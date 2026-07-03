@@ -1,6 +1,7 @@
 /**
  * 画面に表示する日本語の文言はすべてここに集める。
  * コンポーネント内に直接日本語を書かないこと（将来の英語対応のため）。
+ * {n} のような部分は表示時に .replace() で置き換える。
  */
 export const ja = {
   app: {
@@ -13,11 +14,36 @@ export const ja = {
   },
   home: {
     title: 'ホーム',
-    placeholder: 'ここに今日の献立やおすすめが表示されます（準備中）',
+    suggestTitle: '今日なに作る？',
+    shuffle: 'ほかの候補を見る',
+    condAll: 'すべて',
+    condNotRecent: '最近作ってない',
+    condFavorite: 'お気に入り',
+    condQuick: '10分以内',
+    noCandidate: 'この条件に合うレシピがありません',
+    empty: 'レシピを登録すると、ここにおすすめが表示されます',
+    goRegister: 'レシピを登録する',
+    searchPlaceholder: 'レシピを検索',
+    searchButton: '検索',
+    ingShortcutTitle: '使いたい食材から探す',
+    ingPlaceholder: '例: 豚肉 なす',
+    ingButton: 'この食材で探す',
+    historyTitle: '最近作ったもの',
   },
   settings: {
     title: '設定',
-    placeholder: 'ここにテーマ切替やバックアップなどの設定が並びます（準備中）',
+    ngTitle: 'NG食材（アレルギー・苦手）',
+    ngDescription: 'ここに登録した食材を含むレシピには警告マークが付きます',
+    ngPlaceholder: '例: えび',
+    ngAdd: '追加',
+    ngRemove: 'このNG食材を削除',
+    ngEmpty: 'まだ登録されていません',
+    screenTitle: '料理中に画面を暗くしない',
+    screenDescription: 'レシピ詳細を開いている間、画面の自動消灯を防ぎます（対応ブラウザのみ）',
+    themeTitle: 'テーマ',
+    themeAuto: '自動',
+    themeLight: 'ライト',
+    themeDark: 'ダーク',
   },
   effort: {
     easy: '超簡単',
@@ -30,6 +56,29 @@ export const ja = {
     emptyHint: '右下の「＋」から最初のレシピを登録しましょう',
     addRecipe: 'レシピを登録',
     minutesSuffix: '分',
+  },
+  search: {
+    placeholder: '料理名・材料・タグで検索',
+    filterToggle: '絞り込み',
+    ingredientTitle: '使いたい食材から探す',
+    ingredientPlaceholder: '例: 豚肉 なす（空白区切りで複数）',
+    timeTitle: '調理時間',
+    timeAll: 'すべて',
+    timeUnder10: '〜10分',
+    timeUnder30: '〜30分',
+    timeOver30: '30分超',
+    effortTitle: '手間レベル',
+    effortAll: 'すべて',
+    favoriteOnly: 'お気に入りのみ',
+    excludeNg: 'NG食材を含むレシピを隠す',
+    resultCount: '{n}件',
+    noResult: '条件に合うレシピが見つかりません',
+    usedAll: '入れた食材ぜんぶ使える',
+    usedSome: '食材 {m}/{t} が使える',
+    clear: '条件をクリア',
+  },
+  card: {
+    ngBadge: 'NG食材を含む',
   },
   form: {
     newTitle: 'レシピを登録',
@@ -95,6 +144,7 @@ export const ja = {
     memo: 'メモ',
     source: '参照元',
     edit: '編集する',
+    ngWarning: 'NG食材を含みます',
     cooked: '作った！',
     cookedDialogTitle: '作った記録をつける',
     cookedDate: '日付',
@@ -104,6 +154,13 @@ export const ja = {
     cookedCancel: 'やめる',
     cookedLogsTitle: '作った記録',
     cookedCountSuffix: '回',
+  },
+  timer: {
+    start: 'タイマー開始',
+    done: 'できあがり！',
+    dismiss: 'タイマーを閉じる',
+    notificationTitle: 'うちレシピ',
+    notificationBody: '「{label}」のタイマーが終わりました',
   },
 } as const
 

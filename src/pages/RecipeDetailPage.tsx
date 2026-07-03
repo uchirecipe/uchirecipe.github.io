@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -9,11 +9,17 @@ import {
   Pencil,
   CheckCircle2,
   ExternalLink,
+  TriangleAlert,
+  Timer as TimerIcon,
 } from 'lucide-react'
 import { db } from '../db/db'
 import { addCookedLog, toggleFavorite } from '../db/recipes'
+import { useSettings } from '../db/settings'
 import { scaleAmount } from '../logic/amount'
+import { ngMatchedIndices } from '../logic/ng'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import { useTimers } from '../components/TimerProvider'
+import TimeText from '../components/TimeText'
 import { ja } from '../i18n/ja'
 
 function todayString(): string {
@@ -32,6 +38,35 @@ export default function RecipeDetailPage() {
   // undefined = 読み込み中 / null = 該当レシピなし、を区別する
   const recipe = useLiveQuery(async () => (await db.recipes.get(id)) ?? null, [id])
   const photoUrl = usePhotoUrl(recipe?.photo)
+  const settings = useSettings()
+  const { startTimer } = useTimers()
+
+  // 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ
+  // 画面の自動消灯を防ぐ（Wake Lock API。非対応ブラウザでは何もしない）
+  const keepScreenOn = settings?.keepScreenOn ?? false
+  useEffect(() => {
+    if (!keepScreenOn || !('wakeLock' in navigator)) return
+    let sentinel: WakeLockSentinel | null = null
+    let released = false
+    const acquire = async () => {
+      try {
+        sentinel = await navigator.wakeLock.request('screen')
+      } catch {
+        /* 非対応・省電力モードなどで失敗したら静かに無視 */
+      }
+    }
+    // 他アプリから戻ってきたときに取得し直す
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !released) void acquire()
+    }
+    void acquire()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      released = true
+      document.removeEventListener('visibilitychange', onVisible)
+      sentinel?.release().catch(() => {})
+    }
+  }, [keepScreenOn])
 
   // 人数分の表示用（変更していない間はレシピ登録時の人数）
   const [servingsOverride, setServingsOverride] = useState<number>()
@@ -56,6 +91,9 @@ export default function RecipeDetailPage() {
       </div>
     )
   }
+
+  // NG食材（アレルギー・苦手）に引っかかる材料の行番号
+  const ngIndices = ngMatchedIndices(recipe.ingredients, settings?.ngIngredients ?? [])
 
   const totalPrice = recipe.ingredients.reduce(
     (sum, i) => sum + (i.price ?? 0),
@@ -113,6 +151,12 @@ export default function RecipeDetailPage() {
               {ja.detail.priceYen}
             </span>
           )}
+          {ngIndices.size > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-sm border border-warning px-2 py-0.5 text-sm font-bold text-warning">
+              <TriangleAlert size={14} aria-hidden />
+              {ja.detail.ngWarning}
+            </span>
+          )}
         </div>
 
         {/* タグ */}
@@ -158,15 +202,28 @@ export default function RecipeDetailPage() {
             </div>
           </div>
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-            {recipe.ingredients.map((ing, index) => (
-              <li key={index} className="flex items-baseline justify-between gap-2 px-[var(--space-md)] py-3 text-lg">
-                <span>{ing.name}</span>
-                <span className="shrink-0 font-bold">
-                  {scaleAmount(ing.amount, recipe.servings, servings)}
-                  {ing.unit}
-                </span>
-              </li>
-            ))}
+            {recipe.ingredients.map((ing, index) => {
+              const isNg = ngIndices.has(index)
+              return (
+                <li
+                  key={index}
+                  className="flex items-baseline justify-between gap-2 px-[var(--space-md)] py-3 text-lg"
+                >
+                  <span
+                    className={
+                      isNg ? 'inline-flex items-center gap-1 font-bold text-warning' : undefined
+                    }
+                  >
+                    {isNg && <TriangleAlert size={18} aria-label={ja.detail.ngWarning} />}
+                    {ing.name}
+                  </span>
+                  <span className="shrink-0 font-bold">
+                    {scaleAmount(ing.amount, recipe.servings, servings)}
+                    {ing.unit}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         </section>
 
@@ -183,13 +240,31 @@ export default function RecipeDetailPage() {
                   {index + 1}
                 </span>
                 <div>
-                  <p>{step.text}</p>
+                  {/* 文中の「10分」などはタップでタイマー開始 */}
+                  <p>
+                    <TimeText
+                      text={step.text}
+                      onStart={(tokenText, seconds) =>
+                        startTimer(`${recipe.title} ${tokenText}`, seconds)
+                      }
+                    />
+                  </p>
                   {step.minutes != null && step.minutes > 0 && (
-                    <span className="mt-1 inline-flex items-center gap-1 rounded-sm border border-edge px-2 py-0.5 text-sm text-ink-muted">
-                      <Clock size={14} aria-hidden />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        startTimer(
+                          `${recipe.title} ${step.minutes}${ja.detail.minutesSuffix}`,
+                          (step.minutes ?? 0) * 60,
+                        )
+                      }
+                      aria-label={ja.timer.start}
+                      className="mt-1 inline-flex items-center gap-1 rounded-sm border border-edge px-2 py-1 text-sm font-bold text-accent"
+                    >
+                      <TimerIcon size={14} aria-hidden />
                       {step.minutes}
                       {ja.detail.minutesSuffix}
-                    </span>
+                    </button>
                   )}
                 </div>
               </li>

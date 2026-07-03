@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import {
   Clock,
   Heart,
+  TriangleAlert,
   UtensilsCrossed,
   Soup,
   Salad,
@@ -12,6 +13,7 @@ import {
   Coffee,
 } from 'lucide-react'
 import type { Recipe } from '../db/types'
+import { hasNgIngredient } from '../logic/ng'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
@@ -37,38 +39,61 @@ function hashString(text: string): number {
   return Math.abs(hash)
 }
 
-function Placeholder({ seed }: { seed: string }) {
+/** 写真なしレシピの代わり絵（ホーム画面などでも使えるよう公開） */
+export function RecipePlaceholder({
+  seed,
+  iconSize = 48,
+}: {
+  seed: string
+  iconSize?: number
+}) {
   const hash = hashString(seed)
   const Icon = placeholderIcons[hash % placeholderIcons.length]
   const ratio = mixRatios[Math.floor(hash / 7) % mixRatios.length]
   return (
     <div
-      className="flex aspect-square w-full items-center justify-center"
+      className="flex h-full w-full items-center justify-center"
       style={{ background: `color-mix(in oklab, var(--accent) ${ratio}%, var(--bg))` }}
     >
-      <Icon size={48} className="text-accent" aria-hidden />
+      <Icon size={iconSize} className="text-accent" aria-hidden />
     </div>
   )
 }
 
+type Props = {
+  recipe: Recipe
+  /** NG食材リスト（渡すと該当レシピに警告バッジが付く） */
+  ngIngredients?: string[]
+  /** カード下部に出す補足（例: 「食材 2/3 が使える」） */
+  subLabel?: string
+}
+
 /** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ） */
-export default function RecipeCard({ recipe }: { recipe: Recipe }) {
+export default function RecipeCard({ recipe, ngIngredients, subLabel }: Props) {
   const photoUrl = usePhotoUrl(recipe.photo)
   const seed = recipe.tags[0] ?? recipe.title
+  const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
 
   return (
     <Link
       to={`/recipes/${recipe.id}`}
-      className="block overflow-hidden rounded-md bg-surface shadow-sm border border-edge"
+      className="relative block overflow-hidden rounded-md bg-surface shadow-sm border border-edge"
     >
-      {photoUrl ? (
-        <img
-          src={photoUrl}
-          alt={recipe.title}
-          className="aspect-square w-full object-cover"
-        />
-      ) : (
-        <Placeholder seed={seed} />
+      <div className="aspect-square w-full overflow-hidden">
+        {photoUrl ? (
+          <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
+        ) : (
+          <RecipePlaceholder seed={seed} />
+        )}
+      </div>
+      {hasNg && (
+        <span
+          title={ja.card.ngBadge}
+          aria-label={ja.card.ngBadge}
+          className="absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-warning text-app shadow-sm"
+        >
+          <TriangleAlert size={16} aria-hidden />
+        </span>
       )}
       <div className="p-[var(--space-sm)]">
         <div className="flex items-start justify-between gap-1">
@@ -89,6 +114,7 @@ export default function RecipeCard({ recipe }: { recipe: Recipe }) {
             {ja.effort[recipe.effortLevel]}
           </span>
         </div>
+        {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
       </div>
     </Link>
   )

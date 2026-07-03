@@ -49,6 +49,27 @@ export interface Recipe {
   updatedAt: number
 }
 
+/** テーマ設定: 端末に合わせる / ライト固定 / ダーク固定 */
+export type ThemeSetting = 'auto' | 'light' | 'dark'
+
+/** アプリ全体の設定（1件だけ保存する） */
+export interface Settings {
+  /** 常に 1（設定は1レコードだけ） */
+  id?: number
+  /** NG食材（アレルギー・苦手）。ここに載る食材を含むレシピに警告を出す */
+  ngIngredients: string[]
+  /** 料理中に画面を暗くしない（レシピ詳細を開いている間） */
+  keepScreenOn: boolean
+  theme: ThemeSetting
+}
+
+export const defaultSettings: Settings = {
+  id: 1,
+  ngIngredients: [],
+  keepScreenOn: false,
+  theme: 'auto',
+}
+
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */
 export type RecipeInput = Pick<
   Recipe,
