@@ -1,6 +1,8 @@
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import RecipesPage from './pages/RecipesPage'
+import RecipeFormPage from './pages/RecipeFormPage'
+import RecipeDetailPage from './pages/RecipeDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import TabBar from './components/TabBar'
 
@@ -17,6 +19,9 @@ function App() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/recipes" element={<RecipesPage />} />
+          <Route path="/recipes/new" element={<RecipeFormPage />} />
+          <Route path="/recipes/:id" element={<RecipeDetailPage />} />
+          <Route path="/recipes/:id/edit" element={<RecipeFormPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
