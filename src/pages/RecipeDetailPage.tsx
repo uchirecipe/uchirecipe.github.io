@@ -11,12 +11,16 @@ import {
   ExternalLink,
   TriangleAlert,
   Timer as TimerIcon,
+  Share2,
+  Image as ImageIcon,
+  MessageSquareText,
 } from 'lucide-react'
 import { db } from '../db/db'
 import { addCookedLog, toggleFavorite } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { scaleAmount } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
+import { shareText, shareImageCard } from '../logic/share'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { useTimers } from '../components/TimerProvider'
 import TimeText from '../components/TimeText'
@@ -77,6 +81,11 @@ export default function RecipeDetailPage() {
   const [logDate, setLogDate] = useState(todayString)
   const [logNote, setLogNote] = useState('')
 
+  // シェア
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareMessage, setShareMessage] = useState('')
+  const [sharing, setSharing] = useState(false)
+
   if (recipe === undefined) {
     // 読み込み中(undefined)は何も出さない。id が存在しない場合は下の分岐へ
     return null
@@ -109,6 +118,26 @@ export default function RecipeDetailPage() {
     await addCookedLog(id, { date: logDate, note: logNote.trim() || undefined })
     setLogOpen(false)
     setLogNote('')
+  }
+
+  /** テキスト or 画像カードでシェア（非対応環境ではコピー/保存に切替） */
+  const runShare = async (kind: 'text' | 'image') => {
+    setSharing(true)
+    setShareMessage(kind === 'image' ? ja.share.generating : '')
+    try {
+      if (kind === 'text') {
+        const result = await shareText(recipe)
+        setShareMessage(result === 'copied' ? ja.share.copied : '')
+      } else {
+        const result = await shareImageCard(recipe)
+        setShareMessage(result === 'downloaded' ? ja.share.downloaded : '')
+      }
+      if (navigator.share !== undefined) setShareOpen(false)
+    } catch {
+      setShareMessage(ja.share.failed)
+    } finally {
+      setSharing(false)
+    }
   }
 
   return (
@@ -355,7 +384,36 @@ export default function RecipeDetailPage() {
           </div>
         )}
 
-        {/* 下部の大ボタン: 作った！ / 編集 */}
+        {/* シェア（テキスト / 画像カード） */}
+        {shareOpen && (
+          <div className="mt-[var(--space-lg)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={sharing}
+                onClick={() => runShare('text')}
+                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
+              >
+                <MessageSquareText size={20} aria-hidden />
+                {ja.share.textOption}
+              </button>
+              <button
+                type="button"
+                disabled={sharing}
+                onClick={() => runShare('image')}
+                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
+              >
+                <ImageIcon size={20} aria-hidden />
+                {ja.share.imageOption}
+              </button>
+            </div>
+            {shareMessage && (
+              <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{shareMessage}</p>
+            )}
+          </div>
+        )}
+
+        {/* 下部の大ボタン: 作った！ / シェア / 編集 */}
         <div className="mt-[var(--space-lg)] flex gap-2">
           <button
             type="button"
@@ -368,12 +426,24 @@ export default function RecipeDetailPage() {
             <CheckCircle2 size={22} aria-hidden />
             {ja.detail.cooked}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShareMessage('')
+              setShareOpen((open) => !open)
+            }}
+            aria-expanded={shareOpen}
+            aria-label={ja.share.button}
+            className="flex items-center justify-center rounded-md border border-edge bg-surface px-4 py-4 font-bold text-accent shadow-sm"
+          >
+            <Share2 size={22} aria-hidden />
+          </button>
           <Link
             to={`/recipes/${id}/edit`}
-            className="flex items-center justify-center gap-2 rounded-md border border-edge bg-surface px-5 py-4 font-bold text-ink shadow-sm"
+            aria-label={ja.detail.edit}
+            className="flex items-center justify-center gap-2 rounded-md border border-edge bg-surface px-4 py-4 font-bold text-ink shadow-sm"
           >
-            <Pencil size={20} aria-hidden />
-            {ja.detail.edit}
+            <Pencil size={22} aria-hidden />
           </Link>
         </div>
       </div>

@@ -2,9 +2,10 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { defaultSettings, type Settings } from './types'
 
-/** 設定を取得（未保存なら初期値を返す） */
+/** 設定を取得（未保存の項目は初期値で補う） */
 export async function getSettings(): Promise<Settings> {
-  return (await db.settings.get(1)) ?? defaultSettings
+  const stored = await db.settings.get(1)
+  return { ...defaultSettings, ...stored }
 }
 
 /** 設定の一部だけを更新する（例: updateSettings({ theme: 'dark' })） */
@@ -12,7 +13,7 @@ export async function updateSettings(
   patch: Partial<Omit<Settings, 'id'>>,
 ): Promise<void> {
   await db.transaction('rw', db.settings, async () => {
-    const current = (await db.settings.get(1)) ?? defaultSettings
+    const current = { ...defaultSettings, ...(await db.settings.get(1)) }
     await db.settings.put({ ...current, ...patch, id: 1 })
   })
 }

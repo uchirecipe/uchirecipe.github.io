@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Clock, Dices, Heart, History, Search, Carrot } from 'lucide-react'
+import { Clock, Dices, Heart, History, Search, Carrot, HardDriveDownload } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
+import { useSettings } from '../db/settings'
+import { backupOverdue } from '../logic/backup'
 import type { Recipe } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -71,12 +73,25 @@ function SuggestionCard({ recipe }: { recipe: Recipe }) {
 /** ホーム: 今日の提案＋検索＋使いたい食材＋最近の履歴 */
 export default function HomePage() {
   const navigate = useNavigate()
-  const recipes = useLiveQuery(listRecipes, [])
+  const allRecipes = useLiveQuery(listRecipes, [])
+  const settings = useSettings()
 
   const [condition, setCondition] = useState<SuggestCondition>('any')
   const [seed, setSeed] = useState(() => Math.random())
   const [query, setQuery] = useState('')
   const [ingredients, setIngredients] = useState('')
+
+  // 「基本レシピを表示しない」設定を反映
+  const recipes = useMemo(() => {
+    if (!allRecipes) return undefined
+    return settings?.hideStarters ? allRecipes.filter((r) => !r.isStarter) : allRecipes
+  }, [allRecipes, settings?.hideStarters])
+
+  // 自分のレシピが1件以上あり、30日以上（または一度も）バックアップしていないとき
+  const showBackupReminder =
+    settings !== undefined &&
+    (allRecipes?.some((r) => !r.isStarter) ?? false) &&
+    backupOverdue(settings.lastBackupAt)
 
   const candidates = useMemo(
     () => (recipes ?? []).filter((r) => matchesCondition(r, condition)),
@@ -107,6 +122,18 @@ export default function HomePage() {
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.app.name}</h1>
+
+      {/* バックアップの控えめなリマインド */}
+      {showBackupReminder && (
+        <Link
+          to="/settings"
+          className="mt-[var(--space-sm)] flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
+        >
+          <HardDriveDownload size={16} className="shrink-0 text-accent" aria-hidden />
+          <span className="min-w-0 flex-1">{ja.home.backupReminder}</span>
+          <span className="shrink-0 font-bold text-accent">{ja.home.backupReminderLink}</span>
+        </Link>
+      )}
 
       {/* 今日なに作る？ */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">

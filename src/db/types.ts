@@ -45,6 +45,8 @@ export interface Recipe {
    * 「玉ねぎ」「タマネギ」「たまねぎ」のゆらぎを吸収するために保存時に自動生成する。
    */
   searchWords: string[]
+  /** 同梱の基本レシピなら true（将来の件数制限のカウント外にする） */
+  isStarter?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -61,6 +63,12 @@ export interface Settings {
   /** 料理中に画面を暗くしない（レシピ詳細を開いている間） */
   keepScreenOn: boolean
   theme: ThemeSetting
+  /** 基本レシピの初回投入が済んでいるか */
+  starterSeeded: boolean
+  /** 基本レシピを一覧・ホームに出さない */
+  hideStarters: boolean
+  /** 最後にバックアップを書き出した日時（ミリ秒） */
+  lastBackupAt?: number
 }
 
 export const defaultSettings: Settings = {
@@ -68,6 +76,8 @@ export const defaultSettings: Settings = {
   ngIngredients: [],
   keepScreenOn: false,
   theme: 'auto',
+  starterSeeded: false,
+  hideStarters: false,
 }
 
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */

@@ -8,10 +8,12 @@ import {
   ChevronUp,
   ChevronDown,
   Trash2,
+  ClipboardPaste,
 } from 'lucide-react'
 import type { EffortLevel, RecipeInput } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, updateRecipe } from '../db/recipes'
 import { resizePhoto } from '../logic/image'
+import { parseRecipeText } from '../logic/parseRecipeText'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { ja } from '../i18n/ja'
 
@@ -60,6 +62,11 @@ export default function RecipeFormPage() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // テキスト貼り付けで自動入力
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const [pasteMessage, setPasteMessage] = useState('')
+
   const photoUrl = usePhotoUrl(photo)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
@@ -101,6 +108,32 @@ export default function RecipeFormPage() {
       cancelled = true
     }
   }, [editId])
+
+  /** 貼り付けた文章を解析してフォームに流し込む（結果はユーザーが修正できる） */
+  const applyPaste = () => {
+    if (!pasteText.trim()) {
+      setPasteMessage(ja.paste.empty)
+      return
+    }
+    const parsed = parseRecipeText(pasteText)
+    if (parsed.ingredients.length === 0 && parsed.steps.length === 0) {
+      setPasteMessage(ja.paste.resultNone)
+      return
+    }
+    if (parsed.title && !title.trim()) setTitle(parsed.title)
+    if (parsed.servings) setServings(parsed.servings)
+    if (parsed.ingredients.length > 0) {
+      setIngredients(parsed.ingredients.map((row) => ({ ...row, price: '' })))
+    }
+    if (parsed.steps.length > 0) {
+      setSteps(parsed.steps.map((text) => ({ text, minutes: '' })))
+    }
+    setPasteMessage(
+      ja.paste.resultSummary
+        .replace('{i}', String(parsed.ingredients.length))
+        .replace('{s}', String(parsed.steps.length)),
+    )
+  }
 
   const onPhotoSelected = async (file: File | undefined) => {
     if (!file) return
@@ -180,6 +213,48 @@ export default function RecipeFormPage() {
         <p className="mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 font-bold text-warning">
           {error}
         </p>
+      )}
+
+      {/* テキスト貼り付けで自動入力 */}
+      <button
+        type="button"
+        onClick={() => setPasteOpen((open) => !open)}
+        aria-expanded={pasteOpen}
+        className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-accent py-3 font-bold text-accent"
+      >
+        <ClipboardPaste size={20} aria-hidden />
+        {ja.paste.open}
+      </button>
+      {pasteOpen && (
+        <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+          <p className="text-sm text-ink-muted">{ja.paste.description}</p>
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder={ja.paste.placeholder}
+            rows={6}
+            className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
+          />
+          {pasteMessage && (
+            <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{pasteMessage}</p>
+          )}
+          <div className="mt-[var(--space-sm)] flex gap-2">
+            <button
+              type="button"
+              onClick={applyPaste}
+              className="flex-1 rounded-md bg-accent py-3 font-bold text-app shadow-sm"
+            >
+              {ja.paste.apply}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPasteOpen(false)}
+              className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted"
+            >
+              {ja.paste.close}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 料理名 */}

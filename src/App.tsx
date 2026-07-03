@@ -9,6 +9,7 @@ import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
 import { TimerProvider } from './components/TimerProvider'
 import { useSettings } from './db/settings'
+import { seedStartersIfNeeded } from './db/starters'
 
 /**
  * 設定のテーマを画面に反映する。
@@ -35,6 +36,11 @@ function ThemeSync() {
  * TimerProvider が全体を包むので、タブを移動してもタイマーは動き続ける。
  */
 function App() {
+  // 初回起動時だけ、同梱の基本レシピ20品をデータベースに入れる
+  useEffect(() => {
+    void seedStartersIfNeeded()
+  }, [])
+
   return (
     <TimerProvider>
       <HashRouter>

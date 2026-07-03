@@ -47,9 +47,13 @@ export default function RecipesPage() {
   const settings = useSettings()
   const ngIngredients = settings?.ngIngredients
 
+  const hideStarters = settings?.hideStarters ?? false
+
   const results = useMemo(() => {
     if (!recipes) return undefined
-    return searchRecipes(recipes, {
+    // 「基本レシピを表示しない」設定を反映してから検索する
+    const visible = hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
+    return searchRecipes(visible, {
       query,
       ingredients,
       time,
@@ -58,7 +62,7 @@ export default function RecipesPage() {
       excludeNg,
       ngIngredients: ngIngredients ?? [],
     })
-  }, [recipes, query, ingredients, time, effort, favoriteOnly, excludeNg, ngIngredients])
+  }, [recipes, hideStarters, query, ingredients, time, effort, favoriteOnly, excludeNg, ngIngredients])
 
   const filtersActive =
     query !== '' ||
