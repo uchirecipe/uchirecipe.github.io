@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 仮アイコン（maskable版）: OS側で丸く切り抜かれても欠けないよう、絵柄を中央80%に収めている -->
+  <rect width="512" height="512" fill="#d9480f"/>
+  <g fill="none" stroke="#fffdf8" stroke-width="24" stroke-linecap="round">
+    <!-- 鍋本体 -->
+    <path d="M152 244 h208 v76 a60 60 0 0 1 -60 60 h-88 a60 60 0 0 1 -60 -60 z" fill="#fffdf8" stroke="none"/>
+    <!-- 取っ手 -->
+    <line x1="122" y1="258" x2="152" y2="258"/>
+    <line x1="360" y1="258" x2="390" y2="258"/>
+    <!-- 湯気 -->
+    <path d="M208 198 q-12 -20 0 -40"/>
+    <path d="M256 198 q-12 -20 0 -40"/>
+    <path d="M304 198 q-12 -20 0 -40"/>
+  </g>
+</svg>

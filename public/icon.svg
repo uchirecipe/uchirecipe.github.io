@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 仮アイコン: アクセント色の角丸背景 + 白い鍋マーク -->
+  <rect width="512" height="512" rx="112" fill="#d9480f"/>
+  <g fill="none" stroke="#fffdf8" stroke-width="28" stroke-linecap="round">
+    <!-- 鍋本体 -->
+    <path d="M128 236 h256 v92 a72 72 0 0 1 -72 72 h-112 a72 72 0 0 1 -72 -72 z" fill="#fffdf8" stroke="none"/>
+    <!-- 取っ手 -->
+    <line x1="92" y1="252" x2="128" y2="252"/>
+    <line x1="384" y1="252" x2="420" y2="252"/>
+    <!-- 湯気 -->
+    <path d="M200 180 q-14 -24 0 -48"/>
+    <path d="M256 180 q-14 -24 0 -48"/>
+    <path d="M312 180 q-14 -24 0 -48"/>
+  </g>
+</svg>

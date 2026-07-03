@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+/* ============================================================
+   デザイントークン（全画面共通の「決めごと」）
+   色・角丸・余白・影はここで定義したものだけを使う。
+   ============================================================ */
+
+:root {
+  /* 色（4色ルール: 背景 / 文字 / アクセント / 警告） */
+  --bg: #faf5ec;            /* 背景: クリーム系 */
+  --text: #43362a;          /* 文字: 焦げ茶 */
+  --accent: #d9480f;        /* アクセント: トマトオレンジ（1色のみ） */
+  --warning: #c92a2a;       /* 警告: 赤（NG食材アラート等） */
+
+  /* 派生色（上の4色から作る補助トーン。新しい色相は増やさない） */
+  --surface: #fffdf8;       /* カードなどの面 */
+  --text-muted: #8c7b69;    /* 補足テキスト */
+  --border: #e9dfd0;        /* 区切り線 */
+
+  /* 角丸（3段階） */
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+
+  /* 余白（3段階） */
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+
+  /* 影（2段階） */
+  --shadow-sm: 0 1px 3px rgb(67 54 42 / 0.08);
+  --shadow-md: 0 4px 14px rgb(67 54 42 / 0.12);
+}
+
+/* ダークモード:
+   1) 端末設定がダークなら自動で切替（prefers-color-scheme）
+   2) 将来、設定画面から <html data-theme="dark"> を付けて手動切替も可能 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #211a13;
+    --text: #f1e8db;
+    --accent: #ff8a4c;
+    --warning: #ff6b6b;
+    --surface: #2c241b;
+    --text-muted: #a89680;
+    --border: #3d3327;
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 4px 14px rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #211a13;
+  --text: #f1e8db;
+  --accent: #ff8a4c;
+  --warning: #ff6b6b;
+  --surface: #2c241b;
+  --text-muted: #a89680;
+  --border: #3d3327;
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 14px rgb(0 0 0 / 0.5);
+}
+
+/* トークンを Tailwind のクラス名（bg-app, text-accent 等）として使えるようにする */
+@theme inline {
+  --color-app: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--text);
+  --color-ink-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-warning: var(--warning);
+  --color-edge: var(--border);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+}
+
+@layer base {
+  html {
+    /* システム標準の日本語フォント（読み込みゼロ・高速） */
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+      "Yu Gothic", "Noto Sans JP", sans-serif;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    /* スマホでタップ時のハイライトを控えめに */
+    -webkit-tap-highlight-color: transparent;
+  }
+}
