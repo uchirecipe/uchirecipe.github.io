@@ -13,6 +13,7 @@ import {
   importRecipeSet,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
+import { isValidProCode, normalizeProCode } from '../logic/pro'
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
 import { ja } from '../i18n/ja'
 
@@ -54,6 +55,9 @@ export default function SettingsPage() {
   const [recipeSetLoading, setRecipeSetLoading] = useState(false)
   const recipeSetFileRef = useRef<HTMLInputElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const [proCodeInput, setProCodeInput] = useState('')
+  const [proChecking, setProChecking] = useState(false)
+  const [proError, setProError] = useState('')
 
   // 配布ページの「うちレシピに追加する」リンク(#/settings?set=<setId>)からのワンタップ取り込み。
   // 任意URLは受け付けず、同一オリジンの/sets/data/<setId>.jsonだけをfetchする
@@ -203,6 +207,25 @@ export default function SettingsPage() {
   const formatDate = (ms: number) => {
     const date = new Date(ms)
     return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+  }
+
+  const activatePro = async () => {
+    setProChecking(true)
+    setProError('')
+    try {
+      const valid = await isValidProCode(proCodeInput)
+      if (!valid) {
+        setProError(ja.settings.proInvalidCode)
+        return
+      }
+      await updateSettings({
+        proCode: normalizeProCode(proCodeInput),
+        proActivatedAt: Date.now(),
+      })
+      setProCodeInput('')
+    } finally {
+      setProChecking(false)
+    }
   }
 
   const homeWidgets = settings.homeWidgets
@@ -593,6 +616,46 @@ export default function SettingsPage() {
             {ja.settings.backupImportReplace}
           </button>
         </div>
+      </section>
+
+      {/* Pro版 */}
+      <section className={sectionCls}>
+        <h2 className="font-bold">{ja.settings.proTitle}</h2>
+        {settings.proCode ? (
+          <>
+            <p className="mt-1 text-sm font-bold text-accent">{ja.settings.proActivatedTitle}</p>
+            {settings.proActivatedAt && (
+              <p className="mt-0.5 text-xs text-ink-muted">
+                {ja.settings.proActivatedDate.replace('{date}', formatDate(settings.proActivatedAt))}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
+            <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
+              <input
+                type="text"
+                value={proCodeInput}
+                onChange={(e) => {
+                  setProCodeInput(e.target.value)
+                  setProError('')
+                }}
+                placeholder={ja.settings.proCodePlaceholder}
+                className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+              />
+              <button
+                type="button"
+                onClick={() => void activatePro()}
+                disabled={proChecking || !proCodeInput.trim()}
+                className="inline-flex shrink-0 items-center rounded-sm bg-accent px-4 font-bold text-app disabled:opacity-40"
+              >
+                {proChecking ? ja.settings.proActivating : ja.settings.proActivate}
+              </button>
+            </div>
+            {proError && <p className="mt-1 text-sm font-bold text-warning">{proError}</p>}
+          </>
+        )}
       </section>
 
       {/* アプリについて */}

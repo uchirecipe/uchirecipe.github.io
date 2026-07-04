@@ -199,6 +199,10 @@ export interface Settings {
    * 起動時に全レシピのsearchWordsを再構築する（辞書追記のたびに追従させるため）。
    */
   ingredientReadingsVersion: number
+  /** Pro解錠コード（正規化済み・平文で保存。バックアップで復元されればPro状態も復元される） */
+  proCode?: string
+  /** Pro解錠日時（ミリ秒） */
+  proActivatedAt?: number
 }
 
 export const defaultSettings: Settings = {
