@@ -15,10 +15,12 @@ import {
   Image as ImageIcon,
   MessageSquareText,
   Maximize2,
+  CalendarPlus,
 } from 'lucide-react'
 import { db } from '../db/db'
 import { addCookedLog, toggleFavorite } from '../db/recipes'
 import { useSettings } from '../db/settings'
+import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
 import { scaleAmount } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
 import { shareText, shareImageCard } from '../logic/share'
@@ -31,15 +33,8 @@ import FocusMode from '../components/FocusMode'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
+import { todayString } from '../logic/date'
 import { ja } from '../i18n/ja'
-
-function todayString(): string {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
 
 /** レシピ詳細＝料理中に見るメイン画面。文字・ボタンは大きめ */
 export default function RecipeDetailPage() {
@@ -52,6 +47,8 @@ export default function RecipeDetailPage() {
   const photoUrl = usePhotoUrl(recipe?.photo)
   const settings = useSettings()
   const { startTimer } = useTimers()
+  const todayList = useTodayList()
+  const isInTodayList = todayList?.some((item) => item.recipeId === id) ?? false
 
   // 常駐タイマー・完了ポップアップからのタップ（?step=手順番号）で該当手順へスクロール＆一時ハイライト
   const stepRefs = useRef<(HTMLLIElement | null)[]>([])
@@ -129,6 +126,8 @@ export default function RecipeDetailPage() {
   const saveLog = async () => {
     if (!logDate) return
     await addCookedLog(id, { date: logDate, note: logNote.trim() || undefined })
+    // 今日の献立に入っていれば、記録と同時に外す
+    if (isInTodayList) await removeFromTodayList(id)
     setLogOpen(false)
     setLogNote('')
   }
@@ -488,8 +487,24 @@ export default function RecipeDetailPage() {
           </div>
         )}
 
+        {/* 今日つくる（今日の献立への追加・解除） */}
+        <button
+          type="button"
+          onClick={() =>
+            isInTodayList ? void removeFromTodayList(id) : void addToTodayList(id)
+          }
+          className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
+            isInTodayList
+              ? 'border-accent bg-accent text-app'
+              : 'border-edge bg-surface text-accent'
+          }`}
+        >
+          <CalendarPlus size={20} aria-hidden />
+          {isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}
+        </button>
+
         {/* 下部の大ボタン: 作った！ / シェア（編集はタイトル付近に移動済み） */}
-        <div className="mt-[var(--space-lg)] flex gap-2">
+        <div className="mt-[var(--space-sm)] flex gap-2">
           <button
             type="button"
             onClick={() => {

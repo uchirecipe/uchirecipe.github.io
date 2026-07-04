@@ -17,8 +17,7 @@ import { listRecipes } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
 import { pantryAvailableNames } from '../logic/pantry'
-import { useMealPlanRange } from '../db/mealPlan'
-import { MEAL_SLOTS } from '../logic/mealPlan'
+import { useTodayList } from '../db/todayList'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
 import { currentSeason, preferSeason } from '../logic/season'
@@ -45,14 +44,6 @@ function matchesCondition(recipe: Recipe, condition: SuggestCondition): boolean 
   if (condition === 'quick')
     return recipe.cookMinutes != null && recipe.cookMinutes > 0 && recipe.cookMinutes <= 10
   return true
-}
-
-function todayString(): string {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
 }
 
 /** 提案カード（写真サムネイル＋名前で詳細へ） */
@@ -104,9 +95,6 @@ export default function HomePage() {
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
 
-  const today = useMemo(todayString, [])
-  const todayMeals = useMealPlanRange(today, today)
-
   // 「基本レシピを表示しない」設定を反映
   const recipes = useMemo(() => {
     if (!allRecipes) return undefined
@@ -118,6 +106,15 @@ export default function HomePage() {
     recipes?.forEach((r) => map.set(r.id!, r))
     return map
   }, [recipes])
+
+  // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
+  const todayList = useTodayList()
+  const todayListRecipes = useMemo(() => {
+    if (!todayList) return undefined
+    return todayList
+      .map((item) => recipeById.get(item.recipeId))
+      .filter((r): r is Recipe => r !== undefined)
+  }, [todayList, recipeById])
 
   // 自分のレシピが1件以上あり、30日以上（または一度も）バックアップしていないとき
   const showBackupReminder =
@@ -173,32 +170,30 @@ export default function HomePage() {
           <CalendarDays size={20} className="text-accent" aria-hidden />
           {ja.home.mealPlanTitle}
         </h2>
-        {todayMeals && todayMeals.length > 0 ? (
+        {todayListRecipes && todayListRecipes.length > 0 ? (
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-            {MEAL_SLOTS.filter((slot) => todayMeals.some((e) => e.slot === slot)).map((slot) => {
-              const entry = todayMeals.find((e) => e.slot === slot)!
-              const recipe = recipeById.get(entry.recipeId)
-              return (
-                <li key={slot}>
-                  <Link
-                    to={recipe ? `/recipes/${recipe.id}` : '/meal-plan'}
-                    className="flex items-center gap-2 px-[var(--space-md)] py-2"
-                  >
-                    <span className="w-14 shrink-0 text-sm text-ink-muted">{ja.mealPlan.slot[slot]}</span>
-                    <span className="min-w-0 flex-1 truncate font-bold">
-                      {recipe?.title ?? ja.mealPlan.empty}
-                    </span>
-                  </Link>
-                </li>
-              )
-            })}
+            {todayListRecipes.map((recipe) => (
+              <li key={recipe.id}>
+                <Link
+                  to={`/recipes/${recipe.id}`}
+                  className="flex items-center gap-2 px-[var(--space-md)] py-2"
+                >
+                  <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
+                </Link>
+              </li>
+            ))}
           </ul>
         ) : (
           <div className="mt-[var(--space-sm)] text-center">
             <p className="text-sm text-ink-muted">{ja.home.mealPlanEmpty}</p>
-            <Link to="/meal-plan" className="mt-2 inline-block text-sm font-bold text-accent underline">
-              {ja.home.mealPlanGoTo}
-            </Link>
+            <div className="mt-2 flex justify-center gap-3">
+              <Link to="/recipes" className="text-sm font-bold text-accent underline">
+                {ja.home.mealPlanGoRecipes}
+              </Link>
+              <Link to="/meal-plan" className="text-sm font-bold text-accent underline">
+                {ja.home.mealPlanGoTo}
+              </Link>
+            </div>
           </div>
         )}
       </section>

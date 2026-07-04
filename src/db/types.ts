@@ -97,6 +97,17 @@ export interface PantryItem {
   isFrequent: boolean
 }
 
+/**
+ * 「今日の献立」＝今日つくるリストの1件分。
+ * 週間プランナー（予定）とは別物で、その場で「今日これ作る」を管理する。
+ * 日付フィールドを持たない＝作らなかった分は翌日も残る（「×」でいつでも外せる）。
+ */
+export interface TodayListItem {
+  id?: number
+  recipeId: number
+  addedAt: number
+}
+
 /** 献立の枠: 朝/昼/夜 */
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner'
 

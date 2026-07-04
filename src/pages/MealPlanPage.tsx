@@ -1,20 +1,65 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronLeft, ChevronRight, Dices, X, Search, ShoppingCart } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Dices, X, Search, ShoppingCart, CheckCircle2 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { useMealPlanRange, assignMeal, clearMeal } from '../db/mealPlan'
+import {
+  useTodayList,
+  removeFromTodayList,
+  markTodayListCooked,
+  markAllTodayListCooked,
+  importRecipeIdsToTodayList,
+} from '../db/todayList'
 import { MEAL_SLOTS, weekDates, shiftWeek, suggestForSlot } from '../logic/mealPlan'
+import { todayString } from '../logic/date'
+import { RecipePlaceholder } from '../components/RecipeCard'
+import { usePhotoUrl } from '../components/usePhotoUrl'
 import type { MealSlot, Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
 
-function todayString(): string {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+/** 今日の献立の1行（小サムネ＋名前＋作った/×） */
+function TodayListRow({
+  recipe,
+  onCooked,
+  onRemove,
+}: {
+  recipe: Recipe
+  onCooked: () => void
+  onRemove: () => void
+}) {
+  const photoUrl = usePhotoUrl(recipe.photo)
+  return (
+    <li className="flex items-center gap-2 px-[var(--space-sm)] py-2">
+      <Link to={`/recipes/${recipe.id}`} className="h-10 w-10 shrink-0 overflow-hidden rounded-sm">
+        {photoUrl ? (
+          <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
+        ) : (
+          <RecipePlaceholder recipe={recipe} iconSize={20} />
+        )}
+      </Link>
+      <Link to={`/recipes/${recipe.id}`} className="min-w-0 flex-1 truncate font-bold">
+        {recipe.title}
+      </Link>
+      <button
+        type="button"
+        onClick={onCooked}
+        aria-label={ja.mealPlan.todayMarkCooked}
+        className="rounded-full p-2 text-accent"
+      >
+        <CheckCircle2 size={20} aria-hidden />
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={ja.mealPlan.todayRemove}
+        className="rounded-full p-2 text-ink-muted"
+      >
+        <X size={20} aria-hidden />
+      </button>
+    </li>
+  )
 }
 
 /** 献立タブ: 週カレンダー（月〜日 × 朝昼夜）にレシピを割り当てる */
@@ -42,6 +87,24 @@ export default function MealPlanPage() {
     visibleRecipes.forEach((r) => map.set(r.id!, r))
     return map
   }, [visibleRecipes])
+
+  // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
+  const todayList = useTodayList()
+  const todayListRecipes = useMemo(() => {
+    if (!todayList) return undefined
+    return todayList
+      .map((item) => recipeById.get(item.recipeId))
+      .filter((r): r is Recipe => r !== undefined)
+  }, [todayList, recipeById])
+
+  // 今週の献立のうち「今日」の枠に入っているレシピID（取り込みボタン用）
+  const todayFromPlanIds = useMemo(() => {
+    const ids = new Set<number>()
+    entries?.forEach((e) => {
+      if (e.date === today) ids.add(e.recipeId)
+    })
+    return Array.from(ids)
+  }, [entries, today])
 
   const [quickOnly, setQuickOnly] = useState(false)
   const [message, setMessage] = useState('')
@@ -114,6 +177,50 @@ export default function MealPlanPage() {
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.mealPlan.title}</h1>
+
+      {/* 今日の献立（週間プランナーとは別の「今日これ作る」リスト） */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+        <h2 className="text-xl font-bold">{ja.mealPlan.todayTitle}</h2>
+
+        {todayListRecipes && todayListRecipes.length > 0 ? (
+          <>
+            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+              {todayListRecipes.map((recipe) => (
+                <TodayListRow
+                  key={recipe.id}
+                  recipe={recipe}
+                  onCooked={() => void markTodayListCooked(recipe.id!)}
+                  onRemove={() => void removeFromTodayList(recipe.id!)}
+                />
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => void markAllTodayListCooked(todayListRecipes.map((r) => r.id!))}
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-app shadow-sm"
+            >
+              <CheckCircle2 size={18} aria-hidden />
+              {ja.mealPlan.todayMarkAllCooked}
+            </button>
+          </>
+        ) : (
+          <div className="mt-[var(--space-sm)]">
+            <p className="text-sm text-ink-muted">{ja.mealPlan.todayEmpty}</p>
+            {todayFromPlanIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void importRecipeIdsToTodayList(todayFromPlanIds)}
+                className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+              >
+                {ja.mealPlan.todayImport.replace('{n}', String(todayFromPlanIds.length))}
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* 今週の献立 */}
+      <h2 className="mt-[var(--space-lg)] text-xl font-bold">{ja.mealPlan.weekTitle}</h2>
 
       {/* 週の移動 */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
