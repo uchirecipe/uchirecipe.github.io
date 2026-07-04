@@ -43,9 +43,9 @@ function App() {
 
   return (
     <TimerProvider>
-      {/* basename: GitHub Pages（/uchirecipe/ 配下）での公開に対応。
-          HashRouterなので実際のルーティングは #以降で完結し、ローカル開発にも影響しない */}
-      <HashRouter basename={import.meta.env.BASE_URL}>
+      {/* HashRouterのルーティングは #以降で完結するため、公開パス(/uchirecipe/)の
+          影響を受けない。basenameを付けると #/ がどのルートにも一致せず白画面になる */}
+      <HashRouter>
         <ThemeSync />
         {/* pb-24: 下部の固定タブナビに中身が隠れないよう余白を確保 */}
         <main className="min-h-dvh pb-24">
