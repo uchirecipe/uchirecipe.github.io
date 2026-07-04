@@ -1,12 +1,14 @@
-import { X, Timer as TimerIcon, BellRing, Bell, BellOff } from 'lucide-react'
+import { X, BellRing, Bell, BellOff } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useTimers } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
+import StepBadge from './StepBadge'
 import { ja } from '../i18n/ja'
 
 /** 起動中タイマーの常駐表示（タブナビのすぐ上に出る。どの画面でも見える） */
 export default function TimerBar() {
-  const { timers, now, flashingId, dismissTimer, toggleMute } = useTimers()
+  const { timers, now, flashingId, showFirstTimeNotice, dismissFirstTimeNotice, dismissTimer, toggleMute } =
+    useTimers()
   const navigate = useNavigate()
   if (timers.length === 0) return null
 
@@ -21,6 +23,19 @@ export default function TimerBar() {
       style={{ bottom: 'calc(72px + env(safe-area-inset-bottom))' }}
     >
       <div className="mx-auto max-w-md space-y-1 px-[var(--space-sm)]">
+        {showFirstTimeNotice && (
+          <div className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-xs text-ink-muted shadow-md">
+            <span className="min-w-0 flex-1">{ja.timer.notice}</span>
+            <button
+              type="button"
+              onClick={dismissFirstTimeNotice}
+              aria-label={ja.focus.close}
+              className="shrink-0"
+            >
+              <X size={16} aria-hidden />
+            </button>
+          </div>
+        )}
         {timers.map((timer) => {
           const remaining = Math.ceil((timer.endsAt - now) / 1000)
           const isFlashing = flashingId === timer.id
@@ -35,11 +50,8 @@ export default function TimerBar() {
                   : 'border-edge bg-surface'
               } ${isFlashing ? 'animate-pulse ring-2 ring-accent' : ''}`}
             >
-              {timer.done ? (
-                <BellRing size={20} className="shrink-0 animate-pulse" aria-hidden />
-              ) : (
-                <TimerIcon size={20} className="shrink-0 text-accent" aria-hidden />
-              )}
+              <StepBadge number={timer.stepNumber} size={28} />
+              {timer.done && <BellRing size={18} className="shrink-0 animate-pulse" aria-hidden />}
               <span className="min-w-0 flex-1 truncate text-sm font-bold">{timer.label}</span>
               <span className="text-lg font-bold tabular-nums">
                 {timer.done ? timer.doneLabel : formatRemaining(remaining)}

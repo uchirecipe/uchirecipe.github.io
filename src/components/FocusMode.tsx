@@ -12,6 +12,7 @@ import {
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
 import { deriveDoneLabel } from '../logic/timerLabel'
+import StepBadge from './StepBadge'
 import TimeText from './TimeText'
 import { ja } from '../i18n/ja'
 
@@ -93,7 +94,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
   const startStepTimer = (seconds: number) =>
     startTimer({
       key: `${recipeId}-${index}-${seconds}`,
-      label: `${recipe.title}・${ja.timer.stepLabel.replace('{n}', String(stepNumber))}`,
+      label: recipe.title,
       doneLabel: deriveDoneLabel(step.text),
       seconds,
       recipeId,
@@ -142,7 +143,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
           const seconds = Number(minuteMatch[1]) * 60
           startTimerRef.current({
             key: `${recipeId}-${currentIndex}-${seconds}`,
-            label: `${recipe.title}・${ja.timer.stepLabel.replace('{n}', String(currentStepNumber))}`,
+            label: recipe.title,
             doneLabel: deriveDoneLabel(currentStep.text),
             seconds,
             recipeId,
@@ -245,9 +246,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent text-2xl font-bold text-app">
-          {stepNumber}
-        </span>
+        <StepBadge number={stepNumber} size={56} />
         <p className="text-2xl font-bold leading-relaxed">
           <TimeText text={step.text} onStart={(_tokenText, seconds) => startStepTimer(seconds)} />
         </p>

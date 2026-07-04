@@ -22,6 +22,7 @@ import { MEAL_SLOTS } from '../logic/mealPlan'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
 import { currentSeason, preferSeason } from '../logic/season'
+import { toHiragana } from '../logic/kana'
 import type { HomeWidgetKey, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
@@ -96,6 +97,7 @@ export default function HomePage() {
   const settings = useSettings()
 
   const [condition, setCondition] = useState<SuggestCondition>('any')
+  const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
   const [query, setQuery] = useState('')
   const [ingredients, setIngredients] = useState<string[]>([])
@@ -128,9 +130,23 @@ export default function HomePage() {
     const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition))
     return preferSeason(byCondition, currentSeason())
   }, [recipes, condition])
+
+  // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
+  // 0件ならズレの不満を防ぐため通常候補にフォールバックし、その旨を表示する
+  const { list: finalCandidates, fallback: pantryFallback } = useMemo(() => {
+    if (!pantryOnly || pantryNames.length === 0) return { list: candidates, fallback: false }
+    const wantedKeys = pantryNames.map(toHiragana)
+    const filtered = candidates.filter((r) =>
+      r.ingredients.some((i) => wantedKeys.some((k) => toHiragana(i.name).includes(k))),
+    )
+    return filtered.length > 0
+      ? { list: filtered, fallback: false }
+      : { list: candidates, fallback: true }
+  }, [candidates, pantryOnly, pantryNames])
+
   const suggestion =
-    candidates.length > 0
-      ? candidates[Math.floor(seed * candidates.length) % candidates.length]
+    finalCandidates.length > 0
+      ? finalCandidates[Math.floor(seed * finalCandidates.length) % finalCandidates.length]
       : undefined
 
   // 最近作ったもの: 全レシピの「作った記録」を新しい順に5件
@@ -218,7 +234,27 @@ export default function HomePage() {
                   {option.label}
                 </button>
               ))}
+              {pantryNames.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPantryOnly((v) => !v)}
+                  className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                    pantryOnly
+                      ? 'border-accent bg-accent text-app'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  <Refrigerator size={14} aria-hidden />
+                  {ja.home.pantryOnlyToggle}
+                </button>
+              )}
             </div>
+
+            {pantryFallback && (
+              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                {ja.home.pantryOnlyFallback}
+              </p>
+            )}
 
             {suggestion ? (
               <SuggestionCard recipe={suggestion} />
@@ -287,10 +323,15 @@ export default function HomePage() {
     history:
       history.length > 0 ? (
         <section>
-          <h2 className="flex items-center gap-2 font-bold">
-            <History size={20} className="text-accent" aria-hidden />
-            {ja.home.historyTitle}
-          </h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 font-bold">
+              <History size={20} className="text-accent" aria-hidden />
+              {ja.home.historyTitle}
+            </h2>
+            <Link to="/history" className="text-sm font-bold text-accent underline">
+              {ja.home.historyMore}
+            </Link>
+          </div>
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
             {history.map(({ recipe, log }, index) => (
               <li key={index}>

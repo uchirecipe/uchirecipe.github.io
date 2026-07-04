@@ -249,6 +249,34 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* タイマー中は画面を暗くしない */}
+      <section className={sectionCls}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold">{ja.settings.timerWakeLockTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.timerWakeLockEnabled}
+            aria-label={ja.settings.timerWakeLockTitle}
+            onClick={() =>
+              updateSettings({ timerWakeLockEnabled: !settings.timerWakeLockEnabled })
+            }
+            className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+              settings.timerWakeLockEnabled ? 'bg-accent' : 'bg-edge'
+            }`}
+          >
+            <span
+              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                settings.timerWakeLockEnabled ? 'left-7' : 'left-1'
+              }`}
+            />
+          </button>
+        </div>
+      </section>
+
       {/* 週の食費予算 */}
       <section className={sectionCls}>
         <h2 className="font-bold">{ja.settings.weeklyBudgetTitle}</h2>

@@ -1,12 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { House, BookOpen, CalendarDays, ShoppingCart, Settings } from 'lucide-react'
+import { House, BookOpen, CalendarDays, Refrigerator, Settings } from 'lucide-react'
 import { ja } from '../i18n/ja'
 
 const tabs = [
   { to: '/', label: ja.nav.home, Icon: House },
   { to: '/recipes', label: ja.nav.recipes, Icon: BookOpen },
   { to: '/meal-plan', label: ja.nav.mealPlan, Icon: CalendarDays },
-  { to: '/shopping', label: ja.nav.shopping, Icon: ShoppingCart },
+  { to: '/shopping', label: ja.nav.shopping, Icon: Refrigerator },
   { to: '/settings', label: ja.nav.settings, Icon: Settings },
 ] as const
 

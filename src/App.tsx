@@ -6,6 +6,7 @@ import RecipeFormPage from './pages/RecipeFormPage'
 import RecipeDetailPage from './pages/RecipeDetailPage'
 import MealPlanPage from './pages/MealPlanPage'
 import ShoppingPage from './pages/ShoppingPage'
+import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
 import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
@@ -59,6 +60,7 @@ function App() {
             <Route path="/recipes/:id/edit" element={<RecipeFormPage />} />
             <Route path="/meal-plan" element={<MealPlanPage />} />
             <Route path="/shopping" element={<ShoppingPage />} />
+            <Route path="/history" element={<HistoryPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>

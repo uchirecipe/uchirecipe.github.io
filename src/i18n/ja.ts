@@ -31,7 +31,7 @@ export const ja = {
     home: 'ホーム',
     recipes: 'レシピ',
     mealPlan: '献立',
-    shopping: '買い物',
+    shopping: '食材',
     settings: '設定',
   },
   home: {
@@ -42,6 +42,8 @@ export const ja = {
     condNotRecent: '最近作ってない',
     condFavorite: 'お気に入り',
     condQuick: '10分以内',
+    pantryOnlyToggle: '在庫の食材で',
+    pantryOnlyFallback: '在庫の食材を使うレシピが見つからなかったので、通常の候補から選びました',
     noCandidate: 'この条件に合うレシピがありません',
     empty: 'レシピを登録すると、ここにおすすめが表示されます',
     goRegister: 'レシピを登録する',
@@ -55,6 +57,7 @@ export const ja = {
     mealPlanEmpty: 'まだ今日の献立が決まっていません',
     mealPlanGoTo: '献立を決める',
     historyTitle: '最近作ったもの',
+    historyMore: 'すべて見る',
     backupReminder: 'しばらくバックアップしていません。設定から書き出しておくと安心です',
     backupReminderLink: '設定を開く',
     pantryShortcut: '在庫ボードを見る・編集する',
@@ -73,6 +76,11 @@ export const ja = {
     remove: 'この食材を在庫ボードから外す',
     empty: 'よく使う食材を登録すると、ここに並びます',
     addToSearch: '在庫から追加',
+  },
+  history: {
+    title: '作った記録',
+    empty: 'まだ「作った！」の記録がありません',
+    monthFormat: '{y}年{m}月',
   },
   mealPlan: {
     title: '献立',
@@ -104,6 +112,7 @@ export const ja = {
     budgetNotSet: '設定画面で週の食費予算を登録すると、ここで比較できます',
     goToShopping: 'この週の買い物リストを作る',
     goToShoppingEmpty: 'レシピを割り当てると、まとめて買い物リストの候補にできます',
+    historyLink: '過去の記録を見る',
   },
   shopping: {
     fromRecipeTitle: 'レシピから追加',
@@ -149,6 +158,8 @@ export const ja = {
     themeBrown: 'ブラウン',
     timerSoundTitle: 'タイマー音',
     timerSoundDescription: 'タイマー終了時に音を鳴らします（各タイマーごとの消音は常駐バーの🔔で切り替えられます）',
+    timerWakeLockTitle: 'タイマー中は画面を暗くしない',
+    timerWakeLockDescription: 'タイマーが1本でも動いている間、どの画面を見ていても自動消灯を防ぎます（対応ブラウザのみ）',
     weeklyBudgetTitle: '週の食費予算（円・任意）',
     weeklyBudgetDescription: '献立プランナーで、その週の概算食費と比較して表示します',
     weeklyBudgetPlaceholder: '例: 5000',
@@ -218,6 +229,7 @@ export const ja = {
     usedAll: '入れた食材ぜんぶ使える',
     usedSome: '食材 {m}/{t} が使える',
     clear: '条件をクリア',
+    apply: '決定',
   },
   card: {
     ngBadge: 'NG食材を含む',
@@ -351,6 +363,8 @@ export const ja = {
     unmute: 'このタイマーの音を戻す',
     notificationTitle: 'うちレシピ',
     notificationBody: '「{label}」のタイマーが終わりました',
+    notice:
+      'タイマーの通知と音は、アプリを開いている間だけ動きます（アプリの仕組み上の制限です）',
   },
 } as const
 

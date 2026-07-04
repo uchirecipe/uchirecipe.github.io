@@ -25,9 +25,11 @@ import { shareText, shareImageCard } from '../logic/share'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { useTimers } from '../components/TimerProvider'
+import { useWakeLock } from '../components/useWakeLock'
 import BackHeader from '../components/BackHeader'
 import FocusMode from '../components/FocusMode'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
+import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
 import { ja } from '../i18n/ja'
 
@@ -75,32 +77,9 @@ export default function RecipeDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, recipe])
 
-  // 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ
-  // 画面の自動消灯を防ぐ（Wake Lock API。非対応ブラウザでは何もしない）
+  // 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
   const keepScreenOn = settings?.keepScreenOn ?? false
-  useEffect(() => {
-    if (!keepScreenOn || !('wakeLock' in navigator)) return
-    let sentinel: WakeLockSentinel | null = null
-    let released = false
-    const acquire = async () => {
-      try {
-        sentinel = await navigator.wakeLock.request('screen')
-      } catch {
-        /* 非対応・省電力モードなどで失敗したら静かに無視 */
-      }
-    }
-    // 他アプリから戻ってきたときに取得し直す
-    const onVisible = () => {
-      if (document.visibilityState === 'visible' && !released) void acquire()
-    }
-    void acquire()
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      released = true
-      document.removeEventListener('visibilitychange', onVisible)
-      sentinel?.release().catch(() => {})
-    }
-  }, [keepScreenOn])
+  useWakeLock(keepScreenOn)
 
   // 人数分の表示用（変更していない間はレシピ登録時の人数）
   const [servingsOverride, setServingsOverride] = useState<number>()
@@ -178,21 +157,11 @@ export default function RecipeDetailPage() {
 
   return (
     <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
-      <BackHeader fallback="/recipes" />
-
-      {/* 写真（無い場合・アイコン優先の場合はプレースホルダー） */}
-      {showPhoto ? (
-        <img src={photoUrl} alt={recipe.title} className="aspect-video w-full object-cover" />
-      ) : (
-        <div className="aspect-video w-full">
-          <RecipePlaceholder recipe={recipe} iconSize={56} />
-        </div>
-      )}
-
-      <div className="px-[var(--space-md)] pt-[var(--space-md)]">
-        {/* タイトル行＋編集・お気に入り（編集ボタンはタイトル付近＝一番上のエリアに配置） */}
-        <div className="flex items-start justify-between gap-2">
-          <h1 className="min-w-0 flex-1 text-2xl font-bold leading-snug">{recipe.title}</h1>
+      <BackHeader
+        fallback="/recipes"
+        title={recipe.title}
+        onTitleClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        right={
           <div className="flex shrink-0 items-center gap-1">
             <Link
               to={`/recipes/${id}/edit`}
@@ -207,10 +176,24 @@ export default function RecipeDetailPage() {
               aria-label={recipe.isFavorite ? ja.detail.favoriteOff : ja.detail.favoriteOn}
               className="rounded-full p-3 text-accent"
             >
-              <Heart size={28} fill={recipe.isFavorite ? 'currentColor' : 'none'} aria-hidden />
+              <Heart size={22} fill={recipe.isFavorite ? 'currentColor' : 'none'} aria-hidden />
             </button>
           </div>
+        }
+      />
+
+      {/* 写真（無い場合・アイコン優先の場合はプレースホルダー） */}
+      {showPhoto ? (
+        <img src={photoUrl} alt={recipe.title} className="aspect-video w-full object-cover" />
+      ) : (
+        <div className="aspect-video w-full">
+          <RecipePlaceholder recipe={recipe} iconSize={56} />
         </div>
+      )}
+
+      <div className="px-[var(--space-md)] pt-[var(--space-md)]">
+        {/* タイトル（編集・お気に入りは上部のsticky ヘッダーに常時表示） */}
+        <h1 className="text-2xl font-bold leading-snug">{recipe.title}</h1>
 
         {/* 時間・手間・概算価格 */}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-muted">
@@ -346,9 +329,7 @@ export default function RecipeDetailPage() {
                     isHighlighted ? 'border-accent bg-accent/10' : 'border-edge bg-surface'
                   }`}
                 >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent font-bold text-app">
-                    {stepNumber}
-                  </span>
+                  <StepBadge number={stepNumber} />
                   <div>
                     {/* 文中の「10分」などはタップでタイマー開始 */}
                     <p>
@@ -357,7 +338,7 @@ export default function RecipeDetailPage() {
                         onStart={(_tokenText, seconds) =>
                           startTimer({
                             key: `${id}-${index}-${seconds}`,
-                            label: `${recipe.title}・${ja.timer.stepLabel.replace('{n}', String(stepNumber))}`,
+                            label: recipe.title,
                             doneLabel: deriveDoneLabel(step.text),
                             seconds,
                             recipeId: id,
@@ -373,7 +354,7 @@ export default function RecipeDetailPage() {
                         onClick={() =>
                           startTimer({
                             key: `${id}-${index}-${(step.minutes ?? 0) * 60}`,
-                            label: `${recipe.title}・${ja.timer.stepLabel.replace('{n}', String(stepNumber))}`,
+                            label: recipe.title,
                             doneLabel: deriveDoneLabel(step.text),
                             seconds: (step.minutes ?? 0) * 60,
                             recipeId: id,

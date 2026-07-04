@@ -8,7 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useSettings } from '../db/settings'
+import { useSettings, updateSettings } from '../db/settings'
+import { useWakeLock } from './useWakeLock'
 import { ja } from '../i18n/ja'
 
 /**
@@ -51,6 +52,9 @@ interface TimerContextValue {
   now: number
   /** 連打などで既に動いているタイマーに気づかせるための、点滅対象タイマーID */
   flashingId: number | null
+  /** タイマーの制限（アプリを開いている間だけ動く）を初回だけ知らせるための表示フラグ */
+  showFirstTimeNotice: boolean
+  dismissFirstTimeNotice: () => void
   startTimer: (options: StartTimerOptions) => void
   dismissTimer: (id: number) => void
   toggleMute: (id: number) => void
@@ -94,11 +98,13 @@ function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, s
       /* 無視 */
     }
   }
-  // ブラウザ通知（許可済みのときだけ）
+  // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
+  // 通知本文はtruncateされないので手順番号も含めた完全な説明にする
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
+      const stepText = ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
       new Notification(ja.timer.notificationTitle, {
-        body: ja.timer.notificationBody.replace('{label}', timer.label),
+        body: ja.timer.notificationBody.replace('{label}', `${timer.label}・${stepText}`),
       })
     }
   } catch {
@@ -110,10 +116,12 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const [timers, setTimers] = useState<ActiveTimer[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [flashingId, setFlashingId] = useState<number | null>(null)
+  const [showFirstTimeNotice, setShowFirstTimeNotice] = useState(false)
   const audioRef = useRef<AudioContext>(undefined)
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const settings = useSettings()
   const soundOn = settings?.timerSoundEnabled ?? true
+  const wakeLockOn = settings?.timerWakeLockEnabled ?? true
 
   const startTimer = useCallback((options: StartTimerOptions) => {
     // 同じ手順・同じ時間ボタンの連打防止: 既に動作中なら新規起動せず、既存タイマーを点滅で知らせる
@@ -139,6 +147,11 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     } catch {
       /* 無視 */
     }
+    // アプリの制限（閉じている間は動かない）を初回だけ知らせる
+    if (settings && !settings.timerNoticeShown) {
+      setShowFirstTimeNotice(true)
+      void updateSettings({ timerNoticeShown: true })
+    }
     const timer: ActiveTimer = {
       id: nextTimerId++,
       key: options.key,
@@ -154,7 +167,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     setNow(Date.now())
     setTimers((prev) => [...prev, timer])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timers])
+  }, [timers, settings])
 
   const dismissTimer = useCallback((id: number) => {
     setTimers((prev) => prev.filter((t) => t.id !== id))
@@ -164,6 +177,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, muted: !t.muted } : t)))
   }, [])
 
+  const dismissFirstTimeNotice = useCallback(() => setShowFirstTimeNotice(false), [])
+
   const hasRunning = timers.some((t) => !t.done)
 
   // 動作中だけ時計を進める
@@ -172,6 +187,10 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     const interval = setInterval(() => setNow(Date.now()), 300)
     return () => clearInterval(interval)
   }, [hasRunning])
+
+  // タイマーが1本でも動作中は画面を暗くしない。他アプリ等から戻ってきた瞬間に
+  // 時計を再同期し、バックグラウンドで止まっていた間に終わったタイマーを即座に反映する
+  useWakeLock(hasRunning && wakeLockOn, () => setNow(Date.now()))
 
   // 終了したタイマーに合図を出す
   useEffect(() => {
@@ -185,7 +204,16 @@ export function TimerProvider({ children }: { children: ReactNode }) {
 
   return (
     <TimerContext.Provider
-      value={{ timers, now, flashingId, startTimer, dismissTimer, toggleMute }}
+      value={{
+        timers,
+        now,
+        flashingId,
+        showFirstTimeNotice,
+        dismissFirstTimeNotice,
+        startTimer,
+        dismissTimer,
+        toggleMute,
+      }}
     >
       {children}
     </TimerContext.Provider>

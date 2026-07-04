@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronLeft, ChevronRight, Dices, X, Search, ShoppingCart } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
@@ -243,6 +243,13 @@ export default function MealPlanPage() {
       {weekRecipeIds.length === 0 && (
         <p className="mt-1 text-center text-sm text-ink-muted">{ja.mealPlan.goToShoppingEmpty}</p>
       )}
+
+      <Link
+        to="/history"
+        className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent underline"
+      >
+        {ja.mealPlan.historyLink}
+      </Link>
 
       {/* レシピ選択ピッカー */}
       {pickerTarget && (

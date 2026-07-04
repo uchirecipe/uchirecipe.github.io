@@ -223,6 +223,15 @@ export default function RecipesPage() {
               {ja.search.clear}
             </button>
           )}
+
+          {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
+          <button
+            type="button"
+            onClick={() => setPanelOpen(false)}
+            className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-app shadow-sm"
+          >
+            {ja.search.apply}
+          </button>
         </div>
       )}
 

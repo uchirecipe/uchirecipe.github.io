@@ -157,6 +157,10 @@ export interface Settings {
   lastBackupAt?: number
   /** タイマー音の全体ON/OFF（個別ミュートとは別に、これがOFFなら全タイマーが無音） */
   timerSoundEnabled: boolean
+  /** タイマーが1本でも動作中は、どの画面を見ていても画面を暗くしない */
+  timerWakeLockEnabled: boolean
+  /** タイマーの制限（アプリを開いている間だけ通知・音が鳴る）の説明を初回に表示済みか */
+  timerNoticeShown: boolean
   /** 週の食費予算（円・任意）。献立プランナーで概算食費と比較する */
   weeklyBudget?: number
   /** ホーム画面に表示するパーツと並び順（配列に無いものは非表示） */
@@ -171,6 +175,8 @@ export const defaultSettings: Settings = {
   starterSeeded: false,
   hideStarters: false,
   timerSoundEnabled: true,
+  timerWakeLockEnabled: true,
+  timerNoticeShown: false,
   homeWidgets: defaultHomeWidgets,
 }
 
