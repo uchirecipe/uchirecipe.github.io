@@ -6,10 +6,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://vite.dev/config/
 export default defineConfig({
   // ── GitHub Pages で公開するときの設定 ──────────────────────
-  // リポジトリ名（uchirecipe）に合わせたパスに設定済み。
-  // 手元での開発中（npm run dev → localhost:5173）でも、Viteが自動でこのパス配下に
-  // リダイレクトしてくれるのでそのまま動きます。
-  base: '/uchirecipe/',
+  // リポジトリ名を uchirecipe.github.io にしたので、パス無しのルートURL
+  // （https://uchirecipe.github.io/）で公開される。base は '/' のままでよい。
+  base: '/',
   plugins: [
     react(),
     tailwindcss(),

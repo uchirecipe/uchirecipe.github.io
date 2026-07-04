@@ -48,7 +48,7 @@ function App() {
 
   return (
     <TimerProvider>
-      {/* HashRouterのルーティングは #以降で完結するため、公開パス(/uchirecipe/)の
+      {/* HashRouterのルーティングは #以降で完結するため、公開パス(ルート/)の
           影響を受けない。basenameを付けると #/ がどのルートにも一致せず白画面になる */}
       <HashRouter>
         <ThemeSync />
