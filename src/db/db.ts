@@ -54,6 +54,17 @@ class UchiRecipeDB extends Dexie {
       mealPlans: '++id, date, [date+slot]',
       todayList: '++id, recipeId',
     })
+    // バージョン7: todayListにaddedAtの索引が抜けていた不具合を修正
+    // （orderBy('addedAt')がインデックス無しのフィールドを指定していたため
+    //   ホーム・献立タブが白画面になっていた。versionは上書きせず新規追加する）
+    this.version(7).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+    })
   }
 }
 
