@@ -125,6 +125,10 @@ export const ja = {
     goToShopping: 'この週の買い物リストを作る',
     goToShoppingEmpty: 'レシピを割り当てると、まとめて買い物リストの候補にできます',
     historyLink: '過去の記録を見る',
+    planMismatchNotice: '今日の献立と今週の予定が食い違っています',
+    planMismatchDescription: 'タップすると、その時間帯の週の予定を今日の献立に合わせて更新します',
+    planMismatchCurrent: '現在: {title}',
+    planMismatchEmpty: '現在: 未定',
   },
   shopping: {
     fromRecipeTitle: 'レシピから追加',

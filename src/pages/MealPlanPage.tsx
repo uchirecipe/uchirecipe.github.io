@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Sparkles,
   Clock,
+  TriangleAlert,
 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
@@ -22,7 +23,7 @@ import {
   markAllTodayListCooked,
   importRecipeIdsToTodayList,
 } from '../db/todayList'
-import { MEAL_SLOTS, weekDates, shiftWeek, suggestForSlot } from '../logic/mealPlan'
+import { MEAL_SLOTS, weekDates, shiftWeek, suggestForSlot, todayPlanMismatch } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -127,6 +128,16 @@ export default function MealPlanPage() {
     return Array.from(ids)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, today, settings?.visibleMealSlots])
+
+  // 「今日の献立」にあるのに、今日の週プラン枠には入っていないレシピ
+  // (週プランを使っていない=今日の枠が0件のときは食い違い扱いにしない)
+  const mismatchRecipes = useMemo(() => {
+    const todayListIds = todayList?.map((item) => item.recipeId) ?? []
+    const mismatchIds = todayPlanMismatch(todayListIds, todayFromPlanIds)
+    return mismatchIds
+      .map((id) => recipeById.get(id))
+      .filter((r): r is Recipe => r !== undefined)
+  }, [todayList, todayFromPlanIds, recipeById])
 
   const [quickOnly, setQuickOnly] = useState(false)
   const [message, setMessage] = useState('')
@@ -250,6 +261,48 @@ export default function MealPlanPage() {
               <CheckCircle2 size={18} aria-hidden />
               {ja.mealPlan.todayMarkAllCooked}
             </button>
+
+            {mismatchRecipes.length > 0 && (
+              <div className="mt-[var(--space-sm)] rounded-md border border-warning bg-surface p-[var(--space-sm)]">
+                <p className="flex items-center gap-1 text-sm font-bold text-warning">
+                  <TriangleAlert size={16} aria-hidden />
+                  {ja.mealPlan.planMismatchNotice}
+                </p>
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.planMismatchDescription}</p>
+                <div className="mt-[var(--space-sm)] space-y-2">
+                  {mismatchRecipes.map((recipe) => (
+                    <div key={recipe.id}>
+                      <p className="truncate text-sm font-bold">{recipe.title}</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {visibleSlots.map((slot) => {
+                          const currentEntry = entryMap.get(`${today}|${slot}`)
+                          const currentTitle = currentEntry
+                            ? recipeById.get(currentEntry.recipeId)?.title
+                            : undefined
+                          return (
+                            <button
+                              key={slot}
+                              type="button"
+                              onClick={() => void assignMeal(today, slot, recipe.id!)}
+                              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
+                            >
+                              {ja.mealPlan.slot[slot]}
+                              <span className="ml-1 font-normal text-ink-muted">
+                                (
+                                {currentTitle
+                                  ? ja.mealPlan.planMismatchCurrent.replace('{title}', currentTitle)
+                                  : ja.mealPlan.planMismatchEmpty}
+                                )
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div className="mt-[var(--space-sm)]">

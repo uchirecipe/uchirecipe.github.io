@@ -71,3 +71,14 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
     freshAndUnused.length > 0 ? freshAndUnused : notUsedThisWeek.length > 0 ? notUsedThisWeek : slotPool
   return pool[Math.floor(Math.random() * pool.length)]
 }
+
+/**
+ * 「今日の献立」（todayList）と週間プランの今日の枠が食い違っているレシピIDを返す。
+ * 週プランの今日の枠が1件も無いとき（＝週プランを使っていない）は食い違い扱いにしない
+ * （毎回警告が出て煩わしくなるのを防ぐため）。同期はしない設計を維持し、
+ * この結果はあくまで「気づかせる」表示にのみ使う。
+ */
+export function todayPlanMismatch(todayListIds: number[], todayPlanRecipeIds: number[]): number[] {
+  if (todayPlanRecipeIds.length === 0) return []
+  return todayListIds.filter((id) => !todayPlanRecipeIds.includes(id))
+}
