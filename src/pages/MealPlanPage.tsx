@@ -25,6 +25,7 @@ import {
 } from '../db/todayList'
 import { MEAL_SLOTS, weekDates, shiftWeek, suggestForSlot, todayPlanMismatch } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
+import { hasNgIngredient } from '../logic/ng'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import type { MealSlot, Recipe } from '../db/types'
@@ -442,9 +443,18 @@ export default function MealPlanPage() {
                     <button
                       type="button"
                       onClick={() => openPicker(date, slot)}
-                      className="min-w-0 flex-1 truncate rounded-sm border border-edge bg-app px-2 py-2 text-left text-sm"
+                      className="flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border border-edge bg-app px-2 py-2 text-left text-sm"
                     >
-                      {recipe ? recipe.title : <span className="text-ink-muted">{ja.mealPlan.empty}</span>}
+                      {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
+                        <TriangleAlert
+                          size={14}
+                          className="shrink-0 text-warning"
+                          aria-label={ja.detail.ngWarning}
+                        />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">
+                        {recipe ? recipe.title : <span className="text-ink-muted">{ja.mealPlan.empty}</span>}
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -537,6 +547,13 @@ export default function MealPlanPage() {
                       onClick={() => void pickRecipe(recipe.id!)}
                       className="flex w-full items-center gap-2 px-[var(--space-md)] py-3 text-left"
                     >
+                      {hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
+                        <TriangleAlert
+                          size={16}
+                          className="shrink-0 text-warning"
+                          aria-label={ja.detail.ngWarning}
+                        />
+                      )}
                       <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
                       <span className="flex shrink-0 items-center gap-2 text-xs text-ink-muted">
                         {recipe.cookMinutes != null && recipe.cookMinutes > 0 && (

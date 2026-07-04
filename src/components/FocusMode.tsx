@@ -12,7 +12,7 @@ import {
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
 import { deriveDoneLabel } from '../logic/timerLabel'
-import { findTimeTokens } from '../logic/time'
+import { findTimeTokens, formatRemaining } from '../logic/time'
 import StepBadge from './StepBadge'
 import TimeText from './TimeText'
 import { ja } from '../i18n/ja'
@@ -34,7 +34,7 @@ const micSupported =
  * 「画面を暗くしない」設定は詳細画面(呼び出し元)側のWake Lockがそのまま効く。
  */
 export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Props) {
-  const { startTimer } = useTimers()
+  const { startTimer, timers, now } = useTimers()
   const [index, setIndex] = useState(initialStep)
   const [speaking, setSpeaking] = useState(false)
   const [listening, setListening] = useState(false)
@@ -43,6 +43,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
   const total = recipe.steps.length
   const step = recipe.steps[index]
   const stepNumber = index + 1
+  // フォーカスモードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
+  // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)
+  const recipeTimers = timers.filter((t) => t.recipeId === recipeId)
 
   // 音声認識のコールバックは初期化時のクロージャで固定されるため、
   // 最新の手順位置・startTimerを常にrefで参照して古い値を掴まないようにする
@@ -227,7 +230,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
         <span className="font-bold text-ink-muted">
           {ja.focus.stepCounter.replace('{n}', String(stepNumber)).replace('{t}', String(total))}
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-3">
           {micSupported && (
             <button
               type="button"
@@ -259,6 +262,25 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
           {ja.focus.micHint}
           {listening && <span className="ml-1 font-bold text-accent">{ja.focus.micListening}</span>}
         </p>
+      )}
+
+      {recipeTimers.length > 0 && (
+        <div className="flex flex-wrap justify-center gap-2 px-[var(--space-md)] pb-1">
+          {recipeTimers.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => goTo(t.stepNumber - 1)}
+              className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm font-bold ${
+                t.done ? 'border-warning text-warning' : 'border-accent text-accent'
+              }`}
+            >
+              <TimerIcon size={14} aria-hidden />
+              {ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}
+              {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
+            </button>
+          ))}
+        </div>
       )}
 
       <div

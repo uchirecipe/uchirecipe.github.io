@@ -256,6 +256,7 @@ export const ja = {
   card: {
     ngBadge: 'NG食材を含む',
     todayBadge: '今日の献立に追加済み',
+    starterBadge: '基本レシピ',
   },
   paste: {
     open: 'テキスト貼り付けで自動入力',

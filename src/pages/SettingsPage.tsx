@@ -199,7 +199,7 @@ export default function SettingsPage() {
 
       {/* 画面を暗くしない */}
       <section className={sectionCls}>
-        <div className="flex items-center justify-between gap-3">
+        <label className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-bold">{ja.settings.screenTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.screenDescription}</p>
@@ -220,12 +220,12 @@ export default function SettingsPage() {
               }`}
             />
           </button>
-        </div>
+        </label>
       </section>
 
       {/* タイマー音 */}
       <section className={sectionCls}>
-        <div className="flex items-center justify-between gap-3">
+        <label className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
@@ -246,12 +246,12 @@ export default function SettingsPage() {
               }`}
             />
           </button>
-        </div>
+        </label>
       </section>
 
       {/* タイマー中は画面を暗くしない */}
       <section className={sectionCls}>
-        <div className="flex items-center justify-between gap-3">
+        <label className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-bold">{ja.settings.timerWakeLockTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
@@ -274,7 +274,7 @@ export default function SettingsPage() {
               }`}
             />
           </button>
-        </div>
+        </label>
       </section>
 
       {/* 週の食費予算 */}
@@ -372,7 +372,7 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm text-ink-muted">
           {ja.settings.starterDescription.replace('{n}', String(starterCount))}
         </p>
-        <div className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
+        <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
           <span className="text-sm font-bold text-ink-muted">{ja.settings.starterHide}</span>
           <button
             type="button"
@@ -390,7 +390,7 @@ export default function SettingsPage() {
               }`}
             />
           </button>
-        </div>
+        </label>
         <button
           type="button"
           onClick={reloadStarters}

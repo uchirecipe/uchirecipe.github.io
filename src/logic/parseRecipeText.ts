@@ -37,6 +37,18 @@ const BULLET = /^[・･\-–—*●○◎▪•‣＊※◇]+\s*/
 const STEP_NUMBER = /^[（(]?\d{1,2}[）)．.、:：]\s*|^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*|^(step|STEP|Step)\s*\d+[．.:：)）]?\s*/
 const SERVINGS = /(\d+(?:[.．]\d+)?)\s*人\s*(?:分|前)/
 
+/**
+ * 見出し・番号のない材料欄で、分量の無い行が来たときに手順の文と誤認識しないための判定。
+ * 「〜って」「〜んで」のようなて形の中間表現、または代表的な調理動詞の終止形で終わる行は
+ * 材料名（「〈タレ〉しょうゆ」等）ではなく手順の文とみなす
+ */
+const STEP_LIKE_MIDDLE = /って|んで/
+const STEP_LIKE_ENDING =
+  /(切る|むく|剥く|煮る|焼く|炒める|茹でる|ゆでる|蒸す|揚げる|漬ける|冷ます|混ぜる|加える|入れる|盛る|かける|絞る|こす|裏返す|取り出す|並べる|包む|丸める|こねる|塗る|溶く|溶かす|含める|詰める|する|できる)$/
+function looksLikeStepSentence(line: string): boolean {
+  return STEP_LIKE_MIDDLE.test(line) || STEP_LIKE_ENDING.test(line)
+}
+
 /** 「200g」「大さじ2」「1/2個」「適量」などを 分量+単位 に分ける */
 export function splitQuantity(raw: string): { amount: string; unit: string } {
   const text = normalize(raw.trim())
@@ -135,8 +147,14 @@ export function parseRecipeText(text: string): ParsedRecipe {
       continue
     }
     if (mode === 'ingredients') {
-      // 材料欄の中の分量なし行（例: 「〈タレ〉しょうゆ」）は名前だけの材料として拾う
       const name = line.replace(BULLET, '').trim()
+      // 見出し・番号が無いまま手順の文に入っていた場合、材料名と誤認識しないよう切り替える
+      if (looksLikeStepSentence(name)) {
+        mode = 'steps'
+        result.steps.push(name)
+        continue
+      }
+      // 材料欄の中の分量なし行（例: 「〈タレ〉しょうゆ」）は名前だけの材料として拾う
       if (name.length <= 25) {
         result.ingredients.push({ name, amount: '', unit: '' })
         continue
