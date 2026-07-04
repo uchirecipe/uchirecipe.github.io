@@ -27,7 +27,7 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import { useTimers } from '../components/TimerProvider'
 import BackHeader from '../components/BackHeader'
 import FocusMode from '../components/FocusMode'
-import { RecipePlaceholder } from '../components/RecipeCard'
+import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import TimeText from '../components/TimeText'
 import { ja } from '../i18n/ja'
 
@@ -224,6 +224,15 @@ export default function RecipeDetailPage() {
           <span className="rounded-sm border border-edge px-2 py-0.5 text-sm">
             {ja.effort[recipe.effortLevel]}
           </span>
+          {recipe.season && recipe.season !== 'all' && (
+            <span className="inline-flex items-center gap-1 rounded-sm border border-edge px-2 py-0.5 text-sm">
+              {(() => {
+                const SeasonIcon = seasonIcons[recipe.season]
+                return <SeasonIcon size={14} aria-hidden />
+              })()}
+              {ja.season[recipe.season]}
+            </span>
+          )}
           {totalPrice > 0 && (
             <span>
               {ja.detail.priceAbout}

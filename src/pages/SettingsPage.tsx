@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, X, Download, Upload, RotateCcw } from 'lucide-react'
+import { Plus, X, Download, Upload, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes } from '../db/recipes'
 import { reloadStarterRecipes, starterCount } from '../db/starters'
 import { downloadBackup, importBackup, parseBackup } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
-import type { ThemeSetting } from '../db/types'
+import type { HomeWidgetKey, ThemeSetting } from '../db/types'
 import { ja } from '../i18n/ja'
 
 const themeOptions: { value: ThemeSetting; label: string }[] = [
@@ -15,6 +15,22 @@ const themeOptions: { value: ThemeSetting; label: string }[] = [
   { value: 'dark', label: ja.settings.themeDark },
   { value: 'brown', label: ja.settings.themeBrown },
 ]
+
+const allHomeWidgets: HomeWidgetKey[] = [
+  'mealPlan',
+  'suggestion',
+  'ingredientSearch',
+  'pantry',
+  'history',
+]
+
+const homeWidgetLabels: Record<HomeWidgetKey, string> = {
+  mealPlan: ja.home.mealPlanTitle,
+  suggestion: ja.home.suggestTitle,
+  ingredientSearch: ja.home.ingShortcutTitle,
+  pantry: ja.pantry.title,
+  history: ja.home.historyTitle,
+}
 
 const sectionCls =
   'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
@@ -94,6 +110,23 @@ export default function SettingsPage() {
   const formatDate = (ms: number) => {
     const date = new Date(ms)
     return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+  }
+
+  const homeWidgets = settings.homeWidgets
+  const hiddenHomeWidgets = allHomeWidgets.filter((key) => !homeWidgets.includes(key))
+
+  const showHomeWidget = (key: HomeWidgetKey) => {
+    void updateSettings({ homeWidgets: [...homeWidgets, key] })
+  }
+  const hideHomeWidget = (key: HomeWidgetKey) => {
+    void updateSettings({ homeWidgets: homeWidgets.filter((w) => w !== key) })
+  }
+  const moveHomeWidget = (index: number, direction: -1 | 1) => {
+    const target = index + direction
+    if (target < 0 || target >= homeWidgets.length) return
+    const next = [...homeWidgets]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    void updateSettings({ homeWidgets: next })
   }
 
   return (
@@ -232,6 +265,56 @@ export default function SettingsPage() {
           placeholder={ja.settings.weeklyBudgetPlaceholder}
           className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
         />
+      </section>
+
+      {/* ホーム画面のカスタマイズ */}
+      <section className={sectionCls}>
+        <h2 className="font-bold">{ja.settings.homeWidgetsTitle}</h2>
+        <p className="mt-1 text-sm text-ink-muted">{ja.settings.homeWidgetsDescription}</p>
+        <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+          {homeWidgets.map((key, index) => (
+            <li key={key} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
+              <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
+              <button
+                type="button"
+                onClick={() => moveHomeWidget(index, -1)}
+                disabled={index === 0}
+                aria-label={ja.settings.homeWidgetMoveUp}
+                className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+              >
+                <ChevronUp size={18} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveHomeWidget(index, 1)}
+                disabled={index === homeWidgets.length - 1}
+                aria-label={ja.settings.homeWidgetMoveDown}
+                className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+              >
+                <ChevronDown size={18} aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={() => hideHomeWidget(key)}
+                className="rounded-sm border border-edge px-2 py-1 text-xs font-bold text-ink-muted"
+              >
+                {ja.settings.homeWidgetHide}
+              </button>
+            </li>
+          ))}
+          {hiddenHomeWidgets.map((key) => (
+            <li key={key} className="flex items-center gap-2 px-[var(--space-sm)] py-2 opacity-60">
+              <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
+              <button
+                type="button"
+                onClick={() => showHomeWidget(key)}
+                className="rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent"
+              >
+                {ja.settings.homeWidgetShow}
+              </button>
+            </li>
+          ))}
+        </ul>
       </section>
 
       {/* テーマ */}

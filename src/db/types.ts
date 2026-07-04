@@ -46,6 +46,9 @@ export interface CookedLog {
   note?: string
 }
 
+/** 季節タグ（任意）。ホームの提案がこれを見て今の季節のレシピを優先する */
+export type Season = 'spring' | 'summer' | 'autumn' | 'winter' | 'all'
+
 /** レシピ本体（IndexedDB に保存される形） */
 export interface Recipe {
   id?: number
@@ -73,6 +76,8 @@ export interface Recipe {
   iconKey?: IconKey
   /** 写真があっても、一覧・詳細でアイコン表示を優先する */
   showIconInsteadOfPhoto?: boolean
+  /** 季節（任意）。未指定は「季節を問わない」として扱う */
+  season?: Season
   createdAt: number
   updatedAt: number
 }
@@ -123,6 +128,18 @@ export interface ShoppingItem {
 /** テーマ設定: 端末に合わせる / ライト固定 / ダーク固定 / ブラウン固定 */
 export type ThemeSetting = 'auto' | 'light' | 'dark' | 'brown'
 
+/** ホーム画面に置ける表示パーツ */
+export type HomeWidgetKey = 'mealPlan' | 'suggestion' | 'ingredientSearch' | 'pantry' | 'history'
+
+/** 標準の表示パーツ構成（すべて表示・この並び順） */
+export const defaultHomeWidgets: HomeWidgetKey[] = [
+  'mealPlan',
+  'suggestion',
+  'ingredientSearch',
+  'pantry',
+  'history',
+]
+
 /** アプリ全体の設定（1件だけ保存する） */
 export interface Settings {
   /** 常に 1（設定は1レコードだけ） */
@@ -142,6 +159,8 @@ export interface Settings {
   timerSoundEnabled: boolean
   /** 週の食費予算（円・任意）。献立プランナーで概算食費と比較する */
   weeklyBudget?: number
+  /** ホーム画面に表示するパーツと並び順（配列に無いものは非表示） */
+  homeWidgets: HomeWidgetKey[]
 }
 
 export const defaultSettings: Settings = {
@@ -152,6 +171,7 @@ export const defaultSettings: Settings = {
   starterSeeded: false,
   hideStarters: false,
   timerSoundEnabled: true,
+  homeWidgets: defaultHomeWidgets,
 }
 
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */
@@ -169,4 +189,5 @@ export type RecipeInput = Pick<
   | 'memo'
   | 'iconKey'
   | 'showIconInsteadOfPhoto'
+  | 'season'
 >

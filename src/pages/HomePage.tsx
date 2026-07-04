@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Clock,
@@ -10,15 +10,20 @@ import {
   HardDriveDownload,
   Refrigerator,
   ChevronRight,
+  CalendarDays,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
 import { pantryAvailableNames } from '../logic/pantry'
+import { useMealPlanRange } from '../db/mealPlan'
+import { MEAL_SLOTS } from '../logic/mealPlan'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
-import type { Recipe } from '../db/types'
+import { currentSeason, preferSeason } from '../logic/season'
+import type { HomeWidgetKey, Recipe } from '../db/types'
+import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import ChipInput from '../components/ChipInput'
@@ -39,6 +44,14 @@ function matchesCondition(recipe: Recipe, condition: SuggestCondition): boolean 
   if (condition === 'quick')
     return recipe.cookMinutes != null && recipe.cookMinutes > 0 && recipe.cookMinutes <= 10
   return true
+}
+
+function todayString(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 /** 提案カード（写真サムネイル＋名前で詳細へ） */
@@ -76,7 +89,7 @@ function SuggestionCard({ recipe }: { recipe: Recipe }) {
   )
 }
 
-/** ホーム: 今日の提案＋検索＋使いたい食材＋最近の履歴 */
+/** ホーム: 表示パーツは設定でオン・オフ＆並べ替えできる（検索バーは常時表示） */
 export default function HomePage() {
   const navigate = useNavigate()
   const allRecipes = useLiveQuery(listRecipes, [])
@@ -89,11 +102,20 @@ export default function HomePage() {
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
 
+  const today = useMemo(todayString, [])
+  const todayMeals = useMealPlanRange(today, today)
+
   // 「基本レシピを表示しない」設定を反映
   const recipes = useMemo(() => {
     if (!allRecipes) return undefined
     return settings?.hideStarters ? allRecipes.filter((r) => !r.isStarter) : allRecipes
   }, [allRecipes, settings?.hideStarters])
+
+  const recipeById = useMemo(() => {
+    const map = new Map<number, Recipe>()
+    recipes?.forEach((r) => map.set(r.id!, r))
+    return map
+  }, [recipes])
 
   // 自分のレシピが1件以上あり、30日以上（または一度も）バックアップしていないとき
   const showBackupReminder =
@@ -101,10 +123,11 @@ export default function HomePage() {
     (allRecipes?.some((r) => !r.isStarter) ?? false) &&
     backupOverdue(settings.lastBackupAt)
 
-  const candidates = useMemo(
-    () => (recipes ?? []).filter((r) => matchesCondition(r, condition)),
-    [recipes, condition],
-  )
+  // 条件で絞り込んだ上で、今の季節に合うものを優先する
+  const candidates = useMemo(() => {
+    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition))
+    return preferSeason(byCondition, currentSeason())
+  }, [recipes, condition])
   const suggestion =
     candidates.length > 0
       ? candidates[Math.floor(seed * candidates.length) % candidates.length]
@@ -127,24 +150,45 @@ export default function HomePage() {
     navigate(`/recipes?ing=${encodeURIComponent(ingredients.join(' '))}`)
   }
 
-  return (
-    <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]">
-      <h1 className="text-2xl font-bold">{ja.app.name}</h1>
-
-      {/* バックアップの控えめなリマインド */}
-      {showBackupReminder && (
-        <Link
-          to="/settings"
-          className="mt-[var(--space-sm)] flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
-        >
-          <HardDriveDownload size={16} className="shrink-0 text-accent" aria-hidden />
-          <span className="min-w-0 flex-1">{ja.home.backupReminder}</span>
-          <span className="shrink-0 font-bold text-accent">{ja.home.backupReminderLink}</span>
-        </Link>
-      )}
-
-      {/* 今日なに作る？ */}
-      <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+  const widgetSections: Record<HomeWidgetKey, ReactNode> = {
+    mealPlan: (
+      <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+        <h2 className="flex items-center gap-2 font-bold">
+          <CalendarDays size={20} className="text-accent" aria-hidden />
+          {ja.home.mealPlanTitle}
+        </h2>
+        {todayMeals && todayMeals.length > 0 ? (
+          <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+            {MEAL_SLOTS.filter((slot) => todayMeals.some((e) => e.slot === slot)).map((slot) => {
+              const entry = todayMeals.find((e) => e.slot === slot)!
+              const recipe = recipeById.get(entry.recipeId)
+              return (
+                <li key={slot}>
+                  <Link
+                    to={recipe ? `/recipes/${recipe.id}` : '/meal-plan'}
+                    className="flex items-center gap-2 px-[var(--space-md)] py-2"
+                  >
+                    <span className="w-14 shrink-0 text-sm text-ink-muted">{ja.mealPlan.slot[slot]}</span>
+                    <span className="min-w-0 flex-1 truncate font-bold">
+                      {recipe?.title ?? ja.mealPlan.empty}
+                    </span>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <div className="mt-[var(--space-sm)] text-center">
+            <p className="text-sm text-ink-muted">{ja.home.mealPlanEmpty}</p>
+            <Link to="/meal-plan" className="mt-2 inline-block text-sm font-bold text-accent underline">
+              {ja.home.mealPlanGoTo}
+            </Link>
+          </div>
+        )}
+      </section>
+    ),
+    suggestion: (
+      <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
         <h2 className="text-xl font-bold">{ja.home.suggestTitle}</h2>
 
         {recipes && recipes.length === 0 ? (
@@ -193,39 +237,9 @@ export default function HomePage() {
           </>
         )}
       </section>
-
-      {/* 検索バー */}
-      <form
-        className="mt-[var(--space-md)] flex gap-[var(--space-sm)]"
-        onSubmit={(e) => {
-          e.preventDefault()
-          submitSearch()
-        }}
-      >
-        <div className="relative min-w-0 flex-1">
-          <Search
-            size={18}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={ja.home.searchPlaceholder}
-            className="w-full rounded-md border border-edge bg-surface py-3 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
-          />
-        </div>
-        <button
-          type="submit"
-          className="shrink-0 rounded-md bg-accent px-4 font-bold text-app shadow-sm"
-        >
-          {ja.home.searchButton}
-        </button>
-      </form>
-
-      {/* 使いたい食材から探す */}
-      <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+    ),
+    ingredientSearch: (
+      <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
         <h2 className="flex items-center gap-2 font-bold">
           <Carrot size={20} className="text-accent" aria-hidden />
           {ja.home.ingShortcutTitle}
@@ -259,20 +273,20 @@ export default function HomePage() {
           </button>
         </div>
       </section>
-
-      {/* 在庫ボードへのショートカット（簡易版。本格カスタマイズはバッチFで対応） */}
+    ),
+    pantry: (
       <Link
         to="/shopping"
-        className="mt-[var(--space-md)] flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-3 text-sm shadow-sm"
+        className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-3 text-sm shadow-sm"
       >
         <Refrigerator size={18} className="shrink-0 text-accent" aria-hidden />
         <span className="min-w-0 flex-1 font-bold">{ja.home.pantryShortcut}</span>
         <ChevronRight size={16} className="shrink-0 text-ink-muted" aria-hidden />
       </Link>
-
-      {/* 最近作ったもの */}
-      {history.length > 0 && (
-        <section className="mt-[var(--space-md)]">
+    ),
+    history:
+      history.length > 0 ? (
+        <section>
           <h2 className="flex items-center gap-2 font-bold">
             <History size={20} className="text-accent" aria-hidden />
             {ja.home.historyTitle}
@@ -293,7 +307,63 @@ export default function HomePage() {
             ))}
           </ul>
         </section>
+      ) : null,
+  }
+
+  const homeWidgets = settings?.homeWidgets ?? defaultHomeWidgets
+
+  return (
+    <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)] pb-[var(--space-lg)]">
+      <h1 className="text-2xl font-bold">{ja.app.name}</h1>
+
+      {/* バックアップの控えめなリマインド */}
+      {showBackupReminder && (
+        <Link
+          to="/settings"
+          className="mt-[var(--space-sm)] flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
+        >
+          <HardDriveDownload size={16} className="shrink-0 text-accent" aria-hidden />
+          <span className="min-w-0 flex-1">{ja.home.backupReminder}</span>
+          <span className="shrink-0 font-bold text-accent">{ja.home.backupReminderLink}</span>
+        </Link>
       )}
+
+      {/* 検索バー（常時表示） */}
+      <form
+        className="mt-[var(--space-md)] flex gap-[var(--space-sm)]"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submitSearch()
+        }}
+      >
+        <div className="relative min-w-0 flex-1">
+          <Search
+            size={18}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
+            aria-hidden
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={ja.home.searchPlaceholder}
+            className="w-full rounded-md border border-edge bg-surface py-3 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
+          />
+        </div>
+        <button
+          type="submit"
+          className="shrink-0 rounded-md bg-accent px-4 font-bold text-app shadow-sm"
+        >
+          {ja.home.searchButton}
+        </button>
+      </form>
+
+      {/* カスタマイズ可能なパーツ（設定でオン・オフ＆並べ替え） */}
+      <div className="mt-[var(--space-md)] space-y-[var(--space-md)]">
+        {homeWidgets.map((key) => (
+          <div key={key}>{widgetSections[key]}</div>
+        ))}
+      </div>
     </div>
   )
 }

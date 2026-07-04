@@ -16,8 +16,12 @@ import {
   CookingPot,
   Egg,
   Drumstick,
+  Flower2,
+  Sun,
+  Leaf,
+  Snowflake,
 } from 'lucide-react'
-import type { IconKey, Recipe } from '../db/types'
+import type { IconKey, Recipe, Season } from '../db/types'
 import { hasNgIngredient } from '../logic/ng'
 import { pickIconKey } from '../logic/icon'
 import { ingredientColorToken } from '../logic/ingredientColor'
@@ -40,6 +44,14 @@ export const iconComponents: Record<IconKey, typeof UtensilsCrossed> = {
   dessert: CakeSlice,
   drink: Coffee,
   default: UtensilsCrossed,
+}
+
+/** 季節バッジのアイコン（「通年」は表示しないので含めない） */
+export const seasonIcons: Record<Exclude<Season, 'all'>, typeof Flower2> = {
+  spring: Flower2,
+  summer: Sun,
+  autumn: Leaf,
+  winter: Snowflake,
 }
 
 const mixRatios = [16, 26, 38, 52] as const
@@ -144,6 +156,15 @@ export default function RecipeCard({ recipe, ngIngredients, subLabel }: Props) {
           <span className="rounded-sm border border-edge px-1.5 py-0.5">
             {ja.effort[recipe.effortLevel]}
           </span>
+          {recipe.season && recipe.season !== 'all' && (
+            <span className="inline-flex items-center gap-0.5 rounded-sm border border-edge px-1.5 py-0.5">
+              {(() => {
+                const SeasonIcon = seasonIcons[recipe.season]
+                return <SeasonIcon size={12} aria-hidden />
+              })()}
+              {ja.season[recipe.season]}
+            </span>
+          )}
         </div>
         {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
       </div>

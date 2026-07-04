@@ -6,7 +6,7 @@ import { buildSearchWords } from '../logic/kana'
  * 同梱の基本レシピ20品。
  * すべてこのアプリのために書き下ろしたオリジナル原稿（著作権フリー扱い）。
  * 登録フォーマットのお手本にもなるよう、分量・手順の書き方を揃えている。
- * タグの最後は季節タグ（通年・春・夏・秋・冬）。
+ * season フィールド（通年・春・夏・秋・冬）はホームの提案で今の季節を優先するために使う。
  */
 
 type StarterDef = Omit<RecipeInput, 'photo'>
@@ -18,7 +18,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '肉じゃが',
     servings: 2, cookMinutes: 35, effortLevel: 'normal',
-    tags: ['和食', '定番', '煮物', '通年'],
+    tags: ['和食', '定番', '煮物'],
+    season: 'all',
     ingredients: [
       i('じゃがいも', '3', '個'), i('玉ねぎ', '1', '個'), i('にんじん', '1/2', '本'),
       i('牛こま切れ肉', '200', 'g'), i('しょうゆ', '3', '大さじ'), i('みりん', '3', '大さじ'),
@@ -35,7 +36,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'カレーライス',
     servings: 4, cookMinutes: 40, effortLevel: 'easy',
-    tags: ['洋食', '定番', 'ご飯もの', '通年'],
+    tags: ['洋食', '定番', 'ご飯もの'],
+    season: 'all',
     ingredients: [
       i('豚こま切れ肉', '250', 'g'), i('玉ねぎ', '2', '個'), i('じゃがいも', '2', '個'),
       i('にんじん', '1', '本'), i('カレールー', '1/2', '箱'), i('水', '700', 'ml'),
@@ -53,7 +55,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '豆腐とわかめの味噌汁',
     servings: 2, cookMinutes: 10, effortLevel: 'easy',
-    tags: ['和食', '汁物', '定番', '通年'],
+    tags: ['和食', '汁物', '定番'],
+    season: 'all',
     ingredients: [
       i('豆腐', '1/2', '丁'), i('乾燥わかめ', '2', 'g'), i('だしの素', '1', '小さじ'),
       i('味噌', '2', '大さじ'), i('水', '400', 'ml'),
@@ -68,7 +71,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '豚の生姜焼き',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['和食', '定番', '通年'],
+    tags: ['和食', '定番'],
+    season: 'all',
     ingredients: [
       i('豚ロース薄切り', '250', 'g'), i('玉ねぎ', '1/2', '個'), i('しょうが', '1', 'かけ'),
       i('しょうゆ', '2', '大さじ'), i('みりん', '2', '大さじ'), i('酒', '1', '大さじ'),
@@ -85,7 +89,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '野菜炒め',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['中華', '時短', '通年'],
+    tags: ['中華', '時短'],
+    season: 'all',
     ingredients: [
       i('キャベツ', '3', '枚'), i('にんじん', '1/3', '本'), i('ピーマン', '2', '個'),
       i('もやし', '1/2', '袋'), i('豚こま切れ肉', '150', 'g'),
@@ -102,7 +107,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '親子丼',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['和食', 'ご飯もの', '定番', '通年'],
+    tags: ['和食', 'ご飯もの', '定番'],
+    season: 'all',
     ingredients: [
       i('鶏もも肉', '200', 'g'), i('玉ねぎ', '1/2', '個'), i('卵', '3', '個'),
       i('めんつゆ(3倍濃縮)', '50', 'ml'), i('水', '150', 'ml'), i('ご飯', '2', '杯'),
@@ -117,7 +123,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'ハンバーグ',
     servings: 2, cookMinutes: 30, effortLevel: 'normal',
-    tags: ['洋食', '定番', '通年'],
+    tags: ['洋食', '定番'],
+    season: 'all',
     ingredients: [
       i('合いびき肉', '300', 'g'), i('玉ねぎ', '1/2', '個'), i('パン粉', '1/2', 'カップ'),
       i('牛乳', '3', '大さじ'), i('卵', '1', '個'), i('塩こしょう', '少々'),
@@ -135,7 +142,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '鶏の唐揚げ',
     servings: 2, cookMinutes: 30, effortLevel: 'normal',
-    tags: ['和食', '定番', 'お弁当', '通年'],
+    tags: ['和食', '定番', 'お弁当'],
+    season: 'all',
     ingredients: [
       i('鶏もも肉', '400', 'g'), i('しょうゆ', '2', '大さじ'), i('酒', '1', '大さじ'),
       i('しょうが', '1', 'かけ'), i('にんにく', '1', '片'), i('片栗粉', '適量'),
@@ -152,7 +160,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '五目炊き込みご飯',
     servings: 4, cookMinutes: 60, effortLevel: 'normal',
-    tags: ['和食', 'ご飯もの', '秋'],
+    tags: ['和食', 'ご飯もの'],
+    season: 'autumn',
     ingredients: [
       i('米', '2', '合'), i('鶏もも肉', '150', 'g'), i('にんじん', '1/3', '本'),
       i('しめじ', '1', '袋'), i('油揚げ', '1', '枚'), i('しょうゆ', '2', '大さじ'),
@@ -169,7 +178,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'ナポリタン',
     servings: 2, cookMinutes: 20, effortLevel: 'easy',
-    tags: ['洋食', '麺', '通年'],
+    tags: ['洋食', '麺'],
+    season: 'all',
     ingredients: [
       i('スパゲッティ', '200', 'g'), i('ウインナー', '4', '本'), i('玉ねぎ', '1/2', '個'),
       i('ピーマン', '2', '個'), i('ケチャップ', '4', '大さじ'), i('バター', '10', 'g'),
@@ -186,7 +196,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'ペペロンチーノ',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['洋食', '麺', '時短', '通年'],
+    tags: ['洋食', '麺', '時短'],
+    season: 'all',
     ingredients: [
       i('スパゲッティ', '200', 'g'), i('にんにく', '2', '片'), i('赤唐辛子', '1', '本'),
       i('オリーブオイル', '3', '大さじ'), i('塩', '適量'), i('パセリ', 'お好みで'),
@@ -202,7 +213,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'だし巻き卵',
     servings: 2, cookMinutes: 10, effortLevel: 'easy',
-    tags: ['和食', 'お弁当', '定番', '通年'],
+    tags: ['和食', 'お弁当', '定番'],
+    season: 'all',
     ingredients: [
       i('卵', '3', '個'), i('だし汁', '50', 'ml'), i('砂糖', '1', '小さじ'),
       i('しょうゆ', '1/2', '小さじ'), i('サラダ油', '適量'),
@@ -217,7 +229,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '豚汁',
     servings: 4, cookMinutes: 30, effortLevel: 'normal',
-    tags: ['和食', '汁物', '冬'],
+    tags: ['和食', '汁物'],
+    season: 'winter',
     ingredients: [
       i('豚バラ薄切り', '150', 'g'), i('大根', '1/4', '本'), i('にんじん', '1/2', '本'),
       i('ごぼう', '1/2', '本'), i('こんにゃく', '1/2', '枚'), i('長ねぎ', '1/2', '本'),
@@ -234,7 +247,8 @@ const starterDefs: StarterDef[] = [
   {
     title: '寄せ鍋',
     servings: 4, cookMinutes: 30, effortLevel: 'easy',
-    tags: ['和食', '鍋', '冬'],
+    tags: ['和食', '鍋'],
+    season: 'winter',
     ingredients: [
       i('白菜', '1/4', '株'), i('長ねぎ', '1', '本'), i('鶏もも肉', '300', 'g'),
       i('豆腐', '1', '丁'), i('しいたけ', '4', '枚'), i('えのき', '1', '袋'),
@@ -251,7 +265,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'チャーハン',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['中華', 'ご飯もの', '時短', '通年'],
+    tags: ['中華', 'ご飯もの', '時短'],
+    season: 'all',
     ingredients: [
       i('温かいご飯', '2', '杯'), i('卵', '2', '個'), i('長ねぎ', '1/2', '本'),
       i('ハム', '4', '枚'), i('しょうゆ', '1', '大さじ'), i('塩こしょう', '少々'),
@@ -268,7 +283,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'ソース焼きそば',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['中華', '麺', '時短', '通年'],
+    tags: ['中華', '麺', '時短'],
+    season: 'all',
     ingredients: [
       i('焼きそば麺', '2', '玉'), i('豚こま切れ肉', '100', 'g'), i('キャベツ', '2', '枚'),
       i('もやし', '1/2', '袋'), i('付属のソース', '2', '袋'), i('青のり', 'お好みで'),
@@ -283,7 +299,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'ポテトサラダ',
     servings: 4, cookMinutes: 25, effortLevel: 'normal',
-    tags: ['洋食', '作り置き', 'サラダ', '通年'],
+    tags: ['洋食', '作り置き', 'サラダ'],
+    season: 'all',
     ingredients: [
       i('じゃがいも', '4', '個'), i('きゅうり', '1', '本'), i('にんじん', '1/3', '本'),
       i('ハム', '4', '枚'), i('マヨネーズ', '4', '大さじ'), i('酢', '1', '小さじ'),
@@ -300,7 +317,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'きんぴらごぼう',
     servings: 4, cookMinutes: 20, effortLevel: 'easy',
-    tags: ['和食', '作り置き', 'お弁当', '通年'],
+    tags: ['和食', '作り置き', 'お弁当'],
+    season: 'all',
     ingredients: [
       i('ごぼう', '1', '本'), i('にんじん', '1/2', '本'), i('しょうゆ', '2', '大さじ'),
       i('みりん', '2', '大さじ'), i('砂糖', '1', '小さじ'), i('ごま油', '1', '大さじ'),
@@ -316,7 +334,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'さばの味噌煮',
     servings: 2, cookMinutes: 25, effortLevel: 'normal',
-    tags: ['和食', '魚', '通年'],
+    tags: ['和食', '魚'],
+    season: 'all',
     ingredients: [
       i('さば(切り身)', '2', '切れ'), i('しょうが', '1', 'かけ'), i('味噌', '2', '大さじ'),
       i('砂糖', '2', '大さじ'), i('酒', '50', 'ml'), i('みりん', '2', '大さじ'),
@@ -333,7 +352,8 @@ const starterDefs: StarterDef[] = [
   {
     title: 'クリームシチュー',
     servings: 4, cookMinutes: 40, effortLevel: 'normal',
-    tags: ['洋食', '冬'],
+    tags: ['洋食'],
+    season: 'winter',
     ingredients: [
       i('鶏もも肉', '250', 'g'), i('じゃがいも', '2', '個'), i('にんじん', '1', '本'),
       i('玉ねぎ', '1', '個'), i('ブロッコリー', '1/2', '株'), i('シチュールー', '1/2', '箱'),

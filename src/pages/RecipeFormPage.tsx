@@ -10,7 +10,7 @@ import {
   Trash2,
   ClipboardPaste,
 } from 'lucide-react'
-import type { EffortLevel, IconKey, RecipeInput } from '../db/types'
+import type { EffortLevel, IconKey, RecipeInput, Season } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, updateRecipe } from '../db/recipes'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText } from '../logic/parseRecipeText'
@@ -28,6 +28,7 @@ const emptyIngredient: IngredientRow = { name: '', amount: '', unit: '', price: 
 const emptyStep: StepRow = { text: '', minutes: '', memo: '' }
 
 const effortLevels: EffortLevel[] = ['easy', 'normal', 'fancy']
+const seasons: Exclude<Season, 'all'>[] = ['spring', 'summer', 'autumn', 'winter']
 
 const inputCls =
   'mt-1 block w-full rounded-sm border border-edge bg-surface px-3 py-3 text-base text-ink placeholder:text-ink-muted/60'
@@ -64,6 +65,7 @@ export default function RecipeFormPage() {
   const [sourceUrl, setSourceUrl] = useState('')
   const [iconKey, setIconKey] = useState<IconKey>()
   const [showIconInsteadOfPhoto, setShowIconInsteadOfPhoto] = useState(false)
+  const [season, setSeason] = useState<Season>()
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -112,6 +114,7 @@ export default function RecipeFormPage() {
       setSourceUrl(recipe.sourceUrl ?? '')
       setIconKey(recipe.iconKey)
       setShowIconInsteadOfPhoto(recipe.showIconInsteadOfPhoto ?? false)
+      setSeason(recipe.season)
     })
     return () => {
       cancelled = true
@@ -198,6 +201,7 @@ export default function RecipeFormPage() {
         memo: memo.trim() || undefined,
         iconKey,
         showIconInsteadOfPhoto,
+        season,
       }
       let id = editId
       if (isEdit && editId !== undefined) {
@@ -460,6 +464,28 @@ export default function RecipeFormPage() {
               }`}
             >
               {ja.effort[level]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 季節（任意・もう一度押すと解除） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.seasonLabel}</span>
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.seasonDescription}</p>
+        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
+          {seasons.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setSeason((current) => (current === value ? undefined : value))}
+              className={`rounded-md border py-3 font-bold shadow-sm ${
+                season === value
+                  ? 'border-accent bg-accent text-app'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.season[value]}
             </button>
           ))}
         </div>
