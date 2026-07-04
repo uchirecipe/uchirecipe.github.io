@@ -12,6 +12,7 @@ import {
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
 import { deriveDoneLabel } from '../logic/timerLabel'
+import { findTimeTokens } from '../logic/time'
 import StepBadge from './StepBadge'
 import TimeText from './TimeText'
 import { ja } from '../i18n/ja'
@@ -53,6 +54,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
   useEffect(() => {
     startTimerRef.current = startTimer
   }, [startTimer])
+  // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる
+  const autoReadRef = useRef(false)
 
   const stopSpeech = () => {
     if (speechSupported) window.speechSynthesis.cancel()
@@ -76,6 +79,14 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
   // モードを閉じるとき・切り替え中は読み上げを止める
   useEffect(() => stopSpeech, [])
 
+  // 読み上げを一度使ったら、手順が切り替わるたびに自動で読み上げる
+  // (indexが変わった直後の再レンダリングで実行されるので、その時点の最新stepを読む)
+  useEffect(() => {
+    if (!autoReadRef.current) return
+    speak(recipe.steps[index]?.text ?? '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index])
+
   const goTo = (nextIndex: number) => {
     if (nextIndex < 0 || nextIndex >= total) return
     stopSpeech()
@@ -88,6 +99,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
       stopSpeech()
       return
     }
+    autoReadRef.current = true
     speak(step.text)
   }
 
@@ -137,10 +149,17 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
         speak(currentStep.text)
       } else if (/ストップ|とめて|止めて/.test(transcript)) {
         stopSpeech()
-      } else {
+      } else if (/タイマー/.test(transcript)) {
+        // 「3分タイマー」のように分数の指定があればそれを使い、
+        // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す
         const minuteMatch = transcript.match(/(\d+)分/)
-        if (minuteMatch) {
-          const seconds = Number(minuteMatch[1]) * 60
+        const fallbackToken = findTimeTokens(currentStep.text)[0]
+        const seconds = minuteMatch
+          ? Number(minuteMatch[1]) * 60
+          : currentStep.minutes
+            ? currentStep.minutes * 60
+            : fallbackToken?.seconds
+        if (seconds) {
           startTimerRef.current({
             key: `${recipeId}-${currentIndex}-${seconds}`,
             label: recipe.title,
@@ -237,7 +256,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
 
       {micSupported && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
-          {listening ? ja.focus.micListening : ja.focus.micHint}
+          {ja.focus.micHint}
+          {listening && <span className="ml-1 font-bold text-accent">{ja.focus.micListening}</span>}
         </p>
       )}
 

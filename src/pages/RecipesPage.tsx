@@ -11,6 +11,7 @@ import {
   type EffortFilter,
   type TimeFilter,
 } from '../logic/search'
+import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
 import { ja } from '../i18n/ja'
@@ -32,6 +33,13 @@ const effortOptions: { value: EffortFilter; label: string }[] = [
   { value: 'easy', label: ja.effort.easy },
   { value: 'normal', label: ja.effort.normal },
   { value: 'fancy', label: ja.effort.fancy },
+]
+
+const sortOptions: { value: RecipeSortOption; label: string }[] = [
+  { value: 'updated', label: ja.search.sortUpdated },
+  { value: 'pantryMatch', label: ja.search.sortPantryMatch },
+  { value: 'kana', label: ja.search.sortKana },
+  { value: 'cooked', label: ja.search.sortCooked },
 ]
 
 const chipCls = (active: boolean) =>
@@ -69,6 +77,7 @@ export default function RecipesPage() {
   const [effort, setEffort] = useState<EffortFilter>('all')
   const [favoriteOnly, setFavoriteOnly] = useState(false)
   const [excludeNg, setExcludeNg] = useState(false)
+  const [sort, setSort] = useState<RecipeSortOption>('updated')
 
   const recipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
@@ -82,7 +91,7 @@ export default function RecipesPage() {
     if (!recipes) return undefined
     // 「基本レシピを表示しない」設定を反映してから検索する
     const visible = hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
-    return searchRecipes(visible, {
+    const found = searchRecipes(visible, {
       query,
       ingredients: ingredients.join(' '),
       time,
@@ -91,7 +100,20 @@ export default function RecipesPage() {
       excludeNg,
       ngIngredients: ngIngredients ?? [],
     })
-  }, [recipes, hideStarters, query, ingredients, time, effort, favoriteOnly, excludeNg, ngIngredients])
+    return sortResults(found, sort, pantryNames)
+  }, [
+    recipes,
+    hideStarters,
+    query,
+    ingredients,
+    time,
+    effort,
+    favoriteOnly,
+    excludeNg,
+    ngIngredients,
+    sort,
+    pantryNames,
+  ])
 
   const filtersActive =
     query !== '' ||
@@ -99,7 +121,8 @@ export default function RecipesPage() {
     time !== 'all' ||
     effort !== 'all' ||
     favoriteOnly ||
-    excludeNg
+    excludeNg ||
+    sort !== 'updated'
 
   const clearFilters = () => {
     setQuery('')
@@ -108,6 +131,7 @@ export default function RecipesPage() {
     setEffort('all')
     setFavoriteOnly(false)
     setExcludeNg(false)
+    setSort('updated')
   }
 
   const subLabelFor = (usedCount: number, wantedCount: number) => {
@@ -156,8 +180,25 @@ export default function RecipesPage() {
       {/* 絞り込みパネル */}
       {panelOpen && (
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+          {/* 並べ替え */}
+          <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
+          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            {sortOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSort(option.value)}
+                className={chipCls(sort === option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
           {/* 使いたい食材 */}
-          <p className="text-sm font-bold text-ink-muted">{ja.search.ingredientTitle}</p>
+          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+            {ja.search.ingredientTitle}
+          </p>
           <div className="mt-1">
             <ChipInput
               values={ingredients}

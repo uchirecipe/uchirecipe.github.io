@@ -11,6 +11,11 @@ export interface Ingredient {
   price?: number
   /** ひとことメモ（任意。例: 「なければ玉ねぎでも可」） */
   memo?: string
+  /**
+   * 合わせ調味料グループ番号（任意）。同じ番号の材料は先にまとめて計量してよい印として、
+   * 詳細画面で同じ色の左ラインを表示する（logic/seasoningGroup.ts で番号→色を決める）
+   */
+  seasoningGroup?: number
 }
 
 /** 手順1つ分。minutes があれば将来タイマー化できる */

@@ -16,16 +16,31 @@ import { createRecipe, deleteRecipe, getRecipe, updateRecipe } from '../db/recip
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText } from '../logic/parseRecipeText'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
+import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { iconComponents } from '../components/RecipeCard'
 import { ja } from '../i18n/ja'
 
 /* フォーム内部で扱う行の形（入力中は数値も文字列で持つ） */
-type IngredientRow = { name: string; amount: string; unit: string; price: string; memo: string }
+type IngredientRow = {
+  name: string
+  amount: string
+  unit: string
+  price: string
+  memo: string
+  group: number | undefined
+}
 type StepRow = { text: string; minutes: string; memo: string }
 
-const emptyIngredient: IngredientRow = { name: '', amount: '', unit: '', price: '', memo: '' }
+const emptyIngredient: IngredientRow = {
+  name: '',
+  amount: '',
+  unit: '',
+  price: '',
+  memo: '',
+  group: undefined,
+}
 const emptyStep: StepRow = { text: '', minutes: '', memo: '' }
 
 const effortLevels: EffortLevel[] = ['easy', 'normal', 'fancy']
@@ -108,6 +123,7 @@ export default function RecipeFormPage() {
             unit: i.unit,
             price: i.price != null ? String(i.price) : '',
             memo: i.memo ?? '',
+            group: i.seasoningGroup,
           }))
         : [{ ...emptyIngredient }],
     )
@@ -143,7 +159,9 @@ export default function RecipeFormPage() {
     if (parsed.title && !title.trim()) setTitle(parsed.title)
     if (parsed.servings) setServings(parsed.servings)
     if (parsed.ingredients.length > 0) {
-      setIngredients(parsed.ingredients.map((row) => ({ ...row, price: '', memo: '' })))
+      setIngredients(
+        parsed.ingredients.map((row) => ({ ...row, price: '', memo: '', group: undefined })),
+      )
     }
     if (parsed.steps.length > 0) {
       setSteps(parsed.steps.map((text) => ({ text, minutes: '', memo: '' })))
@@ -205,6 +223,7 @@ export default function RecipeFormPage() {
           unit: row.unit.trim(),
           price: row.price.trim() ? Number(row.price) : undefined,
           memo: row.memo.trim() || undefined,
+          seasoningGroup: row.group,
         })),
         steps: steps.map((row) => ({
           text: row.text,
@@ -537,11 +556,17 @@ export default function RecipeFormPage() {
       {/* 材料（追加・削除・並べ替え） */}
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.ingredientsLabel}</span>
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientGroupHint}</p>
         <div className="mt-1 space-y-[var(--space-sm)]">
           {ingredients.map((row, index) => (
             <div
               key={index}
               className="rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
+              style={
+                row.group
+                  ? { borderLeft: `4px solid var(${seasoningGroupColorToken(row.group)})` }
+                  : undefined
+              }
             >
               <div className="flex gap-[var(--space-sm)]">
                 <input
@@ -582,6 +607,28 @@ export default function RecipeFormPage() {
                     className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
                   />
                 </label>
+                <button
+                  type="button"
+                  onClick={() => updateIngredient(index, { group: nextSeasoningGroup(row.group) })}
+                  aria-label={
+                    row.group
+                      ? ja.form.ingredientGroupSet.replace('{n}', String(row.group))
+                      : ja.form.ingredientGroupNone
+                  }
+                  className={iconBtnCls}
+                >
+                  <span
+                    className={`h-5 w-5 rounded-full border-2 ${row.group ? '' : 'border-dashed border-edge'}`}
+                    style={
+                      row.group
+                        ? {
+                            borderColor: `var(${seasoningGroupColorToken(row.group)})`,
+                            background: `var(${seasoningGroupColorToken(row.group)})`,
+                          }
+                        : undefined
+                    }
+                  />
+                </button>
                 <button
                   type="button"
                   onClick={() => setIngredients((rows) => move(rows, index, index - 1))}

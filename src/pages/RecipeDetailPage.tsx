@@ -23,6 +23,7 @@ import { useSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
 import { scaleAmount } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
+import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard } from '../logic/share'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -292,11 +293,22 @@ export default function RecipeDetailPage() {
               </button>
             </div>
           </div>
+          {recipe.ingredients.some((ing) => ing.seasoningGroup) && (
+            <p className="mt-1 text-sm text-ink-muted">{ja.detail.seasoningGroupHint}</p>
+          )}
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
             {recipe.ingredients.map((ing, index) => {
               const isNg = ngIndices.has(index)
               return (
-                <li key={index} className="px-[var(--space-md)] py-3 text-lg">
+                <li
+                  key={index}
+                  className="px-[var(--space-md)] py-3 text-lg"
+                  style={
+                    ing.seasoningGroup
+                      ? { borderLeft: `4px solid var(${seasoningGroupColorToken(ing.seasoningGroup)})` }
+                      : undefined
+                  }
+                >
                   <div className="flex items-baseline justify-between gap-2">
                     <span
                       className={
@@ -317,6 +329,22 @@ export default function RecipeDetailPage() {
             })}
           </ul>
         </section>
+
+        {/* 今日つくる（今日の献立への追加・解除）: 材料を見て作るか決めることが多いため手順の前に表示 */}
+        <button
+          type="button"
+          onClick={() =>
+            isInTodayList ? void removeFromTodayList(id) : void addToTodayList(id)
+          }
+          className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
+            isInTodayList
+              ? 'border-accent bg-accent text-app'
+              : 'border-edge bg-surface text-accent'
+          }`}
+        >
+          <CalendarPlus size={20} aria-hidden />
+          {isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}
+        </button>
 
         {/* 手順 */}
         <section className="mt-[var(--space-lg)]">
@@ -554,22 +582,6 @@ export default function RecipeDetailPage() {
             )}
           </div>
         )}
-
-        {/* 今日つくる（今日の献立への追加・解除） */}
-        <button
-          type="button"
-          onClick={() =>
-            isInTodayList ? void removeFromTodayList(id) : void addToTodayList(id)
-          }
-          className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
-            isInTodayList
-              ? 'border-accent bg-accent text-app'
-              : 'border-edge bg-surface text-accent'
-          }`}
-        >
-          <CalendarPlus size={20} aria-hidden />
-          {isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}
-        </button>
 
         {/* 下部の大ボタン: 作った！ / シェア（編集はタイトル付近に移動済み） */}
         <div className="mt-[var(--space-sm)] flex gap-2">
