@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, X, Download, Upload, Link2, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react'
+import { Plus, X, Download, Upload, Link2, RotateCcw, ChevronUp, ChevronDown, Info } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes } from '../db/recipes'
 import { reloadStarterRecipes, starterCount } from '../db/starters'
@@ -593,6 +593,19 @@ export default function SettingsPage() {
             {ja.settings.backupImportReplace}
           </button>
         </div>
+      </section>
+
+      {/* アプリについて */}
+      <section className={sectionCls}>
+        <h2 className="font-bold">{ja.settings.aboutTitle}</h2>
+        {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
+        <a
+          href="/about/"
+          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+        >
+          <Info size={18} aria-hidden />
+          {ja.settings.aboutPageLink}
+        </a>
       </section>
     </div>
   )

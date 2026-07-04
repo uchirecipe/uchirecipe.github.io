@@ -217,6 +217,8 @@ export const ja = {
     backupImportReplaceConfirm: '今のレシピと設定をすべて消して、ファイルの内容に置き換えます。よろしいですか？',
     backupImportMergeConfirm: 'ファイルのレシピを今のデータに追加します。よろしいですか？',
     backupImportMergeNote: '同じレシピ（同一ID）はスキップされ、今のデータが優先されます。新しいレシピだけが追加されます',
+    aboutTitle: 'うちレシピについて',
+    aboutPageLink: 'アプリの紹介ページを見る',
     backupImportDone: '{n}品のレシピを読み込みました',
     backupImportMergeResult: '追加{a}件・スキップ{s}件',
     backupImportError: 'ファイルを読み込めませんでした。うちレシピのバックアップファイルか確認してください',

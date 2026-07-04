@@ -43,10 +43,10 @@ export default defineConfig({
       workbox: {
         // ビルドされた HTML / JS / CSS / SVG をオフライン用にキャッシュする
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
-        // /sets/ 配下(レシピセット配布ページ)はアプリ本体ではないSPA外の静的ページなので、
+        // /sets/ ・ /about/ 配下(アプリ本体ではないSPA外の静的ページ)は、
         // Service Workerの「未知の遷移はアプリ本体にフォールバック」対象から外す
-        // (外さないと、配布ページを開いたつもりがアプリ本体の白紙/ホーム画面に化けてしまう)
-        navigateFallbackDenylist: [/^\/sets\//],
+        // (外さないと、配布ページ等を開いたつもりがアプリ本体の白紙/ホーム画面に化けてしまう)
+        navigateFallbackDenylist: [/^\/sets\//, /^\/about\//],
       },
     }),
   ],
