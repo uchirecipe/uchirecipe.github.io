@@ -4,6 +4,7 @@ import {
   Clock,
   Heart,
   TriangleAlert,
+  CalendarCheck2,
   UtensilsCrossed,
   Soup,
   Salad,
@@ -92,10 +93,12 @@ type Props = {
   ngIngredients?: string[]
   /** カード下部に出す補足（例: 「食材 2/3 が使える」） */
   subLabel?: string
+  /** 今日の献立（今日つくるリスト）に入っていればバッジを表示 */
+  inTodayList?: boolean
 }
 
 /** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ） */
-export default function RecipeCard({ recipe, ngIngredients, subLabel }: Props) {
+export default function RecipeCard({ recipe, ngIngredients, subLabel, inTodayList }: Props) {
   const photoUrl = usePhotoUrl(recipe.photo)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
   const showPhoto = photoUrl && !recipe.showIconInsteadOfPhoto
@@ -137,6 +140,15 @@ export default function RecipeCard({ recipe, ngIngredients, subLabel }: Props) {
           className="absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-warning text-app shadow-sm"
         >
           <TriangleAlert size={16} aria-hidden />
+        </span>
+      )}
+      {inTodayList && (
+        <span
+          title={ja.card.todayBadge}
+          aria-label={ja.card.todayBadge}
+          className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-accent text-app shadow-sm"
+        >
+          <CalendarCheck2 size={16} aria-hidden />
         </span>
       )}
       <div className="p-[var(--space-sm)]">

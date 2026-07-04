@@ -5,6 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
+import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
@@ -12,14 +13,10 @@ import {
   type TimeFilter,
 } from '../logic/search'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
+import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
 import { ja } from '../i18n/ja'
-
-/** クエリパラメータの空白区切り文字列 → チップ配列（初期表示用の簡易分割） */
-function splitToChips(text: string): string[] {
-  return text.split(/[\s,、]+/u).map((t) => t.trim()).filter(Boolean)
-}
 
 const timeOptions: { value: TimeFilter; label: string }[] = [
   { value: 'all', label: ja.search.timeAll },
@@ -53,7 +50,7 @@ export default function RecipesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState(searchParams.get('q') ?? '')
   const [ingredients, setIngredients] = useState<string[]>(() =>
-    splitToChips(searchParams.get('ing') ?? ''),
+    splitValues(searchParams.get('ing') ?? ''),
   )
   const [panelOpen, setPanelOpen] = useState(searchParams.get('ing') !== null)
 
@@ -84,6 +81,11 @@ export default function RecipesPage() {
   const ngIngredients = settings?.ngIngredients
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
+  const todayList = useTodayList()
+  const todayRecipeIds = useMemo(
+    () => new Set(todayList?.map((item) => item.recipeId) ?? []),
+    [todayList],
+  )
 
   const hideStarters = settings?.hideStarters ?? false
 
@@ -322,6 +324,7 @@ export default function RecipesPage() {
             recipe={recipe}
             ngIngredients={ngIngredients}
             subLabel={subLabelFor(usedCount, wantedCount)}
+            inTodayList={todayRecipeIds.has(recipe.id!)}
           />
         ))}
       </div>

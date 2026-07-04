@@ -1,4 +1,5 @@
 import { toHiragana } from './kana'
+import { isSeasoningLike } from './mainIngredients'
 import type { Ingredient } from '../db/types'
 
 export interface ShoppingCandidate {
@@ -6,6 +7,8 @@ export interface ShoppingCandidate {
   /** 表示用にまとめた分量。単位が揃えば合計し、揃わなければ「・」で列挙する */
   amount: string
   recipeIds: number[]
+  /** 全レシピでの使われ方が調味料的（大さじ/小さじ/単位なし/少々等）なら true */
+  isSeasoningLike: boolean
 }
 
 /**
@@ -74,6 +77,11 @@ export function buildShoppingCandidates(
 
   return order.map((key) => {
     const entry = map.get(key)!
-    return { name: entry.name, amount: combineAmounts(entry.parts), recipeIds: entry.recipeIds }
+    return {
+      name: entry.name,
+      amount: combineAmounts(entry.parts),
+      recipeIds: entry.recipeIds,
+      isSeasoningLike: entry.parts.every(isSeasoningLike),
+    }
   })
 }

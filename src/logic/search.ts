@@ -1,5 +1,6 @@
 import { toHiragana } from './kana'
 import { hasNgIngredient } from './ng'
+import { splitValues } from './textSplit'
 import type { EffortLevel, Recipe } from '../db/types'
 
 /** 調理時間の絞り込み: すべて / 〜10分 / 〜30分 / 30分超 */
@@ -38,11 +39,7 @@ export interface SearchResult {
 
 /** 入力文字列を検索語の配列に分ける（空白・カンマ・読点区切り→ひらがな化） */
 export function splitTerms(input: string): string[] {
-  return input
-    .split(/[\s,、]+/u)
-    .map((term) => term.trim())
-    .filter(Boolean)
-    .map(toHiragana)
+  return splitValues(input).map(toHiragana)
 }
 
 function matchesQuery(recipe: Recipe, terms: string[]): boolean {

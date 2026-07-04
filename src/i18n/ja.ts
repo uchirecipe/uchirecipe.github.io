@@ -119,6 +119,7 @@ export const ja = {
     noSuggestion: '提案できるレシピがありません。先にレシピを登録してください',
     weekCostTitle: '今週の概算食費',
     weekCostNote: '材料に価格を入力したレシピだけが計算対象です',
+    weekCostNoteLink: 'レシピの編集画面で価格を入力する',
     budgetCompareOver: '予算より約{n}円オーバーしています',
     budgetCompareUnder: '予算まで約{n}円の余裕があります',
     budgetNotSet: '設定画面で週の食費予算を登録すると、ここで比較できます',
@@ -242,7 +243,7 @@ export const ja = {
     excludeNg: 'NG食材を含むレシピを隠す',
     sortTitle: '並べ替え',
     sortUpdated: '更新順',
-    sortPantryMatch: '在庫との一致順',
+    sortPantryMatch: '在庫との一致が多いレシピ順',
     sortKana: 'あいうえお順',
     sortCooked: 'よく使う順',
     resultCount: '{n}件',
@@ -254,6 +255,7 @@ export const ja = {
   },
   card: {
     ngBadge: 'NG食材を含む',
+    todayBadge: '今日の献立に追加済み',
   },
   paste: {
     open: 'テキスト貼り付けで自動入力',

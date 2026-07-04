@@ -8,6 +8,7 @@ import {
   movePantryItem,
 } from '../db/pantry'
 import type { PantryLevel } from '../db/types'
+import { splitValues } from '../logic/textSplit'
 import { ja } from '../i18n/ja'
 
 /** 3段階それぞれの見た目（デザイントークンのみ使用。新しい色相は増やさない） */
@@ -27,9 +28,12 @@ export default function PantryBoard() {
   const [text, setText] = useState('')
   const [reordering, setReordering] = useState(false)
 
-  const add = () => {
-    const value = text.trim()
-    if (value) void addFrequentIngredient(value)
+  // スペース・カンマ・読点区切りで複数まとめて入力しても、それぞれ別の食材として登録する
+  const add = async () => {
+    const values = splitValues(text)
+    for (const value of values) {
+      await addFrequentIngredient(value)
+    }
     setText('')
   }
 
@@ -116,7 +120,7 @@ export default function PantryBoard() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()
-              add()
+              void add()
             }
           }}
           placeholder={ja.pantry.addPlaceholder}
@@ -124,7 +128,7 @@ export default function PantryBoard() {
         />
         <button
           type="button"
-          onClick={add}
+          onClick={() => void add()}
           className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
         >
           <Plus size={18} aria-hidden />

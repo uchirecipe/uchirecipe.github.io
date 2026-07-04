@@ -12,7 +12,11 @@ import { buildSearchWords } from '../logic/kana'
 type StarterDef = Omit<RecipeInput, 'photo'>
 
 const i = (name: string, amount = '', unit = '', ) => ({ name, amount, unit })
-const s = (text: string, minutes?: number) => (minutes ? { text, minutes } : { text })
+const s = (text: string, minutes?: number, memo?: string) => ({
+  text,
+  ...(minutes ? { minutes } : {}),
+  ...(memo ? { memo } : {}),
+})
 
 const starterDefs: StarterDef[] = [
   {
@@ -175,9 +179,19 @@ const starterDefs: StarterDef[] = [
     ],
     steps: [
       s('鶏肉を大きめの一口大に切り、しょうゆ・酒・すりおろした薬味と揉み込む'),
-      s('冷蔵庫で15分漬け込む', 15),
-      s('汁気を軽く切って片栗粉をまぶし、170度の油で4分揚げる', 4),
-      s('一度取り出して3分休ませ、180度で1分二度揚げするとカラッと仕上がる', 3),
+      s(
+        '冷蔵庫で15分漬け込む',
+        15,
+        '時間があれば漬け込みは1〜2時間、可能なら一晩置くとより味がしみて美味しくなる',
+      ),
+      s(
+        '汁気を軽く切って片栗粉をまぶし、菜箸を入れて細かい泡がシュワッと出るくらい（170度目安）の油で4分揚げる',
+        4,
+      ),
+      s(
+        '一度取り出して3分休ませ、菜箸を入れて大きな泡が勢いよく出るくらい（180度目安）の油で1分二度揚げするとカラッと仕上がる',
+        3,
+      ),
     ],
     memo: '二度揚げが外カリ中ジューシーの決め手。',
   },

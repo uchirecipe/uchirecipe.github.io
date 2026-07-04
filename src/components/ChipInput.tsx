@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import { splitValues } from '../logic/textSplit'
 import { ja } from '../i18n/ja'
 
 type Props = {
@@ -19,9 +20,18 @@ type Props = {
 export default function ChipInput({ values, onChange, placeholder, addLabel, removeLabel }: Props) {
   const [text, setText] = useState('')
 
+  // スペース・カンマ・読点区切りで複数まとめて入力しても、それぞれ別のチップになる
   const add = () => {
-    const value = text.trim()
-    if (value && !values.includes(value)) onChange([...values, value])
+    const parsed = splitValues(text)
+    if (parsed.length === 0) {
+      setText('')
+      return
+    }
+    const merged = [...values]
+    for (const value of parsed) {
+      if (!merged.includes(value)) merged.push(value)
+    }
+    onChange(merged)
     setText('')
   }
 

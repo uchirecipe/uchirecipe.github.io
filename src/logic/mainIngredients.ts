@@ -3,7 +3,7 @@
  * 選ばれないようにする。「大さじ／小さじ／単位なし」または分量が数値化できない
  * （少々・適量等）ものを調味料寄りとみなし、それ以外を優先して先頭から選ぶ。
  */
-function isSeasoningLike(ingredient: { amount: string; unit: string }): boolean {
+export function isSeasoningLike(ingredient: { amount: string; unit: string }): boolean {
   const unit = ingredient.unit.trim()
   if (unit === '大さじ' || unit === '小さじ' || unit === '') return true
   return !Number.isFinite(Number.parseFloat(ingredient.amount))

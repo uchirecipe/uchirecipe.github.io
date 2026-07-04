@@ -67,7 +67,7 @@ export default function ShoppingPage() {
         chosen.map((r) => ({ id: r.id!, ingredients: r.ingredients })),
         haveNames,
       )
-      setCandidates(built.map((c) => ({ ...c, checked: true })))
+      setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
     }
     setSearchParams(
       (prev) => {
@@ -86,7 +86,7 @@ export default function ShoppingPage() {
       chosen.map((r) => ({ id: r.id!, ingredients: r.ingredients })),
       haveNames,
     )
-    setCandidates(built.map((c) => ({ ...c, checked: true })))
+    setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
     setPickerOpen(false)
     setSelectedIds([])
     setPickerQuery('')

@@ -403,6 +403,9 @@ export default function MealPlanPage() {
         <h2 className="font-bold">{ja.mealPlan.weekCostTitle}</h2>
         <p className="mt-1 text-2xl font-bold text-accent">約{weekCost.toLocaleString()}円</p>
         <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.weekCostNote}</p>
+        <Link to="/recipes" className="mt-1 inline-block text-sm font-bold text-accent underline">
+          {ja.mealPlan.weekCostNoteLink}
+        </Link>
         {weeklyBudget != null && budgetDiff != null ? (
           <p className="mt-1 text-sm font-bold text-ink-muted">
             {budgetDiff >= 0

@@ -266,6 +266,22 @@ export default function RecipeDetailPage() {
           </div>
         )}
 
+        {/* 今日つくる（今日の献立への追加・解除）: 材料を見るより前に判断材料として提示 */}
+        <button
+          type="button"
+          onClick={() =>
+            isInTodayList ? void removeFromTodayList(id) : void addToTodayList(id)
+          }
+          className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
+            isInTodayList
+              ? 'border-accent bg-accent text-app'
+              : 'border-edge bg-surface text-accent'
+          }`}
+        >
+          <CalendarPlus size={20} aria-hidden />
+          {isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}
+        </button>
+
         {/* 材料（人数分の変更で自動換算） */}
         <section className="mt-[var(--space-lg)]">
           <div className="flex items-center justify-between">
@@ -329,22 +345,6 @@ export default function RecipeDetailPage() {
             })}
           </ul>
         </section>
-
-        {/* 今日つくる（今日の献立への追加・解除）: 材料を見て作るか決めることが多いため手順の前に表示 */}
-        <button
-          type="button"
-          onClick={() =>
-            isInTodayList ? void removeFromTodayList(id) : void addToTodayList(id)
-          }
-          className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
-            isInTodayList
-              ? 'border-accent bg-accent text-app'
-              : 'border-edge bg-surface text-accent'
-          }`}
-        >
-          <CalendarPlus size={20} aria-hidden />
-          {isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}
-        </button>
 
         {/* 手順 */}
         <section className="mt-[var(--space-lg)]">
