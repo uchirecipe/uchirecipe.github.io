@@ -482,6 +482,23 @@ export const ja = {
     gateDescription:
       '材料からエネルギー・たんぱく質・脂質・炭水化物・塩分のめやすを自動で計算します（あくまで概算です）。',
     gateLink: 'Pro版について見る',
+    // 状態3（Pro解錠済み・実パネル / M6-1 UI統合③）の文言。
+    // 「概算・めやす」であることを必ず明示し、医療・効能の文脈は使わない。
+    // 計算対象外の材料は隠さず件数と材料名で明示する。
+    estimateBadge: '概算',
+    servingHeader: '1人分',
+    totalHeader: '全量（{n}人分）',
+    kcalLabel: 'エネルギー',
+    kcalUnit: 'kcal',
+    proteinLabel: 'たんぱく質',
+    fatLabel: '脂質',
+    carbLabel: '炭水化物',
+    saltLabel: '塩分相当量',
+    gramUnit: 'g',
+    estimateNote: '※ 材料と分量から自動計算しためやすです。調理による変化などは反映しておらず、実際の栄養価とは異なります。',
+    excludedLabel: '計算対象外 {n}件',
+    excludedHint: '次の材料は成分データが無い、または分量を数値にできないため計算に含めていません。',
+    sourcePrefix: '出典: ',
   },
   timer: {
     start: 'タイマー開始',

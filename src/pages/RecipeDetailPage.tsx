@@ -348,8 +348,8 @@ export default function RecipeDetailPage() {
           </ul>
         </section>
 
-        {/* 栄養価のめやす（M6-1）: 公開前はティーザー、公開後は未解錠ゲート/実表示(③Opus担当) */}
-        <NutritionTeaser isPro={!!settings?.proCode} />
+        {/* 栄養価のめやす（M6-1）: 公開前はティーザー、公開後は未解錠ゲート/実表示(③) */}
+        <NutritionTeaser isPro={!!settings?.proCode} recipe={recipe} servings={servings} />
 
         {/* 手順 */}
         <section className="mt-[var(--space-lg)]">
