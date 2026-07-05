@@ -304,7 +304,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
         onTouchEnd={onTouchEnd}
       >
         <StepBadge number={stepNumber} size={56} />
-        <p className="text-2xl font-bold leading-relaxed">
+        <p className="w-full text-2xl font-bold leading-relaxed">
           <TimeText text={step.text} onStart={(_tokenText, seconds) => startStepTimer(seconds)} />
         </p>
         {step.memo && <p className="text-ink-muted">{step.memo}</p>}

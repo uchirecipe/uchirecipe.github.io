@@ -351,33 +351,7 @@ export default function SettingsPage() {
         </label>
       </section>
 
-      {/* タイマー音 */}
-      <section className={sectionCls}>
-        <label className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={settings.timerSoundEnabled}
-            aria-label={ja.settings.timerSoundTitle}
-            onClick={() => updateSettings({ timerSoundEnabled: !settings.timerSoundEnabled })}
-            className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-              settings.timerSoundEnabled ? 'bg-accent' : 'bg-edge'
-            }`}
-          >
-            <span
-              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
-                settings.timerSoundEnabled ? 'left-7' : 'left-1'
-              }`}
-            />
-          </button>
-        </label>
-      </section>
-
-      {/* タイマー中は画面を暗くしない */}
+      {/* タイマー中は画面を暗くしない（「画面を暗くしない」系の設定をタイマー音より先にまとめる） */}
       <section className={sectionCls}>
         <label className="flex items-center justify-between gap-3">
           <div>
@@ -399,6 +373,32 @@ export default function SettingsPage() {
             <span
               className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
                 settings.timerWakeLockEnabled ? 'left-7' : 'left-1'
+              }`}
+            />
+          </button>
+        </label>
+      </section>
+
+      {/* タイマー音 */}
+      <section className={sectionCls}>
+        <label className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.timerSoundEnabled}
+            aria-label={ja.settings.timerSoundTitle}
+            onClick={() => updateSettings({ timerSoundEnabled: !settings.timerSoundEnabled })}
+            className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+              settings.timerSoundEnabled ? 'bg-accent' : 'bg-edge'
+            }`}
+          >
+            <span
+              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                settings.timerSoundEnabled ? 'left-7' : 'left-1'
               }`}
             />
           </button>
