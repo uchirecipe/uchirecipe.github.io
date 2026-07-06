@@ -219,6 +219,7 @@ export const ja = {
     screenTitle: '料理中に画面を暗くしない',
     screenDescription: 'レシピ詳細を開いている間、画面の自動消灯を防ぎます（対応ブラウザのみ）',
     themeTitle: 'テーマ',
+    themeDescription: '「自動」はお使いの端末の明暗設定（OSのライト/ダークモード）に合わせて自動で切り替わります',
     themeAuto: '自動',
     themeLight: 'ライト',
     themeDark: 'ダーク',

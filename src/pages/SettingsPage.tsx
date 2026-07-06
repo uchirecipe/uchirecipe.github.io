@@ -582,6 +582,7 @@ export default function SettingsPage() {
       {/* テーマ */}
       <section className={sectionCls}>
         <h2 className="font-bold">{ja.settings.themeTitle}</h2>
+        <p className="mt-1 text-sm text-ink-muted">{ja.settings.themeDescription}</p>
         <div className="mt-[var(--space-sm)] grid grid-cols-4 gap-[var(--space-sm)]">
           {themeOptions.map((option) => (
             <button
