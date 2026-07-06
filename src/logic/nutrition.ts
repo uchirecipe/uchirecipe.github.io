@@ -22,7 +22,7 @@ import type { Ingredient, Recipe } from '../db/types'
 export const NUTRITION_ENABLED = false
 
 /**
- * ティーザー表示（無料版含む全員向けの「Pro機能・近日公開」案内カード）のフラグ。
+ * ティーザー表示（無料版含む全員向けの「Pro機能・開発中」案内カード）のフラグ。
  * NUTRITION_ENABLED が false の間だけ意味を持つ（本機能公開後は自動的に出番がなくなる）。
  */
 export const NUTRITION_TEASER_ENABLED = true

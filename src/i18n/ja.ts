@@ -340,6 +340,7 @@ export const ja = {
     tagAll: 'すべて',
     favoriteOnly: 'お気に入りのみ',
     excludeNg: 'NG食材を含むレシピを隠す',
+    myRecipesOnly: '自分の登録のみ',
     sortTitle: '並べ替え',
     sortUpdated: '更新順',
     sortPantryMatch: '在庫との一致が多いレシピ順',
@@ -384,7 +385,7 @@ export const ja = {
     nameLabel: '料理名',
     namePlaceholder: '例: 肉じゃが',
     nameRequired: '料理名を入力してください',
-    freeLimitBlocked: '無料版の登録上限（50件）に達しました。続けて登録するには設定画面からPro版を解錠してください（今までのレシピはそのまま使えます）',
+    freeLimitBlocked: '無料版の登録上限（50件）に達しました。上限の解除はPro版（開発中）で提供予定です。お困りの場合は設定画面の「ご意見箱」からお声をお寄せください（今までのレシピはそのまま使えます）',
     photoLabel: '写真',
     photoTake: 'カメラで撮る',
     photoPick: 'アルバムから選ぶ',
@@ -500,9 +501,9 @@ export const ja = {
     // トーンは既存のPro案内(月間献立・並行調理ナビのゲート)と同じ控えめ路線を保つこと
     title: '栄養価のめやす',
     proBadge: 'Pro',
-    comingSoonBadge: '近日公開',
+    comingSoonBadge: '開発中',
     teaserDescription:
-      '材料からエネルギー・たんぱく質などのめやすを自動計算する機能を準備中です。Pro版の機能として公開予定です。',
+      '材料からエネルギー・たんぱく質などのめやすを自動計算する機能を開発中です。Pro版の機能として提供を検討しています。',
     gateTitle: '栄養価のめやすはPro版の機能です',
     gateDescription:
       '材料からエネルギー・たんぱく質・脂質・炭水化物・塩分のめやすを自動で計算します（あくまで概算です）。',

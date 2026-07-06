@@ -14,7 +14,7 @@ import { ja } from '../i18n/ja'
 /**
  * レシピ詳細に置く「栄養価のめやす」枠（M6-1）。状態は3つ:
  *
- * 1. 機能公開前(NUTRITION_ENABLED=false) … 無料/Proを問わず「Pro・近日公開」のティーザーを表示
+ * 1. 機能公開前(NUTRITION_ENABLED=false) … 無料/Proを問わず「Pro・開発中」のティーザーを表示
  *    （2026-07 ユーザー決定: 無料ユーザーがPro機能の存在に気づくきっかけにする。
  *    ティーザー自体も NUTRITION_TEASER_ENABLED でOFFにできる）
  * 2. 公開後・未解錠 … 月間献立と同じ様式のProゲート（説明＋設定へのリンク）

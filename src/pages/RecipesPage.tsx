@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Plus, Search, SlidersHorizontal, Refrigerator } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
-import { useSettings } from '../db/settings'
+import { useSettings, updateSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
 import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
@@ -314,6 +314,13 @@ export default function RecipesPage() {
               className={chipCls(excludeNg)}
             >
               {ja.search.excludeNg}
+            </button>
+            <button
+              type="button"
+              onClick={() => updateSettings({ hideStarters: !hideStarters })}
+              className={chipCls(hideStarters)}
+            >
+              {ja.search.myRecipesOnly}
             </button>
           </div>
 
