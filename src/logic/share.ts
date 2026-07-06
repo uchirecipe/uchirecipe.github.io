@@ -1,5 +1,6 @@
 import type { Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
+import { formatAmountUnit } from './amount'
 
 /**
  * SNSシェア:
@@ -12,7 +13,7 @@ import { ja } from '../i18n/ja'
 export function buildShareText(recipe: Recipe): string {
   const ingredients = recipe.ingredients
     .slice(0, 8)
-    .map((i) => `・${i.name} ${i.amount}${i.unit}`.trimEnd())
+    .map((i) => `・${i.name} ${formatAmountUnit(i.amount, i.unit)}`.trimEnd())
     .join('\n')
   const more = recipe.ingredients.length > 8 ? `\n${ja.share.moreIngredients}` : ''
   return ja.share.textTemplate
@@ -145,7 +146,7 @@ export async function generateShareCard(recipe: Recipe): Promise<Blob> {
   ctx.fillStyle = ink
   ctx.font = '40px system-ui, sans-serif'
   for (const ing of recipe.ingredients.slice(0, 8)) {
-    const line = `・${ing.name}　${ing.amount}${ing.unit}`.trimEnd()
+    const line = `・${ing.name}　${formatAmountUnit(ing.amount, ing.unit)}`.trimEnd()
     drawWrappedText(ctx, line, pad, y, width - pad * 2, 56, 1)
     y += 56
   }

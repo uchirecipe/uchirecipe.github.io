@@ -1,5 +1,6 @@
 import { toHiragana } from './kana'
 import { isSeasoningLike } from './mainIngredients'
+import { formatAmountUnit } from './amount'
 import type { Ingredient } from '../db/types'
 
 export interface ShoppingCandidate {
@@ -34,9 +35,9 @@ function combineAmounts(parts: { amount: string; unit: string }[]): string {
     if (nums.every((n) => Number.isFinite(n))) {
       const total = nums.reduce((sum, n) => sum + n, 0)
       const totalText = Number.isInteger(total) ? String(total) : String(Math.round(total * 10) / 10)
-      texts.push(`${totalText}${unit}`)
+      texts.push(formatAmountUnit(totalText, unit))
     } else {
-      texts.push(...items.map((p) => `${p.amount}${p.unit}`.trim()))
+      texts.push(...items.map((p) => formatAmountUnit(p.amount, p.unit)))
     }
   }
   return texts.join('・')

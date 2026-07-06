@@ -55,3 +55,18 @@ export function scaleAmount(
   const scaled = (value * targetServings) / baseServings
   return String(roundForDisplay(scaled, unit))
 }
+
+/**
+ * 分量と単位を、日本語として自然な順序の文字列にまとめる。
+ * 大さじ・小さじ・カップ（計量スプーン/カップ）は「単位→数量」（例:「大さじ1」「小さじ1/2」）、
+ * それ以外（g・個・かけ 等）は「数量→単位」（例:「200g」「1個」）。
+ * データは amount/unit のまま保持し、これは表示専用の整形。
+ */
+export function formatAmountUnit(amount: string | undefined, unit?: string): string {
+  const a = (amount ?? '').trim()
+  const u = (unit ?? '').trim()
+  if (!u) return a
+  if (!a) return u
+  if (SPOON_UNITS.has(u)) return `${u}${a}`
+  return `${a}${u}`
+}

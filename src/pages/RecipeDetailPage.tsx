@@ -21,7 +21,7 @@ import { db } from '../db/db'
 import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
-import { scaleAmount } from '../logic/amount'
+import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard } from '../logic/share'
@@ -352,8 +352,10 @@ export default function RecipeDetailPage() {
                       {ing.name}
                     </span>
                     <span className="shrink-0 font-bold">
-                      {scaleAmount(ing.amount, recipe.servings, servings, ing.unit)}
-                      {ing.unit}
+                      {formatAmountUnit(
+                        scaleAmount(ing.amount, recipe.servings, servings, ing.unit),
+                        ing.unit,
+                      )}
                     </span>
                   </div>
                   {ing.memo && <p className="mt-0.5 text-sm text-ink-muted">{ing.memo}</p>}
@@ -419,7 +421,7 @@ export default function RecipeDetailPage() {
                   }`}
                 >
                   <StepBadge number={stepNumber} />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     {/* 文中の「10分」などはタップでタイマー開始 */}
                     <p>
                       <TimeText
