@@ -16,7 +16,8 @@ function roundForDisplay(value: number, unit?: string): number {
     return Math.max(0.5, Math.round(value * 2) / 2)
   }
   if (unit && WEIGHT_VOLUME_UNITS.has(unit)) {
-    if (value < 10) return Math.round(value)
+    // 0より大きい値が丸めで0表示になるのを防ぐ（最小1、B8）
+    if (value < 10) return value > 0 ? Math.max(1, Math.round(value)) : 0
     if (value < 100) return Math.round(value / 5) * 5
     return Math.round(value / 10) * 10
   }
