@@ -71,7 +71,8 @@
 - この運用は無料版の「非公式リリース状態での開発」だけでなく、**将来Pro機能を追加開発するときも同じ形で使う**（`dev`で作り込み、レビュー後に`main`へマージして公開）。あわせて`FREE_LIMIT_ENABLED`等の既存フラグ方式（コードは`main`にあっても機能自体はフラグで隠す）と併用すると二重に安全
 
 ## 検証とコミット
-- 完了条件: `npx tsc --noEmit` エラーゼロ ＋ `npm run build` 成功。ロジック追加時は簡易テストで動作確認
+- 完了条件: `npx tsc --noEmit` エラーゼロ ＋ `npm run build` 成功 ＋ **`npm test`**(ロジック単体・栄養回帰・レシピlintの一括実行、2026-07-08新設)。UI に触れた変更は **`npm run test:e2e`**(恒久Playwrightスモーク、devサーバーかpreviewを起動して実行)も通す
+- **バグを直すときは、再発防止ケースを`scripts/test-logic.mjs`に足してから直す**(詳細はdocs/10 3章)
 - コミットメッセージは日本語
 - **`main`へのpush = 本番公開**（GitHub Actionsが https://uchirecipe.com/ へ自動デプロイ）。動作検証が済み、実際にリリースしたい変更だけを`main`にマージ・pushする。`dev`へのpushはこれに該当しない
 
