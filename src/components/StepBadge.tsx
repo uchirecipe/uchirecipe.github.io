@@ -3,7 +3,7 @@ type Props = {
   size?: number
 }
 
-/** 手順番号の丸バッジ。レシピ詳細・フォーカスモード・タイマー表示で共通の見た目にする */
+/** 手順番号の丸バッジ。レシピ詳細・調理中モード・タイマー表示で共通の見た目にする */
 export default function StepBadge({ number, size = 32 }: Props) {
   return (
     <span

@@ -100,7 +100,7 @@ export default function RecipeDetailPage() {
   const [shareMessage, setShareMessage] = useState('')
   const [sharing, setSharing] = useState(false)
 
-  // フォーカスモード（1手順ずつ大きく表示）
+  // 調理中モード（1手順ずつ大きく表示）
   const [focusOpen, setFocusOpen] = useState(false)
   const [focusStep, setFocusStep] = useState(0)
 
@@ -187,7 +187,7 @@ export default function RecipeDetailPage() {
   const displayCookMinutes = useQuick
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
     : recipe.cookMinutes
-  // フォーカスモードには手順・時間だけ差し替えたレシピを渡す(FocusMode側の変更は不要)
+  // 調理中モードには手順・時間だけ差し替えたレシピを渡す(FocusMode側の変更は不要)
   const focusRecipe = useQuick
     ? { ...recipe, steps: recipe.quickSteps!, cookMinutes: displayCookMinutes }
     : recipe

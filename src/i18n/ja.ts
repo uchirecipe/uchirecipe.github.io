@@ -483,7 +483,7 @@ export const ja = {
     todayAdded: '今日の献立に追加済み',
   },
   focus: {
-    open: 'フォーカスモードで見る',
+    open: '調理中モードで見る',
     stepCounter: '手順 {n}/{t}',
     close: '閉じる',
     prev: '前へ',

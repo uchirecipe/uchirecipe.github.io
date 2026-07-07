@@ -44,7 +44,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose }: Pr
   const total = recipe.steps.length
   const step = recipe.steps[index]
   const stepNumber = index + 1
-  // フォーカスモードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
+  // 調理中モードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
   // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)
   const recipeTimers = timers.filter((t) => t.recipeId === recipeId)
 
