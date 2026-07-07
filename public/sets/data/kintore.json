@@ -99,17 +99,20 @@
         {
           "name": "しょうゆ",
           "amount": "1.5",
-          "unit": "大さじ"
+          "unit": "大さじ",
+          "seasoningGroup": 1
         },
         {
           "name": "みりん",
           "amount": "1.5",
-          "unit": "大さじ"
+          "unit": "大さじ",
+          "seasoningGroup": 1
         },
         {
           "name": "酒",
           "amount": "1",
-          "unit": "大さじ"
+          "unit": "大さじ",
+          "seasoningGroup": 1
         },
         {
           "name": "サラダ油",
