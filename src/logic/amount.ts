@@ -41,6 +41,11 @@ function formatFraction(value: number): string {
   return `${whole}と${fracLabel}`
 }
 
+/** 全角数字・全角の「／」「．」を半角にする（分量入力の表記ゆれ対策） */
+export function normalizeDigits(text: string): string {
+  return text.replace(/[０-９／．]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+}
+
 /**
  * 分量の人数換算。
  * "3"（3個）や "1/2" のような数字は人数に合わせて掛け算し、
@@ -48,6 +53,7 @@ function formatFraction(value: number): string {
  * 表示専用の丸め処理（保存データそのものは変更しない）。
  * 個数系・計量スプーン系の単位は帯分数（例:「1と1/2」）で返す。基準人数時点の分数表記(原稿の書き方)と
  * 人数変更後の見た目を揃えるため（g/ml/cc等はこれまでどおり整数・小数のまま）。
+ * 全角数字("２"等)で保存された分量も、半角に正規化してから解釈する（人数変更で反応しない不具合対策）。
  */
 export function scaleAmount(
   amount: string,
@@ -55,9 +61,10 @@ export function scaleAmount(
   targetServings: number,
   unit?: string,
 ): string {
-  const trimmed = amount.trim()
+  const trimmed = normalizeDigits(amount.trim())
   if (!trimmed || baseServings <= 0 || baseServings === targetServings) {
-    return amount
+    // 人数を変えていなくても、全角数字は半角に正規化して返す(基準人数表示でも正しく見えるように)
+    return trimmed || amount
   }
 
   // 対応する形: "200" "1.5" "1/2"

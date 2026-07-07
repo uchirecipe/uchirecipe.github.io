@@ -1,6 +1,7 @@
 import { toHiragana } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
+import { normalizeDigits } from './amount'
 
 /**
  * 栄養価の自動概算（M6-1・Pro機能）の純ロジック。
@@ -172,7 +173,7 @@ export function matchNutritionFood(name: string): NutritionFood | null {
 
 /** "3"・"1.5"・"1/2" を数値にする（scaleAmountと同じ形だけ対応。他はnull） */
 export function parseAmountNumber(amount: string): number | null {
-  const match = amount.trim().match(/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
+  const match = normalizeDigits(amount.trim()).match(/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
   if (!match) return null
   let value = Number.parseFloat(match[1])
   const denominator = match[2] ? Number.parseFloat(match[2]) : undefined

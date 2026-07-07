@@ -19,6 +19,7 @@ import { resizePhoto } from '../logic/image'
 import { parseRecipeText } from '../logic/parseRecipeText'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
+import { normalizeDigits } from '../logic/amount'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { iconComponents } from '../components/RecipeCard'
@@ -228,7 +229,7 @@ export default function RecipeFormPage() {
         tags: effectiveTags,
         ingredients: ingredients.map((row) => ({
           name: row.name,
-          amount: row.amount.trim(),
+          amount: normalizeDigits(row.amount.trim()),
           unit: row.unit.trim(),
           price: row.price.trim() ? Number(row.price) : undefined,
           memo: row.memo.trim() || undefined,
