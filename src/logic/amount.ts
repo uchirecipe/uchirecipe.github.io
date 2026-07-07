@@ -6,6 +6,9 @@ const COUNT_UNITS = new Set([
 ])
 // 重量・容量: 10未満は整数、10以上は5刻み、100以上は10刻み
 const WEIGHT_VOLUME_UNITS = new Set(['g', 'ml', 'cc'])
+// 帯分数(「1と1/2」)で表示する単位(個数系・スプーン系)。
+// 原稿の基準人数表記が分数(1/2等)のため、人数変更後の表示もここで分数に揃える(2026-07-07 Fable相談・ユーザー決定)。
+const FRACTION_DISPLAY_UNITS = new Set([...COUNT_UNITS, ...SPOON_UNITS])
 
 /** 表示用に丸めた分量の数値を返す（単位ごとの丸め幅、5章の設計表どおり） */
 function roundForDisplay(value: number, unit?: string): number {
@@ -26,10 +29,25 @@ function roundForDisplay(value: number, unit?: string): number {
 }
 
 /**
+ * 0.25刻み・0.5刻みに丸め済みの数値を帯分数の文字列にする。
+ * 例: 1.5→"1と1/2"、3.75→"3と3/4"、0.5→"1/2"、2→"2"
+ */
+function formatFraction(value: number): string {
+  const whole = Math.floor(value)
+  const frac = value - whole
+  const fracLabel = frac === 0.25 ? '1/4' : frac === 0.5 ? '1/2' : frac === 0.75 ? '3/4' : ''
+  if (!fracLabel) return String(whole)
+  if (whole === 0) return fracLabel
+  return `${whole}と${fracLabel}`
+}
+
+/**
  * 分量の人数換算。
  * "3"（3個）や "1/2" のような数字は人数に合わせて掛け算し、
  * "少々" "適量" のような言葉はそのまま返す。
  * 表示専用の丸め処理（保存データそのものは変更しない）。
+ * 個数系・計量スプーン系の単位は帯分数（例:「1と1/2」）で返す。基準人数時点の分数表記(原稿の書き方)と
+ * 人数変更後の見た目を揃えるため（g/ml/cc等はこれまでどおり整数・小数のまま）。
  */
 export function scaleAmount(
   amount: string,
@@ -54,7 +72,11 @@ export function scaleAmount(
   }
 
   const scaled = (value * targetServings) / baseServings
-  return String(roundForDisplay(scaled, unit))
+  const rounded = roundForDisplay(scaled, unit)
+  if (unit && FRACTION_DISPLAY_UNITS.has(unit)) {
+    return formatFraction(rounded)
+  }
+  return String(rounded)
 }
 
 /**
