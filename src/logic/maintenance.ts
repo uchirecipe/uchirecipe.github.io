@@ -4,4 +4,4 @@
  * trueにしてbuild+mainへpushすると本番が準備中ページになり、
  * falseに戻してbuild+pushすると通常のアプリに戻る（データは一切変更しない）。
  */
-export const MAINTENANCE_MODE = true
+export const MAINTENANCE_MODE = false
