@@ -204,6 +204,15 @@ const TERM_EXPLANATIONS = [
   [/土佐酢/, /合わせ酢/, '土佐酢とは〜合わせ酢(レシピmemo)'],
   [/ハリハリ漬け/, /名前の由来/, 'ハリハリ漬けとは〜(レシピmemo)'],
   [/アク|あくを取/, /泡|えぐみ/, 'アク（煮汁に浮く泡／切り口から出るえぐみ成分）'],
+  // 2026-07-08 深層QAで追加(初心者の作業が止まる稀出用語。せん切り・みじん切り・粗熱等の頻出語は
+  // 全レシピ強制にすると本文が膨らむため辞書に入れず、原稿執筆時の層2チェックで個別判断する)
+  [/乱切り/, /向きを変えながら|一口大の斜め/, '乱切り（向きを変えながら一口大の斜め切りにすること）'],
+  [/油抜き/, /余分な油/, '油抜き（表面の余分な油を熱湯で洗い流すこと）'],
+  [/下茹で/, /軽く茹で/, '下茹で（軽く茹でて水分やアクを抜くこと）'],
+  [/乾煎り/, /油をひかずに/, '乾煎り（油をひかずに炒って水分を飛ばすこと）'],
+  [/炒り煮/, /汁気を飛ばしながら|汁気がなくなるまで煮ること/, '炒り煮（汁気を飛ばしながら煮ること）'],
+  [/俵形/, /筒のような形/, '俵形（丸い筒のような形）'],
+  [/石づき/, /根元のかたい部分/, '石づき（根元のかたい部分）'],
 ]
 for (const { source, recipe } of entries) {
   const usageText = [recipe.title, ...recipe.steps.map((s) => s.text)].join('\n')
@@ -222,10 +231,30 @@ for (const { source, recipe } of entries) {
 }
 
 // --- 13. 「袋の表示時間」とアプリ内固定タイマーの矛盾(袋に従えと言いながら固定分数のタイマーを付けている) ---
+// memo側も「袋の表示時間を目安に」の言い回しだけ検査する(「袋に表示があればそちらを優先」のような
+// 優先順位を明示した書き方は矛盾ではないので対象外・2026-07-08深層QAの学び)
 for (const { source, recipe } of entries) {
   for (const st of [...recipe.steps, ...(recipe.quickSteps ?? [])]) {
-    if (/袋の表示時間/.test(st.text) && st.minutes !== undefined) {
+    if (st.minutes === undefined) continue
+    if (/袋の表示時間を目安に/.test(st.text) || /袋の表示時間を目安に/.test(st.memo ?? '')) {
       add('中', '袋表示とタイマー矛盾', source, recipe.title, `「袋の表示時間を目安に」なのに固定タイマー(${st.minutes}分)が付いている: 「${st.text}」`)
+    }
+  }
+}
+
+// --- 15. 「お好みで」材料が手順に登場しない(材料欄に移しただけだと使うタイミングが分からない・2026-07-08深層QA) ---
+// 手順memoでの言及も可(きんぴらごぼうの赤唐辛子・鮭フレークの塩のように、memoで使い方を示す様式があるため)
+for (const { source, recipe } of entries) {
+  const allStepText = [...recipe.steps, ...(recipe.quickSteps ?? [])]
+    .map((s) => `${s.text}\n${s.memo ?? ''}`)
+    .join('\n')
+  for (const ing of recipe.ingredients) {
+    const optional = /お好みで/.test(`${ing.amount}${ing.unit}`)
+    if (!optional) continue
+    // 名前から括弧の注記を外した主要部で照合(「すだち(またはレモン)」→「すだち」)
+    const baseName = ing.name.replace(/[（(].*$/, '').trim()
+    if (baseName && !allStepText.includes(baseName)) {
+      add('中', 'お好みで材料の使いどころ欠落', source, recipe.title, `「${ing.name}」が手順のどこにも登場しない(いつ使うか分からない)`)
     }
   }
 }
