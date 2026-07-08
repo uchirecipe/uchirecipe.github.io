@@ -11,6 +11,7 @@ import { buildSearchWords, toHiragana } from '../src/logic/kana.ts'
 import { normalizeProCode, normalizePackCode, hasPaidRecipeAccess } from '../src/logic/pro.ts'
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
+import { isNewsSuppressed } from '../src/logic/news.ts'
 
 let passed = 0
 const failures = []
@@ -184,6 +185,14 @@ eq('パック: 同上', normalizePackCode('up-xxxx-yyyy'), 'UP-XXXX-YYYY')
 eq('アクセス判定: 両方なし', hasPaidRecipeAccess({ proCode: undefined, recipePackCode: undefined }), false)
 eq('アクセス判定: パックのみ', hasPaidRecipeAccess({ proCode: undefined, recipePackCode: 'UP-X' }), true)
 eq('アクセス判定: Proのみ', hasPaidRecipeAccess({ proCode: 'UR-X', recipePackCode: undefined }), true)
+
+// ---------- isNewsSuppressed(初回起動24時間はお知らせを出さない・2026-07-09ペルソナ第1波) ----------
+const HOUR = 60 * 60 * 1000
+eq('news: 初回起動直後は抑制', isNewsSuppressed(1000, 1000 + HOUR), true)
+eq('news: 23時間後も抑制', isNewsSuppressed(1000, 1000 + 23 * HOUR), true)
+eq('news: 24時間経過で表示', isNewsSuppressed(1000, 1000 + 25 * HOUR), false)
+eq('news: 既存ユーザー(0)は抑制しない', isNewsSuppressed(0, Date.now()), false)
+eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined, Date.now()), true)
 
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
 eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)

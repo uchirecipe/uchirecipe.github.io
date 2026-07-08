@@ -216,6 +216,11 @@ export interface Settings {
   recipePackActivatedAt?: number
   /** アプリ内お知らせで最後に見た（閉じた）お知らせのid。未読管理に使う */
   lastSeenNewsId?: string
+  /**
+   * 初回起動日時（ミリ秒・任意）。初日はお知らせバナーを出さない判定に使う。
+   * この項目が導入される前からの既存ユーザーには 0（=とっくに初日を過ぎている扱い）を入れる
+   */
+  firstLaunchAt?: number
 }
 
 export const defaultSettings: Settings = {

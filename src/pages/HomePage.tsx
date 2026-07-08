@@ -17,7 +17,7 @@ import {
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
-import { fetchNews, type NewsItem } from '../logic/news'
+import { fetchNews, isNewsSuppressed, type NewsItem } from '../logic/news'
 import { usePantryItems } from '../db/pantry'
 import { pantryAvailableNames } from '../logic/pantry'
 import { useTodayList } from '../db/todayList'
@@ -131,7 +131,12 @@ export default function HomePage() {
     void fetchNews().then(setNews)
   }, [])
   const latestNews = news[0]
-  const showNews = settings !== undefined && latestNews !== undefined && latestNews.id !== settings.lastSeenNewsId
+  // 初見ユーザーのファーストビューをお知らせで塞がない: 初回起動から24時間は出さない
+  const showNews =
+    settings !== undefined &&
+    latestNews !== undefined &&
+    latestNews.id !== settings.lastSeenNewsId &&
+    !isNewsSuppressed(settings.firstLaunchAt, Date.now())
   const dismissNews = () => {
     if (latestNews) void updateSettings({ lastSeenNewsId: latestNews.id })
   }
@@ -380,11 +385,12 @@ export default function HomePage() {
               </a>
             )}
           </div>
+          {/* -m-2 + p-3.5: ×の見た目は16pxのまま、タップ領域を44px四方に広げる(バナーの高さは増やさない) */}
           <button
             type="button"
             onClick={dismissNews}
             aria-label={ja.common.close}
-            className="shrink-0 text-ink-muted"
+            className="-m-2 shrink-0 rounded-full p-3.5 text-ink-muted"
           >
             <X size={16} aria-hidden />
           </button>

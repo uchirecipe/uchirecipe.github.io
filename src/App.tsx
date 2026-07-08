@@ -12,7 +12,7 @@ import SettingsPage from './pages/SettingsPage'
 import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
 import { TimerProvider } from './components/TimerProvider'
-import { useSettings } from './db/settings'
+import { useSettings, recordFirstLaunchIfNeeded } from './db/settings'
 import { seedStartersIfNeeded } from './db/starters'
 import { seedPantryPresetIfNeeded } from './db/pantry'
 import { rebuildSearchWordsIfNeeded } from './db/recipes'
@@ -43,11 +43,15 @@ function ThemeSync() {
  */
 function App() {
   // 初回起動時だけ、同梱の基本レシピ21品と在庫ボードのプリセットをデータベースに入れる。
-  // 食材名の読み仮名辞書が更新されていれば、既存レシピのsearchWordsも作り直す
+  // 食材名の読み仮名辞書が更新されていれば、既存レシピのsearchWordsも作り直す。
+  // 初回起動日時の記録は「基本レシピ投入済みか」で既存ユーザーを見分けるため、投入より先に行う
   useEffect(() => {
-    void seedStartersIfNeeded()
-    void seedPantryPresetIfNeeded()
-    void rebuildSearchWordsIfNeeded()
+    void (async () => {
+      await recordFirstLaunchIfNeeded()
+      await seedStartersIfNeeded()
+      await seedPantryPresetIfNeeded()
+      await rebuildSearchWordsIfNeeded()
+    })()
   }, [])
 
   return (
