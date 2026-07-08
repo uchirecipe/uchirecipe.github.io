@@ -15,6 +15,8 @@ export interface ParsedIngredient {
   name: string
   amount: string
   unit: string
+  /** 単位の後ろの括弧書き(「1枚（250g）」の「250g」)。フォームの材料メモ欄へ */
+  memo?: string
 }
 
 export interface ParsedRecipe {
@@ -22,6 +24,8 @@ export interface ParsedRecipe {
   servings?: number
   ingredients: ParsedIngredient[]
   steps: string[]
+  /** 「コツ」「ポイント」「メモ」見出し以降の文章。フォームのメモ欄(レシピ全体のメモ)へ */
+  memo?: string
 }
 
 /** 全角数字・全角英字を半角にする（判定用） */
@@ -33,6 +37,11 @@ function normalize(text: string): string {
 
 const ING_HEADER = /^[【\[（(◆■□●○☆★♪#＊*\s]*(材料|用意するもの|ざいりょう)/
 const STEP_HEADER = /^[【\[（(◆■□●○☆★♪#＊*\s]*(作り方|つくり方|作りかた|手順|調理手順|下ごしらえ)/
+// コツ・ポイント・メモの見出し。見出し語が実質単独の行(飾り記号は可)か、
+// 「コツ: 〜」のようにコロンで内容が続く行だけを見出し扱いする
+// (「ポイントは強火で〜」のような手順の文を誤って見出しにしないため)
+const MEMO_HEADER =
+  /^[【\[（(◆■□●○☆★♪#＊*※\s]*(?:コツ・ポイント|コツ|ポイント|メモ)[】\])）]*\s*(?:[:：]\s*(.*))?$/
 const BULLET = /^[・･\-–—*●○◎▪•‣＊※◇]+\s*/
 const STEP_NUMBER = /^[（(]?\d{1,2}[）)．.、:：]\s*|^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*|^(step|STEP|Step)\s*\d+[．.:：)）]?\s*/
 const SERVINGS = /(\d+(?:[.．]\d+)?)\s*人\s*(?:分|前)/
@@ -49,8 +58,11 @@ function looksLikeStepSentence(line: string): boolean {
   return STEP_LIKE_MIDDLE.test(line) || STEP_LIKE_ENDING.test(line)
 }
 
-/** 「200g」「大さじ2」「1/2個」「適量」などを 分量+単位 に分ける */
-export function splitQuantity(raw: string): { amount: string; unit: string } {
+/**
+ * 「200g」「大さじ2」「1/2個」「適量」などを 分量+単位 に分ける。
+ * 「1枚（250g）」のような単位末尾の括弧書きは memo として分離して返す。
+ */
+export function splitQuantity(raw: string): { amount: string; unit: string; memo?: string } {
   const text = normalize(raw.trim())
   if (!text) return { amount: '', unit: '' }
 
@@ -60,7 +72,14 @@ export function splitQuantity(raw: string): { amount: string; unit: string } {
 
   // 「200g」「1本」「1/2個」→ 数字が前に来る形
   const post = text.match(/^(\d+(?:\.\d+)?(?:\/\d+)?)\s*(.*)$/)
-  if (post) return { amount: post[1], unit: post[2] }
+  if (post) {
+    // 単位の後ろの括弧書き(「1枚（250g）」の「（250g）」)は単位に混ぜず、メモとして分ける
+    const paren = post[2].match(/^(.*?)\s*[（(]([^（）()]+)[）)]$/)
+    if (paren && paren[1].trim()) {
+      return { amount: post[1], unit: paren[1].trim(), memo: paren[2].trim() }
+    }
+    return { amount: post[1], unit: post[2] }
+  }
 
   // 「適量」「少々」など数字なし → 分量欄にそのまま
   return { amount: raw.trim(), unit: '' }
@@ -70,17 +89,18 @@ export function splitQuantity(raw: string): { amount: string; unit: string } {
  * 手入力フォームの保存時の救済: 単位欄が空のまま分量欄に「大さじ3」「1/2本」のように
  * 単位ごと書かれていたら、分量と単位に自動で分ける（そのままだと人数変更が効かないため）。
  * 「少々」「適量」など分けられないものは何もしない。単位欄に入力があるときも触らない。
+ * 「1枚（250g）」の括弧書きは memo として返す（呼び出し側で材料メモに足す）。
  */
 export function autoSplitAmountUnit(
   amount: string,
   unit: string,
-): { amount: string; unit: string } {
+): { amount: string; unit: string; memo?: string } {
   const trimmedAmount = amount.trim()
   const trimmedUnit = unit.trim()
   if (trimmedUnit || !trimmedAmount) return { amount: trimmedAmount, unit: trimmedUnit }
   const split = splitQuantity(trimmedAmount)
   if (!split.unit) return { amount: trimmedAmount, unit: '' }
-  return { amount: split.amount, unit: split.unit }
+  return split
 }
 
 /** 1行を材料として解釈してみる。材料らしくなければ undefined */
@@ -122,7 +142,8 @@ export function parseRecipeText(text: string): ParsedRecipe {
     .map((line) => line.trim())
     .filter(Boolean)
 
-  let mode: 'auto' | 'ingredients' | 'steps' = 'auto'
+  let mode: 'auto' | 'ingredients' | 'steps' | 'memo' = 'auto'
+  const memoLines: string[] = []
 
   for (const rawLine of lines) {
     const line = rawLine
@@ -140,6 +161,21 @@ export function parseRecipeText(text: string): ParsedRecipe {
     }
     if (STEP_HEADER.test(line) && line.length <= 15) {
       mode = 'steps'
+      continue
+    }
+    const memoHeader = line.match(MEMO_HEADER)
+    if (memoHeader) {
+      mode = 'memo'
+      // 「コツ: 強火で〜」のように同じ行に内容が続く形も拾う
+      const inline = memoHeader[1]?.trim()
+      if (inline) memoLines.push(inline)
+      continue
+    }
+
+    // コツ・ポイント・メモの見出し以降は、手順ではなくメモとして集める
+    if (mode === 'memo') {
+      const text = line.replace(BULLET, '').trim()
+      if (text) memoLines.push(text)
       continue
     }
 
@@ -188,5 +224,6 @@ export function parseRecipeText(text: string): ParsedRecipe {
     result.steps.push(line)
   }
 
+  if (memoLines.length > 0) result.memo = memoLines.join('\n')
   return result
 }

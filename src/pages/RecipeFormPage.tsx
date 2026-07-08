@@ -374,12 +374,22 @@ function RecipeFormInner() {
     if (parsed.servings) setServings(parsed.servings)
     if (parsed.ingredients.length > 0) {
       setIngredients(
-        parsed.ingredients.map((row) => ({ ...row, price: '', memo: '', group: undefined })),
+        parsed.ingredients.map((row) => ({
+          name: row.name,
+          amount: row.amount,
+          unit: row.unit,
+          price: '',
+          // 「1枚（250g）」の括弧書きは材料メモ欄へ
+          memo: row.memo ?? '',
+          group: undefined,
+        })),
       )
     }
     if (parsed.steps.length > 0) {
       setSteps(parsed.steps.map((text) => ({ text, minutes: '', memo: '' })))
     }
+    // 「コツ」「ポイント」「メモ」見出し以降の文章は、メモ欄が空ならそこへ流し込む
+    if (parsed.memo && !memo.trim()) setMemo(parsed.memo)
     setPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
@@ -438,14 +448,16 @@ function RecipeFormInner() {
         tags: effectiveTags,
         ingredients: ingredients.map((row) => {
           // 単位欄が空のまま分量欄に「大さじ3」等と書かれていたら自動で分ける
-          // (そのままだと人数変更が効かないため。「少々」「適量」はそのまま)
-          const { amount, unit } = autoSplitAmountUnit(normalizeDigits(row.amount.trim()), row.unit)
+          // (そのままだと人数変更が効かないため。「少々」「適量」はそのまま)。
+          // 「1枚（250g）」の括弧書きは消さずに材料メモへ移す
+          const split = autoSplitAmountUnit(normalizeDigits(row.amount.trim()), row.unit)
+          const memoText = [row.memo.trim(), split.memo].filter(Boolean).join('・')
           return {
             name: row.name,
-            amount,
-            unit,
+            amount: split.amount,
+            unit: split.unit,
             price: row.price.trim() ? Number(row.price) : undefined,
-            memo: row.memo.trim() || undefined,
+            memo: memoText || undefined,
             seasoningGroup: row.group,
           }
         }),
