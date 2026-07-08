@@ -361,7 +361,10 @@ export default function RecipesPage() {
               <p className="mt-1 text-sm">{ja.recipes.emptyHint}</p>
             </>
           ) : (
-            <p className="font-bold">{ja.search.noResult}</p>
+            <>
+              <p className="font-bold">{ja.search.noResult}</p>
+              <p className="mt-1 text-sm">{ja.search.noResultHint}</p>
+            </>
           )}
         </div>
       )}

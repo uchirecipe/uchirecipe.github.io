@@ -349,6 +349,7 @@ export const ja = {
     sortCooked: 'よく使う順',
     resultCount: '{n}件',
     noResult: '条件に合うレシピが見つかりません',
+    noResultHint: '右下の「＋」ボタンから自分のレシピを登録できます',
     usedAll: '入れた食材ぜんぶ使える',
     usedSome: '食材 {m}/{t} が使える',
     clear: '条件をクリア',
