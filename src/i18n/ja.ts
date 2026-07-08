@@ -436,6 +436,9 @@ export const ja = {
     suitableForLabel: '向いている時間帯（任意）',
     suitableForDescription:
       '献立プランナーの自動提案で優先されます。何も選ばなければ制限なしとして扱われます',
+    draftFound: '書きかけの下書きがあります。復元しますか？（写真は下書きに含まれません）',
+    draftRestore: '復元する',
+    draftDiscard: '破棄する',
     save: '保存する',
     saving: '保存中…',
     cancel: 'キャンセル',

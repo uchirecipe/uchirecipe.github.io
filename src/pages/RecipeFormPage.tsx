@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -46,6 +46,44 @@ const emptyIngredient: IngredientRow = {
 }
 const emptyStep: StepRow = { text: '', minutes: '', memo: '' }
 
+/**
+ * 入力途中の内容をsessionStorageに自動保存する下書きの形。
+ * 写真(Blob)はサイズが大きくJSON化できないため下書きには含めない。
+ */
+type FormDraft = {
+  title: string
+  servings: number
+  cookMinutes: string
+  effortLevel: EffortLevel
+  ingredients: IngredientRow[]
+  steps: StepRow[]
+  tags: string[]
+  tagInput: string
+  memo: string
+  sourceUrl: string
+  iconKey?: IconKey
+  showIconInsteadOfPhoto: boolean
+  season?: Season
+  suitableFor: MealSlot[]
+}
+
+/** 新規と編集で下書きを分ける(編集はレシピごとに分ける) */
+function draftStorageKey(editId: number | undefined): string {
+  return editId !== undefined ? `uchirecipe:draft:edit:${editId}` : 'uchirecipe:draft:new'
+}
+
+function readDraft(key: string): FormDraft | null {
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as FormDraft
+    if (typeof parsed !== 'object' || parsed === null) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
 const effortLevels: EffortLevel[] = ['easy', 'normal', 'fancy']
 const seasons: Exclude<Season, 'all'>[] = ['spring', 'summer', 'autumn', 'winter']
 const mealSlots: MealSlot[] = ['breakfast', 'lunch', 'dinner']
@@ -65,8 +103,18 @@ function move<T>(list: T[], from: number, to: number): T[] {
   return next
 }
 
-/** レシピ登録・編集画面（/recipes/new と /recipes/:id/edit の両方で使う） */
+/**
+ * レシピ登録・編集画面（/recipes/new と /recipes/:id/edit の両方で使う）。
+ * 新規⇄編集を直接行き来してもReactが同じ画面を使い回さないよう、
+ * レシピIDをkeyにして毎回まっさらに作り直す（使い回されると、
+ * 入力欄の中身や下書きの読み込みが前のページのまま残ってしまう）
+ */
 export default function RecipeFormPage() {
+  const params = useParams()
+  return <RecipeFormInner key={params.id ?? 'new'} />
+}
+
+function RecipeFormInner() {
   const params = useParams()
   const navigate = useNavigate()
   const editId = params.id ? Number(params.id) : undefined
@@ -99,6 +147,15 @@ export default function RecipeFormPage() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
 
+  // ---- 入力の全損防止: 下書きの自動保存と復元 ----
+  const draftKey = draftStorageKey(editId)
+  // 開いた時点で残っていた下書き(復元するか破棄するかをユーザーが選ぶまで保持)
+  const [pendingDraft, setPendingDraft] = useState<FormDraft | null>(() => readDraft(draftKey))
+  // 「変更なし」とみなす基準のスナップショット(新規=空フォーム、編集=読み込んだレシピ)
+  const baselineRef = useRef<string | null>(null)
+  // 下書きを復元した場合、あとから届く既存レシピの読み込みで上書きしない(写真だけ引き継ぐ)
+  const draftRestoredRef = useRef(false)
+
   // 編集モード: 既存レシピを読み込んでフォームに反映。
   // useLiveQueryで反応的に取得することで、アプリ起動直後の基本レシピ投入
   // (非同期)がまだ終わっていないタイミングでこの画面を直接開いても、
@@ -115,6 +172,45 @@ export default function RecipeFormPage() {
     const recipe = loadedRecipe
     if (!recipe || hydratedRef.current) return
     hydratedRef.current = true
+    if (draftRestoredRef.current) {
+      // 下書きを先に復元済み: フォームは下書きの内容を優先し、
+      // 下書きに含まれない写真だけ既存レシピから引き継ぐ
+      setPhoto(recipe.photo)
+      return
+    }
+    baselineRef.current = JSON.stringify({
+      title: recipe.title,
+      servings: recipe.servings,
+      cookMinutes: recipe.cookMinutes != null ? String(recipe.cookMinutes) : '',
+      effortLevel: recipe.effortLevel,
+      ingredients:
+        recipe.ingredients.length > 0
+          ? recipe.ingredients.map((i) => ({
+              name: i.name,
+              amount: i.amount,
+              unit: i.unit,
+              price: i.price != null ? String(i.price) : '',
+              memo: i.memo ?? '',
+              group: i.seasoningGroup,
+            }))
+          : [{ ...emptyIngredient }],
+      steps:
+        recipe.steps.length > 0
+          ? recipe.steps.map((s) => ({
+              text: s.text,
+              minutes: s.minutes != null ? String(s.minutes) : '',
+              memo: s.memo ?? '',
+            }))
+          : [{ ...emptyStep }],
+      tags: recipe.tags,
+      tagInput: '',
+      memo: recipe.memo ?? '',
+      sourceUrl: recipe.sourceUrl ?? '',
+      iconKey: recipe.iconKey,
+      showIconInsteadOfPhoto: recipe.showIconInsteadOfPhoto ?? false,
+      season: recipe.season,
+      suitableFor: recipe.suitableFor ?? [],
+    } satisfies FormDraft)
     setTitle(recipe.title)
     setPhoto(recipe.photo)
     setServings(recipe.servings)
@@ -149,6 +245,119 @@ export default function RecipeFormPage() {
     setSeason(recipe.season)
     setSuitableFor(recipe.suitableFor ?? [])
   }, [loadedRecipe])
+
+  // 現在の入力内容(下書きに保存する形)。1文字変わるたびに再計算される
+  const currentSerialized = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        servings,
+        cookMinutes,
+        effortLevel,
+        ingredients,
+        steps,
+        tags,
+        tagInput,
+        memo,
+        sourceUrl,
+        iconKey,
+        showIconInsteadOfPhoto,
+        season,
+        suitableFor,
+      } satisfies FormDraft),
+    [
+      title,
+      servings,
+      cookMinutes,
+      effortLevel,
+      ingredients,
+      steps,
+      tags,
+      tagInput,
+      memo,
+      sourceUrl,
+      iconKey,
+      showIconInsteadOfPhoto,
+      season,
+      suitableFor,
+    ],
+  )
+
+  // 新規登録は「空フォーム」が基準(これと同じ内容なら未入力=保存しない)
+  useEffect(() => {
+    if (!isEdit) baselineRef.current = currentSerialized
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 入力が変わるたびに下書きを自動保存する(基準と同じ内容なら消す)
+  useEffect(() => {
+    if (pendingDraft) return // 復元するか決める前に、残っている下書きを上書きしない
+    if (baselineRef.current === null) return
+    try {
+      if (currentSerialized === baselineRef.current) {
+        sessionStorage.removeItem(draftKey)
+      } else {
+        sessionStorage.setItem(draftKey, currentSerialized)
+      }
+    } catch {
+      /* 保存領域の容量超過などは黙って諦める(入力自体は失われない) */
+    }
+  }, [currentSerialized, pendingDraft, draftKey])
+
+  // ブラウザを閉じる・再読み込みするとき、未保存の入力があれば標準の確認を出す
+  const dirtyRef = useRef(false)
+  dirtyRef.current =
+    pendingDraft === null &&
+    baselineRef.current !== null &&
+    currentSerialized !== baselineRef.current
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
+
+  /** 下書きをフォームに反映する(写真は下書きに含まれないため、編集では既存レシピの写真を引き継ぐ) */
+  const restoreDraft = () => {
+    const d = pendingDraft
+    if (!d) return
+    draftRestoredRef.current = true
+    setTitle(d.title ?? '')
+    setServings(d.servings ?? 2)
+    setCookMinutes(d.cookMinutes ?? '')
+    setEffortLevel(d.effortLevel ?? 'normal')
+    setIngredients(d.ingredients?.length ? d.ingredients : [{ ...emptyIngredient }])
+    setSteps(d.steps?.length ? d.steps : [{ ...emptyStep }])
+    setTags(d.tags ?? [])
+    setTagInput(d.tagInput ?? '')
+    setMemo(d.memo ?? '')
+    setSourceUrl(d.sourceUrl ?? '')
+    setIconKey(d.iconKey)
+    setShowIconInsteadOfPhoto(d.showIconInsteadOfPhoto ?? false)
+    setSeason(d.season)
+    setSuitableFor(d.suitableFor ?? [])
+    setPendingDraft(null)
+  }
+
+  const discardDraft = () => {
+    try {
+      sessionStorage.removeItem(draftKey)
+    } catch {
+      /* 無視 */
+    }
+    setPendingDraft(null)
+  }
+
+  const clearDraft = () => {
+    try {
+      sessionStorage.removeItem(draftKey)
+    } catch {
+      /* 無視 */
+    }
+  }
 
   /** 貼り付けた文章を解析してフォームに流し込む（結果はユーザーが修正できる） */
   const applyPaste = () => {
@@ -253,6 +462,9 @@ export default function RecipeFormPage() {
       } else {
         id = await createRecipe(input)
       }
+      // 保存に成功したら下書きは不要(残すと次回また「復元しますか？」が出てしまう)
+      clearDraft()
+      dirtyRef.current = false
       navigate(`/recipes/${id}`, { replace: true })
     } finally {
       setSaving(false)
@@ -263,6 +475,8 @@ export default function RecipeFormPage() {
     if (editId === undefined) return
     if (!window.confirm(ja.form.confirmDelete)) return
     await deleteRecipe(editId)
+    clearDraft()
+    dirtyRef.current = false
     navigate('/recipes', { replace: true })
   }
 
@@ -276,6 +490,29 @@ export default function RecipeFormPage() {
         <p className="mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 font-bold text-warning">
           {error}
         </p>
+      )}
+
+      {/* 書きかけの下書きがあれば復元を提案(誤操作による入力全損の防止) */}
+      {pendingDraft && (
+        <div className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface p-[var(--space-md)] shadow-sm">
+          <p className="font-bold text-ink">{ja.form.draftFound}</p>
+          <div className="mt-[var(--space-sm)] flex gap-2">
+            <button
+              type="button"
+              onClick={restoreDraft}
+              className="flex-1 rounded-md bg-accent py-3 font-bold text-app shadow-sm"
+            >
+              {ja.form.draftRestore}
+            </button>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted"
+            >
+              {ja.form.draftDiscard}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* テキスト貼り付けで自動入力 */}
