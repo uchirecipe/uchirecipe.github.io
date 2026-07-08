@@ -247,7 +247,7 @@ export const ja = {
     starterReloadDone: '基本レシピを入れ直しました',
     recipeSetTitle: 'レシピセットを読み込む',
     recipeSetDescription:
-      '配布されているレシピ集（JSONファイル）を追加で読み込めます。同じ料理名のレシピはスキップされます。読み込んだレシピは基本レシピ扱いになり、無料版の件数制限には含まれません',
+      '配布されているレシピ集（JSONファイル）を追加で読み込めます。同じ料理名のレシピはスキップされます。読み込んだレシピは基本レシピ扱いになり、登録できる件数には数えません',
     recipeSetUrlPlaceholder: 'https://…',
     recipeSetUrlLoad: 'URLから読み込む',
     recipeSetUrlHint: '配布元のサーバー設定によっては読み込めない場合があります',
