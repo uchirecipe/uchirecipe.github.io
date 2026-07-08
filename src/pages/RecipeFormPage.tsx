@@ -879,19 +879,20 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </div>
-              <div className="mt-[var(--space-sm)] flex items-center gap-[var(--space-sm)]">
-                <label className="flex min-w-0 flex-1 items-center gap-2 text-sm text-ink-muted">
-                  <span className="shrink-0">{ja.form.ingredientPrice}</span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    value={row.price}
-                    onChange={(e) => updateIngredient(index, { price: e.target.value })}
-                    placeholder={ja.form.ingredientPricePlaceholder}
-                    className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
-                  />
-                </label>
+              {/* 価格は専用の行にする(ボタン4つと同じ行だと390px幅で入力欄が28pxに潰れるため) */}
+              <label className="mt-[var(--space-sm)] flex items-center gap-2 text-sm text-ink-muted">
+                <span className="shrink-0">{ja.form.ingredientPrice}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={row.price}
+                  onChange={(e) => updateIngredient(index, { price: e.target.value })}
+                  placeholder={ja.form.ingredientPricePlaceholder}
+                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
+                />
+              </label>
+              <div className="mt-[var(--space-sm)] flex items-center justify-between gap-[var(--space-sm)]">
                 <button
                   type="button"
                   onClick={() => updateIngredient(index, { group: nextSeasoningGroup(row.group) })}
@@ -914,30 +915,32 @@ function RecipeFormInner() {
                     }
                   />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIngredients((rows) => move(rows, index, index - 1))}
-                  aria-label={ja.form.moveUp}
-                  className={iconBtnCls}
-                >
-                  <ChevronUp size={20} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIngredients((rows) => move(rows, index, index + 1))}
-                  aria-label={ja.form.moveDown}
-                  className={iconBtnCls}
-                >
-                  <ChevronDown size={20} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeIngredientRow(index)}
-                  aria-label={ja.form.removeRow}
-                  className={`${iconBtnCls} text-warning`}
-                >
-                  <X size={20} aria-hidden />
-                </button>
+                <div className="flex items-center gap-[var(--space-sm)]">
+                  <button
+                    type="button"
+                    onClick={() => setIngredients((rows) => move(rows, index, index - 1))}
+                    aria-label={ja.form.moveUp}
+                    className={iconBtnCls}
+                  >
+                    <ChevronUp size={20} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIngredients((rows) => move(rows, index, index + 1))}
+                    aria-label={ja.form.moveDown}
+                    className={iconBtnCls}
+                  >
+                    <ChevronDown size={20} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeIngredientRow(index)}
+                    aria-label={ja.form.removeRow}
+                    className={`${iconBtnCls} text-warning`}
+                  >
+                    <X size={20} aria-hidden />
+                  </button>
+                </div>
               </div>
               <input
                 type="text"
