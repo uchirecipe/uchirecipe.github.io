@@ -5,6 +5,7 @@
 //   BASE_URL=http://localhost:4173 npx tsx scripts/e2e-smoke.mjs   (preview等)
 // カバー: SMK-01(起動) / SMK-02+03(登録・削除) / SMK-04(貼り付け整形) /
 //         SMK-05(人数変更・帯分数表示) / SMK-08簡易(調理中モード) / SMK-14簡易(未解錠ゲート) /
+//         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         合わせ調味料ライン表示。console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium } from 'playwright'
 
@@ -114,6 +115,27 @@ try {
     'SMK-14 未解錠ゲート',
     (await page.textContent('body')).includes('追加レシピパックまたはPro版の解錠が必要'),
   )
+
+  // --- SMK-19: 静的ページ(/about/配下・/sets/)がSW有効でも200でアプリ本体にすり替わらない ---
+  // アプリ本体のtitleは「うちレシピ」単独。静的ページは必ず「◯◯｜うちレシピ」形式のtitleを持つ
+  currentCheck = 'SMK-19'
+  const staticPages = [
+    ['/about/', 'うちレシピについて'],
+    ['/about/terms.html', '利用規約'],
+    ['/about/column/', 'コラム'],
+    ['/about/column/kondate-kimaranai.html', '献立が決められない'],
+    ['/about/column/recipe-screenshot-seiri.html', 'スクショ'],
+    ['/sets/', 'レシピセット'],
+  ]
+  for (const [path, titleKeyword] of staticPages) {
+    const res = await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
+    const title = await page.title()
+    check(
+      `SMK-19 静的ページ ${path}`,
+      res.status() === 200 && title.includes(titleKeyword),
+      `status=${res.status()} title=「${title}」`,
+    )
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
