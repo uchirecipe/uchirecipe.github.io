@@ -12,6 +12,7 @@ import { normalizeProCode, normalizePackCode, hasPaidRecipeAccess } from '../src
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
+import { suggestForSlot } from '../src/logic/mealPlan.ts'
 
 let passed = 0
 const failures = []
@@ -196,6 +197,63 @@ eq('news: 23時間後も抑制', isNewsSuppressed(1000, 1000 + 23 * HOUR), true)
 eq('news: 24時間経過で表示', isNewsSuppressed(1000, 1000 + 25 * HOUR), false)
 eq('news: 既存ユーザー(0)は抑制しない', isNewsSuppressed(0, Date.now()), false)
 eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined, Date.now()), true)
+
+// ---------- suggestForSlot(献立の自動提案の品質・2026-07-09ペルソナ第2波) ----------
+{
+  const mkRecipe = (id, over = {}) => ({
+    id,
+    title: `レシピ${id}`,
+    servings: 2,
+    effortLevel: 'easy',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+    ...over,
+  })
+  const opts = (over = {}) => ({
+    quickOnly: false,
+    excludeNg: false,
+    ngIngredients: [],
+    usedRecipeIds: [],
+    slot: 'dinner',
+    season: 'summer',
+    ...over,
+  })
+  // (a) 季節外レシピ(8月に冬タグのクリームシチュー等)は提案から除外する
+  {
+    const recipes = [mkRecipe(1, { season: 'winter' }), mkRecipe(2, { season: 'all' })]
+    const picks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts())?.id)
+    eq('提案: 季節外(冬)は夏に提案されない', picks.every((id) => id === 2), true)
+  }
+  eq('提案: 季節外しか無ければ提案なし', suggestForSlot([mkRecipe(1, { season: 'winter' })], opts()), undefined)
+  eq('提案: 季節一致は提案される', suggestForSlot([mkRecipe(1, { season: 'summer' })], opts())?.id, 1)
+  eq('提案: 季節未設定は除外されない', suggestForSlot([mkRecipe(1)], opts())?.id, 1)
+  // (b) 夕食・昼食枠は主菜になりうるレシピ(汁物/サラダ/おやつタグ無し)を優先する
+  {
+    const recipes = [
+      mkRecipe(1, { tags: ['汁物'] }),
+      mkRecipe(2, { tags: ['サラダ'] }),
+      mkRecipe(3, { tags: ['おやつ'] }),
+      mkRecipe(4, { tags: ['和食'] }),
+    ]
+    const dinnerPicks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts())?.id)
+    eq('提案: 夕食枠に汁物・サラダ・おやつ単品は出ない', dinnerPicks.every((id) => id === 4), true)
+    const lunchPicks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts({ slot: 'lunch' }))?.id)
+    eq('提案: 昼食枠も主菜を優先', lunchPicks.every((id) => id === 4), true)
+  }
+  // 主菜候補が足りないときだけ他を許可する(0件にはしない)
+  eq('提案: 主菜が無ければ汁物でも提案する', suggestForSlot([mkRecipe(1, { tags: ['汁物'] })], opts())?.id, 1)
+  eq(
+    '提案: 朝食枠は汁物等も普通に提案対象',
+    suggestForSlot([mkRecipe(1, { tags: ['汁物'] })], opts({ slot: 'breakfast' }))?.id,
+    1,
+  )
+}
 
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
 eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)

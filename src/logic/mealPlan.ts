@@ -1,6 +1,7 @@
 import { hasNgIngredient } from './ng'
 import { cookedWithinDays } from './cooked'
-import type { MealSlot, Recipe } from '../db/types'
+import { currentSeason } from './season'
+import type { MealSlot, Recipe, Season } from '../db/types'
 
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
@@ -64,17 +65,31 @@ export interface SuggestOptions {
   usedRecipeIds: number[]
   /** どの食事帯の枠か。朝から鍋が出る、のようなミスマッチを避けるために使う */
   slot: MealSlot
+  /** 今の季節（省略時は現在日時から判定）。季節指定がall以外で一致しないレシピは提案しない */
+  season?: Exclude<Season, 'all'>
 }
 
 /**
+ * 夕食・昼食の枠で「単品の主菜」になりにくいタグ。
+ * これらを含むレシピは夕食・昼食枠の提案では後回しにする
+ * （8月の夕食にサラダ単品、のようなミスマッチを避ける。2026-07-09ペルソナ第2波）。
+ */
+const SIDE_DISH_TAGS = ['汁物', 'サラダ', 'おやつ']
+
+/**
  * 空き枠の自動提案。
- * 「NG除外」「時短」で絞り込んだ後、「向いている時間帯」が一致するものを優先し
- * （未設定のレシピは制限なしとして扱う）、その中で「最近作ってない」
+ * まず「季節が合わない（all以外で不一致）」のレシピを除外し、「NG除外」「時短」で
+ * 絞り込んだ後、「向いている時間帯」が一致するものを優先（未設定のレシピは制限なし
+ * として扱う）。夕食・昼食の枠では主菜になりうるレシピ（汁物/サラダ/おやつタグを
+ * 含まない）を優先し、足りない場合のみ他を許可する。その中で「最近作ってない」
  * 「週内で重複しない」の順にも絞り込む。候補が無くなったら段階的に
- * 条件を緩めて必ず何か返す（0件にはしない）。
+ * 条件を緩めて必ず何か返す（季節外しか無い場合を除き0件にはしない）。
  */
 export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Recipe | undefined {
+  const season = options.season ?? currentSeason()
   const base = recipes.filter((r) => {
+    // 季節外（例: 8月に冬タグのシチュー）は提案しない。通年・未設定は常に対象
+    if (r.season && r.season !== 'all' && r.season !== season) return false
     if (options.excludeNg && hasNgIngredient(r, options.ngIngredients)) return false
     if (options.quickOnly && !(r.cookMinutes != null && r.cookMinutes > 0 && r.cookMinutes <= 15))
       return false
@@ -88,11 +103,18 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
   )
   const slotPool = slotMatched.length > 0 ? slotMatched : base
 
-  const notUsedThisWeek = slotPool.filter((r) => !options.usedRecipeIds.includes(r.id!))
+  // 夕食・昼食の枠は主菜になりうるレシピを優先し、無いときだけ汁物・サラダ等も許可
+  let mainPool = slotPool
+  if (options.slot === 'dinner' || options.slot === 'lunch') {
+    const mains = slotPool.filter((r) => !r.tags.some((tag) => SIDE_DISH_TAGS.includes(tag)))
+    if (mains.length > 0) mainPool = mains
+  }
+
+  const notUsedThisWeek = mainPool.filter((r) => !options.usedRecipeIds.includes(r.id!))
   const freshAndUnused = notUsedThisWeek.filter((r) => !cookedWithinDays(r, 14))
 
   const pool =
-    freshAndUnused.length > 0 ? freshAndUnused : notUsedThisWeek.length > 0 ? notUsedThisWeek : slotPool
+    freshAndUnused.length > 0 ? freshAndUnused : notUsedThisWeek.length > 0 ? notUsedThisWeek : mainPool
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
