@@ -13,6 +13,7 @@ import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
 import { suggestForSlot } from '../src/logic/mealPlan.ts'
+import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 
 let passed = 0
 const failures = []
@@ -253,6 +254,31 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     suggestForSlot([mkRecipe(1, { tags: ['汁物'] })], opts({ slot: 'breakfast' }))?.id,
     1,
   )
+}
+
+// ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------
+{
+  const recipes = [
+    {
+      id: 1,
+      ingredients: [
+        { name: '水', amount: '600', unit: 'ml' },
+        { name: 'お湯', amount: '200', unit: 'ml' },
+        { name: '湯', amount: '400', unit: 'ml' },
+        { name: 'だし汁', amount: '300', unit: 'ml' },
+        { name: '鶏むね肉', amount: '1', unit: '枚' },
+        { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+      ],
+    },
+  ]
+  const candidates = buildShoppingCandidates(recipes, [])
+  const byName = new Map(candidates.map((c) => [c.name, c]))
+  eq('買い物候補: 水はデフォルト未チェック側', byName.get('水')?.isSeasoningLike, true)
+  eq('買い物候補: お湯もデフォルト未チェック側', byName.get('お湯')?.isSeasoningLike, true)
+  eq('買い物候補: 湯もデフォルト未チェック側', byName.get('湯')?.isSeasoningLike, true)
+  eq('買い物候補: だし汁は通常どおりチェック側', byName.get('だし汁')?.isSeasoningLike, false)
+  eq('買い物候補: 主材料はチェック側のまま', byName.get('鶏むね肉')?.isSeasoningLike, false)
+  eq('買い物候補: 調味料は従来どおり未チェック側', byName.get('しょうゆ')?.isSeasoningLike, true)
 }
 
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------

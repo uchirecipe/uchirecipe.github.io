@@ -8,9 +8,19 @@ export interface ShoppingCandidate {
   /** 表示用にまとめた分量。単位が揃えば合計し、揃わなければ「・」で列挙する */
   amount: string
   recipeIds: number[]
-  /** 全レシピでの使われ方が調味料的（大さじ/小さじ/単位なし/少々等）なら true */
+  /**
+   * 全レシピでの使われ方が調味料的（大さじ/小さじ/単位なし/少々等）、
+   * または水道から出るもの（水・お湯・湯）なら true。
+   * true の候補は買い物候補でデフォルト未チェックになる
+   */
   isSeasoningLike: boolean
 }
+
+/**
+ * 買うものではないのに分量が数値（600ml等）のせいで主材料扱いされてしまう食材。
+ * 調味料と同じくデフォルト未チェックにする（2026-07-09ペルソナ第2波: 「水」がチェック済みで入る）
+ */
+const TAP_WATER_NAMES = new Set(['水', 'お湯', '湯'].map(toHiragana))
 
 /**
  * 単位ごとにグループ化し、数値化できるものはグループ内で合計する
@@ -82,7 +92,7 @@ export function buildShoppingCandidates(
       name: entry.name,
       amount: combineAmounts(entry.parts),
       recipeIds: entry.recipeIds,
-      isSeasoningLike: entry.parts.every(isSeasoningLike),
+      isSeasoningLike: TAP_WATER_NAMES.has(key) || entry.parts.every(isSeasoningLike),
     }
   })
 }
