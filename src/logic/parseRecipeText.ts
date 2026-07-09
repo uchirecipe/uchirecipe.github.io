@@ -22,6 +22,8 @@ export interface ParsedIngredient {
 export interface ParsedRecipe {
   title?: string
   servings?: number
+  /** 「調理時間: 20分」「所要時間 15分」のようなメタ情報行から拾った分数。フォームの調理時間欄へ */
+  cookMinutes?: number
   ingredients: ParsedIngredient[]
   steps: string[]
   /** 「コツ」「ポイント」「メモ」見出し以降の文章。フォームのメモ欄(レシピ全体のメモ)へ */
@@ -45,6 +47,10 @@ const MEMO_HEADER =
 const BULLET = /^[・･\-–—*●○◎▪•‣＊※◇]+\s*/
 const STEP_NUMBER = /^[（(]?\d{1,2}[）)．.、:：]\s*|^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*|^(step|STEP|Step)\s*\d+[．.:：)）]?\s*/
 const SERVINGS = /(\d+(?:[.．]\d+)?)\s*人\s*(?:分|前)/
+// 「調理時間: 20分」「調理時間 20分」「所要時間: 15分」のような単独のメタ情報行。
+// 行全体がこの形のときだけ一致させる(「調理時間20分を目安に煮る」のような手順の文は対象外)
+const COOK_TIME_LINE =
+  /^[【\[（(◆■□●○☆★♪#＊*※\s]*(調理時間|所要時間|目安時間|合計時間|準備時間)[】\])）]*\s*[:：]?\s*約?\s*(\d{1,3})\s*分\s*(?:程度|ほど|くらい)?\s*$/
 
 /**
  * 見出し・番号のない材料欄で、分量の無い行が来たときに手順の文と誤認識しないための判定。
@@ -56,6 +62,19 @@ const STEP_LIKE_ENDING =
   /(切る|むく|剥く|煮る|焼く|炒める|茹でる|ゆでる|蒸す|揚げる|漬ける|冷ます|混ぜる|加える|入れる|盛る|かける|絞る|こす|裏返す|取り出す|並べる|包む|丸める|こねる|塗る|溶く|溶かす|含める|詰める|する|できる)$/
 function looksLikeStepSentence(line: string): boolean {
   return STEP_LIKE_MIDDLE.test(line) || STEP_LIKE_ENDING.test(line)
+}
+
+/**
+ * 材料セクション内の「小見出し・装飾行」（分量を持たず材料名でもない行）の判定。
+ * 「※タレ」「【タレ】」「(合わせ調味料)」「タレ:」等を材料として取り込まないために使う。
+ * 「〈タレ〉しょうゆ」のように括弧の外へ内容が続く行は小見出しではなく材料名として扱う。
+ * rawLine は飾り記号(※等)を落とす前の行、name は落とした後の行を渡す
+ */
+function isIngredientSubheading(rawLine: string, name: string): boolean {
+  if (/^※/.test(rawLine.trim())) return true // 「※タレ」
+  if (/^[【\[（(〈《].*[】\]）)〉》]$/.test(name)) return true // 全体が括弧で囲まれた行
+  if (/^[^:：]{1,12}[:：]$/.test(name)) return true // 「タレ:」のような見出し
+  return false
 }
 
 /**
@@ -154,6 +173,16 @@ export function parseRecipeText(text: string): ParsedRecipe {
       if (servings) result.servings = Math.max(1, Math.round(Number.parseFloat(servings[1])))
     }
 
+    // 「調理時間: 20分」のような単独のメタ情報行は、材料・手順に入れずcookMinutesとして拾う
+    // (準備時間は調理時間と混同しないよう、値は採用せず行だけ読み飛ばす)
+    const timeLine = normalize(line).replace(BULLET, '').match(COOK_TIME_LINE)
+    if (timeLine) {
+      if (result.cookMinutes === undefined && timeLine[1] !== '準備時間') {
+        result.cookMinutes = Number.parseInt(timeLine[2], 10)
+      }
+      continue
+    }
+
     // 見出し行
     if (ING_HEADER.test(line)) {
       mode = 'ingredients'
@@ -207,6 +236,8 @@ export function parseRecipeText(text: string): ParsedRecipe {
         result.steps.push(name)
         continue
       }
+      // 「※タレ」「【タレ】」「(合わせ調味料)」のような小見出し・装飾行は取り込まない
+      if (isIngredientSubheading(line, name)) continue
       // 材料欄の中の分量なし行（例: 「〈タレ〉しょうゆ」）は名前だけの材料として拾う
       if (name.length <= 25) {
         result.ingredients.push({ name, amount: '', unit: '' })

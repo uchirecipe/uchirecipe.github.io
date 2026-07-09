@@ -154,6 +154,53 @@ eq('括弧なしは従来どおり', splitQuantity('1枚'), { amount: '1', unit:
 // 手入力の分量欄でも括弧がunitに混入せずmemoに分離される
 eq('保存時分離: 括弧はmemoへ', autoSplitAmountUnit('1枚（250g）', ''), { amount: '1', unit: '枚', memo: '250g' })
 
+// ---------- 貼り付け解析: 調理時間行をcookMinutesへ(2026-07-09ペルソナ第2波) ----------
+{
+  const r = parseRecipeText('肉じゃが\n調理時間: 20分\n材料（2人分）\n・じゃがいも　3個\n作り方\n1. 切る\n2. 煮る')
+  eq('調理時間行はcookMinutesへ', r.cookMinutes, 20)
+  eq('調理時間行が手順に入らない', r.steps, ['切る', '煮る'])
+  eq('調理時間行があってもタイトルは維持', r.title, '肉じゃが')
+}
+{
+  const r = parseRecipeText('材料\n・にんじん…1本\n調理時間 20分\n作り方\n1. 炒める')
+  eq('コロンなしの調理時間行も拾う', r.cookMinutes, 20)
+  eq('コロンなし調理時間行が材料・手順に入らない', r.ingredients.length, 1)
+  eq('コロンなし調理時間行の手順', r.steps, ['炒める'])
+}
+{
+  const r = parseRecipeText('所要時間: 15分\n材料\n・豚肉…200g\n作り方\n1. 焼く')
+  eq('所要時間もcookMinutesへ', r.cookMinutes, 15)
+}
+eq('全角の調理時間行', parseRecipeText('調理時間：２０分\n材料\n・ねぎ…1本').cookMinutes, 20)
+{
+  // 手順の文中に出てくる「調理時間20分」は手順のまま(単独のメタ情報行だけを拾う)
+  const r = parseRecipeText('作り方\n1. 調理時間20分を目安に弱火で煮る')
+  eq('手順文中の調理時間は手順のまま', r.steps, ['調理時間20分を目安に弱火で煮る'])
+  eq('手順文からはcookMinutesを取らない', r.cookMinutes, undefined)
+}
+{
+  // 準備時間はcookMinutesに入れないが、材料・手順にも混入させない
+  const r = parseRecipeText('準備時間: 5分\n調理時間: 20分\n材料\n・ねぎ…1本')
+  eq('準備時間は読み飛ばして調理時間を採用', r.cookMinutes, 20)
+  eq('準備時間行が材料に混入しない', r.ingredients.map((i) => i.name), ['ねぎ'])
+}
+
+// ---------- 貼り付け解析: 材料内の小見出し行を材料にしない(2026-07-09ペルソナ第2波) ----------
+{
+  const r = parseRecipeText('材料\n・豚肉…200g\n【タレ】\n・しょうゆ…大さじ2\n※タレ\n(合わせ調味料)\n・みそ…大さじ1')
+  eq('小見出し・装飾行は材料に入らない', r.ingredients.map((i) => i.name), ['豚肉', 'しょうゆ', 'みそ'])
+}
+eq(
+  '「タレ:」のような見出し行も材料にしない',
+  parseRecipeText('材料\n・豚肉…200g\nタレ:\n・みそ…大さじ1').ingredients.map((i) => i.name),
+  ['豚肉', 'みそ'],
+)
+eq(
+  '内容付きの「〈タレ〉しょうゆ」は従来どおり名前だけの材料として拾う',
+  parseRecipeText('材料\n・豚肉…200g\n〈タレ〉しょうゆ').ingredients.map((i) => i.name),
+  ['豚肉', '〈タレ〉しょうゆ'],
+)
+
 // ---------- buildSearchWords(「鮭」検索が調味料「酒」に誤ヒットする回帰・2026-07-09ペルソナ第1波) ----------
 {
   // さばの味噌煮の実データ相当(酒50ml=単位付きでも、鮭(さけ)で引っかからないこと)

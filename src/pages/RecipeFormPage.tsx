@@ -372,6 +372,8 @@ function RecipeFormInner() {
     }
     if (parsed.title && !title.trim()) setTitle(parsed.title)
     if (parsed.servings) setServings(parsed.servings)
+    // 「調理時間: 20分」のようなメタ情報行から拾った分数はフォームの調理時間欄へ
+    if (parsed.cookMinutes) setCookMinutes(String(parsed.cookMinutes))
     if (parsed.ingredients.length > 0) {
       setIngredients(
         parsed.ingredients.map((row) => ({
