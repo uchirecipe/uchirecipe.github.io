@@ -115,10 +115,14 @@ export default function RecipeCard({ recipe, ngIngredients, subLabel, inTodayLis
         ) : (
           <RecipePlaceholder recipe={recipe} />
         )}
-        {/* 同梱の基本レシピか、自分で登録したレシピかの見分け */}
-        {recipe.isStarter && (
-          <span className="absolute bottom-1.5 left-1.5 rounded-full bg-surface/90 px-2 py-0.5 text-[10px] font-bold text-ink-muted shadow-sm">
-            {ja.card.starterBadge}
+        {/* 同梱の基本レシピか、配布テーマ由来か、自分で登録したレシピかの見分け。
+            テーマ由来(sourceSetNameあり)はセット名をそのまま表示する(長い名前はtruncate+title属性で全文) */}
+        {(recipe.sourceSetName || recipe.isStarter) && (
+          <span
+            title={recipe.sourceSetName || undefined}
+            className="absolute bottom-1.5 left-1.5 max-w-[70%] truncate rounded-full bg-surface/90 px-2 py-0.5 text-[10px] font-bold text-ink-muted shadow-sm"
+          >
+            {recipe.sourceSetName ?? ja.card.starterBadge}
           </span>
         )}
         {/* 主要食材チップ（先頭3つ）を写真の右下に重ねる */}
