@@ -1,8 +1,10 @@
 // 配布レシピセットの原稿(src/sets/*.ts)を読み込み、public/sets/data/*.json を生成する。
+// あわせて public/sets/manifest.json の各テーマの items(料理名+調理分数)も原稿から自動更新する
+// (未解錠でもテーマの中身が見えるようにするため。手動同期は不要。2026-07-09ペルソナ第2波)。
 // 実行: npx tsx scripts/build-sets.mjs
 // 原稿には isFavorite・cookedLogs・searchWords・createdAt・updatedAt を書かない
 // (取り込み時にimportRecipeSetが実際の値へ再構築するため、ここではダミー値で補完するだけでよい)。
-import { writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -40,3 +42,18 @@ for (const mod of sets) {
   await writeFile(outPath, JSON.stringify(file, null, 2) + '\n')
   console.log(`生成: ${path.relative(process.cwd(), outPath)}（${recipes.length}品）`)
 }
+
+// マニフェスト(テーマ一覧)の items を原稿と同期する。
+// タイトル・説明・追加日は手書きのまま維持し、items だけを上書きする
+const manifestPath = path.join(__dirname, '..', 'public', 'sets', 'manifest.json')
+const manifest = JSON.parse(await readFile(manifestPath, 'utf-8'))
+for (const mod of sets) {
+  const entry = (manifest.themes ?? []).find((t) => t.id === mod.SET_ID)
+  if (!entry) {
+    console.warn(`注意: manifest.json にテーマ「${mod.SET_ID}」の項目が無いため items を書けません（手動で1件追記してから再実行）`)
+    continue
+  }
+  entry.items = mod.recipes.map((r) => ({ title: r.title, cookMinutes: r.cookMinutes }))
+}
+await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+console.log(`更新: ${path.relative(process.cwd(), manifestPath)}（テーマのitemsを原稿と同期）`)

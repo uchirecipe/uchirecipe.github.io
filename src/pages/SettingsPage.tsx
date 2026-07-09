@@ -74,6 +74,10 @@ export default function SettingsPage() {
   const [themesLoading, setThemesLoading] = useState(true)
   const [themeBusyId, setThemeBusyId] = useState<string | null>(null)
   const [addAllBusy, setAddAllBusy] = useState(false)
+  // タップで収録レシピ(品目リスト)を展開しているテーマ。解錠状態と無関係に見られる
+  const [expandedThemeIds, setExpandedThemeIds] = useState<string[]>([])
+  // 未解錠のまま「追加する」を押したテーマ(そのカード内に解錠が必要な旨を表示する)
+  const [blockedThemeId, setBlockedThemeId] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -138,16 +142,18 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, settings])
 
-  // Pro版の紹介リンク(例: /settings?section=pro)から開いたとき、Pro版セクションまで自動スクロール。
-  // settings読み込み前はコンポーネントがnullを返す(下記)ため#pro-sectionがまだ無く、
-  // settingsが揃ってから改めて試す必要がある(1回だけ実行するようscrolledRefで防ぐ)
-  const scrolledToProRef = useRef(false)
+  // セクションへの直接リンク(例: /settings?section=pro、?section=themes)から開いたとき、
+  // 該当セクションまで自動スクロール。settings読み込み前はコンポーネントがnullを返す(下記)ため
+  // 対象要素がまだ無く、settingsが揃ってから改めて試す必要がある(1回だけ実行するようRefで防ぐ)
+  const scrolledToSectionRef = useRef(false)
   useEffect(() => {
-    if (scrolledToProRef.current) return
-    if (searchParams.get('section') !== 'pro') return
+    if (scrolledToSectionRef.current) return
+    const sectionIds: Record<string, string> = { pro: 'pro-section', themes: 'theme-list-section' }
+    const targetId = sectionIds[searchParams.get('section') ?? '']
+    if (!targetId) return
     if (!settings) return
-    scrolledToProRef.current = true
-    document.getElementById('pro-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    scrolledToSectionRef.current = true
+    document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [searchParams, settings])
 
   if (!settings) return null // 読み込み中
@@ -820,8 +826,8 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {/* テーマ一覧: 追加レシピパック/Pro解錠者が、興味のあるテーマだけ選んで取り込める */}
-      <section className={sectionCls}>
+      {/* テーマ一覧: 中身は誰でも確認でき、取り込みは追加レシピパック/Pro解錠者ができる */}
+      <section id="theme-list-section" className={sectionCls}>
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-bold">{ja.settings.themeListTitle}</h2>
           {hasPaidRecipeAccess(settings) && themes.length > 0 && (
@@ -844,13 +850,63 @@ export default function SettingsPage() {
           <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
             {themes.map((theme) => {
               const imported = importedThemeIds.has(theme.id)
+              const expanded = expandedThemeIds.includes(theme.id)
+              const items = theme.items ?? []
               return (
                 <li
                   key={theme.id}
                   className="rounded-md border border-edge p-[var(--space-sm)]"
                 >
-                  <p className="font-bold">{theme.title}</p>
-                  <p className="mt-0.5 text-sm text-ink-muted">{theme.description}</p>
+                  {/* カードのタップで収録レシピを展開表示（解錠状態と無関係に中身を確認できる） */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedThemeIds((prev) =>
+                        prev.includes(theme.id)
+                          ? prev.filter((id) => id !== theme.id)
+                          : [...prev, theme.id],
+                      )
+                    }
+                    aria-expanded={expanded}
+                    className="flex w-full items-start gap-2 text-left"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-bold">{theme.title}</span>
+                      <span className="mt-0.5 block text-sm text-ink-muted">{theme.description}</span>
+                    </span>
+                    {items.length > 0 && (
+                      <ChevronDown
+                        size={18}
+                        className={`mt-1 shrink-0 text-ink-muted transition-transform ${
+                          expanded ? 'rotate-180' : ''
+                        }`}
+                        aria-hidden
+                      />
+                    )}
+                  </button>
+                  {expanded && items.length > 0 && (
+                    <div className="mt-[var(--space-sm)]">
+                      <p className="text-xs font-bold text-ink-muted">
+                        {ja.settings.themeItemsCount.replace('{n}', String(items.length))}
+                      </p>
+                      <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                        {items.map((item) => (
+                          <li
+                            key={item.title}
+                            className="flex items-baseline justify-between gap-2 px-[var(--space-sm)] py-1.5 text-sm"
+                          >
+                            <span className="min-w-0 flex-1">{item.title}</span>
+                            {item.cookMinutes != null && item.cookMinutes > 0 && (
+                              <span className="shrink-0 text-xs text-ink-muted">
+                                {item.cookMinutes}
+                                {ja.recipes.minutesSuffix}
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <div className="mt-[var(--space-sm)]">
                     {imported ? (
                       <div className="flex items-center justify-between gap-2">
@@ -863,15 +919,31 @@ export default function SettingsPage() {
                           {ja.settings.themeDelete}
                         </button>
                       </div>
-                    ) : (
+                    ) : hasPaidRecipeAccess(settings) ? (
                       <button
                         type="button"
                         onClick={() => void addTheme(theme)}
-                        disabled={!hasPaidRecipeAccess(settings) || themeBusyId === theme.id}
+                        disabled={themeBusyId === theme.id}
                         className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
                       >
                         {ja.settings.themeAdd}
                       </button>
+                    ) : (
+                      <>
+                        {/* 未解錠でも無反応にせず、タップで「解錠が必要」の説明を返す */}
+                        <button
+                          type="button"
+                          onClick={() => setBlockedThemeId(theme.id)}
+                          className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm"
+                        >
+                          {ja.settings.themeAdd}
+                        </button>
+                        {blockedThemeId === theme.id && (
+                          <p className="mt-1 rounded-sm border border-accent px-2 py-1.5 text-xs font-bold text-accent">
+                            {ja.settings.recipeSetBlocked}
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 </li>

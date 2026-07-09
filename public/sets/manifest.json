@@ -5,7 +5,49 @@
       "file": "/sets/data/kintore.json",
       "title": "コンビニ卒業、高たんぱくごはん",
       "description": "サラダチキンも味玉も自家製で節約。高たんぱく・低脂質の定番10品",
-      "addedDate": "2026-07-04"
+      "addedDate": "2026-07-04",
+      "items": [
+        {
+          "title": "レンジ蒸し鶏（自家製サラダチキン）",
+          "cookMinutes": 15
+        },
+        {
+          "title": "鶏むねのガーリック照り焼き",
+          "cookMinutes": 15
+        },
+        {
+          "title": "ささみとブロッコリーのごま和え",
+          "cookMinutes": 15
+        },
+        {
+          "title": "サバ缶とトマトの煮込み",
+          "cookMinutes": 15
+        },
+        {
+          "title": "鶏ひき肉の豆腐ハンバーグ",
+          "cookMinutes": 20
+        },
+        {
+          "title": "漬けるだけ味玉",
+          "cookMinutes": 10
+        },
+        {
+          "title": "オートミール卵雑炊",
+          "cookMinutes": 5
+        },
+        {
+          "title": "エビとブロッコリーの卵炒め",
+          "cookMinutes": 10
+        },
+        {
+          "title": "鶏団子スープ",
+          "cookMinutes": 20
+        },
+        {
+          "title": "オートミールバナナパンケーキ",
+          "cookMinutes": 10
+        }
+      ]
     }
   ]
 }

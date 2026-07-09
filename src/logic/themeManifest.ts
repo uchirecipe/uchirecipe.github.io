@@ -1,10 +1,19 @@
 /** 配布レシピのテーマ一覧（追加レシピパック/Pro解錠者がテーマ単位で選んで取り込むためのカタログ） */
+
+/** テーマに収録されているレシピ1品分（scripts/build-sets.mjsが原稿から自動生成する） */
+export interface ThemeManifestItem {
+  title: string
+  cookMinutes?: number
+}
+
 export interface ThemeManifestEntry {
   id: string
   file: string
   title: string
   description: string
   addedDate: string
+  /** 収録レシピの一覧。未解錠でも「中身が何か」を確認できるようテーマ一覧で表示する */
+  items?: ThemeManifestItem[]
 }
 
 interface ThemeManifestFile {

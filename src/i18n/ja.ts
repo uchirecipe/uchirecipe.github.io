@@ -285,8 +285,10 @@ export const ja = {
     packActivatedTitle: '追加レシピパックをご利用いただきありがとうございます',
     packActivatedDate: '解錠日: {date}',
     themeListTitle: 'テーマ一覧',
-    themeListDescription: '興味のあるテーマだけ選んで取り込めます。追加レシピパックまたはPro版の解錠が必要です。',
+    themeListDescription:
+      '興味のあるテーマだけ選んで取り込めます。テーマをタップすると収録レシピを確認できます（取り込みには追加レシピパックまたはPro版の解錠が必要です）。',
     themeListLoading: '読み込み中…',
+    themeItemsCount: '収録レシピ（{n}品）',
     themeListEmpty: '現在配布中のテーマはありません',
     themeAdd: '追加する',
     themeAdded: '追加済み',
