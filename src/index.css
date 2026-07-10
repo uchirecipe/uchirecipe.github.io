@@ -119,5 +119,9 @@
        長い英単語やURLは overflow-wrap で折り返すので横はみ出しはしない */
     word-break: keep-all;
     overflow-wrap: break-word;
+    /* 読点「、」等が行頭に来る不自然な折り返しを防ぐ（overflow-wrapの強制折り返しがkeep-allの
+       禁則処理より優先されてしまうケースの対策。Safari実機で「、」が行頭に来る不具合を確認し追加。
+       対応ブラウザでは行末の読点をわずかにはみ出させて表示する） */
+    hanging-punctuation: allow-end;
   }
 }

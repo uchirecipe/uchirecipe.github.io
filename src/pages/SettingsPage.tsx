@@ -453,7 +453,7 @@ export default function SettingsPage() {
       {/* 画面を暗くしない */}
       <section className={sectionCls}>
         <label className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h2 className="font-bold">{ja.settings.screenTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.screenDescription}</p>
           </div>
@@ -479,7 +479,7 @@ export default function SettingsPage() {
       {/* タイマー中は画面を暗くしない（「画面を暗くしない」系の設定をタイマー音より先にまとめる） */}
       <section className={sectionCls}>
         <label className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h2 className="font-bold">{ja.settings.timerWakeLockTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
           </div>
@@ -507,7 +507,7 @@ export default function SettingsPage() {
       {/* タイマー音 */}
       <section className={sectionCls}>
         <label className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
           </div>
@@ -627,7 +627,7 @@ export default function SettingsPage() {
           {ja.settings.starterDescription.replace('{n}', String(starterCount))}
         </p>
         <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
-          <span className="text-sm font-bold text-ink-muted">{ja.settings.starterHide}</span>
+          <span className="min-w-0 text-sm font-bold text-ink-muted">{ja.settings.starterHide}</span>
           <button
             type="button"
             role="switch"

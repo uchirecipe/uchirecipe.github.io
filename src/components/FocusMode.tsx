@@ -309,7 +309,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         <p className="w-full text-2xl font-bold leading-relaxed">
           <TimeText text={step.text} onStart={(_tokenText, seconds) => startStepTimer(seconds)} />
         </p>
-        {step.memo && <p className="text-ink-muted">{step.memo}</p>}
+        {step.memo && <p className="w-full text-ink-muted">{step.memo}</p>}
         {step.minutes != null && step.minutes > 0 && !isMinutesShownInText(step.text, step.minutes) && (
           <button
             type="button"
@@ -322,7 +322,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             {ja.detail.minutesSuffix}
           </button>
         )}
-        {!speechSupported && <p className="text-sm text-ink-muted">{ja.focus.readUnsupported}</p>}
+        {!speechSupported && <p className="w-full text-sm text-ink-muted">{ja.focus.readUnsupported}</p>}
       </div>
 
       <div className="flex gap-2 px-[var(--space-md)] pb-[calc(var(--space-md)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]">
