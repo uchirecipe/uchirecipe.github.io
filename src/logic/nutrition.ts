@@ -19,12 +19,17 @@ import { normalizeDigits } from './amount'
  * 計算できなかった材料は隠さず「計算対象外 n件」として必ず表示に含めること（excluded参照）。
  */
 
-/** 栄養価機能の全体フラグ。M6-1公開まで false（QA通過とユーザー承認後にONにする） */
+/**
+ * 栄養価機能「フル版」（5項目・材料内訳・計算対象外の明示まで含む完全パネル）の全体フラグ。
+ * M6-1本公開まで false（Pv発動・Pro発売・管理栄養士QA通過後にONにする。docs/09参照）。
+ * ★ 2026-07-10 バッチH-4でエネルギー・食塩相当量の2項目のみは無料版にも常時表示するよう変更した
+ * （NutritionTeaser.tsx参照。このフラグとは独立に動く。計算ロジック自体はscripts/test-nutrition.mjsの
+ * 回帰スモークで既に検証済みのため、2項目限定の先行公開はQA対象外とした。オーナー確定・docs/09に記録）。
+ */
 export const NUTRITION_ENABLED = false
 
 /**
- * ティーザー表示（無料版含む全員向けの「Pro機能・開発中」案内カード）のフラグ。
- * NUTRITION_ENABLED が false の間だけ意味を持つ（本機能公開後は自動的に出番がなくなる）。
+ * 栄養UIカード自体の表示フラグ（緊急停止用）。false にすると無料の2項目表示・フル版どちらも出さない。
  */
 export const NUTRITION_TEASER_ENABLED = true
 
