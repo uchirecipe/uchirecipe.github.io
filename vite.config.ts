@@ -15,7 +15,7 @@ export default defineConfig({
     VitePWA({
       // 新しいバージョンを公開したら、開いているアプリを自動で更新する
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg', 'icon-maskable.svg'],
+      includeAssets: ['icon.svg', 'icon-maskable.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'うちレシピ',
         short_name: 'うちレシピ',
@@ -36,6 +36,24 @@ export default defineConfig({
             src: 'icon-maskable.svg',
             sizes: 'any',
             type: 'image/svg+xml',
+            purpose: 'maskable',
+          },
+          {
+            src: 'pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: 'pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: 'maskable-icon-512x512.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'maskable',
           },
         ],
