@@ -50,6 +50,10 @@ const homeWidgetLabels: Record<HomeWidgetKey, string> = {
 const sectionCls =
   'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
 
+// Wake Lock API非対応環境（'wakeLock' in navigator が false）かどうか。
+// 画面が消えない系トグルの説明の下に注記を出すために使う(useWakeLock.tsのロジック自体は変更しない)
+const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
+
 /** 設定: NG食材 / 画面を暗くしない / テーマ */
 export default function SettingsPage() {
   const settings = useSettings()
@@ -456,6 +460,9 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <h2 className="font-bold">{ja.settings.screenTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.screenDescription}</p>
+            {!wakeLockSupported && (
+              <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
+            )}
           </div>
           <button
             type="button"
@@ -482,6 +489,9 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <h2 className="font-bold">{ja.settings.timerWakeLockTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
+            {!wakeLockSupported && (
+              <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
+            )}
           </div>
           <button
             type="button"

@@ -218,6 +218,9 @@ export const ja = {
     ngEmpty: 'まだ登録されていません',
     screenTitle: '料理中に画面を暗くしない',
     screenDescription: 'レシピ詳細を開いている間、画面の自動消灯を防ぎます（対応ブラウザのみ）',
+    // Wake Lock API非対応環境向けの注記(2026-07-10)。トグル自体は残したまま説明の下に添える
+    wakeLockUnsupportedNote:
+      'この環境（ブラウザ）では利用できません。https（保護された接続）でアクセスすると使えるようになる場合があります。',
     themeTitle: 'テーマ',
     themeDescription: '「自動」はお使いの端末の明暗設定（OSのライト/ダークモード）に合わせて自動で切り替わります',
     themeAuto: '自動',
