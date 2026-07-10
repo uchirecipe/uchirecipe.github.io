@@ -86,7 +86,7 @@ export interface Recipe {
   isStarter?: boolean
   /** 配布レシピセットから読み込んだ場合、そのセットのID（例: "kintore"） */
   sourceSetId?: string
-  /** 配布レシピセットから読み込んだ場合、そのセットの表示名（例: "筋トレ・高たんぱくセット"） */
+  /** 配布レシピセットから読み込んだ場合、そのセットの表示名（例: "高たんぱくごはん"） */
   sourceSetName?: string
   /** プレースホルダーアイコンの手動指定（未指定なら料理名・材料から自動選択） */
   iconKey?: IconKey

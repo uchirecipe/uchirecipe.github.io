@@ -15,6 +15,7 @@ import { isNewsSuppressed } from '../src/logic/news.ts'
 import { suggestForSlot } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
+import { resolveDuplicateTitleAction } from '../src/logic/backup.ts'
 
 let passed = 0
 const failures = []
@@ -341,6 +342,29 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
   eq('ナビ: 最後の待ちはヒントなし', hasLaterHandsOnStep(items, 3), false)
   eq('ナビ: 後続が待ちだけでもヒントなし', hasLaterHandsOnStep([{ kind: 'active' }, { kind: 'wait' }, { kind: 'wait' }], 1), false)
 }
+
+// ---------- resolveDuplicateTitleAction(配布セット再取込: kintoreテーマ改名で旧名称バッジが
+// 残ってしまった不具合の再発防止。バッチH-1 2026-07-10) ----------
+eq(
+  '同一セット由来の再取込は重複させずセット名だけ更新',
+  resolveDuplicateTitleAction('kintore', 'kintore'),
+  'updateName',
+)
+eq(
+  '別セット由来の同名料理はスキップのみ(既存を優先)',
+  resolveDuplicateTitleAction('other-set', 'kintore'),
+  'skip',
+)
+eq(
+  '個人登録(sourceSetIdなし)と同名の取込はスキップのみ',
+  resolveDuplicateTitleAction(undefined, 'kintore'),
+  'skip',
+)
+eq(
+  '取込元のsetIdが無い(通常バックアップ相当)場合は常にスキップ',
+  resolveDuplicateTitleAction('kintore', undefined),
+  'skip',
+)
 
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
 eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)

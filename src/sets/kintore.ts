@@ -17,7 +17,8 @@ import type { RecipeInput } from '../db/types'
  */
 
 export const SET_ID = 'kintore'
-export const SET_NAME = '筋トレ・高たんぱくセット'
+// 2026-07-10 改名: 「筋トレ・高たんぱくセット」→「高たんぱくごはん」（オーナー決定）
+export const SET_NAME = '高たんぱくごはん'
 export const SET_VERSION = 1
 
 type SetRecipeDef = Omit<RecipeInput, 'photo'>

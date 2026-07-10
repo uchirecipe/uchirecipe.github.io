@@ -169,27 +169,51 @@ export async function fetchRecipeSet(url: string): Promise<BackupFile> {
 }
 
 /**
+ * 配布セット取り込み時、料理名が既存レシピと重複した場合にどう扱うか決める（純ロジック・DB非依存）。
+ * - 既存レシピが「同じ配布セット」由来（sourceSetIdが一致）→ 'updateName'
+ *   （セット側の表示名（テーマ名）が変わっていたら、レシピを増やさずsourceSetNameだけ追従させる。
+ *   バッチH-1: kintoreテーマ改名時、旧名称バッジのまま残ってしまう不具合の再発防止）
+ * - それ以外（個人登録・別セット由来・setId不明）→ 'skip'（既存を優先し何もしない。従来どおり）
+ */
+export function resolveDuplicateTitleAction(
+  existingSourceSetId: string | undefined,
+  incomingSetId: string | undefined,
+): 'skip' | 'updateName' {
+  if (incomingSetId !== undefined && existingSourceSetId === incomingSetId) return 'updateName'
+  return 'skip'
+}
+
+/**
  * 配布されているレシピセット（バックアップと同形式のJSON）を追加で読み込む。
  * 個人のバックアップ復元(importBackup)とは別物:
  * - idは信用せず振り直す（配布元と自分のIDが衝突する可能性があるため）
  * - 読み込んだレシピはisStarter扱いにする（無料版の件数制限に含めない）
  * - 重複判定はidではなく料理名（完全一致）で行う
  * - settingsは取り込まない（配布元の設定で自分の設定を上書きしないため）
+ * - 同一セットの再取込（テーマ改名など）では重複させず、sourceSetNameだけ新名称に更新する
+ *   （resolveDuplicateTitleAction参照）
  */
 export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
   let added = 0
   let skipped = 0
   await db.transaction('rw', db.recipes, async () => {
-    const existingTitles = new Set((await db.recipes.toArray()).map((r) => r.title.trim()))
+    const existingByTitle = new Map(
+      (await db.recipes.toArray()).map((r) => [r.title.trim(), r] as const),
+    )
     for (const backupRecipe of file.recipes) {
       const { id: _unused, ...rest } = toRecipe(backupRecipe)
       const title = rest.title.trim()
-      if (existingTitles.has(title)) {
+      const existing = existingByTitle.get(title)
+      if (existing) {
+        const action = resolveDuplicateTitleAction(existing.sourceSetId, file.setId)
+        if (action === 'updateName' && existing.sourceSetName !== file.setName) {
+          await db.recipes.update(existing.id!, { sourceSetName: file.setName })
+        }
         skipped++
         continue
       }
       const now = Date.now()
-      await db.recipes.add({
+      const newRecipe: Recipe = {
         ...rest,
         isStarter: true,
         sourceSetId: file.setId,
@@ -197,8 +221,9 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
         searchWords: buildSearchWords(rest.title, rest.ingredients, rest.tags),
         createdAt: now,
         updatedAt: now,
-      })
-      existingTitles.add(title)
+      }
+      await db.recipes.add(newRecipe)
+      existingByTitle.set(title, newRecipe)
       added++
     }
   })
