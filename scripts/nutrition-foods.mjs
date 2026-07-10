@@ -131,6 +131,7 @@ export const FOODS = [
   { id: '04032', expect: '木綿豆腐', label: '木綿豆腐', aliases: ['木綿豆腐', '豆腐'], unitGrams: { 丁: 350 }, note: '「豆腐」とだけ書かれた場合は木綿豆腐で代表' },
   { id: '04033', expect: '絹ごし豆腐', label: '絹ごし豆腐', aliases: ['絹ごし豆腐', '絹豆腐'], unitGrams: { 丁: 350 } },
   { id: '04040', expect: '油揚げ 生', label: '油揚げ', aliases: ['油揚げ', 'うすあげ'], unitGrams: { 枚: 20 } },
+  { id: '04051', expect: 'おから 生', label: '生おから', aliases: ['生おから', 'おから'], note: 'B4卯の花で初登場(2026-07-10)。「おからパウダー(乾燥)」は別食品なので流用しない' },
   { id: '04039', expect: '生揚げ', label: '厚揚げ', aliases: ['厚揚げ', '生揚げ'], unitGrams: { 枚: 150 } },
   { id: '04046', expect: '糸引き納豆', label: '納豆', aliases: ['納豆'], unitGrams: { パック: 45, 個: 45 } },
   { id: '02003', expect: '板こんにゃく 精粉こんにゃく', label: 'こんにゃく', aliases: ['こんにゃく'], unitGrams: { 枚: 250 } },
