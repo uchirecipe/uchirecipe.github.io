@@ -48,6 +48,7 @@ for (const file of readdirSync(setsDir).sort()) {
 for (const [reviewFileName, reviewLabel] of [
   ['review.json', 'review.json(docs/12原稿)'],
   ['review8.json', 'review8.json(docs/18原稿)'],
+  ['review2.json', 'review2.json(docs/19原稿)'],
 ]) {
   const reviewPath = path.join(__dirname, '..', 'public', 'sets', 'data', reviewFileName)
   if (existsSync(reviewPath)) {

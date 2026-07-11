@@ -12,6 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const TARGETS = [
   { doc: '12_基本レシピ増枠_原稿.md', out: 'review.json' },
   { doc: '18_第8弾_夏のさっぱり和食_原稿.md', out: 'review8.json' },
+  { doc: '19_第2弾_がまんしないダイエットごはん_原稿.md', out: 'review2.json' },
 ]
 
 // 「### 1. タイトル」〜次の「### 」または「## 」の手前までを1レシピブロックとする
