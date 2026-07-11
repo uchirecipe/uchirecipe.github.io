@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Plus, Search, SlidersHorizontal, Refrigerator } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -55,6 +55,13 @@ const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
     active ? 'border-accent bg-accent text-app' : 'border-edge bg-surface text-ink-muted'
   }`
+
+/**
+ * 一覧のスクロール位置の保存・復元用キー（sessionStorage）。
+ * 検索・絞り込み条件（filtersKey）ごと保存し、詳細から戻ってきたとき条件が
+ * 変わっていない場合だけ復元する（2026-07-11 オーナー実機フィードバック）。
+ */
+const RECIPES_SCROLL_KEY = 'uchirecipe:recipesScroll'
 
 /** レシピ一覧: 検索・フィルタ＋写真カードのグリッド＋右下の「＋」ボタン */
 export default function RecipesPage() {
@@ -145,6 +152,41 @@ export default function RecipesPage() {
     excludeNg ||
     quickOnly ||
     sort !== 'updated'
+
+  // 一覧のスクロール位置の保存・復元(検索・絞り込み条件が変わっていないときだけ復元する)。
+  // 条件が変わっていれば復元しない(=先頭表示のまま)ことで、詳細=常に先頭/一覧=復元、を両立する
+  const filtersKey = useMemo(
+    () => JSON.stringify({ query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort }),
+    [query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort],
+  )
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    if (!results) return // 結果がまだ描画されていない間は復元しない(高さ不足でクランプされるため)
+    restoredRef.current = true
+    const raw = sessionStorage.getItem(RECIPES_SCROLL_KEY)
+    if (!raw) return
+    try {
+      const saved = JSON.parse(raw) as { filtersKey: string; y: number }
+      if (saved.filtersKey === filtersKey) window.scrollTo(0, saved.y)
+    } catch {
+      // 壊れた保存値は無視
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results])
+  useEffect(() => {
+    let ticking = false
+    const onScroll = () => {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(() => {
+        sessionStorage.setItem(RECIPES_SCROLL_KEY, JSON.stringify({ filtersKey, y: window.scrollY }))
+        ticking = false
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [filtersKey])
 
   const clearFilters = () => {
     setQuery('')
