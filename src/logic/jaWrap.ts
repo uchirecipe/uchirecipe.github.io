@@ -30,9 +30,11 @@ export function wrapJaPhrases(text: string): string {
     const canMerge =
       prev !== undefined &&
       !PUNCT_END.test(prev) &&
-      // 「豚肉→根菜→…」の矢印列は前後を必ず結合(材料順の並びを分断しない・2026-07-11オーナー指摘)
-      ((prev.endsWith('→') || seg.startsWith('→')
-        ? prev.length + seg.length <= 20
+      // 「豚肉→根菜→…」の矢印列は、列の最後の項目が言い終わるまで結合を続ける
+      // (「ちぎった|こんにゃく」「ご飯を|入れて」で切れる実バグへの対応・2026-07-12)。
+      // 連用形「て」か句読点で項目列の言い切りとみなして止める。上限16文字
+      ((prev.includes('→') && !/[て、。]$/.test(prev)
+        ? prev.length + seg.length <= 16
         : prev.length + seg.length <= MAX_UNIT &&
           (TIME_END.test(prev) ||
             BOND_END.test(prev) ||
