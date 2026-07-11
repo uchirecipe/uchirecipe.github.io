@@ -57,20 +57,64 @@ const chipCls = (active: boolean) =>
   }`
 
 /**
- * 一覧のスクロール位置の保存・復元用キー（sessionStorage）。
- * 検索・絞り込み条件（filtersKey）ごと保存し、詳細から戻ってきたとき条件が
- * 変わっていない場合だけ復元する（2026-07-11 オーナー実機フィードバック）。
+ * 一覧の状態（検索・絞り込み・並べ替え・スクロール位置）の保存・復元用キー（sessionStorage）。
+ *
+ * 【2026-07-12 深夜フィードバックの再調査で原因判明・再設計】
+ * 前回(77a473d)はスクロール位置(y)と、それが有効かどうかを判定するfiltersKeyだけを保存していた。
+ * しかし詳細の「戻る」は常に素の "/recipes"（クエリ文字列なし）へ新規pushする実装
+ * （BackHeaderのalwaysFallback。2026-07-10オーナー指示「常に一覧へ」）のため、RecipesPageは
+ * 毎回まっさらな初期状態（query=''・sort='updated'等すべて既定値）で再マウントされていた。
+ * 検索語や並べ替えなど何か1つでも条件を変えていた場合、離脱時に保存したfiltersKeyと
+ * 復元時（既定値に戻った状態）のfiltersKeyが一致しなくなり、「条件が変わった＝先頭表示」という
+ * “想定どおりの安全装置” が働いて復元が黙ってスキップされていた。スクロールだけでなく検索条件
+ * ごと消えていたのが正体で、時間経過そのものは無関係（詳細で0秒待っても再現した）。
+ * オーナーが「長く滞在すると起きる」と感じたのは、絞り込んで探すほど長時間読む対象に
+ * たどり着きやすい、という行動側の相関だったと考えられる（PC Chromeでも同様に再現した）。
+ *
+ * 対策: スクロール位置だけでなく検索語・絞り込み・並べ替えの全項目をこのキーに保存し、
+ * URLにクエリが無い「素の /recipes」で開いたとき（＝詳細から戻ってきた・タブバーで戻ってきた
+ * 等、明示的な新規検索ではない場合）はここから初期状態を復元する。検索語・使いたい食材は
+ * 従来どおりURLの ?q= / ?ing= が指定されていればそちらを優先する（ホームの検索・食材リンク等、
+ * 意図的な新規検索は先頭表示のまま、という既存の使用感を維持するため）。
  */
-const RECIPES_SCROLL_KEY = 'uchirecipe:recipesScroll'
+const RECIPES_LIST_STATE_KEY = 'uchirecipe:recipesListState'
+
+type SavedListState = {
+  filtersKey: string
+  y: number
+  query: string
+  ingredients: string[]
+  time: TimeFilter
+  effort: EffortFilter
+  tag: TagFilter
+  favoriteOnly: boolean
+  excludeNg: boolean
+  quickOnly: boolean
+  sort: RecipeSortOption
+}
+
+function readSavedListState(): SavedListState | null {
+  const raw = sessionStorage.getItem(RECIPES_LIST_STATE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as SavedListState
+  } catch {
+    return null // 壊れた保存値は無視
+  }
+}
 
 /** レシピ一覧: 検索・フィルタ＋写真カードのグリッド＋右下の「＋」ボタン */
 export default function RecipesPage() {
-  // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く
+  // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
+  // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
   const [searchParams, setSearchParams] = useSearchParams()
-  const [query, setQuery] = useState(searchParams.get('q') ?? '')
-  const [ingredients, setIngredients] = useState<string[]>(() =>
-    splitValues(searchParams.get('ing') ?? ''),
-  )
+  const [saved] = useState(() => readSavedListState())
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? saved?.query ?? '')
+  const [ingredients, setIngredients] = useState<string[]>(() => {
+    const ingParam = searchParams.get('ing')
+    if (ingParam !== null) return splitValues(ingParam)
+    return saved?.ingredients ?? []
+  })
   const [panelOpen, setPanelOpen] = useState(searchParams.get('ing') !== null)
 
   // 検索中の内容をURLにも反映しておく。こうすると、タイマー等で別レシピに
@@ -89,13 +133,13 @@ export default function RecipesPage() {
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, ingredients])
-  const [time, setTime] = useState<TimeFilter>('all')
-  const [effort, setEffort] = useState<EffortFilter>('all')
-  const [tag, setTag] = useState<TagFilter>('all')
-  const [favoriteOnly, setFavoriteOnly] = useState(false)
-  const [excludeNg, setExcludeNg] = useState(false)
-  const [quickOnly, setQuickOnly] = useState(false)
-  const [sort, setSort] = useState<RecipeSortOption>('updated')
+  const [time, setTime] = useState<TimeFilter>(saved?.time ?? 'all')
+  const [effort, setEffort] = useState<EffortFilter>(saved?.effort ?? 'all')
+  const [tag, setTag] = useState<TagFilter>(saved?.tag ?? 'all')
+  const [favoriteOnly, setFavoriteOnly] = useState(saved?.favoriteOnly ?? false)
+  const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
+  const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
+  const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
 
   const recipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
@@ -153,8 +197,10 @@ export default function RecipesPage() {
     quickOnly ||
     sort !== 'updated'
 
-  // 一覧のスクロール位置の保存・復元(検索・絞り込み条件が変わっていないときだけ復元する)。
-  // 条件が変わっていれば復元しない(=先頭表示のまま)ことで、詳細=常に先頭/一覧=復元、を両立する
+  // 一覧の状態（検索語・絞り込み・並べ替え・スクロール位置）の保存・復元。
+  // filtersKeyは「保存時と復元時で条件一式が一致しているか」の判定にのみ使う
+  // （URLにq/ingが明示されていて上のsavedを上書きした場合はここで不一致になり、
+  // 復元しない＝先頭表示のまま、という新規検索時の挙動を維持する）
   const filtersKey = useMemo(
     () => JSON.stringify({ query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort }),
     [query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort],
@@ -171,21 +217,15 @@ export default function RecipesPage() {
     // 実際に読み込まれる(非空になる)まで復元を待つ
     if (!recipes || recipes.length === 0) return
     restoredRef.current = true
-    const raw = sessionStorage.getItem(RECIPES_SCROLL_KEY)
-    if (!raw) return
-    try {
-      const saved = JSON.parse(raw) as { filtersKey: string; y: number }
-      if (saved.filtersKey !== filtersKey) return
-      // データが読み込まれた直後でも、カード画像等のレイアウト確定が1フレーム遅れることがあるため、
-      // 描画・レイアウトの反映を2フレーム分待ってからスクロールする(iPhone実機で有効だった対策)
+    if (!saved) return
+    if (saved.filtersKey !== filtersKey) return
+    // データが読み込まれた直後でも、カード画像等のレイアウト確定が1フレーム遅れることがあるため、
+    // 描画・レイアウトの反映を2フレーム分待ってからスクロールする(iPhone実機で有効だった対策)
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          window.scrollTo(0, saved.y)
-        })
+        window.scrollTo(0, saved.y)
       })
-    } catch {
-      // 壊れた保存値は無視
-    }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results, recipes])
   // カードタップ等で詳細へ遷移する瞬間、ページの中身が一覧から詳細へ切り替わって縦の高さが縮むと、
@@ -197,17 +237,44 @@ export default function RecipesPage() {
   // 遷移が始まる前)にtrueにし、以降のscroll保存を(クリーンアップのタイミングに関わらず)
   // 確実にブロックすることで、上書きされる隙を無くす
   const leavingRef = useRef(false)
-  const saveScroll = (y: number) => {
+  const saveListState = (y: number) => {
     if (leavingRef.current) return
-    sessionStorage.setItem(RECIPES_SCROLL_KEY, JSON.stringify({ filtersKey, y }))
+    const blob: SavedListState = {
+      filtersKey,
+      y,
+      query,
+      ingredients,
+      time,
+      effort,
+      tag,
+      favoriteOnly,
+      excludeNg,
+      quickOnly,
+      sort,
+    }
+    sessionStorage.setItem(RECIPES_LIST_STATE_KEY, JSON.stringify(blob))
   }
+  // 検索語・絞り込み・並べ替えのいずれかを変えたら、その場でも保存する(スクロールしなくても
+  // 条件だけ変えて詳細を経由せずタブを行き来した場合にも復元できるようにするため)。
+  // マウント直後の1回目は「何も変えていない」ので保存をスキップする
+  // (復元前にy=0で上書きしてしまわないようにするため。復元自体はsavedの凍結値を使うので
+  // 実害は無いが、紛らわしい中間状態を作らないための予防)
+  const filtersMountedRef = useRef(false)
+  useEffect(() => {
+    if (!filtersMountedRef.current) {
+      filtersMountedRef.current = true
+      return
+    }
+    saveListState(window.scrollY)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtersKey])
   useEffect(() => {
     let ticking = false
     const onScroll = () => {
       if (ticking) return
       ticking = true
       requestAnimationFrame(() => {
-        saveScroll(window.scrollY)
+        saveListState(window.scrollY)
         ticking = false
       })
     }
@@ -216,7 +283,7 @@ export default function RecipesPage() {
   }, [filtersKey])
   const onClickCapture = (e: ReactMouseEvent) => {
     if (!(e.target instanceof Element) || !e.target.closest('a')) return // リンク以外の操作では固定しない
-    saveScroll(window.scrollY) // 遷移で高さが縮む前の、正しい位置を確定保存する
+    saveListState(window.scrollY) // 遷移で高さが縮む前の、正しい位置を確定保存する
     leavingRef.current = true
   }
 

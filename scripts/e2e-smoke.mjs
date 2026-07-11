@@ -8,7 +8,9 @@
 //         SMK-14簡易(未解錠ゲート) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
-//         webkit+375x667ビューポートで検証。他のチェックはchromiumのまま) /
+//         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
+//         SCROLL-02(一覧の絞り込み・並べ替え条件が詳細→戻るを経ても保持される。
+//         2026-07-12深夜フィードバック再調査で判明した本当の原因の再発防止。PC Chrome相当) /
 //         合わせ調味料ライン表示。console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 
@@ -209,10 +211,85 @@ try {
         Math.abs(scrollAfter - scrollBefore) < 60,
         `復元前=${scrollBefore} 復元後=${scrollAfter}`,
       )
+
+      // --- 滞在時間バリエーション(2026-07-12深夜フィードバック「一定時間以上詳細画面に
+      // いたとき一覧の位置がリセットされる感じ」の再現・再発防止ケース)。再調査の結果、
+      // 実際のトリガーは滞在時間そのものではなく「離脱時に絞り込み条件が既定値でなかったこと」
+      // だったが(下のSCROLL-02で別途固定)、時間経過そのものが無関係であることも
+      // 恒久的に保証しておくため、実際に60秒待ってから戻る経路もここで検証する ---
+      await wkPage.evaluate(() => window.scrollTo(0, 400))
+      await wkPage.waitForTimeout(400)
+      const longScrollBefore = await wkPage.evaluate(() => window.scrollY)
+      await wkPage.evaluate(() => {
+        const link = document.querySelector('a[href^="#/recipes/"]')
+        if (link instanceof HTMLElement) link.click()
+      })
+      await wkPage.waitForTimeout(600)
+      check(
+        'SCROLL-01 (滞在60秒) 詳細へ遷移',
+        /#\/recipes\/\d+/.test(wkPage.url()),
+        `現在URL: ${wkPage.url()}`,
+      )
+      await wkPage.waitForTimeout(60000) // 詳細画面に実際に60秒滞在する
+      await wkPage.getByRole('button', { name: '戻る' }).click()
+      await wkPage.waitForTimeout(800)
+      const longScrollAfter = await wkPage.evaluate(() => window.scrollY)
+      check(
+        'SCROLL-01 詳細に60秒滞在してから戻ってもスクロール位置が復元される',
+        Math.abs(longScrollAfter - longScrollBefore) < 60,
+        `復元前=${longScrollBefore} 復元後=${longScrollAfter}`,
+      )
     } finally {
       await wkBrowser.close()
     }
   }
+
+  // --- SCROLL-02: 一覧の絞り込み・並べ替え条件が「詳細→戻る」を経ても保持される
+  // (2026-07-12深夜フィードバックの再調査で判明した本当の原因の再発防止テスト。PC Chrome相当・
+  // デスクトップビューポート)。詳細の「戻る」は常に素の /recipes へ新規遷移するため、
+  // 検索語や並べ替えなど何か1つでも既定値から変えていると、以前は復元判定のfiltersKeyが
+  // 不一致になり、スクロール位置だけでなく絞り込み条件そのものが黙って消えていた
+  // (オーナーは「長く滞在すると起きる」と感じていたが、実際は滞在時間に関係なく、絞り込み中に
+  // 詳細を開いて戻るだけで即再現した。絞り込んで探すほど長時間読む対象に行き着きやすい、
+  // という行動側の相関を「時間経過が原因」と体感していたと考えられる) ---
+  currentCheck = 'SCROLL-02'
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1500)
+  await page.getByRole('button', { name: '絞り込み' }).click()
+  await page.waitForTimeout(200)
+  // 並べ替えを既定の「更新順」から変える(URLに載らない絞り込みなので、これが復元できれば
+  // filtersKey全体が保存・復元されていることの証明になる)
+  await page.getByRole('button', { name: 'あいうえお順' }).click()
+  await page.waitForTimeout(200)
+  await page.getByRole('button', { name: '絞り込み' }).click() // パネルを閉じる
+  await page.waitForTimeout(200)
+  await page.evaluate(() => window.scrollTo(0, 300))
+  await page.waitForTimeout(400)
+  const s2ScrollBefore = await page.evaluate(() => window.scrollY)
+  await page.evaluate(() => {
+    const link = document.querySelector('a[href^="#/recipes/"]')
+    if (link instanceof HTMLElement) link.click()
+  })
+  await page.waitForTimeout(600)
+  check('SCROLL-02 詳細へ遷移', /#\/recipes\/\d+/.test(page.url()), `現在URL: ${page.url()}`)
+  await page.getByRole('button', { name: '戻る' }).click()
+  await page.waitForTimeout(800)
+  const s2ScrollAfter = await page.evaluate(() => window.scrollY)
+  check(
+    'SCROLL-02 詳細→戻るでスクロール位置が復元される(並べ替え変更中・PC Chrome相当)',
+    Math.abs(s2ScrollAfter - s2ScrollBefore) < 60,
+    `復元前=${s2ScrollBefore} 復元後=${s2ScrollAfter}`,
+  )
+  await page.getByRole('button', { name: '絞り込み' }).click() // パネルを再度開いて並べ替え状態を確認
+  await page.waitForTimeout(200)
+  const sortStillActive = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button'))
+    const target = buttons.find((b) => b.textContent?.trim() === 'あいうえお順')
+    return target ? target.className.includes('border-accent') : false
+  })
+  check('SCROLL-02 詳細→戻るで並べ替え条件(あいうえお順)も保持される', sortStillActive)
+  await page.getByRole('button', { name: '絞り込み' }).click() // パネルを閉じる(後続チェックへの影響防止)
+  await page.waitForTimeout(200)
 
   // --- SMK-19: 静的ページ(/about/配下・/sets/)がSW有効でも200でアプリ本体にすり替わらない ---
   // アプリ本体のtitleは「うちレシピ」単独。静的ページは必ず「◯◯｜うちレシピ」形式のtitleを持つ
