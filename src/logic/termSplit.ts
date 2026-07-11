@@ -67,7 +67,12 @@ export function findTermMatches(text: string): TermMatch[] {
  * seenは呼び出し側でブロック単位(例: 1手順のtext+memo)に使い回すことで、
  * ブロックをまたいだ描画順(text→memo)のまま重複判定される。
  */
-export function splitByTerms(text: string, seen: Set<string>): TermSegment[] {
+export function splitByTerms(text: string, seenInput: Set<string>): TermSegment[] {
+  // 純粋関数にする: 引数のseenは読み取りのみで書き換えない(2026-07-11修正)。
+  // レンダー中にpropsのSetを破壊するとReact StrictModeの二重実行で
+  // 2回目に全語が「既出」扱いになり、開発モードでのみタップ不能になる実バグがあった。
+  const seen = new Set(seenInput)
+
   const matches = findTermMatches(text)
   if (matches.length === 0) return [{ type: 'text', text }]
 

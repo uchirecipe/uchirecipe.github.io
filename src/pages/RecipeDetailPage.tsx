@@ -38,6 +38,7 @@ import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
 import TermText from '../components/TermText'
+import { collectUniqueTerms } from '../logic/termSplit'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
 import { ja } from '../i18n/ja'
@@ -456,7 +457,8 @@ export default function RecipeDetailPage() {
               const stepNumber = index + 1
               const isHighlighted = highlightStepIndex === index
               // 用語タップ辞書: 同じ手順内(本文+memo)では同じ語は最初の1回だけタップ可能にする
-              const stepTermSeen = new Set<string>()
+              // memo側の既出用語=手順本文に出た語(純粋導出。共有セットの書き換えはStrictModeで壊れるため廃止)
+              const stepTermSeen = new Set(collectUniqueTerms(step.text).map((c) => c.term))
               return (
                 <li
                   key={index}
@@ -473,7 +475,6 @@ export default function RecipeDetailPage() {
                     <p className="ja-phrase">
                       <TermText
                         text={step.text}
-                        seen={stepTermSeen}
                         onOpenTerm={openTerm}
                         renderPlain={(t) => (
                           <TimeText

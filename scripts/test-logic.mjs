@@ -505,9 +505,11 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   const akuAlias = findTermMatches('あくを取り除く')
   eq('ひらがな表記ゆれ(あく)もアクの用語としてマッチ', akuAlias.length === 1 && akuAlias[0].term.term, 'アク')
 
-  // 同じ語は最初の1回だけタップ可能(手順の本文とmemoで集合を共有する想定)
+  // 同じ語は最初の1回だけタップ可能。splitByTermsは純粋関数化(2026-07-11)されたため、
+  // 本文→memoの既出共有は呼び出し側が明示的にセットへ追加して行う
   const seen = new Set()
   const inText = splitByTerms('小口切りにしてから炒める。', seen)
+  for (const s of inText) if (s.type === 'term') seen.add(s.match.term.term)
   const inMemo = splitByTerms('小口切りは端から薄く切ること。', seen)
   const firstTermSeg = inText.find((s) => s.type === 'term')
   const secondTermSeg = inMemo.find((s) => s.type === 'term')
@@ -545,6 +547,19 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   eq('仮定計上が2件記録される', r.assumed.length, 2)
   eq('お好みでは計算対象外のまま', r.excluded.some((e) => e.name === '白ごま'), true)
   eq('塩もみ用の塩はprep除外のまま', r.excluded.some((e) => e.reason === 'prep'), true)
+}
+
+// ---------- termSplit: 純粋性(StrictMode二重実行の再発防止・2026-07-11) ----------
+{
+  const { splitByTerms } = await import('../src/logic/termSplit.ts')
+  const text = '玉ねぎはくし形に切る。'
+  const seen = new Set()
+  const first = splitByTerms(text, seen)
+  eq('splitByTermsは入力セットを書き換えない', seen.size, 0)
+  const second = splitByTerms(text, seen)
+  const tappable = (segs) => segs.filter((s) => s.type === 'term' && s.tappable).length
+  eq('2回呼んでも1回目と同じ結果(二重実行安全)', tappable(second), tappable(first))
+  eq('くし形がタップ可能', tappable(first) >= 1, true)
 }
 
 // ---------- 結果 ----------

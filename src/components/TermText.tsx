@@ -26,7 +26,8 @@ type Props = {
  * ・同じ語の2回目以降(seenに既出)はタップ不可の地の文として描画する(ノイズ防止)
  */
 export default function TermText({ text, seen, onOpenTerm, renderPlain }: Props) {
-  const localSeen = seen ?? new Set<string>()
+  // propsのSetは書き換えない(StrictModeの二重実行対策)。既出判定はこの実行内のコピーで行う
+  const localSeen = new Set(seen)
   const segments = splitByTerms(text, localSeen)
   const plain = renderPlain ?? ((t: string) => wrapJaPhrases(t))
 

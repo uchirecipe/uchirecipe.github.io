@@ -25,6 +25,7 @@ function splitSentences(line: string): string[] {
 
 import { wrapJaPhrases } from '../logic/jaWrap'
 import TermText from './TermText'
+import { findTermMatches } from '../logic/termSplit'
 import type { OpenTerm } from './TermPopover'
 
 type Props = {
@@ -39,13 +40,15 @@ type Props = {
 export function MemoText({ text, className, onOpenTerm, seen }: Props) {
   const lines = text.split('\n')
   // 呼び出しごとに1つの集合を使い回し、この関数内(=このmemo1つ分)で用語の既出判定を揃える
-  const localSeen = seen ?? new Set<string>()
-  const renderSentence = (s: string, key: number) =>
-    onOpenTerm ? (
-      <TermText key={key} text={s} seen={localSeen} onOpenTerm={onOpenTerm} />
-    ) : (
-      wrapJaPhrases(s)
-    )
+  // この実行内で新規作成するコピー(propsのSetは書き換えない=StrictMode二重実行対策)
+  const localSeen = new Set(seen)
+  const renderSentence = (s: string, key: number) => {
+    if (!onOpenTerm) return wrapJaPhrases(s)
+    const node = <TermText key={key} text={s} seen={localSeen} onOpenTerm={onOpenTerm} />
+    // 次の文のために、この文に含まれる用語を既出へ(splitByTermsは純粋化済みのため自前で更新)
+    for (const m of findTermMatches(s)) localSeen.add(m.term.term)
+    return node
+  }
   return (
     <div className={className ? `ja-phrase ${className}` : 'ja-phrase'}>
       {lines.map((line, i) =>

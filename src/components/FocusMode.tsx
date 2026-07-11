@@ -51,7 +51,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const step = recipe.steps[index]
   const stepNumber = index + 1
   // 用語タップ辞書(2026-07-11): この手順(本文+memo)内で同じ語は最初の1回だけタップ可能にする
-  const stepTermSeen = new Set<string>()
+  // memo側の既出用語=手順本文の語(純粋導出・StrictMode対策)
+  const stepTermSeen = new Set(collectUniqueTerms(step.text).map((c) => c.term))
   const stepTerms = collectUniqueTerms(step.text, step.memo)
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   // 調理中モードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
@@ -317,7 +318,6 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         <p className="ja-phrase w-full text-2xl font-bold leading-relaxed">
           <TermText
             text={step.text}
-            seen={stepTermSeen}
             onOpenTerm={openTerm}
             renderPlain={(t) => (
               <TimeText text={t} onStart={(_tokenText, seconds) => startStepTimer(seconds)} />
