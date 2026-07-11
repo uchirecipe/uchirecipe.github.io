@@ -16,6 +16,7 @@ import { suggestForSlot } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
 import { resolveDuplicateTitleAction } from '../src/logic/backup.ts'
+import { pickMainIngredients } from '../src/logic/mainIngredients.ts'
 
 let passed = 0
 const failures = []
@@ -369,6 +370,65 @@ eq(
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
 eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)
 eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), false)
+
+// ---------- pickMainIngredients(一覧カードの主要食材=調味料・水・油・粉類・だし系・薬味少量
+// の名前辞書で除外。UI改善バッチ 2026-07-11 オーナー実機フィードバック「メインをはる材料に絞って」) ----------
+{
+  // こんにゃくの炒り煮(review.jsonの実データ)相当: 赤唐辛子(1/2本)は数値化できてしまうため
+  // 分量・単位ベースのisSeasoningLikeだけでは除外できない=名前辞書が必要なことの再発防止ケース
+  const konnyaku = [
+    { name: 'こんにゃく', amount: '1', unit: '枚' },
+    { name: '赤唐辛子', amount: '1/2', unit: '本' },
+    { name: 'ごま油', amount: '1', unit: '大さじ' },
+    { name: 'しょうゆ', amount: '1.5', unit: '大さじ' },
+    { name: 'みりん', amount: '1.5', unit: '大さじ' },
+    { name: '砂糖', amount: '1', unit: '大さじ' },
+    { name: 'かつお節', amount: '1', unit: '袋' },
+  ]
+  eq(
+    '主要食材: こんにゃくの炒り煮は赤唐辛子が出ない',
+    pickMainIngredients(konnyaku).map((i) => i.name),
+    ['こんにゃく'],
+  )
+
+  // 手作り鮭フレーク(review.jsonの実データ)相当: 主材料の鮭は残り、酒・塩(お好みで)は出ない
+  const sakeFlake = [
+    { name: '甘塩鮭（切り身）', amount: '2', unit: '切れ' },
+    { name: '酒', amount: '1', unit: '大さじ' },
+    { name: '塩', amount: '少々(お好みで)', unit: '' },
+  ]
+  eq(
+    '主要食材: 鮭フレークは鮭の切り身が残る',
+    pickMainIngredients(sakeFlake).map((i) => i.name),
+    ['甘塩鮭（切り身）'],
+  )
+
+  // 「お好みで」は数値と同居していてもisSeasoningLikeの非数値判定をすり抜けるため、
+  // 名前辞書に無い食材でも isOptionalAmount 単独で除外できることの確認
+  const optional = [
+    { name: '鶏むね肉', amount: '1', unit: '枚' },
+    { name: 'くるみ', amount: '2(お好みで)', unit: '個' },
+  ]
+  eq(
+    '主要食材: 数値付き「お好みで」も除外される',
+    pickMainIngredients(optional).map((i) => i.name),
+    ['鶏むね肉'],
+  )
+
+  // 先頭から最大3件(水増ししない・4件目以降は出ない)
+  const many = [
+    { name: 'じゃがいも', amount: '3', unit: '個' },
+    { name: '玉ねぎ', amount: '1', unit: '個' },
+    { name: '人参', amount: '1', unit: '本' },
+    { name: '牛こま切れ肉', amount: '200', unit: 'g' },
+    { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+  ]
+  eq(
+    '主要食材: 先頭から最大3件',
+    pickMainIngredients(many).map((i) => i.name),
+    ['じゃがいも', '玉ねぎ', '人参'],
+  )
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
