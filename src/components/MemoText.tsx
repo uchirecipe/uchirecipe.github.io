@@ -52,7 +52,31 @@ export function MemoText({ text, className, onOpenTerm, seen }: Props) {
   return (
     <div className={className ? `ja-phrase ${className}` : 'ja-phrase'}>
       {lines.map((line, i) =>
-        line.startsWith('・') ? (
+        line.startsWith('▽') ? (
+          // 折りたたみ補足(2026-07-11オーナー提案): 「▽ラベル：詳細」はラベルだけを
+          // 用語と同じ見た目(点線下線)で表示し、タップで詳細をポップオーバー表示する。
+          // レンジ時短のような「知りたい人だけ読む」補足に使う(R12参照)
+          (() => {
+            const sep = line.indexOf('：')
+            const label = sep > 0 ? line.slice(1, sep) : line.slice(1)
+            const detail = sep > 0 ? line.slice(sep + 1) : ''
+            if (!onOpenTerm || !detail) {
+              return <p key={i}>{wrapJaPhrases(label + (detail ? '：' + detail : ''))}</p>
+            }
+            return (
+              <p key={i} className="text-left">
+                <button
+                  type="button"
+                  className="rounded-sm border-b border-dotted border-accent/60 px-0.5 text-accent"
+                  style={{ background: 'color-mix(in oklab, var(--accent) 8%, transparent)' }}
+                  onClick={(e) => onOpenTerm({ term: label, description: detail }, e.currentTarget)}
+                >
+                  {label}
+                </button>
+              </p>
+            )
+          })()
+        ) : line.startsWith('・') ? (
           // 中央揃えの文脈(調理中モード)でも箇条書きは左揃えで読ませる
           <p key={i} className="flex text-left">
             <span aria-hidden="true" className="shrink-0">
