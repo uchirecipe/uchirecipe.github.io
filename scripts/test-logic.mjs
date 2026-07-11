@@ -471,6 +471,16 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   eq('文節に分割されている(3つ以上)', segments.length >= 3, true)
   eq('句読点が文節の先頭に来ない', segments.some((s) => s.startsWith('、') || s.startsWith('。')), false)
   eq('短い文字列は素通し', wrapJaPhrases('混ぜる'), '混ぜる')
+  // 2026-07-11第2版(オーナー実例): 時間トークン直後・並列「と」・格助詞では折り返さない
+  const stew = wrapJaPhrases('火を止めてルーを溶かし、牛乳を加えて弱火で5分とろみを付ける').split(ZWSP)
+  eq('「牛乳を」が単独文節にならない', stew.includes('牛乳を'), false)
+  eq('「5分」の直後で切れない(弱火で5分とろみを付ける)', stew.includes('弱火で5分とろみを付ける'), true)
+  const potato = wrapJaPhrases('湯を切って粉ふきにし、熱いうちにつぶして酢と塩こしょうを混ぜる').split(ZWSP)
+  eq('「酢と」が単独文節にならない', potato.includes('酢と'), false)
+  eq('酢と塩こしょうがまとまる', potato.includes('酢と塩こしょうを混ぜる'), true)
+  const broc = wrapJaPhrases('具材を一口大に切る。ブロッコリーは別に2分塩ゆでしておく').split(ZWSP)
+  eq('「2分」の直後で切れない(別に2分塩ゆでしておく)', broc.includes('別に2分塩ゆでしておく'), true)
+  eq('主題の「ブロッコリーは」では切れてよい', broc.includes('ブロッコリーは'), true)
 }
 
 // ---------- 結果 ----------

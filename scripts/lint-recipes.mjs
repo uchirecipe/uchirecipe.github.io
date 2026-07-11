@@ -180,6 +180,16 @@ for (const { source, recipe } of entries) {
   }
 }
 
+// --- 9c. 手順文の「調味料」まとめ書き(R3: 名前を列挙する。用語説明の全角括弧内は対象外・2026-07-11オーナー指摘で統一) ---
+for (const { source, recipe } of entries) {
+  for (const [idx, step] of (recipe.steps ?? []).entries()) {
+    const outside = (step.text ?? '').replace(/（[^）]*）/g, '')
+    if (/調味料/.test(outside)) {
+      add('中', '調味料まとめ書き', source, recipe.title, `手順${idx + 1}が「調味料」とまとめ書き(名前を列挙すること): 「${step.text}」`)
+    }
+  }
+}
+
 // --- 10. 「器に盛る」だけの単独手順(添え物・盛り方の説明が無ければ前の手順に統合する方針・2026-07-07ユーザー決定) ---
 for (const { source, recipe } of entries) {
   for (const st of recipe.steps) {
