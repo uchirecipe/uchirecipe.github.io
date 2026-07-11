@@ -48,11 +48,17 @@
      上の--chip-*（にんじん=オレンジ等の旧個別マッピング）とは別物。チップ自体が独自の背景色を
      持ち写真の上に重ねる用途のため、ページのテーマ色には依存しない。そのため4テーマとも
      同じ値だが、コントラスト監査をテーマ単位で行き渡らせるためテーマごとに明示している。
-     いずれも--chip-ink(#fffdf8)の文字とのコントラスト比4.5:1以上を確認済み */
+     いずれも--chip-ink(#fffdf8)の文字とのコントラスト比4.5:1以上を確認済み。
+     2026-07-12深夜フィードバックで3色追加（にんじん・トマト系=オレンジ/卵=黄/なす=紫）。
+     新3色も同じ4.5:1基準で確認済み。彩度100%のままだと4.5:1を満たせないオレンジ・黄は、
+     琥珀色寄りの落ち着いた濃さにして基準をクリアしている */
   --chip-food-meat: #c2255c; /* 5.65:1 */
   --chip-food-seafood: #1971c2; /* 5.02:1 */
   --chip-food-vegetable: #256e35; /* 6.25:1 */
   --chip-food-root: #6e5030; /* 7.37:1 */
+  --chip-food-orange: #aa5500; /* 5.15:1 */
+  --chip-food-yellow: #806600; /* 5.41:1 */
+  --chip-food-purple: #8a3ea8; /* 6.19:1 */
 }
 
 /* ダークモード:
@@ -89,6 +95,9 @@
   --chip-food-seafood: #1971c2;
   --chip-food-vegetable: #256e35;
   --chip-food-root: #6e5030;
+  --chip-food-orange: #aa5500;
+  --chip-food-yellow: #806600;
+  --chip-food-purple: #8a3ea8;
 }
 
 /* ブラウンテーマ: ライトとダークの中間くらいの、暖色でやや落ち着いた見た目 */
@@ -106,6 +115,9 @@
   --chip-food-seafood: #1971c2;
   --chip-food-vegetable: #256e35;
   --chip-food-root: #6e5030;
+  --chip-food-orange: #aa5500;
+  --chip-food-yellow: #806600;
+  --chip-food-purple: #8a3ea8;
 }
 
 /* グリーンテーマ: 淡い抹茶系。アクセントは指定値(#6f9440系)から
@@ -122,6 +134,9 @@
   --chip-food-seafood: #1971c2;
   --chip-food-vegetable: #256e35;
   --chip-food-root: #6e5030;
+  --chip-food-orange: #aa5500;
+  --chip-food-yellow: #806600;
+  --chip-food-purple: #8a3ea8;
   --shadow-sm: 0 1px 3px rgb(47 54 40 / 0.14);
   --shadow-md: 0 4px 14px rgb(47 54 40 / 0.18);
 }
