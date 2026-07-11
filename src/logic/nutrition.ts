@@ -59,6 +59,12 @@ export interface ExcludedIngredient {
   reason: ExcludedReason
 }
 
+/** 「少々」「適量」を仮の目安量で計算に含めたときの記録(2026-07-11オーナー要望) */
+export interface AssumedIngredient {
+  name: string
+  note: string // 例: '少々 → 約0.5g/食'
+}
+
 /** 1材料分の計算結果（内訳表示・デバッグ用） */
 export interface IngredientNutrition {
   name: string
@@ -68,6 +74,8 @@ export interface IngredientNutrition {
 }
 
 export interface RecipeNutrition {
+  /** 仮の目安量で計算に含めた材料(UIで必ず明示すること) */
+  assumed: AssumedIngredient[]
   /** レシピ全量（servings人分）の合計 */
   total: NutrientTotals
   /** 1人分（total ÷ servings） */
@@ -228,17 +236,53 @@ function addScaled(target: NutrientTotals, per100g: NutritionPer100g, grams: num
   return target
 }
 
+// 「少々」「適量」の仮の目安量(1食あたりg・概算)。
+// 塩系はmemoの「約◯g」表記があればそれを優先。お好みで表記は食べるか不明なため対象外のまま。
+const OIL_NAMES = /(サラダ油|ごま油|オリーブオイル|オリーブ油|^油$)/
+function matchAssumed(ing: Ingredient): { gramsPerServing: number; note: string } | null {
+  const name = ing.name
+  const amount = ing.amount ?? ''
+  if (/お好みで/.test(name) || /お好みで/.test(amount)) return null
+  if (/少々/.test(amount)) {
+    if (name.includes('塩')) {
+      const m = (ing.memo ?? '').match(/約([\d.]+)g/)
+      const g = m ? Number(m[1]) : 0.5
+      return { gramsPerServing: g, note: `少々 → 約${g}g/食` }
+    }
+    if (name.includes('こしょう')) {
+      return { gramsPerServing: 0.3, note: '少々 → 約0.3g/食' }
+    }
+  }
+  if (/適量/.test(amount) && OIL_NAMES.test(name)) {
+    return { gramsPerServing: 3, note: '適量 → 約3g/食(大さじ1/2を2食で使う想定)' }
+  }
+  return null
+}
+
 /** 材料1行を計算する（対象外なら reason を返す） */
 function computeIngredient(
   ing: Ingredient,
-): { item: IngredientNutrition } | { reason: ExcludedReason } | 'zero' {
+  servings: number,
+): { item: IngredientNutrition; assumed?: AssumedIngredient } | { reason: ExcludedReason } | 'zero' {
   if (isZeroIngredient(ing.name)) return 'zero'
   // 塩もみ・板ずり用の塩は、洗い流し・絞りで大半が食べる分に残らないため計算に含めない(2026-07-11)
   if (ing.name.includes('塩') && /(塩もみ|板ずり)用/.test(ing.memo ?? '')) return { reason: 'prep' }
   const food = matchNutritionFood(ing.name)
   if (!food) return { reason: 'food' }
   const value = parseAmountNumber(ing.amount)
-  if (value === null) return { reason: 'amount' }
+  if (value === null) {
+    // 少々・適量は仮の目安量で計算に含める(2026-07-11オーナー要望。UIで仮定を必ず明示)
+    const assumption = matchAssumed(ing)
+    if (assumption) {
+      const grams = assumption.gramsPerServing * servings
+      const nutrients = addScaled(emptyTotals(), food.per100g, grams)
+      return {
+        item: { name: ing.name, foodLabel: food.label, grams, nutrients },
+        assumed: { name: ing.name, note: assumption.note },
+      }
+    }
+    return { reason: 'amount' }
+  }
   const grams = convertToGrams(value, ing.unit, food)
   if (grams === null) return { reason: 'unit' }
   const nutrients = addScaled(emptyTotals(), food.per100g, grams)
@@ -256,15 +300,17 @@ export function computeRecipeNutrition(
   const total = emptyTotals()
   const items: IngredientNutrition[] = []
   const excluded: ExcludedIngredient[] = []
+  const assumed: AssumedIngredient[] = []
 
   for (const ing of recipe.ingredients) {
     if (!ing.name.trim()) continue
-    const result = computeIngredient(ing)
+    const result = computeIngredient(ing, servings)
     if (result === 'zero') continue
     if ('reason' in result) {
       excluded.push({ name: ing.name, reason: result.reason })
       continue
     }
+    if (result.assumed) assumed.push(result.assumed)
     items.push(result.item)
     total.kcal += result.item.nutrients.kcal
     total.proteinG += result.item.nutrients.proteinG
@@ -280,7 +326,7 @@ export function computeRecipeNutrition(
     carbG: total.carbG / servings,
     saltG: total.saltG / servings,
   }
-  return { total, perServing, servings, items, excluded }
+  return { total, perServing, servings, items, excluded, assumed }
 }
 
 /** 表示用の丸め: kcalは整数、それ以外は小数1桁（概算なのでこれ以上細かくしない） */

@@ -554,6 +554,8 @@ export const ja = {
     saltLabel: '塩分相当量',
     gramUnit: 'g',
     estimateNote: '※ 材料と分量から自動計算しためやすです。調理による変化などは反映しておらず、実際の栄養価とは異なります。',
+    assumedLabel: '仮の目安で計算 {n}件',
+    assumedHint: '分量が「少々」「適量」の材料は、次の仮の量で計算に含めています。',
     excludedLabel: '計算対象外 {n}件',
     excludedHint: '次の材料は、成分データが無い・分量を数値にできない・塩もみなど下ごしらえ用で洗い流す、といった理由で計算に含めていません。',
     sourcePrefix: '出典: ',

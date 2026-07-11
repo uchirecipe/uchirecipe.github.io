@@ -91,6 +91,22 @@ export default function NutritionTeaser({
 
 type Nutrition = ReturnType<typeof computeRecipeNutrition>
 
+/** 仮の目安量で計算に含めた材料一覧（両状態で共通のブロック・2026-07-11） */
+function AssumedBlock({ nutrition }: { nutrition: Nutrition }) {
+  if (nutrition.assumed.length === 0) return null
+  return (
+    <div className="rounded-md border border-edge p-[var(--space-sm)]">
+      <p className="text-sm font-bold text-ink-muted">
+        {ja.nutrition.assumedLabel.replace('{n}', String(nutrition.assumed.length))}
+      </p>
+      <p className="mt-0.5 text-xs text-ink-muted">{ja.nutrition.assumedHint}</p>
+      <p className="mt-0.5 text-sm">
+        {nutrition.assumed.map((a) => `${a.name}（${a.note}）`).join('、')}
+      </p>
+    </div>
+  )
+}
+
 /** 計算対象外の材料一覧（両状態で共通のブロック） */
 function ExcludedBlock({ nutrition }: { nutrition: Nutrition }) {
   if (nutrition.excluded.length === 0) return null
@@ -110,6 +126,7 @@ function ExcludedBlock({ nutrition }: { nutrition: Nutrition }) {
 function LockedBody({ nutrition, isPro }: { nutrition: Nutrition; isPro: boolean }) {
   return (
     <div className="space-y-[var(--space-sm)]">
+      <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
       <p className="text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
       <p className="text-xs text-ink-muted">
@@ -191,6 +208,7 @@ function UnlockedBody({ nutrition, servings }: { nutrition: Nutrition; servings?
         </div>
       </div>
 
+      <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
 
       <p className="text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>

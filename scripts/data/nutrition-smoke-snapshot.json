@@ -65,11 +65,9 @@
       "proteinG": 16.3,
       "fatG": 17.2,
       "carbG": 9.1,
-      "saltG": 0.5
+      "saltG": 1
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "starter:親子丼": {
     "servings": 2,
@@ -91,11 +89,9 @@
       "proteinG": 32.4,
       "fatG": 32.8,
       "carbG": 24.2,
-      "saltG": 2.3
+      "saltG": 2.6
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "starter:鶏の唐揚げ": {
     "servings": 2,
@@ -129,11 +125,9 @@
       "proteinG": 18.8,
       "fatG": 18.3,
       "carbG": 88.4,
-      "saltG": 1.8
+      "saltG": 2.3
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "starter:ペペロンチーノ": {
     "servings": 2,
@@ -152,15 +146,13 @@
   "starter:だし巻き卵": {
     "servings": 2,
     "perServing": {
-      "kcal": 114,
+      "kcal": 141,
       "proteinG": 9.3,
-      "fatG": 7.7,
+      "fatG": 10.6,
       "carbG": 2,
       "saltG": 0.5
     },
-    "excluded": [
-      "サラダ油(amount)"
-    ]
+    "excluded": []
   },
   "starter:豚汁": {
     "servings": 4,
@@ -191,11 +183,9 @@
       "proteinG": 14.6,
       "fatG": 14.5,
       "carbG": 59,
-      "saltG": 2
+      "saltG": 2.5
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "starter:ソース焼きそば": {
     "servings": 2,
@@ -218,11 +208,9 @@
       "proteinG": 4.8,
       "fatG": 10.8,
       "carbG": 25.8,
-      "saltG": 0.5
+      "saltG": 0.7
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "starter:きんぴらごぼう": {
     "servings": 4,
@@ -302,11 +290,9 @@
       "proteinG": 22.5,
       "fatG": 16.7,
       "carbG": 14.6,
-      "saltG": 1.5
+      "saltG": 1.8
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "kintore:鶏ひき肉の豆腐ハンバーグ": {
     "servings": 2,
@@ -315,11 +301,9 @@
       "proteinG": 23.9,
       "fatG": 18.3,
       "carbG": 7.1,
-      "saltG": 0.1
+      "saltG": 0.3
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "kintore:漬けるだけ味玉": {
     "servings": 4,
@@ -352,11 +336,9 @@
       "proteinG": 18.6,
       "fatG": 11.7,
       "carbG": 4,
-      "saltG": 0.4
+      "saltG": 0.6
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "kintore:鶏団子スープ": {
     "servings": 3,
@@ -365,11 +347,9 @@
       "proteinG": 12.7,
       "fatG": 8.2,
       "carbG": 7.3,
-      "saltG": 1.5
+      "saltG": 1.8
     },
-    "excluded": [
-      "塩こしょう(amount)"
-    ]
+    "excluded": []
   },
   "kintore:オートミールバナナパンケーキ": {
     "servings": 1,

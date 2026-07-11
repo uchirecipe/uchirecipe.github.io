@@ -527,6 +527,26 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   )
 }
 
+// ---------- 栄養概算: 少々・適量の仮定値計上(2026-07-11) ----------
+{
+  const { computeRecipeNutrition } = await import('../src/logic/nutrition.ts')
+  const recipe = {
+    servings: 2,
+    ingredients: [
+      { name: '塩こしょう', amount: '少々', unit: '', memo: '1食あたり約0.25gが目安' },
+      { name: 'サラダ油', amount: '適量', unit: '', memo: '大さじ1/2〜1が目安' },
+      { name: '白ごま', amount: 'お好みで', unit: '' },
+      { name: '塩', amount: '少々', unit: '', memo: 'きゅうりの塩もみ用' },
+    ],
+  }
+  const r = computeRecipeNutrition(recipe)
+  eq('塩こしょう少々はmemoの0.25g/食で計上', Math.abs(r.perServing.saltG - 0.25) < 0.02, true)
+  eq('油の適量は仮定3g/食でkcal計上', r.perServing.kcal > 20, true)
+  eq('仮定計上が2件記録される', r.assumed.length, 2)
+  eq('お好みでは計算対象外のまま', r.excluded.some((e) => e.name === '白ごま'), true)
+  eq('塩もみ用の塩はprep除外のまま', r.excluded.some((e) => e.reason === 'prep'), true)
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
