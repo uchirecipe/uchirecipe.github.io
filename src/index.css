@@ -129,13 +129,13 @@
     color: var(--text);
     /* スマホでタップ時のハイライトを控えめに */
     -webkit-tap-highlight-color: transparent;
-    /* 日本語の改行位置を単語相当のまとまりで区切る（「タイ」「マー」のような不自然な分断を防ぐ）。
-       長い英単語やURLは overflow-wrap で折り返すので横はみ出しはしない */
-    word-break: keep-all;
+    /* 長い英単語やURLだけ折り返す。word-break: keep-all は廃止(2026-07-11):
+       keep-allはoverflow-wrapの強制折返しと組み合わさると「、」「。」が行頭に来る禁則違反を
+       Chromium系で起こす(Mac Chrome・Androidでオーナー実害確認)。標準の折返しなら全ブラウザで
+       禁則処理が正しく効く。単語のまとまり優先の折返し(タイマー等の分断防止)はBudouX等の
+       文節区切り導入時に再挑戦する(バックログ) */
     overflow-wrap: break-word;
-    /* 読点「、」等が行頭に来る不自然な折り返しを防ぐ（overflow-wrapの強制折り返しがkeep-allの
-       禁則処理より優先されてしまうケースの対策。Safari実機で「、」が行頭に来る不具合を確認し追加。
-       対応ブラウザでは行末の読点をわずかにはみ出させて表示する） */
+    /* 対応ブラウザ(Safari系)では行末の読点をわずかにはみ出させ、行末を揃える */
     hanging-punctuation: allow-end;
   }
 }
