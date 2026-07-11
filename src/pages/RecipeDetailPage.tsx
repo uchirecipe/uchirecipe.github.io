@@ -194,6 +194,21 @@ export default function RecipeDetailPage() {
   const displayCookMinutes = useQuick
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
     : recipe.cookMinutes
+  // 通常/時短タブに調理時間を併記する（2026-07-11 オーナー実機フィードバック:
+  // どちらが早いか見た目で分かるように）。時間が無い場合はモード名だけのラベルにする
+  const quickModeMinutes = recipe.quickCookMinutes ?? recipe.cookMinutes
+  const normalModeLabel =
+    recipe.cookMinutes != null && recipe.cookMinutes > 0
+      ? ja.detail.modeLabelWithMinutes
+          .replace('{mode}', ja.detail.normalMode)
+          .replace('{n}', String(recipe.cookMinutes))
+      : ja.detail.normalMode
+  const quickModeLabel =
+    quickModeMinutes != null && quickModeMinutes > 0
+      ? ja.detail.modeLabelWithMinutes
+          .replace('{mode}', ja.detail.quickMode)
+          .replace('{n}', String(quickModeMinutes))
+      : ja.detail.quickMode
   // 調理中モードには手順・時間だけ差し替えたレシピを渡す(FocusMode側の変更は不要)
   const focusRecipe = useQuick
     ? { ...recipe, steps: recipe.quickSteps!, cookMinutes: displayCookMinutes }
@@ -405,7 +420,7 @@ export default function RecipeDetailPage() {
                   !quickMode ? 'bg-accent text-app' : 'text-ink-muted'
                 }`}
               >
-                {ja.detail.normalMode}
+                {normalModeLabel}
               </button>
               <button
                 type="button"
@@ -414,7 +429,7 @@ export default function RecipeDetailPage() {
                   quickMode ? 'bg-accent text-app' : 'text-ink-muted'
                 }`}
               >
-                {ja.detail.quickMode}
+                {quickModeLabel}
               </button>
             </div>
           )}

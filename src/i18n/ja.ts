@@ -479,6 +479,8 @@ export const ja = {
     steps: '手順',
     normalMode: '通常',
     quickMode: '時短',
+    /** 通常/時短タブに調理時間を併記するときの形（{mode}=normalMode/quickMode, {n}=分数） */
+    modeLabelWithMinutes: '{mode}（{n}分）',
     servingsUnit: '人分',
     servingsDown: '人数を減らす',
     servingsUp: '人数を増やす',
