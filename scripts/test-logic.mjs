@@ -18,6 +18,7 @@ import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
 import { resolveDuplicateTitleAction } from '../src/logic/backup.ts'
 import { pickMainIngredients } from '../src/logic/mainIngredients.ts'
 import { searchRecipes } from '../src/logic/search.ts'
+import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 
 let passed = 0
 const failures = []
@@ -571,6 +572,23 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   eq('2回呼んでも1回目と同じ結果(二重実行安全)', tappable(second), tappable(first))
   eq('くし形がタップ可能', tappable(first) >= 1, true)
 }
+
+// ---------- ingredientColorToken: 食材カテゴリ別チップ色(2026-07-11オーナー実機フィードバック) ----------
+eq('鶏もも肉は肉カテゴリ', ingredientColorToken('鶏もも肉'), '--chip-food-meat')
+eq('豚バラ薄切り肉は肉カテゴリ(読み辞書変換後も一致)', ingredientColorToken('豚バラ薄切り肉'), '--chip-food-meat')
+eq('牛こま切れ肉は肉カテゴリ(読み辞書変換後も一致)', ingredientColorToken('牛こま切れ肉'), '--chip-food-meat')
+// 牛乳はtoHiragana()で「ぎゅうにゅう」に変換されるため、肉カテゴリの「ぎゅう」に
+// 誤ヒットしないことを確認する回帰ケース(実装時に発覚した衝突)
+eq('牛乳は肉カテゴリに誤分類されない', ingredientColorToken('牛乳'), '--chip-neutral')
+eq('生鮭(切り身)は魚介カテゴリ(読み辞書変換後も一致)', ingredientColorToken('生鮭(切り身)'), '--chip-food-seafood')
+eq('むきえびは魚介カテゴリ', ingredientColorToken('むきえび'), '--chip-food-seafood')
+eq('玉ねぎは根菜カテゴリ(茶)', ingredientColorToken('玉ねぎ'), '--chip-food-root')
+eq('にんじんは根菜カテゴリ', ingredientColorToken('にんじん'), '--chip-food-root')
+eq('しめじは根菜カテゴリ(きのこ)', ingredientColorToken('しめじ'), '--chip-food-root')
+eq('長ねぎは野菜カテゴリ(玉ねぎと違い根菜にはしない)', ingredientColorToken('長ねぎ'), '--chip-food-vegetable')
+eq('キャベツは野菜カテゴリ', ingredientColorToken('キャベツ'), '--chip-food-vegetable')
+eq('卵はカテゴリ外でニュートラル', ingredientColorToken('卵'), '--chip-neutral')
+eq('豆腐はカテゴリ外でニュートラル', ingredientColorToken('豆腐'), '--chip-neutral')
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

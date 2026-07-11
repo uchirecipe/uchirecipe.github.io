@@ -31,7 +31,8 @@
   --shadow-sm: 0 1px 3px rgb(67 54 42 / 0.08);
   --shadow-md: 0 4px 14px rgb(67 54 42 / 0.12);
 
-  /* 食材チップ色（一覧カードの主要食材チップ専用。にんじん=オレンジ 等の簡易マッピング） */
+  /* 食材チップ色（一覧カードの主要食材チップ専用。にんじん=オレンジ 等の簡易マッピング。
+     logic/seasoningGroup.ts・pages/CookNaviPage.tsxの色分けにも流用している） */
   --chip-orange: #e8590c;
   --chip-pink: #e64980;
   --chip-red: #c92a2a;
@@ -41,6 +42,17 @@
   --chip-green: #2f9e44;
   --chip-neutral: #8c7b69;
   --chip-ink: #fffdf8; /* 食材チップの文字色（どのテーマでも彩度の高いチップ背景の上で読める色） */
+
+  /* 食材カテゴリ別チップ色（logic/ingredientColor.ts専用。2026-07-11オーナー実機フィードバック:
+     肉=ピンク/魚介=青/野菜=緑/根菜・玉ねぎ・きのこ=茶、それ以外は既存のchip-neutralを使う）。
+     上の--chip-*（にんじん=オレンジ等の旧個別マッピング）とは別物。チップ自体が独自の背景色を
+     持ち写真の上に重ねる用途のため、ページのテーマ色には依存しない。そのため4テーマとも
+     同じ値だが、コントラスト監査をテーマ単位で行き渡らせるためテーマごとに明示している。
+     いずれも--chip-ink(#fffdf8)の文字とのコントラスト比4.5:1以上を確認済み */
+  --chip-food-meat: #c2255c; /* 5.65:1 */
+  --chip-food-seafood: #1971c2; /* 5.02:1 */
+  --chip-food-vegetable: #256e35; /* 6.25:1 */
+  --chip-food-root: #6e5030; /* 7.37:1 */
 }
 
 /* ダークモード:
@@ -70,6 +82,13 @@
   --border: #3d3327;
   --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.4);
   --shadow-md: 0 4px 14px rgb(0 0 0 / 0.5);
+  /* 食材カテゴリチップは:root(ライト)と同値。写真の上に重ねる独自背景色のバッジで、
+     ページ背景の影響を受けないため変える必要が無いが、テーマ単位のコントラスト監査の
+     ためにここでも明示している(2026-07-11) */
+  --chip-food-meat: #c2255c;
+  --chip-food-seafood: #1971c2;
+  --chip-food-vegetable: #256e35;
+  --chip-food-root: #6e5030;
 }
 
 /* ブラウンテーマ: ライトとダークの中間くらいの、暖色でやや落ち着いた見た目 */
@@ -83,6 +102,10 @@
   --border: #d8c4a0;
   --shadow-sm: 0 1px 3px rgb(64 48 31 / 0.14);
   --shadow-md: 0 4px 14px rgb(64 48 31 / 0.18);
+  --chip-food-meat: #c2255c;
+  --chip-food-seafood: #1971c2;
+  --chip-food-vegetable: #256e35;
+  --chip-food-root: #6e5030;
 }
 
 /* グリーンテーマ: 淡い抹茶系。アクセントは指定値(#6f9440系)から
@@ -95,6 +118,10 @@
   --surface: #fbfdf7;
   --text-muted: #66735a;
   --border: #d9e2c8;
+  --chip-food-meat: #c2255c;
+  --chip-food-seafood: #1971c2;
+  --chip-food-vegetable: #256e35;
+  --chip-food-root: #6e5030;
   --shadow-sm: 0 1px 3px rgb(47 54 40 / 0.14);
   --shadow-md: 0 4px 14px rgb(47 54 40 / 0.18);
 }
