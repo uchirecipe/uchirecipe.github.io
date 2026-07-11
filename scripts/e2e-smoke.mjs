@@ -244,6 +244,46 @@ try {
     }
   }
 
+  // --- IPAD-01: iPadで「戻る」ヘッダーがマルチタスク操作ボタンに被らない
+  // (オーナー実機フィードバック 2026-07-12: 「iPadから表示すると、画面サイズボタンと
+  // 『戻る』ボタンが被る」→ iPad判定(:root.is-ipad)で上部に余白を足す対策の配線検証)。
+  // PlaywrightのiPadエミュレーションはmaxTouchPoints=0を返すため、検出値は注入する
+  // (検出式→クラス付与→CSS余白、の配線が壊れたら落ちる回帰テスト) ---
+  currentCheck = 'IPAD-01'
+  {
+    const ipadBrowser = await webkit.launch()
+    const ipadCtx = await ipadBrowser.newContext({
+      viewport: { width: 820, height: 1180 },
+      userAgent:
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15',
+    })
+    const ipadPage = await ipadCtx.newPage()
+    await ipadPage.addInitScript(() => {
+      Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5 })
+    })
+    try {
+      await ipadPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ipadPage.waitForTimeout(1800)
+      check(
+        'IPAD-01 iPad判定クラスが:rootに付く',
+        await ipadPage.evaluate(() => document.documentElement.classList.contains('is-ipad')),
+      )
+      await ipadPage.evaluate(() => {
+        const link = document.querySelector('a[href^="#/recipes/"]')
+        if (link instanceof HTMLElement) link.click()
+      })
+      await ipadPage.waitForTimeout(600)
+      const padTop = await ipadPage.evaluate(() => {
+        const h = document.querySelector('.back-header')
+        return h ? parseFloat(getComputedStyle(h).paddingTop) : -1
+      })
+      check('IPAD-01 戻るヘッダーに上部余白が付く(22px+)', padTop >= 22, `paddingTop=${padTop}`)
+    } finally {
+      await ipadBrowser.close()
+    }
+  }
+  // 逆条件: 通常のスマホ(iPhone SE2相当)ではiPad用の余白が付かないこと(LOG-01のページで検証)
+
   // --- LOG-01: 「作った！」記録フォームの窓表示化(オーナー実機フィードバック 2026-07-12。
   // 「『作った！』の位置が最下層のため、押下すると画面全体の表示が動いて見づらい」
   // 「『作った！』の日付入力のバーの大きさが、はみだしている」の再発防止)。

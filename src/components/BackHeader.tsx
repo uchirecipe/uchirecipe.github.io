@@ -45,7 +45,7 @@ export default function BackHeader({ fallback, title, onTitleClick, right, alway
   }
 
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-1 bg-app/95 px-[var(--space-sm)] py-2 backdrop-blur">
+    <div className="back-header sticky top-0 z-10 flex items-center gap-1 bg-app/95 px-[var(--space-sm)] py-2 backdrop-blur">
       <button
         type="button"
         onClick={goBack}
