@@ -139,8 +139,7 @@
       "saltG": 0
     },
     "excluded": [
-      "パセリ(amount)",
-      "塩(amount)"
+      "パセリ(amount)"
     ]
   },
   "starter:だし巻き卵": {
