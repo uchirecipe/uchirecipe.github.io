@@ -490,6 +490,43 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   eq('句読点止まりの直前は結合しない仕様の確認(ゆで上がりの=5文字は結合)', bond2.bondPrev, 'ゆで上がりの')
 }
 
+// ---------- termSplit: 用語タップ辞書の最長一致分割(2026-07-11) ----------
+{
+  const { findTermMatches, splitByTerms, collectUniqueTerms } = await import(
+    '../src/logic/termSplit.ts'
+  )
+
+  // 最長一致: 「さいの目切り」は辞書のterm本体(6文字)であり、alias「さいの目」(4文字)より
+  // 優先してマッチすること(短い方でマッチして「切り」が地の文に取り残されないか確認)
+  const saiNoMe = findTermMatches('大根はさいの目切りにする')
+  eq('最長一致でさいの目切り全体が1マッチになる', saiNoMe.length === 1 && saiNoMe[0].text, 'さいの目切り')
+
+  // ひらがな表記ゆれ(alias)経由でもマッチする(「アク」のalias「あく」)
+  const akuAlias = findTermMatches('あくを取り除く')
+  eq('ひらがな表記ゆれ(あく)もアクの用語としてマッチ', akuAlias.length === 1 && akuAlias[0].term.term, 'アク')
+
+  // 同じ語は最初の1回だけタップ可能(手順の本文とmemoで集合を共有する想定)
+  const seen = new Set()
+  const inText = splitByTerms('小口切りにしてから炒める。', seen)
+  const inMemo = splitByTerms('小口切りは端から薄く切ること。', seen)
+  const firstTermSeg = inText.find((s) => s.type === 'term')
+  const secondTermSeg = inMemo.find((s) => s.type === 'term')
+  eq('1回目の小口切りはタップ可能', firstTermSeg?.tappable, true)
+  eq('2回目(memo側)の小口切りはタップ不可', secondTermSeg?.tappable, false)
+
+  // 辞書語を含まないテキストはそのまま1つのtextセグメントで素通しする(データ改変なし)
+  const plain = '特に辞書語を含まない普通の文章です'
+  eq('非用語テキストは無加工で素通し', splitByTerms(plain, new Set()), [{ type: 'text', text: plain }])
+
+  // 調理中モードのチップ欄: text+memo両方から辞書語をユニークに集める
+  const uniqueTerms = collectUniqueTerms('小口切りにしたきゅうりを板ずりする。', '小口切りは飾り用。')
+  eq(
+    'text+memo横断でユニークな用語一覧(順序維持・重複なし)',
+    uniqueTerms.map((t) => t.term),
+    ['小口切り', '板ずり'],
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
