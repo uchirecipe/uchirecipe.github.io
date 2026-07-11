@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -176,6 +176,28 @@ export default function MealPlanPage() {
       .map((id) => recipeById.get(id))
       .filter((r): r is Recipe => r !== undefined)
   }, [todayList, todayFromPlanIds, recipeById])
+
+  // 献立タブを開いたときの初期表示位置(2026-07-12オーナー指示): 今日の献立に入力があれば
+  // 先頭(今日の献立セクションが最上部なので何もしなくてよい)／今日は空だが今週の献立に
+  // 入力があれば「今週の献立」見出しまでスクロール／どちらも空なら先頭のまま。
+  // todayList・entriesが両方確定してから一度だけ判定する(liveQueryの再評価のたびに
+  // 動かないよう、初回1回のみに固定するためinitialScrollRefで守る)
+  const weekHeadingRef = useRef<HTMLHeadingElement | null>(null)
+  const initialScrollRef = useRef(false)
+  useEffect(() => {
+    if (initialScrollRef.current) return
+    if (todayList === undefined || entries === undefined) return // データ確定待ち
+    initialScrollRef.current = true
+    if (todayList.length > 0) return // 今日の献立あり→先頭(今日の献立セクション)のまま
+    if (entries.length === 0) return // 今週の献立も空→先頭のまま
+    // 今日は空・今週には入力がある→「今週の献立」見出しまでスクロール
+    // (レイアウト確定を待つため2フレーム分遅らせる。一覧の復元と同じ対策)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        weekHeadingRef.current?.scrollIntoView({ block: 'start' })
+      })
+    })
+  }, [todayList, entries])
 
   const [quickOnly, setQuickOnly] = useState(false)
   const [message, setMessage] = useState('')
@@ -487,7 +509,9 @@ export default function MealPlanPage() {
       {viewMode === 'week' && (
       <>
       {/* 今週の献立 */}
-      <h2 className="mt-[var(--space-lg)] text-xl font-bold">{ja.mealPlan.weekTitle}</h2>
+      <h2 ref={weekHeadingRef} className="mt-[var(--space-lg)] text-xl font-bold">
+        {ja.mealPlan.weekTitle}
+      </h2>
 
       {/* 週の移動 */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
