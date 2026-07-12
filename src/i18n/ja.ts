@@ -324,6 +324,9 @@ export const ja = {
     backupImportDone: '{n}品のレシピを読み込みました',
     backupImportMergeResult: '追加{a}件・スキップ{s}件',
     backupImportError: 'ファイルを読み込めませんでした。うちレシピのバックアップファイルか確認してください',
+    priceMasterTitle: '食材と価格',
+    priceMasterDescription: '頻出食材の目安価格を登録・編集できます。材料に価格を入れていないレシピの概算食費に使われます',
+    priceMasterLink: '食材と価格を編集する',
   },
   effort: {
     easy: '超簡単',
@@ -447,6 +450,11 @@ export const ja = {
     tagPlaceholder: '例: 和食、作り置き など',
     addTag: '追加',
     removeTag: 'タグを外す',
+    keywordsLabel: '検索キーワード（任意）',
+    keywordsDescription: '一覧や詳細には表示されません。検索だけに使われます',
+    keywordPlaceholder: '例: チンジャオロース、おつまみ など',
+    addKeyword: '追加',
+    removeKeyword: 'キーワードを外す',
     memoLabel: 'メモ',
     memoPlaceholder: '気づいたこと・アレンジなどを自由に',
     sourceUrlLabel: '参照元URL（任意）',
@@ -595,6 +603,40 @@ export const ja = {
     notificationBody: '「{label}」のタイマーが終わりました',
     notice:
       'タイマーの通知と音は、アプリを開いている間だけ動きます（アプリの仕組み上の制限です）',
+    // 実行中タイマーの±調整(窓方式。2026-07-12タイマー自由設定バッチ・Fable設計docs/20 §6)。
+    // 常駐バー・調理中モードの動作中タイマー表示をタップすると開く窓の文言
+    adjustOpenAria: '{label}のタイマーを調整',
+    adjustDialogTitle: 'タイマーを調整',
+    plusOneMinute: '+1分',
+    minusThirtySeconds: '−30秒',
+    stopTimer: '停止',
+    // じぶんタイマー(自由な分数で始めるタイマー。同バッチ)。ラベルは常にこの文言(レシピ名にしない)
+    customLabel: 'じぶんタイマー',
+    customOpenAria: 'じぶんタイマーを開く',
+    customBarButton: 'じぶんタイマー',
+    customStart: '開始',
+    customMinutesDown: 'じぶんタイマーの分数を減らす',
+    customMinutesUp: 'じぶんタイマーの分数を増やす',
+  },
+  // 食材価格マスタ「食材と価格」画面(docs/20 §3)。詳細・献立の概算食費が
+  // マスタ価格を使ったときの注記(mixedNote)はRecipeDetailPage・MealPlanPageの両方から参照する
+  priceMaster: {
+    title: '食材と価格',
+    disclaimer: '価格は目安です。地域やお店で差があります。自由に書き換えられます',
+    mixedNote: '一部は目安価格から計算しています',
+    empty: 'まだ食材が登録されていません',
+    nameLabel: '食材名',
+    namePlaceholder: '例: 玉ねぎ',
+    priceLabel: '価格（円）',
+    pricePlaceholder: '例: 50',
+    unitLabel: '単位（数量＋単位）',
+    unitPlaceholder: '例: 1個、100g',
+    add: '追加',
+    edit: 'この食材を編集',
+    save: '保存する',
+    cancel: 'やめる',
+    remove: 'この食材を削除',
+    priceYen: '円',
   },
 } as const
 

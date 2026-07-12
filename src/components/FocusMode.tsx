@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
+import { useSettings, updateSettings } from '../db/settings'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/time'
 import { collectUniqueTerms } from '../logic/termSplit'
@@ -21,7 +22,11 @@ import StepBadge from './StepBadge'
 import TimeText from './TimeText'
 import TermText from './TermText'
 import TermPopover, { useTermPopover } from './TermPopover'
+import TimerAdjustModal from './TimerAdjustModal'
+import CustomTimerModal from './CustomTimerModal'
 import { ja } from '../i18n/ja'
+
+const DEFAULT_CUSTOM_TIMER_MINUTES = 3
 
 type Props = {
   recipe: Recipe
@@ -42,11 +47,17 @@ const micSupported =
  * 「画面を暗くしない」設定は詳細画面(呼び出し元)側のWake Lockがそのまま効く。
  */
 export default function FocusMode({ recipe, recipeId, initialStep, onClose, onComplete }: Props) {
-  const { startTimer, timers, now, dismissTimer } = useTimers()
+  const { startTimer, timers, now, dismissTimer, adjustTimer } = useTimers()
+  const settings = useSettings()
   const [index, setIndex] = useState(initialStep)
   const [speaking, setSpeaking] = useState(false)
   const [listening, setListening] = useState(false)
   const touchStartX = useRef<number | null>(null)
+  // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
+  const [adjustingId, setAdjustingId] = useState<number | null>(null)
+  // じぶんタイマー（自由な分数で始めるタイマー。同バッチ）の窓
+  const [customTimerOpen, setCustomTimerOpen] = useState(false)
+  const [customMinutes, setCustomMinutes] = useState(DEFAULT_CUSTOM_TIMER_MINUTES)
 
   const total = recipe.steps.length
   const step = recipe.steps[index]
@@ -59,6 +70,25 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   // 調理中モードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
   // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)
   const recipeTimers = timers.filter((t) => t.recipeId === recipeId)
+  const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
+
+  const openCustomTimer = () => {
+    setCustomMinutes(settings?.lastCustomTimerMinutes ?? DEFAULT_CUSTOM_TIMER_MINUTES)
+    setCustomTimerOpen(true)
+  }
+
+  const startCustomTimer = () => {
+    void updateSettings({ lastCustomTimerMinutes: customMinutes })
+    const seconds = customMinutes * 60
+    startTimer({
+      key: `custom-${recipeId}-${seconds}`,
+      label: ja.timer.customLabel,
+      seconds,
+      recipeId,
+      stepNumber,
+    })
+    setCustomTimerOpen(false)
+  }
 
   // 音声認識のコールバックは初期化時のクロージャで固定されるため、
   // 最新の手順位置・startTimerを常にrefで参照して古い値を掴まないようにする
@@ -284,38 +314,56 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         </p>
       )}
 
-      {recipeTimers.length > 0 && (
-        <div className="flex flex-wrap justify-center gap-2 px-[var(--space-md)] pb-1">
-          {recipeTimers.map((t) => (
-            <div
-              key={t.id}
-              className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
-                t.done ? 'border-warning text-warning' : 'border-accent text-accent'
-              }`}
+      {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋じぶんタイマー起動ボタン(2026-07-12・入口B)。
+          タイマーが無い時も「じぶんタイマー」ボタンの置き場所として常に表示する */}
+      <div className="flex flex-wrap items-center justify-center gap-2 px-[var(--space-md)] pb-1">
+        {recipeTimers.map((t) => (
+          <div
+            key={t.id}
+            className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
+              t.done ? 'border-warning text-warning' : 'border-accent text-accent'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => (t.done ? goTo(t.stepNumber - 1) : setAdjustingId(t.id))}
+              aria-label={
+                t.done
+                  ? ja.timer.stepLabel.replace('{n}', String(t.stepNumber))
+                  : ja.timer.adjustOpenAria.replace(
+                      '{label}',
+                      t.stepNumber > 0
+                        ? `${t.label}・${ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}`
+                        : t.label,
+                    )
+              }
+              className="flex items-center gap-1.5"
             >
-              <button
-                type="button"
-                onClick={() => goTo(t.stepNumber - 1)}
-                aria-label={ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}
-                className="flex items-center gap-1.5"
-              >
-                <StepBadge number={t.stepNumber} size={24} />
-                <span className="text-lg font-bold tabular-nums">
-                  {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => dismissTimer(t.id)}
-                aria-label={ja.timer.dismiss}
-                className="rounded-full p-1.5"
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+              <StepBadge number={t.stepNumber > 0 ? t.stepNumber : 'custom'} size={24} />
+              <span className="text-lg font-bold tabular-nums">
+                {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => dismissTimer(t.id)}
+              aria-label={ja.timer.dismiss}
+              className="rounded-full p-1.5"
+            >
+              <X size={16} aria-hidden />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={openCustomTimer}
+          aria-label={ja.timer.customOpenAria}
+          className="inline-flex items-center gap-1 rounded-full border border-accent px-3 py-1.5 text-sm font-bold text-accent"
+        >
+          <TimerIcon size={16} aria-hidden />
+          {ja.timer.customBarButton}
+        </button>
+      </div>
 
       <div
         className="flex flex-1 flex-col items-center justify-center gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] py-[var(--space-md)] text-center"
@@ -428,6 +476,25 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         )}
       </div>
       <TermPopover state={termPopoverState} onClose={closeTermPopover} />
+      <TimerAdjustModal
+        timer={adjustingTimer}
+        now={now}
+        onAdjust={(delta) => {
+          if (adjustingId !== null) adjustTimer(adjustingId, delta)
+        }}
+        onStop={() => {
+          if (adjustingId !== null) dismissTimer(adjustingId)
+          setAdjustingId(null)
+        }}
+        onClose={() => setAdjustingId(null)}
+      />
+      <CustomTimerModal
+        open={customTimerOpen}
+        minutes={customMinutes}
+        onMinutesChange={setCustomMinutes}
+        onStart={startCustomTimer}
+        onClose={() => setCustomTimerOpen(false)}
+      />
     </div>
   )
 }

@@ -19,10 +19,12 @@ import {
 } from 'lucide-react'
 import { db } from '../db/db'
 import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
-import { useSettings } from '../db/settings'
+import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
+import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
+import { buildPriceIndex, estimateRecipeCost } from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard } from '../logic/share'
 import { deriveDoneLabel } from '../logic/timerLabel'
@@ -33,6 +35,7 @@ import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import BackHeader from '../components/BackHeader'
 import CookedLogModal from '../components/CookedLogModal'
+import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import NutritionTeaser from '../components/NutritionTeaser'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
@@ -70,6 +73,8 @@ export default function RecipeDetailPage() {
   const { startTimer, timers } = useTimers()
   const todayList = useTodayList()
   const isInTodayList = todayList?.some((item) => item.recipeId === id) ?? false
+  // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
+  const priceEntries = usePriceEntries()
 
   // 一覧からの遷移でスクロール位置が引き継がれることがあるため、詳細を開いたら必ず先頭から
   // 表示する（2026-07-11 オーナー実機フィードバック）。?step= の自動スクロールより先に効くよう
@@ -133,6 +138,10 @@ export default function RecipeDetailPage() {
   // 時短モード（レンジ活用など、通常より手早い代替手順がある料理だけ切り替えを表示。表示中だけの一時的な選択）
   const [quickMode, setQuickMode] = useState(false)
 
+  // じぶんタイマー（自由な分数で始めるタイマー。2026-07-12タイマー自由設定・入口A）の窓
+  const [customTimerOpen, setCustomTimerOpen] = useState(false)
+  const [customMinutes, setCustomMinutes] = useState(3)
+
   // 用語タップ辞書(2026-07-11): ポップオーバーの開閉はページ単位で1つ持つ
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
 
@@ -154,10 +163,9 @@ export default function RecipeDetailPage() {
   // NG食材（アレルギー・苦手）に引っかかる材料の行番号
   const ngIndices = ngMatchedIndices(recipe.ingredients, settings?.ngIngredients ?? [])
 
-  const totalPrice = recipe.ingredients.reduce(
-    (sum, i) => sum + (i.price ?? 0),
-    0,
-  )
+  // 材料ごとの価格入力を優先し、未入力の材料だけ食材価格マスタで補う（優先度: 個別入力>マスタ>なし）
+  const costEstimate = estimateRecipeCost(recipe.ingredients, buildPriceIndex(priceEntries ?? []))
+  const totalPrice = costEstimate.total
   const scaledPrice =
     recipe.servings > 0
       ? Math.round((totalPrice * servings) / recipe.servings)
@@ -176,6 +184,26 @@ export default function RecipeDetailPage() {
     setEditingLogIndex(index)
     setEditingLogDate(date)
     setEditingLogNote(note ?? '')
+  }
+
+  // じぶんタイマー（入口A: BackHeaderのタイマーアイコン）。詳細画面はFocusModeと違い
+  // 「今見ている手順」の概念が無いため、どの手順にも紐付かないタイマーとして起動する
+  const openCustomTimer = () => {
+    setCustomMinutes(settings?.lastCustomTimerMinutes ?? 3)
+    setCustomTimerOpen(true)
+  }
+
+  const startCustomTimer = () => {
+    void updateSettings({ lastCustomTimerMinutes: customMinutes })
+    const seconds = customMinutes * 60
+    startTimer({
+      key: `custom-${id}-${seconds}`,
+      label: ja.timer.customLabel,
+      seconds,
+      recipeId: id,
+      stepNumber: 0,
+    })
+    setCustomTimerOpen(false)
   }
 
   const saveEditingLog = async () => {
@@ -260,6 +288,16 @@ export default function RecipeDetailPage() {
             >
               <Heart size={22} fill={recipe.isFavorite ? 'currentColor' : 'none'} aria-hidden />
             </button>
+            {/* じぶんタイマー入口A（2026-07-12タイマー自由設定・Fable設計docs/20 §6）:
+                料理名横に常設の入口を置く。フローティングボタンは不採用（オーナー裁定） */}
+            <button
+              type="button"
+              onClick={openCustomTimer}
+              aria-label={ja.timer.customOpenAria}
+              className="rounded-full p-3 text-accent"
+            >
+              <TimerIcon size={22} aria-hidden />
+            </button>
           </div>
         }
       />
@@ -312,6 +350,10 @@ export default function RecipeDetailPage() {
             </span>
           )}
         </div>
+        {/* 概算食費の一部が食材価格マスタ由来のとき（docs/20 §3） */}
+        {costEstimate.fromMasterCount > 0 && (
+          <p className="mt-1 text-xs text-ink-muted">{ja.priceMaster.mixedNote}</p>
+        )}
 
         {/* タグ */}
         {recipe.tags.length > 0 && (
@@ -713,6 +755,13 @@ export default function RecipeDetailPage() {
         onNoteChange={setLogNote}
         onSave={saveLog}
         onClose={() => setLogOpen(false)}
+      />
+      <CustomTimerModal
+        open={customTimerOpen}
+        minutes={customMinutes}
+        onMinutesChange={setCustomMinutes}
+        onStart={startCustomTimer}
+        onClose={() => setCustomTimerOpen(false)}
       />
     </div>
   )

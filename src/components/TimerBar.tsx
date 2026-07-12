@@ -1,15 +1,28 @@
+import { useState } from 'react'
 import { X, BellRing, Bell, BellOff } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useTimers } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
 import StepBadge from './StepBadge'
+import TimerAdjustModal from './TimerAdjustModal'
 import { ja } from '../i18n/ja'
 
 /** 起動中タイマーの常駐表示（タブナビのすぐ上に出る。どの画面でも見える） */
 export default function TimerBar() {
-  const { timers, now, flashingId, showFirstTimeNotice, dismissFirstTimeNotice, dismissTimer, toggleMute } =
-    useTimers()
+  const {
+    timers,
+    now,
+    flashingId,
+    showFirstTimeNotice,
+    dismissFirstTimeNotice,
+    dismissTimer,
+    toggleMute,
+    adjustTimer,
+  } = useTimers()
   const navigate = useNavigate()
+  // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
+  const [adjustingId, setAdjustingId] = useState<number | null>(null)
+  const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
   if (timers.length === 0) return null
 
   /** タップで該当レシピの該当手順へ（詳細画面側でスクロール＆一時ハイライトする） */
@@ -39,18 +52,29 @@ export default function TimerBar() {
         {timers.map((timer) => {
           const remaining = Math.ceil((timer.endsAt - now) / 1000)
           const isFlashing = flashingId === timer.id
+          // ±調整の窓を開くボタンの読み上げ名（複数タイマー同時進行でも区別できるよう手順番号を含める。
+          // 手順に紐付かないじぶんタイマーはラベルのみ）
+          const adjustAriaLabel = ja.timer.adjustOpenAria.replace(
+            '{label}',
+            timer.stepNumber > 0
+              ? `${timer.label}・${ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))}`
+              : timer.label,
+          )
           return (
             <button
               key={timer.id}
               type="button"
-              onClick={() => goToStep(timer.recipeId, timer.stepNumber)}
+              onClick={() =>
+                timer.done ? goToStep(timer.recipeId, timer.stepNumber) : setAdjustingId(timer.id)
+              }
+              aria-label={timer.done ? undefined : adjustAriaLabel}
               className={`flex w-full items-center gap-2 rounded-md border px-[var(--space-md)] py-2 text-left shadow-md transition-transform ${
                 timer.done
                   ? 'border-warning bg-surface text-warning'
                   : 'border-edge bg-surface'
               } ${isFlashing ? 'animate-pulse ring-2 ring-accent' : ''}`}
             >
-              <StepBadge number={timer.stepNumber} size={28} />
+              <StepBadge number={timer.stepNumber > 0 ? timer.stepNumber : 'custom'} size={28} />
               {timer.done && <BellRing size={18} className="shrink-0 animate-pulse" aria-hidden />}
               <span className="min-w-0 flex-1 truncate text-sm font-bold">{timer.label}</span>
               <span className="text-lg font-bold tabular-nums">
@@ -98,6 +122,18 @@ export default function TimerBar() {
           )
         })}
       </div>
+      <TimerAdjustModal
+        timer={adjustingTimer}
+        now={now}
+        onAdjust={(delta) => {
+          if (adjustingId !== null) adjustTimer(adjustingId, delta)
+        }}
+        onStop={() => {
+          if (adjustingId !== null) dismissTimer(adjustingId)
+          setAdjustingId(null)
+        }}
+        onClose={() => setAdjustingId(null)}
+      />
     </div>
   )
 }

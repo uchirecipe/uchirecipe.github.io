@@ -1,5 +1,8 @@
+import { Timer } from 'lucide-react'
+
 type Props = {
-  number: number
+  /** 'custom' = 手順に紐付かないタイマー(じぶんタイマー)用。数字の代わりにタイマーアイコンを出す */
+  number: number | 'custom'
   size?: number
 }
 
@@ -10,7 +13,7 @@ export default function StepBadge({ number, size = 32 }: Props) {
       className="flex shrink-0 items-center justify-center rounded-full bg-accent font-bold text-app"
       style={{ width: size, height: size, fontSize: Math.round(size * 0.5) }}
     >
-      {number}
+      {number === 'custom' ? <Timer size={Math.round(size * 0.55)} aria-hidden /> : number}
     </span>
   )
 }

@@ -82,6 +82,12 @@ export interface Recipe {
    * 「玉ねぎ」「タマネギ」「たまねぎ」のゆらぎを吸収するために保存時に自動生成する。
    */
   searchWords: string[]
+  /**
+   * 検索キーワード（任意・ユーザー入力）。一覧・詳細には表示せず、検索のヒット対象にのみ使う
+   * （別名・表記ゆれ・気分語などをタグに出さずに検索だけ効かせたいときのための欄）。
+   * logic/kana.ts の buildSearchWords がひらがな正規化して searchWords へ合流させる。
+   */
+  keywords?: string[]
   /** 同梱の基本レシピなら true（将来の件数制限のカウント外にする） */
   isStarter?: boolean
   /** 配布レシピセットから読み込んだ場合、そのセットのID（例: "kintore"） */
@@ -227,6 +233,13 @@ export interface Settings {
    * この項目が導入される前からの既存ユーザーには 0（=とっくに初日を過ぎている扱い）を入れる
    */
   firstLaunchAt?: number
+  /**
+   * じぶんタイマー(自由な分数のタイマー)で最後に使った分数(2026-07-12・タイマー自由設定)。
+   * 次回開くときの既定値にする。未設定(初回)は呼び出し側で3分を既定値として扱う
+   */
+  lastCustomTimerMinutes?: number
+  /** 食材価格マスタ（頻出食材の目安価格）の初期投入が済んでいるか */
+  priceMasterSeeded: boolean
 }
 
 export const defaultSettings: Settings = {
@@ -243,6 +256,23 @@ export const defaultSettings: Settings = {
   homeWidgets: defaultHomeWidgets,
   ingredientReadingsVersion: 0,
   searchIndexVersion: 0,
+  priceMasterSeeded: false,
+}
+
+/**
+ * 食材価格マスタの1件（「食材と価格」画面で編集する目安価格）。
+ * 地域・店舗で差があるため、あくまで概算食費計算のフォールバック用の目安値として扱う。
+ */
+export interface PriceEntry {
+  id?: number
+  /** 食材名 */
+  name: string
+  /** 単価（円） */
+  pricePerUnit: number
+  /** 単価の基準（例:「100g」「1個」「1本」など、数量＋単位の自由記述） */
+  unit: string
+  /** 最終更新日時（ミリ秒） */
+  updatedAt: number
 }
 
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */
@@ -264,4 +294,5 @@ export type RecipeInput = Pick<
   | 'showIconInsteadOfPhoto'
   | 'season'
   | 'suitableFor'
+  | 'keywords'
 >

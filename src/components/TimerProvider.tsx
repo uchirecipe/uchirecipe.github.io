@@ -26,7 +26,10 @@ export interface ActiveTimer {
   /** 終了時に表示する文言（例: "煮込み終わり"）。判別できなければ既定の「終わり」 */
   doneLabel: string
   recipeId: number
-  /** 手順番号（1始まり。常駐タイマーのタップ先スクロールに使う） */
+  /**
+   * 手順番号（1始まり。常駐タイマーのタップ先スクロールに使う）。
+   * 0 = どの手順にも紐付かない（じぶんタイマーなど自由起動のタイマー）
+   */
   stepNumber: number
   /** 終了予定時刻（ミリ秒） */
   endsAt: number
@@ -58,6 +61,12 @@ interface TimerContextValue {
   startTimer: (options: StartTimerOptions) => void
   dismissTimer: (id: number) => void
   toggleMute: (id: number) => void
+  /**
+   * 実行中タイマーの残り時間を調整する（±調整の窓。2026-07-12タイマー自由設定）。
+   * 完了済み(done)のタイマーには効かない。残りが0を下回る調整は0で止め、即完了扱いにはしない
+   * （0になったら通常どおり次のtickで完了フローに乗る）
+   */
+  adjustTimer: (id: number, deltaSeconds: number) => void
 }
 
 const TimerContext = createContext<TimerContextValue | null>(null)
@@ -68,7 +77,9 @@ let nextTimerId = 1
 function playChime(ctx: AudioContext | undefined) {
   try {
     const audio = ctx ?? new AudioContext()
-    void audio.resume()
+    void audio.resume().catch(() => {
+      /* 無視（ユーザー操作なしのresumeはブラウザによって拒否されることがある） */
+    })
     for (let i = 0; i < 3; i++) {
       const at = audio.currentTime + i * 0.45
       const osc = audio.createOscillator()
@@ -99,12 +110,16 @@ function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, s
     }
   }
   // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
-  // 通知本文はtruncateされないので手順番号も含めた完全な説明にする
+  // 通知本文はtruncateされないので手順番号も含めた完全な説明にする。
+  // stepNumber<=0（じぶんタイマーなど手順に紐付かないタイマー）は手順表記を付けない
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
-      const stepText = ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
+      const fullLabel =
+        timer.stepNumber > 0
+          ? `${timer.label}・${ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))}`
+          : timer.label
       new Notification(ja.timer.notificationTitle, {
-        body: ja.timer.notificationBody.replace('{label}', `${timer.label}・${stepText}`),
+        body: ja.timer.notificationBody.replace('{label}', fullLabel),
       })
     }
   } catch {
@@ -136,7 +151,9 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     // ボタンを押した瞬間（ユーザー操作中）に音の準備と通知の許可依頼を済ませる
     try {
       audioRef.current ??= new AudioContext()
-      void audioRef.current.resume()
+      void audioRef.current.resume().catch(() => {
+        /* 無視（ユーザー操作なしのresumeはブラウザによって拒否されることがある） */
+      })
     } catch {
       /* 無視 */
     }
@@ -171,6 +188,19 @@ export function TimerProvider({ children }: { children: ReactNode }) {
 
   const dismissTimer = useCallback((id: number) => {
     setTimers((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+
+  const adjustTimer = useCallback((id: number, deltaSeconds: number) => {
+    setTimers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id || t.done) return t
+        // 残りが0を下回らないようにする（即完了扱いにはせず、0になったら次のtickで
+        // 通常の完了フロー＝音・通知に自然に乗る）
+        const newEndsAt = Math.max(Date.now(), t.endsAt + deltaSeconds * 1000)
+        return { ...t, endsAt: newEndsAt }
+      }),
+    )
+    setNow(Date.now())
   }, [])
 
   const toggleMute = useCallback((id: number) => {
@@ -213,6 +243,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         startTimer,
         dismissTimer,
         toggleMute,
+        adjustTimer,
       }}
     >
       {children}
