@@ -44,8 +44,57 @@
           "cookMinutes": 20
         },
         {
-          "title": "オートミールバナナパンケーキ",
+          "title": "ツナと蒸し大豆の香味サラダ",
           "cookMinutes": 10
+        }
+      ]
+    },
+    {
+      "id": "bento",
+      "file": "/sets/data/bento.json",
+      "title": "和食の作り置き・お弁当",
+      "description": "週末に作っておけば平日がラク。お弁当箱がすぐ埋まる常備菜10品",
+      "addedDate": "2026-07-12",
+      "items": [
+        {
+          "title": "ミートボールの甘酢あん",
+          "cookMinutes": 20
+        },
+        {
+          "title": "卯の花(おからの炒り煮)",
+          "cookMinutes": 20
+        },
+        {
+          "title": "切り干し大根のハリハリ漬け",
+          "cookMinutes": 30
+        },
+        {
+          "title": "肉巻きおにぎり",
+          "cookMinutes": 20
+        },
+        {
+          "title": "れんこんのきんぴら",
+          "cookMinutes": 15
+        },
+        {
+          "title": "高野豆腐の含め煮",
+          "cookMinutes": 20
+        },
+        {
+          "title": "ちくわときゅうりの土佐酢あえ",
+          "cookMinutes": 20
+        },
+        {
+          "title": "甘辛手羽先の照り焼き",
+          "cookMinutes": 25
+        },
+        {
+          "title": "こんにゃくの炒り煮",
+          "cookMinutes": 15
+        },
+        {
+          "title": "手作り鮭フレーク",
+          "cookMinutes": 15
         }
       ]
     }

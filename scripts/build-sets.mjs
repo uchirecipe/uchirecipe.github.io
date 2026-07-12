@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const outDir = path.join(__dirname, '..', 'public', 'sets', 'data')
 
 // 新しいセットを追加したら、ここに import を1行足す
-const sets = [await import('../src/sets/kintore.ts')]
+const sets = [await import('../src/sets/kintore.ts'), await import('../src/sets/pack07.ts')]
 
 await mkdir(outDir, { recursive: true })
 
