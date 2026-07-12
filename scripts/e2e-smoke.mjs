@@ -5,12 +5,19 @@
 //   BASE_URL=http://localhost:4173 npx tsx scripts/e2e-smoke.mjs   (preview等)
 // カバー: SMK-01(起動) / QF-01(時短絞り込みで件数が変わる) / SMK-02+03(登録・削除) /
 //         SMK-04(貼り付け整形) / SMK-05(人数変更・帯分数表示) / SMK-08簡易(調理中モード) /
+//         KW-01(検索キーワード欄。保存→検索でヒットし、一覧・詳細には表示されないこと) /
 //         SMK-14簡易(未解錠ゲート) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
 //         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
 //         SCROLL-02(一覧の絞り込み・並べ替え条件が詳細→戻るを経ても保持される。
 //         2026-07-12深夜フィードバック再調査で判明した本当の原因の再発防止。PC Chrome相当) /
+//         TIMER-ADJ-01(実行中タイマーの±調整窓。タップで開き「+1分」「−30秒」で残り秒が変わる) /
+//         TIMER-CUSTOM-01(じぶんタイマー。入口Aから起動し、0未満にならない floor 挙動も確認) /
+//         NUT-01(栄養価のめやす: 未解錠でもエネルギー・塩分の概算が閉じた1行から見え、
+//         展開すると「めやす」表記・出典・Pro案内リンクが出る) /
+//         NUT-02(栄養価のめやす: Pro解錠済みで5項目の実パネルが出る・人数を変えても1人分の値は不変。
+//         M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED有効化) /
 //         合わせ調味料ライン表示。console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 
@@ -22,6 +29,14 @@ let currentCheck = ''
 const ok = (label) => results.push({ label, pass: true })
 const ng = (label, detail) => results.push({ label, pass: false, detail })
 const check = (label, cond, detail = '') => (cond ? ok(label) : ng(label, detail))
+// タイマーの残り表示("08:24"や"1:05:00")を秒数に変換する(TIMER-ADJ-01/TIMER-CUSTOM-01用)
+const parseRemainingSeconds = (text) => {
+  const m = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (!m) return null
+  return m[3] !== undefined
+    ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+    : Number(m[1]) * 60 + Number(m[2])
+}
 
 const browser = await chromium.launch()
 const context = await browser.newContext() // 毎回まっさらなストレージ(初回シードから検証)
@@ -76,6 +91,25 @@ try {
 
   // --- 合わせ調味料の色ライン(共通説明文の表示) ---
   check('合わせ調味料ヒント表示', detailText.includes('先にまとめて計量してOK'))
+
+  // --- NUT-01: 栄養価のめやす(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
+  // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。エネルギー・食塩相当量の
+  // 2項目は無料でも常時計算表示(2026-07-10バッチH-4)、残り3項目はPro案内にとどめる設計) ---
+  currentCheck = 'NUT-01'
+  check('NUT-01 栄養価のめやす見出しが閉じた状態から見える', detailText.includes('栄養価のめやす'))
+  check('NUT-01 エネルギー(kcal)の概算が閉じた1行から見える', /\d+kcal/.test(detailText))
+  check('NUT-01 塩分の概算が閉じた1行から見える', detailText.includes('塩分'))
+  await page.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+  await page.waitForTimeout(300)
+  const nutExpandedText = await page.textContent('body')
+  check('NUT-01 展開すると断定しない「めやす」表記の注記が出る', nutExpandedText.includes('めやす'))
+  check('NUT-01 出典表記がある', nutExpandedText.includes('出典'))
+  check(
+    'NUT-01 未解錠には月間献立と同じ「Pro版について見る」リンクが出る',
+    nutExpandedText.includes('Pro版について見る'),
+  )
+  await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
+  await page.waitForTimeout(200)
 
   // --- TERM-01: 用語タップでポップオーバーが開き、外タップで閉じる(用語タップ辞書 2026-07-11)。
   // 肉じゃが手順1「玉ねぎはくし形に切る」の「くし形」をタップして説明を確認する ---
@@ -159,6 +193,49 @@ try {
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
   check('SMK-03 削除が一覧に反映', !(await page.textContent('body')).includes('E2Eスモーク試験用レシピ'))
+
+  // --- KW-01: 検索キーワード欄(keywords・2026-07-12バッチ)。一覧や詳細には表示されず、
+  // 検索語に入力したときだけヒットすることを確認する ---
+  currentCheck = 'KW-01'
+  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByPlaceholder('例: 肉じゃが').fill('E2Eキーワード確認レシピ')
+  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
+  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  const kwInput = page.getByPlaceholder('例: チンジャオロース、おつまみ など')
+  await kwInput.fill('ずっきーにのひみつご')
+  await kwInput.press('Enter') // タグと同じくEnterでチップ化(addKeyword)
+  await page.waitForTimeout(200)
+  const kwFormText = await page.textContent('body')
+  check('KW-01 キーワードがチップとして追加される', kwFormText.includes('ずっきーにのひみつご'))
+  await page.getByRole('button', { name: '保存する' }).click()
+  await page.waitForTimeout(800)
+  const kwDetailText = await page.textContent('body')
+  check('KW-01 保存自体は成功する(詳細にタイトルが出る)', kwDetailText.includes('E2Eキーワード確認レシピ'))
+  check('KW-01 保存後の詳細画面にキーワード文字列が表示されない', !kwDetailText.includes('ずっきーにのひみつご'))
+
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  check('KW-01 一覧画面にもキーワード文字列が表示されない(検索前)', !(await page.textContent('body')).includes('ずっきーにのひみつご'))
+  await page.locator('input[type="search"]').fill('ずっきーにのひみつご')
+  await page.waitForTimeout(400)
+  const kwSearchText = await page.textContent('body')
+  check('KW-01 検索キーワードでレシピがヒットする', kwSearchText.includes('E2Eキーワード確認レシピ'))
+  check('KW-01 検索結果表示でもキーワード文字列自体は表示されない', !kwSearchText.includes('ずっきーにのひみつご'))
+
+  // 検索語をクリアしておく(一覧の検索条件はsessionStorageに保存され、この後の一覧系チェックが
+  // 同じpage/contextを使い回すため、絞り込んだままだと後続チェックの「a[href^="#/recipes/"]」の
+  // querySelectorが0件ヒットの一覧で「＋(新規登録)」リンクを拾ってしまい誤検出になる)
+  await page.locator('input[type="search"]').fill('')
+  await page.waitForTimeout(400)
+
+  // 後始末: 検証用に作成したレシピを削除
+  await page.getByText('E2Eキーワード確認レシピ', { exact: true }).first().click()
+  await page.waitForTimeout(500)
+  await page.locator('a[href*="/edit"]').first().click()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.waitForTimeout(800)
 
   // --- SMK-14(簡易): 未解錠でのセット取り込みは丁寧にブロックされる ---
   currentCheck = 'SMK-14'
@@ -345,6 +422,75 @@ try {
     }
   }
 
+  // --- NUT-02: 栄養価のめやす(Pro解錠済み)。5項目の実パネル(たんぱく質・脂質・炭水化物を含む)が
+  // 出ること、人数を変えても「1人分」の値は変わらないこと(全量だけが連動する)を確認する。
+  // 実際のPro解錠コード(UR-...)は販売台帳の原本なのでリポジトリにコミットできないため、
+  // ここではsettings.proCodeをIndexedDBへ直接書き込んで「解錠済み」状態だけを再現する
+  // (コード検証ロジック自体はscripts/test-logic.mjsで別途確認済み)。他チェックのPro状態に
+  // 影響しないよう、専用のbrowser/contextで完結させる(M6-1 2026-07-12) ---
+  currentCheck = 'NUT-02'
+  {
+    const nutBrowser = await chromium.launch()
+    const nutContext = await nutBrowser.newContext()
+    const nutPage = await nutContext.newPage()
+    nutPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NUT-02] ${err.message}`)
+    })
+    try {
+      await nutPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await nutPage.waitForTimeout(1800) // 初回シード完了待ち(settingsレコードもこの時点で作られる)
+      await nutPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await nutPage.reload({ waitUntil: 'networkidle' })
+      await nutPage.waitForTimeout(800)
+      await nutPage.getByText('肉じゃが', { exact: true }).first().click()
+      await nutPage.waitForTimeout(600)
+      await nutPage.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+      await nutPage.waitForTimeout(300)
+      const unlockedText = await nutPage.textContent('body')
+      check('NUT-02 Pro解錠済みでたんぱく質が表示される', unlockedText.includes('たんぱく質'))
+      check('NUT-02 Pro解錠済みで脂質が表示される', unlockedText.includes('脂質'))
+      check('NUT-02 Pro解錠済みで炭水化物が表示される', unlockedText.includes('炭水化物'))
+      check('NUT-02 Pro解錠済みで塩分相当量が表示される', unlockedText.includes('塩分相当量'))
+      check('NUT-02 断定しない「概算」バッジが出る', unlockedText.includes('概算'))
+      check('NUT-02 「1人分」の内訳がある', unlockedText.includes('1人分'))
+      check('NUT-02 「全量」の内訳もある(人数連動)', unlockedText.includes('全量'))
+
+      // 人数を変えても「1人分」のエネルギーは変わらない(servings連動の検算。全量側だけが連動する)
+      const perMatchBefore = unlockedText.match(/エネルギー\s*([\d,]+)\s*kcal/)
+      await nutPage.locator('button[aria-label="人数を増やす"]').click()
+      await nutPage.waitForTimeout(400)
+      const afterServingsText = await nutPage.textContent('body')
+      const perMatchAfter = afterServingsText.match(/エネルギー\s*([\d,]+)\s*kcal/)
+      check(
+        'NUT-02 人数を変えても1人分のエネルギーは変わらない',
+        !!perMatchBefore && !!perMatchAfter && perMatchBefore[1] === perMatchAfter[1],
+        `変更前=${perMatchBefore?.[1]} 変更後=${perMatchAfter?.[1]}`,
+      )
+    } finally {
+      await nutBrowser.close()
+    }
+  }
+
   // --- SCROLL-02: 一覧の絞り込み・並べ替え条件が「詳細→戻る」を経ても保持される
   // (2026-07-12深夜フィードバックの再調査で判明した本当の原因の再発防止テスト。PC Chrome相当・
   // デスクトップビューポート)。詳細の「戻る」は常に素の /recipes へ新規遷移するため、
@@ -391,6 +537,159 @@ try {
   check('SCROLL-02 詳細→戻るで並べ替え条件(あいうえお順)も保持される', sortStillActive)
   await page.getByRole('button', { name: '絞り込み' }).click() // パネルを閉じる(後続チェックへの影響防止)
   await page.waitForTimeout(200)
+
+  // --- TIMER-ADJ-01: 実行中タイマーの±調整(窓方式。2026-07-12タイマー自由設定・Fable設計docs/20 §6)。
+  // 肉じゃが手順3「中火で15分煮る」の「15分」をタップしてタイマーを起動し、
+  // 常駐バー(TimerBar)の表示をタップして窓を開き、「+1分」「−30秒」で残り秒が変わることを確認する ---
+  currentCheck = 'TIMER-ADJ-01'
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByText('肉じゃが', { exact: true }).first().click()
+  await page.waitForTimeout(600)
+  await page.getByRole('button', { name: '15分 タイマー開始' }).click()
+  await page.waitForTimeout(500)
+  // タイマー起動の初回だけ出る説明バナーが、次の正規表現セレクタと混同しないことも併せて確認
+  const adjustOpenBtn = page.getByRole('button', { name: /のタイマーを調整/ })
+  check('TIMER-ADJ-01 常駐バーにタイマー行が現れる(タップで調整窓が開く導線)', await adjustOpenBtn.isVisible())
+  await adjustOpenBtn.click()
+  await page.waitForTimeout(300)
+  const adjustDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
+  check('TIMER-ADJ-01 タイマー調整の窓が開く(「作った！」と同じ様式)', await adjustDialog.isVisible())
+  const adjBeforeSec = parseRemainingSeconds(await adjustDialog.textContent())
+  await adjustDialog.getByRole('button', { name: '+1分' }).click()
+  await page.waitForTimeout(200)
+  const adjAfterPlusSec = parseRemainingSeconds(await adjustDialog.textContent())
+  check(
+    'TIMER-ADJ-01 「+1分」で残り秒が約60秒増える',
+    adjBeforeSec !== null && adjAfterPlusSec !== null && adjAfterPlusSec - adjBeforeSec >= 50,
+    `押す前=${adjBeforeSec}s 押した後=${adjAfterPlusSec}s`,
+  )
+  await adjustDialog.getByRole('button', { name: '−30秒' }).click()
+  await page.waitForTimeout(200)
+  const adjAfterMinusSec = parseRemainingSeconds(await adjustDialog.textContent())
+  check(
+    'TIMER-ADJ-01 「−30秒」で残り秒が約30秒減る',
+    adjAfterMinusSec !== null && adjAfterPlusSec - adjAfterMinusSec >= 20,
+    `「+1分」後=${adjAfterPlusSec}s 「−30秒」後=${adjAfterMinusSec}s`,
+  )
+  // 窓の外(背景)をタップして閉じる。常駐バーの表示はそのまま残る(タイマー自体は動作中のまま)
+  await page.mouse.click(5, 5)
+  await page.waitForTimeout(300)
+  check('TIMER-ADJ-01 背景タップで窓が閉じる', !(await adjustDialog.isVisible().catch(() => false)))
+  // 「停止」でタイマーごと消えることも確認する(後続のTIMER-CUSTOM-01に影響を残さないための後片付けも兼ねる)
+  await adjustOpenBtn.click()
+  await page.waitForTimeout(300)
+  await adjustDialog.getByRole('button', { name: '停止' }).click()
+  await page.waitForTimeout(300)
+  check(
+    'TIMER-ADJ-01 「停止」でタイマーが常駐バーから消える',
+    !(await adjustOpenBtn.isVisible().catch(() => false)),
+  )
+
+  // --- TIMER-CUSTOM-01: じぶんタイマー(自由な分数で始めるタイマー。同バッチ)。
+  // レシピ詳細のBackHeaderにあるタイマーアイコン(入口A)から開き、既定3分→1分まで減らして起動する。
+  // 続けて同じ調整窓で「−30秒」を重ねても残りが0未満にならない(即完了扱いにしない)ことも確認する ---
+  currentCheck = 'TIMER-CUSTOM-01'
+  await page.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
+  await page.waitForTimeout(300)
+  const customDialog = page.getByRole('dialog', { name: 'じぶんタイマー' })
+  check(
+    'TIMER-CUSTOM-01 じぶんタイマーの窓が開く(初回既定3分)',
+    (await customDialog.textContent()).includes('3分'),
+  )
+  await customDialog.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+  await customDialog.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+  await page.waitForTimeout(150)
+  check(
+    'TIMER-CUSTOM-01 分数ステッパー(±1分)で1分まで減らせる',
+    (await customDialog.textContent()).includes('1分'),
+  )
+  await customDialog.getByRole('button', { name: '開始' }).click()
+  await page.waitForTimeout(400)
+  const customBarText = await page.textContent('body')
+  check(
+    'TIMER-CUSTOM-01 じぶんタイマーが起動する(常駐バーに「じぶんタイマー」表示)',
+    customBarText.includes('じぶんタイマー'),
+  )
+  await page.getByRole('button', { name: /のタイマーを調整/ }).click()
+  await page.waitForTimeout(300)
+  const customAdjustDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
+  await customAdjustDialog.getByRole('button', { name: '−30秒' }).click()
+  await page.waitForTimeout(150)
+  await customAdjustDialog.getByRole('button', { name: '−30秒' }).click() // 1分-30秒-30秒=0
+  await page.waitForTimeout(150)
+  const atFloorText = await customAdjustDialog.textContent()
+  check('TIMER-CUSTOM-01 「−30秒」を重ねても残りは0で止まる', atFloorText.includes('00:00'), atFloorText)
+  await customAdjustDialog.getByRole('button', { name: '−30秒' }).click() // 0からさらに押しても0のまま
+  await page.waitForTimeout(150)
+  check(
+    'TIMER-CUSTOM-01 0からさらに「−30秒」しても0のまま(即完了扱いにしない)',
+    (await customAdjustDialog.textContent()).includes('00:00'),
+  )
+  await customAdjustDialog.getByRole('button', { name: '停止' }).click()
+  await page.waitForTimeout(300)
+
+  // --- PRICE-01: 食材価格マスタ(「食材と価格」画面。docs/20 §3)。
+  // 材料に価格を入力していないレシピでも、マスタの目安価格が詳細の概算食費に反映され、
+  // マスタの価格を編集すると反映結果も追従することを確認する ---
+  currentCheck = 'PRICE-01'
+  // テスト用レシピ: 材料に価格を入力せず、マスタ初期値がある「玉ねぎ」だけを使う
+  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByPlaceholder('例: 肉じゃが').fill('E2E価格マスタ確認レシピ')
+  await page.getByPlaceholder('例: じゃがいも').first().fill('玉ねぎ')
+  await page.getByPlaceholder('例: 3').first().fill('1')
+  await page.getByPlaceholder('例: 個').first().fill('個')
+  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('切る')
+  await page.getByRole('button', { name: '保存する' }).click()
+  await page.waitForTimeout(800)
+  const priceDetailBefore = await page.textContent('body')
+  check(
+    'PRICE-01 マスタ初期値(玉ねぎ1個50円)が価格未入力の詳細の概算食費に反映される',
+    priceDetailBefore.includes('約50円'),
+  )
+  check(
+    'PRICE-01 マスタ由来の注記が表示される',
+    priceDetailBefore.includes('一部は目安価格から計算しています'),
+  )
+
+  // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する
+  await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByRole('link', { name: '食材と価格を編集する' }).click()
+  await page.waitForTimeout(500)
+  check('PRICE-01 設定からの遷移でタイトルが表示される', page.url().includes('#/prices'))
+  const priceListBefore = await page.textContent('body')
+  check(
+    'PRICE-01 初期値が投入されている(玉ねぎ・鶏もも肉を含む)',
+    priceListBefore.includes('玉ねぎ') && priceListBefore.includes('鶏もも肉'),
+  )
+  check('PRICE-01 目安価格の注意書きが表示される', priceListBefore.includes('価格は目安です'))
+
+  // マスタの「玉ねぎ」(一覧の先頭=PRICE_DEFAULTSの1件目)を999円に編集する
+  const firstPriceRow = page.locator('ul li').first()
+  await firstPriceRow.getByLabel('この食材を編集').click()
+  await page.waitForTimeout(300)
+  await firstPriceRow.getByLabel('価格（円）').fill('999')
+  await firstPriceRow.getByRole('button', { name: '保存する' }).click()
+  await page.waitForTimeout(400)
+  check('PRICE-01 マスタの価格編集が一覧に反映される', (await page.textContent('body')).includes('999円'))
+
+  // 詳細画面に戻り、編集後の目安価格が概算食費に反映されることを確認する
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByText('E2E価格マスタ確認レシピ', { exact: true }).first().click()
+  await page.waitForTimeout(500)
+  check(
+    'PRICE-01 マスタ編集後、詳細の概算食費が更新される(約999円)',
+    (await page.textContent('body')).includes('約999円'),
+  )
+
+  // 後始末: テスト用レシピを削除
+  await page.locator('a[href*="/edit"]').first().click()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.waitForTimeout(800)
 
   // --- SMK-19: 静的ページ(/about/配下・/sets/)がSW有効でも200でアプリ本体にすり替わらない ---
   // アプリ本体のtitleは「うちレシピ」単独。静的ページは必ず「◯◯｜うちレシピ」形式のtitleを持つ
