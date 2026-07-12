@@ -259,6 +259,7 @@ export const ja = {
     recipeSetLoading: '読み込み中…',
     recipeSetResult: '{a}件追加しました（重複{s}件はスキップ）',
     recipeSetError: '読み込めませんでした。レシピセットのJSONファイルか確認してください',
+    recipeSetNotFound: '指定されたURLにレシピセットが見つかりませんでした。IDの綴りが正しいか確認してください',
     recipeSetDeepLinkConfirm: '「{name}」（{n}品）を追加しますか？',
     recipeSetPageLink: '配布ページを見る',
     recipeSetBlocked: 'このレシピセットの追加には、追加レシピパックまたはPro版の解錠が必要です',

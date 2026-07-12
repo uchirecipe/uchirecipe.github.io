@@ -11,6 +11,7 @@ import {
   parseBackup,
   fetchRecipeSet,
   importRecipeSet,
+  RecipeSetFetchError,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -137,8 +138,8 @@ export default function SettingsPage() {
             .replace('{a}', String(result.added))
             .replace('{s}', String(result.skipped)),
         )
-      } catch {
-        if (!cancelled) setMessage(ja.settings.recipeSetError)
+      } catch (err) {
+        if (!cancelled) showRecipeSetFetchError(err)
       } finally {
         clearParam()
       }
@@ -208,6 +209,17 @@ export default function SettingsPage() {
     )
   }
 
+  // fetchRecipeSetの失敗理由(URLが存在しない/中身が壊れている)で文言を出し分ける
+  // (2026-07-12実機報告: 存在しないset=IDを開いても「JSONファイルか確認して」としか
+  // 出ず、綴りミスに気づきにくかったため)
+  const showRecipeSetFetchError = (err: unknown) => {
+    setMessage(
+      err instanceof RecipeSetFetchError && err.reason === 'not_found'
+        ? ja.settings.recipeSetNotFound
+        : ja.settings.recipeSetError,
+    )
+  }
+
   const loadRecipeSetFromUrl = async () => {
     const url = recipeSetUrl.trim()
     if (!url) return
@@ -220,8 +232,8 @@ export default function SettingsPage() {
       }
       showRecipeSetResult(await importRecipeSet(file))
       setRecipeSetUrl('')
-    } catch {
-      setMessage(ja.settings.recipeSetError)
+    } catch (err) {
+      showRecipeSetFetchError(err)
     } finally {
       setRecipeSetLoading(false)
     }

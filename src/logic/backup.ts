@@ -161,11 +161,28 @@ export async function importBackup(
   return { added, skipped }
 }
 
+/** URLが見つからない・壊れている場合の理由を、呼び出し側が文言を出し分けられるよう表す */
+export class RecipeSetFetchError extends Error {
+  reason: 'not_found' | 'invalid'
+  constructor(reason: 'not_found' | 'invalid') {
+    super(reason)
+    this.reason = reason
+  }
+}
+
 /** URLからレシピセットのJSON（バックアップと同形式）を取得する。配布元がCORSに対応していないと失敗する */
 export async function fetchRecipeSet(url: string): Promise<BackupFile> {
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
-  return parseBackup(await res.text())
+  if (!res.ok) throw new RecipeSetFetchError('not_found')
+  const text = await res.text()
+  try {
+    return parseBackup(text)
+  } catch {
+    // 開発サーバー(Vite)はSPAのため、存在しないURLでも200＋アプリ本体のHTMLを返す
+    // （実在しないset=IDを開いたときに気づきにくい・2026-07-12オーナー実機報告で発覚）。
+    // 本文がHTMLなら「見つからない」寄りの文言、それ以外は「壊れている」寄りの文言にする
+    throw new RecipeSetFetchError(text.trim().startsWith('<') ? 'not_found' : 'invalid')
+  }
 }
 
 /**
