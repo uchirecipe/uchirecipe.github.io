@@ -26,7 +26,7 @@ const BOND_END = /[をにへとやでのが]$/
 const PUNCT_END = /[、。」』）)]$/
 // 後方吸収してよい短い文節は補助動詞類のみ(「〜して|おく」「せん切りに|する」等)。
 // 任意の2文字を吸収するとBudouXの誤分割(「塩も|みする」)を巻き込み単語内で切れる
-const AUX_SHORT = /^(おく|いく|くる|みる|よい|する|こと)[、。]?$/
+const AUX_SHORT = /^(おく|いく|くる|みる|よい|する|して|こと)[、。]?$/
 const MAX_UNIT = 12
 const BOND_MAX = 10
 
@@ -71,7 +71,8 @@ function normalizedSegments(text: string): string[] {
   //    折り返してしまう(2026-07-12オーナー実機のメモ括弧バグの残り)
   for (let i = 0; i < text.length; i++) {
     if ((text[i] === '、' || text[i] === '。') && i + 1 < text.length) boundaries.add(i + 1)
-    if ((text[i] === '・' || text[i] === '（' || text[i] === '(') && i > 0) boundaries.add(i)
+    if ((text[i] === '・' || text[i] === '（' || text[i] === '(' || text[i] === '→') && i > 0)
+      boundaries.add(i)
   }
   // 5) 12文字以下の自己完結した括弧の内部に境界を残さない(「(または|カニカマ)」のように
   //    括弧の中で折り返すと注記が泣き別れる。長い括弧は内部で折れてよい)
@@ -111,10 +112,18 @@ export function wrapJaPhrases(text: string): string {
       canMerge = !PUNCT_END.test(prev) && /[）)]/.test(seg) && prev.length + seg.length <= MAX_UNIT
     } else if (prev !== undefined && !PUNCT_END.test(prev)) {
       const total = prev.length + seg.length
-      if (prev.includes('→') && !/[て、。]$/.test(prev)) {
-        // 「豚肉→根菜→…」の矢印列は、列の最後の項目が言い終わるまで結合を続ける
-        // (「ちぎった|こんにゃく」「ご飯を|入れて」で切れる実バグへの対応・2026-07-12)。
-        // 連用形「て」か句読点で項目列の言い切りとみなして止める。上限16文字
+      if (/^→/.test(seg)) {
+        // 矢印列は「→x」を項目単位にする(2026-07-12第3.3版)。最初の「→」だけは
+        // 前の項目に密着させ(「豚肉→根菜」)、2本目以降は項目の頭で折り返せるようにする
+        // (「（焼く→ふたで火を通す/→あんをからめる）」・ミートボールのオーナー訂正)
+        canMerge = !prev.includes('→') && total <= 16
+      } else if (
+        prev.includes('→') &&
+        !/[て、。]$/.test(prev) &&
+        !/[）)]/.test(prev.slice(prev.indexOf('→')))
+      ) {
+        // 項目の続き(「→ちぎった+こんにゃくの」)は言い切り(て/、/。/閉じ括弧)まで結合を続ける
+        // (「ちぎった|こんにゃく」「ご飯を|入れて」で切れる実バグへの対応・2026-07-12)。上限16文字
         canMerge = total <= 16
       } else if (
         TIME_END.test(prev) ||
