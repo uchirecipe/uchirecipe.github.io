@@ -1154,11 +1154,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     toSpeechText('ガクを切り落とす。'),
     'ガクを切り落とす。',
   )
-  eq(
   eq('食材名の辞書収載語も読みへ変換(甜麺醤=2026-07-12にFableが辞書へ追加)', toSpeechText('甜麺醤を加える。'), 'テンメンジャンを加える。')
-    toSpeechText('甜麺醤を加える。'),
-    '甜麺醤を加える。',
-  )
   eq('辞書語を含まないテキストは無加工で返る', toSpeechText('よく混ぜ合わせる。'), 'よく混ぜ合わせる。')
 }
 
