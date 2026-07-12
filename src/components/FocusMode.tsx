@@ -383,11 +383,12 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             type="button"
             onClick={() => startStepTimer((step.minutes ?? 0) * 60)}
             aria-label={ja.timer.start}
-            className="inline-flex items-center gap-1 rounded-md border border-edge px-4 py-2 font-bold text-accent"
+            className="inline-flex items-center gap-1 rounded-md px-4 py-2 font-bold text-accent underline underline-offset-2"
+            style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
           >
             <TimerIcon size={18} aria-hidden />
             {step.minutes}
-            {ja.detail.minutesSuffix}
+            {ja.detail.minutesStandaloneSuffix}
           </button>
         )}
         {!speechSupported && <p className="w-full text-sm text-ink-muted">{ja.focus.readUnsupported}</p>}

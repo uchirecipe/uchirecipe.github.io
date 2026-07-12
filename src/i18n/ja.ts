@@ -490,6 +490,9 @@ export const ja = {
     priceAbout: '約',
     priceYen: '円',
     minutesSuffix: '分',
+    /** 手順文中に時間が出てこない工程のタイマー(2026-07-12: 唐突に見える指摘への対応)。
+     * 「◯分が目安」の形にして、文章とは別に添えた目安だとひと目でわかるようにする */
+    minutesStandaloneSuffix: '分が目安',
     memo: 'メモ',
     source: '参照元',
     edit: '編集する',

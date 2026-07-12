@@ -526,11 +526,12 @@ export default function RecipeDetailPage() {
                           })
                         }
                         aria-label={ja.timer.start}
-                        className="mt-1 inline-flex items-center gap-1 rounded-sm border border-edge px-2 py-1 text-sm font-bold text-accent"
+                        className="mt-1 inline-flex items-center gap-1 rounded-sm px-2 py-1 text-sm font-bold text-accent underline underline-offset-2"
+                        style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
                       >
                         <TimerIcon size={14} aria-hidden />
                         {step.minutes}
-                        {ja.detail.minutesSuffix}
+                        {ja.detail.minutesStandaloneSuffix}
                       </button>
                     )}
                   </div>
