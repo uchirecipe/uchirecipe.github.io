@@ -42,6 +42,7 @@ const KNOWN_WORDS = [
   'こんにゃく',
   '白いりごま',
   '一口大',
+  '水溶き片栗粉',
   '両面焼きグリル',
   '片面焼きグリル',
 ]
@@ -73,6 +74,14 @@ function normalizedSegments(text: string): string[] {
     if ((text[i] === '、' || text[i] === '。') && i + 1 < text.length) boundaries.add(i + 1)
     if ((text[i] === '・' || text[i] === '（' || text[i] === '(' || text[i] === '→') && i > 0)
       boundaries.add(i)
+  }
+  // 4.5) 「〜」(範囲)の前後で折り返さない(「2〜/3日」「1分〜/1分30秒」の泣き別れ防止・
+  //      2026-07-12オーナー指摘: 改行が「〜」で途切れがち)
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '〜') {
+      boundaries.delete(i)
+      boundaries.delete(i + 1)
+    }
   }
   // 5) 12文字以下の自己完結した括弧の内部に境界を残さない(「(または|カニカマ)」のように
   //    括弧の中で折り返すと注記が泣き別れる。長い括弧は内部で折れてよい)

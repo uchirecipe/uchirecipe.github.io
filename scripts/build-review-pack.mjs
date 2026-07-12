@@ -110,7 +110,9 @@ function parseHeader(text) {
   const effortLevel = text.match(/effortLevel:\s*(\w+)/)
   const tags = text.match(/tags:\s*(.+?)\s*\//)
   const season = text.match(/season:\s*(\w+)/)
-  const suitableFor = text.match(/suitableFor:\s*([^\n]+)/)
+  // suitableForは末尾に「 / keywords: ...」が続くことがあるため、そこで打ち切る(無ければ改行/文末まで)
+  const suitableFor = text.match(/suitableFor:\s*([^\n]+?)(?=\s*\/\s*keywords:|\n|$)/)
+  const keywords = text.match(/keywords:\s*([^\n]+)/)
   if (servings) out.servings = Number(servings[1])
   if (cookMinutes) out.cookMinutes = Number(cookMinutes[1])
   if (effortLevel) out.effortLevel = effortLevel[1]
@@ -122,6 +124,9 @@ function parseHeader(text) {
       .split(/[・、]/)
       .map((s) => slotMap[s.trim()])
       .filter(Boolean)
+  }
+  if (keywords) {
+    out.keywords = keywords[1].split(/[・、]/).map((s) => s.trim()).filter(Boolean)
   }
   return out
 }
@@ -180,6 +185,7 @@ for (const target of TARGETS) {
     tags: header.tags ?? [],
     season: header.season ?? 'all',
     ...(header.suitableFor && header.suitableFor.length ? { suitableFor: header.suitableFor } : {}),
+    ...(header.keywords && header.keywords.length ? { keywords: header.keywords } : {}),
     ingredients,
     steps,
     ...(memoMatch ? { memo: unescapeNewlines(memoMatch[1].trim()) } : {}),
