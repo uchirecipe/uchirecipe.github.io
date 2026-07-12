@@ -34,8 +34,19 @@
 //         INLINE-01(「食材と価格」一覧の行内編集。2026-07-12 UX改修で編集モーダルを廃止し、
 //         価格欄への直接入力+Enter/blurで即保存。目安/自分の価格バッジの切替・目安に戻す・
 //         検索絞り込みを確認) /
-//         合わせ調味料ライン表示。console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
+//         合わせ調味料ライン表示 /
+//         PRO-FALLBACK-01(crypto.subtleが使えないinsecure context(LAN実機のhttp://等)でも、
+//         純JSのSHA-256フォールバック(src/logic/sha256.ts)でPro解錠コード検証が動くこと。
+//         2026-07-13。他チェックが使う既存サーバーとは別に自前でpreviewサーバーをport 4194で
+//         起動して検証する)。console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
+import { spawn, execSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const appRoot = path.join(__dirname, '..')
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:5173'
 
@@ -1086,6 +1097,76 @@ try {
       res.status() === 200 && title.includes(titleKeyword),
       `status=${res.status()} title=「${title}」`,
     )
+  }
+
+  // --- PRO-FALLBACK-01: crypto.subtleが使えないinsecure context(開発中LANのhttp://192.168.x.x
+  // 等でのiPhone実機テストが該当。docs/22)でも、純JSのSHA-256フォールバック(src/logic/sha256.ts)
+  // でPro解錠コード検証が最後まで動くことを確認する(2026-07-13)。crypto.subtleの有無自体は
+  // オリジンがhttp/httpsかで決まらずaddInitScriptで直接再現できるが、production buildの
+  // 挙動を見るため他チェックのdevサーバーとは別にpreviewサーバーを自前でport 4194に立てる ---
+  currentCheck = 'PRO-FALLBACK-01'
+  {
+    const distIndex = path.join(appRoot, 'dist', 'index.html')
+    if (!existsSync(distIndex)) {
+      // このチェックはproductionビルド(dist)のpreview前提。無ければ先にビルドする
+      execSync('npx vite build', { cwd: appRoot, stdio: 'inherit' })
+    }
+
+    const PREVIEW_PORT = 4194
+    const PREVIEW_BASE = `http://localhost:${PREVIEW_PORT}`
+    const previewProc = spawn(
+      'npx',
+      ['vite', 'preview', '--port', String(PREVIEW_PORT), '--strictPort'],
+      { cwd: appRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    let previewReady = false
+    let previewOutput = ''
+    previewProc.stdout.on('data', (buf) => {
+      previewOutput += buf.toString()
+      if (previewOutput.includes('Local:')) previewReady = true
+    })
+    previewProc.stderr.on('data', (buf) => (previewOutput += buf.toString()))
+
+    try {
+      const start = Date.now()
+      while (!previewReady && Date.now() - start < 15000) {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+      }
+      if (!previewReady) {
+        throw new Error(`previewサーバーが起動しなかった: ${previewOutput}`)
+      }
+
+      const fbBrowser = await chromium.launch()
+      try {
+        const fbContext = await fbBrowser.newContext()
+        const fbPage = await fbContext.newPage()
+        // insecure context相当を再現: crypto.subtleを未定義化する(実機LAN httpと同じ状況)
+        await fbPage.addInitScript(() => {
+          Object.defineProperty(window.crypto, 'subtle', { value: undefined, configurable: true })
+        })
+        await fbPage.goto(`${PREVIEW_BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+        await fbPage.waitForTimeout(800)
+        const subtleGone = await fbPage.evaluate(() => typeof window.crypto.subtle === 'undefined')
+        check('PRO-FALLBACK-01 前提: crypto.subtleを無効化できている', subtleGone)
+
+        // テスト用Pro解錠コード(docs/22の実機確認チェックリスト記載。販売用ではない)
+        await fbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+        await fbPage.getByRole('button', { name: '解錠する', exact: true }).first().click()
+        await fbPage.waitForTimeout(1000)
+        const fbText = await fbPage.textContent('body')
+        check(
+          'PRO-FALLBACK-01 crypto.subtle無効でも純JSフォールバックでPro解錠が通る',
+          fbText.includes('Pro版をご利用いただきありがとうございます'),
+          fbText.includes('コードが正しくありません')
+            ? 'コード検証が失敗した(フォールバック不一致の疑い)'
+            : `本文に成功メッセージなし: ${fbText.slice(0, 200)}`,
+        )
+      } finally {
+        await fbBrowser.close()
+      }
+    } finally {
+      previewProc.kill()
+    }
   }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

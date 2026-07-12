@@ -15,7 +15,13 @@ import {
 } from '../src/logic/kana.ts'
 import { READINGS_VERSION } from '../src/logic/ingredientReadings.ts'
 import { formatMinutesSecondsLabel } from '../src/logic/time.ts'
-import { normalizeProCode, normalizePackCode, hasPaidRecipeAccess } from '../src/logic/pro.ts'
+import {
+  normalizeProCode,
+  normalizePackCode,
+  hasPaidRecipeAccess,
+  isValidProCode,
+  isValidPackCode,
+} from '../src/logic/pro.ts'
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
@@ -1372,6 +1378,97 @@ eq('分+秒は「3分30秒」', formatMinutesSecondsLabel(210), '3分30秒')
 eq('1分未満は秒のみ「45秒」', formatMinutesSecondsLabel(45), '45秒')
 eq('負数は0扱いで「0秒」', formatMinutesSecondsLabel(-5), '0秒')
 eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
+
+// ---------- SHA-256純JSフォールバック(2026-07-13 insecure context対応) ----------
+// crypto.subtleはsecure context(https://またはlocalhost)でしか使えず、開発中LAN実機テスト
+// (http://192.168.x.x:5173等)ではundefinedになりPro/パックのコード検証が動かなくなっていた。
+// src/logic/sha256.ts の純JS実装がNIST既知ベクトル・Node crypto.subtleの出力と完全一致すること、
+// および実際のコード検証(isValidProCode/isValidPackCode)がcrypto.subtle経由・フォールバック強制
+// (第2引数forceFallback)の両経路で同じ結果になることを確認する。
+{
+  const { sha256Hex } = await import('../src/logic/sha256.ts')
+  const { webcrypto } = await import('node:crypto')
+
+  const subtleHex = async (bytesOrText) => {
+    const bytes = typeof bytesOrText === 'string' ? new TextEncoder().encode(bytesOrText) : bytesOrText
+    const digest = await webcrypto.subtle.digest('SHA-256', bytes)
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+
+  // NIST既知ベクトル(値はNode crypto.createHashで再検証済み)
+  eq('SHA-256 空文字列', sha256Hex(''), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+  eq('SHA-256 "abc"', sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+  eq(
+    'SHA-256 2ブロック境界の既知ベクトル(56byte)',
+    sha256Hex('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq'),
+    '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
+  )
+  eq(
+    'SHA-256 "a"を100万回繰り返す長文ベクトル(複数ブロック)',
+    sha256Hex('a'.repeat(1_000_000)),
+    'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0',
+  )
+
+  // Node crypto.subtleとの一致比較(パディング境界の長さを中心に数十ケース+ランダム長)
+  const randomStr = (len) => {
+    const chars =
+      'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789あいうえおアイウエオ漢字🍙'
+    let s = ''
+    for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)]
+    return s
+  }
+  const boundaryLengths = [
+    0, 1, 2, 15, 31, 32, 54, 55, 56, 57, 63, 64, 65, 100, 119, 120, 127, 128, 200, 300, 500,
+  ]
+  for (const len of boundaryLengths) {
+    const s = randomStr(len)
+    eq(`SHA-256 crypto.subtle一致(境界長さ${len})`, sha256Hex(s), await subtleHex(s))
+  }
+  for (let i = 0; i < 20; i++) {
+    const s = randomStr(Math.floor(Math.random() * 400))
+    eq(`SHA-256 crypto.subtle一致(ランダム${i})`, sha256Hex(s), await subtleHex(s))
+  }
+  // Uint8Array直接入力(文字列を経由しない生バイト列)でも一致すること
+  for (const len of [0, 1, 55, 56, 64, 200]) {
+    const bytes = new Uint8Array(len)
+    for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256)
+    eq(`SHA-256 Uint8Array直接入力一致(長さ${len})`, sha256Hex(bytes), await subtleHex(bytes))
+  }
+
+  // isValidProCode/isValidPackCode: crypto.subtle経由(既定)とフォールバック強制の両方で
+  // 同じ判定になること。テスト用コードはdocs/22の実機確認チェックリストに記載のもの
+  // (販売用ではなく、既にPRO_CODE_HASHES/RECIPE_PACK_CODE_HASHESにハッシュが含まれている)
+  const validProCode = 'UR-96QS-2VSZ'
+  const validPackCode = 'UP-2W3D-QZPR'
+
+  eq('isValidProCode 正規コード(crypto.subtle)', await isValidProCode(validProCode), true)
+  eq('isValidProCode 正規コード(フォールバック強制)', await isValidProCode(validProCode, true), true)
+  eq(
+    'isValidProCode 小文字+前後空白ゆらぎ(crypto.subtle)',
+    await isValidProCode(' ur-96qs-2vsz '),
+    true,
+  )
+  eq(
+    'isValidProCode 小文字+前後空白ゆらぎ(フォールバック強制)',
+    await isValidProCode(' ur-96qs-2vsz ', true),
+    true,
+  )
+  eq('isValidProCode 不正コード(crypto.subtle)', await isValidProCode('UR-0000-0000'), false)
+  eq('isValidProCode 不正コード(フォールバック強制)', await isValidProCode('UR-0000-0000', true), false)
+  eq('isValidProCode 空文字列(crypto.subtle)', await isValidProCode(''), false)
+  eq('isValidProCode 空文字列(フォールバック強制)', await isValidProCode('', true), false)
+
+  eq('isValidPackCode 正規コード(crypto.subtle)', await isValidPackCode(validPackCode), true)
+  eq('isValidPackCode 正規コード(フォールバック強制)', await isValidPackCode(validPackCode, true), true)
+  eq('isValidPackCode 不正コード(crypto.subtle)', await isValidPackCode('UP-0000-0000'), false)
+  eq(
+    'isValidPackCode 不正コード(フォールバック強制)',
+    await isValidPackCode('UP-0000-0000', true),
+    false,
+  )
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
