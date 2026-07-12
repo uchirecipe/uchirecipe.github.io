@@ -387,8 +387,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
           >
             <TimerIcon size={18} aria-hidden />
+            {ja.detail.minutesStandalonePrefix}
             {step.minutes}
-            {ja.detail.minutesStandaloneSuffix}
+            {ja.detail.minutesSuffix}
           </button>
         )}
         {!speechSupported && <p className="w-full text-sm text-ink-muted">{ja.focus.readUnsupported}</p>}

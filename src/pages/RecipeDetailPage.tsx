@@ -530,8 +530,9 @@ export default function RecipeDetailPage() {
                         style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
                       >
                         <TimerIcon size={14} aria-hidden />
+                        {ja.detail.minutesStandalonePrefix}
                         {step.minutes}
-                        {ja.detail.minutesStandaloneSuffix}
+                        {ja.detail.minutesSuffix}
                       </button>
                     )}
                   </div>
