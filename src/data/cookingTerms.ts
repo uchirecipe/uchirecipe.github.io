@@ -86,14 +86,14 @@ export const COOKING_TERMS: CookingTerm[] = [
     aliases: ['粉ふきに'],
   },
   {
-    term: '塩もみ',
-    reading: 'しおもみ',
-    description: '薄切りきゅうりに塩少々をまぶして5分ほどおき、出てきた水気をぎゅっと絞ること',
+    term: '水切り',
+    reading: 'みずきり',
+    description: '豆腐をキッチンペーパーで包んで重しをのせるなどして、余分な水分を抜くこと。あえ物や炒め物が水っぽくならない',
   },
   {
-    term: '粉ふき',
-    reading: 'こなふき',
-    description: '湯を切って鍋を弱火に戻して揺すり、表面の水気を飛ばすこと',
+    term: '塩もみ',
+    reading: 'しおもみ',
+    description: '野菜に塩少々をまぶしてしばらくおき、出てきた水気をぎゅっと絞ること。味がなじみ、水っぽくならない',
   },
   { term: '石づき', reading: 'いしづき', description: '根元のかたい部分' },
   {

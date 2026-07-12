@@ -332,6 +332,22 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             )}
           />
         </p>
+        {/* 表示順(2026-07-12オーナー実機フィードバック): 本文→単独タイマー→メモ→用語説明の順。
+            メモが長いとタイマーボタンが画面外になり押せなくなる不具合の対策 */}
+        {step.minutes != null && step.minutes > 0 && !isMinutesShownInText(step.text, step.minutes) && (
+          <button
+            type="button"
+            onClick={() => startStepTimer((step.minutes ?? 0) * 60)}
+            aria-label={ja.timer.start}
+            className="inline-flex items-center gap-1 rounded-md px-4 py-2 font-bold text-accent underline underline-offset-2"
+            style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
+          >
+            <TimerIcon size={18} aria-hidden />
+            {ja.detail.minutesStandalonePrefix}
+            {step.minutes}
+            {ja.detail.minutesSuffix}
+          </button>
+        )}
         {step.memo && (
           <MemoText
             text={step.memo}
@@ -377,20 +393,6 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
               </p>
             )}
           </div>
-        )}
-        {step.minutes != null && step.minutes > 0 && !isMinutesShownInText(step.text, step.minutes) && (
-          <button
-            type="button"
-            onClick={() => startStepTimer((step.minutes ?? 0) * 60)}
-            aria-label={ja.timer.start}
-            className="inline-flex items-center gap-1 rounded-md px-4 py-2 font-bold text-accent underline underline-offset-2"
-            style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
-          >
-            <TimerIcon size={18} aria-hidden />
-            {ja.detail.minutesStandalonePrefix}
-            {step.minutes}
-            {ja.detail.minutesSuffix}
-          </button>
         )}
         {!speechSupported && <p className="w-full text-sm text-ink-muted">{ja.focus.readUnsupported}</p>}
       </div>

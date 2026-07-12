@@ -26,7 +26,7 @@ const BOND_END = /[をにへとやでのが]$/
 const PUNCT_END = /[、。」』）)]$/
 // 後方吸収してよい短い文節は補助動詞類のみ(「〜して|おく」「せん切りに|する」等)。
 // 任意の2文字を吸収するとBudouXの誤分割(「塩も|みする」)を巻き込み単語内で切れる
-const AUX_SHORT = /^(おく|いく|くる|みる|よい|する)[、。]?$/
+const AUX_SHORT = /^(おく|いく|くる|みる|よい|する|こと)[、。]?$/
 const MAX_UNIT = 12
 const BOND_MAX = 10
 
@@ -40,6 +40,7 @@ const KNOWN_WORDS = [
   'ささがき',
   '小口切り',
   'こんにゃく',
+  '白いりごま',
 ]
 
 /** BudouXの素分割に、句読点・中黒・既知語の補正をかけたセグメント列を返す */
@@ -61,10 +62,13 @@ function normalizedSegments(text: string): string[] {
     }
   }
   // 3) 「、」「。」の直後は必ず境界(セグメント中央の句読点で切る)。
-  //    「・」の直前も境界(列挙の・は次項目の先頭に付ける)
+  //    「・」の直前も境界(列挙の・は次項目の先頭に付ける)。
+  //    開き括弧の直前も境界: 括弧をセグメント中央に残すと単位が「こと（オーブンで」の形になり、
+  //    renderJaUnitsのnowrap保護(先頭が括弧の単位だけ包む)が効かず、WebKitが括弧の直後で
+  //    折り返してしまう(2026-07-12オーナー実機のメモ括弧バグの残り)
   for (let i = 0; i < text.length; i++) {
     if ((text[i] === '、' || text[i] === '。') && i + 1 < text.length) boundaries.add(i + 1)
-    if (text[i] === '・' && i > 0) boundaries.add(i)
+    if ((text[i] === '・' || text[i] === '（' || text[i] === '(') && i > 0) boundaries.add(i)
   }
   boundaries.add(text.length)
   // 4) セグメント列へ復元
@@ -85,7 +89,18 @@ export function wrapJaPhrases(text: string): string {
   for (const seg of normalizedSegments(text)) {
     const prev = units[units.length - 1]
     let canMerge = false
-    if (prev !== undefined && !PUNCT_END.test(prev)) {
+    if (prev !== undefined && /^[）)]/.test(seg)) {
+      // 閉じ括弧で始まるセグメントは行頭禁則(」や）を行頭に置かない)を優先し、
+      // 長さ上限に関わらず必ず前の単位へ密着させる(「ひいて|)中火で」の実例・2026-07-12)
+      canMerge = true
+    } else if (prev !== undefined && /^[（(]/.test(seg)) {
+      // 開き括弧で始まるセグメントは、閉じ括弧まで含む自己完結の短い括弧だけ前に密着
+      // (「出るくらい（約170度）の」等)。「（」単体や開きっぱなしの括弧は前に付けない:
+      // 直前が「と」等で終わると格助詞結合が誤発火し「少量足すこと（」のように
+      // 開き括弧が行末に残る実バグがあった(2026-07-12)。単体の「（」は次のセグメントが
+      // 2文字以下ルールで後ろに結合され「（空焚き防止）。」の形に自然にまとまる
+      canMerge = !PUNCT_END.test(prev) && /[）)]/.test(seg) && prev.length + seg.length <= MAX_UNIT
+    } else if (prev !== undefined && !PUNCT_END.test(prev)) {
       const total = prev.length + seg.length
       if (prev.includes('→') && !/[て、。]$/.test(prev)) {
         // 「豚肉→根菜→…」の矢印列は、列の最後の項目が言い終わるまで結合を続ける
@@ -95,18 +110,17 @@ export function wrapJaPhrases(text: string): string {
       } else if (
         TIME_END.test(prev) ||
         prev.length <= 2 ||
-        AUX_SHORT.test(seg) ||
-        // 「出るくらい（約170度）」等: 閉じ括弧まで含む短い括弧だけ直前の語に密着させる。
-        // 「（レンジ600Wで…」のような開きっぱなしの長い括弧は密着させず、
-        // 「〜にする/（レンジ…」と括弧の直前で折り返す(2026-07-12オーナー指摘の傾向反映)
-        (/^[（(]/.test(seg) && /[）)]/.test(seg))
+        AUX_SHORT.test(seg)
       ) {
         canMerge = total <= MAX_UNIT
       } else if (BOND_END.test(prev)) {
         // 時間トークンが絡む結合は12文字まで許す(「別に2分塩ゆでしておく」
-        // 「弱火で5分とろみを付ける」等、◯分の前後を切らない規則が優先)
+        // 「弱火で5分とろみを付ける」等、◯分の前後を切らない規則が優先)。
+        // 並列の「と」は名詞列挙の途中で切れると不自然なため11文字まで許す
+        // (「かつお節と|白いりごまを」の分断防止・2026-07-12オーナー指摘)
         const hasTime = /\d+(分|時間|秒)/.test(prev) || /^\d+(分|時間|秒)/.test(seg)
-        canMerge = total <= (hasTime ? MAX_UNIT : BOND_MAX)
+        const cap = hasTime ? MAX_UNIT : /と$/.test(prev) ? 11 : BOND_MAX
+        canMerge = total <= cap
       }
     }
     if (canMerge) {

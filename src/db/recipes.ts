@@ -1,7 +1,7 @@
 import { db } from './db'
 import { defaultSettings } from './types'
 import type { CookedLog, Recipe, RecipeInput } from './types'
-import { buildSearchWords } from '../logic/kana'
+import { buildSearchWords, SEARCH_INDEX_VERSION, searchIndexNeedsRebuild } from '../logic/kana'
 import { READINGS_VERSION } from '../logic/ingredientReadings'
 
 /** 入力の掃除: 名前が空の材料行・本文が空の手順行は保存しない */
@@ -72,20 +72,30 @@ export async function deleteRecipesBySourceSet(setId: string): Promise<number> {
 }
 
 /**
- * 食材名の読み仮名辞書（表記ゆれ対策）が更新されていたら、
- * 全レシピのsearchWordsを作り直す（保存済みsearchWordsは古い変換のまま
- * 残ってしまうため）。updatedAtは変えない（一覧の並び順を崩さないため）。
+ * 食材名の読み仮名辞書（表記ゆれ対策）またはカテゴリ辞書（logic/kana.ts の
+ * CATEGORY_RULES、例:「きのこ」）が更新されていたら、全レシピのsearchWordsを
+ * 作り直す（保存済みsearchWordsは古い変換のまま残ってしまうため）。
+ * updatedAtは変えない（一覧の並び順を崩さないため）。
+ * ingredientReadingsVersion・searchIndexVersion のどちらか一方でも版が古ければ実行する
+ * （両方まとめて1回のスキャンで作り直し、二重に全件走査しない）。
+ * トランザクションが失敗すればバージョンの書き込みも巻き戻るため、次回起動時に再試行される
+ * （冪等・失敗しても既存データを壊さない）。
  */
 export async function rebuildSearchWordsIfNeeded(): Promise<void> {
   await db.transaction('rw', db.recipes, db.settings, async () => {
     const settings = { ...defaultSettings, ...(await db.settings.get(1)) }
-    if (settings.ingredientReadingsVersion === READINGS_VERSION) return
+    if (!searchIndexNeedsRebuild(settings)) return
     const all = await db.recipes.toArray()
     for (const recipe of all) {
       const searchWords = buildSearchWords(recipe.title, recipe.ingredients, recipe.tags)
       await db.recipes.update(recipe.id!, { searchWords })
     }
-    await db.settings.put({ ...settings, ingredientReadingsVersion: READINGS_VERSION, id: 1 })
+    await db.settings.put({
+      ...settings,
+      ingredientReadingsVersion: READINGS_VERSION,
+      searchIndexVersion: SEARCH_INDEX_VERSION,
+      id: 1,
+    })
   })
 }
 

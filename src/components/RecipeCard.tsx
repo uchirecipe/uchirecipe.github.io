@@ -26,7 +26,7 @@ import type { IconKey, Recipe, Season } from '../db/types'
 import { hasNgIngredient } from '../logic/ng'
 import { pickIconKey } from '../logic/icon'
 import { ingredientColorToken } from '../logic/ingredientColor'
-import { pickMainIngredients } from '../logic/mainIngredients'
+import { pickDisplayIngredientChips } from '../logic/mainIngredients'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
@@ -113,7 +113,7 @@ export default function RecipeCard({
   const photoUrl = usePhotoUrl(recipe.photo)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
   const showPhoto = photoUrl && !recipe.showIconInsteadOfPhoto
-  const topIngredients = pickMainIngredients(recipe.ingredients)
+  const topIngredients = pickDisplayIngredientChips(recipe.ingredients)
   const displayMinutes = showQuickTime
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
     : recipe.cookMinutes

@@ -32,3 +32,48 @@ export function pickMainIngredients<T extends { name: string; amount: string; un
     )
     .slice(0, count)
 }
+
+/**
+ * 括弧書き(半角/全角どちらも。「(切り身)」「（テンメンジャン）」「(3倍濃縮)」等、
+ * 部位・状態・ふりがなの注記)を除去する(半角(...)・全角（...）の両方に対応)。
+ * データ(保存されている材料名)は変更しない。一覧カードの表示専用の正規化。
+ */
+const PAREN_PATTERN = /[（(][^）)]*[）)]/g
+
+/**
+ * 表示ラベルを1つに統一する食材名の別名辞書(2026-07-12オーナー実機フィードバック:
+ * 「生鮭」「甘塩鮭」はどちらもチップでは「鮭」と表示してスッキリさせたい)。
+ * キーは括弧書き除去後の文字列。将来、別の食材で同種の要望が出たらここに追記する。
+ */
+const CHIP_LABEL_SYNONYMS: Record<string, string> = {
+  生鮭: '鮭',
+  甘塩鮭: '鮭',
+}
+
+/** 一覧カードの食材チップに出す表示専用ラベル(データは変更しない) */
+export function normalizeIngredientChipLabel(name: string): string {
+  const withoutParens = name.replace(PAREN_PATTERN, '').replace(/\s+/g, ' ').trim()
+  return CHIP_LABEL_SYNONYMS[withoutParens] ?? withoutParens
+}
+
+/**
+ * 一覧カードに出す食材チップ(最大 count 件・表示専用ラベル)を選ぶ。
+ * pickMainIngredients で候補を多めに集めてから表示ラベルへ正規化し、
+ * 同じラベルになったもの(例:「生鮭」と「甘塩鮭」→どちらも「鮭」)は重複させず1つにまとめる
+ * (同カード内で重複したら1つに、2026-07-12オーナー実機フィードバック)。
+ */
+export function pickDisplayIngredientChips<
+  T extends { name: string; amount: string; unit: string },
+>(ingredients: readonly T[], count = 3): { name: string }[] {
+  const candidates = pickMainIngredients(ingredients, count * 3)
+  const seen = new Set<string>()
+  const chips: { name: string }[] = []
+  for (const ing of candidates) {
+    const label = normalizeIngredientChipLabel(ing.name)
+    if (!label || seen.has(label)) continue
+    seen.add(label)
+    chips.push({ name: label })
+    if (chips.length >= count) break
+  }
+  return chips
+}

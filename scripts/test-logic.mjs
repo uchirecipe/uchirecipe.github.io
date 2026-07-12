@@ -7,7 +7,13 @@ import {
   normalizeDigits,
 } from '../src/logic/amount.ts'
 import { parseRecipeText, splitQuantity, autoSplitAmountUnit } from '../src/logic/parseRecipeText.ts'
-import { buildSearchWords, toHiragana } from '../src/logic/kana.ts'
+import {
+  buildSearchWords,
+  toHiragana,
+  searchIndexNeedsRebuild,
+  SEARCH_INDEX_VERSION,
+} from '../src/logic/kana.ts'
+import { READINGS_VERSION } from '../src/logic/ingredientReadings.ts'
 import { normalizeProCode, normalizePackCode, hasPaidRecipeAccess } from '../src/logic/pro.ts'
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
@@ -15,8 +21,12 @@ import { isNewsSuppressed } from '../src/logic/news.ts'
 import { suggestForSlot } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
-import { resolveDuplicateTitleAction } from '../src/logic/backup.ts'
-import { pickMainIngredients } from '../src/logic/mainIngredients.ts'
+import { resolveDuplicateTitleAction, buildUpdatedSetRecipe } from '../src/logic/backup.ts'
+import {
+  pickMainIngredients,
+  normalizeIngredientChipLabel,
+  pickDisplayIngredientChips,
+} from '../src/logic/mainIngredients.ts'
 import { searchRecipes } from '../src/logic/search.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 
@@ -236,6 +246,43 @@ eq(
   eq('主材料(豚)は引き続きヒット', words2.some((w) => w.includes(toHiragana('豚'))), true)
 }
 
+// ---------- buildSearchWords: きのこカテゴリ語の追加(検索欄で「しめじ」「えのき」等でも
+// 「きのこ」でも同じレシピにヒットしてほしい・2026-07-12オーナー実機フィードバック) ----------
+{
+  const mushroomKey = toHiragana('きのこ')
+  const shimeji = buildSearchWords(
+    'きのこの味噌汁',
+    [{ name: 'しめじ', amount: '1', unit: 'パック' }],
+    [],
+  )
+  eq('しめじで検索語「きのこ」が追加される', shimeji.some((w) => w.includes(mushroomKey)), true)
+
+  const enoki = buildSearchWords('えのきのバター炒め', [{ name: 'えのき', amount: '1', unit: '袋' }], [])
+  eq('えのきで検索語「きのこ」が追加される', enoki.some((w) => w.includes(mushroomKey)), true)
+
+  // 漢字表記(椎茸・舞茸)でもカテゴリ語が追加されること(toHiragana変換後の一致確認)
+  const shiitake = buildSearchWords('椎茸の炊き込みご飯', [{ name: '椎茸', amount: '4', unit: '枚' }], [])
+  eq('椎茸(漢字)でも検索語「きのこ」が追加される', shiitake.some((w) => w.includes(mushroomKey)), true)
+
+  // きのこ類を含まないレシピには追加されない(誤爆しないこと)
+  const noMushroom = buildSearchWords('肉じゃが', [{ name: 'じゃがいも', amount: '3', unit: '個' }], [])
+  eq('きのこを含まないレシピには「きのこ」が追加されない', noMushroom.some((w) => w.includes(mushroomKey)), false)
+}
+
+// ---------- searchIndexNeedsRebuild: 検索インデックス移行の判定(既存レシピのsearchWordsに
+// きのこカテゴリ語等を反映させる一回きりの移行。2026-07-12) ----------
+{
+  const upToDate = { ingredientReadingsVersion: READINGS_VERSION, searchIndexVersion: SEARCH_INDEX_VERSION }
+  eq('両方最新なら再構築不要', searchIndexNeedsRebuild(upToDate), false)
+  eq('searchIndexVersionだけ古ければ再構築が必要', searchIndexNeedsRebuild({ ...upToDate, searchIndexVersion: 0 }), true)
+  eq(
+    'ingredientReadingsVersionだけ古くても再構築が必要',
+    searchIndexNeedsRebuild({ ...upToDate, ingredientReadingsVersion: 0 }),
+    true,
+  )
+  eq('未導入ユーザー(両方0)は再構築が必要', searchIndexNeedsRebuild({ ingredientReadingsVersion: 0, searchIndexVersion: 0 }), true)
+}
+
 // ---------- pro.ts(コード正規化) ----------
 eq('Pro: 全角・小文字・空白ゆらぎ', normalizeProCode(' ｕｒ-ab12-cd34 '), 'UR-AB12-CD34')
 eq('パック: 同上', normalizePackCode('up-xxxx-yyyy'), 'UP-XXXX-YYYY')
@@ -369,6 +416,99 @@ eq(
   'skip',
 )
 
+// ---------- buildUpdatedSetRecipe(レシピセットの再取込で内容を更新できるように・2026-07-12
+// オーナー実機フィードバック「review中セットに修正を配信する手段が無い」の対策) ----------
+{
+  const existingSetRecipe = {
+    id: 42,
+    title: 'レンジ蒸し鶏',
+    photo: 'FAKE_PHOTO_BLOB',
+    servings: 2,
+    cookMinutes: 15,
+    effortLevel: 'easy',
+    tags: ['高たんぱく'],
+    season: 'all',
+    suitableFor: undefined,
+    ingredients: [{ name: '鶏むね肉', amount: '300', unit: 'g' }],
+    steps: [{ text: '鶏むね肉をレンジで加熱する' }],
+    quickSteps: undefined,
+    memo: '旧メモ',
+    sourceUrl: undefined,
+    isFavorite: true,
+    cookedLogs: [{ date: '2026-07-01' }],
+    searchWords: ['old'],
+    isStarter: true,
+    sourceSetId: 'kintore',
+    sourceSetName: '筋トレ・高たんぱくセット',
+    createdAt: 1000,
+    updatedAt: 1000,
+  }
+
+  // (1) 内容が変わっていれば更新される(修正版JSONの再取込で中身が反映されること)
+  const changedContent = {
+    servings: 2,
+    cookMinutes: 12,
+    effortLevel: 'easy',
+    tags: ['高たんぱく', '時短'],
+    season: 'all',
+    suitableFor: undefined,
+    ingredients: [
+      { name: '鶏むね肉', amount: '300', unit: 'g' },
+      { name: '塩こうじ', amount: '1', unit: '大さじ' },
+    ],
+    steps: [{ text: '鶏むね肉に塩こうじを揉み込みレンジで加熱する' }],
+    quickSteps: undefined,
+    memo: '新メモ:レンジ加熱時間を修正',
+    sourceUrl: undefined,
+  }
+  const updated = buildUpdatedSetRecipe(existingSetRecipe, changedContent, existingSetRecipe.sourceSetName, 5000)
+  eq('内容が変わっていれば更新結果が返る(null以外)', updated !== null, true)
+  eq('更新: cookMinutesが反映される', updated?.cookMinutes, 12)
+  eq('更新: memoが反映される', updated?.memo, '新メモ:レンジ加熱時間を修正')
+  eq('更新: ingredientsが反映される', updated?.ingredients, changedContent.ingredients)
+  eq('更新: tagsが反映される', updated?.tags, changedContent.tags)
+  eq('更新: updatedAtが今回渡した時刻になる', updated?.updatedAt, 5000)
+  eq(
+    '更新: searchWordsが新しい材料で再構築される',
+    updated?.searchWords,
+    buildSearchWords(existingSetRecipe.title, changedContent.ingredients, changedContent.tags),
+  )
+
+  // (2) ユーザーデータ(id・createdAt・favorite・cookedLogs・photo・isStarter)は保持される
+  eq('保持: idは既存のまま', updated?.id, existingSetRecipe.id)
+  eq('保持: createdAtは既存のまま', updated?.createdAt, existingSetRecipe.createdAt)
+  eq('保持: favoriteは既存のまま', updated?.isFavorite, existingSetRecipe.isFavorite)
+  eq('保持: cookedLogsは既存のまま', updated?.cookedLogs, existingSetRecipe.cookedLogs)
+  eq('保持: photoは既存のまま', updated?.photo, existingSetRecipe.photo)
+  eq('保持: isStarterは既存のまま', updated?.isStarter, existingSetRecipe.isStarter)
+
+  // (3) 内容が完全に同一(セット名込み)ならnull=スキップ扱い(毎回「更新しました」と出るノイズを防ぐ)
+  const sameContent = {
+    servings: existingSetRecipe.servings,
+    cookMinutes: existingSetRecipe.cookMinutes,
+    effortLevel: existingSetRecipe.effortLevel,
+    tags: [...existingSetRecipe.tags],
+    season: existingSetRecipe.season,
+    suitableFor: existingSetRecipe.suitableFor,
+    ingredients: existingSetRecipe.ingredients.map((i) => ({ ...i })),
+    steps: existingSetRecipe.steps.map((s) => ({ ...s })),
+    quickSteps: existingSetRecipe.quickSteps,
+    memo: existingSetRecipe.memo,
+    sourceUrl: existingSetRecipe.sourceUrl,
+  }
+  eq(
+    '内容が完全に同一ならnull(スキップ扱い)',
+    buildUpdatedSetRecipe(existingSetRecipe, sameContent, existingSetRecipe.sourceSetName, 5000),
+    null,
+  )
+
+  // セット名だけ変わっている(テーマ改名)場合も更新扱いになり、sourceSetNameに反映される
+  // (バッチH-1で対応した挙動が、内容更新の仕組みに統合された後も保たれることの確認)
+  const renamed = buildUpdatedSetRecipe(existingSetRecipe, sameContent, '新テーマ名', 5000)
+  eq('セット名だけの変更でも更新扱いになる(null以外)', renamed !== null, true)
+  eq('更新後のsourceSetNameが新名称になる', renamed?.sourceSetName, '新テーマ名')
+}
+
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
 eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)
 eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), false)
@@ -430,6 +570,36 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
     pickMainIngredients(many).map((i) => i.name),
     ['じゃがいも', '玉ねぎ', '人参'],
   )
+}
+
+// ---------- normalizeIngredientChipLabel / pickDisplayIngredientChips(一覧カードの食材チップを
+// スッキリさせる・2026-07-12オーナー実機フィードバック「生鮭、甘塩鮭は鮭に統一。括弧は付けない」) ----------
+{
+  eq('括弧書き(半角)を除去', normalizeIngredientChipLabel('さば(切り身)'), 'さば')
+  eq('括弧書き(全角)を除去', normalizeIngredientChipLabel('甜麺醤（テンメンジャン）'), '甜麺醤')
+  eq('括弧書き(倍率表記)を除去', normalizeIngredientChipLabel('めんつゆ(3倍濃縮)'), 'めんつゆ')
+  eq('括弧が複数あってもすべて除去', normalizeIngredientChipLabel('甘塩鮭(または生鮭)(切り身)'), '鮭')
+  eq('括弧が半角開き・全角閉じの混在でも除去', normalizeIngredientChipLabel('しょうが(すりおろし）'), 'しょうが')
+  eq('括弧の無い名前はそのまま', normalizeIngredientChipLabel('鶏むね肉'), '鶏むね肉')
+  eq('生鮭は鮭に統一', normalizeIngredientChipLabel('生鮭'), '鮭')
+  eq('甘塩鮭は鮭に統一', normalizeIngredientChipLabel('甘塩鮭'), '鮭')
+  eq('生鮭(切り身)も鮭に統一(括弧除去+別名統一の組み合わせ)', normalizeIngredientChipLabel('生鮭(切り身)'), '鮭')
+
+  // 同カード内で正規化後に重複したら1つにまとめる(生鮭と甘塩鮭が両方並んでも「鮭」チップは1つだけ)
+  const twoSalmonKinds = [
+    { name: '生鮭(切り身)', amount: '2', unit: '切れ' },
+    { name: '甘塩鮭', amount: '1', unit: '切れ' },
+    { name: 'じゃがいも', amount: '2', unit: '個' },
+  ]
+  eq(
+    '重複ラベルは1チップにまとめる',
+    pickDisplayIngredientChips(twoSalmonKinds).map((c) => c.name),
+    ['鮭', 'じゃがいも'],
+  )
+
+  // 表示ラベルは正規化されても、色分け判定(ingredientColorToken)は従来どおり効く
+  eq('正規化後の「鮭」も魚介カテゴリ', ingredientColorToken('鮭'), '--chip-food-seafood')
+  eq('正規化後の「牛乳」は肉カテゴリに誤分類されない', ingredientColorToken(normalizeIngredientChipLabel('牛乳')), '--chip-neutral')
 }
 
 // ---------- searchRecipes: 「時短」絞り込み(quickStepsを持つレシピだけに絞る。

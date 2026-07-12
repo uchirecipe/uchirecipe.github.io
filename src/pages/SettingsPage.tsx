@@ -56,6 +56,23 @@ const sectionCls =
 // 画面が消えない系トグルの説明の下に注記を出すために使う(useWakeLock.tsのロジック自体は変更しない)
 const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
 
+/**
+ * importRecipeSetの結果メッセージを組み立てる。更新（内容が変わっていた再取込）が
+ * 1件以上あるときだけ「{a}件追加・{u}件更新しました」系にし、無いときは従来文言のまま
+ * （u=0のときまで新文言を出すと冗長なため・2026-07-12）
+ */
+function formatRecipeSetResult(result: { added: number; updated: number; skipped: number }): string {
+  if (result.updated > 0) {
+    return ja.settings.recipeSetResultWithUpdate
+      .replace('{a}', String(result.added))
+      .replace('{u}', String(result.updated))
+      .replace('{s}', String(result.skipped))
+  }
+  return ja.settings.recipeSetResult
+    .replace('{a}', String(result.added))
+    .replace('{s}', String(result.skipped))
+}
+
 /** 設定: NG食材 / 画面を暗くしない / テーマ */
 export default function SettingsPage() {
   const settings = useSettings()
@@ -133,11 +150,7 @@ export default function SettingsPage() {
           .replace('{n}', String(file.recipes.length))
         if (!window.confirm(confirmText)) return
         const result = await importRecipeSet(file)
-        setMessage(
-          ja.settings.recipeSetResult
-            .replace('{a}', String(result.added))
-            .replace('{s}', String(result.skipped)),
-        )
+        setMessage(formatRecipeSetResult(result))
       } catch (err) {
         if (!cancelled) showRecipeSetFetchError(err)
       } finally {
@@ -201,12 +214,8 @@ export default function SettingsPage() {
     }
   }
 
-  const showRecipeSetResult = (result: { added: number; skipped: number }) => {
-    setMessage(
-      ja.settings.recipeSetResult
-        .replace('{a}', String(result.added))
-        .replace('{s}', String(result.skipped)),
-    )
+  const showRecipeSetResult = (result: { added: number; updated: number; skipped: number }) => {
+    setMessage(formatRecipeSetResult(result))
   }
 
   // fetchRecipeSetの失敗理由(URLが存在しない/中身が壊れている)で文言を出し分ける

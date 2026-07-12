@@ -206,6 +206,12 @@ export interface Settings {
    * 起動時に全レシピのsearchWordsを再構築する（辞書追記のたびに追従させるため）。
    */
   ingredientReadingsVersion: number
+  /**
+   * 検索インデックス（searchWords）の反映バージョン。logic/kana.ts の SEARCH_INDEX_VERSION と
+   * 食い違っていたら、起動時に全レシピのsearchWordsを再構築する。ingredientReadingsVersionとは
+   * 別枠（カテゴリ辞書など、読み仮名辞書以外の理由でsearchWordsを作り直したい場合に使う）
+   */
+  searchIndexVersion: number
   /** Pro解錠コード（正規化済み・平文で保存。バックアップで復元されればPro状態も復元される） */
   proCode?: string
   /** Pro解錠日時（ミリ秒） */
@@ -236,6 +242,7 @@ export const defaultSettings: Settings = {
   timerNoticeShown: false,
   homeWidgets: defaultHomeWidgets,
   ingredientReadingsVersion: 0,
+  searchIndexVersion: 0,
 }
 
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */

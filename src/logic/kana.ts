@@ -1,4 +1,4 @@
-import { INGREDIENT_READINGS } from './ingredientReadings'
+import { INGREDIENT_READINGS, READINGS_VERSION } from './ingredientReadings'
 import { isSeasoningLike } from './mainIngredients'
 
 /**
@@ -21,6 +21,37 @@ function escapeRegExp(text: string): string {
 const readingKeys = Object.keys(INGREDIENT_READINGS).sort((a, b) => b.length - a.length)
 const readingPattern =
   readingKeys.length > 0 ? new RegExp(readingKeys.map(escapeRegExp).join('|'), 'g') : null
+
+/**
+ * カテゴリ語辞書(2026-07-12オーナー実機フィードバック: 「しめじ」「えのき」等で検索しても
+ * 「きのこ」で検索しても両方ヒットしてほしい)。材料名がいずれかの word を含んでいたら、
+ * 検索語に category を追加する。将来カテゴリを増やす場合はこの配列に1エントリ足すだけでよい。
+ */
+interface CategoryRule {
+  /** 検索語として追加する語 */
+  category: string
+  /** 材料名にこれらのいずれかを含めば category を追加する(toHiragana正規化した上で判定) */
+  words: string[]
+}
+
+const CATEGORY_RULES: CategoryRule[] = [
+  {
+    category: 'きのこ',
+    words: [
+      'しめじ',
+      'えのき',
+      '榎茸',
+      'まいたけ',
+      '舞茸',
+      'エリンギ',
+      'しいたけ',
+      '椎茸',
+      'なめこ',
+      'マッシュルーム',
+      'きくらげ',
+    ],
+  },
+]
 
 /** カタカナをひらがなに変換し、全角英数を半角化・小文字化した上で食材名辞書を適用する */
 export function toHiragana(input: string): string {
@@ -53,5 +84,39 @@ export function buildSearchWords(
     const trimmed = raw.trim()
     if (trimmed) words.add(toHiragana(trimmed))
   }
+  // カテゴリ語(例:「しめじ」→「きのこ」)を材料名から検索語に追加する
+  for (const ing of ingredients) {
+    const normalizedName = toHiragana(ing.name)
+    for (const rule of CATEGORY_RULES) {
+      if (rule.words.some((word) => normalizedName.includes(toHiragana(word)))) {
+        words.add(toHiragana(rule.category))
+      }
+    }
+  }
   return [...words]
+}
+
+/**
+ * searchWords（buildSearchWordsの出力）を作り直すべき変更が入るたびに+1する。
+ * ingredientReadingsVersion（読み仮名辞書の版）とは別枠: こちらはカテゴリ辞書
+ * （CATEGORY_RULES）等、読み仮名以外の理由でsearchWordsの作り直しが必要になったときに使う。
+ * db/recipes.ts の rebuildSearchWordsIfNeeded が settings.searchIndexVersion と比較し、
+ * 食い違っていれば起動時に全レシピのsearchWordsを再構築する。
+ */
+export const SEARCH_INDEX_VERSION = 1
+
+/**
+ * settingsに保存済みのバージョンが古く、全レシピのsearchWordsを再構築すべきかを判定する
+ * （db/recipes.ts の rebuildSearchWordsIfNeeded が使う判定部分だけを切り出したもの。
+ * db非依存の純ロジックなので単体テストできる）。読み仮名辞書・カテゴリ辞書のどちらか
+ * 一方でも版が古ければtrueを返す。
+ */
+export function searchIndexNeedsRebuild(settings: {
+  ingredientReadingsVersion: number
+  searchIndexVersion: number
+}): boolean {
+  return (
+    settings.ingredientReadingsVersion !== READINGS_VERSION ||
+    settings.searchIndexVersion !== SEARCH_INDEX_VERSION
+  )
 }

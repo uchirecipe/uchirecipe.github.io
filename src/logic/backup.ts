@@ -103,6 +103,11 @@ function toRecipe(backup: BackupRecipe): Recipe {
 export interface ImportResult {
   /** 新規に追加したレシピ数 */
   added: number
+  /**
+   * 内容を更新したレシピ数（同一セットの再取込で中身が変わっていた分。
+   * importBackupでは常に0=更新の概念が無い。2026-07-12）
+   */
+  updated: number
   /** 既存と重複していたため取り込まなかったレシピ数（merge時のみ発生） */
   skipped: number
 }
@@ -133,7 +138,7 @@ export async function importBackup(
       })
       await db.recipes.bulkAdd(recipes)
     })
-    return { added: recipes.length, skipped: 0 }
+    return { added: recipes.length, updated: 0, skipped: 0 }
   }
 
   // merge: 1件ずつ id で照合する
@@ -158,7 +163,7 @@ export async function importBackup(
       }
     }
   })
-  return { added, skipped }
+  return { added, updated: 0, skipped }
 }
 
 /** URLが見つからない・壊れている場合の理由を、呼び出し側が文言を出し分けられるよう表す */
@@ -200,6 +205,74 @@ export function resolveDuplicateTitleAction(
   return 'skip'
 }
 
+/** importRecipeSetの更新（再取込）で書き換える「セットの中身」フィールド */
+type RecipeSetContent = Pick<
+  Recipe,
+  | 'servings'
+  | 'cookMinutes'
+  | 'effortLevel'
+  | 'tags'
+  | 'season'
+  | 'suitableFor'
+  | 'ingredients'
+  | 'steps'
+  | 'quickSteps'
+  | 'memo'
+  | 'sourceUrl'
+>
+
+/**
+ * 同一セット由来の再取込（resolveDuplicateTitleActionが'updateName'を返すケース）で、
+ * 既存レシピの内容を更新した結果を返す（純ロジック・DB非依存）。
+ * 更新: servings/cookMinutes/effortLevel/tags/season/suitableFor/ingredients/steps/
+ *       quickSteps/memo/sourceUrl/sourceSetName + searchWords・updatedAt
+ * 保持: 上記以外すべて（id・createdAt・isFavorite・cookedLogs・photo・isStarter・iconKey等の
+ *       ユーザーデータ・表示設定。existingをベースに更新フィールドだけ上書きするため自動的に保持される）
+ * 内容が完全に同一（sourceSetName込み）なら null を返す（呼び出し側はスキップ扱いにする。
+ * 修正の無い再取込のたびに「更新しました」と出るノイズを防ぐため）
+ */
+export function buildUpdatedSetRecipe(
+  existing: Recipe,
+  incoming: RecipeSetContent,
+  setName: string | undefined,
+  now: number = Date.now(),
+): Recipe | null {
+  const content = (source: RecipeSetContent, sourceSetName: string | undefined) =>
+    JSON.stringify({
+      servings: source.servings,
+      cookMinutes: source.cookMinutes,
+      effortLevel: source.effortLevel,
+      tags: source.tags,
+      season: source.season,
+      suitableFor: source.suitableFor,
+      ingredients: source.ingredients,
+      steps: source.steps,
+      quickSteps: source.quickSteps,
+      memo: source.memo,
+      sourceUrl: source.sourceUrl,
+      sourceSetName,
+    })
+  if (content(existing, existing.sourceSetName) === content(incoming, setName)) return null
+
+  return {
+    ...existing,
+    servings: incoming.servings,
+    cookMinutes: incoming.cookMinutes,
+    effortLevel: incoming.effortLevel,
+    tags: incoming.tags,
+    season: incoming.season,
+    suitableFor: incoming.suitableFor,
+    ingredients: incoming.ingredients,
+    steps: incoming.steps,
+    quickSteps: incoming.quickSteps,
+    memo: incoming.memo,
+    sourceUrl: incoming.sourceUrl,
+    sourceSetName: setName,
+    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags),
+    updatedAt: now,
+  }
+}
+
 /**
  * 配布されているレシピセット（バックアップと同形式のJSON）を追加で読み込む。
  * 個人のバックアップ復元(importBackup)とは別物:
@@ -207,11 +280,12 @@ export function resolveDuplicateTitleAction(
  * - 読み込んだレシピはisStarter扱いにする（無料版の件数制限に含めない）
  * - 重複判定はidではなく料理名（完全一致）で行う
  * - settingsは取り込まない（配布元の設定で自分の設定を上書きしないため）
- * - 同一セットの再取込（テーマ改名など）では重複させず、sourceSetNameだけ新名称に更新する
- *   （resolveDuplicateTitleAction参照）
+ * - 同一セットの再取込（修正版JSONの配信・テーマ改名など）では重複させず、既存レシピの内容を
+ *   更新する（resolveDuplicateTitleAction参照。buildUpdatedSetRecipeでユーザーデータを保持）
  */
 export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
   let added = 0
+  let updated = 0
   let skipped = 0
   await db.transaction('rw', db.recipes, async () => {
     const existingByTitle = new Map(
@@ -223,8 +297,17 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
       const existing = existingByTitle.get(title)
       if (existing) {
         const action = resolveDuplicateTitleAction(existing.sourceSetId, file.setId)
-        if (action === 'updateName' && existing.sourceSetName !== file.setName) {
-          await db.recipes.update(existing.id!, { sourceSetName: file.setName })
+        if (action === 'updateName') {
+          const mergedRecipe = buildUpdatedSetRecipe(existing, rest, file.setName)
+          if (mergedRecipe) {
+            // 内容を丸ごと差し替えるため.update()の部分更新ではなく.put()で置き換える
+            // (Dexieの.update()はUpdateSpec<Recipe>型の推論がフルのRecipeオブジェクトだと
+            // 通らないTS上の制約もあるが、意味的にも「内容を丸ごと更新」には.putが適切)
+            await db.recipes.put(mergedRecipe)
+            existingByTitle.set(title, mergedRecipe)
+            updated++
+            continue
+          }
         }
         skipped++
         continue
@@ -244,7 +327,7 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
       added++
     }
   })
-  return { added, skipped }
+  return { added, updated, skipped }
 }
 
 /** 30日以上バックアップしていない（または一度もしていない）か */

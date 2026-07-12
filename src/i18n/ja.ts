@@ -258,6 +258,8 @@ export const ja = {
     recipeSetFileLoad: 'ファイルから読み込む',
     recipeSetLoading: '読み込み中…',
     recipeSetResult: '{a}件追加しました（重複{s}件はスキップ）',
+    /** 更新（内容が変わっていた再取込）が1件以上あるときのみ使う。u=0のときはrecipeSetResultのまま */
+    recipeSetResultWithUpdate: '{a}件追加・{u}件更新しました（重複{s}件はスキップ）',
     recipeSetError: '読み込めませんでした。レシピセットのJSONファイルか確認してください',
     recipeSetNotFound: '指定されたURLにレシピセットが見つかりませんでした。IDの綴りが正しいか確認してください',
     recipeSetDeepLinkConfirm: '「{name}」（{n}品）を追加しますか？',

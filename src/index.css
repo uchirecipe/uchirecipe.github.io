@@ -186,6 +186,9 @@
   .ja-phrase {
     word-break: keep-all;
     overflow-wrap: anywhere;
+    /* 最終行が「のせる。」だけ等の極端に短い孤立行を対応ブラウザでは避ける
+       (折返し候補はZWSPの文節境界に限られるため、どこで折れても読みやすさは保たれる) */
+    text-wrap: pretty;
   }
 
 }
