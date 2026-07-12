@@ -251,6 +251,12 @@ export interface Settings {
   lastCustomTimerMinutes?: number
   /** 食材価格マスタ（頻出食材の目安価格）の初期投入が済んでいるか */
   priceMasterSeeded: boolean
+  /**
+   * 食材価格マスタの「目安/自分の価格」バッジ用フラグ(isDefault等)を、
+   * 既存ユーザーの手持ちデータに1回だけ後付けする移行が済んでいるか（2026-07-12 UX改修）。
+   * 済んでいなければ起動時にprices.tsのseedPriceDefaultsIfNeededが移行処理を行う
+   */
+  priceDefaultFlagsMigrated: boolean
 }
 
 export const defaultSettings: Settings = {
@@ -268,6 +274,7 @@ export const defaultSettings: Settings = {
   ingredientReadingsVersion: 0,
   searchIndexVersion: 0,
   priceMasterSeeded: false,
+  priceDefaultFlagsMigrated: false,
 }
 
 /**
@@ -284,6 +291,15 @@ export interface PriceEntry {
   unit: string
   /** 最終更新日時（ミリ秒） */
   updatedAt: number
+  /**
+   * PRICE_DEFAULTSから投入されたまま、価格・単位をユーザーが書き換えていない行か
+   * （「食材と価格」画面の「目安」/「自分の価格」バッジに使う。2026-07-12 UX改修）。
+   * ユーザーが新規追加した行や、価格/単位を一度でも編集した行は false（または未設定）になる
+   */
+  isDefault?: boolean
+  /** isDefaultの行の元の目安値のスナップショット。「目安に戻す」ボタンの復元先 */
+  defaultPricePerUnit?: number
+  defaultUnit?: string
 }
 
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */
