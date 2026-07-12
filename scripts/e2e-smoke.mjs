@@ -7,13 +7,17 @@
 //         SMK-04(貼り付け整形) / SMK-05(人数変更・帯分数表示) / SMK-08簡易(調理中モード) /
 //         KW-01(検索キーワード欄。保存→検索でヒットし、一覧・詳細には表示されないこと) /
 //         SMK-14簡易(未解錠ゲート) /
+//         SETTINGS-TAB-01(設定画面のタブ分割。?set=/?section=直リンクが該当タブを自動で開く・
+//         4タブの手動切替・トーストのタップ閉じ。2026-07-12オーナー実機フィードバック) /
+//         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
 //         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
 //         SCROLL-02(一覧の絞り込み・並べ替え条件が詳細→戻るを経ても保持される。
 //         2026-07-12深夜フィードバック再調査で判明した本当の原因の再発防止。PC Chrome相当) /
 //         TIMER-ADJ-01(実行中タイマーの±調整窓。タップで開き「+1分」「−30秒」で残り秒が変わる) /
-//         TIMER-CUSTOM-01(じぶんタイマー。入口Aから起動し、0未満にならない floor 挙動も確認) /
+//         TIMER-CUSTOM-01(じぶんタイマー。入口Aから起動し、0未満にならない floor 挙動も確認。
+//         2026-07-12秒刻み対応で±30秒・±10秒の分+秒表示・10秒未満にならない floor も確認) /
 //         LOG-PHOTO-01(「作った！」記録への写真添付。選択→プレビュー→保存→一覧サムネイル→
 //         原寸表示窓、圧縮後Blobと自動記録された表示人数をIndexedDBから直接検証。2026-07-12) /
 //         NUT-01(栄養価のめやす: 未解錠でもエネルギー・塩分の概算が閉じた1行から見え、
@@ -302,6 +306,85 @@ try {
   check(
     'SMK-14 未解錠ゲート',
     (await page.textContent('body')).includes('追加レシピパックまたはPro版の解錠が必要'),
+  )
+
+  // --- SETTINGS-TAB-01: 設定画面のタブ分割(2026-07-12オーナー実機フィードバック)。
+  // ?set=直リンクで開いたときに「レシピ」タブが自動で開くこと(「基本」タブの内容は隠れる)、
+  // 4タブを手動で切り替えられること、?section=pro/?section=themesの直リンクも
+  // 該当タブを自動で開くことを確認する ---
+  currentCheck = 'SETTINGS-TAB-01'
+  check(
+    'SETTINGS-TAB-01 ?set=直リンクは「レシピ」タブを自動で開く(セット読み込みの見出しが見える)',
+    (await page.textContent('body')).includes('レシピセットを読み込む'),
+  )
+  check(
+    'SETTINGS-TAB-01 このとき「基本」タブの内容は隠れている(NG食材の見出しが見えない)',
+    !(await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
+  )
+  // トースト化(2026-07-12: setMessage表示をページ上部固定からトーストに変更)。タップで閉じる。
+  // 「追加レシピパックまたはPro版の解錠が必要」という語句自体はテーマ一覧の説明文にも登場するため、
+  // トースト本文にしか出ない先頭部分「このレシピセットの追加には」で一意に狙う
+  await page.getByRole('button', { name: 'このレシピセットの追加には' }).click()
+  await page.waitForTimeout(200)
+  check(
+    'SETTINGS-TAB-01 トーストはタップで閉じる',
+    !(await page.textContent('body')).includes('このレシピセットの追加には'),
+  )
+
+  // タブを手動で一通り切り替え、それぞれの代表コンテンツが出ることを確認する
+  await page.getByRole('button', { name: '基本', exact: true }).click()
+  await page.waitForTimeout(200)
+  check(
+    'SETTINGS-TAB-01 「基本」タブでNG食材の見出しが見える',
+    (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
+  )
+  await page.getByRole('button', { name: 'バックアップ', exact: true }).click()
+  await page.waitForTimeout(200)
+  check(
+    'SETTINGS-TAB-01 「バックアップ」タブで書き出しボタンが見える',
+    (await page.textContent('body')).includes('ファイルに書き出す'),
+  )
+  await page.getByRole('button', { name: 'Pro・パック', exact: true }).click()
+  await page.waitForTimeout(200)
+  check(
+    'SETTINGS-TAB-01 「Pro・パック」タブでPro版の見出しが見える',
+    (await page.textContent('body')).includes('Pro版'),
+  )
+
+  // ?section=直リンクの自動タブ切り替え(既存のスクロール挙動は維持しつつ、タブ化後も動くことを確認)
+  await page.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  check(
+    'SETTINGS-TAB-01 ?section=themesは「レシピ」タブを自動で開く(テーマ一覧の見出しが見える)',
+    (await page.textContent('body')).includes('テーマ一覧'),
+  )
+  await page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  check(
+    'SETTINGS-TAB-01 ?section=proは「Pro・パック」タブを自動で開く(Pro版の見出しが見える)',
+    (await page.textContent('body')).includes('Pro版'),
+  )
+  check(
+    'SETTINGS-TAB-01 ?section=proでは「基本」タブの内容が隠れている',
+    !(await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
+  )
+
+  // --- TOAST-01: 設定操作の結果メッセージがトーストで表示され、数秒で自動的に消える
+  // (2026-07-12オーナー実機フィードバック。以前はページ最上部固定でスクロールしないと見えなかった) ---
+  currentCheck = 'TOAST-01'
+  await page.getByRole('button', { name: '基本', exact: true }).click()
+  await page.waitForTimeout(200)
+  await page.getByPlaceholder('例: えび').fill('E2Eトースト確認食材')
+  await page.getByRole('button', { name: '追加', exact: true }).click()
+  await page.waitForTimeout(300)
+  check(
+    'TOAST-01 NG食材追加でトーストが表示される',
+    (await page.textContent('body')).includes('「E2Eトースト確認食材」を追加しました'),
+  )
+  await page.waitForTimeout(5000) // Toastの自動非表示(AUTO_DISMISS_MS=4500ms)を超えて待つ
+  check(
+    'TOAST-01 トーストは数秒で自動的に消える',
+    !(await page.textContent('body')).includes('「E2Eトースト確認食材」を追加しました'),
   )
 
   // --- SCROLL-01: 一覧のスクロール位置復元(iPhone SE2実機フィードバック 2026-07-11)。
@@ -765,6 +848,8 @@ try {
   await page.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
   await page.waitForTimeout(300)
   const customDialog = page.getByRole('dialog', { name: 'じぶんタイマー' })
+  // 残り時間の表示だけを拾うロケータ(ボタン文言「−30秒」等と紛れないよう、表示専用のspanをクラスで狙う)
+  const customCounter = customDialog.locator('.tabular-nums')
   check(
     'TIMER-CUSTOM-01 じぶんタイマーの窓が開く(初回既定3分)',
     (await customDialog.textContent()).includes('3分'),
@@ -776,6 +861,32 @@ try {
     'TIMER-CUSTOM-01 分数ステッパー(±1分)で1分まで減らせる',
     (await customDialog.textContent()).includes('1分'),
   )
+  // --- 秒刻み(2026-07-12オーナー実機フィードバック追加分)。±30秒・±10秒で分+秒表示になり、
+  // 一往復(+30+10-30-10=±0)で1分ちょうどに戻ることを確認する(以降の起動値を60秒に保つため) ---
+  await customDialog.getByRole('button', { name: '+30秒' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 秒刻み「+30秒」で1分→1分30秒', (await customCounter.textContent()) === '1分30秒')
+  await customDialog.getByRole('button', { name: '+10秒' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 秒刻み「+10秒」で1分30秒→1分40秒', (await customCounter.textContent()) === '1分40秒')
+  await customDialog.getByRole('button', { name: '−30秒' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 秒刻み「−30秒」で1分40秒→1分10秒', (await customCounter.textContent()) === '1分10秒')
+  await customDialog.getByRole('button', { name: '−10秒' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 秒刻み「−10秒」で1分10秒→1分ちょうどに戻る', (await customCounter.textContent()) === '1分')
+  // 開始前の秒数も10秒未満にならない(floor挙動)。−1分→10秒未満は10秒で止まる。その後+30+10+10=+50秒で1分に戻す
+  await customDialog.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 開始前の秒数も10秒未満にならない(1分→10秒で床止め)', (await customCounter.textContent()) === '10秒')
+  await customDialog.getByRole('button', { name: '−10秒' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 10秒からさらに「−10秒」しても10秒のまま', (await customCounter.textContent()) === '10秒')
+  await customDialog.getByRole('button', { name: '+30秒' }).click()
+  await customDialog.getByRole('button', { name: '+10秒' }).click()
+  await customDialog.getByRole('button', { name: '+10秒' }).click()
+  await page.waitForTimeout(150)
+  check('TIMER-CUSTOM-01 1分まで戻して開始する', (await customCounter.textContent()) === '1分')
   await customDialog.getByRole('button', { name: '開始' }).click()
   await page.waitForTimeout(400)
   const customBarText = await page.textContent('body')

@@ -14,6 +14,7 @@ import {
   SEARCH_INDEX_VERSION,
 } from '../src/logic/kana.ts'
 import { READINGS_VERSION } from '../src/logic/ingredientReadings.ts'
+import { formatMinutesSecondsLabel } from '../src/logic/time.ts'
 import { normalizeProCode, normalizePackCode, hasPaidRecipeAccess } from '../src/logic/pro.ts'
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
@@ -1347,6 +1348,13 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('MB換算は小数第1位に丸める', bytesToMB(52_450_000), 50)
   eq('MB換算の丸め(52.6MB相当)', bytesToMB(55_000_000), 52.5)
 }
+
+// ---------- じぶんタイマーの秒刻み表示(formatMinutesSecondsLabel。2026-07-12秒刻み対応) ----------
+eq('分のみ(秒0)は「3分」', formatMinutesSecondsLabel(180), '3分')
+eq('分+秒は「3分30秒」', formatMinutesSecondsLabel(210), '3分30秒')
+eq('1分未満は秒のみ「45秒」', formatMinutesSecondsLabel(45), '45秒')
+eq('負数は0扱いで「0秒」', formatMinutesSecondsLabel(-5), '0秒')
+eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

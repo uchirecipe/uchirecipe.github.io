@@ -246,9 +246,16 @@ export interface Settings {
   firstLaunchAt?: number
   /**
    * じぶんタイマー(自由な分数のタイマー)で最後に使った分数(2026-07-12・タイマー自由設定)。
-   * 次回開くときの既定値にする。未設定(初回)は呼び出し側で3分を既定値として扱う
+   * 次回開くときの既定値にする。未設定(初回)は呼び出し側で3分を既定値として扱う。
+   * 秒刻み対応(同日オーナー実機フィードバック)後は下のlastCustomTimerSecondsが優先され、
+   * この項目は後方互換の読み取り専用フォールバックとして残す(新規書き込みはしない)
    */
   lastCustomTimerMinutes?: number
+  /**
+   * じぶんタイマーで最後に使った秒数(2026-07-12秒刻み対応)。±10秒/±30秒/±1分の調整後の値を
+   * そのまま保存する。未設定なら呼び出し側でlastCustomTimerMinutes→なければ3分(180秒)を既定値にする
+   */
+  lastCustomTimerSeconds?: number
   /** 食材価格マスタ（頻出食材の目安価格）の初期投入が済んでいるか */
   priceMasterSeeded: boolean
   /**

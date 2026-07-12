@@ -28,7 +28,8 @@ import TimerAdjustModal from './TimerAdjustModal'
 import CustomTimerModal from './CustomTimerModal'
 import { ja } from '../i18n/ja'
 
-const DEFAULT_CUSTOM_TIMER_MINUTES = 3
+// じぶんタイマーの既定値(秒)。2026-07-12秒刻み対応で分単位のstateを廃止し秒単位に統一
+const DEFAULT_CUSTOM_TIMER_SECONDS = 180
 
 type Props = {
   recipe: Recipe
@@ -59,7 +60,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
   // じぶんタイマー（自由な分数で始めるタイマー。同バッチ）の窓
   const [customTimerOpen, setCustomTimerOpen] = useState(false)
-  const [customMinutes, setCustomMinutes] = useState(DEFAULT_CUSTOM_TIMER_MINUTES)
+  const [customSeconds, setCustomSeconds] = useState(DEFAULT_CUSTOM_TIMER_SECONDS)
 
   const total = recipe.steps.length
   const step = recipe.steps[index]
@@ -76,18 +77,24 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const recipeTimers = timers.filter((t) => t.recipeId === recipeId)
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
 
+  // じぶんタイマーの既定値(秒刻み対応・2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、
+  // 無ければ旧フィールドlastCustomTimerMinutes(分)を秒に換算して読む(後方互換)。どちらも無ければ既定3分
   const openCustomTimer = () => {
-    setCustomMinutes(settings?.lastCustomTimerMinutes ?? DEFAULT_CUSTOM_TIMER_MINUTES)
+    setCustomSeconds(
+      settings?.lastCustomTimerSeconds ??
+        (settings?.lastCustomTimerMinutes != null
+          ? settings.lastCustomTimerMinutes * 60
+          : DEFAULT_CUSTOM_TIMER_SECONDS),
+    )
     setCustomTimerOpen(true)
   }
 
   const startCustomTimer = () => {
-    void updateSettings({ lastCustomTimerMinutes: customMinutes })
-    const seconds = customMinutes * 60
+    void updateSettings({ lastCustomTimerSeconds: customSeconds })
     startTimer({
-      key: `custom-${recipeId}-${seconds}`,
+      key: `custom-${recipeId}-${customSeconds}`,
       label: ja.timer.customLabel,
-      seconds,
+      seconds: customSeconds,
       recipeId,
       stepNumber,
     })
@@ -499,8 +506,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       />
       <CustomTimerModal
         open={customTimerOpen}
-        minutes={customMinutes}
-        onMinutesChange={setCustomMinutes}
+        totalSeconds={customSeconds}
+        onSecondsChange={setCustomSeconds}
         onStart={startCustomTimer}
         onClose={() => setCustomTimerOpen(false)}
       />

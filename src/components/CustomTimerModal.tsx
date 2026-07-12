@@ -1,24 +1,36 @@
 import { useEffect } from 'react'
 import { X, Minus, Plus } from 'lucide-react'
 import { ja } from '../i18n/ja'
+import { formatMinutesSecondsLabel } from '../logic/time'
 
 type Props = {
   open: boolean
-  minutes: number
-  onMinutesChange: (value: number) => void
+  totalSeconds: number
+  onSecondsChange: (value: number) => void
   onStart: () => void
   onClose: () => void
 }
 
-const MIN_MINUTES = 1
+// 開始前に設定できる最小値(秒)。0秒タイマーを作れてしまわないための床
+const MIN_SECONDS = 10
 
 /**
  * じぶんタイマー（自由な分数で始めるタイマー）の窓（2026-07-12タイマー自由設定・Fable設計docs/20 §6）。
- * 「作った！」記録の窓（CookedLogModal）と同じ様式。分数ステッパー(±1分)→「開始」で
- * 既存のタイマー機構(useTimers/startTimer)を呼び出す（呼び出し元が担当）。
+ * 「作った！」記録の窓（CookedLogModal）と同じ様式。中央の±1分(アイコンのみ、既存どおり)に加えて、
+ * ±30秒・±10秒のボタン行を追加（同日オーナー実機フィードバックで秒刻み対応）。
+ * ±1分をあえてアイコンのまま（テキスト化しない）にしているのは、表示中の残り時間そのものに
+ * 「1分」「3分」のような文字列が出るため、ボタンにも同じ文字列を乗せるとE2Eの
+ * テキスト一致チェックが紛らわしくなる（表示なのかボタンなのか判別できない）ため。
+ * →「開始」で既存のタイマー機構(useTimers/startTimer)を呼び出す（呼び出し元が担当）。
  * 背景タップ・×ボタン・Escapeで閉じる。
  */
-export default function CustomTimerModal({ open, minutes, onMinutesChange, onStart, onClose }: Props) {
+export default function CustomTimerModal({
+  open,
+  totalSeconds,
+  onSecondsChange,
+  onStart,
+  onClose,
+}: Props) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -29,6 +41,10 @@ export default function CustomTimerModal({ open, minutes, onMinutesChange, onSta
   }, [open, onClose])
 
   if (!open) return null
+
+  const adjust = (deltaSeconds: number) => {
+    onSecondsChange(Math.max(MIN_SECONDS, totalSeconds + deltaSeconds))
+  }
 
   return (
     <div
@@ -56,23 +72,53 @@ export default function CustomTimerModal({ open, minutes, onMinutesChange, onSta
         <div className="mt-[var(--space-sm)] flex items-center justify-center gap-3">
           <button
             type="button"
-            onClick={() => onMinutesChange(Math.max(MIN_MINUTES, minutes - 1))}
+            onClick={() => adjust(-60)}
             aria-label={ja.timer.customMinutesDown}
             className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent shadow-sm"
           >
             <Minus size={22} aria-hidden />
           </button>
-          <span className="min-w-20 text-center text-2xl font-bold tabular-nums">
-            {minutes}
-            {ja.detail.minutesSuffix}
+          <span className="min-w-24 text-center text-2xl font-bold tabular-nums">
+            {formatMinutesSecondsLabel(totalSeconds)}
           </span>
           <button
             type="button"
-            onClick={() => onMinutesChange(minutes + 1)}
+            onClick={() => adjust(60)}
             aria-label={ja.timer.customMinutesUp}
             className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent shadow-sm"
           >
             <Plus size={22} aria-hidden />
+          </button>
+        </div>
+        {/* 秒刻み調整(2026-07-12追加分)。±1分の下に小さめのボタンで並べる */}
+        <div className="mt-[var(--space-sm)] grid grid-cols-4 gap-2">
+          <button
+            type="button"
+            onClick={() => adjust(-30)}
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+          >
+            {ja.timer.minusThirtySeconds}
+          </button>
+          <button
+            type="button"
+            onClick={() => adjust(-10)}
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+          >
+            {ja.timer.minusTenSeconds}
+          </button>
+          <button
+            type="button"
+            onClick={() => adjust(10)}
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+          >
+            {ja.timer.plusTenSeconds}
+          </button>
+          <button
+            type="button"
+            onClick={() => adjust(30)}
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+          >
+            {ja.timer.plusThirtySeconds}
           </button>
         </div>
         <button

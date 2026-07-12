@@ -2,6 +2,7 @@
  * 手順の文章から「10分」「1時間半」「30秒」のような時間表記を見つける。
  * 見つけた部分はタップでタイマー開始できるボタンとして表示される。
  */
+import { ja } from '../i18n/ja'
 
 export interface TimeToken {
   /** 文中に現れたままの表記（例: "1時間半"） */
@@ -65,4 +66,18 @@ export function formatRemaining(totalSeconds: number): string {
   const mm = String(minutes).padStart(2, '0')
   const ss = String(seconds).padStart(2, '0')
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`
+}
+
+/**
+ * じぶんタイマーの設定値(まだ開始していない秒数)を「3分30秒」のような分+秒表記にする
+ * (2026-07-12秒刻み対応・オーナー実機フィードバック)。formatRemainingの"08:24"はカウントダウン中の
+ * 表示用でこの画面には合わないため別関数にする。0分・0秒の側は表示を省く(「3分」「30秒」)
+ */
+export function formatMinutesSecondsLabel(totalSeconds: number): string {
+  const total = Math.max(0, Math.round(totalSeconds))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (minutes === 0) return `${seconds}${ja.timer.secondsSuffix}`
+  if (seconds === 0) return `${minutes}${ja.detail.minutesSuffix}`
+  return `${minutes}${ja.detail.minutesSuffix}${seconds}${ja.timer.secondsSuffix}`
 }

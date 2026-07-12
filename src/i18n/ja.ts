@@ -210,6 +210,11 @@ export const ja = {
   },
   settings: {
     title: '設定',
+    // タブ分割(2026-07-12オーナー実機フィードバック: 縦に長大化したため上部タブで分割)
+    tabBasic: '基本',
+    tabRecipe: 'レシピ',
+    tabBackup: 'バックアップ',
+    tabProPack: 'Pro・パック',
     ngTitle: 'NG食材（アレルギー・苦手）',
     ngDescription: 'ここに登録した食材を含むレシピには警告マークが付きます（例:「豚」で「豚肉」「豚バラ」もヒットします）',
     ngPlaceholder: '例: えび',
@@ -628,6 +633,15 @@ export const ja = {
     customStart: '開始',
     customMinutesDown: 'じぶんタイマーの分数を減らす',
     customMinutesUp: 'じぶんタイマーの分数を増やす',
+    // 秒刻み操作の追加分(2026-07-12オーナー実機フィードバック)。visible textをそのままaria-labelとして
+    // 使う(TimerAdjustModalの「−30秒」「+1分」ボタンと同じ流儀。aria-label重複はダイアログのスコープが
+    // 別なので問題ない)。±1分ボタンはアイコンのまま(テキスト化しない)にする: 残り時間の表示自体に
+    // 「1分」のような文字列が出るため、ボタンにも同じ文字列を乗せるとE2Eのテキスト一致チェックで
+    // 表示文言とボタン文言の区別がつかなくなるため
+    minusTenSeconds: '−10秒',
+    plusTenSeconds: '+10秒',
+    plusThirtySeconds: '+30秒',
+    secondsSuffix: '秒',
   },
   // 食材価格マスタ「食材と価格」画面(docs/20 §3)。詳細・献立の概算食費が
   // マスタ価格を使ったときの注記(mixedNote)はRecipeDetailPage・MealPlanPageの両方から参照する。

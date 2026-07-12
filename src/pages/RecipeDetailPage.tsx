@@ -171,9 +171,10 @@ export default function RecipeDetailPage() {
   // 時短モード（レンジ活用など、通常より手早い代替手順がある料理だけ切り替えを表示。表示中だけの一時的な選択）
   const [quickMode, setQuickMode] = useState(false)
 
-  // じぶんタイマー（自由な分数で始めるタイマー。2026-07-12タイマー自由設定・入口A）の窓
+  // じぶんタイマー（自由な分数で始めるタイマー。2026-07-12タイマー自由設定・入口A。
+  // 同日の秒刻み対応でstateは秒単位に統一）の窓
   const [customTimerOpen, setCustomTimerOpen] = useState(false)
-  const [customMinutes, setCustomMinutes] = useState(3)
+  const [customSeconds, setCustomSeconds] = useState(180)
 
   // 用語タップ辞書(2026-07-11): ポップオーバーの開閉はページ単位で1つ持つ
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
@@ -231,19 +232,23 @@ export default function RecipeDetailPage() {
   }
 
   // じぶんタイマー（入口A: BackHeaderのタイマーアイコン）。詳細画面はFocusModeと違い
-  // 「今見ている手順」の概念が無いため、どの手順にも紐付かないタイマーとして起動する
+  // 「今見ている手順」の概念が無いため、どの手順にも紐付かないタイマーとして起動する。
+  // 秒刻み対応(2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、無ければ旧フィールド
+  // lastCustomTimerMinutes(分)を秒換算して読む(後方互換)。どちらも無ければ既定3分
   const openCustomTimer = () => {
-    setCustomMinutes(settings?.lastCustomTimerMinutes ?? 3)
+    setCustomSeconds(
+      settings?.lastCustomTimerSeconds ??
+        (settings?.lastCustomTimerMinutes != null ? settings.lastCustomTimerMinutes * 60 : 180),
+    )
     setCustomTimerOpen(true)
   }
 
   const startCustomTimer = () => {
-    void updateSettings({ lastCustomTimerMinutes: customMinutes })
-    const seconds = customMinutes * 60
+    void updateSettings({ lastCustomTimerSeconds: customSeconds })
     startTimer({
-      key: `custom-${id}-${seconds}`,
+      key: `custom-${id}-${customSeconds}`,
       label: ja.timer.customLabel,
-      seconds,
+      seconds: customSeconds,
       recipeId: id,
       stepNumber: 0,
     })
@@ -861,8 +866,8 @@ export default function RecipeDetailPage() {
       />
       <CustomTimerModal
         open={customTimerOpen}
-        minutes={customMinutes}
-        onMinutesChange={setCustomMinutes}
+        totalSeconds={customSeconds}
+        onSecondsChange={setCustomSeconds}
         onStart={startCustomTimer}
         onClose={() => setCustomTimerOpen(false)}
       />
