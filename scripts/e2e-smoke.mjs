@@ -14,6 +14,8 @@
 //         2026-07-12深夜フィードバック再調査で判明した本当の原因の再発防止。PC Chrome相当) /
 //         TIMER-ADJ-01(実行中タイマーの±調整窓。タップで開き「+1分」「−30秒」で残り秒が変わる) /
 //         TIMER-CUSTOM-01(じぶんタイマー。入口Aから起動し、0未満にならない floor 挙動も確認) /
+//         LOG-PHOTO-01(「作った！」記録への写真添付。選択→プレビュー→保存→一覧サムネイル→
+//         原寸表示窓、圧縮後Blobと自動記録された表示人数をIndexedDBから直接検証。2026-07-12) /
 //         NUT-01(栄養価のめやす: 未解錠でもエネルギー・塩分の概算が閉じた1行から見え、
 //         展開すると「めやす」表記・出典・Pro案内リンクが出る) /
 //         NUT-02(栄養価のめやす: Pro解錠済みで5項目の実パネルが出る・人数を変えても1人分の値は不変。
@@ -421,6 +423,120 @@ try {
       check('LOG-01 保存すると「作った記録」に反映される', savedText.includes('作った記録'))
     } finally {
       await wkBrowser2.close()
+    }
+  }
+
+  // --- LOG-PHOTO-01: 「作った！」記録への写真添付(2026-07-12・docs/20 §4)。
+  // ・写真を選ぶと窓(CookedLogModal)内にプレビューが出て、保存すると記録一覧に64pxサムネイルが出る
+  // ・サムネイルをタップすると原寸表示の窓が開く
+  // ・記録フォームを開いた時点の表示人数(スケール後)がcookedLogs[].servingsに自動記録される
+  // ・圧縮後の写真がcookedLogs[].photoとしてIndexedDBに実際に保存されている(Blobで実サイズ>0) ---
+  currentCheck = 'LOG-PHOTO-01'
+  {
+    // 1x1の最小PNG(透明ドット)。resizePhoto(createImageBitmap→canvas.toBlob)が
+    // 実際にデコードできる本物の画像である必要があるため、テキストダミーではなくPNGを使う
+    const tinyPng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    )
+    const photoBrowser = await chromium.launch()
+    const photoContext = await photoBrowser.newContext()
+    const photoPage = await photoContext.newPage()
+    photoPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@LOG-PHOTO-01] ${err.message}`)
+    })
+    try {
+      await photoPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await photoPage.waitForTimeout(1800) // 初回シード完了待ち
+      await photoPage.getByText('肉じゃが', { exact: true }).first().click()
+      await photoPage.waitForTimeout(600)
+
+      // 表示人数を既定から1つ増やしてから記録を開く(自動記録される人数がこの値と一致するか確認するため)
+      const servingsBefore = await photoPage.locator('span.min-w-14').textContent()
+      const servingsBeforeNum = Number((servingsBefore ?? '').match(/\d+/)?.[0])
+      await photoPage.locator('button[aria-label="人数を増やす"]').click()
+      await photoPage.waitForTimeout(300)
+      const expectedServings = servingsBeforeNum + 1
+
+      await photoPage.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await photoPage.waitForTimeout(400)
+
+      // 「アルバムから選ぶ」用のinput(capture属性が無い方)にテスト画像を投入する
+      await photoPage
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'test.png', mimeType: 'image/png', buffer: tinyPng })
+      await photoPage.waitForTimeout(500)
+      const previewVisible = await photoPage
+        .locator('div[role="dialog"] img')
+        .first()
+        .isVisible()
+        .catch(() => false)
+      check('LOG-PHOTO-01 写真を選ぶと窓内にプレビューが出る', previewVisible)
+
+      await photoPage.getByRole('button', { name: '記録する', exact: true }).click()
+      await photoPage.waitForTimeout(500)
+      const thumbButton = photoPage.locator('button[aria-label="写真を拡大表示"]').first()
+      check('LOG-PHOTO-01 保存すると記録一覧にサムネイルが出る', await thumbButton.isVisible())
+
+      await thumbButton.click()
+      await photoPage.waitForTimeout(300)
+      const viewerVisible = await photoPage
+        .locator('div[role="dialog"][aria-label="写真を拡大表示"]')
+        .isVisible()
+        .catch(() => false)
+      check('LOG-PHOTO-01 サムネイルをタップすると原寸表示の窓が開く', viewerVisible)
+      await photoPage.keyboard.press('Escape')
+      await photoPage.waitForTimeout(300)
+      const viewerClosed = !(await photoPage
+        .locator('div[role="dialog"][aria-label="写真を拡大表示"]')
+        .isVisible()
+        .catch(() => false))
+      check('LOG-PHOTO-01 Escapeで原寸表示の窓が閉じる', viewerClosed)
+
+      // IndexedDBを直接読み、圧縮後の写真Blobと自動記録された人数が実際に保存されていることを確認する
+      const url = photoPage.url()
+      const recipeId = Number(url.match(/#\/recipes\/(\d+)/)?.[1])
+      const savedLog = await photoPage.evaluate(
+        (id) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction('recipes', 'readonly')
+              const getReq = tx.objectStore('recipes').get(id)
+              getReq.onsuccess = () => {
+                const recipe = getReq.result
+                const log = recipe?.cookedLogs?.[0]
+                resolve(
+                  log
+                    ? { hasPhoto: log.photo instanceof Blob, photoSize: log.photo?.size ?? 0, servings: log.servings }
+                    : null,
+                )
+              }
+              getReq.onerror = () => reject(getReq.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        recipeId,
+      )
+      check(
+        'LOG-PHOTO-01 保存された記録に圧縮後の写真Blob(実サイズ>0)が入っている',
+        !!savedLog?.hasPhoto && savedLog.photoSize > 0,
+        `savedLog=${JSON.stringify(savedLog)}`,
+      )
+      check(
+        'LOG-PHOTO-01 記録フォームを開いた時点の表示人数が自動記録される',
+        savedLog?.servings === expectedServings,
+        `期待=${expectedServings} 実際=${savedLog?.servings}`,
+      )
+    } finally {
+      await photoBrowser.close()
     }
   }
 

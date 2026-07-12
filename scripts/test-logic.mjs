@@ -23,6 +23,12 @@ import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
 import { resolveDuplicateTitleAction, buildUpdatedSetRecipe } from '../src/logic/backup.ts'
 import {
+  totalCookedLogPhotoBytes,
+  isOverCookedPhotoLimit,
+  bytesToMB,
+  COOKED_PHOTO_WARNING_BYTES,
+} from '../src/logic/cookedPhotoStorage.ts'
+import {
   buildPriceIndex,
   matchPriceEntry,
   estimateIngredientYen,
@@ -1154,6 +1160,23 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     '甜麺醤を加える。',
   )
   eq('辞書語を含まないテキストは無加工で返る', toSpeechText('よく混ぜ合わせる。'), 'よく混ぜ合わせる。')
+}
+
+// ---------- 記録写真の容量ガード(docs/20 §4写真添付・自動削除はせず促すバナーのみ) ----------
+{
+  const blob = (bytes) => new Blob([new Uint8Array(bytes)])
+  const recipesWithPhotos = [
+    { cookedLogs: [{ date: '2026-01-01', photo: blob(10) }, { date: '2026-01-02' }] },
+    { cookedLogs: [{ date: '2026-01-03', photo: blob(20) }] },
+  ]
+  eq('全レシピの記録写真バイト数を合算する', totalCookedLogPhotoBytes(recipesWithPhotos), 30)
+  eq('記録写真が無ければ0', totalCookedLogPhotoBytes([{ cookedLogs: [{ date: '2026-01-01' }] }]), 0)
+  eq('空配列は0', totalCookedLogPhotoBytes([]), 0)
+  eq('閾値ちょうどは超過扱いにしない', isOverCookedPhotoLimit(COOKED_PHOTO_WARNING_BYTES), false)
+  eq('閾値を1バイトでも超えたら超過', isOverCookedPhotoLimit(COOKED_PHOTO_WARNING_BYTES + 1), true)
+  eq('閾値未満は超過ではない', isOverCookedPhotoLimit(1024), false)
+  eq('MB換算は小数第1位に丸める', bytesToMB(52_450_000), 50)
+  eq('MB換算の丸め(52.6MB相当)', bytesToMB(55_000_000), 52.5)
 }
 
 // ---------- 結果 ----------

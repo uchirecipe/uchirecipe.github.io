@@ -275,6 +275,11 @@ export const ja = {
     backupImportReplaceConfirm: '今のレシピと設定をすべて消して、ファイルの内容に置き換えます。よろしいですか？',
     backupImportMergeConfirm: 'ファイルのレシピを今のデータに追加します。よろしいですか？',
     backupImportMergeNote: '同じレシピ（同一ID）はスキップされ、今のデータが優先されます。新しいレシピだけが追加されます',
+    backupIncludeCookedPhotos: '「作った記録」の写真もバックアップに含める',
+    backupIncludeCookedPhotosNote:
+      'ONにするとバックアップファイルが大きくなります（写真1枚あたりおおよそ150〜300KB）。既定はOFFです',
+    cookedPhotoOverLimitBanner:
+      '「作った記録」の写真が合計{n}MBになっています。古い記録から写真を削除すると容量を減らせます（自動では削除されません）',
     proTitle: 'Pro版',
     proDescription: '並行調理ナビ・月間献立など、これから追加されるPro向け機能をすべて使えるようになります。',
     proCodePlaceholder: '解錠コード (例: UR-XXXX-XXXX)',
@@ -514,6 +519,9 @@ export const ja = {
     cookedDate: '日付',
     cookedNote: 'ひとことメモ（任意）',
     cookedNotePlaceholder: '例: 少し甘めにしたら好評だった',
+    cookedPhotoLabel: '写真（任意）',
+    cookedPhotoView: '写真を拡大表示',
+    cookedLogPhotoRemove: 'この記録の写真を削除',
     cookedSave: '記録する',
     cookedCancel: 'やめる',
     cookedLogsTitle: '作った記録',

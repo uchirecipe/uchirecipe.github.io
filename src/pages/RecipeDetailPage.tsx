@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Maximize2,
   CalendarPlus,
+  X,
 } from 'lucide-react'
 import { db } from '../db/db'
 import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
@@ -120,11 +121,42 @@ export default function RecipeDetailPage() {
   const [logOpen, setLogOpen] = useState(false)
   const [logDate, setLogDate] = useState(todayString)
   const [logNote, setLogNote] = useState('')
+  // 記録写真(任意・2026-07-12写真添付)。窓を開いた時点の表示人数(スケール後)も一緒に記録する
+  const [logPhoto, setLogPhoto] = useState<Blob>()
+  const [logServings, setLogServings] = useState<number>()
 
   // 過去の記録を後から編集する
   const [editingLogIndex, setEditingLogIndex] = useState<number | null>(null)
   const [editingLogDate, setEditingLogDate] = useState('')
   const [editingLogNote, setEditingLogNote] = useState('')
+  // 編集中の記録の写真を削除対象にしたか(置き換えではなく削除のみ。保存時にphoto:undefinedで反映)
+  const [editingLogRemovePhoto, setEditingLogRemovePhoto] = useState(false)
+
+  // 記録一覧のサムネイル用object URL。usePhotoUrlは1件用のフックのため、複数件のBlobを
+  // ループで扱うこの一覧だけは自前でURLを作って後始末する(Reactのフックはループ内で呼べないため)
+  const [logPhotoUrls, setLogPhotoUrls] = useState<Record<number, string>>({})
+  useEffect(() => {
+    const urls: Record<number, string> = {}
+    for (const [index, log] of (recipe?.cookedLogs ?? []).entries()) {
+      if (log.photo) urls[index] = URL.createObjectURL(log.photo)
+    }
+    setLogPhotoUrls(urls)
+    return () => {
+      Object.values(urls).forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [recipe?.cookedLogs])
+
+  // タップした記録写真を原寸表示するモーダル
+  const [viewingLogPhoto, setViewingLogPhoto] = useState<Blob>()
+  const viewingLogPhotoUrl = usePhotoUrl(viewingLogPhoto)
+  useEffect(() => {
+    if (!viewingLogPhoto) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setViewingLogPhoto(undefined)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewingLogPhoto])
 
   // シェア
   const [shareOpen, setShareOpen] = useState(false)
@@ -173,17 +205,24 @@ export default function RecipeDetailPage() {
 
   const saveLog = async () => {
     if (!logDate) return
-    await addCookedLog(id, { date: logDate, note: logNote.trim() || undefined })
+    await addCookedLog(id, {
+      date: logDate,
+      note: logNote.trim() || undefined,
+      photo: logPhoto,
+      servings: logServings,
+    })
     // 今日の献立に入っていれば、記録と同時に外す
     if (isInTodayList) await removeFromTodayList(id)
     setLogOpen(false)
     setLogNote('')
+    setLogPhoto(undefined)
   }
 
   const openEditLog = (index: number, date: string, note: string | undefined) => {
     setEditingLogIndex(index)
     setEditingLogDate(date)
     setEditingLogNote(note ?? '')
+    setEditingLogRemovePhoto(false)
   }
 
   // じぶんタイマー（入口A: BackHeaderのタイマーアイコン）。詳細画面はFocusModeと違い
@@ -211,8 +250,10 @@ export default function RecipeDetailPage() {
     await updateCookedLog(id, editingLogIndex, {
       date: editingLogDate,
       note: editingLogNote.trim() || undefined,
+      ...(editingLogRemovePhoto ? { photo: undefined } : {}),
     })
     setEditingLogIndex(null)
+    setEditingLogRemovePhoto(false)
   }
 
   /** テキスト or 画像カードでシェア（非対応環境ではコピー/保存に切替） */
@@ -617,60 +658,97 @@ export default function RecipeDetailPage() {
               {ja.detail.cookedCountSuffix}）
             </h2>
             <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-              {recipe.cookedLogs.slice(0, 5).map((log, index) => (
-                <li key={index} className="px-[var(--space-md)] py-2">
-                  {editingLogIndex === index ? (
-                    <div className="space-y-2">
-                      <input
-                        type="date"
-                        value={editingLogDate}
-                        onChange={(e) => setEditingLogDate(e.target.value)}
-                        className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink"
-                      />
-                      <input
-                        type="text"
-                        value={editingLogNote}
-                        onChange={(e) => setEditingLogNote(e.target.value)}
-                        placeholder={ja.detail.cookedLogNotePlaceholder}
-                        className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink placeholder:text-ink-muted/60"
-                      />
-                      <div className="flex gap-2">
+              {recipe.cookedLogs.slice(0, 5).map((log, index) => {
+                const logPhoto = log.photo
+                return (
+                  <li key={index} className="px-[var(--space-md)] py-2">
+                    {editingLogIndex === index ? (
+                      <div className="space-y-2">
+                        <input
+                          type="date"
+                          value={editingLogDate}
+                          onChange={(e) => setEditingLogDate(e.target.value)}
+                          className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink"
+                        />
+                        <input
+                          type="text"
+                          value={editingLogNote}
+                          onChange={(e) => setEditingLogNote(e.target.value)}
+                          placeholder={ja.detail.cookedLogNotePlaceholder}
+                          className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink placeholder:text-ink-muted/60"
+                        />
+                        {logPhoto && !editingLogRemovePhoto && (
+                          <div className="flex items-center gap-2">
+                            {logPhotoUrls[index] && (
+                              <img
+                                src={logPhotoUrls[index]}
+                                alt=""
+                                className="h-12 w-12 shrink-0 rounded-sm object-cover"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditingLogRemovePhoto(true)}
+                              className="text-sm text-warning underline"
+                            >
+                              {ja.detail.cookedLogPhotoRemove}
+                            </button>
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void saveEditingLog()}
+                            className="flex-1 rounded-sm bg-accent py-2 text-sm font-bold text-app shadow-sm"
+                          >
+                            {ja.detail.cookedLogSave}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingLogIndex(null)}
+                            className="rounded-sm border border-edge px-3 py-2 text-sm text-ink-muted"
+                          >
+                            {ja.detail.cookedLogCancel}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex min-w-0 flex-1 items-start gap-2">
+                          {logPhoto && logPhotoUrls[index] && (
+                            <button
+                              type="button"
+                              onClick={() => setViewingLogPhoto(logPhoto)}
+                              aria-label={ja.detail.cookedPhotoView}
+                              className="shrink-0"
+                            >
+                              <img
+                                src={logPhotoUrls[index]}
+                                alt=""
+                                className="h-16 w-16 rounded-sm object-cover shadow-sm"
+                              />
+                            </button>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <span className="text-sm text-ink-muted">
+                              {log.date.replaceAll('-', '/')}
+                            </span>
+                            {log.note && <p className="mt-0.5">{log.note}</p>}
+                          </div>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => void saveEditingLog()}
-                          className="flex-1 rounded-sm bg-accent py-2 text-sm font-bold text-app shadow-sm"
+                          onClick={() => openEditLog(index, log.date, log.note)}
+                          aria-label={ja.detail.cookedLogEdit}
+                          className="shrink-0 rounded-full p-2 text-ink-muted"
                         >
-                          {ja.detail.cookedLogSave}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingLogIndex(null)}
-                          className="rounded-sm border border-edge px-3 py-2 text-sm text-ink-muted"
-                        >
-                          {ja.detail.cookedLogCancel}
+                          <Pencil size={16} aria-hidden />
                         </button>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <span className="text-sm text-ink-muted">
-                          {log.date.replaceAll('-', '/')}
-                        </span>
-                        {log.note && <p className="mt-0.5">{log.note}</p>}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => openEditLog(index, log.date, log.note)}
-                        aria-label={ja.detail.cookedLogEdit}
-                        className="shrink-0 rounded-full p-2 text-ink-muted"
-                      >
-                        <Pencil size={16} aria-hidden />
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))}
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </section>
         )}
@@ -710,6 +788,8 @@ export default function RecipeDetailPage() {
             type="button"
             onClick={() => {
               setLogDate(todayString())
+              // 記録フォームを開いた時点の表示人数(スケール後)を初期値に記録(2026-07-12人数の自動入力)
+              setLogServings(servings)
               setLogOpen(true)
             }}
             className="flex flex-1 items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-app shadow-md"
@@ -742,6 +822,7 @@ export default function RecipeDetailPage() {
             // 完成！→ そのまま「作った！」の記録フォームを開く(達成感と記録導線をつなぐ)
             setFocusOpen(false)
             setLogDate(todayString())
+            setLogServings(servings)
             setLogOpen(true)
           }}
         />
@@ -751,10 +832,15 @@ export default function RecipeDetailPage() {
         open={logOpen}
         date={logDate}
         note={logNote}
+        photo={logPhoto}
         onDateChange={setLogDate}
         onNoteChange={setLogNote}
+        onPhotoChange={setLogPhoto}
         onSave={saveLog}
-        onClose={() => setLogOpen(false)}
+        onClose={() => {
+          setLogOpen(false)
+          setLogPhoto(undefined)
+        }}
       />
       <CustomTimerModal
         open={customTimerOpen}
@@ -763,6 +849,37 @@ export default function RecipeDetailPage() {
         onStart={startCustomTimer}
         onClose={() => setCustomTimerOpen(false)}
       />
+      {/* 記録写真の原寸表示(2026-07-12写真添付・docs/20 §4「タップで原寸モーダル」)。
+          他の窓(CookedLogModal等)と同じ様式(角丸カード・枠線・shadow-md・中央寄せ、
+          背景の暗幕は無し)に合わせる */}
+      {viewingLogPhotoUrl && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-[var(--space-md)]"
+          onClick={() => setViewingLogPhoto(undefined)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label={ja.detail.cookedPhotoView}
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-h-[85vh] max-w-full rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-md"
+          >
+            <button
+              type="button"
+              onClick={() => setViewingLogPhoto(undefined)}
+              aria-label={ja.common.close}
+              className="absolute -right-2 -top-2 rounded-full border border-edge bg-surface p-1.5 text-ink-muted shadow-sm"
+            >
+              <X size={18} aria-hidden />
+            </button>
+            <img
+              src={viewingLogPhotoUrl}
+              alt=""
+              className="max-h-[80vh] max-w-full rounded-sm object-contain"
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -3,7 +3,11 @@
 const MAX_EDGE = 1200
 const JPEG_QUALITY = 0.85
 
-export async function resizePhoto(file: Blob, maxEdge = MAX_EDGE): Promise<Blob> {
+export async function resizePhoto(
+  file: Blob,
+  maxEdge = MAX_EDGE,
+  quality = JPEG_QUALITY,
+): Promise<Blob> {
   // imageOrientation: 'from-image' → スマホ写真の向き情報を反映して回転を直す
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   try {
@@ -22,7 +26,7 @@ export async function resizePhoto(file: Blob, maxEdge = MAX_EDGE): Promise<Blob>
       canvas.toBlob(
         (blob) => (blob ? resolve(blob) : reject(new Error('image encode failed'))),
         'image/jpeg',
-        JPEG_QUALITY,
+        quality,
       )
     })
   } finally {

@@ -15,6 +15,11 @@ import {
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
 import {
+  totalCookedLogPhotoBytes,
+  isOverCookedPhotoLimit,
+  bytesToMB,
+} from '../logic/cookedPhotoStorage'
+import {
   isValidProCode,
   normalizeProCode,
   isValidPackCode,
@@ -93,6 +98,8 @@ export default function SettingsPage() {
   const [packCodeInput, setPackCodeInput] = useState('')
   const [packChecking, setPackChecking] = useState(false)
   const [packError, setPackError] = useState('')
+  // 「作った記録」の写真をバックアップに含めるか(2026-07-12写真添付・docs/20 §4。既定OFF)
+  const [includeCookedPhotos, setIncludeCookedPhotos] = useState(false)
 
   // テーマ一覧（配布物マニフェスト）
   const [themes, setThemes] = useState<ThemeManifestEntry[]>([])
@@ -184,6 +191,10 @@ export default function SettingsPage() {
     ngInput.trim() && recipes
       ? recipes.filter((r) => hasNgIngredient(r, [ngInput.trim()])).length
       : undefined
+
+  // 「作った記録」写真の容量ガード（2026-07-12写真添付・docs/20 §4。自動削除はしない、促すバナーのみ）
+  const cookedPhotoBytes = recipes ? totalCookedLogPhotoBytes(recipes) : 0
+  const showCookedPhotoLimitBanner = isOverCookedPhotoLimit(cookedPhotoBytes)
 
   /** バックアップの読み込み: モードを選んでからファイルを開く */
   const pickImportFile = (mode: 'replace' | 'merge') => {
@@ -762,9 +773,28 @@ export default function SettingsPage() {
             ? ja.settings.backupLastDate.replace('{date}', formatDate(settings.lastBackupAt))
             : ja.settings.backupNever}
         </p>
+        {showCookedPhotoLimitBanner && (
+          <p className="mt-[var(--space-sm)] rounded-sm bg-app px-3 py-2 text-sm text-ink-muted">
+            {ja.settings.cookedPhotoOverLimitBanner.replace('{n}', String(bytesToMB(cookedPhotoBytes)))}
+          </p>
+        )}
+        <label className="mt-[var(--space-sm)] flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeCookedPhotos}
+            onChange={(e) => setIncludeCookedPhotos(e.target.checked)}
+            className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--accent)]"
+          />
+          <span>
+            {ja.settings.backupIncludeCookedPhotos}
+            <span className="mt-0.5 block text-xs text-ink-muted">
+              {ja.settings.backupIncludeCookedPhotosNote}
+            </span>
+          </span>
+        </label>
         <button
           type="button"
-          onClick={() => downloadBackup()}
+          onClick={() => downloadBackup(includeCookedPhotos)}
           className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-app shadow-sm"
         >
           <Download size={18} aria-hidden />

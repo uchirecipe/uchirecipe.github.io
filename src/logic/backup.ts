@@ -1,17 +1,25 @@
 import { db } from '../db/db'
 import { getSettings, updateSettings } from '../db/settings'
-import { defaultSettings, type Recipe, type Settings } from '../db/types'
+import { defaultSettings, type CookedLog, type Recipe, type Settings } from '../db/types'
 import { buildSearchWords } from './kana'
 
 /**
  * バックアップ: 全データ（レシピ・写真・作った記録・設定）を
  * 1つのJSONファイルに書き出し／読み込みする。
  * 写真はBase64（画像を文字にした形式）で埋め込む。
+ * 「作った記録」の写真（cookedLogs[].photo）はファイル肥大を避けるため既定では含めない
+ * （2026-07-12写真添付・docs/20 §4。exportBackup/downloadBackupの引数で明示的にONにできる）。
  */
 
-interface BackupRecipe extends Omit<Recipe, 'photo'> {
+interface BackupCookedLog extends Omit<CookedLog, 'photo'> {
   photoBase64?: string
   photoType?: string
+}
+
+interface BackupRecipe extends Omit<Recipe, 'photo' | 'cookedLogs'> {
+  photoBase64?: string
+  photoType?: string
+  cookedLogs: BackupCookedLog[]
 }
 
 export interface BackupFile {
@@ -45,15 +53,26 @@ function base64ToBlob(base64: string, type: string): Blob {
   return new Blob([bytes], { type })
 }
 
-/** 全データをJSON文字列にまとめる */
-export async function exportBackup(): Promise<string> {
+/**
+ * 全データをJSON文字列にまとめる。
+ * includeCookedLogPhotos: 「作った記録」の写真も含めるか（既定false。設定画面のチェックボックスで指定）
+ */
+export async function exportBackup(includeCookedLogPhotos = false): Promise<string> {
   const recipes = await db.recipes.toArray()
   const settings = await getSettings()
   const backupRecipes: BackupRecipe[] = await Promise.all(
-    recipes.map(async ({ photo, ...rest }) => ({
+    recipes.map(async ({ photo, cookedLogs, ...rest }) => ({
       ...rest,
       photoBase64: photo ? await blobToBase64(photo) : undefined,
       photoType: photo?.type || undefined,
+      cookedLogs: await Promise.all(
+        cookedLogs.map(async ({ photo: logPhoto, ...logRest }) => ({
+          ...logRest,
+          photoBase64:
+            includeCookedLogPhotos && logPhoto ? await blobToBase64(logPhoto) : undefined,
+          photoType: includeCookedLogPhotos && logPhoto ? logPhoto.type || undefined : undefined,
+        })),
+      ),
     })),
   )
   const file: BackupFile = {
@@ -67,8 +86,8 @@ export async function exportBackup(): Promise<string> {
 }
 
 /** JSONをファイルとしてダウンロードし、最終バックアップ日時を記録する */
-export async function downloadBackup(): Promise<void> {
-  const json = await exportBackup()
+export async function downloadBackup(includeCookedLogPhotos = false): Promise<void> {
+  const json = await exportBackup(includeCookedLogPhotos)
   const date = new Date()
   const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
   const blob = new Blob([json], { type: 'application/json' })
@@ -92,8 +111,15 @@ export function parseBackup(json: string): BackupFile {
 
 /** 'replace' 用: id を振り直さず、そのままの内容で取り込む */
 function toRecipe(backup: BackupRecipe): Recipe {
-  const { photoBase64, photoType, ...rest } = backup
-  const recipe: Recipe = { ...rest }
+  const { photoBase64, photoType, cookedLogs, ...rest } = backup
+  const recipe: Recipe = {
+    ...rest,
+    cookedLogs: cookedLogs.map(({ photoBase64: logBase64, photoType: logType, ...logRest }) => {
+      const log: CookedLog = { ...logRest }
+      if (logBase64) log.photo = base64ToBlob(logBase64, logType || 'image/jpeg')
+      return log
+    }),
+  }
   if (photoBase64) {
     recipe.photo = base64ToBlob(photoBase64, photoType || 'image/jpeg')
   }
