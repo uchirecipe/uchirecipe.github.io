@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CookingTerm } from '../data/cookingTerms'
+import { MemoText } from './MemoText'
 import { ja } from '../i18n/ja'
 
 export type OpenTerm = (term: CookingTerm, anchor: HTMLElement) => void
@@ -92,9 +93,11 @@ export default function TermPopover({
         }}
       >
         <p className="font-bold text-accent">{state.term.term}</p>
-        <p className="mt-1 max-w-[70vw] text-sm leading-relaxed text-ink">
-          {state.term.description}
-        </p>
+        {/* 「｜」は説明文内の改行(MemoTextの行に変換され「・」の箇条書きも効く)。
+            ▽折りたたみの長い詳細を小窓の中で読みやすくするため(2026-07-12オーナー要望) */}
+        <div className="mt-1 max-w-[70vw] text-sm leading-relaxed text-ink">
+          <MemoText text={state.term.description.replace(/｜/g, '\n')} />
+        </div>
         <button
           type="button"
           onClick={onClose}

@@ -10,7 +10,10 @@ import { wrapJaPhrases, ZWSP } from '../logic/jaWrap'
  * nowrapスパン(atomic inline)は前後が改行点になるが、単位境界はもともと改行点なので無害。
  */
 export function wrappedToNodes(wrapped: string): ReactNode {
-  const needsSpan = (u: string) => /^[（(]/.test(u) && u.length <= 12
+  // 開き括弧を「含む」単位すべてが対象: WebKitはkeep-allの下でも括弧の直後を
+  // 改行可能として扱うため、「すだち(またはレモン)を」のような結合済み単位の
+  // 内部でも折れてしまう(2026-07-12実機で確認)。12文字以下ならまるごとnowrapで守る
+  const needsSpan = (u: string) => /[（(]/.test(u) && u.length <= 12
   if (!wrapped.split(ZWSP).some(needsSpan)) return wrapped
   const nodes: ReactNode[] = []
   wrapped.split(ZWSP).forEach((u, i) => {
