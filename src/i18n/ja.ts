@@ -439,6 +439,9 @@ export const ja = {
     ingredientUnitPlaceholder: '例: 個',
     ingredientPrice: '価格（円・任意）',
     ingredientPricePlaceholder: '例: 100',
+    // 食材価格マスタに同名の目安価格があるとき、価格欄のプレースホルダに出す文言
+    // (自動入力はしない。「例: 130（目安）」の形。2026-07-12 UX改修)
+    ingredientPricePlaceholderWithDefault: '例: {n}（目安）',
     ingredientMemoPlaceholder: '材料メモ（任意。例: なければ玉ねぎでも可）',
     ingredientGroupHint:
       '丸いボタンをタップすると色がつきます。同じ色の材料は先にまとめて計量してOKという意味です（合わせ調味料）',
@@ -627,12 +630,17 @@ export const ja = {
     customMinutesUp: 'じぶんタイマーの分数を増やす',
   },
   // 食材価格マスタ「食材と価格」画面(docs/20 §3)。詳細・献立の概算食費が
-  // マスタ価格を使ったときの注記(mixedNote)はRecipeDetailPage・MealPlanPageの両方から参照する
+  // マスタ価格を使ったときの注記(mixedNote)はRecipeDetailPage・MealPlanPageの両方から参照する。
+  // 2026-07-12 UX改修: 編集モーダル方式をやめ、一覧の各行を直接編集できる形にした
+  // （オーナー実機フィードバック: 「編集が面倒くさい」「目安/自分の価格の反映状況が見えない」）
   priceMaster: {
     title: '食材と価格',
     disclaimer: '価格は目安です。地域やお店で差があります。自由に書き換えられます',
     mixedNote: '一部は目安価格から計算しています',
     empty: 'まだ食材が登録されていません',
+    searchLabel: '食材名で絞り込む',
+    searchPlaceholder: '食材名で絞り込む',
+    searchEmpty: '該当する食材が見つかりません',
     nameLabel: '食材名',
     namePlaceholder: '例: 玉ねぎ',
     priceLabel: '価格（円）',
@@ -640,11 +648,18 @@ export const ja = {
     unitLabel: '単位（数量＋単位）',
     unitPlaceholder: '例: 1個、100g',
     add: '追加',
-    edit: 'この食材を編集',
-    save: '保存する',
-    cancel: 'やめる',
     remove: 'この食材を削除',
     priceYen: '円',
+    // 一覧の各行のインライン編集欄（食材名ごとに区別できるようaria-labelへ{name}を差し込む）
+    entryPriceAria: '{name}の価格（円）',
+    entryUnitAria: '{name}の単位',
+    // 「目安のまま」/「自分の価格に上書き済み」のバッジと、上書き行を目安へ戻すボタン
+    badgeDefault: '目安',
+    badgeCustom: '自分の価格',
+    resetToDefault: '目安に戻す',
+    resetToDefaultAria: '{name}を目安価格に戻す',
+    // レシピ詳細の材料行: 個別価格が無くマスタの目安価格から計算した行にだけ出す控えめな注記
+    ingredientFromMasterNote: '（目安{n}円）',
   },
 } as const
 

@@ -14,12 +14,14 @@ import {
 import type { EffortLevel, IconKey, MealSlot, RecipeInput, Season } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from '../db/recipes'
 import { useSettings } from '../db/settings'
+import { usePriceEntries } from '../db/prices'
 import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText, autoSplitAmountUnit } from '../logic/parseRecipeText'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeDigits } from '../logic/amount'
+import { buildPriceIndex, matchPriceEntry } from '../logic/priceEstimate'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { iconComponents } from '../components/RecipeCard'
@@ -170,6 +172,10 @@ function RecipeFormInner() {
     [editId],
   )
   const settings = useSettings()
+  // 材料ごとの価格入力欄のプレースホルダに使う、食材価格マスタの照合用索引（2026-07-12 UX改修）。
+  // 自動入力はしない＝プレースホルダとして目安価格を見せるだけ(保存はユーザー入力時のみ)
+  const priceEntries = usePriceEntries()
+  const priceIndex = useMemo(() => buildPriceIndex(priceEntries ?? []), [priceEntries])
   const allRecipes = useLiveQuery(listRecipes, [])
   const hydratedRef = useRef(false)
   useEffect(() => {
@@ -869,7 +875,10 @@ function RecipeFormInner() {
         <span className={labelCls}>{ja.form.ingredientsLabel}</span>
         <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientGroupHint}</p>
         <div className="mt-1 space-y-[var(--space-sm)]">
-          {ingredients.map((row, index) => (
+          {ingredients.map((row, index) => {
+            // 食材価格マスタに同名の目安価格があれば、価格欄のプレースホルダにだけ使う
+            const masterMatch = matchPriceEntry(row.name, priceIndex)
+            return (
             <div
               key={index}
               className="rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
@@ -905,7 +914,9 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </div>
-              {/* 価格は専用の行にする(ボタン4つと同じ行だと390px幅で入力欄が28pxに潰れるため) */}
+              {/* 価格は専用の行にする(ボタン4つと同じ行だと390px幅で入力欄が28pxに潰れるため)。
+                  食材価格マスタに同名の目安価格があれば、プレースホルダとしてだけ見せる
+                  (自動入力はしない。保存されるのはユーザーが実際に入力した値のみ。2026-07-12 UX改修) */}
               <label className="mt-[var(--space-sm)] flex items-center gap-2 text-sm text-ink-muted">
                 <span className="shrink-0">{ja.form.ingredientPrice}</span>
                 <input
@@ -914,7 +925,14 @@ function RecipeFormInner() {
                   min={0}
                   value={row.price}
                   onChange={(e) => updateIngredient(index, { price: e.target.value })}
-                  placeholder={ja.form.ingredientPricePlaceholder}
+                  placeholder={
+                    masterMatch
+                      ? ja.form.ingredientPricePlaceholderWithDefault.replace(
+                          '{n}',
+                          String(masterMatch.pricePerUnit),
+                        )
+                      : ja.form.ingredientPricePlaceholder
+                  }
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </label>
@@ -977,7 +995,8 @@ function RecipeFormInner() {
                 className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60"
               />
             </div>
-          ))}
+            )
+          })}
         </div>
         <button
           type="button"

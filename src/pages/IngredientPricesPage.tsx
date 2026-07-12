@@ -1,43 +1,55 @@
-import { useState } from 'react'
-import { Plus, X, Pencil } from 'lucide-react'
-import { usePriceEntries, addPriceEntry, updatePriceEntry, removePriceEntry } from '../db/prices'
+import { useMemo, useState } from 'react'
+import { Plus, RotateCcw, Search, X } from 'lucide-react'
+import {
+  usePriceEntries,
+  addPriceEntry,
+  updatePriceEntry,
+  removePriceEntry,
+  resetPriceEntryToDefault,
+} from '../db/prices'
+import { toHiragana } from '../logic/kana'
 import BackHeader from '../components/BackHeader'
 import { ja } from '../i18n/ja'
+import type { PriceEntry } from '../db/types'
 
 const inputCls =
   'min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60'
 
+/** blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる) */
+const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === 'Enter') e.currentTarget.blur()
+}
+
 /**
- * 「食材と価格」= 食材価格マスタの一覧・編集・追加・削除。
+ * 「食材と価格」= 食材価格マスタの一覧・一括インライン編集・追加・削除。
  * ここで登録した目安価格は、レシピの「材料ごとの価格入力」が無い材料だけを補う
  * フォールバックとして、詳細画面・献立プランナーの概算食費に使われる（docs/20 §3）。
+ *
+ * 2026-07-12 UX改修: 編集モーダル（タップ→別窓で編集→保存）をやめ、一覧の各行の
+ * 価格・単位を直接書き換えられる形にした（オーナー実機フィードバック: 「編集が面倒」）。
+ * 各入力はuncontrolled(defaultValue)にして、確定した値が変わったときだけ
+ * key(id-値)を変えて再マウントすることで、他の行の編集中に値が飛ばないようにしている
  */
 export default function IngredientPricesPage() {
   const entries = usePriceEntries()
+  const [query, setQuery] = useState('')
 
-  // 編集中の1件（idと下書き値）。他の行は編集中でも通常表示のまま
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [draftName, setDraftName] = useState('')
-  const [draftPrice, setDraftPrice] = useState('')
-  const [draftUnit, setDraftUnit] = useState('')
+  const filtered = useMemo(() => {
+    if (!entries) return entries
+    const normalizedQuery = toHiragana(query.trim())
+    if (!normalizedQuery) return entries
+    return entries.filter((entry) => toHiragana(entry.name).includes(normalizedQuery))
+  }, [entries, query])
 
-  const startEdit = (entry: { id?: number; name: string; pricePerUnit: number; unit: string }) => {
-    setEditingId(entry.id ?? null)
-    setDraftName(entry.name)
-    setDraftPrice(String(entry.pricePerUnit))
-    setDraftUnit(entry.unit)
+  const commitPrice = async (id: number, raw: string) => {
+    const value = Number(raw)
+    if (!(value > 0)) return
+    await updatePriceEntry(id, { pricePerUnit: value })
   }
-
-  const cancelEdit = () => setEditingId(null)
-
-  const saveEdit = async () => {
-    if (editingId == null) return
-    await updatePriceEntry(editingId, {
-      name: draftName,
-      pricePerUnit: Number(draftPrice) || 0,
-      unit: draftUnit,
-    })
-    setEditingId(null)
+  const commitUnit = async (id: number, raw: string) => {
+    const trimmed = raw.trim()
+    if (!trimmed) return
+    await updatePriceEntry(id, { unit: trimmed })
   }
 
   // 新規追加
@@ -65,88 +77,42 @@ export default function IngredientPricesPage() {
         )}
 
         {entries && entries.length > 0 && (
-          <ul className="mt-[var(--space-md)] divide-y divide-edge rounded-md border border-edge bg-surface">
-            {entries.map((entry) => (
-              <li key={entry.id} className="px-[var(--space-sm)] py-2">
-                {editingId === entry.id ? (
-                  <div className="space-y-2 py-1">
-                    <input
-                      type="text"
-                      value={draftName}
-                      onChange={(e) => setDraftName(e.target.value)}
-                      placeholder={ja.priceMaster.namePlaceholder}
-                      aria-label={ja.priceMaster.nameLabel}
-                      className={inputCls}
-                    />
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        value={draftPrice}
-                        onChange={(e) => setDraftPrice(e.target.value)}
-                        placeholder={ja.priceMaster.pricePlaceholder}
-                        aria-label={ja.priceMaster.priceLabel}
-                        className={inputCls}
-                      />
-                      <input
-                        type="text"
-                        value={draftUnit}
-                        onChange={(e) => setDraftUnit(e.target.value)}
-                        placeholder={ja.priceMaster.unitPlaceholder}
-                        aria-label={ja.priceMaster.unitLabel}
-                        className={inputCls}
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void saveEdit()}
-                        className="flex-1 rounded-sm bg-accent py-2 text-sm font-bold text-app shadow-sm"
-                      >
-                        {ja.priceMaster.save}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={cancelEdit}
-                        className="flex-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold text-ink-muted"
-                      >
-                        {ja.priceMaster.cancel}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
-                      <span className="font-bold">{entry.name}</span>
-                      <span className="ml-2 text-sm text-ink-muted">
-                        {entry.unit}
-                        {' '}
-                        {entry.pricePerUnit.toLocaleString()}
-                        {ja.priceMaster.priceYen}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => startEdit(entry)}
-                      aria-label={ja.priceMaster.edit}
-                      className="rounded-full p-2 text-ink-muted"
-                    >
-                      <Pencil size={18} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void removePriceEntry(entry.id!)}
-                      aria-label={ja.priceMaster.remove}
-                      className="rounded-full p-2 text-ink-muted"
-                    >
-                      <X size={18} aria-hidden />
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="relative mt-[var(--space-md)]">
+              <Search
+                size={18}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted"
+                aria-hidden
+              />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={ja.priceMaster.searchPlaceholder}
+                aria-label={ja.priceMaster.searchLabel}
+                className="w-full rounded-md border border-edge bg-surface py-2.5 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
+              />
+            </div>
+
+            {filtered && filtered.length === 0 && (
+              <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.priceMaster.searchEmpty}</p>
+            )}
+
+            {filtered && filtered.length > 0 && (
+              <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface">
+                {filtered.map((entry) => (
+                  <PriceRow
+                    key={entry.id}
+                    entry={entry}
+                    onCommitPrice={commitPrice}
+                    onCommitUnit={commitUnit}
+                    onReset={() => void resetPriceEntryToDefault(entry.id!)}
+                    onRemove={() => void removePriceEntry(entry.id!)}
+                  />
+                ))}
+              </ul>
+            )}
+          </>
         )}
 
         {/* 新規追加 */}
@@ -191,5 +157,87 @@ export default function IngredientPricesPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+/** 一覧の1行分。価格・単位はその場でインライン編集でき、blur(またはEnter)で即保存する */
+function PriceRow({
+  entry,
+  onCommitPrice,
+  onCommitUnit,
+  onReset,
+  onRemove,
+}: {
+  entry: PriceEntry
+  onCommitPrice: (id: number, raw: string) => void
+  onCommitUnit: (id: number, raw: string) => void
+  onReset: () => void
+  onRemove: () => void
+}) {
+  const isDefault = entry.isDefault === true
+  const canReset = !isDefault && entry.defaultPricePerUnit != null && entry.defaultUnit != null
+
+  return (
+    <li className="flex items-center gap-2 px-[var(--space-sm)] py-2.5">
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-bold">{entry.name}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          {isDefault ? (
+            <span className="rounded-sm border border-edge px-1.5 py-0.5 text-xs text-ink-muted">
+              {ja.priceMaster.badgeDefault}
+            </span>
+          ) : (
+            <span
+              className="rounded-sm px-1.5 py-0.5 text-xs text-accent"
+              style={{ background: 'color-mix(in oklab, var(--accent) 12%, var(--bg))' }}
+            >
+              {ja.priceMaster.badgeCustom}
+            </span>
+          )}
+          {canReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              aria-label={ja.priceMaster.resetToDefaultAria.replace('{name}', entry.name)}
+              className="inline-flex items-center gap-0.5 text-xs font-bold text-accent underline"
+            >
+              <RotateCcw size={12} aria-hidden />
+              {ja.priceMaster.resetToDefault}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <input
+          key={`price-${entry.id}-${entry.pricePerUnit}`}
+          type="number"
+          inputMode="numeric"
+          min={0}
+          defaultValue={entry.pricePerUnit}
+          onBlur={(e) => onCommitPrice(entry.id!, e.target.value)}
+          onKeyDown={blurOnEnter}
+          aria-label={ja.priceMaster.entryPriceAria.replace('{name}', entry.name)}
+          className="w-16 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
+        />
+        <span className="text-sm text-ink-muted">{ja.priceMaster.priceYen}/</span>
+        <input
+          key={`unit-${entry.id}-${entry.unit}`}
+          type="text"
+          defaultValue={entry.unit}
+          onBlur={(e) => onCommitUnit(entry.id!, e.target.value)}
+          onKeyDown={blurOnEnter}
+          aria-label={ja.priceMaster.entryUnitAria.replace('{name}', entry.name)}
+          className="w-16 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={ja.priceMaster.remove}
+        className="shrink-0 rounded-full p-2 text-ink-muted"
+      >
+        <X size={18} aria-hidden />
+      </button>
+    </li>
   )
 }

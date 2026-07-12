@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -25,7 +25,7 @@ import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayLi
 import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
-import { buildPriceIndex, estimateRecipeCost } from '../logic/priceEstimate'
+import { buildPriceIndex, estimateIngredientYen, estimateRecipeCost } from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard } from '../logic/share'
 import { deriveDoneLabel } from '../logic/timerLabel'
@@ -178,6 +178,10 @@ export default function RecipeDetailPage() {
   // 用語タップ辞書(2026-07-11): ポップオーバーの開閉はページ単位で1つ持つ
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
 
+  // 食材価格マスタの照合用索引（未入力の材料の概算・目安価格由来の注記の両方で使う）。
+  // 早期returnより前に置く(フックはレンダーのたびに同じ順で呼ぶ必要があるため)
+  const priceIndex = useMemo(() => buildPriceIndex(priceEntries ?? []), [priceEntries])
+
   if (recipe === undefined) {
     // 読み込み中(undefined)は何も出さない。id が存在しない場合は下の分岐へ
     return null
@@ -197,7 +201,7 @@ export default function RecipeDetailPage() {
   const ngIndices = ngMatchedIndices(recipe.ingredients, settings?.ngIngredients ?? [])
 
   // 材料ごとの価格入力を優先し、未入力の材料だけ食材価格マスタで補う（優先度: 個別入力>マスタ>なし）
-  const costEstimate = estimateRecipeCost(recipe.ingredients, buildPriceIndex(priceEntries ?? []))
+  const costEstimate = estimateRecipeCost(recipe.ingredients, priceIndex)
   const totalPrice = costEstimate.total
   const scaledPrice =
     recipe.servings > 0
@@ -463,6 +467,10 @@ export default function RecipeDetailPage() {
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
             {recipe.ingredients.map((ing, index) => {
               const isNg = ngIndices.has(index)
+              // 材料に個別価格が無く、食材価格マスタの目安価格から計算した金額がある行だけ、
+              // 控えめな注記を出す（どの材料がマスタ由来か分かるように。2026-07-12 UX改修）
+              const masterYen =
+                ing.price == null || ing.price <= 0 ? estimateIngredientYen(ing, priceIndex) : undefined
               return (
                 <li
                   key={index}
@@ -489,6 +497,11 @@ export default function RecipeDetailPage() {
                       )}
                     </span>
                   </div>
+                  {masterYen != null && masterYen > 0 && (
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      {ja.priceMaster.ingredientFromMasterNote.replace('{n}', String(masterYen))}
+                    </p>
+                  )}
                   {ing.memo && (
                     <MemoText
                       text={ing.memo}
