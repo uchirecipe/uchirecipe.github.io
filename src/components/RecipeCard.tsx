@@ -56,7 +56,10 @@ export const seasonIcons: Record<Exclude<Season, 'all'>, typeof Flower2> = {
   winter: Snowflake,
 }
 
-const mixRatios = [16, 26, 38, 52] as const
+// 写真なしカードの背景の濃さ(アクセント色の混合比)。タグ由来のハッシュで振り分けて
+// 単調さを避ける意匠。最小16%は「色あせて見える」とオーナー指摘(2026-07-12)があり、
+// 濃い段との差が3倍を超えない範囲(26〜52%)へ引き上げた
+const mixRatios = [26, 34, 42, 52] as const
 
 function hashString(text: string): number {
   let hash = 0
