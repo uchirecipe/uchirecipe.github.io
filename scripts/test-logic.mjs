@@ -29,6 +29,11 @@ import {
 } from '../src/logic/mainIngredients.ts'
 import { searchRecipes } from '../src/logic/search.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
+import { pickIconKey } from '../src/logic/icon.ts'
+import { starterDefs } from '../src/db/starters.ts'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import { readdirSync, readFileSync } from 'node:fs'
 
 let passed = 0
 const failures = []
@@ -826,6 +831,145 @@ eq('たまご(かな表記)も黄カテゴリ', ingredientColorToken('たまご'
 eq('なすは紫カテゴリ', ingredientColorToken('なす'), '--chip-food-purple')
 eq('茄子(漢字・読み辞書変換後)も紫カテゴリ', ingredientColorToken('茄子'), '--chip-food-purple')
 eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優先)', ingredientColorToken('紫キャベツ'), '--chip-food-purple')
+
+// ---------- pickIconKey: 自動判定アイコンの全品スナップショット(2026-07-12 全面改修時の監査) ----------
+// starters全品(21) + public/sets/data/*.json全品(kintore/review/review2/review8/review16)の
+// title→期待キーを丸ごと並べる。今後の規則調整で意図せず判定が変わったらここで落ちる。
+// (このテストが失敗しても即バグとは限らない。意図した変更ならこの期待表を更新すること)
+const iconKeyExpected = {
+  '肉じゃが': 'meat',
+  'カレーライス': 'rice',
+  '豆腐とわかめの味噌汁': 'soup',
+  '豚の生姜焼き': 'meat',
+  'ツナキャベツ丼': 'rice',
+  '野菜炒め': 'default',
+  '親子丼': 'rice',
+  'ハンバーグ': 'meat',
+  '鶏の唐揚げ': 'chicken',
+  '五目炊き込みご飯': 'rice',
+  'ナポリタン': 'noodle',
+  'ペペロンチーノ': 'noodle',
+  'だし巻き卵': 'egg',
+  '豚汁': 'soup',
+  '寄せ鍋': 'soup',
+  'チャーハン': 'rice',
+  'ポテトサラダ': 'salad',
+  'きんぴらごぼう': 'default',
+  'さばの味噌煮': 'fish',
+  'クリームシチュー': 'soup',
+  'レンジ蒸し鶏（自家製サラダチキン）': 'chicken',
+  '鶏むねのガーリック照り焼き': 'chicken',
+  'ささみとブロッコリーのごま和え': 'salad',
+  'サバ缶とトマトの煮込み': 'fish',
+  '鶏ひき肉の豆腐ハンバーグ': 'chicken',
+  '漬けるだけ味玉': 'egg',
+  'オートミール卵雑炊': 'rice',
+  'エビとブロッコリーの卵炒め': 'fish',
+  '鶏団子スープ': 'soup',
+  'オートミールバナナパンケーキ': 'dessert',
+  '牛丼': 'rice',
+  'ほうれん草のおひたし': 'salad',
+  '麻婆豆腐': 'meat',
+  '鮭の塩焼き': 'fish',
+  '肉うどん': 'noodle', // 2026-07-12 Fable裁定: 主食(麺)が料理の類型を決めるので主食優先
+  'ひじきの煮物': 'default',
+  'もやしのナムル': 'salad',
+  '白和え': 'salad',
+  'コールスロー': 'salad',
+  'ニラ玉': 'egg',
+  '中華風卵スープ': 'soup', // 2026-07-12 Fable裁定: 「◯◯スープはsoup」
+  '大学芋': 'dessert',
+  'ツナと蒸し大豆の香味サラダ': 'salad',
+  'さんまの塩焼き': 'fish',
+  '肉豆腐': 'meat',
+  '鶏そぼろ丼': 'rice',
+  '鮭のホイル焼き': 'fish',
+  'なめこと豆腐の味噌汁': 'soup',
+  'さつまいもの甘辛煮': 'default',
+  'きゅうりとわかめの酢の物': 'salad',
+  'オムライス': 'egg',
+  'コンソメ野菜スープ': 'soup',
+  '春雨サラダ': 'salad',
+  '大根とツナのサラダ': 'salad',
+  'キャベツの塩昆布あえ': 'salad',
+  '蒸しなすの香味だれ': 'default',
+  'バンバンジー': 'chicken',
+  '牛乳もち': 'dessert',
+  'フレンチトースト': 'bread',
+  '家庭で作る杏仁豆腐': 'dessert',
+  '鶏の照り焼き': 'chicken',
+  'ミートボールの甘酢あん': 'meat',
+  '卯の花(おからの炒り煮)': 'default',
+  '切り干し大根のハリハリ漬け': 'default',
+  '肉巻きおにぎり': 'rice',
+  'れんこんのきんぴら': 'default',
+  '高野豆腐の含め煮': 'default',
+  'ちくわときゅうりの土佐酢あえ': 'salad',
+  '甘辛手羽先の照り焼き': 'chicken',
+  'こんにゃくの炒り煮': 'default',
+  '手作り鮭フレーク': 'fish',
+  '回鍋肉(ホイコーロー)': 'meat',
+  '鶏もも肉のタンドリー風下味冷凍': 'chicken',
+  '豚肉のケチャップ炒め用下味冷凍': 'meat',
+  '鮭のハーブレモン下味冷凍': 'fish',
+  '鶏むね肉のオイスターだれ下味冷凍': 'chicken',
+  '牛肉のプルコギ風下味冷凍': 'meat',
+  '豚肉の生姜焼きだれ下味冷凍': 'meat',
+  '鶏もも肉のガーリックハーブ下味冷凍': 'chicken',
+  'えびのガーリックオイル下味冷凍': 'fish',
+  '豚肉の甜麺醤だれ下味冷凍': 'meat',
+  '鶏むね肉のレモンペッパー下味冷凍': 'chicken',
+  '豆腐ときのこの和風あんかけ': 'default',
+  '鶏ささみの梅しそレンジ蒸し': 'chicken',
+  '雷こんにゃく': 'default',
+  '具だくさん野菜スープ': 'soup',
+  'キャベツとツナのレンジ蒸し': 'default',
+  'しらたきのチャプチェ風': 'noodle',
+  'きのこの和風マリネ': 'salad',
+  '白菜と豚しゃぶのレンジ蒸し': 'meat',
+  '豆腐グラタン': 'default',
+  'フルーツヨーグルトバーク': 'dessert',
+  '冷やし茶碗蒸し': 'egg',
+  '梅しそ冷奴': 'default',
+  'えびと薬味の香味だれそうめん': 'noodle', // 2026-07-12 Fable裁定: 主食(麺)が料理の類型を決めるので主食優先
+  '冷しゃぶサラダ': 'salad',
+  '冷や汁': 'soup',
+  '冷やしトマトの浅漬け': 'salad',
+  'オクラと長芋の梅肉あえ': 'salad',
+  'ゴーヤチャンプルー': 'default',
+  '梅おろしぶっかけうどん': 'noodle',
+  '水ようかん': 'dessert',
+  'だしのとり方': 'soup',
+}
+
+{
+  const __dirname = path.dirname(fileURLToPath(import.meta.url))
+  const iconEntries = []
+  for (const def of starterDefs) {
+    iconEntries.push({ source: 'starters.ts', recipe: def })
+  }
+  const setDataDir = path.join(__dirname, '../public/sets/data')
+  for (const file of readdirSync(setDataDir).sort()) {
+    if (!file.endsWith('.json')) continue
+    const data = JSON.parse(readFileSync(path.join(setDataDir, file), 'utf-8'))
+    for (const r of data.recipes) {
+      iconEntries.push({ source: file, recipe: r })
+    }
+  }
+
+  const seenTitles = new Set()
+  for (const { source, recipe } of iconEntries) {
+    seenTitles.add(recipe.title)
+    const expected = iconKeyExpected[recipe.title]
+    if (expected === undefined) {
+      failures.push(`pickIconKey期待表に無いタイトル(${source}): ${recipe.title}`)
+      continue
+    }
+    eq(`アイコン自動判定[${source}]: ${recipe.title}`, recipe.iconKey ?? pickIconKey(recipe), expected)
+  }
+  eq('アイコン期待表の品数は全品数と一致', Object.keys(iconKeyExpected).length, iconEntries.length)
+  eq('アイコン期待表に無い余剰キーは無い', Object.keys(iconKeyExpected).every((t) => seenTitles.has(t)), true)
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
