@@ -189,7 +189,15 @@ async function main() {
     let per100g
     let mextName
     let mextId
-    if (def.blend) {
+    if (def.custom) {
+      // 八訂に該当食品が一切無い(香料・エッセンス等)場合の例外ルート。公式データに基づかないため
+      // note必須(でたらめ防止。推定の根拠を必ず書くこと)。id先頭に"custom:"を付けて出典が
+      // 八訂ではないことをデータ上も分かるようにする。
+      if (!def.note) throw new Error(`${def.label}: customはnote(推定根拠)が必須です`)
+      per100g = { ...def.custom.per100g }
+      mextName = def.custom.mextName
+      mextId = `custom:${def.label}`
+    } else if (def.blend) {
       const total = def.blend.reduce((s, b) => s + b.ratio, 0)
       if (Math.abs(total - 1) > 1e-9) throw new Error(`${def.label}: blendの比率合計が1ではありません`)
       const parts = def.blend.map((b) => ({ ...b, hit: resolve(b.id, b.expect) }))
