@@ -148,13 +148,27 @@ export interface TodayListItem {
 /** 献立の枠: 朝/昼/夜 */
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner'
 
-/** 週間献立の1枠分（日付＋枠にレシピを割り当てる） */
+/**
+ * 献立1品の役割: 主菜/副菜（2026-07-13 献立の主菜+副菜構成対応）。
+ * 同じ日×枠に主菜1件+副菜1件（またはそれ以上）を並べて登録できるようにするための区分
+ */
+export type MealRole = 'main' | 'side'
+
+/**
+ * 週間献立の1品分（日付＋枠にレシピを割り当てる）。
+ * 同じ日×枠に複数件登録できる（例: 夕食の主菜+副菜。2026-07-13対応）。
+ */
 export interface MealPlanEntry {
   id?: number
   /** YYYY-MM-DD */
   date: string
   slot: MealSlot
   recipeId: number
+  /**
+   * 主菜/副菜の区分（任意）。未設定の既存データ（2026-07-13より前に保存された行）は
+   * 主菜として扱う（後方互換）。新規追加時は必ずどちらかを設定する
+   */
+  role?: MealRole
 }
 
 /**

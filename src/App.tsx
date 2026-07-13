@@ -13,7 +13,7 @@ import IngredientPricesPage from './pages/IngredientPricesPage'
 import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
 import { TimerProvider } from './components/TimerProvider'
-import { useSettings, recordFirstLaunchIfNeeded } from './db/settings'
+import { useSettings, recordFirstLaunchIfNeeded, resolveVisibleMealSlotsIfNeeded } from './db/settings'
 import { seedStartersIfNeeded } from './db/starters'
 import { seedPantryPresetIfNeeded } from './db/pantry'
 import { seedPriceDefaultsIfNeeded } from './db/prices'
@@ -54,6 +54,9 @@ function App() {
       await seedPantryPresetIfNeeded()
       await seedPriceDefaultsIfNeeded()
       await rebuildSearchWordsIfNeeded()
+      // 表示食事帯の既定値を初回だけ決める（新規ユーザーは夕食のみ・既存ユーザーは
+      // 朝食/昼食を使っていれば3枠を維持。2026-07-13献立の主菜+副菜構成対応と同時導入）
+      await resolveVisibleMealSlotsIfNeeded()
     })()
   }, [])
 

@@ -1,9 +1,19 @@
 import { hasNgIngredient } from './ng'
 import { cookedWithinDays } from './cooked'
 import { currentSeason } from './season'
-import type { MealSlot, Recipe, Season } from '../db/types'
+import type { MealRole, MealSlot, Recipe, Season } from '../db/types'
 
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
+
+/**
+ * 自動提案のジャンル指定（和食/洋食/中華）。starters.ts/sets配下の実データで
+ * 実際に使われているタグのみを採用する（2026-07-13献立の主菜+副菜構成対応）
+ */
+export const MEAL_GENRES = ['和食', '洋食', '中華'] as const
+export type MealGenre = (typeof MEAL_GENRES)[number]
+
+/** 「高たんぱく優先」トグルが参照するタグ（sets/kintore.ts等で実際に使われている） */
+const HIGH_PROTEIN_TAG = '高たんぱく'
 
 function toDateString(d: Date): string {
   const y = d.getFullYear()
@@ -67,23 +77,47 @@ export interface SuggestOptions {
   slot: MealSlot
   /** 今の季節（省略時は現在日時から判定）。季節指定がall以外で一致しないレシピは提案しない */
   season?: Exclude<Season, 'all'>
+  /**
+   * 主菜/副菜どちらの枠への提案か（任意・2026-07-13献立の主菜+副菜構成対応）。
+   * 省略時は従来どおり「夕食・昼食枠は主菜になりうるレシピを優先」の後方互換ロジックを使う
+   */
+  role?: MealRole
+  /**
+   * ジャンル（和食/洋食/中華）の優先指定（任意）。一致するレシピを優先するが、
+   * 無ければ他ジャンルも許可する（絞り込みすぎて提案0件にしないため）
+   */
+  genre?: MealGenre
+  /** 「高たんぱく」タグの品を優先するか（任意・無ければ他も許可） */
+  preferHighProtein?: boolean
 }
 
 /**
  * 夕食・昼食の枠で「単品の主菜」になりにくいタグ。
  * これらを含むレシピは夕食・昼食枠の提案では後回しにする
  * （8月の夕食にサラダ単品、のようなミスマッチを避ける。2026-07-09ペルソナ第2波）。
+ * 「副菜」を表す専用タグはデータ上存在しない（starters.ts/sets配下を実際にgrepして確認済み）
+ * ため、副菜の判定にもこのタグ集合をそのまま使う（=主菜と副菜は互いに排他的な分類になる。
+ * 2026-07-13献立の主菜+副菜構成対応）
  */
 const SIDE_DISH_TAGS = ['汁物', 'サラダ', 'おやつ']
+
+function isSideDishRecipe(r: Recipe): boolean {
+  return r.tags.some((tag) => SIDE_DISH_TAGS.includes(tag))
+}
+
+/** レシピが持つジャンルタグ（和食/洋食/中華のいずれか。無ければundefined） */
+function recipeGenre(r: Recipe): MealGenre | undefined {
+  return MEAL_GENRES.find((g) => r.tags.includes(g))
+}
 
 /**
  * 空き枠の自動提案。
  * まず「季節が合わない（all以外で不一致）」のレシピを除外し、「NG除外」「時短」で
  * 絞り込んだ後、「向いている時間帯」が一致するものを優先（未設定のレシピは制限なし
- * として扱う）。夕食・昼食の枠では主菜になりうるレシピ（汁物/サラダ/おやつタグを
- * 含まない）を優先し、足りない場合のみ他を許可する。その中で「最近作ってない」
- * 「週内で重複しない」の順にも絞り込む。候補が無くなったら段階的に
- * 条件を緩めて必ず何か返す（季節外しか無い場合を除き0件にはしない）。
+ * として扱う）。続けて「主菜/副菜の役割」「ジャンル」「高たんぱく優先」の順で
+ * 優先度を絞り込み（いずれも該当が無ければ絞り込み前に戻す＝0件にはしない）、
+ * その中で「最近作ってない」「週内で重複しない」の順にも絞り込む。候補が無くなったら
+ * 段階的に条件を緩めて必ず何か返す（季節外しか無い場合を除き0件にはしない）。
  */
 export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Recipe | undefined {
   const season = options.season ?? currentSeason()
@@ -103,19 +137,70 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
   )
   const slotPool = slotMatched.length > 0 ? slotMatched : base
 
-  // 夕食・昼食の枠は主菜になりうるレシピを優先し、無いときだけ汁物・サラダ等も許可
-  let mainPool = slotPool
-  if (options.slot === 'dinner' || options.slot === 'lunch') {
-    const mains = slotPool.filter((r) => !r.tags.some((tag) => SIDE_DISH_TAGS.includes(tag)))
-    if (mains.length > 0) mainPool = mains
+  // 主菜/副菜の役割で絞り込む。roleが指定されていればそれを優先し、未指定時は
+  // 従来どおり夕食・昼食枠だけ主菜を優先する後方互換ロジックを使う
+  let rolePool = slotPool
+  if (options.role === 'main') {
+    const mains = slotPool.filter((r) => !isSideDishRecipe(r))
+    if (mains.length > 0) rolePool = mains
+  } else if (options.role === 'side') {
+    const sides = slotPool.filter((r) => isSideDishRecipe(r))
+    if (sides.length > 0) rolePool = sides
+  } else if (options.slot === 'dinner' || options.slot === 'lunch') {
+    const mains = slotPool.filter((r) => !isSideDishRecipe(r))
+    if (mains.length > 0) rolePool = mains
   }
 
-  const notUsedThisWeek = mainPool.filter((r) => !options.usedRecipeIds.includes(r.id!))
+  // ジャンル（和食/洋食/中華）の優先指定
+  let genrePool = rolePool
+  if (options.genre) {
+    const genre = options.genre
+    const matched = rolePool.filter((r) => r.tags.includes(genre))
+    if (matched.length > 0) genrePool = matched
+  }
+
+  // 高たんぱく優先
+  let proteinPool = genrePool
+  if (options.preferHighProtein) {
+    const matched = genrePool.filter((r) => r.tags.includes(HIGH_PROTEIN_TAG))
+    if (matched.length > 0) proteinPool = matched
+  }
+
+  const notUsedThisWeek = proteinPool.filter((r) => !options.usedRecipeIds.includes(r.id!))
   const freshAndUnused = notUsedThisWeek.filter((r) => !cookedWithinDays(r, 14))
 
   const pool =
-    freshAndUnused.length > 0 ? freshAndUnused : notUsedThisWeek.length > 0 ? notUsedThisWeek : mainPool
+    freshAndUnused.length > 0
+      ? freshAndUnused
+      : notUsedThisWeek.length > 0
+        ? notUsedThisWeek
+        : proteinPool
   return pool[Math.floor(Math.random() * pool.length)]
+}
+
+export interface SuggestPairResult {
+  main?: Recipe
+  side?: Recipe
+}
+
+/**
+ * 主菜+副菜のペア提案（2026-07-13献立の主菜+副菜構成対応）。まず主菜を提案し、
+ * ユーザーがジャンルを指定していなければ、選ばれた主菜のジャンル（和食/洋食/中華）に
+ * 副菜のジャンルを揃える（一致する副菜が無ければ何でも可）。主菜が提案できない
+ * （季節・NG等で候補が0件の）ときは副菜だけ提案を試みる。
+ */
+export function suggestPairForSlot(
+  recipes: Recipe[],
+  options: Omit<SuggestOptions, 'role'>,
+): SuggestPairResult {
+  const main = suggestForSlot(recipes, { ...options, role: 'main' })
+  const side = suggestForSlot(recipes, {
+    ...options,
+    role: 'side',
+    usedRecipeIds: main ? [...options.usedRecipeIds, main.id!] : options.usedRecipeIds,
+    genre: options.genre ?? (main ? recipeGenre(main) : undefined),
+  })
+  return { main, side }
 }
 
 /**

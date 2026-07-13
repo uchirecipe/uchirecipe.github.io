@@ -95,6 +95,21 @@ class UchiRecipeDB extends Dexie {
       todayList: '++id, recipeId, addedAt',
       prices: '++id, name, updatedAt',
     })
+    // バージョン10: 献立を「1枠=1件」から「1枠=主菜+副菜（複数件）」に拡張（2026-07-13）。
+    // mealPlansに任意フィールド role('main'|'side')を追加したが、Dexieのインデックス定義に
+    // roleを含めない（絞り込みに使わないため不要）ので、ストア定義はバージョン9と同一。
+    // [date+slot]はもともとunique指定（&プレフィックス）ではなかったため、同じ日×枠に
+    // 複数行を保存してもDexie側の制約に引っかからない。既存の行はrole未設定のまま残り、
+    // アプリ側で「role未設定=主菜」として扱う（後方互換）。バージョンのみ上げて設計変更を記録する
+    this.version(10).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt, sourceSetId',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+      prices: '++id, name, updatedAt',
+    })
   }
 }
 
