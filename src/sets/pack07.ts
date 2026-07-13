@@ -11,7 +11,8 @@ import type { RecipeInput } from '../db/types'
 
 export const SET_ID = 'bento'
 export const SET_NAME = '和食の作り置き・お弁当'
-export const SET_VERSION = 1
+// 2026-07-14: 横展開是正でミートボールの甘酢あんmemoから重複文を削除したためversion+1
+export const SET_VERSION = 2
 
 type SetRecipeDef = Omit<RecipeInput, 'photo'>
 
@@ -76,7 +77,7 @@ export const recipes: SetRecipeDef[] = [
       s(
         'フライパンにサラダ油を中火で熱し、ミートボールを転がしながら揚げ焼きにして全体に焼き色をつける。',
         4,
-        '・たねを入れるときは油がはねやすいので、そっと入れること。\n・一度に焼けるのはフライパンに重ならず並ぶ量まで。\n▽たくさん作るとき：・入りきらないときは手順5〜7（焼く→ふたで火を通す→あんをからめる）を繰り返す。｜・あんのもとも半量ずつ使う。',
+        '・たねを入れるときは油がはねやすいので、そっと入れること。\n・一度に焼けるのはフライパンに重ならず並ぶ量まで。\n▽たくさん作るとき：入りきらないときは手順5〜7（焼く→ふたで火を通す→あんをからめる）を繰り返す。',
       ),
       s(
         'ふたをして弱火にし、中まで火を通す。',
