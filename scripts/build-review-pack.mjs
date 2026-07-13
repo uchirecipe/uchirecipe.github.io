@@ -110,9 +110,13 @@ function parseHeader(text) {
   const effortLevel = text.match(/effortLevel:\s*(\w+)/)
   const tags = text.match(/tags:\s*(.+?)\s*\//)
   const season = text.match(/season:\s*(\w+)/)
-  // suitableForは末尾に「 / keywords: ...」が続くことがあるため、そこで打ち切る(無ければ改行/文末まで)
-  const suitableFor = text.match(/suitableFor:\s*([^\n]+?)(?=\s*\/\s*keywords:|\n|$)/)
-  const keywords = text.match(/keywords:\s*([^\n]+)/)
+  // suitableForは末尾に「 / keywords: ...」または「 / intro: ...」が続くことがあるため、
+  // どちらが来ても手前で打ち切る(無ければ改行/文末まで)
+  const suitableFor = text.match(/suitableFor:\s*([^\n]+?)(?=\s*\/\s*(?:keywords|intro):|\n|$)/)
+  // keywordsも同様に、後ろに「 / intro: ...」が続く場合はそこで打ち切る(introが無ければ文末まで)
+  const keywords = text.match(/keywords:\s*([^\n]+?)(?=\s*\/\s*intro:|\n|$)/)
+  // ひとこと説明(任意・2026-07-13)。ヘッダー行の末尾に置く自由文のため、そのまま文末まで取る
+  const intro = text.match(/intro:\s*([^\n]+)/)
   if (servings) out.servings = Number(servings[1])
   if (cookMinutes) out.cookMinutes = Number(cookMinutes[1])
   if (effortLevel) out.effortLevel = effortLevel[1]
@@ -128,6 +132,7 @@ function parseHeader(text) {
   if (keywords) {
     out.keywords = keywords[1].split(/[・、]/).map((s) => s.trim()).filter(Boolean)
   }
+  if (intro) out.intro = unescapeNewlines(intro[1].trim())
   return out
 }
 
@@ -186,6 +191,7 @@ for (const target of TARGETS) {
     season: header.season ?? 'all',
     ...(header.suitableFor && header.suitableFor.length ? { suitableFor: header.suitableFor } : {}),
     ...(header.keywords && header.keywords.length ? { keywords: header.keywords } : {}),
+    ...(header.intro ? { intro: header.intro } : {}),
     ingredients,
     steps,
     ...(memoMatch ? { memo: unescapeNewlines(memoMatch[1].trim()) } : {}),

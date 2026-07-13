@@ -77,6 +77,11 @@ export type DishType = 'main' | 'side' | 'soup' | 'dessert'
 export interface Recipe {
   id?: number
   title: string
+  /**
+   * ひとこと説明（任意。2026-07-13）。料理名だけでは中身が想像しにくい料理
+   * （例: ヨーグルトバーク）向けに、詳細画面で料理名の直下に1〜2文だけ表示する
+   */
+  intro?: string
   /** 長辺1200pxに縮小済みの写真 */
   photo?: Blob
   servings: number
@@ -361,6 +366,7 @@ export interface PriceEntry {
 export type RecipeInput = Pick<
   Recipe,
   | 'title'
+  | 'intro'
   | 'photo'
   | 'servings'
   | 'cookMinutes'

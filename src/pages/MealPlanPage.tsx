@@ -867,10 +867,6 @@ export default function MealPlanPage() {
           <h2 className="font-bold">{ja.mealPlan.weekCostTitle}</h2>
           <p className="mt-1 text-2xl font-bold text-accent">約{weekCost.toLocaleString()}円</p>
           <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.weekCostNote}</p>
-          {/* 概算食費の一部が食材価格マスタ由来のとき（docs/20 §3） */}
-          {weekCostEstimate.fromMasterCount > 0 && (
-            <p className="mt-1 text-xs text-ink-muted">{ja.priceMaster.mixedNote}</p>
-          )}
           <Link to="/recipes" className="mt-1 inline-block text-sm font-bold text-accent underline">
             {ja.mealPlan.weekCostNoteLink}
           </Link>

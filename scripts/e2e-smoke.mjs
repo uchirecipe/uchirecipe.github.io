@@ -14,6 +14,8 @@
 //         SMK-02+03(登録・削除) /
 //         SMK-04(貼り付け整形) / SMK-05(人数変更・帯分数表示) / SMK-08簡易(調理中モード) /
 //         KW-01(検索キーワード欄。保存→検索でヒットし、一覧・詳細には表示されないこと) /
+//         INTRO-01(ひとこと説明・任意。2026-07-13。料理名だけでは中身が想像しにくい料理向けの
+//         短い説明文。フォームで入力→保存→詳細の料理名見出しの直後に表示されること) /
 //         SMK-14簡易(未解錠ゲート) /
 //         SETTINGS-TAB-01(設定画面のタブ分割。?set=/?section=直リンクが該当タブを自動で開く・
 //         4タブの手動切替・トーストのタップ閉じ。2026-07-12オーナー実機フィードバック。
@@ -52,7 +54,8 @@
 //         PRICE-01(食材価格マスタ。材料に価格未入力のレシピでもマスタ目安価格が詳細の
 //         概算食費・材料行の注記に反映され、マスタ編集に追従すること。2026-07-13
 //         オーナー実機フィードバックで詳細画面の概算食費欄の「一部は目安価格から計算しています」
-//         注記は削除(週の献立側は維持)したため、その不在も確認する) /
+//         注記を削除、同日中に週の献立側も削除(mixedNote定義自体を撤去)したため、
+//         その不在をMEALPLAN-01側でも確認する) /
 //         INLINE-01(「食材と価格」一覧の行内編集。2026-07-12 UX改修で編集モーダルを廃止し、
 //         価格欄への直接入力+Enter/blurで即保存。2026-07-13 UI改善で「目安」/「自分の価格」
 //         バッジは廃止したため「デフォルトに戻す」ボタンの出現/消失で編集反映を確認・
@@ -459,6 +462,44 @@ try {
   // 後始末: 検証用に作成したレシピを削除
   await page.getByText('E2Eキーワード確認レシピ', { exact: true }).first().click()
   await page.waitForTimeout(500)
+  await page.locator('a[href*="/edit"]').first().click()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.waitForTimeout(800)
+
+  // --- INTRO-01: ひとこと説明(intro・任意。2026-07-13)。料理名だけでは中身が想像しにくい
+  // 料理向けの短い説明文。フォームで入力→保存→詳細の料理名の直下に表示されることを確認する ---
+  currentCheck = 'INTRO-01'
+  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByPlaceholder('例: 肉じゃが').fill('E2Eひとこと説明確認レシピ')
+  await page
+    .getByPlaceholder('例: ヨーグルトに二種類のソースをかけた見た目も楽しいデザートです')
+    .fill('E2E確認用のひとこと説明テキスト')
+  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
+  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  await page.getByRole('button', { name: '保存する' }).click()
+  await page.waitForTimeout(800)
+  const introDetailText = await page.textContent('body')
+  check(
+    'INTRO-01 保存後の詳細に料理名が表示される',
+    introDetailText.includes('E2Eひとこと説明確認レシピ'),
+  )
+  check(
+    'INTRO-01 保存後の詳細に料理名の下にひとこと説明が表示される',
+    introDetailText.includes('E2E確認用のひとこと説明テキスト'),
+  )
+  const introHeading = page.getByRole('heading', { name: 'E2Eひとこと説明確認レシピ' })
+  const introBelowTitle = await introHeading.evaluate((el) => {
+    const next = el.nextElementSibling
+    return next?.textContent ?? ''
+  })
+  check(
+    'INTRO-01 ひとこと説明は料理名見出しの直後の要素に表示される',
+    introBelowTitle.includes('E2E確認用のひとこと説明テキスト'),
+  )
+
+  // 後始末: 検証用に作成したレシピを削除
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: 'このレシピを削除' }).click()
@@ -1476,7 +1517,7 @@ try {
   )
   check(
     'PRICE-01 詳細画面の概算食費欄にはマスタ由来の注記が出ない' +
-      '(2026-07-13 オーナー実機フィードバックで削除。週の献立側は維持)',
+      '(2026-07-13 オーナー実機フィードバックで削除。週の献立側も同日中に削除)',
     !priceDetailBefore.includes('一部は目安価格から計算しています'),
   )
   check(
@@ -1657,6 +1698,11 @@ try {
         'MEALPLAN-01(Fix3) 表示された概算食費は0円ではない',
         !!costMatch && Number(costMatch[1].replace(/,/g, '')) > 0,
         `costMatch=${costMatch?.[0]}`,
+      )
+      check(
+        'MEALPLAN-01(Fix3) 概算食費セクションにマスタ由来の注記は出ない' +
+          '(2026-07-13 オーナー実機フィードバックで詳細に続き週の献立側も削除)',
+        !mpAssignedText.includes('一部は目安価格から計算しています'),
       )
 
       // Fix4: 埋まった枠を再度開くと現在のレシピ行に「選択中」バッジが出る

@@ -368,6 +368,9 @@ export default function RecipeDetailPage() {
         {/* タイトル（編集・お気に入りは上部のsticky ヘッダーに常時表示） */}
         <h1 className="text-2xl font-bold leading-snug">{recipe.title}</h1>
 
+        {/* ひとこと説明（任意。料理名だけでは中身が想像しにくい料理向け。2026-07-13） */}
+        {recipe.intro && <p className="mt-1 text-sm text-ink-muted">{recipe.intro}</p>}
+
         {/* 時間・手間・概算価格 */}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-muted">
           {displayCookMinutes != null && displayCookMinutes > 0 && (
