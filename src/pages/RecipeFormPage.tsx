@@ -54,6 +54,7 @@ const emptyStep: StepRow = { text: '', minutes: '', memo: '' }
  */
 type FormDraft = {
   title: string
+  intro: string
   servings: number
   cookMinutes: string
   effortLevel: EffortLevel
@@ -127,6 +128,7 @@ function RecipeFormInner() {
   const isEdit = editId !== undefined
 
   const [title, setTitle] = useState('')
+  const [intro, setIntro] = useState('')
   const [photo, setPhoto] = useState<Blob>()
   const [servings, setServings] = useState(2)
   const [cookMinutes, setCookMinutes] = useState('')
@@ -193,6 +195,7 @@ function RecipeFormInner() {
     }
     baselineRef.current = JSON.stringify({
       title: recipe.title,
+      intro: recipe.intro ?? '',
       servings: recipe.servings,
       cookMinutes: recipe.cookMinutes != null ? String(recipe.cookMinutes) : '',
       effortLevel: recipe.effortLevel,
@@ -228,6 +231,7 @@ function RecipeFormInner() {
       dishType: recipe.dishType,
     } satisfies FormDraft)
     setTitle(recipe.title)
+    setIntro(recipe.intro ?? '')
     setPhoto(recipe.photo)
     setServings(recipe.servings)
     setCookMinutes(recipe.cookMinutes != null ? String(recipe.cookMinutes) : '')
@@ -269,6 +273,7 @@ function RecipeFormInner() {
     () =>
       JSON.stringify({
         title,
+        intro,
         servings,
         cookMinutes,
         effortLevel,
@@ -288,6 +293,7 @@ function RecipeFormInner() {
       } satisfies FormDraft),
     [
       title,
+      intro,
       servings,
       cookMinutes,
       effortLevel,
@@ -350,6 +356,7 @@ function RecipeFormInner() {
     if (!d) return
     draftRestoredRef.current = true
     setTitle(d.title ?? '')
+    setIntro(d.intro ?? '')
     setServings(d.servings ?? 2)
     setCookMinutes(d.cookMinutes ?? '')
     setEffortLevel(d.effortLevel ?? 'normal')
@@ -501,6 +508,7 @@ function RecipeFormInner() {
 
       const input: RecipeInput = {
         title,
+        intro: intro.trim() || undefined,
         photo,
         servings,
         cookMinutes: cookMinutes.trim() ? Number(cookMinutes) : undefined,
@@ -644,6 +652,18 @@ function RecipeFormInner() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={ja.form.namePlaceholder}
+          className={inputCls}
+        />
+      </label>
+
+      {/* ひとこと説明（任意。料理名だけでは中身が想像しにくい料理向け。2026-07-13） */}
+      <label className={`mt-[var(--space-md)] ${labelCls}`}>
+        {ja.form.introLabel}
+        <input
+          type="text"
+          value={intro}
+          onChange={(e) => setIntro(e.target.value)}
+          placeholder={ja.form.introPlaceholder}
           className={inputCls}
         />
       </label>
