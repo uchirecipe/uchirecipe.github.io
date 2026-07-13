@@ -54,9 +54,16 @@
 //         週移動の中央チップが「今週へ戻る」ボタンとして機能しaria-labelが状態に応じて出し分けられる
 //         こと(Fix1)・概算食費セクションは未割当時は非表示で割当後に表示されること(Fix3)・
 //         ピッカー再オープンで現在レシピに「選択中」バッジが出ること(Fix4)・フィルタ/トグルの
-//         aria-pressed(Fix5)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6)) /
+//         aria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみaria-pressed=true)・
+//         最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。同日更新: 既定が夕食のみに
+//         なったため夕食を外そうとするパターンで検証)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
-//         Pro解錠コード入力UI経由で解錠してから検証)。console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
+//         Pro解錠コード入力UI経由で解錠してから検証) /
+//         MEALPLAN-03(献立タブ・主菜+副菜構成。2026-07-13 Fable設計: 各枠が既定で主菜+副菜の
+//         2行になっていること・「＋枠を追加」で行を増やせること・行単位のサイコロは他の行に
+//         影響しないこと・枠が丸ごと空のときのサイコロ/まとめて献立を立てるは主菜+副菜のペアで
+//         埋まること・まとめて献立を立てるのアイコンがDicesであること)。
+//         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -1340,31 +1347,30 @@ try {
       const breakfastFilterBtn = mpPage.getByRole('button', { name: '朝食', exact: true })
       const lunchFilterBtn = mpPage.getByRole('button', { name: '昼食', exact: true })
       const dinnerFilterBtn = mpPage.getByRole('button', { name: '夕食', exact: true })
-      check('MEALPLAN-01(Fix5) 食事帯フィルタは既定で全てaria-pressed=true', (await breakfastFilterBtn.getAttribute('aria-pressed')) === 'true')
+      // 2026-07-13更新: 新規ユーザーの既定表示食事帯は「夕食のみ」(オーナー判断・プレッシャー軽減)。
+      // まっさらプロファイルで検証しているこのテストでは朝食/昼食=false、夕食=trueが既定になる
+      check(
+        'MEALPLAN-01(Fix5・2026-07-13更新) 食事帯フィルタは新規ユーザーの既定で夕食だけaria-pressed=true',
+        (await breakfastFilterBtn.getAttribute('aria-pressed')) === 'false' &&
+          (await lunchFilterBtn.getAttribute('aria-pressed')) === 'false' &&
+          (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
+      )
       const weekToggleBtn = mpPage.getByRole('button', { name: '週', exact: true })
       const monthToggleBtn = mpPage.getByRole('button', { name: '月', exact: true })
       check('MEALPLAN-01(Fix5) 週/月トグルにもaria-pressedが付く(週表示中はtrue/false)', (await weekToggleBtn.getAttribute('aria-pressed')) === 'true' && (await monthToggleBtn.getAttribute('aria-pressed')) === 'false')
 
-      // Fix6: 最後の1つの食事帯フィルタを外そうとすると説明トーストが出て外れない
-      await lunchFilterBtn.click()
-      await mpPage.waitForTimeout(200)
-      await dinnerFilterBtn.click()
-      await mpPage.waitForTimeout(200)
-      check(
-        'MEALPLAN-01(Fix6) 事前条件: 朝食だけが表示中',
-        (await breakfastFilterBtn.getAttribute('aria-pressed')) === 'true' &&
-          (await lunchFilterBtn.getAttribute('aria-pressed')) === 'false' &&
-          (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'false',
-      )
-      await breakfastFilterBtn.click() // 最後の1つを外そうとする
+      // Fix6(2026-07-13更新): 既定で夕食だけが表示中なので、その最後の1つを外そうとすると
+      // 説明トーストが出て外れないことを直接確認する(以前は昼食/夕食を手動で外して朝食だけに
+      // してから検証していたが、新既定で夕食のみのため不要になった)
+      await dinnerFilterBtn.click() // 最後の1つ(夕食)を外そうとする
       await mpPage.waitForTimeout(300)
       check(
-        'MEALPLAN-01(Fix6) 最後の1枠を外そうとすると説明トーストが出る',
+        'MEALPLAN-01(Fix6) 最後の1枠(夕食)を外そうとすると説明トーストが出る',
         (await mpPage.textContent('body')).includes('少なくとも1つの食事帯は表示します'),
       )
       check(
-        'MEALPLAN-01(Fix6) 朝食フィルタは外れずaria-pressed=trueのまま',
-        (await breakfastFilterBtn.getAttribute('aria-pressed')) === 'true',
+        'MEALPLAN-01(Fix6) 夕食フィルタは外れずaria-pressed=trueのまま',
+        (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
     } finally {
       await mpBrowser.close()
@@ -1433,6 +1439,134 @@ try {
       )
     } finally {
       await mp2Browser.close()
+    }
+  }
+
+  // --- MEALPLAN-03: 献立タブ・主菜+副菜構成(2026-07-13 Fable設計・オーナー要望。まっさら
+  // プロファイルで検証するため専用browser/contextを使う)。
+  // ・各枠は既定で「主菜」「副菜」の2行(未定×2)が並ぶこと
+  // ・行単位のサイコロは対象の役割の行だけに作用する(枠が部分的に埋まっているとき)こと
+  // ・枠が丸ごと空のときのサイコロは主菜+副菜のペアで一度に埋まること
+  // ・「＋枠を追加」で行を増やせること
+  // ・ジャンルチップ(指定なし/和食/洋食/中華)が単一選択で切り替わること
+  // ・「まとめて献立を立てる」ボタンにDicesアイコンが付くこと(Sparklesから変更) ---
+  currentCheck = 'MEALPLAN-03'
+  {
+    const mp3Browser = await chromium.launch()
+    const mp3Context = await mp3Browser.newContext()
+    const mp3Page = await mp3Context.newPage()
+    mp3Page.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-03] ${text}`)
+    })
+    mp3Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-03] ${err.message}`)
+    })
+    try {
+      await mp3Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mp3Page.waitForTimeout(1800) // 初回シード完了待ち(この時点で表示食事帯は既定の「夕食のみ」)
+
+      // 各枠は既定で主菜+副菜の2行(未定×2)。既定表示は夕食のみなので7日×2行=14件
+      check(
+        'MEALPLAN-03 各枠は既定で主菜+副菜の2行(未定×2)が並ぶ',
+        (await mp3Page.getByText('未定', { exact: true }).count()) === 14,
+      )
+      check(
+        'MEALPLAN-03 行に「主菜」「副菜」のラベルが付く(7日分ずつ)',
+        (await mp3Page.getByText('主菜', { exact: true }).count()) === 7 &&
+          (await mp3Page.getByText('副菜', { exact: true }).count()) === 7,
+      )
+
+      // 「まとめて献立を立てる」ボタンにアイコン(svg)が付く(SparklesからDicesへ変更。2026-07-13)
+      const fillWeekBtn = mp3Page.getByRole('button', { name: 'まとめて献立を立てる' })
+      check(
+        'MEALPLAN-03 「まとめて献立を立てる」ボタンにアイコンが付く',
+        (await fillWeekBtn.locator('svg').count()) > 0,
+      )
+
+      // ジャンルチップ(指定なし/和食/洋食/中華)は単一選択
+      const anyGenreBtn = mp3Page.getByRole('button', { name: '指定なし', exact: true })
+      const japaneseGenreBtn = mp3Page.getByRole('button', { name: '和食', exact: true })
+      check(
+        'MEALPLAN-03 ジャンルチップは既定で「指定なし」がaria-pressed=true',
+        (await anyGenreBtn.getAttribute('aria-pressed')) === 'true',
+      )
+      await japaneseGenreBtn.click()
+      await mp3Page.waitForTimeout(200)
+      check(
+        'MEALPLAN-03 ジャンルチップ「和食」を選ぶと単一選択で「指定なし」が外れる',
+        (await japaneseGenreBtn.getAttribute('aria-pressed')) === 'true' &&
+          (await anyGenreBtn.getAttribute('aria-pressed')) === 'false',
+      )
+      await anyGenreBtn.click() // 以降の提案テストに影響しないよう「指定なし」に戻す
+      await mp3Page.waitForTimeout(200)
+
+      // 「高たんぱく優先」トグルが表示される
+      const highProteinBtn = mp3Page.getByRole('button', { name: '高たんぱく優先', exact: true })
+      check(
+        'MEALPLAN-03 「高たんぱく優先」トグルは既定でaria-pressed=false',
+        (await highProteinBtn.getAttribute('aria-pressed')) === 'false',
+      )
+
+      // 先頭の日(月曜)・夕食の主菜行(先頭の「未定」)に「肉じゃが」をピッカーで割り当てる
+      await mp3Page.getByText('未定', { exact: true }).first().click()
+      await mp3Page.waitForTimeout(400)
+      await mp3Page.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mp3Page.waitForTimeout(300)
+      await mp3Page.getByText('肉じゃが', { exact: true }).first().click()
+      await mp3Page.waitForTimeout(400)
+      check(
+        'MEALPLAN-03 主菜行に肉じゃがを割り当てられる',
+        await mp3Page.getByRole('button', { name: '肉じゃが' }).first().isVisible(),
+      )
+      check(
+        'MEALPLAN-03 割り当て後は「未定」が1件減る(14→13)',
+        (await mp3Page.getByText('未定', { exact: true }).count()) === 13,
+      )
+
+      // 行単位のサイコロ: 月曜の副菜行(2番目のサイコロ。主菜が埋まっているので枠は
+      // 「丸ごと空」ではない)だけを振ると、副菜だけ埋まり主菜(肉じゃが)は変わらない
+      const diceButtons = mp3Page.getByRole('button', { name: 'この行にレシピを自動提案する' })
+      await diceButtons.nth(1).click()
+      await mp3Page.waitForTimeout(400)
+      check(
+        'MEALPLAN-03(行単位のサイコロ) 副菜だけ自動提案しても主菜(肉じゃが)は変わらない',
+        await mp3Page.getByRole('button', { name: '肉じゃが' }).first().isVisible(),
+      )
+      const afterRowDiceEmptyCount = await mp3Page.getByText('未定', { exact: true }).count()
+      check(
+        'MEALPLAN-03(行単位のサイコロ) 副菜行が埋まり「未定」がさらに1件減る(13→12)',
+        afterRowDiceEmptyCount === 12,
+        `count=${afterRowDiceEmptyCount}`,
+      )
+
+      // 空き枠のペア提案: 火曜の夕食は主菜・副菜ともまだ未定→3番目のサイコロ(火曜の主菜行)を
+      // 振ると、枠が丸ごと空だったため主菜+副菜のペアで一度に埋まる(未定が2件減る)
+      await diceButtons.nth(2).click()
+      await mp3Page.waitForTimeout(400)
+      const afterPairEmptyCount = await mp3Page.getByText('未定', { exact: true }).count()
+      check(
+        'MEALPLAN-03(空き枠のペア提案) サイコロ1回で主菜+副菜の両方が埋まる(未定が2件減る)',
+        afterRowDiceEmptyCount - afterPairEmptyCount === 2,
+        `before=${afterRowDiceEmptyCount} after=${afterPairEmptyCount}`,
+      )
+
+      // ＋枠を追加: 水曜(3番目の「＋枠を追加」ボタン。まだ未着手の日)で主菜をもう1行追加すると
+      // 「未定」が1件増える
+      const addRowButtons = mp3Page.getByRole('button', { name: '＋枠を追加' })
+      await addRowButtons.nth(2).click()
+      await mp3Page.waitForTimeout(200)
+      await mp3Page.getByRole('button', { name: '主菜', exact: true }).click()
+      await mp3Page.waitForTimeout(300)
+      check(
+        'MEALPLAN-03(＋枠を追加) 行を追加すると「未定」が1件増える',
+        (await mp3Page.getByText('未定', { exact: true }).count()) === afterPairEmptyCount + 1,
+      )
+    } finally {
+      await mp3Browser.close()
     }
   }
 

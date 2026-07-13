@@ -25,7 +25,7 @@ import {
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
-import { suggestForSlot } from '../src/logic/mealPlan.ts'
+import { suggestForSlot, suggestPairForSlot } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
 import { resolveDuplicateTitleAction, buildUpdatedSetRecipe } from '../src/logic/backup.ts'
@@ -419,6 +419,85 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     suggestForSlot([mkRecipe(1, { tags: ['汁物'] })], opts({ slot: 'breakfast' }))?.id,
     1,
   )
+
+  // ---- role指定・ジャンル優先・高たんぱく優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
+
+  // role:'side'は副菜系タグ(汁物/サラダ/おやつ。「副菜」専用タグは無いため既存のSIDE_DISH_TAGSの
+  // 複数を流用=主菜と副菜は互いに排他)の品を優先する
+  {
+    const recipes = [mkRecipe(1, { tags: ['和食'] }), mkRecipe(2, { tags: ['汁物'] })]
+    const picks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts({ role: 'side' }))?.id)
+    eq('role:side は副菜系タグの品を優先する', picks.every((id) => id === 2), true)
+  }
+  // role:'main'は副菜系タグを含まない品を優先する(従来のdinner/lunch挙動と同じロジックを流用)
+  {
+    const recipes = [mkRecipe(1, { tags: ['和食'] }), mkRecipe(2, { tags: ['汁物'] })]
+    const picks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts({ role: 'main' }))?.id)
+    eq('role:main は副菜系タグを含まない品を優先する', picks.every((id) => id === 1), true)
+  }
+  // role省略時は従来どおり(後方互換): dinner/lunch枠だけ主菜優先、それ以外は区別しない
+  {
+    const recipes = [mkRecipe(1, { tags: ['和食'] }), mkRecipe(2, { tags: ['汁物'] })]
+    const dinnerPicks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts())?.id)
+    eq('role省略(後方互換): dinner枠は主菜優先のまま', dinnerPicks.every((id) => id === 1), true)
+    eq(
+      'role省略(後方互換): breakfast枠は汁物タグ品も普通に提案される',
+      suggestForSlot([mkRecipe(1, { tags: ['汁物'] })], opts({ slot: 'breakfast' }))?.id,
+      1,
+    )
+  }
+  // genre優先: 指定ジャンルのタグを持つ品を優先し、一致が無ければ他ジャンルも許可する
+  {
+    const recipes = [mkRecipe(1, { tags: ['洋食'] }), mkRecipe(2, { tags: ['和食'] })]
+    const picks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts({ genre: '和食' }))?.id)
+    eq('genre指定: 一致するジャンルの品を優先する', picks.every((id) => id === 2), true)
+  }
+  eq(
+    'genre指定: 一致が無ければ他ジャンルも提案する(0件にしない)',
+    suggestForSlot([mkRecipe(1, { tags: ['洋食'] })], opts({ genre: '和食' }))?.id,
+    1,
+  )
+  // 高たんぱく優先: 「高たんぱく」タグ品を優先し、無ければ他も許可する
+  {
+    const recipes = [mkRecipe(1, { tags: [] }), mkRecipe(2, { tags: ['高たんぱく'] })]
+    const picks = Array.from({ length: 10 }, () =>
+      suggestForSlot(recipes, opts({ preferHighProtein: true }))?.id,
+    )
+    eq('高たんぱく優先: タグ品を優先する', picks.every((id) => id === 2), true)
+  }
+  eq(
+    '高たんぱく優先: 該当が無ければ他も提案する(0件にしない)',
+    suggestForSlot([mkRecipe(1, { tags: [] })], opts({ preferHighProtein: true }))?.id,
+    1,
+  )
+
+  // suggestPairForSlot: 主菜+副菜をペアで返し、ジャンル未指定なら主菜と同じジャンルの副菜を優先する
+  {
+    const recipes = [
+      mkRecipe(1, { tags: ['和食'] }), // 和食の主菜候補(側菜タグ無し)
+      mkRecipe(2, { tags: ['洋食', 'サラダ'] }), // 洋食の副菜候補
+      mkRecipe(3, { tags: ['和食', '汁物'] }), // 和食の副菜候補
+    ]
+    const results = Array.from({ length: 10 }, () => suggestPairForSlot(recipes, opts()))
+    eq('ペア提案: 主菜が選ばれる', results.every((r) => r.main?.id === 1), true)
+    eq(
+      'ペア提案(和洋中の整合): 主菜と同じジャンル(和食)の副菜が優先される',
+      results.every((r) => r.side?.id === 3),
+      true,
+    )
+  }
+  // ジャンル指定時は主菜・副菜の両方にそのジャンルの優先が適用される
+  {
+    const recipes = [
+      mkRecipe(1, { tags: ['和食'] }),
+      mkRecipe(2, { tags: ['洋食'] }),
+      mkRecipe(3, { tags: ['和食', '汁物'] }),
+      mkRecipe(4, { tags: ['洋食', 'サラダ'] }),
+    ]
+    const results = Array.from({ length: 10 }, () => suggestPairForSlot(recipes, opts({ genre: '洋食' })))
+    eq('ペア提案: ジャンル指定時は主菜も指定ジャンルが優先される', results.every((r) => r.main?.id === 2), true)
+    eq('ペア提案: ジャンル指定時は副菜も指定ジャンルが優先される', results.every((r) => r.side?.id === 4), true)
+  }
 }
 
 // ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------

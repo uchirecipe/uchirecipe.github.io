@@ -9,7 +9,6 @@ import {
   Search,
   ShoppingCart,
   CheckCircle2,
-  Sparkles,
   Clock,
   TriangleAlert,
   Lock,
@@ -19,7 +18,13 @@ import {
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
 import { usePriceEntries } from '../db/prices'
-import { useMealPlanRange, assignMeal, clearMeal } from '../db/mealPlan'
+import {
+  useMealPlanRange,
+  addMealEntry,
+  updateMealEntryRecipe,
+  removeMealEntry,
+  setMainMeal,
+} from '../db/mealPlan'
 import Toast from '../components/Toast'
 import {
   useTodayList,
@@ -30,20 +35,23 @@ import {
 } from '../db/todayList'
 import {
   MEAL_SLOTS,
+  MEAL_GENRES,
   weekDates,
   shiftWeek,
   monthDates,
   shiftMonth,
   monthLeadingBlanks,
   suggestForSlot,
+  suggestPairForSlot,
   todayPlanMismatch,
 } from '../logic/mealPlan'
+import type { MealGenre } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import { buildPriceIndex, estimateRecipeCost } from '../logic/priceEstimate'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
-import type { MealSlot, Recipe } from '../db/types'
+import type { MealPlanEntry, MealRole, MealSlot, Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** 今日の献立の1行（小サムネ＋名前＋作った/×） */
@@ -97,7 +105,34 @@ function TodayListRow({
   )
 }
 
-/** 献立タブ: 週カレンダー（月〜日 × 朝昼夜）にレシピを割り当てる */
+/** 献立の1枠内の1行分（主菜/副菜の実データ行、または未割り当てのプレースホルダー行） */
+type MealPlanRow =
+  | { kind: 'entry'; entry: MealPlanEntry }
+  | { kind: 'empty'; removable: boolean; extraLocalId?: string }
+
+/** 「＋枠を追加」で増やした、まだレシピが割り当てられていない行（DBには保存しないUIだけの状態） */
+interface ExtraRow {
+  localId: string
+  role: MealRole
+}
+
+/** ある日×枠の役割(主菜/副菜)ごとに表示する行を組み立てる。
+ * 実データが1件もない役割は「未定」の行を1つ必ず表示し、+ボタンで増やした分を後ろに続ける */
+function buildRoleRows(slotEntries: MealPlanEntry[], role: MealRole, extra: ExtraRow[]): MealPlanRow[] {
+  const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
+  const rows: MealPlanRow[] = roleEntries.map((entry) => ({ kind: 'entry', entry }))
+  if (roleEntries.length === 0) {
+    rows.push({ kind: 'empty', removable: false })
+  }
+  extra
+    .filter((x) => x.role === role)
+    .forEach((x) => {
+      rows.push({ kind: 'empty', removable: true, extraLocalId: x.localId })
+    })
+  return rows
+}
+
+/** 献立タブ: 週カレンダー（月〜日 × 朝昼夜、各枠は主菜+副菜の複数行）にレシピを割り当てる */
 export default function MealPlanPage() {
   const navigate = useNavigate()
   const recipes = useLiveQuery(listRecipes, [])
@@ -140,9 +175,15 @@ export default function MealPlanPage() {
     setWeekStart(weekDates(new Date(`${date}T00:00:00`))[0])
     setViewMode('week')
   }
-  const entryMap = useMemo(() => {
-    const map = new Map<string, { id: number; recipeId: number }>()
-    entries?.forEach((e) => map.set(`${e.date}|${e.slot}`, { id: e.id!, recipeId: e.recipeId }))
+  // 日×枠キー("date|slot")ごとの全エントリ（主菜+副菜など複数件を保持する。2026-07-13対応）
+  const entriesByDateSlot = useMemo(() => {
+    const map = new Map<string, MealPlanEntry[]>()
+    entries?.forEach((e) => {
+      const key = `${e.date}|${e.slot}`
+      const list = map.get(key)
+      if (list) list.push(e)
+      else map.set(key, [e])
+    })
     return map
   }, [entries])
 
@@ -151,7 +192,9 @@ export default function MealPlanPage() {
     return settings?.hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
   }, [recipes, settings?.hideStarters])
 
-  // 表示する食事帯（未設定なら朝昼夜すべて）
+  // 表示する食事帯（未設定なら朝昼夜すべて。実際の既定値は起動時のresolveVisibleMealSlotsIfNeededが
+  // 新規ユーザー=夕食のみ/既存ユーザー=3枠のどちらかに決めて保存する。ここでの[...MEAL_SLOTS]は
+  // その保存が終わるまでの一瞬だけ使われるフォールバック）
   const visibleSlots = settings?.visibleMealSlots ?? [...MEAL_SLOTS]
   const toggleSlot = (slot: MealSlot) => {
     const next = visibleSlots.includes(slot)
@@ -180,7 +223,8 @@ export default function MealPlanPage() {
       .filter((r): r is Recipe => r !== undefined)
   }, [todayList, recipeById])
 
-  // 今週の献立のうち「今日」の枠(表示中の食事帯のみ)に入っているレシピID（取り込みボタン用）
+  // 今週の献立のうち「今日」の枠(表示中の食事帯のみ)に入っているレシピID（取り込みボタン用）。
+  // 複数エントリ(主菜+副菜)があってもSetで自然に列挙される
   const todayFromPlanIds = useMemo(() => {
     const ids = new Set<number>()
     entries?.forEach((e) => {
@@ -223,21 +267,52 @@ export default function MealPlanPage() {
   }, [todayList, entries])
 
   const [quickOnly, setQuickOnly] = useState(false)
+  // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
+  const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
+  const [preferHighProtein, setPreferHighProtein] = useState(false)
   const [message, setMessage] = useState('')
 
-  // レシピ選択ピッカー（どの日・枠に割り当てるか）
-  const [pickerTarget, setPickerTarget] = useState<{ date: string; slot: MealSlot } | null>(null)
+  // 「＋枠を追加」でUI上だけ増やした未割り当て行（date|slotキー→役割つきの一覧）。
+  // レシピが割り当てられた時点でDBの実エントリに置き換わるため、ここからは取り除く
+  const [extraRows, setExtraRows] = useState<Record<string, ExtraRow[]>>({})
+  const extraRowSeq = useRef(0)
+  const addExtraRow = (date: string, slot: MealSlot, role: MealRole) => {
+    extraRowSeq.current += 1
+    const localId = `extra-${extraRowSeq.current}`
+    const key = `${date}|${slot}`
+    setExtraRows((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), { localId, role }] }))
+  }
+  const removeExtraRowState = (date: string, slot: MealSlot, localId: string) => {
+    const key = `${date}|${slot}`
+    setExtraRows((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).filter((r) => r.localId !== localId),
+    }))
+  }
+  // 「＋枠を追加」タップ後、主菜/副菜どちらを足すか選ぶ小さなメニューの開閉(date|slotキー。同時に1つだけ)
+  const [addMenuFor, setAddMenuFor] = useState<string | null>(null)
+
+  // レシピ選択ピッカー（どの日・枠・役割・行を対象にしているか。entryIdがあれば既存行の差し替え、
+  // 無ければ新規追加。extraLocalIdは「＋枠を追加」で増やした未割り当て行に割り当てたときの後始末用）
+  const [pickerTarget, setPickerTarget] = useState<{
+    date: string
+    slot: MealSlot
+    role: MealRole
+    entryId?: number
+    extraLocalId?: string
+  } | null>(null)
   const [pickerQuery, setPickerQuery] = useState('')
   const filteredRecipes = useMemo(() => {
     const q = pickerQuery.trim()
     if (!q) return visibleRecipes
     return visibleRecipes.filter((r) => r.title.includes(q))
   }, [visibleRecipes, pickerQuery])
-  // 今開いている枠に現在割り当て済みのレシピID(Fix4: 埋まった枠を開いても他の候補と
+  // 今開いている行に現在割り当て済みのレシピID(Fix4: 埋まった行を開いても他の候補と
   // 同じ見た目で無確認上書きしてしまう問題の対策で、先頭固定＋選択中バッジに使う)
-  const currentPickerRecipeId = pickerTarget
-    ? entryMap.get(`${pickerTarget.date}|${pickerTarget.slot}`)?.recipeId
-    : undefined
+  const currentPickerRecipeId = useMemo(() => {
+    if (pickerTarget?.entryId == null) return undefined
+    return entries?.find((e) => e.id === pickerTarget.entryId)?.recipeId
+  }, [pickerTarget, entries])
   // 表示用リスト: 現在割り当て済みのレシピが絞り込み結果に含まれるときだけ先頭に固定する。
   // 検索で絞り込まれて対象外になった場合は並べ替えない(＝バッジも出ない)
   const displayedRecipes = useMemo(() => {
@@ -248,57 +323,117 @@ export default function MealPlanPage() {
     return [current, ...filteredRecipes.slice(0, idx), ...filteredRecipes.slice(idx + 1)]
   }, [filteredRecipes, currentPickerRecipeId])
 
-  const suggest = async (date: string, slot: MealSlot) => {
+  const openPicker = (
+    date: string,
+    slot: MealSlot,
+    role: MealRole,
+    entryId?: number,
+    extraLocalId?: string,
+  ) => {
+    setPickerTarget({ date, slot, role, entryId, extraLocalId })
+    setPickerQuery('')
+  }
+
+  const pickRecipe = async (recipeId: number) => {
+    if (!pickerTarget) return
+    const { date, slot, role, entryId, extraLocalId } = pickerTarget
+    if (entryId != null) {
+      await updateMealEntryRecipe(entryId, recipeId)
+    } else {
+      await addMealEntry(date, slot, recipeId, role)
+      if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
+    }
+    setPickerTarget(null)
+  }
+
+  /** 行の「×」: 既存の割り当てなら削除、追加しただけの未割り当て行ならUI上から取り消す */
+  const clearRow = async (date: string, slot: MealSlot, entryId?: number, extraLocalId?: string) => {
+    if (entryId != null) {
+      await removeMealEntry(entryId)
+    } else if (extraLocalId) {
+      removeExtraRowState(date, slot, extraLocalId)
+    }
+  }
+
+  /**
+   * 行の「サイコロ」: その行だけに自動提案を適用する。ただし対象の枠(主菜・副菜とも)が
+   * 丸ごと空のときだけは、主菜+副菜のペアで一度に埋める(Fable設計2026-07-13: 「献立を
+   * 決めたい」という主目的に沿わせるため、片方だけでなく両方を1タップで提案する)
+   */
+  const suggestRow = async (
+    date: string,
+    slot: MealSlot,
+    role: MealRole,
+    entryId?: number,
+    extraLocalId?: string,
+  ) => {
     if (!recipes) return
     setMessage('')
-    const usedRecipeIds = (entries ?? [])
-      .filter((e) => !(e.date === date && e.slot === slot))
-      .map((e) => e.recipeId)
-    const picked = suggestForSlot(visibleRecipes, {
+    const slotEntries = entriesByDateSlot.get(`${date}|${slot}`) ?? []
+    const isSlotEmpty = slotEntries.length === 0
+    const usedRecipeIds = (entries ?? []).filter((e) => e.id !== entryId).map((e) => e.recipeId)
+    const baseOptions = {
       quickOnly,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
       usedRecipeIds,
       slot,
-    })
+      genre: genreFilter,
+      preferHighProtein,
+    }
+    if (isSlotEmpty && entryId == null) {
+      const { main, side } = suggestPairForSlot(visibleRecipes, baseOptions)
+      if (!main && !side) {
+        setMessage(ja.mealPlan.noSuggestion)
+        return
+      }
+      if (main) await addMealEntry(date, slot, main.id!, 'main')
+      if (side) await addMealEntry(date, slot, side.id!, 'side')
+      if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
+      return
+    }
+    const picked = suggestForSlot(visibleRecipes, { ...baseOptions, role })
     if (!picked) {
       setMessage(ja.mealPlan.noSuggestion)
       return
     }
-    await assignMeal(date, slot, picked.id!)
+    if (entryId != null) {
+      await updateMealEntryRecipe(entryId, picked.id!)
+    } else {
+      await addMealEntry(date, slot, picked.id!, role)
+      if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
+    }
   }
 
-  /** 週の空いている枠(表示中の食事帯のみ)すべてに自動提案で埋める。埋まっている枠は触らない */
+  /** 週の空いている枠(表示中の食事帯のみ・丸ごと空のもの)すべてに主菜+副菜のペアで埋める。
+   * 一部でも埋まっている枠は触らない(従来どおり) */
   const fillWeek = async () => {
     if (!recipes) return
     setMessage('')
     const usedRecipeIds = (entries ?? []).map((e) => e.recipeId)
     for (const date of dates) {
       for (const slot of visibleSlots) {
-        if (entryMap.has(`${date}|${slot}`)) continue
-        const picked = suggestForSlot(visibleRecipes, {
+        const slotEntries = entriesByDateSlot.get(`${date}|${slot}`) ?? []
+        if (slotEntries.length > 0) continue
+        const { main, side } = suggestPairForSlot(visibleRecipes, {
           quickOnly,
           excludeNg: true,
           ngIngredients: settings?.ngIngredients ?? [],
           usedRecipeIds,
           slot,
+          genre: genreFilter,
+          preferHighProtein,
         })
-        if (!picked) continue
-        await assignMeal(date, slot, picked.id!)
-        usedRecipeIds.push(picked.id!)
+        if (main) {
+          await addMealEntry(date, slot, main.id!, 'main')
+          usedRecipeIds.push(main.id!)
+        }
+        if (side) {
+          await addMealEntry(date, slot, side.id!, 'side')
+          usedRecipeIds.push(side.id!)
+        }
       }
     }
-  }
-
-  const openPicker = (date: string, slot: MealSlot) => {
-    setPickerTarget({ date, slot })
-    setPickerQuery('')
-  }
-
-  const pickRecipe = async (recipeId: number) => {
-    if (!pickerTarget) return
-    await assignMeal(pickerTarget.date, pickerTarget.slot, recipeId)
-    setPickerTarget(null)
   }
 
   // 週の概算食費（材料ごとの価格入力を優先し、未入力の材料は食材価格マスタで補う。docs/20 §3）
@@ -348,6 +483,53 @@ export default function MealPlanPage() {
   }
 
   const dowLabels = ja.mealPlan.dow
+
+  /** 1行分のUI（役割ラベル＋レシピ名ボタン＋サイコロ＋×） */
+  const renderRow = (date: string, slot: MealSlot, role: MealRole, row: MealPlanRow, key: string) => {
+    const recipe = row.kind === 'entry' ? recipeById.get(row.entry.recipeId) : undefined
+    const entryId = row.kind === 'entry' ? row.entry.id : undefined
+    const extraLocalId = row.kind === 'empty' ? row.extraLocalId : undefined
+    const showRemove = row.kind === 'entry' || row.removable
+    return (
+      <div key={key} className="flex items-center gap-2">
+        <span className="w-10 shrink-0 text-xs font-bold text-ink-muted">{ja.mealPlan.role[role]}</span>
+        <button
+          type="button"
+          onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
+          className="flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border border-edge bg-app px-2 py-2 text-left text-sm"
+        >
+          {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
+            <TriangleAlert
+              size={14}
+              className="shrink-0 text-warning"
+              aria-label={ja.detail.ngWarning}
+            />
+          )}
+          <span className="min-w-0 flex-1 truncate">
+            {recipe ? recipe.title : <span className="text-ink-muted">{ja.mealPlan.empty}</span>}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => void suggestRow(date, slot, role, entryId, extraLocalId)}
+          aria-label={ja.mealPlan.suggestAria}
+          className="rounded-full p-2 text-accent"
+        >
+          <Dices size={18} aria-hidden />
+        </button>
+        {showRemove && (
+          <button
+            type="button"
+            onClick={() => void clearRow(date, slot, entryId, extraLocalId)}
+            aria-label={row.kind === 'entry' ? ja.mealPlan.clear : ja.mealPlan.removeExtraRow}
+            className="rounded-full p-2 text-ink-muted"
+          >
+            <X size={18} aria-hidden />
+          </button>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
@@ -405,15 +587,16 @@ export default function MealPlanPage() {
                       <p className="truncate text-sm font-bold">{recipe.title}</p>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {visibleSlots.map((slot) => {
-                          const currentEntry = entryMap.get(`${today}|${slot}`)
-                          const currentTitle = currentEntry
-                            ? recipeById.get(currentEntry.recipeId)?.title
+                          const slotEntries = entriesByDateSlot.get(`${today}|${slot}`) ?? []
+                          const mainEntry = slotEntries.find((e) => (e.role ?? 'main') === 'main')
+                          const currentTitle = mainEntry
+                            ? recipeById.get(mainEntry.recipeId)?.title
                             : undefined
                           return (
                             <button
                               key={slot}
                               type="button"
-                              onClick={() => void assignMeal(today, slot, recipe.id!)}
+                              onClick={() => void setMainMeal(today, slot, recipe.id!)}
                               className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
                             >
                               {ja.mealPlan.slot[slot]}
@@ -613,7 +796,7 @@ export default function MealPlanPage() {
         ))}
       </div>
 
-      {/* 自動提案の条件 */}
+      {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先 */}
       <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
         <button
           type="button"
@@ -627,10 +810,49 @@ export default function MealPlanPage() {
         </button>
         <button
           type="button"
+          onClick={() => setGenreFilter(undefined)}
+          aria-pressed={genreFilter === undefined}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            genreFilter === undefined
+              ? 'border-accent bg-accent text-app'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.genreAny}
+        </button>
+        {MEAL_GENRES.map((genre) => (
+          <button
+            key={genre}
+            type="button"
+            onClick={() => setGenreFilter(genre)}
+            aria-pressed={genreFilter === genre}
+            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+              genreFilter === genre
+                ? 'border-accent bg-accent text-app'
+                : 'border-edge bg-surface text-ink-muted'
+            }`}
+          >
+            {genre}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setPreferHighProtein((v) => !v)}
+          aria-pressed={preferHighProtein}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            preferHighProtein
+              ? 'border-accent bg-accent text-app'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.preferHighProteinToggle}
+        </button>
+        <button
+          type="button"
           onClick={() => void fillWeek()}
           className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
         >
-          <Sparkles size={14} aria-hidden />
+          <Dices size={14} aria-hidden />
           {ja.mealPlan.fillWeek}
         </button>
       </div>
@@ -677,47 +899,63 @@ export default function MealPlanPage() {
               {dowLabels[dayIndex]} {date.replaceAll('-', '/')}
               {date === today && <span className="ml-2 text-sm text-accent">{ja.mealPlan.todayBadge}</span>}
             </h2>
-            <div className="mt-[var(--space-sm)] space-y-1">
+            <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
               {visibleSlots.map((slot) => {
-                const entry = entryMap.get(`${date}|${slot}`)
-                const recipe = entry ? recipeById.get(entry.recipeId) : undefined
+                const slotKey = `${date}|${slot}`
+                const slotEntries = entriesByDateSlot.get(slotKey) ?? []
+                const extra = extraRows[slotKey] ?? []
+                const mainRows = buildRoleRows(slotEntries, 'main', extra)
+                const sideRows = buildRoleRows(slotEntries, 'side', extra)
+                const isAddMenuOpen = addMenuFor === slotKey
                 return (
-                  <div key={slot} className="flex items-center gap-2">
-                    <span className="w-14 shrink-0 text-sm font-bold text-ink-muted">
-                      {ja.mealPlan.slot[slot]}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => openPicker(date, slot)}
-                      className="flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border border-edge bg-app px-2 py-2 text-left text-sm"
-                    >
-                      {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
-                        <TriangleAlert
-                          size={14}
-                          className="shrink-0 text-warning"
-                          aria-label={ja.detail.ngWarning}
-                        />
+                  <div key={slot}>
+                    <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                    <div className="mt-1 space-y-1">
+                      {mainRows.map((row, i) =>
+                        renderRow(date, slot, 'main', row, `main-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
                       )}
-                      <span className="min-w-0 flex-1 truncate">
-                        {recipe ? recipe.title : <span className="text-ink-muted">{ja.mealPlan.empty}</span>}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void suggest(date, slot)}
-                      aria-label={ja.mealPlan.suggestAria}
-                      className="rounded-full p-2 text-accent"
-                    >
-                      <Dices size={18} aria-hidden />
-                    </button>
-                    {entry && (
+                      {sideRows.map((row, i) =>
+                        renderRow(date, slot, 'side', row, `side-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
+                      )}
+                    </div>
+                    {isAddMenuOpen ? (
+                      <div className="mt-1 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            addExtraRow(date, slot, 'main')
+                            setAddMenuFor(null)
+                          }}
+                          className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
+                        >
+                          {ja.mealPlan.role.main}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            addExtraRow(date, slot, 'side')
+                            setAddMenuFor(null)
+                          }}
+                          className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
+                        >
+                          {ja.mealPlan.role.side}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddMenuFor(null)}
+                          aria-label={ja.focus.close}
+                          className="rounded-full p-1 text-ink-muted"
+                        >
+                          <X size={14} aria-hidden />
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => void clearMeal(date, slot)}
-                        aria-label={ja.mealPlan.clear}
-                        className="rounded-full p-2 text-ink-muted"
+                        onClick={() => setAddMenuFor(slotKey)}
+                        className="mt-1 text-xs font-bold text-accent"
                       >
-                        <X size={18} aria-hidden />
+                        {ja.mealPlan.addRow}
                       </button>
                     )}
                   </div>
