@@ -27,7 +27,7 @@ import { parseAmountNumber } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
 import { suggestForSlot, suggestPairForSlot } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
-import { hasLaterHandsOnStep } from '../src/logic/cookNavi.ts'
+import { hasLaterHandsOnStep, classifyStep, buildCookTimeline } from '../src/logic/cookNavi.ts'
 import {
   resolveDuplicateTitleAction,
   buildUpdatedSetRecipe,
@@ -612,6 +612,61 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
   eq('ナビ: 後続に手作業がある待ちはヒントあり', hasLaterHandsOnStep(items, 1), true)
   eq('ナビ: 最後の待ちはヒントなし', hasLaterHandsOnStep(items, 3), false)
   eq('ナビ: 後続が待ちだけでもヒントなし', hasLaterHandsOnStep([{ kind: 'active' }, { kind: 'wait' }, { kind: 'wait' }], 1), false)
+}
+
+// ---------- classifyStep(並行調理ナビ: フライパンの「焼く」は目を離せないので手作業系のまま。
+// 素の/焼/を待ち系から外し、蒸し焼き・グリル・オーブン・レンジだけ待ち系にする。2026-07-14 Fable/Codexレビュー) ----------
+{
+  eq(
+    'ナビ分類: 素の「焼く」は手作業系(焦げ付き事故防止のため待ちにしない)',
+    classifyStep({ text: '5分焼く', minutes: 5 }),
+    'active',
+  )
+  eq(
+    'ナビ分類: 「蒸し焼き」は待ち系(フタして基本放置でよい)',
+    classifyStep({ text: '8分蒸し焼きにする', minutes: 8 }),
+    'wait',
+  )
+  eq(
+    'ナビ分類: 「グリルで焼く」は待ち系(点火後は基本放置)',
+    classifyStep({ text: 'グリルで10分焼く', minutes: 10 }),
+    'wait',
+  )
+  eq(
+    'ナビ分類: 「オーブンで焼く」は待ち系(既存挙動の回帰確認)',
+    classifyStep({ text: 'オーブンで15分焼く', minutes: 15 }),
+    'wait',
+  )
+  eq(
+    'ナビ分類: 「炒める」は従来どおり手作業系(回帰確認)',
+    classifyStep({ text: '3分炒める', minutes: 3 }),
+    'active',
+  )
+}
+
+// ---------- buildCookTimeline(並行調理ナビ: フライパン焼き中に他レシピを差し込ませない。
+// 2026-07-14 Fable/Codexレビュー) ----------
+{
+  const recipes = [
+    {
+      id: 1,
+      title: '鮭のムニエル',
+      steps: [
+        { text: '下味をつける' },
+        { text: 'フライパンで5分焼く', minutes: 5 },
+        { text: '盛り付ける' },
+      ],
+    },
+    {
+      id: 2,
+      title: 'サラダ',
+      steps: [{ text: '野菜を切る' }, { text: 'ドレッシングを和える' }],
+    },
+  ]
+  const timeline = buildCookTimeline(recipes)
+  const yakuStep = timeline.items.find((it) => it.text === 'フライパンで5分焼く')
+  eq('ナビ組立: 「焼く」は手作業系として計上される', yakuStep?.kind, 'active')
+  eq('ナビ組立: 「焼く」は待ち扱いにならない(waitMinutes=0)', yakuStep?.waitMinutes, 0)
 }
 
 // ---------- resolveDuplicateTitleAction(配布セット再取込: kintoreテーマ改名で旧名称バッジが
