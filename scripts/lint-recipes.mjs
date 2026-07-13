@@ -343,6 +343,35 @@ for (const { source, recipe } of entries) {
   }
 }
 
+// --- 16. レンジ加熱stepのmemoに、用語辞書「電子レンジ」へ集約済みの汎用知識(増量時の加熱時間追加・
+// 加熱ムラ対策・複数回に分ける案内)が再出現していないか(2026-07-13オーナー方針。再発防止のPDCA)。
+// 誤検知を避けるため、doneness文(「〜ずつ追加加熱すること」等)単体では拾わず、量に触れる語との
+// 組み合わせでのみ判定する。
+// 対象はstarters.ts + sets/*.ts(このアプリが実際に配布する確定カタログ)のみ。review*.json は
+// 別パイプライン(レシピセット制作)で執筆中の未承認原稿で、このタスクの編集範囲外のため対象外にする
+// (rule12のDICTIONARY_TERM_STRINGS判定と違い、こちらは原稿の書き方そのものを縛る新ルールのため)。
+const CONFIRMED_CATALOG_RE = /^(starters\.ts|sets\/)/
+const RANGE_STEP_RE = /(電子レンジ|レンジ|\d+W[)）]?で)/
+const QUANTITY_TRIGGER_RE = /(量を増やす|量が多い|本数を増やす|人数が多い|以上作る|以上は|を超える場合)/
+const ADD_TIME_RE = /(ずつ(追加|加熱)|分を目安に追加)/
+const UNEVEN_RE = /(位置を入れ替え|向きを変え)/
+const SPLIT_BATCH_RE = /分けて加熱/
+for (const { source, recipe } of entries) {
+  if (!CONFIRMED_CATALOG_RE.test(source)) continue
+  for (const st of [...(recipe.steps ?? []), ...(recipe.quickSteps ?? [])]) {
+    if (!st.memo || !RANGE_STEP_RE.test(st.text ?? '')) continue
+    if (QUANTITY_TRIGGER_RE.test(st.memo) && ADD_TIME_RE.test(st.memo)) {
+      add('低', 'レンジ加熱memoに増量時間追加の定型が再出現', source, recipe.title, `用語辞書「電子レンジ」に集約済みのはずの定型が手順memoに再出現: 「${st.memo}」`)
+    }
+    if (UNEVEN_RE.test(st.memo)) {
+      add('低', 'レンジ加熱memoに加熱ムラ対策の定型が再出現', source, recipe.title, `用語辞書「電子レンジ」に集約済みのはずの定型が手順memoに再出現: 「${st.memo}」`)
+    }
+    if (SPLIT_BATCH_RE.test(st.memo)) {
+      add('低', 'レンジ加熱memoに分割加熱案内の定型が再出現', source, recipe.title, `用語辞書「電子レンジ」に集約済みのはずの定型が手順memoに再出現: 「${st.memo}」`)
+    }
+  }
+}
+
 // --- 出力 ---
 const bySeverity = { 高: [], 中: [], 低: [] }
 for (const f of findings) bySeverity[f.severity].push(f)
