@@ -93,16 +93,24 @@ export interface SuggestOptions {
 
 /**
  * 夕食・昼食の枠で「単品の主菜」になりにくいタグ。
- * これらを含むレシピは夕食・昼食枠の提案では後回しにする
+ * これらを含むレシピは夕食・昼食枠の主菜提案では後回しにする
  * （8月の夕食にサラダ単品、のようなミスマッチを避ける。2026-07-09ペルソナ第2波）。
  * 「副菜」を表す専用タグはデータ上存在しない（starters.ts/sets配下を実際にgrepして確認済み）
- * ため、副菜の判定にもこのタグ集合をそのまま使う（=主菜と副菜は互いに排他的な分類になる。
- * 2026-07-13献立の主菜+副菜構成対応）
+ * ため、副菜の提案プールは汁物・サラダで代用する。**おやつは主菜からも副菜からも外す**
+ * （夕食の副菜に杏仁豆腐が提案されるのを防ぐ。2026-07-13 Fable裁定。
+ * きんぴら等の「作り置き副菜」がタグでは判別できず主菜側に混ざる限界は既知＝
+ * dishType付与が将来課題・docs/11 §4棚卸し参照）
  */
-const SIDE_DISH_TAGS = ['汁物', 'サラダ', 'おやつ']
+const NON_MAIN_TAGS = ['汁物', 'サラダ', 'おやつ']
+const SIDE_SUGGEST_TAGS = ['汁物', 'サラダ']
 
 function isSideDishRecipe(r: Recipe): boolean {
-  return r.tags.some((tag) => SIDE_DISH_TAGS.includes(tag))
+  return r.tags.some((tag) => NON_MAIN_TAGS.includes(tag))
+}
+
+/** 副菜枠の提案対象にしてよいレシピ（おやつは含めない） */
+function isSideSuggestable(r: Recipe): boolean {
+  return r.tags.some((tag) => SIDE_SUGGEST_TAGS.includes(tag))
 }
 
 /** レシピが持つジャンルタグ（和食/洋食/中華のいずれか。無ければundefined） */
@@ -144,7 +152,7 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
     const mains = slotPool.filter((r) => !isSideDishRecipe(r))
     if (mains.length > 0) rolePool = mains
   } else if (options.role === 'side') {
-    const sides = slotPool.filter((r) => isSideDishRecipe(r))
+    const sides = slotPool.filter((r) => isSideSuggestable(r))
     if (sides.length > 0) rolePool = sides
   } else if (options.slot === 'dinner' || options.slot === 'lunch') {
     const mains = slotPool.filter((r) => !isSideDishRecipe(r))

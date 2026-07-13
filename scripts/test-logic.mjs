@@ -422,12 +422,18 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
 
   // ---- role指定・ジャンル優先・高たんぱく優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
 
-  // role:'side'は副菜系タグ(汁物/サラダ/おやつ。「副菜」専用タグは無いため既存のSIDE_DISH_TAGSの
-  // 複数を流用=主菜と副菜は互いに排他)の品を優先する
+  // role:'side'は副菜系タグ(汁物/サラダ。「副菜」専用タグは無いため代用。おやつは含めない=
+  // 2026-07-13 Fable裁定)の品を優先する
   {
     const recipes = [mkRecipe(1, { tags: ['和食'] }), mkRecipe(2, { tags: ['汁物'] })]
     const picks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts({ role: 'side' }))?.id)
     eq('role:side は副菜系タグの品を優先する', picks.every((id) => id === 2), true)
+  }
+  // 副菜枠におやつは提案しない(夕食の副菜に杏仁豆腐が出るのを防ぐ。2026-07-13 Fable裁定)
+  {
+    const recipes = [mkRecipe(1, { tags: ['おやつ'] }), mkRecipe(2, { tags: ['サラダ'] })]
+    const picks = Array.from({ length: 10 }, () => suggestForSlot(recipes, opts({ role: 'side' }))?.id)
+    eq('role:side はおやつを提案しない', picks.every((id) => id === 2), true)
   }
   // role:'main'は副菜系タグを含まない品を優先する(従来のdinner/lunch挙動と同じロジックを流用)
   {
