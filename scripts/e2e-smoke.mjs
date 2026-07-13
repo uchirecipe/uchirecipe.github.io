@@ -245,7 +245,7 @@ try {
   )
   check(
     'NUT-01 未解錠案内にPro版で増える項目(たんぱく質・脂質・炭水化物)が明記される(2026-07-13 UIペルソナQA)',
-    nutExpandedText.includes('Pro版では、たんぱく質・脂質・炭水化物のめやすも表示されます'),
+    nutExpandedText.includes('Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウムのめやすも表示されます'),
   )
   await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
   await page.waitForTimeout(200)
