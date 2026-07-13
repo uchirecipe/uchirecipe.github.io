@@ -3,15 +3,25 @@
 // 実行: 開発サーバー(npm run dev)またはpreviewを起動した状態で
 //   npx tsx scripts/e2e-smoke.mjs             (既定: http://localhost:5173)
 //   BASE_URL=http://localhost:4173 npx tsx scripts/e2e-smoke.mjs   (preview等)
-// カバー: SMK-01(起動) / QF-01(時短絞り込みで件数が変わる) / SMK-02+03(登録・削除) /
+// カバー: SMK-01(起動) / COUNT-01(一覧上部の総件数「全◯件」が絞り込み無しでも常に表示され、
+//         絞り込み中は「◯件 / 全◯件」の形になる。2026-07-13 UI改善) /
+//         QF-01(「時短レシピ」絞り込みで件数が変わる。チップ文言は2026-07-13変更) /
+//         LAYOUT-01(一覧のグリッド/リスト表示切替。settingsに保存されリロード後も維持される。
+//         2026-07-13 UI改善) /
+//         SORTDIR-01(並べ替えの昇順/降順トグル。「あいうえお順」既定は昇順、「降順」で並びが
+//         ちょうど反転する。2026-07-13 UI改善) /
+//         SMK-02+03(登録・削除) /
 //         SMK-04(貼り付け整形) / SMK-05(人数変更・帯分数表示) / SMK-08簡易(調理中モード) /
 //         KW-01(検索キーワード欄。保存→検索でヒットし、一覧・詳細には表示されないこと) /
 //         SMK-14簡易(未解錠ゲート) /
 //         SETTINGS-TAB-01(設定画面のタブ分割。?set=/?section=直リンクが該当タブを自動で開く・
 //         4タブの手動切替・トーストのタップ閉じ。2026-07-12オーナー実機フィードバック。
-//         タブ名「基本」→「全般」は2026-07-13 UIペルソナQA) /
+//         タブ名「基本」→「全般」は2026-07-13 UIペルソナQA。同日「全般」タブ内はNG食材の直下に
+//         「食材と価格」「週の食費予算」を移動、タブバーはsticky化＋タブごとのスクロール位置復元) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
+//         PACK-01(Pro解錠済み・パック未解錠のとき追加レシピパックのコード入力欄がdisabledになり
+//         案内文が出ること、Pro版の機能一覧が解錠中ずっと表示され続けること。2026-07-13 UI改善) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
 //         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
@@ -32,7 +42,8 @@
 //         PRICE-01(食材価格マスタ。材料に価格未入力のレシピでもマスタ目安価格が詳細の
 //         概算食費・材料行の注記に反映され、マスタ編集に追従すること) /
 //         INLINE-01(「食材と価格」一覧の行内編集。2026-07-12 UX改修で編集モーダルを廃止し、
-//         価格欄への直接入力+Enter/blurで即保存。目安/自分の価格バッジの切替・目安に戻す・
+//         価格欄への直接入力+Enter/blurで即保存。2026-07-13 UI改善で「目安」/「自分の価格」
+//         バッジは廃止したため「デフォルトに戻す」ボタンの出現/消失で編集反映を確認・
 //         検索絞り込みを確認) /
 //         合わせ調味料ライン表示 /
 //         PRO-FALLBACK-01(crypto.subtleが使えないinsecure context(LAN実機のhttp://等)でも、
@@ -93,13 +104,21 @@ try {
   const listText = await page.textContent('body')
   check('SMK-01 起動・基本レシピのシード', listText.includes('肉じゃが') && listText.includes('カレーライス'))
 
-  // --- QF-01: 絞り込み「時短」でカード件数が変わる(quickStepsを持つレシピだけに絞られる。
-  // UI改善バッチ 2026-07-11) ---
-  currentCheck = 'QF-01'
+  // --- COUNT-01: 絞り込み無しでも一覧上部に総件数「全◯件」が常に表示される(2026-07-13 UI改善) ---
+  currentCheck = 'COUNT-01'
   const allCardCount = await page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+  check(
+    'COUNT-01 絞り込み無しで「全◯件」の総件数が表示される',
+    (await page.textContent('body')).includes(`全${allCardCount}件`),
+    `カード数=${allCardCount}`,
+  )
+
+  // --- QF-01: 絞り込み「時短レシピ」でカード件数が変わる(quickStepsを持つレシピだけに絞られる。
+  // UI改善バッチ 2026-07-11。チップ文言は2026-07-13「時短」→「時短レシピ」に変更) ---
+  currentCheck = 'QF-01'
   await page.locator('button[aria-label="絞り込み"]').click()
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '時短', exact: true }).click()
+  await page.getByRole('button', { name: '時短レシピ', exact: true }).click()
   await page.waitForTimeout(400)
   const quickCardCount = await page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
   check(
@@ -107,9 +126,83 @@ try {
     quickCardCount > 0 && quickCardCount < allCardCount,
     `全件=${allCardCount} 時短=${quickCardCount}`,
   )
+  check(
+    'COUNT-01 絞り込み中は「結果件数 / 全件数」の形で表示される',
+    (await page.textContent('body')).includes(`${quickCardCount}件 / 全${allCardCount}件`),
+  )
   // 絞り込みを解除して以降のチェックに影響しないようにする
-  await page.getByRole('button', { name: '時短', exact: true }).click()
+  await page.getByRole('button', { name: '時短レシピ', exact: true }).click()
   await page.waitForTimeout(300)
+  await page.getByRole('button', { name: '決定' }).click()
+  await page.waitForTimeout(300)
+
+  // --- LAYOUT-01: 一覧の表示形式切替(グリッド/リスト。2026-07-13 UI改善)。settingsに保存され
+  // リロード後(再訪)も維持されることを確認する ---
+  currentCheck = 'LAYOUT-01'
+  const layoutContainerInfo = () =>
+    page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
+        /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+      )
+      const container = links[0]?.parentElement
+      return { className: container?.className ?? '', count: links.length }
+    })
+  const layoutBefore = await layoutContainerInfo()
+  check('LAYOUT-01 既定はグリッド表示', layoutBefore.className.includes('grid-cols-2'))
+  await page.locator('button[aria-label="リスト表示に切り替え"]').click()
+  await page.waitForTimeout(300)
+  const layoutAfterToList = await layoutContainerInfo()
+  check(
+    'LAYOUT-01 「リスト表示に切り替え」を押すと縦一列表示になる',
+    layoutAfterToList.className.includes('flex-col') &&
+      !layoutAfterToList.className.includes('grid-cols-2'),
+  )
+  check(
+    'LAYOUT-01 リスト表示でもレシピ件数は変わらない',
+    layoutAfterToList.count === layoutBefore.count,
+    `グリッド=${layoutBefore.count} リスト=${layoutAfterToList.count}`,
+  )
+  // リロードしても設定(settings.recipeListLayout)に保存されて維持されることを確認する
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForTimeout(1000)
+  const layoutAfterReload = await layoutContainerInfo()
+  check(
+    'LAYOUT-01 リロード後もリスト表示が維持される(settingsに保存)',
+    layoutAfterReload.className.includes('flex-col'),
+  )
+  // グリッド表示に戻して以降のチェック(グリッド前提のセレクタ)に影響しないようにする
+  await page.locator('button[aria-label="グリッド表示に切り替え"]').click()
+  await page.waitForTimeout(300)
+  const layoutAfterBackToGrid = await layoutContainerInfo()
+  check('LAYOUT-01 グリッド表示に戻せる', layoutAfterBackToGrid.className.includes('grid-cols-2'))
+
+  // --- SORTDIR-01: 並べ替えの昇順/降順トグル(2026-07-13 UI改善)。「あいうえお順」を選ぶと
+  // 既定で昇順(あ→ん)になり、「降順」を押すと並びがちょうど反転することを確認する ---
+  currentCheck = 'SORTDIR-01'
+  const cardTitles = () =>
+    page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
+  await page.locator('button[aria-label="絞り込み"]').click()
+  await page.waitForTimeout(300)
+  await page.getByRole('button', { name: 'あいうえお順', exact: true }).click()
+  await page.waitForTimeout(300)
+  const ascActive = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button'))
+    const target = buttons.find((b) => b.textContent?.trim() === '昇順')
+    return target ? target.className.includes('border-accent') : false
+  })
+  check('SORTDIR-01 「あいうえお順」を選ぶと既定で昇順が選択される', ascActive)
+  const ascTitles = await cardTitles()
+  await page.getByRole('button', { name: '降順', exact: true }).click()
+  await page.waitForTimeout(300)
+  const descTitles = await cardTitles()
+  check(
+    'SORTDIR-01 「降順」を押すと並び順がちょうど反転する',
+    ascTitles.length > 1 && JSON.stringify(descTitles) === JSON.stringify([...ascTitles].reverse()),
+    `昇順=${JSON.stringify(ascTitles)} 降順=${JSON.stringify(descTitles)}`,
+  )
+  // 既定(更新順・降順)に戻して以降のチェックに影響しないようにする
+  await page.getByRole('button', { name: '更新順', exact: true }).click()
+  await page.waitForTimeout(200)
   await page.getByRole('button', { name: '決定' }).click()
   await page.waitForTimeout(300)
 
@@ -772,6 +865,69 @@ try {
     }
   }
 
+  // --- PACK-01: Pro解錠済み(パック未解錠)のとき、追加レシピパックのコード入力欄がdisabledになり
+  // 「パックコードの入力は不要です」の案内が出ること、Pro版の機能一覧が(解錠直後だけでなく)
+  // 解錠中ずっと表示され続けることを確認する(2026-07-13 UI改善)。実際のPro解錠コードは
+  // 販売台帳の原本なのでリポジトリにコミットできないため、NUT-02と同様settings.proCodeを
+  // IndexedDBへ直接書き込んで「Pro解錠済み・パック未解錠」状態を再現する。他チェックのPro状態に
+  // 影響しないよう、専用のbrowser/contextで完結させる ---
+  currentCheck = 'PACK-01'
+  {
+    const packBrowser = await chromium.launch()
+    const packContext = await packBrowser.newContext()
+    const packPage = await packContext.newPage()
+    packPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PACK-01] ${err.message}`)
+    })
+    try {
+      await packPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await packPage.waitForTimeout(1800) // 初回シード完了待ち(settingsレコードもこの時点で作られる)
+      await packPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({
+              ...current,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await packPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await packPage.waitForTimeout(800)
+      const packSectionText = await packPage.textContent('body')
+      check(
+        'PACK-01 Pro解錠済み時に「パックコードの入力は不要です」の案内が出る',
+        packSectionText.includes('パックコードの入力は不要です'),
+      )
+      const packInputDisabled = await packPage
+        .getByPlaceholder('解錠コード (例: UP-XXXX-XXXX)')
+        .isDisabled()
+      check('PACK-01 パックコード入力欄がdisabledになる', packInputDisabled)
+      check(
+        'PACK-01 Pro版の機能一覧が解錠中ずっと表示される(2026-07-13 UI改善: 一時表示から常設化)',
+        packSectionText.includes('使えるようになった機能') && packSectionText.includes('並行調理ナビ'),
+      )
+    } finally {
+      await packBrowser.close()
+    }
+  }
+
   // --- SCROLL-02: 一覧の絞り込み・並べ替え条件が「詳細→戻る」を経ても保持される
   // (2026-07-12深夜フィードバックの再調査で判明した本当の原因の再発防止テスト。PC Chrome相当・
   // デスクトップビューポート)。詳細の「戻る」は常に素の /recipes へ新規遷移するため、
@@ -987,12 +1143,10 @@ try {
   )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
-  // 設定画面のタブ分割(2026-07-12・別バッチ)で「食材と価格を編集する」リンクは
-  // 「レシピ」タブの中に移動したため、先にタブを開いてからリンクを探す
+  // 「食材と価格を編集する」リンクは既定タブ「全般」のNG食材の直下にある
+  // (2026-07-13 UI改善で「レシピ」タブから移動)ため、タブ切り替え不要でそのまま開ける
   await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'レシピ', exact: true }).click()
-  await page.waitForTimeout(300)
   await page.getByRole('link', { name: '食材と価格を編集する' }).click()
   await page.waitForTimeout(500)
   check('PRICE-01 設定からの遷移でタイトルが表示される', page.url().includes('#/prices'))
@@ -1004,21 +1158,21 @@ try {
   check('PRICE-01 目安価格の注意書きが表示される', priceListBefore.includes('価格は目安です'))
 
   // --- INLINE-01: 一覧の行内編集(2026-07-12 UX改修)。玉ねぎの行を名前で特定し、
-  // 編集ボタン・別窓を経由せず、価格欄に直接入力してEnter(=blur)で即保存できることを確認する ---
+  // 編集ボタン・別窓を経由せず、価格欄に直接入力してEnter(=blur)で即保存できることを確認する。
+  // 2026-07-13 UI改善で「目安」/「自分の価格」バッジは廃止したため、ここでは
+  // 「デフォルトに戻す」ボタンの出現/消失(=上書き済みかどうか)で編集反映を確認する ---
   currentCheck = 'INLINE-01'
   const onionRow = page.locator('li', { hasText: '玉ねぎ' })
-  check('INLINE-01 初期状態は「目安」バッジ', (await onionRow.textContent()).includes('目安'))
   check(
-    'INLINE-01 「目安」のうちは「目安に戻す」ボタンが出ない',
-    !(await onionRow.textContent()).includes('目安に戻す'),
+    'INLINE-01 初期状態(未編集)では「デフォルトに戻す」ボタンが出ない',
+    !(await onionRow.textContent()).includes('デフォルトに戻す'),
   )
   const onionPriceInput = onionRow.getByLabel('玉ねぎの価格（円）')
   await onionPriceInput.fill('999')
   await onionPriceInput.press('Enter') // Enterでblur→保存(モーダル・保存ボタンを経由しない)
   await page.waitForTimeout(400)
   const onionRowTextAfterEdit = await onionRow.textContent()
-  check('INLINE-01 編集後は「自分の価格」バッジに変わる', onionRowTextAfterEdit.includes('自分の価格'))
-  check('INLINE-01 編集後は「目安に戻す」ボタンが出る', onionRowTextAfterEdit.includes('目安に戻す'))
+  check('INLINE-01 編集後は「デフォルトに戻す」ボタンが出る', onionRowTextAfterEdit.includes('デフォルトに戻す'))
   check(
     'INLINE-01 価格入力欄の値が999のまま保持される(再マウントで飛ばない)',
     (await onionPriceInput.inputValue()) === '999',
@@ -1052,16 +1206,19 @@ try {
     priceDetailAfter.includes('（999円）') && !priceDetailAfter.includes('（目安999円）'),
   )
 
-  // 「目安に戻す」で投入時の価格に復元できることを確認する
+  // 「デフォルトに戻す」で投入時の価格に復元できることを確認する
   await page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
   const onionRowAgain = page.locator('li', { hasText: '玉ねぎ' })
-  await onionRowAgain.getByRole('button', { name: '玉ねぎを目安価格に戻す' }).click()
+  await onionRowAgain.getByRole('button', { name: '玉ねぎをデフォルト価格に戻す' }).click()
   await page.waitForTimeout(400)
   const onionRowTextAfterReset = await onionRowAgain.textContent()
-  check('INLINE-01 「目安に戻す」で「目安」バッジに戻る', onionRowTextAfterReset.includes('目安'))
   check(
-    'INLINE-01 「目安に戻す」で価格が50円に戻る',
+    'INLINE-01 「デフォルトに戻す」後はボタンが再び消える(未編集扱いに戻る)',
+    !onionRowTextAfterReset.includes('デフォルトに戻す'),
+  )
+  check(
+    'INLINE-01 「デフォルトに戻す」で価格が50円に戻る',
     (await onionRowAgain.getByLabel('玉ねぎの価格（円）').inputValue()) === '50',
   )
 

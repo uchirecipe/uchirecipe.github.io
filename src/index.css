@@ -213,7 +213,10 @@
 
 /* iPadOSのマルチタスク操作ボタン(ウィンドウ上部の「…」等)が戻るヘッダーに被る対策。
    クラスはmain.tsxのiPad判定で:rootに付く。stickyで再上端に張り付いたときも効く。
-   注意: @layerの外に置くこと(レイヤー内だとTailwindのpy-2ユーティリティに負ける) */
-:root.is-ipad .back-header {
+   注意: @layerの外に置くこと(レイヤー内だとTailwindのpy-2ユーティリティに負ける)。
+   設定画面のタブバー(.settings-tabbar)も同じくsticky top-0で画面最上部に張り付くため、
+   同じ対策を適用する(2026-07-13 UI改善) */
+:root.is-ipad .back-header,
+:root.is-ipad .settings-tabbar {
   padding-top: calc(0.5rem + 22px);
 }

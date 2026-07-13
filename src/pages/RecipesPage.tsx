@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Plus, Search, SlidersHorizontal, Refrigerator } from 'lucide-react'
+import {
+  Plus,
+  Search,
+  SlidersHorizontal,
+  Refrigerator,
+  LayoutGrid,
+  List,
+  ArrowUpNarrowWide,
+  ArrowDownWideNarrow,
+} from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
+import type { RecipeListLayout } from '../db/types'
 import { usePantryItems } from '../db/pantry'
 import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
@@ -13,7 +23,12 @@ import {
   type TagFilter,
   type TimeFilter,
 } from '../logic/search'
-import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
+import {
+  sortResults,
+  defaultSortDirection,
+  type RecipeSortOption,
+  type SortDirection,
+} from '../logic/recipeSort'
 import { countFreeLimitRecipes, isNearFreeLimit, FREE_LIMIT } from '../logic/freeLimit'
 import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
@@ -91,6 +106,8 @@ type SavedListState = {
   excludeNg: boolean
   quickOnly: boolean
   sort: RecipeSortOption
+  /** 並べ替えの昇順/降順（2026-07-13 UI改善。旧セッションの保存値には無いので任意項目） */
+  sortDirection?: SortDirection
 }
 
 function readSavedListState(): SavedListState | null {
@@ -140,10 +157,17 @@ export default function RecipesPage() {
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
   const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
+  // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
+  // その種類の既定方向にリセットする(選ぶ側のonClickで一緒にsetする。下記sortOptions参照)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    saved?.sortDirection ?? defaultSortDirection[saved?.sort ?? 'updated'],
+  )
 
   const recipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
   const ngIngredients = settings?.ngIngredients
+  // 一覧の表示形式(グリッド/リスト。2026-07-13 UI改善)。設定に保存し再訪でも維持する
+  const recipeListLayout: RecipeListLayout = settings?.recipeListLayout ?? 'grid'
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
   const todayList = useTodayList()
@@ -153,6 +177,13 @@ export default function RecipesPage() {
   )
 
   const hideStarters = settings?.hideStarters ?? false
+
+  // 絞り込み無しでも常に見える総件数(2026-07-13 UI改善)。「基本レシピを表示しない」設定は
+  // 一覧の表示そのものに反映される設定なのでここにも反映し、検索語等の絞り込みは反映しない
+  const totalCount = useMemo(() => {
+    if (!recipes) return undefined
+    return hideStarters ? recipes.filter((r) => !r.isStarter).length : recipes.length
+  }, [recipes, hideStarters])
 
   const results = useMemo(() => {
     if (!recipes) return undefined
@@ -169,7 +200,7 @@ export default function RecipesPage() {
       quickOnly,
       ngIngredients: ngIngredients ?? [],
     })
-    return sortResults(found, sort, pantryNames)
+    return sortResults(found, sort, pantryNames, sortDirection)
   }, [
     recipes,
     hideStarters,
@@ -183,6 +214,7 @@ export default function RecipesPage() {
     quickOnly,
     ngIngredients,
     sort,
+    sortDirection,
     pantryNames,
   ])
 
@@ -195,15 +227,28 @@ export default function RecipesPage() {
     favoriteOnly ||
     excludeNg ||
     quickOnly ||
-    sort !== 'updated'
+    sort !== 'updated' ||
+    sortDirection !== defaultSortDirection[sort]
 
   // 一覧の状態（検索語・絞り込み・並べ替え・スクロール位置）の保存・復元。
   // filtersKeyは「保存時と復元時で条件一式が一致しているか」の判定にのみ使う
   // （URLにq/ingが明示されていて上のsavedを上書きした場合はここで不一致になり、
   // 復元しない＝先頭表示のまま、という新規検索時の挙動を維持する）
   const filtersKey = useMemo(
-    () => JSON.stringify({ query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort }),
-    [query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort],
+    () =>
+      JSON.stringify({
+        query,
+        ingredients,
+        time,
+        effort,
+        tag,
+        favoriteOnly,
+        excludeNg,
+        quickOnly,
+        sort,
+        sortDirection,
+      }),
+    [query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort, sortDirection],
   )
   const restoredRef = useRef(false)
   useEffect(() => {
@@ -251,6 +296,7 @@ export default function RecipesPage() {
       excludeNg,
       quickOnly,
       sort,
+      sortDirection,
     }
     sessionStorage.setItem(RECIPES_LIST_STATE_KEY, JSON.stringify(blob))
   }
@@ -297,6 +343,7 @@ export default function RecipesPage() {
     setExcludeNg(false)
     setQuickOnly(false)
     setSort('updated')
+    setSortDirection(defaultSortDirection.updated)
   }
 
   const subLabelFor = (usedCount: number, wantedCount: number) => {
@@ -352,6 +399,23 @@ export default function RecipesPage() {
         >
           <SlidersHorizontal size={22} aria-hidden />
         </button>
+        {/* 一覧の表示形式(グリッド/リスト)切替。押すたびに逆の表示へ切り替わる(2026-07-13 UI改善) */}
+        <button
+          type="button"
+          onClick={() =>
+            updateSettings({ recipeListLayout: recipeListLayout === 'grid' ? 'list' : 'grid' })
+          }
+          aria-label={
+            recipeListLayout === 'grid' ? ja.search.layoutToggleToList : ja.search.layoutToggleToGrid
+          }
+          className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border border-edge bg-surface text-ink-muted shadow-sm"
+        >
+          {recipeListLayout === 'grid' ? (
+            <List size={22} aria-hidden />
+          ) : (
+            <LayoutGrid size={22} aria-hidden />
+          )}
+        </button>
       </div>
 
       {/* 絞り込みパネル */}
@@ -364,12 +428,36 @@ export default function RecipesPage() {
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setSort(option.value)}
+                onClick={() => {
+                  setSort(option.value)
+                  // 並べ替えの種類を変えたら、その種類の既定方向に戻す(2026-07-13 UI改善。
+                  // 例: 「あいうえお順」は常にあ→んから始まる、というこれまでの見え方を保つ)
+                  setSortDirection(defaultSortDirection[option.value])
+                }}
                 className={chipCls(sort === option.value)}
               >
                 {option.label}
               </button>
             ))}
+          </div>
+          {/* 昇順/降順トグル(2026-07-13 UI改善) */}
+          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            <button
+              type="button"
+              onClick={() => setSortDirection('asc')}
+              className={chipCls(sortDirection === 'asc')}
+            >
+              <ArrowUpNarrowWide size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
+              {ja.search.sortAsc}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortDirection('desc')}
+              className={chipCls(sortDirection === 'desc')}
+            >
+              <ArrowDownWideNarrow size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
+              {ja.search.sortDesc}
+            </button>
           </div>
 
           {/* 使いたい食材 */}
@@ -503,10 +591,15 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 件数 */}
-      {results && filtersActive && (
+      {/* 件数: 絞り込み無しでも総件数を常に表示する(2026-07-13 UI改善)。絞り込み中は
+          既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる */}
+      {results && totalCount !== undefined && (
         <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-          {ja.search.resultCount.replace('{n}', String(results.length))}
+          {filtersActive
+            ? ja.search.resultCountWithTotal
+                .replace('{n}', String(results.length))
+                .replace('{t}', String(totalCount))
+            : ja.search.totalCount.replace('{n}', String(totalCount))}
         </p>
       )}
 
@@ -534,12 +627,19 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* カードのグリッド */}
-      <div className="mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]">
+      {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替) */}
+      <div
+        className={
+          recipeListLayout === 'list'
+            ? 'mt-[var(--space-md)] flex flex-col gap-[var(--space-sm)]'
+            : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]'
+        }
+      >
         {results?.map(({ recipe, usedCount, wantedCount }) => (
           <RecipeCard
             key={recipe.id}
             recipe={recipe}
+            layout={recipeListLayout}
             ngIngredients={ngIngredients}
             subLabel={subLabelFor(usedCount, wantedCount)}
             inTodayList={todayRecipeIds.has(recipe.id!)}

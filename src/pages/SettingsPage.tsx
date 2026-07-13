@@ -122,8 +122,6 @@ export default function SettingsPage() {
   const [proCodeInput, setProCodeInput] = useState('')
   const [proChecking, setProChecking] = useState(false)
   const [proError, setProError] = useState('')
-  // このセッションでPro解錠に成功した直後だけ「使えるようになった機能」を案内する
-  const [proJustActivated, setProJustActivated] = useState(false)
   const [packCodeInput, setPackCodeInput] = useState('')
   const [packChecking, setPackChecking] = useState(false)
   const [packError, setPackError] = useState('')
@@ -222,6 +220,28 @@ export default function SettingsPage() {
     scrolledToSectionRef.current = true
     document.getElementById(target.elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [searchParams, settings, activeTab])
+
+  /**
+   * タブごとのスクロール位置復元(セッション内・2026-07-13 UI改善)。タブバー自体をsticky化した
+   * ため、タブを切り替えると中身の高さが変わりスクロール位置がずれてしまう。タブを押した瞬間の
+   * 位置を離脱先のタブに保存しておき、次にそのタブへ戻ったときに復元する。
+   * pendingTabScrollRestoreRefは「タブボタンを直接押した」ときだけ立て、?section=/?set=直リンクに
+   * よる自動タブ切り替え(上のuseEffect)では復元しない(復元してしまうと直リンクの自動スクロールと
+   * 競合するため)
+   */
+  const tabScrollPositions = useRef<Partial<Record<SettingsTab, number>>>({})
+  const pendingTabScrollRestoreRef = useRef(false)
+  const selectTab = (tab: SettingsTab) => {
+    tabScrollPositions.current[activeTab] = window.scrollY
+    pendingTabScrollRestoreRef.current = true
+    setActiveTab(tab)
+  }
+  useEffect(() => {
+    if (!pendingTabScrollRestoreRef.current) return
+    pendingTabScrollRestoreRef.current = false
+    const y = tabScrollPositions.current[activeTab] ?? 0
+    requestAnimationFrame(() => window.scrollTo(0, y))
+  }, [activeTab])
 
   if (!settings) return null // 読み込み中
 
@@ -365,7 +385,6 @@ export default function SettingsPage() {
         proActivatedAt: Date.now(),
       })
       setProCodeInput('')
-      setProJustActivated(true)
     } finally {
       setProChecking(false)
     }
@@ -462,23 +481,27 @@ export default function SettingsPage() {
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.settings.title}</h1>
 
-      {/* タブ切り替え(2026-07-12オーナー実機フィードバック: 縦に長大化したため上部タブで分割) */}
-      <div className="mt-[var(--space-sm)] grid grid-cols-4 gap-1">
-        {settingsTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            aria-pressed={activeTab === tab.id}
-            className={`rounded-md border py-2.5 text-xs font-bold shadow-sm ${
-              activeTab === tab.id
-                ? 'border-accent bg-accent text-app'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* タブ切り替え(2026-07-12オーナー実機フィードバック: 縦に長大化したため上部タブで分割)。
+          2026-07-13 UI改善: スクロールしても上部に固定(sticky)する。settings-tabbarクラスは
+          index.cssでis-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している */}
+      <div className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-app/95 px-[var(--space-md)] py-2 backdrop-blur">
+        <div className="grid grid-cols-4 gap-1">
+          {settingsTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => selectTab(tab.id)}
+              aria-pressed={activeTab === tab.id}
+              className={`rounded-md border py-2.5 text-xs font-bold shadow-sm ${
+                activeTab === tab.id
+                  ? 'border-accent bg-accent text-app'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {activeTab === 'basic' && (
@@ -539,6 +562,38 @@ export default function SettingsPage() {
                 {ja.settings.ngMatchPreview.replace('{n}', String(ngPreviewCount))}
               </p>
             )}
+          </section>
+
+          {/* 食材と価格（食材価格マスタ。詳細・献立の概算食費のフォールバックに使う）。
+              2026-07-13 UI改善: 「レシピ」タブからNG食材の直下に移動 */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.priceMasterTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.priceMasterDescription}</p>
+            <Link
+              to="/prices"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+            >
+              <Coins size={18} aria-hidden />
+              {ja.settings.priceMasterLink}
+            </Link>
+          </section>
+
+          {/* 週の食費予算。2026-07-13 UI改善: NG食材の直下（食材と価格の次）に移動 */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.weeklyBudgetTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.weeklyBudgetDescription}</p>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={settings.weeklyBudget ?? ''}
+              onChange={(e) => {
+                const value = e.target.value
+                void updateSettings({ weeklyBudget: value === '' ? undefined : Number(value) })
+              }}
+              placeholder={ja.settings.weeklyBudgetPlaceholder}
+              className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+            />
           </section>
 
           {/* 画面を暗くしない */}
@@ -647,24 +702,6 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>
-          </section>
-
-          {/* 週の食費予算 */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.weeklyBudgetTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.weeklyBudgetDescription}</p>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={settings.weeklyBudget ?? ''}
-              onChange={(e) => {
-                const value = e.target.value
-                void updateSettings({ weeklyBudget: value === '' ? undefined : Number(value) })
-              }}
-              placeholder={ja.settings.weeklyBudgetPlaceholder}
-              className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
-            />
           </section>
 
           {/* ホーム画面のカスタマイズ */}
@@ -963,19 +1000,6 @@ export default function SettingsPage() {
               </ul>
             )}
           </section>
-
-          {/* 食材と価格（食材価格マスタ。詳細・献立の概算食費のフォールバックに使う） */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.priceMasterTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.priceMasterDescription}</p>
-            <Link
-              to="/prices"
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
-            >
-              <Coins size={18} aria-hidden />
-              {ja.settings.priceMasterLink}
-            </Link>
-          </section>
         </>
       )}
 
@@ -1063,17 +1087,16 @@ export default function SettingsPage() {
                     {ja.settings.proActivatedDate.replace('{date}', formatDate(settings.proActivatedAt))}
                   </p>
                 )}
-                {/* 解錠直後だけ、どこで何が使えるようになったかを控えめに案内する */}
-                {proJustActivated && (
-                  <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
-                    <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
-                    <ul className="mt-1 space-y-0.5 text-sm text-ink-muted">
-                      {ja.settings.proActivatedFeatures.map((feature) => (
-                        <li key={feature}>・{feature}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {/* Pro版の機能内容は解錠中ずっとここに表示し続ける(2026-07-13 UI改善。
+                    従来はコード反映直後のセッションだけの一時表示だった) */}
+                <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
+                  <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
+                  <ul className="mt-1 space-y-0.5 text-sm text-ink-muted">
+                    {ja.settings.proActivatedFeatures.map((feature) => (
+                      <li key={feature}>・{feature}</li>
+                    ))}
+                  </ul>
+                </div>
               </>
             ) : (
               <>
@@ -1121,6 +1144,13 @@ export default function SettingsPage() {
             ) : (
               <>
                 <p className="mt-1 text-sm text-ink-muted">{ja.settings.packDescription}</p>
+                {/* Pro解錠済み(パック未解錠)のときは、パックの内容がPro版に含まれるため
+                    入力欄をdisabledにして案内文を出す(2026-07-13 UI改善) */}
+                {settings.proCode && (
+                  <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">
+                    {ja.settings.packNotNeededWithPro}
+                  </p>
+                )}
                 <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
                   <input
                     type="text"
@@ -1129,13 +1159,14 @@ export default function SettingsPage() {
                       setPackCodeInput(e.target.value)
                       setPackError('')
                     }}
+                    disabled={!!settings.proCode}
                     placeholder={ja.settings.packCodePlaceholder}
-                    className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+                    className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60 disabled:opacity-40"
                   />
                   <button
                     type="button"
                     onClick={() => void activatePack()}
-                    disabled={packChecking || !packCodeInput.trim()}
+                    disabled={!!settings.proCode || packChecking || !packCodeInput.trim()}
                     className="inline-flex shrink-0 items-center rounded-sm bg-accent px-4 font-bold text-app disabled:opacity-40"
                   >
                     {packChecking ? ja.settings.packActivating : ja.settings.packActivate}

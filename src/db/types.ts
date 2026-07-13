@@ -264,7 +264,15 @@ export interface Settings {
    * 済んでいなければ起動時にprices.tsのseedPriceDefaultsIfNeededが移行処理を行う
    */
   priceDefaultFlagsMigrated: boolean
+  /**
+   * レシピ一覧の表示形式（グリッド/リスト。2026-07-13 UI改善）。未設定（既存ユーザー含む）は
+   * 従来どおりのグリッド表示として扱う
+   */
+  recipeListLayout?: RecipeListLayout
 }
+
+/** レシピ一覧の表示形式 */
+export type RecipeListLayout = 'grid' | 'list'
 
 export const defaultSettings: Settings = {
   id: 1,

@@ -28,7 +28,11 @@ const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
  * 2026-07-12 UX改修: 編集モーダル（タップ→別窓で編集→保存）をやめ、一覧の各行の
  * 価格・単位を直接書き換えられる形にした（オーナー実機フィードバック: 「編集が面倒」）。
  * 各入力はuncontrolled(defaultValue)にして、確定した値が変わったときだけ
- * key(id-値)を変えて再マウントすることで、他の行の編集中に値が飛ばないようにしている
+ * key(id-値)を変えて再マウントすることで、他の行の編集中に値が飛ばないようにしている。
+ *
+ * 2026-07-13 UI改善: 表記の簡素化。「目安」/「自分の価格」バッジを廃止し、代わりに
+ * ページ冒頭の一文（ja.priceMaster.disclaimer）だけで説明する。上書き済みの行を戻す
+ * ボタンの文言も「目安に戻す」→「デフォルトに戻す」に変更した
  */
 export default function IngredientPricesPage() {
   const entries = usePriceEntries()
@@ -181,20 +185,9 @@ function PriceRow({
     <li className="flex items-center gap-2 px-[var(--space-sm)] py-2.5">
       <div className="min-w-0 flex-1">
         <p className="truncate font-bold">{entry.name}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-          {isDefault ? (
-            <span className="rounded-sm border border-edge px-1.5 py-0.5 text-xs text-ink-muted">
-              {ja.priceMaster.badgeDefault}
-            </span>
-          ) : (
-            <span
-              className="rounded-sm px-1.5 py-0.5 text-xs text-accent"
-              style={{ background: 'color-mix(in oklab, var(--accent) 12%, var(--bg))' }}
-            >
-              {ja.priceMaster.badgeCustom}
-            </span>
-          )}
-          {canReset && (
+        {/* 「目安」/「自分の価格」バッジは廃止(2026-07-13 UI改善: ページ冒頭の一文で説明を代替) */}
+        {canReset && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
             <button
               type="button"
               onClick={onReset}
@@ -204,8 +197,8 @@ function PriceRow({
               <RotateCcw size={12} aria-hidden />
               {ja.priceMaster.resetToDefault}
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <input

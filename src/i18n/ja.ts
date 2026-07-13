@@ -309,6 +309,9 @@ export const ja = {
     packTitle: '追加レシピパック',
     packDescription:
       '配布されているレシピテーマがすべて使えるようになる買い切りのパックです。今後追加されるテーマも、すべて追加料金なしで使えます（Pro版には最初から含まれています）。',
+    // Pro解錠済み(パック未解錠)のときはパックコード入力欄をdisabledにし、代わりにこの文を表示する
+    // (2026-07-13 UI改善: Pro版にパックの内容が含まれるため入力不要と案内する)
+    packNotNeededWithPro: 'Pro版は追加レシピパックの内容を含むため、パックコードの入力は不要です',
     packCodePlaceholder: '解錠コード (例: UP-XXXX-XXXX)',
     packActivate: '解錠する',
     packActivating: '確認中…',
@@ -377,22 +380,33 @@ export const ja = {
     effortAll: 'すべて',
     tagTitle: 'よく使うタグ',
     tagAll: 'すべて',
-    favoriteOnly: 'お気に入りのみ',
+    favoriteOnly: 'お気に入り',
     excludeNg: 'NG食材を含むレシピを隠す',
-    myRecipesOnly: '自分の登録のみ',
-    quickOnly: '時短',
+    myRecipesOnly: '自分で登録したレシピのみ',
+    quickOnly: '時短レシピ',
     sortTitle: '並べ替え',
     sortUpdated: '更新順',
     sortPantryMatch: '在庫との一致が多いレシピ順',
     sortKana: 'あいうえお順',
     sortCooked: 'よく使う順',
-    resultCount: '{n}件',
+    // 並べ替えの昇順/降順トグル(2026-07-13 UI改善)。既定は並べ替えの種類ごとに異なる
+    // (あいうえお順のみ昇順が既定、それ以外は降順が既定。logic/recipeSort.tsのdefaultSortDirection参照)
+    sortAsc: '昇順',
+    sortDesc: '降順',
+    // 絞り込み無しでも常に表示する総件数(2026-07-13 UI改善)
+    totalCount: '全{n}件',
+    // 絞り込み中は「結果件数 / 総件数」の形でまとめて表示する
+    resultCountWithTotal: '{n}件 / 全{t}件',
     noResult: '条件に合うレシピが見つかりません',
     noResultHint: '右下の「＋」ボタンから自分のレシピを登録できます',
     usedAll: '入れた食材ぜんぶ使える',
     usedSome: '食材 {m}/{t} が使える',
     clear: '条件をクリア',
     apply: '決定',
+    // 一覧の表示切替(グリッド/リスト。2026-07-13 UI改善)。ボタンは現在の表示から
+    // 切り替わる先のアイコン・aria-labelを出す(押すと何になるかが分かるように)
+    layoutToggleToList: 'リスト表示に切り替え',
+    layoutToggleToGrid: 'グリッド表示に切り替え',
   },
   card: {
     ngBadge: 'NG食材を含む',
@@ -659,7 +673,9 @@ export const ja = {
   // （オーナー実機フィードバック: 「編集が面倒くさい」「目安/自分の価格の反映状況が見えない」）
   priceMaster: {
     title: '食材と価格',
-    disclaimer: '価格は目安です。地域やお店で差があります。自由に書き換えられます',
+    // 表記の簡素化(2026-07-13 UI改善: 「目安」/「自分の価格」バッジを廃止し、
+    // 代わりにページ冒頭のこの一文だけで説明する)
+    disclaimer: 'はじめから入っている価格は目安です。タップすると自分の価格に直せます',
     mixedNote: '一部は目安価格から計算しています',
     empty: 'まだ食材が登録されていません',
     searchLabel: '食材名で絞り込む',
@@ -677,11 +693,9 @@ export const ja = {
     // 一覧の各行のインライン編集欄（食材名ごとに区別できるようaria-labelへ{name}を差し込む）
     entryPriceAria: '{name}の価格（円）',
     entryUnitAria: '{name}の単位',
-    // 「目安のまま」/「自分の価格に上書き済み」のバッジと、上書き行を目安へ戻すボタン
-    badgeDefault: '目安',
-    badgeCustom: '自分の価格',
-    resetToDefault: '目安に戻す',
-    resetToDefaultAria: '{name}を目安価格に戻す',
+    // 上書き済みの行を投入時の価格へ戻すボタン(2026-07-13「目安に戻す」→「デフォルトに戻す」に変更)
+    resetToDefault: 'デフォルトに戻す',
+    resetToDefaultAria: '{name}をデフォルト価格に戻す',
     // レシピ詳細の材料行: 個別価格が無くマスタの目安価格から計算した行にだけ出す控えめな注記。
     // 一致したマスタ行が投入時の目安のままなら「目安」表記、ユーザーが上書きした価格なら
     // 「目安」を外す(2026-07-13 UIペルソナQA: 自分で入れた価格に「目安」と付くのは違和感があるため)

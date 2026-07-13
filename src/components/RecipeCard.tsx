@@ -103,15 +103,21 @@ type Props = {
    * （無ければcookMinutesを流用）に切り替え、「時短」ラベルを添えて表示する
    */
   showQuickTime?: boolean
+  /**
+   * 一覧の表示形式（2026-07-13 UI改善）。'list' のときは小さい写真＋タイトル＋
+   * 既存のメタ（時間・手間レベル・季節）だけの縦一列の行として表示する。省略時は従来どおりのグリッドカード
+   */
+  layout?: 'grid' | 'list'
 }
 
-/** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ） */
+/** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ）。layout='list'なら縦一列の行表示 */
 export default function RecipeCard({
   recipe,
   ngIngredients,
   subLabel,
   inTodayList,
   showQuickTime,
+  layout = 'grid',
 }: Props) {
   const photoUrl = usePhotoUrl(recipe.photo)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
@@ -120,6 +126,48 @@ export default function RecipeCard({
   const displayMinutes = showQuickTime
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
     : recipe.cookMinutes
+
+  if (layout === 'list') {
+    return (
+      <Link
+        to={`/recipes/${recipe.id}`}
+        className="flex items-center gap-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
+      >
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm">
+          {showPhoto ? (
+            <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
+          ) : (
+            <RecipePlaceholder recipe={recipe} iconSize={24} />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-bold leading-snug">{recipe.title}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-muted">
+            {displayMinutes != null && displayMinutes > 0 && (
+              <span className="inline-flex items-center gap-0.5">
+                <Clock size={12} aria-hidden />
+                {showQuickTime && ja.card.quickTimePrefix}
+                {displayMinutes}
+                {ja.recipes.minutesSuffix}
+              </span>
+            )}
+            <span className="rounded-sm border border-edge px-1.5 py-0.5">
+              {ja.effort[recipe.effortLevel]}
+            </span>
+            {recipe.season && recipe.season !== 'all' && (
+              <span className="inline-flex items-center gap-0.5 rounded-sm border border-edge px-1.5 py-0.5">
+                {(() => {
+                  const SeasonIcon = seasonIcons[recipe.season]
+                  return <SeasonIcon size={12} aria-hidden />
+                })()}
+                {ja.season[recipe.season]}
+              </span>
+            )}
+          </div>
+        </div>
+      </Link>
+    )
+  }
 
   return (
     <Link
