@@ -102,11 +102,11 @@
 
 /* ブラウンテーマ: ライトとダークの中間くらいの、暖色でやや落ち着いた見た目 */
 :root[data-theme="brown"] {
-  --bg: #ecdfc9;
+  --bg: #e6d5b7;
   --text: #40301f;
-  --accent: #a8571e;
+  --accent: #d9480f;
   --warning: #a8351f;
-  --surface: #f4e9d6;
+  --surface: #f5ecdb;
   --text-muted: #7d6a4f;
   --border: #d8c4a0;
   --shadow-sm: 0 1px 3px rgb(64 48 31 / 0.14);
@@ -120,16 +120,17 @@
   --chip-food-purple: #8a3ea8;
 }
 
-/* グリーンテーマ: 淡い抹茶系。アクセントは指定値(#6f9440系)から
-   文字コントラストがWCAG AA相当(4.5:1前後)を満たす濃さへ微調整した(2026-07-10) */
+/* グリーンテーマ: セージ系の背景＋クリームのカード。アクセントはモックアップに合わせて
+   オレンジ(ライトと同じ#d9480f)にした第一版(2026-07-14 オーナー実機フィードバック)。
+   ※アイコンや絞り込みの選択中バッジを緑にする2色化は、実機を見て別途判断 */
 :root[data-theme="green"] {
-  --bg: #f0f4e8;
+  --bg: #d9e4c4;
   --text: #2f3628;
-  --accent: #557a30;
+  --accent: #d9480f;
   --warning: #a8351f;
-  --surface: #fbfdf7;
-  --text-muted: #66735a;
-  --border: #d9e2c8;
+  --surface: #f6f5ea;
+  --text-muted: #65725a;
+  --border: #cbd9b3;
   --chip-food-meat: #c2255c;
   --chip-food-seafood: #1971c2;
   --chip-food-vegetable: #256e35;
