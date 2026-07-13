@@ -20,6 +20,8 @@
 //         「食材と価格」「週の食費予算」を移動、タブバーはsticky化＋タブごとのスクロール位置復元) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
+//         STARTER-RELOAD-01(「基本レシピを入れ直す」でユーザーデータ(お気に入り)が保持されること。
+//         2026-07-13 削除→再追加からユーザーデータ保持方式への改修) /
 //         PACK-01(Pro解錠済み・パック未解錠のとき追加レシピパックのコード入力欄がdisabledになり
 //         案内文が出ること、Pro版の機能一覧が解錠中ずっと表示され続けること。2026-07-13 UI改善) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
@@ -516,6 +518,40 @@ try {
   check(
     'TOAST-01 トーストは数秒で自動的に消える',
     !(await page.textContent('body')).includes('「E2Eトースト確認食材」を追加しました'),
+  )
+
+  // --- STARTER-RELOAD-01: 「基本レシピを入れ直す」でユーザーデータが保持されること
+  // (2026-07-13 Fable設計。従来は削除→再追加のため、基本レシピに付けたお気に入り・作った記録・
+  // 写真・編集がすべて消えていた。同じtitleの基本レシピは内容だけ新版に差し替え、
+  // お気に入り等は保持する方式に改修) ---
+  currentCheck = 'STARTER-RELOAD-01'
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByText('肉じゃが', { exact: true }).first().click()
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'お気に入りに追加' }).click()
+  await page.waitForTimeout(300)
+  check(
+    'STARTER-RELOAD-01 肉じゃがをお気に入りに追加できる',
+    await page.getByRole('button', { name: 'お気に入りを解除' }).isVisible(),
+  )
+
+  await page.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(300)
+  await page.getByRole('button', { name: '基本レシピを入れ直す', exact: true }).click()
+  await page.waitForTimeout(500)
+  check(
+    'STARTER-RELOAD-01 入れ直し完了のトーストが表示される',
+    (await page.textContent('body')).includes('基本レシピを入れ直しました'),
+  )
+
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByText('肉じゃが', { exact: true }).first().click()
+  await page.waitForTimeout(500)
+  check(
+    'STARTER-RELOAD-01 入れ直し後もお気に入りのまま(ユーザーデータ保持)',
+    await page.getByRole('button', { name: 'お気に入りを解除' }).isVisible(),
   )
 
   // --- SCROLL-01: 一覧のスクロール位置復元(iPhone SE2実機フィードバック 2026-07-11)。

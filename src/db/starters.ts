@@ -1658,19 +1658,149 @@ export async function seedStartersIfNeeded(): Promise<void> {
   })
 }
 
+/** reloadStarterRecipesが更新対象として扱う「内容」フィールド。
+ * logic/backup.tsのRecipeSetContent（セット再取込の更新対象フィールド）と同じ範囲に揃えている
+ * （quickCookMinutes・iconKey・showIconInsteadOfPhotoは対象外＝ユーザーの表示設定として保持される）。 */
+type StarterContent = Pick<
+  Recipe,
+  | 'servings'
+  | 'cookMinutes'
+  | 'effortLevel'
+  | 'tags'
+  | 'season'
+  | 'suitableFor'
+  | 'ingredients'
+  | 'steps'
+  | 'quickSteps'
+  | 'memo'
+  | 'sourceUrl'
+  | 'keywords'
+>
+
 /**
- * 基本レシピを入れ直す（既存の基本レシピを消してから新しく追加）。
- * 配布レシピセット（logic/backup.tsのimportRecipeSetで読み込んだもの）もisStarter=trueだが、
- * sourceSetIdを持つので対象から除外する（入れ直すたびにセットが消える事故を防ぐ）
+ * 1品分の基本レシピ更新マージ（純ロジック・DB非依存）。
+ * logic/backup.ts の buildUpdatedSetRecipe と同じ考え方: 内容フィールドだけ新版（starterDefs）に
+ * 差し替え、それ以外（id・createdAt・isFavorite・cookedLogs・photo・iconKey等のユーザーデータ・
+ * 表示設定）はexistingをベースに更新フィールドだけ上書きするため自動的に保持される。
+ * 内容が完全に同一ならnullを返す（呼び出し側はスキップ扱いにする＝修正の無い入れ直しのたびに
+ * 更新件数がカウントされるノイズを防ぐ）。
  */
-export async function reloadStarterRecipes(): Promise<void> {
+export function buildUpdatedStarterRecipe(
+  existing: Recipe,
+  incoming: StarterContent,
+  now: number = Date.now(),
+): Recipe | null {
+  const content = (source: StarterContent) =>
+    JSON.stringify({
+      servings: source.servings,
+      cookMinutes: source.cookMinutes,
+      effortLevel: source.effortLevel,
+      tags: source.tags,
+      season: source.season,
+      suitableFor: source.suitableFor,
+      ingredients: source.ingredients,
+      steps: source.steps,
+      quickSteps: source.quickSteps,
+      memo: source.memo,
+      sourceUrl: source.sourceUrl,
+      keywords: source.keywords,
+    })
+  if (content(existing) === content(incoming)) return null
+
+  return {
+    ...existing,
+    servings: incoming.servings,
+    cookMinutes: incoming.cookMinutes,
+    effortLevel: incoming.effortLevel,
+    tags: incoming.tags,
+    season: incoming.season,
+    suitableFor: incoming.suitableFor,
+    ingredients: incoming.ingredients,
+    steps: incoming.steps,
+    quickSteps: incoming.quickSteps,
+    memo: incoming.memo,
+    sourceUrl: incoming.sourceUrl,
+    keywords: incoming.keywords,
+    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords),
+    updatedAt: now,
+  }
+}
+
+export interface StarterReloadPlan {
+  /** 新規追加するstarterDefs（既存に同名の基本レシピが無いもの） */
+  toAdd: StarterDef[]
+  /** 内容を更新する（マージ済みの）Recipe一覧 */
+  toUpdate: Recipe[]
+  /** 削除する既存基本レシピのid一覧（starterDefsに同名の品が無いもの＝旧版の品・タイトルを変えた品） */
+  toDeleteIds: number[]
+}
+
+/**
+ * 基本レシピの入れ直し内容を決める（純ロジック・DB非依存。テスト容易化のためreloadStarterRecipes
+ * から切り出した）。
+ * - 同じtitleの既存基本レシピ（isStarter===true && sourceSetId==null。呼び出し側で絞り込み済み）
+ *   があれば buildUpdatedStarterRecipe で内容マージを判定する
+ * - 既存に無いtitleは新規追加
+ * - starterDefsに無いtitleの既存基本レシピ（＝旧版の品）は削除。
+ *   タイトルを編集していた場合、その品はstarterDefsのどのtitleとも一致しないため削除対象になり、
+ *   ユーザーデータ（お気に入り・作った記録・写真等）は保持されない（既知の制約）。
+ */
+export function planStarterReload(
+  existingStarters: Recipe[],
+  defs: StarterDef[] = starterDefs,
+  now: number = Date.now(),
+): StarterReloadPlan {
+  const existingByTitle = new Map(existingStarters.map((r) => [r.title, r] as const))
+  const defTitles = new Set(defs.map((d) => d.title))
+
+  const toAdd: StarterDef[] = []
+  const toUpdate: Recipe[] = []
+  for (const def of defs) {
+    const existing = existingByTitle.get(def.title)
+    if (!existing) {
+      toAdd.push(def)
+      continue
+    }
+    const merged = buildUpdatedStarterRecipe(existing, def, now)
+    if (merged) toUpdate.push(merged)
+  }
+  const toDeleteIds = existingStarters
+    .filter((r) => !defTitles.has(r.title) && r.id != null)
+    .map((r) => r.id as number)
+
+  return { toAdd, toUpdate, toDeleteIds }
+}
+
+export interface StarterReloadResult {
+  /** 新規に追加した件数 */
+  added: number
+  /** 内容を更新した件数（お気に入り・作った記録・写真・idはそのまま） */
+  updated: number
+}
+
+/**
+ * 基本レシピを入れ直す。
+ * 配布レシピセット（logic/backup.tsのimportRecipeSetで読み込んだもの）もisStarter=trueだが、
+ * sourceSetIdを持つので対象から除外する（入れ直すたびにセットが消える事故を防ぐ）。
+ * 2026-07-13: 従来は対象を全削除してから再追加していたため、基本レシピに付けたお気に入り・
+ * 作った記録・写真・編集がすべて消えていた。buildUpdatedSetRecipe（セット再取込）と同じ考え方で
+ * 同名の既存レシピは内容だけ更新し、ユーザーデータを保持するように変更（オーナー実機フィードバック）。
+ */
+export async function reloadStarterRecipes(): Promise<StarterReloadResult> {
+  let added = 0
+  let updated = 0
   await db.transaction('rw', db.recipes, async () => {
-    const olds = await db.recipes
+    const existingStarters = await db.recipes
       .filter((r) => r.isStarter === true && r.sourceSetId == null)
-      .primaryKeys()
-    await db.recipes.bulkDelete(olds)
-    await db.recipes.bulkAdd(starterDefs.map(toRecipe))
+      .toArray()
+    const plan = planStarterReload(existingStarters)
+    if (plan.toDeleteIds.length) await db.recipes.bulkDelete(plan.toDeleteIds)
+    if (plan.toUpdate.length) await db.recipes.bulkPut(plan.toUpdate)
+    if (plan.toAdd.length) await db.recipes.bulkAdd(plan.toAdd.map(toRecipe))
+    added = plan.toAdd.length
+    updated = plan.toUpdate.length
   })
+  return { added, updated }
 }
 
 export const starterCount = starterDefs.length

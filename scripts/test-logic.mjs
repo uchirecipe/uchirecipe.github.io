@@ -50,7 +50,7 @@ import {
 import { searchRecipes } from '../src/logic/search.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 import { pickIconKey } from '../src/logic/icon.ts'
-import { starterDefs } from '../src/db/starters.ts'
+import { starterDefs, buildUpdatedStarterRecipe, planStarterReload } from '../src/db/starters.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -697,6 +697,106 @@ eq(
     updated?.searchWords.some((w) => w.includes(toHiragana('回鍋肉'))),
     true,
   )
+}
+
+// ---------- buildUpdatedStarterRecipe / planStarterReload(基本レシピの入れ直しでユーザーデータを
+// 保持できるように・2026-07-13 Fable設計。buildUpdatedSetRecipeと同じ考え方を移植し、
+// 削除→再追加で消えていたお気に入り・作った記録・写真・編集を保持できるようにした) ----------
+{
+  const existingStarter = {
+    id: 7,
+    title: 'E2Eテスト用肉じゃが',
+    photo: 'FAKE_PHOTO_BLOB',
+    servings: 2,
+    cookMinutes: 35,
+    effortLevel: 'normal',
+    tags: ['和食'],
+    season: 'all',
+    suitableFor: ['dinner'],
+    ingredients: [{ name: 'じゃがいも', amount: '3', unit: '個' }],
+    steps: [{ text: '旧手順' }],
+    quickSteps: undefined,
+    memo: '旧メモ',
+    sourceUrl: undefined,
+    isFavorite: true,
+    cookedLogs: [{ date: '2026-07-01' }],
+    searchWords: ['old'],
+    isStarter: true,
+    sourceSetId: undefined,
+    createdAt: 1000,
+    updatedAt: 1000,
+  }
+
+  // (1) 内容は新版(starterDefs)に置き換わる
+  const newDef = {
+    title: 'E2Eテスト用肉じゃが',
+    servings: 2,
+    cookMinutes: 30,
+    effortLevel: 'normal',
+    tags: ['和食', '定番'],
+    season: 'all',
+    suitableFor: ['dinner'],
+    ingredients: [
+      { name: 'じゃがいも', amount: '3', unit: '個' },
+      { name: '牛こま切れ肉', amount: '200', unit: 'g' },
+    ],
+    steps: [{ text: '新手順' }],
+    quickSteps: undefined,
+    memo: '新メモ',
+    sourceUrl: undefined,
+  }
+  const updated = buildUpdatedStarterRecipe(existingStarter, newDef, 5000)
+  eq('内容が変わっていれば更新結果が返る(null以外)', updated !== null, true)
+  eq('更新: 内容は新版に置き換わる(cookMinutes)', updated?.cookMinutes, 30)
+  eq('更新: 内容は新版に置き換わる(steps)', updated?.steps, newDef.steps)
+  eq('更新: 内容は新版に置き換わる(ingredients)', updated?.ingredients, newDef.ingredients)
+  eq('更新: updatedAtが今回渡した時刻になる', updated?.updatedAt, 5000)
+
+  // (2) お気に入り・作った記録・写真・id・createdAtが保持される
+  eq('保持: お気に入りが保持される', updated?.isFavorite, true)
+  eq('保持: 作った記録が保持される', updated?.cookedLogs, existingStarter.cookedLogs)
+  eq('保持: 写真が保持される', updated?.photo, existingStarter.photo)
+  eq('保持: idは既存のまま', updated?.id, existingStarter.id)
+  eq('保持: createdAtは既存のまま', updated?.createdAt, existingStarter.createdAt)
+
+  // (3) 内容が完全に同一なら同一内容はスキップ(null)
+  const sameDef = {
+    title: existingStarter.title,
+    servings: existingStarter.servings,
+    cookMinutes: existingStarter.cookMinutes,
+    effortLevel: existingStarter.effortLevel,
+    tags: [...existingStarter.tags],
+    season: existingStarter.season,
+    suitableFor: existingStarter.suitableFor,
+    ingredients: existingStarter.ingredients.map((i) => ({ ...i })),
+    steps: existingStarter.steps.map((s) => ({ ...s })),
+    quickSteps: existingStarter.quickSteps,
+    memo: existingStarter.memo,
+    sourceUrl: existingStarter.sourceUrl,
+  }
+  eq('同一内容はスキップ(null)', buildUpdatedStarterRecipe(existingStarter, sameDef, 5000), null)
+
+  // (4) planStarterReload: 新規追加・更新・削除の仕分け。旧title品(starterDefsに無いtitle。
+  // 旧版の品・ユーザーがタイトルを変えた品)は削除される
+  const otherExisting = {
+    id: 8,
+    title: '旧版だけにあった品',
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    isStarter: true,
+    sourceSetId: undefined,
+    createdAt: 500,
+    updatedAt: 500,
+  }
+  const defs = [newDef, { ...newDef, title: '新版で追加された品' }]
+  const plan = planStarterReload([existingStarter, otherExisting], defs, 9000)
+  eq('planStarterReload: 新規titleは追加対象になる', plan.toAdd.map((d) => d.title), [
+    '新版で追加された品',
+  ])
+  eq('planStarterReload: 内容が変わった既存titleは更新対象になる', plan.toUpdate.length, 1)
+  eq('planStarterReload: 更新対象のidは既存のまま', plan.toUpdate[0]?.id, existingStarter.id)
+  eq('旧title品は削除される(starterDefsに無いtitle)', plan.toDeleteIds, [otherExisting.id])
 }
 
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
