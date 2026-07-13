@@ -50,6 +50,7 @@ for (const [reviewFileName, reviewLabel] of [
   ['review.json', 'review.json(docs/12原稿)'],
   ['review8.json', 'review8.json(docs/18原稿)'],
   ['review2.json', 'review2.json(docs/19原稿)'],
+  ['review16.json', 'review16.json(docs/21原稿)'],
 ]) {
   const reviewPath = path.join(__dirname, '..', 'public', 'sets', 'data', reviewFileName)
   if (existsSync(reviewPath)) {

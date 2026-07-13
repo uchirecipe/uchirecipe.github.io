@@ -1,16 +1,17 @@
 {
   "app": "uchi-recipe",
   "version": 1,
-  "exportedAt": "2026-07-12T14:11:11.497Z",
+  "exportedAt": "2026-07-13T09:03:17.607Z",
   "recipes": [
     {
-      "title": "鶏もも肉のタンドリー風下味冷凍",
+      "title": "鶏もも肉のタンドリー風焼き",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "洋食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -100,13 +101,14 @@
       "updatedAt": 0
     },
     {
-      "title": "豚肉のケチャップ炒め用下味冷凍",
+      "title": "豚肉のケチャップ炒め",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "洋食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -187,13 +189,14 @@
       "updatedAt": 0
     },
     {
-      "title": "鮭のハーブレモン下味冷凍",
+      "title": "鮭のハーブレモン焼き",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "洋食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -277,13 +280,14 @@
       "updatedAt": 0
     },
     {
-      "title": "鶏むね肉のオイスターだれ下味冷凍",
+      "title": "鶏むね肉のオイスター炒め",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "中華",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -368,13 +372,14 @@
       "updatedAt": 0
     },
     {
-      "title": "牛肉のプルコギ風下味冷凍",
+      "title": "牛肉のプルコギ風炒め",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "中華",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -463,13 +468,14 @@
       "updatedAt": 0
     },
     {
-      "title": "豚肉の生姜焼きだれ下味冷凍",
+      "title": "豚ロースのしょうが焼き",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "和食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -543,13 +549,14 @@
       "updatedAt": 0
     },
     {
-      "title": "鶏もも肉のガーリックハーブ下味冷凍",
+      "title": "鶏もも肉のガーリックハーブ焼き",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "洋食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -634,13 +641,14 @@
       "updatedAt": 0
     },
     {
-      "title": "えびのガーリックオイル下味冷凍",
+      "title": "えびのガーリックオイル炒め",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "洋食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -709,13 +717,14 @@
       "updatedAt": 0
     },
     {
-      "title": "豚肉の甜麺醤だれ下味冷凍",
+      "title": "豚肉の甜麺醤炒め",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "中華",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
@@ -790,13 +799,14 @@
       "updatedAt": 0
     },
     {
-      "title": "鶏むね肉のレモンペッパー下味冷凍",
+      "title": "鶏むね肉のレモンペッパー炒め",
       "servings": 2,
       "cookMinutes": 10,
       "effortLevel": "easy",
       "tags": [
         "洋食",
-        "作り置き"
+        "作り置き",
+        "冷凍ストック"
       ],
       "season": "all",
       "suitableFor": [
