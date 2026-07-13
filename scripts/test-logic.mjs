@@ -835,6 +835,16 @@ eq(
   }
   eq('同一内容はスキップ(null)', buildUpdatedStarterRecipe(existingStarter, sameDef, 5000), null)
 
+  // (3b) dishTypeだけが違う場合も「内容の更新」として扱う(dishType導入(2026-07-13)の配布が
+  // 入れ直しで既存ユーザーへ届くことの保証。これが無いと同一内容扱いでスキップされる)
+  {
+    const withDishType = { ...sameDef, dishType: 'side' }
+    const updatedByDishType = buildUpdatedStarterRecipe(existingStarter, withDishType, 6000)
+    eq('dishTypeだけの差分でも更新される(nullでない)', updatedByDishType !== null, true)
+    eq('更新結果にdishTypeが入る', updatedByDishType?.dishType, 'side')
+    eq('dishType更新でもお気に入りは保持される', updatedByDishType?.isFavorite, true)
+  }
+
   // (4) planStarterReload: 新規追加・更新・削除の仕分け。旧title品(starterDefsに無いtitle。
   // 旧版の品・ユーザーがタイトルを変えた品)は削除される
   const otherExisting = {

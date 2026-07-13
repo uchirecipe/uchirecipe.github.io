@@ -1726,6 +1726,7 @@ type StarterContent = Pick<
   | 'memo'
   | 'sourceUrl'
   | 'keywords'
+  | 'dishType'
 >
 
 /**
@@ -1755,6 +1756,9 @@ export function buildUpdatedStarterRecipe(
       memo: source.memo,
       sourceUrl: source.sourceUrl,
       keywords: source.keywords,
+      // dishType(種別)も配布内容の一部として更新対象(2026-07-13 dishType導入と同日の統合で追加。
+      // これが無いと、dishTypeだけ違う既存レシピが「内容同一」扱いになり配布が届かない)
+      dishType: source.dishType,
     })
   if (content(existing) === content(incoming)) return null
 
@@ -1772,6 +1776,7 @@ export function buildUpdatedStarterRecipe(
     memo: incoming.memo,
     sourceUrl: incoming.sourceUrl,
     keywords: incoming.keywords,
+    dishType: incoming.dishType,
     searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords),
     updatedAt: now,
   }
