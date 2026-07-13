@@ -33,6 +33,7 @@ import {
   buildUpdatedSetRecipe,
   exclusionRecordFor,
   buildExclusionTitleSet,
+  tablesToReplace,
 } from '../src/logic/backup.ts'
 import {
   sortResults,
@@ -965,6 +966,46 @@ eq(
     '解除後(記録を消した後)は再取込で復活する(除外されない)',
     buildExclusionTitleSet([], 'kintore').has('漬けるだけ味玉'),
     false,
+  )
+}
+
+// ---------- tablesToReplace(バックアップの全ユーザーデータ対応・2026-07-13
+// データ堅牢性強化: 在庫・買い物メモ・週献立・今日の献立・食材価格マスタの復元判定)。
+// undefined(=項目自体が無い古いバックアップ)と空配列[](=空にする意図)を区別できることが
+// 後方互換の要(fake-indexeddb等が無い環境のためDB本体でのclear非実行はE2Eで別途担保する。
+// ここでは判定ロジックそのものを純ロジックとして固定する) ----------
+{
+  const baseFile = { app: 'uchi-recipe', version: 1, exportedAt: '', recipes: [] }
+  eq(
+    '全フィールドが無い(この対応より前の古いバックアップ)場合はすべて置き換え対象外',
+    tablesToReplace(baseFile),
+    { pantryItems: false, shoppingItems: false, mealPlans: false, todayList: false, prices: false },
+  )
+  eq(
+    '空配列(テーブルを空にする意図)は置き換え対象になる(undefinedとの区別)',
+    tablesToReplace({ ...baseFile, pantryItems: [], prices: [] }),
+    { pantryItems: true, shoppingItems: false, mealPlans: false, todayList: false, prices: true },
+  )
+  eq(
+    '中身入りの配列も置き換え対象になる',
+    tablesToReplace({
+      ...baseFile,
+      mealPlans: [{ date: '2026-07-20', slot: 'dinner', recipeId: 1, role: 'main' }],
+      todayList: [{ recipeId: 1, addedAt: 1000 }],
+    }),
+    { pantryItems: false, shoppingItems: false, mealPlans: true, todayList: true, prices: false },
+  )
+  eq(
+    '全フィールドが有る(空配列込み)場合はすべて置き換え対象',
+    tablesToReplace({
+      ...baseFile,
+      pantryItems: [],
+      shoppingItems: [],
+      mealPlans: [],
+      todayList: [],
+      prices: [],
+    }),
+    { pantryItems: true, shoppingItems: true, mealPlans: true, todayList: true, prices: true },
   )
 }
 

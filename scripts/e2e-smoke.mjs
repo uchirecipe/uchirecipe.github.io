@@ -71,11 +71,17 @@
 //         MEALPLAN-03(献立タブ・主菜+副菜構成。2026-07-13 Fable設計: 各枠が既定で主菜+副菜の
 //         2行になっていること・「＋枠を追加」で行を増やせること・行単位のサイコロは他の行に
 //         影響しないこと・枠が丸ごと空のときのサイコロ/まとめて献立を立てるは主菜+副菜のペアで
-//         埋まること・まとめて献立を立てるのアイコンがDicesであること)。
+//         埋まること・まとめて献立を立てるのアイコンがDicesであること) /
+//         BACKUP-01(バックアップの全ユーザーデータ対応・2026-07-13データ堅牢性強化: 価格編集+
+//         週献立割当+在庫品を実際の「ファイルに書き出す」ボタン(Playwrightのdownloadイベントで
+//         捕捉)で書き出し→まっさらな別プロファイルへ「読み込む(置き換え)」で復元し、
+//         価格・週献立・在庫が実際に引き継がれることを確認。加えて、これらの項目が無い
+//         旧形式のbackup JSONを、既に価格・在庫データのあるプロファイルへ読み込んでも
+//         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する)。
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -1896,6 +1902,280 @@ try {
       res.status() === 200 && title.includes(titleKeyword),
       `status=${res.status()} title=「${title}」`,
     )
+  }
+
+  // --- BACKUP-01: バックアップの全ユーザーデータ対応(在庫・買い物メモ・週献立・今日の献立・
+  // 食材価格マスタ。2026-07-13 データ堅牢性強化)。価格編集+週献立割当+在庫品を実際の
+  // 「バックアップ」タブ→「ファイルに書き出す」ボタン(Playwrightのdownloadイベントで捕捉)で
+  // 書き出し、まっさらな別プロファイルへ「読み込む(今のデータと置き換え)」で復元して
+  // 実際に引き継がれることを確認する。加えて、これらの項目が無い旧形式のbackup JSONを
+  // 既に価格・在庫データのあるプロファイルへ読み込んでもエラーにならず既存データが消えない
+  // (後方互換)ことも確認する。他チェックへの影響を避けるため専用のbrowser/contextで完結させる。
+  // 週献立・在庫ボード自体のUI操作はMEALPLAN-01〜03/INLINE-01等で別途カバー済みのため、
+  // ここでは前提データの用意にIndexedDBへの直接書き込みを使い、バックアップ機構そのものの
+  // 往復検証(実際のエクスポート/インポートUI経由)に的を絞る ---
+  currentCheck = 'BACKUP-01'
+  {
+    let downloadedJson = ''
+
+    // 1)〜3) 書き出し元プロファイル: 価格を1件編集・週献立に1枠割当・在庫に1品を用意し、
+    // 実際の「ファイルに書き出す」ボタンでバックアップJSONを書き出す
+    const srcBrowser = await chromium.launch()
+    try {
+      const srcContext = await srcBrowser.newContext({ acceptDownloads: true })
+      const srcPage = await srcContext.newPage()
+      srcPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@BACKUP-01(書き出し元)] ${err.message}`)
+      })
+      srcPage.on('dialog', (dialog) => dialog.accept())
+      await srcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await srcPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 価格を1件編集(玉ねぎ→888円。「食材と価格」一覧の行内編集を実際のUIで行う)
+      await srcPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await srcPage.waitForTimeout(500)
+      const srcOnionPriceInput = srcPage
+        .locator('li', { hasText: '玉ねぎ' })
+        .getByLabel('玉ねぎの価格（円）')
+      await srcOnionPriceInput.fill('888')
+      await srcOnionPriceInput.press('Enter')
+      await srcPage.waitForTimeout(400)
+
+      // 週献立に1枠割当・在庫に1品(IndexedDBへ直接書き込み。理由は上のコメントの通り)
+      const setup = await srcPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const recipeId = await new Promise((resolve, reject) => {
+          const cursorReq = idb.transaction('recipes', 'readonly').objectStore('recipes').openCursor()
+          cursorReq.onsuccess = () => resolve(cursorReq.result ? cursorReq.result.primaryKey : null)
+          cursorReq.onerror = () => reject(cursorReq.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction(['mealPlans', 'pantryItems'], 'readwrite')
+          tx.objectStore('mealPlans').add({ date: '2026-07-20', slot: 'dinner', recipeId, role: 'main' })
+          tx.objectStore('pantryItems').add({ name: 'E2Eバックアップ確認在庫', level: 'have', isFrequent: true })
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+        return { recipeId }
+      })
+      check('BACKUP-01 前提: 割当先レシピIDを取得できた', typeof setup.recipeId === 'number')
+
+      // 「バックアップ」タブ→「ファイルに書き出す」で実際に書き出す
+      await srcPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await srcPage.waitForTimeout(500)
+      await srcPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await srcPage.waitForTimeout(300)
+      const [download] = await Promise.all([
+        srcPage.waitForEvent('download'),
+        srcPage.getByRole('button', { name: 'ファイルに書き出す' }).click(),
+      ])
+      downloadedJson = readFileSync(await download.path(), 'utf-8')
+      const exported = JSON.parse(downloadedJson)
+      const exportedOnion = (exported.prices ?? []).find((p) => p.name === '玉ねぎ')
+      check(
+        'BACKUP-01 書き出しJSONに編集後の価格(玉ねぎ888円)が含まれる',
+        exportedOnion?.pricePerUnit === 888,
+        `exportedOnion=${JSON.stringify(exportedOnion)}`,
+      )
+      check(
+        'BACKUP-01 書き出しJSONに割り当てた週献立の枠が含まれる',
+        (exported.mealPlans ?? []).some(
+          (m) => m.date === '2026-07-20' && m.slot === 'dinner' && m.recipeId === setup.recipeId,
+        ),
+        `mealPlans=${JSON.stringify(exported.mealPlans)}`,
+      )
+      check(
+        'BACKUP-01 書き出しJSONに追加した在庫品が含まれる',
+        (exported.pantryItems ?? []).some((p) => p.name === 'E2Eバックアップ確認在庫'),
+      )
+      check(
+        'BACKUP-01 書き出しJSONの新規5テーブルはid(自動採番)を含まない(復元先で振り直すため)',
+        ['pantryItems', 'shoppingItems', 'mealPlans', 'todayList', 'prices'].every((key) =>
+          (exported[key] ?? []).every((row) => !('id' in row)),
+        ),
+      )
+    } finally {
+      await srcBrowser.close()
+    }
+
+    // 4) まっさらな別プロファイルへ「読み込む(今のデータと置き換え)」で復元する
+    const dstBrowser = await chromium.launch()
+    try {
+      const dstContext = await dstBrowser.newContext()
+      const dstPage = await dstContext.newPage()
+      dstPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@BACKUP-01(復元先)] ${err.message}`)
+      })
+      dstPage.on('dialog', (dialog) => dialog.accept())
+      await dstPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dstPage.waitForTimeout(1800) // 初回シード完了待ち(まっさらな別プロファイル)
+      await dstPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await dstPage.waitForTimeout(500)
+      await dstPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await dstPage.waitForTimeout(300)
+      const [fileChooser] = await Promise.all([
+        dstPage.waitForEvent('filechooser'),
+        dstPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+      ])
+      await fileChooser.setFiles({
+        name: 'uchi-recipe-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(downloadedJson, 'utf-8'),
+      })
+      await dstPage.waitForTimeout(800)
+      const dstMessage = await dstPage.textContent('body')
+      check('BACKUP-01 復元後に成功メッセージが出る(エラーにならない)', dstMessage.includes('品のレシピを読み込みました'))
+      check('BACKUP-01 復元後にエラーメッセージは出ない', !dstMessage.includes('ファイルを読み込めませんでした'))
+
+      // 価格が実際に復元されたことをUIで確認する(玉ねぎ888円)
+      await dstPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await dstPage.waitForTimeout(500)
+      const dstOnionPriceInput = dstPage
+        .locator('li', { hasText: '玉ねぎ' })
+        .getByLabel('玉ねぎの価格（円）')
+      check('BACKUP-01 価格編集(玉ねぎ888円)が復元される', (await dstOnionPriceInput.inputValue()) === '888')
+
+      // 週献立・在庫が実際に復元されたことをIndexedDBで直接確認する
+      const restored = await dstPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const getAll = (storeName) =>
+          new Promise((resolve, reject) => {
+            const req2 = idb.transaction(storeName, 'readonly').objectStore(storeName).getAll()
+            req2.onsuccess = () => resolve(req2.result)
+            req2.onerror = () => reject(req2.error)
+          })
+        const [mealPlans, pantryItems] = await Promise.all([getAll('mealPlans'), getAll('pantryItems')])
+        idb.close()
+        return { mealPlans, pantryItems }
+      })
+      check(
+        'BACKUP-01 週献立の割当(2026-07-20夕食)が復元される',
+        restored.mealPlans.some((m) => m.date === '2026-07-20' && m.slot === 'dinner' && m.role === 'main'),
+        `mealPlans=${JSON.stringify(restored.mealPlans)}`,
+      )
+      check(
+        'BACKUP-01 在庫の追加品が復元される',
+        restored.pantryItems.some((p) => p.name === 'E2Eバックアップ確認在庫'),
+        `pantryItems=${JSON.stringify(restored.pantryItems)}`,
+      )
+    } finally {
+      await dstBrowser.close()
+    }
+
+    // 5) 後方互換: 新5テーブルの項目が無い旧形式のbackup JSONを、既に価格・在庫データのある
+    //    プロファイルへ読み込んでもエラーにならず、既存の価格・在庫データが消えないことを確認する
+    const compatBrowser = await chromium.launch()
+    try {
+      const compatContext = await compatBrowser.newContext()
+      const compatPage = await compatContext.newPage()
+      compatPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@BACKUP-01(後方互換)] ${err.message}`)
+      })
+      compatPage.on('dialog', (dialog) => dialog.accept())
+      await compatPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await compatPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 復元前から価格マスタ・在庫ボードにデータがある状態を用意する(IndexedDBへ直接書き込み)
+      await compatPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction(['prices', 'pantryItems'], 'readwrite')
+          tx.objectStore('prices').add({
+            name: 'E2E後方互換確認価格',
+            pricePerUnit: 321,
+            unit: '1個',
+            updatedAt: Date.now(),
+            isDefault: false,
+          })
+          tx.objectStore('pantryItems').add({ name: 'E2E後方互換確認在庫', level: 'have', isFrequent: true })
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      })
+
+      // この対応より前の形式(新5テーブルの項目が一切無い)のbackup JSONを模す
+      const oldFormatBackup = JSON.stringify({
+        app: 'uchi-recipe',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        recipes: [],
+      })
+
+      await compatPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await compatPage.waitForTimeout(500)
+      await compatPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await compatPage.waitForTimeout(300)
+      const [compatFileChooser] = await Promise.all([
+        compatPage.waitForEvent('filechooser'),
+        compatPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+      ])
+      await compatFileChooser.setFiles({
+        name: 'old-format-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(oldFormatBackup, 'utf-8'),
+      })
+      await compatPage.waitForTimeout(800)
+      check(
+        'BACKUP-01 旧形式(新5テーブル項目なし)のバックアップを読み込んでもエラーにならない',
+        !(await compatPage.textContent('body')).includes('ファイルを読み込めませんでした'),
+      )
+
+      const afterCompat = await compatPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const getAll = (storeName) =>
+          new Promise((resolve, reject) => {
+            const req2 = idb.transaction(storeName, 'readonly').objectStore(storeName).getAll()
+            req2.onsuccess = () => resolve(req2.result)
+            req2.onerror = () => reject(req2.error)
+          })
+        const [prices, pantryItems] = await Promise.all([getAll('prices'), getAll('pantryItems')])
+        const recipeCount = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('recipes', 'readonly').objectStore('recipes').count()
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
+        idb.close()
+        return { prices, pantryItems, recipeCount }
+      })
+      check(
+        'BACKUP-01 旧形式の復元で既存の価格マスタが消えない(clearされない)',
+        afterCompat.prices.some((p) => p.name === 'E2E後方互換確認価格'),
+        `prices件数=${afterCompat.prices.length}`,
+      )
+      check(
+        'BACKUP-01 旧形式の復元で既存の在庫ボードが消えない(clearされない)',
+        afterCompat.pantryItems.some((p) => p.name === 'E2E後方互換確認在庫'),
+        `pantryItems件数=${afterCompat.pantryItems.length}`,
+      )
+      check(
+        'BACKUP-01 旧形式でもrecipesフィールド自体は従来どおり置き換わる(空配列→0件)',
+        afterCompat.recipeCount === 0,
+        `recipeCount=${afterCompat.recipeCount}`,
+      )
+    } finally {
+      await compatBrowser.close()
+    }
   }
 
   // --- PRO-FALLBACK-01: crypto.subtleが使えないinsecure context(開発中LANのhttp://192.168.x.x

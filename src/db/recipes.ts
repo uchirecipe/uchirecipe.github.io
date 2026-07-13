@@ -60,10 +60,13 @@ export async function updateRecipe(id: number, input: RecipeInput): Promise<void
 /**
  * レシピを削除。配布セット（テーマ）由来のレシピなら (setId, title) の「再取込除外」記録を残し、
  * テーマの再取込（再読み込み）で削除した品が復活しないようにする（トゥームストーン。
- * 2026-07-13 Fable設計。確認ダイアログは出さない＝設定のテーマ一覧「すべて戻す」で戻せるため）
+ * 2026-07-13 Fable設計。確認ダイアログは出さない＝設定のテーマ一覧「すべて戻す」で戻せるため）。
+ * 同一トランザクションで週間献立(mealPlans)・今日の献立(todayList)から当該レシピの行も削除し、
+ * 削除済みレシピを指す孤児データが残らないようにする（データ堅牢性強化・2026-07-13）。
+ * mealPlansはrecipeIdに索引が無いためfilterで該当行を洗い出してから削除する
  */
 export async function deleteRecipe(id: number): Promise<void> {
-  await db.transaction('rw', db.recipes, db.setExclusions, async () => {
+  await db.transaction('rw', db.recipes, db.setExclusions, db.mealPlans, db.todayList, async () => {
     const recipe = await db.recipes.get(id)
     if (recipe) {
       const record = exclusionRecordFor(recipe)
@@ -80,6 +83,9 @@ export async function deleteRecipe(id: number): Promise<void> {
       }
     }
     await db.recipes.delete(id)
+    const orphanMealPlanIds = await db.mealPlans.filter((e) => e.recipeId === id).primaryKeys()
+    if (orphanMealPlanIds.length > 0) await db.mealPlans.bulkDelete(orphanMealPlanIds)
+    await db.todayList.where('recipeId').equals(id).delete()
   })
 }
 

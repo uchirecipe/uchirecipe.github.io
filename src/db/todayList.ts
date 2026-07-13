@@ -12,11 +12,17 @@ export function useTodayList() {
   return useLiveQuery(listTodayList, [])
 }
 
-/** レシピ詳細の「今日つくる」ボタンから追加（同じレシピは重複追加しない） */
+/**
+ * レシピ詳細の「今日つくる」ボタンから追加（同じレシピは重複追加しない）。
+ * 重複チェック(get)と追加(add)を1トランザクションにして原子化する（データ堅牢性強化・2026-07-13。
+ * 同時タップ等でチェックと追加の間に別の追加が割り込み、重複登録されることを防ぐ）
+ */
 export async function addToTodayList(recipeId: number): Promise<void> {
-  const existing = await db.todayList.where('recipeId').equals(recipeId).first()
-  if (existing) return
-  await db.todayList.add({ recipeId, addedAt: Date.now() })
+  await db.transaction('rw', db.todayList, async () => {
+    const existing = await db.todayList.where('recipeId').equals(recipeId).first()
+    if (existing) return
+    await db.todayList.add({ recipeId, addedAt: Date.now() })
+  })
 }
 
 /** 「×」でいつでも外す */
@@ -24,10 +30,20 @@ export async function removeFromTodayList(recipeId: number): Promise<void> {
   await db.todayList.where('recipeId').equals(recipeId).delete()
 }
 
-/** 個別の「作った」: 今日の日付で記録し、今日の献立から外す */
+/**
+ * 個別の「作った」: 今日の日付で記録し、今日の献立から外す。
+ * addCookedLog(recipes.ts)とremoveFromTodayListをrecipes+todayListを跨ぐ1トランザクションに
+ * まとめて原子化する（データ堅牢性強化・2026-07-13）。addCookedLogは内部で
+ * db.transaction('rw', db.recipes, ...)を開くが、Dexieのトランザクションは対象テーブルが
+ * 外側の集合の部分集合なら外側を再利用する(reentrant)ため、この呼び出しも含めて単一の
+ * 物理トランザクションになる。addCookedLogの他の呼び出し元(markAllTodayListCooked等)は
+ * 従来どおり単独のトランザクションのまま動作し、挙動は変わらない
+ */
 export async function markTodayListCooked(recipeId: number): Promise<void> {
-  await addCookedLog(recipeId, { date: todayString() })
-  await removeFromTodayList(recipeId)
+  await db.transaction('rw', db.recipes, db.todayList, async () => {
+    await addCookedLog(recipeId, { date: todayString() })
+    await removeFromTodayList(recipeId)
+  })
 }
 
 /** 「まとめて作った！」: 表示中の全レシピを今日の日付で記録し、リストを空にする */

@@ -3,15 +3,20 @@ import { getSettings, updateSettings } from '../db/settings'
 import {
   defaultSettings,
   type CookedLog,
+  type MealPlanEntry,
+  type PantryItem,
+  type PriceEntry,
   type Recipe,
   type SetExclusion,
   type Settings,
+  type ShoppingItem,
+  type TodayListItem,
 } from '../db/types'
 import { buildSearchWords } from './kana'
 
 /**
- * バックアップ: 全データ（レシピ・写真・作った記録・設定）を
- * 1つのJSONファイルに書き出し／読み込みする。
+ * バックアップ: 全データ（レシピ・写真・作った記録・設定・在庫・買い物メモ・週献立・
+ * 今日の献立・食材価格マスタ）を1つのJSONファイルに書き出し／読み込みする。
  * 写真はBase64（画像を文字にした形式）で埋め込む。
  * 「作った記録」の写真（cookedLogs[].photo）はファイル肥大を避けるため既定では含めない
  * （2026-07-12写真添付・docs/20 §4。exportBackup/downloadBackupの引数で明示的にONにできる）。
@@ -45,6 +50,17 @@ export interface BackupFile {
   setId?: string
   setName?: string
   setVersion?: number
+  /**
+   * 在庫ボード・買い物メモ・週献立・今日の献立・食材価格マスタ（2026-07-13 データ堅牢性強化）。
+   * すべて任意項目＝この項目が無い古いバックアップ（この対応より前に書き出したファイル）も
+   * 従来どおり復元できる（後方互換）。idは復元先で採番し直すため含めない（setExclusionsと同じ流儀）。
+   * 写真（Blob）を持たないテーブルなのでrecipesのようなBase64変換は不要
+   */
+  pantryItems?: Omit<PantryItem, 'id'>[]
+  shoppingItems?: Omit<ShoppingItem, 'id'>[]
+  mealPlans?: Omit<MealPlanEntry, 'id'>[]
+  todayList?: Omit<TodayListItem, 'id'>[]
+  prices?: Omit<PriceEntry, 'id'>[]
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -75,6 +91,13 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
   // 再取込除外の記録（トゥームストーン）も含める（復元で除外状態も戻る。2026-07-13）。
   // idは復元先で採番し直すため含めない
   const setExclusions = (await db.setExclusions.toArray()).map(({ id: _unused, ...rest }) => rest)
+  // 在庫ボード・買い物メモ・週献立・今日の献立・食材価格マスタ（2026-07-13 データ堅牢性強化）。
+  // 端末移行でこれらが失われていた問題への対応。いずれもidを除いて保存する（復元先で振り直す）
+  const pantryItems = (await db.pantryItems.toArray()).map(({ id: _unused, ...rest }) => rest)
+  const shoppingItems = (await db.shoppingItems.toArray()).map(({ id: _unused, ...rest }) => rest)
+  const mealPlans = (await db.mealPlans.toArray()).map(({ id: _unused, ...rest }) => rest)
+  const todayList = (await db.todayList.toArray()).map(({ id: _unused, ...rest }) => rest)
+  const prices = (await db.prices.toArray()).map(({ id: _unused, ...rest }) => rest)
   const backupRecipes: BackupRecipe[] = await Promise.all(
     recipes.map(async ({ photo, cookedLogs, ...rest }) => ({
       ...rest,
@@ -97,6 +120,11 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
     settings,
     recipes: backupRecipes,
     setExclusions,
+    pantryItems,
+    shoppingItems,
+    mealPlans,
+    todayList,
+    prices,
   }
   return JSON.stringify(file)
 }
@@ -123,6 +151,30 @@ export function parseBackup(json: string): BackupFile {
     throw new Error('invalid backup file')
   }
   return data as BackupFile
+}
+
+/**
+ * バックアップに在庫・買い物メモ・週献立・今日の献立・食材価格マスタの各フィールドが
+ * 「有るか（=復元時に置き換え対象か）」を判定する（純ロジック・DB非依存。2026-07-13）。
+ * undefined（この対応より前の古いバックアップ。項目自体が無い）は false＝そのテーブルは
+ * 復元時に一切触らない（clearしない）のが後方互換の要。空配列[]（テーブルを空にする意図）は
+ * true＝置き換え対象として扱う。この区別がないと「空配列」と「未対応の古い形式」を混同し、
+ * 古いバックアップを復元しただけで在庫等が消えてしまう事故になる
+ */
+export function tablesToReplace(file: BackupFile): {
+  pantryItems: boolean
+  shoppingItems: boolean
+  mealPlans: boolean
+  todayList: boolean
+  prices: boolean
+} {
+  return {
+    pantryItems: file.pantryItems !== undefined,
+    shoppingItems: file.shoppingItems !== undefined,
+    mealPlans: file.mealPlans !== undefined,
+    todayList: file.todayList !== undefined,
+    prices: file.prices !== undefined,
+  }
 }
 
 /** 'replace' 用: id を振り直さず、そのままの内容で取り込む */
@@ -180,21 +232,59 @@ export async function importBackup(
     .map((e) => ({ setId: e.setId, title: e.title, excludedAt: e.excludedAt ?? Date.now() }))
 
   if (mode === 'replace') {
-    await db.transaction('rw', db.recipes, db.settings, db.setExclusions, async () => {
-      await db.recipes.clear()
-      // 設定も復元。基本レシピの二重投入を防ぐため starterSeeded は必ず true にする
-      await db.settings.put({
-        ...defaultSettings,
-        ...file.settings,
-        id: 1,
-        starterSeeded: true,
-      })
-      await db.recipes.bulkAdd(recipes)
-      // 再取込除外の記録も置き換える（復元で除外状態も戻る。
-      // 記録の無い古いバックアップでは空になるだけで、復元自体は従来どおり成功する）
-      await db.setExclusions.clear()
-      if (backupExclusions.length > 0) await db.setExclusions.bulkAdd(backupExclusions)
-    })
+    // 在庫・買い物メモ・週献立・今日の献立・食材価格マスタ（2026-07-13 データ堅牢性強化）。
+    // フィールドが無い古いバックアップを復元してもそのテーブルは触らない（clearしない）のが
+    // 後方互換の要。tablesToReplaceがundefined(=無い)と空配列[](=空にする意図)を区別する
+    const replace = tablesToReplace(file)
+    await db.transaction(
+      'rw',
+      [
+        db.recipes,
+        db.settings,
+        db.setExclusions,
+        db.pantryItems,
+        db.shoppingItems,
+        db.mealPlans,
+        db.todayList,
+        db.prices,
+      ],
+      async () => {
+        await db.recipes.clear()
+        // 設定も復元。基本レシピの二重投入を防ぐため starterSeeded は必ず true にする
+        await db.settings.put({
+          ...defaultSettings,
+          ...file.settings,
+          id: 1,
+          starterSeeded: true,
+        })
+        await db.recipes.bulkAdd(recipes)
+        // 再取込除外の記録も置き換える（復元で除外状態も戻る。
+        // 記録の無い古いバックアップでは空になるだけで、復元自体は従来どおり成功する）
+        await db.setExclusions.clear()
+        if (backupExclusions.length > 0) await db.setExclusions.bulkAdd(backupExclusions)
+
+        if (replace.pantryItems) {
+          await db.pantryItems.clear()
+          if (file.pantryItems!.length > 0) await db.pantryItems.bulkAdd(file.pantryItems!)
+        }
+        if (replace.shoppingItems) {
+          await db.shoppingItems.clear()
+          if (file.shoppingItems!.length > 0) await db.shoppingItems.bulkAdd(file.shoppingItems!)
+        }
+        if (replace.mealPlans) {
+          await db.mealPlans.clear()
+          if (file.mealPlans!.length > 0) await db.mealPlans.bulkAdd(file.mealPlans!)
+        }
+        if (replace.todayList) {
+          await db.todayList.clear()
+          if (file.todayList!.length > 0) await db.todayList.bulkAdd(file.todayList!)
+        }
+        if (replace.prices) {
+          await db.prices.clear()
+          if (file.prices!.length > 0) await db.prices.bulkAdd(file.prices!)
+        }
+      },
+    )
     return { added: recipes.length, updated: 0, skipped: 0, excluded: 0 }
   }
 
