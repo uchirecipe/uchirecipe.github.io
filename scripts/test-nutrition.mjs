@@ -3,10 +3,11 @@
 //       npx tsx scripts/test-nutrition.mjs --update  … スナップショットを作り直す
 // (nutrition.ts等の拡張子なしimportをNodeネイティブでは解決できないため、tsx経由で実行すること)
 //
-// 対象（回帰スモークセット）: 同梱の基本レシピ21品 ＋ 配布セット「筋トレ・高たんぱく」10品。
+// 対象（回帰スモークセット）: 同梱の基本レシピ51品 ＋ 配布セット全パック
+// （「筋トレ・高たんぱく」10品 ＋「和食の作り置き・お弁当」10品）。
 // - データの健全性（値の範囲・alias衝突なし）
 // - 全レシピが例外なく計算でき、1人分kcalが常識的な範囲に収まる
-// - 名寄せカバー率が閾値を下回らない（辞書の退行検知）
+// - 名寄せカバー率が100%であること（未カバり=1件でも失敗。2026-07-13オーナー指示で必須化）
 // - 前回スナップショット(scripts/data/nutrition-smoke-snapshot.json)と数値が一致する
 //   （公式データ・対応表・換算ロジックのどれかが変わると差分で気づける）
 import { readFile, writeFile } from 'node:fs/promises'
@@ -22,6 +23,7 @@ const { computeRecipeNutrition, matchNutritionFood, roundNutrient } = await impo
 )
 const { starterDefs } = await import('../src/db/starters.ts')
 const kintore = await import('../src/sets/kintore.ts')
+const bento = await import('../src/sets/pack07.ts')
 
 let failures = 0
 function check(ok, message) {
@@ -57,27 +59,34 @@ const expectMatches = [
   ['木綿豆腐', '木綿豆腐'], ['豆腐', '木綿豆腐'], ['絹ごし豆腐', '絹ごし豆腐'],
   ['刻みねぎ', '青ねぎ'], ['万能ねぎ', '小ねぎ'], ['長ねぎ', '長ねぎ'],
   ['すりごま', 'いりごま'], ['白ごま', 'いりごま'],
+  // 2026-07-13 データ整備で対応(以前は「誤マッチしてはいけないもの」扱いだったが、専用食品を
+  // 追加したことで正しく一致するようになった。以下は退行検知用)
+  ['シチュールー', 'シチュールー'], ['揚げ油', 'サラダ油'],
+  ['高野豆腐（こうやどうふ）', '高野豆腐'], ['切り干し大根', '切り干し大根'],
+  ['牛薄切り肉', '牛こま切れ肉'], ['刻みのり', '焼きのり'],
 ]
 for (const [input, expected] of expectMatches) {
   const hit = matchNutritionFood(input)
   check(hit?.label === expected, `名寄せ: "${input}" → 期待:${expected} 実際:${hit?.label ?? '(不一致)'}`)
 }
-// 誤マッチしてはいけないもの
-for (const name of ['シチュールー', '付属のソース', '揚げ油']) {
+// 誤マッチしてはいけないもの(実在しない/未対応の材料が、部分一致で無関係な食品に化けないことの確認)
+for (const name of ['付属のソース']) {
   const hit = matchNutritionFood(name)
   check(hit === null, `名寄せ: "${name}" は対象外のはずが ${hit?.label} に一致`)
 }
-console.log(`名寄せ確認: ${expectMatches.length + 3}件`)
+console.log(`名寄せ確認: ${expectMatches.length + 1}件`)
 
-// ---------- 2. 回帰スモークセット（同梱21品＋筋トレ10品） ----------
+// ---------- 2. 回帰スモークセット（同梱51品＋筋トレ10品＋お弁当10品） ----------
 const recipes = [
   ...starterDefs.map((d) => ({ set: 'starter', title: d.title, servings: d.servings, ingredients: d.ingredients })),
   ...kintore.recipes.map((d) => ({ set: 'kintore', title: d.title, servings: d.servings, ingredients: d.ingredients })),
+  ...bento.recipes.map((d) => ({ set: 'bento', title: d.title, servings: d.servings, ingredients: d.ingredients })),
 ]
-check(recipes.length === 61, `レシピ数が想定外: ${recipes.length}（同梱51+高たんぱく10=61のはず。2026-07-12にレビュー束42品を実装＝同梱に無料増枠31品追加・kintoreはパンケーキ→ツナ差替で10品のまま）`)
+check(recipes.length === 71, `レシピ数が想定外: ${recipes.length}（同梱51+高たんぱく10+お弁当10=71のはず。2026-07-13データ整備で「全パック」カバーのためbento(パック7)をスコープに追加）`)
 
 let totalIngredients = 0
 let matchedIngredients = 0
+const uncovered = new Map() // 名寄せカバー率100%に届かない材料の一覧(退行検知用の詳細)
 const snapshot = {}
 for (const r of recipes) {
   const result = computeRecipeNutrition(r)
@@ -87,6 +96,10 @@ for (const r of recipes) {
   check(kcal >= 20 && kcal <= 1500, `${r.title}: 1人分${kcal}kcalは常識的範囲(20〜1500)の外`)
   for (const ex of result.excluded) {
     check(['food', 'unit', 'amount', 'prep'].includes(ex.reason), `${r.title}: 不明な対象外理由 ${ex.reason}`)
+    if (ex.reason === 'food') {
+      if (!uncovered.has(ex.name)) uncovered.set(ex.name, new Set())
+      uncovered.get(ex.name).add(`${r.set}:${r.title}`)
+    }
   }
   const zeroCount = r.ingredients.filter((i) => ['水', 'お湯', '湯', '熱湯'].includes(i.name.trim())).length
   const counted = r.ingredients.length - zeroCount
@@ -107,7 +120,16 @@ for (const r of recipes) {
 
 const coverage = matchedIngredients / totalIngredients
 console.log(`名寄せカバー率: ${(coverage * 100).toFixed(1)}%（${matchedIngredients}/${totalIngredients}材料）`)
-check(coverage >= 0.9, `名寄せカバー率が90%を下回った (${(coverage * 100).toFixed(1)}%)`)
+if (uncovered.size > 0) {
+  console.error('未カバー材料一覧:')
+  for (const [name, recipeSet] of [...uncovered.entries()].sort()) {
+    console.error(`  - "${name}" ← ${[...recipeSet].join(', ')}`)
+  }
+}
+// 公式レシピ(基本51+全パック)は全食材が名寄せできていること。1件でも未カバーなら失敗させる
+// （2026-07-13オーナー指示: 「公式レシピなのに対応していない数値があるのはおかしい」の回帰固定）
+check(uncovered.size === 0, `名寄せカバー率が100%でない（未カバー${uncovered.size}種）。上の一覧を scripts/nutrition-foods.mjs に追加すること`)
+check(coverage === 1, `名寄せカバー率が100%でない (${(coverage * 100).toFixed(1)}%)`)
 
 // 1人分の見当合わせ（代表レシピの期待レンジ。大きく外れたら換算表の退行を疑う）
 const spotChecks = [

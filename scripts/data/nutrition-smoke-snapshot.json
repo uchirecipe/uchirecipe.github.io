@@ -79,7 +79,7 @@
       "saltG": 3.2
     },
     "excluded": [
-      "三つ葉(または刻みのり)(food)"
+      "三つ葉(または刻みのり)(amount)"
     ]
   },
   "starter:ハンバーグ": {
@@ -103,7 +103,7 @@
       "saltG": 3
     },
     "excluded": [
-      "揚げ油(food)",
+      "揚げ油(amount)",
       "片栗粉(amount)"
     ]
   },
@@ -225,28 +225,25 @@
   "starter:クリームシチュー": {
     "servings": 4,
     "perServing": {
-      "kcal": 228,
-      "proteinG": 15.4,
-      "fatG": 11.2,
-      "carbG": 23.1,
-      "saltG": 0.2
+      "kcal": 350,
+      "proteinG": 16.9,
+      "fatG": 19.6,
+      "carbG": 34.7,
+      "saltG": 2.9
     },
-    "excluded": [
-      "シチュールー(food)"
-    ]
+    "excluded": []
   },
   "starter:牛丼": {
     "servings": 2,
     "perServing": {
-      "kcal": 108,
-      "proteinG": 2.4,
-      "fatG": 0.1,
-      "carbG": 22.1,
-      "saltG": 2.6
+      "kcal": 339,
+      "proteinG": 19.5,
+      "fatG": 19.9,
+      "carbG": 22.4,
+      "saltG": 2.8
     },
     "excluded": [
       "ご飯(unit)",
-      "牛薄切り肉(food)",
       "紅しょうが(amount)"
     ]
   },
@@ -274,9 +271,9 @@
       "saltG": 2.5
     },
     "excluded": [
-      "ラー油(food)",
-      "粉山椒（こなざんしょう）(food)",
-      "豆板醤(トウバンジャン)(food)"
+      "ラー油(amount)",
+      "粉山椒（こなざんしょう）(amount)",
+      "豆板醤(トウバンジャン)(unit)"
     ]
   },
   "starter:鮭の塩焼き": {
@@ -390,7 +387,7 @@
       "saltG": 0.2
     },
     "excluded": [
-      "揚げ油(food)",
+      "揚げ油(amount)",
       "黒いりごま(amount)"
     ]
   },
@@ -404,7 +401,7 @@
       "saltG": 0.9
     },
     "excluded": [
-      "すだち(またはレモン)(food)",
+      "すだち(またはレモン)(amount)",
       "サラダ油(amount)",
       "大根おろし(amount)"
     ]
@@ -412,15 +409,13 @@
   "starter:肉豆腐": {
     "servings": 2,
     "perServing": {
-      "kcal": 230,
-      "proteinG": 14.7,
-      "fatG": 8.6,
-      "carbG": 21.1,
-      "saltG": 2.7
+      "kcal": 403,
+      "proteinG": 27.5,
+      "fatG": 23.5,
+      "carbG": 21.3,
+      "saltG": 2.9
     },
-    "excluded": [
-      "牛薄切り肉(food)"
-    ]
+    "excluded": []
   },
   "starter:鶏そぼろ丼": {
     "servings": 2,
@@ -434,7 +429,7 @@
     "excluded": [
       "ご飯(unit)",
       "サラダ油(amount)",
-      "刻みのり(food)"
+      "刻みのり(amount)"
     ]
   },
   "starter:鮭のホイル焼き": {
@@ -458,7 +453,7 @@
       "saltG": 2.4
     },
     "excluded": [
-      "なめこ(food)",
+      "なめこ(unit)",
       "小ねぎ(amount)"
     ]
   },
@@ -566,7 +561,7 @@
       "saltG": 2
     },
     "excluded": [
-      "ラー油(food)",
+      "ラー油(amount)",
       "長ねぎ(白い部分)(unit)"
     ]
   },
@@ -580,7 +575,7 @@
       "saltG": 2.1
     },
     "excluded": [
-      "ラー油(food)",
+      "ラー油(amount)",
       "長ねぎ(青い部分)(unit)"
     ]
   },
@@ -594,8 +589,8 @@
       "saltG": 0.1
     },
     "excluded": [
-      "きな粉(food)",
-      "黒みつ(food)"
+      "きな粉(amount)",
+      "黒みつ(amount)"
     ]
   },
   "starter:フレンチトースト": {
@@ -608,7 +603,7 @@
       "saltG": 1.1
     },
     "excluded": [
-      "メープルシロップ(food)"
+      "メープルシロップ(amount)"
     ]
   },
   "starter:家庭で作る杏仁豆腐": {
@@ -621,8 +616,8 @@
       "saltG": 0.2
     },
     "excluded": [
-      "みかん缶(またはお好みのフルーツ)(food)",
-      "アーモンドエッセンス(food)"
+      "みかん缶(またはお好みのフルーツ)(amount)",
+      "アーモンドエッセンス(amount)"
     ]
   },
   "starter:鶏の照り焼き": {
@@ -646,8 +641,8 @@
       "saltG": 0.5
     },
     "excluded": [
-      "甜麺醤(テンメンジャン)(food)",
-      "豆板醤(トウバンジャン)(food)"
+      "甜麺醤(テンメンジャン)(unit)",
+      "豆板醤(トウバンジャン)(unit)"
     ]
   },
   "kintore:レンジ蒸し鶏（自家製サラダチキン）": {
@@ -761,7 +756,130 @@
       "saltG": 1.6
     },
     "excluded": [
-      "蒸し大豆(food)"
+      "蒸し大豆(unit)"
+    ]
+  },
+  "bento:ミートボールの甘酢あん": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 376,
+      "proteinG": 23.2,
+      "fatG": 24.5,
+      "carbG": 20.4,
+      "saltG": 1.9
+    },
+    "excluded": [
+      "いりごま(amount)",
+      "しょうが(すりおろし)(unit)"
+    ]
+  },
+  "bento:卯の花(おからの炒り煮)": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 177,
+      "proteinG": 8.2,
+      "fatG": 9.2,
+      "carbG": 19.4,
+      "saltG": 1.4
+    },
+    "excluded": []
+  },
+  "bento:切り干し大根のハリハリ漬け": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 91,
+      "proteinG": 3.1,
+      "fatG": 0.2,
+      "carbG": 19.9,
+      "saltG": 3.2
+    },
+    "excluded": []
+  },
+  "bento:肉巻きおにぎり": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 482,
+      "proteinG": 15.8,
+      "fatG": 38.4,
+      "carbG": 17.4,
+      "saltG": 2.7
+    },
+    "excluded": [
+      "ご飯(unit)"
+    ]
+  },
+  "bento:れんこんのきんぴら": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 180,
+      "proteinG": 3,
+      "fatG": 6.1,
+      "carbG": 26.9,
+      "saltG": 2.1
+    },
+    "excluded": [
+      "いりごま(amount)"
+    ]
+  },
+  "bento:高野豆腐の含め煮": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 197,
+      "proteinG": 14.4,
+      "fatG": 8.7,
+      "carbG": 14.8,
+      "saltG": 2.4
+    },
+    "excluded": []
+  },
+  "bento:ちくわときゅうりの土佐酢あえ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 52,
+      "proteinG": 4.7,
+      "fatG": 0.2,
+      "carbG": 7.4,
+      "saltG": 1.7
+    },
+    "excluded": [
+      "青じそ(amount)"
+    ]
+  },
+  "bento:甘辛手羽先の照り焼き": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 327,
+      "proteinG": 19.7,
+      "fatG": 20,
+      "carbG": 14,
+      "saltG": 2.8
+    },
+    "excluded": []
+  },
+  "bento:こんにゃくの炒り煮": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 120,
+      "proteinG": 1.2,
+      "fatG": 6,
+      "carbG": 14.3,
+      "saltG": 2
+    },
+    "excluded": [
+      "かつお節(unit)"
+    ]
+  },
+  "bento:手作り鮭フレーク": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 107,
+      "proteinG": 17.9,
+      "fatG": 3.3,
+      "carbG": 0.4,
+      "saltG": 0.2
+    },
+    "excluded": [
+      "塩(amount)"
     ]
   }
 }
