@@ -403,10 +403,6 @@ export default function RecipeDetailPage() {
             </span>
           )}
         </div>
-        {/* 概算食費の一部が食材価格マスタ由来のとき（docs/20 §3） */}
-        {costEstimate.fromMasterCount > 0 && (
-          <p className="mt-1 text-xs text-ink-muted">{ja.priceMaster.mixedNote}</p>
-        )}
 
         {/* タグ */}
         {recipe.tags.length > 0 && (

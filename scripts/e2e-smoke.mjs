@@ -7,7 +7,8 @@
 //         絞り込み中は「◯件 / 全◯件」の形になる。2026-07-13 UI改善) /
 //         QF-01(「時短レシピ」絞り込みで件数が変わる。チップ文言は2026-07-13変更) /
 //         LAYOUT-01(一覧のグリッド/リスト表示切替。settingsに保存されリロード後も維持される。
-//         2026-07-13 UI改善) /
+//         2026-07-13 UI改善。同日オーナー実機フィードバックでリスト行にも主要食材チップ・
+//         由来バッジ・タイトル2行折り返しを追加し、グリッドと同等の情報量になったことを確認) /
 //         SORTDIR-01(並べ替えの昇順/降順トグル。「あいうえお順」既定は昇順、「降順」で並びが
 //         ちょうど反転する。2026-07-13 UI改善) /
 //         SMK-02+03(登録・削除) /
@@ -49,7 +50,9 @@
 //         FOCUS-MEMO-01(調理中モードの▽折りたたみメモが詳細画面と同じ小窓タップで開閉し、
 //         「｜」改行・「・」箇条書きも小窓内で効くこと。2026-07-12 Fable裁定) /
 //         PRICE-01(食材価格マスタ。材料に価格未入力のレシピでもマスタ目安価格が詳細の
-//         概算食費・材料行の注記に反映され、マスタ編集に追従すること) /
+//         概算食費・材料行の注記に反映され、マスタ編集に追従すること。2026-07-13
+//         オーナー実機フィードバックで詳細画面の概算食費欄の「一部は目安価格から計算しています」
+//         注記は削除(週の献立側は維持)したため、その不在も確認する) /
 //         INLINE-01(「食材と価格」一覧の行内編集。2026-07-12 UX改修で編集モーダルを廃止し、
 //         価格欄への直接入力+Enter/blurで即保存。2026-07-13 UI改善で「目安」/「自分の価格」
 //         バッジは廃止したため「デフォルトに戻す」ボタンの出現/消失で編集反映を確認・
@@ -183,6 +186,24 @@ try {
     'LAYOUT-01 リスト表示でもレシピ件数は変わらない',
     layoutAfterToList.count === layoutBefore.count,
     `グリッド=${layoutBefore.count} リスト=${layoutAfterToList.count}`,
+  )
+  // リスト表示の行がグリッドカードと同等の情報量を持つこと(2026-07-13 UI改善: 主要食材チップ・
+  // 由来バッジ(基本レシピ)・タイトル2行折り返しをlist行にも追加)
+  const listRowContent = await page.evaluate(() => {
+    const links = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
+      /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+    )
+    return {
+      anyChip: links.some((a) => a.querySelector('[style*="--chip-"]')),
+      anyStarterBadge: links.some((a) => a.textContent?.includes('基本レシピ')),
+      anyClampedTitle: links.some((a) => a.querySelector('p.line-clamp-2')),
+    }
+  })
+  check('LAYOUT-01 リスト表示でも主要食材チップが見える', listRowContent.anyChip)
+  check('LAYOUT-01 リスト表示でも由来バッジ(基本レシピ)が見える', listRowContent.anyStarterBadge)
+  check(
+    'LAYOUT-01 リスト表示でもタイトルが2行まで折り返す(line-clamp-2)',
+    listRowContent.anyClampedTitle,
   )
   // リロードしても設定(settings.recipeListLayout)に保存されて維持されることを確認する
   await page.reload({ waitUntil: 'networkidle' })
@@ -1454,8 +1475,9 @@ try {
     priceDetailBefore.includes('約50円'),
   )
   check(
-    'PRICE-01 マスタ由来の注記が表示される',
-    priceDetailBefore.includes('一部は目安価格から計算しています'),
+    'PRICE-01 詳細画面の概算食費欄にはマスタ由来の注記が出ない' +
+      '(2026-07-13 オーナー実機フィードバックで削除。週の献立側は維持)',
+    !priceDetailBefore.includes('一部は目安価格から計算しています'),
   )
   check(
     'PRICE-01 材料行にも目安価格由来の注記が出る(2026-07-12 UX改修)',

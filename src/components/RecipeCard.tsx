@@ -141,7 +141,12 @@ export default function RecipeCard({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-bold leading-snug">{recipe.title}</p>
+          <div className="flex items-start justify-between gap-1">
+            <p className="line-clamp-2 font-bold leading-snug">{recipe.title}</p>
+            {recipe.isFavorite && (
+              <Heart size={16} className="mt-0.5 shrink-0 text-accent" fill="currentColor" aria-hidden />
+            )}
+          </div>
           <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-muted">
             {displayMinutes != null && displayMinutes > 0 && (
               <span className="inline-flex items-center gap-0.5">
@@ -163,7 +168,50 @@ export default function RecipeCard({
                 {ja.season[recipe.season]}
               </span>
             )}
+            {hasNg && (
+              <span
+                title={ja.card.ngBadge}
+                aria-label={ja.card.ngBadge}
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-warning text-app"
+              >
+                <TriangleAlert size={12} aria-hidden />
+              </span>
+            )}
+            {inTodayList && (
+              <span
+                title={ja.card.todayBadge}
+                aria-label={ja.card.todayBadge}
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-app"
+              >
+                <CalendarCheck2 size={12} aria-hidden />
+              </span>
+            )}
           </div>
+          {(recipe.sourceSetName || recipe.isStarter) && (
+            <p
+              title={recipe.sourceSetName || undefined}
+              className="mt-1 truncate text-[10px] font-bold text-ink-muted"
+            >
+              {recipe.sourceSetName ?? ja.card.starterBadge}
+            </p>
+          )}
+          {topIngredients.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {topIngredients.map((ing, index) => (
+                <span
+                  key={index}
+                  className="max-w-full truncate rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm"
+                  style={{
+                    background: `var(${ingredientColorToken(ing.name)})`,
+                    color: 'var(--chip-ink)',
+                  }}
+                >
+                  {ing.name}
+                </span>
+              ))}
+            </div>
+          )}
+          {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
         </div>
       </Link>
     )
