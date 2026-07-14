@@ -102,9 +102,9 @@
 
 /* ブラウンテーマ: ライトとダークの中間くらいの、暖色でやや落ち着いた見た目 */
 :root[data-theme="brown"] {
-  --bg: #e6d5b7;
+  --bg: #bba583;
   --text: #40301f;
-  --accent: #d9480f;
+  --accent: #ff8a4c;
   --warning: #a8351f;
   --surface: #f5ecdb;
   --text-muted: #7d6a4f;
@@ -124,13 +124,13 @@
    オレンジ(ライトと同じ#d9480f)にした第一版(2026-07-14 オーナー実機フィードバック)。
    ※アイコンや絞り込みの選択中バッジを緑にする2色化は、実機を見て別途判断 */
 :root[data-theme="green"] {
-  --bg: #d9e4c4;
+  --bg: #aec08c;
   --text: #2f3628;
-  --accent: #d9480f;
+  --accent: #ff8a4c;
   --warning: #a8351f;
   --surface: #f6f5ea;
   --text-muted: #65725a;
-  --border: #cbd9b3;
+  --border: #c3d0a6;
   --chip-food-meat: #c2255c;
   --chip-food-seafood: #1971c2;
   --chip-food-vegetable: #256e35;
