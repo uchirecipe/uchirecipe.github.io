@@ -488,11 +488,10 @@ export const ja = {
     ingredientAmountPlaceholder: '例: 3',
     ingredientUnit: '単位',
     ingredientUnitPlaceholder: '例: 個',
-    ingredientPrice: '価格（円・任意）',
-    ingredientPricePlaceholder: '例: 100',
-    // 食材価格マスタに同名の目安価格があるとき、価格欄のプレースホルダに出す文言
-    // (自動入力はしない。「例: 130（目安）」の形。2026-07-12 UX改修)
-    ingredientPricePlaceholderWithDefault: '例: {n}（目安）',
+    // 材料ごとの価格入力欄は撤去し「食材と価格」ページに一元化(2026-07-14 オーナー要望)。
+    // この画面には案内の一文とリンクだけを表示する(mealPlan.weekCostNote/weekCostNoteLinkと同じ形)
+    ingredientPriceGuide: '価格は「食材と価格」ページでまとめて管理します',
+    ingredientPriceGuideLink: '食材と価格を編集する',
     ingredientMemoPlaceholder: '材料メモ（任意。例: なければ玉ねぎでも可）',
     ingredientGroupHint:
       '丸いボタンをタップすると色がつきます。同じ色の材料は先にまとめて計量してOKという意味です（合わせ調味料）',

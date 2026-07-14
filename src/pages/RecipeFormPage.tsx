@@ -14,25 +14,26 @@ import {
 import type { DishType, EffortLevel, IconKey, MealSlot, RecipeInput, Season } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from '../db/recipes'
 import { useSettings } from '../db/settings'
-import { usePriceEntries } from '../db/prices'
 import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText, autoSplitAmountUnit } from '../logic/parseRecipeText'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeDigits } from '../logic/amount'
-import { buildPriceIndex, matchPriceEntry } from '../logic/priceEstimate'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { iconComponents } from '../components/RecipeCard'
 import { ja } from '../i18n/ja'
 
-/* フォーム内部で扱う行の形（入力中は数値も文字列で持つ） */
+/* フォーム内部で扱う行の形（入力中は数値も文字列で持つ）。
+ * 価格(price)はレシピ編集画面から撤去し「食材と価格」ページに一元化した
+ * (2026-07-14 オーナー要望)ため、このフォーム内部の行データには持たない。
+ * ただしIngredient.price自体の型・保存済みデータ・estimateRecipeCostの
+ * 「個別price優先→マスタ」ロジックは変更していない(既存レシピの個別価格は温存)。 */
 type IngredientRow = {
   name: string
   amount: string
   unit: string
-  price: string
   memo: string
   group: number | undefined
 }
@@ -42,7 +43,6 @@ const emptyIngredient: IngredientRow = {
   name: '',
   amount: '',
   unit: '',
-  price: '',
   memo: '',
   group: undefined,
 }
@@ -177,10 +177,6 @@ function RecipeFormInner() {
     [editId],
   )
   const settings = useSettings()
-  // 材料ごとの価格入力欄のプレースホルダに使う、食材価格マスタの照合用索引（2026-07-12 UX改修）。
-  // 自動入力はしない＝プレースホルダとして目安価格を見せるだけ(保存はユーザー入力時のみ)
-  const priceEntries = usePriceEntries()
-  const priceIndex = useMemo(() => buildPriceIndex(priceEntries ?? []), [priceEntries])
   const allRecipes = useLiveQuery(listRecipes, [])
   const hydratedRef = useRef(false)
   useEffect(() => {
@@ -205,7 +201,6 @@ function RecipeFormInner() {
               name: i.name,
               amount: i.amount,
               unit: i.unit,
-              price: i.price != null ? String(i.price) : '',
               memo: i.memo ?? '',
               group: i.seasoningGroup,
             }))
@@ -242,7 +237,6 @@ function RecipeFormInner() {
             name: i.name,
             amount: i.amount,
             unit: i.unit,
-            price: i.price != null ? String(i.price) : '',
             memo: i.memo ?? '',
             group: i.seasoningGroup,
           }))
@@ -414,7 +408,6 @@ function RecipeFormInner() {
           name: row.name,
           amount: row.amount,
           unit: row.unit,
-          price: '',
           // 「1枚（250g）」の括弧書きは材料メモ欄へ
           memo: row.memo ?? '',
           group: undefined,
@@ -455,7 +448,7 @@ function RecipeFormInner() {
     const row = ingredients[index]
     const hasContent = !!(
       row &&
-      (row.name.trim() || row.amount.trim() || row.unit.trim() || row.price.trim() || row.memo.trim())
+      (row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim())
     )
     if (hasContent && !window.confirm(ja.form.confirmRemoveRow)) return
     setIngredients((rows) =>
@@ -521,11 +514,13 @@ function RecipeFormInner() {
           // 「1枚（250g）」の括弧書きは消さずに材料メモへ移す
           const split = autoSplitAmountUnit(normalizeDigits(row.amount.trim()), row.unit)
           const memoText = [row.memo.trim(), split.memo].filter(Boolean).join('・')
+          // 材料ごとの価格入力欄は撤去済み(価格は「食材と価格」ページで一元管理)。
+          // 新規・編集で保存する材料にはpriceを設定しない
+          // (既存レシピに残る個別price自体は温存。estimateRecipeCostの優先ロジックは不変)。
           return {
             name: row.name,
             amount: split.amount,
             unit: split.unit,
-            price: row.price.trim() ? Number(row.price) : undefined,
             memo: memoText || undefined,
             seasoningGroup: row.group,
           }
@@ -925,11 +920,14 @@ function RecipeFormInner() {
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.ingredientsLabel}</span>
         <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientGroupHint}</p>
+        {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。
+            この画面には材料ごとの価格入力欄を置かず、案内だけ表示する */}
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientPriceGuide}</p>
+        <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent underline">
+          {ja.form.ingredientPriceGuideLink}
+        </Link>
         <div className="mt-1 space-y-[var(--space-sm)]">
-          {ingredients.map((row, index) => {
-            // 食材価格マスタに同名の目安価格があれば、価格欄のプレースホルダにだけ使う
-            const masterMatch = matchPriceEntry(row.name, priceIndex)
-            return (
+          {ingredients.map((row, index) => (
             <div
               key={index}
               className="rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
@@ -965,28 +963,6 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </div>
-              {/* 価格は専用の行にする(ボタン4つと同じ行だと390px幅で入力欄が28pxに潰れるため)。
-                  食材価格マスタに同名の目安価格があれば、プレースホルダとしてだけ見せる
-                  (自動入力はしない。保存されるのはユーザーが実際に入力した値のみ。2026-07-12 UX改修) */}
-              <label className="mt-[var(--space-sm)] flex items-center gap-2 text-sm text-ink-muted">
-                <span className="shrink-0">{ja.form.ingredientPrice}</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={row.price}
-                  onChange={(e) => updateIngredient(index, { price: e.target.value })}
-                  placeholder={
-                    masterMatch
-                      ? ja.form.ingredientPricePlaceholderWithDefault.replace(
-                          '{n}',
-                          String(masterMatch.pricePerUnit),
-                        )
-                      : ja.form.ingredientPricePlaceholder
-                  }
-                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
-                />
-              </label>
               <div className="mt-[var(--space-sm)] flex items-center justify-between gap-[var(--space-sm)]">
                 <button
                   type="button"
@@ -1046,8 +1022,7 @@ function RecipeFormInner() {
                 className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60"
               />
             </div>
-            )
-          })}
+          ))}
         </div>
         <button
           type="button"
