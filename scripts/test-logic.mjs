@@ -52,6 +52,7 @@ import {
   estimateIngredientYen,
   estimateRecipeCost,
   normalizeIngredientNameForPrice,
+  normalizeUnit,
 } from '../src/logic/priceEstimate.ts'
 import {
   pickMainIngredients,
@@ -1706,6 +1707,93 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     '由来種別: ユーザーが上書きした価格ならsource=user',
     estimateIngredientYen({ name: 'にんじん', amount: '1', unit: '本' }, sourceIndex),
     { yen: 40, source: 'user' },
+  )
+}
+
+// ---------- 単位正規化(docs/20 §3拡張・2026-07-14: kg/g・L/ml・大さじ/小さじ等が混在しても
+// 正しく按分できるようにする。オーナー要望「kgが混ざっても平気か不安/明らかに間違った値段が
+// 出ることがある」の根治。Fable設計確定: normalizeUnitで次元(mass/volume/count)ごとに正規化) ----------
+{
+  eq('normalizeUnit 質量g', normalizeUnit(100, 'g'), { dim: 'mass', base: 100 })
+  eq('normalizeUnit 質量kg→g換算', normalizeUnit(0.3, 'kg'), { dim: 'mass', base: 300 })
+  eq('normalizeUnit 質量mg→g換算', normalizeUnit(500, 'mg'), { dim: 'mass', base: 0.5 })
+  eq('normalizeUnit 体積ml', normalizeUnit(200, 'ml'), { dim: 'volume', base: 200 })
+  eq('normalizeUnit 体積L→ml換算', normalizeUnit(1, 'L'), { dim: 'volume', base: 1000 })
+  eq('normalizeUnit 体積大さじ→ml換算', normalizeUnit(1, '大さじ'), { dim: 'volume', base: 15 })
+  eq('normalizeUnit 体積小さじ→ml換算', normalizeUnit(1, '小さじ'), { dim: 'volume', base: 5 })
+  eq('normalizeUnit 体積カップ→ml換算', normalizeUnit(1, 'カップ'), { dim: 'volume', base: 200 })
+  eq('normalizeUnit 個数(単位名を保持)', normalizeUnit(2, '個'), { dim: 'count', unit: '個', base: 2 })
+  eq('normalizeUnit 個数(本は個と別単位名)', normalizeUnit(1, '本'), { dim: 'count', unit: '本', base: 1 })
+  eq('normalizeUnit 解釈不能(少々)はnull', normalizeUnit(1, '少々'), null)
+  eq('normalizeUnit 数量0以下はnull', normalizeUnit(0, 'g'), null)
+
+  // 豚肉: マスタ200円/100g × レシピ「0.3 kg」→ kg→g換算で按分(300/100*200=600円)
+  const meatIndex = buildPriceIndex([{ name: '豚肉', pricePerUnit: 200, unit: '100g' }])
+  eq(
+    'estimateIngredientYen kg混在でも按分できる(200円/100g×0.3kg→600円)',
+    estimateIngredientYen({ name: '豚肉', amount: '0.3', unit: 'kg' }, meatIndex),
+    { yen: 600, source: 'user' },
+  )
+
+  // しょうゆ: マスタ15円/大さじ1 × レシピ「小さじ1」→ 大さじ=小さじ3で体積換算(15÷3=5円)
+  const soySauceIndex = buildPriceIndex([{ name: 'しょうゆ', pricePerUnit: 15, unit: '大さじ1' }])
+  eq(
+    'estimateIngredientYen 大さじ/小さじ混在でも按分できる(15円/大さじ1×小さじ1→5円)',
+    estimateIngredientYen({ name: 'しょうゆ', amount: '1', unit: '小さじ' }, soySauceIndex),
+    { yen: 5, source: 'user' },
+  )
+
+  // 牛乳: マスタ200円/1L × レシピ「200 ml」→ L→ml換算で按分(200/1000*200=40円)
+  const milkIndex = buildPriceIndex([{ name: '牛乳', pricePerUnit: 200, unit: '1L' }])
+  eq(
+    'estimateIngredientYen L/ml混在でも按分できる(200円/1L×200ml→40円)',
+    estimateIngredientYen({ name: '牛乳', amount: '200', unit: 'ml' }, milkIndex),
+    { yen: 40, source: 'user' },
+  )
+
+  // 玉ねぎ: マスタ50円/1個 × レシピ「2 個」→ count同一単位で按分(既存の按分の回帰確認)
+  const onionIndex = buildPriceIndex([{ name: '玉ねぎ', pricePerUnit: 50, unit: '1個' }])
+  eq(
+    'estimateIngredientYen 個数系(同一単位)は按分が回帰しない(50円/1個×2個→100円)',
+    estimateIngredientYen({ name: '玉ねぎ', amount: '2', unit: '個' }, onionIndex),
+    { yen: 100, source: 'user' },
+  )
+  // 個数不一致(個 vs 本): 単位名が違うので換算せずフォールバック(マスタ価格そのまま)
+  eq(
+    'estimateIngredientYen 個数系は単位名が違うと按分せずフォールバック(50円/1個×1本→50円のまま)',
+    estimateIngredientYen({ name: '玉ねぎ', amount: '1', unit: '本' }, onionIndex),
+    { yen: 50, source: 'user' },
+  )
+  // 解釈不能(少々): 従来どおりマスタ価格そのままのフォールバック
+  eq(
+    'estimateIngredientYen 解釈不能な分量(少々)は従来どおりフォールバック',
+    estimateIngredientYen({ name: '玉ねぎ', amount: '少々', unit: '個' }, onionIndex),
+    { yen: 50, source: 'user' },
+  )
+
+  // 既存の同一単位(100g×200g等)の按分が回帰しないこと(質量side・従来からの主要ケース)
+  const chickenIndex = buildPriceIndex([{ name: '鶏もも肉', pricePerUnit: 130, unit: '100g' }])
+  eq(
+    'estimateIngredientYen 既存の同一単位(g×g)の按分は回帰しない(130円/100g×300g→390円)',
+    estimateIngredientYen({ name: '鶏もも肉', amount: '300', unit: 'g' }, chickenIndex),
+    { yen: 390, source: 'user' },
+  )
+
+  // 後方互換: mass/volume/countの対応表に無い単位(「1杯」等)でも、文字列として完全一致するなら
+  // 従来どおり按分する(既存の"完全一致で按分"を正規化が包含するための保険。実データ:
+  // public/sets/data/review8.jsonの「冷や汁」がご飯2杯を使う)
+  const riceIndex = buildPriceIndex([{ name: 'ご飯', pricePerUnit: 30, unit: '1杯' }])
+  eq(
+    'estimateIngredientYen 対応表に無い単位でも文字列完全一致なら按分(従来互換。30円/1杯×2杯→60円)',
+    estimateIngredientYen({ name: 'ご飯', amount: '2', unit: '杯' }, riceIndex),
+    { yen: 60, source: 'user' },
+  )
+  // マスタが「単位+数量」書式(例:大さじ1)でも、末尾の数量を正しく解釈できること
+  const misoIndex = buildPriceIndex([{ name: 'みそ', pricePerUnit: 15, unit: '大さじ1' }])
+  eq(
+    'estimateIngredientYen マスタが「単位+数量」書式(大さじ1)でも按分できる(15円/大さじ1×大さじ2→30円)',
+    estimateIngredientYen({ name: 'みそ', amount: '2', unit: '大さじ' }, misoIndex),
+    { yen: 30, source: 'user' },
   )
 }
 

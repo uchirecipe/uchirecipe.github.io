@@ -73,17 +73,87 @@ function parseNumericAmount(amount: string): number | undefined {
 }
 
 /**
- * マスタの unit（例:「100g」「1個」）を数量と単位に分解する。
- * 先頭が数字でなければ解釈できないので、qty=1・baseUnit=元の文字列のまま返す
+ * マスタの unit（例:「100g」「1個」「大さじ1」「1小さじ」）を数量と単位に分解する。
+ * 先頭が数字の「数量+単位」（100g・1個）だけでなく、末尾が数字の「単位+数量」
+ * （大さじ1・小さじ1）も解釈する（PRICE_DEFAULTSに両方の書式が混在しているため）。
+ * どちらの書式にも当てはまらなければ、qty=1・baseUnit=元の文字列のまま返す
  * （後続の按分計算では ingredient.unit と一致しない限り使われないので実害はない）。
  */
 function parseUnitQuantity(unit: string): { qty: number; baseUnit: string } {
   const trimmed = normalizeDigits(unit.trim())
-  const match = trimmed.match(/^(\d+(?:\.\d+)?)(.*)$/)
-  if (!match) return { qty: 1, baseUnit: trimmed }
-  const qty = Number.parseFloat(match[1])
-  const baseUnit = match[2].trim()
-  return { qty: qty > 0 ? qty : 1, baseUnit: baseUnit || trimmed }
+  const leading = trimmed.match(/^(\d+(?:\.\d+)?)(.*)$/)
+  if (leading) {
+    const qty = Number.parseFloat(leading[1])
+    const baseUnit = leading[2].trim()
+    return { qty: qty > 0 ? qty : 1, baseUnit: baseUnit || trimmed }
+  }
+  const trailing = trimmed.match(/^(\D+?)(\d+(?:\.\d+)?)$/)
+  if (trailing) {
+    const baseUnit = trailing[1].trim()
+    const qty = Number.parseFloat(trailing[2])
+    if (baseUnit) return { qty: qty > 0 ? qty : 1, baseUnit }
+  }
+  return { qty: 1, baseUnit: trimmed }
+}
+
+/** 単位の次元。質量・体積は基準単位(g・ml)に換算して按分し、個数は単位名が一致する時だけ按分する */
+export type UnitDimension = 'mass' | 'volume' | 'count'
+
+/**
+ * 単位正規化の結果。mass/volumeは基準量(g・ml換算後の数値)に統一されるので次元さえ揃えば
+ * そのまま比率計算できる。countは「1個」と「1本」が別物のため、単位名(unit)も保持する。
+ */
+export type NormalizedUnit =
+  | { dim: 'mass'; base: number }
+  | { dim: 'volume'; base: number }
+  | { dim: 'count'; unit: string; base: number }
+
+/** 質量: 基準はg（Fable設計確定表） */
+const MASS_UNIT_FACTORS: Record<string, number> = {
+  g: 1,
+  kg: 1000,
+  mg: 0.001,
+}
+
+/** 体積: 基準はml（Fable設計確定表。大さじ=15ml・小さじ=5ml・カップ=200ml） */
+const VOLUME_UNIT_FACTORS: Record<string, number> = {
+  ml: 1,
+  cc: 1,
+  l: 1000,
+  L: 1000,
+  リットル: 1000,
+  大さじ: 15,
+  小さじ: 5,
+  カップ: 200,
+}
+
+/** 個数: 単位名ごとに別物として扱う（「1個」と「1本」は換算不可。Fable設計確定表） */
+const COUNT_UNIT_NAMES = new Set([
+  '個', '本', '枚', '玉', '束', 'パック', 'かけ', '片', '株', '尾', '切れ', '丁', '袋', '缶', '房', '節',
+])
+
+/**
+ * 数量+単位を「次元(mass/volume/count)＋基準量」に正規化する。
+ * - 質量(g/kg/mg)・体積(ml/cc/l/L/リットル/大さじ/小さじ/カップ)は基準単位換算後の数値を返すので、
+ *   同じ次元同士なら基準量の比でそのまま按分できる（kg↔g・L↔ml・大さじ↔小さじ 等）。
+ * - 個数（個/本/枚/玉/束/パック/かけ/片/株/尾/切れ/丁/袋/缶/房/節）は単位名込みで返す
+ *   （呼び出し側で単位名が一致する時だけ按分に使うこと。「1個」と「1本」は別物）。
+ * - 「少々」「適量」等の解釈できない単位・0以下の数量はnull（呼び出し側でフォールバック）。
+ */
+export function normalizeUnit(amount: number, unit: string): NormalizedUnit | null {
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const trimmed = (unit ?? '').trim()
+  if (!trimmed) return null
+
+  const massFactor = MASS_UNIT_FACTORS[trimmed]
+  if (massFactor != null) return { dim: 'mass', base: amount * massFactor }
+
+  const volumeFactor = VOLUME_UNIT_FACTORS[trimmed]
+  if (volumeFactor != null) return { dim: 'volume', base: amount * volumeFactor }
+
+  if (COUNT_UNIT_NAMES.has(trimmed)) return { dim: 'count', unit: trimmed, base: amount }
+
+  return null
 }
 
 /** マスタ行が投入時の目安のままか(default)、ユーザーが上書きした価格か(user)の由来種別 */
@@ -101,6 +171,14 @@ export interface IngredientPriceEstimate {
  * 噛み合わない（「少々」等の非数値・単位不一致・マスタ側が「1/4個」等で解釈不能）場合は
  * マスタの金額をそのまま1行分の目安として使う（按分できないだけで、値自体は常識的な範囲）。
  * sourceは一致したマスタ行がisDefaultのままか(user='default')、ユーザーが上書き済みか('user')を表す。
+ *
+ * 按分の優先順位（2026-07-14 単位正規化・オーナー要望「kgが混ざっても平気か不安」への対応）:
+ * 1) normalizeUnitで両者を正規化し、同じ次元（質量↔質量・体積↔体積）なら基準量換算で按分。
+ *    個数(count)同士は単位名も一致する時だけ按分する（「1個」と「1本」は換算不可）。
+ * 2) どちらか（または両方）がnormalizeUnitで解釈できない単位でも、文字列として完全一致するなら
+ *    従来どおり按分する（「1杯」「1合」「1箱」等、mass/volume/countの対応表に無い単位の後方互換。
+ *    既存の"完全一致で按分"の挙動を正規化に置き換えるのではなく包含するため）。
+ * 3) 上記いずれにも当てはまらなければ、マスタの金額をそのまま使う（安全側のフォールバック）。
  */
 export function estimateIngredientYen(
   ingredient: Pick<Ingredient, 'name' | 'amount' | 'unit'>,
@@ -112,8 +190,22 @@ export function estimateIngredientYen(
   const ingUnit = (ingredient.unit ?? '').trim()
   const amountNum = parseNumericAmount(ingredient.amount ?? '')
   const source: PriceSource = entry.isDefault ? 'default' : 'user'
-  if (amountNum != null && amountNum > 0 && ingUnit && baseUnit && ingUnit === baseUnit) {
-    return { yen: Math.round(entry.pricePerUnit * (amountNum / baseQty)), source }
+
+  if (amountNum != null && amountNum > 0 && ingUnit && baseUnit) {
+    const recipeNorm = normalizeUnit(amountNum, ingUnit)
+    const masterNorm = normalizeUnit(baseQty, baseUnit)
+    if (recipeNorm != null && masterNorm != null && recipeNorm.dim === masterNorm.dim) {
+      if (recipeNorm.dim === 'count') {
+        if (masterNorm.dim === 'count' && recipeNorm.unit === masterNorm.unit) {
+          return { yen: Math.round(entry.pricePerUnit * (recipeNorm.base / masterNorm.base)), source }
+        }
+        // 個数系だが単位名が違う（例:「1個」vs「1本」）→ 換算不可なのでフォールバックへ
+      } else {
+        return { yen: Math.round(entry.pricePerUnit * (recipeNorm.base / masterNorm.base)), source }
+      }
+    } else if (ingUnit === baseUnit) {
+      return { yen: Math.round(entry.pricePerUnit * (amountNum / baseQty)), source }
+    }
   }
   return { yen: entry.pricePerUnit, source }
 }
