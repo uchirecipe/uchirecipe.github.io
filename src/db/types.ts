@@ -100,6 +100,17 @@ export interface Recipe {
   /** 時短版の合計時間（任意。未指定なら通常の cookMinutes を流用表示） */
   quickCookMinutes?: number
   sourceUrl?: string
+  /**
+   * ワンポイント（任意・2026-07メモ2区画化）。こつ・知識・豆知識など、
+   * 「知っているとよりおいしく作れる」情報向け。詳細画面ではメモより先に表示する。
+   * 既存レシピのmemoはこちらに移行しない（既存データ破壊なしのため、既存のmemoは
+   * すべて従来どおり「メモ」側に残り、onePointは未設定＝空のまま）
+   */
+  onePoint?: string
+  /**
+   * メモ（任意）。保存方法・注意書き・安全（保存日数・沸騰再加熱・交差汚染・
+   * 半熟の対象者案内・弁当・冷凍等）向け。詳細画面ではワンポイントの後に表示する
+   */
   memo?: string
   isFavorite: boolean
   cookedLogs: CookedLog[]
@@ -378,6 +389,7 @@ export type RecipeInput = Pick<
   | 'quickSteps'
   | 'quickCookMinutes'
   | 'sourceUrl'
+  | 'onePoint'
   | 'memo'
   | 'iconKey'
   | 'showIconInsteadOfPhoto'

@@ -834,6 +834,15 @@ eq(
     updatedQuickCook?.cookedLogs,
     base.cookedLogs,
   )
+
+  // onePointだけが違う場合も「内容の更新」として扱われる(2026-07メモ2区画化で追加。
+  // introやquickCookMinutesと同じ理由: これが無いと配布側でonePointだけを直しても
+  // 再取込で既存ユーザーへ届かない)
+  const onePointOnly = { ...base, onePoint: '新ワンポイント' }
+  const updatedOnePoint = buildUpdatedSetRecipe(base, onePointOnly, base.sourceSetName, 6000)
+  eq('onePointだけの差分でも更新される(nullでない)', updatedOnePoint !== null, true)
+  eq('更新結果にonePointが反映される', updatedOnePoint?.onePoint, '新ワンポイント')
+  eq('onePoint更新でもお気に入りは保持される', updatedOnePoint?.isFavorite, true)
 }
 
 // ---------- buildUpdatedSetRecipe: keywordsも更新対象フィールドに含まれる(検索キーワード欄
@@ -979,6 +988,17 @@ eq(
     eq(
       'quickCookMinutes更新でも作った記録は保持される',
       updatedByQuickCook?.cookedLogs,
+      existingStarter.cookedLogs,
+    )
+
+    // onePointだけが違う場合も「内容の更新」として扱う(2026-07メモ2区画化: intro等と同型)
+    const withOnePoint = { ...sameDef, onePoint: '新ワンポイント' }
+    const updatedByOnePoint = buildUpdatedStarterRecipe(existingStarter, withOnePoint, 6000)
+    eq('onePointだけの差分でも更新される(nullでない)', updatedByOnePoint !== null, true)
+    eq('更新結果にonePointが入る', updatedByOnePoint?.onePoint, '新ワンポイント')
+    eq(
+      'onePoint更新でも作った記録は保持される',
+      updatedByOnePoint?.cookedLogs,
       existingStarter.cookedLogs,
     )
   }

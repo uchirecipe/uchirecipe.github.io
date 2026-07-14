@@ -16,6 +16,9 @@
 //         KW-01(検索キーワード欄。保存→検索でヒットし、一覧・詳細には表示されないこと) /
 //         INTRO-01(ひとこと説明・任意。2026-07-13。料理名だけでは中身が想像しにくい料理向けの
 //         短い説明文。フォームで入力→保存→詳細の料理名見出しの直後に表示されること) /
+//         ONEPOINT-01(メモ2区画化・2026-07オーナー承認済み設計: 「ワンポイント」(こつ・知識)と
+//         「メモ」(保存方法・注意書き・安全)を別々に入力→保存→詳細で①ワンポイント→②メモの順に
+//         見出し付きで表示されること・編集画面を開き直しても両方の入力が保持されること) /
 //         SMK-14簡易(未解錠ゲート) /
 //         SETTINGS-TAB-01(設定画面のタブ分割。?set=/?section=直リンクが該当タブを自動で開く・
 //         4タブの手動切替・トーストのタップ閉じ。2026-07-12オーナー実機フィードバック。
@@ -529,6 +532,65 @@ try {
   // 後始末: 検証用に作成したレシピを削除
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
+  await page.getByRole('button', { name: 'このレシピを削除' }).click()
+  await page.waitForTimeout(800)
+
+  // --- ONEPOINT-01: メモ2区画化(2026-07。オーナー承認済み設計)。「ワンポイント」
+  // (こつ・知識)と「メモ」(保存方法・注意書き・安全)を別々に入力→保存→詳細画面で
+  // ①ワンポイント→②メモの順で見出し付きで表示されること・編集画面を開き直しても
+  // 両方の入力が保持されることを確認する ---
+  currentCheck = 'ONEPOINT-01'
+  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByPlaceholder('例: 肉じゃが').fill('E2Eワンポイントメモ確認レシピ')
+  await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
+  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  await page
+    .getByPlaceholder('こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に')
+    .fill('E2E確認用のワンポイント本文')
+  await page.getByPlaceholder('気づいたこと・アレンジなどを自由に').fill('E2E確認用のメモ本文')
+  await page.getByRole('button', { name: '保存する' }).click()
+  await page.waitForTimeout(800)
+  // 本文はMemoText(改行エンジン)経由でZWSPが挿入されるため、素のincludesでは一致しない。stripZwspで除去してから照合する
+  const onePointDetailText = stripZwsp(await page.textContent('body'))
+  check(
+    'ONEPOINT-01 保存後の詳細にワンポイント本文が表示される',
+    onePointDetailText.includes('E2E確認用のワンポイント本文'),
+  )
+  check(
+    'ONEPOINT-01 保存後の詳細にメモ本文が表示される',
+    onePointDetailText.includes('E2E確認用のメモ本文'),
+  )
+  const onePointHeadings = await page.locator('h2').allTextContents()
+  const onePointIdx = onePointHeadings.indexOf('ワンポイント')
+  const memoIdx = onePointHeadings.indexOf('メモ')
+  check('ONEPOINT-01 「ワンポイント」見出しが存在する', onePointIdx !== -1)
+  check('ONEPOINT-01 「メモ」見出しが存在する', memoIdx !== -1)
+  check(
+    'ONEPOINT-01 表示順は①ワンポイント→②メモ(オーナー承認済み設計)',
+    onePointIdx !== -1 && memoIdx !== -1 && onePointIdx < memoIdx,
+    `headings: ${JSON.stringify(onePointHeadings)}`,
+  )
+
+  // 編集画面を開き直しても両方の入力が保持される(DB保存の確認)
+  await page.locator('a[href*="/edit"]').first().click()
+  await page.waitForTimeout(500)
+  const onePointEditValue = await page
+    .getByPlaceholder('こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に')
+    .inputValue()
+  const memoEditValue = await page.getByPlaceholder('気づいたこと・アレンジなどを自由に').inputValue()
+  check(
+    'ONEPOINT-01 編集画面のワンポイント欄に保存内容が復元される',
+    onePointEditValue === 'E2E確認用のワンポイント本文',
+    `実際の値: ${onePointEditValue}`,
+  )
+  check(
+    'ONEPOINT-01 編集画面のメモ欄に保存内容が復元される',
+    memoEditValue === 'E2E確認用のメモ本文',
+    `実際の値: ${memoEditValue}`,
+  )
+
+  // 後始末: 検証用に作成したレシピを削除
   await page.getByRole('button', { name: 'このレシピを削除' }).click()
   await page.waitForTimeout(800)
 

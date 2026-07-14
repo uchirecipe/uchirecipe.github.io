@@ -64,6 +64,7 @@ type FormDraft = {
   tagInput: string
   keywords: string[]
   keywordInput: string
+  onePoint: string
   memo: string
   sourceUrl: string
   iconKey?: IconKey
@@ -139,6 +140,7 @@ function RecipeFormInner() {
   const [tagInput, setTagInput] = useState('')
   const [keywords, setKeywords] = useState<string[]>([])
   const [keywordInput, setKeywordInput] = useState('')
+  const [onePoint, setOnePoint] = useState('')
   const [memo, setMemo] = useState('')
   const [sourceUrl, setSourceUrl] = useState('')
   const [iconKey, setIconKey] = useState<IconKey>()
@@ -217,6 +219,7 @@ function RecipeFormInner() {
       tagInput: '',
       keywords: recipe.keywords ?? [],
       keywordInput: '',
+      onePoint: recipe.onePoint ?? '',
       memo: recipe.memo ?? '',
       sourceUrl: recipe.sourceUrl ?? '',
       iconKey: recipe.iconKey,
@@ -253,6 +256,7 @@ function RecipeFormInner() {
     )
     setTags(recipe.tags)
     setKeywords(recipe.keywords ?? [])
+    setOnePoint(recipe.onePoint ?? '')
     setMemo(recipe.memo ?? '')
     setSourceUrl(recipe.sourceUrl ?? '')
     setIconKey(recipe.iconKey)
@@ -277,6 +281,7 @@ function RecipeFormInner() {
         tagInput,
         keywords,
         keywordInput,
+        onePoint,
         memo,
         sourceUrl,
         iconKey,
@@ -297,6 +302,7 @@ function RecipeFormInner() {
       tagInput,
       keywords,
       keywordInput,
+      onePoint,
       memo,
       sourceUrl,
       iconKey,
@@ -360,6 +366,7 @@ function RecipeFormInner() {
     setTagInput(d.tagInput ?? '')
     setKeywords(d.keywords ?? [])
     setKeywordInput(d.keywordInput ?? '')
+    setOnePoint(d.onePoint ?? '')
     setMemo(d.memo ?? '')
     setSourceUrl(d.sourceUrl ?? '')
     setIconKey(d.iconKey)
@@ -531,6 +538,7 @@ function RecipeFormInner() {
           memo: row.memo.trim() || undefined,
         })),
         sourceUrl: sourceUrl.trim() || undefined,
+        onePoint: onePoint.trim() || undefined,
         memo: memo.trim() || undefined,
         keywords: effectiveKeywords.length > 0 ? effectiveKeywords : undefined,
         iconKey,
@@ -1208,9 +1216,20 @@ function RecipeFormInner() {
         </div>
       </div>
 
-      {/* メモ・参照元URL */}
+      {/* ワンポイント・メモ・参照元URL（2026-07 メモ2区画化: ワンポイント=こつ・知識、メモ=保存方法・注意書き・安全） */}
       <label className={`mt-[var(--space-lg)] ${labelCls}`}>
+        {ja.form.onePointLabel}
+        <textarea
+          value={onePoint}
+          onChange={(e) => setOnePoint(e.target.value)}
+          placeholder={ja.form.onePointPlaceholder}
+          rows={3}
+          className={inputCls}
+        />
+      </label>
+      <label className={`mt-[var(--space-md)] ${labelCls}`}>
         {ja.form.memoLabel}
+        <span className="ml-1 font-normal text-ink-muted">（{ja.form.memoDescription}）</span>
         <textarea
           value={memo}
           onChange={(e) => setMemo(e.target.value)}

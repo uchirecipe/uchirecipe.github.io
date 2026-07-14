@@ -655,7 +655,17 @@ export default function RecipeDetailPage() {
           </ol>
         </section>
 
-        {/* メモ・参照元 */}
+        {/* ワンポイント・メモ・参照元（2026-07 メモ2区画化: ①ワンポイント→②メモの順・オーナー承認済み） */}
+        {recipe.onePoint && (
+          <section className="mt-[var(--space-lg)]">
+            <h2 className="text-xl font-bold">{ja.detail.onePoint}</h2>
+            <MemoText
+              text={recipe.onePoint}
+              className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+              onOpenTerm={openTerm}
+            />
+          </section>
+        )}
         {recipe.memo && (
           <section className="mt-[var(--space-lg)]">
             <h2 className="text-xl font-bold">{ja.detail.memo}</h2>

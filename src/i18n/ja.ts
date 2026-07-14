@@ -513,7 +513,12 @@ export const ja = {
     keywordPlaceholder: '例: チンジャオロース、おつまみ など',
     addKeyword: '追加',
     removeKeyword: 'キーワードを外す',
+    // ワンポイント/メモの2区画化(2026-07)。ワンポイント=こつ・知識・豆知識、
+    // メモ=保存方法・注意書き・安全。既存レシピのmemoはメモ側のまま(既存データ破壊なし)
+    onePointLabel: 'ワンポイント（任意）',
+    onePointPlaceholder: 'こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に',
     memoLabel: 'メモ',
+    memoDescription: '保存方法・注意書きなど',
     memoPlaceholder: '気づいたこと・アレンジなどを自由に',
     sourceUrlLabel: '参照元URL（任意）',
     sourceUrlPlaceholder: 'https://…',
@@ -569,6 +574,8 @@ export const ja = {
      * というオーナー指摘で改稿。これはUIボタンのラベルであってレシピ本文ではないため、
      * 本文の表記規約とは別枠) */
     minutesStandalonePrefix: '目安',
+    // ワンポイント/メモの2区画化(2026-07)。表示順は①ワンポイント→②メモ(オーナー承認済み)
+    onePoint: 'ワンポイント',
     memo: 'メモ',
     source: '参照元',
     edit: '編集する',

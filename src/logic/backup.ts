@@ -404,6 +404,7 @@ type RecipeSetContent = Pick<
   | 'ingredients'
   | 'steps'
   | 'quickSteps'
+  | 'onePoint'
   | 'memo'
   | 'sourceUrl'
   | 'keywords'
@@ -413,9 +414,10 @@ type RecipeSetContent = Pick<
  * 同一セット由来の再取込（resolveDuplicateTitleActionが'updateName'を返すケース）で、
  * 既存レシピの内容を更新した結果を返す（純ロジック・DB非依存）。
  * 更新: intro/servings/cookMinutes/quickCookMinutes/effortLevel/tags/dishType/season/
- *       suitableFor/ingredients/steps/quickSteps/memo/sourceUrl/keywords/sourceSetName +
+ *       suitableFor/ingredients/steps/quickSteps/onePoint/memo/sourceUrl/keywords/sourceSetName +
  *       searchWords・updatedAt（2026-07バグ修正: intro/quickCookMinutesが更新対象に
- *       漏れていたため、配布側の修正がこれらのフィールドだけの場合は再取込しても届かなかった）
+ *       漏れていたため、配布側の修正がこれらのフィールドだけの場合は再取込しても届かなかった。
+ *       onePointは2026-07メモ2区画化で追加）
  * 保持: 上記以外すべて（id・createdAt・isFavorite・cookedLogs・photo・isStarter・iconKey等の
  *       ユーザーデータ・表示設定。existingをベースに更新フィールドだけ上書きするため自動的に保持される）
  * 内容が完全に同一（sourceSetName込み）なら null を返す（呼び出し側はスキップ扱いにする。
@@ -441,6 +443,7 @@ export function buildUpdatedSetRecipe(
       ingredients: source.ingredients,
       steps: source.steps,
       quickSteps: source.quickSteps,
+      onePoint: source.onePoint,
       memo: source.memo,
       sourceUrl: source.sourceUrl,
       keywords: source.keywords,
@@ -462,6 +465,7 @@ export function buildUpdatedSetRecipe(
     ingredients: incoming.ingredients,
     steps: incoming.steps,
     quickSteps: incoming.quickSteps,
+    onePoint: incoming.onePoint,
     memo: incoming.memo,
     sourceUrl: incoming.sourceUrl,
     keywords: incoming.keywords,
