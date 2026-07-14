@@ -82,12 +82,21 @@ export type AddPriceEntryResult =
   | { status: 'invalid' }
 
 /**
+ * 重複判定用の正規化: 前後の空白除去・括弧書き除去（normalizeIngredientNameForPrice）に加えて、
+ * カタカナ⇄ひらがなの表記ゆれも同一視するため toHiragana を噛ませる
+ * （2026-07-15 オーナー実機フィードバック: 「とうふ」と「トウフ」を別々に登録できてしまう）。
+ */
+function normalizeForDuplicateCheck(name: string): string {
+  return toHiragana(normalizeIngredientNameForPrice(name))
+}
+
+/**
  * 新規追加。名前・単位が空、または価格が0以下なら何もしない({status:'invalid'}。
  * 呼び出し側のボタンは既にこの条件でdisabledにしているため通常は起きない)。新規行は常に「自分の価格」扱い。
  *
- * 二重登録防止(2026-07-14 オーナー実機フィードバック): 正規化後の名前
- * （前後の空白除去・括弧書き除去。normalizeIngredientNameForPriceと同じ規則）が
- * 既存のマスタ行と一致する場合は追加せず{status:'duplicate'}を返す。
+ * 二重登録防止(2026-07-14 オーナー実機フィードバック、2026-07-15 かな正規化を追加):
+ * 正規化後の名前（前後の空白除去・括弧書き除去＋カタカナ⇄ひらがな正規化。
+ * normalizeForDuplicateCheck）が既存のマスタ行と一致する場合は追加せず{status:'duplicate'}を返す。
  * 既存の行を優先し、重複行は作らない方針（どちらが優先されるか曖昧という不安の解消が目的）。
  */
 export async function addPriceEntry(
@@ -98,9 +107,9 @@ export async function addPriceEntry(
   const trimmedName = name.trim()
   const trimmedUnit = unit.trim()
   if (!trimmedName || !trimmedUnit || !(pricePerUnit > 0)) return { status: 'invalid' }
-  const normalized = normalizeIngredientNameForPrice(trimmedName)
+  const normalized = normalizeForDuplicateCheck(trimmedName)
   const existing = (await db.prices.toArray()).find(
-    (e) => normalizeIngredientNameForPrice(e.name) === normalized,
+    (e) => normalizeForDuplicateCheck(e.name) === normalized,
   )
   if (existing) return { status: 'duplicate', existingName: existing.name }
   await db.prices.add({
