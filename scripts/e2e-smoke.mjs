@@ -1956,6 +1956,23 @@ try {
   await addUnitInput.fill('')
   await page.waitForTimeout(200)
 
+  // 修正2b拡張(2026-07-15オーナー実機フィードバック): かな表記ゆれ(カタカナ⇄ひらがな)も
+  // toHiraganaで正規化して重複と判定する。登録済み「白菜」に対してカタカナ「ハクサイ」を追加拒否する
+  await addNameInput.fill('ハクサイ')
+  await addPriceInput.fill('99')
+  await addUnitInput.fill('1個')
+  await page.getByRole('button', { name: '追加', exact: true }).click()
+  await page.waitForTimeout(300)
+  check(
+    'INLINE-01(修正2b拡張) かな表記ゆれ(カタカナ/ひらがな。白菜/ハクサイ)も正規化して重複と判定する',
+    (await page.textContent('body')).includes('「白菜」は既に登録済みです') &&
+      (await page.locator('li', { hasText: '白菜' }).count()) === 1,
+  )
+  await addNameInput.fill('')
+  await addPriceInput.fill('')
+  await addUnitInput.fill('')
+  await page.waitForTimeout(200)
+
   // 修正2c: 追加入力欄が一覧より上に表示される(食材名欄のY座標 < 玉ねぎ行のY座標)
   const addNameBox = await addNameInput.boundingBox()
   const onionRowBoxForOrder = await onionRow.boundingBox()

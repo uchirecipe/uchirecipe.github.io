@@ -1984,6 +1984,30 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     ),
     ['鶏肉'],
   )
+
+  // ---- v3: 個別別名・修飾接頭語追加(2026-07-15オーナー実機フィードバック) ----
+  eq(
+    '個別別名: 合い挽き肉→ひき肉も手順で拾う',
+    findIngredientMatches('ひき肉を炒める', buildIngredientNames([{ name: '合い挽き肉' }])).map(
+      (m) => m.text,
+    ),
+    ['ひき肉'],
+  )
+  eq(
+    '別名導出: プレーンヨーグルト(無糖)→ヨーグルトも手順で拾う(括弧除去後に修飾接頭語プレーンを剥がす)',
+    findIngredientMatches(
+      'ヨーグルトを加える',
+      buildIngredientNames([{ name: 'プレーンヨーグルト(無糖)' }]),
+    ).map((m) => m.text),
+    ['ヨーグルト'],
+  )
+  eq(
+    '個別別名: 生だら→たら(接頭語「生」剥がしだけでは連濁の濁点が戻らないため個別登録)',
+    findIngredientMatches('たらに塩をふる', buildIngredientNames([{ name: '生だら' }])).map(
+      (m) => m.text,
+    ),
+    ['たら'],
+  )
 }
 
 // ---------- 記録写真の容量ガード(docs/20 §4写真添付・自動削除はせず促すバナーのみ) ----------

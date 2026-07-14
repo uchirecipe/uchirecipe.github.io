@@ -15,6 +15,11 @@
 //    (「豚肉」等)をderiveAliasesで登録する。
 // いずれも別名を候補一覧に追加するだけで、最長一致優先(buildIngredientNamesの長さ降順)は
 // そのまま働く(本文に「木綿豆腐」があればそちらを優先し「豆腐」止まりにはしない)。
+//
+// v3(2026-07-15・オーナー実機フィードバックで追加):
+// 4. 修飾接頭語「プレーン」をMODIFIER_PREFIXESに追加(「プレーンヨーグルト」→「ヨーグルト」)。
+// 5. 汎用ルールでは導出できない個別別名をNAME_ALIAS_OVERRIDESに登録
+//    (「合い挽き肉」→「ひき肉」、「生だら」→「たら」=連濁で濁点が戻らないケース)。
 import { normalizeIngredientChipLabel } from './mainIngredients'
 
 export interface IngredientMatch {
@@ -79,6 +84,7 @@ const MODIFIER_PREFIXES = [
   '甘塩',
   '蒸し',
   'ゆで',
+  'プレーン',
 ] as const
 
 function stripModifierPrefixes(name: string): string {
@@ -101,7 +107,22 @@ function deriveMeatKindAlias(name: string): string | undefined {
 }
 
 /**
- * 材料名から下線マッチ用の別名を導出する(修飾接頭語剥がし＋肉の部位パターン)。
+ * 汎用ルール(接頭語剥がし・肉部位総称化)だけでは導出できない個別の別名
+ * (2026-07-15オーナー実機フィードバック)。
+ * - 「合い挽き肉」→「ひき肉」: 接頭語「合い」を剥がしても残るのは「挽き肉」で、
+ *   手順本文でよく使われるひらがな表記「ひき肉」とは一致しないため個別登録する。
+ * - 「生だら」→「たら」: 接頭語「生」を剥がすと連濁のまま「だら」が残り、
+ *   本来の濁点なし表記「たら」には戻らない(第2弾「たらの香味レンジ蒸し」で発生)。
+ *   既存の接頭語除去ルールでは濁点を戻せないため個別登録する。
+ * 拡張時はこのRecordに1行追記する(キーは normalizeIngredientChipLabel 適用後の材料名)。
+ */
+const NAME_ALIAS_OVERRIDES: Record<string, readonly string[]> = {
+  合い挽き肉: ['ひき肉'],
+  生だら: ['たら'],
+}
+
+/**
+ * 材料名から下線マッチ用の別名を導出する(修飾接頭語剥がし＋肉の部位パターン＋個別別名)。
  * 1文字の別名は取りこぼしより誤検出のリスクが大きいため登録しない
  * (例:「蒸し鶏」→「鶏」は1文字なので見送り。総称別名が欲しければ「鶏肉」表記側で対応)。
  */
@@ -111,6 +132,7 @@ function deriveAliases(name: string): string[] {
   if (stripped !== name && stripped.length >= 2) aliases.add(stripped)
   const meatAlias = deriveMeatKindAlias(name)
   if (meatAlias && meatAlias !== name) aliases.add(meatAlias)
+  for (const alias of NAME_ALIAS_OVERRIDES[name] ?? []) aliases.add(alias)
   return [...aliases]
 }
 
