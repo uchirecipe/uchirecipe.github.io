@@ -78,8 +78,12 @@ function parseNumericAmount(amount: string): number | undefined {
  * （大さじ1・小さじ1）も解釈する（PRICE_DEFAULTSに両方の書式が混在しているため）。
  * どちらの書式にも当てはまらなければ、qty=1・baseUnit=元の文字列のまま返す
  * （後続の按分計算では ingredient.unit と一致しない限り使われないので実害はない）。
+ *
+ * IngredientPricesPage（「食材と価格」の数量＋単位選択UI。2026-07-15）でも、既存行の
+ * unit文字列を編集フォームの初期値（数量欄＋単位選択）へ分解するのに共用する
+ * （二重実装を避けるためexport）。
  */
-function parseUnitQuantity(unit: string): { qty: number; baseUnit: string } {
+export function parseUnitQuantity(unit: string): { qty: number; baseUnit: string } {
   const trimmed = normalizeDigits(unit.trim())
   const leading = trimmed.match(/^(\d+(?:\.\d+)?)(.*)$/)
   if (leading) {

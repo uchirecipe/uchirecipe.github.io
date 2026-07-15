@@ -103,6 +103,12 @@
 //         クリア→再作成で入れ替わることで確認する) /
 //         修正1a(献立タブの概算食費リンクの文言「食材と価格を編集する」・遷移先/pricesを
 //         MEALPLAN-01内で確認) /
+//         PRICEUNIT-01(「食材と価格」の単位入力UI改修・2026-07-15オーナー実機フィードバック:
+//         単位欄が自由入力(「100g」等を数字ごと1欄に書く)だと不安・使いにくいため、
+//         新規追加・行内編集の両方で「数量(数字)＋単位(選択)」に分離。保存形式は従来どおり
+//         1つの文字列に合成(数量「2」+単位「個」→「2個」)されIndexedDBの実データで確認。
+//         既存デフォルト行(玉ねぎ)の数量を変えると「デフォルトに戻す」が出現し、
+//         押すと数量・単位・「デフォルトに戻す」の表示が投入時の状態に戻ることも確認) /
 //         BACKUP-01(バックアップの全ユーザーデータ対応・2026-07-13データ堅牢性強化: 価格編集+
 //         週献立割当+在庫品を実際の「ファイルに書き出す」ボタン(Playwrightのdownloadイベントで
 //         捕捉)で書き出し→まっさらな別プロファイルへ「読み込む(置き換え)」で復元し、
@@ -2004,12 +2010,16 @@ try {
 
   // 修正2b: 重複食材の登録防止。既に登録済みの「玉ねぎ」を追加しようとすると拒否される
   // exact:trueが必須(部分一致だと検索欄「食材名で絞り込む」や各行の「{name}の価格（円）」等と衝突する)
+  // 2026-07-15 UI改修で単位欄が「数量(数字)＋単位(選択)」に分離されたため、addUnitInputは
+  // 数量欄(addQtyInput)＋単位選択(addUnitSelect)の2つに置き換えた(PRICEUNIT-01参照)
   const addNameInput = page.getByLabel('食材名', { exact: true })
   const addPriceInput = page.getByLabel('価格（円）', { exact: true })
-  const addUnitInput = page.getByLabel('単位（数量＋単位）', { exact: true })
+  const addQtyInput = page.getByLabel('数量', { exact: true })
+  const addUnitSelect = page.getByLabel('単位', { exact: true })
   await addNameInput.fill('玉ねぎ')
   await addPriceInput.fill('80')
-  await addUnitInput.fill('1個')
+  await addQtyInput.fill('1')
+  await addUnitSelect.selectOption('個')
   await page.getByRole('button', { name: '追加', exact: true }).click()
   await page.waitForTimeout(300)
   check(
@@ -2031,14 +2041,14 @@ try {
   )
   await addNameInput.fill('')
   await addPriceInput.fill('')
-  await addUnitInput.fill('')
+  await addQtyInput.fill('')
   await page.waitForTimeout(200)
 
   // 修正2b拡張(2026-07-15オーナー実機フィードバック): かな表記ゆれ(カタカナ⇄ひらがな)も
   // toHiraganaで正規化して重複と判定する。登録済み「白菜」に対してカタカナ「ハクサイ」を追加拒否する
   await addNameInput.fill('ハクサイ')
   await addPriceInput.fill('99')
-  await addUnitInput.fill('1個')
+  await addQtyInput.fill('1')
   await page.getByRole('button', { name: '追加', exact: true }).click()
   await page.waitForTimeout(300)
   check(
@@ -2636,6 +2646,126 @@ try {
       res.status() === 200 && title.includes(titleKeyword),
       `status=${res.status()} title=「${title}」`,
     )
+  }
+
+  // --- PRICEUNIT-01: 「食材と価格」の単位入力UI改修(2026-07-15オーナー実機フィードバック:
+  // 単位欄が自由入力だと不安・使いにくい)。新規追加フォームで数量(数字)＋単位(選択)を別々に
+  // 入力して追加すると、保存形式は従来どおり1つの文字列に合成される(「2」＋「個」→「2個」)ことを
+  // IndexedDBの実データで確認する。加えて、既存デフォルト行(玉ねぎ)の数量欄を新UIで書き換えると
+  // 「デフォルトに戻す」ボタンが出現し、押すと数量・単位ともに投入時の状態(1個)へ戻り
+  // ボタンも再び消えることを確認する。他チェックの解錠状態・データに影響しないよう
+  // 専用のbrowser/contextで完結させる ---
+  currentCheck = 'PRICEUNIT-01'
+  {
+    const puBrowser = await chromium.launch()
+    try {
+      const puContext = await puBrowser.newContext()
+      const puPage = await puContext.newPage()
+      puPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@PRICEUNIT-01] ${err.message}`)
+      })
+      await puPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await puPage.waitForTimeout(1800) // 初回シード完了待ち(食材価格マスタの初期投入含む)
+
+      await puPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await puPage.waitForTimeout(500)
+
+      // 新規追加: 名前「テスト食材」・価格「500」・数量「2」・単位「個」で追加する
+      await puPage.getByLabel('食材名', { exact: true }).fill('テスト食材')
+      await puPage.getByLabel('価格（円）', { exact: true }).fill('500')
+      await puPage.getByLabel('数量', { exact: true }).fill('2')
+      await puPage.getByLabel('単位', { exact: true }).selectOption('個')
+      await puPage.getByRole('button', { name: '追加', exact: true }).click()
+      await puPage.waitForTimeout(400)
+
+      const testRow = puPage.locator('li', { hasText: 'テスト食材' })
+      check('PRICEUNIT-01 追加した食材が一覧に並ぶ', (await testRow.count()) === 1)
+
+      // 保存形式が従来どおり1つの文字列(「2個」)に合成されていることをIndexedDBの実データで確認
+      // (updatePriceEntryのisDefault再判定が文字列比較のため、合成結果の完全一致が最重要)
+      const savedTestEntry = await puPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const all = await new Promise((resolve, reject) => {
+          const getReq = idb.transaction('prices', 'readonly').objectStore('prices').getAll()
+          getReq.onsuccess = () => resolve(getReq.result)
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+        return all.find((p) => p.name === 'テスト食材')
+      })
+      check(
+        'PRICEUNIT-01 数量「2」+単位「個」が「2個」の1文字列に合成されて保存される',
+        savedTestEntry?.unit === '2個' && savedTestEntry?.pricePerUnit === 500,
+        `savedTestEntry=${JSON.stringify(savedTestEntry)}`,
+      )
+
+      // 一覧の行は「2個」を数量欄「2」＋単位選択「個」に分解して表示する(往復確認)
+      check(
+        'PRICEUNIT-01 一覧行は保存値「2個」を数量欄「2」に分解して表示する',
+        (await testRow.getByLabel('テスト食材の数量').inputValue()) === '2',
+      )
+      check(
+        'PRICEUNIT-01 一覧行は保存値「2個」を単位選択「個」に分解して表示する',
+        (await testRow.getByLabel('テスト食材の単位').inputValue()) === '個',
+      )
+
+      // 既存のデフォルト行(玉ねぎ=1個50円)の数量を新UIで書き換えると「デフォルトに戻す」が出る
+      const onionRow = puPage.locator('li', { hasText: '玉ねぎ' })
+      check(
+        'PRICEUNIT-01 編集前の玉ねぎ行には「デフォルトに戻す」が出ない',
+        !(await onionRow.textContent()).includes('デフォルトに戻す'),
+      )
+      const onionQtyInput = onionRow.getByLabel('玉ねぎの数量')
+      await onionQtyInput.fill('3')
+      await onionQtyInput.press('Enter') // Enterでblur→保存
+      await puPage.waitForTimeout(400)
+      check(
+        'PRICEUNIT-01 数量欄(新UI)を書き換えると「デフォルトに戻す」が出る',
+        (await onionRow.textContent()).includes('デフォルトに戻す'),
+      )
+      const savedOnionAfterEdit = await puPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const all = await new Promise((resolve, reject) => {
+          const getReq = idb.transaction('prices', 'readonly').objectStore('prices').getAll()
+          getReq.onsuccess = () => resolve(getReq.result)
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+        return all.find((p) => p.name === '玉ねぎ')
+      })
+      check(
+        'PRICEUNIT-01 数量「3」への書き換えが「3個」の1文字列に合成されて保存される',
+        savedOnionAfterEdit?.unit === '3個',
+        `savedOnionAfterEdit=${JSON.stringify(savedOnionAfterEdit)}`,
+      )
+
+      // 「デフォルトに戻す」で投入時の状態(数量「1」・単位「個」)に戻り、ボタンも再び消える
+      await onionRow.getByRole('button', { name: '玉ねぎをデフォルト価格に戻す' }).click()
+      await puPage.waitForTimeout(400)
+      check(
+        'PRICEUNIT-01 「デフォルトに戻す」後はボタンが再び消える',
+        !(await onionRow.textContent()).includes('デフォルトに戻す'),
+      )
+      check(
+        'PRICEUNIT-01 「デフォルトに戻す」後は数量欄が「1」に戻る',
+        (await onionRow.getByLabel('玉ねぎの数量').inputValue()) === '1',
+      )
+      check(
+        'PRICEUNIT-01 「デフォルトに戻す」後は単位選択が「個」に戻る',
+        (await onionRow.getByLabel('玉ねぎの単位').inputValue()) === '個',
+      )
+    } finally {
+      await puBrowser.close()
+    }
   }
 
   // --- BACKUP-01: バックアップの全ユーザーデータ対応(在庫・買い物メモ・週献立・今日の献立・

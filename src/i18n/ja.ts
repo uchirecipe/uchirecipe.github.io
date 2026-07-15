@@ -732,8 +732,15 @@ export const ja = {
     namePlaceholder: '例: 玉ねぎ',
     priceLabel: '価格（円）',
     pricePlaceholder: '例: 50',
-    unitLabel: '単位（数量＋単位）',
-    unitPlaceholder: '例: 1個、100g',
+    // 2026-07-15 UI改修: 単位欄を「数量(数字)＋単位(選択)」に分離(オーナー実機フィードバック:
+    // 自由入力だと不安・使いにくい)。unitLabel/unitPlaceholderは、単位選択で「その他」を
+    // 選んだときだけ出す自由入力欄のラベルに用途を変更した(従来の自由入力欄そのもの)
+    quantityLabel: '数量',
+    quantityPlaceholder: '例: 100',
+    unitTypeLabel: '単位',
+    unitOther: 'その他',
+    unitLabel: 'その他の単位（自由入力）',
+    unitPlaceholder: '例: 1/4個、少々',
     add: '追加',
     // 二重登録防止(2026-07-14 オーナー実機フィードバック): 正規化(前後空白・括弧書き除去)して
     // 一致する食材が既にマスタにあるときに出す案内。既存の行を優先し、重複行は作らない
@@ -742,7 +749,9 @@ export const ja = {
     priceYen: '円',
     // 一覧の各行のインライン編集欄（食材名ごとに区別できるようaria-labelへ{name}を差し込む）
     entryPriceAria: '{name}の価格（円）',
+    entryQuantityAria: '{name}の数量',
     entryUnitAria: '{name}の単位',
+    entryUnitOtherAria: '{name}のその他単位（自由入力）',
     // 上書き済みの行を投入時の価格へ戻すボタン(2026-07-13「目安に戻す」→「デフォルトに戻す」に変更)
     resetToDefault: 'デフォルトに戻す',
     resetToDefaultAria: '{name}をデフォルト価格に戻す',
