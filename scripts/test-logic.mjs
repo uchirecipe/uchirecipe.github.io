@@ -6,7 +6,12 @@ import {
   formatAmountUnit,
   normalizeDigits,
 } from '../src/logic/amount.ts'
-import { parseRecipeText, splitQuantity, autoSplitAmountUnit } from '../src/logic/parseRecipeText.ts'
+import {
+  parseRecipeText,
+  splitQuantity,
+  autoSplitAmountUnit,
+  looksPoorlyParsed,
+} from '../src/logic/parseRecipeText.ts'
 import {
   buildSearchWords,
   toHiragana,
@@ -250,6 +255,150 @@ eq(
   '内容付きの「〈タレ〉しょうゆ」は従来どおり名前だけの材料として拾う',
   parseRecipeText('材料\n・豚肉…200g\n〈タレ〉しょうゆ').ingredients.map((i) => i.name),
   ['豚肉', '〈タレ〉しょうゆ'],
+)
+
+// ---------- 貼り付け解析: F1(番号+空白の剥がし)・F3(範囲分量)・looksPoorlyParsed(docs/29 Fable裁定 2026-07-15) ----------
+
+// ---- F3: splitQuantity 範囲分量(単体) ----
+eq('範囲: 大さじ前置', splitQuantity('大さじ2〜3'), { amount: '2〜3', unit: '大さじ' })
+eq('範囲: 数字後置', splitQuantity('2〜3個'), { amount: '2〜3', unit: '個' })
+eq('範囲: 全角数字後置', splitQuantity('２〜３本'), { amount: '2〜3', unit: '本' })
+
+// ---- コーパスA_標準(見出し+人数+番号手順・数字+空白) ----
+const corpusA = `肉じゃがロール
+材料（2人分）
+・じゃがいも 3個
+・牛こま切れ肉 200g
+・しょうゆ 大さじ2
+作り方
+1 じゃがいもを切る
+2 牛肉を炒める
+3 鍋で煮る`
+{
+  const r = parseRecipeText(corpusA)
+  eq('A_標準: タイトル', r.title, '肉じゃがロール')
+  eq('A_標準: 人数', r.servings, 2)
+  eq('A_標準: 材料完全一致', r.ingredients, [
+    { name: 'じゃがいも', amount: '3', unit: '個' },
+    { name: '牛こま切れ肉', amount: '200', unit: 'g' },
+    { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+  ])
+  eq('A_標準: 手順件数+行頭に数字/空白が残らない', r.steps, [
+    'じゃがいもを切る',
+    '牛肉を炒める',
+    '鍋で煮る',
+  ])
+  eq('A_標準: looksPoorlyParsedはfalse', looksPoorlyParsed(corpusA, r), false)
+}
+
+// ---- コーパスB_見出しなし(材料先頭+読点番号) ----
+{
+  const r = parseRecipeText('じゃがいも 3個\n豚こま切れ肉 200g\nしょうゆ 大さじ2\n1、じゃがいもを切る\n2、豚肉を炒める\n3、しょうゆを加えて煮る')
+  eq('B_見出しなし: title未取得', r.title, undefined)
+  eq('B_見出しなし: 材料完全一致', r.ingredients, [
+    { name: 'じゃがいも', amount: '3', unit: '個' },
+    { name: '豚こま切れ肉', amount: '200', unit: 'g' },
+    { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+  ])
+  eq('B_見出しなし: 手順完全一致', r.steps, ['じゃがいもを切る', '豚肉を炒める', 'しょうゆを加えて煮る'])
+}
+
+// ---- コーパスC_地の文(一段落) ----
+const corpusC =
+  'このハンバーグは材料を全部混ぜてから丸めて焼くだけの簡単レシピです。合いびき肉と玉ねぎと卵とパン粉を使って、よくこねてから中火でじっくり焼き上げると失敗しにくいです。'
+{
+  const r = parseRecipeText(corpusC)
+  eq('C_地の文: 材料0件', r.ingredients.length, 0)
+  eq('C_地の文: 手順1件(段落ほぼ全文)', r.steps.length, 1)
+  eq('C_地の文: 手順の中身が段落全文', r.steps[0], corpusC)
+  eq('C_地の文: looksPoorlyParsedはtrue', looksPoorlyParsed(corpusC, r), true)
+}
+
+// ---- コーパスD_グループ(区切り記号混在+〈煮汁〉小見出し+丸数字) ----
+{
+  const r = parseRecipeText(
+    '筑前煮\n材料（4人分）\n・鶏もも肉…300g\n・れんこん：150g\n〈煮汁〉\n・だし　200ml\n・しょうゆ　大さじ2\n作り方\n①鶏肉を炒める\n②野菜を加える\n③煮汁を加えて煮る',
+  )
+  eq('D_グループ: 人数', r.servings, 4)
+  eq('D_グループ: 小見出し混入なし+区切り記号完全一致', r.ingredients, [
+    { name: '鶏もも肉', amount: '300', unit: 'g' },
+    { name: 'れんこん', amount: '150', unit: 'g' },
+    { name: 'だし', amount: '200', unit: 'ml' },
+    { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+  ])
+  eq('D_グループ: 丸数字剥がし完全一致', r.steps, ['鶏肉を炒める', '野菜を加える', '煮汁を加えて煮る'])
+}
+
+// ---- コーパスE_中黒手順 ----
+{
+  const r = parseRecipeText('チャーハン\n材料\n・ごはん　300g\n・卵　2個\n作り方\n・卵を溶く\n・ごはんと混ぜて炒める\n・塩こしょうで味付けする')
+  eq('E_中黒手順: 材料完全一致', r.ingredients, [
+    { name: 'ごはん', amount: '300', unit: 'g' },
+    { name: '卵', amount: '2', unit: '個' },
+  ])
+  eq('E_中黒手順: 中黒剥がし全行一致', r.steps, ['卵を溶く', 'ごはんと混ぜて炒める', '塩こしょうで味付けする'])
+}
+
+// ---- コーパスF_分量ゆれ(範囲・くっつき・単位前置) ----
+{
+  const r = parseRecipeText('筑前煮\n材料\n・にんじん 2〜3本\n・じゃがいも200g\n・砂糖 大さじ2〜3\n作り方\n1 材料を切る\n2 煮る')
+  eq('F_分量ゆれ: 材料完全一致(範囲・くっつき・単位前置)', r.ingredients, [
+    { name: 'にんじん', amount: '2〜3', unit: '本' },
+    { name: 'じゃがいも', amount: '200', unit: 'g' },
+    { name: '砂糖', amount: '2〜3', unit: '大さじ' },
+  ])
+  eq('F_分量ゆれ: 手順完全一致', r.steps, ['材料を切る', '煮る'])
+}
+
+// ---- コーパスG_タイトルなし ----
+{
+  const r = parseRecipeText('材料（2人分）\n・鶏むね肉 300g\n・玉ねぎ 1個\n作り方\n1 鶏肉を切る\n2 炒める\n3 味付けする')
+  eq('G_タイトルなし: title未取得', r.title, undefined)
+  eq('G_タイトルなし: 材料完全一致', r.ingredients, [
+    { name: '鶏むね肉', amount: '300', unit: 'g' },
+    { name: '玉ねぎ', amount: '1', unit: '個' },
+  ])
+  eq('G_タイトルなし: 手順完全一致', r.steps, ['鶏肉を切る', '炒める', '味付けする'])
+}
+
+// ---- コーパスH_コツ付き(コツ見出し→memo) ----
+{
+  const r = parseRecipeText(
+    'チキンソテー\n材料（2人分）\n・鶏もも肉 2枚\n・塩 少々\n作り方\n1 鶏肉に塩を振る\n2 皮目から焼く\n3 裏返して火を通す\nコツ・ポイント\n皮はしっかり乾かしてから焼くとパリッと仕上がる\n焼き加減は中火をキープする',
+  )
+  eq('H_コツ付き: 材料完全一致', r.ingredients, [
+    { name: '鶏もも肉', amount: '2', unit: '枚' },
+    { name: '塩', amount: '少々', unit: '' },
+  ])
+  eq('H_コツ付き: 番号剥がれ完全一致', r.steps, ['鶏肉に塩を振る', '皮目から焼く', '裏返して火を通す'])
+  eq(
+    'H_コツ付き: memo一致',
+    r.memo,
+    '皮はしっかり乾かしてから焼くとパリッと仕上がる\n焼き加減は中火をキープする',
+  )
+}
+
+// ---- F1ガード: 負例テスト(誤爆防止・再発防止必須) ----
+eq('負例: 材料\\n1 本 は手順0件', parseRecipeText('材料\n1 本').steps.length, 0)
+eq('負例: 材料\\n1 200g は手順0件', parseRecipeText('材料\n1 200g').steps.length, 0)
+eq('負例: 材料\\n2 大さじ1 は手順0件', parseRecipeText('材料\n2 大さじ1').steps.length, 0)
+eq(
+  '負例: 連番材料(1 玉ねぎ 1個/2 にんじん 1本)は手順0件',
+  parseRecipeText('材料\n1 玉ねぎ 1個\n2 にんじん 1本').steps.length,
+  0,
+)
+{
+  const r = parseRecipeText('作り方\n1 鶏むね肉を切る\n2 水200mlを加える')
+  eq('負例: 見出しあり数字+空白手順は2件・番号なし', r.steps, ['鶏むね肉を切る', '水200mlを加える'])
+}
+{
+  const r = parseRecipeText('1 切る\n2 煮る')
+  eq('負例: 見出しなし連番は手順2件', r.steps, ['切る', '煮る'])
+}
+eq(
+  '負例: 単発「1 何かの文」(連番なし)はmode切替なし=手順0件',
+  parseRecipeText('1 何かの文').steps.length,
+  0,
 )
 
 // ---------- buildSearchWords(「鮭」検索が調味料「酒」に誤ヒットする回帰・2026-07-09ペルソナ第1波) ----------

@@ -52,6 +52,41 @@ const SERVINGS = /(\d+(?:[.．]\d+)?)\s*人\s*(?:分|前)/
 const COOK_TIME_LINE =
   /^[【\[（(◆■□●○☆★♪#＊*※\s]*(調理時間|所要時間|目安時間|合計時間|準備時間)[】\])）]*\s*[:：]?\s*約?\s*(\d{1,3})\s*分\s*(?:程度|ほど|くらい)?\s*$/
 
+// F1: 「1 鶏むね肉を切る」のような区切り記号なし(数字＋空白のみ)の番号手順。
+// STEP_NUMBER は区切り記号(．.、:：等)を必須にしているため拾えず、ここで別パターンとして扱う。
+const STEP_NUMBER_SPACE = /^(\d{1,2})[ 　\t]+(.+)$/
+// 「1 本」「2 200g」のように番号直後が材料の分量そのものである行を、手順の番号と誤爆させないためのガード
+const BARE_UNIT_REST =
+  /^(?:g|kg|ml|cc|個|本|枚|袋|缶|玉|株|丁|片|かけ|束|尾|切れ|合|カップ|杯|人分)(?:[（(].*)?$/
+function spaceNumberRestIsQuantity(rest: string): boolean {
+  if (!rest) return true
+  if (/^\d/.test(rest)) return true // G1「1 200g」数字続き=材料
+  if (BARE_UNIT_REST.test(rest)) return true // G2「1 本」残りが単位
+  if (/^(?:大さじ|小さじ|カップ)\s*\d/.test(rest)) return true // G2'「2 大さじ1」
+  if (/^分(?!量)|^(?:時間|秒)/.test(rest)) return true // G3「15 分ほど置く」
+  return false
+}
+// 「1 玉ねぎ 1個」のように、番号の後ろが材料名+分量で終わっている行を
+// (見出しなし連番プリスキャンで)手順の連番としてカウントしないためのガード
+const INGREDIENT_LIKE_END =
+  /(?:\d+(?:\.\d+)?(?:\/\d+)?\s*(?:g|kg|ml|cc|個|本|枚|袋|缶|玉|株|丁|片|かけ|束|尾|切れ|合|カップ|杯)|適量|少々|ひとつまみ|お好みで)$/
+/**
+ * 見出し・番号記号がないまま「数字＋空白」の連番だけが続く文章(クックパッド等の貼り付けに多い形)を検出する。
+ * auto/材料modeのときは、この連番が確認できた場合だけ「数字＋空白」を手順番号として切り替える
+ * (単発の「1 本」等を誤って手順にしないための安全策)。
+ */
+function detectSpaceNumberSequence(lines: string[]): boolean {
+  const nums: number[] = []
+  for (const l of lines) {
+    const m = normalize(l).match(STEP_NUMBER_SPACE)
+    if (!m) continue
+    const rest = m[2].trim()
+    if (spaceNumberRestIsQuantity(rest) || INGREDIENT_LIKE_END.test(rest)) continue
+    nums.push(Number(m[1]))
+  }
+  return nums.some((n, i) => i > 0 && n === nums[i - 1] + 1)
+}
+
 /**
  * 見出し・番号のない材料欄で、分量の無い行が来たときに手順の文と誤認識しないための判定。
  * 「〜って」「〜んで」のようなて形の中間表現、または代表的な調理動詞の終止形で終わる行は
@@ -78,26 +113,35 @@ function isIngredientSubheading(rawLine: string, name: string): boolean {
 }
 
 /**
- * 「200g」「大さじ2」「1/2個」「適量」などを 分量+単位 に分ける。
+ * 「200g」「大さじ2」「1/2個」「適量」「大さじ2〜3」などを 分量+単位 に分ける。
  * 「1枚（250g）」のような単位末尾の括弧書きは memo として分離して返す。
+ * F3: 範囲分量(「〜」「~」「～」いずれも受け付ける)は amount を「N〜M」に正規化して保持する
+ * (人数スケールには非対応。unit だけ分離できれば十分という裁定)。
  */
 export function splitQuantity(raw: string): { amount: string; unit: string; memo?: string } {
   const text = normalize(raw.trim())
   if (!text) return { amount: '', unit: '' }
+  // 範囲(「〜」「~」「～」いずれも受ける)の出力は「N〜M」に正規化し、前後の空白は除く
+  const normalizeRangeAmount = (s: string) => s.replace(/\s*[〜~～]\s*/, '〜')
 
-  // 「大さじ2」「小さじ1/2」「カップ1」→ 単位が前に来る形
-  const pre = text.match(/^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*(\d+(?:\.\d+)?(?:\/\d+)?)$/)
-  if (pre) return { amount: pre[2], unit: pre[1] }
+  // 「大さじ2」「小さじ1/2」「カップ1」「大さじ2〜3」→ 単位が前に来る形
+  const pre = text.match(
+    /^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*(\d+(?:\.\d+)?(?:\/\d+)?(?:\s*[〜~～]\s*\d+(?:\.\d+)?(?:\/\d+)?)?)$/,
+  )
+  if (pre) return { amount: normalizeRangeAmount(pre[2]), unit: pre[1] }
 
-  // 「200g」「1本」「1/2個」→ 数字が前に来る形
-  const post = text.match(/^(\d+(?:\.\d+)?(?:\/\d+)?)\s*(.*)$/)
+  // 「200g」「1本」「1/2個」「2〜3個」→ 数字が前に来る形
+  const post = text.match(
+    /^(\d+(?:\.\d+)?(?:\/\d+)?(?:\s*[〜~～]\s*\d+(?:\.\d+)?(?:\/\d+)?)?)\s*(.*)$/,
+  )
   if (post) {
+    const amount = normalizeRangeAmount(post[1])
     // 単位の後ろの括弧書き(「1枚（250g）」の「（250g）」)は単位に混ぜず、メモとして分ける
     const paren = post[2].match(/^(.*?)\s*[（(]([^（）()]+)[）)]$/)
     if (paren && paren[1].trim()) {
-      return { amount: post[1], unit: paren[1].trim(), memo: paren[2].trim() }
+      return { amount, unit: paren[1].trim(), memo: paren[2].trim() }
     }
-    return { amount: post[1], unit: post[2] }
+    return { amount, unit: post[2] }
   }
 
   // 「適量」「少々」など数字なし → 分量欄にそのまま
@@ -160,6 +204,9 @@ export function parseRecipeText(text: string): ParsedRecipe {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
+  // F1: 見出し・区切り記号が無いまま「数字＋空白」の連番だけが続く文章かどうかを先読みしておく
+  // (auto/材料modeで数字+空白を手順番号として切り替えてよいかの判定に使う)
+  const spaceNumberSeq = detectSpaceNumberSequence(lines)
 
   let mode: 'auto' | 'ingredients' | 'steps' | 'memo' = 'auto'
   const memoLines: string[] = []
@@ -216,6 +263,24 @@ export function parseRecipeText(text: string): ParsedRecipe {
       continue
     }
 
+    // F1: 区切り記号のない「数字＋空白」の番号手順(クックパッド等の最頻出形式)。
+    // steps mode中はガードG1〜G3を通れば常に剥がす。auto/材料modeは連番プリスキャンで
+    // 検出できたときだけ切り替える(単発の「1 本」のような分量行を誤って手順にしないため)。
+    // 既知の制限: ①「2 3cm幅に切る」のように番号直後が数字始まりの手順文は番号が残る(G1とのトレードオフ)
+    // ②連番材料「1 玉ねぎ 1個」はname欄に「1 」が残る(超少数派のため未対応)
+    const spaceNum = normalized.match(STEP_NUMBER_SPACE)
+    if (spaceNum) {
+      const rest = spaceNum[2].trim()
+      if (
+        !spaceNumberRestIsQuantity(rest) &&
+        (mode === 'steps' || (spaceNumberSeq && !INGREDIENT_LIKE_END.test(rest)))
+      ) {
+        mode = 'steps'
+        result.steps.push(rest)
+        continue
+      }
+    }
+
     if (mode === 'steps') {
       result.steps.push(line.replace(BULLET, '').trim())
       continue
@@ -257,4 +322,8 @@ export function parseRecipeText(text: string): ParsedRecipe {
 
   if (memoLines.length > 0) result.memo = memoLines.join('\n')
   return result
+}
+
+export function looksPoorlyParsed(input: string, parsed: ParsedRecipe): boolean {
+  return parsed.ingredients.length === 0 && parsed.steps.length <= 1 && input.trim().length >= 60
 }

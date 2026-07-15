@@ -26,7 +26,7 @@ import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from
 import { useSettings } from '../db/settings'
 import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
-import { parseRecipeText, autoSplitAmountUnit } from '../logic/parseRecipeText'
+import { parseRecipeText, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeDigits } from '../logic/amount'
@@ -429,6 +429,12 @@ function RecipeFormInner() {
     }
     // 「コツ」「ポイント」「メモ」見出し以降の文章は、メモ欄が空ならそこへ流し込む
     if (parsed.memo && !memo.trim()) setMemo(parsed.memo)
+    // 材料・手順のどちらもほぼ拾えなかった(段落丸ごと1文になった等)場合は、
+    // 読み取れた分はフォームへ流し込んだ上で、うまく振り分けられなかった旨を正直に案内する
+    if (looksPoorlyParsed(pasteText, parsed)) {
+      setPasteMessage(ja.paste.resultPoor)
+      return
+    }
     setPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
