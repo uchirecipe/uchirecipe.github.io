@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus, RotateCcw, Search, X } from 'lucide-react'
 import {
   usePriceEntries,
@@ -8,6 +8,7 @@ import {
   resetPriceEntryToDefault,
 } from '../db/prices'
 import { toHiragana } from '../logic/kana'
+import { parseUnitQuantity } from '../logic/priceEstimate'
 import BackHeader from '../components/BackHeader'
 import { ja } from '../i18n/ja'
 import type { PriceEntry } from '../db/types'
@@ -18,6 +19,81 @@ const inputCls =
 /** blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる) */
 const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
   if (e.key === 'Enter') e.currentTarget.blur()
+}
+
+/**
+ * 2026-07-15 UI改修: 単位欄(自由入力)を「数量(数字)＋単位(選択)」に分離。
+ * オーナー実機フィードバック「単位が自由入力だと不安・使いにくい」への対応
+ * （計算エンジンlogic/priceEstimate.tsは元々単位正規化済みで計算は正しいが、入力UIが
+ * 不安に見えていたのが課題）。並び順は使用頻度順(Fable設計確定)。
+ * 保存形式はDBスキーマ変更なしを保つため従来どおり1つの文字列に合成する。
+ */
+const KNOWN_UNITS = [
+  'g', 'kg', '個', '本', '枚', 'ml', 'L', '大さじ', '小さじ', 'カップ',
+  '玉', '束', 'パック', 'かけ', '片', '株', '尾', '切れ', '丁', '袋', '缶', '房', '節',
+] as const
+const KNOWN_UNIT_SET = new Set<string>(KNOWN_UNITS)
+/** 大さじ/小さじ/カップだけ単位が先(例:「大さじ1」)。それ以外は数量が先(例:「100g」「1個」) */
+const UNIT_FIRST = new Set<string>(['大さじ', '小さじ', 'カップ'])
+/** 単位選択で「その他」を選んだ状態を表す内部値(表示文言=ja.priceMaster.unitOtherとは独立させる) */
+const OTHER_UNIT = 'other'
+
+interface UnitFormState {
+  /** 数量入力欄の生の文字列(その他選択時は使わない) */
+  qty: string
+  /** KNOWN_UNITSのいずれか、またはOTHER_UNIT */
+  unitKind: string
+  /** その他選択時の自由入力欄の文字列 */
+  freeText: string
+}
+
+/**
+ * 保存済みのunit文字列(例:「100g」「1個」「大さじ1」)を編集フォームの初期値に分解する。
+ * priceEstimate.tsのparseUnitQuantityで数量+単位に分解できて、かつ単位が選択肢にある
+ * 場合だけ数量欄＋単位選択で表せる。それ以外(「1杯」「少々」「1/4個」等、選択肢に無い単位や
+ * 分解できない書式)は「その他」＋自由入力欄へフォールバックし、元の文字列をそのまま見せる。
+ */
+function decomposeUnit(raw: string): UnitFormState {
+  const trimmed = raw.trim()
+  if (trimmed) {
+    const { qty, baseUnit } = parseUnitQuantity(trimmed)
+    if (qty > 0 && KNOWN_UNIT_SET.has(baseUnit)) {
+      return { qty: String(qty), unitKind: baseUnit, freeText: '' }
+    }
+  }
+  return { qty: '', unitKind: OTHER_UNIT, freeText: trimmed }
+}
+
+/**
+ * 数量欄＋単位選択(またはその他の自由入力)を、保存用の1つの文字列に合成する。
+ * PRICE_DEFAULTSの既存表記(「100g」「1個」「大さじ1」等)と完全一致する形にすることが必須
+ * （updatePriceEntryのisDefault再判定が文字列比較のため。「デフォルトに戻す」表示条件に直結する）。
+ * 数量が空・0以下、またはその他選択時に自由入力が空なら未入力扱いでundefinedを返す
+ * （呼び出し側で「空・0以下は保存しない」既存挙動を踏襲する）。
+ */
+function composeUnit(state: UnitFormState): string | undefined {
+  if (state.unitKind === OTHER_UNIT) {
+    const trimmed = state.freeText.trim()
+    return trimmed || undefined
+  }
+  const qty = Number(state.qty)
+  if (!(qty > 0)) return undefined
+  const qtyStr = String(qty)
+  return UNIT_FIRST.has(state.unitKind) ? `${state.unitKind}${qtyStr}` : `${qtyStr}${state.unitKind}`
+}
+
+/** 単位選択(select)の共通の選択肢一覧(末尾に「その他」を追加) */
+function UnitKindOptions() {
+  return (
+    <>
+      {KNOWN_UNITS.map((u) => (
+        <option key={u} value={u}>
+          {u}
+        </option>
+      ))}
+      <option value={OTHER_UNIT}>{ja.priceMaster.unitOther}</option>
+    </>
+  )
 }
 
 /**
@@ -39,6 +115,10 @@ const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
  * （db/prices.tsのaddPriceEntryが判定。二重登録を作らないことが目的）、
  * (3)「デフォルトに戻す」が消えないバグを修正（db/prices.tsのupdatePriceEntryが
  * 価格・単位を既定値と毎回比較してisDefaultを再判定するように変更）
+ *
+ * 2026-07-15 UI改修: 単位欄(自由入力1本)を「数量(数字)＋単位(選択)」に分離
+ * （オーナー実機フィードバック: 自由入力だと不安・使いにくい）。保存はこれまでどおり
+ * 1つの文字列(composeUnit)なのでDBスキーマ・按分計算(logic/priceEstimate.ts)は変更なし。
  */
 export default function IngredientPricesPage() {
   const entries = usePriceEntries()
@@ -65,12 +145,15 @@ export default function IngredientPricesPage() {
   // 新規追加
   const [newName, setNewName] = useState('')
   const [newPrice, setNewPrice] = useState('')
-  const [newUnit, setNewUnit] = useState('')
+  const [newUnit, setNewUnit] = useState<UnitFormState>({ qty: '', unitKind: KNOWN_UNITS[0], freeText: '' })
+  const newUnitComposed = composeUnit(newUnit)
   // 重複登録を拒否したときの案内メッセージ(2026-07-14 オーナー実機フィードバック)。
   // 入力し直したら自然に消えるよう、各入力欄のonChangeでもクリアする
   const [addError, setAddError] = useState('')
   const addNew = async () => {
-    const result = await addPriceEntry(newName, Number(newPrice) || 0, newUnit)
+    const composed = composeUnit(newUnit)
+    if (!composed) return
+    const result = await addPriceEntry(newName, Number(newPrice) || 0, composed)
     if (result.status === 'invalid') return
     if (result.status === 'duplicate') {
       setAddError(ja.priceMaster.duplicateName.replace('{name}', result.existingName))
@@ -79,7 +162,7 @@ export default function IngredientPricesPage() {
     setAddError('')
     setNewName('')
     setNewPrice('')
-    setNewUnit('')
+    setNewUnit({ qty: '', unitKind: KNOWN_UNITS[0], freeText: '' })
   }
 
   return (
@@ -118,17 +201,49 @@ export default function IngredientPricesPage() {
               aria-label={ja.priceMaster.priceLabel}
               className={inputCls}
             />
-            <input
-              type="text"
-              value={newUnit}
+            {newUnit.unitKind === OTHER_UNIT ? (
+              <input
+                type="text"
+                value={newUnit.freeText}
+                onChange={(e) => {
+                  setNewUnit((s) => ({ ...s, freeText: e.target.value }))
+                  setAddError('')
+                }}
+                placeholder={ja.priceMaster.unitPlaceholder}
+                aria-label={ja.priceMaster.unitLabel}
+                className={inputCls}
+              />
+            ) : (
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                value={newUnit.qty}
+                onChange={(e) => {
+                  setNewUnit((s) => ({ ...s, qty: e.target.value }))
+                  setAddError('')
+                }}
+                placeholder={ja.priceMaster.quantityPlaceholder}
+                aria-label={ja.priceMaster.quantityLabel}
+                className="w-20 shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink placeholder:text-ink-muted/60"
+              />
+            )}
+            <select
+              value={newUnit.unitKind}
               onChange={(e) => {
-                setNewUnit(e.target.value)
+                const unitKind = e.target.value
+                setNewUnit((s) =>
+                  unitKind === OTHER_UNIT
+                    ? { ...s, unitKind, freeText: composeUnit(s) ?? s.freeText }
+                    : { ...s, unitKind },
+                )
                 setAddError('')
               }}
-              placeholder={ja.priceMaster.unitPlaceholder}
-              aria-label={ja.priceMaster.unitLabel}
-              className={inputCls}
-            />
+              aria-label={ja.priceMaster.unitTypeLabel}
+              className="shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
+            >
+              <UnitKindOptions />
+            </select>
           </div>
           {addError && (
             <p role="alert" className="text-sm font-bold text-warning">
@@ -138,7 +253,7 @@ export default function IngredientPricesPage() {
           <button
             type="button"
             onClick={() => void addNew()}
-            disabled={!newName.trim() || !newUnit.trim() || !(Number(newPrice) > 0)}
+            disabled={!newName.trim() || !newUnitComposed || !(Number(newPrice) > 0)}
             className="flex w-full items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
           >
             <Plus size={16} aria-hidden />
@@ -210,10 +325,80 @@ function PriceRow({
   const isDefault = entry.isDefault === true
   const canReset = !isDefault && entry.defaultPricePerUnit != null && entry.defaultUnit != null
 
+  // 数量欄＋単位選択はqty/select/freeTextの3つの入力が互いに絡んで1つの文字列に合成されるため、
+  // 価格欄のような単純なuncontrolled+key再マウント方式ではなくローカルstateで持つ。
+  // entry.unit(DB由来の確定値)が外部要因(デフォルトに戻す・バックアップ復元等)で変わったときだけ
+  // 分解し直す(このページの再描画自体はentries全体のlive queryで頻繁に起きるが、
+  // entry.unitの値自体が変わらない限りeffectは再実行されないので編集中の入力が飛ぶことはない)
+  const [unitState, setUnitState] = useState<UnitFormState>(() => decomposeUnit(entry.unit))
+  useEffect(() => {
+    setUnitState(decomposeUnit(entry.unit))
+  }, [entry.unit])
+
+  const commitUnitState = (next: UnitFormState) => {
+    const composed = composeUnit(next)
+    // 実質的な変更が無ければ書き込まない(isDefaultの不要な再判定・無用なupdatedAt更新を避ける)
+    if (!composed || composed === entry.unit) return
+    onCommitUnit(entry.id!, composed)
+  }
+
   return (
-    <li className="flex items-center gap-2 px-[var(--space-sm)] py-2.5">
+    <li className="flex items-start gap-2 px-[var(--space-sm)] py-2.5">
       <div className="min-w-0 flex-1">
         <p className="truncate font-bold">{entry.name}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <input
+            key={`price-${entry.id}-${entry.pricePerUnit}`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            defaultValue={entry.pricePerUnit}
+            onBlur={(e) => onCommitPrice(entry.id!, e.target.value)}
+            onKeyDown={blurOnEnter}
+            aria-label={ja.priceMaster.entryPriceAria.replace('{name}', entry.name)}
+            className="w-16 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
+          />
+          <span className="text-sm text-ink-muted">{ja.priceMaster.priceYen}/</span>
+          {unitState.unitKind === OTHER_UNIT ? (
+            <input
+              type="text"
+              value={unitState.freeText}
+              onChange={(e) => setUnitState((s) => ({ ...s, freeText: e.target.value }))}
+              onBlur={() => commitUnitState(unitState)}
+              onKeyDown={blurOnEnter}
+              aria-label={ja.priceMaster.entryUnitOtherAria.replace('{name}', entry.name)}
+              className="w-20 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
+            />
+          ) : (
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={unitState.qty}
+              onChange={(e) => setUnitState((s) => ({ ...s, qty: e.target.value }))}
+              onBlur={() => commitUnitState(unitState)}
+              onKeyDown={blurOnEnter}
+              aria-label={ja.priceMaster.entryQuantityAria.replace('{name}', entry.name)}
+              className="w-14 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
+            />
+          )}
+          <select
+            value={unitState.unitKind}
+            onChange={(e) => {
+              const unitKind = e.target.value
+              const next: UnitFormState =
+                unitKind === OTHER_UNIT
+                  ? { ...unitState, unitKind, freeText: composeUnit(unitState) ?? entry.unit }
+                  : { ...unitState, unitKind }
+              setUnitState(next)
+              commitUnitState(next)
+            }}
+            aria-label={ja.priceMaster.entryUnitAria.replace('{name}', entry.name)}
+            className="rounded-sm border border-edge bg-app px-1 py-2 text-sm text-ink"
+          >
+            <UnitKindOptions />
+          </select>
+        </div>
         {/* 「目安」/「自分の価格」バッジは廃止(2026-07-13 UI改善: ページ冒頭の一文で説明を代替) */}
         {canReset && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -228,29 +413,6 @@ function PriceRow({
             </button>
           </div>
         )}
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <input
-          key={`price-${entry.id}-${entry.pricePerUnit}`}
-          type="number"
-          inputMode="numeric"
-          min={0}
-          defaultValue={entry.pricePerUnit}
-          onBlur={(e) => onCommitPrice(entry.id!, e.target.value)}
-          onKeyDown={blurOnEnter}
-          aria-label={ja.priceMaster.entryPriceAria.replace('{name}', entry.name)}
-          className="w-16 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
-        />
-        <span className="text-sm text-ink-muted">{ja.priceMaster.priceYen}/</span>
-        <input
-          key={`unit-${entry.id}-${entry.unit}`}
-          type="text"
-          defaultValue={entry.unit}
-          onBlur={(e) => onCommitUnit(entry.id!, e.target.value)}
-          onKeyDown={blurOnEnter}
-          aria-label={ja.priceMaster.entryUnitAria.replace('{name}', entry.name)}
-          className="w-16 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
-        />
       </div>
       <button
         type="button"

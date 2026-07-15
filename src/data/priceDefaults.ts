@@ -136,7 +136,9 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'だしの素', pricePerUnit: 10, unit: '小さじ1' },
   { name: 'だし汁', pricePerUnit: 20, unit: '200ml' },
   { name: '水またはだし汁', pricePerUnit: 15, unit: '200ml' },
-  { name: 'コンソメ', pricePerUnit: 15, unit: '1小さじ' },
+  // 2026-07-15修正: 他の小さじ表記(だしの素・塩など)と揃え「小さじ1」に統一
+  // (単位先行表記。数量＋単位選択UIの合成結果と完全一致させるため)
+  { name: 'コンソメ', pricePerUnit: 15, unit: '小さじ1' },
   { name: '中濃ソース', pricePerUnit: 15, unit: '大さじ1' },
   { name: 'ケチャップ', pricePerUnit: 15, unit: '大さじ1' },
   { name: 'マヨネーズ', pricePerUnit: 15, unit: '大さじ1' },
