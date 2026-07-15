@@ -121,6 +121,15 @@
 //         「価格なし」)が表示され、「食材と価格を編集する」への案内リンクも現れる。「価格を隠す」
 //         で元に戻ることを確認。オーナー仕様変更(同日)で由来バッジ(目安/自分の価格)表示は
 //         廃止したため、バッジの有無は確認対象外) /
+//         FORMTABS-01(レシピ編集フォームの「かんたん/くわしく」タブ分け・2026-07-16 Fable裁定
+//         docs/26・案A承認。(a)新規登録の初期表示は常に「かんたん」タブで、かんたんタブの入力
+//         だけで保存が成功する (b)「くわしく」タブ側フィールドに入力があると見出し右に●が出て
+//         空のうちは出ない(aria-label「入力済みの項目があります」で判定) (c)「くわしく」タブ
+//         表示中に料理名未入力のまま保存すると、エラー表示とともに「かんたん」タブへ自動的に
+//         戻る (d)両タブのDOMを常時マウントしhidden属性で切り替えるだけの実装のため、タブを
+//         往復してもくわしくタブの入力内容が消えない(state維持)ことを確認。既存のKW-01/
+//         INTRO-01/ONEPOINT-01/DISHTYPE-01もタブ分けで対象フィールドが「くわしく」タブの中に
+//         入ったため、タブ切替の1手を追加済み) /
 //         FORMRESET-01(レシピ編集画面の「デフォルトに戻す」・2026-07-15 オーナー要望。DBには
 //         書き込まずフォームの入力値だけを差し替える安全設計。(a)基本レシピ「肉じゃが」の編集で
 //         タイトル・材料を書き換え→ボタンは1回目「もう一度押すと戻します」に変化するだけで
@@ -482,6 +491,9 @@ try {
   await page.getByPlaceholder('例: 肉じゃが').fill('E2Eキーワード確認レシピ')
   await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
   await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  // 検索キーワード欄は「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
+  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.waitForTimeout(200)
   const kwInput = page.getByPlaceholder('例: チンジャオロース、おつまみ など')
   await kwInput.fill('ずっきーにのひみつご')
   await kwInput.press('Enter') // タグと同じくEnterでチップ化(addKeyword)
@@ -523,9 +535,14 @@ try {
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
   await page.getByPlaceholder('例: 肉じゃが').fill('E2Eひとこと説明確認レシピ')
+  // ひとこと説明欄は「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
+  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.waitForTimeout(200)
   await page
     .getByPlaceholder('例: ヨーグルトに二種類のソースをかけた見た目も楽しいデザートです')
     .fill('E2E確認用のひとこと説明テキスト')
+  await page.getByRole('tab', { name: 'かんたん' }).click()
+  await page.waitForTimeout(200)
   await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
   await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
   await page.getByRole('button', { name: '保存する' }).click()
@@ -565,6 +582,9 @@ try {
   await page.getByPlaceholder('例: 肉じゃが').fill('E2Eワンポイントメモ確認レシピ')
   await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
   await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  // ワンポイント・メモ欄は「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
+  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.waitForTimeout(200)
   await page
     .getByPlaceholder('こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に')
     .fill('E2E確認用のワンポイント本文')
@@ -592,9 +612,12 @@ try {
     `headings: ${JSON.stringify(onePointHeadings)}`,
   )
 
-  // 編集画面を開き直しても両方の入力が保持される(DB保存の確認)
+  // 編集画面を開き直しても両方の入力が保持される(DB保存の確認)。編集画面の初期表示は
+  // 常に「かんたん」タブのため、ワンポイント・メモを確認するには「くわしく」への切替が必要
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
+  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.waitForTimeout(200)
   const onePointEditValue = await page
     .getByPlaceholder('こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に')
     .inputValue()
@@ -624,6 +647,9 @@ try {
   await page.getByPlaceholder('例: 肉じゃが').fill('E2E種別チップ確認レシピ')
   await page.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
   await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+  // 種別チップは「くわしく」タブの中(2026-07-16 かんたん/くわしくタブ分け)
+  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.waitForTimeout(200)
   const sideChip = page.getByRole('button', { name: '副菜', exact: true })
   check('DISHTYPE-01 保存前は「副菜」チップが未選択', !(await isChipActive(sideChip)))
   await sideChip.click()
@@ -637,6 +663,8 @@ try {
   )
   await page.locator('a[href*="/edit"]').first().click()
   await page.waitForTimeout(500)
+  await page.getByRole('tab', { name: 'くわしく' }).click()
+  await page.waitForTimeout(200)
   const sideChipEdit = page.getByRole('button', { name: '副菜', exact: true })
   check('DISHTYPE-01 編集画面を開き直しても選択状態が保持される(DB保存の確認)', await isChipActive(sideChipEdit))
   await sideChipEdit.click()
@@ -3201,6 +3229,103 @@ try {
       )
     } finally {
       await pvBrowser.close()
+    }
+  }
+
+  // --- FORMTABS-01: レシピ編集フォームの「かんたん/くわしく」タブ分け(2026-07-16 Fable裁定
+  // docs/26・案A承認)。(a)新規登録の初期表示は常に「かんたん」タブで、かんたんタブの入力だけで
+  // 保存が成功すること (b)「くわしく」タブ側フィールドに入力があると見出し右の●
+  // (aria-label「入力済みの項目があります」)が出ること・空のうちは出ないこと
+  // (c)「くわしく」タブを表示中に料理名未入力のまま保存すると、エラー表示とともに
+  // 「かんたん」タブへ自動的に戻ること (d)実装は両タブのDOMを常時マウントし`hidden`属性で
+  // 切り替えるだけのため、くわしくタブの入力内容がタブ往復でも消えない(state維持)ことを確認する ---
+  currentCheck = 'FORMTABS-01'
+  {
+    const ftBrowser = await chromium.launch()
+    const ftContext = await ftBrowser.newContext()
+    const ftPage = await ftContext.newPage()
+    ftPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FORMTABS-01] ${err.message}`)
+    })
+    try {
+      await ftPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // (a) 新規登録の初期表示は常に「かんたん」タブ。かんたんタブの入力だけで保存が成功する
+      await ftPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(500)
+      const simpleTab = ftPage.getByRole('tab', { name: 'かんたん' })
+      const detailTab = ftPage.getByRole('tab', { name: 'くわしく' })
+      check(
+        'FORMTABS-01a 新規登録の初期表示は「かんたん」タブ(aria-selected)',
+        (await simpleTab.getAttribute('aria-selected')) === 'true' &&
+          (await detailTab.getAttribute('aria-selected')) === 'false',
+      )
+      await ftPage.getByPlaceholder('例: 肉じゃが').fill('E2Eタブかんたん保存確認レシピ')
+      await ftPage.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
+      await ftPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+      await ftPage.getByRole('button', { name: '保存する' }).click()
+      await ftPage.waitForTimeout(800)
+      check(
+        'FORMTABS-01a かんたんタブの入力だけで保存が成功する(くわしくは未入力のまま)',
+        (await ftPage.textContent('body')).includes('E2Eタブかんたん保存確認レシピ'),
+      )
+      // 後始末: 検証用に作成したレシピを削除
+      await ftPage.locator('a[href*="/edit"]').first().click()
+      await ftPage.waitForTimeout(500)
+      await ftPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await ftPage.waitForTimeout(800)
+
+      // (b) くわしくタブが空のうちは●が出ず、入力があると出る
+      await ftPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(500)
+      const dotBefore = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
+      check('FORMTABS-01b くわしくタブが空のうちは●が出ない', dotBefore === 0)
+      await ftPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ftPage.waitForTimeout(200)
+      await ftPage.getByPlaceholder('気づいたこと・アレンジなどを自由に').fill('E2Eタブ確認メモ')
+      await ftPage.waitForTimeout(200)
+      const dotAfter = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
+      check('FORMTABS-01b くわしくに入力があると見出し右に●が出る', dotAfter > 0)
+
+      // (c) くわしくタブを表示中に料理名未入力のまま保存すると、エラー表示+「かんたん」タブへ戻る
+      await ftPage.getByRole('button', { name: '保存する' }).click()
+      await ftPage.waitForTimeout(300)
+      check(
+        'FORMTABS-01c 料理名未入力で保存するとエラーが表示される',
+        (await ftPage.textContent('body')).includes('料理名を入力してください'),
+      )
+      check(
+        'FORMTABS-01c 料理名未入力で保存すると「かんたん」タブへ自動的に戻る',
+        (await simpleTab.getAttribute('aria-selected')) === 'true' &&
+          (await detailTab.getAttribute('aria-selected')) === 'false',
+      )
+
+      // (d) タブ往復してもくわしくタブの入力内容が消えない(両タブのDOMを常時マウントし
+      // hidden属性で切り替えているだけの実装であることの確認)
+      await ftPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ftPage.waitForTimeout(200)
+      const memoBeforeSwitch = await ftPage
+        .getByPlaceholder('気づいたこと・アレンジなどを自由に')
+        .inputValue()
+      check(
+        'FORMTABS-01d くわしくタブへ戻るとメモの入力内容がまだ残っている(切替前確認)',
+        memoBeforeSwitch === 'E2Eタブ確認メモ',
+      )
+      await ftPage.getByRole('tab', { name: 'かんたん' }).click()
+      await ftPage.waitForTimeout(200)
+      await ftPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ftPage.waitForTimeout(200)
+      const memoAfterSwitch = await ftPage
+        .getByPlaceholder('気づいたこと・アレンジなどを自由に')
+        .inputValue()
+      check(
+        'FORMTABS-01d かんたん→くわしくと切り替えてもメモの入力内容が残っている(state維持)',
+        memoAfterSwitch === 'E2Eタブ確認メモ',
+      )
+    } finally {
+      await ftBrowser.close()
     }
   }
 

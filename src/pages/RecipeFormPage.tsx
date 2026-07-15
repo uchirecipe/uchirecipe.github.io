@@ -148,6 +148,39 @@ function move<T>(list: T[], from: number, to: number): T[] {
   return next
 }
 
+/** 「くわしく」タブ見出しの●表示判定(2026-07-16 Fable裁定docs/26 論点3)。保存stateにはせず、
+ * 現在の入力値から毎レンダー導出する(リセット/下書き復元/貼り付けと自動整合するため)。
+ * effortLevelは'normal'(既定値)を、showIconInsteadOfPhotoはfalse(既定値)を未入力扱いとする */
+function deriveHasDetailInput(fields: {
+  intro: string
+  cookMinutes: string
+  effortLevel: EffortLevel
+  season: Season | undefined
+  suitableFor: MealSlot[]
+  dishType: DishType | undefined
+  tags: string[]
+  keywords: string[]
+  onePoint: string
+  memo: string
+  sourceUrl: string
+  showIconInsteadOfPhoto: boolean
+}): boolean {
+  return (
+    fields.intro.trim() !== '' ||
+    fields.cookMinutes.trim() !== '' ||
+    fields.effortLevel !== 'normal' ||
+    fields.season !== undefined ||
+    fields.suitableFor.length > 0 ||
+    fields.dishType !== undefined ||
+    fields.tags.length > 0 ||
+    fields.keywords.length > 0 ||
+    fields.onePoint.trim() !== '' ||
+    fields.memo.trim() !== '' ||
+    fields.sourceUrl.trim() !== '' ||
+    fields.showIconInsteadOfPhoto
+  )
+}
+
 /**
  * レシピ登録・編集画面（/recipes/new と /recipes/:id/edit の両方で使う）。
  * 新規⇄編集を直接行き来してもReactが同じ画面を使い回さないよう、
@@ -187,6 +220,10 @@ function RecipeFormInner() {
   const [dishType, setDishType] = useState<DishType>()
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // 「かんたん / くわしく」タブ(2026-07-16 Fable裁定docs/26・案A)。ページローカルの表示状態のみで、
+  // 保存対象にも下書き対象にもしない(URLにも載せない)。新規・編集とも初期表示は常に「かんたん」
+  const [activeTab, setActiveTab] = useState<'simple' | 'detail'>('simple')
 
   // テキスト貼り付けで自動入力
   const [pasteOpen, setPasteOpen] = useState(false)
@@ -495,6 +532,9 @@ function RecipeFormInner() {
   const save = async () => {
     if (!title.trim()) {
       setError(ja.form.nameRequired)
+      // 「くわしく」タブを見ている間に料理名未入力で保存を押した場合、必須項目が
+      // 隠れたタブに残らないよう「かんたん」タブへ自動で戻す(Fable裁定docs/26 論点4)
+      setActiveTab('simple')
       window.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
@@ -755,6 +795,22 @@ function RecipeFormInner() {
     performReset()
   }
 
+  // 「くわしく」タブ見出しの●表示(保存stateではなく値から毎レンダー導出。上のderive関数を参照)
+  const hasDetailInput = deriveHasDetailInput({
+    intro,
+    cookMinutes,
+    effortLevel,
+    season,
+    suitableFor,
+    dishType,
+    tags,
+    keywords,
+    onePoint,
+    memo,
+    sourceUrl,
+    showIconInsteadOfPhoto,
+  })
+
   return (
     <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       <BackHeader fallback={isEdit && editId !== undefined ? `/recipes/${editId}` : '/recipes'} />
@@ -832,6 +888,41 @@ function RecipeFormInner() {
         </div>
       )}
 
+      {/* かんたん / くわしく タブ(2026-07-16 Fable裁定docs/26・案A承認)。DOMは両タブとも常時
+          マウントし、非表示は`hidden`属性の切替だけで行う(state消失リスクゼロ)。表示のグルーピング
+          だけを変えるもので、フィールドのstate・保存ロジック・下書き自動保存・リセットは不変 */}
+      <div className="mt-[var(--space-md)] flex border-b border-edge" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'simple'}
+          onClick={() => setActiveTab('simple')}
+          className={`flex-1 border-b-2 py-3 text-center font-bold ${
+            activeTab === 'simple' ? 'border-accent text-accent' : 'border-transparent text-ink-muted'
+          }`}
+        >
+          {ja.form.formTabSimple}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'detail'}
+          onClick={() => setActiveTab('detail')}
+          className={`flex-1 border-b-2 py-3 text-center font-bold ${
+            activeTab === 'detail' ? 'border-accent text-accent' : 'border-transparent text-ink-muted'
+          }`}
+        >
+          {ja.form.formTabDetail}
+          {hasDetailInput && (
+            <span
+              aria-label={ja.form.formTabDetailFilledHint}
+              className="ml-1.5 inline-block h-2 w-2 rounded-full bg-accent align-middle"
+            />
+          )}
+        </button>
+      </div>
+
+      <div hidden={activeTab !== 'simple'}>
       {/* 料理名 */}
       <label className={`mt-[var(--space-md)] ${labelCls}`}>
         {ja.form.nameLabel}
@@ -844,141 +935,8 @@ function RecipeFormInner() {
         />
       </label>
 
-      {/* ひとこと説明（任意。料理名だけでは中身が想像しにくい料理向け。2026-07-13） */}
-      <label className={`mt-[var(--space-md)] ${labelCls}`}>
-        {ja.form.introLabel}
-        <input
-          type="text"
-          value={intro}
-          onChange={(e) => setIntro(e.target.value)}
-          placeholder={ja.form.introPlaceholder}
-          className={inputCls}
-        />
-      </label>
-
-      {/* 写真（カメラ / アルバム） */}
+      {/* 人数分 */}
       <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.photoLabel}</span>
-        {photoUrl && (
-          <img
-            src={photoUrl}
-            alt={title || ja.form.photoLabel}
-            className="mt-1 aspect-video w-full rounded-md object-cover shadow-sm"
-          />
-        )}
-        <div className="mt-2 flex gap-2">
-          {/* capture="environment" 付き → スマホでカメラが直接開く */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => onPhotoSelected(e.target.files?.[0])}
-          />
-          <input
-            ref={albumInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => onPhotoSelected(e.target.files?.[0])}
-          />
-          <button
-            type="button"
-            onClick={() => cameraInputRef.current?.click()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold shadow-sm"
-          >
-            <Camera size={20} className="text-accent" aria-hidden />
-            {ja.form.photoTake}
-          </button>
-          <button
-            type="button"
-            onClick={() => albumInputRef.current?.click()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold shadow-sm"
-          >
-            <ImageIcon size={20} className="text-accent" aria-hidden />
-            {ja.form.photoPick}
-          </button>
-        </div>
-        {photo && (
-          <button
-            type="button"
-            onClick={() => setPhoto(undefined)}
-            className="mt-2 text-sm text-warning underline"
-          >
-            {ja.form.photoRemove}
-          </button>
-        )}
-      </div>
-
-      {/* アイコン（一覧・詳細で写真の代わりに使うプレースホルダー） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.iconLabel}</span>
-        <p className="mt-0.5 text-sm text-ink-muted">{ja.form.iconDescription}</p>
-        <div className="mt-2 grid grid-cols-4 gap-2">
-          <button
-            type="button"
-            onClick={() => setIconKey(undefined)}
-            className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
-              iconKey === undefined
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
-          >
-            <ImageIcon size={20} aria-hidden />
-            {ja.form.iconAuto}
-          </button>
-          {iconKeyOrder.map((key) => {
-            const Icon = iconComponents[key]
-            const isAutoPick = iconKey === undefined && pickIconKey({ title, tags, ingredients }) === key
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setIconKey(key)}
-                className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
-                  iconKey === key
-                    ? 'border-accent bg-accent text-on-accent'
-                    : isAutoPick
-                      ? 'border-accent bg-accent/10 text-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                }`}
-              >
-                <Icon size={20} aria-hidden />
-                {ja.icon[key]}
-              </button>
-            )
-          })}
-        </div>
-        {photo && (
-          <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3 rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm">
-            <span className="text-sm font-bold text-ink-muted">
-              {ja.form.iconShowInsteadOfPhoto}
-              <span className="mt-0.5 block text-xs font-normal text-ink-muted">
-                {ja.form.iconShowInsteadOfPhotoDescription}
-              </span>
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showIconInsteadOfPhoto}
-              onClick={() => setShowIconInsteadOfPhoto((v) => !v)}
-              className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
-                showIconInsteadOfPhoto ? 'bg-accent' : 'bg-edge'
-              }`}
-            >
-              <span
-                className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
-                  showIconInsteadOfPhoto ? 'left-7' : 'left-1'
-                }`}
-              />
-            </button>
-          </label>
-        )}
-      </div>
-
-      {/* 人数分・調理時間 */}
-      <div className="mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]">
         <label className={labelCls}>
           {ja.form.servingsLabel}
           <div className="mt-1 flex items-center gap-2">
@@ -1004,109 +962,6 @@ function RecipeFormInner() {
             </button>
           </div>
         </label>
-        <label className={labelCls}>
-          {ja.form.cookMinutesLabel}
-          <input
-            type="number"
-            inputMode="numeric"
-            min={0}
-            value={cookMinutes}
-            onChange={(e) => setCookMinutes(e.target.value)}
-            placeholder={ja.form.cookMinutesPlaceholder}
-            className={inputCls}
-          />
-        </label>
-      </div>
-
-      {/* 手間レベル（3段階） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.effortLabel}</span>
-        <div className="mt-1 grid grid-cols-3 gap-[var(--space-sm)]">
-          {effortLevels.map((level) => (
-            <button
-              key={level}
-              type="button"
-              onClick={() => setEffortLevel(level)}
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                effortLevel === level
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.effort[level]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 季節（任意・もう一度押すと解除） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.seasonLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.seasonDescription}</p>
-        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
-          {seasons.map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSeason((current) => (current === value ? undefined : value))}
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                season === value
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.season[value]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 向いている時間帯（任意・複数選択可） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.suitableForLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.suitableForDescription}</p>
-        <div className="mt-1 grid grid-cols-3 gap-[var(--space-sm)]">
-          {mealSlots.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              onClick={() =>
-                setSuitableFor((current) =>
-                  current.includes(slot) ? current.filter((s) => s !== slot) : [...current, slot],
-                )
-              }
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                suitableFor.includes(slot)
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.mealPlan.slot[slot]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* 料理の種別（任意・もう一度押すと解除。献立プランナーの主菜/副菜提案に使う） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.dishTypeLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeDescription}</p>
-        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
-          {dishTypes.map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setDishType((current) => (current === value ? undefined : value))}
-              className={`rounded-md border py-3 font-bold shadow-sm ${
-                dishType === value
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.dishType[value]}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* 材料（追加・削除・並べ替え） */}
@@ -1306,6 +1161,223 @@ function RecipeFormInner() {
         </button>
       </div>
 
+      {/* 見た目（写真＋アイコンをこの1セクションに統合。「写真の代わりにアイコンを表示」の
+          細かい設定はくわしくタブへ。2026-07-16 Fable裁定docs/26 論点2） */}
+      {/* 写真（カメラ / アルバム） */}
+      <div className="mt-[var(--space-lg)]">
+        <span className={labelCls}>{ja.form.photoLabel}</span>
+        {photoUrl && (
+          <img
+            src={photoUrl}
+            alt={title || ja.form.photoLabel}
+            className="mt-1 aspect-video w-full rounded-md object-cover shadow-sm"
+          />
+        )}
+        <div className="mt-2 flex gap-2">
+          {/* capture="environment" 付き → スマホでカメラが直接開く */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => onPhotoSelected(e.target.files?.[0])}
+          />
+          <input
+            ref={albumInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => onPhotoSelected(e.target.files?.[0])}
+          />
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold shadow-sm"
+          >
+            <Camera size={20} className="text-accent" aria-hidden />
+            {ja.form.photoTake}
+          </button>
+          <button
+            type="button"
+            onClick={() => albumInputRef.current?.click()}
+            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold shadow-sm"
+          >
+            <ImageIcon size={20} className="text-accent" aria-hidden />
+            {ja.form.photoPick}
+          </button>
+        </div>
+        {photo && (
+          <button
+            type="button"
+            onClick={() => setPhoto(undefined)}
+            className="mt-2 text-sm text-warning underline"
+          >
+            {ja.form.photoRemove}
+          </button>
+        )}
+      </div>
+
+      {/* アイコン（一覧・詳細で写真の代わりに使うプレースホルダー） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.iconLabel}</span>
+        <p className="mt-0.5 text-sm text-ink-muted">{ja.form.iconDescription}</p>
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          <button
+            type="button"
+            onClick={() => setIconKey(undefined)}
+            className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
+              iconKey === undefined
+                ? 'border-accent bg-accent text-on-accent'
+                : 'border-edge bg-surface text-ink-muted'
+            }`}
+          >
+            <ImageIcon size={20} aria-hidden />
+            {ja.form.iconAuto}
+          </button>
+          {iconKeyOrder.map((key) => {
+            const Icon = iconComponents[key]
+            const isAutoPick = iconKey === undefined && pickIconKey({ title, tags, ingredients }) === key
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setIconKey(key)}
+                className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
+                  iconKey === key
+                    ? 'border-accent bg-accent text-on-accent'
+                    : isAutoPick
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                }`}
+              >
+                <Icon size={20} aria-hidden />
+                {ja.icon[key]}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      </div>
+
+      <div hidden={activeTab !== 'detail'}>
+      {/* 紹介文（ひとこと説明。任意。2026-07-13） */}
+      <label className={`mt-[var(--space-md)] ${labelCls}`}>
+        {ja.form.introLabel}
+        <input
+          type="text"
+          value={intro}
+          onChange={(e) => setIntro(e.target.value)}
+          placeholder={ja.form.introPlaceholder}
+          className={inputCls}
+        />
+      </label>
+
+      {/* 調理時間 */}
+      <label className={`mt-[var(--space-md)] ${labelCls}`}>
+        {ja.form.cookMinutesLabel}
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          value={cookMinutes}
+          onChange={(e) => setCookMinutes(e.target.value)}
+          placeholder={ja.form.cookMinutesPlaceholder}
+          className={inputCls}
+        />
+      </label>
+
+      {/* 手間レベル（3段階） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.effortLabel}</span>
+        <div className="mt-1 grid grid-cols-3 gap-[var(--space-sm)]">
+          {effortLevels.map((level) => (
+            <button
+              key={level}
+              type="button"
+              onClick={() => setEffortLevel(level)}
+              className={`rounded-md border py-3 font-bold shadow-sm ${
+                effortLevel === level
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.effort[level]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 季節（任意・もう一度押すと解除） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.seasonLabel}</span>
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.seasonDescription}</p>
+        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
+          {seasons.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setSeason((current) => (current === value ? undefined : value))}
+              className={`rounded-md border py-3 font-bold shadow-sm ${
+                season === value
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.season[value]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 向いている時間帯（任意・複数選択可） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.suitableForLabel}</span>
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.suitableForDescription}</p>
+        <div className="mt-1 grid grid-cols-3 gap-[var(--space-sm)]">
+          {mealSlots.map((slot) => (
+            <button
+              key={slot}
+              type="button"
+              onClick={() =>
+                setSuitableFor((current) =>
+                  current.includes(slot) ? current.filter((s) => s !== slot) : [...current, slot],
+                )
+              }
+              className={`rounded-md border py-3 font-bold shadow-sm ${
+                suitableFor.includes(slot)
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.mealPlan.slot[slot]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 料理の種別（任意・もう一度押すと解除。献立プランナーの主菜/副菜提案に使う） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.dishTypeLabel}</span>
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeDescription}</p>
+        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
+          {dishTypes.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setDishType((current) => (current === value ? undefined : value))}
+              className={`rounded-md border py-3 font-bold shadow-sm ${
+                dishType === value
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.dishType[value]}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* タグ（自由追加） */}
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.tagsLabel}</span>
@@ -1434,6 +1506,35 @@ function RecipeFormInner() {
           className={inputCls}
         />
       </label>
+
+      {/* 写真の代わりにアイコンを表示するトグル(見た目の細かい設定。かんたんタブの「見た目」から
+          切り離してこちらへ。2026-07-16 Fable裁定docs/26 論点2) */}
+      {photo && (
+        <label className="mt-[var(--space-md)] flex items-center justify-between gap-3 rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm">
+          <span className="text-sm font-bold text-ink-muted">
+            {ja.form.iconShowInsteadOfPhoto}
+            <span className="mt-0.5 block text-xs font-normal text-ink-muted">
+              {ja.form.iconShowInsteadOfPhotoDescription}
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showIconInsteadOfPhoto}
+            onClick={() => setShowIconInsteadOfPhoto((v) => !v)}
+            className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+              showIconInsteadOfPhoto ? 'bg-accent' : 'bg-edge'
+            }`}
+          >
+            <span
+              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                showIconInsteadOfPhoto ? 'left-7' : 'left-1'
+              }`}
+            />
+          </button>
+        </label>
+      )}
+      </div>
 
       {/* 保存・キャンセル */}
       <div className="mt-[var(--space-lg)] flex gap-2">

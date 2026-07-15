@@ -469,6 +469,11 @@ export const ja = {
   form: {
     newTitle: 'レシピを登録',
     editTitle: 'レシピを編集',
+    // 「かんたん / くわしく」タブ(2026-07-16 Fable裁定docs/26・案A)。かんたんだけで保存完結、
+    // くわしくは全部任意。新規・編集とも初期表示は常にかんたん
+    formTabSimple: 'かんたん',
+    formTabDetail: 'くわしく（任意）',
+    formTabDetailFilledHint: '入力済みの項目があります',
     nameLabel: '料理名',
     namePlaceholder: '例: 肉じゃが',
     nameRequired: '料理名を入力してください',
