@@ -806,7 +806,10 @@ export function parseRecipeText(text: string): ParsedRecipe {
       const stripped = line.replace(BULLET, '').trim()
       const cleaned = stripped
         .replace(/[\s　]*(?:の)?(?:レシピ[・･]?)?(?:作り方|つくり方)$/, '')
-        .replace(/[\s　]*レシピ$/, '')
+        // 末尾「レシピ」は空白区切りがある時だけ剥がす(「〇〇 レシピ」のサイト接尾辞)。
+        // 空白なしの連結(「試験用レシピ」等、料理名の一部として「レシピ」で終わる名前)は
+        // 剥がさない(2026-07-16 SMK-02回帰: 便Iの`[\s　]*`が語末レシピを過剰除去していた)
+        .replace(/[\s　]+レシピ$/, '')
         .trim()
       result.title = cleaned || stripped
       continue
