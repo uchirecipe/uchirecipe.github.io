@@ -108,7 +108,13 @@
 //         捕捉)で書き出し→まっさらな別プロファイルへ「読み込む(置き換え)」で復元し、
 //         価格・週献立・在庫が実際に引き継がれることを確認。加えて、これらの項目が無い
 //         旧形式のbackup JSONを、既に価格・在庫データのあるプロファイルへ読み込んでも
-//         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する)。
+//         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する) /
+//         PRICEVIEW-01(レシピ詳細の材料「価格ビュー」トグル・2026-07-15 オーナー要望「どの
+//         食材が値段に反映されているか分からない」への対応。既定OFFで材料行に金額表示は無く、
+//         見出し行の「価格を見る」チップを押すと各行右端に「約◯円」(価格が拾えない材料は
+//         「価格なし」)が表示され、「食材と価格を編集する」への案内リンクも現れる。「価格を隠す」
+//         で元に戻ることを確認。オーナー仕様変更(同日)で由来バッジ(目安/自分の価格)表示は
+//         廃止したため、バッジの有無は確認対象外)。
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -2979,6 +2985,84 @@ try {
       }
     } finally {
       previewProc.kill()
+    }
+  }
+
+  // --- PRICEVIEW-01: レシピ詳細の材料「価格ビュー」トグル(2026-07-15 オーナー要望「どの食材が
+  // 値段に反映されているか分からない」への対応)。材料行ごとの常時価格表示は「うるさい」の理由で
+  // 2026-07-14に廃止済みのため、既定OFFのトグルチップで表示/非表示を切り替える方式。
+  // 基本レシピ「肉じゃが」で、OFF時は材料セクションに金額表示が無いこと→「価格を見る」で
+  // 「約◯円」の行が現れ「食材と価格を編集する」への案内リンクも出ること→「価格を隠す」で
+  // 両方とも消えることを確認する。由来バッジ(目安/自分の価格)は同日のオーナー仕様変更で
+  // 表示廃止になったため確認しない ---
+  currentCheck = 'PRICEVIEW-01'
+  {
+    const pvBrowser = await chromium.launch()
+    const pvContext = await pvBrowser.newContext()
+    const pvPage = await pvContext.newPage()
+    pvPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PRICEVIEW-01] ${err.message}`)
+    })
+    try {
+      await pvPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await pvPage.waitForTimeout(1800) // 初回シード完了待ち
+      await pvPage.getByText('肉じゃが', { exact: true }).first().click()
+      await pvPage.waitForTimeout(500)
+
+      // 材料セクション(見出し「材料」を含むsection)だけを対象にする。ページ上部の
+      // 概算食費(合計・1食あたり)は価格ビューと無関係に元から「約◯円」を表示するため、
+      // body全体ではなくこのsectionに絞らないとOFF時の検証が誤って通ってしまう
+      const ingredientsSection = pvPage.locator('section', {
+        has: pvPage.getByRole('heading', { name: '材料', level: 2 }),
+      })
+
+      const beforeText = await ingredientsSection.textContent()
+      check(
+        'PRICEVIEW-01 既定OFF: 材料行に金額表示(約◯円)が無い',
+        !/約[\d,]+円/.test(beforeText ?? ''),
+        beforeText ?? '',
+      )
+      check(
+        'PRICEVIEW-01 既定OFF: 「食材と価格を編集する」リンクが材料セクションに無い',
+        !(beforeText ?? '').includes('食材と価格を編集する'),
+      )
+
+      await pvPage.getByRole('button', { name: '価格を見る' }).click()
+      await pvPage.waitForTimeout(300)
+      const onText = await ingredientsSection.textContent()
+      check(
+        'PRICEVIEW-01 「価格を見る」ON: 「約◯円」の行が1つ以上ある',
+        /約[\d,]+円/.test(onText ?? ''),
+        onText ?? '',
+      )
+      check(
+        'PRICEVIEW-01 「価格を見る」ON: マスタ不一致の材料(水)は「価格なし」になる',
+        (onText ?? '').includes('価格なし'),
+      )
+      check(
+        'PRICEVIEW-01 「価格を見る」ON: 「食材と価格を編集する」リンクが表示される',
+        (onText ?? '').includes('食材と価格を編集する'),
+      )
+      check(
+        'PRICEVIEW-01 ON: 登録人数の基準注記が表示される(2人分)',
+        (onText ?? '').includes('登録人数（2人分）の材料の目安'),
+      )
+
+      await pvPage.getByRole('button', { name: '価格を隠す' }).click()
+      await pvPage.waitForTimeout(300)
+      const afterText = await ingredientsSection.textContent()
+      check(
+        'PRICEVIEW-01 「価格を隠す」OFF: 金額表示が消える',
+        !/約[\d,]+円/.test(afterText ?? ''),
+        afterText ?? '',
+      )
+      check(
+        'PRICEVIEW-01 「価格を隠す」OFF: 「食材と価格を編集する」リンクも消える',
+        !(afterText ?? '').includes('食材と価格を編集する'),
+      )
+    } finally {
+      await pvBrowser.close()
     }
   }
 } catch (err) {

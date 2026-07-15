@@ -16,6 +16,7 @@ import {
   MessageSquareText,
   Maximize2,
   CalendarPlus,
+  JapaneseYen,
   X,
 } from 'lucide-react'
 import { db } from '../db/db'
@@ -23,9 +24,15 @@ import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
 import { usePriceEntries } from '../db/prices'
+import type { Ingredient } from '../db/types'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
-import { buildPriceIndex, estimateRecipeCost } from '../logic/priceEstimate'
+import {
+  buildPriceIndex,
+  estimateIngredientYen,
+  estimateRecipeCost,
+  type PriceIndexEntry,
+} from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard } from '../logic/share'
 import { deriveDoneLabel } from '../logic/timerLabel'
@@ -48,6 +55,24 @@ import { buildIngredientNames } from '../logic/ingredientSpans'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
 import { ja } from '../i18n/ja'
+
+/**
+ * 材料1行分の「価格ビュー」表示金額（2026-07-15 オーナー要望「どの食材が値段に反映されて
+ * いるか分からない」への対応）。概算食費(estimateRecipeCost)と同じ優先順位
+ * （個別入力(ing.price) > マスタ一致 > なし）で1行ずつ評価する。
+ * マスタ一致時の由来(目安のまま/ユーザー上書き=estimateIngredientYenが返すsource)はUI表示には
+ * 使わない（2026-07-15 オーナー仕様変更でバッジ表示を廃止。ロジック側は変更しない）ので、
+ * ここでは金額だけを返す。どちらにも当てはまらない（該当なし）場合はnull＝「価格なし」表示。
+ */
+function ingredientPriceDisplay(
+  ing: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>,
+  index: PriceIndexEntry[],
+): { yen: number } | null {
+  if (ing.price != null && ing.price > 0) return { yen: ing.price }
+  const estimated = estimateIngredientYen(ing, index)
+  if (estimated != null && estimated.yen > 0) return { yen: estimated.yen }
+  return null
+}
 
 /** レシピ詳細＝料理中に見るメイン画面。文字・ボタンは大きめ */
 export default function RecipeDetailPage() {
@@ -116,6 +141,11 @@ export default function RecipeDetailPage() {
   // 人数分の表示用（変更していない間はレシピ登録時の人数）
   const [servingsOverride, setServingsOverride] = useState<number>()
   const servings = servingsOverride ?? recipe?.servings ?? 1
+
+  // 材料ごとの価格ビュー切り替え(2026-07-15 オーナー要望「どの食材が値段に反映されているか
+  // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
+  // 既定OFFのトグル表示に限定する。ページローカルな一時状態でよい(レシピを離れたらリセット)
+  const [showPrices, setShowPrices] = useState(false)
 
   // 「作った！」記録の入力欄(2026-07-12: 窓表示化。中央固定のモーダルなので、
   // 開いたときにページ側をスクロールさせる必要がなくなった＝スクロール位置は動かない)
@@ -454,6 +484,22 @@ export default function RecipeDetailPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold">{ja.detail.ingredients}</h2>
             <div className="flex items-center gap-2">
+              {/* 価格ビュー切り替えチップ(2026-07-15 オーナー要望「どの食材が値段に反映されて
+                  いるか分からない」への対応。常時表示は「うるさい」で廃止済みのためトグル方式。
+                  既定OFF・状態はページローカル） */}
+              <button
+                type="button"
+                onClick={() => setShowPrices((v) => !v)}
+                aria-pressed={showPrices}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
+                  showPrices
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-accent'
+                }`}
+              >
+                <JapaneseYen size={16} aria-hidden />
+                {showPrices ? ja.detail.priceViewHide : ja.detail.priceViewShow}
+              </button>
               <button
                 type="button"
                 onClick={() => setServingsOverride(Math.max(1, servings - 1))}
@@ -476,12 +522,29 @@ export default function RecipeDetailPage() {
               </button>
             </div>
           </div>
+          {/* 価格ビューの基準注記: 概算食費の合計と必ず一致させるため、表示人数ではなく
+              登録人数(recipe.servings)で固定していることを明示する。あわせて「食材と価格」
+              ページへの案内リンクを直下に置く(2026-07-15 オーナー仕様変更: 由来バッジの代わりに
+              マスタ側の編集導線を出す。文言はja.form.ingredientPriceGuideLinkを再利用し新設しない) */}
+          {showPrices && (
+            <>
+              <p className="mt-1 text-sm text-ink-muted">
+                {ja.detail.priceViewNote.replace('{n}', String(recipe.servings))}
+              </p>
+              <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent underline">
+                {ja.form.ingredientPriceGuideLink}
+              </Link>
+            </>
+          )}
           {recipe.ingredients.some((ing) => ing.seasoningGroup) && (
             <p className="mt-1 text-sm text-ink-muted">{ja.detail.seasoningGroupHint}</p>
           )}
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
             {recipe.ingredients.map((ing, index) => {
               const isNg = ngIndices.has(index)
+              // 価格ビューOFF時はrecipe.ingredientsの表示に一切手を加えない(1pxも変えない)ため
+              // showPrices==trueのときだけ計算する
+              const priceDisplay = showPrices ? ingredientPriceDisplay(ing, priceIndex) : null
               return (
                 <li
                   key={index}
@@ -508,9 +571,24 @@ export default function RecipeDetailPage() {
                       )}
                     </span>
                   </div>
-                  {/* 材料行ごとの目安価格の注記は2026-07-14に廃止（オーナー実機フィードバック:
-                      「材料のメモ欄に目安価格が表示されている」の解消。概算食費セクション自体は
-                      残す(3a参照)。旧仕様はja.priceMaster.ingredientFromMasterNote*参照 */}
+                  {/* 材料行ごとの価格表示は2026-07-14に常時表示を廃止（オーナー実機フィードバック:
+                      「材料のメモ欄に目安価格が表示されている」の解消）。2026-07-15、トグルONの
+                      ときだけ出す形で復活。由来バッジ(目安/自分の価格)は同日オーナー仕様変更で
+                      廃止し、金額(または「価格なし」)だけを表示する。由来は代わりに上部の
+                      「食材と価格を編集する」リンクへ誘導して確認する形にした */}
+                  {showPrices && (
+                    <div className="mt-1 flex items-center justify-end text-sm">
+                      {priceDisplay ? (
+                        <span className="tabular-nums font-bold">
+                          {ja.detail.priceAbout}
+                          {priceDisplay.yen.toLocaleString()}
+                          {ja.detail.priceYen}
+                        </span>
+                      ) : (
+                        <span className="text-ink-muted/70">{ja.detail.priceNone}</span>
+                      )}
+                    </div>
+                  )}
                   {ing.memo && (
                     <MemoText
                       text={ing.memo}
