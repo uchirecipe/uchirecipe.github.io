@@ -120,7 +120,15 @@
 //         見出し行の「価格を見る」チップを押すと各行右端に「約◯円」(価格が拾えない材料は
 //         「価格なし」)が表示され、「食材と価格を編集する」への案内リンクも現れる。「価格を隠す」
 //         で元に戻ることを確認。オーナー仕様変更(同日)で由来バッジ(目安/自分の価格)表示は
-//         廃止したため、バッジの有無は確認対象外)。
+//         廃止したため、バッジの有無は確認対象外) /
+//         FORMRESET-01(レシピ編集画面の「デフォルトに戻す」・2026-07-15 オーナー要望。DBには
+//         書き込まずフォームの入力値だけを差し替える安全設計。(a)基本レシピ「肉じゃが」の編集で
+//         タイトル・材料を書き換え→ボタンは1回目「もう一度押すと戻します」に変化するだけで
+//         まだ戻らない→2回目でstarterDefsの原本(タイトル・材料とも)に戻ること・保存前の
+//         軽いフィードバック文言が出ること→保存せず一覧へ離脱しても実データ(DB)が
+//         書き換わっていないこと(b)自作レシピを新規登録→編集でタイトルを変更→
+//         「前回保存した内容に戻す」(自作は文言がスターターと異なる)で保存済みタイトルに
+//         戻ることを確認)。
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -3193,6 +3201,113 @@ try {
       )
     } finally {
       await pvBrowser.close()
+    }
+  }
+
+  // --- FORMRESET-01: レシピ編集画面の「デフォルトに戻す」(2026-07-15 オーナー要望)。
+  // DBには書き込まずフォームの入力値だけを差し替える安全設計。window.confirmは使わず、
+  // もう一度押す方式(1回目はラベルが確認文言に変わるだけ・2回目で実行)で誤操作を防ぐ ---
+  currentCheck = 'FORMRESET-01'
+  {
+    const frBrowser = await chromium.launch()
+    const frContext = await frBrowser.newContext()
+    const frPage = await frContext.newPage()
+    frPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FORMRESET-01] ${err.message}`)
+    })
+    try {
+      // (a) 基本レシピ「肉じゃが」: タイトル・材料を書き換えてからリセット
+      // → starterDefsの原本に戻り、保存しなければ実データ(DB)も壊れないことを確認
+      await frPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await frPage.waitForTimeout(1800) // 初回シード完了待ち
+      await frPage.getByText('肉じゃが', { exact: true }).first().click()
+      await frPage.waitForTimeout(500)
+      await frPage.locator('a[href*="/edit"]').first().click()
+      await frPage.waitForTimeout(500)
+
+      const titleInput = frPage.getByPlaceholder('例: 肉じゃが')
+      await titleInput.fill('テスト改名')
+      const firstIngredientInput = frPage.getByPlaceholder('例: じゃがいも').first()
+      await firstIngredientInput.fill('テスト材料')
+
+      check(
+        'FORMRESET-01a 基本レシピの編集画面に「デフォルトに戻す」ボタンが出る',
+        await frPage.getByRole('button', { name: 'デフォルトに戻す' }).isVisible(),
+      )
+      await frPage.getByRole('button', { name: 'デフォルトに戻す' }).click()
+      await frPage.waitForTimeout(200)
+      check(
+        'FORMRESET-01a 1回目のクリックでは実行されず「もう一度押すと戻します」に変わる',
+        await frPage.getByRole('button', { name: 'もう一度押すと戻します' }).isVisible(),
+      )
+      check(
+        'FORMRESET-01a 確認待ちの間はまだ変更後のタイトルのまま',
+        (await titleInput.inputValue()) === 'テスト改名',
+      )
+
+      await frPage.getByRole('button', { name: 'もう一度押すと戻します' }).click()
+      await frPage.waitForTimeout(300)
+      check(
+        'FORMRESET-01a 2回目のクリックでタイトルが原本(肉じゃが)に戻る',
+        (await titleInput.inputValue()) === '肉じゃが',
+      )
+      check(
+        'FORMRESET-01a 材料も原本(じゃがいも)に戻る',
+        (await firstIngredientInput.inputValue()) === 'じゃがいも',
+      )
+      check(
+        'FORMRESET-01a 保存前の軽いフィードバックが表示される',
+        (await frPage.textContent('body')).includes('まだ保存されていません。保存すると確定します'),
+      )
+
+      // 保存せずに一覧へ離脱しても実データが壊れていないことを確認
+      // (テスト改名・テスト材料のどちらもDBに書き込まれていないこと)
+      await frPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await frPage.waitForTimeout(500)
+      const frListText = await frPage.textContent('body')
+      check('FORMRESET-01a 離脱後も一覧に「肉じゃが」がそのまま残る', frListText.includes('肉じゃが'))
+      check('FORMRESET-01a 離脱後、一覧に「テスト改名」は存在しない', !frListText.includes('テスト改名'))
+      await frPage.getByText('肉じゃが', { exact: true }).first().click()
+      await frPage.waitForTimeout(500)
+      const frDetailText = await frPage.textContent('body')
+      check(
+        'FORMRESET-01a 実データの材料も書き換わっていない(じゃがいもが残る・テスト材料は無い)',
+        frDetailText.includes('じゃがいも') && !frDetailText.includes('テスト材料'),
+      )
+
+      // (b) 自作レシピ: 新規登録→保存→編集でタイトル変更→リセットで前回保存タイトルに戻ることを確認
+      // (自作レシピはラベルが「前回保存した内容に戻す」で、スターターの「デフォルトに戻す」とは異なる)
+      await frPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await frPage.waitForTimeout(500)
+      await frPage.getByPlaceholder('例: 肉じゃが').fill('FORMRESET自作レシピ')
+      await frPage.getByPlaceholder('例: じゃがいも').first().fill('にんじん')
+      await frPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('切る')
+      await frPage.getByRole('button', { name: '保存する' }).click()
+      await frPage.waitForTimeout(800)
+      check(
+        'FORMRESET-01b 自作レシピの新規保存が成功する',
+        (await frPage.textContent('body')).includes('FORMRESET自作レシピ'),
+      )
+
+      await frPage.locator('a[href*="/edit"]').first().click()
+      await frPage.waitForTimeout(500)
+      check(
+        'FORMRESET-01b 自作レシピの編集画面は「前回保存した内容に戻す」ボタンになる',
+        await frPage.getByRole('button', { name: '前回保存した内容に戻す' }).isVisible(),
+      )
+      const ownTitleInput = frPage.getByPlaceholder('例: 肉じゃが')
+      await ownTitleInput.fill('FORMRESET改名後')
+      await frPage.getByRole('button', { name: '前回保存した内容に戻す' }).click()
+      await frPage.waitForTimeout(200)
+      await frPage.getByRole('button', { name: 'もう一度押すと戻します' }).click()
+      await frPage.waitForTimeout(300)
+      check(
+        'FORMRESET-01b 2回目のクリックで前回保存したタイトルに戻る',
+        (await ownTitleInput.inputValue()) === 'FORMRESET自作レシピ',
+      )
+    } finally {
+      await frBrowser.close()
     }
   }
 } catch (err) {
