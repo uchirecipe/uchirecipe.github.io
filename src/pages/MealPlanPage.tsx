@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronLeft,
@@ -67,8 +67,13 @@ function TodayListRow({
   const photoUrl = usePhotoUrl(recipe.photo)
   // state.from/fromPathで「今日の献立から開いた」ことを詳細画面へ持ち回る。
   // RecipeDetailPageの戻るボタンが、通常の「常に一覧へ」ではなくここ(献立タブ)へ
-  // 戻るために参照する（2026-07-12オーナー指示）
-  const fromState = { from: 'todayList' as const, fromPath: '/meal-plan' }
+  // 戻るために参照する（2026-07-12オーナー指示）。
+  // ?focus=today を付けて「今日の献立から戻ってきた」ことをMealPlanPageに伝える。
+  // これが付いていると初期スクロールの「今週の献立へ飛ばす」分岐を必ず抑止し、
+  // 常に今日の献立セクション(最上部)に留まる（2026-07-15オーナー実機フィードバック:
+  // 今日の献立からレシピを開いて戻ると今週の献立に飛ばされる、の恒久対策。作った！等で
+  // 最後の1品が消えて今日の献立が空になった直後でも今週へ飛ばさない）
+  const fromState = { from: 'todayList' as const, fromPath: '/meal-plan?focus=today' }
   return (
     <li className="flex items-center gap-2 px-[var(--space-sm)] py-2">
       <Link
@@ -136,6 +141,7 @@ function buildRoleRows(slotEntries: MealPlanEntry[], role: MealRole, extra: Extr
 export default function MealPlanPage() {
   const navigate = useNavigate()
   const recipes = useLiveQuery(listRecipes, [])
+  const [searchParams, setSearchParams] = useSearchParams()
   const settings = useSettings()
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
   const priceEntries = usePriceEntries()
@@ -253,6 +259,22 @@ export default function MealPlanPage() {
   const initialScrollRef = useRef(false)
   useEffect(() => {
     if (initialScrollRef.current) return
+    // 今日の献立からレシピを開いて戻ってきた(?focus=today)場合は、今週の献立へ飛ばす分岐を
+    // 必ず抑止して今日の献立セクション(最上部)に留まる。パラメータは消費したら消す
+    // (次の「素の献立タブ開き」で通常の初期スクロール判定に戻すため)。2026-07-15
+    if (searchParams.get('focus') === 'today') {
+      initialScrollRef.current = true
+      window.scrollTo(0, 0)
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.delete('focus')
+          return next
+        },
+        { replace: true },
+      )
+      return
+    }
     if (todayList === undefined || entries === undefined) return // データ確定待ち
     initialScrollRef.current = true
     if (todayList.length > 0) return // 今日の献立あり→先頭(今日の献立セクション)のまま
@@ -264,7 +286,7 @@ export default function MealPlanPage() {
         weekHeadingRef.current?.scrollIntoView({ block: 'start' })
       })
     })
-  }, [todayList, entries])
+  }, [todayList, entries, searchParams, setSearchParams])
 
   const [quickOnly, setQuickOnly] = useState(false)
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先

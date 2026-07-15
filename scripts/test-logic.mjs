@@ -1319,6 +1319,14 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
   eq('最初の→は前の項目に密着(豚肉→根菜)', arrow.includes('豚肉→根菜'), true)
   const arrow2 = wrapJaPhrases('強火でごま油を熱し、溶き卵→すぐにご飯を入れて木べらで切るように混ぜる。').split(ZWSP)
   eq('矢印列は項目の言い切りまで一体(チャーハン)', arrow2.includes('溶き卵→すぐにご飯を入れて'), true)
+  // 2026-07-15(オーナー実機・ミートボール): BudouXが「転がしながら」を「転が|しながら」と
+  // 語中で誤分割し、格助詞結合で「ミートボールを転が」まで繋がって語の途中で折り返していた。
+  // KNOWN_WORDSに「転がしながら」を追加して1語に戻す
+  const korogashi = wrapJaPhrases(
+    'フライパンにサラダ油を中火で熱し、ミートボールを転がしながら揚げ焼きにする。',
+  ).split(ZWSP)
+  eq('「転がしながら」が語中で切れない(BudouX誤分割対策)', korogashi.includes('転がしながら'), true)
+  eq('「転が」で終わる文節が出ない', korogashi.some((u) => u.endsWith('転が')), false)
   const kakko = wrapJaPhrases('菜箸を入れて細かい泡がシュワッと出るくらい（約170度）の油で4分揚げる。').split(ZWSP)
   // 2026-07-12第3版: 「出るくらい+（約170度）の」は13文字で上限超のため旧版でも密着せず、
   // 「（約170度）の」が単独ユニットだった。第3版は「の」の格助詞結合で修飾先の

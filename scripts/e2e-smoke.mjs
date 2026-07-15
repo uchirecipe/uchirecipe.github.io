@@ -1653,6 +1653,84 @@ try {
     }
   }
 
+  // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
+  // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
+  // 「今週の献立へ初期スクロール」分岐を必ず抑止して今日の献立(最上部)に留まる。今日の献立が
+  // 空でも今週へ飛ばさない(作った！等で最後の1品が消えた直後の競合対策)。
+  // 分離検証: 今日の献立=空・今週の献立=1件(今日の日付に直接投入)の状態で、
+  //  (a)素の /#/meal-plan は今週見出しへスクロールする(従来動作の前提確認)
+  //  (b)/#/meal-plan?focus=today はスクロールせず最上部に留まり、focusパラメータが消費される
+  // 修正が無いと(b)の2つの断定(scrollY≈0・パラメータ消費)が両方失敗する。 ---
+  currentCheck = 'BACKNAV-01'
+  {
+    const bnBrowser = await chromium.launch()
+    const bnContext = await bnBrowser.newContext()
+    const bnPage = await bnContext.newPage()
+    bnPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@BACKNAV-01] ${err.message}`)
+    })
+    try {
+      await bnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await bnPage.waitForTimeout(1800) // 初回シード完了待ち
+      // 基本レシピのidを1つ取得し、今週の献立(今日の日付)に1件だけ直接投入する。
+      // 今日の献立は空のまま=修正が無いと今週見出しへスクロールする条件
+      const firstId = await bnPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () => resolve(g.result[0]?.id)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await bnPage.evaluate(
+        (recipeId) =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readwrite')
+              const a = tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId, role: 'main' })
+              a.onsuccess = () => resolve(undefined)
+              a.onerror = () => reject(a.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        firstId,
+      )
+
+      // (a) 前提: 素の献立タブは今週見出しへスクロールする(今日が空・今週に1件)
+      await bnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await bnPage.waitForTimeout(900)
+      const plainScrollY = await bnPage.evaluate(() => window.scrollY)
+      check('BACKNAV-01 前提: 素の献立タブは今週見出しへスクロールする', plainScrollY > 80)
+
+      // (b) ?focus=today ではスクロールせず最上部に留まり、パラメータが消費される。
+      // 実アプリの戻り操作はレシピ詳細(別ルート)を経由するため、MealPlanPageは必ず再マウント
+      // されてinitialScrollRefが初期化される。テストでも一度別ページへ抜けてから戻ることで
+      // その再マウントを再現する(ハッシュのクエリだけ変える遷移では再マウントされないため)
+      await bnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await bnPage.waitForTimeout(300)
+      await bnPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
+      await bnPage.waitForTimeout(900)
+      const focusScrollY = await bnPage.evaluate(() => window.scrollY)
+      check('BACKNAV-01 ?focus=today では今週へスクロールせず最上部に留まる', focusScrollY <= 5)
+      check('BACKNAV-01 focus=today パラメータは消費されURLから消える', !bnPage.url().includes('focus=today'))
+      check(
+        'BACKNAV-01 戻った先に今日の献立セクションが見える',
+        (await bnPage.textContent('body')).includes('今日の献立'),
+      )
+    } finally {
+      await bnBrowser.close()
+    }
+  }
+
   // --- SCROLL-02: 一覧の絞り込み・並べ替え条件が「詳細→戻る」を経ても保持される
   // (2026-07-12深夜フィードバックの再調査で判明した本当の原因の再発防止テスト。PC Chrome相当・
   // デスクトップビューポート)。詳細の「戻る」は常に素の /recipes へ新規遷移するため、
