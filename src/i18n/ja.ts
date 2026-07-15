@@ -547,6 +547,19 @@ export const ja = {
     confirmRemoveRow: 'この行を削除しますか？',
     deleteRecipe: 'このレシピを削除',
     confirmDelete: 'このレシピを削除します。よろしいですか？',
+    // 「デフォルトに戻す」(2026-07-15 オーナー要望)。編集画面限定でDBには書き込まず、
+    // フォームの入力値だけを差し替える(保存を押すまで確定しない安全設計)。
+    // 自作レシピ=前回保存した内容、基本レシピ/配布セット由来=原本(デフォルト)に戻す
+    resetToSavedLabel: '前回保存した内容に戻す',
+    resetToDefaultLabel: 'デフォルトに戻す',
+    // window.confirmは使わず、もう一度押す方式で誤操作を防ぐ(押すとこの文言に切り替わり、
+    // もう一度押すと実行される。数秒操作が無ければ元のラベルに自動で戻る)
+    resetConfirmLabel: 'もう一度押すと戻します',
+    resetting: '確認中…',
+    resetFeedback: 'まだ保存されていません。保存すると確定します',
+    resetStarterNotFound: 'デフォルトの元になるレシピが見つかりませんでした',
+    resetSetFetchError:
+      'デフォルトの内容を取得できませんでした。通信状況を確認してからもう一度お試しください',
   },
   detail: {
     notFound: 'レシピが見つかりませんでした',
