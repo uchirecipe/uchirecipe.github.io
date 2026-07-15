@@ -374,6 +374,31 @@ for (const { source, recipe } of entries) {
   }
 }
 
+// --- 17. 「手順」直後の半角数字(単一・範囲とも丸数字①②③…に統一する方針。2026-07-15オーナー指示＋Fable裁定)。
+// 分量・時間・温度・人数等の裸の半角数字は対象外にするため、「手順」の直後という文脈に限定する
+const STEP_HALFWIDTH_DIGIT_RE = /手順[0-9]/
+for (const { source, recipe } of entries) {
+  if (recipe.memo && STEP_HALFWIDTH_DIGIT_RE.test(recipe.memo)) {
+    add('中', '手順参照が半角数字', source, recipe.title, `レシピmemoの手順参照が半角数字のまま(丸数字に統一すること): 「${recipe.memo}」`)
+  }
+  for (const [idx, st] of (recipe.steps ?? []).entries()) {
+    if (st.text && STEP_HALFWIDTH_DIGIT_RE.test(st.text)) {
+      add('中', '手順参照が半角数字', source, recipe.title, `手順${idx + 1}のtextの手順参照が半角数字のまま(丸数字に統一すること): 「${st.text}」`)
+    }
+    if (st.memo && STEP_HALFWIDTH_DIGIT_RE.test(st.memo)) {
+      add('中', '手順参照が半角数字', source, recipe.title, `手順${idx + 1}memoの手順参照が半角数字のまま(丸数字に統一すること): 「${st.memo}」`)
+    }
+  }
+  for (const [idx, st] of (recipe.quickSteps ?? []).entries()) {
+    if (st.text && STEP_HALFWIDTH_DIGIT_RE.test(st.text)) {
+      add('中', '手順参照が半角数字', source, recipe.title, `時短手順${idx + 1}のtextの手順参照が半角数字のまま(丸数字に統一すること): 「${st.text}」`)
+    }
+    if (st.memo && STEP_HALFWIDTH_DIGIT_RE.test(st.memo)) {
+      add('中', '手順参照が半角数字', source, recipe.title, `時短手順${idx + 1}memoの手順参照が半角数字のまま(丸数字に統一すること): 「${st.memo}」`)
+    }
+  }
+}
+
 // --- 出力 ---
 const bySeverity = { 高: [], 中: [], 低: [] }
 for (const f of findings) bySeverity[f.severity].push(f)
