@@ -5,19 +5,6 @@ import {
   Heart,
   TriangleAlert,
   CalendarCheck2,
-  UtensilsCrossed,
-  Soup,
-  Salad,
-  Fish,
-  Beef,
-  CakeSlice,
-  Sandwich,
-  Utensils,
-  CookingPot,
-  Egg,
-  Drumstick,
-  Carrot,
-  Bean,
   Flower2,
   Sun,
   Leaf,
@@ -31,37 +18,47 @@ import { pickDisplayIngredientChips } from '../logic/mainIngredients'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
-/* 写真がないレシピ（または「アイコン表示」を選んだレシピ）用のプレースホルダー:
-   料理名・タグ・材料から選んだ料理アイコンを表示する。背景は--icon-tile(2026-07-14
-   オーナー指定)で全レシピ共通の1色に統一する（従来はレシピごとにハッシュで濃淡を
-   変えていたが廃止）。アイコン自体の色(text-accent)は変えない */
-/* pasta/vegetable/tofuは2026-07-15新設(docs/28)。Magnific実素材の到着まで暫定lucideを割り当てる:
-   pasta=Utensils(noodleと同じ絵を仮に共有)/vegetable=Carrot/tofu=Bean。
-   drinkは資産を調達しないためdefaultと同じ絵に束ねる */
-export const iconComponents: Record<IconKey, typeof UtensilsCrossed> = {
-  rice: CookingPot,
-  pasta: Utensils,
-  noodle: Utensils,
-  bread: Sandwich,
-  soup: Soup,
-  salad: Salad,
-  vegetable: Carrot,
-  tofu: Bean,
-  fish: Fish,
-  egg: Egg,
-  chicken: Drumstick,
-  meat: Beef,
-  dessert: CakeSlice,
-  drink: UtensilsCrossed,
-  default: UtensilsCrossed,
-}
-
 /** 季節バッジのアイコン（「通年」は表示しないので含めない） */
 export const seasonIcons: Record<Exclude<Season, 'all'>, typeof Flower2> = {
   spring: Flower2,
   summer: Sun,
   autumn: Leaf,
   winter: Snowflake,
+}
+
+/** 料理カテゴリの線画（Freepikのspecial-lineal PNG・512px透過・public/icons/配下）を
+   CSSマスクで描画する。塗り色は既定でvar(--accent)（従来のtext-accentと同色=テーマ追従）。
+   RecipeFormPageのアイコン選択UIのように、ボタンの選択状態で文字色が変わる場所では
+   colorを渡して合わせる（未選択時はtext-ink-mutedのミュートグレー等）。
+   iOS Safari向けに-webkit-mask-*プレフィックスを必須で併記する */
+export function RecipeIcon({
+  iconKey,
+  size = 48,
+  color = 'var(--accent)',
+}: {
+  iconKey: IconKey
+  size?: number
+  color?: string
+}) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: size,
+        height: size,
+        display: 'inline-block',
+        backgroundColor: color,
+        WebkitMaskImage: `url(/icons/${iconKey}.png)`,
+        maskImage: `url(/icons/${iconKey}.png)`,
+        WebkitMaskSize: 'contain',
+        maskSize: 'contain',
+        WebkitMaskRepeat: 'no-repeat',
+        maskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        maskPosition: 'center',
+      }}
+    />
+  )
 }
 
 /** 写真なし（または表示優先）レシピの代わり絵。iconKey を指定すれば手動選択したアイコンで固定表示 */
@@ -73,13 +70,12 @@ export function RecipePlaceholder({
   iconSize?: number
 }) {
   const key = recipe.iconKey ?? pickIconKey(recipe)
-  const Icon = iconComponents[key]
   return (
     <div
       className="flex h-full w-full items-center justify-center"
       style={{ background: 'var(--icon-tile)' }}
     >
-      <Icon size={iconSize} className="text-accent" aria-hidden />
+      <RecipeIcon iconKey={key} size={iconSize} />
     </div>
   )
 }

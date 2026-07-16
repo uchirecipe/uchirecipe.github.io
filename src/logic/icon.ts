@@ -18,7 +18,7 @@ import type { IconKey, Ingredient } from '../db/types'
  *   (パスタ系の語はpasta[②]へ切り出し済み。「肉うどん」は肉より麺が料理の類型を決める。
  *    「春雨」は語に含めない=春雨サラダは主食料理ではなくサラダのため。「サラダ」はexclude)
  * ④菓子語(もち/ようかん/杏仁/プリン/ゼリー/パンケーキ/バーク/大学芋等) → dessert
- * ⑤(飲み物語 → drink。④の直後に据え置き。休眠カテゴリ=アイコン資産は調達しないがrules行は維持)
+ * ⑤飲み物語 → drink。④の直後に据え置き（2026-07-16 Freepik線画PNG調達済み・有効化）
  * ⑥魚名(鮭/さば/さんま/ぶり/たら/えび/いか等。ちくわ等の練り物は含めない=あえ物と衝突するため) → fish
  * ⑦スープ/汁/シチュー/鍋/だし → soup
  *   (eggより前=「◯◯スープはsoup」の原則。中華風卵スープはsoup。
@@ -199,7 +199,7 @@ export function pickIconKey(input: {
   return fromAll ?? 'default'
 }
 
-/** アイコン選択UIで並べる順（自動判定の優先順とだいたい揃える。drinkは資産未調達のため除外） */
+/** アイコン選択UIで並べる順（自動判定の優先順とだいたい揃える） */
 export const iconKeyOrder: IconKey[] = [
   'rice',
   'noodle',
@@ -214,5 +214,6 @@ export const iconKeyOrder: IconKey[] = [
   'chicken',
   'meat',
   'dessert',
+  'drink',
   'default',
 ]

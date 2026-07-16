@@ -32,7 +32,7 @@ import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoning
 import { normalizeDigits } from '../logic/amount'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
-import { iconComponents } from '../components/RecipeCard'
+import { RecipeIcon } from '../components/RecipeCard'
 import { starterDefs } from '../db/starters'
 import { fetchRecipeSet } from '../logic/backup'
 import { ja } from '../i18n/ja'
@@ -1236,7 +1236,6 @@ function RecipeFormInner() {
             {ja.form.iconAuto}
           </button>
           {iconKeyOrder.map((key) => {
-            const Icon = iconComponents[key]
             const isAutoPick = iconKey === undefined && pickIconKey({ title, tags, ingredients }) === key
             return (
               <button
@@ -1251,7 +1250,17 @@ function RecipeFormInner() {
                       : 'border-edge bg-surface text-ink-muted'
                 }`}
               >
-                <Icon size={20} aria-hidden />
+                <RecipeIcon
+                  iconKey={key}
+                  size={20}
+                  color={
+                    iconKey === key
+                      ? 'var(--on-accent)'
+                      : isAutoPick
+                        ? 'var(--accent)'
+                        : 'var(--text-muted)'
+                  }
+                />
                 {ja.icon[key]}
               </button>
             )
