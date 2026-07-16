@@ -45,6 +45,8 @@ import {
   sortResults,
   defaultSortDirection,
   buildNutrientSortValues,
+  isNutrientSortOption,
+  NUTRIENT_SORT_OPTIONS,
 } from '../src/logic/recipeSort.ts'
 import {
   totalCookedLogPhotoBytes,
@@ -1921,7 +1923,8 @@ eq(
   eq('旧title品は削除される(starterDefsに無いtitle)', plan.toDeleteIds, [otherExisting.id])
 }
 
-// ---------- 栄養並び替え(2026-07-13 Fable設計: カロリー/たんぱく質(1食)。算出不能は常に末尾) ----------
+// ---------- 栄養並び替え(2026-07-13 Fable設計: カロリー/たんぱく質(1食)。
+// 2026-07-16 便T-4で塩分・脂質・糖質を追加しPro機能化。算出不能は常に末尾) ----------
 {
   const mkRecipe = (id, title, ingredients, updatedAt) => ({
     id,
@@ -1942,9 +1945,12 @@ eq(
   const rLow = mkRecipe(2, '低カロリー', [{ name: '砂糖', amount: '10', unit: 'g' }], 200)
   const rUnknown = mkRecipe(3, '算出不能', [{ name: '謎のたべもの', amount: '適量', unit: '' }], 300)
   const values = buildNutrientSortValues([rHigh, rLow, rUnknown])
-  eq('栄養並び替え値: 名寄せできないレシピはnull(算出不能)', values.get(3), {
+  eq('栄養並び替え値: 名寄せできないレシピはnull(算出不能・5項目とも)', values.get(3), {
     kcal: null,
     proteinG: null,
+    fatG: null,
+    carbG: null,
+    saltG: null,
   })
   eq('栄養並び替え値: 計算できるレシピは正の数値', values.get(2).kcal > 0, true)
   eq(
@@ -1972,8 +1978,46 @@ eq(
     sortResults(results, 'protein', [], 'desc', values).map((r) => r.recipe.id),
     [2, 1, 3],
   )
+  eq(
+    '糖質昇順: 砂糖10g<100gなので低→高、算出不能は末尾(便T-4で追加)',
+    sortResults(results, 'carb', [], 'asc', values).map((r) => r.recipe.id),
+    [2, 1, 3],
+  )
   eq('カロリーの既定方向は昇順(低い方から)', defaultSortDirection.kcal, 'asc')
   eq('たんぱく質の既定方向は降順(多い方から)', defaultSortDirection.protein, 'desc')
+  eq('糖質の既定方向は昇順(便T-4)', defaultSortDirection.carb, 'asc')
+  eq('塩分の既定方向は昇順(便T-4)', defaultSortDirection.salt, 'asc')
+  eq('脂質の既定方向は昇順(便T-4)', defaultSortDirection.fat, 'asc')
+
+  // 塩(saltG高) / サラダ油(fatGのみ高)で塩分・脂質のsortResultsも検算する(便T-4)
+  const rSalty = mkRecipe(4, 'しょっぱい', [{ name: '塩', amount: '100', unit: 'g' }], 400)
+  const rMild = mkRecipe(5, 'うすあじ', [{ name: '塩', amount: '10', unit: 'g' }], 500)
+  const rOily = mkRecipe(6, 'あぶらっこい', [{ name: 'サラダ油', amount: '100', unit: 'g' }], 600)
+  const rLight = mkRecipe(7, 'あっさり', [{ name: 'サラダ油', amount: '10', unit: 'g' }], 700)
+  const saltFatValues = buildNutrientSortValues([rSalty, rMild, rOily, rLight])
+  const saltResults = [rMild, rSalty].map((recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }))
+  eq(
+    '塩分昇順: 塩10g<100gなので低→高(便T-4で追加)',
+    sortResults(saltResults, 'salt', [], 'asc', saltFatValues).map((r) => r.recipe.id),
+    [5, 4],
+  )
+  const fatResults = [rLight, rOily].map((recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }))
+  eq(
+    '脂質昇順: サラダ油10g<100gなので低→高(便T-4で追加)',
+    sortResults(fatResults, 'fat', [], 'asc', saltFatValues).map((r) => r.recipe.id),
+    [7, 6],
+  )
+
+  // 並べ替えオプションの分類(便T-4: 5項目まとめてPro機能化)
+  eq('NUTRIENT_SORT_OPTIONS: 5項目(カロリー/たんぱく質/塩分/脂質/糖質)', [...NUTRIENT_SORT_OPTIONS], [
+    'kcal',
+    'protein',
+    'salt',
+    'fat',
+    'carb',
+  ])
+  eq('isNutrientSortOption: kcalは栄養並び替え', isNutrientSortOption('kcal'), true)
+  eq('isNutrientSortOption: updatedは栄養並び替えでない', isNutrientSortOption('updated'), false)
 }
 
 // ---------- 削除したセット品の再取込除外(トゥームストーン・2026-07-13 Fable設計) ----------

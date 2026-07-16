@@ -98,6 +98,13 @@ type Props = {
    * 既存のメタ（時間・手間レベル・季節）だけの縦一列の行として表示する。省略時は従来どおりのグリッドカード
    */
   layout?: 'grid' | 'list'
+  /**
+   * 栄養価並び替え中（Pro機能。2026-07-16 便T）に表示する、並び替えに使っている栄養価の値
+   * （例:「320kcal」「18.5g」。computeRecipeNutritionの1食あたり値を呼び出し側で整形済みの文字列）。
+   * グリッド表示ではカード左上、一覧（list）表示では右下に出す。算出不能なレシピはRecipesPage側で
+   * undefinedのまま渡す（バッジ自体を出さない）
+   */
+  nutrientBadgeText?: string
 }
 
 /** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ）。layout='list'なら縦一列の行表示 */
@@ -108,6 +115,7 @@ export default function RecipeCard({
   inTodayList,
   showQuickTime,
   layout = 'grid',
+  nutrientBadgeText,
 }: Props) {
   const photoUrl = usePhotoUrl(recipe.photo)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
@@ -121,7 +129,7 @@ export default function RecipeCard({
     return (
       <Link
         to={`/recipes/${recipe.id}`}
-        className="flex items-center gap-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
+        className="relative flex items-center gap-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
       >
         <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm">
           {showPhoto ? (
@@ -203,6 +211,12 @@ export default function RecipeCard({
           )}
           {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
         </div>
+        {/* 栄養価並び替え中の値(2026-07-16 便T-7): 一覧(list)表示は行の右下に重ねる */}
+        {nutrientBadgeText && (
+          <span className="absolute bottom-1.5 right-1.5 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
+            {nutrientBadgeText}
+          </span>
+        )}
       </Link>
     )
   }
@@ -246,14 +260,24 @@ export default function RecipeCard({
           </div>
         )}
       </div>
-      {hasNg && (
-        <span
-          title={ja.card.ngBadge}
-          aria-label={ja.card.ngBadge}
-          className="absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-warning text-app shadow-sm"
-        >
-          <TriangleAlert size={16} aria-hidden />
-        </span>
+      {/* 栄養価並び替え中の値(2026-07-16 便T-7)とNG食材警告は同じ左上角に出るため縦積みにする */}
+      {(nutrientBadgeText || hasNg) && (
+        <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1">
+          {nutrientBadgeText && (
+            <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
+              {nutrientBadgeText}
+            </span>
+          )}
+          {hasNg && (
+            <span
+              title={ja.card.ngBadge}
+              aria-label={ja.card.ngBadge}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-warning text-app shadow-sm"
+            >
+              <TriangleAlert size={16} aria-hidden />
+            </span>
+          )}
+        </div>
       )}
       {inTodayList && (
         <span

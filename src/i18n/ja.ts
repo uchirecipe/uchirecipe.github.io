@@ -435,6 +435,8 @@ export const ja = {
   },
   search: {
     placeholder: '料理名・材料・タグで検索',
+    // 並び替え/絞り込みボタン(2026-07-16 便T: 従来は絞り込みボタン1つに両方入っていたが別ボタンに分離)
+    sortToggle: '並び替え',
     filterToggle: '絞り込み',
     ingredientTitle: '使いたい食材から探す',
     ingredientPlaceholder: '食材を1つずつ入力',
@@ -450,18 +452,27 @@ export const ja = {
     favoriteOnly: 'お気に入り',
     excludeNg: 'NG食材を含むレシピを隠す',
     myRecipesOnly: '自分で登録したレシピのみ',
-    quickOnly: '時短レシピ',
+    // 「時短レシピ」→「時短レシピのみに絞る」(2026-07-16 便T-5: 何をする絞り込みか分かる文言に)
+    quickOnly: '時短レシピのみに絞る',
     sortTitle: '並べ替え',
     sortUpdated: '更新順',
     sortPantryMatch: '在庫との一致が多いレシピ順',
-    sortKana: 'あいうえお順',
+    // 「あいうえお順」→「五十音順」(2026-07-16 便T-5)
+    sortKana: '五十音順',
     sortCooked: 'よく使う順',
-    // 栄養並び替え(2026-07-13 Fable設計)。カロリー順は栄養機能が有効なら常時表示、
-    // たんぱく質順はPro解錠時のみ表示(無料の栄養表示はカロリー・塩分のみ、の既存の線引きに合わせる)
-    sortKcal: 'カロリー(1食)',
-    sortProtein: 'たんぱく質(1食)',
+    // 栄養並び替え(2026-07-13 Fable設計→2026-07-16 便Tで5項目全部Pro機能化。「(1食)」表記は
+    // 見出し「栄養価で並び替え」で1食あたりであることが分かるため省いた)
+    sortKcal: 'カロリー',
+    sortProtein: 'たんぱく質',
+    sortSalt: '塩分',
+    sortFat: '脂質',
+    sortCarb: '糖質',
+    // 栄養並び替えの区分見出し(Pro解錠済み時)とPro未解錠時のグレーのティーザー行(2026-07-16 便T-4)。
+    // タップでPro案内(/settings?section=pro)へ、既存のProゲート表現(Lock+ミュート色+underlineリンク)を流用
+    sortNutritionTitle: '栄養価で並び替え',
+    sortNutritionGate: '栄養価で並び替え（Pro機能）',
     // 並べ替えの昇順/降順トグル(2026-07-13 UI改善)。既定は並べ替えの種類ごとに異なる
-    // (あいうえお順のみ昇順が既定、それ以外は降順が既定。logic/recipeSort.tsのdefaultSortDirection参照)
+    // (五十音順のみ昇順が既定、それ以外は降順が既定。logic/recipeSort.tsのdefaultSortDirection参照)
     sortAsc: '昇順',
     sortDesc: '降順',
     // 絞り込み無しでも常に表示する総件数(2026-07-13 UI改善)

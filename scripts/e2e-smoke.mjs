@@ -5,12 +5,15 @@
 //   BASE_URL=http://localhost:4173 npx tsx scripts/e2e-smoke.mjs   (preview等)
 // カバー: SMK-01(起動) / COUNT-01(一覧上部の総件数「全◯件」が絞り込み無しでも常に表示され、
 //         絞り込み中は「◯件 / 全◯件」の形になる。2026-07-13 UI改善) /
-//         QF-01(「時短レシピ」絞り込みで件数が変わる。チップ文言は2026-07-13変更) /
+//         QF-01(「時短レシピのみに絞る」絞り込みで件数が変わる。チップ文言は2026-07-13と
+//         2026-07-16便T-5で変更) /
 //         LAYOUT-01(一覧のグリッド/リスト表示切替。settingsに保存されリロード後も維持される。
 //         2026-07-13 UI改善。同日オーナー実機フィードバックでリスト行にも主要食材チップ・
-//         由来バッジ・タイトル2行折り返しを追加し、グリッドと同等の情報量になったことを確認) /
-//         SORTDIR-01(並べ替えの昇順/降順トグル。「あいうえお順」既定は昇順、「降順」で並びが
-//         ちょうど反転する。2026-07-13 UI改善) /
+//         由来バッジ・タイトル2行折り返しを追加し、グリッドと同等の情報量になったことを確認。
+//         切替ボタンは2026-07-16便T-2で件数表記の横の常設列へ移動) /
+//         SORTDIR-01(並べ替えの昇順/降順トグル。「五十音順」既定は昇順、「降順」で並びが
+//         ちょうど反転する。2026-07-13 UI改善。並び替えは2026-07-16便T-1で専用ボタン・
+//         専用パネルに分離) /
 //         SMK-02+03(登録・削除) /
 //         SMK-04(貼り付け整形) / SMK-05(人数変更・帯分数表示) / SMK-08簡易(調理中モード) /
 //         KW-01(検索キーワード欄。保存→検索でヒットし、一覧・詳細には表示されないこと) /
@@ -52,9 +55,12 @@
 //         STEP0-01(手順0件のレシピ・2026-07バグ修正: 手順欄を空のまま保存(steps:[])しても、
 //         詳細画面に「調理中モードで見る」ボタンが表示されない=空配列で調理中モードを開いて
 //         クラッシュすることがないこと) /
-//         NUTSORT-01(栄養並び替え・2026-07-13 Fable設計: 無料では「カロリー(1食)」だけが並べ替えに
-//         出て「たんぱく質(1食)」は出ない・カロリー順の既定は昇順・算出不能レシピは昇順/降順とも末尾) /
-//         NUTSORT-02(栄養並び替え・Pro解錠済み: 「たんぱく質(1食)」が出て既定は降順) /
+//         NUTSORT-01(栄養並び替えの無料ティーザー・2026-07-16便T-4で5項目まとめてPro機能化:
+//         無料では栄養価の選択肢が出ず、グレーの「栄養価で並び替え（Pro機能）」行だけが出て
+//         タップ先が既存のPro案内であること) /
+//         NUTSORT-02(栄養並び替え・Pro解錠済み: カロリー/たんぱく質/塩分/脂質/糖質の5項目が出る・
+//         カロリー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
+//         栄養価順の間はカードに並び替え中の値(◯kcal/◯g)が出る=便T-7) /
 //         TOMB-01(削除したセット品の再取込除外=トゥームストーン・2026-07-13 Fable設計:
 //         テーマ取り込み→1品削除→再取込で復活しない(「削除済みの除外中1件」表示)→テーマ一覧の
 //         「除外中1品・すべて戻す」で解除→再取込で復活する) /
@@ -195,12 +201,13 @@ try {
     `カード数=${allCardCount}`,
   )
 
-  // --- QF-01: 絞り込み「時短レシピ」でカード件数が変わる(quickStepsを持つレシピだけに絞られる。
-  // UI改善バッチ 2026-07-11。チップ文言は2026-07-13「時短」→「時短レシピ」に変更) ---
+  // --- QF-01: 絞り込み「時短レシピのみに絞る」でカード件数が変わる(quickStepsを持つレシピだけに
+  // 絞られる。UI改善バッチ 2026-07-11。チップ文言は2026-07-13「時短」→「時短レシピ」、
+  // 2026-07-16便T-5で「時短レシピのみに絞る」に変更) ---
   currentCheck = 'QF-01'
   await page.locator('button[aria-label="絞り込み"]').click()
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '時短レシピ', exact: true }).click()
+  await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
   await page.waitForTimeout(400)
   const quickCardCount = await page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
   check(
@@ -213,7 +220,7 @@ try {
     (await page.textContent('body')).includes(`${quickCardCount}件 / 全${allCardCount}件`),
   )
   // 絞り込みを解除して以降のチェックに影響しないようにする
-  await page.getByRole('button', { name: '時短レシピ', exact: true }).click()
+  await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
   await page.waitForTimeout(300)
   await page.getByRole('button', { name: '決定' }).click()
   await page.waitForTimeout(300)
@@ -276,21 +283,22 @@ try {
   const layoutAfterBackToGrid = await layoutContainerInfo()
   check('LAYOUT-01 グリッド表示に戻せる', layoutAfterBackToGrid.className.includes('grid-cols-2'))
 
-  // --- SORTDIR-01: 並べ替えの昇順/降順トグル(2026-07-13 UI改善)。「あいうえお順」を選ぶと
-  // 既定で昇順(あ→ん)になり、「降順」を押すと並びがちょうど反転することを確認する ---
+  // --- SORTDIR-01: 並べ替えの昇順/降順トグル(2026-07-13 UI改善)。「五十音順」(2026-07-16便T-5で
+  // 「あいうえお順」から改称)を選ぶと既定で昇順(あ→ん)になり、「降順」を押すと並びがちょうど反転する
+  // ことを確認する。便T-1で並び替えボタンが絞り込みボタンから分離したのでそちらを開く ---
   currentCheck = 'SORTDIR-01'
   const cardTitles = () =>
     page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
-  await page.locator('button[aria-label="絞り込み"]').click()
+  await page.locator('button[aria-label="並び替え"]').click()
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: 'あいうえお順', exact: true }).click()
+  await page.getByRole('button', { name: '五十音順', exact: true }).click()
   await page.waitForTimeout(300)
   const ascActive = await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'))
     const target = buttons.find((b) => b.textContent?.trim() === '昇順')
     return target ? target.className.includes('border-accent') : false
   })
-  check('SORTDIR-01 「あいうえお順」を選ぶと既定で昇順が選択される', ascActive)
+  check('SORTDIR-01 「五十音順」を選ぶと既定で昇順が選択される', ascActive)
   const ascTitles = await cardTitles()
   await page.getByRole('button', { name: '降順', exact: true }).click()
   await page.waitForTimeout(300)
@@ -726,73 +734,45 @@ try {
   await page.getByRole('button', { name: 'このレシピを削除' }).click()
   await page.waitForTimeout(800)
 
-  // --- NUTSORT-01: 栄養並び替え(2026-07-13 Fable設計)。無料(未解錠)では「カロリー(1食)」だけが
-  // 並べ替えに出て「たんぱく質(1食)」は出ない(Pro解錠時のみ)こと、カロリー順の既定は昇順で、
-  // 栄養を算出できないレシピ(材料が成分表に名寄せできない自作レシピ)は昇順・降順どちらでも
-  // 末尾に回ることを確認する ---
+  // --- NUTSORT-01: 栄養並び替えの無料ティーザー(2026-07-13 Fable設計→2026-07-16 便T-4で
+  // カロリー・たんぱく質・塩分・脂質・糖質の5項目まとめてPro機能化。従来無料だったカロリー順も
+  // Pro側へ=オーナー確定)。無料(未解錠)では並び替えパネルに栄養価の選択肢が一切出ず、
+  // グレーの「栄養価で並び替え（Pro機能）」行だけが出て、タップ先が既存のPro案内
+  // (設定のPro・パックタブ)であることを確認する。実際の並び順の検証はPro解錠済みの
+  // NUTSORT-02側で行う ---
   currentCheck = 'NUTSORT-01'
-  // 算出不能なレシピを1件作る(材料名が成分表のどの食品にも名寄せできない)
-  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(500)
-  await page.getByPlaceholder('例: 肉じゃが').fill('E2E栄養並び替え確認レシピ')
-  await page.getByPlaceholder('例: じゃがいも').first().fill('謎のたべもの')
-  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('謎のたべものを盛り付ける')
-  await page.getByRole('button', { name: '保存する' }).click()
-  await page.waitForTimeout(800)
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.locator('button[aria-label="絞り込み"]').click()
+  await page.locator('button[aria-label="並び替え"]').click()
   await page.waitForTimeout(300)
   const nutSortPanelText = await page.textContent('body')
   check(
-    'NUTSORT-01 並べ替えに「カロリー(1食)」が出る(栄養機能が有効なら無料でも表示)',
-    nutSortPanelText.includes('カロリー(1食)'),
+    'NUTSORT-01 無料ではグレーの「栄養価で並び替え（Pro機能）」ティーザーが出る',
+    nutSortPanelText.includes('栄養価で並び替え（Pro機能）'),
   )
-  check(
-    'NUTSORT-01 未解錠では「たんぱく質(1食)」は出ない(Pro解錠時のみ)',
-    !nutSortPanelText.includes('たんぱく質(1食)'),
-  )
-  await page.getByRole('button', { name: 'カロリー(1食)', exact: true }).click()
-  await page.waitForTimeout(500)
-  const kcalAscActive = await page.evaluate(() => {
+  const freeNutrientButtons = await page.evaluate(() => {
+    const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']
     const buttons = Array.from(document.querySelectorAll('button'))
-    const target = buttons.find((b) => b.textContent?.trim() === '昇順')
-    return target ? target.className.includes('border-accent') : false
+    return names.filter((n) => buttons.some((b) => b.textContent?.trim() === n))
   })
-  check('NUTSORT-01 カロリー順の既定は昇順(低い方から)', kcalAscActive)
-  const nutCardTitles = () =>
-    page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
-  const kcalAscTitles = await nutCardTitles()
   check(
-    'NUTSORT-01 算出不能なレシピは昇順で末尾に回る',
-    kcalAscTitles.length > 1 && kcalAscTitles[kcalAscTitles.length - 1] === 'E2E栄養並び替え確認レシピ',
-    `末尾=${kcalAscTitles[kcalAscTitles.length - 1]}`,
+    'NUTSORT-01 無料では栄養価5項目が並び替えの選択肢に出ない(旧無料カロリー順もPro側へ)',
+    freeNutrientButtons.length === 0,
+    `出てしまった項目=${JSON.stringify(freeNutrientButtons)}`,
   )
-  await page.getByRole('button', { name: '降順', exact: true }).click()
-  await page.waitForTimeout(500)
-  const kcalDescTitles = await nutCardTitles()
+  const teaserHref = await page.evaluate(() => {
+    const links = Array.from(document.querySelectorAll('a'))
+    const teaser = links.find((a) => a.textContent?.includes('栄養価で並び替え（Pro機能）'))
+    return teaser?.getAttribute('href') ?? null
+  })
   check(
-    'NUTSORT-01 降順でも算出不能なレシピは末尾のまま',
-    kcalDescTitles.length > 1 &&
-      kcalDescTitles[kcalDescTitles.length - 1] === 'E2E栄養並び替え確認レシピ',
-    `末尾=${kcalDescTitles[kcalDescTitles.length - 1]}`,
+    'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のPro・パックタブ)',
+    teaserHref === '#/settings?section=pro',
+    `href=${teaserHref}`,
   )
-  check(
-    'NUTSORT-01 昇順と降順で先頭が入れ替わる(実際にカロリー順で並んでいる)',
-    kcalAscTitles.length > 1 && kcalAscTitles[0] !== kcalDescTitles[0],
-    `昇順先頭=${kcalAscTitles[0]} 降順先頭=${kcalDescTitles[0]}`,
-  )
-  // 後始末: 並べ替えを既定に戻してパネルを閉じ、検証用レシピを削除する
-  await page.getByRole('button', { name: '更新順', exact: true }).click()
-  await page.waitForTimeout(200)
+  // パネルを閉じ、以降のチェックに影響しないようにする(条件は何も変えていない)
   await page.getByRole('button', { name: '決定' }).click()
   await page.waitForTimeout(300)
-  await page.getByText('E2E栄養並び替え確認レシピ', { exact: true }).first().click()
-  await page.waitForTimeout(500)
-  await page.locator('a[href*="/edit"]').first().click()
-  await page.waitForTimeout(500)
-  await page.getByRole('button', { name: 'このレシピを削除' }).click()
-  await page.waitForTimeout(800)
   await page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
 
   // --- SMK-14(簡易): 未解錠でのセット取り込みは丁寧にブロックされる ---
@@ -1293,24 +1273,108 @@ try {
         `変更前=${perMatchBefore?.[1]} 変更後=${perMatchAfter?.[1]}`,
       )
 
-      // --- NUTSORT-02: 栄養並び替え(Pro解錠済み・2026-07-13 Fable設計)。
-      // 「たんぱく質(1食)」が並べ替えの選択肢に出て、選ぶと既定が降順(多い方から)になることを
-      // 確認する(無料側で出ないことはNUTSORT-01で検証済み)。NUT-02と同じ解錠済みcontextを使う ---
+      // --- NUTSORT-02: 栄養並び替え(Pro解錠済み・2026-07-13 Fable設計→2026-07-16 便T-4で
+      // カロリー・たんぱく質・塩分・脂質・糖質の5項目に拡張しPro機能化)。Pro解錠済みでは
+      // 並び替えパネルに「栄養価で並び替え」区分と5項目が出ること、カロリー順の既定は昇順で
+      // 算出不能レシピ(材料が成分表に名寄せできない自作レシピ)は昇順・降順とも末尾に回ること、
+      // たんぱく質順の既定は降順(多い方から)であること、栄養価順の間はレシピカードに
+      // 並び替え中の栄養価の値(◯kcal/◯g)が表示されること(便T-7)を確認する。
+      // NUT-02と同じ解錠済みcontextを使う(無料側でティーザーだけになることはNUTSORT-01で検証済み) ---
       currentCheck = 'NUTSORT-02'
+      // 算出不能なレシピを1件作る(材料名が成分表のどの食品にも名寄せできない)
+      await nutPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await nutPage.waitForTimeout(500)
+      await nutPage.getByPlaceholder('例: 肉じゃが').fill('E2E栄養並び替え確認レシピ')
+      await nutPage.getByPlaceholder('例: じゃがいも').first().fill('謎のたべもの')
+      await nutPage
+        .getByPlaceholder('例: じゃがいもを一口大に切る')
+        .first()
+        .fill('謎のたべものを盛り付ける')
+      await nutPage.getByRole('button', { name: '保存する' }).click()
+      await nutPage.waitForTimeout(800)
       await nutPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await nutPage.waitForTimeout(800)
-      await nutPage.locator('button[aria-label="絞り込み"]').click()
+      await nutPage.locator('button[aria-label="並び替え"]').click()
       await nutPage.waitForTimeout(300)
       const proSortPanelText = await nutPage.textContent('body')
       check(
-        'NUTSORT-02 Pro解錠済みでは「たんぱく質(1食)」が並べ替えに出る',
-        proSortPanelText.includes('たんぱく質(1食)'),
+        'NUTSORT-02 Pro解錠済みでは「栄養価で並び替え」の区分見出しが出る',
+        proSortPanelText.includes('栄養価で並び替え'),
       )
       check(
-        'NUTSORT-02 「カロリー(1食)」も引き続き出る',
-        proSortPanelText.includes('カロリー(1食)'),
+        'NUTSORT-02 Pro解錠済みではグレーのティーザー行(Pro機能)は出ない',
+        !proSortPanelText.includes('栄養価で並び替え（Pro機能）'),
       )
-      await nutPage.getByRole('button', { name: 'たんぱく質(1食)', exact: true }).click()
+      const proNutrientButtons = await nutPage.evaluate(() => {
+        const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']
+        const buttons = Array.from(document.querySelectorAll('button'))
+        return names.filter((n) => buttons.some((b) => b.textContent?.trim() === n))
+      })
+      check(
+        'NUTSORT-02 Pro解錠済みでは栄養価5項目すべてが選択肢に出る',
+        proNutrientButtons.length === 5,
+        `出た項目=${JSON.stringify(proNutrientButtons)}`,
+      )
+      // カロリー順: 既定は昇順(低い方から)。算出不能レシピは昇順・降順とも末尾
+      await nutPage.getByRole('button', { name: 'カロリー', exact: true }).click()
+      await nutPage.waitForTimeout(500)
+      const kcalAscActive = await nutPage.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        const target = buttons.find((b) => b.textContent?.trim() === '昇順')
+        return target ? target.className.includes('border-accent') : false
+      })
+      check('NUTSORT-02 カロリー順の既定は昇順(低い方から)', kcalAscActive)
+      const nutCardTitles = () =>
+        nutPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
+      const kcalAscTitles = await nutCardTitles()
+      check(
+        'NUTSORT-02 算出不能なレシピは昇順で末尾に回る',
+        kcalAscTitles.length > 1 &&
+          kcalAscTitles[kcalAscTitles.length - 1] === 'E2E栄養並び替え確認レシピ',
+        `末尾=${kcalAscTitles[kcalAscTitles.length - 1]}`,
+      )
+      // 便T-7: カロリー順の間、グリッドカードの左上に「◯kcal」の値が出る。算出不能レシピには出ない
+      const kcalBadgeInfo = await nutPage.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('div.grid.grid-cols-2 a')).filter((a) =>
+          /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+        )
+        const badgeOf = (a) =>
+          Array.from(a.querySelectorAll('span')).find((s) =>
+            /^\d+(\.\d+)?kcal$/.test(s.textContent?.trim() ?? ''),
+          )
+        const unknownCard = links.find((a) => a.textContent?.includes('E2E栄養並び替え確認レシピ'))
+        return {
+          total: links.length,
+          withBadge: links.filter((a) => badgeOf(a)).length,
+          unknownHasBadge: unknownCard ? !!badgeOf(unknownCard) : null,
+        }
+      })
+      check(
+        'NUTSORT-02 カロリー順の間、カードに「◯kcal」の値が表示される(便T-7)',
+        kcalBadgeInfo.withBadge > 0,
+        `バッジ付き=${kcalBadgeInfo.withBadge}/${kcalBadgeInfo.total}`,
+      )
+      check(
+        'NUTSORT-02 算出不能なレシピのカードには値バッジが出ない',
+        kcalBadgeInfo.unknownHasBadge === false,
+        `unknownHasBadge=${kcalBadgeInfo.unknownHasBadge}`,
+      )
+      await nutPage.getByRole('button', { name: '降順', exact: true }).click()
+      await nutPage.waitForTimeout(500)
+      const kcalDescTitles = await nutCardTitles()
+      check(
+        'NUTSORT-02 降順でも算出不能なレシピは末尾のまま',
+        kcalDescTitles.length > 1 &&
+          kcalDescTitles[kcalDescTitles.length - 1] === 'E2E栄養並び替え確認レシピ',
+        `末尾=${kcalDescTitles[kcalDescTitles.length - 1]}`,
+      )
+      check(
+        'NUTSORT-02 昇順と降順で先頭が入れ替わる(実際にカロリー順で並んでいる)',
+        kcalAscTitles.length > 1 && kcalAscTitles[0] !== kcalDescTitles[0],
+        `昇順先頭=${kcalAscTitles[0]} 降順先頭=${kcalDescTitles[0]}`,
+      )
+      // たんぱく質順: 既定は降順(多い方から)。カードの値は「◯g」表記になる
+      await nutPage.getByRole('button', { name: 'たんぱく質', exact: true }).click()
       await nutPage.waitForTimeout(500)
       const proteinDescActive = await nutPage.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button'))
@@ -1318,13 +1382,35 @@ try {
         return target ? target.className.includes('border-accent') : false
       })
       check('NUTSORT-02 たんぱく質順の既定は降順(多い方から)', proteinDescActive)
-      const proteinTitles = await nutPage
-        .locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold')
-        .allTextContents()
+      const countGramBadges = () =>
+        nutPage.evaluate(() => {
+          const links = Array.from(document.querySelectorAll('a')).filter((a) =>
+            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+          )
+          return links.filter((a) =>
+            Array.from(a.querySelectorAll('span')).some((s) =>
+              /^\d+(\.\d+)?g$/.test(s.textContent?.trim() ?? ''),
+            ),
+          ).length
+        })
+      check(
+        'NUTSORT-02 たんぱく質順の間はカードの値が「◯g」表記になる(便T-7)',
+        (await countGramBadges()) > 0,
+      )
+      const proteinTitles = await nutCardTitles()
       check(
         'NUTSORT-02 たんぱく質順でも一覧が表示される(console/pageerror監視でエラー0を担保)',
         proteinTitles.length > 0,
       )
+      // 便T-7: 一覧(リスト)表示に切り替えても並び替え中の栄養価の値(行の右下)が出る
+      await nutPage.locator('button[aria-label="リスト表示に切り替え"]').click()
+      await nutPage.waitForTimeout(400)
+      check(
+        'NUTSORT-02 一覧(リスト)表示でも並び替え中の栄養価の値が出る(便T-7)',
+        (await countGramBadges()) > 0,
+      )
+      await nutPage.locator('button[aria-label="グリッド表示に切り替え"]').click()
+      await nutPage.waitForTimeout(300)
     } finally {
       await nutBrowser.close()
     }
@@ -1826,13 +1912,14 @@ try {
   currentCheck = 'SCROLL-02'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1500)
-  await page.getByRole('button', { name: '絞り込み' }).click()
+  // 2026-07-16 便T-1で並び替えボタンが絞り込みボタンから分離したのでそちらを開く
+  await page.getByRole('button', { name: '並び替え' }).click()
   await page.waitForTimeout(200)
-  // 並べ替えを既定の「更新順」から変える(URLに載らない絞り込みなので、これが復元できれば
-  // filtersKey全体が保存・復元されていることの証明になる)
-  await page.getByRole('button', { name: 'あいうえお順' }).click()
+  // 並べ替えを既定の「更新順」から変える(URLに載らない条件なので、これが復元できれば
+  // filtersKey全体が保存・復元されていることの証明になる。文言は便T-5で「あいうえお順」→「五十音順」)
+  await page.getByRole('button', { name: '五十音順' }).click()
   await page.waitForTimeout(200)
-  await page.getByRole('button', { name: '絞り込み' }).click() // パネルを閉じる
+  await page.getByRole('button', { name: '並び替え' }).click() // パネルを閉じる
   await page.waitForTimeout(200)
   await page.evaluate(() => window.scrollTo(0, 300))
   await page.waitForTimeout(400)
@@ -1851,17 +1938,17 @@ try {
     Math.abs(s2ScrollAfter - s2ScrollBefore) < 60,
     `復元前=${s2ScrollBefore} 復元後=${s2ScrollAfter}`,
   )
-  await page.getByRole('button', { name: '絞り込み' }).click() // パネルを再度開いて並べ替え状態を確認
+  await page.getByRole('button', { name: '並び替え' }).click() // パネルを再度開いて並べ替え状態を確認
   await page.waitForTimeout(200)
   // 2026-07-16 B分類の☑リスト化に追随: 選択状態はクラス(border-accent)でなく
   // aria-pressedで判定する(見た目の実装が変わっても壊れない)
   const sortStillActive = await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'))
-    const target = buttons.find((b) => b.textContent?.trim() === 'あいうえお順')
+    const target = buttons.find((b) => b.textContent?.trim() === '五十音順')
     return target ? target.getAttribute('aria-pressed') === 'true' : false
   })
-  check('SCROLL-02 詳細→戻るで並べ替え条件(あいうえお順)も保持される', sortStillActive)
-  await page.getByRole('button', { name: '絞り込み' }).click() // パネルを閉じる(後続チェックへの影響防止)
+  check('SCROLL-02 詳細→戻るで並べ替え条件(五十音順)も保持される', sortStillActive)
+  await page.getByRole('button', { name: '並び替え' }).click() // パネルを閉じる(後続チェックへの影響防止)
   await page.waitForTimeout(200)
 
   // --- TIMER-ADJ-01: 実行中タイマーの±調整(窓方式。2026-07-12タイマー自由設定・Fable設計docs/20 §6)。

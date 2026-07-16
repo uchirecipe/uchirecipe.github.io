@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
+  ArrowDownUp,
   Refrigerator,
   LayoutGrid,
   List,
@@ -11,6 +12,7 @@ import {
   ArrowDownWideNarrow,
   SquareCheck,
   Square,
+  Lock,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
@@ -29,10 +31,14 @@ import {
   sortResults,
   defaultSortDirection,
   buildNutrientSortValues,
+  isNutrientSortOption,
+  NUTRIENT_SORT_OPTIONS,
+  NUTRIENT_SORT_FIELD,
+  type NutrientSortOption,
   type RecipeSortOption,
   type SortDirection,
 } from '../logic/recipeSort'
-import { NUTRITION_TEASER_ENABLED, isNutritionUnlocked } from '../logic/nutrition'
+import { isNutritionUnlocked, roundNutrient } from '../logic/nutrition'
 import { countFreeLimitRecipes, isNearFreeLimit, FREE_LIMIT } from '../logic/freeLimit'
 import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
@@ -70,6 +76,18 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'cooked', label: ja.search.sortCooked },
 ]
 
+/** 栄養並び替え5項目のラベル（2026-07-16 便T-4: カロリー・たんぱく質・塩分・脂質・糖質。Pro機能） */
+const nutrientSortLabels: Record<NutrientSortOption, string> = {
+  kcal: ja.search.sortKcal,
+  protein: ja.search.sortProtein,
+  salt: ja.search.sortSalt,
+  fat: ja.search.sortFat,
+  carb: ja.search.sortCarb,
+}
+const nutrientSortOptions: { value: RecipeSortOption; label: string }[] = NUTRIENT_SORT_OPTIONS.map(
+  (value) => ({ value, label: nutrientSortLabels[value] }),
+)
+
 const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
     active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
@@ -85,7 +103,9 @@ const dirChipCls = (active: boolean) =>
 /**
  * 並べ替え・調理時間・手間レベルの単一選択UI(2026-07-16 UI総点検B-7オーナー個別指示)。
  * 従来はチップ/ボタン並びだったが、選択中の項目が一目で分かる☑付き縦リストに変更する
- * (radioの見た目を☑にするだけで、複数選択にはしない。AskUserで確認済み)
+ * (radioの見た目を☑にするだけで、複数選択にはしない。AskUserで確認済み)。
+ * 選択中の行はアクセント背景+白文字(bg-accent text-on-accent。2026-07-16 便T-6オーナー指示。
+ * 行の背景が角からはみ出さないようコンテナにoverflow-hiddenを併せて付ける)
  */
 function CheckList<T extends string>({
   options,
@@ -97,7 +117,7 @@ function CheckList<T extends string>({
   onSelect: (value: T) => void
 }) {
   return (
-    <div className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+    <div className="mt-1 divide-y divide-edge overflow-hidden rounded-md border border-edge bg-app">
       {options.map((option) => {
         const selected = option.value === value
         return (
@@ -107,7 +127,7 @@ function CheckList<T extends string>({
             onClick={() => onSelect(option.value)}
             aria-pressed={selected}
             className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold ${
-              selected ? 'text-accent' : 'text-ink-muted'
+              selected ? 'bg-accent text-on-accent' : 'text-ink-muted'
             }`}
           >
             {selected ? (
@@ -184,7 +204,18 @@ export default function RecipesPage() {
     if (ingParam !== null) return splitValues(ingParam)
     return saved?.ingredients ?? []
   })
-  const [panelOpen, setPanelOpen] = useState(searchParams.get('ing') !== null)
+  // 並び替え/絞り込みパネル(2026-07-16 便T: 従来は1つのpanelOpenで両方を出し分けていたが、
+  // ボタンを分離したのに合わせて開閉状態も分離する。片方を開くともう片方は閉じる(同時に出さない)
+  const [filterPanelOpen, setFilterPanelOpen] = useState(searchParams.get('ing') !== null)
+  const [sortPanelOpen, setSortPanelOpen] = useState(false)
+  const toggleFilterPanel = () => {
+    setFilterPanelOpen((open) => !open)
+    setSortPanelOpen(false)
+  }
+  const toggleSortPanel = () => {
+    setSortPanelOpen((open) => !open)
+    setFilterPanelOpen(false)
+  }
 
   // 検索中の内容をURLにも反映しておく。こうすると、タイマー等で別レシピに
   // 移動した後に「戻る」で帰ってきたとき、検索していた内容がそのまま復元される
@@ -210,7 +241,8 @@ export default function RecipesPage() {
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
   const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
   // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
-  // その種類の既定方向にリセットする(選ぶ側のonClickで一緒にsetする。下記sortOptions参照)
+  // その種類の既定方向にリセットする(選ぶ側のonClickで一緒にsetする。下記baseSortOptions/
+  // nutrientSortOptions参照)
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     saved?.sortDirection ?? defaultSortDirection[saved?.sort ?? 'updated'],
   )
@@ -230,24 +262,14 @@ export default function RecipesPage() {
 
   const hideStarters = settings?.hideStarters ?? false
 
-  // 栄養並び替え(2026-07-13 Fable設計)。「カロリー(1食)」は栄養機能(無料のカロリー・塩分表示)が
-  // 有効なら常に、「たんぱく質(1食)」はPro解錠時のみ選択肢に出す(無料の栄養表示はカロリー・塩分
-  // のみ、という既存の線引きに合わせる)
+  // 栄養並び替え(2026-07-13 Fable設計→2026-07-16 便T-4でカロリー・たんぱく質・塩分・脂質・糖質の
+  // 5項目まとめてPro機能化。従来は無料でもカロリー順だけ選べたが、オーナー指示によりPro専用に変更した
+  // (アプリ未公開・実ユーザー0のため既存無料機能の有料化には当たらない)
   const nutritionUnlocked = isNutritionUnlocked(!!settings?.proCode)
-  const sortOptions = useMemo(() => {
-    const options = [...baseSortOptions]
-    if (NUTRITION_TEASER_ENABLED || nutritionUnlocked) {
-      options.push({ value: 'kcal', label: ja.search.sortKcal })
-    }
-    if (nutritionUnlocked) {
-      options.push({ value: 'protein', label: ja.search.sortProtein })
-    }
-    return options
-  }, [nutritionUnlocked])
 
   // 栄養並び替え用の値(1食あたり)。計算が重いので栄養並び替えを選んでいる間だけ、
   // 全レシピ分をまとめて1回計算する(毎レンダー再計算しない)
-  const nutrientSortActive = sort === 'kcal' || sort === 'protein'
+  const nutrientSortActive = isNutrientSortOption(sort)
   const nutrientSortValues = useMemo(() => {
     if (!recipes || !nutrientSortActive) return undefined
     return buildNutrientSortValues(recipes)
@@ -294,7 +316,9 @@ export default function RecipesPage() {
     nutrientSortValues,
   ])
 
-  const filtersActive =
+  // 2026-07-16 便T-1: 並び替え/絞り込みがボタンごと分かれたのに合わせて、それぞれのボタンの
+  // アクティブ表示・「条件をクリア」表示も分けて判定する
+  const filterActive =
     query !== '' ||
     ingredients.length > 0 ||
     time !== 'all' ||
@@ -302,9 +326,9 @@ export default function RecipesPage() {
     tag !== 'all' ||
     favoriteOnly ||
     excludeNg ||
-    quickOnly ||
-    sort !== 'updated' ||
-    sortDirection !== defaultSortDirection[sort]
+    quickOnly
+  const sortActive = sort !== 'updated' || sortDirection !== defaultSortDirection[sort]
+  const anyConditionActive = filterActive || sortActive
 
   // 一覧の状態（検索語・絞り込み・並べ替え・スクロール位置）の保存・復元。
   // filtersKeyは「保存時と復元時で条件一式が一致しているか」の判定にのみ使う
@@ -430,6 +454,22 @@ export default function RecipesPage() {
       .replace('{t}', String(wantedCount))
   }
 
+  /**
+   * 栄養価順のとき、カードに表示する「並び替えに使っている栄養価の値」(便T-7)。
+   * カロリー順→「◯kcal」、たんぱく質・塩分・脂質・糖質順→「◯g」。算出不能(null)なレシピは
+   * 表示しない(undefinedを返し、RecipeCard側でバッジ自体を出さない)。Pro機能なので
+   * nutritionUnlocked(=Pro解錠済み)のときだけ計算する
+   */
+  const nutrientBadgeTextFor = (recipeId: number | undefined): string | undefined => {
+    if (!nutritionUnlocked || !nutrientSortActive || !isNutrientSortOption(sort)) return undefined
+    if (recipeId === undefined) return undefined
+    const field = NUTRIENT_SORT_FIELD[sort]
+    const raw = nutrientSortValues?.get(recipeId)?.[field]
+    if (raw == null) return undefined
+    const rounded = roundNutrient(field, raw)
+    return field === 'kcal' ? `${rounded}${ja.nutrition.kcalUnit}` : `${rounded}${ja.nutrition.gramUnit}`
+  }
+
   return (
     <div
       className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]"
@@ -446,7 +486,8 @@ export default function RecipesPage() {
         </p>
       )}
 
-      {/* 検索バー＋絞り込みボタン */}
+      {/* 検索バー＋並び替え/絞り込みボタン(2026-07-16 便T-1: 従来は絞り込みボタン1つに両方の
+          パネルが入っていたが、別ボタンに分離した。列表示切替は件数表記の横へ移動(下記参照)) */}
       <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
         <div className="relative min-w-0 flex-1">
           <Search
@@ -464,55 +505,101 @@ export default function RecipesPage() {
         </div>
         <button
           type="button"
-          onClick={() => setPanelOpen((open) => !open)}
-          aria-expanded={panelOpen}
+          onClick={toggleSortPanel}
+          aria-expanded={sortPanelOpen}
+          aria-label={ja.search.sortToggle}
+          className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
+            sortPanelOpen || sortActive
+              ? 'border-accent text-accent'
+              : 'border-edge text-ink-muted'
+          }`}
+        >
+          <ArrowDownUp size={22} aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={toggleFilterPanel}
+          aria-expanded={filterPanelOpen}
           aria-label={ja.search.filterToggle}
           className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
-            panelOpen || filtersActive
+            filterPanelOpen || filterActive
               ? 'border-accent text-accent'
               : 'border-edge text-ink-muted'
           }`}
         >
           <SlidersHorizontal size={22} aria-hidden />
         </button>
-        {/* 一覧の表示形式(グリッド/リスト)切替。押すたびに逆の表示へ切り替わる(2026-07-13 UI改善) */}
-        <button
-          type="button"
-          onClick={() =>
-            updateSettings({ recipeListLayout: recipeListLayout === 'grid' ? 'list' : 'grid' })
-          }
-          aria-label={
-            recipeListLayout === 'grid' ? ja.search.layoutToggleToList : ja.search.layoutToggleToGrid
-          }
-          className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border border-edge bg-surface text-ink-muted shadow-sm"
-        >
-          {recipeListLayout === 'grid' ? (
-            <List size={22} aria-hidden />
-          ) : (
-            <LayoutGrid size={22} aria-hidden />
-          )}
-        </button>
       </div>
 
-      {/* 絞り込みパネル */}
-      {panelOpen && (
+      {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
+      {sortPanelOpen && (
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-          {/* 並べ替え(2026-07-16 UI総点検B-7オーナー個別指示: チップ並びから☑付き単一選択リストに変更。
-              昇順/降順トグルはパネルの外・件数表記の横へ移動済み=下記の「件数」表示を参照) */}
           <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
           <CheckList
-            options={sortOptions}
+            options={baseSortOptions}
             value={sort}
             onSelect={(next) => {
               setSort(next)
               // 並べ替えの種類を変えたら、その種類の既定方向に戻す(2026-07-13 UI改善。
-              // 例: 「あいうえお順」は常にあ→んから始まる、というこれまでの見え方を保つ)
+              // 例: 「五十音順」は常にあ→んから始まる、というこれまでの見え方を保つ)
               setSortDirection(defaultSortDirection[next])
             }}
           />
 
+          {/* 栄養価並び替え(便T-4: カロリー・たんぱく質・塩分・脂質・糖質の5項目をPro機能化。
+              無料版はグレーのティーザー行のみ・タップで既存のProゲート表現(Lock+ミュート色)でPro案内へ) */}
+          {nutritionUnlocked ? (
+            <>
+              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                {ja.search.sortNutritionTitle}
+              </p>
+              <CheckList
+                options={nutrientSortOptions}
+                value={sort}
+                onSelect={(next) => {
+                  setSort(next)
+                  setSortDirection(defaultSortDirection[next])
+                }}
+              />
+            </>
+          ) : (
+            <Link
+              to="/settings?section=pro"
+              className="mt-[var(--space-md)] flex w-full items-center gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm font-bold text-ink-muted opacity-60"
+            >
+              <Lock size={16} className="shrink-0" aria-hidden />
+              {ja.search.sortNutritionGate}
+            </Link>
+          )}
+
+          {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
+          <button
+            type="button"
+            onClick={() => setSortPanelOpen(false)}
+            className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+          >
+            {ja.search.apply}
+          </button>
+        </div>
+      )}
+
+      {/* 絞り込みパネル(2026-07-16 便T-3: 「条件をクリア」を欄の上方に移動) */}
+      {filterPanelOpen && (
+        <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+          {anyConditionActive && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-sm font-bold text-accent underline"
+            >
+              {ja.search.clear}
+            </button>
+          )}
+
           {/* 使いたい食材 */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+          <p
+            className={`text-sm font-bold text-ink-muted ${anyConditionActive ? 'mt-[var(--space-md)]' : ''}`}
+          >
             {ja.search.ingredientTitle}
           </p>
           <div className="mt-1">
@@ -602,20 +689,10 @@ export default function RecipesPage() {
             </button>
           </div>
 
-          {filtersActive && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="mt-[var(--space-md)] text-sm font-bold text-accent underline"
-            >
-              {ja.search.clear}
-            </button>
-          )}
-
           {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
           <button
             type="button"
-            onClick={() => setPanelOpen(false)}
+            onClick={() => setFilterPanelOpen(false)}
             className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
           >
             {ja.search.apply}
@@ -624,19 +701,21 @@ export default function RecipesPage() {
       )}
 
       {/* 件数: 絞り込み無しでも総件数を常に表示する(2026-07-13 UI改善)。絞り込み中は
-          既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる。
+          既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる(件数が変わるのは絞り込みのみ・
+          並べ替えでは変わらないのでfilterActiveで判定する)。
           昇順/降順トグルは2026-07-16 UI総点検B-7オーナー個別指示によりパネルの外・この件数表記の
-          横に常設する(従来はパネル内にあった) */}
+          横に常設する(従来はパネル内にあった)。列表示切替(グリッド/一覧)も便T-2で同じ行に移動した:
+          全◯件 | 昇順/降順 | 列切替 の並び */}
       {results && totalCount !== undefined && (
         <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
           <p className="min-w-0 flex-1 text-sm text-ink-muted">
-            {filtersActive
+            {filterActive
               ? ja.search.resultCountWithTotal
                   .replace('{n}', String(results.length))
                   .replace('{t}', String(totalCount))
               : ja.search.totalCount.replace('{n}', String(totalCount))}
           </p>
-          <div className="flex shrink-0 gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={() => setSortDirection('asc')}
@@ -652,6 +731,24 @@ export default function RecipesPage() {
             >
               <ArrowDownWideNarrow size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
               {ja.search.sortDesc}
+            </button>
+            {/* 一覧の表示形式(グリッド/リスト)切替。押すたびに逆の表示へ切り替わる(2026-07-13 UI改善。
+                2026-07-16 便T-2でヘッダーからこの常設列へ移動) */}
+            <button
+              type="button"
+              onClick={() =>
+                updateSettings({ recipeListLayout: recipeListLayout === 'grid' ? 'list' : 'grid' })
+              }
+              aria-label={
+                recipeListLayout === 'grid' ? ja.search.layoutToggleToList : ja.search.layoutToggleToGrid
+              }
+              className="inline-flex shrink-0 items-center justify-center rounded-sm border border-edge bg-surface px-2 py-1.5 text-ink-muted"
+            >
+              {recipeListLayout === 'grid' ? (
+                <List size={14} aria-hidden />
+              ) : (
+                <LayoutGrid size={14} aria-hidden />
+              )}
             </button>
           </div>
         </div>
@@ -698,6 +795,7 @@ export default function RecipesPage() {
             subLabel={subLabelFor(usedCount, wantedCount)}
             inTodayList={todayRecipeIds.has(recipe.id!)}
             showQuickTime={quickOnly}
+            nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
           />
         ))}
       </div>

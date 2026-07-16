@@ -3,18 +3,33 @@ import { toHiragana } from './kana'
 import { computeRecipeNutrition } from './nutrition'
 import type { SearchResult } from './search'
 
-/** レシピ一覧の並べ替えオプション（kcal/protein=栄養並び替え。2026-07-13 Fable設計） */
-export type RecipeSortOption = 'updated' | 'pantryMatch' | 'kana' | 'cooked' | 'kcal' | 'protein'
+/**
+ * 栄養並び替えの5種類（カロリー・たんぱく質・塩分・脂質・糖質=docs/08の「栄養価のめやす」Pro5項目と整合）。
+ * 2026-07-16 便T: 従来はカロリーだけ無料でも選べたが、5項目まとめてPro機能化した
+ * （オーナー指示による確定・docs/34便T-4。アプリ未公開・実ユーザー0のため後戻り問題なし）
+ */
+export const NUTRIENT_SORT_OPTIONS = ['kcal', 'protein', 'salt', 'fat', 'carb'] as const
+export type NutrientSortOption = (typeof NUTRIENT_SORT_OPTIONS)[number]
+
+/** レシピ一覧の並べ替えオプション（kcal/protein/salt/fat/carb=栄養並び替え。2026-07-13 Fable設計、
+ * 2026-07-16 便Tで塩分・脂質・糖質を追加） */
+export type RecipeSortOption = 'updated' | 'pantryMatch' | 'kana' | 'cooked' | NutrientSortOption
+
+/** 並べ替えオプションが栄養並び替え（Pro機能）かどうか */
+export function isNutrientSortOption(option: RecipeSortOption): option is NutrientSortOption {
+  return (NUTRIENT_SORT_OPTIONS as readonly string[]).includes(option)
+}
 
 /** 並べ替えの昇順/降順（2026-07-13 UI改善） */
 export type SortDirection = 'asc' | 'desc'
 
 /**
- * 並べ替えの種類ごとの既定方向。「あいうえお順」だけ昇順（あ→ん）が自然で、
+ * 並べ替えの種類ごとの既定方向。「あいうえお順（五十音順）」だけ昇順（あ→ん）が自然で、
  * それ以外（更新順=新しい順・よく使う順=多い順・在庫一致順=多い順）は降順が自然なため、
  * 種類を切り替えたときはこの既定値にリセットする（呼び出し側で使う）。
- * 栄養並び替えの既定は「カロリー=低い方から（ヘルシー志向）・たんぱく質=多い方から（高たんぱく志向）」
- * （2026-07-13。どちらも昇順/降順トグルで反転できる）
+ * 栄養並び替えの既定は「たんぱく質だけ多い方から（高たんぱく志向）・それ以外（カロリー・塩分・脂質・糖質）は
+ * 少ない方から（ヘルシー志向）」（2026-07-13にカロリーで導入した方針を2026-07-16に塩分・脂質・糖質にも適用。
+ * どれも昇順/降順トグルで反転できる）
  */
 export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   updated: 'desc',
@@ -23,15 +38,30 @@ export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   cooked: 'desc',
   kcal: 'asc',
   protein: 'desc',
+  salt: 'asc',
+  fat: 'asc',
+  carb: 'asc',
 }
 
 /**
  * 栄養並び替え用の1食（1人分）あたりの値。null は算出不能（材料が名寄せできない自作レシピ等）で、
- * 昇順/降順に関わらず常に末尾へ回す
+ * 昇順/降順に関わらず常に末尾へ回す（2026-07-16 便T: 塩分・脂質・糖質を追加）
  */
 export interface NutrientSortValue {
   kcal: number | null
   proteinG: number | null
+  fatG: number | null
+  carbG: number | null
+  saltG: number | null
+}
+
+/** 並べ替えオプション → NutrientSortValue のキーの対応表（sortResultsと一覧カードの値表示で共用） */
+export const NUTRIENT_SORT_FIELD: Record<NutrientSortOption, keyof NutrientSortValue> = {
+  kcal: 'kcal',
+  protein: 'proteinG',
+  salt: 'saltG',
+  fat: 'fatG',
+  carb: 'carbG',
 }
 
 /**
@@ -47,11 +77,14 @@ export function buildNutrientSortValues(recipes: Recipe[]): Map<number, Nutrient
     if (recipe.id === undefined) continue
     const nutrition = computeRecipeNutrition(recipe)
     if (nutrition.items.length === 0) {
-      map.set(recipe.id, { kcal: null, proteinG: null })
+      map.set(recipe.id, { kcal: null, proteinG: null, fatG: null, carbG: null, saltG: null })
     } else {
       map.set(recipe.id, {
         kcal: nutrition.perServing.kcal,
         proteinG: nutrition.perServing.proteinG,
+        fatG: nutrition.perServing.fatG,
+        carbG: nutrition.perServing.carbG,
+        saltG: nutrition.perServing.saltG,
       })
     }
   }
@@ -71,7 +104,7 @@ function pantryMatchCount(recipe: Recipe, normalizedPantryNames: string[]): numb
 
 /** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか） */
 function compareAscending(
-  option: Exclude<RecipeSortOption, 'kcal' | 'protein'>,
+  option: Exclude<RecipeSortOption, NutrientSortOption>,
   a: SearchResult,
   b: SearchResult,
   normalizedPantryNames: string[],
@@ -97,7 +130,7 @@ function compareAscending(
  * 省略時はその並べ替えの既定方向（defaultSortDirection）を使うため、
  * 昇順/降順トグルを触っていないユーザーには従来どおりの並びを保つ。
  * 同点のときは常に更新順（新しい順）を維持する（directionの影響を受けない）。
- * 栄養並び替え（kcal/protein）では nutrientValues（buildNutrientSortValues の結果）を渡すこと。
+ * 栄養並び替え（kcal/protein/salt/fat/carb）では nutrientValues（buildNutrientSortValues の結果）を渡すこと。
  * 値が null（算出不能）のレシピは昇順/降順に関わらず常に末尾に回す
  */
 export function sortResults(
@@ -110,11 +143,12 @@ export function sortResults(
   const sign = direction === 'asc' ? 1 : -1
   const sorted = [...results]
 
-  if (option === 'kcal' || option === 'protein') {
+  if (isNutrientSortOption(option)) {
+    const field = NUTRIENT_SORT_FIELD[option]
     const valueOf = (result: SearchResult): number | null => {
       const value = result.recipe.id === undefined ? undefined : nutrientValues?.get(result.recipe.id)
       if (!value) return null
-      return option === 'kcal' ? value.kcal : value.proteinG
+      return value[field]
     }
     sorted.sort((a, b) => {
       const av = valueOf(a)
