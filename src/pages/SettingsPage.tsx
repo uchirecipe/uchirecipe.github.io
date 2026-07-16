@@ -13,6 +13,7 @@ import {
   Info,
   Coins,
   RefreshCw,
+  TriangleAlert,
 } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteRecipesBySourceSet } from '../db/recipes'
@@ -296,8 +297,15 @@ export default function SettingsPage() {
   const cookedPhotoBytes = recipes ? totalCookedLogPhotoBytes(recipes) : 0
   const showCookedPhotoLimitBanner = isOverCookedPhotoLimit(cookedPhotoBytes)
 
-  /** バックアップの読み込み: モードを選んでからファイルを開く */
+  /**
+   * バックアップの読み込み: モードを選んでからファイルを開く。
+   * 置き換え(replace)は、押した瞬間に確認なしでファイル選択ダイアログが開いてしまっていた穴を
+   * 塞ぐため、ファイル選択を開く前に一段確認を挟む(2026-07-16 データ消失事故の再発防止・P6所見)。
+   * キャンセルなら何もしない(ファイル選択自体を開かない)。ファイル選択後にonImportFileで出る
+   * 既存の確認(backupImportReplaceConfirm)はそのまま変更しない
+   */
   const pickImportFile = (mode: 'replace' | 'merge') => {
+    if (mode === 'replace' && !window.confirm(ja.settings.importReplaceConfirm)) return
     importModeRef.current = mode
     importFileRef.current?.click()
   }
@@ -1178,6 +1186,10 @@ export default function SettingsPage() {
                 <Upload size={18} aria-hidden />
                 {ja.settings.backupImportReplace}
               </button>
+              <p className="flex items-center gap-1 text-xs font-bold text-warning">
+                <TriangleAlert size={14} aria-hidden />
+                {ja.settings.importReplaceCaption}
+              </p>
             </div>
           </section>
 

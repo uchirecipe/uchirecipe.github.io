@@ -3096,6 +3096,66 @@ try {
     }
   }
 
+  // --- IMPORTCONFIRM-01: 「読み込む(今のデータと置き換え)」は押した瞬間に確認なしでファイル選択
+  // ダイアログが開いてしまっていた穴(2026-07-16 UI総点検P6 高重要度所見・オーナーのデータ消失事故の
+  // 再発防止)を、ファイル選択を開く前にwindow.confirmを挟むことで塞いだ。(a)ボタン押下で実際に
+  // confirmダイアログが出ること (b)キャンセルするとファイル選択(filechooser)には進まないこと
+  // (c)承認(accept)すると実際にファイル選択へ進むこと、の3点を確認する。承認後に実際のファイルを
+  // 選んで復元まで成功することはBACKUP-01で確認済みのため、ここではfilechooserが開くところまでに留める ---
+  currentCheck = 'IMPORTCONFIRM-01'
+  {
+    const icBrowser = await chromium.launch()
+    try {
+      const icContext = await icBrowser.newContext()
+      const icPage = await icContext.newPage()
+      icPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@IMPORTCONFIRM-01] ${err.message}`)
+      })
+      await icPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await icPage.waitForTimeout(1800) // 初回シード完了待ち
+      await icPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await icPage.waitForTimeout(500)
+      await icPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await icPage.waitForTimeout(300)
+
+      // (a)(b) ボタン押下でconfirmダイアログが実際に出ることを検知し、キャンセル(dismiss)する。
+      // キャンセルした場合はファイル選択(filechooser)には進まないはず
+      let dialogSeen = null
+      icPage.once('dialog', (dialog) => {
+        dialogSeen = { type: dialog.type(), message: dialog.message() }
+        void dialog.dismiss()
+      })
+      let filechooserFired = false
+      icPage.once('filechooser', () => {
+        filechooserFired = true
+      })
+      await icPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click()
+      await icPage.waitForTimeout(500)
+      check(
+        'IMPORTCONFIRM-01 置き換えボタン押下でconfirmダイアログが出る',
+        dialogSeen?.type === 'confirm' && dialogSeen.message.includes('置き換えます'),
+        `dialogSeen=${JSON.stringify(dialogSeen)}`,
+      )
+      check(
+        'IMPORTCONFIRM-01 confirmをキャンセルするとファイル選択(filechooser)には進まない',
+        !filechooserFired,
+      )
+
+      // (c) 同じボタンをもう一度押し、今度はconfirmを承認(accept)すると実際にファイル選択へ進むこと
+      const [fileChooser] = await Promise.all([
+        icPage.waitForEvent('filechooser'),
+        (async () => {
+          icPage.once('dialog', (dialog) => void dialog.accept())
+          await icPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click()
+        })(),
+      ])
+      check('IMPORTCONFIRM-01 confirmを承認するとファイル選択(filechooser)が開く', !!fileChooser)
+    } finally {
+      await icBrowser.close()
+    }
+  }
+
   // --- PRO-FALLBACK-01: crypto.subtleが使えないinsecure context(開発中LANのhttp://192.168.x.x
   // 等でのiPhone実機テストが該当。docs/22)でも、純JSのSHA-256フォールバック(src/logic/sha256.ts)
   // でPro解錠コード検証が最後まで動くことを確認する(2026-07-13)。crypto.subtleの有無自体は

@@ -294,7 +294,15 @@ export const ja = {
     backupLastDate: '最終バックアップ: {date}',
     backupNever: 'まだバックアップしていません',
     backupImportReplace: '読み込む（今のデータと置き換え）',
+    // 置き換えボタン直下に出す短い注意キャプション(2026-07-16 データ消失事故の再発防止。
+    // 追加側のbackupImportMergeNoteと対になる、置き換え側の警告表示)
+    importReplaceCaption: '今のデータを消して選んだファイルの内容だけにします',
     backupImportMerge: '読み込む（今のデータに追加）',
+    // ファイル選択ダイアログを開く前に出す確認(2026-07-16新設)。押した瞬間に確認なしで
+    // ファイル選択が開いてしまう穴を塞ぐためのもので、選択後に出る既存の
+    // backupImportReplaceConfirmとは別の、より手前の確認(キャンセルならファイル選択自体を開かない)
+    importReplaceConfirm:
+      '今のレシピ・価格・設定などをすべて選んだファイルの内容に置き換えます。置き換え前のデータは元に戻せません。よろしいですか？（心配なときは、先に「ファイルに書き出す」でバックアップを取ってください）',
     backupImportReplaceConfirm: '今のレシピと設定をすべて消して、ファイルの内容に置き換えます。よろしいですか？',
     backupImportMergeConfirm: 'ファイルのレシピを今のデータに追加します。よろしいですか？',
     backupImportMergeNote: '同じレシピ（同一ID）はスキップされ、今のデータが優先されます。新しいレシピだけが追加されます',
