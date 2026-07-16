@@ -404,7 +404,7 @@ export default function HomePage() {
       {/* バックアップの控えめなリマインド */}
       {showBackupReminder && (
         <Link
-          to="/settings"
+          to="/settings?section=backup"
           className="mt-[var(--space-sm)] flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
         >
           <HardDriveDownload size={16} className="shrink-0 text-accent" aria-hidden />

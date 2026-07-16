@@ -14,6 +14,16 @@ export interface PriceDefaultItem {
   unit: string
 }
 
+/**
+ * PRICE_DEFAULTSの「版番号」(2026-07-16 バージョン付きトップアップ移行)。
+ * 古い時期にマスタを作った既存ユーザーは、その後追加されたPRICE_DEFAULTSの新項目が
+ * 反映されず「価格なし」が多発する問題への対応。この番号を上げるたびに、
+ * db/prices.tsのseedPriceDefaultsIfNeededが「まだ無い項目だけ」を1回だけ追加で投入する
+ * (ユーザーが編集・追加した行や、意図的に削除した既定は一切触らない)。
+ * 新しい項目をPRICE_DEFAULTSへ追加したときは、この番号をインクリメントすること。
+ */
+export const PRICE_DEFAULTS_VERSION = 2
+
 export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   // 野菜
   { name: '玉ねぎ', pricePerUnit: 50, unit: '1個' },

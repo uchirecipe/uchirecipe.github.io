@@ -2,17 +2,44 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { defaultSettings } from './types'
 import type { PriceEntry } from './types'
-import { PRICE_DEFAULTS } from '../data/priceDefaults'
+import { PRICE_DEFAULTS, PRICE_DEFAULTS_VERSION } from '../data/priceDefaults'
+import type { PriceDefaultItem } from '../data/priceDefaults'
 import { toHiragana } from '../logic/kana'
 import { normalizeIngredientNameForPrice } from '../logic/priceEstimate'
 
 const collator = new Intl.Collator('ja')
 
 /**
+ * 重複判定用の正規化: 前後の空白除去・括弧書き除去（normalizeIngredientNameForPrice）に加えて、
+ * カタカナ⇄ひらがなの表記ゆれも同一視するため toHiragana を噛ませる
+ * （2026-07-15 オーナー実機フィードバック: 「とうふ」と「トウフ」を別々に登録できてしまう）。
+ */
+function normalizeForDuplicateCheck(name: string): string {
+  return toHiragana(normalizeIngredientNameForPrice(name))
+}
+
+/**
+ * 既存マスタ(existing)に対して、defaults側のうち「名前が既存に一つも無いもの」だけを返す純粋関数
+ * （2026-07-16 バージョン付きトップアップ移行用に切り出し。ユニットテストしやすいようexportする）。
+ * 名前の一致判定はnormalizeForDuplicateCheck（かな表記ゆれ込み）で行う。価格・単位が既存と
+ * 違っていても「名前があるなら追加しない」（ユーザーが編集した行を上書きしないため）。
+ */
+export function missingDefaults(
+  existing: Pick<PriceEntry, 'name'>[],
+  defaults: PriceDefaultItem[],
+): PriceDefaultItem[] {
+  const existingNames = new Set(existing.map((e) => normalizeForDuplicateCheck(e.name)))
+  return defaults.filter((d) => !existingNames.has(normalizeForDuplicateCheck(d.name)))
+}
+
+/**
  * 初回起動時だけ、頻出食材の目安価格（PRICE_DEFAULTS）を食材価格マスタに投入する。
  * 既に投入済み、またはマスタに何か登録済みなら何もしない（pantry.tsのプリセット投入と同じ方式）。
  * 併せて、既存ユーザーの手持ちデータに「目安/自分の価格」バッジ用フラグを1回だけ後付けする
  * 移行処理も行う（2026-07-12 UX改修。新規投入分は最初からフラグ付きなので対象外）。
+ * さらに、PRICE_DEFAULTS_VERSIONが上がったときだけ「まだ無い項目だけ」を追加投入する
+ * バージョン付きトップアップ移行も行う（2026-07-16。古い時期にマスタを作った既存ユーザーは、
+ * その後追加されたPRICE_DEFAULTSが反映されず「価格なし」が多発するための対応）。
  */
 export async function seedPriceDefaultsIfNeeded(): Promise<void> {
   await db.transaction('rw', db.prices, db.settings, async () => {
@@ -56,7 +83,32 @@ export async function seedPriceDefaultsIfNeeded(): Promise<void> {
           }
         }
       }
-      await db.settings.put({ ...settings, priceDefaultFlagsMigrated: true, id: 1 })
+      settings = { ...settings, priceDefaultFlagsMigrated: true }
+      await db.settings.put({ ...settings, id: 1 })
+    }
+
+    // バージョン付きトップアップ移行: 既存の行（ユーザーが編集・追加したもの含む）は一切触らず、
+    // 名前がまだ無いPRICE_DEFAULTSの項目だけを追加する。バージョンが上がった時だけ実行するため、
+    // ユーザーが過去に消した既定はそのバージョン内では再追加しない
+    if ((settings.priceDefaultsVersion ?? 0) < PRICE_DEFAULTS_VERSION) {
+      const existing = await db.prices.toArray()
+      const missing = missingDefaults(existing, PRICE_DEFAULTS)
+      if (missing.length > 0) {
+        const now = Date.now()
+        await db.prices.bulkAdd(
+          missing.map((item) => ({
+            name: item.name,
+            pricePerUnit: item.pricePerUnit,
+            unit: item.unit,
+            updatedAt: now,
+            isDefault: true,
+            defaultPricePerUnit: item.pricePerUnit,
+            defaultUnit: item.unit,
+          })),
+        )
+      }
+      settings = { ...settings, priceDefaultsVersion: PRICE_DEFAULTS_VERSION }
+      await db.settings.put({ ...settings, id: 1 })
     }
   })
 }
@@ -80,15 +132,6 @@ export type AddPriceEntryResult =
   | { status: 'added' }
   | { status: 'duplicate'; existingName: string }
   | { status: 'invalid' }
-
-/**
- * 重複判定用の正規化: 前後の空白除去・括弧書き除去（normalizeIngredientNameForPrice）に加えて、
- * カタカナ⇄ひらがなの表記ゆれも同一視するため toHiragana を噛ませる
- * （2026-07-15 オーナー実機フィードバック: 「とうふ」と「トウフ」を別々に登録できてしまう）。
- */
-function normalizeForDuplicateCheck(name: string): string {
-  return toHiragana(normalizeIngredientNameForPrice(name))
-}
 
 /**
  * 新規追加。名前・単位が空、または価格が0以下なら何もしない({status:'invalid'}。

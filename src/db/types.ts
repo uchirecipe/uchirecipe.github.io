@@ -308,6 +308,13 @@ export interface Settings {
    */
   priceDefaultFlagsMigrated: boolean
   /**
+   * 食材価格マスタに反映済みのPRICE_DEFAULTS版番号(2026-07-16 バージョン付きトップアップ移行)。
+   * data/priceDefaults.tsのPRICE_DEFAULTS_VERSIONより低ければ、起動時にprices.tsの
+   * seedPriceDefaultsIfNeededが「まだ無い項目だけ」を追加投入する。未設定（既存ユーザー含む）は
+   * 0扱い（マイグレーション不要。この項目自体は任意のためスキーマ変更なしで運用できる）
+   */
+  priceDefaultsVersion?: number
+  /**
    * レシピ一覧の表示形式（グリッド/リスト。2026-07-13 UI改善）。未設定（既存ユーザー含む）は
    * 従来どおりのグリッド表示として扱う
    */
