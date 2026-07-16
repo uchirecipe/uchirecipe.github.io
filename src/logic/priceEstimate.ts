@@ -18,6 +18,13 @@ export function normalizeIngredientNameForPrice(name: string): string {
 
 /** マスタ照合用に正規化・整形済みの1件 */
 export interface PriceIndexEntry {
+  /**
+   * 元になったPriceEntryのid(2026-07-16 裁定1「原価ビュー」追加)。マスタから作った索引なら
+   * 必ず入っている想定だが、PRICE_DEFAULTSの生データ(idを持たない)から直接buildPriceIndexを
+   * 呼ぶテスト用途もあるため任意項目のまま後方互換を保つ。原価ビューの編集チップは
+   * matchPriceEntryで見つけたエントリのidからマスタ行を特定し、編集モーダルに渡す
+   */
+  id?: number
   normalizedName: string
   /**
    * 照合専用キー: normalizedName(括弧除去済みの表示名)をさらにtoHiraganaでかな正規化したもの
@@ -42,12 +49,13 @@ export interface PriceIndexEntry {
  * 照合キー(かな正規化後)が長いものを先に並べる（前方一致で複数ヒットしたとき、より具体的な名前を優先するため）。
  */
 export function buildPriceIndex(
-  entries: { name: string; pricePerUnit: number; unit: string; isDefault?: boolean }[],
+  entries: { id?: number; name: string; pricePerUnit: number; unit: string; isDefault?: boolean }[],
 ): PriceIndexEntry[] {
   return entries
     .map((e) => {
       const normalizedName = normalizeIngredientNameForPrice(e.name)
       return {
+        id: e.id,
         normalizedName,
         matchKey: toHiragana(normalizedName),
         pricePerUnit: e.pricePerUnit,

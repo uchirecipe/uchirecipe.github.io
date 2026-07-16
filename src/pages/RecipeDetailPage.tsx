@@ -24,14 +24,13 @@ import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
 import { usePriceEntries } from '../db/prices'
-import type { Ingredient } from '../db/types'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
 import {
   buildPriceIndex,
-  estimateIngredientYen,
+  matchPriceEntry,
   estimateRecipeCost,
-  type PriceIndexEntry,
+  normalizeIngredientNameForPrice,
 } from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { shareText, shareImageCard } from '../logic/share'
@@ -48,6 +47,7 @@ import CookedLogModal from '../components/CookedLogModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import NutritionTeaser from '../components/NutritionTeaser'
+import PriceEditModal, { type PriceEditTarget } from '../components/PriceEditModal'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
@@ -57,24 +57,6 @@ import { buildIngredientNames } from '../logic/ingredientSpans'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
 import { ja } from '../i18n/ja'
-
-/**
- * 材料1行分の「価格ビュー」表示金額（2026-07-15 オーナー要望「どの食材が値段に反映されて
- * いるか分からない」への対応）。概算食費(estimateRecipeCost)と同じ優先順位
- * （個別入力(ing.price) > マスタ一致 > なし）で1行ずつ評価する。
- * マスタ一致時の由来(目安のまま/ユーザー上書き=estimateIngredientYenが返すsource)はUI表示には
- * 使わない（2026-07-15 オーナー仕様変更でバッジ表示を廃止。ロジック側は変更しない）ので、
- * ここでは金額だけを返す。どちらにも当てはまらない（該当なし）場合はnull＝「価格なし」表示。
- */
-function ingredientPriceDisplay(
-  ing: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>,
-  index: PriceIndexEntry[],
-): { yen: number } | null {
-  if (ing.price != null && ing.price > 0) return { yen: ing.price }
-  const estimated = estimateIngredientYen(ing, index)
-  if (estimated != null && estimated.yen > 0) return { yen: estimated.yen }
-  return null
-}
 
 /** レシピ詳細＝料理中に見るメイン画面。文字・ボタンは大きめ */
 export default function RecipeDetailPage() {
@@ -152,6 +134,10 @@ export default function RecipeDetailPage() {
   // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
   // 既定OFFのトグル表示に限定する。ページローカルな一時状態でよい(レシピを離れたらリセット)
   const [showPrices, setShowPrices] = useState(false)
+
+  // 原価ビューの価格編集モーダル(2026-07-16 裁定1「原価ビュー」全面改修)。
+  // entryIdあり=マスタ一致行の編集/なし=「＋登録」からの新規登録。nullで閉じている
+  const [priceEdit, setPriceEdit] = useState<PriceEditTarget | null>(null)
 
   // 完了トースト(2026-07-16 UI総点検A-4: 「記録する」後の無言完了への対応。
   // 既存のToastコンポーネント+setMessageパターン(MealPlanPage等と同じ)を流用)
@@ -251,6 +237,10 @@ export default function RecipeDetailPage() {
   // 1食あたりの概算食費(2026-07-14 オーナー実機フィードバック: 合計だけでなく1食分の目安も
   // 見たい。表示中のservings(人数変更に追従)で割る)
   const perServingPrice = servings > 0 ? Math.round(scaledPrice / servings) : scaledPrice
+  // 原価サマリーカード用の1人分金額(2026-07-16 裁定1)。上のperServingPriceとは違い、
+  // 表示人数(servingsOverride)を追わず常にrecipe.servings(登録人数)で割る
+  const costPerServingRegistered =
+    recipe.servings > 0 ? Math.round(totalPrice / recipe.servings) : totalPrice
 
   const saveLog = async () => {
     if (!logDate) return
@@ -540,19 +530,34 @@ export default function RecipeDetailPage() {
               </button>
             </div>
           </div>
-          {/* 価格ビューの基準注記: 概算食費の合計と必ず一致させるため、表示人数ではなく
-              登録人数(recipe.servings)で固定していることを明示する。あわせて「食材と価格」
-              ページへの案内リンクを直下に置く(2026-07-15 オーナー仕様変更: 由来バッジの代わりに
-              マスタ側の編集導線を出す。文言はja.form.ingredientPriceGuideLinkを再利用し新設しない) */}
+          {/* 原価サマリーカード(2026-07-16 裁定1「原価ビュー」全面改修): 材料リスト直上に
+              1人分・全量の概算金額をまとめて出す。人数は登録人数(recipe.servings)で固定し、
+              表示人数(servingsOverride)には追従させない(概算食費の合計と必ず一致させるため)。
+              材料の価格が1件も無ければ(totalPrice===0)金額の代わりに登録を促す案内を出す。
+              「食材と価格を編集する」リンクは2026-07-15から引き続きここに置く */}
           {showPrices && (
-            <>
-              <p className="mt-1 text-sm text-ink-muted">
-                {ja.detail.priceViewNote.replace('{n}', String(recipe.servings))}
-              </p>
-              <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent underline">
+            <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+              {totalPrice > 0 ? (
+                <>
+                  <p className="text-lg font-bold">
+                    {ja.detail.costPerServing.replace('{n}', costPerServingRegistered.toLocaleString())}
+                  </p>
+                  <p className="text-sm text-ink-muted">
+                    {ja.detail.costTotal
+                      .replace('{n}', String(recipe.servings))
+                      .replace('{m}', totalPrice.toLocaleString())}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    {ja.detail.priceViewNote.replace('{n}', String(recipe.servings))}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-ink-muted">{ja.detail.costEmpty}</p>
+              )}
+              <Link to="/prices" className="mt-1 inline-block text-sm font-bold text-accent underline">
                 {ja.form.ingredientPriceGuideLink}
               </Link>
-            </>
+            </div>
           )}
           {recipe.ingredients.some((ing) => ing.seasoningGroup) && (
             <p className="mt-1 text-sm text-ink-muted">{ja.detail.seasoningGroupHint}</p>
@@ -561,8 +566,9 @@ export default function RecipeDetailPage() {
             {recipe.ingredients.map((ing, index) => {
               const isNg = ngIndices.has(index)
               // 価格ビューOFF時はrecipe.ingredientsの表示に一切手を加えない(1pxも変えない)ため
-              // showPrices==trueのときだけ計算する
-              const priceDisplay = showPrices ? ingredientPriceDisplay(ing, priceIndex) : null
+              // showPrices==trueのときだけマスタ照合する
+              const matchedEntry = showPrices ? matchPriceEntry(ing.name, priceIndex) : undefined
+              const hasOwnPrice = ing.price != null && ing.price > 0
               return (
                 <li
                   key={index}
@@ -582,31 +588,51 @@ export default function RecipeDetailPage() {
                       {isNg && <TriangleAlert size={18} aria-label={ja.detail.ngWarning} />}
                       {ing.name}
                     </span>
-                    <span className="shrink-0 font-bold">
-                      {formatAmountUnit(
-                        scaleAmount(ing.amount, recipe.servings, servings, ing.unit),
-                        ing.unit,
-                      )}
-                    </span>
+                    {showPrices ? (
+                      /* 原価ビューON時は使用量表示を消し、代わりに「登録単位と価格」チップに
+                         差し替える(2026-07-16 裁定1: 行別按分額の表示は削除・オーナー指示
+                         「登録単位と価格が正」)。ing.price(レシピ個別入力)がある行は
+                         マスタ編集の対象外なので、チップにせず金額だけの静的表記にする
+                         (edge case1: 合計は個別価格優先・按分計算自体は従来どおり不変) */
+                      <span className="shrink-0">
+                        {hasOwnPrice ? (
+                          <span className="text-sm font-bold text-ink-muted">
+                            {ja.detail.costRecipeSpecific.replace('{n}', (ing.price ?? 0).toLocaleString())}
+                          </span>
+                        ) : matchedEntry ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPriceEdit({ name: matchedEntry.normalizedName, entryId: matchedEntry.id })
+                            }
+                            className="inline-flex items-center gap-1 rounded-full border border-edge bg-app px-2.5 py-1 text-sm font-bold text-accent shadow-sm"
+                          >
+                            {matchedEntry.pricePerUnit.toLocaleString()}
+                            {ja.detail.priceYen}/{matchedEntry.unit}
+                            <Pencil size={12} aria-hidden />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPriceEdit({ name: normalizeIngredientNameForPrice(ing.name) })
+                            }
+                            className="inline-flex items-center gap-1 text-sm text-ink-muted"
+                          >
+                            {ja.detail.priceNone}
+                            <span className="font-bold text-accent">＋{ja.detail.costAddPrice}</span>
+                          </button>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="shrink-0 font-bold">
+                        {formatAmountUnit(
+                          scaleAmount(ing.amount, recipe.servings, servings, ing.unit),
+                          ing.unit,
+                        )}
+                      </span>
+                    )}
                   </div>
-                  {/* 材料行ごとの価格表示は2026-07-14に常時表示を廃止（オーナー実機フィードバック:
-                      「材料のメモ欄に目安価格が表示されている」の解消）。2026-07-15、トグルONの
-                      ときだけ出す形で復活。由来バッジ(目安/自分の価格)は同日オーナー仕様変更で
-                      廃止し、金額(または「価格なし」)だけを表示する。由来は代わりに上部の
-                      「食材と価格を編集する」リンクへ誘導して確認する形にした */}
-                  {showPrices && (
-                    <div className="mt-1 flex items-center justify-end text-sm">
-                      {priceDisplay ? (
-                        <span className="tabular-nums font-bold">
-                          {ja.detail.priceAbout}
-                          {priceDisplay.yen.toLocaleString()}
-                          {ja.detail.priceYen}
-                        </span>
-                      ) : (
-                        <span className="text-ink-muted/70">{ja.detail.priceNone}</span>
-                      )}
-                    </div>
-                  )}
                   {ing.memo && (
                     <MemoText
                       text={ing.memo}
@@ -985,6 +1011,17 @@ export default function RecipeDetailPage() {
         onStart={startCustomTimer}
         onClose={() => setCustomTimerOpen(false)}
       />
+      {/* 原価ビューの価格編集モーダル(2026-07-16 裁定1)。keyをentryId/nameで切ることで、
+          duplicate検出→編集モードへの切替(edge case2)を含め、開くたびに/切り替わるたびに
+          フォームのローカルstateを確実に初期化し直す(古い入力値が残って混線しないようにする) */}
+      {priceEdit && (
+        <PriceEditModal
+          key={priceEdit.entryId ?? `add-${priceEdit.name}`}
+          target={priceEdit}
+          entries={priceEntries}
+          onChangeTarget={setPriceEdit}
+        />
+      )}
       <Toast message={message} onClose={() => setMessage('')} />
       {/* 記録写真の原寸表示(2026-07-12写真添付・docs/20 §4「タップで原寸モーダル」)。
           他の窓(CookedLogModal等)と同じ様式(角丸カード・枠線・shadow-md・中央寄せ、

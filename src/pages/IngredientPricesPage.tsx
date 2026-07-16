@@ -8,7 +8,9 @@ import {
   resetPriceEntryToDefault,
 } from '../db/prices'
 import { toHiragana } from '../logic/kana'
-import { parseUnitQuantity } from '../logic/priceEstimate'
+import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
+import type { UnitFormState } from '../logic/unitForm'
+import UnitQuantityFields from '../components/UnitQuantityFields'
 import BackHeader from '../components/BackHeader'
 import { ja } from '../i18n/ja'
 import type { PriceEntry } from '../db/types'
@@ -21,80 +23,11 @@ const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
   if (e.key === 'Enter') e.currentTarget.blur()
 }
 
-/**
- * 2026-07-15 UI改修: 単位欄(自由入力)を「数量(数字)＋単位(選択)」に分離。
- * オーナー実機フィードバック「単位が自由入力だと不安・使いにくい」への対応
- * （計算エンジンlogic/priceEstimate.tsは元々単位正規化済みで計算は正しいが、入力UIが
- * 不安に見えていたのが課題）。並び順は使用頻度順(Fable設計確定)。
- * 保存形式はDBスキーマ変更なしを保つため従来どおり1つの文字列に合成する。
- */
-const KNOWN_UNITS = [
-  'g', 'kg', '個', '本', '枚', 'ml', 'L', '大さじ', '小さじ', 'カップ',
-  '玉', '束', 'パック', 'かけ', '片', '株', '尾', '切れ', '丁', '袋', '缶', '房', '節',
-] as const
-const KNOWN_UNIT_SET = new Set<string>(KNOWN_UNITS)
-/** 大さじ/小さじ/カップだけ単位が先(例:「大さじ1」)。それ以外は数量が先(例:「100g」「1個」) */
-const UNIT_FIRST = new Set<string>(['大さじ', '小さじ', 'カップ'])
-/** 単位選択で「その他」を選んだ状態を表す内部値(表示文言=ja.priceMaster.unitOtherとは独立させる) */
-const OTHER_UNIT = 'other'
-
-interface UnitFormState {
-  /** 数量入力欄の生の文字列(その他選択時は使わない) */
-  qty: string
-  /** KNOWN_UNITSのいずれか、またはOTHER_UNIT */
-  unitKind: string
-  /** その他選択時の自由入力欄の文字列 */
-  freeText: string
-}
-
-/**
- * 保存済みのunit文字列(例:「100g」「1個」「大さじ1」)を編集フォームの初期値に分解する。
- * priceEstimate.tsのparseUnitQuantityで数量+単位に分解できて、かつ単位が選択肢にある
- * 場合だけ数量欄＋単位選択で表せる。それ以外(「1杯」「少々」「1/4個」等、選択肢に無い単位や
- * 分解できない書式)は「その他」＋自由入力欄へフォールバックし、元の文字列をそのまま見せる。
- */
-function decomposeUnit(raw: string): UnitFormState {
-  const trimmed = raw.trim()
-  if (trimmed) {
-    const { qty, baseUnit } = parseUnitQuantity(trimmed)
-    if (qty > 0 && KNOWN_UNIT_SET.has(baseUnit)) {
-      return { qty: String(qty), unitKind: baseUnit, freeText: '' }
-    }
-  }
-  return { qty: '', unitKind: OTHER_UNIT, freeText: trimmed }
-}
-
-/**
- * 数量欄＋単位選択(またはその他の自由入力)を、保存用の1つの文字列に合成する。
- * PRICE_DEFAULTSの既存表記(「100g」「1個」「大さじ1」等)と完全一致する形にすることが必須
- * （updatePriceEntryのisDefault再判定が文字列比較のため。「デフォルトに戻す」表示条件に直結する）。
- * 数量が空・0以下、またはその他選択時に自由入力が空なら未入力扱いでundefinedを返す
- * （呼び出し側で「空・0以下は保存しない」既存挙動を踏襲する）。
- */
-function composeUnit(state: UnitFormState): string | undefined {
-  if (state.unitKind === OTHER_UNIT) {
-    const trimmed = state.freeText.trim()
-    return trimmed || undefined
-  }
-  const qty = Number(state.qty)
-  if (!(qty > 0)) return undefined
-  const qtyStr = String(qty)
-  return UNIT_FIRST.has(state.unitKind) ? `${state.unitKind}${qtyStr}` : `${qtyStr}${state.unitKind}`
-}
-
-/** 単位選択(select)の共通の選択肢一覧(末尾に「その他」を追加) */
-function UnitKindOptions() {
-  return (
-    <>
-      {KNOWN_UNITS.map((u) => (
-        <option key={u} value={u}>
-          {u}
-        </option>
-      ))}
-      <option value={OTHER_UNIT}>{ja.priceMaster.unitOther}</option>
-    </>
-  )
-}
+// 2026-07-15 UI改修: 単位欄(自由入力)を「数量(数字)＋単位(選択)」に分離
+// （オーナー実機フィードバック「単位が自由入力だと不安・使いにくい」への対応）。
+// 2026-07-16 裁定1でKNOWN_UNITS/OTHER_UNIT/UnitFormState/decomposeUnit/composeUnitは
+// logic/unitForm.tsへ、選択UI部はcomponents/UnitQuantityFields.tsxへ切り出した
+// (原価ビューの編集モーダルとの共通化・単体テスト対象化。挙動変更ゼロ)。
 
 /**
  * 「食材と価格」= 食材価格マスタの一覧・一括インライン編集・追加・削除。
@@ -201,49 +134,21 @@ export default function IngredientPricesPage() {
               aria-label={ja.priceMaster.priceLabel}
               className={inputCls}
             />
-            {newUnit.unitKind === OTHER_UNIT ? (
-              <input
-                type="text"
-                value={newUnit.freeText}
-                onChange={(e) => {
-                  setNewUnit((s) => ({ ...s, freeText: e.target.value }))
-                  setAddError('')
-                }}
-                placeholder={ja.priceMaster.unitPlaceholder}
-                aria-label={ja.priceMaster.unitLabel}
-                className={inputCls}
-              />
-            ) : (
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                value={newUnit.qty}
-                onChange={(e) => {
-                  setNewUnit((s) => ({ ...s, qty: e.target.value }))
-                  setAddError('')
-                }}
-                placeholder={ja.priceMaster.quantityPlaceholder}
-                aria-label={ja.priceMaster.quantityLabel}
-                className="w-20 shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink placeholder:text-ink-muted/60"
-              />
-            )}
-            <select
-              value={newUnit.unitKind}
-              onChange={(e) => {
-                const unitKind = e.target.value
-                setNewUnit((s) =>
-                  unitKind === OTHER_UNIT
-                    ? { ...s, unitKind, freeText: composeUnit(s) ?? s.freeText }
-                    : { ...s, unitKind },
-                )
+            <UnitQuantityFields
+              value={newUnit}
+              onChange={(next) => {
+                setNewUnit(next)
                 setAddError('')
               }}
-              aria-label={ja.priceMaster.unitTypeLabel}
-              className="shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
-            >
-              <UnitKindOptions />
-            </select>
+              quantityAriaLabel={ja.priceMaster.quantityLabel}
+              unitOtherAriaLabel={ja.priceMaster.unitLabel}
+              unitTypeAriaLabel={ja.priceMaster.unitTypeLabel}
+              quantityPlaceholder={ja.priceMaster.quantityPlaceholder}
+              unitOtherPlaceholder={ja.priceMaster.unitPlaceholder}
+              quantityClassName="w-20 shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink placeholder:text-ink-muted/60"
+              unitOtherClassName={inputCls}
+              unitSelectClassName="shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
+            />
           </div>
           {addError && (
             <p role="alert" className="text-sm font-bold text-warning">
@@ -359,45 +264,18 @@ function PriceRow({
             className="w-16 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
           />
           <span className="text-sm text-ink-muted">{ja.priceMaster.priceYen}/</span>
-          {unitState.unitKind === OTHER_UNIT ? (
-            <input
-              type="text"
-              value={unitState.freeText}
-              onChange={(e) => setUnitState((s) => ({ ...s, freeText: e.target.value }))}
-              onBlur={() => commitUnitState(unitState)}
-              onKeyDown={blurOnEnter}
-              aria-label={ja.priceMaster.entryUnitOtherAria.replace('{name}', entry.name)}
-              className="w-20 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
-            />
-          ) : (
-            <input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              value={unitState.qty}
-              onChange={(e) => setUnitState((s) => ({ ...s, qty: e.target.value }))}
-              onBlur={() => commitUnitState(unitState)}
-              onKeyDown={blurOnEnter}
-              aria-label={ja.priceMaster.entryQuantityAria.replace('{name}', entry.name)}
-              className="w-14 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
-            />
-          )}
-          <select
-            value={unitState.unitKind}
-            onChange={(e) => {
-              const unitKind = e.target.value
-              const next: UnitFormState =
-                unitKind === OTHER_UNIT
-                  ? { ...unitState, unitKind, freeText: composeUnit(unitState) ?? entry.unit }
-                  : { ...unitState, unitKind }
-              setUnitState(next)
-              commitUnitState(next)
-            }}
-            aria-label={ja.priceMaster.entryUnitAria.replace('{name}', entry.name)}
-            className="rounded-sm border border-edge bg-app px-1 py-2 text-sm text-ink"
-          >
-            <UnitKindOptions />
-          </select>
+          <UnitQuantityFields
+            value={unitState}
+            onChange={setUnitState}
+            onCommit={commitUnitState}
+            otherFallbackText={entry.unit}
+            quantityAriaLabel={ja.priceMaster.entryQuantityAria.replace('{name}', entry.name)}
+            unitOtherAriaLabel={ja.priceMaster.entryUnitOtherAria.replace('{name}', entry.name)}
+            unitTypeAriaLabel={ja.priceMaster.entryUnitAria.replace('{name}', entry.name)}
+            quantityClassName="w-14 rounded-sm border border-edge bg-app px-2 py-2 text-right text-base text-ink"
+            unitOtherClassName="w-20 rounded-sm border border-edge bg-app px-2 py-2 text-base text-ink"
+            unitSelectClassName="rounded-sm border border-edge bg-app px-1 py-2 text-sm text-ink"
+          />
         </div>
         {/* 「目安」/「自分の価格」バッジは廃止(2026-07-13 UI改善: ページ冒頭の一文で説明を代替) */}
         {canReset && (

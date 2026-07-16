@@ -62,6 +62,7 @@ import {
   normalizeIngredientNameForPrice,
   normalizeUnit,
 } from '../src/logic/priceEstimate.ts'
+import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
   pickMainIngredients,
   normalizeIngredientChipLabel,
@@ -2852,6 +2853,64 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateIngredientYen({ name: 'みそ', amount: '2', unit: '大さじ' }, misoIndex),
     { yen: 30, source: 'user' },
   )
+}
+
+// ---------- buildPriceIndex: idの素通し(2026-07-16 裁定1「原価ビュー」全面改修で
+// PriceIndexEntryにid追加。原価ビューの価格チップがどのマスタ行を編集すべきか特定するのに使う) ----------
+{
+  const idx = buildPriceIndex([{ id: 7, name: '玉ねぎ', pricePerUnit: 50, unit: '1個', isDefault: true }])
+  eq('buildPriceIndex idを素通しする', idx[0]?.id, 7)
+  const idxNoId = buildPriceIndex([{ name: 'にんじん', pricePerUnit: 40, unit: '1本' }])
+  eq('buildPriceIndex idが無くてもundefinedのまま動く(後方互換。PRICE_DEFAULTS等idを持たない入力)', idxNoId[0]?.id, undefined)
+}
+
+// ---------- unitForm.ts: 単位UI共通化(2026-07-16 裁定1でIngredientPricesPage.tsxから切り出し、
+// 原価ビューの価格編集モーダル(PriceEditModal)と共用する。挙動変更ゼロが前提の回帰確認) ----------
+{
+  eq('decomposeUnit 数量+単位(100g)を分解できる', decomposeUnit('100g'), { qty: '100', unitKind: 'g', freeText: '' })
+  eq('decomposeUnit 個数(1個)を分解できる', decomposeUnit('1個'), { qty: '1', unitKind: '個', freeText: '' })
+  eq(
+    'decomposeUnit 単位が先の書式(大さじ1)も分解できる',
+    decomposeUnit('大さじ1'),
+    { qty: '1', unitKind: '大さじ', freeText: '' },
+  )
+  eq(
+    'decomposeUnit 選択肢に無い単位(1杯)はその他+自由入力にフォールバック',
+    decomposeUnit('1杯'),
+    { qty: '', unitKind: OTHER_UNIT, freeText: '1杯' },
+  )
+  eq(
+    'decomposeUnit 分解できない書式(少々)もその他+自由入力にフォールバック',
+    decomposeUnit('少々'),
+    { qty: '', unitKind: OTHER_UNIT, freeText: '少々' },
+  )
+  eq('composeUnit 数量+単位を合成(100+g→100g)', composeUnit({ qty: '100', unitKind: 'g', freeText: '' }), '100g')
+  eq(
+    'composeUnit 単位が先の書式で合成(1+大さじ→大さじ1)',
+    composeUnit({ qty: '1', unitKind: '大さじ', freeText: '' }),
+    '大さじ1',
+  )
+  eq(
+    'composeUnit その他選択時は自由入力をそのまま使う',
+    composeUnit({ qty: '', unitKind: OTHER_UNIT, freeText: '1/4個' }),
+    '1/4個',
+  )
+  eq('composeUnit 数量が0以下ならundefined', composeUnit({ qty: '0', unitKind: 'g', freeText: '' }), undefined)
+  eq(
+    'composeUnit その他選択で自由入力が空(空白のみ)ならundefined',
+    composeUnit({ qty: '', unitKind: OTHER_UNIT, freeText: '  ' }),
+    undefined,
+  )
+  // PRICE_DEFAULTS表記と完全一致する制約の回帰(往復でPRICE_DEFAULTSの主要書式が保たれること。
+  // updatePriceEntryのisDefault再判定が文字列比較のため崩れるとデフォルト復元機能が壊れる)
+  eq('decompose→compose往復(100g)', composeUnit(decomposeUnit('100g')), '100g')
+  eq('decompose→compose往復(1個)', composeUnit(decomposeUnit('1個')), '1個')
+  eq('decompose→compose往復(大さじ1)', composeUnit(decomposeUnit('大さじ1')), '大さじ1')
+  // KNOWN_UNITS一覧(順序込み)がIngredientPricesPageの既存2026-07-15仕様から変わっていないことのピン留め
+  eq('KNOWN_UNITS一覧(順序込み)は既存仕様のまま', [...KNOWN_UNITS], [
+    'g', 'kg', '個', '本', '枚', 'ml', 'L', '大さじ', '小さじ', 'カップ',
+    '玉', '束', 'パック', 'かけ', '片', '株', '尾', '切れ', '丁', '袋', '缶', '房', '節',
+  ])
 }
 
 // ---------- missingDefaults: 価格マスタのバージョン付きトップアップ移行(2026-07-16再発防止) ----------

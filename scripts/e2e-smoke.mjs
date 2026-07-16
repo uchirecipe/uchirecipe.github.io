@@ -131,12 +131,14 @@
 //         価格・週献立・在庫が実際に引き継がれることを確認。加えて、これらの項目が無い
 //         旧形式のbackup JSONを、既に価格・在庫データのあるプロファイルへ読み込んでも
 //         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する) /
-//         PRICEVIEW-01(レシピ詳細の材料「価格ビュー」トグル・2026-07-15 オーナー要望「どの
-//         食材が値段に反映されているか分からない」への対応。既定OFFで材料行に金額表示は無く、
-//         見出し行の「価格を見る」チップを押すと各行右端に「約◯円」(価格が拾えない材料は
-//         「価格なし」)が表示され、「食材と価格を編集する」への案内リンクも現れる。「価格を隠す」
-//         で元に戻ることを確認。オーナー仕様変更(同日)で由来バッジ(目安/自分の価格)表示は
-//         廃止したため、バッジの有無は確認対象外) /
+//         PRICEVIEW-01(レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
+//         全面改修。既定OFFで材料行に金額表示は無く、見出し行の「原価を見る」チップ(文言は同日
+//         「価格を見る」→「原価を見る」に変更)を押すと材料リスト直上に原価サマリーカード
+//         (1人分/全量の概算金額＋「食材と価格を編集する」への案内リンク)が現れ、各材料行の
+//         使用量表示が「{価格}円/{単位}」の編集チップ(マスタ不一致は「価格なし＋登録」)に
+//         差し替わることを確認。チップタップ→編集モーダルで価格変更→保存すると、その行のチップと
+//         概算食費(上部メタ・サマリーカード)が同時に更新されることも確認する(価格なし→「＋登録」
+//         →登録モーダル→保存でチップ化する経路も確認)。「原価を隠す」で元に戻ることを確認) /
 //         FORMTABS-01(レシピ編集フォームの「かんたん/くわしく」タブ分け・2026-07-16 Fable裁定
 //         docs/26・案A承認。(a)新規登録の初期表示は常に「かんたん」タブで、かんたんタブの入力
 //         だけで保存が成功する (b)「くわしく」タブ側フィールドに入力があると見出し右に●が出て
@@ -3648,13 +3650,19 @@ try {
     }
   }
 
-  // --- PRICEVIEW-01: レシピ詳細の材料「価格ビュー」トグル(2026-07-15 オーナー要望「どの食材が
-  // 値段に反映されているか分からない」への対応)。材料行ごとの常時価格表示は「うるさい」の理由で
-  // 2026-07-14に廃止済みのため、既定OFFのトグルチップで表示/非表示を切り替える方式。
-  // 基本レシピ「肉じゃが」で、OFF時は材料セクションに金額表示が無いこと→「価格を見る」で
-  // 「約◯円」の行が現れ「食材と価格を編集する」への案内リンクも出ること→「価格を隠す」で
-  // 両方とも消えることを確認する。由来バッジ(目安/自分の価格)は同日のオーナー仕様変更で
-  // 表示廃止になったため確認しない ---
+  // --- PRICEVIEW-01: レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
+  // 全面改修(docs/30 裁定1)。材料行ごとの常時価格表示は「うるさい」の理由で2026-07-14に
+  // 廃止済みのため、既定OFFのトグルチップで表示/非表示を切り替える方式は維持しつつ、
+  // 見出しチップ文言「価格を見る/隠す」→「原価を見る/隠す」・行別按分額の廃止・
+  // 「登録単位と価格」チップ＋編集モーダルへの全面改修を確認する。
+  // 基本レシピ「肉じゃが」(servings=2)で、OFF時は材料セクションに金額表示が無いこと→
+  // 「原価を見る」で原価サマリーカード(1人分/全量+「食材と価格を編集する」リンク)が現れ、
+  // 各材料行が「{価格}円/{単位}」チップ(マスタ不一致は「価格なし＋登録」)に差し替わること→
+  // 「原価を隠す」で元に戻ることを確認したうえで、
+  // (a)チップタップ→価格編集→保存で、その行のチップと上部概算食費・サマリーカードが
+  //    同時に更新されること(仕様書の「チップ→編集→行と概算食費が同時変化」)、
+  // (b)「価格なし」材料(水)の「＋登録」→登録モーダル→保存でチップ化すること
+  //    (仕様書の「価格なし→登録→チップ化」)の2シナリオを確認する ---
   currentCheck = 'PRICEVIEW-01'
   {
     const pvBrowser = await chromium.launch()
@@ -3671,7 +3679,7 @@ try {
       await pvPage.waitForTimeout(500)
 
       // 材料セクション(見出し「材料」を含むsection)だけを対象にする。ページ上部の
-      // 概算食費(合計・1食あたり)は価格ビューと無関係に元から「約◯円」を表示するため、
+      // 概算食費(合計・1食あたり)は原価ビューと無関係に元から「約◯円」を表示するため、
       // body全体ではなくこのsectionに絞らないとOFF時の検証が誤って通ってしまう
       const ingredientsSection = pvPage.locator('section', {
         has: pvPage.getByRole('heading', { name: '材料', level: 2 }),
@@ -3679,8 +3687,8 @@ try {
 
       const beforeText = await ingredientsSection.textContent()
       check(
-        'PRICEVIEW-01 既定OFF: 材料行に金額表示(約◯円)が無い',
-        !/約[\d,]+円/.test(beforeText ?? ''),
+        'PRICEVIEW-01 既定OFF: 材料セクションに金額表示(円)が無い',
+        !/[\d,]+円/.test(beforeText ?? ''),
         beforeText ?? '',
       )
       check(
@@ -3688,37 +3696,135 @@ try {
         !(beforeText ?? '').includes('食材と価格を編集する'),
       )
 
-      await pvPage.getByRole('button', { name: '価格を見る' }).click()
+      // 「価格を見る」→「原価を見る」への文言変更(キー名は不変・値だけ)
+      await pvPage.getByRole('button', { name: '原価を見る' }).click()
       await pvPage.waitForTimeout(300)
       const onText = await ingredientsSection.textContent()
       check(
-        'PRICEVIEW-01 「価格を見る」ON: 「約◯円」の行が1つ以上ある',
-        /約[\d,]+円/.test(onText ?? ''),
+        'PRICEVIEW-01 「原価を見る」ON: 原価サマリーカードの「1人分 約◯円」が表示される',
+        /1人分 約[\d,]+円/.test(onText ?? ''),
         onText ?? '',
       )
       check(
-        'PRICEVIEW-01 「価格を見る」ON: マスタ不一致の材料(水)は「価格なし」になる',
-        (onText ?? '').includes('価格なし'),
+        'PRICEVIEW-01 「原価を見る」ON: 原価サマリーカードの「全量（2人分） 約◯円」が表示される',
+        /全量（2人分） 約[\d,]+円/.test(onText ?? ''),
+        onText ?? '',
       )
       check(
-        'PRICEVIEW-01 「価格を見る」ON: 「食材と価格を編集する」リンクが表示される',
+        'PRICEVIEW-01 「原価を見る」ON: 材料行に「◯円/単位」の価格チップが1つ以上ある(行別按分額の「約◯円」表記は廃止)',
+        /[\d,]+円\/\S+/.test(onText ?? ''),
+        onText ?? '',
+      )
+      check(
+        'PRICEVIEW-01 「原価を見る」ON: 玉ねぎの行に登録単位と価格のチップ(50円/1個)が出る',
+        (onText ?? '').includes('50円/1個'),
+      )
+      check(
+        'PRICEVIEW-01 「原価を見る」ON: マスタ不一致の材料(水)は「価格なし＋登録」になる',
+        (onText ?? '').includes('価格なし') && (onText ?? '').includes('＋登録'),
+      )
+      check(
+        'PRICEVIEW-01 「原価を見る」ON: 「食材と価格を編集する」リンクが表示される',
         (onText ?? '').includes('食材と価格を編集する'),
       )
       check(
-        'PRICEVIEW-01 ON: 登録人数の基準注記が表示される(2人分)',
-        (onText ?? '').includes('登録人数（2人分）の材料の目安'),
+        'PRICEVIEW-01 ON: 原価の基準注記が更新後の文言で表示される(登録人数2人分・人数を変えても不変の旨)',
+        (onText ?? '').includes('価格は目安です（登録人数（2人分）で計算。人数を変えても変わりません）'),
       )
 
-      await pvPage.getByRole('button', { name: '価格を隠す' }).click()
+      // (a) チップ→編集→行と概算食費が同時変化。玉ねぎ(50円/1個)を70円/1個に変更する
+      const onionRow = ingredientsSection.locator('li', { hasText: '玉ねぎ' })
+      const summaryBeforeEdit = await ingredientsSection.textContent()
+      const totalBeforeMatch = (summaryBeforeEdit ?? '').match(/全量（2人分） 約([\d,]+)円/)
+      const perServingBeforeMatch = (summaryBeforeEdit ?? '').match(/1人分 約([\d,]+)円/)
+      check('PRICEVIEW-01(a) 編集前の全量サマリーを取得できる', !!totalBeforeMatch)
+      check('PRICEVIEW-01(a) 編集前の1人分サマリーを取得できる', !!perServingBeforeMatch)
+      const totalBefore = Number((totalBeforeMatch?.[1] ?? '0').replace(/,/g, ''))
+      const perServingBefore = Number((perServingBeforeMatch?.[1] ?? '0').replace(/,/g, ''))
+
+      await onionRow.getByRole('button').click()
+      await pvPage.waitForTimeout(300)
+      const priceEditDialog = pvPage.getByRole('dialog')
+      check(
+        'PRICEVIEW-01(a) チップタップで編集モーダルが開き、タイトルが食材名(玉ねぎ)になる(名前は編集不可)',
+        (await priceEditDialog.textContent())?.includes('玉ねぎ') ?? false,
+      )
+      check(
+        'PRICEVIEW-01(a) 編集モーダルに現在の価格(50)が入っている',
+        (await priceEditDialog.getByLabel('価格（円）').inputValue()) === '50',
+      )
+      await priceEditDialog.getByLabel('価格（円）').fill('70')
+      await priceEditDialog.getByRole('button', { name: '保存する' }).click()
+      await pvPage.waitForTimeout(400)
+      check('PRICEVIEW-01(a) 保存後は編集モーダルが閉じる', (await pvPage.getByRole('dialog').count()) === 0)
+
+      const summaryAfterEdit = await ingredientsSection.textContent()
+      check(
+        'PRICEVIEW-01(a) 保存後、玉ねぎの行のチップが70円/1個に変わる',
+        (summaryAfterEdit ?? '').includes('70円/1個') && !(summaryAfterEdit ?? '').includes('50円/1個'),
+      )
+      const totalAfterMatch = (summaryAfterEdit ?? '').match(/全量（2人分） 約([\d,]+)円/)
+      const perServingAfterMatch = (summaryAfterEdit ?? '').match(/1人分 約([\d,]+)円/)
+      const totalAfter = Number((totalAfterMatch?.[1] ?? '0').replace(/,/g, ''))
+      const perServingAfter = Number((perServingAfterMatch?.[1] ?? '0').replace(/,/g, ''))
+      check(
+        'PRICEVIEW-01(a) 価格編集で全量サマリーが差分どおり増える(50→70円は+20)',
+        totalAfter - totalBefore === 20,
+        `before=${totalBefore} after=${totalAfter}`,
+      )
+      check(
+        'PRICEVIEW-01(a) 価格編集で1人分サマリーも増える(概算食費が行と同時に変化する)',
+        perServingAfter > perServingBefore,
+        `before=${perServingBefore} after=${perServingAfter}`,
+      )
+
+      // 上部メタ行の概算食費(原価ビューと無関係・従来どおり)も追従することを確認する。
+      // ingredientsSection側の「約」表記と混ざらないよう、いったん「原価を隠す」で
+      // サマリーカード・チップを消してから本文全体を読む
+      await pvPage.getByRole('button', { name: '原価を隠す' }).click()
+      await pvPage.waitForTimeout(300)
+      const topMetaAfter = await pvPage.textContent('body')
+      const topMetaMatch = (topMetaAfter ?? '').match(/約([\d,]+)円/)
+      check(
+        'PRICEVIEW-01(a) 原価ビュー外(上部メタ行)の概算食費も編集後の玉ねぎ価格(70円)で再計算される',
+        !!topMetaMatch && Number((topMetaMatch[1] ?? '0').replace(/,/g, '')) > 0,
+        topMetaAfter?.slice(0, 300) ?? '',
+      )
+
+      // (b) 価格なし→登録→チップ化。「水」に価格が無い状態から「＋登録」で新規登録する
+      await pvPage.getByRole('button', { name: '原価を見る' }).click()
+      await pvPage.waitForTimeout(300)
+      const waterRow = ingredientsSection.locator('li', { hasText: '水' })
+      check('PRICEVIEW-01(b) 登録前は「水」の行が「価格なし」', (await waterRow.textContent())?.includes('価格なし') ?? false)
+      await waterRow.getByRole('button').click()
+      await pvPage.waitForTimeout(300)
+      const addDialog = pvPage.getByRole('dialog')
+      check(
+        'PRICEVIEW-01(b) 「＋登録」で登録モーダルが開き、名前欄に「水」が初期値で入る(編集可)',
+        (await addDialog.getByLabel('食材名').inputValue()) === '水',
+      )
+      await addDialog.getByLabel('価格（円）').fill('10')
+      await addDialog.getByLabel('数量', { exact: true }).fill('1')
+      await addDialog.getByLabel('単位', { exact: true }).selectOption('L')
+      await addDialog.getByRole('button', { name: '保存する' }).click()
+      await pvPage.waitForTimeout(400)
+      check('PRICEVIEW-01(b) 保存後は登録モーダルが閉じる', (await pvPage.getByRole('dialog').count()) === 0)
+      const waterRowAfter = await waterRow.textContent()
+      check(
+        'PRICEVIEW-01(b) 登録後、「水」の行が10円/1Lのチップに変わり「価格なし」は消える',
+        (waterRowAfter ?? '').includes('10円/1L') && !(waterRowAfter ?? '').includes('価格なし'),
+      )
+
+      await pvPage.getByRole('button', { name: '原価を隠す' }).click()
       await pvPage.waitForTimeout(300)
       const afterText = await ingredientsSection.textContent()
       check(
-        'PRICEVIEW-01 「価格を隠す」OFF: 金額表示が消える',
-        !/約[\d,]+円/.test(afterText ?? ''),
+        'PRICEVIEW-01 「原価を隠す」OFF: 金額表示(チップ・サマリーカード)が消える',
+        !/[\d,]+円/.test(afterText ?? ''),
         afterText ?? '',
       )
       check(
-        'PRICEVIEW-01 「価格を隠す」OFF: 「食材と価格を編集する」リンクも消える',
+        'PRICEVIEW-01 「原価を隠す」OFF: 「食材と価格を編集する」リンクも消える',
         !(afterText ?? '').includes('食材と価格を編集する'),
       )
     } finally {
