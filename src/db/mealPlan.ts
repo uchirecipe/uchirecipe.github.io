@@ -27,6 +27,27 @@ export async function addMealEntry(
   await db.mealPlans.add({ date, slot, recipeId, role })
 }
 
+/**
+ * 同じ日×枠に同じレシピが既にあれば追加せず 'duplicate' を返す追加ヘルパー
+ * （2026-07-17 便Z-1・docs/35 §2: 「今日の献立に追加」のスロット振り分け窓用。
+ * 呼び出し側は 'duplicate' のときトーストで案内する）。
+ * 重複チェック(where)と追加(add)を1トランザクションで原子化する
+ * （todayList.tsのaddToTodayListと同じ作法。同時タップの割り込み重複を防ぐ）
+ */
+export async function addMealEntryIfAbsent(
+  date: string,
+  slot: MealSlot,
+  recipeId: number,
+  role: MealRole,
+): Promise<'added' | 'duplicate'> {
+  return db.transaction('rw', db.mealPlans, async () => {
+    const sameSlot = await db.mealPlans.where('[date+slot]').equals([date, slot]).toArray()
+    if (sameSlot.some((e) => e.recipeId === recipeId)) return 'duplicate'
+    await db.mealPlans.add({ date, slot, recipeId, role })
+    return 'added'
+  })
+}
+
 /** 既存エントリのレシピだけを差し替える（役割・日付・枠は変えない） */
 export async function updateMealEntryRecipe(entryId: number, recipeId: number): Promise<void> {
   await db.mealPlans.update(entryId, { recipeId })

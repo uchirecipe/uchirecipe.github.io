@@ -24,6 +24,7 @@ import { db } from '../db/db'
 import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
+import { addMealEntryIfAbsent } from '../db/mealPlan'
 import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
@@ -45,6 +46,7 @@ import { useWakeLock } from '../components/useWakeLock'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
 import CookedLogModal, { LOG_PHOTO_MAX_EDGE, LOG_PHOTO_QUALITY } from '../components/CookedLogModal'
+import TodaySlotModal from '../components/TodaySlotModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import NutritionTeaser from '../components/NutritionTeaser'
@@ -58,6 +60,7 @@ import { buildIngredientNames } from '../logic/ingredientSpans'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
 import { resizePhoto } from '../logic/image'
+import type { MealSlot } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** レシピ詳細＝料理中に見るメイン画面。文字・ボタンは大きめ */
@@ -144,6 +147,36 @@ export default function RecipeDetailPage() {
   // 完了トースト(2026-07-16 UI総点検A-4: 「記録する」後の無言完了への対応。
   // 既存のToastコンポーネント+setMessageパターン(MealPlanPage等と同じ)を流用)
   const [message, setMessage] = useState('')
+
+  // 「今日の献立に追加」のスロット振り分け窓(2026-07-17 便Z-1・docs/35 §2 Fable設計)。
+  // 未追加時のボタン押下は直接追加ではなくこの窓を開く(追加済み時の解除タップは従来どおり)
+  const [slotModalOpen, setSlotModalOpen] = useState(false)
+
+  /**
+   * 窓で朝食/昼食/夕食を選んだ: 週プランの「今日のその枠」へ追加(addMealEntryIfAbsent)し、
+   * あわせて今日の献立(todayList)へも追加する=1操作で両方に反映(docs/35 §2)。
+   * 仕様文の反映経路は「日タブの自動取り込み(便U-3)」だが、自動取り込みには
+   * 「同じ日付につき1回だけ」の歯止め(settings.lastAutoImportDate)があり、その日すでに
+   * 取り込み済みだと当日中は再実行されない。ここはユーザーの明示操作なので、経路任せに
+   * せずaddToTodayList(冪等)を直接呼んで「両方に反映」という仕様の結果を必ず保証する。
+   * 同枠に同レシピが既にある場合は何も追加せずトーストで案内(仕様)
+   */
+  const pickTodaySlot = async (slot: MealSlot) => {
+    const result = await addMealEntryIfAbsent(todayString(), slot, id, 'main')
+    setSlotModalOpen(false)
+    if (result === 'duplicate') {
+      setMessage(ja.detail.todaySlotDuplicateToast.replace('{slot}', ja.mealPlan.slot[slot]))
+      return
+    }
+    await addToTodayList(id)
+    setMessage(ja.detail.todaySlotAddedToast.replace('{slot}', ja.mealPlan.slot[slot]))
+  }
+
+  /** 窓で「決めない」を選んだ: 従来どおり今日の献立へ直接追加(枠なし) */
+  const pickTodayUndecided = async () => {
+    await addToTodayList(id)
+    setSlotModalOpen(false)
+  }
 
   // 「作った！」記録の入力欄(2026-07-12: 窓表示化。中央固定のモーダルなので、
   // 開いたときにページ側をスクロールさせる必要がなくなった＝スクロール位置は動かない)
@@ -500,11 +533,13 @@ export default function RecipeDetailPage() {
         )}
 
         {/* 今日の献立に追加（今日の献立への追加・解除。旧ボタン文言「今日つくる」→2026-07-16改名）:
-            材料を見るより前に判断材料として提示 */}
+            材料を見るより前に判断材料として提示。
+            未追加時の押下は直接追加ではなくスロット振り分け窓を開く(2026-07-17 便Z-1・docs/35 §2。
+            追加済み時の押下=解除は従来どおり直接) */}
         <button
           type="button"
           onClick={() =>
-            isInTodayList ? void removeFromTodayList(id) : void addToTodayList(id)
+            isInTodayList ? void removeFromTodayList(id) : setSlotModalOpen(true)
           }
           className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
             isInTodayList
@@ -1067,6 +1102,13 @@ export default function RecipeDetailPage() {
         />
       )}
       <TermPopover state={termPopoverState} onClose={closeTermPopover} />
+      {/* 「今日の献立に追加」のスロット振り分け窓(2026-07-17 便Z-1) */}
+      <TodaySlotModal
+        open={slotModalOpen}
+        onPickSlot={(slot) => void pickTodaySlot(slot)}
+        onPickUndecided={() => void pickTodayUndecided()}
+        onClose={() => setSlotModalOpen(false)}
+      />
       <CookedLogModal
         open={logOpen}
         date={logDate}

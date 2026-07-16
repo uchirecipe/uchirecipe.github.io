@@ -135,6 +135,11 @@ export const ja = {
     monthDayModalTitle: '{m}月{d}日の献立',
     monthDayModalEmpty: '献立はありません',
     monthDayModalOpenWeek: 'この週を開く',
+    // 週/月の過去振り返り(2026-07-17 便Z-2・docs/35 §3 Fable設計)。週タブの過去日と
+    // 月タブの日モーダルに、その日の「作った記録」(cookedLogs日付一致)を表示する。
+    // 月間献立への機能追加はPro v2まで凍結が既定だったが、オーナー指示で解除して実装
+    monthDayHasLog: '記録あり',
+    pastCookedTitle: '作った記録',
     dow: ['月', '火', '水', '木', '金', '土', '日'] as string[],
     slot: {
       breakfast: '朝食',
@@ -732,10 +737,18 @@ export const ja = {
     cookedLogNotePlaceholder: 'ひとことメモ（任意）',
     cookedLogSave: '保存する',
     cookedLogCancel: 'やめる',
-    // 「今日つくる」→「今日の献立に追加」(2026-07-16 UI総点検B-8オーナー決定)。ボタンの挙動・
+    // 「今日つくる」→「今日の献立に追加」(2026-07-16 UI総点検B-8オーナー決定)。
     // todayAdded(既に追加済みの表示)は変更しない
     todayAdd: '今日の献立に追加',
     todayAdded: '今日の献立に追加済み',
+    // スロット振り分け窓(2026-07-17 便Z-1・docs/35 §2 Fable設計)。「今日の献立に追加」の
+    // 直接追加をこの窓経由に置き換える。朝/昼/夕({slot})=週プランの今日のその枠+今日の献立の
+    // 両方へ、「決めない」=従来どおり今日の献立へ直接(枠なし)
+    todaySlotDialogTitle: 'どの食事に入れますか？',
+    todaySlotDialogHint: '朝食・昼食・夕食を選ぶと、今週の予定（今日の枠）と今日の献立の両方に入ります',
+    todaySlotUndecided: '決めない',
+    todaySlotAddedToast: '今日の{slot}に追加しました',
+    todaySlotDuplicateToast: '今日の{slot}にすでに入っています',
   },
   focus: {
     open: '調理中モードで見る',

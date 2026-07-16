@@ -10,6 +10,7 @@ import {
   X,
   Search,
   ShoppingCart,
+  Check,
   CheckCircle2,
   Clock,
   TriangleAlert,
@@ -57,7 +58,7 @@ import { hasNgIngredient } from '../logic/ng'
 import { buildPriceIndex, estimateRecipeCost } from '../logic/priceEstimate'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
-import type { MealPlanEntry, MealRole, MealSlot, Recipe } from '../db/types'
+import type { CookedLog, MealPlanEntry, MealRole, MealSlot, Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -115,6 +116,49 @@ function TodayListRow({
       >
         <X size={20} aria-hidden />
       </button>
+    </li>
+  )
+}
+
+/**
+ * 過去振り返り(2026-07-17 便Z-2・docs/35 §3)の「作った記録」1件分の薄いカード。
+ * 週タブの過去日の枠と、月タブの日モーダルの両方で使う。
+ * 予定(エントリ)との視覚区別: ✓マーク+淡い表示(薄いカード)。
+ * サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバック
+ * (ホームの「最近作ったもの」HistoryCardと同じ方針)。
+ * usePhotoUrlはループ内で直接呼べないため専用コンポーネントに分離
+ */
+function CookedLogCard({
+  recipe,
+  log,
+  onNavigate,
+}: {
+  recipe: Recipe
+  log: CookedLog
+  onNavigate?: () => void
+}) {
+  const logPhotoUrl = usePhotoUrl(log.photo)
+  const recipePhotoUrl = usePhotoUrl(recipe.photo)
+  const photoUrl = logPhotoUrl ?? recipePhotoUrl
+  return (
+    <li>
+      <Link
+        to={`/recipes/${recipe.id}`}
+        onClick={onNavigate}
+        className="flex items-center gap-2 rounded-sm border border-edge bg-app/60 px-2 py-1.5 opacity-80"
+      >
+        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
+          {photoUrl ? (
+            <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <RecipePlaceholder recipe={recipe} iconSize={16} />
+          )}
+        </div>
+        <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
+          {recipe.title}
+        </span>
+        <CheckCircle2 size={16} className="shrink-0 text-accent" aria-hidden />
+      </Link>
     </li>
   )
 }
@@ -211,6 +255,30 @@ export default function MealPlanPage() {
     monthEntries?.forEach((e) => set.add(e.date))
     return set
   }, [monthEntries])
+  // 過去振り返り(2026-07-17 便Z-2・docs/35 §3): 日付→その日の「作った記録」のインデックス。
+  // 全レシピのcookedLogsを1回の走査でMap化する(記録件数が多い場合に日付ごとのfilterを
+  // 繰り返さないための仕様指定のuseMemoインデックス)。hideStarters設定に関わらず全レシピを
+  // 対象にする(「実際に作った」履歴のため。HistoryPage・ホームの最近作ったものと同じ方針)
+  const cookedLogsByDate = useMemo(() => {
+    const map = new Map<string, { recipe: Recipe; log: CookedLog }[]>()
+    recipes?.forEach((recipe) => {
+      recipe.cookedLogs.forEach((log) => {
+        const list = map.get(log.date)
+        if (list) list.push({ recipe, log })
+        else map.set(log.date, [{ recipe, log }])
+      })
+    })
+    return map
+  }, [recipes])
+  // 月タブ: 「記録あり」小マーク(✓)を出す日の集合(便Z-2。表示中の月の分だけ)
+  const monthDaysWithLog = useMemo(() => {
+    const prefix = monthAnchor.slice(0, 7)
+    const set = new Set<string>()
+    cookedLogsByDate.forEach((_, date) => {
+      if (date.startsWith(prefix)) set.add(date)
+    })
+    return set
+  }, [cookedLogsByDate, monthAnchor])
   // 月タブ: 日タップで開くその日の献立モーダル（便U-5。従来の即週ジャンプはモーダル内の
   // ボタンへ移動）。nullなら非表示
   const [dayModalDate, setDayModalDate] = useState<string | null>(null)
@@ -237,6 +305,8 @@ export default function MealPlanPage() {
     return (monthEntries ?? []).filter((e) => e.date === dayModalDate)
   }, [monthEntries, dayModalDate])
   const dayModalBySlot = useMemo(() => groupBySlot(dayModalEntries), [dayModalEntries])
+  // 月タブの日モーダルに出す、その日の「作った記録」(便Z-2)
+  const dayModalLogs = dayModalDate ? (cookedLogsByDate.get(dayModalDate) ?? []) : []
   const dayModalTitle = dayModalDate
     ? ja.mealPlan.monthDayModalTitle
         .replace('{m}', String(Number(dayModalDate.slice(5, 7))))
@@ -908,13 +978,26 @@ export default function MealPlanPage() {
                   }`}
                 >
                   <span>{Number(date.slice(8, 10))}</span>
-                  {monthDaysWithPlan.has(date) && (
-                    <span
-                      aria-label={ja.mealPlan.monthDayHasPlan}
-                      className={`mt-0.5 h-1.5 w-1.5 rounded-full ${
-                        date === today ? 'bg-app' : 'bg-accent'
-                      }`}
-                    />
+                  {(monthDaysWithPlan.has(date) || monthDaysWithLog.has(date)) && (
+                    <span className="mt-0.5 flex items-center gap-0.5">
+                      {monthDaysWithPlan.has(date) && (
+                        <span
+                          aria-label={ja.mealPlan.monthDayHasPlan}
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            date === today ? 'bg-app' : 'bg-accent'
+                          }`}
+                        />
+                      )}
+                      {/* 「記録あり」の小マーク(2026-07-17 便Z-2。「献立あり」ドットと併記できる) */}
+                      {monthDaysWithLog.has(date) && (
+                        <span
+                          aria-label={ja.mealPlan.monthDayHasLog}
+                          className={date === today ? 'text-on-accent' : 'text-accent'}
+                        >
+                          <Check size={10} strokeWidth={3} aria-hidden />
+                        </span>
+                      )}
+                    </span>
                   )}
                 </button>
               ))}
@@ -1179,6 +1262,22 @@ export default function MealPlanPage() {
                 )
               })}
             </div>
+            {/* 過去日の振り返り(2026-07-17 便Z-2・docs/35 §3): その日の「作った記録」
+                (cookedLogs日付一致)を、予定(エントリ)と視覚区別した薄いカードで表示する。
+                予定が実際に作られたか一目で分かる */}
+            {isPastDate(date, today) && (cookedLogsByDate.get(date)?.length ?? 0) > 0 && (
+              <div className="mt-[var(--space-sm)]">
+                <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
+                  <CheckCircle2 size={14} className="text-accent" aria-hidden />
+                  {ja.mealPlan.pastCookedTitle}
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log }, i) => (
+                    <CookedLogCard key={`${recipe.id}-${i}`} recipe={recipe} log={log} />
+                  ))}
+                </ul>
+              </div>
+            )}
           </section>
         ))}
       </div>
@@ -1339,6 +1438,27 @@ export default function MealPlanPage() {
                     </ul>
                   </div>
                 ))}
+              </div>
+            )}
+            {/* その日の「作った記録」(2026-07-17 便Z-2・docs/35 §3。画像付き)。
+                月間献立への機能追加はPro v2まで凍結が既定だったが、オーナー指示により
+                解除してこの表示と「記録あり」マークを実装(README決定ログに記録) */}
+            {dayModalLogs.length > 0 && (
+              <div className="mt-[var(--space-sm)]">
+                <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
+                  <CheckCircle2 size={14} className="text-accent" aria-hidden />
+                  {ja.mealPlan.pastCookedTitle}
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {dayModalLogs.map(({ recipe, log }, i) => (
+                    <CookedLogCard
+                      key={`${recipe.id}-${i}`}
+                      recipe={recipe}
+                      log={log}
+                      onNavigate={() => setDayModalDate(null)}
+                    />
+                  ))}
+                </ul>
               </div>
             )}
             <button

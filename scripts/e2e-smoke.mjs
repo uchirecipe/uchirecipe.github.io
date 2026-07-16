@@ -168,7 +168,19 @@
 //         軽いフィードバック文言が出ること→保存せず一覧へ離脱しても実データ(DB)が
 //         書き換わっていないこと(b)自作レシピを新規登録→編集でタイトルを変更→
 //         「前回保存した内容に戻す」(自作は文言がスターターと異なる)で保存済みタイトルに
-//         戻ることを確認)。
+//         戻ることを確認) /
+//         SLOTWIN-01(「今日の献立に追加」のスロット振り分け窓・2026-07-17 便Z-1・docs/35 §2:
+//         ボタン押下で「どの食事に入れますか？」の窓が開き、「夕食」を選ぶと週プランの今日の
+//         夕食枠(mealPlans・IndexedDB直読み)と今日の献立(todayList)の両方に入ること・日タブ/
+//         週タブに反映されること・同じ枠に同じレシピが既にあるときは重複させずトーストで
+//         案内されること(件数不変)・「決めない」は従来どおりtodayListへの直接追加のみで
+//         週プランには入らないことを確認。既存のORPHAN-01/TODAYALL-01も窓経由になったため
+//         「決めない」を選ぶ1手を追加済み) /
+//         PASTLOG-01(週/月の過去振り返り・2026-07-17 便Z-2・docs/35 §3: 昨日の日付で
+//         「作った！」記録を付け、週タブの昨日の枠に「作った記録」の薄いカード(レシピ名+✓)が
+//         出ること・月タブ(Pro解錠)のカレンダー日に「記録あり」小マークが出ること・その日を
+//         タップした日モーダルに作った記録が表示されることを確認。月間献立への機能追加は
+//         Pro v2まで凍結が既定だったが、オーナー指示で解除して実装した分)。
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -1757,6 +1769,10 @@ try {
       const targetRecipeId = Number(obPage.url().match(/#\/recipes\/(\d+)/)?.[1])
       await obPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
+      // 2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開くようになった。ここでは従来どおりの
+      // 直接追加(枠なし)を使うため「決めない」を選ぶ(週間献立への登録は次の手順で直接書き込む)
+      await obPage.getByRole('button', { name: '決めない' }).click()
+      await obPage.waitForTimeout(300)
 
       // 3) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
       await obPage.evaluate(
@@ -1856,15 +1872,21 @@ try {
       await taPage.waitForTimeout(1800) // 初回シード完了待ち
 
       // 基本レシピ2品(肉じゃが・カレーライス)を「今日の献立に追加」ボタンで追加する
+      // (2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開くようになったため、
+      // 従来どおりの直接追加=「決めない」を選ぶ1手が増えた)
       await taPage.getByText('肉じゃが', { exact: true }).first().click()
       await taPage.waitForTimeout(500)
       await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await taPage.waitForTimeout(300)
+      await taPage.getByRole('button', { name: '決めない' }).click()
       await taPage.waitForTimeout(300)
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(500)
       await taPage.getByText('カレーライス', { exact: true }).first().click()
       await taPage.waitForTimeout(500)
       await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await taPage.waitForTimeout(300)
+      await taPage.getByRole('button', { name: '決めない' }).click()
       await taPage.waitForTimeout(300)
 
       await taPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -3126,6 +3148,289 @@ try {
       )
     } finally {
       await mp6Browser.close()
+    }
+  }
+
+  // --- SLOTWIN-01: 「今日の献立に追加」のスロット振り分け窓(2026-07-17 便Z-1・docs/35 §2)。
+  // レシピ詳細のボタン押下で「どの食事に入れますか？」の窓が開き、
+  // (a) 「夕食」を選ぶと週プランの今日の夕食枠に入り(IndexedDB直読み)、今日の献立(日タブ)にも
+  //     反映される(=1操作で両方に反映)
+  // (b) 同じ枠に同じレシピが既にあるときは重複させずトーストで案内される(件数不変)
+  // (c) 「決めない」は従来どおりtodayListへの直接追加のみ(週プランには入らない) ---
+  currentCheck = 'SLOTWIN-01'
+  {
+    const swBrowser = await chromium.launch()
+    const swContext = await swBrowser.newContext()
+    const swPage = await swContext.newPage()
+    swPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@SLOTWIN-01] ${text}`)
+    })
+    swPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SLOTWIN-01] ${err.message}`)
+    })
+    try {
+      await swPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await swPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // mealPlans/todayListをIndexedDB直読みするヘルパー(今日の日付はブラウザ側で算出)
+      const countTodaySlotEntries = (recipeId, slot) =>
+        swPage.evaluate(
+          ({ recipeId, slot }) =>
+            new Promise((resolve, reject) => {
+              const d = new Date()
+              const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(
+                    g.result.filter(
+                      (row) => row.date === date && row.slot === slot && row.recipeId === recipeId,
+                    ).length,
+                  )
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          { recipeId, slot },
+        )
+      const todayListIds = () =>
+        swPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('todayList', 'readonly')
+                const g = tx.objectStore('todayList').getAll()
+                g.onsuccess = () => resolve(g.result.map((row) => row.recipeId))
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+
+      // (a) 肉じゃがの詳細でボタン押下→窓→「夕食」
+      await swPage.getByText('肉じゃが', { exact: true }).first().click()
+      await swPage.waitForTimeout(500)
+      const swRecipeId = Number(swPage.url().match(/#\/recipes\/(\d+)/)?.[1])
+      await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await swPage.waitForTimeout(300)
+      check(
+        'SLOTWIN-01 ボタン押下で窓「どの食事に入れますか？」が開く',
+        (await swPage.textContent('body')).includes('どの食事に入れますか？'),
+      )
+      await swPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await swPage.waitForTimeout(500)
+      check(
+        'SLOTWIN-01 「今日の夕食に追加しました」トーストが出る',
+        (await swPage.textContent('body')).includes('今日の夕食に追加しました'),
+      )
+      check(
+        'SLOTWIN-01 ボタンが「今日の献立に追加済み」表示に変わる',
+        (await swPage.textContent('body')).includes('今日の献立に追加済み'),
+      )
+      check(
+        'SLOTWIN-01 週プランの今日の夕食枠に入る(mealPlansに1件)',
+        (await countTodaySlotEntries(swRecipeId, 'dinner')) === 1,
+      )
+      check(
+        'SLOTWIN-01 今日の献立(todayList)にも入る(1操作で両方に反映)',
+        (await todayListIds()).includes(swRecipeId),
+      )
+
+      // 日タブに反映されている(今日の献立セクションに肉じゃがが出る)
+      await swPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await swPage.waitForTimeout(1200)
+      check(
+        'SLOTWIN-01 日タブの今日の献立に反映される',
+        (await swPage.textContent('body')).includes('肉じゃが'),
+      )
+      // 週タブの今日の夕食枠にも見える
+      await swPage.getByRole('button', { name: '週', exact: true }).click()
+      await swPage.waitForTimeout(500)
+      check(
+        'SLOTWIN-01 週タブの今日の枠にも肉じゃがが見える',
+        (await swPage.textContent('body')).includes('肉じゃが'),
+      )
+
+      // (b) 重複ガード: 今日の献立から一旦外し(ボタンを「追加」状態に戻す)、
+      // もう一度窓→夕食を選ぶと、重複させずトーストで案内される
+      await swPage.getByRole('button', { name: '日', exact: true }).click()
+      await swPage.waitForTimeout(500)
+      await swPage.locator('button[aria-label="この献立から外す"]').first().click()
+      await swPage.waitForTimeout(500)
+      await swPage.goto(`${BASE}/#/recipes/${swRecipeId}`, { waitUntil: 'networkidle' })
+      await swPage.waitForTimeout(500)
+      await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await swPage.waitForTimeout(300)
+      await swPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await swPage.waitForTimeout(500)
+      check(
+        'SLOTWIN-01(重複) 「今日の夕食にすでに入っています」トーストが出る',
+        (await swPage.textContent('body')).includes('今日の夕食にすでに入っています'),
+      )
+      check(
+        'SLOTWIN-01(重複) mealPlansの夕食枠は1件のまま増えない',
+        (await countTodaySlotEntries(swRecipeId, 'dinner')) === 1,
+      )
+      check(
+        'SLOTWIN-01(重複) 重複時はtodayListにも追加しない(トースト案内のみ)',
+        !(await todayListIds()).includes(swRecipeId),
+      )
+
+      // (c) 「決めない」: カレーライスで窓→決めない→todayListのみ(週プランには入らない)
+      await swPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await swPage.waitForTimeout(500)
+      await swPage.getByText('カレーライス', { exact: true }).first().click()
+      await swPage.waitForTimeout(500)
+      const swCurryId = Number(swPage.url().match(/#\/recipes\/(\d+)/)?.[1])
+      await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await swPage.waitForTimeout(300)
+      await swPage.getByRole('button', { name: '決めない' }).click()
+      await swPage.waitForTimeout(500)
+      check(
+        'SLOTWIN-01(決めない) todayListへ直接追加される',
+        (await todayListIds()).includes(swCurryId),
+      )
+      const swCurrySlotCounts = await Promise.all(
+        ['breakfast', 'lunch', 'dinner'].map((slot) => countTodaySlotEntries(swCurryId, slot)),
+      )
+      check(
+        'SLOTWIN-01(決めない) 週プランのどの枠にも入らない(従来どおりの枠なし追加)',
+        swCurrySlotCounts.every((n) => n === 0),
+        `counts=${JSON.stringify(swCurrySlotCounts)}`,
+      )
+    } finally {
+      await swBrowser.close()
+    }
+  }
+
+  // --- PASTLOG-01: 週/月の過去振り返り(2026-07-17 便Z-2・docs/35 §3)。
+  // 昨日の日付で「作った！」記録を付け、
+  // (a) 週タブの昨日の枠に「作った記録」の薄いカード(レシピ名+✓)が出ること
+  //     (昨日が前週に当たる=実行日が月曜の場合は「前の週」へ移動してから確認)、
+  // (b) 月タブ(Pro解錠)のカレンダー日に「記録あり」小マークが出て、その日をタップした
+  //     日モーダルに作った記録が表示されること、を確認する。
+  // 月間献立への機能追加はPro v2まで凍結が既定だったが、オーナー指示で解除して実装した分 ---
+  currentCheck = 'PASTLOG-01'
+  {
+    const plBrowser = await chromium.launch()
+    const plContext = await plBrowser.newContext()
+    const plPage = await plContext.newPage()
+    plPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@PASTLOG-01] ${text}`)
+    })
+    plPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PASTLOG-01] ${err.message}`)
+    })
+    try {
+      const plPad = (n) => String(n).padStart(2, '0')
+      const plToday = new Date()
+      const plYd = new Date()
+      plYd.setDate(plYd.getDate() - 1)
+      const plYesterday = `${plYd.getFullYear()}-${plPad(plYd.getMonth() + 1)}-${plPad(plYd.getDate())}`
+      const plYesterdaySlash = plYesterday.replaceAll('-', '/')
+
+      await plPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await plPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 肉じゃがに「作った！」記録を昨日の日付で付ける(実UIのCookedLogModal経由)
+      await plPage.getByText('肉じゃが', { exact: true }).first().click()
+      await plPage.waitForTimeout(500)
+      await plPage.getByRole('button', { name: '作った！' }).click()
+      await plPage.waitForTimeout(300)
+      await plPage.locator('input[type="date"]').fill(plYesterday)
+      await plPage.getByRole('button', { name: '記録する' }).click()
+      await plPage.waitForTimeout(500)
+      check(
+        'PASTLOG-01 前提: 昨日の日付で作った記録を保存できる',
+        (await plPage.textContent('body')).includes('作った記録をつけました'),
+      )
+
+      // (a) 週タブ: 昨日の枠に「作った記録」カード(レシピ名+✓)が出る
+      await plPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await plPage.waitForTimeout(800)
+      await plPage.getByRole('button', { name: '週', exact: true }).click()
+      await plPage.waitForTimeout(500)
+      if (!(await plPage.textContent('body')).includes(plYesterdaySlash)) {
+        // 実行日が月曜のときだけ、昨日(日曜)は前の週に表示される
+        await plPage.locator('button[aria-label="前の週"]').click()
+        await plPage.waitForTimeout(500)
+      }
+      const plDayCardText = await plPage
+        .locator('section', { hasText: plYesterdaySlash })
+        .first()
+        .textContent()
+      check(
+        'PASTLOG-01 週タブの昨日の枠に「作った記録」+レシピ名が出る',
+        !!plDayCardText && plDayCardText.includes('作った記録') && plDayCardText.includes('肉じゃが'),
+        `昨日カード=${plDayCardText?.slice(0, 120)}`,
+      )
+
+      // (b) 月タブ: Pro解錠(月間はPro機能。実コードは台帳原本のためNUT-02等と同様
+      // settings.proCodeの直書きで「解錠済み」状態だけ再現)→「記録あり」マーク→日モーダル
+      await plPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({
+              ...current,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await plPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await plPage.reload({ waitUntil: 'networkidle' })
+      await plPage.waitForTimeout(800)
+      await plPage.getByRole('button', { name: '月', exact: true }).click()
+      await plPage.waitForTimeout(500)
+      if (plYesterday.slice(0, 7) !== `${plToday.getFullYear()}-${plPad(plToday.getMonth() + 1)}`) {
+        // 実行日が月初(1日)のときだけ、昨日は前の月に表示される
+        await plPage.locator('button[aria-label="前の月"]').click()
+        await plPage.waitForTimeout(500)
+      }
+      check(
+        'PASTLOG-01 月カレンダーに「記録あり」小マークが出る',
+        (await plPage.locator('[aria-label="記録あり"]').count()) >= 1,
+      )
+      // 「記録あり」マークの付いた日(=昨日)をタップ→日モーダルに作った記録が出る
+      await plPage
+        .locator('button', { has: plPage.locator('[aria-label="記録あり"]') })
+        .first()
+        .click()
+      await plPage.waitForTimeout(500)
+      const plModalText = await plPage.locator('[role="dialog"]').first().textContent()
+      check(
+        'PASTLOG-01 日モーダルにその日の「作った記録」が表示される',
+        !!plModalText && plModalText.includes('作った記録') && plModalText.includes('肉じゃが'),
+        `モーダル=${plModalText?.slice(0, 120)}`,
+      )
+    } finally {
+      await plBrowser.close()
     }
   }
 
