@@ -18,11 +18,11 @@ export const ja = {
   icon: {
     rice: 'ご飯・丼',
     pasta: 'パスタ',
-    noodle: '麺（うどん・ラーメン）',
+    noodle: '麺類',
     bread: 'パン',
     soup: '汁物・鍋',
     salad: 'サラダ・和え物',
-    vegetable: '野菜のおかず',
+    vegetable: '炒め物・煮物',
     tofu: '豆腐・大豆',
     fish: '魚',
     egg: '卵',
@@ -65,7 +65,7 @@ export const ja = {
     historyTitle: '最近作ったもの',
     historyMore: 'すべて見る',
     backupReminder: 'しばらくバックアップしていません。設定から書き出しておくと安心です',
-    backupReminderLink: '設定を開く',
+    backupReminderLink: 'バックアップを開く',
     newsLinkLabel: '詳しく見る',
     pantryShortcut: '在庫ボードを見る・編集する',
   },
@@ -472,7 +472,7 @@ export const ja = {
     // 「かんたん / くわしく」タブ(2026-07-16 Fable裁定docs/26・案A)。かんたんだけで保存完結、
     // くわしくは全部任意。新規・編集とも初期表示は常にかんたん
     formTabSimple: 'かんたん',
-    formTabDetail: 'くわしく（任意）',
+    formTabDetail: 'くわしく',
     formTabDetailFilledHint: '入力済みの項目があります',
     nameLabel: '料理名',
     namePlaceholder: '例: 肉じゃが',

@@ -85,10 +85,13 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
   { id: 'pro', label: ja.settings.tabProPack },
 ]
 
-// ?section=pro / ?section=themes の直リンクが、タブ化後もどのタブのどの要素までスクロールするか
+// ?section=pro / ?section=themes / ?section=backup の直リンクが、タブ化後もどのタブの
+// どの要素までスクロールするか(backupは2026-07-16 ホーム「しばらくバックアップしていません」
+// リンクの遷移先として追加。既存の?section=直リンクの仕組みをそのまま流用する)
 const sectionDeepLinks: Record<string, { tab: SettingsTab; elementId: string }> = {
   pro: { tab: 'pro', elementId: 'pro-section' },
   themes: { tab: 'recipe', elementId: 'theme-list-section' },
+  backup: { tab: 'backup', elementId: 'backup-section' },
 }
 
 /**
@@ -1099,7 +1102,7 @@ export default function SettingsPage() {
       {activeTab === 'backup' && (
         <>
           {/* バックアップ */}
-          <section className={sectionCls}>
+          <section id="backup-section" className={sectionCls}>
             <h2 className="font-bold">{ja.settings.backupTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupDescription}</p>
             <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">

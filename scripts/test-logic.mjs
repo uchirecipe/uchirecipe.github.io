@@ -2692,6 +2692,51 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   )
 }
 
+// ---------- missingDefaults: 価格マスタのバージョン付きトップアップ移行(2026-07-16再発防止) ----------
+// 背景: 初回だけPRICE_DEFAULTSを投入する仕組みのため、古い時期にマスタを作った既存ユーザーは
+// その後追加されたPRICE_DEFAULTSが反映されず「価格なし」が多発していた。db/prices.tsの
+// seedPriceDefaultsIfNeededは、PRICE_DEFAULTS_VERSIONが上がったときだけmissingDefaultsで
+// 「まだ無い項目だけ」を追加する(既存の行やユーザーの上書き価格は一切触らない)
+{
+  const { missingDefaults } = await import('../src/db/prices.ts')
+  const defaults = [
+    { name: '玉ねぎ', pricePerUnit: 50, unit: '1個' },
+    { name: 'にんじん', pricePerUnit: 40, unit: '1本' },
+    { name: 'じゃがいも', pricePerUnit: 40, unit: '1個' },
+  ]
+  // 既存マスタには「玉ねぎ」だけ入っている(価格をユーザーが80円に上書き済み想定)
+  // → 不足分(にんじん・じゃがいも)だけが返り、玉ねぎの上書き価格には触れない(結果に含まれない)
+  const existing = [{ name: '玉ねぎ', pricePerUnit: 80, unit: '1個' }]
+  const missing = missingDefaults(existing, defaults)
+  eq(
+    'missingDefaults 既存マスタに一部だけある状態で不足分だけを返す',
+    missing.map((d) => d.name).sort(),
+    ['じゃがいも', 'にんじん'],
+  )
+  eq(
+    'missingDefaults 既存の上書き価格(玉ねぎ)は結果に含まれない=上書きされない',
+    missing.some((d) => d.name === '玉ねぎ'),
+    false,
+  )
+  // かな表記ゆれ(カタカナ⇄ひらがな)がある既存項目も「既にある」とみなし、重複追加しない
+  eq(
+    'missingDefaults かな表記ゆれ(カタカナ)の既存項目は不足扱いにしない',
+    missingDefaults(
+      [{ name: 'ニンジン', pricePerUnit: 45, unit: '1本' }],
+      [{ name: 'にんじん', pricePerUnit: 40, unit: '1本' }],
+    ).length,
+    0,
+  )
+  // 既存マスタが空なら全件が不足扱い(初回相当)
+  eq(
+    'missingDefaults 既存が空なら全件返す',
+    missingDefaults([], defaults).map((d) => d.name),
+    defaults.map((d) => d.name),
+  )
+  // 既存マスタに全項目が揃っていれば何も返さない
+  eq('missingDefaults 既存に全項目があれば空配列', missingDefaults(defaults, defaults), [])
+}
+
 // ---------- toSpeechText: 調理中モード読み上げの用語辞書reading適用(docs/20 §2・2026-07-12) ----------
 {
   const { toSpeechText } = await import('../src/logic/toSpeechText.ts')
