@@ -100,7 +100,8 @@ type Props = {
   layout?: 'grid' | 'list'
   /**
    * 栄養価並び替え中（Pro機能。2026-07-16 便T）に表示する、並び替えに使っている栄養価の値
-   * （例:「320kcal」「18.5g」。computeRecipeNutritionの1食あたり値を呼び出し側で整形済みの文字列）。
+   * （例:「カロリー: 320kcal」「たんぱく質: 18.5g」。ラベル+値の形式で呼び出し側(RecipesPage)が
+   * 整形済みの文字列を渡す。2026-07-16オーナー指示でラベル付き表示に変更）。
    * グリッド表示ではカード左上、一覧（list）表示では右下に出す。算出不能なレシピはRecipesPage側で
    * undefinedのまま渡す（バッジ自体を出さない）
    */
@@ -211,9 +212,11 @@ export default function RecipeCard({
           )}
           {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
         </div>
-        {/* 栄養価並び替え中の値(2026-07-16 便T-7): 一覧(list)表示は行の右下に重ねる */}
+        {/* 栄養価並び替え中の値(2026-07-16 便T-7): 一覧(list)表示は行の右下に重ねる。
+            便T-7-2でラベル付き表示("たんぱく質: 24g")に変更し長くなったため、max-width+truncateで
+            カード幅を超えないようにする */}
         {nutrientBadgeText && (
-          <span className="absolute bottom-1.5 right-1.5 rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
+          <span className="absolute bottom-1.5 right-1.5 max-w-[50%] truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
             {nutrientBadgeText}
           </span>
         )}
@@ -233,11 +236,12 @@ export default function RecipeCard({
           <RecipePlaceholder recipe={recipe} />
         )}
         {/* 同梱の基本レシピか、配布テーマ由来か、自分で登録したレシピかの見分け。
-            テーマ由来(sourceSetNameあり)はセット名をそのまま表示する(長い名前はtruncate+title属性で全文) */}
+            テーマ由来(sourceSetNameあり)はセット名をそのまま表示する(長い名前はtitle属性で全文。
+            表示は2026-07-16オーナー指示で最大2行=line-clamp-2に制約し、カードが崩れないようにする) */}
         {(recipe.sourceSetName || recipe.isStarter) && (
           <span
             title={recipe.sourceSetName || undefined}
-            className="absolute bottom-1.5 left-1.5 max-w-[70%] truncate rounded-full bg-surface/90 px-2 py-0.5 text-[10px] font-bold text-ink-muted shadow-sm"
+            className="absolute bottom-1.5 left-1.5 line-clamp-2 max-w-[70%] rounded-full bg-surface/90 px-2 py-0.5 text-[10px] font-bold text-ink-muted shadow-sm"
           >
             {recipe.sourceSetName ?? ja.card.starterBadge}
           </span>
@@ -260,11 +264,13 @@ export default function RecipeCard({
           </div>
         )}
       </div>
-      {/* 栄養価並び替え中の値(2026-07-16 便T-7)とNG食材警告は同じ左上角に出るため縦積みにする */}
+      {/* 栄養価並び替え中の値(2026-07-16 便T-7)とNG食材警告は同じ左上角に出るため縦積みにする。
+          便T-7-2でラベル付き表示("たんぱく質: 24g")に変更し長くなったため、max-width+truncateで
+          カード幅を超えないようにする */}
       {(nutrientBadgeText || hasNg) && (
-        <div className="absolute left-1.5 top-1.5 flex flex-col items-start gap-1">
+        <div className="absolute left-1.5 top-1.5 flex max-w-[70%] flex-col items-start gap-1">
           {nutrientBadgeText && (
-            <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
+            <span className="max-w-full truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
               {nutrientBadgeText}
             </span>
           )}

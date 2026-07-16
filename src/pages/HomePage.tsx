@@ -130,6 +130,10 @@ export default function HomePage() {
       .map((item) => recipeById.get(item.recipeId))
       .filter((r): r is Recipe => r !== undefined)
   }, [todayList, recipeById])
+  // 「今日の献立」ウィジェットが出るか(1品以上)。2026-07-16オーナー指示: 「今日なに作る?」
+  // ウィジェットと常にどちらか片方だけを表示する（今日の献立が1品以上ならそちらを優先し、
+  // 「今日なに作る?」はウィジェットごと非表示にする。読み込み中(undefined)は従来どおり0品扱い）
+  const hasTodayList = !!todayListRecipes && todayListRecipes.length > 0
 
   // 自分のレシピが1件以上あり、30日以上（または一度も）バックアップしていないとき
   const showBackupReminder =
@@ -204,7 +208,7 @@ export default function HomePage() {
     // 登録0品なら非表示(2026-07-16 便S。直近実装の「1行に薄く」表示を置き換え。
     // 読み込み中(todayListRecipesがundefined)も同様に何も出さない)
     mealPlan:
-      todayListRecipes && todayListRecipes.length > 0 ? (
+      hasTodayList ? (
         <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
           <h2 className="flex items-center gap-2 font-bold">
             <CalendarDays size={20} className="text-accent" aria-hidden />
@@ -228,7 +232,9 @@ export default function HomePage() {
           </ul>
         </section>
       ) : null,
-    suggestion: (
+    // 今日の献立が1品以上あるときはウィジェットごと非表示(2026-07-16オーナー指示。
+    // mealPlanウィジェットと常に排他=どちらか片方だけが表示される)
+    suggestion: !hasTodayList ? (
       <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
         <h2 className="text-xl font-bold">{ja.home.suggestTitle}</h2>
 
@@ -319,7 +325,7 @@ export default function HomePage() {
           </>
         )}
       </section>
-    ),
+    ) : null,
     ingredientSearch: (
       <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
         <h2 className="flex items-center gap-2 font-bold">

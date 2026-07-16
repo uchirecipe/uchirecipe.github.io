@@ -458,7 +458,9 @@ export default function RecipesPage() {
    * 栄養価順のとき、カードに表示する「並び替えに使っている栄養価の値」(便T-7)。
    * カロリー順→「◯kcal」、たんぱく質・塩分・脂質・糖質順→「◯g」。算出不能(null)なレシピは
    * 表示しない(undefinedを返し、RecipeCard側でバッジ自体を出さない)。Pro機能なので
-   * nutritionUnlocked(=Pro解錠済み)のときだけ計算する
+   * nutritionUnlocked(=Pro解錠済み)のときだけ計算する。
+   * 2026-07-16オーナー指示: 「たんぱく質: 24g」のように並び替え項目のラベルを値の前に付ける
+   * (ラベルはnutrientSortLabels=並び替えパネルの項目名と同じものを流用する)
    */
   const nutrientBadgeTextFor = (recipeId: number | undefined): string | undefined => {
     if (!nutritionUnlocked || !nutrientSortActive || !isNutrientSortOption(sort)) return undefined
@@ -467,7 +469,9 @@ export default function RecipesPage() {
     const raw = nutrientSortValues?.get(recipeId)?.[field]
     if (raw == null) return undefined
     const rounded = roundNutrient(field, raw)
-    return field === 'kcal' ? `${rounded}${ja.nutrition.kcalUnit}` : `${rounded}${ja.nutrition.gramUnit}`
+    const value =
+      field === 'kcal' ? `${rounded}${ja.nutrition.kcalUnit}` : `${rounded}${ja.nutrition.gramUnit}`
+    return `${nutrientSortLabels[sort]}${ja.card.nutrientBadgeSeparator}${value}`
   }
 
   return (

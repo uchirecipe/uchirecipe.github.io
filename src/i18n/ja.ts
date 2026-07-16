@@ -512,6 +512,9 @@ export const ja = {
     starterBadge: '基本レシピ',
     /** 「時短」絞り込み中、調理時間をquickCookMinutesに切り替えたときに数字の前に添える */
     quickTimePrefix: '時短',
+    /** 栄養価並び替え中のカードバッジ(便T-7)。「カロリー: 350kcal」のようにラベル+値で組み立てる
+     * ときの区切り(2026-07-16オーナー指示: ラベル付き表示に変更) */
+    nutrientBadgeSeparator: ': ',
   },
   paste: {
     open: 'テキスト貼り付けで自動入力',

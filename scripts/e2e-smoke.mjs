@@ -35,7 +35,8 @@
 //         案内文が出ること、Pro版の機能一覧が解錠中ずっと表示され続けること。2026-07-13 UI改善) /
 //         RECIPESET-01(修正4・2026-07-14オーナー実機フィードバック: 「レシピセットを読み込む」欄の
 //         「URLから読み込む」結果を読み込み欄の上部にテキストで表示し、以前の下部トーストとしては
-//         二重に出ないこと。エラー(見つからない)・成功の両方を確認) /
+//         二重に出ないこと。エラー(見つからない)・成功の両方を確認。2026-07-16修正1で
+//         setId/setName付き取り込み後にテーマ名バッジ(sourceSetName)が出ることも確認) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
 //         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
@@ -60,7 +61,8 @@
 //         タップ先が既存のPro案内であること) /
 //         NUTSORT-02(栄養並び替え・Pro解錠済み: カロリー/たんぱく質/塩分/脂質/糖質の5項目が出る・
 //         カロリー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
-//         栄養価順の間はカードに並び替え中の値(◯kcal/◯g)が出る=便T-7) /
+//         栄養価順の間はカードに並び替え中の値が出る=便T-7。2026-07-16便T-7-2で
+//         「カロリー: ◯kcal」「たんぱく質: ◯g」のラベル付き表記に変更) /
 //         TOMB-01(削除したセット品の再取込除外=トゥームストーン・2026-07-13 Fable設計:
 //         テーマ取り込み→1品削除→再取込で復活しない(「削除済みの除外中1件」表示)→テーマ一覧の
 //         「除外中1品・すべて戻す」で解除→再取込で復活する) /
@@ -1286,7 +1288,8 @@ try {
       // 並び替えパネルに「栄養価で並び替え」区分と5項目が出ること、カロリー順の既定は昇順で
       // 算出不能レシピ(材料が成分表に名寄せできない自作レシピ)は昇順・降順とも末尾に回ること、
       // たんぱく質順の既定は降順(多い方から)であること、栄養価順の間はレシピカードに
-      // 並び替え中の栄養価の値(◯kcal/◯g)が表示されること(便T-7)を確認する。
+      // 並び替え中の栄養価の値がラベル付き(「カロリー: ◯kcal」「たんぱく質: ◯g」)で
+      // 表示されること(便T-7・2026-07-16 便T-7-2でラベル付き表示に変更)を確認する。
       // NUT-02と同じ解錠済みcontextを使う(無料側でティーザーだけになることはNUTSORT-01で検証済み) ---
       currentCheck = 'NUTSORT-02'
       // 算出不能なレシピを1件作る(材料名が成分表のどの食品にも名寄せできない)
@@ -1341,14 +1344,15 @@ try {
           kcalAscTitles[kcalAscTitles.length - 1] === 'E2E栄養並び替え確認レシピ',
         `末尾=${kcalAscTitles[kcalAscTitles.length - 1]}`,
       )
-      // 便T-7: カロリー順の間、グリッドカードの左上に「◯kcal」の値が出る。算出不能レシピには出ない
+      // 便T-7-2(2026-07-16オーナー指示): カロリー順の間、グリッドカードの左上に
+      // 「カロリー: ◯kcal」のラベル付きの値が出る。算出不能レシピには出ない
       const kcalBadgeInfo = await nutPage.evaluate(() => {
         const links = Array.from(document.querySelectorAll('div.grid.grid-cols-2 a')).filter((a) =>
           /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
         )
         const badgeOf = (a) =>
           Array.from(a.querySelectorAll('span')).find((s) =>
-            /^\d+(\.\d+)?kcal$/.test(s.textContent?.trim() ?? ''),
+            /^カロリー: \d+(\.\d+)?kcal$/.test(s.textContent?.trim() ?? ''),
           )
         const unknownCard = links.find((a) => a.textContent?.includes('E2E栄養並び替え確認レシピ'))
         return {
@@ -1358,7 +1362,7 @@ try {
         }
       })
       check(
-        'NUTSORT-02 カロリー順の間、カードに「◯kcal」の値が表示される(便T-7)',
+        'NUTSORT-02 カロリー順の間、カードに「カロリー: ◯kcal」のラベル付きの値が表示される(便T-7-2)',
         kcalBadgeInfo.withBadge > 0,
         `バッジ付き=${kcalBadgeInfo.withBadge}/${kcalBadgeInfo.total}`,
       )
@@ -1381,7 +1385,7 @@ try {
         kcalAscTitles.length > 1 && kcalAscTitles[0] !== kcalDescTitles[0],
         `昇順先頭=${kcalAscTitles[0]} 降順先頭=${kcalDescTitles[0]}`,
       )
-      // たんぱく質順: 既定は降順(多い方から)。カードの値は「◯g」表記になる
+      // たんぱく質順: 既定は降順(多い方から)。カードの値は「たんぱく質: ◯g」表記になる(便T-7-2)
       await nutPage.getByRole('button', { name: 'たんぱく質', exact: true }).click()
       await nutPage.waitForTimeout(500)
       const proteinDescActive = await nutPage.evaluate(() => {
@@ -1397,12 +1401,12 @@ try {
           )
           return links.filter((a) =>
             Array.from(a.querySelectorAll('span')).some((s) =>
-              /^\d+(\.\d+)?g$/.test(s.textContent?.trim() ?? ''),
+              /^たんぱく質: \d+(\.\d+)?g$/.test(s.textContent?.trim() ?? ''),
             ),
           ).length
         })
       check(
-        'NUTSORT-02 たんぱく質順の間はカードの値が「◯g」表記になる(便T-7)',
+        'NUTSORT-02 たんぱく質順の間はカードの値が「たんぱく質: ◯g」表記になる(便T-7-2)',
         (await countGramBadges()) > 0,
       )
       const proteinTitles = await nutCardTitles()
@@ -2986,7 +2990,9 @@ try {
   // 縦に長いページでは気づきにくかった)。エラー(見つからない)・成功の両方で読み込み欄の上部に
   // 表示され、下部トースト(押して閉じるボタン)としては二重に出ないことを確認する。
   // 他の操作(テーマ追加・set=直リンク等)のトーストは変更していないため対象外。
-  // review2.json(setId無し=Pro/パック解錠不要)を使い、専用のまっさらプロファイルで完結させる ---
+  // review2.jsonを使い、専用のまっさらプロファイルで完結させる。2026-07-16修正1でreview*.jsonに
+  // setId/setNameが付いたため課金ゲート対象になった(下見用途・Pro解錠済みオーナーのみ想定)。
+  // 成功パスの検証にはPro解錠が必要なため、NUT-02と同じIndexedDB直書きで解錠済み状態を再現する ---
   currentCheck = 'RECIPESET-01'
   {
     const rsBrowser = await chromium.launch()
@@ -3037,7 +3043,35 @@ try {
           .count()) === 0,
       )
 
-      // 成功パス(setId無しのreview2セットなのでPro/パック解錠不要)
+      // Pro解錠(2026-07-16修正1: review2.jsonにsetIdが付いたため課金ゲート対象になった。
+      // 実際のPro解錠コードは販売台帳の原本なのでリポジトリにコミットできないため、NUT-02と同様
+      // settings.proCodeをIndexedDBへ直接書き込んで「解錠済み」状態だけを再現する)
+      await rsPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await rsPage.reload({ waitUntil: 'networkidle' })
+      await rsPage.waitForTimeout(800)
+      await rsPage.getByRole('button', { name: 'レシピ', exact: true }).click()
+      await rsPage.waitForTimeout(300)
+
+      // 成功パス(Pro解錠済みなのでsetId付きのreview2セットも取り込める)
       await urlInput.fill(`${BASE}/sets/data/review2.json`)
       await loadUrlBtn.click()
       await rsPage.waitForTimeout(1000)
@@ -3049,6 +3083,20 @@ try {
       check(
         'RECIPESET-01(修正4) 直前のエラーメッセージは成功後には残らない',
         !afterSuccessText.includes('指定されたURLにレシピセットが見つかりませんでした'),
+      )
+
+      // setName表示の確認(2026-07-16修正1): setId/setName付きで取り込んだレシピはsourceSetNameが
+      // 入り、レシピ一覧カードのテーマ名バッジに反映される(基本レシピの「基本レシピ」バッジと混ざらない)
+      await rsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await rsPage.waitForTimeout(800)
+      const importedCardText = await rsPage
+        .locator('a[href^="#/recipes/"]', { hasText: '豆腐ときのこの和風あんかけ' })
+        .first()
+        .textContent()
+      check(
+        'RECIPESET-01(修正1) setId/setName付きセットの取り込み後、カードにテーマ名バッジ(setName)が出る',
+        !!importedCardText && importedCardText.includes('【下見】第2弾 がまんしないダイエットごはん'),
+        `カードテキスト=${importedCardText}`,
       )
     } finally {
       await rsBrowser.close()
