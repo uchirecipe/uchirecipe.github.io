@@ -23,10 +23,15 @@ export const ZWSP = '\u200b'
 
 const TIME_END = /\d+(分|時間|秒)半?$/
 const BOND_END = /[をにへとやでのが]$/
+// 係助詞「は/も」で終わる文節(2026-07-16 改行監査A-3。BOND_ENDに無条件で加えると
+// 「大葉もせん切りにする」が新たに「大葉もせん」/「切りにする」に分断される退行が
+// シミュレーションで確認されたため、BOND_ENDには入れず下記の狭い条件専用に分離する)
+const TOPIC_PARTICLE_END = /[はも]$/
 const PUNCT_END = /[、。」』）)]$/
 // 後方吸収してよい短い文節は補助動詞類のみ(「〜して|おく」「せん切りに|する」等)。
-// 任意の2文字を吸収するとBudouXの誤分割(「塩も|みする」)を巻き込み単語内で切れる
-const AUX_SHORT = /^(おく|いく|くる|みる|よい|する|して|こと)[、。]?$/
+// 任意の2文字を吸収するとBudouXの誤分割(「塩も|みする」)を巻き込み単語内で切れる。
+// 「見る」(漢字表記)も対象に追加(2026-07-16改行監査A-2: 「味を/見る」の泣き別れ対策)
+const AUX_SHORT = /^(おく|いく|くる|みる|見る|よい|する|して|こと)[、。]?$/
 const MAX_UNIT = 12
 const BOND_MAX = 10
 
@@ -46,6 +51,11 @@ const KNOWN_WORDS = [
   '両面焼きグリル',
   '片面焼きグリル',
   '転がしながら',
+  // 2026-07-16 改行監査A-1: 949項目の機械監査で発見された誤分割語(副作用0件を確認済み)
+  'しょうゆ',
+  'ゴムべら',
+  'タイプ',
+  'せん切り',
 ]
 
 /** BudouXの素分割に、句読点・中黒・既知語の補正をかけたセグメント列を返す */
@@ -149,6 +159,16 @@ export function wrapJaPhrases(text: string): string {
         const hasTime = /\d+(分|時間|秒)/.test(prev) || /^\d+(分|時間|秒)/.test(seg)
         const cap = hasTime ? MAX_UNIT : /と$/.test(prev) ? 11 : BOND_MAX
         canMerge = total <= cap
+      } else if (
+        TOPIC_PARTICLE_END.test(prev) &&
+        seg.length === 1 &&
+        !PUNCT_END.test(seg) &&
+        seg !== '・'
+      ) {
+        // 「は/も」で終わる文節+直後が句読点でも「・」でもない1文字だけの孤立ユニットのときだけ
+        // 前に吸収する(「小分けにして冷凍も|可」の泣き別れ対策・2026-07-16改行監査A-3)。
+        // 「・」除外は食材列挙で次項目の先頭に付ける設計を壊さないため
+        canMerge = total <= MAX_UNIT
       }
     }
     if (canMerge) {

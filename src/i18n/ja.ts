@@ -133,9 +133,14 @@ export const ja = {
     removeExtraRow: 'この追加枠を取り消す',
     addRow: '＋枠を追加',
     quickOnlyToggle: '自動提案は時短レシピ優先',
+    quickOnlySummary: '時短優先',
     genreAny: '指定なし',
     preferHighProteinToggle: '高たんぱく優先',
     fillWeek: 'まとめて献立を立てる',
+    // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がゴチャつきの一因)。
+    // 既定閉。選択中の条件が既定以外のときは畳んだラベルにも現在値を出す（例:「提案の条件: 和食」）
+    suggestConditionsToggle: '提案の条件',
+    todayCookedToast: '作った記録をつけました',
     slotFilterTitle: '表示する食事帯',
     slotFilterKeepOne: '少なくとも1つの食事帯は表示します',
     pickTitle: 'レシピを選ぶ',
@@ -635,6 +640,7 @@ export const ja = {
     cookedPhotoView: '写真を拡大表示',
     cookedLogPhotoRemove: 'この記録の写真を削除',
     cookedSave: '記録する',
+    cookedRecordedToast: '作った記録をつけました',
     cookedCancel: 'やめる',
     cookedLogsTitle: '作った記録',
     cookedCountSuffix: '回',

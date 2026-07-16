@@ -438,18 +438,38 @@ try {
     `現在URL: ${page.url()}`,
   )
 
-  // --- DET-01: 詳細の戻るボタンは、一覧以外の画面(ホーム)から来た場合でも常に一覧へ戻る ---
-  // (ブラウザ履歴があると直前の画面に戻ってしまっていた不具合の再発防止。2026-07-10)
+  // --- DET-01: 詳細の戻るボタン(2026-07-16オーナー改定)。
+  // 従来(2026-07-10決定): 一覧以外の画面から来た場合でも常に一覧へ戻る
+  // (ブラウザ履歴があると直前の画面に戻ってしまっていた不具合の再発防止)。
+  // 改定(2026-07-16): ホームの候補カード(「今日なに作る?」)発だけは例外でホームへ戻る
+  // (todayList方式の拡張)。それ以外(一覧・直接URL等、履歴/state無し)は従来どおり一覧へ ---
   currentCheck = 'DET-01'
+  // (a) ホームの候補カードから詳細→戻る→ホーム(#/)へ戻る
   await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(800)
   await page.locator('a[href^="#/recipes/"]').first().click()
   await page.waitForTimeout(500)
-  check('DET-01 ホームからレシピ詳細へ遷移', /#\/recipes\/\d+/.test(page.url()), `現在URL: ${page.url()}`)
+  check(
+    'DET-01 ホームの候補カードからレシピ詳細へ遷移',
+    /#\/recipes\/\d+/.test(page.url()),
+    `現在URL: ${page.url()}`,
+  )
+  const det01DetailUrl = page.url()
   await page.getByRole('button', { name: '戻る' }).click()
   await page.waitForTimeout(400)
   check(
-    'DET-01 詳細の戻るボタンは常に一覧へ(直前の画面(ホーム)には戻らない)',
+    'DET-01(2026-07-16改定) ホームの候補カード発の戻るはホーム(#/)へ戻る',
+    page.url() === `${BASE}/#/`,
+    `現在URL: ${page.url()}`,
+  )
+
+  // (b) 戻り先の保全: 直接URL(ブラウザ履歴なし・state無し)で詳細を開いた場合は従来どおり一覧へ
+  await page.goto(det01DetailUrl, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByRole('button', { name: '戻る' }).click()
+  await page.waitForTimeout(400)
+  check(
+    'DET-01(戻り先の保全) 直接URLで開いた詳細の戻るは従来どおり一覧へ',
     page.url().endsWith('#/recipes'),
     `現在URL: ${page.url()}`,
   )
@@ -547,7 +567,9 @@ try {
   await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
-  const introDetailText = await page.textContent('body')
+  // 2026-07-16 UI総点検A-8: introもwrapJaPhrases経由(ja-phrase)の描画になり、文節境界にZWSPが
+  // 入るようになったため、他のMemoText系フィールドと同じくstripZwspしてから比較する
+  const introDetailText = stripZwsp(await page.textContent('body'))
   check(
     'INTRO-01 保存後の詳細に料理名が表示される',
     introDetailText.includes('E2Eひとこと説明確認レシピ'),
@@ -557,10 +579,12 @@ try {
     introDetailText.includes('E2E確認用のひとこと説明テキスト'),
   )
   const introHeading = page.getByRole('heading', { name: 'E2Eひとこと説明確認レシピ' })
-  const introBelowTitle = await introHeading.evaluate((el) => {
-    const next = el.nextElementSibling
-    return next?.textContent ?? ''
-  })
+  const introBelowTitle = stripZwsp(
+    await introHeading.evaluate((el) => {
+      const next = el.nextElementSibling
+      return next?.textContent ?? ''
+    }),
+  )
   check(
     'INTRO-01 ひとこと説明は料理名見出しの直後の要素に表示される',
     introBelowTitle.includes('E2E確認用のひとこと説明テキスト'),
@@ -2300,6 +2324,14 @@ try {
       await mpPage.waitForTimeout(300)
 
       // Fix5: aria-pressed(見た目は変更しない)
+      // 2026-07-16 UI総点検A-3: 提案条件6ボタンは既定折りたたみになったため、まず開く
+      const suggestConditionsToggleBtn = mpPage.getByRole('button', { name: '提案の条件', exact: false })
+      check(
+        'MEALPLAN-01(A-3) 提案の条件トグルは既定でaria-expanded=false',
+        (await suggestConditionsToggleBtn.getAttribute('aria-expanded')) === 'false',
+      )
+      await suggestConditionsToggleBtn.click()
+      await mpPage.waitForTimeout(200)
       const quickToggleBtn = mpPage.getByRole('button', { name: '自動提案は時短レシピ優先' })
       check('MEALPLAN-01(Fix5) 時短優先トグルは既定でaria-pressed=false', (await quickToggleBtn.getAttribute('aria-pressed')) === 'false')
       await quickToggleBtn.click()
@@ -2449,6 +2481,10 @@ try {
         'MEALPLAN-03 「まとめて献立を立てる」ボタンにアイコンが付く',
         (await fillWeekBtn.locator('svg').count()) > 0,
       )
+
+      // ジャンルチップ・高たんぱく優先は「提案の条件」トグルの中(2026-07-16 UI総点検A-3で既定折りたたみ化)。まず開く
+      await mp3Page.getByRole('button', { name: '提案の条件', exact: false }).click()
+      await mp3Page.waitForTimeout(200)
 
       // ジャンルチップ(指定なし/和食/洋食/中華)は単一選択
       const anyGenreBtn = mp3Page.getByRole('button', { name: '指定なし', exact: true })

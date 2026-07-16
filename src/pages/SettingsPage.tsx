@@ -566,7 +566,9 @@ export default function SettingsPage() {
 
       {/* タブ切り替え(2026-07-12オーナー実機フィードバック: 縦に長大化したため上部タブで分割)。
           2026-07-13 UI改善: スクロールしても上部に固定(sticky)する。settings-tabbarクラスは
-          index.cssでis-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している */}
+          index.cssでis-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している。
+          2026-07-16 UI総点検A-5: タップ領域が38pxしかなかったためpy-2.5→py-[13px]で44px相当に拡大
+          (バックアップタブの中身は別便が触っているためこのタブバー部分以外は変更しない) */}
       <div className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur">
         <div className="grid grid-cols-4 gap-1">
           {settingsTabs.map((tab) => (
@@ -575,7 +577,7 @@ export default function SettingsPage() {
               type="button"
               onClick={() => selectTab(tab.id)}
               aria-pressed={activeTab === tab.id}
-              className={`rounded-md border py-2.5 text-xs font-bold shadow-sm ${
+              className={`rounded-md border py-[13px] text-xs font-bold shadow-sm ${
                 activeTab === tab.id
                   ? 'border-accent bg-accent text-on-accent'
                   : 'border-edge bg-surface text-ink-muted'

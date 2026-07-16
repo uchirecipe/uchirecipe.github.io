@@ -39,9 +39,11 @@ import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { MemoText } from '../components/MemoText'
+import { renderJaUnits } from '../components/jaUnits'
 import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import BackHeader from '../components/BackHeader'
+import Toast from '../components/Toast'
 import CookedLogModal from '../components/CookedLogModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
@@ -88,10 +90,14 @@ export default function RecipeDetailPage() {
   // 出所はLinkのstate（{from:'todayList', fromPath}）で受け渡す。ブラウザの実際の戻る操作
   // （履歴のpop）は、この画面へ遷移してきた直前の画面へそのまま戻るため、上記の出所と
   // 基本的に一致し乖離しない（今日の献立からのリンクはpush遷移のため、実際の1つ前の
-  // 履歴エントリも呼び出し元と同じになる）
+  // 履歴エントリも呼び出し元と同じになる）。
+  // 2026-07-16オーナー決定: ホームの候補カード発はホームへ(2026-07-10の「常に一覧へ」の例外を追加)。
+  // todayList方式をそのまま流用し、from:'home'のときも同様にfromPathへ戻す
   const navState = location.state as { from?: string; fromPath?: string } | null
   const backFallback =
-    navState?.from === 'todayList' ? (navState.fromPath ?? '/meal-plan') : '/recipes'
+    navState?.from === 'todayList' || navState?.from === 'home'
+      ? (navState.fromPath ?? '/meal-plan')
+      : '/recipes'
 
   // undefined = 読み込み中 / null = 該当レシピなし、を区別する
   const recipe = useLiveQuery(async () => (await db.recipes.get(id)) ?? null, [id])
@@ -146,6 +152,10 @@ export default function RecipeDetailPage() {
   // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
   // 既定OFFのトグル表示に限定する。ページローカルな一時状態でよい(レシピを離れたらリセット)
   const [showPrices, setShowPrices] = useState(false)
+
+  // 完了トースト(2026-07-16 UI総点検A-4: 「記録する」後の無言完了への対応。
+  // 既存のToastコンポーネント+setMessageパターン(MealPlanPage等と同じ)を流用)
+  const [message, setMessage] = useState('')
 
   // 「作った！」記録の入力欄(2026-07-12: 窓表示化。中央固定のモーダルなので、
   // 開いたときにページ側をスクロールさせる必要がなくなった＝スクロール位置は動かない)
@@ -255,6 +265,8 @@ export default function RecipeDetailPage() {
     setLogOpen(false)
     setLogNote('')
     setLogPhoto(undefined)
+    // 2026-07-16 UI総点検A-4: 窓が閉じるだけの無言完了だったのでトーストで明示
+    setMessage(ja.detail.cookedRecordedToast)
   }
 
   const openEditLog = (index: number, date: string, note: string | undefined) => {
@@ -401,8 +413,13 @@ export default function RecipeDetailPage() {
         {/* タイトル（編集・お気に入りは上部のsticky ヘッダーに常時表示） */}
         <h1 className="text-2xl font-bold leading-snug">{recipe.title}</h1>
 
-        {/* ひとこと説明（任意。料理名だけでは中身が想像しにくい料理向け。2026-07-13） */}
-        {recipe.intro && <p className="mt-1 text-sm text-ink-muted">{recipe.intro}</p>}
+        {/* ひとこと説明（任意。料理名だけでは中身が想像しにくい料理向け。2026-07-13）。
+            2026-07-16 UI総点検A-8(改行監査の副次発見): 他フィールドと同じくwrapJaPhrases経由の
+            折返し制御(ja-phrase+renderJaUnits)を通す。素のテキスト描画のままZWSP制御が
+            効いていなかったため揃えた */}
+        {recipe.intro && (
+          <p className="ja-phrase mt-1 text-sm text-ink-muted">{renderJaUnits(recipe.intro)}</p>
+        )}
 
         {/* 時間・手間・概算価格 */}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-ink-muted">
@@ -967,6 +984,7 @@ export default function RecipeDetailPage() {
         onStart={startCustomTimer}
         onClose={() => setCustomTimerOpen(false)}
       />
+      <Toast message={message} onClose={() => setMessage('')} />
       {/* 記録写真の原寸表示(2026-07-12写真添付・docs/20 §4「タップで原寸モーダル」)。
           他の窓(CookedLogModal等)と同じ様式(角丸カード・枠線・shadow-md・中央寄せ、
           背景の暗幕は無し)に合わせる */}

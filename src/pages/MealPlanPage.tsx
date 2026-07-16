@@ -4,6 +4,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Dices,
   X,
   Search,
@@ -292,6 +294,8 @@ export default function MealPlanPage() {
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
   const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
   const [preferHighProtein, setPreferHighProtein] = useState(false)
+  // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3)。既定閉
+  const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const [message, setMessage] = useState('')
 
   // 「＋枠を追加」でUI上だけ増やした未割り当て行（date|slotキー→役割つきの一覧）。
@@ -569,6 +573,15 @@ export default function MealPlanPage() {
     )
   }
 
+  // 提案条件が既定値から変わっていれば、畳んだトグルのラベルにも現在値を出す
+  // (2026-07-16 UI総点検A-3: 「提案の条件: 和食」のように)
+  const activeConditionSummaries: (string | undefined)[] = [
+    quickOnly ? ja.mealPlan.quickOnlySummary : undefined,
+    genreFilter,
+    preferHighProtein ? ja.mealPlan.preferHighProteinToggle : undefined,
+  ]
+  const conditionsSummary = activeConditionSummaries.filter((v): v is string => Boolean(v)).join('・')
+
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.mealPlan.title}</h1>
@@ -584,7 +597,11 @@ export default function MealPlanPage() {
                 <TodayListRow
                   key={recipe.id}
                   recipe={recipe}
-                  onCooked={() => void markTodayListCooked(recipe.id!)}
+                  onCooked={() => {
+                    void markTodayListCooked(recipe.id!)
+                    // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
+                    setMessage(ja.mealPlan.todayCookedToast)
+                  }}
                   onRemove={() => void removeFromTodayList(recipe.id!)}
                 />
               ))}
@@ -834,57 +851,77 @@ export default function MealPlanPage() {
         ))}
       </div>
 
-      {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先 */}
+      {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
+          既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
+          畳んだ状態でも既定値から変わっていればラベルに現在値を出す */}
+      <div className="mt-[var(--space-sm)]">
+        <button
+          type="button"
+          onClick={() => setSuggestConditionsOpen((v) => !v)}
+          aria-expanded={suggestConditionsOpen}
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+        >
+          {ja.mealPlan.suggestConditionsToggle}
+          {!suggestConditionsOpen && conditionsSummary ? `: ${conditionsSummary}` : ''}
+          {suggestConditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
+        </button>
+
+        {suggestConditionsOpen && (
+          <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+            <button
+              type="button"
+              onClick={() => setQuickOnly((v) => !v)}
+              aria-pressed={quickOnly}
+              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                quickOnly ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.mealPlan.quickOnlyToggle}
+            </button>
+            <button
+              type="button"
+              onClick={() => setGenreFilter(undefined)}
+              aria-pressed={genreFilter === undefined}
+              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                genreFilter === undefined
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.mealPlan.genreAny}
+            </button>
+            {MEAL_GENRES.map((genre) => (
+              <button
+                key={genre}
+                type="button"
+                onClick={() => setGenreFilter(genre)}
+                aria-pressed={genreFilter === genre}
+                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                  genreFilter === genre
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-ink-muted'
+                }`}
+              >
+                {genre}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setPreferHighProtein((v) => !v)}
+              aria-pressed={preferHighProtein}
+              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                preferHighProtein
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.mealPlan.preferHighProteinToggle}
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-        <button
-          type="button"
-          onClick={() => setQuickOnly((v) => !v)}
-          aria-pressed={quickOnly}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            quickOnly ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.quickOnlyToggle}
-        </button>
-        <button
-          type="button"
-          onClick={() => setGenreFilter(undefined)}
-          aria-pressed={genreFilter === undefined}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            genreFilter === undefined
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.genreAny}
-        </button>
-        {MEAL_GENRES.map((genre) => (
-          <button
-            key={genre}
-            type="button"
-            onClick={() => setGenreFilter(genre)}
-            aria-pressed={genreFilter === genre}
-            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-              genreFilter === genre
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
-          >
-            {genre}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setPreferHighProtein((v) => !v)}
-          aria-pressed={preferHighProtein}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            preferHighProtein
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.preferHighProteinToggle}
-        </button>
         <button
           type="button"
           onClick={() => void fillWeek()}

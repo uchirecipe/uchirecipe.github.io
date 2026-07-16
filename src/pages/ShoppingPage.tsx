@@ -260,7 +260,7 @@ export default function ShoppingPage() {
           ) : (
             <ul className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
               {candidates.map((c, index) => (
-                <li key={c.name} className="flex items-center gap-2">
+                <li key={c.name} className="flex items-start gap-2">
                   <button
                     type="button"
                     onClick={() =>
@@ -277,19 +277,26 @@ export default function ShoppingPage() {
                   >
                     <CheckCircle2 size={18} aria-hidden />
                   </button>
-                  <span className="min-w-0 flex-1 truncate font-bold">{c.name}</span>
-                  <input
-                    type="text"
+                  <span className="min-w-0 flex-1 truncate pt-2 font-bold">{c.name}</span>
+                  <textarea
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = 'auto'
+                        el.style.height = `${el.scrollHeight}px`
+                      }
+                    }}
                     value={c.amount}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const value = e.target.value
                       setCandidates((prev) =>
-                        prev
-                          ? prev.map((row, i) => (i === index ? { ...row, amount: e.target.value } : row))
-                          : prev,
+                        prev ? prev.map((row, i) => (i === index ? { ...row, amount: value } : row)) : prev,
                       )
-                    }
+                      e.currentTarget.style.height = 'auto'
+                      e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`
+                    }}
                     placeholder={ja.shopping.amountPlaceholder}
-                    className="w-24 shrink-0 rounded-sm border border-edge bg-app px-2 py-2 text-sm text-ink"
+                    rows={1}
+                    className="w-24 shrink-0 resize-none overflow-hidden whitespace-pre-wrap break-words rounded-sm border border-edge bg-app px-2 py-2 text-sm text-ink leading-snug"
                   />
                 </li>
               ))}

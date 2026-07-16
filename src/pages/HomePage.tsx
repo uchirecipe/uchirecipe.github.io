@@ -55,6 +55,9 @@ function SuggestionCard({ recipe }: { recipe: Recipe }) {
   return (
     <Link
       to={`/recipes/${recipe.id}`}
+      // 2026-07-16オーナー決定: ホームの候補カードから詳細を開いて戻ったときはホームへ戻す
+      // (「今日の献立」ウィジェットと同じtodayList方式の拡張。RecipeDetailPageのbackFallback参照)
+      state={{ from: 'home', fromPath: '/' }}
       className="mt-[var(--space-sm)] flex items-center gap-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
     >
       <div className="h-20 w-20 shrink-0 overflow-hidden rounded-sm">
