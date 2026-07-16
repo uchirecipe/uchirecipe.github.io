@@ -3065,6 +3065,99 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   )
 }
 
+// ---------- appRefresh: 「アプリを更新する」ボタンの処理本体(2026-07-16新設) ----------
+// SWとキャッシュストレージだけ消してreloadする安全な機能。ブラウザの「Cookieと他のサイトデータ」
+// 削除でレシピ・購入コードを失った事故の再発防止として追加したため、IndexedDBには絶対に
+// 触れないことをここで固定する。
+{
+  const { refreshApp } = await import('../src/logic/appRefresh.ts')
+
+  // ソースコードにIndexedDB/Dexie関連の文字列が一切現れないこと(触れないことの静的な担保)
+  const appRefreshSrc = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/logic/appRefresh.ts'),
+    'utf-8',
+  )
+  eq(
+    'appRefreshはindexedDB/Dexie/db配下を一切importせず、indexedDBのプロパティアクセスもしない',
+    /from ['"]dexie['"]|from ['"]\.\.\/db|indexeddb\.\w/i.test(appRefreshSrc),
+    false,
+  )
+
+  // ケース1: Service Worker/Cache Storage/window未対応環境(素のNode)でも例外を投げず完了する
+  {
+    let threw = false
+    try {
+      await refreshApp()
+    } catch {
+      threw = true
+    }
+    eq('未対応環境でも例外を投げない', threw, false)
+  }
+
+  // ケース2: SW登録2件・キャッシュ2件がある環境で、両方とも解除・削除されreloadが呼ばれること。
+  // IndexedDBには絶対に触れないことも、呼んだら即例外を投げるダミーを仕込んで検証する
+  {
+    const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+    const unregisterCalls = []
+    const registrations = [
+      {
+        unregister: async () => {
+          unregisterCalls.push('reg1')
+          return true
+        },
+      },
+      {
+        unregister: async () => {
+          unregisterCalls.push('reg2')
+          return true
+        },
+      },
+    ]
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { serviceWorker: { getRegistrations: async () => registrations } },
+      configurable: true,
+    })
+
+    const deleteCalls = []
+    globalThis.caches = {
+      keys: async () => ['cache-a', 'cache-b'],
+      delete: async (key) => {
+        deleteCalls.push(key)
+        return true
+      },
+    }
+
+    let reloadCalls = 0
+    globalThis.window = { location: { reload: () => { reloadCalls++ } } }
+
+    globalThis.indexedDB = {
+      open: () => {
+        throw new Error('indexedDBに触れてはいけない(open)')
+      },
+      deleteDatabase: () => {
+        throw new Error('indexedDBに触れてはいけない(deleteDatabase)')
+      },
+    }
+
+    let threw = false
+    try {
+      await refreshApp()
+    } catch {
+      threw = true
+    }
+
+    eq('SW/キャッシュ削除・reloadで例外を投げない', threw, false)
+    eq('SW登録が全て解除される', unregisterCalls.sort(), ['reg1', 'reg2'])
+    eq('キャッシュが全て削除される', deleteCalls.sort(), ['cache-a', 'cache-b'])
+    eq('reloadが呼ばれる', reloadCalls, 1)
+
+    delete globalThis.caches
+    delete globalThis.window
+    delete globalThis.indexedDB
+    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

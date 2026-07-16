@@ -816,6 +816,18 @@ try {
     'SETTINGS-TAB-01 「バックアップ」タブで書き出しボタンが見える',
     (await page.textContent('body')).includes('ファイルに書き出す'),
   )
+  // REFRESH-APP-01: 「アプリを更新する」ボタン(2026-07-16新設。SWとキャッシュだけ消してリロード
+  // する安全機能)がバックアップタブに存在し、データは消えない旨の説明文があること。
+  // 実際のSW解除・reloadはheadlessでの副作用が大きいため、ボタンとconfirm文言の存在確認までとし、
+  // クリックはしない(refreshApp()自体はscripts/test-logic.mjsのモックテストで検証済み)。
+  check(
+    'REFRESH-APP-01 「アプリを更新する」ボタンが見える',
+    (await page.textContent('body')).includes('アプリを更新する'),
+  )
+  check(
+    'REFRESH-APP-01 説明文に「データは消えません」相当がある',
+    (await page.textContent('body')).includes('データは消えません'),
+  )
   await page.getByRole('button', { name: 'Pro・パック', exact: true }).click()
   await page.waitForTimeout(200)
   check(
