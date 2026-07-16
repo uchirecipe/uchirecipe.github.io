@@ -1,7 +1,8 @@
-// docs/12_基本レシピ増枠_原稿.md を解析し、レビュー用のレシピセットJSON(setIdなし=課金ゲート対象外)を生成する。
+// 各原稿を解析し、レビュー用のレシピセットJSON(setId/setName付き。2026-07-16修正1)を生成する。
 // 最終実装用ではなく、ユーザーが開発環境のアプリ上で内容を確認するためのレビューコピー
-// (開発サーバー起動中に #/settings?set=review を開くとワンタップで41品取り込める)。
-// 出力先はgitignore済みで、本番には決して混入しない。lint-recipes.mjsもこのJSONを自動で対象に含める。
+// (開発サーバー起動中に #/settings?set=review8 のように開くとワンタップで取り込める)。
+// setId付きのため課金ゲート(hasPaidRecipeAccess)の対象になる(Pro解錠済みのオーナーのみ使う下見用途・
+// 一般公開リンクは無いため問題ない)。lint-recipes.mjsもこのJSONを自動で対象に含める。
 // 実行: npx tsx scripts/build-review-pack.mjs
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
@@ -10,10 +11,29 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 対象原稿: docs/18(第8弾+だし→review8.json)・docs/19(第2弾)・docs/21(第16弾)。同じ記法なのでまとめて生成する
 // (docs/12は2026-07-12に本体へ実装済みのためTARGETSから除外・review.jsonも削除)
+// setId/setName(2026-07-16オーナー指示・修正1): レビューセットにも識別を付与し、取り込み後に
+// テーマ名バッジ表示(sourceSetName)と「テーマごと削除」を使えるようにする。
+// setIdが付くと課金ゲート(hasPaidRecipeAccess)の対象になるが、レビュー用途(下見・一般公開リンクなし)
+// で使うのはPro解錠済みのオーナーのみのため問題ない
 const TARGETS = [
-  { doc: '18_第8弾_夏のさっぱり和食_原稿.md', out: 'review8.json' },
-  { doc: '19_第2弾_がまんしないダイエットごはん_原稿.md', out: 'review2.json' },
-  { doc: '21_第16弾_下味冷凍_原稿.md', out: 'review16.json' },
+  {
+    doc: '18_第8弾_夏のさっぱり和食_原稿.md',
+    out: 'review8.json',
+    setId: 'review8',
+    setName: '【下見】第8弾 夏のさっぱり和食',
+  },
+  {
+    doc: '19_第2弾_がまんしないダイエットごはん_原稿.md',
+    out: 'review2.json',
+    setId: 'review2',
+    setName: '【下見】第2弾 がまんしないダイエットごはん',
+  },
+  {
+    doc: '21_第16弾_下味冷凍_原稿.md',
+    out: 'review16.json',
+    setId: 'review16',
+    setName: '【下見】第16弾 下味冷凍・まとめ作り置き',
+  },
 ]
 
 // 「### 1. タイトル」〜次の「### 」または「## 」の手前までを1レシピブロックとする
@@ -211,7 +231,8 @@ for (const target of TARGETS) {
     app: 'uchi-recipe',
     version: 1,
     exportedAt: new Date().toISOString(),
-    // setIdをあえて付けない: 課金ゲート(hasPaidRecipeAccess)の対象外にするため(レビュー専用)
+    setId: target.setId,
+    setName: target.setName,
     recipes,
   }
 
