@@ -75,6 +75,7 @@ import {
   pickDisplayIngredientChips,
 } from '../src/logic/mainIngredients.ts'
 import { searchRecipes } from '../src/logic/search.ts'
+import { buildShareText } from '../src/logic/share.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 import { pickIconKey } from '../src/logic/icon.ts'
 import { starterDefs, buildUpdatedStarterRecipe, planStarterReload } from '../src/db/starters.ts'
@@ -3479,6 +3480,142 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     delete globalThis.window
     if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
   }
+}
+
+// ---------- buildShareText(シェアの選択式・2026-07-16 Fable裁定docs/30裁定3) ----------
+// 回帰の狙い: opts省略時の出力を従来形式(2026-07-17時点)に固定する。固定部分(料理名・人数分・
+// 材料8件+…ほか・#アプリ名・URL)は従来とバイト単位で同一。「作り方は全◯ステップ」行だけは
+// 裁定3の字義解釈(オーナーの固定項目列挙に無い)で意図的に削除済み＝期待値にも含めない。
+{
+  const shareRecipe = {
+    id: 1,
+    title: '肉じゃが',
+    servings: 2,
+    cookMinutes: 30,
+    effortLevel: 'normal',
+    tags: [],
+    ingredients: [
+      { name: '牛こま切れ肉', amount: '200', unit: 'g' },
+      { name: 'じゃがいも', amount: '3', unit: '個' },
+      { name: '玉ねぎ', amount: '1', unit: '個' },
+      { name: 'にんじん', amount: '1', unit: '本' },
+      { name: 'しらたき', amount: '1', unit: '袋' },
+      { name: 'サラダ油', amount: '1', unit: '大さじ' },
+      { name: '砂糖', amount: '2', unit: '大さじ' },
+      { name: 'しょうゆ', amount: '3', unit: '大さじ' },
+      { name: '水', amount: '300', unit: 'ml' },
+    ],
+    steps: [{ text: '切る' }, { text: '炒める' }, { text: '煮る' }],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+  }
+
+  const expectedDefault = [
+    '肉じゃが（2人分）',
+    '',
+    '【材料】',
+    '・牛こま切れ肉 200g',
+    '・じゃがいも 3個',
+    '・玉ねぎ 1個',
+    '・にんじん 1本',
+    '・しらたき 1袋',
+    '・サラダ油 大さじ1',
+    '・砂糖 大さじ2',
+    '・しょうゆ 大さじ3',
+    '…ほか',
+    '',
+    '#うちレシピ',
+    'https://uchirecipe.com/',
+  ].join('\n')
+  eq('share: opts省略は従来出力と一致(材料8件+…ほか・ステップ行なし)', buildShareText(shareRecipe), expectedDefault)
+
+  // 全項目OFF(既定はテキストに任意行なし)のoptsを渡してもopts省略と同じ出力になる。
+  // 「レシピ画像」は画像カード専用オプションで、テキスト出力には一切影響しない(仕様の※併記)
+  const offOpts = { image: false, cookMinutes: false, cost: false, nutrition: false, allIngredients: false }
+  eq('share: 全OFFのoptsはopts省略と同一', buildShareText(shareRecipe, offOpts), expectedDefault)
+  eq('share: 画像ONはテキストに影響しない(画像カード専用)', buildShareText(shareRecipe, { ...offOpts, image: true }), expectedDefault)
+
+  // 組合せ1: 調理時間ON → 料理名行の直後に「調理時間 約◯分」が入る
+  const expectedWithCook = expectedDefault.replace(
+    '肉じゃが（2人分）\n\n【材料】',
+    '肉じゃが（2人分）\n調理時間 約30分\n\n【材料】',
+  )
+  eq('share: 調理時間ONで行が入る', buildShareText(shareRecipe, { ...offOpts, cookMinutes: true }), expectedWithCook)
+  // 調理時間のデータが無いレシピではONを渡しても行が出ない(グレーアウトの防波堤)
+  eq(
+    'share: 調理時間なしレシピはONでも行なし',
+    buildShareText({ ...shareRecipe, cookMinutes: undefined }, { ...offOpts, cookMinutes: true }),
+    expectedDefault,
+  )
+
+  // 組合せ2: 原価ON → 登録人数基準の1人分/全量(実数値はRecipeDetailPage側が渡す)
+  const expectedWithCost = expectedDefault.replace(
+    '肉じゃが（2人分）\n\n【材料】',
+    '肉じゃが（2人分）\n原価 1人分 約210円／全量（2人分） 約420円\n\n【材料】',
+  )
+  eq(
+    'share: 原価ONで1人分/全量の行が入る',
+    buildShareText(shareRecipe, { ...offOpts, cost: true, costPerServingYen: 210, costTotalYen: 420 }),
+    expectedWithCost,
+  )
+  // 実数値が渡されなければ(合計0円等)ONでも行が出ない
+  eq('share: 原価の実数値なしはONでも行なし', buildShareText(shareRecipe, { ...offOpts, cost: true }), expectedDefault)
+
+  // 組合せ3: 栄養ON → カロリー・塩分の2項目のみ+「めやす」表記必須
+  const expectedWithNutrition = expectedDefault.replace(
+    '肉じゃが（2人分）\n\n【材料】',
+    '肉じゃが（2人分）\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n\n【材料】',
+  )
+  eq(
+    'share: 栄養ONでカロリー・塩分(めやす)の行が入る',
+    buildShareText(shareRecipe, { ...offOpts, nutrition: true, kcalPerServing: 498, saltPerServing: 4.1 }),
+    expectedWithNutrition,
+  )
+  eq('share: 栄養の実数値なしはONでも行なし', buildShareText(shareRecipe, { ...offOpts, nutrition: true }), expectedDefault)
+
+  // 組合せ4: 材料をすべて載せる → 9件全部が並び「…ほか」は消える
+  const expectedAll = [
+    '肉じゃが（2人分）',
+    '',
+    '【材料】',
+    '・牛こま切れ肉 200g',
+    '・じゃがいも 3個',
+    '・玉ねぎ 1個',
+    '・にんじん 1本',
+    '・しらたき 1袋',
+    '・サラダ油 大さじ1',
+    '・砂糖 大さじ2',
+    '・しょうゆ 大さじ3',
+    '・水 300ml',
+    '',
+    '#うちレシピ',
+    'https://uchirecipe.com/',
+  ].join('\n')
+  eq('share: 材料をすべて載せる', buildShareText(shareRecipe, { ...offOpts, allIngredients: true }), expectedAll)
+
+  // 全部ON: 任意行の順序は 調理時間→原価→栄養(仕様のモーダル並び順と同じ)
+  const expectedFull = expectedAll.replace(
+    '肉じゃが（2人分）\n\n【材料】',
+    '肉じゃが（2人分）\n調理時間 約30分\n原価 1人分 約210円／全量（2人分） 約420円\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n\n【材料】',
+  )
+  eq(
+    'share: 全部ONの行順は調理時間→原価→栄養',
+    buildShareText(shareRecipe, {
+      image: true,
+      cookMinutes: true,
+      cost: true,
+      nutrition: true,
+      allIngredients: true,
+      costPerServingYen: 210,
+      costTotalYen: 420,
+      kcalPerServing: 498,
+      saltPerServing: 4.1,
+    }),
+    expectedFull,
+  )
 }
 
 // ---------- 結果 ----------

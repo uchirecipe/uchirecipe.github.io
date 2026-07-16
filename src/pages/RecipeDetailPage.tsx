@@ -14,7 +14,6 @@ import {
   Share2,
   Image as ImageIcon,
   Camera,
-  MessageSquareText,
   Maximize2,
   CalendarPlus,
   JapaneseYen,
@@ -35,7 +34,12 @@ import {
   normalizeIngredientNameForPrice,
 } from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
-import { shareText, shareImageCard } from '../logic/share'
+import { shareText, shareImageCard, type ShareOptions } from '../logic/share'
+import {
+  NUTRITION_TEASER_ENABLED,
+  computeRecipeNutrition,
+  roundNutrient,
+} from '../logic/nutrition'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -47,6 +51,7 @@ import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
 import CookedLogModal, { LOG_PHOTO_MAX_EDGE, LOG_PHOTO_QUALITY } from '../components/CookedLogModal'
 import TodaySlotModal from '../components/TodaySlotModal'
+import ShareModal, { type ShareSelection } from '../components/ShareModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import NutritionTeaser from '../components/NutritionTeaser'
@@ -226,7 +231,7 @@ export default function RecipeDetailPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [viewingLogPhoto])
 
-  // シェア
+  // シェア(2026-07-16 裁定3: インライン2ボタン→選択モーダルに変更)
   const [shareOpen, setShareOpen] = useState(false)
   const [shareMessage, setShareMessage] = useState('')
   const [sharing, setSharing] = useState(false)
@@ -249,6 +254,13 @@ export default function RecipeDetailPage() {
   // 食材価格マスタの照合用索引（未入力の材料の概算・目安価格由来の注記の両方で使う）。
   // 早期returnより前に置く(フックはレンダーのたびに同じ順で呼ぶ必要があるため)
   const priceIndex = useMemo(() => buildPriceIndex(priceEntries ?? []), [priceEntries])
+
+  // シェア選択モーダル用の栄養概算(2026-07-16 裁定3)。モーダルを開いたときだけ計算する。
+  // グレーアウト判定(計算対象0件)と、選択時にshare.tsへ渡す実数値の両方に使う
+  const shareNutrition = useMemo(
+    () => (shareOpen && recipe ? computeRecipeNutrition(recipe) : null),
+    [shareOpen, recipe],
+  )
 
   if (recipe === undefined) {
     // 読み込み中(undefined)は何も出さない。id が存在しない場合は下の分岐へ
@@ -363,16 +375,35 @@ export default function RecipeDetailPage() {
     setEditingLogPhotoError('')
   }
 
-  /** テキスト or 画像カードでシェア（非対応環境ではコピー/保存に切替） */
-  const runShare = async (kind: 'text' | 'image') => {
+  // シェアの選択式(2026-07-16 裁定3)のグレーアウト判定。モーダルを開いた時点の値で確定する
+  const shareCookMinutesAvailable = recipe.cookMinutes != null && recipe.cookMinutes > 0
+  const shareCostAvailable = totalPrice > 0
+  const shareNutritionAvailable = (shareNutrition?.items.length ?? 0) > 0
+
+  /** テキスト or 画像カードでシェア（非対応環境ではコピー/保存に切替）。
+   *  selection(モーダルの選択)に、原価・栄養の実数値を詰めてshare.tsへ渡す
+   *  (share.tsは純ロジック=Dexie/priceIndex持ち込み禁止のため、値はこちらで確定させる)。
+   *  原価・1人分とも登録人数(recipe.servings)基準=原価ビュー(裁定1)と同値 */
+  const runShare = async (kind: 'text' | 'image', selection: ShareSelection) => {
     setSharing(true)
     setShareMessage(kind === 'image' ? ja.share.generating : '')
+    const opts: ShareOptions = {
+      ...selection,
+      costTotalYen: shareCostAvailable ? totalPrice : undefined,
+      costPerServingYen: shareCostAvailable ? costPerServingRegistered : undefined,
+      kcalPerServing: shareNutritionAvailable
+        ? roundNutrient('kcal', shareNutrition!.perServing.kcal)
+        : undefined,
+      saltPerServing: shareNutritionAvailable
+        ? roundNutrient('saltG', shareNutrition!.perServing.saltG)
+        : undefined,
+    }
     try {
       if (kind === 'text') {
-        const result = await shareText(recipe)
+        const result = await shareText(recipe, opts)
         setShareMessage(result === 'copied' ? ja.share.copied : '')
       } else {
-        const result = await shareImageCard(recipe)
+        const result = await shareImageCard(recipe, opts)
         setShareMessage(result === 'downloaded' ? ja.share.downloaded : '')
       }
       if (navigator.share !== undefined) setShareOpen(false)
@@ -1027,36 +1058,9 @@ export default function RecipeDetailPage() {
           </section>
         )}
 
-        {/* シェア（テキスト / 画像カード） */}
-        {shareOpen && (
-          <div className="mt-[var(--space-lg)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={sharing}
-                onClick={() => runShare('text')}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
-              >
-                <MessageSquareText size={20} aria-hidden />
-                {ja.share.textOption}
-              </button>
-              <button
-                type="button"
-                disabled={sharing}
-                onClick={() => runShare('image')}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
-              >
-                <ImageIcon size={20} aria-hidden />
-                {ja.share.imageOption}
-              </button>
-            </div>
-            {shareMessage && (
-              <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{shareMessage}</p>
-            )}
-          </div>
-        )}
-
-        {/* 下部の大ボタン: 作った！ / シェア（編集はタイトル付近に移動済み） */}
+        {/* 下部の大ボタン: 作った！ / シェア（編集はタイトル付近に移動済み）。
+            シェアは以前ここにインラインの2ボタンパネルを展開していたが、2026-07-16 裁定3で
+            「何を載せるか」を選べる選択モーダル(ShareModal)に変更した */}
         <div className="mt-[var(--space-sm)] flex gap-2">
           <button
             type="button"
@@ -1075,9 +1079,9 @@ export default function RecipeDetailPage() {
             type="button"
             onClick={() => {
               setShareMessage('')
-              setShareOpen((open) => !open)
+              setShareOpen(true)
             }}
-            aria-expanded={shareOpen}
+            aria-haspopup="dialog"
             aria-label={ja.share.button}
             className="flex items-center justify-center rounded-md border border-edge bg-surface px-4 py-4 font-bold text-accent shadow-sm"
           >
@@ -1122,6 +1126,19 @@ export default function RecipeDetailPage() {
           setLogOpen(false)
           setLogPhoto(undefined)
         }}
+      />
+      {/* シェアの選択式モーダル(2026-07-16 裁定3)。栄養行はNUTRITION_TEASER_ENABLED=falseなら
+          行ごと非表示(緊急停止フラグと連動)。選択は開くたび既定値に初期化・永続化しない */}
+      <ShareModal
+        open={shareOpen}
+        cookMinutesAvailable={shareCookMinutesAvailable}
+        costAvailable={shareCostAvailable}
+        nutritionRowVisible={NUTRITION_TEASER_ENABLED}
+        nutritionAvailable={shareNutritionAvailable}
+        sharing={sharing}
+        message={shareMessage}
+        onShare={(kind, selection) => void runShare(kind, selection)}
+        onClose={() => setShareOpen(false)}
       />
       <CustomTimerModal
         open={customTimerOpen}
