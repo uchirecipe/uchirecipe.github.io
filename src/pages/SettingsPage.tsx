@@ -73,6 +73,10 @@ const homeWidgetLabels: Record<HomeWidgetKey, string> = {
 const sectionCls =
   'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
 
+// 全般タブの小見出し(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理)。
+// 既存のセクション見出しパターン(RecipesPageの絞り込みパネル等)に合わせ、小さめの text-sm font-bold
+const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
+
 // Wake Lock API非対応環境（'wakeLock' in navigator が false）かどうか。
 // 画面が消えない系トグルの説明の下に注記を出すために使う(useWakeLock.tsのロジック自体は変更しない)
 const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
@@ -599,6 +603,85 @@ export default function SettingsPage() {
 
       {activeTab === 'basic' && (
         <>
+          {/* 見た目(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理。
+              テーマカラーを全般タブの最上部へ移動。並びとグループ見出しのみでカードの中身は変更しない) */}
+          <p className={groupHeadingCls}>{ja.settings.groupAppearanceTitle}</p>
+
+          {/* テーマカラー(旧「テーマ」。2026-07-16 UI総点検B-1: レシピ側「テーマ一覧」との用語衝突のため改名) */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.themeTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.themeDescription}</p>
+            <div className="mt-[var(--space-sm)] grid grid-cols-4 gap-[var(--space-sm)]">
+              {themeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updateSettings({ theme: option.value })}
+                  className={`rounded-md border py-3 font-bold shadow-sm ${
+                    settings.theme === option.value
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* ホーム画面のカスタマイズ */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.homeWidgetsTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.homeWidgetsDescription}</p>
+            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+              {homeWidgets.map((key, index) => (
+                <li key={key} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
+                  <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
+                  <button
+                    type="button"
+                    onClick={() => moveHomeWidget(index, -1)}
+                    disabled={index === 0}
+                    aria-label={ja.settings.homeWidgetMoveUp}
+                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+                  >
+                    <ChevronUp size={18} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveHomeWidget(index, 1)}
+                    disabled={index === homeWidgets.length - 1}
+                    aria-label={ja.settings.homeWidgetMoveDown}
+                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+                  >
+                    <ChevronDown size={18} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => hideHomeWidget(key)}
+                    className="rounded-sm border border-edge px-2 py-1 text-xs font-bold text-ink-muted"
+                  >
+                    {ja.settings.homeWidgetHide}
+                  </button>
+                </li>
+              ))}
+              {hiddenHomeWidgets.map((key) => (
+                <li key={key} className="flex items-center gap-2 px-[var(--space-sm)] py-2 opacity-60">
+                  <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
+                  <button
+                    type="button"
+                    onClick={() => showHomeWidget(key)}
+                    className="rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent"
+                  >
+                    {ja.settings.homeWidgetShow}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* 食材と価格 */}
+          <p className={groupHeadingCls}>{ja.settings.groupIngredientsTitle}</p>
+
           {/* NG食材 */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.ngTitle}</h2>
@@ -689,6 +772,9 @@ export default function SettingsPage() {
             />
           </section>
 
+          {/* 料理中 */}
+          <p className={groupHeadingCls}>{ja.settings.groupCookingTitle}</p>
+
           {/* 画面を暗くしない */}
           <section className={sectionCls}>
             <label className="flex items-center justify-between gap-3">
@@ -775,77 +861,8 @@ export default function SettingsPage() {
             </label>
           </section>
 
-          {/* テーマ */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.themeTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.themeDescription}</p>
-            <div className="mt-[var(--space-sm)] grid grid-cols-4 gap-[var(--space-sm)]">
-              {themeOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updateSettings({ theme: option.value })}
-                  className={`rounded-md border py-3 font-bold shadow-sm ${
-                    settings.theme === option.value
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          {/* ホーム画面のカスタマイズ */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.homeWidgetsTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.homeWidgetsDescription}</p>
-            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-              {homeWidgets.map((key, index) => (
-                <li key={key} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
-                  <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
-                  <button
-                    type="button"
-                    onClick={() => moveHomeWidget(index, -1)}
-                    disabled={index === 0}
-                    aria-label={ja.settings.homeWidgetMoveUp}
-                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                  >
-                    <ChevronUp size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveHomeWidget(index, 1)}
-                    disabled={index === homeWidgets.length - 1}
-                    aria-label={ja.settings.homeWidgetMoveDown}
-                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                  >
-                    <ChevronDown size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => hideHomeWidget(key)}
-                    className="rounded-sm border border-edge px-2 py-1 text-xs font-bold text-ink-muted"
-                  >
-                    {ja.settings.homeWidgetHide}
-                  </button>
-                </li>
-              ))}
-              {hiddenHomeWidgets.map((key) => (
-                <li key={key} className="flex items-center gap-2 px-[var(--space-sm)] py-2 opacity-60">
-                  <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
-                  <button
-                    type="button"
-                    onClick={() => showHomeWidget(key)}
-                    className="rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent"
-                  >
-                    {ja.settings.homeWidgetShow}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {/* その他 */}
+          <p className={groupHeadingCls}>{ja.settings.groupOtherTitle}</p>
 
           {/* アプリについて(区分表に明示は無いが、汎用の基本タブ末尾に置く) */}
           <section className={sectionCls}>

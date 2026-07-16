@@ -10,6 +10,8 @@ import {
   HardDriveDownload,
   Refrigerator,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   CalendarDays,
   Megaphone,
   X,
@@ -94,6 +96,9 @@ export default function HomePage() {
   const settings = useSettings()
 
   const [condition, setCondition] = useState<SuggestCondition>('any')
+  // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
+  // MealPlanPage「提案の条件」と同じパターン)
+  const [conditionsOpen, setConditionsOpen] = useState(false)
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
   const [query, setQuery] = useState('')
@@ -210,17 +215,15 @@ export default function HomePage() {
             ))}
           </ul>
         ) : (
-          <div className="mt-[var(--space-sm)] text-center">
-            <p className="text-sm text-ink-muted">{ja.home.mealPlanEmpty}</p>
-            <div className="mt-2 flex justify-center gap-3">
-              <Link to="/recipes" className="text-sm font-bold text-accent underline">
-                {ja.home.mealPlanGoRecipes}
-              </Link>
-              <Link to="/meal-plan" className="text-sm font-bold text-accent underline">
-                {ja.home.mealPlanGoTo}
-              </Link>
-            </div>
-          </div>
+          // 空のとき: 従来の中央寄せブロック(見出し+リンク2つ)を1行の薄い表示に縮小
+          // (2026-07-16 UI総点検B-3/B-6オーナー決定: 入口2系統の重複感を緩和。候補カードを主役にする。
+          // 「献立を決める」リンクは削除確定=このウィジェットからは「レシピを探す」だけ残す)
+          <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+            {ja.home.mealPlanEmpty}
+            <Link to="/recipes" className="ml-2 font-bold text-accent underline">
+              {ja.home.mealPlanGoRecipes}
+            </Link>
+          </p>
         )}
       </section>
     ),
@@ -240,22 +243,43 @@ export default function HomePage() {
           </div>
         ) : (
           <>
-            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-              {conditions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setCondition(option.value)}
-                  className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                    condition === option.value
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-              {pantryNames.length > 0 && (
+            {/* 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5)。既定閉。畳んだ状態でも
+                既定値(すべて)から変えていればラベルに現在値を出す(MealPlanPage「提案の条件」と同じパターン) */}
+            <div className="mt-[var(--space-sm)]">
+              <button
+                type="button"
+                onClick={() => setConditionsOpen((v) => !v)}
+                aria-expanded={conditionsOpen}
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+              >
+                {ja.home.conditionsToggle}
+                {!conditionsOpen && condition !== 'any'
+                  ? `: ${conditions.find((c) => c.value === condition)?.label}`
+                  : ''}
+                {conditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
+              </button>
+              {conditionsOpen && (
+                <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                  {conditions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setCondition(option.value)}
+                      className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                        condition === option.value
+                          ? 'border-accent bg-accent text-on-accent'
+                          : 'border-edge bg-surface text-ink-muted'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {pantryNames.length > 0 && (
+              <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
                 <button
                   type="button"
                   onClick={() => setPantryOnly((v) => !v)}
@@ -268,8 +292,8 @@ export default function HomePage() {
                   <Refrigerator size={14} aria-hidden />
                   {ja.home.pantryOnlyToggle}
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
             {pantryFallback && (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
@@ -416,7 +440,8 @@ export default function HomePage() {
         </Link>
       )}
 
-      {/* 検索バー（常時表示） */}
+      {/* 検索バー（常時表示）。「検索」テキストボタンは削除確定(2026-07-16 UI総点検B-6)。
+          虫眼鏡アイコン(装飾)とEnter押下での送信(下記onSubmit)は維持する */}
       <form
         className="mt-[var(--space-md)] flex gap-[var(--space-sm)]"
         onSubmit={(e) => {
@@ -438,12 +463,6 @@ export default function HomePage() {
             className="w-full rounded-md border border-edge bg-surface py-3 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
           />
         </div>
-        <button
-          type="submit"
-          className="shrink-0 rounded-md bg-accent px-4 font-bold text-on-accent shadow-sm"
-        >
-          {ja.home.searchButton}
-        </button>
       </form>
 
       {/* カスタマイズ可能なパーツ（設定でオン・オフ＆並べ替え） */}

@@ -1566,7 +1566,7 @@ try {
         (await obPage.textContent('body')).includes('10件追加しました'),
       )
 
-      // 2) 収録品の1つ(漬けるだけ味玉)を「今日つくる」に追加し、そのidを控える
+      // 2) 収録品の1つ(漬けるだけ味玉)を「今日の献立に追加」ボタンで追加し、そのidを控える
       await obPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await obPage.waitForTimeout(600)
       await obPage.locator('input[type="search"]').fill('漬けるだけ味玉')
@@ -1574,7 +1574,7 @@ try {
       await obPage.getByText('漬けるだけ味玉', { exact: true }).first().click()
       await obPage.waitForTimeout(500)
       const targetRecipeId = Number(obPage.url().match(/#\/recipes\/(\d+)/)?.[1])
-      await obPage.getByRole('button', { name: '今日つくる' }).click()
+      await obPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
 
       // 3) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
@@ -1674,16 +1674,16 @@ try {
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // 基本レシピ2品(肉じゃが・カレーライス)を「今日つくる」に追加する
+      // 基本レシピ2品(肉じゃが・カレーライス)を「今日の献立に追加」ボタンで追加する
       await taPage.getByText('肉じゃが', { exact: true }).first().click()
       await taPage.waitForTimeout(500)
-      await taPage.getByRole('button', { name: '今日つくる' }).click()
+      await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(500)
       await taPage.getByText('カレーライス', { exact: true }).first().click()
       await taPage.waitForTimeout(500)
-      await taPage.getByRole('button', { name: '今日つくる' }).click()
+      await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
 
       await taPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
