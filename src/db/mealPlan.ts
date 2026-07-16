@@ -38,6 +38,26 @@ export async function removeMealEntry(entryId: number): Promise<void> {
 }
 
 /**
+ * 指定期間のうち、指定した食事帯（例: 朝食）のエントリだけをまとめて削除する。
+ * 週タブの「この帯の今週分を空にする」用（2026-07-16 便U-4 Fable設計:
+ * 「朝のみ削除したい」というオーナー要望への回答。帯を選んで確認ダイアログを経てから
+ * 呼び出す想定）。他の帯・他の日付には影響しない
+ */
+export async function clearMealSlotInRange(
+  startDate: string,
+  endDate: string,
+  slot: MealSlot,
+): Promise<void> {
+  const rows = await db.mealPlans
+    .where('date')
+    .between(startDate, endDate, true, true)
+    .and((e) => e.slot === slot)
+    .toArray()
+  const ids = rows.map((r) => r.id).filter((id): id is number => id != null)
+  if (ids.length > 0) await db.mealPlans.bulkDelete(ids)
+}
+
+/**
  * その日・枠の「主菜」を設定する（無ければ追加、あれば差し替え）。役割未設定の
  * 既存データも主菜として扱う（後方互換）。「今日の献立」との食い違い解消チップなど、
  * 役割を意識せず「この枠にこのレシピ」を素早く設定したい場面向けの簡易ヘルパー

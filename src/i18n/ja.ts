@@ -113,6 +113,9 @@ export const ja = {
     prevWeek: '前の週',
     nextWeek: '次の週',
     thisWeek: '今週へ戻る',
+    // 3タブ構成(2026-07-16 便U-1 Fable設計: 現行の「今日セクション+週/月切替」を
+    // ページ上部の「日」「週」「月」タブに再構成)
+    viewDay: '日',
     viewWeek: '週',
     viewMonth: '月',
     monthTitle: '月間の献立',
@@ -121,8 +124,21 @@ export const ja = {
     thisMonth: '今月へ戻る',
     monthDayHasPlan: '献立あり',
     monthProGateTitle: '月間表示はPro版の機能です',
-    monthProGateDescription: '1か月分の献立をカレンダーでまとめて見渡せます。日付をタップすると、その週の献立にすぐ移動できます。',
+    monthProGateDescription: '1か月分の献立をカレンダーでまとめて見渡せます。日付をタップすると、その日の献立を確認できます。',
     monthProGateLink: 'Pro版について見る',
+    // 日タブの食事帯選択の補足文(便U-2)。visibleMealSlotsは週タブの表示帯フィルタと共通の設定値
+    daySlotFilterHint: '選んだ帯の今週の予定を、自動で今日の献立に取り込みます',
+    // 週タブ「この帯の今週分を空にする」(便U-4 Fable設計。「朝のみ削除したい」への回答)
+    clearWeekSlotTitle: 'この帯の今週分を空にする',
+    clearWeekSlotTargetAria: '空にする帯として{slot}を選ぶ',
+    clearWeekSlotButton: '空にする',
+    clearWeekSlotConfirm: '{slot}の今週の登録をすべて削除します。よろしいですか？',
+    clearWeekSlotDone: '{slot}の今週分を削除しました',
+    // 月タブの日タップモーダル(便U-5 Fable設計。従来の即週ジャンプを廃止しモーダル内の
+    // ボタンへ移動。「突然週に飛ばされる」問題の解消)
+    monthDayModalTitle: '{m}月{d}日の献立',
+    monthDayModalEmpty: '献立はありません',
+    monthDayModalOpenWeek: 'この週を開く',
     dow: ['月', '火', '水', '木', '金', '土', '日'] as string[],
     slot: {
       breakfast: '朝食',
