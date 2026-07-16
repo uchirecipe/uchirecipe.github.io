@@ -537,7 +537,21 @@ export const ja = {
     generating: '画像を作成中…',
     failed: 'シェアできませんでした',
     moreIngredients: '…ほか',
-    textTemplate: '{title}（{servings}人分）\n\n【材料】\n{ingredients}\n\n作り方は全{steps}ステップ\n#{app}\nhttps://{url}/',
+    // シェアの選択式モーダル(2026-07-16 Fable裁定docs/30裁定3)。
+    // 「作り方は全◯ステップ」行はオーナーの固定項目列挙に無いため削除(字義解釈・オーナー報告事項)。
+    // {lines}には選択された任意行(調理時間/原価/栄養)が「行+改行」の形で入る(無選択なら空文字=従来形式)
+    textTemplate: '{title}（{servings}人分）\n{lines}\n【材料】\n{ingredients}\n\n#{app}\nhttps://{url}/',
+    dialogTitle: 'シェアする内容',
+    alwaysIncluded: '料理名・人数分・材料（最初の8件）はいつも入ります',
+    optImage: 'レシピ画像（写真またはアイコン）',
+    optImageCardOnly: '※画像カードのみ',
+    optCookMinutes: '調理時間',
+    optCost: '原価',
+    optNutrition: '1食あたりのカロリー・塩分（めやす）',
+    optAllIngredients: '材料をすべて載せる',
+    lineCookMinutes: '調理時間 約{n}分',
+    lineCost: '原価 1人分 約{n}円／全量（{s}人分） 約{m}円',
+    lineNutrition: '1食あたり 約{kcal}kcal・塩分 約{salt}g（めやす）',
   },
   form: {
     newTitle: 'レシピを登録',

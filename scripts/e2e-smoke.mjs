@@ -169,6 +169,17 @@
 //         書き換わっていないこと(b)自作レシピを新規登録→編集でタイトルを変更→
 //         「前回保存した内容に戻す」(自作は文言がスターターと異なる)で保存済みタイトルに
 //         戻ることを確認)。
+//         SHARE-01(シェアの選択式モーダル・2026-07-16 Fable裁定docs/30 裁定3【シェアの選択式】。
+//         詳細下部のシェアボタンで旧インライン2ボタンパネルではなく選択モーダルが開き、
+//         固定項目の説明文言・「※画像カードのみ」併記・既定値(画像ON/調理時間ON/原価OFF/
+//         栄養OFF/材料全部OFF)を確認。navigator.share非対応のchromiumでは「テキストでシェア」が
+//         クリップボードへのコピーになるため、コピーされた文字列を直接検証する:
+//         (a)既定選択で料理名(人数分)・調理時間行・材料8件+…ほか・#うちレシピ・URLが入り、
+//            「作り方は全◯ステップ」行(裁定3で削除)・原価・栄養が入らないこと
+//         (b)「材料をすべて載せる」+「原価」ONで、9件目の材料が入り…ほかが消え、
+//            原価行(1人分/全量・登録人数基準)が入ること
+//         (c)「画像カードでシェア」は非対応環境でPNGダウンロードに切り替わるため、
+//            downloadイベントの発生=画像カード生成の成功のみ確認する)。
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -3971,6 +3982,107 @@ try {
       )
     } finally {
       await pvBrowser.close()
+    }
+  }
+
+  // --- SHARE-01: シェアの選択式モーダル(2026-07-16 Fable裁定docs/30 裁定3)。
+  // 基本レシピ「豚汁」(材料9件・4人分・調理時間30分・材料に価格マスタのデフォルトあり)を使い、
+  // (a)既定選択のテキストシェア(=chromiumではクリップボードへコピー)の文字列、
+  // (b)「材料をすべて載せる」+「原価」ON時の文字列、(c)画像カードの生成成功(ダウンロード発生)
+  // を確認する。クリップボードの読み取りにはcontextへの権限付与が必要 ---
+  currentCheck = 'SHARE-01'
+  {
+    const shBrowser = await chromium.launch()
+    const shContext = await shBrowser.newContext()
+    await shContext.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE })
+    const shPage = await shContext.newPage()
+    shPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHARE-01] ${err.message}`)
+    })
+    try {
+      await shPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await shPage.waitForTimeout(1800) // 初回シード完了待ち
+      await shPage.getByText('豚汁', { exact: true }).first().click()
+      await shPage.waitForTimeout(500)
+
+      // シェアボタン→選択モーダル(旧インラインパネルは廃止)
+      await shPage.locator('button[aria-label="シェア"]').click()
+      await shPage.waitForTimeout(300)
+      const shareDialog = shPage.getByRole('dialog', { name: 'シェアする内容' })
+      check('SHARE-01 シェアボタンで選択モーダルが開く', (await shareDialog.count()) === 1)
+      const dialogText = (await shareDialog.textContent()) ?? ''
+      check(
+        'SHARE-01 固定項目の説明文言(料理名・人数分・材料8件)が出る',
+        dialogText.includes('料理名・人数分・材料（最初の8件）はいつも入ります'),
+      )
+      check('SHARE-01 レシピ画像の行に「※画像カードのみ」が併記される', dialogText.includes('※画像カードのみ'))
+
+      // 既定値: 画像ON・調理時間ON(豚汁はcookMinutesあり)・原価OFF・栄養OFF・材料全部OFF
+      const optionCheckbox = (label) =>
+        shareDialog.locator('label', { hasText: label }).locator('input[type="checkbox"]')
+      check('SHARE-01 既定: レシピ画像ON', await optionCheckbox('レシピ画像').isChecked())
+      check('SHARE-01 既定: 調理時間ON', await optionCheckbox('調理時間').isChecked())
+      check('SHARE-01 既定: 原価OFF', !(await optionCheckbox('原価').isChecked()))
+      check(
+        'SHARE-01 既定: 栄養OFF(行はカロリー・塩分(めやす)の文言で表示)',
+        !(await optionCheckbox('1食あたりのカロリー・塩分（めやす）').isChecked()),
+      )
+      check('SHARE-01 既定: 材料をすべて載せるOFF', !(await optionCheckbox('材料をすべて載せる').isChecked()))
+
+      // (a) 既定選択のままテキストでシェア → chromiumはnavigator.share非対応のためコピーになる
+      await shareDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await shPage.waitForTimeout(600)
+      check(
+        'SHARE-01(a) コピー完了メッセージがモーダル内に出る',
+        ((await shareDialog.textContent()) ?? '').includes('レシピの文章をコピーしました'),
+      )
+      const copiedDefault = await shPage.evaluate(() => navigator.clipboard.readText())
+      check('SHARE-01(a) 料理名+人数分', copiedDefault.includes('豚汁（4人分）'))
+      check('SHARE-01(a) 調理時間行(既定ON)', copiedDefault.includes('調理時間 約30分'))
+      check(
+        'SHARE-01(a) 材料は8件+…ほか(9件目のごま油は入らない)',
+        copiedDefault.includes('【材料】') &&
+          copiedDefault.includes('…ほか') &&
+          !copiedDefault.includes('ごま油'),
+      )
+      check('SHARE-01(a) 「作り方は全◯ステップ」行が無い(裁定3で削除)', !copiedDefault.includes('作り方は全'))
+      check(
+        'SHARE-01(a) アプリ名とURLは必ず残る(宣伝枠)',
+        copiedDefault.includes('#うちレシピ') && copiedDefault.includes('https://uchirecipe.com/'),
+      )
+      check(
+        'SHARE-01(a) 原価・栄養は既定OFFで入らない',
+        !copiedDefault.includes('原価') && !copiedDefault.includes('kcal'),
+      )
+
+      // (b) 材料をすべて載せる+原価ON → 全材料と原価行(登録人数4人分基準)が入る
+      await optionCheckbox('材料をすべて載せる').check()
+      await optionCheckbox('原価').check()
+      await shareDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await shPage.waitForTimeout(600)
+      const copiedFull = await shPage.evaluate(() => navigator.clipboard.readText())
+      check(
+        'SHARE-01(b) 全材料が入り…ほかが消える(9件目のごま油も入る)',
+        copiedFull.includes('・ごま油') && !copiedFull.includes('…ほか'),
+      )
+      check(
+        'SHARE-01(b) 原価行(1人分/全量・登録人数基準)が入る',
+        /原価 1人分 約[\d,]+円／全量（4人分） 約[\d,]+円/.test(copiedFull),
+      )
+
+      // (c) 画像カードでシェア → 非対応環境ではPNGダウンロード(=生成成功のみ確認)
+      const [download] = await Promise.all([
+        shPage.waitForEvent('download', { timeout: 15000 }),
+        shareDialog.getByRole('button', { name: '画像カードでシェア' }).click(),
+      ])
+      check(
+        'SHARE-01(c) 画像カードが生成されPNGダウンロードに切り替わる',
+        download.suggestedFilename().endsWith('.png'),
+        download.suggestedFilename(),
+      )
+    } finally {
+      await shBrowser.close()
     }
   }
 
