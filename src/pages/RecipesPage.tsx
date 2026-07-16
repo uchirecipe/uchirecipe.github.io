@@ -9,6 +9,8 @@ import {
   List,
   ArrowUpNarrowWide,
   ArrowDownWideNarrow,
+  SquareCheck,
+  Square,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
@@ -72,6 +74,54 @@ const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
     active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
   }`
+
+// 昇順/降順トグル用(2026-07-16 UI総点検B-7: パネルの外・件数表記の横に常設するため、
+// 通常のchipClsより一回り小さいサイズにする)
+const dirChipCls = (active: boolean) =>
+  `inline-flex shrink-0 items-center rounded-sm border px-2 py-1.5 text-xs font-bold ${
+    active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
+  }`
+
+/**
+ * 並べ替え・調理時間・手間レベルの単一選択UI(2026-07-16 UI総点検B-7オーナー個別指示)。
+ * 従来はチップ/ボタン並びだったが、選択中の項目が一目で分かる☑付き縦リストに変更する
+ * (radioの見た目を☑にするだけで、複数選択にはしない。AskUserで確認済み)
+ */
+function CheckList<T extends string>({
+  options,
+  value,
+  onSelect,
+}: {
+  options: { value: T; label: string }[]
+  value: T
+  onSelect: (value: T) => void
+}) {
+  return (
+    <div className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+      {options.map((option) => {
+        const selected = option.value === value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onSelect(option.value)}
+            aria-pressed={selected}
+            className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-bold ${
+              selected ? 'text-accent' : 'text-ink-muted'
+            }`}
+          >
+            {selected ? (
+              <SquareCheck size={18} className="shrink-0" aria-hidden />
+            ) : (
+              <Square size={18} className="shrink-0 opacity-40" aria-hidden />
+            )}
+            {option.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 /**
  * 一覧の状態（検索・絞り込み・並べ替え・スクロール位置）の保存・復元用キー（sessionStorage）。
@@ -447,44 +497,19 @@ export default function RecipesPage() {
       {/* 絞り込みパネル */}
       {panelOpen && (
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-          {/* 並べ替え */}
+          {/* 並べ替え(2026-07-16 UI総点検B-7オーナー個別指示: チップ並びから☑付き単一選択リストに変更。
+              昇順/降順トグルはパネルの外・件数表記の横へ移動済み=下記の「件数」表示を参照) */}
           <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            {sortOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  setSort(option.value)
-                  // 並べ替えの種類を変えたら、その種類の既定方向に戻す(2026-07-13 UI改善。
-                  // 例: 「あいうえお順」は常にあ→んから始まる、というこれまでの見え方を保つ)
-                  setSortDirection(defaultSortDirection[option.value])
-                }}
-                className={chipCls(sort === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          {/* 昇順/降順トグル(2026-07-13 UI改善) */}
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setSortDirection('asc')}
-              className={chipCls(sortDirection === 'asc')}
-            >
-              <ArrowUpNarrowWide size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
-              {ja.search.sortAsc}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSortDirection('desc')}
-              className={chipCls(sortDirection === 'desc')}
-            >
-              <ArrowDownWideNarrow size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
-              {ja.search.sortDesc}
-            </button>
-          </div>
+          <CheckList
+            options={sortOptions}
+            value={sort}
+            onSelect={(next) => {
+              setSort(next)
+              // 並べ替えの種類を変えたら、その種類の既定方向に戻す(2026-07-13 UI改善。
+              // 例: 「あいうえお順」は常にあ→んから始まる、というこれまでの見え方を保つ)
+              setSortDirection(defaultSortDirection[next])
+            }}
+          />
 
           {/* 使いたい食材 */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
@@ -511,23 +536,15 @@ export default function RecipesPage() {
             )}
           </div>
 
-          {/* 調理時間 */}
+          {/* 調理時間(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.timeTitle}
           </p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            {timeOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setTime(option.value)}
-                className={chipCls(time === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-            {/* 時短版の手順(quickSteps)があるレシピだけに絞る。有効な間は一覧カードの
-                調理時間表示もquickCookMinutesに切り替わる(2026-07-11 オーナー実機フィードバック) */}
+          <CheckList options={timeOptions} value={time} onSelect={setTime} />
+          {/* 時短版の手順(quickSteps)があるレシピだけに絞る独立トグル。単一選択の並べ替え・時間・
+              手間とは別枠のON/OFFなのでチップのまま維持する。有効な間は一覧カードの調理時間表示も
+              quickCookMinutesに切り替わる(2026-07-11 オーナー実機フィードバック) */}
+          <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
             <button
               type="button"
               onClick={() => setQuickOnly((v) => !v)}
@@ -537,22 +554,11 @@ export default function RecipesPage() {
             </button>
           </div>
 
-          {/* 手間レベル */}
+          {/* 手間レベル(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.effortTitle}
           </p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            {effortOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setEffort(option.value)}
-                className={chipCls(effort === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <CheckList options={effortOptions} value={effort} onSelect={setEffort} />
 
           {/* よく使うタグ */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
@@ -618,15 +624,37 @@ export default function RecipesPage() {
       )}
 
       {/* 件数: 絞り込み無しでも総件数を常に表示する(2026-07-13 UI改善)。絞り込み中は
-          既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる */}
+          既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる。
+          昇順/降順トグルは2026-07-16 UI総点検B-7オーナー個別指示によりパネルの外・この件数表記の
+          横に常設する(従来はパネル内にあった) */}
       {results && totalCount !== undefined && (
-        <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-          {filtersActive
-            ? ja.search.resultCountWithTotal
-                .replace('{n}', String(results.length))
-                .replace('{t}', String(totalCount))
-            : ja.search.totalCount.replace('{n}', String(totalCount))}
-        </p>
+        <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
+          <p className="min-w-0 flex-1 text-sm text-ink-muted">
+            {filtersActive
+              ? ja.search.resultCountWithTotal
+                  .replace('{n}', String(results.length))
+                  .replace('{t}', String(totalCount))
+              : ja.search.totalCount.replace('{n}', String(totalCount))}
+          </p>
+          <div className="flex shrink-0 gap-1">
+            <button
+              type="button"
+              onClick={() => setSortDirection('asc')}
+              className={dirChipCls(sortDirection === 'asc')}
+            >
+              <ArrowUpNarrowWide size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
+              {ja.search.sortAsc}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortDirection('desc')}
+              className={dirChipCls(sortDirection === 'desc')}
+            >
+              <ArrowDownWideNarrow size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
+              {ja.search.sortDesc}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 空の状態 */}

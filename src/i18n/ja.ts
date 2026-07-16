@@ -50,13 +50,15 @@ export const ja = {
     condNotRecent: '最近作ってない',
     condFavorite: 'お気に入り',
     condQuick: '10分以内',
+    // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5)。既定閉。MealPlanPage「提案の条件」と
+    // 同じパターン(既定値=すべて以外を選んでいるときは畳んだラベルにも現在値を出す)
+    conditionsToggle: '条件をしぼる',
     pantryOnlyToggle: '在庫の食材で',
     pantryOnlyFallback: '在庫の食材を使うレシピが見つからなかったので、通常の候補から選びました',
     noCandidate: 'この条件に合うレシピがありません',
     empty: 'レシピを登録すると、ここにおすすめが表示されます',
     goRegister: 'レシピを登録する',
     searchPlaceholder: 'レシピを検索',
-    searchButton: '検索',
     ingShortcutTitle: '使いたい食材から探す',
     ingPlaceholder: '食材を1つずつ入力',
     ingAdd: '追加',
@@ -64,7 +66,6 @@ export const ja = {
     mealPlanTitle: '今日の献立',
     mealPlanEmpty: 'まだ今日つくるものが決まっていません',
     mealPlanGoRecipes: 'レシピを探す',
-    mealPlanGoTo: '献立を決める',
     historyTitle: '最近作ったもの',
     historyMore: 'すべて見る',
     backupReminder: 'しばらくバックアップしていません。設定から書き出しておくと安心です',
@@ -190,7 +191,7 @@ export const ja = {
     selectHint: '今日の献立から2〜3品まで選べます',
     selectedCount: '{n}品を選択中',
     emptyToday:
-      '今日の献立にレシピがありません。レシピ詳細の「今日つくる」から追加すると、ここで段取りを組めます。',
+      '今日の献立にレシピがありません。レシピ詳細の「今日の献立に追加」から追加すると、ここで段取りを組めます。',
     onlyOneToday:
       '今日の献立が1品だけです。2品以上あると、待ち時間を活かした段取りを組めます。',
     goToday: '今日の献立を見る',
@@ -249,6 +250,13 @@ export const ja = {
     tabRecipe: 'レシピ',
     tabBackup: 'バックアップ',
     tabProPack: 'Pro・パック',
+    // 全般タブの小見出し4グループ(2026-07-16 UI総点検B-2オーナー決定: 9カードフラット並列を整理。
+    // 見た目(テーマカラー・ホームカスタマイズ)/食材と価格/料理中/その他。並びとグループ見出しのみで
+    // カードの中身は変更しない)
+    groupAppearanceTitle: '見た目',
+    groupIngredientsTitle: '食材と価格',
+    groupCookingTitle: '料理中',
+    groupOtherTitle: 'その他',
     ngTitle: 'NG食材（アレルギー・苦手）',
     ngDescription: 'ここに登録した食材を含むレシピには警告マークが付きます（例:「豚」で「豚肉」「豚バラ」もヒットします）',
     ngPlaceholder: '例: えび',
@@ -260,7 +268,9 @@ export const ja = {
     // Wake Lock API非対応環境向けの注記(2026-07-10)。トグル自体は残したまま説明の下に添える
     wakeLockUnsupportedNote:
       'この環境（ブラウザ）では利用できません。https（保護された接続）でアクセスすると使えるようになる場合があります。',
-    themeTitle: 'テーマ',
+    // 「テーマ」→「テーマカラー」(2026-07-16 UI総点検B-1オーナー決定: レシピ側の「テーマ一覧」
+    // (配布レシピ集)との用語衝突。色選択側のみ改名し、レシピ側の用語(themeListTitle等)は不変)
+    themeTitle: 'テーマカラー',
     themeDescription: '「自動」はお使いの端末の明暗設定（OSのライト/ダークモード）に合わせて自動で切り替わります',
     themeAuto: '自動',
     themeLight: 'ライト',
@@ -670,7 +680,9 @@ export const ja = {
     cookedLogNotePlaceholder: 'ひとことメモ（任意）',
     cookedLogSave: '保存する',
     cookedLogCancel: 'やめる',
-    todayAdd: '今日つくる',
+    // 「今日つくる」→「今日の献立に追加」(2026-07-16 UI総点検B-8オーナー決定)。ボタンの挙動・
+    // todayAdded(既に追加済みの表示)は変更しない
+    todayAdd: '今日の献立に追加',
     todayAdded: '今日の献立に追加済み',
   },
   focus: {
