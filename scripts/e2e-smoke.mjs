@@ -1853,10 +1853,12 @@ try {
   )
   await page.getByRole('button', { name: '絞り込み' }).click() // パネルを再度開いて並べ替え状態を確認
   await page.waitForTimeout(200)
+  // 2026-07-16 B分類の☑リスト化に追随: 選択状態はクラス(border-accent)でなく
+  // aria-pressedで判定する(見た目の実装が変わっても壊れない)
   const sortStillActive = await page.evaluate(() => {
     const buttons = Array.from(document.querySelectorAll('button'))
     const target = buttons.find((b) => b.textContent?.trim() === 'あいうえお順')
-    return target ? target.className.includes('border-accent') : false
+    return target ? target.getAttribute('aria-pressed') === 'true' : false
   })
   check('SCROLL-02 詳細→戻るで並べ替え条件(あいうえお順)も保持される', sortStillActive)
   await page.getByRole('button', { name: '絞り込み' }).click() // パネルを閉じる(後続チェックへの影響防止)
