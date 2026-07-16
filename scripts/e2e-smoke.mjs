@@ -90,15 +90,19 @@
 //         純JSのSHA-256フォールバック(src/logic/sha256.ts)でPro解錠コード検証が動くこと。
 //         2026-07-13。他チェックが使う既存サーバーとは別に自前でpreviewサーバーをport 4194で
 //         起動して検証する) /
-//         MEALPLAN-01(献立タブ・週プランナー。第4波ペルソナPDCA・2026-07-13裁定:
+//         MEALPLAN-01(献立タブ・週プランナー。第4波ペルソナPDCA・2026-07-13裁定。2026-07-16
+//         便U-1で献立タブは日/週/月の3タブ構成になり、既定は「日」タブ・週の検証は「週」タブへ
+//         切り替えてから行う:
 //         週移動の中央チップが「今週へ戻る」ボタンとして機能しaria-labelが状態に応じて出し分けられる
 //         こと(Fix1)・概算食費セクションは未割当時は非表示で割当後に表示されること(Fix3)・
-//         ピッカー再オープンで現在レシピに「選択中」バッジが出ること(Fix4)・フィルタ/トグルの
-//         aria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみaria-pressed=true)・
-//         最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。同日更新: 既定が夕食のみに
-//         なったため夕食を外そうとするパターンで検証)) /
+//         ピッカー再オープンで現在レシピに「選択中」バッジが出ること(Fix4)・フィルタ/トグル/
+//         日週月タブのaria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみ
+//         aria-pressed=true)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。
+//         同日更新: 既定が夕食のみになったため夕食を外そうとするパターンで検証)・
+//         「この帯の今週分を空にする」の帯選択+confirm+一括削除(便U-4)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
-//         Pro解錠コード入力UI経由で解錠してから検証) /
+//         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
+//         その日の献立モーダル(朝昼夕・レシピ名リンク・「この週を開く」・献立なし文言)を出す) /
 //         MEALPLAN-03(献立タブ・主菜+副菜構成。2026-07-13 Fable設計: 各枠が既定で主菜+副菜の
 //         2行になっていること・「＋枠を追加」で行を増やせること・行単位のサイコロは他の行に
 //         影響しないこと・枠が丸ごと空のときのサイコロ/まとめて献立を立てるは主菜+副菜のペアで
@@ -107,6 +111,10 @@
 //         以前は空き枠だけ埋めるため2回目以降のタップが無反応だった。押すたびに表示中の全枠
 //         (手動選択枠も含む)を一旦クリアしてから再抽選することを、mealPlansの行idが
 //         クリア→再作成で入れ替わることで確認する) /
+//         MEALPLAN-05(日タブの週プラン自動取り込み・便U-3・2026-07-16 Fable設計: 日タブを開くと
+//         今日の週プラン登録(表示帯のみ)が今日の献立へ自動で入ること・非表示帯は取り込まれない
+//         こと・2回開いても重複しないこと(冪等)・取り込まれた品を消して開き直しても同じ日の
+//         うちは再出現しないこと(settings.lastAutoImportDate)をIndexedDB直読みで確認) /
 //         修正1a(献立タブの概算食費リンクの文言「食材と価格を編集する」・遷移先/pricesを
 //         MEALPLAN-01内で確認) /
 //         PRICEUNIT-01(「食材と価格」の単位入力UI改修・2026-07-15オーナー実機フィードバック:
@@ -1825,12 +1833,10 @@ try {
 
   // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
   // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
-  // 「今週の献立へ初期スクロール」分岐を必ず抑止して今日の献立(最上部)に留まる。今日の献立が
-  // 空でも今週へ飛ばさない(作った！等で最後の1品が消えた直後の競合対策)。
-  // 分離検証: 今日の献立=空・今週の献立=1件(今日の日付に直接投入)の状態で、
-  //  (a)素の /#/meal-plan は今週見出しへスクロールする(従来動作の前提確認)
-  //  (b)/#/meal-plan?focus=today はスクロールせず最上部に留まり、focusパラメータが消費される
-  // 修正が無いと(b)の2つの断定(scrollY≈0・パラメータ消費)が両方失敗する。 ---
+  // 「日」タブへ固定される(2026-07-16 便U-1でタブ構成に再設計。以前はスクロール制御だったが、
+  // 今は「日」「週」「月」タブの選択制御になった。既定タブは元々「日」だが、?focus=todayは
+  // 将来デフォルトが変わっても壊れないよう明示的に強制する・パラメータを必ず消費する、の
+  // 2点を保証する回帰テストとして残す)。修正が無いと(b)の断定が失敗する ---
   currentCheck = 'BACKNAV-01'
   {
     const bnBrowser = await chromium.launch()
@@ -1843,54 +1849,28 @@ try {
     try {
       await bnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await bnPage.waitForTimeout(1800) // 初回シード完了待ち
-      // 基本レシピのidを1つ取得し、今週の献立(今日の日付)に1件だけ直接投入する。
-      // 今日の献立は空のまま=修正が無いと今週見出しへスクロールする条件
-      const firstId = await bnPage.evaluate(
-        () =>
-          new Promise((resolve, reject) => {
-            const req = indexedDB.open('uchi-recipe')
-            req.onsuccess = () => {
-              const tx = req.result.transaction('recipes', 'readonly')
-              const g = tx.objectStore('recipes').getAll()
-              g.onsuccess = () => resolve(g.result[0]?.id)
-              g.onerror = () => reject(g.error)
-            }
-            req.onerror = () => reject(req.error)
-          }),
-      )
-      await bnPage.evaluate(
-        (recipeId) =>
-          new Promise((resolve, reject) => {
-            const d = new Date()
-            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-            const req = indexedDB.open('uchi-recipe')
-            req.onsuccess = () => {
-              const tx = req.result.transaction('mealPlans', 'readwrite')
-              const a = tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId, role: 'main' })
-              a.onsuccess = () => resolve(undefined)
-              a.onerror = () => reject(a.error)
-            }
-            req.onerror = () => reject(req.error)
-          }),
-        firstId,
-      )
 
-      // (a) 前提: 素の献立タブは今週見出しへスクロールする(今日が空・今週に1件)
+      // (a) 前提: 素の /#/meal-plan は既定で「日」タブが選択されている
       await bnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await bnPage.waitForTimeout(900)
-      const plainScrollY = await bnPage.evaluate(() => window.scrollY)
-      check('BACKNAV-01 前提: 素の献立タブは今週見出しへスクロールする', plainScrollY > 80)
+      await bnPage.waitForTimeout(600)
+      const dayTabBtn = bnPage.getByRole('button', { name: '日', exact: true })
+      check('BACKNAV-01 前提: 素の献立タブは既定で「日」タブが選択されている', (await dayTabBtn.getAttribute('aria-pressed')) === 'true')
 
-      // (b) ?focus=today ではスクロールせず最上部に留まり、パラメータが消費される。
+      // 「週」タブへ切り替えてから離脱する(実アプリの戻り操作は別ルートを経由してMealPlanPageが
+      // 再マウントされるため、タブ状態はリセットされる。それでも?focus=todayが「日」を
+      // 強制することを確認するため、あえて別タブに切り替えた状態を経由する)
+      await bnPage.getByRole('button', { name: '週', exact: true }).click()
+      await bnPage.waitForTimeout(300)
+
+      // (b) ?focus=today では「日」タブへ固定され、パラメータが消費される。
       // 実アプリの戻り操作はレシピ詳細(別ルート)を経由するため、MealPlanPageは必ず再マウント
-      // されてinitialScrollRefが初期化される。テストでも一度別ページへ抜けてから戻ることで
+      // されてinitialFocusRefが初期化される。テストでも一度別ページへ抜けてから戻ることで
       // その再マウントを再現する(ハッシュのクエリだけ変える遷移では再マウントされないため)
       await bnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await bnPage.waitForTimeout(300)
       await bnPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
-      await bnPage.waitForTimeout(900)
-      const focusScrollY = await bnPage.evaluate(() => window.scrollY)
-      check('BACKNAV-01 ?focus=today では今週へスクロールせず最上部に留まる', focusScrollY <= 5)
+      await bnPage.waitForTimeout(600)
+      check('BACKNAV-01 ?focus=today では「日」タブへ固定される', (await dayTabBtn.getAttribute('aria-pressed')) === 'true')
       check('BACKNAV-01 focus=today パラメータは消費されURLから消える', !bnPage.url().includes('focus=today'))
       check(
         'BACKNAV-01 戻った先に今日の献立セクションが見える',
@@ -2309,13 +2289,16 @@ try {
   await page.waitForTimeout(800)
 
   // --- MEALPLAN-01: 献立タブ・週プランナー(第4波ペルソナPDCA Fix1/3/4/5/6。まっさらプロファイル
-  // で検証するため専用browser/contextを使う)。
+  // で検証するため専用browser/contextを使う。2026-07-16 便U-1でタブ構成(日/週/月)に再設計。
+  // 既定タブは「日」になったため、週タブの検証は明示的に「週」タブへ切り替えてから行う)。
   // Fix1: 週移動の中央チップ(以前は無ラベルの地の文だった)は、当週表示中はaria-labelなし、
   //       当週以外を見ているときだけaria-label(今週へ戻る)が付く「戻るボタン」になっていること
   // Fix3: 何も割り当てていない週は概算食費セクションが非表示、割り当てると表示されること
   // Fix4: 埋まった枠のピッカーを再度開くと、現在のレシピの行に「選択中」バッジが出ること
-  // Fix5: 食事帯フィルタ・時短優先トグル・週/月トグルにaria-pressedが付くこと(見た目は変更なし)
-  // Fix6: 最後の1つの食事帯フィルタを外そうとすると無反応ではなく説明トーストが出ること ---
+  // Fix5: 食事帯フィルタ・時短優先トグル・日/週/月タブにaria-pressedが付くこと(見た目は変更なし)
+  // Fix6: 最後の1つの食事帯フィルタを外そうとすると無反応ではなく説明トーストが出ること
+  // 便U-4: 週タブの「この帯の今週分を空にする」で帯選択+確認confirm→その帯の週エントリが
+  //        全削除されること・他の帯には影響しないこと ---
   currentCheck = 'MEALPLAN-01'
   {
     const mpBrowser = await chromium.launch()
@@ -2331,9 +2314,16 @@ try {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@MEALPLAN-01] ${err.message}`)
     })
+    mpPage.on('dialog', (dialog) => dialog.accept()) // 便U-4の削除確認confirmを自動承認
     try {
       await mpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mpPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 便U-1: 既定は「日」タブ。以降の検証は週タブの内容が対象なので明示的に切り替える
+      const dayTabBtn = mpPage.getByRole('button', { name: '日', exact: true })
+      check('MEALPLAN-01(便U-1) 献立タブを開くと既定で「日」タブが選択されている', (await dayTabBtn.getAttribute('aria-pressed')) === 'true')
+      await mpPage.getByRole('button', { name: '週', exact: true }).click()
+      await mpPage.waitForTimeout(300)
 
       // Fix3: まっさらプロファイル・未割当時は概算食費セクションが無い
       const mpEmptyText = await mpPage.textContent('body')
@@ -2441,7 +2431,12 @@ try {
       )
       const weekToggleBtn = mpPage.getByRole('button', { name: '週', exact: true })
       const monthToggleBtn = mpPage.getByRole('button', { name: '月', exact: true })
-      check('MEALPLAN-01(Fix5) 週/月トグルにもaria-pressedが付く(週表示中はtrue/false)', (await weekToggleBtn.getAttribute('aria-pressed')) === 'true' && (await monthToggleBtn.getAttribute('aria-pressed')) === 'false')
+      check(
+        'MEALPLAN-01(Fix5・便U-1) 日/週/月タブにもaria-pressedが付く(週表示中はfalse/true/false)',
+        (await dayTabBtn.getAttribute('aria-pressed')) === 'false' &&
+          (await weekToggleBtn.getAttribute('aria-pressed')) === 'true' &&
+          (await monthToggleBtn.getAttribute('aria-pressed')) === 'false',
+      )
 
       // Fix6(2026-07-13更新): 既定で夕食だけが表示中なので、その最後の1つを外そうとすると
       // 説明トーストが出て外れないことを直接確認する(以前は昼食/夕食を手動で外して朝食だけに
@@ -2456,6 +2451,25 @@ try {
         'MEALPLAN-01(Fix6) 夕食フィルタは外れずaria-pressed=trueのまま',
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
+
+      // 便U-4: 「この帯の今週分を空にする」。ここまでの操作で月曜夕食の主菜行に「肉じゃが」が
+      // 割り当て済み(Fix4)。帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
+      // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
+      const clearDinnerTargetBtn = mpPage.getByRole('button', { name: '空にする帯として夕食を選ぶ' })
+      check(
+        'MEALPLAN-01(便U-4) 帯選択ボタンは既定で「夕食」がaria-pressed=true',
+        (await clearDinnerTargetBtn.getAttribute('aria-pressed')) === 'true',
+      )
+      await mpPage.getByRole('button', { name: '空にする', exact: true }).click()
+      await mpPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-01(便U-4) 確認後、削除完了のトーストが出る',
+        (await mpPage.textContent('body')).includes('夕食の今週分を削除しました'),
+      )
+      check(
+        'MEALPLAN-01(便U-4) 夕食を空にすると割り当て済みだった「肉じゃが」も消える(未定に戻る)',
+        (await mpPage.getByText('肉じゃが', { exact: true }).count()) === 0,
+      )
     } finally {
       await mpBrowser.close()
     }
@@ -2463,7 +2477,9 @@ try {
 
   // --- MEALPLAN-02: 献立タブ・月カレンダー(第4波ペルソナPDCA Fix2)。Pro解錠(実際のコード入力UI経由)
   // →月表示→「前の月」→中央チップにaria-label(今月へ戻る)→タップで当月へ戻ることを確認する。
-  // Pro解錠はPRO-FALLBACK-01と同じテスト用コード(docs/22記載・販売用ではない)を使う ---
+  // Pro解錠はPRO-FALLBACK-01と同じテスト用コード(docs/22記載・販売用ではない)を使う。
+  // 便U-5(2026-07-16 Fable設計: 月タブの日タップは「その日の献立」を窓表示し、従来の
+  // 即週ジャンプはモーダル内の「この週を開く」ボタンへ移動)も同じPro解錠済みブラウザで検証する ---
   currentCheck = 'MEALPLAN-02'
   {
     const mp2Browser = await chromium.launch()
@@ -2521,6 +2537,94 @@ try {
         'MEALPLAN-02(Fix2) 当月へ戻った後は中央チップのaria-labelが再び消える',
         (await monthCenterBtn.getAttribute('aria-label')) === null,
       )
+
+      // 便U-5: 月タブの日タップは窓表示(モーダル)。まず献立の無い日(今日)をタップ→
+      // 「献立はありません」+「この週を開く」が出ること。従来の即週ジャンプが起きない
+      // (=タップ直後も月タブのまま)ことも確認する
+      const todayCell = mp2Page.locator('div.grid.grid-cols-7 button.border-accent').first()
+      await todayCell.click()
+      await mp2Page.waitForTimeout(400)
+      const monthTabBtn = mp2Page.getByRole('button', { name: '月', exact: true })
+      check(
+        'MEALPLAN-02(便U-5) 日をタップしても即週ジャンプせず月タブのまま(モーダルが開く)',
+        (await monthTabBtn.getAttribute('aria-pressed')) === 'true',
+      )
+      const dayModal = mp2Page.locator('[role="dialog"]')
+      check('MEALPLAN-02(便U-5) その日の献立モーダルが開く', await dayModal.isVisible())
+      check(
+        'MEALPLAN-02(便U-5) 献立の無い日は「献立はありません」と出る',
+        (await dayModal.textContent()).includes('献立はありません'),
+      )
+      check(
+        'MEALPLAN-02(便U-5) モーダルに「この週を開く」ボタンがある',
+        await dayModal.getByRole('button', { name: 'この週を開く' }).isVisible(),
+      )
+      // ×で閉じられる
+      await dayModal.locator('button[aria-label="閉じる"]').click()
+      await mp2Page.waitForTimeout(300)
+      check('MEALPLAN-02(便U-5) ×でモーダルが閉じる', !(await dayModal.isVisible()))
+
+      // 献立のある日: 今日の日付の夕食に「肉じゃが」をIndexedDB直書きで投入してから
+      // 同じ日をタップ→モーダルに食事帯ラベルとレシピ名リンクが出ること
+      const mp2RecipeId = await mp2Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () => resolve(g.result.find((r) => r.title === '肉じゃが')?.id)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await mp2Page.evaluate(
+        (recipeId) =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readwrite')
+              const a = tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId, role: 'main' })
+              a.onerror = () => reject(a.error)
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        mp2RecipeId,
+      )
+      // 素のIndexedDB直書きはDexieのliveQueryキャッシュに検知されない(ハッシュ遷移の
+      // 開き直しは同一ドキュメントのためキャッシュも残る)ので、本物のreloadで反映させる
+      await mp2Page.reload({ waitUntil: 'networkidle' })
+      await mp2Page.waitForTimeout(800)
+      await mp2Page.getByRole('button', { name: '月', exact: true }).click()
+      await mp2Page.waitForTimeout(400)
+      await mp2Page.locator('div.grid.grid-cols-7 button.border-accent').first().click()
+      await mp2Page.waitForTimeout(400)
+      const dayModalFilled = mp2Page.locator('[role="dialog"]')
+      const dayModalFilledText = await dayModalFilled.textContent()
+      check(
+        'MEALPLAN-02(便U-5) 献立のある日は食事帯ラベル(夕食)とレシピ名が出る',
+        dayModalFilledText.includes('夕食') && dayModalFilledText.includes('肉じゃが'),
+      )
+      check(
+        'MEALPLAN-02(便U-5) レシピ名はタップで詳細へ行けるリンクになっている',
+        (await dayModalFilled.locator('a[href*="/recipes/"]').count()) > 0,
+      )
+      // 「この週を開く」で週タブへ移動する(従来の週ジャンプはここへ移動した)
+      await dayModalFilled.getByRole('button', { name: 'この週を開く' }).click()
+      await mp2Page.waitForTimeout(400)
+      check(
+        'MEALPLAN-02(便U-5) 「この週を開く」で週タブへ切り替わる',
+        (await mp2Page.getByRole('button', { name: '週', exact: true }).getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'MEALPLAN-02(便U-5) 開いた週に投入済みの肉じゃがが見える(今日を含む週が開いている)',
+        (await mp2Page.getByText('肉じゃが', { exact: true }).count()) > 0,
+      )
     } finally {
       await mp2Browser.close()
     }
@@ -2552,6 +2656,9 @@ try {
     try {
       await mp3Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp3Page.waitForTimeout(1800) // 初回シード完了待ち(この時点で表示食事帯は既定の「夕食のみ」)
+      // 便U-1: 既定タブは「日」になったため、週プランナーの検証は「週」タブへ切り替えてから行う
+      await mp3Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp3Page.waitForTimeout(300)
 
       // 各枠は既定で主菜+副菜の2行(未定×2)。既定表示は夕食のみなので7日×2行=14件
       check(
@@ -2681,6 +2788,9 @@ try {
     try {
       await mp4Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp4Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
+      // 便U-1: 既定タブは「日」になったため、「まとめて献立を立てる」がある「週」タブへ切り替える
+      await mp4Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp4Page.waitForTimeout(300)
 
       const dinnerMealPlanIds = () =>
         mp4Page.evaluate(
@@ -2729,6 +2839,145 @@ try {
       )
     } finally {
       await mp4Browser.close()
+    }
+  }
+
+  // --- MEALPLAN-05: 日タブの週プラン自動取り込み(便U-3・2026-07-16 Fable設計)。
+  // 日タブを開いたとき、今日の日付の週プラン登録(表示中の食事帯のみ)が今日の献立へ
+  // 自動で取り込まれること。加えて冪等性の2点:
+  //  (a) 2回開いても重複しない(importRecipeIdsToTodayListの重複スキップ+lastAutoImportDate)
+  //  (b) 取り込まれた品をユーザーが消した後にもう一度開いても、その日のうちは再出現しない
+  //      (settings.lastAutoImportDateに今日の日付が記録済みのため自動実行がスキップされる)
+  // 非表示帯(朝食)の登録は取り込まれないことも確認する。まっさらプロファイル(新規ユーザー
+  // 既定=夕食のみ表示)で検証するため専用browser/contextを使う ---
+  currentCheck = 'MEALPLAN-05'
+  {
+    const mp5Browser = await chromium.launch()
+    const mp5Context = await mp5Browser.newContext()
+    const mp5Page = await mp5Context.newPage()
+    mp5Page.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-05] ${text}`)
+    })
+    mp5Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-05] ${err.message}`)
+    })
+    try {
+      // まずレシピ一覧で初回シードを済ませ、今日の週プランをIndexedDB直書きで用意する:
+      // 夕食(表示帯)に肉じゃが(主菜)+カレーライス(副菜扱い)、朝食(非表示帯)に豚の生姜焼き
+      await mp5Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(1800) // 初回シード完了待ち
+      const seeded = await mp5Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const byTitle = (t) => g.result.find((r) => r.title === t)?.id
+                const nikujaga = byTitle('肉じゃが')
+                const curry = byTitle('カレーライス')
+                const shogayaki = byTitle('豚の生姜焼き')
+                if (!nikujaga || !curry || !shogayaki) {
+                  resolve({ ok: false })
+                  return
+                }
+                const wtx = idb.transaction('mealPlans', 'readwrite')
+                const store = wtx.objectStore('mealPlans')
+                store.add({ date, slot: 'dinner', recipeId: nikujaga, role: 'main' })
+                store.add({ date, slot: 'dinner', recipeId: curry, role: 'side' })
+                store.add({ date, slot: 'breakfast', recipeId: shogayaki, role: 'main' })
+                wtx.oncomplete = () => resolve({ ok: true })
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('MEALPLAN-05 前提: 今日の週プラン(夕食2件+朝食1件)を直接投入できる', seeded.ok)
+
+      // todayListの実データを直接読むヘルパー(重複の有無を黒箱の見た目でなくDBで断定する)
+      const todayListRecipeIds = () =>
+        mp5Page.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('todayList', 'readonly')
+                const g = tx.objectStore('todayList').getAll()
+                g.onsuccess = () => resolve(g.result.map((row) => row.recipeId))
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+
+      // 1回目: 献立タブを開く(既定=日タブ)→夕食の2件だけが自動で今日の献立に入る
+      await mp5Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(1200) // 自動取り込み+liveQuery反映待ち
+      const mp5BodyAfterFirst = await mp5Page.textContent('body')
+      check(
+        'MEALPLAN-05 日タブを開くと夕食(表示帯)の週プラン2件が今日の献立に自動で入る',
+        mp5BodyAfterFirst.includes('肉じゃが') && mp5BodyAfterFirst.includes('カレーライス'),
+      )
+      check(
+        'MEALPLAN-05 朝食(非表示帯)の登録は取り込まれない',
+        !mp5BodyAfterFirst.includes('豚の生姜焼き'),
+      )
+      const idsAfterFirstOpen = await todayListRecipeIds()
+      check(
+        'MEALPLAN-05 todayListの実データは2件(夕食の2件のみ)',
+        idsAfterFirstOpen.length === 2,
+        `ids=${JSON.stringify(idsAfterFirstOpen)}`,
+      )
+
+      // 2回目: 一旦別ページへ抜けて開き直す(再マウント)→重複しない(冪等)
+      await mp5Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(300)
+      await mp5Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(1200)
+      const idsAfterSecondOpen = await todayListRecipeIds()
+      check(
+        'MEALPLAN-05(冪等) 2回開いてもtodayListは2件のまま重複しない',
+        idsAfterSecondOpen.length === 2,
+        `ids=${JSON.stringify(idsAfterSecondOpen)}`,
+      )
+
+      // 削除→開き直し: 肉じゃがを×で外す→開き直しても再出現しない
+      // (lastAutoImportDateに今日が記録済みのため、その日のうちの自動再取り込みはスキップ)
+      const removeButtons = mp5Page.locator('button[aria-label="この献立から外す"]')
+      const removeCountBefore = await removeButtons.count()
+      check('MEALPLAN-05 前提: 今日の献立に×ボタンが2つ出ている', removeCountBefore === 2)
+      // 1行目(肉じゃが)の×を押す
+      await removeButtons.first().click()
+      await mp5Page.waitForTimeout(500)
+      const idsAfterRemove = await todayListRecipeIds()
+      check(
+        'MEALPLAN-05 ×で1件外すとtodayListは1件になる',
+        idsAfterRemove.length === 1,
+        `ids=${JSON.stringify(idsAfterRemove)}`,
+      )
+      await mp5Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(300)
+      await mp5Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mp5Page.waitForTimeout(1200)
+      const idsAfterReopen = await todayListRecipeIds()
+      check(
+        'MEALPLAN-05(再出現防止) 削除後に日タブを開き直しても消した品は戻らない(1件のまま)',
+        idsAfterReopen.length === 1 &&
+          JSON.stringify(idsAfterReopen) === JSON.stringify(idsAfterRemove),
+        `before=${JSON.stringify(idsAfterRemove)} after=${JSON.stringify(idsAfterReopen)}`,
+      )
+    } finally {
+      await mp5Browser.close()
     }
   }
 
