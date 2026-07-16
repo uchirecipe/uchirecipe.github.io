@@ -3887,7 +3887,7 @@ try {
       check(
         'ICONPICK-01 クリックでaria-expandedがtrueになりアイコングリッド(自動+15種)が開く',
         (await iconToggle.getAttribute('aria-expanded')) === 'true' &&
-          (await ipPage.getByRole('button', { name: '自動' }).isVisible()),
+          (await ipPage.getByRole('button', { name: '自動' }).first().isVisible()),
       )
 
       // アイコン(ご飯・丼)をタップする。写真設定済みなのでshowIconInsteadOfPhotoが自動ONになるはず(裁定2 ④)
