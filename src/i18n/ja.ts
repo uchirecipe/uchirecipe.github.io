@@ -554,7 +554,9 @@ export const ja = {
     introLabel: 'ひとこと説明（任意）',
     introPlaceholder: '例: ヨーグルトに二種類のソースをかけた見た目も楽しいデザートです',
     freeLimitBlocked: '無料版の登録上限（50件）に達しました。上限の解除はPro版（開発中）で提供予定です。お困りの場合は設定画面の「ご意見箱」からお声をお寄せください（今までのレシピはそのまま使えます）',
-    photoLabel: '写真',
+    // 「画像」= 写真/アイコンの3択をまとめたセクション見出し(2026-07-16 Fable裁定docs/30
+    // 裁定2【画像の3択】。旧「写真」から改称。値だけ変更・キー名は既存のphotoLabelのまま)
+    photoLabel: '画像',
     photoTake: 'カメラで撮る',
     photoPick: 'アルバムから選ぶ',
     photoRemove: '写真を削除',
@@ -605,7 +607,9 @@ export const ja = {
     memoPlaceholder: '気づいたこと・アレンジなどを自由に',
     sourceUrlLabel: '参照元URL（任意）',
     sourceUrlPlaceholder: 'https://…',
-    iconLabel: 'アイコン',
+    // iconLabelは「画像」3択への統合(裁定2)でセクション見出しとしては使わなくなったため削除。
+    // 折りたたみの開閉ボタン文言はiconPickOpen、展開時の説明文はiconDescriptionを流用
+    iconPickOpen: 'アイコンから選ぶ',
     iconDescription: '一覧・詳細で写真の代わりに使うアイコンです。「自動」なら料理名・材料から自動で選びます',
     iconAuto: '自動',
     iconShowInsteadOfPhoto: '写真ではなくアイコンを表示',
