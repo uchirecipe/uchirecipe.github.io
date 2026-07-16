@@ -146,6 +146,12 @@
 //         往復してもくわしくタブの入力内容が消えない(state維持)ことを確認。既存のKW-01/
 //         INTRO-01/ONEPOINT-01/DISHTYPE-01もタブ分けで対象フィールドが「くわしく」タブの中に
 //         入ったため、タブ切替の1手を追加済み) /
+//         ICONPICK-01(「画像」3択UI・2026-07-16 Fable裁定docs/30 裁定2【画像の3択】。
+//         [カメラで撮る][アルバムから選ぶ][アイコンから選ぶ▾]の3等分タイル。「アイコンから選ぶ」
+//         クリックでaria-expandedが切り替わりアイコングリッド(自動+15種)が展開すること・
+//         写真を設定→アイコンを選択すると自動でshowIconInsteadOfPhotoがONになりプレビューが
+//         写真からアイコン表示に切り替わること・保存して詳細画面へ渡ってもアイコン表示のまま
+//         (showIconInsteadOfPhotoが実際にDBへ連動)であることを確認) /
 //         FORMRESET-01(レシピ編集画面の「デフォルトに戻す」・2026-07-15 オーナー要望。DBには
 //         書き込まずフォームの入力値だけを差し替える安全設計。(a)基本レシピ「肉じゃが」の編集で
 //         タイトル・材料を書き換え→ボタンは1回目「もう一度押すと戻します」に変化するだけで
@@ -3820,6 +3826,110 @@ try {
       )
     } finally {
       await ftBrowser.close()
+    }
+  }
+
+  // --- ICONPICK-01: 「画像」3択UI(2026-07-16 Fable裁定docs/30 裁定2【画像の3択】)。
+  // [カメラで撮る][アルバムから選ぶ][アイコンから選ぶ▾]の3等分タイルで、3つ目が折りたたみの
+  // 開閉ボタンになっていること(aria-expanded)・展開でアイコングリッドが出ること・写真を設定した
+  // 状態でアイコンをタップすると「写真ではなくアイコンを表示」(showIconInsteadOfPhoto)が自動で
+  // ONになりプレビューが即座にアイコン表示へ切り替わること・保存後の詳細画面でもアイコン表示が
+  // 維持される(showIconInsteadOfPhotoが実際にDBへ連動している)ことを確認する ---
+  currentCheck = 'ICONPICK-01'
+  {
+    const ipBrowser = await chromium.launch()
+    const ipContext = await ipBrowser.newContext()
+    const ipPage = await ipContext.newPage()
+    ipPage.on('dialog', (dialog) => dialog.accept())
+    ipPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@ICONPICK-01] ${err.message}`)
+    })
+    try {
+      // 1x1の最小PNG(LOG-PHOTO-01と同じダミー画像。resizePhotoが実際にデコードできる本物の
+      // 画像である必要があるため、テキストダミーではなくPNGを使う)
+      const tinyPng = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      )
+      await ipPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await ipPage.waitForTimeout(800)
+
+      // 見出しが「写真」ではなく「画像」に改称されている(photoLabel値変更。裁定2 ①)
+      check(
+        'ICONPICK-01 見出しが「画像」に改称されている',
+        await ipPage.getByText('画像', { exact: true }).first().isVisible().catch(() => false),
+      )
+
+      await ipPage.getByPlaceholder('例: 肉じゃが').fill('E2Eアイコン選択確認レシピ')
+      await ipPage.getByPlaceholder('例: じゃがいも').first().fill('テスト材料')
+      await ipPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('テスト手順')
+
+      // 「アルバムから選ぶ」用のinput(capture属性が無い方)に写真を投入する
+      await ipPage
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'test.png', mimeType: 'image/png', buffer: tinyPng })
+      await ipPage.waitForTimeout(500)
+      const previewPhotoImg = ipPage.locator('img[alt="E2Eアイコン選択確認レシピ"]')
+      check(
+        'ICONPICK-01 写真を設定するとプレビューに写真が出る',
+        await previewPhotoImg.isVisible().catch(() => false),
+      )
+
+      // 3つ目のタイル「アイコンから選ぶ」は折りたたみの開閉ボタン(裁定2 ③)
+      const iconToggle = ipPage.getByRole('button', { name: 'アイコンから選ぶ' })
+      check(
+        'ICONPICK-01 「アイコンから選ぶ」は閉じた状態(aria-expanded=false)で始まる',
+        (await iconToggle.getAttribute('aria-expanded')) === 'false',
+      )
+      await iconToggle.click()
+      await ipPage.waitForTimeout(200)
+      check(
+        'ICONPICK-01 クリックでaria-expandedがtrueになりアイコングリッド(自動+15種)が開く',
+        (await iconToggle.getAttribute('aria-expanded')) === 'true' &&
+          (await ipPage.getByRole('button', { name: '自動' }).first().isVisible()),
+      )
+
+      // アイコン(ご飯・丼)をタップする。写真設定済みなのでshowIconInsteadOfPhotoが自動ONになるはず(裁定2 ④)
+      await ipPage.getByRole('button', { name: 'ご飯・丼', exact: true }).click()
+      await ipPage.waitForTimeout(300)
+      check(
+        'ICONPICK-01 写真設定済みでアイコンを選ぶとプレビューが写真からアイコン表示に切り替わる',
+        !(await previewPhotoImg.isVisible().catch(() => false)),
+      )
+
+      // くわしくタブの「写真ではなくアイコンを表示」トグル(このページで唯一のrole=switch)が
+      // アイコンタップの副作用で自動的にONになっている(●が点く。オーナー報告に明記の仕様)
+      await ipPage.getByRole('tab', { name: 'くわしく' }).click()
+      await ipPage.waitForTimeout(200)
+      const showIconSwitch = ipPage.locator('button[role="switch"]')
+      check(
+        'ICONPICK-01 くわしくタブの「写真ではなくアイコンを表示」トグルが自動でONになっている',
+        (await showIconSwitch.getAttribute('aria-checked')) === 'true',
+      )
+      await ipPage.getByRole('tab', { name: 'かんたん' }).click()
+      await ipPage.waitForTimeout(200)
+
+      // 保存→詳細画面でもアイコン表示が維持されている(showIconInsteadOfPhotoが実際にDBへ連動)
+      await ipPage.getByRole('button', { name: '保存する' }).click()
+      await ipPage.waitForTimeout(800)
+      const detailPhotoImg = ipPage.locator('img[alt="E2Eアイコン選択確認レシピ"]')
+      check(
+        'ICONPICK-01 保存後の詳細画面でも写真ではなくアイコンが表示される(DB連動)',
+        !(await detailPhotoImg.isVisible().catch(() => false)),
+      )
+      check(
+        'ICONPICK-01 保存後、詳細画面のタイトルが正しく表示される',
+        (await ipPage.textContent('body')).includes('E2Eアイコン選択確認レシピ'),
+      )
+
+      // 後始末: 検証用に作成したレシピを削除
+      await ipPage.locator('a[href*="/edit"]').first().click()
+      await ipPage.waitForTimeout(500)
+      await ipPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await ipPage.waitForTimeout(800)
+    } finally {
+      await ipBrowser.close()
     }
   }
 

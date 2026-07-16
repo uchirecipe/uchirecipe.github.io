@@ -233,6 +233,9 @@ function RecipeFormInner() {
   const photoUrl = usePhotoUrl(photo)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
+  // 「アイコンから選ぶ」の折りたたみ開閉(2026-07-16 Fable裁定docs/30 裁定2)。保存stateにも
+  // 下書きにも含めないUIローカルの表示状態のみ(下書き復元/リセット/貼り付けでは触らない)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
 
   // ---- 入力の全損防止: 下書きの自動保存と復元 ----
   const draftKey = draftStorageKey(editId)
@@ -483,10 +486,22 @@ function RecipeFormInner() {
     if (!file) return
     try {
       setPhoto(await resizePhoto(file))
+      // 写真を新しく取得できたら、それまでアイコン優先(showIconInsteadOfPhoto)だったとしても
+      // 撮った/選んだ写真を見せる(2026-07-16 Fable裁定docs/30 裁定2の状態対応)
+      setShowIconInsteadOfPhoto(false)
       setError('')
     } catch {
       setError(ja.form.photoError)
     }
+  }
+
+  /** アイコン(自動含む)をタップしたときの処理。選択の反映に加えて、写真が既に設定済みなら
+   * 「アイコンを画像として使う」(showIconInsteadOfPhoto)を自動でONにする(2026-07-16 Fable裁定
+   * docs/30 裁定2 = アイコンから選ぶことは「画像」の3択の1つという扱い)。写真が無いときはこの
+   * フラグを触らない(そもそも表示はアイコンのまま)。くわしくタブの手動トグルは引き続き上書き可能 */
+  const handleIconTap = (key: IconKey | undefined) => {
+    setIconKey(key)
+    if (photo) setShowIconInsteadOfPhoto(true)
   }
 
   const updateIngredient = (index: number, patch: Partial<IngredientRow>) => {
@@ -1161,39 +1176,47 @@ function RecipeFormInner() {
         </button>
       </div>
 
-      {/* 見た目（写真＋アイコンをこの1セクションに統合。「写真の代わりにアイコンを表示」の
-          細かい設定はくわしくタブへ。2026-07-16 Fable裁定docs/26 論点2） */}
-      {/* 写真（カメラ / アルバム） */}
+      {/* 画像（写真 / アイコン の3択に統合。2026-07-16 Fable裁定docs/30 裁定2【画像の3択】。
+          「写真ではなくアイコンを表示」の手動上書きトグルはくわしくタブに残す(同stateで整合) */}
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.photoLabel}</span>
-        {photoUrl && (
+        {/* プレビュー: 写真があり、かつアイコン優先でなければ写真。それ以外(写真なし/アイコン優先)は
+            一覧・詳細と同じ--icon-tile背景+RecipeIconのプレースホルダーを出し、3択の結果を即見せる */}
+        {photo && !showIconInsteadOfPhoto ? (
           <img
             src={photoUrl}
             alt={title || ja.form.photoLabel}
             className="mt-1 aspect-video w-full rounded-md object-cover shadow-sm"
           />
+        ) : (
+          <div
+            className="mt-1 flex aspect-video w-full items-center justify-center rounded-md shadow-sm"
+            style={{ background: 'var(--icon-tile)' }}
+          >
+            <RecipeIcon iconKey={iconKey ?? pickIconKey({ title, tags, ingredients })} size={64} />
+          </div>
         )}
-        <div className="mt-2 flex gap-2">
-          {/* capture="environment" 付き → スマホでカメラが直接開く */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => onPhotoSelected(e.target.files?.[0])}
-          />
-          <input
-            ref={albumInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => onPhotoSelected(e.target.files?.[0])}
-          />
+        {/* capture="environment" 付き → スマホでカメラが直接開く */}
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => onPhotoSelected(e.target.files?.[0])}
+        />
+        <input
+          ref={albumInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => onPhotoSelected(e.target.files?.[0])}
+        />
+        <div className="mt-2 grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={() => cameraInputRef.current?.click()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold shadow-sm"
+            className="flex flex-col items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-xs font-bold shadow-sm"
           >
             <Camera size={20} className="text-accent" aria-hidden />
             {ja.form.photoTake}
@@ -1201,10 +1224,32 @@ function RecipeFormInner() {
           <button
             type="button"
             onClick={() => albumInputRef.current?.click()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold shadow-sm"
+            className="flex flex-col items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-xs font-bold shadow-sm"
           >
             <ImageIcon size={20} className="text-accent" aria-hidden />
             {ja.form.photoPick}
+          </button>
+          {/* アイコンから選ぶ: 折りたたみの開閉ボタン。ボタン内アイコンは現在の選択(手動指定 or
+              自動判定)をそのまま表示するので、閉じたままでも今どのアイコンが選ばれているか分かる */}
+          <button
+            type="button"
+            onClick={() => setIconPickerOpen((open) => !open)}
+            aria-expanded={iconPickerOpen}
+            className="flex flex-col items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-xs font-bold shadow-sm"
+          >
+            <RecipeIcon
+              iconKey={iconKey ?? pickIconKey({ title, tags, ingredients })}
+              size={20}
+              color="var(--accent)"
+            />
+            <span className="flex items-center gap-0.5">
+              {ja.form.iconPickOpen}
+              {iconPickerOpen ? (
+                <ChevronUp size={14} aria-hidden />
+              ) : (
+                <ChevronDown size={14} aria-hidden />
+              )}
+            </span>
           </button>
         </div>
         {photo && (
@@ -1216,56 +1261,58 @@ function RecipeFormInner() {
             {ja.form.photoRemove}
           </button>
         )}
-      </div>
 
-      {/* アイコン（一覧・詳細で写真の代わりに使うプレースホルダー） */}
-      <div className="mt-[var(--space-md)]">
-        <span className={labelCls}>{ja.form.iconLabel}</span>
-        <p className="mt-0.5 text-sm text-ink-muted">{ja.form.iconDescription}</p>
-        <div className="mt-2 grid grid-cols-4 gap-2">
-          <button
-            type="button"
-            onClick={() => setIconKey(undefined)}
-            className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
-              iconKey === undefined
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
-          >
-            <ImageIcon size={20} aria-hidden />
-            {ja.form.iconAuto}
-          </button>
-          {iconKeyOrder.map((key) => {
-            const isAutoPick = iconKey === undefined && pickIconKey({ title, tags, ingredients }) === key
-            return (
+        {/* アイコングリッド(折りたたみ配下。旧・独立「アイコン」セクションをここへ移設) */}
+        {iconPickerOpen && (
+          <div className="mt-2">
+            <p className="text-sm text-ink-muted">{ja.form.iconDescription}</p>
+            <div className="mt-2 grid grid-cols-4 gap-2">
               <button
-                key={key}
                 type="button"
-                onClick={() => setIconKey(key)}
+                onClick={() => handleIconTap(undefined)}
                 className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
-                  iconKey === key
+                  iconKey === undefined
                     ? 'border-accent bg-accent text-on-accent'
-                    : isAutoPick
-                      ? 'border-accent bg-accent/10 text-accent'
-                      : 'border-edge bg-surface text-ink-muted'
+                    : 'border-edge bg-surface text-ink-muted'
                 }`}
               >
-                <RecipeIcon
-                  iconKey={key}
-                  size={20}
-                  color={
-                    iconKey === key
-                      ? 'var(--on-accent)'
-                      : isAutoPick
-                        ? 'var(--accent)'
-                        : 'var(--text-muted)'
-                  }
-                />
-                {ja.icon[key]}
+                <ImageIcon size={20} aria-hidden />
+                {ja.form.iconAuto}
               </button>
-            )
-          })}
-        </div>
+              {iconKeyOrder.map((key) => {
+                const isAutoPick =
+                  iconKey === undefined && pickIconKey({ title, tags, ingredients }) === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handleIconTap(key)}
+                    className={`flex flex-col items-center justify-center gap-1 rounded-md border py-2 text-xs font-bold shadow-sm ${
+                      iconKey === key
+                        ? 'border-accent bg-accent text-on-accent'
+                        : isAutoPick
+                          ? 'border-accent bg-accent/10 text-accent'
+                          : 'border-edge bg-surface text-ink-muted'
+                    }`}
+                  >
+                    <RecipeIcon
+                      iconKey={key}
+                      size={20}
+                      color={
+                        iconKey === key
+                          ? 'var(--on-accent)'
+                          : isAutoPick
+                            ? 'var(--accent)'
+                            : 'var(--text-muted)'
+                      }
+                    />
+                    {ja.icon[key]}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
       </div>
 
