@@ -11,6 +11,9 @@ export const ja = {
   common: {
     back: '戻る',
     close: '閉じる',
+    // 説明文の折りたたみトグル共通ラベル(2026-07-16 UI総点検B-5: 在庫ボード・買い物候補の
+    // 説明文が常時表示でゴチャつきの一因だったため。既定は閉。文言はどちらも同じなので共通化)
+    usageHint: '使い方',
   },
   chip: {
     remove: 'このチップを削除',
@@ -80,11 +83,17 @@ export const ja = {
     },
     addPlaceholder: '例: 豚肉',
     add: '追加',
-    remove: 'この食材を在庫ボードから外す',
     empty: 'よく使う食材を登録すると、ここに並びます',
     addToSearch: '在庫から追加',
     reorderToggle: '並び替え',
     reorderDone: '完了',
+    // 整理モード(2026-07-16 UI総点検B-10: チップ常時×が状態切替タップと隣接し誤操作の元
+    // だったため廃止。代わりにモードに入って複数選択→一括削除にする)
+    organizeToggle: '整理',
+    organizeDone: '完了',
+    organizeSelect: 'タップして選択',
+    organizeDeleteSelected: '選択した{n}件を削除',
+    organizeConfirm: '選択した{n}件を在庫ボードから削除します。よろしいですか？',
   },
   history: {
     title: '作った記録',
@@ -202,6 +211,10 @@ export const ja = {
     startTimer: 'タイマーを始める',
   },
   shopping: {
+    // 食材タブの2タブ分割(2026-07-16 UI総点検B-9: 買い物メモが最上部を占有しヘビーユーザーの
+    // 壁になっていた所見への対応。既定タブは在庫)
+    tabInventory: '食材の在庫',
+    tabMemo: '買い物メモ',
     fromRecipeTitle: 'レシピから追加',
     pickRecipes: '材料を合算したいレシピを選ぶ',
     pickerSearchPlaceholder: 'レシピ名で絞り込み',

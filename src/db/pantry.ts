@@ -81,6 +81,11 @@ export async function removePantryItem(id: number): Promise<void> {
   await db.pantryItems.delete(id)
 }
 
+/** 在庫ボードから複数の食材をまとめて外す(整理モードの一括削除から呼ぶ) */
+export async function removePantryItems(ids: number[]): Promise<void> {
+  await db.pantryItems.bulkDelete(ids)
+}
+
 /** 隣の食材と順序を入れ替える（並び替えモードの矢印ボタンから呼ぶ） */
 export async function movePantryItem(
   items: PantryItem[],
