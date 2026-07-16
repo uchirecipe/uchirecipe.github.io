@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, X, Download, Upload, Link2, RotateCcw, ChevronUp, ChevronDown, Info, Coins } from 'lucide-react'
+import {
+  Plus,
+  X,
+  Download,
+  Upload,
+  Link2,
+  RotateCcw,
+  ChevronUp,
+  ChevronDown,
+  Info,
+  Coins,
+  RefreshCw,
+} from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteRecipesBySourceSet } from '../db/recipes'
 import { listSetExclusions, clearSetExclusions } from '../db/setExclusions'
@@ -15,6 +27,7 @@ import {
   RecipeSetFetchError,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
+import { refreshApp } from '../logic/appRefresh'
 import {
   totalCookedLogPhotoBytes,
   isOverCookedPhotoLimit,
@@ -1166,6 +1179,25 @@ export default function SettingsPage() {
                 {ja.settings.backupImportReplace}
               </button>
             </div>
+          </section>
+
+          {/* 困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設)。
+              レシピ・価格・購入コード等のIndexedDBデータには一切触れない(src/logic/appRefresh.ts参照) */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.refreshAppTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.refreshAppDescription}</p>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(ja.settings.refreshAppConfirm)) {
+                  void refreshApp()
+                }
+              }}
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+            >
+              <RefreshCw size={18} aria-hidden />
+              {ja.settings.refreshAppButton}
+            </button>
           </section>
         </>
       )}
