@@ -14,11 +14,16 @@ import {
   addFrequentIngredient,
   cyclePantryLevel,
   removePantryItems,
+  setPantryItemsLevel,
   movePantryItem,
 } from '../db/pantry'
 import type { PantryLevel } from '../db/types'
 import { splitValues } from '../logic/textSplit'
 import { ja } from '../i18n/ja'
+import Toast from './Toast'
+
+/** 整理モードの「まとめて状態設定」3ボタンの並び順(ある→少ない→ない) */
+const BULK_SET_LEVELS: PantryLevel[] = ['have', 'low', 'none']
 
 /** 3段階それぞれの見た目（デザイントークンのみ使用。新しい色相は増やさない） */
 function levelClass(level: PantryLevel): string {
@@ -31,8 +36,11 @@ function levelClass(level: PantryLevel): string {
  * 在庫ボード: よく使う食材をチップで並べ、タップで「ある→少ない→ない」を切り替える。
  * 数量は数えないので、棚卸しは数秒で終わる。
  * 「並び替え」モード中は縦一列にして矢印ボタンで手動並び替えできる。
- * 「整理」モード中はチップをタップで複数選択→一括削除できる(2026-07-16 UI総点検B-10:
- * 通常モードの常時×ボタンは状態切替タップと隣接して誤操作の元だったため廃止)。
+ * 「整理」モード中はチップをタップで複数選択→一括削除、または「ある」「少ない」「ない」の
+ * 3ボタンでまとめて状態設定できる(2026-07-16 UI総点検B-10: 通常モードの常時×ボタンは状態
+ * 切替タップと隣接して誤操作の元だったため廃止→複数選択方式に統一。まとめて状態設定は
+ * 2026-07-17 docs/35 §5 オーナー決定・案D)。まとめて状態設定は適用後も整理モードを維持し
+ * 選択だけ解除する(削除は整理モードごと抜ける。用途が違うため意図的に挙動を分けている)。
  */
 export default function PantryBoard() {
   const items = usePantryItems()
@@ -40,6 +48,7 @@ export default function PantryBoard() {
   const [reordering, setReordering] = useState(false)
   const [organizing, setOrganizing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [message, setMessage] = useState('')
   // 説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉。他の折りたたみ同様、
   // 永続化はしない軽量実装(オーナー決定: 実装が軽い方でよい)
   const [showDescription, setShowDescription] = useState(false)
@@ -64,6 +73,17 @@ export default function PantryBoard() {
     setSelectedIds([])
     setOrganizing(false)
   }
+  // まとめて状態設定(docs/35 §5 案D): 選択中の食材全部を指定の状態に一括更新する。
+  // 削除と違って整理モードは維持したまま選択だけ解除する(続けて別の一括操作をしやすくするため)
+  const applyBulkLevel = async (level: PantryLevel) => {
+    if (selectedIds.length === 0) return
+    const count = selectedIds.length
+    await setPantryItemsLevel(selectedIds, level)
+    setSelectedIds([])
+    setMessage(
+      ja.pantry.organizeBulkSetToast.replace('{n}', String(count)).replace('{level}', ja.pantry.level[level]),
+    )
+  }
 
   // スペース・カンマ・読点区切りで複数まとめて入力しても、それぞれ別の食材として登録する
   const add = async () => {
@@ -75,6 +95,7 @@ export default function PantryBoard() {
   }
 
   return (
+    <>
     <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-xl font-bold">
@@ -189,14 +210,33 @@ export default function PantryBoard() {
           </div>
         ))}
 
-      {organizing && selectedIds.length > 0 && (
-        <button
-          type="button"
-          onClick={() => void deleteSelected()}
-          className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
-        >
-          {ja.pantry.organizeDeleteSelected.replace('{n}', String(selectedIds.length))}
-        </button>
+      {organizing && (
+        <div className="mt-[var(--space-md)] flex flex-col gap-2">
+          {/* まとめて状態設定(docs/35 §5 案D): 0件選択時はdisabled。削除ボタンと同じ操作列に
+              配置し、スマホ幅でも崩れないよう3等分グリッド+削除ボタンは別行のフル幅にする */}
+          <div className="grid grid-cols-3 gap-2">
+            {BULK_SET_LEVELS.map((level) => (
+              <button
+                key={level}
+                type="button"
+                onClick={() => void applyBulkLevel(level)}
+                disabled={selectedIds.length === 0}
+                className={`rounded-md border py-3 text-sm font-bold shadow-sm disabled:opacity-40 ${levelClass(level)}`}
+              >
+                {ja.pantry.level[level]}
+              </button>
+            ))}
+          </div>
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void deleteSelected()}
+              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+            >
+              {ja.pantry.organizeDeleteSelected.replace('{n}', String(selectedIds.length))}
+            </button>
+          )}
+        </div>
       )}
 
       <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
@@ -223,5 +263,7 @@ export default function PantryBoard() {
         </button>
       </div>
     </section>
+    <Toast message={message} onClose={() => setMessage('')} />
+    </>
   )
 }

@@ -91,6 +91,9 @@ export const ja = {
     organizeSelect: 'タップして選択',
     organizeDeleteSelected: '選択した{n}件を削除',
     organizeConfirm: '選択した{n}件を食材の在庫から削除します。よろしいですか？',
+    // まとめて状態設定(2026-07-17 docs/35 §5 案D): 整理モード中、選択した食材をまとめて
+    // 「ある」「少ない」「ない」のいずれかに一括変更する。ボタン文言はpantry.levelを流用
+    organizeBulkSetToast: '{n}件を『{level}』にしました',
   },
   history: {
     title: '作った記録',

@@ -86,6 +86,17 @@ export async function removePantryItems(ids: number[]): Promise<void> {
   await db.pantryItems.bulkDelete(ids)
 }
 
+/**
+ * 整理モードで選択した複数の食材をまとめて指定の状態(ある/少ない/ない)にする
+ * (docs/35 §5 在庫チップ=案D「整理モードにまとめて状態設定」)。1トランザクションで実行する。
+ */
+export async function setPantryItemsLevel(ids: number[], level: PantryLevel): Promise<void> {
+  if (ids.length === 0) return
+  await db.transaction('rw', db.pantryItems, async () => {
+    await db.pantryItems.where('id').anyOf(ids).modify({ level })
+  })
+}
+
 /** 隣の食材と順序を入れ替える（並び替えモードの矢印ボタンから呼ぶ） */
 export async function movePantryItem(
   items: PantryItem[],
