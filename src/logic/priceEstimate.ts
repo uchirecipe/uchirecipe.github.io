@@ -274,3 +274,36 @@ export function estimateRecipeCost(
   }
   return { total, fromMasterCount, hasAnyPriceInfo }
 }
+
+/** 献立エントリ群(mealPlans)の概算食費の合計・内訳 */
+export interface MealPlanCostSum {
+  /** 円換算の合計 */
+  total: number
+  /** マスタ価格で補完した材料の件数の合計 */
+  fromMasterCount: number
+}
+
+/**
+ * 献立エントリ群(mealPlans)の概算食費合計。エントリのrecipeIdから該当レシピを引き、
+ * estimateRecipeCost(レシピ登録時の基準人数分)を合算する。週の概算食費(MealPlanPageの
+ * weekCostEstimate)と期間の食費(2026-07-17 便AB・docs/35 §5「期間の食費」のrangeCostEstimate)が
+ * 共通で使う集計ロジック。recipeが見つからないエントリ(削除済みレシピ等を指す孤児行)はスキップする
+ */
+export function sumMealPlanEntriesCost<E extends { recipeId: number }>(
+  entries: E[],
+  recipeById: Map<number, { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[] }>,
+  index: PriceIndexEntry[],
+): MealPlanCostSum {
+  return entries.reduce<MealPlanCostSum>(
+    (acc, e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (!recipe) return acc
+      const estimate = estimateRecipeCost(recipe.ingredients, index)
+      return {
+        total: acc.total + estimate.total,
+        fromMasterCount: acc.fromMasterCount + estimate.fromMasterCount,
+      }
+    },
+    { total: 0, fromMasterCount: 0 },
+  )
+}

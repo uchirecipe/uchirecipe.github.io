@@ -100,6 +100,25 @@ export function monthLeadingBlanks(reference: Date): number {
   return firstDay === 0 ? 6 : firstDay - 1
 }
 
+/**
+ * 2つの日付(YYYY-MM-DD)を開始<=終了の順に並べ替える(2026-07-17 便AB・docs/35 §5「期間の食費」:
+ * 「終了日<開始日は自動で入れ替え」用)。YYYY-MM-DD文字列同士は辞書式比較=日付比較として成立する
+ * （isPastDateと同じ前提）
+ */
+export function normalizeDateRange(a: string, b: string): [string, string] {
+  return a <= b ? [a, b] : [b, a]
+}
+
+/**
+ * 開始日〜終了日(両端を含む)の日数。期間の食費(便AB)の「日数」表示、および
+ * 「1日あたり平均」の割り算に使う
+ */
+export function rangeDayCount(start: string, end: string): number {
+  const startMs = new Date(`${start}T00:00:00`).getTime()
+  const endMs = new Date(`${end}T00:00:00`).getTime()
+  return Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1
+}
+
 export interface SuggestOptions {
   quickOnly: boolean
   excludeNg: boolean

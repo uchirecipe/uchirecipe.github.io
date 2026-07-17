@@ -37,6 +37,8 @@ import {
   isPastDate,
   shiftDate,
   excludeYesterdayPlanRecipes,
+  normalizeDateRange,
+  rangeDayCount,
 } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep, classifyStep, buildCookTimeline } from '../src/logic/cookNavi.ts'
@@ -65,6 +67,7 @@ import {
   matchPriceEntry,
   estimateIngredientYen,
   estimateRecipeCost,
+  sumMealPlanEntriesCost,
   normalizeIngredientNameForPrice,
   normalizeUnit,
 } from '../src/logic/priceEstimate.ts'
@@ -1531,6 +1534,26 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
   }
 }
 
+// ---------- 期間の食費(2026-07-17 便AB・docs/35 §5): normalizeDateRange/rangeDayCount ----------
+eq(
+  'normalizeDateRange: 開始<=終了はそのまま',
+  normalizeDateRange('2026-07-03', '2026-07-08'),
+  ['2026-07-03', '2026-07-08'],
+)
+eq(
+  'normalizeDateRange: 終了<開始は自動で入れ替え',
+  normalizeDateRange('2026-07-08', '2026-07-03'),
+  ['2026-07-03', '2026-07-08'],
+)
+eq(
+  'normalizeDateRange: 同日を2回タップしても1日の範囲になる',
+  normalizeDateRange('2026-07-05', '2026-07-05'),
+  ['2026-07-05', '2026-07-05'],
+)
+eq('rangeDayCount: 同日は1日', rangeDayCount('2026-07-05', '2026-07-05'), 1)
+eq('rangeDayCount: 3日〜8日は6日間(両端含む)', rangeDayCount('2026-07-03', '2026-07-08'), 6)
+eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28', '2026-07-02'), 5)
+
 // ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------
 {
   const recipes = [
@@ -2781,6 +2804,39 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateRecipeCost([{ name: '謎の食材', amount: '1', unit: '個' }], index),
     { total: 0, fromMasterCount: 0, hasAnyPriceInfo: false },
   )
+
+  // sumMealPlanEntriesCost(2026-07-17 便AB・docs/35 §5「期間の食費」): 週の概算食費と
+  // 期間の食費が共通で使う、mealPlansエントリ群の合算ロジック
+  {
+    const recipeById = new Map([
+      [1, { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] }], // マスタ一致50円
+      [2, { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }] }], // マスタ按分260円
+      [3, { ingredients: [{ name: '謎の食材', amount: '1', unit: '個' }] }], // 計算対象外(0円)
+    ])
+    eq(
+      'sumMealPlanEntriesCost: 複数エントリ(同じレシピの重複含む)を合算する',
+      sumMealPlanEntriesCost(
+        [{ recipeId: 1 }, { recipeId: 2 }, { recipeId: 1 }],
+        recipeById,
+        index,
+      ),
+      { total: 50 + 260 + 50, fromMasterCount: 3 },
+    )
+    eq(
+      'sumMealPlanEntriesCost: 価格情報のないレシピは0円扱いで合計に影響しない',
+      sumMealPlanEntriesCost([{ recipeId: 3 }], recipeById, index),
+      { total: 0, fromMasterCount: 0 },
+    )
+    eq(
+      'sumMealPlanEntriesCost: recipeByIdに無いエントリ(削除済みレシピ等の孤児行)はスキップする',
+      sumMealPlanEntriesCost([{ recipeId: 999 }, { recipeId: 1 }], recipeById, index),
+      { total: 50, fromMasterCount: 1 },
+    )
+    eq('sumMealPlanEntriesCost: エントリ0件は0円', sumMealPlanEntriesCost([], recipeById, index), {
+      total: 0,
+      fromMasterCount: 0,
+    })
+  }
 
   // 由来種別(default/user)の出し分け(2026-07-13 UIペルソナQA: 詳細の価格注記「目安」表記の分岐に使う)
   const sourceIndex = buildPriceIndex([

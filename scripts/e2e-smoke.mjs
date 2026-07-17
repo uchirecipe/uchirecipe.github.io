@@ -192,6 +192,12 @@
 //            原価行(1人分/全量・登録人数基準)が入ること
 //         (c)「画像カードでシェア」は非対応環境でPNGダウンロードに切り替わるため、
 //            downloadイベントの発生=画像カード生成の成功のみ確認する)。
+//         MEALPLAN-07(献立タブ・月タブ「期間の食費」・2026-07-17 便AB・オーナー決定・docs/35 §5:
+//         モードボタンで開始日→終了日の2タップ選択→範囲ハイライト+結果カード(期間の献立原価
+//         合計・1日あたり平均・日数)が出ること。モード中は日タップが範囲選択に使われ既存の
+//         日モーダル(便U-5)が出ないこと・モード解除で日モーダルが復活すること・終了日<開始日の
+//         順にタップしても自動で入れ替わり結果が変わらないこと。原価は既存の週集計と同方式
+//         (登録人数基準)のため、期間合計が肉じゃが単品の概算食費の2倍と一致することで検証する) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -3442,6 +3448,205 @@ try {
       )
     } finally {
       await plBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-07: 献立タブ・月タブ「期間の食費」(2026-07-17 便AB・オーナー決定・docs/35 §5)。
+  // モードボタンで開始日→終了日の2タップ選択→範囲ハイライト+結果カード(合計・1日あたり平均・
+  // 日数)が出ること。モード中は日タップが範囲選択に使われ、既存の日モーダル(便U-5)が出ないこと。
+  // モード解除で日モーダルが復活すること。終了日<開始日の順にタップしても自動で入れ替わり
+  // 結果が変わらないことも確認する。概算食費は既存の週集計と同方式(登録人数基準・
+  // sumMealPlanEntriesCost)のため、肉じゃがの詳細画面に出る「概算食費」の実測値を2倍した値と
+  // 期間合計が一致することを検証する(価格マスタの初期値そのものに依存せず決定的に確認できる) ---
+  currentCheck = 'MEALPLAN-07'
+  {
+    const rcBrowser = await chromium.launch()
+    const rcContext = await rcBrowser.newContext()
+    const rcPage = await rcContext.newPage()
+    rcPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-07] ${text}`)
+    })
+    rcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-07] ${err.message}`)
+    })
+    try {
+      await rcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await rcPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 肉じゃがの単品概算食費(登録人数基準)を実UIから読み取る
+      await rcPage.getByText('肉じゃが', { exact: true }).first().click()
+      await rcPage.waitForTimeout(500)
+      const rcDetailText = (await rcPage.textContent('body')) ?? ''
+      const rcSingleMatch = rcDetailText.match(/約([\d,]+)円/)
+      const rcSingleCost = Number((rcSingleMatch?.[1] ?? '0').replace(/,/g, ''))
+      check(
+        'MEALPLAN-07 前提: 肉じゃがの概算食費が読み取れる(0円ではない)',
+        rcSingleCost > 0,
+        `rcSingleCost=${rcSingleCost}`,
+      )
+
+      const rcRecipeId = await rcPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () => resolve(g.result.find((r) => r.title === '肉じゃが')?.id)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+
+      // 表示中の月の3日・8日の夕食枠に肉じゃがを直接投入(2件・同じレシピ)。
+      // どの月も28日以上あるため月末をまたがず安全に使える日付
+      const rcNow = new Date()
+      const rcPrefix = `${rcNow.getFullYear()}-${String(rcNow.getMonth() + 1).padStart(2, '0')}`
+      const rcStartDate = `${rcPrefix}-03`
+      const rcEndDate = `${rcPrefix}-08`
+      await rcPage.evaluate(
+        ({ recipeId, dates }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readwrite')
+              const store = tx.objectStore('mealPlans')
+              dates.forEach((date) => store.add({ date, slot: 'dinner', recipeId, role: 'main' }))
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { recipeId: rcRecipeId, dates: [rcStartDate, rcEndDate] },
+      )
+
+      // Pro解錠(IndexedDB直書き。PASTLOG-01と同じ「解錠済み状態の再現」手法)
+      await rcPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({
+              ...current,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+
+      await rcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await rcPage.reload({ waitUntil: 'networkidle' })
+      await rcPage.waitForTimeout(800)
+      await rcPage.getByRole('button', { name: '月', exact: true }).click()
+      await rcPage.waitForTimeout(500)
+
+      const rcMonthGrid = rcPage.locator('div.grid.grid-cols-7').last()
+      // getByRole('button', {name})は使えない: 献立ありの日は「献立あり」マーク(dot)のaria-labelが
+      // 合成されて役割名が「3 献立あり」等になるため。日の数字だけの完全一致はテキストで絞り込む
+      const rcDayButton = (n) => rcMonthGrid.locator('button').filter({ hasText: new RegExp(`^${n}$`) })
+      const rcModeBtn = rcPage.getByRole('button', { name: '期間の食費', exact: true })
+
+      // モードON→開始日案内が出る
+      await rcModeBtn.click()
+      await rcPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-07 モードONで開始日案内が出る',
+        ((await rcPage.textContent('body')) ?? '').includes('開始日をタップしてください'),
+      )
+      check('MEALPLAN-07 モードONはaria-pressed=true', (await rcModeBtn.getAttribute('aria-pressed')) === 'true')
+
+      // 開始日(3日)タップ→終了日案内・日モーダルは出ない
+      await rcDayButton('3').click()
+      await rcPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-07 開始日タップ後は終了日案内が出る',
+        ((await rcPage.textContent('body')) ?? '').includes('終了日をタップしてください'),
+      )
+      check(
+        'MEALPLAN-07 モード中は日モーダルが開かない(開始日タップ時点)',
+        (await rcPage.locator('[role="dialog"]').count()) === 0,
+      )
+
+      // 終了日(8日)タップ→範囲ハイライト+結果カード(合計・1日あたり平均・日数)
+      await rcDayButton('8').click()
+      await rcPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-07 終了日タップ後も日モーダルは開かない',
+        (await rcPage.locator('[role="dialog"]').count()) === 0,
+      )
+      const rcResultText = (await rcPage.textContent('body')) ?? ''
+      check('MEALPLAN-07 結果カードの見出しが出る', rcResultText.includes('期間の食費'))
+      check('MEALPLAN-07 結果カードに日数(6日間)が出る', rcResultText.includes('6日間'))
+      const rcTotalMatch = rcResultText.match(/約([\d,]+)円/)
+      const rcTotal = Number((rcTotalMatch?.[1] ?? '0').replace(/,/g, ''))
+      check(
+        'MEALPLAN-07 期間合計=肉じゃが単品概算食費の2倍(登録人数基準・既存の週集計と同方式)',
+        rcTotal === rcSingleCost * 2,
+        `rcTotal=${rcTotal} rcSingleCost*2=${rcSingleCost * 2}`,
+      )
+      const rcAvgMatch = rcResultText.match(/1日あたり 約([\d,]+)円/)
+      const rcAvg = Number((rcAvgMatch?.[1] ?? '0').replace(/,/g, ''))
+      check(
+        'MEALPLAN-07 1日あたり平均=合計÷6日(四捨五入)',
+        rcAvg === Math.round(rcTotal / 6),
+        `rcAvg=${rcAvg} total=${rcTotal}`,
+      )
+
+      // モード解除→日モーダルが復活する(3日タップ)
+      await rcModeBtn.click()
+      await rcPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-07 モード解除後はaria-pressed=false',
+        (await rcModeBtn.getAttribute('aria-pressed')) === 'false',
+      )
+      await rcDayButton('3').click()
+      await rcPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-07 モード解除後は日タップで日モーダルが復活する',
+        await rcPage.locator('[role="dialog"]').isVisible(),
+      )
+      await rcPage.locator('[role="dialog"] button[aria-label="閉じる"]').click()
+      await rcPage.waitForTimeout(300)
+
+      // 終了日<開始日の順にタップしても自動で入れ替わり同じ範囲・同じ合計になる
+      await rcModeBtn.click()
+      await rcPage.waitForTimeout(300)
+      await rcDayButton('8').click()
+      await rcPage.waitForTimeout(300)
+      await rcDayButton('3').click()
+      await rcPage.waitForTimeout(300)
+      const rcSwappedText = (await rcPage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-07 終了日<開始日タップでも自動で入れ替わり同じ範囲になる(6日間)',
+        rcSwappedText.includes('6日間'),
+      )
+      const rcSwappedTotalMatch = rcSwappedText.match(/約([\d,]+)円/)
+      const rcSwappedTotal = Number((rcSwappedTotalMatch?.[1] ?? '0').replace(/,/g, ''))
+      check(
+        'MEALPLAN-07 逆順タップでも合計は変わらない(自動入れ替え)',
+        rcSwappedTotal === rcTotal,
+        `rcSwappedTotal=${rcSwappedTotal} rcTotal=${rcTotal}`,
+      )
+    } finally {
+      await rcBrowser.close()
     }
   }
 

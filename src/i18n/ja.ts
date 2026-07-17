@@ -140,6 +140,15 @@ export const ja = {
     // 月間献立への機能追加はPro v2まで凍結が既定だったが、オーナー指示で解除して実装
     monthDayHasLog: '記録あり',
     pastCookedTitle: '作った記録',
+    // 期間の食費(2026-07-17 便AB・オーナー決定・docs/35 §5): 月タブのモードボタン。
+    // 開始日タップ→終了日タップの2タップで期間を選び、期間の献立原価合計・1日あたり平均を出す。
+    // 段階1(予定ベース・登録人数基準。既存の週の概算食費と同方式)。段階2(実績ベース)は後日
+    rangeCostToggle: '期間の食費',
+    rangeCostGuideStart: '開始日をタップしてください',
+    rangeCostGuideEnd: '終了日をタップしてください',
+    rangeCostResultTitle: '期間の食費',
+    rangeCostResultRange: '{sm}/{sd}〜{em}/{ed}（{n}日間）',
+    rangeCostResultAverage: '1日あたり 約{n}円',
     dow: ['月', '火', '水', '木', '金', '土', '日'] as string[],
     slot: {
       breakfast: '朝食',

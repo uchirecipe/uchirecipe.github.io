@@ -51,11 +51,13 @@ import {
   suggestForSlot,
   suggestPairForSlot,
   todayPlanMismatch,
+  normalizeDateRange,
+  rangeDayCount,
 } from '../logic/mealPlan'
 import type { MealGenre } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
-import { buildPriceIndex, estimateRecipeCost } from '../logic/priceEstimate'
+import { buildPriceIndex, estimateRecipeCost, sumMealPlanEntriesCost } from '../logic/priceEstimate'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import type { CookedLog, MealPlanEntry, MealRole, MealSlot, Recipe } from '../db/types'
@@ -286,6 +288,37 @@ export default function MealPlanPage() {
     setWeekStart(weekDates(new Date(`${date}T00:00:00`))[0])
     setViewMode('week')
   }
+
+  // 期間の食費(2026-07-17 便AB・オーナー決定・docs/35 §5): 月タブの「期間の食費」モード。
+  // costMode中は日タップがこの範囲選択に使われ、日モーダル(dayModalDate)は抑止する。
+  // rangeStart/rangeEndは共に非nullになった時点で常に開始<=終了へ正規化済み(normalizeDateRange)
+  const [costMode, setCostMode] = useState(false)
+  const [rangeStart, setRangeStart] = useState<string | null>(null)
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null)
+  // モードボタンをもう一度押すと解除し、選択もリセットする(再度押せば再選択できる)
+  const toggleCostMode = () => {
+    setCostMode((v) => !v)
+    setRangeStart(null)
+    setRangeEnd(null)
+  }
+  // 月を移動すると選択を無効化する(段階1は「表示中の月のカレンダー内で完結」の仕様のため、
+  // 月をまたいだ範囲を組めないようにする。表示中の月が変われば選び直してもらう)
+  useEffect(() => {
+    setRangeStart(null)
+    setRangeEnd(null)
+  }, [monthAnchor])
+  // 日タップ時の範囲選択ロジック。未選択→開始日。開始日のみ→終了日(自動で開始<=終了に正規化)。
+  // 両方選択済み(結果カード表示中)にさらにタップ→そのタップを新しい開始日として選び直す
+  const handleRangeDayTap = (date: string) => {
+    if (rangeStart == null || rangeEnd != null) {
+      setRangeStart(date)
+      setRangeEnd(null)
+    } else {
+      const [start, end] = normalizeDateRange(rangeStart, date)
+      setRangeStart(start)
+      setRangeEnd(end)
+    }
+  }
   // 日×枠キー("date|slot")ごとの全エントリ（主菜+副菜など複数件を保持する。2026-07-13対応）
   const entriesByDateSlot = useMemo(() => {
     const map = new Map<string, MealPlanEntry[]>()
@@ -339,6 +372,27 @@ export default function MealPlanPage() {
     visibleRecipes.forEach((r) => map.set(r.id!, r))
     return map
   }, [visibleRecipes])
+
+  // 期間の食費(便AB): ハイライト表示用の範囲(開始日のみ選択中は単日をそのまま範囲として扱う)。
+  // 結果カードは rangeStart/rangeEnd が両方そろって初めて出す(こちらはハイライト専用)
+  const rangeHighlightBounds = useMemo(() => {
+    if (rangeStart == null) return null
+    return rangeEnd == null ? { start: rangeStart, end: rangeStart } : { start: rangeStart, end: rangeEnd }
+  }, [rangeStart, rangeEnd])
+  // 期間内(両端含む)のmealPlansエントリ。monthEntries(表示中の月のカレンダー内)から絞り込むため、
+  // 「月をまたぐ期間は月表示範囲内に限定してよい」の仕様を自然に満たす(月をまたぐ選択自体は
+  // monthAnchor変更時のリセットで防止済み)
+  const rangeCostEntries = useMemo(() => {
+    if (rangeStart == null || rangeEnd == null) return []
+    return (monthEntries ?? []).filter((e) => e.date >= rangeStart && e.date <= rangeEnd)
+  }, [monthEntries, rangeStart, rangeEnd])
+  // 期間の献立原価合計(既存の週の概算食費と同じsumMealPlanEntriesCost・登録人数基準で算出)
+  const rangeCostEstimate = useMemo(
+    () => sumMealPlanEntriesCost(rangeCostEntries, recipeById, priceIndex),
+    [rangeCostEntries, recipeById, priceIndex],
+  )
+  const rangeDays = rangeStart != null && rangeEnd != null ? rangeDayCount(rangeStart, rangeEnd) : 0
+  const rangeAverageCost = rangeDays > 0 ? Math.round(rangeCostEstimate.total / rangeDays) : 0
 
   // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
   const todayList = useTodayList()
@@ -628,21 +682,10 @@ export default function MealPlanPage() {
   }
 
   // 週の概算食費（材料ごとの価格入力を優先し、未入力の材料は食材価格マスタで補う。docs/20 §3）
-  const weekCostEstimate = useMemo(() => {
-    if (!entries) return { total: 0, fromMasterCount: 0 }
-    return entries.reduce(
-      (acc, e) => {
-        const recipe = recipeById.get(e.recipeId)
-        if (!recipe) return acc
-        const estimate = estimateRecipeCost(recipe.ingredients, priceIndex)
-        return {
-          total: acc.total + estimate.total,
-          fromMasterCount: acc.fromMasterCount + estimate.fromMasterCount,
-        }
-      },
-      { total: 0, fromMasterCount: 0 },
-    )
-  }, [entries, recipeById, priceIndex])
+  const weekCostEstimate = useMemo(
+    () => sumMealPlanEntriesCost(entries ?? [], recipeById, priceIndex),
+    [entries, recipeById, priceIndex],
+  )
   const weekCost = weekCostEstimate.total
 
   const weeklyBudget = settings?.weeklyBudget
@@ -957,6 +1000,29 @@ export default function MealPlanPage() {
                 <ChevronRight size={20} aria-hidden />
               </button>
             </div>
+
+            {/* 期間の食費モード(2026-07-17 便AB・docs/35 §5)。押すたびにON/OFFを切り替え、
+                切り替え時は選択もリセットする(再度押せば選び直せる) */}
+            <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={toggleCostMode}
+                aria-pressed={costMode}
+                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                  costMode
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-ink-muted'
+                }`}
+              >
+                {ja.mealPlan.rangeCostToggle}
+              </button>
+              {costMode && (rangeStart == null || rangeEnd == null) && (
+                <p className="text-sm font-bold text-accent">
+                  {rangeStart == null ? ja.mealPlan.rangeCostGuideStart : ja.mealPlan.rangeCostGuideEnd}
+                </p>
+              )}
+            </div>
+
             <div className="mt-[var(--space-sm)] grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
               {ja.mealPlan.dow.map((d) => (
                 <div key={d}>{d}</div>
@@ -966,15 +1032,24 @@ export default function MealPlanPage() {
               {Array.from({ length: monthLeading }, (_, i) => (
                 <div key={`blank-${i}`} />
               ))}
-              {monthDatesList.map((date) => (
+              {monthDatesList.map((date) => {
+                // 期間の食費モード中は日タップ=範囲選択に使う(便AB・日モーダルは抑止)
+                const inRange =
+                  costMode &&
+                  rangeHighlightBounds != null &&
+                  date >= rangeHighlightBounds.start &&
+                  date <= rangeHighlightBounds.end
+                return (
                 <button
                   key={date}
                   type="button"
-                  onClick={() => setDayModalDate(date)}
+                  onClick={() => (costMode ? handleRangeDayTap(date) : setDayModalDate(date))}
                   className={`flex aspect-square flex-col items-center justify-center rounded-sm border text-sm ${
                     date === today
                       ? 'border-accent bg-accent text-on-accent font-bold'
-                      : 'border-edge bg-surface text-ink'
+                      : inRange
+                        ? 'border-accent bg-accent/20 text-ink'
+                        : 'border-edge bg-surface text-ink'
                   }`}
                 >
                   <span>{Number(date.slice(8, 10))}</span>
@@ -1000,8 +1075,38 @@ export default function MealPlanPage() {
                     </span>
                   )}
                 </button>
-              ))}
+                )
+              })}
             </div>
+
+            {/* 期間の食費の結果カード(便AB): 開始日・終了日の両方が選ばれたら表示。
+                期間の献立原価合計・1日あたり平均・日数を出す(段階1・登録人数基準) */}
+            {costMode && rangeStart != null && rangeEnd != null && (
+              <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+                <h2 className="font-bold">{ja.mealPlan.rangeCostResultTitle}</h2>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {ja.mealPlan.rangeCostResultRange
+                    .replace('{sm}', String(Number(rangeStart.slice(5, 7))))
+                    .replace('{sd}', String(Number(rangeStart.slice(8, 10))))
+                    .replace('{em}', String(Number(rangeEnd.slice(5, 7))))
+                    .replace('{ed}', String(Number(rangeEnd.slice(8, 10))))
+                    .replace('{n}', String(rangeDays))}
+                </p>
+                <p className="mt-1 text-2xl font-bold text-accent">
+                  約{rangeCostEstimate.total.toLocaleString()}円
+                </p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  {ja.mealPlan.rangeCostResultAverage.replace('{n}', rangeAverageCost.toLocaleString())}
+                </p>
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekCostNote}</p>
+                <Link
+                  to="/prices"
+                  className="mt-1 inline-block text-xs font-bold text-accent underline"
+                >
+                  {ja.mealPlan.weekCostNoteLink}
+                </Link>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-lg)] text-center shadow-sm">
