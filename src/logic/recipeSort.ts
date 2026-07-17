@@ -12,8 +12,14 @@ export const NUTRIENT_SORT_OPTIONS = ['kcal', 'protein', 'salt', 'fat', 'carb'] 
 export type NutrientSortOption = (typeof NUTRIENT_SORT_OPTIONS)[number]
 
 /** レシピ一覧の並べ替えオプション（kcal/protein/salt/fat/carb=栄養並び替え。2026-07-13 Fable設計、
- * 2026-07-16 便Tで塩分・脂質・糖質を追加） */
-export type RecipeSortOption = 'updated' | 'pantryMatch' | 'kana' | 'cooked' | NutrientSortOption
+ * 2026-07-16 便Tで塩分・脂質・糖質を追加。theme=テーマごと（2026-07-17オーナー指示で追加）） */
+export type RecipeSortOption =
+  | 'updated'
+  | 'pantryMatch'
+  | 'kana'
+  | 'cooked'
+  | 'theme'
+  | NutrientSortOption
 
 /** 並べ替えオプションが栄養並び替え（Pro機能）かどうか */
 export function isNutrientSortOption(option: RecipeSortOption): option is NutrientSortOption {
@@ -29,13 +35,16 @@ export type SortDirection = 'asc' | 'desc'
  * 種類を切り替えたときはこの既定値にリセットする（呼び出し側で使う）。
  * 栄養並び替えの既定は「たんぱく質だけ多い方から（高たんぱく志向）・それ以外（カロリー・塩分・脂質・糖質）は
  * 少ない方から（ヘルシー志向）」（2026-07-13にカロリーで導入した方針を2026-07-16に塩分・脂質・糖質にも適用。
- * どれも昇順/降順トグルで反転できる）
+ * どれも昇順/降順トグルで反転できる）。
+ * テーマごと（theme）の既定も昇順で、①基本レシピ→②各テーマ（五十音順）→③自作レシピ、の順に
+ * 読める並びを基準にする（2026-07-17オーナー指示。降順トグルで全体反転できる）
  */
 export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   updated: 'desc',
   pantryMatch: 'desc',
   kana: 'asc',
   cooked: 'desc',
+  theme: 'asc',
   kcal: 'asc',
   protein: 'desc',
   salt: 'asc',
@@ -102,7 +111,18 @@ function pantryMatchCount(recipe: Recipe, normalizedPantryNames: string[]): numb
   ).length
 }
 
-/** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか） */
+/**
+ * 「テーマごと」並び替えの基本区分（2026-07-17オーナー指示）。
+ * 配布テーマ取り込み品も isStarter=true のため、判定は sourceSetName の有無を先に見る。
+ * 0=基本レシピ（sourceSetNameなし・isStarter）／1=テーマ（sourceSetNameあり）／2=自作レシピ
+ */
+function themeGroupRank(recipe: Recipe): number {
+  if (recipe.sourceSetName) return 1
+  if (recipe.isStarter) return 0
+  return 2
+}
+
+/** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数・テーマ区分のいずれか） */
 function compareAscending(
   option: Exclude<RecipeSortOption, NutrientSortOption>,
   a: SearchResult,
@@ -121,6 +141,17 @@ function compareAscending(
         pantryMatchCount(a.recipe, normalizedPantryNames) -
         pantryMatchCount(b.recipe, normalizedPantryNames)
       )
+    case 'theme': {
+      // ①基本レシピ→②各テーマ（sourceSetNameの五十音順）→③自作レシピ。
+      // 同テーマ内・同区分内はここでは0を返し、sortResults側の既定タイブレーク
+      // （更新順=新しい順）に委ねる（「同テーマ内は既定順=更新順」の要件どおり）
+      const rankDiff = themeGroupRank(a.recipe) - themeGroupRank(b.recipe)
+      if (rankDiff !== 0) return rankDiff
+      if (a.recipe.sourceSetName && b.recipe.sourceSetName) {
+        return collator.compare(toHiragana(a.recipe.sourceSetName), toHiragana(b.recipe.sourceSetName))
+      }
+      return 0
+    }
   }
 }
 

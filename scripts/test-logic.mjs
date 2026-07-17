@@ -2101,6 +2101,63 @@ eq(
   eq('isNutrientSortOption: updatedは栄養並び替えでない', isNutrientSortOption('updated'), false)
 }
 
+// ---------- 「テーマごと」並び替え(2026-07-17オーナー指示: レシピ一覧の並び替えに新設)。
+// 昇順は①基本レシピ(sourceSetNameなし・isStarter)→②各テーマ(sourceSetNameの五十音順・
+// 同テーマ内は既定順=更新順=新しい順)→③自作レシピ(最後)。降順トグルは①②③の並び自体と
+// テーマの五十音順は反転するが、既存の全並び替え共通の仕様どおり「同点(同グループ・同テーマ内)の
+// 順序は常に更新順(新しい順)を維持し方向トグルの影響を受けない」ため、単純な配列reverseとは
+// 一致しない(グループ間・テーマ間の前後だけが反転する) ----------
+{
+  const mkThemeRecipe = (id, title, updatedAt, extra) => ({
+    id,
+    title,
+    servings: 2,
+    effortLevel: 'easy',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: updatedAt,
+    updatedAt,
+    ...extra,
+  })
+  // 基本レシピ2件(sourceSetNameなし・isStarter)・テーマ2種(あいうえお×2, いろは×1。
+  // いずれもsourceSetNameあり・配布セット取り込み品はisStarterも true)・自作2件
+  // (sourceSetNameなし・isStarterなし=通常のユーザー登録レシピ相当)
+  const rOwnOld = mkThemeRecipe(1, '自作B', 100)
+  const rOwnNew = mkThemeRecipe(2, '自作A', 200)
+  const rBaseOld = mkThemeRecipe(3, '基本1', 50, { isStarter: true })
+  const rBaseNew = mkThemeRecipe(4, '基本2', 150, { isStarter: true })
+  const rThemeIroha = mkThemeRecipe(5, 'テーマい', 300, {
+    isStarter: true,
+    sourceSetName: 'いろは',
+  })
+  const rThemeAiOld = mkThemeRecipe(6, 'テーマあ古', 10, {
+    isStarter: true,
+    sourceSetName: 'あいうえお',
+  })
+  const rThemeAiNew = mkThemeRecipe(7, 'テーマあ新', 500, {
+    isStarter: true,
+    sourceSetName: 'あいうえお',
+  })
+  const themeResults = [rThemeIroha, rOwnOld, rBaseOld, rThemeAiOld, rOwnNew, rThemeAiNew, rBaseNew].map(
+    (recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }),
+  )
+  eq('テーマごとの既定方向は昇順', defaultSortDirection.theme, 'asc')
+  eq(
+    'テーマごと昇順: 基本(新しい順)→テーマ(五十音順・同テーマ内は新しい順)→自作(新しい順)',
+    sortResults(themeResults, 'theme', []).map((r) => r.recipe.id),
+    [4, 3, 7, 6, 5, 2, 1],
+  )
+  eq(
+    'テーマごと降順: グループ順・テーマの五十音順は反転するが、同テーマ内は常に新しい順のまま(方向トグルの影響を受けない・既存仕様どおり)',
+    sortResults(themeResults, 'theme', [], 'desc').map((r) => r.recipe.id),
+    [2, 1, 5, 7, 6, 4, 3],
+  )
+}
+
 // ---------- 削除したセット品の再取込除外(トゥームストーン・2026-07-13 Fable設計) ----------
 {
   // 削除時の記録: 配布セット由来なら(setId, title)を記録し、自作レシピは記録しない
