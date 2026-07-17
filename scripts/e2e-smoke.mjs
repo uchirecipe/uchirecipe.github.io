@@ -137,7 +137,26 @@
 //         捕捉)で書き出し→まっさらな別プロファイルへ「読み込む(置き換え)」で復元し、
 //         価格・週献立・在庫が実際に引き継がれることを確認。加えて、これらの項目が無い
 //         旧形式のbackup JSONを、既に価格・在庫データのあるプロファイルへ読み込んでも
-//         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する) /
+//         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する。2026-07-17
+//         バックアップ改修 修正1でPro解錠コードの往復(CODEBACKUP-01)も同じ書き出し元/復元先で
+//         追加確認: 書き出しJSONにsettings.proCodeが含まれる・まっさらな未購入プロファイルへの
+//         置き換え復元だけでPro解錠状態が戻る(IndexedDB直読み+Pro・パックタブの表示の両方で確認)) /
+//         CODEMERGE-01(2026-07-17バックアップ改修 修正1: merge(「読み込む(今のデータに追加)」)でも
+//         Pro解錠コードが戻ることを実UI経由で確認。(a)未購入プロファイル+コード入りバックアップを
+//         mergeで解錠される (b)Pro解錠済みプロファイル+コード無し旧形式バックアップをmergeしても
+//         解錠状態が消えない=mergeUnlockCodesの「バックアップに無ければ既存を保持」の実固定) /
+//         FILESAVE-01(2026-07-17バックアップ改修 修正2+3: 保存先選択+前回の場所に上書き。
+//         File System Access API(showSaveFilePicker)はheadless chromiumに実装が無いことを実測
+//         確認済みのため、addInitScriptで注入して「対応ブラウザ」を模す。(a)保存先の記録が無い間は
+//         「前回の場所に上書き」ボタンが出ず、IndexedDBのfileHandlesテーブルに記録すると
+//         再訪問で出る(表示分岐の実コードを固定) (b)ピッカーのキャンセル(AbortError)・
+//         上書き失敗時のピッカーへのフォールバックのどちらもエラー表示が出ない。
+//         自作の偽handleは関数を含むとDataCloneErrorになりIndexedDBに保存できないため、
+//         実際のJSON書き込み内容の往復まではここでは検証できない(scripts/test-logic.mjsの
+//         単体テストとコードレビューで別途担保。報告に明記) /
+//         BACKUPCARDS-01(2026-07-17バックアップ改修 修正5: バックアップタブを3カード
+//         (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成。②で「追加」
+//         「置き換え」ボタンが並んで見えること・①に購入コード注意文があることを確認) /
 //         PRICEVIEW-01(レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
 //         全面改修。既定OFFで材料行に金額表示は無く、見出し行の「原価を見る」チップ(文言は同日
 //         「価格を見る」→「原価を見る」に変更)を押すと材料リスト直上に原価サマリーカード
@@ -887,17 +906,41 @@ try {
     'SETTINGS-TAB-01 「バックアップ」タブで書き出しボタンが見える',
     (await page.textContent('body')).includes('ファイルに書き出す'),
   )
-  // REFRESH-APP-01: 「アプリを更新する」ボタン(2026-07-16新設。SWとキャッシュだけ消してリロード
-  // する安全機能)がバックアップタブに存在し、データは消えない旨の説明文があること。
-  // 実際のSW解除・reloadはheadlessでの副作用が大きいため、ボタンとconfirm文言の存在確認までとし、
-  // クリックはしない(refreshApp()自体はscripts/test-logic.mjsのモックテストで検証済み)。
+  // 修正5(2026-07-17バックアップ改修): バックアップタブが3カード
+  // (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成されたこと
   check(
-    'REFRESH-APP-01 「アプリを更新する」ボタンが見える',
-    (await page.textContent('body')).includes('アプリを更新する'),
+    'BACKUPCARDS-01 「バックアップから戻す」の見出しが見える(カード②)',
+    (await page.textContent('body')).includes('バックアップから戻す'),
   )
   check(
-    'REFRESH-APP-01 説明文に「データは消えません」相当がある',
-    (await page.textContent('body')).includes('データは消えません'),
+    'BACKUPCARDS-01 「追加」「置き換え」の両ボタンが同時に見える(並べて配置)',
+    (await page.textContent('body')).includes('読み込む（今のデータに追加）') &&
+      (await page.textContent('body')).includes('読み込む（今のデータと置き換え）'),
+  )
+  check(
+    'BACKUPCARDS-01 修正1: バックアップに購入コードが含まれる旨の注意文が見える',
+    (await page.textContent('body')).includes('バックアップファイルには購入コードが含まれます'),
+  )
+  // REFRESH-APP-01: 「アプリの表示を修復する」ボタン(2026-07-16新設・2026-07-17修正4で文言全面改訂。
+  // SWとキャッシュだけ消してリロードする安全機能)が③困ったときカードに存在し、消えるもの/残るものの
+  // 説明があること。実際のSW解除・reloadはheadlessでの副作用が大きいため、ボタンとconfirm文言の
+  // 存在確認までとし、クリックはしない(refreshApp()自体はscripts/test-logic.mjsのモックテストで検証済み)。
+  check(
+    'REFRESH-APP-01 「アプリの表示を修復する」ボタンが見える(2026-07-17文言変更)',
+    (await page.textContent('body')).includes('アプリの表示を修復する'),
+  )
+  check(
+    'REFRESH-APP-01 説明文に「消えるもの」「残るもの」の内訳がある(修正4)',
+    (await page.textContent('body')).includes('消えるもの: 画面の一時ファイルだけです') &&
+      (await page.textContent('body')).includes('残るもの: レシピ・価格・設定・購入コードなど'),
+  )
+  check(
+    'REFRESH-APP-01 ブラウザのキャッシュクリアに関する注意(「Cookieと他のサイトデータ」)がある(修正4)',
+    (await page.textContent('body')).includes('Cookieと他のサイトデータ」を消すとレシピなどのデータがすべて消えます'),
+  )
+  check(
+    'REFRESH-APP-01 上書きボタン(前回の場所に上書き)はFile System Access API非対応のheadless環境では出ない',
+    !(await page.textContent('body')).includes('前回の場所に上書き'),
   )
   await page.getByRole('button', { name: 'Pro・パック', exact: true }).click()
   await page.waitForTimeout(200)
@@ -4065,7 +4108,9 @@ try {
       await srcOnionPriceInput.press('Enter')
       await srcPage.waitForTimeout(400)
 
-      // 週献立に1枠割当・在庫に1品(IndexedDBへ直接書き込み。理由は上のコメントの通り)
+      // 週献立に1枠割当・在庫に1品・Pro解錠コード(IndexedDBへ直接書き込み。理由は上のコメントの通り。
+      // Pro解錠コードは2026-07-17バックアップ改修 修正1のコード往復確認用。実際の購入コードは
+      // 販売台帳の原本のためNUT-02等と同様settings.proCodeの直書きで「解錠済み」を再現する)
       const setup = await srcPage.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((resolve, reject) => {
@@ -4078,9 +4123,20 @@ try {
           cursorReq.onerror = () => reject(cursorReq.error)
         })
         await new Promise((resolve, reject) => {
-          const tx = idb.transaction(['mealPlans', 'pantryItems'], 'readwrite')
+          const tx = idb.transaction(['mealPlans', 'pantryItems', 'settings'], 'readwrite')
           tx.objectStore('mealPlans').add({ date: '2026-07-20', slot: 'dinner', recipeId, role: 'main' })
           tx.objectStore('pantryItems').add({ name: 'E2Eバックアップ確認在庫', level: 'have', isFrequent: true })
+          const settingsStore = tx.objectStore('settings')
+          const getReq = settingsStore.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            settingsStore.put({
+              ...current,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+          }
           tx.oncomplete = () => resolve(undefined)
           tx.onerror = () => reject(tx.error)
         })
@@ -4122,6 +4178,14 @@ try {
         ['pantryItems', 'shoppingItems', 'mealPlans', 'todayList', 'prices'].every((key) =>
           (exported[key] ?? []).every((row) => !('id' in row)),
         ),
+      )
+      // CODEBACKUP-01(修正1): 書き出しJSONにPro解錠コードが含まれること(オーナー実害
+      // 「ブラウザデータ消去→復元しても購入状態が戻らない」の再発防止。settings自体が
+      // 従来からバックアップに含まれていたが、コード欄がちゃんと乗ることを明示的に固定する)
+      check(
+        'CODEBACKUP-01 書き出しJSONの settings.proCode に解錠コードが含まれる',
+        exported.settings?.proCode === 'UR-E2E-TEST-ONLY',
+        `exported.settings=${JSON.stringify(exported.settings)}`,
       )
     } finally {
       await srcBrowser.close()
@@ -4178,9 +4242,14 @@ try {
             req2.onsuccess = () => resolve(req2.result)
             req2.onerror = () => reject(req2.error)
           })
+        const settings = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('settings', 'readonly').objectStore('settings').get(1)
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
         const [mealPlans, pantryItems] = await Promise.all([getAll('mealPlans'), getAll('pantryItems')])
         idb.close()
-        return { mealPlans, pantryItems }
+        return { mealPlans, pantryItems, settings }
       })
       check(
         'BACKUP-01 週献立の割当(2026-07-20夕食)が復元される',
@@ -4191,6 +4260,22 @@ try {
         'BACKUP-01 在庫の追加品が復元される',
         restored.pantryItems.some((p) => p.name === 'E2Eバックアップ確認在庫'),
         `pantryItems=${JSON.stringify(restored.pantryItems)}`,
+      )
+      // CODEBACKUP-01(修正1・最重要): 「ブラウザデータ消去→復元」を再現する本命シナリオ。
+      // まっさらな(購入していない)別プロファイルへ「読み込む(置き換え)」で復元するだけで、
+      // Pro解錠コードも一緒に戻り購入状態が回復することを確認する
+      check(
+        'CODEBACKUP-01 まっさらなプロファイルへの置き換え復元でPro解錠コードが戻る(オーナー実害の再発防止)',
+        restored.settings?.proCode === 'UR-E2E-TEST-ONLY',
+        `settings=${JSON.stringify(restored.settings)}`,
+      )
+      // UI側でも実際にPro解錠済み表示になっていることを確認する(IndexedDB直読みだけでなく
+      // 画面表示にも反映されることの担保)
+      await dstPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await dstPage.waitForTimeout(500)
+      check(
+        'CODEBACKUP-01 復元後、Pro・パックタブの表示も解錠済みになっている',
+        (await dstPage.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
       )
     } finally {
       await dstBrowser.close()
@@ -4298,6 +4383,254 @@ try {
       )
     } finally {
       await compatBrowser.close()
+    }
+  }
+
+  // --- CODEMERGE-01(2026-07-17バックアップ改修 修正1): merge復元(「読み込む(今のデータに追加)」)
+  // でもPro解錠コードが戻ること、および旧形式(コード無し)バックアップをmergeしても既存の解錠
+  // コードが消えない(後方互換)ことを、実際の「バックアップから戻す」UI経由で確認する。
+  // (a) 既存プロファイルはコード未購入→コードを含むバックアップをmerge→復元後に解錠される
+  // (b) 既存プロファイルはPro解錠済み→コードを含まない旧形式バックアップをmerge→解錠状態が
+  //     消えない(mergeUnlockCodesの「バックアップに無ければ既存を保持」を実UIで固定する) ---
+  currentCheck = 'CODEMERGE-01'
+  {
+    // (a) 未購入プロファイル + コード入りバックアップをmerge → 解錠される
+    const cmaBrowser = await chromium.launch()
+    try {
+      const cmaContext = await cmaBrowser.newContext()
+      const cmaPage = await cmaContext.newPage()
+      cmaPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@CODEMERGE-01(a)] ${err.message}`)
+      })
+      cmaPage.on('dialog', (dialog) => dialog.accept())
+      await cmaPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cmaPage.waitForTimeout(1800) // 初回シード完了待ち(未購入のまっさらなプロファイル)
+
+      const backupWithCode = JSON.stringify({
+        app: 'uchi-recipe',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        settings: { proCode: 'UR-E2E-MERGE-TEST', proActivatedAt: Date.now() },
+        recipes: [],
+      })
+      await cmaPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await cmaPage.waitForTimeout(500)
+      await cmaPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await cmaPage.waitForTimeout(300)
+      const [cmaFileChooser] = await Promise.all([
+        cmaPage.waitForEvent('filechooser'),
+        cmaPage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+      ])
+      await cmaFileChooser.setFiles({
+        name: 'with-code-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(backupWithCode, 'utf-8'),
+      })
+      await cmaPage.waitForTimeout(800)
+      const cmaProCode = await cmaPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const settings = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('settings', 'readonly').objectStore('settings').get(1)
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
+        idb.close()
+        return settings?.proCode
+      })
+      check(
+        'CODEMERGE-01(a) 未購入プロファイルへのmerge復元でバックアップ側のPro解錠コードが設定される',
+        cmaProCode === 'UR-E2E-MERGE-TEST',
+        `proCode=${cmaProCode}`,
+      )
+    } finally {
+      await cmaBrowser.close()
+    }
+
+    // (b) Pro解錠済みプロファイル + コード無し(旧形式)バックアップをmerge → 解錠状態が消えない
+    const cmbBrowser = await chromium.launch()
+    try {
+      const cmbContext = await cmbBrowser.newContext()
+      const cmbPage = await cmbContext.newPage()
+      cmbPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@CODEMERGE-01(b)] ${err.message}`)
+      })
+      cmbPage.on('dialog', (dialog) => dialog.accept())
+      await cmbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cmbPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 既にPro解錠済みの状態を用意する(IndexedDB直書き。実コードは販売台帳の原本のため
+      // NUT-02等と同じ方式で「解錠済み」だけを再現する)
+      await cmbPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            store.put({ ...current, id: 1, proCode: 'UR-E2E-EXISTING', proActivatedAt: Date.now() })
+          }
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      })
+
+      // コード欄もsettings欄も無い、この対応より前の旧形式バックアップを模す
+      const oldFormatNoCodeBackup = JSON.stringify({
+        app: 'uchi-recipe',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        recipes: [],
+      })
+      await cmbPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await cmbPage.waitForTimeout(500)
+      await cmbPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await cmbPage.waitForTimeout(300)
+      const [cmbFileChooser] = await Promise.all([
+        cmbPage.waitForEvent('filechooser'),
+        cmbPage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+      ])
+      await cmbFileChooser.setFiles({
+        name: 'old-format-no-code-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(oldFormatNoCodeBackup, 'utf-8'),
+      })
+      await cmbPage.waitForTimeout(800)
+      check(
+        'CODEMERGE-01(b) 旧形式バックアップのmerge復元でもエラーにならない',
+        !(await cmbPage.textContent('body')).includes('ファイルを読み込めませんでした'),
+      )
+      const cmbProCode = await cmbPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const settings = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('settings', 'readonly').objectStore('settings').get(1)
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
+        idb.close()
+        return settings?.proCode
+      })
+      check(
+        'CODEMERGE-01(b) 旧形式(コード無し)バックアップをmergeしても既存のPro解錠コードは消えない(空で上書きしない)',
+        cmbProCode === 'UR-E2E-EXISTING',
+        `proCode=${cmbProCode}`,
+      )
+    } finally {
+      await cmbBrowser.close()
+    }
+  }
+
+  // --- FILESAVE-01(2026-07-17バックアップ改修 修正2+3): 保存先選択+前回の場所に上書き。
+  // 実ブラウザのFile System Access APIはネイティブのOS保存ダイアログを伴うため、Playwrightの
+  // headless chromiumでは`showSaveFilePicker`自体が存在しない(=既定では非対応ブラウザ扱いになる。
+  // 実測確認済み)。そのため、このチェックだけaddInitScriptで`window.showSaveFilePicker`を
+  // 注入し「対応ブラウザ」を模して、以下2点を実コードで検証する:
+  // (a) 保存先の記録が無い間は「前回の場所に上書き」ボタンが出ない→IndexedDBのfileHandles
+  //     テーブルに記録を直接投入→再訪問でボタンが出る(表示分岐そのもの=hasSavedFileHandle/
+  //     useEffectの実コードを通す)
+  // (b) 「ファイルに書き出す」「前回の場所に上書き」を押しても、ピッカーがキャンセル
+  //     (AbortError)扱いになったときエラー表示が出ない(isAbortErrorの実コードを通す)
+  // 注意: 本物のFileSystemFileHandle(createWritable等のメソッド持ち)はブラウザネイティブの
+  // structured clone対応があるためIndexedDBに保存できるが、JSで自作した偽handleは関数を
+  // 持つとDataCloneErrorになり保存できない。そのため実際の書き込み内容(JSON)の往復までは
+  // ここでは検証できず、その部分はscripts/test-logic.mjsの単体テスト(backupFileName/
+  // isAbortError/supportsSaveFilePicker)とコードレビューで担保する(報告に明記) ---
+  currentCheck = 'FILESAVE-01'
+  {
+    const fsBrowser = await chromium.launch()
+    try {
+      const fsContext = await fsBrowser.newContext()
+      const fsPage = await fsContext.newPage()
+      fsPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@FILESAVE-01] ${err.message}`)
+      })
+      fsPage.on('dialog', (dialog) => dialog.accept())
+      // 「対応ブラウザ」を模す: showSaveFilePickerを注入する(呼ばれたら常にキャンセル扱い)
+      await fsContext.addInitScript(() => {
+        // webdriverガード(supportsSaveFilePicker)を明示フラグで解除し、偽ピッカーで
+        // ピッカー経路のUI分岐を検証する(フラグ無しの通常e2eは常にDLフォールバック経路)
+        window.__e2eForceFilePicker = true
+        window.showSaveFilePicker = async () => {
+          throw new DOMException('e2e fake picker: canceled', 'AbortError')
+        }
+      })
+
+      await fsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fsPage.waitForTimeout(1800) // 初回シード完了待ち
+      await fsPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await fsPage.waitForTimeout(500)
+      await fsPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await fsPage.waitForTimeout(300)
+
+      check(
+        'FILESAVE-01(a) 保存先の記録が無い間は「前回の場所に上書き」ボタンが出ない',
+        !(await fsPage.textContent('body')).includes('前回の場所に上書き'),
+      )
+
+      // 「ファイルに書き出す」→対応ブラウザ扱いなので注入したshowSaveFilePickerが呼ばれ、
+      // AbortErrorでキャンセル扱いになる。エラートーストが出ないことを確認する
+      await fsPage.getByRole('button', { name: 'ファイルに書き出す' }).click()
+      await fsPage.waitForTimeout(500)
+      check(
+        'FILESAVE-01(b) ピッカーをキャンセル(AbortError)してもエラー表示が出ない',
+        !(await fsPage.textContent('body')).includes('保存に失敗しました'),
+      )
+
+      // IndexedDBのfileHandlesテーブルに保存先ハンドルの記録を直接投入し(本物のhandleは
+      // structured cloneでしか作れないため、表示分岐の検証用に中身を問わない記録だけを置く)、
+      // 再訪問(再マウント)で「前回の場所に上書き」ボタンが出ることを確認する
+      await fsPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('fileHandles', 'readwrite')
+          tx.objectStore('fileHandles').put({ id: 1, handle: {}, savedAt: Date.now() })
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      })
+      // 既に#/settingsに居るためgotoではハッシュ同一=再マウントされない(Dexie/React側は
+      // 初回マウント時の判定のまま)。本物のreloadで再マウントさせる(便Zと同じ既知の落とし穴)
+      await fsPage.reload({ waitUntil: 'networkidle' })
+      await fsPage.waitForTimeout(800)
+      await fsPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await fsPage.waitForTimeout(300)
+      check(
+        'FILESAVE-01(a) 保存先の記録がある状態で再訪問すると「前回の場所に上書き」ボタンが出る',
+        (await fsPage.textContent('body')).includes('前回の場所に上書き'),
+      )
+
+      // 「前回の場所に上書き」: 記録した偽handleにはrequestPermission等のメソッドが無いため
+      // overwriteSavedFileが例外を投げ、保存先選択(注入したshowSaveFilePicker)へ
+      // フォールバックする。そちらもAbortError扱いになるため、結局エラー表示は出ない
+      await fsPage.getByRole('button', { name: '前回の場所に上書き' }).click()
+      await fsPage.waitForTimeout(500)
+      check(
+        'FILESAVE-01(b) 上書き失敗→保存先選択へフォールバックしてもエラー表示が出ない',
+        !(await fsPage.textContent('body')).includes('保存に失敗しました'),
+      )
+    } finally {
+      await fsBrowser.close()
     }
   }
 

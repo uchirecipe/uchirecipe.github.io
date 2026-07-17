@@ -48,7 +48,13 @@ import {
   exclusionRecordFor,
   buildExclusionTitleSet,
   tablesToReplace,
+  mergeUnlockCodes,
 } from '../src/logic/backup.ts'
+import {
+  supportsSaveFilePicker,
+  backupFileName,
+  isAbortError,
+} from '../src/logic/fileSave.ts'
 import {
   sortResults,
   defaultSortDirection,
@@ -2230,6 +2236,89 @@ eq(
       prices: [],
     }),
     { pantryItems: true, shoppingItems: true, mealPlans: true, todayList: true, prices: true },
+  )
+}
+
+// ---------- mergeUnlockCodes(バックアップ修正1・2026-07-17: merge復元でPro・追加レシピ
+// パックの解錠コードを「バックアップ側にあれば設定、無ければ既存を保持」で戻す。
+// オーナー実害「ブラウザデータ消去→復元しても購入状態が戻らない」の再発防止。
+// 空文字列/undefinedで既存コードを上書きしない=旧形式(コード無し)バックアップの
+// 後方互換の要 ----------
+{
+  const noCode = {
+    proCode: undefined,
+    proActivatedAt: undefined,
+    recipePackCode: undefined,
+    recipePackActivatedAt: undefined,
+  }
+  const withProCode = {
+    proCode: 'UR-AAAA-AAAA',
+    proActivatedAt: 1000,
+    recipePackCode: undefined,
+    recipePackActivatedAt: undefined,
+  }
+  const withPackCode = {
+    proCode: undefined,
+    proActivatedAt: undefined,
+    recipePackCode: 'UP-BBBB-BBBB',
+    recipePackActivatedAt: 2000,
+  }
+
+  eq(
+    'コード往復: 既存コード無し+バックアップにコード有り→採用する',
+    mergeUnlockCodes(noCode, withProCode),
+    withProCode,
+  )
+  eq(
+    '既存コード有り+バックアップ側が旧形式(settings自体が無い=undefined)→既存を保持(消さない)',
+    mergeUnlockCodes(withProCode, undefined),
+    withProCode,
+  )
+  eq(
+    '既存コード有り+バックアップのsettingsはあるがコード欄が無い(空)→既存を消さない(空で上書きしない)',
+    mergeUnlockCodes(withProCode, noCode),
+    withProCode,
+  )
+  eq(
+    '既存Pro解錠済み+バックアップに別のPro解錠コード→バックアップ側を採用する(コードがあれば設定)',
+    mergeUnlockCodes(withProCode, { ...noCode, proCode: 'UR-ZZZZ-ZZZZ', proActivatedAt: 9999 }),
+    { proCode: 'UR-ZZZZ-ZZZZ', proActivatedAt: 9999, recipePackCode: undefined, recipePackActivatedAt: undefined },
+  )
+  eq(
+    'proCodeとrecipePackCodeは独立に判定される(Pro解錠済みの状態でパックだけ含む古いバックアップをmerge)',
+    mergeUnlockCodes(withProCode, withPackCode),
+    { proCode: 'UR-AAAA-AAAA', proActivatedAt: 1000, recipePackCode: 'UP-BBBB-BBBB', recipePackActivatedAt: 2000 },
+  )
+  eq(
+    '両方コード無しどうし→両方とも既存(undefined)のまま・エラーにならない',
+    mergeUnlockCodes(noCode, noCode),
+    noCode,
+  )
+}
+
+// ---------- fileSave(バックアップ修正2+3・2026-07-17: 保存先選択+前回に上書き) ----------
+{
+  eq(
+    'supportsSaveFilePicker: window自体が無いNode環境ではfalse(未対応ブラウザ相当)',
+    supportsSaveFilePicker(),
+    false,
+  )
+  eq(
+    'backupFileName: 日付から yyyy-mm-dd 形式のファイル名を組み立てる',
+    backupFileName(new Date(2026, 6, 5)), // 月は0始まり(6=7月)
+    'uchi-recipe-backup-2026-07-05.json',
+  )
+  eq(
+    'backupFileName: 1桁の月日も0埋めする',
+    backupFileName(new Date(2026, 0, 9)),
+    'uchi-recipe-backup-2026-01-09.json',
+  )
+  eq('isAbortError: DOMExceptionでもAbortError以外はfalse', isAbortError(new DOMException('x', 'NotFoundError')), false)
+  eq('isAbortError: DOMException以外(普通のError)はfalse', isAbortError(new Error('x')), false)
+  eq(
+    'isAbortError: name=AbortErrorのDOMExceptionはtrue(ユーザーがピッカーをキャンセルした扱い)',
+    isAbortError(new DOMException('x', 'AbortError')),
+    true,
   )
 }
 

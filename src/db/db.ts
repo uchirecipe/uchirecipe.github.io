@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type {
+  BackupFileHandleRecord,
   MealPlanEntry,
   PantryItem,
   PriceEntry,
@@ -23,6 +24,7 @@ class UchiRecipeDB extends Dexie {
   todayList!: Table<TodayListItem, number>
   prices!: Table<PriceEntry, number>
   setExclusions!: Table<SetExclusion, number>
+  fileHandles!: Table<BackupFileHandleRecord, number>
 
   constructor() {
     super('uchi-recipe')
@@ -124,6 +126,20 @@ class UchiRecipeDB extends Dexie {
       todayList: '++id, recipeId, addedAt',
       prices: '++id, name, updatedAt',
       setExclusions: '++id, setId, title',
+    })
+    // バージョン12: 「ファイルに書き出す」の保存先ハンドル（File System Access API対応ブラウザの
+    // 「前回の場所に上書き」用。2026-07-17バックアップ改修 修正2+3）を保存するテーブルを追加。
+    // 新規テーブルのみの追加で既存データには影響しない（upgrade関数不要）
+    this.version(12).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt, sourceSetId',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+      prices: '++id, name, updatedAt',
+      setExclusions: '++id, setId, title',
+      fileHandles: 'id',
     })
   }
 }

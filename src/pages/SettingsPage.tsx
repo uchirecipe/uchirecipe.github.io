@@ -5,6 +5,7 @@ import {
   Plus,
   X,
   Download,
+  Save,
   Upload,
   Link2,
   RotateCcw,
@@ -20,6 +21,7 @@ import { listRecipes, deleteRecipesBySourceSet } from '../db/recipes'
 import { listSetExclusions, clearSetExclusions } from '../db/setExclusions'
 import { reloadStarterRecipes, starterCount } from '../db/starters'
 import {
+  exportBackup,
   downloadBackup,
   importBackup,
   parseBackup,
@@ -29,6 +31,14 @@ import {
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
 import { refreshApp } from '../logic/appRefresh'
+import {
+  supportsSaveFilePicker,
+  saveWithPicker,
+  overwriteSavedFile,
+  hasSavedFileHandle,
+  backupFileName,
+  isAbortError,
+} from '../logic/fileSave'
 import {
   totalCookedLogPhotoBytes,
   isOverCookedPhotoLimit,
@@ -78,6 +88,11 @@ const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
 // Wake Lock API非対応環境（'wakeLock' in navigator が false）かどうか。
 // 画面が消えない系トグルの説明の下に注記を出すために使う(useWakeLock.tsのロジック自体は変更しない)
 const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
+
+// File System Access API対応ブラウザ(Chrome/Edge等)かどうか(2026-07-17バックアップ改修
+// 修正2+3)。対応環境のみ保存先選択・「前回の場所に上書き」を出し、非対応(Safari/Firefox)は
+// 従来どおりの自動ダウンロードのままにする(ブラウザ機能自体の対応可否なのでセッション中は不変)
+const fileSaveSupported = supportsSaveFilePicker()
 
 /**
  * 設定画面のタブ分割(2026-07-12オーナー実機フィードバック)。
@@ -168,8 +183,25 @@ export default function SettingsPage() {
   const [packError, setPackError] = useState('')
   // 「作った記録」の写真をバックアップに含めるか(2026-07-12写真添付・docs/20 §4。既定OFF)
   const [includeCookedPhotos, setIncludeCookedPhotos] = useState(false)
+  // 前回選んだ保存先ハンドルの記録があるか(2026-07-17バックアップ改修 修正2+3。
+  // File System Access API対応ブラウザのみ意味を持つ。「前回の場所に上書き」ボタンの表示判定)
+  const [savedHandleExists, setSavedHandleExists] = useState(false)
+  const [exportBusy, setExportBusy] = useState(false)
   // 設定画面のタブ(2026-07-12オーナー実機フィードバックのタブ分割)
   const [activeTab, setActiveTab] = useState<SettingsTab>('basic')
+
+  // 前回の保存先ハンドルの記録有無を起動時に1回確認する(2026-07-17バックアップ改修 修正2+3。
+  // 非対応ブラウザでは常にfalseのまま=ボタン自体を出さない)
+  useEffect(() => {
+    if (!fileSaveSupported) return
+    let cancelled = false
+    void hasSavedFileHandle().then((exists) => {
+      if (!cancelled) setSavedHandleExists(exists)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // テーマ一覧（配布物マニフェスト）
   const [themes, setThemes] = useState<ThemeManifestEntry[]>([])
@@ -298,6 +330,61 @@ export default function SettingsPage() {
   // 「作った記録」写真の容量ガード（2026-07-12写真添付・docs/20 §4。自動削除はしない、促すバナーのみ）
   const cookedPhotoBytes = recipes ? totalCookedLogPhotoBytes(recipes) : 0
   const showCookedPhotoLimitBanner = isOverCookedPhotoLimit(cookedPhotoBytes)
+
+  /**
+   * 「ファイルに書き出す」(2026-07-17バックアップ改修 修正2+3)。
+   * File System Access API対応ブラウザ(Chrome/Edge等)では保存先選択ダイアログ
+   * (showSaveFilePicker)を開き、選んだ場所へ書き込む。選んだハンドルはIndexedDBに記録し、
+   * 次回以降「前回の場所に上書き」ボタン(handleExportOverwrite)で使う。
+   * 非対応ブラウザ(Safari/Firefox)は従来どおりの自動ダウンロード(downloadBackup)のまま
+   * （挙動を変えない）。ユーザーがピッカーをキャンセルした場合(AbortError)はエラー表示しない
+   */
+  const handleExportPick = async () => {
+    if (!fileSaveSupported) {
+      await downloadBackup(includeCookedPhotos) // 非対応ブラウザは従来どおりの自動ダウンロード
+      return
+    }
+    setExportBusy(true)
+    try {
+      const json = await exportBackup(includeCookedPhotos)
+      await saveWithPicker(json, backupFileName())
+      await updateSettings({ lastBackupAt: Date.now() })
+      setSavedHandleExists(true)
+    } catch (err) {
+      // ユーザーのキャンセル(AbortError)は何もしない。それ以外(権限拒否・headless等で
+      // ピッカー自体が使えない環境)は、エラーで終わらせず従来の自動ダウンロードへ
+      // フォールバックする(バックアップが取れないままになるのが最悪のため)
+      if (!isAbortError(err)) {
+        try {
+          await downloadBackup(includeCookedPhotos)
+          await updateSettings({ lastBackupAt: Date.now() })
+        } catch {
+          setMessage(ja.settings.backupSaveError)
+        }
+      }
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  /**
+   * 「前回の場所に上書き」(2026-07-17バックアップ改修 修正2+3)。権限確認
+   * (requestPermission)→書き込み。拒否・ハンドル失効時は保存先選択(handleExportPick)へ
+   * フォールバックする(overwriteSavedFileが例外を投げるので、そのcatchでフォールバックする)
+   */
+  const handleExportOverwrite = async () => {
+    setExportBusy(true)
+    try {
+      const json = await exportBackup(includeCookedPhotos)
+      await overwriteSavedFile(json)
+      await updateSettings({ lastBackupAt: Date.now() })
+    } catch {
+      setExportBusy(false)
+      await handleExportPick()
+      return
+    }
+    setExportBusy(false)
+  }
 
   /**
    * バックアップの読み込み: モードを選んでからファイルを開く。
@@ -1139,10 +1226,16 @@ export default function SettingsPage() {
 
       {activeTab === 'backup' && (
         <>
-          {/* バックアップ */}
+          {/* ①バックアップを取る(2026-07-17バックアップ改修 修正5でカード再構成。
+              修正2+3: File System Access API対応ブラウザは保存先選択+前回の場所に上書きボタンを併設) */}
           <section id="backup-section" className={sectionCls}>
             <h2 className="font-bold">{ja.settings.backupTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupDescription}</p>
+            {/* 修正1: バックアップに購入コードが含まれることの注意喚起 */}
+            <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
+              <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+              {ja.settings.backupContainsCodeNotice}
+            </p>
             <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
               {settings.lastBackupAt
                 ? ja.settings.backupLastDate.replace('{date}', formatDate(settings.lastBackupAt))
@@ -1169,12 +1262,36 @@ export default function SettingsPage() {
             </label>
             <button
               type="button"
-              onClick={() => downloadBackup(includeCookedPhotos)}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+              disabled={exportBusy}
+              onClick={() => void handleExportPick()}
+              className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-60"
             >
               <Download size={18} aria-hidden />
               {ja.settings.backupExport}
             </button>
+            {/* 「前回の場所に上書き」: File System Access API対応ブラウザで、一度でも保存先を
+                選んだことがある場合だけ併設で出す(2026-07-17修正2+3) */}
+            {fileSaveSupported && savedHandleExists && (
+              <>
+                <button
+                  type="button"
+                  disabled={exportBusy}
+                  onClick={() => void handleExportOverwrite()}
+                  className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
+                >
+                  <Save size={18} aria-hidden />
+                  {ja.settings.backupOverwrite}
+                </button>
+                <p className="mt-1 text-xs text-ink-muted">{ja.settings.backupOverwriteNote}</p>
+              </>
+            )}
+          </section>
+
+          {/* ②バックアップから戻す: 「追加」「置き換え」を並べて配置し、それぞれに説明キャプションを
+              付ける(2026-07-17修正5。以前は縦積みで置き換えだけ警告色が浮いて見えていたのを解消) */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.backupRestoreTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupRestoreDescription}</p>
             <input
               ref={importFileRef}
               type="file"
@@ -1185,36 +1302,45 @@ export default function SettingsPage() {
                 e.target.value = '' // 同じファイルをもう一度選べるように
               }}
             />
-            <div className="mt-[var(--space-sm)] grid grid-cols-1 gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => pickImportFile('merge')}
-                className="flex items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
-              >
-                <Upload size={18} aria-hidden />
-                {ja.settings.backupImportMerge}
-              </button>
-              <p className="text-xs text-ink-muted">{ja.settings.backupImportMergeNote}</p>
-              <button
-                type="button"
-                onClick={() => pickImportFile('replace')}
-                className="flex items-center justify-center gap-2 rounded-md border border-warning py-3 font-bold text-warning"
-              >
-                <Upload size={18} aria-hidden />
-                {ja.settings.backupImportReplace}
-              </button>
-              <p className="flex items-center gap-1 text-xs font-bold text-warning">
-                <TriangleAlert size={14} aria-hidden />
-                {ja.settings.importReplaceCaption}
-              </p>
+            <div className="mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]">
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => pickImportFile('merge')}
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent shadow-sm"
+                >
+                  <Upload size={18} className="shrink-0" aria-hidden />
+                  <span>{ja.settings.backupImportMerge}</span>
+                </button>
+                <p className="mt-1 text-xs text-ink-muted">{ja.settings.backupImportMergeNote}</p>
+              </div>
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => pickImportFile('replace')}
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center font-bold text-warning"
+                >
+                  <Upload size={18} className="shrink-0" aria-hidden />
+                  <span>{ja.settings.backupImportReplace}</span>
+                </button>
+                <p className="mt-1 flex items-start gap-1 text-xs font-bold text-warning">
+                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  {ja.settings.importReplaceCaption}
+                </p>
+              </div>
             </div>
           </section>
 
-          {/* 困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設)。
+          {/* ③困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設。
+              2026-07-17修正4でボタン文言・説明文を全面改訂)。
               レシピ・価格・購入コード等のIndexedDBデータには一切触れない(src/logic/appRefresh.ts参照) */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.refreshAppTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.refreshAppDescription}</p>
+            <ul className="mt-1 space-y-1 text-sm text-ink-muted">
+              <li>{ja.settings.refreshAppWhenToUse}</li>
+              <li>{ja.settings.refreshAppWhatIsCleared}</li>
+              <li>{ja.settings.refreshAppWhatRemains}</li>
+            </ul>
             <button
               type="button"
               onClick={() => {
@@ -1229,6 +1355,12 @@ export default function SettingsPage() {
               <RefreshCw size={18} aria-hidden />
               {ja.settings.refreshAppButton}
             </button>
+            {/* 修正4: ブラウザ自体のキャッシュクリア機能を使う場合の注意
+                (「Cookieと他のサイトデータ」を消すとIndexedDBごと消える事故の再発防止) */}
+            <p className="mt-[var(--space-md)] flex items-start gap-1 text-xs font-bold text-warning">
+              <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+              {ja.settings.refreshAppCacheClearWarning}
+            </p>
           </section>
         </>
       )}

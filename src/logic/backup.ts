@@ -13,6 +13,7 @@ import {
   type TodayListItem,
 } from '../db/types'
 import { buildSearchWords } from './kana'
+import { backupFileName } from './fileSave'
 
 /**
  * バックアップ: 全データ（レシピ・写真・作った記録・設定・在庫・買い物メモ・週献立・
@@ -20,6 +21,14 @@ import { buildSearchWords } from './kana'
  * 写真はBase64（画像を文字にした形式）で埋め込む。
  * 「作った記録」の写真（cookedLogs[].photo）はファイル肥大を避けるため既定では含めない
  * （2026-07-12写真添付・docs/20 §4。exportBackup/downloadBackupの引数で明示的にONにできる）。
+ *
+ * settings（Pro・追加レシピパックの解錠コード=proCode/recipePackCode込み）は個人のバックアップ
+ * には常に含まれる（exportBackupがgetSettings()の全項目をそのまま入れるため）。復元は
+ * replace（settings全体を置き換え）・merge（mergeUnlockCodes参照。解錠コードだけを
+ * 「バックアップにあれば設定、無ければ既存を保持」で復元）の両方に対応する
+ * （2026-07-17バックアップ改修 修正1・オーナー実害「ブラウザデータ消去→復元しても購入状態が
+ * 戻らない」の再発防止）。配布用のレシピセット（importRecipeSet）は別経路でsettingsを
+ * 一切参照しないため、配布物に購入コードが混入する余地はない
  */
 
 interface BackupCookedLog extends Omit<CookedLog, 'photo'> {
@@ -132,13 +141,11 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
 /** JSONをファイルとしてダウンロードし、最終バックアップ日時を記録する */
 export async function downloadBackup(includeCookedLogPhotos = false): Promise<void> {
   const json = await exportBackup(includeCookedLogPhotos)
-  const date = new Date()
-  const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `uchi-recipe-backup-${stamp}.json`
+  anchor.download = backupFileName()
   anchor.click()
   URL.revokeObjectURL(url)
   await updateSettings({ lastBackupAt: Date.now() })
@@ -174,6 +181,45 @@ export function tablesToReplace(file: BackupFile): {
     mealPlans: file.mealPlans !== undefined,
     todayList: file.todayList !== undefined,
     prices: file.prices !== undefined,
+  }
+}
+
+/** Pro・追加レシピパックの解錠コード関連フィールドだけを抜き出した型（merge復元専用） */
+type UnlockCodeFields = Pick<
+  Settings,
+  'proCode' | 'proActivatedAt' | 'recipePackCode' | 'recipePackActivatedAt'
+>
+
+/**
+ * merge復元（'今のデータに追加'）で解錠コード（Pro・追加レシピパック）をどう扱うかを決める
+ * （純ロジック・DB非依存。2026-07-17バックアップ改修 修正1・オーナー実害の再発防止）。
+ *
+ * 「ブラウザデータ消去→バックアップ読み込み」でPro/パックの購入状態が戻らない事故があった。
+ * 原因はimportBackupのmergeモードがsettings自体に一切触れていなかったこと（レシピ・
+ * 再取込除外の記録しか見ていなかった）。replaceモードは元々settings全体を置き換えるため
+ * バックアップにコードが含まれていれば自然に復元されるが、merge（今のデータに追加＝
+ * 今のデータを消さない設計）は同じやり方（全置き換え）はできない。
+ *
+ * ルール（Fable裁定）: 「バックアップ側にコードがあれば設定、無ければ既存を保持」
+ * （空で上書きしない）。proCode/recipePackCodeそれぞれ独立に判定する（Pro解錠済みの状態で
+ * パックだけを含む古いバックアップをmergeしてもPro状態は消えない、等）。
+ * バックアップにfile.settings自体が無い場合（settingsを持たない配布セット形式や、
+ * 万一の欠損）は既存をそのまま保持する＝何も変えない
+ */
+export function mergeUnlockCodes(
+  current: UnlockCodeFields,
+  backupSettings: Partial<UnlockCodeFields> | undefined,
+): UnlockCodeFields {
+  if (!backupSettings) return current
+  return {
+    proCode: backupSettings.proCode || current.proCode,
+    proActivatedAt: backupSettings.proCode
+      ? (backupSettings.proActivatedAt ?? current.proActivatedAt)
+      : current.proActivatedAt,
+    recipePackCode: backupSettings.recipePackCode || current.recipePackCode,
+    recipePackActivatedAt: backupSettings.recipePackCode
+      ? (backupSettings.recipePackActivatedAt ?? current.recipePackActivatedAt)
+      : current.recipePackActivatedAt,
   }
 }
 
@@ -291,7 +337,7 @@ export async function importBackup(
   // merge: 1件ずつ id で照合する
   let added = 0
   let skipped = 0
-  await db.transaction('rw', db.recipes, db.setExclusions, async () => {
+  await db.transaction('rw', db.recipes, db.setExclusions, db.settings, async () => {
     for (const recipe of recipes) {
       if (recipe.id == null) {
         // 古い形式などIDが無い場合は照合できないので新規として追加
@@ -320,6 +366,19 @@ export async function importBackup(
         existingKeys.add(key)
         await db.setExclusions.add(exclusion)
       }
+    }
+    // Pro・追加レシピパックの解錠コードも復元する（2026-07-17バックアップ改修 修正1・
+    // オーナー実害の再発防止: 「ブラウザデータ消去→バックアップ読み込み」で購入状態が戻らない
+    // 事故があった）。mergeUnlockCodesのルールどおり「バックアップ側にコードがあれば設定、
+    // 無ければ既存を保持」（空で上書きしない）。他の設定項目（NG食材・テーマ等）は
+    // mergeでは従来どおり一切触らない（merge=追加のみという既存設計を尊重する）
+    const currentSettings = { ...defaultSettings, ...(await db.settings.get(1)) }
+    const unlockCodes = mergeUnlockCodes(currentSettings, file.settings)
+    if (
+      unlockCodes.proCode !== currentSettings.proCode ||
+      unlockCodes.recipePackCode !== currentSettings.recipePackCode
+    ) {
+      await db.settings.put({ ...currentSettings, ...unlockCodes, id: 1 })
     }
   })
   return { added, updated: 0, skipped, excluded: 0 }

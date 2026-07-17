@@ -399,6 +399,21 @@ export interface PriceEntry {
   defaultUnit?: string
 }
 
+/**
+ * 「ファイルに書き出す」の保存先ハンドル（File System Access API対応ブラウザのみ。
+ * 2026-07-17バックアップ改修 修正2+3）。FileSystemFileHandleはJSON化できないため
+ * バックアップ本体(BackupFile)には含めず、専用テーブルにオブジェクトのまま
+ * structured cloneで保存する（IndexedDBのネイティブ機能。他ブラウザ間で共有されない・
+ * 端末固有の値なのでバックアップの往復対象にもしない）。1件のみ保持し、新しく
+ * 保存先を選ぶたびに置き換える（id固定=1）
+ */
+export interface BackupFileHandleRecord {
+  id?: number
+  handle: FileSystemFileHandle
+  /** 記録した日時（ミリ秒）。参考表示用（任意） */
+  savedAt: number
+}
+
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */
 export type RecipeInput = Pick<
   Recipe,
