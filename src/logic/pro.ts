@@ -54,3 +54,38 @@ export async function isValidPackCode(code: string, forceFallback = false): Prom
 export function hasPaidRecipeAccess(settings: Pick<Settings, 'proCode' | 'recipePackCode'>): boolean {
   return !!settings.proCode || !!settings.recipePackCode
 }
+
+/**
+ * 入力コードがPro用(UR-)か追加レシピパック用(UP-)かを判定する（純ロジック。
+ * 2026-07-17設定ゼロベース裁定#7）。「購入と解錠」1画面統合で、入力欄1つに入れたコードを
+ * どちらの解錠フローへ回すか自動判定するために使う。既存の相互判定ヒント
+ * （proCodeIsPackCode/packCodeIsProCode。SettingsPageのactivatePro/activatePack内で
+ * .startsWith('UP-')/.startsWith('UR-')を見ていた判定）と同じ正規化・同じprefix判定を
+ * 流用し、「ヒントを出す」から「そのまま正しい方で解錠する」へ発展させたもの。
+ * コード形式はdocs/08 2-6で`UR-XXXX-XXXX`/`UP-XXXX-XXXX`に固定されているため、
+ * prefix以外の判定（桁数等）は行わない（実際の正当性はisValidProCode/isValidPackCodeが担う）
+ */
+export function detectCodeKind(code: string): 'pro' | 'pack' | 'unknown' {
+  const normalized = normalizeProCode(code)
+  if (normalized.startsWith('UR-')) return 'pro'
+  if (normalized.startsWith('UP-')) return 'pack'
+  return 'unknown'
+}
+
+/**
+ * 解錠コードをマスク表示する（純ロジック。2026-07-17設定ゼロベース裁定#4）。
+ * 「UR-XXXX-XXXX」形式のうち先頭のprefix(UR-/UP-)は残し、末尾4文字だけ見せて残りを*にする
+ * （例: "UR-AB12-CD34" → "UR-****CD34"）。ハイフンを含まない/短いコードにも耐えるよう、
+ * prefix以外の文字数が4以下ならすべて*にする。機種変更時に「自分のコードだ」と識別できる
+ * 最小限だけ見せつつ、画面越し(盗み見・スクリーンショット)での総当たり材料にならないようにする
+ */
+export function maskUnlockCode(code: string): string {
+  const hyphenIndex = code.indexOf('-')
+  if (hyphenIndex === -1) return code
+  const prefix = code.slice(0, hyphenIndex)
+  const rest = code.slice(hyphenIndex + 1).replace(/-/g, '')
+  if (rest.length <= 4) return `${prefix}-${'*'.repeat(rest.length)}`
+  const visible = rest.slice(-4)
+  const hidden = '*'.repeat(rest.length - 4)
+  return `${prefix}-${hidden}${visible}`
+}

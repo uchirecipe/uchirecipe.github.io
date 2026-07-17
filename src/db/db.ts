@@ -3,6 +3,7 @@ import type {
   BackupFileHandleRecord,
   MealPlanEntry,
   PantryItem,
+  PreImportSnapshotRecord,
   PriceEntry,
   Recipe,
   SetExclusion,
@@ -25,6 +26,7 @@ class UchiRecipeDB extends Dexie {
   prices!: Table<PriceEntry, number>
   setExclusions!: Table<SetExclusion, number>
   fileHandles!: Table<BackupFileHandleRecord, number>
+  preImportSnapshots!: Table<PreImportSnapshotRecord, number>
 
   constructor() {
     super('uchi-recipe')
@@ -140,6 +142,21 @@ class UchiRecipeDB extends Dexie {
       prices: '++id, name, updatedAt',
       setExclusions: '++id, setId, title',
       fileHandles: 'id',
+    })
+    // バージョン13: 「読み込む（今のデータと置き換え）」実行前の自動退避（2026-07-17設定
+    // ゼロベース裁定#6b・三重の網の(b)）を保存するテーブルを追加。新規テーブルのみの追加で
+    // 既存データには影響しない（upgrade関数不要）
+    this.version(13).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt, sourceSetId',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+      prices: '++id, name, updatedAt',
+      setExclusions: '++id, setId, title',
+      fileHandles: 'id',
+      preImportSnapshots: 'id',
     })
   }
 }

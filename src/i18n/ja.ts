@@ -286,8 +286,17 @@ export const ja = {
     groupIngredientsTitle: '食材と価格',
     groupCookingTitle: '料理中',
     groupOtherTitle: 'その他',
+    // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。タブバーの下・全タブ共通の
+    // 常設バナー。「◯日前」形式はバックアップタブ内の既存表示(backupLastDate「最終バックアップ: {date}」)
+    // とは別建て(頂点バナーは経過日数、タブ内は日付そのもの)。未実施はbackupNeverを流用する
+    bannerLastBackupToday: '最終バックアップ: 今日',
+    bannerLastBackupDaysAgo: '最終バックアップ: {n}日前',
+    bannerSaveNow: '今すぐ保存',
     ngTitle: 'NG食材（アレルギー・苦手）',
     ngDescription: 'ここに登録した食材を含むレシピには警告マークが付きます（例:「豚」で「豚肉」「豚バラ」もヒットします）',
+    // 見出し行の件数常時表示(2026-07-17設定ゼロベース裁定#2)。0件は登録を促す「未設定」にする
+    ngCount: '{n}件',
+    ngCountEmpty: '未設定',
     ngPlaceholder: '例: えび',
     ngAdd: '追加',
     ngRemove: 'このNG食材を削除',
@@ -366,14 +375,30 @@ export const ja = {
     // 追加側のbackupImportMergeNoteと対になる、置き換え側の警告表示)
     importReplaceCaption: '今のデータを消して選んだファイルの内容だけにします',
     backupImportMerge: '読み込む（今のデータに追加）',
-    // ファイル選択ダイアログを開く前に出す確認(2026-07-16新設)。押した瞬間に確認なしで
-    // ファイル選択が開いてしまう穴を塞ぐためのもので、選択後に出る既存の
-    // backupImportReplaceConfirmとは別の、より手前の確認(キャンセルならファイル選択自体を開かない)
-    importReplaceConfirm:
-      '今のレシピ・価格・設定などをすべて選んだファイルの内容に置き換えます。置き換え前のデータは元に戻せません。よろしいですか？（心配なときは、先に「ファイルに書き出す」でバックアップを取ってください）',
-    backupImportReplaceConfirm: '今のレシピと設定をすべて消して、ファイルの内容に置き換えます。よろしいですか？',
+    // 置き換え確認文(2026-07-17設定ゼロベース裁定#6a・app/CLAUDE.md規約F)。ファイル選択を開く前
+    // (pickImportFile)・ファイル選択後の最終確認(onImportFile)の両方で同じ文言を使い整合させる
+    // (2026-07-16新設の「押した瞬間に確認なしでファイル選択が開いてしまう穴を塞ぐ手前の確認」と、
+    // 実行直前の確認の2段構成はそのまま維持)。消える件数({r}レシピ・{c}作った記録・{p}価格)を
+    // 具体的に明示した上で、実行前に自動退避すること・直後なら「元に戻す」で戻せることを明記する
+    // （「よろしいですか？」だけの確認にしない＝規約F）
+    backupImportReplaceConfirm:
+      '今のレシピ{r}件・作った記録{c}件・価格{p}件が消え、読み込むファイルの内容に置き換えます。置き換え前のデータは自動で退避されるので、直後なら「元に戻す」で戻せます。よろしいですか？',
     backupImportMergeConfirm: 'ファイルのレシピを今のデータに追加します。よろしいですか？',
     backupImportMergeNote: '同じレシピ（同一ID）はスキップされ、今のデータが優先されます。新しいレシピだけが追加されます',
+    // 置き換え直後に1回だけ出す「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c・三重の網の(c))。
+    // savePreImportSnapshotで退避したデータからrestorePreImportSnapshotで復元する
+    replaceUndoMessage: '置き換え前のデータを退避しました。今なら元に戻せます',
+    replaceUndoButton: '元に戻す',
+    replaceUndoDismiss: '閉じる',
+    replaceUndoDone: '元のデータに戻しました',
+    replaceUndoError: '元に戻せませんでした（退避データが見つかりません）',
+    // 機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。バックアップタブの折りたたみ
+    moveGuideToggle: '機種変更するときは',
+    moveGuideStep1: '①この端末で「ファイルに書き出す」',
+    moveGuideStep2: '②新しい端末でアプリを開き「読み込む（置き換え）」',
+    moveGuideStep3: '③購入コードを入れ直す（コードは「Pro・パック」タブでコピーできます）',
+    moveGuideNote:
+      '②は新しい端末の中身を今のファイルの内容に置き換えます。新しい端末で先にレシピを登録していた場合は消えるのでご注意ください',
     backupIncludeCookedPhotos: '「作った記録」の写真もバックアップに含める',
     backupIncludeCookedPhotosNote:
       'ONにするとバックアップファイルが大きくなります（写真1枚あたりおおよそ150〜300KB）。既定はOFFです',
@@ -401,14 +426,30 @@ export const ja = {
     // どうしてもブラウザ側で消す場合の絞り込み方を明記する)
     refreshAppCacheClearWarning:
       'ブラウザの設定から消す場合は「キャッシュされた画像とファイル」だけにしてください。「Cookieと他のサイトデータ」を消すとレシピなどのデータがすべて消えます（消す前にバックアップを取ってください）',
+    // 「購入と解錠」1カード統合(2026-07-17設定ゼロベース裁定#7)。入力欄1つでPro/追加レシピ
+    // パックのどちらのコードも受け付け、種類(UR-/UP-)は自動判定する(src/logic/pro.tsの
+    // detectCodeKind)。既存の相互判定ヒント(旧proCodeIsPackCode/packCodeIsProCode。
+    // 「違う欄に入力してください」という案内)は、「そのまま正しい方で解錠する」という
+    // 発展形になったため役目を終え、この統合で削除した
+    unlockTitle: '購入と解錠',
+    unlockDescription:
+      '解錠コードを入力すると、Pro版または追加レシピパックが使えるようになります。コードの種類は自動で判定されます',
+    unlockCodePlaceholder: '解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)',
+    unlockActivate: '解錠する',
+    unlockActivating: '確認中…',
+    unlockUnknownCode: 'コードの形式が正しくありません（UR-またはUP-で始まるコードを入力してください）',
+    unlockStatusActive: '解錠済み',
+    unlockStatusInactive: '未解錠',
+    // Pro解錠済みのときの追加レシピパック行に出す案内(旧packNotNeededWithProの後継。
+    // Pro解錠済みなら入力欄自体を出さないため、状態一覧の行内表示に位置づけを変更した)
+    packIncludedInPro: 'Pro版に含まれています',
+    // 解錠コードの控え表示+コピー(2026-07-17設定ゼロベース裁定#4。機種変更時の「購入の復元」用)
+    unlockCodeCopy: 'コピー',
+    unlockCodeCopied: 'コピーしました',
+    unlockCodeToggleAria: 'コードの表示を切り替え',
     proTitle: 'Pro版',
     proDescription: '並行調理ナビ・月間献立など、これから追加されるPro向け機能をすべて使えるようになります。',
-    proCodePlaceholder: '解錠コード (例: UR-XXXX-XXXX)',
-    proActivate: '解錠する',
-    proActivating: '確認中…',
     proInvalidCode: 'コードが正しくありません。ご購入時のコードをご確認ください',
-    proCodeIsPackCode:
-      'そのコードは追加レシピパック用です。下の追加レシピパック欄に入力してください',
     proActivatedTitle: 'Pro版をご利用いただきありがとうございます',
     proActivatedDate: '解錠日: {date}',
     // Pro解錠直後に「何が使えるようになったか」を控えめに案内する(2026-07-09ペルソナ第2波)
@@ -421,14 +462,7 @@ export const ja = {
     packTitle: '追加レシピパック',
     packDescription:
       '配布されているレシピテーマがすべて使えるようになる買い切りのパックです。今後追加されるテーマも、すべて追加料金なしで使えます（Pro版には最初から含まれています）。',
-    // Pro解錠済み(パック未解錠)のときはパックコード入力欄をdisabledにし、代わりにこの文を表示する
-    // (2026-07-13 UI改善: Pro版にパックの内容が含まれるため入力不要と案内する)
-    packNotNeededWithPro: 'Pro版は追加レシピパックの内容を含むため、パックコードの入力は不要です',
-    packCodePlaceholder: '解錠コード (例: UP-XXXX-XXXX)',
-    packActivate: '解錠する',
-    packActivating: '確認中…',
     packInvalidCode: 'コードが正しくありません。ご購入時のコードをご確認ください',
-    packCodeIsProCode: 'そのコードはPro版用です。上のPro版欄に入力してください',
     packActivatedTitle: '追加レシピパックをご利用いただきありがとうございます',
     packActivatedDate: '解錠日: {date}',
     themeListTitle: 'テーマ一覧',
@@ -450,6 +484,9 @@ export const ja = {
     themeExclusionRestore: '除外中{n}品・すべて戻す',
     themeExclusionRestored: '「{name}」の除外を解除しました。次にこのテーマを取り込むと戻ります',
     aboutTitle: 'うちレシピについて',
+    // バージョン+データ件数(2026-07-17設定ゼロベース裁定#3。問い合わせ対応に必須)
+    aboutVersion: 'バージョン {v}',
+    aboutDataCount: 'レシピ {r}件・作った記録 {c}件',
     aboutPageLink: 'アプリの紹介ページを見る',
     termsLink: '利用規約・プライバシーポリシー',
     feedbackLink: 'ご意見箱',

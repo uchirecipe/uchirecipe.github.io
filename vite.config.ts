@@ -1,7 +1,16 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+
+// 「このアプリについて」に表示するアプリバージョン(2026-07-17設定ゼロベース裁定#3)。
+// package.jsonのversionをビルド時の文字列定数として埋め込む(実行時にpackage.json自体を
+// fetchしない)。readFileSync+JSON.parseを使うのは、import assertions("with { type: 'json' }")の
+// 対応状況がNode/TSのバージョンに依存し不安定なため(vite.config.ts自体はNode上で実行される
+// 設定ファイルなので、ここだけはNode組み込みAPIで素直に読む)
+const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf-8'))
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -9,6 +18,9 @@ export default defineConfig({
   // リポジトリ名を uchirecipe.github.io にしたので、パス無しのルートURL
   // （https://uchirecipe.github.io/）で公開される。base は '/' のままでよい。
   base: '/',
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     tailwindcss(),

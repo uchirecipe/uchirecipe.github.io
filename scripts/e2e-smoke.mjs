@@ -893,19 +893,85 @@ try {
     !(await page.textContent('body')).includes('このレシピセットの追加には'),
   )
 
+  // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。タブバーの下・
+  // 全タブ共通の常設バナー(今は「レシピ」タブ表示中)。未実施は「まだバックアップしていません」、
+  // 「今すぐ保存」はどのタブからでもバックアップタブの書き出しへ移動する ---
+  currentCheck = 'BANNER-01'
+  check(
+    'BANNER-01 「レシピ」タブでもバナーが見える(全タブ共通・未実施表示)',
+    (await page.textContent('body')).includes('まだバックアップしていません'),
+  )
+  await page.getByRole('button', { name: '今すぐ保存', exact: true }).click()
+  await page.waitForTimeout(500)
+  check(
+    'BANNER-01 「今すぐ保存」でバックアップタブの書き出しへ移動する',
+    (await page.textContent('body')).includes('ファイルに書き出す'),
+  )
+  check(
+    'BANNER-01 バックアップタブがアクティブになる',
+    (await page.getByRole('button', { name: 'バックアップ', exact: true }).getAttribute('aria-pressed')) === 'true',
+  )
+
   // タブを手動で一通り切り替え、それぞれの代表コンテンツが出ることを確認する
+  currentCheck = 'SETTINGS-TAB-01'
   await page.getByRole('button', { name: '全般', exact: true }).click()
   await page.waitForTimeout(200)
   check(
     'SETTINGS-TAB-01 「全般」タブでNG食材の見出しが見える',
     (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
   )
+  // --- NGCOUNT-01(2026-07-17設定ゼロベース裁定#2): NG食材見出し行の件数常時表示。
+  // 未登録は「未設定」(登録後の「◯件」表示はTOAST-01で確認する) ---
+  currentCheck = 'NGCOUNT-01'
+  check(
+    'NGCOUNT-01 未登録は「未設定」表示',
+    (await page.textContent('body')).includes('未設定'),
+  )
+  // --- ABOUT-01(2026-07-17設定ゼロベース裁定#3): 「このアプリについて」にバージョン+
+  // データ件数(レシピ◯件・作った記録◯件)を表示する ---
+  currentCheck = 'ABOUT-01'
+  {
+    const aboutText = await page.textContent('body')
+    check('ABOUT-01 バージョン表示がある', /バージョン \S+/.test(aboutText))
+    check(
+      'ABOUT-01 データ件数表示(レシピ◯件・作った記録◯件)がある',
+      /レシピ \d+件・作った記録 \d+件/.test(aboutText),
+    )
+  }
   await page.getByRole('button', { name: 'バックアップ', exact: true }).click()
   await page.waitForTimeout(200)
   check(
     'SETTINGS-TAB-01 「バックアップ」タブで書き出しボタンが見える',
     (await page.textContent('body')).includes('ファイルに書き出す'),
   )
+  // --- MOVEGUIDE-01(2026-07-17設定ゼロベース裁定#5): 機種変更・引っ越しガイド(折りたたみ)。
+  // 既定は畳まれていて手順は見えず、タップで展開すると3ステップ+注意文が見えること ---
+  currentCheck = 'MOVEGUIDE-01'
+  check(
+    'MOVEGUIDE-01 「機種変更するときは」の折りたたみ見出しが見える',
+    (await page.textContent('body')).includes('機種変更するときは'),
+  )
+  check(
+    'MOVEGUIDE-01 既定は畳まれていて手順は見えない',
+    !(await page.textContent('body')).includes('この端末で「ファイルに書き出す」'),
+  )
+  await page.getByRole('button', { name: '機種変更するときは', exact: true }).click()
+  await page.waitForTimeout(300)
+  {
+    const guideText = await page.textContent('body')
+    check(
+      'MOVEGUIDE-01 展開すると3ステップが見える',
+      guideText.includes('この端末で「ファイルに書き出す」') &&
+        guideText.includes('読み込む（置き換え）') &&
+        guideText.includes('購入コードを入れ直す'),
+    )
+    check('MOVEGUIDE-01 注意文が見える', guideText.includes('先にレシピを登録していた場合は消える'))
+  }
+  // 畳んで元に戻す(以降のチェックに影響しないように)
+  await page.getByRole('button', { name: '機種変更するときは', exact: true }).click()
+  await page.waitForTimeout(200)
+
+  currentCheck = 'BACKUPCARDS-01'
   // 修正5(2026-07-17バックアップ改修): バックアップタブが3カード
   // (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成されたこと
   check(
@@ -979,6 +1045,10 @@ try {
   check(
     'TOAST-01 NG食材追加でトーストが表示される',
     (await page.textContent('body')).includes('「E2Eトースト確認食材」を追加しました'),
+  )
+  check(
+    'NGCOUNT-01 登録後は見出し行が「1件」表示になる(2026-07-17設定ゼロベース裁定#2)',
+    (await page.textContent('body')).includes('1件'),
   )
   await page.waitForTimeout(6800) // Toastの自動非表示(AUTO_DISMISS_MS=6000ms)を超えて待つ
   check(
@@ -1596,25 +1666,116 @@ try {
     }
   }
 
-  // --- PACK-01: Pro解錠済み(パック未解錠)のとき、追加レシピパックのコード入力欄がdisabledになり
-  // 「パックコードの入力は不要です」の案内が出ること、Pro版の機能一覧が(解錠直後だけでなく)
-  // 解錠中ずっと表示され続けることを確認する(2026-07-13 UI改善)。実際のPro解錠コードは
-  // 販売台帳の原本なのでリポジトリにコミットできないため、NUT-02と同様settings.proCodeを
-  // IndexedDBへ直接書き込んで「Pro解錠済み・パック未解錠」状態を再現する。他チェックのPro状態に
-  // 影響しないよう、専用のbrowser/contextで完結させる ---
-  currentCheck = 'PACK-01'
+  // --- UNLOCK-01(2026-07-17設定ゼロベース裁定#4+#7): 「購入と解錠」1画面統合。
+  // (a) 入力欄1つでコード種別(UR-/UP-)を自動判定して解錠できること(実際のPro/パック解錠コード
+  //     UI経由。テスト用コードはdocs/22記載・販売用ではない: Pro=UR-96QS-2VSZ、
+  //     パック=UP-2W3D-QZPR)・UR-/UP-以外のprefixはコード形式エラーになること・
+  //     解錠済みコードがマスク表示(例: UP-****QZPR)+コピーで控えられること(クリップボードの
+  //     実文字列まで確認)を、専用のbrowser/contextで確認する
+  // (b) Pro解錠済み(パック未解錠)のときは、追加レシピパック行が「Pro版に含まれています」と
+  //     表示され統合入力欄自体が消えること(旧PACK-01の「パックコードの入力は不要です」+
+  //     disabled入力の後継)、Pro版の機能一覧が解錠中ずっと表示され続けることを、
+  //     別の専用browser/contextで確認する ---
+  currentCheck = 'UNLOCK-01'
   {
-    const packBrowser = await chromium.launch()
-    const packContext = await packBrowser.newContext()
-    const packPage = await packContext.newPage()
-    packPage.on('pageerror', (err) => {
-      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@PACK-01] ${err.message}`)
-    })
+    // (a) 統合入力の種別自動判定+マスク表示+コピー
+    const ulBrowser = await chromium.launch()
     try {
-      await packPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await packPage.waitForTimeout(1800) // 初回シード完了待ち(settingsレコードもこの時点で作られる)
-      await packPage.evaluate(async () => {
+      const ulContext = await ulBrowser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
+      const ulPage = await ulContext.newPage()
+      ulPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@UNLOCK-01(a)] ${err.message}`)
+      })
+      await ulPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ulPage.waitForTimeout(1800) // 初回シード完了待ち
+      await ulPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await ulPage.waitForTimeout(800)
+
+      check(
+        'UNLOCK-01(a) 「購入と解錠」1カードに統合されている',
+        (await ulPage.textContent('body')).includes('購入と解錠'),
+      )
+      check(
+        'UNLOCK-01(a) 解錠前は両方「未解錠」表示',
+        (await ulPage.getByText('未解錠').count()) === 2,
+      )
+
+      const unlockInput = ulPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)')
+      const unlockButton = ulPage.getByRole('button', { name: '解錠する', exact: true })
+
+      // UR-/UP-以外のprefixはコード形式エラー
+      await unlockInput.fill('XX-0000-0000')
+      await unlockButton.click()
+      await ulPage.waitForTimeout(500)
+      check(
+        'UNLOCK-01(a) UR-/UP-以外のprefixはコード形式エラーになる',
+        (await ulPage.textContent('body')).includes('コードの形式が正しくありません'),
+      )
+
+      // UP-コードを入れると(Pro欄ではなく)追加レシピパックが自動判定で解錠される
+      await unlockInput.fill('UP-2W3D-QZPR')
+      await unlockButton.click()
+      await ulPage.waitForTimeout(800)
+      const afterPackText = await ulPage.textContent('body')
+      check(
+        'UNLOCK-01(a) UP-コードは自動判定で追加レシピパックが解錠される',
+        afterPackText.includes('追加レシピパックをご利用いただきありがとうございます'),
+      )
+      check(
+        'UNLOCK-01(a) 解錠済みコードはマスク表示される(末尾4文字のみ・UP-****QZPR)',
+        afterPackText.includes('UP-****QZPR'),
+      )
+      check(
+        'UNLOCK-01(a) パックのみ解錠時は統合入力欄がまだ残る(将来Pro追加購入に備える)',
+        await unlockInput.isVisible(),
+      )
+
+      // コピーボタンで生のコードがクリップボードへ入ること
+      await ulPage.getByRole('button', { name: 'コピー', exact: true }).first().click()
+      await ulPage.waitForTimeout(300)
+      const copiedText = await ulPage.evaluate(() => navigator.clipboard.readText())
+      check(
+        'UNLOCK-01(a) コピーボタンで生のコードがクリップボードにコピーされる',
+        copiedText === 'UP-2W3D-QZPR',
+        `copiedText=${copiedText}`,
+      )
+      check(
+        'UNLOCK-01(a) コピー後は「コピーしました」表示になる',
+        (await ulPage.textContent('body')).includes('コピーしました'),
+      )
+
+      // UR-コードを入れるとPro版が自動判定で解錠される
+      await unlockInput.fill('UR-96QS-2VSZ')
+      await unlockButton.click()
+      await ulPage.waitForTimeout(800)
+      const afterProText = await ulPage.textContent('body')
+      check(
+        'UNLOCK-01(a) UR-コードは自動判定でPro版が解錠される',
+        afterProText.includes('Pro版をご利用いただきありがとうございます'),
+      )
+      check(
+        'UNLOCK-01(a) Pro解錠後は統合入力欄が消える(Pro版がすべて含むため)',
+        !(await unlockInput.isVisible().catch(() => false)),
+      )
+    } finally {
+      await ulBrowser.close()
+    }
+
+    // (b) Pro解錠済み(パック未解錠)。実際のPro解錠コードは販売台帳の原本なのでリポジトリに
+    // コミットできない実コードのケースを模すため、NUT-02と同様settings.proCodeをIndexedDBへ
+    // 直接書き込んで再現する(コード検証自体は(a)で実UI経由済み)
+    const ulbBrowser = await chromium.launch()
+    try {
+      const ulbContext = await ulbBrowser.newContext()
+      const ulbPage = await ulbContext.newPage()
+      ulbPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@UNLOCK-01(b)] ${err.message}`)
+      })
+      await ulbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ulbPage.waitForTimeout(1800) // 初回シード完了待ち(settingsレコードもこの時点で作られる)
+      await ulbPage.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((resolve, reject) => {
           req.onsuccess = () => resolve(req.result)
@@ -1639,23 +1800,23 @@ try {
         })
         idb.close()
       })
-      await packPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
-      await packPage.waitForTimeout(800)
-      const packSectionText = await packPage.textContent('body')
+      await ulbPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await ulbPage.waitForTimeout(800)
+      const packSectionText = await ulbPage.textContent('body')
       check(
-        'PACK-01 Pro解錠済み時に「パックコードの入力は不要です」の案内が出る',
-        packSectionText.includes('パックコードの入力は不要です'),
+        'UNLOCK-01(b) Pro解錠済み時に追加レシピパック行が「Pro版に含まれています」表示になる',
+        packSectionText.includes('Pro版に含まれています'),
       )
-      const packInputDisabled = await packPage
-        .getByPlaceholder('解錠コード (例: UP-XXXX-XXXX)')
-        .isDisabled()
-      check('PACK-01 パックコード入力欄がdisabledになる', packInputDisabled)
       check(
-        'PACK-01 Pro版の機能一覧が解錠中ずっと表示される(2026-07-13 UI改善: 一時表示から常設化)',
+        'UNLOCK-01(b) Pro解錠済み時は統合入力欄自体が表示されない(旧: disabled入力の後継)',
+        !(await ulbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)').isVisible()),
+      )
+      check(
+        'UNLOCK-01(b) Pro版の機能一覧が解錠中ずっと表示される(2026-07-13 UI改善: 一時表示から常設化)',
         packSectionText.includes('使えるようになった機能') && packSectionText.includes('並行調理ナビ'),
       )
     } finally {
-      await packBrowser.close()
+      await ulbBrowser.close()
     }
   }
 
@@ -2785,7 +2946,8 @@ try {
     try {
       await mp2Page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await mp2Page.waitForTimeout(1500)
-      await mp2Page.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+      // 2026-07-17設定ゼロベース裁定#7: Pro/追加レシピパックの入力欄が1つに統合された
+      await mp2Page.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)').fill('UR-96QS-2VSZ')
       await mp2Page.getByRole('button', { name: '解錠する', exact: true }).first().click()
       await mp2Page.waitForTimeout(1000)
       check(
@@ -4386,6 +4548,138 @@ try {
     }
   }
 
+  // --- REPLACEUNDO-01(2026-07-17設定ゼロベース裁定#6): 置き換え読み込みの安全三重化。
+  // (a)確認文(pickImportFile・onImportFileの両方)に消える件数(レシピ・作った記録・価格)が
+  //    具体的に入り、「何が残るか/どうなるか」も書かれていること(app/CLAUDE.md規約F)
+  // (b)実行前に現データを内部(preImportSnapshotsテーブル)へ自動退避すること
+  // (c)置き換え直後に1回だけ「元に戻す」が出て、押すと退避データから実際に復元できること
+  // を、実際の「読み込む(今のデータと置き換え)」UIフローで確認する。他チェックに影響しない
+  // よう専用のbrowser/contextで完結させる ---
+  currentCheck = 'REPLACEUNDO-01'
+  {
+    const ruBrowser = await chromium.launch()
+    try {
+      const ruContext = await ruBrowser.newContext()
+      const ruPage = await ruContext.newPage()
+      ruPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@REPLACEUNDO-01] ${err.message}`)
+      })
+      const dialogMessages = []
+      ruPage.on('dialog', (dialog) => {
+        dialogMessages.push(dialog.message())
+        void dialog.accept()
+      })
+
+      const countTable = async (storeName) =>
+        ruPage.evaluate(async (name) => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
+          const count = await new Promise((resolve, reject) => {
+            const req2 = idb.transaction(name, 'readonly').objectStore(name).count()
+            req2.onsuccess = () => resolve(req2.result)
+            req2.onerror = () => reject(req2.error)
+          })
+          idb.close()
+          return count
+        }, storeName)
+
+      await ruPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ruPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      const originalRecipeCount = await countTable('recipes')
+      check(
+        'REPLACEUNDO-01 前提: 基本レシピがシードされている',
+        originalRecipeCount > 0,
+        `originalRecipeCount=${originalRecipeCount}`,
+      )
+
+      await ruPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await ruPage.waitForTimeout(500)
+      await ruPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await ruPage.waitForTimeout(300)
+
+      const emptyBackup = JSON.stringify({
+        app: 'uchi-recipe',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        recipes: [],
+      })
+      const [fileChooser] = await Promise.all([
+        ruPage.waitForEvent('filechooser'),
+        ruPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+      ])
+      await fileChooser.setFiles({
+        name: 'empty-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(emptyBackup, 'utf-8'),
+      })
+      await ruPage.waitForTimeout(800)
+
+      check(
+        'REPLACEUNDO-01(a) 確認文(事前確認+実行前確認の2回とも)に消えるレシピ件数が具体的に入る(規約F)',
+        dialogMessages.length === 2 &&
+          dialogMessages.every((m) => m.includes(`今のレシピ${originalRecipeCount}件`)),
+        `dialogMessages=${JSON.stringify(dialogMessages)}`,
+      )
+      check(
+        'REPLACEUNDO-01(a) 確認文に「作った記録」「価格」の件数も入る',
+        dialogMessages.every((m) => /作った記録\d+件・価格\d+件/.test(m)),
+        `dialogMessages=${JSON.stringify(dialogMessages)}`,
+      )
+      check(
+        'REPLACEUNDO-01(a) 確認文に「元に戻す」で戻せる旨(残る/どうなるか)も書かれている' +
+          '(規約F。「よろしいですか？」だけの確認にしない)',
+        dialogMessages.every((m) => m.includes('元に戻す') && m.includes('戻せます')),
+      )
+
+      check(
+        'REPLACEUNDO-01 置き換え実行後に成功メッセージが出る(0品)',
+        (await ruPage.textContent('body')).includes('0品のレシピを読み込みました'),
+      )
+      check(
+        'REPLACEUNDO-01(c) 置き換え直後に「元に戻す」バナーが出る',
+        (await ruPage.textContent('body')).includes('元に戻す'),
+      )
+
+      const afterReplaceRecipeCount = await countTable('recipes')
+      const afterReplaceSnapshotCount = await countTable('preImportSnapshots')
+      check(
+        'REPLACEUNDO-01(b) 置き換え前に現データが内部へ自動退避されている(preImportSnapshotsに1件)',
+        afterReplaceSnapshotCount === 1,
+        `afterReplaceSnapshotCount=${afterReplaceSnapshotCount}`,
+      )
+      check(
+        'REPLACEUNDO-01 置き換え後、実際にレシピが0件になっている(IndexedDB直読み)',
+        afterReplaceRecipeCount === 0,
+      )
+
+      // 「元に戻す」を押す
+      await ruPage.getByRole('button', { name: '元に戻す', exact: true }).click()
+      await ruPage.waitForTimeout(800)
+      check(
+        'REPLACEUNDO-01(c) 「元に戻す」後に復元完了メッセージが出る',
+        (await ruPage.textContent('body')).includes('元のデータに戻しました'),
+      )
+      const afterUndoRecipeCount = await countTable('recipes')
+      const afterUndoSnapshotCount = await countTable('preImportSnapshots')
+      check(
+        'REPLACEUNDO-01(c) 「元に戻す」でレシピ件数が退避前と一致する',
+        afterUndoRecipeCount === originalRecipeCount,
+        `originalRecipeCount=${originalRecipeCount} afterUndoRecipeCount=${afterUndoRecipeCount}`,
+      )
+      check(
+        'REPLACEUNDO-01 復元後は退避データが消える(1世代のみ保持)',
+        afterUndoSnapshotCount === 0,
+      )
+    } finally {
+      await ruBrowser.close()
+    }
+  }
+
   // --- CODEMERGE-01(2026-07-17バックアップ改修 修正1): merge復元(「読み込む(今のデータに追加)」)
   // でもPro解錠コードが戻ること、および旧形式(コード無し)バックアップをmergeしても既存の解錠
   // コードが消えない(後方互換)ことを、実際の「バックアップから戻す」UI経由で確認する。
@@ -4744,8 +5038,9 @@ try {
         const subtleGone = await fbPage.evaluate(() => typeof window.crypto.subtle === 'undefined')
         check('PRO-FALLBACK-01 前提: crypto.subtleを無効化できている', subtleGone)
 
-        // テスト用Pro解錠コード(docs/22の実機確認チェックリスト記載。販売用ではない)
-        await fbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+        // テスト用Pro解錠コード(docs/22の実機確認チェックリスト記載。販売用ではない)。
+        // 2026-07-17設定ゼロベース裁定#7: Pro/追加レシピパックの入力欄が1つに統合された
+        await fbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)').fill('UR-96QS-2VSZ')
         await fbPage.getByRole('button', { name: '解錠する', exact: true }).first().click()
         await fbPage.waitForTimeout(1000)
         const fbText = await fbPage.textContent('body')

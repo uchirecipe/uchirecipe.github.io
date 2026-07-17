@@ -414,6 +414,19 @@ export interface BackupFileHandleRecord {
   savedAt: number
 }
 
+/**
+ * 「読み込む（今のデータと置き換え）」実行前の自動退避（2026-07-17設定ゼロベース裁定#6b・
+ * 三重の網の(b)）。exportBackup相当のJSON文字列をそのまま1世代だけ保持し、置き換え直後の
+ * 「元に戻す」（restorePreImportSnapshot）で復元する。1件のみ保持し、次の置き換えのたびに
+ * 上書きする（id固定=1。BackupFileHandleRecordと同じ流儀）。バックアップ本体には含めない
+ * （端末内の一時的な安全網であり、往復対象のユーザーデータではないため）
+ */
+export interface PreImportSnapshotRecord {
+  id?: number
+  json: string
+  savedAt: number
+}
+
 /** 登録・編集フォームから受け取る入力（派生フィールドは含まない） */
 export type RecipeInput = Pick<
   Recipe,

@@ -184,6 +184,30 @@ export function tablesToReplace(file: BackupFile): {
   }
 }
 
+/**
+ * 「読み込む（今のデータと置き換え）」で消える件数（純ロジック・DB非依存。
+ * 2026-07-17設定ゼロベース裁定#6a）。確認文に「今のレシピ◯件・作った記録◯件・価格◯件が
+ * 消えます」と具体的な件数を明示するために使う（app/CLAUDE.md規約F: 破壊的操作の確認文は
+ * 何が消えるかを具体的に書く）。作った記録はレシピに埋め込み配列なので、全レシピの
+ * cookedLogs.lengthを合算する
+ */
+export interface ReplaceImpactCounts {
+  recipes: number
+  cookedLogs: number
+  prices: number
+}
+
+export function countReplaceImpact(
+  recipes: Pick<Recipe, 'cookedLogs'>[],
+  priceCount: number,
+): ReplaceImpactCounts {
+  return {
+    recipes: recipes.length,
+    cookedLogs: recipes.reduce((sum, r) => sum + r.cookedLogs.length, 0),
+    prices: priceCount,
+  }
+}
+
 /** Pro・追加レシピパックの解錠コード関連フィールドだけを抜き出した型（merge復元専用） */
 type UnlockCodeFields = Pick<
   Settings,
@@ -382,6 +406,34 @@ export async function importBackup(
     }
   })
   return { added, updated: 0, skipped, excluded: 0 }
+}
+
+/**
+ * 「読み込む（今のデータと置き換え）」実行前に、現在の全データをIndexedDBの専用ストア
+ * （preImportSnapshots）へ1世代だけ退避する（2026-07-17設定ゼロベース裁定#6b。三重の網の(b)）。
+ * 置き換え直後に出す「元に戻す」ボタン（SettingsPage側）がここから復元する。写真も含めて
+ * 完全に戻せるようincludeCookedLogPhotos=trueで書き出す（この退避はファイルに出さない内部専用の
+ * ものなので、サイズより「戻したら本当に元通りになる」ことを優先する）。1件のみ保持し、
+ * 次に置き換えを実行するたびに上書きする（id固定=1。fileHandlesと同じ流儀）
+ */
+export async function savePreImportSnapshot(): Promise<void> {
+  const json = await exportBackup(true)
+  await db.preImportSnapshots.put({ id: 1, json, savedAt: Date.now() })
+}
+
+/**
+ * savePreImportSnapshotで退避した直前のデータへ復元する（三重の網の(c)「元に戻す」）。
+ * 退避が無ければ何もせずfalseを返す（ボタン自体は置き換え直後にしか出さない設計だが、
+ * 呼び出し側の念のためのガードとして戻り値で判定できるようにする）。
+ * 復元後は退避データを消す（1世代のみ保持する設計のため、使用済みの退避を残す意味が無い）
+ */
+export async function restorePreImportSnapshot(): Promise<boolean> {
+  const record = await db.preImportSnapshots.get(1)
+  if (!record) return false
+  const backup = parseBackup(record.json)
+  await importBackup(backup, 'replace')
+  await db.preImportSnapshots.delete(1)
+  return true
 }
 
 /** URLが見つからない・壊れている場合の理由を、呼び出し側が文言を出し分けられるよう表す */
@@ -605,4 +657,18 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
 export function backupOverdue(lastBackupAt: number | undefined): boolean {
   if (lastBackupAt === undefined) return true
   return Date.now() - lastBackupAt > 30 * 24 * 60 * 60 * 1000
+}
+
+/**
+ * 最終バックアップから何日経ったか（純ロジック・DB非依存。2026-07-17設定ゼロベース裁定#1）。
+ * 設定画面頂点の常設バナー「最終バックアップ: ◯日前」の表示に使う。未実施はnull
+ * （呼び出し側で「まだバックアップしていません」に出し分ける）。nowは検証用の注入フック
+ * （省略時はDate.now()）
+ */
+export function daysSinceBackup(
+  lastBackupAt: number | undefined,
+  now: number = Date.now(),
+): number | null {
+  if (lastBackupAt === undefined) return null
+  return Math.floor((now - lastBackupAt) / (24 * 60 * 60 * 1000))
 }

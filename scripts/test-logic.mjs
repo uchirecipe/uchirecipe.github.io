@@ -27,6 +27,8 @@ import {
   hasPaidRecipeAccess,
   isValidProCode,
   isValidPackCode,
+  detectCodeKind,
+  maskUnlockCode,
 } from '../src/logic/pro.ts'
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber } from '../src/logic/nutrition.ts'
@@ -49,6 +51,8 @@ import {
   buildExclusionTitleSet,
   tablesToReplace,
   mergeUnlockCodes,
+  countReplaceImpact,
+  daysSinceBackup,
 } from '../src/logic/backup.ts'
 import {
   supportsSaveFilePicker,
@@ -1281,6 +1285,20 @@ eq('アクセス判定: 両方なし', hasPaidRecipeAccess({ proCode: undefined,
 eq('アクセス判定: パックのみ', hasPaidRecipeAccess({ proCode: undefined, recipePackCode: 'UP-X' }), true)
 eq('アクセス判定: Proのみ', hasPaidRecipeAccess({ proCode: 'UR-X', recipePackCode: undefined }), true)
 
+// ---------- detectCodeKind(2026-07-17設定ゼロベース裁定#7: 購入と解錠1画面統合の種別自動判定) ----------
+eq('種別判定: UR-はpro', detectCodeKind('UR-AB12-CD34'), 'pro')
+eq('種別判定: UP-はpack', detectCodeKind('UP-AB12-CD34'), 'pack')
+eq('種別判定: 全角・小文字ゆらぎでも判定できる(normalizeProCode経由)', detectCodeKind(' ｕｒ-ab12-cd34 '), 'pro')
+eq('種別判定: どちらでもないprefixはunknown', detectCodeKind('XX-AB12-CD34'), 'unknown')
+eq('種別判定: 空文字はunknown', detectCodeKind(''), 'unknown')
+eq('種別判定: prefixのみ(ハイフン無し)はunknown', detectCodeKind('URXXXX'), 'unknown')
+
+// ---------- maskUnlockCode(2026-07-17設定ゼロベース裁定#4: 解錠コードのマスク表示+コピー) ----------
+eq('マスク: 標準形式は末尾4文字だけ見せる', maskUnlockCode('UR-AB12-CD34'), 'UR-****CD34')
+eq('マスク: パックコードも同様', maskUnlockCode('UP-1234-5678'), 'UP-****5678')
+eq('マスク: 残り4文字以下は全部隠す', maskUnlockCode('UR-AB'), 'UR-**')
+eq('マスク: ハイフンが無いコードはそのまま返す', maskUnlockCode('URABCDEFGH'), 'URABCDEFGH')
+
 // ---------- isNewsSuppressed(初回起動24時間はお知らせを出さない・2026-07-09ペルソナ第1波) ----------
 const HOUR = 60 * 60 * 1000
 eq('news: 初回起動直後は抑制', isNewsSuppressed(1000, 1000 + HOUR), true)
@@ -2294,6 +2312,29 @@ eq(
     mergeUnlockCodes(noCode, noCode),
     noCode,
   )
+}
+
+// ---------- countReplaceImpact(2026-07-17設定ゼロベース裁定#6a: 置き換え確認文の件数表示) ----------
+{
+  eq('退避件数: レシピ0件・記録0件・価格0件', countReplaceImpact([], 0), { recipes: 0, cookedLogs: 0, prices: 0 })
+  eq(
+    '退避件数: レシピ件数はそのまま・作った記録は全レシピの合算',
+    countReplaceImpact(
+      [{ cookedLogs: [{ date: '2026-01-01' }, { date: '2026-01-02' }] }, { cookedLogs: [] }, { cookedLogs: [{ date: '2026-01-03' }] }],
+      5,
+    ),
+    { recipes: 3, cookedLogs: 3, prices: 5 },
+  )
+}
+
+// ---------- daysSinceBackup(2026-07-17設定ゼロベース裁定#1: バックアップ状態バナー) ----------
+{
+  const now = Date.parse('2026-07-17T12:00:00+09:00')
+  eq('経過日数: 未実施はnull', daysSinceBackup(undefined, now), null)
+  eq('経過日数: 今日(同時刻)は0日前', daysSinceBackup(now, now), 0)
+  eq('経過日数: 5日前', daysSinceBackup(now - 5 * 24 * 60 * 60 * 1000, now), 5)
+  eq('経過日数: 31日前(要警告)', daysSinceBackup(now - 31 * 24 * 60 * 60 * 1000, now), 31)
+  eq('経過日数: 23時間59分前は端数切り捨てで0日前', daysSinceBackup(now - (24 * 60 * 60 * 1000 - 60000), now), 0)
 }
 
 // ---------- fileSave(バックアップ修正2+3・2026-07-17: 保存先選択+前回に上書き) ----------

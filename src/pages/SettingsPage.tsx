@@ -15,10 +15,14 @@ import {
   Coins,
   RefreshCw,
   TriangleAlert,
+  HardDriveDownload,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteRecipesBySourceSet } from '../db/recipes'
 import { listSetExclusions, clearSetExclusions } from '../db/setExclusions'
+import { usePriceEntries } from '../db/prices'
 import { reloadStarterRecipes, starterCount } from '../db/starters'
 import {
   exportBackup,
@@ -28,6 +32,11 @@ import {
   fetchRecipeSet,
   importRecipeSet,
   RecipeSetFetchError,
+  countReplaceImpact,
+  savePreImportSnapshot,
+  restorePreImportSnapshot,
+  daysSinceBackup,
+  type ReplaceImpactCounts,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
 import { refreshApp } from '../logic/appRefresh'
@@ -50,6 +59,8 @@ import {
   isValidPackCode,
   normalizePackCode,
   hasPaidRecipeAccess,
+  detectCodeKind,
+  maskUnlockCode,
 } from '../logic/pro'
 import { fetchThemeManifest, type ThemeManifestEntry } from '../logic/themeManifest'
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
@@ -153,10 +164,66 @@ function formatRecipeSetResult(result: {
   return base
 }
 
+/**
+ * 「読み込む（今のデータと置き換え）」の確認文を件数入りで組み立てる
+ * （2026-07-17設定ゼロベース裁定#6a）。ファイル選択を開く前(pickImportFile)・
+ * ファイル選択後の最終確認(onImportFile)の両方で同じ文言を使い整合させる
+ */
+function buildReplaceConfirmText(impact: ReplaceImpactCounts): string {
+  return ja.settings.backupImportReplaceConfirm
+    .replace('{r}', String(impact.recipes))
+    .replace('{c}', String(impact.cookedLogs))
+    .replace('{p}', String(impact.prices))
+}
+
+/**
+ * 解錠コードの控え表示+コピー（2026-07-17設定ゼロベース裁定#4。機種変更時の「購入の復元」用）。
+ * 既定はマスク表示（例: UR-****CD34）で、タップすると生のコードに切り替わる（マスク解除表示）。
+ * コピーボタンは常にマスクの有無に関わらず生のコードをクリップボードへコピーする
+ * （画面には隠していても、機種変更で貼り付ける先は本人の新しい端末なので生のコードで問題ない）
+ */
+function UnlockCodeDisplay({ code }: { code: string }) {
+  const [revealed, setRevealed] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // クリップボードAPI非対応・権限拒否時は何もしない（コード自体は画面表示済みなので手動選択でコピーできる）
+    }
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => setRevealed((v) => !v)}
+        aria-label={ja.settings.unlockCodeToggleAria}
+        className="rounded-sm font-mono text-xs text-ink-muted underline decoration-dotted underline-offset-2"
+      >
+        {revealed ? code : maskUnlockCode(code)}
+      </button>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge px-2 py-1 text-xs font-bold text-accent shadow-sm"
+      >
+        {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
+        {copied ? ja.settings.unlockCodeCopied : ja.settings.unlockCodeCopy}
+      </button>
+    </div>
+  )
+}
+
 /** 設定: NG食材 / 画面を暗くしない / テーマ */
 export default function SettingsPage() {
   const settings = useSettings()
   const recipes = useLiveQuery(listRecipes, [])
+  // 食材価格マスタ(2026-07-17設定ゼロベース裁定#6a: 置き換え確認文の件数表示に使う)
+  const prices = usePriceEntries()
   // 再取込除外の記録(トゥームストーン)。テーマ一覧の「除外中◯品・すべて戻す」表示に使う
   const setExclusions = useLiveQuery(listSetExclusions, [])
   const [ngInput, setNgInput] = useState('')
@@ -175,12 +242,11 @@ export default function SettingsPage() {
   const [recipeSetMessage, setRecipeSetMessage] = useState('')
   const recipeSetFileRef = useRef<HTMLInputElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
-  const [proCodeInput, setProCodeInput] = useState('')
-  const [proChecking, setProChecking] = useState(false)
-  const [proError, setProError] = useState('')
-  const [packCodeInput, setPackCodeInput] = useState('')
-  const [packChecking, setPackChecking] = useState(false)
-  const [packError, setPackError] = useState('')
+  // 「購入と解錠」1画面統合(2026-07-17設定ゼロベース裁定#7)。入力欄1つでPro・追加レシピパック
+  // 両方のコードを受け付け、種類(UR-/UP-)はdetectCodeKindが自動判定する
+  const [unlockCodeInput, setUnlockCodeInput] = useState('')
+  const [unlockChecking, setUnlockChecking] = useState(false)
+  const [unlockError, setUnlockError] = useState('')
   // 「作った記録」の写真をバックアップに含めるか(2026-07-12写真添付・docs/20 §4。既定OFF)
   const [includeCookedPhotos, setIncludeCookedPhotos] = useState(false)
   // 前回選んだ保存先ハンドルの記録があるか(2026-07-17バックアップ改修 修正2+3。
@@ -189,6 +255,11 @@ export default function SettingsPage() {
   const [exportBusy, setExportBusy] = useState(false)
   // 設定画面のタブ(2026-07-12オーナー実機フィードバックのタブ分割)
   const [activeTab, setActiveTab] = useState<SettingsTab>('basic')
+  // 置き換え直後1回だけ出す「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c・三重の網の(c))。
+  // タブを切り替える(=画面遷移)と消える(下のuseEffect参照)
+  const [replaceUndoAvailable, setReplaceUndoAvailable] = useState(false)
+  // バックアップタブ「機種変更するときは」の折りたたみ開閉(2026-07-17設定ゼロベース裁定#5)
+  const [moveGuideOpen, setMoveGuideOpen] = useState(false)
 
   // 前回の保存先ハンドルの記録有無を起動時に1回確認する(2026-07-17バックアップ改修 修正2+3。
   // 非対応ブラウザでは常にfalseのまま=ボタン自体を出さない)
@@ -319,6 +390,38 @@ export default function SettingsPage() {
     requestAnimationFrame(() => window.scrollTo(0, y))
   }, [activeTab])
 
+  /**
+   * バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)のタップ/ボタン先。
+   * 「バックアップタブの書き出しへ」＝タブを切り替えて①バックアップを取るカードまで自動スクロール
+   * する(実際の保存はユーザーが写真込みチェック等を確認してから「ファイルに書き出す」を押す形を
+   * 維持する。バナーの小ボタンから確認なしに即ファイル保存を開始しない)。
+   * selectTab経由にすると離脱先タブのスクロール位置復元(pendingTabScrollRestoreRef)と競合するため、
+   * ?section=直リンクの自動スクロール(上のuseEffect)と同じくsetActiveTabを直接呼ぶ
+   */
+  const backupBannerScrollPendingRef = useRef(false)
+  const goToBackupExport = () => {
+    if (activeTab === 'backup') {
+      document.getElementById('backup-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    backupBannerScrollPendingRef.current = true
+    setActiveTab('backup')
+  }
+  useEffect(() => {
+    if (!backupBannerScrollPendingRef.current) return
+    if (activeTab !== 'backup') return
+    backupBannerScrollPendingRef.current = false
+    requestAnimationFrame(() => {
+      document.getElementById('backup-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [activeTab])
+
+  // 置き換え直後の「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c)はタブ切り替え(=画面遷移)で
+  // 消えてよい設計のため、activeTabが変わるたびに閉じる
+  useEffect(() => {
+    setReplaceUndoAvailable(false)
+  }, [activeTab])
+
   if (!settings) return null // 読み込み中
 
   /** 現在の入力欄の文字が今の時点で何件のレシピに一致するか（登録前のその場プレビュー） */
@@ -330,6 +433,10 @@ export default function SettingsPage() {
   // 「作った記録」写真の容量ガード（2026-07-12写真添付・docs/20 §4。自動削除はしない、促すバナーのみ）
   const cookedPhotoBytes = recipes ? totalCookedLogPhotoBytes(recipes) : 0
   const showCookedPhotoLimitBanner = isOverCookedPhotoLimit(cookedPhotoBytes)
+
+  // レシピ件数・作った記録の合計件数・価格マスタ件数(2026-07-17設定ゼロベース裁定#3のデータ件数表示・
+  // #6aの置き換え確認文の件数表示の両方で使う共通値)
+  const dataCounts = countReplaceImpact(recipes ?? [], prices?.length ?? 0)
 
   /**
    * 「ファイルに書き出す」(2026-07-17バックアップ改修 修正2+3)。
@@ -391,10 +498,11 @@ export default function SettingsPage() {
    * 置き換え(replace)は、押した瞬間に確認なしでファイル選択ダイアログが開いてしまっていた穴を
    * 塞ぐため、ファイル選択を開く前に一段確認を挟む(2026-07-16 データ消失事故の再発防止・P6所見)。
    * キャンセルなら何もしない(ファイル選択自体を開かない)。ファイル選択後にonImportFileで出る
-   * 既存の確認(backupImportReplaceConfirm)はそのまま変更しない
+   * 確認(backupImportReplaceConfirm)と同じ、件数入りの文言を使って整合させる
+   * (2026-07-17設定ゼロベース裁定#6a)
    */
   const pickImportFile = (mode: 'replace' | 'merge') => {
-    if (mode === 'replace' && !window.confirm(ja.settings.importReplaceConfirm)) return
+    if (mode === 'replace' && !window.confirm(buildReplaceConfirmText(dataCounts))) return
     importModeRef.current = mode
     importFileRef.current?.click()
   }
@@ -403,13 +511,25 @@ export default function SettingsPage() {
     if (!file) return
     const mode = importModeRef.current
     const confirmText =
-      mode === 'replace'
-        ? ja.settings.backupImportReplaceConfirm
-        : ja.settings.backupImportMergeConfirm
+      mode === 'replace' ? buildReplaceConfirmText(dataCounts) : ja.settings.backupImportMergeConfirm
     if (!window.confirm(confirmText)) return
     try {
       const backup = parseBackup(await file.text())
+      // 三重の網の(b): 置き換え実行前に現在の全データを内部へ自動退避する(2026-07-17設定
+      // ゼロベース裁定#6b)。退避に失敗しても置き換え自体は止めない(退避はあくまで安全網の追加分で、
+      // 従来どおりのバックアップ/復元フローを妨げてはいけないため)。この場合は「元に戻す」を
+      // 出さない(退避が無ければ復元できないため)
+      let snapshotSaved = false
+      if (mode === 'replace') {
+        try {
+          await savePreImportSnapshot()
+          snapshotSaved = true
+        } catch {
+          snapshotSaved = false
+        }
+      }
       const result = await importBackup(backup, mode)
+      if (mode === 'replace' && snapshotSaved) setReplaceUndoAvailable(true)
       setMessage(
         mode === 'replace'
           ? ja.settings.backupImportDone.replace('{n}', String(result.added))
@@ -420,6 +540,16 @@ export default function SettingsPage() {
     } catch {
       setMessage(ja.settings.backupImportError)
     }
+  }
+
+  /**
+   * 三重の網の(c): 置き換え直後に1回だけ出す「元に戻す」(2026-07-17設定ゼロベース裁定#6c)。
+   * savePreImportSnapshotで退避したデータへ復元する
+   */
+  const handleUndoReplace = async () => {
+    const restored = await restorePreImportSnapshot()
+    setReplaceUndoAvailable(false)
+    setMessage(restored ? ja.settings.replaceUndoDone : ja.settings.replaceUndoError)
   }
 
   // addTheme(テーマ一覧の1タップ取り込み)・set=直リンク取り込み専用。従来どおり下部トーストのまま変更しない
@@ -531,51 +661,45 @@ export default function SettingsPage() {
     return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
   }
 
-  const activatePro = async () => {
-    setProChecking(true)
-    setProError('')
+  /**
+   * 「購入と解錠」1画面統合(2026-07-17設定ゼロベース裁定#7)。入力欄1つでPro・追加レシピパック
+   * 両方を受け付け、detectCodeKindで種類(UR-/UP-)を判定してから、既存のisValidProCode/
+   * isValidPackCode・updateSettingsのフィールドはそのまま流用する(解錠フロー・検証ロジック
+   * 自体は変えない)。旧来の「違う欄に入力してください」という相互誘導ヒントは、
+   * そのまま正しい方で解錠する形に発展したため不要になった
+   */
+  const activateUnlock = async () => {
+    setUnlockChecking(true)
+    setUnlockError('')
     try {
-      // パック用コード(UP-)を間違えてPro欄に入れたときは、正しい欄へ相互誘導する
-      if (normalizeProCode(proCodeInput).startsWith('UP-')) {
-        setProError(ja.settings.proCodeIsPackCode)
-        return
+      const kind = detectCodeKind(unlockCodeInput)
+      if (kind === 'pro') {
+        const valid = await isValidProCode(unlockCodeInput)
+        if (!valid) {
+          setUnlockError(ja.settings.proInvalidCode)
+          return
+        }
+        await updateSettings({
+          proCode: normalizeProCode(unlockCodeInput),
+          proActivatedAt: Date.now(),
+        })
+        setUnlockCodeInput('')
+      } else if (kind === 'pack') {
+        const valid = await isValidPackCode(unlockCodeInput)
+        if (!valid) {
+          setUnlockError(ja.settings.packInvalidCode)
+          return
+        }
+        await updateSettings({
+          recipePackCode: normalizePackCode(unlockCodeInput),
+          recipePackActivatedAt: Date.now(),
+        })
+        setUnlockCodeInput('')
+      } else {
+        setUnlockError(ja.settings.unlockUnknownCode)
       }
-      const valid = await isValidProCode(proCodeInput)
-      if (!valid) {
-        setProError(ja.settings.proInvalidCode)
-        return
-      }
-      await updateSettings({
-        proCode: normalizeProCode(proCodeInput),
-        proActivatedAt: Date.now(),
-      })
-      setProCodeInput('')
     } finally {
-      setProChecking(false)
-    }
-  }
-
-  const activatePack = async () => {
-    setPackChecking(true)
-    setPackError('')
-    try {
-      // Pro用コード(UR-)を間違えてパック欄に入れたときは、正しい欄へ相互誘導する
-      if (normalizePackCode(packCodeInput).startsWith('UR-')) {
-        setPackError(ja.settings.packCodeIsProCode)
-        return
-      }
-      const valid = await isValidPackCode(packCodeInput)
-      if (!valid) {
-        setPackError(ja.settings.packInvalidCode)
-        return
-      }
-      await updateSettings({
-        recipePackCode: normalizePackCode(packCodeInput),
-        recipePackActivatedAt: Date.now(),
-      })
-      setPackCodeInput('')
-    } finally {
-      setPackChecking(false)
+      setUnlockChecking(false)
     }
   }
 
@@ -657,6 +781,16 @@ export default function SettingsPage() {
     void updateSettings({ homeWidgets: next })
   }
 
+  // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。30日超(または未実施)で警告色にする
+  const backupDaysAgo = daysSinceBackup(settings.lastBackupAt)
+  const backupBannerWarning = backupDaysAgo === null || backupDaysAgo > 30
+  const backupBannerText =
+    backupDaysAgo === null
+      ? ja.settings.backupNever
+      : backupDaysAgo === 0
+        ? ja.settings.bannerLastBackupToday
+        : ja.settings.bannerLastBackupDaysAgo.replace('{n}', String(backupDaysAgo))
+
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.settings.title}</h1>
@@ -684,6 +818,40 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。タブバーの下・全タブ共通の常設
+          バナー。タップ/[今すぐ保存]ボタンのどちらも「バックアップタブの書き出しへ」導く
+          (バナー自体は即ファイル保存を実行しない。写真込みチェック等を確認してから
+          「ファイルに書き出す」を押す既存の流れを維持するため)。30日超(または未実施)は警告色 */}
+      <div
+        className={`mt-[var(--space-sm)] flex items-center gap-2 rounded-md border px-[var(--space-sm)] py-2 shadow-sm ${
+          backupBannerWarning ? 'border-warning' : 'border-edge'
+        }`}
+      >
+        <HardDriveDownload
+          size={16}
+          className={`shrink-0 ${backupBannerWarning ? 'text-warning' : 'text-ink-muted'}`}
+          aria-hidden
+        />
+        <button
+          type="button"
+          onClick={goToBackupExport}
+          className={`min-w-0 flex-1 truncate text-left text-sm font-bold ${
+            backupBannerWarning ? 'text-warning' : 'text-ink-muted'
+          }`}
+        >
+          {backupBannerText}
+        </button>
+        <button
+          type="button"
+          onClick={goToBackupExport}
+          className={`shrink-0 rounded-sm border px-2 py-1 text-xs font-bold shadow-sm ${
+            backupBannerWarning ? 'border-warning text-warning' : 'border-edge text-accent'
+          }`}
+        >
+          {ja.settings.bannerSaveNow}
+        </button>
       </div>
 
       {activeTab === 'basic' && (
@@ -767,9 +935,17 @@ export default function SettingsPage() {
           {/* 食材と価格 */}
           <p className={groupHeadingCls}>{ja.settings.groupIngredientsTitle}</p>
 
-          {/* NG食材 */}
+          {/* NG食材。見出し行に件数を常時表示する(2026-07-17設定ゼロベース裁定#2。
+              未登録は「未設定」で登録を促す) */}
           <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.ngTitle}</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-bold">{ja.settings.ngTitle}</h2>
+              <span className="shrink-0 text-sm font-bold text-ink-muted">
+                {settings.ngIngredients.length > 0
+                  ? ja.settings.ngCount.replace('{n}', String(settings.ngIngredients.length))
+                  : ja.settings.ngCountEmpty}
+              </span>
+            </div>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.ngDescription}</p>
             {settings.ngIngredients.length === 0 ? (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
@@ -952,6 +1128,15 @@ export default function SettingsPage() {
           {/* アプリについて(区分表に明示は無いが、汎用の基本タブ末尾に置く) */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.aboutTitle}</h2>
+            {/* バージョン+データ件数(2026-07-17設定ゼロベース裁定#3。問い合わせ対応に必須) */}
+            <p className="mt-1 text-sm text-ink-muted">
+              {ja.settings.aboutVersion.replace('{v}', __APP_VERSION__)}
+            </p>
+            <p className="text-sm text-ink-muted">
+              {ja.settings.aboutDataCount
+                .replace('{r}', String(dataCounts.recipes))
+                .replace('{c}', String(dataCounts.cookedLogs))}
+            </p>
             {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
             <a
               href="/about/"
@@ -1331,6 +1516,37 @@ export default function SettingsPage() {
             </div>
           </section>
 
+          {/* 機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。折りたたみ式で、
+              普段は畳んでおき機種変更のときだけ開く想定 */}
+          <section className={sectionCls}>
+            <button
+              type="button"
+              onClick={() => setMoveGuideOpen((v) => !v)}
+              aria-expanded={moveGuideOpen}
+              className="flex w-full items-center justify-between gap-2 text-left font-bold"
+            >
+              {ja.settings.moveGuideToggle}
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-ink-muted transition-transform ${moveGuideOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            {moveGuideOpen && (
+              <div className="mt-[var(--space-sm)]">
+                <ol className="space-y-1 text-sm text-ink-muted">
+                  <li>{ja.settings.moveGuideStep1}</li>
+                  <li>{ja.settings.moveGuideStep2}</li>
+                  <li>{ja.settings.moveGuideStep3}</li>
+                </ol>
+                <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs font-bold text-warning">
+                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  {ja.settings.moveGuideNote}
+                </p>
+              </div>
+            )}
+          </section>
+
           {/* ③困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設。
               2026-07-17修正4でボタン文言・説明文を全面改訂)。
               レシピ・価格・購入コード等のIndexedDBデータには一切触れない(src/logic/appRefresh.ts参照) */}
@@ -1362,109 +1578,141 @@ export default function SettingsPage() {
               {ja.settings.refreshAppCacheClearWarning}
             </p>
           </section>
+
+          {/* 三重の網の(c): 置き換え直後に1回だけ出す「元に戻す」バナー
+              (2026-07-17設定ゼロベース裁定#6c)。タブ切り替え(画面遷移)で自動的に消える */}
+          {replaceUndoAvailable && (
+            <div
+              className="fixed inset-x-0 z-[70] flex justify-center px-[var(--space-md)]"
+              style={{ bottom: 'calc(160px + env(safe-area-inset-bottom))' }}
+              role="status"
+            >
+              <div className="flex w-full max-w-sm items-start gap-2 rounded-md border border-accent bg-surface px-4 py-3 shadow-md motion-safe:animate-toast-in">
+                <span className="min-w-0 flex-1 text-sm font-bold text-accent">
+                  {ja.settings.replaceUndoMessage}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleUndoReplace()}
+                  className="shrink-0 rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent"
+                >
+                  {ja.settings.replaceUndoButton}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplaceUndoAvailable(false)}
+                  aria-label={ja.settings.replaceUndoDismiss}
+                  className="shrink-0"
+                >
+                  <X size={16} className="text-accent" aria-hidden />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
       {activeTab === 'pro' && (
         <>
-          {/* Pro版 */}
+          {/* 購入と解錠(2026-07-17設定ゼロベース裁定#7: Pro版・追加レシピパックの2カードを
+              1カードに統合。入力欄1つでコード種別(UR-/UP-)を自動判定する。解錠状態は両方を
+              一覧表示し、解錠済みコードはマスク表示+コピー(#4)を添える) */}
           <section id="pro-section" className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.proTitle}</h2>
-            {settings.proCode ? (
-              <>
-                <p className="mt-1 text-sm font-bold text-accent">{ja.settings.proActivatedTitle}</p>
-                {settings.proActivatedAt && (
-                  <p className="mt-0.5 text-xs text-ink-muted">
-                    {ja.settings.proActivatedDate.replace('{date}', formatDate(settings.proActivatedAt))}
-                  </p>
-                )}
-                {/* Pro版の機能内容は解錠中ずっとここに表示し続ける(2026-07-13 UI改善。
-                    従来はコード反映直後のセッションだけの一時表示だった) */}
-                <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
-                  <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
-                  <ul className="mt-1 space-y-0.5 text-sm text-ink-muted">
-                    {ja.settings.proActivatedFeatures.map((feature) => (
-                      <li key={feature}>・{feature}</li>
-                    ))}
-                  </ul>
+            <h2 className="font-bold">{ja.settings.unlockTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.unlockDescription}</p>
+
+            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+              {/* Pro版の行 */}
+              <li className="px-[var(--space-sm)] py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold">{ja.settings.proTitle}</span>
+                  {!settings.proCode && (
+                    <span className="shrink-0 text-sm text-ink-muted">{ja.settings.unlockStatusInactive}</span>
+                  )}
                 </div>
-              </>
-            ) : (
-              <>
-                <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
-                <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
+                {settings.proCode ? (
+                  <>
+                    <p className="mt-1 text-sm font-bold text-accent">{ja.settings.proActivatedTitle}</p>
+                    {settings.proActivatedAt && (
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        {ja.settings.proActivatedDate.replace('{date}', formatDate(settings.proActivatedAt))}
+                      </p>
+                    )}
+                    <UnlockCodeDisplay code={settings.proCode} />
+                  </>
+                ) : (
+                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
+                )}
+              </li>
+              {/* 追加レシピパックの行 */}
+              <li className="px-[var(--space-sm)] py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold">{ja.settings.packTitle}</span>
+                  {!settings.recipePackCode && (
+                    <span className="shrink-0 text-sm text-ink-muted">
+                      {settings.proCode ? ja.settings.packIncludedInPro : ja.settings.unlockStatusInactive}
+                    </span>
+                  )}
+                </div>
+                {settings.recipePackCode ? (
+                  <>
+                    <p className="mt-1 text-sm font-bold text-accent">{ja.settings.packActivatedTitle}</p>
+                    {settings.recipePackActivatedAt && (
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        {ja.settings.packActivatedDate.replace(
+                          '{date}',
+                          formatDate(settings.recipePackActivatedAt),
+                        )}
+                      </p>
+                    )}
+                    <UnlockCodeDisplay code={settings.recipePackCode} />
+                  </>
+                ) : (
+                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.packDescription}</p>
+                )}
+              </li>
+            </ul>
+
+            {/* 未解錠(またはパックのみ解錠=将来のPro追加購入に備えて残す)なら統合入力を出す。
+                Pro解錠済みならすべて含むため入力欄自体を隠す(旧packNotNeededWithProの後継:
+                「入力できるのに無意味」ではなく「そもそも入力の必要が無い」状態にする) */}
+            {!settings.proCode && (
+              <div className="mt-[var(--space-md)]">
+                <div className="flex gap-[var(--space-sm)]">
                   <input
                     type="text"
-                    value={proCodeInput}
+                    value={unlockCodeInput}
                     onChange={(e) => {
-                      setProCodeInput(e.target.value)
-                      setProError('')
+                      setUnlockCodeInput(e.target.value)
+                      setUnlockError('')
                     }}
-                    placeholder={ja.settings.proCodePlaceholder}
+                    placeholder={ja.settings.unlockCodePlaceholder}
                     className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
                   />
                   <button
                     type="button"
-                    onClick={() => void activatePro()}
-                    disabled={proChecking || !proCodeInput.trim()}
+                    onClick={() => void activateUnlock()}
+                    disabled={unlockChecking || !unlockCodeInput.trim()}
                     className="inline-flex shrink-0 items-center rounded-sm bg-accent px-4 font-bold text-on-accent disabled:opacity-40"
                   >
-                    {proChecking ? ja.settings.proActivating : ja.settings.proActivate}
+                    {unlockChecking ? ja.settings.unlockActivating : ja.settings.unlockActivate}
                   </button>
                 </div>
-                {proError && <p className="mt-1 text-sm font-bold text-warning">{proError}</p>}
-              </>
+                {unlockError && <p className="mt-1 text-sm font-bold text-warning">{unlockError}</p>}
+              </div>
             )}
-          </section>
 
-          {/* 追加レシピパック */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.packTitle}</h2>
-            {settings.recipePackCode ? (
-              <>
-                <p className="mt-1 text-sm font-bold text-accent">{ja.settings.packActivatedTitle}</p>
-                {settings.recipePackActivatedAt && (
-                  <p className="mt-0.5 text-xs text-ink-muted">
-                    {ja.settings.packActivatedDate.replace(
-                      '{date}',
-                      formatDate(settings.recipePackActivatedAt),
-                    )}
-                  </p>
-                )}
-              </>
-            ) : (
-              <>
-                <p className="mt-1 text-sm text-ink-muted">{ja.settings.packDescription}</p>
-                {/* Pro解錠済み(パック未解錠)のときは、パックの内容がPro版に含まれるため
-                    入力欄をdisabledにして案内文を出す(2026-07-13 UI改善) */}
-                {settings.proCode && (
-                  <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">
-                    {ja.settings.packNotNeededWithPro}
-                  </p>
-                )}
-                <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
-                  <input
-                    type="text"
-                    value={packCodeInput}
-                    onChange={(e) => {
-                      setPackCodeInput(e.target.value)
-                      setPackError('')
-                    }}
-                    disabled={!!settings.proCode}
-                    placeholder={ja.settings.packCodePlaceholder}
-                    className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60 disabled:opacity-40"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void activatePack()}
-                    disabled={!!settings.proCode || packChecking || !packCodeInput.trim()}
-                    className="inline-flex shrink-0 items-center rounded-sm bg-accent px-4 font-bold text-on-accent disabled:opacity-40"
-                  >
-                    {packChecking ? ja.settings.packActivating : ja.settings.packActivate}
-                  </button>
-                </div>
-                {packError && <p className="mt-1 text-sm font-bold text-warning">{packError}</p>}
-              </>
+            {/* Pro解錠直後に「何が使えるようになったか」を控えめに案内する(2026-07-09ペルソナ第2波)。
+                解錠中ずっと表示され続ける(2026-07-13 UI改善) */}
+            {settings.proCode && (
+              <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
+                <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
+                <ul className="mt-1 space-y-0.5 text-sm text-ink-muted">
+                  {ja.settings.proActivatedFeatures.map((feature) => (
+                    <li key={feature}>・{feature}</li>
+                  ))}
+                </ul>
+              </div>
             )}
           </section>
         </>
