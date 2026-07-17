@@ -54,3 +54,13 @@ export async function isValidPackCode(code: string, forceFallback = false): Prom
 export function hasPaidRecipeAccess(settings: Pick<Settings, 'proCode' | 'recipePackCode'>): boolean {
   return !!settings.proCode || !!settings.recipePackCode
 }
+
+/**
+ * オーナーの下見(レビュー)専用セットか(2026-07-17)。
+ * 下見セット(review2/8/16等)はテーマ名バッジ・テーマごと削除のためにsetIdを持つが、
+ * 販売物ではなく公開リンクも無いため課金ゲートの対象外とする
+ * (setId付与(2026-07-16便V)でゲートに引っかかりオーナーが下見できなくなった実害の恒久修正)
+ */
+export function isPreviewSetId(setId: string): boolean {
+  return setId.startsWith('review')
+}

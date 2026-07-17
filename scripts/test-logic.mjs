@@ -3824,3 +3824,12 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
 process.exit(failures.length > 0 ? 1 : 0)
+
+// ---- isPreviewSetId: 下見セットは課金ゲート対象外(2026-07-17・オーナー下見不能の恒久修正) ----
+{
+  const { isPreviewSetId } = await import('../src/logic/pro.ts')
+  eq('下見セット(review2)はプレビュー扱い', isPreviewSetId('review2'), true)
+  eq('下見セット(review16)はプレビュー扱い', isPreviewSetId('review16'), true)
+  eq('販売セット(kintore)はプレビューではない', isPreviewSetId('kintore'), false)
+  eq('販売セット(bento)はプレビューではない', isPreviewSetId('bento'), false)
+}

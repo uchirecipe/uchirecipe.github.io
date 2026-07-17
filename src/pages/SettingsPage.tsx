@@ -49,8 +49,7 @@ import {
   normalizeProCode,
   isValidPackCode,
   normalizePackCode,
-  hasPaidRecipeAccess,
-} from '../logic/pro'
+  hasPaidRecipeAccess,, isPreviewSetId } from '../logic/pro'
 import { fetchThemeManifest, type ThemeManifestEntry } from '../logic/themeManifest'
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
 import { ja } from '../i18n/ja'
@@ -255,7 +254,7 @@ export default function SettingsPage() {
       try {
         const file = await fetchRecipeSet(`/sets/data/${setId}.json`)
         if (cancelled) return
-        if (file.setId && !hasPaidRecipeAccess(settings)) {
+        if (file.setId && !isPreviewSetId(file.setId) && !hasPaidRecipeAccess(settings)) {
           setMessage(ja.settings.recipeSetBlocked)
           return
         }
@@ -469,7 +468,7 @@ export default function SettingsPage() {
     setRecipeSetMessage('')
     try {
       const file = await fetchRecipeSet(url)
-      if (file.setId && !hasPaidRecipeAccess(settings)) {
+      if (file.setId && !isPreviewSetId(file.setId) && !hasPaidRecipeAccess(settings)) {
         setRecipeSetMessage(ja.settings.recipeSetBlocked)
         return
       }
