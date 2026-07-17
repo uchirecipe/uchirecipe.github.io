@@ -74,6 +74,8 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'pantryMatch', label: ja.search.sortPantryMatch },
   { value: 'kana', label: ja.search.sortKana },
   { value: 'cooked', label: ja.search.sortCooked },
+  // テーマごと(2026-07-17オーナー指示で追加)
+  { value: 'theme', label: ja.search.sortTheme },
 ]
 
 /** 栄養並び替え5項目のラベル（2026-07-16 便T-4: カロリー・たんぱく質・塩分・脂質・糖質。Pro機能） */

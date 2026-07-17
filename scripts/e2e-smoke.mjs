@@ -205,6 +205,12 @@
 //         日モーダル(便U-5)が出ないこと・モード解除で日モーダルが復活すること・終了日<開始日の
 //         順にタップしても自動で入れ替わり結果が変わらないこと。原価は既存の週集計と同方式
 //         (登録人数基準)のため、期間合計が肉じゃが単品の概算食費の2倍と一致することで検証する) /
+//         THEMESORT-01(一覧の並び替えに「テーマごと」を追加・2026-07-17オーナー指示: 並び替え
+//         パネルに選択肢として出ること・選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)に
+//         なること・テーマ「高たんぱくごはん」(kintore・10品)取り込み後は、そのテーマのカードが
+//         基本レシピの直後に連続した塊として並ぶこと。既存のSORTDIR-01/SCROLL-01/SCROLL-02が
+//         「テーマごと」追加後も壊れていないことは、同じ一覧の状態保存の仕組み(sessionStorageの
+//         recipesListState)を共用するそれぞれの既存チェックの合格をもって確認する) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -1724,6 +1730,111 @@ try {
       )
     } finally {
       await tbBrowser.close()
+    }
+  }
+
+  // --- THEMESORT-01: 一覧の並び替えに「テーマごと」を追加(2026-07-17オーナー指示)。並び替え
+  // パネルに選択肢として出ること・選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる
+  // こと(まだテーマ未取込)・テーマ「高たんぱくごはん」(kintore・10品)を取り込んだ後は一覧へ
+  // 戻ると「テーマごと」の選択がsessionStorageから保持されたまま、そのテーマのカードが基本レシピの
+  // 直後に連続した塊として並ぶことを確認する。テーマ取り込みには追加レシピパック解錠が必要なため、
+  // TOMB-01と同様settings.recipePackCodeを直接書き込む。他チェックの解錠状態・レシピに
+  // 影響しないよう専用のbrowser/contextで完結させる ---
+  currentCheck = 'THEMESORT-01'
+  {
+    const tsBrowser = await chromium.launch()
+    const tsContext = await tsBrowser.newContext()
+    const tsPage = await tsContext.newPage()
+    tsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@THEMESORT-01] ${err.message}`)
+    })
+    tsPage.on('dialog', (dialog) => dialog.accept())
+    try {
+      await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tsPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 1) 並び替えパネルに「テーマごと」が選択肢として出る
+      await tsPage.locator('button[aria-label="並び替え"]').click()
+      await tsPage.waitForTimeout(300)
+      const sortPanelText = await tsPage.textContent('body')
+      check('THEMESORT-01 並び替えパネルに「テーマごと」が出る', sortPanelText.includes('テーマごと'))
+
+      // 2) 選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる(テーマ未取込のため)
+      await tsPage.getByRole('button', { name: 'テーマごと', exact: true }).click()
+      await tsPage.waitForTimeout(300)
+      await tsPage.getByRole('button', { name: '決定' }).click()
+      await tsPage.waitForTimeout(300)
+      const firstCardTextBeforeImport = await tsPage.evaluate(() => {
+        const first = document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')
+        return first ? first.textContent : null
+      })
+      check(
+        'THEMESORT-01 「テーマごと」選択で先頭カードが基本レシピになる(テーマ未取込)',
+        !!firstCardTextBeforeImport && firstCardTextBeforeImport.includes('基本レシピ'),
+        `先頭カードテキスト=${firstCardTextBeforeImport}`,
+      )
+
+      // 3) テーマ「高たんぱくごはん」(kintore・10品)を取り込む(TOMB-01と同様にパックを解錠してから)
+      await tsPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({
+              ...current,
+              id: 1,
+              recipePackCode: 'UP-E2E-TEST-ONLY',
+              recipePackActivatedAt: Date.now(),
+            })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await tsPage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
+      await tsPage.waitForTimeout(2000)
+      check(
+        'THEMESORT-01 テーマ「高たんぱくごはん」の取り込み(10品追加)',
+        (await tsPage.textContent('body')).includes('10件追加しました'),
+      )
+
+      // 4) 一覧へ戻ると「テーマごと」の選択がsessionStorageから保持されたまま、取り込んだテーマの
+      //    カードが基本レシピの直後に連続した塊として並ぶ(自作レシピは未登録のため末尾は対象外)
+      await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tsPage.waitForTimeout(800)
+      const badgeKindsAfterImport = await tsPage.evaluate(() => {
+        const cards = Array.from(document.querySelectorAll('div.grid.grid-cols-2 a[href^="#/recipes/"]'))
+        return cards.map((card) => {
+          if (card.textContent?.includes('高たんぱくごはん')) return 'theme'
+          if (card.textContent?.includes('基本レシピ')) return 'base'
+          return 'other'
+        })
+      })
+      const firstThemeIndex = badgeKindsAfterImport.indexOf('theme')
+      const themeCount = badgeKindsAfterImport.filter((kind) => kind === 'theme').length
+      const isContiguousThemeBlockAfterBase =
+        firstThemeIndex > 0 &&
+        badgeKindsAfterImport.slice(0, firstThemeIndex).every((kind) => kind === 'base') &&
+        badgeKindsAfterImport
+          .slice(firstThemeIndex, firstThemeIndex + themeCount)
+          .every((kind) => kind === 'theme')
+      check(
+        'THEMESORT-01 取り込み後、基本レシピの直後にテーマ「高たんぱくごはん」の10品が連続した塊として並ぶ',
+        isContiguousThemeBlockAfterBase && themeCount === 10,
+        `並び=${JSON.stringify(badgeKindsAfterImport)}`,
+      )
+    } finally {
+      await tsBrowser.close()
     }
   }
 
