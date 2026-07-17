@@ -30,3 +30,8 @@ scripts/data/*.xlsx
 # レビュー用レシピセット(docs/12原稿からscripts/build-review-pack.mjsが生成する一時物。
 # 本番に混入させないためコミットしない)
 public/sets/data/review.json
+
+# workers/recipe-import(URL取り込みWorker): wranglerのローカル実行キャッシュ・秘密情報ファイル
+workers/recipe-import/.wrangler
+workers/recipe-import/.dev.vars*
+.wrangler

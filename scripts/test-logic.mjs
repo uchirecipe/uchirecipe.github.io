@@ -92,6 +92,15 @@ import { buildShareText } from '../src/logic/share.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 import { pickIconKey } from '../src/logic/icon.ts'
 import { starterDefs, buildUpdatedStarterRecipe, planStarterReload } from '../src/db/starters.ts'
+import {
+  extractRecipeFromHtml,
+  extractServings,
+  parseIso8601DurationToMinutes,
+  extractImageUrl,
+  splitIngredientAmount,
+  normalizeIngredients,
+  normalizeInstructions,
+} from '../workers/recipe-import/src/normalize.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -3859,6 +3868,214 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     }),
     expectedFull,
   )
+}
+
+// ============================================================================
+// URLから取り込む(workers/recipe-import/src/normalize.ts)。docs/39検証で確認した実世界の
+// ばらつき(schema.org/Recipe JSON-LDの@graph/配列/HowToStep/HowToSection/文字列instructions/
+// ISO8601 duration/recipeYield表記ゆれ)を、実サイトHTMLの丸写しではなく構造を模した合成
+// JSON-LDフィクスチャで網羅する。Workerからもこのファイルからも同じロジックを使う(共有資産)。
+// ============================================================================
+
+// ---- extractServings: recipeYieldの表記ゆれ ----
+eq('servings: 「2人前」', extractServings('2人前'), 2)
+eq('servings: 「4人分」', extractServings('4人分'), 4)
+eq('servings: 全角「２人分」', extractServings('２人分'), 2)
+eq('servings: 「4 servings」', extractServings('4 servings'), 4)
+eq('servings: 「4(servings)」', extractServings('4(servings)'), 4)
+eq('servings: 数字のみ「2」', extractServings('2'), 2)
+// 「人分/人前」が無い裸の範囲(rakutenレシピの実例「2~3」相当)には人分直前ルールが使えないため、
+// 単純に最初の数字(範囲の下限)を採用する(「人分」付きの範囲とは挙動が異なる。次のケースと対比)
+eq('servings: 「人分」なし裸の範囲「2〜3」は最初の数字(下限)を採用', extractServings('2〜3'), 2)
+eq('servings: 範囲「3〜4人分」は人分直前の数字を採用', extractServings('3〜4人分'), 4)
+eq('servings: 数字なし「その他」はundefined(必須項目にしない)', extractServings('その他'), undefined)
+eq('servings: 配列なら先頭要素', extractServings(['4人分', '4 servings']), 4)
+eq('servings: undefined入力はundefined', extractServings(undefined), undefined)
+
+// ---- parseIso8601DurationToMinutes: 分表記・秒表記の両対応(docs/39 DELISH KITCHENの秒表記対策) ----
+eq('duration: 「PT30M」→30分', parseIso8601DurationToMinutes('PT30M'), 30)
+eq('duration: 「PT1800S」(秒表記)→30分', parseIso8601DurationToMinutes('PT1800S'), 30)
+eq('duration: 「PT1H」→60分', parseIso8601DurationToMinutes('PT1H'), 60)
+eq('duration: 「PT1H15M」→75分', parseIso8601DurationToMinutes('PT1H15M'), 75)
+eq('duration: 不正な文字列はundefined', parseIso8601DurationToMinutes('約30分'), undefined)
+eq('duration: undefined入力はundefined', parseIso8601DurationToMinutes(undefined), undefined)
+
+// ---- extractImageUrl: 文字列/配列/オブジェクト/オブジェクト配列 ----
+eq('image: 文字列', extractImageUrl('https://example.com/a.jpg'), 'https://example.com/a.jpg')
+eq('image: 文字列配列は先頭', extractImageUrl(['https://example.com/a.jpg', 'https://example.com/b.jpg']), 'https://example.com/a.jpg')
+eq('image: {url}オブジェクト', extractImageUrl({ url: 'https://example.com/c.jpg' }), 'https://example.com/c.jpg')
+eq('image: undefinedはundefined', extractImageUrl(undefined), undefined)
+
+// ---- splitIngredientAmount: name+amountの分離(unit分解はapp側splitQuantityに委ねる) ----
+eq('ingredient: 空白区切り「しょうゆ 大さじ2」', splitIngredientAmount('しょうゆ 大さじ2'), { name: 'しょうゆ', amount: '大さじ2' })
+eq('ingredient: 全角空白区切り「豚肉　200g」', splitIngredientAmount('豚肉　200g'), { name: '豚肉', amount: '200g' })
+eq('ingredient: 全角数字「にんじん　１本」→半角化', splitIngredientAmount('にんじん　１本'), { name: 'にんじん', amount: '1本' })
+eq('ingredient: くっつき(区切りなし)「そうめん4ワ」', splitIngredientAmount('そうめん4ワ'), { name: 'そうめん', amount: '4ワ' })
+eq('ingredient: 三点リーダー区切り「じゃがいも…2個」', splitIngredientAmount('じゃがいも…2個'), { name: 'じゃがいも', amount: '2個' })
+eq('ingredient: 分量なしのグループ見出し「合わせ調味料」', splitIngredientAmount('合わせ調味料'), { name: '合わせ調味料' })
+eq('ingredient: 括弧付き分量「じゃがいも 3個(450g)」', splitIngredientAmount('じゃがいも 3個(450g)'), { name: 'じゃがいも', amount: '3個(450g)' })
+eq('ingredient: 先頭の中黒を除去「・鶏もも肉 200g」', splitIngredientAmount('・鶏もも肉 200g'), { name: '鶏もも肉', amount: '200g' })
+
+// ---- normalizeIngredients: 配列のまとめ処理(空要素・文字列以外は無視) ----
+eq(
+  'ingredients: 配列一括',
+  normalizeIngredients(['じゃがいも 3個', 'しょうゆ 大さじ2', '塩　少々']),
+  [
+    { name: 'じゃがいも', amount: '3個' },
+    { name: 'しょうゆ', amount: '大さじ2' },
+    { name: '塩', amount: '少々' },
+  ],
+)
+eq('ingredients: undefinedは空配列', normalizeIngredients(undefined), [])
+
+// ---- normalizeInstructions: 文字列配列/HowToStep配列/HowToSection入れ子/単一長文字列 ----
+eq(
+  'instructions: 文字列配列',
+  normalizeInstructions(['じゃがいもを切る', '鍋で煮る']),
+  ['じゃがいもを切る', '鍋で煮る'],
+)
+eq(
+  'instructions: HowToStep配列',
+  normalizeInstructions([
+    { '@type': 'HowToStep', text: 'じゃがいもを切る' },
+    { '@type': 'HowToStep', text: '鍋で煮る' },
+  ]),
+  ['じゃがいもを切る', '鍋で煮る'],
+)
+eq(
+  'instructions: HowToSection入れ子(itemListElementを展開)',
+  normalizeInstructions([
+    {
+      '@type': 'HowToSection',
+      name: '下ごしらえ',
+      itemListElement: [
+        { '@type': 'HowToStep', text: '野菜を切る' },
+        { '@type': 'HowToStep', text: '肉を切る' },
+      ],
+    },
+    { '@type': 'HowToStep', text: '炒める' },
+  ]),
+  ['野菜を切る', '肉を切る', '炒める'],
+)
+eq(
+  'instructions: 単一長文字列を番号で分割(E・レシピ形式)',
+  normalizeInstructions('作り方1. じゃがいもの皮をむいて切る。2. 鍋に入れて煮る。3. 味付けする。'),
+  ['じゃがいもの皮をむいて切る。', '鍋に入れて煮る。', '味付けする。'],
+)
+eq(
+  'instructions: HTMLタグ・実体参照を除去(nadia形式のリンク混入対策)',
+  normalizeInstructions(['にんじんは<a href="/wordlist/乱切り">乱切り</a>にする&amp;混ぜる']),
+  ['にんじんは乱切りにする&混ぜる'],
+)
+eq('instructions: undefinedは空配列', normalizeInstructions(undefined), [])
+
+// ---- extractRecipeFromHtml: JSON-LD抽出パイプライン全体(合成HTML) ----
+function ldJsonHtml(json) {
+  return `<!doctype html><html><head><script type="application/ld+json">${JSON.stringify(json)}</script></head><body></body></html>`
+}
+
+{
+  // 基本形: 単体Recipeオブジェクト・recipeYield「2人前」・cookTime分表記
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@type': 'Recipe',
+    name: '肉じゃが',
+    recipeIngredient: ['じゃがいも 3個', '牛こま切れ肉 200g', 'しょうゆ 大さじ2'],
+    recipeInstructions: ['じゃがいもを切る', '鍋で煮る'],
+    recipeYield: '2人前',
+    cookTime: 'PT30M',
+    image: 'https://example.com/nikujaga.jpg',
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/1')
+  eq('extractRecipeFromHtml: 基本形タイトル', r?.title, '肉じゃが')
+  eq('extractRecipeFromHtml: 基本形材料3件', r?.ingredients, [
+    { name: 'じゃがいも', amount: '3個' },
+    { name: '牛こま切れ肉', amount: '200g' },
+    { name: 'しょうゆ', amount: '大さじ2' },
+  ])
+  eq('extractRecipeFromHtml: 基本形手順2件', r?.steps, ['じゃがいもを切る', '鍋で煮る'])
+  eq('extractRecipeFromHtml: 基本形servings', r?.servings, 2)
+  eq('extractRecipeFromHtml: 基本形cookMinutes', r?.cookMinutes, 30)
+  eq('extractRecipeFromHtml: 基本形imageUrl', r?.imageUrl, 'https://example.com/nikujaga.jpg')
+  eq('extractRecipeFromHtml: 基本形sourceUrlは引数のURL', r?.sourceUrl, 'https://example.com/recipe/1')
+}
+
+{
+  // @graph形式: WebSite等のノードに混ざってRecipeが入っている
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@graph': [
+      { '@type': 'WebSite', name: 'サンプルレシピサイト' },
+      {
+        '@type': ['Recipe'],
+        name: 'カレーライス',
+        recipeIngredient: ['じゃがいも 2個', 'カレールー 1箱'],
+        recipeInstructions: [
+          { '@type': 'HowToStep', text: '野菜を切る' },
+          { '@type': 'HowToStep', text: '煮込む' },
+        ],
+        recipeYield: '4 servings',
+      },
+    ],
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/2')
+  eq('extractRecipeFromHtml: @graph形式でもRecipeを発見', r?.title, 'カレーライス')
+  eq('extractRecipeFromHtml: @graph形式・@typeが配列でも検出', r?.steps, ['野菜を切る', '煮込む'])
+  eq('extractRecipeFromHtml: @graph形式のrecipeYield「4 servings」', r?.servings, 4)
+}
+
+{
+  // 配列ルート形式
+  const html = ldJsonHtml([
+    { '@type': 'Organization', name: 'サンプル' },
+    {
+      '@type': 'Recipe',
+      name: '親子丼',
+      recipeIngredient: ['卵 2個', '鶏もも肉 100g'],
+      recipeInstructions: '作り方1. 鶏肉を煮る。2. 卵でとじる。',
+      cookTime: 'PT1800S',
+    },
+  ])
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/3')
+  eq('extractRecipeFromHtml: 配列ルート形式でもRecipeを発見', r?.title, '親子丼')
+  eq('extractRecipeFromHtml: 単一長文字列instructionsも番号分割', r?.steps, ['鶏肉を煮る。', '卵でとじる。'])
+  eq('extractRecipeFromHtml: cookTime秒表記(PT1800S)→30分', r?.cookMinutes, 30)
+}
+
+{
+  // JSON-LD内に生の制御文字(改行)が文字列リテラル中に混入するケース(ミツカン実例の再現)。
+  // JSON.stringifyでは作れないため、素朴なJSON.parseが失敗する壊れたJSON-LD文字列を直接組み立てる
+  const brokenJsonLd =
+    '{"@context":"https://schema.org","@type":"Recipe","name":"筑前煮",' +
+    '"recipeIngredient":["れんこん 150g","鶏もも肉 300g"],' +
+    '"recipeInstructions":["野菜を\n炒める","煮込む"]}'
+  const html = `<!doctype html><html><head><script type="application/ld+json">${brokenJsonLd}</script></head><body></body></html>`
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/4')
+  eq('extractRecipeFromHtml: 制御文字混入JSON-LDもサニタイズして復旧', r?.title, '筑前煮')
+  // サニタイズでJSON.parse自体は復旧する。埋め込まれていた改行はcleanTextの空白正規化で
+  // 半角スペース1つにまとまる(手順文を1行の読みやすい文として扱う設計。改行の保持が目的ではない)
+  eq('extractRecipeFromHtml: サニタイズ後も手順が読める(改行は空白に正規化)', r?.steps, ['野菜を 炒める', '煮込む'])
+}
+
+{
+  // Recipe型のJSON-LDが存在しない(白ごはん.com・S&B相当) → no_recipeとして扱うためundefinedを返す
+  const html = ldJsonHtml({ '@context': 'https://schema.org', '@type': 'Article', headline: 'コラム記事' })
+  const r = extractRecipeFromHtml(html, 'https://example.com/article')
+  eq('extractRecipeFromHtml: Recipe型が無ければundefined(no_recipe)', r, undefined)
+}
+
+{
+  // JSON-LD自体が存在しない
+  const html = '<!doctype html><html><head></head><body>レシピはありません</body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/none')
+  eq('extractRecipeFromHtml: JSON-LDが無ければundefined', r, undefined)
+}
+
+{
+  // Recipe型はあるが中核3項目(材料・手順)が空 → undefined(name/ingredients/stepsが必須)
+  const html = ldJsonHtml({ '@context': 'https://schema.org', '@type': 'Recipe', name: 'タイトルのみ' })
+  const r = extractRecipeFromHtml(html, 'https://example.com/incomplete')
+  eq('extractRecipeFromHtml: 材料・手順が空ならundefined', r, undefined)
 }
 
 // ---------- 結果 ----------

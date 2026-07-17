@@ -568,6 +568,18 @@ try {
     `現在URL: ${page.url()}`,
   )
 
+  // --- URLIMPORT-00: VITE_RECIPE_IMPORT_ENDPOINT未設定(通常のdev/preview起動)では
+  // 「URLから取り込む」ボタン自体が出ない(Workerデプロイ前でも壊れない設計。src/logic/urlImport.ts
+  // のisUrlImportEnabled)。設定済みの場合の表示・取り込みフローはURLIMPORT-01以降(自前previewサーバー
+  // port 4203・VITE_RECIPE_IMPORT_ENDPOINTをダミー値でビルド)で確認する ---
+  currentCheck = 'URLIMPORT-00'
+  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  check(
+    'URLIMPORT-00 エンドポイント未設定では「URLから取り込む」ボタンが出ない',
+    !(await page.getByText('URLから取り込む').isVisible().catch(() => false)),
+  )
+
   // --- SMK-04+02: テキスト貼り付け→登録 ---
   currentCheck = 'SMK-04'
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
@@ -5777,6 +5789,193 @@ try {
       )
     } finally {
       await pbBrowser.close()
+    }
+  }
+
+  // --- URLIMPORT-01〜: 「URLから取り込む」。エンドポイント設定時の表示・取り込みフロー全体
+  // (成功/no_recipe/fetch_failed)を、実際のCloudflare Workerを立てずに検証する。
+  // VITE_RECIPE_IMPORT_ENDPOINT を(実在しない.invalidドメインの)ダミー値で焼き込んでビルドし、
+  // page.route()でその宛先へのfetchだけをブラウザ内で横取りしてWorkerの応答を模す(実ネットワークには
+  // 出ない)。他チェックが使うBASE(通常5173。オーナー検証時等はport 4202を使うこともある)・
+  // PRO-FALLBACK-01が使うport 4194とは別に、自前previewサーバーをport 4203に立てる
+  // (CLAUDE.md運用ルール: 自分が起動したPIDのみkill・4190には触れない) ---
+  currentCheck = 'URLIMPORT-01'
+  {
+    const MOCK_ENDPOINT = 'https://recipe-import.example.invalid/api'
+    execSync('npx vite build', {
+      cwd: appRoot,
+      stdio: 'inherit',
+      env: { ...process.env, VITE_RECIPE_IMPORT_ENDPOINT: MOCK_ENDPOINT },
+    })
+
+    const URLIMPORT_PREVIEW_PORT = 4203
+    const URLIMPORT_PREVIEW_BASE = `http://localhost:${URLIMPORT_PREVIEW_PORT}`
+    const urlImportPreviewProc = spawn(
+      'npx',
+      ['vite', 'preview', '--port', String(URLIMPORT_PREVIEW_PORT), '--strictPort'],
+      { cwd: appRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    let uiPreviewReady = false
+    let uiPreviewOutput = ''
+    urlImportPreviewProc.stdout.on('data', (buf) => {
+      uiPreviewOutput += buf.toString()
+      if (uiPreviewOutput.includes('Local:')) uiPreviewReady = true
+    })
+    urlImportPreviewProc.stderr.on('data', (buf) => (uiPreviewOutput += buf.toString()))
+
+    try {
+      const start = Date.now()
+      while (!uiPreviewReady && Date.now() - start < 15000) {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+      }
+      if (!uiPreviewReady) {
+        throw new Error(`URLIMPORT用previewサーバーが起動しなかった: ${uiPreviewOutput}`)
+      }
+
+      const uiBrowser = await chromium.launch()
+      try {
+        const uiContext = await uiBrowser.newContext()
+        const uiPage = await uiContext.newPage()
+
+        // Worker応答のスタブ: 「url」クエリの中身で成功/no_recipe/fetch_failedを出し分ける
+        await uiPage.route(
+          (url) => url.href.startsWith(MOCK_ENDPOINT),
+          (route) => {
+            const requested = new URL(route.request().url())
+            const target = requested.searchParams.get('url') ?? ''
+            if (target.includes('no-recipe-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'no_recipe' }),
+              })
+            }
+            if (target.includes('fetch-failed-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'fetch_failed' }),
+              })
+            }
+            return route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                ok: true,
+                recipe: {
+                  title: 'E2Eモック鍋',
+                  ingredients: [
+                    { name: '鶏もも肉', amount: '300g' },
+                    { name: 'しょうゆ', amount: '大さじ2' },
+                  ],
+                  steps: ['鶏肉を切る', '煮込む'],
+                  servings: 3,
+                  cookMinutes: 25,
+                  sourceUrl: target,
+                },
+              }),
+            })
+          },
+        )
+
+        await uiPage.goto(`${URLIMPORT_PREVIEW_BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        check(
+          'URLIMPORT-01 エンドポイント設定時は「URLから取り込む」ボタンが出る',
+          await uiPage.getByText('URLから取り込む').isVisible(),
+        )
+
+        // --- 成功パス ---
+        currentCheck = 'URLIMPORT-02'
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        const importedText = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-02 成功時に材料2件・手順2件を読み込んだ旨のメッセージが出る',
+          importedText.includes('材料2件・手順2件を読み込みました。内容を確認して修正してください'),
+        )
+        check(
+          'URLIMPORT-02 タイトルが自動入力される',
+          (await uiPage.locator('input[placeholder="例: 肉じゃが"]').inputValue()) === 'E2Eモック鍋',
+        )
+        check(
+          'URLIMPORT-02 調理時間が自動入力される',
+          (await uiPage.locator('input[placeholder="例: 30"]').inputValue()) === '25',
+        )
+        check(
+          'URLIMPORT-02 人数分が自動入力される(3人分)',
+          (await uiPage.locator('span.min-w-14.text-center.text-lg.font-bold.text-ink').textContent()) === '3人分',
+        )
+        const ingNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
+        const ingAmountInputs = uiPage.locator('input[placeholder="例: 3"]')
+        const ingUnitInputs = uiPage.locator('input[placeholder="例: 個"]')
+        check(
+          'URLIMPORT-02 材料1件目: name=鶏もも肉・splitQuantityでamount=300/unit=g に分解される',
+          (await ingNameInputs.nth(0).inputValue()) === '鶏もも肉' &&
+            (await ingAmountInputs.nth(0).inputValue()) === '300' &&
+            (await ingUnitInputs.nth(0).inputValue()) === 'g',
+        )
+        check(
+          'URLIMPORT-02 材料2件目: name=しょうゆ・splitQuantityでamount=2/unit=大さじ に分解される',
+          (await ingNameInputs.nth(1).inputValue()) === 'しょうゆ' &&
+            (await ingAmountInputs.nth(1).inputValue()) === '2' &&
+            (await ingUnitInputs.nth(1).inputValue()) === '大さじ',
+        )
+        const stepInputs = uiPage.locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+        check(
+          'URLIMPORT-02 手順が2件とも自動入力される',
+          (await stepInputs.nth(0).inputValue()) === '鶏肉を切る' &&
+            (await stepInputs.nth(1).inputValue()) === '煮込む',
+        )
+        // sourceUrlは「くわしく」タブ内の欄(常時マウント・hidden属性のみで非表示)。inputValueは
+        // 可視性を問わずDOMの値を読めるため、タブ切替なしでも自動セットされたことを確認できる
+        const sourceUrlInputs = uiPage.locator('input[type="url"]')
+        check(
+          'URLIMPORT-02 取り込んだURLがsourceUrl欄へ自動セットされる',
+          (await sourceUrlInputs.nth(1).inputValue()) === 'https://example.com/success-recipe',
+        )
+
+        // --- no_recipeパス: 貼り付け欄への案内文言(オーナー確定文言と一致することを確認) ---
+        // ハッシュルーティングは同一URLへのgoto()だと同一文書内遷移扱いになりReact状態がリセット
+        // されない(前の入力・開閉状態が残る)ため、確実にフォームを作り直すreload()を使う
+        currentCheck = 'URLIMPORT-03'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/no-recipe-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        check(
+          'URLIMPORT-03 no_recipe時は貼り付け欄への案内文言が出る',
+          (await uiPage.textContent('body')).includes(
+            'このサイトは自動取り込みに対応していません。ページの文章をコピーして、下の貼り付け欄をお使いください',
+          ),
+        )
+
+        // --- fetch_failedパス ---
+        currentCheck = 'URLIMPORT-04'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/fetch-failed-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        check(
+          'URLIMPORT-04 fetch_failed時は時間をおいて/貼り付けを促す文言が出る',
+          (await uiPage.textContent('body')).includes(
+            '読み込めませんでした。時間をおいて試すか、貼り付けをお使いください',
+          ),
+        )
+      } finally {
+        await uiBrowser.close()
+      }
+    } finally {
+      urlImportPreviewProc.kill()
     }
   }
 } catch (err) {

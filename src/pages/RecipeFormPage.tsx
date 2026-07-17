@@ -11,6 +11,7 @@ import {
   Trash2,
   ClipboardPaste,
   RotateCcw,
+  Globe,
 } from 'lucide-react'
 import type {
   DishType,
@@ -26,7 +27,8 @@ import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from
 import { useSettings } from '../db/settings'
 import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
-import { parseRecipeText, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
+import { parseRecipeText, splitQuantity, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
+import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError } from '../logic/urlImport'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeDigits } from '../logic/amount'
@@ -224,6 +226,12 @@ function RecipeFormInner() {
   // 「かんたん / くわしく」タブ(2026-07-16 Fable裁定docs/26・案A)。ページローカルの表示状態のみで、
   // 保存対象にも下書き対象にもしない(URLにも載せない)。新規・編集とも初期表示は常に「かんたん」
   const [activeTab, setActiveTab] = useState<'simple' | 'detail'>('simple')
+
+  // URLから取り込む(エンドポイント未設定ならUI自体を表示しない。urlImport.tsのisUrlImportEnabled参照)
+  const [urlImportOpen, setUrlImportOpen] = useState(false)
+  const [urlImportValue, setUrlImportValue] = useState('')
+  const [urlImportMessage, setUrlImportMessage] = useState('')
+  const [urlImportLoading, setUrlImportLoading] = useState(false)
 
   // テキスト貼り付けで自動入力
   const [pasteOpen, setPasteOpen] = useState(false)
@@ -434,6 +442,61 @@ function RecipeFormInner() {
       sessionStorage.removeItem(draftKey)
     } catch {
       /* 無視 */
+    }
+  }
+
+  /**
+   * URLを取り込んでフォームに流し込む（結果はユーザーが修正できる。applyPasteと同じ流し込み先を再利用する）。
+   * ingredients は Worker側で name+amount(単位くっつき)までしか分けていないため、ここで既存の
+   * splitQuantity(貼り付け解析と同じ資産)を使ってamount/unitに分解する
+   */
+  const applyUrlImport = async () => {
+    const target = urlImportValue.trim()
+    if (!target) {
+      setUrlImportMessage(ja.urlImport.empty)
+      return
+    }
+    setUrlImportLoading(true)
+    setUrlImportMessage('')
+    try {
+      const result = await importRecipeFromUrl(target)
+      if (result.title && !title.trim()) setTitle(result.title)
+      if (result.servings) setServings(result.servings)
+      if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
+      if (result.ingredients.length > 0) {
+        setIngredients(
+          result.ingredients.map((ing) => {
+            const split = ing.amount ? splitQuantity(ing.amount) : { amount: '', unit: '' }
+            return {
+              name: ing.name,
+              amount: split.amount,
+              unit: split.unit,
+              memo: split.memo ?? '',
+              group: undefined,
+            }
+          }),
+        )
+      }
+      if (result.steps.length > 0) {
+        setSteps(result.steps.map((text) => ({ text, minutes: '', memo: '' })))
+      }
+      setSourceUrl(result.sourceUrl || target)
+      setUrlImportMessage(
+        ja.urlImport.resultSummary
+          .replace('{i}', String(result.ingredients.length))
+          .replace('{s}', String(result.steps.length)),
+      )
+    } catch (e) {
+      const reason = e instanceof UrlImportError ? e.reason : 'fetch_failed'
+      setUrlImportMessage(
+        reason === 'no_recipe'
+          ? ja.urlImport.errorNoRecipe
+          : reason === 'invalid_url'
+            ? ja.urlImport.errorInvalidUrl
+            : ja.urlImport.errorFetchFailed,
+      )
+    } finally {
+      setUrlImportLoading(false)
     }
   }
 
@@ -859,6 +922,54 @@ function RecipeFormInner() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* URLから取り込む(エンドポイント未設定=Workerデプロイ前はUI自体を表示しない) */}
+      {isUrlImportEnabled() && (
+        <>
+          <button
+            type="button"
+            onClick={() => setUrlImportOpen((open) => !open)}
+            aria-expanded={urlImportOpen}
+            className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-accent py-3 font-bold text-accent"
+          >
+            <Globe size={20} aria-hidden />
+            {ja.urlImport.open}
+          </button>
+          {urlImportOpen && (
+            <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+              <p className="text-sm text-ink-muted">{ja.urlImport.description}</p>
+              <input
+                type="url"
+                inputMode="url"
+                value={urlImportValue}
+                onChange={(e) => setUrlImportValue(e.target.value)}
+                placeholder={ja.urlImport.placeholder}
+                className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
+              />
+              {urlImportMessage && (
+                <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{urlImportMessage}</p>
+              )}
+              <div className="mt-[var(--space-sm)] flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void applyUrlImport()}
+                  disabled={urlImportLoading}
+                  className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-60"
+                >
+                  {urlImportLoading ? ja.urlImport.loading : ja.urlImport.apply}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUrlImportOpen(false)}
+                  className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted"
+                >
+                  {ja.urlImport.close}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* テキスト貼り付けで自動入力 */}

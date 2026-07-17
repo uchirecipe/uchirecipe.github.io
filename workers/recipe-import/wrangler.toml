@@ -1,0 +1,8 @@
+# うちレシピ「URLから取り込む」機能のCloudflare Worker設定。
+# デプロイ手順はオーナー向けに ../../docs/41_URL取り込み_デプロイ手順.md にまとめてある。
+name = "uchirecipe-recipe-import"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[observability]
+enabled = false
