@@ -192,6 +192,13 @@
 //            原価行(1人分/全量・登録人数基準)が入ること
 //         (c)「画像カードでシェア」は非対応環境でPNGダウンロードに切り替わるため、
 //            downloadイベントの発生=画像カード生成の成功のみ確認する)。
+//         PANTRY-BULK-01(在庫チップ「まとめて状態設定」・2026-07-17 docs/35 §5 オーナー決定・
+//         案D: 整理モード中に選択したチップへ「ある」「少ない」「ない」の3ボタンで一括状態変更
+//         できること。0件選択時は3ボタンともdisabled・3件選択→「ない」適用で実際にIndexedDBの
+//         levelが変わること(事前に「ある」へ変えてから検証し、既定値のnoneのままでは書き込みを
+//         証明できない問題を回避)・適用後にトーストが出て選択が解除されるが整理モード自体は
+//         維持されること(削除とは挙動が異なる意図的な仕様)。合わせて既存の整理モード一括削除も
+//         同じセッションで検証し、まとめて状態設定の追加で退行していないことを確認する)。
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -4696,6 +4703,136 @@ try {
       )
     } finally {
       await frBrowser.close()
+    }
+  }
+
+  // --- PANTRY-BULK-01: 在庫チップ「まとめて状態設定」(2026-07-17 docs/35 §5 オーナー決定・案D)。
+  // 整理モード中、選択したチップに「ある」「少ない」「ない」の3ボタンで一括状態変更できることを
+  // 検証する。プリセット食材は既定levelが'none'のため、先に通常モード(単発タップ)で「ある」に
+  // 変えてから一括「ない」を適用しないと、書き込みが実際に効いたことを証明できない点に注意。
+  // 合わせて既存の整理モード一括削除も同じセッションで検証し、退行がないことを確認する ---
+  currentCheck = 'PANTRY-BULK-01'
+  {
+    const pbBrowser = await chromium.launch()
+    const pbContext = await pbBrowser.newContext()
+    const pbPage = await pbContext.newPage()
+    pbPage.on('dialog', (dialog) => dialog.accept())
+    pbPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PANTRY-BULK-01] ${err.message}`)
+    })
+    const readPantryItems = () =>
+      pbPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const items = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('pantryItems', 'readonly').objectStore('pantryItems').getAll()
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
+        idb.close()
+        return items
+      })
+    try {
+      await pbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await pbPage.waitForTimeout(1800) // 初回シード完了待ち(在庫プリセット12品も同時に投入される)
+      await pbPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await pbPage.waitForTimeout(500)
+
+      // 前提: 「食材の在庫」タブが既定で開いている(通常モード)。対象3品(卵・玉ねぎ・にんじん)を
+      // 単発タップで「ない」→「ある」に変え、既定値のままでは一括更新の証明にならない問題を回避する
+      for (const name of ['卵', '玉ねぎ', 'にんじん']) {
+        await pbPage.getByRole('button', { name }).click()
+        await pbPage.waitForTimeout(150)
+      }
+      const beforeBulk = await readPantryItems()
+      check(
+        'PANTRY-BULK-01 前提: 対象3品を単発タップで「ある」にできた',
+        ['卵', '玉ねぎ', 'にんじん'].every(
+          (name) => beforeBulk.find((p) => p.name === name)?.level === 'have',
+        ),
+        `beforeBulk=${JSON.stringify(beforeBulk)}`,
+      )
+
+      // 整理モードに入る
+      await pbPage.getByRole('button', { name: '整理', exact: true }).click()
+      await pbPage.waitForTimeout(300)
+      check(
+        'PANTRY-BULK-01 整理モードに入ると案内文が出る',
+        (await pbPage.textContent('body')).includes('タップして選択'),
+      )
+
+      const bulkButton = (label) => pbPage.getByRole('button', { name: label, exact: true })
+      check(
+        'PANTRY-BULK-01 0件選択時は「ある」「少ない」「ない」ボタンがdisabled',
+        (await bulkButton('ある').isDisabled()) &&
+          (await bulkButton('少ない').isDisabled()) &&
+          (await bulkButton('ない').isDisabled()),
+      )
+
+      // 対象3品を整理モードのチップとして選択する
+      for (const name of ['卵', '玉ねぎ', 'にんじん']) {
+        await pbPage.getByRole('button', { name, exact: true }).click()
+      }
+      await pbPage.waitForTimeout(200)
+      check(
+        'PANTRY-BULK-01 3件選択するとボタンのdisabledが解除される',
+        !(await bulkButton('ない').isDisabled()),
+      )
+
+      // 「ない」を適用する
+      await bulkButton('ない').click()
+      await pbPage.waitForTimeout(400)
+      const toastText = await pbPage.textContent('body')
+      check(
+        'PANTRY-BULK-01 適用後にトーストが出る(3件を「ない」にしました)',
+        toastText.includes('3件を『ない』にしました'),
+        toastText.slice(0, 200),
+      )
+      check(
+        'PANTRY-BULK-01 適用後は選択が解除されボタンが再びdisabledになる(整理モードは維持)',
+        (await bulkButton('ない').isDisabled()) &&
+          (await pbPage.getByRole('button', { name: '完了', exact: true }).isVisible()),
+      )
+
+      const afterBulk = await readPantryItems()
+      check(
+        'PANTRY-BULK-01 選択した3件が実際にIndexedDB上でlevel=noneになる',
+        ['卵', '玉ねぎ', 'にんじん'].every(
+          (name) => afterBulk.find((p) => p.name === name)?.level === 'none',
+        ),
+        `afterBulk=${JSON.stringify(afterBulk)}`,
+      )
+      check(
+        'PANTRY-BULK-01 選択していない品(じゃがいも)は既定のnoneのまま変化しない',
+        afterBulk.find((p) => p.name === 'じゃがいも')?.level === 'none',
+      )
+
+      // 既存の整理モード一括削除が退行していないことを、同じ整理モードのまま続けて確認する
+      const beforeDeleteCount = afterBulk.length
+      await pbPage.getByRole('button', { name: 'じゃがいも', exact: true }).click()
+      await pbPage.waitForTimeout(200)
+      check(
+        'PANTRY-BULK-01(delete) 1件選択で削除ボタンに件数が出る',
+        await pbPage.getByRole('button', { name: '選択した1件を削除', exact: true }).isVisible(),
+      )
+      await pbPage.getByRole('button', { name: '選択した1件を削除', exact: true }).click()
+      await pbPage.waitForTimeout(400)
+      const afterDelete = await readPantryItems()
+      check(
+        'PANTRY-BULK-01(delete) 削除した品(じゃがいも)がIndexedDBから消える',
+        !afterDelete.some((p) => p.name === 'じゃがいも') && afterDelete.length === beforeDeleteCount - 1,
+        `afterDelete件数=${afterDelete.length}`,
+      )
+      check(
+        'PANTRY-BULK-01(delete) 削除後は整理モード自体を抜ける(既存挙動どおり・まとめて状態設定とは異なる)',
+        await pbPage.getByRole('button', { name: '整理', exact: true }).isVisible(),
+      )
+    } finally {
+      await pbBrowser.close()
     }
   }
 } catch (err) {
