@@ -4452,6 +4452,9 @@ try {
       fsPage.on('dialog', (dialog) => dialog.accept())
       // 「対応ブラウザ」を模す: showSaveFilePickerを注入する(呼ばれたら常にキャンセル扱い)
       await fsContext.addInitScript(() => {
+        // webdriverガード(supportsSaveFilePicker)を明示フラグで解除し、偽ピッカーで
+        // ピッカー経路のUI分岐を検証する(フラグ無しの通常e2eは常にDLフォールバック経路)
+        window.__e2eForceFilePicker = true
         window.showSaveFilePicker = async () => {
           throw new DOMException('e2e fake picker: canceled', 'AbortError')
         }

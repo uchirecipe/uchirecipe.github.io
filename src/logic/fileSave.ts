@@ -22,7 +22,12 @@ export function supportsSaveFilePicker(): boolean {
   // showSaveFilePickerが例外も投げずに応答しないことがあり(BACKUP-01で実測)、
   // フォールバックにも到達できない。自動化環境では常に従来の自動ダウンロード経路にする
   // (実ユーザーには影響なし。ピッカーUI自体は自動テストで検証不能なため方針として妥当)
-  if (typeof navigator !== 'undefined' && navigator.webdriver) return false
+  // ただしe2eが偽ピッカーを注入して明示フラグを立てた場合は有効化する(FILESAVE-01が
+  // ピッカー経路のUI分岐を検証するため。フラグ無しの自動化=通常のe2eは常にDL経路)
+  const forced =
+    typeof window !== 'undefined' &&
+    (window as unknown as { __e2eForceFilePicker?: boolean }).__e2eForceFilePicker === true
+  if (typeof navigator !== 'undefined' && navigator.webdriver && !forced) return false
   return typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function'
 }
 
