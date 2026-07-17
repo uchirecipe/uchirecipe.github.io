@@ -18,6 +18,11 @@ const HANDLE_ID = 1
 
 /** File System Access API（保存先選択・上書き）に対応しているブラウザか（Chrome/Edge等） */
 export function supportsSaveFilePicker(): boolean {
+  // navigator.webdriver(自動テスト環境)ではピッカーを使わない: headless Chromiumは
+  // showSaveFilePickerが例外も投げずに応答しないことがあり(BACKUP-01で実測)、
+  // フォールバックにも到達できない。自動化環境では常に従来の自動ダウンロード経路にする
+  // (実ユーザーには影響なし。ピッカーUI自体は自動テストで検証不能なため方針として妥当)
+  if (typeof navigator !== 'undefined' && navigator.webdriver) return false
   return typeof window !== 'undefined' && typeof window.showSaveFilePicker === 'function'
 }
 
