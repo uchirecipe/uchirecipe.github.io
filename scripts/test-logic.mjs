@@ -160,6 +160,21 @@ eq('分数', splitQuantity('1/2個'), { amount: '1/2', unit: '個' })
 eq('適量', splitQuantity('適量'), { amount: '適量', unit: '' })
 eq('全角数字', splitQuantity('２００ｇ'), { amount: '200', unit: 'g' })
 
+// 2026-07-20 URL取り込み品質監査(docs/43)で実測: 「大さじ1と1/2」(オレンジページ・DELISH KITCHEN・
+// macaroni)「大さじ1・1/2」(ハウス食品)のような帯分数(整数+と/・+分数)は、pre/post正規表現が
+// 数字パターンとして認識できず単位分離ごと失敗していた(amountに文字列全体が残りunitが空になる)。
+// collapseMixedFractionで小数へ畳んでから既存の分離処理に渡すことで解消する
+eq('帯分数(と): 大さじ前置', splitQuantity('大さじ1と1/2'), { amount: '1.5', unit: '大さじ' })
+eq('帯分数(・): 大さじ前置', splitQuantity('大さじ1・1/2'), { amount: '1.5', unit: '大さじ' })
+eq('帯分数(と): 数字後置', splitQuantity('1と1/2個'), { amount: '1.5', unit: '個' })
+eq('帯分数: 整数部が2桁でも解釈', splitQuantity('大さじ2と3/4'), { amount: '2.75', unit: '大さじ' })
+// 「1/2」単体(帯分数ではない普通の分数)は従来どおり壊さない(誤爆防止の回帰)
+eq('帯分数っぽくない単なる分数は従来どおり', splitQuantity('1/2個'), { amount: '1/2', unit: '個' })
+// macaroni実測:「大さじ2杯」のように大さじ/小さじの後ろに冗長な助数詞「杯」が付くと、
+// 末尾を$固定していたpre正規表現が丸ごと不一致になり単位分離できていなかった
+eq('末尾「杯」付きの大さじ表記も単位分離できる(macaroni実測)', splitQuantity('大さじ2杯'), { amount: '2', unit: '大さじ' })
+eq('末尾「杯」+帯分数の組み合わせ', splitQuantity('大さじ1と1/2杯'), { amount: '1.5', unit: '大さじ' })
+
 // ---------- autoSplitAmountUnit(手入力の分量欄「大さじ3」等を保存時に分離・2026-07-09ペルソナ第1波) ----------
 // 分量欄に単位ごと書くと人数変更が効かないバグの再発防止
 eq('保存時分離: 大さじ3', autoSplitAmountUnit('大さじ3', ''), { amount: '3', unit: '大さじ' })
@@ -3891,6 +3906,19 @@ eq('servings: 範囲「3〜4人分」は人分直前の数字を採用', extract
 eq('servings: 数字なし「その他」はundefined(必須項目にしない)', extractServings('その他'), undefined)
 eq('servings: 配列なら先頭要素', extractServings(['4人分', '4 servings']), 4)
 eq('servings: undefined入力はundefined', extractServings(undefined), undefined)
+// 2026-07-20 URL取り込み品質監査(docs/43)で実測: recipeYieldがJSON上の素の数値(文字列でない)の
+// サイトがある(macaroni)。firstStringが数値を文字列化しないと丸ごと欠落していた
+eq('servings: JSON数値そのもの(macaroni実測)', extractServings(2), 2)
+// クックパッド「鶏もも肉600gで作る分量」→600人分、DELISH KITCHEN「26個分」→26人分のような
+// 誤爆を実測(重量・個数の数字を人数と取り違える)。直後に重量・個数単位が続く数字は人数の
+// フォールバック対象から除外し、他に使える数字が無ければundefinedを返す
+eq('servings: 重量表記(600g)を人数と誤認しない', extractServings('鶏もも肉600gで作る分量'), undefined)
+eq('servings: 「26個分」を人数と誤認しない', extractServings('26個分'), undefined)
+eq(
+  'servings: 重量の数字(先頭)を飛ばして後続の裸の数字を拾う',
+  extractServings('600g / 3'),
+  3,
+)
 
 // ---- parseIso8601DurationToMinutes: 分表記・秒表記の両対応(docs/39 DELISH KITCHENの秒表記対策) ----
 eq('duration: 「PT30M」→30分', parseIso8601DurationToMinutes('PT30M'), 30)
@@ -3915,6 +3943,26 @@ eq('ingredient: 三点リーダー区切り「じゃがいも…2個」', splitI
 eq('ingredient: 分量なしのグループ見出し「合わせ調味料」', splitIngredientAmount('合わせ調味料'), { name: '合わせ調味料' })
 eq('ingredient: 括弧付き分量「じゃがいも 3個(450g)」', splitIngredientAmount('じゃがいも 3個(450g)'), { name: 'じゃがいも', amount: '3個(450g)' })
 eq('ingredient: 先頭の中黒を除去「・鶏もも肉 200g」', splitIngredientAmount('・鶏もも肉 200g'), { name: '鶏もも肉', amount: '200g' })
+// 2026-07-20 URL取り込み品質監査(docs/43)で実測: 味の素パークは合わせ調味料のグループ記号(A/B)が
+// 区切りなしで名前の先頭にくっつく(「Ａ水」「Bみりん」「A「ほんだし®」」)。オレンジページは
+// グループ記号だけの行(「A」)が単独の配列要素として存在する
+eq('ingredient: グループ記号の連結を除去「Ａ水　2カップ」', splitIngredientAmount('Ａ水　2カップ'), { name: '水', amount: '2カップ' })
+eq('ingredient: グループ記号の連結を除去(半角)「B砂糖 大さじ1」', splitIngredientAmount('B砂糖 大さじ1'), { name: '砂糖', amount: '大さじ1' })
+eq(
+  'ingredient: グループ記号+括弧書き商品名「A「ほんだし®」 小さじ1」',
+  splitIngredientAmount('A「ほんだし®」 小さじ1'),
+  { name: '「ほんだし®」', amount: '小さじ1' },
+)
+eq('ingredient: グループ記号のみの行は空扱い(呼び出し側で除外)', splitIngredientAmount('A'), { name: '' })
+eq('ingredient: グループ記号のみ(全角)も空扱い', splitIngredientAmount('Ｂ'), { name: '' })
+// レタスクラブ実測:「大さじ2　1/2」(整数と分数の間に区切りの空白)が入ると、素朴な「末尾の空白で
+// 名前/分量を分ける」ロジックが整数側まで名前に取り込んでしまう不具合。整数+分数を先に1個の
+// 小数トークンへ畳んでから分離することで正しく分かれる
+eq(
+  'ingredient: 空白区切りの帯分数「しょうゆ…大さじ2　1/2」を正しく分離',
+  splitIngredientAmount('しょうゆ…大さじ2　1/2'),
+  { name: 'しょうゆ', amount: '大さじ2.5' },
+)
 
 // ---- normalizeIngredients: 配列のまとめ処理(空要素・文字列以外は無視) ----
 eq(
@@ -3968,6 +4016,41 @@ eq(
   ['にんじんは乱切りにする&混ぜる'],
 )
 eq('instructions: undefinedは空配列', normalizeInstructions(undefined), [])
+
+// 2026-07-20 URL取り込み品質監査(docs/43)で実測: ミツカンはHowToStepが1個しかなく、その中に
+// 「[1]…[2]…」のように複数手順が角括弧番号でまとめて詰め込まれている。HowToStepが1個だけに
+// なった結果へ番号分割を再適用することで正しく複数手順に割り直す(通常の複数HowToStep配列は
+// これまでどおり触らない)
+eq(
+  'instructions: HowToStep1個に複数手順が角括弧番号でまとまっている場合は分割する(ミツカン形式)',
+  normalizeInstructions([
+    { '@type': 'HowToStep', text: '[1]野菜を切る。[2]鍋に油を熱し、[1]の野菜を炒める。[3]煮汁を加えて煮る。' },
+  ]),
+  ['野菜を切る。', '鍋に油を熱し、[1]の野菜を炒める。', '煮汁を加えて煮る。'],
+)
+// 「[2]鍋に油を熱し、[1]の野菜を炒める。」の中の「[1]の」は前の手順への参照であって新しい手順の
+// 開始ではない(番号直後が助詞「の」で始まるため分割しない=STEP_MARKER_FOLLOWED_BY_PARTICLE)。
+// 上のテストで手順2に「[1]の野菜を炒める」がそのまま残っていることが、参照ガードが効いている証拠
+eq(
+  'instructions: 角括弧番号は全角数字でも認識する',
+  normalizeInstructions([{ '@type': 'HowToStep', text: '［１］下ごしらえをする。［２］焼く。' }]),
+  ['下ごしらえをする。', '焼く。'],
+)
+// E・レシピ実測:「作り方1. …作り方2. …」のようにラベル語が番号ごとに繰り返されると、末尾の
+// 「作り方」が前の手順の末尾に残ってしまっていた不具合(番号側にラベルがくっついていれば
+// マーカーとしてまるごと消費する)
+eq(
+  'instructions: 番号ごとに繰り返されるラベル語が手順末尾に残らない(E・レシピ形式)',
+  normalizeInstructions('作り方1. 材料を切る。 作り方2. 炒める。 作り方3. 盛り付ける。'),
+  ['材料を切る。', '炒める。', '盛り付ける。'],
+)
+// E・レシピ実測:「(1)のタネを大さじ1位のせ」のような前の手順への参照を、新しい手順番号と
+// 誤認して余計な空ステップ(「(」だけの手順)を作らないことの回帰確認
+eq(
+  'instructions: 「(1)の」参照は新しい手順として分割しない',
+  normalizeInstructions('作り方1. 皮でタネを包む。 作り方2. (1)の生地を焼く。'),
+  ['皮でタネを包む。', '(1)の生地を焼く。'],
+)
 
 // ---- extractRecipeFromHtml: JSON-LD抽出パイプライン全体(合成HTML) ----
 function ldJsonHtml(json) {
@@ -4076,6 +4159,66 @@ function ldJsonHtml(json) {
   const html = ldJsonHtml({ '@context': 'https://schema.org', '@type': 'Recipe', name: 'タイトルのみ' })
   const r = extractRecipeFromHtml(html, 'https://example.com/incomplete')
   eq('extractRecipeFromHtml: 材料・手順が空ならundefined', r, undefined)
+}
+
+{
+  // 2026-07-20 URL取り込み品質監査(docs/43)で実測: 山本ゆり(syunkon)は投稿名の末尾に「の作り方」が
+  // 付いたままJSON-LDのnameに入っている。貼り付けパーサーM7(src/logic/parseRecipeText.ts)と同じ
+  // 末尾整形資産をURL取り込み側にも適用し、末尾の定型句を落とす
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@type': 'Recipe',
+    name: '究極のフライドポテトの作り方',
+    recipeIngredient: ['じゃがいも 3個'],
+    recipeInstructions: ['切る', '揚げる'],
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/5')
+  eq('extractRecipeFromHtml: タイトル末尾「の作り方」を除去(M7資産の流用)', r?.title, '究極のフライドポテト')
+}
+
+{
+  // Nadia実測:「定番美味しい！基本の【ハンバーグ】のレシピ」のように、投稿者が定型句として
+  // 「〇〇のレシピ」で終わるタイトルを付けるサイトがある。M7は空白区切りの「レシピ」しか
+  // 剥がさないため(SMK-02回帰対策)、「の」接続も安全に剥がせる追加ケースとして対応する
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@type': 'Recipe',
+    name: '基本のハンバーグのレシピ',
+    recipeIngredient: ['合いびき肉 300g'],
+    recipeInstructions: ['こねる', '焼く'],
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/6')
+  eq('extractRecipeFromHtml: タイトル末尾「〇〇のレシピ」(の接続)を除去', r?.title, '基本のハンバーグ')
+}
+
+{
+  // 2026-07-16 SMK-02回帰(便Iの事故)の再発防止: 空白なし・「の」なしで「レシピ」に連結している
+  // 名前(「試験用レシピ」等、料理名の一部としてレシピで終わる名前)は剥がさない
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@type': 'Recipe',
+    name: '試験用レシピ',
+    recipeIngredient: ['塩 少々'],
+    recipeInstructions: ['混ぜる'],
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/7')
+  eq('extractRecipeFromHtml: SMK-02回帰確認・連結した「レシピ」は剥がさない', r?.title, '試験用レシピ')
+}
+
+{
+  // 2026-07-20 URL取り込み品質監査(docs/43)で実測: NHK・キッコーマン・味の素パーク・ハウス食品・
+  // 楽天レシピ・つくおき等はcookTimeが空でtotalTimeにだけ調理時間が入っている。cookTimeしか
+  // 見ていなかった実装では7サイト分のcookMinutesが丸ごと欠落していた
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@type': 'Recipe',
+    name: '肉じゃが',
+    recipeIngredient: ['じゃがいも 3個'],
+    recipeInstructions: ['煮る'],
+    totalTime: 'PT25M',
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/8')
+  eq('extractRecipeFromHtml: cookTimeが無くてもtotalTimeから調理時間を拾う', r?.cookMinutes, 25)
 }
 
 // ---------- 結果 ----------

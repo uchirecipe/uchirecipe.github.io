@@ -134,6 +134,19 @@ function isIngredientSubheading(rawLine: string, name: string): boolean {
   return false
 }
 
+// 「大さじ1と1/2」「大さじ1・1/2」のような帯分数(整数+と/・+分数)を小数(1.5)に畳む。
+// URL取り込み(実サイトのrecipeIngredient)で「と」「・」のどちらの接続も実測されており
+// (オレンジページ・DELISH KITCHEN・macaroniは「と」、ハウス食品は「・」)、素の数字パターンしか
+// 認識しない下の pre/post 正規表現だけでは丸ごと解釈不能になり単位が分離できなくなるための前処理。
+function collapseMixedFraction(text: string): string {
+  return text.replace(/(\d+)(?:と|・)(\d+)\/(\d+)/g, (match, whole: string, num: string, den: string) => {
+    const denominator = Number.parseInt(den, 10)
+    if (!denominator) return match
+    const value = Number.parseInt(whole, 10) + Number.parseInt(num, 10) / denominator
+    return String(Math.round(value * 1000) / 1000)
+  })
+}
+
 /**
  * 「200g」「大さじ2」「1/2個」「適量」「大さじ2〜3」などを 分量+単位 に分ける。
  * 「1枚（250g）」のような単位末尾の括弧書きは memo として分離して返す。
@@ -141,14 +154,15 @@ function isIngredientSubheading(rawLine: string, name: string): boolean {
  * (人数スケールには非対応。unit だけ分離できれば十分という裁定)。
  */
 export function splitQuantity(raw: string): { amount: string; unit: string; memo?: string } {
-  const text = normalize(raw.trim())
+  const text = collapseMixedFraction(normalize(raw.trim()))
   if (!text) return { amount: '', unit: '' }
   // 範囲(「〜」「~」「～」いずれも受ける)の出力は「N〜M」に正規化し、前後の空白は除く
   const normalizeRangeAmount = (s: string) => s.replace(/\s*[〜~～]\s*/, '〜')
 
-  // 「大さじ2」「小さじ1/2」「カップ1」「大さじ2〜3」→ 単位が前に来る形
+  // 「大さじ2」「小さじ1/2」「カップ1」「大さじ2〜3」→ 単位が前に来る形。
+  // 末尾の「杯」(「大さじ2杯」macaroni実測)は数量に対する冗長な助数詞なので、あれば読み捨てる
   const pre = text.match(
-    /^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*(\d+(?:\.\d+)?(?:\/\d+)?(?:\s*[〜~～]\s*\d+(?:\.\d+)?(?:\/\d+)?)?)$/,
+    /^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*(\d+(?:\.\d+)?(?:\/\d+)?(?:\s*[〜~～]\s*\d+(?:\.\d+)?(?:\/\d+)?)?)杯?$/,
   )
   if (pre) return { amount: normalizeRangeAmount(pre[2]), unit: pre[1] }
 

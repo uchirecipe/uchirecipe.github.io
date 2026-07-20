@@ -193,6 +193,9 @@ function pickBestCandidate(candidates: Record<string, unknown>[]): Record<string
 
 function firstString(value: unknown): string | undefined {
   if (typeof value === 'string') return value
+  // JSON-LDのrecipeYieldに素のJSON数値(例: 2)を入れているサイトがある(macaroni実測)。
+  // 文字列でなくても数値ならそのまま文字列化して扱う(そうしないと人数が丸ごと欠落する)。
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   if (Array.isArray(value)) {
     for (const v of value) {
       const s = firstString(v)
@@ -202,12 +205,32 @@ function firstString(value: unknown): string | undefined {
   return undefined
 }
 
+// M7(貼り付けパーサー src/logic/parseRecipeText.ts)のタイトル末尾整形と同じ資産をURL取り込み側にも適用する。
+// 「〇〇の作り方」「〇〇 レシピ」のようなサイト・投稿者の定型末尾句を取り除く(空になれば元のまま)。
+// 末尾レシピの剥がし条件は「直前が空白」または「直前が“の”」の場合のみ(2026-07-16 SMK-02回帰の教訓:
+// 空白なしの連結=「試験用レシピ」のように名前の一部としてレシピで終わる語は剥がさない。
+// 「の」は「誰々のレシピ」のような投稿者側の定型句にほぼ限られる安全な接続語のため対象に含める)。
+function stripTitleDecoration(title: string): string {
+  const cleaned = title
+    .replace(/[\s　]*(?:の)?(?:レシピ[・･]?)?(?:作り方|つくり方)$/, '')
+    .replace(/(?:[\s　]+|の)レシピ$/, '')
+    .trim()
+  return cleaned || title
+}
+
 function extractTitle(name: unknown): string | undefined {
   const raw = firstString(name)
   if (!raw) return undefined
   const cleaned = cleanText(raw)
-  return cleaned || undefined
+  return stripTitleDecoration(cleaned) || undefined
 }
+
+// 分量として扱ってはいけない単位(重量・容量・個数の「◯個分」等)が数字の直後に続く場合、
+// その数字は「人数」ではなく食材の分量・出来上がり数なので、人数フォールバックの対象から除外する
+// (docs/39再監査: クックパッド「鶏もも肉600gで作る分量」→600人分、DELISH KITCHEN「26個分」→26人分
+//  のような誤爆が実際に発生することを実測で確認)。
+const NON_SERVINGS_UNIT_AFTER_NUMBER =
+  /^\s*(?:g|kg|ml|cc|l|個|枚|本|切れ|缶|袋|束|かけ|尾|玉|株|合|片|箱|杯|節)/i
 
 /**
  * recipeYield("2 servings" "4人分" "２人分" "4(servings)" "2〜3" "その他"等)から人数(整数)を取り出す。
@@ -220,8 +243,13 @@ export function extractServings(recipeYield: unknown): number | undefined {
   const normalized = normalizeDigits(raw)
   const withServings = normalized.match(/(\d+)\s*人\s*(?:分|前)/)
   if (withServings) return Number.parseInt(withServings[1], 10)
-  const anyNumber = normalized.match(/(\d+)/)
-  if (anyNumber) return Number.parseInt(anyNumber[1], 10)
+  // 「人分/人前」の明示が無い場合だけ、最初に見つかった数字を人数とみなす。
+  // ただし直後に重量・容量・個数単位が続く数字(600g・26個分等)は人数ではないので飛ばす。
+  for (const m of normalized.matchAll(/\d+/g)) {
+    const after = normalized.slice((m.index ?? 0) + m[0].length)
+    if (NON_SERVINGS_UNIT_AFTER_NUMBER.test(after)) continue
+    return Number.parseInt(m[0], 10)
+  }
   return undefined
 }
 
@@ -263,6 +291,26 @@ export function extractImageUrl(image: unknown): string | undefined {
 
 const BULLET_PREFIX = /^[・･\-–—*●○◎▪•‣＊※◇☆★\s　]+/
 
+// 「Ａ水」「B砂糖」「A「ほんだし®」」のように、合わせ調味料のグループ記号(A/B等の単一英字)が
+// 区切りなしで名前の先頭にくっついているケース(味の素パーク実測)。BULLET_PREFIXの記号(☆★○等)と違い
+// 英字は普通の食材名の一部でもありうるため、「1文字の大文字英字の直後が日本語(かな/カナ/漢字)か
+// 開き括弧・引用符」という、グループ記号として使われる時の典型形に絞って剥がす
+// (誤って"L-〇〇"のような英字混じりの実在の食材名を壊さないため2文字以上・小文字は対象外)。
+const GROUP_LETTER_PREFIX = /^[A-ZＡ-Ｚ](?=[぀-ゟ゠-ヿ一-鿿「『（(＜<])/
+
+// 「大さじ2　1/2」(空白区切りの帯分数=整数2＋分数1/2で2.5を意味する)のように、整数と分数の間に
+// 区切りの空白が入っていると、素朴な「末尾の空白で名前/分量を分ける」ロジックが誤爆し、
+// 整数側までもが名前に取り込まれてしまう(レタスクラブ実測:「しょうゆ…大さじ2」+「1/2」に誤分割)。
+// 名前/分量の境界を決める前に「整数+空白+分数」を1個の小数トークンへ畳んでおくことで防ぐ。
+function collapseSpacedMixedFraction(text: string): string {
+  return text.replace(/(\d+)[\s　]+(\d+)\/(\d+)(?![\d\/])/g, (match, whole: string, num: string, den: string) => {
+    const denominator = Number.parseInt(den, 10)
+    if (!denominator) return match
+    const value = Number.parseInt(whole, 10) + Number.parseInt(num, 10) / denominator
+    return String(Math.round(value * 1000) / 1000)
+  })
+}
+
 /**
  * recipeIngredientの1件分の文字列("牛こま切れ肉 200g" "そうめん4ワ" "合わせ調味料"等)を
  * 名前と分量に分ける。分量はamount+unitのくっついた文字列のまま返す(単位への分解は
@@ -272,7 +320,10 @@ const BULLET_PREFIX = /^[・･\-–—*●○◎▪•‣＊※◇☆★\s　]+
 export function splitIngredientAmount(raw: string): NormalizedIngredient {
   const cleaned = cleanText(raw).replace(BULLET_PREFIX, '').trim()
   if (!cleaned) return { name: '' }
-  const normalized = normalizeDigits(cleaned)
+  // 「A」「Ｂ」のようなグループ記号1文字だけの行(味の素パーク・オレンジページ実測)は
+  // 材料としての情報を持たないため、空扱いにして呼び出し側(normalizeIngredients)で除外する
+  if (/^[A-ZＡ-Ｚ]$/.test(cleaned)) return { name: '' }
+  const normalized = collapseSpacedMixedFraction(normalizeDigits(cleaned)).replace(GROUP_LETTER_PREFIX, '')
 
   // 末尾の区切り(半角/全角スペース・三点リーダー系)を優先して分量境界とみなす
   const sepMatches = [...normalized.matchAll(/[\s　]+|[…‥⋯]+/g)]
@@ -305,17 +356,44 @@ export function normalizeIngredients(recipeIngredient: unknown): NormalizedIngre
   return out
 }
 
-const LEADING_STEP_LABEL = /^(作り方|つくり方|手順|調理手順)[:：]?\s*/
+const LEADING_STEP_LABEL = /^(作り方|つくり方|手順|調理手順|下ごしらえ|下準備)[:：]?\s*/
 
-/** 「作り方1. ジャガイモは…2. 玉ねぎは…」のような1本の長文字列を番号区切りで手順配列に割る(E・レシピ対応) */
+// 手順の番号マーカー本体(全角/半角数字1〜2桁 + 区切り記号、丸数字、または「[1]」のような角括弧数字)。
+// 「作り方1.」「下準備2.」のようにラベル語が番号ごとに繰り返されるサイト(E・レシピ実測)に対応するため、
+// ラベル語も番号にくっついていれば1個のマーカーとして丸ごと消費する。
+// (?!\d)は「3.5」のような小数点をステップ番号と誤認しないためのガード。
+const STEP_MARKER =
+  /(?:作り方|つくり方|手順|下ごしらえ|下準備)?[0-9０-９]{1,2}[.、．)）](?![0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|[\[［][0-9０-９]{1,2}[\]］]/g
+// 番号直後が格助詞で始まる場合は、新しい手順の開始ではなく前の手順への参照
+// (「(1)の生地を」「[3]に加える」等。ミツカン・E・レシピ実測)とみなし、マーカーとして扱わない
+// (parseRecipeText.ts STEP_NUMBER_REF_GUARD/M4と同じ考え方をWorker側にも移植)。
+const STEP_MARKER_FOLLOWED_BY_PARTICLE = /^(?:を|と|の|へ|は|が|に|で)/
+
+/**
+ * 「作り方1. ジャガイモは…作り方2. 玉ねぎは…」のような1本の長文字列を番号区切りで手順配列に割る
+ * (E・レシピ・ミツカン対応)。番号直後が助詞なら前の手順への参照とみなして分割しない。
+ */
 function splitInstructionBlob(text: string): string[] {
   const withoutLabel = text.replace(LEADING_STEP_LABEL, '')
-  // 番号("1." "1)" "1、" 等)直前で分割する。丸数字にも対応
-  const parts = withoutLabel
-    .split(/(?=\d{1,2}[.、．)）])|(?=[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])/)
-    .map((s) => s.replace(/^\d{1,2}[.、．)）]\s*/, '').replace(/^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*/, '').trim())
-    .filter(Boolean)
-  if (parts.length > 1) return parts
+  const markers: { index: number; length: number }[] = []
+  STEP_MARKER.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = STEP_MARKER.exec(withoutLabel)) !== null) {
+    const after = withoutLabel.slice(m.index + m[0].length)
+    if (!STEP_MARKER_FOLLOWED_BY_PARTICLE.test(after)) {
+      markers.push({ index: m.index, length: m[0].length })
+    }
+  }
+  if (markers.length > 1) {
+    const parts: string[] = []
+    for (let i = 0; i < markers.length; i++) {
+      const start = markers[i].index + markers[i].length
+      const end = i + 1 < markers.length ? markers[i + 1].index : withoutLabel.length
+      const part = withoutLabel.slice(start, end).trim()
+      if (part) parts.push(part)
+    }
+    if (parts.length > 1) return parts
+  }
   // 番号が見つからなければ改行区切りを試す
   const byNewline = withoutLabel
     .split(/\r?\n+/)
@@ -354,10 +432,19 @@ function collectInstructionTexts(node: unknown, out: string[]): void {
   }
 }
 
-/** recipeInstructions(文字列配列 / HowToStep配列 / HowToSection入れ子 / 単一文字列)を手順配列に正規化する */
+/**
+ * recipeInstructions(文字列配列 / HowToStep配列 / HowToSection入れ子 / 単一文字列)を手順配列に正規化する。
+ * HowToStepが1個しかなく、その中身が「[1]…[2]…」のように複数手順を1個のテキストに
+ * まとめてしまっているサイト(ミツカン実測)に対応するため、結果が1件だけの場合は
+ * 番号分割(splitInstructionBlob)を再適用する(通常の複数HowToStep配列には影響しない)。
+ */
 export function normalizeInstructions(recipeInstructions: unknown): string[] {
   const out: string[] = []
   collectInstructionTexts(recipeInstructions, out)
+  if (out.length === 1) {
+    const resplit = splitInstructionBlob(out[0])
+    if (resplit.length > 1) return resplit.filter((s) => s.length > 0)
+  }
   return out.filter((s) => s.length > 0)
 }
 
@@ -380,7 +467,10 @@ export function extractRecipeFromHtml(html: string, sourceUrl: string): Normaliz
   if (!title || ingredients.length === 0 || steps.length === 0) return undefined
 
   const servings = extractServings(best.recipeYield)
-  const cookMinutes = parseIso8601DurationToMinutes(best.cookTime)
+  // cookTime(正味の調理時間)が無くてもtotalTime(下ごしらえ込みの所要時間)は入っているサイトが多い
+  // (再監査実測: NHK・キッコーマン・味の素パーク・ハウス食品・楽天レシピ・つくおき等7サイトでcookTimeは
+  // 空だがtotalTimeは入っており、cookTimeだけを見ていたこれまでの実装では丸ごと欠落していた)。
+  const cookMinutes = parseIso8601DurationToMinutes(best.cookTime) ?? parseIso8601DurationToMinutes(best.totalTime)
   const imageUrl = extractImageUrl(best.image)
 
   return {
