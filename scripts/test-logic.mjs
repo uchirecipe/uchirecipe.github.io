@@ -2149,12 +2149,13 @@ eq(
   eq('isNutrientSortOption: updatedは栄養並び替えでない', isNutrientSortOption('updated'), false)
 }
 
-// ---------- 「テーマごと」並び替え(2026-07-17オーナー指示: レシピ一覧の並び替えに新設)。
-// 昇順は①基本レシピ(sourceSetNameなし・isStarter)→②各テーマ(sourceSetNameの五十音順・
-// 同テーマ内は既定順=更新順=新しい順)→③自作レシピ(最後)。降順トグルは①②③の並び自体と
-// テーマの五十音順は反転するが、既存の全並び替え共通の仕様どおり「同点(同グループ・同テーマ内)の
-// 順序は常に更新順(新しい順)を維持し方向トグルの影響を受けない」ため、単純な配列reverseとは
-// 一致しない(グループ間・テーマ間の前後だけが反転する) ----------
+// ---------- 「基本レシピ順」並び替え(2026-07-17オーナー指示で「テーマごと」として新設。
+// 2026-07-20 便AMで第◯弾/テーマの括りを廃止し「①基本レシピ(公式全部)→②自作レシピ」の
+// 2区分に単純化。配布テーマ取り込み品(sourceSetNameあり)もisStarterのため①側にまとまる。
+// 昇順は①基本レシピ(公式全部・区分内は既定順=更新順=新しい順)→②自作レシピ(既定順=新しい順)。
+// 降順トグルは①②の並び自体を反転するが、既存の全並び替え共通の仕様どおり「同区分内の順序は
+// 常に更新順(新しい順)を維持し方向トグルの影響を受けない」ため、単純な配列reverseとは
+// 一致しない(区分間の前後だけが反転する) ----------
 {
   const mkThemeRecipe = (id, title, updatedAt, extra) => ({
     id,
@@ -2171,9 +2172,9 @@ eq(
     updatedAt,
     ...extra,
   })
-  // 基本レシピ2件(sourceSetNameなし・isStarter)・テーマ2種(あいうえお×2, いろは×1。
-  // いずれもsourceSetNameあり・配布セット取り込み品はisStarterも true)・自作2件
-  // (sourceSetNameなし・isStarterなし=通常のユーザー登録レシピ相当)
+  // 基本レシピ2件(sourceSetNameなし・isStarter)・配布テーマ取り込み品3件(あいうえお×2, いろは×1。
+  // いずれもsourceSetNameあり・isStarterも true=①基本レシピ側にまとまる)・自作2件
+  // (sourceSetNameなし・isStarterなし=通常のユーザー登録レシピ相当・②側)
   const rOwnOld = mkThemeRecipe(1, '自作B', 100)
   const rOwnNew = mkThemeRecipe(2, '自作A', 200)
   const rBaseOld = mkThemeRecipe(3, '基本1', 50, { isStarter: true })
@@ -2193,16 +2194,16 @@ eq(
   const themeResults = [rThemeIroha, rOwnOld, rBaseOld, rThemeAiOld, rOwnNew, rThemeAiNew, rBaseNew].map(
     (recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }),
   )
-  eq('テーマごとの既定方向は昇順', defaultSortDirection.theme, 'asc')
+  eq('基本レシピ順の既定方向は昇順', defaultSortDirection.theme, 'asc')
   eq(
-    'テーマごと昇順: 基本(新しい順)→テーマ(五十音順・同テーマ内は新しい順)→自作(新しい順)',
+    '基本レシピ順昇順: ①基本レシピ(公式全部・sourceSetNameの有無を問わず新しい順にまとまる)→②自作(新しい順)',
     sortResults(themeResults, 'theme', []).map((r) => r.recipe.id),
-    [4, 3, 7, 6, 5, 2, 1],
+    [7, 5, 4, 3, 6, 2, 1],
   )
   eq(
-    'テーマごと降順: グループ順・テーマの五十音順は反転するが、同テーマ内は常に新しい順のまま(方向トグルの影響を受けない・既存仕様どおり)',
+    '基本レシピ順降順: 区分順(自作→基本)が反転するが、区分内は常に新しい順のまま(方向トグルの影響を受けない・既存仕様どおり)',
     sortResults(themeResults, 'theme', [], 'desc').map((r) => r.recipe.id),
-    [2, 1, 5, 7, 6, 4, 3],
+    [2, 1, 7, 5, 4, 3, 6],
   )
 }
 

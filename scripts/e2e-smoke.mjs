@@ -36,7 +36,8 @@
 //         RECIPESET-01(修正4・2026-07-14オーナー実機フィードバック: 「レシピセットを読み込む」欄の
 //         「URLから読み込む」結果を読み込み欄の上部にテキストで表示し、以前の下部トーストとしては
 //         二重に出ないこと。エラー(見つからない)・成功の両方を確認。2026-07-16修正1で
-//         setId/setName付き取り込み後にテーマ名バッジ(sourceSetName)が出ることも確認) /
+//         setId/setName付き取り込み後にテーマ名バッジ(sourceSetName)が出ることも確認したが、
+//         2026-07-20 便AMで第◯弾/テーマの括りを廃止し「基本レシピ」バッジに統一されたことを確認) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
 //         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
@@ -224,12 +225,14 @@
 //         日モーダル(便U-5)が出ないこと・モード解除で日モーダルが復活すること・終了日<開始日の
 //         順にタップしても自動で入れ替わり結果が変わらないこと。原価は既存の週集計と同方式
 //         (登録人数基準)のため、期間合計が肉じゃが単品の概算食費の2倍と一致することで検証する) /
-//         THEMESORT-01(一覧の並び替えに「テーマごと」を追加・2026-07-17オーナー指示: 並び替え
-//         パネルに選択肢として出ること・選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)に
-//         なること・テーマ「高たんぱくごはん」(kintore・10品)取り込み後は、そのテーマのカードが
-//         基本レシピの直後に連続した塊として並ぶこと。既存のSORTDIR-01/SCROLL-01/SCROLL-02が
-//         「テーマごと」追加後も壊れていないことは、同じ一覧の状態保存の仕組み(sessionStorageの
-//         recipesListState)を共用するそれぞれの既存チェックの合格をもって確認する) /
+//         THEMESORT-01(一覧の並び替えに「基本レシピ順」を追加・2026-07-17オーナー指示で「テーマごと」
+//         として新設: 並び替えパネルに選択肢として出ること・選択すると先頭カードが基本レシピ
+//         (「基本レシピ」バッジ)になること・テーマ「高たんぱくごはん」(kintore・10品)取り込み後は
+//         2026-07-20 便AMで第◯弾/テーマの括りを廃止したため、取り込んだ品も含め全カードが
+//         「基本レシピ」バッジに統一され旧テーマ名は出ないこと(区分は「基本レシピ(公式全部)→自作」の
+//         2区分に単純化)。既存のSORTDIR-01/SCROLL-01/SCROLL-02が「基本レシピ順」追加後も
+//         壊れていないことは、同じ一覧の状態保存の仕組み(sessionStorageのrecipesListState)を
+//         共用するそれぞれの既存チェックの合格をもって確認する) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -1961,13 +1964,15 @@ try {
     }
   }
 
-  // --- THEMESORT-01: 一覧の並び替えに「テーマごと」を追加(2026-07-17オーナー指示)。並び替え
-  // パネルに選択肢として出ること・選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる
-  // こと(まだテーマ未取込)・テーマ「高たんぱくごはん」(kintore・10品)を取り込んだ後は一覧へ
-  // 戻ると「テーマごと」の選択がsessionStorageから保持されたまま、そのテーマのカードが基本レシピの
-  // 直後に連続した塊として並ぶことを確認する。テーマ取り込みには追加レシピパック解錠が必要なため、
-  // TOMB-01と同様settings.recipePackCodeを直接書き込む。他チェックの解錠状態・レシピに
-  // 影響しないよう専用のbrowser/contextで完結させる ---
+  // --- THEMESORT-01: 一覧の並び替えに「基本レシピ順」を追加(2026-07-17オーナー指示で「テーマごと」
+  // として新設)。並び替えパネルに選択肢として出ること・選択すると先頭カードが基本レシピ
+  // (「基本レシピ」バッジ)になること(まだテーマ未取込)・テーマ「高たんぱくごはん」(kintore・10品)を
+  // 取り込んだ後は一覧へ戻ると「基本レシピ順」の選択がsessionStorageから保持されたまま、取り込んだ品
+  // も含め全カードが「基本レシピ」バッジに統一され、旧テーマ名(第◯弾/セット名)が出ないことを確認する
+  // (2026-07-20 便AM: 商品が全部込み買い切りになりテーマ区別が販売上不要になったため、区分を
+  // 「基本レシピ(公式全部)→自作」の2区分に単純化。データ側のsourceSetName/sourceSetIdは維持)。
+  // テーマ取り込みには追加レシピパック解錠が必要なため、TOMB-01と同様settings.recipePackCodeを
+  // 直接書き込む。他チェックの解錠状態・レシピに影響しないよう専用のbrowser/contextで完結させる ---
   currentCheck = 'THEMESORT-01'
   {
     const tsBrowser = await chromium.launch()
@@ -1982,14 +1987,14 @@ try {
       await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await tsPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // 1) 並び替えパネルに「テーマごと」が選択肢として出る
+      // 1) 並び替えパネルに「基本レシピ順」が選択肢として出る
       await tsPage.locator('button[aria-label="並び替え"]').click()
       await tsPage.waitForTimeout(300)
       const sortPanelText = await tsPage.textContent('body')
-      check('THEMESORT-01 並び替えパネルに「テーマごと」が出る', sortPanelText.includes('テーマごと'))
+      check('THEMESORT-01 並び替えパネルに「基本レシピ順」が出る', sortPanelText.includes('基本レシピ順'))
 
       // 2) 選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる(テーマ未取込のため)
-      await tsPage.getByRole('button', { name: 'テーマごと', exact: true }).click()
+      await tsPage.getByRole('button', { name: '基本レシピ順', exact: true }).click()
       await tsPage.waitForTimeout(300)
       await tsPage.getByRole('button', { name: '決定' }).click()
       await tsPage.waitForTimeout(300)
@@ -1998,7 +2003,7 @@ try {
         return first ? first.textContent : null
       })
       check(
-        'THEMESORT-01 「テーマごと」選択で先頭カードが基本レシピになる(テーマ未取込)',
+        'THEMESORT-01 「基本レシピ順」選択で先頭カードが基本レシピになる(テーマ未取込)',
         !!firstCardTextBeforeImport && firstCardTextBeforeImport.includes('基本レシピ'),
         `先頭カードテキスト=${firstCardTextBeforeImport}`,
       )
@@ -2036,8 +2041,9 @@ try {
         (await tsPage.textContent('body')).includes('10件追加しました'),
       )
 
-      // 4) 一覧へ戻ると「テーマごと」の選択がsessionStorageから保持されたまま、取り込んだテーマの
-      //    カードが基本レシピの直後に連続した塊として並ぶ(自作レシピは未登録のため末尾は対象外)
+      // 4) 一覧へ戻ると「基本レシピ順」の選択がsessionStorageから保持されたまま、取り込んだ「高たんぱく
+      //    ごはん」の10品も含め全カードが「基本レシピ」バッジに統一され、旧テーマ名は出ない
+      //    (2026-07-20 便AMで第◯弾/テーマの括りを廃止・「基本レシピ(公式全部)→自作」の2区分に単純化)
       await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await tsPage.waitForTimeout(800)
       const badgeKindsAfterImport = await tsPage.evaluate(() => {
@@ -2048,17 +2054,11 @@ try {
           return 'other'
         })
       })
-      const firstThemeIndex = badgeKindsAfterImport.indexOf('theme')
-      const themeCount = badgeKindsAfterImport.filter((kind) => kind === 'theme').length
-      const isContiguousThemeBlockAfterBase =
-        firstThemeIndex > 0 &&
-        badgeKindsAfterImport.slice(0, firstThemeIndex).every((kind) => kind === 'base') &&
-        badgeKindsAfterImport
-          .slice(firstThemeIndex, firstThemeIndex + themeCount)
-          .every((kind) => kind === 'theme')
+      const allCardsAreBase =
+        badgeKindsAfterImport.length > 0 && badgeKindsAfterImport.every((kind) => kind === 'base')
       check(
-        'THEMESORT-01 取り込み後、基本レシピの直後にテーマ「高たんぱくごはん」の10品が連続した塊として並ぶ',
-        isContiguousThemeBlockAfterBase && themeCount === 10,
+        'THEMESORT-01 取り込み後、テーマ「高たんぱくごはん」の10品も含め全カードが「基本レシピ」バッジに統一される(旧テーマ名バッジは出ない)',
+        allCardsAreBase,
         `並び=${JSON.stringify(badgeKindsAfterImport)}`,
       )
     } finally {
@@ -4097,8 +4097,10 @@ try {
         !afterSuccessText.includes('指定されたURLにレシピセットが見つかりませんでした'),
       )
 
-      // setName表示の確認(2026-07-16修正1): setId/setName付きで取り込んだレシピはsourceSetNameが
-      // 入り、レシピ一覧カードのテーマ名バッジに反映される(基本レシピの「基本レシピ」バッジと混ざらない)
+      // 基本レシピバッジの確認(2026-07-16修正1ではsourceSetNameがテーマ名バッジとしてそのまま
+      // 表示されていたが、2026-07-20 便AMで第◯弾/テーマの括りを廃止し、公式(isStarter)は
+      // すべて「基本レシピ」表示に統一。データ側のsourceSetName/sourceSetIdは維持したまま
+      // 表示だけ変わったことを確認する)
       await rsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rsPage.waitForTimeout(800)
       const importedCardText = await rsPage
@@ -4106,8 +4108,10 @@ try {
         .first()
         .textContent()
       check(
-        'RECIPESET-01(修正1) setId/setName付きセットの取り込み後、カードにテーマ名バッジ(setName)が出る',
-        !!importedCardText && importedCardText.includes('【下見】第2弾 がまんしないダイエットごはん'),
+        'RECIPESET-01(修正1→便AM) setId/setName付きセットの取り込み後もカードは「基本レシピ」バッジに統一され、第◯弾/テーマ名(setName)は出ない',
+        !!importedCardText &&
+          importedCardText.includes('基本レシピ') &&
+          !importedCardText.includes('【下見】第2弾 がまんしないダイエットごはん'),
         `カードテキスト=${importedCardText}`,
       )
     } finally {
