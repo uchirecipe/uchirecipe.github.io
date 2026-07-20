@@ -53,8 +53,8 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-07-13",
-  "dbVersion": 1,
+  "generatedAt": "2026-07-20",
+  "dbVersion": 2,
   "foods": [
     {
       "id": "06153",
@@ -213,8 +213,10 @@ export const NUTRITION_DATA: NutritionData = {
         "calciumMg": 36
       },
       "unitGrams": {
-        "本": 100
-      }
+        "本": 100,
+        "cm": 3
+      },
+      "note": "「長ねぎ(青い部分)」「長ねぎ(白い部分)」はcm表記(2026-07-21・栄養カバレッジ監査で追加)。本1本=100g・約30cmの目安から1cmあたり約3gで換算"
     },
     {
       "id": "06227",
@@ -282,8 +284,11 @@ export const NUTRITION_DATA: NutritionData = {
       },
       "unitGrams": {
         "かけ": 10,
-        "片": 10
-      }
+        "片": 10,
+        "大さじ": 15,
+        "小さじ": 5
+      },
+      "note": "大さじ/小さじはおろししょうが(チューブ)と同じ換算値(2026-07-21追加。「しょうが(すりおろし)」の名寄せ対応)"
     },
     {
       "id": "06223",
@@ -560,8 +565,10 @@ export const NUTRITION_DATA: NutritionData = {
       },
       "unitGrams": {
         "束": 180,
-        "株": 20
-      }
+        "株": 20,
+        "袋": 200
+      },
+      "note": "袋は「豆腐グラタン」レシピのmemo「1袋=約200gが目安」から(2026-07-21追加)"
     },
     {
       "id": "06086",
@@ -1174,7 +1181,8 @@ export const NUTRITION_DATA: NutritionData = {
       },
       "unitGrams": {
         "袋": 85,
-        "株": 85
+        "株": 85,
+        "パック": 85
       }
     },
     {
@@ -1639,7 +1647,8 @@ export const NUTRITION_DATA: NutritionData = {
       "mextName": "＜魚類＞ （たら類） まだら 生",
       "aliases": [
         "たら",
-        "鱈"
+        "鱈",
+        "生だら"
       ],
       "per100g": {
         "kcal": 72,
@@ -1654,6 +1663,28 @@ export const NUTRITION_DATA: NutritionData = {
       "unitGrams": {
         "切れ": 80
       }
+    },
+    {
+      "id": "10171",
+      "label": "さわら",
+      "mextName": "＜魚類＞ さわら 生",
+      "aliases": [
+        "さわら"
+      ],
+      "per100g": {
+        "kcal": 161,
+        "proteinG": 20.1,
+        "fatG": 9.7,
+        "carbG": 0.1,
+        "saltG": 0.2,
+        "fiberG": 0,
+        "ironMg": 0.8,
+        "calciumMg": 13
+      },
+      "unitGrams": {
+        "切れ": 80
+      },
+      "note": "「さわら(切り身)」の名寄せ対応(2026-07-21・栄養カバレッジ監査で追加)"
     },
     {
       "id": "10241",
@@ -1895,7 +1926,8 @@ export const NUTRITION_DATA: NutritionData = {
       },
       "unitGrams": {
         "パック": 3,
-        "大さじ": 2
+        "大さじ": 2,
+        "袋": 3
       }
     },
     {
@@ -2308,7 +2340,8 @@ export const NUTRITION_DATA: NutritionData = {
       },
       "unitGrams": {
         "杯": 150,
-        "膳": 150
+        "膳": 150,
+        "杯分": 150
       }
     },
     {
@@ -2826,7 +2859,8 @@ export const NUTRITION_DATA: NutritionData = {
       "mextName": "＜調味料類＞ （みそ類） 米みそ 甘みそ",
       "aliases": [
         "白味噌",
-        "甘みそ"
+        "甘みそ",
+        "白みそ"
       ],
       "per100g": {
         "kcal": 206,
@@ -3779,7 +3813,11 @@ export const NUTRITION_DATA: NutritionData = {
         "fiberG": 3.4,
         "ironMg": 0.7,
         "calciumMg": 4
-      }
+      },
+      "unitGrams": {
+        "袋": 100
+      },
+      "note": "袋は「なめこと豆腐の味噌汁」レシピのmemo「1袋=100g程度が目安」から(2026-07-21追加)"
     },
     {
       "id": "07035",
@@ -3833,7 +3871,9 @@ export const NUTRITION_DATA: NutritionData = {
         "fiberG": 0,
         "ironMg": 0.1,
         "calciumMg": 0
-      }
+      },
+      "gramsPerMl": 0.9,
+      "note": "密度はサラダ油(0.8)・ごま油(0.8)に近い油脂系調味料として概算(2026-07-21追加。数値自体は八訂17006の成分値)"
     },
     {
       "id": "06278",
@@ -3872,7 +3912,12 @@ export const NUTRITION_DATA: NutritionData = {
         "fiberG": 3.1,
         "ironMg": 1.6,
         "calciumMg": 45
-      }
+      },
+      "unitGrams": {
+        "大さじ": 18,
+        "小さじ": 6
+      },
+      "note": "大さじ/小さじの重さは味噌類と同じペースト状調味料の目安で概算(2026-07-21追加)"
     },
     {
       "id": "17066",
@@ -3910,7 +3955,11 @@ export const NUTRITION_DATA: NutritionData = {
         "fiberG": 10.6,
         "ironMg": 2.8,
         "calciumMg": 75
-      }
+      },
+      "unitGrams": {
+        "パック": 50
+      },
+      "note": "パックは「ツナと蒸し大豆の香味サラダ」レシピのmemo「1パック=50g程度が目安」から(2026-07-21追加)"
     },
     {
       "id": "17004",
@@ -3929,7 +3978,12 @@ export const NUTRITION_DATA: NutritionData = {
         "fiberG": 4.3,
         "ironMg": 2.3,
         "calciumMg": 32
-      }
+      },
+      "unitGrams": {
+        "大さじ": 18,
+        "小さじ": 6
+      },
+      "note": "大さじ/小さじの重さは味噌類と同じペースト状調味料の目安で概算(2026-07-21追加)"
     },
     {
       "id": "03029",
@@ -4036,6 +4090,113 @@ export const NUTRITION_DATA: NutritionData = {
         "calciumMg": 0
       },
       "note": "八訂に香料/エッセンス類の収載が無いための例外(custom)。一般的な洋菓子用エッセンス(アルコールベースの香料。中身の大半は水・アルコールで、風味成分はごく微量)の一般的な栄養表示を参考にした保守的な概算値であり、MEXT成分表に基づく値ではない。レシピ側の分量は常に「少々(お好みで)」表記のため、実際の計算では対象外(reason:amount)になり、この値が計算に使われることはない(名寄せの網羅目的で追加)"
+    },
+    {
+      "id": "07012",
+      "label": "いちご",
+      "mextName": "いちご 生",
+      "aliases": [
+        "いちご"
+      ],
+      "per100g": {
+        "kcal": 31,
+        "proteinG": 0.9,
+        "fatG": 0.1,
+        "carbG": 8.5,
+        "saltG": 0,
+        "fiberG": 1.4,
+        "ironMg": 0.3,
+        "calciumMg": 17
+      },
+      "unitGrams": {
+        "個": 15
+      },
+      "note": "フルーツヨーグルトバーク(第2弾)で使用。1個=15gはレシピ側memoの目安値"
+    },
+    {
+      "id": "07054",
+      "label": "キウイ",
+      "mextName": "キウイフルーツ 緑肉種 生",
+      "aliases": [
+        "キウイ",
+        "キウイフルーツ"
+      ],
+      "per100g": {
+        "kcal": 51,
+        "proteinG": 1,
+        "fatG": 0.2,
+        "carbG": 13.4,
+        "saltG": 0,
+        "fiberG": 2.6,
+        "ironMg": 0.3,
+        "calciumMg": 26
+      },
+      "unitGrams": {
+        "個": 100
+      },
+      "note": "フルーツヨーグルトバーク(第2弾)で使用。1個=100gはレシピ側memoの目安値"
+    },
+    {
+      "id": "07124",
+      "label": "ブルーベリー",
+      "mextName": "ブルーベリー 生",
+      "aliases": [
+        "ブルーベリー"
+      ],
+      "per100g": {
+        "kcal": 48,
+        "proteinG": 0.5,
+        "fatG": 0.1,
+        "carbG": 12.9,
+        "saltG": 0,
+        "fiberG": 3.3,
+        "ironMg": 0.2,
+        "calciumMg": 8
+      },
+      "note": "フルーツヨーグルトバーク(第2弾)で使用。レシピの分量は「適量(お好みで)」表記のため、追加後も実際の計算では対象外(reason:amount)のまま(名寄せの網羅目的で追加)"
+    },
+    {
+      "id": "04052",
+      "label": "豆乳",
+      "mextName": "だいず ［その他］ 豆乳 豆乳",
+      "aliases": [
+        "豆乳"
+      ],
+      "per100g": {
+        "kcal": 43,
+        "proteinG": 3.6,
+        "fatG": 2.8,
+        "carbG": 2.3,
+        "saltG": 0,
+        "fiberG": 0.9,
+        "ironMg": 1.2,
+        "calciumMg": 15
+      },
+      "gramsPerMl": 1.03,
+      "note": "豆乳担々スープ(第2弾)の「豆乳(無調整)」に対応。密度は牛乳と同じ1.03g/mlで概算(無調整豆乳は水分主体で近似)。調製豆乳(04053)とは別食品なので流用しない"
+    },
+    {
+      "id": "17077",
+      "label": "乾燥ハーブ",
+      "mextName": "＜香辛料類＞ バジル 粉",
+      "aliases": [
+        "乾燥ハーブ"
+      ],
+      "per100g": {
+        "kcal": 307,
+        "proteinG": 21.1,
+        "fatG": 2.2,
+        "carbG": 50.6,
+        "saltG": 0.1,
+        "fiberG": 0,
+        "ironMg": 120,
+        "calciumMg": 2800
+      },
+      "unitGrams": {
+        "小さじ": 1,
+        "大さじ": 3
+      },
+      "note": "第16弾「鮭のハーブレモン焼き」「鶏もも肉のガーリックハーブ焼き」の「乾燥ハーブ(オレガノまたはバジル/ローズマリー)」に対応。オレガノ・ローズマリーは八訂に収載が無く、レシピ側も「好みのハーブでよい」と明記し銘柄を限定していないため、収載のある乾燥バジル(粉)の値を代表として使用(いずれも少量使用の乾燥葉物ハーブで、栄養価への影響はごく小さい)。単位重量(小さじ1=1g)は乾燥ハーブ類の一般的な目安(MEXTの値ではない概算)"
     }
   ]
 }
