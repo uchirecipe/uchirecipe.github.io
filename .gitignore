@@ -36,3 +36,7 @@ workers/recipe-import/.wrangler
 workers/recipe-import/.dev.vars*
 .wrangler
 dist-urlimport-e2e
+
+# workers/purchase-fulfill(購入後コード自動配信Worker): wranglerのローカル実行キャッシュ・秘密情報ファイル
+workers/purchase-fulfill/.wrangler
+workers/purchase-fulfill/.dev.vars*

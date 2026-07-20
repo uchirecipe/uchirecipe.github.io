@@ -1,0 +1,19 @@
+# うちレシピ「購入後に解錠コードを自動で渡す」Worker。設計: ../../docs/44_購入後コード自動配信_設計.md
+# KV投入・secret設定・デプロイ手順はオーナー向けに scripts/load-codes.md にまとめてある。
+name = "uchirecipe-purchase-fulfill"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[observability]
+enabled = false
+
+# コードプール(pool キー = 未使用コードのJSON配列)とセッション割当(session:{id} キー)を保存するKV。
+# id は投入用プレースホルダ。オーナーが `npx wrangler kv namespace create PRO_CODES` で作成し、
+# 出力された id にこの行を書き換える(手順は scripts/load-codes.md)。
+[[kv_namespaces]]
+binding = "PRO_CODES"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# 以下はコードに値を書かず、wrangler secret で設定する(手順は scripts/load-codes.md):
+#   npx wrangler secret put STRIPE_SECRET_KEY
+#   npx wrangler secret put STRIPE_WEBHOOK_SECRET
