@@ -2662,6 +2662,26 @@ eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), fals
     u('大葉もせん切りにする。').some((s) => s === '大葉もせん' || s.startsWith('切りに')),
     false,
   )
+
+  // ---- 2026-07-20 便AK(オーナー実機指摘): 改行の過剰分割・短行空白の解消 ----
+  // 再現例(docs/45): 「とうもろこしは/ 半分削ぎ切りに/して、/ 半分は/ ラップに/包んで/
+  // 600W 3分/してから/ 5㎝幅輪切りから/ 縦に/4等分し/ます。」のように行が細切れになっていた。
+  // カタログには同型の実文言がない(help/setsをgrepしても不在)ため、指示どおり同型の合成文を使う。
+  const cornBefore = 'とうもろこしは半分削ぎ切りにして、半分はラップに包んで600W '
+  const cornAfter = 'してから5㎝幅輪切りから縦に4等分します。'
+  const corn = splitAroundTimeToken(cornBefore, cornAfter, '3分'.length)
+  // 原因: 「600W」は助詞を伴わない裸の数値+単位表記のため、既存ので/に/の/が止まり限定の
+  // 遡り結合(bondPrev)にひっかからず、タイマーボタン直前で単独ユニットとして取り残されていた。
+  eq('「600W」がタイマーボタンに密着する(泣き別れ解消)', corn.bondPrev, '600W ')
+  eq('「600W」がpre側の単独ユニットとして残らない', corn.pre.split(ZWSP).includes('600W'), false)
+  eq(
+    'データ不変(pre+bondPrev+トークン+bondNext+postを連結すると原文と一致)',
+    corn.pre.split(ZWSP).join('') + corn.bondPrev + '3分' + corn.bondNext + corn.post.split(ZWSP).join(''),
+    cornBefore + '3分' + cornAfter,
+  )
+  // 目標の目安(完全一致は求めない): 「半分は」「ラップに包んで」は自然な粒度のまま残ってよい
+  // (格助詞なしで数値+単位が並ぶケースの個別対応であり、係助詞「は」の結合条件は今回変更していない)
+  eq('「半分は」は単体のまま(過剰結合しない)', corn.pre.split(ZWSP).includes('半分は'), true)
 }
 
 // ---------- termSplit: 用語タップ辞書の最長一致分割(2026-07-11) ----------

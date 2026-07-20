@@ -199,9 +199,17 @@ export function splitAroundTimeToken(
   let beforeRest = before
   if (before) {
     const raw = normalizedSegments(before)
-    // 末尾がで/に/の/が止まりのときだけ、8文字を上限にraw文節を末尾から蓄積して結合
-    // (「ゆで|上がりの」のようにBudouXが語中で切っても「ゆで上がりの」ごと拾えるように)
-    if (
+    const last = raw[raw.length - 1]
+    // 助詞を伴わない裸の数値+単位表記(「600W」「180℃」等)がタイマー直前にあるときは、
+    // その表記だけをそのままタイマーボタンに密着させる(「600W 3分」のように助詞なしで
+    // 数値+単位が並ぶ書き方で「600W」だけが行末に取り残される泣き別れ対策・2026-07-20便AK)。
+    // で/に/の/が止まりの遡り結合(下記)とは別枠: 遡って複数文節を蓄積せず、この1文節だけ拾う
+    if (last !== undefined && /\d+(?:W|w|℃|度)\s*$/.test(last) && !PUNCT_END.test(last)) {
+      bondPrev = last
+      beforeRest = before.slice(0, before.length - last.length)
+    } else if (
+      // 末尾がで/に/の/が止まりのときだけ、8文字を上限にraw文節を末尾から蓄積して結合
+      // (「ゆで|上がりの」のようにBudouXが語中で切っても「ゆで上がりの」ごと拾えるように)
       raw.length > 0 &&
       /[でにのが]$/.test(raw[raw.length - 1]) &&
       !PUNCT_END.test(raw[raw.length - 1])
