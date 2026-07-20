@@ -275,6 +275,42 @@ export function estimateRecipeCost(
   return { total, fromMasterCount, hasAnyPriceInfo }
 }
 
+/**
+ * 材料1行分の「1食あたりの按分原価」(2026-07-20 便AJ「原価ビュー」再改修・docs/45)。
+ * 「原価を見る」ON時、材料行の計量表記の位置に表示する値の計算本体。
+ * 優先度はestimateRecipeCostと同じ(個別入力(ing.price) > マスタ一致 > なし)。
+ * 全量(登録時のamount・レシピ登録人数=servings分)の金額をservingsで割った値
+ * (=1食あたりの按分原価)を返す。servingsで割ってからさらに表示側の人数変更(servingsOverride)
+ * には追従させない設計のため、呼び出し側は必ずrecipe.servings(登録人数)を渡すこと
+ * (仕様書「2食分などの変動値は出さない」)。
+ * 価格情報が無い(マスタ不一致かつ個別入力も無い)材料はundefinedを返す
+ * (estimateRecipeCostの合計計算から除外される材料と同じ扱い)。
+ */
+export interface IngredientRowCostEstimate {
+  /** 全量(登録量)の金額。個別入力ならその値、マスタ一致ならestimateIngredientYenの結果 */
+  totalYen: number
+  /** totalYen ÷ servings を四捨五入した1食あたりの按分原価。0(=1円未満)なら
+   *  呼び出し側は金額の代わりに「1円未満」を表示する想定(仕様書「四捨五入・1円未満は「1円未満」」) */
+  perServingYen: number
+}
+
+export function estimateIngredientRowCost(
+  ingredient: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>,
+  index: PriceIndexEntry[],
+  servings: number,
+): IngredientRowCostEstimate | undefined {
+  let totalYen: number
+  if (ingredient.price != null && ingredient.price > 0) {
+    totalYen = ingredient.price
+  } else {
+    const estimated = estimateIngredientYen(ingredient, index)
+    if (estimated == null || estimated.yen <= 0) return undefined
+    totalYen = estimated.yen
+  }
+  const perServingYen = Math.round(servings > 0 ? totalYen / servings : totalYen)
+  return { totalYen, perServingYen }
+}
+
 /** 献立エントリ群(mealPlans)の概算食費の合計・内訳 */
 export interface MealPlanCostSum {
   /** 円換算の合計 */

@@ -31,6 +31,7 @@ import {
   buildPriceIndex,
   matchPriceEntry,
   estimateRecipeCost,
+  estimateIngredientRowCost,
   normalizeIngredientNameForPrice,
 } from '../logic/priceEstimate'
 import { seasoningGroupColorToken } from '../logic/seasoningGroup'
@@ -140,10 +141,12 @@ export default function RecipeDetailPage() {
   const [servingsOverride, setServingsOverride] = useState<number>()
   const servings = servingsOverride ?? recipe?.servings ?? 1
 
-  // 材料ごとの価格ビュー切り替え(2026-07-15 オーナー要望「どの食材が値段に反映されているか
+  // 材料ごとの原価ビュー切り替え(2026-07-15 オーナー要望「どの食材が値段に反映されているか
   // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
-  // 既定OFFのトグル表示に限定する。ページローカルな一時状態でよい(レシピを離れたらリセット)
-  const [showPrices, setShowPrices] = useState(false)
+  // 既定は非表示のトグル表示に限定する。ページローカルな一時状態でよい(レシピを離れたらリセット)。
+  // 2026-07-20 便AJ(docs/45)で「原価を見る」(閲覧=1食あたり按分)と「原価を編集」(単価編集)の
+  // 2モードに分離。互いに排他(同時に両方は出さない)なので3値のunion 1つで管理する
+  const [costMode, setCostMode] = useState<'hidden' | 'view' | 'edit'>('hidden')
 
   // 原価ビューの価格編集モーダル(2026-07-16 裁定1「原価ビュー」全面改修)。
   // entryIdあり=マスタ一致行の編集/なし=「＋登録」からの新規登録。nullで閉じている
@@ -587,21 +590,36 @@ export default function RecipeDetailPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold">{ja.detail.ingredients}</h2>
             <div className="flex items-center gap-2">
-              {/* 価格ビュー切り替えチップ(2026-07-15 オーナー要望「どの食材が値段に反映されて
+              {/* 原価ビュー切り替えチップ(2026-07-15 オーナー要望「どの食材が値段に反映されて
                   いるか分からない」への対応。常時表示は「うるさい」で廃止済みのためトグル方式。
-                  既定OFF・状態はページローカル） */}
+                  既定は非表示・状態はページローカル)。2026-07-20 便AJ(docs/45)で「原価を見る」
+                  (閲覧=1食あたり按分)と「原価を編集」(単価編集)の2ボタンに再改修。互いに排他
+                  (選ぶと自動でもう片方は消える)で、選択中のボタンをもう一度押すと非表示に戻る */}
               <button
                 type="button"
-                onClick={() => setShowPrices((v) => !v)}
-                aria-pressed={showPrices}
+                onClick={() => setCostMode((m) => (m === 'view' ? 'hidden' : 'view'))}
+                aria-pressed={costMode === 'view'}
                 className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
-                  showPrices
+                  costMode === 'view'
                     ? 'border-accent bg-accent text-on-accent'
                     : 'border-edge bg-surface text-accent'
                 }`}
               >
                 <JapaneseYen size={16} aria-hidden />
-                {showPrices ? ja.detail.priceViewHide : ja.detail.priceViewShow}
+                {ja.detail.priceViewShow}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCostMode((m) => (m === 'edit' ? 'hidden' : 'edit'))}
+                aria-pressed={costMode === 'edit'}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
+                  costMode === 'edit'
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-accent'
+                }`}
+              >
+                <Pencil size={16} aria-hidden />
+                {ja.detail.priceEditShow}
               </button>
               <button
                 type="button"
@@ -625,34 +643,11 @@ export default function RecipeDetailPage() {
               </button>
             </div>
           </div>
-          {/* 原価サマリーカード(2026-07-16 裁定1「原価ビュー」全面改修): 材料リスト直上に
-              1人分・全量の概算金額をまとめて出す。人数は登録人数(recipe.servings)で固定し、
-              表示人数(servingsOverride)には追従させない(概算食費の合計と必ず一致させるため)。
-              材料の価格が1件も無ければ(totalPrice===0)金額の代わりに登録を促す案内を出す。
-              「食材と価格を編集する」リンクは2026-07-15から引き続きここに置く */}
-          {showPrices && (
-            <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-              {totalPrice > 0 ? (
-                <>
-                  <p className="text-lg font-bold">
-                    {ja.detail.costPerServing.replace('{n}', costPerServingRegistered.toLocaleString())}
-                  </p>
-                  <p className="text-sm text-ink-muted">
-                    {ja.detail.costTotal
-                      .replace('{n}', String(recipe.servings))
-                      .replace('{m}', totalPrice.toLocaleString())}
-                  </p>
-                  <p className="mt-1 text-sm text-ink-muted">
-                    {ja.detail.priceViewNote.replace('{n}', String(recipe.servings))}
-                  </p>
-                </>
-              ) : (
-                <p className="text-sm text-ink-muted">{ja.detail.costEmpty}</p>
-              )}
-              <Link to="/prices" className="mt-1 inline-block text-sm font-bold text-accent underline">
-                {ja.form.ingredientPriceGuideLink}
-              </Link>
-            </div>
+          {/* 原価サマリーカード(2026-07-16 裁定1で新設)は2026-07-20 便AJ(docs/45)で丸ごと削除
+              (オーナー指示。上部メタ行の概算食費「約◯円」「1食あたり 約◯円」は不変のため重複していた)。
+              代わりに「原価を編集」モードの説明を1文だけ出す(チップ表の上・編集モード時のみ) */}
+          {costMode === 'edit' && (
+            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.detail.priceEditNote}</p>
           )}
           {recipe.ingredients.some((ing) => ing.seasoningGroup) && (
             <p className="mt-1 text-sm text-ink-muted">{ja.detail.seasoningGroupHint}</p>
@@ -660,10 +655,17 @@ export default function RecipeDetailPage() {
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
             {recipe.ingredients.map((ing, index) => {
               const isNg = ngIndices.has(index)
-              // 価格ビューOFF時はrecipe.ingredientsの表示に一切手を加えない(1pxも変えない)ため
-              // showPrices==trueのときだけマスタ照合する
-              const matchedEntry = showPrices ? matchPriceEntry(ing.name, priceIndex) : undefined
+              // 非表示時はrecipe.ingredientsの表示に一切手を加えない(1pxも変えない)ため
+              // 編集モードのときだけマスタ照合する(チップ表示・タップ編集に使う)
+              const matchedEntry = costMode === 'edit' ? matchPriceEntry(ing.name, priceIndex) : undefined
               const hasOwnPrice = ing.price != null && ing.price > 0
+              // 「原価を見る」時だけ計算する1食あたりの按分原価(2026-07-20 便AJ・docs/45)。
+              // 全量(登録量)の金額を登録人数(recipe.servings)で割った固定値で、表示人数
+              // (servingsOverride)には追従させない(仕様書「2食分などの変動値は出さない」)
+              const rowCost =
+                costMode === 'view'
+                  ? estimateIngredientRowCost(ing, priceIndex, recipe.servings)
+                  : undefined
               return (
                 <li
                   key={index}
@@ -683,10 +685,10 @@ export default function RecipeDetailPage() {
                       {isNg && <TriangleAlert size={18} aria-label={ja.detail.ngWarning} />}
                       {ing.name}
                     </span>
-                    {showPrices ? (
-                      /* 原価ビューON時は使用量表示を消し、代わりに「登録単位と価格」チップに
-                         差し替える(2026-07-16 裁定1: 行別按分額の表示は削除・オーナー指示
-                         「登録単位と価格が正」)。ing.price(レシピ個別入力)がある行は
+                    {costMode === 'edit' ? (
+                      /* 原価を編集モード: 計量表記の代わりに「登録単位と価格」チップを出す
+                         (タップで編集モーダル。2026-07-16 裁定1由来・2026-07-20 便AJで
+                         「編集モード」側へ移動)。ing.price(レシピ個別入力)がある行は
                          マスタ編集の対象外なので、チップにせず金額だけの静的表記にする
                          (edge case1: 合計は個別価格優先・按分計算自体は従来どおり不変) */
                       <span className="shrink-0">
@@ -717,6 +719,26 @@ export default function RecipeDetailPage() {
                             {ja.detail.priceNone}
                             <span className="font-bold text-accent">＋{ja.detail.costAddPrice}</span>
                           </button>
+                        )}
+                      </span>
+                    ) : costMode === 'view' ? (
+                      /* 原価を見るモード: 計量表記の位置に1食あたりの按分原価を出す
+                         (2026-07-20 便AJ・docs/45。編集導線は無い=タップ不可の静的テキスト。
+                         価格情報が無い材料は「価格なし」、四捨五入で0円になる材料は
+                         「1円未満」を出す) */
+                      <span className="shrink-0 font-bold">
+                        {rowCost ? (
+                          rowCost.perServingYen > 0 ? (
+                            <>
+                              {ja.detail.priceAbout}
+                              {rowCost.perServingYen.toLocaleString()}
+                              {ja.detail.priceYen}
+                            </>
+                          ) : (
+                            ja.detail.costUnderOneYen
+                          )
+                        ) : (
+                          <span className="text-ink-muted">{ja.detail.priceNone}</span>
                         )}
                       </span>
                     ) : (

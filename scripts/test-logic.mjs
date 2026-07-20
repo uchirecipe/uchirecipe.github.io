@@ -77,6 +77,7 @@ import {
   matchPriceEntry,
   estimateIngredientYen,
   estimateRecipeCost,
+  estimateIngredientRowCost,
   sumMealPlanEntriesCost,
   normalizeIngredientNameForPrice,
   normalizeUnit,
@@ -3014,6 +3015,39 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     'estimateRecipeCost 価格情報が1件も無ければhasAnyPriceInfo=false',
     estimateRecipeCost([{ name: '謎の食材', amount: '1', unit: '個' }], index),
     { total: 0, fromMasterCount: 0, hasAnyPriceInfo: false },
+  )
+
+  // estimateIngredientRowCost(2026-07-20 便AJ「原価ビュー」再改修・docs/45): 材料行の
+  // 「1食あたりの按分原価」(estimateIngredientYen(全量)÷servingsを四捨五入)
+  eq(
+    'estimateIngredientRowCost マスタ一致(300g/100gあたり130円→390円)を4人分で割る(97.5→98円)',
+    estimateIngredientRowCost({ name: '鶏もも肉', amount: '300', unit: 'g' }, index, 4),
+    { totalYen: 390, perServingYen: 98 },
+  )
+  eq(
+    'estimateIngredientRowCost 個別入力(ing.price)はマスタより優先される',
+    estimateIngredientRowCost({ name: '玉ねぎ', amount: '1', unit: '個', price: 80 }, index, 2),
+    { totalYen: 80, perServingYen: 40 },
+  )
+  eq(
+    'estimateIngredientRowCost 四捨五入で1円未満(0.5円未満)は0円(呼び出し側が「1円未満」表示する契機)',
+    estimateIngredientRowCost({ name: '玉ねぎ', amount: '2', unit: '個' }, index, 250),
+    { totalYen: 100, perServingYen: 0 }, // 100÷250=0.4→0
+  )
+  eq(
+    'estimateIngredientRowCost 0.5円ちょうどは四捨五入で1円(境界値)',
+    estimateIngredientRowCost({ name: '玉ねぎ', amount: '1', unit: '個' }, index, 100),
+    { totalYen: 50, perServingYen: 1 }, // 50÷100=0.5→1
+  )
+  eq(
+    'estimateIngredientRowCost マスタにも個別入力にも無い材料はundefined',
+    estimateIngredientRowCost({ name: '謎の食材', amount: '1', unit: '個' }, index, 2),
+    undefined,
+  )
+  eq(
+    'estimateIngredientRowCost servings=0はtotalYenをそのまま返す(0除算回避)',
+    estimateIngredientRowCost({ name: '玉ねぎ', amount: '1', unit: '個' }, index, 0),
+    { totalYen: 50, perServingYen: 50 },
   )
 
   // sumMealPlanEntriesCost(2026-07-17 便AB・docs/35 §5「期間の食費」): 週の概算食費と
