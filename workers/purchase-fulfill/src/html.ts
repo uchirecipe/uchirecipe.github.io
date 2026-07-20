@@ -6,6 +6,7 @@
 
 const APP_URL = 'https://uchirecipe.com/'
 const CONTACT_EMAIL = 'hapillust@gmail.com'
+const UNLOCK_GUIDE_URL = 'https://uchirecipe.com/about/unlock.html'
 
 function escapeHtml(text: string): string {
   return text
@@ -85,6 +86,8 @@ function pageShell(title: string, bodyHtml: string): string {
     font-weight: 700;
   }
   .contact { font-size: 0.85rem; color: #6b5f52; margin-top: 24px; }
+  .guide-link { text-align: center; font-size: 0.9rem; margin: 0 0 20px; }
+  .guide-link a { color: #7a4f10; text-decoration: underline; }
   @media (prefers-color-scheme: dark) {
     body { background: #1e1a16; color: #f0e9df; }
     .code-box { background: #2a241d; border-color: #d9a441; }
@@ -93,6 +96,7 @@ function pageShell(title: string, bodyHtml: string): string {
     .copy-btn:active { background: #3a3225; }
     .warn { background: #3a2f1a; color: #f0e9df; }
     .contact { color: #b3a898; }
+    .guide-link a { color: #e8c477; }
   }
 </style>
 </head>
@@ -116,12 +120,13 @@ export function renderSuccessPage(code: string): string {
 <div class="code-box"><span class="code" id="unlock-code">${safeCode}</span></div>
 <button type="button" class="copy-btn" id="copy-btn" onclick="copyUnlockCode()">コードをコピーする</button>
 <ol>
-  <li>うちレシピを開く</li>
-  <li>「設定」→「購入と解錠」を開く</li>
-  <li>このコードを入力すると全機能が使えます</li>
+  <li>うちレシピを開く→設定</li>
+  <li>「購入と解錠」にこのコードを入力</li>
+  <li>「解錠する」を押すと全機能が使えます</li>
 </ol>
-<p class="warn">このコードは大切に保管してください。このページは後から開き直せない場合があります。</p>
+<p class="warn">このコードは大切に保管してください。このページは後から開き直せない場合があります(機種変更のときも、同じコードをもう一度入力すれば使えます)。</p>
 <a class="btn" href="${escapeHtml(APP_URL)}">うちレシピを開く</a>
+<p class="guide-link"><a href="${escapeHtml(UNLOCK_GUIDE_URL)}">画面つきの詳しい使い方はこちら</a></p>
 <p class="contact">コードについて困ったときは ${escapeHtml(CONTACT_EMAIL)} までご連絡ください。</p>
 </main>
 <script>
