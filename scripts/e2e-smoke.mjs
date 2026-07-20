@@ -573,12 +573,24 @@ try {
   // のisUrlImportEnabled)。設定済みの場合の表示・取り込みフローはURLIMPORT-01以降(自前previewサーバー
   // port 4203・VITE_RECIPE_IMPORT_ENDPOINTをダミー値でビルド)で確認する ---
   currentCheck = 'URLIMPORT-00'
+  // 2026-07-21改定: 本番Workerのデプロイに伴い .env.production にエンドポイントが設定された。
+  // このチェックは「ビルド時の設定状態と表示が一致すること」を検証する適応型にする
+  // (設定済みビルド=ボタンが出る/未設定ビルド=出ない。未設定側の分岐検証はURLIMPORT-01の
+  // 専用ビルド側で担保)。.env.production を読んで期待値を決める
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  check(
-    'URLIMPORT-00 エンドポイント未設定では「URLから取り込む」ボタンが出ない',
-    !(await page.getByText('URLから取り込む').isVisible().catch(() => false)),
-  )
+  {
+    const envFile = readFileSync(path.join(appRoot, '.env.production'), 'utf8')
+    const m = envFile.match(/^VITE_RECIPE_IMPORT_ENDPOINT=(.*)$/m)
+    const endpointConfigured = !!(m && m[1].trim())
+    const btnVisible = await page.getByText('URLから取り込む').isVisible().catch(() => false)
+    check(
+      endpointConfigured
+        ? 'URLIMPORT-00 エンドポイント設定済みビルドでは「URLから取り込む」ボタンが出る'
+        : 'URLIMPORT-00 エンドポイント未設定では「URLから取り込む」ボタンが出ない',
+      endpointConfigured ? btnVisible : !btnVisible,
+    )
+  }
 
   // --- SMK-04+02: テキスト貼り付け→登録 ---
   currentCheck = 'SMK-04'
