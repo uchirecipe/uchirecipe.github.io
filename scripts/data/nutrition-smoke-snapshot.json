@@ -296,25 +296,24 @@
   "starter:牛丼": {
     "servings": 2,
     "perServing": {
-      "kcal": 339,
-      "proteinG": 19.5,
-      "fatG": 19.9,
-      "carbG": 22.4,
+      "kcal": 573,
+      "proteinG": 23.3,
+      "fatG": 20.4,
+      "carbG": 78,
       "saltG": 2.8,
-      "fiberG": 1.5,
-      "ironMg": 2.7,
-      "calciumMg": 27
+      "fiberG": 3.8,
+      "ironMg": 2.9,
+      "calciumMg": 31
     },
     "excluded": [
-      "ご飯(unit)",
       "紅しょうが(amount)"
     ]
   },
   "starter:ほうれん草のおひたし": {
     "servings": 2,
     "perServing": {
-      "kcal": 23,
-      "proteinG": 2.7,
+      "kcal": 28,
+      "proteinG": 3.8,
       "fatG": 0.4,
       "carbG": 3.5,
       "saltG": 1.3,
@@ -323,26 +322,24 @@
       "calciumMg": 47
     },
     "excluded": [
-      "かつお節(unit)",
       "白いりごま(amount)"
     ]
   },
   "starter:麻婆豆腐": {
     "servings": 2,
     "perServing": {
-      "kcal": 414,
-      "proteinG": 27.9,
-      "fatG": 30.1,
-      "carbG": 13.8,
-      "saltG": 2.5,
-      "fiberG": 3.3,
-      "ironMg": 4,
-      "calciumMg": 189
+      "kcal": 415,
+      "proteinG": 28,
+      "fatG": 30.2,
+      "carbG": 14,
+      "saltG": 3,
+      "fiberG": 3.4,
+      "ironMg": 4.1,
+      "calciumMg": 190
     },
     "excluded": [
       "ラー油(amount)",
-      "粉山椒（こなざんしょう）(amount)",
-      "豆板醤(トウバンジャン)(unit)"
+      "粉山椒（こなざんしょう）(amount)"
     ]
   },
   "starter:鮭の塩焼き": {
@@ -522,17 +519,16 @@
   "starter:鶏そぼろ丼": {
     "servings": 2,
     "perServing": {
-      "kcal": 321,
-      "proteinG": 24.8,
-      "fatG": 17.1,
-      "carbG": 14.5,
+      "kcal": 555,
+      "proteinG": 28.5,
+      "fatG": 17.6,
+      "carbG": 70.1,
       "saltG": 2.5,
-      "fiberG": 0.1,
-      "ironMg": 1.8,
-      "calciumMg": 36
+      "fiberG": 2.4,
+      "ironMg": 2,
+      "calciumMg": 41
     },
     "excluded": [
-      "ご飯(unit)",
       "サラダ油(amount)",
       "刻みのり(amount)"
     ]
@@ -554,17 +550,16 @@
   "starter:なめこと豆腐の味噌汁": {
     "servings": 2,
     "perServing": {
-      "kcal": 86,
-      "proteinG": 7.5,
-      "fatG": 4.1,
-      "carbG": 6.3,
+      "kcal": 96,
+      "proteinG": 8.4,
+      "fatG": 4.2,
+      "carbG": 9,
       "saltG": 2.4,
-      "fiberG": 1.7,
-      "ironMg": 1.8,
-      "calciumMg": 90
+      "fiberG": 3.4,
+      "ironMg": 2.1,
+      "calciumMg": 92
     },
     "excluded": [
-      "なめこ(unit)",
       "小ねぎ(amount)"
     ]
   },
@@ -604,17 +599,16 @@
   "starter:オムライス": {
     "servings": 2,
     "perServing": {
-      "kcal": 395,
-      "proteinG": 21.9,
-      "fatG": 30.1,
-      "carbG": 11.6,
+      "kcal": 629,
+      "proteinG": 25.7,
+      "fatG": 30.5,
+      "carbG": 67.2,
       "saltG": 1.4,
-      "fiberG": 1.1,
-      "ironMg": 2.1,
-      "calciumMg": 79
+      "fiberG": 3.4,
+      "ironMg": 2.2,
+      "calciumMg": 83
     },
     "excluded": [
-      "ご飯(unit)",
       "塩こしょう(amount)"
     ]
   },
@@ -686,35 +680,33 @@
   "starter:蒸しなすの香味だれ": {
     "servings": 2,
     "perServing": {
-      "kcal": 55,
-      "proteinG": 2.4,
+      "kcal": 58,
+      "proteinG": 2.5,
       "fatG": 2.1,
-      "carbG": 8.3,
+      "carbG": 8.9,
       "saltG": 2,
-      "fiberG": 2.7,
+      "fiberG": 2.9,
       "ironMg": 0.6,
-      "calciumMg": 26
+      "calciumMg": 29
     },
     "excluded": [
-      "ラー油(amount)",
-      "長ねぎ(白い部分)(unit)"
+      "ラー油(amount)"
     ]
   },
   "starter:バンバンジー": {
     "servings": 2,
     "perServing": {
-      "kcal": 283,
-      "proteinG": 26.3,
-      "fatG": 16.9,
-      "carbG": 7.7,
+      "kcal": 288,
+      "proteinG": 26.5,
+      "fatG": 17,
+      "carbG": 8.9,
       "saltG": 2.1,
-      "fiberG": 2.6,
-      "ironMg": 1.7,
-      "calciumMg": 128
+      "fiberG": 3,
+      "ironMg": 1.8,
+      "calciumMg": 133
     },
     "excluded": [
-      "ラー油(amount)",
-      "長ねぎ(青い部分)(unit)"
+      "ラー油(amount)"
     ]
   },
   "starter:牛乳もち": {
@@ -784,19 +776,16 @@
   "starter:回鍋肉(ホイコーロー)": {
     "servings": 2,
     "perServing": {
-      "kcal": 356,
-      "proteinG": 13,
-      "fatG": 29.8,
-      "carbG": 11,
-      "saltG": 0.5,
-      "fiberG": 3.1,
-      "ironMg": 1,
-      "calciumMg": 60
+      "kcal": 390,
+      "proteinG": 14.2,
+      "fatG": 30.8,
+      "carbG": 16.3,
+      "saltG": 1.8,
+      "fiberG": 3.6,
+      "ironMg": 1.3,
+      "calciumMg": 66
     },
-    "excluded": [
-      "甜麺醤(テンメンジャン)(unit)",
-      "豆板醤(トウバンジャン)(unit)"
-    ]
+    "excluded": []
   },
   "kintore:レンジ蒸し鶏（自家製サラダチキン）": {
     "servings": 2,
@@ -929,34 +918,31 @@
   "kintore:ツナと蒸し大豆の香味サラダ": {
     "servings": 2,
     "perServing": {
-      "kcal": 122,
-      "proteinG": 7,
-      "fatG": 9.6,
-      "carbG": 2.2,
-      "saltG": 1.6,
-      "fiberG": 0.4,
-      "ironMg": 0.4,
-      "calciumMg": 12
+      "kcal": 168,
+      "proteinG": 11.1,
+      "fatG": 12.1,
+      "carbG": 5.6,
+      "saltG": 1.8,
+      "fiberG": 3,
+      "ironMg": 1.1,
+      "calciumMg": 30
     },
-    "excluded": [
-      "蒸し大豆(unit)"
-    ]
+    "excluded": []
   },
   "bento:ミートボールの甘酢あん": {
     "servings": 2,
     "perServing": {
-      "kcal": 376,
+      "kcal": 377,
       "proteinG": 23.2,
-      "fatG": 24.5,
-      "carbG": 20.4,
+      "fatG": 24.6,
+      "carbG": 20.6,
       "saltG": 1.9,
-      "fiberG": 0.5,
+      "fiberG": 0.6,
       "ironMg": 1.6,
       "calciumMg": 17
     },
     "excluded": [
-      "いりごま(amount)",
-      "しょうが(すりおろし)(unit)"
+      "いりごま(amount)"
     ]
   },
   "bento:卯の花(おからの炒り煮)": {
@@ -990,18 +976,16 @@
   "bento:肉巻きおにぎり": {
     "servings": 2,
     "perServing": {
-      "kcal": 482,
-      "proteinG": 15.8,
-      "fatG": 38.4,
-      "carbG": 17.4,
+      "kcal": 716,
+      "proteinG": 19.6,
+      "fatG": 38.9,
+      "carbG": 73.1,
       "saltG": 2.7,
-      "fiberG": 0,
-      "ironMg": 0.9,
-      "calciumMg": 9
+      "fiberG": 2.3,
+      "ironMg": 1.1,
+      "calciumMg": 14
     },
-    "excluded": [
-      "ご飯(unit)"
-    ]
+    "excluded": []
   },
   "bento:れんこんのきんぴら": {
     "servings": 2,
@@ -1066,18 +1050,16 @@
   "bento:こんにゃくの炒り煮": {
     "servings": 2,
     "perServing": {
-      "kcal": 120,
-      "proteinG": 1.2,
-      "fatG": 6,
+      "kcal": 125,
+      "proteinG": 2.4,
+      "fatG": 6.1,
       "carbG": 14.3,
       "saltG": 2,
       "fiberG": 2.8,
-      "ironMg": 0.7,
-      "calciumMg": 58
+      "ironMg": 0.8,
+      "calciumMg": 59
     },
-    "excluded": [
-      "かつお節(unit)"
-    ]
+    "excluded": []
   },
   "bento:手作り鮭フレーク": {
     "servings": 2,
@@ -1094,5 +1076,489 @@
     "excluded": [
       "塩(amount)"
     ]
+  },
+  "review8:冷やし茶碗蒸し": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 119,
+      "proteinG": 13.4,
+      "fatG": 5.3,
+      "carbG": 4.7,
+      "saltG": 1.4,
+      "fiberG": 0.6,
+      "ironMg": 1.3,
+      "calciumMg": 52
+    },
+    "excluded": [
+      "みつば(または小ねぎ)(amount)"
+    ]
+  },
+  "review8:梅しそ冷奴": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 115,
+      "proteinG": 9.7,
+      "fatG": 7.2,
+      "carbG": 5.4,
+      "saltG": 2.5,
+      "fiberG": 2.1,
+      "ironMg": 2.3,
+      "calciumMg": 140
+    },
+    "excluded": [
+      "かつお節(amount)"
+    ]
+  },
+  "review8:えびと薬味の香味だれそうめん": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 415,
+      "proteinG": 23,
+      "fatG": 3.5,
+      "carbG": 76.3,
+      "saltG": 3.4,
+      "fiberG": 3,
+      "ironMg": 1.8,
+      "calciumMg": 74
+    },
+    "excluded": [
+      "白いりごま(amount)"
+    ]
+  },
+  "review8:冷しゃぶサラダ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 303,
+      "proteinG": 21.3,
+      "fatG": 21.3,
+      "carbG": 6.8,
+      "saltG": 2,
+      "fiberG": 1.6,
+      "ironMg": 0.9,
+      "calciumMg": 40
+    },
+    "excluded": [
+      "白いりごま(amount)"
+    ]
+  },
+  "review8:冷や汁": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 589,
+      "proteinG": 35.8,
+      "fatG": 23.4,
+      "carbG": 65.9,
+      "saltG": 3.2,
+      "fiberG": 6.7,
+      "ironMg": 5.3,
+      "calciumMg": 538
+    },
+    "excluded": [
+      "塩(prep)"
+    ]
+  },
+  "review8:冷やしトマトの浅漬け": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 43,
+      "proteinG": 2,
+      "fatG": 0.2,
+      "carbG": 9,
+      "saltG": 1.4,
+      "fiberG": 1.8,
+      "ironMg": 0.5,
+      "calciumMg": 20
+    },
+    "excluded": []
+  },
+  "review8:オクラと長芋の梅肉あえ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 67,
+      "proteinG": 2.5,
+      "fatG": 0.4,
+      "carbG": 14.5,
+      "saltG": 2,
+      "fiberG": 2.5,
+      "ironMg": 0.6,
+      "calciumMg": 42
+    },
+    "excluded": [
+      "かつお節(amount)",
+      "塩(prep)"
+    ]
+  },
+  "review8:ゴーヤチャンプルー": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 552,
+      "proteinG": 31.1,
+      "fatG": 46.4,
+      "carbG": 8.5,
+      "saltG": 2.1,
+      "fiberG": 5.2,
+      "ironMg": 4.5,
+      "calciumMg": 208
+    },
+    "excluded": [
+      "かつお節(amount)",
+      "塩(prep)"
+    ]
+  },
+  "review8:梅おろしぶっかけうどん": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 257,
+      "proteinG": 7.6,
+      "fatG": 1,
+      "carbG": 55.9,
+      "saltG": 5.1,
+      "fiberG": 4.5,
+      "ironMg": 1.1,
+      "calciumMg": 52
+    },
+    "excluded": [
+      "みょうが(amount)"
+    ]
+  },
+  "review8:水ようかん": {
+    "servings": 4,
+    "perServing": {
+      "kcal": 193,
+      "proteinG": 4.2,
+      "fatG": 0.2,
+      "carbG": 44.9,
+      "saltG": 0.1,
+      "fiberG": 3.7,
+      "ironMg": 1.3,
+      "calciumMg": 33
+    },
+    "excluded": []
+  },
+  "review8:だしのとり方": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 42,
+      "proteinG": 8,
+      "fatG": 0.4,
+      "carbG": 3.3,
+      "saltG": 0.4,
+      "fiberG": 1.6,
+      "ironMg": 0.7,
+      "calciumMg": 42
+    },
+    "excluded": []
+  },
+  "review2:豆腐ときのこの和風あんかけ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 200,
+      "proteinG": 15.7,
+      "fatG": 8.9,
+      "carbG": 16.8,
+      "saltG": 1.4,
+      "fiberG": 5,
+      "ironMg": 3.5,
+      "calciumMg": 170
+    },
+    "excluded": [
+      "小ねぎ(小口切り)(amount)"
+    ]
+  },
+  "review2:鶏ささみの梅しそレンジ蒸し": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 110,
+      "proteinG": 22.3,
+      "fatG": 0.8,
+      "carbG": 3.2,
+      "saltG": 3.2,
+      "fiberG": 0.5,
+      "ironMg": 0.5,
+      "calciumMg": 14
+    },
+    "excluded": []
+  },
+  "review2:しらたきのチャプチェ風": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 185,
+      "proteinG": 9.9,
+      "fatG": 14,
+      "carbG": 9,
+      "saltG": 1.4,
+      "fiberG": 4.2,
+      "ironMg": 1.9,
+      "calciumMg": 89
+    },
+    "excluded": [
+      "白いりごま(amount)"
+    ]
+  },
+  "review2:きのこの和風マリネ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 104,
+      "proteinG": 4.6,
+      "fatG": 6.6,
+      "carbG": 8.6,
+      "saltG": 2,
+      "fiberG": 4.5,
+      "ironMg": 0.7,
+      "calciumMg": 5
+    },
+    "excluded": []
+  },
+  "review2:白菜と豚しゃぶのレンジ蒸し": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 302,
+      "proteinG": 22.1,
+      "fatG": 19.4,
+      "carbG": 10.8,
+      "saltG": 2,
+      "fiberG": 3.2,
+      "ironMg": 1.2,
+      "calciumMg": 110
+    },
+    "excluded": [
+      "万能ねぎ(小口切り)(amount)"
+    ]
+  },
+  "review2:豆腐グラタン": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 262,
+      "proteinG": 21.4,
+      "fatG": 16.3,
+      "carbG": 13.9,
+      "saltG": 1.5,
+      "fiberG": 5.4,
+      "ironMg": 4.1,
+      "calciumMg": 379
+    },
+    "excluded": []
+  },
+  "review2:フルーツヨーグルトバーク": {
+    "servings": 4,
+    "perServing": {
+      "kcal": 110,
+      "proteinG": 4.1,
+      "fatG": 3.1,
+      "carbG": 18.8,
+      "saltG": 0.1,
+      "fiberG": 1,
+      "ironMg": 0.2,
+      "calciumMg": 131
+    },
+    "excluded": [
+      "グラノーラ(food)",
+      "ブルーベリー(amount)"
+    ]
+  },
+  "review2:たらの香味レンジ蒸し": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 141,
+      "proteinG": 15.4,
+      "fatG": 6.2,
+      "carbG": 4,
+      "saltG": 2.7,
+      "fiberG": 0.5,
+      "ironMg": 0.5,
+      "calciumMg": 36
+    },
+    "excluded": []
+  },
+  "review2:よだれ鶏": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 249,
+      "proteinG": 29.4,
+      "fatG": 12.1,
+      "carbG": 5.8,
+      "saltG": 2.7,
+      "fiberG": 1.2,
+      "ironMg": 1.2,
+      "calciumMg": 76
+    },
+    "excluded": []
+  },
+  "review2:豆乳担々スープ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 218,
+      "proteinG": 15.4,
+      "fatG": 15,
+      "carbG": 10.1,
+      "saltG": 3.8,
+      "fiberG": 3.5,
+      "ironMg": 2.8,
+      "calciumMg": 95
+    },
+    "excluded": [
+      "ラー油(amount)",
+      "小ねぎ(小口切り)(amount)"
+    ]
+  },
+  "review16:鶏もも肉のタンドリー風": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 349,
+      "proteinG": 26.6,
+      "fatG": 25.5,
+      "carbG": 6,
+      "saltG": 2.1,
+      "fiberG": 1.2,
+      "ironMg": 1.6,
+      "calciumMg": 57
+    },
+    "excluded": []
+  },
+  "review16:豚肉のケチャップ炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 320,
+      "proteinG": 23.9,
+      "fatG": 21.3,
+      "carbG": 9.9,
+      "saltG": 2,
+      "fiberG": 0.6,
+      "ironMg": 1,
+      "calciumMg": 15
+    },
+    "excluded": []
+  },
+  "review16:鮭のハーブレモン焼き": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 183,
+      "proteinG": 18,
+      "fatG": 12.3,
+      "carbG": 1.1,
+      "saltG": 0.9,
+      "fiberG": 0,
+      "ironMg": 0.7,
+      "calciumMg": 20
+    },
+    "excluded": []
+  },
+  "review16:鶏むね肉のオイスター炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 217,
+      "proteinG": 27.7,
+      "fatG": 10.4,
+      "carbG": 3.5,
+      "saltG": 1.6,
+      "fiberG": 0.1,
+      "ironMg": 0.5,
+      "calciumMg": 9
+    },
+    "excluded": []
+  },
+  "review16:牛肉のプルコギ風": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 364,
+      "proteinG": 22.5,
+      "fatG": 29.8,
+      "carbG": 6.5,
+      "saltG": 2.2,
+      "fiberG": 0.1,
+      "ironMg": 2.9,
+      "calciumMg": 10
+    },
+    "excluded": [
+      "コチュジャン(food)"
+    ]
+  },
+  "review16:鶏もも肉のガーリックハーブ焼き": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 371,
+      "proteinG": 25.2,
+      "fatG": 30.4,
+      "carbG": 1.2,
+      "saltG": 1.8,
+      "fiberG": 0.2,
+      "ironMg": 1.3,
+      "calciumMg": 16
+    },
+    "excluded": []
+  },
+  "review16:えびのガーリックオイル炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 193,
+      "proteinG": 19.8,
+      "fatG": 12.6,
+      "carbG": 1.5,
+      "saltG": 1,
+      "fiberG": 0.2,
+      "ironMg": 1.4,
+      "calciumMg": 69
+    },
+    "excluded": [
+      "赤唐辛子(小口切り)(amount)"
+    ]
+  },
+  "review16:豚肉の甜麺醤炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 381,
+      "proteinG": 25.6,
+      "fatG": 28,
+      "carbG": 6.2,
+      "saltG": 1.5,
+      "fiberG": 0.5,
+      "ironMg": 0.7,
+      "calciumMg": 12
+    },
+    "excluded": []
+  },
+  "review16:鶏むね肉のレモンペッパー炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 223,
+      "proteinG": 26.7,
+      "fatG": 13.4,
+      "carbG": 1.1,
+      "saltG": 1.6,
+      "fiberG": 0,
+      "ironMg": 0.5,
+      "calciumMg": 8
+    },
+    "excluded": []
+  },
+  "review16:鮭の西京みそ漬け": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 185,
+      "proteinG": 20.5,
+      "fatG": 4.1,
+      "carbG": 14.6,
+      "saltG": 1.8,
+      "fiberG": 1.5,
+      "ironMg": 1.3,
+      "calciumMg": 33
+    },
+    "excluded": [
+      "サラダ油(amount)"
+    ]
+  },
+  "review16:さわらの西京焼き": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 217,
+      "proteinG": 18.8,
+      "fatG": 8.6,
+      "carbG": 15.3,
+      "saltG": 1.8,
+      "fiberG": 1.5,
+      "ironMg": 1.6,
+      "calciumMg": 32
+    },
+    "excluded": []
   }
 }
