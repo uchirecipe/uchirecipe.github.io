@@ -12,7 +12,9 @@ export const NUTRIENT_SORT_OPTIONS = ['kcal', 'protein', 'salt', 'fat', 'carb'] 
 export type NutrientSortOption = (typeof NUTRIENT_SORT_OPTIONS)[number]
 
 /** レシピ一覧の並べ替えオプション（kcal/protein/salt/fat/carb=栄養並び替え。2026-07-13 Fable設計、
- * 2026-07-16 便Tで塩分・脂質・糖質を追加。theme=テーマごと（2026-07-17オーナー指示で追加）） */
+ * 2026-07-16 便Tで塩分・脂質・糖質を追加。theme=基本レシピ順（2026-07-17オーナー指示で追加、
+ * 2026-07-20 便AMで「基本レシピ→自作」の2区分に単純化しラベルも改称。識別子theme自体は
+ * sessionStorage保存値の互換のため据え置き）） */
 export type RecipeSortOption =
   | 'updated'
   | 'pantryMatch'
@@ -36,8 +38,10 @@ export type SortDirection = 'asc' | 'desc'
  * 栄養並び替えの既定は「たんぱく質だけ多い方から（高たんぱく志向）・それ以外（カロリー・塩分・脂質・糖質）は
  * 少ない方から（ヘルシー志向）」（2026-07-13にカロリーで導入した方針を2026-07-16に塩分・脂質・糖質にも適用。
  * どれも昇順/降順トグルで反転できる）。
- * テーマごと（theme）の既定も昇順で、①基本レシピ→②各テーマ（五十音順）→③自作レシピ、の順に
- * 読める並びを基準にする（2026-07-17オーナー指示。降順トグルで全体反転できる）
+ * 基本レシピ順（theme）の既定も昇順で、①基本レシピ（公式全部）→②自作レシピ、の順に
+ * 読める並びを基準にする（2026-07-17オーナー指示で新設時は①基本レシピ→②各テーマ（五十音順）→
+ * ③自作レシピの3区分だったが、2026-07-20 便AMで第◯弾/テーマの括りを廃止し2区分に単純化。
+ * 降順トグルで全体反転できる）
  */
 export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   updated: 'desc',
@@ -112,14 +116,12 @@ function pantryMatchCount(recipe: Recipe, normalizedPantryNames: string[]): numb
 }
 
 /**
- * 「テーマごと」並び替えの基本区分（2026-07-17オーナー指示）。
- * 配布テーマ取り込み品も isStarter=true のため、判定は sourceSetName の有無を先に見る。
- * 0=基本レシピ（sourceSetNameなし・isStarter）／1=テーマ（sourceSetNameあり）／2=自作レシピ
+ * 「基本レシピ順」並び替えの基本区分（2026-07-17オーナー指示で新設、2026-07-20 便AMで単純化）。
+ * 第◯弾/テーマの括りは表示上廃止したため、配布テーマ取り込み品（sourceSetNameあり）も
+ * 公式(isStarter)としてひとまとめにする。0=基本レシピ（isStarter。テーマ取り込み品含む）／1=自作レシピ
  */
 function themeGroupRank(recipe: Recipe): number {
-  if (recipe.sourceSetName) return 1
-  if (recipe.isStarter) return 0
-  return 2
+  return recipe.isStarter ? 0 : 1
 }
 
 /** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数・テーマ区分のいずれか） */
@@ -141,17 +143,11 @@ function compareAscending(
         pantryMatchCount(a.recipe, normalizedPantryNames) -
         pantryMatchCount(b.recipe, normalizedPantryNames)
       )
-    case 'theme': {
-      // ①基本レシピ→②各テーマ（sourceSetNameの五十音順）→③自作レシピ。
-      // 同テーマ内・同区分内はここでは0を返し、sortResults側の既定タイブレーク
-      // （更新順=新しい順）に委ねる（「同テーマ内は既定順=更新順」の要件どおり）
-      const rankDiff = themeGroupRank(a.recipe) - themeGroupRank(b.recipe)
-      if (rankDiff !== 0) return rankDiff
-      if (a.recipe.sourceSetName && b.recipe.sourceSetName) {
-        return collator.compare(toHiragana(a.recipe.sourceSetName), toHiragana(b.recipe.sourceSetName))
-      }
-      return 0
-    }
+    case 'theme':
+      // ①基本レシピ（公式全部）→②自作レシピの2区分（2026-07-20 便AMで第◯弾/テーマの区分を
+      // 廃止し単純化。公式内の順序はここでは0を返し、sortResults側の既定タイブレーク
+      // （更新順=新しい順）に委ねる＝「公式内は既定順」の要件どおり）
+      return themeGroupRank(a.recipe) - themeGroupRank(b.recipe)
   }
 }
 

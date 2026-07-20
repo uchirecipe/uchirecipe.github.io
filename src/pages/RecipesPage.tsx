@@ -74,7 +74,7 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'pantryMatch', label: ja.search.sortPantryMatch },
   { value: 'kana', label: ja.search.sortKana },
   { value: 'cooked', label: ja.search.sortCooked },
-  // テーマごと(2026-07-17オーナー指示で追加)
+  // 基本レシピ順(2026-07-17オーナー指示で「テーマごと」として追加。2026-07-20 便AMで改称・区分単純化)
   { value: 'theme', label: ja.search.sortTheme },
 ]
 
