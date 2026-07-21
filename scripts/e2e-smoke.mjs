@@ -251,6 +251,21 @@ const appRoot = path.join(__dirname, '..')
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:5173'
 
+// 事故防止ガード(2026-07-21): 環境変数名の誤り(E2E_BASE_URL等)でBASE_URL未指定のまま
+// デフォルトの5173(オーナーの開発サーバー・不可侵)へ向けて走る事故が実際に起きた。
+// 5173はvite devのためSW無し・/about/等のディレクトリURLがSPAシェルにフォールバックし、
+// SMK-19が偽陽性で落ちる(previewのdistと挙動が違う)。previewポートを明示しない実行は
+// 原則ミスなので、明示的な許可(ALLOW_DEV_SERVER=1)がない限り中断する。
+console.log(`e2e対象: ${BASE}`)
+if (/:5173(\/|$)/.test(BASE) && process.env.ALLOW_DEV_SERVER !== '1') {
+  console.error(
+    'BASE_URLが未指定またはポート5173(オーナーのdevサーバー)を指しています。' +
+      'preview(例: BASE_URL=http://localhost:4173)を指定してください。' +
+      '意図的にdevサーバーへ実行する場合のみ ALLOW_DEV_SERVER=1 を付けてください。',
+  )
+  process.exit(1)
+}
+
 const errors = []
 const results = []
 let currentCheck = ''

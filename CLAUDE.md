@@ -83,6 +83,7 @@
 
 ## 検証とコミット
 - 完了条件: `npx tsc --noEmit` エラーゼロ ＋ `npm run build` 成功 ＋ **`npm test`**(ロジック単体・栄養回帰・レシピlintの一括実行、2026-07-08新設)。UI に触れた変更は **`npm run test:e2e`**(恒久Playwrightスモーク、devサーバーかpreviewを起動して実行)も通す
+- **e2eの対象指定は環境変数 `BASE_URL`**(例: `BASE_URL=http://localhost:4173 node scripts/e2e-smoke.mjs`)。`E2E_BASE_URL`等の誤名は無視されデフォルト5173(オーナーdev・不可侵)に向かう事故が実際に起きた(2026-07-21司令部)。スクリプト側に5173ガード(ALLOW_DEV_SERVER=1で明示解除)と対象URL表示を追加済み。5173はvite devのためSW無し・静的ページのディレクトリURLがSPAシェルに化け、SMK-19が偽陽性で落ちる点にも注意
 - **バグを直すときは、再発防止ケースを`scripts/test-logic.mjs`に足してから直す**(詳細はdocs/10 3章)
 - コミットメッセージは日本語
 - **`main`へのpush = 本番公開**（GitHub Actionsが https://uchirecipe.com/ へ自動デプロイ）。動作検証が済み、実際にリリースしたい変更だけを`main`にマージ・pushする
