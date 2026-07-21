@@ -5876,12 +5876,36 @@ try {
         const uiContext = await uiBrowser.newContext()
         const uiPage = await uiContext.newPage()
 
-        // Worker応答のスタブ: 「url」クエリの中身で成功/no_recipe/fetch_failedを出し分ける
+        // 1x1の実在する有効なPNG(透過)。resizePhoto(createImageBitmap経由)が壊れずデコードできる
+        // 必要があるため、単なるダミーバイト列ではなく本物のPNGバイナリを使う
+        const DUMMY_PNG_BASE64 =
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+
+        // Worker応答のスタブ: 「url」クエリの中身で成功/no_recipe/fetch_failedを出し分ける。
+        // 画像プロキシ(/image?url=)へのリクエストも同じMOCK_ENDPOINT配下に来るためpathnameで分岐する
+        // (2026-07-21 URL取り込みでレシピ写真も一緒に取り込む対応。app側src/logic/urlImportImage.ts
+        // がWorker側 GET /image?url= を叩く設計をそのまま模す)
         await uiPage.route(
           (url) => url.href.startsWith(MOCK_ENDPOINT),
           (route) => {
             const requested = new URL(route.request().url())
             const target = requested.searchParams.get('url') ?? ''
+            if (requested.pathname.endsWith('/image')) {
+              // photo-markerを含むURLだけ画像を返す(それ以外はWorker側のinvalid_content_type相当=400)
+              if (!target.includes('photo-marker')) {
+                return route.fulfill({
+                  status: 400,
+                  contentType: 'application/json',
+                  body: JSON.stringify({ ok: false, error: 'invalid_content_type' }),
+                })
+              }
+              return route.fulfill({
+                status: 200,
+                contentType: 'image/png',
+                headers: { 'Cache-Control': 'public, max-age=86400' },
+                body: Buffer.from(DUMMY_PNG_BASE64, 'base64'),
+              })
+            }
             if (target.includes('no-recipe-marker')) {
               return route.fulfill({
                 status: 200,
@@ -5910,6 +5934,8 @@ try {
                   steps: ['鶏肉を切る', '煮込む'],
                   servings: 3,
                   cookMinutes: 25,
+                  // photo-markerを含むURLで取り込んだときだけ画像ありのレシピを返す
+                  ...(target.includes('photo-marker') ? { imageUrl: 'https://example.com/photo-marker.jpg' } : {}),
                   sourceUrl: target,
                 },
               }),
@@ -6009,6 +6035,31 @@ try {
           (await uiPage.textContent('body')).includes(
             '読み込めませんでした。時間をおいて試すか、貼り付けをお使いください',
           ),
+        )
+
+        // --- 写真の自動取り込み(2026-07-21): imageUrlがあるレシピを取り込むと、
+        // Worker側の画像プロキシ(/image?url=)経由で写真も自動セットされる。取得は非同期(ベストエフォート)
+        // なので、取り込み結果メッセージが出た後にプレビュー<img>が現れるまで少し待つ ---
+        currentCheck = 'URLIMPORT-05'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-recipe')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        check(
+          'URLIMPORT-05 レシピ本体の取り込み結果メッセージは写真を待たずに出る',
+          (await uiPage.textContent('body')).includes('材料2件・手順2件を読み込みました'),
+        )
+        await uiPage.waitForTimeout(1000)
+        check(
+          'URLIMPORT-05 写真も取り込みました、の追記メッセージが出る',
+          (await uiPage.textContent('body')).includes('写真も取り込みました'),
+        )
+        check(
+          'URLIMPORT-05 取り込んだ写真がフォームのプレビューに表示される(アイコンでなくimg)',
+          await uiPage.locator('img[alt="E2Eモック鍋"]').isVisible(),
         )
       } finally {
         await uiBrowser.close()

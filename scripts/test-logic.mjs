@@ -102,6 +102,7 @@ import {
   normalizeIngredients,
   normalizeInstructions,
 } from '../workers/recipe-import/src/normalize.ts'
+import { buildImageProxyUrl, isImageContentType } from '../src/logic/urlImportImage.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -3987,7 +3988,41 @@ eq('duration: undefined入力はundefined', parseIso8601DurationToMinutes(undefi
 eq('image: 文字列', extractImageUrl('https://example.com/a.jpg'), 'https://example.com/a.jpg')
 eq('image: 文字列配列は先頭', extractImageUrl(['https://example.com/a.jpg', 'https://example.com/b.jpg']), 'https://example.com/a.jpg')
 eq('image: {url}オブジェクト', extractImageUrl({ url: 'https://example.com/c.jpg' }), 'https://example.com/c.jpg')
+eq('image: {@id}オブジェクト(ImageObjectの@id形式)', extractImageUrl({ '@id': 'https://example.com/id.jpg' }), 'https://example.com/id.jpg')
+eq('image: {url}オブジェクトの配列', extractImageUrl([{ url: 'https://example.com/d.jpg' }]), 'https://example.com/d.jpg')
 eq('image: undefinedはundefined', extractImageUrl(undefined), undefined)
+// 2026-07-21 画像取り込み対応: 相対URLはbaseUrl(sourceUrl)を基準に絶対URL化する
+eq(
+  'image: 相対URL(ルート相対)をbaseUrlで絶対URL化',
+  extractImageUrl('/img/recipe/123.jpg', 'https://cookpad.example.com/recipes/1'),
+  'https://cookpad.example.com/img/recipe/123.jpg',
+)
+eq(
+  'image: 相対URL(パス相対)をbaseUrlで絶対URL化',
+  extractImageUrl('recipe123.jpg', 'https://example.com/recipes/'),
+  'https://example.com/recipes/recipe123.jpg',
+)
+eq(
+  'image: プロトコル相対URL(//)をbaseUrlのスキームで絶対URL化',
+  extractImageUrl('//cdn.example.com/a.jpg', 'https://example.com/recipes/1'),
+  'https://cdn.example.com/a.jpg',
+)
+eq(
+  'image: 既に絶対URLならbaseUrlと違うドメインでもそのまま',
+  extractImageUrl('https://cdn.other.com/a.jpg', 'https://example.com/recipes/1'),
+  'https://cdn.other.com/a.jpg',
+)
+eq(
+  'image: {url}オブジェクトの相対URLも絶対URL化される',
+  extractImageUrl({ url: '/img/e.jpg' }, 'https://example.com/recipes/1'),
+  'https://example.com/img/e.jpg',
+)
+eq('image: baseUrl未指定なら相対URLのまま返す(従来挙動を保つ)', extractImageUrl('/img/f.jpg'), '/img/f.jpg')
+eq(
+  'image: baseUrl自体が壊れていても元の文字列をそのまま返す',
+  extractImageUrl('/img/g.jpg', 'not-a-url'),
+  '/img/g.jpg',
+)
 
 // ---- splitIngredientAmount: name+amountの分離(unit分解はapp側splitQuantityに委ねる) ----
 eq('ingredient: 空白区切り「しょうゆ 大さじ2」', splitIngredientAmount('しょうゆ 大さじ2'), { name: 'しょうゆ', amount: '大さじ2' })
@@ -4275,6 +4310,35 @@ function ldJsonHtml(json) {
   const r = extractRecipeFromHtml(html, 'https://example.com/recipe/8')
   eq('extractRecipeFromHtml: cookTimeが無くてもtotalTimeから調理時間を拾う', r?.cookMinutes, 25)
 }
+
+{
+  // 2026-07-21 画像取り込み対応: imageがルート相対URLのサイト実測(サイトによってはimageに
+  // フルURLではなくパスのみを入れている)を想定し、sourceUrlを基準に絶対URL化されることを確認する
+  const html = ldJsonHtml({
+    '@context': 'https://schema.org',
+    '@type': 'Recipe',
+    name: '肉じゃが',
+    recipeIngredient: ['じゃがいも 3個'],
+    recipeInstructions: ['煮る'],
+    image: '/img/nikujaga.jpg',
+  })
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/9')
+  eq('extractRecipeFromHtml: 相対URLのimageはsourceUrlを基準に絶対URL化される', r?.imageUrl, 'https://example.com/img/nikujaga.jpg')
+}
+
+// ---- buildImageProxyUrl / isImageContentType(src/logic/urlImportImage.ts、写真自動取り込み2026-07-21) ----
+eq(
+  'buildImageProxyUrl: エンドポイント+/image?url=に画像URLをencodeURIComponentして付ける',
+  buildImageProxyUrl('https://recipe-import.example.workers.dev', 'https://cdn.example.com/a b.jpg'),
+  'https://recipe-import.example.workers.dev/image?url=https%3A%2F%2Fcdn.example.com%2Fa%20b.jpg',
+)
+eq('isImageContentType: image/jpegはtrue', isImageContentType('image/jpeg'), true)
+eq('isImageContentType: セミコロン以降のcharset付きでもtrue', isImageContentType('image/png; charset=binary'), true)
+eq('isImageContentType: 大文字混在でもtrue', isImageContentType('Image/WEBP'), true)
+eq('isImageContentType: text/htmlはfalse', isImageContentType('text/html'), false)
+eq('isImageContentType: nullはfalse', isImageContentType(null), false)
+eq('isImageContentType: undefinedはfalse', isImageContentType(undefined), false)
+eq('isImageContentType: 空文字はfalse', isImageContentType(''), false)
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

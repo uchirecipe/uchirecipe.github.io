@@ -270,13 +270,13 @@ export function parseIso8601DurationToMinutes(duration: unknown): number | undef
   return total > 0 ? total : undefined
 }
 
-/** image(文字列 / 文字列配列 / {url} / {url}の配列)から最初のURLを取り出す */
-export function extractImageUrl(image: unknown): string | undefined {
+/** image(文字列 / 文字列配列 / {url} / {url}の配列 / {@id})から最初のURLを取り出す(相対URLのまま) */
+function extractImageUrlRaw(image: unknown): string | undefined {
   if (!image) return undefined
   if (typeof image === 'string') return image || undefined
   if (Array.isArray(image)) {
     for (const item of image) {
-      const url = extractImageUrl(item)
+      const url = extractImageUrlRaw(item)
       if (url) return url
     }
     return undefined
@@ -287,6 +287,24 @@ export function extractImageUrl(image: unknown): string | undefined {
     if (typeof obj['@id'] === 'string') return obj['@id'] as string
   }
   return undefined
+}
+
+/**
+ * image(文字列 / 文字列配列 / {url} / {url}の配列 / {@id})から最初のURLを取り出す。
+ * サイトによってはimageが絶対URLではなくパス(相対URL)のことがある(例: "/img/recipe/123.jpg")ため、
+ * baseUrl(=そのページのsourceUrl)が渡された場合はそれを基準に絶対URL化する
+ * (Worker(index.ts)・app側の画像プロキシfetchのどちらも絶対URLを前提にしているため必須)。
+ * 絶対URL化に失敗した場合(baseUrl自体が壊れている等)は元の文字列をそのまま返す。
+ */
+export function extractImageUrl(image: unknown, baseUrl?: string): string | undefined {
+  const raw = extractImageUrlRaw(image)
+  if (!raw) return undefined
+  if (!baseUrl) return raw
+  try {
+    return new URL(raw, baseUrl).toString()
+  } catch {
+    return raw
+  }
 }
 
 const BULLET_PREFIX = /^[・･\-–—*●○◎▪•‣＊※◇☆★\s　]+/
@@ -471,7 +489,7 @@ export function extractRecipeFromHtml(html: string, sourceUrl: string): Normaliz
   // (再監査実測: NHK・キッコーマン・味の素パーク・ハウス食品・楽天レシピ・つくおき等7サイトでcookTimeは
   // 空だがtotalTimeは入っており、cookTimeだけを見ていたこれまでの実装では丸ごと欠落していた)。
   const cookMinutes = parseIso8601DurationToMinutes(best.cookTime) ?? parseIso8601DurationToMinutes(best.totalTime)
-  const imageUrl = extractImageUrl(best.image)
+  const imageUrl = extractImageUrl(best.image, sourceUrl)
 
   return {
     title,

@@ -28,7 +28,8 @@ import { useSettings } from '../db/settings'
 import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText, splitQuantity, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
-import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError } from '../logic/urlImport'
+import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
+import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeDigits } from '../logic/amount'
@@ -446,6 +447,28 @@ function RecipeFormInner() {
   }
 
   /**
+   * URL取り込みで見つかった写真(imageUrl)をベストエフォートで取得してフォームへセットする
+   * (2026-07-21 オーナー要望・Fable設計)。Worker側の画像プロキシ(/image?url=)経由で取得し、
+   * 既存のresizePhoto(写真選択時と同じ圧縮パラメータ)にかけてからセットする。
+   * 失敗してもレシピ本体の取り込みは成功のままにするため、ここでの失敗はエラー表示せず静かに諦める
+   * (写真だけ無し=従来どおりアイコン表示)。applyUrlImportからはawaitせずに呼ぶ想定
+   * (取り込み結果メッセージは先に確定させ、写真は後から差し込まれてもよい)。
+   */
+  const importPhotoFromUrl = async (imageUrl: string) => {
+    const blob = await fetchImportedPhoto(IMPORT_ENDPOINT, imageUrl)
+    if (!blob) return
+    try {
+      setPhoto(await resizePhoto(blob))
+      // 写真を新しく取得できたら、それまでアイコン優先だったとしても取り込んだ写真を見せる
+      // (onPhotoSelectedと同じ扱い。2026-07-16 Fable裁定docs/30 裁定2の状態対応を踏襲)
+      setShowIconInsteadOfPhoto(false)
+      setUrlImportMessage((prev) => (prev ? `${prev} ${ja.urlImport.photoImported}` : prev))
+    } catch {
+      // resizePhotoの失敗(壊れた画像等)もベストエフォートなので何もしない
+    }
+  }
+
+  /**
    * URLを取り込んでフォームに流し込む（結果はユーザーが修正できる。applyPasteと同じ流し込み先を再利用する）。
    * ingredients は Worker側で name+amount(単位くっつき)までしか分けていないため、ここで既存の
    * splitQuantity(貼り付け解析と同じ資産)を使ってamount/unitに分解する
@@ -486,6 +509,11 @@ function RecipeFormInner() {
           .replace('{i}', String(result.ingredients.length))
           .replace('{s}', String(result.steps.length)),
       )
+      // 写真はベストエフォート(Worker経由の取得・変換は非同期で後から差し込まれてもよい)。
+      // await しない: 材料・手順の取り込み結果メッセージをここで即座に確定させるため
+      if (result.imageUrl) {
+        void importPhotoFromUrl(result.imageUrl)
+      }
     } catch (e) {
       const reason = e instanceof UrlImportError ? e.reason : 'fetch_failed'
       setUrlImportMessage(

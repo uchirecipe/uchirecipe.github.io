@@ -1,9 +1,12 @@
 /**
  * うちレシピ「URLから取り込む」機能のCloudflare Worker。
  * GET /?url=<encoded> → 対象URLのHTMLを取得 → schema.org/Recipe(JSON-LD)を抽出 → 正規化JSONを返す。
+ * GET /image?url=<encoded> → 対象URLの画像をそのまま中継する(ブラウザから外部画像を直接fetchすると
+ * CORSで失敗するサイトが多いためのプロキシ。2026-07-21追加)。
  *
  * プライバシー方針: 取り込んだURLはログに一切残さない(console.log等は使わない。プラポリ整合)。
- * SSRF対策: http(s)以外のスキーム・localhost・プライベートIP帯へのアクセスは拒否する。
+ * SSRF対策: http(s)以外のスキーム・localhost・プライベートIP帯へのアクセスは拒否する(validateTargetUrl
+ * に共通化し、レシピ取り込み・画像プロキシの両ルートで共有する)。
  */
 import { extractRecipeFromHtml } from './normalize'
 
@@ -11,6 +14,8 @@ import { extractRecipeFromHtml } from './normalize'
 const CHROME_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 const FETCH_TIMEOUT_MS = 8000
+// 画像プロキシのサイズ上限(3MB)。Content-Length事前判定とストリーム打ち切りの両方で強制する
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024
 
 // 開発オリジン(Vite dev既定5173・preview既定4173等)は localhost の任意ポートを許可する。
 // 本番オリジンはうちレシピの固定ドメインのみ(CLAUDE.mdの取り決め: オリジン変更禁止)
@@ -54,6 +59,113 @@ function validateTargetUrl(raw: string): URL | null {
   return url
 }
 
+/** GET /?url=<encoded>: 対象URLのHTMLを取得してschema.org/Recipeを抽出する(既存挙動) */
+async function handleRecipeImport(requestUrl: URL, headers: Record<string, string>): Promise<Response> {
+  const target = requestUrl.searchParams.get('url')
+  if (!target) return jsonResponse({ ok: false, error: 'invalid_url' }, 400, headers)
+
+  const validated = validateTargetUrl(target)
+  if (!validated) return jsonResponse({ ok: false, error: 'invalid_url' }, 400, headers)
+
+  let html: string
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    let res: Response
+    try {
+      res = await fetch(validated.toString(), {
+        headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'ja' },
+        redirect: 'follow',
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timeoutId)
+    }
+    if (!res.ok) return jsonResponse({ ok: false, error: 'fetch_failed' }, 200, headers)
+    html = await res.text()
+  } catch {
+    return jsonResponse({ ok: false, error: 'fetch_failed' }, 200, headers)
+  }
+
+  const recipe = extractRecipeFromHtml(html, validated.toString())
+  if (!recipe) return jsonResponse({ ok: false, error: 'no_recipe' }, 200, headers)
+  return jsonResponse({ ok: true, recipe }, 200, headers)
+}
+
+/**
+ * GET /image?url=<encoded>: 対象URLの画像をそのまま中継する。
+ * - Content-Typeがimage/*でなければ400
+ * - 3MB超は拒否する(Content-Length事前判定 + 実際の受信バイト数によるストリーム打ち切りの両方)
+ * - 成功時はContent-Typeを透過し、CORSは既存と同じ許可オリジン・Cache-Control: public, max-age=86400を付ける
+ */
+async function handleImageProxy(requestUrl: URL, headers: Record<string, string>): Promise<Response> {
+  const target = requestUrl.searchParams.get('url')
+  if (!target) return jsonResponse({ ok: false, error: 'invalid_url' }, 400, headers)
+
+  const validated = validateTargetUrl(target)
+  if (!validated) return jsonResponse({ ok: false, error: 'invalid_url' }, 400, headers)
+
+  let res: Response
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    try {
+      res = await fetch(validated.toString(), {
+        headers: { 'User-Agent': CHROME_UA },
+        redirect: 'follow',
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  } catch {
+    return jsonResponse({ ok: false, error: 'fetch_failed' }, 502, headers)
+  }
+  if (!res.ok || !res.body) return jsonResponse({ ok: false, error: 'fetch_failed' }, 502, headers)
+
+  const contentType = res.headers.get('Content-Type') ?? ''
+  if (!contentType.toLowerCase().startsWith('image/')) {
+    return jsonResponse({ ok: false, error: 'invalid_content_type' }, 400, headers)
+  }
+
+  const contentLength = res.headers.get('Content-Length')
+  if (contentLength && Number(contentLength) > MAX_IMAGE_BYTES) {
+    return jsonResponse({ ok: false, error: 'too_large' }, 413, headers)
+  }
+
+  // Content-Lengthが無い/実態と違う場合に備え、受信しながら実バイト数を数えて上限超で打ち切る
+  let received = 0
+  const upstreamReader = res.body.getReader()
+  const boundedStream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await upstreamReader.read()
+      if (done) {
+        controller.close()
+        return
+      }
+      received += value.byteLength
+      if (received > MAX_IMAGE_BYTES) {
+        controller.error(new Error('image too large'))
+        await upstreamReader.cancel()
+        return
+      }
+      controller.enqueue(value)
+    },
+    cancel(reason) {
+      return upstreamReader.cancel(reason)
+    },
+  })
+
+  return new Response(boundedStream, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=86400',
+      ...headers,
+    },
+  })
+}
+
 export default {
   async fetch(request: Request): Promise<Response> {
     const origin = request.headers.get('Origin')
@@ -67,34 +179,9 @@ export default {
     }
 
     const requestUrl = new URL(request.url)
-    const target = requestUrl.searchParams.get('url')
-    if (!target) return jsonResponse({ ok: false, error: 'invalid_url' }, 400, headers)
-
-    const validated = validateTargetUrl(target)
-    if (!validated) return jsonResponse({ ok: false, error: 'invalid_url' }, 400, headers)
-
-    let html: string
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-      let res: Response
-      try {
-        res = await fetch(validated.toString(), {
-          headers: { 'User-Agent': CHROME_UA, 'Accept-Language': 'ja' },
-          redirect: 'follow',
-          signal: controller.signal,
-        })
-      } finally {
-        clearTimeout(timeoutId)
-      }
-      if (!res.ok) return jsonResponse({ ok: false, error: 'fetch_failed' }, 200, headers)
-      html = await res.text()
-    } catch {
-      return jsonResponse({ ok: false, error: 'fetch_failed' }, 200, headers)
+    if (requestUrl.pathname === '/image') {
+      return handleImageProxy(requestUrl, headers)
     }
-
-    const recipe = extractRecipeFromHtml(html, validated.toString())
-    if (!recipe) return jsonResponse({ ok: false, error: 'no_recipe' }, 200, headers)
-    return jsonResponse({ ok: true, recipe }, 200, headers)
+    return handleRecipeImport(requestUrl, headers)
   },
 }
