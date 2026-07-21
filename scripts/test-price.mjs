@@ -12,6 +12,9 @@
 //
 // 併せて、既存30件の目安価格が変更されていないことも確認する
 // (E2E PRICE-01が「玉ねぎ1個50円」に依存。データ整備で既存行の値を書き換えないためのピン留め)。
+// 例外: しょうゆ・みそは2026-07-21の調味料既定価格改定(docs/49_調味料既定価格調査.md。
+// オーナー指摘「酒・塩・醤油の原価が高く感じる」への対応で実勢価格の中央値に更新)により
+// このピン留め値自体を新値に更新した(E2E PRICE-01は玉ねぎのみに依存するため無関係)。
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import { buildPriceIndex, matchPriceEntry } from '../src/logic/priceEstimate.ts'
 import { isZeroIngredient } from '../src/logic/nutrition.ts'
@@ -40,7 +43,7 @@ const ORIGINAL_30 = [
   ['豚こま切れ肉', 110, '100g'], ['牛こま切れ肉', 200, '100g'], ['合いびき肉', 130, '100g'],
   ['鮭', 120, '1切れ'], ['さば', 100, '1切れ'],
   ['卵', 25, '1個'], ['牛乳', 200, '1L'], ['バター', 250, '200g'], ['豆腐', 40, '1丁'],
-  ['米', 60, '1合'], ['しょうゆ', 20, '大さじ1'], ['みそ', 15, '大さじ1'],
+  ['米', 60, '1合'], ['しょうゆ', 400, '1L'], ['みそ', 11, '大さじ1'],
 ]
 check(PRICE_DEFAULTS.length >= ORIGINAL_30.length, `PRICE_DEFAULTSが既存30件を下回っている: ${PRICE_DEFAULTS.length}件`)
 const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
