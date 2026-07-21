@@ -1,5 +1,5 @@
 import type { Ingredient } from '../db/types'
-import { normalizeDigits } from './amount'
+import { normalizeDigits, resolveCalcAmount } from './amount'
 import { toHiragana } from './kana'
 
 /**
@@ -234,8 +234,12 @@ export function estimateIngredientYen(
   const entry = matchPriceEntry(ingredient.name, index)
   if (!entry) return undefined
   const { qty: baseQty, baseUnit } = parseUnitQuantity(entry.unit)
-  const ingUnit = (ingredient.unit ?? '').trim()
-  const amountNum = parseNumericAmount(ingredient.amount ?? '')
+  // 「大2」「小1/2」(大さじ/小さじの略記)・「ひとかけ」等の和語の個数詞(単位欄が空の時のみ該当)は、
+  // resolveCalcAmountが展開した単位(大さじ/小さじ/かけ 等)をingUnitとして使う(2026-07-21分量表記拡充)。
+  // 該当しなければ従来どおりingredient.unitそのまま
+  const resolved = resolveCalcAmount(ingredient.amount ?? '', ingredient.unit)
+  const ingUnit = resolved ? resolved.unit : (ingredient.unit ?? '').trim()
+  const amountNum = resolved ? resolved.value : parseNumericAmount(ingredient.amount ?? '')
   const source: PriceSource = entry.isDefault ? 'default' : 'user'
 
   if (amountNum != null && amountNum > 0 && ingUnit && baseUnit) {

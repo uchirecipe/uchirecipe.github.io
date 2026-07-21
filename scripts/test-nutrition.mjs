@@ -110,12 +110,18 @@ const expectMatches = [
   // 2026-07-21 オーナー実機報告「URL取り込みレシピの対象外13件」調査で対応。docs/47参照
   ['タコ（茹で）', 'たこ'], ['たこ', 'たこ'],
   ['とうもろこし', 'とうもろこし'], ['コーン缶', 'コーン缶'], // 生ととうもろこしと缶詰は別食品のまま
-  ['赤パプリカ', '赤パプリカ'], ['パプリカ', '赤パプリカ'], ['パプリカパウダー', 'パプリカ(粉)'], ['パプリカ粉', 'パプリカ(粉)'],
+  ['赤パプリカ', '赤パプリカ'], ['パプリカパウダー', 'パプリカ(粉)'], ['パプリカ粉', 'パプリカ(粉)'],
   ['ターメリック', 'カレー粉'], ['カレーパウダー', 'カレー粉'], ['カレー粉', 'カレー粉'],
   ['黒胡椒', '黒こしょう'], ['黒こしょう', '黒こしょう'], ['粗びき黒こしょう', '黒こしょう'], ['ブラックペッパー', '黒こしょう'],
   ['こしょう', 'こしょう'], // 銘柄無指定は引き続き混合こしょう(17065)
   ['オイスターソース', 'オイスターソース'], ['醤油', 'しょうゆ'], ['塩', '塩'], ['アサリ', 'あさり'],
   ['グラノーラ', 'グラノーラ'], ['コチュジャン', 'コチュジャン'],
+  // 2026-07-21 分量表記拡充: 無印「パプリカ」はスパイス(17079)優先に変更(オーナー実機のURL取り込み
+  // レシピで「パプリカ(小さじ1)」のようにスパイス文脈で無印表記されるケースを確認したため。
+  // 野菜として使う場合は「赤パプリカ」等、色を明記した表記で照合する(scripts/nutrition-foods.mjs参照)
+  ['パプリカ', 'パプリカ(粉)'],
+  // あさり水煮缶(10283)を生あさり(10281)とは別食品として追加(廃棄率0%・むき身のみ)
+  ['あさり水煮缶', 'あさり水煮缶'], ['あさり缶', 'あさり水煮缶'], ['アサリ缶詰', 'あさり水煮缶'],
 ]
 for (const [input, expected] of expectMatches) {
   const hit = matchNutritionFood(input)
@@ -146,6 +152,124 @@ for (const [name, amount, unit] of assumedCases) {
   )
 }
 console.log(`仮定計算(少々/適量)の再発防止: ${assumedCases.length}件`)
+
+// ---------- 1.6. 分量表記拡充(2026-07-21・オーナー実機報告「URL取り込みレシピの対象外10件のうち
+// 8件は大さじ/小さじの略記(大2/小1)だった」への対応)。src/logic/amount.tsのresolveCalcAmount
+// (parseAbbreviatedSpoonAmount・parseCounterWordAmount)がnutrition.tsのcomputeIngredientから
+// 呼ばれるようになったことの回帰防止。表示(amount欄)は書き換えず、計算だけ展開すること ----------
+const abbreviatedCases = [
+  // オーナー実機報告の8件(大さじ/小さじの略記。単位欄は空のまま)
+  ['オリーブオイル', '大2', '', 24], // 大さじ2×0.8g/ml×15ml
+  ['コンソメ', '小2', '', 6], // 小さじ1=3g×2
+  ['パプリカ', '小1', '', 2], // スパイス(17079)の小さじ1=2g(パプリカ野菜側ではなくスパイス側に解決すること)
+  ['ターメリック', '小1', '', 2], // カレー粉の小さじ1=2g
+  ['塩', '小1/2', '', 3], // 小さじ1=6g×1/2
+  ['オイスターソース', '小1', '', 6],
+  ['醤油', '小1', '', 6], // gramsPerMl経由(1.2g/ml×5ml)
+]
+for (const [name, amount, unit, expectedGrams] of abbreviatedCases) {
+  const result = computeRecipeNutrition({ ingredients: [{ name, amount, unit }], servings: 1 })
+  const item = result.items[0]
+  check(
+    result.items.length === 1 && result.excluded.length === 0,
+    `略記解釈: "${name} ${amount}" は計算対象になるはずが対象外(${result.excluded.map((e) => e.reason).join(',')})になった`,
+  )
+  if (item) check(Math.abs(item.grams - expectedGrams) < 0.01, `略記解釈: "${name} ${amount}" のグラム数が期待外(実際:${item.grams} 期待:${expectedGrams})`)
+}
+// カレーパウダー「大1〜1.5」のような範囲は、既存の範囲分量の方針(人数換算・計算には使わず表示のみ。
+// parseRecipeText.tsのF3コメント参照)に合わせて計算対象外(amount)のまま据え置く(仕様どおり)
+{
+  const result = computeRecipeNutrition({ ingredients: [{ name: 'カレーパウダー', amount: '大1〜1.5', unit: '' }], servings: 1 })
+  check(
+    result.excluded.length === 1 && result.excluded[0].reason === 'amount',
+    `略記の範囲「大1〜1.5」は既存の範囲方針どおり計算対象外(amount)のはずが ${JSON.stringify(result.excluded)} / items=${result.items.length}`,
+  )
+}
+// 単位欄が入力済みなら略記として解釈しない(「大1個」のようなサイズ修飾語+助数詞との衝突防止。
+// docs/43「材料名に残る大きさ修飾語」参照)。単位欄が入っていると大さじ1として静かに解釈される
+// ことは無く(=誤って計算対象になることは無く)、従来どおり「大1」は数値化できずamount理由のまま
+{
+  const result = computeRecipeNutrition({ ingredients: [{ name: 'カレーパウダー', amount: '大1', unit: '個' }], servings: 1 })
+  check(
+    result.excluded.length === 1 && result.excluded[0].reason === 'amount',
+    `単位欄が入力済みの「大1」は略記解釈せず従来どおりamount理由で対象外のはずが ${JSON.stringify(result.excluded)} / items=${result.items.length}`,
+  )
+}
+console.log(`大さじ/小さじ略記の再発防止: ${abbreviatedCases.length + 2}件`)
+
+// ---------- 1.7. 和語の個数詞「ひとかけ」「一房」等(2026-07-21分量表記拡充)。
+// 既存のunitGrams(かけ/片/切れ/房/束/株/玉)を再利用するだけの表記解釈なので、新しい重量値は無い ----------
+const counterWordCases = [
+  ['しょうが', 'ひとかけ', '', 10],
+  ['にんにく', '一片', '', 6],
+  ['ブロッコリー', 'ひと房', '', 15],
+  ['ほうれん草', 'ひと束', '', 180],
+]
+for (const [name, amount, unit, expectedGrams] of counterWordCases) {
+  const result = computeRecipeNutrition({ ingredients: [{ name, amount, unit }], servings: 1 })
+  const item = result.items[0]
+  check(
+    result.items.length === 1 && result.excluded.length === 0,
+    `個数詞解釈: "${name} ${amount}" は計算対象になるはずが対象外(${result.excluded.map((e) => e.reason).join(',')})になった`,
+  )
+  if (item) check(Math.abs(item.grams - expectedGrams) < 0.01, `個数詞解釈: "${name} ${amount}" のグラム数が期待外(実際:${item.grams} 期待:${expectedGrams})`)
+}
+console.log(`和語の個数詞の再発防止: ${counterWordCases.length}件`)
+
+// ---------- 1.8. アサリの対象外原因の特定(2026-07-21分量表記拡充・オーナー実機報告)。
+// 辞書(あさり=10281)自体は名寄せ・g/ml換算とも問題なし。実機で対象外だった場合の主因は
+// 「1パック」等の包装単位(unitGrams未対応・意図的な保留=殻付き重量の商品差が大きく廃棄率換算も
+// 必要で二重の不確実性が生じるため。scripts/nutrition-foods.mjs参照)。缶詰(水煮)は廃棄率0%で
+// 別食品として追加済みなので計算できることを確認する ----------
+{
+  const okCases = [
+    ['あさり', '200', 'g'],
+    ['あさり(殻付き)', '200', 'g'],
+    ['あさり水煮缶', '1', '缶'],
+    ['あさり缶', '2', '缶'],
+  ]
+  for (const [name, amount, unit] of okCases) {
+    const result = computeRecipeNutrition({ ingredients: [{ name, amount, unit }], servings: 1 })
+    check(result.items.length === 1 && result.excluded.length === 0, `アサリ: "${name} ${amount}${unit}" は計算できるはずが対象外(${result.excluded.map((e) => e.reason).join(',')})になった`)
+  }
+  // 意図的な保留(バグではない)の確認: パック単位は今回も未対応のまま
+  const packResult = computeRecipeNutrition({ ingredients: [{ name: 'あさり', amount: '1', unit: 'パック' }], servings: 1 })
+  check(
+    packResult.excluded.length === 1 && packResult.excluded[0].reason === 'unit',
+    `アサリ「1パック」は意図的にunit理由で対象外のはずが ${JSON.stringify(packResult.excluded)} / items=${packResult.items.length}`,
+  )
+}
+console.log('アサリの原因特定・回帰防止: 5件')
+
+// ---------- 1.9. オーナー実機報告のスクショレシピ相当のフィクスチャ(2026-07-21分量表記拡充)。
+// 「対象外10件のうち8件」の実例(大2/小2/小1/小1/2/大1〜1.5)+cc確認(450cc)+意図的対象外(適量)を
+// 1レシピにまとめ、修正後は「黒胡椒(適量)」と「カレーパウダー(範囲、既存の範囲方針どおり)」の
+// 意図的なものだけが対象外に残ることを確認する ----------
+{
+  const screenshotRecipe = {
+    servings: 2,
+    ingredients: [
+      { name: 'オリーブオイル', amount: '大2', unit: '' },
+      { name: 'コンソメ', amount: '小2', unit: '' },
+      { name: 'パプリカ', amount: '小1', unit: '' },
+      { name: 'ターメリック', amount: '小1', unit: '' },
+      { name: '塩', amount: '小1/2', unit: '' },
+      { name: 'カレーパウダー', amount: '大1〜1.5', unit: '' }, // 範囲: 既存方針どおり対象外のまま
+      { name: 'オイスターソース', amount: '小1', unit: '' },
+      { name: '醤油', amount: '小1', unit: '' },
+      { name: '水', amount: '450', unit: 'cc' }, // ZERO_INGREDIENTとして計算自体をスキップ(対象外にも数えない)
+      { name: '黒胡椒', amount: '適量', unit: '' }, // 意図的対象外(仕様どおり。matchAssumedはこしょうの「適量」には対応しない)
+    ],
+  }
+  const result = computeRecipeNutrition(screenshotRecipe)
+  const excludedNames = result.excluded.map((e) => `${e.name}(${e.reason})`).sort()
+  check(
+    JSON.stringify(excludedNames) === JSON.stringify(['カレーパウダー(amount)', '黒胡椒(amount)']),
+    `スクショ相当フィクスチャ: 対象外は範囲(カレーパウダー)と適量(黒胡椒)の2件のみのはずが ${JSON.stringify(excludedNames)}`,
+  )
+  check(result.items.length === 7, `スクショ相当フィクスチャ: 計算対象になった材料が7件(水を除く9件-対象外2件)のはずが${result.items.length}件`)
+}
+console.log('スクショ相当フィクスチャ: 1件(9材料+水)')
 
 // ---------- 2. 回帰スモークセット（全カタログ103品=基本51+配布5パック52） ----------
 const recipes = [
