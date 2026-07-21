@@ -1,7 +1,7 @@
 import { toHiragana } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
-import { normalizeDigits } from './amount'
+import { normalizeDigits, resolveCalcAmount } from './amount'
 import { VOLUME_UNIT_FACTORS } from './priceEstimate'
 
 /**
@@ -301,6 +301,21 @@ function matchAssumed(ing: Ingredient): { gramsPerServing: number; note: string 
   return null
 }
 
+/**
+ * 分量欄と単位欄から、栄養計算用の(数値, 単位)を解決する。
+ * 「大2」「小1/2」(大さじ/小さじの略記)・「ひとかけ」「一房」等の和語の個数詞を優先的に解釈し
+ * (resolveCalcAmount、いずれも単位欄が空の時のみ該当)、どちらでもなければ通常どおり
+ * amount+ing.unitとして扱う。少々・適量・範囲(「2〜3」等)のように数値化できないものはnull
+ * （呼び出し側でmatchAssumedのフォールバックに回す）。
+ */
+function resolveIngredientAmount(ing: Ingredient): { value: number; unit: string } | null {
+  const resolved = resolveCalcAmount(ing.amount, ing.unit)
+  if (resolved) return resolved
+  const value = parseAmountNumber(ing.amount)
+  if (value === null) return null
+  return { value, unit: ing.unit }
+}
+
 /** 材料1行を計算する（対象外なら reason を返す） */
 function computeIngredient(
   ing: Ingredient,
@@ -311,8 +326,8 @@ function computeIngredient(
   if (ing.name.includes('塩') && /(塩もみ|板ずり)用/.test(ing.memo ?? '')) return { reason: 'prep' }
   const food = matchNutritionFood(ing.name)
   if (!food) return { reason: 'food' }
-  const value = parseAmountNumber(ing.amount)
-  if (value === null) {
+  const resolved = resolveIngredientAmount(ing)
+  if (resolved === null) {
     // 少々・適量は仮の目安量で計算に含める(2026-07-11オーナー要望。UIで仮定を必ず明示)
     const assumption = matchAssumed(ing)
     if (assumption) {
@@ -325,7 +340,7 @@ function computeIngredient(
     }
     return { reason: 'amount' }
   }
-  const grams = convertToGrams(value, ing.unit, food)
+  const grams = convertToGrams(resolved.value, resolved.unit, food)
   if (grams === null) return { reason: 'unit' }
   const nutrients = addScaled(emptyTotals(), food.per100g, grams)
   return { item: { name: ing.name, foodLabel: food.label, grams, nutrients } }
