@@ -80,10 +80,18 @@ const KNOWN_WORDS = [
   // 偶然隠していたが、孤児防止先読みの導入で露出するため語として固定する)
   'でこぼこ',
   '鶏がらスープの素',
+  // 2026-07-21 改行第4弾(便AZ): さわらの西京焼き手順3「軽くも|み込んで」の語中分断。
+  // BudouX が「もみ込んで」を「も|み込んで」と割り、それがユニット境界=行の切れ目に
+  // なったオーナー実機指摘(要件C)。こそげ取り・でこぼこと同じ既知語固定で1語に戻す
+  'もみ込んで',
 ]
 
+// BudouXの素分割に句読点・中黒・既知語の補正をかけた「細かい文節境界」列。wrapJaPhrases はこれを
+// canMergeSegs で結合して表示ユニットにするが、行組み(lineCompose)の借用パスは結合前のこの
+// 細分節を「良い切れ目までの借用」の単位として使う(2026-07-21 便AZ・要件F-2。exportを足すだけで
+// 結合ロジックは不変)。
 /** BudouXの素分割に、句読点・中黒・既知語の補正をかけたセグメント列を返す */
-function normalizedSegments(text: string): string[] {
+export function normalizedSegments(text: string): string[] {
   // 1) 境界オフセット集合を作る
   const raw = parser.parse(text)
   const boundaries = new Set<number>()

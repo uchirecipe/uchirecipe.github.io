@@ -145,7 +145,10 @@ function buildAtoms(
   return atoms
 }
 
-// 本文フォントで文字幅を測る canvas 測定器を作る(材料下線・ZWSP は幅に影響しない)
+// 本文フォントで文字幅を測る canvas 測定器を作る(材料下線・ZWSP は幅に影響しない)。
+// 要件E: canvas の measureText は letter-spacing を無視するため、computed style の
+// letterSpacing が normal 以外なら「measureText + letterSpacing × 文字数」で補正する。
+// これを塞がないと実測が過小になり、語中の緊急折返し(overflow-wrap:anywhere)を誘発しうる。
 let sharedCanvas: HTMLCanvasElement | null = null
 function makeMeasurer(el: HTMLElement): (t: string) => number {
   const cs = getComputedStyle(el)
@@ -155,7 +158,13 @@ function makeMeasurer(el: HTMLElement): (t: string) => number {
   if (!ctx) throw new Error('canvas 2d context 取得不可')
   ctx.font = font
   const zwsp = new RegExp(ZWSP, 'g')
-  return (t: string) => ctx.measureText(t.replace(zwsp, '')).width
+  const lsRaw = cs.letterSpacing
+  const ls = lsRaw && lsRaw !== 'normal' ? parseFloat(lsRaw) : 0
+  return (t: string) => {
+    const s = t.replace(zwsp, '')
+    const base = ctx.measureText(s).width
+    return ls ? base + ls * [...s].length : base
+  }
 }
 
 // 1行(LinePiece列)を描画ノードへ。連続するテキスト片は1本のランにまとめ、
