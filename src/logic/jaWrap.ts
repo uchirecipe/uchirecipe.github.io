@@ -34,6 +34,26 @@ const PUNCT_END = /[、。」』）)]$/
 const AUX_SHORT = /^(おく|いく|くる|みる|見る|よい|する|して|こと)[、。]?$/
 const MAX_UNIT = 12
 const BOND_MAX = 10
+// 読点(、)で終わる短い文節の「孤児化」対策(2026-07-21オーナー実機・改行第3弾)。
+// 実例: 「鍋にたっぷりの(7)|湯を(2)|沸かし、(4)」で「湯を」を前に吸収すると
+// 「鍋にたっぷりの湯を(9)|沸かし、(4)」になり、実機で「沸かし、」だけが次行へ
+// 送られて短い2行+右側の不自然な空白になる(こんにゃくの炒り煮)。
+//
+// 【結合上限を引き上げる案(読点終わりは12〜14字まで結合)は実機DOM検証で棄却】
+// ・手順本文の実コンテナ(番号バッジ+パディング)の実測行幅は320px端末で
+//   Chromium≈11.7字/行・WebKit≈12.6字/行しかない(「iPhoneSEは19〜20字/行」という
+//   従来の見積りは誤り)。13字以上のユニットが行頭に来ると overflow-wrap:anywhere の
+//   フォールバックが発動し「沸か|し、」と語中で強制分断される(Chromium 320px実測)。
+// ・12字上限に留めても、結合は折返し候補を減らす操作なので幅によっては悪化する
+//   (390px実測: 照り焼きsteps[2]で「サラダ油を中火で」+「熱し、」の結合により
+//   「フライパンに」が孤立し2行→3行に退行)。
+// そのため結合を増やす方向はやめ、逆に「結合の見送り」で直す: prev+seg を結合すると
+// 直後の読点終わりの短い文節が結合できず孤児になる場合、prev+seg の結合を見送って
+// seg+next の結合に回す(下記 wrapJaPhrases 内の先読み)。ユニットの偏り(9字+4字)を
+// 均す(7字+6字)だけで折返し候補は減らないため、語中分断のリスクを増やさない。
+// 390pxでは「鍋にたっぷりの湯を沸かし、」(13字)が1行に収まり、320pxでも
+// 「鍋にたっぷりの/湯を沸かし、」の均された2行になる。
+const TOUTEN_END = /、$/
 
 // BudouXが語中で切ることが実機で確認された語。境界がこの語の内部に落ちたら除去する
 // (「じゃが|いも」「だしの|素」「い|ちょう|切り」「ささが|き」「麺とゆで|汁」の実例・2026-07-12)
@@ -56,6 +76,10 @@ const KNOWN_WORDS = [
   'ゴムべら',
   'タイプ',
   'せん切り',
+  // 2026-07-21 改行第3弾: 「表面がで|こぼこ」「スープの|素」の誤分割(従来は前方結合が
+  // 偶然隠していたが、孤児防止先読みの導入で露出するため語として固定する)
+  'でこぼこ',
+  '鶏がらスープの素',
 ]
 
 /** BudouXの素分割に、句読点・中黒・既知語の補正をかけたセグメント列を返す */
@@ -112,66 +136,106 @@ function normalizedSegments(text: string): string[] {
   return out
 }
 
+/** 直前ユニットprevへセグメントsegを結合してよいかの判定(wrapJaPhrases本体と孤児防止先読みで共用) */
+function canMergeSegs(prev: string, seg: string): boolean {
+  if (/^[）)]/.test(seg)) {
+    // 閉じ括弧で始まるセグメントは行頭禁則(」や）を行頭に置かない)を優先し、
+    // 長さ上限に関わらず必ず前の単位へ密着させる(「ひいて|)中火で」の実例・2026-07-12)
+    return true
+  }
+  if (/^[（(]/.test(seg)) {
+    // 開き括弧で始まるセグメントは、閉じ括弧まで含む自己完結の短い括弧だけ前に密着
+    // (「出るくらい（約170度）の」等)。「（」単体や開きっぱなしの括弧は前に付けない:
+    // 直前が「と」等で終わると格助詞結合が誤発火し「少量足すこと（」のように
+    // 開き括弧が行末に残る実バグがあった(2026-07-12)。単体の「（」は次のセグメントが
+    // 2文字以下ルールで後ろに結合され「（空焚き防止）。」の形に自然にまとまる
+    return !PUNCT_END.test(prev) && /[）)]/.test(seg) && prev.length + seg.length <= MAX_UNIT
+  }
+  if (PUNCT_END.test(prev)) return false
+  const total = prev.length + seg.length
+  if (/^→/.test(seg)) {
+    // 矢印列は「→x」を項目単位にする(2026-07-12第3.3版)。最初の「→」だけは
+    // 前の項目に密着させ(「豚肉→根菜」)、2本目以降は項目の頭で折り返せるようにする
+    // (「（焼く→ふたで火を通す/→あんをからめる）」・ミートボールのオーナー訂正)
+    return !prev.includes('→') && total <= 16
+  }
+  if (
+    prev.includes('→') &&
+    !/[て、。]$/.test(prev) &&
+    !/[）)]/.test(prev.slice(prev.indexOf('→')))
+  ) {
+    // 項目の続き(「→ちぎった+こんにゃくの」)は言い切り(て/、/。/閉じ括弧)まで結合を続ける
+    // (「ちぎった|こんにゃく」「ご飯を|入れて」で切れる実バグへの対応・2026-07-12)。上限16文字
+    return total <= 16
+  }
+  if (TIME_END.test(prev) || prev.length <= 2 || AUX_SHORT.test(seg)) {
+    return total <= MAX_UNIT
+  }
+  if (BOND_END.test(prev)) {
+    // 時間トークンが絡む結合は12文字まで許す(「別に2分塩ゆでしておく」
+    // 「弱火で5分とろみを付ける」等、◯分の前後を切らない規則が優先)。
+    // 並列の「と」は名詞列挙の途中で切れると不自然なため11文字まで許す
+    // (「かつお節と|白いりごまを」の分断防止・2026-07-12オーナー指摘)
+    const hasTime = /\d+(分|時間|秒)/.test(prev) || /^\d+(分|時間|秒)/.test(seg)
+    const cap = hasTime ? MAX_UNIT : /と$/.test(prev) ? 11 : BOND_MAX
+    return total <= cap
+  }
+  if (
+    TOPIC_PARTICLE_END.test(prev) &&
+    seg.length === 1 &&
+    !PUNCT_END.test(seg) &&
+    seg !== '・'
+  ) {
+    // 「は/も」で終わる文節+直後が句読点でも「・」でもない1文字だけの孤立ユニットのときだけ
+    // 前に吸収する(「小分けにして冷凍も|可」の泣き別れ対策・2026-07-16改行監査A-3)。
+    // 「・」除外は食材列挙で次項目の先頭に付ける設計を壊さないため
+    return total <= MAX_UNIT
+  }
+  return false
+}
+
 /** 文節境界にゼロ幅スペースを挿入する(見た目・検索データは不変。表示専用) */
 export function wrapJaPhrases(text: string): string {
   if (!text) return text
   const units: string[] = []
-  for (const seg of normalizedSegments(text)) {
+  const segs = normalizedSegments(text)
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i]
     const prev = units[units.length - 1]
-    let canMerge = false
-    if (prev !== undefined && /^[）)]/.test(seg)) {
-      // 閉じ括弧で始まるセグメントは行頭禁則(」や）を行頭に置かない)を優先し、
-      // 長さ上限に関わらず必ず前の単位へ密着させる(「ひいて|)中火で」の実例・2026-07-12)
-      canMerge = true
-    } else if (prev !== undefined && /^[（(]/.test(seg)) {
-      // 開き括弧で始まるセグメントは、閉じ括弧まで含む自己完結の短い括弧だけ前に密着
-      // (「出るくらい（約170度）の」等)。「（」単体や開きっぱなしの括弧は前に付けない:
-      // 直前が「と」等で終わると格助詞結合が誤発火し「少量足すこと（」のように
-      // 開き括弧が行末に残る実バグがあった(2026-07-12)。単体の「（」は次のセグメントが
-      // 2文字以下ルールで後ろに結合され「（空焚き防止）。」の形に自然にまとまる
-      canMerge = !PUNCT_END.test(prev) && /[）)]/.test(seg) && prev.length + seg.length <= MAX_UNIT
-    } else if (prev !== undefined && !PUNCT_END.test(prev)) {
-      const total = prev.length + seg.length
-      if (/^→/.test(seg)) {
-        // 矢印列は「→x」を項目単位にする(2026-07-12第3.3版)。最初の「→」だけは
-        // 前の項目に密着させ(「豚肉→根菜」)、2本目以降は項目の頭で折り返せるようにする
-        // (「（焼く→ふたで火を通す/→あんをからめる）」・ミートボールのオーナー訂正)
-        canMerge = !prev.includes('→') && total <= 16
-      } else if (
-        prev.includes('→') &&
-        !/[て、。]$/.test(prev) &&
-        !/[）)]/.test(prev.slice(prev.indexOf('→')))
-      ) {
-        // 項目の続き(「→ちぎった+こんにゃくの」)は言い切り(て/、/。/閉じ括弧)まで結合を続ける
-        // (「ちぎった|こんにゃく」「ご飯を|入れて」で切れる実バグへの対応・2026-07-12)。上限16文字
-        canMerge = total <= 16
-      } else if (
-        TIME_END.test(prev) ||
-        prev.length <= 2 ||
-        AUX_SHORT.test(seg)
-      ) {
-        canMerge = total <= MAX_UNIT
-      } else if (BOND_END.test(prev)) {
-        // 時間トークンが絡む結合は12文字まで許す(「別に2分塩ゆでしておく」
-        // 「弱火で5分とろみを付ける」等、◯分の前後を切らない規則が優先)。
-        // 並列の「と」は名詞列挙の途中で切れると不自然なため11文字まで許す
-        // (「かつお節と|白いりごまを」の分断防止・2026-07-12オーナー指摘)
-        const hasTime = /\d+(分|時間|秒)/.test(prev) || /^\d+(分|時間|秒)/.test(seg)
-        const cap = hasTime ? MAX_UNIT : /と$/.test(prev) ? 11 : BOND_MAX
-        canMerge = total <= cap
-      } else if (
-        TOPIC_PARTICLE_END.test(prev) &&
-        seg.length === 1 &&
+    let canMerge = prev !== undefined && canMergeSegs(prev, seg)
+    // 孤児防止の先読み(2026-07-21・改行第3弾): この結合(prev+seg)を許すと、直後の
+    // 読点終わりの文節(next)が結合上限に届かず孤児ユニットになる場合は、prev+segの
+    // 結合を見送ってseg+nextの結合に回す(冒頭TOUTEN_ENDの解説参照)。発動条件:
+    //  ・nextが読点終わり / segが句読点終わりでない
+    //  ・prevが単独でも十分な長さ(4字以上。短いprevを孤立させて新しい孤児を作らない)
+    //  ・prevがと/や止まりでない(「肉と|玉ねぎを」「バットや|保存容器に」のような
+    //    名詞列挙の途中で切る退行を全カタログ比較で確認したため)
+    //  ・3文節の合計がMAX_UNIT超。合計12字以内の句は狭い画面でも1行に収まりうるので
+    //    現状維持が安全(実測: 照り焼きsteps[2]「サラダ油を|中火で|熱し、」計11字へ
+    //    先読みを効かせると、WebKit/390pxで「焼く。」が孤立して2行→3行に退行した)
+    //  ・結合するとnextが(prev+seg)へ届かず、見送ればseg+nextは確実に結合できる
+    //  ・見送った配置(prev / seg+next)の最長ユニットが、結合した配置(prev+seg / next)の
+    //    最長ユニットより厳密に短い=均しが確実に改善する場合だけ動かす
+    //    (「透明感が|出てしんなりすれば、」のように逆に偏りを悪化させる発動を防ぐ。
+    //    同長のときも動かさない=変更を最小に保つ)
+    if (canMerge && prev !== undefined) {
+      const next = segs[i + 1]
+      if (
+        next !== undefined &&
+        TOUTEN_END.test(next) &&
         !PUNCT_END.test(seg) &&
-        seg !== '・'
+        prev.length >= 4 &&
+        !/[とや]$/.test(prev) &&
+        prev.length + seg.length + next.length > MAX_UNIT &&
+        !canMergeSegs(prev + seg, next) &&
+        canMergeSegs(seg, next) &&
+        Math.max(prev.length, seg.length + next.length) <
+          Math.max(prev.length + seg.length, next.length)
       ) {
-        // 「は/も」で終わる文節+直後が句読点でも「・」でもない1文字だけの孤立ユニットのときだけ
-        // 前に吸収する(「小分けにして冷凍も|可」の泣き別れ対策・2026-07-16改行監査A-3)。
-        // 「・」除外は食材列挙で次項目の先頭に付ける設計を壊さないため
-        canMerge = total <= MAX_UNIT
+        canMerge = false
       }
     }
-    if (canMerge) {
+    if (canMerge && prev !== undefined) {
       units[units.length - 1] = prev + seg
     } else {
       units.push(seg)
