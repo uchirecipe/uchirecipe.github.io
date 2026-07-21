@@ -4755,6 +4755,214 @@ eq('isImageContentType: 空文字はfalse', isImageContentType(''), false)
   }
 }
 
+// ---------- lineCompose 改行第5弾(便BA): タイマー箱結合ルールの新エンジン適応(オーナー実機第2波9件) ----------
+// 生テキスト→ComposedStepText.buildAtoms(用語/タイマー分解 + 要件2スリム化 + 要件9〜接着)を再現して
+// composeLines へ通す。1文字=1幅の偽測定・幅16〜19字相当。hangingPunct は WebKit(true)/Chromium(false)。
+{
+  const { composeLines, lineToText } = await import('../src/logic/lineCompose.ts')
+  const { splitAroundTimeToken, ZWSP } = await import('../src/logic/jaWrap.ts')
+  const { findTimeTokens } = await import('../src/logic/time.ts')
+  const { splitByTerms } = await import('../src/logic/termSplit.ts')
+  const measure = (t) => [...t.replace(new RegExp(ZWSP, 'g'), '')].length
+  // ComposedStepText.buildAtoms のロジック再現(node は測らないので省く。text/width/id だけ作る)。
+  const buildAtoms = (text) => {
+    const atoms = []
+    let n = 0
+    const seen = new Set()
+    for (const seg of splitByTerms(text, seen)) {
+      if (seg.type === 'term' && seg.tappable) {
+        atoms.push({ kind: 'atom', id: `t${n++}`, text: seg.match.text })
+        continue
+      }
+      const plain = seg.type === 'text' ? seg.text : seg.match.text
+      const tokens = findTimeTokens(plain)
+      if (tokens.length === 0) {
+        if (plain) atoms.push({ kind: 'text', text: plain })
+        continue
+      }
+      let cursor = 0
+      tokens.forEach((token, i) => {
+        const before = plain.slice(cursor, token.start)
+        const afterEnd = i + 1 < tokens.length ? tokens[i + 1].start : plain.length
+        const after = plain.slice(token.start + token.text.length, afterEnd)
+        const tt = token.text.trim()
+        const { pre, bondPrev, bondNext, post } = splitAroundTimeToken(before, after, tt.length)
+        const preRaw = pre.replace(new RegExp(ZWSP, 'g'), '')
+        if (preRaw) atoms.push({ kind: 'text', text: preRaw })
+        // 要件2スリム化: bondNext の ほど/くらい/ぐらい/程度 接尾より後ろの吸収文節が4字以上・非句読点なら箱から出す
+        const suffix = bondNext.match(/^(ほど|くらい|ぐらい|程度)/)?.[0] ?? ''
+        const absorbed = bondNext.slice(suffix.length)
+        let bn = bondNext
+        let pulled = ''
+        if (absorbed && [...absorbed].length >= 4 && !/[、。]$/.test(absorbed)) {
+          bn = suffix
+          pulled = absorbed
+        }
+        atoms.push({ kind: 'atom', id: `m${n++}`, text: bondPrev + tt + bn })
+        const postRaw = pulled + post.replace(new RegExp(ZWSP, 'g'), '')
+        if (postRaw) atoms.push({ kind: 'text', text: postRaw })
+        cursor = afterEnd
+      })
+    }
+    // 要件9: 箱・「〜」・箱を1アトムに接着
+    const merged = []
+    for (let i = 0; i < atoms.length; i++) {
+      const a = atoms[i]
+      const b = atoms[i + 1]
+      const c = atoms[i + 2]
+      let left = null
+      let mid = ''
+      let right = null
+      if (a.kind === 'atom' && a.text.endsWith('〜') && b && b.kind === 'atom') {
+        left = a
+        right = b
+      } else if (a.kind === 'atom' && b && b.kind === 'text' && b.text === '〜' && c && c.kind === 'atom') {
+        left = a
+        mid = b.text
+        right = c
+      }
+      if (left && right) {
+        merged.push({ kind: 'atom', id: left.id, text: left.text + mid + right.text })
+        i += mid ? 2 : 1
+        continue
+      }
+      merged.push(a)
+    }
+    return merged.map((a) => (a.kind === 'atom' ? { ...a, width: measure(a.text) } : a))
+  }
+  const c = (text, w, hang = false) =>
+    composeLines(buildAtoms(text), w, measure, { eps: 0, hangingPunct: hang }).map(lineToText)
+
+  // 要件1: タイマー箱のtextが読点で終わると句境界(寄せ鍋「あく[10分]煮て、」で句を閉じる)。
+  const yosenabe = 'あくを取りながら10分煮て、煮えたものから食べる。'
+  for (const w of [17, 18, 19]) {
+    eq(`要件1 寄せ鍋 箱内読点で句を閉じる 幅${w}`, c(yosenabe, w), [
+      'あくを取りながら10分煮て、',
+      '煮えたものから食べる。',
+    ])
+  }
+
+  // 要件2: からあげ「くらい（約180度）の油で[1分] / 二度揚げするとカラッと仕上がる。」
+  // (箱直後の長い文節「二度揚げすると」を切り離す=「の / 油で」の泣き別れも[1分]直後の泣き別れも無い)。
+  const karaage =
+    '一度取り出して3分休ませ、菜箸を入れて大きな泡が勢いよく出るくらい（約180度）の油で1分二度揚げするとカラッと仕上がる。'
+  for (const w of [17, 18, 19]) {
+    const lines = c(karaage, w)
+    // 「の」で終わる行の次行が「油で…」で始まらない(の/油で泣き別れが無い)
+    for (let i = 0; i < lines.length - 1; i++) {
+      const bad = /の$/.test(lines[i]) && /^油で/.test(lines[i + 1])
+      eq(`要件2 からあげ の/油で泣き別れ無し 幅${w} 行${i}`, bad, false)
+    }
+    // 「油で1分」を含む行はその行の末尾がタイマー([1分])で、次行が「二度揚げ」から始まる
+    eq(`要件2 からあげ 油で[1分]で行を終える 幅${w}`, lines.some((l) => /油で1分$/.test(l)), true)
+  }
+  eq('要件2 からあげ 幅17 期待行', c(karaage, 17), [
+    '一度取り出して3分休ませ、',
+    '菜箸を入れて大きな泡が勢いよく出る',
+    'くらい（約180度）の油で1分',
+    '二度揚げするとカラッと仕上がる。',
+  ])
+
+  // 要件3: 大学芋の句「さつまいもを中まで火が通るまで揚げる。」。「。」止まりの短い最終行は切れ端(runt)と
+  // みなさずDPで均等割りしない。※この句のユニット構造は[さつまいもを中まで][火が通るまで揚げる。]で、
+  // 幅17の「火が通るまで揚げる。」10字は貪欲どおり(元々DP発動しない=元の形)。オーナー「元の形が良い」に整合。
+  const daigaku = 'さつまいもを中まで火が通るまで揚げる。'
+  eq('要件3 大学芋 幅17 hang=off(。止まり最終行を均等割りしない)', c(daigaku, 17, false), [
+    'さつまいもを中まで',
+    '火が通るまで揚げる。',
+  ])
+  // WebKit(hang=on 幅18): ぶら下げ補正で18字の句がまるごと1行(要件4と併せオーナー期待)
+  eq('要件3/4 大学芋 幅18 hang=on(句がまるごと1行)', c(daigaku, 18, true), ['さつまいもを中まで火が通るまで揚げる。'])
+  // 非退行: 「、」止まりの短い最終行は従来どおり切れ端扱い→DP発動(「加えて、」対策・要件Aの非退行)。
+  eq('要件3 非退行 「、」止まり切れ端はDP発動(洗ってない米) 幅17', c('洗っていない米を③のフライパンに加えて、3分ほど透き通るまで炒めます。', 17), [
+    '洗っていない米を',
+    '③のフライパンに加えて、',
+    '3分ほど透き通るまで炒めます。',
+  ])
+
+  // 要件4: 肉じゃが「じゃがいも・にんじんは小さめの一口大、」(19字)は WebKit のぶら下げ補正で1行に。
+  const nikujaga = 'じゃがいも・にんじんは小さめの一口大、玉ねぎは薄切りにする（小さく切ると火の通りが早い）。'
+  eq('要件4 肉じゃが 幅18 hang=on(句読点ぶら下げで19字句が1行)', c(nikujaga, 18, true)[0], 'じゃがいも・にんじんは小さめの一口大、')
+  // Chromium(hang=off)は従来判定=はみ出し防止側(19字は1行に入れず分割)
+  eq('要件4 肉じゃが 幅18 hang=off(はみ出し防止で1行にしない)', c(nikujaga, 18, false)[0] !== 'じゃがいも・にんじんは小さめの一口大、', true)
+
+  // 要件5: ひじき「浸してもどし、」が1語(もどしをKNOWN_WORDSに追加。語中分断しない)。
+  const hijiki = '乾燥ひじきはたっぷりの水に15分ほど浸してもどし、水気を切る。'
+  eq('要件5 ひじき 幅18(浸してもどし、が1行)', c(hijiki, 18), [
+    '乾燥ひじきはたっぷりの水に15分ほど',
+    '浸してもどし、水気を切る。',
+  ])
+  // 「浸しても」で終わる行(もどしの語中分断)が無い
+  for (const w of [16, 17, 18, 19])
+    eq(`要件5 ひじき 語中分断なし 幅${w}`, c(hijiki, w).some((l) => /浸しても$/.test(l)), false)
+
+  // 要件7: 水ようかん「沸騰後も1〜[2分]ほど / しっかり煮て寒天を溶かす。」(しっかり煮てが同じ行)。
+  const yokan = '混ぜながら煮立たせ、沸騰後も1〜2分ほどしっかり煮て寒天を溶かす。'
+  for (const w of [17, 18, 19]) {
+    const lines = c(yokan, w)
+    eq(`要件7 水ようかん しっかり煮てが同じ行 幅${w}`, lines.some((l) => /しっかり煮て/.test(l)), true)
+    // 「しっかり」で終わる行(しっかり|煮ての分断)が無い
+    eq(`要件7 水ようかん しっかり|煮て分断なし 幅${w}`, lines.some((l) => /しっかり$/.test(l)), false)
+  }
+  eq('要件7 水ようかん 幅17 期待行', c(yokan, 17), [
+    '混ぜながら煮立たせ、',
+    '沸騰後も1〜2分ほど',
+    'しっかり煮て寒天を溶かす。',
+  ])
+
+  // 要件9: 冷やしトマト 箱・「〜」・箱を1アトムに接着=「〜」の前後で割れない。
+  const tomato = 'トマトを漬け汁に入れ、冷蔵庫で30分〜1時間ほど漬ける。'
+  // buildAtoms が2つのタイマー箱を1アトムに接着している(タイマー箱の数=1)
+  const tomatoAtoms = buildAtoms(tomato)
+  eq('要件9 冷やしトマト 〜で2箱が1アトムに接着', tomatoAtoms.filter((a) => a.kind === 'atom').length, 1)
+  for (const w of [17, 18, 19]) {
+    const lines = c(tomato, w)
+    // 行末が「〜」で終わらない(〜の直後で割れない)
+    eq(`要件9 冷やしトマト 行末〜なし 幅${w}`, lines.some((l) => /〜$/.test(l)), false)
+    eq(`要件9 冷やしトマト 〜前後同じ行 幅${w}`, lines.some((l) => /30分〜1時間/.test(l)), true)
+  }
+
+  // ---- 要件8: オーナー承認済みレンダリング回帰集(本便の全変更後も全通過が統合条件) ----
+  // 基準1 こんにゃく(2分ほど下茹でしてが同じ行)
+  eq('回帰集 こんにゃく基準1 幅17', c('鍋にたっぷりの湯を沸かし、こんにゃくを2分ほど下茹でしてざるにあげ、水気を切る。', 17), [
+    '鍋にたっぷりの湯を沸かし、',
+    'こんにゃくを2分ほど下茹でして',
+    'ざるにあげ、水気を切る。',
+  ])
+  // しょうゆ・みりん・砂糖を加えて / 炒り煮にする。(炒り煮=用語箱)
+  eq('回帰集 しょうゆ・みりん・砂糖 幅17', c('しょうゆ・みりん・砂糖を加えて炒り煮にする。', 17), [
+    'しょうゆ・みりん・砂糖を加えて',
+    '炒り煮にする。',
+  ])
+  // タンドリー型: 320px相当(幅16)で「鶏肉を加え、/袋の上から手でよくもみ込んで/下味をなじませ、/冷蔵庫で…」
+  eq('回帰集 タンドリー型 幅16', c('鶏肉を加え、袋の上から手でよくもみ込んで下味をなじませ、冷蔵庫で30分ほど置く。', 16), [
+    '鶏肉を加え、',
+    '袋の上から手でよくもみ込んで',
+    '下味をなじませ、',
+    '冷蔵庫で30分ほど置く。',
+  ])
+  // 「もみ込んで」の語中分断が無い(便AZのKNOWN_WORD固定の非退行)
+  for (const w of [16, 17, 18, 19])
+    eq(`回帰集 タンドリー もみ込んで語中分断なし 幅${w}`, c('鶏肉を加え、袋の上から手でよくもみ込んで下味をなじませ、冷蔵庫で30分ほど置く。', w).some((l) => /も$/.test(l) || /^み込/.test(l)), false)
+  // 水切り型: 「…をのせて水切りする。」で行終止(切る系の言い切りが行末)
+  eq('回帰集 水切り型 幅17', c('木綿豆腐はキッチンペーパーに包み、重し(皿など)をのせて水切りする。', 17), [
+    '木綿豆腐はキッチンペーパーに包み、',
+    '重し(皿など)をのせて水切りする。',
+  ])
+
+  // 全ケース整合性: どの幅・hangでも行連結が原文(ZWSP除去)に一致(欠落・重複・並べ替え無し)
+  const strip = (s) => s.replace(new RegExp(ZWSP, 'g'), '')
+  for (const text of [yosenabe, karaage, daigaku, nikujaga, hijiki, yokan, tomato]) {
+    for (const w of [16, 17, 18, 19]) {
+      for (const hang of [false, true]) {
+        eq(`要件整合性 「${text.slice(0, 6)}…」幅${w}hang${hang ? 1 : 0}`, c(text, w, hang).join(''), strip(text))
+        // 行頭禁則: 「、」「。」「〜」で始まる行が無い
+        eq(`要件行頭禁則 「${text.slice(0, 6)}…」幅${w}hang${hang ? 1 : 0}`, c(text, w, hang).some((l) => /^[、。〜]/.test(l)), false)
+      }
+    }
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
