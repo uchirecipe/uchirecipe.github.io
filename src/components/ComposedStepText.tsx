@@ -130,19 +130,81 @@ function buildAtoms(
       const { pre, bondPrev, bondNext, post } = splitAroundTimeToken(before, after, tokenText.length)
       const preRaw = pre.replace(new RegExp(ZWSP, 'g'), '')
       if (preRaw) atoms.push({ kind: 'text', text: preRaw })
+      // 要件2(便BA): bondNext の「ほど/くらい/ぐらい/程度」接尾より後ろに吸収された先頭文節が
+      // 一定長(4字以上)で、かつ句読点で終わらないなら、箱から出して別の text アトムにする。
+      // splitAroundTimeToken は旧方式(ブラウザ任せ折返し)向けに「[◯分]しっかり」まで箱へ密着させるが、
+      // 新エンジンでは箱が肥大化して行に収まらず「しっかり|煮て」を割る(水ようかん)・「油で[1分]…」が
+      // 巨大ユニット化して泣き別れる。読点/句点止まり(「[10分]煮て、」=3字)は #1 と整合させ箱に残す。
+      // bondPrev 側は「[◯分]の直前修飾を密着させて泣き別れを防ぐ」ための存在なので、出すと逆効果
+      // (「の / 油で」を招く)。よって bondPrev は据え置き、bondNext だけをスリム化する(便BA判断)。
+      const suffix = bondNext.match(/^(ほど|くらい|ぐらい|程度)/)?.[0] ?? ''
+      const absorbed = bondNext.slice(suffix.length)
+      let boxBondNext = bondNext
+      let pulled = ''
+      if (absorbed && [...absorbed].length >= 4 && !/[、。]$/.test(absorbed)) {
+        boxBondNext = suffix
+        pulled = absorbed
+      }
       const id = `m${n++}`
       atoms.push({
         kind: 'atom',
         id,
-        text: bondPrev + tokenText + bondNext,
-        node: timerChip(id, tokenText, token.seconds, bondPrev, bondNext, ingredientNames, onStartTimer),
+        text: bondPrev + tokenText + boxBondNext,
+        node: timerChip(id, tokenText, token.seconds, bondPrev, boxBondNext, ingredientNames, onStartTimer),
       })
-      const postRaw = post.replace(new RegExp(ZWSP, 'g'), '')
+      const postRaw = pulled + post.replace(new RegExp(ZWSP, 'g'), '')
       if (postRaw) atoms.push({ kind: 'text', text: postRaw })
       cursor = afterEnd
     })
   }
-  return atoms
+  return mergeTildeBoxes(atoms)
+}
+
+/**
+ * 要件9(便BA): タイマー箱・「〜」・タイマー箱の並びを1つの分割不能アトムに接着する。
+ * 「冷蔵庫で[30分]〜[1時間]ほど漬ける。」の「〜」は範囲つなぎで、前後で行が割れてはいけない。
+ * composeLines 上は「〜」境界削除で既に1ユニットだが、renderLine が箱アトム間に改行機会(ZWSP+
+ * keep-all下のatomic inline境界)を作るため、実DOMでは箱の間で割れうる。両箱を1つの whitespace-nowrap
+ * ノードにまとめて改行機会をなくす(テキストの「〜」前後不可分ルールの箱版)。中黒「〜」が独立した
+ * text アトムとして挟まる形にも対応する。
+ */
+function mergeTildeBoxes(atoms: BuiltAtom[]): BuiltAtom[] {
+  const out: BuiltAtom[] = []
+  for (let i = 0; i < atoms.length; i++) {
+    const a = atoms[i]
+    // パターンA: [「〜」で終わる箱][箱] / パターンB: [箱][text「〜」][箱]
+    const b = atoms[i + 1]
+    const c = atoms[i + 2]
+    let left: BuiltAtom | null = null
+    let midText = ''
+    let right: BuiltAtom | null = null
+    if (a.kind === 'atom' && a.text.endsWith('〜') && b && b.kind === 'atom') {
+      left = a
+      right = b
+    } else if (a.kind === 'atom' && b && b.kind === 'text' && b.text === '〜' && c && c.kind === 'atom') {
+      left = a
+      midText = b.text
+      right = c
+    }
+    if (left && right) {
+      out.push({
+        kind: 'atom',
+        id: left.id,
+        text: left.text + midText + right.text,
+        node: (
+          <span className="whitespace-nowrap">
+            {left.node}
+            {midText}
+            {right.node}
+          </span>
+        ),
+      })
+      i += midText ? 2 : 1
+      continue
+    }
+    out.push(a)
+  }
+  return out
 }
 
 // 本文フォントで文字幅を測る canvas 測定器を作る(材料下線・ZWSP は幅に影響しない)。
@@ -274,6 +336,13 @@ export default function ComposedStepText({ text, ingredientNames, onOpenTerm, on
         return
       }
       const measure = makeMeasurer(el)
+      // 要件4: 行末の読点/句点を枠外にぶら下げる hanging-punctuation:allow-end に対応する
+      // ブラウザ(WebKit系)でだけ、行末の「、」「。」1字分をぶら下げ幅として収まり判定から差し引く。
+      // Chromium 等は非対応なので false=従来判定(句読点も1字として数える)に倒し、はみ出しを防ぐ。
+      const hangingPunct =
+        typeof CSS !== 'undefined' &&
+        typeof CSS.supports === 'function' &&
+        CSS.supports('hanging-punctuation', 'allow-end')
       const composeAtoms: ComposeAtom[] = builtAtoms.map((a) =>
         a.kind === 'text'
           ? { kind: 'text', text: a.text }
@@ -284,7 +353,7 @@ export default function ComposedStepText({ text, ingredientNames, onOpenTerm, on
               width: boxRefs.current.get(a.id)?.getBoundingClientRect().width ?? measure(a.text),
             },
       )
-      setLines(composeLines(composeAtoms, width, measure, { eps: 1 }))
+      setLines(composeLines(composeAtoms, width, measure, { eps: 1, hangingPunct }))
     } catch {
       setLines(null) // 測定不能・例外時は従来 ZWSP 描画のまま(フォールバック)
     }
