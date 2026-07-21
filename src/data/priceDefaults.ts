@@ -21,8 +21,21 @@ export interface PriceDefaultItem {
  * db/prices.tsのseedPriceDefaultsIfNeededが「まだ無い項目だけ」を1回だけ追加で投入する
  * (ユーザーが編集・追加した行や、意図的に削除した既定は一切触らない)。
  * 新しい項目をPRICE_DEFAULTSへ追加したときは、この番号をインクリメントすること。
+ *
+ * 【重要な既知の限界】このトップアップ機構は「名前がまだ無い項目の追加」専用であり、
+ * 既存項目の価格・単位の「更新」には使われない(db/prices.tsのmissingDefaultsは名前の
+ * 存在チェックのみ)。2026-07-21の調味料価格改定(3への昇格。docs/49参照)で酒・しょうゆ・塩
+ * 等の値を実勢価格ベースに引き下げたが、既にisDefault=trueでマスタ行を持つ既存ユーザーは
+ * この版番号を上げても「新値」には自動更新されない(名前は既に存在するため対象外になる)。
+ * 新規インストールのユーザーだけが新値の恩恵を受ける。既存ユーザーへの反映は
+ * 「食材と価格」画面の「デフォルトに戻す」操作（isDefault行のみ表示）でも、旧デフォルト値に
+ * 戻るだけで新値にはならない(defaultPricePerUnit/defaultUnitがシード時点の値のまま)。
+ * 既存ユーザー全員に新値を反映する専用の再シード処理は今回は実装していない
+ * (影響範囲が「価格マスタの数値」のみで実害が小さいことと、既存のトップアップ機構の
+ * 設計思想[ユーザーが編集した値を勝手に上書きしない]と、価格改定のたびに既存行を
+ * 強制上書きする挙動が両立しないため。必要になった場合は別途設計判断が要る)。
  */
-export const PRICE_DEFAULTS_VERSION = 2
+export const PRICE_DEFAULTS_VERSION = 3
 
 export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   // 野菜
@@ -58,11 +71,19 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '豆腐', pricePerUnit: 40, unit: '1丁' },
   // 主食・調味料
   { name: '米', pricePerUnit: 60, unit: '1合' },
-  { name: 'しょうゆ', pricePerUnit: 20, unit: '大さじ1' },
-  { name: 'みそ', pricePerUnit: 15, unit: '大さじ1' },
+  // 2026-07-21 調味料既定価格改定(docs/49): 販売単位(1L)の実勢中央値ベースに変更。
+  // 大さじ1相当は400×15/1000=6円(旧20円から実勢並みに引き下げ)。
+  { name: 'しょうゆ', pricePerUnit: 400, unit: '1L' },
+  // 2026-07-21 調味料既定価格改定(docs/49): 実勢kg中央値(617円/kg)×大さじ1=18g換算。
+  // 大さじ表記のまま単価のみ実勢に合わせた(体積↔質量は按分できない設計のため単位は維持。
+  // 詳細はdocs/49の「単位を維持した理由」参照)。
+  { name: 'みそ', pricePerUnit: 11, unit: '大さじ1' },
 
   // ============ 2026-07-13 データ整備: 基本51品+全パックの価格カバー100%対応 ============
-  // 既存30件(上記)は値を変更しない(E2E PRICE-01が「玉ねぎ1個50円」に依存)。
+  // 既存30件(上記)は原則値を変更しない(E2E PRICE-01が「玉ねぎ1個50円」に依存)。
+  // 例外: しょうゆ・みそのみ2026-07-21の調味料既定価格改定(docs/49)で単価を更新した
+  // (E2E PRICE-01は玉ねぎのみに依存するため無関係。scripts/test-price.mjsのORIGINAL_30も
+  // この2件だけ新値に更新済み)。
   // 「1回のレシピで使う現実的な量」を単位にする(既存のしょうゆ/みそ=大さじ1と同じ考え方。
   // 「少々」「お好みで」等の非数値な分量は按分できず、そのままの金額が1行分の目安になる
   // (logic/priceEstimate.tsのestimateIngredientYen参照)ため、小さめの実勢価格にしてある。
@@ -135,34 +156,44 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '粉寒天', pricePerUnit: 50, unit: '1袋' },
 
   // 調味料・香辛料・油
-  { name: 'サラダ油', pricePerUnit: 15, unit: '大さじ1' },
-  { name: 'ごま油', pricePerUnit: 25, unit: '大さじ1' },
-  { name: 'オリーブオイル', pricePerUnit: 30, unit: '大さじ1' },
+  // 2026-07-21 調味料既定価格改定(docs/49・オーナー指摘「酒・塩・醤油の原価が高く感じる」への
+  // 対応。実売価格調査に基づき販売単位ベースの中央値へ改定): 液体調味料(サラダ油〜めんつゆ・
+  // ポン酢・中濃ソース・マヨネーズ・ケチャップ)はレシピ側も大さじ/小さじ(体積)でしか使われて
+  // いないことを確認済みのため、登録単位を実際の販売単位「1L」に変更(体積↔体積の按分がそのまま
+  // 効くため換算精度を落とさず実現できる)。塩・砂糖・味噌・だしの素・鶏がらスープの素・コンソメは
+  // 販売単位が重量(kg/g)だが、レシピ側は例外なく大さじ/小さじ(体積)で使われており、原価計算
+  // (estimateIngredientYen)は質量↔質量・体積↔体積でしか按分できない設計(docs/48 §7-1で
+  // 対応不要と判断済みの既知の制限)。単位を「1kg」化すると次元が食い違い按分できず、1行あたり
+  // 「1kg分の価格がそのまま」表示される重大な回帰になるため、これらは単位は据え置き、
+  // 単価だけを実勢kg中央値×大さじ/小さじの実重量換算(docs/48で確定済みの換算値)で再計算した。
+  { name: 'サラダ油', pricePerUnit: 400, unit: '1L' },
+  { name: 'ごま油', pricePerUnit: 1200, unit: '1L' },
+  { name: 'オリーブオイル', pricePerUnit: 1400, unit: '1L' },
   { name: '揚げ油', pricePerUnit: 40, unit: '使用分' },
-  { name: '酒', pricePerUnit: 15, unit: '大さじ1' },
-  { name: 'みりん', pricePerUnit: 20, unit: '大さじ1' },
-  { name: '酢', pricePerUnit: 10, unit: '大さじ1' },
-  { name: '味噌', pricePerUnit: 15, unit: '大さじ1' },
+  { name: '酒', pricePerUnit: 260, unit: '1L' },
+  { name: 'みりん', pricePerUnit: 390, unit: '1L' },
+  { name: '酢', pricePerUnit: 340, unit: '1L' },
+  { name: '味噌', pricePerUnit: 11, unit: '大さじ1' },
   { name: 'だしの素', pricePerUnit: 10, unit: '小さじ1' },
   { name: 'だし汁', pricePerUnit: 20, unit: '200ml' },
   { name: '水またはだし汁', pricePerUnit: 15, unit: '200ml' },
   // 2026-07-15修正: 他の小さじ表記(だしの素・塩など)と揃え「小さじ1」に統一
   // (単位先行表記。数量＋単位選択UIの合成結果と完全一致させるため)
-  { name: 'コンソメ', pricePerUnit: 15, unit: '小さじ1' },
-  { name: '中濃ソース', pricePerUnit: 15, unit: '大さじ1' },
-  { name: 'ケチャップ', pricePerUnit: 15, unit: '大さじ1' },
-  { name: 'マヨネーズ', pricePerUnit: 15, unit: '大さじ1' },
-  { name: 'ポン酢', pricePerUnit: 15, unit: '大さじ1' },
-  { name: 'めんつゆ', pricePerUnit: 15, unit: '大さじ1' },
+  { name: 'コンソメ', pricePerUnit: 10, unit: '小さじ1' },
+  { name: '中濃ソース', pricePerUnit: 780, unit: '1L' },
+  { name: 'ケチャップ', pricePerUnit: 960, unit: '1L' },
+  { name: 'マヨネーズ', pricePerUnit: 680, unit: '1L' },
+  { name: 'ポン酢', pricePerUnit: 890, unit: '1L' },
+  { name: 'めんつゆ', pricePerUnit: 420, unit: '1L' },
   { name: 'カレールー', pricePerUnit: 200, unit: '1箱' },
   { name: 'シチュールー', pricePerUnit: 250, unit: '1箱' },
-  { name: '鶏がらスープの素', pricePerUnit: 10, unit: '小さじ1' },
+  { name: '鶏がらスープの素', pricePerUnit: 9, unit: '小さじ1' },
   { name: 'おろしにんにく', pricePerUnit: 15, unit: '少々' },
-  { name: '塩', pricePerUnit: 5, unit: '小さじ1' },
+  { name: '塩', pricePerUnit: 1, unit: '小さじ1' },
   { name: '塩こしょう', pricePerUnit: 5, unit: '少々' },
   { name: 'こしょう', pricePerUnit: 10, unit: '小さじ1' },
   { name: '七味唐辛子', pricePerUnit: 10, unit: '少々' },
-  { name: '砂糖', pricePerUnit: 5, unit: '大さじ1' },
+  { name: '砂糖', pricePerUnit: 2, unit: '大さじ1' },
   { name: '甜麺醤', pricePerUnit: 20, unit: '大さじ1' },
   { name: '豆板醤', pricePerUnit: 15, unit: '小さじ1' },
   { name: '粉山椒', pricePerUnit: 15, unit: '少々' },
