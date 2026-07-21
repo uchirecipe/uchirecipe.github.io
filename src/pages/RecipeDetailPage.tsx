@@ -145,7 +145,10 @@ export default function RecipeDetailPage() {
   // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
   // 既定は非表示のトグル表示に限定する。ページローカルな一時状態でよい(レシピを離れたらリセット)。
   // 2026-07-20 便AJ(docs/45)で「原価を見る」(閲覧=1食あたり按分)と「原価を編集」(単価編集)の
-  // 2モードに分離。互いに排他(同時に両方は出さない)なので3値のunion 1つで管理する
+  // 2モードに分離。3値のunion 1つで管理する。
+  // 2026-07-21 オーナー実機FB: 「見る」「編集」を横並びの独立トグルではなく、「見る」を
+  // 押すと「編集」ボタンが出現する階層構造に変更(hidden→view→editの一方向段階)。
+  // 「見る」ボタンは開閉の親トグルを兼ね、view/edit中に再度押すとhiddenへ両方まとめて解除する
   const [costMode, setCostMode] = useState<'hidden' | 'view' | 'edit'>('hidden')
 
   // 原価ビューの価格編集モーダル(2026-07-16 裁定1「原価ビュー」全面改修)。
@@ -593,14 +596,17 @@ export default function RecipeDetailPage() {
               {/* 原価ビュー切り替えチップ(2026-07-15 オーナー要望「どの食材が値段に反映されて
                   いるか分からない」への対応。常時表示は「うるさい」で廃止済みのためトグル方式。
                   既定は非表示・状態はページローカル)。2026-07-20 便AJ(docs/45)で「原価を見る」
-                  (閲覧=1食あたり按分)と「原価を編集」(単価編集)の2ボタンに再改修。互いに排他
-                  (選ぶと自動でもう片方は消える)で、選択中のボタンをもう一度押すと非表示に戻る */}
+                  (閲覧=1食あたり按分)と「原価を編集」(単価編集)の2ボタンに改修。
+                  2026-07-21 オーナー実機FB: 横並びの独立トグルをやめ、「見る」を押すと
+                  「編集」ボタンが出現する階層構造に変更。「見る」はhidden⇔view/editの親トグルを
+                  兼ね、開いている間(view/edit)に再度押すと編集ボタンごと非表示に戻る。
+                  「編集」はview⇔editの子トグル(見るボタンが閉じられない限り出続ける) */}
               <button
                 type="button"
-                onClick={() => setCostMode((m) => (m === 'view' ? 'hidden' : 'view'))}
-                aria-pressed={costMode === 'view'}
+                onClick={() => setCostMode((m) => (m === 'hidden' ? 'view' : 'hidden'))}
+                aria-pressed={costMode !== 'hidden'}
                 className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
-                  costMode === 'view'
+                  costMode !== 'hidden'
                     ? 'border-accent bg-accent text-on-accent'
                     : 'border-edge bg-surface text-accent'
                 }`}
@@ -608,19 +614,21 @@ export default function RecipeDetailPage() {
                 <JapaneseYen size={16} aria-hidden />
                 {ja.detail.priceViewShow}
               </button>
-              <button
-                type="button"
-                onClick={() => setCostMode((m) => (m === 'edit' ? 'hidden' : 'edit'))}
-                aria-pressed={costMode === 'edit'}
-                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
-                  costMode === 'edit'
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-accent'
-                }`}
-              >
-                <Pencil size={16} aria-hidden />
-                {ja.detail.priceEditShow}
-              </button>
+              {costMode !== 'hidden' && (
+                <button
+                  type="button"
+                  onClick={() => setCostMode((m) => (m === 'edit' ? 'view' : 'edit'))}
+                  aria-pressed={costMode === 'edit'}
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
+                    costMode === 'edit'
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-accent'
+                  }`}
+                >
+                  <Pencil size={16} aria-hidden />
+                  {ja.detail.priceEditShow}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setServingsOverride(Math.max(1, servings - 1))}

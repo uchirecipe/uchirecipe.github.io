@@ -5146,16 +5146,20 @@ try {
   // --- PRICEVIEW-01: レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
   // 全面改修・2026-07-20 便AJ(docs/45)で再改修。「原価を見る」(閲覧)/「原価を編集」(単価編集)の
   // 2チップに分離し、原価サマリーカードは廃止(上部メタ行の概算食費「約◯円」「1食あたり
-  // 約◯円」と重複していたため)。基本レシピ「肉じゃが」(servings=2)で検証する:
-  // 非表示(既定)は材料セクションに金額表示が無いこと→「原価を見る」ONで各材料行の使用量表示が
-  // 1食あたりの按分原価(「約◯円」・登録人数固定・タップ不可)に差し替わり、マスタ不一致(水)は
-  // 「価格なし」になること→「原価を編集」ONで使用量表示が「{価格}円/{単位}」チップ
-  // (マスタ不一致は「価格なし＋登録」)に差し替わり、原価を見る側の按分原価は消えること
-  // (2モードは排他)を確認したうえで、
+  // 約◯円」と重複していたため)。2026-07-21 オーナー実機FBで、横並びの独立トグルから
+  // 「見る」を押すと「編集」ボタンが出現する階層構造(hidden→view→edit)に変更。
+  // 「見る」は開閉の親トグル(view/edit中に再度押すと編集ボタンごとhiddenへ両方解除)、
+  // 「編集」はview⇔editの子トグル(見るを閉じない限り出続ける)。基本レシピ「肉じゃが」
+  // (servings=2)で検証する: 非表示(既定)は材料セクションに金額表示が無く「原価を編集」
+  // ボタンも存在しないこと→「原価を見る」ONで「原価を編集」ボタンが出現し、各材料行の
+  // 使用量表示が1食あたりの按分原価(「約◯円」・登録人数固定・タップ不可)に差し替わり、
+  // マスタ不一致(水)は「価格なし」になること→「原価を編集」ONで(「原価を見る」は選択中の
+  // ままaria-pressed=true)使用量表示が「{価格}円/{単位}」チップ(マスタ不一致は
+  // 「価格なし＋登録」)に差し替わることを確認したうえで、
   // (a)チップタップ→価格編集→保存で、その行のチップ・上部メタ行の概算食費・原価を見る側の
   //    按分原価が同時に更新されること、
   // (b)「価格なし」材料(水)の「＋登録」→登録モーダル→保存でチップ化すること、の2シナリオと、
-  // 選択中のチップをもう一度押すと非表示に戻ることを確認する ---
+  // 「原価を見る」を選択中にもう一度押すと「原価を編集」ボタンごと非表示に戻ることを確認する ---
   currentCheck = 'PRICEVIEW-01'
   {
     const pvBrowser = await chromium.launch()
@@ -5189,11 +5193,16 @@ try {
         beforeText ?? '',
       )
       check('PRICEVIEW-01 既定は非表示: 玉ねぎの行は使用量(1個)のまま', (await onionRow.textContent())?.includes('1個') ?? false)
+      check(
+        'PRICEVIEW-01 既定は非表示: 「原価を編集」ボタンは存在しない(階層構造。見るを押すまで出現しない)',
+        (await editButton.count()) === 0,
+      )
 
-      // ---------- 「原価を見る」ON: 各行が1食あたりの按分原価になる ----------
+      // ---------- 「原価を見る」ON: 「原価を編集」ボタンが出現し、各行が1食あたりの按分原価になる ----------
       await viewButton.click()
       await pvPage.waitForTimeout(300)
       check('PRICEVIEW-01 「原価を見る」ON: 押したボタンがaria-pressed=trueになる', (await viewButton.getAttribute('aria-pressed')) === 'true')
+      check('PRICEVIEW-01 「原価を見る」ON: 「原価を編集」ボタンが出現する(階層構造)', (await editButton.count()) === 1)
       const onText = await ingredientsSection.textContent()
       check(
         'PRICEVIEW-01 「原価を見る」ON: 材料行に「約◯円」の按分原価が表示される(編集チップの「◯円/単位」形式は無い)',
@@ -5218,10 +5227,14 @@ try {
         !(onText ?? '').includes('食材と価格を編集する') && !/1人分 約[\d,]+円/.test(onText ?? ''),
       )
 
-      // ---------- 「原価を編集」ON: 「原価を見る」とは排他で使用量表示がチップに差し替わる ----------
+      // ---------- 「原価を編集」ON: 階層構造なので「原価を見る」は選択中のまま、使用量表示だけチップに差し替わる ----------
       await editButton.click()
       await pvPage.waitForTimeout(300)
-      check('PRICEVIEW-01 「原価を編集」ON: 押すと「原価を見る」は自動でOFFになる(排他)', (await viewButton.getAttribute('aria-pressed')) === 'false')
+      check(
+        'PRICEVIEW-01 「原価を編集」ON: 「原価を見る」は選択中のまま(親トグルなのでaria-pressed=trueを維持)',
+        (await viewButton.getAttribute('aria-pressed')) === 'true',
+      )
+      check('PRICEVIEW-01 「原価を編集」ON: 押したボタンがaria-pressed=trueになる', (await editButton.getAttribute('aria-pressed')) === 'true')
       const editText = await ingredientsSection.textContent()
       check(
         'PRICEVIEW-01 「原価を編集」ON: 按分原価「約◯円」は消え、チップ表(◯円/単位)に差し替わる',
@@ -5287,11 +5300,17 @@ try {
         `before=${topPerServingBefore} after=${topPerServingAfter}`,
       )
 
-      // 「原価を見る」に切り替えると、編集した70円がそのまま按分原価(70÷2人分=約35円)に反映される
-      await viewButton.click()
+      // 「原価を編集」をもう一度押して(子トグルでedit→view)「原価を見る」表示に戻ると、
+      // 編集した70円がそのまま按分原価(70÷2人分=約35円)に反映される
+      await editButton.click()
       await pvPage.waitForTimeout(300)
       check(
-        'PRICEVIEW-01(a) 「原価を見る」に戻すと、玉ねぎの按分原価が編集後の価格で再計算される(70÷2人分=約35円)',
+        'PRICEVIEW-01(a) 編集を閉じてview表示に戻ると、「原価を見る」がaria-pressed=true・「原価を編集」がaria-pressed=falseになる',
+        (await viewButton.getAttribute('aria-pressed')) === 'true' &&
+          (await editButton.getAttribute('aria-pressed')) === 'false',
+      )
+      check(
+        'PRICEVIEW-01(a) 「原価を見る」表示に戻ると、玉ねぎの按分原価が編集後の価格で再計算される(70÷2人分=約35円)',
         (await onionRow.textContent())?.includes('約35円') ?? false,
       )
 
@@ -5318,18 +5337,23 @@ try {
           !((await waterRow.textContent())?.includes('価格なし') ?? false),
       )
 
-      // 「原価を見る」に切り替えると、登録した水(300ml分・10円/1L→3円÷2人分=1.5→四捨五入2円)も按分原価が出る
-      await viewButton.click()
+      // 「原価を編集」をもう一度押して(子トグルでedit→view)「原価を見る」表示に戻ると、
+      // 登録した水(300ml分・10円/1L→3円÷2人分=1.5→四捨五入2円)も按分原価が出る
+      await editButton.click()
       await pvPage.waitForTimeout(300)
       check(
-        'PRICEVIEW-01(b) 登録後「原価を見る」で水の行にも按分原価が出る(300ml分3円÷2人分=約2円)',
+        'PRICEVIEW-01(b) 登録後「原価を見る」表示で水の行にも按分原価が出る(300ml分3円÷2人分=約2円)',
         (await waterRow.textContent())?.includes('約2円') ?? false,
       )
 
-      // ---------- 選択中のチップをもう一度押すと非表示に戻る ----------
+      // ---------- 選択中の「原価を見る」をもう一度押すと「原価を編集」ボタンごと非表示に戻る ----------
       await viewButton.click()
       await pvPage.waitForTimeout(300)
       check('PRICEVIEW-01 「原価を見る」を再度押すと非表示になる: aria-pressed=false', (await viewButton.getAttribute('aria-pressed')) === 'false')
+      check(
+        'PRICEVIEW-01 非表示に戻る: 「原価を編集」ボタンも消える(階層構造)',
+        (await editButton.count()) === 0,
+      )
       const afterText = await ingredientsSection.textContent()
       check(
         'PRICEVIEW-01 非表示に戻る: 金額表示(按分原価・チップとも)が消える',
@@ -5370,8 +5394,8 @@ try {
       check('SHARE-01 シェアボタンで選択モーダルが開く', (await shareDialog.count()) === 1)
       const dialogText = (await shareDialog.textContent()) ?? ''
       check(
-        'SHARE-01 固定項目の説明文言(料理名・人数分・材料8件)が出る',
-        dialogText.includes('料理名・人数分・材料（最初の8件）はいつも入ります'),
+        'SHARE-01 固定項目の説明文言(料理名・食数・材料8件)が出る',
+        dialogText.includes('料理名・食数・材料（最初の8件）は常に入ります'),
       )
       check('SHARE-01 レシピ画像の行に「※画像カードのみ」が併記される', dialogText.includes('※画像カードのみ'))
 
@@ -5382,8 +5406,8 @@ try {
       check('SHARE-01 既定: 調理時間ON', await optionCheckbox('調理時間').isChecked())
       check('SHARE-01 既定: 原価OFF', !(await optionCheckbox('原価').isChecked()))
       check(
-        'SHARE-01 既定: 栄養OFF(行はカロリー・塩分(めやす)の文言で表示)',
-        !(await optionCheckbox('1食あたりのカロリー・塩分（めやす）').isChecked()),
+        'SHARE-01 既定: 栄養OFF(行はカロリー・塩分の文言で表示。チェック行ラベルから「（めやす）」は削除済み・シェア本文側は法務配慮で残す)',
+        !(await optionCheckbox('1食あたりのカロリー・塩分').isChecked()),
       )
       check('SHARE-01 既定: 材料をすべて載せるOFF', !(await optionCheckbox('材料をすべて載せる').isChecked()))
 
