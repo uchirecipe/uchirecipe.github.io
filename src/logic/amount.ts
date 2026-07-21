@@ -49,6 +49,33 @@ export function normalizeDigits(text: string): string {
 }
 
 /**
+ * 分量・単位を解釈する入口（本ファイルのparseAbbreviatedSpoonAmount・parseCounterWordAmount・
+ * scaleAmount、nutrition.tsのparseAmountNumber・convertToGrams、priceEstimate.tsの
+ * parseNumericAmount・parseUnitQuantity・normalizeUnit・estimateIngredientYen）で共通して使う
+ * NFKC正規化。全角英数字（３００→300・ｇ→g・ｍｌ→ml）・全角スラッシュ／全角ピリオド／
+ * 全角スペース等の記号を半角にする。
+ *
+ * 2026-07-21 全角入力の自動正規化（オーナー実機報告:「アサリ 300ｇ」の全角ｇだと栄養計算に
+ * 反映されない・数量も全角で入力できてしまう）。旧来のnormalizeDigits（全角数字・／・．のみ）は
+ * 単位側の全角英字（ｇ・ｍｌ等）を変換できず、単位欄が全角のまま計算関数に渡ると
+ * MASS_UNIT_FACTORS['g']等の完全一致判定に失敗し、計算対象外になっていた（本バグの原因）。
+ * NFKCはnormalizeDigitsより広い範囲（全角英字・記号・半角ｶﾅ→全角カナ等）を正規化するため、
+ * 分量・単位どちらの解釈入口にもこの1つに一元化する（二重正規化を避ける）。
+ *
+ * ひらがな・カタカナ・漢字はNFKCで意味が変わらない（全角カナは全角カナのまま。半角ｶﾅのみ
+ * 全角カナになるが、レシピの数量・単位欄に半角カナを使う想定は無いため実害なし。2026-07-21確認）。
+ *
+ * **解釈専用**: ここを通すのは計算・比較の直前だけ。呼び出し側は返り値を計算にのみ使い、
+ * 保存データ(amount/unit文字列そのもの)は書き換えないこと（表示は原文を尊重する既存方針。
+ * parseAbbreviatedSpoonAmount等のコメント・docs/43参照）。入力欄側の見た目の半角化
+ * （blur時に保存データ自体を書き換える処理）はRecipeFormPage.tsx・UnitQuantityFields.tsx側で
+ * 別途行う（そちらは解釈用のこの関数とは別レイヤー）。
+ */
+export function normalizeAmountInput(text: string): string {
+  return text.normalize('NFKC')
+}
+
+/**
  * 2026-07-21 分量表記拡充（オーナー実機報告: URL取り込みレシピの計算対象外10件のうち8件が
  * 「大2」「小1」のような大さじ/小さじの略記だった）。
  *
@@ -75,7 +102,7 @@ export function parseAbbreviatedSpoonAmount(
   unit?: string,
 ): AbbreviatedSpoonAmount | null {
   if (unit && unit.trim()) return null
-  const trimmed = normalizeDigits(amount.trim())
+  const trimmed = normalizeAmountInput(amount.trim())
   const match = trimmed.match(/^([大小])(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
   if (!match) return null
   let value = Number.parseFloat(match[2])
@@ -120,7 +147,7 @@ export interface CounterWordAmount {
 
 export function parseCounterWordAmount(amount: string, unit?: string): CounterWordAmount | null {
   if (unit && unit.trim()) return null
-  const trimmed = normalizeDigits(amount.trim())
+  const trimmed = normalizeAmountInput(amount.trim())
   const resolvedUnit = COUNTER_WORD_ONE[trimmed]
   return resolvedUnit ? { value: 1, unit: resolvedUnit } : null
 }
@@ -149,7 +176,10 @@ export function scaleAmount(
   targetServings: number,
   unit?: string,
 ): string {
-  const trimmed = normalizeDigits(amount.trim())
+  const trimmed = normalizeAmountInput(amount.trim())
+  // 単位側も解釈用に正規化する(2026-07-21全角対応: 全角「ｇ」等でもroundForDisplay/
+  // FRACTION_DISPLAY_UNITSの単位判定が効くように)。保存データそのものは変更しない
+  const normalizedUnit = unit ? normalizeAmountInput(unit).trim() : unit
   if (!trimmed || baseServings <= 0 || baseServings === targetServings) {
     // 人数を変えていなくても、全角数字は半角に正規化して返す(基準人数表示でも正しく見えるように)
     return trimmed || amount
@@ -158,7 +188,7 @@ export function scaleAmount(
   // 「大2」「小1/2」のような大さじ/小さじの略記(単位欄が空の時のみ)。表示は略記の1文字
   // (「大」「小」)のまま保ち、数値だけ大さじ/小さじと同じ丸め幅(0.25刻み)・帯分数表示で更新する
   // (例: 2人分「大2」→4人分は「大4」。「大さじ4」のような展開はしない=原文尊重)
-  const spoonAbbrev = parseAbbreviatedSpoonAmount(trimmed, unit)
+  const spoonAbbrev = parseAbbreviatedSpoonAmount(trimmed, normalizedUnit)
   if (spoonAbbrev) {
     const scaled = (spoonAbbrev.value * targetServings) / baseServings
     const rounded = roundForDisplay(scaled, spoonAbbrev.unit)
@@ -167,7 +197,7 @@ export function scaleAmount(
 
   // 「ひとかけ」「一房」のような和語の個数詞(単位欄が空の時のみ)。スケール後は「1」の意味が
   // 崩れるため、通常の個数表記(「2かけ」等・数値→単位の順)に切り替える
-  const counterWord = parseCounterWordAmount(trimmed, unit)
+  const counterWord = parseCounterWordAmount(trimmed, normalizedUnit)
   if (counterWord) {
     const scaled = (counterWord.value * targetServings) / baseServings
     const rounded = roundForDisplay(scaled, counterWord.unit)
@@ -186,8 +216,8 @@ export function scaleAmount(
   }
 
   const scaled = (value * targetServings) / baseServings
-  const rounded = roundForDisplay(scaled, unit)
-  if (unit && FRACTION_DISPLAY_UNITS.has(unit)) {
+  const rounded = roundForDisplay(scaled, normalizedUnit)
+  if (normalizedUnit && FRACTION_DISPLAY_UNITS.has(normalizedUnit)) {
     return formatFraction(rounded)
   }
   return String(rounded)

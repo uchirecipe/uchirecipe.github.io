@@ -1,6 +1,7 @@
-import type { KeyboardEvent } from 'react'
+import type { FocusEvent, KeyboardEvent } from 'react'
 import { KNOWN_UNITS, OTHER_UNIT, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
+import { normalizeAmountInput } from '../logic/amount'
 import { ja } from '../i18n/ja'
 
 /** blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる) */
@@ -54,6 +55,25 @@ export default function UnitQuantityFields({
   unitOtherClassName,
   unitSelectClassName,
 }: UnitQuantityFieldsProps) {
+  /**
+   * 数量欄・単位(その他)自由入力欄のblurで、全角入力を自動でNFKC半角化する(2026-07-21全角対応。
+   * 「食材と価格」の数量・単位欄も計算の入口になるため、RecipeFormPageの材料欄と同じ扱いにする)。
+   * onChangeではなくonBlurでだけ発火するため、IME変換中(compositionstart〜end)には介入しない
+   * (blurは常にIMEのcompositionend後に発火するため、確定前の文字が正規化で壊れることはない)。
+   * 正規化で値が変わらない場合は、従来どおりonCommitだけ呼ぶ(挙動変更ゼロを維持)。
+   */
+  const commitField = (field: 'freeText' | 'qty', e: FocusEvent<HTMLInputElement>) => {
+    const raw = e.target.value
+    const normalized = normalizeAmountInput(raw)
+    if (normalized === raw) {
+      onCommit?.(value)
+      return
+    }
+    const next = { ...value, [field]: normalized }
+    onChange(next)
+    onCommit?.(next)
+  }
+
   return (
     <>
       {value.unitKind === OTHER_UNIT ? (
@@ -61,7 +81,7 @@ export default function UnitQuantityFields({
           type="text"
           value={value.freeText}
           onChange={(e) => onChange({ ...value, freeText: e.target.value })}
-          onBlur={() => onCommit?.(value)}
+          onBlur={(e) => commitField('freeText', e)}
           onKeyDown={blurOnEnter}
           placeholder={unitOtherPlaceholder}
           aria-label={unitOtherAriaLabel}
@@ -74,7 +94,7 @@ export default function UnitQuantityFields({
           min={0}
           value={value.qty}
           onChange={(e) => onChange({ ...value, qty: e.target.value })}
-          onBlur={() => onCommit?.(value)}
+          onBlur={(e) => commitField('qty', e)}
           onKeyDown={blurOnEnter}
           placeholder={quantityPlaceholder}
           aria-label={quantityAriaLabel}

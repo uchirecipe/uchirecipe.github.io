@@ -5,6 +5,7 @@ import {
   scaleAmount,
   formatAmountUnit,
   normalizeDigits,
+  normalizeAmountInput,
 } from '../src/logic/amount.ts'
 import {
   parseRecipeText,
@@ -31,7 +32,7 @@ import {
   maskUnlockCode,
 } from '../src/logic/pro.ts'
 import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
-import { parseAmountNumber } from '../src/logic/nutrition.ts'
+import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
 import {
   suggestForSlot,
@@ -81,6 +82,7 @@ import {
   sumMealPlanEntriesCost,
   normalizeIngredientNameForPrice,
   normalizeUnit,
+  parseUnitQuantity,
 } from '../src/logic/priceEstimate.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
@@ -138,6 +140,9 @@ eq('節の増量', scaleAmount('1/2', 2, 4, '節'), '1')
 eq('全角数字のスケール', scaleAmount('２', 2, 5, '本'), '5')
 eq('全角分数のスケール', scaleAmount('１／２', 2, 4, '個'), '1')
 eq('全角は基準人数でも半角化', scaleAmount('２', 2, 2, '本'), '2')
+// 2026-07-21 全角入力の自動正規化: 単位欄が全角(「ｇ」等)でも、半角と同じ丸め幅・帯分数表示になること
+eq('全角単位「ｇ」でも半角gと同じ5刻みの丸めになる', scaleAmount('50', 3, 5, 'ｇ'), scaleAmount('50', 3, 5, 'g'))
+eq('全角単位「ｍｌ」でも半角mlと同じ10刻みの丸めになる', scaleAmount('150', 2, 3, 'ｍｌ'), scaleAmount('150', 2, 3, 'ml'))
 
 // ---------- scaleAmount: 大さじ/小さじの略記「大2」「小1」(2026-07-21分量表記拡充) ----------
 // 表示は「大」「小」の略記のまま・数値だけ大さじ/小さじと同じ0.25刻みで更新する(原文尊重)
@@ -168,10 +173,52 @@ eq('全角数字', normalizeDigits('２００'), '200')
 eq('全角スラッシュ・ピリオド', normalizeDigits('１／２と１．５'), '1/2と1.5')
 eq('半角はそのまま', normalizeDigits('1.5'), '1.5')
 
+// ---------- normalizeAmountInput(2026-07-21 全角入力の自動正規化。オーナー実機報告:
+// 「アサリ 300ｇ」の全角ｇだと栄養計算に反映されない・数量も全角で入力できてしまう。
+// normalizeDigitsは全角数字・／・．のみで単位側の全角英字を変換できなかったため、
+// より広い範囲をNFKCで正規化する分量・単位共通の解釈入口として新設) ----------
+eq('全角数字→半角', normalizeAmountInput('３００'), '300')
+eq('全角英字の単位→半角(ｇ→g)', normalizeAmountInput('ｇ'), 'g')
+eq('全角英字の単位→半角(ｍｌ→ml)', normalizeAmountInput('ｍｌ'), 'ml')
+eq('全角英字の単位→半角(ｋｇ→kg)', normalizeAmountInput('ｋｇ'), 'kg')
+eq('全角スラッシュ→半角', normalizeAmountInput('１／２'), '1/2')
+eq('全角スペース→半角', normalizeAmountInput('３００　ｇ'), '300 g')
+eq('全角カタカナは全角カタカナのまま(意味を変えない)', normalizeAmountInput('オオサジ'), 'オオサジ')
+eq('半角カナは全角カナになる(実害なし・意図した挙動)', normalizeAmountInput('ｵｵｻｼﾞ'), 'オオサジ')
+eq('漢字・ひらがなは不変', normalizeAmountInput('大さじ'), '大さじ')
+eq('半角はそのまま(冪等)', normalizeAmountInput('300g'), '300g')
+
 // ---------- parseAmountNumber(栄養価計算の分量解釈) ----------
 eq('栄養: 分数', parseAmountNumber('1/2'), 0.5)
 eq('栄養: 全角(2026-07-08バグ)', parseAmountNumber('２'), 2)
 eq('栄養: 非数値はnull', parseAmountNumber('少々'), null)
+
+// ---------- convertToGrams(2026-07-21全角対応: 単位欄が全角でも半角と同じ食品データに一致する) ----------
+eq('convertToGrams 半角g', convertToGrams(300, 'g', {}), 300)
+eq('convertToGrams 全角ｇも半角gと同じ(本バグの直接の再発防止ケース)', convertToGrams(300, 'ｇ', {}), 300)
+eq('convertToGrams 全角ｋｇ', convertToGrams(1, 'ｋｇ', {}), 1000)
+eq(
+  'convertToGrams 全角ｍｌ(gramsPerMl経由)は半角mlと同じ',
+  convertToGrams(200, 'ｍｌ', { gramsPerMl: 1.03 }),
+  convertToGrams(200, 'ml', { gramsPerMl: 1.03 }),
+)
+eq('convertToGrams 換算できない単位はnull(全角でも同様)', convertToGrams(1, 'ｘｘ', {}), null)
+
+// ---------- computeRecipeNutrition: 全角「アサリ 300ｇ」の栄養計算(2026-07-21全角対応・
+// オーナー実機報告の再現ケース。修正前は単位「ｇ」が半角gと一致せず計算対象外になっていた) ----------
+{
+  const halfWidth = computeRecipeNutrition({
+    ingredients: [{ name: 'アサリ', amount: '300', unit: 'g' }],
+    servings: 1,
+  })
+  const fullWidth = computeRecipeNutrition({
+    ingredients: [{ name: 'アサリ', amount: '３００', unit: 'ｇ' }],
+    servings: 1,
+  })
+  eq('全角「アサリ ３００ｇ」は計算対象外にならない(本バグの再発防止)', fullWidth.excluded.length, 0)
+  eq('全角「３００ｇ」は半角「300g」と同じ1人分の栄養価になる', fullWidth.perServing, halfWidth.perServing)
+  eq('全角「３００ｇ」は半角「300g」と同じグラム数で計算される', fullWidth.items[0]?.grams, halfWidth.items[0]?.grams)
+}
 
 // ---------- splitQuantity ----------
 eq('大さじ前置形', splitQuantity('大さじ2'), { amount: '2', unit: '大さじ' })
@@ -3182,6 +3229,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('normalizeUnit 個数(本は個と別単位名)', normalizeUnit(1, '本'), { dim: 'count', unit: '本', base: 1 })
   eq('normalizeUnit 解釈不能(少々)はnull', normalizeUnit(1, '少々'), null)
   eq('normalizeUnit 数量0以下はnull', normalizeUnit(0, 'g'), null)
+  // 2026-07-21全角対応: 単位が全角(「ｇ」「ｍｌ」等)でも半角と同じ次元・基準量に正規化できる
+  eq('normalizeUnit 全角質量「ｇ」も半角gと同じ', normalizeUnit(100, 'ｇ'), { dim: 'mass', base: 100 })
+  eq('normalizeUnit 全角体積「ｍｌ」も半角mlと同じ', normalizeUnit(200, 'ｍｌ'), { dim: 'volume', base: 200 })
+  eq('parseUnitQuantity 全角「３００ｇ」を半角と同じ形に分解できる', parseUnitQuantity('３００ｇ'), { qty: 300, baseUnit: 'g' })
 
   // 豚肉: マスタ200円/100g × レシピ「0.3 kg」→ kg→g換算で按分(300/100*200=600円)
   const meatIndex = buildPriceIndex([{ name: '豚肉', pricePerUnit: 200, unit: '100g' }])
@@ -3316,6 +3367,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     estimateIngredientYen({ name: '鶏もも肉', amount: '300', unit: 'g' }, chickenIndex),
     { yen: 390, source: 'user' },
   )
+  // 2026-07-21全角対応: 分量・単位が全角(「３００」「ｇ」)でも半角と同じ按分結果になること
+  eq(
+    'estimateIngredientYen 全角「３００ｇ」でも半角「300g」と同じ按分結果(130円/100g×300g→390円)',
+    estimateIngredientYen({ name: '鶏もも肉', amount: '３００', unit: 'ｇ' }, chickenIndex),
+    { yen: 390, source: 'user' },
+  )
 
   // 後方互換: mass/volume/countの対応表に無い単位(「1杯」等)でも、文字列として完全一致するなら
   // 従来どおり按分する(既存の"完全一致で按分"を正規化が包含するための保険。実データ:
@@ -3349,6 +3406,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
 {
   eq('decomposeUnit 数量+単位(100g)を分解できる', decomposeUnit('100g'), { qty: '100', unitKind: 'g', freeText: '' })
   eq('decomposeUnit 個数(1個)を分解できる', decomposeUnit('1個'), { qty: '1', unitKind: '個', freeText: '' })
+  // 2026-07-21全角対応: 全角の数量+単位(「３００ｇ」)も半角と同じ形に分解できる(副次効果)
+  eq(
+    'decomposeUnit 全角「３００ｇ」も半角「300g」と同じ形に分解できる',
+    decomposeUnit('３００ｇ'),
+    { qty: '300', unitKind: 'g', freeText: '' },
+  )
   eq(
     'decomposeUnit 単位が先の書式(大さじ1)も分解できる',
     decomposeUnit('大さじ1'),

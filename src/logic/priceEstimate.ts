@@ -1,5 +1,5 @@
 import type { Ingredient } from '../db/types'
-import { normalizeDigits, resolveCalcAmount } from './amount'
+import { normalizeAmountInput, resolveCalcAmount } from './amount'
 import { toHiragana } from './kana'
 
 /**
@@ -84,7 +84,7 @@ export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIn
 
 /** "200" "1.5" "1/2" のような数字の分量を数値化する（人数換算不要の素の値） */
 function parseNumericAmount(amount: string): number | undefined {
-  const trimmed = normalizeDigits(amount.trim())
+  const trimmed = normalizeAmountInput(amount.trim())
   const match = trimmed.match(/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
   if (!match) return undefined
   let value = Number.parseFloat(match[1])
@@ -108,7 +108,7 @@ function parseNumericAmount(amount: string): number | undefined {
  * （二重実装を避けるためexport）。
  */
 export function parseUnitQuantity(unit: string): { qty: number; baseUnit: string } {
-  const trimmed = normalizeDigits(unit.trim())
+  const trimmed = normalizeAmountInput(unit.trim())
   const leading = trimmed.match(/^(\d+(?:\.\d+)?)(.*)$/)
   if (leading) {
     const qty = Number.parseFloat(leading[1])
@@ -186,10 +186,13 @@ const COUNT_UNIT_NAMES = new Set([
  * - 個数（個/本/枚/玉/束/パック/かけ/片/株/尾/切れ/丁/袋/缶/房/節）は単位名込みで返す
  *   （呼び出し側で単位名が一致する時だけ按分に使うこと。「1個」と「1本」は別物）。
  * - 「少々」「適量」等の解釈できない単位・0以下の数量はnull（呼び出し側でフォールバック）。
+ *
+ * unitはNFKC正規化してから比較する(2026-07-21全角対応: 全角「ｇ」「ｍｌ」等でも半角と同じ
+ * 単位名に一致させるため。保存データ自体は書き換えない)。
  */
 export function normalizeUnit(amount: number, unit: string): NormalizedUnit | null {
   if (!Number.isFinite(amount) || amount <= 0) return null
-  const trimmed = (unit ?? '').trim()
+  const trimmed = normalizeAmountInput((unit ?? '').trim())
   if (!trimmed) return null
 
   const massFactor = MASS_UNIT_FACTORS[trimmed]
@@ -236,9 +239,11 @@ export function estimateIngredientYen(
   const { qty: baseQty, baseUnit } = parseUnitQuantity(entry.unit)
   // 「大2」「小1/2」(大さじ/小さじの略記)・「ひとかけ」等の和語の個数詞(単位欄が空の時のみ該当)は、
   // resolveCalcAmountが展開した単位(大さじ/小さじ/かけ 等)をingUnitとして使う(2026-07-21分量表記拡充)。
-  // 該当しなければ従来どおりingredient.unitそのまま
+  // 該当しなければingredient.unitをNFKC正規化したもの(2026-07-21全角対応: 下のingUnit===baseUnitの
+  // 完全一致フォールバックはbaseUnit(parseUnitQuantityで正規化済み)と比較するため、ingUnit側も
+  // 同じ正規化形にしておく必要がある)
   const resolved = resolveCalcAmount(ingredient.amount ?? '', ingredient.unit)
-  const ingUnit = resolved ? resolved.unit : (ingredient.unit ?? '').trim()
+  const ingUnit = resolved ? resolved.unit : normalizeAmountInput((ingredient.unit ?? '').trim())
   const amountNum = resolved ? resolved.value : parseNumericAmount(ingredient.amount ?? '')
   const source: PriceSource = entry.isDefault ? 'default' : 'user'
 

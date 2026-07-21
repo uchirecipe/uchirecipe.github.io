@@ -235,6 +235,10 @@
 //         2区分に単純化)。既存のSORTDIR-01/SCROLL-01/SCROLL-02が「基本レシピ順」追加後も
 //         壊れていないことは、同じ一覧の状態保存の仕組み(sessionStorageのrecipesListState)を
 //         共用するそれぞれの既存チェックの合格をもって確認する) /
+//         ZENKAKU-01(全角入力の自動正規化・2026-07-21 オーナー実機報告:「アサリ 300ｇ」の
+//         全角ｇだと栄養計算に反映されない・数量も全角で入力できてしまう。材料の分量欄に全角数字
+//         「３００」・単位欄に全角「ｇ」を入力→blurで自動的に半角「300」「g」に置き換わること、
+//         保存後の栄養計算にも反映され「計算対象外」にならないことを確認する) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -440,6 +444,56 @@ try {
   )
   await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
   await page.waitForTimeout(200)
+
+  // --- ZENKAKU-01: 全角入力の自動正規化(2026-07-21 オーナー実機報告:「アサリ 300ｇ」の全角ｇだと
+  // 栄養計算に反映されない・数量も全角で入力できてしまう)。材料の分量欄に全角数字「３００」・
+  // 単位欄に全角「ｇ」を入力し、blur(フォーカスを外す)で自動的に半角「300」「g」に置き換わること、
+  // 保存後の栄養計算にも反映され「計算対象外」にならないことを確認する(修正前は単位が全角のまま
+  // だと半角の食品データと一致せず計算対象外になっていた=本バグの直接の再現ケース) ---
+  currentCheck = 'ZENKAKU-01'
+  await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByPlaceholder('例: 肉じゃが').fill('E2E全角正規化確認レシピ')
+  await page.getByPlaceholder('例: じゃがいも').first().fill('アサリ')
+  const zenkakuAmountInput = page.getByPlaceholder('例: 3', { exact: true }).first()
+  const zenkakuUnitInput = page.getByPlaceholder('例: 個', { exact: true }).first()
+  await zenkakuAmountInput.fill('３００') // 全角数字
+  await zenkakuUnitInput.fill('ｇ') // 全角英字(半角gの全角形)
+  // Tabでフォーカスを外し、実際のblurイベントを発火させる(IME確定後のblurと同じ経路。
+  // compositionend後にしか発火しないため、変換中の文字が正規化で壊れることはない)
+  await zenkakuUnitInput.press('Tab')
+  await page.waitForTimeout(200)
+  check(
+    'ZENKAKU-01 全角数量「３００」はblurで半角「300」に置き換わる',
+    (await zenkakuAmountInput.inputValue()) === '300',
+    `実際の値=${await zenkakuAmountInput.inputValue()}`,
+  )
+  check(
+    'ZENKAKU-01 全角単位「ｇ」はblurで半角「g」に置き換わる',
+    (await zenkakuUnitInput.inputValue()) === 'g',
+    `実際の値=${await zenkakuUnitInput.inputValue()}`,
+  )
+  await page.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('アサリを砂抜きする')
+  await page.getByRole('button', { name: '保存する' }).click()
+  await page.waitForTimeout(800)
+  check('ZENKAKU-01 保存後にレシピ詳細へ遷移する', page.url().includes('#/recipes/'))
+  const zenkakuDetailText = await page.textContent('body')
+  check('ZENKAKU-01 栄養価のめやす見出しが見える', zenkakuDetailText.includes('栄養価のめやす'))
+  await page.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+  await page.waitForTimeout(300)
+  const zenkakuNutritionText = await page.textContent('body')
+  check(
+    'ZENKAKU-01 全角で入力した「アサリ 300ｇ」が栄養計算対象外にならない(単位「ｇ」がgとして解釈される回帰)',
+    !zenkakuNutritionText.includes('計算対象外'),
+  )
+  await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
+  await page.waitForTimeout(200)
+
+  // 以降のTERM-01が「肉じゃが」の詳細を開いたままである前提のため、その状態に戻す
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(500)
+  await page.getByText('肉じゃが', { exact: true }).first().click()
+  await page.waitForTimeout(600)
 
   // --- TERM-01: 用語タップでポップオーバーが開き、外タップで閉じる(用語タップ辞書 2026-07-11)。
   // 肉じゃが手順1「玉ねぎはくし形に切る」の「くし形」をタップして説明を確認する ---

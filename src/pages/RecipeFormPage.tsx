@@ -32,7 +32,7 @@ import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOIN
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
-import { normalizeDigits } from '../logic/amount'
+import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { RecipeIcon } from '../components/RecipeCard'
@@ -605,6 +605,19 @@ function RecipeFormInner() {
   const updateIngredient = (index: number, patch: Partial<IngredientRow>) => {
     setIngredients((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
+  /**
+   * 材料の数量欄・単位欄のblurで、全角入力を自動でNFKC半角化する(2026-07-21全角対応。
+   * オーナー実機報告:「アサリ 300ｇ」の全角ｇだと栄養計算に反映されない・数量も全角で入力できて
+   * しまう)。onChangeではなくonBlurでだけ発火するため、IME変換中(compositionstart〜end)には
+   * 介入しない(blurは常にIMEのcompositionend後に発火するため、確定前の文字が正規化で壊れることはない)。
+   * 値が実際に変わるときだけ更新し(無変化の再レンダーを避ける)、他のフィールドと同じ
+   * updateIngredientで反映する
+   */
+  const normalizeIngredientFieldOnBlur =
+    (index: number, field: 'amount' | 'unit') => (e: React.FocusEvent<HTMLInputElement>) => {
+      const normalized = normalizeAmountInput(e.target.value)
+      if (normalized !== e.target.value) updateIngredient(index, { [field]: normalized })
+    }
   const updateStep = (index: number, patch: Partial<StepRow>) => {
     setSteps((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
@@ -1171,6 +1184,7 @@ function RecipeFormInner() {
                   type="text"
                   value={row.amount}
                   onChange={(e) => updateIngredient(index, { amount: e.target.value })}
+                  onBlur={normalizeIngredientFieldOnBlur(index, 'amount')}
                   placeholder={ja.form.ingredientAmountPlaceholder}
                   aria-label={ja.form.ingredientAmount}
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
@@ -1179,6 +1193,7 @@ function RecipeFormInner() {
                   type="text"
                   value={row.unit}
                   onChange={(e) => updateIngredient(index, { unit: e.target.value })}
+                  onBlur={normalizeIngredientFieldOnBlur(index, 'unit')}
                   placeholder={ja.form.ingredientUnitPlaceholder}
                   aria-label={ja.form.ingredientUnit}
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
