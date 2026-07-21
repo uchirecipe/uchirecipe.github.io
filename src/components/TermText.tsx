@@ -63,10 +63,15 @@ export default function TermText({ text, seen, onOpenTerm, renderPlain }: Props)
                 }
               }}
               aria-label={ja.term.openAria.replace('{term}', seg.match.term.term)}
-              className={`cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 ${
+              // タップ可能と分かる見た目に強化(2026-07-21オーナー実機フィードバック):
+              // 従来はdecoration-dottedのみで文字色が地の文と同じため薄く見えた。
+              // 時間表記タップ(TimeText)のボタンと同じfont-bold text-accent+chip状の
+              // 背景で統一しつつ、下線は点線のまま残して「用語=点線／タイマー=実線」の
+              // 使い分け(MemoTextの▽ボタン・4語目以降チップと同じ規則)は維持する
+              className={`cursor-pointer rounded-sm px-1 py-0.5 font-bold text-accent underline decoration-dotted underline-offset-2 ${
                 seg.match.text.length <= 7 ? 'whitespace-nowrap' : ''
               }`}
-              style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
+              style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
             >
               {seg.match.text}
             </span>

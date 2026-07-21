@@ -392,7 +392,10 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       </div>
 
       <div
-        className="flex flex-1 flex-col items-center justify-center gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] py-[var(--space-md)] text-center"
+        // 手順テキストの縦位置(2026-07-21オーナー実機フィードバック): 中央揃えのままだと
+        // 画面全体で見たとき視線より低く見えるため、上下のpaddingをあえて非対称にして
+        // 見た目の重心を少し上へ寄せる(pt<pb。paddingの合計は変えず配分だけ変える手法)
+        className="flex flex-1 flex-col items-center justify-center gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[calc(var(--space-lg)+var(--space-sm))] pt-[var(--space-sm)] text-center"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -435,14 +438,18 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           />
         )}
         {stepTerms.length > 0 && (
-          <div className="w-full text-sm text-ink-muted md:max-w-md">
+          <div className="mt-[var(--space-sm)] w-full rounded-md bg-surface p-[var(--space-sm)] text-sm text-ink-muted md:max-w-md">
             {/* 用語は常時表示にする(2026-07-11オーナー実機フィードバック: タップしないと説明が
                 見えないのが不便)。「用語＝説明文」を1行ずつ、最大3語まで表示する。
                 説明が長い場合も文節折返し(.ja-phrase)を適用する。
                 PCなど広い画面だと左端に寄りすぎる(2026-07-12オーナー実機フィードバック)ため、
                 md(768px)以上だけ幅を絞る。親(text-center + items-center の縦flex)が
                 中央寄せしてくれるので、margin指定なしでも「中央気味」に収まる。
-                375px幅では w-full のまま挙動が変わらないことを確認済み */}
+                375px幅では w-full のまま挙動が変わらないことを確認済み。
+                2026-07-21オーナー実機フィードバック: 上のメモ(text-ink-muted・背景なし)と
+                見た目が同化していたため、mt-[var(--space-sm)]でメモとの間を通常のgapより
+                広めに離し、bg-surfaceの薄い面色+角丸+paddingで「用語説明の区画」を
+                視覚的に独立させる */}
             {stepTerms.slice(0, 3).map((term) => (
               <p key={term.term} className="ja-phrase text-left leading-snug">
                 <span className="font-bold text-ink">{term.term}</span>
