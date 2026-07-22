@@ -4963,6 +4963,122 @@ eq('isImageContentType: 空文字はfalse', isImageContentType(''), false)
   }
 }
 
+// ---------- lineCompose 改行第6弾(便BB): 指摘1「連続する格助詞『を』の詰め込み回避」+ メモ用アトム ----------
+// 生テキスト→buildAtoms(手順=タイマー/用語/スリム化/接着) と buildMemoAtoms(メモ=用語箱のみ)を再現して
+// composeLines へ通す。1文字=1幅の偽測定・幅16〜19字相当。
+{
+  const { composeLines, lineToText } = await import('../src/logic/lineCompose.ts')
+  const { splitAroundTimeToken, ZWSP } = await import('../src/logic/jaWrap.ts')
+  const { findTimeTokens } = await import('../src/logic/time.ts')
+  const { splitByTerms } = await import('../src/logic/termSplit.ts')
+  const measure = (t) => [...t.replace(new RegExp(ZWSP, 'g'), '')].length
+  // 手順アトム(第5弾ブロックと同一ロジック)
+  const buildStepAtoms = (text) => {
+    const atoms = []
+    let n = 0
+    const seen = new Set()
+    for (const seg of splitByTerms(text, seen)) {
+      if (seg.type === 'term' && seg.tappable) { atoms.push({ kind: 'atom', id: `t${n++}`, text: seg.match.text }); continue }
+      const plain = seg.type === 'text' ? seg.text : seg.match.text
+      const tokens = findTimeTokens(plain)
+      if (tokens.length === 0) { if (plain) atoms.push({ kind: 'text', text: plain }); continue }
+      let cursor = 0
+      tokens.forEach((token, i) => {
+        const before = plain.slice(cursor, token.start)
+        const afterEnd = i + 1 < tokens.length ? tokens[i + 1].start : plain.length
+        const after = plain.slice(token.start + token.text.length, afterEnd)
+        const tt = token.text.trim()
+        const { pre, bondPrev, bondNext, post } = splitAroundTimeToken(before, after, tt.length)
+        const preRaw = pre.replace(new RegExp(ZWSP, 'g'), '')
+        if (preRaw) atoms.push({ kind: 'text', text: preRaw })
+        const suffix = bondNext.match(/^(ほど|くらい|ぐらい|程度)/)?.[0] ?? ''
+        const absorbed = bondNext.slice(suffix.length)
+        let bn = bondNext, pulled = ''
+        if (absorbed && [...absorbed].length >= 4 && !/[、。]$/.test(absorbed)) { bn = suffix; pulled = absorbed }
+        atoms.push({ kind: 'atom', id: `m${n++}`, text: bondPrev + tt + bn })
+        const postRaw = pulled + post.replace(new RegExp(ZWSP, 'g'), '')
+        if (postRaw) atoms.push({ kind: 'text', text: postRaw })
+        cursor = afterEnd
+      })
+    }
+    return atoms.map((a) => (a.kind === 'atom' ? { ...a, width: measure(a.text) } : a))
+  }
+  // メモアトム(ComposedMemoSentence.buildMemoAtoms 再現: 用語箱のみ・タイマー化しない・材料下線しない)
+  const buildMemoAtoms = (text) => {
+    const atoms = []
+    let n = 0
+    const seen = new Set()
+    for (const seg of splitByTerms(text, seen)) {
+      if (seg.type === 'term' && seg.tappable) atoms.push({ kind: 'atom', id: `t${n++}`, text: seg.match.text })
+      else { const t = seg.type === 'text' ? seg.text : seg.match.text; if (t) atoms.push({ kind: 'text', text: t }) }
+    }
+    return atoms.map((a) => (a.kind === 'atom' ? { ...a, width: measure(a.text) } : a))
+  }
+  const cs = (text, w, hang = false) => composeLines(buildStepAtoms(text), w, measure, { eps: 0, hangingPunct: hang }).map(lineToText)
+  const cm = (text, w, hang = false) => composeLines(buildMemoAtoms(text), w, measure, { eps: 0, hangingPunct: hang }).map(lineToText)
+
+  // 指摘1: 「白菜と豚肉を切り口を上にして耐熱皿に並べ、酒を回しかける。」(オーナー実機・白菜と豚しゃぶ手順3)。
+  // jaWrap が「白菜と豚肉を」+「切り口を」を1ユニットに過結合するため BASE は「白菜と豚肉を切り口を」で
+  // 「を」止まり文節が2つ詰まっていた。「を」バンチ分割+罰則DPで「白菜と豚肉を / 切り口を…」に離す。
+  const hakusai = '白菜と豚肉を切り口を上にして耐熱皿に並べ、酒を回しかける。'
+  for (const w of [16, 17, 18, 19]) {
+    for (const hang of [false, true]) {
+      eq(`指摘1 白菜と豚肉を 幅${w}hang${hang ? 1 : 0}(「白菜と豚肉を」で2行目に送る)`, cs(hakusai, w, hang), [
+        '白菜と豚肉を',
+        '切り口を上にして耐熱皿に並べ、',
+        '酒を回しかける。',
+      ])
+      // 「を」止まり文節が同じ行に2つ詰まらない(隣接『を』ペアの行が無い)
+      const lines = cs(hakusai, w, hang)
+      const bunched = lines.some((l) => {
+        const us = l.replace(new RegExp(ZWSP, 'g'), '')
+        return /を.*を$/.test(us) && us.length <= 12 // 1行内に「を」止まり文節が2つ詰まった短い行
+      })
+      eq(`指摘1 白菜と豚肉を 幅${w}hang${hang ? 1 : 0}(「を」バンチ無し)`, bunched, false)
+    }
+  }
+
+  // 巻き添え確認(同型・意図した改善): 鶏の照り焼き quickStep「耐熱皿に鶏肉を皮目を上にして並べ、たれをかける。」
+  // も「鶏肉を」「皮目を」の連続格助詞バンチ。同じ規則で「耐熱皿に鶏肉を / 皮目を…」に離れる(狭い幅16で発動)。
+  eq('指摘1 同型 鶏照り焼きquick 幅16(鶏肉を/皮目を に離す)', cs('耐熱皿に鶏肉を皮目を上にして並べ、たれをかける。', 16), [
+    '耐熱皿に鶏肉を',
+    '皮目を上にして並べ、',
+    'たれをかける。',
+  ])
+
+  // 承認済み回帰の非退行(「を」変更後も): 1つの「を」止まり文節は従来どおり(鮭の皮目を型を割らない)。
+  eq('指摘1 非退行 鮭の皮目を(単一「を」は割らない)', cs('みそだれを軽くぬぐった鮭の皮目を下にして焼く。', 17), [
+    'みそだれを軽くぬぐった鮭の皮目を',
+    '下にして焼く。',
+  ])
+  eq('指摘1 非退行 こんにゃく基準1 幅17', cs('鍋にたっぷりの湯を沸かし、こんにゃくを2分ほど下茹でしてざるにあげ、水気を切る。', 17), [
+    '鍋にたっぷりの湯を沸かし、',
+    'こんにゃくを2分ほど下茹でして',
+    'ざるにあげ、水気を切る。',
+  ])
+  eq('指摘1 非退行 しょうゆ・みりん・砂糖 幅17', cs('しょうゆ・みりん・砂糖を加えて炒り煮にする。', 17), [
+    'しょうゆ・みりん・砂糖を加えて',
+    '炒り煮にする。',
+  ])
+
+  // ---- メモ用アトム: 用語箱のみ・タイマー化しない・材料下線しない(タスク1) ----
+  // 時間表記を含むメモ文はタイマー箱(digit+分/時間/秒 の atom)を作らない=素のテキストのまま組む。
+  const memoTimeAtoms = buildMemoAtoms('赤ければ1分ずつ追加で加熱する。')
+  eq('メモ 時間表記をタイマー箱化しない', memoTimeAtoms.some((a) => a.kind === 'atom' && /\d\s*(分|時間|秒)/.test(a.text || '')), false)
+  eq('メモ 時間表記文の整合性(素テキストで組む) 幅12', cm('赤ければ1分ずつ追加で加熱する。', 12).join(''), '赤ければ1分ずつ追加で加熱する。')
+  // 辞書語(用語)はタップ可能な分割不能箱(atom)として残る
+  const memoTermAtoms = buildMemoAtoms('こんにゃくを下茹でしてから加える。')
+  eq('メモ 用語はタップ箱(atom)として残す', memoTermAtoms.some((a) => a.kind === 'atom' && a.text === '下茹で'), true)
+  // 用語箱を含むメモ文が禁則を守って組める(行頭に、。〜が来ない・整合)
+  for (const w of [10, 12, 14, 17]) {
+    const lines = cm('こんにゃくを下茹でしてから加え、味をなじませる。', w)
+    eq(`メモ 用語箱含む文 整合性 幅${w}`, lines.join(''), 'こんにゃくを下茹でしてから加え、味をなじませる。')
+    eq(`メモ 用語箱含む文 行頭禁則 幅${w}`, lines.some((l) => /^[、。〜]/.test(l)), false)
+  }
+  // 用語が無い純テキストのメモ文も読点優先で組める(・箇条書きの1文相当)
+  eq('メモ 純テキスト文 読点優先 幅8', cm('あいう、えお、かき。', 8), ['あいう、えお、', 'かき。'])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

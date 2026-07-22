@@ -24,7 +24,7 @@ function splitSentences(line: string): string[] {
 }
 
 import { renderJaUnits } from './jaUnits'
-import TermText from './TermText'
+import ComposedMemoSentence from './ComposedMemoSentence'
 import { findTermMatches } from '../logic/termSplit'
 import type { OpenTerm } from './TermPopover'
 
@@ -43,8 +43,11 @@ export function MemoText({ text, className, onOpenTerm, seen }: Props) {
   // この実行内で新規作成するコピー(propsのSetは書き換えない=StrictMode二重実行対策)
   const localSeen = new Set(seen)
   const renderSentence = (s: string, key: number) => {
-    if (!onOpenTerm) return renderJaUnits(s)
-    const node = <TermText key={key} text={s} seen={localSeen} onOpenTerm={onOpenTerm} />
+    // 各文を手順本文と同じ行組みエンジンで組む(2026-07-22 p12/memo-compose)。ただしメモ用の
+    // 軽量版 ComposedMemoSentence を使う=用語タップ箱のみで、タイマー化・材料下線はしない。
+    // 用語の既出(seen)判定・その更新は従来(TermText 時)と同一なので、タップ可否は1件も変わらない。
+    if (!onOpenTerm) return <ComposedMemoSentence key={key} text={s} />
+    const node = <ComposedMemoSentence key={key} text={s} seen={localSeen} onOpenTerm={onOpenTerm} />
     // 次の文のために、この文に含まれる用語を既出へ(splitByTermsは純粋化済みのため自前で更新)
     for (const m of findTermMatches(s)) localSeen.add(m.term.term)
     return node

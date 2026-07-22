@@ -57,7 +57,9 @@ type Clause = { pieces: Piece[]; hardBreakBefore: boolean }
 
 // 折返しの最小単位。文節境界と文節境界の間の1まとまり。テキストと箱が混在しうる
 // (例: 「こんにゃく+[2分ほど]」や「[下茹で]+して」が1ユニットになりうる)。
-type Unit = { parts: LinePiece[]; width: number }
+// bunchBreakBefore: 指摘1(便BB)の「連続格助詞『を』の過結合を解した」境界で始まるユニット。
+// このユニットの直前は、句が1行に収まらず折り返すときは必ず改行する(「白菜と豚肉を / 切り口を…」)。
+type Unit = { parts: LinePiece[]; width: number; bunchBreakBefore?: boolean }
 
 /** 括弧の中身の長さ(閉じ括弧までの文字数。閉じ括弧が無ければ文末まで)。要件Dの長短判定に使う */
 const LONG_PAREN_CONTENT = 12
@@ -211,6 +213,40 @@ function clauseUnits(clause: Clause, measure: MeasureText): Unit[] {
     boundaries.add(r.end)
   }
 
+  // 指摘1(便BB): 連続する格助詞「を」句の過結合を解す境界を足す。jaWrap は「白菜と豚肉を」+
+  // 「切り口を」を1ユニット「白菜と豚肉を切り口を」に結合するため、1行に「を」止まり文節が2つ
+  // 詰まる(オーナー実機・白菜と豚しゃぶ手順3)。結合前の細分節(normalizedSegments)を使い、
+  // マージ済みユニット内に「を」止まり文節が2つ以上あるものだけ、内部の「を」境界(末尾以外)を
+  // ユニット境界へ昇格し、そこで始まるユニットに bunchBreakBefore 印を付ける。句が1行に収まる幅なら
+  // 従来どおり1行に置く(印は折り返し時のみ効く=過剰分割しない)。折り返すときだけ、印の直前で必ず
+  // 改行して連続格助詞を分ける(greedy/DP が構造的に強制。px 実測では slack² が支配的でコスト罰則は
+  // 効かないため構造で実現)。箱(タイマー/用語)に重なる
+  // ユニットは対象外(格助詞分割は地の文だけ)。「を」止まり文節が1つのユニット(「鮭の皮目を下にして」
+  // 等)は非対象=借用パスの承認済み挙動を壊さない。
+  // woSplitOffsets: ここで昇格した「を」境界のオフセット集合。ここで始まるユニットは、句が折り返す
+  // ときに必ず改行する(「白菜と豚肉を」の直後で切る)。自然に隣り合っただけの2つの「を」句
+  // (「しょうがを」|「混ぜ合わせてたれを」=間に動詞。過結合ではない)には印を付けない=巻き添えを防ぐ。
+  const woSplitOffsets = new Set<number>()
+  {
+    const fineEnds: { start: number; end: number; isWo: boolean }[] = []
+    let fo = 0
+    for (const s of normalizedSegments(full)) {
+      const start = fo
+      fo += s.length
+      fineEnds.push({ start, end: fo, isWo: /を$/.test(s) })
+    }
+    const atomRanges = ranges.filter((r) => r.piece.kind === 'atom')
+    const sortedB = [...boundaries].sort((a, b) => a - b)
+    for (let bi = 0; bi < sortedB.length - 1; bi++) {
+      const a = sortedB[bi]
+      const b = sortedB[bi + 1]
+      if (atomRanges.some((r) => r.start < b && r.end > a)) continue
+      const woInUnit = fineEnds.filter((f) => f.start >= a && f.end <= b && f.isWo)
+      if (woInUnit.length < 2) continue
+      for (const f of woInUnit) if (f.end < b) { boundaries.add(f.end); woSplitOffsets.add(f.end) } // 末尾以外の「を」境界を昇格
+    }
+  }
+
   // 3) 隣り合う境界の間を1ユニットにする。各ユニットは重なるピース片(テキスト/箱)を順に持つ
   const sorted = [...boundaries].sort((a, b) => a - b)
   const units: Unit[] = []
@@ -233,7 +269,8 @@ function clauseUnits(clause: Clause, measure: MeasureText): Unit[] {
         width += measure(txt)
       }
     }
-    if (parts.length > 0) units.push({ parts, width })
+    // 「を」バンチ分割で昇格した境界 a で始まるユニットは、折り返し時に必ずその手前で改行する(指摘1)
+    if (parts.length > 0) units.push({ parts, width, bunchBreakBefore: woSplitOffsets.has(a) })
   }
   return units
 }
@@ -296,7 +333,11 @@ function greedyGroups(units: Unit[], maxWidth: number, startUsed: number, eps: n
   let line: Unit[] = []
   let used = startUsed
   for (const u of units) {
-    if (line.length > 0 && used + u.width - corr(u) > maxWidth + eps) {
+    // 指摘1(便BB): 過結合を解した「を」境界で始まるユニット(bunchBreakBefore)は、幅に余裕が
+    // あっても改行して連続格助詞を同じ行に詰めない(「白菜と豚肉を / 切り口を…」)。実DOMは px 実測で
+    // slack² が大きく、コスト罰則では均等割り(=詰め込み)に負けるため、構造的な強制改行で実現する。
+    // clauseUnits の「を」分割が顕在化した境界だけが対象=自然に隣接しただけの「を」句は巻き込まない。
+    if (line.length > 0 && (u.bunchBreakBefore || used + u.width - corr(u) > maxWidth + eps)) {
       groups.push(line)
       line = []
       used = 0
@@ -319,6 +360,7 @@ function penaltyGroups(units: Unit[], maxWidth: number, startUsed: number, corr:
   const w = units.map((u) => u.width)
   const chars = units.map((u) => unitChars(u))
   const cor = units.map((u) => corr(u)) // 要件4: 行末が「、」「。」のときのぶら下げ補正(px)
+  const bbb = units.map((u) => u.bunchBreakBefore === true) // 指摘1: 「を」バンチ分割で始まるユニット
   // 要件3: 句点「。」で終わる最終行は切れ端とみなさない(runt罰則を科さない)。
   const lastEndsPeriod = endsWithPeriod(unitText(units[n - 1]))
   const dp = new Array(n + 1).fill(Infinity)
@@ -330,6 +372,10 @@ function penaltyGroups(units: Unit[], maxWidth: number, startUsed: number, corr:
     for (let j = i + 1; j <= n; j++) {
       lineW += w[j - 1]
       lineCh += chars[j - 1]
+      // 指摘1(便BB): 「を」バンチ分割で始まるユニット(bbb)を行の途中に含む分割は不可。行を
+      // その手前で閉じさせる。グリーディと同じ「連続する『を』句を同じ行に詰めない」規則を DP でも
+      // 構造的に守る(px 実測では slack² が支配的でコスト罰則が効かないため、実現可能集合から外す)。
+      if (j - 1 > i && bbb[j - 1]) break
       // 行末ユニット(j-1)が「、」「。」で終わるならその1字分を差し引いた実効幅で slack を測る(要件4)
       const totalW = (i === 0 ? startUsed : 0) + lineW - cor[j - 1]
       const slack = maxWidth - totalW

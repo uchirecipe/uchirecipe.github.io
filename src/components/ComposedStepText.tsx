@@ -1,30 +1,24 @@
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, type ReactNode } from 'react'
 import { Timer as TimerIcon } from 'lucide-react'
 import { findTimeTokens } from '../logic/time'
 import { splitAroundTimeToken, ZWSP } from '../logic/jaWrap'
 import { splitByTerms } from '../logic/termSplit'
-import { renderWrapped, underlineIngredients } from './jaUnits'
-import {
-  composeLines,
-  LINE_COMPOSE_ENABLED,
-  type ComposeAtom,
-  type LinePiece,
-} from '../logic/lineCompose'
+import { underlineIngredients } from './jaUnits'
 import { ja } from '../i18n/ja'
 import type { OpenTerm } from './TermPopover'
 import TimeText from './TimeText'
 import TermText from './TermText'
+import ComposedLines, { type BuiltAtom } from './ComposedLines'
 
-// 読点優先・幅実測の行組みエンジンの描画層(2026-07-21 p9/line-compose)。
+// 読点優先・幅実測の行組みエンジンの「手順本文用アトム分解」層(2026-07-21 p9/line-compose)。
 //
 // 手順本文の描画は「用語(TermText)→時間(TimeText)→材料下線/ZWSP(renderWrapped)」の3層。
 // このコンポーネントは、その3層が作る「アトム列」(テキスト片 + タイマー/用語の分割不能な箱)を
-// 組み立て、コンテナ幅と箱の実幅を測り、logic/lineCompose の composeLines() で行に割り付けて
-// 各行を <span className="block"> として描き直す。箱の中身(ボタン・下線・splitAroundTimeToken の
-// 結合規則)には一切手を入れず、行への割り付けだけを新エンジンが決める。
+// 組み立てて ComposedLines に渡す。箱の中身(ボタン・下線・splitAroundTimeToken の結合規則)には
+// 一切手を入れず、行への割り付けは共通土台 ComposedLines(logic/lineCompose)が決める。
 //
 // フォールバック: 機能フラグ OFF / コンテナ幅ゼロ / 例外時は、従来どおり TimeText・TermText を
-// そのまま描く(FOUC 回避も兼ねる)。初回描画も測定が済むまでは従来描画。
+// そのまま描く(FOUC 回避も兼ねる)。初回描画も測定が済むまでは従来描画(ComposedLines が担当)。
 //
 // コピー仕様の変更: 行が <span className="block"> になるため、範囲選択してコピーすると
 // 行区切りが改行として入る(従来は1段落=改行なし)。手順は元々1文なので実害は小さい。
@@ -35,10 +29,6 @@ type Props = {
   onOpenTerm: OpenTerm
   onStartTimer: (tokenText: string, seconds: number) => void
 }
-
-type BuiltAtom =
-  | { kind: 'text'; text: string }
-  | { kind: 'atom'; id: string; text: string; node: ReactNode }
 
 // タイマーボタンの箱(TimeText と同一の JSX。前後の結合文節ごと nowrap で1つの箱にする)
 function timerChip(
@@ -68,8 +58,9 @@ function timerChip(
   )
 }
 
-// 用語スパンの箱(TermText の tappable 分岐と同一の JSX。display:inline のまま=atomic化しない)
-function termChip(match: ReturnType<typeof splitByTerms>[number], onOpenTerm: OpenTerm): ReactNode {
+// 用語スパンの箱(TermText の tappable 分岐と同一の JSX。display:inline のまま=atomic化しない)。
+// メモの用語箱(ComposedMemoSentence)からも同じ箱を使えるよう export する。
+export function termChip(match: ReturnType<typeof splitByTerms>[number], onOpenTerm: OpenTerm): ReactNode {
   if (match.type !== 'term') return null
   const term = match.match.term
   return (
@@ -207,57 +198,6 @@ function mergeTildeBoxes(atoms: BuiltAtom[]): BuiltAtom[] {
   return out
 }
 
-// 本文フォントで文字幅を測る canvas 測定器を作る(材料下線・ZWSP は幅に影響しない)。
-// 要件E: canvas の measureText は letter-spacing を無視するため、computed style の
-// letterSpacing が normal 以外なら「measureText + letterSpacing × 文字数」で補正する。
-// これを塞がないと実測が過小になり、語中の緊急折返し(overflow-wrap:anywhere)を誘発しうる。
-let sharedCanvas: HTMLCanvasElement | null = null
-function makeMeasurer(el: HTMLElement): (t: string) => number {
-  const cs = getComputedStyle(el)
-  const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
-  sharedCanvas ??= document.createElement('canvas')
-  const ctx = sharedCanvas.getContext('2d')
-  if (!ctx) throw new Error('canvas 2d context 取得不可')
-  ctx.font = font
-  const zwsp = new RegExp(ZWSP, 'g')
-  const lsRaw = cs.letterSpacing
-  const ls = lsRaw && lsRaw !== 'normal' ? parseFloat(lsRaw) : 0
-  return (t: string) => {
-    const s = t.replace(zwsp, '')
-    const base = ctx.measureText(s).width
-    return ls ? base + ls * [...s].length : base
-  }
-}
-
-// 1行(LinePiece列)を描画ノードへ。連続するテキスト片は1本のランにまとめ、
-// renderWrapped で材料下線+文節ZWSP(微小な測定ズレ時のフォールバック折返し点)を付ける。
-// 箱は id で実ノードを引く。アイテム間には ZWSP を挟み、万一のはみ出し時に文節境界で折れるようにする。
-function renderLine(
-  line: LinePiece[],
-  nodeById: Map<string, ReactNode>,
-  ingredientNames: readonly string[] | undefined,
-): ReactNode {
-  type Item = { type: 'run'; units: string[] } | { type: 'atom'; id: string }
-  const items: Item[] = []
-  for (const p of line) {
-    if (p.kind === 'text') {
-      const last = items[items.length - 1]
-      if (last && last.type === 'run') last.units.push(p.text)
-      else items.push({ type: 'run', units: [p.text] })
-    } else {
-      items.push({ type: 'atom', id: p.id })
-    }
-  }
-  return items.map((item, idx) => (
-    <Fragment key={idx}>
-      {idx > 0 ? ZWSP : null}
-      {item.type === 'run'
-        ? renderWrapped(item.units.join(ZWSP), ingredientNames)
-        : nodeById.get(item.id)}
-    </Fragment>
-  ))
-}
-
 export default function ComposedStepText({ text, ingredientNames, onOpenTerm, onStartTimer }: Props) {
   // コールバックは ref 経由の安定ラッパーで包み、アトム(=箱ノード)を text/材料名だけに依存させる。
   // (RecipeDetailPage は onStartTimer/ingredientNames を毎描画で作り直すため、素で依存すると
@@ -267,7 +207,7 @@ export default function ComposedStepText({ text, ingredientNames, onOpenTerm, on
   onOpenTermRef.current = onOpenTerm
   onStartTimerRef.current = onStartTimer
 
-  const namesKey = ingredientNames ? ingredientNames.join('') : ''
+  const namesKey = ingredientNames ? ingredientNames.join('') : ''
   const builtAtoms = useMemo(
     () =>
       buildAtoms(
@@ -280,87 +220,7 @@ export default function ComposedStepText({ text, ingredientNames, onOpenTerm, on
     [text, namesKey],
   )
 
-  const nodeById = useMemo(() => {
-    const m = new Map<string, ReactNode>()
-    for (const a of builtAtoms) if (a.kind === 'atom') m.set(a.id, a.node)
-    return m
-  }, [builtAtoms])
-
-  const rootRef = useRef<HTMLSpanElement>(null)
-  const boxRefs = useRef<Map<string, HTMLElement>>(new Map())
-  const lastWidthRef = useRef(-1)
-  const [version, setVersion] = useState(0) // 幅変化・フォント確定で再計測を促す
-  const [lines, setLines] = useState<LinePiece[][] | null>(null)
-
-  const enabled = LINE_COMPOSE_ENABLED
-
-  // コンテナ幅の監視(回転・リサイズ)と、フォント確定後の1回再計測。
-  // 幅が実際に変わったときだけ version を上げる=自分の再描画(高さ変化)ではループしない。
-  useLayoutEffect(() => {
-    if (!enabled) return
-    const el = rootRef.current
-    if (!el) return
-    const onResize = () => {
-      const w = el.clientWidth
-      if (Math.abs(w - lastWidthRef.current) >= 1) {
-        lastWidthRef.current = w
-        setVersion((v) => v + 1)
-      }
-    }
-    const ro = new ResizeObserver(onResize)
-    ro.observe(el)
-    let cancelled = false
-    // フォント確定後に一度だけ再計測(初回計測はフォールバックフォントの幅かもしれないため)
-    const fontsReady = document.fonts?.ready
-    if (fontsReady) {
-      fontsReady.then(() => { if (!cancelled) setVersion((v) => v + 1) }).catch(() => {})
-    }
-    return () => {
-      cancelled = true
-      ro.disconnect()
-    }
-  }, [enabled])
-
-  // 計測 → composeLines → 行の確定。例外時は lines=null にして従来描画へ落とす。
-  useLayoutEffect(() => {
-    if (!enabled) {
-      setLines(null)
-      return
-    }
-    const el = rootRef.current
-    if (!el) return
-    try {
-      const width = el.clientWidth
-      if (width <= 0) {
-        setLines(null)
-        return
-      }
-      const measure = makeMeasurer(el)
-      // 要件4: 行末の読点/句点を枠外にぶら下げる hanging-punctuation:allow-end に対応する
-      // ブラウザ(WebKit系)でだけ、行末の「、」「。」1字分をぶら下げ幅として収まり判定から差し引く。
-      // Chromium 等は非対応なので false=従来判定(句読点も1字として数える)に倒し、はみ出しを防ぐ。
-      const hangingPunct =
-        typeof CSS !== 'undefined' &&
-        typeof CSS.supports === 'function' &&
-        CSS.supports('hanging-punctuation', 'allow-end')
-      const composeAtoms: ComposeAtom[] = builtAtoms.map((a) =>
-        a.kind === 'text'
-          ? { kind: 'text', text: a.text }
-          : {
-              kind: 'atom',
-              id: a.id,
-              text: a.text,
-              width: boxRefs.current.get(a.id)?.getBoundingClientRect().width ?? measure(a.text),
-            },
-      )
-      setLines(composeLines(composeAtoms, width, measure, { eps: 1, hangingPunct }))
-    } catch {
-      setLines(null) // 測定不能・例外時は従来 ZWSP 描画のまま(フォールバック)
-    }
-    // version を依存に入れて幅変化・フォント確定で再計測する
-  }, [enabled, builtAtoms, ingredientNames, version])
-
-  // 従来描画(フォールバック兼 FOUC 回避)。機能フラグ OFF・計測前・例外時に使う。
+  // 従来描画(フォールバック兼 FOUC 回避)。機能フラグ OFF・計測前・例外時に ComposedLines が使う。
   const fallback = (
     <TermText
       text={text}
@@ -371,45 +231,5 @@ export default function ComposedStepText({ text, ingredientNames, onOpenTerm, on
     />
   )
 
-  if (!enabled) return fallback
-
-  return (
-    <span ref={rootRef} className="block" data-compose-root="">
-      {lines === null
-        ? fallback
-        : lines.map((line, li) => (
-            <span key={li} className="block" data-compose-line="">
-              {renderLine(line, nodeById, ingredientNames)}
-            </span>
-          ))}
-      {/* 箱の実幅を測る隠し層。aria-hidden で支援技術・Playwright の role 検索から除外し、
-          可視の箱(合成後 or フォールバック)とロールが二重にならないようにする。
-          visibility:hidden はレイアウト(幅)を保つので getBoundingClientRect で測れる。 */}
-      <span
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          left: -9999,
-          top: 0,
-          visibility: 'hidden',
-          whiteSpace: 'nowrap',
-          pointerEvents: 'none',
-        }}
-      >
-        {builtAtoms.map((a) =>
-          a.kind === 'atom' ? (
-            <span
-              key={a.id}
-              ref={(node) => {
-                if (node) boxRefs.current.set(a.id, node)
-                else boxRefs.current.delete(a.id)
-              }}
-            >
-              {a.node}
-            </span>
-          ) : null,
-        )}
-      </span>
-    </span>
-  )
+  return <ComposedLines builtAtoms={builtAtoms} fallback={fallback} ingredientNames={ingredientNames} />
 }
