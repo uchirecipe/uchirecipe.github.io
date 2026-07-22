@@ -50,6 +50,7 @@ import {
   monthLeadingBlanks,
   suggestForSlot,
   suggestPairForSlot,
+  planWeekFill,
   todayPlanMismatch,
   normalizeDateRange,
   rangeDayCount,
@@ -617,54 +618,58 @@ export default function MealPlanPage() {
   }
 
   /**
-   * 週の表示中の食事帯すべてを、押すたびに新しい提案で埋め直す(再抽選)。
-   * 以前は空いている枠だけを埋める仕様だったため、埋まった後の2回目以降のタップが
-   * 無反応になっていた(2026-07-14オーナー実機フィードバック)。この対策として、
-   * 表示中の全枠(手動で選んだ枠も含む)の既存割り当てを一旦クリアしてから、
-   * suggestPairForSlotの既存のランダム性を使って主菜+副菜のペアで再提案する。
-   * 「まとめて立てる」という一括操作の性質上、手動で選んだ枠も上書きされる挙動は
-   * 妥当と判断した(Fable設計2026-07-14)。
-   * 表示中の食事帯に含まれない枠(例: 朝食を非表示にしている状態で夕食だけ埋め直す場合の朝食)
-   * の既存レシピは、重複を避けるための除外対象として引き続き使う。
-   * 過去日(今日より前)の枠は対象外(2026-07-16 便W-⑤a・上書きも新規埋めもしない＝今日以降だけ埋める)。
-   * 過去日の既存の割り当ては「触らない」バケットに入るため、自動的に重複回避の除外対象にも含まれる
+   * 週の表示中の食事帯を、自動提案でまとめて埋める。
+   *
+   * 2026-07-22 便BE(外部レビューで見つかった欠陥の修正): 以前は表示中の全枠(手動で選んだ枠も含む)を
+   * 一旦クリアしてから再提案していたため、手動で入れた献立が無警告で上書きされて消えていた。
+   * これをやめ、planWeekFill(logic/mealPlan.ts)で枠を仕分けする:
+   *   - 手動配置(auto以外)がある枠 → 丸ごと残す(上書きしない)
+   *   - 空き枠・自動提案由来だけの枠 → 自動行を消してから主菜+副菜のペアで埋め直す
+   * これにより「手動配置の保護」と「押すたびの再抽選(2026-07-14仕様。自動枠に限って維持)」を両立する。
+   * 埋める枠にはauto=trueを付け、次回もこの枠だけが再抽選対象になるようにする。
+   * 過去日・非表示帯の枠は対象外で、重複回避の除外対象としてのみ使う(planWeekFill内で処理)。
+   * 手動枠を残した場合は結果メッセージで明示する(空き枠だけ埋めたことも伝わる)。
    */
   const fillWeek = async () => {
     if (!recipes) return
     setMessage('')
-    const futureDates = dates.filter((date) => !isPastDate(date, today))
-    const touchedKeys = new Set(
-      futureDates.flatMap((date) => visibleSlots.map((slot) => `${date}|${slot}`)),
-    )
-    const usedRecipeIds = (entries ?? [])
-      .filter((e) => !touchedKeys.has(`${e.date}|${e.slot}`))
-      .map((e) => e.recipeId)
-    for (const date of futureDates) {
-      for (const slot of visibleSlots) {
-        const slotEntries = entriesByDateSlot.get(`${date}|${slot}`) ?? []
-        for (const entry of slotEntries) {
-          await removeMealEntry(entry.id!)
-        }
-        const { main, side } = suggestPairForSlot(visibleRecipes, {
-          quickOnly,
-          excludeNg: true,
-          ngIngredients: settings?.ngIngredients ?? [],
-          usedRecipeIds,
-          slot,
-          genre: genreFilter,
-          preferHighProtein,
-          yesterdayRecipeIds,
-        })
-        if (main) {
-          await addMealEntry(date, slot, main.id!, 'main')
-          usedRecipeIds.push(main.id!)
-        }
-        if (side) {
-          await addMealEntry(date, slot, side.id!, 'side')
-          usedRecipeIds.push(side.id!)
-        }
+    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
+    // 埋め直す枠に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
+    for (const id of plan.autoEntryIdsToRemove) {
+      await removeMealEntry(id)
+    }
+    const usedRecipeIds = [...plan.usedRecipeIds]
+    for (const { date, slot } of plan.slotsToFill) {
+      const { main, side } = suggestPairForSlot(visibleRecipes, {
+        quickOnly,
+        excludeNg: true,
+        ngIngredients: settings?.ngIngredients ?? [],
+        usedRecipeIds,
+        slot,
+        genre: genreFilter,
+        preferHighProtein,
+        yesterdayRecipeIds,
+      })
+      if (main) {
+        await addMealEntry(date, slot, main.id!, 'main', true)
+        usedRecipeIds.push(main.id!)
+      }
+      if (side) {
+        await addMealEntry(date, slot, side.id!, 'side', true)
+        usedRecipeIds.push(side.id!)
       }
     }
+    // 結果メッセージ。手動枠を残した場合と、今日を含む週で「今日の献立」(日タブ)が
+    // 自動では変わらない場合(タスク2の混乱対策)を、状況に応じて出す
+    const messages: string[] = []
+    if (plan.preservedSlotKeys.size > 0) {
+      messages.push(ja.mealPlan.fillWeekKeptManual.replace('{n}', String(plan.preservedSlotKeys.size)))
+    }
+    const todayRefilled = plan.slotsToFill.some((s) => s.date === today)
+    if (todayRefilled && (todayList?.length ?? 0) > 0) {
+      messages.push(ja.mealPlan.fillWeekTodayNotice)
+    }
+    if (messages.length > 0) setMessage(messages.join(' '))
   }
 
   // 週タブ「この帯の今週分を空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。

@@ -229,6 +229,10 @@
 //         日モーダル(便U-5)が出ないこと・モード解除で日モーダルが復活すること・終了日<開始日の
 //         順にタップしても自動で入れ替わり結果が変わらないこと。原価は既存の週集計と同方式
 //         (登録人数基準)のため、期間合計が肉じゃが単品の概算食費の2倍と一致することで検証する) /
+//         MEALPLAN-08(手動配置の保護・2026-07-22 便BE・外部レビュー欠陥修正: 週の枠に手動で
+//         レシピを入れた後「まとめて献立を立てる」を押しても、手動配置の行が上書き削除されず
+//         同じid・同じレシピのまま残ること(旧実装は無警告で全消し)。空き枠は埋まり、手動枠を
+//         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
 //         THEMESORT-01(一覧の並び替えに「基本レシピ順」を追加・2026-07-17オーナー指示で「テーマごと」
 //         として新設: 並び替えパネルに選択肢として出ること・選択すると先頭カードが基本レシピ
 //         (「基本レシピ」バッジ)になること・テーマ「高たんぱくごはん」(kintore・10品)取り込み後は
@@ -3357,9 +3361,11 @@ try {
 
   // --- MEALPLAN-04: 「まとめて献立を立てる」の再抽選(修正1b・2026-07-14オーナー実機
   // フィードバック)。以前は空き枠だけ埋めるため2回目以降のタップが無反応だった。
-  // 押すたびに表示中の全枠(手動で選んだ枠含む)の既存割り当てを一旦クリアしてから
-  // 主菜+副菜のペアで埋め直す(再抽選)ことを、mealPlansテーブルの行idが
-  // クリア→再作成で入れ替わる(削除+追加のため必ず新しいautoIncrement idになる)ことで検証する ---
+  // 押すたびに「自動提案由来の枠」を一旦クリアしてから主菜+副菜のペアで埋め直す(再抽選)。
+  // 2026-07-22 便BEで「手動配置の枠は保護する」仕様が入ったが、このテストは手動配置が
+  // 一切ない(全枠が自動提案由来)状態なので、全枠が再抽選対象になり従来どおり全idが入れ替わる。
+  // mealPlansテーブルの行idがクリア→再作成で入れ替わる(削除+追加のため必ず新しいautoIncrement
+  // idになる)ことで再抽選を検証する。手動枠が保護されることは MEALPLAN-08 で別途検証する ---
   currentCheck = 'MEALPLAN-04'
   {
     const mp4Browser = await chromium.launch()
@@ -3622,6 +3628,113 @@ try {
       )
     } finally {
       await mp6Browser.close()
+    }
+  }
+
+  // --- MEALPLAN-08: 手動配置の保護(2026-07-22 便BE・外部レビューで見つかったUX欠陥の修正)。
+  // 週の枠に手動でレシピ(肉じゃが)を入れた直後に「まとめて献立を立てる」を押しても、
+  // その手動配置が無警告で上書き削除されず、同じmealPlans行id・同じレシピのまま残ることを
+  // IndexedDB直読みで検証する。旧実装は表示中の全枠を一旦クリアしていたため手動配置が消えていた。
+  // 併せて、空き枠は自動提案で埋まること・「手動で入れた◯枠は残した」トーストが出ること・
+  // 2回押しても手動枠が保護され続けること(自動枠だけ再抽選)を確認する。
+  // まっさらプロファイルで検証するため専用browser/contextを使う ---
+  currentCheck = 'MEALPLAN-08'
+  {
+    const mp8Browser = await chromium.launch()
+    const mp8Context = await mp8Browser.newContext()
+    const mp8Page = await mp8Context.newPage()
+    mp8Page.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-08] ${text}`)
+    })
+    mp8Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-08] ${err.message}`)
+    })
+    try {
+      // 夕食枠の全mealPlans行(id・recipeId・auto)を読む(手動行が上書きされないことの検証用)
+      const dinnerRows = () =>
+        mp8Page.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const tx = idb.transaction('mealPlans', 'readonly')
+                const getAllReq = tx.objectStore('mealPlans').getAll()
+                getAllReq.onsuccess = () =>
+                  resolve(
+                    getAllReq.result
+                      .filter((row) => row.slot === 'dinner')
+                      .map((row) => ({ id: row.id, recipeId: row.recipeId, role: row.role, auto: row.auto ?? false })),
+                  )
+                getAllReq.onerror = () => reject(getAllReq.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+
+      await mp8Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mp8Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
+      await mp8Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp8Page.waitForTimeout(300)
+      // 全日程を未来日にするため「次の週」へ(過去日保護と切り分ける。MEALPLAN-03/04と同じ理由)
+      await mp8Page.locator('button[aria-label="次の週"]').click()
+      await mp8Page.waitForTimeout(300)
+
+      // 月曜・夕食の主菜行(先頭の「未定」)に肉じゃがを手動で割り当てる
+      await mp8Page.getByText('未定', { exact: true }).first().click()
+      await mp8Page.waitForTimeout(400)
+      await mp8Page.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mp8Page.waitForTimeout(300)
+      await mp8Page.getByText('肉じゃが', { exact: true }).first().click()
+      await mp8Page.waitForTimeout(400)
+
+      const rowsBefore = await dinnerRows()
+      check('MEALPLAN-08 前提: 手動配置の夕食行が1件だけある', rowsBefore.length === 1)
+      const manual = rowsBefore[0]
+      check('MEALPLAN-08 前提: 手動配置の行はauto=false(手動扱い)', manual.auto === false)
+
+      // 「まとめて献立を立てる」を押す
+      const fillWeekBtn = mp8Page.getByRole('button', { name: 'まとめて献立を立てる' })
+      await fillWeekBtn.click()
+      await mp8Page.waitForTimeout(1000)
+
+      // 核心: 手動配置の行が同じid・同じレシピ・手動のまま残る(無警告で上書き削除されない)
+      const rowsAfter = await dinnerRows()
+      check(
+        'MEALPLAN-08 手動配置の行が上書き削除されず、同じid・同じレシピのまま残る',
+        rowsAfter.some((r) => r.id === manual.id && r.recipeId === manual.recipeId && r.auto === false),
+      )
+      // 肉じゃがが画面にも残っている
+      check(
+        'MEALPLAN-08 肉じゃがが週ビューに残って見える',
+        await mp8Page.getByRole('button', { name: '肉じゃが' }).first().isVisible(),
+      )
+      // 空き枠は自動提案で埋まる(手動の1枠以外の夕食に自動行が増える)
+      const autoRowsAfter = rowsAfter.filter((r) => r.auto === true)
+      check(
+        'MEALPLAN-08 空いていた枠は自動提案で埋まる(自動行が1件以上増える)',
+        autoRowsAfter.length >= 1,
+      )
+      // 「手動で入れた◯枠は残した」トーストが出る(結果メッセージで明示)
+      check(
+        'MEALPLAN-08 手動枠を残した旨のトーストが出る',
+        await mp8Page.getByText('手動で入れた', { exact: false }).first().isVisible(),
+      )
+
+      // 2回目のタップでも手動枠は保護され続ける(自動枠だけ再抽選される)
+      await fillWeekBtn.click()
+      await mp8Page.waitForTimeout(1000)
+      const rowsAfter2 = await dinnerRows()
+      check(
+        'MEALPLAN-08 2回押しても手動配置の行(id・レシピ)は保護され続ける',
+        rowsAfter2.some((r) => r.id === manual.id && r.recipeId === manual.recipeId && r.auto === false),
+      )
+    } finally {
+      await mp8Browser.close()
     }
   }
 
