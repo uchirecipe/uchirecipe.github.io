@@ -24,10 +24,7 @@ import { READINGS_VERSION } from '../src/logic/ingredientReadings.ts'
 import { formatMinutesSecondsLabel } from '../src/logic/time.ts'
 import {
   normalizeProCode,
-  normalizePackCode,
-  hasPaidRecipeAccess,
   isValidProCode,
-  isValidPackCode,
   detectCodeKind,
   maskUnlockCode,
 } from '../src/logic/pro.ts'
@@ -1371,22 +1368,20 @@ eq(
 
 // ---------- pro.ts(コード正規化) ----------
 eq('Pro: 全角・小文字・空白ゆらぎ', normalizeProCode(' ｕｒ-ab12-cd34 '), 'UR-AB12-CD34')
-eq('パック: 同上', normalizePackCode('up-xxxx-yyyy'), 'UP-XXXX-YYYY')
-eq('アクセス判定: 両方なし', hasPaidRecipeAccess({ proCode: undefined, recipePackCode: undefined }), false)
-eq('アクセス判定: パックのみ', hasPaidRecipeAccess({ proCode: undefined, recipePackCode: 'UP-X' }), true)
-eq('アクセス判定: Proのみ', hasPaidRecipeAccess({ proCode: 'UR-X', recipePackCode: undefined }), true)
 
-// ---------- detectCodeKind(2026-07-17設定ゼロベース裁定#7: 購入と解錠1画面統合の種別自動判定) ----------
+// ---------- detectCodeKind(2026-07-17設定ゼロベース裁定#7の種別判定→2026-07-22全無料化でPro(UR-)のみ) ----------
+// 2026-07-22: 収録レシピは全て無料になり、追加レシピパック(UP-)は製品廃止。有効なコードはPro(UR-)のみ。
 eq('種別判定: UR-はpro', detectCodeKind('UR-AB12-CD34'), 'pro')
-eq('種別判定: UP-はpack', detectCodeKind('UP-AB12-CD34'), 'pack')
+eq('種別判定: 廃止したUP-はunknown(2026-07-22全無料化でパック廃止)', detectCodeKind('UP-AB12-CD34'), 'unknown')
 eq('種別判定: 全角・小文字ゆらぎでも判定できる(normalizeProCode経由)', detectCodeKind(' ｕｒ-ab12-cd34 '), 'pro')
 eq('種別判定: どちらでもないprefixはunknown', detectCodeKind('XX-AB12-CD34'), 'unknown')
 eq('種別判定: 空文字はunknown', detectCodeKind(''), 'unknown')
 eq('種別判定: prefixのみ(ハイフン無し)はunknown', detectCodeKind('URXXXX'), 'unknown')
 
 // ---------- maskUnlockCode(2026-07-17設定ゼロベース裁定#4: 解錠コードのマスク表示+コピー) ----------
+// prefix非依存の純粋な文字列マスク(Proコードのマスク表示に使う)
 eq('マスク: 標準形式は末尾4文字だけ見せる', maskUnlockCode('UR-AB12-CD34'), 'UR-****CD34')
-eq('マスク: パックコードも同様', maskUnlockCode('UP-1234-5678'), 'UP-****5678')
+eq('マスク: 4-4形式は末尾4文字だけ見せる', maskUnlockCode('UR-1234-5678'), 'UR-****5678')
 eq('マスク: 残り4文字以下は全部隠す', maskUnlockCode('UR-AB'), 'UR-**')
 eq('マスク: ハイフンが無いコードはそのまま返す', maskUnlockCode('URABCDEFGH'), 'URABCDEFGH')
 
@@ -3851,11 +3846,11 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     eq(`SHA-256 Uint8Array直接入力一致(長さ${len})`, sha256Hex(bytes), await subtleHex(bytes))
   }
 
-  // isValidProCode/isValidPackCode: crypto.subtle経由(既定)とフォールバック強制の両方で
-  // 同じ判定になること。テスト用コードはdocs/22の実機確認チェックリストに記載のもの
-  // (販売用ではなく、既にPRO_CODE_HASHES/RECIPE_PACK_CODE_HASHESにハッシュが含まれている)
+  // isValidProCode: crypto.subtle経由(既定)とフォールバック強制の両方で同じ判定になること。
+  // テスト用コードはdocs/22の実機確認チェックリストに記載のもの(販売用ではなく、既に
+  // PRO_CODE_HASHESにハッシュが含まれている)。2026-07-22の全無料化で追加レシピパック(UP-)は
+  // 製品廃止したため、isValidPackCodeのケースは削除した(コード検証はPro=UR-のみになった)。
   const validProCode = 'UR-96QS-2VSZ'
-  const validPackCode = 'UP-2W3D-QZPR'
 
   eq('isValidProCode 正規コード(crypto.subtle)', await isValidProCode(validProCode), true)
   eq('isValidProCode 正規コード(フォールバック強制)', await isValidProCode(validProCode, true), true)
@@ -3873,15 +3868,6 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   eq('isValidProCode 不正コード(フォールバック強制)', await isValidProCode('UR-0000-0000', true), false)
   eq('isValidProCode 空文字列(crypto.subtle)', await isValidProCode(''), false)
   eq('isValidProCode 空文字列(フォールバック強制)', await isValidProCode('', true), false)
-
-  eq('isValidPackCode 正規コード(crypto.subtle)', await isValidPackCode(validPackCode), true)
-  eq('isValidPackCode 正規コード(フォールバック強制)', await isValidPackCode(validPackCode, true), true)
-  eq('isValidPackCode 不正コード(crypto.subtle)', await isValidPackCode('UP-0000-0000'), false)
-  eq(
-    'isValidPackCode 不正コード(フォールバック強制)',
-    await isValidPackCode('UP-0000-0000', true),
-    false,
-  )
 }
 
 // ---------- appRefresh: 「アプリを更新する」ボタンの処理本体(2026-07-16新設) ----------
@@ -5113,12 +5099,3 @@ eq('isImageContentType: 空文字はfalse', isImageContentType(''), false)
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
 process.exit(failures.length > 0 ? 1 : 0)
-
-// ---- isPreviewSetId: 下見セットは課金ゲート対象外(2026-07-17・オーナー下見不能の恒久修正) ----
-{
-  const { isPreviewSetId } = await import('../src/logic/pro.ts')
-  eq('下見セット(review2)はプレビュー扱い', isPreviewSetId('review2'), true)
-  eq('下見セット(review16)はプレビュー扱い', isPreviewSetId('review16'), true)
-  eq('販売セット(kintore)はプレビューではない', isPreviewSetId('kintore'), false)
-  eq('販売セット(bento)はプレビューではない', isPreviewSetId('bento'), false)
-}

@@ -22,7 +22,8 @@
 //         ONEPOINT-01(メモ2区画化・2026-07オーナー承認済み設計: 「ワンポイント」(こつ・知識)と
 //         「メモ」(保存方法・注意書き・安全)を別々に入力→保存→詳細で①ワンポイント→②メモの順に
 //         見出し付きで表示されること・編集画面を開き直しても両方の入力が保持されること) /
-//         SMK-14簡易(未解錠ゲート) /
+//         SMK-14(収録レシピ全無料化2026-07-22: 未解錠でも?set=直リンクからテーマを自由に取り込める。
+//         旧「未解錠ゲート」は解錠ゲート撤去により「全セット自由取り込み」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面のタブ分割。?set=/?section=直リンクが該当タブを自動で開く・
 //         4タブの手動切替・トーストのタップ閉じ。2026-07-12オーナー実機フィードバック。
 //         タブ名「基本」→「全般」は2026-07-13 UIペルソナQA。同日「全般」タブ内はNG食材の直下に
@@ -31,8 +32,9 @@
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
 //         STARTER-RELOAD-01(「基本レシピを入れ直す」でユーザーデータ(お気に入り)が保持されること。
 //         2026-07-13 削除→再追加からユーザーデータ保持方式への改修) /
-//         PACK-01(Pro解錠済み・パック未解錠のとき追加レシピパックのコード入力欄がdisabledになり
-//         案内文が出ること、Pro版の機能一覧が解錠中ずっと表示され続けること。2026-07-13 UI改善) /
+//         UNLOCK-01(購入と解錠。2026-07-22全無料化でPro(UR-)のみ受け付ける: UR-以外/廃止したUP-は
+//         コード形式エラー・UR-でPro解錠・解錠済みコードのマスク表示+コピー・Pro解錠済みなら入力欄が
+//         消えPro機能一覧が常設される) /
 //         RECIPESET-01(修正4・2026-07-14オーナー実機フィードバック: 「レシピセットを読み込む」欄の
 //         「URLから読み込む」結果を読み込み欄の上部にテキストで表示し、以前の下部トーストとしては
 //         二重に出ないこと。エラー(見つからない)・成功の両方を確認。2026-07-16修正1で
@@ -141,7 +143,7 @@
 //         エラーにならず既存の価格・在庫データが消えない(後方互換)ことも確認する。2026-07-17
 //         バックアップ改修 修正1でPro解錠コードの往復(CODEBACKUP-01)も同じ書き出し元/復元先で
 //         追加確認: 書き出しJSONにsettings.proCodeが含まれる・まっさらな未購入プロファイルへの
-//         置き換え復元だけでPro解錠状態が戻る(IndexedDB直読み+Pro・パックタブの表示の両方で確認)) /
+//         置き換え復元だけでPro解錠状態が戻る(IndexedDB直読み+Proタブの表示の両方で確認)) /
 //         CODEMERGE-01(2026-07-17バックアップ改修 修正1: merge(「読み込む(今のデータに追加)」)でも
 //         Pro解錠コードが戻ることを実UI経由で確認。(a)未購入プロファイル+コード入りバックアップを
 //         mergeで解錠される (b)Pro解錠済みプロファイル+コード無し旧形式バックアップをmergeしても
@@ -922,7 +924,7 @@ try {
   // カロリー・たんぱく質・塩分・脂質・糖質の5項目まとめてPro機能化。従来無料だったカロリー順も
   // Pro側へ=オーナー確定)。無料(未解錠)では並び替えパネルに栄養価の選択肢が一切出ず、
   // グレーの「栄養価で並び替え（Pro機能）」行だけが出て、タップ先が既存のPro案内
-  // (設定のPro・パックタブ)であることを確認する。実際の並び順の検証はPro解錠済みの
+  // (設定のProタブ)であることを確認する。実際の並び順の検証はPro解錠済みの
   // NUTSORT-02側で行う ---
   currentCheck = 'NUTSORT-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -950,7 +952,7 @@ try {
     return teaser?.getAttribute('href') ?? null
   })
   check(
-    'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のPro・パックタブ)',
+    'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のProタブ)',
     teaserHref === '#/settings?section=pro',
     `href=${teaserHref}`,
   )
@@ -959,36 +961,67 @@ try {
   await page.waitForTimeout(300)
   await page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
 
-  // --- SMK-14(簡易): 未解錠でのセット取り込みは丁寧にブロックされる ---
+  // --- SMK-14: 収録レシピ(基本+全テーマ=約100品)は全て無料(2026-07-22オーナー確定・全無料化)。
+  // 旧仕様の解錠ゲートは撤去済み。未解錠(Pro/パックいずれも解錠していない)まっさらな状態でも、
+  // 配布ページの?set=直リンクからテーマをワンタップで取り込めること・解錠を促すゲート文言が
+  // 出ないこと・?set=直リンクが「レシピ」タブを自動で開くことを、専用のbrowser/contextで確認する
+  // (主フローのDBを汚さないため。TOMB-01等と同じ隔離パターン) ---
   currentCheck = 'SMK-14'
-  await page.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1500)
-  check(
-    'SMK-14 未解錠ゲート',
-    (await page.textContent('body')).includes('追加レシピパックまたはPro版の解錠が必要'),
-  )
+  {
+    const freeBrowser = await chromium.launch()
+    const freeContext = await freeBrowser.newContext()
+    const freePage = await freeContext.newPage()
+    freePage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SMK-14] ${err.message}`)
+    })
+    // ?set=直リンクの取り込み確認ダイアログを自動承諾する(未解錠のまま=解錠コードは一切入れない)
+    freePage.on('dialog', (dialog) => dialog.accept())
+    try {
+      await freePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await freePage.waitForTimeout(1800) // 初回シード完了待ち(未解錠状態のまま)
+      await freePage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
+      await freePage.waitForTimeout(2000)
+      const freeBody = await freePage.textContent('body')
+      check(
+        'SMK-14 未解錠でも?set=直リンクからテーマを自由に取り込める(10品追加・解錠ゲート撤去)',
+        freeBody.includes('10件追加しました'),
+      )
+      check(
+        'SMK-14 解錠を促すゲート文言(解錠が必要)は出ない',
+        !freeBody.includes('解錠が必要'),
+      )
+      check(
+        'SMK-14 ?set=直リンクは「レシピ」タブを自動で開く(セット読み込みの見出しが見える)',
+        freeBody.includes('レシピセットを読み込む'),
+      )
+      check(
+        'SMK-14 このとき「全般」タブの内容は隠れている(NG食材の見出しが見えない)',
+        !freeBody.includes('NG食材（アレルギー・苦手）'),
+      )
+    } finally {
+      await freeBrowser.close()
+    }
+  }
 
   // --- SETTINGS-TAB-01: 設定画面のタブ分割(2026-07-12オーナー実機フィードバック)。
-  // ?set=直リンクで開いたときに「レシピ」タブが自動で開くこと(「全般」タブの内容は隠れる)、
-  // 4タブを手動で切り替えられること、?section=pro/?section=themesの直リンクも
-  // 該当タブを自動で開くことを確認する。タブ名「基本」→「全般」は2026-07-13 UIペルソナQA ---
+  // 4タブを手動で切り替えられること・?section=直リンクが該当タブを自動で開くことを確認する。
+  // タブ名「基本」→「全般」は2026-07-13 UIペルソナQA。2026-07-22全無料化で解錠ゲートを撤去したため、
+  // 旧SMK-14のゲートトーストに相乗りしていた確認は撤去し、ここでは「レシピ」タブを手動で開いて
+  // (URLは素の#/settingsのまま=後段の?section=直リンク検証の一発目が確実に再マウントで発火する)、
+  // BANNER-01が「レシピ」タブでも出ることを見る土台にする。?set=直リンクの自動オープンはSMK-14で確認済み ---
   currentCheck = 'SETTINGS-TAB-01'
+  await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(800)
+  await page.getByRole('button', { name: 'レシピ', exact: true }).click()
+  await page.waitForTimeout(300)
   check(
-    'SETTINGS-TAB-01 ?set=直リンクは「レシピ」タブを自動で開く(セット読み込みの見出しが見える)',
+    'SETTINGS-TAB-01 「レシピ」タブに切り替えるとセット読み込みの見出しが見える',
     (await page.textContent('body')).includes('レシピセットを読み込む'),
   )
   check(
     'SETTINGS-TAB-01 このとき「全般」タブの内容は隠れている(NG食材の見出しが見えない)',
     !(await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
-  )
-  // トースト化(2026-07-12: setMessage表示をページ上部固定からトーストに変更)。タップで閉じる。
-  // 「追加レシピパックまたはPro版の解錠が必要」という語句自体はテーマ一覧の説明文にも登場するため、
-  // トースト本文にしか出ない先頭部分「このレシピセットの追加には」で一意に狙う
-  await page.getByRole('button', { name: 'このレシピセットの追加には' }).click()
-  await page.waitForTimeout(200)
-  check(
-    'SETTINGS-TAB-01 トーストはタップで閉じる',
-    !(await page.textContent('body')).includes('このレシピセットの追加には'),
   )
 
   // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。タブバーの下・
@@ -1106,24 +1139,32 @@ try {
     'REFRESH-APP-01 上書きボタン(前回の場所に上書き)はFile System Access API非対応のheadless環境では出ない',
     !(await page.textContent('body')).includes('前回の場所に上書き'),
   )
-  await page.getByRole('button', { name: 'Pro・パック', exact: true }).click()
+  await page.getByRole('button', { name: 'Pro', exact: true }).click()
   await page.waitForTimeout(200)
   check(
-    'SETTINGS-TAB-01 「Pro・パック」タブでPro版の見出しが見える',
+    'SETTINGS-TAB-01 「Pro」タブでPro版の見出しが見える(2026-07-22「Pro・パック」→「Pro」改称)',
     (await page.textContent('body')).includes('Pro版'),
   )
 
-  // ?section=直リンクの自動タブ切り替え(既存のスクロール挙動は維持しつつ、タブ化後も動くことを確認)
+  // ?section=直リンクの自動タブ切り替え(既存のスクロール挙動は維持しつつ、タブ化後も動くことを確認)。
+  // 自動タブ切り替えはSettingsPageの1マウントにつき一度だけ動く(scrolledToSectionRefのワンショット)ため、
+  // 各?section=の検証の前に一度/recipesへ抜けてSettingsPageを再マウントさせ、毎回まっさらな状態で
+  // 切り替えが発火することを独立に確認する(以前は素通りで、テーマ一覧側の説明文にたまたま「Pro版」の
+  // 語が含まれていたため?section=proが切替なしでも通ってしまっていた。全無料化で説明文から語が消えたため顕在化)
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(300)
   await page.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(800)
   check(
     'SETTINGS-TAB-01 ?section=themesは「レシピ」タブを自動で開く(テーマ一覧の見出しが見える)',
     (await page.textContent('body')).includes('テーマ一覧'),
   )
+  await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(300)
   await page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(800)
   check(
-    'SETTINGS-TAB-01 ?section=proは「Pro・パック」タブを自動で開く(Pro版の見出しが見える)',
+    'SETTINGS-TAB-01 ?section=proは「Pro」タブを自動で開く(Pro版の見出しが見える)',
     (await page.textContent('body')).includes('Pro版'),
   )
   check(
@@ -1764,19 +1805,18 @@ try {
     }
   }
 
-  // --- UNLOCK-01(2026-07-17設定ゼロベース裁定#4+#7): 「購入と解錠」1画面統合。
-  // (a) 入力欄1つでコード種別(UR-/UP-)を自動判定して解錠できること(実際のPro/パック解錠コード
-  //     UI経由。テスト用コードはdocs/22記載・販売用ではない: Pro=UR-96QS-2VSZ、
-  //     パック=UP-2W3D-QZPR)・UR-/UP-以外のprefixはコード形式エラーになること・
-  //     解錠済みコードがマスク表示(例: UP-****QZPR)+コピーで控えられること(クリップボードの
-  //     実文字列まで確認)を、専用のbrowser/contextで確認する
-  // (b) Pro解錠済み(パック未解錠)のときは、追加レシピパック行が「Pro版に含まれています」と
-  //     表示され統合入力欄自体が消えること(旧PACK-01の「パックコードの入力は不要です」+
-  //     disabled入力の後継)、Pro版の機能一覧が解錠中ずっと表示され続けることを、
+  // --- UNLOCK-01(2026-07-17設定ゼロベース裁定#4+#7の「購入と解錠」を継承→2026-07-22全無料化で
+  // Pro(UR-)専用化): 収録レシピは全て無料になり、追加レシピパック(UP-)は製品廃止したため、
+  // 受け付ける解錠コードはPro(UR-)のみになった。
+  // (a) UR-以外のprefix・廃止したUP-パックコードはコード形式エラーになること・UR-でPro版が解錠でき
+  //     解錠済みコードがマスク表示(UR-****2VSZ)+コピーで控えられること(クリップボードの実文字列まで
+  //     確認)を、専用のbrowser/contextで確認する。テスト用コードはdocs/22記載・販売用ではない:
+  //     Pro=UR-96QS-2VSZ。廃止したUP-2W3D-QZPRはもう解錠されないこと(コード形式エラー)も確認する
+  // (b) Pro解錠済みのときは入力欄自体が消え、Pro版の機能一覧が解錠中ずっと表示され続けることを、
   //     別の専用browser/contextで確認する ---
   currentCheck = 'UNLOCK-01'
   {
-    // (a) 統合入力の種別自動判定+マスク表示+コピー
+    // (a) コード解錠の種別判定+マスク表示+コピー(Pro=UR-のみ有効)
     const ulBrowser = await chromium.launch()
     try {
       const ulContext = await ulBrowser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
@@ -1791,42 +1831,56 @@ try {
       await ulPage.waitForTimeout(800)
 
       check(
-        'UNLOCK-01(a) 「購入と解錠」1カードに統合されている',
+        'UNLOCK-01(a) 「購入と解錠」カードがある',
         (await ulPage.textContent('body')).includes('購入と解錠'),
       )
       check(
-        'UNLOCK-01(a) 解錠前は両方「未解錠」表示',
-        (await ulPage.getByText('未解錠').count()) === 2,
+        'UNLOCK-01(a) 解錠前はPro版が「未解錠」表示(パック行は撤去済みで1つだけ)',
+        (await ulPage.getByText('未解錠').count()) === 1,
       )
 
-      const unlockInput = ulPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)')
+      const unlockInput = ulPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)')
       const unlockButton = ulPage.getByRole('button', { name: '解錠する', exact: true })
 
-      // UR-/UP-以外のprefixはコード形式エラー
+      // UR-以外のprefixはコード形式エラー
       await unlockInput.fill('XX-0000-0000')
       await unlockButton.click()
       await ulPage.waitForTimeout(500)
       check(
-        'UNLOCK-01(a) UR-/UP-以外のprefixはコード形式エラーになる',
+        'UNLOCK-01(a) UR-以外のprefixはコード形式エラーになる',
         (await ulPage.textContent('body')).includes('コードの形式が正しくありません'),
       )
 
-      // UP-コードを入れると(Pro欄ではなく)追加レシピパックが自動判定で解錠される
+      // 廃止したUP-パックコードももう受け付けない(2026-07-22全無料化・パック製品廃止でコード形式エラー扱い)
       await unlockInput.fill('UP-2W3D-QZPR')
       await unlockButton.click()
-      await ulPage.waitForTimeout(800)
+      await ulPage.waitForTimeout(500)
       const afterPackText = await ulPage.textContent('body')
       check(
-        'UNLOCK-01(a) UP-コードは自動判定で追加レシピパックが解錠される',
-        afterPackText.includes('追加レシピパックをご利用いただきありがとうございます'),
+        'UNLOCK-01(a) 廃止したUP-パックコードは受け付けない(コード形式エラー)',
+        afterPackText.includes('コードの形式が正しくありません'),
       )
       check(
-        'UNLOCK-01(a) 解錠済みコードはマスク表示される(末尾4文字のみ・UP-****QZPR)',
-        afterPackText.includes('UP-****QZPR'),
+        'UNLOCK-01(a) UP-では解錠されない(解錠のお礼文言は出ない)',
+        !afterPackText.includes('ご利用いただきありがとうございます'),
+      )
+
+      // UR-コードでPro版が解錠される
+      await unlockInput.fill('UR-96QS-2VSZ')
+      await unlockButton.click()
+      await ulPage.waitForTimeout(800)
+      const afterProText = await ulPage.textContent('body')
+      check(
+        'UNLOCK-01(a) UR-コードでPro版が解錠される',
+        afterProText.includes('Pro版をご利用いただきありがとうございます'),
       )
       check(
-        'UNLOCK-01(a) パックのみ解錠時は統合入力欄がまだ残る(将来Pro追加購入に備える)',
-        await unlockInput.isVisible(),
+        'UNLOCK-01(a) 解錠済みコードはマスク表示される(末尾4文字のみ・UR-****2VSZ)',
+        afterProText.includes('UR-****2VSZ'),
+      )
+      check(
+        'UNLOCK-01(a) Pro解錠後は入力欄が消える(Pro版がすべて含むため)',
+        !(await unlockInput.isVisible().catch(() => false)),
       )
 
       // コピーボタンで生のコードがクリップボードへ入ること
@@ -1835,34 +1889,19 @@ try {
       const copiedText = await ulPage.evaluate(() => navigator.clipboard.readText())
       check(
         'UNLOCK-01(a) コピーボタンで生のコードがクリップボードにコピーされる',
-        copiedText === 'UP-2W3D-QZPR',
+        copiedText === 'UR-96QS-2VSZ',
         `copiedText=${copiedText}`,
       )
       check(
         'UNLOCK-01(a) コピー後は「コピーしました」表示になる',
         (await ulPage.textContent('body')).includes('コピーしました'),
       )
-
-      // UR-コードを入れるとPro版が自動判定で解錠される
-      await unlockInput.fill('UR-96QS-2VSZ')
-      await unlockButton.click()
-      await ulPage.waitForTimeout(800)
-      const afterProText = await ulPage.textContent('body')
-      check(
-        'UNLOCK-01(a) UR-コードは自動判定でPro版が解錠される',
-        afterProText.includes('Pro版をご利用いただきありがとうございます'),
-      )
-      check(
-        'UNLOCK-01(a) Pro解錠後は統合入力欄が消える(Pro版がすべて含むため)',
-        !(await unlockInput.isVisible().catch(() => false)),
-      )
     } finally {
       await ulBrowser.close()
     }
 
-    // (b) Pro解錠済み(パック未解錠)。実際のPro解錠コードは販売台帳の原本なのでリポジトリに
-    // コミットできない実コードのケースを模すため、NUT-02と同様settings.proCodeをIndexedDBへ
-    // 直接書き込んで再現する(コード検証自体は(a)で実UI経由済み)
+    // (b) Pro解錠済み。実際のPro解錠コードは販売台帳の原本なのでリポジトリにコミットできないため、
+    // NUT-02と同様settings.proCodeをIndexedDBへ直接書き込んで再現する(コード検証自体は(a)で実UI経由済み)
     const ulbBrowser = await chromium.launch()
     try {
       const ulbContext = await ulbBrowser.newContext()
@@ -1900,18 +1939,14 @@ try {
       })
       await ulbPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await ulbPage.waitForTimeout(800)
-      const packSectionText = await ulbPage.textContent('body')
+      const proSectionText = await ulbPage.textContent('body')
       check(
-        'UNLOCK-01(b) Pro解錠済み時に追加レシピパック行が「Pro版に含まれています」表示になる',
-        packSectionText.includes('Pro版に含まれています'),
-      )
-      check(
-        'UNLOCK-01(b) Pro解錠済み時は統合入力欄自体が表示されない(旧: disabled入力の後継)',
-        !(await ulbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)').isVisible()),
+        'UNLOCK-01(b) Pro解錠済み時は入力欄自体が表示されない(旧: disabled入力の後継)',
+        !(await ulbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').isVisible()),
       )
       check(
         'UNLOCK-01(b) Pro版の機能一覧が解錠中ずっと表示される(2026-07-13 UI改善: 一時表示から常設化)',
-        packSectionText.includes('使えるようになった機能') && packSectionText.includes('並行調理ナビ'),
+        proSectionText.includes('使えるようになった機能') && proSectionText.includes('並行調理ナビ'),
       )
     } finally {
       await ulbBrowser.close()
@@ -1922,8 +1957,9 @@ try {
   // テーマ「高たんぱくごはん」(kintore・10品)を取り込む→1品(漬けるだけ味玉)を削除→
   // 再取込(#/settings?set=直リンク)しても復活せず「削除済みの除外中1件」と出る→
   // テーマ一覧の「除外中1品・すべて戻す」で解除(次の取込で戻る旨のトースト)→
-  // もう一度取り込むと復活する、の一連を確認する。テーマ取り込みには追加レシピパック解錠が
-  // 必要なため、NUT-02と同様settings.recipePackCodeをIndexedDBへ直接書き込んで再現する。
+  // もう一度取り込むと復活する、の一連を確認する。2026-07-22の全無料化でテーマ取り込みに解錠は
+  // 不要になったが、settings.recipePackCode(廃止済みフィールド)をIndexedDBへ敢えて直接書き込む=
+  // 既存ユーザーに旧パックコードが残っていても取り込み・トゥームストーンが壊れないことの回帰確認も兼ねる。
   // 他チェックの解錠状態・レシピに影響しないよう、専用のbrowser/contextで完結させる ---
   currentCheck = 'TOMB-01'
   {
@@ -2042,8 +2078,9 @@ try {
   // も含め全カードが「基本レシピ」バッジに統一され、旧テーマ名(第◯弾/セット名)が出ないことを確認する
   // (2026-07-20 便AM: 商品が全部込み買い切りになりテーマ区別が販売上不要になったため、区分を
   // 「基本レシピ(公式全部)→自作」の2区分に単純化。データ側のsourceSetName/sourceSetIdは維持)。
-  // テーマ取り込みには追加レシピパック解錠が必要なため、TOMB-01と同様settings.recipePackCodeを
-  // 直接書き込む。他チェックの解錠状態・レシピに影響しないよう専用のbrowser/contextで完結させる ---
+  // 2026-07-22の全無料化でテーマ取り込みに解錠は不要になったが、settings.recipePackCode(廃止済み
+  // フィールド)をTOMB-01同様に敢えて書き込む=旧パックコードが残っていても取り込みが壊れない回帰も兼ねる。
+  // 他チェックの解錠状態・レシピに影響しないよう専用のbrowser/contextで完結させる ---
   currentCheck = 'THEMESORT-01'
   {
     const tsBrowser = await chromium.launch()
@@ -2079,7 +2116,8 @@ try {
         `先頭カードテキスト=${firstCardTextBeforeImport}`,
       )
 
-      // 3) テーマ「高たんぱくごはん」(kintore・10品)を取り込む(TOMB-01と同様にパックを解錠してから)
+      // 3) テーマ「高たんぱくごはん」(kintore・10品)を取り込む(全無料化で解錠不要。廃止済みの
+      //    recipePackCodeを敢えて残す=旧パックコードが残っていても取り込めることの回帰も兼ねる)
       await tsPage.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((resolve, reject) => {
@@ -2143,9 +2181,10 @@ try {
   // 取り込み、収録品の1つを週間献立・今日の献立の両方に登録してからテーマごと削除し、
   // 両テーブルから該当行が消えている(IndexedDB直読み)ことを確認する。週間献立への登録は
   // UIのピッカー経路が長い(MEALPLAN-01/02で別途検証済み)ため、実データ形状に合わせて
-  // IndexedDBへ直接1行だけ書き込んで再現する。テーマ取り込みには追加レシピパック解錠が
-  // 必要なため、TOMB-01と同様settings.recipePackCodeを直接書き込む。他チェックに影響しない
-  // よう専用のbrowser/contextで完結させる ---
+  // IndexedDBへ直接1行だけ書き込んで再現する。2026-07-22の全無料化でテーマ取り込みに解錠は不要に
+  // なったが、settings.recipePackCode(廃止済みフィールド)をTOMB-01同様に敢えて書き込む=旧パック
+  // コードが残っていても取り込み・孤児掃除が壊れない回帰も兼ねる。他チェックに影響しないよう
+  // 専用のbrowser/contextで完結させる ---
   currentCheck = 'ORPHAN-01'
   {
     const obBrowser = await chromium.launch()
@@ -3042,7 +3081,7 @@ try {
       await mp2Page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await mp2Page.waitForTimeout(1500)
       // 2026-07-17設定ゼロベース裁定#7: Pro/追加レシピパックの入力欄が1つに統合された
-      await mp2Page.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+      await mp2Page.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
       await mp2Page.getByRole('button', { name: '解錠する', exact: true }).first().click()
       await mp2Page.waitForTimeout(1000)
       check(
@@ -4126,41 +4165,15 @@ try {
           .count()) === 0,
       )
 
-      // Pro解錠(2026-07-16修正1: review2.jsonにsetIdが付いたため課金ゲート対象になった。
-      // 実際のPro解錠コードは販売台帳の原本なのでリポジトリにコミットできないため、NUT-02と同様
-      // settings.proCodeをIndexedDBへ直接書き込んで「解錠済み」状態だけを再現する)
-      await rsPage.evaluate(async () => {
-        const req = indexedDB.open('uchi-recipe')
-        const idb = await new Promise((resolve, reject) => {
-          req.onsuccess = () => resolve(req.result)
-          req.onerror = () => reject(req.error)
-        })
-        await new Promise((resolve, reject) => {
-          const tx = idb.transaction('settings', 'readwrite')
-          const store = tx.objectStore('settings')
-          const getReq = store.get(1)
-          getReq.onsuccess = () => {
-            const current = getReq.result || { id: 1 }
-            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
-            putReq.onsuccess = () => resolve(undefined)
-            putReq.onerror = () => reject(putReq.error)
-          }
-          getReq.onerror = () => reject(getReq.error)
-        })
-        idb.close()
-      })
-      await rsPage.reload({ waitUntil: 'networkidle' })
-      await rsPage.waitForTimeout(800)
-      await rsPage.getByRole('button', { name: 'レシピ', exact: true }).click()
-      await rsPage.waitForTimeout(300)
-
-      // 成功パス(Pro解錠済みなのでsetId付きのreview2セットも取り込める)
+      // 成功パス(2026-07-22全無料化: 収録レシピは全て無料。setId付きのセット(review2)も解錠不要で
+      // 取り込める。旧仕様ではsetId付き=課金ゲート対象だったためsettings.proCodeを書き込んで解錠して
+      // いたが、解錠ゲート撤去により未解錠のままURL読み込みが成功することをそのまま検証する)
       await urlInput.fill(`${BASE}/sets/data/review2.json`)
       await loadUrlBtn.click()
       await rsPage.waitForTimeout(1000)
       const afterSuccessText = await rsPage.textContent('body')
       check(
-        'RECIPESET-01(修正4) 成功時も「◯件追加しました」が読み込み欄の上部に出る',
+        'RECIPESET-01(全無料化) 未解錠でもsetId付きセットのURL読み込みが成功し「◯件追加しました」が上部に出る',
         /\d+件追加しました/.test(afterSuccessText),
       )
       check(
@@ -4535,7 +4548,7 @@ try {
       await dstPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await dstPage.waitForTimeout(500)
       check(
-        'CODEBACKUP-01 復元後、Pro・パックタブの表示も解錠済みになっている',
+        'CODEBACKUP-01 復元後、Proタブの表示も解錠済みになっている',
         (await dstPage.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
       )
     } finally {
@@ -5139,7 +5152,7 @@ try {
 
         // テスト用Pro解錠コード(docs/22の実機確認チェックリスト記載。販売用ではない)。
         // 2026-07-17設定ゼロベース裁定#7: Pro/追加レシピパックの入力欄が1つに統合された
-        await fbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+        await fbPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
         await fbPage.getByRole('button', { name: '解錠する', exact: true }).first().click()
         await fbPage.waitForTimeout(1000)
         const fbText = await fbPage.textContent('body')

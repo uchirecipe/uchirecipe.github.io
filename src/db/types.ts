@@ -281,9 +281,13 @@ export interface Settings {
   proCode?: string
   /** Pro解錠日時（ミリ秒） */
   proActivatedAt?: number
-  /** 追加レシピパック解錠コード（Proとは別体系。同じ仕組みで検証する） */
+  /**
+   * 【廃止】追加レシピパック解錠コード。2026-07-22の全無料化(収録レシピは全て無料・有料はPro機能のみ)で
+   * 追加レシピパック(UP-)は製品廃止した。新規に書き込むことはもう無いが、既存ユーザーのIndexedDBや
+   * バックアップに残っていても壊れないよう、フィールド自体は読み取り互換のため残す(無視するだけ)。
+   */
   recipePackCode?: string
-  /** 追加レシピパック解錠日時（ミリ秒） */
+  /** 【廃止】追加レシピパック解錠日時（ミリ秒）。recipePackCodeと同じく後方互換のため残す */
   recipePackActivatedAt?: number
   /** アプリ内お知らせで最後に見た（閉じた）お知らせのid。未読管理に使う */
   lastSeenNewsId?: string

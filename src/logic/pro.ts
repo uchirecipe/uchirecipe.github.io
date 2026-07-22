@@ -1,7 +1,5 @@
 import { PRO_CODE_HASHES } from './proCodes'
-import { RECIPE_PACK_CODE_HASHES } from './recipePackCodes'
 import { sha256Hex as sha256HexFallback } from './sha256'
-import type { Settings } from '../db/types'
 
 /** コード入力のゆらぎ(全角・小文字・前後の空白)を吸収する */
 export function normalizeProCode(code: string): string {
@@ -34,51 +32,16 @@ export async function isValidProCode(code: string, forceFallback = false): Promi
   return PRO_CODE_HASHES.includes(hash)
 }
 
-/** コード入力のゆらぎを吸収する（追加レシピパック用。Proコードと同じ正規化） */
-export function normalizePackCode(code: string): string {
-  return code.normalize('NFKC').toUpperCase().trim()
-}
-
-/** 入力されたコードが有効な追加レシピパック解錠コードか判定する（完全オフラインで動作） */
-export async function isValidPackCode(code: string, forceFallback = false): Promise<boolean> {
-  const normalized = normalizePackCode(code)
-  if (!normalized) return false
-  const hash = await sha256Hex(`uchirecipe-pack:${normalized}`, forceFallback)
-  return RECIPE_PACK_CODE_HASHES.includes(hash)
-}
-
 /**
- * 配布レシピ（セット）の取り込みが可能か: Pro解錠済み、または追加レシピパック解錠済みなら常に可。
- * 課金モデル（docs/08 2-8）: 無料=基本レシピのみ／追加レシピパック(単体)＋Pro(パック込み)で配布セットが使える
+ * 入力コードがPro解錠コード(UR-)かどうかを判定する（純ロジック。2026-07-17設定ゼロベース裁定#7）。
+ * 「購入と解錠」の入力欄に入れたコードを解錠フローへ回すか判定するために使う。
+ * 2026-07-22の全無料化(収録レシピは全て無料・有料はPro機能のみ)で追加レシピパック(UP-)は製品として
+ * 廃止したため、有効なコード種別はPro(UR-)のみになった。コード形式はdocs/08 2-6で`UR-XXXX-XXXX`に
+ * 固定されているため、prefix以外の判定（桁数等）は行わない（実際の正当性はisValidProCodeが担う）。
  */
-export function hasPaidRecipeAccess(settings: Pick<Settings, 'proCode' | 'recipePackCode'>): boolean {
-  return !!settings.proCode || !!settings.recipePackCode
-}
-
-/**
- * オーナーの下見(レビュー)専用セットか(2026-07-17)。
- * 下見セット(review2/8/16等)はテーマ名バッジ・テーマごと削除のためにsetIdを持つが、
- * 販売物ではなく公開リンクも無いため課金ゲートの対象外とする
- * (setId付与(2026-07-16便V)でゲートに引っかかりオーナーが下見できなくなった実害の恒久修正)
- */
-export function isPreviewSetId(setId: string): boolean {
-  return setId.startsWith('review')
-}
-
-/**
- * 入力コードがPro用(UR-)か追加レシピパック用(UP-)かを判定する（純ロジック。
- * 2026-07-17設定ゼロベース裁定#7）。「購入と解錠」1画面統合で、入力欄1つに入れたコードを
- * どちらの解錠フローへ回すか自動判定するために使う。既存の相互判定ヒント
- * （proCodeIsPackCode/packCodeIsProCode。SettingsPageのactivatePro/activatePack内で
- * .startsWith('UP-')/.startsWith('UR-')を見ていた判定）と同じ正規化・同じprefix判定を
- * 流用し、「ヒントを出す」から「そのまま正しい方で解錠する」へ発展させたもの。
- * コード形式はdocs/08 2-6で`UR-XXXX-XXXX`/`UP-XXXX-XXXX`に固定されているため、
- * prefix以外の判定（桁数等）は行わない（実際の正当性はisValidProCode/isValidPackCodeが担う）
- */
-export function detectCodeKind(code: string): 'pro' | 'pack' | 'unknown' {
+export function detectCodeKind(code: string): 'pro' | 'unknown' {
   const normalized = normalizeProCode(code)
   if (normalized.startsWith('UR-')) return 'pro'
-  if (normalized.startsWith('UP-')) return 'pack'
   return 'unknown'
 }
 

@@ -278,7 +278,8 @@ export const ja = {
     tabBasic: '全般',
     tabRecipe: 'レシピ',
     tabBackup: 'バックアップ',
-    tabProPack: 'Pro・パック',
+    // 2026-07-22全無料化: 追加レシピパック(UP-)を製品廃止し「Pro・パック」→「Pro」へ改称
+    tabPro: 'Pro',
     // 全般タブの小見出し4グループ(2026-07-16 UI総点検B-2オーナー決定: 9カードフラット並列を整理。
     // 見た目(テーマカラー・ホームカスタマイズ)/食材と価格/料理中/その他。並びとグループ見出しのみで
     // カードの中身は変更しない)
@@ -353,7 +354,6 @@ export const ja = {
     recipeSetNotFound: '指定されたURLにレシピセットが見つかりませんでした。IDの綴りが正しいか確認してください',
     recipeSetDeepLinkConfirm: '「{name}」（{n}品）を追加しますか？',
     recipeSetPageLink: '配布ページを見る',
-    recipeSetBlocked: 'このレシピセットの追加には、追加レシピパックまたはPro版の解錠が必要です',
     // 2026-07-17バックアップ改修 修正5: バックアップタブを3カード(バックアップを取る/
     // バックアップから戻す/困ったとき)に再構成。backupTitleは「バックアップを取る」カードの見出し
     backupTitle: 'バックアップを取る',
@@ -426,29 +426,26 @@ export const ja = {
     // どうしてもブラウザ側で消す場合の絞り込み方を明記する)
     refreshAppCacheClearWarning:
       'ブラウザの設定から消す場合は「キャッシュされた画像とファイル」だけにしてください。「Cookieと他のサイトデータ」を消すとレシピなどのデータがすべて消えます（消す前にバックアップを取ってください）',
-    // 「購入と解錠」1カード統合(2026-07-17設定ゼロベース裁定#7)。入力欄1つでPro/追加レシピ
-    // パックのどちらのコードも受け付け、種類(UR-/UP-)は自動判定する(src/logic/pro.tsの
-    // detectCodeKind)。既存の相互判定ヒント(旧proCodeIsPackCode/packCodeIsProCode。
-    // 「違う欄に入力してください」という案内)は、「そのまま正しい方で解錠する」という
-    // 発展形になったため役目を終え、この統合で削除した
+    // 「購入と解錠」(2026-07-17設定ゼロベース裁定#7の統合入力を継承)。2026-07-22の全無料化で
+    // 収録レシピは全て無料になり、追加レシピパック(UP-)は製品廃止。受け付ける解錠コードは
+    // Pro(UR-)のみで、UR-以外はコード形式エラーになる(src/logic/pro.tsのdetectCodeKind)
     unlockTitle: '購入と解錠',
     unlockDescription:
-      '解錠コードを入力すると、Pro版または追加レシピパックが使えるようになります。コードの種類は自動で判定されます',
-    unlockCodePlaceholder: '解錠コード (例: UR-XXXX-XXXX / UP-XXXX-XXXX)',
+      '解錠コードを入力すると、Pro版の機能が使えるようになります',
+    unlockCodePlaceholder: '解錠コード (例: UR-XXXX-XXXX)',
     unlockActivate: '解錠する',
     unlockActivating: '確認中…',
-    unlockUnknownCode: 'コードの形式が正しくありません（UR-またはUP-で始まるコードを入力してください）',
+    unlockUnknownCode: 'コードの形式が正しくありません（UR-で始まるコードを入力してください）',
     unlockStatusActive: '解錠済み',
     unlockStatusInactive: '未解錠',
-    // Pro解錠済みのときの追加レシピパック行に出す案内(旧packNotNeededWithProの後継。
-    // Pro解錠済みなら入力欄自体を出さないため、状態一覧の行内表示に位置づけを変更した)
-    packIncludedInPro: 'Pro版に含まれています',
     // 解錠コードの控え表示+コピー(2026-07-17設定ゼロベース裁定#4。機種変更時の「購入の復元」用)
     unlockCodeCopy: 'コピー',
     unlockCodeCopied: 'コピーしました',
     unlockCodeToggleAria: 'コードの表示を切り替え',
     proTitle: 'Pro版',
-    proDescription: '並行調理ナビ・月間献立など、これから追加されるPro向け機能をすべて使えるようになります。',
+    // 2026-07-22全無料化: 収録レシピは全て無料。Proは機能の買い切り解錠(登録無制限・栄養8項目と
+    // 栄養並び替え・月間献立)。レシピテーマは無料化したためPro説明・機能一覧から外した
+    proDescription: 'レシピの登録数を無制限にしたり、栄養価の8項目表示・栄養価での並び替え・月間の献立表など、Pro向けの機能が使えるようになります。',
     proInvalidCode: 'コードが正しくありません。ご購入時のコードをご確認ください',
     proActivatedTitle: 'Pro版をご利用いただきありがとうございます',
     proActivatedDate: '解錠日: {date}',
@@ -457,17 +454,11 @@ export const ja = {
     proActivatedFeatures: [
       '並行調理ナビ（献立タブから）',
       '月間ビュー（献立の週・月切替から）',
-      'レシピテーマ（下のテーマ一覧から）',
+      '栄養価の8項目表示・栄養価での並び替え',
     ] as string[],
-    packTitle: '追加レシピパック',
-    packDescription:
-      '配布されているレシピテーマがすべて使えるようになる買い切りのパックです。今後追加されるテーマも、すべて追加料金なしで使えます（Pro版には最初から含まれています）。',
-    packInvalidCode: 'コードが正しくありません。ご購入時のコードをご確認ください',
-    packActivatedTitle: '追加レシピパックをご利用いただきありがとうございます',
-    packActivatedDate: '解錠日: {date}',
     themeListTitle: 'テーマ一覧',
     themeListDescription:
-      '興味のあるテーマだけ選んで取り込めます。テーマをタップすると収録レシピを確認できます（取り込みには追加レシピパックまたはPro版の解錠が必要です）。',
+      '興味のあるテーマだけ選んで取り込めます。テーマをタップすると収録レシピを確認できます（すべて無料で取り込めます）。',
     themeListLoading: '読み込み中…',
     themeItemsCount: '収録レシピ（{n}品）',
     themeListEmpty: '現在配布中のテーマはありません',

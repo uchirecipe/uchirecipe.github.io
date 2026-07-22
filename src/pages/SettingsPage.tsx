@@ -56,10 +56,6 @@ import {
 import {
   isValidProCode,
   normalizeProCode,
-  isValidPackCode,
-  normalizePackCode,
-  hasPaidRecipeAccess,
-  isPreviewSetId,
   detectCodeKind,
   maskUnlockCode,
 } from '../logic/pro'
@@ -113,7 +109,8 @@ const fileSaveSupported = supportsSaveFilePicker()
  *   (+ 未指定だった「アプリについて」もここに置く。最も汎用的なタブの末尾が収まりが良いため)
  * レシピ=基本レシピ/レシピセットを読み込む/テーマ一覧/食材と価格へのリンク
  * バックアップ=バックアップ一式
- * Pro・パック=Pro版/追加レシピパック
+ * Pro=Pro版(有料の機能解錠)。2026-07-22の全無料化で追加レシピパック(UP-)は製品廃止し、
+ *   このタブは「Pro・パック」→「Pro」に改称した(収録レシピは全て無料・有料はPro機能のみ)
  * タブ状態の持ち方(URL or ローカルstate)は指示側の2択(規約C)。ローカルstateを選択（理由:
  * 既存の?section=/?set=クエリと絡めてタブ用の?tabまで増やすと分岐が複雑になり規約C②
  * 「既存機能を妨げない」に反しやすいため。ローカルstateなら?section=/?set=の処理は
@@ -125,7 +122,7 @@ const settingsTabs: { id: SettingsTab; label: string }[] = [
   { id: 'basic', label: ja.settings.tabBasic },
   { id: 'recipe', label: ja.settings.tabRecipe },
   { id: 'backup', label: ja.settings.tabBackup },
-  { id: 'pro', label: ja.settings.tabProPack },
+  { id: 'pro', label: ja.settings.tabPro },
 ]
 
 // ?section=pro / ?section=themes / ?section=backup の直リンクが、タブ化後もどのタブの
@@ -280,10 +277,8 @@ export default function SettingsPage() {
   const [themesLoading, setThemesLoading] = useState(true)
   const [themeBusyId, setThemeBusyId] = useState<string | null>(null)
   const [addAllBusy, setAddAllBusy] = useState(false)
-  // タップで収録レシピ(品目リスト)を展開しているテーマ。解錠状態と無関係に見られる
+  // タップで収録レシピ(品目リスト)を展開しているテーマ
   const [expandedThemeIds, setExpandedThemeIds] = useState<string[]>([])
-  // 未解錠のまま「追加する」を押したテーマ(そのカード内に解錠が必要な旨を表示する)
-  const [blockedThemeId, setBlockedThemeId] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -327,10 +322,7 @@ export default function SettingsPage() {
       try {
         const file = await fetchRecipeSet(`/sets/data/${setId}.json`)
         if (cancelled) return
-        if (file.setId && !isPreviewSetId(file.setId) && !hasPaidRecipeAccess(settings)) {
-          setMessage(ja.settings.recipeSetBlocked)
-          return
-        }
+        // 2026-07-22全無料化: 収録レシピ(基本+全テーマ)は全て無料。解錠なしで誰でも取り込める
         const confirmText = ja.settings.recipeSetDeepLinkConfirm
           .replace('{name}', file.setName ?? setId)
           .replace('{n}', String(file.recipes.length))
@@ -600,10 +592,6 @@ export default function SettingsPage() {
     setRecipeSetMessage('')
     try {
       const file = await fetchRecipeSet(url)
-      if (file.setId && !isPreviewSetId(file.setId) && !hasPaidRecipeAccess(settings)) {
-        setRecipeSetMessage(ja.settings.recipeSetBlocked)
-        return
-      }
       showRecipeSetResultInline(await importRecipeSet(file))
       setRecipeSetUrl('')
     } catch (err) {
@@ -619,10 +607,6 @@ export default function SettingsPage() {
     setRecipeSetMessage('')
     try {
       const parsed = parseBackup(await file.text())
-      if (parsed.setId && !hasPaidRecipeAccess(settings)) {
-        setRecipeSetMessage(ja.settings.recipeSetBlocked)
-        return
-      }
       showRecipeSetResultInline(await importRecipeSet(parsed))
     } catch {
       setRecipeSetMessage(ja.settings.recipeSetError)
@@ -663,11 +647,9 @@ export default function SettingsPage() {
   }
 
   /**
-   * 「購入と解錠」1画面統合(2026-07-17設定ゼロベース裁定#7)。入力欄1つでPro・追加レシピパック
-   * 両方を受け付け、detectCodeKindで種類(UR-/UP-)を判定してから、既存のisValidProCode/
-   * isValidPackCode・updateSettingsのフィールドはそのまま流用する(解錠フロー・検証ロジック
-   * 自体は変えない)。旧来の「違う欄に入力してください」という相互誘導ヒントは、
-   * そのまま正しい方で解錠する形に発展したため不要になった
+   * 「購入と解錠」のコード解錠(2026-07-17設定ゼロベース裁定#7の統合入力を継承)。
+   * 2026-07-22の全無料化で追加レシピパック(UP-)は製品廃止したため、受け付ける解錠コードは
+   * Pro(UR-)のみ。detectCodeKindがUR-以外を'unknown'として弾き、コード形式エラーを出す。
    */
   const activateUnlock = async () => {
     setUnlockChecking(true)
@@ -683,17 +665,6 @@ export default function SettingsPage() {
         await updateSettings({
           proCode: normalizeProCode(unlockCodeInput),
           proActivatedAt: Date.now(),
-        })
-        setUnlockCodeInput('')
-      } else if (kind === 'pack') {
-        const valid = await isValidPackCode(unlockCodeInput)
-        if (!valid) {
-          setUnlockError(ja.settings.packInvalidCode)
-          return
-        }
-        await updateSettings({
-          recipePackCode: normalizePackCode(unlockCodeInput),
-          recipePackActivatedAt: Date.now(),
         })
         setUnlockCodeInput('')
       } else {
@@ -1266,11 +1237,11 @@ export default function SettingsPage() {
             </a>
           </section>
 
-          {/* テーマ一覧: 中身は誰でも確認でき、取り込みは追加レシピパック/Pro解錠者ができる */}
+          {/* テーマ一覧: 収録レシピ(全テーマ)は2026-07-22の全無料化で誰でも解錠なしに取り込める */}
           <section id="theme-list-section" className={sectionCls}>
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-bold">{ja.settings.themeListTitle}</h2>
-              {hasPaidRecipeAccess(settings) && themes.length > 0 && (
+              {themes.length > 0 && (
                 <button
                   type="button"
                   onClick={() => void addAllThemes()}
@@ -1361,7 +1332,8 @@ export default function SettingsPage() {
                               {ja.settings.themeDelete}
                             </button>
                           </div>
-                        ) : hasPaidRecipeAccess(settings) ? (
+                        ) : (
+                          // 2026-07-22全無料化: 全テーマを解錠なしで取り込める
                           <button
                             type="button"
                             onClick={() => void addTheme(theme)}
@@ -1370,22 +1342,6 @@ export default function SettingsPage() {
                           >
                             {ja.settings.themeAdd}
                           </button>
-                        ) : (
-                          <>
-                            {/* 未解錠でも無反応にせず、タップで「解錠が必要」の説明を返す */}
-                            <button
-                              type="button"
-                              onClick={() => setBlockedThemeId(theme.id)}
-                              className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm"
-                            >
-                              {ja.settings.themeAdd}
-                            </button>
-                            {blockedThemeId === theme.id && (
-                              <p className="mt-1 rounded-sm border border-accent px-2 py-1.5 text-xs font-bold text-accent">
-                                {ja.settings.recipeSetBlocked}
-                              </p>
-                            )}
-                          </>
                         )}
                       </div>
                       {/* 削除済みで再取込しない品(トゥームストーン)があるときだけ「すべて戻す」を出す。
@@ -1615,14 +1571,15 @@ export default function SettingsPage() {
 
       {activeTab === 'pro' && (
         <>
-          {/* 購入と解錠(2026-07-17設定ゼロベース裁定#7: Pro版・追加レシピパックの2カードを
-              1カードに統合。入力欄1つでコード種別(UR-/UP-)を自動判定する。解錠状態は両方を
-              一覧表示し、解錠済みコードはマスク表示+コピー(#4)を添える) */}
+          {/* 購入と解錠。2026-07-22の全無料化で収録レシピ(基本+全テーマ)は全て無料になり、
+              有料は買い切りProの機能解錠(登録無制限・栄養8項目と栄養並び替え・月間献立)のみ。
+              追加レシピパック(UP-)は製品廃止したため、この画面はPro(UR-)の解錠だけを扱う。
+              解錠済みコードはマスク表示+コピー(2026-07-17設定ゼロベース裁定#4)を添える */}
           <section id="pro-section" className={sectionCls}>
             <h2 className="font-bold">{ja.settings.unlockTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.unlockDescription}</p>
 
-            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+            <ul className="mt-[var(--space-sm)] rounded-md border border-edge bg-app">
               {/* Pro版の行 */}
               <li className="px-[var(--space-sm)] py-2">
                 <div className="flex items-center justify-between gap-2">
@@ -1645,38 +1602,9 @@ export default function SettingsPage() {
                   <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
                 )}
               </li>
-              {/* 追加レシピパックの行 */}
-              <li className="px-[var(--space-sm)] py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold">{ja.settings.packTitle}</span>
-                  {!settings.recipePackCode && (
-                    <span className="shrink-0 text-sm text-ink-muted">
-                      {settings.proCode ? ja.settings.packIncludedInPro : ja.settings.unlockStatusInactive}
-                    </span>
-                  )}
-                </div>
-                {settings.recipePackCode ? (
-                  <>
-                    <p className="mt-1 text-sm font-bold text-accent">{ja.settings.packActivatedTitle}</p>
-                    {settings.recipePackActivatedAt && (
-                      <p className="mt-0.5 text-xs text-ink-muted">
-                        {ja.settings.packActivatedDate.replace(
-                          '{date}',
-                          formatDate(settings.recipePackActivatedAt),
-                        )}
-                      </p>
-                    )}
-                    <UnlockCodeDisplay code={settings.recipePackCode} />
-                  </>
-                ) : (
-                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.packDescription}</p>
-                )}
-              </li>
             </ul>
 
-            {/* 未解錠(またはパックのみ解錠=将来のPro追加購入に備えて残す)なら統合入力を出す。
-                Pro解錠済みならすべて含むため入力欄自体を隠す(旧packNotNeededWithProの後継:
-                「入力できるのに無意味」ではなく「そもそも入力の必要が無い」状態にする) */}
+            {/* 未解錠ならコード入力を出す。Pro解錠済みなら入力の必要が無いため入力欄自体を隠す */}
             {!settings.proCode && (
               <div className="mt-[var(--space-md)]">
                 <div className="flex gap-[var(--space-sm)]">
