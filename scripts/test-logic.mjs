@@ -34,6 +34,7 @@ import { isNewsSuppressed } from '../src/logic/news.ts'
 import {
   suggestForSlot,
   suggestPairForSlot,
+  planWeekFill,
   isPastDate,
   shiftDate,
   excludeYesterdayPlanRecipes,
@@ -1663,6 +1664,83 @@ eq(
 eq('rangeDayCount: 同日は1日', rangeDayCount('2026-07-05', '2026-07-05'), 1)
 eq('rangeDayCount: 3日〜8日は6日間(両端含む)', rangeDayCount('2026-07-03', '2026-07-08'), 6)
 eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28', '2026-07-02'), 5)
+
+// ---------- planWeekFill(「まとめて献立を立てる」の計画・2026-07-22 便BE) ----------
+// 外部レビューで見つかった「手動配置を無警告で上書きする」欠陥の再発防止。
+// 手動配置(auto以外)がある枠は残し、空き枠・自動提案由来の枠だけを埋め直す。過去日・非表示帯は対象外。
+{
+  const week = [
+    '2026-07-20', // 月
+    '2026-07-21', // 火
+    '2026-07-22', // 水
+    '2026-07-23', // 木
+    '2026-07-24', // 金
+    '2026-07-25', // 土
+    '2026-07-26', // 日
+  ]
+  const mkEntry = (id, date, recipeId, over = {}) => ({ id, date, slot: 'dinner', recipeId, role: 'main', ...over })
+  const keysOf = (slots) => slots.map((s) => `${s.date}|${s.slot}`)
+  const sortedNums = (a) => [...a].sort((x, y) => x - y)
+  const sortedStrs = (set) => Array.from(set).sort()
+
+  // (1) まっさらな週(空): 表示中の全枠が埋め対象になる。手動保護なし・削除なし(MEALPLAN-04 1回目相当)
+  {
+    const plan = planWeekFill([], week, ['dinner'], '2026-07-20')
+    eq('planWeekFill(空の週): 7日分の夕食すべてが埋め対象', keysOf(plan.slotsToFill), [
+      '2026-07-20|dinner', '2026-07-21|dinner', '2026-07-22|dinner', '2026-07-23|dinner',
+      '2026-07-24|dinner', '2026-07-25|dinner', '2026-07-26|dinner',
+    ])
+    eq('planWeekFill(空の週): 残す手動枠は0', plan.preservedSlotKeys.size, 0)
+    eq('planWeekFill(空の週): 削除対象なし', plan.autoEntryIdsToRemove, [])
+    eq('planWeekFill(空の週): used除外なし', plan.usedRecipeIds, [])
+  }
+
+  // (2) 全枠が自動提案由来: 2回目のタップでも全枠を埋め直す(再抽選)＝手動保護は邪魔しない
+  //     (MEALPLAN-04 2回目相当: 自動枠は削除→再作成される)
+  {
+    const entries = week.map((date, i) => mkEntry(i + 1, date, 10 + i, { auto: true }))
+    const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
+    eq('planWeekFill(全自動枠): 全7枠が埋め直し対象', plan.slotsToFill.length, 7)
+    eq('planWeekFill(全自動枠): 自動行は全件削除対象', sortedNums(plan.autoEntryIdsToRemove), [1, 2, 3, 4, 5, 6, 7])
+    eq('planWeekFill(全自動枠): 残す手動枠は0(再抽選できる)', plan.preservedSlotKeys.size, 0)
+  }
+
+  // (3) 手動配置は残し、空き枠だけ埋める。手動枠は埋め対象にも削除対象にもならない(タスク1の核心)
+  {
+    const entries = [
+      mkEntry(1, '2026-07-20', 11), // 月・手動(auto未設定)
+      mkEntry(2, '2026-07-21', 12, { auto: true }), // 火・自動
+    ]
+    const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
+    eq('planWeekFill(手動保護): 月の手動枠は残す枠に入る', sortedStrs(plan.preservedSlotKeys), ['2026-07-20|dinner'])
+    eq(
+      'planWeekFill(手動保護): 月(手動)は埋め対象から外れ、火〜日だけ埋める',
+      keysOf(plan.slotsToFill),
+      ['2026-07-21|dinner', '2026-07-22|dinner', '2026-07-23|dinner', '2026-07-24|dinner', '2026-07-25|dinner', '2026-07-26|dinner'],
+    )
+    eq('planWeekFill(手動保護): 手動行(id=1)は削除されず、火の自動行(id=2)だけ削除', plan.autoEntryIdsToRemove, [2])
+    eq('planWeekFill(手動保護): 手動枠のレシピ(11)は重複回避のusedに入る', plan.usedRecipeIds.includes(11), true)
+  }
+
+  // (4) 過去日・今日の手動・非表示帯・手動と自動が同居する枠、の複合ケース
+  {
+    const entries = [
+      mkEntry(1, '2026-07-20', 100), // 月=過去日(today=水): 対象外→触らない・usedに入る
+      mkEntry(2, '2026-07-22', 200), // 水=今日・手動→残す
+      mkEntry(3, '2026-07-23', 300, { auto: true }), // 木・自動→削除して埋め直す
+      mkEntry(4, '2026-07-24', 400, { auto: true }), // 金・自動 …だが同じ枠に手動(id=5)があるので枠ごと残す
+      mkEntry(5, '2026-07-24', 401), // 金・手動→金の枠を残す
+      mkEntry(6, '2026-07-25', 500, { slot: 'lunch' }), // 土・昼食(非表示帯)→対象外・usedに入る
+    ]
+    const plan = planWeekFill(entries, week, ['dinner'], '2026-07-22')
+    eq('planWeekFill(複合): 残す枠は今日(水)と金の2枠', sortedStrs(plan.preservedSlotKeys), ['2026-07-22|dinner', '2026-07-24|dinner'])
+    eq('planWeekFill(複合): 埋めるのは木・土・日の夕食', keysOf(plan.slotsToFill), [
+      '2026-07-23|dinner', '2026-07-25|dinner', '2026-07-26|dinner',
+    ])
+    eq('planWeekFill(複合): 削除は木の自動(id=3)のみ。金の自動(id=4)は枠ごと残すので消さない', plan.autoEntryIdsToRemove, [3])
+    eq('planWeekFill(複合): 過去日・非表示帯・残す枠の全レシピがusedに入る', sortedNums(plan.usedRecipeIds), [100, 200, 400, 401, 500])
+  }
+}
 
 // ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------
 {

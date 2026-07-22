@@ -1,7 +1,7 @@
 import { hasNgIngredient } from './ng'
 import { cookedWithinDays } from './cooked'
 import { currentSeason } from './season'
-import type { DishType, MealRole, MealSlot, Recipe, Season } from '../db/types'
+import type { DishType, MealPlanEntry, MealRole, MealSlot, Recipe, Season } from '../db/types'
 
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
@@ -299,6 +299,74 @@ export function suggestPairForSlot(
     genre: options.genre ?? (main ? recipeGenre(main) : undefined),
   })
   return { main, side }
+}
+
+/** 「まとめて献立を立てる」の埋め方を決める計画（planWeekFill の戻り値） */
+export interface FillWeekPlan {
+  /** これから自動提案で埋める枠（日付×食事帯。日付順→食事帯順） */
+  slotsToFill: { date: string; slot: MealSlot }[]
+  /** 手動配置があるため丸ごと残す枠のキー("date|slot")の集合。件数はメッセージにも使う */
+  preservedSlotKeys: Set<string>
+  /** 埋め直す枠に残っている「自動提案由来」エントリのid（削除してから提案し直す） */
+  autoEntryIdsToRemove: number[]
+  /** 重複回避で used とみなす recipeId（対象外の枠＋残す手動枠の中身）。提案の同一週内重複を避ける */
+  usedRecipeIds: number[]
+}
+
+/**
+ * 「まとめて献立を立てる」の計画を立てる純ロジック（2026-07-22 便BE・手動配置の無警告上書き対策）。
+ *
+ * 挙動:
+ * - 過去日(今日より前)の枠は対象外（既存仕様。上書きも新規埋めもしない）
+ * - 対象=未来日×表示中の食事帯。そのうち
+ *   - 手動配置(auto以外の行)が1件でもある枠は「丸ごと残す」＝提案で埋め直さない（手動を守る）
+ *   - それ以外の枠（空 or 自動提案由来だけ）は、自動提案由来の既存行を消してから提案で埋め直す
+ *     （＝2回目以降のタップでも自動枠は再抽選される。2026-07-14の再抽選仕様を自動枠に限って維持）
+ *
+ * これで「手動で入れた献立を無警告で上書きして消す」欠陥をなくしつつ、
+ * 「まとめて献立を立てるを押すたびに新しい提案に振り直せる」再抽選の使い勝手も保つ。
+ * 未設定(auto未指定)の既存データは手動扱い＝保護側に倒す（非破壊が既定）。
+ */
+export function planWeekFill(
+  entries: MealPlanEntry[],
+  weekDatesArr: string[],
+  visibleSlots: MealSlot[],
+  today: string,
+): FillWeekPlan {
+  const futureDates = weekDatesArr.filter((date) => !isPastDate(date, today))
+  const touchedKeys = new Set(
+    futureDates.flatMap((date) => visibleSlots.map((slot) => `${date}|${slot}`)),
+  )
+
+  // 1周目: 対象枠の中で手動配置を持つ枠を確定する（＝残す枠）
+  const preservedSlotKeys = new Set<string>()
+  for (const e of entries) {
+    const key = `${e.date}|${e.slot}`
+    if (touchedKeys.has(key) && !e.auto) preservedSlotKeys.add(key)
+  }
+
+  // 2周目: 削除対象(残さない枠の自動行)と、重複回避のused(対象外枠＋残す枠の中身)を集める
+  const autoEntryIdsToRemove: number[] = []
+  const usedRecipeIds: number[] = []
+  for (const e of entries) {
+    const key = `${e.date}|${e.slot}`
+    if (!touchedKeys.has(key)) {
+      usedRecipeIds.push(e.recipeId) // 対象外の枠（過去日・非表示帯）は触らない＝重複回避対象
+    } else if (preservedSlotKeys.has(key)) {
+      usedRecipeIds.push(e.recipeId) // 残す枠の中身（手動・自動とも）も重複回避対象
+    } else if (e.auto && e.id != null) {
+      autoEntryIdsToRemove.push(e.id) // 埋め直す枠の自動行は削除してから提案し直す
+    }
+  }
+
+  const slotsToFill: { date: string; slot: MealSlot }[] = []
+  for (const date of futureDates) {
+    for (const slot of visibleSlots) {
+      if (!preservedSlotKeys.has(`${date}|${slot}`)) slotsToFill.push({ date, slot })
+    }
+  }
+
+  return { slotsToFill, preservedSlotKeys, autoEntryIdsToRemove, usedRecipeIds }
 }
 
 /**

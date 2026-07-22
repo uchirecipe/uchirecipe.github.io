@@ -23,8 +23,12 @@ export async function addMealEntry(
   slot: MealSlot,
   recipeId: number,
   role: MealRole,
+  auto = false,
 ): Promise<void> {
-  await db.mealPlans.add({ date, slot, recipeId, role })
+  // auto=true は「まとめて献立を立てる」由来の枠だけに付ける。手動追加(既定)は付けない
+  // （＝手動配置として保護される。types.ts MealPlanEntry.auto 参照）。falseはあえて保存せず
+  // 既存の「未設定=手動」の後方互換とそろえる（レコードを余計な項目で汚さない）
+  await db.mealPlans.add(auto ? { date, slot, recipeId, role, auto: true } : { date, slot, recipeId, role })
 }
 
 /**
@@ -48,9 +52,16 @@ export async function addMealEntryIfAbsent(
   })
 }
 
-/** 既存エントリのレシピだけを差し替える（役割・日付・枠は変えない） */
+/**
+ * 既存エントリのレシピだけを差し替える（役割・日付・枠は変えない）。
+ * ピッカーでの選び直し・行サイコロなど、ユーザーが明示的に置き換える経路で使う。
+ * このとき auto フラグを外して手動扱いに戻す（2026-07-22 便BE）：自動提案由来の枠を
+ * ユーザーが差し替えたら、それはもう「手動で決めた枠」なので、次の「まとめて献立を立てる」で
+ * 上書きされないよう保護する。「まとめて献立を立てる」自身は remove+add で埋め直すので
+ * この関数は通らない
+ */
 export async function updateMealEntryRecipe(entryId: number, recipeId: number): Promise<void> {
-  await db.mealPlans.update(entryId, { recipeId })
+  await db.mealPlans.update(entryId, { recipeId, auto: false })
 }
 
 /** 指定エントリを削除する（その行だけを外す） */
