@@ -139,8 +139,9 @@ function LockedBody({ nutrition, isPro }: { nutrition: Nutrition; isPro: boolean
         {'　'}
         {ja.nutrition.sourceCommercialNote}
       </p>
-      {/* 解錠済みユーザーには「Pro特典として開発中・公開時に自動で使える」ことを明示する
-          (「解錠したのに残りが見えない」という誤解を防ぐ。2026-07-09ペルソナ第2波を踏襲) */}
+      {/* Pro未解錠のユーザーには、これらのめやすが買い切りのPro版で表示されること
+          (設定のProタブから解錠できること)を伝える。isProの分岐は栄養フル版の公開フラグを
+          落としたとき用の保険(通常は未解錠=非ProなのでfreeDescription側が出る) */}
       <p className="text-sm text-ink-muted">
         {isPro ? ja.nutrition.freeDescriptionPro : ja.nutrition.freeDescription}
       </p>
