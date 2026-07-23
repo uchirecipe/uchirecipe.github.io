@@ -1,10 +1,12 @@
 // レシピ原稿の機械チェック(記法ルールR1〜R7・カタログ全体の整合性)。
 // 人間・QAが見るべきもの(味の妥当性・D-④の解釈)は対象外、機械で潰せるものだけを見る。
 // 実行: npx tsx scripts/lint-recipes.mjs
-// 対象: starters.ts + src/sets/*.ts + (存在すれば)public/sets/data/review.json(docs/12原稿のレビュー用コピー)
+// 対象: starters.ts の starterDefs(全103品)。
+// 2026-07-23のテーマ全廃で、旧配布テーマ原稿(src/sets/*.ts)は starters.ts が recipes を読み込んで
+// starterDefs に合流するようになったため、ここは starterDefs だけを見れば全カタログを網羅する
+// (src/sets/*.ts を別ループで読むと二重計上になり「料理名重複」を誤検出するので読まない)。
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { readdirSync, existsSync, readFileSync } from 'node:fs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -25,7 +27,7 @@ const WEIGHT_VOLUME_UNITS = new Set(['g', 'ml', 'cc'])
 /** @type {{source: string, recipe: RecipeLike}[]} */
 const entries = []
 
-// 基本レシピ21品
+// 基本レシピ全103品(従来の基本レシピ + 旧配布テーマ由来。starters.tsが両方を連結してexportする)
 const startersMod = await import('../src/db/starters.ts')
 for (const r of startersMod.starterDefs) {
   entries.push({ source: 'starters.ts', recipe: r })
@@ -34,31 +36,6 @@ for (const r of startersMod.starterDefs) {
 // 用語タップ辞書(2026-07-11導入)。収載語は本文の括弧説明を持たなくても「説明済み」とみなす(ルール12で使用)。
 const { COOKING_TERMS } = await import('../src/data/cookingTerms.ts')
 const DICTIONARY_TERM_STRINGS = COOKING_TERMS.flatMap((t) => [t.term, ...(t.aliases ?? [])])
-
-// 配布セット(src/sets/*.ts を全部読む。新しいセットを追加してもここは自動で拾う)
-const setsDir = path.join(__dirname, '..', 'src', 'sets')
-for (const file of readdirSync(setsDir).sort()) {
-  if (!file.endsWith('.ts')) continue
-  const mod = await import(`../src/sets/${file}`)
-  for (const r of mod.recipes) {
-    entries.push({ source: `sets/${file}`, recipe: r })
-  }
-}
-
-// レビュー用コピー(原稿から生成される未承認レシピ。あればそれも同じ基準で見る)
-// ※第2/8/16弾(旧review2/8/16)は2026-07-23にsrc/sets/diet・summer・freezer.tsとして正式公開したため
-//   上のsrc/sets/*.ts自動読み込みで拾われる。ここからは除外(重複計上と料理名重複誤検出を防ぐ)。
-for (const [reviewFileName, reviewLabel] of [
-  ['review.json', 'review.json(docs/12原稿)'],
-]) {
-  const reviewPath = path.join(__dirname, '..', 'public', 'sets', 'data', reviewFileName)
-  if (existsSync(reviewPath)) {
-    const reviewFile = JSON.parse(readFileSync(reviewPath, 'utf-8'))
-    for (const r of reviewFile.recipes) {
-      entries.push({ source: reviewLabel, recipe: r })
-    }
-  }
-}
 
 const findings = []
 const add = (severity, rule, source, title, detail) => {

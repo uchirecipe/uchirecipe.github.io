@@ -1,12 +1,25 @@
 import { db } from './db'
 import { defaultSettings, type Recipe, type RecipeInput } from './types'
 import { buildSearchWords } from '../logic/kana'
+// 旧「配布テーマ（第◯弾）」の原稿。2026-07-23のテーマ全廃(オーナー確定)で、これらは
+// もう ?set= 配布用ではなく「同梱の基本レシピ」として初回シードに合流する（下の starterDefs 参照）。
+// 原稿ファイル自体は執筆・レビューの正本として残し、ここから recipes 配列だけを読み込む
+// （レシピ本文・材料・分量は一切変更しない＝内容無変更）。
+import { recipes as kintoreRecipes } from '../sets/kintore'
+import { recipes as bentoRecipes } from '../sets/pack07'
+import { recipes as dietRecipes } from '../sets/diet'
+import { recipes as summerRecipes } from '../sets/summer'
+import { recipes as freezerRecipes } from '../sets/freezer'
 
 /**
- * 同梱の基本レシピ21品。
+ * 同梱の基本レシピ。
  * すべてこのアプリのために書き下ろしたオリジナル原稿（著作権フリー扱い）。
  * 登録フォーマットのお手本にもなるよう、分量・手順の書き方を揃えている。
  * season フィールド（通年・春・夏・秋・冬）はホームの提案で今の季節を優先するために使う。
+ *
+ * 下の baseStarterDefs（従来からの基本レシピ）と、旧配布テーマ原稿（src/sets/*.ts）を
+ * 連結した starterDefs（= 全 103 品）が初回シード対象。テーマ・第◯弾の括りは 2026-07-23 に
+ * 全廃し、全品を平らな「基本レシピ」として扱う（料理名はカタログ全体で一意・lint-recipes で担保）。
  */
 
 type StarterDef = Omit<RecipeInput, 'photo'>
@@ -24,8 +37,8 @@ const s = (text: string, minutes?: number, memo?: string) => ({
   ...(memo ? { memo } : {}),
 })
 
-// exportは栄養価概算の回帰スモークテスト(scripts/test-nutrition.mjs)が原稿を読むため（アプリ動作は不変）
-export const starterDefs: StarterDef[] = [
+// 従来からの基本レシピ（51品）。旧配布テーマ原稿と連結して starterDefs を作る（下記）
+const baseStarterDefs: StarterDef[] = [
   {
     title: '肉じゃが',
     servings: 2, cookMinutes: 35, effortLevel: 'normal',
@@ -1867,6 +1880,26 @@ export const starterDefs: StarterDef[] = [
   },
 ]
 
+/**
+ * 旧配布テーマ原稿（第◯弾）由来の基本レシピ（52品）。
+ * 2026-07-23のテーマ全廃で、これらも初回シードの対象に合流させた。dishType 等の既存メタは維持する。
+ * ここで連結するだけで、レシピ本文・材料・分量には一切手を加えていない（内容無変更）。
+ */
+const setStarterDefs: StarterDef[] = [
+  ...kintoreRecipes,
+  ...bentoRecipes,
+  ...dietRecipes,
+  ...summerRecipes,
+  ...freezerRecipes,
+]
+
+/**
+ * 初回シード対象の全基本レシピ（103品）。
+ * exportは栄養価概算の回帰スモークテスト(scripts/test-nutrition.mjs)・レシピlint(scripts/lint-recipes.mjs)が
+ * 原稿を読むためにも使う（アプリ動作は不変）。
+ */
+export const starterDefs: StarterDef[] = [...baseStarterDefs, ...setStarterDefs]
+
 /** StarterDef → 保存できる Recipe の形にする */
 function toRecipe(def: StarterDef): Recipe {
   const now = Date.now()
@@ -1882,16 +1915,56 @@ function toRecipe(def: StarterDef): Recipe {
 }
 
 /**
- * 初回起動時に基本レシピを投入する。
+ * 初回起動時に基本レシピ（全103品）を投入する。
  * 判定と投入を1つのトランザクションで行うので、二重に呼ばれても重複しない。
+ * 初回シードでは全品が入るため、旧テーマ差分投入(topUpFlattenedStartersIfNeeded)は不要
+ * ＝starterFlattenSeededも同時にtrueにして空振りさせる。
  */
 export async function seedStartersIfNeeded(): Promise<void> {
   await db.transaction('rw', db.recipes, db.settings, async () => {
     const settings = { ...defaultSettings, ...(await db.settings.get(1)) }
     if (settings.starterSeeded) return
     await db.recipes.bulkAdd(starterDefs.map(toRecipe))
-    await db.settings.put({ ...settings, starterSeeded: true, id: 1 })
+    await db.settings.put({ ...settings, starterSeeded: true, starterFlattenSeeded: true, id: 1 })
   })
+}
+
+/**
+ * 既存ユーザーへの差分投入（純ロジック・DB非依存）。
+ * 旧テーマ全廃(2026-07-23)より前に初回シード済みの端末には、旧配布テーマ由来の基本レシピが
+ * まだ入っていない。アップデート後の起動時に「不足分だけ」足すため、追加すべき原稿を選ぶ。
+ * 二重投入・削除品の復活を防ぐため、次のどちらかに当てはまる料理名は追加しない:
+ *  - 既に同じ料理名のレシピが端末にある（過去に?set=で取り込み済み・自作で同名登録済みなど）
+ *  - 削除済みの再取込除外記録（トゥームストーン）がある（ユーザーが消した品を復活させない）
+ */
+export function planFlattenedStarterTopUp(
+  existingTitles: Iterable<string>,
+  exclusionTitles: Iterable<string>,
+  defs: StarterDef[] = setStarterDefs,
+): StarterDef[] {
+  const present = new Set([...existingTitles].map((t) => t.trim()))
+  const excluded = new Set([...exclusionTitles].map((t) => t.trim()))
+  return defs.filter((d) => !present.has(d.title.trim()) && !excluded.has(d.title.trim()))
+}
+
+/**
+ * 既存ユーザーの端末へ、旧テーマ由来の基本レシピの不足分だけを1回投入する。
+ * starterFlattenSeededがtrueなら何もしない（初回シード済みの新規ユーザー・投入済みの既存ユーザー）。
+ * 追加した品は「平らな基本レシピ」(isStarter=true・sourceSetIdなし)として入る。
+ */
+export async function topUpFlattenedStartersIfNeeded(): Promise<number> {
+  let added = 0
+  await db.transaction('rw', db.recipes, db.setExclusions, db.settings, async () => {
+    const settings = { ...defaultSettings, ...(await db.settings.get(1)) }
+    if (settings.starterFlattenSeeded) return
+    const existingTitles = (await db.recipes.toArray()).map((r) => r.title)
+    const exclusionTitles = (await db.setExclusions.toArray()).map((e) => e.title)
+    const toAdd = planFlattenedStarterTopUp(existingTitles, exclusionTitles)
+    if (toAdd.length) await db.recipes.bulkAdd(toAdd.map(toRecipe))
+    await db.settings.put({ ...settings, starterFlattenSeeded: true, id: 1 })
+    added = toAdd.length
+  })
+  return added
 }
 
 /** reloadStarterRecipesが更新対象として扱う「内容」フィールド。
@@ -2002,6 +2075,11 @@ export function planStarterReload(
   existingStarters: Recipe[],
   defs: StarterDef[] = starterDefs,
   now: number = Date.now(),
+  /** 端末上の全レシピ料理名（?set=取込・自作を含む）。新規追加の二重投入ガード。
+   * 既定は existingStarters の料理名（＝従来どおりの挙動＝基本レシピ同士の照合のみ） */
+  allTitles: ReadonlySet<string> = new Set(existingStarters.map((r) => r.title.trim())),
+  /** 削除済みの再取込除外記録（トゥームストーン）の料理名。ここに載る品は入れ直しでも復活させない */
+  excludedTitles: ReadonlySet<string> = new Set<string>(),
 ): StarterReloadPlan {
   const existingByTitle = new Map(existingStarters.map((r) => [r.title, r] as const))
   const defTitles = new Set(defs.map((d) => d.title))
@@ -2010,12 +2088,16 @@ export function planStarterReload(
   const toUpdate: Recipe[] = []
   for (const def of defs) {
     const existing = existingByTitle.get(def.title)
-    if (!existing) {
-      toAdd.push(def)
+    if (existing) {
+      const merged = buildUpdatedStarterRecipe(existing, def, now)
+      if (merged) toUpdate.push(merged)
       continue
     }
-    const merged = buildUpdatedStarterRecipe(existing, def, now)
-    if (merged) toUpdate.push(merged)
+    // 基本レシピに同名が無い品。端末に同名レシピ（?set=取込・自作）があれば二重投入しない。
+    // 削除済み（トゥームストーン）の品も復活させない。どちらでもなければ新規追加。
+    const key = def.title.trim()
+    if (allTitles.has(key) || excludedTitles.has(key)) continue
+    toAdd.push(def)
   }
   const toDeleteIds = existingStarters
     .filter((r) => !defTitles.has(r.title) && r.id != null)
@@ -2042,11 +2124,14 @@ export interface StarterReloadResult {
 export async function reloadStarterRecipes(): Promise<StarterReloadResult> {
   let added = 0
   let updated = 0
-  await db.transaction('rw', db.recipes, async () => {
-    const existingStarters = await db.recipes
-      .filter((r) => r.isStarter === true && r.sourceSetId == null)
-      .toArray()
-    const plan = planStarterReload(existingStarters)
+  await db.transaction('rw', db.recipes, db.setExclusions, async () => {
+    const allRecipes = await db.recipes.toArray()
+    // 更新・削除の対象は「平らな基本レシピ」(isStarter・sourceSetIdなし)のみ。
+    // ?set=で取り込んだ品(sourceSetIdあり)は対象外だが、二重投入を防ぐため allTitles には含める
+    const existingStarters = allRecipes.filter((r) => r.isStarter === true && r.sourceSetId == null)
+    const allTitles = new Set(allRecipes.map((r) => r.title.trim()))
+    const excludedTitles = new Set((await db.setExclusions.toArray()).map((e) => e.title.trim()))
+    const plan = planStarterReload(existingStarters, starterDefs, Date.now(), allTitles, excludedTitles)
     if (plan.toDeleteIds.length) await db.recipes.bulkDelete(plan.toDeleteIds)
     if (plan.toUpdate.length) await db.recipes.bulkPut(plan.toUpdate)
     if (plan.toAdd.length) await db.recipes.bulkAdd(plan.toAdd.map(toRecipe))

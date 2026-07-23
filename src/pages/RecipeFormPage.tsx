@@ -37,7 +37,6 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { RecipeIcon } from '../components/RecipeCard'
 import { starterDefs } from '../db/starters'
-import { fetchRecipeSet } from '../logic/backup'
 import { ja } from '../i18n/ja'
 
 /* フォーム内部で扱う行の形（入力中は数値も文字列で持つ）。
@@ -747,21 +746,20 @@ function RecipeFormInner() {
 
   // ---- 「デフォルトに戻す」(2026-07-15 オーナー要望・編集モードのみ) ----
   // DBへは書き込まず、フォームの入力値だけを差し替える（保存を押すまで確定しない安全設計）。
-  // 戻し先は3分岐: 自作レシピ=前回保存値(loadedRecipe自身) / 基本レシピ=starterDefsの原本 /
-  // 配布セット由来=public/sets/data/<setId>.jsonの原本。3分岐とも「フォームに現れるフィールド」
-  // だけを対象にし、title・photo・iconKey・showIconInsteadOfPhotoは常にloadedRecipe(既存の保存値)
-  // 側から取る（reloadStarterRecipes/importRecipeSetの再取込が「表示設定はユーザーのものを保持する」
-  // のと同じ考え方。自作レシピ分岐ではこれもloadedRecipe由来なので実質「全部を前回保存値に戻す」になる）
-  const resetVariant: 'own' | 'starter' | 'set' | undefined = !loadedRecipe
+  // 戻し先は2分岐: 自作レシピ=前回保存値(loadedRecipe自身) / 基本レシピ=starterDefsの原本。
+  // テーマ全廃(2026-07-23)で旧配布セット由来の品も starterDefs に合流したため、isStarterなら
+  // 料理名一致でstarterDefsの原本を探せる（旧: 配布セット由来は/sets/data/<setId>.jsonをfetchしていた）。
+  // どちらの分岐も「フォームに現れるフィールド」だけを対象にし、title・photo・iconKey・
+  // showIconInsteadOfPhotoは常にloadedRecipe(既存の保存値)側から取る（reloadStarterRecipesの
+  // 入れ直しが「表示設定はユーザーのものを保持する」のと同じ考え方。自作レシピ分岐ではこれも
+  // loadedRecipe由来なので実質「全部を前回保存値に戻す」になる）
+  const resetVariant: 'own' | 'starter' | undefined = !loadedRecipe
     ? undefined
     : loadedRecipe.isStarter
-      ? loadedRecipe.sourceSetId
-        ? 'set'
-        : 'starter'
+      ? 'starter'
       : 'own'
 
   const [resetArmed, setResetArmed] = useState(false)
-  const [resetting, setResetting] = useState(false)
   const [resetMessage, setResetMessage] = useState('')
   const resetArmTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
@@ -859,52 +857,9 @@ function RecipeFormInner() {
     setPhoto(loadedRecipe.photo)
   }
 
-  // 配布セット由来: public/sets/data/<setId>.json を同一オリジンfetchし、料理名一致で原本を取得する
-  // （importRecipeSet/buildUpdatedSetRecipeと同じ「内容フィールドだけ差し替え、表示設定は保持」の考え方）。
-  // fetch失敗・該当レシピなしはエラーメッセージを出すだけで何もしない
-  const resetToSet = async () => {
-    if (!loadedRecipe || !loadedRecipe.sourceSetId) return
-    setResetting(true)
-    try {
-      const file = await fetchRecipeSet(`/sets/data/${loadedRecipe.sourceSetId}.json`)
-      const match = file.recipes.find((r) => r.title.trim() === loadedRecipe.title.trim())
-      if (!match) {
-        setError(ja.form.resetSetFetchError)
-        return
-      }
-      applyResetTarget({
-        title: loadedRecipe.title,
-        intro: match.intro ?? '',
-        servings: match.servings,
-        cookMinutes: match.cookMinutes != null ? String(match.cookMinutes) : '',
-        effortLevel: match.effortLevel,
-        ingredients: toIngredientRows(match.ingredients),
-        steps: toStepRows(match.steps),
-        tags: match.tags,
-        tagInput: '',
-        keywords: match.keywords ?? [],
-        keywordInput: '',
-        onePoint: match.onePoint ?? '',
-        memo: match.memo ?? '',
-        sourceUrl: match.sourceUrl ?? '',
-        iconKey: loadedRecipe.iconKey,
-        showIconInsteadOfPhoto: loadedRecipe.showIconInsteadOfPhoto ?? false,
-        season: match.season,
-        suitableFor: match.suitableFor ?? [],
-        dishType: match.dishType,
-      })
-      setPhoto(loadedRecipe.photo)
-    } catch {
-      setError(ja.form.resetSetFetchError)
-    } finally {
-      setResetting(false)
-    }
-  }
-
   const performReset = () => {
     if (resetVariant === 'own') resetToOwn()
     else if (resetVariant === 'starter') resetToStarter()
-    else if (resetVariant === 'set') void resetToSet()
   }
 
   /** window.confirmは使わず、既存の確認UIパターンが無いためもう一度押す方式で誤操作を防ぐ
@@ -1791,17 +1746,14 @@ function RecipeFormInner() {
           <button
             type="button"
             onClick={handleResetClick}
-            disabled={resetting}
             className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
           >
             <RotateCcw size={18} aria-hidden />
-            {resetting
-              ? ja.form.resetting
-              : resetArmed
-                ? ja.form.resetConfirmLabel
-                : resetVariant === 'own'
-                  ? ja.form.resetToSavedLabel
-                  : ja.form.resetToDefaultLabel}
+            {resetArmed
+              ? ja.form.resetConfirmLabel
+              : resetVariant === 'own'
+                ? ja.form.resetToSavedLabel
+                : ja.form.resetToDefaultLabel}
           </button>
           {resetMessage && (
             <p className="mt-1 text-center text-sm font-bold text-accent">{resetMessage}</p>

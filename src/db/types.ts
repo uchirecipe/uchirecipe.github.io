@@ -255,6 +255,13 @@ export interface Settings {
   theme: ThemeSetting
   /** 基本レシピの初回投入が済んでいるか */
   starterSeeded: boolean
+  /**
+   * 旧配布テーマ(第◯弾)全廃(2026-07-23)に伴う、既存ユーザーへの差分投入が済んでいるか（任意）。
+   * テーマ全廃より前に初回シード済みの端末は、旧テーマ由来の基本レシピがまだ入っていないため、
+   * 起動時に不足分だけ1回投入する（topUpFlattenedStartersIfNeeded）。未設定（既存ユーザー）は
+   * false 扱い＝1回だけ差分投入が走る。任意項目なのでスキーマ変更・マイグレーションは不要。
+   */
+  starterFlattenSeeded?: boolean
   /** 在庫ボードへの「よく使う食材」プリセット投入が済んでいるか */
   pantryPresetSeeded: boolean
   /** 基本レシピを一覧・ホームに出さない */

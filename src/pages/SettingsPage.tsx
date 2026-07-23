@@ -20,8 +20,7 @@ import {
   Check,
 } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
-import { listRecipes, deleteRecipesBySourceSet } from '../db/recipes'
-import { listSetExclusions, clearSetExclusions } from '../db/setExclusions'
+import { listRecipes } from '../db/recipes'
 import { usePriceEntries } from '../db/prices'
 import { reloadStarterRecipes, starterCount } from '../db/starters'
 import {
@@ -59,7 +58,6 @@ import {
   detectCodeKind,
   maskUnlockCode,
 } from '../logic/pro'
-import { fetchThemeManifest, type ThemeManifestEntry } from '../logic/themeManifest'
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
 import { ja } from '../i18n/ja'
 import Toast from '../components/Toast'
@@ -108,7 +106,7 @@ const fileSaveSupported = supportsSaveFilePicker()
  * 区切る。ページ上部には節へ飛ぶ目次チップ(sticky)を置き、タップで該当節へスクロールする。
  * 各節の内訳(旧タブの区分をそのまま踏襲):
  * 全般=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算)/料理中(画面/タイマー)/アプリについて
- * レシピ=基本レシピ/レシピセットを読み込む/テーマ一覧
+ * レシピ=基本レシピ/レシピセットを読み込む（テーマ一覧は2026-07-23のテーマ全廃で撤去）
  * バックアップ=バックアップ一式
  * Pro=Pro版(有料の機能解錠。収録レシピは全て無料・有料はPro機能のみ)
  * 旧タブの表示名(ja.settings.tabBasic等)を目次チップ・節見出しの両方でそのまま流用する。
@@ -120,14 +118,17 @@ const settingsSections: { id: string; label: string }[] = [
   { id: 'section-pro', label: ja.settings.tabPro },
 ]
 
-// ?section=pro / ?section=themes / ?section=backup の直リンクが、どの要素まで自動スクロールするか。
+// ?section=pro / ?section=backup / ?section=recipe の直リンクが、どの要素まで自動スクロールするか。
 // 1本スクロール化で「該当タブを開く」から「該当節へ自動スクロール」へ読み替えた(unlock.html・
 // NutritionTeaser・ホーム「しばらくバックアップしていません」等の既存導線を維持する)。
-// backupは2026-07-16 ホームリンクの遷移先として追加。値は該当節内のアンカー要素id
+// backupは2026-07-16 ホームリンクの遷移先として追加。値は該当節内のアンカー要素id。
+// テーマ全廃(2026-07-23)で ?section=themes は廃止したが、旧リンクで来ても無害に着地させるため
+// 「レシピ」節へ読み替える（recipe/themes のどちらでもレシピ節の先頭へ飛ぶ）
 const sectionDeepLinks: Record<string, string> = {
   pro: 'pro-section',
-  themes: 'theme-list-section',
   backup: 'backup-section',
+  recipe: 'section-recipe',
+  themes: 'section-recipe',
 }
 
 // 各節の見出し(全般/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -222,8 +223,6 @@ export default function SettingsPage() {
   const recipes = useLiveQuery(listRecipes, [])
   // 食材価格マスタ(2026-07-17設定ゼロベース裁定#6a: 置き換え確認文の件数表示に使う)
   const prices = usePriceEntries()
-  // 再取込除外の記録(トゥームストーン)。テーマ一覧の「除外中◯品・すべて戻す」表示に使う
-  const setExclusions = useLiveQuery(listSetExclusions, [])
   const [ngInput, setNgInput] = useState('')
   const [message, setMessage] = useState('')
   const importFileRef = useRef<HTMLInputElement>(null)
@@ -272,96 +271,36 @@ export default function SettingsPage() {
     }
   }, [])
 
-  // テーマ一覧（配布物マニフェスト）
-  const [themes, setThemes] = useState<ThemeManifestEntry[]>([])
-  const [themesLoading, setThemesLoading] = useState(true)
-  const [themeBusyId, setThemeBusyId] = useState<string | null>(null)
-  const [addAllBusy, setAddAllBusy] = useState(false)
-  // タップで収録レシピ(品目リスト)を展開しているテーマ
-  const [expandedThemeIds, setExpandedThemeIds] = useState<string[]>([])
+  // 旧・配布テーマの ?set=<setId> 直リンク（#/settings?set=kintore 等）で来たときの後始末。
+  // テーマ全廃(2026-07-23)で取り込み処理は撤去した。エラーにはせず、URLの set パラメータだけを
+  // 静かに取り除いて設定画面へ無害に着地させる（旧配布ページ・旧ブックマークからの流入対策）
   useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const list = await fetchThemeManifest()
-      if (!cancelled) {
-        setThemes(list)
-        setThemesLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+    if (!searchParams.get('set')) return
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('set')
+        return next
+      },
+      { replace: true },
+    )
+  }, [searchParams, setSearchParams])
 
-  // 配布ページの「うちレシピに追加する」リンク(#/settings?set=<setId>)からのワンタップ取り込み。
-  // 任意URLは受け付けず、同一オリジンの/sets/data/<setId>.jsonだけをfetchする
-  useEffect(() => {
-    const setId = searchParams.get('set')
-    if (!setId || !settings) return
-    const clearParam = () => {
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          next.delete('set')
-          return next
-        },
-        { replace: true },
-      )
-    }
-    if (!/^[a-z0-9-]+$/.test(setId)) {
-      clearParam()
-      return
-    }
-    // レシピセットの取り込みは「レシピ」節のテーマ一覧の内容なので、直リンクで開いたときは
-    // そのテーマ一覧へ自動スクロールする(1本スクロール化。旧: 「レシピ」タブへ自動切り替え)。
-    // このフローは配布ページの外部リンクから来る一発取り込みで、画面下部のトースト表示が
-    // 既存の挙動(タップで閉じられる)としてテスト済みのため、修正4の対象(読み込み欄上部の
-    // テキスト表示)には含めない(setMessage/下部トーストのまま変更しない)
-    requestAnimationFrame(() => {
-      document.getElementById('theme-list-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
-    let cancelled = false
-    void (async () => {
-      try {
-        const file = await fetchRecipeSet(`/sets/data/${setId}.json`)
-        if (cancelled) return
-        // 2026-07-22全無料化: 収録レシピ(基本+全テーマ)は全て無料。解錠なしで誰でも取り込める
-        const confirmText = ja.settings.recipeSetDeepLinkConfirm
-          .replace('{name}', file.setName ?? setId)
-          .replace('{n}', String(file.recipes.length))
-        if (!window.confirm(confirmText)) return
-        const result = await importRecipeSet(file)
-        setMessage(formatRecipeSetResult(result))
-      } catch (err) {
-        if (!cancelled) showRecipeSetFetchError(err)
-      } finally {
-        clearParam()
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, settings])
-
-  // セクションへの直接リンク(例: /settings?section=pro、?section=themes)から開いたとき、
+  // セクションへの直接リンク(例: /settings?section=pro、?section=backup)から開いたとき、
   // 該当節のアンカー要素まで自動スクロールする(1本スクロール化。旧: 該当タブへ切り替え→スクロール)。
   // 1本スクロールなので対象要素は常にDOMにあるが、settings読み込み前はコンポーネントがnullを返す
-  // (下記)ため要素がまだ無く、settingsが揃ってから試す。テーマ一覧の高さが確定してから
-  // スクロールするようthemesLoadingがfalseになるのを待つ(その下のbackup/proの位置がずれないように)。
-  // 1マウントにつき1回だけ実行するようRefで防ぐ
+  // (下記)ため要素がまだ無く、settingsが揃ってから試す。1マウントにつき1回だけ実行するようRefで防ぐ
   const scrolledToSectionRef = useRef(false)
   useEffect(() => {
     if (scrolledToSectionRef.current) return
     const elementId = sectionDeepLinks[searchParams.get('section') ?? '']
     if (!elementId) return
     if (!settings) return
-    if (themesLoading) return
     scrolledToSectionRef.current = true
     requestAnimationFrame(() => {
       document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
-  }, [searchParams, settings, themesLoading])
+  }, [searchParams, settings])
 
   /**
    * バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)のタップ/ボタン先。
@@ -414,7 +353,7 @@ export default function SettingsPage() {
       window.removeEventListener('scroll', onScroll)
       window.removeEventListener('resize', onScroll)
     }
-  }, [settings, themesLoading])
+  }, [settings])
 
   if (!settings) return null // 読み込み中
 
@@ -546,27 +485,6 @@ export default function SettingsPage() {
     setMessage(restored ? ja.settings.replaceUndoDone : ja.settings.replaceUndoError)
   }
 
-  // addTheme(テーマ一覧の1タップ取り込み)・set=直リンク取り込み専用。従来どおり下部トーストのまま変更しない
-  const showRecipeSetResult = (result: {
-    added: number
-    updated: number
-    skipped: number
-    excluded: number
-  }) => {
-    setMessage(formatRecipeSetResult(result))
-  }
-
-  // fetchRecipeSetの失敗理由(URLが存在しない/中身が壊れている)で文言を出し分ける
-  // (2026-07-12実機報告: 存在しないset=IDを開いても「JSONファイルか確認して」としか
-  // 出ず、綴りミスに気づきにくかったため)。set=直リンク取り込み専用。従来どおり下部トーストのまま変更しない
-  const showRecipeSetFetchError = (err: unknown) => {
-    setMessage(
-      err instanceof RecipeSetFetchError && err.reason === 'not_found'
-        ? ja.settings.recipeSetNotFound
-        : ja.settings.recipeSetError,
-    )
-  }
-
   // 「レシピセットを読み込む」欄の「URLから読み込む」「ファイルから読み込む」専用
   // (2026-07-14 オーナー実機フィードバック)。結果を読み込み欄の上部テキスト(recipeSetMessage)
   // で出す。下部トーストとの二重表示はしない
@@ -674,67 +592,6 @@ export default function SettingsPage() {
     } finally {
       setUnlockChecking(false)
     }
-  }
-
-  // テーマごとの取込済み判定: そのテーマ由来(sourceSetId一致)のレシピが1件でも端末にあるか
-  const importedThemeIds = new Set((recipes ?? []).map((r) => r.sourceSetId).filter(Boolean))
-
-  // テーマごとの「除外中」(削除済みで再取込しない)品数(トゥームストーン・2026-07-13 Fable設計)
-  const exclusionCountByTheme = new Map<string, number>()
-  for (const exclusion of setExclusions ?? []) {
-    exclusionCountByTheme.set(
-      exclusion.setId,
-      (exclusionCountByTheme.get(exclusion.setId) ?? 0) + 1,
-    )
-  }
-
-  /** テーマの除外記録をすべて消す(「除外中◯品・すべて戻す」)。次にそのテーマを取り込むと戻る */
-  const restoreThemeExclusions = async (theme: ThemeManifestEntry) => {
-    await clearSetExclusions(theme.id)
-    setMessage(ja.settings.themeExclusionRestored.replace('{name}', theme.title))
-  }
-
-  const addTheme = async (theme: ThemeManifestEntry) => {
-    setThemeBusyId(theme.id)
-    try {
-      const file = await fetchRecipeSet(theme.file)
-      showRecipeSetResult(await importRecipeSet(file))
-    } catch {
-      setMessage(ja.settings.recipeSetError)
-    } finally {
-      setThemeBusyId(null)
-    }
-  }
-
-  const addAllThemes = async () => {
-    const targets = themes.filter((t) => !importedThemeIds.has(t.id))
-    if (targets.length === 0) {
-      setMessage(ja.settings.themeAddAllNone)
-      return
-    }
-    setAddAllBusy(true)
-    try {
-      let added = 0
-      for (const theme of targets) {
-        try {
-          const file = await fetchRecipeSet(theme.file)
-          const result = await importRecipeSet(file)
-          added += result.added
-        } catch {
-          // 1テーマの失敗で全体を止めない。次のテーマへ続行する
-        }
-      }
-      setMessage(ja.settings.themeAddAllResult.replace('{n}', String(added)))
-    } finally {
-      setAddAllBusy(false)
-    }
-  }
-
-  const deleteTheme = async (theme: ThemeManifestEntry) => {
-    const confirmText = ja.settings.themeDeleteConfirm.replace('{name}', theme.title)
-    if (!window.confirm(confirmText)) return
-    const count = await deleteRecipesBySourceSet(theme.id)
-    setMessage(ja.settings.themeDeleteDone.replace('{name}', theme.title).replace('{n}', String(count)))
   }
 
   const homeWidgets = settings.homeWidgets
@@ -1242,142 +1099,6 @@ export default function SettingsPage() {
               <Upload size={18} aria-hidden />
               {recipeSetLoading ? ja.settings.recipeSetLoading : ja.settings.recipeSetFileLoad}
             </button>
-            {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため、
-                別窓で開くと取り込み先が今のアプリとズレてしまう */}
-            <a
-              href="/sets/"
-              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent underline"
-            >
-              {ja.settings.recipeSetPageLink}
-            </a>
-          </section>
-
-          {/* テーマ一覧: 収録レシピ(全テーマ)は2026-07-22の全無料化で誰でも解錠なしに取り込める。
-              ?section=themes・?set=直リンクの自動スクロール先(scroll-mt-24でsticky目次チップ分を下げる) */}
-          <section id="theme-list-section" className={`${sectionCls} scroll-mt-24`}>
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="font-bold">{ja.settings.themeListTitle}</h2>
-              {themes.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => void addAllThemes()}
-                  disabled={addAllBusy}
-                  className="shrink-0 rounded-sm border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
-                >
-                  {ja.settings.themeAddAll}
-                </button>
-              )}
-            </div>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.themeListDescription}</p>
-            {themesLoading ? (
-              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.settings.themeListLoading}</p>
-            ) : themes.length === 0 ? (
-              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.settings.themeListEmpty}</p>
-            ) : (
-              <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
-                {themes.map((theme) => {
-                  const imported = importedThemeIds.has(theme.id)
-                  const expanded = expandedThemeIds.includes(theme.id)
-                  const items = theme.items ?? []
-                  // 削除済みで再取込しない品数(トゥームストーン)。1件以上なら「すべて戻す」を出す
-                  const excludedCount = exclusionCountByTheme.get(theme.id) ?? 0
-                  return (
-                    <li
-                      key={theme.id}
-                      className="rounded-md border border-edge p-[var(--space-sm)]"
-                    >
-                      {/* カードのタップで収録レシピを展開表示（解錠状態と無関係に中身を確認できる） */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedThemeIds((prev) =>
-                            prev.includes(theme.id)
-                              ? prev.filter((id) => id !== theme.id)
-                              : [...prev, theme.id],
-                          )
-                        }
-                        aria-expanded={expanded}
-                        className="flex w-full items-start gap-2 text-left"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block font-bold">{theme.title}</span>
-                          <span className="mt-0.5 block text-sm text-ink-muted">{theme.description}</span>
-                        </span>
-                        {items.length > 0 && (
-                          <ChevronDown
-                            size={18}
-                            className={`mt-1 shrink-0 text-ink-muted transition-transform ${
-                              expanded ? 'rotate-180' : ''
-                            }`}
-                            aria-hidden
-                          />
-                        )}
-                      </button>
-                      {expanded && items.length > 0 && (
-                        <div className="mt-[var(--space-sm)]">
-                          <p className="text-xs font-bold text-ink-muted">
-                            {ja.settings.themeItemsCount.replace('{n}', String(items.length))}
-                          </p>
-                          <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
-                            {items.map((item) => (
-                              <li
-                                key={item.title}
-                                className="flex items-baseline justify-between gap-2 px-[var(--space-sm)] py-1.5 text-sm"
-                              >
-                                <span className="min-w-0 flex-1">{item.title}</span>
-                                {item.cookMinutes != null && item.cookMinutes > 0 && (
-                                  <span className="shrink-0 text-xs text-ink-muted">
-                                    {item.cookMinutes}
-                                    {ja.recipes.minutesSuffix}
-                                  </span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <div className="mt-[var(--space-sm)]">
-                        {imported ? (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-bold text-accent">{ja.settings.themeAdded}</span>
-                            <button
-                              type="button"
-                              onClick={() => void deleteTheme(theme)}
-                              className="text-sm font-bold text-warning underline"
-                            >
-                              {ja.settings.themeDelete}
-                            </button>
-                          </div>
-                        ) : (
-                          // 2026-07-22全無料化: 全テーマを解錠なしで取り込める
-                          <button
-                            type="button"
-                            onClick={() => void addTheme(theme)}
-                            disabled={themeBusyId === theme.id}
-                            className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
-                          >
-                            {ja.settings.themeAdd}
-                          </button>
-                        )}
-                      </div>
-                      {/* 削除済みで再取込しない品(トゥームストーン)があるときだけ「すべて戻す」を出す。
-                          タップで除外記録を消し、次にこのテーマを取り込むと戻る(2026-07-13 Fable設計) */}
-                      {excludedCount > 0 && (
-                        <div className="mt-[var(--space-sm)]">
-                          <button
-                            type="button"
-                            onClick={() => void restoreThemeExclusions(theme)}
-                            className="text-sm font-bold text-accent underline"
-                          >
-                            {ja.settings.themeExclusionRestore.replace('{n}', String(excludedCount))}
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
           </section>
         </>
       </section>
