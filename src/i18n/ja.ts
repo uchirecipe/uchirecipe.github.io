@@ -97,6 +97,24 @@ export const ja = {
     // まとめて状態設定(2026-07-17 docs/35 §5 案D): 整理モード中、選択した食材をまとめて
     // 「ある」「少ない」「ない」のいずれかに一括変更する。ボタン文言はpantry.levelを流用
     organizeBulkSetToast: '{n}件を『{level}』にしました',
+    // 整理モードの全選択・選択解除(2026-07-23 オーナー実機FB #10)
+    organizeSelectAll: '全選択',
+    organizeClearSelection: '選択解除',
+    // 整理モードの「グループへ移動」(2026-07-23 オーナー実機FB #1: 大分類グループの手動変更)
+    organizeMoveGroupTitle: '選んだ食材をグループへ移動',
+    organizeMoveGroupToast: '{n}件を「{group}」に移動しました',
+    // 大分類グループの見出し(2026-07-23 #1)。通常表示でこの見出しごとにチップをまとめる。
+    // 自動振り分けの情報源は栄養データベース(nutrition-foods)の分類
+    group: {
+      meatFish: '肉・魚介',
+      vegetable: '野菜・きのこ',
+      soyEgg: '豆腐・卵・乳',
+      staple: '主食・粉',
+      seasoning: '調味料',
+      other: 'その他',
+    },
+    // 在庫欄の下部に添える一言(2026-07-23 オーナー実機FB #12。トーンはdescriptionの「ざっくりでOK」に合わせる)
+    omakeNote: '在庫はざっくり把握のためのおまけ機能です。合わなければ使わなくても大丈夫です',
   },
   history: {
     title: '作った記録',
@@ -267,6 +285,15 @@ export const ja = {
     pickerSearchPlaceholder: 'レシピ名で絞り込み',
     pickerEmpty: 'レシピがありません',
     pickerNoMatch: '見つかりません',
+    // レシピピッカーの並び替え(2026-07-23 オーナー実機FB #2: 一覧の並び替え機構を流用)。
+    // ラベルはレシピ一覧(ja.search)のものを共用する
+    pickerSortLabel: '並び替え',
+    // 食数の+/-方式(2026-07-23 オーナー実機FB #3: ☑選択をやめ、レシピごとに食数を指定)。
+    // 1食以上で選択扱いにし、指定食数で候補の分量をスケールする
+    pickerServingUnit: '食',
+    pickerServingDown: '食数を減らす',
+    pickerServingUp: '食数を増やす',
+    pickerBaseServings: '{n}人分レシピ',
     makeCandidates: '候補を作る',
     candidateTitle: '買い物候補（下書き）',
     candidateDescription:
@@ -281,12 +308,25 @@ export const ja = {
     manualAmountPlaceholder: '分量（任意）',
     manualAdd: '追加',
     remove: 'この項目を削除',
+    // 買い物メモの1項目チェックの切り替え(a11yラベル。まとめてチェックの「全部チェック」と区別する)
+    toggleCheck: 'チェックの切り替え',
+    // 買い物メモの並び替えハンドル(2026-07-23 オーナー実機FB #5: 上下矢印が数量調整に見える指摘)
+    reorderHandle: '並び替え（上下に移動）',
+    // まとめてチェック/解除(2026-07-23 オーナー実機FB #6)
+    checkAll: '全部チェック',
+    uncheckAll: 'チェックを外す',
     complete: '買い物完了',
     completeConfirmTitle: '食材の在庫に反映しますか？',
     completeConfirmDescription:
-      'チェックした食材のうち、食材の在庫に登録済みのものを「ある」にします。反映してもしなくても、チェック済みの項目はメモから消えます',
+      'チェックした食材を「ある」にして食材の在庫に反映します（在庫に無い食材は新しく追加します）。反映してもしなくても、チェック済みの項目はメモから消えます',
     completeYes: '反映する',
     completeNo: '反映せず完了',
+    // 候補を作る/買い物メモに追加のトースト(2026-07-23 オーナー実機FB #4)
+    candidatesMadeToast: '買い物候補を作りました',
+    addedToMemoToast: '{n}件を買い物メモに追加しました',
+    // 買い物完了のトースト(2026-07-23 オーナー実機FB #9: 反映する/しないどちらでもトースト)
+    completeReflectedToast: 'チェックした食材を在庫に反映しました',
+    completeDoneToast: '買い物を完了しました',
   },
   settings: {
     title: '設定',
@@ -833,6 +873,10 @@ export const ja = {
     cookedSave: '記録する',
     cookedRecordedToast: '作った記録をつけました',
     cookedCancel: 'やめる',
+    // 「作った！」の在庫反映スイッチ(2026-07-23 オーナー実機FB #11)。既定OFF・選択を記憶。
+    // ON時、使った食材の在庫を1段階だけ下げる(ある→少ない→ない)。調味料系は対象外
+    cookedReflectPantryLabel: '使った食材の在庫を減らす',
+    cookedReflectPantryHint: '記録すると、使った食材の在庫を1段階下げます（調味料は減りません）',
     cookedLogsTitle: '作った記録',
     cookedCountSuffix: '回',
     cookedLogEdit: 'この記録を編集',

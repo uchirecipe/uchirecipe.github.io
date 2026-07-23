@@ -1,27 +1,52 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChefHat, Search, ChevronUp, ChevronDown, X, Plus, CheckCircle2, HelpCircle } from 'lucide-react'
+import {
+  ChefHat,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  X,
+  Plus,
+  Minus,
+  GripVertical,
+  CheckCircle2,
+  CheckCheck,
+  HelpCircle,
+} from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
-import { pantryHaveNames } from '../logic/pantry'
+import { pantryHaveNames, pantryAvailableNames } from '../logic/pantry'
 import {
   useShoppingItems,
   addShoppingItem,
   addConfirmedItems,
   toggleShoppingChecked,
+  setAllShoppingChecked,
   removeShoppingItem,
   moveShoppingItem,
   completeShopping,
 } from '../db/shopping'
 import { buildShoppingCandidates, type ShoppingCandidate } from '../logic/shopping'
+import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
+import type { SearchResult } from '../logic/search'
 import PantryBoard from '../components/PantryBoard'
+import Toast from '../components/Toast'
 import { ja } from '../i18n/ja'
 
 type CandidateRow = ShoppingCandidate & { checked: boolean }
 
 type ShoppingTab = 'pantry' | 'memo'
+
+/** レシピピッカーの並び替え(2026-07-23 #2: 一覧の並び替え機構=recipeSortを流用。栄養並び替えは
+ * Pro機能なので除き、無料で使える4種に絞る。ラベルはレシピ一覧のもの=ja.searchを共用する) */
+const PICKER_SORT_OPTIONS: { value: RecipeSortOption; label: string }[] = [
+  { value: 'updated', label: ja.search.sortUpdated },
+  { value: 'pantryMatch', label: ja.search.sortPantryMatch },
+  { value: 'kana', label: ja.search.sortKana },
+  { value: 'cooked', label: ja.search.sortCooked },
+]
 
 /** 食材タブ: 「食材の在庫」（在庫ボード）／「買い物メモ」（レシピからの候補づくり＋確定した
  * 買い物メモ）の2タブ構成(2026-07-16 UI総点検B-9: 買い物メモが最上部を占有しヘビーユーザーの
@@ -31,8 +56,13 @@ export default function ShoppingPage() {
   const settings = useSettings()
   const pantryItems = usePantryItems()
   const haveNames = useMemo(() => pantryHaveNames(pantryItems ?? []), [pantryItems])
+  // ピッカーの「在庫で作れる順」用(「ある」「少ない」を在庫ありとみなす。在庫一致順の既存定義に合わせる)
+  const availableNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
   const shoppingItems = useShoppingItems()
   const [activeTab, setActiveTab] = useState<ShoppingTab>('pantry')
+
+  // 操作結果のトースト(2026-07-23 #4/#9。既存のToast+setMessageパターンを流用)
+  const [message, setMessage] = useState('')
 
   const visibleRecipes = useMemo(() => {
     if (!recipes) return []
@@ -42,22 +72,37 @@ export default function ShoppingPage() {
   // レシピ選択ピッカー
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerQuery, setPickerQuery] = useState('')
-  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [pickerSort, setPickerSort] = useState<RecipeSortOption>('updated')
+  // 食数の+/-方式(2026-07-23 #3): recipeId → 食数。1食以上で「選択」扱い(既定0=未選択)
+  const [pickerCounts, setPickerCounts] = useState<Record<number, number>>({})
+
   const filteredRecipes = useMemo(() => {
     const q = pickerQuery.trim()
-    if (!q) return visibleRecipes
-    return visibleRecipes.filter((r) => r.title.includes(q))
-  }, [visibleRecipes, pickerQuery])
+    const base = q ? visibleRecipes.filter((r) => r.title.includes(q)) : visibleRecipes
+    // 一覧の並び替え機構(sortResults)を流用する。SearchResultの形に包んで並べ替え、レシピへ戻す
+    const wrapped: SearchResult[] = base.map((recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }))
+    return sortResults(wrapped, pickerSort, availableNames).map((r) => r.recipe)
+  }, [visibleRecipes, pickerQuery, pickerSort, availableNames])
 
-  const toggleSelected = (id: number) => {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
+  const setCount = (id: number, next: number) => {
+    setPickerCounts((prev) => ({ ...prev, [id]: Math.max(0, next) }))
+  }
+  const selectedRecipeCount = useMemo(
+    () => Object.values(pickerCounts).filter((n) => n >= 1).length,
+    [pickerCounts],
+  )
+
+  const openPicker = () => {
+    setPickerCounts({})
+    setPickerQuery('')
+    setPickerOpen(true)
   }
 
   // 買い物候補（下書き。確定するまでDBには保存しない）
   const [candidates, setCandidates] = useState<CandidateRow[] | null>(null)
 
   // 献立プランナーの「この週の買い物リストを作る」から来た場合（?recipeIds=1,2,3）は
-  // ピッカーを介さず自動で候補を作る
+  // ピッカーを介さず自動で候補を作る（食数は等倍=1回分ずつ。スケールは掛けない）
   const [searchParams, setSearchParams] = useSearchParams()
   useEffect(() => {
     const raw = searchParams.get('recipeIds')
@@ -89,15 +134,20 @@ export default function ShoppingPage() {
   }, [recipes, searchParams])
 
   const makeCandidates = () => {
-    const chosen = visibleRecipes.filter((r) => selectedIds.includes(r.id!))
-    const built = buildShoppingCandidates(
-      chosen.map((r) => ({ id: r.id!, ingredients: r.ingredients })),
-      haveNames,
-    )
+    // 食数≥1のレシピだけを対象にし、指定食数で分量をスケールする(scale=食数÷登録人数。2026-07-23 #3)
+    const chosen = visibleRecipes
+      .filter((r) => (pickerCounts[r.id!] ?? 0) >= 1)
+      .map((r) => ({
+        id: r.id!,
+        ingredients: r.ingredients,
+        scale: (pickerCounts[r.id!] ?? r.servings) / (r.servings > 0 ? r.servings : 1),
+      }))
+    const built = buildShoppingCandidates(chosen, haveNames)
     setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
     setPickerOpen(false)
-    setSelectedIds([])
+    setPickerCounts({})
     setPickerQuery('')
+    setMessage(ja.shopping.candidatesMadeToast)
   }
 
   const addConfirmed = async () => {
@@ -105,6 +155,7 @@ export default function ShoppingPage() {
     const chosen = candidates.filter((c) => c.checked)
     await addConfirmedItems(chosen.map(({ name, amount, recipeIds }) => ({ name, amount, recipeIds })))
     setCandidates(null)
+    setMessage(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
   }
 
   // 手動追加
@@ -117,12 +168,26 @@ export default function ShoppingPage() {
     setManualAmount('')
   }
 
-  // 買い物完了
+  // まとめてチェック/解除(2026-07-23 #6)
+  const memoItems = shoppingItems ?? []
+  const allChecked = memoItems.length > 0 && memoItems.every((i) => i.isChecked)
+
+  // 買い物完了(2026-07-23 #7: 下部インラインパネル→作った!と同じ中央モーダルに変更)
   const [completeOpen, setCompleteOpen] = useState(false)
-  const checkedItems = (shoppingItems ?? []).filter((i) => i.isChecked)
+  const checkedItems = memoItems.filter((i) => i.isChecked)
+  useEffect(() => {
+    if (!completeOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCompleteOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [completeOpen])
   const runComplete = async (reflect: boolean) => {
     await completeShopping(checkedItems, reflect)
     setCompleteOpen(false)
+    // 反映する/しないどちらでもトースト(2026-07-23 #9)
+    setMessage(reflect ? ja.shopping.completeReflectedToast : ja.shopping.completeDoneToast)
   }
 
   // 買い物候補の説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉
@@ -173,7 +238,7 @@ export default function ShoppingPage() {
             <h2 className="text-xl font-bold">{ja.shopping.memoTitle}</h2>
             <button
               type="button"
-              onClick={() => setPickerOpen(true)}
+              onClick={openPicker}
               className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
             >
               <ChefHat size={16} aria-hidden />
@@ -181,57 +246,83 @@ export default function ShoppingPage() {
             </button>
           </div>
 
-          {shoppingItems && shoppingItems.length === 0 && !candidates && (
+          {memoItems.length === 0 && !candidates && (
             <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.shopping.memoEmpty}</p>
           )}
 
-          {shoppingItems && shoppingItems.length > 0 && (
-            <ul className="mt-[var(--space-md)] divide-y divide-edge rounded-md border border-edge bg-app">
-              {shoppingItems.map((item, index) => (
-                <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
-                  <button
-                    type="button"
-                    onClick={() => void toggleShoppingChecked(item.id!)}
-                    aria-pressed={item.isChecked}
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
-                      item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
-                    }`}
-                  >
-                    <CheckCircle2 size={18} aria-hidden />
-                  </button>
-                  <div className={`min-w-0 flex-1 px-2 ${item.isChecked ? 'text-ink-muted line-through' : ''}`}>
-                    <span className="font-bold">{item.name}</span>
-                    {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void moveShoppingItem(shoppingItems, index, -1)}
-                    disabled={index === 0}
-                    aria-label={ja.form.moveUp}
-                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                  >
-                    <ChevronUp size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void moveShoppingItem(shoppingItems, index, 1)}
-                    disabled={index === shoppingItems.length - 1}
-                    aria-label={ja.form.moveDown}
-                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                  >
-                    <ChevronDown size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void removeShoppingItem(item.id!)}
-                    aria-label={ja.shopping.remove}
-                    className="rounded-full p-2 text-ink-muted"
-                  >
-                    <X size={18} aria-hidden />
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {memoItems.length > 0 && (
+            <>
+              {/* まとめてチェック/解除(2026-07-23 #6) */}
+              <div className="mt-[var(--space-md)] flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void setAllShoppingChecked(!allChecked)}
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+                >
+                  <CheckCheck size={16} aria-hidden />
+                  {allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}
+                </button>
+              </div>
+              <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+                {memoItems.map((item, index) => (
+                  <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
+                    <button
+                      type="button"
+                      onClick={() => void toggleShoppingChecked(item.id!)}
+                      aria-pressed={item.isChecked}
+                      aria-label={ja.shopping.toggleCheck}
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+                        item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
+                      }`}
+                    >
+                      <CheckCircle2 size={18} aria-hidden />
+                    </button>
+                    <div className={`min-w-0 flex-1 px-2 ${item.isChecked ? 'text-ink-muted line-through' : ''}`}>
+                      <span className="font-bold">{item.name}</span>
+                      {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
+                    </div>
+                    {/* 並び替えハンドル(2026-07-23 #5: 上下矢印が数量調整に見える指摘への対応。
+                        つまみ(GripVertical)と枠でくくり、数量の+/-ではなく「順番の入れ替え」だと分かる
+                        見た目にする)。並び替えは2件以上あるときだけ意味があるので、そのとき出す */}
+                    {memoItems.length > 1 && (
+                      <div
+                        className="flex shrink-0 items-center rounded-sm border border-edge text-ink-muted"
+                        role="group"
+                        aria-label={ja.shopping.reorderHandle}
+                      >
+                        <GripVertical size={14} className="ml-0.5 opacity-50" aria-hidden />
+                        <button
+                          type="button"
+                          onClick={() => void moveShoppingItem(memoItems, index, -1)}
+                          disabled={index === 0}
+                          aria-label={ja.form.moveUp}
+                          className="p-1 disabled:opacity-30"
+                        >
+                          <ChevronUp size={16} aria-hidden />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void moveShoppingItem(memoItems, index, 1)}
+                          disabled={index === memoItems.length - 1}
+                          aria-label={ja.form.moveDown}
+                          className="p-1 disabled:opacity-30"
+                        >
+                          <ChevronDown size={16} aria-hidden />
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void removeShoppingItem(item.id!)}
+                      aria-label={ja.shopping.remove}
+                      className="rounded-full p-2 text-ink-muted"
+                    >
+                      <X size={18} aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
 
           {/* 手動追加 */}
@@ -269,29 +360,6 @@ export default function ShoppingPage() {
             >
               {ja.shopping.complete}
             </button>
-          )}
-
-          {completeOpen && (
-            <div className="mt-[var(--space-md)] rounded-md border border-edge bg-app p-[var(--space-md)] shadow-md">
-              <h3 className="font-bold">{ja.shopping.completeConfirmTitle}</h3>
-              <p className="mt-1 text-sm text-ink-muted">{ja.shopping.completeConfirmDescription}</p>
-              <div className="mt-[var(--space-md)] flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void runComplete(true)}
-                  className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-                >
-                  {ja.shopping.completeYes}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void runComplete(false)}
-                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
-                >
-                  {ja.shopping.completeNo}
-                </button>
-              </div>
-            </div>
           )}
         </section>
 
@@ -384,6 +452,54 @@ export default function ShoppingPage() {
         </>
       )}
 
+      {/* 買い物完了の確認モーダル(2026-07-23 #7: 作った!と同じ中央カード様式)。
+          背景タップ・Escで閉じる。反映する/反映せず完了の2択はどちらでもトースト(#9) */}
+      {completeOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-[var(--space-md)]"
+          onClick={() => setCompleteOpen(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label={ja.shopping.completeConfirmTitle}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm min-w-0 rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold">{ja.shopping.completeConfirmTitle}</h3>
+              <button
+                type="button"
+                onClick={() => setCompleteOpen(false)}
+                aria-label={ja.common.close}
+                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+              {ja.shopping.completeConfirmDescription}
+            </p>
+            <div className="mt-[var(--space-md)] flex gap-2">
+              <button
+                type="button"
+                onClick={() => void runComplete(true)}
+                className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+              >
+                {ja.shopping.completeYes}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runComplete(false)}
+                className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
+              >
+                {ja.shopping.completeNo}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* レシピ選択ピッカー */}
       {pickerOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-app">
@@ -413,6 +529,21 @@ export default function ShoppingPage() {
                 className="w-full rounded-md border border-edge bg-surface py-3 pl-10 pr-3 text-base text-ink placeholder:text-ink-muted/60 shadow-sm"
               />
             </div>
+            {/* 並び替え(2026-07-23 #2: 一覧の並び替え機構を流用) */}
+            <label className="mt-[var(--space-sm)] flex items-center gap-2 text-sm text-ink-muted">
+              <span className="shrink-0">{ja.shopping.pickerSortLabel}</span>
+              <select
+                value={pickerSort}
+                onChange={(e) => setPickerSort(e.target.value as RecipeSortOption)}
+                className="min-w-0 flex-1 rounded-sm border border-edge bg-surface px-2 py-2 text-sm text-ink shadow-sm"
+              >
+                {PICKER_SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="mt-[var(--space-sm)] flex-1 overflow-y-auto px-[var(--space-md)]">
             {filteredRecipes.length === 0 ? (
@@ -421,19 +552,53 @@ export default function ShoppingPage() {
               </p>
             ) : (
               <ul className="divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-                {filteredRecipes.map((recipe) => (
-                  <li key={recipe.id}>
-                    <label className="flex items-center gap-3 px-[var(--space-md)] py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(recipe.id!)}
-                        onChange={() => toggleSelected(recipe.id!)}
-                        className="h-5 w-5 accent-[var(--accent)]"
-                      />
-                      <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
-                    </label>
-                  </li>
-                ))}
+                {filteredRecipes.map((recipe) => {
+                  const count = pickerCounts[recipe.id!] ?? 0
+                  const selected = count >= 1
+                  return (
+                    <li
+                      key={recipe.id}
+                      className={`flex items-center gap-2 px-[var(--space-md)] py-3 ${
+                        selected ? 'bg-accent/5' : ''
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className={`block truncate font-bold ${selected ? 'text-accent' : ''}`}>
+                          {recipe.title}
+                        </span>
+                        <span className="text-xs text-ink-muted">
+                          {ja.shopping.pickerBaseServings.replace('{n}', String(recipe.servings))}
+                        </span>
+                      </div>
+                      {/* 食数の+/-ステッパー(2026-07-23 #3)。1食以上で選択扱い・指定食数で候補生成 */}
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setCount(recipe.id!, count - 1)}
+                          disabled={count === 0}
+                          aria-label={ja.shopping.pickerServingDown}
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-edge text-ink-muted disabled:opacity-30"
+                        >
+                          <Minus size={16} aria-hidden />
+                        </button>
+                        <span className="w-12 text-center text-sm font-bold tabular-nums">
+                          {count}
+                          {ja.shopping.pickerServingUnit}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCount(recipe.id!, count + 1)}
+                          aria-label={ja.shopping.pickerServingUp}
+                          className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+                            selected ? 'border-accent bg-accent text-on-accent' : 'border-edge text-accent'
+                          }`}
+                        >
+                          <Plus size={16} aria-hidden />
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>
@@ -441,15 +606,17 @@ export default function ShoppingPage() {
             <button
               type="button"
               onClick={makeCandidates}
-              disabled={selectedIds.length === 0}
+              disabled={selectedRecipeCount === 0}
               className="w-full rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
             >
               {ja.shopping.makeCandidates}
-              {selectedIds.length > 0 ? `（${selectedIds.length}）` : ''}
+              {selectedRecipeCount > 0 ? `（${selectedRecipeCount}）` : ''}
             </button>
           </div>
         </div>
       )}
+
+      <Toast message={message} onClose={() => setMessage('')} />
     </div>
   )
 }

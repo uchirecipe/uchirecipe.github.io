@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { db } from '../db/db'
 import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
+import { lowerPantryLevelsForCooked } from '../db/pantry'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
 import { addMealEntryIfAbsent } from '../db/mealPlan'
@@ -316,6 +317,11 @@ export default function RecipeDetailPage() {
       photo: logPhoto,
       servings: logServings,
     })
+    // 在庫反映スイッチON時(2026-07-23 オーナー実機FB #11): 使った食材の在庫を1段階下げる
+    // (調味料系は対象外・登録済みチップの範囲だけ)。既定OFF・選択はsettingsに記憶している
+    if (recipe && settings?.cookedReflectPantry) {
+      await lowerPantryLevelsForCooked(recipe.ingredients)
+    }
     // 今日の献立に入っていれば、記録と同時に外す
     if (isInTodayList) await removeFromTodayList(id)
     setLogOpen(false)
@@ -1173,6 +1179,9 @@ export default function RecipeDetailPage() {
           setLogOpen(false)
           setLogPhoto(undefined)
         }}
+        // 在庫反映スイッチ(2026-07-23 #11): settingsを直接の真実の源にして即永続化＝選択を記憶する
+        reflectPantry={settings?.cookedReflectPantry ?? false}
+        onReflectPantryChange={(value) => void updateSettings({ cookedReflectPantry: value })}
       />
       {/* シェアの選択式モーダル(2026-07-16 裁定3)。栄養行はNUTRITION_TEASER_ENABLED=falseなら
           行ごと非表示(緊急停止フラグと連動)。選択は開くたび既定値に初期化・永続化しない */}

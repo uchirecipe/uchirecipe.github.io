@@ -152,6 +152,14 @@ export interface Recipe {
  */
 export type PantryLevel = 'have' | 'low' | 'none'
 
+/**
+ * 在庫チップの大分類グループ（2026-07-23 オーナー実機FB #1・食材/買い物UX）。
+ * 通常表示でこのグループごとにチップをまとめる。自動振り分けの情報源は
+ * 栄養データベース（scripts/nutrition-foods.mjs の分類）＝logic/pantryGroups.ts。
+ * PantryItem.group が未設定の食材は名前から自動判定し、判定できない食材は 'other'。
+ */
+export type PantryGroupKey = 'meatFish' | 'vegetable' | 'soyEgg' | 'staple' | 'seasoning' | 'other'
+
 /** 在庫ボードの1食材分（よく使う食材をタップで3段階切替） */
 export interface PantryItem {
   id?: number
@@ -161,6 +169,12 @@ export interface PantryItem {
   isFrequent: boolean
   /** 手動並び替えの順序（任意）。未指定の食材はid順（＝登録順）で表示する */
   sortOrder?: number
+  /**
+   * 大分類グループの手動指定（任意・2026-07-23）。未設定なら名前から自動判定する
+   * （logic/pantryGroups.ts）。ユーザーが整理モードでグループを変えたときだけ入る。
+   * 任意項目なのでスキーマ変更・マイグレーションは不要。
+   */
+  group?: PantryGroupKey
 }
 
 /**
@@ -354,6 +368,12 @@ export interface Settings {
    * 未設定（既存ユーザー含む）は「まだ一度も自動実行していない」扱いになる
    */
   lastAutoImportDate?: string
+  /**
+   * 「作った！」記録時に、使った食材の在庫を1段階だけ下げるスイッチの記憶値
+   * （2026-07-23 オーナー実機FB #11）。既定はOFF（未設定＝false扱い）。
+   * ユーザーがスイッチを切り替えるたびに保存し、次回の既定値にする（調味料系は対象外）。
+   */
+  cookedReflectPantry?: boolean
 }
 
 /** レシピ一覧の表示形式 */
