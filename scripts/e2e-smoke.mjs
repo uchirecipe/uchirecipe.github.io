@@ -955,7 +955,7 @@ try {
     return teaser?.getAttribute('href') ?? null
   })
   check(
-    'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のProタブ)',
+    'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のPro節)',
     teaserHref === '#/settings?section=pro',
     `href=${teaserHref}`,
   )
@@ -4736,7 +4736,7 @@ try {
       await dstPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await dstPage.waitForTimeout(500)
       check(
-        'CODEBACKUP-01 復元後、Proタブの表示も解錠済みになっている',
+        'CODEBACKUP-01 復元後、Pro節の表示も解錠済みになっている',
         (await dstPage.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
       )
     } finally {

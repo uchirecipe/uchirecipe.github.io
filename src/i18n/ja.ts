@@ -405,7 +405,7 @@ export const ja = {
     moveGuideToggle: '機種変更するときは',
     moveGuideStep1: '①この端末で「ファイルに書き出す」',
     moveGuideStep2: '②新しい端末でアプリを開き「読み込む（置き換え）」',
-    moveGuideStep3: '③購入コードを入れ直す（コードは「Pro」タブでコピーできます）',
+    moveGuideStep3: '③購入コードを入れ直す（コードは上部メニューの「Pro」からコピーできます）',
     moveGuideNote:
       '②は新しい端末の中身を今のファイルの内容に置き換えます。新しい端末で先にレシピを登録していた場合は消えるのでご注意ください',
     backupIncludeCookedPhotos: '「作った記録」の写真もバックアップに含める',
@@ -926,7 +926,7 @@ export const ja = {
     // 未解錠案内の冒頭に置く、Pro版で増える項目の明示（2026-07-13 UIペルソナQA:
     // 「Pro版で何が増えるか」が伝わりにくいとの指摘。断定・誇大な表現は避け、事実のみを1文で書く）
     proNutrientHighlight: 'Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウムのめやすも表示されます。',
-    freeDescription: 'Pro版は買い切りで、設定のProタブから解錠できます。',
+    freeDescription: 'Pro版は買い切りで、設定の「Pro」から解錠できます。',
     // Pro解錠済みユーザー向け: 「解錠したのに残りが見えない」と誤解させない文言
     freeDescriptionPro:
       'たんぱく質・脂質・炭水化物などの残りの項目は、Pro版の栄養パネルに表示されます。',
