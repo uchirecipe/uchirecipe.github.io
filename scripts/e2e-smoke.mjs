@@ -24,10 +24,9 @@
 //         見出し付きで表示されること・編集画面を開き直しても両方の入力が保持されること) /
 //         SMK-14(収録レシピ全無料化2026-07-22: 未解錠でも?set=直リンクからテーマを自由に取り込める。
 //         旧「未解錠ゲート」は解錠ゲート撤去により「全セット自由取り込み」の検証へ置き換え) /
-//         SETTINGS-TAB-01(設定画面のタブ分割。?set=/?section=直リンクが該当タブを自動で開く・
-//         4タブの手動切替・トーストのタップ閉じ。2026-07-12オーナー実機フィードバック。
-//         タブ名「基本」→「全般」は2026-07-13 UIペルソナQA。同日「全般」タブ内はNG食材の直下に
-//         「食材と価格」「週の食費予算」を移動、タブバーはsticky化＋タブごとのスクロール位置復元) /
+//         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
+//         全般/レシピ/バックアップ/Proの4節が1画面に同時に存在・上部の目次チップのタップで該当節へ
+//         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
 //         STARTER-RELOAD-01(「基本レシピを入れ直す」でユーザーデータ(お気に入り)が保持されること。
@@ -968,7 +967,8 @@ try {
   // --- SMK-14: 収録レシピ(基本+全テーマ=約100品)は全て無料(2026-07-22オーナー確定・全無料化)。
   // 旧仕様の解錠ゲートは撤去済み。未解錠(Pro/パックいずれも解錠していない)まっさらな状態でも、
   // 配布ページの?set=直リンクからテーマをワンタップで取り込めること・解錠を促すゲート文言が
-  // 出ないこと・?set=直リンクが「レシピ」タブを自動で開くことを、専用のbrowser/contextで確認する
+  // 出ないこと・?set=直リンクがテーマ一覧の節へ自動スクロールすること(2026-07-17 1本スクロール化。
+  // 旧: 「レシピ」タブを自動で開く)を、専用のbrowser/contextで確認する
   // (主フローのDBを汚さないため。TOMB-01等と同じ隔離パターン) ---
   currentCheck = 'SMK-14'
   {
@@ -996,65 +996,138 @@ try {
         !freeBody.includes('解錠が必要'),
       )
       check(
-        'SMK-14 ?set=直リンクは「レシピ」タブを自動で開く(セット読み込みの見出しが見える)',
-        freeBody.includes('レシピセットを読み込む'),
+        'SMK-14 ?set=直リンクはテーマ一覧の節へ自動スクロールする(見出しがDOMにある)',
+        freeBody.includes('テーマ一覧'),
       )
+      {
+        // 1本スクロール化(2026-07-17): テーマ一覧の節が上端付近(sticky目次チップの下)へ自動スクロールする
+        const setThemeTop = await freePage.evaluate(() => {
+          const el = document.getElementById('theme-list-section')
+          return el ? el.getBoundingClientRect().top : null
+        })
+        check(
+          'SMK-14 ?set=直リンクでテーマ一覧が上端付近へ自動スクロールする',
+          setThemeTop !== null && setThemeTop >= -5 && setThemeTop < 300,
+          `setThemeTop=${setThemeTop}`,
+        )
+      }
       check(
-        'SMK-14 このとき「全般」タブの内容は隠れている(NG食材の見出しが見えない)',
-        !freeBody.includes('NG食材（アレルギー・苦手）'),
+        'SMK-14 1本スクロールなので?set=直リンクでも全般節(NG食材)は同じページに存在する',
+        freeBody.includes('NG食材（アレルギー・苦手）'),
       )
     } finally {
       await freeBrowser.close()
     }
   }
 
-  // --- SETTINGS-TAB-01: 設定画面のタブ分割(2026-07-12オーナー実機フィードバック)。
-  // 4タブを手動で切り替えられること・?section=直リンクが該当タブを自動で開くことを確認する。
-  // タブ名「基本」→「全般」は2026-07-13 UIペルソナQA。2026-07-22全無料化で解錠ゲートを撤去したため、
-  // 旧SMK-14のゲートトーストに相乗りしていた確認は撤去し、ここでは「レシピ」タブを手動で開いて
-  // (URLは素の#/settingsのまま=後段の?section=直リンク検証の一発目が確実に再マウントで発火する)、
-  // BANNER-01が「レシピ」タブでも出ることを見る土台にする。?set=直リンクの自動オープンはSMK-14で確認済み ---
+  // --- SETTINGS-TAB-01: 設定画面の1本スクロール化(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
+  // 全般→レシピ→バックアップ→Proの4節が1画面に同時に存在し(=どれも隠れない)、上部の目次チップ
+  // (全般/レシピ/バックアップ/Pro)のタップで該当節へスクロールすること・?section=/?set=直リンクが
+  // 該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は「4節が同時に存在する」検証へ、
+  // 旧aria-pressed検証はスクロール位置検証へ置き換えた(テスト意図: タブ選択→節スクロールに読み替え) ---
   currentCheck = 'SETTINGS-TAB-01'
   await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(800)
-  await page.getByRole('button', { name: 'レシピ', exact: true }).click()
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(1000)
+  {
+    const body = await page.textContent('body')
+    check(
+      'SETTINGS-TAB-01 1本スクロール: 全般(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
+      body.includes('NG食材（アレルギー・苦手）') &&
+        body.includes('レシピセットを読み込む') &&
+        body.includes('ファイルに書き出す') &&
+        body.includes('Pro版'),
+    )
+  }
   check(
-    'SETTINGS-TAB-01 「レシピ」タブに切り替えるとセット読み込みの見出しが見える',
-    (await page.textContent('body')).includes('レシピセットを読み込む'),
+    'SETTINGS-TAB-01 目次チップ(全般/レシピ/バックアップ/Pro)が4つとも存在する',
+    (await page.getByRole('button', { name: '全般', exact: true }).count()) === 1 &&
+      (await page.getByRole('button', { name: 'レシピ', exact: true }).count()) === 1 &&
+      (await page.getByRole('button', { name: 'バックアップ', exact: true }).count()) === 1 &&
+      (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1,
+  )
+  // 節の上端(viewport相対top)を返すヘルパ。sticky目次チップ(約88px)の下付近(<200)へ来たら
+  // 「その節の先頭までスクロールした」とみなす(scroll-mt-24でチップ分だけ下げている)
+  const settingsSectionTop = (id) =>
+    page.evaluate((elId) => {
+      const el = document.getElementById(elId)
+      return el ? el.getBoundingClientRect().top : null
+    }, id)
+  // スムーズスクロールが落ち着く(window.scrollYが変化しなくなる)まで待つ。長距離のスムーズ
+  // スクロールは固定待ちだとアニメーション途中で測ってしまうため(旧: 700ms固定で偽陰性)
+  const waitScrollSettled = async () => {
+    let last = -1
+    for (let i = 0; i < 25; i++) {
+      const y = await page.evaluate(() => Math.round(window.scrollY))
+      if (y === last) return
+      last = y
+      await page.waitForTimeout(120)
+    }
+  }
+  // 「Pro」チップ: 最上部から下部のPro節まで大きくスクロールする(topが大きく減る=下へ動いた)。
+  // Pro節は最後尾なので先頭が上端(96px)まで届かず最下部で止まることがある→上端付近か最下部で合格
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(200)
+  const proTopBefore = await settingsSectionTop('section-pro')
+  await page.getByRole('button', { name: 'Pro', exact: true }).click()
+  await waitScrollSettled()
+  const proTopAfter = await settingsSectionTop('section-pro')
+  const proAtBottom = await page.evaluate(
+    () => window.innerHeight + Math.ceil(window.scrollY) >= document.body.scrollHeight - 8,
   )
   check(
-    'SETTINGS-TAB-01 このとき「全般」タブの内容は隠れている(NG食材の見出しが見えない)',
-    !(await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
+    'SETTINGS-TAB-01 「Pro」チップのタップで下部のPro節までスクロールする',
+    proTopBefore !== null &&
+      proTopAfter !== null &&
+      proTopAfter < proTopBefore - 100 &&
+      (proTopAfter < 200 || proAtBottom),
+    `proTopBefore=${proTopBefore} proTopAfter=${proTopAfter} atBottom=${proAtBottom}`,
+  )
+  // 「バックアップ」チップ: バックアップ節の先頭が上端付近へ来る
+  await page.getByRole('button', { name: 'バックアップ', exact: true }).click()
+  await waitScrollSettled()
+  const backupChipTop = await settingsSectionTop('section-backup')
+  check(
+    'SETTINGS-TAB-01 「バックアップ」チップのタップでバックアップ節の先頭が上端付近へ来る',
+    backupChipTop !== null && backupChipTop >= -5 && backupChipTop < 200,
+    `backupChipTop=${backupChipTop}`,
+  )
+  // 「レシピ」チップ: レシピ節の先頭が上端付近へ来る
+  await page.getByRole('button', { name: 'レシピ', exact: true }).click()
+  await waitScrollSettled()
+  const recipeChipTop = await settingsSectionTop('section-recipe')
+  check(
+    'SETTINGS-TAB-01 「レシピ」チップのタップでレシピ節の先頭が上端付近へ来る',
+    recipeChipTop !== null && recipeChipTop >= -5 && recipeChipTop < 200,
+    `recipeChipTop=${recipeChipTop}`,
   )
 
-  // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。タブバーの下・
-  // 全タブ共通の常設バナー(今は「レシピ」タブ表示中)。未実施は「まだバックアップしていません」、
-  // 「今すぐ保存」はどのタブからでもバックアップタブの書き出しへ移動する ---
+  // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。目次チップの下・
+  // 全節共通の常設バナー。未実施は「まだバックアップしていません」、「今すぐ保存」はどこからでも
+  // バックアップ節の①書き出しカードへスクロールする(1本スクロール化でタブ切り替えは廃止) ---
   currentCheck = 'BANNER-01'
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.waitForTimeout(200)
   check(
-    'BANNER-01 「レシピ」タブでもバナーが見える(全タブ共通・未実施表示)',
+    'BANNER-01 全節共通のバックアップ状態バナーが見える(未実施表示)',
     (await page.textContent('body')).includes('まだバックアップしていません'),
   )
   await page.getByRole('button', { name: '今すぐ保存', exact: true }).click()
-  await page.waitForTimeout(500)
+  await waitScrollSettled()
   check(
-    'BANNER-01 「今すぐ保存」でバックアップタブの書き出しへ移動する',
+    'BANNER-01 「今すぐ保存」でバックアップの①書き出しカードへスクロールする(ボタンがDOMにある)',
     (await page.textContent('body')).includes('ファイルに書き出す'),
   )
-  check(
-    'BANNER-01 バックアップタブがアクティブになる',
-    (await page.getByRole('button', { name: 'バックアップ', exact: true }).getAttribute('aria-pressed')) === 'true',
-  )
+  {
+    const exportCardTop = await settingsSectionTop('backup-section')
+    check(
+      'BANNER-01 「今すぐ保存」で①バックアップを取るカードが上端付近へ来る(旧aria-pressed検証をスクロール位置検証へ)',
+      exportCardTop !== null && exportCardTop >= -5 && exportCardTop < 200,
+      `exportCardTop=${exportCardTop}`,
+    )
+  }
 
-  // タブを手動で一通り切り替え、それぞれの代表コンテンツが出ることを確認する
+  // 1本スクロールでは全節が常にDOMにあるため、以降の各節の内容は直接確認する(タブ切り替え不要)
   currentCheck = 'SETTINGS-TAB-01'
-  await page.getByRole('button', { name: '全般', exact: true }).click()
-  await page.waitForTimeout(200)
-  check(
-    'SETTINGS-TAB-01 「全般」タブでNG食材の見出しが見える',
-    (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
-  )
   // --- NGCOUNT-01(2026-07-17設定ゼロベース裁定#2): NG食材見出し行の件数常時表示。
   // 未登録は「未設定」(登録後の「◯件」表示はTOAST-01で確認する) ---
   currentCheck = 'NGCOUNT-01'
@@ -1073,12 +1146,6 @@ try {
       /レシピ \d+件・作った記録 \d+件/.test(aboutText),
     )
   }
-  await page.getByRole('button', { name: 'バックアップ', exact: true }).click()
-  await page.waitForTimeout(200)
-  check(
-    'SETTINGS-TAB-01 「バックアップ」タブで書き出しボタンが見える',
-    (await page.textContent('body')).includes('ファイルに書き出す'),
-  )
   // --- MOVEGUIDE-01(2026-07-17設定ゼロベース裁定#5): 機種変更・引っ越しガイド(折りたたみ)。
   // 既定は畳まれていて手順は見えず、タップで展開すると3ステップ+注意文が見えること ---
   currentCheck = 'MOVEGUIDE-01'
@@ -1143,37 +1210,45 @@ try {
     'REFRESH-APP-01 上書きボタン(前回の場所に上書き)はFile System Access API非対応のheadless環境では出ない',
     !(await page.textContent('body')).includes('前回の場所に上書き'),
   )
-  await page.getByRole('button', { name: 'Pro', exact: true }).click()
-  await page.waitForTimeout(200)
-  check(
-    'SETTINGS-TAB-01 「Pro」タブでPro版の見出しが見える(2026-07-22「Pro・パック」→「Pro」改称)',
-    (await page.textContent('body')).includes('Pro版'),
-  )
-
-  // ?section=直リンクの自動タブ切り替え(既存のスクロール挙動は維持しつつ、タブ化後も動くことを確認)。
-  // 自動タブ切り替えはSettingsPageの1マウントにつき一度だけ動く(scrolledToSectionRefのワンショット)ため、
+  // ?section=直リンクの自動スクロール(1本スクロール化後: タブ切り替えではなく該当節へ自動スクロール)。
+  // 自動スクロールはSettingsPageの1マウントにつき一度だけ動く(scrolledToSectionRefのワンショット)ため、
   // 各?section=の検証の前に一度/recipesへ抜けてSettingsPageを再マウントさせ、毎回まっさらな状態で
-  // 切り替えが発火することを独立に確認する(以前は素通りで、テーマ一覧側の説明文にたまたま「Pro版」の
-  // 語が含まれていたため?section=proが切替なしでも通ってしまっていた。全無料化で説明文から語が消えたため顕在化)
+  // 発火することを独立に確認する。unlock.html・NutritionTeaser・ホーム等の既存導線が使う互換パラメータ
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
   await page.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(800)
-  check(
-    'SETTINGS-TAB-01 ?section=themesは「レシピ」タブを自動で開く(テーマ一覧の見出しが見える)',
-    (await page.textContent('body')).includes('テーマ一覧'),
-  )
+  await page.waitForTimeout(1200)
+  {
+    const themeTop = await settingsSectionTop('theme-list-section')
+    check(
+      'SETTINGS-TAB-01 ?section=themesはテーマ一覧の節へ自動スクロールする(見出しがDOMにあり上端付近)',
+      (await page.textContent('body')).includes('テーマ一覧') &&
+        themeTop !== null &&
+        themeTop >= -5 &&
+        themeTop < 220,
+      `themeTop=${themeTop}`,
+    )
+  }
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
   await page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(1200)
+  {
+    const proSecTop = await settingsSectionTop('pro-section')
+    const proSecAtBottom = await page.evaluate(
+      () => window.innerHeight + Math.ceil(window.scrollY) >= document.body.scrollHeight - 8,
+    )
+    check(
+      'SETTINGS-TAB-01 ?section=proはPro節へ自動スクロールする(Pro版の見出しがDOMにあり上端付近か最下部)',
+      (await page.textContent('body')).includes('Pro版') &&
+        proSecTop !== null &&
+        (proSecTop < 220 || proSecAtBottom),
+      `proSecTop=${proSecTop} atBottom=${proSecAtBottom}`,
+    )
+  }
   check(
-    'SETTINGS-TAB-01 ?section=proは「Pro」タブを自動で開く(Pro版の見出しが見える)',
-    (await page.textContent('body')).includes('Pro版'),
-  )
-  check(
-    'SETTINGS-TAB-01 ?section=proでは「全般」タブの内容が隠れている',
-    !(await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
+    'SETTINGS-TAB-01 1本スクロールなので?section=proでも全般節(NG食材)は同じページに存在する',
+    (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
   )
 
   // --- TOAST-01: 設定操作の結果メッセージがトーストで表示され、数秒で自動的に消える

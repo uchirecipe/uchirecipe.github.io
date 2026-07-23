@@ -103,36 +103,36 @@ const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navi
 const fileSaveSupported = supportsSaveFilePicker()
 
 /**
- * 設定画面のタブ分割(2026-07-12オーナー実機フィードバック)。
- * 縦に長大化した設定画面を上部タブ4つに分割する。区分はFable裁定どおり:
- * 基本=NG食材/画面暗くしない系/タイマー音/テーマ/週の食費予算/ホームのカスタマイズ
- *   (+ 未指定だった「アプリについて」もここに置く。最も汎用的なタブの末尾が収まりが良いため)
- * レシピ=基本レシピ/レシピセットを読み込む/テーマ一覧/食材と価格へのリンク
+ * 設定画面は1本スクロール(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
+ * 縦に長い設定を「全般→レシピ→バックアップ→Pro」の順(旧タブ順)に並べ、各節を見出し+アンカーで
+ * 区切る。ページ上部には節へ飛ぶ目次チップ(sticky)を置き、タップで該当節へスクロールする。
+ * 各節の内訳(旧タブの区分をそのまま踏襲):
+ * 全般=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算)/料理中(画面/タイマー)/アプリについて
+ * レシピ=基本レシピ/レシピセットを読み込む/テーマ一覧
  * バックアップ=バックアップ一式
- * Pro=Pro版(有料の機能解錠)。2026-07-22の全無料化で追加レシピパック(UP-)は製品廃止し、
- *   このタブは「Pro・パック」→「Pro」に改称した(収録レシピは全て無料・有料はPro機能のみ)
- * タブ状態の持ち方(URL or ローカルstate)は指示側の2択(規約C)。ローカルstateを選択（理由:
- * 既存の?section=/?set=クエリと絡めてタブ用の?tabまで増やすと分岐が複雑になり規約C②
- * 「既存機能を妨げない」に反しやすいため。ローカルstateなら?section=/?set=の処理は
- * 「見つけたら該当タブへ切り替える」の1箇所追加だけで済む）
+ * Pro=Pro版(有料の機能解錠。収録レシピは全て無料・有料はPro機能のみ)
+ * 旧タブの表示名(ja.settings.tabBasic等)を目次チップ・節見出しの両方でそのまま流用する。
  */
-type SettingsTab = 'basic' | 'recipe' | 'backup' | 'pro'
-
-const settingsTabs: { id: SettingsTab; label: string }[] = [
-  { id: 'basic', label: ja.settings.tabBasic },
-  { id: 'recipe', label: ja.settings.tabRecipe },
-  { id: 'backup', label: ja.settings.tabBackup },
-  { id: 'pro', label: ja.settings.tabPro },
+const settingsSections: { id: string; label: string }[] = [
+  { id: 'section-basic', label: ja.settings.tabBasic },
+  { id: 'section-recipe', label: ja.settings.tabRecipe },
+  { id: 'section-backup', label: ja.settings.tabBackup },
+  { id: 'section-pro', label: ja.settings.tabPro },
 ]
 
-// ?section=pro / ?section=themes / ?section=backup の直リンクが、タブ化後もどのタブの
-// どの要素までスクロールするか(backupは2026-07-16 ホーム「しばらくバックアップしていません」
-// リンクの遷移先として追加。既存の?section=直リンクの仕組みをそのまま流用する)
-const sectionDeepLinks: Record<string, { tab: SettingsTab; elementId: string }> = {
-  pro: { tab: 'pro', elementId: 'pro-section' },
-  themes: { tab: 'recipe', elementId: 'theme-list-section' },
-  backup: { tab: 'backup', elementId: 'backup-section' },
+// ?section=pro / ?section=themes / ?section=backup の直リンクが、どの要素まで自動スクロールするか。
+// 1本スクロール化で「該当タブを開く」から「該当節へ自動スクロール」へ読み替えた(unlock.html・
+// NutritionTeaser・ホーム「しばらくバックアップしていません」等の既存導線を維持する)。
+// backupは2026-07-16 ホームリンクの遷移先として追加。値は該当節内のアンカー要素id
+const sectionDeepLinks: Record<string, string> = {
+  pro: 'pro-section',
+  themes: 'theme-list-section',
+  backup: 'backup-section',
 }
+
+// 各節の見出し(全般/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
+// 大きくする(スクロール位置の調整=scroll-mt-24は節ラッパーの<section>側に付ける)
+const nodeHeadingCls = 'text-lg font-bold'
 
 /**
  * importRecipeSetの結果メッセージを組み立てる。更新（内容が変わっていた再取込）が
@@ -251,8 +251,8 @@ export default function SettingsPage() {
   // File System Access API対応ブラウザのみ意味を持つ。「前回の場所に上書き」ボタンの表示判定)
   const [savedHandleExists, setSavedHandleExists] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
-  // 設定画面のタブ(2026-07-12オーナー実機フィードバックのタブ分割)
-  const [activeTab, setActiveTab] = useState<SettingsTab>('basic')
+  // 目次チップの現在地ハイライト用(1本スクロール化)。スクロール監視で表示中の節idを保持する
+  const [activeSection, setActiveSection] = useState<string>('section-basic')
   // 置き換え直後1回だけ出す「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c・三重の網の(c))。
   // タブを切り替える(=画面遷移)と消える(下のuseEffect参照)
   const [replaceUndoAvailable, setReplaceUndoAvailable] = useState(false)
@@ -312,11 +312,14 @@ export default function SettingsPage() {
       clearParam()
       return
     }
-    // レシピセットの取り込みは「レシピ」タブの内容なので、直リンクで開いたときも自動でそこへ切り替える。
+    // レシピセットの取り込みは「レシピ」節のテーマ一覧の内容なので、直リンクで開いたときは
+    // そのテーマ一覧へ自動スクロールする(1本スクロール化。旧: 「レシピ」タブへ自動切り替え)。
     // このフローは配布ページの外部リンクから来る一発取り込みで、画面下部のトースト表示が
     // 既存の挙動(タップで閉じられる)としてテスト済みのため、修正4の対象(読み込み欄上部の
     // テキスト表示)には含めない(setMessage/下部トーストのまま変更しない)
-    setActiveTab('recipe')
+    requestAnimationFrame(() => {
+      document.getElementById('theme-list-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
     let cancelled = false
     void (async () => {
       try {
@@ -342,78 +345,76 @@ export default function SettingsPage() {
   }, [searchParams, settings])
 
   // セクションへの直接リンク(例: /settings?section=pro、?section=themes)から開いたとき、
-  // 該当タブへ自動で切り替えた上で該当セクションまで自動スクロールする(2026-07-12タブ分割)。
-  // タブ切り替え直後はまだDOMにその要素が無いことがあるため、activeTabが目的のタブと
-  // 一致するまでこのエフェクト自体を再実行させる(依存配列にactiveTabを含める)。
-  // settings読み込み前はコンポーネントがnullを返す(下記)ため対象要素がまだ無く、
-  // settingsが揃ってから改めて試す必要がある(1回だけ実行するようRefで防ぐ)
+  // 該当節のアンカー要素まで自動スクロールする(1本スクロール化。旧: 該当タブへ切り替え→スクロール)。
+  // 1本スクロールなので対象要素は常にDOMにあるが、settings読み込み前はコンポーネントがnullを返す
+  // (下記)ため要素がまだ無く、settingsが揃ってから試す。テーマ一覧の高さが確定してから
+  // スクロールするようthemesLoadingがfalseになるのを待つ(その下のbackup/proの位置がずれないように)。
+  // 1マウントにつき1回だけ実行するようRefで防ぐ
   const scrolledToSectionRef = useRef(false)
   useEffect(() => {
     if (scrolledToSectionRef.current) return
-    const target = sectionDeepLinks[searchParams.get('section') ?? '']
-    if (!target) return
+    const elementId = sectionDeepLinks[searchParams.get('section') ?? '']
+    if (!elementId) return
     if (!settings) return
-    if (activeTab !== target.tab) {
-      setActiveTab(target.tab)
-      return
-    }
+    if (themesLoading) return
     scrolledToSectionRef.current = true
-    document.getElementById(target.elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, [searchParams, settings, activeTab])
-
-  /**
-   * タブごとのスクロール位置復元(セッション内・2026-07-13 UI改善)。タブバー自体をsticky化した
-   * ため、タブを切り替えると中身の高さが変わりスクロール位置がずれてしまう。タブを押した瞬間の
-   * 位置を離脱先のタブに保存しておき、次にそのタブへ戻ったときに復元する。
-   * pendingTabScrollRestoreRefは「タブボタンを直接押した」ときだけ立て、?section=/?set=直リンクに
-   * よる自動タブ切り替え(上のuseEffect)では復元しない(復元してしまうと直リンクの自動スクロールと
-   * 競合するため)
-   */
-  const tabScrollPositions = useRef<Partial<Record<SettingsTab, number>>>({})
-  const pendingTabScrollRestoreRef = useRef(false)
-  const selectTab = (tab: SettingsTab) => {
-    tabScrollPositions.current[activeTab] = window.scrollY
-    pendingTabScrollRestoreRef.current = true
-    setActiveTab(tab)
-  }
-  useEffect(() => {
-    if (!pendingTabScrollRestoreRef.current) return
-    pendingTabScrollRestoreRef.current = false
-    const y = tabScrollPositions.current[activeTab] ?? 0
-    requestAnimationFrame(() => window.scrollTo(0, y))
-  }, [activeTab])
+    requestAnimationFrame(() => {
+      document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [searchParams, settings, themesLoading])
 
   /**
    * バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)のタップ/ボタン先。
-   * 「バックアップタブの書き出しへ」＝タブを切り替えて①バックアップを取るカードまで自動スクロール
-   * する(実際の保存はユーザーが写真込みチェック等を確認してから「ファイルに書き出す」を押す形を
-   * 維持する。バナーの小ボタンから確認なしに即ファイル保存を開始しない)。
-   * selectTab経由にすると離脱先タブのスクロール位置復元(pendingTabScrollRestoreRef)と競合するため、
-   * ?section=直リンクの自動スクロール(上のuseEffect)と同じくsetActiveTabを直接呼ぶ
+   * バックアップ節の①バックアップを取るカードまで自動スクロールする(実際の保存はユーザーが
+   * 写真込みチェック等を確認してから「ファイルに書き出す」を押す形を維持する。バナーの小ボタンから
+   * 確認なしに即ファイル保存を開始しない)。1本スクロール化でタブ切り替えが不要になったため、
+   * 単純にbackup-sectionへスクロールする
    */
-  const backupBannerScrollPendingRef = useRef(false)
   const goToBackupExport = () => {
-    if (activeTab === 'backup') {
-      document.getElementById('backup-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      return
-    }
-    backupBannerScrollPendingRef.current = true
-    setActiveTab('backup')
+    document.getElementById('backup-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
-  useEffect(() => {
-    if (!backupBannerScrollPendingRef.current) return
-    if (activeTab !== 'backup') return
-    backupBannerScrollPendingRef.current = false
-    requestAnimationFrame(() => {
-      document.getElementById('backup-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
-  }, [activeTab])
 
-  // 置き換え直後の「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c)はタブ切り替え(=画面遷移)で
-  // 消えてよい設計のため、activeTabが変わるたびに閉じる
+  /** 目次チップのタップ: 該当節の見出しへスクロールし、チップのハイライトを即時に切り替える */
+  const scrollToSection = (id: string) => {
+    setActiveSection(id)
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // 目次チップの現在地ハイライト(1本スクロール化)。スクロールに応じて表示中の節を追従表示する。
+  // sticky目次チップの少し下(140px)に判定ラインを引き、それを越えた最後の節をactiveにする。
+  // 最後尾のPro節は高さが足りず先頭が判定ラインまで届かない(=最下部で止まる)ため、ページ最下部に
+  // 達したら最後の節を明示的にactiveにする(そうしないとPro表示中もバックアップが光ったままになる)
   useEffect(() => {
-    setReplaceUndoAvailable(false)
-  }, [activeTab])
+    if (!settings) return
+    let ticking = false
+    const compute = () => {
+      ticking = false
+      const atBottom =
+        window.innerHeight + Math.ceil(window.scrollY) >= document.documentElement.scrollHeight - 4
+      if (atBottom) {
+        setActiveSection(settingsSections[settingsSections.length - 1].id)
+        return
+      }
+      let current = settingsSections[0].id
+      for (const s of settingsSections) {
+        const el = document.getElementById(s.id)
+        if (el && el.getBoundingClientRect().top <= 140) current = s.id
+      }
+      setActiveSection(current)
+    }
+    const onScroll = () => {
+      if (ticking) return
+      ticking = true
+      requestAnimationFrame(compute)
+    }
+    compute() // 初期反映
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      window.removeEventListener('resize', onScroll)
+    }
+  }, [settings, themesLoading])
 
   if (!settings) return null // 読み込み中
 
@@ -767,33 +768,36 @@ export default function SettingsPage() {
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.settings.title}</h1>
 
-      {/* タブ切り替え(2026-07-12オーナー実機フィードバック: 縦に長大化したため上部タブで分割)。
-          2026-07-13 UI改善: スクロールしても上部に固定(sticky)する。settings-tabbarクラスは
-          index.cssでis-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している。
-          2026-07-16 UI総点検A-5: タップ領域が38pxしかなかったためpy-2.5→py-[13px]で44px相当に拡大
-          (バックアップタブの中身は別便が触っているためこのタブバー部分以外は変更しない) */}
-      <div className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur">
+      {/* 目次チップ(2026-07-17オーナー採用決定で設定を1本スクロール化。旧: 上部タブ4分割2026-07-12〜)。
+          全般/レシピ/バックアップ/Proの各節へタップでスクロールし、スクロール監視で表示中の節を
+          ハイライトする。スクロールしても上部に固定(sticky)。settings-tabbarクラスはindex.cssで
+          is-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している。
+          タップ領域は44px相当(py-[13px]・2026-07-16 UI総点検A-5から踏襲) */}
+      <nav
+        aria-label={ja.settings.tocLabel}
+        className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
+      >
         <div className="grid grid-cols-4 gap-1">
-          {settingsTabs.map((tab) => (
+          {settingsSections.map((section) => (
             <button
-              key={tab.id}
+              key={section.id}
               type="button"
-              onClick={() => selectTab(tab.id)}
-              aria-pressed={activeTab === tab.id}
+              onClick={() => scrollToSection(section.id)}
+              aria-current={activeSection === section.id ? 'true' : undefined}
               className={`rounded-md border py-[13px] text-xs font-bold shadow-sm ${
-                activeTab === tab.id
+                activeSection === section.id
                   ? 'border-accent bg-accent text-on-accent'
                   : 'border-edge bg-surface text-ink-muted'
               }`}
             >
-              {tab.label}
+              {section.label}
             </button>
           ))}
         </div>
-      </div>
+      </nav>
 
-      {/* バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。タブバーの下・全タブ共通の常設
-          バナー。タップ/[今すぐ保存]ボタンのどちらも「バックアップタブの書き出しへ」導く
+      {/* バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。目次チップの下・全節共通の常設
+          バナー。タップ/[今すぐ保存]ボタンのどちらも「バックアップ節の書き出しへ」導く
           (バナー自体は即ファイル保存を実行しない。写真込みチェック等を確認してから
           「ファイルに書き出す」を押す既存の流れを維持するため)。30日超(または未実施)は警告色 */}
       <div
@@ -826,10 +830,14 @@ export default function SettingsPage() {
         </button>
       </div>
 
-      {activeTab === 'basic' && (
+      {/* ===== 全般 節 ===== */}
+      <section id="section-basic" aria-labelledby="section-basic-heading" className="scroll-mt-24">
+        <h2 id="section-basic-heading" className={`${nodeHeadingCls} mt-[var(--space-lg)]`}>
+          {ja.settings.tabBasic}
+        </h2>
         <>
           {/* 見た目(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理。
-              テーマカラーを全般タブの最上部へ移動。並びとグループ見出しのみでカードの中身は変更しない) */}
+              テーマカラーを全般節の最上部へ移動。並びとグループ見出しのみでカードの中身は変更しない) */}
           <p className={groupHeadingCls}>{ja.settings.groupAppearanceTitle}</p>
 
           {/* テーマカラー(旧「テーマ」。2026-07-16 UI総点検B-1: レシピ側「テーマ一覧」との用語衝突のため改名) */}
@@ -1134,9 +1142,16 @@ export default function SettingsPage() {
             </a>
           </section>
         </>
-      )}
+      </section>
 
-      {activeTab === 'recipe' && (
+      {/* ===== レシピ 節 ===== */}
+      <section id="section-recipe" aria-labelledby="section-recipe-heading" className="scroll-mt-24">
+        <h2
+          id="section-recipe-heading"
+          className={`${nodeHeadingCls} mt-[var(--space-lg)] border-t border-edge pt-[var(--space-lg)]`}
+        >
+          {ja.settings.tabRecipe}
+        </h2>
         <>
           {/* 基本レシピ */}
           <section className={sectionCls}>
@@ -1237,8 +1252,9 @@ export default function SettingsPage() {
             </a>
           </section>
 
-          {/* テーマ一覧: 収録レシピ(全テーマ)は2026-07-22の全無料化で誰でも解錠なしに取り込める */}
-          <section id="theme-list-section" className={sectionCls}>
+          {/* テーマ一覧: 収録レシピ(全テーマ)は2026-07-22の全無料化で誰でも解錠なしに取り込める。
+              ?section=themes・?set=直リンクの自動スクロール先(scroll-mt-24でsticky目次チップ分を下げる) */}
+          <section id="theme-list-section" className={`${sectionCls} scroll-mt-24`}>
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-bold">{ja.settings.themeListTitle}</h2>
               {themes.length > 0 && (
@@ -1364,13 +1380,20 @@ export default function SettingsPage() {
             )}
           </section>
         </>
-      )}
+      </section>
 
-      {activeTab === 'backup' && (
+      {/* ===== バックアップ 節 ===== */}
+      <section id="section-backup" aria-labelledby="section-backup-heading" className="scroll-mt-24">
+        <h2
+          id="section-backup-heading"
+          className={`${nodeHeadingCls} mt-[var(--space-lg)] border-t border-edge pt-[var(--space-lg)]`}
+        >
+          {ja.settings.tabBackup}
+        </h2>
         <>
           {/* ①バックアップを取る(2026-07-17バックアップ改修 修正5でカード再構成。
               修正2+3: File System Access API対応ブラウザは保存先選択+前回の場所に上書きボタンを併設) */}
-          <section id="backup-section" className={sectionCls}>
+          <section id="backup-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.backupTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupDescription}</p>
             {/* 修正1: バックアップに購入コードが含まれることの注意喚起 */}
@@ -1537,7 +1560,8 @@ export default function SettingsPage() {
           </section>
 
           {/* 三重の網の(c): 置き換え直後に1回だけ出す「元に戻す」バナー
-              (2026-07-17設定ゼロベース裁定#6c)。タブ切り替え(画面遷移)で自動的に消える */}
+              (2026-07-17設定ゼロベース裁定#6c)。画面固定表示で、[元に戻す]/×で閉じるか
+              設定画面を離れる(アンマウント)と消える(1本スクロール化でタブ切り替えは無くなった) */}
           {replaceUndoAvailable && (
             <div
               className="fixed inset-x-0 z-[70] flex justify-center px-[var(--space-md)]"
@@ -1567,15 +1591,22 @@ export default function SettingsPage() {
             </div>
           )}
         </>
-      )}
+      </section>
 
-      {activeTab === 'pro' && (
+      {/* ===== Pro 節 ===== */}
+      <section id="section-pro" aria-labelledby="section-pro-heading" className="scroll-mt-24">
+        <h2
+          id="section-pro-heading"
+          className={`${nodeHeadingCls} mt-[var(--space-lg)] border-t border-edge pt-[var(--space-lg)]`}
+        >
+          {ja.settings.tabPro}
+        </h2>
         <>
           {/* 購入と解錠。2026-07-22の全無料化で収録レシピ(基本+全テーマ)は全て無料になり、
               有料は買い切りProの機能解錠(登録無制限・栄養8項目と栄養並び替え・月間献立)のみ。
               追加レシピパック(UP-)は製品廃止したため、この画面はPro(UR-)の解錠だけを扱う。
               解錠済みコードはマスク表示+コピー(2026-07-17設定ゼロベース裁定#4)を添える */}
-          <section id="pro-section" className={sectionCls}>
+          <section id="pro-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.unlockTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.unlockDescription}</p>
 
@@ -1645,7 +1676,7 @@ export default function SettingsPage() {
             )}
           </section>
         </>
-      )}
+      </section>
 
       <Toast message={message} onClose={() => setMessage('')} />
     </div>
