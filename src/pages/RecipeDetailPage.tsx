@@ -254,6 +254,23 @@ export default function RecipeDetailPage() {
   const [focusOpen, setFocusOpen] = useState(false)
   const [focusStep, setFocusStep] = useState(0)
 
+  // 「調理中モードで見る」の初回ヒント(2026-07-23 便BJ・docs/55 CEO提案1-5)。
+  // このアプリ最強の機能が初見で気づかれにくいため、レシピ詳細を初めて開いたときだけ
+  // ボタンを控えめにハイライトし一言添える。表示と同時に「見せた」フラグを保存し、
+  // 以降は二度と出さない(常時アニメ・派手な演出はしない=落ち着いたトーン維持)。
+  const [showCookHint, setShowCookHint] = useState(false)
+  const cookHintHandled = useRef(false)
+  useEffect(() => {
+    if (cookHintHandled.current) return
+    if (!recipe || settings === undefined) return // レシピ・設定の読み込み待ち
+    if (recipe.steps.length === 0) return // ボタン自体が出ないレシピではヒントも出さない
+    cookHintHandled.current = true
+    if (!settings.cookModeHintSeen) {
+      setShowCookHint(true)
+      void updateSettings({ cookModeHintSeen: true })
+    }
+  }, [recipe, settings])
+
   // 時短モード（レンジ活用など、通常より手早い代替手順がある料理だけ切り替えを表示。表示中だけの一時的な選択）
   const [quickMode, setQuickMode] = useState(false)
 
@@ -812,16 +829,35 @@ export default function RecipeDetailPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    setShowCookHint(false)
                     setFocusStep(0)
                     setFocusOpen(true)
                   }}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge px-3 py-2 text-sm font-bold text-accent"
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold text-accent ${
+                    showCookHint ? 'border-accent ring-2 ring-accent/30' : 'border-edge'
+                  }`}
                 >
                   <Maximize2 size={16} aria-hidden />
                   {ja.focus.open}
                 </button>
                 {/* 初見でも何が起きるボタンか分かるように一言添える(名称自体は変えない) */}
                 <p className="mt-0.5 text-xs text-ink-muted">{ja.focus.openHint}</p>
+                {/* 初回のみ・1回だけの控えめなヒント(docs/55 CEO提案1-5)。表示済みフラグで再表示しない */}
+                {showCookHint && (
+                  <div className="mt-1 flex items-center justify-end gap-1">
+                    <span className="rounded-sm border border-accent bg-accent/10 px-2 py-1 text-xs font-bold text-accent">
+                      {ja.focus.firstHint}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowCookHint(false)}
+                      aria-label={ja.focus.firstHintDismiss}
+                      className="shrink-0 rounded-full p-1 text-ink-muted"
+                    >
+                      <X size={14} aria-hidden />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

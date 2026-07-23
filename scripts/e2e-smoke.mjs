@@ -212,12 +212,17 @@
 //         固定項目の説明文言・「※画像カードのみ」併記・既定値(画像ON/調理時間ON/原価OFF/
 //         栄養OFF/材料全部OFF)を確認。navigator.share非対応のchromiumでは「テキストでシェア」が
 //         クリップボードへのコピーになるため、コピーされた文字列を直接検証する:
-//         (a)既定選択で料理名(人数分)・調理時間行・材料8件+…ほか・#うちレシピ・URLが入り、
-//            「作り方は全◯ステップ」行(裁定3で削除)・原価・栄養が入らないこと
+//         (a)既定選択で料理名・人数分(別行)・調理時間行・材料8件+…ほか・作り方(【作り方】)・
+//            #うちレシピ・URLが入り、「作り方は全◯ステップ」行(裁定3で削除)・原価・栄養が入らないこと
 //         (b)「材料をすべて載せる」+「原価」ONで、9件目の材料が入り…ほかが消え、
 //            原価行(1人分/全量・登録人数基準)が入ること
 //         (c)「画像カードでシェア」は非対応環境でPNGダウンロードに切り替わるため、
-//            downloadイベントの発生=画像カード生成の成功のみ確認する)。
+//            downloadイベントの発生=画像カード生成の成功のみ確認する
+//         (d)往復(2026-07-23 便BJ・docs/55 CEO提案2-1): (b)の全文を新規レシピに貼り付け、自動振り分けで
+//            材料・手順が過不足なく復元され料理名も戻ること=端末間で丸ごと取り込める形式であること)。
+//         FOCUS-HINT-01(調理中モードの初回発見性・2026-07-23 便BJ・docs/55 CEO提案1-5: レシピ詳細を
+//         初めて開いたときだけ「作りながら見るならこれ」の控えめなヒントが1回だけ出て、2品目以降は
+//         出ないこと=cookModeHintSeenフラグで再表示しない) /
 //         PANTRY-BULK-01(在庫チップ「まとめて状態設定」・2026-07-17 docs/35 §5 オーナー決定・
 //         案D: 整理モード中に選択したチップへ「ある」「少ない」「ない」の3ボタンで一括状態変更
 //         できること。0件選択時は3ボタンともdisabled・3件選択→「ない」適用で実際にIndexedDBの
@@ -5876,8 +5881,8 @@ try {
       check('SHARE-01 シェアボタンで選択モーダルが開く', (await shareDialog.count()) === 1)
       const dialogText = (await shareDialog.textContent()) ?? ''
       check(
-        'SHARE-01 固定項目の説明文言(料理名・食数・材料8件)が出る',
-        dialogText.includes('料理名・食数・材料（最初の8件）は常に入ります'),
+        'SHARE-01 固定項目の説明文言(料理名・食数・材料8件・作り方)が出る',
+        dialogText.includes('料理名・食数・材料（最初の8件）・作り方は常に入ります'),
       )
       check('SHARE-01 レシピ画像の行に「※画像カードのみ」が併記される', dialogText.includes('※画像カードのみ'))
 
@@ -5901,14 +5906,17 @@ try {
         ((await shareDialog.textContent()) ?? '').includes('レシピの文章をコピーしました'),
       )
       const copiedDefault = await shPage.evaluate(() => navigator.clipboard.readText())
-      check('SHARE-01(a) 料理名+人数分', copiedDefault.includes('豚汁（4人分）'))
+      // 2026-07-23 便BJ・docs/55 CEO提案2-1: 料理名と人数分は別行(貼り付けパーサーが人数分だけの
+      // 行として読み飛ばし、料理名を汚さないため)。作り方(全手順)も【作り方】見出しつきで入る
+      check('SHARE-01(a) 料理名+人数分が別行', copiedDefault.includes('豚汁\n4人分'))
       check('SHARE-01(a) 調理時間行(既定ON)', copiedDefault.includes('調理時間 約30分'))
       check(
-        'SHARE-01(a) 材料は8件+…ほか(9件目のごま油は入らない)',
+        'SHARE-01(a) 材料は8件+…ほか(9件目のごま油の材料行は入らない)',
         copiedDefault.includes('【材料】') &&
           copiedDefault.includes('…ほか') &&
-          !copiedDefault.includes('ごま油'),
+          !copiedDefault.includes('・ごま油'),
       )
+      check('SHARE-01(a) 作り方(全手順)が【作り方】見出しつきで入る', copiedDefault.includes('【作り方】'))
       check('SHARE-01(a) 「作り方は全◯ステップ」行が無い(裁定3で削除)', !copiedDefault.includes('作り方は全'))
       check(
         'SHARE-01(a) アプリ名とURLは必ず残る(宣伝枠)',
@@ -5944,8 +5952,76 @@ try {
         download.suggestedFilename().endsWith('.png'),
         download.suggestedFilename(),
       )
+
+      // (d) 往復(round-trip・2026-07-23 便BJ・docs/55 CEO提案2-1): (b)でコピーした全文をそのまま
+      // 新規レシピに貼り付け、自動振り分けで材料・手順が過不足なく復元される=テキスト共有が
+      // 「見る専用」ではなく端末間で丸ごと取り込める形式であることの実DOM実証。
+      const ingLineCount = copiedFull.split('\n').filter((l) => l.startsWith('・')).length
+      const stepLineCount = copiedFull.split('\n').filter((l) => /^\d+\.\s/.test(l)).length
+      await shPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await shPage.waitForTimeout(500)
+      await shPage.getByText('テキスト貼り付けで自動入力').click()
+      await shPage.waitForTimeout(300)
+      await shPage.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(copiedFull)
+      await shPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await shPage.waitForTimeout(400)
+      const rtFormText = await shPage.textContent('body')
+      check(
+        'SHARE-01(d) 往復: 貼り付けで材料・手順が過不足なく復元される',
+        rtFormText.includes(`材料${ingLineCount}件・手順${stepLineCount}件を読み取りました`),
+        rtFormText,
+      )
+      check(
+        'SHARE-01(d) 往復: 料理名も復元される(人数分の括弧に汚れない)',
+        (await shPage.getByPlaceholder('例: 肉じゃが').inputValue()) === '豚汁',
+      )
+      check(
+        'SHARE-01(d) 往復: 末尾の入口URLが手順に化けない(手順数=共有本文の手順行数)',
+        stepLineCount > 0 && rtFormText.includes(`手順${stepLineCount}件`),
+      )
     } finally {
       await shBrowser.close()
+    }
+  }
+
+  // --- FOCUS-HINT-01: 調理中モードの初回発見性(2026-07-23 便BJ・docs/55 CEO提案1-5)。
+  // レシピ詳細を初めて開いたときだけ「作りながら見るならこれ」の控えめなヒントを1回だけ出し、
+  // 2品目以降は出さない(cookModeHintSeenフラグで再表示しない)。新規IndexedDBの独立ブラウザで検証 ---
+  currentCheck = 'FOCUS-HINT-01'
+  {
+    const fhBrowser = await chromium.launch()
+    const fhContext = await fhBrowser.newContext()
+    const fhPage = await fhContext.newPage()
+    fhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FOCUS-HINT-01] ${err.message}`)
+    })
+    try {
+      await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fhPage.waitForTimeout(1800) // 初回シード完了待ち
+      // 1品目: 初回ヒントが出る
+      await fhPage.getByText('肉じゃが', { exact: true }).first().click()
+      await fhPage.waitForTimeout(600)
+      check(
+        'FOCUS-HINT-01 初回のレシピ詳細で「作りながら見るならこれ」ヒントが出る',
+        (await fhPage.getByText('作りながら見るならこれ').count()) === 1,
+      )
+      // 2品目: もう出ない(1回だけ)
+      await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fhPage.waitForTimeout(600)
+      await fhPage.getByText('カレーライス', { exact: true }).first().click()
+      await fhPage.waitForTimeout(600)
+      check(
+        'FOCUS-HINT-01 2品目以降はヒントが出ない(1回だけ)',
+        (await fhPage.getByText('作りながら見るならこれ').count()) === 0,
+      )
+      // 調理中モードのボタン自体は毎回ある(ヒントが消えても機能は不変)
+      check(
+        'FOCUS-HINT-01 ヒントが消えても「調理中モードで見る」ボタンは残る',
+        (await fhPage.getByText('調理中モードで見る').count()) >= 1,
+      )
+    } finally {
+      await fhBrowser.close()
     }
   }
 

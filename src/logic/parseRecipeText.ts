@@ -564,6 +564,10 @@ const SERVING_ADJUST_LINE = /^人数に合わせて.{0,12}調整/
 const MY_RECIPE_REGISTER_LINE = /^(?:マイレシピ登録|お気に入り登録|クリップ)(?:する)?[（(]?\d*[）)]?.{0,6}$/
 const PHOTOGRAPHER_LINE = /^撮影[\s　／/:：]/
 const UPDATED_DATE_LINE = /^更新日[\s:：]/
+// 行全体がURLだけの行（レシピサイトからの貼り付けに混ざるリンク、本アプリの共有テキスト末尾の
+// 入口URL「https://uchirecipe.com/」など）。手順・材料のどれでもないので落とす。
+// これにより「テキストで共有」した文章を別端末に貼り付けても、末尾のアプリ入口URLが手順に化けない
+const URL_ONLY_LINE = /^https?:\/\/\S+$/
 const REGEX_GOMI = [
   AUTHOR_HANDLE_LINE,
   PHOTO_CAPTION_LINE,
@@ -574,6 +578,7 @@ const REGEX_GOMI = [
   MY_RECIPE_REGISTER_LINE,
   PHOTOGRAPHER_LINE,
   UPDATED_DATE_LINE,
+  URL_ONLY_LINE,
 ]
 
 function isHashtagGomi(line: string): boolean {
