@@ -772,13 +772,6 @@ export default function RecipesPage() {
             <>
               <p className="font-bold">{ja.search.noResult}</p>
               <p className="mt-1 text-sm">{ja.search.noResultHint}</p>
-              {/* 配布テーマへの控えめな発見導線（探し物が無かった人に別の入り口を示す） */}
-              <Link
-                to="/settings?section=themes"
-                className="mt-2 inline-block text-sm font-bold text-accent underline"
-              >
-                {ja.recipes.themeShortcut}
-              </Link>
             </>
           )}
         </div>
@@ -805,16 +798,6 @@ export default function RecipesPage() {
           />
         ))}
       </div>
-
-      {/* 一覧最下部の控えめな発見導線（設定のテーマ一覧へ） */}
-      {results && results.length > 0 && (
-        <Link
-          to="/settings?section=themes"
-          className="mt-[var(--space-lg)] block text-center text-sm font-bold text-accent underline"
-        >
-          {ja.recipes.themeShortcut}
-        </Link>
-      )}
 
       {/* 新規登録ボタン（親指が届く右下に固定、タブナビの上） */}
       <Link

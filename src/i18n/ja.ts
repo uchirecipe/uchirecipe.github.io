@@ -361,8 +361,6 @@ export const ja = {
     recipeSetResultExcluded: '（削除済みの除外中{e}件）',
     recipeSetError: '読み込めませんでした。レシピセットのJSONファイルか確認してください',
     recipeSetNotFound: '指定されたURLにレシピセットが見つかりませんでした。IDの綴りが正しいか確認してください',
-    recipeSetDeepLinkConfirm: '「{name}」（{n}品）を追加しますか？',
-    recipeSetPageLink: '配布ページを見る',
     // 2026-07-17バックアップ改修 修正5: バックアップタブを3カード(バックアップを取る/
     // バックアップから戻す/困ったとき)に再構成。backupTitleは「バックアップを取る」カードの見出し
     backupTitle: 'バックアップを取る',
@@ -466,24 +464,8 @@ export const ja = {
       '月間ビュー（献立の週・月切替から）',
       '栄養価の8項目表示・栄養価での並び替え',
     ] as string[],
-    themeListTitle: 'テーマ一覧',
-    themeListDescription:
-      '興味のあるテーマだけ選んで取り込めます。テーマをタップすると収録レシピを確認できます（すべて無料で取り込めます）。',
-    themeListLoading: '読み込み中…',
-    themeItemsCount: '収録レシピ（{n}品）',
-    themeListEmpty: '現在配布中のテーマはありません',
-    themeAdd: '追加する',
-    themeAdded: '追加済み',
-    themeAddAll: 'すべて追加',
-    themeAddAllResult: '{n}件のテーマから追加しました',
-    themeAddAllNone: '追加できる新しいテーマはありません',
-    themeDelete: 'このテーマのレシピを削除',
-    themeDeleteConfirm: '「{name}」のレシピをすべて削除します。よろしいですか？',
-    themeDeleteDone: '「{name}」のレシピを削除しました（{n}件）',
-    // 削除したセット品の再取込除外(トゥームストーン・2026-07-13 Fable設計)。
-    // 個別に削除した品は再取込しても復活しない。このボタンで除外記録を消すと次の取込で戻る
-    themeExclusionRestore: '除外中{n}品・すべて戻す',
-    themeExclusionRestored: '「{name}」の除外を解除しました。次にこのテーマを取り込むと戻ります',
+    // テーマ一覧(配布テーマのカタログ)関連の文言は2026-07-23のテーマ全廃で撤去した
+    // (収録103品は全て平らな「基本レシピ」になり、テーマ単位の取り込み・削除UI自体が無くなった)。
     aboutTitle: 'うちレシピについて',
     // バージョン+データ件数(2026-07-17設定ゼロベース裁定#3。問い合わせ対応に必須)
     aboutVersion: 'バージョン {v}',
@@ -524,7 +506,6 @@ export const ja = {
     addRecipe: 'レシピを登録',
     minutesSuffix: '分',
     freeLimitNearBanner: '無料版はあと{n}件登録できます（既存のレシピはこのまま全部使えます）',
-    themeShortcut: 'レシピテーマを見る →',
   },
   search: {
     placeholder: '料理名・材料・タグで検索',
@@ -761,17 +742,16 @@ export const ja = {
     // window.confirmは使わず、もう一度押す方式で誤操作を防ぐ(押すとこの文言に切り替わり、
     // もう一度押すと実行される。数秒操作が無ければ元のラベルに自動で戻る)
     resetConfirmLabel: 'もう一度押すと戻します',
-    resetting: '確認中…',
     resetFeedback: 'まだ保存されていません。保存すると確定します',
     resetStarterNotFound: 'デフォルトの元になるレシピが見つかりませんでした',
-    resetSetFetchError:
-      'デフォルトの内容を取得できませんでした。通信状況を確認してからもう一度お試しください',
   },
   detail: {
     notFound: 'レシピが見つかりませんでした',
     backToList: 'レシピ一覧へ戻る',
     ingredients: '材料',
     seasoningGroupHint: '左に同じ色のラインがある材料は、先にまとめて計量してOKです（合わせ調味料）',
+    // だし紐づけ(2026-07-23): 材料「だし汁」の行から収録レシピ「だしのとり方」へ飛ぶリンク
+    dashiRecipeLink: 'だしのとり方',
     steps: '手順',
     normalMode: '通常',
     quickMode: '時短',

@@ -25,24 +25,10 @@ const { NUTRITION_DATA } = await import('../src/logic/nutritionData.ts')
 const { computeRecipeNutrition, matchNutritionFood, roundNutrient } = await import(
   '../src/logic/nutrition.ts'
 )
+// テーマ全廃(2026-07-23): 旧配布テーマ原稿(kintore/bento/diet/summer/freezer)は starters.ts が
+// starterDefs に連結済み。よって全103品は starterDefs だけで網羅でき、旧public/sets/data/*.jsonや
+// 各セットの個別importは読まない(読むと二重計上になる)。スナップショットのキーは全て starter: で揃う
 const { starterDefs } = await import('../src/db/starters.ts')
-const kintore = await import('../src/sets/kintore.ts')
-const bento = await import('../src/sets/pack07.ts')
-
-// 2026-07-23公開の3パック(第2/8/16弾)。build-sets.mjsが生成する成果物JSONを読む
-// (kintore/bentoと同じsrc/sets/*.ts由来。スナップショットのキーはsetId=summer/diet/freezerで揃える)
-const reviewPacks = []
-for (const [file, label] of [
-  ['summer.json', 'summer'],
-  ['diet.json', 'diet'],
-  ['freezer.json', 'freezer'],
-]) {
-  const reviewPath = path.join(__dirname, '..', 'public', 'sets', 'data', file)
-  if (existsSync(reviewPath)) {
-    const parsed = JSON.parse(readFileSync(reviewPath, 'utf-8'))
-    reviewPacks.push({ set: label, recipes: parsed.recipes })
-  }
-}
 
 // 八訂(2023増補)に収載が無く、出典を捏造しない方針(docs/47「出典の検証」節)により
 // 対象外のまま据え置いている材料(2026-07-21カバレッジ監査で確認・オーナー方針待ち)。
@@ -270,16 +256,14 @@ console.log('アサリの原因特定・回帰防止: 5件')
 }
 console.log('スクショ相当フィクスチャ: 1件(9材料+水)')
 
-// ---------- 2. 回帰スモークセット（全カタログ103品=基本51+配布5パック52） ----------
-const recipes = [
-  ...starterDefs.map((d) => ({ set: 'starter', title: d.title, servings: d.servings, ingredients: d.ingredients })),
-  ...kintore.recipes.map((d) => ({ set: 'kintore', title: d.title, servings: d.servings, ingredients: d.ingredients })),
-  ...bento.recipes.map((d) => ({ set: 'bento', title: d.title, servings: d.servings, ingredients: d.ingredients })),
-  ...reviewPacks.flatMap((p) =>
-    p.recipes.map((d) => ({ set: p.set, title: d.title, servings: d.servings, ingredients: d.ingredients })),
-  ),
-]
-check(recipes.length === 103, `レシピ数が想定外: ${recipes.length}（基本51+配布5パック(kintore10+bento10+summer11+diet10+freezer11)=103のはず。2026-07-23に第2/8/16弾をdiet/summer/freezerとして正式公開）`)
+// ---------- 2. 回帰スモークセット（全カタログ103品=基本51+旧配布テーマ52。全て基本レシピに合流） ----------
+const recipes = starterDefs.map((d) => ({
+  set: 'starter',
+  title: d.title,
+  servings: d.servings,
+  ingredients: d.ingredients,
+}))
+check(recipes.length === 103, `レシピ数が想定外: ${recipes.length}（基本51+旧配布テーマ52=103のはず。2026-07-23のテーマ全廃で全てstarterDefsに合流）`)
 
 let totalIngredients = 0
 let matchedIngredients = 0
@@ -353,7 +337,7 @@ const spotChecks = [
   ['starter:肉じゃが', 300, 700],
   ['starter:カレーライス', 500, 900],
   ['starter:豆腐とわかめの味噌汁', 20, 120],
-  ['kintore:レンジ蒸し鶏（自家製サラダチキン）', 100, 400],
+  ['starter:レンジ蒸し鶏（自家製サラダチキン）', 100, 400],
 ]
 for (const [key, min, max] of spotChecks) {
   const s = snapshot[key]

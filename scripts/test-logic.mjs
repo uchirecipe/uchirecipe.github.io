@@ -92,7 +92,13 @@ import { searchRecipes } from '../src/logic/search.ts'
 import { buildShareText } from '../src/logic/share.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 import { pickIconKey } from '../src/logic/icon.ts'
-import { starterDefs, buildUpdatedStarterRecipe, planStarterReload } from '../src/db/starters.ts'
+import {
+  starterDefs,
+  buildUpdatedStarterRecipe,
+  planStarterReload,
+  planFlattenedStarterTopUp,
+} from '../src/db/starters.ts'
+import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../src/logic/dashiLink.ts'
 import {
   extractRecipeFromHtml,
   extractServings,
@@ -2231,6 +2237,79 @@ eq(
   eq('planStarterReload: 内容が変わった既存titleは更新対象になる', plan.toUpdate.length, 1)
   eq('planStarterReload: 更新対象のidは既存のまま', plan.toUpdate[0]?.id, existingStarter.id)
   eq('旧title品は削除される(starterDefsに無いtitle)', plan.toDeleteIds, [otherExisting.id])
+
+  // (5) 二重投入ガード・トゥームストーン尊重(2026-07-23テーマ全廃)。planStarterReloadに
+  // allTitles(端末上の全料理名)・excludedTitles(削除済み記録)を渡すと、基本レシピに同名が無くても
+  // 端末に同名レシピがある/削除済みの品は新規追加しない
+  {
+    const addDefs = [
+      { ...newDef, title: 'ゼロから新規の品' },
+      { ...newDef, title: '?set=で取込済みの品' },
+      { ...newDef, title: '削除済みの品' },
+    ]
+    const allTitles = new Set(['E2Eテスト用肉じゃが', '?set=で取込済みの品'])
+    const excludedTitles = new Set(['削除済みの品'])
+    const plan2 = planStarterReload([existingStarter], addDefs, 9000, allTitles, excludedTitles)
+    eq(
+      'planStarterReload: 端末に無く未削除の品だけ追加される(二重投入・復活を防ぐ)',
+      plan2.toAdd.map((d) => d.title),
+      ['ゼロから新規の品'],
+    )
+  }
+}
+
+// ---------- planFlattenedStarterTopUp(既存ユーザーへの差分投入。テーマ全廃2026-07-23) ----------
+{
+  const setDefs = [
+    { title: '高たんぱく品A' },
+    { title: '和食品B' },
+    { title: '冷凍品C' },
+    { title: 'ダイエット品D' },
+  ]
+  // 端末に既にB(自作or?set=取込済み)があり、Cは過去に削除済み(トゥームストーン)
+  const existingTitles = ['肉じゃが', '和食品B']
+  const exclusionTitles = ['冷凍品C']
+  const toAdd = planFlattenedStarterTopUp(existingTitles, exclusionTitles, setDefs)
+  eq(
+    '差分投入: 端末に無く削除もされていない品だけ追加(既存品と削除品は除外)',
+    toAdd.map((d) => d.title),
+    ['高たんぱく品A', 'ダイエット品D'],
+  )
+  eq(
+    '差分投入: 端末が空・削除記録も無ければ全部追加',
+    planFlattenedStarterTopUp([], [], setDefs).length,
+    4,
+  )
+  eq(
+    '差分投入: 前後空白を無視して料理名照合する',
+    planFlattenedStarterTopUp(['  高たんぱく品A '], [], setDefs).map((d) => d.title),
+    ['和食品B', '冷凍品C', 'ダイエット品D'],
+  )
+}
+
+// ---------- 全品同梱の健全性(テーマ全廃2026-07-23: 収録103品・料理名は一意) ----------
+{
+  eq('starterDefsは103品(基本51+旧テーマ52)', starterDefs.length, 103)
+  const titles = starterDefs.map((d) => d.title.trim())
+  eq('starterDefsの料理名はカタログ全体で一意', new Set(titles).size, titles.length)
+  eq(
+    '収録レシピ「だしのとり方」が同梱に含まれる(だし紐づけの飛び先)',
+    titles.includes(DASHI_RECIPE_TITLE),
+    true,
+  )
+}
+
+// ---------- だし紐づけ: 材料名が「だし汁」系か判定(2026-07-23) ----------
+{
+  eq('だし汁はだし系', isDashiIngredientName('だし汁'), true)
+  eq('だしはだし系', isDashiIngredientName('だし'), true)
+  eq('和風だしはだし系', isDashiIngredientName('和風だし'), true)
+  eq('かつおだしはだし系', isDashiIngredientName('かつおだし'), true)
+  eq('用途の丸括弧補足付きも拾う(だし汁(つゆ用))', isDashiIngredientName('だし汁(つゆ用)'), true)
+  eq('全角丸括弧の補足も拾う(だし汁（卵液用）)', isDashiIngredientName('だし汁（卵液用）'), true)
+  eq('だしの素は対象外(調味料でありだし汁ではない)', isDashiIngredientName('だしの素'), false)
+  eq('複合表記「水またはだし汁」は対象外(保守的)', isDashiIngredientName('水またはだし汁'), false)
+  eq('無関係な材料は対象外', isDashiIngredientName('しょうゆ'), false)
 }
 
 // ---------- 栄養並び替え(2026-07-13 Fable設計: カロリー/たんぱく質(1食)。
@@ -3134,18 +3213,11 @@ const iconKeyExpected = {
 }
 
 {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url))
+  // 収録全103品(基本+旧テーマ由来)はstarterDefsが連結済み。旧public/sets/data/*.jsonは
+  // テーマ全廃(2026-07-23)で撤去したため読まない(starterDefsだけで全品を網羅する)
   const iconEntries = []
   for (const def of starterDefs) {
     iconEntries.push({ source: 'starters.ts', recipe: def })
-  }
-  const setDataDir = path.join(__dirname, '../public/sets/data')
-  for (const file of readdirSync(setDataDir).sort()) {
-    if (!file.endsWith('.json')) continue
-    const data = JSON.parse(readFileSync(path.join(setDataDir, file), 'utf-8'))
-    for (const r of data.recipes) {
-      iconEntries.push({ source: file, recipe: r })
-    }
   }
 
   const seenTitles = new Set()

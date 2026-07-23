@@ -1,5 +1,6 @@
 /**
- * 食材価格マスタの初期値（公式レシピ全食材=136件の目安価格。2026-07-13に30件から拡大）。
+ * 食材価格マスタの初期値（公式レシピ全食材=168件の目安価格。2026-07-13に30件から拡大、
+ * 2026-07-23のテーマ全廃で旧配布テーマ由来の食材32件を追加して168件に）。
  * 一般的なスーパーの相場を基準にした「常識的な水準」の目安であり、地域・店舗・時期で
  * 実際の価格とはズレる。ユーザーはいつでも「食材と価格」画面から書き換え・削除できる
  * （db/prices.ts の seedPriceDefaultsIfNeeded が初回起動時に1度だけ投入する）。
@@ -35,7 +36,7 @@ export interface PriceDefaultItem {
  * 設計思想[ユーザーが編集した値を勝手に上書きしない]と、価格改定のたびに既存行を
  * 強制上書きする挙動が両立しないため。必要になった場合は別途設計判断が要る)。
  */
-export const PRICE_DEFAULTS_VERSION = 3
+export const PRICE_DEFAULTS_VERSION = 4
 
 export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   // 野菜
@@ -216,4 +217,40 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'メープルシロップ', pricePerUnit: 40, unit: '大さじ1' },
   { name: '黒みつ', pricePerUnit: 20, unit: '大さじ1' },
   { name: 'アーモンドエッセンス', pricePerUnit: 30, unit: '1本' },
+
+  // 旧配布テーマ(第◯弾)由来の基本レシピ(2026-07-23のテーマ全廃で同梱に合流)で使う食材の目安価格。
+  // 一般的なスーパーの相場を基準にした概算(ユーザーは「食材と価格」画面でいつでも書き換え・削除できる)。
+  // 分量が g/ml/大さじ/小さじ の食材は按分できるよう単位を数量付きにしている
+  { name: '牛切り落とし肉', pricePerUnit: 200, unit: '100g' },
+  { name: 'さわら', pricePerUnit: 200, unit: '1切れ' },
+  { name: '生だら', pricePerUnit: 120, unit: '1切れ' },
+  { name: 'レタス', pricePerUnit: 150, unit: '1個' },
+  { name: 'ゴーヤ', pricePerUnit: 130, unit: '1本' },
+  { name: 'オクラ', pricePerUnit: 130, unit: '1袋' },
+  { name: '長芋', pricePerUnit: 100, unit: '100g' },
+  { name: 'みつば', pricePerUnit: 100, unit: '1束' },
+  { name: '万能ねぎ', pricePerUnit: 100, unit: '1束' },
+  { name: 'まいたけ', pricePerUnit: 130, unit: '1パック' },
+  { name: 'エリンギ', pricePerUnit: 100, unit: '1パック' },
+  { name: '生しいたけ', pricePerUnit: 100, unit: '1パック' },
+  { name: 'しらたき', pricePerUnit: 80, unit: '1袋' },
+  { name: '昆布', pricePerUnit: 400, unit: '100g' },
+  { name: '梅干し', pricePerUnit: 30, unit: '1個' },
+  { name: 'プレーンヨーグルト', pricePerUnit: 50, unit: '100g' },
+  { name: 'ピザ用チーズ', pricePerUnit: 300, unit: '200g' },
+  { name: '豆乳', pricePerUnit: 200, unit: '1L' },
+  { name: 'そうめん', pricePerUnit: 50, unit: '1束' },
+  { name: 'グラノーラ', pricePerUnit: 500, unit: '1袋' },
+  { name: 'こしあん', pricePerUnit: 200, unit: '300g' },
+  { name: 'いちご', pricePerUnit: 400, unit: '1パック' },
+  { name: 'ブルーベリー', pricePerUnit: 300, unit: '1パック' },
+  { name: 'キウイ', pricePerUnit: 80, unit: '1個' },
+  { name: 'はちみつ', pricePerUnit: 40, unit: '大さじ1' },
+  { name: 'オイスターソース', pricePerUnit: 15, unit: '大さじ1' },
+  { name: 'コチュジャン', pricePerUnit: 10, unit: '小さじ1' },
+  { name: 'カレー粉', pricePerUnit: 15, unit: '小さじ1' },
+  { name: '白みそ', pricePerUnit: 15, unit: '大さじ1' },
+  { name: 'レモン汁', pricePerUnit: 15, unit: '大さじ1' },
+  { name: '粗びき黒こしょう', pricePerUnit: 10, unit: '小さじ1' },
+  { name: '乾燥ハーブ', pricePerUnit: 20, unit: '小さじ1' },
 ]

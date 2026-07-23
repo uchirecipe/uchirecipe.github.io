@@ -17,6 +17,7 @@ import {
   Maximize2,
   CalendarPlus,
   JapaneseYen,
+  ChevronRight,
   X,
 } from 'lucide-react'
 import { db } from '../db/db'
@@ -62,6 +63,7 @@ import StepBadge from '../components/StepBadge'
 import ComposedStepText from '../components/ComposedStepText'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
+import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../logic/dashiLink'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
 import { resizePhoto } from '../logic/image'
@@ -93,6 +95,12 @@ export default function RecipeDetailPage() {
 
   // undefined = 読み込み中 / null = 該当レシピなし、を区別する
   const recipe = useLiveQuery(async () => (await db.recipes.get(id)) ?? null, [id])
+  // だし紐づけ(2026-07-23): 材料「だし汁」の行から収録レシピ「だしのとり方」へ飛べるようにする。
+  // ユーザーが「だしのとり方」を削除済みなら見つからない(=リンクを出さない)
+  const dashiRecipe = useLiveQuery(
+    async () => (await db.recipes.where('title').equals(DASHI_RECIPE_TITLE).first()) ?? null,
+    [],
+  )
   const photoUrl = usePhotoUrl(recipe?.photo)
   const settings = useSettings()
   const { startTimer, timers } = useTimers()
@@ -757,6 +765,20 @@ export default function RecipeDetailPage() {
                       </span>
                     )}
                   </div>
+                  {/* だし紐づけ(2026-07-23): 「だし汁」系の材料から収録レシピ「だしのとり方」の詳細へ。
+                      収録レシピが端末にあり(=ユーザーが未削除)、自分自身でないときだけ出す */}
+                  {dashiRecipe &&
+                    dashiRecipe.id != null &&
+                    dashiRecipe.id !== recipe.id &&
+                    isDashiIngredientName(ing.name) && (
+                      <Link
+                        to={`/recipes/${dashiRecipe.id}`}
+                        className="mt-0.5 inline-flex items-center gap-0.5 text-sm font-bold text-accent"
+                      >
+                        {ja.detail.dashiRecipeLink}
+                        <ChevronRight size={14} aria-hidden />
+                      </Link>
+                    )}
                   {ing.memo && (
                     <MemoText
                       text={ing.memo}

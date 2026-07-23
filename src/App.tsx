@@ -14,7 +14,7 @@ import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
 import { TimerProvider } from './components/TimerProvider'
 import { useSettings, recordFirstLaunchIfNeeded, resolveVisibleMealSlotsIfNeeded } from './db/settings'
-import { seedStartersIfNeeded } from './db/starters'
+import { seedStartersIfNeeded, topUpFlattenedStartersIfNeeded } from './db/starters'
 import { seedPantryPresetIfNeeded } from './db/pantry'
 import { seedPriceDefaultsIfNeeded } from './db/prices'
 import { rebuildSearchWordsIfNeeded } from './db/recipes'
@@ -44,13 +44,16 @@ function ThemeSync() {
  * TimerProvider が全体を包むので、タブを移動してもタイマーは動き続ける。
  */
 function App() {
-  // 初回起動時だけ、同梱の基本レシピ21品と在庫ボードのプリセットをデータベースに入れる。
+  // 初回起動時だけ、同梱の基本レシピ103品と在庫ボードのプリセットをデータベースに入れる。
+  // 既にシード済みの既存ユーザーには、旧テーマ全廃(2026-07-23)で基本レシピに合流した分を
+  // 起動時に「不足分だけ」1回投入する（過去に?set=取込済み・削除済みの品は二重投入・復活させない）。
   // 食材名の読み仮名辞書が更新されていれば、既存レシピのsearchWordsも作り直す。
   // 初回起動日時の記録は「基本レシピ投入済みか」で既存ユーザーを見分けるため、投入より先に行う
   useEffect(() => {
     void (async () => {
       await recordFirstLaunchIfNeeded()
       await seedStartersIfNeeded()
+      await topUpFlattenedStartersIfNeeded()
       await seedPantryPresetIfNeeded()
       await seedPriceDefaultsIfNeeded()
       await rebuildSearchWordsIfNeeded()

@@ -1,8 +1,8 @@
 // 食材価格マスタ(M2-3)の回帰スモークテスト。
 // 実行: npx tsx scripts/test-price.mjs
 //
-// 対象: 同梱の基本レシピ51品 ＋ 配布セット全パック（「筋トレ・高たんぱく」10品 ＋ 「和食の作り置き・
-// お弁当」10品）。全材料が食材価格マスタ(PRICE_DEFAULTS)で名前解決できることを確認する
+// 対象: 同梱の全基本レシピ103品(従来の基本51品＋旧配布テーマ由来52品。2026-07-23のテーマ全廃で
+// starterDefsに合流)。全材料が食材価格マスタ(PRICE_DEFAULTS)で名前解決できることを確認する
 // (2026-07-13オーナー指示: 「公式レシピなのに対応していない数値があるのはおかしい」の回帰固定。
 // test-nutrition.mjsの名寄せカバー率100%チェックの価格版)。
 //
@@ -19,8 +19,6 @@ import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import { buildPriceIndex, matchPriceEntry } from '../src/logic/priceEstimate.ts'
 import { isZeroIngredient } from '../src/logic/nutrition.ts'
 import { starterDefs } from '../src/db/starters.ts'
-import * as kintore from '../src/sets/kintore.ts'
-import * as bento from '../src/sets/pack07.ts'
 
 let failures = 0
 function check(ok, message) {
@@ -64,15 +62,16 @@ for (const [name, count] of nameCounts) {
   check(count === 1, `PRICE_DEFAULTSに同名が${count}件: ${name}`)
 }
 
-// ---------- 2. 基本51品＋全パックの価格カバー ----------
+// ---------- 2. 全カタログ103品の価格カバー ----------
+// テーマ全廃(2026-07-23)で旧配布テーマ(kintore/bento/diet/summer/freezer)は starterDefs に
+// 合流したため、starterDefs(103品)だけで全カタログを網羅する(旧: 基本51+kintore+bentoの71品)。
+// 「公式レシピなのに価格が無いのはおかしい」の回帰固定はそのまま全103品へ広げる
 const sets = {
   starter: starterDefs,
-  kintore: kintore.recipes,
-  bento: bento.recipes,
 }
 let totalCheckedRecipes = 0
 for (const recs of Object.values(sets)) totalCheckedRecipes += recs.length
-check(totalCheckedRecipes === 71, `対象レシピ数が想定外: ${totalCheckedRecipes}（基本51+高たんぱく10+お弁当10=71のはず）`)
+check(totalCheckedRecipes === 103, `対象レシピ数が想定外: ${totalCheckedRecipes}（全カタログ103品のはず）`)
 
 const index = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
 const uncovered = new Map() // 材料名 -> Set(出現レシピ)
