@@ -22,8 +22,9 @@
 //         ONEPOINT-01(メモ2区画化・2026-07オーナー承認済み設計: 「ワンポイント」(こつ・知識)と
 //         「メモ」(保存方法・注意書き・安全)を別々に入力→保存→詳細で①ワンポイント→②メモの順に
 //         見出し付きで表示されること・編集画面を開き直しても両方の入力が保持されること) /
-//         SMK-14(収録レシピ全無料化2026-07-22: 未解錠でも?set=直リンクからテーマを自由に取り込める。
-//         旧「未解錠ゲート」は解錠ゲート撤去により「全セット自由取り込み」の検証へ置き換え) /
+//         SMK-14(テーマ全廃2026-07-23: 初回シードで全103品が「平らな基本レシピ」で入る・旧テーマ由来の
+//         代表品が同梱される・設定にテーマUIが一切存在しない・旧?set=付きURLは無害に設定へ着地する。
+//         旧「?set=テーマ取り込み」検証はテーマ廃止に伴い「全品同梱・テーマUI不存在」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
 //         全般/レシピ/バックアップ/Proの4節が1画面に同時に存在・上部の目次チップのタップで該当節へ
 //         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA) /
@@ -34,11 +35,10 @@
 //         UNLOCK-01(購入と解錠。2026-07-22全無料化でPro(UR-)のみ受け付ける: UR-以外/廃止したUP-は
 //         コード形式エラー・UR-でPro解錠・解錠済みコードのマスク表示+コピー・Pro解錠済みなら入力欄が
 //         消えPro機能一覧が常設される) /
-//         RECIPESET-01(修正4・2026-07-14オーナー実機フィードバック: 「レシピセットを読み込む」欄の
-//         「URLから読み込む」結果を読み込み欄の上部にテキストで表示し、以前の下部トーストとしては
-//         二重に出ないこと。エラー(見つからない)・成功の両方を確認。2026-07-16修正1で
-//         setId/setName付き取り込み後にテーマ名バッジ(sourceSetName)が出ることも確認したが、
-//         2026-07-20 便AMで第◯弾/テーマの括りを廃止し「基本レシピ」バッジに統一されたことを確認) /
+//         RECIPESET-01(汎用の「レシピセットを読み込む」欄=バックアップ形式の追加読み込み。テーマ全廃
+//         2026-07-23後も配布互換として存続。修正4・2026-07-14: 結果を読み込み欄の上部にテキストで表示し
+//         下部トーストとしては二重に出ないこと。エラー(URLが見つからない)・成功(ファイル読み込み)の両方を
+//         確認。取り込んだ品は「基本レシピ」バッジで表示され旧テーマ名(setName)は出ないことも確認) /
 //         SMK-19(静的ページがアプリ本体にすり替わらない。SWが動くpreviewでの実行時に実質検証) /
 //         SCROLL-01(一覧のスクロール位置復元。iPhone SE実機フィードバック 2026-07-11。
 //         webkit+375x667ビューポートで検証。60秒滞在バリエーション込み。他のチェックはchromiumのまま) /
@@ -68,12 +68,15 @@
 //         カロリー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
 //         栄養価順の間はカードに並び替え中の値が出る=便T-7。2026-07-16便T-7-2で
 //         「カロリー: ◯kcal」「たんぱく質: ◯g」のラベル付き表記に変更) /
-//         TOMB-01(削除したセット品の再取込除外=トゥームストーン・2026-07-13 Fable設計:
-//         テーマ取り込み→1品削除→再取込で復活しない(「削除済みの除外中1件」表示)→テーマ一覧の
-//         「除外中1品・すべて戻す」で解除→再取込で復活する) /
-//         ORPHAN-01(テーマ一括削除の孤児防止・2026-07バグ修正: テーマ収録品を週間献立・
-//         今日の献立の両方に登録した状態でテーマごと削除しても、両テーブルに削除済み
-//         レシピを指す孤児行が残らないことをIndexedDB直読みで確認) /
+//         TOPUP-01(既存ユーザーへの差分投入・テーマ全廃2026-07-23: アップデート前状態を再現し、
+//         起動時に不足分だけ1回投入される・トゥームストーンのある削除済みの品は復活させない・
+//         二重投入しない(101→102)・1回だけ実行される、をIndexedDB直読みで確認。旧TOMB-01のテーマ
+//         トゥームストーン検証はテーマUI撤去に伴い差分投入側で尊重する形へ置き換え) /
+//         ORPHAN-01(レシピ削除の孤児防止・2026-07バグ修正・deleteRecipe: 基本レシピを週間献立・
+//         今日の献立の両方に登録した状態で1品削除しても、両テーブルに削除済みレシピを指す孤児行が
+//         残らないことをIndexedDB直読みで確認。旧「テーマ一括削除」はテーマUI撤去で1品削除経路へ置換) /
+//         DASH-01(だし紐づけ・2026-07-23: 材料「だし汁」の行から収録レシピ「だしのとり方」の詳細へ
+//         飛べるリンクが出てタップで遷移する・収録レシピを削除するとリンクは出ない) /
 //         TODAYALL-01(「全て作った！」の一括反映・2026-07バグ修正: 記録追加(addCookedLog)と
 //         今日の献立クリアを1トランザクションにまとめた後も、正常系で両方が揃って反映される
 //         ことを確認。トランザクション途中断の再現は黒箱E2Eでは不可のため対象外) /
@@ -232,12 +235,10 @@
 //         レシピを入れた後「まとめて献立を立てる」を押しても、手動配置の行が上書き削除されず
 //         同じid・同じレシピのまま残ること(旧実装は無警告で全消し)。空き枠は埋まり、手動枠を
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
-//         THEMESORT-01(一覧の並び替えに「基本レシピ順」を追加・2026-07-17オーナー指示で「テーマごと」
-//         として新設: 並び替えパネルに選択肢として出ること・選択すると先頭カードが基本レシピ
-//         (「基本レシピ」バッジ)になること・テーマ「高たんぱくごはん」(kintore・10品)取り込み後は
-//         2026-07-20 便AMで第◯弾/テーマの括りを廃止したため、取り込んだ品も含め全カードが
-//         「基本レシピ」バッジに統一され旧テーマ名は出ないこと(区分は「基本レシピ(公式全部)→自作」の
-//         2区分に単純化)。既存のSORTDIR-01/SCROLL-01/SCROLL-02が「基本レシピ順」追加後も
+//         THEMESORT-01(一覧の並び替えに「基本レシピ順」・2026-07-17新設/便AMで2区分化: 並び替えパネルに
+//         選択肢として出る・選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる・テーマ全廃
+//         2026-07-23で旧テーマ由来も同梱の基本レシピに合流したため、旧テーマ由来の品(高たんぱくの
+//         レンジ蒸し鶏)も「基本レシピ」バッジに統一され旧テーマ名は出ないこと。既存のSORTDIR-01/SCROLL-01/SCROLL-02が「基本レシピ順」追加後も
 //         壊れていないことは、同じ一覧の状態保存の仕組み(sessionStorageのrecipesListState)を
 //         共用するそれぞれの既存チェックの合格をもって確認する) /
 //         ZENKAKU-01(全角入力の自動正規化・2026-07-21 オーナー実機報告:「アサリ 300ｇ」の
@@ -964,12 +965,13 @@ try {
   await page.waitForTimeout(300)
   await page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
 
-  // --- SMK-14: 収録レシピ(基本+全テーマ=約100品)は全て無料(2026-07-22オーナー確定・全無料化)。
-  // 旧仕様の解錠ゲートは撤去済み。未解錠(Pro/パックいずれも解錠していない)まっさらな状態でも、
-  // 配布ページの?set=直リンクからテーマをワンタップで取り込めること・解錠を促すゲート文言が
-  // 出ないこと・?set=直リンクがテーマ一覧の節へ自動スクロールすること(2026-07-17 1本スクロール化。
-  // 旧: 「レシピ」タブを自動で開く)を、専用のbrowser/contextで確認する
-  // (主フローのDBを汚さないため。TOMB-01等と同じ隔離パターン) ---
+  // --- SMK-14: テーマ・第◯弾の括りを全廃(2026-07-23オーナー確定)。旧配布テーマ(全52品)は
+  // 同梱の「基本レシピ」に合流し、初回シードで全103品が入る。まっさらな状態で:
+  //  (1) 初回シードで103品が全て「基本レシピ」(isStarter・sourceSetIdなし)として入る
+  //  (2) 旧テーマ由来の代表品が基本レシピとして存在する
+  //  (3) 設定にテーマ一覧・「すべて追加」等のテーマUIが一切存在しない
+  //  (4) 旧配布ページの ?set= 付きURLで来ても、エラーにならず設定へ無害に着地する(取り込みは起きない)
+  // を、専用のbrowser/contextで確認する(主フローのDBを汚さないため) ---
   currentCheck = 'SMK-14'
   {
     const freeBrowser = await chromium.launch()
@@ -979,41 +981,85 @@ try {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@SMK-14] ${err.message}`)
     })
-    // ?set=直リンクの取り込み確認ダイアログを自動承諾する(未解錠のまま=解錠コードは一切入れない)
+    // ?set= 付きURLで確認ダイアログが出ないこと自体も仕様だが、万一出ても止まらないよう承諾しておく
     freePage.on('dialog', (dialog) => dialog.accept())
     try {
       await freePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await freePage.waitForTimeout(1800) // 初回シード完了待ち(未解錠状態のまま)
+      await freePage.waitForTimeout(2200) // 初回シード完了待ち(103品)
+
+      // (1) 初回シードで103品が全て「平らな基本レシピ」(isStarter・sourceSetIdなし)として入る
+      const seededStats = await freePage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction('recipes', 'readonly')
+              const getAll = tx.objectStore('recipes').getAll()
+              getAll.onsuccess = () => {
+                const rs = getAll.result
+                resolve({
+                  total: rs.length,
+                  starters: rs.filter((r) => r.isStarter === true).length,
+                  withSourceSet: rs.filter((r) => r.sourceSetId != null).length,
+                  hasKintore: rs.some((r) => r.title === 'レンジ蒸し鶏（自家製サラダチキン）'),
+                  hasDashi: rs.some((r) => r.title === 'だしのとり方'),
+                })
+              }
+              getAll.onerror = () => reject(getAll.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'SMK-14 初回シードで103品が入る',
+        seededStats.total === 103,
+        `total=${seededStats.total}`,
+      )
+      check(
+        'SMK-14 全品が「基本レシピ」(isStarter)で、テーマ由来のsourceSetIdは付かない(平ら)',
+        seededStats.starters === 103 && seededStats.withSourceSet === 0,
+        `starters=${seededStats.starters} withSourceSet=${seededStats.withSourceSet}`,
+      )
+      check(
+        'SMK-14 旧テーマ由来の代表品(高たんぱく・だしのとり方)が基本レシピとして同梱される',
+        seededStats.hasKintore && seededStats.hasDashi,
+        `hasKintore=${seededStats.hasKintore} hasDashi=${seededStats.hasDashi}`,
+      )
+
+      // (3) 設定にテーマUI(テーマ一覧・すべて追加・テーマ一覧節)が一切存在しない
+      await freePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await freePage.waitForTimeout(800)
+      const settingsBody = await freePage.textContent('body')
+      const hasThemeSection = await freePage.evaluate(
+        () => !!document.getElementById('theme-list-section'),
+      )
+      check(
+        'SMK-14 設定にテーマ一覧・「すべて追加」等のテーマUIが存在しない',
+        !settingsBody.includes('テーマ一覧') &&
+          !settingsBody.includes('すべて追加') &&
+          !hasThemeSection,
+      )
+      // 汎用の「レシピセットを読み込む」欄(バックアップ形式の追加読み込み)は配布互換として存続する
+      check(
+        'SMK-14 汎用の「レシピセットを読み込む」欄は存続する',
+        settingsBody.includes('レシピセットを読み込む'),
+      )
+
+      // (4) 旧 ?set= 付きURLで来ても、エラーにならず設定へ無害に着地する(取り込みは起きない)
       await freePage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-      await freePage.waitForTimeout(2000)
-      const freeBody = await freePage.textContent('body')
+      await freePage.waitForTimeout(1000)
+      const afterSetBody = await freePage.textContent('body')
       check(
-        'SMK-14 未解錠でも?set=直リンクからテーマを自由に取り込める(10品追加・解錠ゲート撤去)',
-        freeBody.includes('10件追加しました'),
+        'SMK-14 ?set=付きURLは無害に設定へ着地する(取り込みは起きない・エラーも出ない)',
+        !afterSetBody.includes('件追加しました') &&
+          !afterSetBody.includes('見つかりませんでした') &&
+          afterSetBody.includes('NG食材（アレルギー・苦手）'),
       )
       check(
-        'SMK-14 解錠を促すゲート文言(解錠が必要)は出ない',
-        !freeBody.includes('解錠が必要'),
-      )
-      check(
-        'SMK-14 ?set=直リンクはテーマ一覧の節へ自動スクロールする(見出しがDOMにある)',
-        freeBody.includes('テーマ一覧'),
-      )
-      {
-        // 1本スクロール化(2026-07-17): テーマ一覧の節が上端付近(sticky目次チップの下)へ自動スクロールする
-        const setThemeTop = await freePage.evaluate(() => {
-          const el = document.getElementById('theme-list-section')
-          return el ? el.getBoundingClientRect().top : null
-        })
-        check(
-          'SMK-14 ?set=直リンクでテーマ一覧が上端付近へ自動スクロールする',
-          setThemeTop !== null && setThemeTop >= -5 && setThemeTop < 300,
-          `setThemeTop=${setThemeTop}`,
-        )
-      }
-      check(
-        'SMK-14 1本スクロールなので?set=直リンクでも全般節(NG食材)は同じページに存在する',
-        freeBody.includes('NG食材（アレルギー・苦手）'),
+        'SMK-14 ?set=付きURLの set パラメータは静かに取り除かれる',
+        !freePage.url().includes('set=kintore'),
+        `url=${freePage.url()}`,
       )
     } finally {
       await freeBrowser.close()
@@ -1216,17 +1262,19 @@ try {
   // 発火することを独立に確認する。unlock.html・NutritionTeaser・ホーム等の既存導線が使う互換パラメータ
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
-  await page.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
+  // ?section=recipe は「レシピ」節へ自動スクロールする(テーマ全廃で ?section=themes は廃止したが、
+  // 旧リンク互換として themes も recipe 節へ読み替えて着地させる=sectionDeepLinksのthemes→section-recipe)
+  await page.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1200)
   {
-    const themeTop = await settingsSectionTop('theme-list-section')
+    const recipeSecTop = await settingsSectionTop('section-recipe')
     check(
-      'SETTINGS-TAB-01 ?section=themesはテーマ一覧の節へ自動スクロールする(見出しがDOMにあり上端付近)',
-      (await page.textContent('body')).includes('テーマ一覧') &&
-        themeTop !== null &&
-        themeTop >= -5 &&
-        themeTop < 220,
-      `themeTop=${themeTop}`,
+      'SETTINGS-TAB-01 ?section=recipeはレシピ節へ自動スクロールする(見出しがDOMにあり上端付近)',
+      (await page.textContent('body')).includes('レシピセットを読み込む') &&
+        recipeSecTop !== null &&
+        recipeSecTop >= -5 &&
+        recipeSecTop < 220,
+      `recipeSecTop=${recipeSecTop}`,
     )
   }
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -1290,7 +1338,7 @@ try {
     await page.getByRole('button', { name: 'お気に入りを解除' }).isVisible(),
   )
 
-  await page.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
   await page.getByRole('button', { name: '基本レシピを入れ直す', exact: true }).click()
   await page.waitForTimeout(500)
@@ -2032,134 +2080,139 @@ try {
     }
   }
 
-  // --- TOMB-01: 削除したセット品の再取込除外(トゥームストーン・2026-07-13 Fable設計)。
-  // テーマ「高たんぱくごはん」(kintore・10品)を取り込む→1品(漬けるだけ味玉)を削除→
-  // 再取込(#/settings?set=直リンク)しても復活せず「削除済みの除外中1件」と出る→
-  // テーマ一覧の「除外中1品・すべて戻す」で解除(次の取込で戻る旨のトースト)→
-  // もう一度取り込むと復活する、の一連を確認する。2026-07-22の全無料化でテーマ取り込みに解錠は
-  // 不要になったが、settings.recipePackCode(廃止済みフィールド)をIndexedDBへ敢えて直接書き込む=
-  // 既存ユーザーに旧パックコードが残っていても取り込み・トゥームストーンが壊れないことの回帰確認も兼ねる。
-  // 他チェックの解錠状態・レシピに影響しないよう、専用のbrowser/contextで完結させる ---
-  currentCheck = 'TOMB-01'
+  // --- TOPUP-01: 既存ユーザーへの差分投入(テーマ全廃2026-07-23)。テーマ全廃より前に初回シード済みの
+  // 端末には旧テーマ由来の基本レシピがまだ無いため、アップデート後の起動時に「不足分だけ」1回投入する
+  // (topUpFlattenedStartersIfNeeded)。IndexedDBを直接いじって「アップデート前の端末」を再現し:
+  //  (1) 削除済み(トゥームストーン記録あり)の品は差分投入で復活させない(削除した品を復活させない)
+  //  (2) 未削除で不足している品は差分投入で戻る
+  //  (3) 差分投入は1回だけ(starterFlattenSeededフラグ)で、二重投入されない
+  // を確認する。旧TOMB-01(テーマ取り込み→削除→再取込のトゥームストーン)はテーマUI撤去に伴い、
+  // トゥームストーンを尊重する経路を差分投入側で検証する形へ置き換えた。専用のbrowser/contextで完結させる ---
+  currentCheck = 'TOPUP-01'
   {
-    const tbBrowser = await chromium.launch()
-    const tbContext = await tbBrowser.newContext()
-    const tbPage = await tbContext.newPage()
-    tbPage.on('pageerror', (err) => {
+    const tuBrowser = await chromium.launch()
+    const tuContext = await tuBrowser.newContext()
+    const tuPage = await tuContext.newPage()
+    tuPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@TOMB-01] ${err.message}`)
+      errors.push(`[pageerror@TOPUP-01] ${err.message}`)
     })
-    // 削除確認・?set=直リンクの取り込み確認ダイアログを自動承諾する
-    tbPage.on('dialog', (dialog) => dialog.accept())
     try {
-      await tbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(1800) // 初回シード完了待ち(settingsレコードもこの時点で作られる)
-      await tbPage.evaluate(async () => {
-        const req = indexedDB.open('uchi-recipe')
-        const idb = await new Promise((resolve, reject) => {
-          req.onsuccess = () => resolve(req.result)
-          req.onerror = () => reject(req.error)
-        })
-        await new Promise((resolve, reject) => {
-          const tx = idb.transaction('settings', 'readwrite')
-          const store = tx.objectStore('settings')
-          const getReq = store.get(1)
-          getReq.onsuccess = () => {
-            const current = getReq.result || { id: 1 }
-            const putReq = store.put({
-              ...current,
-              id: 1,
-              recipePackCode: 'UP-E2E-TEST-ONLY',
-              recipePackActivatedAt: Date.now(),
-            })
-            putReq.onsuccess = () => resolve(undefined)
-            putReq.onerror = () => reject(putReq.error)
-          }
-          getReq.onerror = () => reject(getReq.error)
-        })
-        idb.close()
-      })
+      await tuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(2200) // 初回シード完了待ち(103品・starterFlattenSeeded=true)
 
-      // 1) テーマを取り込む(?set=直リンク。確認ダイアログは自動承諾)
-      await tbPage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(2000)
-      check(
-        'TOMB-01 テーマの初回取り込み(10品追加)',
-        (await tbPage.textContent('body')).includes('10件追加しました'),
-      )
-
-      // 2) 取り込んだうち1品(漬けるだけ味玉)を編集画面から削除する(確認ダイアログは自動承諾)
-      await tbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(600)
-      await tbPage.locator('input[type="search"]').fill('漬けるだけ味玉')
-      await tbPage.waitForTimeout(400)
-      await tbPage.getByText('漬けるだけ味玉', { exact: true }).first().click()
-      await tbPage.waitForTimeout(500)
-      await tbPage.locator('a[href*="/edit"]').first().click()
-      await tbPage.waitForTimeout(500)
-      await tbPage.getByRole('button', { name: 'このレシピを削除' }).click()
-      await tbPage.waitForTimeout(800)
-      // 一覧の検索条件(sessionStorage)に検索語が残ると以降の一覧確認が絞り込まれたままになるため消す
-      await tbPage.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
-
-      // 3) 再取込しても復活せず、「削除済みの除外中1件」と表示される
-      await tbPage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(2000)
-      check(
-        'TOMB-01 再取込の結果に「削除済みの除外中1件」が出る',
-        (await tbPage.textContent('body')).includes('削除済みの除外中1件'),
-      )
-      await tbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(600)
-      check(
-        'TOMB-01 再取込しても削除した品は復活しない',
-        !(await tbPage.textContent('body')).includes('漬けるだけ味玉'),
+      // 「アップデート前の端末」を再現する: 旧テーマ由来の2品を消し、うち1品にトゥームストーン記録を残し、
+      // 差分投入フラグ(starterFlattenSeeded)を未実施状態(false)に戻す。starterSeeded自体はtrueのまま
+      const REVIVE = 'レンジ蒸し鶏（自家製サラダチキン）' // 旧kintore由来・トゥームストーン無し→戻るはず
+      const DELETED = 'だしのとり方' // 旧summer由来・トゥームストーンあり→戻らないはず
+      await tuPage.evaluate(
+        ({ revive, deleted }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['recipes', 'setExclusions', 'settings'], 'readwrite')
+              const recipes = tx.objectStore('recipes')
+              const getAll = recipes.getAll()
+              getAll.onsuccess = () => {
+                for (const r of getAll.result) {
+                  if (r.title === revive || r.title === deleted) recipes.delete(r.id)
+                }
+                // 削除した品にはトゥームストーン(再取込除外)記録を残す
+                tx.objectStore('setExclusions').add({
+                  setId: 'summer',
+                  title: deleted,
+                  excludedAt: Date.now(),
+                })
+                // 差分投入フラグを未実施へ戻す(starterSeededはtrueのまま=アップデート前の既存端末)
+                const settings = tx.objectStore('settings')
+                const getS = settings.get(1)
+                getS.onsuccess = () => {
+                  settings.put({ ...(getS.result || { id: 1 }), id: 1, starterFlattenSeeded: false })
+                }
+              }
+              tx.oncomplete = () => {
+                idb.close()
+                resolve(undefined)
+              }
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { revive: REVIVE, deleted: DELETED },
       )
 
-      // 4) テーマ一覧の「除外中1品・すべて戻す」で解除→トーストで「次に取り込むと戻る」旨を案内
-      await tbPage.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(1000)
-      const restoreButton = tbPage.getByRole('button', { name: '除外中1品・すべて戻す' })
-      check('TOMB-01 テーマ一覧に「除外中1品・すべて戻す」ボタンが出る', await restoreButton.isVisible())
-      await restoreButton.click()
-      await tbPage.waitForTimeout(400)
+      const countTitles = () =>
+        tuPage.evaluate(
+          ({ revive, deleted }) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('recipes', 'readonly')
+                const getAll = tx.objectStore('recipes').getAll()
+                getAll.onsuccess = () => {
+                  const rs = getAll.result
+                  resolve({
+                    total: rs.length,
+                    hasRevive: rs.some((r) => r.title === revive),
+                    hasDeleted: rs.some((r) => r.title === deleted),
+                  })
+                }
+                getAll.onerror = () => reject(getAll.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          { revive: REVIVE, deleted: DELETED },
+        )
+
+      const before = await countTitles()
       check(
-        'TOMB-01 解除すると「次にこのテーマを取り込むと戻ります」のトーストが出る',
-        (await tbPage.textContent('body')).includes('次にこのテーマを取り込むと戻ります'),
-      )
-      check(
-        'TOMB-01 解除後は「除外中」ボタンが消える',
-        !(await restoreButton.isVisible().catch(() => false)),
+        'TOPUP-01 前提: アップデート前状態を再現(2品削除・101品)',
+        before.total === 101 && !before.hasRevive && !before.hasDeleted,
+        `before=${JSON.stringify(before)}`,
       )
 
-      // 5) もう一度取り込むと削除していた品が復活する
-      await tbPage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(2000)
+      // アップデート後の起動を再現: フルリロードで App が再マウントされ topUpFlattenedStartersIfNeeded
+      // が実行される(同じhash URLへの goto は文書を再読み込みしないため reload を使う)
+      await tuPage.reload({ waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(2200)
+      const after = await countTitles()
       check(
-        'TOMB-01 解除後の再取込で1件追加される',
-        (await tbPage.textContent('body')).includes('1件追加しました'),
+        'TOPUP-01 差分投入: 未削除で不足していた品は戻る',
+        after.hasRevive,
+        `after=${JSON.stringify(after)}`,
       )
-      await tbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tbPage.waitForTimeout(600)
       check(
-        'TOMB-01 解除→再取込で削除した品が復活する',
-        (await tbPage.textContent('body')).includes('漬けるだけ味玉'),
+        'TOPUP-01 差分投入: トゥームストーンのある削除済みの品は復活させない',
+        !after.hasDeleted,
+        `after=${JSON.stringify(after)}`,
+      )
+      check(
+        'TOPUP-01 差分投入は不足分だけ(101→102・二重投入しない)',
+        after.total === 102,
+        `total=${after.total}`,
+      )
+
+      // もう一度リロードしても差分投入は再実行されない(starterFlattenSeededフラグで1回だけ)
+      await tuPage.reload({ waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(2000)
+      const again = await countTitles()
+      check(
+        'TOPUP-01 差分投入は1回だけ(再起動しても件数が増えない)',
+        again.total === 102,
+        `total=${again.total}`,
       )
     } finally {
-      await tbBrowser.close()
+      await tuBrowser.close()
     }
   }
 
-  // --- THEMESORT-01: 一覧の並び替えに「基本レシピ順」を追加(2026-07-17オーナー指示で「テーマごと」
-  // として新設)。並び替えパネルに選択肢として出ること・選択すると先頭カードが基本レシピ
-  // (「基本レシピ」バッジ)になること(まだテーマ未取込)・テーマ「高たんぱくごはん」(kintore・10品)を
-  // 取り込んだ後は一覧へ戻ると「基本レシピ順」の選択がsessionStorageから保持されたまま、取り込んだ品
-  // も含め全カードが「基本レシピ」バッジに統一され、旧テーマ名(第◯弾/セット名)が出ないことを確認する
-  // (2026-07-20 便AM: 商品が全部込み買い切りになりテーマ区別が販売上不要になったため、区分を
-  // 「基本レシピ(公式全部)→自作」の2区分に単純化。データ側のsourceSetName/sourceSetIdは維持)。
-  // 2026-07-22の全無料化でテーマ取り込みに解錠は不要になったが、settings.recipePackCode(廃止済み
-  // フィールド)をTOMB-01同様に敢えて書き込む=旧パックコードが残っていても取り込みが壊れない回帰も兼ねる。
-  // 他チェックの解錠状態・レシピに影響しないよう専用のbrowser/contextで完結させる ---
+  // --- THEMESORT-01: 一覧の並び替え「基本レシピ順」(2026-07-17新設。2026-07-20 便AMで第◯弾/テーマの
+  // 括りを廃止し「基本レシピ(公式全部)→自作」の2区分に単純化)。テーマ全廃(2026-07-23)で旧テーマ由来も
+  // 同梱の基本レシピに合流したため、並び替えパネルに選択肢として出ること・選択すると先頭カードが
+  // 「基本レシピ」バッジになること・旧テーマ由来の品(例: 高たんぱくのレンジ蒸し鶏)も含め全カードが
+  // 「基本レシピ」バッジに統一され、旧テーマ名(第◯弾/セット名)が一切出ないことを確認する。
+  // 他チェックに影響しないよう専用のbrowser/contextで完結させる ---
   currentCheck = 'THEMESORT-01'
   {
     const tsBrowser = await chromium.launch()
@@ -2172,7 +2225,7 @@ try {
     tsPage.on('dialog', (dialog) => dialog.accept())
     try {
       await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tsPage.waitForTimeout(1800) // 初回シード完了待ち
+      await tsPage.waitForTimeout(2200) // 初回シード完了待ち(103品)
 
       // 1) 並び替えパネルに「基本レシピ順」が選択肢として出る
       await tsPage.locator('button[aria-label="並び替え"]').click()
@@ -2180,90 +2233,47 @@ try {
       const sortPanelText = await tsPage.textContent('body')
       check('THEMESORT-01 並び替えパネルに「基本レシピ順」が出る', sortPanelText.includes('基本レシピ順'))
 
-      // 2) 選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる(テーマ未取込のため)
+      // 2) 選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる
       await tsPage.getByRole('button', { name: '基本レシピ順', exact: true }).click()
       await tsPage.waitForTimeout(300)
       await tsPage.getByRole('button', { name: '決定' }).click()
       await tsPage.waitForTimeout(300)
-      const firstCardTextBeforeImport = await tsPage.evaluate(() => {
+      const firstCardText = await tsPage.evaluate(() => {
         const first = document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')
         return first ? first.textContent : null
       })
       check(
-        'THEMESORT-01 「基本レシピ順」選択で先頭カードが基本レシピになる(テーマ未取込)',
-        !!firstCardTextBeforeImport && firstCardTextBeforeImport.includes('基本レシピ'),
-        `先頭カードテキスト=${firstCardTextBeforeImport}`,
+        'THEMESORT-01 「基本レシピ順」選択で先頭カードが基本レシピになる',
+        !!firstCardText && firstCardText.includes('基本レシピ'),
+        `先頭カードテキスト=${firstCardText}`,
       )
 
-      // 3) テーマ「高たんぱくごはん」(kintore・10品)を取り込む(全無料化で解錠不要。廃止済みの
-      //    recipePackCodeを敢えて残す=旧パックコードが残っていても取り込めることの回帰も兼ねる)
-      await tsPage.evaluate(async () => {
-        const req = indexedDB.open('uchi-recipe')
-        const idb = await new Promise((resolve, reject) => {
-          req.onsuccess = () => resolve(req.result)
-          req.onerror = () => reject(req.error)
-        })
-        await new Promise((resolve, reject) => {
-          const tx = idb.transaction('settings', 'readwrite')
-          const store = tx.objectStore('settings')
-          const getReq = store.get(1)
-          getReq.onsuccess = () => {
-            const current = getReq.result || { id: 1 }
-            const putReq = store.put({
-              ...current,
-              id: 1,
-              recipePackCode: 'UP-E2E-TEST-ONLY',
-              recipePackActivatedAt: Date.now(),
-            })
-            putReq.onsuccess = () => resolve(undefined)
-            putReq.onerror = () => reject(putReq.error)
-          }
-          getReq.onerror = () => reject(getReq.error)
-        })
-        idb.close()
-      })
-      await tsPage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-      await tsPage.waitForTimeout(2000)
+      // 3) 旧テーマ由来の品(高たんぱくのレンジ蒸し鶏)も「基本レシピ」バッジで表示され、旧テーマ名は出ない
+      await tsPage.locator('input[type="search"]').fill('レンジ蒸し鶏')
+      await tsPage.waitForTimeout(500)
+      const kintoreCardText = await tsPage
+        .locator('a[href^="#/recipes/"]', { hasText: 'レンジ蒸し鶏' })
+        .first()
+        .textContent()
       check(
-        'THEMESORT-01 テーマ「高たんぱくごはん」の取り込み(10品追加)',
-        (await tsPage.textContent('body')).includes('10件追加しました'),
-      )
-
-      // 4) 一覧へ戻ると「基本レシピ順」の選択がsessionStorageから保持されたまま、取り込んだ「高たんぱく
-      //    ごはん」の10品も含め全カードが「基本レシピ」バッジに統一され、旧テーマ名は出ない
-      //    (2026-07-20 便AMで第◯弾/テーマの括りを廃止・「基本レシピ(公式全部)→自作」の2区分に単純化)
-      await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tsPage.waitForTimeout(800)
-      const badgeKindsAfterImport = await tsPage.evaluate(() => {
-        const cards = Array.from(document.querySelectorAll('div.grid.grid-cols-2 a[href^="#/recipes/"]'))
-        return cards.map((card) => {
-          if (card.textContent?.includes('高たんぱくごはん')) return 'theme'
-          if (card.textContent?.includes('基本レシピ')) return 'base'
-          return 'other'
-        })
-      })
-      const allCardsAreBase =
-        badgeKindsAfterImport.length > 0 && badgeKindsAfterImport.every((kind) => kind === 'base')
-      check(
-        'THEMESORT-01 取り込み後、テーマ「高たんぱくごはん」の10品も含め全カードが「基本レシピ」バッジに統一される(旧テーマ名バッジは出ない)',
-        allCardsAreBase,
-        `並び=${JSON.stringify(badgeKindsAfterImport)}`,
+        'THEMESORT-01 旧テーマ由来の品も「基本レシピ」バッジに統一され、旧テーマ名(高たんぱくごはん)は出ない',
+        !!kintoreCardText &&
+          kintoreCardText.includes('基本レシピ') &&
+          !kintoreCardText.includes('高たんぱくごはん'),
+        `カードテキスト=${kintoreCardText}`,
       )
     } finally {
       await tsBrowser.close()
     }
   }
 
-  // --- ORPHAN-01: テーマ一括削除で週間献立・今日の献立に孤児が残らない(2026-07バグ修正)。
-  // 従来はdeleteRecipesBySourceSetがdb.recipes.bulkDeleteのみで、削除済みレシピを指す
-  // mealPlans/todayListの行が残ってしまっていた。テーマ「高たんぱくごはん」(kintore)を
-  // 取り込み、収録品の1つを週間献立・今日の献立の両方に登録してからテーマごと削除し、
-  // 両テーブルから該当行が消えている(IndexedDB直読み)ことを確認する。週間献立への登録は
-  // UIのピッカー経路が長い(MEALPLAN-01/02で別途検証済み)ため、実データ形状に合わせて
-  // IndexedDBへ直接1行だけ書き込んで再現する。2026-07-22の全無料化でテーマ取り込みに解錠は不要に
-  // なったが、settings.recipePackCode(廃止済みフィールド)をTOMB-01同様に敢えて書き込む=旧パック
-  // コードが残っていても取り込み・孤児掃除が壊れない回帰も兼ねる。他チェックに影響しないよう
-  // 専用のbrowser/contextで完結させる ---
+  // --- ORPHAN-01: レシピ削除で週間献立・今日の献立に孤児が残らない(2026-07バグ修正・deleteRecipe)。
+  // deleteRecipeは同一トランザクションで当該レシピを指すmealPlans/todayListの行も消す。テーマ全廃
+  // (2026-07-23)でテーマ一括削除UIは撤去したため、1品削除(編集画面の「このレシピを削除」)で
+  // 孤児掃除が効くことを検証する形へ置き換えた。基本レシピ(肉じゃが)を週間献立・今日の献立の
+  // 両方に登録してから削除し、両テーブルから該当行が消えている(IndexedDB直読み)ことを確認する。
+  // 週間献立への登録はUIのピッカー経路が長い(MEALPLAN-01/02で別途検証済み)ため、実データ形状に
+  // 合わせてIndexedDBへ直接1行だけ書き込んで再現する。他チェックに影響しないよう専用のcontextで完結 ---
   currentCheck = 'ORPHAN-01'
   {
     const obBrowser = await chromium.launch()
@@ -2276,57 +2286,19 @@ try {
     obPage.on('dialog', (dialog) => dialog.accept())
     try {
       await obPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await obPage.waitForTimeout(1800) // 初回シード完了待ち
-      await obPage.evaluate(async () => {
-        const req = indexedDB.open('uchi-recipe')
-        const idb = await new Promise((resolve, reject) => {
-          req.onsuccess = () => resolve(req.result)
-          req.onerror = () => reject(req.error)
-        })
-        await new Promise((resolve, reject) => {
-          const tx = idb.transaction('settings', 'readwrite')
-          const store = tx.objectStore('settings')
-          const getReq = store.get(1)
-          getReq.onsuccess = () => {
-            const current = getReq.result || { id: 1 }
-            const putReq = store.put({
-              ...current,
-              id: 1,
-              recipePackCode: 'UP-E2E-TEST-ONLY',
-              recipePackActivatedAt: Date.now(),
-            })
-            putReq.onsuccess = () => resolve(undefined)
-            putReq.onerror = () => reject(putReq.error)
-          }
-          getReq.onerror = () => reject(getReq.error)
-        })
-        idb.close()
-      })
+      await obPage.waitForTimeout(2200) // 初回シード完了待ち
 
-      // 1) テーマ「高たんぱくごはん」(kintore・10品)を取り込む
-      await obPage.goto(`${BASE}/#/settings?set=kintore`, { waitUntil: 'networkidle' })
-      await obPage.waitForTimeout(2000)
-      check(
-        'ORPHAN-01 テーマの取り込み(10品追加)',
-        (await obPage.textContent('body')).includes('10件追加しました'),
-      )
-
-      // 2) 収録品の1つ(漬けるだけ味玉)を「今日の献立に追加」ボタンで追加し、そのidを控える
-      await obPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await obPage.waitForTimeout(600)
-      await obPage.locator('input[type="search"]').fill('漬けるだけ味玉')
-      await obPage.waitForTimeout(400)
-      await obPage.getByText('漬けるだけ味玉', { exact: true }).first().click()
+      // 1) 基本レシピ(肉じゃが)を開いて「今日の献立に追加」し、そのidを控える
+      await obPage.getByText('肉じゃが', { exact: true }).first().click()
       await obPage.waitForTimeout(500)
       const targetRecipeId = Number(obPage.url().match(/#\/recipes\/(\d+)/)?.[1])
       await obPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
-      // 2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開くようになった。ここでは従来どおりの
-      // 直接追加(枠なし)を使うため「決めない」を選ぶ(週間献立への登録は次の手順で直接書き込む)
+      // 2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開く。従来どおりの直接追加(枠なし)は「決めない」
       await obPage.getByRole('button', { name: '決めない' }).click()
       await obPage.waitForTimeout(300)
 
-      // 3) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
+      // 2) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
       await obPage.evaluate(
         (recipeId) =>
           new Promise((resolve, reject) => {
@@ -2370,23 +2342,19 @@ try {
       check('ORPHAN-01 前提: 今日の献立に対象レシピの行がある', (await countByRecipeId('todayList')) === 1)
       check('ORPHAN-01 前提: 週間献立に対象レシピの行がある', (await countByRecipeId('mealPlans')) === 1)
 
-      // 4) テーマごと削除する(設定画面の「このテーマのレシピを削除」。確認ダイアログは自動承諾)
-      await obPage.goto(`${BASE}/#/settings?section=themes`, { waitUntil: 'networkidle' })
-      await obPage.waitForTimeout(1000)
-      await obPage.getByRole('button', { name: 'このテーマのレシピを削除' }).click()
+      // 3) 対象レシピを編集画面の「このレシピを削除」で削除する(確認ダイアログは自動承諾)
+      await obPage.goto(`${BASE}/#/recipes/${targetRecipeId}/edit`, { waitUntil: 'networkidle' })
+      await obPage.waitForTimeout(600)
+      await obPage.getByRole('button', { name: 'このレシピを削除' }).click()
       await obPage.waitForTimeout(800)
-      check(
-        'ORPHAN-01 テーマ削除の結果メッセージが出る',
-        (await obPage.textContent('body')).includes('削除しました'),
-      )
 
-      // 5) 孤児が残っていない: 週間献立・今日の献立のどちらにも対象レシピの行が無い
+      // 4) 孤児が残っていない: 週間献立・今日の献立のどちらにも対象レシピの行が無い
       check(
-        'ORPHAN-01 テーマ一括削除後、今日の献立に孤児が残らない',
+        'ORPHAN-01 レシピ削除後、今日の献立に孤児が残らない',
         (await countByRecipeId('todayList')) === 0,
       )
       check(
-        'ORPHAN-01 テーマ一括削除後、週間献立に孤児が残らない',
+        'ORPHAN-01 レシピ削除後、週間献立に孤児が残らない',
         (await countByRecipeId('mealPlans')) === 0,
       )
 
@@ -4295,14 +4263,12 @@ try {
     }
   }
 
-  // --- RECIPESET-01: 修正4(2026-07-14 オーナー実機フィードバック)。「レシピセットを読み込む」欄の
-  // 「URLから読み込む」の結果を、読み込み欄の上部にテキストで表示する(以前は下部トーストのみで、
-  // 縦に長いページでは気づきにくかった)。エラー(見つからない)・成功の両方で読み込み欄の上部に
-  // 表示され、下部トースト(押して閉じるボタン)としては二重に出ないことを確認する。
-  // 他の操作(テーマ追加・set=直リンク等)のトーストは変更していないため対象外。
-  // diet.json(第2弾・2026-07-23正式公開)を使い、専用のまっさらプロファイルで完結させる。
-  // setId/setName付きセットの取り込み挙動を検証する。
-  // 成功パスの検証にはPro解錠が必要なため、NUT-02と同じIndexedDB直書きで解錠済み状態を再現する ---
+  // --- RECIPESET-01: 汎用の「レシピセットを読み込む」欄(バックアップ形式の追加読み込み)。テーマ全廃
+  // (2026-07-23)でテーマ配布(?set=・配布JSON)は撤去したが、この汎用ローダーは配布互換として存続する。
+  // 修正4(2026-07-14 オーナー実機フィードバック): 結果を読み込み欄の上部にテキストで表示し、下部トースト
+  // (押して閉じるボタン)としては二重に出ないこと。エラー(URLが見つからない)・成功(ファイル読み込み)の
+  // 両方を確認し、取り込んだ品が「基本レシピ」バッジで表示され旧テーマ名(setName)が出ないことも確認する。
+  // 専用のまっさらプロファイルで完結させる ---
   currentCheck = 'RECIPESET-01'
   {
     const rsBrowser = await chromium.launch()
@@ -4328,7 +4294,7 @@ try {
       const loadUrlBtn = rsPage.getByRole('button', { name: 'URLから読み込む' })
 
       // エラー(見つからない)パス
-      await urlInput.fill(`${BASE}/sets/data/does-not-exist-e2e.json`)
+      await urlInput.fill(`${BASE}/e2e-nonexistent-set.json`)
       await loadUrlBtn.click()
       await rsPage.waitForTimeout(600)
       check(
@@ -4353,16 +4319,38 @@ try {
           .count()) === 0,
       )
 
-      // 成功パス(2026-07-22全無料化: 収録レシピは全て無料。setId付きのセット(diet=第2弾)も解錠不要で
-      // 取り込める。旧仕様ではsetId付き=課金ゲート対象だったためsettings.proCodeを書き込んで解錠して
-      // いたが、解錠ゲート撤去により未解錠のままURL読み込みが成功することをそのまま検証する。
-      // 2026-07-23に第2弾を正式公開しreview2.json→diet.jsonへ改名)
-      await urlInput.fill(`${BASE}/sets/data/diet.json`)
-      await loadUrlBtn.click()
+      // 成功パス: 汎用の「レシピセットを読み込む」欄(バックアップ形式の追加読み込み)は、テーマ全廃
+      // (2026-07-23)後も配布互換として存続する。配布JSON(/sets/data/*.json)は撤去したため、ファイル
+      // 読み込み経路をバックアップ形式のJSONで検証する。setId/setName付きでも取り込んだ品は「基本レシピ」
+      // として入り(isStarter)、テーマ名(setName)は出ない(RecipeCardが第◯弾/テーマ名を表示しない)
+      const setJson = JSON.stringify({
+        app: 'uchi-recipe',
+        version: 1,
+        setId: 'e2e-generic-set',
+        setName: 'E2Eテスト用セット',
+        recipes: [
+          {
+            title: 'E2E読み込みテストレシピ',
+            servings: 2,
+            cookMinutes: 10,
+            effortLevel: 'easy',
+            tags: ['和食'],
+            ingredients: [{ name: 'E2Eテスト食材', amount: '1', unit: '個' }],
+            steps: [{ text: 'E2Eテスト手順。' }],
+            cookedLogs: [],
+          },
+        ],
+      })
+      // 「レシピセットを読み込む」欄の隠しファイル入力(DOM上は設定画面で最初のファイル入力)へ直接投入する
+      await rsPage.locator('input[type="file"][accept="application/json,.json"]').first().setInputFiles({
+        name: 'e2e-set.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(setJson, 'utf-8'),
+      })
       await rsPage.waitForTimeout(1000)
       const afterSuccessText = await rsPage.textContent('body')
       check(
-        'RECIPESET-01(全無料化) 未解錠でもsetId付きセットのURL読み込みが成功し「◯件追加しました」が上部に出る',
+        'RECIPESET-01 ファイル読み込み(バックアップ形式)が成功し「◯件追加しました」が上部に出る',
         /\d+件追加しました/.test(afterSuccessText),
       )
       check(
@@ -4370,25 +4358,83 @@ try {
         !afterSuccessText.includes('指定されたURLにレシピセットが見つかりませんでした'),
       )
 
-      // 基本レシピバッジの確認(2026-07-16修正1ではsourceSetNameがテーマ名バッジとしてそのまま
-      // 表示されていたが、2026-07-20 便AMで第◯弾/テーマの括りを廃止し、公式(isStarter)は
-      // すべて「基本レシピ」表示に統一。データ側のsourceSetName/sourceSetIdは維持したまま
-      // 表示だけ変わったことを確認する)
+      // 基本レシピバッジの確認: setId/setName付きで取り込んでもカードは「基本レシピ」バッジに統一され、
+      // 第◯弾/テーマ名(setName)は出ない(2026-07-23のテーマ全廃で表示上の括りを完全撤去)
       await rsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rsPage.waitForTimeout(800)
       const importedCardText = await rsPage
-        .locator('a[href^="#/recipes/"]', { hasText: '豆腐ときのこの和風あんかけ' })
+        .locator('a[href^="#/recipes/"]', { hasText: 'E2E読み込みテストレシピ' })
         .first()
         .textContent()
       check(
-        'RECIPESET-01(修正1→便AM) setId/setName付きセットの取り込み後もカードは「基本レシピ」バッジに統一され、第◯弾/テーマ名(setName)は出ない',
+        'RECIPESET-01 setId/setName付きセットの取り込み後もカードは「基本レシピ」バッジで、テーマ名(setName)は出ない',
         !!importedCardText &&
           importedCardText.includes('基本レシピ') &&
-          !importedCardText.includes('がまんしないダイエットごはん'),
+          !importedCardText.includes('E2Eテスト用セット'),
         `カードテキスト=${importedCardText}`,
       )
     } finally {
       await rsBrowser.close()
+    }
+  }
+
+  // --- DASH-01: だし紐づけ(2026-07-23)。材料「だし汁」系の行から収録レシピ「だしのとり方」の詳細へ
+  // 飛べる小さなリンクが出て、タップで遷移すること・収録レシピをユーザーが削除するとリンクが出ないこと
+  // を確認する。専用のbrowser/contextで完結させる ---
+  currentCheck = 'DASH-01'
+  {
+    const dsBrowser = await chromium.launch()
+    const dsContext = await dsBrowser.newContext()
+    const dsPage = await dsContext.newPage()
+    dsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@DASH-01] ${err.message}`)
+    })
+    dsPage.on('dialog', (dialog) => dialog.accept())
+    try {
+      await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(2200) // 初回シード完了待ち(103品・だし巻き卵/だしのとり方を含む)
+
+      // 1) 「だし汁」を材料に持つ基本レシピ(だし巻き卵)を開く
+      await dsPage.locator('input[type="search"]').fill('だし巻き卵')
+      await dsPage.waitForTimeout(500)
+      await dsPage.getByText('だし巻き卵', { exact: true }).first().click()
+      await dsPage.waitForTimeout(600)
+
+      // 2) 材料エリアに「だしのとり方」への小さなリンクが出る(だし汁の行)
+      const dashiLink = dsPage.getByRole('link', { name: 'だしのとり方' })
+      check('DASH-01 「だし汁」の材料行に「だしのとり方」へのリンクが出る', (await dashiLink.count()) > 0)
+
+      // 3) リンクをタップすると収録レシピ「だしのとり方」の詳細へ遷移する
+      await dashiLink.first().click()
+      await dsPage.waitForTimeout(600)
+      const dashiDetail = await dsPage.textContent('body')
+      check(
+        'DASH-01 リンクから「だしのとり方」の詳細へ遷移する(材料に昆布・かつお節がある)',
+        dashiDetail.includes('だしのとり方') &&
+          dashiDetail.includes('昆布') &&
+          dashiDetail.includes('かつお節'),
+      )
+      const dashiRecipeId = Number(dsPage.url().match(/#\/recipes\/(\d+)/)?.[1])
+
+      // 4) 収録レシピ「だしのとり方」をユーザーが削除するとリンクは出なくなる
+      await dsPage.goto(`${BASE}/#/recipes/${dashiRecipeId}/edit`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(600)
+      await dsPage.getByRole('button', { name: 'このレシピを削除' }).click()
+      await dsPage.waitForTimeout(800)
+      await dsPage.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
+      await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(500)
+      await dsPage.locator('input[type="search"]').fill('だし巻き卵')
+      await dsPage.waitForTimeout(500)
+      await dsPage.getByText('だし巻き卵', { exact: true }).first().click()
+      await dsPage.waitForTimeout(600)
+      check(
+        'DASH-01 収録レシピ「だしのとり方」を削除するとリンクは出ない(ユーザー削除を尊重)',
+        (await dsPage.getByRole('link', { name: 'だしのとり方' }).count()) === 0,
+      )
+    } finally {
+      await dsBrowser.close()
     }
   }
 
@@ -4401,7 +4447,7 @@ try {
     ['/about/column/', 'コラム'],
     ['/about/column/kondate-kimaranai.html', '献立が決められない'],
     ['/about/column/recipe-screenshot-seiri.html', 'スクショ'],
-    ['/sets/', 'レシピセット'],
+    // /sets/(配布ページ)は2026-07-23のテーマ全廃で撤去
   ]
   for (const [path, titleKeyword] of staticPages) {
     const res = await page.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
