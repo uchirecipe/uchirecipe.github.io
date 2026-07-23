@@ -15,9 +15,11 @@ import {
   cyclePantryLevel,
   removePantryItems,
   setPantryItemsLevel,
+  setPantryItemsGroup,
   movePantryItem,
 } from '../db/pantry'
-import type { PantryLevel } from '../db/types'
+import type { PantryGroupKey, PantryLevel } from '../db/types'
+import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
 import { splitValues } from '../logic/textSplit'
 import { ja } from '../i18n/ja'
 import Toast from './Toast'
@@ -35,12 +37,13 @@ function levelClass(level: PantryLevel): string {
 /**
  * 在庫ボード: よく使う食材をチップで並べ、タップで「ある→少ない→ない」を切り替える。
  * 数量は数えないので、棚卸しは数秒で終わる。
+ * 通常表示では大分類グループ(肉・魚介／野菜・きのこ …)ごとにチップをまとめる
+ * (2026-07-23 オーナー実機FB #1。振り分けの情報源は栄養データベース=logic/pantryGroups)。
  * 「並び替え」モード中は縦一列にして矢印ボタンで手動並び替えできる。
- * 「整理」モード中はチップをタップで複数選択→一括削除、または「ある」「少ない」「ない」の
- * 3ボタンでまとめて状態設定できる(2026-07-16 UI総点検B-10: 通常モードの常時×ボタンは状態
- * 切替タップと隣接して誤操作の元だったため廃止→複数選択方式に統一。まとめて状態設定は
- * 2026-07-17 docs/35 §5 オーナー決定・案D)。まとめて状態設定は適用後も整理モードを維持し
- * 選択だけ解除する(削除は整理モードごと抜ける。用途が違うため意図的に挙動を分けている)。
+ * 「整理」モード中はチップをタップで複数選択→一括削除／「ある」「少ない」「ない」の一括状態設定／
+ * 大分類グループへの一括移動(手動グループ変更・#1)ができ、全選択・選択解除もできる(#10)。
+ * まとめて状態設定・グループ移動は適用後も整理モードを維持し選択だけ解除する
+ * (削除は整理モードごと抜ける。用途が違うため意図的に挙動を分けている)。
  */
 export default function PantryBoard() {
   const items = usePantryItems()
@@ -66,6 +69,8 @@ export default function PantryBoard() {
   const toggleSelected = (id: number) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
   }
+  const selectAll = () => setSelectedIds((items ?? []).map((item) => item.id!))
+  const clearSelection = () => setSelectedIds([])
   const deleteSelected = async () => {
     if (selectedIds.length === 0) return
     if (!window.confirm(ja.pantry.organizeConfirm.replace('{n}', String(selectedIds.length)))) return
@@ -84,6 +89,18 @@ export default function PantryBoard() {
       ja.pantry.organizeBulkSetToast.replace('{n}', String(count)).replace('{level}', ja.pantry.level[level]),
     )
   }
+  // 大分類グループへの一括移動(2026-07-23 #1 手動グループ変更)。状態設定と同じく整理モードは維持する
+  const applyGroup = async (group: PantryGroupKey) => {
+    if (selectedIds.length === 0) return
+    const count = selectedIds.length
+    await setPantryItemsGroup(selectedIds, group)
+    setSelectedIds([])
+    setMessage(
+      ja.pantry.organizeMoveGroupToast
+        .replace('{n}', String(count))
+        .replace('{group}', ja.pantry.group[group]),
+    )
+  }
 
   // スペース・カンマ・読点区切りで複数まとめて入力しても、それぞれ別の食材として登録する
   const add = async () => {
@@ -93,6 +110,8 @@ export default function PantryBoard() {
     }
     setText('')
   }
+
+  const grouped = items ? groupPantryItems(items) : []
 
   return (
     <>
@@ -175,6 +194,7 @@ export default function PantryBoard() {
             ))}
           </ul>
         ) : organizing ? (
+          // 整理モードは全食材をフラットなグリッドで出す(グループをまたいで一括選択したいため)
           <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">
             {items.map((item) => {
               const selected = selectedIds.includes(item.id!)
@@ -195,25 +215,51 @@ export default function PantryBoard() {
             })}
           </div>
         ) : (
-          <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">
-            {items.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => void cyclePantryLevel(item.id!)}
-                className={`inline-flex items-center gap-1 rounded-full border py-2 px-3 text-sm font-bold shadow-sm ${levelClass(item.level)}`}
-              >
-                {item.name}
-                <span className="ml-1 font-normal opacity-80">（{ja.pantry.level[item.level]}）</span>
-              </button>
+          // 通常表示: 大分類グループごとにまとめてチップを並べる(2026-07-23 #1)
+          <div className="mt-[var(--space-md)] flex flex-col gap-[var(--space-md)]">
+            {grouped.map(({ key, items: groupItems }) => (
+              <div key={key}>
+                <h3 className="text-sm font-bold text-ink-muted">{ja.pantry.group[key]}</h3>
+                <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                  {groupItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => void cyclePantryLevel(item.id!)}
+                      className={`inline-flex items-center gap-1 rounded-full border py-2 px-3 text-sm font-bold shadow-sm ${levelClass(item.level)}`}
+                    >
+                      {item.name}
+                      <span className="ml-1 font-normal opacity-80">（{ja.pantry.level[item.level]}）</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         ))}
 
       {organizing && (
         <div className="mt-[var(--space-md)] flex flex-col gap-2">
-          {/* まとめて状態設定(docs/35 §5 案D): 0件選択時はdisabled。削除ボタンと同じ操作列に
-              配置し、スマホ幅でも崩れないよう3等分グリッド+削除ボタンは別行のフル幅にする */}
+          {/* 全選択・選択解除(2026-07-23 #10) */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={selectAll}
+              disabled={items !== undefined && selectedIds.length === items.length}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+            >
+              {ja.pantry.organizeSelectAll}
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              disabled={selectedIds.length === 0}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm disabled:opacity-40"
+            >
+              {ja.pantry.organizeClearSelection}
+            </button>
+          </div>
+          {/* まとめて状態設定(docs/35 §5 案D): 0件選択時はdisabled。スマホ幅でも崩れないよう3等分グリッド */}
           <div className="grid grid-cols-3 gap-2">
             {BULK_SET_LEVELS.map((level) => (
               <button
@@ -224,6 +270,21 @@ export default function PantryBoard() {
                 className={`rounded-md border py-3 text-sm font-bold shadow-sm disabled:opacity-40 ${levelClass(level)}`}
               >
                 {ja.pantry.level[level]}
+              </button>
+            ))}
+          </div>
+          {/* 大分類グループへ移動(2026-07-23 #1 手動グループ変更)。0件選択時はdisabled */}
+          <p className="mt-1 text-sm text-ink-muted">{ja.pantry.organizeMoveGroupTitle}</p>
+          <div className="grid grid-cols-3 gap-2">
+            {PANTRY_GROUP_ORDER.map((group) => (
+              <button
+                key={group}
+                type="button"
+                onClick={() => void applyGroup(group)}
+                disabled={selectedIds.length === 0}
+                className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm disabled:opacity-40"
+              >
+                {ja.pantry.group[group]}
               </button>
             ))}
           </div>
@@ -262,6 +323,9 @@ export default function PantryBoard() {
           {ja.pantry.add}
         </button>
       </div>
+
+      {/* 在庫欄の下部の一言(2026-07-23 #12。ざっくり=おまけ機能であることを控えめに添える) */}
+      <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.pantry.omakeNote}</p>
     </section>
     <Toast message={message} onClose={() => setMessage('')} />
     </>

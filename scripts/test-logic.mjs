@@ -52,6 +52,14 @@ import {
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
+import { selectPantryDowngrades } from '../src/logic/pantry.ts'
+import {
+  categorizePantryName,
+  resolvePantryGroup,
+  groupPantryItems,
+  categorizedFoodLabels,
+} from '../src/logic/pantryGroups.ts'
+import { NUTRITION_DATA } from '../src/logic/nutritionData.ts'
 import { hasLaterHandsOnStep, classifyStep, resolveStepMinutes, buildCookTimeline } from '../src/logic/cookNavi.ts'
 import {
   resolveDuplicateTitleAction,
@@ -1989,6 +1997,105 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('買い物候補: だし汁は通常どおりチェック側', byName.get('だし汁')?.isSeasoningLike, false)
   eq('買い物候補: 主材料はチェック側のまま', byName.get('鶏むね肉')?.isSeasoningLike, false)
   eq('買い物候補: 調味料は従来どおり未チェック側', byName.get('しょうゆ')?.isSeasoningLike, true)
+}
+
+// ---------- buildShoppingCandidates: 食数スケール(2026-07-23 オーナー実機FB #3「食数の+/-」方式) ----------
+{
+  // 2人分レシピを「4食」ぶん(scale=2)作ると、数値化できる分量は2倍になる
+  const c = buildShoppingCandidates(
+    [
+      {
+        id: 1,
+        ingredients: [
+          { name: '玉ねぎ', amount: '1', unit: '個' },
+          { name: '牛乳', amount: '100', unit: 'ml' },
+          { name: '塩', amount: '少々', unit: '' }, // 数値化できない分量は原文のまま(スケールしない)
+        ],
+        scale: 2,
+      },
+    ],
+    [],
+  )
+  const byName = new Map(c.map((x) => [x.name, x]))
+  eq('食数スケール: 玉ねぎ1個×2=2個', byName.get('玉ねぎ')?.amount, '2個')
+  eq('食数スケール: 牛乳100ml×2=200ml', byName.get('牛乳')?.amount, '200ml')
+  eq('食数スケール: 少々はスケールしない', byName.get('塩')?.amount, '少々')
+}
+{
+  // scale未指定は等倍(既存呼び出し=献立の「この週の買い物リストを作る」等を壊さない)
+  const c = buildShoppingCandidates([{ id: 1, ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] }], [])
+  eq('食数スケール: scale未指定は等倍', c[0]?.amount, '1個')
+  // 別々のscaleを持つ同じ食材は、スケール後の数値で合算する(1個×2 + 1個×3 = 5個)
+  const c2 = buildShoppingCandidates(
+    [
+      { id: 1, ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], scale: 2 },
+      { id: 2, ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], scale: 3 },
+    ],
+    [],
+  )
+  eq('食数スケール: 別scaleの同一食材はスケール後に合算(5個)', c2[0]?.amount, '5個')
+}
+
+// ---------- 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1) ----------
+{
+  eq('在庫グループ: 玉ねぎ→野菜・きのこ', categorizePantryName('玉ねぎ'), 'vegetable')
+  eq('在庫グループ: しめじ→野菜・きのこ', categorizePantryName('しめじ'), 'vegetable')
+  eq('在庫グループ: 納豆→豆腐・卵・乳', categorizePantryName('納豆'), 'soyEgg')
+  eq('在庫グループ: 卵→豆腐・卵・乳', categorizePantryName('卵'), 'soyEgg')
+  eq('在庫グループ: 牛乳→豆腐・卵・乳', categorizePantryName('牛乳'), 'soyEgg')
+  eq('在庫グループ: 米→主食・粉', categorizePantryName('米'), 'staple')
+  eq('在庫グループ: しょうゆ→調味料', categorizePantryName('しょうゆ'), 'seasoning')
+  eq('在庫グループ: 味噌→調味料', categorizePantryName('味噌'), 'seasoning')
+  eq('在庫グループ: 鮭→肉・魚介', categorizePantryName('鮭'), 'meatFish')
+  // 栄養DBに部位別しか無い総称語はキーワードで救済(#1フォールバック)
+  eq('在庫グループ: 豚肉→肉・魚介(総称語フォールバック)', categorizePantryName('豚肉'), 'meatFish')
+  eq('在庫グループ: 鶏肉→肉・魚介(総称語フォールバック)', categorizePantryName('鶏肉'), 'meatFish')
+  // 未知の食材は その他
+  eq('在庫グループ: 未知の食材→その他', categorizePantryName('架空の宇宙食材'), 'other')
+  // 手動指定(group)は自動判定より優先
+  eq('在庫グループ: 手動指定が自動判定より優先', resolvePantryGroup({ name: '豚肉', group: 'other' }), 'other')
+  eq('在庫グループ: 手動指定なしは自動判定', resolvePantryGroup({ name: '玉ねぎ' }), 'vegetable')
+}
+{
+  // カバレッジ: 栄養DBの全食品labelがどれかのグループに分類済み(未分類の取りこぼしを検知)
+  const categorized = categorizedFoodLabels()
+  const missing = NUTRITION_DATA.foods.map((f) => f.label).filter((label) => !categorized.has(label))
+  eq('在庫グループ: 栄養DB全食品が分類済み(未分類0件)', missing, [])
+}
+{
+  // groupPantryItems: PANTRY_GROUP_ORDER順にまとまり、空グループは出ない
+  const grouped = groupPantryItems([
+    { id: 1, name: 'しょうゆ' },
+    { id: 2, name: '豚肉' },
+    { id: 3, name: '玉ねぎ' },
+  ])
+  eq('在庫グループ分け: 肉→野菜→調味料の表示順で空グループは出ない', grouped.map((g) => g.key), [
+    'meatFish',
+    'vegetable',
+    'seasoning',
+  ])
+}
+
+// ---------- selectPantryDowngrades(2026-07-23 オーナー実機FB #11「作った!」の在庫反映) ----------
+{
+  const items = [
+    { id: 1, name: '豚バラ肉', level: 'have', isFrequent: true }, // 使った→ある→少ない
+    { id: 2, name: '玉ねぎ', level: 'low', isFrequent: true }, // 使った→少ない→ない
+    { id: 3, name: 'しょうゆ', level: 'have', isFrequent: true }, // 調味料→対象外
+    { id: 4, name: 'にんじん', level: 'have', isFrequent: true }, // レシピに無い→変化なし
+    { id: 5, name: 'キャベツ', level: 'none', isFrequent: true }, // 使ったが既にない→据え置き
+  ]
+  const ingredients = ['豚バラ肉', '玉ねぎ', 'しょうゆ', 'キャベツ']
+  const down = selectPantryDowngrades(items, ingredients)
+  const byId = new Map(down.map((d) => [d.id, d.level]))
+  eq('在庫反映: 豚バラ肉 ある→少ない', byId.get(1), 'low')
+  eq('在庫反映: 玉ねぎ 少ない→ない', byId.get(2), 'none')
+  eq('在庫反映: しょうゆ(調味料)は対象外', byId.has(3), false)
+  eq('在庫反映: 使っていないにんじんは変化なし', byId.has(4), false)
+  eq('在庫反映: 既にない食材は据え置き(変更リストに出ない)', byId.has(5), false)
+  eq('在庫反映: 変化するのは2件だけ', down.length, 2)
+  // 材料が空なら何も下げない
+  eq('在庫反映: 材料が空なら0件', selectPantryDowngrades(items, []).length, 0)
 }
 
 // ---------- hasLaterHandsOnStep(並行調理ナビ: 最後の待ち工程に「この間に〜」を出さない・2026-07-09ペルソナ第2波) ----------

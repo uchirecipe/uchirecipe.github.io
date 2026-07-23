@@ -21,6 +21,12 @@ type Props = {
   onPhotoChange: (photo: Blob | undefined) => void
   onSave: () => void
   onClose: () => void
+  /**
+   * 在庫反映スイッチの状態（2026-07-23 オーナー実機FB #11）。onReflectPantryChange を渡した
+   * ときだけスイッチUIを表示する（渡さない呼び出し元との後方互換のため両方とも任意）。
+   */
+  reflectPantry?: boolean
+  onReflectPantryChange?: (value: boolean) => void
 }
 
 /**
@@ -42,6 +48,8 @@ export default function CookedLogModal({
   onPhotoChange,
   onSave,
   onClose,
+  reflectPantry,
+  onReflectPantryChange,
 }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
@@ -171,6 +179,32 @@ export default function CookedLogModal({
           )}
           {photoError && <p className="mt-1 text-sm text-warning">{photoError}</p>}
         </div>
+        {/* 在庫反映スイッチ(2026-07-23 オーナー実機FB #11)。既定OFF・選択を記憶。
+            ON時、記録すると使った食材の在庫を1段階下げる(調味料系は対象外) */}
+        {onReflectPantryChange && (
+          <div className="mt-[var(--space-md)] flex items-center justify-between gap-3 rounded-md border border-edge bg-app p-[var(--space-sm)]">
+            <div className="min-w-0">
+              <span className="font-bold">{ja.detail.cookedReflectPantryLabel}</span>
+              <p className="mt-1 text-sm text-ink-muted">{ja.detail.cookedReflectPantryHint}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!reflectPantry}
+              aria-label={ja.detail.cookedReflectPantryLabel}
+              onClick={() => onReflectPantryChange(!reflectPantry)}
+              className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                reflectPantry ? 'bg-accent' : 'bg-edge'
+              }`}
+            >
+              <span
+                className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                  reflectPantry ? 'left-7' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+        )}
         <div className="mt-[var(--space-md)] flex gap-2">
           <button
             type="button"

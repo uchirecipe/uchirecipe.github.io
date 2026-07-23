@@ -1,8 +1,9 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { toHiragana } from '../logic/kana'
+import { selectPantryDowngrades } from '../logic/pantry'
 import { defaultSettings } from './types'
-import type { PantryItem, PantryLevel } from './types'
+import type { Ingredient, PantryGroupKey, PantryItem, PantryLevel } from './types'
 
 /** タップのたびに ある→少ない→ない→ある… と3段階を巡回する */
 const nextLevel: Record<PantryLevel, PantryLevel> = {
@@ -97,6 +98,17 @@ export async function setPantryItemsLevel(ids: number[], level: PantryLevel): Pr
   })
 }
 
+/**
+ * 整理モードで選択した複数の食材をまとめて指定の大分類グループに移す（2026-07-23 #1）。
+ * 手動指定（group）を書き込むので、以降その食材は自動振り分けより手動指定が優先される。
+ */
+export async function setPantryItemsGroup(ids: number[], group: PantryGroupKey): Promise<void> {
+  if (ids.length === 0) return
+  await db.transaction('rw', db.pantryItems, async () => {
+    await db.pantryItems.where('id').anyOf(ids).modify({ group })
+  })
+}
+
 /** 隣の食材と順序を入れ替える（並び替えモードの矢印ボタンから呼ぶ） */
 export async function movePantryItem(
   items: PantryItem[],
@@ -116,13 +128,43 @@ export async function movePantryItem(
 }
 
 /**
- * 買い物完了時に使う: その食材が在庫ボードに登録済みなら「ある」にする。
- * 登録されていない食材は勝手に追加しない（在庫ボードは自分で選んだものだけに保つ）。
+ * 買い物完了時に使う: その食材を「ある」にする。在庫ボードに未登録なら新しくチップを作って反映する
+ * （2026-07-23 オーナー実機FB #8: 未作成だと無反応＝実質バグだった。反映するなら作って反映する）。
+ * 同名（表記ゆれ含む）が既にあれば新規作成せず「ある」に更新するだけ。1件ずつトランザクションで安全に。
  */
-export async function markPantryHaveIfTracked(name: string): Promise<void> {
-  const key = toHiragana(name.trim())
+export async function markPantryHaveOrCreate(name: string): Promise<void> {
+  const trimmed = name.trim()
+  const key = toHiragana(trimmed)
   if (!key) return
-  const all = await db.pantryItems.toArray()
-  const match = all.find((item) => toHiragana(item.name) === key)
-  if (match) await db.pantryItems.update(match.id!, { level: 'have' })
+  await db.transaction('rw', db.pantryItems, async () => {
+    const all = await db.pantryItems.toArray()
+    const match = all.find((item) => toHiragana(item.name) === key)
+    if (match) {
+      await db.pantryItems.update(match.id!, { level: 'have' })
+      return
+    }
+    const maxOrder = all.reduce((max, item) => Math.max(max, item.sortOrder ?? item.id ?? 0), 0)
+    await db.pantryItems.add({
+      name: trimmed,
+      level: 'have',
+      isFrequent: true,
+      sortOrder: maxOrder + 1,
+    })
+  })
+}
+
+/**
+ * 「作った！」の在庫反映（2026-07-23 オーナー実機FB #11）: レシピで使った食材の在庫を
+ * 1段階だけ下げる（ある→少ない→ない）。調味料系は対象外・登録済みチップの範囲だけ・
+ * すでに「ない」は据え置き（判定は logic/pantry.ts selectPantryDowngrades）。
+ */
+export async function lowerPantryLevelsForCooked(ingredients: Ingredient[]): Promise<void> {
+  const ingredientNames = ingredients.map((ing) => ing.name)
+  await db.transaction('rw', db.pantryItems, async () => {
+    const all = await db.pantryItems.toArray()
+    const downgrades = selectPantryDowngrades(all, ingredientNames)
+    for (const { id, level } of downgrades) {
+      await db.pantryItems.update(id, { level })
+    }
+  })
 }

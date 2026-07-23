@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
-import { markPantryHaveIfTracked } from './pantry'
+import { markPantryHaveOrCreate } from './pantry'
 import type { ShoppingItem } from './types'
 
 export async function listShoppingItems(): Promise<ShoppingItem[]> {
@@ -56,6 +56,16 @@ export async function toggleShoppingChecked(id: number): Promise<void> {
   await db.shoppingItems.update(id, { isChecked: !item.isChecked })
 }
 
+/**
+ * 買い物メモの全項目をまとめてチェック/解除する（2026-07-23 オーナー実機FB #6「まとめてチェック」）。
+ * 1トランザクションで一括更新する。
+ */
+export async function setAllShoppingChecked(checked: boolean): Promise<void> {
+  await db.transaction('rw', db.shoppingItems, async () => {
+    await db.shoppingItems.toCollection().modify({ isChecked: checked })
+  })
+}
+
 export async function removeShoppingItem(id: number): Promise<void> {
   await db.shoppingItems.delete(id)
 }
@@ -78,7 +88,8 @@ export async function moveShoppingItem(
 
 /**
  * 買い物完了: チェック済みの項目を削除する。
- * reflectToPantry が true なら、在庫ボードに登録済みの食材だけ「ある」に更新する。
+ * reflectToPantry が true なら、チェックした食材を在庫「ある」に反映する
+ * （2026-07-23 #8: 在庫ボードに未登録の食材は新しくチップを作って反映する）。
  */
 export async function completeShopping(
   checkedItems: ShoppingItem[],
@@ -87,7 +98,7 @@ export async function completeShopping(
   if (checkedItems.length === 0) return
   if (reflectToPantry) {
     for (const item of checkedItems) {
-      await markPantryHaveIfTracked(item.name)
+      await markPantryHaveOrCreate(item.name)
     }
   }
   await db.shoppingItems.bulkDelete(checkedItems.map((i) => i.id!))

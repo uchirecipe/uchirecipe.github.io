@@ -6920,6 +6920,268 @@ try {
       await nav4Browser.close()
     }
   }
+
+  // --- PANTRY-GROUP-01: 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1)。
+  // 通常表示でグループ見出し(肉・魚介／野菜・きのこ／調味料 …)が出ること、整理モードで選んだ
+  // 食材を別グループへ手動移動でき(group手動指定)、IndexedDBに保存されトーストが出ることを確認する ---
+  currentCheck = 'PANTRY-GROUP-01'
+  {
+    const grBrowser = await chromium.launch()
+    const grContext = await grBrowser.newContext()
+    const grPage = await grContext.newPage()
+    grPage.on('dialog', (dialog) => dialog.accept())
+    grPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PANTRY-GROUP-01] ${err.message}`)
+    })
+    const readPantry = () =>
+      grPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const items = await new Promise((resolve, reject) => {
+          const r2 = idb.transaction('pantryItems', 'readonly').objectStore('pantryItems').getAll()
+          r2.onsuccess = () => resolve(r2.result)
+          r2.onerror = () => reject(r2.error)
+        })
+        idb.close()
+        return items
+      })
+    try {
+      await grPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await grPage.waitForTimeout(1800) // 初回シード完了待ち(在庫プリセット12品も投入される)
+      await grPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await grPage.waitForTimeout(500)
+
+      // 通常表示でグループ見出しが出る(プリセットは野菜・きのこ/肉・魚介/調味料/豆腐・卵・乳/主食・粉を含む)
+      const body = await grPage.textContent('body')
+      check('PANTRY-GROUP-01 グループ見出し「野菜・きのこ」が表示される', body.includes('野菜・きのこ'))
+      check('PANTRY-GROUP-01 グループ見出し「肉・魚介」が表示される', body.includes('肉・魚介'))
+      check('PANTRY-GROUP-01 グループ見出し「調味料」が表示される', body.includes('調味料'))
+      // おまけ機能の一言(#12)も同じ画面に出る
+      check('PANTRY-GROUP-01 在庫のおまけ機能の一言(#12)が出る', body.includes('おまけ機能'))
+
+      // 整理モードに入り、玉ねぎを選んで「調味料」グループへ移動する
+      await grPage.getByRole('button', { name: '整理', exact: true }).click()
+      await grPage.waitForTimeout(300)
+      await grPage.getByRole('button', { name: '玉ねぎ', exact: true }).click()
+      await grPage.waitForTimeout(150)
+      await grPage.getByRole('button', { name: '調味料', exact: true }).click()
+      await grPage.waitForTimeout(400)
+      const toast = await grPage.textContent('body')
+      check(
+        'PANTRY-GROUP-01 グループ移動でトーストが出る',
+        toast.includes('1件を「調味料」に移動しました'),
+        toast.slice(0, 160),
+      )
+      const items = await readPantry()
+      check(
+        'PANTRY-GROUP-01 玉ねぎのgroupがseasoningに保存される(手動グループ変更)',
+        items.find((p) => p.name === '玉ねぎ')?.group === 'seasoning',
+        `玉ねぎ=${JSON.stringify(items.find((p) => p.name === '玉ねぎ'))}`,
+      )
+    } finally {
+      await grBrowser.close()
+    }
+  }
+
+  // --- SHOP-COUNT-01: 買い物メモ「レシピから追加」の食数+/-方式(2026-07-23 #3)と、
+  // 「候補を作る」押下時のトースト(#4)。食数0では候補を作るがdisabled、+で1食にすると押せて、
+  // 押すと候補(下書き)セクションとトーストが出ることを確認する ---
+  currentCheck = 'SHOP-COUNT-01'
+  {
+    const scBrowser = await chromium.launch()
+    const scContext = await scBrowser.newContext()
+    const scPage = await scContext.newPage()
+    scPage.on('dialog', (dialog) => dialog.accept())
+    scPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHOP-COUNT-01] ${err.message}`)
+    })
+    try {
+      await scPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await scPage.waitForTimeout(1800)
+      await scPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await scPage.waitForTimeout(400)
+      // 買い物メモタブへ
+      await scPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await scPage.waitForTimeout(300)
+      // レシピから追加(ピッカー)を開く
+      await scPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await scPage.waitForTimeout(400)
+
+      const makeBtn = scPage.getByRole('button', { name: '候補を作る' })
+      check('SHOP-COUNT-01 食数0では「候補を作る」がdisabled', await makeBtn.isDisabled())
+      // 最初のレシピの食数を1にする
+      await scPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await scPage.waitForTimeout(200)
+      check('SHOP-COUNT-01 食数1で「候補を作る」が押せる(1食以上で選択扱い)', !(await makeBtn.isDisabled()))
+      await makeBtn.click()
+      await scPage.waitForTimeout(500)
+      const afterMake = await scPage.textContent('body')
+      check('SHOP-COUNT-01 候補を作るとトーストが出る(#4)', afterMake.includes('買い物候補を作りました'))
+      check('SHOP-COUNT-01 買い物候補(下書き)セクションが出る', afterMake.includes('買い物候補'))
+    } finally {
+      await scBrowser.close()
+    }
+  }
+
+  // --- SHOP-COMPLETE-01: 買い物完了の中央モーダル(2026-07-23 #7)＋在庫反映で未登録食材の
+  // チップを作って反映(#8)＋反映トースト(#9)。在庫に無い新食材を手入力→チェック→買い物完了→
+  // モーダルで「反映する」を押すと、在庫チップが新規作成され(level=have)トーストが出ることを確認する ---
+  currentCheck = 'SHOP-COMPLETE-01'
+  {
+    const cpBrowser = await chromium.launch()
+    const cpContext = await cpBrowser.newContext()
+    const cpPage = await cpContext.newPage()
+    cpPage.on('dialog', (dialog) => dialog.accept())
+    cpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHOP-COMPLETE-01] ${err.message}`)
+    })
+    const readPantry = () =>
+      cpPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const items = await new Promise((resolve, reject) => {
+          const r2 = idb.transaction('pantryItems', 'readonly').objectStore('pantryItems').getAll()
+          r2.onsuccess = () => resolve(r2.result)
+          r2.onerror = () => reject(r2.error)
+        })
+        idb.close()
+        return items
+      })
+    try {
+      await cpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cpPage.waitForTimeout(1800)
+      await cpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await cpPage.waitForTimeout(400)
+      await cpPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await cpPage.waitForTimeout(300)
+
+      // 在庫に無い新食材を手入力で1件追加
+      await cpPage.getByPlaceholder('食材を入力').fill('E2E新食材ペペロン')
+      await cpPage.getByRole('button', { name: '追加', exact: true }).click()
+      await cpPage.waitForTimeout(300)
+      // チェックを入れる
+      await cpPage.getByRole('button', { name: 'チェックの切り替え', exact: true }).click()
+      await cpPage.waitForTimeout(200)
+      // 買い物完了 → 中央モーダル
+      await cpPage.getByRole('button', { name: '買い物完了', exact: true }).click()
+      await cpPage.waitForTimeout(300)
+      const modalBody = await cpPage.textContent('body')
+      check(
+        'SHOP-COMPLETE-01 買い物完了で確認モーダルが出る(#7)',
+        modalBody.includes('食材の在庫に反映しますか？'),
+      )
+      // 反映する
+      await cpPage.getByRole('button', { name: '反映する', exact: true }).click()
+      await cpPage.waitForTimeout(500)
+      const afterBody = await cpPage.textContent('body')
+      check('SHOP-COMPLETE-01 反映するとトーストが出る(#9)', afterBody.includes('在庫に反映しました'))
+      const items = await readPantry()
+      const created = items.find((p) => p.name === 'E2E新食材ペペロン')
+      check(
+        'SHOP-COMPLETE-01 未登録食材のチップが新規作成され「ある」で反映される(#8)',
+        !!created && created.level === 'have',
+        `created=${JSON.stringify(created)}`,
+      )
+    } finally {
+      await cpBrowser.close()
+    }
+  }
+
+  // --- COOKED-REFLECT-01: 「作った！」の在庫反映スイッチ(2026-07-23 #11)。既定OFF・選択を記憶。
+  // 在庫「玉ねぎ」を「ある」にしておき、玉ねぎを使う肉じゃがで作った!記録時にスイッチONで保存すると、
+  // 使った食材の在庫が1段階下がる(ある→少ない)こと、スイッチ状態がsettingsに記憶されることを確認する ---
+  currentCheck = 'COOKED-REFLECT-01'
+  {
+    const crBrowser = await chromium.launch()
+    const crContext = await crBrowser.newContext()
+    const crPage = await crContext.newPage()
+    crPage.on('dialog', (dialog) => dialog.accept())
+    crPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@COOKED-REFLECT-01] ${err.message}`)
+    })
+    const readPantry = () =>
+      crPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const items = await new Promise((resolve, reject) => {
+          const r2 = idb.transaction('pantryItems', 'readonly').objectStore('pantryItems').getAll()
+          r2.onsuccess = () => resolve(r2.result)
+          r2.onerror = () => reject(r2.error)
+        })
+        idb.close()
+        return items
+      })
+    const readReflectSetting = () =>
+      crPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const s = await new Promise((resolve, reject) => {
+          const r2 = idb.transaction('settings', 'readonly').objectStore('settings').get(1)
+          r2.onsuccess = () => resolve(r2.result)
+          r2.onerror = () => reject(r2.error)
+        })
+        idb.close()
+        return s
+      })
+    try {
+      await crPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await crPage.waitForTimeout(1800)
+      // 在庫「玉ねぎ」を1回タップして「ない」→「ある」にする
+      await crPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await crPage.waitForTimeout(400)
+      await crPage.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await crPage.waitForTimeout(250)
+      const beforeItems = await readPantry()
+      check(
+        'COOKED-REFLECT-01 前提: 玉ねぎを「ある」にできた',
+        beforeItems.find((p) => p.name === '玉ねぎ')?.level === 'have',
+        `玉ねぎ=${JSON.stringify(beforeItems.find((p) => p.name === '玉ねぎ'))}`,
+      )
+      // 肉じゃがの詳細を開く
+      await crPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await crPage.waitForTimeout(500)
+      await crPage.getByText('肉じゃが', { exact: true }).first().click()
+      await crPage.waitForTimeout(500)
+      // 作った!モーダルを開き、在庫反映スイッチをONにする
+      await crPage.getByRole('button', { name: '作った！' }).first().click()
+      await crPage.waitForTimeout(300)
+      await crPage.getByRole('switch', { name: '使った食材の在庫を減らす' }).click()
+      await crPage.waitForTimeout(300)
+      const setting = await readReflectSetting()
+      check(
+        'COOKED-REFLECT-01 スイッチONがsettingsに記憶される(cookedReflectPantry=true)',
+        setting?.cookedReflectPantry === true,
+        `settings=${JSON.stringify({ cookedReflectPantry: setting?.cookedReflectPantry })}`,
+      )
+      // 記録する → 使った玉ねぎの在庫が1段階下がる(ある→少ない)
+      await crPage.getByRole('button', { name: '記録する', exact: true }).click()
+      await crPage.waitForTimeout(700)
+      const afterItems = await readPantry()
+      check(
+        'COOKED-REFLECT-01 記録すると玉ねぎの在庫が1段階下がる(ある→少ない)',
+        afterItems.find((p) => p.name === '玉ねぎ')?.level === 'low',
+        `玉ねぎ=${JSON.stringify(afterItems.find((p) => p.name === '玉ねぎ'))}`,
+      )
+    } finally {
+      await crBrowser.close()
+    }
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
