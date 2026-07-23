@@ -1,9 +1,10 @@
 {
   "app": "uchi-recipe",
   "version": 1,
-  "exportedAt": "2026-07-16T12:47:52.142Z",
-  "setId": "review2",
-  "setName": "【下見】第2弾 がまんしないダイエットごはん",
+  "exportedAt": "2026-07-23T04:35:15.002Z",
+  "setId": "diet",
+  "setName": "がまんしないダイエットごはん",
+  "setVersion": 1,
   "recipes": [
     {
       "title": "豆腐ときのこの和風あんかけ",

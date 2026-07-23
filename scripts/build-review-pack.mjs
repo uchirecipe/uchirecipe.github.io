@@ -15,26 +15,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // テーマ名バッジ表示(sourceSetName)と「テーマごと削除」を使えるようにする。
 // setIdが付くと課金ゲート(hasPaidRecipeAccess)の対象になるが、レビュー用途(下見・一般公開リンクなし)
 // で使うのはPro解錠済みのオーナーのみのため問題ない
-const TARGETS = [
-  {
-    doc: '18_第8弾_夏のさっぱり和食_原稿.md',
-    out: 'review8.json',
-    setId: 'review8',
-    setName: '【下見】第8弾 夏のさっぱり和食',
-  },
-  {
-    doc: '19_第2弾_がまんしないダイエットごはん_原稿.md',
-    out: 'review2.json',
-    setId: 'review2',
-    setName: '【下見】第2弾 がまんしないダイエットごはん',
-  },
-  {
-    doc: '21_第16弾_下味冷凍_原稿.md',
-    out: 'review16.json',
-    setId: 'review16',
-    setName: '【下見】第16弾 下味冷凍・まとめ作り置き',
-  },
-]
+// 第2弾(docs/19)・第8弾(docs/18)・第16弾(docs/21)は2026-07-23に正式公開済み
+// (src/sets/diet.ts・summer.ts・freezer.ts が原本、public/sets/data/diet|summer|freezer.json が成果物)。
+// 下見(review*.json)を再生成すると公開済みセットと料理名が重複してlintが落ちるため、TARGETSから外した。
+// 今後の未承認セットを下見する際は、ここに新しい原稿を1件追加して使う。
+const TARGETS = []
 
 // 「### 1. タイトル」〜次の「### 」または「## 」の手前までを1レシピブロックとする
 function parseBlocks(md) {

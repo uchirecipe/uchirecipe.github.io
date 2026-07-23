@@ -4225,8 +4225,8 @@ try {
   // 縦に長いページでは気づきにくかった)。エラー(見つからない)・成功の両方で読み込み欄の上部に
   // 表示され、下部トースト(押して閉じるボタン)としては二重に出ないことを確認する。
   // 他の操作(テーマ追加・set=直リンク等)のトーストは変更していないため対象外。
-  // review2.jsonを使い、専用のまっさらプロファイルで完結させる。2026-07-16修正1でreview*.jsonに
-  // setId/setNameが付いたため課金ゲート対象になった(下見用途・Pro解錠済みオーナーのみ想定)。
+  // diet.json(第2弾・2026-07-23正式公開)を使い、専用のまっさらプロファイルで完結させる。
+  // setId/setName付きセットの取り込み挙動を検証する。
   // 成功パスの検証にはPro解錠が必要なため、NUT-02と同じIndexedDB直書きで解錠済み状態を再現する ---
   currentCheck = 'RECIPESET-01'
   {
@@ -4278,10 +4278,11 @@ try {
           .count()) === 0,
       )
 
-      // 成功パス(2026-07-22全無料化: 収録レシピは全て無料。setId付きのセット(review2)も解錠不要で
+      // 成功パス(2026-07-22全無料化: 収録レシピは全て無料。setId付きのセット(diet=第2弾)も解錠不要で
       // 取り込める。旧仕様ではsetId付き=課金ゲート対象だったためsettings.proCodeを書き込んで解錠して
-      // いたが、解錠ゲート撤去により未解錠のままURL読み込みが成功することをそのまま検証する)
-      await urlInput.fill(`${BASE}/sets/data/review2.json`)
+      // いたが、解錠ゲート撤去により未解錠のままURL読み込みが成功することをそのまま検証する。
+      // 2026-07-23に第2弾を正式公開しreview2.json→diet.jsonへ改名)
+      await urlInput.fill(`${BASE}/sets/data/diet.json`)
       await loadUrlBtn.click()
       await rsPage.waitForTimeout(1000)
       const afterSuccessText = await rsPage.textContent('body')
@@ -4308,7 +4309,7 @@ try {
         'RECIPESET-01(修正1→便AM) setId/setName付きセットの取り込み後もカードは「基本レシピ」バッジに統一され、第◯弾/テーマ名(setName)は出ない',
         !!importedCardText &&
           importedCardText.includes('基本レシピ') &&
-          !importedCardText.includes('【下見】第2弾 がまんしないダイエットごはん'),
+          !importedCardText.includes('がまんしないダイエットごはん'),
         `カードテキスト=${importedCardText}`,
       )
     } finally {

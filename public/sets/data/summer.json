@@ -1,9 +1,10 @@
 {
   "app": "uchi-recipe",
   "version": 1,
-  "exportedAt": "2026-07-16T12:47:52.139Z",
-  "setId": "review8",
-  "setName": "【下見】第8弾 夏のさっぱり和食",
+  "exportedAt": "2026-07-23T04:35:15.002Z",
+  "setId": "summer",
+  "setName": "夏のさっぱり和食",
+  "setVersion": 1,
   "recipes": [
     {
       "title": "冷やし茶碗蒸し",

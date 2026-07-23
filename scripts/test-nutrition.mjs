@@ -3,9 +3,8 @@
 //       npx tsx scripts/test-nutrition.mjs --update  … スナップショットを作り直す
 // (nutrition.ts等の拡張子なしimportをNodeネイティブでは解決できないため、tsx経由で実行すること)
 //
-// 対象（回帰スモークセット）: 同梱の基本レシピ51品 ＋ 配布セット全パック(kintore/bento、src/sets/*.ts)
-// ＋ 発売スコープ確定済みの残り3パック(review2/8/16=public/sets/data/配下のJSON。docs/33の
-// 「5パック52品」のうちsrc/sets/*.ts化されていない分。2026-07-21 栄養カバレッジ監査(便AL)で追加)。
+// 対象（回帰スモークセット）: 同梱の基本レシピ51品 ＋ 配布セット全パック(kintore/bento/diet/summer/
+// freezer=src/sets/*.ts。2026-07-23に第2/8/16弾を正式公開しdiet/summer/freezer.jsonへ改名)。
 // 基本51+配布5パック52=合計103品が「全カタログ」(docs/47参照)。
 // - データの健全性（値の範囲・alias衝突なし）
 // - 全レシピが例外なく計算でき、1人分kcalが常識的な範囲に収まる
@@ -30,13 +29,13 @@ const { starterDefs } = await import('../src/db/starters.ts')
 const kintore = await import('../src/sets/kintore.ts')
 const bento = await import('../src/sets/pack07.ts')
 
-// 発売スコープ確定済み・src/sets/*.ts未実装の3パック(承認導線は別だが、docs/33で発売スコープ確定済み。
-// lint-recipes.mjsと同じ読み込み範囲)
+// 2026-07-23公開の3パック(第2/8/16弾)。build-sets.mjsが生成する成果物JSONを読む
+// (kintore/bentoと同じsrc/sets/*.ts由来。スナップショットのキーはsetId=summer/diet/freezerで揃える)
 const reviewPacks = []
 for (const [file, label] of [
-  ['review8.json', 'review8'],
-  ['review2.json', 'review2'],
-  ['review16.json', 'review16'],
+  ['summer.json', 'summer'],
+  ['diet.json', 'diet'],
+  ['freezer.json', 'freezer'],
 ]) {
   const reviewPath = path.join(__dirname, '..', 'public', 'sets', 'data', file)
   if (existsSync(reviewPath)) {
@@ -280,7 +279,7 @@ const recipes = [
     p.recipes.map((d) => ({ set: p.set, title: d.title, servings: d.servings, ingredients: d.ingredients })),
   ),
 ]
-check(recipes.length === 103, `レシピ数が想定外: ${recipes.length}（基本51+配布5パック(kintore10+bento10+review8 11+review2 10+review16 11)=103のはず。2026-07-21栄養カバレッジ監査(便AL)でreview2/8/16をスコープに追加）`)
+check(recipes.length === 103, `レシピ数が想定外: ${recipes.length}（基本51+配布5パック(kintore10+bento10+summer11+diet10+freezer11)=103のはず。2026-07-23に第2/8/16弾をdiet/summer/freezerとして正式公開）`)
 
 let totalIngredients = 0
 let matchedIngredients = 0

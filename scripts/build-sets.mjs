@@ -12,7 +12,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const outDir = path.join(__dirname, '..', 'public', 'sets', 'data')
 
 // 新しいセットを追加したら、ここに import を1行足す
-const sets = [await import('../src/sets/kintore.ts'), await import('../src/sets/pack07.ts')]
+const sets = [
+  await import('../src/sets/kintore.ts'),
+  await import('../src/sets/pack07.ts'),
+  await import('../src/sets/diet.ts'), // 第2弾 がまんしないダイエットごはん（2026-07-23公開）
+  await import('../src/sets/summer.ts'), // 第8弾 夏のさっぱり和食（2026-07-23公開）
+  await import('../src/sets/freezer.ts'), // 第16弾 下味冷凍・まとめ作り置き（2026-07-23公開）
+]
 
 await mkdir(outDir, { recursive: true })
 

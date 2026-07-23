@@ -46,11 +46,10 @@ for (const file of readdirSync(setsDir).sort()) {
 }
 
 // レビュー用コピー(原稿から生成される未承認レシピ。あればそれも同じ基準で見る)
+// ※第2/8/16弾(旧review2/8/16)は2026-07-23にsrc/sets/diet・summer・freezer.tsとして正式公開したため
+//   上のsrc/sets/*.ts自動読み込みで拾われる。ここからは除外(重複計上と料理名重複誤検出を防ぐ)。
 for (const [reviewFileName, reviewLabel] of [
   ['review.json', 'review.json(docs/12原稿)'],
-  ['review8.json', 'review8.json(docs/18原稿)'],
-  ['review2.json', 'review2.json(docs/19原稿)'],
-  ['review16.json', 'review16.json(docs/21原稿)'],
 ]) {
   const reviewPath = path.join(__dirname, '..', 'public', 'sets', 'data', reviewFileName)
   if (existsSync(reviewPath)) {
