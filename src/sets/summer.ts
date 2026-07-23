@@ -28,6 +28,7 @@ export const recipes: SetRecipeDef[] = [
     "tags": [
       "和食"
     ],
+    "dishType": "side",
     "season": "summer",
     "suitableFor": [
       "lunch",
@@ -144,6 +145,7 @@ export const recipes: SetRecipeDef[] = [
     "tags": [
       "和食"
     ],
+    "dishType": "side",
     "season": "summer",
     "suitableFor": [
       "dinner"
@@ -212,6 +214,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "麺"
     ],
+    "dishType": "main",
     "season": "summer",
     "suitableFor": [
       "lunch"
@@ -322,6 +325,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "サラダ"
     ],
+    "dishType": "side",
     "season": "summer",
     "suitableFor": [
       "dinner"
@@ -410,6 +414,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "ご飯もの"
     ],
+    "dishType": "main",
     "season": "summer",
     "suitableFor": [
       "lunch",
@@ -515,6 +520,7 @@ export const recipes: SetRecipeDef[] = [
     "tags": [
       "和食"
     ],
+    "dishType": "side",
     "season": "summer",
     "suitableFor": [
       "lunch",
@@ -595,6 +601,7 @@ export const recipes: SetRecipeDef[] = [
     "tags": [
       "和食"
     ],
+    "dishType": "side",
     "season": "summer",
     "suitableFor": [
       "lunch",
@@ -680,8 +687,10 @@ export const recipes: SetRecipeDef[] = [
     "cookMinutes": 35,
     "effortLevel": "normal",
     "tags": [
+      "和食",
       "定番"
     ],
+    "dishType": "main",
     "season": "summer",
     "suitableFor": [
       "dinner"
@@ -797,6 +806,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "麺"
     ],
+    "dishType": "main",
     "season": "summer",
     "suitableFor": [
       "lunch"
@@ -888,6 +898,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "おやつ"
     ],
+    "dishType": "dessert",
     "season": "summer",
     "suitableFor": [
       "lunch",
@@ -955,6 +966,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "作り置き"
     ],
+    "dishType": "dessert",
     "season": "all",
     "suitableFor": [
       "breakfast",

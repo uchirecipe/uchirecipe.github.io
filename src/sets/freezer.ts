@@ -30,6 +30,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -120,6 +121,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -196,6 +198,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -280,6 +283,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -360,6 +364,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -444,6 +449,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -529,6 +535,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -593,6 +600,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -663,6 +671,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -736,6 +745,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -808,6 +818,7 @@ export const recipes: SetRecipeDef[] = [
       "作り置き",
       "冷凍ストック"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",

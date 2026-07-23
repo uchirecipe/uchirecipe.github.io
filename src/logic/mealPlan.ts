@@ -201,6 +201,29 @@ function recipeGenre(r: Recipe): MealGenre | undefined {
 }
 
 /**
+ * 「一品もの」（丼・麺・鍋・カレー・シチュー等、それ1品で食事が完結する主菜）を表すタグ。
+ * 献立エンジン（便BH-2）が「一品ものの日は主菜1品で完結。副菜・汁物の自動枠を空ける」判定に使う
+ * （カレーの隣に主菜をもう1品…を防ぐ。docs/56 §3-8）。
+ */
+const ONE_DISH_TAGS = ['ご飯もの', '麺', '鍋']
+/**
+ * タグに現れないがタイトルで「一品もの」と分かる語（クリームシチュー等）。タグ方式（ONE_DISH_TAGS）を
+ * 主にしつつ、シチュー・カレーはタイトルで補う（クリームシチューは 鍋/ご飯もの タグを持たないため。
+ * オーナー裁定 2026-07-23: 寄せ鍋・クリームシチューは「一品もの」扱いの主菜）。
+ */
+const ONE_DISH_TITLE_WORDS = ['カレー', 'シチュー']
+
+/**
+ * レシピが「一品もの」か（純関数・dishType非依存）。タグ（ご飯もの/麺/鍋）またはタイトル
+ * （カレー/シチュー）で判定する。同梱品だけでなくユーザー自作・取り込みレシピにも効くよう、
+ * タグに加えてタイトル語も見る（丼・麺・鍋はタグが確実に付くが、シチュー系はタグが無いため）。
+ */
+export function isOneDish(recipe: Pick<Recipe, 'title' | 'tags'>): boolean {
+  if (recipe.tags.some((tag) => ONE_DISH_TAGS.includes(tag))) return true
+  return ONE_DISH_TITLE_WORDS.some((word) => recipe.title.includes(word))
+}
+
+/**
  * 空き枠の自動提案。
  * まず「季節が合わない（all以外で不一致）」のレシピを除外し、「NG除外」「時短」で
  * 絞り込んだ後、「向いている時間帯」が一致するものを優先（未設定のレシピは制限なし

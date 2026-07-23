@@ -101,7 +101,9 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'しょうが', pricePerUnit: 20, unit: '1かけ' },
   { name: '小ねぎ', pricePerUnit: 80, unit: '1袋' },
   { name: 'パセリ', pricePerUnit: 50, unit: '1束' },
-  { name: '三つ葉', pricePerUnit: 80, unit: '1束' },
+  // 「三つ葉」(旧80円/1束)は下の「みつば」(100円/1束・docs/49の実売中央値)へ名寄せ統合した
+  // (2026-07-23 便BH-1)。表記ゆれは logic/ingredientReadings.ts の「三つ葉→みつば」で吸収するので、
+  // レシピ材料名が「三つ葉」でも「みつば」でも同じ1件に価格解決する(二重登録を解消)。
   { name: 'なめこ', pricePerUnit: 100, unit: '1袋' },
   { name: 'さつまいも', pricePerUnit: 100, unit: '1本' },
   { name: 'さんま', pricePerUnit: 150, unit: '1尾' },
@@ -232,6 +234,8 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'ゴーヤ', pricePerUnit: 130, unit: '1本' },
   { name: 'オクラ', pricePerUnit: 130, unit: '1袋' },
   { name: '長芋', pricePerUnit: 80, unit: '100g' },
+  // 「三つ葉」と「みつば」の名寄せ統合先(2026-07-23 便BH-1)。値はdocs/49の実売中央値=100円/1束。
+  // ingredientReadings.ts の「三つ葉→みつば」で旧表記「三つ葉」もこの1件に価格解決する。
   { name: 'みつば', pricePerUnit: 100, unit: '1束' },
   { name: '万能ねぎ', pricePerUnit: 100, unit: '1束' },
   { name: 'まいたけ', pricePerUnit: 130, unit: '1パック' },
