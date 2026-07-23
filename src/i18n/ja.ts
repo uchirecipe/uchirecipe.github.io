@@ -497,7 +497,10 @@ export const ja = {
     main: '主菜',
     side: '副菜',
     soup: '汁物',
-    dessert: 'デザート',
+    // 「デザート」→「その他」に改称(2026-07-23 便BH-1)。おやつ(大学芋・杏仁豆腐等)に加えて、
+    // ご飯のお供(手作り鮭フレーク)やだしのとり方など「主菜・副菜・汁物のどれでもない」品の受け皿。
+    // 献立の主菜・副菜どちらの自動提案にも入らない枠(logic/mealPlan.ts)。
+    dessert: 'その他',
   },
   recipes: {
     title: 'レシピ',
@@ -722,6 +725,7 @@ export const ja = {
     dishTypeLabel: '料理の種別（任意）',
     dishTypeDescription:
       '献立プランナーの主菜・副菜の自動提案に使われます。もう一度押すと解除できます',
+    dishTypeAutoHint: '料理名から自動でえらびました。ちがえば押して直してください',
     draftFound: '書きかけの下書きがあります。復元しますか？（写真は下書きに含まれません）',
     draftRestore: '復元する',
     draftDiscard: '破棄する',

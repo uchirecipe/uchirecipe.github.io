@@ -12,7 +12,7 @@
  * 辞書を追記・変更したら必ず READINGS_VERSION を +1 すること
  * （既存レシピのsearchWordsを再構築するトリガーに使われている。src/logic/kana.ts参照）。
  */
-export const READINGS_VERSION = 2 // v2: 「酒→さけ」を削除(鮭との衝突対策)+調味料を検索語から除外する変更の反映
+export const READINGS_VERSION = 3 // v3: 「三つ葉→みつば」の名寄せを追加(2026-07-23 便BH-1・価格マスタ二重登録の統合)
 
 export const INGREDIENT_READINGS: Record<string, string> = {
   // 野菜
@@ -55,6 +55,9 @@ export const INGREDIENT_READINGS: Record<string, string> = {
   獅子唐: 'ししとう',
   紫蘇: 'しそ',
   茗荷: 'みょうが',
+  // 「三つ葉」と「みつば」の名寄せ(2026-07-23 便BH-1)。価格マスタで両表記を1件に統合したため、
+  // 材料名が漢字「三つ葉」でも「みつば」でも同じ価格・検索・栄養に解決するようにする。
+  三つ葉: 'みつば',
   生姜焼き: 'しょうがやき',
 
   // 肉

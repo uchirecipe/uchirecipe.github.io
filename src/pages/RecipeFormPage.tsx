@@ -31,6 +31,7 @@ import { parseRecipeText, splitQuantity, autoSplitAmountUnit, looksPoorlyParsed 
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
+import { guessDishType } from '../logic/dishTypeGuess'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -220,8 +221,23 @@ function RecipeFormInner() {
   const [season, setSeason] = useState<Season>()
   const [suitableFor, setSuitableFor] = useState<MealSlot[]>([])
   const [dishType, setDishType] = useState<DishType>()
+  // 種別チップをユーザーが一度でも手で押したか(2026-07-23 便BH-1)。押すまでは料理名からの
+  // 自動提案(guessDishType)を初期選択として表示し、押したら追従を止める(iconKeyの自動追従と同じ流儀)。
+  const [dishTypeTouched, setDishTypeTouched] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // dishType の初期値提案(2026-07-23 便BH-1・docs/56 §3-2/§3-3): 料理名・タグ・材料から役割を推定する。
+  const suggestedDishType = useMemo(
+    () => guessDishType({ title, tags, ingredients: ingredients.map((r) => ({ name: r.name })) }),
+    [title, tags, ingredients],
+  )
+  // 新規登録で、ユーザーがまだ種別チップを触っておらず・種別が未設定で・料理名が入っているときだけ
+  // 提案を初期選択として見せる。既存レシピの編集では提案しない(既存の dishType を書き換えないため)。
+  const showDishTypeSuggestion =
+    !isEdit && !dishTypeTouched && dishType === undefined && title.trim() !== ''
+  // 実際に「選択中」として扱う種別。未設定でも提案表示中なら提案値を使い、保存時もこの値を採用する。
+  const effectiveDishType = dishType ?? (showDishTypeSuggestion ? suggestedDishType : undefined)
 
   // 「かんたん / くわしく」タブ(2026-07-16 Fable裁定docs/26・案A)。ページローカルの表示状態のみで、
   // 保存対象にも下書き対象にもしない(URLにも載せない)。新規・編集とも初期表示は常に「かんたん」
@@ -509,6 +525,18 @@ function RecipeFormInner() {
         setSteps(result.steps.map((text) => ({ text, minutes: '', memo: '' })))
       }
       setSourceUrl(result.sourceUrl || target)
+      // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
+      // 既に種別が入っている場合は上書きしない(ユーザーが選んだ値・既存レシピの値を尊重)。
+      if (dishType === undefined) {
+        const guessedTitle = title.trim() || result.title || ''
+        const guessedIngredients =
+          result.ingredients.length > 0
+            ? result.ingredients.map((ing) => ({ name: ing.name }))
+            : ingredients.map((r) => ({ name: r.name }))
+        if (guessedTitle) {
+          setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
+        }
+      }
       setUrlImportMessage(
         ja.urlImport.resultSummary
           .replace('{i}', String(result.ingredients.length))
@@ -566,6 +594,18 @@ function RecipeFormInner() {
     }
     // 「コツ」「ポイント」「メモ」見出し以降の文章は、メモ欄が空ならそこへ流し込む
     if (parsed.memo && !memo.trim()) setMemo(parsed.memo)
+    // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
+    // 既に種別が入っている場合は上書きしない。
+    if (dishType === undefined) {
+      const guessedTitle = title.trim() || parsed.title || ''
+      const guessedIngredients =
+        parsed.ingredients.length > 0
+          ? parsed.ingredients.map((row) => ({ name: row.name }))
+          : ingredients.map((r) => ({ name: r.name }))
+      if (guessedTitle) {
+        setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
+      }
+    }
     // 材料・手順のどちらもほぼ拾えなかった(段落丸ごと1文になった等)場合は、
     // 読み取れた分はフォームへ流し込んだ上で、うまく振り分けられなかった旨を正直に案内する
     if (looksPoorlyParsed(pasteText, parsed)) {
@@ -688,7 +728,9 @@ function RecipeFormInner() {
         cookMinutes: cookMinutes.trim() ? Number(cookMinutes) : undefined,
         effortLevel,
         tags: effectiveTags,
-        dishType,
+        // 未設定でも新規登録なら自動提案値を初期値として保存する(effectiveDishType)。
+        // 既存レシピの編集では dishType(=既存値 or 未設定)がそのまま入り、勝手に付与しない。
+        dishType: effectiveDishType,
         ingredients: ingredients.map((row) => {
           // 単位欄が空のまま分量欄に「大さじ3」等と書かれていたら自動で分ける
           // (そのままだと人数変更が効かないため。「少々」「適量」はそのまま)。
@@ -1549,9 +1591,12 @@ function RecipeFormInner() {
             <button
               key={value}
               type="button"
-              onClick={() => setDishType((current) => (current === value ? undefined : value))}
+              onClick={() => {
+                setDishTypeTouched(true)
+                setDishType((current) => (current === value ? undefined : value))
+              }}
               className={`rounded-md border py-3 font-bold shadow-sm ${
-                dishType === value
+                effectiveDishType === value
                   ? 'border-accent bg-accent text-on-accent'
                   : 'border-edge bg-surface text-ink-muted'
               }`}
@@ -1560,6 +1605,9 @@ function RecipeFormInner() {
             </button>
           ))}
         </div>
+        {showDishTypeSuggestion && effectiveDishType !== undefined && (
+          <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeAutoHint}</p>
+        )}
       </div>
 
       {/* タグ（自由追加） */}

@@ -28,6 +28,7 @@ export const recipes: SetRecipeDef[] = [
     "tags": [
       "和食"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -126,6 +127,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "高たんぱく"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -189,6 +191,7 @@ export const recipes: SetRecipeDef[] = [
     "tags": [
       "中華"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -276,6 +279,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "作り置き"
     ],
+    "dishType": "side",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -359,6 +363,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "高たんぱく"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -423,6 +428,7 @@ export const recipes: SetRecipeDef[] = [
       "洋食",
       "高たんぱく"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -515,6 +521,7 @@ export const recipes: SetRecipeDef[] = [
       "おやつ",
       "洋食"
     ],
+    "dishType": "dessert",
     "season": "all",
     "suitableFor": [
       "breakfast",
@@ -589,6 +596,7 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "高たんぱく"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -684,6 +692,7 @@ export const recipes: SetRecipeDef[] = [
       "中華",
       "高たんぱく"
     ],
+    "dishType": "main",
     "season": "all",
     "suitableFor": [
       "lunch",
@@ -791,6 +800,7 @@ export const recipes: SetRecipeDef[] = [
       "中華",
       "汁物"
     ],
+    "dishType": "soup",
     "season": "all",
     "suitableFor": [
       "lunch",

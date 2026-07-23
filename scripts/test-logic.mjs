@@ -40,7 +40,10 @@ import {
   excludeYesterdayPlanRecipes,
   normalizeDateRange,
   rangeDayCount,
+  isOneDish,
 } from '../src/logic/mealPlan.ts'
+import { guessDishType } from '../src/logic/dishTypeGuess.ts'
+import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
 import { hasLaterHandsOnStep, classifyStep, resolveStepMinutes, buildCookTimeline } from '../src/logic/cookNavi.ts'
 import {
@@ -3237,6 +3240,77 @@ const iconKeyExpected = {
   // 落ちるものが無いこと(誤爆防止の核=たんぱく源が野菜の調理法語より先に取ること)。
   const defaultCount = iconEntries.filter(({ recipe }) => pickIconKey(recipe) === 'default').length
   eq('カタログ全品でpickIconKeyがdefaultになるものは0件', defaultCount, 0)
+}
+
+// ---------- guessDishType: 役割の自動判定(2026-07-23 便BH-1・docs/56 §3-2) ----------
+{
+  // (a) guessDishType は pickIconKey の結果を役割へ写像するだけ。全カタログ103品で、期待アイコン
+  //     (iconKeyExpected)から導いた役割と一致することを確認する(docs/56の63/71一致検証を流用)。
+  const iconToRole = (icon) => {
+    switch (icon) {
+      case 'soup': return 'soup'
+      case 'salad': case 'vegetable': return 'side'
+      case 'dessert': case 'drink': case 'bread': return 'dessert'
+      default: return 'main' // fish/egg/tofu/chicken/meat/rice/pasta/noodle/default はすべて主菜
+    }
+  }
+  for (const def of starterDefs) {
+    const expectedIcon = iconKeyExpected[def.title]
+    if (expectedIcon === undefined) continue
+    eq(`guessDishType[${def.title}]`, guessDishType(def), iconToRole(expectedIcon))
+  }
+
+  // (b) 代表ケースの固定(docs/56 §4-1)。既知の限界(卵の小鉢→main)も含めて挙動を明示する。
+  eq('guessDishType: 野菜炒め→side(野菜が主役)', guessDishType({ title: '野菜炒め', tags: [], ingredients: [{ name: 'キャベツ' }] }), 'side')
+  eq('guessDishType: 親子丼→main(主食)', guessDishType({ title: '親子丼', tags: [], ingredients: [{ name: '鶏もも肉' }] }), 'main')
+  eq('guessDishType: 味噌汁→soup', guessDishType({ title: '豆腐とわかめの味噌汁', tags: [], ingredients: [{ name: '豆腐' }] }), 'soup')
+  eq('guessDishType: ポテトサラダ→side', guessDishType({ title: 'ポテトサラダ', tags: [], ingredients: [{ name: 'じゃがいも' }] }), 'side')
+  eq('guessDishType: 大学芋→dessert(その他)', guessDishType({ title: '大学芋', tags: [], ingredients: [{ name: 'さつまいも' }] }), 'dessert')
+  eq('guessDishType: さばの味噌煮→main(魚)', guessDishType({ title: 'さばの味噌煮', tags: [], ingredients: [{ name: 'さば' }] }), 'main')
+  eq('guessDishType: だし巻き卵→main(既知の限界:卵→main。データ側は裁定でside)', guessDishType({ title: 'だし巻き卵', tags: [], ingredients: [{ name: '卵' }] }), 'main')
+  eq('guessDishType: 該当語なし→main(default)', guessDishType({ title: 'なぞの料理', tags: [], ingredients: [{ name: 'なにか' }] }), 'main')
+
+  // (c) オーナー裁定8品の同梱データ(dishType)ピン留め(2026-07-23確定・docs/56 §2-3)。
+  const byTitle = new Map(starterDefs.map((d) => [d.title, d]))
+  const rulings = [
+    ['野菜炒め', 'side'],
+    ['だし巻き卵', 'side'],
+    ['漬けるだけ味玉', 'side'],
+    ['卯の花(おからの炒り煮)', 'side'],
+    ['高野豆腐の含め煮', 'side'],
+    ['寄せ鍋', 'main'],
+    ['クリームシチュー', 'main'],
+    ['手作り鮭フレーク', 'dessert'],
+  ]
+  for (const [title, expected] of rulings) {
+    eq(`dishType裁定ピン留め: ${title}`, byTitle.get(title)?.dishType, expected)
+  }
+  // ジャンルタグ欠落品への付与(docs/56 §2-3 B)
+  eq('野菜炒めに中華タグを付与', byTitle.get('野菜炒め')?.tags.includes('中華'), true)
+  eq('レンジ蒸し鶏に和食タグを付与', byTitle.get('レンジ蒸し鶏（自家製サラダチキン）')?.tags.includes('和食'), true)
+
+  // (d) isOneDish: 一品もの(丼・麺・鍋・カレー・シチュー)判定(docs/56 §3-8)
+  eq('isOneDish: 寄せ鍋(鍋タグ)', isOneDish(byTitle.get('寄せ鍋')), true)
+  eq('isOneDish: クリームシチュー(タイトル語・鍋/ご飯ものタグ無し)', isOneDish(byTitle.get('クリームシチュー')), true)
+  eq('isOneDish: カレーライス(ご飯もの)', isOneDish(byTitle.get('カレーライス')), true)
+  eq('isOneDish: 肉うどん(麺)', isOneDish(byTitle.get('肉うどん')), true)
+  eq('isOneDish: 冷や汁(ご飯もの)', isOneDish(byTitle.get('冷や汁')), true)
+  eq('isOneDish: 肉じゃが(該当なし)', isOneDish(byTitle.get('肉じゃが')), false)
+  eq('isOneDish: 野菜炒め(該当なし)', isOneDish(byTitle.get('野菜炒め')), false)
+  eq('isOneDish: だし巻き卵(該当なし)', isOneDish(byTitle.get('だし巻き卵')), false)
+}
+
+// ---------- 三つ葉/みつばの名寄せ統合(2026-07-23 便BH-1) ----------
+{
+  const mitsuba = PRICE_DEFAULTS.filter((d) => d.name === '三つ葉' || d.name === 'みつば')
+  eq('三つ葉/みつばはPRICE_DEFAULTSに1件だけ(二重登録の解消)', mitsuba.length, 1)
+  eq('統合先の名前はみつば', mitsuba[0]?.name, 'みつば')
+  eq('統合先の価格は100円(docs/49の出典側)', mitsuba[0]?.pricePerUnit, 100)
+  eq('統合先の単位は1束', mitsuba[0]?.unit, '1束')
+  const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  eq('材料「三つ葉(または刻みのり)」が価格解決する(旧表記のエイリアス)', matchPriceEntry('三つ葉(または刻みのり)', idx)?.pricePerUnit, 100)
+  eq('材料「みつば(または小ねぎ)」が価格解決する', matchPriceEntry('みつば(または小ねぎ)', idx)?.pricePerUnit, 100)
+  eq('三つ葉とみつばは同じ価格エントリに解決する', matchPriceEntry('三つ葉', idx)?.pricePerUnit, matchPriceEntry('みつば', idx)?.pricePerUnit)
 }
 
 // ---------- pickIconKey: 将来入力の代表ケース(2026-07-15 アイコン分類改訂・docs/28 §5) ----------

@@ -407,7 +407,7 @@ export const recipes: SetRecipeDef[] = [
     title: '手作り鮭フレーク',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
     tags: ['和食', '作り置き', 'お弁当'],
-    dishType: 'side',
+    dishType: 'dessert',
     season: 'all',
     suitableFor: ['breakfast', 'lunch'],
     ingredients: [

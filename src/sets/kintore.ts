@@ -49,7 +49,7 @@ export const recipes: SetRecipeDef[] = [
   {
     title: 'レンジ蒸し鶏（自家製サラダチキン）',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['高たんぱく', '作り置き'],
+    tags: ['和食', '高たんぱく', '作り置き'],
     dishType: 'main',
     suitableFor: ['lunch', 'dinner'],
     ingredients: [

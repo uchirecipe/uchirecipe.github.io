@@ -211,8 +211,8 @@ const baseStarterDefs: StarterDef[] = [
   {
     title: '野菜炒め',
     servings: 2, cookMinutes: 15, effortLevel: 'easy',
-    tags: ['定番'],
-    dishType: 'main',
+    tags: ['中華', '定番'],
+    dishType: 'side',
     season: 'all',
     suitableFor: ['lunch', 'dinner'],
     ingredients: [
