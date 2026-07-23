@@ -41,6 +41,10 @@ import {
   normalizeDateRange,
   rangeDayCount,
   isOneDish,
+  proteinSourceOf,
+  detectGenreMix,
+  isMainDish,
+  recipeGenre,
 } from '../src/logic/mealPlan.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
@@ -1603,6 +1607,96 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     eq('ペア提案: ジャンル指定時は副菜も指定ジャンルが優先される', results.every((r) => r.side?.id === 4), true)
   }
 
+  // ---- 便BH-2: 一品もの・副菜純化・たんぱく源分散・ジャンル混在(docs/56) ----
+
+  // 一品もの(丼・麺・鍋・カレー・シチュー)の主菜が選ばれた枠は副菜を空ける(主菜1品で完結)
+  {
+    // 主菜候補は一品ものだけ(カレー=タイトルで一品もの判定)。副菜候補も用意しておく
+    const recipes = [
+      mkRecipe(1, { title: 'カレーライス', tags: ['洋食', 'ご飯もの'] }),
+      mkRecipe(2, { title: 'ポテトサラダ', tags: ['洋食', 'サラダ'], dishType: 'side' }),
+    ]
+    const results = Array.from({ length: 10 }, () => suggestPairForSlot(recipes, opts()))
+    eq('ペア提案(一品もの): カレーが主菜に選ばれる', results.every((r) => r.main?.id === 1), true)
+    eq('ペア提案(一品もの): 一品ものの主菜には副菜を付けない', results.every((r) => r.side === undefined), true)
+  }
+
+  // 副菜スロットは純粋な副菜(dishType:'side')に寄せる。汁物(dishType:'soup')は副菜より後回し
+  {
+    const recipes = [
+      mkRecipe(1, { title: '味噌汁', tags: ['和食'], dishType: 'soup' }),
+      mkRecipe(2, { title: 'ほうれん草のおひたし', tags: ['和食'], dishType: 'side' }),
+    ]
+    const picks = Array.from({ length: 12 }, () =>
+      suggestForSlot(recipes, opts({ role: 'side', preferDishType: 'side' }))?.id,
+    )
+    eq('副菜純化: preferDishType=side は汁物(soup)より純粋な副菜(side)を優先する', picks.every((id) => id === 2), true)
+  }
+  // 純粋な副菜が無ければ緩和して汁物も副菜として許す(0件回避)
+  eq(
+    '副菜純化: 純粋な副菜が無ければ汁物(soup)を副菜として許す',
+    suggestForSlot([mkRecipe(1, { title: '味噌汁', tags: ['和食'], dishType: 'soup' })], opts({ role: 'side', preferDishType: 'side' }))?.id,
+    1,
+  )
+
+  // たんぱく源分散: preferProteinSources に挙げたソースの主菜を優先する(該当0件なら緩和)
+  {
+    const recipes = [
+      mkRecipe(1, { title: '豚の生姜焼き', tags: ['和食'], dishType: 'main' }), // 肉
+      mkRecipe(2, { title: '鮭の塩焼き', tags: ['和食'], dishType: 'main' }), // 魚
+    ]
+    const picks = Array.from({ length: 12 }, () =>
+      suggestForSlot(recipes, opts({ role: 'main', preferProteinSources: ['魚'] }))?.id,
+    )
+    eq('たんぱく源分散: 魚を優先すると魚の主菜が選ばれる', picks.every((id) => id === 2), true)
+  }
+  eq(
+    'たんぱく源分散: 指定ソースの主菜が無ければ緩和して他も提案する(0件にしない)',
+    suggestForSlot([mkRecipe(1, { title: '豚の生姜焼き', dishType: 'main' })], opts({ role: 'main', preferProteinSources: ['魚'] }))?.id,
+    1,
+  )
+
+  // proteinSourceOf: アイコン流用でたんぱく源を判定する(一品ものは主材料スキャン)
+  eq('proteinSourceOf: 鮭の塩焼き→魚', proteinSourceOf({ title: '鮭の塩焼き', tags: [], ingredients: [{ name: '生鮭' }] }), '魚')
+  eq('proteinSourceOf: だし巻き卵→卵', proteinSourceOf({ title: 'だし巻き卵', tags: [], ingredients: [{ name: '卵' }] }), '卵')
+  eq('proteinSourceOf: 麻婆豆腐→豆腐', proteinSourceOf({ title: '麻婆豆腐', tags: [], ingredients: [{ name: '木綿豆腐' }] }), '豆腐')
+  eq('proteinSourceOf: 豚の生姜焼き→肉', proteinSourceOf({ title: '豚の生姜焼き', tags: [], ingredients: [{ name: '豚ロース' }] }), '肉')
+  eq('proteinSourceOf: 鶏の唐揚げ→肉', proteinSourceOf({ title: '鶏の唐揚げ', tags: [], ingredients: [{ name: '鶏もも肉' }] }), '肉')
+  // 一品もの(丼)はアイコンがrice(主食)に寄るので主材料からたんぱく源を拾う
+  eq(
+    'proteinSourceOf: 牛丼→肉(一品ものは主材料スキャン)',
+    proteinSourceOf({ title: '牛丼', tags: ['ご飯もの'], ingredients: [{ name: 'ご飯', amount: '300', unit: 'g' }, { name: '牛薄切り肉', amount: '200', unit: 'g' }] }),
+    '肉',
+  )
+  eq('proteinSourceOf: 野菜中心はその他', proteinSourceOf({ title: 'きんぴらごぼう', tags: [], ingredients: [{ name: 'ごぼう' }] }), 'その他')
+
+  // detectGenreMix: 主菜のジャンルと副菜/汁物のジャンルが食い違うか(混在バッジ用)
+  eq(
+    'detectGenreMix: 主菜和食+副菜中華は混在',
+    detectGenreMix({ tags: ['和食'] }, [{ tags: ['中華'] }]),
+    true,
+  )
+  eq(
+    'detectGenreMix: 主菜和食+副菜和食は混在でない',
+    detectGenreMix({ tags: ['和食'] }, [{ tags: ['和食'] }]),
+    false,
+  )
+  eq(
+    'detectGenreMix: ジャンルタグの無い副菜は万能枠=混在に数えない',
+    detectGenreMix({ tags: ['和食'] }, [{ tags: [] }]),
+    false,
+  )
+  eq('detectGenreMix: 主菜が無ければ混在なし', detectGenreMix(undefined, [{ tags: ['中華'] }]), false)
+  eq('detectGenreMix: 主菜にジャンルが無ければ混在なし', detectGenreMix({ tags: [] }, [{ tags: ['中華'] }]), false)
+
+  // isMainDish / recipeGenre: 外部公開の主菜判定・ジャンル取得(ホーム「今日なに作る?」等が使う)
+  eq('isMainDish: dishType:main は主菜', isMainDish(mkRecipe(1, { dishType: 'main' })), true)
+  eq('isMainDish: dishType:side は主菜でない', isMainDish(mkRecipe(1, { dishType: 'side' })), false)
+  eq('isMainDish: dishType:dessert は主菜でない', isMainDish(mkRecipe(1, { dishType: 'dessert' })), false)
+  eq('isMainDish: dishType未設定はタグヒューリスティック(汁物タグは主菜でない)', isMainDish(mkRecipe(1, { tags: ['汁物'] })), false)
+  eq('recipeGenre: 和食タグ→和食', recipeGenre({ tags: ['定番', '和食'] }), '和食')
+  eq('recipeGenre: ジャンルタグ無し→undefined', recipeGenre({ tags: ['定番'] }), undefined)
+
   // ---- ランダム週献立の保護2点(2026-07-16 便W-⑤・オーナー指示2026-07-16夜) ----
 
   // (a) 過去日不変: isPastDateは今日より前の日付だけtrueを返す(MealPlanPage側のfillWeek/
@@ -1729,6 +1823,31 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     )
     eq('planWeekFill(手動保護): 手動行(id=1)は削除されず、火の自動行(id=2)だけ削除', plan.autoEntryIdsToRemove, [2])
     eq('planWeekFill(手動保護): 手動枠のレシピ(11)は重複回避のusedに入る', plan.usedRecipeIds.includes(11), true)
+    // 便BH-2(役割粒度): 手動で主菜だけ入れた月曜は、主菜を残したまま副菜だけを追加で埋める
+    eq(
+      'planWeekFill(役割粒度): 手動主菜だけの月曜は副菜だけを追加で埋める(partialFills)',
+      plan.partialFills.map((p) => `${p.date}|${p.slot}|${p.fillRole}`),
+      ['2026-07-20|dinner|side'],
+    )
+  }
+
+  // (3b) 便BH-2(役割粒度): 手動で副菜だけ入れ、同じ枠に自動主菜がある場合。
+  //      副菜(手動)は残し、自動主菜は削除して主菜だけを埋め直す
+  {
+    const entries = [
+      mkEntry(1, '2026-07-20', 21, { role: 'side' }), // 月・手動副菜
+      mkEntry(2, '2026-07-20', 22, { role: 'main', auto: true }), // 月・自動主菜
+    ]
+    const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
+    eq('planWeekFill(役割粒度): 手動副菜のある月曜は残す枠に入る', sortedStrs(plan.preservedSlotKeys), ['2026-07-20|dinner'])
+    eq('planWeekFill(役割粒度): 自動主菜(id=2)は削除して主菜だけ埋め直す', plan.autoEntryIdsToRemove.includes(2), true)
+    eq('planWeekFill(役割粒度): 手動副菜(id=1)は削除されない', plan.autoEntryIdsToRemove.includes(1), false)
+    eq(
+      'planWeekFill(役割粒度): 月曜は主菜だけ埋める(partialFills=main)',
+      plan.partialFills.find((p) => p.date === '2026-07-20')?.fillRole,
+      'main',
+    )
+    eq('planWeekFill(役割粒度): 手動副菜のレシピ(21)は重複回避のusedに入る', plan.usedRecipeIds.includes(21), true)
   }
 
   // (4) 過去日・今日の手動・非表示帯・手動と自動が同居する枠、の複合ケース
@@ -1748,6 +1867,12 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     ])
     eq('planWeekFill(複合): 削除は木の自動(id=3)のみ。金の自動(id=4)は枠ごと残すので消さない', plan.autoEntryIdsToRemove, [3])
     eq('planWeekFill(複合): 過去日・非表示帯・残す枠の全レシピがusedに入る', sortedNums(plan.usedRecipeIds), [100, 200, 400, 401, 500])
+    // 便BH-2(役割粒度): 手動主菜だけの水(今日)・金は、副菜だけを追加で埋める
+    eq(
+      'planWeekFill(複合・役割粒度): 水と金は副菜だけを追加で埋める(partialFills)',
+      plan.partialFills.map((p) => `${p.date}|${p.slot}|${p.fillRole}`).sort(),
+      ['2026-07-22|dinner|side', '2026-07-24|dinner|side'],
+    )
   }
 }
 

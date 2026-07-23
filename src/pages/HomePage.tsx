@@ -24,6 +24,7 @@ import { useTodayList } from '../db/todayList'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
 import { currentSeason, preferSeason } from '../logic/season'
+import { isMainDish } from '../logic/mealPlan'
 import { toHiragana } from '../logic/kana'
 import type { CookedLog, HomeWidgetKey, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
@@ -164,6 +165,10 @@ export default function HomePage() {
   // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
   // MealPlanPage「提案の条件」と同じパターン)
   const [conditionsOpen, setConditionsOpen] = useState(false)
+  // 「今日なに作る?」を主菜から提案する(2026-07-23 便BH-2・docs/56 §3-5)。既定オン=献立の中心に
+  // なる主菜(肉・魚・卵・豆腐が主役)を提案し、「1品ランダムに副菜が出てがっかり」を防ぐ。
+  // オフにすると副菜・その他も候補に入る。主菜が0件になる場合は0件回避で全体から選ぶ
+  const [mainOnly, setMainOnly] = useState(true)
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
   const [ingredients, setIngredients] = useState<string[]>([])
@@ -226,11 +231,16 @@ export default function HomePage() {
     if (latestNews) void updateSettings({ lastSeenNewsId: latestNews.id })
   }
 
-  // 条件で絞り込んだ上で、今の季節に合うものを優先する
+  // 条件で絞り込んだ上で、今の季節に合うものを優先する。
+  // 「主菜から」がオンなら主菜(肉・魚・卵・豆腐が主役)に絞る(0件なら0件回避で全体から・便BH-2)
   const candidates = useMemo(() => {
-    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition))
+    let byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition))
+    if (mainOnly) {
+      const mains = byCondition.filter((r) => isMainDish(r))
+      if (mains.length > 0) byCondition = mains
+    }
     return preferSeason(byCondition, currentSeason())
-  }, [recipes, condition])
+  }, [recipes, condition, mainOnly])
 
   // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
   // 0件ならズレの不満を防ぐため通常候補にフォールバックし、その旨を表示する
@@ -332,6 +342,23 @@ export default function HomePage() {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* 「主菜から」トグル(2026-07-23 便BH-2)。既定オンで主菜を提案。副菜・その他も
+                見たいときはオフにする */}
+            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+              <button
+                type="button"
+                onClick={() => setMainOnly((v) => !v)}
+                aria-pressed={mainOnly}
+                className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                  mainOnly
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-ink-muted'
+                }`}
+              >
+                {ja.home.mainOnlyToggle}
+              </button>
             </div>
 
             {pantryNames.length > 0 && (

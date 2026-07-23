@@ -3376,14 +3376,17 @@ try {
       )
 
       // 空き枠のペア提案: 火曜の夕食は主菜・副菜ともまだ未定→3番目のサイコロ(火曜の主菜行)を
-      // 振ると、枠が丸ごと空だったため主菜+副菜のペアで一度に埋まる(未定が2件減る)
+      // 振ると、枠が丸ごと空だったため主菜(+副菜)で埋まる。便BH-2で「一品もの(カレー・丼・麺・鍋)の
+      // 主菜が選ばれた枠は副菜を空ける」ようになったため、減る未定は2件(通常)か1件(一品もの)。
+      // どちらでも主菜は必ず1件埋まる(=最低1件は未定が減る)ことを確認する
       await diceButtons.nth(2).click()
       await mp3Page.waitForTimeout(400)
       const afterPairEmptyCount = await mp3Page.getByText('未定', { exact: true }).count()
+      const pairDelta = afterRowDiceEmptyCount - afterPairEmptyCount
       check(
-        'MEALPLAN-03(空き枠のペア提案) サイコロ1回で主菜+副菜の両方が埋まる(未定が2件減る)',
-        afterRowDiceEmptyCount - afterPairEmptyCount === 2,
-        `before=${afterRowDiceEmptyCount} after=${afterPairEmptyCount}`,
+        'MEALPLAN-03(空き枠のペア提案) サイコロ1回で主菜(+副菜)が埋まる(一品ものなら副菜は空く)',
+        pairDelta === 1 || pairDelta === 2,
+        `before=${afterRowDiceEmptyCount} after=${afterPairEmptyCount} delta=${pairDelta}`,
       )
 
       // ＋枠を追加: 水曜(3番目の「＋枠を追加」ボタン。まだ未着手の日)で主菜をもう1行追加すると
@@ -3436,20 +3439,43 @@ try {
       await mp4Page.locator('button[aria-label="次の週"]').click()
       await mp4Page.waitForTimeout(300)
 
-      const dinnerMealPlanIds = () =>
+      // 便BH-2: 一品もの(カレー・丼・麺・鍋)の主菜が選ばれた枠は副菜を空けるため、埋まる件数は
+      // 7(全部一品もの)〜14(全部通常)の範囲でばらつく。件数固定ではなく「毎日必ず主菜が1件立つ」
+      // という不変条件で検証する。あわせて主菜・レシピのdishTypeも読む
+      const dinnerRows = () =>
         mp4Page.evaluate(
           () =>
             new Promise((resolve, reject) => {
               const req = indexedDB.open('uchi-recipe')
               req.onsuccess = () => {
                 const idb = req.result
-                const tx = idb.transaction('mealPlans', 'readonly')
-                const getAllReq = tx.objectStore('mealPlans').getAll()
-                getAllReq.onsuccess = () =>
+                const tx = idb.transaction(['mealPlans', 'recipes'], 'readonly')
+                const mpReq = tx.objectStore('mealPlans').getAll()
+                const rcReq = tx.objectStore('recipes').getAll()
+                let mp, rc
+                const done = () => {
+                  if (mp === undefined || rc === undefined) return
+                  const dishTypeById = new Map(rc.map((r) => [r.id, r.dishType]))
                   resolve(
-                    getAllReq.result.filter((row) => row.slot === 'dinner').map((row) => row.id),
+                    mp
+                      .filter((row) => row.slot === 'dinner')
+                      .map((row) => ({
+                        id: row.id,
+                        role: row.role,
+                        dishType: dishTypeById.get(row.recipeId),
+                      })),
                   )
-                getAllReq.onerror = () => reject(getAllReq.error)
+                }
+                mpReq.onsuccess = () => {
+                  mp = mpReq.result
+                  done()
+                }
+                rcReq.onsuccess = () => {
+                  rc = rcReq.result
+                  done()
+                }
+                mpReq.onerror = () => reject(mpReq.error)
+                rcReq.onerror = () => reject(rcReq.error)
               }
               req.onerror = () => reject(req.error)
             }),
@@ -3458,21 +3484,34 @@ try {
       const fillWeekBtn = mp4Page.getByRole('button', { name: 'まとめて献立を立てる' })
       await fillWeekBtn.click()
       await mp4Page.waitForTimeout(1000)
+      const rowsAfterFirst = await dinnerRows()
+      const mainsAfterFirst = rowsAfterFirst.filter((r) => r.role === 'main')
       check(
-        'MEALPLAN-04 1回目の「まとめて献立を立てる」で全枠(7日×主菜+副菜=14件)が埋まる',
-        (await mp4Page.getByText('未定', { exact: true }).count()) === 0,
+        'MEALPLAN-04 1回目の「まとめて献立を立てる」で7日すべてに主菜が1件立つ',
+        mainsAfterFirst.length === 7,
+        `主菜=${mainsAfterFirst.length}件`,
       )
-      const idsAfterFirst = await dinnerMealPlanIds()
-      check('MEALPLAN-04 1回目の結果、mealPlansの行が14件作られる', idsAfterFirst.length === 14)
+      check(
+        'MEALPLAN-04 1回目の合計は7〜14件(一品ものの日は副菜が空く)',
+        rowsAfterFirst.length >= 7 && rowsAfterFirst.length <= 14,
+        `合計=${rowsAfterFirst.length}件`,
+      )
+      // 便BH-2 タスク2: 主菜スロットは必ずdishType=mainのレシピから選ばれる(野菜炒め=side等は主菜に来ない)
+      check(
+        'MEALPLAN-04 主菜は必ずdishType=mainのレシピから選ばれる',
+        mainsAfterFirst.every((r) => r.dishType === 'main'),
+        `主菜のdishType=${JSON.stringify(mainsAfterFirst.map((r) => r.dishType))}`,
+      )
+      const idsAfterFirst = rowsAfterFirst.map((r) => r.id)
 
       await fillWeekBtn.click()
       await mp4Page.waitForTimeout(1000)
+      const rowsAfterSecond = await dinnerRows()
       check(
-        'MEALPLAN-04 2回目のタップも無反応にならず、全枠が引き続き埋まっている(以前は無反応バグがあった)',
-        (await mp4Page.getByText('未定', { exact: true }).count()) === 0,
+        'MEALPLAN-04 2回目のタップも無反応にならず、7日すべてに主菜が立つ(以前は無反応バグがあった)',
+        rowsAfterSecond.filter((r) => r.role === 'main').length === 7,
       )
-      const idsAfterSecond = await dinnerMealPlanIds()
-      check('MEALPLAN-04 2回目の結果も、mealPlansの行が14件のまま', idsAfterSecond.length === 14)
+      const idsAfterSecond = rowsAfterSecond.map((r) => r.id)
       const overlappingIds = idsAfterSecond.filter((id) => idsAfterFirst.includes(id))
       check(
         'MEALPLAN-04 2回目は「全部埋まっているので無視」ではなく、全行を一旦クリアしてから' +
@@ -3711,7 +3750,7 @@ try {
                   resolve(
                     getAllReq.result
                       .filter((row) => row.slot === 'dinner')
-                      .map((row) => ({ id: row.id, recipeId: row.recipeId, role: row.role, auto: row.auto ?? false })),
+                      .map((row) => ({ id: row.id, date: row.date, recipeId: row.recipeId, role: row.role, auto: row.auto ?? false })),
                   )
                 getAllReq.onerror = () => reject(getAllReq.error)
               }
@@ -3762,6 +3801,14 @@ try {
         'MEALPLAN-08 空いていた枠は自動提案で埋まる(自動行が1件以上増える)',
         autoRowsAfter.length >= 1,
       )
+      // 便BH-2(役割粒度の保護): 手動主菜(肉じゃが=一品ものでない)だけ入れた枠は、主菜を残したまま
+      // 空いていた副菜だけが自動で埋まる。手動主菜と同じ日に、自動の副菜行が足される
+      check(
+        'MEALPLAN-08(役割粒度) 手動主菜だけの枠に副菜だけが自動提案で足される',
+        rowsAfter.some(
+          (r) => r.date === manual.date && r.role === 'side' && r.auto === true,
+        ) && rowsAfter.some((r) => r.id === manual.id && r.role === 'main' && r.auto === false),
+      )
       // 「手動で入れた◯枠は残した」トーストが出る(結果メッセージで明示)
       check(
         'MEALPLAN-08 手動枠を残した旨のトーストが出る',
@@ -3778,6 +3825,104 @@ try {
       )
     } finally {
       await mp8Browser.close()
+    }
+  }
+
+  // --- MEALPLAN-09: 便BH-2の新仕様を決定的に検証する(docs/56)。
+  //  (A) 一品もの(カレー)の主菜を手動で入れた枠は、まとめて献立でも副菜を足さない(1品で完結) /
+  //  (B) 主菜と副菜のジャンルが食い違う枠には「ジャンル混在」バッジが控えめに出る ---
+  currentCheck = 'MEALPLAN-09'
+  {
+    const mp9Browser = await chromium.launch()
+    const mp9Context = await mp9Browser.newContext()
+    const mp9Page = await mp9Context.newPage()
+    mp9Page.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-09] ${text}`)
+    })
+    mp9Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-09] ${err.message}`)
+    })
+    try {
+      // 「先頭の未定」の行にレシピを手動割り当てするヘルパー(ピッカーで検索して選ぶ)
+      const assign = async (title) => {
+        await mp9Page.getByText('未定', { exact: true }).first().click()
+        await mp9Page.waitForTimeout(400)
+        await mp9Page.getByPlaceholder('レシピ名で絞り込み').fill(title)
+        await mp9Page.waitForTimeout(300)
+        await mp9Page.getByText(title, { exact: true }).first().click()
+        await mp9Page.waitForTimeout(400)
+      }
+
+      await mp9Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mp9Page.waitForTimeout(1800)
+      await mp9Page.getByRole('button', { name: '週', exact: true }).click()
+      await mp9Page.waitForTimeout(300)
+      // 全日程を未来日にする(MEALPLAN-03/04/08と同じ理由)
+      await mp9Page.locator('button[aria-label="次の週"]').click()
+      await mp9Page.waitForTimeout(300)
+
+      // (B) 月曜: 主菜=肉じゃが(和食)→副菜=ポテトサラダ(洋食)を手動で入れる(ジャンルが食い違う)。
+      // 先頭の未定=月曜の主菜、次の先頭の未定=月曜の副菜(主菜が埋まると副菜が先頭になる)
+      await assign('肉じゃが')
+      await assign('ポテトサラダ')
+      check(
+        'MEALPLAN-09(B) 主菜(和食)と副菜(洋食)が食い違う枠に「ジャンル混在」バッジが出る',
+        (await mp9Page.getByText('ジャンル混在', { exact: true }).count()) >= 1,
+      )
+
+      // (A) 火曜: 主菜=カレーライス(一品もの)を手動で入れる(次の先頭の未定=火曜の主菜)
+      await assign('カレーライス')
+      await mp9Page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await mp9Page.waitForTimeout(1200)
+
+      // カレーの入った枠(date)に副菜行が無いことをIndexedDBで確認
+      const rows = await mp9Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['mealPlans', 'recipes'], 'readonly')
+              const mpReq = tx.objectStore('mealPlans').getAll()
+              const rcReq = tx.objectStore('recipes').getAll()
+              let mp, rc
+              const done = () => {
+                if (mp === undefined || rc === undefined) return
+                const titleById = new Map(rc.map((r) => [r.id, r.title]))
+                resolve(
+                  mp
+                    .filter((r) => r.slot === 'dinner')
+                    .map((r) => ({ date: r.date, role: r.role, title: titleById.get(r.recipeId) })),
+                )
+              }
+              mpReq.onsuccess = () => {
+                mp = mpReq.result
+                done()
+              }
+              rcReq.onsuccess = () => {
+                rc = rcReq.result
+                done()
+              }
+              mpReq.onerror = () => reject(mpReq.error)
+              rcReq.onerror = () => reject(rcReq.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      const curryRow = rows.find((r) => r.title === 'カレーライス')
+      const curryDate = curryRow?.date
+      const sidesOnCurryDay = rows.filter((r) => r.date === curryDate && r.role === 'side')
+      check(
+        'MEALPLAN-09(A) 一品もの(カレー)の主菜を入れた枠には、まとめて献立でも副菜が足されない',
+        !!curryRow && sidesOnCurryDay.length === 0,
+        `curryDate=${curryDate} sides=${JSON.stringify(sidesOnCurryDay)}`,
+      )
+    } finally {
+      await mp9Browser.close()
     }
   }
 

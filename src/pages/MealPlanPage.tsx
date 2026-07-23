@@ -54,8 +54,12 @@ import {
   todayPlanMismatch,
   normalizeDateRange,
   rangeDayCount,
+  isOneDish,
+  recipeGenre,
+  detectGenreMix,
+  proteinSourceOf,
 } from '../logic/mealPlan'
-import type { MealGenre } from '../logic/mealPlan'
+import type { MealGenre, ProteinSource } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import { buildPriceIndex, estimateRecipeCost, sumMealPlanEntriesCost } from '../logic/priceEstimate'
@@ -634,38 +638,103 @@ export default function MealPlanPage() {
     if (!recipes) return
     setMessage('')
     const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
-    // 埋め直す枠に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
+    // 埋め直す役割に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
     for (const id of plan.autoEntryIdsToRemove) {
       await removeMealEntry(id)
     }
     const usedRecipeIds = [...plan.usedRecipeIds]
+
+    // たんぱく源の週内分散(docs/56 §3-6): 今週まだ少ない主菜のソース(肉/魚/卵/豆腐)を軽く優先し、
+    // 肉→肉→肉と連続で偏るのを防ぐ。残る手動主菜も集計に入れる。'その他'は分散対象にしない
+    const proteinCounts: Record<ProteinSource, number> = { 肉: 0, 魚: 0, 卵: 0, 豆腐: 0, その他: 0 }
+    const bumpProtein = (r: Recipe) => {
+      proteinCounts[proteinSourceOf(r)] += 1
+    }
+    for (const e of entries ?? []) {
+      if ((e.role ?? 'main') !== 'main') continue
+      if (e.id != null && plan.autoEntryIdsToRemove.includes(e.id)) continue // これから消える主菜は数えない
+      const r = recipeById.get(e.recipeId)
+      if (r) bumpProtein(r)
+    }
+    const preferProteinSources = (): ProteinSource[] => {
+      const sources: ProteinSource[] = ['肉', '魚', '卵', '豆腐']
+      const min = Math.min(...sources.map((s) => proteinCounts[s]))
+      return sources.filter((s) => proteinCounts[s] === min)
+    }
+
+    const baseOpts = {
+      quickOnly,
+      excludeNg: true,
+      ngIngredients: settings?.ngIngredients ?? [],
+      genre: genreFilter,
+      preferHighProtein,
+      yesterdayRecipeIds,
+    }
+
+    // 両役割が空 or 自動だけの枠: 主菜+副菜のペアで埋める(一品ものの主菜なら副菜は付かない=空く)
     for (const { date, slot } of plan.slotsToFill) {
       const { main, side } = suggestPairForSlot(visibleRecipes, {
-        quickOnly,
-        excludeNg: true,
-        ngIngredients: settings?.ngIngredients ?? [],
-        usedRecipeIds,
+        ...baseOpts,
         slot,
-        genre: genreFilter,
-        preferHighProtein,
-        yesterdayRecipeIds,
+        usedRecipeIds,
+        preferProteinSources: preferProteinSources(),
       })
       if (main) {
         await addMealEntry(date, slot, main.id!, 'main', true)
         usedRecipeIds.push(main.id!)
+        bumpProtein(main)
       }
       if (side) {
         await addMealEntry(date, slot, side.id!, 'side', true)
         usedRecipeIds.push(side.id!)
       }
     }
+
+    // 片方の役割だけ空の枠(便BH-2・役割粒度の保護): 手動で入っている役割は触らず、空いた役割だけ埋める。
+    // 手動主菜だけの枠には主菜のジャンルに揃えた副菜を足す(主菜が一品ものなら副菜は足さない)。
+    for (const { date, slot, fillRole } of plan.partialFills) {
+      if (fillRole === 'side') {
+        const manualMain = (entries ?? []).find(
+          (e) => e.date === date && e.slot === slot && (e.role ?? 'main') === 'main' && !e.auto,
+        )
+        const mainRecipe = manualMain ? recipeById.get(manualMain.recipeId) : undefined
+        if (mainRecipe && isOneDish(mainRecipe)) continue // 一品ものの主菜には副菜を足さない
+        const side = suggestForSlot(visibleRecipes, {
+          ...baseOpts,
+          slot,
+          role: 'side',
+          preferDishType: 'side',
+          usedRecipeIds,
+          genre: genreFilter ?? (mainRecipe ? recipeGenre(mainRecipe) : undefined),
+        })
+        if (side) {
+          await addMealEntry(date, slot, side.id!, 'side', true)
+          usedRecipeIds.push(side.id!)
+        }
+      } else {
+        const main = suggestForSlot(visibleRecipes, {
+          ...baseOpts,
+          slot,
+          role: 'main',
+          usedRecipeIds,
+          preferProteinSources: preferProteinSources(),
+        })
+        if (main) {
+          await addMealEntry(date, slot, main.id!, 'main', true)
+          usedRecipeIds.push(main.id!)
+          bumpProtein(main)
+        }
+      }
+    }
+
     // 結果メッセージ。手動枠を残した場合と、今日を含む週で「今日の献立」(日タブ)が
     // 自動では変わらない場合(タスク2の混乱対策)を、状況に応じて出す
     const messages: string[] = []
     if (plan.preservedSlotKeys.size > 0) {
       messages.push(ja.mealPlan.fillWeekKeptManual.replace('{n}', String(plan.preservedSlotKeys.size)))
     }
-    const todayRefilled = plan.slotsToFill.some((s) => s.date === today)
+    const todayRefilled =
+      plan.slotsToFill.some((s) => s.date === today) || plan.partialFills.some((s) => s.date === today)
     if (todayRefilled && (todayList?.length ?? 0) > 0) {
       messages.push(ja.mealPlan.fillWeekTodayNotice)
     }
@@ -1317,9 +1386,30 @@ export default function MealPlanPage() {
                 const mainRows = buildRoleRows(slotEntries, 'main', extra)
                 const sideRows = buildRoleRows(slotEntries, 'side', extra)
                 const isAddMenuOpen = addMenuFor === slotKey
+                // ジャンル混在の控えめ表示(便BH-2・docs/56 §3-10): 主菜のジャンルに対して
+                // 副菜が別ジャンルのとき「ジャンル混在」バッジを出す(揃っている枠は無表示)
+                const slotMainRecipe = slotEntries
+                  .filter((e) => (e.role ?? 'main') === 'main')
+                  .map((e) => recipeById.get(e.recipeId))
+                  .find((r): r is Recipe => !!r)
+                const slotSideRecipes = slotEntries
+                  .filter((e) => (e.role ?? 'main') === 'side')
+                  .map((e) => recipeById.get(e.recipeId))
+                  .filter((r): r is Recipe => !!r)
+                const genreMixed = detectGenreMix(slotMainRecipe, slotSideRecipes)
                 return (
                   <div key={slot}>
-                    <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                      {genreMixed && (
+                        <span
+                          title={ja.mealPlan.genreMixedHint}
+                          className="rounded-sm border border-edge px-1.5 py-0.5 text-[10px] font-bold text-ink-muted"
+                        >
+                          {ja.mealPlan.genreMixedBadge}
+                        </span>
+                      )}
+                    </div>
                     <div className="mt-1 space-y-1">
                       {mainRows.map((row, i) =>
                         renderRow(date, slot, 'main', row, `main-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),

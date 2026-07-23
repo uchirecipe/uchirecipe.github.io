@@ -1,7 +1,9 @@
 import { hasNgIngredient } from './ng'
 import { cookedWithinDays } from './cooked'
 import { currentSeason } from './season'
-import type { DishType, MealPlanEntry, MealRole, MealSlot, Recipe, Season } from '../db/types'
+import { pickIconKey } from './icon'
+import { pickMainIngredients } from './mainIngredients'
+import type { DishType, IconKey, MealPlanEntry, MealRole, MealSlot, Recipe, Season } from '../db/types'
 
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
@@ -142,6 +144,18 @@ export interface SuggestOptions {
   /** 「高たんぱく」タグの品を優先するか（任意・無ければ他も許可） */
   preferHighProtein?: boolean
   /**
+   * この役割で優先したいdishType（任意・2026-07-23 便BH-2）。副菜スロットを純粋な副菜
+   * （dishType:'side'）に寄せるために使う。一致0件なら緩和する（汁物しか無い日は汁物を
+   * 副菜として許す）＝提案0件にはしない現行の安全設計を保つ。
+   */
+  preferDishType?: DishType
+  /**
+   * 主菜のたんぱく源（肉/魚/卵/豆腐）の週内分散用（任意・2026-07-23 便BH-2・docs/56 §3-6）。
+   * ここに挙げたソースの主菜を優先する。fillWeekが「今週まだ少ないソース」を渡すことで、
+   * 肉→肉→肉と連続で偏るのを防ぐ。該当0件なら緩和する（0件回避優先）。
+   */
+  preferProteinSources?: ProteinSource[]
+  /**
    * 「昨日の週プランに入っていたレシピ」のID（任意・2026-07-16 便W-⑤b）。指定があれば
    * 候補から除外し、直近の繰り返し（一昨日食べたものが翌日また出る）を防ぐ。
    * 除外すると候補が尽きる場合は除外を解く（excludeYesterdayPlanRecipes参照）
@@ -196,8 +210,80 @@ function isSideCandidate(r: Recipe): boolean {
 }
 
 /** レシピが持つジャンルタグ（和食/洋食/中華のいずれか。無ければundefined） */
-function recipeGenre(r: Recipe): MealGenre | undefined {
+export function recipeGenre(r: Pick<Recipe, 'tags'>): MealGenre | undefined {
   return MEAL_GENRES.find((g) => r.tags.includes(g))
+}
+
+/**
+ * レシピが主菜候補か（外部公開版・2026-07-23 便BH-2）。ホームの「今日なに作る?」の
+ * 「主菜から提案」など、献立エンジン外でも同じ主菜判定を使うために公開する。
+ * 中身は献立エンジンの isMainCandidate と同一（dishType優先・未設定はタグフォールバック）。
+ */
+export function isMainDish(r: Recipe): boolean {
+  return isMainCandidate(r)
+}
+
+/** 主菜のたんぱく源（週内分散の集計単位・2026-07-23 便BH-2・docs/56 §3-6） */
+export type ProteinSource = '肉' | '魚' | '卵' | '豆腐' | 'その他'
+
+/** アイコン種別 → たんぱく源。野菜・主食・汁物・菓子など該当しないものはundefined */
+function iconToProtein(icon: IconKey): ProteinSource | undefined {
+  switch (icon) {
+    case 'fish':
+      return '魚'
+    case 'egg':
+      return '卵'
+    case 'tofu':
+      return '豆腐'
+    case 'chicken':
+    case 'meat':
+      return '肉'
+    default:
+      return undefined
+  }
+}
+
+/**
+ * 主菜のたんぱく源（肉/魚/卵/豆腐/その他）を判定する純関数（2026-07-23 便BH-2・docs/56 §3-6）。
+ * 既存のアイコン自動判定（logic/icon.ts の pickIconKey）を流用する。丼・麺・パスタなどの
+ * 一品ものはアイコンが主食（rice/pasta/noodle）に寄るため、その場合だけ主材料
+ * （pickMainIngredients・調味料を除いた先頭材料）を1件ずつアイコン判定し直して肉/魚/卵/豆腐を拾う。
+ * どれにも当たらなければ 'その他'（野菜が主役の主菜・分類不能）。
+ */
+export function proteinSourceOf(
+  recipe: Pick<Recipe, 'title' | 'tags' | 'ingredients'>,
+): ProteinSource {
+  const icon = pickIconKey(recipe)
+  const direct = iconToProtein(icon)
+  if (direct) return direct
+  if (icon === 'rice' || icon === 'pasta' || icon === 'noodle') {
+    for (const ing of pickMainIngredients(recipe.ingredients, 4)) {
+      const p = iconToProtein(pickIconKey({ title: ing.name, tags: [], ingredients: [] }))
+      if (p) return p
+    }
+  }
+  return 'その他'
+}
+
+/**
+ * その枠の主菜と、それ以外の品（副菜・汁物）のジャンルが食い違っているか
+ * （「ジャンル混在」バッジ表示用・2026-07-23 便BH-2・docs/56 §3-10）。
+ * 主菜のジャンルが定まっていて、他の品のいずれかが「別ジャンル」なら true。
+ * ジャンルタグの無い品は「どのジャンルにも合う万能枠」として不一致に数えない
+ * （黙って1品だけ他ジャンル、を正直に見せるための判定。主菜が無い/ジャンル無しなら混在なし）。
+ */
+export function detectGenreMix(
+  mainRecipe: Pick<Recipe, 'tags'> | undefined,
+  otherRecipes: (Pick<Recipe, 'tags'> | undefined)[],
+): boolean {
+  if (!mainRecipe) return false
+  const mainGenre = recipeGenre(mainRecipe)
+  if (!mainGenre) return false
+  return otherRecipes.some((r) => {
+    if (!r) return false
+    const g = recipeGenre(r)
+    return g !== undefined && g !== mainGenre
+  })
 }
 
 /**
@@ -227,8 +313,9 @@ export function isOneDish(recipe: Pick<Recipe, 'title' | 'tags'>): boolean {
  * 空き枠の自動提案。
  * まず「季節が合わない（all以外で不一致）」のレシピを除外し、「NG除外」「時短」で
  * 絞り込んだ後、「向いている時間帯」が一致するものを優先（未設定のレシピは制限なし
- * として扱う）。続けて「主菜/副菜の役割」「ジャンル」「高たんぱく優先」の順で
- * 優先度を絞り込み（いずれも該当が無ければ絞り込み前に戻す＝0件にはしない）、
+ * として扱う）。続けて「主菜/副菜の役割」「ジャンル」「役割のdishType純化(副菜=side)」
+ * 「たんぱく源の分散」「高たんぱく優先」の順で優先度を絞り込み（いずれも該当が無ければ
+ * 絞り込み前に戻す＝0件にはしない）、
  * 続けて「昨日の週プランに入っていたレシピを除外」（2026-07-16 便W-⑤b・こちらも
  * 除外して尽きれば解除）、その中で「最近作ってない」「週内で重複しない」の順にも絞り込む。
  * 候補が無くなったら段階的に条件を緩めて必ず何か返す（季節外しか無い場合を除き0件にはしない）。
@@ -274,10 +361,28 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
     if (matched.length > 0) genrePool = matched
   }
 
+  // 役割のdishType純化（副菜スロットを純粋な副菜dishType:'side'に寄せる。2026-07-23 便BH-2・
+  // docs/56 §2「副菜スロットはsideのみ」。一致0件なら緩和＝汁物しか無い日は汁物を副菜として許す）
+  let dishTypePool = genrePool
+  if (options.preferDishType) {
+    const wanted = options.preferDishType
+    const matched = genrePool.filter((r) => r.dishType === wanted)
+    if (matched.length > 0) dishTypePool = matched
+  }
+
+  // たんぱく源の週内分散（今週まだ少ないソースの主菜を優先。2026-07-23 便BH-2・docs/56 §3-6。
+  // 該当0件なら緩和＝0件回避を優先。魚・卵・豆腐の主菜が限られるため厳格化はしない）
+  let proteinSourcePool = dishTypePool
+  if (options.preferProteinSources && options.preferProteinSources.length > 0) {
+    const wanted = options.preferProteinSources
+    const matched = dishTypePool.filter((r) => wanted.includes(proteinSourceOf(r)))
+    if (matched.length > 0) proteinSourcePool = matched
+  }
+
   // 高たんぱく優先
-  let proteinPool = genrePool
+  let proteinPool = proteinSourcePool
   if (options.preferHighProtein) {
-    const matched = genrePool.filter((r) => r.tags.includes(HIGH_PROTEIN_TAG))
+    const matched = proteinSourcePool.filter((r) => r.tags.includes(HIGH_PROTEIN_TAG))
     if (matched.length > 0) proteinPool = matched
   }
 
@@ -305,19 +410,28 @@ export interface SuggestPairResult {
 }
 
 /**
- * 主菜+副菜のペア提案（2026-07-13献立の主菜+副菜構成対応）。まず主菜を提案し、
- * ユーザーがジャンルを指定していなければ、選ばれた主菜のジャンル（和食/洋食/中華）に
- * 副菜のジャンルを揃える（一致する副菜が無ければ何でも可）。主菜が提案できない
- * （季節・NG等で候補が0件の）ときは副菜だけ提案を試みる。
+ * 主菜+副菜のペア提案（2026-07-13献立の主菜+副菜構成対応・2026-07-23 便BH-2で日単位の
+ * ジャンル統一・一品もの・副菜純化を追加）。まず主菜を提案し:
+ * - 主菜が「一品もの」（丼・麺・鍋・カレー・シチュー）なら、それ1品で食事が完結するので
+ *   副菜は付けない（カレーの隣に主菜/副菜をもう1品…を防ぐ。docs/56 §3-8）。
+ * - そうでなければ、ユーザーがジャンルを指定していない限り、選ばれた主菜のジャンル
+ *   （和食/洋食/中華）に副菜のジャンルを揃える（一致する副菜が無ければ他ジャンルも許可＝混在）。
+ *   副菜スロットは純粋な副菜（dishType:'side'）に寄せる（docs/56 §2「副菜スロットはsideのみ」）。
+ * 主菜が提案できない（季節・NG等で候補が0件の）ときは副菜だけ提案を試みる。
  */
 export function suggestPairForSlot(
   recipes: Recipe[],
   options: Omit<SuggestOptions, 'role'>,
 ): SuggestPairResult {
   const main = suggestForSlot(recipes, { ...options, role: 'main' })
+  // 一品ものの主菜は副菜を空ける（主菜1品で完結）
+  if (main && isOneDish(main)) return { main }
   const side = suggestForSlot(recipes, {
     ...options,
     role: 'side',
+    // 副菜スロットは純粋な副菜に寄せる。たんぱく源分散は主菜だけの都合なので副菜には効かせない
+    preferDishType: 'side',
+    preferProteinSources: undefined,
     usedRecipeIds: main ? [...options.usedRecipeIds, main.id!] : options.usedRecipeIds,
     genre: options.genre ?? (main ? recipeGenre(main) : undefined),
   })
@@ -326,13 +440,23 @@ export function suggestPairForSlot(
 
 /** 「まとめて献立を立てる」の埋め方を決める計画（planWeekFill の戻り値） */
 export interface FillWeekPlan {
-  /** これから自動提案で埋める枠（日付×食事帯。日付順→食事帯順） */
+  /**
+   * 主菜+副菜のペアで埋める枠（主菜・副菜のどちらの役割も空 or 自動提案由来だけの枠。
+   * 日付順→食事帯順）。fillWeek はここを suggestPairForSlot で埋める。
+   */
   slotsToFill: { date: string; slot: MealSlot }[]
-  /** 手動配置があるため丸ごと残す枠のキー("date|slot")の集合。件数はメッセージにも使う */
+  /**
+   * 片方の役割だけを追加で埋める枠（2026-07-23 便BH-2・docs/56 §3-9: 保護粒度を
+   * 「枠」から「枠×役割」へ細分化）。例: 手動で主菜だけ入れた枠は、主菜は残したまま
+   * 空いている副菜だけを自動提案で埋める。fillRole=埋める役割。手動主菜のジャンルに副菜を
+   * 揃える等はfillWeek側で（recipe本体を引ける側で）解決する。
+   */
+  partialFills: { date: string; slot: MealSlot; fillRole: MealRole }[]
+  /** 手動配置がある（＝丸ごとは消さない）枠のキー("date|slot")の集合。件数はメッセージにも使う */
   preservedSlotKeys: Set<string>
-  /** 埋め直す枠に残っている「自動提案由来」エントリのid（削除してから提案し直す） */
+  /** 埋め直す役割に残っている「自動提案由来」エントリのid（削除してから提案し直す） */
   autoEntryIdsToRemove: number[]
-  /** 重複回避で used とみなす recipeId（対象外の枠＋残す手動枠の中身）。提案の同一週内重複を避ける */
+  /** 重複回避で used とみなす recipeId（対象外の枠＋残す手動役割の中身）。提案の同一週内重複を避ける */
   usedRecipeIds: number[]
 }
 
@@ -349,6 +473,12 @@ export interface FillWeekPlan {
  * これで「手動で入れた献立を無警告で上書きして消す」欠陥をなくしつつ、
  * 「まとめて献立を立てるを押すたびに新しい提案に振り直せる」再抽選の使い勝手も保つ。
  * 未設定(auto未指定)の既存データは手動扱い＝保護側に倒す（非破壊が既定）。
+ *
+ * 2026-07-23 便BH-2（docs/56 §3-9・保護粒度を「枠」から「枠×役割」へ細分化）:
+ * 手動で主菜だけ入れた枠は、主菜は残したまま空いている副菜だけを自動で足せるようにした。
+ * 判定を役割（main/side）単位で行い、手動で埋まっている役割だけを残し、空 or 自動だけの役割を
+ * 埋め対象にする。両役割とも埋め対象なら slotsToFill（ペア）、片方だけなら partialFills（単役割）。
+ * 便BEの非破壊原則（手動配置は消さない）はそのまま：手動役割のエントリは削除対象にしない。
  */
 export function planWeekFill(
   entries: MealPlanEntry[],
@@ -361,35 +491,49 @@ export function planWeekFill(
     futureDates.flatMap((date) => visibleSlots.map((slot) => `${date}|${slot}`)),
   )
 
-  // 1周目: 対象枠の中で手動配置を持つ枠を確定する（＝残す枠）
+  const slotsToFill: { date: string; slot: MealSlot }[] = []
+  const partialFills: { date: string; slot: MealSlot; fillRole: MealRole }[] = []
   const preservedSlotKeys = new Set<string>()
-  for (const e of entries) {
-    const key = `${e.date}|${e.slot}`
-    if (touchedKeys.has(key) && !e.auto) preservedSlotKeys.add(key)
-  }
-
-  // 2周目: 削除対象(残さない枠の自動行)と、重複回避のused(対象外枠＋残す枠の中身)を集める
   const autoEntryIdsToRemove: number[] = []
   const usedRecipeIds: number[] = []
+
+  // 対象外の枠（過去日・非表示帯）のレシピは触らない＝重複回避のusedに入れるだけ
   for (const e of entries) {
-    const key = `${e.date}|${e.slot}`
-    if (!touchedKeys.has(key)) {
-      usedRecipeIds.push(e.recipeId) // 対象外の枠（過去日・非表示帯）は触らない＝重複回避対象
-    } else if (preservedSlotKeys.has(key)) {
-      usedRecipeIds.push(e.recipeId) // 残す枠の中身（手動・自動とも）も重複回避対象
-    } else if (e.auto && e.id != null) {
-      autoEntryIdsToRemove.push(e.id) // 埋め直す枠の自動行は削除してから提案し直す
-    }
+    if (!touchedKeys.has(`${e.date}|${e.slot}`)) usedRecipeIds.push(e.recipeId)
   }
 
-  const slotsToFill: { date: string; slot: MealSlot }[] = []
+  // 対象枠を役割（main/side）単位で仕分ける
+  const roles: MealRole[] = ['main', 'side']
   for (const date of futureDates) {
     for (const slot of visibleSlots) {
-      if (!preservedSlotKeys.has(`${date}|${slot}`)) slotsToFill.push({ date, slot })
+      const slotEntries = entries.filter((e) => e.date === date && e.slot === slot)
+      let hasManualAnything = false
+      const fillable: Record<MealRole, boolean> = { main: false, side: false }
+      for (const role of roles) {
+        const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
+        const hasManual = roleEntries.some((e) => !e.auto)
+        if (hasManual) {
+          // 手動で埋まっている役割: 同役割のエントリ（手動+自動とも）を残し、重複回避のusedに入れる
+          hasManualAnything = true
+          for (const e of roleEntries) usedRecipeIds.push(e.recipeId)
+        } else {
+          // 空 or 自動提案由来だけの役割 = 埋め対象。自動行は削除してから提案し直す（再抽選）
+          fillable[role] = true
+          for (const e of roleEntries) if (e.auto && e.id != null) autoEntryIdsToRemove.push(e.id)
+        }
+      }
+      if (hasManualAnything) preservedSlotKeys.add(`${date}|${slot}`)
+      if (fillable.main && fillable.side) {
+        slotsToFill.push({ date, slot }) // 両役割が空/自動 → ペアで埋める
+      } else if (fillable.main) {
+        partialFills.push({ date, slot, fillRole: 'main' }) // 手動副菜が残る枠に主菜だけ
+      } else if (fillable.side) {
+        partialFills.push({ date, slot, fillRole: 'side' }) // 手動主菜が残る枠に副菜だけ
+      }
     }
   }
 
-  return { slotsToFill, preservedSlotKeys, autoEntryIdsToRemove, usedRecipeIds }
+  return { slotsToFill, partialFills, preservedSlotKeys, autoEntryIdsToRemove, usedRecipeIds }
 }
 
 /**
