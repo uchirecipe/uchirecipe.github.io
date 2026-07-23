@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { X, BellRing, Bell, BellOff } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useTimers } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
 import StepBadge from './StepBadge'
@@ -20,13 +20,30 @@ export default function TimerBar() {
     adjustTimer,
   } = useTimers()
   const navigate = useNavigate()
+  const location = useLocation()
   // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
   if (timers.length === 0) return null
 
-  /** タップで該当レシピの該当手順へ（詳細画面側でスクロール＆一時ハイライトする） */
+  /**
+   * 完了タイマーのタップで該当レシピの該当手順へ。
+   * 通常は単品レシピ詳細（?step=）へ飛んで詳細画面側でスクロール＆一時ハイライトする。
+   * ただし並行調理ナビ実行中は、常駐バーは元々レシピ詳細向けの設計なので詳細へ離脱させず、
+   * ナビ内に同じ手順カードが表示されていればナビ内でスクロール＆ハイライトして文脈に留める
+   * （2026-07-23便BI。バグ修正: ナビ実行中に完了タイマーをタップすると単品詳細へ飛ばされ
+   * ナビから離脱していた）。ナビにその手順が無い（別の組み合わせで再構築した・タイムライン
+   * を畳んだ等）ときは従来どおり詳細へフォールバックする。
+   */
   const goToStep = (recipeId: number, stepNumber: number) => {
+    // `navi-step-...` の id は CookNaviPage の naviStepDomId が付与する。形式を変えるときは両方を揃える
+    if (
+      location.pathname === '/cook-navi' &&
+      document.getElementById(`navi-step-${recipeId}-${stepNumber}`)
+    ) {
+      navigate(`/cook-navi?focusStep=${recipeId}-${stepNumber}`, { replace: true })
+      return
+    }
     navigate(`/recipes/${recipeId}?step=${stepNumber}`)
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Lock,
@@ -40,15 +40,26 @@ function RecipePill({ title, colorIndex }: { title: string; colorIndex: number }
   )
 }
 
+/**
+ * タイムライン上の手順カードのDOM id（常駐タイマーバーの完了タップからの着地点に使う）。
+ * この形式は TimerBar.tsx の goToStep も参照するので、変えるときは両方を揃えること。
+ */
+function naviStepDomId(recipeId: number, stepNumber: number): string {
+  return `navi-step-${recipeId}-${stepNumber}`
+}
+
 /** タイムラインの1手順カード */
 function TimelineCard({
   item,
   showFillHint,
+  highlighted,
   onStartTimer,
 }: {
   item: TimelineItem
   /** 待ちブロックに「この間に、次の手作業を進められます」を出すか（後続に手作業があるときだけ） */
   showFillHint: boolean
+  /** 常駐タイマーバーの完了タップから飛んできた直後の一時ハイライト対象か */
+  highlighted: boolean
   onStartTimer: (item: TimelineItem, seconds: number) => void
 }) {
   const isWait = item.kind === 'wait'
@@ -56,7 +67,10 @@ function TimelineCard({
     isWait && item.minutes != null && item.minutes > 0 && !isMinutesShownInText(item.text, item.minutes)
   return (
     <li
-      className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+      id={naviStepDomId(item.recipeId, item.stepNumber)}
+      className={`rounded-md border bg-surface p-[var(--space-md)] shadow-sm transition-shadow ${
+        highlighted ? 'border-accent ring-2 ring-accent' : 'border-edge'
+      }`}
       style={{ borderLeftWidth: 4, borderLeftColor: RECIPE_COLORS[item.colorIndex % RECIPE_COLORS.length] }}
     >
       <div className="flex items-center gap-2">
@@ -134,6 +148,34 @@ export default function CookNaviPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showTimeline, setShowTimeline] = useState(false)
   const initializedRef = useRef(false)
+
+  // 常駐タイマーバーの「完了タイマー」タップからの着地（?focusStep=レシピID-手順番号）。
+  // ナビ実行中はタップで単品レシピ詳細へ離脱させず、ナビ内の該当手順カードへスクロール＆
+  // 一時ハイライトしてナビ文脈に留める（2026-07-23便BI。バグ修正: 完了タイマーのタップが
+  // ナビから単品詳細へ飛ばしていた）。RecipeDetailPage の ?step= と同じ流儀で、着地後に
+  // パラメータを消して同じ手順に何度でも飛べるようにする。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [highlightKey, setHighlightKey] = useState<string | null>(null)
+  useEffect(() => {
+    const focus = searchParams.get('focusStep')
+    if (!focus) return
+    const el = document.getElementById(`navi-step-${focus}`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightKey(focus)
+    }
+    const timeout = setTimeout(() => setHighlightKey(null), 2000)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('focusStep')
+        return next
+      },
+      { replace: true },
+    )
+    return () => clearTimeout(timeout)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   // 初回に今日の献立から先頭2〜3品をあらかじめ選んでおく（すぐ試せるように）
   useEffect(() => {
@@ -314,6 +356,7 @@ export default function CookNaviPage() {
                           key={`${item.recipeId}-${item.stepIndex}`}
                           item={item}
                           showFillHint={hasLaterHandsOnStep(timeline.items, index)}
+                          highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
                           onStartTimer={startStepTimer}
                         />
                       ))}

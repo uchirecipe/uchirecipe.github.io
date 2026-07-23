@@ -6328,6 +6328,127 @@ try {
       try { execSync(`rm -rf ${URLIMPORT_OUT_DIR}`, { cwd: appRoot }) } catch { /* 掃除失敗は無害 */ }
     }
   }
+
+  // --- NAVI-01/02/03: 並行調理ナビ(Pro)の常駐タイマー連携(2026-07-23便BI)。
+  //     報告バグ「ナビ実行中に動作中(=完了)タイマーをタップすると単品レシピ詳細へ飛ばされ
+  //     ナビから離脱する」の回帰防止。期待挙動:
+  //       NAVI-01 完了タイマーのタップ→ナビ内に留まり該当手順カードをハイライト(単品詳細へ離脱しない)
+  //       NAVI-02 動作中タイマーのタップ→±調整の窓が開く(従来どおり・ナビ内)
+  //       NAVI-03 タイムラインを畳んで該当カードが無いとき→従来どおり単品詳細へフォールバック
+  //     解錠(proCode)・専用レシピ(短い秒タイマー)をIndexedDB直書きで用意し、専用browserで完結させる。
+  //     生IDB書き込みはDexieのliveQueryを更新しないので、必ずreload()で読み直してから操作する ---
+  currentCheck = 'NAVI-01'
+  {
+    const naviBrowser = await chromium.launch()
+    const naviContext = await naviBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const naviPage = await naviContext.newPage()
+    naviPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI] ${err.message}`)
+    })
+    naviPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@NAVI] ${t}`)
+    })
+    try {
+      await naviPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await naviPage.waitForTimeout(1800) // 初回シード完了待ち(settingsレコードもこの時点で作られる)
+      await naviPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        // 「2秒煮る」= TimeTextの「2秒」ボタンで2秒タイマーを起動できる(素早く完了させるため)
+        const idA = await P(store('recipes').add(mk('E2Eナビ煮物A', [
+          { text: '材料を切る' }, { text: '鍋に入れて2秒煮る', minutes: 1 }, { text: '盛り付ける' },
+        ])))
+        const idB = await P(store('recipes').add(mk('E2Eナビ炒めB', [
+          { text: 'フライパンを熱する' }, { text: '3分炒める', minutes: 3 }, { text: '皿に移す' },
+        ])))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+
+      // reload()で読み直してナビへ。段取りを組む
+      await naviPage.goto(`${BASE}/#/cook-navi`)
+      await naviPage.reload({ waitUntil: 'networkidle' })
+      await naviPage.waitForTimeout(1200)
+      check(
+        'NAVI-01 Pro解錠済みでナビが開き2品が自動選択される',
+        (await naviPage.textContent('body')).includes('2品を選択中'),
+      )
+      await naviPage.getByRole('button', { name: '段取りを作る' }).click()
+      await naviPage.waitForTimeout(600)
+      check(
+        'NAVI-01 2品のタイムラインが組める',
+        (await naviPage.textContent('body')).includes('組み合わせる2品'),
+      )
+
+      // 「2秒」ボタンで短いタイマーを起動
+      await naviPage.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await naviPage.waitForTimeout(400)
+
+      // NAVI-02: 動作中タイマーの行タップ→±調整の窓が開く(ナビ内に留まる)
+      await naviPage.locator('[aria-label*="のタイマーを調整"]').first().click()
+      await naviPage.waitForTimeout(400)
+      check(
+        'NAVI-02 動作中タイマーのタップで±調整の窓が開く(ナビ内)',
+        await naviPage.getByRole('dialog', { name: 'タイマーを調整' }).isVisible().catch(() => false),
+      )
+      check('NAVI-02 このとき単品レシピ詳細へ遷移していない', naviPage.url().includes('/cook-navi'))
+      await naviPage.keyboard.press('Escape')
+      await naviPage.waitForTimeout(300)
+
+      // タイマー完了を待つ(完了行=border-warning)
+      await naviPage.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
+      await naviPage.waitForTimeout(400)
+
+      // NAVI-01(本題): 完了タイマーのタップ→ナビに留まり、該当手順カードがハイライトされる
+      const urlBeforeDoneTap = naviPage.url()
+      await naviPage.locator('div.fixed button.border-warning').first().click()
+      await naviPage.waitForTimeout(700)
+      check(
+        'NAVI-01 完了タイマーのタップでナビから離脱しない(単品詳細へ飛ばない)',
+        naviPage.url().includes('/cook-navi') && !/#\/recipes\/\d+/.test(naviPage.url()),
+        `before=${urlBeforeDoneTap} after=${naviPage.url()}`,
+      )
+      check(
+        'NAVI-01 完了タイマーのタップでナビ内の該当手順カードがハイライトされる',
+        (await naviPage.locator('li[class*="ring-2"]').count()) >= 1,
+      )
+      await naviPage.waitForTimeout(2200) // ハイライト消去を待つ
+
+      // NAVI-03: タイムラインを畳む(該当カードがDOMから消える)と、完了タイマーのタップは
+      // 従来どおり単品レシピ詳細へフォールバックする(ガードが両方向に効くことの確認)
+      currentCheck = 'NAVI-03'
+      await naviPage.getByRole('button', { name: 'レシピを選び直す' }).click()
+      await naviPage.waitForTimeout(400)
+      await naviPage.locator('div.fixed button.border-warning').first().click()
+      await naviPage.waitForTimeout(700)
+      check(
+        'NAVI-03 タイムラインが畳まれ該当カードが無いときは単品レシピ詳細へフォールバックする',
+        /#\/recipes\/\d+/.test(naviPage.url()),
+        `url=${naviPage.url()}`,
+      )
+    } finally {
+      await naviBrowser.close()
+    }
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
