@@ -39,7 +39,7 @@ import {
   type SortDirection,
 } from '../logic/recipeSort'
 import { isNutritionUnlocked, roundNutrient } from '../logic/nutrition'
-import { countFreeLimitRecipes, isNearFreeLimit, FREE_LIMIT } from '../logic/freeLimit'
+import { countFreeLimitRecipes, isNearFreeLimit, freeLimitRemaining } from '../logic/freeLimit'
 import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
@@ -487,7 +487,7 @@ export default function RecipesPage() {
         <p className="mt-[var(--space-sm)] rounded-sm bg-surface px-3 py-2 text-sm text-ink-muted">
           {ja.recipes.freeLimitNearBanner.replace(
             '{n}',
-            String(FREE_LIMIT - countFreeLimitRecipes(recipes)),
+            String(freeLimitRemaining(countFreeLimitRecipes(recipes))),
           )}
         </p>
       )}

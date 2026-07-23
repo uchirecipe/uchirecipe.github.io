@@ -28,7 +28,14 @@ import {
   detectCodeKind,
   maskUnlockCode,
 } from '../src/logic/pro.ts'
-import { isAtFreeLimit, isNearFreeLimit } from '../src/logic/freeLimit.ts'
+import {
+  isAtFreeLimit,
+  isNearFreeLimit,
+  isInWarningRange,
+  freeLimitRemaining,
+  FREE_LIMIT,
+  FREE_LIMIT_WARNING_THRESHOLD,
+} from '../src/logic/freeLimit.ts'
 import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
 import {
@@ -1225,6 +1232,18 @@ eq(
   '負例M-4: steps領域の「人数に合わせて量を調整してください」は従来どおり除去される',
   parseRecipeText('作り方\n1. 焼く\n人数に合わせて量を調整してください\n2. 盛り付ける').steps,
   ['焼く', '盛り付ける'],
+)
+// F7(2026-07-23 便BJ): 行全体がURLだけの行は手順に化けず除去される(共有テキスト末尾の入口URLや
+// レシピサイトからの貼り付けに混ざるリンク対策)。URLを含むだけの手順文(部分一致)は消えない
+eq(
+  'F7: 末尾のURL単独行(共有テキストの入口URL)は手順に混ざらない',
+  parseRecipeText('作り方\n1. 焼く\n2. 盛る\n\n#うちレシピ\nhttps://uchirecipe.com/').steps,
+  ['焼く', '盛る'],
+)
+eq(
+  '負例F7: URLを含むだけの手順文(行全体がURLでない)は消えない',
+  parseRecipeText('作り方\n1. https://example.com を参考に飾り付ける').steps,
+  ['https://example.com を参考に飾り付ける'],
 )
 {
   const r = parseRecipeText('作り方\n1. 生地を作る\n2.と3.を合わせる')
@@ -2654,6 +2673,21 @@ eq(
 // ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
 eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)
 eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), false)
+// 予告閾値を45→40へ引き下げ(2026-07-23 便BJ・docs/55 CEO提案:「40件あたりから静かにあと◯件を
+// 表示する。突然壁に当てるのが一番心証が悪い」)。発売時にFREE_LIMIT_ENABLEDをONにしたときの
+// 挙動を、フラグOFFの現状でも単体テストで固定する(フラグ非依存のisInWarningRangeで検証)
+eq('予告閾値は40件', FREE_LIMIT_WARNING_THRESHOLD, 40)
+eq('上限は50件', FREE_LIMIT, 50)
+eq('39件はまだ予告域でない', isInWarningRange(39), false)
+eq('40件から予告域に入る(最初のバナー)', isInWarningRange(40), true)
+eq('49件も予告域', isInWarningRange(49), true)
+eq('50件は予告でなくブロック域(予告域からは外れる)', isInWarningRange(50), false)
+eq('「あと◯件」: 40件時点はあと10件', freeLimitRemaining(40), 10)
+eq('「あと◯件」: 49件時点はあと1件', freeLimitRemaining(49), 1)
+eq('「あと◯件」: 50件以上でも負にならない', freeLimitRemaining(51), 0)
+// フラグOFFの現状は予告域でもバナーを出さない/Pro解錠済みは(将来ON時も)予告しない=不変条件
+eq('フラグOFF: 予告域(40件)でもisNearFreeLimitはfalse', isNearFreeLimit(40, false), false)
+eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
 
 // ---------- pickMainIngredients(一覧カードの主要食材=調味料・水・油・粉類・だし系・薬味少量
 // の名前辞書で除外。UI改善バッチ 2026-07-11 オーナー実機フィードバック「メインをはる材料に絞って」) ----------
@@ -4275,9 +4309,9 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 }
 
 // ---------- buildShareText(シェアの選択式・2026-07-16 Fable裁定docs/30裁定3) ----------
-// 回帰の狙い: opts省略時の出力を従来形式(2026-07-17時点)に固定する。固定部分(料理名・人数分・
-// 材料8件+…ほか・#アプリ名・URL)は従来とバイト単位で同一。「作り方は全◯ステップ」行だけは
-// 裁定3の字義解釈(オーナーの固定項目列挙に無い)で意図的に削除済み＝期待値にも含めない。
+// 2026-07-23 便BJ・docs/55 CEO提案2-1: テキスト共有を「貼り付けで丸ごと取り込める形式」に変更。
+// 料理名と人数分を別行にし、作り方(全手順)を【作り方】見出しつきで常に含める。末尾のアプリ名(#)と
+// 入口URLは宣伝枠として残しつつ、取り込み時に自動除去される(下の「share往復」テストで実証)。
 {
   const shareRecipe = {
     id: 1,
@@ -4306,8 +4340,8 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   }
 
   const expectedDefault = [
-    '肉じゃが（2人分）',
-    '',
+    '肉じゃが',
+    '2人分',
     '【材料】',
     '・牛こま切れ肉 200g',
     '・じゃがいも 3個',
@@ -4318,11 +4352,15 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     '・砂糖 大さじ2',
     '・しょうゆ 大さじ3',
     '…ほか',
+    '【作り方】',
+    '1. 切る',
+    '2. 炒める',
+    '3. 煮る',
     '',
     '#うちレシピ',
     'https://uchirecipe.com/',
   ].join('\n')
-  eq('share: opts省略は従来出力と一致(材料8件+…ほか・ステップ行なし)', buildShareText(shareRecipe), expectedDefault)
+  eq('share: opts省略は料理名/人数分/材料8件+…ほか/作り方の取り込み可能形式', buildShareText(shareRecipe), expectedDefault)
 
   // 全項目OFF(既定はテキストに任意行なし)のoptsを渡してもopts省略と同じ出力になる。
   // 「レシピ画像」は画像カード専用オプションで、テキスト出力には一切影響しない(仕様の※併記)
@@ -4330,10 +4368,10 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   eq('share: 全OFFのoptsはopts省略と同一', buildShareText(shareRecipe, offOpts), expectedDefault)
   eq('share: 画像ONはテキストに影響しない(画像カード専用)', buildShareText(shareRecipe, { ...offOpts, image: true }), expectedDefault)
 
-  // 組合せ1: 調理時間ON → 料理名行の直後に「調理時間 約◯分」が入る
+  // 組合せ1: 調理時間ON → 人数分の直後に「調理時間 約◯分」が入る
   const expectedWithCook = expectedDefault.replace(
-    '肉じゃが（2人分）\n\n【材料】',
-    '肉じゃが（2人分）\n調理時間 約30分\n\n【材料】',
+    '肉じゃが\n2人分\n【材料】',
+    '肉じゃが\n2人分\n調理時間 約30分\n【材料】',
   )
   eq('share: 調理時間ONで行が入る', buildShareText(shareRecipe, { ...offOpts, cookMinutes: true }), expectedWithCook)
   // 調理時間のデータが無いレシピではONを渡しても行が出ない(グレーアウトの防波堤)
@@ -4345,8 +4383,8 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 
   // 組合せ2: 原価ON → 登録人数基準の1人分/全量(実数値はRecipeDetailPage側が渡す)
   const expectedWithCost = expectedDefault.replace(
-    '肉じゃが（2人分）\n\n【材料】',
-    '肉じゃが（2人分）\n原価 1人分 約210円／全量（2人分） 約420円\n\n【材料】',
+    '肉じゃが\n2人分\n【材料】',
+    '肉じゃが\n2人分\n原価 1人分 約210円／全量（2人分） 約420円\n【材料】',
   )
   eq(
     'share: 原価ONで1人分/全量の行が入る',
@@ -4358,8 +4396,8 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 
   // 組合せ3: 栄養ON → カロリー・塩分の2項目のみ+「めやす」表記必須
   const expectedWithNutrition = expectedDefault.replace(
-    '肉じゃが（2人分）\n\n【材料】',
-    '肉じゃが（2人分）\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n\n【材料】',
+    '肉じゃが\n2人分\n【材料】',
+    '肉じゃが\n2人分\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n【材料】',
   )
   eq(
     'share: 栄養ONでカロリー・塩分(めやす)の行が入る',
@@ -4370,8 +4408,8 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 
   // 組合せ4: 材料をすべて載せる → 9件全部が並び「…ほか」は消える
   const expectedAll = [
-    '肉じゃが（2人分）',
-    '',
+    '肉じゃが',
+    '2人分',
     '【材料】',
     '・牛こま切れ肉 200g',
     '・じゃがいも 3個',
@@ -4382,6 +4420,10 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     '・砂糖 大さじ2',
     '・しょうゆ 大さじ3',
     '・水 300ml',
+    '【作り方】',
+    '1. 切る',
+    '2. 炒める',
+    '3. 煮る',
     '',
     '#うちレシピ',
     'https://uchirecipe.com/',
@@ -4390,8 +4432,8 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
 
   // 全部ON: 任意行の順序は 調理時間→原価→栄養(仕様のモーダル並び順と同じ)
   const expectedFull = expectedAll.replace(
-    '肉じゃが（2人分）\n\n【材料】',
-    '肉じゃが（2人分）\n調理時間 約30分\n原価 1人分 約210円／全量（2人分） 約420円\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n\n【材料】',
+    '肉じゃが\n2人分\n【材料】',
+    '肉じゃが\n2人分\n調理時間 約30分\n原価 1人分 約210円／全量（2人分） 約420円\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n【材料】',
   )
   eq(
     'share: 全部ONの行順は調理時間→原価→栄養',
@@ -4408,6 +4450,47 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
     }),
     expectedFull,
   )
+
+  // share往復(2026-07-23 便BJ・docs/55 CEO提案2-1): コピーした全文をそのまま貼り付けパーサーに
+  // 通すと、料理名・人数分・材料・作り方が過不足なく復元される(=見る専用でなく取り込める形式)。
+  // 末尾のアプリ名(#)・入口URLは宣伝枠として残るが、取り込み時に手順へ化けず自動除去される。
+  {
+    const shared = buildShareText(shareRecipe, { ...offOpts, allIngredients: true })
+    const parsed = parseRecipeText(shared)
+    eq('share往復: 料理名が(人数分の括弧に汚れず)復元', parsed.title, '肉じゃが')
+    eq('share往復: 人数分が復元', parsed.servings, 2)
+    eq(
+      'share往復: 材料名が全件復元',
+      parsed.ingredients.map((i) => i.name),
+      shareRecipe.ingredients.map((i) => i.name),
+    )
+    eq(
+      'share往復: 材料の分量+単位が復元(大さじの並び順も一致)',
+      parsed.ingredients.map((i) => formatAmountUnit(i.amount, i.unit)),
+      shareRecipe.ingredients.map((i) => formatAmountUnit(i.amount, i.unit)),
+    )
+    eq(
+      'share往復: 作り方が全手順復元',
+      parsed.steps,
+      shareRecipe.steps.map((s) => s.text),
+    )
+    eq('share往復: 末尾のアプリ名(#)・URLは手順に混ざらない', parsed.steps.length, shareRecipe.steps.length)
+  }
+
+  // 手順が1つも無いレシピでは【作り方】見出しごと省く(空見出しを残さない)。往復も材料まで成立する
+  {
+    const noSteps = { ...shareRecipe, steps: [] }
+    const text = buildShareText(noSteps, { ...offOpts, allIngredients: true })
+    eq('share: 手順なしレシピは【作り方】見出しが出ない', text.includes('【作り方】'), false)
+    const parsed = parseRecipeText(text)
+    eq('share往復(手順なし): 料理名が復元', parsed.title, '肉じゃが')
+    eq(
+      'share往復(手順なし): 材料は全件復元',
+      parsed.ingredients.map((i) => i.name),
+      noSteps.ingredients.map((i) => i.name),
+    )
+    eq('share往復(手順なし): 作り方は空', parsed.steps, [])
+  }
 }
 
 // ============================================================================

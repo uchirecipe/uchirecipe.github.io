@@ -56,7 +56,7 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
   return lines
 }
 
-/** シェア用の文章を組み立てる。opts省略時は従来出力(固定項目のみ)と同一 */
+/** シェア用の文章を組み立てる。貼り付けパーサー(parseRecipeText)がそのまま取り込める形式。 */
 export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
   const listed = opts?.allIngredients ? recipe.ingredients : recipe.ingredients.slice(0, 8)
   const ingredients = listed
@@ -70,11 +70,16 @@ export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
     optionalLines.push(ja.share.lineCookMinutes.replace('{n}', String(recipe.cookMinutes)))
   }
   optionalLines.push(...buildCostNutritionLines(recipe, opts))
+  // 作り方(全手順)。貼り付けパーサーが番号つき手順として復元できるよう「N. 本文」で並べる。
+  // 手順が1つも無いレシピでは見出しごと省く(空の【作り方】が付かないように)
+  const stepText = recipe.steps.map((s, i) => `${i + 1}. ${s.text}`).join('\n')
+  const stepsBlock = stepText ? `${ja.share.stepsHeading}\n${stepText}\n` : ''
   return ja.share.textTemplate
     .replace('{title}', recipe.title)
     .replace('{servings}', String(recipe.servings))
     .replace('{lines}', optionalLines.length > 0 ? `${optionalLines.join('\n')}\n` : '')
     .replace('{ingredients}', ingredients + more)
+    .replace('{steps}', stepsBlock)
     .replace('{app}', ja.app.name)
     .replace('{url}', ja.app.url)
 }
