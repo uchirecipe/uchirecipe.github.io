@@ -42,7 +42,7 @@ import {
   rangeDayCount,
 } from '../src/logic/mealPlan.ts'
 import { buildShoppingCandidates } from '../src/logic/shopping.ts'
-import { hasLaterHandsOnStep, classifyStep, buildCookTimeline } from '../src/logic/cookNavi.ts'
+import { hasLaterHandsOnStep, classifyStep, resolveStepMinutes, buildCookTimeline } from '../src/logic/cookNavi.ts'
 import {
   resolveDuplicateTitleAction,
   buildUpdatedSetRecipe,
@@ -1808,6 +1808,47 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     classifyStep({ text: '3分炒める', minutes: 3 }),
     'active',
   )
+}
+
+// ---------- classifyStep / resolveStepMinutes(並行調理ナビ: step.minutesが空でも本文の時間表記から
+// 待ち分数を推定して分類する。2026-07-23 便BI・Fable裁定。貼り付け/URL取り込みのレシピはminutesが
+// 空になる実態への対応。安全側=待ち動詞ホワイトリスト維持・迷ったら手作業・明示minutes最優先) ----------
+{
+  // 本文から待ち分数を推定して待ち系に分類する(minutes未設定=貼り付け相当)
+  eq('ナビ推定: 「鍋で15分煮る」(minutes無)は待ち系', classifyStep({ text: '鍋で15分煮る' }), 'wait')
+  eq('ナビ推定: 「弱火で20分煮込む」(minutes無)は待ち系', classifyStep({ text: '弱火で20分煮込む' }), 'wait')
+  eq('ナビ推定: 「10分蒸らす」(minutes無)は待ち系', classifyStep({ text: '10分蒸らす' }), 'wait')
+  eq('ナビ推定: 「そのまま10分おく」(minutes無)は待ち系', classifyStep({ text: 'そのまま10分おく' }), 'wait')
+  eq('ナビ推定: 「600Wで3分加熱する」(minutes無)は待ち系(レンジ出力ワット数)', classifyStep({ text: '600Wで3分加熱する' }), 'wait')
+  // 安全側: 待ち動詞でない工程は本文に時間があっても手作業系のまま
+  eq('ナビ推定: 「5分炒める」(minutes無)は手作業系(炒めは目を離せない)', classifyStep({ text: '5分炒める' }), 'active')
+  eq('ナビ推定: 「フライパンで3分焼く」(minutes無)は手作業系(素の焼く)', classifyStep({ text: 'フライパンで3分焼く' }), 'active')
+  // 安全側: 1分未満(秒だけ)の待ちは並行の実益が無いので手作業系に倒す
+  eq('ナビ推定: 「30秒茹でる」(minutes無)は手作業系(秒だけの待ちは並行しない)', classifyStep({ text: '30秒茹でる' }), 'active')
+  // 安全側: 待ち動詞でも分数の手掛かりが全く無ければ手作業系に倒す
+  eq('ナビ推定: 「じっくり煮込む」(時間表記なし)は手作業系(分数不明)', classifyStep({ text: 'じっくり煮込む' }), 'active')
+  // 待ち動詞も時間も無いふつうの工程は手作業系
+  eq('ナビ推定: 「材料を切る」は手作業系', classifyStep({ text: '材料を切る' }), 'active')
+
+  // resolveStepMinutes: 明示minutesが本文推定より優先される(明示データ>推定)
+  eq('ナビ推定: 明示minutesは本文の時間より優先(15分本文でもminutes:20を採用)', resolveStepMinutes({ text: '15分煮る', minutes: 20 }), 20)
+  eq('ナビ推定: minutes無なら本文の15分を採用', resolveStepMinutes({ text: '鍋で15分煮る' }), 15)
+  eq('ナビ推定: 複数の時間表記があれば最長を採用(10分煮て5分蒸らす→10)', resolveStepMinutes({ text: '10分煮て5分蒸らす' }), 10)
+  eq('ナビ推定: 秒だけ(30秒)は推定対象外(undefined)', resolveStepMinutes({ text: '30秒茹でる' }), undefined)
+  eq('ナビ推定: 時間表記が無ければundefined', resolveStepMinutes({ text: 'じっくり煮込む' }), undefined)
+
+  // タイムライン: 貼り付け相当(minutes無)でも長い待ちが認識され、隙間に別レシピの手作業が入る
+  const timeline = buildCookTimeline([
+    { id: 1, title: '煮物', steps: [{ text: '材料を切る' }, { text: '鍋で15分煮る' }, { text: '盛る' }] },
+    { id: 2, title: 'サラダ', steps: [{ text: '野菜を切る' }, { text: 'ドレッシングと和える' }] },
+  ])
+  const simmer = timeline.items.find((it) => it.text === '鍋で15分煮る')
+  eq('ナビ組立: minutes無の「15分煮る」が待ち系として計上される', simmer?.kind, 'wait')
+  eq('ナビ組立: minutes無でも待ち分数が本文から15分として入る', simmer?.waitMinutes, 15)
+  // 待ち(order 2)の直後に別レシピ(サラダ)の手作業が差し込まれている=並行化されている
+  const simmerOrder = simmer?.order ?? 0
+  const nextItem = timeline.items.find((it) => it.order === simmerOrder + 1)
+  eq('ナビ組立: 15分の待ちの隙間に別レシピの手作業が差し込まれる', nextItem?.recipeTitle, 'サラダ')
 }
 
 // ---------- buildCookTimeline(並行調理ナビ: フライパン焼き中に他レシピを差し込ませない。

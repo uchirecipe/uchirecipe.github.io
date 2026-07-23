@@ -1,4 +1,5 @@
 import type { Recipe, Step } from '../db/types'
+import { findTimeTokens } from './time'
 
 /**
  * 並行調理ナビ（Pro）の中核ロジック。
@@ -53,19 +54,42 @@ export const WAIT_VERB_PATTERNS: RegExp[] = [
   /温め|あたため/, // 温める
   /オーブン/, // オーブン
   /レンジ|電子レンジ|チン/, // 電子レンジ
+  /[0-9０-９]+\s*[WＷ]/, // 「600Wで3分加熱」等のレンジ出力ワット数（点火後は基本放置でよい）
   /発酵/, // 発酵
   /なじ|馴染/, // 味をなじませる
   /しみ|染み/, // 味をしみ込ませる
   /置い|置く|おく|おき/, // そのまま10分おく 等（minutes があるときのみ待ち扱いになる）
 ]
 
-/** 手順1つを「待ち系」か「手作業系」かに分類する */
+/**
+ * 手順の待ち分数（分）を求める。
+ * 明示された step.minutes を最優先し（明示データ＞推定）、無ければ本文の時間表記から
+ * 推定する（2026-07-23 便BI・Fable裁定。貼り付け／URL取り込みのレシピは minutes が空で、
+ * 長い待ちが認識されず段取り精度が落ちていた実態への対応）。推定はタイマー機能と同じ
+ * findTimeTokens を情報源にし、複数あるときは最長を採る。1分未満（秒だけ）の待ちは
+ * 並行しても実益が乏しく、むしろ誤って別作業を挟ませる実害の方が大きいので推定対象から
+ * 外す（安全側＝手作業に倒す）。明示 minutes は 1分未満でも尊重する。
+ */
+export function resolveStepMinutes(step: Step): number | undefined {
+  if (step.minutes != null && step.minutes > 0) return step.minutes
+  const tokens = findTimeTokens(step.text)
+  if (tokens.length === 0) return undefined
+  const maxSeconds = Math.max(...tokens.map((t) => t.seconds))
+  if (maxSeconds < 60) return undefined
+  return Math.round(maxSeconds / 60)
+}
+
+/**
+ * 手順1つを「待ち系」か「手作業系」かに分類する。
+ * 待ち動詞（WAIT_VERB_PATTERNS）を含まない手順（切る・混ぜる・炒める・素の焼く等）は
+ * 常に手作業系（安全側の既定）。待ち動詞を含む手順は、待ち分数が分かるとき（明示 minutes
+ * または本文の時間表記から推定できるとき）だけ待ち系にする。時間が全く分からない待ち動詞
+ * （「じっくり煮込む」等、分数の手掛かりが無いもの）は、どれだけ手を離してよいか不明なので
+ * 手作業系に倒す（安全側。誤って待ち扱いにして別作業を挟ませる方が実害が大きい）。
+ */
 export function classifyStep(step: Step): StepKind {
-  const minutes = step.minutes
-  if (minutes != null && minutes > 0 && WAIT_VERB_PATTERNS.some((re) => re.test(step.text))) {
-    return 'wait'
-  }
-  return 'active'
+  if (!WAIT_VERB_PATTERNS.some((re) => re.test(step.text))) return 'active'
+  return resolveStepMinutes(step) != null ? 'wait' : 'active'
 }
 
 /**
@@ -143,7 +167,11 @@ function buildJobs(recipes: Recipe[]): Job[] {
       readyAt: 0,
       steps: r.steps.map((s, i) => {
         const kind = classifyStep(s)
-        const waitMinutes = kind === 'wait' ? (s.minutes ?? 0) : 0
+        // 待ちの分数は明示 minutes ＞本文推定の順で解決する（classifyStep が wait を返した
+        // 時点で resolveStepMinutes は必ず値を持つ）。手作業系の順序計算は従来どおり明示
+        // minutes か DEFAULT_ACTIVE_MINUTES を使う（本文推定は待ちの認識だけに使い、
+        // 手作業の所要時間は変えない＝順序への影響を待ち認識の改善だけに限定する）
+        const waitMinutes = kind === 'wait' ? (resolveStepMinutes(s) ?? 0) : 0
         const activeMinutes =
           kind === 'active'
             ? s.minutes != null && s.minutes > 0
