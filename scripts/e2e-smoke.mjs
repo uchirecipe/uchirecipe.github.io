@@ -6399,6 +6399,30 @@ try {
                 body: JSON.stringify({ ok: false, error: 'no_recipe' }),
               })
             }
+            // colon-marker: おいしい健康(https://oishi-kenko.com/recipes/22619)相当のコロン書式・
+            // 括弧グラム併記。Worker側は「末尾の空白で名前と分量を切る」ため name に分量が食い込んだ
+            // 状態(木綿豆腐: 75 / g など)で返ってくるのを模す。app側 normalizeImportedIngredient が
+            // 貼り付け経路と同じロジックで木綿豆腐/75/g・白ごま/小さじ1/3・ごま油/小さじ1/2 に修復すること
+            if (target.includes('colon-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: 'コロン書式レシピ',
+                    ingredients: [
+                      { name: '木綿豆腐: 75', amount: 'g' },
+                      { name: '白ごま: 小さじ1/3 (1', amount: 'g)' },
+                      { name: 'ごま油: 小さじ1/2 (2', amount: 'g)' },
+                    ],
+                    steps: ['豆腐を切る', 'ごまをふる'],
+                    servings: 2,
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
             if (target.includes('fetch-failed-marker')) {
               return route.fulfill({
                 status: 200,
@@ -6585,6 +6609,39 @@ try {
             .locator('img[alt="E2Eモック鍋"]')
             .isVisible()
             .catch(() => false)),
+        )
+
+        // --- コロン書式・括弧グラム併記(おいしい健康 https://oishi-kenko.com/recipes/22619 相当)の
+        // 経路統一。Worker側で name に分量が食い込んだ材料でも、app側 normalizeImportedIngredient が
+        // 貼り付け経路と同じロジックで 名前/分量/単位 に修復することを確認する(2026-07-23) ---
+        currentCheck = 'URLIMPORT-07'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/colon-marker-recipe')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        const colonNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
+        const colonAmountInputs = uiPage.locator('input[placeholder="例: 3"]')
+        const colonUnitInputs = uiPage.locator('input[placeholder="例: 個"]')
+        check(
+          'URLIMPORT-07 コロン書式「木綿豆腐: 75 g」→ name=木綿豆腐/amount=75/unit=g に修復',
+          (await colonNameInputs.nth(0).inputValue()) === '木綿豆腐' &&
+            (await colonAmountInputs.nth(0).inputValue()) === '75' &&
+            (await colonUnitInputs.nth(0).inputValue()) === 'g',
+        )
+        check(
+          'URLIMPORT-07 括弧グラム併記「白ごま: 小さじ1/3 (1 g)」→ name=白ごま/amount=1/3/unit=小さじ に修復',
+          (await colonNameInputs.nth(1).inputValue()) === '白ごま' &&
+            (await colonAmountInputs.nth(1).inputValue()) === '1/3' &&
+            (await colonUnitInputs.nth(1).inputValue()) === '小さじ',
+        )
+        check(
+          'URLIMPORT-07 括弧グラム併記「ごま油: 小さじ1/2 (2 g)」→ name=ごま油/amount=1/2/unit=小さじ に修復',
+          (await colonNameInputs.nth(2).inputValue()) === 'ごま油' &&
+            (await colonAmountInputs.nth(2).inputValue()) === '1/2' &&
+            (await colonUnitInputs.nth(2).inputValue()) === '小さじ',
         )
       } finally {
         await uiBrowser.close()

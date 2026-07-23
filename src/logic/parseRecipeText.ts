@@ -160,11 +160,17 @@ export function splitQuantity(raw: string): { amount: string; unit: string; memo
   const normalizeRangeAmount = (s: string) => s.replace(/\s*[〜~～]\s*/, '〜')
 
   // 「大さじ2」「小さじ1/2」「カップ1」「大さじ2〜3」→ 単位が前に来る形。
-  // 末尾の「杯」(「大さじ2杯」macaroni実測)は数量に対する冗長な助数詞なので、あれば読み捨てる
+  // 末尾の「杯」(「大さじ2杯」macaroni実測)は数量に対する冗長な助数詞なので、あれば読み捨てる。
+  // 末尾の括弧書き(「小さじ1/3 (1 g)」おいしい健康実測のグラム併記)は数量に混ぜず、
+  // 数字後置形(下のpost)と同じくメモとして分離する(2026-07-23 URL取り込み経路統一)。
   const pre = text.match(
-    /^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*(\d+(?:\.\d+)?(?:\/\d+)?(?:\s*[〜~～]\s*\d+(?:\.\d+)?(?:\/\d+)?)?)杯?$/,
+    /^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*(\d+(?:\.\d+)?(?:\/\d+)?(?:\s*[〜~～]\s*\d+(?:\.\d+)?(?:\/\d+)?)?)杯?\s*(?:[（(]([^（）()]+)[）)])?$/,
   )
-  if (pre) return { amount: normalizeRangeAmount(pre[2]), unit: pre[1] }
+  if (pre) {
+    const amount = normalizeRangeAmount(pre[2])
+    const memo = pre[3]?.trim()
+    return memo ? { amount, unit: pre[1], memo } : { amount, unit: pre[1] }
+  }
 
   // 「200g」「1本」「1/2個」「2〜3個」→ 数字が前に来る形
   const post = text.match(
@@ -245,6 +251,26 @@ function parseIngredientLine(rawLine: string): ParsedIngredient | undefined {
   }
 
   return undefined
+}
+
+/**
+ * URL取り込み(Worker側 workers/recipe-import/src/normalize.ts が name+amount まで分けた材料)を、
+ * 貼り付け経路と同じ parseIngredientLine に通して name/amount/unit/memo へ正規化する共通関数。
+ *
+ * Worker側の分割は「末尾の空白で名前と分量を切る」実装のため、「木綿豆腐: 75 g」のコロン書式や
+ * 「小さじ1/3 (1 g)」の括弧グラム併記(おいしい健康 実測)では name 側に分量が食い込んでしまい、
+ * 数値変換不能な材料が栄養計算の対象外になっていた(2026-07-23 オーナー実機報告)。
+ * ここで name と amount を元の1行に組み直し、貼り付け側と同一のロジック(コロン区切り・全半角
+ * スペース区切り・末尾括弧グラム併記に対応)で解釈し直すことで、取り込み経路を貼り付け経路と統一する。
+ * 分量なしのグループ見出し等、材料行として解釈できないものは名前(と元の分量)だけを拾う。
+ */
+export function normalizeImportedIngredient(name: string, amount?: string): ParsedIngredient {
+  const trimmedName = name.trim()
+  const trimmedAmount = (amount ?? '').trim()
+  const full = trimmedAmount ? `${trimmedName} ${trimmedAmount}` : trimmedName
+  const parsed = parseIngredientLine(full)
+  if (parsed && parsed.name) return parsed
+  return { name: trimmedName, amount: trimmedAmount, unit: '' }
 }
 
 // ============================================================================
