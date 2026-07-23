@@ -97,6 +97,161 @@
           "cookMinutes": 15
         }
       ]
+    },
+    {
+      "id": "diet",
+      "file": "/sets/data/diet.json",
+      "title": "がまんしないダイエットごはん",
+      "description": "カロリー控えめでも満足感しっかり。レンジ中心で疲れた日にも作れる10品",
+      "addedDate": "2026-07-23",
+      "items": [
+        {
+          "title": "豆腐ときのこの和風あんかけ",
+          "cookMinutes": 15
+        },
+        {
+          "title": "鶏ささみの梅しそレンジ蒸し",
+          "cookMinutes": 10
+        },
+        {
+          "title": "しらたきのチャプチェ風",
+          "cookMinutes": 15
+        },
+        {
+          "title": "きのこの和風マリネ",
+          "cookMinutes": 15
+        },
+        {
+          "title": "白菜と豚しゃぶのレンジ蒸し",
+          "cookMinutes": 15
+        },
+        {
+          "title": "豆腐グラタン",
+          "cookMinutes": 20
+        },
+        {
+          "title": "フルーツヨーグルトバーク",
+          "cookMinutes": 10
+        },
+        {
+          "title": "たらの香味レンジ蒸し",
+          "cookMinutes": 15
+        },
+        {
+          "title": "よだれ鶏",
+          "cookMinutes": 25
+        },
+        {
+          "title": "豆乳担々スープ",
+          "cookMinutes": 15
+        }
+      ]
+    },
+    {
+      "id": "summer",
+      "file": "/sets/data/summer.json",
+      "title": "夏のさっぱり和食",
+      "description": "冷や汁、冷しゃぶ、冷やしトマトの浅漬け。食欲が落ちる日も箸がすすむ10品",
+      "addedDate": "2026-07-23",
+      "items": [
+        {
+          "title": "冷やし茶碗蒸し",
+          "cookMinutes": 30
+        },
+        {
+          "title": "梅しそ冷奴",
+          "cookMinutes": 10
+        },
+        {
+          "title": "えびと薬味の香味だれそうめん",
+          "cookMinutes": 20
+        },
+        {
+          "title": "冷しゃぶサラダ",
+          "cookMinutes": 15
+        },
+        {
+          "title": "冷や汁",
+          "cookMinutes": 15
+        },
+        {
+          "title": "冷やしトマトの浅漬け",
+          "cookMinutes": 15
+        },
+        {
+          "title": "オクラと長芋の梅肉あえ",
+          "cookMinutes": 10
+        },
+        {
+          "title": "ゴーヤチャンプルー",
+          "cookMinutes": 35
+        },
+        {
+          "title": "梅おろしぶっかけうどん",
+          "cookMinutes": 20
+        },
+        {
+          "title": "水ようかん",
+          "cookMinutes": 10
+        },
+        {
+          "title": "だしのとり方",
+          "cookMinutes": 15
+        }
+      ]
+    },
+    {
+      "id": "freezer",
+      "file": "/sets/data/freezer.json",
+      "title": "下味冷凍・まとめ作り置き",
+      "description": "タンドリーチキン、プルコギ、えびのガーリックオイルなど。生のまま下味だけつけて冷凍、平日は解凍して焼くだけ。どれも週末に10分で仕込める11品",
+      "addedDate": "2026-07-23",
+      "items": [
+        {
+          "title": "鶏もも肉のタンドリー風",
+          "cookMinutes": 10
+        },
+        {
+          "title": "豚肉のケチャップ炒め",
+          "cookMinutes": 10
+        },
+        {
+          "title": "鮭のハーブレモン焼き",
+          "cookMinutes": 10
+        },
+        {
+          "title": "鶏むね肉のオイスター炒め",
+          "cookMinutes": 10
+        },
+        {
+          "title": "牛肉のプルコギ風",
+          "cookMinutes": 10
+        },
+        {
+          "title": "鶏もも肉のガーリックハーブ焼き",
+          "cookMinutes": 10
+        },
+        {
+          "title": "えびのガーリックオイル炒め",
+          "cookMinutes": 10
+        },
+        {
+          "title": "豚肉の甜麺醤炒め",
+          "cookMinutes": 10
+        },
+        {
+          "title": "鶏むね肉のレモンペッパー炒め",
+          "cookMinutes": 10
+        },
+        {
+          "title": "鮭の西京みそ漬け",
+          "cookMinutes": 10
+        },
+        {
+          "title": "さわらの西京焼き",
+          "cookMinutes": 10
+        }
+      ]
     }
   ]
 }

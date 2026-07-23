@@ -2983,7 +2983,7 @@ eq('紫キャベツは紫カテゴリ(キャベツの野菜カテゴリより優
 
 // ---------- pickIconKey: 自動判定アイコンの全品スナップショット(2026-07-12 全面改修時の監査。
 // 2026-07-15 アイコン分類改訂[docs/28]でpasta/vegetable/tofu新設に伴い19件を再ベースライン) ----------
-// starters全品(51) + public/sets/data/*.json全品(bento/kintore/review2/review8/review16)の
+// starters全品(51) + public/sets/data/*.json全品(bento/kintore/diet/summer/freezer)の
 // title→期待キーを丸ごと並べる。今後の規則調整で意図せず判定が変わったらここで落ちる。
 // (このテストが失敗しても即バグとは限らない。意図した変更ならこの期待表を更新すること)
 const iconKeyExpected = {

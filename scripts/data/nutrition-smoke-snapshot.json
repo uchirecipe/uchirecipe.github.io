@@ -1075,7 +1075,7 @@
       "塩(amount)"
     ]
   },
-  "review8:冷やし茶碗蒸し": {
+  "summer:冷やし茶碗蒸し": {
     "servings": 2,
     "perServing": {
       "kcal": 119,
@@ -1091,7 +1091,7 @@
       "みつば(または小ねぎ)(amount)"
     ]
   },
-  "review8:梅しそ冷奴": {
+  "summer:梅しそ冷奴": {
     "servings": 2,
     "perServing": {
       "kcal": 115,
@@ -1107,7 +1107,7 @@
       "かつお節(amount)"
     ]
   },
-  "review8:えびと薬味の香味だれそうめん": {
+  "summer:えびと薬味の香味だれそうめん": {
     "servings": 2,
     "perServing": {
       "kcal": 415,
@@ -1123,7 +1123,7 @@
       "白いりごま(amount)"
     ]
   },
-  "review8:冷しゃぶサラダ": {
+  "summer:冷しゃぶサラダ": {
     "servings": 2,
     "perServing": {
       "kcal": 303,
@@ -1139,7 +1139,7 @@
       "白いりごま(amount)"
     ]
   },
-  "review8:冷や汁": {
+  "summer:冷や汁": {
     "servings": 2,
     "perServing": {
       "kcal": 589,
@@ -1155,7 +1155,7 @@
       "塩(prep)"
     ]
   },
-  "review8:冷やしトマトの浅漬け": {
+  "summer:冷やしトマトの浅漬け": {
     "servings": 2,
     "perServing": {
       "kcal": 43,
@@ -1169,7 +1169,7 @@
     },
     "excluded": []
   },
-  "review8:オクラと長芋の梅肉あえ": {
+  "summer:オクラと長芋の梅肉あえ": {
     "servings": 2,
     "perServing": {
       "kcal": 67,
@@ -1186,7 +1186,7 @@
       "塩(prep)"
     ]
   },
-  "review8:ゴーヤチャンプルー": {
+  "summer:ゴーヤチャンプルー": {
     "servings": 2,
     "perServing": {
       "kcal": 552,
@@ -1203,7 +1203,7 @@
       "塩(prep)"
     ]
   },
-  "review8:梅おろしぶっかけうどん": {
+  "summer:梅おろしぶっかけうどん": {
     "servings": 2,
     "perServing": {
       "kcal": 257,
@@ -1219,7 +1219,7 @@
       "みょうが(amount)"
     ]
   },
-  "review8:水ようかん": {
+  "summer:水ようかん": {
     "servings": 4,
     "perServing": {
       "kcal": 193,
@@ -1233,7 +1233,7 @@
     },
     "excluded": []
   },
-  "review8:だしのとり方": {
+  "summer:だしのとり方": {
     "servings": 2,
     "perServing": {
       "kcal": 42,
@@ -1247,7 +1247,7 @@
     },
     "excluded": []
   },
-  "review2:豆腐ときのこの和風あんかけ": {
+  "diet:豆腐ときのこの和風あんかけ": {
     "servings": 2,
     "perServing": {
       "kcal": 200,
@@ -1263,7 +1263,7 @@
       "小ねぎ(小口切り)(amount)"
     ]
   },
-  "review2:鶏ささみの梅しそレンジ蒸し": {
+  "diet:鶏ささみの梅しそレンジ蒸し": {
     "servings": 2,
     "perServing": {
       "kcal": 110,
@@ -1277,7 +1277,7 @@
     },
     "excluded": []
   },
-  "review2:しらたきのチャプチェ風": {
+  "diet:しらたきのチャプチェ風": {
     "servings": 2,
     "perServing": {
       "kcal": 185,
@@ -1293,7 +1293,7 @@
       "白いりごま(amount)"
     ]
   },
-  "review2:きのこの和風マリネ": {
+  "diet:きのこの和風マリネ": {
     "servings": 2,
     "perServing": {
       "kcal": 104,
@@ -1307,7 +1307,7 @@
     },
     "excluded": []
   },
-  "review2:白菜と豚しゃぶのレンジ蒸し": {
+  "diet:白菜と豚しゃぶのレンジ蒸し": {
     "servings": 2,
     "perServing": {
       "kcal": 302,
@@ -1323,7 +1323,7 @@
       "万能ねぎ(小口切り)(amount)"
     ]
   },
-  "review2:豆腐グラタン": {
+  "diet:豆腐グラタン": {
     "servings": 2,
     "perServing": {
       "kcal": 262,
@@ -1337,7 +1337,7 @@
     },
     "excluded": []
   },
-  "review2:フルーツヨーグルトバーク": {
+  "diet:フルーツヨーグルトバーク": {
     "servings": 4,
     "perServing": {
       "kcal": 110,
@@ -1354,7 +1354,7 @@
       "ブルーベリー(amount)"
     ]
   },
-  "review2:たらの香味レンジ蒸し": {
+  "diet:たらの香味レンジ蒸し": {
     "servings": 2,
     "perServing": {
       "kcal": 141,
@@ -1368,7 +1368,7 @@
     },
     "excluded": []
   },
-  "review2:よだれ鶏": {
+  "diet:よだれ鶏": {
     "servings": 2,
     "perServing": {
       "kcal": 249,
@@ -1382,7 +1382,7 @@
     },
     "excluded": []
   },
-  "review2:豆乳担々スープ": {
+  "diet:豆乳担々スープ": {
     "servings": 2,
     "perServing": {
       "kcal": 218,
@@ -1399,7 +1399,7 @@
       "小ねぎ(小口切り)(amount)"
     ]
   },
-  "review16:鶏もも肉のタンドリー風": {
+  "freezer:鶏もも肉のタンドリー風": {
     "servings": 2,
     "perServing": {
       "kcal": 349,
@@ -1413,7 +1413,7 @@
     },
     "excluded": []
   },
-  "review16:豚肉のケチャップ炒め": {
+  "freezer:豚肉のケチャップ炒め": {
     "servings": 2,
     "perServing": {
       "kcal": 320,
@@ -1427,7 +1427,7 @@
     },
     "excluded": []
   },
-  "review16:鮭のハーブレモン焼き": {
+  "freezer:鮭のハーブレモン焼き": {
     "servings": 2,
     "perServing": {
       "kcal": 183,
@@ -1441,7 +1441,7 @@
     },
     "excluded": []
   },
-  "review16:鶏むね肉のオイスター炒め": {
+  "freezer:鶏むね肉のオイスター炒め": {
     "servings": 2,
     "perServing": {
       "kcal": 217,
@@ -1455,7 +1455,7 @@
     },
     "excluded": []
   },
-  "review16:牛肉のプルコギ風": {
+  "freezer:牛肉のプルコギ風": {
     "servings": 2,
     "perServing": {
       "kcal": 371,
@@ -1469,7 +1469,7 @@
     },
     "excluded": []
   },
-  "review16:鶏もも肉のガーリックハーブ焼き": {
+  "freezer:鶏もも肉のガーリックハーブ焼き": {
     "servings": 2,
     "perServing": {
       "kcal": 371,
@@ -1483,7 +1483,7 @@
     },
     "excluded": []
   },
-  "review16:えびのガーリックオイル炒め": {
+  "freezer:えびのガーリックオイル炒め": {
     "servings": 2,
     "perServing": {
       "kcal": 193,
@@ -1499,7 +1499,7 @@
       "赤唐辛子(小口切り)(amount)"
     ]
   },
-  "review16:豚肉の甜麺醤炒め": {
+  "freezer:豚肉の甜麺醤炒め": {
     "servings": 2,
     "perServing": {
       "kcal": 381,
@@ -1513,7 +1513,7 @@
     },
     "excluded": []
   },
-  "review16:鶏むね肉のレモンペッパー炒め": {
+  "freezer:鶏むね肉のレモンペッパー炒め": {
     "servings": 2,
     "perServing": {
       "kcal": 223,
@@ -1527,7 +1527,7 @@
     },
     "excluded": []
   },
-  "review16:鮭の西京みそ漬け": {
+  "freezer:鮭の西京みそ漬け": {
     "servings": 2,
     "perServing": {
       "kcal": 185,
@@ -1543,7 +1543,7 @@
       "サラダ油(amount)"
     ]
   },
-  "review16:さわらの西京焼き": {
+  "freezer:さわらの西京焼き": {
     "servings": 2,
     "perServing": {
       "kcal": 217,

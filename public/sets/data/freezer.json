@@ -1,9 +1,10 @@
 {
   "app": "uchi-recipe",
   "version": 1,
-  "exportedAt": "2026-07-16T12:47:52.145Z",
-  "setId": "review16",
-  "setName": "【下見】第16弾 下味冷凍・まとめ作り置き",
+  "exportedAt": "2026-07-23T04:35:15.003Z",
+  "setId": "freezer",
+  "setName": "下味冷凍・まとめ作り置き",
+  "setVersion": 1,
   "recipes": [
     {
       "title": "鶏もも肉のタンドリー風",
