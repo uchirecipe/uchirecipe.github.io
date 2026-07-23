@@ -27,7 +27,7 @@ import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from
 import { useSettings } from '../db/settings'
 import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
-import { parseRecipeText, splitQuantity, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
+import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
@@ -491,8 +491,10 @@ function RecipeFormInner() {
 
   /**
    * URLを取り込んでフォームに流し込む（結果はユーザーが修正できる。applyPasteと同じ流し込み先を再利用する）。
-   * ingredients は Worker側で name+amount(単位くっつき)までしか分けていないため、ここで既存の
-   * splitQuantity(貼り付け解析と同じ資産)を使ってamount/unitに分解する
+   * ingredients は Worker側で name+amount(単位くっつき)までしか分けていないため、ここで貼り付け経路と
+   * 同じ normalizeImportedIngredient(parseIngredientLineと同一資産)に通して name/amount/unit/memo へ
+   * 分解する。Worker側の分割はコロン書式「木綿豆腐: 75 g」や括弧グラム併記「小さじ1/3 (1 g)」で
+   * name に分量が食い込むため、元の1行に組み直して貼り付け側と同一ロジックで解釈し直す(経路統一)。
    */
   const applyUrlImport = async () => {
     const target = urlImportValue.trim()
@@ -510,12 +512,12 @@ function RecipeFormInner() {
       if (result.ingredients.length > 0) {
         setIngredients(
           result.ingredients.map((ing) => {
-            const split = ing.amount ? splitQuantity(ing.amount) : { amount: '', unit: '' }
+            const parsed = normalizeImportedIngredient(ing.name, ing.amount)
             return {
-              name: ing.name,
-              amount: split.amount,
-              unit: split.unit,
-              memo: split.memo ?? '',
+              name: parsed.name,
+              amount: parsed.amount,
+              unit: parsed.unit,
+              memo: parsed.memo ?? '',
               group: undefined,
             }
           }),

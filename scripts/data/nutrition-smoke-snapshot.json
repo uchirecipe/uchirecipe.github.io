@@ -662,14 +662,14 @@
   "starter:キャベツの塩昆布あえ": {
     "servings": 2,
     "perServing": {
-      "kcal": 55,
-      "proteinG": 1.8,
-      "fatG": 2.2,
-      "carbG": 9.7,
-      "saltG": 0.3,
-      "fiberG": 3.9,
-      "ironMg": 0.5,
-      "calciumMg": 92
+      "kcal": 56,
+      "proteinG": 2.3,
+      "fatG": 2.1,
+      "carbG": 8.4,
+      "saltG": 0.9,
+      "fiberG": 2.9,
+      "ironMg": 0.6,
+      "calciumMg": 67
     },
     "excluded": [
       "塩(prep)"

@@ -53,8 +53,8 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-07-21",
-  "dbVersion": 4,
+  "generatedAt": "2026-07-23",
+  "dbVersion": 5,
   "foods": [
     {
       "id": "06153",
@@ -2765,6 +2765,25 @@ export const NUTRITION_DATA: NutritionData = {
       "unitGrams": {
         "枚": 10
       }
+    },
+    {
+      "id": "09022",
+      "label": "塩昆布",
+      "mextName": "（こんぶ類） 塩昆布",
+      "aliases": [
+        "塩昆布"
+      ],
+      "per100g": {
+        "kcal": 193,
+        "proteinG": 16.9,
+        "fatG": 0.4,
+        "carbG": 37,
+        "saltG": 18,
+        "fiberG": 13.1,
+        "ironMg": 4.2,
+        "calciumMg": 280
+      },
+      "note": "つくだ煮の味付け昆布。「塩昆布」を素干し昆布(09017・食塩相当量6.6g/100g)への部分一致に流すと食塩相当量を大きく過小評価するため、八訂09022「塩昆布」を専用食品として分離(2026-07-23 オーナー実機報告。塩昆布3g≒食塩相当量0.5g相当)"
     },
     {
       "id": "09050",
