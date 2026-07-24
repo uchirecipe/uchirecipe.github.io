@@ -325,10 +325,10 @@ export const recipes: SetRecipeDef[] = [
       "和食",
       "サラダ"
     ],
-    "dishType": "side",
+    "dishType": "main",
     "season": "summer",
     "suitableFor": [
-      "dinner"
+      "lunch"
     ],
     "ingredients": [
       {
