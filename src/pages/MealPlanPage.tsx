@@ -39,7 +39,6 @@ import {
 import Toast from '../components/Toast'
 import {
   useTodayList,
-  addToTodayList,
   removeFromTodayList,
   markTodayListCooked,
   markAllTodayListCooked,
@@ -627,10 +626,12 @@ export default function MealPlanPage() {
     entryId?: number
     extraLocalId?: string
   } | null>(null)
-  // 「今日の献立を選ぶ」ピッカー(2026-07-24 便BH-3・タスク1)。週の枠(pickerTarget)とは別に、
-  // 今日の献立(todayList)へタップで追加/解除するモード。同じピッカーUIを流用する
-  const [todayPickerOpen, setTodayPickerOpen] = useState(false)
-  const pickerOpen = pickerTarget != null || todayPickerOpen
+  // ピッカーは週の枠(pickerTarget)への割り当て専用。空状態の「今日の献立を選ぶ」は2026-07-24
+  // 便BN・タスク1でレシピ一覧タブへの遷移に変更したため、旧「今日の献立ピッカー」モードは廃止した
+  const pickerOpen = pickerTarget != null
+  // 「おまかせで提案」で今日の献立に入れた分のレシピID(2026-07-24 便BN・タスク2)。
+  // これがある間だけ「振り直す」ボタンを出し、押されたらこの分を入れ替えて再提案する
+  const [lastSuggestedIds, setLastSuggestedIds] = useState<number[]>([])
   const [pickerQuery, setPickerQuery] = useState('')
   // ピッカーの絞り込み・並び替え(2026-07-24 便BH-3・タスク6・一覧画面の機構を流用)。
   // 開閉は既定閉。パネル外の検索窓(pickerQuery)と合わせてsearchRecipes/sortResultsに渡す
@@ -669,11 +670,6 @@ export default function MealPlanPage() {
   const filteredRecipes = useMemo(() => pickerResults.map((r) => r.recipe), [pickerResults])
   const pickerFilterActive =
     pickerTime !== 'all' || pickerEffort !== 'all' || pickerTag !== 'all' || pickerFavoriteOnly
-  // 今日の献立ピッカーで「追加済み」を出すためのID集合(タスク1)
-  const todayListIdSet = useMemo(
-    () => new Set(todayList?.map((item) => item.recipeId) ?? []),
-    [todayList],
-  )
   // 今開いている行に現在割り当て済みのレシピID(Fix4: 埋まった行を開いても他の候補と
   // 同じ見た目で無確認上書きしてしまう問題の対策で、先頭固定＋選択中バッジに使う)
   const currentPickerRecipeId = useMemo(() => {
@@ -692,7 +688,6 @@ export default function MealPlanPage() {
 
   const closePicker = () => {
     setPickerTarget(null)
-    setTodayPickerOpen(false)
   }
 
   const openPicker = (
@@ -702,25 +697,11 @@ export default function MealPlanPage() {
     entryId?: number,
     extraLocalId?: string,
   ) => {
-    setTodayPickerOpen(false)
     setPickerTarget({ date, slot, role, entryId, extraLocalId })
     setPickerQuery('')
   }
 
-  // 「今日の献立を選ぶ」を開く(タスク1)。今日の献立へ直接足すモード
-  const openTodayPicker = () => {
-    setPickerTarget(null)
-    setTodayPickerOpen(true)
-    setPickerQuery('')
-  }
-
   const pickRecipe = async (recipeId: number) => {
-    // 今日の献立ピッカー: タップで追加/解除。複数選べるようピッカーは閉じない(×で閉じる)
-    if (todayPickerOpen) {
-      if (todayListIdSet.has(recipeId)) await removeFromTodayList(recipeId)
-      else await addToTodayList(recipeId)
-      return
-    }
     if (!pickerTarget) return
     const { date, slot, role, entryId, extraLocalId } = pickerTarget
     if (entryId != null) {
@@ -732,28 +713,52 @@ export default function MealPlanPage() {
     setPickerTarget(null)
   }
 
-  // 「おまかせで提案」(タスク1): 主菜+副菜のペアを提案して今日の献立へ入れる。
-  // 提案元の枠は「表示中の食事帯に夕食があれば夕食、無ければ先頭の帯」を使う
-  const suggestTodayList = async () => {
-    if (!recipes) return
-    setMessage('')
+  // 主菜+副菜のペアを1組計算する(タスク1/2共用)。提案元の枠は「表示中の食事帯に夕食があれば
+  // 夕食、無ければ先頭の帯」を使う。excludeIdsに渡したレシピは候補から外す(振り直しで直前の提案を
+  // 避けるために使う)。候補が0件のときはundefinedを返す
+  const computeSuggestionIds = (excludeIds: number[]): number[] | undefined => {
+    if (!recipes) return undefined
     const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
     const { main, side } = suggestPairForSlot(visibleRecipes, {
       quickOnly,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
-      usedRecipeIds: [],
+      usedRecipeIds: excludeIds,
       slot,
       genre: genreFilter,
       preferHighProtein,
       yesterdayRecipeIds,
     })
     const ids = [main?.id, side?.id].filter((x): x is number => x != null)
-    if (ids.length === 0) {
+    return ids.length === 0 ? undefined : ids
+  }
+
+  // 「おまかせで提案」(タスク1): 主菜+副菜のペアを提案して今日の献立へ入れる
+  const suggestTodayList = async () => {
+    setMessage('')
+    const ids = computeSuggestionIds([])
+    if (!ids) {
       setMessage(ja.mealPlan.noSuggestion)
       return
     }
     await importRecipeIdsToTodayList(ids)
+    setLastSuggestedIds(ids)
+    setMessage(ja.mealPlan.todaySuggestDone.replace('{n}', String(ids.length)))
+  }
+
+  // 「おまかせを振り直す」(タスク2): 直前のおまかせ分を入れ替えて別の主菜+副菜を提案し直す。
+  // 直前の分を候補から外して先に新しい組を計算し、取れたときだけ入れ替える(取れなければ元のまま)
+  const rerollTodayList = async () => {
+    setMessage('')
+    const prev = lastSuggestedIds
+    const ids = computeSuggestionIds(prev)
+    if (!ids) {
+      setMessage(ja.mealPlan.noSuggestion)
+      return
+    }
+    for (const id of prev) await removeFromTodayList(id)
+    await importRecipeIdsToTodayList(ids)
+    setLastSuggestedIds(ids)
     setMessage(ja.mealPlan.todaySuggestDone.replace('{n}', String(ids.length)))
   }
 
@@ -1191,6 +1196,18 @@ export default function MealPlanPage() {
                     />
                   ))}
                 </ul>
+                {/* 「おまかせで提案」の直後だけ出す振り直し(2026-07-24 便BN・タスク2)。
+                    前回のおまかせ分を入れ替えて別の主菜+副菜を提案し直す */}
+                {lastSuggestedIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void rerollTodayList()}
+                    className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                  >
+                    <Dices size={18} aria-hidden />
+                    {ja.mealPlan.todayReroll}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => void markAllTodayListCooked(todayListRecipes.map((r) => r.id!))}
@@ -1258,14 +1275,16 @@ export default function MealPlanPage() {
                 )}
               </>
             ) : (
-              // 空状態の案内+ボタン(2026-07-24 便BH-3・タスク1: 何をすべきか分かるように)
+              // 空状態の案内+ボタン(2026-07-24 便BH-3・タスク1: 何をすべきか分かるように。
+              // 便BN・タスク1: 「今日の献立を選ぶ」はレシピ一覧タブへ移動する(一覧の「今日の献立に
+              // 追加」で足す動線・オーナー指定))
               <div className="mt-[var(--space-sm)]">
                 <p className="text-sm text-ink-muted">{ja.mealPlan.todayEmpty}</p>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.todayEmptyGuide}</p>
                 <div className="mt-[var(--space-sm)] flex flex-col gap-[var(--space-sm)]">
                   <button
                     type="button"
-                    onClick={openTodayPicker}
+                    onClick={() => navigate('/recipes')}
                     className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
                   >
                     <Plus size={18} aria-hidden />
@@ -1842,13 +1861,11 @@ export default function MealPlanPage() {
       </>
       )}
 
-      {/* レシピ選択ピッカー(週の枠に入れる/今日の献立に足す の2モードで共用) */}
+      {/* レシピ選択ピッカー(週の枠に入れる) */}
       {pickerOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-app">
           <div className="flex items-center justify-between px-[var(--space-md)] py-[var(--space-sm)]">
-            <h2 className="text-lg font-bold">
-              {todayPickerOpen ? ja.mealPlan.todayPickTitle : ja.mealPlan.pickTitle}
-            </h2>
+            <h2 className="text-lg font-bold">{ja.mealPlan.pickTitle}</h2>
             <button
               type="button"
               onClick={closePicker}
@@ -1858,11 +1875,6 @@ export default function MealPlanPage() {
               <X size={22} aria-hidden />
             </button>
           </div>
-          {todayPickerOpen && (
-            <p className="px-[var(--space-md)] pb-[var(--space-sm)] text-xs text-ink-muted">
-              {ja.mealPlan.todayPickHint}
-            </p>
-          )}
           <div className="px-[var(--space-md)]">
             <div className="flex gap-[var(--space-sm)]">
               <div className="relative min-w-0 flex-1">
@@ -1973,9 +1985,7 @@ export default function MealPlanPage() {
             ) : (
               <ul className="divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
                 {displayedRecipes.map((recipe) => {
-                  const isTodaySelected = todayPickerOpen && todayListIdSet.has(recipe.id!)
-                  const isCurrentPick = !todayPickerOpen && recipe.id === currentPickerRecipeId
-                  const isSelected = isTodaySelected || isCurrentPick
+                  const isSelected = recipe.id === currentPickerRecipeId
                   return (
                   <li key={recipe.id} className={isSelected ? 'bg-accent/10' : undefined}>
                     <button
@@ -1983,9 +1993,6 @@ export default function MealPlanPage() {
                       onClick={() => void pickRecipe(recipe.id!)}
                       className="flex w-full items-center gap-2 px-[var(--space-md)] py-3 text-left"
                     >
-                      {isTodaySelected && (
-                        <CheckCircle2 size={16} className="shrink-0 text-accent" aria-hidden />
-                      )}
                       {hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
                         <TriangleAlert
                           size={16}
@@ -1996,7 +2003,7 @@ export default function MealPlanPage() {
                       <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
                       {isSelected && (
                         <span className="shrink-0 rounded-sm border border-accent px-1.5 py-0.5 text-xs font-bold text-accent">
-                          {todayPickerOpen ? ja.mealPlan.todayPickAddedBadge : ja.mealPlan.pickCurrentBadge}
+                          {ja.mealPlan.pickCurrentBadge}
                         </span>
                       )}
                       <span className="flex shrink-0 items-center gap-2 text-xs text-ink-muted">

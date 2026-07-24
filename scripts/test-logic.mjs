@@ -2753,63 +2753,8 @@ eq(
   eq('isNutrientSortOption: updatedは栄養並び替えでない', isNutrientSortOption('updated'), false)
 }
 
-// ---------- 「基本レシピ順」並び替え(2026-07-17オーナー指示で「テーマごと」として新設。
-// 2026-07-20 便AMで第◯弾/テーマの括りを廃止し「①基本レシピ(公式全部)→②自作レシピ」の
-// 2区分に単純化。配布テーマ取り込み品(sourceSetNameあり)もisStarterのため①側にまとまる。
-// 昇順は①基本レシピ(公式全部・区分内は既定順=更新順=新しい順)→②自作レシピ(既定順=新しい順)。
-// 降順トグルは①②の並び自体を反転するが、既存の全並び替え共通の仕様どおり「同区分内の順序は
-// 常に更新順(新しい順)を維持し方向トグルの影響を受けない」ため、単純な配列reverseとは
-// 一致しない(区分間の前後だけが反転する) ----------
-{
-  const mkThemeRecipe = (id, title, updatedAt, extra) => ({
-    id,
-    title,
-    servings: 2,
-    effortLevel: 'easy',
-    tags: [],
-    ingredients: [],
-    steps: [],
-    isFavorite: false,
-    cookedLogs: [],
-    searchWords: [],
-    createdAt: updatedAt,
-    updatedAt,
-    ...extra,
-  })
-  // 基本レシピ2件(sourceSetNameなし・isStarter)・配布テーマ取り込み品3件(あいうえお×2, いろは×1。
-  // いずれもsourceSetNameあり・isStarterも true=①基本レシピ側にまとまる)・自作2件
-  // (sourceSetNameなし・isStarterなし=通常のユーザー登録レシピ相当・②側)
-  const rOwnOld = mkThemeRecipe(1, '自作B', 100)
-  const rOwnNew = mkThemeRecipe(2, '自作A', 200)
-  const rBaseOld = mkThemeRecipe(3, '基本1', 50, { isStarter: true })
-  const rBaseNew = mkThemeRecipe(4, '基本2', 150, { isStarter: true })
-  const rThemeIroha = mkThemeRecipe(5, 'テーマい', 300, {
-    isStarter: true,
-    sourceSetName: 'いろは',
-  })
-  const rThemeAiOld = mkThemeRecipe(6, 'テーマあ古', 10, {
-    isStarter: true,
-    sourceSetName: 'あいうえお',
-  })
-  const rThemeAiNew = mkThemeRecipe(7, 'テーマあ新', 500, {
-    isStarter: true,
-    sourceSetName: 'あいうえお',
-  })
-  const themeResults = [rThemeIroha, rOwnOld, rBaseOld, rThemeAiOld, rOwnNew, rThemeAiNew, rBaseNew].map(
-    (recipe) => ({ recipe, usedCount: 0, wantedCount: 0 }),
-  )
-  eq('基本レシピ順の既定方向は昇順', defaultSortDirection.theme, 'asc')
-  eq(
-    '基本レシピ順昇順: ①基本レシピ(公式全部・sourceSetNameの有無を問わず新しい順にまとまる)→②自作(新しい順)',
-    sortResults(themeResults, 'theme', []).map((r) => r.recipe.id),
-    [7, 5, 4, 3, 6, 2, 1],
-  )
-  eq(
-    '基本レシピ順降順: 区分順(自作→基本)が反転するが、区分内は常に新しい順のまま(方向トグルの影響を受けない・既存仕様どおり)',
-    sortResults(themeResults, 'theme', [], 'desc').map((r) => r.recipe.id),
-    [2, 1, 7, 5, 4, 3, 6],
-  )
-}
+// ---------- 「基本レシピ順」並び替えは2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で
+// 区分が無意味化したため。RecipeSortOptionから'theme'ごと削除) ----------
 
 // ---------- 削除したセット品の再取込除外(トゥームストーン・2026-07-13 Fable設計) ----------
 {
@@ -3136,6 +3081,64 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
     '時短絞り込みONはquickStepsありのみ',
     searchRecipes(recipes, { ...baseOptions, quickOnly: true }).map((r) => r.recipe.id),
     [2],
+  )
+}
+
+// ---------- searchRecipes: 「在庫の食材で絞る」(在庫(ある/少ない)の食材を材料に含むレシピだけ・
+// 2026-07-24 便BN・司令部追加。判定は在庫との一致順と同じ部分一致) ----------
+{
+  const baseOptions = {
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    tag: 'all',
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  }
+  const recipes = [
+    {
+      id: 1,
+      title: '玉ねぎ炒め',
+      tags: [],
+      searchWords: [],
+      ingredients: [{ name: '玉ねぎ' }, { name: 'しょうゆ' }],
+    },
+    {
+      id: 2,
+      title: '豆腐サラダ',
+      tags: [],
+      searchWords: [],
+      ingredients: [{ name: '絹ごし豆腐' }, { name: 'トマト' }],
+    },
+  ]
+  eq(
+    '在庫絞り込みOFFは全件',
+    searchRecipes(recipes, baseOptions).map((r) => r.recipe.id),
+    [1, 2],
+  )
+  eq(
+    '在庫絞り込みON: 在庫「玉ねぎ」を使うレシピだけ残る',
+    searchRecipes(recipes, { ...baseOptions, pantryOnly: true, pantryNames: ['玉ねぎ'] }).map(
+      (r) => r.recipe.id,
+    ),
+    [1],
+  )
+  eq(
+    '在庫絞り込みON: 部分一致で「豆腐」が「絹ごし豆腐」にヒットする(在庫一致順と同じ判定)',
+    searchRecipes(recipes, { ...baseOptions, pantryOnly: true, pantryNames: ['豆腐'] }).map(
+      (r) => r.recipe.id,
+    ),
+    [2],
+  )
+  eq(
+    '在庫絞り込みON: 在庫が空なら0件',
+    searchRecipes(recipes, { ...baseOptions, pantryOnly: true, pantryNames: [] }).map(
+      (r) => r.recipe.id,
+    ),
+    [],
   )
 }
 

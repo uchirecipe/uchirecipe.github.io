@@ -12,15 +12,14 @@ export const NUTRIENT_SORT_OPTIONS = ['kcal', 'protein', 'salt', 'fat', 'carb'] 
 export type NutrientSortOption = (typeof NUTRIENT_SORT_OPTIONS)[number]
 
 /** レシピ一覧の並べ替えオプション（kcal/protein/salt/fat/carb=栄養並び替え。2026-07-13 Fable設計、
- * 2026-07-16 便Tで塩分・脂質・糖質を追加。theme=基本レシピ順（2026-07-17オーナー指示で追加、
- * 2026-07-20 便AMで「基本レシピ→自作」の2区分に単純化しラベルも改称。識別子theme自体は
- * sessionStorage保存値の互換のため据え置き）） */
+ * 2026-07-16 便Tで塩分・脂質・糖質を追加。旧'theme'（基本レシピ順）は配布テーマ全廃で無意味化した
+ * ため2026-07-24 便BN・タスク4で廃止。sessionStorageに旧'theme'が残っていても、sortResultsは
+ * 該当なしで更新順のタイブレークに落ちるだけなので後方互換上の問題はない） */
 export type RecipeSortOption =
   | 'updated'
   | 'pantryMatch'
   | 'kana'
   | 'cooked'
-  | 'theme'
   | NutrientSortOption
 
 /** 並べ替えオプションが栄養並び替え（Pro機能）かどうか */
@@ -38,17 +37,12 @@ export type SortDirection = 'asc' | 'desc'
  * 栄養並び替えの既定は「たんぱく質だけ多い方から（高たんぱく志向）・それ以外（カロリー・塩分・脂質・糖質）は
  * 少ない方から（ヘルシー志向）」（2026-07-13にカロリーで導入した方針を2026-07-16に塩分・脂質・糖質にも適用。
  * どれも昇順/降順トグルで反転できる）。
- * 基本レシピ順（theme）の既定も昇順で、①基本レシピ（公式全部）→②自作レシピ、の順に
- * 読める並びを基準にする（2026-07-17オーナー指示で新設時は①基本レシピ→②各テーマ（五十音順）→
- * ③自作レシピの3区分だったが、2026-07-20 便AMで第◯弾/テーマの括りを廃止し2区分に単純化。
- * 降順トグルで全体反転できる）
  */
 export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   updated: 'desc',
   pantryMatch: 'desc',
   kana: 'asc',
   cooked: 'desc',
-  theme: 'asc',
   kcal: 'asc',
   protein: 'desc',
   salt: 'asc',
@@ -115,16 +109,7 @@ function pantryMatchCount(recipe: Recipe, normalizedPantryNames: string[]): numb
   ).length
 }
 
-/**
- * 「基本レシピ順」並び替えの基本区分（2026-07-17オーナー指示で新設、2026-07-20 便AMで単純化）。
- * 第◯弾/テーマの括りは表示上廃止したため、配布テーマ取り込み品（sourceSetNameあり）も
- * 公式(isStarter)としてひとまとめにする。0=基本レシピ（isStarter。テーマ取り込み品含む）／1=自作レシピ
- */
-function themeGroupRank(recipe: Recipe): number {
-  return recipe.isStarter ? 0 : 1
-}
-
-/** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数・テーマ区分のいずれか） */
+/** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか） */
 function compareAscending(
   option: Exclude<RecipeSortOption, NutrientSortOption>,
   a: SearchResult,
@@ -143,11 +128,6 @@ function compareAscending(
         pantryMatchCount(a.recipe, normalizedPantryNames) -
         pantryMatchCount(b.recipe, normalizedPantryNames)
       )
-    case 'theme':
-      // ①基本レシピ（公式全部）→②自作レシピの2区分（2026-07-20 便AMで第◯弾/テーマの区分を
-      // 廃止し単純化。公式内の順序はここでは0を返し、sortResults側の既定タイブレーク
-      // （更新順=新しい順）に委ねる＝「公式内は既定順」の要件どおり）
-      return themeGroupRank(a.recipe) - themeGroupRank(b.recipe)
   }
 }
 

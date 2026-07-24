@@ -74,8 +74,7 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'pantryMatch', label: ja.search.sortPantryMatch },
   { value: 'kana', label: ja.search.sortKana },
   { value: 'cooked', label: ja.search.sortCooked },
-  // 基本レシピ順(2026-07-17オーナー指示で「テーマごと」として追加。2026-07-20 便AMで改称・区分単純化)
-  { value: 'theme', label: ja.search.sortTheme },
+  // 「基本レシピ順」は2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で無意味化)
 ]
 
 /** 栄養並び替え5項目のラベル（2026-07-16 便T-4: カロリー・たんぱく質・塩分・脂質・糖質。Pro機能） */
@@ -179,6 +178,8 @@ type SavedListState = {
   favoriteOnly: boolean
   excludeNg: boolean
   quickOnly: boolean
+  /** 在庫の食材で絞る（2026-07-24 便BN・司令部追加。旧セッションの保存値には無いので任意項目） */
+  pantryOnly?: boolean
   sort: RecipeSortOption
   /** 並べ替えの昇順/降順（2026-07-13 UI改善。旧セッションの保存値には無いので任意項目） */
   sortDirection?: SortDirection
@@ -241,6 +242,8 @@ export default function RecipesPage() {
   const [favoriteOnly, setFavoriteOnly] = useState(saved?.favoriteOnly ?? false)
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
+  // 在庫(ある/少ない)の食材を使うレシピだけに絞る(2026-07-24 便BN・司令部追加)
+  const [pantryOnly, setPantryOnly] = useState(saved?.pantryOnly ?? false)
   const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
   // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
   // その種類の既定方向にリセットする(選ぶ側のonClickで一緒にsetする。下記baseSortOptions/
@@ -297,6 +300,8 @@ export default function RecipesPage() {
       favoriteOnly,
       excludeNg,
       quickOnly,
+      pantryOnly,
+      pantryNames,
       ngIngredients: ngIngredients ?? [],
     })
     return sortResults(found, sort, pantryNames, sortDirection, nutrientSortValues)
@@ -311,6 +316,7 @@ export default function RecipesPage() {
     favoriteOnly,
     excludeNg,
     quickOnly,
+    pantryOnly,
     ngIngredients,
     sort,
     sortDirection,
@@ -328,7 +334,8 @@ export default function RecipesPage() {
     tag !== 'all' ||
     favoriteOnly ||
     excludeNg ||
-    quickOnly
+    quickOnly ||
+    pantryOnly
   const sortActive = sort !== 'updated' || sortDirection !== defaultSortDirection[sort]
   const anyConditionActive = filterActive || sortActive
 
@@ -347,10 +354,23 @@ export default function RecipesPage() {
         favoriteOnly,
         excludeNg,
         quickOnly,
+        pantryOnly,
         sort,
         sortDirection,
       }),
-    [query, ingredients, time, effort, tag, favoriteOnly, excludeNg, quickOnly, sort, sortDirection],
+    [
+      query,
+      ingredients,
+      time,
+      effort,
+      tag,
+      favoriteOnly,
+      excludeNg,
+      quickOnly,
+      pantryOnly,
+      sort,
+      sortDirection,
+    ],
   )
   const restoredRef = useRef(false)
   useEffect(() => {
@@ -397,6 +417,7 @@ export default function RecipesPage() {
       favoriteOnly,
       excludeNg,
       quickOnly,
+      pantryOnly,
       sort,
       sortDirection,
     }
@@ -444,6 +465,7 @@ export default function RecipesPage() {
     setFavoriteOnly(false)
     setExcludeNg(false)
     setQuickOnly(false)
+    setPantryOnly(false)
     setSort('updated')
     setSortDirection(defaultSortDirection.updated)
   }
@@ -602,10 +624,40 @@ export default function RecipesPage() {
             </button>
           )}
 
-          {/* 使いたい食材 */}
+          {/* よく使うタグ(2026-07-24 便BN・タスク3: 絞り込みパネルの上部へ移動。よく使う「作り置き・
+              お弁当」の切替を最初に見せる) */}
           <p
             className={`text-sm font-bold text-ink-muted ${anyConditionActive ? 'mt-[var(--space-md)]' : ''}`}
           >
+            {ja.search.tagTitle}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            {tagOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setTag(option.value)}
+                className={chipCls(tag === option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+            {/* 在庫の食材で絞る(2026-07-24 便BN・司令部追加)。在庫(ある/少ない)が1件以上あるときだけ出す */}
+            {pantryNames.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setPantryOnly((v) => !v)}
+                aria-pressed={pantryOnly}
+                className={`inline-flex items-center gap-1 ${chipCls(pantryOnly)}`}
+              >
+                <Refrigerator size={16} aria-hidden />
+                {ja.search.pantryFilter}
+              </button>
+            )}
+          </div>
+
+          {/* 使いたい食材 */}
+          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.ingredientTitle}
           </p>
           <div className="mt-1">
@@ -652,23 +704,6 @@ export default function RecipesPage() {
             {ja.search.effortTitle}
           </p>
           <CheckList options={effortOptions} value={effort} onSelect={setEffort} />
-
-          {/* よく使うタグ */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.tagTitle}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            {tagOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setTag(option.value)}
-                className={chipCls(tag === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
 
           {/* お気に入り / NG除外 */}
           <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">

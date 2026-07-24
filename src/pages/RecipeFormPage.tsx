@@ -32,6 +32,7 @@ import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOIN
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
+import { toHiragana } from '../logic/kana'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -285,6 +286,29 @@ function RecipeFormInner() {
   )
   const settings = useSettings()
   const allRecipes = useLiveQuery(listRecipes, [])
+
+  // タグ入力の候補(2026-07-24 便BN・タスク5): これまで登録した全レシピのタグを集計し、入力中の
+  // 文字にマッチする既存タグをサジェストする。タップでそのまま採用でき、同じ意味のタグの表記ゆれ
+  // (作り置き/作りおき 等)を防ぐ。使用回数の多い順→同数はかな順で安定させる
+  const allExistingTags = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const r of allRecipes ?? []) {
+      for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ja'))
+      .map(([t]) => t)
+  }, [allRecipes])
+  // 入力中の文字にかな正規化で部分一致する既存タグ(既に付けたタグ・完全一致は除く)を最大8件
+  const tagSuggestions = useMemo(() => {
+    const q = tagInput.trim()
+    if (!q) return []
+    const qKey = toHiragana(q)
+    return allExistingTags
+      .filter((t) => !tags.includes(t) && t !== q && toHiragana(t).includes(qKey))
+      .slice(0, 8)
+  }, [allExistingTags, tagInput, tags])
+
   const hydratedRef = useRef(false)
   useEffect(() => {
     const recipe = loadedRecipe
@@ -684,11 +708,12 @@ function RecipeFormInner() {
     setSteps((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== index) : [{ ...emptyStep }]))
   }
 
-  const addTag = () => {
-    const tag = tagInput.trim()
+  const addTagValue = (value: string) => {
+    const tag = value.trim()
     if (tag && !tags.includes(tag)) setTags([...tags, tag])
     setTagInput('')
   }
+  const addTag = () => addTagValue(tagInput)
 
   const addKeyword = () => {
     const keyword = keywordInput.trim()
@@ -1657,6 +1682,24 @@ function RecipeFormInner() {
             {ja.form.addTag}
           </button>
         </div>
+        {/* 既存タグのサジェスト(2026-07-24 便BN・タスク5): 入力中だけ出し、タップで採用する */}
+        {tagSuggestions.length > 0 && (
+          <div className="mt-[var(--space-sm)]">
+            <p className="text-xs text-ink-muted">{ja.form.tagSuggestLabel}</p>
+            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+              {tagSuggestions.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => addTagValue(t)}
+                  className="rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 検索キーワード（任意・一覧や詳細には表示せず検索のヒット対象にのみ使う） */}

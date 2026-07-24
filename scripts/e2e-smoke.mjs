@@ -7,6 +7,8 @@
 //         絞り込み中は「◯件 / 全◯件」の形になる。2026-07-13 UI改善) /
 //         QF-01(「時短レシピのみに絞る」絞り込みで件数が変わる。チップ文言は2026-07-13と
 //         2026-07-16便T-5で変更) /
+//         PANTRYFILTER-01(一覧の絞り込み「在庫の食材で絞る」チップ・2026-07-24 便BN・司令部追加:
+//         在庫が空のうちは出ず、在庫を1品「ある」にすると出て、ONで在庫の食材を使うレシピだけに件数が絞られる) /
 //         LAYOUT-01(一覧のグリッド/リスト表示切替。settingsに保存されリロード後も維持される。
 //         2026-07-13 UI改善。同日オーナー実機フィードバックでリスト行にも主要食材チップ・
 //         由来バッジ・タイトル2行折り返しを追加し、グリッドと同等の情報量になったことを確認。
@@ -240,12 +242,7 @@
 //         レシピを入れた後「まとめて献立を立てる」を押しても、手動配置の行が上書き削除されず
 //         同じid・同じレシピのまま残ること(旧実装は無警告で全消し)。空き枠は埋まり、手動枠を
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
-//         THEMESORT-01(一覧の並び替えに「基本レシピ順」・2026-07-17新設/便AMで2区分化: 並び替えパネルに
-//         選択肢として出る・選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる・テーマ全廃
-//         2026-07-23で旧テーマ由来も同梱の基本レシピに合流したため、旧テーマ由来の品(高たんぱくの
-//         レンジ蒸し鶏)も「基本レシピ」バッジに統一され旧テーマ名は出ないこと。既存のSORTDIR-01/SCROLL-01/SCROLL-02が「基本レシピ順」追加後も
-//         壊れていないことは、同じ一覧の状態保存の仕組み(sessionStorageのrecipesListState)を
-//         共用するそれぞれの既存チェックの合格をもって確認する) /
+//         (THEMESORT-01は「基本レシピ順」並び替えの廃止・2026-07-24 便BNに伴い削除) /
 //         ZENKAKU-01(全角入力の自動正規化・2026-07-21 オーナー実機報告:「アサリ 300ｇ」の
 //         全角ｇだと栄養計算に反映されない・数量も全角で入力できてしまう。材料の分量欄に全角数字
 //         「３００」・単位欄に全角「ｇ」を入力→blurで自動的に半角「300」「g」に置き換わること、
@@ -2209,66 +2206,6 @@ try {
       )
     } finally {
       await tuBrowser.close()
-    }
-  }
-
-  // --- THEMESORT-01: 一覧の並び替え「基本レシピ順」(2026-07-17新設。2026-07-20 便AMで第◯弾/テーマの
-  // 括りを廃止し「基本レシピ(公式全部)→自作」の2区分に単純化)。テーマ全廃(2026-07-23)で旧テーマ由来も
-  // 同梱の基本レシピに合流したため、並び替えパネルに選択肢として出ること・選択すると先頭カードが
-  // 「基本レシピ」バッジになること・旧テーマ由来の品(例: 高たんぱくのレンジ蒸し鶏)も含め全カードが
-  // 「基本レシピ」バッジに統一され、旧テーマ名(第◯弾/セット名)が一切出ないことを確認する。
-  // 他チェックに影響しないよう専用のbrowser/contextで完結させる ---
-  currentCheck = 'THEMESORT-01'
-  {
-    const tsBrowser = await chromium.launch()
-    const tsContext = await tsBrowser.newContext()
-    const tsPage = await tsContext.newPage()
-    tsPage.on('pageerror', (err) => {
-      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@THEMESORT-01] ${err.message}`)
-    })
-    tsPage.on('dialog', (dialog) => dialog.accept())
-    try {
-      await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tsPage.waitForTimeout(2200) // 初回シード完了待ち(103品)
-
-      // 1) 並び替えパネルに「基本レシピ順」が選択肢として出る
-      await tsPage.locator('button[aria-label="並び替え"]').click()
-      await tsPage.waitForTimeout(300)
-      const sortPanelText = await tsPage.textContent('body')
-      check('THEMESORT-01 並び替えパネルに「基本レシピ順」が出る', sortPanelText.includes('基本レシピ順'))
-
-      // 2) 選択すると先頭カードが基本レシピ(「基本レシピ」バッジ)になる
-      await tsPage.getByRole('button', { name: '基本レシピ順', exact: true }).click()
-      await tsPage.waitForTimeout(300)
-      await tsPage.getByRole('button', { name: '決定' }).click()
-      await tsPage.waitForTimeout(300)
-      const firstCardText = await tsPage.evaluate(() => {
-        const first = document.querySelector('div.grid.grid-cols-2 a[href^="#/recipes/"]')
-        return first ? first.textContent : null
-      })
-      check(
-        'THEMESORT-01 「基本レシピ順」選択で先頭カードが基本レシピになる',
-        !!firstCardText && firstCardText.includes('基本レシピ'),
-        `先頭カードテキスト=${firstCardText}`,
-      )
-
-      // 3) 旧テーマ由来の品(高たんぱくのレンジ蒸し鶏)も「基本レシピ」バッジで表示され、旧テーマ名は出ない
-      await tsPage.locator('input[type="search"]').fill('レンジ蒸し鶏')
-      await tsPage.waitForTimeout(500)
-      const kintoreCardText = await tsPage
-        .locator('a[href^="#/recipes/"]', { hasText: 'レンジ蒸し鶏' })
-        .first()
-        .textContent()
-      check(
-        'THEMESORT-01 旧テーマ由来の品も「基本レシピ」バッジに統一され、旧テーマ名(高たんぱくごはん)は出ない',
-        !!kintoreCardText &&
-          kintoreCardText.includes('基本レシピ') &&
-          !kintoreCardText.includes('高たんぱくごはん'),
-        `カードテキスト=${kintoreCardText}`,
-      )
-    } finally {
-      await tsBrowser.close()
     }
   }
 
@@ -7060,6 +6997,72 @@ try {
       )
     } finally {
       await grBrowser.close()
+    }
+  }
+
+  // --- PANTRYFILTER-01: レシピ一覧の絞り込みに「在庫の食材で絞る」チップ(2026-07-24 便BN・司令部追加)。
+  // 在庫(ある/少ない)が1件も無いうちはチップを出さず、在庫を1品「ある」にするとチップが出て、ONに
+  // すると在庫の食材を使うレシピだけに件数が絞られる(判定は在庫との一致順と同じ部分一致)ことを確認する。
+  // 他チェックに影響しないよう専用のbrowser/contextで完結させる ---
+  currentCheck = 'PANTRYFILTER-01'
+  {
+    const pfBrowser = await chromium.launch()
+    const pfContext = await pfBrowser.newContext()
+    const pfPage = await pfContext.newPage()
+    pfPage.on('dialog', (dialog) => dialog.accept())
+    pfPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PANTRYFILTER-01] ${err.message}`)
+    })
+    const cardCount = () =>
+      pfPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+    try {
+      await pfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await pfPage.waitForTimeout(1800) // 初回シード完了待ち(在庫プリセット12品は全て「ない」で投入)
+
+      // 1) 在庫が全て「ない」のうちは、絞り込みパネルに「在庫の食材で絞る」チップが出ない
+      await pfPage.locator('button[aria-label="絞り込み"]').click()
+      await pfPage.waitForTimeout(300)
+      check(
+        'PANTRYFILTER-01 在庫が空のうちはチップが出ない',
+        !(await pfPage.textContent('body')).includes('在庫の食材で絞る'),
+      )
+      // パネルを閉じる
+      await pfPage.getByRole('button', { name: '決定' }).click()
+      await pfPage.waitForTimeout(200)
+
+      // 2) 在庫の「玉ねぎ」を1タップして「ある」にする(none→have)
+      await pfPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await pfPage.waitForTimeout(500)
+      await pfPage.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await pfPage.waitForTimeout(300)
+      check(
+        'PANTRYFILTER-01 玉ねぎを「ある」にできた',
+        (await pfPage.textContent('body')).includes('玉ねぎ（ある）'),
+      )
+
+      // 3) レシピ一覧に戻ると、絞り込みパネルにチップが出る
+      await pfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await pfPage.waitForTimeout(800)
+      const totalCards = await cardCount()
+      await pfPage.locator('button[aria-label="絞り込み"]').click()
+      await pfPage.waitForTimeout(300)
+      check(
+        'PANTRYFILTER-01 在庫があるとチップが出る',
+        (await pfPage.textContent('body')).includes('在庫の食材で絞る'),
+      )
+
+      // 4) ONにすると在庫の食材(玉ねぎ)を使うレシピだけに件数が絞られる
+      await pfPage.getByRole('button', { name: '在庫の食材で絞る', exact: true }).click()
+      await pfPage.waitForTimeout(400)
+      const filteredCards = await cardCount()
+      check(
+        'PANTRYFILTER-01 チップONで件数が絞られる(0<絞り込み後<全件)',
+        filteredCards > 0 && filteredCards < totalCards,
+        `全件=${totalCards} 絞り込み後=${filteredCards}`,
+      )
+    } finally {
+      await pfBrowser.close()
     }
   }
 

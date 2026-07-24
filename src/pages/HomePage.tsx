@@ -43,14 +43,22 @@ const conditions: { value: SuggestCondition; label: string }[] = [
   { value: 'any', label: ja.home.condAll },
   { value: 'notRecent', label: ja.home.condNotRecent },
   { value: 'favorite', label: ja.home.condFavorite },
+  // condQuickは '{n}分以内' テンプレート。{n}には選択中の分数が入る(2026-07-24 便BN・タスク7)
   { value: 'quick', label: ja.home.condQuick },
 ]
 
-function matchesCondition(recipe: Recipe, condition: SuggestCondition): boolean {
+// 「◯分以内」で選べる分数(2026-07-24 便BN・タスク7)。既定は先頭の10分
+const QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
+
+function matchesCondition(
+  recipe: Recipe,
+  condition: SuggestCondition,
+  quickMinutes: number,
+): boolean {
   if (condition === 'notRecent') return !cookedWithinDays(recipe, 14)
   if (condition === 'favorite') return recipe.isFavorite
   if (condition === 'quick')
-    return recipe.cookMinutes != null && recipe.cookMinutes > 0 && recipe.cookMinutes <= 10
+    return recipe.cookMinutes != null && recipe.cookMinutes > 0 && recipe.cookMinutes <= quickMinutes
   return true
 }
 
@@ -172,6 +180,13 @@ export default function HomePage() {
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
   const [ingredients, setIngredients] = useState<string[]>([])
+  // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
+  const quickMinutes = settings?.homeQuickMinutes ?? 10
+  // 「◯分以内」チップのラベルは選択中の分数を差し込む。他の条件はそのままのラベルを使う
+  const conditionLabel = (value: SuggestCondition): string => {
+    const base = conditions.find((c) => c.value === value)?.label ?? ''
+    return value === 'quick' ? base.replace('{n}', String(quickMinutes)) : base
+  }
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
 
@@ -234,13 +249,13 @@ export default function HomePage() {
   // 条件で絞り込んだ上で、今の季節に合うものを優先する。
   // 「主菜から」がオンなら主菜(肉・魚・卵・豆腐が主役)に絞る(0件なら0件回避で全体から・便BH-2)
   const candidates = useMemo(() => {
-    let byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition))
+    let byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
     if (mainOnly) {
       const mains = byCondition.filter((r) => isMainDish(r))
       if (mains.length > 0) byCondition = mains
     }
     return preferSeason(byCondition, currentSeason())
-  }, [recipes, condition, mainOnly])
+  }, [recipes, condition, mainOnly, quickMinutes])
 
   // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
   // 0件ならズレの不満を防ぐため通常候補にフォールバックし、その旨を表示する
@@ -319,33 +334,58 @@ export default function HomePage() {
                 className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
               >
                 {ja.home.conditionsToggle}
-                {!conditionsOpen && condition !== 'any'
-                  ? `: ${conditions.find((c) => c.value === condition)?.label}`
-                  : ''}
+                {!conditionsOpen && condition !== 'any' ? `: ${conditionLabel(condition)}` : ''}
                 {conditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
               </button>
               {conditionsOpen && (
-                <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-                  {conditions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setCondition(option.value)}
-                      className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                        condition === option.value
-                          ? 'border-accent bg-accent text-on-accent'
-                          : 'border-edge bg-surface text-ink-muted'
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                    {conditions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setCondition(option.value)}
+                        className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                          condition === option.value
+                            ? 'border-accent bg-accent text-on-accent'
+                            : 'border-edge bg-surface text-ink-muted'
+                        }`}
+                      >
+                        {conditionLabel(option.value)}
+                      </button>
+                    ))}
+                  </div>
+                  {/* 「◯分以内」を選んでいるときだけ、分数(10/15/20/30)を選ぶ(2026-07-24 便BN・タスク7)。
+                      選んだ分数は設定に記憶する */}
+                  {condition === 'quick' && (
+                    <div className="mt-[var(--space-sm)]">
+                      <p className="text-xs text-ink-muted">{ja.home.quickMinutesLabel}</p>
+                      <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                        {QUICK_MINUTES_OPTIONS.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => void updateSettings({ homeQuickMinutes: m })}
+                            aria-pressed={m === quickMinutes}
+                            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                              m === quickMinutes
+                                ? 'border-accent bg-accent text-on-accent'
+                                : 'border-edge bg-surface text-ink-muted'
+                            }`}
+                          >
+                            {ja.home.condQuick.replace('{n}', String(m))}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
-            {/* 「主菜から」トグル(2026-07-23 便BH-2)。既定オンで主菜を提案。副菜・その他も
-                見たいときはオフにする */}
+            {/* 「主菜」「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6で横並び化)。
+                主菜=既定オンで主菜(肉・魚・卵・豆腐が主役)に絞る。在庫の食材から=在庫にある食材を使う
+                レシピに絞る(在庫が1件以上あるときだけ出す) */}
             <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
               <button
                 type="button"
@@ -359,13 +399,11 @@ export default function HomePage() {
               >
                 {ja.home.mainOnlyToggle}
               </button>
-            </div>
-
-            {pantryNames.length > 0 && (
-              <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+              {pantryNames.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setPantryOnly((v) => !v)}
+                  aria-pressed={pantryOnly}
                   className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
                     pantryOnly
                       ? 'border-accent bg-accent text-on-accent'
@@ -375,8 +413,8 @@ export default function HomePage() {
                   <Refrigerator size={14} aria-hidden />
                   {ja.home.pantryOnlyToggle}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
             {pantryFallback && (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">

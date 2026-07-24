@@ -23,6 +23,14 @@ export interface SearchOptions {
   /** 時短版の手順(quickSteps)があるレシピだけに絞る */
   quickOnly: boolean
   ngIngredients: string[]
+  /**
+   * 在庫（ある/少ない）の食材を材料に1つ以上含むレシピだけに絞る（2026-07-24 便BN・司令部追加）。
+   * 判定は並び替え「在庫との一致順」と同じ部分一致で行う。pantryNamesに在庫の食材名を渡すこと。
+   * 任意項目（未指定=絞り込みしない）なので、この絞り込みを使わない呼び出し側は据え置きでよい
+   */
+  pantryOnly?: boolean
+  /** pantryOnly用の在庫（ある/少ない）の食材名リスト（未指定なら空扱い） */
+  pantryNames?: string[]
 }
 
 export const defaultSearchOptions: Omit<SearchOptions, 'ngIngredients'> = {
@@ -82,6 +90,12 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
     if (options.favoriteOnly && !recipe.isFavorite) continue
     if (options.excludeNg && hasNgIngredient(recipe, options.ngIngredients)) continue
     if (options.quickOnly && (recipe.quickSteps?.length ?? 0) === 0) continue
+    if (options.pantryOnly) {
+      const pantryKeys = (options.pantryNames ?? []).map(toHiragana)
+      const ingredientNames = recipe.ingredients.map((i) => toHiragana(i.name))
+      const usesPantry = pantryKeys.some((key) => ingredientNames.some((n) => n.includes(key)))
+      if (!usesPantry) continue
+    }
 
     let usedCount = 0
     if (wantedTerms.length > 0) {
