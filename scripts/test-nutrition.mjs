@@ -22,9 +22,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SNAPSHOT_PATH = path.join(__dirname, 'data', 'nutrition-smoke-snapshot.json')
 
 const { NUTRITION_DATA } = await import('../src/logic/nutritionData.ts')
-const { computeRecipeNutrition, matchNutritionFood, roundNutrient } = await import(
-  '../src/logic/nutrition.ts'
-)
+const { computeRecipeNutrition, matchNutritionFood, roundNutrient, averagePerMealNutrition } =
+  await import('../src/logic/nutrition.ts')
 // テーマ全廃(2026-07-23): 旧配布テーマ原稿(kintore/bento/diet/summer/freezer)は starters.ts が
 // starterDefs に連結済み。よって全103品は starterDefs だけで網羅でき、旧public/sets/data/*.jsonや
 // 各セットの個別importは読まない(読むと二重計上になる)。スナップショットのキーは全て starter: で揃う
@@ -344,6 +343,38 @@ for (const [key, min, max] of spotChecks) {
   check(!!s, `スポットチェック対象が見つからない: ${key}`)
   if (s) check(s.perServing.kcal >= min && s.perServing.kcal <= max,
     `${key}: 1人分${s.perServing.kcal}kcalが期待レンジ${min}〜${max}の外`)
+}
+
+// ---------- 2.5 averagePerMealNutrition(期間の集計「摂取できた栄養」・2026-07-24 便BS・タスク3) ----------
+{
+  // 単純な確認用レシピ: 白米200g(1人分)。値はcomputeRecipeNutritionのperServingと一致するはず
+  const rice = { ingredients: [{ name: '白米', amount: '200', unit: 'g' }], servings: 1 }
+  const riceOne = computeRecipeNutrition(rice).perServing
+
+  // 空配列 → 0食・平均0
+  const empty = averagePerMealNutrition([])
+  check(empty.mealCount === 0, `averagePerMeal: 空配列はmealCount=0 (実際:${empty.mealCount})`)
+  check(empty.excludedMealCount === 0, 'averagePerMeal: 空配列はexcludedMealCount=0')
+
+  // 同じレシピ2件 → 平均は1件分のperServingと一致(合算÷2)
+  const two = averagePerMealNutrition([rice, rice])
+  check(two.mealCount === 2, `averagePerMeal: 2件はmealCount=2 (実際:${two.mealCount})`)
+  check(
+    roundNutrient('kcal', two.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
+    `averagePerMeal: 同一2件の1食あたりkcalは単品perServingと一致 (avg:${two.perMeal.kcal} single:${riceOne.kcal})`,
+  )
+
+  // 計算対象外だけのレシピ(分量が「適量」で成分表にも無い名前) → 平均から除外・excludedに数える
+  const uncomputable = { ingredients: [{ name: 'なぞの食材', amount: '適量', unit: '' }], servings: 1 }
+  const mixed = averagePerMealNutrition([rice, uncomputable])
+  check(
+    mixed.mealCount === 1 && mixed.excludedMealCount === 1,
+    `averagePerMeal: 計算できない1件は平均から除外しexcludedで数える (meal:${mixed.mealCount} excl:${mixed.excludedMealCount})`,
+  )
+  check(
+    roundNutrient('kcal', mixed.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
+    'averagePerMeal: 計算できない品は平均を薄めない(1食あたりは計算できた品だけの平均)',
+  )
 }
 
 // ---------- 3. スナップショット照合 ----------

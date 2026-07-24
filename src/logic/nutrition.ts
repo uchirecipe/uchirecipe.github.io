@@ -395,6 +395,63 @@ export function computeRecipeNutrition(
   return { total, perServing, servings, items, excluded, assumed }
 }
 
+/** 期間の「摂取できた栄養」概算の結果（averagePerMealNutrition の戻り値・2026-07-24 便BS・タスク3） */
+export interface PerMealNutrition {
+  /** 1食あたりの平均栄養（8項目・計算できた食数で割った値） */
+  perMeal: NutrientTotals
+  /** 平均に含めた食数（＝栄養を計算できた「作った記録」の数） */
+  mealCount: number
+  /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数 */
+  excludedMealCount: number
+}
+
+/**
+ * 「作った記録」のレシピ群から、1食あたりの平均栄養（8項目）を概算する純ロジック
+ * （2026-07-24 便BS・タスク3・月タブ「期間の集計」の摂取栄養めやす用）。
+ *
+ * 各レシピの perServing（1人分＝1食分とみなす）を合算し、計算できた食数で割って
+ * 「1食あたりのめやす」を出す。材料が丸ごと計算対象外で1品も計算できないレシピ
+ * （computeRecipeNutrition の items が0件）は 0kcal で平均を薄めないよう平均から除外し、
+ * excludedMealCount で数える。あくまで概算・めやす（医療・効能の文脈では使わない）。
+ * 呼び出し側は必ず「めやす／概算」表記と、excludedMealCount>0 のときはその件数を明示すること。
+ */
+export function averagePerMealNutrition(
+  recipes: Pick<Recipe, 'ingredients' | 'servings'>[],
+): PerMealNutrition {
+  const sum = emptyTotals()
+  let mealCount = 0
+  let excludedMealCount = 0
+  for (const recipe of recipes) {
+    const n = computeRecipeNutrition(recipe)
+    if (n.items.length === 0) {
+      excludedMealCount += 1
+      continue
+    }
+    const p = n.perServing
+    sum.kcal += p.kcal
+    sum.proteinG += p.proteinG
+    sum.fatG += p.fatG
+    sum.carbG += p.carbG
+    sum.saltG += p.saltG
+    sum.fiberG += p.fiberG
+    sum.ironMg += p.ironMg
+    sum.calciumMg += p.calciumMg
+    mealCount += 1
+  }
+  if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount }
+  const perMeal: NutrientTotals = {
+    kcal: sum.kcal / mealCount,
+    proteinG: sum.proteinG / mealCount,
+    fatG: sum.fatG / mealCount,
+    carbG: sum.carbG / mealCount,
+    saltG: sum.saltG / mealCount,
+    fiberG: sum.fiberG / mealCount,
+    ironMg: sum.ironMg / mealCount,
+    calciumMg: sum.calciumMg / mealCount,
+  }
+  return { perMeal, mealCount, excludedMealCount }
+}
+
 /** 表示用の丸め: kcalとカルシウム(mg・値が大きい)は整数、それ以外は小数1桁
  * （概算なのでこれ以上細かくしない。鉄は1食1〜数mgの世界なので小数1桁を保つ） */
 export function roundNutrient(key: keyof NutrientTotals, value: number): number {

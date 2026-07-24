@@ -76,6 +76,13 @@ import {
   sumMealPlanEntriesCost,
   sumCookedRecipesCost,
 } from '../logic/priceEstimate'
+import {
+  averagePerMealNutrition,
+  roundNutrient,
+  isNutritionUnlocked,
+  nutritionSourceName,
+  type NutrientTotals,
+} from '../logic/nutrition'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import type { CookedLog, MealPlanEntry, MealRole, MealSlot, Recipe } from '../db/types'
@@ -210,6 +217,112 @@ function CookedLogCard({
         <CheckCircle2 size={16} className="shrink-0 text-accent" aria-hidden />
       </Link>
     </li>
+  )
+}
+
+/** 期間の集計「摂取できた栄養」の表示行（1食あたり・8項目。NutritionTeaserと同じ並び・2026-07-24 便BS・タスク3） */
+const PERIOD_NUTRIENT_ROWS: { key: keyof NutrientTotals; label: string }[] = [
+  { key: 'kcal', label: ja.nutrition.kcalLabel },
+  { key: 'proteinG', label: ja.nutrition.proteinLabel },
+  { key: 'fatG', label: ja.nutrition.fatLabel },
+  { key: 'carbG', label: ja.nutrition.carbLabel },
+  { key: 'fiberG', label: ja.nutrition.fiberLabel },
+  { key: 'ironMg', label: ja.nutrition.ironLabel },
+  { key: 'calciumMg', label: ja.nutrition.calciumLabel },
+  { key: 'saltG', label: ja.nutrition.saltLabel },
+]
+const formatNutrient = (key: keyof NutrientTotals, value: number): string => {
+  const n = roundNutrient(key, value).toLocaleString()
+  if (key === 'kcal') return `${n} ${ja.nutrition.kcalUnit}`
+  if (key === 'ironMg' || key === 'calciumMg') return `${n} ${ja.nutrition.mgUnit}`
+  return `${n} ${ja.nutrition.gramUnit}`
+}
+
+/** 未解錠プレビューのサンプルカレンダー(便BS・タスク6)。実データではなく雰囲気を伝えるための飾り。
+ * 先頭を2つ空け、写真枠(accentの淡色ブロック)と予定ドットを散らして「写真の残る月間献立」を示す */
+const LOCK_SAMPLE_BLANKS = 2
+const LOCK_SAMPLE_TODAY_DAY = 15
+const LOCK_SAMPLE_PHOTO_DAYS = new Set([3, 6, 10, 13, 15, 19, 22, 27])
+const LOCK_SAMPLE_PLAN_DAYS = new Set([2, 8, 16, 20, 24, 29])
+
+/**
+ * 月カレンダーの1日分のセル(2026-07-24 便BS・タスク4/5)。その日に「作った記録」があれば写真サムネを
+ * セル全面に敷き(日記のように写真で振り返れる)、日付を左上の小バッジに出す。写真の無い記録は従来の
+ * 「記録あり」チェックで表す。予定(献立あり)のドットは showPlanDot が true の日(今日・未来日)だけ出す
+ * (過去日の未達成予定はカレンダーからも消す=便BS・タスク2の方針。mealPlansデータは非破壊で残す)。
+ * usePhotoUrlはループ内で直接呼べないため、親でBlobを解決してこのセル単位で1回だけ呼ぶ。
+ */
+function MonthDayCell({
+  dayNum,
+  isToday,
+  inRange,
+  showPlanDot,
+  hasLog,
+  coverPhoto,
+  onClick,
+}: {
+  dayNum: number
+  isToday: boolean
+  inRange: boolean
+  showPlanDot: boolean
+  hasLog: boolean
+  coverPhoto: Blob | undefined
+  onClick: () => void
+}) {
+  const photoUrl = usePhotoUrl(coverPhoto)
+  const base =
+    'relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-sm border text-sm'
+  if (photoUrl) {
+    // 写真あり: 全面に写真、日付は左上の小バッジ(スクリムで可読性確保)。「記録あり」のaria-labelは維持する
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={ja.mealPlan.monthDayHasLog}
+        className={`${base} ${isToday ? 'border-accent' : 'border-edge'}`}
+      >
+        <img src={photoUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        {inRange && <span className="absolute inset-0 bg-accent/40" aria-hidden />}
+        {isToday && (
+          <span className="absolute inset-0 rounded-sm ring-2 ring-inset ring-accent" aria-hidden />
+        )}
+        <span
+          className={`absolute left-0.5 top-0.5 rounded-sm px-1 text-xs font-bold ${
+            isToday ? 'bg-accent text-on-accent' : 'bg-black/55 text-white'
+          }`}
+        >
+          {dayNum}
+        </span>
+      </button>
+    )
+  }
+  const tone = isToday
+    ? 'border-accent bg-accent text-on-accent font-bold'
+    : inRange
+      ? 'border-accent bg-accent/20 text-ink'
+      : 'border-edge bg-surface text-ink'
+  return (
+    <button type="button" onClick={onClick} className={`${base} ${tone}`}>
+      <span>{dayNum}</span>
+      {(showPlanDot || hasLog) && (
+        <span className="mt-0.5 flex items-center gap-0.5">
+          {showPlanDot && (
+            <span
+              aria-label={ja.mealPlan.monthDayHasPlan}
+              className={`h-1.5 w-1.5 rounded-full ${isToday ? 'bg-app' : 'bg-accent'}`}
+            />
+          )}
+          {hasLog && (
+            <span
+              aria-label={ja.mealPlan.monthDayHasLog}
+              className={isToday ? 'text-on-accent' : 'text-accent'}
+            >
+              <Check size={10} strokeWidth={3} aria-hidden />
+            </span>
+          )}
+        </span>
+      )}
+    </button>
   )
 }
 
@@ -381,6 +494,20 @@ export default function MealPlanPage() {
     })
     return set
   }, [cookedLogsByDate, monthAnchor])
+  // 月カレンダーの各日の代表写真(2026-07-24 便BS・タスク4): その日の最初の記録の写真(無ければ
+  // そのレシピの写真)をBlobで解決してMap化する。複数記録があっても視認性優先で先頭1枚。
+  // usePhotoUrlはセル(MonthDayCell)内で1回だけ呼ぶため、ここではBlobまで(URL化しない)。表示中の月の分だけ
+  const monthDayCoverPhoto = useMemo(() => {
+    const prefix = monthAnchor.slice(0, 7)
+    const map = new Map<string, Blob>()
+    cookedLogsByDate.forEach((list, date) => {
+      if (!date.startsWith(prefix) || list.length === 0) return
+      const first = list[0]
+      const photo = first.log.photo ?? first.recipe.photo
+      if (photo) map.set(date, photo)
+    })
+    return map
+  }, [cookedLogsByDate, monthAnchor])
   // 月タブ: 日タップで開くその日の献立モーダル（便U-5。従来の即週ジャンプはモーダル内の
   // ボタンへ移動）。nullなら非表示
   const [dayModalDate, setDayModalDate] = useState<string | null>(null)
@@ -440,6 +567,8 @@ export default function MealPlanPage() {
   const dayModalBySlot = useMemo(() => groupBySlot(dayModalEntries), [dayModalEntries])
   // 月タブの日モーダルに出す、その日の「作った記録」(便Z-2)
   const dayModalLogs = dayModalDate ? (cookedLogsByDate.get(dayModalDate) ?? []) : []
+  // 過去日は予定(献立)を表示から消し、作った記録だけを日記のように見せる(便BS・タスク2。非破壊)
+  const dayModalIsPast = dayModalDate ? isPastDate(dayModalDate, today) : false
   const dayModalTitle = dayModalDate
     ? ja.mealPlan.monthDayModalTitle
         .replace('{m}', String(Number(dayModalDate.slice(5, 7))))
@@ -511,6 +640,13 @@ export default function MealPlanPage() {
   )
   const rangeActualPerMeal =
     rangeActualCost.count > 0 ? Math.round(rangeActualCost.total / rangeActualCost.count) : 0
+  // 期間の集計「摂取できた栄養」(2026-07-24 便BS・タスク3): 期間内の「作った記録」のレシピ群から
+  // 1食あたりの平均栄養(既存のPro8項目計算=computeRecipeNutritionを流用)を出す。あくまで概算・めやす。
+  // 表示は栄養フラグ&&Pro(isNutritionUnlocked)かつ計算できた食数>0のときだけ(下のカードで判定)
+  const rangeNutrition = useMemo(
+    () => averagePerMealNutrition(rangeCookedRecipes),
+    [rangeCookedRecipes],
+  )
 
   // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
   const todayList = useTodayList()
@@ -1389,42 +1525,21 @@ export default function MealPlanPage() {
                   rangeHighlightBounds != null &&
                   date >= rangeHighlightBounds.start &&
                   date <= rangeHighlightBounds.end
+                // 予定ドット(献立あり)は今日・未来日だけ。過去日の未達成予定はカレンダーからも消す
+                // (便BS・タスク2。作った記録は写真/チェックで別途出す=非破壊)
                 return (
-                <button
-                  key={date}
-                  type="button"
-                  onClick={() => (costMode ? handleRangeDayTap(date) : setDayModalDate(date))}
-                  className={`flex aspect-square flex-col items-center justify-center rounded-sm border text-sm ${
-                    date === today
-                      ? 'border-accent bg-accent text-on-accent font-bold'
-                      : inRange
-                        ? 'border-accent bg-accent/20 text-ink'
-                        : 'border-edge bg-surface text-ink'
-                  }`}
-                >
-                  <span>{Number(date.slice(8, 10))}</span>
-                  {(monthDaysWithPlan.has(date) || monthDaysWithLog.has(date)) && (
-                    <span className="mt-0.5 flex items-center gap-0.5">
-                      {monthDaysWithPlan.has(date) && (
-                        <span
-                          aria-label={ja.mealPlan.monthDayHasPlan}
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            date === today ? 'bg-app' : 'bg-accent'
-                          }`}
-                        />
-                      )}
-                      {/* 「記録あり」の小マーク(2026-07-17 便Z-2。「献立あり」ドットと併記できる) */}
-                      {monthDaysWithLog.has(date) && (
-                        <span
-                          aria-label={ja.mealPlan.monthDayHasLog}
-                          className={date === today ? 'text-on-accent' : 'text-accent'}
-                        >
-                          <Check size={10} strokeWidth={3} aria-hidden />
-                        </span>
-                      )}
-                    </span>
-                  )}
-                </button>
+                  <MonthDayCell
+                    key={date}
+                    dayNum={Number(date.slice(8, 10))}
+                    isToday={date === today}
+                    inRange={!!inRange}
+                    showPlanDot={monthDaysWithPlan.has(date) && !isPastDate(date, today)}
+                    hasLog={monthDaysWithLog.has(date)}
+                    coverPhoto={monthDayCoverPhoto.get(date)}
+                    onClick={() =>
+                      costMode ? handleRangeDayTap(date) : setDayModalDate(date)
+                    }
+                  />
                 )
               })}
             </div>
@@ -1474,6 +1589,55 @@ export default function MealPlanPage() {
                   <p className="mt-0.5 text-sm text-ink-muted">{ja.mealPlan.rangeCostActualEmpty}</p>
                 )}
 
+                {/* 摂取できた栄養(記録ベース・1食あたり・便BS・タスク3): 既存のPro8項目計算を流用し、
+                    期間内の記録の平均を「めやす／概算」表記で出す。栄養フラグ&&Pro(isNutritionUnlocked)
+                    かつ計算できた食数>0のときだけ表示する */}
+                {isNutritionUnlocked(isPro) && rangeNutrition.mealCount > 0 && (
+                  <div className="mt-[var(--space-md)]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-bold text-ink-muted">
+                        {ja.mealPlan.rangeNutritionLabel}
+                      </p>
+                      <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
+                        {ja.nutrition.estimateBadge}
+                      </span>
+                    </div>
+                    <div
+                      className="mt-1 rounded-md border border-edge p-[var(--space-sm)]"
+                      style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
+                    >
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        {PERIOD_NUTRIENT_ROWS.map(({ key, label }) => (
+                          <div key={key} className="flex items-baseline justify-between gap-2">
+                            <span className="text-sm">{label}</span>
+                            <span className="text-sm font-bold text-accent tabular-nums">
+                              {formatNutrient(key, rangeNutrition.perMeal[key])}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="mt-1 text-xs text-ink-muted">
+                      {ja.mealPlan.rangeNutritionMealCount.replace('{n}', String(rangeNutrition.mealCount))}
+                    </p>
+                    {rangeNutrition.excludedMealCount > 0 && (
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        {ja.mealPlan.rangeNutritionExcluded.replace(
+                          '{n}',
+                          String(rangeNutrition.excludedMealCount),
+                        )}
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      {ja.nutrition.sourcePrefix}
+                      {nutritionSourceName()}
+                      {'　'}
+                      {ja.nutrition.sourceCommercialNote}
+                    </p>
+                  </div>
+                )}
+
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.weekCostNote}</p>
                 <Link
                   to="/prices"
@@ -1485,16 +1649,67 @@ export default function MealPlanPage() {
             )}
           </div>
         ) : (
-          <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-lg)] text-center shadow-sm">
-            <Lock size={28} className="mx-auto text-ink-muted" aria-hidden />
-            <p className="mt-[var(--space-sm)] font-bold">{ja.mealPlan.monthProGateTitle}</p>
-            <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthProGateDescription}</p>
-            <Link
-              to="/settings?section=pro"
-              className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent underline"
-            >
-              {ja.mealPlan.monthProGateLink}
-            </Link>
+          // 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。月タブを完全に
+          // 隠さず、ぼかしたサンプルカレンダーの上に、機能の性質を素直に説明するロック案内を重ねる
+          // (卑下しない・購入圧を強くしない)。サンプルは飾りなのでaria-hidden
+          <div className="mt-[var(--space-md)]">
+            <div className="relative overflow-hidden rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+              <div
+                aria-hidden
+                className="pointer-events-none select-none opacity-70 blur-[3px]"
+              >
+                <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
+                  {ja.mealPlan.dow.map((d) => (
+                    <div key={d}>{d}</div>
+                  ))}
+                </div>
+                <div className="mt-1 grid grid-cols-7 gap-1">
+                  {Array.from({ length: 35 }, (_, i) => {
+                    const dayNum = i - LOCK_SAMPLE_BLANKS + 1
+                    const inMonth = dayNum >= 1 && dayNum <= 31
+                    const isSampleToday = dayNum === LOCK_SAMPLE_TODAY_DAY
+                    const hasPhoto = inMonth && LOCK_SAMPLE_PHOTO_DAYS.has(dayNum)
+                    const hasPlan = inMonth && LOCK_SAMPLE_PLAN_DAYS.has(dayNum)
+                    return (
+                      <div
+                        key={i}
+                        className={`relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-sm border text-xs ${
+                          isSampleToday
+                            ? 'border-accent bg-accent font-bold text-on-accent'
+                            : 'border-edge bg-app text-ink-muted'
+                        }`}
+                      >
+                        {hasPhoto && !isSampleToday && (
+                          <span
+                            className="absolute inset-0"
+                            style={{ background: 'color-mix(in oklab, var(--accent) 35%, var(--bg))' }}
+                          />
+                        )}
+                        <span className="relative">{inMonth ? dayNum : ''}</span>
+                        {hasPlan && !hasPhoto && !isSampleToday && (
+                          <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+              {/* ロックの案内(機能の性質を素直に説明・購入圧を強くしすぎない) */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-app/40 p-[var(--space-md)] text-center backdrop-blur-[1px]">
+                <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent shadow-sm">
+                  <Lock size={14} aria-hidden />
+                  {ja.mealPlan.monthLockedBadge}
+                </span>
+                <p className="mt-1 font-bold">{ja.mealPlan.monthLockedTitle}</p>
+                <p className="text-sm text-ink-muted">{ja.mealPlan.monthLockedDescription}</p>
+                <Link
+                  to="/settings?section=pro"
+                  className="mt-1 inline-block text-sm font-bold text-accent underline"
+                >
+                  {ja.mealPlan.monthProGateLink}
+                </Link>
+              </div>
+            </div>
           </div>
         ))}
 
@@ -1689,6 +1904,9 @@ export default function MealPlanPage() {
               {dowLabels[dayIndex]} {date.replaceAll('-', '/')}
               {date === today && <span className="ml-2 text-sm text-accent">{ja.mealPlan.todayBadge}</span>}
             </h2>
+            {/* 今日・未来日は編集可能な予定グリッド。過去日は予定を表示から消し、下の「作った記録」
+                だけを日記のように見せる(便BS・タスク2。mealPlansデータは非破壊で残す) */}
+            {!isPastDate(date, today) && (
             <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
               {visibleSlots.map((slot) => {
                 const slotKey = `${date}|${slot}`
@@ -1773,22 +1991,29 @@ export default function MealPlanPage() {
                 )
               })}
             </div>
-            {/* 過去日の振り返り(2026-07-17 便Z-2・docs/35 §3): その日の「作った記録」
-                (cookedLogs日付一致)を、予定(エントリ)と視覚区別した薄いカードで表示する。
-                予定が実際に作られたか一目で分かる */}
-            {isPastDate(date, today) && (cookedLogsByDate.get(date)?.length ?? 0) > 0 && (
-              <div className="mt-[var(--space-sm)]">
-                <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
-                  <CheckCircle2 size={14} className="text-accent" aria-hidden />
-                  {ja.mealPlan.pastCookedTitle}
-                </p>
-                <ul className="mt-1 space-y-1">
-                  {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log }, i) => (
-                    <CookedLogCard key={`${recipe.id}-${i}`} recipe={recipe} log={log} />
-                  ))}
-                </ul>
-              </div>
             )}
+            {/* 過去日の振り返り(2026-07-17 便Z-2・docs/35 §3・便BSで「記録だけ残す」へ強化):
+                その日の「作った記録」(cookedLogs日付一致)を写真付きの薄いカードで表示する。
+                達成しなかった予定は上のグリッドごと消えているので、ここが過去日の主役になる。
+                記録が無い過去日は控えめな空案内だけ出す */}
+            {isPastDate(date, today) &&
+              ((cookedLogsByDate.get(date)?.length ?? 0) > 0 ? (
+                <div className="mt-[var(--space-sm)]">
+                  <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
+                    <CheckCircle2 size={14} className="text-accent" aria-hidden />
+                    {ja.mealPlan.pastCookedTitle}
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log }, i) => (
+                      <CookedLogCard key={`${recipe.id}-${i}`} recipe={recipe} log={log} />
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                  {ja.mealPlan.pastNoRecord}
+                </p>
+              ))}
           </section>
         ))}
       </div>
@@ -2054,7 +2279,13 @@ export default function MealPlanPage() {
                 <X size={20} aria-hidden />
               </button>
             </div>
-            {dayModalEntries.length === 0 ? (
+            {dayModalIsPast ? (
+              // 過去日: 予定は表示から消す(便BS・タスク2)。記録が無ければ空案内だけ出す(記録があれば下の
+              // 「作った記録」ブロックが主役になる)。mealPlansデータは削除しない=非破壊
+              dayModalLogs.length === 0 ? (
+                <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.mealPlan.pastNoRecord}</p>
+              ) : null
+            ) : dayModalEntries.length === 0 ? (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.mealPlan.monthDayModalEmpty}</p>
             ) : (
               <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
