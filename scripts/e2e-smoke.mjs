@@ -228,8 +228,9 @@
 //         できること。0件選択時は3ボタンともdisabled・3件選択→「ない」適用で実際にIndexedDBの
 //         levelが変わること(事前に「ある」へ変えてから検証し、既定値のnoneのままでは書き込みを
 //         証明できない問題を回避)・適用後にトーストが出て選択が解除されるが整理モード自体は
-//         維持されること(削除とは挙動が異なる意図的な仕様)。合わせて既存の整理モード一括削除も
-//         同じセッションで検証し、まとめて状態設定の追加で退行していないことを確認する) /
+//         維持されること。合わせて整理モード一括削除も同じセッションで検証し、削除ボタンが
+//         「選択した食材◯件を削除」で全選択/選択解除の下に出ること(補足#15)、削除後も整理
+//         モードのままであること(補足#16。2026-07-24オーナー補足で挙動を統一)を確認する) /
 //         MEALPLAN-07(献立タブ・月タブ「期間の食費」・2026-07-17 便AB・オーナー決定・docs/35 §5:
 //         モードボタンで開始日→終了日の2タップ選択→範囲ハイライト+結果カード(期間の献立原価
 //         合計・1日あたり平均・日数)が出ること。モード中は日タップが範囲選択に使われ既存の
@@ -6438,15 +6439,15 @@ try {
         afterBulk.find((p) => p.name === 'じゃがいも')?.level === 'none',
       )
 
-      // 既存の整理モード一括削除が退行していないことを、同じ整理モードのまま続けて確認する
+      // 整理モード一括削除。文言は「選択した食材◯件を削除」で、全選択/選択解除のすぐ下に出る(補足#15)
       const beforeDeleteCount = afterBulk.length
       await pbPage.getByRole('button', { name: 'じゃがいも', exact: true }).click()
       await pbPage.waitForTimeout(200)
       check(
-        'PANTRY-BULK-01(delete) 1件選択で削除ボタンに件数が出る',
-        await pbPage.getByRole('button', { name: '選択した1件を削除', exact: true }).isVisible(),
+        'PANTRY-BULK-01(delete) 1件選択で削除ボタン「選択した食材1件を削除」が出る(補足#15)',
+        await pbPage.getByRole('button', { name: '選択した食材1件を削除', exact: true }).isVisible(),
       )
-      await pbPage.getByRole('button', { name: '選択した1件を削除', exact: true }).click()
+      await pbPage.getByRole('button', { name: '選択した食材1件を削除', exact: true }).click()
       await pbPage.waitForTimeout(400)
       const afterDelete = await readPantryItems()
       check(
@@ -6455,8 +6456,9 @@ try {
         `afterDelete件数=${afterDelete.length}`,
       )
       check(
-        'PANTRY-BULK-01(delete) 削除後は整理モード自体を抜ける(既存挙動どおり・まとめて状態設定とは異なる)',
-        await pbPage.getByRole('button', { name: '整理', exact: true }).isVisible(),
+        'PANTRY-BULK-01(delete) 削除後も整理モードのまま(2026-07-24 補足#16。片づけが中断されない)',
+        (await pbPage.getByRole('button', { name: '完了', exact: true }).isVisible()) &&
+          !(await pbPage.getByRole('button', { name: '整理', exact: true }).isVisible()),
       )
     } finally {
       await pbBrowser.close()
@@ -7064,8 +7066,8 @@ try {
   }
 
   // --- SHOP-COUNT-01: 買い物メモ「レシピから追加」の食数+/-方式(2026-07-23 #3)と、
-  // 「候補を作る」押下時のトースト(#4)。食数0では候補を作るがdisabled、+で1食にすると押せて、
-  // 押すと候補(下書き)セクションとトーストが出ることを確認する ---
+  // 「下書きを作る」押下時のトースト(#4/文言は2026-07-24 #14で「候補」→「下書き」に改称)。
+  // 食数0では下書きを作るがdisabled、+で1食にすると押せて、押すと下書きセクションとトーストが出る ---
   currentCheck = 'SHOP-COUNT-01'
   {
     const scBrowser = await chromium.launch()
@@ -7088,17 +7090,17 @@ try {
       await scPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
       await scPage.waitForTimeout(400)
 
-      const makeBtn = scPage.getByRole('button', { name: '候補を作る' })
-      check('SHOP-COUNT-01 食数0では「候補を作る」がdisabled', await makeBtn.isDisabled())
+      const makeBtn = scPage.getByRole('button', { name: '下書きを作る' })
+      check('SHOP-COUNT-01 食数0では「下書きを作る」がdisabled', await makeBtn.isDisabled())
       // 最初のレシピの食数を1にする
       await scPage.getByRole('button', { name: '食数を増やす' }).first().click()
       await scPage.waitForTimeout(200)
-      check('SHOP-COUNT-01 食数1で「候補を作る」が押せる(1食以上で選択扱い)', !(await makeBtn.isDisabled()))
+      check('SHOP-COUNT-01 食数1で「下書きを作る」が押せる(1食以上で選択扱い)', !(await makeBtn.isDisabled()))
       await makeBtn.click()
       await scPage.waitForTimeout(500)
       const afterMake = await scPage.textContent('body')
-      check('SHOP-COUNT-01 候補を作るとトーストが出る(#4)', afterMake.includes('買い物候補を作りました'))
-      check('SHOP-COUNT-01 買い物候補(下書き)セクションが出る', afterMake.includes('買い物候補'))
+      check('SHOP-COUNT-01 下書きを作るとトーストが出る(#4)', afterMake.includes('下書きを作りました'))
+      check('SHOP-COUNT-01 買い物メモ(下書き)セクションが出る(#14)', afterMake.includes('買い物メモ（下書き）'))
     } finally {
       await scBrowser.close()
     }
@@ -7169,6 +7171,79 @@ try {
       )
     } finally {
       await cpBrowser.close()
+    }
+  }
+
+  // --- SHOP-DRAFT-02: 2026-07-24 実機FB の買い物メモ系。
+  //  #11 買い物メモの売り場順(野菜→肉→…)自動整列 / #8 「レシピを選び直す」で直前の選択を保持したまま
+  //  ピッカーを開き直す / #10 下書きの食材名タップで「使うレシピ」ポップが出る、を通しで検証する ---
+  currentCheck = 'SHOP-DRAFT-02'
+  {
+    const sdBrowser = await chromium.launch()
+    const sdContext = await sdBrowser.newContext()
+    const sdPage = await sdContext.newPage()
+    sdPage.on('dialog', (dialog) => dialog.accept())
+    sdPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHOP-DRAFT-02] ${err.message}`)
+    })
+    try {
+      await sdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await sdPage.waitForTimeout(1800)
+      await sdPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await sdPage.waitForTimeout(400)
+      await sdPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await sdPage.waitForTimeout(300)
+
+      // #11 売り場順: わざと売り場順と違う順(調味料→肉→野菜)で手入力し、表示は野菜→肉→調味料に整うことを確認
+      for (const name of ['しょうゆ', '豚バラ肉', '玉ねぎ']) {
+        await sdPage.getByPlaceholder('食材を入力').fill(name)
+        await sdPage.getByRole('button', { name: '追加', exact: true }).click()
+        await sdPage.waitForTimeout(200)
+      }
+      const memoSection = sdPage.locator('section', { hasText: '買い物メモ' }).first()
+      const memoOrder = await memoSection
+        .locator('ul > li')
+        .evaluateAll((lis) => lis.map((li) => li.querySelector('span')?.textContent ?? ''))
+      check(
+        'SHOP-DRAFT-02(#11) 買い物メモが売り場順(野菜→肉→調味料)に自動整列する',
+        JSON.stringify(memoOrder) === JSON.stringify(['玉ねぎ', '豚バラ肉', 'しょうゆ']),
+        `memoOrder=${JSON.stringify(memoOrder)}`,
+      )
+
+      // 下書きを作る(最初のレシピを2食に)
+      await sdPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await sdPage.waitForTimeout(400)
+      await sdPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await sdPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await sdPage.waitForTimeout(200)
+      await sdPage.getByRole('button', { name: '下書きを作る' }).click()
+      await sdPage.waitForTimeout(500)
+      const draftBody = await sdPage.textContent('body')
+      check('SHOP-DRAFT-02 下書きセクションが出て「レシピを選び直す」「キャンセル」が並ぶ(#8)',
+        draftBody.includes('買い物メモ（下書き）') &&
+          (await sdPage.getByRole('button', { name: 'レシピを選び直す' }).isVisible()) &&
+          (await sdPage.getByRole('button', { name: 'キャンセル' }).isVisible()))
+
+      // #10 食材名タップで「使うレシピ」ポップ(全文+レシピ名)が出る
+      const draftSection = sdPage.locator('section', { hasText: '買い物メモ（下書き）' })
+      await draftSection.locator('ul li').first().locator('button').nth(1).click()
+      await sdPage.waitForTimeout(250)
+      const popup = sdPage.getByRole('dialog')
+      check('SHOP-DRAFT-02(#10) 食材名タップで「使うレシピ」ポップが出る',
+        (await popup.isVisible()) && (await popup.textContent()).includes('使うレシピ'))
+      await sdPage.keyboard.press('Escape')
+      await sdPage.waitForTimeout(200)
+
+      // #8 「レシピを選び直す」で直前の選択(2食)を保持したままピッカーが開き直す
+      await sdPage.getByRole('button', { name: 'レシピを選び直す' }).click()
+      await sdPage.waitForTimeout(300)
+      const repickBody = await sdPage.textContent('body')
+      check('SHOP-DRAFT-02(#8) 選び直しで直前の選択(2食)が保持されピッカーが開く',
+        repickBody.includes('2食') &&
+          !(await sdPage.getByRole('button', { name: '下書きを作る' }).isDisabled()))
+    } finally {
+      await sdBrowser.close()
     }
   }
 

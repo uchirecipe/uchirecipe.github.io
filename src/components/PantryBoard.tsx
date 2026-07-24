@@ -2,7 +2,6 @@ import { useState } from 'react'
 import {
   Plus,
   Refrigerator,
-  ArrowUpDown,
   ChevronUp,
   ChevronDown,
   ListChecks,
@@ -16,7 +15,6 @@ import {
   removePantryItems,
   setPantryItemsLevel,
   setPantryItemsGroup,
-  movePantryItem,
 } from '../db/pantry'
 import type { PantryGroupKey, PantryLevel } from '../db/types'
 import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
@@ -37,18 +35,18 @@ function levelClass(level: PantryLevel): string {
 /**
  * 在庫ボード: よく使う食材をチップで並べ、タップで「ある→少ない→ない」を切り替える。
  * 数量は数えないので、棚卸しは数秒で終わる。
- * 通常表示では大分類グループ(肉・魚介／野菜・きのこ …)ごとにチップをまとめる
- * (2026-07-23 オーナー実機FB #1。振り分けの情報源は栄養データベース=logic/pantryGroups)。
- * 「並び替え」モード中は縦一列にして矢印ボタンで手動並び替えできる。
+ * チップは通常表示・整理モードのどちらでも大分類グループ(肉・魚介／野菜・きのこ …)ごとに
+ * まとめて並べる(2026-07-23 #1／2026-07-24 実機FB #5: 整理モードでもグループ表示を維持)。
+ * 振り分けの情報源は栄養データベース=logic/pantryGroups。
  * 「整理」モード中はチップをタップで複数選択→一括削除／「ある」「少ない」「ない」の一括状態設定／
- * 大分類グループへの一括移動(手動グループ変更・#1)ができ、全選択・選択解除もできる(#10)。
- * まとめて状態設定・グループ移動は適用後も整理モードを維持し選択だけ解除する
- * (削除は整理モードごと抜ける。用途が違うため意図的に挙動を分けている)。
+ * 大分類グループへの一括移動(手動グループ変更・#1)ができ、全選択・選択解除もできる。
+ * 一括操作(状態設定・グループ移動・削除)はいずれも適用後も整理モードを維持し、選択だけ解除する
+ * (2026-07-24 補足#16: 削除後も整理を抜けないように統一。途中で中断されると連続で片づけられないため)。
+ * グループ表示化で並び順がグループ主体になったため、手動並び替えUIは廃止した(2026-07-24 実機FB #6)。
  */
 export default function PantryBoard() {
   const items = usePantryItems()
   const [text, setText] = useState('')
-  const [reordering, setReordering] = useState(false)
   const [organizing, setOrganizing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
@@ -56,14 +54,8 @@ export default function PantryBoard() {
   // 永続化はしない軽量実装(オーナー決定: 実装が軽い方でよい)
   const [showDescription, setShowDescription] = useState(false)
 
-  const toggleReordering = () => {
-    setReordering((v) => !v)
-    setOrganizing(false)
-    setSelectedIds([])
-  }
   const toggleOrganizing = () => {
     setOrganizing((v) => !v)
-    setReordering(false)
     setSelectedIds([])
   }
   const toggleSelected = (id: number) => {
@@ -71,12 +63,13 @@ export default function PantryBoard() {
   }
   const selectAll = () => setSelectedIds((items ?? []).map((item) => item.id!))
   const clearSelection = () => setSelectedIds([])
+  // 一括削除。他の一括操作(状態設定・グループ移動)と同じく、実行後も整理モードは維持し
+  // 選択だけ解除する(2026-07-24 補足#16。片づけの途中で中断されないように)
   const deleteSelected = async () => {
     if (selectedIds.length === 0) return
     if (!window.confirm(ja.pantry.organizeConfirm.replace('{n}', String(selectedIds.length)))) return
     await removePantryItems(selectedIds)
     setSelectedIds([])
-    setOrganizing(false)
   }
   // まとめて状態設定(docs/35 §5 案D): 選択中の食材全部を指定の状態に一括更新する。
   // 削除と違って整理モードは維持したまま選択だけ解除する(続けて別の一括操作をしやすくするため)
@@ -112,6 +105,7 @@ export default function PantryBoard() {
   }
 
   const grouped = items ? groupPantryItems(items) : []
+  const allSelected = items !== undefined && items.length > 0 && selectedIds.length === items.length
 
   return (
     <>
@@ -123,19 +117,6 @@ export default function PantryBoard() {
         </h2>
         {items && items.length > 0 && (
           <div className="flex shrink-0 items-center gap-1">
-            {items.length > 1 && (
-              <button
-                type="button"
-                onClick={toggleReordering}
-                aria-pressed={reordering}
-                className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
-                  reordering ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
-                }`}
-              >
-                <ArrowUpDown size={14} aria-hidden />
-                {reordering ? ja.pantry.reorderDone : ja.pantry.reorderToggle}
-              </button>
-            )}
             <button
               type="button"
               onClick={toggleOrganizing}
@@ -151,68 +132,99 @@ export default function PantryBoard() {
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => setShowDescription((v) => !v)}
-        aria-expanded={showDescription}
-        className="mt-1 inline-flex items-center gap-1 text-sm text-ink-muted"
-      >
-        <HelpCircle size={14} aria-hidden />
-        {ja.common.usageHint}
-        {showDescription ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
-      </button>
-      {showDescription && <p className="mt-1 text-sm text-ink-muted">{ja.pantry.description}</p>}
+      {/* 通常モードの「使い方」(タップで3段階を切り替える説明)。整理モード中はタップの意味が
+          「選択」に変わり説明と食い違うので隠す(2026-07-24 実機FB #4)。代わりに下の
+          organizeSelect(タップして選択)を出す */}
+      {!organizing && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowDescription((v) => !v)}
+            aria-expanded={showDescription}
+            className="mt-1 inline-flex items-center gap-1 text-sm text-ink-muted"
+          >
+            <HelpCircle size={14} aria-hidden />
+            {ja.common.usageHint}
+            {showDescription ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+          </button>
+          {showDescription && <p className="mt-1 text-sm text-ink-muted">{ja.pantry.description}</p>}
+        </>
+      )}
       {organizing && <p className="mt-1 text-sm text-ink-muted">{ja.pantry.organizeSelect}</p>}
+
+      {/* 全選択・選択解除(2026-07-23 #10 → 2026-07-24 実機FB #1: チップ列の上部へ移動。
+          下までスクロールしなくても全選択できるように、案内文のすぐ下・チップの上に置く)。
+          「選択した食材◯件を削除」も、この選択操作のすぐ下に置く(2026-07-24 補足#15) */}
+      {organizing && items && items.length > 0 && (
+        <div className="mt-[var(--space-sm)] flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={selectAll}
+              disabled={allSelected}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+            >
+              {ja.pantry.organizeSelectAll}
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              disabled={selectedIds.length === 0}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm disabled:opacity-40"
+            >
+              {ja.pantry.organizeClearSelection}
+            </button>
+          </div>
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void deleteSelected()}
+              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+            >
+              {ja.pantry.organizeDeleteSelected.replace('{n}', String(selectedIds.length))}
+            </button>
+          )}
+        </div>
+      )}
 
       {items !== undefined &&
         (items.length === 0 ? (
           <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.pantry.empty}</p>
-        ) : reordering ? (
-          <ul className="mt-[var(--space-md)] divide-y divide-edge rounded-md border border-edge bg-app">
-            {items.map((item, index) => (
-              <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
-                <span className="min-w-0 flex-1 truncate font-bold">{item.name}</span>
-                <button
-                  type="button"
-                  onClick={() => void movePantryItem(items, index, -1)}
-                  disabled={index === 0}
-                  aria-label={ja.form.moveUp}
-                  className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                >
-                  <ChevronUp size={18} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void movePantryItem(items, index, 1)}
-                  disabled={index === items.length - 1}
-                  aria-label={ja.form.moveDown}
-                  className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                >
-                  <ChevronDown size={18} aria-hidden />
-                </button>
-              </li>
-            ))}
-          </ul>
         ) : organizing ? (
-          // 整理モードは全食材をフラットなグリッドで出す(グループをまたいで一括選択したいため)
-          <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">
-            {items.map((item) => {
-              const selected = selectedIds.includes(item.id!)
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => toggleSelected(item.id!)}
-                  aria-pressed={selected}
-                  className={`inline-flex items-center gap-1 rounded-full border-2 py-2 px-3 text-sm font-bold shadow-sm ${
-                    selected ? 'border-accent bg-accent/10 text-accent' : 'border-edge bg-surface text-ink-muted'
-                  }`}
-                >
-                  {selected && <CheckCircle2 size={16} aria-hidden />}
-                  {item.name}
-                </button>
-              )
-            })}
+          // 整理モードでも大分類グループごとにまとめて表示する(2026-07-24 実機FB #5)。
+          // チップはタップで複数選択でき、選択の印(チェック)はチップの寸法を変えずに角へ重ねる
+          // (2026-07-24 実機FB #2: 選択でサイズ・位置がズレて連打しづらい問題の対策=絶対配置で重ねる)
+          <div className="mt-[var(--space-md)] flex flex-col gap-[var(--space-md)]">
+            {grouped.map(({ key, items: groupItems }) => (
+              <div key={key}>
+                <h3 className="text-sm font-bold text-ink-muted">{ja.pantry.group[key]}</h3>
+                <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                  {groupItems.map((item) => {
+                    const selected = selectedIds.includes(item.id!)
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => toggleSelected(item.id!)}
+                        aria-pressed={selected}
+                        className={`relative inline-flex items-center rounded-full border-2 py-2 px-3 text-sm font-bold shadow-sm ${
+                          selected ? 'border-accent bg-accent/10 text-accent' : 'border-edge bg-surface text-ink-muted'
+                        }`}
+                      >
+                        {item.name}
+                        {selected && (
+                          <CheckCircle2
+                            size={16}
+                            className="absolute -right-1.5 -top-1.5 rounded-full bg-surface text-accent"
+                            aria-hidden
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           // 通常表示: 大分類グループごとにまとめてチップを並べる(2026-07-23 #1)
@@ -240,26 +252,10 @@ export default function PantryBoard() {
 
       {organizing && (
         <div className="mt-[var(--space-md)] flex flex-col gap-2">
-          {/* 全選択・選択解除(2026-07-23 #10) */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={selectAll}
-              disabled={items !== undefined && selectedIds.length === items.length}
-              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
-            >
-              {ja.pantry.organizeSelectAll}
-            </button>
-            <button
-              type="button"
-              onClick={clearSelection}
-              disabled={selectedIds.length === 0}
-              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm disabled:opacity-40"
-            >
-              {ja.pantry.organizeClearSelection}
-            </button>
-          </div>
-          {/* まとめて状態設定(docs/35 §5 案D): 0件選択時はdisabled。スマホ幅でも崩れないよう3等分グリッド */}
+          {/* まとめて状態設定(docs/35 §5 案D): 0件選択時はdisabled。スマホ幅でも崩れないよう3等分グリッド。
+              「選んだ食材の在庫状況をまとめて変更」の見出しを3ボタンの上に添える
+              (2026-07-24 実機FB #3・グループ移動の見出しと同様式) */}
+          <p className="mt-1 text-sm text-ink-muted">{ja.pantry.organizeBulkSetTitle}</p>
           <div className="grid grid-cols-3 gap-2">
             {BULK_SET_LEVELS.map((level) => (
               <button
@@ -288,15 +284,6 @@ export default function PantryBoard() {
               </button>
             ))}
           </div>
-          {selectedIds.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void deleteSelected()}
-              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
-            >
-              {ja.pantry.organizeDeleteSelected.replace('{n}', String(selectedIds.length))}
-            </button>
-          )}
         </div>
       )}
 

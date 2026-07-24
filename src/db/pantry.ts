@@ -109,24 +109,6 @@ export async function setPantryItemsGroup(ids: number[], group: PantryGroupKey):
   })
 }
 
-/** 隣の食材と順序を入れ替える（並び替えモードの矢印ボタンから呼ぶ） */
-export async function movePantryItem(
-  items: PantryItem[],
-  index: number,
-  direction: -1 | 1,
-): Promise<void> {
-  const targetIndex = index + direction
-  if (targetIndex < 0 || targetIndex >= items.length) return
-  const a = items[index]
-  const b = items[targetIndex]
-  const aOrder = a.sortOrder ?? a.id!
-  const bOrder = b.sortOrder ?? b.id!
-  await db.transaction('rw', db.pantryItems, async () => {
-    await db.pantryItems.update(a.id!, { sortOrder: bOrder })
-    await db.pantryItems.update(b.id!, { sortOrder: aOrder })
-  })
-}
-
 /**
  * 買い物完了時に使う: その食材を「ある」にする。在庫ボードに未登録なら新しくチップを作って反映する
  * （2026-07-23 オーナー実機FB #8: 未作成だと無反応＝実質バグだった。反映するなら作って反映する）。

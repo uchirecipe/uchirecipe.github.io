@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -9,7 +9,6 @@ import {
   X,
   Plus,
   Minus,
-  GripVertical,
   CheckCircle2,
   CheckCheck,
   HelpCircle,
@@ -25,10 +24,9 @@ import {
   toggleShoppingChecked,
   setAllShoppingChecked,
   removeShoppingItem,
-  moveShoppingItem,
   completeShopping,
 } from '../db/shopping'
-import { buildShoppingCandidates, type ShoppingCandidate } from '../logic/shopping'
+import { buildShoppingCandidates, sortShoppingByAisle, type ShoppingCandidate } from '../logic/shopping'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import type { SearchResult } from '../logic/search'
 import PantryBoard from '../components/PantryBoard'
@@ -69,12 +67,21 @@ export default function ShoppingPage() {
     return settings?.hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
   }, [recipes, settings?.hideStarters])
 
+  // recipeId → レシピ名(下書きの食材名タップで「使うレシピ」を出すため。2026-07-24 実機FB #10)
+  const recipeTitleById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const r of recipes ?? []) if (r.id != null) map.set(r.id, r.title)
+    return map
+  }, [recipes])
+
   // レシピ選択ピッカー
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerQuery, setPickerQuery] = useState('')
   const [pickerSort, setPickerSort] = useState<RecipeSortOption>('updated')
   // 食数の+/-方式(2026-07-23 #3): recipeId → 食数。1食以上で「選択」扱い(既定0=未選択)
   const [pickerCounts, setPickerCounts] = useState<Record<number, number>>({})
+  // 直前のレシピ選択(食数)を覚えておき、「レシピを選び直す」でそのまま復元する(2026-07-24 実機FB #8)
+  const [lastPickerCounts, setLastPickerCounts] = useState<Record<number, number>>({})
 
   const filteredRecipes = useMemo(() => {
     const q = pickerQuery.trim()
@@ -97,9 +104,22 @@ export default function ShoppingPage() {
     setPickerQuery('')
     setPickerOpen(true)
   }
+  // レシピを選び直す(2026-07-24 実機FB #8): 直前の選択(食数)を保ったままピッカーを開き直す。
+  // 下書き自体は消さず、「下書きを作る」を再度押したときに作り直す
+  const repickRecipes = () => {
+    setPickerCounts(lastPickerCounts)
+    setPickerQuery('')
+    setPickerOpen(true)
+  }
 
   // 買い物候補（下書き。確定するまでDBには保存しない）
   const [candidates, setCandidates] = useState<CandidateRow[] | null>(null)
+  // 生成した下書きへ自動スクロールする(2026-07-24 実機FB #13)。候補がDOMに乗ってから実行するため
+  // フラグ+useEffectで1テンポ遅らせる
+  const candidatesRef = useRef<HTMLElement>(null)
+  const [scrollToCandidates, setScrollToCandidates] = useState(false)
+  // 下書きの食材名タップで出す「全文＋その食材を使うレシピ名」ポップ(2026-07-24 実機FB #10)
+  const [namePopup, setNamePopup] = useState<{ name: string; recipeIds: number[] } | null>(null)
 
   // 献立プランナーの「この週の買い物リストを作る」から来た場合（?recipeIds=1,2,3）は
   // ピッカーを介さず自動で候補を作る（食数は等倍=1回分ずつ。スケールは掛けない）
@@ -118,6 +138,8 @@ export default function ShoppingPage() {
         haveNames,
       )
       setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
+      // 「レシピを選び直す」で復元できるよう選択を覚えておく(#8)。献立由来は等倍=登録人数ぶん
+      setLastPickerCounts(Object.fromEntries(chosen.map((r) => [r.id!, r.servings])))
       // 献立プランナーの「この週の買い物リストを作る」から来た場合は、候補が乗る
       // 「買い物メモ」タブを開いた状態で迎える(在庫タブのまま候補が見えない事故を防ぐ)
       setActiveTab('memo')
@@ -144,10 +166,12 @@ export default function ShoppingPage() {
       }))
     const built = buildShoppingCandidates(chosen, haveNames)
     setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
+    setLastPickerCounts(pickerCounts) // 「レシピを選び直す」で復元できるよう、直前の選択を覚えておく(#8)
     setPickerOpen(false)
     setPickerCounts({})
     setPickerQuery('')
     setMessage(ja.shopping.candidatesMadeToast)
+    setScrollToCandidates(true) // 生成した下書きへ自動スクロール(#13)
   }
 
   const addConfirmed = async () => {
@@ -168,8 +192,10 @@ export default function ShoppingPage() {
     setManualAmount('')
   }
 
+  // 買い物メモは一般的なスーパーの売り場順に自動整列する(2026-07-24 実機FB #11)。
+  // 表示専用の並べ替えで、DBの保存順(order)は書き換えない
+  const memoItems = useMemo(() => sortShoppingByAisle(shoppingItems ?? []), [shoppingItems])
   // まとめてチェック/解除(2026-07-23 #6)
-  const memoItems = shoppingItems ?? []
   const allChecked = memoItems.length > 0 && memoItems.every((i) => i.isChecked)
 
   // 買い物完了(2026-07-23 #7: 下部インラインパネル→作った!と同じ中央モーダルに変更)
@@ -183,6 +209,25 @@ export default function ShoppingPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [completeOpen])
+
+  // 生成した下書きへ自動スクロール(2026-07-24 実機FB #13)。候補がDOMに乗った次の描画で1回だけ実行する
+  useEffect(() => {
+    if (scrollToCandidates && candidates && candidatesRef.current) {
+      candidatesRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setScrollToCandidates(false)
+    }
+  }, [scrollToCandidates, candidates])
+
+  // 食材名ポップはEscでも閉じる(2026-07-24 実機FB #10。他モーダルと同じ作法)
+  useEffect(() => {
+    if (!namePopup) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNamePopup(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [namePopup])
+
   const runComplete = async (reflect: boolean) => {
     await completeShopping(checkedItems, reflect)
     setCompleteOpen(false)
@@ -263,8 +308,9 @@ export default function ShoppingPage() {
                   {allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}
                 </button>
               </div>
+              {/* 並び順は売り場順の自動整列に一本化したため、手動の上下矢印UIは廃止(2026-07-24 実機FB #11・#12) */}
               <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-                {memoItems.map((item, index) => (
+                {memoItems.map((item) => (
                   <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
                     <button
                       type="button"
@@ -281,36 +327,6 @@ export default function ShoppingPage() {
                       <span className="font-bold">{item.name}</span>
                       {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
                     </div>
-                    {/* 並び替えハンドル(2026-07-23 #5: 上下矢印が数量調整に見える指摘への対応。
-                        つまみ(GripVertical)と枠でくくり、数量の+/-ではなく「順番の入れ替え」だと分かる
-                        見た目にする)。並び替えは2件以上あるときだけ意味があるので、そのとき出す */}
-                    {memoItems.length > 1 && (
-                      <div
-                        className="flex shrink-0 items-center rounded-sm border border-edge text-ink-muted"
-                        role="group"
-                        aria-label={ja.shopping.reorderHandle}
-                      >
-                        <GripVertical size={14} className="ml-0.5 opacity-50" aria-hidden />
-                        <button
-                          type="button"
-                          onClick={() => void moveShoppingItem(memoItems, index, -1)}
-                          disabled={index === 0}
-                          aria-label={ja.form.moveUp}
-                          className="p-1 disabled:opacity-30"
-                        >
-                          <ChevronUp size={16} aria-hidden />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void moveShoppingItem(memoItems, index, 1)}
-                          disabled={index === memoItems.length - 1}
-                          aria-label={ja.form.moveDown}
-                          className="p-1 disabled:opacity-30"
-                        >
-                          <ChevronDown size={16} aria-hidden />
-                        </button>
-                      </div>
-                    )}
                     <button
                       type="button"
                       onClick={() => void removeShoppingItem(item.id!)}
@@ -363,9 +379,12 @@ export default function ShoppingPage() {
           )}
         </section>
 
-        {/* 買い物候補（下書き） */}
+        {/* 買い物メモ（下書き。2026-07-24 実機FB #14で改称） */}
         {candidates && (
-          <section className="mt-[var(--space-md)] rounded-md border border-accent bg-surface p-[var(--space-md)] shadow-sm">
+          <section
+            ref={candidatesRef}
+            className="mt-[var(--space-md)] scroll-mt-[var(--space-md)] rounded-md border border-accent bg-surface p-[var(--space-md)] shadow-sm"
+          >
             <h2 className="text-xl font-bold">{ja.shopping.candidateTitle}</h2>
             <button
               type="button"
@@ -403,7 +422,15 @@ export default function ShoppingPage() {
                     >
                       <CheckCircle2 size={18} aria-hidden />
                     </button>
-                    <span className="min-w-0 flex-1 truncate pt-2 font-bold">{c.name}</span>
+                    {/* 食材名タップで全文＋使うレシピ名をポップ表示(2026-07-24 実機FB #10)。
+                        名前は truncate で省略されるので、タップで確認できるようにする */}
+                    <button
+                      type="button"
+                      onClick={() => setNamePopup({ name: c.name, recipeIds: c.recipeIds })}
+                      className="min-w-0 flex-1 truncate pt-2 text-left font-bold underline decoration-dotted decoration-ink-muted/40 underline-offset-4"
+                    >
+                      {c.name}
+                    </button>
                     <textarea
                       ref={(el) => {
                         if (el) {
@@ -429,23 +456,34 @@ export default function ShoppingPage() {
               </ul>
             )}
 
-            <div className="mt-[var(--space-md)] flex gap-2">
+            {/* 確定/やり直し/取り消し(2026-07-24 実機FB #8)。確定は主ボタンで上に、
+                「レシピを選び直す」(選択を保持して開き直す)と「キャンセル」は下段に並べる */}
+            <div className="mt-[var(--space-md)] flex flex-col gap-2">
               {candidates.length > 0 && (
                 <button
                   type="button"
                   onClick={() => void addConfirmed()}
-                  className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                  className="w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
                 >
                   {ja.shopping.addConfirmed}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => setCandidates(null)}
-                className="rounded-md border border-edge bg-surface px-4 py-3 font-bold text-ink-muted shadow-sm"
-              >
-                {ja.shopping.discardCandidates}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={repickRecipes}
+                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                >
+                  {ja.shopping.repickRecipes}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCandidates(null)}
+                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
+                >
+                  {ja.shopping.discardCandidates}
+                </button>
+              </div>
             </div>
           </section>
         )}
@@ -496,6 +534,54 @@ export default function ShoppingPage() {
                 {ja.shopping.completeNo}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 下書きの食材名タップで出す「全文＋使うレシピ名」ポップ(2026-07-24 実機FB #10)。
+          背景タップ・X・Escで閉じる(他モーダルと同じ作法) */}
+      {namePopup && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center p-[var(--space-md)]"
+          onClick={() => setNamePopup(null)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label={namePopup.name}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm min-w-0 rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="min-w-0 break-words font-bold">{namePopup.name}</h3>
+              <button
+                type="button"
+                onClick={() => setNamePopup(null)}
+                aria-label={ja.common.close}
+                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
+              {ja.shopping.candidateUsedInRecipes}
+            </p>
+            {(() => {
+              const titles = namePopup.recipeIds
+                .map((id) => recipeTitleById.get(id))
+                .filter((t): t is string => !!t)
+              return titles.length > 0 ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink">
+                  {titles.map((title, i) => (
+                    <li key={i} className="break-words">
+                      {title}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-ink-muted">{ja.shopping.candidateUsedInNoRecipe}</p>
+              )
+            })()}
           </div>
         </div>
       )}
@@ -562,12 +648,10 @@ export default function ShoppingPage() {
                         selected ? 'bg-accent/5' : ''
                       }`}
                     >
+                      {/* 品目名下の「◯人分レシピ」表記は削除(2026-07-24 実機FB #9) */}
                       <div className="min-w-0 flex-1">
                         <span className={`block truncate font-bold ${selected ? 'text-accent' : ''}`}>
                           {recipe.title}
-                        </span>
-                        <span className="text-xs text-ink-muted">
-                          {ja.shopping.pickerBaseServings.replace('{n}', String(recipe.servings))}
                         </span>
                       </div>
                       {/* 食数の+/-ステッパー(2026-07-23 #3)。1食以上で選択扱い・指定食数で候補生成 */}

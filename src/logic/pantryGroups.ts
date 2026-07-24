@@ -24,6 +24,21 @@ export const PANTRY_GROUP_ORDER: PantryGroupKey[] = [
 ]
 
 /**
+ * 買い物メモの売り場順（一般的なスーパーの導線: 野菜・きのこ→肉・魚介→豆腐・卵・乳→
+ * 主食・粉→調味料→その他。2026-07-24 実機FB #11）。
+ * 在庫チップの分類（categorizePantryName）をそのまま流用し、並び順だけ買い物向けに
+ * 組み替える。在庫ボードの表示順（PANTRY_GROUP_ORDER＝肉・魚介が先頭）とは意図的に別物。
+ */
+export const SHOPPING_AISLE_ORDER: PantryGroupKey[] = [
+  'vegetable',
+  'meatFish',
+  'soyEgg',
+  'staple',
+  'seasoning',
+  'other',
+]
+
+/**
  * グループ → そのグループに属する栄養食品の label 一覧。
  * label は src/logic/nutritionData.ts（= scripts/nutrition-foods.mjs）の表示名そのまま。
  */
