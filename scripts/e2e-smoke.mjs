@@ -3618,8 +3618,10 @@ try {
     }
   }
 
-  // --- MEALPLAN-06: ランダム週献立の過去日保護(2026-07-16 便W-⑤a・オーナー指示2026-07-16夜)。
-  // 「まとめて献立」「サイコロ」は過去日(今日より前)の枠を対象外にする(上書きも新規埋めもしない)。
+  // --- MEALPLAN-06: 過去日の扱い(2026-07-16 便W-⑤a→2026-07-24 便BS・タスク2で強化)。
+  // 便BS: 過去日は「作った記録」だけを日記のように残し、達成しなかった予定は過去表示から消す
+  // (表示レベルのフィルタ=mealPlansデータは非破壊で残す)。よって過去週は予定グリッドを出さず、
+  // 「まとめて献立」「サイコロ」の対象にもならない(上書きも新規埋めも起きない)。
   // 「前の週」は実行日の曜日に関わらず必ず全7日が過去日になる(当週の月曜が実行日以前でも、
   // 前の週の日曜は必ずそれよりさらに前)ため、実行日に依存しない決定的なテストになる ---
   currentCheck = 'MEALPLAN-06'
@@ -3645,22 +3647,28 @@ try {
       await mp6Page.locator('button[aria-label="前の週"]').click()
       await mp6Page.waitForTimeout(300)
 
-      // 前提: 表示中の週は全日程が過去日(既定は夕食のみ表示なので7日×2行=14件の「未定」)
+      // 前提: 表示中の週は全日程が過去日。便BS(タスク2)で過去日は予定グリッドを表示しなくなった
+      // (達成しなかった予定は過去表示から消す=非破壊の表示フィルタ)。記録の無い過去日は「この日の
+      // 記録はありません」を出す(7日分)。よって「レシピを選ぶ」(空き枠ボタン)は0件になる
       check(
-        'MEALPLAN-06 前提: 前の週(全日程過去日)も既定どおり7日×2行(未定×14)が並ぶ',
-        (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 14,
+        'MEALPLAN-06(便BS) 過去週は予定グリッド(レシピを選ぶ)を1つも出さない',
+        (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 0,
+      )
+      check(
+        'MEALPLAN-06(便BS) 記録の無い過去日は「この日の記録はありません」を7日分出す',
+        (await mp6Page.getByText('この日の記録はありません').count()) === 7,
       )
       // (a) 過去日にはサイコロ(行の自動提案)ボタン自体が出ない
       check(
         'MEALPLAN-06(過去日保護a) 過去週にはサイコロボタンが1つも出ない',
         (await mp6Page.getByRole('button', { name: 'この行にレシピを自動提案する' }).count()) === 0,
       )
-      // (a) 「まとめて献立を立てる」を押しても過去週は一切埋まらない(上書きも新規埋めもしない)
+      // (a) 「まとめて献立を立てる」を押しても過去週には予定が生まれない(グリッドを出さないまま)
       await mp6Page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
       await mp6Page.waitForTimeout(600)
       check(
-        'MEALPLAN-06(過去日保護a) 「まとめて献立を立てる」を押しても過去週は未定のまま(14件不変)',
-        (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 14,
+        'MEALPLAN-06(過去日保護a) 「まとめて献立を立てる」を押しても過去週に予定は出ない(0のまま)',
+        (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 0,
       )
     } finally {
       await mp6Browser.close()
@@ -4104,6 +4112,12 @@ try {
         !!plDayCardText && plDayCardText.includes('作った記録') && plDayCardText.includes('肉じゃが'),
         `昨日カード=${plDayCardText?.slice(0, 120)}`,
       )
+      // 便BS(タスク2): 過去日は予定グリッドを出さず「記録だけ残す」。昨日カードに空き枠ボタン
+      // (レシピを選ぶ)が無いことで、達成しなかった予定が過去表示から消えていることを確認する
+      check(
+        'PASTLOG-01(便BS) 過去日は予定グリッドを出さない(昨日カードに「レシピを選ぶ」が無い)',
+        !!plDayCardText && !plDayCardText.includes('レシピを選ぶ'),
+      )
 
       // (b) 月タブ: Pro解錠(月間はPro機能。実コードは台帳原本のためNUT-02等と同様
       // settings.proCodeの直書きで「解錠済み」状態だけ再現)→「記録あり」マーク→日モーダル
@@ -4420,8 +4434,149 @@ try {
           `total=${actualTotal} count=${actualCount} per=${actualPer} single=${rcSingleCost}`,
         )
       }
+      // 2026-07-24 便BS・タスク3: 記録のある期間には「摂取できた栄養（1食あたり）」が出る。
+      // 既存のPro8項目計算を流用し、「めやす／概算」表記を厳守すること
+      check(
+        'MEALPLAN-07(便BS・タスク3) 実績のある期間に「摂取できた栄養（1食あたり）」が出る',
+        rcActualText.includes('摂取できた栄養（1食あたり）') && rcActualText.includes('エネルギー'),
+      )
+      check(
+        'MEALPLAN-07(便BS・タスク3) 摂取栄養は「概算／めやす」表記で出す',
+        rcActualText.includes('概算') && rcActualText.includes('めやす'),
+      )
+      check(
+        'MEALPLAN-07(便BS・タスク3) 記録のあった食数(1食)のめやすである旨を出す',
+        rcActualText.includes('記録のあった1食のめやすです'),
+      )
     } finally {
       await rcBrowser.close()
+    }
+  }
+
+  // --- LOCKPREV-01: 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。
+  // 月タブを完全に隠さず、ぼかしたサンプルカレンダーの上に「Pro版で使えます」+機能説明+「Pro版に
+  // ついて見る」リンクを重ねる。実カレンダーの操作(期間の食費モード等)は出さない。機能を卑下する
+  // 表現(おまけ/簡易的/大したもの=規約H禁止)を含まないことも確認する。まっさら(未解錠)プロファイル ---
+  currentCheck = 'LOCKPREV-01'
+  {
+    const lpBrowser = await chromium.launch()
+    const lpContext = await lpBrowser.newContext()
+    const lpPage = await lpContext.newPage()
+    lpPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@LOCKPREV-01] ${text}`)
+    })
+    lpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@LOCKPREV-01] ${err.message}`)
+    })
+    try {
+      await lpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await lpPage.waitForTimeout(1500)
+      await lpPage.getByRole('button', { name: '月', exact: true }).click()
+      await lpPage.waitForTimeout(400)
+      const lpBody = (await lpPage.textContent('body')) ?? ''
+      check('LOCKPREV-01 未解錠は鍵付きプレビューに「Pro版で使えます」が出る', lpBody.includes('Pro版で使えます'))
+      check('LOCKPREV-01 未解錠でも「Pro版について見る」リンクが出る', lpBody.includes('Pro版について見る'))
+      check(
+        'LOCKPREV-01 未解錠では実カレンダー操作(期間の食費モード)を出さない',
+        (await lpPage.getByRole('button', { name: '期間の食費', exact: true }).count()) === 0,
+      )
+      check(
+        'LOCKPREV-01(規約H) 機能を卑下する表現(おまけ/簡易的/大したもの)を含まない',
+        !/おまけ|簡易的|大したもの/.test(lpBody),
+      )
+    } finally {
+      await lpBrowser.close()
+    }
+  }
+
+  // --- PHOTOCAL-01: 月間カレンダーに作った記録の写真サムネ(2026-07-24 便BS・タスク4)。
+  // 肉じゃがのcookedLogsに写真Blob付きの記録(昨日)を直接注入し、Pro解錠済み月カレンダーで
+  // その日のセルに写真(img)が敷かれ、「記録あり」のaria-labelを持つことを確認する。
+  // Pro解錠はPASTLOG-01等と同じsettings.proCode直書きで「解錠済み状態」を再現する ---
+  currentCheck = 'PHOTOCAL-01'
+  {
+    const pcBrowser = await chromium.launch()
+    const pcContext = await pcBrowser.newContext()
+    const pcPage = await pcContext.newPage()
+    pcPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@PHOTOCAL-01] ${text}`)
+    })
+    pcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PHOTOCAL-01] ${err.message}`)
+    })
+    try {
+      const pcPad = (n) => String(n).padStart(2, '0')
+      const pcNow = new Date()
+      const pcYd = new Date()
+      pcYd.setDate(pcYd.getDate() - 1)
+      const pcYesterday = `${pcYd.getFullYear()}-${pcPad(pcYd.getMonth() + 1)}-${pcPad(pcYd.getDate())}`
+
+      await pcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await pcPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      await pcPage.evaluate(async (date) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        // 肉じゃがに写真Blob付きの記録(昨日)を追加
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('recipes', 'readwrite')
+          const store = tx.objectStore('recipes')
+          const g = store.getAll()
+          g.onsuccess = () => {
+            const r = g.result.find((x) => x.title === '肉じゃが')
+            const blob = new Blob([new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70])], {
+              type: 'image/jpeg',
+            })
+            r.cookedLogs = [{ date, photo: blob }, ...(r.cookedLogs ?? [])]
+            store.put(r)
+          }
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        // Pro解錠(settings.proCode直書き)
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const gg = store.get(1)
+          gg.onsuccess = () => {
+            const c = gg.result || { id: 1 }
+            store.put({ ...c, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+          }
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      }, pcYesterday)
+
+      await pcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await pcPage.reload({ waitUntil: 'networkidle' })
+      await pcPage.waitForTimeout(800)
+      await pcPage.getByRole('button', { name: '月', exact: true }).click()
+      await pcPage.waitForTimeout(500)
+      if (pcYesterday.slice(0, 7) !== `${pcNow.getFullYear()}-${pcPad(pcNow.getMonth() + 1)}`) {
+        // 実行日が月初(1日)のときだけ、昨日は前の月に表示される
+        await pcPage.locator('button[aria-label="前の月"]').click()
+        await pcPage.waitForTimeout(400)
+      }
+      const pcPhotoCell = pcPage.locator('button[aria-label="記録あり"]').first()
+      check('PHOTOCAL-01 記録のある日セルが「記録あり」で出る', (await pcPhotoCell.count()) >= 1)
+      check(
+        'PHOTOCAL-01 記録写真のある日のセルに写真(img)が敷かれる',
+        (await pcPhotoCell.locator('img').count()) >= 1,
+      )
+    } finally {
+      await pcBrowser.close()
     }
   }
 
