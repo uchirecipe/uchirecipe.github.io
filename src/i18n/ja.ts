@@ -85,17 +85,19 @@ export const ja = {
     add: '追加',
     empty: 'よく使う食材を登録すると、ここに並びます',
     addToSearch: '在庫から追加',
-    reorderToggle: '並び替え',
-    reorderDone: '完了',
     // 整理モード(2026-07-16 UI総点検B-10: チップ常時×が状態切替タップと隣接し誤操作の元
-    // だったため廃止。代わりにモードに入って複数選択→一括削除にする)
+    // だったため廃止。代わりにモードに入って複数選択→一括削除にする)。
+    // 手動並び替えはグループ表示化(#1)で並び順がグループ主体になり無意味になったため廃止(2026-07-24 実機FB #6)
     organizeToggle: '整理',
     organizeDone: '完了',
     organizeSelect: 'タップして選択',
-    organizeDeleteSelected: '選択した{n}件を削除',
+    // 削除ボタン(2026-07-24 補足#15: 「食材」を入れて何を消すか明確にし、選択操作のすぐ下に置く)
+    organizeDeleteSelected: '選択した食材{n}件を削除',
     organizeConfirm: '選択した{n}件を食材の在庫から削除します。よろしいですか？',
     // まとめて状態設定(2026-07-17 docs/35 §5 案D): 整理モード中、選択した食材をまとめて
     // 「ある」「少ない」「ない」のいずれかに一括変更する。ボタン文言はpantry.levelを流用
+    // 見出し(2026-07-24 実機FB #3: グループ移動の見出しと同様式で、3ボタンの上に添える)
+    organizeBulkSetTitle: '選んだ食材の在庫状況をまとめて変更',
     organizeBulkSetToast: '{n}件を『{level}』にしました',
     // 整理モードの全選択・選択解除(2026-07-23 オーナー実機FB #10)
     organizeSelectAll: '全選択',
@@ -321,15 +323,21 @@ export const ja = {
     pickerServingUnit: '食',
     pickerServingDown: '食数を減らす',
     pickerServingUp: '食数を増やす',
-    pickerBaseServings: '{n}人分レシピ',
-    makeCandidates: '候補を作る',
-    candidateTitle: '買い物候補（下書き）',
+    // 生成ボタン・下書きセクションの文言(2026-07-24 実機FB #14: 「候補」より下書きだと分かる語に統一)
+    makeCandidates: '下書きを作る',
+    candidateTitle: '買い物メモ（下書き）',
     candidateDescription:
-      '内容を確認してチェックを入れ、「買い物メモに追加」を押すと確定します。自動計算はあくまで下書きです',
+      '内容を確認してチェックを入れ、「買い物メモに追加」を押すと確定します。数量は、選択したレシピの食数から自動計算したものです',
     candidateEmpty: '選んだレシピの材料は、食材の在庫で「ある」に登録済みのようです',
+    // 下書きの食材名タップで出すポップ(2026-07-24 実機FB #10: 全文と、その食材を使うレシピ名を表示)
+    candidateUsedInRecipes: '使うレシピ',
+    candidateUsedInNoRecipe: 'レシピ情報が見つかりません',
     amountPlaceholder: '分量',
     addConfirmed: '買い物メモに追加',
-    discardCandidates: '候補を閉じる',
+    // 下書きの操作(2026-07-24 実機FB #8): 「閉じる」→「キャンセル」に改称し、
+    // 直前の選択を保ったままレシピ選択をやり直せる「レシピを選び直す」を新設
+    repickRecipes: 'レシピを選び直す',
+    discardCandidates: 'キャンセル',
     memoTitle: '買い物メモ',
     memoEmpty: 'まだ買い物メモがありません。レシピから追加するか、下から手入力できます',
     manualPlaceholder: '食材を入力',
@@ -338,8 +346,6 @@ export const ja = {
     remove: 'この項目を削除',
     // 買い物メモの1項目チェックの切り替え(a11yラベル。まとめてチェックの「全部チェック」と区別する)
     toggleCheck: 'チェックの切り替え',
-    // 買い物メモの並び替えハンドル(2026-07-23 オーナー実機FB #5: 上下矢印が数量調整に見える指摘)
-    reorderHandle: '並び替え（上下に移動）',
     // まとめてチェック/解除(2026-07-23 オーナー実機FB #6)
     checkAll: '全部チェック',
     uncheckAll: 'チェックを外す',
@@ -349,8 +355,8 @@ export const ja = {
       'チェックした食材を「ある」にして食材の在庫に反映します（在庫に無い食材は新しく追加します）。反映してもしなくても、チェック済みの項目はメモから消えます',
     completeYes: '反映する',
     completeNo: '反映せず完了',
-    // 候補を作る/買い物メモに追加のトースト(2026-07-23 オーナー実機FB #4)
-    candidatesMadeToast: '買い物候補を作りました',
+    // 下書きを作る/買い物メモに追加のトースト(2026-07-23 #4 → 2026-07-24 #14: ボタン「下書きを作る」に合わせる)
+    candidatesMadeToast: '下書きを作りました',
     addedToMemoToast: '{n}件を買い物メモに追加しました',
     // 買い物完了のトースト(2026-07-23 オーナー実機FB #9: 反映する/しないどちらでもトースト)
     completeReflectedToast: 'チェックした食材を在庫に反映しました',

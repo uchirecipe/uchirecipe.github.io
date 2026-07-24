@@ -58,7 +58,7 @@ import {
 } from '../src/logic/mealPlan.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
-import { buildShoppingCandidates } from '../src/logic/shopping.ts'
+import { buildShoppingCandidates, sortShoppingByAisle } from '../src/logic/shopping.ts'
 import { selectPantryDowngrades } from '../src/logic/pantry.ts'
 import {
   categorizePantryName,
@@ -2092,6 +2092,30 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     'meatFish',
     'vegetable',
     'seasoning',
+  ])
+}
+
+// ---------- 買い物メモの売り場順(2026-07-24 実機FB #11) ----------
+{
+  // 在庫の表示順(肉が先)とは別に、買い物は売り場導線=野菜→肉→豆腐卵乳→主食粉→調味料→その他。
+  // 同じグループ内は元の並び(既存の追加順)を安定して保つ
+  const sorted = sortShoppingByAisle([
+    { id: 1, name: 'しょうゆ' }, // 調味料
+    { id: 2, name: '豚肉' }, // 肉・魚介
+    { id: 3, name: '玉ねぎ' }, // 野菜・きのこ
+    { id: 4, name: 'にんじん' }, // 野菜・きのこ(玉ねぎより後=既存順を維持する)
+    { id: 5, name: '架空の宇宙食材' }, // その他
+    { id: 6, name: '卵' }, // 豆腐・卵・乳
+    { id: 7, name: '米' }, // 主食・粉
+  ])
+  eq('買い物売り場順: 野菜→肉→豆腐卵乳→主食粉→調味料→その他の順に並ぶ', sorted.map((s) => s.name), [
+    '玉ねぎ',
+    'にんじん',
+    '豚肉',
+    '卵',
+    '米',
+    'しょうゆ',
+    '架空の宇宙食材',
   ])
 }
 

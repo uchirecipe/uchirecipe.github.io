@@ -70,22 +70,6 @@ export async function removeShoppingItem(id: number): Promise<void> {
   await db.shoppingItems.delete(id)
 }
 
-/** 隣の項目と順序を入れ替える（上へ/下へ移動） */
-export async function moveShoppingItem(
-  items: ShoppingItem[],
-  index: number,
-  direction: -1 | 1,
-): Promise<void> {
-  const targetIndex = index + direction
-  if (targetIndex < 0 || targetIndex >= items.length) return
-  const a = items[index]
-  const b = items[targetIndex]
-  await db.transaction('rw', db.shoppingItems, async () => {
-    await db.shoppingItems.update(a.id!, { order: b.order })
-    await db.shoppingItems.update(b.id!, { order: a.order })
-  })
-}
-
 /**
  * 買い物完了: チェック済みの項目を削除する。
  * reflectToPantry が true なら、チェックした食材を在庫「ある」に反映する
