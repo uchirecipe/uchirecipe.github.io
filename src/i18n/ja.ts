@@ -141,7 +141,7 @@ export const ja = {
     todaySuggestDone: 'おまかせで{n}品を今日の献立に入れました',
     // おまかせで提案したあとに出す振り直しボタン(2026-07-24 便BN・タスク2)。前回のおまかせ分を
     // 入れ替えて、別の主菜+副菜を提案し直す
-    todayReroll: 'おまかせを振り直す',
+    todayReroll: '別の提案を見る',
     todayMarkCooked: '作った',
     todayRemove: 'この献立から外す',
     todayMarkAllCooked: '全て作った！',
