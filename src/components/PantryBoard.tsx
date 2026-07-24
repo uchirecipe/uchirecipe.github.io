@@ -324,7 +324,7 @@ export default function PantryBoard() {
         </button>
       </div>
 
-      {/* 在庫欄の下部の一言(2026-07-23 #12。ざっくり=おまけ機能であることを控えめに添える) */}
+      {/* 在庫欄の下部の一言(2026-07-23 #12→07-24訂正。「ざっくり3段階」という機能の性質だけを伝える。規約H: 自己卑下的な表現(おまけ等)をUI文言に使わない) */}
       <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.pantry.omakeNote}</p>
     </section>
     <Toast message={message} onClose={() => setMessage('')} />

@@ -7036,8 +7036,8 @@ try {
       check('PANTRY-GROUP-01 グループ見出し「野菜・きのこ」が表示される', body.includes('野菜・きのこ'))
       check('PANTRY-GROUP-01 グループ見出し「肉・魚介」が表示される', body.includes('肉・魚介'))
       check('PANTRY-GROUP-01 グループ見出し「調味料」が表示される', body.includes('調味料'))
-      // おまけ機能の一言(#12)も同じ画面に出る
-      check('PANTRY-GROUP-01 在庫のおまけ機能の一言(#12)が出る', body.includes('おまけ機能'))
+      // ざっくり3段階の説明の一言(#12)も同じ画面に出る
+      check('PANTRY-GROUP-01 在庫のざっくり3段階の一言(#12)が出る', body.includes('ざっくり3段階で記録'))
 
       // 整理モードに入り、玉ねぎを選んで「調味料」グループへ移動する
       await grPage.getByRole('button', { name: '整理', exact: true }).click()
