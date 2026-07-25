@@ -4453,6 +4453,262 @@ try {
     }
   }
 
+  // --- MEALPLAN-S1S2: 月セルの未来日プレビュー強化(S-1)と、献立ゼロの未来日を淡く可視化(S-2)。
+  // 2026-07-25 便BU・docs/59。翌月(=全日が未来日)へ移動し、ある日にだけ夕食主菜を投入する。
+  //  S-1: 予定のある未来日のセルに、点ではなく主菜名(肉じゃが)が出ること。
+  //  S-2: 予定も記録も無い未来日のセルは控えめな点線枠(border-dashed)になり、予定のある日は実線のままなこと。
+  // 月タブはPro機能のためIndexedDB直書きで解錠する(MEALPLAN-07と同手法)。 ---
+  currentCheck = 'MEALPLAN-S1S2'
+  {
+    const s12Browser = await chromium.launch()
+    const s12Context = await s12Browser.newContext()
+    const s12Page = await s12Context.newPage()
+    s12Page.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-S1S2] ${text}`)
+    })
+    s12Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-S1S2] ${err.message}`)
+    })
+    try {
+      await s12Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await s12Page.waitForTimeout(1800) // 初回シード完了待ち
+
+      const s12RecipeId = await s12Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () => resolve(g.result.find((r) => r.title === '肉じゃが')?.id)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+
+      // 翌月・10日の夕食主菜に肉じゃがを投入(翌月は全日が未来日=showPlanDotが立つ)
+      const s12Now = new Date()
+      const s12Next = new Date(s12Now.getFullYear(), s12Now.getMonth() + 1, 1)
+      const s12Prefix = `${s12Next.getFullYear()}-${String(s12Next.getMonth() + 1).padStart(2, '0')}`
+      const s12PlannedDate = `${s12Prefix}-10`
+      await s12Page.evaluate(
+        ({ recipeId, date }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readwrite')
+              tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId, role: 'main' })
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { recipeId: s12RecipeId, date: s12PlannedDate },
+      )
+
+      // Pro解錠(IndexedDB直書き)
+      await s12Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+
+      await s12Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await s12Page.reload({ waitUntil: 'networkidle' })
+      await s12Page.waitForTimeout(800)
+      await s12Page.getByRole('button', { name: '月', exact: true }).click()
+      await s12Page.waitForTimeout(400)
+      // 翌月へ移動(全日が未来日になる)
+      await s12Page.getByRole('button', { name: '次の月', exact: true }).click()
+      await s12Page.waitForTimeout(400)
+
+      const s12Grid = s12Page.locator('div.grid.grid-cols-7').last()
+      // セルは主菜名を含むため ^10$ 完全一致では引けない。「10」を含むセル(唯一)をテキストで判定する
+      const s12Day10 = s12Grid.locator('button').filter({ hasText: /10/ }).first()
+      const s12Day10Text = (await s12Day10.textContent()) ?? ''
+      check(
+        'MEALPLAN-S1S2(S-1) 予定のある未来日セルに主菜名(肉じゃが)が出る(点ではなく名前)',
+        s12Day10Text.includes('肉じゃが'),
+        `day10Text=${s12Day10Text}`,
+      )
+      const s12Day10Cls = (await s12Day10.getAttribute('class')) ?? ''
+      check(
+        'MEALPLAN-S1S2(S-2) 予定のある未来日セルは実線のまま(点線ではない)',
+        !s12Day10Cls.includes('border-dashed'),
+        `day10Cls=${s12Day10Cls}`,
+      )
+      // 予定も記録も無い未来日(11日)は控えめな点線枠になる
+      const s12Day11 = s12Grid.locator('button').filter({ hasText: /^11$/ }).first()
+      const s12Day11Cls = (await s12Day11.getAttribute('class')) ?? ''
+      check(
+        'MEALPLAN-S1S2(S-2) 献立ゼロの未来日セルは控えめな点線枠(border-dashed)で可視化される',
+        s12Day11Cls.includes('border-dashed'),
+        `day11Cls=${s12Day11Cls}`,
+      )
+    } finally {
+      await s12Browser.close()
+    }
+  }
+
+  // --- MEALPLAN-S3: 先週の献立をコピー(2026-07-25 便BU・docs/59)。週タブ「今日から7日間」表示にし、
+  // 1週間前(source)にだけ夕食主菜を仕込み、今日(day0)には別の主菜を手動配置しておく。
+  // 「先週の献立をコピー」→確認ダイアログ承認で:
+  //  ・空いている未来日(day1=今日+1)に先週の主菜(カレーライス)がコピーされること
+  //  ・既に手動配置がある今日(day0)は上書きされず元のまま(肉じゃが)残ること(非破壊)
+  //  ・確認文が「入る件数」と「残る」を明示する規約F準拠であること
+  // を確認する。今日を含むローリング表示にすることで日付計算を決定的にする。 ---
+  currentCheck = 'MEALPLAN-S3'
+  {
+    const cwBrowser = await chromium.launch()
+    const cwContext = await cwBrowser.newContext()
+    const cwPage = await cwContext.newPage()
+    let cwDialogMsg = ''
+    cwPage.on('dialog', (dialog) => {
+      cwDialogMsg = dialog.message()
+      return dialog.accept()
+    })
+    cwPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-S3] ${text}`)
+    })
+    cwPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-S3] ${err.message}`)
+    })
+    try {
+      await cwPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cwPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      const cwIds = await cwPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const find = (t) => g.result.find((r) => r.title === t)?.id
+                resolve({ curry: find('カレーライス'), nikujaga: find('肉じゃが') })
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+
+      // 週の表示起点を「今日から7日間」に切り替え(weekStartsToday=trueを設定に記憶)。
+      // 先週(source)= 今日-7 / 今日-6、今週= 今日(day0) / 今日+1(day1) を決定的に扱う
+      await cwPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await cwPage.waitForTimeout(500)
+      await cwPage.getByRole('button', { name: '週', exact: true }).click()
+      await cwPage.waitForTimeout(300)
+      await cwPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await cwPage.waitForTimeout(300)
+
+      // IndexedDB直書きで先週2日分のsourceと、今週day0の手動配置を仕込む
+      await cwPage.evaluate(
+        ({ curry, nikujaga }) =>
+          new Promise((resolve, reject) => {
+            const toStr = (d) =>
+              `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const shift = (days) => {
+              const d = new Date()
+              d.setDate(d.getDate() + days)
+              return toStr(d)
+            }
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readwrite')
+              const store = tx.objectStore('mealPlans')
+              store.add({ date: shift(-7), slot: 'dinner', recipeId: curry, role: 'main' }) // 先週day0
+              store.add({ date: shift(-6), slot: 'dinner', recipeId: curry, role: 'main' }) // 先週day1
+              store.add({ date: shift(0), slot: 'dinner', recipeId: nikujaga, role: 'main' }) // 今日=手動配置
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        cwIds,
+      )
+      await cwPage.reload({ waitUntil: 'networkidle' })
+      await cwPage.waitForTimeout(800)
+      await cwPage.getByRole('button', { name: '週', exact: true }).click()
+      await cwPage.waitForTimeout(400)
+
+      // 「先週の献立をコピー」実行(confirmは自動承認・メッセージを捕捉)
+      await cwPage.getByRole('button', { name: '先週の献立をコピー', exact: true }).click()
+      await cwPage.waitForTimeout(700)
+
+      check(
+        'MEALPLAN-S3 確認文が「入る件数」と「残る」を明示する(規約F準拠)',
+        /コピーします/.test(cwDialogMsg) && /件/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
+        `dialog=${cwDialogMsg}`,
+      )
+      const cwToast = (await cwPage.textContent('body')) ?? ''
+      check('MEALPLAN-S3 コピー完了トーストが出る', /先週の献立を\d+件コピーしました/.test(cwToast))
+
+      // IndexedDBで結果を検証(day1=コピーされる / day0=手動配置が残る)
+      const cwResult = await cwPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const toStr = (d) =>
+              `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const shift = (days) => {
+              const d = new Date()
+              d.setDate(d.getDate() + days)
+              return toStr(d)
+            }
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => {
+                const all = g.result
+                const at = (date) => all.filter((e) => e.date === date && e.slot === 'dinner')
+                resolve({ day0: at(shift(0)), day1: at(shift(1)) })
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-S3 空いていた未来日(今日+1)に先週の主菜(カレー)がコピーされる',
+        cwResult.day1.length === 1 && cwResult.day1[0].recipeId === cwIds.curry,
+        `day1=${JSON.stringify(cwResult.day1)}`,
+      )
+      check(
+        'MEALPLAN-S3 手動配置のある今日(day0)は上書きされず元のまま(肉じゃが)残る=非破壊',
+        cwResult.day0.length === 1 && cwResult.day0[0].recipeId === cwIds.nikujaga,
+        `day0=${JSON.stringify(cwResult.day0)}`,
+      )
+    } finally {
+      await cwBrowser.close()
+    }
+  }
+
   // --- LOCKPREV-01: 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。
   // 月タブを完全に隠さず、ぼかしたサンプルカレンダーの上に「Pro版で使えます」+機能説明+「Pro版に
   // ついて見る」リンクを重ねる。実カレンダーの操作(期間の食費モード等)は出さない。機能を卑下する

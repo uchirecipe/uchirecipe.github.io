@@ -13,6 +13,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Copy,
   TriangleAlert,
   Lock,
   Route,
@@ -248,8 +249,10 @@ const LOCK_SAMPLE_PLAN_DAYS = new Set([2, 8, 16, 20, 24, 29])
 /**
  * 月カレンダーの1日分のセル(2026-07-24 便BS・タスク4/5)。その日に「作った記録」があれば写真サムネを
  * セル全面に敷き(日記のように写真で振り返れる)、日付を左上の小バッジに出す。写真の無い記録は従来の
- * 「記録あり」チェックで表す。予定(献立あり)のドットは showPlanDot が true の日(今日・未来日)だけ出す
+ * 「記録あり」チェックで表す。予定(献立あり)は showPlanDot が true の日(今日・未来日)だけ出し、
+ * 2026-07-25 便BU・S-1(docs/59)で点から主菜名(無ければ件数)のプレビューへ強化した
  * (過去日の未達成予定はカレンダーからも消す=便BS・タスク2の方針。mealPlansデータは非破壊で残す)。
+ * S-2(docs/59): 予定も記録も無い未来日(isEmptyFuture)は控えめな点線枠で「まだ決めていない日」を可視化する。
  * usePhotoUrlはループ内で直接呼べないため、親でBlobを解決してこのセル単位で1回だけ呼ぶ。
  */
 function MonthDayCell({
@@ -257,6 +260,8 @@ function MonthDayCell({
   isToday,
   inRange,
   showPlanDot,
+  planPreview,
+  isEmptyFuture,
   hasLog,
   coverPhoto,
   onClick,
@@ -265,6 +270,10 @@ function MonthDayCell({
   isToday: boolean
   inRange: boolean
   showPlanDot: boolean
+  /** S-1(docs/59): 今日・未来日の予定プレビュー（主菜名／無ければ「◯件」）。showPlanDotのときだけ出す */
+  planPreview?: string
+  /** S-2(docs/59): 予定も記録も無い未来日か（＝まだ献立を決めていない日。控えめな点線枠で可視化する） */
+  isEmptyFuture: boolean
   hasLog: boolean
   coverPhoto: Blob | undefined
   onClick: () => void
@@ -300,26 +309,33 @@ function MonthDayCell({
     ? 'border-accent bg-accent text-on-accent font-bold'
     : inRange
       ? 'border-accent bg-accent/20 text-ink'
-      : 'border-edge bg-surface text-ink'
+      : isEmptyFuture
+        ? // S-2(docs/59): 予定も記録も無い未来日は「まだ決めていない日」が一目で分かる控えめな点線枠＋
+          // 淡い数字にする（押し付けがましいバッジは付けない＝規約H）
+          'border-dashed border-edge bg-surface text-ink-muted'
+        : 'border-edge bg-surface text-ink'
   return (
     <button type="button" onClick={onClick} className={`${base} ${tone}`}>
-      <span>{dayNum}</span>
-      {(showPlanDot || hasLog) && (
-        <span className="mt-0.5 flex items-center gap-0.5">
-          {showPlanDot && (
-            <span
-              aria-label={ja.mealPlan.monthDayHasPlan}
-              className={`h-1.5 w-1.5 rounded-full ${isToday ? 'bg-app' : 'bg-accent'}`}
-            />
-          )}
-          {hasLog && (
-            <span
-              aria-label={ja.mealPlan.monthDayHasLog}
-              className={isToday ? 'text-on-accent' : 'text-accent'}
-            >
-              <Check size={10} strokeWidth={3} aria-hidden />
-            </span>
-          )}
+      <span className="leading-none">{dayNum}</span>
+      {/* S-1(docs/59): 今日・未来日の予定は、点ではなく主菜名（無ければ「◯件」）でプレビューし、
+          先の予定を月表で読めるようにする（過去日の写真日記＝上の分岐には出さない）。
+          従来の点の「献立あり」ラベルはこのプレビューへ引き継ぐ */}
+      {showPlanDot && planPreview && (
+        <span
+          aria-label={ja.mealPlan.monthDayHasPlan}
+          className={`mt-0.5 w-full truncate px-0.5 text-center text-[9px] leading-tight ${
+            isToday ? 'text-on-accent' : 'text-ink-muted'
+          }`}
+        >
+          {planPreview}
+        </span>
+      )}
+      {hasLog && (
+        <span
+          aria-label={ja.mealPlan.monthDayHasLog}
+          className={`mt-0.5 ${isToday ? 'text-on-accent' : 'text-accent'}`}
+        >
+          <Check size={10} strokeWidth={3} aria-hidden />
         </span>
       )}
     </button>
@@ -557,6 +573,22 @@ export default function MealPlanPage() {
     })
     return map
   }, [entries])
+  // S-3 先週の献立をコピー(2026-07-25 便BU・docs/59): 表示中の週の1週間前(各日を7日戻した同じ曜日)の
+  // 献立を引くためのインデックス。datesを丸ごと-7日した範囲をliveQueryで取得し、date|slotキーでまとめる。
+  // ローリング表示・週区切り表示のどちらでも「同じ曜日の1週間前」を指す(shiftDate(-7)が常に週差になるため)
+  const prevWeekDates = useMemo(() => dates.map((d) => shiftDate(d, -7)), [dates])
+  const prevWeekEntries = useMealPlanRange(prevWeekDates[0], prevWeekDates[6])
+  const prevEntriesByDateSlot = useMemo(() => {
+    const map = new Map<string, MealPlanEntry[]>()
+    prevWeekEntries?.forEach((e) => {
+      const key = `${e.date}|${e.slot}`
+      const list = map.get(key)
+      if (list) list.push(e)
+      else map.set(key, [e])
+    })
+    return map
+  }, [prevWeekEntries])
+
   // 「今日」だけの枠別マップ（食い違い検出UI用。todayEntries由来でweekStartに依存しない）
   const todayEntriesBySlot = useMemo(() => groupBySlot(todayEntries), [todayEntries])
   // 月タブの日タップモーダル用（monthEntries由来なので表示帯フィルタに関係なく朝昼夕すべてを見せる）
@@ -601,6 +633,27 @@ export default function MealPlanPage() {
     visibleRecipes.forEach((r) => map.set(r.id!, r))
     return map
   }, [visibleRecipes])
+
+  // S-1 月セルの未来日プレビュー(2026-07-25 便BU・docs/59): 日付→その日の予定を表す短い文字列。
+  // 代表の主菜名(夕食を優先→他の帯の主菜)を出し、主菜が特定できない日は「◯件」に倒す。
+  // recipeByIdはhideStarters反映済みなので、隠したレシピ由来の枠は件数側に倒れる。
+  // 実際に出すのは呼び出し側でshowPlanDot(今日・未来日)の日だけ＝過去日の写真日記(便BS)は触らない
+  const monthDayPreview = useMemo(() => {
+    const byDate = new Map<string, MealPlanEntry[]>()
+    monthEntries?.forEach((e) => {
+      const list = byDate.get(e.date)
+      if (list) list.push(e)
+      else byDate.set(e.date, [e])
+    })
+    const map = new Map<string, string>()
+    byDate.forEach((dayEntries, date) => {
+      const mains = dayEntries.filter((e) => (e.role ?? 'main') === 'main')
+      const rep = mains.find((e) => e.slot === 'dinner') ?? mains[0]
+      const title = rep ? recipeById.get(rep.recipeId)?.title : undefined
+      map.set(date, title ?? `${dayEntries.length}件`)
+    })
+    return map
+  }, [monthEntries, recipeById])
 
   // 期間の食費(便AB): ハイライト表示用の範囲(開始日のみ選択中は単日をそのまま範囲として扱う)。
   // 結果カードは rangeStart/rangeEnd が両方そろって初めて出す(こちらはハイライト専用)
@@ -1092,6 +1145,45 @@ export default function MealPlanPage() {
   // 週タブの「今日」のカード(feature 7のスクロール先)。今日が表示中の週に無ければnullのまま
   const todaySectionRef = useRef<HTMLElement | null>(null)
 
+  /**
+   * S-3 先週の献立をコピー(2026-07-25 便BU・docs/59)。
+   * 表示中の週の各日(今日・未来日のみ)へ、その1週間前の同じ曜日の献立を「空いている枠だけ」複製する。
+   * - 既にある枠(手動配置・自動提案由来のどちらも)は上書きしない＝非破壊。空き枠にだけ入れる設計。
+   * - コピーした枠は手動配置(auto=false)として保存する：ユーザーが意図して「先週を写した」枠なので、
+   *   次の「まとめて献立を立てる」で再抽選(上書き)されないよう保護側に倒す(既存のauto/手動保護と整合)。
+   * - 過去日・非表示帯は対象外(週タブの編集グリッドと同じ範囲)。
+   * 確認文は規約F準拠で「入る件数」と「今ある献立は上書きされず残る」を明示する(消える予定は無い)。
+   */
+  const copyLastWeek = async () => {
+    setMessage('')
+    const ops: { date: string; slot: MealSlot; recipeId: number; role: MealRole }[] = []
+    let sourceTotal = 0
+    for (const date of dates) {
+      if (isPastDate(date, today)) continue
+      const src = shiftDate(date, -7)
+      for (const slot of visibleSlots) {
+        const srcEntries = prevEntriesByDateSlot.get(`${src}|${slot}`) ?? []
+        sourceTotal += srcEntries.length
+        // 既にある枠は上書きしない(手動・自動とも残す)。空いている枠にだけ先週の分を入れる
+        if ((entriesByDateSlot.get(`${date}|${slot}`) ?? []).length > 0) continue
+        srcEntries.forEach((e) => {
+          ops.push({ date, slot, recipeId: e.recipeId, role: e.role ?? 'main' })
+        })
+      }
+    }
+    if (ops.length === 0) {
+      // 先週にそもそも献立が無い場合と、空き枠が無い(全部埋まっている)場合を出し分ける
+      setMessage(sourceTotal === 0 ? ja.mealPlan.copyLastWeekNoSource : ja.mealPlan.copyLastWeekNoRoom)
+      return
+    }
+    if (!window.confirm(ja.mealPlan.copyLastWeekConfirm.replace('{n}', String(ops.length)))) return
+    // auto=false(既定)で追加＝手動配置として保護される
+    for (const op of ops) {
+      await addMealEntry(op.date, op.slot, op.recipeId, op.role)
+    }
+    setMessage(ja.mealPlan.copyLastWeekDone.replace('{n}', String(ops.length)))
+  }
+
   // 週タブ「この帯の今週分を空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 帯を1つ選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
   // 前後移動している場合はその週)のうちその帯のエントリだけをまとめて削除する。
@@ -1525,8 +1617,11 @@ export default function MealPlanPage() {
                   rangeHighlightBounds != null &&
                   date >= rangeHighlightBounds.start &&
                   date <= rangeHighlightBounds.end
-                // 予定ドット(献立あり)は今日・未来日だけ。過去日の未達成予定はカレンダーからも消す
-                // (便BS・タスク2。作った記録は写真/チェックで別途出す=非破壊)
+                // 予定プレビュー(主菜名/件数・S-1)は今日・未来日だけ。過去日の未達成予定はカレンダーからも
+                // 消す(便BS・タスク2。作った記録は写真/チェックで別途出す=非破壊)。
+                // S-2: 予定も記録も無い未来日(今日より後)は控えめな点線枠で「まだ決めていない日」を可視化する
+                const isEmptyFuture =
+                  date > today && !monthDaysWithPlan.has(date) && !monthDaysWithLog.has(date)
                 return (
                   <MonthDayCell
                     key={date}
@@ -1534,6 +1629,8 @@ export default function MealPlanPage() {
                     isToday={date === today}
                     inRange={!!inRange}
                     showPlanDot={monthDaysWithPlan.has(date) && !isPastDate(date, today)}
+                    planPreview={monthDayPreview.get(date)}
+                    isEmptyFuture={isEmptyFuture}
                     hasLog={monthDaysWithLog.has(date)}
                     coverPhoto={monthDayCoverPhoto.get(date)}
                     onClick={() =>
@@ -1887,6 +1984,15 @@ export default function MealPlanPage() {
         >
           <Dices size={14} aria-hidden />
           {ja.mealPlan.fillWeek}
+        </button>
+        {/* S-3(docs/59): 先週の献立を空き枠だけにコピー。上書きはしない=非破壊(確認文で件数と「残る」を明示) */}
+        <button
+          type="button"
+          onClick={() => void copyLastWeek()}
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+        >
+          <Copy size={14} aria-hidden />
+          {ja.mealPlan.copyLastWeek}
         </button>
       </div>
 
