@@ -217,8 +217,18 @@ function firstString(value: unknown): string | undefined {
 // 末尾レシピの剥がし条件は「直前が空白」または「直前が“の”」の場合のみ(2026-07-16 SMK-02回帰の教訓:
 // 空白なしの連結=「試験用レシピ」のように名前の一部としてレシピで終わる語は剥がさない。
 // 「の」は「誰々のレシピ」のような投稿者側の定型句にほぼ限られる安全な接続語のため対象に含める)。
+// 先頭の「媒体そのものの宣伝」だけを剥がす(2026-07-28 便BX/C07・QA S3)。
+// DELISH KITCHEN実測「作り方が動画でわかる！おすすめ具材で作る基本の肉じゃが」が丸ごと料理名になり、
+// レシピ一覧・献立・買い物リストにまで宣伝文が出ていた。
+// キャッチコピー全般を剥がすのは docs/43⑤ が却下済み(レシピごとに違い、料理名の一部を壊す)なので、
+// 「動画がある」という媒体の宣伝と字面で断定できる完全一致リテラルだけに絞る
+// (実測: 「牛でも豚でも！ 簡単具材の肉じゃが」「上品な仕上がり♪ 白だしで作る肉じゃが」は無傷)
+const MEDIA_PROMO_TITLE_PREFIX =
+  /^(?:作り方が(?:動画|ムービー)で(?:わかる|分かる|見られる)|(?:作り方)?動画(?:つき|付き|あり)|レシピ動画(?:つき|付き|あり)?)[！!][\s　]*/
+
 function stripTitleDecoration(title: string): string {
   const cleaned = title
+    .replace(MEDIA_PROMO_TITLE_PREFIX, '')
     .replace(/[\s　]*(?:の)?(?:レシピ[・･]?)?(?:作り方|つくり方)$/, '')
     .replace(/(?:[\s　]+|の)レシピ$/, '')
     .trim()
@@ -316,6 +326,10 @@ export function extractImageUrl(image: unknown, baseUrl?: string): string | unde
 
 const BULLET_PREFIX = /^[・･\-–—*●○◎▪•‣＊※◇☆★\s　]+/
 
+// 材料欄の区切り線だけの行(「ーーーーーーーーーー」「＝＝＝＝」等)。記号のみが3文字以上続く行を
+// 材料として取り込まないための判定(2026-07-28 便BX/C15・楽天レシピ実測)
+const SEPARATOR_ONLY_LINE = /^[ー―‐−–—\-_＿=＝~〜～*＊・･.．\s　]{3,}$/
+
 // 「Ａ水」「B砂糖」「A「ほんだし®」」のように、合わせ調味料のグループ記号(A/B等の単一英字)が
 // 区切りなしで名前の先頭にくっついているケース(味の素パーク実測)。BULLET_PREFIXの記号(☆★○等)と違い
 // 英字は普通の食材名の一部でもありうるため、「1文字の大文字英字の直後が日本語(かな/カナ/漢字)か
@@ -345,6 +359,11 @@ function collapseSpacedMixedFraction(text: string): string {
 export function splitIngredientAmount(raw: string): NormalizedIngredient {
   const cleaned = cleanText(raw).replace(BULLET_PREFIX, '').trim()
   if (!cleaned) return { name: '' }
+  // 材料欄の区切り線(「ーーーーーーーーーー」楽天レシピ実測)は材料ではない(2026-07-28 便BX/C15)。
+  // BULLET_PREFIXは半角ハイフンやダッシュは落とすが全角長音符(U+30FC)を含まないため、
+  // 区切り行がそのまま材料名になり、保存後の材料表・買い物リストにも残っていた。
+  // 記号だけで3文字以上続く行に限定し、実在の材料名を巻き込まない
+  if (SEPARATOR_ONLY_LINE.test(cleaned)) return { name: '' }
   // 「A」「Ｂ」のようなグループ記号1文字だけの行(味の素パーク・オレンジページ実測)は
   // 材料としての情報を持たないため、空扱いにして呼び出し側(normalizeIngredients)で除外する
   if (/^[A-ZＡ-Ｚ]$/.test(cleaned)) return { name: '' }
@@ -436,11 +455,72 @@ function splitInstructionBlob(text: string): string[] {
   return single ? [single] : []
 }
 
+/**
+ * 誤爆しない手順マーカーだけを集めた版(丸数字・角括弧数字)。2026-07-28 便BX/C11・C14。
+ * STEP_MARKER が持つ「数字+区切り記号」(1. / 2、)は、本文中の分量表記
+ * 「しょうゆ大さじ2、みりん大さじ1」にも当たってしまうため、1要素の中を割る用途には使えない。
+ * 丸数字と角括弧数字は分量表記には現れないので、要素内の分割・先頭剥がしはこちらだけで行う。
+ */
+const SAFE_STEP_MARKER = /[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]|[[［][0-9０-９]{1,2}[\]］]/g
+
+/** 要素の先頭に付いた番号マーカー(①/1./[1]/(1))を1個だけ剥がす。直後が助詞なら参照なので剥がさない */
+function stripLeadingStepMarker(text: string): string {
+  const trimmed = text.trim()
+  STEP_MARKER.lastIndex = 0
+  const m = STEP_MARKER.exec(trimmed)
+  if (!m || m.index !== 0) return trimmed
+  const rest = trimmed.slice(m[0].length)
+  if (STEP_MARKER_FOLLOWED_BY_PARTICLE.test(rest)) return trimmed
+  return rest.trim() || trimmed
+}
+
+/**
+ * C11(2026-07-28 便BX): 1要素に複数手順が連結されているとき(「①…②…」)だけ割る。
+ * マーカーが1個以下なら何もしない(通常のHowToStep配列には影響しない)。
+ */
+function splitBySafeStepMarkers(text: string): string[] {
+  const markers: { index: number; length: number }[] = []
+  SAFE_STEP_MARKER.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = SAFE_STEP_MARKER.exec(text)) !== null) {
+    const after = text.slice(m.index + m[0].length)
+    if (!STEP_MARKER_FOLLOWED_BY_PARTICLE.test(after)) {
+      markers.push({ index: m.index, length: m[0].length })
+    }
+  }
+  if (markers.length < 2) return [text]
+  const parts: string[] = []
+  const head = text.slice(0, markers[0].index).trim()
+  if (head) parts.push(head)
+  for (let i = 0; i < markers.length; i++) {
+    const start = markers[i].index + markers[i].length
+    const end = i + 1 < markers.length ? markers[i + 1].index : text.length
+    const part = text.slice(start, end).trim()
+    if (part) parts.push(part)
+  }
+  return parts.length > 1 ? parts : [text]
+}
+
+/**
+ * 手順1件分のテキストを整える。
+ * - C11: 1要素に複数手順が連結されていれば割る
+ * - C14: 元サイトの番号(「①じゃがいもは…」楽天レシピ実測)を剥がす。アプリ側が手順番号を
+ *   自前で振るため、剥がさないと「1 ①じゃがいもは…」と番号が二重に並ぶ
+ */
+function normalizeStepText(text: string): string[] {
+  return splitBySafeStepMarkers(text)
+    .map((part) => stripLeadingStepMarker(part))
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
 /** recipeInstructionsの1要素(文字列 / HowToStep / HowToSection)から手順テキストを集める */
 function collectInstructionTexts(node: unknown, out: string[]): void {
   if (!node) return
   if (typeof node === 'string') {
-    for (const text of splitInstructionBlob(cleanText(node))) out.push(text)
+    for (const text of splitInstructionBlob(cleanText(node))) {
+      for (const part of normalizeStepText(text)) out.push(part)
+    }
     return
   }
   if (Array.isArray(node)) {
@@ -459,7 +539,7 @@ function collectInstructionTexts(node: unknown, out: string[]): void {
     const text = obj.text ?? obj.name
     if (typeof text === 'string') {
       const cleaned = cleanText(text)
-      if (cleaned) out.push(cleaned)
+      if (cleaned) for (const part of normalizeStepText(cleaned)) out.push(part)
     }
   }
 }

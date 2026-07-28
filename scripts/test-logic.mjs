@@ -8,6 +8,7 @@ import {
   normalizeAmountInput,
   expandMixedFraction,
 } from '../src/logic/amount.ts'
+import { leadingRangeAmount } from '../src/logic/amount.ts'
 import { isHttpUrl } from '../src/logic/url.ts'
 import {
   parseRecipeText,
@@ -676,9 +677,11 @@ eq(
   { name: 'みりん', amount: '2', unit: '大さじ' },
 )
 eq(
-  'M8(2): 「そうめん4ワ（200g）」→unit=ワ+memo=200g',
+  // 2026-07-28 便BX/C06: カタカナ助数詞「ワ」(把)は計算側(栄養・原価・人数スケール)が
+  // 知らない表記のため、既知の「束」へ寄せる(旧期待値は unit='ワ' でそのまま計算対象外だった)
+  'M8(2): 「そうめん4ワ（200g）」→unit=束(ワの正規化)+memo=200g',
   parseRecipeText('材料\nそうめん4ワ（200g）').ingredients[0],
-  { name: 'そうめん', amount: '4', unit: 'ワ', memo: '200g' },
+  { name: 'そうめん', amount: '4', unit: '束', memo: '200g' },
 )
 eq(
   'M8(2): 範囲+分「レタス2〜3枚分」',
@@ -1139,14 +1142,14 @@ eq(
   const r = parseRecipeText(r5)
   eq('R5: cookMinutes', r.cookMinutes, 20)
   eq('R5: servings', r.servings, 2)
-  eq('R5: 材料10件・みりん大さじ2分離・4ワ→unit=ワ+memo=200g・＊行が材料に入らない', r.ingredients, [
+  eq('R5: 材料10件・みりん大さじ2分離・4ワ→unit=束(正規化)+memo=200g・＊行が材料に入らない', r.ingredients, [
     { name: '桜えび （乾）', amount: '10', unit: 'g' },
     { name: '鶏ひき肉', amount: '250', unit: 'g' },
     { name: 'みりん', amount: '2', unit: '大さじ' },
     { name: 'しょうゆ', amount: '2', unit: '小さじ' },
     { name: '塩', amount: '1/2', unit: '小さじ' },
     { name: 'こしょう', amount: '1/2', unit: '小さじ' },
-    { name: 'そうめん', amount: '4', unit: 'ワ', memo: '200g' },
+    { name: 'そうめん', amount: '4', unit: '束', memo: '200g' },
     { name: '紫たまねぎ （薄切り）', amount: '1/2', unit: 'コ分' },
     { name: 'レタス （せん切り）', amount: '2〜3', unit: '枚分' },
     { name: 'セロリ （斜め薄切り）', amount: '1/2', unit: '本分' },
@@ -5185,6 +5188,12 @@ eq(
   { name: '「ほんだし®」', amount: '小さじ1', group: 'A' },
 )
 eq('ingredient: グループ記号が無ければgroupは付かない', splitIngredientAmount('しょうゆ 大さじ2'), { name: 'しょうゆ', amount: '大さじ2' })
+// 2026-07-28 便BX/C15(楽天レシピ実測): 材料欄の区切り線が材料1件として取り込まれ、
+// 保存後の材料表・買い物リストにも「ーーーーーーーーーー」が残っていた
+eq('ingredient/C15: 全角長音符の区切り線は材料にしない', splitIngredientAmount('ーーーーーーーーーーーーーーーーーーー'), { name: '' })
+eq('ingredient/C15: 全角イコールの区切り線も材料にしない', splitIngredientAmount('＝＝＝＝＝＝'), { name: '' })
+eq('ingredient/C15: 記号2文字までは巻き込まない(実在の材料名を守る)', splitIngredientAmount('ーー'), { name: 'ーー' })
+eq('ingredient/C15: 普通の材料名は影響なし', splitIngredientAmount('じゃがいも 3個'), { name: 'じゃがいも', amount: '3個' })
 eq('ingredient: グループ記号のみの行は空扱い(呼び出し側で除外)', splitIngredientAmount('A'), { name: '' })
 eq('ingredient: グループ記号のみ(全角)も空扱い', splitIngredientAmount('Ｂ'), { name: '' })
 // レタスクラブ実測:「大さじ2　1/2」(整数と分数の間に区切りの空白)が入ると、素朴な「末尾の空白で
@@ -5279,6 +5288,67 @@ eq(
   ['にんじんは乱切りにする&混ぜる'],
 )
 eq('instructions: undefinedは空配列', normalizeInstructions(undefined), [])
+
+// 2026-07-28 便BX/C14(楽天レシピ実測): HowToStep配列の各要素の先頭に元サイトの番号(①②)が
+// 付いていると、アプリ側が自前で振る番号と並んで「1 ①じゃがいもは…」の二重表示になる
+eq(
+  'instructions/C14: 各要素の先頭の丸数字を剥がす(アプリ側の番号と二重にしない)',
+  normalizeInstructions([
+    { '@type': 'HowToStep', text: '①じゃがいもは4等分し、水にさらす' },
+    { '@type': 'HowToStep', text: '②鍋にサラダ油をひき、肉を炒める' },
+  ]),
+  ['じゃがいもは4等分し、水にさらす', '鍋にサラダ油をひき、肉を炒める'],
+)
+eq(
+  'instructions/C14: 「1.」形式の先頭番号も剥がす',
+  normalizeInstructions([{ '@type': 'HowToStep', text: '1. 材料を切る' }]),
+  ['材料を切る'],
+)
+eq(
+  'instructions/C14: 先頭以外の番号は本文なので残す',
+  normalizeInstructions([{ '@type': 'HowToStep', text: 'フライパンに2を入れて炒める' }]),
+  ['フライパンに2を入れて炒める'],
+)
+// C11: 1要素に複数手順が連結されているときだけ割る。分量表記(「大さじ2、みりん大さじ1」)を
+// 手順番号と誤認しないよう、要素内の分割は丸数字・角括弧数字だけを手がかりにする
+eq(
+  'instructions/C11: 1要素に連結された複数手順(丸数字)を割る',
+  normalizeInstructions([{ '@type': 'HowToStep', text: '①野菜を切る。②鍋で煮る。③盛り付ける。' }]),
+  ['野菜を切る。', '鍋で煮る。', '盛り付ける。'],
+)
+eq(
+  'instructions/C11: 分量の「大さじ2、」を手順番号と誤認して割らない',
+  normalizeInstructions([
+    { '@type': 'HowToStep', text: 'しょうゆ大さじ2、みりん大さじ1、砂糖大さじ1を加えて煮る' },
+    { '@type': 'HowToStep', text: '器に盛る' },
+  ]),
+  ['しょうゆ大さじ2、みりん大さじ1、砂糖大さじ1を加えて煮る', '器に盛る'],
+)
+eq(
+  'instructions/C11: マーカーが1個だけなら割らない(先頭剥がしのみ)',
+  normalizeInstructions([{ '@type': 'HowToStep', text: '①玉ねぎは1cm幅に切る' }]),
+  ['玉ねぎは1cm幅に切る'],
+)
+
+// 2026-07-28 便BX/C07(DELISH KITCHEN実測): 媒体そのものの宣伝が料理名に残り、レシピ一覧・
+// 献立・買い物リストにまで出ていた。キャッチコピー全般ではなく完全一致リテラルだけを剥がす
+{
+  const titleOf = (name) =>
+    extractRecipeFromHtml(
+      `<script type="application/ld+json">${JSON.stringify({
+        '@type': 'Recipe',
+        name,
+        recipeIngredient: ['じゃがいも 3個'],
+        recipeInstructions: ['煮る'],
+      })}</script>`,
+      'https://example.com/r',
+    ).title
+  eq('title/C07: 「作り方が動画でわかる！」を剥がす', titleOf('作り方が動画でわかる！おすすめ具材で作る基本の肉じゃが'), 'おすすめ具材で作る基本の肉じゃが')
+  eq('title/C07: レシピごとに違うキャッチコピーは剥がさない', titleOf('牛でも豚でも！ 簡単具材の肉じゃが'), '牛でも豚でも！ 簡単具材の肉じゃが')
+  eq('title/C07: 「上品な仕上がり♪」も無傷', titleOf('上品な仕上がり♪ 白だしで作る肉じゃが'), '上品な仕上がり♪ 白だしで作る肉じゃが')
+  eq('title/C07: 「簡単！肉じゃが」も無傷', titleOf('簡単！肉じゃが'), '簡単！肉じゃが')
+  eq('title/C07: 末尾の定型句の除去は従来どおり', titleOf('肉じゃがの作り方'), '肉じゃが')
+}
 
 // 2026-07-20 URL取り込み品質監査(docs/43)で実測: ミツカンはHowToStepが1個しかなく、その中に
 // 「[1]…[2]…」のように複数手順が角括弧番号でまとめて詰め込まれている。HowToStepが1個だけに
@@ -5595,6 +5665,45 @@ eq(
   [{ name: '玉ねぎ', amount: '1', unit: '個', memo: '', group: undefined }],
 )
 // C09: 分量が読み取れなかった材料の件数(取り込み結果の内訳表示に使う)
+// ---- C06(2026-07-28 便BX): 分量・単位の破損。本番Worker経由でクラシル/楽天/DELISHを再実測し、
+// 実在した破損だけを対象にしている(帯分数・括弧グラム併記は設計どおりで破損ではないことを再確認済み) ----
+// (1) カタカナ助数詞: クックパッドは「大きめ6コ」「大1コ」表記が多く、栄養・原価の両方が
+//     「コ」を知らないため主材料が黙って計算対象外に落ちていた
+eq('C06: 「6コ」→ unit=個に正規化', splitQuantity('6コ'), { amount: '6', unit: '個' })
+eq('C06: 「3ヶ」→ unit=個に正規化', splitQuantity('3ヶ'), { amount: '3', unit: '個' })
+eq('C06: 「4ワ」→ unit=束に正規化', splitQuantity('4ワ'), { amount: '4', unit: '束' })
+eq('C06: 既知の単位はそのまま', splitQuantity('3個'), { amount: '3', unit: '個' })
+// (2) 名前に残る大きさ修飾語: 楽天レシピ「にんじん 中1本」でWorkerが name=にんじん / amount=中1本 と
+//     返し、1行に組み直すと「にんじん 中」が材料名になっていた
+eq(
+  'C06: 「にんじん」+「中1本」→ 名前は汚さずメモへ逃がす(楽天レシピ実測)',
+  normalizeImportedIngredient('にんじん', '中1本'),
+  { name: 'にんじん', amount: '1', unit: '本', memo: '中' },
+)
+eq(
+  'C06: 「じゃがいも」+「中2個」も同じ',
+  normalizeImportedIngredient('じゃがいも', '中2個'),
+  { name: 'じゃがいも', amount: '2', unit: '個', memo: '中' },
+)
+eq(
+  'C06: 分量が読めない行の末尾語には触らない(名前の一部の可能性を否定できないため)',
+  normalizeImportedIngredient('大根 中'),
+  { name: '大根 中', amount: '', unit: '' },
+)
+// (3) 範囲分量: 楽天レシピ「牛こま切れ 200〜250g」が栄養の対象外(reason=amount)に落ちていた。
+//     表示・保存は原文のまま、計算だけ先頭値(少なめ側)を使う
+eq('C06: 範囲分量の計算値は先頭値', leadingRangeAmount('200〜250'), '200')
+eq('C06: 半角チルダの範囲も先頭値', leadingRangeAmount('200~250'), '200')
+eq('C06: 全角チルダの範囲も先頭値', leadingRangeAmount('4～5'), '4')
+eq('C06: 分数の範囲も先頭値', leadingRangeAmount('1/2〜1'), '1/2')
+eq('C06: 範囲でなければそのまま', leadingRangeAmount('200'), '200')
+eq('C06: 数値でない分量はそのまま', leadingRangeAmount('適量'), '適量')
+eq('C06: 範囲分量が栄養計算で数値化できる(旧: null=対象外)', parseAmountNumber('200〜250'), 200)
+eq('C06: 「4〜5」も先頭値', parseAmountNumber('4〜5'), 4)
+// 表示・保存・人数スケールは従来どおり範囲のまま(F3の裁定を変えない)
+eq('C06: 表示側の範囲は据え置き(人数変更しても原文のまま)', scaleAmount('4〜5', 2, 4, '個'), '4〜5')
+eq('C06: splitQuantityは範囲を保持したまま単位だけ分ける', splitQuantity('200〜250g'), { amount: '200〜250', unit: 'g' })
+
 eq(
   'rows/C09: 分量も単位も無い材料の件数を数える',
   countAmountlessRows(

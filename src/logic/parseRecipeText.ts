@@ -166,6 +166,29 @@ function stripApproxSuffix(unit: string): string {
   return matched ? matched[1] : unit
 }
 
+// C06(2026-07-28 便BX): カタカナ表記の助数詞を、栄養(nutrition.ts convertToGrams)・原価
+// (priceEstimate.ts normalizeUnit)・人数スケール(amount.ts)が知っている正式な単位名に寄せる。
+// クックパッドは「じゃがいも 大きめ6コ」「玉ねぎ 大1コ」のようにカタカナの「コ」表記が多く、
+// パーサーは単位として受理するのに計算側が「コ」を知らないため、主材料が黙って
+// 栄養・原価の対象外に落ちていた(実測: 対象外4件のうち2件がこれ)。
+// 表示は正式表記に揃える(「6コ」→「6個」)。「ワ」は乾麺・青菜の束(把)なので既知の「束」に寄せる
+const UNIT_ALIAS: Record<string, string> = {
+  コ: '個',
+  ヶ: '個',
+  ケ: '個',
+  ワ: '束',
+}
+function canonicalUnit(unit: string): string {
+  const trimmed = unit.trim()
+  return UNIT_ALIAS[trimmed] ?? trimmed
+}
+
+// C06(2026-07-28 便BX・楽天レシピ実測「にんじん 中1本」): 名前の末尾に残る大きさ修飾語。
+// Worker側が「にんじん」+「中1本」に分けたものを1行に組み直すと、くっつき形の解釈で
+// 「にんじん 中」が名前になり、材料名・買い物リストが汚れる。名前からは外してメモへ逃がす
+const SIZE_MODIFIER_SUFFIX = /^(.+?)[\s　]+(大きめ|小さめ|中くらい|中位|大|中|小)$/
+
+
 /**
  * 「200g」「大さじ2」「1/2個」「適量」「大さじ2〜3」などを 分量+単位 に分ける。
  * 「1枚（250g）」のような単位末尾の括弧書きは memo として分離して返す。
@@ -200,9 +223,9 @@ export function splitQuantity(raw: string): { amount: string; unit: string; memo
     // 単位の後ろの括弧書き(「1枚（250g）」の「（250g）」)は単位に混ぜず、メモとして分ける
     const paren = post[2].match(/^(.*?)\s*[（(]([^（）()]+)[）)]$/)
     if (paren && paren[1].trim()) {
-      return { amount, unit: stripApproxSuffix(paren[1].trim()), memo: paren[2].trim() }
+      return { amount, unit: canonicalUnit(stripApproxSuffix(paren[1].trim())), memo: paren[2].trim() }
     }
-    return { amount, unit: stripApproxSuffix(post[2]) }
+    return { amount, unit: canonicalUnit(stripApproxSuffix(post[2])) }
   }
 
   // 「適量」「少々」など数字なし → 分量欄にそのまま
@@ -337,8 +360,23 @@ export function normalizeImportedIngredient(name: string, amount?: string): Pars
   const trimmedAmount = (amount ?? '').trim()
   const full = trimmedAmount ? `${trimmedName} ${trimmedAmount}` : trimmedName
   const parsed = parseIngredientLine(full)
-  if (parsed && parsed.name) return parsed
+  if (parsed && parsed.name) return moveSizeModifierToMemo(parsed)
   return { name: trimmedName, amount: trimmedAmount, unit: '' }
+}
+
+/**
+ * C06(2026-07-28 便BX): 名前の末尾に残った大きさ修飾語(「にんじん 中」)をメモへ逃がす。
+ * 分量が読み取れている行だけを対象にする(「大根 中」のように分量が無い行では、
+ * その語が名前の一部である可能性を否定できないため触らない)。
+ */
+function moveSizeModifierToMemo(parsed: ParsedIngredient): ParsedIngredient {
+  if (!parsed.amount && !parsed.unit) return parsed
+  const matched = parsed.name.match(SIZE_MODIFIER_SUFFIX)
+  if (!matched) return parsed
+  const name = matched[1].trim()
+  if (!name) return parsed
+  const memo = [matched[2], parsed.memo].filter(Boolean).join(' ')
+  return { ...parsed, name, memo }
 }
 
 // ============================================================================

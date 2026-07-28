@@ -1,5 +1,5 @@
 import type { Ingredient } from '../db/types'
-import { normalizeAmountInput, resolveCalcAmount } from './amount'
+import { leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
 import { toHiragana } from './kana'
 
 /**
@@ -84,7 +84,8 @@ export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIn
 
 /** "200" "1.5" "1/2" のような数字の分量を数値化する（人数換算不要の素の値） */
 function parseNumericAmount(amount: string): number | undefined {
-  const trimmed = normalizeAmountInput(amount.trim())
+  // 範囲分量(「200〜250」)は先頭の値で計算する(2026-07-28 便BX/C06。栄養側と同じ扱い)
+  const trimmed = leadingRangeAmount(normalizeAmountInput(amount.trim()))
   const match = trimmed.match(/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
   if (!match) return undefined
   let value = Number.parseFloat(match[1])
