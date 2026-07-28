@@ -29,6 +29,7 @@ import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
+import type { ImportErrorReason } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
@@ -69,6 +70,20 @@ const emptyIngredient: IngredientRow = {
   group: undefined,
 }
 const emptyStep: StepRow = { text: '', minutes: '', memo: '' }
+
+/**
+ * URL取り込みの失敗理由ごとの案内文(2026-07-28 便BX/C04・C05・C10)。
+ * 「時間をおいて試すか、貼り付けをお使いください」1本に、URLの打ち間違い・ページ消失・
+ * サイト側の拒否・一時的な通信不調が全部潰れており、404では絶対に解決しない案内が
+ * 出ていた(実機QA)。理由ごとに「次に何をすればよいか」が変わるので文言を分ける。
+ */
+const URL_IMPORT_ERROR_MESSAGE: Record<ImportErrorReason, string> = {
+  invalid_url: ja.urlImport.errorInvalidUrl,
+  not_found: ja.urlImport.errorNotFound,
+  blocked: ja.urlImport.errorBlocked,
+  no_recipe: ja.urlImport.errorNoRecipe,
+  fetch_failed: ja.urlImport.errorFetchFailed,
+}
 
 /** Ingredient[]（DB形）→ IngredientRow[]（フォーム形）。既存レシピの読み込み・
  * 「デフォルトに戻す」の3分岐すべてで使う共通の変換（重複を避けるため2026-07-15に切り出し） */
@@ -803,14 +818,7 @@ function RecipeFormInner() {
       }
     } catch (e) {
       const reason = e instanceof UrlImportError ? e.reason : 'fetch_failed'
-      showUrlImportMessage(
-        reason === 'no_recipe'
-          ? ja.urlImport.errorNoRecipe
-          : reason === 'invalid_url'
-            ? ja.urlImport.errorInvalidUrl
-            : ja.urlImport.errorFetchFailed,
-        'warn',
-      )
+      showUrlImportMessage(URL_IMPORT_ERROR_MESSAGE[reason] ?? ja.urlImport.errorFetchFailed, 'warn')
     } finally {
       setUrlImportLoading(false)
     }

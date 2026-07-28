@@ -127,8 +127,31 @@ await (async () => {
         req('/?url=' + encodeURIComponent('https://example.com/missing'), { headers: { Origin: PROD_ORIGIN } }),
       )
       const body = await res.json()
-      // 既存挙動: 上流が失敗してもWorker自体は200を返しok=falseで理由を伝える(温存)
-      ok('/: 上流404はステータス200のままok=false/fetch_failed', res.status === 200 && body.ok === false && body.error === 'fetch_failed')
+      // 既存挙動: 上流が失敗してもWorker自体は200を返しok=falseで理由を伝える(温存)。
+      // 2026-07-28 便BX/C05: 上流のステータスを status として添える(app側が404と一時障害を
+      // 書き分けるために必要。URL自体はログにも応答にも残さないのでプラポリ影響なし)
+      ok(
+        '/: 上流404はステータス200のままok=false/fetch_failed + status:404',
+        res.status === 200 && body.ok === false && body.error === 'fetch_failed' && body.status === 404,
+      )
+    },
+  )
+})()
+
+await (async () => {
+  await withMockFetch(
+    async () => new Response('forbidden', { status: 403 }),
+    async () => {
+      const res = await worker.fetch(
+        req('/?url=' + encodeURIComponent('https://example.com/blocked'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      const body = await res.json()
+      // 便BX/C05: サイト側の拒否(403)も上流ステータスを添える。app側はこれを見て
+      // 「待てば直る」ではなく貼り付けへ案内する
+      ok(
+        '/: 上流403も200/fetch_failed + status:403',
+        res.status === 200 && body.ok === false && body.error === 'fetch_failed' && body.status === 403,
+      )
     },
   )
 })()
@@ -143,7 +166,12 @@ await (async () => {
         req('/?url=' + encodeURIComponent('https://example.com/down'), { headers: { Origin: PROD_ORIGIN } }),
       )
       const body = await res.json()
-      ok('/: 上流fetch例外も200/fetch_failed', res.status === 200 && body.ok === false && body.error === 'fetch_failed')
+      // 通信例外にはHTTPステータスが存在しないので status は付かない
+      // (app側はこれを「一時的な不調」として扱い、数分後の再試行を勧める)
+      ok(
+        '/: 上流fetch例外も200/fetch_failed(statusは付かない)',
+        res.status === 200 && body.ok === false && body.error === 'fetch_failed' && body.status === undefined,
+      )
     },
   )
 })()

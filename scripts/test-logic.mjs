@@ -138,6 +138,7 @@ import {
   normalizeInstructions,
 } from '../workers/recipe-import/src/normalize.ts'
 import { buildImageProxyUrl, isImageContentType } from '../src/logic/urlImportImage.ts'
+import { resolveImportErrorReason } from '../src/logic/urlImportReason.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -5502,6 +5503,24 @@ eq('isImageContentType: text/htmlはfalse', isImageContentType('text/html'), fal
 eq('isImageContentType: nullはfalse', isImageContentType(null), false)
 eq('isImageContentType: undefinedはfalse', isImageContentType(undefined), false)
 eq('isImageContentType: 空文字はfalse', isImageContentType(''), false)
+
+// ---- resolveImportErrorReason(src/logic/urlImportReason.ts、2026-07-28 便BX/C04・C05) ----
+// 実機QAで「404・サイト側の拒否・一時的な通信不調・URLの打ち間違い」が全部同じ文言に潰れ、
+// 404に対して「時間をおいて試す」という絶対に解決しない案内が出ていた回帰の防止。
+eq('reason: 上流404はnot_found(URLを直すべき)', resolveImportErrorReason('fetch_failed', 404), 'not_found')
+eq('reason: 上流410(消滅)もnot_found', resolveImportErrorReason('fetch_failed', 410), 'not_found')
+eq('reason: 上流403(サイト側の拒否)はblocked', resolveImportErrorReason('fetch_failed', 403), 'blocked')
+eq('reason: 上流401もblocked', resolveImportErrorReason('fetch_failed', 401), 'blocked')
+eq('reason: 上流451もblocked', resolveImportErrorReason('fetch_failed', 451), 'blocked')
+eq('reason: 上流500は一時障害扱いのままfetch_failed', resolveImportErrorReason('fetch_failed', 500), 'fetch_failed')
+eq('reason: 上流503も一時障害扱い', resolveImportErrorReason('fetch_failed', 503), 'fetch_failed')
+eq('reason: statusが無い(通信例外)ならfetch_failed', resolveImportErrorReason('fetch_failed', undefined), 'fetch_failed')
+// invalid_url は「Workerがリクエストを受け付けなかった」判断なので、HTTPステータスで上書きしない
+// (Workerは invalid_url を必ずHTTP400で返すため、ここを取り違えると死に文言に戻る)
+eq('reason: invalid_urlはstatusに関係なくinvalid_url', resolveImportErrorReason('invalid_url', 400), 'invalid_url')
+eq('reason: no_recipeはそのまま', resolveImportErrorReason('no_recipe', 200), 'no_recipe')
+eq('reason: 未知のerror値はfetch_failedに落とす', resolveImportErrorReason('something_new', 404), 'not_found')
+eq('reason: errorが無くてもfetch_failed', resolveImportErrorReason(undefined, undefined), 'fetch_failed')
 
 // ---------- lineCompose: 読点優先・幅実測の行組みエンジン(2026-07-21 p9/line-compose) ----------
 // composeLines へ「1文字=1幅」の偽測定関数と、実アトム列(TermText+TimeText 相当の分解結果)を

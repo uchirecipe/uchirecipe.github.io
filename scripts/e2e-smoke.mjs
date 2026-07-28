@@ -6949,6 +6949,31 @@ try {
                 body: JSON.stringify({ ok: false, error: 'fetch_failed' }),
               })
             }
+            // 便BX/C05: Workerが上流ステータスを添えて返すケース。404(ページが無い)と
+            // 403(サイト側の拒否)と一時障害で案内文が変わることの回帰防止
+            if (target.includes('notfound-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'fetch_failed', status: 404 }),
+              })
+            }
+            if (target.includes('blocked-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'fetch_failed', status: 403 }),
+              })
+            }
+            // 便BX/C04: Workerは形式不正のURLをHTTP400+invalid_urlで返す。app側が本文を読む前に
+            // 打ち切っていたため「URLの形式」の案内が本番で一度も出ていなかった回帰の防止
+            if (target.includes('invalid-url-marker')) {
+              return route.fulfill({
+                status: 400,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'invalid_url' }),
+              })
+            }
             return route.fulfill({
               status: 200,
               contentType: 'application/json',
@@ -7043,10 +7068,12 @@ try {
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/no-recipe-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(500)
+        // 便BX/C10: サイト単位で「非対応」と断定しない(判定はページ単位)。同じサイトの
+        // 別ページなら取り込めることと、貼り付け欄への導線の両方を伝える
         check(
-          'URLIMPORT-03 no_recipe時は貼り付け欄への案内文言が出る',
+          'URLIMPORT-03 no_recipe時はページ単位の言い回し+貼り付け欄への案内が出る',
           (await uiPage.textContent('body')).includes(
-            'このサイトは自動取り込みに対応していません。ページの文章をコピーして、下の貼り付け欄をお使いください',
+            'このページからはレシピを読み取れませんでした。同じサイトの別のページなら取り込めることがあります。ページの文章をコピーして、下の貼り付け欄をお使いいただくこともできます',
           ),
         )
 
@@ -7060,10 +7087,43 @@ try {
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(500)
         check(
-          'URLIMPORT-04 fetch_failed時は時間をおいて/貼り付けを促す文言が出る',
+          'URLIMPORT-04 fetch_failed(一時障害)時は待ち時間の目安つきで再試行を促す',
           (await uiPage.textContent('body')).includes(
-            '読み込めませんでした。時間をおいて試すか、貼り付けをお使いください',
+            '読み込めませんでした。数分おいてからもう一度お試しください。急ぐときは下の貼り付け欄もお使いいただけます',
           ),
+        )
+
+        // --- URLIMPORT-04b(便BX/C04・C05): 404・403・形式不正でそれぞれ違う案内が出る ---
+        currentCheck = 'URLIMPORT-04b'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/notfound-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        const notFoundBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-04b 上流404は「ページが見つかりません」でURL確認を促す(時間をおいて、とは言わない)',
+          notFoundBody.includes('ページが見つかりません。URLを確認してください') &&
+            !notFoundBody.includes('数分おいてから'),
+        )
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/blocked-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        const blockedBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-04b 上流403は再試行を勧めず貼り付けへ案内する',
+          blockedBody.includes(
+            'このページは自動での読み込みを受け付けていませんでした。ページの文章をコピーして、下の貼り付け欄をお使いください',
+          ) && !blockedBody.includes('数分おいてから'),
+        )
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/invalid-url-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        check(
+          'URLIMPORT-04b HTTP400+invalid_urlはURLの形式の案内が出る(死に文言だったものが到達する)',
+          (await uiPage.textContent('body')).includes('URLの形式が正しいか確認してください。例: https://〜'),
         )
 
         // --- 写真の自動取り込み(2026-07-21): imageUrlがあるレシピを取り込むと、

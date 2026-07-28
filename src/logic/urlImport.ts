@@ -23,7 +23,11 @@ export interface ImportedRecipe {
   sourceUrl: string
 }
 
-type ImportErrorReason = 'fetch_failed' | 'no_recipe' | 'invalid_url'
+// 失敗理由の型と、上流ステータスからの細分化(便BX/C05)は vite非依存の別モジュールに置き、
+// scripts/test-logic.mjs から直接テストできるようにしてある(urlImportImage.ts と同じ作法)
+import { resolveImportErrorReason } from './urlImportReason'
+import type { ImportErrorReason } from './urlImportReason'
+export type { ImportErrorReason }
 
 /** 取り込み失敗の理由を呼び出し側が文言を出し分けられるよう表す(RecipeSetFetchErrorと同じ形) */
 export class UrlImportError extends Error {
@@ -65,15 +69,17 @@ export async function importRecipeFromUrl(url: string): Promise<ImportedRecipe> 
   } catch {
     throw new UrlImportError('fetch_failed')
   }
-  if (!res.ok) throw new UrlImportError('fetch_failed')
+  // res.ok を見て即throwしない(2026-07-28 便BX/C04)。Workerはリクエスト不正(invalid_url)を
+  // HTTP400で返す設計なので、先に打ち切ると「URLの形式」の案内が本番で一度も出せなかった。
+  // 本文がJSONでない(Cloudflareのエラーページ等)ときだけ従来どおり fetch_failed に落ちる。
   let json: unknown
   try {
     json = await res.json()
   } catch {
     throw new UrlImportError('fetch_failed')
   }
-  const body = json as { ok?: boolean; error?: ImportErrorReason; recipe?: unknown }
-  if (!body.ok) throw new UrlImportError(body.error ?? 'fetch_failed')
+  const body = json as { ok?: boolean; error?: unknown; status?: unknown; recipe?: unknown }
+  if (!res.ok || !body.ok) throw new UrlImportError(resolveImportErrorReason(body.error, body.status))
   if (!isImportedRecipe(body.recipe)) throw new UrlImportError('fetch_failed')
   return body.recipe
 }

@@ -81,7 +81,11 @@ async function handleRecipeImport(requestUrl: URL, headers: Record<string, strin
     } finally {
       clearTimeout(timeoutId)
     }
-    if (!res.ok) return jsonResponse({ ok: false, error: 'fetch_failed' }, 200, headers)
+    // 上流のステータスをそのまま添えて返す(2026-07-28 便BX/C05)。
+    // 404(ページが無い)と一時的な通信不調が同じ error:'fetch_failed' に潰れており、
+    // app側が「時間をおいて試す」という404では絶対に解決しない案内しか出せなかった。
+    // 数値のステータスだけなので、URLをログに残さないプライバシー方針には影響しない。
+    if (!res.ok) return jsonResponse({ ok: false, error: 'fetch_failed', status: res.status }, 200, headers)
     html = await res.text()
   } catch {
     return jsonResponse({ ok: false, error: 'fetch_failed' }, 200, headers)
