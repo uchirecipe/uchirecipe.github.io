@@ -31,7 +31,7 @@ import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, look
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
 import type { ImportErrorReason } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
-import { buildImportedIngredientRows, filterImportedSteps } from '../logic/urlImportRows'
+import { buildImportedIngredientRows, countAmountlessRows, filterImportedSteps } from '../logic/urlImportRows'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
 import { toTagKey } from '../logic/kana'
@@ -390,12 +390,23 @@ function RecipeFormInner() {
   // 「写真も取り込む」がONで写真だけ取れなかったときの控えめな通知(2026-07-28 便BX/C01)。
   // レシピ本体の結果メッセージ(パネル内)とは別枠で、画面下のトーストとして数秒だけ出す
   const [urlImportToast, setUrlImportToast] = useState('')
+  // 取り込みで分量が読み取れなかった材料の名前(2026-07-28 便BX/C09)。
+  // 「どこを直せばよいか分からない」への最小限の答えで、大掛かりなプレビューUIは作らない。
+  // 名前で覚えるので、行を並べ替えても印が付いたままになり、分量を入れれば自然に消える
+  const [amountlessImportedNames, setAmountlessImportedNames] = useState<string[]>([])
 
   // テキスト貼り付けで自動入力
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [pasteMessage, setPasteMessage] = useState('')
   const [pasteMessageTone, setPasteMessageTone] = useState<'info' | 'warn'>('info')
+
+  /** 取り込み時に分量が読み取れず、まだ空のままの行か(便BX/C09の控えめな印の表示条件) */
+  const isImportedAmountless = (row: IngredientRow): boolean =>
+    !row.amount.trim() &&
+    !row.unit.trim() &&
+    !!row.name.trim() &&
+    amountlessImportedNames.includes(row.name.trim())
 
   const showPasteMessage = (message: string, tone: 'info' | 'warn') => {
     setPasteMessage(message)
@@ -765,6 +776,10 @@ function RecipeFormInner() {
       if (result.servings) setServings(result.servings)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
       if (importedRows.length > 0) setIngredients(importedRows)
+      // 分量が読み取れなかった行に印を付ける(便BX/C09)。取り込むたびに入れ替える
+      setAmountlessImportedNames(
+        importedRows.filter((row) => !row.amount.trim() && !row.unit.trim()).map((row) => row.name),
+      )
       if (importedSteps.length > 0) {
         setSteps(importedSteps.map((text) => ({ text, minutes: '', memo: '' })))
       }
@@ -795,9 +810,18 @@ function RecipeFormInner() {
           'warn',
         )
       } else {
+        // 件数だけでは「どこを直せばよいか」が分からないという5体一致の指摘への最小限の答え
+        // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
+        const amountless = countAmountlessRows(importedRows)
         showUrlImportMessage(
           ja.urlImport.resultSummary
             .replace('{i}', String(importedRows.length))
+            .replace(
+              '{a}',
+              amountless > 0
+                ? ja.urlImport.resultAmountless.replace('{n}', String(amountless))
+                : '',
+            )
             .replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
           'info',
         )
@@ -1654,6 +1678,11 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </div>
+              {/* 取り込みで分量が読み取れなかった行の控えめな印(2026-07-28 便BX/C09)。
+                  自分で分量を入れると消える(印は「まだ空のまま」を指すため) */}
+              {isImportedAmountless(row) && (
+                <p className="mt-1 text-xs text-ink-muted">{ja.form.importedAmountlessHint}</p>
+              )}
               <div className="mt-[var(--space-sm)] flex items-center justify-between gap-[var(--space-sm)]">
                 <button
                   type="button"

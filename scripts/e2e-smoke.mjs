@@ -6965,6 +6965,26 @@ try {
                 }),
               })
             }
+            // amountless-marker: 分量が読み取れない材料を含むケース(便BX/C09ライト版)
+            if (target.includes('amountless-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: '分量不明レシピ',
+                    ingredients: [
+                      { name: 'じゃがいも', amount: '3個' },
+                      { name: '塩こしょう' },
+                      { name: 'パセリ' },
+                    ],
+                    steps: ['じゃがいもを切る', '炒める'],
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
             if (target.includes('fetch-failed-marker')) {
               return route.fulfill({
                 status: 200,
@@ -7338,6 +7358,29 @@ try {
           'URLIMPORT-11 結果メッセージの件数は整形後の件数(材料3件・手順2件)',
           (await uiPage.textContent('body')).includes('材料3件・手順2件を読み込みました'),
         )
+
+        // --- URLIMPORT-12(便BX/C09ライト版): 分量が読み取れなかった材料の内訳と、
+        // 該当行の控えめな印。大掛かりなプレビューUIは作らない ---
+        currentCheck = 'URLIMPORT-12'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/amountless-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        check(
+          'URLIMPORT-12 結果メッセージに分量を読み取れなかった件数の内訳が出る',
+          (await uiPage.textContent('body')).includes(
+            '材料3件（うち2件は分量が読み取れず名前だけです）・手順2件を読み込みました',
+          ),
+        )
+        const amountlessHints = uiPage.getByText('分量が読み取れませんでした。元のページを見て入れてください')
+        check('URLIMPORT-12 該当の材料行にだけ控えめな印が付く(2件)', (await amountlessHints.count()) === 2)
+        // 自分で分量を入れると印は消える(「まだ空のまま」を指す印なので)
+        await uiPage.locator('input[placeholder="例: 3"]').nth(1).fill('少々')
+        await uiPage.waitForTimeout(300)
+        check('URLIMPORT-12 分量を入れた行の印は消える', (await amountlessHints.count()) === 1)
       } finally {
         await uiBrowser.close()
       }
