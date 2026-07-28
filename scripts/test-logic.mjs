@@ -110,6 +110,11 @@ import {
   sumCookedRecipesCost,
   normalizeIngredientNameForPrice,
 } from '../src/logic/priceEstimate.ts'
+import {
+  splitRangeByToday,
+  summarizeRangeIntake,
+  dayIntakeMap,
+} from '../src/logic/rangeSummary.ts'
 import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
@@ -3634,7 +3639,7 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
 
 // ---------- NUT-01/NUT-02(2026-07-28 便BY): 部分欠落の判定と、計算対象外の理由・分量テキスト ----------
 {
-  const { computeRecipeNutrition, hasMaterialGap, averagePerMealNutrition } = await import(
+  const { computeRecipeNutrition, hasMaterialGap, sumPersonalNutrition } = await import(
     '../src/logic/nutrition.ts'
   )
   // 「適量」「少々」の薬味しか外れていないケース → 警告は出さない(誤警告を増やさない)
@@ -3686,17 +3691,19 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
   })
   eq('excluded.amountText: 分量が空ならundefined(空文字を出さない)', emptyAmount.excluded[0]?.amountText, undefined)
 
-  // NUT-01 横展開: 期間の平均でも「一部だけ計算できなかった食数」を数える
-  const avg = averagePerMealNutrition([
+  // NUT-01 横展開: 期間の合計でも「一部だけ計算できなかった品数」を数える。
+  // 2026-07-28 便CAで averagePerMealNutrition(平均・延べ人数)を廃止したため、
+  // 期待値も「延べ人数」から「品数(料理1品=1)」に書き換えている
+  const sum = sumPersonalNutrition([
     { servings: 2, ingredients: [{ name: '牛肉', amount: '300', unit: 'g' }, { name: 'ご飯', amount: '2', unit: '杯' }] },
     { servings: 2, ingredients: [{ name: '鶏もも肉', amount: '250', unit: 'g' }] },
   ])
-  eq('averagePerMealNutrition: partialMealCountは部分欠落レシピの延べ人数', avg.partialMealCount, 2)
-  eq('averagePerMealNutrition: 全部計算できたレシピはpartialに数えない', avg.mealCount, 4)
-  const noPartial = averagePerMealNutrition([
+  eq('sumPersonalNutrition: partialDishCountは部分欠落レシピの品数', sum.partialDishCount, 1)
+  eq('sumPersonalNutrition: 合計に入れた品数は2品(人数では数えない)', sum.dishCount, 2)
+  const noPartial = sumPersonalNutrition([
     { servings: 2, ingredients: [{ name: '鶏もも肉', amount: '250', unit: 'g' }] },
   ])
-  eq('averagePerMealNutrition: 部分欠落が無ければpartialMealCount=0', noPartial.partialMealCount, 0)
+  eq('sumPersonalNutrition: 部分欠落が無ければpartialDishCount=0', noPartial.partialDishCount, 0)
 }
 
 // ---------- NUT-01: シェア文の栄養行に「一部の材料を除く」を添える(2026-07-28 便BY) ----------
@@ -4168,12 +4175,15 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   }
 
   // sumMealPlanEntriesCost(2026-07-17 便AB・docs/35 §5「期間の食費」): 週の概算食費と
-  // 期間の食費が共通で使う、mealPlansエントリ群の合算ロジック
+  // 期間の食費が共通で使う、mealPlansエントリ群の合算ロジック。
+  // 2026-07-28 便CAで personalTotal(1人分の合計)と dishCount(品数)を追加したため、
+  // 期待値オブジェクトにその2項目を足している(total/fromMasterCountの値は据え置き=週の表示は不変)
   {
     const recipeById = new Map([
-      [1, { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] }], // マスタ一致50円
-      [2, { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }] }], // マスタ按分260円
-      [3, { ingredients: [{ name: '謎の食材', amount: '1', unit: '個' }] }], // 計算対象外(0円)
+      [1, { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 }], // 全量50円
+      [2, { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }], servings: 2 }], // 全量260円
+      [3, { ingredients: [{ name: '謎の食材', amount: '1', unit: '個' }], servings: 2 }], // 計算対象外(0円)
+      [4, { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] }], // servings未指定=1人分扱い
     ])
     eq(
       'sumMealPlanEntriesCost: 複数エントリ(同じレシピの重複含む)を合算する',
@@ -4182,61 +4192,80 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         recipeById,
         index,
       ),
-      { total: 50 + 260 + 50, fromMasterCount: 3 },
+      { total: 50 + 260 + 50, fromMasterCount: 3, personalTotal: 25 + 130 + 25, dishCount: 3 },
     )
     eq(
       'sumMealPlanEntriesCost: 価格情報のないレシピは0円扱いで合計に影響しない',
       sumMealPlanEntriesCost([{ recipeId: 3 }], recipeById, index),
-      { total: 0, fromMasterCount: 0 },
+      { total: 0, fromMasterCount: 0, personalTotal: 0, dishCount: 1 },
     )
     eq(
       'sumMealPlanEntriesCost: recipeByIdに無いエントリ(削除済みレシピ等の孤児行)はスキップする',
       sumMealPlanEntriesCost([{ recipeId: 999 }, { recipeId: 1 }], recipeById, index),
-      { total: 50, fromMasterCount: 1 },
+      { total: 50, fromMasterCount: 1, personalTotal: 25, dishCount: 1 },
     )
     eq('sumMealPlanEntriesCost: エントリ0件は0円', sumMealPlanEntriesCost([], recipeById, index), {
       total: 0,
       fromMasterCount: 0,
+      personalTotal: 0,
+      dishCount: 0,
     })
+    eq(
+      'sumMealPlanEntriesCost(便CA): 1人分は「全量÷登録人数」を1品1回だけ足す(何食分作るかでは増えない)',
+      sumMealPlanEntriesCost([{ recipeId: 1 }], recipeById, index).personalTotal,
+      25,
+    )
+    eq(
+      'sumMealPlanEntriesCost(便CA): 登録人数が分からないレシピは1人分として扱う',
+      sumMealPlanEntriesCost([{ recipeId: 4 }], recipeById, index).personalTotal,
+      50,
+    )
 
     // sumCookedRecipesCost(2026-07-24 便BH-3・タスク9「期間の食費・実績ベース」): 作った記録群の
     // 実績原価合計と食数。2026-07-28 便BY/RANGE-01で「食数=記録件数」から「食数=延べ人数(1人1食)」へ
     // 直した。従来は2人分レシピ全量を1食として割っていたため「1食あたり」が約2倍に出ており、
-    // 同じカードの「摂取できた栄養(1食あたり)」(1人分基準)と単位が食い違っていた
+    // 同じカードの「摂取できた栄養(1食あたり)」(1人分基準)と単位が食い違っていた。
+    // 2026-07-28 便CA: 「1人が食べた分」を出す personalTotal / dishCount を追加。
+    // total(全体金額)とcount(延べ食数)はオーナー指示で残すため値は据え置き＝期待値も従来どおり
     const onion2 = { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 } // 全量50円
     const chicken2 = { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }], servings: 2 } // 全量260円
     eq(
-      'sumCookedRecipesCost: 2人分レシピ2件は食数4(延べ人数)・合計310円→1食あたり78円',
+      'sumCookedRecipesCost: 2人分レシピ2件は食数4(延べ人数)・全体310円・1人分は155円(2品)',
       sumCookedRecipesCost([{ recipe: onion2 }, { recipe: chicken2 }], index),
-      { total: 50 + 260, count: 4 },
+      { total: 50 + 260, count: 4, personalTotal: 25 + 130, dishCount: 2 },
     )
     eq(
       'sumCookedRecipesCost: 記録時の人数(log.servings)が登録人数と違えば金額もその比でスケールする(2人分レシピを4人分で作った=倍量)',
       sumCookedRecipesCost([{ recipe: onion2, log: { servings: 4 } }], index),
-      { total: 100, count: 4 },
+      { total: 100, count: 4, personalTotal: 25, dishCount: 1 },
+    )
+    eq(
+      'sumCookedRecipesCost(便CA): 4人分作っても「1人が食べた分」は1人分のまま(25円)',
+      sumCookedRecipesCost([{ recipe: onion2, log: { servings: 4 } }], index).personalTotal,
+      25,
     )
     eq(
       'sumCookedRecipesCost: 記録時の人数が1人なら金額も半分・食数1(2人分レシピの半量)',
       sumCookedRecipesCost([{ recipe: onion2, log: { servings: 1 } }], index),
-      { total: 25, count: 1 },
+      { total: 25, count: 1, personalTotal: 25, dishCount: 1 },
     )
     eq(
       'sumCookedRecipesCost: 記録時の人数が無い古い記録(2026-07-12以前)は登録人数で代替する',
       sumCookedRecipesCost([{ recipe: onion2, log: {} }], index),
-      { total: 50, count: 2 },
+      { total: 50, count: 2, personalTotal: 25, dishCount: 1 },
     )
     eq(
-      'sumCookedRecipesCost: 同じレシピ2回は食数4・合計100',
+      'sumCookedRecipesCost: 同じレシピ2回は食数4・合計100・1人分は50円(2品)',
       sumCookedRecipesCost([{ recipe: onion2 }, { recipe: onion2 }], index),
-      { total: 100, count: 4 },
+      { total: 100, count: 4, personalTotal: 50, dishCount: 2 },
     )
     eq(
-      'sumCookedRecipesCost: 価格情報の無いレシピも食数には数える(1食あたりの分母)',
+      'sumCookedRecipesCost: 価格情報の無いレシピも食数・品数には数える',
       sumCookedRecipesCost(
         [{ recipe: { ingredients: [{ name: '謎の食材', amount: '1', unit: '個' }], servings: 2 } }],
         index,
       ),
-      { total: 0, count: 2 },
+      { total: 0, count: 2, personalTotal: 0, dishCount: 1 },
     )
     eq(
       'sumCookedRecipesCost: 登録人数が不正(0)なら1人分として扱う',
@@ -4244,9 +4273,186 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         [{ recipe: { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 0 } }],
         index,
       ),
-      { total: 50, count: 1 },
+      { total: 50, count: 1, personalTotal: 50, dishCount: 1 },
     )
-    eq('sumCookedRecipesCost: 0件は0円・食数0', sumCookedRecipesCost([], index), { total: 0, count: 0 })
+    eq('sumCookedRecipesCost: 0件は0円・食数0', sumCookedRecipesCost([], index), {
+      total: 0,
+      count: 0,
+      personalTotal: 0,
+      dishCount: 0,
+    })
+  }
+
+  // ===== 期間の集計(rangeSummary・2026-07-28 便CA・オーナー確定仕様) =====
+  // オーナー原文(2026-07-27):
+  //  ・期間指定の栄養と価格は平均ではなく「1人が期間内に摂取した食事の合計」を表示したい
+  //  ・選択した期間が過去の場合は実績のみ、未来の場合は予定の献立で計算。過去の予定ベース計算は表示なし
+  // ここでは①過去/今日以降の切り分け ②1人分の期間合計 ③二重計上しないこと を検証する
+  {
+    const TODAY = '2026-07-15'
+    const onion2 = { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 } // 全量50円→1人分25円
+    const chicken2 = { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }], servings: 2 } // 全量260円→1人分130円
+
+    // --- splitRangeByToday: 期間を「実績で数える日」と「予定で数える日」に分ける ---
+    eq(
+      'splitRangeByToday: 全部過去の期間は実績だけ(予定はnull=過去の予定ベース計算は出さない)',
+      splitRangeByToday('2026-07-01', '2026-07-14', TODAY),
+      { actual: { start: '2026-07-01', end: '2026-07-14' }, plan: null },
+    )
+    eq(
+      'splitRangeByToday: 全部今日以降の期間は予定だけ',
+      splitRangeByToday('2026-07-20', '2026-07-25', TODAY),
+      { actual: null, plan: { start: '2026-07-20', end: '2026-07-25' } },
+    )
+    eq(
+      'splitRangeByToday: 今日が始まりの期間は全部予定(今日は予定側=カレンダー表示の境界と揃える)',
+      splitRangeByToday(TODAY, '2026-07-31', TODAY),
+      { actual: null, plan: { start: TODAY, end: '2026-07-31' } },
+    )
+    eq(
+      'splitRangeByToday: またぐ期間は今日の前日までが実績・今日から先が予定(同じ日を二重に数えない)',
+      splitRangeByToday('2026-07-01', '2026-07-31', TODAY),
+      {
+        actual: { start: '2026-07-01', end: '2026-07-14' },
+        plan: { start: TODAY, end: '2026-07-31' },
+      },
+    )
+    eq(
+      'splitRangeByToday: 月をまたぐ境界(今日が1日)でも前日は前月末になる',
+      splitRangeByToday('2026-06-25', '2026-07-05', '2026-07-01'),
+      {
+        actual: { start: '2026-06-25', end: '2026-06-30' },
+        plan: { start: '2026-07-01', end: '2026-07-05' },
+      },
+    )
+    eq(
+      'splitRangeByToday: 単日(今日より前)は実績だけ',
+      splitRangeByToday('2026-07-14', '2026-07-14', TODAY),
+      { actual: { start: '2026-07-14', end: '2026-07-14' }, plan: null },
+    )
+
+    // --- summarizeRangeIntake ---
+    // 過去(7/10)に肉2件を作った記録、今日以降(7/20)に玉ねぎの予定が1件ある月を想定する。
+    // 過去日にも予定を、今日以降にも記録を置いて「使われない側」が混ざらないことを確かめる
+    const cooked = [
+      { date: '2026-07-10', recipe: onion2 },
+      { date: '2026-07-10', recipe: chicken2 },
+      { date: '2026-07-20', recipe: chicken2 }, // 今日以降の記録=予定基準なので数えない
+    ]
+    const planned = [
+      { date: '2026-07-10', recipe: chicken2 }, // 過去の予定=オーナー指示で数えない
+      { date: '2026-07-20', recipe: onion2 },
+    ]
+    const wholeMonth = summarizeRangeIntake({
+      start: '2026-07-01',
+      end: '2026-07-31',
+      today: TODAY,
+      cooked,
+      planned,
+      priceIndex: index,
+    })
+    eq(
+      'summarizeRangeIntake: 過去分は作った記録だけを数える(過去の予定は無視)',
+      { dishCount: wholeMonth.actual.dishCount, yen: wholeMonth.actual.personalYen },
+      { dishCount: 2, yen: 25 + 130 },
+    )
+    eq(
+      'summarizeRangeIntake: 今日以降は登録した献立だけを数える(今日以降の作った記録は無視)',
+      { dishCount: wholeMonth.plan.dishCount, yen: wholeMonth.plan.personalYen },
+      { dishCount: 1, yen: 25 },
+    )
+    eq(
+      'summarizeRangeIntake: 1人分の食費は実績+予定の単純合計(平均ではない)',
+      wholeMonth.personalYen,
+      25 + 130 + 25,
+    )
+    eq(
+      'summarizeRangeIntake: 栄養も1人分を品ごとに1回だけ足す(実績2品+予定1品=3品)',
+      wholeMonth.nutrition.dishCount,
+      3,
+    )
+    eq(
+      'summarizeRangeIntake: 「作った食数の合算(全体食費)」は残す(全体310円・延べ4食)',
+      { yen: wholeMonth.cookedHouseholdYen, meals: wholeMonth.cookedMealCount },
+      { yen: 310, meals: 4 },
+    )
+    // 全部過去の期間: 予定は0のまま(過去の予定ベース計算は表示しない)
+    const pastOnly = summarizeRangeIntake({
+      start: '2026-07-01',
+      end: '2026-07-14',
+      today: TODAY,
+      cooked,
+      planned,
+      priceIndex: index,
+    })
+    eq(
+      'summarizeRangeIntake: 全部過去の期間は予定側が0品0円(過去の予定ベース計算は廃止)',
+      { dishCount: pastOnly.plan.dishCount, yen: pastOnly.plan.personalYen, range: pastOnly.plan.range },
+      { dishCount: 0, yen: 0, range: null },
+    )
+    // 全部未来の期間: 実績は0のまま
+    const futureOnly = summarizeRangeIntake({
+      start: '2026-07-16',
+      end: '2026-07-31',
+      today: TODAY,
+      cooked,
+      planned,
+      priceIndex: index,
+    })
+    eq(
+      'summarizeRangeIntake: 全部未来の期間は実績側が0品0円',
+      { dishCount: futureOnly.actual.dishCount, yen: futureOnly.actual.personalYen },
+      { dishCount: 0, yen: 0 },
+    )
+    eq(
+      'summarizeRangeIntake: 未来の期間でも「1人分の合計」は予定から出る',
+      futureOnly.personalYen,
+      25,
+    )
+    // 記録も予定も無い期間
+    const emptyRange = summarizeRangeIntake({
+      start: '2026-07-02',
+      end: '2026-07-03',
+      today: TODAY,
+      cooked,
+      planned,
+      priceIndex: index,
+    })
+    eq(
+      'summarizeRangeIntake: 記録も予定も無い期間は0品0円',
+      {
+        a: emptyRange.actual.dishCount,
+        p: emptyRange.plan.dishCount,
+        yen: emptyRange.personalYen,
+        kcal: emptyRange.nutrition.total.kcal,
+      },
+      { a: 0, p: 0, yen: 0, kcal: 0 },
+    )
+
+    // --- dayIntakeMap: カレンダーのセルに出す「その日1人分」 ---
+    const stats = dayIntakeMap({
+      dates: ['2026-07-10', '2026-07-14', '2026-07-20'],
+      today: TODAY,
+      cooked,
+      planned,
+      priceIndex: index,
+    })
+    eq(
+      'dayIntakeMap: 過去日は作った記録の1人分合計(玉ねぎ25+鶏130=155円)・基準はactual',
+      { yen: stats.get('2026-07-10')?.yen, basis: stats.get('2026-07-10')?.basis },
+      { yen: 155, basis: 'actual' },
+    )
+    eq(
+      'dayIntakeMap: 今日以降は登録した献立の1人分合計(玉ねぎ25円)・基準はplan',
+      { yen: stats.get('2026-07-20')?.yen, basis: stats.get('2026-07-20')?.basis },
+      { yen: 25, basis: 'plan' },
+    )
+    eq(
+      'dayIntakeMap: 記録も予定も無い日はMapに入れない(セルは数字なしで表示する)',
+      stats.has('2026-07-14'),
+      false,
+    )
+    eq('dayIntakeMap: 数字を出す日だけが入る(2日分)', stats.size, 2)
   }
 
   // 由来種別(default/user)の出し分け(2026-07-13 UIペルソナQA: 詳細の価格注記「目安」表記の分岐に使う)

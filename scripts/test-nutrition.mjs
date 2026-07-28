@@ -22,8 +22,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SNAPSHOT_PATH = path.join(__dirname, 'data', 'nutrition-smoke-snapshot.json')
 
 const { NUTRITION_DATA } = await import('../src/logic/nutritionData.ts')
-const { computeRecipeNutrition, matchNutritionFood, roundNutrient, averagePerMealNutrition } =
-  await import('../src/logic/nutrition.ts')
+const {
+  computeRecipeNutrition,
+  matchNutritionFood,
+  roundNutrient,
+  sumPersonalNutrition,
+  addPersonalNutritionSum,
+  emptyPersonalNutritionSum,
+} = await import('../src/logic/nutrition.ts')
 // テーマ全廃(2026-07-23): 旧配布テーマ原稿(kintore/bento/diet/summer/freezer)は starters.ts が
 // starterDefs に連結済み。よって全103品は starterDefs だけで網羅でき、旧public/sets/data/*.jsonや
 // 各セットの個別importは読まない(読むと二重計上になる)。スナップショットのキーは全て starter: で揃う
@@ -367,70 +373,80 @@ for (const [key, limit, unit, label] of PER_SERVING_LIMITS) {
 }
 console.log(`1人分の常識レンジ検査: ${PER_SERVING_LIMITS.length}項目 × ${Object.keys(snapshot).length}レシピ`)
 
-// ---------- 2.5 averagePerMealNutrition(期間の集計「摂取できた栄養」・2026-07-24 便BS・タスク3) ----------
+// ---------- 2.5 sumPersonalNutrition(期間の「摂取できた栄養(1人分)」) ----------
+// 2026-07-28 便CA・オーナー確定仕様で averagePerMealNutrition(1食あたりの平均)を廃止し、
+// 「1人が期間内に摂取した食事の合計(期間内に作った料理1食ずつの合計)」に置き換えた。
+// 旧仕様に固定されていた「延べ人数で重み付け」「平均は人数で変わらない」系のケースは、
+// 平均そのものが無くなったため、合計と品数の検証に書き換えている。
 {
   // 単純な確認用レシピ: 白米200g(1人分)。値はcomputeRecipeNutritionのperServingと一致するはず
   const rice = { ingredients: [{ name: '白米', amount: '200', unit: 'g' }], servings: 1 }
   const riceOne = computeRecipeNutrition(rice).perServing
 
-  // 空配列 → 0食・平均0
-  const empty = averagePerMealNutrition([])
-  check(empty.mealCount === 0, `averagePerMeal: 空配列はmealCount=0 (実際:${empty.mealCount})`)
-  check(empty.excludedMealCount === 0, 'averagePerMeal: 空配列はexcludedMealCount=0')
+  // 空配列 → 0品・合計0
+  const empty = sumPersonalNutrition([])
+  check(empty.dishCount === 0, `sumPersonal: 空配列はdishCount=0 (実際:${empty.dishCount})`)
+  check(empty.excludedDishCount === 0, 'sumPersonal: 空配列はexcludedDishCount=0')
+  check(empty.total.kcal === 0, 'sumPersonal: 空配列は合計0kcal')
 
-  // 同じレシピ2件 → 平均は1件分のperServingと一致(合算÷2)
-  const two = averagePerMealNutrition([rice, rice])
-  check(two.mealCount === 2, `averagePerMeal: 2件はmealCount=2 (実際:${two.mealCount})`)
+  // 同じレシピ2件 → 合計は1件分のperServingの2倍(平均ではなく合計)
+  const two = sumPersonalNutrition([rice, rice])
+  check(two.dishCount === 2, `sumPersonal: 2件はdishCount=2 (実際:${two.dishCount})`)
   check(
-    roundNutrient('kcal', two.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
-    `averagePerMeal: 同一2件の1食あたりkcalは単品perServingと一致 (avg:${two.perMeal.kcal} single:${riceOne.kcal})`,
+    roundNutrient('kcal', two.total.kcal) === roundNutrient('kcal', riceOne.kcal * 2),
+    `sumPersonal: 同一2件の合計kcalは単品perServingの2倍 (合計:${two.total.kcal} 単品:${riceOne.kcal})`,
   )
 
-  // 計算対象外だけのレシピ(分量が「適量」で成分表にも無い名前) → 平均から除外・excludedに数える
+  // 計算対象外だけのレシピ(分量が「適量」で成分表にも無い名前) → 合計から除外・excludedに数える
   const uncomputable = { ingredients: [{ name: 'なぞの食材', amount: '適量', unit: '' }], servings: 1 }
-  const mixed = averagePerMealNutrition([rice, uncomputable])
+  const mixed = sumPersonalNutrition([rice, uncomputable])
   check(
-    mixed.mealCount === 1 && mixed.excludedMealCount === 1,
-    `averagePerMeal: 計算できない1件は平均から除外しexcludedで数える (meal:${mixed.mealCount} excl:${mixed.excludedMealCount})`,
+    mixed.dishCount === 1 && mixed.excludedDishCount === 1,
+    `sumPersonal: 計算できない1件は合計から除外しexcludedで数える (dish:${mixed.dishCount} excl:${mixed.excludedDishCount})`,
   )
   check(
-    roundNutrient('kcal', mixed.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
-    'averagePerMeal: 計算できない品は平均を薄めない(1食あたりは計算できた品だけの平均)',
+    roundNutrient('kcal', mixed.total.kcal) === roundNutrient('kcal', riceOne.kcal),
+    'sumPersonal: 計算できない品は合計に0kcalを足さない(計算できた品だけの合計)',
   )
 
-  // 2026-07-28 便BY/RANGE-01: 食数を延べ人数(1人1食)で数える。同じカードに並ぶ食費の
-  // 「1食あたり」と単位を揃えるため。金額側だけ直すと「6食分」と「3食」が並ぶ
+  // 便CAの核心: 何人分作ったかでは重み付けしない。「1人が食べた分」は2人分作っても1食
   const rice2 = { ingredients: [{ name: '白米', amount: '400', unit: 'g' }], servings: 2 }
-  const twoServings = averagePerMealNutrition([rice2])
+  const twoServings = sumPersonalNutrition([rice2])
   check(
-    twoServings.mealCount === 2,
-    `averagePerMeal: 2人分レシピ1件は延べ2食 (実際:${twoServings.mealCount})`,
+    twoServings.dishCount === 1,
+    `sumPersonal: 2人分レシピ1件も1品(延べ人数では数えない) (実際:${twoServings.dishCount})`,
   )
   check(
-    roundNutrient('kcal', twoServings.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
-    'averagePerMeal: 人数で重み付けしても1食あたり(1人分)の値は変わらない',
+    roundNutrient('kcal', twoServings.total.kcal) === roundNutrient('kcal', riceOne.kcal),
+    'sumPersonal: 2人分レシピ1件の合計は1人分(perServing)そのもの',
   )
-  const cookedFour = averagePerMealNutrition([{ ...rice2, cookedServings: 4 }])
+  const excludedTwoServings = sumPersonalNutrition([{ ...uncomputable, servings: 2 }])
   check(
-    cookedFour.mealCount === 4,
-    `averagePerMeal: 記録時の人数(cookedServings)が4なら延べ4食 (実際:${cookedFour.mealCount})`,
+    excludedTwoServings.excludedDishCount === 1,
+    `sumPersonal: 合計から除いた数も品数で数える (実際:${excludedTwoServings.excludedDishCount})`,
   )
-  const oldLog = averagePerMealNutrition([{ ...rice2, cookedServings: undefined }])
+  // 人数の違う品が混ざっても1人分同士の足し算: 1人分+2人分レシピ=2品・kcalは1人分の2倍
+  const combined = sumPersonalNutrition([rice, rice2])
+  check(combined.dishCount === 2, `sumPersonal: 1人分+2人分は2品 (実際:${combined.dishCount})`)
   check(
-    oldLog.mealCount === 2,
-    'averagePerMeal: 記録時の人数が無い古い記録は登録人数で代替する',
+    roundNutrient('kcal', combined.total.kcal) === roundNutrient('kcal', riceOne.kcal * 2),
+    'sumPersonal: 1人分レシピ+2人分レシピの合計は1人分×2',
   )
-  const excludedTwo = averagePerMealNutrition([{ ...uncomputable, servings: 2 }])
+
+  // addPersonalNutritionSum: 実績(過去)+予定(今日以降)を1つの期間合計にまとめる
+  const merged = addPersonalNutritionSum(sumPersonalNutrition([rice]), sumPersonalNutrition([rice]))
   check(
-    excludedTwo.excludedMealCount === 2,
-    `averagePerMeal: 平均から除いた食数も延べ人数で数える (実際:${excludedTwo.excludedMealCount})`,
+    merged.dishCount === 2 &&
+      roundNutrient('kcal', merged.total.kcal) === roundNutrient('kcal', riceOne.kcal * 2),
+    `addPersonalNutritionSum: 2つの合計を足すと品数もkcalも合算される (dish:${merged.dishCount})`,
   )
-  // 人数の違う品が混ざると重み付けが効く: 1人分(riceOne)と2人分(rice2の1人分は同じ値)なので
-  // 値自体は同じだが、食数は1+2=3になる
-  const weighted = averagePerMealNutrition([rice, rice2])
+  const mergedEmpty = addPersonalNutritionSum(
+    emptyPersonalNutritionSum(),
+    sumPersonalNutrition([rice]),
+  )
   check(
-    weighted.mealCount === 3,
-    `averagePerMeal: 1人分+2人分は延べ3食 (実際:${weighted.mealCount})`,
+    mergedEmpty.dishCount === 1,
+    'addPersonalNutritionSum: 空(片方だけの期間)を足しても値が変わらない',
   )
 }
 

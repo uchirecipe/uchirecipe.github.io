@@ -186,30 +186,53 @@ export const ja = {
     // 月間献立への機能追加はPro v2まで凍結が既定だったが、オーナー指示で解除して実装
     monthDayHasLog: '記録あり',
     pastCookedTitle: '作った記録',
-    // 期間の食費(2026-07-17 便AB・オーナー決定・docs/35 §5): 月タブのモードボタン。
-    // 開始日タップ→終了日タップの2タップで期間を選び、期間の献立原価合計・1日あたり平均を出す。
-    // 段階1(予定ベース・登録人数基準。既存の週の概算食費と同方式)。段階2(実績ベース)は後日
-    rangeCostToggle: '期間の食費',
+    // 期間の栄養と食費(2026-07-17 便AB → 2026-07-28 便CAでオーナー確定仕様に改訂): 月タブのモードボタン。
+    // 開始日タップ→終了日タップの2タップで期間を選ぶ。
+    // 便CAの改訂点: ①「合計÷食数の平均」をやめ「1人が期間内に食べた分の合計」を出す
+    // ②過去日は作った記録・今日以降は登録した献立だけで数える(過去の予定ベース表示は廃止)。
+    // カードが食費だけでなく栄養も出すため、ボタン名も実態に合わせて「期間の栄養と食費」にした
+    rangeCostToggle: '期間の栄養と食費',
     rangeCostGuideStart: '開始日をタップしてください',
     rangeCostGuideEnd: '終了日をタップしてください',
-    rangeCostResultTitle: '期間の食費',
+    rangeCostResultTitle: '期間の栄養と食費',
     rangeCostResultRange: '{sm}/{sd}〜{em}/{ed}（{n}日間）',
-    rangeCostResultAverage: '1日あたり 約{n}円',
-    // 期間の食費の基準を明示(2026-07-24 便BH-3・タスク9): 予定ベース(登録した献立)と
-    // 実績ベース(作った記録)を分けて出す。実績ベースは記録の食数を反映し「1食あたり」も出す
-    rangeCostPlanLabel: '予定ベース（登録した献立）',
-    rangeCostActualLabel: '実績ベース（作った記録）',
-    rangeCostMealCount: '{n}食分',
-    rangeCostActualResult: '約{yen}円（{n}食分・1食あたり 約{per}円）',
-    rangeCostActualEmpty: 'この期間にはまだ「作った記録」がありません',
-    // 期間の集計・摂取できた栄養(2026-07-24 便BS・タスク3): 期間内の「作った記録」から1食あたりの
-    // 平均栄養(既存のPro8項目計算を流用)を出す。あくまで「めやす／概算」で、医療・効能の文脈では使わない
-    rangeNutritionLabel: '摂取できた栄養（1食あたり）',
-    rangeNutritionMealCount: '記録のあった{n}食のめやすです',
-    rangeNutritionExcluded: '栄養を計算できなかった{n}食は平均から除いています',
-    // 2026-07-28 便BY/NUT-01: 一部の材料だけ計算できなかった食数。平均には入れているが、
-    // その分だけ小さく出ていることを既存の「除いた食数」と同じ作法で明示する
-    rangeNutritionPartial: '{n}食は、量が書いてあるのに計算できなかった材料があり、その分だけ小さく出ています',
+    // どの日をどちらの基準で数えたかの明示(便CA)。混在する期間は両方、片方だけの期間は片方を出す
+    rangeBasisBoth: '{ps}〜{pe}は作った記録、{fs}〜{fe}は登録した献立で計算しています',
+    rangeBasisActualOnly: '過ぎた日なので、作った記録だけで計算しています',
+    rangeBasisPlanOnly: '今日から先の期間なので、登録した献立で計算しています',
+    // 「期間内に摂取できた栄養（1人分）」(便CA・オーナー原文の語彙)。期間内の料理を1食ずつ足した合計。
+    // 既存のPro8項目計算を流用。あくまで「めやす／概算」で、医療・効能の文脈では使わない
+    rangeIntakeNutritionLabel: '期間内に摂取できた栄養（1人分）',
+    rangeIntakeNutritionCountBoth: '作った記録{a}品と登録した献立{p}品を、1食ずつ足しためやすです',
+    rangeIntakeNutritionCountActual: '作った記録{a}品を、1食ずつ足しためやすです',
+    rangeIntakeNutritionCountPlan: '登録した献立{p}品を、1食ずつ足しためやすです',
+    rangeIntakeNutritionExcluded: '栄養を計算できなかった{n}品は合計に入れていません',
+    // 2026-07-28 便BY/NUT-01: 一部の材料だけ計算できなかった品数。合計には入れているが、
+    // その分だけ小さく出ていることを既存の「除いた品数」と同じ作法で明示する
+    rangeIntakeNutritionPartial:
+      '{n}品は、量が書いてあるのに計算できなかった材料があり、その分だけ小さく出ています',
+    // 「期間内の食費（1人分）」(便CA)。栄養と同じ数え方＝料理1品につき1人分の金額を1回足した合計
+    rangeIntakePersonalCostLabel: '期間内の食費（1人分）',
+    rangeIntakePersonalCostPerDay: '1人あたり1日 約{n}円',
+    rangeIntakeCostBreakdown: '内訳 作った記録 約{a}円（{an}品）／登録した献立 約{p}円（{pn}品）',
+    // 「作った食数の合算（全体食費）」はオーナー指示で残す。家族全員分の金額と延べ食数
+    rangeIntakeHouseholdLabel: '作った記録の食費（全体）',
+    rangeIntakeHouseholdResult: '約{yen}円（{n}食分）',
+    rangeIntakeEmpty: 'この期間には、作った記録も登録した献立もありません',
+    // 月カレンダーのセル表示切り替え(2026-07-28 便CA・オーナー指示)。既定は従来の写真＋献立プレビュー
+    monthCellModeLabel: 'カレンダーに出す情報',
+    monthCellModePhoto: '写真',
+    monthCellModeNutrition: '栄養',
+    monthCellModeCost: '食費',
+    monthCellNutritionLegend:
+      '数字はその日に1人が食べる分のエネルギー（kcal）のめやすです。過ぎた日は作った記録、今日から先は登録した献立で計算しています',
+    monthCellCostLegend:
+      '数字はその日に1人が食べる分の食費のめやすです。過ぎた日は作った記録、今日から先は登録した献立で計算しています',
+    monthCellKcal: '{n}kcal',
+    monthCellYen: '{n}円',
+    monthDayStatAriaActual: '{d}日 {v} 作った記録',
+    monthDayStatAriaPlan: '{d}日 {v} 登録した献立',
+    monthDayStatAriaEmpty: '{d}日',
     // 過去日は「作った記録」だけを日記のように振り返る(2026-07-24 便BS・タスク2)。
     // 達成しなかった予定(記録の無い予定)は過去表示から消す=表示レベルのフィルタ(データは残す=非破壊)。
     // 記録の無い過去日に控えめに出す案内
@@ -594,8 +617,9 @@ export const ja = {
         linkLabel: 'レシピ一覧を開く',
       },
       {
+        // 2026-07-28 便CA: 月タブのボタン名を「期間の栄養と食費」に変えたので案内も揃える
         label: '期間の食費と摂取できた栄養',
-        hint: '献立タブ →「月」→「期間の食費」で、選んだ期間の食費と栄養のめやすをまとめて見られます',
+        hint: '献立タブ →「月」→「期間の栄養と食費」で、選んだ期間に1人が食べた分の食費と栄養のめやすをまとめて見られます',
         to: '/meal-plan',
         linkLabel: '献立を開く',
       },

@@ -393,76 +393,93 @@ export function computeRecipeNutrition(
   return { total, perServing, servings, items, excluded, assumed }
 }
 
-/** 期間の「摂取できた栄養」概算の結果（averagePerMealNutrition の戻り値・2026-07-24 便BS・タスク3） */
-export interface PerMealNutrition {
-  /** 1食あたりの平均栄養（8項目・計算できた食数で割った値） */
-  perMeal: NutrientTotals
-  /** 平均に含めた食数（＝1人1食で数えた延べ人数。2人分作った記録は2食） */
-  mealCount: number
-  /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数（同じく延べ人数） */
-  excludedMealCount: number
+/**
+ * 期間内に「1人が摂取した」栄養の合計（sumPersonalNutrition の戻り値）。
+ * 2026-07-28 便CA・オーナー確定仕様: 従来の「1食あたりの平均（averagePerMealNutrition）」を廃止し、
+ * 「期間内に作った料理を1食ずつ足した、1人分の期間合計」に置き換えた。
+ */
+export interface PersonalNutritionSum {
+  /** 1人分の期間合計（8項目）。料理1品につき perServing（1人分）を1回だけ足した値 */
+  total: NutrientTotals
+  /** 合計に入れた品数（料理1品＝1。作った人数・延べ人数では数えない） */
+  dishCount: number
+  /** 材料が丸ごと計算対象外で1品も計算できず、合計から除いた品数 */
+  excludedDishCount: number
   /**
-   * 平均には入れたが、量の書いてある材料を計算できなかった食数（2026-07-28 便BY/NUT-01）。
-   * 主材料が落ちたレシピは平均を静かに下げるので、件数を呼び出し側で明示する。
+   * 合計には入れたが、量の書いてある材料を計算できなかった品数（2026-07-28 便BY/NUT-01）。
+   * 主材料が落ちたレシピは合計を静かに下げるので、件数を呼び出し側で明示する。
    */
-  partialMealCount: number
+  partialDishCount: number
+}
+
+/** 空の PersonalNutritionSum（期間内に1品も無いときの戻り値・呼び出し側の初期値にも使う） */
+export function emptyPersonalNutritionSum(): PersonalNutritionSum {
+  return { total: emptyTotals(), dishCount: 0, excludedDishCount: 0, partialDishCount: 0 }
 }
 
 /**
- * 「作った記録」のレシピ群から、1食あたりの平均栄養（8項目）を概算する純ロジック
- * （2026-07-24 便BS・タスク3・月タブ「期間の集計」の摂取栄養めやす用）。
+ * 料理（作った記録／登録した献立）のレシピ群から、「1人が期間内に摂取した栄養の合計」を概算する
+ * 純ロジック（2026-07-28 便CA・オーナー確定仕様・月タブ「期間の栄養と食費」用）。
  *
- * 各レシピの perServing（1人分＝1食分）を、その記録で作った人数分だけ合算し、
- * 延べ人数で割って「1食あたりのめやす」を出す。材料が丸ごと計算対象外で1品も計算できないレシピ
- * （computeRecipeNutrition の items が0件）は 0kcal で平均を薄めないよう平均から除外し、
- * excludedMealCount で数える。あくまで概算・めやす（医療・効能の文脈では使わない）。
- * 呼び出し側は必ず「めやす／概算」表記と、excludedMealCount>0 のときはその件数を明示すること。
+ * 各レシピの perServing（1人分＝1食分）を、料理1品につき1回だけ単純合計する。
+ * 2人分作っても4人分作っても「1人が食べた分」は1食なので、作った人数では重み付けしない
+ * （オーナー原文: 「1人が期間内に摂取した食事の合計(期間内に作った料理1食ずつの合計)」）。
+ * 従来の averagePerMealNutrition は延べ人数で割った「1食あたりの平均」を返しており、
+ * 「期間で摂った合計」を知りたいという要望と食い違っていたため廃止した。
  *
- * 2026-07-28 便BY/RANGE-01: 同じカードに並ぶ食費の「1食あたり」を延べ人数（1人1食）基準に
- * 直したのに合わせ、こちらも記録時の人数(log.servings)で重み付けする。
- * 揃えないと、同じカードに食費「6食分」と栄養「3食」が並ぶ。
- * 記録時の人数が無い古い記録（2026-07-12以前）はレシピの登録人数で代替する。
+ * 材料が丸ごと計算対象外で1品も計算できないレシピ（computeRecipeNutrition の items が0件）は
+ * 0kcal の品として合計を薄めないよう除外し、excludedDishCount で数える。
+ * あくまで概算・めやす（医療・効能の文脈では使わない）。呼び出し側は必ず「めやす／概算」表記と、
+ * excludedDishCount>0 のときはその件数を明示すること。
  */
-export function averagePerMealNutrition(
-  recipes: (Pick<Recipe, 'ingredients' | 'servings'> & { cookedServings?: number })[],
-): PerMealNutrition {
-  const sum = emptyTotals()
-  let mealCount = 0
-  let excludedMealCount = 0
-  let partialMealCount = 0
+export function sumPersonalNutrition(
+  recipes: Pick<Recipe, 'ingredients' | 'servings'>[],
+): PersonalNutritionSum {
+  const total = emptyTotals()
+  let dishCount = 0
+  let excludedDishCount = 0
+  let partialDishCount = 0
   for (const recipe of recipes) {
-    const registered = recipe.servings > 0 ? recipe.servings : 1
-    const cooked =
-      recipe.cookedServings != null && recipe.cookedServings > 0 ? recipe.cookedServings : registered
     const n = computeRecipeNutrition(recipe)
     if (n.items.length === 0) {
-      excludedMealCount += cooked
+      excludedDishCount++
       continue
     }
-    if (hasMaterialGap(n)) partialMealCount += cooked
+    if (hasMaterialGap(n)) partialDishCount++
     const p = n.perServing
-    sum.kcal += p.kcal * cooked
-    sum.proteinG += p.proteinG * cooked
-    sum.fatG += p.fatG * cooked
-    sum.carbG += p.carbG * cooked
-    sum.saltG += p.saltG * cooked
-    sum.fiberG += p.fiberG * cooked
-    sum.ironMg += p.ironMg * cooked
-    sum.calciumMg += p.calciumMg * cooked
-    mealCount += cooked
+    total.kcal += p.kcal
+    total.proteinG += p.proteinG
+    total.fatG += p.fatG
+    total.carbG += p.carbG
+    total.saltG += p.saltG
+    total.fiberG += p.fiberG
+    total.ironMg += p.ironMg
+    total.calciumMg += p.calciumMg
+    dishCount++
   }
-  if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount, partialMealCount }
-  const perMeal: NutrientTotals = {
-    kcal: sum.kcal / mealCount,
-    proteinG: sum.proteinG / mealCount,
-    fatG: sum.fatG / mealCount,
-    carbG: sum.carbG / mealCount,
-    saltG: sum.saltG / mealCount,
-    fiberG: sum.fiberG / mealCount,
-    ironMg: sum.ironMg / mealCount,
-    calciumMg: sum.calciumMg / mealCount,
+  return { total, dishCount, excludedDishCount, partialDishCount }
+}
+
+/** 2つの PersonalNutritionSum を足す（実績（過去）＋予定（今日以降）を1つの期間合計にまとめる用） */
+export function addPersonalNutritionSum(
+  a: PersonalNutritionSum,
+  b: PersonalNutritionSum,
+): PersonalNutritionSum {
+  return {
+    total: {
+      kcal: a.total.kcal + b.total.kcal,
+      proteinG: a.total.proteinG + b.total.proteinG,
+      fatG: a.total.fatG + b.total.fatG,
+      carbG: a.total.carbG + b.total.carbG,
+      saltG: a.total.saltG + b.total.saltG,
+      fiberG: a.total.fiberG + b.total.fiberG,
+      ironMg: a.total.ironMg + b.total.ironMg,
+      calciumMg: a.total.calciumMg + b.total.calciumMg,
+    },
+    dishCount: a.dishCount + b.dishCount,
+    excludedDishCount: a.excludedDishCount + b.excludedDishCount,
+    partialDishCount: a.partialDishCount + b.partialDishCount,
   }
-  return { perMeal, mealCount, excludedMealCount, partialMealCount }
 }
 
 /** 表示用の丸め: kcalとカルシウム(mg・値が大きい)は整数、それ以外は小数1桁
