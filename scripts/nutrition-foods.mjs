@@ -225,7 +225,7 @@ export const FOODS = [
   { id: '17054', expect: 'みりん風調味料', label: 'みりん風調味料', aliases: ['みりん風調味料'], gramsPerMl: 1.2 },
   { id: '17015', expect: '穀物酢', label: '酢', aliases: ['酢', '穀物酢'], gramsPerMl: 1.0 },
   { id: '17016', expect: '米酢', label: '米酢', aliases: ['米酢'], gramsPerMl: 1.0 },
-  { id: '14006', expect: '調合油', label: 'サラダ油', aliases: ['サラダ油', '植物油', '揚げ油'], rawAliases: ['油'], gramsPerMl: 0.8, note: '大さじ1=12gの慣用値に合わせて0.8g/ml。「揚げ油」も同じ植物油で代表(2026-07-13追加。実際の吸油量は少ないが、量が「適量」表記のため計算には現状反映されない＝名寄せの網羅目的)' },
+  { id: '14006', expect: '調合油', label: 'サラダ油', aliases: ['サラダ油', '植物油', '揚げ油'], rawAliases: ['油'], gramsPerMl: 0.8, note: '大さじ1=12gの慣用値に合わせて0.8g/ml。「揚げ油」も同じ植物油で代表(2026-07-13追加)。分量が「適量」の油は matchAssumedGrams が約3g/食として計算に含める(2026-07-28 便BY で記述を更新。「計算には反映されない」という以前の注記は、OIL_NAMESに「あげあぶら」が入った時点で実態と食い違っていた)' },
   { id: '14002', expect: '（植物油脂類） ごま油', label: 'ごま油', aliases: ['ごま油'], gramsPerMl: 0.8 },
   { id: '14001', expect: 'オリーブ油', label: 'オリーブオイル', aliases: ['オリーブオイル', 'オリーブ油'], gramsPerMl: 0.8 },
   { id: '17036', expect: 'トマトケチャップ', label: 'ケチャップ', aliases: ['ケチャップ', 'トマトケチャップ'], unitGrams: { 大さじ: 15, 小さじ: 5 } },
