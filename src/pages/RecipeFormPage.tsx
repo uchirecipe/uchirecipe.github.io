@@ -1449,6 +1449,36 @@ function RecipeFormInner() {
         </label>
       </div>
 
+      {/* 料理の種別（2026-07-28 便BW/C-05）。「くわしく」タブと同じ選択をここにも出す。
+          実機QAでは麦茶・ぬか漬け・みそ汁などが自動で「主菜」に決まったまま保存され、
+          献立プランナーの提案に効いていた。自動で決まった値が見えて、1タップで直せるようにする
+          （state は detail タブ側と共有。どちらで押しても同じ値が変わる） */}
+      <div className="mt-[var(--space-md)]">
+        <span className={labelCls}>{ja.form.dishTypeShortLabel}</span>
+        <div className="mt-1 grid grid-cols-4 gap-[var(--space-sm)]">
+          {dishTypes.map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setDishTypeTouched(true)
+                setDishType((current) => (current === value ? undefined : value))
+              }}
+              className={`rounded-md border py-2.5 text-sm font-bold shadow-sm ${
+                effectiveDishType === value
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {ja.dishType[value]}
+            </button>
+          ))}
+        </div>
+        {showDishTypeSuggestion && effectiveDishType !== undefined && (
+          <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeAutoHint}</p>
+        )}
+      </div>
+
       {/* 材料（追加・削除・並べ替え） */}
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.ingredientsLabel}</span>
@@ -1889,7 +1919,8 @@ function RecipeFormInner() {
         </div>
       </div>
 
-      {/* 料理の種別（任意・もう一度押すと解除。献立プランナーの主菜/副菜提案に使う） */}
+      {/* 料理の種別（任意・もう一度押すと解除。献立プランナーの主菜/副菜提案に使う）。
+          同じ選択は「かんたん」タブにも出している(2026-07-28 便BW/C-05)。stateは共通 */}
       <div className="mt-[var(--space-md)]">
         <span className={labelCls}>{ja.form.dishTypeLabel}</span>
         <p className="mt-1 text-sm text-ink-muted">{ja.form.dishTypeDescription}</p>
