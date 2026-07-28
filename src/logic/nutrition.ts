@@ -1,8 +1,9 @@
-import { toHiragana } from './kana'
+import { toIngredientKey } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
 import { expandMixedFraction, leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
-import { VOLUME_UNIT_FACTORS } from './priceEstimate'
+import { VOLUME_UNIT_FACTORS } from './unitGrams'
+import { matchAssumedGrams } from './amountAssumption'
 
 /**
  * 栄養価の自動概算（M6-1・Pro機能）の純ロジック。
@@ -17,7 +18,7 @@ import { VOLUME_UNIT_FACTORS } from './priceEstimate'
  * 手書きの成分値は存在しない。
  *
  * 【設計方針】あくまで「概算・めやす」。医療・効能の文脈では使わない。
- * 計算できなかった材料は隠さず「計算対象外 n件」として必ず表示に含めること（excluded参照）。
+ * 計算できなかった材料は隠さず「計算に含めていない材料 n件」として必ず表示に含めること（excluded参照）。
  */
 
 /**
@@ -72,6 +73,30 @@ export type ExcludedReason =
 export interface ExcludedIngredient {
   name: string
   reason: ExcludedReason
+  /**
+   * 保存されている分量テキスト（例: '適量(お好みで)'・'1パック'）。2026-07-28 便BY/NUT-02。
+   * 「無視していいのか、意外と効くのか」を判断する手掛かりとしてUIに併記する。
+   * 計算時にだけ作る型でIndexedDBには保存しないため、任意項目でよい（マイグレーション不要）。
+   */
+  amountText?: string
+}
+
+/**
+ * 「量は書いてあるのに計算できなかった」材料が含まれているか（2026-07-28 便BY/NUT-01）。
+ *
+ * reason別に重みが違う:
+ * - amount / prep … 「適量」「少々」「塩もみ用の塩」など、元々分量が書かれていない薬味・下ごしらえ。
+ *   同梱103品の計算対象外66件はすべてこちら。数値を出しても実害が小さい。
+ * - food / unit … 「牛肉 300g」「米 360cc」のように分量は書いてあるのに、成分データが無い・
+ *   単位をグラムに換算できないケース。主材料が丸ごと落ちるのはこちらで、
+ *   エネルギーも塩分も大きく過小に出る（実測で最大21倍の過小表示を確認）。
+ *
+ * この線引きなら同梱カタログでは1件も警告が出ず、主材料が落ちたときだけ発火する。
+ * nutrition.ts 冒頭の設計方針「計算できなかった材料は隠さず必ず表示に含めること」を、
+ * 折りたたみ既定（2026-07-11）で見えなくなった部分欠落にも効かせるための判定。
+ */
+export function hasMaterialGap(nutrition: Pick<RecipeNutrition, 'excluded'>): boolean {
+  return nutrition.excluded.some((e) => e.reason === 'food' || e.reason === 'unit')
 }
 
 /** 「少々」「適量」を仮の目安量で計算に含めたときの記録(2026-07-11オーナー要望) */
@@ -98,16 +123,15 @@ export interface RecipeNutrition {
   servings: number
   /** 計算に含めた材料の内訳 */
   items: IngredientNutrition[]
-  /** 計算対象外の材料（UIでは「計算対象外 n件」として必ず明示すること） */
+  /** 計算に含めていない材料（UIでは「計算に含めていない材料 n件」として必ず明示すること） */
   excluded: ExcludedIngredient[]
 }
 
 // ---------- 名寄せ（材料名 → 成分表の食品） ----------
 
-/** 材料名の正規化: toHiragana（カタカナ→ひらがな・NFKC・読み仮名辞書）＋空白除去 */
-function normalizeName(name: string): string {
-  return toHiragana(name.trim()).replace(/[\s・]+/g, '')
-}
+/** 材料名の正規化: toHiragana（カタカナ→ひらがな・NFKC・読み仮名辞書）＋空白除去
+ * （kana.tsのtoIngredientKey。原価側の「少々・適量」の仮の量と同じキーで比べるため共有している） */
+const normalizeName = toIngredientKey
 
 /** 括弧書きの注記を落とす（「めんつゆ(2倍濃縮)」のように括弧が意味を持つ場合は先に完全一致で拾う） */
 function stripParens(normalized: string): string {
@@ -220,11 +244,11 @@ export function parseAmountNumber(amount: string): number | null {
 }
 
 /**
- * 大さじ/小さじ/カップのml換算。priceEstimate.tsのVOLUME_UNIT_FACTORSと同一の値を使う
+ * 大さじ/小さじ/カップのml換算。unitGrams.tsのVOLUME_UNIT_FACTORSと同一の値を使う
  * （1948年制定のJIS S 2052「家庭用計量スプーン」に由来する日本の調理計量の標準値。
  * 大さじ15ml・小さじ5ml・カップ200ml。2026-07-21 単位換算監査(docs/48)で確認）。
  * 数値を2箇所に手書きすると片方だけ変更されて食い違う事故が起きるため、
- * ここでは書き写さずpriceEstimate.tsから直接参照して一本化している。
+ * ここでは書き写さずunitGrams.tsから直接参照して一本化している。
  */
 const SPOON_ML: Record<string, number> = {
   大さじ: VOLUME_UNIT_FACTORS.大さじ,
@@ -274,42 +298,6 @@ function addScaled(target: NutrientTotals, per100g: NutritionPer100g, grams: num
   return target
 }
 
-// 「少々」「適量」の仮の目安量(1食あたりg・概算)。
-// 塩系はmemoの「約◯g」表記があればそれを優先。お好みで表記は食べるか不明なため対象外のまま。
-//
-// 判定はnormalizeName済みの表記(toHiragana適用後)で行う(2026-07-21・オーナー実機報告
-// 「対象外13件」調査で発見・修正)。旧実装は生の文字列(name)をそのまま比較しており、
-// 「黒胡椒」のような漢字・「コショウ」のようなカタカナ表記だとmatchNutritionFoodでは
-// 食品が見つかっているのに少々の仮定だけ効かない、という表記ゆれバグがあった。
-// OIL_NAMESもnormalizeName後の文字列と比較するため、カタカナ由来の語はひらがな化した形
-// (「サラダ」→「さらだ」「オリーブ」→「おりーぶ」)で書く。「ごま油」「胡麻油」「揚げ油」は
-// ingredientReadings辞書で丸ごと「ごまあぶら」「あげあぶら」に変換されるため、その変換後の
-// 形も含める(「あげあぶら」を含めたことで、便AL(docs/47)が「適量でも仮定計算されない
-// 既知の欠落」として報告していた揚げ油のケースも合わせて解消した)。
-const OIL_NAMES = /(さらだ油|ごま油|ごまあぶら|あげあぶら|おりーぶおいる|おりーぶ油|^油$)/
-function matchAssumed(ing: Ingredient): { gramsPerServing: number; note: string } | null {
-  const name = ing.name
-  const amount = ing.amount ?? ''
-  const normalizedName = normalizeName(name)
-  if (/お好みで/.test(name) || /お好みで/.test(amount)) return null
-  if (/少々/.test(amount)) {
-    // normalizeName適用後は「塩」は辞書(ingredientReadings)で必ず「しお」に変換されるため、
-    // 判定は「しお」のみで足りる(「塩」がそのまま残るケースは無い)
-    if (normalizedName.includes('しお')) {
-      const m = (ing.memo ?? '').match(/約([\d.]+)g/)
-      const g = m ? Number(m[1]) : 0.5
-      return { gramsPerServing: g, note: `少々 → 約${g}g/食` }
-    }
-    if (normalizedName.includes('こしょう')) {
-      return { gramsPerServing: 0.3, note: '少々 → 約0.3g/食' }
-    }
-  }
-  if (/適量/.test(amount) && OIL_NAMES.test(normalizedName)) {
-    return { gramsPerServing: 3, note: '適量 → 約3g/食(大さじ1/2を2食で使う想定)' }
-  }
-  return null
-}
-
 /**
  * 分量欄と単位欄から、栄養計算用の(数値, 単位)を解決する。
  * 「大2」「小1/2」(大さじ/小さじの略記)・「ひとかけ」「一房」等の和語の個数詞を優先的に解釈し
@@ -338,7 +326,7 @@ function computeIngredient(
   const resolved = resolveIngredientAmount(ing)
   if (resolved === null) {
     // 少々・適量は仮の目安量で計算に含める(2026-07-11オーナー要望。UIで仮定を必ず明示)
-    const assumption = matchAssumed(ing)
+    const assumption = matchAssumedGrams(ing)
     if (assumption) {
       const grams = assumption.gramsPerServing * servings
       const nutrients = addScaled(emptyTotals(), food.per100g, grams)
@@ -357,7 +345,7 @@ function computeIngredient(
 
 /**
  * レシピ全体の栄養概算。servingsが不正(0以下)のときは1人分として扱う。
- * 戻り値の excluded は UI で「計算対象外 n件」として必ず明示すること（docs/09 M6-1）。
+ * 戻り値の excluded は UI で「計算に含めていない材料 n件」として必ず明示すること（docs/09 M6-1）。
  */
 export function computeRecipeNutrition(
   recipe: Pick<Recipe, 'ingredients' | 'servings'>,
@@ -373,7 +361,11 @@ export function computeRecipeNutrition(
     const result = computeIngredient(ing, servings)
     if (result === 'zero') continue
     if ('reason' in result) {
-      excluded.push({ name: ing.name, reason: result.reason })
+      excluded.push({
+        name: ing.name,
+        reason: result.reason,
+        amountText: `${ing.amount ?? ''}${ing.unit ?? ''}`.trim() || undefined,
+      })
       continue
     }
     if (result.assumed) assumed.push(result.assumed)
@@ -405,46 +397,61 @@ export function computeRecipeNutrition(
 export interface PerMealNutrition {
   /** 1食あたりの平均栄養（8項目・計算できた食数で割った値） */
   perMeal: NutrientTotals
-  /** 平均に含めた食数（＝栄養を計算できた「作った記録」の数） */
+  /** 平均に含めた食数（＝1人1食で数えた延べ人数。2人分作った記録は2食） */
   mealCount: number
-  /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数 */
+  /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数（同じく延べ人数） */
   excludedMealCount: number
+  /**
+   * 平均には入れたが、量の書いてある材料を計算できなかった食数（2026-07-28 便BY/NUT-01）。
+   * 主材料が落ちたレシピは平均を静かに下げるので、件数を呼び出し側で明示する。
+   */
+  partialMealCount: number
 }
 
 /**
  * 「作った記録」のレシピ群から、1食あたりの平均栄養（8項目）を概算する純ロジック
  * （2026-07-24 便BS・タスク3・月タブ「期間の集計」の摂取栄養めやす用）。
  *
- * 各レシピの perServing（1人分＝1食分とみなす）を合算し、計算できた食数で割って
- * 「1食あたりのめやす」を出す。材料が丸ごと計算対象外で1品も計算できないレシピ
+ * 各レシピの perServing（1人分＝1食分）を、その記録で作った人数分だけ合算し、
+ * 延べ人数で割って「1食あたりのめやす」を出す。材料が丸ごと計算対象外で1品も計算できないレシピ
  * （computeRecipeNutrition の items が0件）は 0kcal で平均を薄めないよう平均から除外し、
  * excludedMealCount で数える。あくまで概算・めやす（医療・効能の文脈では使わない）。
  * 呼び出し側は必ず「めやす／概算」表記と、excludedMealCount>0 のときはその件数を明示すること。
+ *
+ * 2026-07-28 便BY/RANGE-01: 同じカードに並ぶ食費の「1食あたり」を延べ人数（1人1食）基準に
+ * 直したのに合わせ、こちらも記録時の人数(log.servings)で重み付けする。
+ * 揃えないと、同じカードに食費「6食分」と栄養「3食」が並ぶ。
+ * 記録時の人数が無い古い記録（2026-07-12以前）はレシピの登録人数で代替する。
  */
 export function averagePerMealNutrition(
-  recipes: Pick<Recipe, 'ingredients' | 'servings'>[],
+  recipes: (Pick<Recipe, 'ingredients' | 'servings'> & { cookedServings?: number })[],
 ): PerMealNutrition {
   const sum = emptyTotals()
   let mealCount = 0
   let excludedMealCount = 0
+  let partialMealCount = 0
   for (const recipe of recipes) {
+    const registered = recipe.servings > 0 ? recipe.servings : 1
+    const cooked =
+      recipe.cookedServings != null && recipe.cookedServings > 0 ? recipe.cookedServings : registered
     const n = computeRecipeNutrition(recipe)
     if (n.items.length === 0) {
-      excludedMealCount += 1
+      excludedMealCount += cooked
       continue
     }
+    if (hasMaterialGap(n)) partialMealCount += cooked
     const p = n.perServing
-    sum.kcal += p.kcal
-    sum.proteinG += p.proteinG
-    sum.fatG += p.fatG
-    sum.carbG += p.carbG
-    sum.saltG += p.saltG
-    sum.fiberG += p.fiberG
-    sum.ironMg += p.ironMg
-    sum.calciumMg += p.calciumMg
-    mealCount += 1
+    sum.kcal += p.kcal * cooked
+    sum.proteinG += p.proteinG * cooked
+    sum.fatG += p.fatG * cooked
+    sum.carbG += p.carbG * cooked
+    sum.saltG += p.saltG * cooked
+    sum.fiberG += p.fiberG * cooked
+    sum.ironMg += p.ironMg * cooked
+    sum.calciumMg += p.calciumMg * cooked
+    mealCount += cooked
   }
-  if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount }
+  if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount, partialMealCount }
   const perMeal: NutrientTotals = {
     kcal: sum.kcal / mealCount,
     proteinG: sum.proteinG / mealCount,
@@ -455,7 +462,7 @@ export function averagePerMealNutrition(
     ironMg: sum.ironMg / mealCount,
     calciumMg: sum.calciumMg / mealCount,
   }
-  return { perMeal, mealCount, excludedMealCount }
+  return { perMeal, mealCount, excludedMealCount, partialMealCount }
 }
 
 /** 表示用の丸め: kcalとカルシウム(mg・値が大きい)は整数、それ以外は小数1桁

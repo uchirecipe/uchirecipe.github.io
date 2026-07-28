@@ -53,8 +53,8 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-07-23",
-  "dbVersion": 5,
+  "generatedAt": "2026-07-28",
+  "dbVersion": 6,
   "foods": [
     {
       "id": "06153",
@@ -95,13 +95,14 @@ export const NUTRITION_DATA: NutritionData = {
         "fatG": 0.1,
         "carbG": 17.3,
         "saltG": 0,
-        "fiberG": 8.9,
+        "fiberG": 3.1,
         "ironMg": 0.4,
         "calciumMg": 4
       },
       "unitGrams": {
         "個": 135
-      }
+      },
+      "note": "食物繊維のみ 02019「＜いも類＞ じゃがいも 塊茎 皮なし 水煮」から採用（3.1g/100g）"
     },
     {
       "id": "06212",
@@ -3089,7 +3090,7 @@ export const NUTRITION_DATA: NutritionData = {
         "calciumMg": 0
       },
       "gramsPerMl": 0.8,
-      "note": "大さじ1=12gの慣用値に合わせて0.8g/ml。「揚げ油」も同じ植物油で代表(2026-07-13追加。実際の吸油量は少ないが、量が「適量」表記のため計算には現状反映されない＝名寄せの網羅目的)"
+      "note": "大さじ1=12gの慣用値に合わせて0.8g/ml。「揚げ油」も同じ植物油で代表(2026-07-13追加)。分量が「適量」の油は matchAssumedGrams が約3g/食として計算に含める(2026-07-28 便BY で記述を更新。「計算には反映されない」という以前の注記は、OIL_NAMESに「あげあぶら」が入った時点で実態と食い違っていた)"
     },
     {
       "id": "14002",

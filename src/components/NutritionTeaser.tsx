@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { Sparkles, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import {
   NUTRITION_TEASER_ENABLED,
   isNutritionUnlocked,
   computeRecipeNutrition,
+  hasMaterialGap,
   roundNutrient,
   nutritionSourceName,
+  type ExcludedReason,
   type NutrientTotals,
 } from '../logic/nutrition'
 import type { Recipe } from '../db/types'
@@ -47,6 +49,9 @@ export default function NutritionTeaser({
 
   const nutrition = computeRecipeNutrition(recipe)
   const per = nutrition.perServing
+  // 表示中の人数(材料の人数変更に追従)。1人分の値そのものは人数を変えても動かないが、
+  // 「何人分を1食に分けた値なのか」を要約行に常時出すために使う(2026-07-28 便BY/COST-03)
+  const displayServings = servings != null && servings > 0 ? servings : nutrition.servings
   // 計算に含められた材料が1つも無ければ「0kcal」表示は誤解を招くため出さない
   const canShowSummary = nutrition.items.length > 0
   const summaryText = canShowSummary
@@ -54,6 +59,12 @@ export default function NutritionTeaser({
         ja.nutrition.saltShortLabel
       }${roundNutrient('saltG', per.saltG).toLocaleString()}${ja.nutrition.gramUnit}`
     : ja.nutrition.unavailableSummary
+  // 量が書いてあるのに計算できなかった材料(主材料の脱落)がある状態。
+  // 折りたたんだ既定の1行でも分かるようにする(2026-07-28 便BY/NUT-01)
+  const materialGap = hasMaterialGap(nutrition)
+  const gapCount = nutrition.excluded.filter(
+    (e) => e.reason === 'food' || e.reason === 'unit',
+  ).length
 
   const ChevronIcon = expanded ? ChevronUp : ChevronDown
 
@@ -70,8 +81,13 @@ export default function NutritionTeaser({
           <span className="min-w-0 flex-1 text-sm font-bold">
             <Sparkles size={14} className="mr-1 inline-block shrink-0 text-accent" aria-hidden />
             {ja.nutrition.title}
-            {ja.nutrition.summaryLabel}
+            {ja.nutrition.summaryLabel.replace('{s}', String(displayServings))}
             {summaryText}
+            {canShowSummary && materialGap && (
+              <span className="ml-1 whitespace-nowrap font-bold text-warning">
+                {ja.nutrition.materialGapBadge.replace('{n}', String(gapCount))}
+              </span>
+            )}
           </span>
           <ChevronIcon size={20} className="shrink-0 text-ink-muted" aria-hidden />
         </button>
@@ -79,7 +95,7 @@ export default function NutritionTeaser({
         {expanded && (
           <div className="border-t border-edge p-[var(--space-md)] pt-[var(--space-sm)]">
             {unlocked ? (
-              <UnlockedBody nutrition={nutrition} servings={servings} />
+              <UnlockedBody nutrition={nutrition} displayServings={displayServings} />
             ) : (
               <LockedBody nutrition={nutrition} isPro={isPro} />
             )}
@@ -97,7 +113,7 @@ function AssumedBlock({ nutrition }: { nutrition: Nutrition }) {
   if (nutrition.assumed.length === 0) return null
   return (
     <div className="rounded-md border border-edge p-[var(--space-sm)]">
-      <p className="text-sm font-bold text-ink-muted">
+      <p className="text-sm font-bold text-accent">
         {ja.nutrition.assumedLabel.replace('{n}', String(nutrition.assumed.length))}
       </p>
       <p className="mt-0.5 text-xs text-ink-muted">{ja.nutrition.assumedHint}</p>
@@ -108,16 +124,115 @@ function AssumedBlock({ nutrition }: { nutrition: Nutrition }) {
   )
 }
 
-/** 計算対象外の材料一覧（両状態で共通のブロック） */
+/** 計算に含めていない理由の表示順（重い順: 量が書いてあるのに計算できなかったものを先に出す） */
+const EXCLUDED_REASON_ORDER: ExcludedReason[] = ['food', 'unit', 'amount', 'prep']
+const EXCLUDED_REASON_LABEL: Record<ExcludedReason, string> = {
+  food: ja.nutrition.excludedReasonFood,
+  unit: ja.nutrition.excludedReasonUnit,
+  amount: ja.nutrition.excludedReasonAmount,
+  prep: ja.nutrition.excludedReasonPrep,
+}
+
+/**
+ * 計算に含めていない材料一覧（両状態で共通のブロック）。
+ * 2026-07-28 便BY/NUT-02: 理由ごとにグループ分けし、保存されている分量テキストを併記する。
+ * 「鶏むね肉＝単位を換算できない」と「秘伝のタレ＝成分データが無い」では直し方が正反対なので、
+ * 一般文をまとめて出すのではなく材料ごとに理由が分かる形にする。
+ * 併せて、除外は必ず「引く」側にしか働かない＝めやすは下限側であることを1文で明示する。
+ */
 function ExcludedBlock({ nutrition }: { nutrition: Nutrition }) {
   if (nutrition.excluded.length === 0) return null
+  const groups = EXCLUDED_REASON_ORDER.map((reason) => ({
+    reason,
+    items: nutrition.excluded.filter((e) => e.reason === reason),
+  })).filter((g) => g.items.length > 0)
   return (
-    <div className="rounded-md border border-edge p-[var(--space-sm)]">
+    <div className="rounded-md border-2 border-dashed border-edge p-[var(--space-sm)]">
       <p className="text-sm font-bold text-ink-muted">
         {ja.nutrition.excludedLabel.replace('{n}', String(nutrition.excluded.length))}
       </p>
-      <p className="mt-0.5 text-xs text-ink-muted">{ja.nutrition.excludedHint}</p>
-      <p className="mt-0.5 text-sm">{nutrition.excluded.map((e) => e.name).join('、')}</p>
+      <ul className="mt-0.5 space-y-1">
+        {groups.map((g) => (
+          <li key={g.reason} className="text-sm">
+            <span className="text-xs text-ink-muted">{EXCLUDED_REASON_LABEL[g.reason]}: </span>
+            {g.items
+              .map((e) => (e.amountText ? `${e.name}（${e.amountText}）` : e.name))
+              .join('、')}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.excludedDirectionNote}</p>
+    </div>
+  )
+}
+
+/** 量が書いてあるのに計算できなかった材料があるときだけ出す注意（2026-07-28 便BY/NUT-01） */
+function MaterialGapNote({ nutrition }: { nutrition: Nutrition }) {
+  if (!hasMaterialGap(nutrition)) return null
+  return <p className="text-sm font-bold text-warning">{ja.nutrition.materialGapNote}</p>
+}
+
+/** 出典表記（両状態で共通・2026-07-28 便BY/NUT-05で内訳と精度感を明記） */
+function SourceNote() {
+  return (
+    <div className="space-y-0.5 text-xs text-ink-muted">
+      <p>
+        {ja.nutrition.sourcePrefix}
+        {nutritionSourceName()}
+      </p>
+      <p>{ja.nutrition.sourceOfficialNote}</p>
+      <p>{ja.nutrition.sourceCommercialNote}</p>
+      <p>{ja.nutrition.precisionNote}</p>
+    </div>
+  )
+}
+
+/**
+ * Pro側で増える6項目のティーザー（2026-07-28 便BY/PRO-01）。
+ * MealPlanPageの月間献立ゲートと同じ「ぼかした本体＋Lockバッジ＋見出し＋説明＋リンク」の様式に揃える。
+ * 従来はテキスト1行だけで、同じPro導線なのに画面ごとに表現が3種類あった。
+ * ぼかす中身は数値ではなく項目名と値の位置を示すバーで、実データは出さない（サンプル表示）。
+ */
+function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
+  const sampleLabels = [
+    ja.nutrition.proteinLabel,
+    ja.nutrition.fatLabel,
+    ja.nutrition.carbLabel,
+    ja.nutrition.fiberLabel,
+    ja.nutrition.ironLabel,
+    ja.nutrition.calciumLabel,
+  ]
+  return (
+    <div className="relative overflow-hidden rounded-md border border-edge">
+      {/* ぼかす対象のサンプル(実データは出さない)。案内文の高さで枠が決まるよう背面に敷く */}
+      <div
+        aria-hidden
+        className="absolute inset-0 grid grid-cols-2 content-start gap-x-4 gap-y-2 p-[var(--space-sm)]"
+        style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
+      >
+        {sampleLabels.map((label) => (
+          <div key={label} className="flex items-baseline justify-between gap-2">
+            <span className="text-sm">{label}</span>
+            <span className="h-3 w-10 rounded-sm bg-accent/40" />
+          </div>
+        ))}
+      </div>
+      <div className="relative flex flex-col items-center justify-center gap-1 bg-app/40 p-[var(--space-md)] text-center backdrop-blur-[2px]">
+        <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent shadow-sm">
+          <Lock size={14} aria-hidden />
+          {ja.nutrition.lockedBadge}
+        </span>
+        <p className="mt-1 font-bold">{ja.nutrition.lockedTitle}</p>
+        <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
+        {!isPro && (
+          <Link
+            to="/settings?section=pro"
+            className="mt-1 inline-block text-sm font-bold text-accent underline"
+          >
+            {ja.nutrition.gateLink}
+          </Link>
+        )}
+      </div>
     </div>
   )
 }
@@ -127,47 +242,45 @@ function ExcludedBlock({ nutrition }: { nutrition: Nutrition }) {
 function LockedBody({ nutrition, isPro }: { nutrition: Nutrition; isPro: boolean }) {
   return (
     <div className="space-y-[var(--space-sm)]">
-      {/* Pro版で増える項目の明示(2026-07-13 UIペルソナQA)。詳しい提供時期の話(freeDescription系)より
-          先に、まず「何が増えるか」を1文で伝える */}
-      <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
+      {/* Pro版で増える項目のティーザー(2026-07-28 便BY/PRO-01で blur+Lock 様式に統一)。
+          詳しい提供時期の話(freeDescription系)より先に、まず「何が増えるか」を見せる */}
+      <ProNutrientTeaser isPro={isPro} />
+      <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
       <p className="text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
-      <p className="text-xs text-ink-muted">
-        {ja.nutrition.sourcePrefix}
-        {nutritionSourceName()}
-        {'　'}
-        {ja.nutrition.sourceCommercialNote}
-      </p>
+      <SourceNote />
       {/* Pro未解錠のユーザーには、これらのめやすが買い切りのPro版で表示されること
           (設定のProタブから解錠できること)を伝える。isProの分岐は栄養フル版の公開フラグを
           落としたとき用の保険(通常は未解錠=非ProなのでfreeDescription側が出る) */}
+      {/* ティーザー内に「Pro版について見る」リンクを置いたので、ここは説明だけにする
+          (同じリンクを2つ並べない) */}
       <p className="text-sm text-ink-muted">
         {isPro ? ja.nutrition.freeDescriptionPro : ja.nutrition.freeDescription}
       </p>
-      {!isPro && (
-        <Link to="/settings?section=pro" className="inline-block text-sm font-bold text-accent underline">
-          {ja.nutrition.gateLink}
-        </Link>
-      )}
     </div>
   )
 }
 
 /** 状態2: Pro解錠済み。8項目の実内訳（1人分・全量）＋計算対象外・注記・出典
  *  (2026-07-13 第2弾: 食物繊維・鉄・カルシウムを追加。オーナー承認・Fable設計) */
-function UnlockedBody({ nutrition, servings }: { nutrition: Nutrition; servings?: number }) {
-  const displayServings = servings != null && servings > 0 ? servings : nutrition.servings
+function UnlockedBody({ nutrition, displayServings }: { nutrition: Nutrition; displayServings: number }) {
   const per = nutrition.perServing
+  // 全量は「表示している1人分の値 × 人数」で作る(2026-07-28 便BY/NUT-06)。
+  // 従来は丸める前の値に人数を掛けてから個別に丸めていたため、画面の1人分を掛け算した結果と
+  // 一致しなかった(塩分 4.1×4=16.4 なのに全量が16.6 と出る等)。暗算で検算する人には
+  // 計算ミスに見えるので、表示どうしが必ず噛み合う側に揃える(どちらも同じ「めやす」の精度内)
+  const scaleForDisplay = (key: keyof NutrientTotals): number =>
+    roundNutrient(key, per[key]) * displayServings
   const totalForDisplay: NutrientTotals = {
-    kcal: per.kcal * displayServings,
-    proteinG: per.proteinG * displayServings,
-    fatG: per.fatG * displayServings,
-    carbG: per.carbG * displayServings,
-    saltG: per.saltG * displayServings,
-    fiberG: per.fiberG * displayServings,
-    ironMg: per.ironMg * displayServings,
-    calciumMg: per.calciumMg * displayServings,
+    kcal: scaleForDisplay('kcal'),
+    proteinG: scaleForDisplay('proteinG'),
+    fatG: scaleForDisplay('fatG'),
+    carbG: scaleForDisplay('carbG'),
+    saltG: scaleForDisplay('saltG'),
+    fiberG: scaleForDisplay('fiberG'),
+    ironMg: scaleForDisplay('ironMg'),
+    calciumMg: scaleForDisplay('calciumMg'),
   }
 
   // 食物繊維・鉄・カルシウムは既存のたんぱく質・脂質・炭水化物の並びに続けて置き、
@@ -226,6 +339,7 @@ function UnlockedBody({ nutrition, servings }: { nutrition: Nutrition; servings?
         </div>
       </div>
 
+      <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
 
@@ -233,12 +347,7 @@ function UnlockedBody({ nutrition, servings }: { nutrition: Nutrition; servings?
       {/* ビタミン非表示の理由(2026-07-13オーナー指示)。Pro解錠時のみ表示(無料側は栄養3項目が
           見えていないので注記も不要) */}
       <p className="text-xs text-ink-muted">{ja.nutrition.vitaminNote}</p>
-      <p className="text-xs text-ink-muted">
-        {ja.nutrition.sourcePrefix}
-        {nutritionSourceName()}
-        {'　'}
-        {ja.nutrition.sourceCommercialNote}
-      </p>
+      <SourceNote />
     </div>
   )
 }

@@ -42,6 +42,7 @@ import {
   NUTRITION_TEASER_ENABLED,
   computeRecipeNutrition,
   roundNutrient,
+  hasMaterialGap,
 } from '../logic/nutrition'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isHttpUrl } from '../logic/url'
@@ -434,6 +435,8 @@ export default function RecipeDetailPage() {
       saltPerServing: shareNutritionAvailable
         ? roundNutrient('saltG', shareNutrition!.perServing.saltG)
         : undefined,
+      // 主材料が計算できていないまま数値だけシェアされるのを防ぐ(2026-07-28 便BY/NUT-01)
+      nutritionHasGap: shareNutrition != null && hasMaterialGap(shareNutrition),
     }
     try {
       if (kind === 'text') {
@@ -581,7 +584,9 @@ export default function RecipeDetailPage() {
             1食分の目安も見たい。表示中のservingsに追従) */}
         {totalPrice > 0 && (
           <p className="mt-0.5 text-sm text-ink-muted">
-            {ja.detail.pricePerServing.replace('{n}', perServingPrice.toLocaleString())}
+            {ja.detail.pricePerServing
+              .replace('{s}', String(servings))
+              .replace('{n}', perServingPrice.toLocaleString())}
           </p>
         )}
 
@@ -621,9 +626,12 @@ export default function RecipeDetailPage() {
 
         {/* 材料（人数分の変更で自動換算） */}
         <section className="mt-[var(--space-lg)]">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold">{ja.detail.ingredients}</h2>
-            <div className="flex items-center gap-2">
+          {/* 見出し＋原価ボタン＋人数ステッパーの1行。390px幅(iPhone 12〜15相当)で「原価を見る」を
+              ONにすると横に収まらず、「人数を増やす」＋ボタンが画面外に出ていた(2026-07-28 便BY/UI-01)。
+              折り返しを許可し、原価ボタン群と人数ステッパーをそれぞれ塊のまま次の行へ送る */}
+          <div className="flex flex-wrap items-center justify-between gap-y-2">
+            <h2 className="shrink-0 text-xl font-bold">{ja.detail.ingredients}</h2>
+            <div className="flex flex-wrap items-center justify-end gap-2">
               {/* 原価ビュー切り替えチップ(2026-07-15 オーナー要望「どの食材が値段に反映されて
                   いるか分からない」への対応。常時表示は「うるさい」で廃止済みのためトグル方式。
                   既定は非表示・状態はページローカル)。2026-07-20 便AJ(docs/45)で「原価を見る」
@@ -632,6 +640,7 @@ export default function RecipeDetailPage() {
                   「編集」ボタンが出現する階層構造に変更。「見る」はhidden⇔view/editの親トグルを
                   兼ね、開いている間(view/edit)に再度押すと編集ボタンごと非表示に戻る。
                   「編集」はview⇔editの子トグル(見るボタンが閉じられない限り出続ける) */}
+              <span className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setCostMode((m) => (m === 'hidden' ? 'view' : 'hidden'))}
@@ -660,6 +669,8 @@ export default function RecipeDetailPage() {
                   {ja.detail.priceEditShow}
                 </button>
               )}
+              </span>
+              <span className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setServingsOverride(Math.max(1, servings - 1))}
@@ -680,6 +691,7 @@ export default function RecipeDetailPage() {
               >
                 <Plus size={22} aria-hidden />
               </button>
+              </span>
             </div>
           </div>
           {/* 原価サマリーカード(2026-07-16 裁定1で新設)は2026-07-20 便AJ(docs/45)で丸ごと削除

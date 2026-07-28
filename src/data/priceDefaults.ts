@@ -5,9 +5,12 @@
  * 実際の価格とはズレる。ユーザーはいつでも「食材と価格」画面から書き換え・削除できる
  * （db/prices.ts の seedPriceDefaultsIfNeeded が初回起動時に1度だけ投入する）。
  *
- * unit は「数量＋単位」の自由記述（例:「100g」「1個」）。logic/priceEstimate.ts が
- * 数量として解釈できる場合（例:「100g」)のみ、レシピの分量に応じた按分計算に使う。
- * 「1/4個」のような解釈できない書式は、そのままの金額を1行分の目安として使う（按分なし）。
+ * unit は「数量＋単位」の自由記述（例:「100g」「1個」「1/4個」）。logic/priceEstimate.ts が
+ * 数量として解釈できる場合、レシピの分量に応じた按分計算に使う（分数表記「1/4個」も
+ * 2026-07-28 便BY/COST-01 から数量0.25として解釈する）。
+ * 単位の次元が食い違う組（レシピ「1枚」×マスタ「100g」等）は、栄養側の目安量で
+ * 両者をグラムに寄せてから按分する。それでも解釈できない書式だけ、
+ * そのままの金額を1行分の目安として使う（按分なし）。
  */
 export interface PriceDefaultItem {
   name: string
@@ -94,7 +97,12 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'こんにゃく', pricePerUnit: 60, unit: '1枚' },
   { name: 'しいたけ', pricePerUnit: 150, unit: '1パック' },
   { name: 'にら', pricePerUnit: 100, unit: '1束' },
-  { name: 'にんにく', pricePerUnit: 60, unit: '1個' },
+  // 2026-07-28 便BY/COST-01: 単位を「1個」→「1玉」へ。栄養側の目安量(nutritionData.tsの
+  // にんにく unitGrams: 玉=45g・かけ=6g)が「個」を持たないため、レシピの「1かけ」から
+  // 按分できず1かけでもマスタ金額60円が丸ごと乗っていた(同梱103品で15行)。
+  // 価格は据え置き(にんにく1玉=1個で指すものは同じ)。「1玉」なら玉↔かけの換算が通り、
+  // 「にんにく1かけ」は8円になる。
+  { name: 'にんにく', pricePerUnit: 60, unit: '1玉' },
   { name: 'ブロッコリー', pricePerUnit: 200, unit: '1株' },
   { name: 'れんこん', pricePerUnit: 200, unit: '1節' },
   { name: '赤唐辛子', pricePerUnit: 10, unit: '1本' },
@@ -109,9 +117,11 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'さんま', pricePerUnit: 150, unit: '1尾' },
   { name: 'すだち', pricePerUnit: 30, unit: '1個' },
   { name: '人参', pricePerUnit: 40, unit: '1本' },
-  { name: '青じそ', pricePerUnit: 100, unit: '1パック' },
+  // 2026-07-28 便BY/COST-01: 「1パック」は栄養側の目安量に無く按分できないため、
+  // 一般的な小売規格である枚数表記へ(価格は据え置き)。大葉・青じそは同じ食材の別表記。
+  { name: '青じそ', pricePerUnit: 100, unit: '10枚' },
   { name: 'みょうが', pricePerUnit: 30, unit: '1個' },
-  { name: '大葉', pricePerUnit: 100, unit: '1パック' },
+  { name: '大葉', pricePerUnit: 100, unit: '10枚' },
   { name: '刻みねぎ', pricePerUnit: 15, unit: '少々' },
   { name: '長ねぎ', pricePerUnit: 100, unit: '1本' },
 
@@ -124,8 +134,10 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '生鮭', pricePerUnit: 120, unit: '1切れ' },
   { name: '鶏手羽先', pricePerUnit: 40, unit: '1本' },
   { name: 'ちくわ', pricePerUnit: 25, unit: '1本' },
-  { name: 'ハム', pricePerUnit: 150, unit: '1パック' },
-  { name: 'ベーコン', pricePerUnit: 200, unit: '1パック' },
+  // 2026-07-28 便BY/COST-01: 同上。スライスの販売規格(4枚入り)で登録し、
+  // レシピの「1枚」「2枚」から按分できるようにする(価格は据え置き)。
+  { name: 'ハム', pricePerUnit: 150, unit: '4枚' },
+  { name: 'ベーコン', pricePerUnit: 200, unit: '4枚' },
   { name: 'ウインナー', pricePerUnit: 25, unit: '1本' },
   { name: 'むきえび', pricePerUnit: 200, unit: '100g' },
   { name: '鶏ささみ', pricePerUnit: 40, unit: '1本' },

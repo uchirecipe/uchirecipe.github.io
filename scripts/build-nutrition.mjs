@@ -117,8 +117,11 @@ function parseSheetRows(xml, shared) {
 }
 
 // 成分値の表記ゆれを数値化する: "Tr"(微量)→0, "-"(未測定)→0, "(1.2)"(推計値)→1.2
-// "14.0†"の「†」は食物繊維のAOAC2011.25法(網羅的な分析法)による測定であることを示す注記で、
-// 数値自体は有効なのでマーカーだけ落とす(2026-07-13 第2弾で食物繊維列を読むようになり遭遇)
+// "14.0†"の「†」は、公式の凡例(備考欄)によると「規定法による測定値」を示す注記。
+// 数値自体は有効なのでマーカーだけ落とす(2026-07-13 第2弾で食物繊維列を読むようになり遭遇)。
+// 2026-07-28 便BY/NUT-04で確認: このファイル内で†が付くセルは 03032(還元水あめ)の3セルだけで、
+// アプリはこの食品を使っていない。分析法(AOAC2011.25法かどうか)は成分値ではなく備考欄(BJ列)に
+// 書かれており、†とは別物(以前のコメントは意味が逆だった)
 function parseNutrientValue(raw) {
   if (raw === undefined || raw === null) return 0
   const s = String(raw).trim().replace(/[()†]/g, '')
@@ -225,6 +228,17 @@ async function main() {
       mextId = def.id
     }
 
+    // 食物繊維だけ別番号から採る例外(2026-07-28 便BY/NUT-04・じゃがいもの生↔加熱後)。
+    // 採用元を必ずnoteに残して出典を追えるようにする
+    let fiberNote
+    if (def.fiberFrom) {
+      if (def.custom || def.blend) throw new Error(`${def.label}: fiberFromはcustom/blendと併用できません`)
+      const fiberHit = resolve(def.fiberFrom.id, def.fiberFrom.expect)
+      per100g = { ...per100g, fiberG: fiberHit.per100g.fiberG }
+      fiberNote = `食物繊維のみ ${def.fiberFrom.id}「${fiberHit.name}」から採用（${fiberHit.per100g.fiberG}g/100g）`
+    }
+    const note = [def.note, fiberNote].filter(Boolean).join(' / ') || undefined
+
     outFoods.push({
       id: mextId,
       label: def.label,
@@ -234,7 +248,7 @@ async function main() {
       per100g,
       ...(def.unitGrams ? { unitGrams: def.unitGrams } : {}),
       ...(def.gramsPerMl ? { gramsPerMl: def.gramsPerMl } : {}),
-      ...(def.note ? { note: def.note } : {}),
+      ...(note ? { note } : {}),
     })
   }
 

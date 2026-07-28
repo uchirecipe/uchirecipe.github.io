@@ -1388,9 +1388,19 @@ export default function SettingsPage() {
             {settings.proCode && (
               <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
                 <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
-                <ul className="mt-1 space-y-0.5 text-sm text-ink-muted">
+                {/* 機能名だけでなく「どこを開けば見られるか」と、その画面への入口を添える
+                    (2026-07-28 便BY/DISC-01。8項目表・期間の集計は数手先にあり到達しにくかった) */}
+                <ul className="mt-1 space-y-2 text-sm">
                   {ja.settings.proActivatedFeatures.map((feature) => (
-                    <li key={feature}>・{feature}</li>
+                    <li key={feature.label}>
+                      <p className="font-bold">・{feature.label}</p>
+                      <p className="text-sm text-ink-muted">{feature.hint}</p>
+                      {feature.to && feature.linkLabel && (
+                        <Link to={feature.to} className="text-sm font-bold text-accent underline">
+                          {feature.linkLabel}
+                        </Link>
+                      )}
+                    </li>
                   ))}
                 </ul>
               </div>

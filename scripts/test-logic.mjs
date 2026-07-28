@@ -109,9 +109,8 @@ import {
   sumMealPlanEntriesCost,
   sumCookedRecipesCost,
   normalizeIngredientNameForPrice,
-  normalizeUnit,
-  parseUnitQuantity,
 } from '../src/logic/priceEstimate.ts'
+import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
   pickMainIngredients,
@@ -3633,6 +3632,92 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
   eq('塩昆布あえ1人分の食塩相当量が0.9g前後へ是正(旧0.33g)', Math.abs(dish.perServing.saltG - 0.9) < 0.05, true)
 }
 
+// ---------- NUT-01/NUT-02(2026-07-28 便BY): 部分欠落の判定と、計算対象外の理由・分量テキスト ----------
+{
+  const { computeRecipeNutrition, hasMaterialGap, averagePerMealNutrition } = await import(
+    '../src/logic/nutrition.ts'
+  )
+  // 「適量」「少々」の薬味しか外れていないケース → 警告は出さない(誤警告を増やさない)
+  const garnishOnly = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: '鶏もも肉', amount: '250', unit: 'g' },
+      { name: '白いりごま', amount: '適量(お好みで)', unit: '' },
+    ],
+  })
+  eq('hasMaterialGap: 薬味(適量)だけの対象外では警告しない', hasMaterialGap(garnishOnly), false)
+  eq('hasMaterialGap: 対象外0件でも警告しない', hasMaterialGap({ excluded: [] }), false)
+  // 量は書いてあるのに成分データが無い(food) → 警告する
+  const unknownFood = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: '牛肉', amount: '300', unit: 'g' },
+      { name: 'ご飯', amount: '2', unit: '杯' },
+    ],
+  })
+  eq('hasMaterialGap: 量が書いてあるのに成分データが無い材料(food)は警告する', hasMaterialGap(unknownFood), true)
+  eq('hasMaterialGap: reasonはfood', unknownFood.excluded[0]?.reason, 'food')
+  // 量は書いてあるのに単位を換算できない(unit) → 警告する
+  const unknownUnit = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: '米', amount: '360', unit: 'cc' },
+      { name: '卵', amount: '2', unit: '個' },
+    ],
+  })
+  eq('hasMaterialGap: 単位をgに換算できない材料(unit)は警告する', hasMaterialGap(unknownUnit), true)
+  eq('hasMaterialGap: reasonはunit', unknownUnit.excluded[0]?.reason, 'unit')
+  // 塩もみ用の塩(prep)は警告しない
+  const prepSalt = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: 'きゅうり', amount: '2', unit: '本' },
+      { name: '塩', amount: '1/4', unit: '小さじ', memo: 'きゅうりの塩もみ用' },
+    ],
+  })
+  eq('hasMaterialGap: 下ごしらえ用の塩(prep)では警告しない', hasMaterialGap(prepSalt), false)
+
+  // NUT-02: 計算対象外の材料に、保存されている分量テキストを添える
+  eq('excluded.amountText: 保存されている分量テキストを持つ', garnishOnly.excluded[0]?.amountText, '適量(お好みで)')
+  eq('excluded.amountText: 単位付きも連結して持つ', unknownUnit.excluded[0]?.amountText, '360cc')
+  const emptyAmount = computeRecipeNutrition({
+    servings: 1,
+    ingredients: [{ name: '秘伝のタレ', amount: '', unit: '' }],
+  })
+  eq('excluded.amountText: 分量が空ならundefined(空文字を出さない)', emptyAmount.excluded[0]?.amountText, undefined)
+
+  // NUT-01 横展開: 期間の平均でも「一部だけ計算できなかった食数」を数える
+  const avg = averagePerMealNutrition([
+    { servings: 2, ingredients: [{ name: '牛肉', amount: '300', unit: 'g' }, { name: 'ご飯', amount: '2', unit: '杯' }] },
+    { servings: 2, ingredients: [{ name: '鶏もも肉', amount: '250', unit: 'g' }] },
+  ])
+  eq('averagePerMealNutrition: partialMealCountは部分欠落レシピの延べ人数', avg.partialMealCount, 2)
+  eq('averagePerMealNutrition: 全部計算できたレシピはpartialに数えない', avg.mealCount, 4)
+  const noPartial = averagePerMealNutrition([
+    { servings: 2, ingredients: [{ name: '鶏もも肉', amount: '250', unit: 'g' }] },
+  ])
+  eq('averagePerMealNutrition: 部分欠落が無ければpartialMealCount=0', noPartial.partialMealCount, 0)
+}
+
+// ---------- NUT-01: シェア文の栄養行に「一部の材料を除く」を添える(2026-07-28 便BY) ----------
+{
+  const recipe = {
+    title: 'テスト',
+    servings: 2,
+    ingredients: [{ name: '牛肉', amount: '300', unit: 'g' }],
+    steps: [],
+    tags: [],
+  }
+  const base = {
+    image: false, cookMinutes: false, cost: false, nutrition: true, allIngredients: false,
+    kcalPerServing: 100, saltPerServing: 1.2,
+  }
+  const normal = buildShareText(recipe, { ...base })
+  eq('シェア: 部分欠落が無ければ従来どおりの栄養行', normal.includes('1食あたり 約100kcal・塩分 約1.2g（めやす）'), true)
+  const partial = buildShareText(recipe, { ...base, nutritionHasGap: true })
+  eq('シェア: 部分欠落があれば「一部の材料を除く」を添える', partial.includes('（めやす・一部の材料を除く）'), true)
+}
+
 // ---------- termSplit: 純粋性(StrictMode二重実行の再発防止・2026-07-11) ----------
 {
   const { splitByTerms } = await import('../src/logic/termSplit.ts')
@@ -3971,22 +4056,22 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen 数量・単位が噛み合えば按分(300g/100gあたり130円→390円)',
     estimateIngredientYen({ name: '鶏もも肉', amount: '300', unit: 'g' }, index),
-    { yen: 390, source: 'user' },
+    { yen: 390, rawYen: 390, source: 'user' },
   )
   eq(
     'estimateIngredientYen 個数系も按分(2個/1個あたり50円→100円)',
     estimateIngredientYen({ name: '玉ねぎ', amount: '2', unit: '個' }, index),
-    { yen: 100, source: 'user' },
+    { yen: 100, rawYen: 100, source: 'user' },
   )
   eq(
     'estimateIngredientYen 非数値の分量(少々)はマスタの金額をそのまま使う',
     estimateIngredientYen({ name: '鶏もも肉', amount: '少々', unit: 'g' }, index),
-    { yen: 130, source: 'user' },
+    { yen: 130, rawYen: 130, source: 'user' },
   )
   eq(
     'estimateIngredientYen 単位が噛み合わない場合はマスタの金額をそのまま使う',
     estimateIngredientYen({ name: '玉ねぎ', amount: '200', unit: 'g' }, index),
-    { yen: 50, source: 'user' },
+    { yen: 50, rawYen: 50, source: 'user' },
   )
   eq(
     'estimateIngredientYen マスタに無い食材はundefined',
@@ -4045,6 +4130,43 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     { totalYen: 50, perServingYen: 50 },
   )
 
+  // COST-02(2026-07-28 便BY): 「価格なし」と「1円未満」の混線を解消する。
+  // マスタに価格があるのに按分額が0.5円未満へ丸まる材料まで undefined を返しており、
+  // UIが「価格なし ＋登録」と出していた(登録済みの砂糖・塩に対する誤ったシグナル。同梱103品で14行)
+  {
+    const seasoningIndex = buildPriceIndex([
+      { name: '砂糖', pricePerUnit: 2, unit: '大さじ1' },
+      { name: '塩', pricePerUnit: 1, unit: '小さじ1' },
+    ])
+    eq(
+      'COST-02: 砂糖 小さじ1/2(=0.33円)はundefinedではなく0円で返す(呼び出し側が「1円未満」を出す)',
+      estimateIngredientRowCost({ name: '砂糖', amount: '1/2', unit: '小さじ' }, seasoningIndex, 2),
+      { totalYen: 0, perServingYen: 0 },
+    )
+    eq(
+      'COST-02: 塩 小さじ1/4(=0.25円)も同じく0円で返す',
+      estimateIngredientRowCost({ name: '塩', amount: '1/4', unit: '小さじ' }, seasoningIndex, 2),
+      { totalYen: 0, perServingYen: 0 },
+    )
+    eq(
+      'COST-02: マスタに無い材料は従来どおりundefined(=「価格なし」のまま)',
+      estimateIngredientRowCost({ name: '水', amount: '300', unit: 'ml' }, seasoningIndex, 2),
+      undefined,
+    )
+    // 二重丸めの解消: 従来は estimateIngredientYen で円に丸めてから servings で割っていた
+    eq(
+      'COST-02: 二重丸めをやめる(0.33円を2人で割っても合計は丸め前から計算する)',
+      estimateIngredientRowCost({ name: '砂糖', amount: '1', unit: '小さじ' }, seasoningIndex, 2),
+      { totalYen: 1, perServingYen: 0 }, // 0.667円→合計1円・1食あたり0.33円→0(1円未満)
+    )
+    // 合計金額(estimateRecipeCost)は1円も変わらないこと
+    eq(
+      'COST-02: 合計計算は従来どおり四捨五入後のyenを使う(表示金額を動かさない)',
+      estimateRecipeCost([{ name: '砂糖', amount: '1/2', unit: '小さじ' }], seasoningIndex).total,
+      0,
+    )
+  }
+
   // sumMealPlanEntriesCost(2026-07-17 便AB・docs/35 §5「期間の食費」): 週の概算食費と
   // 期間の食費が共通で使う、mealPlansエントリ群の合算ロジック
   {
@@ -4078,33 +4200,51 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     })
 
     // sumCookedRecipesCost(2026-07-24 便BH-3・タスク9「期間の食費・実績ベース」): 作った記録群の
-    // 実績原価合計と食数(記録1件=1食)。同じレシピを2回作った記録は同じレシピが2件並ぶ想定
+    // 実績原価合計と食数。2026-07-28 便BY/RANGE-01で「食数=記録件数」から「食数=延べ人数(1人1食)」へ
+    // 直した。従来は2人分レシピ全量を1食として割っていたため「1食あたり」が約2倍に出ており、
+    // 同じカードの「摂取できた栄養(1食あたり)」(1人分基準)と単位が食い違っていた
+    const onion2 = { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 } // 全量50円
+    const chicken2 = { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }], servings: 2 } // 全量260円
     eq(
-      'sumCookedRecipesCost: 記録2件(玉ねぎ50+鶏260)を合算・食数2',
-      sumCookedRecipesCost(
-        [
-          { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] },
-          { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }] },
-        ],
-        index,
-      ),
-      { total: 50 + 260, count: 2 },
+      'sumCookedRecipesCost: 2人分レシピ2件は食数4(延べ人数)・合計310円→1食あたり78円',
+      sumCookedRecipesCost([{ recipe: onion2 }, { recipe: chicken2 }], index),
+      { total: 50 + 260, count: 4 },
     )
     eq(
-      'sumCookedRecipesCost: 同じレシピ2回(玉ねぎ)は食数2・合計100',
-      sumCookedRecipesCost(
-        [
-          { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] },
-          { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] },
-        ],
-        index,
-      ),
-      { total: 100, count: 2 },
+      'sumCookedRecipesCost: 記録時の人数(log.servings)が登録人数と違えば金額もその比でスケールする(2人分レシピを4人分で作った=倍量)',
+      sumCookedRecipesCost([{ recipe: onion2, log: { servings: 4 } }], index),
+      { total: 100, count: 4 },
+    )
+    eq(
+      'sumCookedRecipesCost: 記録時の人数が1人なら金額も半分・食数1(2人分レシピの半量)',
+      sumCookedRecipesCost([{ recipe: onion2, log: { servings: 1 } }], index),
+      { total: 25, count: 1 },
+    )
+    eq(
+      'sumCookedRecipesCost: 記録時の人数が無い古い記録(2026-07-12以前)は登録人数で代替する',
+      sumCookedRecipesCost([{ recipe: onion2, log: {} }], index),
+      { total: 50, count: 2 },
+    )
+    eq(
+      'sumCookedRecipesCost: 同じレシピ2回は食数4・合計100',
+      sumCookedRecipesCost([{ recipe: onion2 }, { recipe: onion2 }], index),
+      { total: 100, count: 4 },
     )
     eq(
       'sumCookedRecipesCost: 価格情報の無いレシピも食数には数える(1食あたりの分母)',
-      sumCookedRecipesCost([{ ingredients: [{ name: '謎の食材', amount: '1', unit: '個' }] }], index),
-      { total: 0, count: 1 },
+      sumCookedRecipesCost(
+        [{ recipe: { ingredients: [{ name: '謎の食材', amount: '1', unit: '個' }], servings: 2 } }],
+        index,
+      ),
+      { total: 0, count: 2 },
+    )
+    eq(
+      'sumCookedRecipesCost: 登録人数が不正(0)なら1人分として扱う',
+      sumCookedRecipesCost(
+        [{ recipe: { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 0 } }],
+        index,
+      ),
+      { total: 50, count: 1 },
     )
     eq('sumCookedRecipesCost: 0件は0円・食数0', sumCookedRecipesCost([], index), { total: 0, count: 0 })
   }
@@ -4117,12 +4257,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     '由来種別: マスタ行が投入時の目安のままならsource=default',
     estimateIngredientYen({ name: '玉ねぎ', amount: '1', unit: '個' }, sourceIndex),
-    { yen: 50, source: 'default' },
+    { yen: 50, rawYen: 50, source: 'default' },
   )
   eq(
     '由来種別: ユーザーが上書きした価格ならsource=user',
     estimateIngredientYen({ name: 'にんじん', amount: '1', unit: '本' }, sourceIndex),
-    { yen: 40, source: 'user' },
+    { yen: 40, rawYen: 40, source: 'user' },
   )
 }
 
@@ -4178,7 +4318,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen kg混在でも按分できる(200円/100g×0.3kg→600円)',
     estimateIngredientYen({ name: '豚肉', amount: '0.3', unit: 'kg' }, meatIndex),
-    { yen: 600, source: 'user' },
+    { yen: 600, rawYen: 600, source: 'user' },
   )
 
   // しょうゆ: マスタ15円/大さじ1 × レシピ「小さじ1」→ 大さじ=小さじ3で体積換算(15÷3=5円)
@@ -4186,7 +4326,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen 大さじ/小さじ混在でも按分できる(15円/大さじ1×小さじ1→5円)',
     estimateIngredientYen({ name: 'しょうゆ', amount: '1', unit: '小さじ' }, soySauceIndex),
-    { yen: 5, source: 'user' },
+    { yen: 5, rawYen: 5, source: 'user' },
   )
 
   // 牛乳: マスタ200円/1L × レシピ「200 ml」→ L→ml換算で按分(200/1000*200=40円)
@@ -4194,7 +4334,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen L/ml混在でも按分できる(200円/1L×200ml→40円)',
     estimateIngredientYen({ name: '牛乳', amount: '200', unit: 'ml' }, milkIndex),
-    { yen: 40, source: 'user' },
+    { yen: 40, rawYen: 40, source: 'user' },
   )
 
   // ---------- 1Lボトル→大さじ按分の実証テスト(2026-07-21 単位換算監査・docs/48・オーナー指示) ----------
@@ -4207,7 +4347,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       '1Lボトル按分: しょうゆ1000ml400円×大さじ1(15ml)の全量(400*15/1000=6円)',
       estimateIngredientYen({ name: 'しょうゆ', amount: '1', unit: '大さじ' }, soySauceBottleIndex),
-      { yen: 6, source: 'user' },
+      { yen: 6, rawYen: 6, source: 'user' },
     )
     eq(
       '1Lボトル按分: 2人分レシピの1食あたり(6円÷2=3円。オーナー指示の検証ケース)',
@@ -4253,13 +4393,13 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       '略記按分: オリーブオイル「大2」(大さじ1=30円→大さじ2=60円)',
       estimateIngredientYen({ name: 'オリーブオイル', amount: '大2', unit: '' }, oilIndex),
-      { yen: 60, source: 'user' },
+      { yen: 60, rawYen: 60, source: 'user' },
     )
     const soySauceBottleIndex2 = buildPriceIndex([{ name: 'しょうゆ', pricePerUnit: 400, unit: '1000ml' }])
     eq(
       '略記按分: しょうゆ「小1」(1000ml400円×小さじ1(5ml)=2円)',
       estimateIngredientYen({ name: 'しょうゆ', amount: '小1', unit: '' }, soySauceBottleIndex2),
-      { yen: 2, source: 'user' },
+      { yen: 2, rawYen: 2, source: 'user' },
     )
     // 分数「小1/2」の解決確認(体積↔体積の同じ次元同士。大さじ換算のマスタで按分)。
     // 塩は通常g登録が多いが、按分ロジック自体(質量↔質量・体積↔体積のみ按分可=docs/48の既存仕様)の
@@ -4269,13 +4409,13 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq(
       '略記按分: 塩「小1/2」(大さじ1=30円→小さじ0.5(2.5ml/15ml)=5円)',
       estimateIngredientYen({ name: '塩', amount: '小1/2', unit: '' }, saltIndex),
-      { yen: 5, source: 'user' },
+      { yen: 5, rawYen: 5, source: 'user' },
     )
     // 単位欄が入力済みなら略記解釈しない(従来どおり単位不一致でマスタ価格そのまま)
     eq(
       '略記按分: 単位欄が入力済みの「大2」は略記解釈せずフォールバック(マスタ価格そのまま)',
       estimateIngredientYen({ name: 'オリーブオイル', amount: '大2', unit: '個' }, oilIndex),
-      { yen: 30, source: 'user' },
+      { yen: 30, rawYen: 30, source: 'user' },
     )
   }
 
@@ -4284,19 +4424,19 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen 個数系(同一単位)は按分が回帰しない(50円/1個×2個→100円)',
     estimateIngredientYen({ name: '玉ねぎ', amount: '2', unit: '個' }, onionIndex),
-    { yen: 100, source: 'user' },
+    { yen: 100, rawYen: 100, source: 'user' },
   )
   // 個数不一致(個 vs 本): 単位名が違うので換算せずフォールバック(マスタ価格そのまま)
   eq(
     'estimateIngredientYen 個数系は単位名が違うと按分せずフォールバック(50円/1個×1本→50円のまま)',
     estimateIngredientYen({ name: '玉ねぎ', amount: '1', unit: '本' }, onionIndex),
-    { yen: 50, source: 'user' },
+    { yen: 50, rawYen: 50, source: 'user' },
   )
   // 解釈不能(少々): 従来どおりマスタ価格そのままのフォールバック
   eq(
     'estimateIngredientYen 解釈不能な分量(少々)は従来どおりフォールバック',
     estimateIngredientYen({ name: '玉ねぎ', amount: '少々', unit: '個' }, onionIndex),
-    { yen: 50, source: 'user' },
+    { yen: 50, rawYen: 50, source: 'user' },
   )
 
   // 既存の同一単位(100g×200g等)の按分が回帰しないこと(質量side・従来からの主要ケース)
@@ -4304,13 +4444,13 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen 既存の同一単位(g×g)の按分は回帰しない(130円/100g×300g→390円)',
     estimateIngredientYen({ name: '鶏もも肉', amount: '300', unit: 'g' }, chickenIndex),
-    { yen: 390, source: 'user' },
+    { yen: 390, rawYen: 390, source: 'user' },
   )
   // 2026-07-21全角対応: 分量・単位が全角(「３００」「ｇ」)でも半角と同じ按分結果になること
   eq(
     'estimateIngredientYen 全角「３００ｇ」でも半角「300g」と同じ按分結果(130円/100g×300g→390円)',
     estimateIngredientYen({ name: '鶏もも肉', amount: '３００', unit: 'ｇ' }, chickenIndex),
-    { yen: 390, source: 'user' },
+    { yen: 390, rawYen: 390, source: 'user' },
   )
 
   // 後方互換: mass/volume/countの対応表に無い単位(「1杯」等)でも、文字列として完全一致するなら
@@ -4320,15 +4460,149 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq(
     'estimateIngredientYen 対応表に無い単位でも文字列完全一致なら按分(従来互換。30円/1杯×2杯→60円)',
     estimateIngredientYen({ name: 'ご飯', amount: '2', unit: '杯' }, riceIndex),
-    { yen: 60, source: 'user' },
+    { yen: 60, rawYen: 60, source: 'user' },
   )
   // マスタが「単位+数量」書式(例:大さじ1)でも、末尾の数量を正しく解釈できること
   const misoIndex = buildPriceIndex([{ name: 'みそ', pricePerUnit: 15, unit: '大さじ1' }])
   eq(
     'estimateIngredientYen マスタが「単位+数量」書式(大さじ1)でも按分できる(15円/大さじ1×大さじ2→30円)',
     estimateIngredientYen({ name: 'みそ', amount: '2', unit: '大さじ' }, misoIndex),
-    { yen: 30, source: 'user' },
+    { yen: 30, rawYen: 30, source: 'user' },
   )
+}
+
+// ---------- COST-01/XREF-01(2026-07-28 便BY): 単位の次元が食い違う組をグラム換算で按分し、
+// 「適量」「少々」は1回の使用量で按分する。従来はどちらもマスタ金額の満額が1行に乗っており、
+// 原価が過大(サラダ油「適量」=1Lボトル400円)・過小(鶏むね肉「1枚」=100g分90円)の両方向に壊れていた ----------
+{
+  // (1) 個数 vs 質量: 栄養側の目安量(鶏むね肉 1枚=250g)でグラムに寄せて按分する
+  const breastIndex = buildPriceIndex([{ name: '鶏むね肉', pricePerUnit: 90, unit: '100g' }])
+  eq(
+    'g換算按分: 鶏むね肉1枚(=250g)は100g90円のマスタから225円(従来は満額90円=実勢の約1/2)',
+    estimateIngredientYen({ name: '鶏むね肉', amount: '1', unit: '枚' }, breastIndex),
+    { yen: 225, rawYen: 225, source: 'user' },
+  )
+  const thighIndex = buildPriceIndex([{ name: '鶏もも肉', pricePerUnit: 130, unit: '100g' }])
+  eq(
+    'g換算按分: 鶏もも肉2枚(=500g)は650円(従来は満額130円=実勢の約1/5)',
+    estimateIngredientYen({ name: '鶏もも肉', amount: '2', unit: '枚' }, thighIndex),
+    { yen: 650, rawYen: 650, source: 'user' },
+  )
+  // (2) 個数 vs 個数(単位名が違う): レタス4枚(=120g) ÷ 1個(=300g)
+  const lettuceIndex = buildPriceIndex([{ name: 'レタス', pricePerUnit: 150, unit: '1個' }])
+  eq(
+    'g換算按分: レタス4枚(=120g)は1個150円のマスタから60円(従来は満額150円)',
+    estimateIngredientYen({ name: 'レタス', amount: '4', unit: '枚' }, lettuceIndex),
+    { yen: 60, rawYen: 60, source: 'user' },
+  )
+  // (3) 長さ単位(cm)も栄養側の目安量にあれば通る: 長ねぎ10cm(=30g) ÷ 1本(=100g)
+  const negiIndex = buildPriceIndex([{ name: '長ねぎ', pricePerUnit: 100, unit: '1本' }])
+  eq(
+    'g換算按分: 長ねぎ10cm(=30g)は1本100円のマスタから30円(従来は満額100円)',
+    estimateIngredientYen({ name: '長ねぎ', amount: '10', unit: 'cm' }, negiIndex),
+    { yen: 30, rawYen: 30, source: 'user' },
+  )
+  // (4) 栄養側に目安量が無い組は従来どおり満額フォールバック(勝手な換算を作らない)
+  const konnyakuIndex = buildPriceIndex([{ name: 'こんにゃく', pricePerUnit: 60, unit: '1枚' }])
+  eq(
+    'g換算按分: 換算の根拠が無い組(こんにゃく1袋 vs マスタ1枚)は従来どおり満額フォールバック',
+    estimateIngredientYen({ name: 'こんにゃく', amount: '1', unit: '袋' }, konnyakuIndex),
+    { yen: 60, rawYen: 60, source: 'user' },
+  )
+  // (5) 「適量」「少々」を1回の使用量で按分する(サラダ油=大さじ1・ごま油=小さじ1・
+  //     オリーブオイル=大さじ1。同梱レシピが分量を数値で書いているときの最頻値)
+  const saladOilIndex = buildPriceIndex([{ name: 'サラダ油', pricePerUnit: 400, unit: '1L' }])
+  eq(
+    '1回使用量で按分: サラダ油「適量」は大さじ1(15ml)ぶんの6円(従来は1Lボトル満額400円)',
+    estimateIngredientYen({ name: 'サラダ油', amount: '適量', unit: '' }, saladOilIndex),
+    { yen: 6, rawYen: 6, source: 'user' },
+  )
+  eq(
+    '1回使用量で按分: サラダ油「少々」も同じ扱い(従来は満額400円)',
+    estimateIngredientYen({ name: 'サラダ油', amount: '少々', unit: '' }, saladOilIndex),
+    { yen: 6, rawYen: 6, source: 'user' },
+  )
+  const sesameOilIndex = buildPriceIndex([{ name: 'ごま油', pricePerUnit: 1200, unit: '1L' }])
+  eq(
+    '1回使用量で按分: ごま油「少々(お好みで)」は小さじ1(5ml)ぶんの6円(従来は満額1200円)',
+    estimateIngredientYen({ name: 'ごま油', amount: '少々(お好みで)', unit: '' }, sesameOilIndex),
+    { yen: 6, rawYen: 6, source: 'user' },
+  )
+  const oliveOilIndex = buildPriceIndex([{ name: 'オリーブオイル', pricePerUnit: 1400, unit: '1L' }])
+  eq(
+    '1回使用量で按分: オリーブオイル「適量」は大さじ1ぶんの21円(従来は満額1400円)',
+    estimateIngredientYen({ name: 'オリーブオイル', amount: '適量', unit: '' }, oliveOilIndex),
+    { yen: 21, rawYen: 21, source: 'user' },
+  )
+  // 分量が数値で書いてあれば従来どおり按分が優先される(1回使用量は使わない)
+  eq(
+    '1回使用量: 分量が数値で書いてあるときは従来どおり按分が優先(オリーブオイル大さじ2→42円)',
+    estimateIngredientYen({ name: 'オリーブオイル', amount: '2', unit: '大さじ' }, oliveOilIndex),
+    { yen: 42, rawYen: 42, source: 'user' },
+  )
+  // 1回使用量を持たない食材(薬味等・docs/49 §7でオーナー了承済みの満額表示)は従来どおり
+  const komeIndex = buildPriceIndex([{ name: '小ねぎ', pricePerUnit: 80, unit: '1袋' }])
+  eq(
+    '1回使用量: 持たない食材(小ねぎ「適量(お好みで)」)は従来どおり満額のまま(docs/49 §7の既決事項)',
+    estimateIngredientYen({ name: '小ねぎ', amount: '適量(お好みで)', unit: '' }, komeIndex),
+    { yen: 80, rawYen: 80, source: 'user' },
+  )
+  // (6) parseUnitQuantityの分数対応: マスタ「1/4個」を数量0.25として読む。
+  //     従来は{qty:1, baseUnit:'/4個'}になり、レシピ側にどんな分量を書いても按分できなかった
+  eq('parseUnitQuantity 分数「1/4個」を数量0.25として読む', parseUnitQuantity('1/4個'), { qty: 0.25, baseUnit: '個' })
+  eq('parseUnitQuantity 分数「1/2本」を数量0.5として読む', parseUnitQuantity('1/2本'), { qty: 0.5, baseUnit: '本' })
+  eq('parseUnitQuantity 分数でない従来書式は変わらない(100g)', parseUnitQuantity('100g'), { qty: 100, baseUnit: 'g' })
+  const cabbageIndex = buildPriceIndex([{ name: 'キャベツ', pricePerUnit: 130, unit: '1/4個' }])
+  eq(
+    '分数マスタ: キャベツ1/4個は同量なので130円のまま(表示が変わらないことの確認)',
+    estimateIngredientYen({ name: 'キャベツ', amount: '1/4', unit: '個' }, cabbageIndex),
+    { yen: 130, rawYen: 130, source: 'user' },
+  )
+  eq(
+    '分数マスタ: キャベツ1/2個は倍量なので260円(従来はどんな分量でも130円だった)',
+    estimateIngredientYen({ name: 'キャベツ', amount: '1/2', unit: '個' }, cabbageIndex),
+    { yen: 260, rawYen: 260, source: 'user' },
+  )
+  eq(
+    '分数マスタ: キャベツ2枚(=100g)は1/4個(=250g)から52円(グラム換算按分と併用)',
+    estimateIngredientYen({ name: 'キャベツ', amount: '2', unit: '枚' }, cabbageIndex),
+    { yen: 52, rawYen: 52, source: 'user' },
+  )
+  const radishIndex = buildPriceIndex([{ name: '大根', pricePerUnit: 100, unit: '1/2本' }])
+  eq(
+    '分数マスタ: 大根1/4本は1/2本100円のマスタから50円(従来はどんな分量でも100円だった)',
+    estimateIngredientYen({ name: '大根', amount: '1/4', unit: '本' }, radishIndex),
+    { yen: 50, rawYen: 50, source: 'user' },
+  )
+  // (7) マスタ単位の換算可能化(にんにく1個→1玉ほか)。栄養側の目安量に無い単位名だと
+  //     グラム換算に持ち込めないため、単位表記そのものを換算できる形に直したぶんの確認
+  {
+    const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
+    eq('PRICE_DEFAULTS にんにくの単位は「1玉」(栄養側の目安量が玉=45g・かけ=6gを持つため)', byName.get('にんにく')?.unit, '1玉')
+    eq('PRICE_DEFAULTS 大葉の単位は「10枚」', byName.get('大葉')?.unit, '10枚')
+    eq('PRICE_DEFAULTS 青じその単位は「10枚」', byName.get('青じそ')?.unit, '10枚')
+    eq('PRICE_DEFAULTS ハムの単位は「4枚」', byName.get('ハム')?.unit, '4枚')
+    eq('PRICE_DEFAULTS ベーコンの単位は「4枚」', byName.get('ベーコン')?.unit, '4枚')
+    const garlicIndex = buildPriceIndex([{ name: 'にんにく', pricePerUnit: 60, unit: '1玉' }])
+    eq(
+      'マスタ単位の換算可能化: にんにく1かけ(=6g)は1玉(=45g)60円から8円(従来は満額60円)',
+      estimateIngredientYen({ name: 'にんにく', amount: '1', unit: 'かけ' }, garlicIndex),
+      { yen: 8, rawYen: 8, source: 'user' },
+    )
+  }
+  // (8) 同梱103品の合計原価のピン留め(この数字が動いたら按分の前提が変わったということ)
+  {
+    const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+    let grand = 0
+    for (const def of starterDefs) grand += estimateRecipeCost(def.ingredients, idx).total
+    eq('同梱103品の概算食費の合計(便BY修正後。修正前は48,377円)', grand, 36780)
+    const soup = starterDefs.find((d) => d.title.includes('中華風卵スープ'))
+    eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 85)
+    const steamed = starterDefs.find((d) => d.title.includes('レンジ蒸し鶏'))
+    eq('レンジ蒸し鶏 1食あたり(修正前48円・鶏むね肉1枚が100g分の90円だった)', Math.round(estimateRecipeCost(steamed.ingredients, idx).total / steamed.servings), 115)
+    const teriyaki = starterDefs.find((d) => d.title === '鶏の照り焼き')
+    eq('鶏の照り焼き 1食あたり(修正前280円・鶏もも肉2枚が100g分の130円だった)', Math.round(estimateRecipeCost(teriyaki.ingredients, idx).total / teriyaki.servings), 343)
+  }
 }
 
 // ---------- buildPriceIndex: idの素通し(2026-07-16 裁定1「原価ビュー」全面改修で
