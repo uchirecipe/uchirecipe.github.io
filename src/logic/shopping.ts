@@ -1,4 +1,4 @@
-import { toHiragana } from './kana'
+import { toPantryKey } from './kana'
 import { isSeasoningLike } from './mainIngredients'
 import {
   formatAmountUnit,
@@ -41,7 +41,7 @@ export interface ShoppingCandidate {
  * 買うものではないのに分量が数値（600ml等）のせいで主材料扱いされてしまう食材。
  * 調味料と同じくデフォルト未チェックにする（2026-07-09ペルソナ第2波: 「水」がチェック済みで入る）
  */
-const TAP_WATER_NAMES = new Set(['水', 'お湯', '湯'].map(toHiragana))
+const TAP_WATER_NAMES = new Set(['水', 'お湯', '湯'].map(toPantryKey))
 
 /** 買い物候補づくりの内部で扱う、1材料分の分量パーツ（scale=食数スケール、既定1） */
 interface AmountPart {
@@ -120,6 +120,62 @@ function combineAmounts(parts: AmountPart[]): string {
   return texts.join('・')
 }
 
+/** 「大さじ2」のように単位が前に来る表記（formatAmountUnit と同じ並び）を切り出すための単位 */
+const LEADING_UNITS = ['大さじ', '小さじ', 'カップ', 'おおさじ', 'こさじ']
+
+/**
+ * 「200g」「1/2本」「大さじ2」のような表示用の分量文字列を、分量と単位に切り分ける。
+ * 買い物メモに確定した後は分量が1つの文字列にまとまっているため、重複行を合算するとき
+ * （C14）に元の amount / unit へ戻す必要がある。切り分けられない文字列（「少々」等）は
+ * 分量だけにして単位を空にする＝合算対象外として原文のまま扱われる。
+ */
+function splitAmountUnit(text: string): { amount: string; unit: string } {
+  const trimmed = text.trim()
+  for (const unit of LEADING_UNITS) {
+    if (trimmed.startsWith(unit)) return { amount: trimmed.slice(unit.length).trim(), unit }
+  }
+  const match = trimmed.match(/^([0-9０-９.．/／〜~～と]+)\s*(.*)$/)
+  if (match) return { amount: match[1], unit: match[2].trim() }
+  return { amount: trimmed, unit: '' }
+}
+
+/**
+ * 買い物メモに入っている表示用の分量文字列どうしを合算する（2026-07-29 便CC/C14）。
+ * 下書きの中では同名の材料をまとめるのに、買い物メモに入れた後は同じ食材を足しても
+ * 別行で並ぶだけで合算されず、売り場順で離れた位置に重複が出ていた。
+ * 合算の規則は下書きと同じ（combineAmounts）で、単位が揃えば足し、揃わなければ「・」で並べる。
+ */
+export function combineAmountTexts(texts: (string | undefined)[]): string {
+  const parts: AmountPart[] = []
+  for (const text of texts) {
+    for (const token of (text ?? '').split('・')) {
+      if (!token.trim()) continue
+      parts.push({ ...splitAmountUnit(token), scale: 1 })
+    }
+  }
+  return combineAmounts(parts)
+}
+
+/**
+ * 献立の「この週の買い物リストを作る」から渡る ?recipeIds= を解釈する（2026-07-29 便CC/C10）。
+ * 「1,2,3」に加えて「1x3」（同じレシピを週に3回作る＝材料3回分）の形を受け付ける。
+ * 従来はレシピIDの重複を捨てて常に1回分（scale=1固定）で計算していたため、
+ * 週に何度も作る料理の材料が足りない量で下書きに出ていた。
+ * 同じIDが複数回並んだ場合（旧形式で重複が残っていた場合）も回数として足し合わせる。
+ */
+export function parseRecipeIdsParam(raw: string): { id: number; times: number }[] {
+  const counts = new Map<number, number>()
+  for (const token of raw.split(',')) {
+    const [idPart, timesPart] = token.split('x')
+    const id = Number(idPart)
+    if (!Number.isFinite(id) || !idPart.trim()) continue
+    const times = Number(timesPart)
+    const add = timesPart !== undefined && Number.isFinite(times) && times > 0 ? Math.floor(times) : 1
+    counts.set(id, (counts.get(id) ?? 0) + add)
+  }
+  return [...counts].map(([id, times]) => ({ id, times }))
+}
+
 /**
  * 選んだレシピの材料を名前でまとめ、在庫「ある」の食材を除いた買い物候補を作る。
  * ここで作った候補はまだ買い物メモではなく、確認してから確定してもらう「下書き」。
@@ -131,7 +187,10 @@ export function buildShoppingCandidates(
   recipes: { id: number; ingredients: Ingredient[]; scale?: number }[],
   pantryHaveNames: string[],
 ): ShoppingCandidate[] {
-  const haveKeys = new Set(pantryHaveNames.map(toHiragana))
+  // 在庫との照合は toPantryKey の完全一致に統一する(2026-07-29 便CC/C4)。
+  // 従来の toHiragana 完全一致では「長ねぎ（白い部分）」のような括弧付きの材料名が
+  // 在庫チップ「長ねぎ」と別物になり、在庫「ある」にしても候補に出続けていた
+  const haveKeys = new Set(pantryHaveNames.map(toPantryKey))
   const order: string[] = []
   const map = new Map<
     string,
@@ -143,7 +202,7 @@ export function buildShoppingCandidates(
     for (const ing of recipe.ingredients) {
       const trimmedName = ing.name.trim()
       if (!trimmedName) continue
-      const key = toHiragana(trimmedName)
+      const key = toPantryKey(trimmedName)
       if (haveKeys.has(key)) continue // 在庫「ある」は候補に出さない
 
       let entry = map.get(key)

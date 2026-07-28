@@ -1225,22 +1225,36 @@ export default function MealPlanPage() {
     [recipes, priceIndex],
   )
 
-  const weekRecipeIds = useMemo(() => {
-    const ids = new Set<number>()
+  /**
+   * 買い物リストに渡すレシピと、その週に作る回数（2026-07-29 便CC/C10）。
+   * 従来はレシピIDの重複を捨てていたため、同じ料理が週に2回入っていても材料は1回分しか
+   * 出ず、買い物メモが実際の必要量に足りていなかった。回数を数えて倍率として渡す。
+   */
+  const weekRecipeCounts = useMemo(() => {
+    const counts = new Map<number, number>()
     entries?.forEach((e) => {
-      if (visibleSlots.includes(e.slot)) ids.add(e.recipeId)
+      if (visibleSlots.includes(e.slot)) counts.set(e.recipeId, (counts.get(e.recipeId) ?? 0) + 1)
     })
     // 「今日の献立」(今日つくるリスト)の分も買い物候補に含める。
     // 週の表を使わず今日の献立だけで運用する人の材料が漏れないように
-    // (2026-07-09 ペルソナテスト第1波)。重複は既存の合算ロジックがまとめる
-    todayList?.forEach((item) => ids.add(item.recipeId))
-    return Array.from(ids)
+    // (2026-07-09 ペルソナテスト第1波)。週の表に既にある品は回数を増やさない
+    // (同じ食事を週の表と今日の献立で二重に数えないため)
+    todayList?.forEach((item) => {
+      if (!counts.has(item.recipeId)) counts.set(item.recipeId, 1)
+    })
+    return counts
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, settings?.visibleMealSlots, todayList])
 
+  const weekRecipeIds = useMemo(() => Array.from(weekRecipeCounts.keys()), [weekRecipeCounts])
+
   const goShopping = () => {
-    if (weekRecipeIds.length === 0) return
-    navigate(`/shopping?recipeIds=${weekRecipeIds.join(',')}`)
+    if (weekRecipeCounts.size === 0) return
+    // 「id」または「idx回数」の並び（買い物側は logic/shopping.ts parseRecipeIdsParam で読む）
+    const param = Array.from(weekRecipeCounts, ([id, times]) =>
+      times > 1 ? `${id}x${times}` : String(id),
+    ).join(',')
+    navigate(`/shopping?recipeIds=${param}`)
   }
 
   const dowLabels = ja.mealPlan.dow
