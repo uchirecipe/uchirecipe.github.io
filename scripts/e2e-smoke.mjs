@@ -6923,6 +6923,25 @@ try {
                 }),
               })
             }
+            // photo-fail-marker: imageUrlはあるが画像プロキシが画像を返さない(=写真だけ取れない)
+            // ケース。「photo-marker」を含まないURLなので上の/image分岐は400を返す。
+            // 便BX/C01: 従来は完全に無言だったのを、控えめなトーストで伝えることの回帰防止
+            if (target.includes('photo-fail-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: '写真だけ失敗する鍋',
+                    ingredients: [{ name: '鶏もも肉', amount: '300g' }],
+                    steps: ['鶏肉を切る'],
+                    imageUrl: 'https://example.com/not-an-image.html',
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
             if (target.includes('fetch-failed-marker')) {
               return route.fulfill({
                 status: 200,
@@ -7142,6 +7161,65 @@ try {
           (await colonNameInputs.nth(2).inputValue()) === 'ごま油' &&
             (await colonAmountInputs.nth(2).inputValue()) === '1/2' &&
             (await colonUnitInputs.nth(2).inputValue()) === '小さじ',
+        )
+
+        // --- URLIMPORT-08(便BX/C02・C17): 材料・手順以外に置き換わった項目(人数分・調理時間)を
+        // 結果メッセージに書き添える。成功メッセージがrole="status"で読み上げ対象になる ---
+        currentCheck = 'URLIMPORT-08'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        check(
+          'URLIMPORT-08 人数分・調理時間も置き換わった旨が結果メッセージに出る(C02)',
+          (await uiPage.textContent('body')).includes('人数分・調理時間も読み込んだ内容に合わせました'),
+        )
+        const okMsg = uiPage.locator('p[role="status"]', { hasText: '材料2件・手順2件を読み込みました' })
+        check(
+          'URLIMPORT-08 成功メッセージはrole="status"+aria-live="polite"で読み上げられる(C17)',
+          (await okMsg.count()) === 1 && (await okMsg.first().getAttribute('aria-live')) === 'polite',
+        )
+
+        // --- URLIMPORT-09(便BX/C16): 置き換え確認をキャンセルしたら「中止した」と返事する ---
+        currentCheck = 'URLIMPORT-09'
+        const dismissDialog = (dialog) => dialog.dismiss()
+        uiPage.on('dialog', dismissDialog)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe-2')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        uiPage.off('dialog', dismissDialog)
+        check(
+          'URLIMPORT-09 確認ダイアログをキャンセルすると中止した旨が出る(C16)',
+          (await uiPage.textContent('body')).includes('取り込みを中止しました。入力していた内容はそのままです'),
+        )
+        check(
+          'URLIMPORT-09 キャンセルしたので参照元URLは前回のまま(置き換わらない)',
+          (await uiPage.locator('input[type="url"]').nth(1).inputValue()) ===
+            'https://example.com/success-recipe',
+        )
+
+        // --- URLIMPORT-10(便BX/C01): 「写真も取り込む」ONで写真だけ取れなかったとき、
+        // レシピ本体の成功メッセージはそのままに、控えめなトーストで写真の失敗を伝える ---
+        currentCheck = 'URLIMPORT-10'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-fail-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(1200)
+        const photoFailBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-10 写真だけ取れなかったときトーストで伝える(C01)',
+          photoFailBody.includes('写真は取り込めませんでした。レシピは取り込んでいます'),
+        )
+        check(
+          'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
+          photoFailBody.includes('材料1件・手順1件を読み込みました') &&
+            !photoFailBody.includes('写真も取り込みました'),
         )
       } finally {
         await uiBrowser.close()
