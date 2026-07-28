@@ -6,7 +6,9 @@ import {
   formatAmountUnit,
   normalizeDigits,
   normalizeAmountInput,
+  expandMixedFraction,
 } from '../src/logic/amount.ts'
+import { isHttpUrl } from '../src/logic/url.ts'
 import {
   parseRecipeText,
   splitQuantity,
@@ -192,11 +194,44 @@ eq('「ひとかけ」を半分(2→1人分)は分数表記', scaleAmount('ひ�
 eq('「一房」の1.5倍(2→3人分)は帯分数', scaleAmount('ひと房', 2, 3, ''), '1と1/2房')
 eq('未収録の「ひと丁」は通常どおり素通し(不自然な言い回しのため非対応)', scaleAmount('ひと丁', 2, 4, ''), 'ひと丁')
 
+// ---------- scaleAmount: 帯分数「1と1/2」(2026-07-28 便BW/C-18) ----------
+// 実機QA: 「水 1と1/2 カップ」だけ人数変更で倍にならず据え置かれていた。アプリ自身が人数変更後の
+// 表示に帯分数を使う(formatFraction)ため、その表示を保存して開き直すと解釈できない往復の穴だった
+eq('帯分数「1と1/2」を2倍(2→4人分)', scaleAmount('1と1/2', 2, 4, 'カップ'), '3')
+eq('帯分数「1と1/2」を半分(2→1人分)', scaleAmount('1と1/2', 2, 1, 'カップ'), '3/4')
+eq('帯分数「1と1/2」(単位=本)を2倍', scaleAmount('1と1/2', 2, 4, '本'), '3')
+eq('中黒の帯分数「1・1/2」も同じ', scaleAmount('1・1/2', 2, 4, 'カップ'), '3')
+eq('全角の帯分数「１と１／２」も同じ', scaleAmount('１と１／２', 2, 4, 'カップ'), '3')
+eq('帯分数はg単位でも倍になる', scaleAmount('1と1/2', 2, 4, 'g'), '3')
+eq('帯分数の展開(解釈専用)', expandMixedFraction('1と1/2'), '1.5')
+eq('帯分数でない文字列は素通し', expandMixedFraction('少々'), '少々')
+// 帯分数が栄養計算の対象外にならないこと(同じ書き方が計算にも乗る)
+eq('栄養: 帯分数「1と1/2」', parseAmountNumber('1と1/2'), 1.5)
+
+// ---------- ひらがな単位「おおさじ」「こさじ」(2026-07-28 便BW・QA S3) ----------
+// 「おおさじ2」と入力すると単位が後ろに回り「2おおさじ」と表示されていた。
+// 表記は原文のまま尊重し、並び順と丸め幅だけを大さじ/小さじと揃える
+eq('おおさじは単位が先', formatAmountUnit('2', 'おおさじ'), 'おおさじ2')
+eq('こさじは単位が先', formatAmountUnit('1/2', 'こさじ'), 'こさじ1/2')
+eq('おおさじも0.25刻み+帯分数でスケールする', scaleAmount('1', 2, 5, 'おおさじ'), '2と1/2')
+
 // ---------- formatAmountUnit(表示順 = 大さじ/小さじ/カップは単位が先) ----------
 eq('大さじは単位が先', formatAmountUnit('2', '大さじ'), '大さじ2')
 eq('gは数量が先', formatAmountUnit('200', 'g'), '200g')
 eq('単位なし', formatAmountUnit('適量', ''), '適量')
 eq('分量なし', formatAmountUnit('', '本'), '本')
+
+// ---------- isHttpUrl(参照元URLの検証。2026-07-28 便BW/C-19) ----------
+// 実機QA: 「javascript:alert(1)」や「これはURLではない」が保存でき、押しても何も起きない
+// 「参照元」リンクが詳細ページに出ていた。保存前の指摘と詳細ページのリンク化で同じ判定を使う
+eq('http URL', isHttpUrl('http://example.com/recipe'), true)
+eq('https URL', isHttpUrl('https://uchirecipe.com/'), true)
+eq('前後の空白は無視', isHttpUrl('  https://example.com  '), true)
+eq('javascript: は不可', isHttpUrl('javascript:alert(1)'), false)
+eq('data: は不可', isHttpUrl('data:text/html,<script>alert(1)</script>'), false)
+eq('URLでない文字列は不可', isHttpUrl('これはURLではない'), false)
+eq('スキームなしは不可', isHttpUrl('example.com'), false)
+eq('空文字は不可', isHttpUrl(''), false)
 
 // ---------- normalizeDigits ----------
 eq('全角数字', normalizeDigits('２００'), '200')

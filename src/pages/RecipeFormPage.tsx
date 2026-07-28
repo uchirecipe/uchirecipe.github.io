@@ -35,6 +35,7 @@ import { guessDishType } from '../logic/dishTypeGuess'
 import { toHiragana } from '../logic/kana'
 import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
+import { isHttpUrl } from '../logic/url'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import { RecipeIcon } from '../components/RecipeCard'
@@ -120,16 +121,118 @@ function draftStorageKey(editId: number | undefined): string {
   return editId !== undefined ? `uchirecipe:draft:edit:${editId}` : 'uchirecipe:draft:new'
 }
 
-function readDraft(key: string): FormDraft | null {
+/**
+ * 下書きの保存先(2026-07-28 便BW/C-16)。
+ * 旧: sessionStorage = タブを閉じる・別タブで開くと復元できず、ホーム画面PWAでOSがタブを
+ * 破棄すると書きかけが失われていた(QA S2)。新: localStorage に保存し、保存した時刻を一緒に
+ * 持たせて DRAFT_MAX_AGE_MS を過ぎた古い下書きは読まずに捨てる(いつまでも「復元しますか？」が
+ * 出続けないようにする)。旧版の sessionStorage に残っている下書きも一度だけ読んで引き継ぐ。
+ */
+const DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/** 下書きの保存形式(中身のJSON文字列 + 保存時刻)。draft は FormDraft をJSON化した文字列 */
+type DraftEnvelope = { savedAt: number; draft: string }
+
+/**
+ * 「復元しますか？」を出している間の退避先キー(2026-07-28 便BW/C-01)。
+ * 以前は復元するか決めるまで自動保存を止めていたため、バナーを無視して書き続けた内容が
+ * 画面移動で丸ごと消えていた。開いた時点の下書きをこの退避キーへ移しておくことで、
+ * バナー表示中も「いまの入力」を通常どおり自動保存できる。
+ */
+function heldDraftKey(key: string): string {
+  return `${key}:held`
+}
+
+function readDraftEnvelope(key: string): DraftEnvelope | null {
   try {
-    const raw = sessionStorage.getItem(key)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as FormDraft
+    const raw = localStorage.getItem(key)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DraftEnvelope>
+      if (typeof parsed?.draft !== 'string') return null
+      const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0
+      if (Date.now() - savedAt > DRAFT_MAX_AGE_MS) {
+        localStorage.removeItem(key)
+        return null
+      }
+      return { savedAt, draft: parsed.draft }
+    }
+    // 旧版(sessionStorage・時刻なし)からの引き継ぎ。中身はFormDraftのJSONそのもの
+    const legacy = sessionStorage.getItem(key)
+    if (!legacy) return null
+    return { savedAt: Date.now(), draft: legacy }
+  } catch {
+    return null
+  }
+}
+
+function writeDraftEnvelope(key: string, draft: string, savedAt = Date.now()): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt, draft } satisfies DraftEnvelope))
+  } catch {
+    /* 保存領域の容量超過などは黙って諦める(入力自体は失われない) */
+  }
+}
+
+/** 書きかけ(本体キー)だけを消す。退避中の下書き(held)には触らない */
+function removeMainDraft(key: string): void {
+  try {
+    localStorage.removeItem(key)
+    sessionStorage.removeItem(key)
+  } catch {
+    /* 無視 */
+  }
+}
+
+/** 本体・退避の両方を消す(保存・削除・キャンセルで完了したとき) */
+function removeAllDrafts(key: string): void {
+  removeMainDraft(key)
+  try {
+    localStorage.removeItem(heldDraftKey(key))
+  } catch {
+    /* 無視 */
+  }
+}
+
+function parseDraft(serialized: string | null): FormDraft | null {
+  if (!serialized) return null
+  try {
+    const parsed = JSON.parse(serialized) as FormDraft
     if (typeof parsed !== 'object' || parsed === null) return null
     return parsed
   } catch {
     return null
   }
+}
+
+/**
+ * 画面を開いた時点の下書きを取り出し、退避キーへ移す(C-01)。
+ * 本体キーを空けることで、この後の自動保存は「いまの入力」を普通に書き込める。
+ * 2回呼ばれても(React StrictModeの二重実行)結果が変わらないよう、本体が空なら退避側を読む。
+ */
+function takePendingDraft(key: string): FormDraft | null {
+  const envelope = readDraftEnvelope(key) ?? readDraftEnvelope(heldDraftKey(key))
+  removeMainDraft(key)
+  if (envelope) writeDraftEnvelope(heldDraftKey(key), envelope.draft, envelope.savedAt)
+  else {
+    try {
+      localStorage.removeItem(heldDraftKey(key))
+    } catch {
+      /* 無視 */
+    }
+  }
+  return parseDraft(envelope?.draft ?? null)
+}
+
+/** 料理名の上限(2026-07-28 便BW)。超えると詳細ページの見出しが画面をほぼ占有するため保存前に指摘する */
+const MAX_TITLE_LENGTH = 60
+/** 人数分の下限・上限(便BW)。家庭用レシピ帳として常識的な範囲に収め、範囲外はボタン自体を無効にする */
+const MIN_SERVINGS = 1
+const MAX_SERVINGS = 20
+
+/** 「30」「0」のような0以上の数字だけを受け付ける(「-30」「abc」を弾く。便BW/C-20) */
+function isNonNegativeNumber(value: string): boolean {
+  const n = Number(value.trim())
+  return Number.isFinite(n) && n >= 0
 }
 
 const effortLevels: EffortLevel[] = ['easy', 'normal', 'fancy']
@@ -248,6 +351,9 @@ function RecipeFormInner() {
   const [urlImportOpen, setUrlImportOpen] = useState(false)
   const [urlImportValue, setUrlImportValue] = useState('')
   const [urlImportMessage, setUrlImportMessage] = useState('')
+  // 結果メッセージの見た目(2026-07-28 便BW/C-02)。失敗・片側だけの取り込みは警告色+role="alert"で出し、
+  // 成功と同じ顔にしない(件数だけを見て中身未確認のまま保存されるのを防ぐ)
+  const [urlImportMessageTone, setUrlImportMessageTone] = useState<'info' | 'warn'>('info')
   const [urlImportLoading, setUrlImportLoading] = useState(false)
   // 「写真も取り込む」チェック(2026-07-21 オーナー指示)。ページローカルのその場限りの状態で、
   // 保存も設定への永続化もしない(このフォームを開くたび毎回既定ON)。OFFならapplyUrlImportが
@@ -258,6 +364,43 @@ function RecipeFormInner() {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [pasteMessage, setPasteMessage] = useState('')
+  const [pasteMessageTone, setPasteMessageTone] = useState<'info' | 'warn'>('info')
+
+  const showPasteMessage = (message: string, tone: 'info' | 'warn') => {
+    setPasteMessage(message)
+    setPasteMessageTone(tone)
+  }
+  const showUrlImportMessage = (message: string, tone: 'info' | 'warn') => {
+    setUrlImportMessage(message)
+    setUrlImportMessageTone(tone)
+  }
+
+  /**
+   * 貼り付け・URL取り込みで入力済みの材料・手順が置き換わるときの確認(規約F・2026-07-28 便BW/C-04)。
+   * 置き換え先が実際に埋まっているときだけ確認を出し、消えるもの(件数)と残るものを両方伝える。
+   * 続けてよければ true。1行削除に確認を出しているのに全行の置き換えが無警告だった不整合の解消。
+   */
+  const confirmReplaceExisting = (
+    template: string,
+    parsedIngredientCount: number,
+    parsedStepCount: number,
+  ): boolean => {
+    const filledIngredients = ingredients.filter(
+      (row) => row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim(),
+    ).length
+    const filledSteps = steps.filter(
+      (row) => row.text.trim() || row.minutes.trim() || row.memo.trim(),
+    ).length
+    const items: string[] = []
+    if (parsedIngredientCount > 0 && filledIngredients > 0) {
+      items.push(ja.paste.replaceItemIngredients.replace('{n}', String(filledIngredients)))
+    }
+    if (parsedStepCount > 0 && filledSteps > 0) {
+      items.push(ja.paste.replaceItemSteps.replace('{n}', String(filledSteps)))
+    }
+    if (items.length === 0) return true
+    return window.confirm(template.replace('{items}', items.join(ja.paste.replaceItemSeparator)))
+  }
 
   const photoUrl = usePhotoUrl(photo)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -268,8 +411,9 @@ function RecipeFormInner() {
 
   // ---- 入力の全損防止: 下書きの自動保存と復元 ----
   const draftKey = draftStorageKey(editId)
-  // 開いた時点で残っていた下書き(復元するか破棄するかをユーザーが選ぶまで保持)
-  const [pendingDraft, setPendingDraft] = useState<FormDraft | null>(() => readDraft(draftKey))
+  // 開いた時点で残っていた下書き(復元するか破棄するかをユーザーが選ぶまで保持)。
+  // 取り出しと同時に退避キーへ移すので、バナー表示中も「いまの入力」の自動保存は止まらない(C-01)
+  const [pendingDraft, setPendingDraft] = useState<FormDraft | null>(() => takePendingDraft(draftKey))
   // 「変更なし」とみなす基準のスナップショット(新規=空フォーム、編集=読み込んだレシピ)
   const baselineRef = useRef<string | null>(null)
   // 下書きを復元した場合、あとから届く既存レシピの読み込みで上書きしない(写真だけ引き継ぐ)
@@ -414,27 +558,18 @@ function RecipeFormInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 入力が変わるたびに下書きを自動保存する(基準と同じ内容なら消す)
+  // 入力が変わるたびに下書きを自動保存する(基準と同じ内容なら消す)。
+  // 復元バナーの表示中も止めない: 開いた時点の下書きは退避キーへ移してあるので上書きは起きない(C-01)
   useEffect(() => {
-    if (pendingDraft) return // 復元するか決める前に、残っている下書きを上書きしない
     if (baselineRef.current === null) return
-    try {
-      if (currentSerialized === baselineRef.current) {
-        sessionStorage.removeItem(draftKey)
-      } else {
-        sessionStorage.setItem(draftKey, currentSerialized)
-      }
-    } catch {
-      /* 保存領域の容量超過などは黙って諦める(入力自体は失われない) */
-    }
-  }, [currentSerialized, pendingDraft, draftKey])
+    if (currentSerialized === baselineRef.current) removeMainDraft(draftKey)
+    else writeDraftEnvelope(draftKey, currentSerialized)
+  }, [currentSerialized, draftKey])
 
-  // ブラウザを閉じる・再読み込みするとき、未保存の入力があれば標準の確認を出す
+  // ブラウザを閉じる・再読み込みするとき、未保存の入力があれば標準の確認を出す。
+  // 復元バナーの表示中も対象にする(以前はバナー中だけ離脱警告も無効だった。C-01)
   const dirtyRef = useRef(false)
-  dirtyRef.current =
-    pendingDraft === null &&
-    baselineRef.current !== null &&
-    currentSerialized !== baselineRef.current
+  dirtyRef.current = baselineRef.current !== null && currentSerialized !== baselineRef.current
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (!dirtyRef.current) return
@@ -445,10 +580,24 @@ function RecipeFormInner() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [])
 
+  // 保存前の指摘(「料理名を入力してください」等)は、入力を直した時点で消す(2026-07-28 便BW・QA S3)。
+  // 以前は次に保存を押すまで赤いエラーが残り続け、直したのに直っていないように見えていた
+  useEffect(() => {
+    setError((current) => (current ? '' : current))
+  }, [currentSerialized])
+
   /** 下書きをフォームに反映する(写真は下書きに含まれないため、編集では既存レシピの写真を引き継ぐ) */
   const restoreDraft = () => {
     const d = pendingDraft
     if (!d) return
+    // バナーを無視して書き続けた内容がある場合は、無警告で置き換えない(規約F・C-01)
+    if (
+      baselineRef.current !== null &&
+      currentSerialized !== baselineRef.current &&
+      !window.confirm(ja.form.draftRestoreConfirm)
+    ) {
+      return
+    }
     draftRestoredRef.current = true
     setTitle(d.title ?? '')
     setIntro(d.intro ?? '')
@@ -469,24 +618,24 @@ function RecipeFormInner() {
     setSeason(d.season)
     setSuitableFor(d.suitableFor ?? [])
     setDishType(d.dishType)
+    // 退避しておいた下書きは役目を終える(この後は復元した内容が本体キーへ自動保存される)
+    removeAllDrafts(draftKey)
     setPendingDraft(null)
   }
 
+  /** 残っていた下書きだけを捨てる(いま入力中の内容はそのまま自動保存を続ける) */
   const discardDraft = () => {
     try {
-      sessionStorage.removeItem(draftKey)
+      localStorage.removeItem(heldDraftKey(draftKey))
     } catch {
       /* 無視 */
     }
     setPendingDraft(null)
   }
 
+  /** 書きかけ・退避の両方を消す(保存・削除・キャンセルで用が済んだとき) */
   const clearDraft = () => {
-    try {
-      sessionStorage.removeItem(draftKey)
-    } catch {
-      /* 無視 */
-    }
+    removeAllDrafts(draftKey)
   }
 
   /**
@@ -523,13 +672,23 @@ function RecipeFormInner() {
   const applyUrlImport = async () => {
     const target = urlImportValue.trim()
     if (!target) {
-      setUrlImportMessage(ja.urlImport.empty)
+      showUrlImportMessage(ja.urlImport.empty, 'warn')
       return
     }
     setUrlImportLoading(true)
     setUrlImportMessage('')
     try {
       const result = await importRecipeFromUrl(target)
+      // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
+      if (
+        !confirmReplaceExisting(
+          ja.urlImport.confirmReplace,
+          result.ingredients.length,
+          result.steps.length,
+        )
+      ) {
+        return
+      }
       if (result.title && !title.trim()) setTitle(result.title)
       if (result.servings) setServings(result.servings)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
@@ -552,8 +711,9 @@ function RecipeFormInner() {
       }
       setSourceUrl(result.sourceUrl || target)
       // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
-      // 既に種別が入っている場合は上書きしない(ユーザーが選んだ値・既存レシピの値を尊重)。
-      if (dishType === undefined) {
+      // 新規登録では料理名からの自動提案に任せる(applyPasteと同じ理由・便BW)。
+      // 編集中のレシピで種別が未設定のときだけ、ここで初期値を入れる。
+      if (isEdit && dishType === undefined) {
         const guessedTitle = title.trim() || result.title || ''
         const guessedIngredients =
           result.ingredients.length > 0
@@ -563,11 +723,25 @@ function RecipeFormInner() {
           setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
         }
       }
-      setUrlImportMessage(
-        ja.urlImport.resultSummary
-          .replace('{i}', String(result.ingredients.length))
-          .replace('{s}', String(result.steps.length)),
-      )
+      // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)
+      if (result.ingredients.length === 0) {
+        showUrlImportMessage(
+          ja.urlImport.resultNoIngredients.replace('{s}', String(result.steps.length)),
+          'warn',
+        )
+      } else if (result.steps.length === 0) {
+        showUrlImportMessage(
+          ja.urlImport.resultNoSteps.replace('{i}', String(result.ingredients.length)),
+          'warn',
+        )
+      } else {
+        showUrlImportMessage(
+          ja.urlImport.resultSummary
+            .replace('{i}', String(result.ingredients.length))
+            .replace('{s}', String(result.steps.length)),
+          'info',
+        )
+      }
       // 写真はベストエフォート(Worker経由の取得・変換は非同期で後から差し込まれてもよい)。
       // await しない: 材料・手順の取り込み結果メッセージをここで即座に確定させるため。
       // 「写真も取り込む」チェックがOFFのときは取得自体を行わない(2026-07-21 オーナー指示のスイッチ)
@@ -576,12 +750,13 @@ function RecipeFormInner() {
       }
     } catch (e) {
       const reason = e instanceof UrlImportError ? e.reason : 'fetch_failed'
-      setUrlImportMessage(
+      showUrlImportMessage(
         reason === 'no_recipe'
           ? ja.urlImport.errorNoRecipe
           : reason === 'invalid_url'
             ? ja.urlImport.errorInvalidUrl
             : ja.urlImport.errorFetchFailed,
+        'warn',
       )
     } finally {
       setUrlImportLoading(false)
@@ -591,12 +766,16 @@ function RecipeFormInner() {
   /** 貼り付けた文章を解析してフォームに流し込む（結果はユーザーが修正できる） */
   const applyPaste = () => {
     if (!pasteText.trim()) {
-      setPasteMessage(ja.paste.empty)
+      showPasteMessage(ja.paste.empty, 'warn')
       return
     }
     const parsed = parseRecipeText(pasteText)
     if (parsed.ingredients.length === 0 && parsed.steps.length === 0) {
-      setPasteMessage(ja.paste.resultNone)
+      showPasteMessage(ja.paste.resultNone, 'warn')
+      return
+    }
+    // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04)
+    if (!confirmReplaceExisting(ja.paste.confirmReplace, parsed.ingredients.length, parsed.steps.length)) {
       return
     }
     if (parsed.title && !title.trim()) setTitle(parsed.title)
@@ -621,8 +800,11 @@ function RecipeFormInner() {
     // 「コツ」「ポイント」「メモ」見出し以降の文章は、メモ欄が空ならそこへ流し込む
     if (parsed.memo && !memo.trim()) setMemo(parsed.memo)
     // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
-    // 既に種別が入っている場合は上書きしない。
-    if (dishType === undefined) {
+    // 新規登録では料理名からの自動提案(showDishTypeSuggestion)が同じ推定を担うので、ここでは値を
+    // 書き込まない: 書き込むと「料理名から自動でえらびました」の説明だけが出ないままになるため
+    // (2026-07-28 便BW・QA S3。手入力経路と貼り付け経路で見え方を揃える)。
+    // 編集中のレシピで種別が未設定のときだけ、従来どおりここで初期値を入れる。
+    if (isEdit && dishType === undefined) {
       const guessedTitle = title.trim() || parsed.title || ''
       const guessedIngredients =
         parsed.ingredients.length > 0
@@ -635,13 +817,24 @@ function RecipeFormInner() {
     // 材料・手順のどちらもほぼ拾えなかった(段落丸ごと1文になった等)場合は、
     // 読み取れた分はフォームへ流し込んだ上で、うまく振り分けられなかった旨を正直に案内する
     if (looksPoorlyParsed(pasteText, parsed)) {
-      setPasteMessage(ja.paste.resultPoor)
+      showPasteMessage(ja.paste.resultPoor, 'warn')
       return
     }
-    setPasteMessage(
+    // 片側だけ読み取れたときは件数だけを出さず、読み取れなかった側を名指しして警告トーンで出す
+    // (2026-07-28 便BW/C-02: 「材料0件・手順3件」が成功と同じ顔で出ていた)
+    if (parsed.ingredients.length === 0) {
+      showPasteMessage(ja.paste.resultNoIngredients.replace('{s}', String(parsed.steps.length)), 'warn')
+      return
+    }
+    if (parsed.steps.length === 0) {
+      showPasteMessage(ja.paste.resultNoSteps.replace('{i}', String(parsed.ingredients.length)), 'warn')
+      return
+    }
+    showPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
         .replace('{s}', String(parsed.steps.length)),
+      'info',
     )
   }
 
@@ -721,13 +914,64 @@ function RecipeFormInner() {
     setKeywordInput('')
   }
 
+  /**
+   * 保存前の指摘(2026-07-28 便BW)。入力は消さずにその場に残したまま、直すべき場所を伝えて止める。
+   * 指摘した項目が隠れたタブにあるままにならないよう、該当するタブへ切り替えて先頭までスクロールする
+   * (料理名未入力で「かんたん」へ戻す既存の扱い=Fable裁定docs/26 論点4 と同じ考え方)
+   */
+  const failValidation = (message: string, tab: 'simple' | 'detail') => {
+    setError(message)
+    setActiveTab(tab)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   const save = async () => {
     if (!title.trim()) {
-      setError(ja.form.nameRequired)
-      // 「くわしく」タブを見ている間に料理名未入力で保存を押した場合、必須項目が
-      // 隠れたタブに残らないよう「かんたん」タブへ自動で戻す(Fable裁定docs/26 論点4)
-      setActiveTab('simple')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      failValidation(ja.form.nameRequired, 'simple')
+      return
+    }
+    if (title.trim().length > MAX_TITLE_LENGTH) {
+      failValidation(ja.form.nameTooLong.replace('{n}', String(title.trim().length)), 'simple')
+      return
+    }
+    // 名前が空で分量・単位・メモだけの材料行は保存されない(db/recipes.tsのcleanInput)。
+    // 黙って消さず、行を残したまま指摘する(C-17)
+    const namelessIngredient = ingredients.findIndex(
+      (row) =>
+        !row.name.trim() && (row.amount.trim() || row.unit.trim() || row.memo.trim()),
+    )
+    if (namelessIngredient >= 0) {
+      failValidation(
+        ja.form.ingredientNameRequired.replace('{n}', String(namelessIngredient + 1)),
+        'simple',
+      )
+      return
+    }
+    const textlessStep = steps.findIndex(
+      (row) => !row.text.trim() && (row.minutes.trim() || row.memo.trim()),
+    )
+    if (textlessStep >= 0) {
+      failValidation(ja.form.stepTextRequired.replace('{n}', String(textlessStep + 1)), 'simple')
+      return
+    }
+    // 負の値・数字でない値のガード(C-20)。保存はできるのに表示されない値を作らない
+    if (cookMinutes.trim() && !isNonNegativeNumber(cookMinutes)) {
+      failValidation(ja.form.cookMinutesInvalid, 'detail')
+      return
+    }
+    const invalidStepMinutes = steps.findIndex(
+      (row) => row.minutes.trim() && !isNonNegativeNumber(row.minutes),
+    )
+    if (invalidStepMinutes >= 0) {
+      failValidation(
+        ja.form.stepMinutesInvalid.replace('{n}', String(invalidStepMinutes + 1)),
+        'simple',
+      )
+      return
+    }
+    // 参照元URLはhttp/httpsのみ(C-19)。押しても何も起きないリンクを作らない
+    if (sourceUrl.trim() && !isHttpUrl(sourceUrl)) {
+      failValidation(ja.form.sourceUrlInvalid, 'detail')
       return
     }
     if (!isEdit && isAtFreeLimit(countFreeLimitRecipes(allRecipes ?? []), !!settings?.proCode)) {
@@ -737,15 +981,11 @@ function RecipeFormInner() {
     }
     setSaving(true)
     try {
-      // タグ欄に入力したまま「追加」を押し忘れていても、保存時に取り込む
-      // （押し忘れたら無言でタグが消えるのは実質的なデータロス扱いのため）
-      const pendingTag = tagInput.trim()
-      const effectiveTags =
-        pendingTag && !tags.includes(pendingTag) ? [...tags, pendingTag] : tags
-      // キーワード欄も同様に、入力したまま「追加」押し忘れの分を保存時に取り込む
-      const pendingKeyword = keywordInput.trim()
-      const effectiveKeywords =
-        pendingKeyword && !keywords.includes(pendingKeyword) ? [...keywords, pendingKeyword] : keywords
+      // タグ・キーワードは「追加」を押したものだけを保存する(2026-07-28 便BW・QA S3)。
+      // 以前は打ちかけの文字も保存時に自動でタグ化していたため、候補を見るために打ってやめた
+      // 文字列までタグになっていた。押し忘れ対策は入力中に出す案内(tagPending)で行う
+      const effectiveTags = tags
+      const effectiveKeywords = keywords
 
       const input: RecipeInput = {
         title,
@@ -802,6 +1042,18 @@ function RecipeFormInner() {
     } finally {
       setSaving(false)
     }
+  }
+
+  /**
+   * キャンセルで抜ける(2026-07-28 便BW/C-16)。
+   * 以前はリンクで戻るだけで下書きが残り、次に新規登録を開くたび「復元しますか？」が出ていた
+   * （取りやめの意図と食い違う）。書きかけがあるときだけ確認を出し、確認できたら下書きも消す。
+   */
+  const handleCancel = () => {
+    if (dirtyRef.current && !window.confirm(ja.form.confirmCancel)) return
+    clearDraft()
+    dirtyRef.current = false
+    navigate(isEdit && editId !== undefined ? `/recipes/${editId}` : '/recipes')
   }
 
   const remove = async () => {
@@ -977,6 +1229,7 @@ function RecipeFormInner() {
       {pendingDraft && (
         <div className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface p-[var(--space-md)] shadow-sm">
           <p className="font-bold text-ink">{ja.form.draftFound}</p>
+          <p className="mt-1 text-sm text-ink-muted">{ja.form.draftFoundNote}</p>
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"
@@ -1032,7 +1285,16 @@ function RecipeFormInner() {
                 </span>
               </label>
               {urlImportMessage && (
-                <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{urlImportMessage}</p>
+                <p
+                  role={urlImportMessageTone === 'warn' ? 'alert' : undefined}
+                  className={
+                    urlImportMessageTone === 'warn'
+                      ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
+                      : 'mt-[var(--space-sm)] text-sm font-bold text-accent'
+                  }
+                >
+                  {urlImportMessage}
+                </p>
               )}
               <div className="mt-[var(--space-sm)] flex gap-2">
                 <button
@@ -1077,7 +1339,16 @@ function RecipeFormInner() {
             className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
           />
           {pasteMessage && (
-            <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{pasteMessage}</p>
+            <p
+              role={pasteMessageTone === 'warn' ? 'alert' : undefined}
+              className={
+                pasteMessageTone === 'warn'
+                  ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
+                  : 'mt-[var(--space-sm)] text-sm font-bold text-accent'
+              }
+            >
+              {pasteMessage}
+            </p>
           )}
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
@@ -1150,10 +1421,13 @@ function RecipeFormInner() {
         <label className={labelCls}>
           {ja.form.servingsLabel}
           <div className="mt-1 flex items-center gap-2">
+            {/* 下限(1人分)・上限(20人分)に達したらボタン自体を無効にする(2026-07-28 便BW・QA S3:
+                下限でも押せて無反応・上限がなく31人分まで増やせた) */}
             <button
               type="button"
-              onClick={() => setServings((n) => Math.max(1, n - 1))}
-              className={iconBtnCls}
+              onClick={() => setServings((n) => Math.max(MIN_SERVINGS, n - 1))}
+              disabled={servings <= MIN_SERVINGS}
+              className={`${iconBtnCls} disabled:opacity-40`}
               aria-label={ja.detail.servingsDown}
             >
               −
@@ -1164,8 +1438,9 @@ function RecipeFormInner() {
             </span>
             <button
               type="button"
-              onClick={() => setServings((n) => n + 1)}
-              className={iconBtnCls}
+              onClick={() => setServings((n) => Math.min(MAX_SERVINGS, n + 1))}
+              disabled={servings >= MAX_SERVINGS}
+              className={`${iconBtnCls} disabled:opacity-40`}
               aria-label={ja.detail.servingsUp}
             >
               ＋
@@ -1247,19 +1522,22 @@ function RecipeFormInner() {
                   />
                 </button>
                 <div className="flex items-center gap-[var(--space-sm)]">
+                  {/* 先頭行の「上へ」・末尾行の「下へ」は押しても動かないため無効にする(便BW・QA S3) */}
                   <button
                     type="button"
                     onClick={() => setIngredients((rows) => move(rows, index, index - 1))}
+                    disabled={index === 0}
                     aria-label={ja.form.moveUp}
-                    className={iconBtnCls}
+                    className={`${iconBtnCls} disabled:opacity-40`}
                   >
                     <ChevronUp size={20} aria-hidden />
                   </button>
                   <button
                     type="button"
                     onClick={() => setIngredients((rows) => move(rows, index, index + 1))}
+                    disabled={index === ingredients.length - 1}
                     aria-label={ja.form.moveDown}
-                    className={iconBtnCls}
+                    className={`${iconBtnCls} disabled:opacity-40`}
                   >
                     <ChevronDown size={20} aria-hidden />
                   </button>
@@ -1330,16 +1608,18 @@ function RecipeFormInner() {
                 <button
                   type="button"
                   onClick={() => setSteps((rows) => move(rows, index, index - 1))}
+                  disabled={index === 0}
                   aria-label={ja.form.moveUp}
-                  className={iconBtnCls}
+                  className={`${iconBtnCls} disabled:opacity-40`}
                 >
                   <ChevronUp size={20} aria-hidden />
                 </button>
                 <button
                   type="button"
                   onClick={() => setSteps((rows) => move(rows, index, index + 1))}
+                  disabled={index === steps.length - 1}
                   aria-label={ja.form.moveDown}
-                  className={iconBtnCls}
+                  className={`${iconBtnCls} disabled:opacity-40`}
                 >
                   <ChevronDown size={20} aria-hidden />
                 </button>
@@ -1823,12 +2103,13 @@ function RecipeFormInner() {
         >
           {saving ? ja.form.saving : ja.form.save}
         </button>
-        <Link
-          to={isEdit ? `/recipes/${editId}` : '/recipes'}
+        <button
+          type="button"
+          onClick={handleCancel}
           className="flex items-center rounded-md border border-edge bg-surface px-5 py-4 text-ink-muted shadow-sm"
         >
           {ja.form.cancel}
-        </Link>
+        </button>
       </div>
 
       {/* デフォルトに戻す（編集時のみ・2026-07-15 オーナー要望）。DBには書き込まず、
