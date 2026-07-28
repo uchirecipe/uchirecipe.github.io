@@ -581,7 +581,9 @@ export default function RecipeDetailPage() {
             1食分の目安も見たい。表示中のservingsに追従) */}
         {totalPrice > 0 && (
           <p className="mt-0.5 text-sm text-ink-muted">
-            {ja.detail.pricePerServing.replace('{n}', perServingPrice.toLocaleString())}
+            {ja.detail.pricePerServing
+              .replace('{s}', String(servings))
+              .replace('{n}', perServingPrice.toLocaleString())}
           </p>
         )}
 

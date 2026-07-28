@@ -375,6 +375,41 @@ for (const [key, min, max] of spotChecks) {
     roundNutrient('kcal', mixed.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
     'averagePerMeal: 計算できない品は平均を薄めない(1食あたりは計算できた品だけの平均)',
   )
+
+  // 2026-07-28 便BY/RANGE-01: 食数を延べ人数(1人1食)で数える。同じカードに並ぶ食費の
+  // 「1食あたり」と単位を揃えるため。金額側だけ直すと「6食分」と「3食」が並ぶ
+  const rice2 = { ingredients: [{ name: '白米', amount: '400', unit: 'g' }], servings: 2 }
+  const twoServings = averagePerMealNutrition([rice2])
+  check(
+    twoServings.mealCount === 2,
+    `averagePerMeal: 2人分レシピ1件は延べ2食 (実際:${twoServings.mealCount})`,
+  )
+  check(
+    roundNutrient('kcal', twoServings.perMeal.kcal) === roundNutrient('kcal', riceOne.kcal),
+    'averagePerMeal: 人数で重み付けしても1食あたり(1人分)の値は変わらない',
+  )
+  const cookedFour = averagePerMealNutrition([{ ...rice2, cookedServings: 4 }])
+  check(
+    cookedFour.mealCount === 4,
+    `averagePerMeal: 記録時の人数(cookedServings)が4なら延べ4食 (実際:${cookedFour.mealCount})`,
+  )
+  const oldLog = averagePerMealNutrition([{ ...rice2, cookedServings: undefined }])
+  check(
+    oldLog.mealCount === 2,
+    'averagePerMeal: 記録時の人数が無い古い記録は登録人数で代替する',
+  )
+  const excludedTwo = averagePerMealNutrition([{ ...uncomputable, servings: 2 }])
+  check(
+    excludedTwo.excludedMealCount === 2,
+    `averagePerMeal: 平均から除いた食数も延べ人数で数える (実際:${excludedTwo.excludedMealCount})`,
+  )
+  // 人数の違う品が混ざると重み付けが効く: 1人分(riceOne)と2人分(rice2の1人分は同じ値)なので
+  // 値自体は同じだが、食数は1+2=3になる
+  const weighted = averagePerMealNutrition([rice, rice2])
+  check(
+    weighted.mealCount === 3,
+    `averagePerMeal: 1人分+2人分は延べ3食 (実際:${weighted.mealCount})`,
+  )
 }
 
 // ---------- 3. スナップショット照合 ----------

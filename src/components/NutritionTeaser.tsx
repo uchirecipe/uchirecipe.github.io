@@ -47,6 +47,9 @@ export default function NutritionTeaser({
 
   const nutrition = computeRecipeNutrition(recipe)
   const per = nutrition.perServing
+  // 表示中の人数(材料の人数変更に追従)。1人分の値そのものは人数を変えても動かないが、
+  // 「何人分を1食に分けた値なのか」を要約行に常時出すために使う(2026-07-28 便BY/COST-03)
+  const displayServings = servings != null && servings > 0 ? servings : nutrition.servings
   // 計算に含められた材料が1つも無ければ「0kcal」表示は誤解を招くため出さない
   const canShowSummary = nutrition.items.length > 0
   const summaryText = canShowSummary
@@ -70,7 +73,7 @@ export default function NutritionTeaser({
           <span className="min-w-0 flex-1 text-sm font-bold">
             <Sparkles size={14} className="mr-1 inline-block shrink-0 text-accent" aria-hidden />
             {ja.nutrition.title}
-            {ja.nutrition.summaryLabel}
+            {ja.nutrition.summaryLabel.replace('{s}', String(displayServings))}
             {summaryText}
           </span>
           <ChevronIcon size={20} className="shrink-0 text-ink-muted" aria-hidden />
@@ -79,7 +82,7 @@ export default function NutritionTeaser({
         {expanded && (
           <div className="border-t border-edge p-[var(--space-md)] pt-[var(--space-sm)]">
             {unlocked ? (
-              <UnlockedBody nutrition={nutrition} servings={servings} />
+              <UnlockedBody nutrition={nutrition} displayServings={displayServings} />
             ) : (
               <LockedBody nutrition={nutrition} isPro={isPro} />
             )}
@@ -156,8 +159,7 @@ function LockedBody({ nutrition, isPro }: { nutrition: Nutrition; isPro: boolean
 
 /** 状態2: Pro解錠済み。8項目の実内訳（1人分・全量）＋計算対象外・注記・出典
  *  (2026-07-13 第2弾: 食物繊維・鉄・カルシウムを追加。オーナー承認・Fable設計) */
-function UnlockedBody({ nutrition, servings }: { nutrition: Nutrition; servings?: number }) {
-  const displayServings = servings != null && servings > 0 ? servings : nutrition.servings
+function UnlockedBody({ nutrition, displayServings }: { nutrition: Nutrition; displayServings: number }) {
   const per = nutrition.perServing
   const totalForDisplay: NutrientTotals = {
     kcal: per.kcal * displayServings,

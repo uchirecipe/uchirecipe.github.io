@@ -369,9 +369,9 @@ export function computeRecipeNutrition(
 export interface PerMealNutrition {
   /** 1食あたりの平均栄養（8項目・計算できた食数で割った値） */
   perMeal: NutrientTotals
-  /** 平均に含めた食数（＝栄養を計算できた「作った記録」の数） */
+  /** 平均に含めた食数（＝1人1食で数えた延べ人数。2人分作った記録は2食） */
   mealCount: number
-  /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数 */
+  /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数（同じく延べ人数） */
   excludedMealCount: number
 }
 
@@ -379,34 +379,42 @@ export interface PerMealNutrition {
  * 「作った記録」のレシピ群から、1食あたりの平均栄養（8項目）を概算する純ロジック
  * （2026-07-24 便BS・タスク3・月タブ「期間の集計」の摂取栄養めやす用）。
  *
- * 各レシピの perServing（1人分＝1食分とみなす）を合算し、計算できた食数で割って
- * 「1食あたりのめやす」を出す。材料が丸ごと計算対象外で1品も計算できないレシピ
+ * 各レシピの perServing（1人分＝1食分）を、その記録で作った人数分だけ合算し、
+ * 延べ人数で割って「1食あたりのめやす」を出す。材料が丸ごと計算対象外で1品も計算できないレシピ
  * （computeRecipeNutrition の items が0件）は 0kcal で平均を薄めないよう平均から除外し、
  * excludedMealCount で数える。あくまで概算・めやす（医療・効能の文脈では使わない）。
  * 呼び出し側は必ず「めやす／概算」表記と、excludedMealCount>0 のときはその件数を明示すること。
+ *
+ * 2026-07-28 便BY/RANGE-01: 同じカードに並ぶ食費の「1食あたり」を延べ人数（1人1食）基準に
+ * 直したのに合わせ、こちらも記録時の人数(log.servings)で重み付けする。
+ * 揃えないと、同じカードに食費「6食分」と栄養「3食」が並ぶ。
+ * 記録時の人数が無い古い記録（2026-07-12以前）はレシピの登録人数で代替する。
  */
 export function averagePerMealNutrition(
-  recipes: Pick<Recipe, 'ingredients' | 'servings'>[],
+  recipes: (Pick<Recipe, 'ingredients' | 'servings'> & { cookedServings?: number })[],
 ): PerMealNutrition {
   const sum = emptyTotals()
   let mealCount = 0
   let excludedMealCount = 0
   for (const recipe of recipes) {
+    const registered = recipe.servings > 0 ? recipe.servings : 1
+    const cooked =
+      recipe.cookedServings != null && recipe.cookedServings > 0 ? recipe.cookedServings : registered
     const n = computeRecipeNutrition(recipe)
     if (n.items.length === 0) {
-      excludedMealCount += 1
+      excludedMealCount += cooked
       continue
     }
     const p = n.perServing
-    sum.kcal += p.kcal
-    sum.proteinG += p.proteinG
-    sum.fatG += p.fatG
-    sum.carbG += p.carbG
-    sum.saltG += p.saltG
-    sum.fiberG += p.fiberG
-    sum.ironMg += p.ironMg
-    sum.calciumMg += p.calciumMg
-    mealCount += 1
+    sum.kcal += p.kcal * cooked
+    sum.proteinG += p.proteinG * cooked
+    sum.fatG += p.fatG * cooked
+    sum.carbG += p.carbG * cooked
+    sum.saltG += p.saltG * cooked
+    sum.fiberG += p.fiberG * cooked
+    sum.ironMg += p.ironMg * cooked
+    sum.calciumMg += p.calciumMg * cooked
+    mealCount += cooked
   }
   if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount }
   const perMeal: NutrientTotals = {

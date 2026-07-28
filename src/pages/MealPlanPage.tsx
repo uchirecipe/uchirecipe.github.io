@@ -678,18 +678,20 @@ export default function MealPlanPage() {
   // 期間の食費(予定ベース)の食数(=食事の回数。主菜+副菜が並ぶ枠も1食。2026-07-24 便BH-3・タスク9)
   const rangePlanMealCount = useMemo(() => mealOccasionCount(rangeCostEntries), [rangeCostEntries])
   // 期間の食費(実績ベース・2026-07-24 便BH-3・タスク9): 期間内の「作った記録」から実績原価と食数を出す。
-  // 予定(mealPlansエントリ)ではなく実際に作った記録が基準。記録件数=食数、合計÷食数で「1食あたり」を出す
-  const rangeCookedRecipes = useMemo(() => {
+  // 予定(mealPlansエントリ)ではなく実際に作った記録が基準。
+  // 2026-07-28 便BY/RANGE-01: 食数は延べ人数(1人1食)。記録時の人数(log.servings)を渡すため
+  // レシピだけでなく記録もそのまま持ち回る(同じカードの栄養「1食あたり」と単位を揃える)
+  const rangeCookedLogs = useMemo(() => {
     if (rangeStart == null || rangeEnd == null) return []
-    const out: Recipe[] = []
+    const out: { recipe: Recipe; log: CookedLog }[] = []
     cookedLogsByDate.forEach((list, date) => {
-      if (date >= rangeStart && date <= rangeEnd) list.forEach(({ recipe }) => out.push(recipe))
+      if (date >= rangeStart && date <= rangeEnd) list.forEach((pair) => out.push(pair))
     })
     return out
   }, [cookedLogsByDate, rangeStart, rangeEnd])
   const rangeActualCost = useMemo(
-    () => sumCookedRecipesCost(rangeCookedRecipes, priceIndex),
-    [rangeCookedRecipes, priceIndex],
+    () => sumCookedRecipesCost(rangeCookedLogs, priceIndex),
+    [rangeCookedLogs, priceIndex],
   )
   const rangeActualPerMeal =
     rangeActualCost.count > 0 ? Math.round(rangeActualCost.total / rangeActualCost.count) : 0
@@ -697,8 +699,11 @@ export default function MealPlanPage() {
   // 1食あたりの平均栄養(既存のPro8項目計算=computeRecipeNutritionを流用)を出す。あくまで概算・めやす。
   // 表示は栄養フラグ&&Pro(isNutritionUnlocked)かつ計算できた食数>0のときだけ(下のカードで判定)
   const rangeNutrition = useMemo(
-    () => averagePerMealNutrition(rangeCookedRecipes),
-    [rangeCookedRecipes],
+    () =>
+      averagePerMealNutrition(
+        rangeCookedLogs.map(({ recipe, log }) => ({ ...recipe, cookedServings: log.servings })),
+      ),
+    [rangeCookedLogs],
   )
 
   // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）

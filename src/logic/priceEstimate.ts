@@ -110,6 +110,13 @@ export type PriceSource = 'default' | 'user'
 /** マスタ由来の1行分の見積もり（金額＋由来種別。2026-07-13 UIペルソナQA: 表示側の「目安」表記の出し分けに使う） */
 export interface IngredientPriceEstimate {
   yen: number
+  /**
+   * 四捨五入する前の按分額（2026-07-28 便BY/COST-02）。
+   * 0 < rawYen < 0.5 の材料（例: 砂糖 小さじ1/2 = 0.33円）を「価格なし」ではなく
+   * 「1円未満」(ja.detail.costUnderOneYen)へ振り分けるために使う。
+   * 合計計算(estimateRecipeCost)は従来どおりyenを使うので、表示金額は1円も変わらない。
+   */
+  rawYen: number
   source: PriceSource
 }
 
@@ -127,6 +134,11 @@ function toGramsForPrice(
   const food = matchNutritionFood(ingredientName) ?? matchNutritionFood(entryName)
   if (!food) return null
   return convertToGrams(value, unit, food)
+}
+
+/** 按分額から戻り値を作る（表示・合計に使う四捨五入後のyenと、丸め前のrawYenの両方を持たせる） */
+function prorated(rawYen: number, source: PriceSource): IngredientPriceEstimate {
+  return { yen: Math.round(rawYen), rawYen, source }
 }
 
 /**
@@ -176,20 +188,20 @@ export function estimateIngredientYen(
     if (recipeNorm != null && masterNorm != null && recipeNorm.dim === masterNorm.dim) {
       if (recipeNorm.dim === 'count') {
         if (masterNorm.dim === 'count' && recipeNorm.unit === masterNorm.unit) {
-          return { yen: Math.round(entry.pricePerUnit * (recipeNorm.base / masterNorm.base)), source }
+          return prorated(entry.pricePerUnit * (recipeNorm.base / masterNorm.base), source)
         }
         // 個数系だが単位名が違う（例:「1個」vs「1本」）→ グラム換算の按分へ
       } else {
-        return { yen: Math.round(entry.pricePerUnit * (recipeNorm.base / masterNorm.base)), source }
+        return prorated(entry.pricePerUnit * (recipeNorm.base / masterNorm.base), source)
       }
     } else if (ingUnit === baseUnit) {
-      return { yen: Math.round(entry.pricePerUnit * (amountNum / baseQty)), source }
+      return prorated(entry.pricePerUnit * (amountNum / baseQty), source)
     }
     // 3) グラム換算での按分
     const recipeGrams = toGramsForPrice(ingredient.name, entry.normalizedName, amountNum, ingUnit)
     const masterGrams = toGramsForPrice(ingredient.name, entry.normalizedName, baseQty, baseUnit)
     if (recipeGrams != null && masterGrams != null && masterGrams > 0) {
-      return { yen: Math.round(entry.pricePerUnit * (recipeGrams / masterGrams)), source }
+      return prorated(entry.pricePerUnit * (recipeGrams / masterGrams), source)
     }
   } else if (baseUnit) {
     // 4) 「適量」「少々」を1回の使用量で按分
@@ -204,16 +216,16 @@ export function estimateIngredientYen(
         (typNorm.dim !== 'count' ||
           (masterNorm.dim === 'count' && typNorm.unit === masterNorm.unit))
       ) {
-        return { yen: Math.round(entry.pricePerUnit * (typNorm.base / masterNorm.base)), source }
+        return prorated(entry.pricePerUnit * (typNorm.base / masterNorm.base), source)
       }
       const typGrams = toGramsForPrice(ingredient.name, entry.normalizedName, typQty, typUnit)
       const masterGrams = toGramsForPrice(ingredient.name, entry.normalizedName, baseQty, baseUnit)
       if (typGrams != null && masterGrams != null && masterGrams > 0) {
-        return { yen: Math.round(entry.pricePerUnit * (typGrams / masterGrams)), source }
+        return prorated(entry.pricePerUnit * (typGrams / masterGrams), source)
       }
     }
   }
-  return { yen: entry.pricePerUnit, source }
+  return { yen: entry.pricePerUnit, rawYen: entry.pricePerUnit, source }
 }
 
 /** レシピ1品分の概算食費（材料ごとの内訳を集計した結果） */
@@ -263,6 +275,13 @@ export function estimateRecipeCost(
  * (仕様書「2食分などの変動値は出さない」)。
  * 価格情報が無い(マスタ不一致かつ個別入力も無い)材料はundefinedを返す
  * (estimateRecipeCostの合計計算から除外される材料と同じ扱い)。
+ *
+ * 2026-07-28 便BY/COST-02: 「マスタに価格が無い(=価格なし)」と「価格はあるが按分額が1円未満」を
+ * 区別できるようにした。従来は estimated.yen <= 0 でどちらもundefinedにしていたため、
+ * マスタに登録済みの砂糖(小さじ1/2 = 0.33円)や塩(小さじ1/4 = 0.25円)まで「価格なし」と表示され、
+ * 「登録し忘れている」という誤ったシグナルになっていた(同梱103品で14行)。
+ * docs/45のオーナー指示「四捨五入・1円未満は『1円未満』」に用意されていた表示が、
+ * この経路では一度も出ていなかったのを実際に到達させる修正。
  */
 export interface IngredientRowCostEstimate {
   /** 全量(登録量)の金額。個別入力ならその値、マスタ一致ならestimateIngredientYenの結果 */
@@ -277,15 +296,19 @@ export function estimateIngredientRowCost(
   index: PriceIndexEntry[],
   servings: number,
 ): IngredientRowCostEstimate | undefined {
-  let totalYen: number
+  let rawTotal: number
   if (ingredient.price != null && ingredient.price > 0) {
-    totalYen = ingredient.price
+    rawTotal = ingredient.price
   } else {
     const estimated = estimateIngredientYen(ingredient, index)
-    if (estimated == null || estimated.yen <= 0) return undefined
-    totalYen = estimated.yen
+    // マスタ不一致(=本当に価格情報が無い)ときだけundefined。
+    // 按分額が1円未満へ丸まる材料は perServingYen=0 で返し、呼び出し側に「1円未満」を出させる
+    if (estimated == null || estimated.rawYen <= 0) return undefined
+    rawTotal = estimated.rawYen
   }
-  const perServingYen = Math.round(servings > 0 ? totalYen / servings : totalYen)
+  // 丸め前のrawTotalから直接割る(yenを丸めてからservingsで割る二重丸めを避ける)
+  const totalYen = Math.round(rawTotal)
+  const perServingYen = Math.round(servings > 0 ? rawTotal / servings : rawTotal)
   return { totalYen, perServingYen }
 }
 
@@ -322,27 +345,44 @@ export function sumMealPlanEntriesCost<E extends { recipeId: number }>(
   )
 }
 
-/** 「作った記録」群の実績原価合計と食数（記録1件=1食）。2026-07-24 便BH-3・タスク9 */
+/** 「作った記録」群の実績原価合計と食数（1人1食＝1食）。2026-07-24 便BH-3・タスク9 */
 export interface CookedLogsCostSum {
-  /** 実績原価の合計（各記録のレシピを登録人数基準のestimateRecipeCostで見積もって合算） */
+  /** 実績原価の合計（記録した人数分にスケールした金額を合算する） */
   total: number
-  /** 食数（=渡した記録の件数。1回の「作った!」を1食として数える） */
+  /** 食数（=延べ人数。2人分作った記録は2食と数える） */
   count: number
 }
 
 /**
  * 「作った記録」（cookedLogs）群の実績ベースの概算食費合計と食数を出す（2026-07-24 便BH-3・タスク9・
  * 期間の食費の「実績ベース」表示用）。渡す配列は「記録1件につきそのレシピ1件」（同じレシピを2回
- * 作った記録があれば同じレシピが2件並ぶ）を想定する。予定ベースのsumMealPlanEntriesCostと同じく
- * 登録人数基準で見積もる。countは食数（記録件数）で、呼び出し側は total÷count で「1食あたり」を出す。
+ * 作った記録があれば同じレシピが2件並ぶ）を想定する。
+ *
+ * 2026-07-28 便BY/RANGE-01: 「1食あたり」の分母を記録件数から延べ人数（1人1食）へ直した。
+ * 従来は2人分のレシピ全量を「1食」として数えており、同じカードに並ぶ「摂取できた栄養（1食あたり）」が
+ * 1人分基準なのに対し、食費だけ人数分まとめた額が「1食あたり」として出ていた
+ * （2人分レシピ3品で 約4,951円・1食あたり約1,650円＝正しくは約825円）。
+ * うちレシピの「1食あたり」は2026-07-06のオーナー裁定で1人分に確定しており（docs/12）、
+ * レシピ詳細の原価も 合計÷recipe.servings で1人分を出している。ここだけ基準が違っていた。
+ * docs/35 §段階2 の「作った記録×保存人数で按分」という仕様どおりの実装でもある。
+ *
+ * 金額は記録時の人数(log.servings)に合わせてスケールする。
+ * 記録時の人数が無い古い記録（2026-07-12以前）はレシピの登録人数で代替する。
  */
 export function sumCookedRecipesCost(
-  recipesForLogs: { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[] }[],
+  logsWithRecipe: {
+    recipe: { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[]; servings: number }
+    log?: { servings?: number }
+  }[],
   index: PriceIndexEntry[],
 ): CookedLogsCostSum {
   let total = 0
-  for (const r of recipesForLogs) {
-    total += estimateRecipeCost(r.ingredients, index).total
+  let count = 0
+  for (const { recipe, log } of logsWithRecipe) {
+    const registered = recipe.servings > 0 ? recipe.servings : 1
+    const cooked = log?.servings != null && log.servings > 0 ? log.servings : registered
+    total += estimateRecipeCost(recipe.ingredients, index).total * (cooked / registered)
+    count += cooked
   }
-  return { total, count: recipesForLogs.length }
+  return { total: Math.round(total), count }
 }

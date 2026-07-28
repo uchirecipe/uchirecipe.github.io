@@ -2676,6 +2676,11 @@ try {
     'PRICE-01(修正3a) 「1食あたり」の概算食費も表示される(既定人数2人・50÷2=約25円)',
     priceDetailBefore.includes('1食あたり 約25円'),
   )
+  // 2026-07-28 便BY/COST-03: 何人分を1食に分けた額なのかを常時添える
+  check(
+    'PRICE-01(便BY COST-03) 概算食費に基準人数が併記される(「2人分レシピの1食あたり」)',
+    priceDetailBefore.includes('2人分レシピの1食あたり 約25円'),
+  )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
   // 「食材と価格を編集する」リンクは既定タブ「全般」のNG食材の直下にある
@@ -4384,7 +4389,9 @@ try {
       check('MEALPLAN-07(タスク9) 予定ベースに「◯食分」が併記される', /\d+食分/.test(rcSwappedText))
 
       // 期間内(5日)に肉じゃがの「作った記録」を1件注入→再選択で実績ベースが出る。
-      // 記録1件=1食、実績原価=肉じゃが単品概算食費、1食あたり=同額(count=1)になる
+      // 2026-07-28 便BY/RANGE-01: 食数は延べ人数(1人1食)。肉じゃがは2人分レシピなので
+      // 記録1件=2食、実績原価=肉じゃが単品概算食費(全量)、1食あたり=その半分になる
+      // (同じカードに並ぶ「摂取できた栄養(1食あたり)」が1人分基準なので単位を揃えた)
       await rcPage.evaluate(
         ({ recipeId, date }) =>
           new Promise((resolve, reject) => {
@@ -4429,8 +4436,10 @@ try {
         const actualCount = Number(rcActualMatch[2])
         const actualPer = Number(rcActualMatch[3].replace(/,/g, ''))
         check(
-          'MEALPLAN-07(タスク9) 実績原価=肉じゃが単品概算食費・食数1・1食あたり=同額',
-          actualTotal === rcSingleCost && actualCount === 1 && actualPer === rcSingleCost,
+          'MEALPLAN-07(タスク9/便BY RANGE-01) 実績原価=肉じゃが単品概算食費・食数2(延べ人数)・1食あたり=その半分',
+          actualTotal === rcSingleCost &&
+            actualCount === 2 &&
+            actualPer === Math.round(rcSingleCost / 2),
           `total=${actualTotal} count=${actualCount} per=${actualPer} single=${rcSingleCost}`,
         )
       }
@@ -4445,8 +4454,12 @@ try {
         rcActualText.includes('概算') && rcActualText.includes('めやす'),
       )
       check(
-        'MEALPLAN-07(便BS・タスク3) 記録のあった食数(1食)のめやすである旨を出す',
-        rcActualText.includes('記録のあった1食のめやすです'),
+        'MEALPLAN-07(便BS・タスク3/便BY RANGE-01) 記録のあった食数(延べ2食)のめやすである旨を出す',
+        rcActualText.includes('記録のあった2食のめやすです'),
+      )
+      check(
+        'MEALPLAN-07(便BY RANGE-01) 食費と栄養の「◯食」の数が同じカード内で一致する',
+        rcActualText.includes('（2食分・1食あたり') && rcActualText.includes('記録のあった2食'),
       )
     } finally {
       await rcBrowser.close()
