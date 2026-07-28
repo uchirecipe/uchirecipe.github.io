@@ -24,11 +24,18 @@ import {
   toggleShoppingChecked,
   setAllShoppingChecked,
   removeShoppingItem,
+  restoreShoppingItem,
   completeShopping,
 } from '../db/shopping'
-import { buildShoppingCandidates, sortShoppingByAisle, type ShoppingCandidate } from '../logic/shopping'
+import {
+  buildShoppingCandidates,
+  sortShoppingByAisle,
+  parseRecipeIdsParam,
+  type ShoppingCandidate,
+} from '../logic/shopping'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import type { SearchResult } from '../logic/search'
+import type { ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
 import { ja } from '../i18n/ja'
@@ -36,6 +43,65 @@ import { ja } from '../i18n/ja'
 type CandidateRow = ShoppingCandidate & { checked: boolean }
 
 type ShoppingTab = 'pantry' | 'memo'
+
+/**
+ * 買い物メモの下書きの保存先（2026-07-29 便CC/C2）。
+ *
+ * 従来はコンポーネントのstateだけだったため、他のページへ移動・リロード・「キャンセル」で
+ * 手で直した分量ごと無警告で消えていた（QA S2。「下書き」という名前が実装と食い違っていた）。
+ * レシピの書きかけと同じ作法に揃える＝localStorage に「保存した時刻＋中身」で持ち、
+ * 期限を過ぎた古い下書きは読まずに捨てる（sessionStorage はホーム画面PWAでOSがタブを
+ * 破棄すると消えるため使わない。2026-07-28 便BW/C-16で却下済み）。
+ * 期限はレシピの書きかけと同じ7日（買い物は当日〜数日の行動なので十分に長い）。
+ */
+const SHOPPING_DRAFT_KEY = 'uchirecipe:draft:shopping'
+const SHOPPING_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+type ShoppingDraft = { candidates: CandidateRow[]; lastPickerCounts: Record<number, number> }
+
+function readShoppingDraft(): ShoppingDraft | null {
+  try {
+    const raw = localStorage.getItem(SHOPPING_DRAFT_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { savedAt?: unknown; draft?: unknown }
+    const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0
+    if (Date.now() - savedAt > SHOPPING_DRAFT_MAX_AGE_MS) {
+      localStorage.removeItem(SHOPPING_DRAFT_KEY)
+      return null
+    }
+    if (typeof parsed.draft !== 'string') return null
+    const draft = JSON.parse(parsed.draft) as Partial<ShoppingDraft>
+    if (!Array.isArray(draft.candidates) || draft.candidates.length === 0) return null
+    return {
+      candidates: draft.candidates,
+      lastPickerCounts:
+        draft.lastPickerCounts && typeof draft.lastPickerCounts === 'object'
+          ? draft.lastPickerCounts
+          : {},
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeShoppingDraft(draft: ShoppingDraft): void {
+  try {
+    localStorage.setItem(
+      SHOPPING_DRAFT_KEY,
+      JSON.stringify({ savedAt: Date.now(), draft: JSON.stringify(draft) }),
+    )
+  } catch {
+    /* 保存領域の容量超過などは黙って諦める(画面上の下書きは失われない) */
+  }
+}
+
+function clearShoppingDraft(): void {
+  try {
+    localStorage.removeItem(SHOPPING_DRAFT_KEY)
+  } catch {
+    /* 無視 */
+  }
+}
 
 /** レシピピッカーの並び替え(2026-07-23 #2: 一覧の並び替え機構=recipeSortを流用。栄養並び替えは
  * Pro機能なので除き、無料で使える4種に絞る。ラベルはレシピ一覧のもの=ja.searchを共用する) */
@@ -50,6 +116,9 @@ const PICKER_SORT_OPTIONS: { value: RecipeSortOption; label: string }[] = [
  * 買い物メモ）の2タブ構成(2026-07-16 UI総点検B-9: 買い物メモが最上部を占有しヘビーユーザーの
  * 壁になっていた所見への対応)。既定タブは「食材の在庫」。タブ状態はページローカルで保存しない */
 export default function ShoppingPage() {
+  // 保存してある下書きを初回描画時に1度だけ読む(2026-07-29 便CC/C2)。
+  // 期限切れはここで破棄される。競合する入力状態が無いので「復元しますか？」は出さず黙って戻す
+  const [restoredDraft] = useState(readShoppingDraft)
   const recipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
   const pantryItems = usePantryItems()
@@ -57,10 +126,17 @@ export default function ShoppingPage() {
   // ピッカーの「在庫で作れる順」用(「ある」「少ない」を在庫ありとみなす。在庫一致順の既存定義に合わせる)
   const availableNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
   const shoppingItems = useShoppingItems()
-  const [activeTab, setActiveTab] = useState<ShoppingTab>('pantry')
+  // 下書きが残っていたら、それが見える「買い物メモ」タブで迎える(既定は「食材の在庫」)
+  const [activeTab, setActiveTab] = useState<ShoppingTab>(restoredDraft ? 'memo' : 'pantry')
 
   // 操作結果のトースト(2026-07-23 #4/#9。既存のToast+setMessageパターンを流用)
   const [message, setMessage] = useState('')
+  // ✕で消した項目の取り消し(2026-07-29 便CC/C19)。次のトーストが出たら取り消しは無効にする
+  const [undoRemoved, setUndoRemoved] = useState<ShoppingItem | null>(null)
+  const showToast = (text: string) => {
+    setUndoRemoved(null)
+    setMessage(text)
+  }
 
   const visibleRecipes = useMemo(() => {
     if (!recipes) return []
@@ -81,7 +157,9 @@ export default function ShoppingPage() {
   // 食数の+/-方式(2026-07-23 #3): recipeId → 食数。1食以上で「選択」扱い(既定0=未選択)
   const [pickerCounts, setPickerCounts] = useState<Record<number, number>>({})
   // 直前のレシピ選択(食数)を覚えておき、「レシピを選び直す」でそのまま復元する(2026-07-24 実機FB #8)
-  const [lastPickerCounts, setLastPickerCounts] = useState<Record<number, number>>({})
+  const [lastPickerCounts, setLastPickerCounts] = useState<Record<number, number>>(
+    restoredDraft?.lastPickerCounts ?? {},
+  )
 
   const filteredRecipes = useMemo(() => {
     const q = pickerQuery.trim()
@@ -112,8 +190,9 @@ export default function ShoppingPage() {
     setPickerOpen(true)
   }
 
-  // 買い物候補（下書き。確定するまでDBには保存しない）
-  const [candidates, setCandidates] = useState<CandidateRow[] | null>(null)
+  // 買い物候補（下書き。確定するまでDBには保存しない。画面を離れても消えないよう
+  // localStorageに保存する＝2026-07-29 便CC/C2）
+  const [candidates, setCandidates] = useState<CandidateRow[] | null>(restoredDraft?.candidates ?? null)
   // 生成した下書きへ自動スクロールする(2026-07-24 実機FB #13)。候補がDOMに乗ってから実行するため
   // フラグ+useEffectで1テンポ遅らせる
   const candidatesRef = useRef<HTMLElement>(null)
@@ -121,29 +200,41 @@ export default function ShoppingPage() {
   // 下書きの食材名タップで出す「全文＋その食材を使うレシピ名」ポップ(2026-07-24 実機FB #10)
   const [namePopup, setNamePopup] = useState<{ name: string; recipeIds: number[] } | null>(null)
 
-  // 献立プランナーの「この週の買い物リストを作る」から来た場合（?recipeIds=1,2,3）は
-  // ピッカーを介さず自動で候補を作る（食数は等倍=1回分ずつ。スケールは掛けない）
+  // 献立プランナーの「この週の買い物リストを作る」から来た場合（?recipeIds=1x2,3）は
+  // ピッカーを介さず自動で候補を作る。
+  // 2026-07-29 便CC/C10: 従来は献立に同じ料理が何回入っていても1回分（scale=1固定）でしか
+  // 計算せず、週に2回作る料理の材料が足りない量で出ていた。「1x2」=その週に2回ぶん、として
+  // 回数を倍率に使う。C18: 渡ったレシピが1件も見つからないときは無言で終わらず理由を出す
   const [searchParams, setSearchParams] = useSearchParams()
   useEffect(() => {
     const raw = searchParams.get('recipeIds')
-    if (!raw || !recipes) return
-    const ids = raw
-      .split(',')
-      .map((v) => Number(v))
-      .filter((n) => Number.isFinite(n))
-    const chosen = recipes.filter((r) => ids.includes(r.id!))
+    if (raw == null || !recipes) return
+    const requested = parseRecipeIdsParam(raw)
+    const chosen = requested
+      .map(({ id, times }) => ({ recipe: recipes.find((r) => r.id === id), times }))
+      .filter((x): x is { recipe: (typeof recipes)[number]; times: number } => x.recipe != null)
     if (chosen.length > 0) {
       const built = buildShoppingCandidates(
-        chosen.map((r) => ({ id: r.id!, ingredients: r.ingredients })),
+        chosen.map(({ recipe, times }) => ({
+          id: recipe.id!,
+          ingredients: recipe.ingredients,
+          scale: times,
+        })),
         haveNames,
       )
       setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
-      // 「レシピを選び直す」で復元できるよう選択を覚えておく(#8)。献立由来は等倍=登録人数ぶん
-      setLastPickerCounts(Object.fromEntries(chosen.map((r) => [r.id!, r.servings])))
+      // 「レシピを選び直す」で復元できるよう選択を覚えておく(#8)。献立由来は
+      // 「登録人数 × 献立に入っている回数」を初期の食数にする
+      setLastPickerCounts(
+        Object.fromEntries(chosen.map(({ recipe, times }) => [recipe.id!, recipe.servings * times])),
+      )
       // 献立プランナーの「この週の買い物リストを作る」から来た場合は、候補が乗る
       // 「買い物メモ」タブを開いた状態で迎える(在庫タブのまま候補が見えない事故を防ぐ)
       setActiveTab('memo')
+    } else if (requested.length > 0) {
+      showToast(ja.shopping.fromMealPlanNotFoundToast)
     }
+    // 値が空(?recipeIds=)でもURLからは必ず消す(従来は早期returnでパラメータが残り続けていた)
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -155,7 +246,20 @@ export default function ShoppingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipes, searchParams])
 
+  // 下書きの保存/破棄(2026-07-29 便CC/C2)。画面を離れてもリロードしても残るようにする。
+  // 確定・キャンセルで candidates が null になったら保存も消す
+  useEffect(() => {
+    if (candidates && candidates.length > 0) writeShoppingDraft({ candidates, lastPickerCounts })
+    else clearShoppingDraft()
+  }, [candidates, lastPickerCounts])
+
   const makeCandidates = () => {
+    // 既に下書きがあるときの作り直しは、手で直した分量が自動計算に戻るので先に一言確認する
+    // (2026-07-29 便CC/C2。規約F=何が消えて何が残るかを両方書く)
+    if (candidates && candidates.length > 0) {
+      const ok = window.confirm(ja.shopping.remakeConfirm.replace('{n}', String(candidates.length)))
+      if (!ok) return
+    }
     // 食数≥1のレシピだけを対象にし、指定食数で分量をスケールする(scale=食数÷登録人数。2026-07-23 #3)
     const chosen = visibleRecipes
       .filter((r) => (pickerCounts[r.id!] ?? 0) >= 1)
@@ -170,16 +274,45 @@ export default function ShoppingPage() {
     setPickerOpen(false)
     setPickerCounts({})
     setPickerQuery('')
-    setMessage(ja.shopping.candidatesMadeToast)
+    showToast(ja.shopping.candidatesMadeToast)
     setScrollToCandidates(true) // 生成した下書きへ自動スクロール(#13)
   }
+
+  // チェック0件で確定すると「0件を買い物メモに追加しました」と出て下書きだけが消えていた
+  // (2026-07-29 便CC/C13)。ボタンを押せない状態にし、下書きは残す
+  const checkedCandidateCount = candidates?.filter((c) => c.checked).length ?? 0
 
   const addConfirmed = async () => {
     if (!candidates) return
     const chosen = candidates.filter((c) => c.checked)
+    if (chosen.length === 0) return
     await addConfirmedItems(chosen.map(({ name, amount, recipeIds }) => ({ name, amount, recipeIds })))
     setCandidates(null)
-    setMessage(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
+    showToast(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
+  }
+
+  // 下書きの取り消し(2026-07-29 便CC/C2)。従来は確認ゼロで即消えていた
+  const discardCandidates = () => {
+    if (!candidates) return
+    const ok = window.confirm(ja.shopping.discardConfirm.replace('{n}', String(candidates.length)))
+    if (!ok) return
+    setCandidates(null)
+    showToast(ja.shopping.discardedToast)
+  }
+
+  // ✕の削除(2026-07-29 便CC/C19): 確認で止めず、消してから取り消せるようにする
+  // (買い物中に片手・カートを押しながら触る画面なので、毎回の確認は邪魔になる)
+  const removeMemoItem = async (item: ShoppingItem) => {
+    await removeShoppingItem(item.id!)
+    setUndoRemoved(item)
+    setMessage(ja.shopping.removedToast.replace('{name}', item.name))
+  }
+  const undoRemoveMemoItem = async () => {
+    if (!undoRemoved) return
+    const restored = undoRemoved
+    setUndoRemoved(null)
+    await restoreShoppingItem(restored)
+    setMessage(ja.shopping.restoredToast.replace('{name}', restored.name))
   }
 
   // 手動追加
@@ -228,11 +361,18 @@ export default function ShoppingPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [namePopup])
 
+  // 「あとにする」(2026-07-29 便CC/C7): 何も消さずにモーダルを閉じる。
+  // 背景タップ・Escでも閉じられるが、それが分かる導線がボタンとして無かった
+  const completeLater = () => {
+    setCompleteOpen(false)
+    showToast(ja.shopping.completeLaterToast)
+  }
+
   const runComplete = async (reflect: boolean) => {
     await completeShopping(checkedItems, reflect)
     setCompleteOpen(false)
     // 反映する/しないどちらでもトースト(2026-07-23 #9)
-    setMessage(reflect ? ja.shopping.completeReflectedToast : ja.shopping.completeDoneToast)
+    showToast(reflect ? ja.shopping.completeReflectedToast : ja.shopping.completeDoneToast)
   }
 
   // 買い物候補の説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉
@@ -327,11 +467,12 @@ export default function ShoppingPage() {
                       <span className="font-bold">{item.name}</span>
                       {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
                     </div>
+                    {/* 料理中・買い物中に片手で触るので44px確保(2026-07-29 便CC/C19。旧34px) */}
                     <button
                       type="button"
-                      onClick={() => void removeShoppingItem(item.id!)}
+                      onClick={() => void removeMemoItem(item)}
                       aria-label={ja.shopping.remove}
-                      className="rounded-full p-2 text-ink-muted"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
                     >
                       <X size={18} aria-hidden />
                     </button>
@@ -341,30 +482,33 @@ export default function ShoppingPage() {
             </>
           )}
 
-          {/* 手動追加 */}
-          <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
+          {/* 手動追加。1行に3つ並べると390px幅で分量欄が約94pxしか取れず
+              プレースホルダが「分量（任」で切れていたため2行に分ける(2026-07-29 便CC/C20) */}
+          <div className="mt-[var(--space-md)] flex flex-col gap-[var(--space-sm)]">
             <input
               type="text"
               value={manualName}
               onChange={(e) => setManualName(e.target.value)}
               placeholder={ja.shopping.manualPlaceholder}
-              className="min-w-0 flex-[2] rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+              className="w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
             />
-            <input
-              type="text"
-              value={manualAmount}
-              onChange={(e) => setManualAmount(e.target.value)}
-              placeholder={ja.shopping.manualAmountPlaceholder}
-              className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
-            />
-            <button
-              type="button"
-              onClick={() => void addManual()}
-              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
-            >
-              <Plus size={18} aria-hidden />
-              {ja.shopping.manualAdd}
-            </button>
+            <div className="flex gap-[var(--space-sm)]">
+              <input
+                type="text"
+                value={manualAmount}
+                onChange={(e) => setManualAmount(e.target.value)}
+                placeholder={ja.shopping.manualAmountPlaceholder}
+                className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+              />
+              <button
+                type="button"
+                onClick={() => void addManual()}
+                className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-4 py-3 font-bold text-accent shadow-sm"
+              >
+                <Plus size={18} aria-hidden />
+                {ja.shopping.manualAdd}
+              </button>
+            </div>
           </div>
 
           {/* 買い物完了 */}
@@ -460,13 +604,22 @@ export default function ShoppingPage() {
                 「レシピを選び直す」(選択を保持して開き直す)と「キャンセル」は下段に並べる */}
             <div className="mt-[var(--space-md)] flex flex-col gap-2">
               {candidates.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => void addConfirmed()}
-                  className="w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-                >
-                  {ja.shopping.addConfirmed}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void addConfirmed()}
+                    disabled={checkedCandidateCount === 0}
+                    className="w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-40"
+                  >
+                    {ja.shopping.addConfirmed}
+                  </button>
+                  {/* 押せない理由を添える(2026-07-29 便CC/C13。無言の死にボタンにしない) */}
+                  {checkedCandidateCount === 0 && (
+                    <p className="text-center text-sm text-ink-muted">
+                      {ja.shopping.addConfirmedNoneHint}
+                    </p>
+                  )}
+                </>
               )}
               <div className="flex gap-2">
                 <button
@@ -478,7 +631,7 @@ export default function ShoppingPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCandidates(null)}
+                  onClick={discardCandidates}
                   className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
                 >
                   {ja.shopping.discardCandidates}
@@ -515,24 +668,39 @@ export default function ShoppingPage() {
                 <X size={20} aria-hidden />
               </button>
             </div>
+            {/* 件数を明示する(2026-07-29 便CC/C7・規約F: 何が消えて何が残るかを件数つきで) */}
             <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-              {ja.shopping.completeConfirmDescription}
+              {ja.shopping.completeConfirmDescription
+                .replace(/\{n\}/g, String(checkedItems.length))
+                .replace('{m}', String(memoItems.length - checkedItems.length))}
             </p>
-            <div className="mt-[var(--space-md)] flex gap-2">
+            <div className="mt-[var(--space-md)] flex flex-col gap-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void runComplete(true)}
+                  className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                >
+                  {ja.shopping.completeYes}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runComplete(false)}
+                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
+                >
+                  {ja.shopping.completeNo}
+                </button>
+              </div>
+              {/* 後回しの導線(2026-07-29 便CC/C7)。レジ前でその場の判断を強いない。
+                  チェックは残るので、帰ってから同じ手順で反映できる */}
               <button
                 type="button"
-                onClick={() => void runComplete(true)}
-                className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                onClick={completeLater}
+                className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
               >
-                {ja.shopping.completeYes}
+                {ja.shopping.completeLater}
               </button>
-              <button
-                type="button"
-                onClick={() => void runComplete(false)}
-                className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
-              >
-                {ja.shopping.completeNo}
-              </button>
+              <p className="text-xs text-ink-muted">{ja.shopping.completeLaterNote}</p>
             </div>
           </div>
         </div>
@@ -649,8 +817,14 @@ export default function ShoppingPage() {
                       }`}
                     >
                       {/* 品目名下の「◯人分レシピ」表記は削除(2026-07-24 実機FB #9) */}
+                      {/* 似た名前が「鶏むね肉のレモンペッ…」で切れて区別できないため、
+                          2行まで折り返す(2026-07-29 便CC/C20) */}
                       <div className="min-w-0 flex-1">
-                        <span className={`block truncate font-bold ${selected ? 'text-accent' : ''}`}>
+                        <span
+                          className={`block line-clamp-2 break-words font-bold ${
+                            selected ? 'text-accent' : ''
+                          }`}
+                        >
                           {recipe.title}
                         </span>
                       </div>
@@ -700,7 +874,15 @@ export default function ShoppingPage() {
         </div>
       )}
 
-      <Toast message={message} onClose={() => setMessage('')} />
+      <Toast
+        message={message}
+        onClose={() => {
+          setMessage('')
+          setUndoRemoved(null)
+        }}
+        actionLabel={undoRemoved ? ja.common.undo : undefined}
+        onAction={undoRemoved ? () => void undoRemoveMemoItem() : undefined}
+      />
     </div>
   )
 }

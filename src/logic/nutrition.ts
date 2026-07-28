@@ -1,7 +1,12 @@
 import { toIngredientKey } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
-import { expandMixedFraction, leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
+import {
+  leadingRangeAmount,
+  normalizeAmountInput,
+  parseAmountNumber as parseAmountValue,
+  resolveCalcAmount,
+} from './amount'
 import { VOLUME_UNIT_FACTORS } from './unitGrams'
 import { matchAssumedGrams } from './amountAssumption'
 
@@ -229,18 +234,11 @@ export function parseAmountNumber(amount: string): number | null {
   // 「1と1/2」のような帯分数も解釈する(2026-07-28 便BW/C-18。アプリ自身が人数変更後の表示に
   // 使う書き方なので、それを保存した分量が栄養計算の対象外になるのを防ぐ)
   // 範囲分量(「200〜250」)は先頭の値で計算する(2026-07-28 便BX/C06。表示は原文のまま)。
-  // 従来はここで解釈できず、材料が丸ごと計算対象外に落ちていた
-  const match = leadingRangeAmount(expandMixedFraction(normalizeAmountInput(amount.trim()))).match(
-    /^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/,
-  )
-  if (!match) return null
-  let value = Number.parseFloat(match[1])
-  const denominator = match[2] ? Number.parseFloat(match[2]) : undefined
-  if (denominator !== undefined) {
-    if (denominator === 0) return null
-    value /= denominator
-  }
-  return value
+  // 従来はここで解釈できず、材料が丸ごと計算対象外に落ちていた。
+  // 数値化そのものは amount.ts の parseAmountNumber に集約（同じ解釈器を人数変更・
+  // 買い物メモの合算とも共有する。2026-07-29 便CC/C1）。ここは栄養計算向けに
+  // 「範囲は先頭値で計算する」という前処理だけを足した薄いラッパー
+  return parseAmountValue(leadingRangeAmount(normalizeAmountInput(amount.trim())))
 }
 
 /**

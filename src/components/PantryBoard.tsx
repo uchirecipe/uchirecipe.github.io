@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Plus,
   Refrigerator,
@@ -15,6 +15,8 @@ import {
   removePantryItems,
   setPantryItemsLevel,
   setPantryItemsGroup,
+  setPantryItemNote,
+  PANTRY_NOTE_MAX_LENGTH,
 } from '../db/pantry'
 import type { PantryGroupKey, PantryLevel } from '../db/types'
 import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
@@ -53,6 +55,33 @@ export default function PantryBoard() {
   // 説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉。他の折りたたみ同様、
   // 永続化はしない軽量実装(オーナー決定: 実装が軽い方でよい)
   const [showDescription, setShowDescription] = useState(false)
+  // 在庫チップの一言メモ(2026-07-29 便CC/C8)。整理モードで1件だけ選んだときに編集する。
+  // チップ内に編集ボタンは置かない(2026-07-16 B-10で誤操作の元として廃止済みのため)
+  const [noteDraft, setNoteDraft] = useState('')
+
+  // 全削除で0件になったら整理モードを自動で抜ける(2026-07-29 便CC/C5・QA S2)。
+  // 0件だと見出し横の「完了」ボタンが消える一方で整理モードは続くため、画面上に抜ける手段が
+  // 無くなっていた(残るのはdisabledの一括操作パネルと「タップして選択」だけ)
+  useEffect(() => {
+    if (organizing && items?.length === 0) {
+      setOrganizing(false)
+      setSelectedIds([])
+    }
+  }, [organizing, items])
+
+  // 選択が「1件だけ」になったら、その食材の現在のメモを編集欄に読み込む
+  const singleSelected =
+    selectedIds.length === 1 ? (items ?? []).find((item) => item.id === selectedIds[0]) : undefined
+  useEffect(() => {
+    setNoteDraft(singleSelected?.note ?? '')
+  }, [singleSelected?.id, singleSelected?.note])
+
+  const saveNote = async () => {
+    if (!singleSelected?.id) return
+    const trimmed = noteDraft.trim()
+    await setPantryItemNote(singleSelected.id, trimmed)
+    setMessage(trimmed ? ja.pantry.organizeNoteSavedToast : ja.pantry.organizeNoteClearedToast)
+  }
 
   const toggleOrganizing = () => {
     setOrganizing((v) => !v)
@@ -82,16 +111,19 @@ export default function PantryBoard() {
       ja.pantry.organizeBulkSetToast.replace('{n}', String(count)).replace('{level}', ja.pantry.level[level]),
     )
   }
-  // 大分類グループへの一括移動(2026-07-23 #1 手動グループ変更)。状態設定と同じく整理モードは維持する
-  const applyGroup = async (group: PantryGroupKey) => {
+  // 大分類グループへの一括移動(2026-07-23 #1 手動グループ変更)。状態設定と同じく整理モードは維持する。
+  // group が undefined のときは手動指定を消して食材名からの自動振り分けに戻す(2026-07-29 便CC/C6)
+  const applyGroup = async (group: PantryGroupKey | undefined) => {
     if (selectedIds.length === 0) return
     const count = selectedIds.length
     await setPantryItemsGroup(selectedIds, group)
     setSelectedIds([])
     setMessage(
-      ja.pantry.organizeMoveGroupToast
-        .replace('{n}', String(count))
-        .replace('{group}', ja.pantry.group[group]),
+      group === undefined
+        ? ja.pantry.organizeGroupAutoToast.replace('{n}', String(count))
+        : ja.pantry.organizeMoveGroupToast
+            .replace('{n}', String(count))
+            .replace('{group}', ja.pantry.group[group]),
     )
   }
 
@@ -241,7 +273,11 @@ export default function PantryBoard() {
                       className={`inline-flex items-center gap-1 rounded-full border py-2 px-3 text-sm font-bold shadow-sm ${levelClass(item.level)}`}
                     >
                       {item.name}
-                      <span className="ml-1 font-normal opacity-80">（{ja.pantry.level[item.level]}）</span>
+                      {/* メモを付けた食材のチップだけ幅が伸びる(2026-07-29 便CC/C8。2列詰めの盤面を壊さない) */}
+                      <span className="ml-1 font-normal opacity-80">
+                        （{ja.pantry.level[item.level]}
+                        {item.note ? `・${item.note}` : ''}）
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -283,7 +319,53 @@ export default function PantryBoard() {
                 {ja.pantry.group[group]}
               </button>
             ))}
+            {/* 手動で移したグループを自動振り分けに戻す(2026-07-29 便CC/C6)。
+                「任せる」に戻す言い方が画面に無く、一方向の操作に見えていた */}
+            <button
+              type="button"
+              onClick={() => void applyGroup(undefined)}
+              disabled={selectedIds.length === 0}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+            >
+              {ja.pantry.organizeGroupAuto}
+            </button>
           </div>
+          {/* 移動が一方向に見えないよう、戻し方と調味料グループの副作用をここで一言添える */}
+          <p className="text-xs text-ink-muted">{ja.pantry.organizeMoveGroupNote}</p>
+
+          {/* 一言メモ(2026-07-29 便CC/C8)。1件だけ選んだときに編集できる */}
+          <p className="mt-1 text-sm text-ink-muted">{ja.pantry.organizeNoteTitle}</p>
+          {singleSelected ? (
+            <>
+              <div className="flex gap-[var(--space-sm)]">
+                <input
+                  type="text"
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void saveNote()
+                    }
+                  }}
+                  maxLength={PANTRY_NOTE_MAX_LENGTH}
+                  placeholder={ja.pantry.organizeNotePlaceholder}
+                  aria-label={ja.pantry.organizeNoteTitle}
+                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveNote()}
+                  className="shrink-0 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
+                >
+                  {ja.pantry.organizeNoteSave}
+                </button>
+              </div>
+              <p className="text-xs text-ink-muted">{ja.pantry.organizeNoteNote}</p>
+            </>
+          ) : (
+            <p className="text-xs text-ink-muted">{ja.pantry.organizeNoteMultiHint}</p>
+          )}
         </div>
       )}
 

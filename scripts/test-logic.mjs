@@ -22,6 +22,7 @@ import {
   buildSearchWords,
   toHiragana,
   toTagKey,
+  toPantryKey,
   searchIndexNeedsRebuild,
   SEARCH_INDEX_VERSION,
 } from '../src/logic/kana.ts'
@@ -62,7 +63,12 @@ import {
 } from '../src/logic/mealPlan.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
-import { buildShoppingCandidates, sortShoppingByAisle } from '../src/logic/shopping.ts'
+import {
+  buildShoppingCandidates,
+  sortShoppingByAisle,
+  combineAmountTexts,
+  parseRecipeIdsParam,
+} from '../src/logic/shopping.ts'
 import { selectPantryDowngrades } from '../src/logic/pantry.ts'
 import {
   categorizePantryName,
@@ -163,6 +169,15 @@ function eq(label, actual, expected) {
     passed++
   } else {
     failures.push(`${label}: 実際=${a} 期待=${e}`)
+  }
+}
+
+/** 「同じであってはいけない」検査(名寄せキーが別食材どうしでぶつかっていないか等) */
+function neq(label, actual, notExpected) {
+  if (JSON.stringify(actual) !== JSON.stringify(notExpected)) {
+    passed++
+  } else {
+    failures.push(`${label}: 実際=${JSON.stringify(actual)} 期待=これ以外`)
   }
 }
 
@@ -2224,6 +2239,140 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('食数スケール: 別scaleの同一食材はスケール後に合算(5個)', c2[0]?.amount, '5個')
 }
 
+// ---------- buildShoppingCandidates: 分数分量(2026-07-29 便CC/C1。S1: 分母を無視して2〜4倍になっていた) ----------
+{
+  const amountOf = (ingredients, scale, have = []) =>
+    buildShoppingCandidates([{ id: 1, ingredients, scale }], have)[0]?.amount
+
+  // 等倍(食数=登録人数)は原文をそのまま見せる(レシピ詳細の表示と一致させる・C11)
+  eq('買い物候補(分数): 1/2本 等倍→1/2本', amountOf([{ name: 'にんじん', amount: '1/2', unit: '本' }], 1), '1/2本')
+  eq('買い物候補(分数): 大さじ1/2 等倍→大さじ1/2', amountOf([{ name: 'みりん', amount: '1/2', unit: '大さじ' }], 1), '大さじ1/2')
+  eq(
+    '買い物候補(分数): 帯分数「1と1/2個」等倍→原文のまま',
+    amountOf([{ name: '玉ねぎ', amount: '1と1/2', unit: '個' }], 1),
+    '1と1/2個',
+  )
+  // 2レシピぶんの合算は分母を解釈してから足す(1/2個 + 1/2個 = 1個)
+  const half2 = buildShoppingCandidates(
+    [
+      { id: 1, ingredients: [{ name: '玉ねぎ', amount: '1/2', unit: '個' }] },
+      { id: 2, ingredients: [{ name: '玉ねぎ', amount: '1/2', unit: '個' }] },
+    ],
+    [],
+  )
+  eq('買い物候補(分数): 1/2個+1/2個=1個', half2[0]?.amount, '1個')
+  // カレールー1/2箱を4人分レシピ→3食(scale=0.75)。レシピ詳細と同じ「1/2箱」になる
+  eq(
+    '買い物候補(分数): カレールー1/2箱×0.75→1/2箱(レシピ詳細と一致)',
+    amountOf([{ name: 'カレールー', amount: '1/2', unit: '箱' }], 0.75),
+    '1/2箱',
+  )
+  eq(
+    '買い物候補(分数): 豆腐1/2丁×1.5→1丁',
+    amountOf([{ name: '豆腐', amount: '1/2', unit: '丁' }], 1.5),
+    '1丁',
+  )
+}
+
+// ---------- buildShoppingCandidates: 単位ごとの丸め(2026-07-29 便CC/C11。62.5g・0.3本など買えない粒度) ----------
+{
+  const amountOf = (ingredients, scale) =>
+    buildShoppingCandidates([{ id: 1, ingredients, scale }], [])[0]?.amount
+  eq('買い物候補(丸め): 250g×0.25→65g(5刻み)', amountOf([{ name: '豚こま切れ肉', amount: '250', unit: 'g' }], 0.25), '65g')
+  eq('買い物候補(丸め): 700ml×0.25→180ml(10刻み)', amountOf([{ name: '水', amount: '700', unit: 'ml' }], 0.25), '180ml')
+  eq('買い物候補(丸め): 1本×0.25→1/2本(個数系は0.5刻み・0にしない)', amountOf([{ name: 'にんじん', amount: '1', unit: '本' }], 0.25), '1/2本')
+  eq('買い物候補(丸め): 1箱×0.25→1/2箱', amountOf([{ name: 'カレールー', amount: '1', unit: '箱' }], 0.25), '1/2箱')
+}
+
+// ---------- buildShoppingCandidates: 単位が混ざる/略記(2026-07-29 便CC/C12。数値側までスケールが落ちていた) ----------
+{
+  // 同じ単位グループに「少々」が混ざっても、数値側はスケールして合算する
+  const mixed = buildShoppingCandidates(
+    [
+      { id: 1, ingredients: [{ name: '塩', amount: '少々', unit: '' }], scale: 2 },
+      { id: 2, ingredients: [{ name: '塩', amount: '2', unit: '' }], scale: 2 },
+    ],
+    [],
+  )
+  eq('買い物候補(混在): 数値側は2×2=4にスケールし「少々」は原文で併記', mixed[0]?.amount, '4・少々')
+  // 「大2」「小1」の略記も大さじ/小さじとして解釈してスケールする
+  const abbrev = buildShoppingCandidates(
+    [{ id: 1, ingredients: [{ name: 'しょうゆ', amount: '大2', unit: '' }], scale: 2 }],
+    [],
+  )
+  eq('買い物候補(略記): 大2×2→大さじ4', abbrev[0]?.amount, '大さじ4')
+  // 範囲分量は人数スケールに非対応(レシピ詳細と同じ)。原文のまま残す
+  const range = buildShoppingCandidates(
+    [{ id: 1, ingredients: [{ name: '牛こま切れ肉', amount: '200〜250', unit: 'g' }] }],
+    [],
+  )
+  eq('買い物候補(範囲): 200〜250gは原文のまま', range[0]?.amount, '200〜250g')
+}
+
+// ---------- combineAmountTexts(2026-07-29 便CC/C14。買い物メモの重複行の合算) ----------
+{
+  eq('メモ合算: 1束+2束=3束', combineAmountTexts(['1束', '2束']), '3束')
+  eq('メモ合算: 200g+150g=350g', combineAmountTexts(['200g', '150g']), '350g')
+  eq('メモ合算: 大さじ1+大さじ2=大さじ3', combineAmountTexts(['大さじ1', '大さじ2']), '大さじ3')
+  eq('メモ合算: 1/2本+1/2本=1本', combineAmountTexts(['1/2本', '1/2本']), '1本')
+  eq('メモ合算: 単位違いは「・」で並べる', combineAmountTexts(['1本', '100g']), '1本・100g')
+  eq('メモ合算: 数値化できない分量は原文のまま並べる', combineAmountTexts(['少々', '1つまみ']), '少々・1つまみ')
+  eq('メモ合算: 片方が空なら残りをそのまま', combineAmountTexts(['1袋', undefined]), '1袋')
+  eq('メモ合算: 両方空なら空文字', combineAmountTexts([undefined, '']), '')
+  eq('メモ合算: 範囲分量は原文のまま', combineAmountTexts(['200〜250g', undefined]), '200〜250g')
+}
+
+// ---------- parseRecipeIdsParam(2026-07-29 便CC/C10。献立経路に回数=倍率を乗せる) ----------
+{
+  eq('献立経路: 単純なID列は各1回分', parseRecipeIdsParam('1,2,3'), [
+    { id: 1, times: 1 },
+    { id: 2, times: 1 },
+    { id: 3, times: 1 },
+  ])
+  eq('献立経路: 「1x3」は3回分', parseRecipeIdsParam('1x3,2'), [
+    { id: 1, times: 3 },
+    { id: 2, times: 1 },
+  ])
+  eq('献立経路: 同じIDの重複は回数として足す', parseRecipeIdsParam('5,5,7'), [
+    { id: 5, times: 2 },
+    { id: 7, times: 1 },
+  ])
+  eq('献立経路: 空文字・数値でない要素は無視', parseRecipeIdsParam('1,,abc,2'), [
+    { id: 1, times: 1 },
+    { id: 2, times: 1 },
+  ])
+  eq('献立経路: 空パラメータは0件', parseRecipeIdsParam(''), [])
+}
+
+// ---------- toPantryKey(2026-07-29 便CC/C4。在庫照合の名寄せキーを1本化) ----------
+{
+  eq('在庫キー: 括弧書きを落とす', toPantryKey('長ねぎ（白い部分）'), toPantryKey('長ねぎ'))
+  eq('在庫キー: 半角括弧も落とす', toPantryKey('片栗粉(あん用)'), toPantryKey('片栗粉'))
+  eq('在庫キー: 空白・中黒のゆれを吸収', toPantryKey('オリーブ・オイル'), toPantryKey('オリーブオイル'))
+  eq('在庫キー: かな/漢字の表記ゆれを吸収', toPantryKey('とりにく'), toPantryKey('鶏肉'))
+  // 別食材どうしがぶつからないこと(部分一致に寄せないための歯止め)
+  neq('在庫キー: 豆腐と高野豆腐は別物', toPantryKey('豆腐'), toPantryKey('高野豆腐'))
+  neq('在庫キー: 卵と砂糖(卵用)は別物', toPantryKey('卵'), toPantryKey('砂糖（卵用）'))
+  neq('在庫キー: ねぎと玉ねぎは別物', toPantryKey('ねぎ'), toPantryKey('玉ねぎ'))
+}
+
+// ---------- 買い物候補の除外: 括弧付き材料も在庫「ある」で除外される(便CC/C4) ----------
+{
+  const c = buildShoppingCandidates(
+    [
+      {
+        id: 1,
+        ingredients: [
+          { name: '長ねぎ（白い部分）', amount: '1/2', unit: '本' },
+          { name: 'にんじん', amount: '1', unit: '本' },
+        ],
+      },
+    ],
+    ['長ねぎ'],
+  )
+  eq('買い物候補: 在庫「長ねぎ」ありなら「長ねぎ（白い部分）」も除外される', c.map((x) => x.name), ['にんじん'])
+}
+
 // ---------- 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1) ----------
 {
   eq('在庫グループ: 玉ねぎ→野菜・きのこ', categorizePantryName('玉ねぎ'), 'vegetable')
@@ -2308,6 +2457,40 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('在庫反映: 変化するのは2件だけ', down.length, 2)
   // 材料が空なら何も下げない
   eq('在庫反映: 材料が空なら0件', selectPantryDowngrades(items, []).length, 0)
+}
+
+// ---------- selectPantryDowngrades: 名寄せの誤爆と不発(2026-07-29 便CC/C3。QA S2) ----------
+{
+  const down = (chipName, ingredientNames) =>
+    selectPantryDowngrades([{ id: 1, name: chipName, level: 'have', isFrequent: true }], ingredientNames)
+      .length > 0
+
+  // 誤爆側: 部分一致をやめたので別食材で減らない
+  eq('在庫反映(誤爆): 「ねぎ」チップは玉ねぎで減らない', down('ねぎ', ['玉ねぎ']), false)
+  eq('在庫反映(誤爆): 「豆腐」チップは高野豆腐で減らない', down('豆腐', ['高野豆腐']), false)
+  eq('在庫反映(総称): 「豆腐」チップは絹ごし豆腐で減る', down('豆腐', ['絹ごし豆腐']), true)
+  eq('在庫反映(誤爆): 「卵」チップは「砂糖（卵用）」で減らない', down('卵', ['砂糖（卵用）']), false)
+  eq('在庫反映(誤爆): 「米」チップは米酢で減らない', down('米', ['米酢']), false)
+  eq('在庫反映(誤爆): 「ごま」チップはごま油で減らない', down('ごま', ['ごま油']), false)
+  // 不発側: 括弧付きの材料名でも同じ食材として減る
+  eq('在庫反映: 「長ねぎ」チップは「長ねぎ（白い部分）」で減る', down('長ねぎ', ['長ねぎ（白い部分）']), true)
+  eq('在庫反映: 同名はこれまでどおり減る', down('玉ねぎ', ['玉ねぎ']), true)
+  // 不発側: プリセットの総称チップ(豚肉・鶏肉)が部位名の材料で減る
+  eq('在庫反映(総称): 「豚肉」チップは豚こま切れ肉で減る', down('豚肉', ['豚こま切れ肉']), true)
+  eq('在庫反映(総称): 「鶏肉」チップは鶏もも肉で減る', down('鶏肉', ['鶏もも肉']), true)
+  eq('在庫反映(総称): 「牛肉」チップは牛こま切れ肉で減る', down('牛肉', ['牛こま切れ肉']), true)
+  // 総称チップの巻き添え防止: 調味料や別の肉では減らない
+  eq('在庫反映(総称): 「鶏肉」チップは鶏がらスープの素で減らない', down('鶏肉', ['鶏がらスープの素']), false)
+  eq('在庫反映(総称): 「豚肉」チップは鶏もも肉で減らない', down('豚肉', ['鶏もも肉']), false)
+}
+
+// ---------- categorizePantryName: かな書きの総称語(2026-07-29 便CC/C4。QA S3の「とりにく」) ----------
+{
+  eq('在庫グループ: かな「とりにく」→肉・魚介', categorizePantryName('とりにく'), 'meatFish')
+  eq('在庫グループ: かな「ぶたにく」→肉・魚介', categorizePantryName('ぶたにく'), 'meatFish')
+  eq('在庫グループ: かな「ぎゅうにく」→肉・魚介', categorizePantryName('ぎゅうにく'), 'meatFish')
+  // 「にく」の部分一致に寄せていないこと(にんにくが肉売り場に行かない)
+  eq('在庫グループ: 「にんにく」は肉・魚介にしない', categorizePantryName('にんにく') !== 'meatFish', true)
 }
 
 // ---------- hasLaterHandsOnStep(並行調理ナビ: 最後の待ち工程に「この間に〜」を出さない・2026-07-09ペルソナ第2波) ----------
@@ -3320,7 +3503,9 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
     [1],
   )
   eq(
-    '在庫絞り込みON: 部分一致で「豆腐」が「絹ごし豆腐」にヒットする(在庫一致順と同じ判定)',
+    // 2026-07-29 便CC/C4: 判定は部分一致から「総称語→具体名」の表に置き換えたが、
+    // 在庫「豆腐」で絹ごし豆腐のレシピが出るという意図はそのまま保つ
+    '在庫絞り込みON: 総称の「豆腐」が「絹ごし豆腐」にヒットする(在庫一致順と同じ判定)',
     searchRecipes(recipes, { ...baseOptions, pantryOnly: true, pantryNames: ['豆腐'] }).map(
       (r) => r.recipe.id,
     ),

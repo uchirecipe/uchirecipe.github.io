@@ -1,5 +1,6 @@
 import type { Recipe } from '../db/types'
 import { toHiragana } from './kana'
+import { makePantryMatcher } from './pantry'
 import { computeRecipeNutrition } from './nutrition'
 import type { SearchResult } from './search'
 
@@ -100,13 +101,16 @@ export function buildNutrientSortValues(recipes: Recipe[]): Map<number, Nutrient
 
 const collator = new Intl.Collator('ja')
 
-/** 在庫にある食材のうち、このレシピの材料に含まれるものの数 */
-function pantryMatchCount(recipe: Recipe, normalizedPantryNames: string[]): number {
-  if (normalizedPantryNames.length === 0) return 0
-  const ingredientNames = recipe.ingredients.map((i) => toHiragana(i.name))
-  return normalizedPantryNames.filter((pantryName) =>
-    ingredientNames.some((name) => name.includes(pantryName)),
-  ).length
+/**
+ * 在庫にある食材のうち、このレシピの材料に含まれるものの数。
+ * 在庫との照合は logic/pantry.ts の判定器に一本化する(2026-07-29 便CC/C4)。
+ */
+function pantryMatchCount(
+  recipe: Recipe,
+  matchers: ((ingredientName: string) => boolean)[],
+): number {
+  if (matchers.length === 0) return 0
+  return matchers.filter((matches) => recipe.ingredients.some((i) => matches(i.name))).length
 }
 
 /** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか） */
@@ -114,7 +118,7 @@ function compareAscending(
   option: Exclude<RecipeSortOption, NutrientSortOption>,
   a: SearchResult,
   b: SearchResult,
-  normalizedPantryNames: string[],
+  pantryMatchers: ((ingredientName: string) => boolean)[],
 ): number {
   switch (option) {
     case 'updated':
@@ -124,10 +128,7 @@ function compareAscending(
     case 'cooked':
       return a.recipe.cookedLogs.length - b.recipe.cookedLogs.length
     case 'pantryMatch':
-      return (
-        pantryMatchCount(a.recipe, normalizedPantryNames) -
-        pantryMatchCount(b.recipe, normalizedPantryNames)
-      )
+      return pantryMatchCount(a.recipe, pantryMatchers) - pantryMatchCount(b.recipe, pantryMatchers)
   }
 }
 
@@ -168,10 +169,12 @@ export function sortResults(
     return sorted
   }
 
-  const normalizedPantry = option === 'pantryMatch' ? pantryNames.map(toHiragana) : []
+  // 在庫チップ1件ごとの照合器を1回だけ作る(2026-07-29 便CC/C4。判定は logic/pantry.ts に一本化)
+  const pantryMatchers =
+    option === 'pantryMatch' ? pantryNames.map((name) => makePantryMatcher([name])) : []
   sorted.sort(
     (a, b) =>
-      sign * compareAscending(option, a, b, normalizedPantry) ||
+      sign * compareAscending(option, a, b, pantryMatchers) ||
       b.recipe.updatedAt - a.recipe.updatedAt,
   )
   return sorted

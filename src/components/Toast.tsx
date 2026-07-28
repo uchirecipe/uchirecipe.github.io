@@ -1,9 +1,16 @@
 import { useEffect } from 'react'
 import { X } from 'lucide-react'
+import { ja } from '../i18n/ja'
 
 type Props = {
   message: string
   onClose: () => void
+  /**
+   * 取り消しなど、トーストから直接行える操作（任意・2026-07-29 便CC/C19）。
+   * 省略すると従来どおり「どこをタップしても閉じるだけ」のトーストになる。
+   */
+  actionLabel?: string
+  onAction?: () => void
 }
 
 // 自動で消えるまでの時間(ミリ秒)。「◯件追加・◯件更新しました（重複◯件はスキップ）」のような
@@ -22,7 +29,7 @@ const AUTO_DISMISS_MS = 6000
  * 出現時は軽いスライドイン(下から10px+フェードイン。motion-safe:でprefers-reduced-motionを尊重。
  * 2026-07-13 UIペルソナQA)。
  */
-export default function Toast({ message, onClose }: Props) {
+export default function Toast({ message, onClose, actionLabel, onAction }: Props) {
   useEffect(() => {
     if (!message) return
     const timer = window.setTimeout(onClose, AUTO_DISMISS_MS)
@@ -31,6 +38,8 @@ export default function Toast({ message, onClose }: Props) {
 
   if (!message) return null
 
+  const hasAction = !!actionLabel && !!onAction
+
   return (
     <div
       className="fixed inset-x-0 z-[70] flex justify-center px-[var(--space-md)]"
@@ -38,14 +47,35 @@ export default function Toast({ message, onClose }: Props) {
       role="status"
       aria-live="polite"
     >
-      <button
-        type="button"
-        onClick={onClose}
-        className="flex w-full max-w-sm items-start gap-2 rounded-md border border-accent bg-surface px-4 py-3 text-left shadow-md motion-safe:animate-toast-in"
-      >
-        <span className="min-w-0 flex-1 text-sm font-bold text-accent">{message}</span>
-        <X size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden />
-      </button>
+      <div className="flex w-full max-w-sm items-start gap-2 rounded-md border border-accent bg-surface px-4 py-3 text-left shadow-md motion-safe:animate-toast-in">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+        >
+          <span className="min-w-0 flex-1 text-sm font-bold text-accent">{message}</span>
+          {!hasAction && <X size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden />}
+        </button>
+        {hasAction && (
+          <>
+            <button
+              type="button"
+              onClick={onAction}
+              className="shrink-0 rounded-sm border border-accent px-3 py-1 text-sm font-bold text-accent"
+            >
+              {actionLabel}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={ja.common.close}
+              className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-accent"
+            >
+              <X size={16} aria-hidden />
+            </button>
+          </>
+        )}
+      </div>
     </div>
   )
 }
