@@ -1051,6 +1051,26 @@ try {
           edit.plusRight <= edit.clientWidth,
         JSON.stringify(edit),
       )
+      // --- UI-390-02: 時間トークン2連の接着(「[30分]〜[1時間]ほど漬ける。」)が横あふれを
+      // 起こさないこと(2026-07-27 機能④診断C1。mergeTildeBoxesの無条件nowrap接着で
+      // レシピ87を開くだけでページ全体が横あふれし、Chrome Android相当では全ボタンが
+      // 押下不能になっていた。12字の幅ガードで〜の前後の行割りを許容して解消) ---
+      currentCheck = 'UI-390-02'
+      await w390Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await w390Page.waitForTimeout(800)
+      await w390Page.getByPlaceholder('料理名・材料・タグで検索').fill('冷やしトマト')
+      await w390Page.waitForTimeout(600)
+      await w390Page.getByText('冷やしトマトの浅漬け', { exact: true }).first().click()
+      await w390Page.waitForTimeout(800)
+      const tildeDoc = await w390Page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      check(
+        'UI-390-02 時間トークン2連のレシピ詳細で横あふれしない',
+        tildeDoc.scrollWidth <= tildeDoc.clientWidth,
+        JSON.stringify(tildeDoc),
+      )
     } finally {
       await w390Browser.close()
     }

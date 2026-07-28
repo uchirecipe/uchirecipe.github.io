@@ -177,7 +177,10 @@ function mergeTildeBoxes(atoms: BuiltAtom[]): BuiltAtom[] {
       midText = b.text
       right = c
     }
-    if (left && right) {
+    // 幅ガード(2026-07-27 機能④診断C1): 「[30分]〜[1時間]ほど漬ける。」のような長い接着は
+    // nowrapが緊急折返しまで無効化し、狭幅端末でページ全体が横あふれして操作不能になる。
+    // splitAroundTimeToken(jaWrap.ts)と同じ12字を上限とし、超える場合は接着しない(〜で行が割れる方を優先)。
+    if (left && right && [...(left.text + midText + right.text)].length <= 12) {
       out.push({
         kind: 'atom',
         id: left.id,
