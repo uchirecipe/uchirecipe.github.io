@@ -103,8 +103,17 @@ function detectSpaceNumberSequence(lines: string[]): boolean {
 const STEP_LIKE_MIDDLE = /って|んで/
 const STEP_LIKE_ENDING =
   /(切る|むく|剥く|煮る|焼く|炒める|茹でる|ゆでる|蒸す|揚げる|漬ける|冷ます|混ぜる|加える|入れる|盛る|かける|絞る|こす|裏返す|取り出す|並べる|包む|丸める|こねる|塗る|溶く|溶かす|含める|詰める|する|できる)$/
+// C-03(2026-07-28 便BW): 走り書きのノートで多い、句点で終わる行(「大根は下ゆで。」)と、
+// 連用形で終わる文(「玉ねぎをあめ色になるまで炒め」)も手順文として扱う。
+// 連用形は材料名(「にんじんの千切り」「なすの煮浸し」)と紛らわしいため、格助詞「を」が
+// ある行だけに限定する(材料名に「を」はまず現れない)
+const STEP_LIKE_PERIOD = /。$/
+const STEP_LIKE_RENYOU_ENDING =
+  /(切り|むき|剥き|煮|焼き|炒め|茹で|ゆで|蒸し|揚げ|漬け|冷まし|混ぜ|加え|入れ|盛り|かけ|絞り|こし|裏返し|取り出し|並べ|包み|丸め|こね|塗り|溶き|溶かし|含め|詰め)$/
 function looksLikeStepSentence(line: string): boolean {
-  return STEP_LIKE_MIDDLE.test(line) || STEP_LIKE_ENDING.test(line)
+  if (STEP_LIKE_MIDDLE.test(line) || STEP_LIKE_ENDING.test(line)) return true
+  if (STEP_LIKE_PERIOD.test(line)) return true
+  return STEP_LIKE_RENYOU_ENDING.test(line) && line.includes('を')
 }
 
 // M3(a): 「（A）ソース」のように短い英数字ラベル+短い補足語で終わる行
@@ -147,6 +156,16 @@ function collapseMixedFraction(text: string): string {
   })
 }
 
+// C-03(2026-07-28 便BW): 「200gくらい」の「くらい」は単位の一部ではない。
+// 単位欄に「gくらい」と入ると栄養・原価の集計から静かに外れるため、
+// 既知の単位に続く曖昧語だけを落とす(単位が分からない「ひとつまみくらい」等には触らない)
+const UNIT_WITH_APPROX =
+  /^((?:g|kg|ml|cc|個|本|枚|袋|缶|玉|株|丁|片|かけ|束|尾|切れ|合|カップ|杯|節|房))\s*(?:くらい|ぐらい|ほど|程度|前後)$/
+function stripApproxSuffix(unit: string): string {
+  const matched = unit.trim().match(UNIT_WITH_APPROX)
+  return matched ? matched[1] : unit
+}
+
 /**
  * 「200g」「大さじ2」「1/2個」「適量」「大さじ2〜3」などを 分量+単位 に分ける。
  * 「1枚（250g）」のような単位末尾の括弧書きは memo として分離して返す。
@@ -181,9 +200,9 @@ export function splitQuantity(raw: string): { amount: string; unit: string; memo
     // 単位の後ろの括弧書き(「1枚（250g）」の「（250g）」)は単位に混ぜず、メモとして分ける
     const paren = post[2].match(/^(.*?)\s*[（(]([^（）()]+)[）)]$/)
     if (paren && paren[1].trim()) {
-      return { amount, unit: paren[1].trim(), memo: paren[2].trim() }
+      return { amount, unit: stripApproxSuffix(paren[1].trim()), memo: paren[2].trim() }
     }
-    return { amount, unit: post[2] }
+    return { amount, unit: stripApproxSuffix(post[2]) }
   }
 
   // 「適量」「少々」など数字なし → 分量欄にそのまま
@@ -214,18 +233,26 @@ function parseIngredientLine(rawLine: string): ParsedIngredient | undefined {
   if (!line || line.length > 40) return undefined
 
   // 区切り文字あり: 「にんじん…1本」「豚肉：200g」「じゃがいも  3個」
-  const bySeparator = line.split(/[…‥⋯]+|[：:]|\t+| {2,}|　+/).map((p) => p.trim()).filter(Boolean)
+  // C-03(2026-07-28 便BW): 三点リーダー(…)だけでなく、実際のレシピメモに多い
+  // 「にんじん...1本」(半角ピリオド)「塩こしょう・・・少々」(中黒)の連続も区切りとして扱う。
+  // 単独の「・」「.」は材料名の一部(「A・B調味料」「1.5」)なので2つ以上の連続だけを対象にする
+  const bySeparator = line
+    .split(/[…‥⋯]+|[.．]{2,}|[・･]{2,}|[：:]|\t+| {2,}|　+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
   if (bySeparator.length >= 2) {
     const name = bySeparator[0]
     const quantity = bySeparator.slice(1).join(' ')
     if (name) return { name, ...splitQuantity(quantity) }
   }
 
-  // 半角スペース1つ区切り: 「にんじん 1本」（後半が分量らしいときだけ）
+  // 半角スペース1つ区切り: 「にんじん 1本」（後半が分量らしいときだけ）。
+  // C-03: 曖昧な分量語の語彙を AMOUNT_ONLY_EXACT に一本化する(従来はここだけ4語しか知らず、
+  // 「しょうゆ 適宜」「塩 少し」が材料名に吸われていた)
   const bySpace = line.match(/^(.+?)\s+(\S+)$/)
   if (bySpace) {
     const quantity = normalize(bySpace[2])
-    if (/^(?:大さじ|小さじ|カップ)?\d|^(適量|少々|お好みで|ひとつまみ)$/.test(quantity)) {
+    if (/^(?:大さじ|小さじ|カップ)?\d/.test(quantity) || AMOUNT_ONLY_EXACT.test(quantity)) {
       return { name: bySpace[1].trim(), ...splitQuantity(bySpace[2]) }
     }
   }
@@ -251,6 +278,47 @@ function parseIngredientLine(rawLine: string): ParsedIngredient | undefined {
   }
 
   return undefined
+}
+
+/**
+ * C-03(2026-07-28 便BW): 手書きノートに多い「1行に材料を複数書く」形
+ * （例:「ぶり2切れ 大根1/3 しょうが少し」）を、材料の並びとして解釈する。
+ *
+ * 従来はこの行がどの材料パターンにも当たらず、丸ごと手順や料理名に化けていた
+ * （実機QAの走り書きケースで材料↔手順が入れ替わる主因）。
+ * 誤爆を避けるため、**空白で区切った全ての塊が「名前＋分量」として読めるときだけ** 採用する
+ * （日本語の手順文に半角/全角スペースが複数入り、その全部が分量で終わることはまずない）。
+ */
+const COMPACT_AMOUNT_WORD = /(少し|少々|適量|適宜|ひとつまみ|ちょっと|お好みで?)$/
+function parseCompactIngredientChunk(chunk: string): ParsedIngredient | undefined {
+  const parsed = parseIngredientLine(chunk)
+  if (parsed && /\d|適量|少々|適宜|お好み|ひとつまみ|少し|ちょっと/.test(parsed.amount + parsed.unit)) {
+    return parsed
+  }
+  const normalized = normalize(chunk.replace(BULLET, '').trim())
+  // 「大根1/3」のように単位のない数量が名前にくっついている形
+  const withNumber = normalized.match(/^(\D{1,12}?)(\d+(?:\.\d+)?(?:\/\d+)?)$/)
+  if (withNumber) return { name: withNumber[1].trim(), amount: withNumber[2], unit: '' }
+  // 「しょうが少し」のように曖昧な分量語が名前にくっついている形
+  const withWord = normalized.match(COMPACT_AMOUNT_WORD)
+  if (withWord && withWord.index !== undefined && withWord.index > 0) {
+    return { name: normalized.slice(0, withWord.index).trim(), amount: withWord[1], unit: '' }
+  }
+  return undefined
+}
+
+export function parseMultiIngredientLine(rawLine: string): ParsedIngredient[] | undefined {
+  const line = rawLine.replace(BULLET, '').trim()
+  if (!line || line.length > 40) return undefined
+  const chunks = line.split(/[ 　]+/).filter(Boolean)
+  if (chunks.length < 2 || chunks.length > 6) return undefined
+  const parsed: ParsedIngredient[] = []
+  for (const chunk of chunks) {
+    const one = parseCompactIngredientChunk(chunk)
+    if (!one || !one.name) return undefined
+    parsed.push(one)
+  }
+  return parsed
 }
 
 /**
@@ -291,6 +359,19 @@ const ING_HEADER_FOLLOWED_BY_PARTICLE =
   /^[【\[（(◆■□●○☆★♪#＊*\s]*(?:材料|用意するもの|ざいりょう)[をはがもにで]/
 function isIngHeaderLine(line: string): boolean {
   return ING_HEADER.test(line) && line.length <= 15 && !ING_HEADER_FOLLOWED_BY_PARTICLE.test(line)
+}
+
+/**
+ * C-06(2026-07-28 便BW): 料理名の候補にしない「文っぽい行」の判定。
+ * SNS投稿の貼り付けでは〈感想キャプション → 料理名 → 材料〉の順が多く、従来は先頭の感想文が
+ * 料理名として採用され、本当の料理名の行は前処理で捨てられていた(実機QA・5体一致の指摘)。
+ * 句読点を含む行と、丁寧語・話し言葉の語尾で終わる行はタイトル候補から外し、次の候補に譲る。
+ * 料理名に句読点や「です・ます」が入ることはまずないため、短い名詞句が優先される。
+ */
+const SENTENCE_LIKE_TITLE =
+  /[、。]|(?:です|ます|でした|ました|しまう|ちゃう|してみて|ください)[♪★☆！!〜～…。\s]*$/
+function isSentenceLikeTitle(line: string): boolean {
+  return SENTENCE_LIKE_TITLE.test(line.replace(BULLET, '').trim())
 }
 
 /** 見出し行かどうか(既存のING_HEADER/STEP_HEADER/MEMO_HEADERで判定)。ヘッダー行自身の領域分類には使わない共通ヘルパー */
@@ -467,7 +548,10 @@ function pass2(lines: string[]): string[] {
 }
 
 // ---- §1 F5: 名前行+分量行ペアリング ----
-const AMOUNT_ONLY_EXACT = /^(適量|少々|適宜|少量|ひとつまみ|ふたつまみ|お好みで?|お好みの量|好みで)$/
+// C-03(2026-07-28 便BW): 手書きノートで実際に使われる「少し」「ちょっと」も分量語に加える
+// (これが分量と分からないと、行が丸ごと材料名になる/手順に化ける)
+const AMOUNT_ONLY_EXACT =
+  /^(適量|少々|適宜|少量|ひとつまみ|ふたつまみ|お好みで?|お好みの量|好みで|少し|ちょっと)$/
 const AMOUNT_EACH = /^各[、,]?\s*\S{1,8}$/
 const AMOUNT_PRE_UNIT = /^(大さじ|小さじ|おおさじ|こさじ|カップ)\s*\d/
 const AMOUNT_SIZE_PREFIX = /^[大中小]\s*\d/
@@ -717,7 +801,7 @@ function pass1(lines: string[]): string[] {
         i++
         continue
       }
-      if (!titleAssigned && line.trim().length <= 30) {
+      if (!titleAssigned && line.trim().length <= 30 && !isSentenceLikeTitle(line)) {
         out.push(line)
         titleAssigned = true
         i++
@@ -839,6 +923,15 @@ export function parseRecipeText(text: string): ParsedRecipe {
       continue
     }
 
+    // 1行に材料が複数書かれている走り書き(「ぶり2切れ 大根1/3 しょうが少し」)を材料の並びとして拾う。
+    // ここに来るのは auto / ingredients モードだけ(steps modeは上で処理済み)なので手順文は対象外(C-03)
+    const multi = parseMultiIngredientLine(line)
+    if (multi) {
+      result.ingredients.push(...multi)
+      if (mode === 'auto') mode = 'ingredients'
+      continue
+    }
+
     // 材料として読めるか試す（見出し前は、分量がはっきりある行だけ材料とみなす）
     const ingredient = parseIngredientLine(line)
     if (ingredient && (mode === 'ingredients' || /\d|適量|少々|お好み|ひとつまみ/.test(ingredient.amount))) {
@@ -848,14 +941,16 @@ export function parseRecipeText(text: string): ParsedRecipe {
     }
     if (mode === 'ingredients') {
       const name = line.replace(BULLET, '').trim()
+      // 「※タレ」「【タレ】」「(合わせ調味料)」のような小見出し・装飾行は取り込まない。
+      // C-03(2026-07-28 便BW)で手順文の判定に「。で終わる行」を足したため、材料欄の注記
+      // (「＊あれば干しあみえびがおすすめ。」)が手順に化けないよう、小見出し判定を先に見る
+      if (isIngredientSubheading(line, name)) continue
       // 見出し・番号が無いまま手順の文に入っていた場合、材料名と誤認識しないよう切り替える
       if (looksLikeStepSentence(name)) {
         mode = 'steps'
         result.steps.push(name)
         continue
       }
-      // 「※タレ」「【タレ】」「(合わせ調味料)」のような小見出し・装飾行は取り込まない
-      if (isIngredientSubheading(line, name)) continue
       // 材料欄の中の分量なし行（例: 「〈タレ〉しょうゆ」）は名前だけの材料として拾う
       if (name.length <= 25) {
         result.ingredients.push({ name, amount: '', unit: '' })
@@ -865,7 +960,8 @@ export function parseRecipeText(text: string): ParsedRecipe {
 
     // まだタイトルが無く、短い行ならタイトルと解釈
     // M7: 「〇〇　レシピ・作り方」のようなサイトの末尾定型句を取り除く(空になれば元のまま)
-    if (!result.title && mode === 'auto' && line.length <= 30) {
+    // C-06: 「やばい、これ本当に簡単でびっくりした」のような感想文は料理名にしない
+    if (!result.title && mode === 'auto' && line.length <= 30 && !isSentenceLikeTitle(line)) {
       const stripped = line.replace(BULLET, '').trim()
       const cleaned = stripped
         .replace(/[\s　]*(?:の)?(?:レシピ[・･]?)?(?:作り方|つくり方)$/, '')

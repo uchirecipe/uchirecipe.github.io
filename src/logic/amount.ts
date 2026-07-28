@@ -1,5 +1,8 @@
-// 大さじ・小さじ・カップ(計量スプーン/カップ類): 0.25刻み
-const SPOON_UNITS = new Set(['大さじ', '小さじ', 'カップ'])
+// 大さじ・小さじ・カップ(計量スプーン/カップ類): 0.25刻み。
+// ひらがな表記「おおさじ」「こさじ」も同じ扱いにする(2026-07-28 便BW・QA S3: 「おおさじ2」と
+// 入力すると単位が後ろに回って「2おおさじ」と表示されていた。表記は原文のまま尊重し、
+// 並び順と丸め幅だけを大さじ/小さじと揃える)
+const SPOON_UNITS = new Set(['大さじ', '小さじ', 'カップ', 'おおさじ', 'こさじ'])
 // 個数として数える単位: 0.5刻み(最小0.5、0にはしない)。
 // 「房」は2026-07-21分量表記拡充で追加(「ひと房」の解釈用。src/logic/priceEstimate.tsの
 // COUNT_UNIT_NAMESには元から入っていたが、こちらは漏れていた表記ゆれ)
@@ -41,6 +44,23 @@ function formatFraction(value: number): string {
   if (!fracLabel) return String(whole)
   if (whole === 0) return fracLabel
   return `${whole}と${fracLabel}`
+}
+
+/**
+ * 「1と1/2」「1・1/2」のような帯分数を小数(1.5)に開く（2026-07-28 便BW/C-18）。
+ * 詳細ページの人数変更で、帯分数の分量だけ倍にならず据え置かれていた不具合の対策
+ * （アプリ自身が人数変更後の表示に帯分数(formatFraction)を使うため、その表示を保存して
+ * 開き直すと解釈できない、という往復の穴になっていた）。
+ * 貼り付けパーサー側の collapseMixedFraction と同じ考え方の解釈専用ヘルパーで、
+ * 保存データそのものは書き換えない。
+ */
+export function expandMixedFraction(text: string): string {
+  return text.replace(/(\d+)(?:と|・)(\d+)\/(\d+)/g, (matched, whole: string, num: string, den: string) => {
+    const denominator = Number.parseInt(den, 10)
+    if (!denominator) return matched
+    const value = Number.parseInt(whole, 10) + Number.parseInt(num, 10) / denominator
+    return String(Math.round(value * 1000) / 1000)
+  })
 }
 
 /** 全角数字・全角の「／」「．」を半角にする（分量入力の表記ゆれ対策） */
@@ -204,8 +224,10 @@ export function scaleAmount(
     return `${formatFraction(rounded)}${counterWord.unit}`
   }
 
-  // 対応する形: "200" "1.5" "1/2"
-  const match = trimmed.match(/^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/)
+  // 対応する形: "200" "1.5" "1/2" "1と1/2"(帯分数は小数に開いてから解釈する。C-18)
+  const match = expandMixedFraction(trimmed).match(
+    /^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/,
+  )
   if (!match) return amount
 
   let value = Number.parseFloat(match[1])

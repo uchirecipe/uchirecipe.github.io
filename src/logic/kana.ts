@@ -66,6 +66,70 @@ export function toHiragana(input: string): string {
 }
 
 /**
+ * タグでよく使う語の読み（2026-07-28 便BW・QA S3）。
+ *
+ * タグ候補の絞り込みは toHiragana で行っているが、その辞書（INGREDIENT_READINGS）は食材名だけで、
+ * 「夏」「作り置き」のようなタグ語の読みを持たない。そのため「なつ」と打っても既存タグの「夏」に
+ * 辿り着けなかった。ここでは献立・保存・ジャンルなど、タグとして実際によく使う語だけを補う。
+ * 網羅は狙わない（読みが引けない語は従来どおり表記の一致で拾う）。
+ */
+const TAG_READINGS: Record<string, string> = {
+  春: 'はる',
+  夏: 'なつ',
+  秋: 'あき',
+  冬: 'ふゆ',
+  和食: 'わしょく',
+  洋食: 'ようしょく',
+  中華: 'ちゅうか',
+  韓国: 'かんこく',
+  作り置き: 'つくりおき',
+  作りおき: 'つくりおき',
+  常備菜: 'じょうびさい',
+  時短: 'じたん',
+  節約: 'せつやく',
+  簡単: 'かんたん',
+  定番: 'ていばん',
+  弁当: 'べんとう',
+  朝食: 'ちょうしょく',
+  昼食: 'ちゅうしょく',
+  夕食: 'ゆうしょく',
+  夜食: 'やしょく',
+  主菜: 'しゅさい',
+  副菜: 'ふくさい',
+  汁物: 'しるもの',
+  主食: 'しゅしょく',
+  子供: 'こども',
+  子ども: 'こども',
+  来客: 'らいきゃく',
+  行事: 'ぎょうじ',
+  正月: 'しょうがつ',
+  煮物: 'にもの',
+  焼き物: 'やきもの',
+  揚げ物: 'あげもの',
+  炒め物: 'いためもの',
+  蒸し物: 'むしもの',
+  鍋: 'なべ',
+  丼: 'どんぶり',
+  麺: 'めん',
+  漬物: 'つけもの',
+  甘辛: 'あまから',
+  作り方: 'つくりかた',
+}
+const tagReadingKeys = Object.keys(TAG_READINGS).sort((a, b) => b.length - a.length)
+const tagReadingPattern =
+  tagReadingKeys.length > 0 ? new RegExp(tagReadingKeys.map(escapeRegExp).join('|'), 'g') : null
+
+/**
+ * タグの絞り込み用のキー。toHiragana（食材名辞書つき）に加えてタグ語の読みも当てる。
+ * 例: 「夏」→「なつ」／「作り置き」→「つくりおき」。読みが引けない語はそのまま返す。
+ */
+export function toTagKey(input: string): string {
+  const base = toHiragana(input)
+  if (!tagReadingPattern) return base
+  return base.replace(tagReadingPattern, (matched) => TAG_READINGS[matched])
+}
+
+/**
  * 料理名・材料名・タグ・検索キーワードから検索用キーワード一覧を作る（保存時に呼ぶ）。
  *
  * 調味料的な材料（大さじ/小さじ/単位なし/「少々」等。isSeasoningLikeと同じ基準）は

@@ -44,6 +44,7 @@ import {
   roundNutrient,
 } from '../logic/nutrition'
 import { deriveDoneLabel } from '../logic/timerLabel'
+import { isHttpUrl } from '../logic/url'
 import { isMinutesShownInText } from '../logic/time'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { MemoText } from '../components/MemoText'
@@ -982,17 +983,26 @@ export default function RecipeDetailPage() {
             />
           </section>
         )}
+        {/* 参照元(2026-07-28 便BW/C-19): http/https のときだけリンクにする。
+            それ以外(「javascript:…」や URL でない文字列)は押しても何も起きないリンクになるため、
+            リンクにはせず入力された文字をそのまま見せる(勝手に消さない) */}
         {recipe.sourceUrl && (
           <p className="mt-[var(--space-md)]">
-            <a
-              href={recipe.sourceUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-accent underline"
-            >
-              <ExternalLink size={16} aria-hidden />
-              {ja.detail.source}
-            </a>
+            {isHttpUrl(recipe.sourceUrl) ? (
+              <a
+                href={recipe.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-accent underline"
+              >
+                <ExternalLink size={16} aria-hidden />
+                {ja.detail.source}
+              </a>
+            ) : (
+              <span className="text-sm break-all text-ink-muted">
+                {ja.detail.source}: {recipe.sourceUrl}
+              </span>
+            )}
           </p>
         )}
 

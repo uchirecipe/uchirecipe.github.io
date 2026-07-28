@@ -6,7 +6,9 @@ import {
   formatAmountUnit,
   normalizeDigits,
   normalizeAmountInput,
+  expandMixedFraction,
 } from '../src/logic/amount.ts'
+import { isHttpUrl } from '../src/logic/url.ts'
 import {
   parseRecipeText,
   splitQuantity,
@@ -18,6 +20,7 @@ import {
 import {
   buildSearchWords,
   toHiragana,
+  toTagKey,
   searchIndexNeedsRebuild,
   SEARCH_INDEX_VERSION,
 } from '../src/logic/kana.ts'
@@ -192,11 +195,44 @@ eq('「ひとかけ」を半分(2→1人分)は分数表記', scaleAmount('ひ�
 eq('「一房」の1.5倍(2→3人分)は帯分数', scaleAmount('ひと房', 2, 3, ''), '1と1/2房')
 eq('未収録の「ひと丁」は通常どおり素通し(不自然な言い回しのため非対応)', scaleAmount('ひと丁', 2, 4, ''), 'ひと丁')
 
+// ---------- scaleAmount: 帯分数「1と1/2」(2026-07-28 便BW/C-18) ----------
+// 実機QA: 「水 1と1/2 カップ」だけ人数変更で倍にならず据え置かれていた。アプリ自身が人数変更後の
+// 表示に帯分数を使う(formatFraction)ため、その表示を保存して開き直すと解釈できない往復の穴だった
+eq('帯分数「1と1/2」を2倍(2→4人分)', scaleAmount('1と1/2', 2, 4, 'カップ'), '3')
+eq('帯分数「1と1/2」を半分(2→1人分)', scaleAmount('1と1/2', 2, 1, 'カップ'), '3/4')
+eq('帯分数「1と1/2」(単位=本)を2倍', scaleAmount('1と1/2', 2, 4, '本'), '3')
+eq('中黒の帯分数「1・1/2」も同じ', scaleAmount('1・1/2', 2, 4, 'カップ'), '3')
+eq('全角の帯分数「１と１／２」も同じ', scaleAmount('１と１／２', 2, 4, 'カップ'), '3')
+eq('帯分数はg単位でも倍になる', scaleAmount('1と1/2', 2, 4, 'g'), '3')
+eq('帯分数の展開(解釈専用)', expandMixedFraction('1と1/2'), '1.5')
+eq('帯分数でない文字列は素通し', expandMixedFraction('少々'), '少々')
+// 帯分数が栄養計算の対象外にならないこと(同じ書き方が計算にも乗る)
+eq('栄養: 帯分数「1と1/2」', parseAmountNumber('1と1/2'), 1.5)
+
+// ---------- ひらがな単位「おおさじ」「こさじ」(2026-07-28 便BW・QA S3) ----------
+// 「おおさじ2」と入力すると単位が後ろに回り「2おおさじ」と表示されていた。
+// 表記は原文のまま尊重し、並び順と丸め幅だけを大さじ/小さじと揃える
+eq('おおさじは単位が先', formatAmountUnit('2', 'おおさじ'), 'おおさじ2')
+eq('こさじは単位が先', formatAmountUnit('1/2', 'こさじ'), 'こさじ1/2')
+eq('おおさじも0.25刻み+帯分数でスケールする', scaleAmount('1', 2, 5, 'おおさじ'), '2と1/2')
+
 // ---------- formatAmountUnit(表示順 = 大さじ/小さじ/カップは単位が先) ----------
 eq('大さじは単位が先', formatAmountUnit('2', '大さじ'), '大さじ2')
 eq('gは数量が先', formatAmountUnit('200', 'g'), '200g')
 eq('単位なし', formatAmountUnit('適量', ''), '適量')
 eq('分量なし', formatAmountUnit('', '本'), '本')
+
+// ---------- isHttpUrl(参照元URLの検証。2026-07-28 便BW/C-19) ----------
+// 実機QA: 「javascript:alert(1)」や「これはURLではない」が保存でき、押しても何も起きない
+// 「参照元」リンクが詳細ページに出ていた。保存前の指摘と詳細ページのリンク化で同じ判定を使う
+eq('http URL', isHttpUrl('http://example.com/recipe'), true)
+eq('https URL', isHttpUrl('https://uchirecipe.com/'), true)
+eq('前後の空白は無視', isHttpUrl('  https://example.com  '), true)
+eq('javascript: は不可', isHttpUrl('javascript:alert(1)'), false)
+eq('data: は不可', isHttpUrl('data:text/html,<script>alert(1)</script>'), false)
+eq('URLでない文字列は不可', isHttpUrl('これはURLではない'), false)
+eq('スキームなしは不可', isHttpUrl('example.com'), false)
+eq('空文字は不可', isHttpUrl(''), false)
 
 // ---------- normalizeDigits ----------
 eq('全角数字', normalizeDigits('２００'), '200')
@@ -686,6 +722,106 @@ eq(
   ])
 }
 
+// ---------- 材料の「まとめて入力」(2026-07-28 便BW/C-07) ----------
+// 「豚こま 200g」と1行で書いて材料を足せる速記欄。分解は貼り付け取込と同じ資産
+// (normalizeImportedIngredient→parseIngredientLine)を使い、分けられなければ名前欄に入れる
+{
+  eq('C-07: 「豚こま 200g」を名前/分量/単位に分ける', normalizeImportedIngredient('豚こま 200g'), {
+    name: '豚こま',
+    amount: '200',
+    unit: 'g',
+  })
+  eq('C-07: 単位が前に来る「しょうゆ 大さじ2」', normalizeImportedIngredient('しょうゆ 大さじ2'), {
+    name: 'しょうゆ',
+    amount: '2',
+    unit: '大さじ',
+  })
+  eq('C-07: 「塩 少々」', normalizeImportedIngredient('塩 少々'), {
+    name: '塩',
+    amount: '少々',
+    unit: '',
+  })
+  eq('C-07: くっつき表記「玉ねぎ1個」', normalizeImportedIngredient('玉ねぎ1個'), {
+    name: '玉ねぎ',
+    amount: '1',
+    unit: '個',
+  })
+  eq('C-07: 分けられない入力は名前欄へ(黙って捨てない)', normalizeImportedIngredient('あまったお肉'), {
+    name: 'あまったお肉',
+    amount: '',
+    unit: '',
+  })
+}
+
+// ---------- 貼り付け解析 第3弾: 走り書きノート・SNS投稿(2026-07-28 便BW/C-03・C-06) ----------
+// 実機QA+ペルソナ5体診断の再発防止。診断の主症状は3つ:
+//  (1) 「・材料名...分量」の点区切りが分離されず材料名に「...」が残る
+//  (2) 走り書き(1行に複数材料・句点で終わる手順)で材料↔手順が丸ごと入れ替わる
+//  (3) SNS投稿で感想文が料理名として採用され、本当の料理名は前処理で捨てられる
+{
+  // (1) 点区切り(半角ピリオド・中黒の連続)。三点リーダー「…」は従来から対応済み
+  const r = parseRecipeText(
+    '【材料】(2人分)\n・スパゲッティ...200g\n・ツナ缶...1缶\n・塩こしょう...少々\n・しょうゆ 適宜\n・塩 少し',
+  )
+  eq('C-03: 半角ピリオド区切りで材料名に「...」が残らない', r.ingredients, [
+    { name: 'スパゲッティ', amount: '200', unit: 'g' },
+    { name: 'ツナ缶', amount: '1', unit: '缶' },
+    { name: '塩こしょう', amount: '少々', unit: '' },
+    { name: 'しょうゆ', amount: '適宜', unit: '' },
+    { name: '塩', amount: '少し', unit: '' },
+  ])
+  const r2 = parseRecipeText('【材料】\n・にんじん・・・1本\n・玉ねぎ・・・1/2個')
+  eq('C-03: 中黒の連続も区切りとして扱う', r2.ingredients, [
+    { name: 'にんじん', amount: '1', unit: '本' },
+    { name: '玉ねぎ', amount: '1/2', unit: '個' },
+  ])
+  // 単独の中黒は材料名の一部として保つ(「A・B調味料」を壊さない)
+  const r3 = parseRecipeText('【材料】\nゆず胡椒・柚子皮 少々')
+  eq('C-03: 単独の中黒は材料名のまま', r3.ingredients, [
+    { name: 'ゆず胡椒・柚子皮', amount: '少々', unit: '' },
+  ])
+}
+{
+  // (2) 走り書き: 1行に材料を複数書く形と、句点で終わる手順文
+  const r = parseRecipeText(
+    'ぶり大根\nぶり2切れ 大根1/3 しょうが少し\n大根は下ゆで。ぶりは霜降り。\n煮汁を沸かして20分煮る',
+  )
+  eq('C-03: 走り書きの料理名', r.title, 'ぶり大根')
+  eq('C-03: 1行に複数の材料を書いた走り書きを材料として拾う', r.ingredients, [
+    { name: 'ぶり', amount: '2', unit: '切れ' },
+    { name: '大根', amount: '1/3', unit: '' },
+    { name: 'しょうが', amount: '少し', unit: '' },
+  ])
+  eq('C-03: 句点で終わる走り書きの文は手順に入る(材料に化けない)', r.steps, [
+    '大根は下ゆで。ぶりは霜降り。',
+    '煮汁を沸かして20分煮る',
+  ])
+  // 連用形終わりの手順文(「〜を〜炒め」)も手順として扱う。格助詞「を」が無い材料名は巻き込まない
+  const r2 = parseRecipeText('材料\n玉ねぎ 1個\nにんじんの千切り\n作り方\n玉ねぎをあめ色になるまで炒め')
+  eq('C-03: 「にんじんの千切り」は材料のまま', r2.ingredients, [
+    { name: '玉ねぎ', amount: '1', unit: '個' },
+    { name: 'にんじんの千切り', amount: '', unit: '' },
+  ])
+  eq('C-03: 連用形で終わる手順文は手順', r2.steps, ['玉ねぎをあめ色になるまで炒め'])
+}
+{
+  // (3) SNS投稿: 感想が先・料理名が後。従来は感想が料理名になり、料理名の行は捨てられていた
+  const sns = `やばい、これ本当に簡単でびっくりした
+鶏むね肉のやわらか照り焼き
+材料（2人分）
+鶏むね肉\t1枚
+しょうゆ\t大さじ2
+作り方
+1. 鶏むね肉をそぎ切りにする
+2. フライパンで焼く`
+  const r = parseRecipeText(sns)
+  eq('C-06: 感想文ではなく料理名がタイトルになる', r.title, '鶏むね肉のやわらか照り焼き')
+  eq('C-06: 材料は従来どおり2件', r.ingredients.length, 2)
+  // 体言止めのキャッチコピーなど、句読点も丁寧語も無い行は従来どおりタイトル候補のまま
+  const r2 = parseRecipeText('【簡単すぎる】無限ピーマン\n材料\nピーマン 4個\n作り方\n1. 切る')
+  eq('C-06: 記号つきの短い料理名は従来どおり採用', r2.title, '【簡単すぎる】無限ピーマン')
+}
+
 // ============================================================================
 // 貼り付け解析 第2弾: 実サイト形式コーパスR1〜R8(docs/29 P7第2弾Fable裁定§7)
 // 実物(オーナー提供の生コピペ)と構造同型・内容は創作。生コピペそのものはコミットしない。
@@ -811,7 +947,9 @@ eq(
     { name: 'だしと水', amount: '合わせて400cc', unit: '' },
     { name: '砂糖', amount: '大1〜2', unit: '' },
     { name: 'みりん', amount: '大1〜2', unit: '' },
-    { name: '青ねぎ', amount: '10', unit: '本くらい' },
+    // 2026-07-28 便BW/C-03: 単位の後ろの「くらい」は単位の一部として保存しない
+    // (「本くらい」のままだと栄養・原価の集計から静かに外れるため。旧期待値は unit='本くらい')
+    { name: '青ねぎ', amount: '10', unit: '本' },
     { name: 'トリュフ塩', amount: '適宜', unit: '' },
   ])
   eq('R2: 手順6件・写真キャプション混入なし', r.steps, [
@@ -1400,6 +1538,23 @@ eq(
     ['', '  '],
   )
   eq('空文字・空白だけのkeywordsは検索語を増やさない', emptyKeyword.length, baseline.length)
+}
+
+// ---------- toTagKey(タグ候補のかな検索。2026-07-28 便BW・QA S3) ----------
+// 実機QA: 既存タグに「夏」「作り置き」があるのに「なつ」「つく」と打っても候補が出なかった
+// (読み仮名辞書は食材名だけで、タグ語の読みを持っていなかった)
+{
+  const suggest = (query, existing) =>
+    existing.filter((t) => t !== query && toTagKey(t).includes(toTagKey(query)))
+  const existingTags = ['夏', '作り置き', '和食', 'サラダ', '子ども']
+  eq('タグ候補: 「なつ」→夏', suggest('なつ', existingTags), ['夏'])
+  eq('タグ候補: 「つく」→作り置き', suggest('つく', existingTags), ['作り置き'])
+  eq('タグ候補: 「わ」→和食', suggest('わ', existingTags), ['和食'])
+  eq('タグ候補: 半角カナ「ｻﾗﾀﾞ」→サラダ(既存の挙動を維持)', suggest('ｻﾗﾀﾞ', existingTags), ['サラダ'])
+  eq('タグ候補: 「こども」→子ども', suggest('こども', existingTags), ['子ども'])
+  eq('タグ読み: 夏', toTagKey('夏'), 'なつ')
+  eq('タグ読み: 作り置き', toTagKey('作り置き'), 'つくりおき')
+  eq('タグ読み: 辞書にない語はそのまま', toTagKey('ぬか床'), 'ぬか床')
 }
 
 // ---------- searchIndexNeedsRebuild: 検索インデックス移行の判定(既存レシピのsearchWordsに
@@ -3675,6 +3830,28 @@ const iconKeyExpected = {
   eq('guessDishType: さばの味噌煮→main(魚)', guessDishType({ title: 'さばの味噌煮', tags: [], ingredients: [{ name: 'さば' }] }), 'main')
   eq('guessDishType: だし巻き卵→main(既知の限界:卵→main。データ側は裁定でside)', guessDishType({ title: 'だし巻き卵', tags: [], ingredients: [{ name: '卵' }] }), 'main')
   eq('guessDishType: 該当語なし→main(default)', guessDishType({ title: 'なぞの料理', tags: [], ingredients: [{ name: 'なにか' }] }), 'main')
+
+  // (b-2) 2026-07-28 便BW/C-05: 実機QAで「全部 主菜(main)で保存される」と実測された6品の再発防止。
+  // 5体のペルソナ全員が自動提案をそのまま通すと明言しており、誤った種別はそのままDBに残る。
+  const dish = (title, ingredients = []) => guessDishType({ title, tags: [], ingredients })
+  eq('C-05: 麦茶→その他(飲み物)', dish('麦茶', [{ name: '麦茶パック' }]), 'dessert')
+  eq('C-05: ほうじ茶→その他(飲み物)', dish('ほうじ茶'), 'dessert')
+  eq('C-05: 甘酒→その他(飲み物)', dish('甘酒'), 'dessert')
+  eq('C-05: ぬか漬け→副菜(漬物)', dish('ぬか漬け', [{ name: 'きゅうり' }]), 'side')
+  eq('C-05: きゅうりのピクルス→副菜', dish('きゅうりのピクルス'), 'side')
+  eq('C-05: いちごのシャーベット→その他(菓子)', dish('いちごのシャーベット', [{ name: 'いちご' }]), 'dessert')
+  eq('C-05: フルーツポンチ→その他(菓子)', dish('フルーツポンチ'), 'dessert')
+  eq('C-05: 鮭のみそ汁→汁物(魚より汁物が料理の類型を決める)', dish('鮭のみそ汁', [{ name: '鮭' }]), 'soup')
+  eq('C-05: あさりのお吸い物→汁物', dish('あさりのお吸い物', [{ name: 'あさり' }]), 'soup')
+  eq('C-05: たらの水炊き→汁物', dish('たらの水炊き', [{ name: 'たら' }]), 'soup')
+  // 汁物語を含まない魚料理は従来どおり主菜のまま(soupの前出しで魚料理を巻き込まないこと)
+  eq('C-05: 鮭のホイル焼き→主菜(据え置き)', dish('鮭のホイル焼き', [{ name: '鮭' }]), 'main')
+  eq('C-05: さばの味噌煮→主菜(据え置き)', dish('さばの味噌煮', [{ name: 'さば' }]), 'main')
+  // 茶碗蒸し・お茶漬けは飲み物ではない(「茶」1文字を飲み物語に入れていないことの固定)
+  eq('C-05: 茶碗蒸し→主菜(卵。飲み物にしない)', dish('茶碗蒸し', [{ name: '卵' }]), 'main')
+  eq('C-05: 鮭のお茶漬け→主菜(ご飯もの。飲み物にしない)', dish('鮭のお茶漬け', [{ name: 'ご飯' }]), 'main')
+  // 「◯◯漬け」全般を漬物にしていないこと(肉料理を副菜に巻き込まない)
+  eq('C-05: 豚肉の味噌漬け→主菜(据え置き)', dish('豚肉の味噌漬け', [{ name: '豚ロース' }]), 'main')
 
   // (c) オーナー裁定8品の同梱データ(dishType)ピン留め(2026-07-23確定・docs/56 §2-3)。
   const byTitle = new Map(starterDefs.map((d) => [d.title, d]))
