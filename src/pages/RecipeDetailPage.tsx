@@ -860,8 +860,6 @@ export default function RecipeDetailPage() {
                   <Maximize2 size={16} aria-hidden />
                   {ja.focus.open}
                 </button>
-                {/* 初見でも何が起きるボタンか分かるように一言添える(名称自体は変えない) */}
-                <p className="mt-0.5 text-xs text-ink-muted">{ja.focus.openHint}</p>
                 {/* 初回のみ・1回だけの控えめなヒント(docs/55 CEO提案1-5)。表示済みフラグで再表示しない */}
                 {showCookHint && (
                   <div className="mt-1 flex items-center justify-end gap-1">
@@ -881,6 +879,13 @@ export default function RecipeDetailPage() {
               </div>
             )}
           </div>
+          {/* 初見でも何ができるボタンか分かるように一言添える(名称自体は変えない)。
+              2026-07-28 機能④診断C16で読み上げ・声の操作・タイマーまで書き足したので、
+              ボタンと同じ shrink-0 の箱に入れると375px幅でページごと横あふれする。
+              見出し行の外に出して、折り返せる全幅の1行として置く */}
+          {recipe.steps.length > 0 && (
+            <p className="mt-0.5 text-right text-xs text-ink-muted">{ja.focus.openHint}</p>
+          )}
           {hasQuickVariant && (
             <div className="mt-[var(--space-sm)] inline-flex rounded-sm border border-edge p-0.5">
               <button

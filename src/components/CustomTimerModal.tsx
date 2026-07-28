@@ -69,6 +69,9 @@ export default function CustomTimerModal({
             <X size={20} aria-hidden />
           </button>
         </div>
+        {/* 何をするタイマーかを最初に伝える(2026-07-28 機能④診断C17)。
+            名前だけでは用途が伝わらず、機能そのものに到達されていなかった */}
+        <p className="mt-0.5 text-sm text-ink-muted">{ja.timer.customHint}</p>
         <div className="mt-[var(--space-sm)] flex items-center justify-center gap-3">
           <button
             type="button"

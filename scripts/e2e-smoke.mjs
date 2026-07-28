@@ -1083,6 +1083,11 @@ try {
   // justify-center-safe(safe center)であふれた時だけ上寄せに落ちる ---
   currentCheck = 'FOCUS-SCROLL-01'
   {
+    // 調理中モードの✕(左上)を押して閉じる
+    const fsFocusClose = async (p) => {
+      await p.locator('.fixed.inset-0.z-50').getByRole('button', { name: '閉じる' }).first().click()
+      await p.waitForTimeout(400)
+    }
     const fsBrowser = await chromium.launch()
     try {
       const fsContext = await fsBrowser.newContext({
@@ -1134,6 +1139,81 @@ try {
         'FOCUS-SCROLL-01 縦位置の指定は safe center(短い手順の中央寄せは維持)',
         reach != null && reach.justify === 'safe center',
         JSON.stringify(reach),
+      )
+      // 375px幅の横あふれ監視(2026-07-28): 横に1pxでもあふれるとChromeモバイルは
+      // ページ全体をズームアウトし、fixed inset-0 の調理中モードが画面より高く描画されて
+      // 「前へ/次へ」が可視域の外に落ちる(機能④診断C1と同じ機構)。
+      // 説明文を足したときに再発しやすいので、詳細ページと調理中モードの両方で見張る
+      const w375 = await fsPage.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+        innerHeight: window.innerHeight,
+      }))
+      check(
+        'FOCUS-SCROLL-01 375px幅の調理中モードで横あふれしない(ボタンが画面外に落ちない)',
+        w375.scrollWidth <= w375.clientWidth && w375.innerHeight === 667,
+        JSON.stringify(w375),
+      )
+      const nextReachable = await fsPage.evaluate(() => {
+        const overlay = document.querySelector('.fixed.inset-0.z-50')
+        const next = Array.from(overlay.querySelectorAll('button')).find((b) =>
+          b.textContent.includes('次へ'),
+        )
+        if (!next) return null
+        const r = next.getBoundingClientRect()
+        return { bottom: Math.round(r.bottom), viewport: window.innerHeight }
+      })
+      check(
+        'FOCUS-SCROLL-01 「次へ」が可視域の中に収まっている',
+        nextReachable != null && nextReachable.bottom <= nextReachable.viewport,
+        JSON.stringify(nextReachable),
+      )
+      await fsFocusClose(fsPage)
+      const w375Detail = await fsPage.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }))
+      check(
+        'FOCUS-SCROLL-01 375px幅のレシピ詳細でも横あふれしない(入口の説明文を足しても)',
+        w375Detail.scrollWidth <= w375Detail.clientWidth,
+        JSON.stringify(w375Detail),
+      )
+
+      // --- FOCUS-COPY-01: 何ができる機能かが読んで分かること(2026-07-28 機能④診断C13/C15/C16/C17) ---
+      currentCheck = 'FOCUS-COPY-01'
+      const detailBody = await fsPage.textContent('body')
+      check(
+        'FOCUS-COPY-01 入口の説明で読み上げ・声の操作・タイマーまで伝わる',
+        detailBody.includes('大きな文字で1手順ずつ。読み上げ・声での操作・タイマーも使えます'),
+      )
+      await fsPage.getByText('調理中モードで見る').click()
+      await fsPage.waitForTimeout(500)
+      const focusBody = await fsPage.textContent('body')
+      check(
+        'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている',
+        focusBody.includes('「次へ」「戻って」で手順の移動') &&
+          focusBody.includes('「タイマー」で時間をはかる'),
+      )
+      const iconLabels = await fsPage.evaluate(() =>
+        Array.from(document.querySelector('.fixed.inset-0.z-50').querySelectorAll('button span'))
+          .map((s) => s.textContent)
+          .filter((t) => t === '読み上げ' || t === '声で操作'),
+      )
+      check(
+        'FOCUS-COPY-01 アイコンだけのボタンに小さな名前が添えられている(読み上げ・声で操作)',
+        iconLabels.includes('読み上げ') && iconLabels.includes('声で操作'),
+        JSON.stringify(iconLabels),
+      )
+      await fsPage
+        .locator('.fixed.inset-0.z-50')
+        .getByRole('button', { name: 'じぶんタイマーを開く' })
+        .click()
+      await fsPage.waitForTimeout(400)
+      check(
+        'FOCUS-COPY-01 じぶんタイマーの窓に用途の説明がある',
+        (await fsPage.getByRole('dialog', { name: 'じぶんタイマー' }).textContent()).includes(
+          'レシピの手順とは関係なく、好きな時間ではかれます',
+        ),
       )
     } finally {
       await fsBrowser.close()

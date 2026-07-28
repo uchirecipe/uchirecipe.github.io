@@ -70,6 +70,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const [index, setIndex] = useState(initialStep)
   const [speaking, setSpeaking] = useState(false)
   const [listening, setListening] = useState(false)
+  // 声の操作の手応え(2026-07-28 機能④診断C14)。聞き取れた言葉・マイクが使えなかったことを
+  // その場に短く出す。以前は認識しても拒否されても画面に何の変化も無く、効いたのか分からなかった
+  const [voiceMessage, setVoiceMessage] = useState('')
   const touchStartX = useRef<number | null>(null)
   // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
@@ -146,6 +149,15 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   }, [startTimer])
   // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる
   const autoReadRef = useRef(false)
+
+  // 声の操作の手応えを一定時間だけ出す(機能④診断C14)
+  const voiceMessageTimeout = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const showVoiceMessage = useCallback((message: string, ms = 2500) => {
+    setVoiceMessage(message)
+    clearTimeout(voiceMessageTimeout.current)
+    voiceMessageTimeout.current = setTimeout(() => setVoiceMessage(''), ms)
+  }, [])
+  useEffect(() => () => clearTimeout(voiceMessageTimeout.current), [])
 
   const stopSpeech = () => {
     if (speechSupported) window.speechSynthesis.cancel()
@@ -251,22 +263,31 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       const currentStep = recipe.steps[currentIndex]
       if (!currentStep) return
       const currentStepNumber = currentIndex + 1
+      // 聞き取れた言葉をその場に短く出す(機能④診断C14)。
+      // 手応えが無いと「聞こえたのか・効いたのか」が分からず、同じ言葉を繰り返すことになる
+      const feedback = () =>
+        showVoiceMessage(ja.focus.micHeard.replace('{text}', transcript.slice(0, 12)))
 
       if (/次|つぎ/.test(transcript)) {
+        feedback()
         if (currentIndex < total - 1) {
           stopSpeech()
           setIndex(currentIndex + 1)
         }
       } else if (/戻|もど|前へ|まえ/.test(transcript)) {
+        feedback()
         if (currentIndex > 0) {
           stopSpeech()
           setIndex(currentIndex - 1)
         }
       } else if (/もう1?回|もういちど|もう一度/.test(transcript)) {
+        feedback()
         speak(currentStep.text)
       } else if (/ストップ|とめて|止めて/.test(transcript)) {
+        feedback()
         stopSpeech()
       } else if (/タイマー/.test(transcript)) {
+        feedback()
         // 「3分タイマー」のように分数の指定があればそれを使い、
         // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す
         const minuteMatch = transcript.match(/(\d+)分/)
@@ -293,6 +314,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       // マイク拒否は聞き続けても無駄なのでOFFにする。無音タイムアウト等はonendから再開に任せる
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         setListening(false)
+        // 以前は無言でOFFに戻るだけで、なぜ効かないのかが分からなかった(機能④診断C14)
+        showVoiceMessage(ja.focus.micDenied, 6000)
       }
     }
     recognition.onend = () => {
@@ -357,19 +380,25 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             {ja.focus.stepCounter.replace('{n}', String(stepNumber)).replace('{t}', String(total))}
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        {/* アイコンだけでは何のボタンか分からなかった(2026-07-28 機能④診断C15)ため、
+            小さな文字で名前を添える。状態(聞き取り中・読み上げ中)は色とアイコンで示し、
+            文字は固定にして押すたびに幅が動かないようにする */}
+        <div className="flex items-center gap-1">
           {micSupported && (
             <button
               type="button"
               onClick={() => setListening((v) => !v)}
               aria-label={listening ? ja.focus.micStop : ja.focus.micStart}
-              className={`rounded-full p-3 ${listening ? 'text-accent' : 'text-ink-muted'}`}
+              className={`flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 ${
+                listening ? 'text-accent' : 'text-ink-muted'
+              }`}
             >
               {listening ? (
                 <Mic size={24} className="animate-pulse" aria-hidden />
               ) : (
                 <MicOff size={24} aria-hidden />
               )}
+              <span className="text-[10px] font-bold leading-none">{ja.focus.micLabel}</span>
             </button>
           )}
           <button
@@ -377,9 +406,10 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             onClick={toggleSpeak}
             disabled={!speechSupported}
             aria-label={speaking ? ja.focus.stop : ja.focus.read}
-            className="rounded-full p-3 text-accent disabled:opacity-30"
+            className="flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 text-accent disabled:opacity-30"
           >
             {speaking ? <VolumeX size={24} aria-hidden /> : <Volume2 size={24} aria-hidden />}
+            <span className="text-[10px] font-bold leading-none">{ja.focus.readLabel}</span>
           </button>
         </div>
       </div>
@@ -387,7 +417,14 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       {micSupported && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
           {ja.focus.micHint}
-          {listening && <span className="ml-1 font-bold text-accent">{ja.focus.micListening}</span>}
+          {/* 聞いている最中・聞き取れた言葉・マイクが使えなかったことの手応え(機能④診断C14) */}
+          {voiceMessage ? (
+            <span className={`ml-1 font-bold ${listening ? 'text-accent' : 'text-warning'}`}>
+              {voiceMessage}
+            </span>
+          ) : (
+            listening && <span className="ml-1 font-bold text-accent">{ja.focus.micListening}</span>
+          )}
         </p>
       )}
 
