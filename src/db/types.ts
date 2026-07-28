@@ -286,7 +286,7 @@ export interface Settings {
   timerSoundEnabled: boolean
   /** タイマーが1本でも動作中は、どの画面を見ていても画面を暗くしない */
   timerWakeLockEnabled: boolean
-  /** タイマーの制限（アプリを開いている間だけ通知・音が鳴る）の説明を初回に表示済みか */
+  /** タイマーの決まりごと（音と通知はアプリを開いている間だけ鳴る）の説明を初回に表示済みか */
   timerNoticeShown: boolean
   /** 週の食費予算（円・任意）。献立プランナーで概算食費と比較する */
   weeklyBudget?: number

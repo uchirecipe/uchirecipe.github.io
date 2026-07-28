@@ -4741,6 +4741,34 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   )
   eq('食材名の辞書収載語も読みへ変換(甜麺醤=2026-07-12にFableが辞書へ追加)', toSpeechText('甜麺醤を加える。'), 'テンメンジャンを加える。')
   eq('辞書語を含まないテキストは無加工で返る', toSpeechText('よく混ぜ合わせる。'), 'よく混ぜ合わせる。')
+
+  // 別表記に見出し語の読みを当てない(2026-07-28 機能④診断)。
+  // 以前は「くし形」に「くしがたぎり」(=くし形切り)が当たり「くし形切りに切る」と重複して読まれた
+  eq(
+    '別表記「くし形」は「くしがた」と読む(見出し語くし形切りの読みを流用しない)',
+    toSpeechText('玉ねぎはくし形に切る。'),
+    '玉ねぎはくしがたに切る。',
+  )
+  eq(
+    '別表記「さいの目」も同様(さいのめぎりにならない)',
+    toSpeechText('豆腐はさいの目に切る。'),
+    '豆腐はさいのめに切る。',
+  )
+  eq(
+    '別表記「落とし蓋」は見出し語と同じ読みを明示しているのでそのまま当たる',
+    toSpeechText('落とし蓋をして煮る。'),
+    'おとしぶたをして煮る。',
+  )
+  eq(
+    '別表記に読みを書いていない語(あく)は表記のまま読み上げる',
+    toSpeechText('あくを取る。'),
+    'あくを取る。',
+  )
+  eq(
+    '見出し語そのものは従来どおりreadingで置換される(回帰)',
+    toSpeechText('玉ねぎはくし形切りにする。'),
+    '玉ねぎはくしがたぎりにする。',
+  )
 }
 
 // ---------- 材料名の下線マッチ(docs/20 §7・手順本文中の材料名に控えめな下線・2026-07-12) ----------
@@ -6539,6 +6567,79 @@ eq(
   }
   // 用語が無い純テキストのメモ文も読点優先で組める(・箇条書きの1文相当)
   eq('メモ 純テキスト文 読点優先 幅8', cm('あいう、えお、かき。', 8), ['あいう、えお、', 'かき。'])
+}
+
+// ---------- timerOrder: タイマーの表示順と端末内保存の読み戻し(2026-07-28 機能④診断C6/C7) ----------
+{
+  const { sortTimersForDisplay, parseStoredTimers, RESTORE_GRACE_MS } = await import(
+    '../src/logic/timerOrder.ts'
+  )
+
+  // C6: 起動順のままだと「先に鳴るもの」が最下段に来ることがあった。
+  // 終わったもの→残りが少ない順に並べ替える(元の配列は書き換えない)
+  const base = [
+    { id: 1, done: false, endsAt: 15_000 }, // 肉じゃが15分(先に起動・一番長い)
+    { id: 2, done: false, endsAt: 5_000 }, // カレー5分
+    { id: 3, done: false, endsAt: 2_000 }, // 味噌汁2分(最後に起動・一番先に鳴る)
+  ]
+  eq(
+    'C6 起動順に関係なく残りが少ない順に並ぶ',
+    sortTimersForDisplay(base).map((t) => t.id),
+    [3, 2, 1],
+  )
+  eq('C6 元の配列(TimerProviderの状態)は並べ替えない', base.map((t) => t.id), [1, 2, 3])
+  eq(
+    'C6 終わったタイマーは残り時間に関わらず先頭に来る',
+    sortTimersForDisplay([
+      { id: 1, done: false, endsAt: 2_000 },
+      { id: 2, done: true, endsAt: 9_000 },
+      { id: 3, done: false, endsAt: 1_000 },
+    ]).map((t) => t.id),
+    [2, 3, 1],
+  )
+  eq('C6 0本・1本でも壊れない', sortTimersForDisplay([]).length, 0)
+
+  // C7: リロード・タブ破棄でタイマーが全消滅していた。endsAtは絶対時刻なので保存→読み戻しで続く
+  const now = 1_800_000_000_000
+  const stored = JSON.stringify([
+    {
+      id: 7,
+      key: '1-2-900',
+      label: '肉じゃが',
+      doneLabel: '煮込み終わり',
+      recipeId: 1,
+      stepNumber: 3,
+      endsAt: now + 600_000,
+      totalSeconds: 900,
+      done: false,
+      muted: false,
+    },
+  ])
+  const restored = parseStoredTimers(stored, now)
+  eq('C7 保存したタイマーが読み戻せる', restored.length, 1)
+  eq('C7 終了予定時刻(絶対時刻)がそのまま復元される', restored[0].endsAt, now + 600_000)
+  eq('C7 レシピID・手順番号・終了文言も保たれる', [restored[0].recipeId, restored[0].stepNumber, restored[0].doneLabel], [1, 3, '煮込み終わり'])
+  eq(
+    'C7 読み戻しの時点で終了時刻を過ぎている分は done で戻す(開いた瞬間に鳴らさない)',
+    parseStoredTimers(stored, now + 900_000)[0].done,
+    true,
+  )
+  eq(
+    'C7 終了から1時間より古いものは捨てる(翌日に古い「終わり」が並ばない)',
+    parseStoredTimers(stored, now + 600_000 + RESTORE_GRACE_MS + 1).length,
+    0,
+  )
+  eq('C7 保存が無い・壊れているときは空で始める(起動を妨げない)', [
+    parseStoredTimers(null, now).length,
+    parseStoredTimers('', now).length,
+    parseStoredTimers('{壊れたJSON', now).length,
+    parseStoredTimers('{"not":"array"}', now).length,
+  ], [0, 0, 0, 0])
+  eq(
+    'C7 idやendsAtが欠けた行は黙って捨てる',
+    parseStoredTimers(JSON.stringify([{ label: 'こわれた行' }, null, 3]), now).length,
+    0,
+  )
 }
 
 // ---------- 結果 ----------

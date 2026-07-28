@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { X } from 'lucide-react'
+import { X, BellRing } from 'lucide-react'
 import type { ActiveTimer } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
 import StepBadge from './StepBadge'
@@ -34,6 +34,12 @@ export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose
   if (!timer) return null
 
   const remaining = Math.max(0, Math.ceil((timer.endsAt - now) / 1000))
+  // 窓を開いたままタイマーが終わった場合(2026-07-28 機能④診断C10)。
+  // adjustTimer は完了済みには効かない(TimerProvider側の既定)ため、以前は「+1分」「−30秒」を
+  // 押しても00:00のまま何も起きない死にボタンになり、窓の中からは終わったことも分からなかった。
+  // 終了後は残り時間の代わりに終了文言を出し、±ボタンは押せないことが見て分かる状態にする
+  // (「停止」は引き続き押せる=この窓から片付けられる)
+  const finished = timer.done
 
   return (
     <div
@@ -62,25 +68,39 @@ export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose
           <StepBadge number={timer.stepNumber > 0 ? timer.stepNumber : 'custom'} size={32} />
           <span className="min-w-0 truncate font-bold">{timer.label}</span>
         </div>
-        <p className="mt-1 text-center text-4xl font-bold tabular-nums">
-          {formatRemaining(remaining)}
-        </p>
+        {finished ? (
+          <p className="mt-1 flex items-center justify-center gap-2 text-center text-3xl font-bold text-warning">
+            <BellRing size={26} className="shrink-0 animate-pulse" aria-hidden />
+            {timer.doneLabel}
+          </p>
+        ) : (
+          <p className="mt-1 text-center text-4xl font-bold tabular-nums">
+            {formatRemaining(remaining)}
+          </p>
+        )}
         <div className="mt-[var(--space-md)] flex gap-2">
           <button
             type="button"
             onClick={() => onAdjust(-30)}
-            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent shadow-sm"
+            disabled={finished}
+            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent shadow-sm disabled:opacity-30"
           >
             {ja.timer.minusThirtySeconds}
           </button>
           <button
             type="button"
             onClick={() => onAdjust(60)}
-            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent shadow-sm"
+            disabled={finished}
+            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent shadow-sm disabled:opacity-30"
           >
             {ja.timer.plusOneMinute}
           </button>
         </div>
+        {finished && (
+          <p className="mt-[var(--space-sm)] text-center text-sm text-ink-muted">
+            {ja.timer.adjustFinishedHint}
+          </p>
+        )}
         <button
           type="button"
           onClick={onStop}

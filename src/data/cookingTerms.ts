@@ -25,6 +25,13 @@ export interface CookingTerm {
   description: string
   /** 表記ゆれ・別表記(例: ['小口切りに']) */
   aliases?: string[]
+  /**
+   * 別表記ごとの読み仮名(2026-07-28 機能④診断)。
+   * 以前は別表記にも見出し語の reading をそのまま当てていたため、
+   * 「くし形に切る」が「くしがたぎりに切る」(=「くし形切りに切る」)と重複して読まれていた。
+   * 別表記に読みを付けたいときだけここに書く。書かなければ表記のまま読み上げる。
+   */
+  aliasReadings?: Record<string, string>
 }
 
 export const COOKING_TERMS: CookingTerm[] = [
@@ -41,12 +48,14 @@ export const COOKING_TERMS: CookingTerm[] = [
     reading: 'くしがたぎり',
     description: '縦半分に切った玉ねぎを切り口から放射状に等分する切り方（みかんの房のような形）',
     aliases: ['くし形'],
+    aliasReadings: { 'くし形': 'くしがた' },
   },
   {
     term: 'さいの目切り',
     reading: 'さいのめぎり',
     description: '1cm角ほどのサイコロ状に切る切り方',
     aliases: ['さいの目'],
+    aliasReadings: { 'さいの目': 'さいのめ' },
   },
   { term: '短冊切り', reading: 'たんざくぎり', description: '薄く細長い長方形に切ること' },
   {
@@ -84,6 +93,7 @@ export const COOKING_TERMS: CookingTerm[] = [
     reading: 'こなふき',
     description: '湯を切って鍋を弱火に戻して揺すり、表面の水気を飛ばすこと',
     aliases: ['粉ふきに'],
+    aliasReadings: { '粉ふきに': 'こなふきに' },
   },
   {
     term: '甜麺醤',
@@ -177,6 +187,7 @@ export const COOKING_TERMS: CookingTerm[] = [
     reading: 'おとしぶた',
     description: '鍋の中身に直接のせる小さめのふたやアルミホイル',
     aliases: ['落とし蓋'],
+    aliasReadings: { '落とし蓋': 'おとしぶた' },
   },
   {
     term: '揚げ焼き',

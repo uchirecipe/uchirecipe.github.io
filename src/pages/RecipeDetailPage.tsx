@@ -254,7 +254,15 @@ export default function RecipeDetailPage() {
 
   // 調理中モード（1手順ずつ大きく表示）
   const [focusOpen, setFocusOpen] = useState(false)
+  // 閉じた時点の手順位置を覚えておき、開き直したらそこから再開する（2026-07-28 機能④診断C3）。
+  // 調理中モードには材料一覧が無いので「分量を確認しにいったん閉じる」は例外操作ではなく
+  // 常用の動線であり、そのたびに手順1へ戻るのは進捗を丸ごと失うのと同じだった。
   const [focusStep, setFocusStep] = useState(0)
+  // 詳細内リンク（「だしのとり方」など）でidだけ変わる場合、このページは作り直されないため
+  // 前のレシピの手順位置が残る。レシピが変わったら必ず先頭に戻す
+  useEffect(() => {
+    setFocusStep(0)
+  }, [id])
 
   // 「調理中モードで見る」の初回ヒント(2026-07-23 便BJ・docs/55 CEO提案1-5)。
   // このアプリ最強の機能が初見で気づかれにくいため、レシピ詳細を初めて開いたときだけ
@@ -843,7 +851,6 @@ export default function RecipeDetailPage() {
                   type="button"
                   onClick={() => {
                     setShowCookHint(false)
-                    setFocusStep(0)
                     setFocusOpen(true)
                   }}
                   className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold text-accent ${
@@ -853,8 +860,6 @@ export default function RecipeDetailPage() {
                   <Maximize2 size={16} aria-hidden />
                   {ja.focus.open}
                 </button>
-                {/* 初見でも何が起きるボタンか分かるように一言添える(名称自体は変えない) */}
-                <p className="mt-0.5 text-xs text-ink-muted">{ja.focus.openHint}</p>
                 {/* 初回のみ・1回だけの控えめなヒント(docs/55 CEO提案1-5)。表示済みフラグで再表示しない */}
                 {showCookHint && (
                   <div className="mt-1 flex items-center justify-end gap-1">
@@ -874,6 +879,13 @@ export default function RecipeDetailPage() {
               </div>
             )}
           </div>
+          {/* 初見でも何ができるボタンか分かるように一言添える(名称自体は変えない)。
+              2026-07-28 機能④診断C16で読み上げ・声の操作・タイマーまで書き足したので、
+              ボタンと同じ shrink-0 の箱に入れると375px幅でページごと横あふれする。
+              見出し行の外に出して、折り返せる全幅の1行として置く */}
+          {recipe.steps.length > 0 && (
+            <p className="mt-0.5 text-right text-xs text-ink-muted">{ja.focus.openHint}</p>
+          )}
           {hasQuickVariant && (
             <div className="mt-[var(--space-sm)] inline-flex rounded-sm border border-edge p-0.5">
               <button
@@ -1205,11 +1217,18 @@ export default function RecipeDetailPage() {
         <FocusMode
           recipe={focusRecipe}
           recipeId={id}
-          initialStep={focusStep}
-          onClose={() => setFocusOpen(false)}
+          // 時短版への切り替えや別レシピへの移動で手順数が減ることがあるため、
+          // 覚えている位置は必ず今の手順数に収める(範囲外だと開いても何も出ない)
+          initialStep={Math.max(0, Math.min(focusStep, focusRecipe.steps.length - 1))}
+          onClose={(lastStep) => {
+            setFocusStep(lastStep ?? 0)
+            setFocusOpen(false)
+          }}
           onComplete={() => {
             // 完成！→ そのまま「作った！」の記録フォームを開く(達成感と記録導線をつなぐ)
             setFocusOpen(false)
+            // 作り終えたので次に開くときは手順1から
+            setFocusStep(0)
             setLogDate(todayString())
             setLogServings(servings)
             setLogOpen(true)
