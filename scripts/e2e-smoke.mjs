@@ -466,6 +466,31 @@ try {
     'NUT-01 未解錠案内にPro版で増える項目(たんぱく質・脂質・炭水化物)が明記される(2026-07-13 UIペルソナQA)',
     nutExpandedText.includes('Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウムのめやすも表示されます'),
   )
+  // PRO-01(2026-07-28 便BY): 未解錠のティーザーを、月間献立ゲートと同じ blur+Lockバッジ+見出しの
+  // 様式に揃える(同じPro導線なのに画面ごとに表現が3種類あった状態の解消)
+  check(
+    'NUT-01(便BY PRO-01) 未解錠ティーザーに月間献立と同じLockバッジ「Pro版で使えます」が出る',
+    nutExpandedText.includes('Pro版で使えます') && nutExpandedText.includes('栄養価8項目のめやす'),
+  )
+  const nutBlurCount = await page.evaluate(
+    () =>
+      Array.from(document.querySelectorAll('*')).filter((el) => {
+        const f = getComputedStyle(el).backdropFilter
+        return f && f !== 'none' && f.includes('blur')
+      }).length,
+  )
+  check(
+    'NUT-01(便BY PRO-01) 未解錠ティーザーにぼかし(backdrop-blur)が適用されている',
+    nutBlurCount > 0,
+    `blur要素=${nutBlurCount}`,
+  )
+  // COST-03(2026-07-28 便BY): 要約行に基準人数を常時添える
+  // 直前に「人数を増やす」を押しているので基準人数は表示中の人数に追従する
+  check(
+    'NUT-01(便BY COST-03) 栄養・原価の「1食あたり」に基準人数が併記される',
+    /\d+人分レシピの1食あたり/.test(nutExpandedText),
+    `本文に「◯人分レシピの1食あたり」が無い`,
+  )
   await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
   await page.waitForTimeout(200)
 
@@ -940,9 +965,15 @@ try {
   await page.locator('button[aria-label="並び替え"]').click()
   await page.waitForTimeout(300)
   const nutSortPanelText = await page.textContent('body')
+  // 見出しは2026-07-28 便BY/見せ方(c)で「栄養価で並び替え」→「栄養価で探す」に変更
+  // (操作名だけでなく何のために使うかが伝わる用途の言葉にする)
   check(
-    'NUTSORT-01 無料ではグレーの「栄養価で並び替え（Pro機能）」ティーザーが出る',
-    nutSortPanelText.includes('栄養価で並び替え（Pro機能）'),
+    'NUTSORT-01 無料ではグレーの「栄養価で探す（Pro機能）」ティーザーが出る',
+    nutSortPanelText.includes('栄養価で探す（Pro機能）'),
+  )
+  check(
+    'NUTSORT-01(便BY) ティーザーに用途の説明が添えられる(たんぱく質が多い順・塩分が低い順)',
+    nutSortPanelText.includes('たんぱく質が多い順・塩分が低い順などで探せます'),
   )
   const freeNutrientButtons = await page.evaluate(() => {
     const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']
@@ -956,7 +987,7 @@ try {
   )
   const teaserHref = await page.evaluate(() => {
     const links = Array.from(document.querySelectorAll('a'))
-    const teaser = links.find((a) => a.textContent?.includes('栄養価で並び替え（Pro機能）'))
+    const teaser = links.find((a) => a.textContent?.includes('栄養価で探す（Pro機能）'))
     return teaser?.getAttribute('href') ?? null
   })
   check(
@@ -968,6 +999,62 @@ try {
   await page.getByRole('button', { name: '決定' }).click()
   await page.waitForTimeout(300)
   await page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
+
+  // --- UI-390-01: 390px幅(iPhone 12〜15相当)のレシピ詳細で、「原価を見る」「原価を編集」を
+  // ONにしても横スクロールが出ず、「人数を増やす」ボタンが画面内に収まること
+  // (2026-07-28 便BY/UI-01。従来は見出し行を1本のflexにshrink-0で並べていたため
+  // documentElement.scrollWidthが416pxへ膨らみ、＋ボタンが画面外に出ていた) ---
+  currentCheck = 'UI-390-01'
+  {
+    const w390Browser = await chromium.launch()
+    try {
+      const w390Context = await w390Browser.newContext({ viewport: { width: 390, height: 844 } })
+      const w390Page = await w390Context.newPage()
+      await w390Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await w390Page.waitForTimeout(1200)
+      await w390Page.getByText('肉じゃが', { exact: true }).first().click()
+      await w390Page.waitForTimeout(600)
+      const measure = async () => {
+        const doc = await w390Page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+        }))
+        const box = await w390Page.getByRole('button', { name: '人数を増やす' }).boundingBox()
+        return { ...doc, plusRight: box ? box.x + box.width : null }
+      }
+      const before = await measure()
+      check(
+        'UI-390-01 原価OFFでは横スクロールが出ない(前提)',
+        before.scrollWidth === before.clientWidth,
+        JSON.stringify(before),
+      )
+      await w390Page.getByRole('button', { name: '原価を見る' }).click()
+      await w390Page.waitForTimeout(400)
+      const view = await measure()
+      check(
+        'UI-390-01 「原価を見る」ONでも横スクロールが出ない',
+        view.scrollWidth === view.clientWidth,
+        JSON.stringify(view),
+      )
+      check(
+        'UI-390-01 「原価を見る」ONでも「人数を増やす」が画面内に収まる',
+        view.plusRight != null && view.plusRight <= view.clientWidth,
+        JSON.stringify(view),
+      )
+      await w390Page.getByRole('button', { name: '原価を編集' }).click()
+      await w390Page.waitForTimeout(400)
+      const edit = await measure()
+      check(
+        'UI-390-01 「原価を編集」ONでも横スクロールが出ず＋ボタンが画面内に収まる',
+        edit.scrollWidth === edit.clientWidth &&
+          edit.plusRight != null &&
+          edit.plusRight <= edit.clientWidth,
+        JSON.stringify(edit),
+      )
+    } finally {
+      await w390Browser.close()
+    }
+  }
 
   // --- SMK-14: テーマ・第◯弾の括りを全廃(2026-07-23オーナー確定)。旧配布テーマ(全52品)は
   // 同梱の「基本レシピ」に合流し、初回シードで全103品が入る。まっさらな状態で:
@@ -1764,6 +1851,40 @@ try {
       await nutPage.waitForTimeout(300)
       const unlockedText = await nutPage.textContent('body')
       check('NUT-02 Pro解錠済みでたんぱく質が表示される', unlockedText.includes('たんぱく質'))
+      // DISC-01(2026-07-28 便BY): 解錠後に8項目表・期間の集計へ届く入口が設定のPro節にある
+      {
+        await nutPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+        await nutPage.waitForTimeout(600)
+        const proSectionText = (await nutPage.textContent('body')) ?? ''
+        check(
+          'DISC-01 解錠後の「使えるようになった機能」に8項目表の見つけ方が書かれている',
+          proSectionText.includes('栄養価の8項目表示') &&
+            proSectionText.includes('レシピを開いて「栄養価のめやす」をタップする'),
+        )
+        check(
+          'DISC-01 解錠後の案内に期間の集計(期間の食費・摂取できた栄養)への行き方が書かれている',
+          proSectionText.includes('期間の食費と摂取できた栄養') &&
+            proSectionText.includes('献立タブ →「月」→「期間の食費」'),
+        )
+        const discLinks = await nutPage.evaluate(() => {
+          const hrefs = Array.from(document.querySelectorAll('#pro-section a')).map((a) =>
+            a.getAttribute('href'),
+          )
+          return { recipes: hrefs.includes('#/recipes'), mealPlan: hrefs.includes('#/meal-plan') }
+        })
+        check(
+          'DISC-01 解錠後の案内からレシピ一覧・献立へ直接飛べる入口がある',
+          discLinks.recipes && discLinks.mealPlan,
+          JSON.stringify(discLinks),
+        )
+        // 元の画面に戻す(以降のNUT-02チェックに影響させない)
+        await nutPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await nutPage.waitForTimeout(600)
+        await nutPage.getByText('肉じゃが', { exact: true }).first().click()
+        await nutPage.waitForTimeout(600)
+        await nutPage.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+        await nutPage.waitForTimeout(300)
+      }
       check('NUT-02 Pro解錠済みで脂質が表示される', unlockedText.includes('脂質'))
       check('NUT-02 Pro解錠済みで炭水化物が表示される', unlockedText.includes('炭水化物'))
       check('NUT-02 Pro解錠済みで塩分相当量が表示される', unlockedText.includes('塩分相当量'))
@@ -1817,12 +1938,16 @@ try {
       await nutPage.waitForTimeout(300)
       const proSortPanelText = await nutPage.textContent('body')
       check(
-        'NUTSORT-02 Pro解錠済みでは「栄養価で並び替え」の区分見出しが出る',
-        proSortPanelText.includes('栄養価で並び替え'),
+        'NUTSORT-02 Pro解錠済みでは「栄養価で探す」の区分見出しが出る',
+        proSortPanelText.includes('栄養価で探す'),
       )
       check(
         'NUTSORT-02 Pro解錠済みではグレーのティーザー行(Pro機能)は出ない',
-        !proSortPanelText.includes('栄養価で並び替え（Pro機能）'),
+        !proSortPanelText.includes('栄養価で探す（Pro機能）'),
+      )
+      check(
+        'NUTSORT-02(便BY) 解錠後も用途の説明が添えられる',
+        proSortPanelText.includes('目的からレシピを探せます'),
       )
       const proNutrientButtons = await nutPage.evaluate(() => {
         const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']

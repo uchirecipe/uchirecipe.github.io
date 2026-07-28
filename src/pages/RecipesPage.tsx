@@ -581,6 +581,8 @@ export default function RecipesPage() {
               <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
                 {ja.search.sortNutritionTitle}
               </p>
+              {/* 何のために並べ替えるのか(用途)を1行添える(2026-07-28 便BY/見せ方(c)) */}
+              <p className="text-xs text-ink-muted">{ja.search.sortNutritionHint}</p>
               <CheckList
                 options={nutrientSortOptions}
                 value={sort}
@@ -593,10 +595,13 @@ export default function RecipesPage() {
           ) : (
             <Link
               to="/settings?section=pro"
-              className="mt-[var(--space-md)] flex w-full items-center gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm font-bold text-ink-muted opacity-60"
+              className="mt-[var(--space-md)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
             >
-              <Lock size={16} className="shrink-0" aria-hidden />
-              {ja.search.sortNutritionGate}
+              <Lock size={16} className="mt-0.5 shrink-0" aria-hidden />
+              <span>
+                <span className="font-bold">{ja.search.sortNutritionGate}</span>
+                <span className="block text-xs">{ja.search.sortNutritionGateHint}</span>
+              </span>
             </Link>
           )}
 

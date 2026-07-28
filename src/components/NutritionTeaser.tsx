@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { Sparkles, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import {
   NUTRITION_TEASER_ENABLED,
   isNutritionUnlocked,
@@ -187,14 +187,64 @@ function SourceNote() {
   )
 }
 
+/**
+ * Pro側で増える6項目のティーザー（2026-07-28 便BY/PRO-01）。
+ * MealPlanPageの月間献立ゲートと同じ「ぼかした本体＋Lockバッジ＋見出し＋説明＋リンク」の様式に揃える。
+ * 従来はテキスト1行だけで、同じPro導線なのに画面ごとに表現が3種類あった。
+ * ぼかす中身は数値ではなく項目名と値の位置を示すバーで、実データは出さない（サンプル表示）。
+ */
+function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
+  const sampleLabels = [
+    ja.nutrition.proteinLabel,
+    ja.nutrition.fatLabel,
+    ja.nutrition.carbLabel,
+    ja.nutrition.fiberLabel,
+    ja.nutrition.ironLabel,
+    ja.nutrition.calciumLabel,
+  ]
+  return (
+    <div className="relative overflow-hidden rounded-md border border-edge">
+      {/* ぼかす対象のサンプル(実データは出さない)。案内文の高さで枠が決まるよう背面に敷く */}
+      <div
+        aria-hidden
+        className="absolute inset-0 grid grid-cols-2 content-start gap-x-4 gap-y-2 p-[var(--space-sm)]"
+        style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
+      >
+        {sampleLabels.map((label) => (
+          <div key={label} className="flex items-baseline justify-between gap-2">
+            <span className="text-sm">{label}</span>
+            <span className="h-3 w-10 rounded-sm bg-accent/40" />
+          </div>
+        ))}
+      </div>
+      <div className="relative flex flex-col items-center justify-center gap-1 bg-app/40 p-[var(--space-md)] text-center backdrop-blur-[2px]">
+        <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent shadow-sm">
+          <Lock size={14} aria-hidden />
+          {ja.nutrition.lockedBadge}
+        </span>
+        <p className="mt-1 font-bold">{ja.nutrition.lockedTitle}</p>
+        <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
+        {!isPro && (
+          <Link
+            to="/settings?section=pro"
+            className="mt-1 inline-block text-sm font-bold text-accent underline"
+          >
+            {ja.nutrition.gateLink}
+          </Link>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /** 状態1: 未解錠（無料版）。エネルギー・食塩相当量は既に見出し行に出ているので、
  *  展開後は注記・出典・Pro案内・計算対象外だけを出す */
 function LockedBody({ nutrition, isPro }: { nutrition: Nutrition; isPro: boolean }) {
   return (
     <div className="space-y-[var(--space-sm)]">
-      {/* Pro版で増える項目の明示(2026-07-13 UIペルソナQA)。詳しい提供時期の話(freeDescription系)より
-          先に、まず「何が増えるか」を1文で伝える */}
-      <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
+      {/* Pro版で増える項目のティーザー(2026-07-28 便BY/PRO-01で blur+Lock 様式に統一)。
+          詳しい提供時期の話(freeDescription系)より先に、まず「何が増えるか」を見せる */}
+      <ProNutrientTeaser isPro={isPro} />
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
@@ -203,14 +253,11 @@ function LockedBody({ nutrition, isPro }: { nutrition: Nutrition; isPro: boolean
       {/* Pro未解錠のユーザーには、これらのめやすが買い切りのPro版で表示されること
           (設定のProタブから解錠できること)を伝える。isProの分岐は栄養フル版の公開フラグを
           落としたとき用の保険(通常は未解錠=非ProなのでfreeDescription側が出る) */}
+      {/* ティーザー内に「Pro版について見る」リンクを置いたので、ここは説明だけにする
+          (同じリンクを2つ並べない) */}
       <p className="text-sm text-ink-muted">
         {isPro ? ja.nutrition.freeDescriptionPro : ja.nutrition.freeDescription}
       </p>
-      {!isPro && (
-        <Link to="/settings?section=pro" className="inline-block text-sm font-bold text-accent underline">
-          {ja.nutrition.gateLink}
-        </Link>
-      )}
     </div>
   )
 }
