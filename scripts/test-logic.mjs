@@ -2219,6 +2219,76 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('食数スケール: 別scaleの同一食材はスケール後に合算(5個)', c2[0]?.amount, '5個')
 }
 
+// ---------- buildShoppingCandidates: 分数分量(2026-07-29 便CC/C1。S1: 分母を無視して2〜4倍になっていた) ----------
+{
+  const amountOf = (ingredients, scale, have = []) =>
+    buildShoppingCandidates([{ id: 1, ingredients, scale }], have)[0]?.amount
+
+  // 等倍(食数=登録人数)は原文をそのまま見せる(レシピ詳細の表示と一致させる・C11)
+  eq('買い物候補(分数): 1/2本 等倍→1/2本', amountOf([{ name: 'にんじん', amount: '1/2', unit: '本' }], 1), '1/2本')
+  eq('買い物候補(分数): 大さじ1/2 等倍→大さじ1/2', amountOf([{ name: 'みりん', amount: '1/2', unit: '大さじ' }], 1), '大さじ1/2')
+  eq(
+    '買い物候補(分数): 帯分数「1と1/2個」等倍→原文のまま',
+    amountOf([{ name: '玉ねぎ', amount: '1と1/2', unit: '個' }], 1),
+    '1と1/2個',
+  )
+  // 2レシピぶんの合算は分母を解釈してから足す(1/2個 + 1/2個 = 1個)
+  const half2 = buildShoppingCandidates(
+    [
+      { id: 1, ingredients: [{ name: '玉ねぎ', amount: '1/2', unit: '個' }] },
+      { id: 2, ingredients: [{ name: '玉ねぎ', amount: '1/2', unit: '個' }] },
+    ],
+    [],
+  )
+  eq('買い物候補(分数): 1/2個+1/2個=1個', half2[0]?.amount, '1個')
+  // カレールー1/2箱を4人分レシピ→3食(scale=0.75)。レシピ詳細と同じ「1/2箱」になる
+  eq(
+    '買い物候補(分数): カレールー1/2箱×0.75→1/2箱(レシピ詳細と一致)',
+    amountOf([{ name: 'カレールー', amount: '1/2', unit: '箱' }], 0.75),
+    '1/2箱',
+  )
+  eq(
+    '買い物候補(分数): 豆腐1/2丁×1.5→1丁',
+    amountOf([{ name: '豆腐', amount: '1/2', unit: '丁' }], 1.5),
+    '1丁',
+  )
+}
+
+// ---------- buildShoppingCandidates: 単位ごとの丸め(2026-07-29 便CC/C11。62.5g・0.3本など買えない粒度) ----------
+{
+  const amountOf = (ingredients, scale) =>
+    buildShoppingCandidates([{ id: 1, ingredients, scale }], [])[0]?.amount
+  eq('買い物候補(丸め): 250g×0.25→65g(5刻み)', amountOf([{ name: '豚こま切れ肉', amount: '250', unit: 'g' }], 0.25), '65g')
+  eq('買い物候補(丸め): 700ml×0.25→180ml(10刻み)', amountOf([{ name: '水', amount: '700', unit: 'ml' }], 0.25), '180ml')
+  eq('買い物候補(丸め): 1本×0.25→1/2本(個数系は0.5刻み・0にしない)', amountOf([{ name: 'にんじん', amount: '1', unit: '本' }], 0.25), '1/2本')
+  eq('買い物候補(丸め): 1箱×0.25→1/2箱', amountOf([{ name: 'カレールー', amount: '1', unit: '箱' }], 0.25), '1/2箱')
+}
+
+// ---------- buildShoppingCandidates: 単位が混ざる/略記(2026-07-29 便CC/C12。数値側までスケールが落ちていた) ----------
+{
+  // 同じ単位グループに「少々」が混ざっても、数値側はスケールして合算する
+  const mixed = buildShoppingCandidates(
+    [
+      { id: 1, ingredients: [{ name: '塩', amount: '少々', unit: '' }], scale: 2 },
+      { id: 2, ingredients: [{ name: '塩', amount: '2', unit: '' }], scale: 2 },
+    ],
+    [],
+  )
+  eq('買い物候補(混在): 数値側は2×2=4にスケールし「少々」は原文で併記', mixed[0]?.amount, '4・少々')
+  // 「大2」「小1」の略記も大さじ/小さじとして解釈してスケールする
+  const abbrev = buildShoppingCandidates(
+    [{ id: 1, ingredients: [{ name: 'しょうゆ', amount: '大2', unit: '' }], scale: 2 }],
+    [],
+  )
+  eq('買い物候補(略記): 大2×2→大さじ4', abbrev[0]?.amount, '大さじ4')
+  // 範囲分量は人数スケールに非対応(レシピ詳細と同じ)。原文のまま残す
+  const range = buildShoppingCandidates(
+    [{ id: 1, ingredients: [{ name: '牛こま切れ肉', amount: '200〜250', unit: 'g' }] }],
+    [],
+  )
+  eq('買い物候補(範囲): 200〜250gは原文のまま', range[0]?.amount, '200〜250g')
+}
+
 // ---------- 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1) ----------
 {
   eq('在庫グループ: 玉ねぎ→野菜・きのこ', categorizePantryName('玉ねぎ'), 'vegetable')

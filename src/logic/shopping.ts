@@ -1,6 +1,12 @@
 import { toHiragana } from './kana'
 import { isSeasoningLike } from './mainIngredients'
-import { formatAmountUnit, normalizeDigits } from './amount'
+import {
+  formatAmountUnit,
+  formatScaledAmount,
+  normalizeAmountInput,
+  parseAmountNumber,
+  resolveCalcAmount,
+} from './amount'
 import { categorizePantryName, SHOPPING_AISLE_ORDER } from './pantryGroups'
 import type { Ingredient } from '../db/types'
 
@@ -45,35 +51,71 @@ interface AmountPart {
   scale: number
 }
 
+/** 合算のために解釈し直した1パーツ（2026-07-29 便CC/C1・C11・C12） */
+interface ResolvedPart {
+  /** 数値化できないときや等倍1件のときに、そのまま見せる表示文字列 */
+  original: string
+  /** 合算のまとまりを決める単位（「大2」等の略記は「大さじ」に解決した後の単位） */
+  unit: string
+  /** 数値化できた分量。できなければ null（「少々」「200〜250」等） */
+  value: number | null
+  scale: number
+}
+
+/**
+ * 1パーツを合算用に解釈する。
+ * 「大2」「小1/2」のような略記と「ひとかけ」のような和語の個数詞は、レシピ詳細の人数変更
+ * （scaleAmount）と同じ resolveCalcAmount で正式な単位に解決してから合算対象にする
+ * （2026-07-29 便CC/C12。従来はここを通さないため単位なしのまま扱われ、食数スケールが
+ * 掛からず「大2」のまま出ていた）。
+ */
+function resolvePart(part: AmountPart): ResolvedPart {
+  const original = formatAmountUnit(normalizeAmountInput(part.amount.trim()), part.unit)
+  const calc = resolveCalcAmount(part.amount, part.unit)
+  if (calc) return { original, unit: calc.unit, value: calc.value, scale: part.scale }
+  return { original, unit: part.unit.trim(), value: parseAmountNumber(part.amount), scale: part.scale }
+}
+
 /**
  * 単位ごとにグループ化し、数値化できるものはグループ内で合計する
  * （例:「大さじ2」+「大さじ3」+「小さじ1」→「大さじ5・小さじ1」）。
  * 数値化できないもの（「少々」等）はそのまま列挙する。
  * 各パーツの scale（指定食数スケール）は数値化できる分量にのみ掛ける。
+ *
+ * 2026-07-29 便CC で3点修正（診断 C1・C11・C12）:
+ * - 分量の数値化を amount.ts の parseAmountNumber に寄せた。従来の `Number.parseFloat` は
+ *   分母を読めず `parseFloat('1/2')=1` となり、分数表記の材料が必要量の2〜4倍で出ていた（S1）。
+ * - 丸めを formatScaledAmount（単位ごとの丸め幅）に寄せた。従来の小数第1位丸めでは
+ *   「62.5g」「0.3箱」のような店頭で行動に移せない粒度が出ていた（C11）。
+ * - 同じ単位に数値化できない分量が1つでも混ざるとグループ全体が原文列挙になり、数値側の
+ *   食数スケールまで落ちていたのを、数値側と原文側を分けて両方出すようにした（C12）。
  */
 function combineAmounts(parts: AmountPart[]): string {
   const nonEmpty = parts.filter((p) => p.amount.trim() || p.unit.trim())
   if (nonEmpty.length === 0) return ''
 
-  const groups = new Map<string, AmountPart[]>()
+  const groups = new Map<string, ResolvedPart[]>()
   for (const part of nonEmpty) {
-    const unit = part.unit.trim()
-    const list = groups.get(unit)
-    if (list) list.push(part)
-    else groups.set(unit, [part])
+    const resolved = resolvePart(part)
+    const list = groups.get(resolved.unit)
+    if (list) list.push(resolved)
+    else groups.set(resolved.unit, [resolved])
   }
 
   const texts: string[] = []
   for (const [unit, items] of groups) {
-    const nums = items.map((p) => Number.parseFloat(normalizeDigits(p.amount)) * p.scale)
-    if (nums.every((n) => Number.isFinite(n))) {
-      const total = nums.reduce((sum, n) => sum + n, 0)
-      const totalText = Number.isInteger(total) ? String(total) : String(Math.round(total * 10) / 10)
-      texts.push(formatAmountUnit(totalText, unit))
-    } else {
-      // 「少々」など数値化できない分量は食数スケールを掛けられないので原文のまま列挙する
-      texts.push(...items.map((p) => formatAmountUnit(p.amount, p.unit)))
+    const numeric = items.filter((p) => p.value != null)
+    const raw = items.filter((p) => p.value == null)
+    if (numeric.length === 1 && numeric[0].scale === 1) {
+      // 等倍（指定食数＝レシピの登録人数）で1レシピ分だけなら、計算する必要がないので原文を
+      // そのまま見せる。「1/3本」を丸めて「1/2本」にしてしまわず、レシピ詳細の表示と一致する
+      texts.push(numeric[0].original)
+    } else if (numeric.length > 0) {
+      const total = numeric.reduce((sum, p) => sum + p.value! * p.scale, 0)
+      texts.push(formatAmountUnit(formatScaledAmount(total, unit), unit))
     }
+    // 「少々」など数値化できない分量は食数スケールを掛けられないので原文のまま併記する
+    texts.push(...raw.map((p) => p.original))
   }
   return texts.join('・')
 }

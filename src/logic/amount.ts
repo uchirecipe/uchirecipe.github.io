@@ -198,6 +198,51 @@ export function resolveCalcAmount(amount: string, unit?: string): { value: numbe
 }
 
 /**
+ * 分量文字列を計算用の数値にする（解釈専用。表示・保存データは書き換えない）。
+ * 対応する形は "200" "1.5" "1/2" "1と1/2"（帯分数は小数に開いてから解釈する）。
+ * "少々" "適量" や範囲分量("200〜250")のように数値1つに定まらないものは null を返す。
+ *
+ * 2026-07-29 便CC/C1（QA S1）で切り出し。買い物メモの合算(logic/shopping.ts combineAmounts)が
+ * 独自に `Number.parseFloat` で数値化していたため `parseFloat('1/2')=1` となり、
+ * 分数の材料（同梱103品中70品）が必要量の2〜4倍で下書きに載っていた。
+ * レシピ詳細の人数変更(scaleAmount)と買い物メモで答えが食い違わないよう、
+ * 「分量文字列→数値」の解釈をこの1関数に集約し、両方から呼ぶ。
+ * 範囲分量を先頭値で計算したい側（栄養・原価）は leadingRangeAmount を通してから渡すこと
+ * （nutrition.ts の parseAmountNumber がその形。人数スケールは範囲非対応＝F3の裁定のまま）。
+ */
+export function parseAmountNumber(text: string): number | null {
+  const trimmed = normalizeAmountInput((text ?? '').trim())
+  if (!trimmed) return null
+  const match = expandMixedFraction(trimmed).match(
+    /^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/,
+  )
+  if (!match) return null
+  const value = Number.parseFloat(match[1])
+  const denominator = match[2] ? Number.parseFloat(match[2]) : undefined
+  if (denominator === undefined) return value
+  if (denominator === 0) return null
+  return value / denominator
+}
+
+/**
+ * 計算後の数値を、単位ごとの丸め幅で表示用の文字列にする（解釈専用の相方）。
+ * 個数系・計量スプーン系は帯分数（「1と1/2」「1/2」）、g/ml/cc は5刻み・10刻み。
+ *
+ * 2026-07-29 便CC/C1・C11 で切り出し。買い物メモ側が `Math.round(total*10)/10` の
+ * 独自丸めしか持たず「62.5g」「0.3箱」のような店頭で行動に移せない粒度を出していたため、
+ * レシピ詳細と同じ roundForDisplay / formatFraction をこの1関数から共有する。
+ * 単位は付けずに数値部分だけを返す（単位との連結は formatAmountUnit の役目）。
+ */
+export function formatScaledAmount(value: number, unit?: string): string {
+  const normalizedUnit = unit ? normalizeAmountInput(unit).trim() : unit
+  const rounded = roundForDisplay(value, normalizedUnit)
+  if (normalizedUnit && FRACTION_DISPLAY_UNITS.has(normalizedUnit)) {
+    return formatFraction(rounded)
+  }
+  return String(rounded)
+}
+
+/**
  * 分量の人数換算。
  * "3"（3個）や "1/2" のような数字は人数に合わせて掛け算し、
  * "少々" "適量" のような言葉はそのまま返す。
@@ -240,25 +285,13 @@ export function scaleAmount(
     return `${formatFraction(rounded)}${counterWord.unit}`
   }
 
-  // 対応する形: "200" "1.5" "1/2" "1と1/2"(帯分数は小数に開いてから解釈する。C-18)
-  const match = expandMixedFraction(trimmed).match(
-    /^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/,
-  )
-  if (!match) return amount
+  // 対応する形: "200" "1.5" "1/2" "1と1/2"(帯分数は小数に開いてから解釈する。C-18)。
+  // 解釈は parseAmountNumber、丸め・表示は formatScaledAmount に集約し、買い物メモの合算
+  // (logic/shopping.ts)と同じ答えになるようにしている(2026-07-29 便CC/C1)
+  const value = parseAmountNumber(trimmed)
+  if (value == null) return amount
 
-  let value = Number.parseFloat(match[1])
-  const denominator = match[2] ? Number.parseFloat(match[2]) : undefined
-  if (denominator) {
-    if (denominator === 0) return amount
-    value /= denominator
-  }
-
-  const scaled = (value * targetServings) / baseServings
-  const rounded = roundForDisplay(scaled, normalizedUnit)
-  if (normalizedUnit && FRACTION_DISPLAY_UNITS.has(normalizedUnit)) {
-    return formatFraction(rounded)
-  }
-  return String(rounded)
+  return formatScaledAmount((value * targetServings) / baseServings, normalizedUnit)
 }
 
 /**
