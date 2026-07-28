@@ -2961,12 +2961,34 @@ try {
   await customAdjustDialog.getByRole('button', { name: '−30秒' }).click() // 1分-30秒-30秒=0
   await page.waitForTimeout(150)
   const atFloorText = await customAdjustDialog.textContent()
-  check('TIMER-CUSTOM-01 「−30秒」を重ねても残りは0で止まる', atFloorText.includes('00:00'), atFloorText)
-  await customAdjustDialog.getByRole('button', { name: '−30秒' }).click() // 0からさらに押しても0のまま
-  await page.waitForTimeout(150)
+  // 残りがマイナスにならないこと。0ちょうどになると通常の完了フローに乗るので、
+  // 表示は「00:00」か終了文言のどちらか(どちらでも「マイナスに突き抜けていない」ことの確認になる)
   check(
-    'TIMER-CUSTOM-01 0からさらに「−30秒」しても0のまま(即完了扱いにしない)',
-    (await customAdjustDialog.textContent()).includes('00:00'),
+    'TIMER-CUSTOM-01 「−30秒」を重ねても残りは0で止まる(マイナスにならない)',
+    atFloorText.includes('00:00') || atFloorText.includes('終わり'),
+    atFloorText,
+  )
+  // 2026-07-28 機能④診断C10: 0まで減って終わったあとの±は「押しても何も起きない死にボタン」に
+  // していた。押せないと見て分かる状態にし、理由の一言を出す(「停止」は引き続き押せる)
+  const floorButtons = await customAdjustDialog.evaluate((dlg) => {
+    const btns = Array.from(dlg.querySelectorAll('button'))
+    const find = (t) => btns.find((b) => b.textContent.trim() === t)
+    return {
+      minus: find('−30秒')?.disabled,
+      plus: find('+1分')?.disabled,
+      stop: find('停止')?.disabled,
+      hasReason: dlg.textContent.includes('終わったタイマーの時間は変えられません'),
+    }
+  })
+  check(
+    'TIMER-CUSTOM-01 0まで減らして終わったら「−30秒」「+1分」は押せない状態になる(死にボタンにしない)',
+    floorButtons.minus === true && floorButtons.plus === true,
+    JSON.stringify(floorButtons),
+  )
+  check(
+    'TIMER-CUSTOM-01 終わったあとも「停止」は押せて、変えられない理由が出る',
+    floorButtons.stop === false && floorButtons.hasReason,
+    JSON.stringify(floorButtons),
   )
   await customAdjustDialog.getByRole('button', { name: '停止' }).click()
   await page.waitForTimeout(300)
