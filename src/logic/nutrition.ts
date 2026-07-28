@@ -1,8 +1,9 @@
-import { toHiragana } from './kana'
+import { toIngredientKey } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
 import { expandMixedFraction, leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
-import { VOLUME_UNIT_FACTORS } from './priceEstimate'
+import { VOLUME_UNIT_FACTORS } from './unitGrams'
+import { matchAssumedGrams } from './amountAssumption'
 
 /**
  * 栄養価の自動概算（M6-1・Pro機能）の純ロジック。
@@ -104,10 +105,9 @@ export interface RecipeNutrition {
 
 // ---------- 名寄せ（材料名 → 成分表の食品） ----------
 
-/** 材料名の正規化: toHiragana（カタカナ→ひらがな・NFKC・読み仮名辞書）＋空白除去 */
-function normalizeName(name: string): string {
-  return toHiragana(name.trim()).replace(/[\s・]+/g, '')
-}
+/** 材料名の正規化: toHiragana（カタカナ→ひらがな・NFKC・読み仮名辞書）＋空白除去
+ * （kana.tsのtoIngredientKey。原価側の「少々・適量」の仮の量と同じキーで比べるため共有している） */
+const normalizeName = toIngredientKey
 
 /** 括弧書きの注記を落とす（「めんつゆ(2倍濃縮)」のように括弧が意味を持つ場合は先に完全一致で拾う） */
 function stripParens(normalized: string): string {
@@ -220,11 +220,11 @@ export function parseAmountNumber(amount: string): number | null {
 }
 
 /**
- * 大さじ/小さじ/カップのml換算。priceEstimate.tsのVOLUME_UNIT_FACTORSと同一の値を使う
+ * 大さじ/小さじ/カップのml換算。unitGrams.tsのVOLUME_UNIT_FACTORSと同一の値を使う
  * （1948年制定のJIS S 2052「家庭用計量スプーン」に由来する日本の調理計量の標準値。
  * 大さじ15ml・小さじ5ml・カップ200ml。2026-07-21 単位換算監査(docs/48)で確認）。
  * 数値を2箇所に手書きすると片方だけ変更されて食い違う事故が起きるため、
- * ここでは書き写さずpriceEstimate.tsから直接参照して一本化している。
+ * ここでは書き写さずunitGrams.tsから直接参照して一本化している。
  */
 const SPOON_ML: Record<string, number> = {
   大さじ: VOLUME_UNIT_FACTORS.大さじ,
@@ -274,42 +274,6 @@ function addScaled(target: NutrientTotals, per100g: NutritionPer100g, grams: num
   return target
 }
 
-// 「少々」「適量」の仮の目安量(1食あたりg・概算)。
-// 塩系はmemoの「約◯g」表記があればそれを優先。お好みで表記は食べるか不明なため対象外のまま。
-//
-// 判定はnormalizeName済みの表記(toHiragana適用後)で行う(2026-07-21・オーナー実機報告
-// 「対象外13件」調査で発見・修正)。旧実装は生の文字列(name)をそのまま比較しており、
-// 「黒胡椒」のような漢字・「コショウ」のようなカタカナ表記だとmatchNutritionFoodでは
-// 食品が見つかっているのに少々の仮定だけ効かない、という表記ゆれバグがあった。
-// OIL_NAMESもnormalizeName後の文字列と比較するため、カタカナ由来の語はひらがな化した形
-// (「サラダ」→「さらだ」「オリーブ」→「おりーぶ」)で書く。「ごま油」「胡麻油」「揚げ油」は
-// ingredientReadings辞書で丸ごと「ごまあぶら」「あげあぶら」に変換されるため、その変換後の
-// 形も含める(「あげあぶら」を含めたことで、便AL(docs/47)が「適量でも仮定計算されない
-// 既知の欠落」として報告していた揚げ油のケースも合わせて解消した)。
-const OIL_NAMES = /(さらだ油|ごま油|ごまあぶら|あげあぶら|おりーぶおいる|おりーぶ油|^油$)/
-function matchAssumed(ing: Ingredient): { gramsPerServing: number; note: string } | null {
-  const name = ing.name
-  const amount = ing.amount ?? ''
-  const normalizedName = normalizeName(name)
-  if (/お好みで/.test(name) || /お好みで/.test(amount)) return null
-  if (/少々/.test(amount)) {
-    // normalizeName適用後は「塩」は辞書(ingredientReadings)で必ず「しお」に変換されるため、
-    // 判定は「しお」のみで足りる(「塩」がそのまま残るケースは無い)
-    if (normalizedName.includes('しお')) {
-      const m = (ing.memo ?? '').match(/約([\d.]+)g/)
-      const g = m ? Number(m[1]) : 0.5
-      return { gramsPerServing: g, note: `少々 → 約${g}g/食` }
-    }
-    if (normalizedName.includes('こしょう')) {
-      return { gramsPerServing: 0.3, note: '少々 → 約0.3g/食' }
-    }
-  }
-  if (/適量/.test(amount) && OIL_NAMES.test(normalizedName)) {
-    return { gramsPerServing: 3, note: '適量 → 約3g/食(大さじ1/2を2食で使う想定)' }
-  }
-  return null
-}
-
 /**
  * 分量欄と単位欄から、栄養計算用の(数値, 単位)を解決する。
  * 「大2」「小1/2」(大さじ/小さじの略記)・「ひとかけ」「一房」等の和語の個数詞を優先的に解釈し
@@ -338,7 +302,7 @@ function computeIngredient(
   const resolved = resolveIngredientAmount(ing)
   if (resolved === null) {
     // 少々・適量は仮の目安量で計算に含める(2026-07-11オーナー要望。UIで仮定を必ず明示)
-    const assumption = matchAssumed(ing)
+    const assumption = matchAssumedGrams(ing)
     if (assumption) {
       const grams = assumption.gramsPerServing * servings
       const nutrients = addScaled(emptyTotals(), food.per100g, grams)

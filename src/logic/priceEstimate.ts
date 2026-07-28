@@ -1,6 +1,13 @@
 import type { Ingredient } from '../db/types'
 import { leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
 import { toHiragana } from './kana'
+import { normalizeUnit, parseUnitQuantity } from './unitGrams'
+import { typicalAmountFor } from './amountAssumption'
+// 栄養側の「1枚=◯g」等の目安量(文部科学省 日本食品標準成分表ベース・docs/47監査済み)を
+// 原価の按分にも使うための参照。依存の向きは priceEstimate → nutrition の一方通行で、
+// nutrition側は単位換算の定義を unitGrams.ts から取るため循環importにはならない
+// （2026-07-28 便BY/COST-01。同じ材料の「量」を2つのエンジンが別々に解釈していたのを解消する）。
+import { convertToGrams, matchNutritionFood } from './nutrition'
 
 /**
  * 概算食費計算: レシピの「材料ごとの価格入力」(Ingredient.price)を優先し、
@@ -97,116 +104,6 @@ function parseNumericAmount(amount: string): number | undefined {
   return value
 }
 
-/**
- * マスタの unit（例:「100g」「1個」「大さじ1」「1小さじ」）を数量と単位に分解する。
- * 先頭が数字の「数量+単位」（100g・1個）だけでなく、末尾が数字の「単位+数量」
- * （大さじ1・小さじ1）も解釈する（PRICE_DEFAULTSに両方の書式が混在しているため）。
- * どちらの書式にも当てはまらなければ、qty=1・baseUnit=元の文字列のまま返す
- * （後続の按分計算では ingredient.unit と一致しない限り使われないので実害はない）。
- *
- * IngredientPricesPage（「食材と価格」の数量＋単位選択UI。2026-07-15）でも、既存行の
- * unit文字列を編集フォームの初期値（数量欄＋単位選択）へ分解するのに共用する
- * （二重実装を避けるためexport）。
- */
-export function parseUnitQuantity(unit: string): { qty: number; baseUnit: string } {
-  const trimmed = normalizeAmountInput(unit.trim())
-  const leading = trimmed.match(/^(\d+(?:\.\d+)?)(.*)$/)
-  if (leading) {
-    const qty = Number.parseFloat(leading[1])
-    const baseUnit = leading[2].trim()
-    return { qty: qty > 0 ? qty : 1, baseUnit: baseUnit || trimmed }
-  }
-  const trailing = trimmed.match(/^(\D+?)(\d+(?:\.\d+)?)$/)
-  if (trailing) {
-    const baseUnit = trailing[1].trim()
-    const qty = Number.parseFloat(trailing[2])
-    if (baseUnit) return { qty: qty > 0 ? qty : 1, baseUnit }
-  }
-  return { qty: 1, baseUnit: trimmed }
-}
-
-/** 単位の次元。質量・体積は基準単位(g・ml)に換算して按分し、個数は単位名が一致する時だけ按分する */
-export type UnitDimension = 'mass' | 'volume' | 'count'
-
-/**
- * 単位正規化の結果。mass/volumeは基準量(g・ml換算後の数値)に統一されるので次元さえ揃えば
- * そのまま比率計算できる。countは「1個」と「1本」が別物のため、単位名(unit)も保持する。
- */
-export type NormalizedUnit =
-  | { dim: 'mass'; base: number }
-  | { dim: 'volume'; base: number }
-  | { dim: 'count'; unit: string; base: number }
-
-/**
- * 質量: 基準はg。kg=1000g・mg=0.001gはSI(国際単位系)の接頭辞(キロ=10^3・ミリ=10^-3)そのもので、
- * 「調べて決める値」ではなく単位の定義から一意に決まる値（根拠調査の対象外）。
- */
-const MASS_UNIT_FACTORS: Record<string, number> = {
-  g: 1,
-  kg: 1000,
-  mg: 0.001,
-}
-
-/**
- * 体積: 基準はml。
- * - ml/cc/l/L/リットルはSI(国際単位系)の定義そのもの（1cc=1ml、1L=1000ml。根拠調査の対象外）。
- * - 大さじ=15ml・小さじ=5ml・カップ=200mlは、1948年制定のJIS S 2052「家庭用計量スプーン」
- *   （大さじ15ml±0.5ml・小さじ5ml±0.2ml）で正式に統一された日本の家庭料理の標準値。
- *   計量カップ200mlも同JIS由来で、大手レシピサイト・文部科学省「日本食品標準成分表」の
- *   目安量表でも共通してこの値が使われる（米を量る「合(180ml)」や欧米の1カップ(約237ml)とは
- *   別物なので注意）。2026-07-21 単位換算監査(docs/48)でオーナー指定値と突き合わせ済み。
- * nutrition.ts の SPOON_ML（栄養価側のg換算に使う大さじ/小さじ/カップ）もこの値を使う
- * （数値を2箇所に手書きで重複させると片方だけ変更されて食い違う事故が起きるため、
- * VOLUME_UNIT_FACTORSをexportしてnutrition.ts側から参照する一本化構成にしている）。
- */
-export const VOLUME_UNIT_FACTORS: Record<string, number> = {
-  ml: 1,
-  cc: 1,
-  l: 1000,
-  L: 1000,
-  リットル: 1000,
-  大さじ: 15,
-  小さじ: 5,
-  カップ: 200,
-}
-
-/**
- * 個数: 単位名ごとに別物として扱う（「1個」と「1本」は同じ「1」でも重さが違うため換算不可。
- * 数値換算表ではなく、按分に使ってよい単位名の許可リストという性質のもの）。
- * ここに列挙した名前はunitForm.ts(食材と価格の単位入力UI)のKNOWN_UNITSと対応する
- * レシピ側の助数詞表記を拾うための一覧で、値の大小を調べる根拠は不要（単位名の一致判定のみに使う）。
- */
-const COUNT_UNIT_NAMES = new Set([
-  '個', '本', '枚', '玉', '束', 'パック', 'かけ', '片', '株', '尾', '切れ', '丁', '袋', '缶', '房', '節',
-])
-
-/**
- * 数量+単位を「次元(mass/volume/count)＋基準量」に正規化する。
- * - 質量(g/kg/mg)・体積(ml/cc/l/L/リットル/大さじ/小さじ/カップ)は基準単位換算後の数値を返すので、
- *   同じ次元同士なら基準量の比でそのまま按分できる（kg↔g・L↔ml・大さじ↔小さじ 等）。
- * - 個数（個/本/枚/玉/束/パック/かけ/片/株/尾/切れ/丁/袋/缶/房/節）は単位名込みで返す
- *   （呼び出し側で単位名が一致する時だけ按分に使うこと。「1個」と「1本」は別物）。
- * - 「少々」「適量」等の解釈できない単位・0以下の数量はnull（呼び出し側でフォールバック）。
- *
- * unitはNFKC正規化してから比較する(2026-07-21全角対応: 全角「ｇ」「ｍｌ」等でも半角と同じ
- * 単位名に一致させるため。保存データ自体は書き換えない)。
- */
-export function normalizeUnit(amount: number, unit: string): NormalizedUnit | null {
-  if (!Number.isFinite(amount) || amount <= 0) return null
-  const trimmed = normalizeAmountInput((unit ?? '').trim())
-  if (!trimmed) return null
-
-  const massFactor = MASS_UNIT_FACTORS[trimmed]
-  if (massFactor != null) return { dim: 'mass', base: amount * massFactor }
-
-  const volumeFactor = VOLUME_UNIT_FACTORS[trimmed]
-  if (volumeFactor != null) return { dim: 'volume', base: amount * volumeFactor }
-
-  if (COUNT_UNIT_NAMES.has(trimmed)) return { dim: 'count', unit: trimmed, base: amount }
-
-  return null
-}
-
 /** マスタ行が投入時の目安のままか(default)、ユーザーが上書きした価格か(user)の由来種別 */
 export type PriceSource = 'default' | 'user'
 
@@ -217,19 +114,44 @@ export interface IngredientPriceEstimate {
 }
 
 /**
+ * 「数量+単位」を、栄養側の目安量(NutritionFood.unitGrams・gramsPerMl)でグラムに換算する。
+ * foodは材料名とマスタ名の両方で名寄せを試す(材料名が「鶏むね肉(皮なし)」のような
+ * 書き方でも、マスタ名「鶏むね肉」で拾えるようにするため)。
+ */
+function toGramsForPrice(
+  ingredientName: string,
+  entryName: string,
+  value: number,
+  unit: string,
+): number | null {
+  const food = matchNutritionFood(ingredientName) ?? matchNutritionFood(entryName)
+  if (!food) return null
+  return convertToGrams(value, unit, food)
+}
+
+/**
  * マスタ一致した材料1行分の金額を見積もる。
  * ingredientの分量・単位がマスタのunitと数量として噛み合えば按分計算し、
- * 噛み合わない（「少々」等の非数値・単位不一致・マスタ側が「1/4個」等で解釈不能）場合は
- * マスタの金額をそのまま1行分の目安として使う（按分できないだけで、値自体は常識的な範囲）。
+ * 最後まで噛み合わなければマスタの金額をそのまま1行分の目安として使う。
  * sourceは一致したマスタ行がisDefaultのままか(user='default')、ユーザーが上書き済みか('user')を表す。
  *
- * 按分の優先順位（2026-07-14 単位正規化・オーナー要望「kgが混ざっても平気か不安」への対応）:
+ * 按分の優先順位（1〜2は2026-07-14 単位正規化・オーナー要望「kgが混ざっても平気か不安」への対応。
+ * 3〜4は2026-07-28 便BY/COST-01で追加）:
  * 1) normalizeUnitで両者を正規化し、同じ次元（質量↔質量・体積↔体積）なら基準量換算で按分。
  *    個数(count)同士は単位名も一致する時だけ按分する（「1個」と「1本」は換算不可）。
  * 2) どちらか（または両方）がnormalizeUnitで解釈できない単位でも、文字列として完全一致するなら
  *    従来どおり按分する（「1杯」「1合」「1箱」等、mass/volume/countの対応表に無い単位の後方互換。
  *    既存の"完全一致で按分"の挙動を正規化に置き換えるのではなく包含するため）。
- * 3) 上記いずれにも当てはまらなければ、マスタの金額をそのまま使う（安全側のフォールバック）。
+ * 3) 次元も単位名も食い違うときは、両者を栄養側の目安量でグラムに寄せて質量比で按分する
+ *    （「鶏むね肉 1枚」とマスタ「100g」のように、個数と重さで書かれていて比べられなかった組。
+ *    従来はここでマスタ金額の満額＝100g分の90円が1枚に乗り、実勢の1/2〜1/5という過小計上に
+ *    なっていた。栄養側は同じ材料を250gとして計算しており、同じ画面の2つの数字が
+ *    食い違う原因でもあった）。
+ * 4) 分量が数値で書かれていない（「適量」「少々」）材料は、1回の調理で使う量
+ *    （amountAssumption.tsのtypicalAmountFor）を持っていればその量で按分する
+ *    （登録単位が販売単位のサラダ油・ごま油・オリーブオイルで、「適量」1行にボトル1本分の
+ *    金額が乗るのを止める）。
+ * 5) 上記いずれにも当てはまらなければ、マスタの金額をそのまま使う（安全側のフォールバック）。
  */
 export function estimateIngredientYen(
   ingredient: Pick<Ingredient, 'name' | 'amount' | 'unit'>,
@@ -247,21 +169,48 @@ export function estimateIngredientYen(
   const ingUnit = resolved ? resolved.unit : normalizeAmountInput((ingredient.unit ?? '').trim())
   const amountNum = resolved ? resolved.value : parseNumericAmount(ingredient.amount ?? '')
   const source: PriceSource = entry.isDefault ? 'default' : 'user'
+  const masterNorm = baseUnit ? normalizeUnit(baseQty, baseUnit) : null
 
   if (amountNum != null && amountNum > 0 && ingUnit && baseUnit) {
     const recipeNorm = normalizeUnit(amountNum, ingUnit)
-    const masterNorm = normalizeUnit(baseQty, baseUnit)
     if (recipeNorm != null && masterNorm != null && recipeNorm.dim === masterNorm.dim) {
       if (recipeNorm.dim === 'count') {
         if (masterNorm.dim === 'count' && recipeNorm.unit === masterNorm.unit) {
           return { yen: Math.round(entry.pricePerUnit * (recipeNorm.base / masterNorm.base)), source }
         }
-        // 個数系だが単位名が違う（例:「1個」vs「1本」）→ 換算不可なのでフォールバックへ
+        // 個数系だが単位名が違う（例:「1個」vs「1本」）→ グラム換算の按分へ
       } else {
         return { yen: Math.round(entry.pricePerUnit * (recipeNorm.base / masterNorm.base)), source }
       }
     } else if (ingUnit === baseUnit) {
       return { yen: Math.round(entry.pricePerUnit * (amountNum / baseQty)), source }
+    }
+    // 3) グラム換算での按分
+    const recipeGrams = toGramsForPrice(ingredient.name, entry.normalizedName, amountNum, ingUnit)
+    const masterGrams = toGramsForPrice(ingredient.name, entry.normalizedName, baseQty, baseUnit)
+    if (recipeGrams != null && masterGrams != null && masterGrams > 0) {
+      return { yen: Math.round(entry.pricePerUnit * (recipeGrams / masterGrams)), source }
+    }
+  } else if (baseUnit) {
+    // 4) 「適量」「少々」を1回の使用量で按分
+    const typical = typicalAmountFor(entry.normalizedName)
+    if (typical) {
+      const { qty: typQty, baseUnit: typUnit } = parseUnitQuantity(typical)
+      const typNorm = normalizeUnit(typQty, typUnit)
+      if (
+        typNorm != null &&
+        masterNorm != null &&
+        typNorm.dim === masterNorm.dim &&
+        (typNorm.dim !== 'count' ||
+          (masterNorm.dim === 'count' && typNorm.unit === masterNorm.unit))
+      ) {
+        return { yen: Math.round(entry.pricePerUnit * (typNorm.base / masterNorm.base)), source }
+      }
+      const typGrams = toGramsForPrice(ingredient.name, entry.normalizedName, typQty, typUnit)
+      const masterGrams = toGramsForPrice(ingredient.name, entry.normalizedName, baseQty, baseUnit)
+      if (typGrams != null && masterGrams != null && masterGrams > 0) {
+        return { yen: Math.round(entry.pricePerUnit * (typGrams / masterGrams)), source }
+      }
     }
   }
   return { yen: entry.pricePerUnit, source }

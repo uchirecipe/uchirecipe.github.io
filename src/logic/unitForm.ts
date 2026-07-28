@@ -1,4 +1,5 @@
-import { parseUnitQuantity } from './priceEstimate'
+import { normalizeAmountInput } from './amount'
+import { parseUnitQuantity } from './unitGrams'
 
 /**
  * 「食材と価格」の単位入力UI(数量＋単位選択)の純関数部分。
@@ -30,16 +31,25 @@ export interface UnitFormState {
 
 /**
  * 保存済みのunit文字列(例:「100g」「1個」「大さじ1」)を編集フォームの初期値に分解する。
- * priceEstimate.tsのparseUnitQuantityで数量+単位に分解できて、かつ単位が選択肢にある
+ * unitGrams.tsのparseUnitQuantityで数量+単位に分解できて、かつ単位が選択肢にある
  * 場合だけ数量欄＋単位選択で表せる。それ以外(「1杯」「少々」「1/4個」等、選択肢に無い単位や
  * 分解できない書式)は「その他」＋自由入力欄へフォールバックし、元の文字列をそのまま見せる。
+ *
+ * 分解した結果をcomposeUnitで組み立て直して元の文字列に戻る場合だけ数量欄＋単位選択にする
+ * (2026-07-28 便BY。parseUnitQuantityが分数「1/4個」を数量0.25として読めるようになったが、
+ * これを数量欄に入れると保存時に「0.25個」へ書き換わってしまい、PRICE_DEFAULTSの表記
+ * 「1/4個」と食い違って「デフォルトに戻す」の判定が壊れる。表示上の挙動は従来どおり
+ * 「その他」＋原文のまま)。
  */
 export function decomposeUnit(raw: string): UnitFormState {
   const trimmed = raw.trim()
   if (trimmed) {
     const { qty, baseUnit } = parseUnitQuantity(trimmed)
     if (qty > 0 && KNOWN_UNIT_SET.has(baseUnit)) {
-      return { qty: String(qty), unitKind: baseUnit, freeText: '' }
+      const state: UnitFormState = { qty: String(qty), unitKind: baseUnit, freeText: '' }
+      // 比較は全角→半角の正規化後(parseUnitQuantityと同じ土俵)で行う。
+      // 「３００ｇ」のような全角入力を従来どおり数量欄＋単位選択に分解するため
+      if (composeUnit(state) === normalizeAmountInput(trimmed)) return state
     }
   }
   return { qty: '', unitKind: OTHER_UNIT, freeText: trimmed }

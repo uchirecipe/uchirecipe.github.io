@@ -66,6 +66,16 @@ export function toHiragana(input: string): string {
 }
 
 /**
+ * 材料名の照合キー。toHiragana に加えて空白・中黒を落とす
+ * （「白 いりごま」「オリーブ・オイル」のような区切りのゆれを吸収する）。
+ * 栄養の名寄せ(nutrition.ts)と「少々・適量」の仮の量(amountAssumption.ts)が
+ * 同じ土俵で名前を比べられるよう、1箇所に置いている（2026-07-28 便BY）。
+ */
+export function toIngredientKey(name: string): string {
+  return toHiragana(name.trim()).replace(/[\s・]+/g, '')
+}
+
+/**
  * タグでよく使う語の読み（2026-07-28 便BW・QA S3）。
  *
  * タグ候補の絞り込みは toHiragana で行っているが、その辞書（INGREDIENT_READINGS）は食材名だけで、
