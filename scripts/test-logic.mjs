@@ -6541,6 +6541,79 @@ eq(
   eq('メモ 純テキスト文 読点優先 幅8', cm('あいう、えお、かき。', 8), ['あいう、えお、', 'かき。'])
 }
 
+// ---------- timerOrder: タイマーの表示順と端末内保存の読み戻し(2026-07-28 機能④診断C6/C7) ----------
+{
+  const { sortTimersForDisplay, parseStoredTimers, RESTORE_GRACE_MS } = await import(
+    '../src/logic/timerOrder.ts'
+  )
+
+  // C6: 起動順のままだと「先に鳴るもの」が最下段に来ることがあった。
+  // 終わったもの→残りが少ない順に並べ替える(元の配列は書き換えない)
+  const base = [
+    { id: 1, done: false, endsAt: 15_000 }, // 肉じゃが15分(先に起動・一番長い)
+    { id: 2, done: false, endsAt: 5_000 }, // カレー5分
+    { id: 3, done: false, endsAt: 2_000 }, // 味噌汁2分(最後に起動・一番先に鳴る)
+  ]
+  eq(
+    'C6 起動順に関係なく残りが少ない順に並ぶ',
+    sortTimersForDisplay(base).map((t) => t.id),
+    [3, 2, 1],
+  )
+  eq('C6 元の配列(TimerProviderの状態)は並べ替えない', base.map((t) => t.id), [1, 2, 3])
+  eq(
+    'C6 終わったタイマーは残り時間に関わらず先頭に来る',
+    sortTimersForDisplay([
+      { id: 1, done: false, endsAt: 2_000 },
+      { id: 2, done: true, endsAt: 9_000 },
+      { id: 3, done: false, endsAt: 1_000 },
+    ]).map((t) => t.id),
+    [2, 3, 1],
+  )
+  eq('C6 0本・1本でも壊れない', sortTimersForDisplay([]).length, 0)
+
+  // C7: リロード・タブ破棄でタイマーが全消滅していた。endsAtは絶対時刻なので保存→読み戻しで続く
+  const now = 1_800_000_000_000
+  const stored = JSON.stringify([
+    {
+      id: 7,
+      key: '1-2-900',
+      label: '肉じゃが',
+      doneLabel: '煮込み終わり',
+      recipeId: 1,
+      stepNumber: 3,
+      endsAt: now + 600_000,
+      totalSeconds: 900,
+      done: false,
+      muted: false,
+    },
+  ])
+  const restored = parseStoredTimers(stored, now)
+  eq('C7 保存したタイマーが読み戻せる', restored.length, 1)
+  eq('C7 終了予定時刻(絶対時刻)がそのまま復元される', restored[0].endsAt, now + 600_000)
+  eq('C7 レシピID・手順番号・終了文言も保たれる', [restored[0].recipeId, restored[0].stepNumber, restored[0].doneLabel], [1, 3, '煮込み終わり'])
+  eq(
+    'C7 読み戻しの時点で終了時刻を過ぎている分は done で戻す(開いた瞬間に鳴らさない)',
+    parseStoredTimers(stored, now + 900_000)[0].done,
+    true,
+  )
+  eq(
+    'C7 終了から1時間より古いものは捨てる(翌日に古い「終わり」が並ばない)',
+    parseStoredTimers(stored, now + 600_000 + RESTORE_GRACE_MS + 1).length,
+    0,
+  )
+  eq('C7 保存が無い・壊れているときは空で始める(起動を妨げない)', [
+    parseStoredTimers(null, now).length,
+    parseStoredTimers('', now).length,
+    parseStoredTimers('{壊れたJSON', now).length,
+    parseStoredTimers('{"not":"array"}', now).length,
+  ], [0, 0, 0, 0])
+  eq(
+    'C7 idやendsAtが欠けた行は黙って捨てる',
+    parseStoredTimers(JSON.stringify([{ label: 'こわれた行' }, null, 3]), now).length,
+    0,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

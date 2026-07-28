@@ -10,12 +10,14 @@ import {
   Mic,
   MicOff,
   Timer as TimerIcon,
+  BellRing,
 } from 'lucide-react'
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
 import { useSettings, updateSettings } from '../db/settings'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/time'
+import { sortTimersForDisplay } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import { toSpeechText } from '../logic/toSpeechText'
@@ -49,7 +51,16 @@ const micSupported =
  * 「画面を暗くしない」設定は詳細画面(呼び出し元)側のWake Lockがそのまま効く。
  */
 export default function FocusMode({ recipe, recipeId, initialStep, onClose, onComplete }: Props) {
-  const { startTimer, timers, now, dismissTimer, adjustTimer } = useTimers()
+  const {
+    startTimer,
+    timers,
+    now,
+    dismissTimer,
+    adjustTimer,
+    flashingId,
+    showFirstTimeNotice,
+    dismissFirstTimeNotice,
+  } = useTimers()
   const settings = useSettings()
   const [index, setIndex] = useState(initialStep)
   const [speaking, setSpeaking] = useState(false)
@@ -80,8 +91,10 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const stepTerms = step ? collectUniqueTerms(step.text, step.memo) : []
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   // 調理中モードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
-  // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)
-  const recipeTimers = timers.filter((t) => t.recipeId === recipeId)
+  // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)。
+  // 並び順(2026-07-28 機能④診断C6): 終わったもの→残りが少ない順。起動順のままだと
+  // 先に鳴るタイマーが端に来ることがあり、毎回数字を読み比べる必要があった
+  const recipeTimers = sortTimersForDisplay(timers.filter((t) => t.recipeId === recipeId))
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
 
   // じぶんタイマーの既定値(秒刻み対応・2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、
@@ -341,13 +354,13 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
 
       {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋じぶんタイマー起動ボタン(2026-07-12・入口B)。
           タイマーが無い時も「じぶんタイマー」ボタンの置き場所として常に表示する */}
-      <div className="flex flex-wrap items-center justify-center gap-2 px-[var(--space-md)] pb-1">
+      <div className="flex max-h-[30vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1">
         {recipeTimers.map((t) => (
           <div
             key={t.id}
             className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
-              t.done ? 'border-warning text-warning' : 'border-accent text-accent'
-            }`}
+              t.done ? 'animate-pulse border-warning text-warning' : 'border-accent text-accent'
+            } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''}`}
           >
             <button
               type="button"
@@ -365,6 +378,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
               className="flex items-center gap-1.5"
             >
               <StepBadge number={t.stepNumber > 0 ? t.stepNumber : 'custom'} size={24} />
+              {/* 終了の合図(2026-07-28 機能④診断C5): 常駐バー(TimerBar)と同じベル+点滅にそろえる。
+                  以前は色が変わるだけの静止ピルで、音を聞き逃すと画面上の手掛かりが実質無かった */}
+              {t.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
               <span className="text-lg font-bold tabular-nums">
                 {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
               </span>
@@ -389,6 +405,24 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           {ja.timer.customBarButton}
         </button>
       </div>
+
+      {/* タイマーの決まりごとの初回案内(2026-07-28 機能④診断C7)。常駐バー(TimerBar)にしか
+          描かれておらず、この全画面モードから初めてタイマーを起動すると覆い隠されたまま
+          「見せた」ことになり、二度と出せなくなっていた。TimerBarの内容をここにも複製する
+          という既存方針(上のバッジ行と同じ)にそろえて、同じ案内をここにも出す */}
+      {showFirstTimeNotice && (
+        <div className="mx-[var(--space-md)] mb-1 flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-xs text-ink-muted">
+          <span className="min-w-0 flex-1">{ja.timer.notice}</span>
+          <button
+            type="button"
+            onClick={dismissFirstTimeNotice}
+            aria-label={ja.focus.close}
+            className="shrink-0 rounded-full p-1"
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+      )}
 
       <div
         // 手順テキストの縦位置(2026-07-21オーナー実機フィードバック): 中央揃えのままだと

@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { useSettings, updateSettings } from '../db/settings'
 import { useWakeLock } from './useWakeLock'
+import { parseStoredTimers, TIMERS_STORAGE_KEY } from '../logic/timerOrder'
 import { ja } from '../i18n/ja'
 
 /**
@@ -55,7 +56,7 @@ interface TimerContextValue {
   now: number
   /** 連打などで既に動いているタイマーに気づかせるための、点滅対象タイマーID */
   flashingId: number | null
-  /** タイマーの制限（アプリを開いている間だけ動く）を初回だけ知らせるための表示フラグ */
+  /** タイマーの決まりごと（音と通知はアプリを開いている間だけ）を初回だけ知らせるための表示フラグ */
   showFirstTimeNotice: boolean
   dismissFirstTimeNotice: () => void
   startTimer: (options: StartTimerOptions) => void
@@ -72,6 +73,34 @@ interface TimerContextValue {
 const TimerContext = createContext<TimerContextValue | null>(null)
 
 let nextTimerId = 1
+
+/**
+ * 動作中タイマーの端末内保存（2026-07-28 機能④診断C7）。
+ * 以前はメモリ内stateだけだったため、リロード・OSによるタブ破棄でタイマーが
+ * 無警告で全消滅していた（60分タイマー中の誤操作で全損する）。
+ * endsAt は絶対時刻なので、そのまま保存して読み戻すだけで残り時間が正しく復元できる。
+ * 読み戻しの規則そのものは src/logic/timerOrder.ts の純関数側にある（単体テスト対象）。
+ */
+function loadStoredTimers(): ActiveTimer[] {
+  let restored: ActiveTimer[] = []
+  try {
+    restored = parseStoredTimers(localStorage.getItem(TIMERS_STORAGE_KEY), Date.now())
+  } catch {
+    return []
+  }
+  // 復元したIDと衝突しないように採番を進める
+  for (const t of restored) if (t.id >= nextTimerId) nextTimerId = t.id + 1
+  return restored
+}
+
+function saveTimers(timers: ActiveTimer[]) {
+  try {
+    if (timers.length === 0) localStorage.removeItem(TIMERS_STORAGE_KEY)
+    else localStorage.setItem(TIMERS_STORAGE_KEY, JSON.stringify(timers))
+  } catch {
+    /* 保存できない環境（プライベートモード等）では諦める。動作自体は従来どおり続く */
+  }
+}
 
 /** 終了の合図: ピピピと3回鳴らす（音が出せない環境では静かに無視） */
 function playChime(ctx: AudioContext | undefined) {
@@ -102,12 +131,16 @@ function playChime(ctx: AudioContext | undefined) {
 function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, soundOn: boolean) {
   if (soundOn && !timer.muted) {
     playChime(audio)
-    // バイブレーション（対応端末のみ）
-    try {
-      if (typeof navigator.vibrate === 'function') navigator.vibrate([300, 120, 300])
-    } catch {
-      /* 無視 */
-    }
+  }
+  // バイブレーション（対応端末のみ）。
+  // 2026-07-28 機能④診断C5: 以前はチャイムと同じ `soundOn && !muted` の中にあり、
+  // 設定「タイマー音」をOFFにする・その行を消音すると振動まで止まっていた。
+  // 「音は出せないが振動で気づきたい」（夜間・子どもが寝ている・イヤホン使用中）が
+  // 消音の主目的なので、振動は音の条件から切り離して常に出す
+  try {
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([300, 120, 300])
+  } catch {
+    /* 無視 */
   }
   // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
   // 通知本文はtruncateされないので手順番号も含めた完全な説明にする。
@@ -128,7 +161,8 @@ function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, s
 }
 
 export function TimerProvider({ children }: { children: ReactNode }) {
-  const [timers, setTimers] = useState<ActiveTimer[]>([])
+  // 起動時に端末内の保存分を読み戻す（2026-07-28 機能④診断C7）
+  const [timers, setTimers] = useState<ActiveTimer[]>(loadStoredTimers)
   const [now, setNow] = useState(() => Date.now())
   const [flashingId, setFlashingId] = useState<number | null>(null)
   const [showFirstTimeNotice, setShowFirstTimeNotice] = useState(false)
@@ -164,7 +198,11 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     } catch {
       /* 無視 */
     }
-    // アプリの制限（閉じている間は動かない）を初回だけ知らせる
+    // タイマーの決まりごと（音と通知はアプリを開いている間だけ）を初回だけ知らせる。
+    // 2026-07-28 機能④診断C7: この案内は常駐バー(TimerBar)にしか描かれておらず、
+    // 全画面の調理中モードから起動すると覆い隠されたままフラグだけ立って二度と出せなく
+    // なっていた。調理中モード側にも同じ案内を出すようにした（FocusMode）ので、
+    // ここでフラグを立てても「誰にも読まれない」経路は無くなる
     if (settings && !settings.timerNoticeShown) {
       setShowFirstTimeNotice(true)
       void updateSettings({ timerNoticeShown: true })
@@ -208,6 +246,12 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const dismissFirstTimeNotice = useCallback(() => setShowFirstTimeNotice(false), [])
+
+  // 動作中タイマーを端末内に保存する（2026-07-28 機能④診断C7）。
+  // 起動・±調整・停止・完了のたびに配列そのものが差し替わるので、この1本で全経路を拾える
+  useEffect(() => {
+    saveTimers(timers)
+  }, [timers])
 
   const hasRunning = timers.some((t) => !t.done)
 

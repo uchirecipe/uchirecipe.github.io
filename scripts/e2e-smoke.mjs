@@ -2851,6 +2851,219 @@ try {
   await customAdjustDialog.getByRole('button', { name: '停止' }).click()
   await page.waitForTimeout(300)
 
+  // --- TIMER-KEEP-01 / TIMER-ORDER-01 / FOCUS-TIMER-01 / TIMER-ADJ-02:
+  // 2026-07-28 機能④診断(第2群 タイマーの信頼性)の再発防止。まっさらな別プロファイルで:
+  //  (1) C7 リロードでタイマーが全消滅しない(端末内に保存し、絶対時刻から残り時間を復元する)
+  //  (2) C7 初回の注意書きが調理中モードの中にも出る(以前は常駐バーにしか無く、全画面に
+  //      覆われたままフラグだけ立って二度と出せなくなっていた)
+  //  (3) C6 複数タイマーの並びが起動順ではなく「残りが少ない順」になる
+  //  (4) C5 調理中モードの終了バッジにベル+点滅が付く(常駐バーと同じ合図にそろえる)
+  //  (5) C12 同じ時間表記の2度タップで、調理中モードの中でも既存タイマーが点滅する
+  //  (6) C10 ±調整の窓を開いたままタイマーが終わったら、±が押せないと見て分かる
+  currentCheck = 'TIMER-KEEP-01'
+  {
+    const tkBrowser = await chromium.launch()
+    try {
+      const tkContext = await tkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const tkPage = await tkContext.newPage()
+      const openNikujaga = async () => {
+        await tkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await tkPage.waitForTimeout(1200)
+        await tkPage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+        await tkPage.waitForTimeout(500)
+        await tkPage.getByText('肉じゃが', { exact: true }).first().click()
+        await tkPage.waitForTimeout(700)
+      }
+      await openNikujaga()
+      await tkPage.getByRole('button', { name: '15分 タイマー開始' }).click()
+      await tkPage.waitForTimeout(500)
+      const barRow = tkPage.getByRole('button', { name: /のタイマーを調整/ })
+      const beforeReload = parseRemainingSeconds(await barRow.first().textContent())
+      // (2) 初回の注意書きが、実態に合わせた文言になっている
+      check(
+        'TIMER-KEEP-01 初回の注意書きが「残り時間は続く／音と通知は開いている間だけ」になっている',
+        (await tkPage.textContent('body')).includes('残り時間はアプリを閉じても続きます'),
+      )
+      // (1) リロードしても残る
+      await tkPage.reload({ waitUntil: 'networkidle' })
+      await tkPage.waitForTimeout(1500)
+      const afterReload = parseRemainingSeconds(await barRow.first().textContent().catch(() => ''))
+      check(
+        'TIMER-KEEP-01 リロードしてもタイマーが消えない',
+        (await barRow.count()) === 1,
+        `リロード後の行数=${await barRow.count()}`,
+      )
+      check(
+        'TIMER-KEEP-01 リロード後も残り時間が続きから復元される(経過分だけ減っている)',
+        beforeReload !== null && afterReload !== null && afterReload < beforeReload && beforeReload - afterReload < 60,
+        `リロード前=${beforeReload}s リロード後=${afterReload}s`,
+      )
+
+      // (3) C6 並び順。15分の後に「じぶんタイマー1分」を足すと、後から起動した1分が上に来る
+      currentCheck = 'TIMER-ORDER-01'
+      await tkPage.getByRole('button', { name: 'じぶんタイマーを開く' }).first().click()
+      await tkPage.waitForTimeout(300)
+      {
+        const dlg = tkPage.getByRole('dialog', { name: 'じぶんタイマー' })
+        await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+        await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+        await tkPage.waitForTimeout(150)
+        await dlg.getByRole('button', { name: '開始' }).click()
+      }
+      await tkPage.waitForTimeout(500)
+      const orderLabels = await tkPage.evaluate(() =>
+        Array.from(
+          document.querySelectorAll('.fixed.inset-x-0.z-10 button[aria-label*="タイマーを調整"]'),
+        ).map((b) => b.getAttribute('aria-label')),
+      )
+      check(
+        'TIMER-ORDER-01 後から起動しても残りが少ないタイマーが上に来る(起動順ではない)',
+        orderLabels.length === 2 && orderLabels[0].includes('じぶんタイマー'),
+        JSON.stringify(orderLabels),
+      )
+
+      // (4)(5) 調理中モード内のタイマー表示
+      currentCheck = 'FOCUS-TIMER-01'
+      await tkPage.getByText('調理中モードで見る').click()
+      await tkPage.waitForTimeout(500)
+      const focus = tkPage.locator('.fixed.inset-0.z-50')
+      for (let i = 0; i < 2; i++) {
+        await focus.getByRole('button', { name: '次へ' }).click()
+        await tkPage.waitForTimeout(250)
+      }
+      // 同じ「15分」を押す = 既に動いているタイマーの重複起動 → 点滅で知らせる
+      await focus.getByRole('button', { name: '15分 タイマー開始' }).click()
+      await tkPage.waitForTimeout(300)
+      const flashInFocus = await tkPage.evaluate(
+        () => document.querySelector('.fixed.inset-0.z-50').querySelectorAll('.animate-pulse.ring-2').length,
+      )
+      check(
+        'FOCUS-TIMER-01 重複タップの点滅が調理中モードの中でも見える(押しても無反応に見えない)',
+        flashInFocus >= 1,
+        `点滅要素=${flashInFocus}`,
+      )
+      // じぶんタイマー10秒 → 終了バッジのベル+点滅
+      await focus.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
+      await tkPage.waitForTimeout(300)
+      {
+        const dlg = tkPage.getByRole('dialog', { name: 'じぶんタイマー' })
+        for (let i = 0; i < 3; i++)
+          await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+        await tkPage.waitForTimeout(150)
+        await dlg.getByRole('button', { name: '開始' }).click()
+      }
+      await tkPage.waitForTimeout(11500)
+      const donePill = await tkPage.evaluate(() => {
+        const overlay = document.querySelector('.fixed.inset-0.z-50')
+        const pill = Array.from(overlay.querySelectorAll('div.inline-flex')).find((p) =>
+          p.className.includes('border-warning'),
+        )
+        return pill
+          ? { pulses: pill.className.includes('animate-pulse'), bell: !!pill.querySelector('svg.animate-pulse') }
+          : null
+      })
+      check(
+        'FOCUS-TIMER-01 調理中モードの終了バッジにベルと点滅が付く(常駐バーと同じ合図)',
+        donePill != null && donePill.pulses && donePill.bell,
+        JSON.stringify(donePill),
+      )
+
+      // (6) C10 ±調整の窓を開いたままタイマーが終わる
+      currentCheck = 'TIMER-ADJ-02'
+      await focus.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
+      await tkPage.waitForTimeout(300)
+      {
+        const dlg = tkPage.getByRole('dialog', { name: 'じぶんタイマー' })
+        for (let i = 0; i < 3; i++)
+          await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+        await tkPage.waitForTimeout(150)
+        await dlg.getByRole('button', { name: '開始' }).click()
+      }
+      await tkPage.waitForTimeout(500)
+      await focus.getByRole('button', { name: /のタイマーを調整/ }).first().click()
+      await tkPage.waitForTimeout(300)
+      const zeroDialog = tkPage.getByRole('dialog', { name: 'タイマーを調整' })
+      check('TIMER-ADJ-02 調整の窓が開く', await zeroDialog.isVisible())
+      await tkPage.waitForTimeout(11000)
+      const zeroState = await tkPage.evaluate(() => {
+        const dlg = document.querySelector('[role="dialog"][aria-label="タイマーを調整"]')
+        if (!dlg) return null
+        const btns = Array.from(dlg.querySelectorAll('button'))
+        const find = (t) => btns.find((b) => b.textContent.trim() === t)
+        return {
+          plus: find('+1分')?.disabled,
+          minus: find('−30秒')?.disabled,
+          stop: find('停止')?.disabled,
+          text: dlg.textContent,
+        }
+      })
+      check(
+        'TIMER-ADJ-02 窓を開いたまま終わったら「+1分」「−30秒」は押せない状態になる(死にボタンにしない)',
+        zeroState != null && zeroState.plus === true && zeroState.minus === true,
+        JSON.stringify(zeroState && { plus: zeroState.plus, minus: zeroState.minus }),
+      )
+      check(
+        'TIMER-ADJ-02 窓の中でも終わったことが分かり、理由の一言が出る',
+        zeroState != null && zeroState.text.includes('終わったタイマーの時間は変えられません'),
+      )
+      check(
+        'TIMER-ADJ-02 「停止」は引き続き押せる(この窓から片付けられる)',
+        zeroState != null && zeroState.stop === false,
+      )
+    } finally {
+      await tkBrowser.close()
+    }
+  }
+
+  // --- FOCUS-NOTICE-01: 初回のタイマー注意書きを、調理中モードから初めて起動した場合でも
+  // 見える場所に出す(2026-07-28 機能④診断C7)。まっさらなプロファイルで、常駐バーを覆う
+  // 全画面の中に同じ案内が現れることを確認する ---
+  currentCheck = 'FOCUS-NOTICE-01'
+  {
+    const fnBrowser = await chromium.launch()
+    try {
+      const fnContext = await fnBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const fnPage = await fnContext.newPage()
+      await fnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fnPage.waitForTimeout(1200)
+      await fnPage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await fnPage.waitForTimeout(500)
+      await fnPage.getByText('肉じゃが', { exact: true }).first().click()
+      await fnPage.waitForTimeout(700)
+      await fnPage.getByText('調理中モードで見る').click()
+      await fnPage.waitForTimeout(500)
+      const fnFocus = fnPage.locator('.fixed.inset-0.z-50')
+      for (let i = 0; i < 2; i++) {
+        await fnFocus.getByRole('button', { name: '次へ' }).click()
+        await fnPage.waitForTimeout(250)
+      }
+      await fnFocus.getByRole('button', { name: '15分 タイマー開始' }).click()
+      await fnPage.waitForTimeout(500)
+      const noticeSeen = await fnPage.evaluate(() => {
+        const overlay = document.querySelector('.fixed.inset-0.z-50')
+        const span = Array.from(overlay.querySelectorAll('span')).find((s) =>
+          s.textContent.includes('残り時間はアプリを閉じても続きます'),
+        )
+        if (!span) return { found: false }
+        const r = span.getBoundingClientRect()
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        return { found: true, covered: !(span === top || span.contains(top) || top?.contains(span)) }
+      })
+      check(
+        'FOCUS-NOTICE-01 調理中モードから初めてタイマーを起動しても注意書きが出る',
+        noticeSeen.found,
+        JSON.stringify(noticeSeen),
+      )
+      check(
+        'FOCUS-NOTICE-01 その注意書きは全画面に覆われず読める',
+        noticeSeen.found && !noticeSeen.covered,
+        JSON.stringify(noticeSeen),
+      )
+    } finally {
+      await fnBrowser.close()
+    }
+  }
+
   // --- PRICE-01: 食材価格マスタ(「食材と価格」画面。docs/20 §3)。
   // 材料に価格を入力していないレシピでも、マスタの目安価格が詳細の概算食費に反映され、
   // マスタの価格を編集すると反映結果も追従することを確認する。

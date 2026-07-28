@@ -3,6 +3,7 @@ import { X, BellRing, Bell, BellOff } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTimers } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
+import { sortTimersForDisplay } from '../logic/timerOrder'
 import StepBadge from './StepBadge'
 import TimerAdjustModal from './TimerAdjustModal'
 import { ja } from '../i18n/ja'
@@ -25,6 +26,12 @@ export default function TimerBar() {
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
   if (timers.length === 0) return null
+
+  // 表示順(2026-07-28 機能④診断C6): 以前は起動順のままで、先に鳴るタイマーが最下段に
+  // 来ることがあり「どれが一番先に終わるか」を毎回数字で読み比べる必要があった。
+  // 終わったもの→残りが少ない順に並べる。TimerProvider の配列自体は触らず表示用の
+  // コピーだけ並べ替える(key={timer.id} なので並べ替えでタイマーの状態は壊れない)
+  const sortedTimers = sortTimersForDisplay(timers)
 
   /**
    * 完了タイマーのタップで該当レシピの該当手順へ。
@@ -66,7 +73,7 @@ export default function TimerBar() {
             </button>
           </div>
         )}
-        {timers.map((timer) => {
+        {sortedTimers.map((timer) => {
           const remaining = Math.ceil((timer.endsAt - now) / 1000)
           const isFlashing = flashingId === timer.id
           // ±調整の窓を開くボタンの読み上げ名（複数タイマー同時進行でも区別できるよう手順番号を含める。
