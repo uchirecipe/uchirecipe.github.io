@@ -17,6 +17,13 @@
 export interface NormalizedIngredient {
   name: string
   amount?: string
+  /**
+   * 合わせ調味料のグループ記号(「A水」「B砂糖」の A/B。味の素パーク・オレンジページ実測)。
+   * 名前からは従来どおり剥がした上で、記号だけをここに残す(2026-07-28 便BX/C08)。
+   * 名前に記号を残すと栄養・原価の名前照合が壊れるため、名前は無記号のまま保つ。
+   * app側(RecipeFormPage)がこれを合わせ調味料グループ(seasoningGroup)へ対応づける。
+   */
+  group?: string
 }
 
 export interface NormalizedRecipe {
@@ -341,7 +348,14 @@ export function splitIngredientAmount(raw: string): NormalizedIngredient {
   // 「A」「Ｂ」のようなグループ記号1文字だけの行(味の素パーク・オレンジページ実測)は
   // 材料としての情報を持たないため、空扱いにして呼び出し側(normalizeIngredients)で除外する
   if (/^[A-ZＡ-Ｚ]$/.test(cleaned)) return { name: '' }
-  const normalized = collapseSpacedMixedFraction(normalizeDigits(cleaned)).replace(GROUP_LETTER_PREFIX, '')
+  const digitsFixed = collapseSpacedMixedFraction(normalizeDigits(cleaned))
+  // グループ記号は名前から剥がすが、捨てずに group として持ち回る(2026-07-28 便BX/C08)。
+  // 手順文の「Aを加えて」がどの材料を指すのかが取り込み後に完全に失われていた
+  const groupMatch = digitsFixed.match(GROUP_LETTER_PREFIX)
+  const group = groupMatch ? groupMatch[0].normalize('NFKC') : undefined
+  const normalized = digitsFixed.replace(GROUP_LETTER_PREFIX, '')
+  const withGroup = (parsed: NormalizedIngredient): NormalizedIngredient =>
+    group ? { ...parsed, group } : parsed
 
   // 末尾の区切り(半角/全角スペース・三点リーダー系)を優先して分量境界とみなす
   const sepMatches = [...normalized.matchAll(/[\s　]+|[…‥⋯]+/g)]
@@ -349,17 +363,17 @@ export function splitIngredientAmount(raw: string): NormalizedIngredient {
     const last = sepMatches[sepMatches.length - 1]
     const name = normalized.slice(0, last.index).trim()
     const amount = normalized.slice((last.index ?? 0) + last[0].length).trim()
-    if (name && amount) return { name, amount }
+    if (name && amount) return withGroup({ name, amount })
   }
 
   // 区切りが無い「くっつき」形(「そうめん4ワ」等): 数字が始まる位置で分ける
   const glued = normalized.match(/^(\D+?)(\d.*)$/)
   if (glued && glued[1].trim()) {
-    return { name: glued[1].trim(), amount: glued[2].trim() }
+    return withGroup({ name: glued[1].trim(), amount: glued[2].trim() })
   }
 
   // 数字も区切りも無ければ、材料名(グループ見出し等)のみとして返す
-  return { name: normalized }
+  return withGroup({ name: normalized })
 }
 
 /** recipeIngredient(文字列配列が基本だが、単体文字列のケースも防御的に受ける)を正規化する */

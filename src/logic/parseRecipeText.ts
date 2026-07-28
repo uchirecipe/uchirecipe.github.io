@@ -665,6 +665,36 @@ const REGEX_GOMI = [
   URL_ONLY_LINE,
 ]
 
+/**
+ * C07(2026-07-28 便BX): 貼り付け経路で使っているゴミ行の判定を、URL取り込み経路の
+ * 材料・手順にも適用できるよう1つの述語として公開する。
+ *
+ * URL取り込みは Worker(normalize.ts)がJSON-LDから直接組み立てるため、貼り付け側で積み上げた
+ * この資産を一度も通っていなかった(経路間の非対称)。JSON-LDに載る宣伝文は文章型が多く、
+ * ここで落とせるのは「Instagram」「関連レシピ」のような行全体がナビ屑・SNS名のケースや、
+ * URLだけの行・ハッシュタグ行に限られる(文章型の宣伝は docs/43⑤ の裁定どおり手つかず)。
+ * それでも共有テキストの往復や、投稿者が材料欄・手順欄に入れた定型行には効く。
+ *
+ * region は 'ing' 相当で判定する(memo領域だけの例外規則 SERVING_ADJUST_LINE は
+ * URL取り込みには関係しないため)。
+ */
+export function isImportGomiLine(line: string): boolean {
+  const t = line.trim()
+  if (!t) return false
+  return isExactGomi(t) || isPrefixGomi(t) || isHashtagGomi(t) || isRegexGomi(t, 'ing')
+}
+
+/**
+ * C08(2026-07-28 便BX): 材料の「グループ見出し行」(「合わせ調味料」「【A】」「（A）ソース」等)かどうか。
+ * 貼り付け経路の isIngredientSubheading と同じ判定資産をURL取り込み経路からも使えるようにしたもの。
+ * URL取り込みでは分量を持たない行にだけ適用する想定(呼び出し側で確認すること)。
+ */
+export function isIngredientGroupHeading(name: string): boolean {
+  const trimmed = name.trim()
+  if (!trimmed) return false
+  return isIngredientSubheading(trimmed, trimmed)
+}
+
 function isHashtagGomi(line: string): boolean {
   const t = line.trim()
   return HASHTAG_LINE.test(t) && !HEADER_WORDS_IN_LINE.test(t)

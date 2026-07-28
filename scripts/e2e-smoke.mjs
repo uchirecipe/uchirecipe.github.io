@@ -6942,6 +6942,29 @@ try {
                 }),
               })
             }
+            // group-marker: 味の素パーク相当のグループ記号(「A水」)+ グループ見出し行 +
+            // 手順に紛れ込んだSNS名の行。便BX/C07(ゴミ行除去の経路統一)・C08(グループの引き継ぎ)
+            if (target.includes('group-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: 'グループ記号レシピ',
+                    ingredients: [
+                      { name: 'じゃがいも', amount: '3個' },
+                      { name: '水', amount: '2カップ', group: 'A' },
+                      { name: '関連レシピ' },
+                      { name: '合わせ調味料' },
+                      { name: 'しょうゆ', amount: '大さじ2' },
+                    ],
+                    steps: ['じゃがいもを切る', 'Instagram', '煮込む'],
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
             if (target.includes('fetch-failed-marker')) {
               return route.fulfill({
                 status: 200,
@@ -7280,6 +7303,40 @@ try {
           'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
           photoFailBody.includes('材料1件・手順1件を読み込みました') &&
             !photoFailBody.includes('写真も取り込みました'),
+        )
+
+        // --- URLIMPORT-11(便BX/C07・C08): ゴミ行の除去とグループの引き継ぎ ---
+        currentCheck = 'URLIMPORT-11'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/group-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        const groupNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
+        const groupMemoInputs = uiPage.locator('input[placeholder="材料メモ（任意。例: なければ玉ねぎでも可）"]')
+        check(
+          'URLIMPORT-11 材料からゴミ行(関連レシピ)と見出し行(合わせ調味料)が落ちて3件になる(C07/C08)',
+          (await groupNameInputs.count()) === 3 &&
+            (await groupNameInputs.nth(0).inputValue()) === 'じゃがいも' &&
+            (await groupNameInputs.nth(1).inputValue()) === '水' &&
+            (await groupNameInputs.nth(2).inputValue()) === 'しょうゆ',
+        )
+        check(
+          'URLIMPORT-11 グループ記号Aは材料名から外れてメモに残る(名前照合を壊さない・C08)',
+          (await groupMemoInputs.nth(1).inputValue()) === 'A',
+        )
+        const stepTextareas = uiPage.locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+        check(
+          'URLIMPORT-11 手順に紛れたSNS名の行が落ちる(C07)',
+          (await stepTextareas.count()) === 2 &&
+            (await stepTextareas.nth(0).inputValue()) === 'じゃがいもを切る' &&
+            (await stepTextareas.nth(1).inputValue()) === '煮込む',
+        )
+        check(
+          'URLIMPORT-11 結果メッセージの件数は整形後の件数(材料3件・手順2件)',
+          (await uiPage.textContent('body')).includes('材料3件・手順2件を読み込みました'),
         )
       } finally {
         await uiBrowser.close()

@@ -139,6 +139,12 @@ import {
 } from '../workers/recipe-import/src/normalize.ts'
 import { buildImageProxyUrl, isImageContentType } from '../src/logic/urlImportImage.ts'
 import { resolveImportErrorReason } from '../src/logic/urlImportReason.ts'
+import {
+  buildImportedIngredientRows,
+  filterImportedSteps,
+  seasoningGroupFromLetter,
+  countAmountlessRows,
+} from '../src/logic/urlImportRows.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -5169,13 +5175,16 @@ eq('ingredient: 先頭の中黒を除去「・鶏もも肉 200g」', splitIngred
 // 2026-07-20 URL取り込み品質監査(docs/43)で実測: 味の素パークは合わせ調味料のグループ記号(A/B)が
 // 区切りなしで名前の先頭にくっつく(「Ａ水」「Bみりん」「A「ほんだし®」」)。オレンジページは
 // グループ記号だけの行(「A」)が単独の配列要素として存在する
-eq('ingredient: グループ記号の連結を除去「Ａ水　2カップ」', splitIngredientAmount('Ａ水　2カップ'), { name: '水', amount: '2カップ' })
-eq('ingredient: グループ記号の連結を除去(半角)「B砂糖 大さじ1」', splitIngredientAmount('B砂糖 大さじ1'), { name: '砂糖', amount: '大さじ1' })
+// 2026-07-28 便BX/C08: 記号は名前から剥がすが捨てずに group として返す(手順文の「Aを加えて」が
+// どの材料を指すのか取り込み後に完全に失われていた。名前は無記号のままなので栄養・原価の照合は不変)
+eq('ingredient: グループ記号は名前から剥がしgroupに残す「Ａ水　2カップ」', splitIngredientAmount('Ａ水　2カップ'), { name: '水', amount: '2カップ', group: 'A' })
+eq('ingredient: グループ記号(半角)もgroupに残す「B砂糖 大さじ1」', splitIngredientAmount('B砂糖 大さじ1'), { name: '砂糖', amount: '大さじ1', group: 'B' })
 eq(
   'ingredient: グループ記号+括弧書き商品名「A「ほんだし®」 小さじ1」',
   splitIngredientAmount('A「ほんだし®」 小さじ1'),
-  { name: '「ほんだし®」', amount: '小さじ1' },
+  { name: '「ほんだし®」', amount: '小さじ1', group: 'A' },
 )
+eq('ingredient: グループ記号が無ければgroupは付かない', splitIngredientAmount('しょうゆ 大さじ2'), { name: 'しょうゆ', amount: '大さじ2' })
 eq('ingredient: グループ記号のみの行は空扱い(呼び出し側で除外)', splitIngredientAmount('A'), { name: '' })
 eq('ingredient: グループ記号のみ(全角)も空扱い', splitIngredientAmount('Ｂ'), { name: '' })
 // レタスクラブ実測:「大さじ2　1/2」(整数と分数の間に区切りの空白)が入ると、素朴な「末尾の空白で
@@ -5521,6 +5530,82 @@ eq('reason: invalid_urlはstatusに関係なくinvalid_url', resolveImportErrorR
 eq('reason: no_recipeはそのまま', resolveImportErrorReason('no_recipe', 200), 'no_recipe')
 eq('reason: 未知のerror値はfetch_failedに落とす', resolveImportErrorReason('something_new', 404), 'not_found')
 eq('reason: errorが無くてもfetch_failed', resolveImportErrorReason(undefined, undefined), 'fetch_failed')
+
+// ---- urlImportRows(src/logic/urlImportRows.ts、2026-07-28 便BX/C07・C08・C09) ----
+// C07: 貼り付け経路のゴミ行判定をURL取り込み経路にも通す(経路間の非対称の解消)
+eq('rows/C07: SNS名だけの手順は落とす', filterImportedSteps(['鶏肉を切る', 'Instagram', '煮込む']), ['鶏肉を切る', '煮込む'])
+eq('rows/C07: URLだけの手順は落とす', filterImportedSteps(['鶏肉を切る', 'https://example.com/ad']), ['鶏肉を切る'])
+eq('rows/C07: ハッシュタグ行も落とす', filterImportedSteps(['鶏肉を切る', '#簡単レシピ']), ['鶏肉を切る'])
+eq('rows/C07: 「関連レシピ」も落とす', filterImportedSteps(['鶏肉を切る', '関連レシピ']), ['鶏肉を切る'])
+eq('rows/C07: 普通の手順は1件も落とさない', filterImportedSteps(['鍋に水を入れて沸かす', '弱火で20分煮る']), ['鍋に水を入れて沸かす', '弱火で20分煮る'])
+// 安全弁: 判定が全部当たってしまったら疑って元のまま返す(取り込みが丸ごと空になる事故を防ぐ)
+eq('rows/C07: 全部ゴミ判定になったら安全弁で元のまま', filterImportedSteps(['Instagram', '広告']), ['Instagram', '広告'])
+eq('rows/C07: 空配列はそのまま', filterImportedSteps([]), [])
+
+// C08: グループ記号 → 合わせ調味料グループ番号
+eq('rows/C08: Aは1', seasoningGroupFromLetter('A'), 1)
+eq('rows/C08: 全角Ａも1', seasoningGroupFromLetter('Ａ'), 1)
+eq('rows/C08: Dは4(上限)', seasoningGroupFromLetter('D'), 4)
+eq('rows/C08: 上限超え(E)は未設定(色が一周して見分けが付かないため)', seasoningGroupFromLetter('E'), undefined)
+eq('rows/C08: 記号なしは未設定', seasoningGroupFromLetter(undefined), undefined)
+
+// C08: 「A水」形式のグループ記号がグループ色+材料メモに引き継がれる(味の素パーク実測形)
+eq(
+  'rows/C08: グループ記号はグループ色に対応づけ、記号自体はメモに残す(名前は無記号のまま)',
+  buildImportedIngredientRows([
+    { name: '水', amount: '1.5カップ', group: 'A' },
+    { name: '砂糖', amount: '大さじ1', group: 'B' },
+    { name: '牛こま切れ肉', amount: '200g' },
+  ]),
+  [
+    { name: '水', amount: '1.5', unit: 'カップ', memo: 'A', group: 1 },
+    { name: '砂糖', amount: '1', unit: '大さじ', memo: 'B', group: 2 },
+    { name: '牛こま切れ肉', amount: '200', unit: 'g', memo: '', group: undefined },
+  ],
+)
+// C08: 分量を持たない見出し行(「合わせ調味料」等)は材料にせず、以降をひとまとまりにする
+eq(
+  'rows/C08: グループ見出し行は材料にせず、以降の材料をグループにまとめる',
+  buildImportedIngredientRows([
+    { name: 'じゃがいも', amount: '3個' },
+    { name: '合わせ調味料' },
+    { name: 'しょうゆ', amount: '大さじ2' },
+    { name: 'みりん', amount: '大さじ2' },
+  ]),
+  [
+    { name: 'じゃがいも', amount: '3', unit: '個', memo: '', group: undefined },
+    { name: 'しょうゆ', amount: '2', unit: '大さじ', memo: '', group: 1 },
+    { name: 'みりん', amount: '2', unit: '大さじ', memo: '', group: 1 },
+  ],
+)
+eq(
+  'rows/C08: 【A】形式の見出し行も同じ扱い',
+  buildImportedIngredientRows([{ name: '【A】' }, { name: '酒', amount: '大さじ1' }]),
+  [{ name: '酒', amount: '1', unit: '大さじ', memo: '', group: 1 }],
+)
+// 見出しに見えても分量を持つ行は材料(実材料を誤って消さないための条件)
+eq(
+  'rows/C08: 分量がある行は見出し語に一致しても材料として残す',
+  buildImportedIngredientRows([{ name: '調味料', amount: '大さじ2' }]),
+  [{ name: '調味料', amount: '2', unit: '大さじ', memo: '', group: undefined }],
+)
+eq(
+  'rows/C07: 材料側のゴミ行も落とす',
+  buildImportedIngredientRows([{ name: '関連レシピ' }, { name: '玉ねぎ', amount: '1個' }]),
+  [{ name: '玉ねぎ', amount: '1', unit: '個', memo: '', group: undefined }],
+)
+// C09: 分量が読み取れなかった材料の件数(取り込み結果の内訳表示に使う)
+eq(
+  'rows/C09: 分量も単位も無い材料の件数を数える',
+  countAmountlessRows(
+    buildImportedIngredientRows([
+      { name: '玉ねぎ', amount: '1個' },
+      { name: '塩こしょう' },
+      { name: 'サラダ油', amount: '適量' },
+    ]),
+  ),
+  1,
+)
 
 // ---------- lineCompose: 読点優先・幅実測の行組みエンジン(2026-07-21 p9/line-compose) ----------
 // composeLines へ「1文字=1幅」の偽測定関数と、実アトム列(TermText+TimeText 相当の分解結果)を

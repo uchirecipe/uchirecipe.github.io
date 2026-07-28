@@ -11,6 +11,8 @@
 export interface ImportedIngredient {
   name: string
   amount?: string
+  /** 合わせ調味料のグループ記号(「A水」のA。2026-07-28 便BX/C08。名前からは剥がしてある) */
+  group?: string
 }
 
 export interface ImportedRecipe {

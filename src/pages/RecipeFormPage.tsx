@@ -31,6 +31,7 @@ import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, look
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
 import type { ImportErrorReason } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
+import { buildImportedIngredientRows, filterImportedSteps } from '../logic/urlImportRows'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
 import { toTagKey } from '../logic/kana'
@@ -723,12 +724,16 @@ function RecipeFormInner() {
     setUrlImportToast('')
     try {
       const result = await importRecipeFromUrl(target)
+      // 貼り付け経路と同じゴミ行判定を通し、グループ見出しをグループ色へ引き継ぐ(便BX/C07・C08)。
+      // 以降の件数(確認文・結果メッセージ)はすべてこの整形後の件数で数える
+      const importedRows = buildImportedIngredientRows(result.ingredients)
+      const importedSteps = filterImportedSteps(result.steps)
       // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
       if (
         !confirmReplaceExisting(
           ja.urlImport.confirmReplace,
-          result.ingredients.length,
-          result.steps.length,
+          importedRows.length,
+          importedSteps.length,
         )
       ) {
         // 中止したことを必ず返事する(2026-07-28 便BX/C16・QA S3)。
@@ -759,22 +764,9 @@ function RecipeFormInner() {
       if (result.title && !title.trim()) setTitle(result.title)
       if (result.servings) setServings(result.servings)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
-      if (result.ingredients.length > 0) {
-        setIngredients(
-          result.ingredients.map((ing) => {
-            const parsed = normalizeImportedIngredient(ing.name, ing.amount)
-            return {
-              name: parsed.name,
-              amount: parsed.amount,
-              unit: parsed.unit,
-              memo: parsed.memo ?? '',
-              group: undefined,
-            }
-          }),
-        )
-      }
-      if (result.steps.length > 0) {
-        setSteps(result.steps.map((text) => ({ text, minutes: '', memo: '' })))
+      if (importedRows.length > 0) setIngredients(importedRows)
+      if (importedSteps.length > 0) {
+        setSteps(importedSteps.map((text) => ({ text, minutes: '', memo: '' })))
       }
       setSourceUrl(nextSourceUrl)
       // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
@@ -783,8 +775,8 @@ function RecipeFormInner() {
       if (isEdit && dishType === undefined) {
         const guessedTitle = title.trim() || result.title || ''
         const guessedIngredients =
-          result.ingredients.length > 0
-            ? result.ingredients.map((ing) => ({ name: ing.name }))
+          importedRows.length > 0
+            ? importedRows.map((row) => ({ name: row.name }))
             : ingredients.map((r) => ({ name: r.name }))
         if (guessedTitle) {
           setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
@@ -792,21 +784,21 @@ function RecipeFormInner() {
       }
       // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)。
       // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
-      if (result.ingredients.length === 0) {
+      if (importedRows.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoIngredients.replace('{s}', String(result.steps.length)) + alsoAppliedNote,
+          ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
           'warn',
         )
-      } else if (result.steps.length === 0) {
+      } else if (importedSteps.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoSteps.replace('{i}', String(result.ingredients.length)) + alsoAppliedNote,
+          ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)) + alsoAppliedNote,
           'warn',
         )
       } else {
         showUrlImportMessage(
           ja.urlImport.resultSummary
-            .replace('{i}', String(result.ingredients.length))
-            .replace('{s}', String(result.steps.length)) + alsoAppliedNote,
+            .replace('{i}', String(importedRows.length))
+            .replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
           'info',
         )
       }
