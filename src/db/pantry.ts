@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
-import { toHiragana } from '../logic/kana'
+import { toPantryKey } from '../logic/kana'
 import { selectPantryDowngrades } from '../logic/pantry'
 import { defaultSettings } from './types'
 import type { Ingredient, PantryGroupKey, PantryItem, PantryLevel } from './types'
@@ -101,10 +101,25 @@ export async function setPantryItemsLevel(ids: number[], level: PantryLevel): Pr
 /**
  * 整理モードで選択した複数の食材をまとめて指定の大分類グループに移す（2026-07-23 #1）。
  * 手動指定（group）を書き込むので、以降その食材は自動振り分けより手動指定が優先される。
+ *
+ * group に undefined を渡すと手動指定を消して自動振り分けに戻す（2026-07-29 便CC/C6）。
+ * `.modify({ group: undefined })` はキーが残る書き方なので、コールバック形で delete する。
  */
-export async function setPantryItemsGroup(ids: number[], group: PantryGroupKey): Promise<void> {
+export async function setPantryItemsGroup(
+  ids: number[],
+  group: PantryGroupKey | undefined,
+): Promise<void> {
   if (ids.length === 0) return
   await db.transaction('rw', db.pantryItems, async () => {
+    if (group === undefined) {
+      await db.pantryItems
+        .where('id')
+        .anyOf(ids)
+        .modify((item) => {
+          delete item.group
+        })
+      return
+    }
     await db.pantryItems.where('id').anyOf(ids).modify({ group })
   })
 }
@@ -116,11 +131,14 @@ export async function setPantryItemsGroup(ids: number[], group: PantryGroupKey):
  */
 export async function markPantryHaveOrCreate(name: string): Promise<void> {
   const trimmed = name.trim()
-  const key = toHiragana(trimmed)
+  // 名寄せは toPantryKey の完全一致に統一する(2026-07-29 便CC/C4)。
+  // 旧: toHiragana 完全一致では「長ねぎ（白い部分）」が既存の「長ねぎ」チップと別物になり、
+  // 買い物完了のたびに同名別チップが増えて在庫ボードが汚れていた
+  const key = toPantryKey(trimmed)
   if (!key) return
   await db.transaction('rw', db.pantryItems, async () => {
     const all = await db.pantryItems.toArray()
-    const match = all.find((item) => toHiragana(item.name) === key)
+    const match = all.find((item) => toPantryKey(item.name) === key)
     if (match) {
       await db.pantryItems.update(match.id!, { level: 'have' })
       return

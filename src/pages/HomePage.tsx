@@ -25,7 +25,7 @@ import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
 import { currentSeason, preferSeason } from '../logic/season'
 import { isMainDish } from '../logic/mealPlan'
-import { toHiragana } from '../logic/kana'
+import { makePantryMatcher } from '../logic/pantry'
 import type { CookedLog, HomeWidgetKey, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
@@ -261,10 +261,9 @@ export default function HomePage() {
   // 0件ならズレの不満を防ぐため通常候補にフォールバックし、その旨を表示する
   const { list: finalCandidates, fallback: pantryFallback } = useMemo(() => {
     if (!pantryOnly || pantryNames.length === 0) return { list: candidates, fallback: false }
-    const wantedKeys = pantryNames.map(toHiragana)
-    const filtered = candidates.filter((r) =>
-      r.ingredients.some((i) => wantedKeys.some((k) => toHiragana(i.name).includes(k))),
-    )
+    // 在庫との照合は logic/pantry.ts の判定器に一本化する(2026-07-29 便CC/C4)
+    const matchesPantry = makePantryMatcher(pantryNames)
+    const filtered = candidates.filter((r) => r.ingredients.some((i) => matchesPantry(i.name)))
     return filtered.length > 0
       ? { list: filtered, fallback: false }
       : { list: candidates, fallback: true }

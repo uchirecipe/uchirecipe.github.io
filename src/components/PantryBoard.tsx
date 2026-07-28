@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Plus,
   Refrigerator,
@@ -54,6 +54,16 @@ export default function PantryBoard() {
   // 永続化はしない軽量実装(オーナー決定: 実装が軽い方でよい)
   const [showDescription, setShowDescription] = useState(false)
 
+  // 全削除で0件になったら整理モードを自動で抜ける(2026-07-29 便CC/C5・QA S2)。
+  // 0件だと見出し横の「完了」ボタンが消える一方で整理モードは続くため、画面上に抜ける手段が
+  // 無くなっていた(残るのはdisabledの一括操作パネルと「タップして選択」だけ)
+  useEffect(() => {
+    if (organizing && items?.length === 0) {
+      setOrganizing(false)
+      setSelectedIds([])
+    }
+  }, [organizing, items])
+
   const toggleOrganizing = () => {
     setOrganizing((v) => !v)
     setSelectedIds([])
@@ -82,16 +92,19 @@ export default function PantryBoard() {
       ja.pantry.organizeBulkSetToast.replace('{n}', String(count)).replace('{level}', ja.pantry.level[level]),
     )
   }
-  // 大分類グループへの一括移動(2026-07-23 #1 手動グループ変更)。状態設定と同じく整理モードは維持する
-  const applyGroup = async (group: PantryGroupKey) => {
+  // 大分類グループへの一括移動(2026-07-23 #1 手動グループ変更)。状態設定と同じく整理モードは維持する。
+  // group が undefined のときは手動指定を消して食材名からの自動振り分けに戻す(2026-07-29 便CC/C6)
+  const applyGroup = async (group: PantryGroupKey | undefined) => {
     if (selectedIds.length === 0) return
     const count = selectedIds.length
     await setPantryItemsGroup(selectedIds, group)
     setSelectedIds([])
     setMessage(
-      ja.pantry.organizeMoveGroupToast
-        .replace('{n}', String(count))
-        .replace('{group}', ja.pantry.group[group]),
+      group === undefined
+        ? ja.pantry.organizeGroupAutoToast.replace('{n}', String(count))
+        : ja.pantry.organizeMoveGroupToast
+            .replace('{n}', String(count))
+            .replace('{group}', ja.pantry.group[group]),
     )
   }
 
@@ -283,7 +296,19 @@ export default function PantryBoard() {
                 {ja.pantry.group[group]}
               </button>
             ))}
+            {/* 手動で移したグループを自動振り分けに戻す(2026-07-29 便CC/C6)。
+                「任せる」に戻す言い方が画面に無く、一方向の操作に見えていた */}
+            <button
+              type="button"
+              onClick={() => void applyGroup(undefined)}
+              disabled={selectedIds.length === 0}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+            >
+              {ja.pantry.organizeGroupAuto}
+            </button>
           </div>
+          {/* 移動が一方向に見えないよう、戻し方と調味料グループの副作用をここで一言添える */}
+          <p className="text-xs text-ink-muted">{ja.pantry.organizeMoveGroupNote}</p>
         </div>
       )}
 

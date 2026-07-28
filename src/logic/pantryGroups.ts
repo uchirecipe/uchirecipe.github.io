@@ -1,4 +1,5 @@
 import { matchNutritionFood } from './nutrition'
+import { toPantryKey } from './kana'
 import type { PantryGroupKey, PantryItem } from '../db/types'
 
 /**
@@ -125,10 +126,39 @@ function keywordGroup(name: string): PantryGroupKey | null {
 }
 
 /**
+ * かな書きの総称語（2026-07-29 便CC/C4。QA S3）。
+ * 栄養DBは部位別（鶏もも肉…）で総称を持たず、keywordGroup の正規表現は漢字前提のため、
+ * かなで入力・保存された総称語がどちらにも当たらず「その他」に落ちていた
+ * （実測: 買い物メモに「とりにく」と手入力すると肉売り場に並ばない）。
+ * 部分一致にすると「にんにく」が肉になってしまうので、キーの**完全一致**だけで引く。
+ */
+const KANA_GENERIC_GROUP: Record<string, PantryGroupKey> = {
+  とりにく: 'meatFish',
+  ぶたにく: 'meatFish',
+  ぎゅうにく: 'meatFish',
+  ひきにく: 'meatFish',
+  あいびきにく: 'meatFish',
+  さかな: 'meatFish',
+  やさい: 'vegetable',
+  きのこ: 'vegetable',
+  とうふ: 'soyEgg',
+  たまご: 'soyEgg',
+  ぎゅうにゅう: 'soyEgg',
+  こめ: 'staple',
+  ごはん: 'staple',
+  しょうゆ: 'seasoning',
+  みそ: 'seasoning',
+  さとう: 'seasoning',
+  しお: 'seasoning',
+  あぶら: 'seasoning',
+}
+
+/**
  * 食材名を大分類グループへ自動振り分けする。
  * ① matchNutritionFood で栄養食品に名寄せ→そのlabelのグループ（栄養DBの分類が最優先）
  * ② 名寄せできなければキーワードによる控えめなフォールバック（総称語の救済）
- * ③ どちらも外れたら 'other'（その他）
+ * ③ かな書きの総称語は専用の表から完全一致で引く（②の正規表現が漢字前提のため）
+ * ④ どれも外れたら 'other'（その他）
  */
 export function categorizePantryName(name: string): PantryGroupKey {
   const food = matchNutritionFood(name)
@@ -136,7 +166,42 @@ export function categorizePantryName(name: string): PantryGroupKey {
     const byFood = LABEL_TO_GROUP.get(food.label)
     if (byFood) return byFood
   }
-  return keywordGroup(name) ?? 'other'
+  return keywordGroup(name) ?? KANA_GENERIC_GROUP[toPantryKey(name)] ?? 'other'
+}
+
+/**
+ * 在庫チップの総称語（「豚肉」「鶏肉」「豆腐」…）と、具体名の材料名を結びつける表
+ * （2026-07-29 便CC/C3・C4）。
+ *
+ * 初期プリセットの「豚肉」「鶏肉」チップは、同梱103品の肉材料がほぼ部位名（豚こま切れ肉・
+ * 鶏もも肉…）のため「作った！」の在庫反映で一度も減らなかった（QA実測: 一致0件）。
+ * 一方で単純な部分一致に戻すと「ねぎ」チップが玉ねぎで減るような誤爆が復活するので、
+ * 総称として扱う語を明示し、次の3条件をすべて満たすときだけ成立させる:
+ *   ① 在庫チップ名がこの表の総称語であること
+ *   ② 材料側が栄養DBの食品に名寄せでき、その食品が総称と同じグループであること
+ *      （これで「鶏がらスープの素」のような調味料の巻き添えを防ぐ）
+ *   ③ pattern に当たり、except（別物として扱う例外）に当たらないこと
+ */
+const GENERIC_PANTRY_CHIPS: Record<
+  string,
+  { group: PantryGroupKey; pattern: RegExp; except?: RegExp }
+> = {
+  ぶたにく: { group: 'meatFish', pattern: /豚|ぶた|ポーク/ },
+  とりにく: { group: 'meatFish', pattern: /鶏|とり|チキン/ },
+  ぎゅうにく: { group: 'meatFish', pattern: /牛|ぎゅう|ビーフ/ },
+  ひきにく: { group: 'meatFish', pattern: /ひき肉|挽き肉|ミンチ/ },
+  // 「高野豆腐（凍り豆腐）」は乾物で用途も別物なので、豆腐の在庫とは結びつけない
+  とうふ: { group: 'soyEgg', pattern: /豆腐/, except: /高野豆腐|凍り豆腐/ },
+}
+
+/** 在庫チップが総称語で、材料名がその総称に収まる具体名かどうか（上のコメント参照） */
+export function matchesGenericPantryChip(chipKey: string, ingredientName: string): boolean {
+  const generic = GENERIC_PANTRY_CHIPS[chipKey]
+  if (!generic) return false
+  const food = matchNutritionFood(ingredientName)
+  if (!food || LABEL_TO_GROUP.get(food.label) !== generic.group) return false
+  if (generic.except?.test(ingredientName) || generic.except?.test(food.label)) return false
+  return generic.pattern.test(ingredientName) || generic.pattern.test(food.label)
 }
 
 /** 在庫チップの実効グループ: 手動指定（group）があればそれ、無ければ名前から自動判定 */

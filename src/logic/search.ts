@@ -1,4 +1,5 @@
 import { toHiragana } from './kana'
+import { makePantryMatcher } from './pantry'
 import { hasNgIngredient } from './ng'
 import { splitValues } from './textSplit'
 import type { EffortLevel, Recipe } from '../db/types'
@@ -80,6 +81,8 @@ function matchesTime(recipe: Recipe, time: TimeFilter): boolean {
 export function searchRecipes(recipes: Recipe[], options: SearchOptions): SearchResult[] {
   const queryTerms = splitTerms(options.query)
   const wantedTerms = splitTerms(options.ingredients)
+  // 在庫との照合器は1回だけ作る(2026-07-29 便CC/C4)
+  const matchesPantry = makePantryMatcher(options.pantryOnly ? (options.pantryNames ?? []) : [])
 
   const results: SearchResult[] = []
   for (const recipe of recipes) {
@@ -91,10 +94,10 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
     if (options.excludeNg && hasNgIngredient(recipe, options.ngIngredients)) continue
     if (options.quickOnly && (recipe.quickSteps?.length ?? 0) === 0) continue
     if (options.pantryOnly) {
-      const pantryKeys = (options.pantryNames ?? []).map(toHiragana)
-      const ingredientNames = recipe.ingredients.map((i) => toHiragana(i.name))
-      const usesPantry = pantryKeys.some((key) => ingredientNames.some((n) => n.includes(key)))
-      if (!usesPantry) continue
+      // 在庫との照合は logic/pantry.ts の判定器に一本化する(2026-07-29 便CC/C4)。
+      // 旧: かな化した材料名が在庫名を含む部分一致で、在庫「卵」が材料「砂糖（卵用）」に
+      // 当たる一方、在庫「豚肉」は「豚こま切れ肉」に当たらない、という食い違いがあった
+      if (!recipe.ingredients.some((i) => matchesPantry(i.name))) continue
     }
 
     let usedCount = 0

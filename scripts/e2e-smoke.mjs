@@ -7525,6 +7525,20 @@ try {
         (await pbPage.getByRole('button', { name: '完了', exact: true }).isVisible()) &&
           !(await pbPage.getByRole('button', { name: '整理', exact: true }).isVisible()),
       )
+
+      // 2026-07-29 便CC/C5(QA S2): 全選択→全削除で0件になると「完了」ボタンが消える一方で
+      // 整理モードは続き、画面上に抜ける手段が無くなっていた。0件になったら自動で抜ける
+      await pbPage.getByRole('button', { name: '全選択', exact: true }).click()
+      await pbPage.waitForTimeout(200)
+      const deleteAllBtn = pbPage.getByRole('button', { name: /^選択した食材\d+件を削除$/ })
+      await deleteAllBtn.click()
+      await pbPage.waitForTimeout(500)
+      check(
+        'PANTRY-BULK-01(C5) 全削除で0件になると整理モードを自動で抜ける(閉じ込められない)',
+        (await readPantryItems()).length === 0 &&
+          !(await pbPage.getByRole('button', { name: '完了', exact: true }).isVisible()) &&
+          !(await pbPage.getByText('タップして選択').isVisible()),
+      )
     } finally {
       await pbBrowser.close()
     }

@@ -1,7 +1,30 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { addCookedLog } from './recipes'
+import { lowerPantryLevelsForCooked } from './pantry'
 import { todayString } from '../logic/date'
+
+/**
+ * 献立ページの「作った」「全て作った！」でも、レシピ詳細の「作った！」と同じように
+ * 在庫を1段階下げる（2026-07-29 便CC/C3）。
+ *
+ * 従来 lowerPantryLevelsForCooked の呼び出しは RecipeDetailPage にしか無く、同じ「作った」と
+ * いう語なのに入口によって在庫が減ったり減らなかったりしていた。
+ * 設定（cookedReflectPantry・既定OFF）はレシピ詳細と共通で、OFFなら何もしない。
+ * レシピ1品につき1回ずつ数える＝詳細ページで1品ずつ「作った！」を押したときと同じ結果になる。
+ *
+ * 在庫の更新は、記録（recipes・todayList）のトランザクションが終わってから行う
+ * （Dexieは対象テーブルが外側の集合に含まれていないと同じトランザクション内で触れないため）。
+ */
+async function reflectPantryForCooked(recipeIds: number[]): Promise<void> {
+  if (recipeIds.length === 0) return
+  const settings = await db.settings.get(1)
+  if (!settings?.cookedReflectPantry) return
+  for (const recipeId of recipeIds) {
+    const recipe = await db.recipes.get(recipeId)
+    if (recipe) await lowerPantryLevelsForCooked(recipe.ingredients)
+  }
+}
 
 export async function listTodayList() {
   return db.todayList.orderBy('addedAt').toArray()
@@ -44,6 +67,7 @@ export async function markTodayListCooked(recipeId: number): Promise<void> {
     await addCookedLog(recipeId, { date: todayString() })
     await removeFromTodayList(recipeId)
   })
+  await reflectPantryForCooked([recipeId]) // 在庫反映(便CC/C3。設定ONのときだけ)
 }
 
 /**
@@ -63,6 +87,7 @@ export async function markAllTodayListCooked(recipeIds: number[]): Promise<void>
     }
     await db.todayList.clear()
   })
+  await reflectPantryForCooked(recipeIds) // 在庫反映(便CC/C3。設定ONのときだけ)
 }
 
 /** 今週の献立から、指定したレシピIDをまとめて取り込む（既に入っているものはスキップ） */
