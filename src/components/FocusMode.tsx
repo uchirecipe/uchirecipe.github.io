@@ -394,7 +394,14 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         // 手順テキストの縦位置(2026-07-21オーナー実機フィードバック): 中央揃えのままだと
         // 画面全体で見たとき視線より低く見えるため、上下のpaddingをあえて非対称にして
         // 見た目の重心を少し上へ寄せる(pt<pb。paddingの合計は変えず配分だけ変える手法)
-        className="flex flex-1 flex-col items-center justify-center gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[calc(var(--space-lg)+var(--space-sm))] pt-[var(--space-sm)] text-center"
+        //
+        // justify-center-safe(= justify-content: safe center。2026-07-28 機能④診断C2):
+        // 素の justify-center は、中身が枠より高いとき開始側(上)をスクロール原点より外へ
+        // 押し出す。scrollTopは負にできないため、長い手順では本文の冒頭が永久に読めなくなる
+        // (Chromium系で発生。375x667の同梱レシピ10手順で実測。最大101px欠落)。
+        // safe center は「あふれた時だけ flex-start 相当に落ちる」ので、収まる短い手順の
+        // 見え方は上のpt<pb裁定を含めて1pxも変わらない
+        className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[calc(var(--space-lg)+var(--space-sm))] pt-[var(--space-sm)] text-center"
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >

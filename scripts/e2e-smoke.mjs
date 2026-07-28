@@ -1076,6 +1076,70 @@ try {
     }
   }
 
+  // --- FOCUS-SCROLL-01: 調理中モードで長い手順を開いても本文の冒頭が「上に到達不能」に
+  // ならないこと(2026-07-28 機能④診断C2)。素の justify-center は中身が枠より高いとき
+  // 開始側をスクロール原点より外へ押し出し、scrollTopは負にできないため冒頭が永久に
+  // 読めなくなっていた(375x667の同梱レシピ10手順・最大101px欠落。Chromium系)。
+  // justify-center-safe(safe center)であふれた時だけ上寄せに落ちる ---
+  currentCheck = 'FOCUS-SCROLL-01'
+  {
+    const fsBrowser = await chromium.launch()
+    try {
+      const fsContext = await fsBrowser.newContext({
+        viewport: { width: 375, height: 667 },
+        isMobile: true,
+        hasTouch: true,
+      })
+      const fsPage = await fsContext.newPage()
+      await fsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fsPage.waitForTimeout(1200)
+      await fsPage.getByPlaceholder('料理名・材料・タグで検索').fill('冷やし茶碗蒸し')
+      await fsPage.waitForTimeout(600)
+      await fsPage.getByText('冷やし茶碗蒸し', { exact: true }).first().click()
+      await fsPage.waitForTimeout(800)
+      await fsPage.getByText('調理中モードで見る').click()
+      await fsPage.waitForTimeout(500)
+      // 診断で最大(101px)の欠落が出ていた手順4/8まで送る
+      for (let i = 0; i < 3; i++) {
+        await fsPage.getByRole('button', { name: '次へ' }).click()
+        await fsPage.waitForTimeout(250)
+      }
+      const reach = await fsPage.evaluate(() => {
+        const scroller = Array.from(document.querySelectorAll('div')).find(
+          (d) => d.className.includes('overflow-y-auto') && d.className.includes('flex-1'),
+        )
+        const body = scroller?.querySelector('p.ja-phrase')
+        const badge = scroller?.firstElementChild
+        if (!scroller || !body || !badge) return null
+        scroller.scrollTop = -99999 // 上限まで戻す(負は0に丸められる)
+        const top = scroller.getBoundingClientRect().top
+        return {
+          step: document.body.innerText.match(/手順 \d+\/\d+/)?.[0] ?? '',
+          justify: getComputedStyle(scroller).justifyContent,
+          hiddenBody: Math.round(top - body.getBoundingClientRect().top),
+          hiddenBadge: Math.round(top - badge.getBoundingClientRect().top),
+        }
+      })
+      check(
+        'FOCUS-SCROLL-01 375x667の長い手順で本文の冒頭が枠の上に隠れない',
+        reach != null && reach.hiddenBody <= 0,
+        JSON.stringify(reach),
+      )
+      check(
+        'FOCUS-SCROLL-01 手順番号バッジも枠内に収まる(上に押し出されない)',
+        reach != null && reach.hiddenBadge <= 0,
+        JSON.stringify(reach),
+      )
+      check(
+        'FOCUS-SCROLL-01 縦位置の指定は safe center(短い手順の中央寄せは維持)',
+        reach != null && reach.justify === 'safe center',
+        JSON.stringify(reach),
+      )
+    } finally {
+      await fsBrowser.close()
+    }
+  }
+
   // --- SMK-14: テーマ・第◯弾の括りを全廃(2026-07-23オーナー確定)。旧配布テーマ(全52品)は
   // 同梱の「基本レシピ」に合流し、初回シードで全103品が入る。まっさらな状態で:
   //  (1) 初回シードで103品が全て「基本レシピ」(isStarter・sourceSetIdなし)として入る
