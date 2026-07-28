@@ -42,6 +42,7 @@ import {
   NUTRITION_TEASER_ENABLED,
   computeRecipeNutrition,
   roundNutrient,
+  hasMaterialGap,
 } from '../logic/nutrition'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isHttpUrl } from '../logic/url'
@@ -434,6 +435,8 @@ export default function RecipeDetailPage() {
       saltPerServing: shareNutritionAvailable
         ? roundNutrient('saltG', shareNutrition!.perServing.saltG)
         : undefined,
+      // 主材料が計算できていないまま数値だけシェアされるのを防ぐ(2026-07-28 便BY/NUT-01)
+      nutritionHasGap: shareNutrition != null && hasMaterialGap(shareNutrition),
     }
     try {
       if (kind === 'text') {

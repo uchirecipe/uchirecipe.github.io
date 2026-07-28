@@ -508,7 +508,8 @@ try {
   const zenkakuNutritionText = await page.textContent('body')
   check(
     'ZENKAKU-01 全角で入力した「アサリ 300ｇ」が栄養計算対象外にならない(単位「ｇ」がgとして解釈される回帰)',
-    !zenkakuNutritionText.includes('計算対象外'),
+    // ラベルは2026-07-28 便BY/NUT-02で「計算対象外 n件」→「計算に含めていない材料 n件」に変更
+    !zenkakuNutritionText.includes('計算に含めていない材料'),
   )
   await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
   await page.waitForTimeout(200)

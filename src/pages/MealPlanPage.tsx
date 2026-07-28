@@ -1730,6 +1730,16 @@ export default function MealPlanPage() {
                         )}
                       </p>
                     )}
+                    {/* 量が書いてあるのに計算できなかった材料があるレシピは、平均を静かに下げる。
+                        既にある「除いた食数」の明示と同じ作法で件数を出す(2026-07-28 便BY/NUT-01) */}
+                    {rangeNutrition.partialMealCount > 0 && (
+                      <p className="mt-0.5 text-xs font-bold text-warning">
+                        {ja.mealPlan.rangeNutritionPartial.replace(
+                          '{n}',
+                          String(rangeNutrition.partialMealCount),
+                        )}
+                      </p>
+                    )}
                     <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
                     <p className="mt-0.5 text-xs text-ink-muted">
                       {ja.nutrition.sourcePrefix}

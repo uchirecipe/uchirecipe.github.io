@@ -53,8 +53,8 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-07-23",
-  "dbVersion": 5,
+  "generatedAt": "2026-07-28",
+  "dbVersion": 6,
   "foods": [
     {
       "id": "06153",
@@ -95,13 +95,14 @@ export const NUTRITION_DATA: NutritionData = {
         "fatG": 0.1,
         "carbG": 17.3,
         "saltG": 0,
-        "fiberG": 8.9,
+        "fiberG": 3.1,
         "ironMg": 0.4,
         "calciumMg": 4
       },
       "unitGrams": {
         "個": 135
-      }
+      },
+      "note": "食物繊維のみ 02019「＜いも類＞ じゃがいも 塊茎 皮なし 水煮」から採用（3.1g/100g）"
     },
     {
       "id": "06212",

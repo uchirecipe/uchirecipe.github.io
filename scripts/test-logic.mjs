@@ -3632,6 +3632,92 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
   eq('塩昆布あえ1人分の食塩相当量が0.9g前後へ是正(旧0.33g)', Math.abs(dish.perServing.saltG - 0.9) < 0.05, true)
 }
 
+// ---------- NUT-01/NUT-02(2026-07-28 便BY): 部分欠落の判定と、計算対象外の理由・分量テキスト ----------
+{
+  const { computeRecipeNutrition, hasMaterialGap, averagePerMealNutrition } = await import(
+    '../src/logic/nutrition.ts'
+  )
+  // 「適量」「少々」の薬味しか外れていないケース → 警告は出さない(誤警告を増やさない)
+  const garnishOnly = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: '鶏もも肉', amount: '250', unit: 'g' },
+      { name: '白いりごま', amount: '適量(お好みで)', unit: '' },
+    ],
+  })
+  eq('hasMaterialGap: 薬味(適量)だけの対象外では警告しない', hasMaterialGap(garnishOnly), false)
+  eq('hasMaterialGap: 対象外0件でも警告しない', hasMaterialGap({ excluded: [] }), false)
+  // 量は書いてあるのに成分データが無い(food) → 警告する
+  const unknownFood = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: '牛肉', amount: '300', unit: 'g' },
+      { name: 'ご飯', amount: '2', unit: '杯' },
+    ],
+  })
+  eq('hasMaterialGap: 量が書いてあるのに成分データが無い材料(food)は警告する', hasMaterialGap(unknownFood), true)
+  eq('hasMaterialGap: reasonはfood', unknownFood.excluded[0]?.reason, 'food')
+  // 量は書いてあるのに単位を換算できない(unit) → 警告する
+  const unknownUnit = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: '米', amount: '360', unit: 'cc' },
+      { name: '卵', amount: '2', unit: '個' },
+    ],
+  })
+  eq('hasMaterialGap: 単位をgに換算できない材料(unit)は警告する', hasMaterialGap(unknownUnit), true)
+  eq('hasMaterialGap: reasonはunit', unknownUnit.excluded[0]?.reason, 'unit')
+  // 塩もみ用の塩(prep)は警告しない
+  const prepSalt = computeRecipeNutrition({
+    servings: 2,
+    ingredients: [
+      { name: 'きゅうり', amount: '2', unit: '本' },
+      { name: '塩', amount: '1/4', unit: '小さじ', memo: 'きゅうりの塩もみ用' },
+    ],
+  })
+  eq('hasMaterialGap: 下ごしらえ用の塩(prep)では警告しない', hasMaterialGap(prepSalt), false)
+
+  // NUT-02: 計算対象外の材料に、保存されている分量テキストを添える
+  eq('excluded.amountText: 保存されている分量テキストを持つ', garnishOnly.excluded[0]?.amountText, '適量(お好みで)')
+  eq('excluded.amountText: 単位付きも連結して持つ', unknownUnit.excluded[0]?.amountText, '360cc')
+  const emptyAmount = computeRecipeNutrition({
+    servings: 1,
+    ingredients: [{ name: '秘伝のタレ', amount: '', unit: '' }],
+  })
+  eq('excluded.amountText: 分量が空ならundefined(空文字を出さない)', emptyAmount.excluded[0]?.amountText, undefined)
+
+  // NUT-01 横展開: 期間の平均でも「一部だけ計算できなかった食数」を数える
+  const avg = averagePerMealNutrition([
+    { servings: 2, ingredients: [{ name: '牛肉', amount: '300', unit: 'g' }, { name: 'ご飯', amount: '2', unit: '杯' }] },
+    { servings: 2, ingredients: [{ name: '鶏もも肉', amount: '250', unit: 'g' }] },
+  ])
+  eq('averagePerMealNutrition: partialMealCountは部分欠落レシピの延べ人数', avg.partialMealCount, 2)
+  eq('averagePerMealNutrition: 全部計算できたレシピはpartialに数えない', avg.mealCount, 4)
+  const noPartial = averagePerMealNutrition([
+    { servings: 2, ingredients: [{ name: '鶏もも肉', amount: '250', unit: 'g' }] },
+  ])
+  eq('averagePerMealNutrition: 部分欠落が無ければpartialMealCount=0', noPartial.partialMealCount, 0)
+}
+
+// ---------- NUT-01: シェア文の栄養行に「一部の材料を除く」を添える(2026-07-28 便BY) ----------
+{
+  const recipe = {
+    title: 'テスト',
+    servings: 2,
+    ingredients: [{ name: '牛肉', amount: '300', unit: 'g' }],
+    steps: [],
+    tags: [],
+  }
+  const base = {
+    image: false, cookMinutes: false, cost: false, nutrition: true, allIngredients: false,
+    kcalPerServing: 100, saltPerServing: 1.2,
+  }
+  const normal = buildShareText(recipe, { ...base })
+  eq('シェア: 部分欠落が無ければ従来どおりの栄養行', normal.includes('1食あたり 約100kcal・塩分 約1.2g（めやす）'), true)
+  const partial = buildShareText(recipe, { ...base, nutritionHasGap: true })
+  eq('シェア: 部分欠落があれば「一部の材料を除く」を添える', partial.includes('（めやす・一部の材料を除く）'), true)
+}
+
 // ---------- termSplit: 純粋性(StrictMode二重実行の再発防止・2026-07-11) ----------
 {
   const { splitByTerms } = await import('../src/logic/termSplit.ts')

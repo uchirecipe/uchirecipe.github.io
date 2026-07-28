@@ -31,6 +31,12 @@ export interface ShareOptions {
   kcalPerServing?: number
   /** 1食あたり食塩相当量(g・表示用丸め済み) */
   saltPerServing?: number
+  /**
+   * 量が書いてあるのに計算できなかった材料があるか(2026-07-28 便BY/NUT-01)。
+   * trueのときは栄養行に「一部の材料を除く」を添える。過小な数値がそのままアプリの外へ
+   * 出ていくのを防ぐため(受け取った人は元のレシピを見られない)
+   */
+  nutritionHasGap?: boolean
 }
 
 /** 選択された原価・栄養の行を組み立てる(テキスト・画像カード共通)。
@@ -48,7 +54,7 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
   }
   if (opts.nutrition && opts.kcalPerServing != null && opts.saltPerServing != null) {
     lines.push(
-      ja.share.lineNutrition
+      (opts.nutritionHasGap ? ja.share.lineNutritionPartial : ja.share.lineNutrition)
         .replace('{kcal}', opts.kcalPerServing.toLocaleString())
         .replace('{salt}', opts.saltPerServing.toLocaleString()),
     )

@@ -18,7 +18,7 @@ import { matchAssumedGrams } from './amountAssumption'
  * 手書きの成分値は存在しない。
  *
  * 【設計方針】あくまで「概算・めやす」。医療・効能の文脈では使わない。
- * 計算できなかった材料は隠さず「計算対象外 n件」として必ず表示に含めること（excluded参照）。
+ * 計算できなかった材料は隠さず「計算に含めていない材料 n件」として必ず表示に含めること（excluded参照）。
  */
 
 /**
@@ -73,6 +73,30 @@ export type ExcludedReason =
 export interface ExcludedIngredient {
   name: string
   reason: ExcludedReason
+  /**
+   * 保存されている分量テキスト（例: '適量(お好みで)'・'1パック'）。2026-07-28 便BY/NUT-02。
+   * 「無視していいのか、意外と効くのか」を判断する手掛かりとしてUIに併記する。
+   * 計算時にだけ作る型でIndexedDBには保存しないため、任意項目でよい（マイグレーション不要）。
+   */
+  amountText?: string
+}
+
+/**
+ * 「量は書いてあるのに計算できなかった」材料が含まれているか（2026-07-28 便BY/NUT-01）。
+ *
+ * reason別に重みが違う:
+ * - amount / prep … 「適量」「少々」「塩もみ用の塩」など、元々分量が書かれていない薬味・下ごしらえ。
+ *   同梱103品の計算対象外66件はすべてこちら。数値を出しても実害が小さい。
+ * - food / unit … 「牛肉 300g」「米 360cc」のように分量は書いてあるのに、成分データが無い・
+ *   単位をグラムに換算できないケース。主材料が丸ごと落ちるのはこちらで、
+ *   エネルギーも塩分も大きく過小に出る（実測で最大21倍の過小表示を確認）。
+ *
+ * この線引きなら同梱カタログでは1件も警告が出ず、主材料が落ちたときだけ発火する。
+ * nutrition.ts 冒頭の設計方針「計算できなかった材料は隠さず必ず表示に含めること」を、
+ * 折りたたみ既定（2026-07-11）で見えなくなった部分欠落にも効かせるための判定。
+ */
+export function hasMaterialGap(nutrition: Pick<RecipeNutrition, 'excluded'>): boolean {
+  return nutrition.excluded.some((e) => e.reason === 'food' || e.reason === 'unit')
 }
 
 /** 「少々」「適量」を仮の目安量で計算に含めたときの記録(2026-07-11オーナー要望) */
@@ -99,7 +123,7 @@ export interface RecipeNutrition {
   servings: number
   /** 計算に含めた材料の内訳 */
   items: IngredientNutrition[]
-  /** 計算対象外の材料（UIでは「計算対象外 n件」として必ず明示すること） */
+  /** 計算に含めていない材料（UIでは「計算に含めていない材料 n件」として必ず明示すること） */
   excluded: ExcludedIngredient[]
 }
 
@@ -321,7 +345,7 @@ function computeIngredient(
 
 /**
  * レシピ全体の栄養概算。servingsが不正(0以下)のときは1人分として扱う。
- * 戻り値の excluded は UI で「計算対象外 n件」として必ず明示すること（docs/09 M6-1）。
+ * 戻り値の excluded は UI で「計算に含めていない材料 n件」として必ず明示すること（docs/09 M6-1）。
  */
 export function computeRecipeNutrition(
   recipe: Pick<Recipe, 'ingredients' | 'servings'>,
@@ -337,7 +361,11 @@ export function computeRecipeNutrition(
     const result = computeIngredient(ing, servings)
     if (result === 'zero') continue
     if ('reason' in result) {
-      excluded.push({ name: ing.name, reason: result.reason })
+      excluded.push({
+        name: ing.name,
+        reason: result.reason,
+        amountText: `${ing.amount ?? ''}${ing.unit ?? ''}`.trim() || undefined,
+      })
       continue
     }
     if (result.assumed) assumed.push(result.assumed)
@@ -373,6 +401,11 @@ export interface PerMealNutrition {
   mealCount: number
   /** 材料が丸ごと計算対象外で1品も計算できず、平均から除いた食数（同じく延べ人数） */
   excludedMealCount: number
+  /**
+   * 平均には入れたが、量の書いてある材料を計算できなかった食数（2026-07-28 便BY/NUT-01）。
+   * 主材料が落ちたレシピは平均を静かに下げるので、件数を呼び出し側で明示する。
+   */
+  partialMealCount: number
 }
 
 /**
@@ -396,6 +429,7 @@ export function averagePerMealNutrition(
   const sum = emptyTotals()
   let mealCount = 0
   let excludedMealCount = 0
+  let partialMealCount = 0
   for (const recipe of recipes) {
     const registered = recipe.servings > 0 ? recipe.servings : 1
     const cooked =
@@ -405,6 +439,7 @@ export function averagePerMealNutrition(
       excludedMealCount += cooked
       continue
     }
+    if (hasMaterialGap(n)) partialMealCount += cooked
     const p = n.perServing
     sum.kcal += p.kcal * cooked
     sum.proteinG += p.proteinG * cooked
@@ -416,7 +451,7 @@ export function averagePerMealNutrition(
     sum.calciumMg += p.calciumMg * cooked
     mealCount += cooked
   }
-  if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount }
+  if (mealCount === 0) return { perMeal: sum, mealCount, excludedMealCount, partialMealCount }
   const perMeal: NutrientTotals = {
     kcal: sum.kcal / mealCount,
     proteinG: sum.proteinG / mealCount,
@@ -427,7 +462,7 @@ export function averagePerMealNutrition(
     ironMg: sum.ironMg / mealCount,
     calciumMg: sum.calciumMg / mealCount,
   }
-  return { perMeal, mealCount, excludedMealCount }
+  return { perMeal, mealCount, excludedMealCount, partialMealCount }
 }
 
 /** 表示用の丸め: kcalとカルシウム(mg・値が大きい)は整数、それ以外は小数1桁
