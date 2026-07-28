@@ -248,6 +248,20 @@
 //         全角ｇだと栄養計算に反映されない・数量も全角で入力できてしまう。材料の分量欄に全角数字
 //         「３００」・単位欄に全角「ｇ」を入力→blurで自動的に半角「300」「g」に置き換わること、
 //         保存後の栄養計算にも反映され「計算対象外」にならないことを確認する) /
+//         【2026-07-28 機能④(調理中モード+タイマー)診断の再発防止】
+//         FOCUS-SCROLL-01(375x667の長い手順で本文の冒頭が枠の上に隠れない=safe center・C2 /
+//         375px幅で横あふれしない=説明文を足したときのボタン画面外落ち防止 /
+//         表示中は背景のレシピ詳細がスクロールしない・閉じたら戻る) /
+//         FOCUS-COPY-01(入口の説明で読み上げ・声の操作・タイマーが伝わる・声のコマンドに結果が
+//         添えられている・アイコンだけのボタンに名前がある・じぶんタイマーの窓に用途説明。C13/C15/C16/C17) /
+//         TIMER-KEEP-01(リロードでタイマーが消えず残り時間が続きから復元される・注意書きが実態に
+//         合った文言になっている。C7) / TIMER-ORDER-01(残りが少ない順に並ぶ=起動順ではない。C6) /
+//         FOCUS-TIMER-01(重複タップの点滅が調理中モードでも見える=C12・終了バッジにベル+点滅=C5) /
+//         TIMER-ADJ-02(調整の窓を開いたまま終わったら±が押せない状態になり理由が出る・停止は可能。C10) /
+//         FOCUS-NOTICE-01(調理中モードから初回起動しても注意書きが覆われず読める。C7) /
+//         FOCUS-KEEP-01(閉じた手順から再開する・完成！や別レシピ経由では手順1から。C3) /
+//         FOCUS-BACK-01(端末の戻るで調理中モードだけが閉じる。C11) /
+//         FOCUS-OTHER-01(別の料理のタイマーも料理名つきで出る・タップで調整窓が開き停止できる。C4/C8) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -1168,7 +1182,33 @@ try {
         nextReachable != null && nextReachable.bottom <= nextReachable.viewport,
         JSON.stringify(nextReachable),
       )
+      // 背景スクロールのロック(2026-07-28 機能④診断): 手順を読むための縦スワイプが
+      // 背後のレシピ詳細に抜けると、閉じたときに見当違いな位置へ着地する
+      const scrollBefore = await fsPage.evaluate(() => window.scrollY)
+      await fsPage.mouse.move(180, 400)
+      await fsPage.mouse.wheel(0, 500)
+      await fsPage.waitForTimeout(400)
+      const scrollLeak = await fsPage.evaluate(() => ({
+        after: window.scrollY,
+        bodyOverflow: getComputedStyle(document.body).overflow,
+        htmlOverflow: getComputedStyle(document.documentElement).overflow,
+      }))
+      check(
+        'FOCUS-SCROLL-01 調理中モード表示中は背景のレシピ詳細がスクロールしない',
+        scrollBefore === scrollLeak.after &&
+          scrollLeak.bodyOverflow === 'hidden' &&
+          scrollLeak.htmlOverflow === 'hidden',
+        JSON.stringify({ before: scrollBefore, ...scrollLeak }),
+      )
       await fsFocusClose(fsPage)
+      const scrollRestored = await fsPage.evaluate(
+        () => getComputedStyle(document.body).overflow,
+      )
+      check(
+        'FOCUS-SCROLL-01 閉じたら背景のスクロールは元に戻る',
+        scrollRestored !== 'hidden',
+        scrollRestored,
+      )
       const w375Detail = await fsPage.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,

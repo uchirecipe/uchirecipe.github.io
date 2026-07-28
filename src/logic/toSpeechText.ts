@@ -12,6 +12,11 @@ import { findTermMatches } from './termSplit'
  * ・readingが無い語(例:「ガク」「わた」等、読み方に迷いが無い語)はそのまま素通しする
  * ・辞書語を含まないテキストは無加工で返す
  * ・誤読が報告されたら cookingTerms.ts の該当語にreadingを足す/直すだけで直る運用
+ *
+ * 別表記(aliases)にマッチしたときは、見出し語のreadingを当てない(2026-07-28 機能④診断)。
+ * 例:「くし形に切る」は別表記「くし形」にマッチするが、見出し語「くし形切り」の読み
+ * 「くしがたぎり」を当てると「くし形切りに切る」と重複した日本語になり誤読に聞こえていた。
+ * 別表記の読みが要る場合は aliasReadings に書く。無ければ表記のまま読み上げる。
  */
 export function toSpeechText(text: string): string {
   const matches = findTermMatches(text)
@@ -21,7 +26,10 @@ export function toSpeechText(text: string): string {
   let cursor = 0
   for (const match of matches) {
     result += text.slice(cursor, match.start)
-    result += match.term.reading ?? match.text
+    const isHeadword = match.text === match.term.term
+    result += isHeadword
+      ? (match.term.reading ?? match.text)
+      : (match.term.aliasReadings?.[match.text] ?? match.text)
     cursor = match.end
   }
   result += text.slice(cursor)

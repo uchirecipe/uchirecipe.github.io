@@ -182,6 +182,21 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   // モードを閉じるとき・切り替え中は読み上げを止める
   useEffect(() => stopSpeech, [])
 
+  // 開いている間は背景(レシピ詳細)をスクロールさせない(2026-07-28 機能④診断)。
+  // 手順を読むための縦スワイプが背後のページに抜けてしまい、閉じたときに
+  // 詳細画面の見当違いな位置へ着地していた。スクロール位置そのものは保たれる
+  useEffect(() => {
+    const { body, documentElement: html } = document
+    const prevBody = body.style.overflow
+    const prevHtml = html.style.overflow
+    body.style.overflow = 'hidden'
+    html.style.overflow = 'hidden'
+    return () => {
+      body.style.overflow = prevBody
+      html.style.overflow = prevHtml
+    }
+  }, [])
+
   // 端末の「戻る」で調理中モードだけを閉じる(2026-07-28 機能④診断C11)。
   // このモードは画面(ルート)ではなくレシピ詳細の上に重なるだけなので、以前は
   // Androidの戻るジェスチャ・iOSの端スワイプで詳細ページごとレシピ一覧まで戻ってしまい、
@@ -434,8 +449,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         {shownTimers.map((t) => {
           const isThisRecipe = t.recipeId === recipeId
           // この料理の手順タイマー以外は、どれの時間か分かるよう名前を併記する
-          // (他の料理=料理名 / この料理のじぶんタイマー=「じぶんタイマー」。機能④診断C4・C19)
-          const showLabel = !isThisRecipe || t.stepNumber === 0
+          // (他の料理=料理名 / じぶんタイマー=「じぶんタイマー」。機能④診断C4・C19)。
+          // じぶんタイマーは起動場所によって手順番号が入るため、番号ではなく名前で判定する
+          const showLabel = !isThisRecipe || t.label !== recipe.title
           const fullLabel =
             t.stepNumber > 0
               ? `${t.label}・${ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}`
