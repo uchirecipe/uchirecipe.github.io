@@ -124,6 +124,26 @@ export async function setPantryItemsGroup(
   })
 }
 
+/** 在庫チップに添える一言メモの上限（2026-07-29 便CC/C8。チップの幅が伸びすぎないように） */
+export const PANTRY_NOTE_MAX_LENGTH = 20
+
+/**
+ * 在庫チップの一言メモを設定する（2026-07-29 便CC/C8）。
+ * 空文字を渡すとメモを消す。上限を超えた入力はここで切り詰める（保存側でも歯止めをかける）。
+ */
+export async function setPantryItemNote(id: number, note: string): Promise<void> {
+  const trimmed = note.trim().slice(0, PANTRY_NOTE_MAX_LENGTH)
+  await db.transaction('rw', db.pantryItems, async () => {
+    if (!trimmed) {
+      await db.pantryItems.where('id').equals(id).modify((item) => {
+        delete item.note
+      })
+      return
+    }
+    await db.pantryItems.update(id, { note: trimmed })
+  })
+}
+
 /**
  * 買い物完了時に使う: その食材を「ある」にする。在庫ボードに未登録なら新しくチップを作って反映する
  * （2026-07-23 オーナー実機FB #8: 未作成だと無反応＝実質バグだった。反映するなら作って反映する）。

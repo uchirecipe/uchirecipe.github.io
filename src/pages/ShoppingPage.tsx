@@ -338,6 +338,13 @@ export default function ShoppingPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [namePopup])
 
+  // 「あとにする」(2026-07-29 便CC/C7): 何も消さずにモーダルを閉じる。
+  // 背景タップ・Escでも閉じられるが、それが分かる導線がボタンとして無かった
+  const completeLater = () => {
+    setCompleteOpen(false)
+    setMessage(ja.shopping.completeLaterToast)
+  }
+
   const runComplete = async (reflect: boolean) => {
     await completeShopping(checkedItems, reflect)
     setCompleteOpen(false)
@@ -634,24 +641,39 @@ export default function ShoppingPage() {
                 <X size={20} aria-hidden />
               </button>
             </div>
+            {/* 件数を明示する(2026-07-29 便CC/C7・規約F: 何が消えて何が残るかを件数つきで) */}
             <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-              {ja.shopping.completeConfirmDescription}
+              {ja.shopping.completeConfirmDescription
+                .replace(/\{n\}/g, String(checkedItems.length))
+                .replace('{m}', String(memoItems.length - checkedItems.length))}
             </p>
-            <div className="mt-[var(--space-md)] flex gap-2">
+            <div className="mt-[var(--space-md)] flex flex-col gap-2">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void runComplete(true)}
+                  className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                >
+                  {ja.shopping.completeYes}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runComplete(false)}
+                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
+                >
+                  {ja.shopping.completeNo}
+                </button>
+              </div>
+              {/* 後回しの導線(2026-07-29 便CC/C7)。レジ前でその場の判断を強いない。
+                  チェックは残るので、帰ってから同じ手順で反映できる */}
               <button
                 type="button"
-                onClick={() => void runComplete(true)}
-                className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                onClick={completeLater}
+                className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
               >
-                {ja.shopping.completeYes}
+                {ja.shopping.completeLater}
               </button>
-              <button
-                type="button"
-                onClick={() => void runComplete(false)}
-                className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
-              >
-                {ja.shopping.completeNo}
-              </button>
+              <p className="text-xs text-ink-muted">{ja.shopping.completeLaterNote}</p>
             </div>
           </div>
         </div>

@@ -15,6 +15,8 @@ import {
   removePantryItems,
   setPantryItemsLevel,
   setPantryItemsGroup,
+  setPantryItemNote,
+  PANTRY_NOTE_MAX_LENGTH,
 } from '../db/pantry'
 import type { PantryGroupKey, PantryLevel } from '../db/types'
 import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
@@ -53,6 +55,9 @@ export default function PantryBoard() {
   // 説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉。他の折りたたみ同様、
   // 永続化はしない軽量実装(オーナー決定: 実装が軽い方でよい)
   const [showDescription, setShowDescription] = useState(false)
+  // 在庫チップの一言メモ(2026-07-29 便CC/C8)。整理モードで1件だけ選んだときに編集する。
+  // チップ内に編集ボタンは置かない(2026-07-16 B-10で誤操作の元として廃止済みのため)
+  const [noteDraft, setNoteDraft] = useState('')
 
   // 全削除で0件になったら整理モードを自動で抜ける(2026-07-29 便CC/C5・QA S2)。
   // 0件だと見出し横の「完了」ボタンが消える一方で整理モードは続くため、画面上に抜ける手段が
@@ -63,6 +68,20 @@ export default function PantryBoard() {
       setSelectedIds([])
     }
   }, [organizing, items])
+
+  // 選択が「1件だけ」になったら、その食材の現在のメモを編集欄に読み込む
+  const singleSelected =
+    selectedIds.length === 1 ? (items ?? []).find((item) => item.id === selectedIds[0]) : undefined
+  useEffect(() => {
+    setNoteDraft(singleSelected?.note ?? '')
+  }, [singleSelected?.id, singleSelected?.note])
+
+  const saveNote = async () => {
+    if (!singleSelected?.id) return
+    const trimmed = noteDraft.trim()
+    await setPantryItemNote(singleSelected.id, trimmed)
+    setMessage(trimmed ? ja.pantry.organizeNoteSavedToast : ja.pantry.organizeNoteClearedToast)
+  }
 
   const toggleOrganizing = () => {
     setOrganizing((v) => !v)
@@ -254,7 +273,11 @@ export default function PantryBoard() {
                       className={`inline-flex items-center gap-1 rounded-full border py-2 px-3 text-sm font-bold shadow-sm ${levelClass(item.level)}`}
                     >
                       {item.name}
-                      <span className="ml-1 font-normal opacity-80">（{ja.pantry.level[item.level]}）</span>
+                      {/* メモを付けた食材のチップだけ幅が伸びる(2026-07-29 便CC/C8。2列詰めの盤面を壊さない) */}
+                      <span className="ml-1 font-normal opacity-80">
+                        （{ja.pantry.level[item.level]}
+                        {item.note ? `・${item.note}` : ''}）
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -309,6 +332,40 @@ export default function PantryBoard() {
           </div>
           {/* 移動が一方向に見えないよう、戻し方と調味料グループの副作用をここで一言添える */}
           <p className="text-xs text-ink-muted">{ja.pantry.organizeMoveGroupNote}</p>
+
+          {/* 一言メモ(2026-07-29 便CC/C8)。1件だけ選んだときに編集できる */}
+          <p className="mt-1 text-sm text-ink-muted">{ja.pantry.organizeNoteTitle}</p>
+          {singleSelected ? (
+            <>
+              <div className="flex gap-[var(--space-sm)]">
+                <input
+                  type="text"
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void saveNote()
+                    }
+                  }}
+                  maxLength={PANTRY_NOTE_MAX_LENGTH}
+                  placeholder={ja.pantry.organizeNotePlaceholder}
+                  aria-label={ja.pantry.organizeNoteTitle}
+                  className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveNote()}
+                  className="shrink-0 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
+                >
+                  {ja.pantry.organizeNoteSave}
+                </button>
+              </div>
+              <p className="text-xs text-ink-muted">{ja.pantry.organizeNoteNote}</p>
+            </>
+          ) : (
+            <p className="text-xs text-ink-muted">{ja.pantry.organizeNoteMultiHint}</p>
+          )}
         </div>
       )}
 
