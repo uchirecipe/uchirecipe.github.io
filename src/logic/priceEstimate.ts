@@ -314,43 +314,68 @@ export function estimateIngredientRowCost(
 
 /** 献立エントリ群(mealPlans)の概算食費の合計・内訳 */
 export interface MealPlanCostSum {
-  /** 円換算の合計 */
+  /** 円換算の合計（レシピ登録時の基準人数分＝家族全員分） */
   total: number
   /** マスタ価格で補完した材料の件数の合計 */
   fromMasterCount: number
+  /**
+   * 1人分の合計（円・2026-07-28 便CA）。料理1品につき「合計÷登録人数」を1回だけ足した金額。
+   * 「1人が期間内に食べた分の食費」を出すために使う（栄養の sumPersonalNutrition と同じ数え方）。
+   * レシピの登録人数が分からない・不正(0以下)なら1人分として扱う。
+   */
+  personalTotal: number
+  /** 合計に入れた品数（料理1品＝1。人数では数えない・2026-07-28 便CA） */
+  dishCount: number
 }
 
 /**
  * 献立エントリ群(mealPlans)の概算食費合計。エントリのrecipeIdから該当レシピを引き、
  * estimateRecipeCost(レシピ登録時の基準人数分)を合算する。週の概算食費(MealPlanPageの
  * weekCostEstimate)と期間の食費(2026-07-17 便AB・docs/35 §5「期間の食費」のrangeCostEstimate)が
- * 共通で使う集計ロジック。recipeが見つからないエントリ(削除済みレシピ等を指す孤児行)はスキップする
+ * 共通で使う集計ロジック。recipeが見つからないエントリ(削除済みレシピ等を指す孤児行)はスキップする。
+ *
+ * 2026-07-28 便CA: 「1人が期間内に食べた分の食費」を出すため personalTotal（合計÷登録人数を
+ * 品ごとに1回足した金額）と dishCount も返す。従来の total/fromMasterCount の値は変えていない
+ * （週の概算食費の表示は据え置き）。personalTotalは丸め誤差を溜めないよう最後に一度だけ四捨五入する。
  */
 export function sumMealPlanEntriesCost<E extends { recipeId: number }>(
   entries: E[],
-  recipeById: Map<number, { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[] }>,
+  recipeById: Map<
+    number,
+    { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[]; servings?: number }
+  >,
   index: PriceIndexEntry[],
 ): MealPlanCostSum {
-  return entries.reduce<MealPlanCostSum>(
-    (acc, e) => {
-      const recipe = recipeById.get(e.recipeId)
-      if (!recipe) return acc
-      const estimate = estimateRecipeCost(recipe.ingredients, index)
-      return {
-        total: acc.total + estimate.total,
-        fromMasterCount: acc.fromMasterCount + estimate.fromMasterCount,
-      }
-    },
-    { total: 0, fromMasterCount: 0 },
-  )
+  let total = 0
+  let fromMasterCount = 0
+  let personalRaw = 0
+  let dishCount = 0
+  for (const e of entries) {
+    const recipe = recipeById.get(e.recipeId)
+    if (!recipe) continue
+    const estimate = estimateRecipeCost(recipe.ingredients, index)
+    const servings = recipe.servings != null && recipe.servings > 0 ? recipe.servings : 1
+    total += estimate.total
+    fromMasterCount += estimate.fromMasterCount
+    personalRaw += estimate.total / servings
+    dishCount++
+  }
+  return { total, fromMasterCount, personalTotal: Math.round(personalRaw), dishCount }
 }
 
 /** 「作った記録」群の実績原価合計と食数（1人1食＝1食）。2026-07-24 便BH-3・タスク9 */
 export interface CookedLogsCostSum {
-  /** 実績原価の合計（記録した人数分にスケールした金額を合算する） */
+  /** 実績原価の合計（記録した人数分にスケールした金額を合算する＝家族全員分） */
   total: number
   /** 食数（=延べ人数。2人分作った記録は2食と数える） */
   count: number
+  /**
+   * 1人分の合計（円・2026-07-28 便CA）。料理1品につき「全量÷登録人数」を1回だけ足した金額。
+   * 何人分作ったかに関係なく「1人が食べた分」を数えるので、記録時の人数ではスケールしない。
+   */
+  personalTotal: number
+  /** 品数（作った記録1件＝1品。人数では数えない・2026-07-28 便CA） */
+  dishCount: number
 }
 
 /**
@@ -368,6 +393,11 @@ export interface CookedLogsCostSum {
  *
  * 金額は記録時の人数(log.servings)に合わせてスケールする。
  * 記録時の人数が無い古い記録（2026-07-12以前）はレシピの登録人数で代替する。
+ *
+ * 2026-07-28 便CA: 「1人が期間内に食べた分の食費」を出す personalTotal と、その品数 dishCount を
+ * 追加した。personalTotalは何人分作ったかに関係なく「全量÷登録人数」を1品につき1回だけ足す
+ * （栄養の sumPersonalNutrition と同じ数え方）。従来の total/count（全体の金額と延べ人数の食数）は
+ * オーナー指示で残す＝「作った食数の合算(全体食費)」として引き続き表示する。
  */
 export function sumCookedRecipesCost(
   logsWithRecipe: {
@@ -378,11 +408,21 @@ export function sumCookedRecipesCost(
 ): CookedLogsCostSum {
   let total = 0
   let count = 0
+  let personalRaw = 0
+  let dishCount = 0
   for (const { recipe, log } of logsWithRecipe) {
     const registered = recipe.servings > 0 ? recipe.servings : 1
     const cooked = log?.servings != null && log.servings > 0 ? log.servings : registered
-    total += estimateRecipeCost(recipe.ingredients, index).total * (cooked / registered)
+    const whole = estimateRecipeCost(recipe.ingredients, index).total
+    total += whole * (cooked / registered)
     count += cooked
+    personalRaw += whole / registered
+    dishCount++
   }
-  return { total: Math.round(total), count }
+  return {
+    total: Math.round(total),
+    count,
+    personalTotal: Math.round(personalRaw),
+    dishCount,
+  }
 }

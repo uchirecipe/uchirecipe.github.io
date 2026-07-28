@@ -233,12 +233,14 @@
 //         維持されること。合わせて整理モード一括削除も同じセッションで検証し、削除ボタンが
 //         「選択した食材◯件を削除」で全選択/選択解除の下に出ること(補足#15)、削除後も整理
 //         モードのままであること(補足#16。2026-07-24オーナー補足で挙動を統一)を確認する) /
-//         MEALPLAN-07(献立タブ・月タブ「期間の食費」・2026-07-17 便AB・オーナー決定・docs/35 §5:
-//         モードボタンで開始日→終了日の2タップ選択→範囲ハイライト+結果カード(期間の献立原価
-//         合計・1日あたり平均・日数)が出ること。モード中は日タップが範囲選択に使われ既存の
-//         日モーダル(便U-5)が出ないこと・モード解除で日モーダルが復活すること・終了日<開始日の
-//         順にタップしても自動で入れ替わり結果が変わらないこと。原価は既存の週集計と同方式
-//         (登録人数基準)のため、期間合計が肉じゃが単品の概算食費の2倍と一致することで検証する) /
+//         MEALPLAN-07(献立タブ・月タブ「期間の栄養と食費」・2026-07-17 便AB → 2026-07-28 便CAで
+//         オーナー確定仕様に改訂: ①平均(1食あたり)を廃止し「1人が期間内に摂取した食事の合計
+//         (1人分)」を出す ②過去日は作った記録・今日以降は登録した献立だけで数える(過去の予定
+//         ベース表示は廃止) ③カレンダーのセル表示を写真/栄養/食費で切り替えられる。
+//         予定側は翌月(全日が未来)・実績側は前月(全日が過去)で日付に依存せず検証し、当月で
+//         混在期間の区別表示を確認する。モード中は日タップが範囲選択に使われ既存の日モーダル
+//         (便U-5)が出ないこと・モード解除で日モーダルが復活すること・終了日<開始日の順に
+//         タップしても自動で入れ替わることも引き続き見る) /
 //         MEALPLAN-08(手動配置の保護・2026-07-22 便BE・外部レビュー欠陥修正: 週の枠に手動で
 //         レシピを入れた後「まとめて献立を立てる」を押しても、手動配置の行が上書き削除されず
 //         同じid・同じレシピのまま残ること(旧実装は無警告で全消し)。空き枠は埋まり、手動枠を
@@ -2066,9 +2068,10 @@ try {
             proSectionText.includes('レシピを開いて「栄養価のめやす」をタップする'),
         )
         check(
-          'DISC-01 解錠後の案内に期間の集計(期間の食費・摂取できた栄養)への行き方が書かれている',
+          // 2026-07-28 便CA: 月タブのボタン名を「期間の栄養と食費」に変えたため、案内文の期待値も更新
+          'DISC-01 解錠後の案内に期間の集計(期間の栄養と食費)への行き方が書かれている',
           proSectionText.includes('期間の食費と摂取できた栄養') &&
-            proSectionText.includes('献立タブ →「月」→「期間の食費」'),
+            proSectionText.includes('献立タブ →「月」→「期間の栄養と食費」'),
         )
         const discLinks = await nutPage.evaluate(() => {
           const hrefs = Array.from(document.querySelectorAll('#pro-section a')).map((a) =>
@@ -4886,13 +4889,26 @@ try {
     }
   }
 
-  // --- MEALPLAN-07: 献立タブ・月タブ「期間の食費」(2026-07-17 便AB・オーナー決定・docs/35 §5)。
-  // モードボタンで開始日→終了日の2タップ選択→範囲ハイライト+結果カード(合計・1日あたり平均・
-  // 日数)が出ること。モード中は日タップが範囲選択に使われ、既存の日モーダル(便U-5)が出ないこと。
-  // モード解除で日モーダルが復活すること。終了日<開始日の順にタップしても自動で入れ替わり
-  // 結果が変わらないことも確認する。概算食費は既存の週集計と同方式(登録人数基準・
-  // sumMealPlanEntriesCost)のため、肉じゃがの詳細画面に出る「概算食費」の実測値を2倍した値と
-  // 期間合計が一致することを検証する(価格マスタの初期値そのものに依存せず決定的に確認できる) ---
+  // --- MEALPLAN-07: 献立タブ・月タブ「期間の栄養と食費」
+  // (2026-07-17 便AB → 2026-07-28 便CAでオーナー確定仕様に改訂)。
+  //
+  // 【旧テストを書き換えた理由】便CAでオーナー確定の仕様変更が2点入り、旧テストが固定していた
+  // 期待値がそのまま成立しなくなったため、丸ごと書き直した。
+  //  ①「合計÷食数の平均(1食あたり)」を廃止し「1人が期間内に摂取した食事の合計(1人分)」を出す
+  //    → 旧「1食あたり 約◯円」「1日あたり平均=合計÷6日」の検証は仕様ごと消滅。
+  //  ②過去日は作った記録・今日以降は登録した献立だけで数える(過去の予定ベース表示は廃止)
+  //    → 旧テストは「当月の3〜8日」に献立を入れていたが、実行日によって過去にも未来にもなるため
+  //      日付依存で不安定。予定側は翌月(全日が未来)・実績側は前月(全日が過去)で決定的に検証する。
+  //
+  // 検証内容:
+  //  A(予定・翌月): 今日以降の期間は登録した献立で計算する。1人分の合計＝単品の概算食費÷登録人数×2品。
+  //  B(実績・前月): 過ぎた期間は作った記録だけで計算し、同じ期間に置いた「過去の予定」は数えない
+  //    (オーナー指示「過去の予定ベース計算は邪魔なので表示なし」の回帰防止)。
+  //    オーナー指示で残す「作った記録の食費(全体)」＝全量の金額と延べ食数も確認する。
+  //  C(混在・当月): 過去分と今日以降分が混ざる期間は、どの日をどちらの基準で数えたかを明示する。
+  //  D: モード中は日タップが範囲選択に使われ日モーダルが出ない/解除で復活する(便ABからの継続確認)。
+  //  E: カレンダーのセル表示切り替え(写真/栄養/食費)と、選択が設定に記憶されること(便CA・タスク2)。
+  // 日セルは data-date 属性で掴む(日番号のテキスト一致だと予定プレビューや数字が入った途端に崩れるため)。
   currentCheck = 'MEALPLAN-07'
   {
     const rcBrowser = await chromium.launch()
@@ -4912,7 +4928,7 @@ try {
       await rcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rcPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // 肉じゃがの単品概算食費(登録人数基準)を実UIから読み取る
+      // 肉じゃがの単品概算食費(レシピ登録人数の全量)を実UIから読み取る
       await rcPage.getByText('肉じゃが', { exact: true }).first().click()
       await rcPage.waitForTimeout(500)
       const rcDetailText = (await rcPage.textContent('body')) ?? ''
@@ -4924,26 +4940,42 @@ try {
         `rcSingleCost=${rcSingleCost}`,
       )
 
-      const rcRecipeId = await rcPage.evaluate(
+      const rcRecipe = await rcPage.evaluate(
         () =>
           new Promise((resolve, reject) => {
             const req = indexedDB.open('uchi-recipe')
             req.onsuccess = () => {
               const tx = req.result.transaction('recipes', 'readonly')
               const g = tx.objectStore('recipes').getAll()
-              g.onsuccess = () => resolve(g.result.find((r) => r.title === '肉じゃが')?.id)
+              g.onsuccess = () => {
+                const r = g.result.find((x) => x.title === '肉じゃが')
+                resolve(r ? { id: r.id, servings: r.servings } : null)
+              }
               g.onerror = () => reject(g.error)
             }
             req.onerror = () => reject(req.error)
           }),
       )
+      const rcRecipeId = rcRecipe?.id
+      const rcServings = rcRecipe?.servings > 0 ? rcRecipe.servings : 1
+      check(
+        'MEALPLAN-07 前提: 肉じゃがの登録人数が読める',
+        rcServings > 0,
+        `servings=${rcRecipe?.servings}`,
+      )
+      // 1人分の期待値(便CA): 「全量÷登録人数」を品ごとに1回だけ足し、最後に一度だけ四捨五入する
+      const rcPersonalOne = rcSingleCost / rcServings
 
-      // 表示中の月の3日・8日の夕食枠に肉じゃがを直接投入(2件・同じレシピ)。
-      // どの月も28日以上あるため月末をまたがず安全に使える日付
+      // 翌月(全日が未来)・前月(全日が過去)・当月(混在)に、それぞれ検証用のデータを入れる
       const rcNow = new Date()
-      const rcPrefix = `${rcNow.getFullYear()}-${String(rcNow.getMonth() + 1).padStart(2, '0')}`
-      const rcStartDate = `${rcPrefix}-03`
-      const rcEndDate = `${rcPrefix}-08`
+      const prefixOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const rcCurPrefix = prefixOf(rcNow)
+      const rcNextPrefix = prefixOf(new Date(rcNow.getFullYear(), rcNow.getMonth() + 1, 1))
+      const rcPrevPrefix = prefixOf(new Date(rcNow.getFullYear(), rcNow.getMonth() - 1, 1))
+      const rcCurLastDay = new Date(rcNow.getFullYear(), rcNow.getMonth() + 1, 0).getDate()
+      const rcTodayDay = rcNow.getDate()
+
+      // 献立(mealPlans): 翌月3日・8日(未来=数える) / 前月5日(過去=数えない) / 当月末日(今日以降=数える)
       await rcPage.evaluate(
         ({ recipeId, dates }) =>
           new Promise((resolve, reject) => {
@@ -4957,7 +4989,36 @@ try {
             }
             req.onerror = () => reject(req.error)
           }),
-        { recipeId: rcRecipeId, dates: [rcStartDate, rcEndDate] },
+        {
+          recipeId: rcRecipeId,
+          dates: [
+            `${rcNextPrefix}-03`,
+            `${rcNextPrefix}-08`,
+            `${rcPrevPrefix}-05`,
+            `${rcCurPrefix}-${String(rcCurLastDay).padStart(2, '0')}`,
+          ],
+        },
+      )
+      // 作った記録(cookedLogs): 前月3日(過去=数える) / 当月1日(過去=数える。当月が混在期間になる)
+      await rcPage.evaluate(
+        ({ recipeId, dates }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.get(recipeId)
+              g.onsuccess = () => {
+                const r = g.result
+                r.cookedLogs = [...dates.map((date) => ({ date })), ...(r.cookedLogs ?? [])]
+                store.put(r)
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { recipeId: rcRecipeId, dates: [`${rcPrevPrefix}-03`, `${rcCurPrefix}-01`] },
       )
 
       // Pro解錠(IndexedDB直書き。PASTLOG-01と同じ「解錠済み状態の再現」手法)
@@ -4993,13 +5054,13 @@ try {
       await rcPage.getByRole('button', { name: '月', exact: true }).click()
       await rcPage.waitForTimeout(500)
 
-      const rcMonthGrid = rcPage.locator('div.grid.grid-cols-7').last()
-      // getByRole('button', {name})は使えない: 献立ありの日は「献立あり」マーク(dot)のaria-labelが
-      // 合成されて役割名が「3 献立あり」等になるため。日の数字だけの完全一致はテキストで絞り込む
-      const rcDayButton = (n) => rcMonthGrid.locator('button').filter({ hasText: new RegExp(`^${n}$`) })
-      const rcModeBtn = rcPage.getByRole('button', { name: '期間の食費', exact: true })
+      // 日セルは data-date で掴む(予定プレビュー・数字が入っても壊れない)
+      const rcDay = (date) => rcPage.locator(`button[data-date="${date}"]`)
+      const rcModeBtn = rcPage.getByRole('button', { name: '期間の栄養と食費', exact: true })
+      const rcNextMonthBtn = rcPage.getByRole('button', { name: '次の月', exact: true })
+      const rcPrevMonthBtn = rcPage.getByRole('button', { name: '前の月', exact: true })
 
-      // モードON→開始日案内が出る
+      // ===== モードON: 案内が出る =====
       await rcModeBtn.click()
       await rcPage.waitForTimeout(300)
       check(
@@ -5008,9 +5069,11 @@ try {
       )
       check('MEALPLAN-07 モードONはaria-pressed=true', (await rcModeBtn.getAttribute('aria-pressed')) === 'true')
 
-      // 開始日(3日)タップ→終了日案内・日モーダルは出ない
-      await rcDayButton('3').click()
-      await rcPage.waitForTimeout(300)
+      // ===== A: 予定(翌月=全日が未来) =====
+      await rcNextMonthBtn.click()
+      await rcPage.waitForTimeout(400)
+      await rcDay(`${rcNextPrefix}-03`).click()
+      await rcPage.waitForTimeout(200)
       check(
         'MEALPLAN-07 開始日タップ後は終了日案内が出る',
         ((await rcPage.textContent('body')) ?? '').includes('終了日をタップしてください'),
@@ -5019,40 +5082,182 @@ try {
         'MEALPLAN-07 モード中は日モーダルが開かない(開始日タップ時点)',
         (await rcPage.locator('[role="dialog"]').count()) === 0,
       )
-
-      // 終了日(8日)タップ→範囲ハイライト+結果カード(合計・1日あたり平均・日数)
-      await rcDayButton('8').click()
+      await rcDay(`${rcNextPrefix}-08`).click()
       await rcPage.waitForTimeout(300)
       check(
         'MEALPLAN-07 終了日タップ後も日モーダルは開かない',
         (await rcPage.locator('[role="dialog"]').count()) === 0,
       )
-      const rcResultText = (await rcPage.textContent('body')) ?? ''
-      check('MEALPLAN-07 結果カードの見出しが出る', rcResultText.includes('期間の食費'))
-      check('MEALPLAN-07 結果カードに日数(6日間)が出る', rcResultText.includes('6日間'))
-      const rcTotalMatch = rcResultText.match(/約([\d,]+)円/)
-      const rcTotal = Number((rcTotalMatch?.[1] ?? '0').replace(/,/g, ''))
+      const rcFutureText = (await rcPage.textContent('body')) ?? ''
+      check('MEALPLAN-07 結果カードの見出しが出る', rcFutureText.includes('期間の栄養と食費'))
+      check('MEALPLAN-07 結果カードに日数(6日間)が出る', rcFutureText.includes('6日間'))
       check(
-        'MEALPLAN-07 期間合計=肉じゃが単品概算食費の2倍(登録人数基準・既存の週集計と同方式)',
-        rcTotal === rcSingleCost * 2,
-        `rcTotal=${rcTotal} rcSingleCost*2=${rcSingleCost * 2}`,
+        'MEALPLAN-07(便CA③) 未来だけの期間は「登録した献立で計算」と明示する',
+        rcFutureText.includes('今日から先の期間なので、登録した献立で計算しています'),
+        `本文=${rcFutureText.slice(0, 40)}`,
       )
-      const rcAvgMatch = rcResultText.match(/1日あたり 約([\d,]+)円/)
-      const rcAvg = Number((rcAvgMatch?.[1] ?? '0').replace(/,/g, ''))
       check(
-        'MEALPLAN-07 1日あたり平均=合計÷6日(四捨五入)',
-        rcAvg === Math.round(rcTotal / 6),
-        `rcAvg=${rcAvg} total=${rcTotal}`,
+        'MEALPLAN-07(便CA③) 未来だけの期間に「作った記録だけで計算」は出さない',
+        !rcFutureText.includes('過ぎた日なので、作った記録だけで計算しています'),
+      )
+      const rcFuturePersonalMatch = rcFutureText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)
+      const rcFuturePersonal = Number((rcFuturePersonalMatch?.[1] ?? '-1').replace(/,/g, ''))
+      check(
+        'MEALPLAN-07(便CA①) 1人分の期間合計＝単品概算食費÷登録人数×2品(平均ではなく合計)',
+        rcFuturePersonal === Math.round(rcPersonalOne * 2),
+        `表示=${rcFuturePersonal} 期待=${Math.round(rcPersonalOne * 2)} single=${rcSingleCost} servings=${rcServings}`,
+      )
+      check(
+        'MEALPLAN-07(便CA①) 内訳に「作った記録 約0円（0品）／登録した献立 …（2品）」が出る',
+        /内訳 作った記録 約0円（0品）／登録した献立 約[\d,]+円（2品）/.test(rcFutureText),
+        `内訳=${rcFutureText.match(/内訳[^。]{0,60}/)?.[0]}`,
+      )
+      check(
+        'MEALPLAN-07(便CA①) 1人あたり1日の金額＝1人分合計÷6日',
+        rcFutureText.includes(
+          `1人あたり1日 約${Math.round(Math.round(rcPersonalOne * 2) / 6).toLocaleString()}円`,
+        ),
+        `本文=${rcFutureText.match(/1人あたり1日 約[\d,]+円/)?.[0]}`,
+      )
+      check(
+        'MEALPLAN-07(便CA①) 廃止した「1食あたり 約◯円」は出さない',
+        !/1食あたり 約[\d,]+円/.test(rcFutureText),
+      )
+      check(
+        'MEALPLAN-07(便CA) 未来だけの期間には「作った記録の食費（全体）」を出さない',
+        !rcFutureText.includes('作った記録の食費（全体）'),
+      )
+      check(
+        'MEALPLAN-07(便CA①) 「期間内に摂取できた栄養（1人分）」が8項目で出る',
+        rcFutureText.includes('期間内に摂取できた栄養（1人分）') &&
+          rcFutureText.includes('エネルギー') &&
+          rcFutureText.includes('食物繊維'),
+      )
+      check(
+        'MEALPLAN-07 摂取栄養は「概算／めやす」表記で出す',
+        rcFutureText.includes('概算') && rcFutureText.includes('めやす'),
+      )
+      check(
+        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品を、1食ずつ足しためやすです」',
+        rcFutureText.includes('登録した献立2品を、1食ずつ足しためやすです'),
+        `注記=${rcFutureText.match(/.{0,10}1食ずつ足しためやすです/)?.[0]}`,
       )
 
-      // モード解除→日モーダルが復活する(3日タップ)
+      // 終了日<開始日の順にタップしても自動で入れ替わり同じ結果になる
+      await rcDay(`${rcNextPrefix}-08`).click()
+      await rcPage.waitForTimeout(200)
+      await rcDay(`${rcNextPrefix}-03`).click()
+      await rcPage.waitForTimeout(300)
+      const rcSwappedText = (await rcPage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-07 終了日<開始日タップでも自動で入れ替わり同じ範囲になる(6日間)',
+        rcSwappedText.includes('6日間'),
+      )
+      const rcSwappedPersonal = Number(
+        (rcSwappedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
+      )
+      check(
+        'MEALPLAN-07 逆順タップでも1人分の合計は変わらない(自動入れ替え)',
+        rcSwappedPersonal === rcFuturePersonal,
+        `swapped=${rcSwappedPersonal} normal=${rcFuturePersonal}`,
+      )
+
+      // ===== B: 実績(前月=全日が過去)。同じ期間に置いた「過去の予定」は数えないこと =====
+      await rcPrevMonthBtn.click()
+      await rcPage.waitForTimeout(300)
+      await rcPrevMonthBtn.click()
+      await rcPage.waitForTimeout(400)
+      await rcDay(`${rcPrevPrefix}-01`).click()
+      await rcPage.waitForTimeout(200)
+      await rcDay(`${rcPrevPrefix}-10`).click()
+      await rcPage.waitForTimeout(300)
+      const rcPastText = (await rcPage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-07(便CA③) 過去だけの期間は「作った記録だけで計算」と明示する',
+        rcPastText.includes('過ぎた日なので、作った記録だけで計算しています'),
+      )
+      const rcPastPersonal = Number(
+        (rcPastText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
+      )
+      check(
+        'MEALPLAN-07(便CA①) 過去期間の1人分合計＝作った記録1品の1人分(何人分作ったかでは増えない)',
+        rcPastPersonal === Math.round(rcPersonalOne),
+        `表示=${rcPastPersonal} 期待=${Math.round(rcPersonalOne)}`,
+      )
+      check(
+        'MEALPLAN-07(便CA②) 同じ期間に登録した献立があっても、過去の予定は0品0円で数えない',
+        /内訳 作った記録 約[\d,]+円（1品）／登録した献立 約0円（0品）/.test(rcPastText),
+        `内訳=${rcPastText.match(/内訳[^。]{0,60}/)?.[0]}`,
+      )
+      check(
+        'MEALPLAN-07(便CA) オーナー指示で残す「作った記録の食費（全体）約◯円（◯食分）」が出る',
+        rcPastText.includes(
+          `作った記録の食費（全体）約${rcSingleCost.toLocaleString()}円（${rcServings}食分）`,
+        ),
+        `全体=${rcPastText.match(/作った記録の食費（全体）約[\d,]+円（\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
+      )
+      check(
+        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品を、1食ずつ足しためやすです」',
+        rcPastText.includes('作った記録1品を、1食ずつ足しためやすです'),
+      )
+      // 記録も予定も無い期間は空案内
+      await rcDay(`${rcPrevPrefix}-20`).click()
+      await rcPage.waitForTimeout(200)
+      await rcDay(`${rcPrevPrefix}-22`).click()
+      await rcPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-07(便CA) 記録も予定も無い期間は空案内を出す',
+        ((await rcPage.textContent('body')) ?? '').includes(
+          'この期間には、作った記録も登録した献立もありません',
+        ),
+      )
+
+      // ===== C: 混在(当月。1日に記録・末日に予定) =====
+      // 実行日が1日だと当月に過去日が無く混在にならないため、2日以降のときだけ検証する
+      await rcPage.getByRole('button', { name: '今月へ戻る' }).click()
+      await rcPage.waitForTimeout(400)
+      if (rcTodayDay >= 2) {
+        await rcDay(`${rcCurPrefix}-01`).click()
+        await rcPage.waitForTimeout(200)
+        await rcDay(`${rcCurPrefix}-${String(rcCurLastDay).padStart(2, '0')}`).click()
+        await rcPage.waitForTimeout(300)
+        const rcMixedText = (await rcPage.textContent('body')) ?? ''
+        check(
+          'MEALPLAN-07(便CA③) 混在期間は「◯/◯〜◯/◯は作った記録、◯/◯〜◯/◯は登録した献立で計算しています」と区別して出す',
+          /\d+\/\d+〜\d+\/\d+は作った記録、\d+\/\d+〜\d+\/\d+は登録した献立で計算しています/.test(
+            rcMixedText,
+          ),
+          `本文=${rcMixedText.match(/.{0,40}計算しています/)?.[0]}`,
+        )
+        check(
+          'MEALPLAN-07(便CA③) 混在期間の内訳は実績1品と予定1品の両方が出る',
+          /内訳 作った記録 約[\d,]+円（1品）／登録した献立 約[\d,]+円（1品）/.test(rcMixedText),
+          `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
+        )
+        check(
+          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品を、1食ずつ足しためやすです」',
+          rcMixedText.includes('作った記録1品と登録した献立1品を、1食ずつ足しためやすです'),
+        )
+        const rcMixedPersonal = Number(
+          (rcMixedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
+        )
+        check(
+          'MEALPLAN-07(便CA①) 混在期間の1人分合計＝実績1品＋予定1品',
+          rcMixedPersonal === Math.round(rcPersonalOne) + Math.round(rcPersonalOne),
+          `表示=${rcMixedPersonal} 期待=${Math.round(rcPersonalOne) * 2}`,
+        )
+      } else {
+        check('MEALPLAN-07(便CA③) 混在期間の検証は当月に過去日がある日だけ実施(今日は1日なので省略)', true)
+      }
+
+      // ===== D: モード解除で日モーダルが復活する =====
       await rcModeBtn.click()
       await rcPage.waitForTimeout(300)
       check(
         'MEALPLAN-07 モード解除後はaria-pressed=false',
         (await rcModeBtn.getAttribute('aria-pressed')) === 'false',
       )
-      await rcDayButton('3').click()
+      await rcDay(`${rcCurPrefix}-01`).click()
       await rcPage.waitForTimeout(300)
       check(
         'MEALPLAN-07 モード解除後は日タップで日モーダルが復活する',
@@ -5061,109 +5266,88 @@ try {
       await rcPage.locator('[role="dialog"] button[aria-label="閉じる"]').click()
       await rcPage.waitForTimeout(300)
 
-      // 終了日<開始日の順にタップしても自動で入れ替わり同じ範囲・同じ合計になる
-      await rcModeBtn.click()
-      await rcPage.waitForTimeout(300)
-      await rcDayButton('8').click()
-      await rcPage.waitForTimeout(300)
-      await rcDayButton('3').click()
-      await rcPage.waitForTimeout(300)
-      const rcSwappedText = (await rcPage.textContent('body')) ?? ''
-      check(
-        'MEALPLAN-07 終了日<開始日タップでも自動で入れ替わり同じ範囲になる(6日間)',
-        rcSwappedText.includes('6日間'),
-      )
-      const rcSwappedTotalMatch = rcSwappedText.match(/約([\d,]+)円/)
-      const rcSwappedTotal = Number((rcSwappedTotalMatch?.[1] ?? '0').replace(/,/g, ''))
-      check(
-        'MEALPLAN-07 逆順タップでも合計は変わらない(自動入れ替え)',
-        rcSwappedTotal === rcTotal,
-        `rcSwappedTotal=${rcSwappedTotal} rcTotal=${rcTotal}`,
-      )
-
-      // 2026-07-24 便BH-3・タスク9: 基準を明示(予定ベース/実績ベース)。ここまでの範囲(3〜8日)には
-      // 「作った記録」が無いので実績ベースは「まだ記録がありません」。予定ベースのラベルが出ること・
-      // 実績ベースが空案内であることを確認する
-      check('MEALPLAN-07(タスク9) 予定ベースのラベルが出る', rcSwappedText.includes('予定ベース'))
-      check('MEALPLAN-07(タスク9) 実績ベースのラベルが出る', rcSwappedText.includes('実績ベース'))
-      check(
-        'MEALPLAN-07(タスク9) 記録が無い期間の実績ベースは「まだ記録がありません」',
-        rcSwappedText.includes('この期間にはまだ「作った記録」がありません'),
-      )
-      check('MEALPLAN-07(タスク9) 予定ベースに「◯食分」が併記される', /\d+食分/.test(rcSwappedText))
-
-      // 期間内(5日)に肉じゃがの「作った記録」を1件注入→再選択で実績ベースが出る。
-      // 2026-07-28 便BY/RANGE-01: 食数は延べ人数(1人1食)。肉じゃがは2人分レシピなので
-      // 記録1件=2食、実績原価=肉じゃが単品概算食費(全量)、1食あたり=その半分になる
-      // (同じカードに並ぶ「摂取できた栄養(1食あたり)」が1人分基準なので単位を揃えた)
-      await rcPage.evaluate(
-        ({ recipeId, date }) =>
-          new Promise((resolve, reject) => {
-            const req = indexedDB.open('uchi-recipe')
-            req.onsuccess = () => {
-              const tx = req.result.transaction('recipes', 'readwrite')
-              const store = tx.objectStore('recipes')
-              const g = store.get(recipeId)
-              g.onsuccess = () => {
-                const r = g.result
-                r.cookedLogs = [{ date }, ...(r.cookedLogs ?? [])]
-                store.put(r)
-              }
-              tx.oncomplete = () => resolve(undefined)
-              tx.onerror = () => reject(tx.error)
-            }
-            req.onerror = () => reject(req.error)
-          }),
-        { recipeId: rcRecipeId, date: `${rcPrefix}-05` },
-      )
-      await rcPage.reload({ waitUntil: 'networkidle' })
-      await rcPage.waitForTimeout(800)
-      await rcPage.getByRole('button', { name: '月', exact: true }).click()
+      // ===== E: カレンダーのセル表示切り替え(便CA・タスク2) =====
+      // 翌月(予定あり)で確認する。既定は写真モード＝予定のある日に主菜名が出ている
+      await rcNextMonthBtn.click()
       await rcPage.waitForTimeout(400)
-      await rcPage.getByRole('button', { name: '期間の食費', exact: true }).click()
-      await rcPage.waitForTimeout(300)
-      const rcMonthGrid2 = rcPage.locator('div.grid.grid-cols-7').last()
-      const rcDay2 = (n) => rcMonthGrid2.locator('button').filter({ hasText: new RegExp(`^${n}$`) })
-      await rcDay2('3').click()
-      await rcPage.waitForTimeout(300)
-      await rcDay2('8').click()
-      await rcPage.waitForTimeout(300)
-      const rcActualText = (await rcPage.textContent('body')) ?? ''
-      const rcActualMatch = rcActualText.match(/実績ベース（作った記録）\s*約([\d,]+)円（(\d+)食分・1食あたり 約([\d,]+)円）/)
+      const rcPhotoModeBtn = rcPage.getByRole('button', { name: '写真', exact: true })
+      const rcNutriModeBtn = rcPage.getByRole('button', { name: '栄養', exact: true })
+      const rcCostModeBtn = rcPage.getByRole('button', { name: '食費', exact: true })
       check(
-        'MEALPLAN-07(タスク9) 記録注入後、実績ベースに「約◯円（◯食分・1食あたり 約◯円）」が出る',
-        !!rcActualMatch,
-        `actualText含む=${rcActualText.includes('実績ベース')} match=${rcActualMatch?.[0]}`,
-      )
-      if (rcActualMatch) {
-        const actualTotal = Number(rcActualMatch[1].replace(/,/g, ''))
-        const actualCount = Number(rcActualMatch[2])
-        const actualPer = Number(rcActualMatch[3].replace(/,/g, ''))
-        check(
-          'MEALPLAN-07(タスク9/便BY RANGE-01) 実績原価=肉じゃが単品概算食費・食数2(延べ人数)・1食あたり=その半分',
-          actualTotal === rcSingleCost &&
-            actualCount === 2 &&
-            actualPer === Math.round(rcSingleCost / 2),
-          `total=${actualTotal} count=${actualCount} per=${actualPer} single=${rcSingleCost}`,
-        )
-      }
-      // 2026-07-24 便BS・タスク3: 記録のある期間には「摂取できた栄養（1食あたり）」が出る。
-      // 既存のPro8項目計算を流用し、「めやす／概算」表記を厳守すること
-      check(
-        'MEALPLAN-07(便BS・タスク3) 実績のある期間に「摂取できた栄養（1食あたり）」が出る',
-        rcActualText.includes('摂取できた栄養（1食あたり）') && rcActualText.includes('エネルギー'),
+        'MEALPLAN-07(便CA②) 写真/栄養/食費の切り替えが3つとも出る',
+        (await rcPhotoModeBtn.count()) === 1 &&
+          (await rcNutriModeBtn.count()) === 1 &&
+          (await rcCostModeBtn.count()) === 1,
       )
       check(
-        'MEALPLAN-07(便BS・タスク3) 摂取栄養は「概算／めやす」表記で出す',
-        rcActualText.includes('概算') && rcActualText.includes('めやす'),
+        'MEALPLAN-07(便CA②) 既定は写真モード(aria-pressed=true)',
+        (await rcPhotoModeBtn.getAttribute('aria-pressed')) === 'true',
       )
       check(
-        'MEALPLAN-07(便BS・タスク3/便BY RANGE-01) 記録のあった食数(延べ2食)のめやすである旨を出す',
-        rcActualText.includes('記録のあった2食のめやすです'),
+        'MEALPLAN-07(便CA②) 写真モードのセルは従来どおり献立のプレビュー(主菜名)を出す',
+        ((await rcDay(`${rcNextPrefix}-03`).textContent()) ?? '').includes('肉じゃが'),
+      )
+
+      await rcNutriModeBtn.click()
+      await rcPage.waitForTimeout(400)
+      // セルの見た目は数字だけ(「498kcal」は7列のセルに入りきらず切れるため。単位は凡例と読み上げで補う)。
+      // 数字が「その日の1人分のkcal」であることは aria-label 側で確認する
+      const rcNutriCell = (await rcDay(`${rcNextPrefix}-03`).textContent()) ?? ''
+      const rcNutriAria = (await rcDay(`${rcNextPrefix}-03`).getAttribute('aria-label')) ?? ''
+      const rcNutriKcal = rcNutriAria.match(/([\d,]+)kcal/)?.[1] ?? ''
+      check(
+        'MEALPLAN-07(便CA②) 読み上げ(aria-label)は「◯日 ◯kcal 登録した献立」',
+        /^3日 [\d,]+kcal 登録した献立$/.test(rcNutriAria),
+        `aria=${rcNutriAria}`,
       )
       check(
-        'MEALPLAN-07(便BY RANGE-01) 食費と栄養の「◯食」の数が同じカード内で一致する',
-        rcActualText.includes('（2食分・1食あたり') && rcActualText.includes('記録のあった2食'),
+        'MEALPLAN-07(便CA②) 栄養モードのセルは日付＋その日の1人分の数字だけ(単位はセルに入らないので凡例へ)',
+        rcNutriCell === `3${rcNutriKcal}` && rcNutriKcal !== '',
+        `セル=${rcNutriCell} 期待=3${rcNutriKcal}`,
+      )
+      check(
+        'MEALPLAN-07(便CA②) 栄養モードには単位と基準の凡例を添える',
+        ((await rcPage.textContent('body')) ?? '').includes(
+          '数字はその日に1人が食べる分のエネルギー（kcal）のめやすです',
+        ),
+      )
+      check(
+        'MEALPLAN-07(便CA②) 予定も記録も無い日は数字を出さない(日付だけ)',
+        ((await rcDay(`${rcNextPrefix}-04`).textContent()) ?? '').trim() === '4',
+        `セル=${await rcDay(`${rcNextPrefix}-04`).textContent()}`,
+      )
+
+      await rcCostModeBtn.click()
+      await rcPage.waitForTimeout(400)
+      const rcCostCell = (await rcDay(`${rcNextPrefix}-03`).textContent()) ?? ''
+      check(
+        'MEALPLAN-07(便CA②) 食費モードのセルにその日の1人分の金額が出る',
+        new RegExp(`${Math.round(rcPersonalOne).toLocaleString()}円`).test(rcCostCell),
+        `セル=${rcCostCell} 期待=${Math.round(rcPersonalOne).toLocaleString()}円`,
+      )
+      check(
+        'MEALPLAN-07(便CA②) 食費モードには単位と基準の凡例を添える',
+        ((await rcPage.textContent('body')) ?? '').includes(
+          '数字はその日に1人が食べる分の食費のめやすです',
+        ),
+      )
+
+      // 選択は設定に記憶され、再読み込みしても食費モードのまま
+      await rcPage.reload({ waitUntil: 'networkidle' })
+      await rcPage.waitForTimeout(900)
+      await rcPage.getByRole('button', { name: '月', exact: true }).click()
+      await rcPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-07(便CA②) 切り替えた表示は設定に記憶される(再読み込み後も食費モード)',
+        (await rcPage.getByRole('button', { name: '食費', exact: true }).getAttribute('aria-pressed')) ===
+          'true',
+      )
+      // 写真モードへ戻すと従来表示に復帰する
+      await rcPage.getByRole('button', { name: '写真', exact: true }).click()
+      await rcPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-07(便CA②) 写真モードへ戻すと従来の献立プレビューに復帰する',
+        !((await rcPage.textContent('body')) ?? '').includes('数字はその日に1人が食べる分'),
       )
     } finally {
       await rcBrowser.close()

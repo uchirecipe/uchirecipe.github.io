@@ -258,6 +258,12 @@ export const defaultHomeWidgets: HomeWidgetKey[] = [
   'history',
 ]
 
+/**
+ * 月タブのカレンダーセルの表示内容（2026-07-28 便CA・オーナー指示
+ * 「デフォは写真>献立(作った食数)。加えて、栄養と価格表示をスイッチなどで切り替え表示できるようにしたい」）。
+ */
+export type MonthCellMode = 'photo' | 'nutrition' | 'cost'
+
 /** アプリ全体の設定（1件だけ保存する） */
 export interface Settings {
   /** 常に 1（設定は1レコードだけ） */
@@ -298,6 +304,13 @@ export interface Settings {
    * 任意項目なのでスキーマ変更・マイグレーション不要（既存ユーザーは従来どおりの週区切り）。
    */
   weekStartsToday?: boolean
+  /**
+   * 月タブのカレンダーセルに何を出すか（任意・2026-07-28 便CA・オーナー指示）。
+   * 'photo'=既定（写真があれば写真・無ければ献立のプレビュー）、'nutrition'=その日の1人分の
+   * エネルギー、'cost'=その日の1人分の食費。未設定は 'photo'（従来どおり）。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  monthCellMode?: MonthCellMode
   /** ホーム画面に表示するパーツと並び順（配列に無いものは非表示） */
   homeWidgets: HomeWidgetKey[]
   /**

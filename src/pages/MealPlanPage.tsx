@@ -75,18 +75,30 @@ import {
   buildPriceIndex,
   estimateRecipeCost,
   sumMealPlanEntriesCost,
-  sumCookedRecipesCost,
 } from '../logic/priceEstimate'
 import {
-  averagePerMealNutrition,
   roundNutrient,
   isNutritionUnlocked,
   nutritionSourceName,
   type NutrientTotals,
 } from '../logic/nutrition'
+import {
+  summarizeRangeIntake,
+  dayIntakeMap,
+  type DayIntake,
+  type RangeCookedDish,
+  type RangePlannedDish,
+} from '../logic/rangeSummary'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
-import type { CookedLog, MealPlanEntry, MealRole, MealSlot, Recipe } from '../db/types'
+import type {
+  CookedLog,
+  MealPlanEntry,
+  MealRole,
+  MealSlot,
+  MonthCellMode,
+  Recipe,
+} from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -221,7 +233,11 @@ function CookedLogCard({
   )
 }
 
-/** 期間の集計「摂取できた栄養」の表示行（1食あたり・8項目。NutritionTeaserと同じ並び・2026-07-24 便BS・タスク3） */
+/**
+ * 期間の集計「期間内に摂取できた栄養（1人分）」の表示行（8項目。NutritionTeaserと同じ並び）。
+ * 2026-07-24 便BS・タスク3で新設し、2026-07-28 便CAで「1食あたりの平均」から
+ * 「1人が期間内に食べた分の合計」へ意味を変えた（行の並び自体は据え置き）。
+ */
 const PERIOD_NUTRIENT_ROWS: { key: keyof NutrientTotals; label: string }[] = [
   { key: 'kcal', label: ja.nutrition.kcalLabel },
   { key: 'proteinG', label: ja.nutrition.proteinLabel },
@@ -231,6 +247,16 @@ const PERIOD_NUTRIENT_ROWS: { key: keyof NutrientTotals; label: string }[] = [
   { key: 'ironMg', label: ja.nutrition.ironLabel },
   { key: 'calciumMg', label: ja.nutrition.calciumLabel },
   { key: 'saltG', label: ja.nutrition.saltLabel },
+]
+/** YYYY-MM-DD を「7/3」の形にする（期間の集計カードの「どの日をどちらの基準で数えたか」の表示用） */
+const formatMonthDay = (date: string): string =>
+  `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`
+
+/** 月カレンダーのセルに出す情報の切り替え(2026-07-28 便CA・タスク2・オーナー指示)。既定は写真 */
+const MONTH_CELL_MODES: { value: MonthCellMode; label: string }[] = [
+  { value: 'photo', label: ja.mealPlan.monthCellModePhoto },
+  { value: 'nutrition', label: ja.mealPlan.monthCellModeNutrition },
+  { value: 'cost', label: ja.mealPlan.monthCellModeCost },
 ]
 const formatNutrient = (key: keyof NutrientTotals, value: number): string => {
   const n = roundNutrient(key, value).toLocaleString()
@@ -254,11 +280,20 @@ const LOCK_SAMPLE_PLAN_DAYS = new Set([2, 8, 16, 20, 24, 29])
  * (過去日の未達成予定はカレンダーからも消す=便BS・タスク2の方針。mealPlansデータは非破壊で残す)。
  * S-2(docs/59): 予定も記録も無い未来日(isEmptyFuture)は控えめな点線枠で「まだ決めていない日」を可視化する。
  * usePhotoUrlはループ内で直接呼べないため、親でBlobを解決してこのセル単位で1回だけ呼ぶ。
+ *
+ * 2026-07-28 便CA・タスク2(オーナー指示): mode で表示内容を切り替える。
+ *  'photo'   = 既定。従来どおり写真＞献立プレビュー。
+ *  'nutrition'/'cost' = その日に1人が食べる分のエネルギー／食費を数字で出す(stat)。
+ * 数字モードでは写真を敷かない(小さい文字が写真に埋もれて読めないため・視認性優先)。
+ * 数字の色で基準を見分けられるようにする: 実績(作った記録)=accent、予定(登録した献立)=控えめな文字色。
  */
 function MonthDayCell({
+  date,
   dayNum,
   isToday,
   inRange,
+  mode,
+  stat,
   showPlanDot,
   planPreview,
   isEmptyFuture,
@@ -266,9 +301,15 @@ function MonthDayCell({
   coverPhoto,
   onClick,
 }: {
+  /** YYYY-MM-DD。e2eからセルを一意に掴むための data-date にも使う */
+  date: string
   dayNum: number
   isToday: boolean
   inRange: boolean
+  /** セルに出す情報(便CA・タスク2)。既定は 'photo' */
+  mode: MonthCellMode
+  /** 'nutrition'/'cost' のときに出す、その日の1人分の数字(無い日はundefined) */
+  stat?: DayIntake
   showPlanDot: boolean
   /** S-1(docs/59): 今日・未来日の予定プレビュー（主菜名／無ければ「◯件」）。showPlanDotのときだけ出す */
   planPreview?: string
@@ -281,11 +322,72 @@ function MonthDayCell({
   const photoUrl = usePhotoUrl(coverPhoto)
   const base =
     'relative flex aspect-square flex-col items-center justify-center overflow-hidden rounded-sm border text-sm'
+
+  // 栄養／食費モード: その日の1人分の数字を主役にする(写真は敷かない=視認性優先)
+  if (mode !== 'photo') {
+    // 7列のセルは375px幅で約46px。「498kcal」は入りきらず途中で切れてしまったため、
+    // 栄養モードのセルは数字だけを出し、単位(kcal)は下の凡例と読み上げ(aria-label)で補う。
+    // 「314円」は収まるので食費モードは単位を付けたまま(数字だけだと金額に見えないため)
+    const cellText = stat
+      ? mode === 'nutrition'
+        ? Math.round(stat.kcal).toLocaleString()
+        : ja.mealPlan.monthCellYen.replace('{n}', stat.yen.toLocaleString())
+      : null
+    const value = stat
+      ? mode === 'nutrition'
+        ? ja.mealPlan.monthCellKcal.replace('{n}', Math.round(stat.kcal).toLocaleString())
+        : ja.mealPlan.monthCellYen.replace('{n}', stat.yen.toLocaleString())
+      : null
+    const ariaTemplate = !stat
+      ? ja.mealPlan.monthDayStatAriaEmpty
+      : stat.basis === 'actual'
+        ? ja.mealPlan.monthDayStatAriaActual
+        : ja.mealPlan.monthDayStatAriaPlan
+    const tone = isToday
+      ? 'border-accent bg-accent/20 text-ink'
+      : inRange
+        ? 'border-accent bg-accent/20 text-ink'
+        : stat
+          ? 'border-edge bg-surface text-ink'
+          : 'border-dashed border-edge bg-surface text-ink-muted'
+    return (
+      <button
+        type="button"
+        data-date={date}
+        onClick={onClick}
+        aria-label={ariaTemplate.replace('{d}', String(dayNum)).replace('{v}', value ?? '')}
+        // baseのjustify-centerとぶつからないよう、数字セルはここで独立したクラス列を組む
+        className={`relative flex aspect-square flex-col items-center justify-between overflow-hidden rounded-sm border py-1 text-sm ${tone}`}
+      >
+        {isToday && (
+          <span className="absolute inset-0 rounded-sm ring-2 ring-inset ring-accent" aria-hidden />
+        )}
+        <span
+          aria-hidden
+          className={`text-[10px] leading-none ${isToday ? 'font-bold text-accent' : 'text-ink-muted'}`}
+        >
+          {dayNum}
+        </span>
+        {cellText && (
+          <span
+            aria-hidden
+            className={`w-full truncate px-0.5 text-center text-[10px] font-bold leading-tight tabular-nums ${
+              stat?.basis === 'actual' ? 'text-accent' : 'text-ink-muted'
+            }`}
+          >
+            {cellText}
+          </span>
+        )}
+      </button>
+    )
+  }
+
   if (photoUrl) {
     // 写真あり: 全面に写真、日付は左上の小バッジ(スクリムで可読性確保)。「記録あり」のaria-labelは維持する
     return (
       <button
         type="button"
+        data-date={date}
         onClick={onClick}
         aria-label={ja.mealPlan.monthDayHasLog}
         className={`${base} ${isToday ? 'border-accent' : 'border-edge'}`}
@@ -315,7 +417,7 @@ function MonthDayCell({
           'border-dashed border-edge bg-surface text-ink-muted'
         : 'border-edge bg-surface text-ink'
   return (
-    <button type="button" onClick={onClick} className={`${base} ${tone}`}>
+    <button type="button" data-date={date} onClick={onClick} className={`${base} ${tone}`}>
       <span className="leading-none">{dayNum}</span>
       {/* S-1(docs/59): 今日・未来日の予定は、点ではなく主菜名（無ければ「◯件」）でプレビューし、
           先の予定を月表で読めるようにする（過去日の写真日記＝上の分岐には出さない）。
@@ -661,50 +763,62 @@ export default function MealPlanPage() {
     if (rangeStart == null) return null
     return rangeEnd == null ? { start: rangeStart, end: rangeStart } : { start: rangeStart, end: rangeEnd }
   }, [rangeStart, rangeEnd])
-  // 期間内(両端含む)のmealPlansエントリ。monthEntries(表示中の月のカレンダー内)から絞り込むため、
-  // 「月をまたぐ期間は月表示範囲内に限定してよい」の仕様を自然に満たす(月をまたぐ選択自体は
-  // monthAnchor変更時のリセットで防止済み)
-  const rangeCostEntries = useMemo(() => {
-    if (rangeStart == null || rangeEnd == null) return []
-    return (monthEntries ?? []).filter((e) => e.date >= rangeStart && e.date <= rangeEnd)
-  }, [monthEntries, rangeStart, rangeEnd])
-  // 期間の献立原価合計(既存の週の概算食費と同じsumMealPlanEntriesCost・登録人数基準で算出)
-  const rangeCostEstimate = useMemo(
-    () => sumMealPlanEntriesCost(rangeCostEntries, recipeById, priceIndex),
-    [rangeCostEntries, recipeById, priceIndex],
-  )
   const rangeDays = rangeStart != null && rangeEnd != null ? rangeDayCount(rangeStart, rangeEnd) : 0
-  const rangeAverageCost = rangeDays > 0 ? Math.round(rangeCostEstimate.total / rangeDays) : 0
-  // 期間の食費(予定ベース)の食数(=食事の回数。主菜+副菜が並ぶ枠も1食。2026-07-24 便BH-3・タスク9)
-  const rangePlanMealCount = useMemo(() => mealOccasionCount(rangeCostEntries), [rangeCostEntries])
-  // 期間の食費(実績ベース・2026-07-24 便BH-3・タスク9): 期間内の「作った記録」から実績原価と食数を出す。
-  // 予定(mealPlansエントリ)ではなく実際に作った記録が基準。
-  // 2026-07-28 便BY/RANGE-01: 食数は延べ人数(1人1食)。記録時の人数(log.servings)を渡すため
-  // レシピだけでなく記録もそのまま持ち回る(同じカードの栄養「1食あたり」と単位を揃える)
-  const rangeCookedLogs = useMemo(() => {
-    if (rangeStart == null || rangeEnd == null) return []
-    const out: { recipe: Recipe; log: CookedLog }[] = []
+  // 表示中の月の「作った記録」と「登録した献立」を、期間集計・セル表示の共通入力の形に整える
+  // (2026-07-28 便CA)。monthEntries(表示中の月のカレンダー内)から作るため「月をまたぐ期間は
+  // 月表示範囲内に限定してよい」の仕様を自然に満たす(月をまたぐ選択自体はmonthAnchor変更時の
+  // リセットで防止済み)。記録側はhideStartersに関わらず全レシピ(実際に作った履歴のため)、
+  // 予定側はrecipeById(hideStarters反映済み)を使う=従来の集計と同じ対象範囲
+  const monthCookedDishes = useMemo(() => {
+    const prefix = monthAnchor.slice(0, 7)
+    const out: RangeCookedDish[] = []
     cookedLogsByDate.forEach((list, date) => {
-      if (date >= rangeStart && date <= rangeEnd) list.forEach((pair) => out.push(pair))
+      if (!date.startsWith(prefix)) return
+      list.forEach(({ recipe, log }) => out.push({ date, recipe, log }))
     })
     return out
-  }, [cookedLogsByDate, rangeStart, rangeEnd])
-  const rangeActualCost = useMemo(
-    () => sumCookedRecipesCost(rangeCookedLogs, priceIndex),
-    [rangeCookedLogs, priceIndex],
-  )
-  const rangeActualPerMeal =
-    rangeActualCost.count > 0 ? Math.round(rangeActualCost.total / rangeActualCost.count) : 0
-  // 期間の集計「摂取できた栄養」(2026-07-24 便BS・タスク3): 期間内の「作った記録」のレシピ群から
-  // 1食あたりの平均栄養(既存のPro8項目計算=computeRecipeNutritionを流用)を出す。あくまで概算・めやす。
-  // 表示は栄養フラグ&&Pro(isNutritionUnlocked)かつ計算できた食数>0のときだけ(下のカードで判定)
-  const rangeNutrition = useMemo(
-    () =>
-      averagePerMealNutrition(
-        rangeCookedLogs.map(({ recipe, log }) => ({ ...recipe, cookedServings: log.servings })),
-      ),
-    [rangeCookedLogs],
-  )
+  }, [cookedLogsByDate, monthAnchor])
+  const monthPlannedDishes = useMemo(() => {
+    const out: RangePlannedDish[] = []
+    monthEntries?.forEach((e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (recipe) out.push({ date: e.date, recipe })
+    })
+    return out
+  }, [monthEntries, recipeById])
+  /**
+   * 期間の集計(2026-07-28 便CA・オーナー確定仕様)。
+   * ①平均をやめ「1人が期間内に食べた分の合計」を出す ②過去日は作った記録・今日以降は登録した献立
+   * だけで数える(過去の予定ベース表示は廃止)。詳細な理由は logic/rangeSummary.ts のコメント。
+   */
+  const rangeSummary = useMemo(() => {
+    if (rangeStart == null || rangeEnd == null) return null
+    return summarizeRangeIntake({
+      start: rangeStart,
+      end: rangeEnd,
+      today,
+      cooked: monthCookedDishes,
+      planned: monthPlannedDishes,
+      priceIndex,
+    })
+  }, [rangeStart, rangeEnd, today, monthCookedDishes, monthPlannedDishes, priceIndex])
+  // 1人あたり1日の食費(便CA): 期間の1人分合計を日数で割る。従来の「1日あたり」は予定ベースの
+  // 全体金額÷日数だったが、予定が今日以降だけになったので「1人分の合計÷日数」に置き換えた
+  const rangePersonalPerDay =
+    rangeSummary != null && rangeDays > 0 ? Math.round(rangeSummary.personalYen / rangeDays) : 0
+
+  // 月カレンダーのセル表示(便CA・タスク2): 既定は写真。栄養/食費モードのときだけ日ごとの1人分を計算する
+  const monthCellMode: MonthCellMode = settings?.monthCellMode ?? 'photo'
+  const monthDayStats = useMemo(() => {
+    if (monthCellMode === 'photo') return new Map<string, DayIntake>()
+    return dayIntakeMap({
+      dates: monthDatesList,
+      today,
+      cooked: monthCookedDishes,
+      planned: monthPlannedDishes,
+      priceIndex,
+    })
+  }, [monthCellMode, monthDatesList, today, monthCookedDishes, monthPlannedDishes, priceIndex])
 
   // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
   const todayList = useTodayList()
@@ -1584,8 +1698,35 @@ export default function MealPlanPage() {
               </button>
             </div>
 
-            {/* 期間の食費モード(2026-07-17 便AB・docs/35 §5)。押すたびにON/OFFを切り替え、
-                切り替え時は選択もリセットする(再度押せば選び直せる) */}
+            {/* カレンダーに出す情報の切り替え(2026-07-28 便CA・タスク2・オーナー指示)。
+                既定は写真＞献立プレビュー。栄養/食費に切り替えると各セルにその日の1人分の数字が出る。
+                選択は設定に記憶する(次に月タブを開いても同じ表示) */}
+            <div
+              role="group"
+              aria-label={ja.mealPlan.monthCellModeLabel}
+              className="mt-[var(--space-sm)] flex gap-1"
+            >
+              {MONTH_CELL_MODES.filter(
+                (m) => m.value !== 'nutrition' || isNutritionUnlocked(isPro),
+              ).map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => void updateSettings({ monthCellMode: m.value })}
+                  aria-pressed={monthCellMode === m.value}
+                  className={`flex-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                    monthCellMode === m.value
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {/* 期間の栄養と食費モード(2026-07-17 便AB・docs/35 §5 → 2026-07-28 便CAで改訂)。
+                押すたびにON/OFFを切り替え、切り替え時は選択もリセットする(再度押せば選び直せる) */}
             <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -1630,9 +1771,12 @@ export default function MealPlanPage() {
                 return (
                   <MonthDayCell
                     key={date}
+                    date={date}
                     dayNum={Number(date.slice(8, 10))}
                     isToday={date === today}
                     inRange={!!inRange}
+                    mode={monthCellMode}
+                    stat={monthDayStats.get(date)}
                     showPlanDot={monthDaysWithPlan.has(date) && !isPastDate(date, today)}
                     planPreview={monthDayPreview.get(date)}
                     isEmptyFuture={isEmptyFuture}
@@ -1645,12 +1789,22 @@ export default function MealPlanPage() {
                 )
               })}
             </div>
+            {/* 数字モードの読み方(便CA・タスク2): 単位と、どの日をどちらの基準で数えているかを添える。
+                セル内に単位まで入れると小さすぎて読めないため、凡例で補う(視認性優先) */}
+            {monthCellMode !== 'photo' && (
+              <p className="mt-1 text-xs text-ink-muted">
+                {monthCellMode === 'nutrition'
+                  ? ja.mealPlan.monthCellNutritionLegend
+                  : ja.mealPlan.monthCellCostLegend}
+              </p>
+            )}
 
-            {/* 期間の食費の結果カード(便AB): 開始日・終了日の両方が選ばれたら表示。
-                2026-07-24 便BH-3・タスク9で基準を明示: 「予定ベース(登録した献立)」と
-                「実績ベース(作った記録)」を分けて出す。予定ベースは従来どおり登録人数基準の
-                原価合計・1日あたり平均・食数。実績ベースは期間内の記録から実績原価・食数・1食あたりを出す */}
-            {costMode && rangeStart != null && rangeEnd != null && (
+            {/* 期間の栄養と食費の結果カード(便AB → 2026-07-28 便CAでオーナー確定仕様に改訂)。
+                開始日・終了日の両方が選ばれたら表示。
+                ①「1人が期間内に食べた分の合計」を主役にする(平均は出さない)
+                ②過去日は作った記録・今日以降は登録した献立だけで数える(過去の予定ベース表示は廃止)
+                ③オーナー指示で「作った食数の合算(全体食費)」は残す */}
+            {costMode && rangeStart != null && rangeEnd != null && rangeSummary != null && (
               <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
                 <h2 className="font-bold">{ja.mealPlan.rangeCostResultTitle}</h2>
                 <p className="mt-0.5 text-xs text-ink-muted">
@@ -1661,93 +1815,130 @@ export default function MealPlanPage() {
                     .replace('{ed}', String(Number(rangeEnd.slice(8, 10))))
                     .replace('{n}', String(rangeDays))}
                 </p>
-
-                {/* 予定ベース */}
-                <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
-                  {ja.mealPlan.rangeCostPlanLabel}
-                </p>
-                <p className="mt-0.5 text-2xl font-bold text-accent">
-                  約{rangeCostEstimate.total.toLocaleString()}円
-                  <span className="ml-2 text-sm font-bold text-ink-muted">
-                    （{ja.mealPlan.rangeCostMealCount.replace('{n}', String(rangePlanMealCount))}）
-                  </span>
-                </p>
-                <p className="mt-1 text-sm text-ink-muted">
-                  {ja.mealPlan.rangeCostResultAverage.replace('{n}', rangeAverageCost.toLocaleString())}
+                {/* どの日をどちらの基準で数えたかを必ず明示する(混在する期間＝当月などのため) */}
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {rangeSummary.actual.range && rangeSummary.plan.range
+                    ? ja.mealPlan.rangeBasisBoth
+                        .replace('{ps}', formatMonthDay(rangeSummary.actual.range.start))
+                        .replace('{pe}', formatMonthDay(rangeSummary.actual.range.end))
+                        .replace('{fs}', formatMonthDay(rangeSummary.plan.range.start))
+                        .replace('{fe}', formatMonthDay(rangeSummary.plan.range.end))
+                    : rangeSummary.actual.range
+                      ? ja.mealPlan.rangeBasisActualOnly
+                      : ja.mealPlan.rangeBasisPlanOnly}
                 </p>
 
-                {/* 実績ベース(作った記録) */}
-                <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                  {ja.mealPlan.rangeCostActualLabel}
-                </p>
-                {rangeActualCost.count > 0 ? (
-                  <p className="mt-0.5 text-lg font-bold text-accent">
-                    {ja.mealPlan.rangeCostActualResult
-                      .replace('{yen}', rangeActualCost.total.toLocaleString())
-                      .replace('{n}', String(rangeActualCost.count))
-                      .replace('{per}', rangeActualPerMeal.toLocaleString())}
+                {rangeSummary.actual.dishCount + rangeSummary.plan.dishCount === 0 ? (
+                  <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                    {ja.mealPlan.rangeIntakeEmpty}
                   </p>
                 ) : (
-                  <p className="mt-0.5 text-sm text-ink-muted">{ja.mealPlan.rangeCostActualEmpty}</p>
-                )}
-
-                {/* 摂取できた栄養(記録ベース・1食あたり・便BS・タスク3): 既存のPro8項目計算を流用し、
-                    期間内の記録の平均を「めやす／概算」表記で出す。栄養フラグ&&Pro(isNutritionUnlocked)
-                    かつ計算できた食数>0のときだけ表示する */}
-                {isNutritionUnlocked(isPro) && rangeNutrition.mealCount > 0 && (
-                  <div className="mt-[var(--space-md)]">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-bold text-ink-muted">
-                        {ja.mealPlan.rangeNutritionLabel}
-                      </p>
-                      <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
-                        {ja.nutrition.estimateBadge}
-                      </span>
-                    </div>
-                    <div
-                      className="mt-1 rounded-md border border-edge p-[var(--space-sm)]"
-                      style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
-                    >
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                        {PERIOD_NUTRIENT_ROWS.map(({ key, label }) => (
-                          <div key={key} className="flex items-baseline justify-between gap-2">
-                            <span className="text-sm">{label}</span>
-                            <span className="text-sm font-bold text-accent tabular-nums">
-                              {formatNutrient(key, rangeNutrition.perMeal[key])}
-                            </span>
+                  <>
+                    {/* 期間内に摂取できた栄養(1人分・便CA): 期間内の料理を1食ずつ足した合計。
+                        既存のPro8項目計算を流用し「めやす／概算」表記を厳守する。
+                        栄養フラグ&&Pro(isNutritionUnlocked)かつ計算できた品数>0のときだけ出す */}
+                    {isNutritionUnlocked(isPro) && rangeSummary.nutrition.dishCount > 0 && (
+                      <div className="mt-[var(--space-sm)]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-bold text-ink-muted">
+                            {ja.mealPlan.rangeIntakeNutritionLabel}
+                          </p>
+                          <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
+                            {ja.nutrition.estimateBadge}
+                          </span>
+                        </div>
+                        <div
+                          className="mt-1 rounded-md border border-edge p-[var(--space-sm)]"
+                          style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
+                        >
+                          {/* 期間合計は1食分より桁が大きく(1か月で数万kcal)、ラベルと値を横並びにすると
+                              375px幅で「エネルギー」が途中改行される。項目名の上に値を置く2段組にして
+                              桁が伸びても崩れないようにする(2026-07-28 便CA・視認性優先) */}
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                            {PERIOD_NUTRIENT_ROWS.map(({ key, label }) => (
+                              <div key={key} className="flex flex-col">
+                                <span className="text-xs text-ink-muted">{label}</span>
+                                <span className="text-sm font-bold text-accent tabular-nums">
+                                  {formatNutrient(key, rangeSummary.nutrition.total[key])}
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        </div>
+                        <p className="mt-1 text-xs text-ink-muted">
+                          {(rangeSummary.actual.nutrition.dishCount > 0 &&
+                          rangeSummary.plan.nutrition.dishCount > 0
+                            ? ja.mealPlan.rangeIntakeNutritionCountBoth
+                            : rangeSummary.actual.nutrition.dishCount > 0
+                              ? ja.mealPlan.rangeIntakeNutritionCountActual
+                              : ja.mealPlan.rangeIntakeNutritionCountPlan
+                          )
+                            .replace('{a}', String(rangeSummary.actual.nutrition.dishCount))
+                            .replace('{p}', String(rangeSummary.plan.nutrition.dishCount))}
+                        </p>
+                        {rangeSummary.nutrition.excludedDishCount > 0 && (
+                          <p className="mt-0.5 text-xs text-ink-muted">
+                            {ja.mealPlan.rangeIntakeNutritionExcluded.replace(
+                              '{n}',
+                              String(rangeSummary.nutrition.excludedDishCount),
+                            )}
+                          </p>
+                        )}
+                        {/* 量が書いてあるのに計算できなかった材料があるレシピは、合計を静かに下げる。
+                            既にある「除いた品数」の明示と同じ作法で件数を出す(2026-07-28 便BY/NUT-01) */}
+                        {rangeSummary.nutrition.partialDishCount > 0 && (
+                          <p className="mt-0.5 text-xs font-bold text-warning">
+                            {ja.mealPlan.rangeIntakeNutritionPartial.replace(
+                              '{n}',
+                              String(rangeSummary.nutrition.partialDishCount),
+                            )}
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
+                        <p className="mt-0.5 text-xs text-ink-muted">
+                          {ja.nutrition.sourcePrefix}
+                          {nutritionSourceName()}
+                          {'　'}
+                          {ja.nutrition.sourceCommercialNote}
+                        </p>
                       </div>
-                    </div>
-                    <p className="mt-1 text-xs text-ink-muted">
-                      {ja.mealPlan.rangeNutritionMealCount.replace('{n}', String(rangeNutrition.mealCount))}
+                    )}
+
+                    {/* 期間内の食費(1人分・便CA): 栄養と同じ数え方＝料理1品につき1人分の金額を1回足す */}
+                    <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                      {ja.mealPlan.rangeIntakePersonalCostLabel}
                     </p>
-                    {rangeNutrition.excludedMealCount > 0 && (
-                      <p className="mt-0.5 text-xs text-ink-muted">
-                        {ja.mealPlan.rangeNutritionExcluded.replace(
-                          '{n}',
-                          String(rangeNutrition.excludedMealCount),
-                        )}
-                      </p>
-                    )}
-                    {/* 量が書いてあるのに計算できなかった材料があるレシピは、平均を静かに下げる。
-                        既にある「除いた食数」の明示と同じ作法で件数を出す(2026-07-28 便BY/NUT-01) */}
-                    {rangeNutrition.partialMealCount > 0 && (
-                      <p className="mt-0.5 text-xs font-bold text-warning">
-                        {ja.mealPlan.rangeNutritionPartial.replace(
-                          '{n}',
-                          String(rangeNutrition.partialMealCount),
-                        )}
-                      </p>
-                    )}
-                    <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
+                    <p className="mt-0.5 text-2xl font-bold text-accent">
+                      約{rangeSummary.personalYen.toLocaleString()}円
+                    </p>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      {ja.mealPlan.rangeIntakePersonalCostPerDay.replace(
+                        '{n}',
+                        rangePersonalPerDay.toLocaleString(),
+                      )}
+                    </p>
                     <p className="mt-0.5 text-xs text-ink-muted">
-                      {ja.nutrition.sourcePrefix}
-                      {nutritionSourceName()}
-                      {'　'}
-                      {ja.nutrition.sourceCommercialNote}
+                      {ja.mealPlan.rangeIntakeCostBreakdown
+                        .replace('{a}', rangeSummary.actual.personalYen.toLocaleString())
+                        .replace('{an}', String(rangeSummary.actual.dishCount))
+                        .replace('{p}', rangeSummary.plan.personalYen.toLocaleString())
+                        .replace('{pn}', String(rangeSummary.plan.dishCount))}
                     </p>
-                  </div>
+
+                    {/* 作った食数の合算(全体食費)はオーナー指示で残す。家族全員分の金額と延べ食数 */}
+                    {rangeSummary.cookedMealCount > 0 && (
+                      <>
+                        <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                          {ja.mealPlan.rangeIntakeHouseholdLabel}
+                        </p>
+                        <p className="mt-0.5 text-lg font-bold text-accent">
+                          {ja.mealPlan.rangeIntakeHouseholdResult
+                            .replace('{yen}', rangeSummary.cookedHouseholdYen.toLocaleString())
+                            .replace('{n}', String(rangeSummary.cookedMealCount))}
+                        </p>
+                      </>
+                    )}
+                  </>
                 )}
 
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.weekCostNote}</p>
