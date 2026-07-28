@@ -3015,6 +3015,145 @@ try {
     }
   }
 
+  // --- FOCUS-KEEP-01 / FOCUS-BACK-01 / FOCUS-OTHER-01:
+  // 2026-07-28 機能④診断(第3群 複数品同時進行)の再発防止。
+  //  (1) C3 調理中モードを閉じて開き直したら、閉じた手順から再開する(毎回手順1に戻らない)。
+  //      「完成！」のあとと、別レシピへ移った後は手順1に戻す。
+  //  (2) C11 端末の「戻る」で調理中モードだけが閉じる(レシピ一覧まで離脱しない)。
+  //  (3) C4/C8 他の料理のタイマーも調理中モードの中に料理名つきで出て、タップで停止・±調整できる。
+  currentCheck = 'FOCUS-KEEP-01'
+  {
+    const fkBrowser = await chromium.launch()
+    try {
+      const fkContext = await fkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const fkPage = await fkContext.newPage()
+      const fkFocus = fkPage.locator('.fixed.inset-0.z-50')
+      const fkStep = () => fkFocus.locator('text=/手順 \\d+\\/\\d+/').first().textContent()
+      const fkOpen = async (name) => {
+        await fkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await fkPage.waitForTimeout(1200)
+        await fkPage.getByPlaceholder('料理名・材料・タグで検索').fill(name)
+        await fkPage.waitForTimeout(500)
+        await fkPage.getByText(name, { exact: true }).first().click()
+        await fkPage.waitForTimeout(700)
+      }
+      await fkOpen('肉じゃが')
+      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.waitForTimeout(500)
+      for (let i = 0; i < 2; i++) {
+        await fkFocus.getByRole('button', { name: '次へ' }).click()
+        await fkPage.waitForTimeout(250)
+      }
+      const beforeClose = await fkStep()
+      await fkFocus.getByRole('button', { name: '閉じる' }).first().click()
+      await fkPage.waitForTimeout(500)
+      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.waitForTimeout(500)
+      const afterReopen = await fkStep()
+      check(
+        'FOCUS-KEEP-01 閉じて開き直しても閉じた手順から再開する(毎回手順1に戻らない)',
+        beforeClose === '手順 3/4' && afterReopen === beforeClose,
+        `閉じる前=${beforeClose} 開き直し=${afterReopen}`,
+      )
+
+      // (2) C11 端末の戻る: 1回目は調理中モードだけが閉じ、URLは詳細のまま
+      currentCheck = 'FOCUS-BACK-01'
+      await fkPage.goBack()
+      await fkPage.waitForTimeout(700)
+      const backState = {
+        hash: fkPage.url().split('#')[1] ?? '',
+        overlays: await fkPage.locator('.fixed.inset-0.z-50').count(),
+      }
+      check(
+        'FOCUS-BACK-01 端末の「戻る」で調理中モードだけが閉じる(レシピ一覧まで離脱しない)',
+        backState.overlays === 0 && backState.hash.startsWith('/recipes/'),
+        JSON.stringify(backState),
+      )
+      await fkPage.goBack()
+      await fkPage.waitForTimeout(700)
+      check(
+        'FOCUS-BACK-01 もう一度「戻る」で従来どおりレシピ一覧へ戻る',
+        (fkPage.url().split('#')[1] ?? '').startsWith('/recipes') &&
+          !(fkPage.url().split('#')[1] ?? '').match(/^\/recipes\/\d/),
+        fkPage.url(),
+      )
+
+      // (1続き) 「完成！」のあとは手順1に戻る
+      currentCheck = 'FOCUS-KEEP-01'
+      await fkOpen('肉じゃが')
+      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.waitForTimeout(500)
+      check(
+        'FOCUS-KEEP-01 別のレシピを経由して開き直した場合は手順1から',
+        (await fkStep()) === '手順 1/4',
+        await fkStep(),
+      )
+      for (let i = 0; i < 5; i++) {
+        const next = fkFocus.getByRole('button', { name: '次へ' })
+        if (!(await next.isVisible().catch(() => false))) break
+        await next.click()
+        await fkPage.waitForTimeout(200)
+      }
+      await fkFocus.getByRole('button', { name: '完成！' }).click()
+      await fkPage.waitForTimeout(700)
+      await fkPage
+        .getByRole('dialog', { name: '作った記録をつける' })
+        .getByRole('button', { name: '閉じる' })
+        .first()
+        .click()
+      await fkPage.waitForTimeout(400)
+      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.waitForTimeout(500)
+      check(
+        'FOCUS-KEEP-01 「完成！」のあとに開き直すと手順1から始まる',
+        (await fkStep()) === '手順 1/4',
+        await fkStep(),
+      )
+      await fkFocus.getByRole('button', { name: '閉じる' }).first().click()
+      await fkPage.waitForTimeout(400)
+
+      // (3) C4/C8 他レシピのタイマー
+      currentCheck = 'FOCUS-OTHER-01'
+      await fkOpen('肉じゃが')
+      await fkPage.getByRole('button', { name: '15分 タイマー開始' }).click()
+      await fkPage.waitForTimeout(500)
+      await fkOpen('カレーライス')
+      await fkPage.getByText('調理中モードで見る').click()
+      await fkPage.waitForTimeout(700)
+      const otherPills = await fkPage.evaluate(() =>
+        Array.from(
+          document.querySelector('.fixed.inset-0.z-50').querySelectorAll('div.inline-flex.rounded-full'),
+        ).map((p) => p.textContent.replace(/\s+/g, ' ').trim()),
+      )
+      check(
+        'FOCUS-OTHER-01 別の料理のタイマーも調理中モードの中に出る(覆い隠されない)',
+        otherPills.length >= 1,
+        JSON.stringify(otherPills),
+      )
+      check(
+        'FOCUS-OTHER-01 別の料理の分は料理名が併記され、どれの残り時間か分かる',
+        otherPills.some((t) => t.includes('肉じゃが')),
+        JSON.stringify(otherPills),
+      )
+      await fkFocus.getByRole('button', { name: /のタイマーを調整/ }).first().click()
+      await fkPage.waitForTimeout(400)
+      const otherDialog = fkPage.getByRole('dialog', { name: 'タイマーを調整' })
+      check(
+        'FOCUS-OTHER-01 別の料理のタイマーをタップすると調整の窓が開く(手順の誤ジャンプをしない)',
+        (await otherDialog.isVisible()) && (await otherDialog.textContent()).includes('肉じゃが'),
+        await otherDialog.textContent().catch(() => 'なし'),
+      )
+      await otherDialog.getByRole('button', { name: '停止' }).click()
+      await fkPage.waitForTimeout(400)
+      check(
+        'FOCUS-OTHER-01 調理中モードから出ずに別の料理のタイマーを停止できる',
+        (await fkFocus.getByRole('button', { name: /のタイマーを調整/ }).count()) === 0,
+      )
+    } finally {
+      await fkBrowser.close()
+    }
+  }
+
   // --- FOCUS-NOTICE-01: 初回のタイマー注意書きを、調理中モードから初めて起動した場合でも
   // 見える場所に出す(2026-07-28 機能④診断C7)。まっさらなプロファイルで、常駐バーを覆う
   // 全画面の中に同じ案内が現れることを確認する ---

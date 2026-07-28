@@ -36,7 +36,12 @@ type Props = {
   recipe: Recipe
   recipeId: number
   initialStep: number
-  onClose: () => void
+  /**
+   * 閉じるとき。引数は「閉じた時点で見ていた手順のindex」(2026-07-28 機能④診断C3)。
+   * 呼び出し元がこれを覚えておくことで、材料を見に一度戻ってから開き直しても
+   * 手順1に巻き戻らない。手順が無い等で引数なしで呼ばれたときは先頭扱いでよい。
+   */
+  onClose: (lastStep?: number) => void
   /** 最終手順の「完成！」を押したとき(未指定ならonCloseと同じ)。作った記録への導線に使う */
   onComplete?: () => void
 }
@@ -92,9 +97,17 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   // 調理中モードは全画面表示で常駐タイマー(TimerBar)を覆い隠してしまうため、
   // 動作中のタイマーをここにも表示する(押しても反応が無いように見える不具合の対策)。
-  // 並び順(2026-07-28 機能④診断C6): 終わったもの→残りが少ない順。起動順のままだと
-  // 先に鳴るタイマーが端に来ることがあり、毎回数字を読み比べる必要があった
-  const recipeTimers = sortTimersForDisplay(timers.filter((t) => t.recipeId === recipeId))
+  //
+  // 2026-07-28 機能④診断C4/C8: 以前は「この料理のタイマー」だけに絞っていたため、
+  // 2〜3品を同時に進めているとき、他の料理のタイマーは残り時間も「終わり」表示も見えず
+  // ±調整も停止もできなかった(常駐バーは覆われている)。全部を出して、他の料理の分は
+  // 料理名を併記する。全画面をやめる・レシピ切替タブを足すといった構造は変えない。
+  //
+  // 並び順: この料理の分が先、そのあと終わったもの→残りが少ない順(機能④診断C6)。
+  // 起動順のままだと先に鳴るタイマーが端に来ることがあり、毎回数字を読み比べる必要があった
+  const shownTimers = sortTimersForDisplay(timers).sort(
+    (a, b) => Number(b.recipeId === recipeId) - Number(a.recipeId === recipeId),
+  )
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
 
   // じぶんタイマーの既定値(秒刻み対応・2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、
@@ -156,6 +169,32 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
 
   // モードを閉じるとき・切り替え中は読み上げを止める
   useEffect(() => stopSpeech, [])
+
+  // 端末の「戻る」で調理中モードだけを閉じる(2026-07-28 機能④診断C11)。
+  // このモードは画面(ルート)ではなくレシピ詳細の上に重なるだけなので、以前は
+  // Androidの戻るジェスチャ・iOSの端スワイプで詳細ページごとレシピ一覧まで戻ってしまい、
+  // 復帰に「一覧→レシピ→調理中モード→次へ連打」が必要だった。
+  // 開いている間だけ履歴を1つ積み、戻る操作はその1つを消費して閉じるだけに留める。
+  // ✕や「完成！」で閉じたときは積んだ履歴を自分で戻して残さない。
+  const closeRef = useRef(onClose)
+  useEffect(() => {
+    closeRef.current = onClose
+  }, [onClose])
+  useEffect(() => {
+    window.history.pushState({ uchiFocusMode: true }, '')
+    const onPopState = () => {
+      // 戻る操作で既に履歴は消費済み。ここでは閉じるだけ(自分で history.back しない)
+      closeRef.current(indexRef.current)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => {
+      window.removeEventListener('popstate', onPopState)
+      // 自分で閉じた場合だけ、積んだ履歴エントリを取り除く
+      if ((window.history.state as { uchiFocusMode?: boolean } | null)?.uchiFocusMode) {
+        window.history.back()
+      }
+    }
+  }, [])
 
   // 読み上げを一度使ったら、手順が切り替わるたびに自動で読み上げる
   // (indexが変わった直後の再レンダリングで実行されるので、その時点の最新stepを読む)
@@ -302,7 +341,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       <div className="flex items-center justify-between px-[var(--space-md)] py-[var(--space-sm)]">
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => onClose(index)}
           aria-label={ja.focus.close}
           className="rounded-full p-3 text-ink-muted"
         >
@@ -355,46 +394,59 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋じぶんタイマー起動ボタン(2026-07-12・入口B)。
           タイマーが無い時も「じぶんタイマー」ボタンの置き場所として常に表示する */}
       <div className="flex max-h-[30vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1">
-        {recipeTimers.map((t) => (
-          <div
-            key={t.id}
-            className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
-              t.done ? 'animate-pulse border-warning text-warning' : 'border-accent text-accent'
-            } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''}`}
-          >
-            <button
-              type="button"
-              onClick={() => (t.done ? goTo(t.stepNumber - 1) : setAdjustingId(t.id))}
-              aria-label={
-                t.done
-                  ? ja.timer.stepLabel.replace('{n}', String(t.stepNumber))
-                  : ja.timer.adjustOpenAria.replace(
-                      '{label}',
-                      t.stepNumber > 0
-                        ? `${t.label}・${ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}`
-                        : t.label,
-                    )
-              }
-              className="flex items-center gap-1.5"
+        {shownTimers.map((t) => {
+          const isThisRecipe = t.recipeId === recipeId
+          // この料理の手順タイマー以外は、どれの時間か分かるよう名前を併記する
+          // (他の料理=料理名 / この料理のじぶんタイマー=「じぶんタイマー」。機能④診断C4・C19)
+          const showLabel = !isThisRecipe || t.stepNumber === 0
+          const fullLabel =
+            t.stepNumber > 0
+              ? `${t.label}・${ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}`
+              : t.label
+          // この料理の終わったタイマーだけ、タップでその手順へ戻る(他の料理の手順番号へは飛べない)。
+          // それ以外は調整の窓を開く=残り時間の±も停止も、調理中モードから出ずにできる
+          const jumpsToStep = t.done && isThisRecipe && t.stepNumber > 0
+          return (
+            <div
+              key={t.id}
+              className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
+                t.done ? 'animate-pulse border-warning text-warning' : 'border-accent text-accent'
+              } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''} ${
+                isThisRecipe ? '' : 'opacity-90'
+              }`}
             >
-              <StepBadge number={t.stepNumber > 0 ? t.stepNumber : 'custom'} size={24} />
-              {/* 終了の合図(2026-07-28 機能④診断C5): 常駐バー(TimerBar)と同じベル+点滅にそろえる。
-                  以前は色が変わるだけの静止ピルで、音を聞き逃すと画面上の手掛かりが実質無かった */}
-              {t.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
-              <span className="text-lg font-bold tabular-nums">
-                {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => dismissTimer(t.id)}
-              aria-label={ja.timer.dismiss}
-              className="rounded-full p-1.5"
-            >
-              <X size={16} aria-hidden />
-            </button>
-          </div>
-        ))}
+              <button
+                type="button"
+                onClick={() => (jumpsToStep ? goTo(t.stepNumber - 1) : setAdjustingId(t.id))}
+                aria-label={
+                  jumpsToStep
+                    ? ja.timer.stepLabel.replace('{n}', String(t.stepNumber))
+                    : ja.timer.adjustOpenAria.replace('{label}', fullLabel)
+                }
+                className="flex min-w-0 items-center gap-1.5"
+              >
+                <StepBadge number={t.stepNumber > 0 ? t.stepNumber : 'custom'} size={24} />
+                {/* 終了の合図(2026-07-28 機能④診断C5): 常駐バー(TimerBar)と同じベル+点滅にそろえる。
+                    以前は色が変わるだけの静止ピルで、音を聞き逃すと画面上の手掛かりが実質無かった */}
+                {t.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
+                {showLabel && (
+                  <span className="max-w-24 truncate text-xs font-bold">{t.label}</span>
+                )}
+                <span className="text-lg font-bold tabular-nums">
+                  {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => dismissTimer(t.id)}
+                aria-label={ja.timer.dismiss}
+                className="shrink-0 rounded-full p-1.5"
+              >
+                <X size={16} aria-hidden />
+              </button>
+            </div>
+          )
+        })}
         <button
           type="button"
           onClick={openCustomTimer}
@@ -530,7 +582,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         {index === total - 1 ? (
           <button
             type="button"
-            onClick={onComplete ?? onClose}
+            onClick={() => (onComplete ? onComplete() : onClose(0))}
             className="flex flex-1 items-center justify-center gap-1 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
           >
             <Check size={22} aria-hidden />
