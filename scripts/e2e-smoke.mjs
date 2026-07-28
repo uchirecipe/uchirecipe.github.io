@@ -811,9 +811,9 @@ try {
   await page.getByRole('tab', { name: 'くわしく' }).click()
   await page.waitForTimeout(200)
   await page
-    .getByPlaceholder('こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に')
+    .getByPlaceholder('例: 味噌は煮立てると香りが飛ぶので最後に')
     .fill('E2E確認用のワンポイント本文')
-  await page.getByPlaceholder('気づいたこと・アレンジなどを自由に').fill('E2E確認用のメモ本文')
+  await page.getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる').fill('E2E確認用のメモ本文')
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
   // 本文はMemoText(改行エンジン)経由でZWSPが挿入されるため、素のincludesでは一致しない。stripZwspで除去してから照合する
@@ -844,9 +844,9 @@ try {
   await page.getByRole('tab', { name: 'くわしく' }).click()
   await page.waitForTimeout(200)
   const onePointEditValue = await page
-    .getByPlaceholder('こつ・知識など。例: 味噌は煮立てると香りが飛ぶので最後に')
+    .getByPlaceholder('例: 味噌は煮立てると香りが飛ぶので最後に')
     .inputValue()
-  const memoEditValue = await page.getByPlaceholder('気づいたこと・アレンジなどを自由に').inputValue()
+  const memoEditValue = await page.getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる').inputValue()
   check(
     'ONEPOINT-01 編集画面のワンポイント欄に保存内容が復元される',
     onePointEditValue === 'E2E確認用のワンポイント本文',
@@ -6426,7 +6426,7 @@ try {
       check('FORMTABS-01b くわしくタブが空のうちは●が出ない', dotBefore === 0)
       await ftPage.getByRole('tab', { name: 'くわしく' }).click()
       await ftPage.waitForTimeout(200)
-      await ftPage.getByPlaceholder('気づいたこと・アレンジなどを自由に').fill('E2Eタブ確認メモ')
+      await ftPage.getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる').fill('E2Eタブ確認メモ')
       await ftPage.waitForTimeout(200)
       const dotAfter = await ftPage.locator('[aria-label="入力済みの項目があります"]').count()
       check('FORMTABS-01b くわしくに入力があると見出し右に●が出る', dotAfter > 0)
@@ -6449,7 +6449,7 @@ try {
       await ftPage.getByRole('tab', { name: 'くわしく' }).click()
       await ftPage.waitForTimeout(200)
       const memoBeforeSwitch = await ftPage
-        .getByPlaceholder('気づいたこと・アレンジなどを自由に')
+        .getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる')
         .inputValue()
       check(
         'FORMTABS-01d くわしくタブへ戻るとメモの入力内容がまだ残っている(切替前確認)',
@@ -6460,7 +6460,7 @@ try {
       await ftPage.getByRole('tab', { name: 'くわしく' }).click()
       await ftPage.waitForTimeout(200)
       const memoAfterSwitch = await ftPage
-        .getByPlaceholder('気づいたこと・アレンジなどを自由に')
+        .getByPlaceholder('例: 冷蔵で3日。温め直すときはしっかり沸騰させる')
         .inputValue()
       check(
         'FORMTABS-01d かんたん→くわしくと切り替えてもメモの入力内容が残っている(state維持)',
