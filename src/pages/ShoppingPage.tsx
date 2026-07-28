@@ -24,6 +24,7 @@ import {
   toggleShoppingChecked,
   setAllShoppingChecked,
   removeShoppingItem,
+  restoreShoppingItem,
   completeShopping,
 } from '../db/shopping'
 import {
@@ -34,6 +35,7 @@ import {
 } from '../logic/shopping'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import type { SearchResult } from '../logic/search'
+import type { ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
 import { ja } from '../i18n/ja'
@@ -129,6 +131,12 @@ export default function ShoppingPage() {
 
   // 操作結果のトースト(2026-07-23 #4/#9。既存のToast+setMessageパターンを流用)
   const [message, setMessage] = useState('')
+  // ✕で消した項目の取り消し(2026-07-29 便CC/C19)。次のトーストが出たら取り消しは無効にする
+  const [undoRemoved, setUndoRemoved] = useState<ShoppingItem | null>(null)
+  const showToast = (text: string) => {
+    setUndoRemoved(null)
+    setMessage(text)
+  }
 
   const visibleRecipes = useMemo(() => {
     if (!recipes) return []
@@ -224,7 +232,7 @@ export default function ShoppingPage() {
       // 「買い物メモ」タブを開いた状態で迎える(在庫タブのまま候補が見えない事故を防ぐ)
       setActiveTab('memo')
     } else if (requested.length > 0) {
-      setMessage(ja.shopping.fromMealPlanNotFoundToast)
+      showToast(ja.shopping.fromMealPlanNotFoundToast)
     }
     // 値が空(?recipeIds=)でもURLからは必ず消す(従来は早期returnでパラメータが残り続けていた)
     setSearchParams(
@@ -266,7 +274,7 @@ export default function ShoppingPage() {
     setPickerOpen(false)
     setPickerCounts({})
     setPickerQuery('')
-    setMessage(ja.shopping.candidatesMadeToast)
+    showToast(ja.shopping.candidatesMadeToast)
     setScrollToCandidates(true) // 生成した下書きへ自動スクロール(#13)
   }
 
@@ -280,7 +288,7 @@ export default function ShoppingPage() {
     if (chosen.length === 0) return
     await addConfirmedItems(chosen.map(({ name, amount, recipeIds }) => ({ name, amount, recipeIds })))
     setCandidates(null)
-    setMessage(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
+    showToast(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
   }
 
   // 下書きの取り消し(2026-07-29 便CC/C2)。従来は確認ゼロで即消えていた
@@ -289,7 +297,22 @@ export default function ShoppingPage() {
     const ok = window.confirm(ja.shopping.discardConfirm.replace('{n}', String(candidates.length)))
     if (!ok) return
     setCandidates(null)
-    setMessage(ja.shopping.discardedToast)
+    showToast(ja.shopping.discardedToast)
+  }
+
+  // ✕の削除(2026-07-29 便CC/C19): 確認で止めず、消してから取り消せるようにする
+  // (買い物中に片手・カートを押しながら触る画面なので、毎回の確認は邪魔になる)
+  const removeMemoItem = async (item: ShoppingItem) => {
+    await removeShoppingItem(item.id!)
+    setUndoRemoved(item)
+    setMessage(ja.shopping.removedToast.replace('{name}', item.name))
+  }
+  const undoRemoveMemoItem = async () => {
+    if (!undoRemoved) return
+    const restored = undoRemoved
+    setUndoRemoved(null)
+    await restoreShoppingItem(restored)
+    setMessage(ja.shopping.restoredToast.replace('{name}', restored.name))
   }
 
   // 手動追加
@@ -342,14 +365,14 @@ export default function ShoppingPage() {
   // 背景タップ・Escでも閉じられるが、それが分かる導線がボタンとして無かった
   const completeLater = () => {
     setCompleteOpen(false)
-    setMessage(ja.shopping.completeLaterToast)
+    showToast(ja.shopping.completeLaterToast)
   }
 
   const runComplete = async (reflect: boolean) => {
     await completeShopping(checkedItems, reflect)
     setCompleteOpen(false)
     // 反映する/しないどちらでもトースト(2026-07-23 #9)
-    setMessage(reflect ? ja.shopping.completeReflectedToast : ja.shopping.completeDoneToast)
+    showToast(reflect ? ja.shopping.completeReflectedToast : ja.shopping.completeDoneToast)
   }
 
   // 買い物候補の説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉
@@ -444,11 +467,12 @@ export default function ShoppingPage() {
                       <span className="font-bold">{item.name}</span>
                       {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
                     </div>
+                    {/* 料理中・買い物中に片手で触るので44px確保(2026-07-29 便CC/C19。旧34px) */}
                     <button
                       type="button"
-                      onClick={() => void removeShoppingItem(item.id!)}
+                      onClick={() => void removeMemoItem(item)}
                       aria-label={ja.shopping.remove}
-                      className="rounded-full p-2 text-ink-muted"
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
                     >
                       <X size={18} aria-hidden />
                     </button>
@@ -458,30 +482,33 @@ export default function ShoppingPage() {
             </>
           )}
 
-          {/* 手動追加 */}
-          <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
+          {/* 手動追加。1行に3つ並べると390px幅で分量欄が約94pxしか取れず
+              プレースホルダが「分量（任」で切れていたため2行に分ける(2026-07-29 便CC/C20) */}
+          <div className="mt-[var(--space-md)] flex flex-col gap-[var(--space-sm)]">
             <input
               type="text"
               value={manualName}
               onChange={(e) => setManualName(e.target.value)}
               placeholder={ja.shopping.manualPlaceholder}
-              className="min-w-0 flex-[2] rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+              className="w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
             />
-            <input
-              type="text"
-              value={manualAmount}
-              onChange={(e) => setManualAmount(e.target.value)}
-              placeholder={ja.shopping.manualAmountPlaceholder}
-              className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
-            />
-            <button
-              type="button"
-              onClick={() => void addManual()}
-              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
-            >
-              <Plus size={18} aria-hidden />
-              {ja.shopping.manualAdd}
-            </button>
+            <div className="flex gap-[var(--space-sm)]">
+              <input
+                type="text"
+                value={manualAmount}
+                onChange={(e) => setManualAmount(e.target.value)}
+                placeholder={ja.shopping.manualAmountPlaceholder}
+                className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+              />
+              <button
+                type="button"
+                onClick={() => void addManual()}
+                className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-4 py-3 font-bold text-accent shadow-sm"
+              >
+                <Plus size={18} aria-hidden />
+                {ja.shopping.manualAdd}
+              </button>
+            </div>
           </div>
 
           {/* 買い物完了 */}
@@ -790,8 +817,14 @@ export default function ShoppingPage() {
                       }`}
                     >
                       {/* 品目名下の「◯人分レシピ」表記は削除(2026-07-24 実機FB #9) */}
+                      {/* 似た名前が「鶏むね肉のレモンペッ…」で切れて区別できないため、
+                          2行まで折り返す(2026-07-29 便CC/C20) */}
                       <div className="min-w-0 flex-1">
-                        <span className={`block truncate font-bold ${selected ? 'text-accent' : ''}`}>
+                        <span
+                          className={`block line-clamp-2 break-words font-bold ${
+                            selected ? 'text-accent' : ''
+                          }`}
+                        >
                           {recipe.title}
                         </span>
                       </div>
@@ -841,7 +874,15 @@ export default function ShoppingPage() {
         </div>
       )}
 
-      <Toast message={message} onClose={() => setMessage('')} />
+      <Toast
+        message={message}
+        onClose={() => {
+          setMessage('')
+          setUndoRemoved(null)
+        }}
+        actionLabel={undoRemoved ? ja.common.undo : undefined}
+        onAction={undoRemoved ? () => void undoRemoveMemoItem() : undefined}
+      />
     </div>
   )
 }

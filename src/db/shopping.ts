@@ -108,6 +108,14 @@ export async function removeShoppingItem(id: number): Promise<void> {
 }
 
 /**
+ * ✕で消した項目を元に戻す（2026-07-29 便CC/C19）。
+ * 削除したばかりのidはまだ空いているので、同じidで書き戻して並び順もそのまま復元する。
+ */
+export async function restoreShoppingItem(item: ShoppingItem): Promise<void> {
+  await db.shoppingItems.put(item)
+}
+
+/**
  * 買い物完了: チェック済みの項目を削除する。
  * reflectToPantry が true なら、チェックした食材を在庫「ある」に反映する
  * （2026-07-23 #8: 在庫ボードに未登録の食材は新しくチップを作って反映する）。
