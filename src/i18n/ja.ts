@@ -441,7 +441,10 @@ export const ja = {
     themeBrown: 'ブラウン',
     themeGreen: 'グリーン',
     timerSoundTitle: 'タイマー音',
-    timerSoundDescription: 'タイマー終了時に音を鳴らします（各タイマーごとの消音は常駐バーの🔔で切り替えられます）',
+    // 2026-07-28 機能④診断C5: 振動を音のON/OFFから切り離したので、消音しても振動で
+    // 知らせることを明記する（夜間・子どもが寝ているときに音だけ切る使い方に応える）
+    timerSoundDescription:
+      'タイマー終了時に音を鳴らします（各タイマーごとの消音は常駐バーの🔔で切り替えられます）。音を消しても、振動に対応した端末では振動でお知らせします',
     timerWakeLockTitle: 'タイマー中は画面を暗くしない',
     timerWakeLockDescription: 'タイマーが1本でも動いている間、どの画面を見ていても自動消灯を防ぎます（対応ブラウザのみ）',
     weeklyBudgetTitle: '週の食費予算（円・任意）',
