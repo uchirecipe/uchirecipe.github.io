@@ -767,7 +767,7 @@ function RecipeFormInner() {
       }
       const alsoAppliedNote =
         alsoApplied.length > 0
-          ? ` ${ja.urlImport.alsoApplied.replace(
+          ? `。${ja.urlImport.alsoApplied.replace(
               '{items}',
               alsoApplied.join(ja.urlImport.alsoAppliedSeparator),
             )}`
