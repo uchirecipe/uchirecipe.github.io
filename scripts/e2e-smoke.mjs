@@ -6923,11 +6923,98 @@ try {
                 }),
               })
             }
+            // photo-fail-marker: imageUrlはあるが画像プロキシが画像を返さない(=写真だけ取れない)
+            // ケース。「photo-marker」を含まないURLなので上の/image分岐は400を返す。
+            // 便BX/C01: 従来は完全に無言だったのを、控えめなトーストで伝えることの回帰防止
+            if (target.includes('photo-fail-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: '写真だけ失敗する鍋',
+                    ingredients: [{ name: '鶏もも肉', amount: '300g' }],
+                    steps: ['鶏肉を切る'],
+                    imageUrl: 'https://example.com/not-an-image.html',
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
+            // group-marker: 味の素パーク相当のグループ記号(「A水」)+ グループ見出し行 +
+            // 手順に紛れ込んだSNS名の行。便BX/C07(ゴミ行除去の経路統一)・C08(グループの引き継ぎ)
+            if (target.includes('group-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: 'グループ記号レシピ',
+                    ingredients: [
+                      { name: 'じゃがいも', amount: '3個' },
+                      { name: '水', amount: '2カップ', group: 'A' },
+                      { name: '関連レシピ' },
+                      { name: '合わせ調味料' },
+                      { name: 'しょうゆ', amount: '大さじ2' },
+                    ],
+                    steps: ['じゃがいもを切る', 'Instagram', '煮込む'],
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
+            // amountless-marker: 分量が読み取れない材料を含むケース(便BX/C09ライト版)
+            if (target.includes('amountless-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: '分量不明レシピ',
+                    ingredients: [
+                      { name: 'じゃがいも', amount: '3個' },
+                      { name: '塩こしょう' },
+                      { name: 'パセリ' },
+                    ],
+                    steps: ['じゃがいもを切る', '炒める'],
+                    sourceUrl: target,
+                  },
+                }),
+              })
+            }
             if (target.includes('fetch-failed-marker')) {
               return route.fulfill({
                 status: 200,
                 contentType: 'application/json',
                 body: JSON.stringify({ ok: false, error: 'fetch_failed' }),
+              })
+            }
+            // 便BX/C05: Workerが上流ステータスを添えて返すケース。404(ページが無い)と
+            // 403(サイト側の拒否)と一時障害で案内文が変わることの回帰防止
+            if (target.includes('notfound-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'fetch_failed', status: 404 }),
+              })
+            }
+            if (target.includes('blocked-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'fetch_failed', status: 403 }),
+              })
+            }
+            // 便BX/C04: Workerは形式不正のURLをHTTP400+invalid_urlで返す。app側が本文を読む前に
+            // 打ち切っていたため「URLの形式」の案内が本番で一度も出ていなかった回帰の防止
+            if (target.includes('invalid-url-marker')) {
+              return route.fulfill({
+                status: 400,
+                contentType: 'application/json',
+                body: JSON.stringify({ ok: false, error: 'invalid_url' }),
               })
             }
             return route.fulfill({
@@ -7024,10 +7111,12 @@ try {
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/no-recipe-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(500)
+        // 便BX/C10: サイト単位で「非対応」と断定しない(判定はページ単位)。同じサイトの
+        // 別ページなら取り込めることと、貼り付け欄への導線の両方を伝える
         check(
-          'URLIMPORT-03 no_recipe時は貼り付け欄への案内文言が出る',
+          'URLIMPORT-03 no_recipe時はページ単位の言い回し+貼り付け欄への案内が出る',
           (await uiPage.textContent('body')).includes(
-            'このサイトは自動取り込みに対応していません。ページの文章をコピーして、下の貼り付け欄をお使いください',
+            'このページからはレシピを読み取れませんでした。同じサイトの別のページなら取り込めることがあります。ページの文章をコピーして、下の貼り付け欄をお使いいただくこともできます',
           ),
         )
 
@@ -7041,10 +7130,43 @@ try {
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(500)
         check(
-          'URLIMPORT-04 fetch_failed時は時間をおいて/貼り付けを促す文言が出る',
+          'URLIMPORT-04 fetch_failed(一時障害)時は待ち時間の目安つきで再試行を促す',
           (await uiPage.textContent('body')).includes(
-            '読み込めませんでした。時間をおいて試すか、貼り付けをお使いください',
+            '読み込めませんでした。数分おいてからもう一度お試しください。急ぐときは下の貼り付け欄もお使いいただけます',
           ),
+        )
+
+        // --- URLIMPORT-04b(便BX/C04・C05): 404・403・形式不正でそれぞれ違う案内が出る ---
+        currentCheck = 'URLIMPORT-04b'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/notfound-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        const notFoundBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-04b 上流404は「ページが見つかりません」でURL確認を促す(時間をおいて、とは言わない)',
+          notFoundBody.includes('ページが見つかりません。URLを確認してください') &&
+            !notFoundBody.includes('数分おいてから'),
+        )
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/blocked-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        const blockedBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-04b 上流403は再試行を勧めず貼り付けへ案内する',
+          blockedBody.includes(
+            'このページは自動での読み込みを受け付けていませんでした。ページの文章をコピーして、下の貼り付け欄をお使いください',
+          ) && !blockedBody.includes('数分おいてから'),
+        )
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/invalid-url-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500)
+        check(
+          'URLIMPORT-04b HTTP400+invalid_urlはURLの形式の案内が出る(死に文言だったものが到達する)',
+          (await uiPage.textContent('body')).includes('URLの形式が正しいか確認してください。例: https://〜'),
         )
 
         // --- 写真の自動取り込み(2026-07-21): imageUrlがあるレシピを取り込むと、
@@ -7143,6 +7265,122 @@ try {
             (await colonAmountInputs.nth(2).inputValue()) === '1/2' &&
             (await colonUnitInputs.nth(2).inputValue()) === '小さじ',
         )
+
+        // --- URLIMPORT-08(便BX/C02・C17): 材料・手順以外に置き換わった項目(人数分・調理時間)を
+        // 結果メッセージに書き添える。成功メッセージがrole="status"で読み上げ対象になる ---
+        currentCheck = 'URLIMPORT-08'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        check(
+          'URLIMPORT-08 人数分・調理時間も置き換わった旨が結果メッセージに出る(C02)',
+          (await uiPage.textContent('body')).includes('人数分・調理時間も読み込んだ内容に合わせました'),
+        )
+        const okMsg = uiPage.locator('p[role="status"]', { hasText: '材料2件・手順2件を読み込みました' })
+        check(
+          'URLIMPORT-08 成功メッセージはrole="status"+aria-live="polite"で読み上げられる(C17)',
+          (await okMsg.count()) === 1 && (await okMsg.first().getAttribute('aria-live')) === 'polite',
+        )
+
+        // --- URLIMPORT-09(便BX/C16): 置き換え確認をキャンセルしたら「中止した」と返事する ---
+        currentCheck = 'URLIMPORT-09'
+        const dismissDialog = (dialog) => dialog.dismiss()
+        uiPage.on('dialog', dismissDialog)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe-2')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        uiPage.off('dialog', dismissDialog)
+        check(
+          'URLIMPORT-09 確認ダイアログをキャンセルすると中止した旨が出る(C16)',
+          (await uiPage.textContent('body')).includes('取り込みを中止しました。入力していた内容はそのままです'),
+        )
+        check(
+          'URLIMPORT-09 キャンセルしたので参照元URLは前回のまま(置き換わらない)',
+          (await uiPage.locator('input[type="url"]').nth(1).inputValue()) ===
+            'https://example.com/success-recipe',
+        )
+
+        // --- URLIMPORT-10(便BX/C01): 「写真も取り込む」ONで写真だけ取れなかったとき、
+        // レシピ本体の成功メッセージはそのままに、控えめなトーストで写真の失敗を伝える ---
+        currentCheck = 'URLIMPORT-10'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-fail-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(1200)
+        const photoFailBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-10 写真だけ取れなかったときトーストで伝える(C01)',
+          photoFailBody.includes('写真は取り込めませんでした。レシピは取り込んでいます'),
+        )
+        check(
+          'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
+          photoFailBody.includes('材料1件・手順1件を読み込みました') &&
+            !photoFailBody.includes('写真も取り込みました'),
+        )
+
+        // --- URLIMPORT-11(便BX/C07・C08): ゴミ行の除去とグループの引き継ぎ ---
+        currentCheck = 'URLIMPORT-11'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/group-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        const groupNameInputs = uiPage.locator('input[placeholder="例: じゃがいも"]')
+        const groupMemoInputs = uiPage.locator('input[placeholder="材料メモ（任意。例: なければ玉ねぎでも可）"]')
+        check(
+          'URLIMPORT-11 材料からゴミ行(関連レシピ)と見出し行(合わせ調味料)が落ちて3件になる(C07/C08)',
+          (await groupNameInputs.count()) === 3 &&
+            (await groupNameInputs.nth(0).inputValue()) === 'じゃがいも' &&
+            (await groupNameInputs.nth(1).inputValue()) === '水' &&
+            (await groupNameInputs.nth(2).inputValue()) === 'しょうゆ',
+        )
+        check(
+          'URLIMPORT-11 グループ記号Aは材料名から外れてメモに残る(名前照合を壊さない・C08)',
+          (await groupMemoInputs.nth(1).inputValue()) === 'A',
+        )
+        const stepTextareas = uiPage.locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+        check(
+          'URLIMPORT-11 手順に紛れたSNS名の行が落ちる(C07)',
+          (await stepTextareas.count()) === 2 &&
+            (await stepTextareas.nth(0).inputValue()) === 'じゃがいもを切る' &&
+            (await stepTextareas.nth(1).inputValue()) === '煮込む',
+        )
+        check(
+          'URLIMPORT-11 結果メッセージの件数は整形後の件数(材料3件・手順2件)',
+          (await uiPage.textContent('body')).includes('材料3件・手順2件を読み込みました'),
+        )
+
+        // --- URLIMPORT-12(便BX/C09ライト版): 分量が読み取れなかった材料の内訳と、
+        // 該当行の控えめな印。大掛かりなプレビューUIは作らない ---
+        currentCheck = 'URLIMPORT-12'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/amountless-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        check(
+          'URLIMPORT-12 結果メッセージに分量を読み取れなかった件数の内訳が出る',
+          (await uiPage.textContent('body')).includes(
+            '材料3件（うち2件は分量が読み取れず名前だけです）・手順2件を読み込みました',
+          ),
+        )
+        const amountlessHints = uiPage.getByText('分量が読み取れませんでした。元のページを見て入れてください')
+        check('URLIMPORT-12 該当の材料行にだけ控えめな印が付く(2件)', (await amountlessHints.count()) === 2)
+        // 自分で分量を入れると印は消える(「まだ空のまま」を指す印なので)
+        await uiPage.locator('input[placeholder="例: 3"]').nth(1).fill('少々')
+        await uiPage.waitForTimeout(300)
+        check('URLIMPORT-12 分量を入れた行の印は消える', (await amountlessHints.count()) === 1)
       } finally {
         await uiBrowser.close()
       }

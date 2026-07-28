@@ -96,6 +96,22 @@ export function normalizeAmountInput(text: string): string {
 }
 
 /**
+ * 範囲分量(「200〜250」「4〜5」)から、計算に使う先頭の値だけを取り出す
+ * （2026-07-28 便BX/C06。範囲でなければそのまま返す）。
+ *
+ * 表示・保存は原文のまま(「200〜250」)を尊重し、人数変更(scaleAmount)も従来どおり範囲は
+ * 据え置く（F3の裁定「範囲は人数スケールに非対応」を変えない）。変えるのは栄養・原価の
+ * 「計算に使う値」だけで、従来はここで数値化に失敗して材料が丸ごと計算対象外に落ちていた
+ * （実測: 楽天レシピ「牛こま切れ 200〜250g」が対象外理由 amount で除外）。
+ * 少なめ側を採用するのは、栄養・原価を過大に見せない安全側のため。
+ */
+export function leadingRangeAmount(amount: string): string {
+  const trimmed = amount.trim()
+  const match = trimmed.match(/^(\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)?)\s*[〜~～]\s*\d/)
+  return match ? match[1].replace(/\s+/g, '') : trimmed
+}
+
+/**
  * 2026-07-21 分量表記拡充（オーナー実機報告: URL取り込みレシピの計算対象外10件のうち8件が
  * 「大2」「小1」のような大さじ/小さじの略記だった）。
  *

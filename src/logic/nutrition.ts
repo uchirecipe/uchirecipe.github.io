@@ -1,7 +1,7 @@
 import { toHiragana } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
-import { expandMixedFraction, normalizeAmountInput, resolveCalcAmount } from './amount'
+import { expandMixedFraction, leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
 import { VOLUME_UNIT_FACTORS } from './priceEstimate'
 
 /**
@@ -204,7 +204,9 @@ export function matchNutritionFood(name: string): NutritionFood | null {
 export function parseAmountNumber(amount: string): number | null {
   // 「1と1/2」のような帯分数も解釈する(2026-07-28 便BW/C-18。アプリ自身が人数変更後の表示に
   // 使う書き方なので、それを保存した分量が栄養計算の対象外になるのを防ぐ)
-  const match = expandMixedFraction(normalizeAmountInput(amount.trim())).match(
+  // 範囲分量(「200〜250」)は先頭の値で計算する(2026-07-28 便BX/C06。表示は原文のまま)。
+  // 従来はここで解釈できず、材料が丸ごと計算対象外に落ちていた
+  const match = leadingRangeAmount(expandMixedFraction(normalizeAmountInput(amount.trim()))).match(
     /^(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+(?:\.\d+)?))?$/,
   )
   if (!match) return null

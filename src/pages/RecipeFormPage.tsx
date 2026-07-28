@@ -29,7 +29,9 @@ import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
+import type { ImportErrorReason } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
+import { buildImportedIngredientRows, countAmountlessRows, filterImportedSteps } from '../logic/urlImportRows'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
 import { toTagKey } from '../logic/kana'
@@ -42,6 +44,7 @@ import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { isHttpUrl } from '../logic/url'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
+import Toast from '../components/Toast'
 import { RecipeIcon } from '../components/RecipeCard'
 import { starterDefs } from '../db/starters'
 import { ja } from '../i18n/ja'
@@ -68,6 +71,20 @@ const emptyIngredient: IngredientRow = {
   group: undefined,
 }
 const emptyStep: StepRow = { text: '', minutes: '', memo: '' }
+
+/**
+ * URL取り込みの失敗理由ごとの案内文(2026-07-28 便BX/C04・C05・C10)。
+ * 「時間をおいて試すか、貼り付けをお使いください」1本に、URLの打ち間違い・ページ消失・
+ * サイト側の拒否・一時的な通信不調が全部潰れており、404では絶対に解決しない案内が
+ * 出ていた(実機QA)。理由ごとに「次に何をすればよいか」が変わるので文言を分ける。
+ */
+const URL_IMPORT_ERROR_MESSAGE: Record<ImportErrorReason, string> = {
+  invalid_url: ja.urlImport.errorInvalidUrl,
+  not_found: ja.urlImport.errorNotFound,
+  blocked: ja.urlImport.errorBlocked,
+  no_recipe: ja.urlImport.errorNoRecipe,
+  fetch_failed: ja.urlImport.errorFetchFailed,
+}
 
 /** Ingredient[]（DB形）→ IngredientRow[]（フォーム形）。既存レシピの読み込み・
  * 「デフォルトに戻す」の3分岐すべてで使う共通の変換（重複を避けるため2026-07-15に切り出し） */
@@ -370,6 +387,13 @@ function RecipeFormInner() {
   // 保存も設定への永続化もしない(このフォームを開くたび毎回既定ON)。OFFならapplyUrlImportが
   // importPhotoFromUrl(Worker画像プロキシ経由のfetchImportedPhoto)を呼ばない
   const [urlImportFetchPhoto, setUrlImportFetchPhoto] = useState(true)
+  // 「写真も取り込む」がONで写真だけ取れなかったときの控えめな通知(2026-07-28 便BX/C01)。
+  // レシピ本体の結果メッセージ(パネル内)とは別枠で、画面下のトーストとして数秒だけ出す
+  const [urlImportToast, setUrlImportToast] = useState('')
+  // 取り込みで分量が読み取れなかった材料の名前(2026-07-28 便BX/C09)。
+  // 「どこを直せばよいか分からない」への最小限の答えで、大掛かりなプレビューUIは作らない。
+  // 名前で覚えるので、行を並べ替えても印が付いたままになり、分量を入れれば自然に消える
+  const [amountlessImportedNames, setAmountlessImportedNames] = useState<string[]>([])
 
   // テキスト貼り付けで自動入力
   const [pasteOpen, setPasteOpen] = useState(false)
@@ -377,13 +401,24 @@ function RecipeFormInner() {
   const [pasteMessage, setPasteMessage] = useState('')
   const [pasteMessageTone, setPasteMessageTone] = useState<'info' | 'warn'>('info')
 
+  /** 取り込み時に分量が読み取れず、まだ空のままの行か(便BX/C09の控えめな印の表示条件) */
+  const isImportedAmountless = (row: IngredientRow): boolean =>
+    !row.amount.trim() &&
+    !row.unit.trim() &&
+    !!row.name.trim() &&
+    amountlessImportedNames.includes(row.name.trim())
+
   const showPasteMessage = (message: string, tone: 'info' | 'warn') => {
     setPasteMessage(message)
     setPasteMessageTone(tone)
   }
+  // 取り込み結果・エラーの表示欄はパネルの内側にしか無いため、読み込み中にパネルを閉じられると
+  // 結果もエラーも一度も出ないまま終わっていた(2026-07-28 便BX/C03・QA S2)。
+  // メッセージを出すときは必ずパネルを開き直し、どの経路でも結果が目に入るようにする
   const showUrlImportMessage = (message: string, tone: 'info' | 'warn') => {
     setUrlImportMessage(message)
     setUrlImportMessageTone(tone)
+    setUrlImportOpen(true)
   }
 
   /**
@@ -663,7 +698,12 @@ function RecipeFormInner() {
    */
   const importPhotoFromUrl = async (imageUrl: string) => {
     const blob = await fetchImportedPhoto(IMPORT_ENDPOINT, imageUrl)
-    if (!blob) return
+    // 2026-07-28 便BX/C01: 取れなかったときも完全な無言はやめる。レシピ本体は取り込めているので
+    // 成功メッセージ(パネル内)はそのままにし、写真だけ入らなかったことをトーストで控えめに伝える
+    if (!blob) {
+      setUrlImportToast(ja.urlImport.photoNotImported)
+      return
+    }
     try {
       setPhoto(await resizePhoto(blob))
       // 写真を新しく取得できたら、それまでアイコン優先だったとしても取り込んだ写真を見せる
@@ -671,7 +711,9 @@ function RecipeFormInner() {
       setShowIconInsteadOfPhoto(false)
       setUrlImportMessage((prev) => (prev ? `${prev} ${ja.urlImport.photoImported}` : prev))
     } catch {
-      // resizePhotoの失敗(壊れた画像等)もベストエフォートなので何もしない
+      // resizePhotoの失敗(壊れた画像等)もベストエフォート。取り込みは止めないが、
+      // 「写真も取り込む」がONだった以上は結果を黙らせない(便BX/C01)
+      setUrlImportToast(ja.urlImport.photoNotImported)
     }
   }
 
@@ -690,68 +732,97 @@ function RecipeFormInner() {
     }
     setUrlImportLoading(true)
     setUrlImportMessage('')
+    setUrlImportToast('')
     try {
       const result = await importRecipeFromUrl(target)
+      // 貼り付け経路と同じゴミ行判定を通し、グループ見出しをグループ色へ引き継ぐ(便BX/C07・C08)。
+      // 以降の件数(確認文・結果メッセージ)はすべてこの整形後の件数で数える
+      const importedRows = buildImportedIngredientRows(result.ingredients)
+      const importedSteps = filterImportedSteps(result.steps)
       // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
       if (
         !confirmReplaceExisting(
           ja.urlImport.confirmReplace,
-          result.ingredients.length,
-          result.steps.length,
+          importedRows.length,
+          importedSteps.length,
         )
       ) {
+        // 中止したことを必ず返事する(2026-07-28 便BX/C16・QA S3)。
+        // 従来は冒頭で消したメッセージ欄が空のまま戻り、押した結果が一切分からなかった
+        showUrlImportMessage(ja.urlImport.canceled, 'warn')
         return
       }
+      // 材料・手順以外にも黙って置き換わる項目(人数分・調理時間・参照元URL)があるので、
+      // 実際に値が変わったものだけを後で結果メッセージに書き添える(便BX/C02・ペルソナ5/5一致)
+      const alsoApplied: string[] = []
+      if (result.servings && result.servings !== servings) {
+        alsoApplied.push(ja.urlImport.alsoAppliedServings)
+      }
+      if (result.cookMinutes && String(result.cookMinutes) !== cookMinutes.trim()) {
+        alsoApplied.push(ja.urlImport.alsoAppliedCookMinutes)
+      }
+      const nextSourceUrl = result.sourceUrl || target
+      if (sourceUrl.trim() && sourceUrl.trim() !== nextSourceUrl) {
+        alsoApplied.push(ja.urlImport.alsoAppliedSourceUrl)
+      }
+      const alsoAppliedNote =
+        alsoApplied.length > 0
+          ? `。${ja.urlImport.alsoApplied.replace(
+              '{items}',
+              alsoApplied.join(ja.urlImport.alsoAppliedSeparator),
+            )}`
+          : ''
       if (result.title && !title.trim()) setTitle(result.title)
       if (result.servings) setServings(result.servings)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
-      if (result.ingredients.length > 0) {
-        setIngredients(
-          result.ingredients.map((ing) => {
-            const parsed = normalizeImportedIngredient(ing.name, ing.amount)
-            return {
-              name: parsed.name,
-              amount: parsed.amount,
-              unit: parsed.unit,
-              memo: parsed.memo ?? '',
-              group: undefined,
-            }
-          }),
-        )
+      if (importedRows.length > 0) setIngredients(importedRows)
+      // 分量が読み取れなかった行に印を付ける(便BX/C09)。取り込むたびに入れ替える
+      setAmountlessImportedNames(
+        importedRows.filter((row) => !row.amount.trim() && !row.unit.trim()).map((row) => row.name),
+      )
+      if (importedSteps.length > 0) {
+        setSteps(importedSteps.map((text) => ({ text, minutes: '', memo: '' })))
       }
-      if (result.steps.length > 0) {
-        setSteps(result.steps.map((text) => ({ text, minutes: '', memo: '' })))
-      }
-      setSourceUrl(result.sourceUrl || target)
+      setSourceUrl(nextSourceUrl)
       // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
       // 新規登録では料理名からの自動提案に任せる(applyPasteと同じ理由・便BW)。
       // 編集中のレシピで種別が未設定のときだけ、ここで初期値を入れる。
       if (isEdit && dishType === undefined) {
         const guessedTitle = title.trim() || result.title || ''
         const guessedIngredients =
-          result.ingredients.length > 0
-            ? result.ingredients.map((ing) => ({ name: ing.name }))
+          importedRows.length > 0
+            ? importedRows.map((row) => ({ name: row.name }))
             : ingredients.map((r) => ({ name: r.name }))
         if (guessedTitle) {
           setDishType(guessDishType({ title: guessedTitle, tags, ingredients: guessedIngredients }))
         }
       }
-      // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)
-      if (result.ingredients.length === 0) {
+      // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)。
+      // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
+      if (importedRows.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoIngredients.replace('{s}', String(result.steps.length)),
+          ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
           'warn',
         )
-      } else if (result.steps.length === 0) {
+      } else if (importedSteps.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoSteps.replace('{i}', String(result.ingredients.length)),
+          ja.urlImport.resultNoSteps.replace('{i}', String(importedRows.length)) + alsoAppliedNote,
           'warn',
         )
       } else {
+        // 件数だけでは「どこを直せばよいか」が分からないという5体一致の指摘への最小限の答え
+        // (便BX/C09ライト版)。分量を読み取れなかった件数だけ内訳として添える
+        const amountless = countAmountlessRows(importedRows)
         showUrlImportMessage(
           ja.urlImport.resultSummary
-            .replace('{i}', String(result.ingredients.length))
-            .replace('{s}', String(result.steps.length)),
+            .replace('{i}', String(importedRows.length))
+            .replace(
+              '{a}',
+              amountless > 0
+                ? ja.urlImport.resultAmountless.replace('{n}', String(amountless))
+                : '',
+            )
+            .replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
           'info',
         )
       }
@@ -763,14 +834,7 @@ function RecipeFormInner() {
       }
     } catch (e) {
       const reason = e instanceof UrlImportError ? e.reason : 'fetch_failed'
-      showUrlImportMessage(
-        reason === 'no_recipe'
-          ? ja.urlImport.errorNoRecipe
-          : reason === 'invalid_url'
-            ? ja.urlImport.errorInvalidUrl
-            : ja.urlImport.errorFetchFailed,
-        'warn',
-      )
+      showUrlImportMessage(URL_IMPORT_ERROR_MESSAGE[reason] ?? ja.urlImport.errorFetchFailed, 'warn')
     } finally {
       setUrlImportLoading(false)
     }
@@ -1324,9 +1388,13 @@ function RecipeFormInner() {
                   <span className="mt-0.5 block text-xs text-ink-muted">{ja.urlImport.fetchPhotoNote}</span>
                 </span>
               </label>
+              {/* 取り込み結果は成功時もスクリーンリーダーへ伝える(2026-07-28 便BX/C17・QA S3)。
+                  失敗・片側だけの警告は従来どおり role="alert" で割り込ませ、成功は
+                  role="status" + aria-live="polite" で邪魔をせず読み上げる */}
               {urlImportMessage && (
                 <p
-                  role={urlImportMessageTone === 'warn' ? 'alert' : undefined}
+                  role={urlImportMessageTone === 'warn' ? 'alert' : 'status'}
+                  aria-live={urlImportMessageTone === 'warn' ? undefined : 'polite'}
                   className={
                     urlImportMessageTone === 'warn'
                       ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
@@ -1341,14 +1409,19 @@ function RecipeFormInner() {
                   type="button"
                   onClick={() => void applyUrlImport()}
                   disabled={urlImportLoading}
+                  aria-busy={urlImportLoading}
                   className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-60"
                 >
                   {urlImportLoading ? ja.urlImport.loading : ja.urlImport.apply}
                 </button>
+                {/* 読み込み中は閉じられないようにする(2026-07-28 便BX/C03・QA S2)。
+                    閉じると結果もエラーも出ないままフォームだけが置き換わっていた。
+                    待ち時間はWorker側のFETCH_TIMEOUT_MS(8秒)で上限が担保されている */}
                 <button
                   type="button"
                   onClick={() => setUrlImportOpen(false)}
-                  className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted"
+                  disabled={urlImportLoading}
+                  className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted disabled:opacity-60"
                 >
                   {ja.urlImport.close}
                 </button>
@@ -1605,6 +1678,11 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
                 />
               </div>
+              {/* 取り込みで分量が読み取れなかった行の控えめな印(2026-07-28 便BX/C09)。
+                  自分で分量を入れると消える(印は「まだ空のまま」を指すため) */}
+              {isImportedAmountless(row) && (
+                <p className="mt-1 text-xs text-ink-muted">{ja.form.importedAmountlessHint}</p>
+              )}
               <div className="mt-[var(--space-sm)] flex items-center justify-between gap-[var(--space-sm)]">
                 <button
                   type="button"
@@ -2281,6 +2359,8 @@ function RecipeFormInner() {
         </button>
       )}
       </div>
+      {/* URL取り込みの補足通知(2026-07-28 便BX/C01)。既存のToast+setMessageパターンを流用 */}
+      <Toast message={urlImportToast} onClose={() => setUrlImportToast('')} />
     </div>
   )
 }
