@@ -32,8 +32,12 @@ import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOIN
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
-import { toHiragana } from '../logic/kana'
-import { nextSeasoningGroup, seasoningGroupColorToken } from '../logic/seasoningGroup'
+import { toTagKey } from '../logic/kana'
+import {
+  MAX_SEASONING_GROUP,
+  nextSeasoningGroup,
+  seasoningGroupColorToken,
+} from '../logic/seasoningGroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { isHttpUrl } from '../logic/url'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -243,6 +247,10 @@ const dishTypes: DishType[] = ['main', 'side', 'soup', 'dessert']
 const inputCls =
   'mt-1 block w-full rounded-sm border border-edge bg-surface px-3 py-3 text-base text-ink placeholder:text-ink-muted/60'
 const labelCls = 'block text-sm font-bold text-ink-muted'
+// 「くわしく」タブの区分見出し(2026-07-28 便BW/C-10)。項目名(labelCls)より一段強く、
+// 上に区切り線を置いて「ここから別の区分」と分かるようにする
+const sectionHeadingCls =
+  'mt-[var(--space-lg)] border-t border-edge pt-[var(--space-md)] text-base font-bold text-ink'
 const iconBtnCls =
   'flex h-10 w-10 items-center justify-center rounded-sm border border-edge bg-surface text-ink-muted'
 
@@ -312,6 +320,9 @@ function RecipeFormInner() {
   const [cookMinutes, setCookMinutes] = useState('')
   const [effortLevel, setEffortLevel] = useState<EffortLevel>('normal')
   const [ingredients, setIngredients] = useState<IngredientRow[]>([{ ...emptyIngredient }])
+  // 材料の「まとめて入力」欄(2026-07-28 便BW/C-07)。入力途中の文字はフォームの値ではないので
+  // 下書き(FormDraft)には含めない=「追加」を押した時点で材料行になる
+  const [quickIngredient, setQuickIngredient] = useState('')
   const [steps, setSteps] = useState<StepRow[]>([{ ...emptyStep }])
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -443,13 +454,15 @@ function RecipeFormInner() {
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ja'))
       .map(([t]) => t)
   }, [allRecipes])
-  // 入力中の文字にかな正規化で部分一致する既存タグ(既に付けたタグ・完全一致は除く)を最大8件
+  // 入力中の文字にかな正規化で部分一致する既存タグ(既に付けたタグ・完全一致は除く)を最大8件。
+  // 2026-07-28 便BW・QA S3: 漢字タグの読みにも対応する(「なつ」→「夏」、「つく」→「作り置き」)。
+  // 従来はカタカナ⇄ひらがなと食材名辞書だけで、読みからは既存タグに辿り着けなかった
   const tagSuggestions = useMemo(() => {
     const q = tagInput.trim()
     if (!q) return []
-    const qKey = toHiragana(q)
+    const qKey = toTagKey(q)
     return allExistingTags
-      .filter((t) => !tags.includes(t) && t !== q && toHiragana(t).includes(qKey))
+      .filter((t) => !tags.includes(t) && t !== q && toTagKey(t).includes(qKey))
       .slice(0, 8)
   }, [allExistingTags, tagInput, tags])
 
@@ -862,6 +875,33 @@ function RecipeFormInner() {
 
   const updateIngredient = (index: number, patch: Partial<IngredientRow>) => {
     setIngredients((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+  }
+
+  /**
+   * 材料の「まとめて入力」(2026-07-28 便BW/C-07)。
+   * 「豚こま 200g」のように1行で書いた材料を、名前/分量/単位に分けて1行追加する。
+   * 分解には貼り付け取込と同じロジック(normalizeImportedIngredient→parseIngredientLine)を使い、
+   * 分けられなかったときは名前の欄にそのまま入れる(黙って捨てない)。
+   * 3マスの入力欄は従来どおり残し、こちらは速記の入口として足すだけ。
+   */
+  const addQuickIngredient = () => {
+    const text = quickIngredient.trim()
+    if (!text) return
+    const parsed = normalizeImportedIngredient(text)
+    const row: IngredientRow = {
+      name: parsed.name,
+      amount: parsed.amount,
+      unit: parsed.unit,
+      memo: parsed.memo ?? '',
+      group: undefined,
+    }
+    setIngredients((rows) => {
+      const last = rows[rows.length - 1]
+      const lastIsEmpty =
+        last && !last.name.trim() && !last.amount.trim() && !last.unit.trim() && !last.memo.trim()
+      return lastIsEmpty ? [...rows.slice(0, -1), row] : [...rows, row]
+    })
+    setQuickIngredient('')
   }
   /**
    * 材料の数量欄・単位欄のblurで、全角入力を自動でNFKC半角化する(2026-07-21全角対応。
@@ -1402,6 +1442,10 @@ function RecipeFormInner() {
           )}
         </button>
       </div>
+      {/* ●の意味を画面上でも示す(2026-07-28 便BW/C-10)。●が出ている間だけの控えめな1行 */}
+      {hasDetailInput && (
+        <p className="mt-1 text-xs text-ink-muted">{ja.form.formTabDetailFilledLegend}</p>
+      )}
 
       <div hidden={activeTab !== 'simple'}>
       {/* 料理名 */}
@@ -1482,14 +1526,47 @@ function RecipeFormInner() {
       {/* 材料（追加・削除・並べ替え） */}
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.ingredientsLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientGroupHint}</p>
+        <p className="mt-1 text-sm text-ink-muted">
+          {ja.form.ingredientGroupHint.replace('{last}', String(MAX_SEASONING_GROUP))}
+        </p>
         {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。
             この画面には材料ごとの価格入力欄を置かず、案内だけ表示する */}
         <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientPriceGuide}</p>
         <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent underline">
           {ja.form.ingredientPriceGuideLink}
         </Link>
-        <div className="mt-1 space-y-[var(--space-sm)]">
+
+        {/* まとめて入力(2026-07-28 便BW/C-07): 「豚こま 200g」と1行で書いて材料を足せる速記欄。
+            分解は貼り付け取込と同じロジック。3マスの入力欄はそのまま残している */}
+        <div className="mt-[var(--space-sm)] rounded-md border border-dashed border-edge p-[var(--space-sm)]">
+          <span className="text-sm font-bold text-ink-muted">{ja.form.quickIngredientLabel}</span>
+          <p className="mt-0.5 text-xs text-ink-muted">{ja.form.quickIngredientDescription}</p>
+          <div className="mt-1 flex gap-[var(--space-sm)]">
+            <input
+              type="text"
+              value={quickIngredient}
+              onChange={(e) => setQuickIngredient(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addQuickIngredient()
+                }
+              }}
+              placeholder={ja.form.quickIngredientPlaceholder}
+              aria-label={ja.form.quickIngredientLabel}
+              className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
+            />
+            <button
+              type="button"
+              onClick={addQuickIngredient}
+              className="shrink-0 rounded-sm border border-edge bg-surface px-4 font-bold text-accent shadow-sm"
+            >
+              {ja.form.quickIngredientAdd}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
           {ingredients.map((row, index) => (
             <div
               key={index}
@@ -1534,7 +1611,9 @@ function RecipeFormInner() {
                   onClick={() => updateIngredient(index, { group: nextSeasoningGroup(row.group) })}
                   aria-label={
                     row.group
-                      ? ja.form.ingredientGroupSet.replace('{n}', String(row.group))
+                      ? ja.form.ingredientGroupSet
+                          .replace('{n}', String(row.group))
+                          .replace('{last}', String(MAX_SEASONING_GROUP))
                       : ja.form.ingredientGroupNone
                   }
                   className={iconBtnCls}
@@ -1824,9 +1903,15 @@ function RecipeFormInner() {
       </div>
 
       <div hidden={activeTab !== 'detail'}>
+      {/* セクション見出し(2026-07-28 便BW/C-10): 任意項目が縦に長く並ぶため、
+          「このレシピについて」「献立・検索に使う」「書き残す」の3区分に分ける。
+          欄そのものの統合・並べ替えはしていない(既存の入力・保存ロジックは不変) */}
+      <h2 className={sectionHeadingCls}>{ja.form.detailSectionAbout}</h2>
+
       {/* 紹介文（ひとこと説明。任意。2026-07-13） */}
       <label className={`mt-[var(--space-md)] ${labelCls}`}>
         {ja.form.introLabel}
+        <span className="ml-1 font-normal text-ink-muted">（{ja.form.introDescription}）</span>
         <input
           type="text"
           value={intro}
@@ -1870,6 +1955,8 @@ function RecipeFormInner() {
           ))}
         </div>
       </div>
+
+      <h2 className={sectionHeadingCls}>{ja.form.detailSectionPlanning}</h2>
 
       {/* 季節（任意・もう一度押すと解除） */}
       <div className="mt-[var(--space-md)]">
@@ -1951,12 +2038,16 @@ function RecipeFormInner() {
       {/* タグ（自由追加） */}
       <div className="mt-[var(--space-lg)]">
         <span className={labelCls}>{ja.form.tagsLabel}</span>
+        {/* タグ=画面に出る / キーワード=検索だけに効く、の書き分け(2026-07-28 便BW/C-11) */}
+        <p className="mt-1 text-sm text-ink-muted">{ja.form.tagsDescription}</p>
         {tags.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
+            {/* 「タグを外す」は14x14pxしかなく、料理中に使う前提のタップ領域として小さかったため
+                44px級に拡大(2026-07-28 便BW・QA S3。キーワード側も同じ) */}
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-sm text-accent"
+                className="inline-flex items-center gap-1 rounded-sm py-1 pl-3 text-sm text-accent"
                 style={{ background: 'color-mix(in oklab, var(--accent) 12%, var(--bg))' }}
               >
                 {tag}
@@ -1964,8 +2055,9 @@ function RecipeFormInner() {
                   type="button"
                   onClick={() => setTags(tags.filter((t) => t !== tag))}
                   aria-label={ja.form.removeTag}
+                  className="flex h-11 w-11 items-center justify-center"
                 >
-                  <X size={14} aria-hidden />
+                  <X size={18} aria-hidden />
                 </button>
               </span>
             ))}
@@ -1993,6 +2085,9 @@ function RecipeFormInner() {
             {ja.form.addTag}
           </button>
         </div>
+        {/* 打ちかけの文字は保存してもタグにならない(2026-07-28 便BW・QA S3)。
+            黙って消えるのを避けるため、入力中はその場で案内する */}
+        {tagInput.trim() && <p className="mt-1 text-xs text-ink-muted">{ja.form.tagPending}</p>}
         {/* 既存タグのサジェスト(2026-07-24 便BN・タスク5): 入力中だけ出し、タップで採用する */}
         {tagSuggestions.length > 0 && (
           <div className="mt-[var(--space-sm)]">
@@ -2022,7 +2117,7 @@ function RecipeFormInner() {
             {keywords.map((keyword) => (
               <span
                 key={keyword}
-                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-sm text-accent"
+                className="inline-flex items-center gap-1 rounded-sm py-1 pl-3 text-sm text-accent"
                 style={{ background: 'color-mix(in oklab, var(--accent) 12%, var(--bg))' }}
               >
                 {keyword}
@@ -2030,8 +2125,9 @@ function RecipeFormInner() {
                   type="button"
                   onClick={() => setKeywords(keywords.filter((k) => k !== keyword))}
                   aria-label={ja.form.removeKeyword}
+                  className="flex h-11 w-11 items-center justify-center"
                 >
-                  <X size={14} aria-hidden />
+                  <X size={18} aria-hidden />
                 </button>
               </span>
             ))}
@@ -2059,11 +2155,18 @@ function RecipeFormInner() {
             {ja.form.addKeyword}
           </button>
         </div>
+        {keywordInput.trim() && (
+          <p className="mt-1 text-xs text-ink-muted">{ja.form.keywordPending}</p>
+        )}
       </div>
 
-      {/* ワンポイント・メモ・参照元URL（2026-07 メモ2区画化: ワンポイント=こつ・知識、メモ=保存方法・注意書き・安全） */}
+      <h2 className={sectionHeadingCls}>{ja.form.detailSectionNotes}</h2>
+
+      {/* ワンポイント・メモ・参照元URL（2026-07 メモ2区画化: ワンポイント=こつ・知識、メモ=保存方法・注意書き・安全）。
+          2026-07-28 便BW/C-08: ワンポイント側にもメモと同じ常設の説明を付け、入力後も役割が画面に残るようにした */}
       <label className={`mt-[var(--space-lg)] ${labelCls}`}>
         {ja.form.onePointLabel}
+        <span className="ml-1 font-normal text-ink-muted">（{ja.form.onePointDescription}）</span>
         <textarea
           value={onePoint}
           onChange={(e) => setOnePoint(e.target.value)}

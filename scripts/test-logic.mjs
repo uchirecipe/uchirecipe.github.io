@@ -20,6 +20,7 @@ import {
 import {
   buildSearchWords,
   toHiragana,
+  toTagKey,
   searchIndexNeedsRebuild,
   SEARCH_INDEX_VERSION,
 } from '../src/logic/kana.ts'
@@ -719,6 +720,37 @@ eq(
     '下ごしらえした玉ねぎを飴色になるまで炒める',
     'ルーを加えて煮込む',
   ])
+}
+
+// ---------- 材料の「まとめて入力」(2026-07-28 便BW/C-07) ----------
+// 「豚こま 200g」と1行で書いて材料を足せる速記欄。分解は貼り付け取込と同じ資産
+// (normalizeImportedIngredient→parseIngredientLine)を使い、分けられなければ名前欄に入れる
+{
+  eq('C-07: 「豚こま 200g」を名前/分量/単位に分ける', normalizeImportedIngredient('豚こま 200g'), {
+    name: '豚こま',
+    amount: '200',
+    unit: 'g',
+  })
+  eq('C-07: 単位が前に来る「しょうゆ 大さじ2」', normalizeImportedIngredient('しょうゆ 大さじ2'), {
+    name: 'しょうゆ',
+    amount: '2',
+    unit: '大さじ',
+  })
+  eq('C-07: 「塩 少々」', normalizeImportedIngredient('塩 少々'), {
+    name: '塩',
+    amount: '少々',
+    unit: '',
+  })
+  eq('C-07: くっつき表記「玉ねぎ1個」', normalizeImportedIngredient('玉ねぎ1個'), {
+    name: '玉ねぎ',
+    amount: '1',
+    unit: '個',
+  })
+  eq('C-07: 分けられない入力は名前欄へ(黙って捨てない)', normalizeImportedIngredient('あまったお肉'), {
+    name: 'あまったお肉',
+    amount: '',
+    unit: '',
+  })
 }
 
 // ---------- 貼り付け解析 第3弾: 走り書きノート・SNS投稿(2026-07-28 便BW/C-03・C-06) ----------
@@ -1506,6 +1538,23 @@ eq(
     ['', '  '],
   )
   eq('空文字・空白だけのkeywordsは検索語を増やさない', emptyKeyword.length, baseline.length)
+}
+
+// ---------- toTagKey(タグ候補のかな検索。2026-07-28 便BW・QA S3) ----------
+// 実機QA: 既存タグに「夏」「作り置き」があるのに「なつ」「つく」と打っても候補が出なかった
+// (読み仮名辞書は食材名だけで、タグ語の読みを持っていなかった)
+{
+  const suggest = (query, existing) =>
+    existing.filter((t) => t !== query && toTagKey(t).includes(toTagKey(query)))
+  const existingTags = ['夏', '作り置き', '和食', 'サラダ', '子ども']
+  eq('タグ候補: 「なつ」→夏', suggest('なつ', existingTags), ['夏'])
+  eq('タグ候補: 「つく」→作り置き', suggest('つく', existingTags), ['作り置き'])
+  eq('タグ候補: 「わ」→和食', suggest('わ', existingTags), ['和食'])
+  eq('タグ候補: 半角カナ「ｻﾗﾀﾞ」→サラダ(既存の挙動を維持)', suggest('ｻﾗﾀﾞ', existingTags), ['サラダ'])
+  eq('タグ候補: 「こども」→子ども', suggest('こども', existingTags), ['子ども'])
+  eq('タグ読み: 夏', toTagKey('夏'), 'なつ')
+  eq('タグ読み: 作り置き', toTagKey('作り置き'), 'つくりおき')
+  eq('タグ読み: 辞書にない語はそのまま', toTagKey('ぬか床'), 'ぬか床')
 }
 
 // ---------- searchIndexNeedsRebuild: 検索インデックス移行の判定(既存レシピのsearchWordsに
