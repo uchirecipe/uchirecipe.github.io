@@ -2292,6 +2292,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       ['2026-07-22|dinner|side', '2026-07-24|dinner|side'],
     )
   }
+
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------
@@ -2560,6 +2561,86 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     visibleSlots: ['breakfast', 'lunch', 'dinner'],
   })
   eq('テンプレに中身の無い曜日を選ぶと0件(呼び出し側が案内を出す)', [applyNoDow.ops.length, applyNoDow.targetDayCount], [0, 0])
+}
+
+// ---------- 献立表(A-4 印刷／画像化)・2026-07-29 便CB-2・docs/59 ----------
+// 紙(印刷HTML)・画面・画像(Canvas)の3つが同じこの結果を読む＝内容がずれないことをここで固定する。
+// 何を載せるかの規則はアプリの他の画面と同じ: 過ぎた日=作った記録・今日から先=登録した献立(＋日付メモ)
+{
+  const { buildPlanSheet, planSheetLines, formatSheetDayLabel } = await import(
+    '../src/logic/planSheet.ts'
+  )
+  const titles = { 10: '肉じゃが', 20: 'きんぴらごぼう', 30: 'カレー' }
+  const sheet = buildPlanSheet({
+    title: '7/28〜7/30の献立',
+    dates: ['2026-07-28', '2026-07-29', '2026-07-30'],
+    today: '2026-07-29',
+    visibleSlots: ['breakfast', 'dinner'],
+    entries: [
+      { date: '2026-07-28', slot: 'dinner', role: 'main', recipeId: 30 }, // 過去日の未達成予定
+      { date: '2026-07-29', slot: 'dinner', role: 'side', recipeId: 20 },
+      { date: '2026-07-29', slot: 'dinner', role: 'main', recipeId: 10 },
+      { date: '2026-07-30', slot: 'lunch', role: 'main', recipeId: 10 }, // 表示していない食事
+    ],
+    titleOf: (id) => titles[id],
+    notes: new Map([['2026-07-30', '外食']]),
+    cookedTitlesByDate: new Map([['2026-07-28', ['カレー']]]),
+  })
+  eq('献立表: 日付見出しは「7/29（水）」の形', formatSheetDayLabel('2026-07-29'), '7/29（水）')
+  eq(
+    '献立表: 過ぎた日は予定を載せず、作った記録だけを載せる(画面の扱いと同じ)',
+    [sheet.days[0].slots.length, sheet.days[0].cookedTitles],
+    [0, ['カレー']],
+  )
+  eq(
+    '献立表: 今日以降は登録した献立を主菜→副菜の順に載せる',
+    sheet.days[1].slots.map((s) => [s.slot, s.dishes.map((d) => `${d.role}:${d.title}`)]),
+    [['dinner', ['main:肉じゃが', 'side:きんぴらごぼう']]],
+  )
+  eq('献立表: 表示していない食事(昼食)は紙にも出さない', sheet.days[2].slots.length, 0)
+  eq('献立表: 日付メモも一緒に載せる', sheet.days[2].note, '外食')
+  eq(
+    '献立表: 見つからないレシピ(隠している等)は載せない',
+    buildPlanSheet({
+      title: 'x',
+      dates: ['2026-07-30'],
+      today: '2026-07-29',
+      visibleSlots: ['dinner'],
+      entries: [{ date: '2026-07-30', slot: 'dinner', role: 'main', recipeId: 999 }],
+      titleOf: () => undefined,
+      notes: new Map(),
+      cookedTitlesByDate: new Map(),
+    }).days[0].slots.length,
+    0,
+  )
+  eq('献立表: 献立も記録もメモも無ければ白紙と分かる(呼び出し側が案内を出す)', sheet.isEmpty, false)
+  eq(
+    '献立表: 空の期間は isEmpty=true',
+    buildPlanSheet({
+      title: 'x',
+      dates: ['2026-07-30'],
+      today: '2026-07-29',
+      visibleSlots: ['dinner'],
+      entries: [],
+      titleOf: () => undefined,
+      notes: new Map(),
+      cookedTitlesByDate: new Map(),
+    }).isEmpty,
+    true,
+  )
+  const lines = planSheetLines(sheet)
+  eq(
+    '献立表(画像化): 日付見出し→中身→メモの順に1行ずつ平らにする',
+    lines.map((l) => `${l.kind}:${l.text}`),
+    [
+      'day:7/28（火）',
+      'dish:作った記録　カレー',
+      'day:7/29（水）',
+      'dish:夕食　主菜 肉じゃが　副菜 きんぴらごぼう',
+      'day:7/30（木）',
+      'note:この日のメモ　外食',
+    ],
+  )
 }
 
 // ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------

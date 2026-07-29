@@ -377,6 +377,8 @@ export const ja = {
     templateSave: 'この週をテンプレとして保存',
     templateSaveDescription:
       '表示中の週の献立を曜日ごと覚えます。あとで別の週や月にまとめて入れられます',
+    // 保存の窓の説明。何を覚えるのか(どの週の何品か)を言い切る
+    templateSaveRange: '{start}〜{end}の献立{n}品を覚えます',
     templateNameLabel: 'テンプレの名前',
     templateNamePlaceholder: '平日の定番 など',
     templateSaveButton: '保存する',
@@ -408,6 +410,23 @@ export const ja = {
     templateDeleteConfirm:
       'テンプレ「{name}」（{n}品）を削除します。すでに献立に入れた分と、ほかのテンプレは消えません。よろしいですか？',
     templateDeleteDone: 'テンプレ「{name}」を削除しました',
+    // 献立表の印刷／画像化(2026-07-29 便CB-2・docs/59 A-4)。週または月の献立を1枚に整形し、
+    // ブラウザ印刷と画像保存の両方に出す。冷蔵庫に貼る・家族に見せる用途(同期なしで共有を満たす)。
+    // 載せる中身の規則はアプリの他の画面と同じ(過ぎた日=作った記録・今日から先=登録した献立)＋日付メモ
+    planSheetTitle: '献立表（印刷・画像で保存）',
+    planSheetHint:
+      '週または月の献立を1枚にまとめます。印刷して冷蔵庫に貼ったり、画像にして家族へ送ったりできます',
+    planSheetBasisNote:
+      '過ぎた日は作った記録、今日から先は登録した献立を載せています。この日のメモも一緒に出ます',
+    planSheetWeekHeading: '{start}〜{end}の献立',
+    planSheetMonthHeading: '{y}年{m}月の献立',
+    planSheetPrint: '印刷する',
+    planSheetImage: '画像で保存',
+    planSheetEmpty: 'この期間には、まだ載せられる献立・記録・メモがありません',
+    planSheetImageDone: '献立表の画像を保存しました',
+    planSheetImageShared: '献立表の画像を共有しました',
+    planSheetImageCancelled: '画像の保存をやめました（保存はしていません）',
+    planSheetImageFailed: '画像を作れませんでした。もう一度お試しください',
     // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がゴチャつきの一因)。
     // 既定閉。選択中の条件が既定以外のときは畳んだラベルにも現在値を出す（例:「提案の条件: 和食」）
     suggestConditionsToggle: '提案の条件',

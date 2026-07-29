@@ -241,6 +241,50 @@
 
 }
 
+/* 献立表の印刷(2026-07-29 便CB-2・docs/59 A-4)。
+   「印刷する」を押したときに、画面のUI(タブ・ボタン・カレンダー等)を一切紙に出さず、
+   献立表だけを紙に出す。
+
+   印刷用の1枚(.plan-sheet-print)は、Reactのポータルで body の直下に置いている
+   (MealPlanPage の renderPlanSheetSection 参照)。こうすると印刷時にアプリ本体(#root)を
+   まるごと display:none にでき、紙が「献立表1枚」だけで終わる。
+   visibility:hidden で隠す書き方だと、隠した要素の場所取り(レイアウト)が残るため、
+   献立表のあとに真っ白なページが何枚も続いてしまう(月表示だと数ページ分)。
+
+   紙は白なので、テーマ(ダーク等)に関わらず文字色は黒・背景は白に固定する
+   (ダークテーマのまま印刷すると白地に白文字になって何も読めないため)。
+   注意: @layerの外に置くこと(レイヤー内だとTailwindのユーティリティに負ける) */
+.plan-sheet-print {
+  display: none;
+}
+
+@media print {
+  /* 紙は白。テーマの地色をそのまま持ち込まない */
+  body {
+    background: #fff !important;
+  }
+
+  /* アプリ本体を含む body 直下の要素はすべて紙に出さない */
+  body > *:not(.plan-sheet-print) {
+    display: none !important;
+  }
+
+  .plan-sheet-print {
+    display: block !important;
+    background: #fff !important;
+  }
+
+  .plan-sheet-print,
+  .plan-sheet-print * {
+    color: #000 !important;
+    background-color: transparent !important;
+  }
+
+  @page {
+    margin: 12mm;
+  }
+}
+
 /* iPadOSのマルチタスク操作ボタン(ウィンドウ上部の「…」等)が戻るヘッダーに被る対策。
    クラスはmain.tsxのiPad判定で:rootに付く。stickyで再上端に張り付いたときも効く。
    注意: @layerの外に置くこと(レイヤー内だとTailwindのpy-2ユーティリティに負ける)。

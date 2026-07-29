@@ -6219,6 +6219,172 @@ try {
     }
   }
 
+  // --- MEALPLAN-A4: 献立表の印刷／画像化(2026-07-29 便CB-2・docs/59 A-4)。
+  // 週・月の献立を1枚に整形し、①ブラウザ印刷(画面のUIは紙に出さず献立表だけを出す)
+  // ②画像保存(既存のレシピ画像カードと同じCanvas機構)の両方が動くことを確認する。
+  // 日付メモ(A-2)も一緒に載ること・過ぎた日の予定は載せない(画面と同じ規則)ことも見る ---
+  currentCheck = 'MEALPLAN-A4'
+  {
+    const psBrowser = await chromium.launch()
+    const psContext = await psBrowser.newContext()
+    const psPage = await psContext.newPage()
+    psPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A4] ${text}`)
+    })
+    psPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A4] ${err.message}`)
+    })
+    try {
+      const psNow = new Date()
+      const psToday = `${psNow.getFullYear()}-${String(psNow.getMonth() + 1).padStart(2, '0')}-${String(psNow.getDate()).padStart(2, '0')}`
+      const psLabel = `${psNow.getMonth() + 1}/${psNow.getDate()}（${['日', '月', '火', '水', '木', '金', '土'][psNow.getDay()]}）`
+      await psPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await psPage.waitForTimeout(1800) // 初回シード完了待ち
+      await psPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.find((r) => r.title === '肉じゃが')
+                const side = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                if (!main || !side) {
+                  reject(new Error('seed recipes not found'))
+                  return
+                }
+                const wtx = idb.transaction(['mealPlans', 'dayNotes', 'settings'], 'readwrite')
+                const plans = wtx.objectStore('mealPlans')
+                plans.add({ date, slot: 'dinner', recipeId: main.id, role: 'main' })
+                plans.add({ date, slot: 'dinner', recipeId: side.id, role: 'side' })
+                wtx.objectStore('dayNotes').put({ date, text: '実家に行く', updatedAt: Date.now() })
+                const settings = wtx.objectStore('settings')
+                const getReq = settings.get(1)
+                getReq.onsuccess = () => {
+                  const current = getReq.result || { id: 1 }
+                  settings.put({
+                    ...current,
+                    id: 1,
+                    proCode: 'UR-E2E-TEST-ONLY',
+                    proActivatedAt: Date.now(),
+                  })
+                }
+                wtx.oncomplete = () => resolve(undefined)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        psToday,
+      )
+      await psPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await psPage.reload({ waitUntil: 'networkidle' })
+      await psPage.waitForTimeout(900)
+
+      // 週タブ: 献立表を開く（既定は閉じている＝画面を占領しない）
+      await psPage.getByRole('button', { name: '週', exact: true }).click()
+      await psPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A4 献立表は既定で畳まれている(画面を占領しない)',
+        (await psPage.locator('.plan-sheet-preview').count()) === 0,
+      )
+      await psPage.getByRole('button', { name: '献立表（印刷・画像で保存）', exact: true }).click()
+      await psPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A4 開くと献立表1枚がプレビューされる',
+        (await psPage.locator('.plan-sheet-preview').count()) === 1,
+      )
+      const psSheetText = (await psPage.locator('.plan-sheet-preview').textContent()) ?? ''
+      check(
+        'MEALPLAN-A4 週の献立表に日付・主菜・副菜が1枚に整形されて載る',
+        psSheetText.includes(psLabel) &&
+          psSheetText.includes('肉じゃが') &&
+          psSheetText.includes('ほうれん草のおひたし'),
+        `sheet=${psSheetText.slice(0, 200)}`,
+      )
+      check(
+        'MEALPLAN-A4 日付メモ(A-2)も一緒に載る(冷蔵庫に貼る用途)',
+        psSheetText.includes('実家に行く'),
+      )
+      check(
+        'MEALPLAN-A4 何を載せた表なのか(過ぎた日=記録・今日から先=予定)を紙の上でも明記する',
+        psSheetText.includes('過ぎた日は作った記録、今日から先は登録した献立'),
+      )
+      check(
+        'MEALPLAN-A4 出どころが分かるようアプリ名とURLを入れる',
+        psSheetText.includes('うちレシピ') && psSheetText.includes('uchirecipe.com'),
+      )
+
+      // 印刷: 画面のUIは紙に出さず、献立表だけを出す(index.cssの@media print)
+      await psPage.emulateMedia({ media: 'print' })
+      await psPage.waitForTimeout(200)
+      check(
+        'MEALPLAN-A4(印刷) 印刷時は献立表だけが見え、画面のUI(タブ等)は紙に出ない',
+        (await psPage.locator('.plan-sheet-print').isVisible()) === true &&
+          (await psPage.getByRole('button', { name: '週', exact: true }).isVisible()) === false,
+      )
+      check(
+        'MEALPLAN-A4(印刷) 印刷用の1枚はアプリ本体の外(body直下)に置き、白紙ページが続かないようにする',
+        (await psPage.evaluate(
+          () => document.querySelector('.plan-sheet-print')?.parentElement === document.body,
+        )) === true,
+      )
+      check(
+        'MEALPLAN-A4(印刷) 印刷用の1枚にも同じ内容(日付・料理・メモ)が入る',
+        ((await psPage.locator('.plan-sheet-print').textContent()) ?? '').includes('実家に行く'),
+      )
+      await psPage.emulateMedia({ media: 'screen' })
+      await psPage.waitForTimeout(200)
+      await psPage.evaluate(() => {
+        window.__e2ePrintCount = 0
+        window.print = () => {
+          window.__e2ePrintCount += 1
+        }
+      })
+      await psPage.getByRole('button', { name: '印刷する', exact: true }).click()
+      await psPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A4(印刷) 「印刷する」でブラウザの印刷が呼ばれる',
+        (await psPage.evaluate(() => window.__e2ePrintCount)) === 1,
+      )
+
+      // 画像保存: 非対応環境ではPNGダウンロードに切り替わる(=生成成功の確認)
+      const [psDownload] = await Promise.all([
+        psPage.waitForEvent('download', { timeout: 15000 }),
+        psPage.getByRole('button', { name: '画像で保存', exact: true }).click(),
+      ])
+      check(
+        'MEALPLAN-A4(画像) 献立表の画像が生成されPNGダウンロードに切り替わる',
+        psDownload.suggestedFilename().endsWith('.png'),
+        psDownload.suggestedFilename(),
+      )
+      check(
+        'MEALPLAN-A4(画像) 保存したことを結果メッセージで伝える',
+        ((await psPage.textContent('body')) ?? '').includes('献立表の画像を保存しました'),
+      )
+
+      // 月タブでも同じ機構で1枚にまとまる(見出しはその月)
+      await psPage.getByRole('button', { name: '月', exact: true }).click()
+      await psPage.waitForTimeout(600)
+      const psMonthHeading = `${psNow.getFullYear()}年${psNow.getMonth() + 1}月の献立`
+      const psMonthSheet = (await psPage.locator('.plan-sheet-preview').textContent()) ?? ''
+      check(
+        'MEALPLAN-A4 月タブでも同じ献立表が出る(見出しはその月)',
+        psMonthSheet.includes(psMonthHeading) && psMonthSheet.includes('肉じゃが'),
+        `heading=${psMonthHeading} sheet=${psMonthSheet.slice(0, 120)}`,
+      )
+    } finally {
+      await psBrowser.close()
+    }
+  }
+
   // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
   // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
   // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を

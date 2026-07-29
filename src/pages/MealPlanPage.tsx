@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -23,6 +24,8 @@ import {
   SlidersHorizontal,
   BookmarkPlus,
   LayoutTemplate,
+  Printer,
+  ImageDown,
 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
@@ -48,6 +51,8 @@ import {
   ALL_DOWS,
   TEMPLATE_NAME_MAX_LENGTH,
 } from '../logic/mealTemplate'
+import { buildPlanSheet, type PlanSheet } from '../logic/planSheet'
+import { sharePlanSheetImage } from '../logic/planSheetImage'
 import Toast from '../components/Toast'
 import {
   useTodayList,
@@ -84,7 +89,7 @@ import {
   cookedPlanEntryIds,
   mealOccasionCount,
 } from '../logic/mealPlan'
-import type { MealGenre, ProteinSource } from '../logic/mealPlan'
+import type { FillWeekPlan, MealGenre, ProteinSource } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -323,6 +328,58 @@ function DayNoteEditor({
         className="mt-1 w-full rounded-sm border border-edge bg-app px-2 py-2 text-sm text-ink placeholder:text-ink-muted/60"
       />
     </div>
+  )
+}
+
+/**
+ * 献立表（2026-07-29 便CB-2・docs/59 A-4）の1枚分の中身。
+ * 画面のプレビュー（.plan-sheet-preview）と、印刷用にbody直下へポータルで置く1枚
+ * （.plan-sheet-print）の両方がこの同じ中身を描く。何を載せるかは純ロジック
+ * logic/planSheet.ts が決めるので、画像保存（logic/planSheetImage.ts）とも内容がずれない。
+ *
+ * 印刷時は index.css 側で文字色を黒・背景を白に固定する（ダークテーマのまま紙に出すと
+ * 白地に白文字になって読めないため）。ここでは画面用のテーマ色だけを指定する。
+ */
+function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
+  return (
+    <>
+      <h3 className="text-lg font-bold">{sheet.title}</h3>
+      <p className="mt-0.5 text-[10px] text-ink-muted">{ja.mealPlan.planSheetBasisNote}</p>
+      <ul className="mt-[var(--space-sm)] divide-y divide-edge">
+        {sheet.days.map((day) => (
+          <li key={day.date} className="py-1.5">
+            <p className="text-sm font-bold text-accent">{day.label}</p>
+            {day.slots.map((slotRow) => (
+              <p key={slotRow.slot} className="mt-0.5 pl-2 text-sm">
+                <span className="font-bold">{slotRow.label}</span>
+                {'　'}
+                {slotRow.dishes.map((dish, i) => (
+                  <span key={`${dish.role}-${i}`}>
+                    {i > 0 && '　'}
+                    <span className="text-ink-muted">{ja.mealPlan.role[dish.role]}</span> {dish.title}
+                  </span>
+                ))}
+              </p>
+            ))}
+            {day.cookedTitles.length > 0 && (
+              <p className="mt-0.5 pl-2 text-sm">
+                <span className="font-bold">{ja.mealPlan.pastCookedTitle}</span>
+                {'　'}
+                {day.cookedTitles.join('　')}
+              </p>
+            )}
+            {day.note && (
+              <p className="mt-0.5 pl-2 text-xs text-ink-muted">
+                {ja.mealPlan.dayNoteLabel}　{day.note}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-[var(--space-sm)] text-[10px] text-ink-muted">
+        {ja.app.name}｜{ja.app.url}
+      </p>
+    </>
   )
 }
 
@@ -1497,7 +1554,11 @@ export default function MealPlanPage() {
   }
 
   /**
-   * 週の表示中の食事帯を、自動提案でまとめて埋める。
+   * 「まとめて献立を立てる」の実行本体（2026-07-29 便CB-2・docs/59 A-5で週タブ専用から切り出した）。
+   * 計画(planWeekFill)と対象期間の献立を受け取り、自動提案由来の行を消してから提案で埋め直し、
+   * **実際にDBへ追加できた品数**を返す。週タブ(fillWeek)と月タブの一括提案(fillMonth)は
+   * この1本を共有する＝提案の質(日単位のジャンル統一・たんぱく源の分散・一品ものの扱い)が
+   * 週と月で食い違わないようにするため。
    *
    * 2026-07-22 便BE(外部レビューで見つかった欠陥の修正): 以前は表示中の全枠(手動で選んだ枠も含む)を
    * 一旦クリアしてから再提案していたため、手動で入れた献立が無警告で上書きされて消えていた。
@@ -1507,31 +1568,24 @@ export default function MealPlanPage() {
    * これにより「手動配置の保護」と「押すたびの再抽選(2026-07-14仕様。自動枠に限って維持)」を両立する。
    * 埋める枠にはauto=trueを付け、次回もこの枠だけが再抽選対象になるようにする。
    * 過去日・非表示帯の枠は対象外で、重複回避の除外対象としてのみ使う(planWeekFill内で処理)。
-   * 手動枠を残した場合は結果メッセージで明示する(空き枠だけ埋めたことも伝わる)。
    */
-  const fillWeek = async () => {
-    if (!recipes) return
-    setMessage('')
-    // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
-    // 「おまかせで提案」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
-    if (visibleRecipes.length === 0) {
-      setMessage(ja.mealPlan.noSuggestion)
-      return
-    }
-    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
+  const executeFill = async (
+    plan: FillWeekPlan,
+    rangeEntries: MealPlanEntry[],
+  ): Promise<number> => {
     // 埋め直す役割に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
     for (const id of plan.autoEntryIdsToRemove) {
       await removeMealEntry(id)
     }
     const usedRecipeIds = [...plan.usedRecipeIds]
 
-    // たんぱく源の週内分散(docs/56 §3-6): 今週まだ少ない主菜のソース(肉/魚/卵/豆腐)を軽く優先し、
+    // たんぱく源の分散(docs/56 §3-6): 対象期間でまだ少ない主菜のソース(肉/魚/卵/豆腐)を軽く優先し、
     // 肉→肉→肉と連続で偏るのを防ぐ。残る手動主菜も集計に入れる。'その他'は分散対象にしない
     const proteinCounts: Record<ProteinSource, number> = { 肉: 0, 魚: 0, 卵: 0, 豆腐: 0, その他: 0 }
     const bumpProtein = (r: Recipe) => {
       proteinCounts[proteinSourceOf(r)] += 1
     }
-    for (const e of entries ?? []) {
+    for (const e of rangeEntries) {
       if ((e.role ?? 'main') !== 'main') continue
       if (e.id != null && plan.autoEntryIdsToRemove.includes(e.id)) continue // これから消える主菜は数えない
       const r = recipeById.get(e.recipeId)
@@ -1580,7 +1634,7 @@ export default function MealPlanPage() {
     // 手動主菜だけの枠には主菜のジャンルに揃えた副菜を足す(主菜が一品ものなら副菜は足さない)。
     for (const { date, slot, fillRole } of plan.partialFills) {
       if (fillRole === 'side') {
-        const manualMain = (entries ?? []).find(
+        const manualMain = rangeEntries.find(
           (e) => e.date === date && e.slot === slot && (e.role ?? 'main') === 'main' && !e.auto,
         )
         const mainRecipe = manualMain ? recipeById.get(manualMain.recipeId) : undefined
@@ -1617,6 +1671,25 @@ export default function MealPlanPage() {
         }
       }
     }
+
+    return added
+  }
+
+  /**
+   * 週の表示中の食事帯を、自動提案でまとめて埋める（結果メッセージ・今日の枠へのスクロールまで）。
+   * 埋め方そのものは executeFill が担う（便CB-2で月タブの一括提案と共通化した）。
+   */
+  const fillWeek = async () => {
+    if (!recipes) return
+    setMessage('')
+    // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
+    // 「おまかせで提案」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
+    if (visibleRecipes.length === 0) {
+      setMessage(ja.mealPlan.noSuggestion)
+      return
+    }
+    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
+    const added = await executeFill(plan, entries ?? [])
 
     // 結果メッセージ(2026-07-29 便CD/MP-06で正直な出し分けに修正)。
     // 従来は「残す枠が1つでもあれば」だけを見て「空いていた枠に献立を立てました」と言っていたため、
@@ -1827,6 +1900,153 @@ export default function MealPlanPage() {
     if (selectedTemplateId === id) setSelectedTemplateId(null)
     setMessage(ja.mealPlan.templateDeleteDone.replace('{name}', name))
   }
+
+  /**
+   * A-4 献立表の印刷／画像化（2026-07-29 便CB-2・docs/59）。
+   * 週または月の献立を1枚に整形し、①ブラウザ印刷（index.css の @media print が .plan-sheet だけを
+   * 紙に出す）②画像保存（既存のレシピ画像カードと同じCanvas機構を流用）の2通りで外に出せるようにする。
+   * 冷蔵庫に貼る・家族に見せる用途で、アカウントも同期も要らない共有手段になる（docs/59 C-2の代替）。
+   * 載せる中身の規則はアプリの他の画面と同じ（過ぎた日＝作った記録・今日から先＝登録した献立）＋日付メモ。
+   */
+  const [planSheetOpen, setPlanSheetOpen] = useState(false)
+  // 日付→その日の「作った記録」の料理名（献立表の過去日の行に使う）
+  const cookedTitlesByDate = useMemo(() => {
+    const map = new Map<string, string[]>()
+    cookedLogsByDate.forEach((list, date) => {
+      map.set(
+        date,
+        list.map(({ recipe }) => recipe.title),
+      )
+    })
+    return map
+  }, [cookedLogsByDate])
+  const sheetTitleOf = useMemo(
+    () => (recipeId: number) => recipeById.get(recipeId)?.title,
+    [recipeById],
+  )
+  const weekPlanSheet = useMemo(
+    () =>
+      buildPlanSheet({
+        title: ja.mealPlan.planSheetWeekHeading
+          .replace('{start}', formatMonthDay(dates[0]))
+          .replace('{end}', formatMonthDay(dates[6])),
+        dates,
+        today,
+        visibleSlots,
+        entries: entries ?? [],
+        titleOf: sheetTitleOf,
+        notes: new Map((weekDayNotes ?? []).map((n) => [n.date, n.text])),
+        cookedTitlesByDate,
+      }),
+    [dates, today, visibleSlots, entries, sheetTitleOf, weekDayNotes, cookedTitlesByDate],
+  )
+  const monthPlanSheet = useMemo(
+    () =>
+      buildPlanSheet({
+        title: ja.mealPlan.planSheetMonthHeading
+          .replace('{y}', monthAnchor.slice(0, 4))
+          .replace('{m}', String(Number(monthAnchor.slice(5, 7)))),
+        dates: monthDatesList,
+        today,
+        visibleSlots,
+        entries: monthEntries ?? [],
+        titleOf: sheetTitleOf,
+        notes: new Map((monthDayNotes ?? []).map((n) => [n.date, n.text])),
+        cookedTitlesByDate,
+      }),
+    [
+      monthAnchor,
+      monthDatesList,
+      today,
+      visibleSlots,
+      monthEntries,
+      sheetTitleOf,
+      monthDayNotes,
+      cookedTitlesByDate,
+    ],
+  )
+  const savePlanSheetImage = async (sheet: PlanSheet) => {
+    try {
+      const result = await sharePlanSheetImage(sheet)
+      setMessage(
+        result === 'shared'
+          ? ja.mealPlan.planSheetImageShared
+          : result === 'cancelled'
+            ? ja.mealPlan.planSheetImageCancelled
+            : ja.mealPlan.planSheetImageDone,
+      )
+    } catch {
+      // Canvasが使えない等で作れなかったときに無反応にしない（何が起きたかを必ず伝える）
+      setMessage(ja.mealPlan.planSheetImageFailed)
+    }
+  }
+
+  /**
+   * 献立表の折りたたみ（週タブ・月タブで同じものを使う）。開いている間だけ .plan-sheet が
+   * 画面とDOMに存在し、その状態で「印刷する」を押す＝紙に出るのは必ず今見えている1枚になる。
+   */
+  const renderPlanSheetSection = (sheet: PlanSheet) => (
+    <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface shadow-sm">
+      <button
+        type="button"
+        onClick={() => setPlanSheetOpen((v) => !v)}
+        aria-expanded={planSheetOpen}
+        className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
+      >
+        <span className="font-bold">{ja.mealPlan.planSheetTitle}</span>
+        {planSheetOpen ? (
+          <ChevronUp size={18} className="shrink-0 text-accent" aria-hidden />
+        ) : (
+          <ChevronDown size={18} className="shrink-0 text-accent" aria-hidden />
+        )}
+      </button>
+      {planSheetOpen && (
+        <div className="px-[var(--space-md)] pb-[var(--space-md)]">
+          <p className="text-xs text-ink-muted">{ja.mealPlan.planSheetHint}</p>
+          {sheet.isEmpty ? (
+            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+              {ja.mealPlan.planSheetEmpty}
+            </p>
+          ) : (
+            <>
+              <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                >
+                  <Printer size={14} aria-hidden />
+                  {ja.mealPlan.planSheetPrint}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void savePlanSheetImage(sheet)}
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                >
+                  <ImageDown size={14} aria-hidden />
+                  {ja.mealPlan.planSheetImage}
+                </button>
+              </div>
+              {/* 画面のプレビュー。長い月の表が画面を占領しないよう高さを抑える */}
+              <div className="mt-[var(--space-sm)] max-h-[60vh] overflow-y-auto">
+                <div className="plan-sheet-preview rounded-sm border border-edge bg-app p-[var(--space-md)]">
+                  <PlanSheetView sheet={sheet} />
+                </div>
+              </div>
+              {/* 印刷用の1枚。body直下へ出す（＝印刷時にアプリ本体をまるごと消せるので、
+                  献立表のあとに真っ白なページが続かない。詳細は index.css の @media print） */}
+              {createPortal(
+                <div className="plan-sheet-print">
+                  <PlanSheetView sheet={sheet} />
+                </div>,
+                document.body,
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  )
 
   // 週タブ「この帯の今週分を空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 帯を1つ選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
@@ -2664,6 +2884,9 @@ export default function MealPlanPage() {
                 </Link>
               </div>
             )}
+
+            {/* A-4 献立表(印刷・画像で保存)。この月の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
+            {renderPlanSheetSection(monthPlanSheet)}
           </div>
         ) : (
           // 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。月タブを完全に
@@ -3078,6 +3301,9 @@ export default function MealPlanPage() {
         </section>
       )}
 
+      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
+      {renderPlanSheetSection(weekPlanSheet)}
+
       {/* この週の買い物リストを作る */}
       <button
         type="button"
@@ -3297,11 +3523,10 @@ export default function MealPlanPage() {
               </button>
             </div>
             <p className="mt-1 text-sm text-ink-muted">
-              {ja.mealPlan.templateApplyRangeWeek
-                .replace('{start}', dates[0].replaceAll('-', '/'))
-                .replace('{end}', dates[6].replaceAll('-', '/'))}
-              {'　'}
-              {ja.mealPlan.templateItemCount.replace('{n}', String(weekTemplateItems.length))}
+              {ja.mealPlan.templateSaveRange
+                .replace('{start}', formatMonthDay(dates[0]))
+                .replace('{end}', formatMonthDay(dates[6]))
+                .replace('{n}', String(weekTemplateItems.length))}
             </p>
             <label className="mt-[var(--space-md)] block text-sm font-bold text-ink-muted">
               {ja.mealPlan.templateNameLabel}
@@ -3360,8 +3585,8 @@ export default function MealPlanPage() {
                     .replace('{y}', monthAnchor.slice(0, 4))
                     .replace('{m}', String(Number(monthAnchor.slice(5, 7))))
                 : ja.mealPlan.templateApplyRangeWeek
-                    .replace('{start}', dates[0].replaceAll('-', '/'))
-                    .replace('{end}', dates[6].replaceAll('-', '/'))}
+                    .replace('{start}', formatMonthDay(dates[0]))
+                    .replace('{end}', formatMonthDay(dates[6]))}
             </p>
             {(mealTemplates?.length ?? 0) === 0 ? (
               <p className="mt-[var(--space-md)] text-sm text-ink-muted">
