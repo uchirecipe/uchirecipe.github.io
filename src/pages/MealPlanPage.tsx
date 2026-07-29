@@ -66,6 +66,8 @@ import {
   recipeGenre,
   detectGenreMix,
   proteinSourceOf,
+  preferredProteinSources,
+  dishAvoidKeys,
   cookedPlanEntryIds,
   mealOccasionCount,
 } from '../logic/mealPlan'
@@ -1121,7 +1123,32 @@ export default function MealPlanPage() {
       if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
       return
     }
-    const picked = suggestForSlot(visibleRecipes, { ...baseOptions, role })
+    // 副菜行のサイコロにも、ペア提案(suggestPairForSlot)・まとめて献立と同じ条件を効かせる
+    // (2026-07-29 便CD/MP-05)。従来この非ペア経路だけが role しか渡しておらず、
+    // 「副菜を純粋な副菜に寄せる(preferDishType)」も「主菜のジャンルに揃える(genre)」も
+    // 効いていなかったため、8割が別ジャンル・2割が汁物になっていた。最も使われる動線が
+    // 最も手当てされていなかった箇所。あわせて主菜との食材・食感の重複回避も渡す(MP-04)。
+    // 一品ものの主菜でもここでは提案する(ユーザーが明示的に押した行を無反応にしない)
+    const slotMainRecipe =
+      role === 'side'
+        ? slotEntries
+            .filter((e) => (e.role ?? 'main') === 'main')
+            .map((e) => recipeById.get(e.recipeId))
+            .find((r): r is Recipe => !!r)
+        : undefined
+    const picked = suggestForSlot(
+      visibleRecipes,
+      role === 'side'
+        ? {
+            ...baseOptions,
+            role,
+            preferDishType: 'side' as const,
+            genre: genreFilter ?? (slotMainRecipe ? recipeGenre(slotMainRecipe) : undefined),
+            avoidKeys: slotMainRecipe ? dishAvoidKeys(slotMainRecipe) : undefined,
+            excludeRecipeIds: slotMainRecipe?.id != null ? [slotMainRecipe.id] : undefined,
+          }
+        : { ...baseOptions, role },
+    )
     if (!picked) {
       setMessage(ja.mealPlan.noSuggestion)
       return
@@ -1169,11 +1196,10 @@ export default function MealPlanPage() {
       const r = recipeById.get(e.recipeId)
       if (r) bumpProtein(r)
     }
-    const preferProteinSources = (): ProteinSource[] => {
-      const sources: ProteinSource[] = ['肉', '魚', '卵', '豆腐']
-      const min = Math.min(...sources.map((s) => proteinCounts[s]))
-      return sources.filter((s) => proteinCounts[s] === min)
-    }
+    // 「今週まだ少ないたんぱく源」の算出は logic/mealPlan.ts の純関数に切り出した
+    // (2026-07-29 便CD/MP-03。テストで守れるようにするため。'その他'の主菜が構造的に
+    // 出なくなっていた欠陥と、主菜プールが強制ローテーションになる副作用の修正も同関数側)
+    const preferProteinSources = (): ProteinSource[] => preferredProteinSources(proteinCounts)
 
     const baseOpts = {
       quickOnly,
@@ -1183,6 +1209,10 @@ export default function MealPlanPage() {
       preferHighProtein,
       yesterdayRecipeIds,
     }
+
+    // 実際にDBへ追加した品数(2026-07-29 便CD/MP-06)。結果メッセージはこの実数で出す。
+    // plan.slotsToFill.length で判定してはいけない(一品ものスキップ・候補0件で0品追加になる)
+    let added = 0
 
     // 両役割が空 or 自動だけの枠: 主菜+副菜のペアで埋める(一品ものの主菜なら副菜は付かない=空く)
     for (const { date, slot } of plan.slotsToFill) {
@@ -1196,10 +1226,12 @@ export default function MealPlanPage() {
         await addMealEntry(date, slot, main.id!, 'main', true)
         usedRecipeIds.push(main.id!)
         bumpProtein(main)
+        added++
       }
       if (side) {
         await addMealEntry(date, slot, side.id!, 'side', true)
         usedRecipeIds.push(side.id!)
+        added++
       }
     }
 
@@ -1219,10 +1251,14 @@ export default function MealPlanPage() {
           preferDishType: 'side',
           usedRecipeIds,
           genre: genreFilter ?? (mainRecipe ? recipeGenre(mainRecipe) : undefined),
+          // 手動で入れた主菜とも食材・食感を重ねない(2026-07-29 便CD/MP-04)
+          avoidKeys: mainRecipe ? dishAvoidKeys(mainRecipe) : undefined,
+          excludeRecipeIds: mainRecipe?.id != null ? [mainRecipe.id] : undefined,
         })
         if (side) {
           await addMealEntry(date, slot, side.id!, 'side', true)
           usedRecipeIds.push(side.id!)
+          added++
         }
       } else {
         const main = suggestForSlot(visibleRecipes, {
@@ -1236,15 +1272,29 @@ export default function MealPlanPage() {
           await addMealEntry(date, slot, main.id!, 'main', true)
           usedRecipeIds.push(main.id!)
           bumpProtein(main)
+          added++
         }
       }
     }
 
-    // 結果メッセージ。手動枠を残した場合と、今日を含む週で「今日の献立」(日タブ)が
-    // 自動では変わらない場合(タスク2の混乱対策)を、状況に応じて出す
+    // 結果メッセージ(2026-07-29 便CD/MP-06で正直な出し分けに修正)。
+    // 従来は「残す枠が1つでもあれば」だけを見て「空いていた枠に献立を立てました」と言っていたため、
+    // 1品も追加していない(行のサイコロで全部埋めた後など)ときにも「立てました」と嘘を言っていた。
+    // 実際に追加した品数(added)で分岐し、0品なら0品と伝える
     const messages: string[] = []
-    if (plan.preservedSlotKeys.size > 0) {
-      messages.push(ja.mealPlan.fillWeekKeptManual.replace('{n}', String(plan.preservedSlotKeys.size)))
+    const preserved = plan.preservedSlotKeys.size
+    if (added > 0) {
+      if (preserved > 0) {
+        messages.push(
+          ja.mealPlan.fillWeekKeptManual
+            .replace('{n}', String(preserved))
+            .replace('{a}', String(added)),
+        )
+      }
+    } else if (preserved > 0) {
+      messages.push(ja.mealPlan.fillWeekNoRoom.replace('{n}', String(preserved)))
+    } else {
+      messages.push(ja.mealPlan.fillWeekNoAdded)
     }
     // 今日を含む週で「今日の献立」(日タブ)がどうなるかの案内(2026-07-22 便BE・タスク2 →
     // 2026-07-29 便CD/MP-01で出し分けを修正)。自動取り込みは「同じ日につき1回だけ」なので、

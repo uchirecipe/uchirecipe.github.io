@@ -56,12 +56,16 @@ import {
   rangeDayCount,
   isOneDish,
   proteinSourceOf,
+  preferredProteinSources,
+  isSlipperyDish,
+  dishAvoidKeys,
   detectGenreMix,
   isMainDish,
   recipeGenre,
   cookedPlanEntryIds,
   mealOccasionCount,
 } from '../src/logic/mealPlan.ts'
+import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import {
@@ -1964,6 +1968,123 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     eq('dowIndex: 並び順インデックスとは一致しない(旧実装の再発防止)', rolling.every((d, i) => d === i), false)
   }
 
+  // MP-03 たんぱく源分散の絞り込み: 'その他'を候補に入れ、「最少ちょうど」から「最少+1まで」に緩める。
+  // 以前は'その他'が抜けていたため、たんぱく源が'その他'と判定される主菜8品
+  // (ツナキャベツ丼・ペペロンチーノ・寄せ鍋・クリームシチュー等)が まとめて献立 から
+  // 構造的に出なくなっていた(0/100枠)。docs/56 §3-6「軽く優先・厳格化しない」への復帰
+  eq(
+    'preferredProteinSources: 「その他」が候補から消えない(まとめて献立で出なくなる欠陥の再発防止)',
+    preferredProteinSources({ 肉: 0, 魚: 0, 卵: 0, 豆腐: 0, その他: 0 }).includes('その他'),
+    true,
+  )
+  eq(
+    'preferredProteinSources: 最少+1までを候補にする(強制ローテーションにしない)',
+    preferredProteinSources({ 肉: 2, 魚: 1, 卵: 0, 豆腐: 3, その他: 1 }),
+    ['魚', '卵', 'その他'],
+  )
+  eq(
+    'preferredProteinSources: 使用数が並んでいれば全ソースが候補',
+    preferredProteinSources({ 肉: 1, 魚: 1, 卵: 1, 豆腐: 1, その他: 1 }),
+    ['肉', '魚', '卵', '豆腐', 'その他'],
+  )
+  eq(
+    'preferredProteinSources: 肉に偏っていれば肉は候補から外れる(分散機能は死なない)',
+    preferredProteinSources({ 肉: 5, 魚: 0, 卵: 0, 豆腐: 0, その他: 0 }).includes('肉'),
+    false,
+  )
+
+  // MP-04 同じ食事の中での食材・食感の重複回避。差し替え理由の69%がこのクラスタだった
+  eq('isSlipperyDish: しらたきはつるっと系', isSlipperyDish({ title: 'しらたきのチャプチェ風', ingredients: [{ name: 'しらたき', amount: '100', unit: 'g' }] }), true)
+  eq('isSlipperyDish: 春雨はつるっと系', isSlipperyDish({ title: '春雨サラダ', ingredients: [{ name: '春雨', amount: '100', unit: 'g' }] }), true)
+  eq('isSlipperyDish: こんにゃくはつるっと系', isSlipperyDish({ title: 'こんにゃくの炒り煮', ingredients: [{ name: 'こんにゃく', amount: '100', unit: 'g' }] }), true)
+  eq('isSlipperyDish: 普通の副菜はつるっと系でない', isSlipperyDish({ title: 'ほうれん草のおひたし', ingredients: [{ name: 'ほうれん草', amount: '100', unit: 'g' }] }), false)
+  eq(
+    'dishAvoidKeys: 主菜のたんぱく源と食感がキーになる',
+    dishAvoidKeys({ title: 'しらたきのチャプチェ風', tags: ['中華'], ingredients: [{ name: 'しらたき', amount: '100', unit: 'g' }, { name: '牛切り落とし肉', amount: '100', unit: 'g' }] }),
+    ['protein:肉', 'texture:つるっと'],
+  )
+  eq(
+    'dishAvoidKeys: 「その他」(野菜が主役)はキーにしない(副菜がほぼ全滅して絞り込みにならないため)',
+    dishAvoidKeys({ title: 'きんぴらごぼう', tags: ['和食'], ingredients: [{ name: 'ごぼう', amount: '100', unit: 'g' }] }),
+    [],
+  )
+  {
+    // 中華の副菜3品を再現し、つるっと系(春雨サラダ)が後回しになることを確認する
+    const recipes = [
+      mkRecipe(1, { title: '春雨サラダ', tags: ['中華'], dishType: 'side', ingredients: [{ name: '春雨', amount: '100', unit: 'g' }] }),
+      mkRecipe(2, { title: '野菜炒め', tags: ['中華'], dishType: 'side', ingredients: [{ name: 'キャベツ', amount: '100', unit: 'g' }] }),
+      mkRecipe(3, { title: '蒸しなすの香味だれ', tags: ['中華'], dishType: 'side', ingredients: [{ name: 'なす', amount: '100', unit: 'g' }] }),
+    ]
+    const picks = Array.from({ length: 20 }, () =>
+      suggestForSlot(recipes, opts({ role: 'side', preferDishType: 'side', avoidKeys: ['protein:肉', 'texture:つるっと'] }))?.id,
+    )
+    eq('avoidKeys: つるっと系の主菜のとき、つるっと系の副菜(春雨サラダ)は出ない', picks.includes(1), false)
+    eq('avoidKeys: 残り2品からは提案される(0件にはしない)', picks.every((id) => id === 2 || id === 3), true)
+  }
+  {
+    // 主菜がえび(魚)のとき、ツナ副菜(魚)を後回しにする
+    const recipes = [
+      mkRecipe(1, { title: 'ツナと蒸し大豆の香味サラダ', tags: ['洋食'], dishType: 'side', ingredients: [{ name: 'ツナ缶', amount: '100', unit: 'g' }] }),
+      mkRecipe(2, { title: 'コールスロー', tags: ['洋食'], dishType: 'side', ingredients: [{ name: 'キャベツ', amount: '100', unit: 'g' }] }),
+    ]
+    const picks = Array.from({ length: 20 }, () =>
+      suggestForSlot(recipes, opts({ role: 'side', preferDishType: 'side', avoidKeys: ['protein:魚'] }))?.id,
+    )
+    eq('avoidKeys: 魚の主菜のとき、魚の副菜(ツナ)は出ない', picks.every((id) => id === 2), true)
+  }
+  eq(
+    'avoidKeys: 一致しない候補が0件なら緩和して提案する(0件にしない)',
+    suggestForSlot(
+      [mkRecipe(1, { title: '春雨サラダ', tags: ['中華'], dishType: 'side', ingredients: [{ name: '春雨', amount: '100', unit: 'g' }] })],
+      opts({ role: 'side', preferDishType: 'side', avoidKeys: ['texture:つるっと'] }),
+    )?.id,
+    1,
+  )
+  {
+    // ペア提案の実地: つるっと系の主菜には、つるっとしていない副菜が付く
+    const recipes = [
+      mkRecipe(1, { title: 'しらたきのチャプチェ風', tags: ['中華'], dishType: 'main', ingredients: [{ name: 'しらたき', amount: '100', unit: 'g' }, { name: '牛切り落とし肉', amount: '100', unit: 'g' }] }),
+      mkRecipe(2, { title: '春雨サラダ', tags: ['中華'], dishType: 'side', ingredients: [{ name: '春雨', amount: '100', unit: 'g' }] }),
+      mkRecipe(3, { title: '野菜炒め', tags: ['中華'], dishType: 'side', ingredients: [{ name: 'キャベツ', amount: '100', unit: 'g' }] }),
+    ]
+    const results = Array.from({ length: 20 }, () => suggestPairForSlot(recipes, opts()))
+    eq('ペア提案(MP-04): 主菜はしらたきのチャプチェ風', results.every((r) => r.main?.id === 1), true)
+    eq('ペア提案(MP-04): つるっと系が重ならない副菜が選ばれる(春雨サラダは出ない)', results.every((r) => r.side?.id === 3), true)
+  }
+
+  // MP-09 デザートが副菜に出る/同じ料理が同じ枠に2回入る
+  {
+    // 「肉じゃが(main)」「水ようかん(dessert)」の2品しかない状態
+    const recipes = [
+      mkRecipe(1, { title: '肉じゃが', tags: ['和食'], dishType: 'main', ingredients: [{ name: '牛こま切れ肉', amount: '100', unit: 'g' }] }),
+      mkRecipe(2, { title: '水ようかん', tags: ['和食'], dishType: 'dessert', ingredients: [{ name: 'こしあん', amount: '100', unit: 'g' }] }),
+    ]
+    const results = Array.from({ length: 20 }, () => suggestPairForSlot(recipes, opts()))
+    eq('MP-09: 副菜候補が0件でもデザートは副菜にしない(副菜なしにする)', results.every((r) => r.side === undefined), true)
+    eq('MP-09: 主菜は肉じゃがのまま提案される', results.every((r) => r.main?.id === 1), true)
+  }
+  {
+    // 主菜になりうる品が1品しかない状態でも、同じ料理が主菜と副菜の両方に入らない
+    const recipes = [mkRecipe(1, { title: '肉じゃが', tags: ['和食'], dishType: 'main', ingredients: [{ name: '牛こま切れ肉', amount: '100', unit: 'g' }] })]
+    const results = Array.from({ length: 20 }, () => suggestPairForSlot(recipes, opts()))
+    eq('MP-09: 同じ枠の主菜と副菜に同じ料理は入らない', results.every((r) => r.main?.id === 1 && r.side === undefined), true)
+  }
+  eq(
+    'excludeRecipeIds: 指定したレシピは段階的緩和でも復活しない(ハード除外)',
+    suggestForSlot([mkRecipe(1, { tags: ['和食'] })], opts({ excludeRecipeIds: [1] })),
+    undefined,
+  )
+  eq(
+    'MP-09: 主菜候補が0件でもデザートは主菜にしない',
+    suggestForSlot([mkRecipe(1, { title: '水ようかん', dishType: 'dessert' })], opts({ role: 'main' })),
+    undefined,
+  )
+  eq(
+    'MP-09: dishType未設定でも「おやつ」タグは副菜の緩和段で除外される',
+    suggestForSlot([mkRecipe(1, { tags: ['おやつ'] })], opts({ role: 'side' })),
+    undefined,
+  )
+
   // excludeYesterdayPlanRecipes単体: 除外0件時はpoolをそのまま返す・id未設定要素は素通し
   {
     const pool = [{ id: 1 }, { id: 2 }, { id: 3 }]
@@ -1983,6 +2104,53 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
       [1, 2, 3],
     )
   }
+}
+
+// ---------- preferSeasonWithFallback(ホームの候補が季節で痩せる問題・2026-07-29 便CD/MP-12) ----------
+// 季節ぴったりの品が少ないときは通年・季節指定なしの品も自動で混ぜる。同梱の夏タグは5品しかなく、
+// 従来のpreferSeasonは「1品でもあればその季節の品だけ」に絞るため、何度振り直しても同じ5品しか出なかった。
+{
+  const mk = (id, season) => ({
+    id,
+    title: `レシピ${id}`,
+    servings: 2,
+    effortLevel: 'easy',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+    ...(season ? { season } : {}),
+  })
+  // 夏5品＋通年20品 = 従来なら夏5品だけ。閾値(10)未満なので通年も混ぜて25品にする
+  {
+    const pool = [
+      ...Array.from({ length: 5 }, (_, i) => mk(i + 1, 'summer')),
+      ...Array.from({ length: 20 }, (_, i) => mk(100 + i, 'all')),
+    ]
+    const got = preferSeasonWithFallback(pool, 'summer')
+    eq('preferSeasonWithFallback: 季節の品が少なければ通年も混ぜる(夏5品固定の解消)', got.length, 25)
+    eq('preferSeasonWithFallback: 季節の品は必ず残る', got.filter((r) => r.season === 'summer').length, 5)
+  }
+  // 季節の品が十分あれば従来どおり季節優先のまま(季節感を捨てない)
+  {
+    const pool = [
+      ...Array.from({ length: SEASON_MIN_CANDIDATES, }, (_, i) => mk(i + 1, 'summer')),
+      ...Array.from({ length: 20 }, (_, i) => mk(100 + i, 'all')),
+    ]
+    const got = preferSeasonWithFallback(pool, 'summer')
+    eq('preferSeasonWithFallback: 季節の品が十分あれば季節優先のまま', got.length, SEASON_MIN_CANDIDATES)
+  }
+  // 季節外しか無ければ0件にはしない(そのまま返す)
+  eq(
+    'preferSeasonWithFallback: 季節外しか無ければ0件にせずそのまま返す',
+    preferSeasonWithFallback([mk(1, 'winter')], 'summer').length,
+    1,
+  )
+  eq('preferSeasonWithFallback: 空配列はそのまま', preferSeasonWithFallback([], 'summer').length, 0)
 }
 
 // ---------- 期間の食費(2026-07-17 便AB・docs/35 §5): normalizeDateRange/rangeDayCount ----------
