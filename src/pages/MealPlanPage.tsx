@@ -49,6 +49,7 @@ import {
   MEAL_SLOTS,
   MEAL_GENRES,
   weekDates,
+  dowIndex,
   shiftWeek,
   shiftDate,
   isPastDate,
@@ -1245,10 +1246,19 @@ export default function MealPlanPage() {
     if (plan.preservedSlotKeys.size > 0) {
       messages.push(ja.mealPlan.fillWeekKeptManual.replace('{n}', String(plan.preservedSlotKeys.size)))
     }
+    // 今日を含む週で「今日の献立」(日タブ)がどうなるかの案内(2026-07-22 便BE・タスク2 →
+    // 2026-07-29 便CD/MP-01で出し分けを修正)。自動取り込みは「同じ日につき1回だけ」なので、
+    // まだ今日の取り込みが済んでいなければ、次に日タブを開いた時点で今日の分が取り込まれる。
+    // 済んでいれば自動では変わらない。日/週の同期モデル自体(週=計画・日=当日・1日1回取り込み)は
+    // 現行設計のまま維持し、案内文だけを実挙動に合わせる
     const todayRefilled =
       plan.slotsToFill.some((s) => s.date === today) || plan.partialFills.some((s) => s.date === today)
     if (todayRefilled && (todayList?.length ?? 0) > 0) {
-      messages.push(ja.mealPlan.fillWeekTodayNotice)
+      messages.push(
+        settings?.lastAutoImportDate === today
+          ? ja.mealPlan.fillWeekTodayNotice
+          : ja.mealPlan.fillWeekTodayWillImport,
+      )
     }
     if (messages.length > 0) setMessage(messages.join(' '))
 
@@ -2218,7 +2228,7 @@ export default function MealPlanPage() {
 
       {/* 7日分のカード */}
       <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
-        {dates.map((date, dayIndex) => (
+        {dates.map((date) => (
           <section
             key={date}
             ref={date === today ? todaySectionRef : undefined}
@@ -2227,7 +2237,10 @@ export default function MealPlanPage() {
             }`}
           >
             <h2 className="font-bold">
-              {dowLabels[dayIndex]} {date.replaceAll('-', '/')}
+              {/* 曜日は必ず日付から引く(2026-07-29 便CD/MP-02)。並び順(配列インデックス)で
+                  引いていたため、「今日から7日間」表示では今日が月曜の日以外は全行の曜日が
+                  日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る) */}
+              {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
               {date === today && <span className="ml-2 text-sm text-accent">{ja.mealPlan.todayBadge}</span>}
             </h2>
             {/* 今日・未来日は編集可能な予定グリッド。過去日は予定を表示から消し、下の「作った記録」

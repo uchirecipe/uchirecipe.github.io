@@ -3765,6 +3765,37 @@ try {
         'MEALPLAN-01(便U-4) 夕食を空にすると割り当て済みだった「肉じゃが」も消える(未定に戻る)',
         (await mpPage.getByText('肉じゃが', { exact: true }).count()) === 0,
       )
+
+      // 2026-07-29 便CD/MP-02: 「今日から7日間」表示の曜日ラベルが日付と一致すること。
+      // 従来は7日カードの並び順(配列インデックス)で曜日を引いていたため、今日が月曜の日以外は
+      // 表示中の7行すべての曜日が日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る)。
+      // このモードは自動テストが1件も無く、ユーザーからも報告されにくい盲点だったので恒久化する
+      await mpPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await mpPage.waitForTimeout(500)
+      const rollingHeads = await mpPage.evaluate(() => {
+        const dow = ['月', '火', '水', '木', '金', '土', '日']
+        const found = []
+        const mismatch = []
+        document.querySelectorAll('h2').forEach((h) => {
+          const m = (h.textContent ?? '').match(/^([月火水木金土日])\s+(\d{4})\/(\d{2})\/(\d{2})/)
+          if (!m) return
+          const d = new Date(`${m[2]}-${m[3]}-${m[4]}T00:00:00`)
+          const expected = dow[(d.getDay() + 6) % 7]
+          found.push(`${m[1]} ${m[2]}/${m[3]}/${m[4]}`)
+          if (expected !== m[1]) mismatch.push(`${m[2]}/${m[3]}/${m[4]} は${expected}なのに${m[1]}と表示`)
+        })
+        return { found, mismatch }
+      })
+      check(
+        'MEALPLAN-01(便CD/MP-02) 「今日から7日間」で7日分のカード見出しが出る',
+        rollingHeads.found.length === 7,
+        `found=${rollingHeads.found.length}`,
+      )
+      check(
+        'MEALPLAN-01(便CD/MP-02) 「今日から7日間」の曜日ラベルが日付と一致する',
+        rollingHeads.mismatch.length === 0,
+        rollingHeads.mismatch.join(' / '),
+      )
     } finally {
       await mpBrowser.close()
     }

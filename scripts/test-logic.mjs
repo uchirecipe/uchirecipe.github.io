@@ -50,6 +50,7 @@ import {
   planWeekFill,
   isPastDate,
   shiftDate,
+  dowIndex,
   excludeYesterdayPlanRecipes,
   normalizeDateRange,
   rangeDayCount,
@@ -1947,6 +1948,22 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     suggestForSlot([mkRecipe(1, { tags: ['和食'] })], opts())?.id,
     1,
   )
+  // ---- 2026-07-29 便CD: PDCA2周目・献立診断の再発防止 ----
+
+  // MP-02 曜日ラベル: 曜日は必ず日付から引く(月曜始まり 0=月 … 6=日)。
+  // 以前は7日カードの並び順(配列インデックス)で引いており、「今日から7日間」表示では
+  // 今日が月曜の日以外は全行の曜日が嘘になっていた
+  eq('dowIndex: 2026-07-27(月)→0', dowIndex('2026-07-27'), 0)
+  eq('dowIndex: 2026-07-29(水)→2', dowIndex('2026-07-29'), 2)
+  eq('dowIndex: 2026-08-02(日)→6', dowIndex('2026-08-02'), 6)
+  eq('dowIndex: 月をまたいでも日付から引ける(2026-08-01=土)', dowIndex('2026-08-01'), 5)
+  {
+    // 「今日から7日間」の再現: 水曜起点で7日並べると 水木金土日月火 になる(並び順とは一致しない)
+    const rolling = Array.from({ length: 7 }, (_, i) => dowIndex(shiftDate('2026-07-29', i)))
+    eq('dowIndex: 今日(水)起点の7日間は 水木金土日月火 の順になる', rolling, [2, 3, 4, 5, 6, 0, 1])
+    eq('dowIndex: 並び順インデックスとは一致しない(旧実装の再発防止)', rolling.every((d, i) => d === i), false)
+  }
+
   // excludeYesterdayPlanRecipes単体: 除外0件時はpoolをそのまま返す・id未設定要素は素通し
   {
     const pool = [{ id: 1 }, { id: 2 }, { id: 3 }]

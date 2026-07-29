@@ -38,6 +38,16 @@ export function weekDates(reference: Date): string[] {
   })
 }
 
+/**
+ * YYYY-MM-DD の曜日を「月曜始まりのインデックス」(0=月, 1=火 … 6=日)で返す
+ * （2026-07-29 便CD/MP-02）。`ja.mealPlan.dow` が月曜始まりの配列なので、曜日ラベルは
+ * 必ずこの関数で日付から引くこと。以前は7日カードの並び順(配列インデックス)で曜日を
+ * 引いていたため、「今日から7日間」表示では今日が月曜の日以外は全行の曜日が嘘になっていた。
+ */
+export function dowIndex(dateStr: string): number {
+  return (new Date(`${dateStr}T00:00:00`).getDay() + 6) % 7
+}
+
 /** YYYY-MM-DD を weeks 週分だけ前後にずらす */
 export function shiftWeek(dateStr: string, weeks: number): string {
   const d = new Date(`${dateStr}T00:00:00`)
