@@ -24,7 +24,7 @@
 //         ONEPOINT-01(メモ2区画化・2026-07オーナー承認済み設計: 「ワンポイント」(こつ・知識)と
 //         「メモ」(保存方法・注意書き・安全)を別々に入力→保存→詳細で①ワンポイント→②メモの順に
 //         見出し付きで表示されること・編集画面を開き直しても両方の入力が保持されること) /
-//         SMK-14(テーマ全廃2026-07-23: 初回シードで全103品が「平らな基本レシピ」で入る・旧テーマ由来の
+//         SMK-14(テーマ全廃2026-07-23: 初回シードで全109品が「平らな基本レシピ」で入る・旧テーマ由来の
 //         代表品が同梱される・設定にテーマUIが一切存在しない・旧?set=付きURLは無害に設定へ着地する。
 //         旧「?set=テーマ取り込み」検証はテーマ廃止に伴い「全品同梱・テーマUI不存在」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
@@ -72,7 +72,7 @@
 //         「カロリー: ◯kcal」「たんぱく質: ◯g」のラベル付き表記に変更) /
 //         TOPUP-01(既存ユーザーへの差分投入・テーマ全廃2026-07-23: アップデート前状態を再現し、
 //         起動時に不足分だけ1回投入される・トゥームストーンのある削除済みの品は復活させない・
-//         二重投入しない(101→102)・1回だけ実行される、をIndexedDB直読みで確認。旧TOMB-01のテーマ
+//         二重投入しない(107→108)・1回だけ実行される、をIndexedDB直読みで確認。旧TOMB-01のテーマ
 //         トゥームストーン検証はテーマUI撤去に伴い差分投入側で尊重する形へ置き換え) /
 //         ORPHAN-01(レシピ削除の孤児防止・2026-07バグ修正・deleteRecipe: 基本レシピを週間献立・
 //         今日の献立の両方に登録した状態で1品削除しても、両テーブルに削除済みレシピを指す孤児行が
@@ -1263,8 +1263,8 @@ try {
   }
 
   // --- SMK-14: テーマ・第◯弾の括りを全廃(2026-07-23オーナー確定)。旧配布テーマ(全52品)は
-  // 同梱の「基本レシピ」に合流し、初回シードで全103品が入る。まっさらな状態で:
-  //  (1) 初回シードで103品が全て「基本レシピ」(isStarter・sourceSetIdなし)として入る
+  // 同梱の「基本レシピ」に合流し、初回シードで全109品が入る(2026-07-29に副菜6品を追加)。まっさらな状態で:
+  //  (1) 初回シードで109品が全て「基本レシピ」(isStarter・sourceSetIdなし)として入る
   //  (2) 旧テーマ由来の代表品が基本レシピとして存在する
   //  (3) 設定にテーマ一覧・「すべて追加」等のテーマUIが一切存在しない
   //  (4) 旧配布ページの ?set= 付きURLで来ても、エラーにならず設定へ無害に着地する(取り込みは起きない)
@@ -1282,9 +1282,9 @@ try {
     freePage.on('dialog', (dialog) => dialog.accept())
     try {
       await freePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await freePage.waitForTimeout(2200) // 初回シード完了待ち(103品)
+      await freePage.waitForTimeout(2200) // 初回シード完了待ち(109品)
 
-      // (1) 初回シードで103品が全て「平らな基本レシピ」(isStarter・sourceSetIdなし)として入る
+      // (1) 初回シードで109品が全て「平らな基本レシピ」(isStarter・sourceSetIdなし)として入る
       const seededStats = await freePage.evaluate(
         () =>
           new Promise((resolve, reject) => {
@@ -1309,13 +1309,13 @@ try {
           }),
       )
       check(
-        'SMK-14 初回シードで103品が入る',
-        seededStats.total === 103,
+        'SMK-14 初回シードで109品が入る',
+        seededStats.total === 109,
         `total=${seededStats.total}`,
       )
       check(
         'SMK-14 全品が「基本レシピ」(isStarter)で、テーマ由来のsourceSetIdは付かない(平ら)',
-        seededStats.starters === 103 && seededStats.withSourceSet === 0,
+        seededStats.starters === 109 && seededStats.withSourceSet === 0,
         `starters=${seededStats.starters} withSourceSet=${seededStats.withSourceSet}`,
       )
       check(
@@ -2435,7 +2435,7 @@ try {
     })
     try {
       await tuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await tuPage.waitForTimeout(2200) // 初回シード完了待ち(103品・starterFlattenSeeded=true)
+      await tuPage.waitForTimeout(2200) // 初回シード完了待ち(109品・starterFlattenSeeded=true)
 
       // 「アップデート前の端末」を再現する: 旧テーマ由来の2品を消し、うち1品にトゥームストーン記録を残し、
       // 差分投入フラグ(starterFlattenSeeded)を未実施状態(false)に戻す。starterSeeded自体はtrueのまま
@@ -2503,8 +2503,8 @@ try {
 
       const before = await countTitles()
       check(
-        'TOPUP-01 前提: アップデート前状態を再現(2品削除・101品)',
-        before.total === 101 && !before.hasRevive && !before.hasDeleted,
+        'TOPUP-01 前提: アップデート前状態を再現(2品削除・107品)',
+        before.total === 107 && !before.hasRevive && !before.hasDeleted,
         `before=${JSON.stringify(before)}`,
       )
 
@@ -2524,8 +2524,8 @@ try {
         `after=${JSON.stringify(after)}`,
       )
       check(
-        'TOPUP-01 差分投入は不足分だけ(101→102・二重投入しない)',
-        after.total === 102,
+        'TOPUP-01 差分投入は不足分だけ(107→108・二重投入しない)',
+        after.total === 108,
         `total=${after.total}`,
       )
 
@@ -2535,7 +2535,7 @@ try {
       const again = await countTitles()
       check(
         'TOPUP-01 差分投入は1回だけ(再起動しても件数が増えない)',
-        again.total === 102,
+        again.total === 108,
         `total=${again.total}`,
       )
     } finally {
@@ -6376,7 +6376,7 @@ try {
     dsPage.on('dialog', (dialog) => dialog.accept())
     try {
       await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await dsPage.waitForTimeout(2200) // 初回シード完了待ち(103品・だし巻き卵/だしのとり方を含む)
+      await dsPage.waitForTimeout(2200) // 初回シード完了待ち(109品・だし巻き卵/だしのとり方を含む)
 
       // 1) 「だし汁」を材料に持つ基本レシピ(だし巻き卵)を開く
       await dsPage.locator('input[type="search"]').fill('だし巻き卵')

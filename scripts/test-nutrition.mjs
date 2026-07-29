@@ -5,7 +5,7 @@
 //
 // 対象（回帰スモークセット）: 同梱の基本レシピ51品 ＋ 配布セット全パック(kintore/bento/diet/summer/
 // freezer=src/sets/*.ts。2026-07-23に第2/8/16弾を正式公開しdiet/summer/freezer.jsonへ改名)。
-// 基本51+配布5パック52=合計103品が「全カタログ」(docs/47参照)。
+// 基本57(51+2026-07-29追加の副菜6品)+配布5パック52=合計109品が「全カタログ」(docs/47参照)。
 // - データの健全性（値の範囲・alias衝突なし）
 // - 全レシピが例外なく計算でき、1人分kcalが常識的な範囲に収まる
 // - 名寄せカバー率が100%であること（未カバり=1件でも失敗。2026-07-13オーナー指示で必須化。
@@ -25,13 +25,14 @@ const { NUTRITION_DATA } = await import('../src/logic/nutritionData.ts')
 const {
   computeRecipeNutrition,
   matchNutritionFood,
+  isZeroIngredient,
   roundNutrient,
   sumPersonalNutrition,
   addPersonalNutritionSum,
   emptyPersonalNutritionSum,
 } = await import('../src/logic/nutrition.ts')
 // テーマ全廃(2026-07-23): 旧配布テーマ原稿(kintore/bento/diet/summer/freezer)は starters.ts が
-// starterDefs に連結済み。よって全103品は starterDefs だけで網羅でき、旧public/sets/data/*.jsonや
+// starterDefs に連結済み。よって全109品は starterDefs だけで網羅でき、旧public/sets/data/*.jsonや
 // 各セットの個別importは読まない(読むと二重計上になる)。スナップショットのキーは全て starter: で揃う
 const { starterDefs } = await import('../src/db/starters.ts')
 
@@ -261,14 +262,14 @@ console.log('アサリの原因特定・回帰防止: 5件')
 }
 console.log('スクショ相当フィクスチャ: 1件(9材料+水)')
 
-// ---------- 2. 回帰スモークセット（全カタログ103品=基本51+旧配布テーマ52。全て基本レシピに合流） ----------
+// ---------- 2. 回帰スモークセット（全カタログ109品=基本57+旧配布テーマ52。全て基本レシピに合流） ----------
 const recipes = starterDefs.map((d) => ({
   set: 'starter',
   title: d.title,
   servings: d.servings,
   ingredients: d.ingredients,
 }))
-check(recipes.length === 103, `レシピ数が想定外: ${recipes.length}（基本51+旧配布テーマ52=103のはず。2026-07-23のテーマ全廃で全てstarterDefsに合流）`)
+check(recipes.length === 109, `レシピ数が想定外: ${recipes.length}（基本57+旧配布テーマ52=109のはず。2026-07-23のテーマ全廃で全てstarterDefsに合流。2026-07-29に副菜6品を追加）`)
 
 let totalIngredients = 0
 let matchedIngredients = 0
@@ -294,7 +295,11 @@ for (const r of recipes) {
       uncovered.get(ex.name).add(`${r.set}:${r.title}`)
     }
   }
-  const zeroCount = r.ingredients.filter((i) => ['水', 'お湯', '湯', '熱湯'].includes(i.name.trim())).length
+  // 計算上ゼロ扱いの材料(水・湯・氷)は分母から外す。判定は必ず nutrition.ts の isZeroIngredient を
+  // 使うこと(2026-07-29修正)。従来はここだけ名前の完全一致で数えていたため、「水(水溶き片栗粉用)」の
+  // ように括弧付きで書かれた水がnutrition側ではゼロ扱い(items/excludedのどちらにも出ない)なのに
+  // 分母からは外れず、カバー率が100%に届かなくなっていた(ぬるま湯・氷もこちらの一覧から漏れていた)
+  const zeroCount = r.ingredients.filter((i) => isZeroIngredient(i.name)).length
   const counted = r.ingredients.length - zeroCount
   totalIngredients += counted
   matchedIngredients += result.items.length + result.excluded.filter((e) => e.reason !== 'food').length
