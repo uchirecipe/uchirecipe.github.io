@@ -12,7 +12,7 @@
  * 辞書を追記・変更したら必ず READINGS_VERSION を +1 すること
  * （既存レシピのsearchWordsを再構築するトリガーに使われている。src/logic/kana.ts参照）。
  */
-export const READINGS_VERSION = 3 // v3: 「三つ葉→みつば」の名寄せを追加(2026-07-23 便BH-1・価格マスタ二重登録の統合)
+export const READINGS_VERSION = 4 // v4: 「鶏ひき肉」等の“ひらがな交じり”表記を追加(2026-07-29 便CI/C21)
 
 export const INGREDIENT_READINGS: Record<string, string> = {
   // 野菜
@@ -80,6 +80,14 @@ export const INGREDIENT_READINGS: Record<string, string> = {
   鶏挽肉: 'とりひきにく',
   豚挽肉: 'ぶたひきにく',
   牛挽肉: 'ぎゅうひきにく',
+  // 2026-07-29 便CI/C21: 辞書は「鶏挽肉」しか持っていなかったが、同梱レシピの材料名は
+  // 「鶏ひき肉」「豚ひき肉」（ひらがな交じり）で、かな検索が1件も引けなかった
+  // （「鶏ひき肉」3件に対し「とりひきにく」「ひきにく」ともに0件）
+  鶏ひき肉: 'とりひきにく',
+  豚ひき肉: 'ぶたひきにく',
+  牛ひき肉: 'ぎゅうひきにく',
+  合いびき: 'あいびき',
+  ひき肉: 'ひきにく',
 
   // 魚介
   鮭: 'さけ',

@@ -1,4 +1,5 @@
 import { INGREDIENT_READINGS, READINGS_VERSION } from './ingredientReadings'
+import { DISH_WORD_READINGS, TITLE_READINGS } from './titleReadings'
 import { isSeasoningLike } from './mainIngredients'
 
 /**
@@ -147,6 +148,16 @@ const TAG_READINGS: Record<string, string> = {
   漬物: 'つけもの',
   甘辛: 'あまから',
   作り方: 'つくりかた',
+  // 2026-07-29 便CI/C09: 同梱レシピが実際に使っているタグのうち、読みが引けなかったもの。
+  // 実機QAで「こうたんぱく」「れいとうすとっく」「さかな」がいずれも0件だった
+  高たんぱく: 'こうたんぱく',
+  高タンパク: 'こうたんぱく',
+  冷凍: 'れいとう',
+  魚: 'さかな',
+  肉: 'にく',
+  野菜: 'やさい',
+  減塩: 'げんえん',
+  低糖質: 'ていとうしつ',
 }
 const tagReadingKeys = Object.keys(TAG_READINGS).sort((a, b) => b.length - a.length)
 const tagReadingPattern =
@@ -162,6 +173,27 @@ export function toTagKey(input: string): string {
   return base.replace(tagReadingPattern, (matched) => TAG_READINGS[matched])
 }
 
+// 料理名の読み（2026-07-29 便CI/C12）。辞書は logic/titleReadings.ts、
+// 引き当ての手順だけをここに置く（読み仮名の変換はこのモジュールに集約する）
+const dishWordKeys = Object.keys(DISH_WORD_READINGS).sort((a, b) => b.length - a.length)
+const dishWordPattern =
+  dishWordKeys.length > 0 ? new RegExp(dishWordKeys.map(escapeRegExp).join('|'), 'g') : null
+
+/**
+ * 料理名の読み（並び替え「五十音順」の比較キー）。
+ * ①同梱の基本レシピは料理名まるごとの読み（TITLE_READINGS）を使う
+ * ②それ以外は食材名辞書（toHiragana）＋料理名によく出る語（DISH_WORD_READINGS）で寄せる。
+ * どちらも引けない語はそのまま残る（従来と同じで、悪化はしない）。
+ */
+export function titleKanaKey(title: string): string {
+  const trimmed = title.trim()
+  const exact = TITLE_READINGS[trimmed]
+  if (exact) return exact
+  const base = toHiragana(trimmed)
+  if (!dishWordPattern) return base
+  return base.replace(dishWordPattern, (matched) => DISH_WORD_READINGS[matched])
+}
+
 /**
  * 料理名・材料名・タグ・検索キーワードから検索用キーワード一覧を作る（保存時に呼ぶ）。
  *
@@ -173,6 +205,12 @@ export function toTagKey(input: string): string {
  * keywords（Recipe.keywords、任意）は一覧・詳細には表示しない検索専用の語（別名・
  * 表記ゆれ・気分語など）。第4引数は省略可能なので既存の呼び出し元（keywordsを持たない
  * データ）は変更なしで動く。
+ *
+ * 2026-07-29 便CI/C09・C21: 読み（toTagKey／titleKanaKey）の形も一緒に入れる。
+ * 実機QAで「和食66件／わしょく0件」「作り置き44件／つくりおき0件」のように、
+ * タグは漢字でしか引けなかった（読み辞書はタグ候補の入力補助にしか配線されていなかった）。
+ * 置き換えではなく**足す**のがポイントで、こうすると漢字表記での検索（「和食」「鍋」）も
+ * そのまま効き続ける＝既存の検索結果を1件も減らさずに、かなでも引けるようになる。
  */
 export function buildSearchWords(
   title: string,
@@ -184,8 +222,12 @@ export function buildSearchWords(
   const mainNames = ingredients.filter((ing) => !isSeasoningLike(ing)).map((ing) => ing.name)
   for (const raw of [title, ...mainNames, ...tags, ...(keywords ?? [])]) {
     const trimmed = raw.trim()
-    if (trimmed) words.add(toHiragana(trimmed))
+    if (!trimmed) continue
+    words.add(toHiragana(trimmed))
+    words.add(toTagKey(trimmed))
   }
+  // 料理名は読み（「肉じゃが→にくじゃが」「豚汁→とんじる」）でも引けるようにする
+  if (title.trim()) words.add(titleKanaKey(title))
   // カテゴリ語(例:「しめじ」→「きのこ」)を材料名から検索語に追加する
   for (const ing of ingredients) {
     const normalizedName = toHiragana(ing.name)
@@ -205,7 +247,7 @@ export function buildSearchWords(
  * db/recipes.ts の rebuildSearchWordsIfNeeded が settings.searchIndexVersion と比較し、
  * 食い違っていれば起動時に全レシピのsearchWordsを再構築する。
  */
-export const SEARCH_INDEX_VERSION = 1
+export const SEARCH_INDEX_VERSION = 2 // v2: タグ・料理名の読みも検索語に入れる(2026-07-29 便CI/C09・C12)
 
 /**
  * settingsに保存済みのバージョンが古く、全レシピのsearchWordsを再構築すべきかを判定する

@@ -23,6 +23,7 @@ import {
   toHiragana,
   toTagKey,
   toPantryKey,
+  titleKanaKey,
   searchIndexNeedsRebuild,
   SEARCH_INDEX_VERSION,
 } from '../src/logic/kana.ts'
@@ -158,6 +159,7 @@ import {
   normalizeIngredients,
   normalizeInstructions,
 } from '../workers/recipe-import/src/normalize.ts'
+import { cookedWithinDays } from '../src/logic/cooked.ts'
 import { buildImageProxyUrl, isImageContentType } from '../src/logic/urlImportImage.ts'
 import { resolveImportErrorReason } from '../src/logic/urlImportReason.ts'
 import {
@@ -7865,6 +7867,187 @@ eq(
     parseStoredTimers(JSON.stringify([{ label: 'こわれた行' }, null, 3]), now).length,
     0,
   )
+}
+
+// ---------- cookedWithinDays: 「最近作った」判定(2026-07-29 便CI/C08) ----------
+// 旧実装は cookedLogs[0] の1件だけを見ており、addCookedLog が日付を見ずに先頭へ積むため、
+// 過去の日付を後から記録すると「今日作ったばかりのレシピ」が最近作っていない扱いになっていた
+// (ホーム「今日なに作る？」の候補と献立の自動提案が誤って拾う)。全件の最大日付で判定する。
+{
+  const day = 24 * 60 * 60 * 1000
+  const ymd = (offsetDays) => new Date(Date.now() - offsetDays * day).toISOString().slice(0, 10)
+  const recipeWith = (dates) => ({ cookedLogs: dates.map((date) => ({ date })) })
+
+  eq('C08 記録が無ければ false', cookedWithinDays(recipeWith([]), 14), false)
+  eq('C08 今日の記録だけなら true', cookedWithinDays(recipeWith([ymd(0)]), 14), true)
+  eq('C08 30日前の記録だけなら false', cookedWithinDays(recipeWith([ymd(30)]), 14), false)
+  eq(
+    'C08 今日の記録のあとに過去日を足しても(配列先頭が古くても)true のまま',
+    cookedWithinDays(recipeWith([ymd(60), ymd(0)]), 14),
+    true,
+  )
+  eq(
+    'C08 並び順に関わらず判定は同じ(全件の最大日付で見る)',
+    cookedWithinDays(recipeWith([ymd(0), ymd(60)]), 14),
+    cookedWithinDays(recipeWith([ymd(60), ymd(0)]), 14),
+  )
+  eq(
+    'C08 古い記録しか無ければ、何件あっても false',
+    cookedWithinDays(recipeWith([ymd(90), ymd(40), ymd(20)]), 14),
+    false,
+  )
+}
+
+// ---------- 便CI 第3波: 検索の配線(C09/C21/C12/C11/C16) ----------
+// 実機QAで「和食66件 / わしょく0件」「作り置き44件 / つくりおき0件」「鶏ひき肉3件 / とりひきにく0件」と、
+// 登録時のタグ候補では引ける読みが検索では1件も引けなかった(読み辞書が検索に配線されていなかった)。
+{
+  // 全109品の基本レシピを実データとして使い、漢字表記とかな表記の件数が一致することを見る
+  const ciRecipes = starterDefs.map((def, index) => ({
+    id: index + 1,
+    title: def.title,
+    servings: def.servings ?? 2,
+    effortLevel: def.effortLevel ?? 'normal',
+    tags: def.tags ?? [],
+    ingredients: def.ingredients ?? [],
+    steps: def.steps ?? [],
+    isFavorite: false,
+    cookedLogs: [],
+    createdAt: 0,
+    updatedAt: index,
+    searchWords: buildSearchWords(def.title, def.ingredients ?? [], def.tags ?? [], def.keywords),
+  }))
+  const ciBase = {
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    tag: 'all',
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  }
+  const hits = (query) => searchRecipes(ciRecipes, { ...ciBase, query }).length
+
+  // C09: タグのかな検索(漢字表記でも引けるままであること=既存の検索結果を1件も減らさない)
+  for (const [kanji, kana] of [
+    ['和食', 'わしょく'],
+    ['中華', 'ちゅうか'],
+    ['作り置き', 'つくりおき'],
+    ['お弁当', 'おべんとう'],
+    ['煮物', 'にもの'],
+    ['汁物', 'しるもの'],
+    ['鍋', 'なべ'],
+    ['魚', 'さかな'],
+    ['高たんぱく', 'こうたんぱく'],
+    ['冷凍ストック', 'れいとうすとっく'],
+  ]) {
+    const kanjiHits = hits(kanji)
+    eq(`C09 タグ「${kanji}」は1件以上ヒットする(従来どおり)`, kanjiHits > 0, true)
+    eq(`C09 かな「${kana}」でも同じ件数になる`, hits(kana), kanjiHits)
+  }
+
+  // C21: 「鶏ひき肉」など、ひらがな交じりの材料名の読み
+  eq('C21 「鶏ひき肉」は1件以上ヒットする', hits('鶏ひき肉') > 0, true)
+  eq('C21 「とりひきにく」でも同じ件数', hits('とりひきにく'), hits('鶏ひき肉'))
+  eq('C21 「鶏挽肉」(未使用表記)でも同じ件数', hits('鶏挽肉'), hits('鶏ひき肉'))
+  eq('C21 「ひきにく」は鶏・豚をまとめて拾う', hits('ひきにく'), hits('ひき肉'))
+
+  // C12: 料理名の読み。同梱レシピは全品が読みに変換できること(基本レシピを増やしたらここが落ちる)
+  const unreadable = starterDefs
+    .map((def) => def.title)
+    .filter((title) => /[^ぁ-ゟーa-z0-9 ]/.test(titleKanaKey(title)))
+  eq(`C12 同梱レシピの料理名はすべて読みに変換できる(未登録=${unreadable.join('・')})`, unreadable, [])
+  eq('C12 読み: 肉じゃが', titleKanaKey('肉じゃが'), 'にくじゃが')
+  eq('C12 読み: 豚汁(ぶたしるにしない)', titleKanaKey('豚汁'), 'とんじる')
+  eq('C12 読み: 白和え', titleKanaKey('白和え'), 'しらあえ')
+  eq('C12 辞書に無い料理名も、よく出る語の分だけ読みに寄せる', titleKanaKey('大葉の照り焼き'), '大葉のてりやき')
+  // 五十音順が実際にあ→ん順になっている(旧実装では漢字始まりが末尾に固まっていた)
+  const kanaSorted = sortResults(searchRecipes(ciRecipes, ciBase), 'kana', [], 'asc')
+  const kanaKeys = kanaSorted.map((r) => titleKanaKey(r.recipe.title))
+  const collatorJa = new Intl.Collator('ja')
+  eq(
+    'C12 五十音順の並びが読みの昇順になっている',
+    kanaKeys.every((key, i) => i === 0 || collatorJa.compare(kanaKeys[i - 1], key) <= 0),
+    true,
+  )
+  eq('C12 五十音順の先頭は「あ」で始まる読み', kanaKeys[0].startsWith('あ'), true)
+  eq(
+    'C12 漢字始まりの料理名が末尾に固まっていない(肉じゃがは「に」の位置)',
+    kanaSorted.findIndex((r) => r.recipe.title === '肉じゃが') < kanaSorted.length - 20,
+    true,
+  )
+
+  // C11: 「使いたい食材」を入れている間は、ぜんぶ使えるレシピが必ず先頭に出る
+  const wanted = searchRecipes(ciRecipes, { ...ciBase, ingredients: 'キャベツ にんじん' })
+  const sortedByUpdated = sortResults(wanted, 'updated', [])
+  eq(
+    'C11 並べ替えが更新順のままでも「ぜんぶ使える」が先頭に来る',
+    sortedByUpdated[0].usedCount,
+    2,
+  )
+  eq(
+    'C11 usedCountの降順が崩れない(並べ替えの選択は同点内でだけ効く)',
+    sortedByUpdated.every((r, i) => i === 0 || sortedByUpdated[i - 1].usedCount >= r.usedCount),
+    true,
+  )
+  eq(
+    'C11 五十音順を選んでも「ぜんぶ使える」優先は変わらない',
+    sortResults(wanted, 'kana', [], 'asc')[0].usedCount,
+    2,
+  )
+  eq(
+    'C11 「使いたい食材」を入れていないときは並べ替えの結果を変えない',
+    sortResults(searchRecipes(ciRecipes, ciBase), 'kana', [], 'asc').map((r) => r.recipe.id),
+    kanaSorted.map((r) => r.recipe.id),
+  )
+
+  // C16: 作った記録のひとことメモも検索対象にする
+  const withNote = ciRecipes.map((r) =>
+    r.title === '肉じゃが'
+      ? { ...r, cookedLogs: [{ date: '2026-07-20', note: '子どもが完食した' }] }
+      : r,
+  )
+  eq(
+    'C16 記録メモの言葉で検索するとそのレシピが出る',
+    searchRecipes(withNote, { ...ciBase, query: '完食' }).map((r) => r.recipe.title),
+    ['肉じゃが'],
+  )
+  eq(
+    'C16 記録メモはレシピ保存を挟まなくても効く(searchWordsに入れない)',
+    searchRecipes(ciRecipes, { ...ciBase, query: '完食' }).length,
+    0,
+  )
+}
+
+// ---------- buildShareText: 共有は表示している人数の分量で出す(2026-07-29 便CI/C18) ----------
+{
+  const c18Recipe = {
+    id: 1,
+    title: 'さわらの西京焼き',
+    servings: 2,
+    effortLevel: 'normal',
+    tags: [],
+    ingredients: [
+      { name: 'さわら(切り身)', amount: '2', unit: '切れ' },
+      { name: 'みそ', amount: '2', unit: '大さじ' },
+    ],
+    steps: [{ text: '漬ける' }],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const opts = { image: true, cookMinutes: false, cost: false, nutrition: false, allIngredients: true }
+  const asRegistered = buildShareText(c18Recipe, opts)
+  eq('C18 人数を渡さなければ従来どおり登録人数で出る', asRegistered.includes('\n2人分\n'), true)
+  eq('C18 登録人数のままなら分量の表記も変わらない', asRegistered.includes('・さわら(切り身) 2切れ'), true)
+  const asShown = buildShareText(c18Recipe, { ...opts, servings: 4 })
+  eq('C18 表示人数4人分で共有すると「4人分」になる', asShown.includes('\n4人分\n'), true)
+  eq('C18 材料の分量も4人分にスケールする', asShown.includes('・さわら(切り身) 4切れ'), true)
+  eq('C18 調味料も一緒にスケールする', asShown.includes('・みそ 大さじ4'), true)
 }
 
 // ---------- 結果 ----------

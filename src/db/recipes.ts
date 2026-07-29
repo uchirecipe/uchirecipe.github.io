@@ -151,18 +151,30 @@ export async function toggleFavorite(id: number): Promise<void> {
   })
 }
 
-/** 「作った！」記録を追加（新しい順に先頭へ） */
+/**
+ * 「作った！」記録の並び順は常に日付の新しい順（2026-07-29 便CI/C08）。
+ * 以前は追加順（先頭に積むだけ）だったため、過去の日付を後から記録すると
+ * cookedLogs[0] が最新でなくなり、logic/cooked.ts の cookedWithinDays（＝ホームの
+ * 「今日なに作る？」と献立自動提案の「最近作ってない」条件）が誤判定していた。
+ * date は 'YYYY-MM-DD' 固定（db/types.ts）なので文字列比較で日付順になる。
+ * JSのsortは安定なので、同じ日付の記録どうしは元の順序（新しく足した方が先頭）を保つ。
+ */
+function sortLogsByDateDesc(logs: CookedLog[]): CookedLog[] {
+  return [...logs].sort((a, b) => b.date.localeCompare(a.date))
+}
+
+/** 「作った！」記録を追加（日付の新しい順に並べ直して保存する） */
 export async function addCookedLog(id: number, log: CookedLog): Promise<void> {
   await db.transaction('rw', db.recipes, async () => {
     const recipe = await db.recipes.get(id)
     if (!recipe) return
     await db.recipes.update(id, {
-      cookedLogs: [log, ...recipe.cookedLogs],
+      cookedLogs: sortLogsByDateDesc([log, ...recipe.cookedLogs]),
     })
   })
 }
 
-/** 「作った！」記録を後から編集する（日付・ひとことメモの追記や修正） */
+/** 「作った！」記録を後から編集する（日付・ひとことメモ・人数・写真の修正） */
 export async function updateCookedLog(
   id: number,
   index: number,
@@ -171,9 +183,27 @@ export async function updateCookedLog(
   await db.transaction('rw', db.recipes, async () => {
     const recipe = await db.recipes.get(id)
     if (!recipe || !recipe.cookedLogs[index]) return
-    const cookedLogs = recipe.cookedLogs.map((log, i) =>
-      i === index ? { ...log, ...patch } : log,
+    // 日付を直したときも並びが崩れたままにならないよう、書き戻す前に必ず日付順に整える
+    const cookedLogs = sortLogsByDateDesc(
+      recipe.cookedLogs.map((log, i) => (i === index ? { ...log, ...patch } : log)),
     )
     await db.recipes.update(id, { cookedLogs })
+  })
+}
+
+/**
+ * 「作った！」記録を1件だけ削除する（2026-07-29 便CI/C02）。
+ * これが無かったため、誤タップ・重複記録を消す唯一の手段が「レシピごと削除」になっており、
+ * 記録・写真・献立の予定まで巻き添えにする全損経路へ誘導していた。
+ * 記録は Recipe に埋め込んだ配列なので、対象の index を除いて書き戻すだけでよい
+ * （写真Blobも同じ要素に入っているので一緒に消え、容量も戻る）。
+ */
+export async function deleteCookedLog(id: number, index: number): Promise<void> {
+  await db.transaction('rw', db.recipes, async () => {
+    const recipe = await db.recipes.get(id)
+    if (!recipe || !recipe.cookedLogs[index]) return
+    await db.recipes.update(id, {
+      cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
+    })
   })
 }

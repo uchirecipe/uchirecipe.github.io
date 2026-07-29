@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Camera, Image as ImageIcon } from 'lucide-react'
+import { X, Camera, Image as ImageIcon, Minus, Plus } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import { resizePhoto } from '../logic/image'
 import { usePhotoUrl } from './usePhotoUrl'
@@ -16,6 +16,13 @@ type Props = {
   date: string
   note: string
   photo?: Blob
+  /**
+   * 何人分作ったか（2026-07-29 便CI/C05）。従来は詳細画面の表示人数が黙って保存されるだけで、
+   * 記録窓にも記録一覧にも出ず、ユーザーは値の存在も誤りも見えなかった。
+   * onServingsChange を渡したときだけステッパー行を出す（渡さない呼び出し元との後方互換）
+   */
+  servings?: number
+  onServingsChange?: (value: number) => void
   onDateChange: (value: string) => void
   onNoteChange: (value: string) => void
   onPhotoChange: (photo: Blob | undefined) => void
@@ -27,6 +34,13 @@ type Props = {
    */
   reflectPantry?: boolean
   onReflectPantryChange?: (value: boolean) => void
+  /**
+   * このレシピが「今日の献立」に入っているか（2026-07-29 便CI/R02）。
+   * true のときだけ「記録すると今日の献立から外れる」旨を先に出す。
+   * 実挙動は RecipeDetailPage の saveLog が removeFromTodayList を呼ぶところ（献立ページの
+   * 「作った」も db/todayList.ts で同じことをする）で、どこにも書かれていなかった
+   */
+  inTodayList?: boolean
 }
 
 /**
@@ -43,6 +57,8 @@ export default function CookedLogModal({
   date,
   note,
   photo,
+  servings,
+  onServingsChange,
   onDateChange,
   onNoteChange,
   onPhotoChange,
@@ -50,6 +66,7 @@ export default function CookedLogModal({
   onClose,
   reflectPantry,
   onReflectPantryChange,
+  inTodayList,
 }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
@@ -109,6 +126,35 @@ export default function CookedLogModal({
             className="mt-1 block w-full min-w-0 max-w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink"
           />
         </label>
+        {/* 何人分作ったか(2026-07-29 便CI/C05)。初期値は記録窓を開いた時点の詳細画面の表示人数 */}
+        {onServingsChange && (
+          <div className="mt-[var(--space-sm)]">
+            <span className="block text-sm text-ink-muted">{ja.detail.cookedServings}</span>
+            <div className="mt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onServingsChange(Math.max(1, (servings ?? 1) - 1))}
+                aria-label={ja.detail.servingsDown}
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-app text-accent shadow-sm"
+              >
+                <Minus size={20} aria-hidden />
+              </button>
+              <span className="min-w-14 text-center text-lg font-bold">
+                {servings ?? 1}
+                {ja.detail.servingsUnit}
+              </span>
+              <button
+                type="button"
+                onClick={() => onServingsChange((servings ?? 1) + 1)}
+                aria-label={ja.detail.servingsUp}
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-app text-accent shadow-sm"
+              >
+                <Plus size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-ink-muted">{ja.detail.cookedServingsHint}</p>
+          </div>
+        )}
         <label className="mt-[var(--space-sm)] block text-sm text-ink-muted">
           {ja.detail.cookedNote}
           <input
@@ -204,6 +250,12 @@ export default function CookedLogModal({
               />
             </button>
           </div>
+        )}
+        {/* 今日の献立に入っている料理だけ、記録すると外れることを先に伝える(便CI/R02) */}
+        {inTodayList && (
+          <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+            {ja.detail.cookedTodayListNote}
+          </p>
         )}
         <div className="mt-[var(--space-md)] flex gap-2">
           <button

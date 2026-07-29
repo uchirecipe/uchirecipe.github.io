@@ -61,6 +61,13 @@ export function splitTerms(input: string): string[] {
 function matchesQuery(recipe: Recipe, terms: string[]): boolean {
   if (terms.length === 0) return true
   const pool = [...recipe.searchWords, toHiragana(recipe.title)]
+  // 「作った記録」のひとことメモも検索対象にする(2026-07-29 便CI/C16)。
+  // メモは「子どもが完食」「しょうゆ少なめで◎」のように、そのレシピを思い出す手がかりに
+  // なっているのに引けなかった。searchWordsに入れるとレシピ保存時にしか作り直されず、
+  // 記録を足した瞬間に検索できない=索引が古くなるため、ここで直接読む
+  for (const log of recipe.cookedLogs) {
+    if (log.note) pool.push(toHiragana(log.note))
+  }
   return terms.every((term) => pool.some((word) => word.includes(term)))
 }
 

@@ -451,7 +451,11 @@ export default function RecipesPage() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [filtersKey])
   const onClickCapture = (e: ReactMouseEvent) => {
-    if (!(e.target instanceof Element) || !e.target.closest('a')) return // リンク以外の操作では固定しない
+    if (!(e.target instanceof Element)) return
+    // カード内のボタン(お気に入りトグル・2026-07-29 便CI/C15)は遷移しないので、
+    // 「離脱する」扱いにしない(leavingRefを立てると以降のスクロール位置保存が止まってしまう)
+    if (e.target.closest('button')) return
+    if (!e.target.closest('a')) return // リンク以外の操作では固定しない
     saveListState(window.scrollY) // 遷移で高さが縮む前の、正しい位置を確定保存する
     leavingRef.current = true
   }
@@ -573,6 +577,8 @@ export default function RecipesPage() {
               setSortDirection(defaultSortDirection[next])
             }}
           />
+          {/* 「よく使う順」が何を数えた順かを一言で示す(2026-07-29 便CI/C13) */}
+          <p className="mt-1 text-xs text-ink-muted">{ja.search.sortCookedHint}</p>
 
           {/* 栄養価並び替え(便T-4: カロリー・たんぱく質・塩分・脂質・糖質の5項目をPro機能化。
               無料版はグレーのティーザー行のみ・タップで既存のProゲート表現(Lock+ミュート色)でPro案内へ) */}
@@ -811,7 +817,23 @@ export default function RecipesPage() {
           ) : (
             <>
               <p className="font-bold">{ja.search.noResult}</p>
-              <p className="mt-1 text-sm">{ja.search.noResultHint}</p>
+              {/* 条件がかかっているなら、原因は絞り込みなので、その場で外せるようにする
+                  (2026-07-29 便CI/C20。従来は絞り込みパネルを開かないと「条件をクリア」に届かず、
+                  全件あるのに新規登録を勧める文面だけが出ていた) */}
+              {anyConditionActive ? (
+                <>
+                  <p className="mt-1 text-sm">{ja.search.noResultFilteredHint}</p>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent shadow-sm"
+                  >
+                    {ja.search.clear}
+                  </button>
+                </>
+              ) : (
+                <p className="mt-1 text-sm">{ja.search.noResultHint}</p>
+              )}
             </>
           )}
         </div>

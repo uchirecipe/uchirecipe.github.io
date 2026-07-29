@@ -1,6 +1,6 @@
 import type { Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
-import { formatAmountUnit } from './amount'
+import { formatAmountUnit, scaleAmount } from './amount'
 import { pickIconKey } from './icon'
 
 /**
@@ -37,6 +37,35 @@ export interface ShareOptions {
    * 出ていくのを防ぐため(受け取った人は元のレシピを見られない)
    */
   nutritionHasGap?: boolean
+  /**
+   * 共有する人数（2026-07-29 便CI/C18）。レシピ詳細で表示している人数を渡す。
+   * 従来は常に登録人数で出していたため、画面で4人分・4切れを見た直後に共有しても
+   * 「2人分／2切れ」の文章が出て、増やした分量を送ったつもりのユーザーが取り違えていた。
+   * 省略時は登録人数（recipe.servings）＝従来どおり。
+   */
+  servings?: number
+}
+
+/** 共有する人数（表示人数。未指定なら登録人数） */
+function shareServings(recipe: Recipe, opts: ShareOptions | undefined): number {
+  const value = opts?.servings
+  return value != null && value > 0 ? value : recipe.servings
+}
+
+/**
+ * 材料の分量を共有する人数に合わせる。
+ * 登録人数と同じときは元の表記をそのまま使う（丸め・正規化で見た目が変わらないように）。
+ */
+function shareAmount(
+  recipe: Recipe,
+  ingredient: { amount: string; unit: string },
+  servings: number,
+): string {
+  const amount =
+    servings === recipe.servings || recipe.servings <= 0
+      ? ingredient.amount
+      : scaleAmount(ingredient.amount, recipe.servings, servings, ingredient.unit)
+  return formatAmountUnit(amount, ingredient.unit)
 }
 
 /** 選択された原価・栄養の行を組み立てる(テキスト・画像カード共通)。
@@ -48,7 +77,8 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
     lines.push(
       ja.share.lineCost
         .replace('{n}', opts.costPerServingYen.toLocaleString())
-        .replace('{s}', String(recipe.servings))
+        // 全量の人数は共有する人数に合わせる(便CI/C18。金額側も呼び出し元が同じ人数で渡す)
+        .replace('{s}', String(shareServings(recipe, opts)))
         .replace('{m}', opts.costTotalYen.toLocaleString()),
     )
   }
@@ -64,9 +94,10 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
 
 /** シェア用の文章を組み立てる。貼り付けパーサー(parseRecipeText)がそのまま取り込める形式。 */
 export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
+  const servings = shareServings(recipe, opts)
   const listed = opts?.allIngredients ? recipe.ingredients : recipe.ingredients.slice(0, 8)
   const ingredients = listed
-    .map((i) => `・${i.name} ${formatAmountUnit(i.amount, i.unit)}`.trimEnd())
+    .map((i) => `・${i.name} ${shareAmount(recipe, i, servings)}`.trimEnd())
     .join('\n')
   const more =
     !opts?.allIngredients && recipe.ingredients.length > 8 ? `\n${ja.share.moreIngredients}` : ''
@@ -82,7 +113,7 @@ export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
   const stepsBlock = stepText ? `${ja.share.stepsHeading}\n${stepText}\n` : ''
   return ja.share.textTemplate
     .replace('{title}', recipe.title)
-    .replace('{servings}', String(recipe.servings))
+    .replace('{servings}', String(servings))
     .replace('{lines}', optionalLines.length > 0 ? `${optionalLines.join('\n')}\n` : '')
     .replace('{ingredients}', ingredients + more)
     .replace('{steps}', stepsBlock)
@@ -90,15 +121,27 @@ export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
     .replace('{url}', ja.app.url)
 }
 
-/** テキストを共有（非対応ならクリップボードへコピー）。戻り値は 'shared' | 'copied' */
-export async function shareText(recipe: Recipe, opts?: ShareOptions): Promise<'shared' | 'copied'> {
+/**
+ * テキストを共有（非対応ならクリップボードへコピー）。戻り値は 'shared' | 'copied' | 'cancelled'。
+ *
+ * 2026-07-29 便CI/C17: 共有シートをキャンセル（AbortError）したときにコピーへ落ちていたため、
+ * ユーザーが別の用途でコピーしていた内容がクリップボードごと黙って書き換わっていた。
+ * キャンセルは「やめる」という正常な選択なので何もしない（画像カード側の既存の作法に揃える）。
+ */
+export async function shareText(
+  recipe: Recipe,
+  opts?: ShareOptions,
+): Promise<'shared' | 'copied' | 'cancelled'> {
   const text = buildShareText(recipe, opts)
   if (typeof navigator.share === 'function') {
     try {
       await navigator.share({ text })
       return 'shared'
-    } catch {
-      /* キャンセル時などはコピーに切り替え */
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return 'cancelled'
+      }
+      /* それ以外のエラー(非対応環境など)はコピーに切り替え */
     }
   }
   await navigator.clipboard.writeText(text)
@@ -188,6 +231,8 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
   // 材料: 「材料をすべて載せる」ONは全件(件数×56pxで縦長カード許容・分割/縮小なし)
   const ingredients = opts.allIngredients ? recipe.ingredients : recipe.ingredients.slice(0, 8)
   const hasMoreIngredients = !opts.allIngredients && recipe.ingredients.length > 8
+  // 画像カードも表示している人数の分量で出す(2026-07-29 便CI/C18)
+  const cardServings = shareServings(recipe, opts)
   const bandHeight = 96
 
   // サイズ計算専用のcanvas（本描画の前にタイトルの折り返し行数を測るため）
@@ -199,12 +244,17 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
 
   // 原価・栄養の任意行(各1行=56px)。高さ計算に加算する
   const infoLines = buildCostNutritionLines(recipe, opts)
+  // 情報行と「材料」見出しのあいだの余白(2026-07-29 便CI/C22)。
+  // 従来は最後の情報行から見出しまでが56pxしかなく、44pxの太字見出しがほぼ密着していた
+  // (「人数分」→「原価」のあいだは84px空くのに、選んだ項目が増えるほど詰まって見える)
+  const INFO_BLOCK_GAP = 28
+  const infoGap = infoLines.length > 0 ? INFO_BLOCK_GAP : 0
 
   // 内容量に応じて高さを決める（固定高だと材料が多い/写真が無い場合に下の帯へ隠れてしまうため）
   const contentTop = imageHeight + (imageHeight > 0 ? 110 : 96)
   const afterTitle = contentTop + titleLines * 92 + 8
   const afterMeta = afterTitle + 84
-  const afterInfo = afterMeta + infoLines.length * 56
+  const afterInfo = afterMeta + infoLines.length * 56 + infoGap
   const afterHeader = afterInfo + 64
   const afterIngredients = afterHeader + ingredients.length * 56 + (hasMoreIngredients ? 56 : 0)
   const height = afterIngredients + 56 + bandHeight
@@ -272,7 +322,8 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
   ctx.font = '40px system-ui, sans-serif'
   const meta = [
     opts.cookMinutes && recipe.cookMinutes ? `${recipe.cookMinutes}${ja.detail.minutesSuffix}` : '',
-    `${recipe.servings}${ja.detail.servingsUnit}`,
+    // 共有する人数(表示人数)に合わせる(2026-07-29 便CI/C18)
+    `${cardServings}${ja.detail.servingsUnit}`,
   ]
     .filter(Boolean)
     .join('　')
@@ -284,6 +335,7 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
     drawWrappedText(ctx, line, pad, y, width - pad * 2, 56, 1)
     y += 56
   }
+  y += infoGap
 
   // 材料（全部 or 最大8つ）
   ctx.fillStyle = accent
@@ -293,7 +345,7 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
   ctx.fillStyle = ink
   ctx.font = '40px system-ui, sans-serif'
   for (const ing of ingredients) {
-    const line = `・${ing.name}　${formatAmountUnit(ing.amount, ing.unit)}`.trimEnd()
+    const line = `・${ing.name}　${shareAmount(recipe, ing, cardServings)}`.trimEnd()
     drawWrappedText(ctx, line, pad, y, width - pad * 2, 56, 1)
     y += 56
   }
