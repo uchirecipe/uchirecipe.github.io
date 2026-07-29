@@ -3,6 +3,7 @@ import { getSettings, updateSettings } from '../db/settings'
 import {
   defaultSettings,
   type CookedLog,
+  type DayNote,
   type MealPlanEntry,
   type PantryItem,
   type PriceEntry,
@@ -70,6 +71,11 @@ export interface BackupFile {
   mealPlans?: Omit<MealPlanEntry, 'id'>[]
   todayList?: Omit<TodayListItem, 'id'>[]
   prices?: Omit<PriceEntry, 'id'>[]
+  /**
+   * 日付メモ（2026-07-29 便CB-1・docs/59 A-2）。他のテーブルと違い主キーが日付そのものなので、
+   * idを外さずそのまま入れる。これも任意項目＝この項目が無い古いバックアップも従来どおり復元できる
+   */
+  dayNotes?: DayNote[]
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -107,6 +113,8 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
   const mealPlans = (await db.mealPlans.toArray()).map(({ id: _unused, ...rest }) => rest)
   const todayList = (await db.todayList.toArray()).map(({ id: _unused, ...rest }) => rest)
   const prices = (await db.prices.toArray()).map(({ id: _unused, ...rest }) => rest)
+  // 日付メモ（便CB-1）。主キーが日付そのものなのでidを外す処理は無く、そのまま入れる
+  const dayNotes = await db.dayNotes.toArray()
   const backupRecipes: BackupRecipe[] = await Promise.all(
     recipes.map(async ({ photo, cookedLogs, ...rest }) => ({
       ...rest,
@@ -134,6 +142,7 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
     mealPlans,
     todayList,
     prices,
+    dayNotes,
   }
   return JSON.stringify(file)
 }
@@ -174,6 +183,7 @@ export function tablesToReplace(file: BackupFile): {
   mealPlans: boolean
   todayList: boolean
   prices: boolean
+  dayNotes: boolean
 } {
   return {
     pantryItems: file.pantryItems !== undefined,
@@ -181,6 +191,9 @@ export function tablesToReplace(file: BackupFile): {
     mealPlans: file.mealPlans !== undefined,
     todayList: file.todayList !== undefined,
     prices: file.prices !== undefined,
+    // 日付メモ（2026-07-29 便CB-1）。この項目を持たない古いバックアップ（=undefined）は
+    // 復元時にdayNotesテーブルへ一切触らない＝既存のメモを消さない（他テーブルと同じ後方互換）
+    dayNotes: file.dayNotes !== undefined,
   }
 }
 
@@ -317,6 +330,7 @@ export async function importBackup(
         db.mealPlans,
         db.todayList,
         db.prices,
+        db.dayNotes,
       ],
       async () => {
         await db.recipes.clear()
@@ -352,6 +366,10 @@ export async function importBackup(
         if (replace.prices) {
           await db.prices.clear()
           if (file.prices!.length > 0) await db.prices.bulkAdd(file.prices!)
+        }
+        if (replace.dayNotes) {
+          await db.dayNotes.clear()
+          if (file.dayNotes!.length > 0) await db.dayNotes.bulkAdd(file.dayNotes!)
         }
       },
     )
