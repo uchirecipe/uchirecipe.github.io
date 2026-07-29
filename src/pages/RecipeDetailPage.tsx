@@ -466,7 +466,10 @@ export default function RecipeDetailPage() {
     setShareMessage(kind === 'image' ? ja.share.generating : '')
     const opts: ShareOptions = {
       ...selection,
-      costTotalYen: shareCostAvailable ? totalPrice : undefined,
+      // 画面で見えている人数の分量で共有する(2026-07-29 便CI/C18)。
+      // 金額の「全量」も同じ人数に合わせる(1人分は人数によらず同じなので登録人数基準のまま)
+      servings,
+      costTotalYen: shareCostAvailable ? scaledPrice : undefined,
       costPerServingYen: shareCostAvailable ? costPerServingRegistered : undefined,
       kcalPerServing: shareNutritionAvailable
         ? roundNutrient('kcal', shareNutrition!.perServing.kcal)
@@ -1364,6 +1367,7 @@ export default function RecipeDetailPage() {
           行ごと非表示(緊急停止フラグと連動)。選択は開くたび既定値に初期化・永続化しない */}
       <ShareModal
         open={shareOpen}
+        servings={servings}
         cookMinutesAvailable={shareCookMinutesAvailable}
         costAvailable={shareCostAvailable}
         nutritionRowVisible={NUTRITION_TEASER_ENABLED}

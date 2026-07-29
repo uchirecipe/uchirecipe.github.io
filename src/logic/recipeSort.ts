@@ -1,5 +1,5 @@
 import type { Recipe } from '../db/types'
-import { toHiragana } from './kana'
+import { titleKanaKey } from './kana'
 import { makePantryMatcher } from './pantry'
 import { computeRecipeNutrition } from './nutrition'
 import type { SearchResult } from './search'
@@ -124,7 +124,10 @@ function compareAscending(
     case 'updated':
       return a.recipe.updatedAt - b.recipe.updatedAt
     case 'kana':
-      return collator.compare(toHiragana(a.recipe.title), toHiragana(b.recipe.title))
+      // 2026-07-29 便CI/C12: 食材名辞書だけで読みを引いていたため、辞書に無い漢字始まりの
+      // 料理名(肉じゃが・親子丼・麻婆豆腐…)がコードポイント比較で末尾に固まっていた。
+      // 料理名の読み(logic/titleReadings.ts)で比べる
+      return collator.compare(titleKanaKey(a.recipe.title), titleKanaKey(b.recipe.title))
     case 'cooked':
       return a.recipe.cookedLogs.length - b.recipe.cookedLogs.length
     case 'pantryMatch':
@@ -151,6 +154,14 @@ export function sortResults(
   const sign = direction === 'asc' ? 1 : -1
   const sorted = [...results]
 
+  // 「使いたい食材」を入れているあいだは、使える食材が多いレシピを必ず先に出す
+  // (2026-07-29 便CI/C11)。logic/search.ts は usedCount 降順に並べていたのに、その結果を
+  // ここが並べ替えの種類(既定=更新順)で丸ごと並べ直していたため、「入れた食材ぜんぶ使える」
+  // レシピが5位・10位に埋もれていた。並べ替えの選択は同点内の順序として引き続き効く
+  const wantedActive = results.some((result) => result.wantedCount > 0)
+  const byUsedCount = (a: SearchResult, b: SearchResult) =>
+    wantedActive ? b.usedCount - a.usedCount : 0
+
   if (isNutrientSortOption(option)) {
     const field = NUTRIENT_SORT_FIELD[option]
     const valueOf = (result: SearchResult): number | null => {
@@ -159,6 +170,8 @@ export function sortResults(
       return value[field]
     }
     sorted.sort((a, b) => {
+      const used = byUsedCount(a, b)
+      if (used !== 0) return used
       const av = valueOf(a)
       const bv = valueOf(b)
       // 算出不能（null）は昇順/降順に関わらず常に末尾へ
@@ -174,6 +187,7 @@ export function sortResults(
     option === 'pantryMatch' ? pantryNames.map((name) => makePantryMatcher([name])) : []
   sorted.sort(
     (a, b) =>
+      byUsedCount(a, b) ||
       sign * compareAscending(option, a, b, pantryMatchers) ||
       b.recipe.updatedAt - a.recipe.updatedAt,
   )

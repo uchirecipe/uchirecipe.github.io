@@ -11,6 +11,8 @@ export type ShareSelection = Pick<
 
 type Props = {
   open: boolean
+  /** 共有する人数（＝レシピ詳細で表示している人数。2026-07-29 便CI/C18） */
+  servings: number
   /** 調理時間のデータがあるか(無ければグレーアウト) */
   cookMinutesAvailable: boolean
   /** 原価の概算合計が0円より大きいか(0ならグレーアウト) */
@@ -37,6 +39,7 @@ type Props = {
  */
 export default function ShareModal({
   open,
+  servings,
   cookMinutesAvailable,
   costAvailable,
   nutritionRowVisible,
@@ -124,6 +127,10 @@ export default function ShareModal({
 
         {/* 固定項目(チェックなし・文言のみ) */}
         <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.share.alwaysIncluded}</p>
+        {/* 何人分の分量で出るのかを送る前に言い切る(2026-07-29 便CI/C18) */}
+        <p className="mt-1 text-xs text-ink-muted">
+          {ja.share.servingsNote.replace('{n}', String(servings))}
+        </p>
 
         <div className="mt-[var(--space-sm)]">
           {optionRow(ja.share.optImage, image, setImage, { note: ja.share.optImageCardOnly })}

@@ -10627,6 +10627,181 @@ try {
       await scBrowser.close()
     }
   }
+  // --- SEARCH-CI3-01(2026-07-29 便CI 第3波・検索の配線): C09/C21 タグ・材料がかなでも引ける /
+  // C12 五十音順が読み順になる / C11 「ぜんぶ使える」が先頭に出る / C16 記録メモも検索対象 ---
+  currentCheck = 'SEARCH-CI3-01'
+  {
+    const s3Browser = await chromium.launch()
+    const s3Context = await s3Browser.newContext()
+    const s3Page = await s3Context.newPage()
+    s3Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SEARCH-CI3-01] ${err.message}`)
+    })
+    const countFor = async (query) => {
+      await s3Page.locator('input[type="search"]').fill(query)
+      await s3Page.waitForTimeout(500)
+      // カードのタイトルで数える(a[href^="#/recipes/"] だけだと右下の「＋」も1件に数えてしまう)
+      return await s3Page.locator('a[href^="#/recipes/"] p.line-clamp-2').count()
+    }
+    // 検索条件つきのURLで一覧を開き直す。同じ /recipes のまま goto すると RecipesPage が
+    // 作り直されず、?ing= / ?q= が読まれない(初期stateでしか見ていないため)ので、
+    // 一度ホームを経由して確実にマウントし直す
+    const openRecipesWith = async (queryString) => {
+      await s3Page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
+      await s3Page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await s3Page.waitForTimeout(400)
+      await s3Page.goto(`${BASE}/#/recipes${queryString}`, { waitUntil: 'networkidle' })
+      await s3Page.waitForTimeout(900)
+    }
+    try {
+      await s3Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await s3Page.waitForTimeout(2200) // 初回シード完了待ち
+
+      // C09/C21: 漢字表記とかな表記で同じ件数になる(漢字側の件数を減らさないこと込み)
+      for (const [kanji, kana] of [
+        ['和食', 'わしょく'],
+        ['作り置き', 'つくりおき'],
+        ['お弁当', 'おべんとう'],
+        ['鶏ひき肉', 'とりひきにく'],
+      ]) {
+        const kanjiCount = await countFor(kanji)
+        const kanaCount = await countFor(kana)
+        check(
+          `SEARCH-CI3-01/C09・C21 「${kanji}」(${kanjiCount}件)と「${kana}」の件数が一致する`,
+          kanjiCount > 0 && kanaCount === kanjiCount,
+          `${kanji}=${kanjiCount} ${kana}=${kanaCount}`,
+        )
+      }
+      await s3Page.locator('input[type="search"]').fill('')
+      await s3Page.waitForTimeout(500)
+
+      // C12: 五十音順が読みの順になっている(旧実装は漢字始まりが末尾に固まっていた)
+      await s3Page.locator('button[aria-label="並び替え"]').click()
+      await s3Page.waitForTimeout(300)
+      await s3Page.getByRole('button', { name: '五十音順' }).click()
+      await s3Page.waitForTimeout(300)
+      await s3Page.getByRole('button', { name: '決定' }).click()
+      await s3Page.waitForTimeout(600)
+      const kanaTitles = await s3Page.evaluate(() =>
+        Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.line-clamp-2')).map((p) =>
+          p.textContent.trim(),
+        ),
+      )
+      const indexOf = (title) => kanaTitles.indexOf(title)
+      check(
+        'SEARCH-CI3-01/C12 五十音順で「親子丼(おやこどん)」が「カレーライス(かれーらいす)」より前に出る',
+        indexOf('親子丼') >= 0 && indexOf('親子丼') < indexOf('カレーライス'),
+        `親子丼=${indexOf('親子丼')} カレーライス=${indexOf('カレーライス')}`,
+      )
+      check(
+        'SEARCH-CI3-01/C12 「肉じゃが(にくじゃが)」が末尾ではなく「水ようかん(みずようかん)」より前に出る',
+        indexOf('肉じゃが') >= 0 && indexOf('肉じゃが') < indexOf('水ようかん'),
+        `肉じゃが=${indexOf('肉じゃが')} 水ようかん=${indexOf('水ようかん')} 全${kanaTitles.length}件`,
+      )
+      check(
+        'SEARCH-CI3-01/C12 「豚汁(とんじる)」が「豚肉のケチャップ炒め(ぶたにく…)」より前に出る(同じ漢字で2箇所に割れない)',
+        indexOf('豚汁') >= 0 && indexOf('豚汁') < indexOf('豚肉のケチャップ炒め'),
+        `豚汁=${indexOf('豚汁')} 豚肉のケチャップ炒め=${indexOf('豚肉のケチャップ炒め')}`,
+      )
+
+      // C11: 「使いたい食材」を入れると、ぜんぶ使えるレシピが先頭に出る(並べ替えは更新順のまま)
+      await openRecipesWith(`?ing=${encodeURIComponent('キャベツ にんじん')}`)
+      const subLabels = await s3Page.evaluate(() =>
+        Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.text-accent')).map((p) =>
+          p.textContent.trim(),
+        ),
+      )
+      check(
+        'SEARCH-CI3-01/C11 「入れた食材ぜんぶ使える」レシピが先頭に出る',
+        subLabels[0] === '入れた食材ぜんぶ使える',
+        JSON.stringify(subLabels.slice(0, 6)),
+      )
+      check(
+        'SEARCH-CI3-01/C11 「ぜんぶ使える」が「一部だけ使える」より後ろに埋もれない',
+        subLabels.indexOf('入れた食材ぜんぶ使える') <
+          subLabels.findIndex((l) => l.startsWith('食材 1/')),
+        JSON.stringify(subLabels.slice(0, 6)),
+      )
+
+      // C16: 作った記録のひとことメモでも探せる
+      await openRecipesWith('')
+      await s3Page.getByText('肉じゃが', { exact: true }).first().click()
+      await s3Page.waitForTimeout(700)
+      await s3Page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await s3Page.waitForTimeout(400)
+      await s3Page
+        .getByRole('dialog', { name: '作った記録をつける' })
+        .locator('input[type="text"]')
+        .first()
+        .fill('こどもが完食した')
+      await s3Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await s3Page.waitForTimeout(800)
+      await openRecipesWith(`?q=${encodeURIComponent('完食')}`)
+      const noteHitTitles = await s3Page.evaluate(() =>
+        Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.line-clamp-2')).map((p) =>
+          p.textContent.trim(),
+        ),
+      )
+      check(
+        'SEARCH-CI3-01/C16 記録のひとことメモの言葉で、そのレシピを検索できる',
+        noteHitTitles.length === 1 && noteHitTitles[0] === '肉じゃが',
+        JSON.stringify(noteHitTitles),
+      )
+    } finally {
+      await s3Browser.close()
+    }
+  }
+
+  // --- SHARE-SERVINGS-01(2026-07-29 便CI/C18): 共有はレシピ詳細で表示している人数の分量で出る。
+  // 従来は画面で4人分を見た直後に共有しても登録人数(2人分)の分量が出て、断りも無かった ---
+  currentCheck = 'SHARE-SERVINGS-01'
+  {
+    const ssBrowser = await chromium.launch()
+    const ssContext = await ssBrowser.newContext()
+    await ssContext.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE })
+    const ssPage = await ssContext.newPage()
+    ssPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHARE-SERVINGS-01] ${err.message}`)
+    })
+    try {
+      await ssPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ssPage.waitForTimeout(2000)
+      await ssPage.getByText('肉じゃが', { exact: true }).first().click()
+      await ssPage.waitForTimeout(700)
+      const registered = Number(
+        ((await ssPage.locator('span.min-w-14').first().textContent()) ?? '').match(/\d+/)?.[0],
+      )
+      await ssPage.locator('button[aria-label="人数を増やす"]').first().click()
+      await ssPage.waitForTimeout(300)
+      await ssPage.locator('button[aria-label="シェア"]').click()
+      await ssPage.waitForTimeout(400)
+      const ssDialog = ssPage.getByRole('dialog', { name: 'シェアする内容' })
+      check(
+        'SHARE-SERVINGS-01/C18 シェアの窓に「いま表示している◯人分の分量でシェアします」が出る',
+        ((await ssDialog.textContent()) ?? '').includes(
+          `いま表示している${registered + 1}人分の分量でシェアします`,
+        ),
+        await ssDialog.textContent(),
+      )
+      await ssDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await ssPage.waitForTimeout(800)
+      const shared = await ssPage.evaluate(() => navigator.clipboard.readText())
+      check(
+        'SHARE-SERVINGS-01/C18 共有した文章の人数が表示中の人数になる',
+        shared.includes(`\n${registered + 1}人分\n`),
+        shared.split('\n').slice(0, 3).join(' / '),
+      )
+    } finally {
+      await ssBrowser.close()
+    }
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
