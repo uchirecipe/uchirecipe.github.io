@@ -1392,9 +1392,25 @@ export default function MealPlanPage() {
   const [clearSlotTarget, setClearSlotTarget] = useState<MealSlot>('dinner')
   const clearWeekSlot = async () => {
     const label = ja.mealPlan.slot[clearSlotTarget]
-    if (!window.confirm(ja.mealPlan.clearWeekSlotConfirm.replace('{slot}', label))) return
+    // 規約F(2026-07-29 便CD/MP-19): 「何が消えるか(件数つき)」と「何が残るか」を両方書く。
+    // clearMealSlotInRangeは表示中の週の全日(過去日を含む)を消すので、件数も同じ範囲で数える
+    const targetCount = (entries ?? []).filter((e) => e.slot === clearSlotTarget).length
+    if (targetCount === 0) {
+      setMessage(ja.mealPlan.clearWeekSlotEmpty.replace('{slot}', label))
+      return
+    }
+    if (
+      !window.confirm(
+        ja.mealPlan.clearWeekSlotConfirm
+          .replace('{slot}', label)
+          .replace('{n}', String(targetCount)),
+      )
+    )
+      return
     await clearMealSlotInRange(dates[0], dates[6], clearSlotTarget)
-    setMessage(ja.mealPlan.clearWeekSlotDone.replace('{slot}', label))
+    setMessage(
+      ja.mealPlan.clearWeekSlotDone.replace('{slot}', label).replace('{n}', String(targetCount)),
+    )
   }
 
   // 週の概算食費（材料ごとの価格入力を優先し、未入力の材料は食材価格マスタで補う。docs/20 §3）
@@ -1747,6 +1763,9 @@ export default function MealPlanPage() {
                     <Dices size={18} aria-hidden />
                     {ja.mealPlan.todaySuggestButton}
                   </button>
+                  {/* 週タブの「まとめて献立を立てる」との違いを一言で示す
+                      (2026-07-29 便CD/MP-15。名前が近く区別が付かないという指摘) */}
+                  <p className="-mt-1 text-xs text-ink-muted">{ja.mealPlan.todaySuggestHint}</p>
                   {todayFromPlanIds.length > 0 && (
                     <button
                       type="button"
@@ -2148,6 +2167,10 @@ export default function MealPlanPage() {
           {ja.mealPlan.weekLayoutRolling}
         </button>
       </div>
+      {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
+          3体が切替自体を触っていなかった */}
+      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
+
 
       {/* 週の移動 */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
@@ -2303,6 +2326,10 @@ export default function MealPlanPage() {
           {ja.mealPlan.copyLastWeek}
         </button>
       </div>
+      {/* 「おまかせで提案」(日タブ)との違いが名前から分からないという指摘への1行説明
+          (2026-07-29 便CD/MP-15) */}
+      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
+
 
       {/* 7日分のカード */}
       <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
@@ -2343,17 +2370,29 @@ export default function MealPlanPage() {
                   .map((e) => recipeById.get(e.recipeId))
                   .filter((r): r is Recipe => !!r)
                 const genreMixed = detectGenreMix(slotMainRecipe, slotSideRecipes)
+                // 一品もの(丼・麺・カレー・鍋)の日は副菜を意図的に空ける(docs/56 §3-8)。
+                // その理由が画面に一切出ず「提案が1品だけ失敗した」ように見えていたので、
+                // 副菜が空のときだけ1行で理由を添える(2026-07-29 便CD/MP-18)。
+                // 「足したい人」も選べることを併記して、足す/足さないの好みの割れに両対応する
+                const showOneDishNote =
+                  !!slotMainRecipe && isOneDish(slotMainRecipe) && slotSideRecipes.length === 0
                 return (
                   <div key={slot}>
                     <div className="flex items-center gap-2">
                       <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                      {/* 2026-07-29 便CD/MP-08: 説明がtitle属性(ホバー)にしかなく、スマホでは
+                          物理的に到達できなかった。タップで説明をトーストに出すボタンにする
+                          (静止時の見た目は従来と同じ＝docs/56 §3-10「うるさくしない」を維持) */}
                       {genreMixed && (
-                        <span
+                        <button
+                          type="button"
                           title={ja.mealPlan.genreMixedHint}
+                          aria-label={ja.mealPlan.genreMixedAria}
+                          onClick={() => setMessage(ja.mealPlan.genreMixedHint)}
                           className="rounded-sm border border-edge px-1.5 py-0.5 text-[10px] font-bold text-ink-muted"
                         >
                           {ja.mealPlan.genreMixedBadge}
-                        </span>
+                        </button>
                       )}
                     </div>
                     <div className="mt-1 space-y-1">
@@ -2364,6 +2403,9 @@ export default function MealPlanPage() {
                         renderRow(date, slot, 'side', row, `side-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
                       )}
                     </div>
+                    {showOneDishNote && (
+                      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.oneDishNote}</p>
+                    )}
                     {isAddMenuOpen ? (
                       <div className="mt-1 flex items-center gap-2">
                         <button
