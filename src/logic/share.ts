@@ -105,14 +105,18 @@ export async function shareText(recipe: Recipe, opts?: ShareOptions): Promise<'s
   return 'copied'
 }
 
-/** 現在のテーマのデザイントークン（CSS変数）から色を読む */
-function tokenColor(name: string, fallback: string): string {
+/**
+ * 現在のテーマのデザイントークン（CSS変数）から色を読む。
+ * 2026-07-29 便CB-2（docs/59 A-4）: 献立表の画像化でも同じ描画の作法（テーマ色・折り返し・
+ * 下部の帯）を使うため、この下の描画ヘルパー3つを外部にも公開する（logic/planSheetImage.ts）。
+ */
+export function tokenColor(name: string, fallback: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
   return value || fallback
 }
 
-/** 折り返しながら文字を描く。描いた行数を返す */
-function drawWrappedText(
+/** 折り返しながら文字を描く。描いた行数を返す（献立表の画像化＝便CB-2でも使う） */
+export function drawWrappedText(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
@@ -140,8 +144,8 @@ function drawWrappedText(
   return lines
 }
 
-/** 折り返した場合の行数だけを数える（描画はしない。サイズ計算用） */
-function countWrappedLines(
+/** 折り返した場合の行数だけを数える（描画はしない。サイズ計算用。便CB-2でも使う） */
+export function countWrappedLines(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,

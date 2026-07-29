@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
@@ -21,6 +22,10 @@ import {
   Trash2,
   Plus,
   SlidersHorizontal,
+  BookmarkPlus,
+  LayoutTemplate,
+  Printer,
+  ImageDown,
 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
@@ -38,6 +43,16 @@ import {
   clearMealSlotInRange,
 } from '../db/mealPlan'
 import { useDayNoteRange, saveDayNote } from '../db/dayNotes'
+import { useMealTemplates, saveMealTemplate, deleteMealTemplate } from '../db/mealTemplates'
+import {
+  buildTemplateItems,
+  planTemplateFill,
+  templateDowCounts,
+  ALL_DOWS,
+  TEMPLATE_NAME_MAX_LENGTH,
+} from '../logic/mealTemplate'
+import { buildPlanSheet, type PlanSheet } from '../logic/planSheet'
+import { sharePlanSheetImage } from '../logic/planSheetImage'
 import Toast from '../components/Toast'
 import {
   useTodayList,
@@ -74,7 +89,7 @@ import {
   cookedPlanEntryIds,
   mealOccasionCount,
 } from '../logic/mealPlan'
-import type { MealGenre, ProteinSource } from '../logic/mealPlan'
+import type { FillWeekPlan, MealGenre, ProteinSource } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -313,6 +328,58 @@ function DayNoteEditor({
         className="mt-1 w-full rounded-sm border border-edge bg-app px-2 py-2 text-sm text-ink placeholder:text-ink-muted/60"
       />
     </div>
+  )
+}
+
+/**
+ * 献立表（2026-07-29 便CB-2・docs/59 A-4）の1枚分の中身。
+ * 画面のプレビュー（.plan-sheet-preview）と、印刷用にbody直下へポータルで置く1枚
+ * （.plan-sheet-print）の両方がこの同じ中身を描く。何を載せるかは純ロジック
+ * logic/planSheet.ts が決めるので、画像保存（logic/planSheetImage.ts）とも内容がずれない。
+ *
+ * 印刷時は index.css 側で文字色を黒・背景を白に固定する（ダークテーマのまま紙に出すと
+ * 白地に白文字になって読めないため）。ここでは画面用のテーマ色だけを指定する。
+ */
+function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
+  return (
+    <>
+      <h3 className="text-lg font-bold">{sheet.title}</h3>
+      <p className="mt-0.5 text-[10px] text-ink-muted">{ja.mealPlan.planSheetBasisNote}</p>
+      <ul className="mt-[var(--space-sm)] divide-y divide-edge">
+        {sheet.days.map((day) => (
+          <li key={day.date} className="py-1.5">
+            <p className="text-sm font-bold text-accent">{day.label}</p>
+            {day.slots.map((slotRow) => (
+              <p key={slotRow.slot} className="mt-0.5 pl-2 text-sm">
+                <span className="font-bold">{slotRow.label}</span>
+                {'　'}
+                {slotRow.dishes.map((dish, i) => (
+                  <span key={`${dish.role}-${i}`}>
+                    {i > 0 && '　'}
+                    <span className="text-ink-muted">{ja.mealPlan.role[dish.role]}</span> {dish.title}
+                  </span>
+                ))}
+              </p>
+            ))}
+            {day.cookedTitles.length > 0 && (
+              <p className="mt-0.5 pl-2 text-sm">
+                <span className="font-bold">{ja.mealPlan.pastCookedTitle}</span>
+                {'　'}
+                {day.cookedTitles.join('　')}
+              </p>
+            )}
+            {day.note && (
+              <p className="mt-0.5 pl-2 text-xs text-ink-muted">
+                {ja.mealPlan.dayNoteLabel}　{day.note}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-[var(--space-sm)] text-[10px] text-ink-muted">
+        {ja.app.name}｜{ja.app.url}
+      </p>
+    </>
   )
 }
 
@@ -1487,7 +1554,11 @@ export default function MealPlanPage() {
   }
 
   /**
-   * 週の表示中の食事帯を、自動提案でまとめて埋める。
+   * 「まとめて献立を立てる」の実行本体（2026-07-29 便CB-2・docs/59 A-5で週タブ専用から切り出した）。
+   * 計画(planWeekFill)と対象期間の献立を受け取り、自動提案由来の行を消してから提案で埋め直し、
+   * **実際にDBへ追加できた品数**を返す。週タブ(fillWeek)と月タブの一括提案(fillMonth)は
+   * この1本を共有する＝提案の質(日単位のジャンル統一・たんぱく源の分散・一品ものの扱い)が
+   * 週と月で食い違わないようにするため。
    *
    * 2026-07-22 便BE(外部レビューで見つかった欠陥の修正): 以前は表示中の全枠(手動で選んだ枠も含む)を
    * 一旦クリアしてから再提案していたため、手動で入れた献立が無警告で上書きされて消えていた。
@@ -1497,31 +1568,24 @@ export default function MealPlanPage() {
    * これにより「手動配置の保護」と「押すたびの再抽選(2026-07-14仕様。自動枠に限って維持)」を両立する。
    * 埋める枠にはauto=trueを付け、次回もこの枠だけが再抽選対象になるようにする。
    * 過去日・非表示帯の枠は対象外で、重複回避の除外対象としてのみ使う(planWeekFill内で処理)。
-   * 手動枠を残した場合は結果メッセージで明示する(空き枠だけ埋めたことも伝わる)。
    */
-  const fillWeek = async () => {
-    if (!recipes) return
-    setMessage('')
-    // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
-    // 「おまかせで提案」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
-    if (visibleRecipes.length === 0) {
-      setMessage(ja.mealPlan.noSuggestion)
-      return
-    }
-    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
+  const executeFill = async (
+    plan: FillWeekPlan,
+    rangeEntries: MealPlanEntry[],
+  ): Promise<number> => {
     // 埋め直す役割に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
     for (const id of plan.autoEntryIdsToRemove) {
       await removeMealEntry(id)
     }
     const usedRecipeIds = [...plan.usedRecipeIds]
 
-    // たんぱく源の週内分散(docs/56 §3-6): 今週まだ少ない主菜のソース(肉/魚/卵/豆腐)を軽く優先し、
+    // たんぱく源の分散(docs/56 §3-6): 対象期間でまだ少ない主菜のソース(肉/魚/卵/豆腐)を軽く優先し、
     // 肉→肉→肉と連続で偏るのを防ぐ。残る手動主菜も集計に入れる。'その他'は分散対象にしない
     const proteinCounts: Record<ProteinSource, number> = { 肉: 0, 魚: 0, 卵: 0, 豆腐: 0, その他: 0 }
     const bumpProtein = (r: Recipe) => {
       proteinCounts[proteinSourceOf(r)] += 1
     }
-    for (const e of entries ?? []) {
+    for (const e of rangeEntries) {
       if ((e.role ?? 'main') !== 'main') continue
       if (e.id != null && plan.autoEntryIdsToRemove.includes(e.id)) continue // これから消える主菜は数えない
       const r = recipeById.get(e.recipeId)
@@ -1570,7 +1634,7 @@ export default function MealPlanPage() {
     // 手動主菜だけの枠には主菜のジャンルに揃えた副菜を足す(主菜が一品ものなら副菜は足さない)。
     for (const { date, slot, fillRole } of plan.partialFills) {
       if (fillRole === 'side') {
-        const manualMain = (entries ?? []).find(
+        const manualMain = rangeEntries.find(
           (e) => e.date === date && e.slot === slot && (e.role ?? 'main') === 'main' && !e.auto,
         )
         const mainRecipe = manualMain ? recipeById.get(manualMain.recipeId) : undefined
@@ -1607,6 +1671,25 @@ export default function MealPlanPage() {
         }
       }
     }
+
+    return added
+  }
+
+  /**
+   * 週の表示中の食事帯を、自動提案でまとめて埋める（結果メッセージ・今日の枠へのスクロールまで）。
+   * 埋め方そのものは executeFill が担う（便CB-2で月タブの一括提案と共通化した）。
+   */
+  const fillWeek = async () => {
+    if (!recipes) return
+    setMessage('')
+    // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
+    // 「おまかせで提案」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
+    if (visibleRecipes.length === 0) {
+      setMessage(ja.mealPlan.noSuggestion)
+      return
+    }
+    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
+    const added = await executeFill(plan, entries ?? [])
 
     // 結果メッセージ(2026-07-29 便CD/MP-06で正直な出し分けに修正)。
     // 従来は「残す枠が1つでもあれば」だけを見て「空いていた枠に献立を立てました」と言っていたため、
@@ -1656,6 +1739,63 @@ export default function MealPlanPage() {
   const todaySectionRef = useRef<HTMLElement | null>(null)
 
   /**
+   * A-5 月の空日を一括提案（2026-07-29 便CB-2・docs/59）。
+   * 週の「まとめて献立を立てる」と同じ計画・同じ埋め方（planWeekFill＋executeFill）を、
+   * 対象範囲だけ表示中の月まるごとに広げたもの。提案の質（日単位のジャンル統一・たんぱく源の分散・
+   * 一品ものの日は副菜を空ける）は週と同じロジックを共有するので食い違わない。
+   *
+   * 週と違うのは2点だけ:
+   *  ①一度に数十枠を触るので、実行前に必ず確認を出す（規約F: 何日分・何食分を埋めるか＝入るもの、
+   *    すでに決まっている献立と作った記録は消えない＝残るもの、を件数つきで書く）
+   *  ②結果は必ず出す。しかも「立てるつもりだった数」ではなく**実際に入れられた品数**で報告する
+   *    （便CD/MP-06の正直な完了報告と同じ作法。一品ものスキップ・候補切れで数は必ず減りうる）
+   */
+  const fillMonth = async () => {
+    if (!recipes) return
+    setMessage('')
+    if (visibleRecipes.length === 0) {
+      setMessage(ja.mealPlan.noSuggestion)
+      return
+    }
+    const plan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today)
+    const preserved = plan.preservedSlotKeys.size
+    const targetSlots = [...plan.slotsToFill, ...plan.partialFills]
+    if (targetSlots.length === 0) {
+      setMessage(
+        preserved > 0
+          ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
+          : ja.mealPlan.fillMonthNoAdded,
+      )
+      return
+    }
+    const targetDayCount = new Set(targetSlots.map((s) => s.date)).size
+    const confirmText = (
+      preserved > 0 ? ja.mealPlan.fillMonthConfirm : ja.mealPlan.fillMonthConfirmNoKept
+    )
+      .replace('{d}', String(targetDayCount))
+      .replace('{s}', String(targetSlots.length))
+      .replace('{k}', String(preserved))
+    if (!window.confirm(confirmText)) return
+    const added = await executeFill(plan, monthEntries ?? [])
+    // 正直な完了報告: 実際にDBへ入った品数で出し分ける
+    if (added > 0) {
+      setMessage(
+        preserved > 0
+          ? ja.mealPlan.fillMonthKeptManual
+              .replace('{n}', String(preserved))
+              .replace('{a}', String(added))
+          : ja.mealPlan.fillMonthDone.replace('{a}', String(added)),
+      )
+    } else {
+      setMessage(
+        preserved > 0
+          ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
+          : ja.mealPlan.fillMonthNoAdded,
+      )
+    }
+  }
+
+  /**
    * S-3 先週の献立をコピー(2026-07-25 便BU・docs/59)。
    * 表示中の週の各日(今日・未来日のみ)へ、その1週間前の同じ曜日の献立を「空いている枠だけ」複製する。
    * - 既にある枠(手動配置・自動提案由来のどちらも)は上書きしない＝非破壊。空き枠にだけ入れる設計。
@@ -1693,6 +1833,277 @@ export default function MealPlanPage() {
     }
     setMessage(ja.mealPlan.copyLastWeekDone.replace('{n}', String(ops.length)))
   }
+
+  /**
+   * A-1 マイ献立テンプレ ＋ B-2 曜日固定の定番（2026-07-29 便CB-2・docs/59。統合設計）。
+   *
+   * 週タブで「この週をテンプレとして保存」すると、表示中の週の献立を**曜日ごと**に覚える
+   * （db/types.ts MealTemplateItem）。流し込むときに曜日を絞れるので、
+   *  ・全曜日を選ぶ → お気に入りの1週間をそのまま別の週／月へ（A-1）
+   *  ・金曜だけを選ぶ → 期間内の毎週金曜に同じ献立が入る（B-2「毎週◯曜はカレー」）
+   * が同じ機構で成立する（B-2のために専用の繰り返し設計を足さない）。
+   *
+   * 入るのは「まだ決まっていないところ（空いている食事）」だけで、今ある献立は手動配置・
+   * 自動提案由来のどちらも上書きしない＝非破壊（S-3 先週コピーと同じ作法）。入れた枠は
+   * auto を付けない＝手動配置扱いなので、次の「まとめて献立を立てる」でも再抽選されない。
+   * 判断は純ロジック（logic/mealTemplate.ts の planTemplateFill）に置き、テストで固定する。
+   */
+  const mealTemplates = useMealTemplates()
+  const [templateSaveOpen, setTemplateSaveOpen] = useState(false)
+  const [templateName, setTemplateName] = useState('')
+  // 「テンプレを流し込む」窓を、どの範囲へ入れるために開いたか（週タブ＝表示中の週／月タブ＝表示中の月）
+  const [templateApplyScope, setTemplateApplyScope] = useState<'week' | 'month' | null>(null)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
+  // B-2: 流し込む曜日（0=月 … 6=日）。既定は全曜日＝1週間まるごと
+  const [templateDows, setTemplateDows] = useState<number[]>(ALL_DOWS)
+
+  // 保存対象＝表示中の週の献立（曜日×食事×役割へ変換したもの）
+  const weekTemplateItems = useMemo(() => buildTemplateItems(entries ?? [], dates), [entries, dates])
+  const openTemplateSave = () => {
+    if (weekTemplateItems.length === 0) {
+      setMessage(ja.mealPlan.templateSaveEmpty)
+      return
+    }
+    setTemplateName('')
+    setTemplateSaveOpen(true)
+  }
+  const submitTemplateSave = async () => {
+    const name = templateName.trim()
+    if (name === '') {
+      setMessage(ja.mealPlan.templateNameRequired)
+      return
+    }
+    await saveMealTemplate(name, weekTemplateItems)
+    setTemplateSaveOpen(false)
+    setMessage(
+      ja.mealPlan.templateSaveDone
+        .replace('{name}', name)
+        .replace('{n}', String(weekTemplateItems.length)),
+    )
+  }
+
+  const openTemplateApply = (scope: 'week' | 'month') => {
+    setSelectedTemplateId(null)
+    setTemplateDows(ALL_DOWS)
+    setTemplateApplyScope(scope)
+  }
+  // 選択中のテンプレ（未選択なら先頭＝保存が一番古いものを既定にする。窓を開いてすぐ流し込める）
+  const selectedTemplate = useMemo(() => {
+    const list = mealTemplates ?? []
+    if (list.length === 0) return undefined
+    return list.find((t) => t.id === selectedTemplateId) ?? list[0]
+  }, [mealTemplates, selectedTemplateId])
+  const toggleTemplateDow = (dow: number) => {
+    setTemplateDows((prev) =>
+      prev.includes(dow) ? prev.filter((d) => d !== dow) : [...prev, dow].sort((a, b) => a - b),
+    )
+  }
+  const applyTemplate = async () => {
+    const template = selectedTemplate
+    if (!template || templateApplyScope == null) return
+    if (templateDows.length === 0) {
+      setMessage(ja.mealPlan.templateDowNone)
+      return
+    }
+    const targetDates = templateApplyScope === 'month' ? monthDatesList : dates
+    const targetEntries = templateApplyScope === 'month' ? (monthEntries ?? []) : (entries ?? [])
+    const plan = planTemplateFill({
+      items: template.items,
+      dates: targetDates,
+      entries: targetEntries,
+      today,
+      allowedDows: templateDows,
+      visibleSlots,
+    })
+    if (plan.ops.length === 0) {
+      // 「全部埋まっていて入る余地が無い」と「選んだ曜日にテンプレの中身が無い」を出し分ける
+      setMessage(
+        plan.keptSlotCount > 0
+          ? ja.mealPlan.templateApplyNoRoom.replace('{n}', String(plan.keptSlotCount))
+          : ja.mealPlan.templateApplyNoItems,
+      )
+      return
+    }
+    // 規約F: 何品がどこに入るかと、何が消えないかを件数つきで両方書く
+    const confirmText = (
+      plan.keptSlotCount > 0
+        ? ja.mealPlan.templateApplyConfirm
+        : ja.mealPlan.templateApplyConfirmNoKept
+    )
+      .replace('{name}', template.name)
+      .replace('{n}', String(plan.ops.length))
+      .replace('{d}', String(plan.fillSlotCount))
+      .replace('{k}', String(plan.keptSlotCount))
+    if (!window.confirm(confirmText)) return
+    // auto=false(既定)で追加＝手動配置として保護される（ユーザーが意図して入れた献立のため）
+    for (const op of plan.ops) {
+      await addMealEntry(op.date, op.slot, op.recipeId, op.role)
+    }
+    setTemplateApplyScope(null)
+    setMessage(
+      ja.mealPlan.templateApplyDone
+        .replace('{name}', template.name)
+        .replace('{n}', String(plan.ops.length)),
+    )
+  }
+  const removeTemplate = async (id: number, name: string, itemCount: number) => {
+    if (
+      !window.confirm(
+        ja.mealPlan.templateDeleteConfirm.replace('{name}', name).replace('{n}', String(itemCount)),
+      )
+    )
+      return
+    await deleteMealTemplate(id)
+    if (selectedTemplateId === id) setSelectedTemplateId(null)
+    setMessage(ja.mealPlan.templateDeleteDone.replace('{name}', name))
+  }
+
+  /**
+   * A-4 献立表の印刷／画像化（2026-07-29 便CB-2・docs/59）。
+   * 週または月の献立を1枚に整形し、①ブラウザ印刷（index.css の @media print が .plan-sheet だけを
+   * 紙に出す）②画像保存（既存のレシピ画像カードと同じCanvas機構を流用）の2通りで外に出せるようにする。
+   * 冷蔵庫に貼る・家族に見せる用途で、アカウントも同期も要らない共有手段になる（docs/59 C-2の代替）。
+   * 載せる中身の規則はアプリの他の画面と同じ（過ぎた日＝作った記録・今日から先＝登録した献立）＋日付メモ。
+   */
+  const [planSheetOpen, setPlanSheetOpen] = useState(false)
+  // 日付→その日の「作った記録」の料理名（献立表の過去日の行に使う）
+  const cookedTitlesByDate = useMemo(() => {
+    const map = new Map<string, string[]>()
+    cookedLogsByDate.forEach((list, date) => {
+      map.set(
+        date,
+        list.map(({ recipe }) => recipe.title),
+      )
+    })
+    return map
+  }, [cookedLogsByDate])
+  const sheetTitleOf = useMemo(
+    () => (recipeId: number) => recipeById.get(recipeId)?.title,
+    [recipeById],
+  )
+  const weekPlanSheet = useMemo(
+    () =>
+      buildPlanSheet({
+        title: ja.mealPlan.planSheetWeekHeading
+          .replace('{start}', formatMonthDay(dates[0]))
+          .replace('{end}', formatMonthDay(dates[6])),
+        dates,
+        today,
+        visibleSlots,
+        entries: entries ?? [],
+        titleOf: sheetTitleOf,
+        notes: new Map((weekDayNotes ?? []).map((n) => [n.date, n.text])),
+        cookedTitlesByDate,
+      }),
+    [dates, today, visibleSlots, entries, sheetTitleOf, weekDayNotes, cookedTitlesByDate],
+  )
+  const monthPlanSheet = useMemo(
+    () =>
+      buildPlanSheet({
+        title: ja.mealPlan.planSheetMonthHeading
+          .replace('{y}', monthAnchor.slice(0, 4))
+          .replace('{m}', String(Number(monthAnchor.slice(5, 7)))),
+        dates: monthDatesList,
+        today,
+        visibleSlots,
+        entries: monthEntries ?? [],
+        titleOf: sheetTitleOf,
+        notes: new Map((monthDayNotes ?? []).map((n) => [n.date, n.text])),
+        cookedTitlesByDate,
+      }),
+    [
+      monthAnchor,
+      monthDatesList,
+      today,
+      visibleSlots,
+      monthEntries,
+      sheetTitleOf,
+      monthDayNotes,
+      cookedTitlesByDate,
+    ],
+  )
+  const savePlanSheetImage = async (sheet: PlanSheet) => {
+    try {
+      const result = await sharePlanSheetImage(sheet)
+      setMessage(
+        result === 'shared'
+          ? ja.mealPlan.planSheetImageShared
+          : result === 'cancelled'
+            ? ja.mealPlan.planSheetImageCancelled
+            : ja.mealPlan.planSheetImageDone,
+      )
+    } catch {
+      // Canvasが使えない等で作れなかったときに無反応にしない（何が起きたかを必ず伝える）
+      setMessage(ja.mealPlan.planSheetImageFailed)
+    }
+  }
+
+  /**
+   * 献立表の折りたたみ（週タブ・月タブで同じものを使う）。開いている間だけ .plan-sheet が
+   * 画面とDOMに存在し、その状態で「印刷する」を押す＝紙に出るのは必ず今見えている1枚になる。
+   */
+  const renderPlanSheetSection = (sheet: PlanSheet) => (
+    <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface shadow-sm">
+      <button
+        type="button"
+        onClick={() => setPlanSheetOpen((v) => !v)}
+        aria-expanded={planSheetOpen}
+        className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
+      >
+        <span className="font-bold">{ja.mealPlan.planSheetTitle}</span>
+        {planSheetOpen ? (
+          <ChevronUp size={18} className="shrink-0 text-accent" aria-hidden />
+        ) : (
+          <ChevronDown size={18} className="shrink-0 text-accent" aria-hidden />
+        )}
+      </button>
+      {planSheetOpen && (
+        <div className="px-[var(--space-md)] pb-[var(--space-md)]">
+          <p className="text-xs text-ink-muted">{ja.mealPlan.planSheetHint}</p>
+          {sheet.isEmpty ? (
+            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+              {ja.mealPlan.planSheetEmpty}
+            </p>
+          ) : (
+            <>
+              <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                >
+                  <Printer size={14} aria-hidden />
+                  {ja.mealPlan.planSheetPrint}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void savePlanSheetImage(sheet)}
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                >
+                  <ImageDown size={14} aria-hidden />
+                  {ja.mealPlan.planSheetImage}
+                </button>
+              </div>
+              {/* 画面のプレビュー。長い月の表が画面を占領しないよう高さを抑える */}
+              <div className="mt-[var(--space-sm)] max-h-[60vh] overflow-y-auto">
+                <div className="plan-sheet-preview rounded-sm border border-edge bg-app p-[var(--space-md)]">
+                  <PlanSheetView sheet={sheet} />
+                </div>
+              </div>
+              {/* 印刷用の1枚。body直下へ出す（＝印刷時にアプリ本体をまるごと消せるので、
+                  献立表のあとに真っ白なページが続かない。詳細は index.css の @media print） */}
+              {createPortal(
+                <div className="plan-sheet-print">
+                  <PlanSheetView sheet={sheet} />
+                </div>,
+                document.body,
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  )
 
   // 週タブ「この帯の今週分を空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 帯を1つ選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
@@ -2361,6 +2772,30 @@ export default function MealPlanPage() {
               ))}
             </div>
 
+            {/* 月タブの操作(2026-07-29 便CB-2・docs/59)。
+                A-5: この月のまだ決まっていない日に、主菜と副菜をまとめて入れる（実行前に確認）
+                A-1＋B-2: 保存したテンプレを、表示中の月の空いているところへ流し込む
+                （曜日を絞れば「毎週金曜はカレー」になる） */}
+            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+              <button
+                type="button"
+                onClick={() => void fillMonth()}
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+              >
+                <Dices size={14} aria-hidden />
+                {ja.mealPlan.fillMonth}
+              </button>
+              <button
+                type="button"
+                onClick={() => openTemplateApply('month')}
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+              >
+                <LayoutTemplate size={14} aria-hidden />
+                {ja.mealPlan.templateApply}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillMonthHint}</p>
+
             {/* 期間の栄養と食費モード(2026-07-17 便AB・docs/35 §5 → 2026-07-28 便CAで改訂)。
                 押すたびにON/OFFを切り替え、切り替え時は選択もリセットする(再度押せば選び直せる) */}
             <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
@@ -2516,6 +2951,9 @@ export default function MealPlanPage() {
                 </Link>
               </div>
             )}
+
+            {/* A-4 献立表(印刷・画像で保存)。この月の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
+            {renderPlanSheetSection(monthPlanSheet)}
           </div>
         ) : (
           // 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。月タブを完全に
@@ -2774,6 +3212,28 @@ export default function MealPlanPage() {
           (2026-07-29 便CD/MP-15) */}
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
 
+      {/* A-1 マイ献立テンプレ＋B-2 曜日固定の定番(2026-07-29 便CB-2・docs/59)。
+          保存＝表示中の週を曜日ごと覚える／流し込む＝空いているところにだけ入れる(非破壊) */}
+      <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+        <button
+          type="button"
+          onClick={openTemplateSave}
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+        >
+          <BookmarkPlus size={14} aria-hidden />
+          {ja.mealPlan.templateSave}
+        </button>
+        <button
+          type="button"
+          onClick={() => openTemplateApply('week')}
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+        >
+          <LayoutTemplate size={14} aria-hidden />
+          {ja.mealPlan.templateApply}
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateSaveDescription}</p>
+
       {/* 7日分のカード */}
       <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
         {dates.map((date) => (
@@ -2907,6 +3367,9 @@ export default function MealPlanPage() {
           )}
         </section>
       )}
+
+      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
+      {renderPlanSheetSection(weekPlanSheet)}
 
       {/* この週の買い物リストを作る */}
       <button
@@ -3096,6 +3559,188 @@ export default function MealPlanPage() {
                   )
                 })}
               </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* A-1 テンプレ保存の窓(2026-07-29 便CB-2)。名前を付けて保存する（複数保存できる）。
+          z-[60]は日モーダルより上に重ねるため（週タブからしか開かないが、重なり順をピッカーとそろえる） */}
+      {templateSaveOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-[var(--space-md)]"
+          onClick={() => setTemplateSaveOpen(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label={ja.mealPlan.templateSave}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold">{ja.mealPlan.templateSave}</h3>
+              <button
+                type="button"
+                onClick={() => setTemplateSaveOpen(false)}
+                aria-label={ja.common.close}
+                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-ink-muted">
+              {ja.mealPlan.templateSaveRange
+                .replace('{start}', formatMonthDay(dates[0]))
+                .replace('{end}', formatMonthDay(dates[6]))
+                .replace('{n}', String(weekTemplateItems.length))}
+            </p>
+            <label className="mt-[var(--space-md)] block text-sm font-bold text-ink-muted">
+              {ja.mealPlan.templateNameLabel}
+              <input
+                type="text"
+                value={templateName}
+                maxLength={TEMPLATE_NAME_MAX_LENGTH}
+                onChange={(e) => setTemplateName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void submitTemplateSave()
+                }}
+                placeholder={ja.mealPlan.templateNamePlaceholder}
+                className="mt-1 w-full rounded-sm border border-edge bg-app px-2 py-2 text-base font-normal text-ink placeholder:text-ink-muted/60"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void submitTemplateSave()}
+              className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+            >
+              {ja.mealPlan.templateSaveButton}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* A-1＋B-2 テンプレを流し込む窓(2026-07-29 便CB-2)。
+          テンプレを選び、入れる曜日を選んでから流し込む（曜日を絞る＝毎週◯曜はカレー）。
+          入るのは空いているところだけで、実行前に規約Fの確認文を必ず出す */}
+      {templateApplyScope != null && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-[var(--space-md)]"
+          onClick={() => setTemplateApplyScope(null)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label={ja.mealPlan.templateApply}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold">{ja.mealPlan.templateApply}</h3>
+              <button
+                type="button"
+                onClick={() => setTemplateApplyScope(null)}
+                aria-label={ja.common.close}
+                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-ink-muted">
+              {templateApplyScope === 'month'
+                ? ja.mealPlan.templateApplyRangeMonth
+                    .replace('{y}', monthAnchor.slice(0, 4))
+                    .replace('{m}', String(Number(monthAnchor.slice(5, 7))))
+                : ja.mealPlan.templateApplyRangeWeek
+                    .replace('{start}', formatMonthDay(dates[0]))
+                    .replace('{end}', formatMonthDay(dates[6]))}
+            </p>
+            {(mealTemplates?.length ?? 0) === 0 ? (
+              <p className="mt-[var(--space-md)] text-sm text-ink-muted">
+                {ja.mealPlan.templateApplyNone}
+              </p>
+            ) : (
+              <>
+                <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                  {ja.mealPlan.templateApplyPick}
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {(mealTemplates ?? []).map((t) => {
+                    const isSelected = selectedTemplate?.id === t.id
+                    return (
+                      <li key={t.id} className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTemplateId(t.id ?? null)}
+                          aria-pressed={isSelected}
+                          className={`flex min-w-0 flex-1 items-center gap-2 rounded-sm border px-3 py-2 text-left text-sm font-bold ${
+                            isSelected
+                              ? 'border-accent bg-accent text-on-accent'
+                              : 'border-edge bg-app text-ink'
+                          }`}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{t.name}</span>
+                          <span
+                            className={`shrink-0 text-xs font-normal ${
+                              isSelected ? 'text-on-accent' : 'text-ink-muted'
+                            }`}
+                          >
+                            {ja.mealPlan.templateItemCount.replace('{n}', String(t.items.length))}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeTemplate(t.id!, t.name, t.items.length)}
+                          aria-label={ja.mealPlan.templateDelete}
+                          className="shrink-0 rounded-full p-2 text-ink-muted"
+                        >
+                          <Trash2 size={16} aria-hidden />
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                {/* B-2: 入れる曜日。既定は全曜日＝1週間まるごと。絞ればその曜日だけに入る */}
+                <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                  {ja.mealPlan.templateDowTitle}
+                </p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {ja.mealPlan.dow.map((label, dow) => {
+                    const active = templateDows.includes(dow)
+                    const count = selectedTemplate
+                      ? templateDowCounts(selectedTemplate.items)[dow]
+                      : 0
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        data-dow={dow}
+                        onClick={() => toggleTemplateDow(dow)}
+                        aria-pressed={active}
+                        aria-label={`${label}${ja.mealPlan.templateItemCount.replace('{n}', String(count))}`}
+                        className={`min-w-11 rounded-sm border px-2 py-2 text-sm font-bold ${
+                          active
+                            ? 'border-accent bg-accent text-on-accent'
+                            : 'border-edge bg-surface text-ink-muted'
+                        }`}
+                      >
+                        {label}
+                        <span className="ml-0.5 text-[10px] font-normal">{count}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateDowHint}</p>
+
+                <button
+                  type="button"
+                  onClick={() => void applyTemplate()}
+                  className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                >
+                  {ja.mealPlan.templateApplyButton}
+                </button>
+              </>
             )}
           </div>
         </div>

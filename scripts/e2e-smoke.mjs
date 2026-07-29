@@ -6007,6 +6007,554 @@ try {
     }
   }
 
+  // --- MEALPLAN-A1B2: マイ献立テンプレ(A-1)＋曜日固定の定番(B-2)。2026-07-29 便CB-2・docs/59。
+  // 表示中の週(月曜に副菜1品・金曜に肉じゃが)を「この週をテンプレとして保存」→ 月タブで翌月を開き
+  //  ・入れる曜日を「金」だけに絞って流し込む＝毎週金曜に同じ献立が入る(B-2)
+  //  ・すでに献立が入っている金曜は上書きされず残る(非破壊)
+  //  ・確認文が規約F(何品が入るか＋何が消えないか)を満たしている
+  // をIndexedDBの実データで確認する。月タブはPro機能のためIndexedDB直書きで解錠する ---
+  currentCheck = 'MEALPLAN-A1B2'
+  {
+    const tpBrowser = await chromium.launch()
+    const tpContext = await tpBrowser.newContext()
+    const tpPage = await tpContext.newPage()
+    let tpConfirmMsg = ''
+    tpPage.on('dialog', (dialog) => {
+      tpConfirmMsg = dialog.message()
+      return dialog.accept()
+    })
+    tpPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A1B2] ${text}`)
+    })
+    tpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A1B2] ${err.message}`)
+    })
+    try {
+      const tpYmd = (d) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const tpNow = new Date()
+      // 表示中の週(週区切り＝月曜始まり)の月曜と金曜
+      const tpMonday = new Date(tpNow)
+      tpMonday.setDate(tpNow.getDate() + (tpNow.getDay() === 0 ? -6 : 1 - tpNow.getDay()))
+      const tpFriday = new Date(tpMonday)
+      tpFriday.setDate(tpMonday.getDate() + 4)
+      // 翌月(全日が未来日)の金曜すべて
+      const tpNextAnchor = new Date(tpNow.getFullYear(), tpNow.getMonth() + 1, 1)
+      const tpNextLast = new Date(tpNextAnchor.getFullYear(), tpNextAnchor.getMonth() + 1, 0).getDate()
+      const tpNextFridays = []
+      for (let day = 1; day <= tpNextLast; day++) {
+        const d = new Date(tpNextAnchor.getFullYear(), tpNextAnchor.getMonth(), day)
+        if (d.getDay() === 5) tpNextFridays.push(tpYmd(d))
+      }
+
+      await tpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tpPage.waitForTimeout(1800) // 初回シード完了待ち
+      // Pro解錠(IndexedDB直書き)＋週の献立と「翌月の最初の金曜」の先約を仕込む
+      const tpIds = await tpPage.evaluate(
+        ([monday, friday, occupied]) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const curry = g.result.find((r) => r.title === '肉じゃが')
+                const side = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                if (!curry || !side) {
+                  reject(new Error('seed recipes not found'))
+                  return
+                }
+                const wtx = idb.transaction(['mealPlans', 'settings'], 'readwrite')
+                const plans = wtx.objectStore('mealPlans')
+                plans.add({ date: monday, slot: 'dinner', recipeId: side.id, role: 'main' })
+                plans.add({ date: friday, slot: 'dinner', recipeId: curry.id, role: 'main' })
+                // 翌月の最初の金曜には先約(別の料理)を入れておく＝上書きされないことの確認用
+                plans.add({ date: occupied, slot: 'dinner', recipeId: side.id, role: 'main' })
+                const settings = wtx.objectStore('settings')
+                const getReq = settings.get(1)
+                getReq.onsuccess = () => {
+                  const current = getReq.result || { id: 1 }
+                  settings.put({
+                    ...current,
+                    id: 1,
+                    proCode: 'UR-E2E-TEST-ONLY',
+                    proActivatedAt: Date.now(),
+                  })
+                }
+                wtx.oncomplete = () => resolve({ curryId: curry.id, sideId: side.id })
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        [tpYmd(tpMonday), tpYmd(tpFriday), tpNextFridays[0]],
+      )
+      await tpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tpPage.reload({ waitUntil: 'networkidle' })
+      await tpPage.waitForTimeout(900)
+
+      // A-1: 週タブで「この週をテンプレとして保存」
+      await tpPage.getByRole('button', { name: '週', exact: true }).click()
+      await tpPage.waitForTimeout(400)
+      await tpPage.getByRole('button', { name: 'この週をテンプレとして保存' }).click()
+      await tpPage.waitForTimeout(300)
+      const tpSaveModal = tpPage.getByRole('dialog', { name: 'この週をテンプレとして保存' })
+      check('MEALPLAN-A1B2(A-1) 保存の窓が開き、名前を付けられる', (await tpSaveModal.count()) === 1)
+      await tpSaveModal.getByLabel('テンプレの名前').fill('定番セット')
+      await tpSaveModal.getByRole('button', { name: '保存する' }).click()
+      await tpPage.waitForTimeout(600)
+      check(
+        'MEALPLAN-A1B2(A-1) 保存すると品数つきで結果が出る',
+        ((await tpPage.textContent('body')) ?? '').includes('テンプレ「定番セット」を2品で保存しました'),
+      )
+      const tpSaved = await tpPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealTemplates', 'readonly')
+              const g = tx.objectStore('mealTemplates').getAll()
+              g.onsuccess = () => resolve(g.result)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-A1B2(A-1) テンプレは献立とは別の専用テーブルに1件保存される',
+        tpSaved.length === 1 && tpSaved[0].name === '定番セット' && tpSaved[0].items.length === 2,
+        `saved=${JSON.stringify(tpSaved)}`,
+      )
+      check(
+        'MEALPLAN-A1B2(A-1) 中身は日付ではなく曜日(月=0/金=4)で持つ',
+        JSON.stringify(tpSaved[0].items.map((i) => [i.dow, i.slot, i.recipeId])) ===
+          JSON.stringify([
+            [0, 'dinner', tpIds.sideId],
+            [4, 'dinner', tpIds.curryId],
+          ]),
+        `items=${JSON.stringify(tpSaved[0].items)}`,
+      )
+
+      // B-2: 月タブで翌月を開き、「金」だけを選んで流し込む
+      await tpPage.getByRole('button', { name: '月', exact: true }).click()
+      await tpPage.waitForTimeout(400)
+      await tpPage.getByRole('button', { name: '次の月' }).click()
+      await tpPage.waitForTimeout(500)
+      await tpPage.getByRole('button', { name: 'テンプレを流し込む' }).click()
+      await tpPage.waitForTimeout(400)
+      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレを流し込む' })
+      check('MEALPLAN-A1B2(B-2) 流し込みの窓が開く', (await tpApplyModal.count()) === 1)
+      check(
+        'MEALPLAN-A1B2(B-2) 既定では全曜日が選ばれている(1週間まるごと＝A-1)',
+        (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 7,
+      )
+      // 月・火・水・木・土・日を外して「金」だけにする
+      for (const dow of [0, 1, 2, 3, 5, 6]) {
+        await tpApplyModal.locator(`button[data-dow="${dow}"]`).click()
+      }
+      await tpPage.waitForTimeout(200)
+      check(
+        'MEALPLAN-A1B2(B-2) 曜日を絞れる(金だけを選べる)',
+        (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 1,
+      )
+      await tpApplyModal.getByRole('button', { name: '流し込む' }).click()
+      await tpPage.waitForTimeout(900)
+      check(
+        'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
+        tpConfirmMsg.includes('テンプレ「定番セット」から') &&
+          /まだ決まっていない\d+食分に入れます/.test(tpConfirmMsg) &&
+          tpConfirmMsg.includes('消えません'),
+        `confirm=${tpConfirmMsg}`,
+      )
+      const tpAfter = await tpPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      const tpFridayPlans = tpNextFridays.map((date) =>
+        tpAfter.filter((e) => e.date === date).map((e) => e.recipeId),
+      )
+      check(
+        'MEALPLAN-A1B2(B-2) 翌月の毎週金曜に同じ献立(肉じゃが)が入る',
+        tpFridayPlans.slice(1).every((ids) => ids.length === 1 && ids[0] === tpIds.curryId),
+        `fridays=${JSON.stringify(tpNextFridays)} plans=${JSON.stringify(tpFridayPlans)}`,
+      )
+      check(
+        'MEALPLAN-A1B2(非破壊) すでに献立がある金曜は上書きされず元のまま残る',
+        tpFridayPlans[0].length === 1 && tpFridayPlans[0][0] === tpIds.sideId,
+        `first=${JSON.stringify(tpFridayPlans[0])}`,
+      )
+      const tpNextPrefix = `${tpNextAnchor.getFullYear()}-${String(tpNextAnchor.getMonth() + 1).padStart(2, '0')}`
+      check(
+        'MEALPLAN-A1B2(B-2) 選ばなかった曜日(月)には何も入らない',
+        tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length === 1,
+        `count=${tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length}`,
+      )
+      check(
+        'MEALPLAN-A1B2 流し込んだ枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
+        tpAfter
+          .filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId)
+          .every((e) => !e.auto),
+      )
+      check(
+        'MEALPLAN-A1B2 結果は入れた品数つきで伝える',
+        ((await tpPage.textContent('body')) ?? '').includes('テンプレ「定番セット」から'),
+      )
+    } finally {
+      await tpBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-A4: 献立表の印刷／画像化(2026-07-29 便CB-2・docs/59 A-4)。
+  // 週・月の献立を1枚に整形し、①ブラウザ印刷(画面のUIは紙に出さず献立表だけを出す)
+  // ②画像保存(既存のレシピ画像カードと同じCanvas機構)の両方が動くことを確認する。
+  // 日付メモ(A-2)も一緒に載ること・過ぎた日の予定は載せない(画面と同じ規則)ことも見る ---
+  currentCheck = 'MEALPLAN-A4'
+  {
+    const psBrowser = await chromium.launch()
+    const psContext = await psBrowser.newContext()
+    const psPage = await psContext.newPage()
+    psPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A4] ${text}`)
+    })
+    psPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A4] ${err.message}`)
+    })
+    try {
+      const psNow = new Date()
+      const psToday = `${psNow.getFullYear()}-${String(psNow.getMonth() + 1).padStart(2, '0')}-${String(psNow.getDate()).padStart(2, '0')}`
+      const psLabel = `${psNow.getMonth() + 1}/${psNow.getDate()}（${['日', '月', '火', '水', '木', '金', '土'][psNow.getDay()]}）`
+      await psPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await psPage.waitForTimeout(1800) // 初回シード完了待ち
+      await psPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.find((r) => r.title === '肉じゃが')
+                const side = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                if (!main || !side) {
+                  reject(new Error('seed recipes not found'))
+                  return
+                }
+                const wtx = idb.transaction(['mealPlans', 'dayNotes', 'settings'], 'readwrite')
+                const plans = wtx.objectStore('mealPlans')
+                plans.add({ date, slot: 'dinner', recipeId: main.id, role: 'main' })
+                plans.add({ date, slot: 'dinner', recipeId: side.id, role: 'side' })
+                wtx.objectStore('dayNotes').put({ date, text: '実家に行く', updatedAt: Date.now() })
+                const settings = wtx.objectStore('settings')
+                const getReq = settings.get(1)
+                getReq.onsuccess = () => {
+                  const current = getReq.result || { id: 1 }
+                  settings.put({
+                    ...current,
+                    id: 1,
+                    proCode: 'UR-E2E-TEST-ONLY',
+                    proActivatedAt: Date.now(),
+                  })
+                }
+                wtx.oncomplete = () => resolve(undefined)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        psToday,
+      )
+      await psPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await psPage.reload({ waitUntil: 'networkidle' })
+      await psPage.waitForTimeout(900)
+
+      // 週タブ: 献立表を開く（既定は閉じている＝画面を占領しない）
+      await psPage.getByRole('button', { name: '週', exact: true }).click()
+      await psPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A4 献立表は既定で畳まれている(画面を占領しない)',
+        (await psPage.locator('.plan-sheet-preview').count()) === 0,
+      )
+      await psPage.getByRole('button', { name: '献立表（印刷・画像で保存）', exact: true }).click()
+      await psPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A4 開くと献立表1枚がプレビューされる',
+        (await psPage.locator('.plan-sheet-preview').count()) === 1,
+      )
+      const psSheetText = (await psPage.locator('.plan-sheet-preview').textContent()) ?? ''
+      check(
+        'MEALPLAN-A4 週の献立表に日付・主菜・副菜が1枚に整形されて載る',
+        psSheetText.includes(psLabel) &&
+          psSheetText.includes('肉じゃが') &&
+          psSheetText.includes('ほうれん草のおひたし'),
+        `sheet=${psSheetText.slice(0, 200)}`,
+      )
+      check(
+        'MEALPLAN-A4 日付メモ(A-2)も一緒に載る(冷蔵庫に貼る用途)',
+        psSheetText.includes('実家に行く'),
+      )
+      check(
+        'MEALPLAN-A4 何を載せた表なのか(過ぎた日=記録・今日から先=予定)を紙の上でも明記する',
+        psSheetText.includes('過ぎた日は作った記録、今日から先は登録した献立'),
+      )
+      check(
+        'MEALPLAN-A4 出どころが分かるようアプリ名とURLを入れる',
+        psSheetText.includes('うちレシピ') && psSheetText.includes('uchirecipe.com'),
+      )
+
+      // 印刷: 画面のUIは紙に出さず、献立表だけを出す(index.cssの@media print)
+      await psPage.emulateMedia({ media: 'print' })
+      await psPage.waitForTimeout(200)
+      check(
+        'MEALPLAN-A4(印刷) 印刷時は献立表だけが見え、画面のUI(タブ等)は紙に出ない',
+        (await psPage.locator('.plan-sheet-print').isVisible()) === true &&
+          (await psPage.getByRole('button', { name: '週', exact: true }).isVisible()) === false,
+      )
+      check(
+        'MEALPLAN-A4(印刷) 印刷用の1枚はアプリ本体の外(body直下)に置き、白紙ページが続かないようにする',
+        (await psPage.evaluate(
+          () => document.querySelector('.plan-sheet-print')?.parentElement === document.body,
+        )) === true,
+      )
+      check(
+        'MEALPLAN-A4(印刷) 印刷用の1枚にも同じ内容(日付・料理・メモ)が入る',
+        ((await psPage.locator('.plan-sheet-print').textContent()) ?? '').includes('実家に行く'),
+      )
+      await psPage.emulateMedia({ media: 'screen' })
+      await psPage.waitForTimeout(200)
+      await psPage.evaluate(() => {
+        window.__e2ePrintCount = 0
+        window.print = () => {
+          window.__e2ePrintCount += 1
+        }
+      })
+      await psPage.getByRole('button', { name: '印刷する', exact: true }).click()
+      await psPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A4(印刷) 「印刷する」でブラウザの印刷が呼ばれる',
+        (await psPage.evaluate(() => window.__e2ePrintCount)) === 1,
+      )
+
+      // 画像保存: 非対応環境ではPNGダウンロードに切り替わる(=生成成功の確認)
+      const [psDownload] = await Promise.all([
+        psPage.waitForEvent('download', { timeout: 15000 }),
+        psPage.getByRole('button', { name: '画像で保存', exact: true }).click(),
+      ])
+      check(
+        'MEALPLAN-A4(画像) 献立表の画像が生成されPNGダウンロードに切り替わる',
+        psDownload.suggestedFilename().endsWith('.png'),
+        psDownload.suggestedFilename(),
+      )
+      check(
+        'MEALPLAN-A4(画像) 保存したことを結果メッセージで伝える',
+        ((await psPage.textContent('body')) ?? '').includes('献立表の画像を保存しました'),
+      )
+
+      // 月タブでも同じ機構で1枚にまとまる(見出しはその月)
+      await psPage.getByRole('button', { name: '月', exact: true }).click()
+      await psPage.waitForTimeout(600)
+      const psMonthHeading = `${psNow.getFullYear()}年${psNow.getMonth() + 1}月の献立`
+      const psMonthSheet = (await psPage.locator('.plan-sheet-preview').textContent()) ?? ''
+      check(
+        'MEALPLAN-A4 月タブでも同じ献立表が出る(見出しはその月)',
+        psMonthSheet.includes(psMonthHeading) && psMonthSheet.includes('肉じゃが'),
+        `heading=${psMonthHeading} sheet=${psMonthSheet.slice(0, 120)}`,
+      )
+    } finally {
+      await psBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-A5: 月の空日を一括提案(2026-07-29 便CB-2・docs/59 A-5)。
+  // 翌月(全日が未来日)を開いて「未定の日をまとめて提案」を押し、
+  //  ・一括なので実行前に規約Fの確認文が出る(何日分・何食分を埋めるか＋何が消えないか)
+  //  ・すでに決まっている日は上書きされない(手動配置の保護は週の「まとめて献立」と同じ)
+  //  ・結果は実際に入れた品数で報告する(便CD/MP-06の正直な完了報告と同じ作法)
+  //  ・BH-2の回帰(同じ食事の主菜と副菜のジャンルが揃う)を月の一括提案でも壊していない
+  // をIndexedDBの実データで確認する ---
+  currentCheck = 'MEALPLAN-A5'
+  {
+    const fmBrowser = await chromium.launch()
+    const fmContext = await fmBrowser.newContext()
+    const fmPage = await fmContext.newPage()
+    let fmConfirmMsg = ''
+    fmPage.on('dialog', (dialog) => {
+      fmConfirmMsg = dialog.message()
+      return dialog.accept()
+    })
+    fmPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A5] ${text}`)
+    })
+    fmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A5] ${err.message}`)
+    })
+    try {
+      const fmNow = new Date()
+      const fmNextAnchor = new Date(fmNow.getFullYear(), fmNow.getMonth() + 1, 1)
+      const fmPrefix = `${fmNextAnchor.getFullYear()}-${String(fmNextAnchor.getMonth() + 1).padStart(2, '0')}`
+      const fmLastDay = new Date(fmNextAnchor.getFullYear(), fmNextAnchor.getMonth() + 1, 0).getDate()
+      const fmManualDate = `${fmPrefix}-10`
+
+      await fmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fmPage.waitForTimeout(1800) // 初回シード完了待ち
+      const fmManualId = await fmPage.evaluate(
+        (manualDate) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const manual = g.result.find((r) => r.title === '肉じゃが')
+                if (!manual) {
+                  reject(new Error('seed recipe not found'))
+                  return
+                }
+                const wtx = idb.transaction(['mealPlans', 'settings'], 'readwrite')
+                // 手動で入れた1枠(上書きされないことの確認用)
+                wtx
+                  .objectStore('mealPlans')
+                  .add({ date: manualDate, slot: 'dinner', recipeId: manual.id, role: 'main' })
+                const settings = wtx.objectStore('settings')
+                const getReq = settings.get(1)
+                getReq.onsuccess = () => {
+                  const current = getReq.result || { id: 1 }
+                  settings.put({
+                    ...current,
+                    id: 1,
+                    proCode: 'UR-E2E-TEST-ONLY',
+                    proActivatedAt: Date.now(),
+                  })
+                }
+                wtx.oncomplete = () => resolve(manual.id)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        fmManualDate,
+      )
+      await fmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await fmPage.reload({ waitUntil: 'networkidle' })
+      await fmPage.waitForTimeout(900)
+      await fmPage.getByRole('button', { name: '月', exact: true }).click()
+      await fmPage.waitForTimeout(400)
+      await fmPage.getByRole('button', { name: '次の月' }).click()
+      await fmPage.waitForTimeout(600)
+      await fmPage.getByRole('button', { name: '未定の日をまとめて提案' }).click()
+      // 月まるごとの提案は枠数が多いので、書き込みが終わるまで長めに待つ
+      await fmPage.waitForTimeout(6000)
+      check(
+        'MEALPLAN-A5(規約F) 実行前に「何日分・何食分を埋めるか」と「何が消えないか」を確認する',
+        /まだ決まっていない\d+日分（\d+食分）/.test(fmConfirmMsg) &&
+          fmConfirmMsg.includes('作った記録は消えません'),
+        `confirm=${fmConfirmMsg}`,
+      )
+      const fmData = await fmPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['mealPlans', 'recipes'], 'readonly')
+              const plans = tx.objectStore('mealPlans').getAll()
+              const recipes = tx.objectStore('recipes').getAll()
+              tx.oncomplete = () =>
+                resolve({
+                  plans: plans.result,
+                  recipes: recipes.result.map((r) => ({ id: r.id, title: r.title, tags: r.tags })),
+                })
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      const fmMonthPlans = fmData.plans.filter((e) => e.date.startsWith(fmPrefix))
+      const fmFilledDays = new Set(fmMonthPlans.map((e) => e.date))
+      check(
+        'MEALPLAN-A5 翌月のほぼ全日に献立が入る(週の7日ではなく月レンジで動く)',
+        fmFilledDays.size >= fmLastDay - 1,
+        `days=${fmFilledDays.size}/${fmLastDay}`,
+      )
+      const fmManualSlot = fmMonthPlans.filter(
+        (e) => e.date === fmManualDate && (e.role ?? 'main') === 'main',
+      )
+      check(
+        'MEALPLAN-A5 手動で入れた主菜は上書きされずそのまま残る(非破壊)',
+        fmManualSlot.length === 1 &&
+          fmManualSlot[0].recipeId === fmManualId &&
+          !fmManualSlot[0].auto,
+        `manual=${JSON.stringify(fmManualSlot)}`,
+      )
+      check(
+        'MEALPLAN-A5 自動で入れた枠にはautoが付く(次の提案で再抽選できる)',
+        fmMonthPlans.filter((e) => e.date !== fmManualDate).every((e) => e.auto === true),
+      )
+      check(
+        'MEALPLAN-A5 結果は実際に入れた品数で伝える(正直な完了報告)',
+        /\d+品の献立を立てました|\d+食分はそのままにして、\d+品を新しく立てました/.test(
+          (await fmPage.textContent('body')) ?? '',
+        ),
+        `body=${((await fmPage.textContent('body')) ?? '').slice(0, 120)}`,
+      )
+      // BH-2の回帰: 同じ食事に入った主菜と副菜のジャンル(和食/洋食/中華)が食い違わない
+      const fmGenres = ['和食', '洋食', '中華']
+      const fmTagsById = new Map(fmData.recipes.map((r) => [r.id, r.tags ?? []]))
+      const fmGenreOf = (id) => fmGenres.find((g) => (fmTagsById.get(id) ?? []).includes(g))
+      const fmBySlot = new Map()
+      for (const e of fmMonthPlans) {
+        const key = `${e.date}|${e.slot}`
+        const list = fmBySlot.get(key) ?? []
+        list.push(e)
+        fmBySlot.set(key, list)
+      }
+      let fmPairs = 0
+      let fmMixed = 0
+      for (const list of fmBySlot.values()) {
+        const main = list.find((e) => (e.role ?? 'main') === 'main')
+        const sides = list.filter((e) => (e.role ?? 'main') === 'side')
+        if (!main || sides.length === 0) continue
+        const mainGenre = fmGenreOf(main.recipeId)
+        if (!mainGenre) continue
+        fmPairs++
+        if (sides.some((s) => fmGenreOf(s.recipeId) && fmGenreOf(s.recipeId) !== mainGenre)) fmMixed++
+      }
+      check(
+        'MEALPLAN-A5(BH-2回帰) 月の一括提案でも、同じ食事の主菜と副菜のジャンルが揃う(混在0)',
+        fmPairs > 0 && fmMixed === 0,
+        `pairs=${fmPairs} mixed=${fmMixed}`,
+      )
+    } finally {
+      await fmBrowser.close()
+    }
+  }
+
   // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
   // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
   // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を

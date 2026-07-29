@@ -363,6 +363,20 @@ export const ja = {
     // 「自動では変わらない」と言った直後に自動で増える＝案内が事実の逆になっていた
     fillWeekTodayNotice: '今日の予定を変えました。「今日の献立」(日タブ)は自動では変わらないので、必要なら見直してください',
     fillWeekTodayWillImport: '今日の予定を変えました。「日」タブを開くと、今日の分を今日の献立に取り込みます（今ある分はそのまま残ります）',
+    // A-5 月の空日を一括提案(2026-07-29 便CB-2・docs/59)。月タブで、まだ決まっていない日に
+    // 主菜と副菜をまとめて入れる。埋め方は週タブの「まとめて献立を立てる」と同じロジック
+    // (すでに決まっている献立は上書きしない・過ぎた日と表示していない食事は対象外)。
+    // 一括なので実行前に必ず確認を出し(規約F)、結果は実際に入れた品数で正直に伝える
+    fillMonth: '未定の日をまとめて提案',
+    fillMonthHint: 'この月のまだ決まっていない日に、主菜と副菜をまとめて入れます',
+    fillMonthConfirm:
+      'この月のまだ決まっていない{d}日分（{s}食分）に、主菜と副菜を自動で入れます。すでに決まっている{k}食分の献立と、作った記録は消えません。よろしいですか？',
+    fillMonthConfirmNoKept:
+      'この月のまだ決まっていない{d}日分（{s}食分）に、主菜と副菜を自動で入れます。今ある献立と作った記録は消えません。よろしいですか？',
+    fillMonthDone: '{a}品の献立を立てました',
+    fillMonthKeptManual: 'すでに決まっている{n}食分はそのままにして、{a}品を新しく立てました',
+    fillMonthNoRoom: 'すでに決まっている{n}食分のままです。新しく立てられる日がありませんでした',
+    fillMonthNoAdded: '新しく立てられる献立はありませんでした（今ある献立はそのまま残っています）',
     // 先週の献立をコピー(2026-07-25 便BU・docs/59 S-3)。表示中の週の各日に、1週間前の同じ曜日の献立を
     // 「空いている枠だけ」コピーする(既にある献立は上書きしない=非破壊)。繰り返しの多い家庭の入力を減らす狙い。
     // 確認文は規約F準拠で「入る件数」と「今ある献立は上書きされず残る」を必ず明示する(消える予定は無い)
@@ -371,6 +385,62 @@ export const ja = {
     copyLastWeekDone: '先週の献立を{n}品コピーしました',
     copyLastWeekNoSource: '先週にはコピーできる献立がありません',
     copyLastWeekNoRoom: 'まだ決まっていないところがないため、コピーしませんでした（今ある献立はそのまま残っています）',
+    // マイ献立テンプレ(2026-07-29 便CB-2・docs/59 A-1＋B-2)。表示中の週の献立を曜日ごと覚えて
+    // 名前を付けて保存し、別の週・別の月へ流し込む。流し込む曜日を絞れる＝B-2「毎週◯曜はカレー」も
+    // 同じ機構で満たす。入るのは「まだ決まっていないところ」だけで、今ある献立は上書きしない
+    templateSave: 'この週をテンプレとして保存',
+    templateSaveDescription:
+      '表示中の週の献立を曜日ごと覚えます。あとで別の週や月にまとめて入れられます',
+    // 保存の窓の説明。何を覚えるのか(どの週の何品か)を言い切る
+    templateSaveRange: '{start}〜{end}の献立{n}品を覚えます',
+    templateNameLabel: 'テンプレの名前',
+    templateNamePlaceholder: '平日の定番 など',
+    templateSaveButton: '保存する',
+    templateSaveDone: 'テンプレ「{name}」を{n}品で保存しました',
+    templateSaveEmpty: 'この週にはまだ献立がありません。献立を入れてから保存できます',
+    templateNameRequired: 'テンプレの名前を入れてください',
+    templateApply: 'テンプレを流し込む',
+    templateApplyRangeWeek: '{start}〜{end}に入れます',
+    templateApplyRangeMonth: '{y}年{m}月に入れます',
+    templateApplyNone: '保存したテンプレはまだありません。週タブの「この週をテンプレとして保存」で作れます',
+    templateApplyPick: '入れるテンプレ',
+    templateItemCount: '{n}品',
+    templateDowTitle: '入れる曜日',
+    // B-2(毎週◯曜はカレー)の入口。曜日を絞ると、その曜日にだけ流し込む
+    templateDowHint:
+      '選んだ曜日にだけ入ります。金曜だけを選ぶと、期間内の毎週金曜に同じ献立が入ります',
+    templateDowNone: '曜日を1つ以上選んでください',
+    templateApplyButton: '流し込む',
+    // 規約F: 何が入るか(件数)と、何が消えないかを必ず両方書く
+    templateApplyConfirm:
+      'テンプレ「{name}」から{n}品を、まだ決まっていない{d}食分に入れます。すでに決まっている{k}食分と、そのほかの献立・記録は消えません。よろしいですか？',
+    templateApplyConfirmNoKept:
+      'テンプレ「{name}」から{n}品を、まだ決まっていない{d}食分に入れます。今ある献立・記録は消えません。よろしいですか？',
+    templateApplyDone: 'テンプレ「{name}」から{n}品を入れました',
+    templateApplyNoRoom:
+      'すでに決まっている{n}食分のままです。新しく入れられるところがありませんでした',
+    templateApplyNoItems: '選んだ曜日には、このテンプレの献立がありません',
+    templateDelete: 'このテンプレを削除',
+    templateDeleteConfirm:
+      'テンプレ「{name}」（{n}品）を削除します。すでに献立に入れた分と、ほかのテンプレは消えません。よろしいですか？',
+    templateDeleteDone: 'テンプレ「{name}」を削除しました',
+    // 献立表の印刷／画像化(2026-07-29 便CB-2・docs/59 A-4)。週または月の献立を1枚に整形し、
+    // ブラウザ印刷と画像保存の両方に出す。冷蔵庫に貼る・家族に見せる用途(同期なしで共有を満たす)。
+    // 載せる中身の規則はアプリの他の画面と同じ(過ぎた日=作った記録・今日から先=登録した献立)＋日付メモ
+    planSheetTitle: '献立表（印刷・画像で保存）',
+    planSheetHint:
+      '週または月の献立を1枚にまとめます。印刷して冷蔵庫に貼ったり、画像にして家族へ送ったりできます',
+    planSheetBasisNote:
+      '過ぎた日は作った記録、今日から先は登録した献立を載せています。この日のメモも一緒に出ます',
+    planSheetWeekHeading: '{start}〜{end}の献立',
+    planSheetMonthHeading: '{y}年{m}月の献立',
+    planSheetPrint: '印刷する',
+    planSheetImage: '画像で保存',
+    planSheetEmpty: 'この期間には、まだ載せられる献立・記録・メモがありません',
+    planSheetImageDone: '献立表の画像を保存しました',
+    planSheetImageShared: '献立表の画像を共有しました',
+    planSheetImageCancelled: '画像の保存をやめました（保存はしていません）',
+    planSheetImageFailed: '画像を作れませんでした。もう一度お試しください',
     // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がゴチャつきの一因)。
     // 既定閉。選択中の条件が既定以外のときは畳んだラベルにも現在値を出す（例:「提案の条件: 和食」）
     suggestConditionsToggle: '提案の条件',

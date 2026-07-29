@@ -2292,6 +2292,47 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       ['2026-07-22|dinner|side', '2026-07-24|dinner|side'],
     )
   }
+
+  // (5) A-5 月の空日を一括提案(2026-07-29 便CB-2・docs/59)。同じ planWeekFill を
+  // 日付の配列だけ「その月の全日」に広げて使う＝週と月で埋め方(手動保護・autoの再抽選・
+  // 過去日の除外)が食い違わないことを固定する
+  {
+    const august = Array.from(
+      { length: 31 },
+      (_, i) => `2026-08-${String(i + 1).padStart(2, '0')}`,
+    )
+    const entries = [
+      mkEntry(1, '2026-08-02', 100), // 過去日(today=8/5)→対象外
+      mkEntry(2, '2026-08-10', 200), // 手動の主菜→枠ごと残し、副菜だけ足す
+      mkEntry(3, '2026-08-11', 300, { auto: true }), // 自動→消して埋め直す(再抽選)
+    ]
+    const plan = planWeekFill(entries, august, ['dinner'], '2026-08-05')
+    eq(
+      'planWeekFill(月レンジ): 過去日(8/1〜8/4)は対象外',
+      plan.slotsToFill.every((s) => s.date >= '2026-08-05'),
+      true,
+    )
+    eq(
+      'planWeekFill(月レンジ): 手動のある日を除いた未来日をペアで埋める(8/5〜8/31の26日分)',
+      plan.slotsToFill.length,
+      26,
+    )
+    eq(
+      'planWeekFill(月レンジ): 手動主菜の日は枠ごと残し、副菜だけ足す',
+      [sortedStrs(plan.preservedSlotKeys), plan.partialFills.map((p) => `${p.date}|${p.fillRole}`)],
+      [['2026-08-10|dinner'], ['2026-08-10|side']],
+    )
+    eq(
+      'planWeekFill(月レンジ): 自動提案由来の行だけを消して振り直す(手動は消さない)',
+      plan.autoEntryIdsToRemove,
+      [3],
+    )
+    eq(
+      'planWeekFill(月レンジ): 過去日と残す枠のレシピは重複回避のusedに入る',
+      sortedNums(plan.usedRecipeIds),
+      [100, 200],
+    )
+  }
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------
@@ -2421,6 +2462,224 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     'role未設定の既存データがあっても、副菜の料理は追加(既存を消さない)',
     planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'side'),
     { kind: 'add' },
+  )
+}
+
+// ---------- マイ献立テンプレ(A-1)＋曜日固定の定番(B-2)・2026-07-29 便CB-2・docs/59 ----------
+// テンプレは日付ではなく曜日で持つ。全曜日を選べばA-1(1週間まるごと)・1曜日だけ選べばB-2
+// (毎週◯曜はカレー)になる、という統合設計をここで固定する。入るのは空いているところだけ(非破壊)
+{
+  const { buildTemplateItems, planTemplateFill, templateDowCounts } = await import(
+    '../src/logic/mealTemplate.ts'
+  )
+  // 2026-07-27(月)〜08-02(日)の週
+  const weekDatesArr = [
+    '2026-07-27',
+    '2026-07-28',
+    '2026-07-29',
+    '2026-07-30',
+    '2026-07-31',
+    '2026-08-01',
+    '2026-08-02',
+  ]
+  const weekEntries = [
+    { id: 1, date: '2026-07-27', slot: 'dinner', recipeId: 10, role: 'main' }, // 月
+    { id: 2, date: '2026-07-27', slot: 'dinner', recipeId: 20, role: 'side' },
+    { id: 3, date: '2026-07-31', slot: 'dinner', recipeId: 30, role: 'main' }, // 金＝カレー
+    { id: 4, date: '2026-08-05', slot: 'dinner', recipeId: 99, role: 'main' }, // 週の外(取得範囲の重なり)
+  ]
+  const items = buildTemplateItems(weekEntries, weekDatesArr)
+  eq('テンプレ保存: 表示中の週の献立だけを覚える(週の外の日は入れない)', items.length, 3)
+  eq(
+    'テンプレ保存: 日付ではなく曜日(0=月…6=日)で持つ',
+    items.map((i) => [i.dow, i.slot, i.role, i.recipeId]),
+    [
+      [0, 'dinner', 'main', 10],
+      [0, 'dinner', 'side', 20],
+      [4, 'dinner', 'main', 30],
+    ],
+  )
+  eq(
+    'テンプレ保存: role未設定の既存データは主菜として覚える(後方互換)',
+    buildTemplateItems([{ date: '2026-07-27', slot: 'dinner', recipeId: 10 }], weekDatesArr)[0].role,
+    'main',
+  )
+  eq('曜日ごとの品数を数えられる(曜日チップの表示用)', templateDowCounts(items), [2, 0, 0, 0, 1, 0, 0])
+
+  // A-1: 翌週(8/3(月)〜8/9(日))へ丸ごと流し込む
+  const nextWeek = [
+    '2026-08-03',
+    '2026-08-04',
+    '2026-08-05',
+    '2026-08-06',
+    '2026-08-07',
+    '2026-08-08',
+    '2026-08-09',
+  ]
+  const applyAll = planTemplateFill({
+    items,
+    dates: nextWeek,
+    entries: [],
+    today: '2026-07-29',
+    allowedDows: [0, 1, 2, 3, 4, 5, 6],
+    visibleSlots: ['breakfast', 'lunch', 'dinner'],
+  })
+  eq(
+    'A-1: 全曜日を選ぶと、同じ曜日の同じ食事に丸ごと入る',
+    applyAll.ops.map((o) => [o.date, o.slot, o.role, o.recipeId]),
+    [
+      ['2026-08-03', 'dinner', 'main', 10],
+      ['2026-08-03', 'dinner', 'side', 20],
+      ['2026-08-07', 'dinner', 'main', 30],
+    ],
+  )
+  eq('A-1: 埋まる食事の数と対象日数を数える(確認文の件数)', [applyAll.fillSlotCount, applyAll.targetDayCount, applyAll.keptSlotCount], [2, 2, 0])
+
+  // 非破壊: すでに献立が入っている食事には入れない(手動・自動を問わず残す)
+  const applyOverlap = planTemplateFill({
+    items,
+    dates: nextWeek,
+    entries: [{ date: '2026-08-03', slot: 'dinner' }],
+    today: '2026-07-29',
+    allowedDows: [0, 1, 2, 3, 4, 5, 6],
+    visibleSlots: ['breakfast', 'lunch', 'dinner'],
+  })
+  eq(
+    '非破壊: すでに献立がある食事は上書きせず飛ばす(残った数も数える)',
+    [applyOverlap.ops.length, applyOverlap.fillSlotCount, applyOverlap.keptSlotCount],
+    [1, 1, 1],
+  )
+  eq('非破壊: 飛ばすのはその食事だけで、空いている金曜には入る', applyOverlap.ops[0].date, '2026-08-07')
+
+  // 過去日は対象外(便W-⑤a以来の共通ルール)
+  const applyPast = planTemplateFill({
+    items,
+    dates: nextWeek,
+    entries: [],
+    today: '2026-08-05',
+    allowedDows: [0, 1, 2, 3, 4, 5, 6],
+    visibleSlots: ['breakfast', 'lunch', 'dinner'],
+  })
+  eq('過去日(今日より前)には入れない', applyPast.ops.map((o) => o.date), ['2026-08-07'])
+
+  // 表示していない食事には入れない(画面に出ない献立が黙って増えない)
+  const applyHidden = planTemplateFill({
+    items,
+    dates: nextWeek,
+    entries: [],
+    today: '2026-07-29',
+    allowedDows: [0, 1, 2, 3, 4, 5, 6],
+    visibleSlots: ['breakfast'],
+  })
+  eq('表示していない食事(夕食を隠している)には入れない', applyHidden.ops.length, 0)
+
+  // B-2: 金曜だけを選ぶ → 8月の毎週金曜(7/14/21/28)に同じ献立が入る
+  const augustDates = Array.from(
+    { length: 31 },
+    (_, i) => `2026-08-${String(i + 1).padStart(2, '0')}`,
+  )
+  const applyFriday = planTemplateFill({
+    items,
+    dates: augustDates,
+    entries: [],
+    today: '2026-08-01',
+    allowedDows: [4],
+    visibleSlots: ['breakfast', 'lunch', 'dinner'],
+  })
+  eq(
+    'B-2: 金曜だけを選ぶと、その月の毎週金曜に同じ献立が入る(毎週◯曜はカレー)',
+    applyFriday.ops.map((o) => `${o.date}:${o.recipeId}`),
+    ['2026-08-07:30', '2026-08-14:30', '2026-08-21:30', '2026-08-28:30'],
+  )
+  eq('B-2: 月曜のぶん(2品)は入らない=選んだ曜日だけ', applyFriday.ops.every((o) => o.recipeId === 30), true)
+  const applyNoDow = planTemplateFill({
+    items,
+    dates: augustDates,
+    entries: [],
+    today: '2026-08-01',
+    allowedDows: [1],
+    visibleSlots: ['breakfast', 'lunch', 'dinner'],
+  })
+  eq('テンプレに中身の無い曜日を選ぶと0件(呼び出し側が案内を出す)', [applyNoDow.ops.length, applyNoDow.targetDayCount], [0, 0])
+}
+
+// ---------- 献立表(A-4 印刷／画像化)・2026-07-29 便CB-2・docs/59 ----------
+// 紙(印刷HTML)・画面・画像(Canvas)の3つが同じこの結果を読む＝内容がずれないことをここで固定する。
+// 何を載せるかの規則はアプリの他の画面と同じ: 過ぎた日=作った記録・今日から先=登録した献立(＋日付メモ)
+{
+  const { buildPlanSheet, planSheetLines, formatSheetDayLabel } = await import(
+    '../src/logic/planSheet.ts'
+  )
+  const titles = { 10: '肉じゃが', 20: 'きんぴらごぼう', 30: 'カレー' }
+  const sheet = buildPlanSheet({
+    title: '7/28〜7/30の献立',
+    dates: ['2026-07-28', '2026-07-29', '2026-07-30'],
+    today: '2026-07-29',
+    visibleSlots: ['breakfast', 'dinner'],
+    entries: [
+      { date: '2026-07-28', slot: 'dinner', role: 'main', recipeId: 30 }, // 過去日の未達成予定
+      { date: '2026-07-29', slot: 'dinner', role: 'side', recipeId: 20 },
+      { date: '2026-07-29', slot: 'dinner', role: 'main', recipeId: 10 },
+      { date: '2026-07-30', slot: 'lunch', role: 'main', recipeId: 10 }, // 表示していない食事
+    ],
+    titleOf: (id) => titles[id],
+    notes: new Map([['2026-07-30', '外食']]),
+    cookedTitlesByDate: new Map([['2026-07-28', ['カレー']]]),
+  })
+  eq('献立表: 日付見出しは「7/29（水）」の形', formatSheetDayLabel('2026-07-29'), '7/29（水）')
+  eq(
+    '献立表: 過ぎた日は予定を載せず、作った記録だけを載せる(画面の扱いと同じ)',
+    [sheet.days[0].slots.length, sheet.days[0].cookedTitles],
+    [0, ['カレー']],
+  )
+  eq(
+    '献立表: 今日以降は登録した献立を主菜→副菜の順に載せる',
+    sheet.days[1].slots.map((s) => [s.slot, s.dishes.map((d) => `${d.role}:${d.title}`)]),
+    [['dinner', ['main:肉じゃが', 'side:きんぴらごぼう']]],
+  )
+  eq('献立表: 表示していない食事(昼食)は紙にも出さない', sheet.days[2].slots.length, 0)
+  eq('献立表: 日付メモも一緒に載せる', sheet.days[2].note, '外食')
+  eq(
+    '献立表: 見つからないレシピ(隠している等)は載せない',
+    buildPlanSheet({
+      title: 'x',
+      dates: ['2026-07-30'],
+      today: '2026-07-29',
+      visibleSlots: ['dinner'],
+      entries: [{ date: '2026-07-30', slot: 'dinner', role: 'main', recipeId: 999 }],
+      titleOf: () => undefined,
+      notes: new Map(),
+      cookedTitlesByDate: new Map(),
+    }).days[0].slots.length,
+    0,
+  )
+  eq('献立表: 献立も記録もメモも無ければ白紙と分かる(呼び出し側が案内を出す)', sheet.isEmpty, false)
+  eq(
+    '献立表: 空の期間は isEmpty=true',
+    buildPlanSheet({
+      title: 'x',
+      dates: ['2026-07-30'],
+      today: '2026-07-29',
+      visibleSlots: ['dinner'],
+      entries: [],
+      titleOf: () => undefined,
+      notes: new Map(),
+      cookedTitlesByDate: new Map(),
+    }).isEmpty,
+    true,
+  )
+  const lines = planSheetLines(sheet)
+  eq(
+    '献立表(画像化): 日付見出し→中身→メモの順に1行ずつ平らにする',
+    lines.map((l) => `${l.kind}:${l.text}`),
+    [
+      'day:7/28（火）',
+      'dish:作った記録　カレー',
+      'day:7/29（水）',
+      'dish:夕食　主菜 肉じゃが　副菜 きんぴらごぼう',
+      'day:7/30（木）',
+      'note:この日のメモ　外食',
+    ],
   )
 }
 
@@ -3462,6 +3721,7 @@ eq(
       todayList: false,
       prices: false,
       dayNotes: false,
+      mealTemplates: false,
     },
   )
   eq(
@@ -3474,6 +3734,7 @@ eq(
       todayList: false,
       prices: true,
       dayNotes: false,
+      mealTemplates: false,
     },
   )
   eq(
@@ -3490,6 +3751,7 @@ eq(
       todayList: true,
       prices: false,
       dayNotes: false,
+      mealTemplates: false,
     },
   )
   eq(
@@ -3502,6 +3764,7 @@ eq(
       todayList: [],
       prices: [],
       dayNotes: [],
+      mealTemplates: [],
     }),
     {
       pantryItems: true,
@@ -3510,6 +3773,7 @@ eq(
       todayList: true,
       prices: true,
       dayNotes: true,
+      mealTemplates: true,
     },
   )
   // 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。新テーブルを足したときの後方互換の要:
@@ -3525,6 +3789,23 @@ eq(
       ...baseFile,
       dayNotes: [{ date: '2026-07-30', text: '外食', updatedAt: 1000 }],
     }).dayNotes,
+    true,
+  )
+  // マイ献立テンプレ(2026-07-29 便CB-2・docs/59 A-1)。日付メモと同じ後方互換のルール:
+  // 項目を持たない古いバックアップを復元しても、端末に残っているテンプレを消さない
+  eq(
+    'テンプレの項目が無い古いバックアップは、復元してもテンプレのテーブルに触らない',
+    tablesToReplace({ ...baseFile, mealPlans: [] }).mealTemplates,
+    false,
+  )
+  eq(
+    'テンプレが中身入りで入っていれば置き換え対象になる',
+    tablesToReplace({
+      ...baseFile,
+      mealTemplates: [
+        { name: '平日の定番', items: [{ dow: 4, slot: 'dinner', role: 'main', recipeId: 1 }], createdAt: 1000 },
+      ],
+    }).mealTemplates,
     true,
   )
 }
