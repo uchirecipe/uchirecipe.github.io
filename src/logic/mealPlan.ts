@@ -699,6 +699,38 @@ export function todayPlanMismatch(todayListIds: number[], todayPlanRecipeIds: nu
   return todayListIds.filter((id) => !todayPlanRecipeIds.includes(id))
 }
 
+/** planRoleAssign の結果（呼び出し側はこれを見て DB 操作を1つだけ行う） */
+export type RoleAssignPlan =
+  | { kind: 'duplicate' }
+  | { kind: 'replace'; entryId: number }
+  | { kind: 'add' }
+
+/**
+ * 「その日×その食事に、この料理をこの役割で入れる」ときに何をするかを決める純関数
+ * （2026-07-29 便CB-1。便CDで見つかった不具合の再発防止）。
+ *
+ * 直った不具合: 日タブの「今日の献立と今週の予定が食い違っています」の食事ボタンが、
+ * 料理の種類にかかわらず「その枠の主菜を置き換える」処理（旧 db/mealPlan.ts setMainMeal）を
+ * 呼んでいた。そのため副菜（きんぴら等）を押すと、その日の夕食の主菜（肉じゃが）が
+ * 副菜に置き換わって消えていた。役割（主菜/副菜）の粒度を守るのがこの関数の責任:
+ *  - 主菜の料理 … その枠の主菜があれば差し替え、無ければ追加（従来の主菜の挙動）
+ *  - 副菜の料理 … 既存の主菜・副菜には触らず追加する（消さない＝非破壊）
+ *  - 同じ料理が既にその枠にある … 何もしない（同じ料理を2行に増やさない）
+ * role未設定の既存データは主菜として扱う（2026-07-13の後方互換ルールを踏襲）。
+ */
+export function planRoleAssign(
+  slotEntries: Pick<MealPlanEntry, 'id' | 'recipeId' | 'role'>[],
+  recipeId: number,
+  role: MealRole,
+): RoleAssignPlan {
+  if (slotEntries.some((e) => e.recipeId === recipeId)) return { kind: 'duplicate' }
+  if (role === 'main') {
+    const existingMain = slotEntries.find((e) => (e.role ?? 'main') === 'main')
+    if (existingMain?.id != null) return { kind: 'replace', entryId: existingMain.id }
+  }
+  return { kind: 'add' }
+}
+
 /**
  * 週ビューの「作った見た目」対応付け（2026-07-24 便BH-3・タスク2）。
  * ある日付の献立エントリ群を、その日の「作った記録」の件数だけ「作った枠」に対応付ける

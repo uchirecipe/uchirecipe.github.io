@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
+import { planRoleAssign } from '../logic/mealPlan'
 import type { MealPlanEntry, MealRole, MealSlot } from './types'
 
 export async function listMealPlanRange(startDate: string, endDate: string) {
@@ -90,19 +91,33 @@ export async function clearMealSlotInRange(
 }
 
 /**
- * その日・枠の「主菜」を設定する（無ければ追加、あれば差し替え）。役割未設定の
- * 既存データも主菜として扱う（後方互換）。「今日の献立」との食い違い解消チップなど、
- * 役割を意識せず「この枠にこのレシピ」を素早く設定したい場面向けの簡易ヘルパー
+ * その日・枠に、役割（主菜/副菜）を尊重してレシピを1品入れる（2026-07-29 便CB-1）。
+ * 「今日の献立」との食い違い解消チップのように、枠を指定して素早く登録したい場面で使う。
+ *
+ * 旧 setMainMeal（役割を見ずに必ず主菜を置き換える）を置き換えたもの。旧版は副菜の料理を
+ * 押しても「その枠の主菜」を差し替えていたため、夕食の主菜が副菜に化けて消えていた（便CD報告）。
+ * どうするかの判断は純関数 planRoleAssign（logic/mealPlan.ts）に置き、テストで固定してある。
+ *
+ * 差し替えのときは auto を外して手動配置に戻す（updateMealEntryRecipe と同じ考え方。
+ * ユーザーが自分で置いた枠は「まとめて献立を立てる」で上書きさせない）。
+ * 判定と書き込みは1トランザクションにまとめ、連打しても二重追加にならないようにする。
  */
-export async function setMainMeal(date: string, slot: MealSlot, recipeId: number): Promise<void> {
-  await db.transaction('rw', db.mealPlans, async () => {
+export async function assignMealEntryByRole(
+  date: string,
+  slot: MealSlot,
+  recipeId: number,
+  role: MealRole,
+): Promise<'added' | 'replaced' | 'duplicate'> {
+  return db.transaction('rw', db.mealPlans, async () => {
     const sameSlot = await db.mealPlans.where('[date+slot]').equals([date, slot]).toArray()
-    const existingMain = sameSlot.find((e) => (e.role ?? 'main') === 'main')
-    if (existingMain) {
-      await db.mealPlans.update(existingMain.id!, { recipeId })
-    } else {
-      await db.mealPlans.add({ date, slot, recipeId, role: 'main' })
+    const plan = planRoleAssign(sameSlot, recipeId, role)
+    if (plan.kind === 'duplicate') return 'duplicate'
+    if (plan.kind === 'replace') {
+      await db.mealPlans.update(plan.entryId, { recipeId, auto: false })
+      return 'replaced'
     }
+    await db.mealPlans.add({ date, slot, recipeId, role })
+    return 'added'
   })
 }
 

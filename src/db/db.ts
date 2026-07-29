@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import type {
   BackupFileHandleRecord,
+  DayNote,
   MealPlanEntry,
   PantryItem,
   PreImportSnapshotRecord,
@@ -27,6 +28,8 @@ class UchiRecipeDB extends Dexie {
   setExclusions!: Table<SetExclusion, number>
   fileHandles!: Table<BackupFileHandleRecord, number>
   preImportSnapshots!: Table<PreImportSnapshotRecord, number>
+  /** 日付メモ（1日1件。主キーが日付そのもの）。2026-07-29 便CB-1・docs/59 A-2 */
+  dayNotes!: Table<DayNote, string>
 
   constructor() {
     super('uchi-recipe')
@@ -157,6 +160,23 @@ class UchiRecipeDB extends Dexie {
       setExclusions: '++id, setId, title',
       fileHandles: 'id',
       preImportSnapshots: 'id',
+    })
+    // バージョン14: 日付メモ（2026-07-29 便CB-1・docs/59 A-2）テーブルを追加。
+    // 主キーは日付文字列そのもの（'date'）＝1日1件をDexie側で保証し、put(date)で
+    // 追加と更新を区別せず書ける。新規テーブルのみの追加なので既存データには影響しない
+    // （upgrade関数不要＝マイグレーション不要を保つ）
+    this.version(14).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt, sourceSetId',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+      prices: '++id, name, updatedAt',
+      setExclusions: '++id, setId, title',
+      fileHandles: 'id',
+      preImportSnapshots: 'id',
+      dayNotes: 'date',
     })
   }
 }

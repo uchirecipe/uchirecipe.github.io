@@ -3937,9 +3937,16 @@ try {
         'MEALPLAN-02(便U-5) 献立のある日は食事帯ラベル(夕食)とレシピ名が出る',
         dayModalFilledText.includes('夕食') && dayModalFilledText.includes('肉じゃが'),
       )
+      // 2026-07-29 便CB-1・docs/59 A-3で、この窓は「閲覧+週を開く」から「その場で編集できる」へ変わった。
+      // レシピ名は詳細へのリンクではなく、押すとレシピを選び直せるボタンになる(週タブの行と同じ機構)。
+      // 元の検証意図(窓が行き止まりでなく、その日の献立に手が届く)はこの形で引き継ぐ
       check(
-        'MEALPLAN-02(便U-5) レシピ名はタップで詳細へ行けるリンクになっている',
-        (await dayModalFilled.locator('a[href*="/recipes/"]').count()) > 0,
+        'MEALPLAN-02(便CB-1/A-3) レシピ名は押すと選び直せるボタンになっている(週タブと同じ編集行)',
+        (await dayModalFilled.getByRole('button', { name: '肉じゃが' }).count()) > 0,
+      )
+      check(
+        'MEALPLAN-02(便CB-1/A-3) 窓の中に主菜・副菜の行ラベルが出る(役割の粒度を保ったまま編集できる)',
+        dayModalFilledText.includes('主菜') && dayModalFilledText.includes('副菜'),
       )
       // 「この週を開く」で週タブへ移動する(従来の週ジャンプはここへ移動した)
       await dayModalFilled.getByRole('button', { name: 'この週を開く' }).click()
@@ -5639,6 +5646,476 @@ try {
       )
     } finally {
       await cwBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-A2: 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。レシピに紐付かない1行メモを
+  // 週タブの日カードで書き、月タブのセルに「メモあり」の印が出て、日モーダルからも同じメモを
+  // 読み書きできること、空にすると消えること(データも消えること)を確認する。
+  // 月タブはPro機能のためIndexedDB直書きで解錠する(MEALPLAN-07と同手法)。 ---
+  currentCheck = 'MEALPLAN-A2'
+  {
+    const dnBrowser = await chromium.launch()
+    const dnContext = await dnBrowser.newContext()
+    const dnPage = await dnContext.newPage()
+    dnPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A2] ${text}`)
+    })
+    dnPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A2] ${err.message}`)
+    })
+    try {
+      await dnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dnPage.waitForTimeout(1800) // 初回シード完了待ち
+      // Pro解錠(IndexedDB直書き)
+      await dnPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await dnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dnPage.reload({ waitUntil: 'networkidle' })
+      await dnPage.waitForTimeout(800)
+
+      const dnNow = new Date()
+      const dnDay = dnNow.getDate()
+      const dnNoteLabel = `${dnNow.getMonth() + 1}月${dnDay}日のメモ`
+      const dnToday = `${dnNow.getFullYear()}-${String(dnNow.getMonth() + 1).padStart(2, '0')}-${String(dnDay).padStart(2, '0')}`
+
+      // 週タブ: 今日のカードのメモ欄に入力し、欄から離れると保存される
+      await dnPage.getByRole('button', { name: '週', exact: true }).click()
+      await dnPage.waitForTimeout(400)
+      const dnWeekInput = dnPage.getByLabel(dnNoteLabel)
+      check('MEALPLAN-A2 週タブの各日カードにメモ欄がある', (await dnWeekInput.count()) === 1)
+      check(
+        'MEALPLAN-A2 メモ欄は空のとき書き方の例をプレースホルダーで示す',
+        (await dnWeekInput.getAttribute('placeholder')) === '外食、実家、お弁当いる など',
+      )
+      await dnWeekInput.fill('外食')
+      await dnPage.keyboard.press('Enter')
+      await dnPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-A2 メモを書いて欄を離れると保存され、保存した旨のトーストが出る',
+        ((await dnPage.textContent('body')) ?? '').includes('この日のメモを保存しました'),
+      )
+      const dnStored = await dnPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('dayNotes', 'readonly')
+              const g = tx.objectStore('dayNotes').get(date)
+              g.onsuccess = () => resolve(g.result ?? null)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        dnToday,
+      )
+      check(
+        'MEALPLAN-A2 メモは献立(mealPlans)ではなく日付メモ専用テーブルに1日1件で保存される',
+        dnStored != null && dnStored.date === dnToday && dnStored.text === '外食',
+        `stored=${JSON.stringify(dnStored)}`,
+      )
+      // 献立の登録が無くてもメモだけが保存できている(レシピに紐付かない自由メモであること)
+      const dnPlanCount = await dnPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-A2 メモを書いても献立(mealPlans)には1件も行が増えない',
+        dnPlanCount === 0,
+        `mealPlans=${dnPlanCount}`,
+      )
+
+      // 月タブ: セルに「メモあり」の控えめな印が出る(写真モードのまま=既定)
+      await dnPage.getByRole('button', { name: '月', exact: true }).click()
+      await dnPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-A2 月カレンダーの今日のセルに「メモあり」の印が出る',
+        (await dnPage.locator(`button[data-date="${dnToday}"] [aria-label="メモあり"]`).count()) === 1,
+      )
+      check(
+        'MEALPLAN-A2 メモの無い日のセルには印が出ない(1件だけ)',
+        (await dnPage.locator('[aria-label="メモあり"]').count()) === 1,
+      )
+
+      // 日モーダル: 同じメモが読める→空にすると消える
+      await dnPage.locator(`button[data-date="${dnToday}"]`).click()
+      await dnPage.waitForTimeout(400)
+      const dnModal = dnPage.getByRole('dialog')
+      const dnModalInput = dnModal.getByLabel(dnNoteLabel)
+      check('MEALPLAN-A2 月タブの日モーダルにも同じメモ欄がある', (await dnModalInput.count()) === 1)
+      check(
+        'MEALPLAN-A2 日モーダルのメモ欄に週タブで書いた内容が入っている',
+        (await dnModalInput.inputValue()) === '外食',
+      )
+      await dnModalInput.fill('')
+      await dnPage.keyboard.press('Enter')
+      await dnPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-A2 メモを空にして離れると消した旨のトーストが出る',
+        ((await dnPage.textContent('body')) ?? '').includes('この日のメモを消しました'),
+      )
+      const dnAfter = await dnPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('dayNotes', 'readonly')
+              const g = tx.objectStore('dayNotes').get(date)
+              g.onsuccess = () => resolve(g.result ?? null)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        dnToday,
+      )
+      check('MEALPLAN-A2 空にしたメモはデータごと消える(空のメモを残さない)', dnAfter === null)
+      await dnPage.getByRole('button', { name: '閉じる', exact: true }).first().click()
+      await dnPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A2 メモを消すと月セルの印も消える',
+        (await dnPage.locator('[aria-label="メモあり"]').count()) === 0,
+      )
+    } finally {
+      await dnBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-A3B3: 月タブから直接 追加/差し替え/削除(A-3)と、月間サマリーの常設(B-3)。
+  // 2026-07-29 便CB-1・docs/59。翌月(=全日が未来日)の10日を開き、日モーダルの中だけで
+  //  ・空き行「レシピを選ぶ」→ピッカー→肉じゃが を割り当てられる(週タブへ飛ばない)
+  //  ・割り当て後もモーダルは開いたままで、続けて編集できる(ピッカーはモーダルより上に出る)
+  //  ・役割(主菜/副菜)の粒度が保たれる(主菜行に入れたら role=main で保存される)
+  //  ・×で削除できる(データも消える)
+  // を確認し、あわせて期間を選ばなくても月間サマリーが出ていること(B-3)を確認する。
+  // 月タブはPro機能のためIndexedDB直書きで解錠する(MEALPLAN-07と同手法)。 ---
+  currentCheck = 'MEALPLAN-A3B3'
+  {
+    const meBrowser = await chromium.launch()
+    const meContext = await meBrowser.newContext()
+    const mePage = await meContext.newPage()
+    mePage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A3B3] ${text}`)
+    })
+    mePage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A3B3] ${err.message}`)
+    })
+    try {
+      await mePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mePage.waitForTimeout(1800) // 初回シード完了待ち
+      await mePage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await mePage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await mePage.reload({ waitUntil: 'networkidle' })
+      await mePage.waitForTimeout(800)
+      await mePage.getByRole('button', { name: '月', exact: true }).click()
+      await mePage.waitForTimeout(400)
+
+      // B-3: 期間を1日も選んでいない状態で、月間サマリーが最初から出ている
+      const meNow = new Date()
+      const meThisMonthTitle = `${meNow.getMonth() + 1}月の食費と栄養（1人分）`
+      const meBodyBefore = (await mePage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-A3B3(B-3) 期間を選ばなくても月間サマリーが月タブ上部に出ている',
+        meBodyBefore.includes(meThisMonthTitle),
+        `title=${meThisMonthTitle}`,
+      )
+      check(
+        'MEALPLAN-A3B3(B-3) 期間指定のUI(期間の栄養と食費)も従来どおり残っている',
+        (await mePage.getByRole('button', { name: '期間の栄養と食費', exact: true }).count()) === 1,
+      )
+
+      // 翌月へ移動(全日が未来日=編集対象)。10日のセルを開く
+      await mePage.getByRole('button', { name: '次の月', exact: true }).click()
+      await mePage.waitForTimeout(400)
+      const meNext = new Date(meNow.getFullYear(), meNow.getMonth() + 1, 1)
+      const meDate = `${meNext.getFullYear()}-${String(meNext.getMonth() + 1).padStart(2, '0')}-10`
+      check(
+        'MEALPLAN-A3B3(B-3) 記録も予定も無い月は、数字の代わりに空の案内を出す',
+        ((await mePage.textContent('body')) ?? '').includes(
+          'この月には、作った記録も登録した献立もまだありません',
+        ),
+      )
+      await mePage.locator(`button[data-date="${meDate}"]`).click()
+      await mePage.waitForTimeout(400)
+      const meModal = mePage.locator('[role="dialog"]')
+      check('MEALPLAN-A3B3(A-3) 日モーダルが開く', await meModal.isVisible())
+      check(
+        'MEALPLAN-A3B3(A-3) 献立の無い未来日でも、その場で選べる空き行が出る',
+        (await meModal.getByRole('button', { name: 'レシピを選ぶ' }).count()) >= 1,
+      )
+      // 主菜行の「レシピを選ぶ」→ピッカー→肉じゃが
+      await meModal.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await mePage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A3B3(A-3) 月タブのままピッカーが開く(週タブへ飛ばない)',
+        (await mePage.getByRole('button', { name: '月', exact: true }).getAttribute('aria-pressed')) ===
+          'true',
+      )
+      await mePage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await mePage.waitForTimeout(300)
+      await mePage.getByRole('button', { name: /肉じゃが/ }).first().click()
+      await mePage.waitForTimeout(600)
+      check(
+        'MEALPLAN-A3B3(A-3) 選び終わってもモーダルは開いたまま(続けて編集できる)',
+        await meModal.isVisible(),
+      )
+      check(
+        'MEALPLAN-A3B3(A-3) モーダルの主菜行に選んだレシピが入る',
+        ((await meModal.textContent()) ?? '').includes('肉じゃが'),
+      )
+      const meSaved = await mePage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.filter((e) => e.date === date))
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        meDate,
+      )
+      check(
+        'MEALPLAN-A3B3(A-3) 月から入れた献立は、その日・その食事の主菜として1件だけ保存される',
+        meSaved.length === 1 && meSaved[0].slot === 'dinner' && meSaved[0].role === 'main',
+        `saved=${JSON.stringify(meSaved)}`,
+      )
+      check(
+        'MEALPLAN-A3B3(A-3) 手で選んだ枠なので自動提案由来(auto)にはならない',
+        meSaved[0].auto !== true,
+        `auto=${meSaved[0].auto}`,
+      )
+      // B-3: 予定を入れた翌月のサマリーに金額が出る(期間選択なし)
+      const meMonthTitle = `${meNext.getMonth() + 1}月の食費と栄養（1人分）`
+      await meModal.locator('button[aria-label="閉じる"]').first().click()
+      await mePage.waitForTimeout(400)
+      const meBodyAfter = (await mePage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-A3B3(B-3) 表示中の月のサマリーが見出しに月を出す',
+        meBodyAfter.includes(meMonthTitle),
+        `title=${meMonthTitle}`,
+      )
+      check(
+        'MEALPLAN-A3B3(B-3) 未来の月は「今日から先の期間なので、登録した献立で計算しています」と基準を明示する',
+        meBodyAfter.includes('今日から先の期間なので、登録した献立で計算しています'),
+      )
+      const meSummaryYen = /食費[\s\S]{0,40}?約([\d,]+)円/.exec(meBodyAfter)
+      check(
+        'MEALPLAN-A3B3(B-3) 期間を選ばなくても1人分の食費が0円ではない金額で出る',
+        !!meSummaryYen && Number(meSummaryYen[1].replaceAll(',', '')) > 0,
+        `matched=${meSummaryYen?.[1]}`,
+      )
+      check(
+        'MEALPLAN-A3B3(B-3) 内訳は既定で畳まれている(カレンダーを押し下げない)',
+        !meBodyAfter.includes('内訳 作った記録'),
+      )
+      await mePage.getByRole('button', { name: '内訳を見る' }).click()
+      await mePage.waitForTimeout(300)
+      const meBodyOpen = (await mePage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-A3B3(B-3) 「内訳を見る」で栄養8項目と実績/予定の内訳が出る',
+        meBodyOpen.includes('この月に摂取できた栄養（1人分）') &&
+          meBodyOpen.includes('たんぱく質') &&
+          meBodyOpen.includes('内訳 作った記録'),
+      )
+      check(
+        'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・めやす」の但し書きを外さない',
+        meBodyOpen.includes('概算') && meBodyOpen.includes('材料に価格を入力したレシピだけが計算対象です'),
+      )
+      // A-3: 月の窓から削除もできる(データごと消える)
+      await mePage.locator(`button[data-date="${meDate}"]`).click()
+      await mePage.waitForTimeout(400)
+      await meModal.getByRole('button', { name: 'この割り当てを外す' }).first().click()
+      await mePage.waitForTimeout(600)
+      const meAfterRemove = await mePage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.filter((e) => e.date === date).length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        meDate,
+      )
+      check('MEALPLAN-A3B3(A-3) 月の窓から外すと献立が消える(0件)', meAfterRemove === 0)
+      check(
+        'MEALPLAN-A3B3(A-3) 外した後も月タブのまま(週へ飛ばされない)',
+        (await mePage.getByRole('button', { name: '月', exact: true }).getAttribute('aria-pressed')) ===
+          'true',
+      )
+    } finally {
+      await meBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
+  // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
+  // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を
+  // 押すと夕食の主菜(肉じゃが)が消えていた。副菜は副菜として足され、主菜が残ることを実データで確認する ---
+  currentCheck = 'MEALPLAN-ROLE'
+  {
+    const roBrowser = await chromium.launch()
+    const roContext = await roBrowser.newContext()
+    const roPage = await roContext.newPage()
+    roPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-ROLE] ${text}`)
+    })
+    roPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-ROLE] ${err.message}`)
+    })
+    try {
+      await roPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await roPage.waitForTimeout(1800) // 初回シード完了待ち
+      // 今日の夕食の主菜に肉じゃが / 「今日の献立」に副菜(ほうれん草のおひたし)だけを入れる
+      const roSeed = await roPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.find((r) => r.title === '肉じゃが')
+                const side = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                if (!main || !side) {
+                  reject(new Error('seed recipes not found'))
+                  return
+                }
+                const wtx = idb.transaction(['mealPlans', 'todayList'], 'readwrite')
+                wtx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId: main.id, role: 'main' })
+                wtx.objectStore('todayList').add({ recipeId: side.id, addedAt: Date.now() })
+                wtx.oncomplete = () =>
+                  resolve({ date, mainId: main.id, sideId: side.id, sideDishType: side.dishType })
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-ROLE 前提: 副菜のレシピ(ほうれん草のおひたし)はdishType=sideで同梱されている',
+        roSeed.sideDishType === 'side',
+        `dishType=${roSeed.sideDishType}`,
+      )
+      await roPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await roPage.reload({ waitUntil: 'networkidle' })
+      await roPage.waitForTimeout(1200)
+      const roBody = (await roPage.textContent('body')) ?? ''
+      check(
+        'MEALPLAN-ROLE 前提: 食い違いの案内が出る',
+        roBody.includes('今日の献立と今週の予定が食い違っています'),
+      )
+      check(
+        'MEALPLAN-ROLE 案内文が「主菜になる料理は主菜、副菜になる料理は副菜として入る」ことを説明する',
+        roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り、今ある献立は消えません'),
+      )
+      await roPage.getByRole('button', { name: /夕食.*現在/ }).first().click()
+      await roPage.waitForTimeout(700)
+      check(
+        'MEALPLAN-ROLE どの食事のどの役割に入れたかをトーストで伝える',
+        ((await roPage.textContent('body')) ?? '').includes(
+          '夕食の副菜に「ほうれん草のおひたし」を登録しました',
+        ),
+      )
+      const roResult = await roPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () =>
+                resolve(g.result.filter((e) => e.date === date && e.slot === 'dinner'))
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        roSeed.date,
+      )
+      check(
+        '再発防止(便CD) 副菜を押しても夕食の主菜(肉じゃが)は消えない',
+        roResult.some((e) => e.recipeId === roSeed.mainId && (e.role ?? 'main') === 'main'),
+        `rows=${JSON.stringify(roResult)}`,
+      )
+      check(
+        '再発防止(便CD) 副菜のレシピはrole=sideで追加される(主菜の置き換えではない)',
+        roResult.some((e) => e.recipeId === roSeed.sideId && e.role === 'side'),
+        `rows=${JSON.stringify(roResult)}`,
+      )
+      check(
+        '再発防止(便CD) 夕食の行はちょうど2件(主菜+副菜)になる',
+        roResult.length === 2,
+        `rows=${JSON.stringify(roResult)}`,
+      )
+    } finally {
+      await roBrowser.close()
     }
   }
 

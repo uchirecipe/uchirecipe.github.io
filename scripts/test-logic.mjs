@@ -65,6 +65,7 @@ import {
   recipeGenre,
   cookedPlanEntryIds,
   mealOccasionCount,
+  planRoleAssign,
 } from '../src/logic/mealPlan.ts'
 import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
@@ -2374,6 +2375,55 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
+// ---------- planRoleAssign(日タブ「食い違い」チップの役割粒度・2026-07-29 便CB-1)。
+// 便CD報告の不具合の再発防止: 副菜の料理を押しても「その枠の主菜」を置き換えていたため、
+// 夕食の主菜(肉じゃが)が副菜(きんぴら)に化けて消えていた。役割ごとに何をするかをここで固定する ----------
+{
+  const main1 = { id: 1, recipeId: 10, role: 'main' }
+  const side1 = { id: 2, recipeId: 20, role: 'side' }
+  eq(
+    '再発防止: 副菜の料理は既存の主菜を置き換えず追加する(主菜が消えない)',
+    planRoleAssign([main1], 30, 'side'),
+    { kind: 'add' },
+  )
+  eq(
+    '再発防止: 副菜の料理は既存の副菜も置き換えず追加する(副菜も消えない)',
+    planRoleAssign([main1, side1], 30, 'side'),
+    { kind: 'add' },
+  )
+  eq(
+    '主菜の料理は、その枠の主菜を差し替える(従来どおりの主菜の挙動)',
+    planRoleAssign([main1, side1], 30, 'main'),
+    { kind: 'replace', entryId: 1 },
+  )
+  eq(
+    '主菜の料理でも、その枠に主菜が無ければ追加する',
+    planRoleAssign([side1], 30, 'main'),
+    { kind: 'add' },
+  )
+  eq('空の枠はどちらの役割でも追加になる', planRoleAssign([], 30, 'main'), { kind: 'add' })
+  eq(
+    '同じ料理が既にその枠にあれば何もしない(同じ料理を2行に増やさない)',
+    planRoleAssign([main1, side1], 20, 'side'),
+    { kind: 'duplicate' },
+  )
+  eq(
+    '同じ料理が主菜として入っている枠に、主菜として押しても何もしない',
+    planRoleAssign([main1], 10, 'main'),
+    { kind: 'duplicate' },
+  )
+  eq(
+    'role未設定の既存データ(2026-07-13より前)は主菜として扱い、主菜の料理で差し替える',
+    planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'main'),
+    { kind: 'replace', entryId: 5 },
+  )
+  eq(
+    'role未設定の既存データがあっても、副菜の料理は追加(既存を消さない)',
+    planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'side'),
+    { kind: 'add' },
+  )
+}
+
 // ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------
 {
   const recipes = [
@@ -3374,12 +3424,26 @@ eq(
   eq(
     '全フィールドが無い(この対応より前の古いバックアップ)場合はすべて置き換え対象外',
     tablesToReplace(baseFile),
-    { pantryItems: false, shoppingItems: false, mealPlans: false, todayList: false, prices: false },
+    {
+      pantryItems: false,
+      shoppingItems: false,
+      mealPlans: false,
+      todayList: false,
+      prices: false,
+      dayNotes: false,
+    },
   )
   eq(
     '空配列(テーブルを空にする意図)は置き換え対象になる(undefinedとの区別)',
     tablesToReplace({ ...baseFile, pantryItems: [], prices: [] }),
-    { pantryItems: true, shoppingItems: false, mealPlans: false, todayList: false, prices: true },
+    {
+      pantryItems: true,
+      shoppingItems: false,
+      mealPlans: false,
+      todayList: false,
+      prices: true,
+      dayNotes: false,
+    },
   )
   eq(
     '中身入りの配列も置き換え対象になる',
@@ -3388,7 +3452,14 @@ eq(
       mealPlans: [{ date: '2026-07-20', slot: 'dinner', recipeId: 1, role: 'main' }],
       todayList: [{ recipeId: 1, addedAt: 1000 }],
     }),
-    { pantryItems: false, shoppingItems: false, mealPlans: true, todayList: true, prices: false },
+    {
+      pantryItems: false,
+      shoppingItems: false,
+      mealPlans: true,
+      todayList: true,
+      prices: false,
+      dayNotes: false,
+    },
   )
   eq(
     '全フィールドが有る(空配列込み)場合はすべて置き換え対象',
@@ -3399,8 +3470,31 @@ eq(
       mealPlans: [],
       todayList: [],
       prices: [],
+      dayNotes: [],
     }),
-    { pantryItems: true, shoppingItems: true, mealPlans: true, todayList: true, prices: true },
+    {
+      pantryItems: true,
+      shoppingItems: true,
+      mealPlans: true,
+      todayList: true,
+      prices: true,
+      dayNotes: true,
+    },
+  )
+  // 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。新テーブルを足したときの後方互換の要:
+  // この項目を持たない古いバックアップ(=undefined)を復元しても、端末に残っているメモを消さない
+  eq(
+    '日付メモの項目が無い古いバックアップは、復元してもメモのテーブルに触らない',
+    tablesToReplace({ ...baseFile, mealPlans: [] }).dayNotes,
+    false,
+  )
+  eq(
+    '日付メモが中身入りで入っていれば置き換え対象になる',
+    tablesToReplace({
+      ...baseFile,
+      dayNotes: [{ date: '2026-07-30', text: '外食', updatedAt: 1000 }],
+    }).dayNotes,
+    true,
   )
 }
 
