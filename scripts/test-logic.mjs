@@ -51,6 +51,7 @@ import {
   isPastDate,
   shiftDate,
   dowIndex,
+  sortMealSlots,
   excludeYesterdayPlanRecipes,
   normalizeDateRange,
   rangeDayCount,
@@ -118,6 +119,7 @@ import {
   estimateRecipeCost,
   estimateIngredientRowCost,
   sumMealPlanEntriesCost,
+  pricelessIngredientNames,
   sumCookedRecipesCost,
   normalizeIngredientNameForPrice,
 } from '../src/logic/priceEstimate.ts'
@@ -1966,6 +1968,16 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     const rolling = Array.from({ length: 7 }, (_, i) => dowIndex(shiftDate('2026-07-29', i)))
     eq('dowIndex: 今日(水)起点の7日間は 水木金土日月火 の順になる', rolling, [2, 3, 4, 5, 6, 0, 1])
     eq('dowIndex: 並び順インデックスとは一致しない(旧実装の再発防止)', rolling.every((d, i) => d === i), false)
+  }
+
+  // MP-10 食事帯の並び: 押した順ではなく必ず 朝食→昼食→夕食 の順にする
+  eq('sortMealSlots: 押した順(夕→朝→昼)でも朝昼夕に並べ直す', sortMealSlots(['dinner', 'breakfast', 'lunch']), ['breakfast', 'lunch', 'dinner'])
+  eq('sortMealSlots: 既に正しい順はそのまま', sortMealSlots(['breakfast', 'dinner']), ['breakfast', 'dinner'])
+  eq('sortMealSlots: 1件でも壊れない', sortMealSlots(['dinner']), ['dinner'])
+  {
+    const original = ['dinner', 'breakfast']
+    sortMealSlots(original)
+    eq('sortMealSlots: 元の配列を書き換えない(設定値を壊さない)', original, ['dinner', 'breakfast'])
   }
 
   // MP-03 たんぱく源分散の絞り込み: 'その他'を候補に入れ、「最少ちょうど」から「最少+1まで」に緩める。
@@ -4589,6 +4601,29 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       'sumMealPlanEntriesCost(便CA): 登録人数が分からないレシピは1人分として扱う',
       sumMealPlanEntriesCost([{ recipeId: 4 }], recipeById, index).personalTotal,
       50,
+    )
+
+    // pricelessIngredientNames(2026-07-29 便CD/MP-11): 概算食費に1円も入っていない材料を数え、
+    // 「価格が分からない材料◯種類を除いた概算です」と正直に添えるために使う
+    eq(
+      'pricelessIngredientNames: 価格が分からない材料だけを返す',
+      pricelessIngredientNames([{ recipeId: 1 }, { recipeId: 3 }], recipeById, index),
+      ['謎の食材'],
+    )
+    eq(
+      'pricelessIngredientNames: 同じ材料が何品に出ても1件として数える',
+      pricelessIngredientNames([{ recipeId: 3 }, { recipeId: 3 }], recipeById, index),
+      ['謎の食材'],
+    )
+    eq(
+      'pricelessIngredientNames: 全部に価格があれば0件(注記を出さない)',
+      pricelessIngredientNames([{ recipeId: 1 }, { recipeId: 2 }], recipeById, index),
+      [],
+    )
+    eq(
+      'pricelessIngredientNames: recipeByIdに無い孤児行はスキップする',
+      pricelessIngredientNames([{ recipeId: 999 }], recipeById, index),
+      [],
     )
 
     // sumCookedRecipesCost(2026-07-24 便BH-3・タスク9「期間の食費・実績ベース」): 作った記録群の

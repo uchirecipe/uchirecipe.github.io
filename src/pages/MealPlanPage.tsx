@@ -50,6 +50,7 @@ import {
   MEAL_GENRES,
   weekDates,
   dowIndex,
+  sortMealSlots,
   shiftWeek,
   shiftDate,
   isPastDate,
@@ -78,6 +79,7 @@ import {
   buildPriceIndex,
   estimateRecipeCost,
   sumMealPlanEntriesCost,
+  pricelessIngredientNames,
 } from '../logic/priceEstimate'
 import {
   roundNutrient,
@@ -530,6 +532,16 @@ export default function MealPlanPage() {
   const isAtCurrentWeek = dates[0] === currentWeekAnchor
 
   const entries = useMealPlanRange(dates[0], dates[6])
+  // 表示中の週のうち「今日以降」の予定だけ(2026-07-29 便CD/MP-07)。
+  // 便BS(2026-07-24)で過去日の予定は週タブの表示から消した(記録だけ残す)が、概算食費と
+  // 買い物リストは entries をそのまま集計していたため、画面のどこにも出ていない過去日の献立が
+  // 金額と買い物メモに入り、ユーザーは何を消せば減るのか辿れなかった。集計側も
+  // 「過去=実績(月タブの期間の集計が担当)・週タブ=これから作る予定」に揃える。
+  // データは非破壊(表示と集計から外すだけ)
+  const activeEntries = useMemo(
+    () => (entries ?? []).filter((e) => !isPastDate(e.date, today)),
+    [entries, today],
+  )
   // 「今日」の週プラン登録は、週タブで表示中の週(weekStart)に依存させない
   // （2026-07-16 便U: 日タブが週タブから独立した別タブになったため。以前はentries(週タブの
   // 表示中の週)からtoday部分を抜き出していたが、週タブで別の週へ移動した状態のまま
@@ -720,11 +732,18 @@ export default function MealPlanPage() {
   // 表示する食事帯（未設定なら朝昼夜すべて。実際の既定値は起動時のresolveVisibleMealSlotsIfNeededが
   // 新規ユーザー=夕食のみ/既存ユーザー=3枠のどちらかに決めて保存する。ここでの[...MEAL_SLOTS]は
   // その保存が終わるまでの一瞬だけ使われるフォールバック）。日タブ・週タブの両方で同じ設定値を使う
-  const visibleSlots = settings?.visibleMealSlots ?? [...MEAL_SLOTS]
+  // 2026-07-29 便CD/MP-10: 保存されている順(押した順)ではなく必ず 朝食→昼食→夕食 の順にする。
+  // 保存時にも並べ直すが、既に「夕食→朝食→昼食」の順で保存済みの端末をその場で直すために
+  // 読み出し側でも通す(マイグレーション不要)。各日カードの並び・自動取り込み順・fillWeekの
+  // 割り当て順がすべてこの配列を見ているので、ここ1か所で揃う
+  const visibleSlots = useMemo(
+    () => sortMealSlots(settings?.visibleMealSlots ?? [...MEAL_SLOTS]),
+    [settings?.visibleMealSlots],
+  )
   const toggleSlot = (slot: MealSlot) => {
     const next = visibleSlots.includes(slot)
       ? visibleSlots.filter((s) => s !== slot)
-      : [...visibleSlots, slot]
+      : sortMealSlots([...visibleSlots, slot])
     // 全部外すことはできない（何も見えなくなるため）。以前は無反応だっただけだったが、
     // 何も起きない理由が伝わらないとの指摘(第4波ペルソナPDCA Fix6)を受け、トーストで説明する
     if (next.length === 0) {
@@ -1366,9 +1385,10 @@ export default function MealPlanPage() {
   // 週タブ「この帯の今週分を空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 帯を1つ選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
   // 前後移動している場合はその週)のうちその帯のエントリだけをまとめて削除する。
-  // 概算食費(weekCostEstimate)はentries(全帯)を集計対象にしており、visibleSlotsで
-  // フィルタしていないため、この削除で自動的に反映される(「登録されている献立全部」の
-  // 集計のまま変えない、という仕様どおり)
+  // 概算食費(weekCostEstimate)は表示帯(visibleSlots)では絞らず「登録されている献立全部」を
+  // 集計する仕様のままなので、この削除は自動的に金額へ反映される。
+  // ただし過去日は集計から外している(2026-07-29 便CD/MP-07。表示から消えている予定が
+  // 金額に入っていると何を消せば減るのか辿れないため)
   const [clearSlotTarget, setClearSlotTarget] = useState<MealSlot>('dinner')
   const clearWeekSlot = async () => {
     const label = ja.mealPlan.slot[clearSlotTarget]
@@ -1378,13 +1398,20 @@ export default function MealPlanPage() {
   }
 
   // 週の概算食費（材料ごとの価格入力を優先し、未入力の材料は食材価格マスタで補う。docs/20 §3）
+  // 集計対象は activeEntries(今日以降)。過去日は週タブに表示されないので金額から辿れない
+  // (2026-07-29 便CD/MP-07)。過ぎた分の実績は月タブの「期間の栄養と食費」が担当する
   const weekCostEstimate = useMemo(
-    () => sumMealPlanEntriesCost(entries ?? [], recipeById, priceIndex),
-    [entries, recipeById, priceIndex],
+    () => sumMealPlanEntriesCost(activeEntries, recipeById, priceIndex),
+    [activeEntries, recipeById, priceIndex],
   )
   const weekCost = weekCostEstimate.total
   // 概算食費の食数(=食事の回数。主菜+副菜が並ぶ枠も1食。2026-07-24 便BH-3・タスク8「◯食分」併記)
-  const weekMealCount = useMemo(() => mealOccasionCount(entries ?? []), [entries])
+  const weekMealCount = useMemo(() => mealOccasionCount(activeEntries), [activeEntries])
+  // 価格が分からない材料の種類数(2026-07-29 便CD/MP-11)。この分は合計に1円も入っていない
+  const weekPricelessCount = useMemo(
+    () => pricelessIngredientNames(activeEntries, recipeById, priceIndex).length,
+    [activeEntries, recipeById, priceIndex],
+  )
   // 概算食費の折りたたみ(2026-07-24 便BH-3・タスク4: 「まとめて献立」直後にいきなり金額が出る
   // 違和感への対応。既定閉・配置も7日分カードの下=邪魔にならない位置へ移動)
   const [weekCostOpen, setWeekCostOpen] = useState(false)
@@ -1406,7 +1433,8 @@ export default function MealPlanPage() {
    */
   const weekRecipeCounts = useMemo(() => {
     const counts = new Map<number, number>()
-    entries?.forEach((e) => {
+    // 過ぎた日の材料は買わせない(2026-07-29 便CD/MP-07): 集計対象は activeEntries(今日以降)
+    activeEntries.forEach((e) => {
       if (visibleSlots.includes(e.slot)) counts.set(e.recipeId, (counts.get(e.recipeId) ?? 0) + 1)
     })
     // 「今日の献立」(今日つくるリスト)の分も買い物候補に含める。
@@ -1418,7 +1446,7 @@ export default function MealPlanPage() {
     })
     return counts
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, settings?.visibleMealSlots, todayList])
+  }, [activeEntries, settings?.visibleMealSlots, todayList])
 
   const weekRecipeIds = useMemo(() => Array.from(weekRecipeCounts.keys()), [weekRecipeCounts])
 
@@ -2403,6 +2431,11 @@ export default function MealPlanPage() {
                   {ja.mealPlan.pastNoRecord}
                 </p>
               ))}
+            {/* 過ぎた日は「予定を消した」のではなく「表示していないだけ」を明示する
+                (2026-07-29 便CD/MP-07。枠が突然出てこないことに一瞬止まる、への対応) */}
+            {isPastDate(date, today) && (
+              <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.pastPlanHidden}</p>
+            )}
           </section>
         ))}
       </div>
@@ -2434,7 +2467,22 @@ export default function MealPlanPage() {
                   （{ja.mealPlan.weekCostMealCount.replace('{n}', String(weekMealCount))}）
                 </span>
               </p>
+              {/* どの範囲を数えているか(2026-07-29 便CD/MP-07)。過ぎた日は集計から外したので、
+                  黙って数字だけ変えずに範囲を明記する */}
+              <p className="mt-1 text-sm text-ink-muted">
+                {ja.mealPlan.weekCostRange
+                  // 先の週を見ているときは その週の初日 が起点。当週なら今日が起点
+                  .replace('{start}', (dates[0] > today ? dates[0] : today).replaceAll('-', '/'))
+                  .replace('{end}', dates[6].replaceAll('-', '/'))}
+              </p>
               <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.weekCostNote}</p>
+              {/* 価格が分からない材料の分は1円も入っていない＝数字の信頼度を明示する
+                  (2026-07-29 便CD/MP-11) */}
+              {weekPricelessCount > 0 && (
+                <p className="mt-1 text-sm text-ink-muted">
+                  {ja.mealPlan.weekCostPriceless.replace('{n}', String(weekPricelessCount))}
+                </p>
+              )}
               <Link to="/prices" className="mt-1 inline-block text-sm font-bold text-accent underline">
                 {ja.mealPlan.weekCostNoteLink}
               </Link>
@@ -2445,7 +2493,17 @@ export default function MealPlanPage() {
                     : ja.mealPlan.budgetCompareOver.replace('{n}', String(Math.abs(budgetDiff).toLocaleString()))}
                 </p>
               ) : (
-                <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.budgetNotSet}</p>
+                // 「設定画面で登録すると比較できます」だけでは行き止まりだったので、
+                // 予算の入力欄へ直接移動できるボタンを添える(2026-07-29 便CD/MP-11)
+                <div className="mt-1">
+                  <p className="text-sm text-ink-muted">{ja.mealPlan.budgetNotSet}</p>
+                  <Link
+                    to="/settings?section=budget"
+                    className="mt-1 inline-block rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                  >
+                    {ja.mealPlan.budgetSetLink}
+                  </Link>
+                </div>
               )}
             </div>
           )}

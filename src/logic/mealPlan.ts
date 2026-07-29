@@ -8,6 +8,16 @@ import type { DishType, IconKey, MealPlanEntry, MealRole, MealSlot, Recipe, Seas
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
 /**
+ * 食事帯を必ず 朝食→昼食→夕食 の順に並べ直す（2026-07-29 便CD/MP-10）。
+ * 「表示する食事帯」は押した順に配列へ足されるだけだったため、あとから朝食・昼食を
+ * 足すと各日のカードが「夕食→朝食→昼食」の順で並び、設定に保存されて直せなかった。
+ * 保存時と読み出し時の両方でこの関数を通し、既存の設定値もその場で正しい順に見せる。
+ */
+export function sortMealSlots(slots: MealSlot[]): MealSlot[] {
+  return [...slots].sort((a, b) => MEAL_SLOTS.indexOf(a) - MEAL_SLOTS.indexOf(b))
+}
+
+/**
  * 自動提案のジャンル指定（和食/洋食/中華）。starters.ts/sets配下の実データで
  * 実際に使われているタグのみを採用する（2026-07-13献立の主菜+副菜構成対応）
  */
