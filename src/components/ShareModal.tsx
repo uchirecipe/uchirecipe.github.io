@@ -158,6 +158,8 @@ export default function ShareModal({
             {ja.share.imageOption}
           </button>
         </div>
+        {/* テキスト共有は貼り付け取込できる形式で出している(便BJ)。その使い道の告知(便CI/C14) */}
+        <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.share.textImportNote}</p>
         {message && (
           <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{message}</p>
         )}

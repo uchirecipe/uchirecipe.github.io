@@ -8313,9 +8313,23 @@ try {
       const shareDialog = shPage.getByRole('dialog', { name: 'シェアする内容' })
       check('SHARE-01 シェアボタンで選択モーダルが開く', (await shareDialog.count()) === 1)
       const dialogText = (await shareDialog.textContent()) ?? ''
+      // 2026-07-29 便CI/C10: 旧文「…作り方は常に入ります」は画像カードでは事実と違った
+      // (generateShareCardは手順を描かない)。テキストにだけ作り方が入ることを明記した文言に変更
       check(
-        'SHARE-01 固定項目の説明文言(料理名・食数・材料8件・作り方)が出る',
-        dialogText.includes('料理名・食数・材料（最初の8件）・作り方は常に入ります'),
+        'SHARE-01 固定項目の説明文言(料理名・人数分・材料8件)が出る',
+        dialogText.includes('料理名・人数分・材料（最初の8件）が入ります'),
+        dialogText,
+      )
+      check(
+        'SHARE-01/C10 「作り方が入るのはテキストだけ」と明記されている(画像カードに手順は入らない)',
+        dialogText.includes('作り方が入るのはテキストだけです') &&
+          !dialogText.includes('作り方は常に入ります'),
+        dialogText,
+      )
+      check(
+        'SHARE-01/C14 テキストは貼り付けで取り込める旨が案内されている',
+        dialogText.includes('テキスト貼り付けで自動入力') && dialogText.includes('取り込めます'),
+        dialogText,
       )
       check('SHARE-01 レシピ画像の行に「※画像カードのみ」が併記される', dialogText.includes('※画像カードのみ'))
 
@@ -10081,6 +10095,124 @@ try {
       )
     } finally {
       await crBrowser.close()
+    }
+  }
+  // --- WORD-CI1-01(2026-07-29 便CI 第1波・文言): B4診断の文言4件の再発防止。
+  // C13 並び替え「よく使う順」が何を数えた順かの説明 /
+  // C20 絞り込みで0件になったとき、その場で条件を外せる導線 /
+  // C06 在庫スイッチの説明が「ある→少ない→ない」の3段階で閉じている /
+  // C01 レシピ削除の確認文が消えるもの(作った記録・写真・献立の予定)と残るものを件数つきで書く(規約F) ---
+  currentCheck = 'WORD-CI1-01'
+  {
+    const w1Browser = await chromium.launch()
+    const w1Context = await w1Browser.newContext()
+    const w1Page = await w1Context.newPage()
+    w1Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WORD-CI1-01] ${err.message}`)
+    })
+    // 削除の確認文を読むだけで実際には消さない(dismiss)。同じ端末データを後続の検証で使うため
+    const w1Dialogs = []
+    w1Page.on('dialog', async (dialog) => {
+      w1Dialogs.push(dialog.message())
+      await dialog.dismiss()
+    })
+    try {
+      await w1Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await w1Page.waitForTimeout(1800) // 初回シード完了待ち
+
+      // C13: 並び替えパネルに「よく使う順」の意味が書かれている
+      await w1Page.locator('button[aria-label="並び替え"]').click()
+      await w1Page.waitForTimeout(300)
+      const sortPanelText = await w1Page.textContent('body')
+      check(
+        'WORD-CI1-01/C13 並び替えパネルに「よく使う順」が何を数えた順かの説明が出る',
+        sortPanelText.includes('「よく使う順」は、「作った！」の記録が多い順です'),
+      )
+      await w1Page.getByRole('button', { name: '決定' }).click()
+      await w1Page.waitForTimeout(300)
+
+      // C20: お気に入り0件の状態で「お気に入り」絞り込みをONにして0件にする
+      await w1Page.locator('button[aria-label="絞り込み"]').click()
+      await w1Page.waitForTimeout(300)
+      await w1Page.getByRole('button', { name: 'お気に入り', exact: true }).click()
+      await w1Page.waitForTimeout(300)
+      await w1Page.getByRole('button', { name: '決定' }).click()
+      await w1Page.waitForTimeout(400)
+      const emptyText = await w1Page.textContent('body')
+      check(
+        'WORD-CI1-01/C20 絞り込みで0件のとき「＋から登録」ではなく条件を外す案内が出る',
+        emptyText.includes('条件に合うレシピが見つかりません') &&
+          emptyText.includes('条件を外すと、ほかのレシピが出てきます') &&
+          !emptyText.includes('右下の「＋」ボタンから自分のレシピを登録できます'),
+        emptyText.slice(0, 400),
+      )
+      const clearBtn = w1Page.getByRole('button', { name: '条件をクリア' })
+      check(
+        'WORD-CI1-01/C20 絞り込みパネルを開かなくても「条件をクリア」が押せる',
+        (await clearBtn.count()) === 1 && (await clearBtn.first().isVisible()),
+        `count=${await clearBtn.count()}`,
+      )
+      await clearBtn.first().click()
+      await w1Page.waitForTimeout(500)
+      check(
+        'WORD-CI1-01/C20 「条件をクリア」でレシピが戻る',
+        (await w1Page.locator('a[href^="#/recipes/"]').count()) > 0,
+      )
+
+      // C06: 記録モーダルの在庫スイッチの説明が3段階で閉じている
+      await w1Page.getByText('肉じゃが', { exact: true }).first().click()
+      await w1Page.waitForTimeout(600)
+      await w1Page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await w1Page.waitForTimeout(400)
+      const logDialogText =
+        (await w1Page.getByRole('dialog', { name: '作った記録をつける' }).textContent()) ?? ''
+      check(
+        'WORD-CI1-01/C06 在庫スイッチの説明が「ある→少ない→ない」の3段階で閉じている',
+        logDialogText.includes('「ある→少ない→ない」の順に1つ下げます') &&
+          !logDialogText.includes('在庫を1段階下げます'),
+        logDialogText,
+      )
+
+      // C01: 記録を2件つけてから削除の確認文を読む(実行はしない)
+      await w1Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await w1Page.waitForTimeout(600)
+      await w1Page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await w1Page.waitForTimeout(400)
+      await w1Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await w1Page.waitForTimeout(600)
+      await w1Page.locator('a[href*="/edit"]').first().click()
+      await w1Page.waitForTimeout(600)
+      await w1Page.getByRole('button', { name: 'このレシピを削除' }).click()
+      await w1Page.waitForTimeout(500)
+      const delMessage = w1Dialogs[w1Dialogs.length - 1] ?? ''
+      check(
+        'WORD-CI1-01/C01 削除の確認文に消える作った記録の件数(写真枚数つき)が入る(規約F)',
+        delMessage.includes('作った記録2件（うち写真0枚）'),
+        delMessage,
+      )
+      check(
+        'WORD-CI1-01/C01 削除の確認文に献立の予定・今日の献立も消えることが書かれている',
+        delMessage.includes('献立の予定') && delMessage.includes('今日の献立'),
+        delMessage,
+      )
+      check(
+        'WORD-CI1-01/C01 削除の確認文に「何が残るか」も書かれている(「よろしいですか？」だけにしない)',
+        delMessage.includes('残ります') && !delMessage.includes('よろしいですか'),
+        delMessage,
+      )
+    } finally {
+      await w1Browser.close()
     }
   }
 } catch (err) {

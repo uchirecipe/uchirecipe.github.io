@@ -27,6 +27,13 @@ type Props = {
    */
   reflectPantry?: boolean
   onReflectPantryChange?: (value: boolean) => void
+  /**
+   * このレシピが「今日の献立」に入っているか（2026-07-29 便CI/R02）。
+   * true のときだけ「記録すると今日の献立から外れる」旨を先に出す。
+   * 実挙動は RecipeDetailPage の saveLog が removeFromTodayList を呼ぶところ（献立ページの
+   * 「作った」も db/todayList.ts で同じことをする）で、どこにも書かれていなかった
+   */
+  inTodayList?: boolean
 }
 
 /**
@@ -50,6 +57,7 @@ export default function CookedLogModal({
   onClose,
   reflectPantry,
   onReflectPantryChange,
+  inTodayList,
 }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
@@ -204,6 +212,12 @@ export default function CookedLogModal({
               />
             </button>
           </div>
+        )}
+        {/* 今日の献立に入っている料理だけ、記録すると外れることを先に伝える(便CI/R02) */}
+        {inTodayList && (
+          <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+            {ja.detail.cookedTodayListNote}
+          </p>
         )}
         <div className="mt-[var(--space-md)] flex gap-2">
           <button

@@ -1162,7 +1162,13 @@ function RecipeFormInner() {
 
   const remove = async () => {
     if (editId === undefined) return
-    if (!window.confirm(ja.form.confirmDelete)) return
+    // 削除で巻き添えになるもの(作った記録・記録写真)の件数を確認文に入れる(規約F・便CI/C01)。
+    // cookedLogsはRecipe埋め込み配列なのでloadedRecipeから同期的に数えられる
+    const logs = loadedRecipe?.cookedLogs ?? []
+    const confirmText = ja.form.confirmDelete
+      .replace('{n}', String(logs.length))
+      .replace('{p}', String(logs.filter((log) => log.photo).length))
+    if (!window.confirm(confirmText)) return
     await deleteRecipe(editId)
     clearDraft()
     dirtyRef.current = false
