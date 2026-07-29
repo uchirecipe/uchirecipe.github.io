@@ -4583,8 +4583,9 @@ try {
       await assign('肉じゃが')
       await assign('ポテトサラダ')
       check(
-        'MEALPLAN-09(B) 主菜(和食)と副菜(洋食)が食い違う枠に「ジャンル混在」バッジが出る',
-        (await mp9Page.getByText('ジャンル混在', { exact: true }).count()) >= 1,
+        // 2026-07-30 便CH/C12: バッジ文言を平易な「主菜と別ジャンル」に変えた
+        'MEALPLAN-09(B) 主菜(和食)と副菜(洋食)が食い違う枠に「主菜と別ジャンル」バッジが出る',
+        (await mp9Page.getByText('主菜と別ジャンル', { exact: true }).count()) >= 1,
       )
 
       // (A) 火曜: 主菜=カレーライス(一品もの)を手動で入れる(次の先頭の未定=火曜の主菜)
@@ -4911,6 +4912,26 @@ try {
         'PASTLOG-01 月カレンダーに「記録あり」小マークが出る',
         (await plPage.locator('[aria-label="記録あり"]').count()) >= 1,
       )
+      // 2026-07-30 便CH/C3: 写真モードでは記録の印が出るのに、数字モードに切り替えると
+      // 印ごと消えていた(同じ画面で「記録はある/数字には無い」が同居して見える)。
+      // 便CH/C8: 家族の実支出(作った人数ぶん)は内訳を開かずに読めるところへ上げた
+      await plPage.getByRole('button', { name: '食費', exact: true }).click()
+      await plPage.waitForTimeout(400)
+      check(
+        'PASTLOG-01(便CH/C3) 食費モードに切り替えても作った記録の日に「作った記録あり」が残る',
+        (await plPage
+          .locator(`button[data-date="${plYesterday}"][aria-label*="作った記録あり"]`)
+          .count()) === 1,
+      )
+      const plMonthText = (await plPage.textContent('body')) ?? ''
+      check(
+        'PASTLOG-01(便CH/C8) 月間サマリーに「作った記録（過ぎた日）は、作った人数ぶんで…」が常設で出る',
+        /作った記録（過ぎた日）は、作った人数ぶんで約[\d,]+円（のべ\d+食分）/.test(plMonthText),
+        `本文=${plMonthText.match(/作った記録（過ぎた日）[^。]{0,40}/)?.[0]}`,
+      )
+      // 以降の「記録あり」マーク経由のタップのため写真モードへ戻す
+      await plPage.getByRole('button', { name: '写真', exact: true }).click()
+      await plPage.waitForTimeout(400)
       // 「記録あり」マークの付いた日(=昨日)をタップ→日モーダルに作った記録が出る
       await plPage
         .locator('button', { has: plPage.locator('[aria-label="記録あり"]') })
@@ -5163,8 +5184,9 @@ try {
         !/1食あたり 約[\d,]+円/.test(rcFutureText),
       )
       check(
-        'MEALPLAN-07(便CA) 未来だけの期間には「作った記録の食費（全体）」を出さない',
-        !rcFutureText.includes('作った記録の食費（全体）'),
+        // 2026-07-30 便CH/C8: ラベルを「作った記録の食費（作った人数ぶん）」に言い換えた
+        'MEALPLAN-07(便CA) 未来だけの期間には「作った記録の食費（作った人数ぶん）」を出さない',
+        !rcFutureText.includes('作った記録の食費（作った人数ぶん）'),
       )
       check(
         'MEALPLAN-07(便CA①) 「期間内に摂取できた栄養（1人分）」が8項目で出る',
@@ -5229,11 +5251,12 @@ try {
         `内訳=${rcPastText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
-        'MEALPLAN-07(便CA) オーナー指示で残す「作った記録の食費（全体）約◯円（◯食分）」が出る',
+        // 2026-07-30 便CH/C8: 「全体」→「作った人数ぶん」・「◯食分」→「のべ◯食分」
+        'MEALPLAN-07(便CA) オーナー指示で残す「作った記録の食費（作った人数ぶん）約◯円（のべ◯食分）」が出る',
         rcPastText.includes(
-          `作った記録の食費（全体）約${rcSingleCost.toLocaleString()}円（${rcServings}食分）`,
+          `作った記録の食費（作った人数ぶん）約${rcSingleCost.toLocaleString()}円（のべ${rcServings}食分）`,
         ),
-        `全体=${rcPastText.match(/作った記録の食費（全体）約[\d,]+円（\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
+        `全体=${rcPastText.match(/作った記録の食費（作った人数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品を、1食ずつ足しためやすです」',
@@ -5904,6 +5927,33 @@ try {
         (await mePage.getByRole('button', { name: '月', exact: true }).getAttribute('aria-pressed')) ===
           'true',
       )
+      // 2026-07-30 便CH/C13: 重ね窓をEscape・端末の戻るで1枚ずつ閉じる。
+      // 従来はどちらでも閉じず、戻ると献立画面ごとレシピ一覧へ離脱していた(見ていた月も失われる)
+      await mePage.keyboard.press('Escape')
+      await mePage.waitForTimeout(400)
+      check(
+        'MEALPLAN-A3B3(便CH/C13) ピッカーはEscapeで閉じる',
+        (await mePage.getByRole('heading', { name: 'レシピを選ぶ' }).count()) === 0,
+      )
+      check(
+        'MEALPLAN-A3B3(便CH/C13) ピッカーを閉じても下の日モーダルは開いたまま残る',
+        await meModal.isVisible(),
+      )
+      await mePage.goBack()
+      await mePage.waitForTimeout(500)
+      check(
+        'MEALPLAN-A3B3(便CH/C13) 端末の戻るでは日モーダルだけが閉じ、月タブから離脱しない',
+        !(await meModal.isVisible()) &&
+          mePage.url().includes('/meal-plan') &&
+          (await mePage.getByRole('button', { name: '月', exact: true }).getAttribute('aria-pressed')) ===
+            'true',
+        `url=${mePage.url()}`,
+      )
+      // 続きの検証のため、日モーダル→ピッカーを開き直す
+      await mePage.locator(`button[data-date="${meDate}"]`).click()
+      await mePage.waitForTimeout(400)
+      await meModal.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await mePage.waitForTimeout(400)
       await mePage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
       await mePage.waitForTimeout(300)
       await mePage.getByRole('button', { name: /肉じゃが/ }).first().click()
@@ -5964,6 +6014,20 @@ try {
         'MEALPLAN-A3B3(B-3) 内訳は既定で畳まれている(カレンダーを押し下げない)',
         !meBodyAfter.includes('内訳 作った記録'),
       )
+      // 2026-07-30 便CH/C4: 「1人あたり1日」の分母は月の日数。期間カードと違って日数の
+      // 文脈が無く、経過日数と勘違いされていたので月では分母を言い切る
+      const meMonthDays = new Date(meNext.getFullYear(), meNext.getMonth() + 1, 0).getDate()
+      check(
+        'MEALPLAN-A3B3(便CH/C4) 「1人あたり1日」の分母(月の日数)を文言で言い切る',
+        new RegExp(
+          `${meNext.getMonth() + 1}月の${meMonthDays}日で割ると 1人あたり1日 約[\\d,]+円`,
+        ).test(meBodyAfter),
+        `本文=${meBodyAfter.match(/\d+月の\d+日で割ると[^。]{0,30}/)?.[0]}`,
+      )
+      check(
+        'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにしためやすか)を常設で出す',
+        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算しためやすです'),
+      )
       await mePage.getByRole('button', { name: '内訳を見る' }).click()
       await mePage.waitForTimeout(300)
       const meBodyOpen = (await mePage.textContent('body')) ?? ''
@@ -5975,7 +6039,9 @@ try {
       )
       check(
         'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・めやす」の但し書きを外さない',
-        meBodyOpen.includes('概算') && meBodyOpen.includes('材料に価格を入力したレシピだけが計算対象です'),
+        // 2026-07-30 便CH/C2: 注記の文言を実装どおり(目安価格で自動計算している)に直した
+        meBodyOpen.includes('概算') &&
+          meBodyOpen.includes('食材の目安価格で自動計算しています'),
       )
       // A-3: 月の窓から削除もできる(データごと消える)
       await mePage.locator(`button[data-date="${meDate}"]`).click()
@@ -6418,11 +6484,13 @@ try {
       const fmPrefix = `${fmNextAnchor.getFullYear()}-${String(fmNextAnchor.getMonth() + 1).padStart(2, '0')}`
       const fmLastDay = new Date(fmNextAnchor.getFullYear(), fmNextAnchor.getMonth() + 1, 0).getDate()
       const fmManualDate = `${fmPrefix}-10`
+      // 2026-07-30 便CH/C10: 「外食」とメモを書いた日は一括提案で埋めない
+      const fmNoteDate = `${fmPrefix}-15`
 
       await fmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fmPage.waitForTimeout(1800) // 初回シード完了待ち
       const fmManualId = await fmPage.evaluate(
-        (manualDate) =>
+        ([manualDate, noteDate]) =>
           new Promise((resolve, reject) => {
             const req = indexedDB.open('uchi-recipe')
             req.onsuccess = () => {
@@ -6435,11 +6503,15 @@ try {
                   reject(new Error('seed recipe not found'))
                   return
                 }
-                const wtx = idb.transaction(['mealPlans', 'settings'], 'readwrite')
+                const wtx = idb.transaction(['mealPlans', 'settings', 'dayNotes'], 'readwrite')
                 // 手動で入れた1枠(上書きされないことの確認用)
                 wtx
                   .objectStore('mealPlans')
                   .add({ date: manualDate, slot: 'dinner', recipeId: manual.id, role: 'main' })
+                // その日のメモがある日(便CH/C10: 一括提案の対象外になることの確認用)
+                wtx
+                  .objectStore('dayNotes')
+                  .put({ date: noteDate, text: '外食', updatedAt: Date.now() })
                 const settings = wtx.objectStore('settings')
                 const getReq = settings.get(1)
                 getReq.onsuccess = () => {
@@ -6458,7 +6530,7 @@ try {
             }
             req.onerror = () => reject(req.error)
           }),
-        fmManualDate,
+        [fmManualDate, fmNoteDate],
       )
       await fmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await fmPage.reload({ waitUntil: 'networkidle' })
@@ -6499,8 +6571,21 @@ try {
       const fmFilledDays = new Set(fmMonthPlans.map((e) => e.date))
       check(
         'MEALPLAN-A5 翌月のほぼ全日に献立が入る(週の7日ではなく月レンジで動く)',
-        fmFilledDays.size >= fmLastDay - 1,
+        // 2026-07-30 便CH/C10: メモを書いた1日は対象外なので、埋まるのは最大でも「月の日数-1」
+        fmFilledDays.size >= fmLastDay - 2,
         `days=${fmFilledDays.size}/${fmLastDay}`,
+      )
+      // 2026-07-30 便CH/C10: 「外食」とメモを書いた日は埋めない。しかも黙って飛ばさず
+      // 確認文にも「メモを書いた◯日には入れません」と書く
+      check(
+        'MEALPLAN-A5(便CH/C10) メモを書いた日には献立を入れない(外食の日を勝手に埋めない)',
+        !fmFilledDays.has(fmNoteDate),
+        `noteDate=${fmNoteDate} filled=${fmFilledDays.has(fmNoteDate)}`,
+      )
+      check(
+        'MEALPLAN-A5(便CH/C10) メモの日を外したことを確認文に書く',
+        fmConfirmMsg.includes('メモを書いた1日には入れません'),
+        `confirm=${fmConfirmMsg}`,
       )
       const fmManualSlot = fmMonthPlans.filter(
         (e) => e.date === fmManualDate && (e.role ?? 'main') === 'main',
@@ -6523,6 +6608,47 @@ try {
         ),
         `body=${((await fmPage.textContent('body')) ?? '').slice(0, 120)}`,
       )
+      // 2026-07-30 便CH/C1: 2回目に押しても、自動で入れた献立を総入れ替えしない(非破壊)。
+      // 従来は確認文が「今ある献立と作った記録は消えません」と言いながら自動分を全部消して
+      // 振り直していた(規約F違反・買い物を済ませた後だと取り消せない)
+      fmConfirmMsg = ''
+      const fmBefore = fmMonthPlans
+        .map((e) => `${e.date}|${e.slot}|${e.role ?? 'main'}|${e.recipeId}`)
+        .sort()
+      await fmPage.getByRole('button', { name: '未定の日をまとめて提案' }).click()
+      await fmPage.waitForTimeout(2500)
+      const fmAfterSecond = await fmPage.evaluate(
+        (prefix) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () =>
+                resolve(
+                  g.result
+                    .filter((e) => e.date.startsWith(prefix))
+                    .map((e) => `${e.date}|${e.slot}|${e.role ?? 'main'}|${e.recipeId}`)
+                    .sort(),
+                )
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        fmPrefix,
+      )
+      check(
+        'MEALPLAN-A5(便CH/C1) 2回目を押しても1品も消えない・入れ替わらない(総入れ替えしない)',
+        fmBefore.every((row) => fmAfterSecond.includes(row)),
+        `before=${fmBefore.length}品 after=${fmAfterSecond.length}品 消えた=${
+          fmBefore.filter((row) => !fmAfterSecond.includes(row)).length
+        }品`,
+      )
+      check(
+        'MEALPLAN-A5(便CH/C10) 2回目でもメモを書いた日は空のまま',
+        !fmAfterSecond.some((row) => row.startsWith(`${fmNoteDate}|`)),
+      )
+
       // BH-2の回帰: 同じ食事に入った主菜と副菜のジャンル(和食/洋食/中華)が食い違わない
       const fmGenres = ['和食', '洋食', '中華']
       const fmTagsById = new Map(fmData.recipes.map((r) => [r.id, r.tags ?? []]))

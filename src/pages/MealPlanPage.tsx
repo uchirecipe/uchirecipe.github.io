@@ -97,6 +97,7 @@ import {
   estimateRecipeCost,
   sumMealPlanEntriesCost,
   pricelessIngredientNames,
+  pricelessIngredientNamesOfRecipes,
 } from '../logic/priceEstimate'
 import {
   roundNutrient,
@@ -106,6 +107,7 @@ import {
 } from '../logic/nutrition'
 import {
   summarizeRangeIntake,
+  rangeIntakeRecipes,
   dayIntakeMap,
   type DayIntake,
   type RangeCookedDish,
@@ -114,6 +116,7 @@ import {
 } from '../logic/rangeSummary'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import type {
   CookedLog,
   DayNote,
@@ -613,17 +616,29 @@ function MonthDayCell({
         : stat
           ? 'border-edge bg-surface text-ink'
           : 'border-dashed border-edge bg-surface text-ink-muted'
+    // 2026-07-30 便CH/C3: 「作った記録あり」の印は表示モードに関わらず出す。
+    // 写真モードだけに出していたため、食費/栄養に切り替えると印が消え、今日のように
+    // 数字が予定側で計算される日は「記録が無かったこと」になって見えていた
+    const ariaLabel = `${ariaTemplate.replace('{d}', String(dayNum)).replace('{v}', value ?? '')}${
+      hasLog ? ` ${ja.mealPlan.monthDayStatAriaLogged}` : ''
+    }`
     return (
       <button
         type="button"
         data-date={date}
         onClick={onClick}
-        aria-label={ariaTemplate.replace('{d}', String(dayNum)).replace('{v}', value ?? '')}
+        aria-label={ariaLabel}
         // baseのjustify-centerとぶつからないよう、数字セルはここで独立したクラス列を組む
         className={`relative flex aspect-square flex-col items-center justify-between overflow-hidden rounded-sm border py-1 text-sm ${tone}`}
       >
         {isToday && (
           <span className="absolute inset-0 rounded-sm ring-2 ring-inset ring-accent" aria-hidden />
+        )}
+        {/* 作った記録の印(便CH/C3)。メモの点と同じ「小さな印」の作法で、位置だけ左上に分ける */}
+        {hasLog && (
+          <span aria-hidden className="absolute left-0.5 top-0.5 text-accent">
+            <Check size={10} strokeWidth={3} aria-hidden />
+          </span>
         )}
         <span
           aria-hidden
@@ -1042,15 +1057,25 @@ export default function MealPlanPage() {
     }
     void updateSettings({ visibleMealSlots: next })
   }
+  /**
+   * レシピID→レシピ（すでに登録されている献立・記録を「表示する／数える」ための引き当て表）。
+   *
+   * 2026-07-30 便CH/C7: ここは hideStarters（設定「基本レシピを一覧に表示しない」）を**反映しない**。
+   * 反映していたときは、設定をONにすると登録済みの献立が月間サマリー・月セル・献立表・週/日タブ・
+   * 概算食費から丸ごと消えていた（記録側は全レシピで引くので残り、同じ画面で扱いが食い違っていた）。
+   * 設定の文言は「一覧に表示しない」で、登録済みの予定を消すとは書いていない＝約束を超えた挙動だった。
+   * 切り分けは「選ぶ／提案する対象＝visibleRecipes（hideStarters反映）」「登録済みを表示・集計する
+   * 対象＝全レシピ」。ピッカー(searchRecipes)と自動提案(suggestForSlot/suggestPairForSlot)は
+   * visibleRecipes のままなので、設定の本来の意図（一覧・提案に出さない）は変わらない。
+   */
   const recipeById = useMemo(() => {
     const map = new Map<number, Recipe>()
-    visibleRecipes.forEach((r) => map.set(r.id!, r))
+    ;(recipes ?? []).forEach((r) => map.set(r.id!, r))
     return map
-  }, [visibleRecipes])
+  }, [recipes])
 
   // S-1 月セルの未来日プレビュー(2026-07-25 便BU・docs/59): 日付→その日の予定を表す短い文字列。
   // 代表の主菜名(夕食を優先→他の帯の主菜)を出し、主菜が特定できない日は「◯件」に倒す。
-  // recipeByIdはhideStarters反映済みなので、隠したレシピ由来の枠は件数側に倒れる。
   // 実際に出すのは呼び出し側でshowPlanDot(今日・未来日)の日だけ＝過去日の写真日記(便BS)は触らない
   const monthDayPreview = useMemo(() => {
     const byDate = new Map<string, MealPlanEntry[]>()
@@ -1060,11 +1085,16 @@ export default function MealPlanPage() {
       else byDate.set(e.date, [e])
     })
     const map = new Map<string, string>()
+    // 代表は「夕食の主菜 → ほかの帯の主菜 → 夕食の品 → その日の最初の品」の順に選ぶ。
+    // 2026-07-30 便CH/C15: 主菜が無い日（作り置きの副菜だけ・主菜を消した日）を「◯件」に
+    // 倒していたため、月表で先の予定が読めるという狙いがその日だけ効かなくなっていた
+    const pickRepresentative = (list: MealPlanEntry[]) =>
+      list.find((e) => e.slot === 'dinner') ?? list[0]
     byDate.forEach((dayEntries, date) => {
       const mains = dayEntries.filter((e) => (e.role ?? 'main') === 'main')
-      const rep = mains.find((e) => e.slot === 'dinner') ?? mains[0]
+      const rep = mains.length > 0 ? pickRepresentative(mains) : pickRepresentative(dayEntries)
       const title = rep ? recipeById.get(rep.recipeId)?.title : undefined
-      map.set(date, title ?? `${dayEntries.length}件`)
+      map.set(date, title ?? ja.mealPlan.monthDayPlanCount.replace('{n}', String(dayEntries.length)))
     })
     return map
   }, [monthEntries, recipeById])
@@ -1079,8 +1109,8 @@ export default function MealPlanPage() {
   // 表示中の月の「作った記録」と「登録した献立」を、期間集計・セル表示の共通入力の形に整える
   // (2026-07-28 便CA)。monthEntries(表示中の月のカレンダー内)から作るため「月をまたぐ期間は
   // 月表示範囲内に限定してよい」の仕様を自然に満たす(月をまたぐ選択自体はmonthAnchor変更時の
-  // リセットで防止済み)。記録側はhideStartersに関わらず全レシピ(実際に作った履歴のため)、
-  // 予定側はrecipeById(hideStarters反映済み)を使う=従来の集計と同じ対象範囲
+  // リセットで防止済み)。記録側・予定側とも全レシピで引く(2026-07-30 便CH/C7。設定
+  // 「基本レシピを一覧に表示しない」で登録済みの予定が集計から消えるのを直した=recipeById参照)
   const monthCookedDishes = useMemo(() => {
     const prefix = monthAnchor.slice(0, 7)
     const out: RangeCookedDish[] = []
@@ -1140,6 +1170,39 @@ export default function MealPlanPage() {
   )
   const monthSummaryDishCount = monthSummary.actual.dishCount + monthSummary.plan.dishCount
   const monthPersonalPerDay = Math.round(monthSummary.personalYen / monthDatesList.length)
+  /**
+   * 「価格が分からない材料◯種類を除いた概算です」の件数（2026-07-30 便CH/C2・C4）。
+   * 週の概算食費にだけ入っていた注記（便CD/MP-11）を、月間サマリーと期間カードにも同じ作法で出す
+   * ＝どの画面でも「この金額に何が入っていないか」が分かるようにする。
+   * 数える対象は合計と同じ料理（rangeIntakeRecipes＝過ぎた日は作った記録・今日から先は登録した献立）。
+   */
+  const monthPricelessCount = useMemo(
+    () =>
+      pricelessIngredientNamesOfRecipes(
+        rangeIntakeRecipes({
+          start: monthDatesList[0],
+          end: monthDatesList[monthDatesList.length - 1],
+          today,
+          cooked: monthCookedDishes,
+          planned: monthPlannedDishes,
+        }),
+        priceIndex,
+      ).length,
+    [monthDatesList, today, monthCookedDishes, monthPlannedDishes, priceIndex],
+  )
+  const rangePricelessCount = useMemo(() => {
+    if (rangeStart == null || rangeEnd == null) return 0
+    return pricelessIngredientNamesOfRecipes(
+      rangeIntakeRecipes({
+        start: rangeStart,
+        end: rangeEnd,
+        today,
+        cooked: monthCookedDishes,
+        planned: monthPlannedDishes,
+      }),
+      priceIndex,
+    ).length
+  }, [rangeStart, rangeEnd, today, monthCookedDishes, monthPlannedDishes, priceIndex])
   // 内訳(8項目の栄養・実績/予定の分解・作った記録の全体食費)は既定で畳んでおく。
   // 常設カードが画面上部を占領してカレンダーを押し下げないようにするため(数字自体は畳んでも見える)
   const [monthSummaryOpen, setMonthSummaryOpen] = useState(false)
@@ -1634,10 +1697,17 @@ export default function MealPlanPage() {
     // 手動主菜だけの枠には主菜のジャンルに揃えた副菜を足す(主菜が一品ものなら副菜は足さない)。
     for (const { date, slot, fillRole } of plan.partialFills) {
       if (fillRole === 'side') {
-        const manualMain = rangeEntries.find(
-          (e) => e.date === date && e.slot === slot && (e.role ?? 'main') === 'main' && !e.auto,
+        // その枠に残る主菜（この後も消えないもの）。手動配置だけでなく、keepAuto=trueで
+        // 保護される自動配置の主菜も見る（2026-07-30 便CH/C1。月の一括提案を2回目に押したとき、
+        // カレー等の一品ものの主菜が自動配置だと「主菜なし」と見なされ、副菜が足されていた）
+        const existingMain = rangeEntries.find(
+          (e) =>
+            e.date === date &&
+            e.slot === slot &&
+            (e.role ?? 'main') === 'main' &&
+            !(e.id != null && plan.autoEntryIdsToRemove.includes(e.id)),
         )
-        const mainRecipe = manualMain ? recipeById.get(manualMain.recipeId) : undefined
+        const mainRecipe = existingMain ? recipeById.get(existingMain.recipeId) : undefined
         if (mainRecipe && isOneDish(mainRecipe)) continue // 一品ものの主菜には副菜を足さない
         const side = suggestForSlot(visibleRecipes, {
           ...baseOpts,
@@ -1744,11 +1814,16 @@ export default function MealPlanPage() {
    * 対象範囲だけ表示中の月まるごとに広げたもの。提案の質（日単位のジャンル統一・たんぱく源の分散・
    * 一品ものの日は副菜を空ける）は週と同じロジックを共有するので食い違わない。
    *
-   * 週と違うのは2点だけ:
+   * 週と違うのは3点:
    *  ①一度に数十枠を触るので、実行前に必ず確認を出す（規約F: 何日分・何食分を埋めるか＝入るもの、
    *    すでに決まっている献立と作った記録は消えない＝残るもの、を件数つきで書く）
    *  ②結果は必ず出す。しかも「立てるつもりだった数」ではなく**実際に入れられた品数**で報告する
    *    （便CD/MP-06の正直な完了報告と同じ作法。一品ものスキップ・候補切れで数は必ず減りうる）
+   *  ③keepAuto=true（2026-07-30 便CH/C1）。このボタンは「まだ決まっていない日に入れる」としか
+   *    約束していないので、自動提案で入った献立も消さない＝完全に非破壊にする。2回目に押すと
+   *    埋まっている月は「新しく立てられる日がありませんでした」で終わり、確認文の
+   *    「今ある献立と作った記録は消えません」がそのまま真になる。振り直したい人は週タブの
+   *    「まとめて献立を立てる」（再抽選・2026-07-14確定仕様）を使う。
    */
   const fillMonth = async () => {
     if (!recipes) return
@@ -1757,14 +1832,48 @@ export default function MealPlanPage() {
       setMessage(ja.mealPlan.noSuggestion)
       return
     }
-    const plan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today)
+    const rawPlan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today, {
+      keepAuto: true,
+      // メモを書いた日（外食・実家に帰る 等）は埋めない（2026-07-30 便CH/C10）。
+      // 日付メモは「この日は献立が要らない」を表せる唯一の手段なのに一括提案が無視しており、
+      // 外食の日の分まで月の食費・栄養に乗っていた
+      skipDates: (monthDayNotes ?? []).map((n) => n.date),
+    })
+    // 一品もの（カレー・丼・麺）の主菜が残る枠は副菜を足さない＝はじめから対象に数えない
+    // （2026-07-30 便CH/C1。executeFill側は元から足さないので、確認文だけが「◯食分に入れます」と
+    //  多めの数を言っていた。keepAutoで自動配置の主菜も残るようになり、2回目のタップで
+    //  この食い違いが必ず表に出るため、数える段階でそろえる＝規約Fの件数を実態に合わせる）
+    const plan = {
+      ...rawPlan,
+      partialFills: rawPlan.partialFills.filter((p) => {
+        if (p.fillRole !== 'side') return true
+        const keptMain = (monthEntries ?? []).find(
+          (e) =>
+            e.date === p.date &&
+            e.slot === p.slot &&
+            (e.role ?? 'main') === 'main' &&
+            !(e.id != null && rawPlan.autoEntryIdsToRemove.includes(e.id)),
+        )
+        const mainRecipe = keptMain ? recipeById.get(keptMain.recipeId) : undefined
+        return !(mainRecipe && isOneDish(mainRecipe))
+      }),
+    }
     const preserved = plan.preservedSlotKeys.size
     const targetSlots = [...plan.slotsToFill, ...plan.partialFills]
+    // メモの日を外したことは、入れる前にも入れた後にも必ず言う（黙って飛ばさない）
+    const noteSkipped =
+      plan.skippedDates.length > 0
+        ? ja.mealPlan.fillMonthNoteSkipped.replace('{n}', String(plan.skippedDates.length))
+        : ''
+    // トーストは既存の作法どおり半角スペースでつなぐ（確認文は文中に差し込むので noteSkipped をそのまま使う）
+    const withNoteSkipped = (text: string) => (noteSkipped ? `${text} ${noteSkipped}` : text)
     if (targetSlots.length === 0) {
       setMessage(
-        preserved > 0
-          ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
-          : ja.mealPlan.fillMonthNoAdded,
+        withNoteSkipped(
+          preserved > 0
+            ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
+            : ja.mealPlan.fillMonthNoAdded,
+        ),
       )
       return
     }
@@ -1775,22 +1884,27 @@ export default function MealPlanPage() {
       .replace('{d}', String(targetDayCount))
       .replace('{s}', String(targetSlots.length))
       .replace('{k}', String(preserved))
+      .replace('{note}', noteSkipped)
     if (!window.confirm(confirmText)) return
     const added = await executeFill(plan, monthEntries ?? [])
     // 正直な完了報告: 実際にDBへ入った品数で出し分ける
     if (added > 0) {
       setMessage(
-        preserved > 0
-          ? ja.mealPlan.fillMonthKeptManual
-              .replace('{n}', String(preserved))
-              .replace('{a}', String(added))
-          : ja.mealPlan.fillMonthDone.replace('{a}', String(added)),
+        withNoteSkipped(
+          preserved > 0
+            ? ja.mealPlan.fillMonthKeptManual
+                .replace('{n}', String(preserved))
+                .replace('{a}', String(added))
+            : ja.mealPlan.fillMonthDone.replace('{a}', String(added)),
+        ),
       )
     } else {
       setMessage(
-        preserved > 0
-          ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
-          : ja.mealPlan.fillMonthNoAdded,
+        withNoteSkipped(
+          preserved > 0
+            ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
+            : ja.mealPlan.fillMonthNoAdded,
+        ),
       )
     }
   }
@@ -1916,11 +2030,18 @@ export default function MealPlanPage() {
       visibleSlots,
     })
     if (plan.ops.length === 0) {
-      // 「全部埋まっていて入る余地が無い」と「選んだ曜日にテンプレの中身が無い」を出し分ける
+      // 入らなかった理由を3つに言い分ける(2026-07-30 便CH/C14で「表示していない食事」を追加)。
+      // 従来は表示していない食事のテンプレを流し込むと「選んだ曜日には、このテンプレの献立が
+      // ありません」と出ていたが、同じ窓の曜日チップには「木 1品」と出ており矛盾していた
       setMessage(
         plan.keptSlotCount > 0
           ? ja.mealPlan.templateApplyNoRoom.replace('{n}', String(plan.keptSlotCount))
-          : ja.mealPlan.templateApplyNoItems,
+          : plan.hiddenSlots.length > 0
+            ? ja.mealPlan.templateApplyHiddenSlots.replaceAll(
+                '{slots}',
+                plan.hiddenSlots.map((s) => ja.mealPlan.slot[s]).join('・'),
+              )
+            : ja.mealPlan.templateApplyNoItems,
       )
       return
     }
@@ -2384,6 +2505,88 @@ export default function MealPlanPage() {
   ]
   const conditionsSummary = activeConditionSummaries.filter((v): v is string => Boolean(v)).join('・')
 
+  /**
+   * 自動提案の条件（時短優先・ジャンル・高たんぱく優先）の折りたたみ。
+   * 2026-07-30 便CH/C11: 週タブの中にしか無かったが、この3つの条件は月タブの
+   * 「未定の日をまとめて提案」にも100%効いている（executeFillが同じ値を読む）。
+   * 月から条件が見えず変えられないため、「なぜ月が全部中華になったのか」が画面から分からなかった。
+   * 同じ部品を週・月の両方で出す＝どちらから見ても今の条件が分かり、その場で変えられる。
+   */
+  const renderSuggestConditions = () => (
+    <div className="mt-[var(--space-sm)]">
+      <button
+        type="button"
+        onClick={() => setSuggestConditionsOpen((v) => !v)}
+        aria-expanded={suggestConditionsOpen}
+        className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+      >
+        {ja.mealPlan.suggestConditionsToggle}
+        {!suggestConditionsOpen && conditionsSummary ? `: ${conditionsSummary}` : ''}
+        {suggestConditionsOpen ? (
+          <ChevronUp size={16} aria-hidden />
+        ) : (
+          <ChevronDown size={16} aria-hidden />
+        )}
+      </button>
+
+      {suggestConditionsOpen && (
+        <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+          <button
+            type="button"
+            onClick={() => setQuickOnly((v) => !v)}
+            aria-pressed={quickOnly}
+            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+              quickOnly
+                ? 'border-accent bg-accent text-on-accent'
+                : 'border-edge bg-surface text-ink-muted'
+            }`}
+          >
+            {ja.mealPlan.quickOnlyToggle}
+          </button>
+          <button
+            type="button"
+            onClick={() => setGenreFilter(undefined)}
+            aria-pressed={genreFilter === undefined}
+            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+              genreFilter === undefined
+                ? 'border-accent bg-accent text-on-accent'
+                : 'border-edge bg-surface text-ink-muted'
+            }`}
+          >
+            {ja.mealPlan.genreAny}
+          </button>
+          {MEAL_GENRES.map((genre) => (
+            <button
+              key={genre}
+              type="button"
+              onClick={() => setGenreFilter(genre)}
+              aria-pressed={genreFilter === genre}
+              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                genreFilter === genre
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              {genre}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setPreferHighProtein((v) => !v)}
+            aria-pressed={preferHighProtein}
+            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+              preferHighProtein
+                ? 'border-accent bg-accent text-on-accent'
+                : 'border-edge bg-surface text-ink-muted'
+            }`}
+          >
+            {ja.mealPlan.preferHighProteinToggle}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
   /** 表示する食事帯トグル（日タブ・週タブで共用。便U-2: 既存visibleMealSlotsを日タブにも適用） */
   const renderSlotFilter = () => (
     <>
@@ -2408,15 +2611,13 @@ export default function MealPlanPage() {
     </>
   )
 
-  // 月タブの日タップモーダルはEscapeキーでも閉じる(CookedLogModalと同じ作法)
-  useEffect(() => {
-    if (!dayModalDate) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDayModalDate(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [dayModalDate])
+  // 重ね窓はEscapeキーと端末の「戻る」で1枚ずつ閉じる(2026-07-30 便CH/C13)。
+  // 日モーダルはEscapeだけ対応済みだったので戻るにも広げ、便CB-1/CB-2で増えた
+  // ピッカー・テンプレの窓（どちらも未対応で、戻るとレシピ一覧へ離脱していた）も同じ作法に揃える
+  useOverlayDismiss(dayModalDate != null, () => setDayModalDate(null))
+  useOverlayDismiss(pickerOpen, () => closePicker())
+  useOverlayDismiss(templateSaveOpen, () => setTemplateSaveOpen(false))
+  useOverlayDismiss(templateApplyScope != null, () => setTemplateApplyScope(null))
 
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
@@ -2657,7 +2858,14 @@ export default function MealPlanPage() {
                 )}
               </h2>
               {monthSummaryDishCount === 0 ? (
-                <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthSummaryEmpty}</p>
+                // 2026-07-30 便CH/C3: 合計が0品でも「作った記録も献立もまだありません」と
+                // 言い切れるのは、その月に作った記録が1件も無いときだけ。今日の記録だけがある月は
+                // カレンダーに記録の印が出ているので、集計に入っていない理由を正直に出す
+                <p className="mt-1 text-sm text-ink-muted">
+                  {monthCookedDishes.length > 0
+                    ? ja.mealPlan.monthSummaryTodayOnly
+                    : ja.mealPlan.monthSummaryEmpty}
+                </p>
               ) : (
                 <>
                   <div className="mt-1 flex flex-wrap items-end gap-x-[var(--space-md)] gap-y-1">
@@ -2679,14 +2887,29 @@ export default function MealPlanPage() {
                       {ja.nutrition.estimateBadge}
                     </span>
                   </div>
+                  {/* 1人あたり1日の分母は「月の日数」。期間カードと違って日数の文脈が無いので、
+                      月では何日で割ったかを文言で言い切る(2026-07-30 便CH/C4) */}
                   <p className="mt-1 text-sm text-ink-muted">
-                    {ja.mealPlan.rangeIntakePersonalCostPerDay.replace(
-                      '{n}',
-                      monthPersonalPerDay.toLocaleString(),
-                    )}
+                    {ja.mealPlan.monthSummaryPersonalCostPerDay
+                      .replace('{m}', String(Number(monthAnchor.slice(5, 7))))
+                      .replace('{d}', String(monthDatesList.length))
+                      .replace('{n}', monthPersonalPerDay.toLocaleString())}
                   </p>
+                  {/* 家族の実支出にあたる「作った記録の全体食費」は内訳に畳まず1行だけ常設で出す
+                      (2026-07-30 便CH/C8)。1人分の見出しと並ぶので、いつの分か・何人分かを言い切る */}
+                  {monthSummary.cookedMealCount > 0 && (
+                    <p className="mt-0.5 text-sm text-ink-muted">
+                      {ja.mealPlan.monthSummaryHousehold
+                        .replace('{yen}', monthSummary.cookedHouseholdYen.toLocaleString())
+                        .replace('{n}', String(monthSummary.cookedMealCount))}
+                    </p>
+                  )}
                   {/* どの日をどちらの基準で数えたかは、期間の集計カードと同じ文言で必ず出す */}
                   <p className="mt-0.5 text-xs text-ink-muted">{intakeBasisText(monthSummary)}</p>
+                  {/* 数字の前提(何をもとにしためやすか)も同じ場所に置く(2026-07-30 便CH/C12) */}
+                  <p className="mt-0.5 text-xs text-ink-muted">
+                    {ja.mealPlan.monthSummaryEstimateNote}
+                  </p>
                   <button
                     type="button"
                     onClick={() => setMonthSummaryOpen((v) => !v)}
@@ -2717,22 +2940,21 @@ export default function MealPlanPage() {
                           .replace('{p}', monthSummary.plan.personalYen.toLocaleString())
                           .replace('{pn}', String(monthSummary.plan.dishCount))}
                       </p>
-                      {/* 作った食数の合算(全体食費)はオーナー指示で残す。家族全員分の金額と延べ食数 */}
-                      {monthSummary.cookedMealCount > 0 && (
-                        <>
-                          <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
-                            {ja.mealPlan.rangeIntakeHouseholdLabel}
-                          </p>
-                          <p className="mt-0.5 text-lg font-bold text-accent">
-                            {ja.mealPlan.rangeIntakeHouseholdResult
-                              .replace('{yen}', monthSummary.cookedHouseholdYen.toLocaleString())
-                              .replace('{n}', String(monthSummary.cookedMealCount))}
-                          </p>
-                        </>
-                      )}
+                      {/* 作った食数の合算(全体食費)はオーナー指示で残す。2026-07-30 便CH/C8で
+                          カード上部の常設1行へ昇格させたので、内訳では重ねて出さない */}
                       <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
                         {ja.mealPlan.weekCostNote}
                       </p>
+                      {/* 価格が分からない材料の分は1円も入っていない＝この金額の信頼度を月にも出す
+                          (2026-07-30 便CH/C2。週の概算食費にだけ入っていた注記を揃えた) */}
+                      {monthPricelessCount > 0 && (
+                        <p className="mt-1 text-xs text-ink-muted">
+                          {ja.mealPlan.weekCostPriceless.replace(
+                            '{n}',
+                            String(monthPricelessCount),
+                          )}
+                        </p>
+                      )}
                       <Link
                         to="/prices"
                         className="mt-1 inline-block text-xs font-bold text-accent underline"
@@ -2771,6 +2993,11 @@ export default function MealPlanPage() {
                 </button>
               ))}
             </div>
+
+            {/* 自動提案の条件(2026-07-30 便CH/C11)。この条件は月の「未定の日をまとめて提案」にも
+                そのまま効く(週タブでしか変えられず、月が全部同じジャンルになる理由が
+                画面から分からなかった)。週タブと同じ部品・同じ状態を共有する */}
+            {renderSuggestConditions()}
 
             {/* 月タブの操作(2026-07-29 便CB-2・docs/59)。
                 A-5: この月のまだ決まっていない日に、主菜と副菜をまとめて入れる（実行前に確認）
@@ -2943,6 +3170,12 @@ export default function MealPlanPage() {
                 )}
 
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.weekCostNote}</p>
+                {/* 期間カードにも同じ信頼度の注記を出す(2026-07-30 便CH/C2) */}
+                {rangePricelessCount > 0 && (
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.weekCostPriceless.replace('{n}', String(rangePricelessCount))}
+                  </p>
+                )}
                 <Link
                   to="/prices"
                   className="mt-1 inline-block text-xs font-bold text-accent underline"
@@ -3121,73 +3354,9 @@ export default function MealPlanPage() {
 
       {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
           既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
-          畳んだ状態でも既定値から変わっていればラベルに現在値を出す */}
-      <div className="mt-[var(--space-sm)]">
-        <button
-          type="button"
-          onClick={() => setSuggestConditionsOpen((v) => !v)}
-          aria-expanded={suggestConditionsOpen}
-          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
-        >
-          {ja.mealPlan.suggestConditionsToggle}
-          {!suggestConditionsOpen && conditionsSummary ? `: ${conditionsSummary}` : ''}
-          {suggestConditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
-        </button>
-
-        {suggestConditionsOpen && (
-          <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setQuickOnly((v) => !v)}
-              aria-pressed={quickOnly}
-              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                quickOnly ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.mealPlan.quickOnlyToggle}
-            </button>
-            <button
-              type="button"
-              onClick={() => setGenreFilter(undefined)}
-              aria-pressed={genreFilter === undefined}
-              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                genreFilter === undefined
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.mealPlan.genreAny}
-            </button>
-            {MEAL_GENRES.map((genre) => (
-              <button
-                key={genre}
-                type="button"
-                onClick={() => setGenreFilter(genre)}
-                aria-pressed={genreFilter === genre}
-                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                  genreFilter === genre
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
-              >
-                {genre}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setPreferHighProtein((v) => !v)}
-              aria-pressed={preferHighProtein}
-              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                preferHighProtein
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {ja.mealPlan.preferHighProteinToggle}
-            </button>
-          </div>
-        )}
-      </div>
+          畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
+          2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions) */}
+      {renderSuggestConditions()}
 
       <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
         <button
@@ -3325,6 +3494,8 @@ export default function MealPlanPage() {
                   （{ja.mealPlan.weekCostMealCount.replace('{n}', String(weekMealCount))}）
                 </span>
               </p>
+              {/* 何人ぶんの金額かを言い切る(2026-07-30 便CH/C8。月間サマリーの「1人分」と対にする) */}
+              <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.weekCostWholeNote}</p>
               {/* どの範囲を数えているか(2026-07-29 便CD/MP-07)。過ぎた日は集計から外したので、
                   黙って数字だけ変えずに範囲を明記する */}
               <p className="mt-1 text-sm text-ink-muted">
@@ -3817,6 +3988,14 @@ export default function MealPlanPage() {
                   ))}
                 </ul>
               </div>
+            )}
+            {/* 過ぎた日は「予定を消した」のではなく「表示していないだけ」を月タブにも書く
+                (2026-07-30 便CH/C9(a)。週タブには便CD/MP-07で入っていたが月には無く、
+                作らなかった予定が黙って消えたように見えていた。データは非破壊で残っている) */}
+            {dayModalIsPast && (
+              <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+                {ja.mealPlan.pastPlanHidden}
+              </p>
             )}
             {/* 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。週タブの各日カードと同じ入力欄。
                 過去日にも出す(「この日は外食だった」と後から書き残せるようにするため) */}

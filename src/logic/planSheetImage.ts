@@ -23,8 +23,23 @@ const DAY_FONT = 'bold 42px system-ui, sans-serif'
 const DISH_FONT = '38px system-ui, sans-serif'
 const NOTE_FONT = '34px system-ui, sans-serif'
 const LINE_HEIGHT = { day: 62, dish: 52, note: 48 } as const
-/** 1行が長い場合の最大行数（料理名が多い日でも表が縦に伸びすぎないようにする） */
-const MAX_WRAP_LINES = 2
+/**
+ * 1行が長い場合の最大行数（料理名が多い日でも表が縦に伸びすぎないようにする）。
+ *
+ * 2026-07-30 便CH/C6: 一律2行だったため、料理名の行だけが「…」で打ち切られ、
+ * 画面プレビューと印刷には出ている品が画像からだけ欠けていた（送った先で初めて気づく）。
+ * 献立表は「冷蔵庫に貼る・家族に送る」ためのものなので、料理名は欠けさせない＝dishだけ3行許す。
+ * 全種別を一律に増やさないのは、月シートが31日×3食ぶん縦に伸びるとキャンバス面積が
+ * iOS Safariの上限（約16.7Mpx）に触れ、画像生成そのものが失敗しうるため。
+ */
+export const MAX_WRAP_LINES = { day: 2, dish: 3, note: 2 } as const
+
+/**
+ * 画像1行に入る全角文字数のめやす（38px・折り返し幅920pxをブラウザで実測して26字）。
+ * 描画には使わない（実際の折り返しはCanvasの実測幅で決まる）。料理名が画像から欠けていないかを
+ * 文字数で見張る回帰テスト（scripts/test-logic.mjs）のために公開している。
+ */
+export const IMAGE_WIDE_CHARS_PER_LINE = 26
 
 function fontOf(kind: 'day' | 'dish' | 'note'): string {
   return kind === 'day' ? DAY_FONT : kind === 'dish' ? DISH_FONT : NOTE_FONT
@@ -45,7 +60,7 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
   const wrapCounts = lines.map((line) => {
     measureCtx.font = fontOf(line.kind)
     const width = line.kind === 'day' ? contentWidth : contentWidth - 32
-    return countWrappedLines(measureCtx, line.text, width, MAX_WRAP_LINES)
+    return countWrappedLines(measureCtx, line.text, width, MAX_WRAP_LINES[line.kind])
   })
   const bodyHeight = lines.reduce(
     (sum, line, i) => sum + wrapCounts[i] * LINE_HEIGHT[line.kind] + (line.kind === 'day' ? 8 : 0),
@@ -79,7 +94,7 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
     if (line.kind === 'day') {
       y += 8
       ctx.fillStyle = accent
-      drawWrappedText(ctx, line.text, PAD, y, contentWidth, LINE_HEIGHT.day, MAX_WRAP_LINES)
+      drawWrappedText(ctx, line.text, PAD, y, contentWidth, LINE_HEIGHT.day, MAX_WRAP_LINES.day)
     } else {
       ctx.fillStyle = line.kind === 'note' ? muted : ink
       drawWrappedText(
@@ -89,7 +104,7 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
         y,
         contentWidth - 32,
         LINE_HEIGHT[line.kind],
-        MAX_WRAP_LINES,
+        MAX_WRAP_LINES[line.kind],
       )
     }
     y += wrapCounts[i] * LINE_HEIGHT[line.kind]

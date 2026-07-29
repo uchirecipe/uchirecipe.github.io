@@ -112,6 +112,47 @@ export interface RangeIntakeSummary {
 }
 
 /**
+ * 期間内で実際に数える料理を、規則2（過去=作った記録・今日以降=登録した献立）で切り分ける。
+ * summarizeRangeIntake と rangeIntakeRecipes が同じ料理を見るための共通部品
+ * （集計と、その集計に添える注記が別々の対象を数えることが無いようにするため）。
+ */
+function splitRangeDishes(input: {
+  start: string
+  end: string
+  today: string
+  cooked: RangeCookedDish[]
+  planned: RangePlannedDish[]
+}): { actualDishes: RangeCookedDish[]; planDishes: RangePlannedDish[] } {
+  const { start, end, today, cooked, planned } = input
+  const split = splitRangeByToday(start, end, today)
+  const actual = split.actual
+  const plan = split.plan
+  return {
+    // 過去分: 作った記録だけを数える（過去の予定ベース計算はオーナー指示で廃止）
+    actualDishes:
+      actual == null ? [] : cooked.filter((d) => d.date >= actual.start && d.date <= actual.end),
+    // 今日以降: 登録した献立だけを数える
+    planDishes: plan == null ? [] : planned.filter((d) => d.date >= plan.start && d.date <= plan.end),
+  }
+}
+
+/**
+ * 期間の合計に実際に入れた料理のレシピ一覧（2026-07-30 便CH/C2）。
+ * 「価格が分からない材料◯種類を除いた概算です」の注記を、合計と同じ対象から数えるために使う。
+ * 並びは 作った記録→登録した献立（注記は件数だけを使うので順序に意味は持たせない）。
+ */
+export function rangeIntakeRecipes(input: {
+  start: string
+  end: string
+  today: string
+  cooked: RangeCookedDish[]
+  planned: RangePlannedDish[]
+}): RangeRecipeLike[] {
+  const { actualDishes, planDishes } = splitRangeDishes(input)
+  return [...actualDishes.map((d) => d.recipe), ...planDishes.map((d) => d.recipe)]
+}
+
+/**
  * 期間の「1人が摂取した合計」を、過去=実績・今日以降=予定の規則で集計する（規則1＋規則2）。
  *
  * 渡す cooked / planned は期間外の日が混ざっていてもよい（ここで start〜end に絞る）。
@@ -127,17 +168,7 @@ export function summarizeRangeIntake(input: {
 }): RangeIntakeSummary {
   const { start, end, today, cooked, planned, priceIndex } = input
   const split = splitRangeByToday(start, end, today)
-
-  // 過去分: 作った記録だけを数える（過去の予定ベース計算はオーナー指示で廃止）
-  const actualDishes =
-    split.actual == null
-      ? []
-      : cooked.filter((d) => d.date >= split.actual!.start && d.date <= split.actual!.end)
-  // 今日以降: 登録した献立だけを数える
-  const planDishes =
-    split.plan == null
-      ? []
-      : planned.filter((d) => d.date >= split.plan!.start && d.date <= split.plan!.end)
+  const { actualDishes, planDishes } = splitRangeDishes({ start, end, today, cooked, planned })
 
   const actualCost = sumCookedRecipesCost(actualDishes, priceIndex)
   const actualNutrition = sumPersonalNutrition(actualDishes.map((d) => d.recipe))

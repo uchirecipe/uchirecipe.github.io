@@ -206,11 +206,15 @@ export default function HomePage() {
     return settings?.hideStarters ? allRecipes.filter((r) => !r.isStarter) : allRecipes
   }, [allRecipes, settings?.hideStarters])
 
+  // 登録済みの「今日の献立」を引き当てる表は全レシピから作る(2026-07-30 便CH/C7)。
+  // hideStartersを反映すると、設定をONにした瞬間に今日の献立に入れた基本レシピが
+  // 画面から消える(登録は残っているのに無かったことになる)。設定は一覧・提案の話なので、
+  // 「選ぶ対象」(下のrecipes)にだけ効かせる
   const recipeById = useMemo(() => {
     const map = new Map<number, Recipe>()
-    recipes?.forEach((r) => map.set(r.id!, r))
+    allRecipes?.forEach((r) => map.set(r.id!, r))
     return map
-  }, [recipes])
+  }, [allRecipes])
 
   // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
   const todayList = useTodayList()
