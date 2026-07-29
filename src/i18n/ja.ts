@@ -371,6 +371,43 @@ export const ja = {
     copyLastWeekDone: '先週の献立を{n}品コピーしました',
     copyLastWeekNoSource: '先週にはコピーできる献立がありません',
     copyLastWeekNoRoom: 'まだ決まっていないところがないため、コピーしませんでした（今ある献立はそのまま残っています）',
+    // マイ献立テンプレ(2026-07-29 便CB-2・docs/59 A-1＋B-2)。表示中の週の献立を曜日ごと覚えて
+    // 名前を付けて保存し、別の週・別の月へ流し込む。流し込む曜日を絞れる＝B-2「毎週◯曜はカレー」も
+    // 同じ機構で満たす。入るのは「まだ決まっていないところ」だけで、今ある献立は上書きしない
+    templateSave: 'この週をテンプレとして保存',
+    templateSaveDescription:
+      '表示中の週の献立を曜日ごと覚えます。あとで別の週や月にまとめて入れられます',
+    templateNameLabel: 'テンプレの名前',
+    templateNamePlaceholder: '平日の定番 など',
+    templateSaveButton: '保存する',
+    templateSaveDone: 'テンプレ「{name}」を{n}品で保存しました',
+    templateSaveEmpty: 'この週にはまだ献立がありません。献立を入れてから保存できます',
+    templateNameRequired: 'テンプレの名前を入れてください',
+    templateApply: 'テンプレを流し込む',
+    templateApplyRangeWeek: '{start}〜{end}に入れます',
+    templateApplyRangeMonth: '{y}年{m}月に入れます',
+    templateApplyNone: '保存したテンプレはまだありません。週タブの「この週をテンプレとして保存」で作れます',
+    templateApplyPick: '入れるテンプレ',
+    templateItemCount: '{n}品',
+    templateDowTitle: '入れる曜日',
+    // B-2(毎週◯曜はカレー)の入口。曜日を絞ると、その曜日にだけ流し込む
+    templateDowHint:
+      '選んだ曜日にだけ入ります。金曜だけを選ぶと、期間内の毎週金曜に同じ献立が入ります',
+    templateDowNone: '曜日を1つ以上選んでください',
+    templateApplyButton: '流し込む',
+    // 規約F: 何が入るか(件数)と、何が消えないかを必ず両方書く
+    templateApplyConfirm:
+      'テンプレ「{name}」から{n}品を、まだ決まっていない{d}食分に入れます。すでに決まっている{k}食分と、そのほかの献立・記録は消えません。よろしいですか？',
+    templateApplyConfirmNoKept:
+      'テンプレ「{name}」から{n}品を、まだ決まっていない{d}食分に入れます。今ある献立・記録は消えません。よろしいですか？',
+    templateApplyDone: 'テンプレ「{name}」から{n}品を入れました',
+    templateApplyNoRoom:
+      'すでに決まっている{n}食分のままです。新しく入れられるところがありませんでした',
+    templateApplyNoItems: '選んだ曜日には、このテンプレの献立がありません',
+    templateDelete: 'このテンプレを削除',
+    templateDeleteConfirm:
+      'テンプレ「{name}」（{n}品）を削除します。すでに献立に入れた分と、ほかのテンプレは消えません。よろしいですか？',
+    templateDeleteDone: 'テンプレ「{name}」を削除しました',
     // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がゴチャつきの一因)。
     // 既定閉。選択中の条件が既定以外のときは畳んだラベルにも現在値を出す（例:「提案の条件: 和食」）
     suggestConditionsToggle: '提案の条件',

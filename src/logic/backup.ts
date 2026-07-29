@@ -5,6 +5,7 @@ import {
   type CookedLog,
   type DayNote,
   type MealPlanEntry,
+  type MealTemplate,
   type PantryItem,
   type PriceEntry,
   type Recipe,
@@ -76,6 +77,12 @@ export interface BackupFile {
    * idを外さずそのまま入れる。これも任意項目＝この項目が無い古いバックアップも従来どおり復元できる
    */
   dayNotes?: DayNote[]
+  /**
+   * マイ献立テンプレ（2026-07-29 便CB-2・docs/59 A-1＋B-2）。端末内保存なので、端末移行で
+   * 失わせないためにバックアップへ含める（日付メモ＝便CB-1と同じ扱い）。idは復元先で
+   * 採番し直すため含めない。これも任意項目＝この項目が無い古いバックアップも従来どおり復元できる
+   */
+  mealTemplates?: Omit<MealTemplate, 'id'>[]
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -115,6 +122,8 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
   const prices = (await db.prices.toArray()).map(({ id: _unused, ...rest }) => rest)
   // 日付メモ（便CB-1）。主キーが日付そのものなのでidを外す処理は無く、そのまま入れる
   const dayNotes = await db.dayNotes.toArray()
+  // マイ献立テンプレ（便CB-2）。他のテーブルと同じくidを除いて保存する（復元先で振り直す）
+  const mealTemplates = (await db.mealTemplates.toArray()).map(({ id: _unused, ...rest }) => rest)
   const backupRecipes: BackupRecipe[] = await Promise.all(
     recipes.map(async ({ photo, cookedLogs, ...rest }) => ({
       ...rest,
@@ -143,6 +152,7 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
     todayList,
     prices,
     dayNotes,
+    mealTemplates,
   }
   return JSON.stringify(file)
 }
@@ -184,6 +194,7 @@ export function tablesToReplace(file: BackupFile): {
   todayList: boolean
   prices: boolean
   dayNotes: boolean
+  mealTemplates: boolean
 } {
   return {
     pantryItems: file.pantryItems !== undefined,
@@ -194,6 +205,8 @@ export function tablesToReplace(file: BackupFile): {
     // 日付メモ（2026-07-29 便CB-1）。この項目を持たない古いバックアップ（=undefined）は
     // 復元時にdayNotesテーブルへ一切触らない＝既存のメモを消さない（他テーブルと同じ後方互換）
     dayNotes: file.dayNotes !== undefined,
+    // マイ献立テンプレ（2026-07-29 便CB-2）。日付メモと同じ後方互換のルール
+    mealTemplates: file.mealTemplates !== undefined,
   }
 }
 
@@ -331,6 +344,7 @@ export async function importBackup(
         db.todayList,
         db.prices,
         db.dayNotes,
+        db.mealTemplates,
       ],
       async () => {
         await db.recipes.clear()
@@ -370,6 +384,10 @@ export async function importBackup(
         if (replace.dayNotes) {
           await db.dayNotes.clear()
           if (file.dayNotes!.length > 0) await db.dayNotes.bulkAdd(file.dayNotes!)
+        }
+        if (replace.mealTemplates) {
+          await db.mealTemplates.clear()
+          if (file.mealTemplates!.length > 0) await db.mealTemplates.bulkAdd(file.mealTemplates!)
         }
       },
     )

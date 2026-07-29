@@ -3,6 +3,7 @@ import type {
   BackupFileHandleRecord,
   DayNote,
   MealPlanEntry,
+  MealTemplate,
   PantryItem,
   PreImportSnapshotRecord,
   PriceEntry,
@@ -30,6 +31,8 @@ class UchiRecipeDB extends Dexie {
   preImportSnapshots!: Table<PreImportSnapshotRecord, number>
   /** 日付メモ（1日1件。主キーが日付そのもの）。2026-07-29 便CB-1・docs/59 A-2 */
   dayNotes!: Table<DayNote, string>
+  /** マイ献立テンプレ（曜日で持つ献立の雛形）。2026-07-29 便CB-2・docs/59 A-1＋B-2 */
+  mealTemplates!: Table<MealTemplate, number>
 
   constructor() {
     super('uchi-recipe')
@@ -177,6 +180,24 @@ class UchiRecipeDB extends Dexie {
       fileHandles: 'id',
       preImportSnapshots: 'id',
       dayNotes: 'date',
+    })
+    // バージョン15: マイ献立テンプレ（2026-07-29 便CB-2・docs/59 A-1＋B-2）テーブルを追加。
+    // 索引は保存日時（createdAt）だけ＝一覧を保存順に並べるためで、中身（items）は配列なので
+    // 索引を張らない。新規テーブルのみの追加なので既存データには影響しない（upgrade関数不要＝
+    // マイグレーション不要を保つ）
+    this.version(15).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt, sourceSetId',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+      prices: '++id, name, updatedAt',
+      setExclusions: '++id, setId, title',
+      fileHandles: 'id',
+      preImportSnapshots: 'id',
+      dayNotes: 'date',
+      mealTemplates: '++id, createdAt',
     })
   }
 }
