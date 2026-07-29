@@ -175,11 +175,14 @@ function TodayListRow({
       <Link to={`/recipes/${recipe.id}`} state={fromState} className="min-w-0 flex-1 truncate font-bold">
         {recipe.title}
       </Link>
+      {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
+          破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
+          押し間違いを減らす(アイコンの大きさ・aria-labelは据え置き) */}
       <button
         type="button"
         onClick={onCooked}
         aria-label={ja.mealPlan.todayMarkCooked}
-        className="rounded-full p-2 text-accent"
+        className="shrink-0 rounded-full p-3 text-accent"
       >
         <CheckCircle2 size={20} aria-hidden />
       </button>
@@ -187,7 +190,7 @@ function TodayListRow({
         type="button"
         onClick={onRemove}
         aria-label={ja.mealPlan.todayRemove}
-        className="rounded-full p-2 text-ink-muted"
+        className="ml-[var(--space-sm)] shrink-0 rounded-full p-3 text-ink-muted"
       >
         <X size={20} aria-hidden />
       </button>
@@ -1196,6 +1199,12 @@ export default function MealPlanPage() {
   const fillWeek = async () => {
     if (!recipes) return
     setMessage('')
+    // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
+    // 「おまかせで提案」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
+    if (visibleRecipes.length === 0) {
+      setMessage(ja.mealPlan.noSuggestion)
+      return
+    }
     const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
     // 埋め直す役割に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
     for (const id of plan.autoEntryIdsToRemove) {
@@ -2171,7 +2180,6 @@ export default function MealPlanPage() {
           3体が切替自体を触っていなかった */}
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
 
-
       {/* 週の移動 */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
         <button
@@ -2329,7 +2337,6 @@ export default function MealPlanPage() {
       {/* 「おまかせで提案」(日タブ)との違いが名前から分からないという指摘への1行説明
           (2026-07-29 便CD/MP-15) */}
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
-
 
       {/* 7日分のカード */}
       <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
