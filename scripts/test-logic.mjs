@@ -2293,6 +2293,46 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     )
   }
 
+  // (5) A-5 月の空日を一括提案(2026-07-29 便CB-2・docs/59)。同じ planWeekFill を
+  // 日付の配列だけ「その月の全日」に広げて使う＝週と月で埋め方(手動保護・autoの再抽選・
+  // 過去日の除外)が食い違わないことを固定する
+  {
+    const august = Array.from(
+      { length: 31 },
+      (_, i) => `2026-08-${String(i + 1).padStart(2, '0')}`,
+    )
+    const entries = [
+      mkEntry(1, '2026-08-02', 100), // 過去日(today=8/5)→対象外
+      mkEntry(2, '2026-08-10', 200), // 手動の主菜→枠ごと残し、副菜だけ足す
+      mkEntry(3, '2026-08-11', 300, { auto: true }), // 自動→消して埋め直す(再抽選)
+    ]
+    const plan = planWeekFill(entries, august, ['dinner'], '2026-08-05')
+    eq(
+      'planWeekFill(月レンジ): 過去日(8/1〜8/4)は対象外',
+      plan.slotsToFill.every((s) => s.date >= '2026-08-05'),
+      true,
+    )
+    eq(
+      'planWeekFill(月レンジ): 手動のある日を除いた未来日をペアで埋める(8/5〜8/31の26日分)',
+      plan.slotsToFill.length,
+      26,
+    )
+    eq(
+      'planWeekFill(月レンジ): 手動主菜の日は枠ごと残し、副菜だけ足す',
+      [sortedStrs(plan.preservedSlotKeys), plan.partialFills.map((p) => `${p.date}|${p.fillRole}`)],
+      [['2026-08-10|dinner'], ['2026-08-10|side']],
+    )
+    eq(
+      'planWeekFill(月レンジ): 自動提案由来の行だけを消して振り直す(手動は消さない)',
+      plan.autoEntryIdsToRemove,
+      [3],
+    )
+    eq(
+      'planWeekFill(月レンジ): 過去日と残す枠のレシピは重複回避のusedに入る',
+      sortedNums(plan.usedRecipeIds),
+      [100, 200],
+    )
+  }
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------

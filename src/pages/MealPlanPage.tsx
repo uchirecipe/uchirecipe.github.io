@@ -1739,6 +1739,63 @@ export default function MealPlanPage() {
   const todaySectionRef = useRef<HTMLElement | null>(null)
 
   /**
+   * A-5 月の空日を一括提案（2026-07-29 便CB-2・docs/59）。
+   * 週の「まとめて献立を立てる」と同じ計画・同じ埋め方（planWeekFill＋executeFill）を、
+   * 対象範囲だけ表示中の月まるごとに広げたもの。提案の質（日単位のジャンル統一・たんぱく源の分散・
+   * 一品ものの日は副菜を空ける）は週と同じロジックを共有するので食い違わない。
+   *
+   * 週と違うのは2点だけ:
+   *  ①一度に数十枠を触るので、実行前に必ず確認を出す（規約F: 何日分・何食分を埋めるか＝入るもの、
+   *    すでに決まっている献立と作った記録は消えない＝残るもの、を件数つきで書く）
+   *  ②結果は必ず出す。しかも「立てるつもりだった数」ではなく**実際に入れられた品数**で報告する
+   *    （便CD/MP-06の正直な完了報告と同じ作法。一品ものスキップ・候補切れで数は必ず減りうる）
+   */
+  const fillMonth = async () => {
+    if (!recipes) return
+    setMessage('')
+    if (visibleRecipes.length === 0) {
+      setMessage(ja.mealPlan.noSuggestion)
+      return
+    }
+    const plan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today)
+    const preserved = plan.preservedSlotKeys.size
+    const targetSlots = [...plan.slotsToFill, ...plan.partialFills]
+    if (targetSlots.length === 0) {
+      setMessage(
+        preserved > 0
+          ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
+          : ja.mealPlan.fillMonthNoAdded,
+      )
+      return
+    }
+    const targetDayCount = new Set(targetSlots.map((s) => s.date)).size
+    const confirmText = (
+      preserved > 0 ? ja.mealPlan.fillMonthConfirm : ja.mealPlan.fillMonthConfirmNoKept
+    )
+      .replace('{d}', String(targetDayCount))
+      .replace('{s}', String(targetSlots.length))
+      .replace('{k}', String(preserved))
+    if (!window.confirm(confirmText)) return
+    const added = await executeFill(plan, monthEntries ?? [])
+    // 正直な完了報告: 実際にDBへ入った品数で出し分ける
+    if (added > 0) {
+      setMessage(
+        preserved > 0
+          ? ja.mealPlan.fillMonthKeptManual
+              .replace('{n}', String(preserved))
+              .replace('{a}', String(added))
+          : ja.mealPlan.fillMonthDone.replace('{a}', String(added)),
+      )
+    } else {
+      setMessage(
+        preserved > 0
+          ? ja.mealPlan.fillMonthNoRoom.replace('{n}', String(preserved))
+          : ja.mealPlan.fillMonthNoAdded,
+      )
+    }
+  }
+
+  /**
    * S-3 先週の献立をコピー(2026-07-25 便BU・docs/59)。
    * 表示中の週の各日(今日・未来日のみ)へ、その1週間前の同じ曜日の献立を「空いている枠だけ」複製する。
    * - 既にある枠(手動配置・自動提案由来のどちらも)は上書きしない＝非破壊。空き枠にだけ入れる設計。
@@ -2716,9 +2773,18 @@ export default function MealPlanPage() {
             </div>
 
             {/* 月タブの操作(2026-07-29 便CB-2・docs/59)。
+                A-5: この月のまだ決まっていない日に、主菜と副菜をまとめて入れる（実行前に確認）
                 A-1＋B-2: 保存したテンプレを、表示中の月の空いているところへ流し込む
                 （曜日を絞れば「毎週金曜はカレー」になる） */}
             <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+              <button
+                type="button"
+                onClick={() => void fillMonth()}
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+              >
+                <Dices size={14} aria-hidden />
+                {ja.mealPlan.fillMonth}
+              </button>
               <button
                 type="button"
                 onClick={() => openTemplateApply('month')}
@@ -2728,6 +2794,7 @@ export default function MealPlanPage() {
                 {ja.mealPlan.templateApply}
               </button>
             </div>
+            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillMonthHint}</p>
 
             {/* 期間の栄養と食費モード(2026-07-17 便AB・docs/35 §5 → 2026-07-28 便CAで改訂)。
                 押すたびにON/OFFを切り替え、切り替え時は選択もリセットする(再度押せば選び直せる) */}

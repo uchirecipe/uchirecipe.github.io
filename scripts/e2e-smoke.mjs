@@ -6385,6 +6385,176 @@ try {
     }
   }
 
+  // --- MEALPLAN-A5: 月の空日を一括提案(2026-07-29 便CB-2・docs/59 A-5)。
+  // 翌月(全日が未来日)を開いて「未定の日をまとめて提案」を押し、
+  //  ・一括なので実行前に規約Fの確認文が出る(何日分・何食分を埋めるか＋何が消えないか)
+  //  ・すでに決まっている日は上書きされない(手動配置の保護は週の「まとめて献立」と同じ)
+  //  ・結果は実際に入れた品数で報告する(便CD/MP-06の正直な完了報告と同じ作法)
+  //  ・BH-2の回帰(同じ食事の主菜と副菜のジャンルが揃う)を月の一括提案でも壊していない
+  // をIndexedDBの実データで確認する ---
+  currentCheck = 'MEALPLAN-A5'
+  {
+    const fmBrowser = await chromium.launch()
+    const fmContext = await fmBrowser.newContext()
+    const fmPage = await fmContext.newPage()
+    let fmConfirmMsg = ''
+    fmPage.on('dialog', (dialog) => {
+      fmConfirmMsg = dialog.message()
+      return dialog.accept()
+    })
+    fmPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-A5] ${text}`)
+    })
+    fmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-A5] ${err.message}`)
+    })
+    try {
+      const fmNow = new Date()
+      const fmNextAnchor = new Date(fmNow.getFullYear(), fmNow.getMonth() + 1, 1)
+      const fmPrefix = `${fmNextAnchor.getFullYear()}-${String(fmNextAnchor.getMonth() + 1).padStart(2, '0')}`
+      const fmLastDay = new Date(fmNextAnchor.getFullYear(), fmNextAnchor.getMonth() + 1, 0).getDate()
+      const fmManualDate = `${fmPrefix}-10`
+
+      await fmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fmPage.waitForTimeout(1800) // 初回シード完了待ち
+      const fmManualId = await fmPage.evaluate(
+        (manualDate) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const manual = g.result.find((r) => r.title === '肉じゃが')
+                if (!manual) {
+                  reject(new Error('seed recipe not found'))
+                  return
+                }
+                const wtx = idb.transaction(['mealPlans', 'settings'], 'readwrite')
+                // 手動で入れた1枠(上書きされないことの確認用)
+                wtx
+                  .objectStore('mealPlans')
+                  .add({ date: manualDate, slot: 'dinner', recipeId: manual.id, role: 'main' })
+                const settings = wtx.objectStore('settings')
+                const getReq = settings.get(1)
+                getReq.onsuccess = () => {
+                  const current = getReq.result || { id: 1 }
+                  settings.put({
+                    ...current,
+                    id: 1,
+                    proCode: 'UR-E2E-TEST-ONLY',
+                    proActivatedAt: Date.now(),
+                  })
+                }
+                wtx.oncomplete = () => resolve(manual.id)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        fmManualDate,
+      )
+      await fmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await fmPage.reload({ waitUntil: 'networkidle' })
+      await fmPage.waitForTimeout(900)
+      await fmPage.getByRole('button', { name: '月', exact: true }).click()
+      await fmPage.waitForTimeout(400)
+      await fmPage.getByRole('button', { name: '次の月' }).click()
+      await fmPage.waitForTimeout(600)
+      await fmPage.getByRole('button', { name: '未定の日をまとめて提案' }).click()
+      // 月まるごとの提案は枠数が多いので、書き込みが終わるまで長めに待つ
+      await fmPage.waitForTimeout(6000)
+      check(
+        'MEALPLAN-A5(規約F) 実行前に「何日分・何食分を埋めるか」と「何が消えないか」を確認する',
+        /まだ決まっていない\d+日分（\d+食分）/.test(fmConfirmMsg) &&
+          fmConfirmMsg.includes('作った記録は消えません'),
+        `confirm=${fmConfirmMsg}`,
+      )
+      const fmData = await fmPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['mealPlans', 'recipes'], 'readonly')
+              const plans = tx.objectStore('mealPlans').getAll()
+              const recipes = tx.objectStore('recipes').getAll()
+              tx.oncomplete = () =>
+                resolve({
+                  plans: plans.result,
+                  recipes: recipes.result.map((r) => ({ id: r.id, title: r.title, tags: r.tags })),
+                })
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      const fmMonthPlans = fmData.plans.filter((e) => e.date.startsWith(fmPrefix))
+      const fmFilledDays = new Set(fmMonthPlans.map((e) => e.date))
+      check(
+        'MEALPLAN-A5 翌月のほぼ全日に献立が入る(週の7日ではなく月レンジで動く)',
+        fmFilledDays.size >= fmLastDay - 1,
+        `days=${fmFilledDays.size}/${fmLastDay}`,
+      )
+      const fmManualSlot = fmMonthPlans.filter(
+        (e) => e.date === fmManualDate && (e.role ?? 'main') === 'main',
+      )
+      check(
+        'MEALPLAN-A5 手動で入れた主菜は上書きされずそのまま残る(非破壊)',
+        fmManualSlot.length === 1 &&
+          fmManualSlot[0].recipeId === fmManualId &&
+          !fmManualSlot[0].auto,
+        `manual=${JSON.stringify(fmManualSlot)}`,
+      )
+      check(
+        'MEALPLAN-A5 自動で入れた枠にはautoが付く(次の提案で再抽選できる)',
+        fmMonthPlans.filter((e) => e.date !== fmManualDate).every((e) => e.auto === true),
+      )
+      check(
+        'MEALPLAN-A5 結果は実際に入れた品数で伝える(正直な完了報告)',
+        /\d+品の献立を立てました|\d+食分はそのままにして、\d+品を新しく立てました/.test(
+          (await fmPage.textContent('body')) ?? '',
+        ),
+        `body=${((await fmPage.textContent('body')) ?? '').slice(0, 120)}`,
+      )
+      // BH-2の回帰: 同じ食事に入った主菜と副菜のジャンル(和食/洋食/中華)が食い違わない
+      const fmGenres = ['和食', '洋食', '中華']
+      const fmTagsById = new Map(fmData.recipes.map((r) => [r.id, r.tags ?? []]))
+      const fmGenreOf = (id) => fmGenres.find((g) => (fmTagsById.get(id) ?? []).includes(g))
+      const fmBySlot = new Map()
+      for (const e of fmMonthPlans) {
+        const key = `${e.date}|${e.slot}`
+        const list = fmBySlot.get(key) ?? []
+        list.push(e)
+        fmBySlot.set(key, list)
+      }
+      let fmPairs = 0
+      let fmMixed = 0
+      for (const list of fmBySlot.values()) {
+        const main = list.find((e) => (e.role ?? 'main') === 'main')
+        const sides = list.filter((e) => (e.role ?? 'main') === 'side')
+        if (!main || sides.length === 0) continue
+        const mainGenre = fmGenreOf(main.recipeId)
+        if (!mainGenre) continue
+        fmPairs++
+        if (sides.some((s) => fmGenreOf(s.recipeId) && fmGenreOf(s.recipeId) !== mainGenre)) fmMixed++
+      }
+      check(
+        'MEALPLAN-A5(BH-2回帰) 月の一括提案でも、同じ食事の主菜と副菜のジャンルが揃う(混在0)',
+        fmPairs > 0 && fmMixed === 0,
+        `pairs=${fmPairs} mixed=${fmMixed}`,
+      )
+    } finally {
+      await fmBrowser.close()
+    }
+  }
+
   // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
   // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
   // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を
