@@ -1,7 +1,7 @@
 // レシピ原稿の機械チェック(記法ルールR1〜R7・カタログ全体の整合性)。
 // 人間・QAが見るべきもの(味の妥当性・D-④の解釈)は対象外、機械で潰せるものだけを見る。
 // 実行: npx tsx scripts/lint-recipes.mjs
-// 対象: starters.ts の starterDefs(全103品)。
+// 対象: starters.ts の starterDefs(全109品)。
 // 2026-07-23のテーマ全廃で、旧配布テーマ原稿(src/sets/*.ts)は starters.ts が recipes を読み込んで
 // starterDefs に合流するようになったため、ここは starterDefs だけを見れば全カタログを網羅する
 // (src/sets/*.ts を別ループで読むと二重計上になり「料理名重複」を誤検出するので読まない)。
@@ -27,7 +27,7 @@ const WEIGHT_VOLUME_UNITS = new Set(['g', 'ml', 'cc'])
 /** @type {{source: string, recipe: RecipeLike}[]} */
 const entries = []
 
-// 基本レシピ全103品(従来の基本レシピ + 旧配布テーマ由来。starters.tsが両方を連結してexportする)
+// 基本レシピ全109品(従来の基本レシピ + 旧配布テーマ由来。starters.tsが両方を連結してexportする)
 const startersMod = await import('../src/db/starters.ts')
 for (const r of startersMod.starterDefs) {
   entries.push({ source: 'starters.ts', recipe: r })

@@ -785,6 +785,94 @@
     },
     "excluded": []
   },
+  "starter:チンゲン菜としいたけのにんにく炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 89,
+      "proteinG": 2.1,
+      "fatG": 6.3,
+      "carbG": 6.4,
+      "saltG": 0.8,
+      "fiberG": 3.2,
+      "ironMg": 1.6,
+      "calciumMg": 131
+    },
+    "excluded": []
+  },
+  "starter:白菜とにんじんの中華とろみ煮": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 62,
+      "proteinG": 1.6,
+      "fatG": 2.2,
+      "carbG": 8.8,
+      "saltG": 0.8,
+      "fiberG": 2.4,
+      "ironMg": 0.5,
+      "calciumMg": 63
+    },
+    "excluded": []
+  },
+  "starter:パプリカといんげんのオイスター炒め": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 103,
+      "proteinG": 2.3,
+      "fatG": 6.2,
+      "carbG": 9.9,
+      "saltG": 0.9,
+      "fiberG": 2.5,
+      "ironMg": 0.8,
+      "calciumMg": 35
+    },
+    "excluded": [
+      "白いりごま(amount)"
+    ]
+  },
+  "starter:かぼちゃのミルク煮": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 165,
+      "proteinG": 5,
+      "fatG": 5.4,
+      "carbG": 30,
+      "saltG": 0.7,
+      "fiberG": 4.4,
+      "ironMg": 0.6,
+      "calciumMg": 114
+    },
+    "excluded": [
+      "パセリ(amount)"
+    ]
+  },
+  "starter:ラタトゥイユ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 118,
+      "proteinG": 2.9,
+      "fatG": 6.4,
+      "carbG": 15.5,
+      "saltG": 0.7,
+      "fiberG": 4.7,
+      "ironMg": 1.6,
+      "calciumMg": 51
+    },
+    "excluded": []
+  },
+  "starter:ブロッコリーとにんじんのハーブマリネ": {
+    "servings": 2,
+    "perServing": {
+      "kcal": 110,
+      "proteinG": 5.8,
+      "fatG": 6.7,
+      "carbG": 11.1,
+      "saltG": 0.8,
+      "fiberG": 6,
+      "ironMg": 2,
+      "calciumMg": 75
+    },
+    "excluded": []
+  },
   "starter:レンジ蒸し鶏（自家製サラダチキン）": {
     "servings": 2,
     "perServing": {

@@ -3254,9 +3254,9 @@ eq(
   )
 }
 
-// ---------- 全品同梱の健全性(テーマ全廃2026-07-23: 収録103品・料理名は一意) ----------
+// ---------- 全品同梱の健全性(テーマ全廃2026-07-23: 収録109品・料理名は一意) ----------
 {
-  eq('starterDefsは103品(基本51+旧テーマ52)', starterDefs.length, 103)
+  eq('starterDefsは109品(基本57+旧テーマ52)', starterDefs.length, 109)
   const titles = starterDefs.map((d) => d.title.trim())
   eq('starterDefsの料理名はカタログ全体で一意', new Set(titles).size, titles.length)
   eq(
@@ -3264,6 +3264,37 @@ eq(
     titles.includes(DASHI_RECIPE_TITLE),
     true,
   )
+
+  // 2026-07-29 副菜6品の増枠(docs/61)。6品とも副菜(dishType='side')・通年・昼夜で入っていること
+  const SIDE6 = [
+    'チンゲン菜としいたけのにんにく炒め',
+    '白菜とにんじんの中華とろみ煮',
+    'パプリカといんげんのオイスター炒め',
+    'かぼちゃのミルク煮',
+    'ラタトゥイユ',
+    'ブロッコリーとにんじんのハーブマリネ',
+  ]
+  for (const t of SIDE6) {
+    const def = starterDefs.find((d) => d.title === t)
+    eq(`増枠副菜が同梱される: ${t}`, def != null, true)
+    eq(`増枠副菜の種別は副菜: ${t}`, def?.dishType, 'side')
+    eq(`増枠副菜は通年: ${t}`, def?.season, 'all')
+    eq(`増枠副菜は昼・夜: ${t}`, def?.suitableFor, ['lunch', 'dinner'])
+  }
+
+  // 既存端末(増枠前の103品が入っている)への差分投入: 「基本レシピを入れ直す」で
+  // 増枠6品だけが追加され、既存103品は内容が同じなので更新0件・削除0件になること
+  // (お気に入り・作った記録などのユーザーデータに触れない = 増枠のたびに全消しされない)
+  {
+    const before = starterDefs
+      .filter((d) => !SIDE6.includes(d.title))
+      .map((d, k) => ({ ...d, id: k + 1, isStarter: true, isFavorite: false, cookedLogs: [] }))
+    eq('増枠前の端末は103品', before.length, 103)
+    const topUp = planStarterReload(before, starterDefs, 9000)
+    eq('増枠の差分投入: 追加は増枠6品だけ', topUp.toAdd.map((d) => d.title).sort(), [...SIDE6].sort())
+    eq('増枠の差分投入: 既存103品は更新されない(ユーザーデータに触れない)', topUp.toUpdate.length, 0)
+    eq('増枠の差分投入: 削除は発生しない', topUp.toDeleteIds.length, 0)
+  }
 }
 
 // ---------- だし紐づけ: 材料名が「だし汁」系か判定(2026-07-23) ----------
@@ -4352,10 +4383,18 @@ const iconKeyExpected = {
   '梅おろしぶっかけうどん': 'noodle',
   '水ようかん': 'dessert',
   'だしのとり方': 'soup',
+  // 2026-07-29 追加の副菜6品(docs/61)。判定結果はdocs/61 §4-7の実測どおり
+  // (vegetable5・salad1。defaultに落ちる品はゼロ)
+  'チンゲン菜としいたけのにんにく炒め': 'vegetable',
+  '白菜とにんじんの中華とろみ煮': 'vegetable',
+  'パプリカといんげんのオイスター炒め': 'vegetable',
+  'かぼちゃのミルク煮': 'vegetable',
+  'ラタトゥイユ': 'vegetable',
+  'ブロッコリーとにんじんのハーブマリネ': 'salad',
 }
 
 {
-  // 収録全103品(基本+旧テーマ由来)はstarterDefsが連結済み。旧public/sets/data/*.jsonは
+  // 収録全109品(基本+旧テーマ由来)はstarterDefsが連結済み。旧public/sets/data/*.jsonは
   // テーマ全廃(2026-07-23)で撤去したため読まない(starterDefsだけで全品を網羅する)
   const iconEntries = []
   for (const def of starterDefs) {
@@ -4383,7 +4422,7 @@ const iconKeyExpected = {
 
 // ---------- guessDishType: 役割の自動判定(2026-07-23 便BH-1・docs/56 §3-2) ----------
 {
-  // (a) guessDishType は pickIconKey の結果を役割へ写像するだけ。全カタログ103品で、期待アイコン
+  // (a) guessDishType は pickIconKey の結果を役割へ写像するだけ。全カタログ109品で、期待アイコン
   //     (iconKeyExpected)から導いた役割と一致することを確認する(docs/56の63/71一致検証を流用)。
   const iconToRole = (icon) => {
     switch (icon) {
@@ -5295,12 +5334,13 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       { yen: 8, rawYen: 8, source: 'user' },
     )
   }
-  // (8) 同梱103品の合計原価のピン留め(この数字が動いたら按分の前提が変わったということ)
+  // (8) 同梱109品の合計原価のピン留め(この数字が動いたら按分の前提が変わったということ)
   {
     const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
     let grand = 0
     for (const def of starterDefs) grand += estimateRecipeCost(def.ingredients, idx).total
-    eq('同梱103品の概算食費の合計(便BY修正後。修正前は48,377円)', grand, 36780)
+    // 2026-07-29 副菜6品追加で36,780→38,622円(+1,842円=6品ぶん。既存103品の値は不変)
+    eq('同梱109品の概算食費の合計(便BY修正後。修正前は48,377円/103品時点は36,780円)', grand, 38622)
     const soup = starterDefs.find((d) => d.title.includes('中華風卵スープ'))
     eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 85)
     const steamed = starterDefs.find((d) => d.title.includes('レンジ蒸し鶏'))
