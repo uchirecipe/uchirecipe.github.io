@@ -631,13 +631,27 @@ export interface FillWeekPlan {
  * 判定を役割（main/side）単位で行い、手動で埋まっている役割だけを残し、空 or 自動だけの役割を
  * 埋め対象にする。両役割とも埋め対象なら slotsToFill（ペア）、片方だけなら partialFills（単役割）。
  * 便BEの非破壊原則（手動配置は消さない）はそのまま：手動役割のエントリは削除対象にしない。
+ *
+ * 2026-07-30 便CH/C1（月の一括提案の総入れ替え対策）: options.keepAuto を追加した。
+ * true にすると自動提案由来の枠も「すでに決まっている」側として保護する＝1品も消さない。
+ * 月タブの「未定の日をまとめて提案」（fillMonth）だけがこれを使う。理由:
+ *  - ボタン名（未定の日をまとめて提案）・ヒント（まだ決まっていない日に入れます）・docs/59 A-5 は
+ *    三つとも「空いているところだけ」を約束しているのに、週の再抽選仕様をそのまま共有したせいで
+ *    2回目のタップで自動配置分が丸ごと入れ替わっていた（確認文「今ある献立は消えません」が嘘になる）。
+ *  - 週タブの「まとめて献立を立てる」は押すたびに振り直せる再抽選が2026-07-14の確定仕様なので、
+ *    既定値 false のまま一切変えない。入れ替えたい人は週タブで振り直せる。
  */
 export function planWeekFill(
   entries: MealPlanEntry[],
   weekDatesArr: string[],
   visibleSlots: MealSlot[],
   today: string,
+  options: {
+    /** 自動提案由来の枠も保護する（消さない）。月の一括提案だけ true */
+    keepAuto?: boolean
+  } = {},
 ): FillWeekPlan {
+  const keepAuto = options.keepAuto ?? false
   const futureDates = weekDatesArr.filter((date) => !isPastDate(date, today))
   const touchedKeys = new Set(
     futureDates.flatMap((date) => visibleSlots.map((slot) => `${date}|${slot}`)),
@@ -663,7 +677,8 @@ export function planWeekFill(
       const fillable: Record<MealRole, boolean> = { main: false, side: false }
       for (const role of roles) {
         const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
-        const hasManual = roleEntries.some((e) => !e.auto)
+        // keepAuto=true のときは、自動提案で入った行も「すでに決まっている」として保護する
+        const hasManual = roleEntries.some((e) => keepAuto || !e.auto)
         if (hasManual) {
           // 手動で埋まっている役割: 同役割のエントリ（手動+自動とも）を残し、重複回避のusedに入れる
           hasManualAnything = true

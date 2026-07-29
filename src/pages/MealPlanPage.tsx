@@ -97,6 +97,7 @@ import {
   estimateRecipeCost,
   sumMealPlanEntriesCost,
   pricelessIngredientNames,
+  pricelessIngredientNamesOfRecipes,
 } from '../logic/priceEstimate'
 import {
   roundNutrient,
@@ -106,6 +107,7 @@ import {
 } from '../logic/nutrition'
 import {
   summarizeRangeIntake,
+  rangeIntakeRecipes,
   dayIntakeMap,
   type DayIntake,
   type RangeCookedDish,
@@ -1042,15 +1044,25 @@ export default function MealPlanPage() {
     }
     void updateSettings({ visibleMealSlots: next })
   }
+  /**
+   * レシピID→レシピ（すでに登録されている献立・記録を「表示する／数える」ための引き当て表）。
+   *
+   * 2026-07-30 便CH/C7: ここは hideStarters（設定「基本レシピを一覧に表示しない」）を**反映しない**。
+   * 反映していたときは、設定をONにすると登録済みの献立が月間サマリー・月セル・献立表・週/日タブ・
+   * 概算食費から丸ごと消えていた（記録側は全レシピで引くので残り、同じ画面で扱いが食い違っていた）。
+   * 設定の文言は「一覧に表示しない」で、登録済みの予定を消すとは書いていない＝約束を超えた挙動だった。
+   * 切り分けは「選ぶ／提案する対象＝visibleRecipes（hideStarters反映）」「登録済みを表示・集計する
+   * 対象＝全レシピ」。ピッカー(searchRecipes)と自動提案(suggestForSlot/suggestPairForSlot)は
+   * visibleRecipes のままなので、設定の本来の意図（一覧・提案に出さない）は変わらない。
+   */
   const recipeById = useMemo(() => {
     const map = new Map<number, Recipe>()
-    visibleRecipes.forEach((r) => map.set(r.id!, r))
+    ;(recipes ?? []).forEach((r) => map.set(r.id!, r))
     return map
-  }, [visibleRecipes])
+  }, [recipes])
 
   // S-1 月セルの未来日プレビュー(2026-07-25 便BU・docs/59): 日付→その日の予定を表す短い文字列。
   // 代表の主菜名(夕食を優先→他の帯の主菜)を出し、主菜が特定できない日は「◯件」に倒す。
-  // recipeByIdはhideStarters反映済みなので、隠したレシピ由来の枠は件数側に倒れる。
   // 実際に出すのは呼び出し側でshowPlanDot(今日・未来日)の日だけ＝過去日の写真日記(便BS)は触らない
   const monthDayPreview = useMemo(() => {
     const byDate = new Map<string, MealPlanEntry[]>()
@@ -1079,8 +1091,8 @@ export default function MealPlanPage() {
   // 表示中の月の「作った記録」と「登録した献立」を、期間集計・セル表示の共通入力の形に整える
   // (2026-07-28 便CA)。monthEntries(表示中の月のカレンダー内)から作るため「月をまたぐ期間は
   // 月表示範囲内に限定してよい」の仕様を自然に満たす(月をまたぐ選択自体はmonthAnchor変更時の
-  // リセットで防止済み)。記録側はhideStartersに関わらず全レシピ(実際に作った履歴のため)、
-  // 予定側はrecipeById(hideStarters反映済み)を使う=従来の集計と同じ対象範囲
+  // リセットで防止済み)。記録側・予定側とも全レシピで引く(2026-07-30 便CH/C7。設定
+  // 「基本レシピを一覧に表示しない」で登録済みの予定が集計から消えるのを直した=recipeById参照)
   const monthCookedDishes = useMemo(() => {
     const prefix = monthAnchor.slice(0, 7)
     const out: RangeCookedDish[] = []
@@ -1140,6 +1152,39 @@ export default function MealPlanPage() {
   )
   const monthSummaryDishCount = monthSummary.actual.dishCount + monthSummary.plan.dishCount
   const monthPersonalPerDay = Math.round(monthSummary.personalYen / monthDatesList.length)
+  /**
+   * 「価格が分からない材料◯種類を除いた概算です」の件数（2026-07-30 便CH/C2・C4）。
+   * 週の概算食費にだけ入っていた注記（便CD/MP-11）を、月間サマリーと期間カードにも同じ作法で出す
+   * ＝どの画面でも「この金額に何が入っていないか」が分かるようにする。
+   * 数える対象は合計と同じ料理（rangeIntakeRecipes＝過ぎた日は作った記録・今日から先は登録した献立）。
+   */
+  const monthPricelessCount = useMemo(
+    () =>
+      pricelessIngredientNamesOfRecipes(
+        rangeIntakeRecipes({
+          start: monthDatesList[0],
+          end: monthDatesList[monthDatesList.length - 1],
+          today,
+          cooked: monthCookedDishes,
+          planned: monthPlannedDishes,
+        }),
+        priceIndex,
+      ).length,
+    [monthDatesList, today, monthCookedDishes, monthPlannedDishes, priceIndex],
+  )
+  const rangePricelessCount = useMemo(() => {
+    if (rangeStart == null || rangeEnd == null) return 0
+    return pricelessIngredientNamesOfRecipes(
+      rangeIntakeRecipes({
+        start: rangeStart,
+        end: rangeEnd,
+        today,
+        cooked: monthCookedDishes,
+        planned: monthPlannedDishes,
+      }),
+      priceIndex,
+    ).length
+  }, [rangeStart, rangeEnd, today, monthCookedDishes, monthPlannedDishes, priceIndex])
   // 内訳(8項目の栄養・実績/予定の分解・作った記録の全体食費)は既定で畳んでおく。
   // 常設カードが画面上部を占領してカレンダーを押し下げないようにするため(数字自体は畳んでも見える)
   const [monthSummaryOpen, setMonthSummaryOpen] = useState(false)
@@ -1744,11 +1789,16 @@ export default function MealPlanPage() {
    * 対象範囲だけ表示中の月まるごとに広げたもの。提案の質（日単位のジャンル統一・たんぱく源の分散・
    * 一品ものの日は副菜を空ける）は週と同じロジックを共有するので食い違わない。
    *
-   * 週と違うのは2点だけ:
+   * 週と違うのは3点:
    *  ①一度に数十枠を触るので、実行前に必ず確認を出す（規約F: 何日分・何食分を埋めるか＝入るもの、
    *    すでに決まっている献立と作った記録は消えない＝残るもの、を件数つきで書く）
    *  ②結果は必ず出す。しかも「立てるつもりだった数」ではなく**実際に入れられた品数**で報告する
    *    （便CD/MP-06の正直な完了報告と同じ作法。一品ものスキップ・候補切れで数は必ず減りうる）
+   *  ③keepAuto=true（2026-07-30 便CH/C1）。このボタンは「まだ決まっていない日に入れる」としか
+   *    約束していないので、自動提案で入った献立も消さない＝完全に非破壊にする。2回目に押すと
+   *    埋まっている月は「新しく立てられる日がありませんでした」で終わり、確認文の
+   *    「今ある献立と作った記録は消えません」がそのまま真になる。振り直したい人は週タブの
+   *    「まとめて献立を立てる」（再抽選・2026-07-14確定仕様）を使う。
    */
   const fillMonth = async () => {
     if (!recipes) return
@@ -1757,7 +1807,9 @@ export default function MealPlanPage() {
       setMessage(ja.mealPlan.noSuggestion)
       return
     }
-    const plan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today)
+    const plan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today, {
+      keepAuto: true,
+    })
     const preserved = plan.preservedSlotKeys.size
     const targetSlots = [...plan.slotsToFill, ...plan.partialFills]
     if (targetSlots.length === 0) {
@@ -2733,6 +2785,16 @@ export default function MealPlanPage() {
                       <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
                         {ja.mealPlan.weekCostNote}
                       </p>
+                      {/* 価格が分からない材料の分は1円も入っていない＝この金額の信頼度を月にも出す
+                          (2026-07-30 便CH/C2。週の概算食費にだけ入っていた注記を揃えた) */}
+                      {monthPricelessCount > 0 && (
+                        <p className="mt-1 text-xs text-ink-muted">
+                          {ja.mealPlan.weekCostPriceless.replace(
+                            '{n}',
+                            String(monthPricelessCount),
+                          )}
+                        </p>
+                      )}
                       <Link
                         to="/prices"
                         className="mt-1 inline-block text-xs font-bold text-accent underline"
@@ -2943,6 +3005,12 @@ export default function MealPlanPage() {
                 )}
 
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.weekCostNote}</p>
+                {/* 期間カードにも同じ信頼度の注記を出す(2026-07-30 便CH/C2) */}
+                {rangePricelessCount > 0 && (
+                  <p className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.weekCostPriceless.replace('{n}', String(rangePricelessCount))}
+                  </p>
+                )}
                 <Link
                   to="/prices"
                   className="mt-1 inline-block text-xs font-bold text-accent underline"

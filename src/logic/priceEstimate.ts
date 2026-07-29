@@ -378,14 +378,34 @@ export function pricelessIngredientNames<E extends { recipeId: number }>(
   >,
   index: PriceIndexEntry[],
 ): string[] {
-  const names = new Set<string>()
+  const recipes: { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[] }[] = []
   for (const e of entries) {
     const recipe = recipeById.get(e.recipeId)
-    if (!recipe) continue
+    if (recipe) recipes.push(recipe)
+  }
+  return pricelessIngredientNamesOfRecipes(recipes, index)
+}
+
+/**
+ * レシピの配列そのものから「価格が分からない材料」の名前を返す（2026-07-30 便CH/C2）。
+ * 月間サマリー・期間の集計は献立エントリではなく「作った記録＋登録した献立のレシピ」を数えるため、
+ * recipeId を持たないこちらの形が要る（pricelessIngredientNames は同じ判定をこの関数に委ねる）。
+ *
+ * 判定は「個別入力(ing.price)もマスタ一致も無い」＝概算に1円も入っていない材料だけ。
+ * 丸め前の rawYen で見るのが要点で、四捨五入後の yen で判定すると、マスタに載っていて
+ * 小口按分で0円に丸まる材料（塩 小さじ1=約1円・砂糖 大さじ1=約2円の一部）まで
+ * 「価格が分からない」に数えてしまい、注記が実態より多い件数を出していた。
+ */
+export function pricelessIngredientNamesOfRecipes(
+  recipes: { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[] }[],
+  index: PriceIndexEntry[],
+): string[] {
+  const names = new Set<string>()
+  for (const recipe of recipes) {
     for (const ing of recipe.ingredients) {
       if (ing.price != null && ing.price > 0) continue
       const estimated = estimateIngredientYen(ing, index)
-      if (estimated != null && estimated.yen > 0) continue
+      if (estimated != null && estimated.rawYen > 0) continue
       names.add(ing.name)
     }
   }

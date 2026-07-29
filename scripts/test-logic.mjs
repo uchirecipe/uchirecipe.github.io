@@ -121,12 +121,14 @@ import {
   estimateIngredientRowCost,
   sumMealPlanEntriesCost,
   pricelessIngredientNames,
+  pricelessIngredientNamesOfRecipes,
   sumCookedRecipesCost,
   normalizeIngredientNameForPrice,
 } from '../src/logic/priceEstimate.ts'
 import {
   splitRangeByToday,
   summarizeRangeIntake,
+  rangeIntakeRecipes,
   dayIntakeMap,
 } from '../src/logic/rangeSummary.ts'
 import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
@@ -2331,6 +2333,49 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       'planWeekFill(月レンジ): 過去日と残す枠のレシピは重複回避のusedに入る',
       sortedNums(plan.usedRecipeIds),
       [100, 200],
+    )
+  }
+
+  // (6) 便CH/C1(2026-07-30): 月の「未定の日をまとめて提案」は keepAuto=true で呼ぶ。
+  // 自動提案で入った献立も保護し、2回目に押しても1品も消さない・入れ替えない
+  // （確認文「今ある献立と作った記録は消えません」が事実になる。週タブの再抽選は既定値falseで不変）。
+  {
+    const august = Array.from(
+      { length: 31 },
+      (_, i) => `2026-08-${String(i + 1).padStart(2, '0')}`,
+    )
+    // 1回目で全日を自動配置し終えた状態（主菜+副菜が auto で入っている）
+    const filled = august.flatMap((date, i) => [
+      mkEntry(i * 2 + 1, date, 100 + i, { auto: true }),
+      mkEntry(i * 2 + 2, date, 200 + i, { role: 'side', auto: true }),
+    ])
+    const again = planWeekFill(filled, august, ['dinner'], '2026-08-01', { keepAuto: true })
+    eq(
+      'planWeekFill(便CH/C1): 2回目は埋める枠が0（総入れ替えが起きない）',
+      [again.slotsToFill.length, again.partialFills.length],
+      [0, 0],
+    )
+    eq('planWeekFill(便CH/C1): 削除する行は0件（自動配置分も消さない）', again.autoEntryIdsToRemove, [])
+    eq(
+      'planWeekFill(便CH/C1): 全31日が「すでに決まっている」枠として数えられる',
+      again.preservedSlotKeys.size,
+      31,
+    )
+    // 空き枠は従来どおり埋まる（保護しただけで機能は殺していない）
+    const partial = planWeekFill(filled.slice(0, 4), august, ['dinner'], '2026-08-01', {
+      keepAuto: true,
+    })
+    eq(
+      'planWeekFill(便CH/C1): 自動で埋まっている2日を残し、残り29日は今までどおり埋める',
+      [partial.preservedSlotKeys.size, partial.slotsToFill.length],
+      [2, 29],
+    )
+    // 週タブ（既定値）は2026-07-14の再抽選仕様のまま＝自動枠は振り直す
+    const weekDefault = planWeekFill(filled.slice(0, 2), august, ['dinner'], '2026-08-01')
+    eq(
+      'planWeekFill(便CH/C1): 既定(keepAuto無し)は従来どおり自動枠を振り直す＝週タブは不変',
+      [weekDefault.preservedSlotKeys.size, sortedNums(weekDefault.autoEntryIdsToRemove)],
+      [0, [1, 2]],
     )
   }
 }
@@ -5039,6 +5084,36 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       pricelessIngredientNames([{ recipeId: 999 }], recipeById, index),
       [],
     )
+    // 2026-07-30 便CH/C2: 四捨五入後(yen)で判定していたため、マスタに載っているのに
+    // 小口按分で0円に丸まる材料(塩 小さじ1など)が「価格が分からない材料」に数えられ、
+    // 注記の件数が実態より多く出ていた。丸め前(rawYen)で判定する
+    {
+      const smallIndex = buildPriceIndex([{ name: '塩', pricePerUnit: 100, unit: '1000g' }])
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CH/C2): 0.5円未満に丸まる材料は「価格が分からない」に数えない',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '塩', amount: '1', unit: 'g' }] }],
+          smallIndex,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CH/C2): マスタにも個別入力にも無い材料だけを数える',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '塩', amount: '1', unit: 'g' }, { name: '水', amount: '200', unit: 'ml' }] }],
+          smallIndex,
+        ),
+        ['水'],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CH/C2): 個別入力の価格があれば数えない',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '水', amount: '200', unit: 'ml', price: 1 }] }],
+          smallIndex,
+        ),
+        [],
+      )
+    }
 
     // sumCookedRecipesCost(2026-07-24 便BH-3・タスク9「期間の食費・実績ベース」): 作った記録群の
     // 実績原価合計と食数。2026-07-28 便BY/RANGE-01で「食数=記録件数」から「食数=延べ人数(1人1食)」へ
@@ -5194,6 +5269,30 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       'summarizeRangeIntake: 「作った食数の合算(全体食費)」は残す(全体310円・延べ4食)',
       { yen: wholeMonth.cookedHouseholdYen, meals: wholeMonth.cookedMealCount },
       { yen: 310, meals: 4 },
+    )
+    // 2026-07-30 便CH/C2: 「価格が分からない材料◯種類」の注記は合計と同じ料理から数える。
+    // rangeIntakeRecipes が summarizeRangeIntake と同じ切り分け(過去=記録・今日以降=予定)を返す
+    eq(
+      'rangeIntakeRecipes(便CH/C2): 合計に入れた料理だけを返す(実績2品+予定1品=3品)',
+      rangeIntakeRecipes({
+        start: '2026-07-01',
+        end: '2026-07-31',
+        today: TODAY,
+        cooked,
+        planned,
+      }).length,
+      3,
+    )
+    eq(
+      'rangeIntakeRecipes(便CH/C2): 全部過去の期間は作った記録だけ(過去の予定は数に入れない)',
+      rangeIntakeRecipes({
+        start: '2026-07-01',
+        end: '2026-07-14',
+        today: TODAY,
+        cooked,
+        planned,
+      }).length,
+      2,
     )
     // 全部過去の期間: 予定は0のまま(過去の予定ベース計算は表示しない)
     const pastOnly = summarizeRangeIntake({

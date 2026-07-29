@@ -5975,7 +5975,9 @@ try {
       )
       check(
         'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・めやす」の但し書きを外さない',
-        meBodyOpen.includes('概算') && meBodyOpen.includes('材料に価格を入力したレシピだけが計算対象です'),
+        // 2026-07-30 便CH/C2: 注記の文言を実装どおり(目安価格で自動計算している)に直した
+        meBodyOpen.includes('概算') &&
+          meBodyOpen.includes('食材の目安価格で自動計算しています'),
       )
       // A-3: 月の窓から削除もできる(データごと消える)
       await mePage.locator(`button[data-date="${meDate}"]`).click()
