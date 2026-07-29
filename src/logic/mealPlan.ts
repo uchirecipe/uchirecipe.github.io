@@ -610,6 +610,11 @@ export interface FillWeekPlan {
   autoEntryIdsToRemove: number[]
   /** 重複回避で used とみなす recipeId（対象外の枠＋残す手動役割の中身）。提案の同一週内重複を避ける */
   usedRecipeIds: number[]
+  /**
+   * options.skipDates で対象から外した日（過去日は元から対象外なので含めない）。
+   * 「メモを書いた◯日には入れません」と確認文に書くための件数に使う（2026-07-30 便CH/C10）。
+   */
+  skippedDates: string[]
 }
 
 /**
@@ -649,10 +654,19 @@ export function planWeekFill(
   options: {
     /** 自動提案由来の枠も保護する（消さない）。月の一括提案だけ true */
     keepAuto?: boolean
+    /**
+     * 丸ごと対象から外す日（2026-07-30 便CH/C10）。月の一括提案が「その日のメモ」を書いた日
+     * （外食・実家に帰る等）に献立を入れてしまうのを防ぐために使う。
+     * 外した日の献立は触らないだけ＝非破壊で、重複回避の used にだけ入る。
+     */
+    skipDates?: string[]
   } = {},
 ): FillWeekPlan {
   const keepAuto = options.keepAuto ?? false
-  const futureDates = weekDatesArr.filter((date) => !isPastDate(date, today))
+  const skipDates = new Set(options.skipDates ?? [])
+  const notPastDates = weekDatesArr.filter((date) => !isPastDate(date, today))
+  const skippedDates = notPastDates.filter((date) => skipDates.has(date))
+  const futureDates = notPastDates.filter((date) => !skipDates.has(date))
   const touchedKeys = new Set(
     futureDates.flatMap((date) => visibleSlots.map((slot) => `${date}|${slot}`)),
   )
@@ -700,7 +714,14 @@ export function planWeekFill(
     }
   }
 
-  return { slotsToFill, partialFills, preservedSlotKeys, autoEntryIdsToRemove, usedRecipeIds }
+  return {
+    slotsToFill,
+    partialFills,
+    preservedSlotKeys,
+    autoEntryIdsToRemove,
+    usedRecipeIds,
+    skippedDates,
+  }
 }
 
 /**

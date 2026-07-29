@@ -55,6 +55,12 @@ export interface TemplateFillPlan {
   keptSlotCount: number
   /** テンプレに中身がある曜日にあたった日数（確認文の「何日分か」に使う） */
   targetDayCount: number
+  /**
+   * テンプレに中身はあるのに、その食事を画面に出していないせいで入れられなかった食事
+   * （2026-07-30 便CH/C14）。1品も入らなかったときに「選んだ曜日には献立がありません」と
+   * 事実と違う理由を返していたので、本当の理由を言い分けるために返す。
+   */
+  hiddenSlots: MealSlot[]
 }
 
 /**
@@ -94,10 +100,17 @@ export function planTemplateFill(options: {
   let fillSlotCount = 0
   let keptSlotCount = 0
   let targetDayCount = 0
+  const hiddenSlotSet = new Set<MealSlot>()
   for (const date of dates) {
     if (isPastDate(date, today)) continue
     const dow = dowIndex(date)
     if (!allowedDows.includes(dow)) continue
+    // 表示していない食事にテンプレの中身があるかを控えておく（2026-07-30 便CH/C14。
+    // 入らなかった理由を「曜日に中身が無い」と取り違えないようにするため）
+    for (const slot of MEAL_SLOTS) {
+      if (visibleSlots.includes(slot)) continue
+      if ((itemsByDowSlot.get(`${dow}|${slot}`) ?? []).length > 0) hiddenSlotSet.add(slot)
+    }
     let dayHasTemplateItems = false
     for (const slot of visibleSlots) {
       const slotItems = itemsByDowSlot.get(`${dow}|${slot}`)
@@ -114,7 +127,13 @@ export function planTemplateFill(options: {
     }
     if (dayHasTemplateItems) targetDayCount++
   }
-  return { ops, fillSlotCount, keptSlotCount, targetDayCount }
+  return {
+    ops,
+    fillSlotCount,
+    keptSlotCount,
+    targetDayCount,
+    hiddenSlots: MEAL_SLOTS.filter((s) => hiddenSlotSet.has(s)),
+  }
 }
 
 /**

@@ -62,7 +62,12 @@ export function buildPlanSheet(options: {
   /** 表示中の食事（画面に出している食事だけを紙にも出す＝画面と同じ内容にする） */
   visibleSlots: MealSlot[]
   entries: Pick<MealPlanEntry, 'date' | 'slot' | 'role' | 'recipeId'>[]
-  /** レシピID→料理名（見つからない＝隠しているレシピ等は載せない） */
+  /**
+   * レシピID→料理名（見つからない＝レシピを消した等の孤児行は載せない）。
+   * 2026-07-30 便CH/C7: 呼び出し側は全レシピから引くようになった。以前は設定
+   * 「基本レシピを一覧に表示しない」を反映した表を渡していたため、設定をONにすると
+   * 献立表から今日以降の行だけが丸ごと消えていた（記録の行は残るので紙の中で扱いが食い違う）。
+   */
   titleOf: (recipeId: number) => string | undefined
   /** 日付→日付メモの本文 */
   notes: Map<string, string>
