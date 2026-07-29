@@ -8,6 +8,16 @@ import type { DishType, IconKey, MealPlanEntry, MealRole, MealSlot, Recipe, Seas
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
 /**
+ * 食事帯を必ず 朝食→昼食→夕食 の順に並べ直す（2026-07-29 便CD/MP-10）。
+ * 「表示する食事帯」は押した順に配列へ足されるだけだったため、あとから朝食・昼食を
+ * 足すと各日のカードが「夕食→朝食→昼食」の順で並び、設定に保存されて直せなかった。
+ * 保存時と読み出し時の両方でこの関数を通し、既存の設定値もその場で正しい順に見せる。
+ */
+export function sortMealSlots(slots: MealSlot[]): MealSlot[] {
+  return [...slots].sort((a, b) => MEAL_SLOTS.indexOf(a) - MEAL_SLOTS.indexOf(b))
+}
+
+/**
  * 自動提案のジャンル指定（和食/洋食/中華）。starters.ts/sets配下の実データで
  * 実際に使われているタグのみを採用する（2026-07-13献立の主菜+副菜構成対応）
  */
@@ -36,6 +46,16 @@ export function weekDates(reference: Date): string[] {
     d.setDate(monday.getDate() + i)
     return toDateString(d)
   })
+}
+
+/**
+ * YYYY-MM-DD の曜日を「月曜始まりのインデックス」(0=月, 1=火 … 6=日)で返す
+ * （2026-07-29 便CD/MP-02）。`ja.mealPlan.dow` が月曜始まりの配列なので、曜日ラベルは
+ * 必ずこの関数で日付から引くこと。以前は7日カードの並び順(配列インデックス)で曜日を
+ * 引いていたため、「今日から7日間」表示では今日が月曜の日以外は全行の曜日が嘘になっていた。
+ */
+export function dowIndex(dateStr: string): number {
+  return (new Date(`${dateStr}T00:00:00`).getDay() + 6) % 7
 }
 
 /** YYYY-MM-DD を weeks 週分だけ前後にずらす */
@@ -156,6 +176,19 @@ export interface SuggestOptions {
    */
   preferProteinSources?: ProteinSource[]
   /**
+   * 同じ食事の中で重ねたくない特徴キー（任意・2026-07-29 便CD/MP-04・dishAvoidKeys の戻り値）。
+   * 主菜が決まったあと、その主菜のたんぱく源・食感キーを渡すことで、同じ特徴を持つ副菜を
+   * 後回しにする（「しらたきのチャプチェ風＋春雨サラダ」「えび主菜＋ツナ副菜」の回避）。
+   * 一致しない候補が0件なら緩和する＝0件回避を優先する既存の段階的緩和と同じ作法。
+   */
+  avoidKeys?: string[]
+  /**
+   * 候補から必ず外すレシピID（任意・2026-07-29 便CD/MP-09・ハード除外）。
+   * 段階的緩和で復活する usedRecipeIds と違い、こちらは絶対に提案しない。
+   * 「同じ枠の主菜と副菜に同じ料理が入る」（レシピが極端に少ないときに起きる）を防ぐ。
+   */
+  excludeRecipeIds?: number[]
+  /**
    * 「昨日の週プランに入っていたレシピ」のID（任意・2026-07-16 便W-⑤b）。指定があれば
    * 候補から除外し、直近の繰り返し（一昨日食べたものが翌日また出る）を防ぐ。
    * 除外すると候補が尽きる場合は除外を解く（excludeYesterdayPlanRecipes参照）
@@ -189,6 +222,18 @@ function isSideSuggestable(r: Recipe): boolean {
 
 /** 副菜枠の提案対象になりうるdishType（デザートは含めない） */
 const SIDE_DISH_TYPES: DishType[] = ['side', 'soup']
+
+/**
+ * デザート・おやつか（2026-07-29 便CD/MP-09）。「おやつは主菜からも副菜からも外す」
+ * （2026-07-13 Fable裁定）は、役割の絞り込みが成立したときだけ効いていて、
+ * 主菜候補/副菜候補が0件になったときの緩和段では効いていなかった。そのため
+ * 「肉じゃが1品＋水ようかん1品」しか無い状態では水ようかんが副菜として提案されていた。
+ * 緩和段でもこの判定でデザートだけは除き続ける（結果0件＝副菜なしのほうが正しい）。
+ */
+function isDessertRecipe(r: Recipe): boolean {
+  if (r.dishType) return r.dishType === 'dessert'
+  return r.tags.includes('おやつ')
+}
 
 /**
  * レシピが主菜候補か。dishTypeがあれば最優先（'main'のみ主菜）で使い、
@@ -266,6 +311,93 @@ export function proteinSourceOf(
 }
 
 /**
+ * 「今週まだ少ないたんぱく源」を返す純関数（2026-07-29 便CD/MP-03・docs/56 §3-6）。
+ * fillWeek が週内の主菜のたんぱく源の集計を渡し、その結果を suggestForSlot の
+ * preferProteinSources に載せる。
+ *
+ * 従来は ①'その他'（ツナキャベツ丼・ペペロンチーノ・寄せ鍋・クリームシチュー・冷しゃぶサラダ・
+ * 冷や汁・ゴーヤチャンプルー・梅おろしぶっかけうどん など、野菜や主食が主役の主菜）を候補に
+ * 入れておらず ②「最少ちょうど」のソースだけに絞っていた。①のせいでその8品は「まとめて献立」から
+ * 構造的に出なくなり、②のせいで主菜プールが 肉→魚→卵→豆腐 の強制ローテーションに縛られて
+ * 「振り直しても代わり映えしない」原因になっていた（中華指定では麻婆豆腐が毎回必ず出る等）。
+ * docs/56 §3-6 は「軽く優先」「厳格化すると0件回避で結局崩れる」と書いており、
+ * 最少ちょうどの絞り込みはその設計意図からの逸脱だった。'その他'を候補に入れ、
+ * 「最少＋1まで」に緩めて設計意図へ戻す。
+ */
+export function preferredProteinSources(
+  counts: Record<ProteinSource, number>,
+): ProteinSource[] {
+  const sources: ProteinSource[] = ['肉', '魚', '卵', '豆腐', 'その他']
+  const min = Math.min(...sources.map((s) => counts[s]))
+  return sources.filter((s) => counts[s] <= min + 1)
+}
+
+/**
+ * 「つるっと系」（麺状で噛みごたえの少ない）主材料を使う料理か（2026-07-29 便CD/MP-04）。
+ * しらたき・春雨・くずきり・そうめん・ところてん等は、材料名も pantryGroup も iconKey も
+ * 別々に分類されるため、既存のどの名寄せでも「同じ食感が重なった」を検出できない。
+ * 食感の重なり（例:「しらたきのチャプチェ風」＋「春雨サラダ」＝噛みごたえがゼロの日）を
+ * 避けるためだけの、食感に特化した判定として新設する。
+ */
+export function isSlipperyDish(recipe: Pick<Recipe, 'title' | 'ingredients'>): boolean {
+  const words = ['しらたき', '白滝', '糸こんにゃく', 'こんにゃく', '蒟蒻', '春雨', 'はるさめ', 'くずきり', '葛切り', 'そうめん', '素麺', 'ところてん', '心太']
+  const hit = (text: string) => words.some((w) => text.includes(w))
+  if (hit(recipe.title)) return true
+  return recipe.ingredients.some((i) => hit(i.name))
+}
+
+/**
+ * 同じ食事の中で重ねたくない「特徴キー」（2026-07-29 便CD/MP-04）。
+ * 主菜に対して呼び、その結果を副菜提案の avoidKeys に渡す。
+ * - たんぱく源（肉/魚/卵/豆腐）: 「えび主菜＋ツナ副菜」のような魚介の重複を避ける。
+ *   'その他'（野菜が主役）は副菜のほとんどが該当してしまい絞り込みとして機能しないので入れない。
+ * - つるっと系: 「しらたき＋春雨」のような食感の重複を避ける。
+ * 差し替え理由の69%がこの2種類の重複だったため（PDCA2周目・T1実測）。
+ */
+export function dishAvoidKeys(
+  recipe: Pick<Recipe, 'title' | 'tags' | 'ingredients'>,
+): string[] {
+  const keys: string[] = []
+  const protein = avoidProteinSourceOf(recipe)
+  if (protein !== 'その他') keys.push(`protein:${protein}`)
+  if (isSlipperyDish(recipe)) keys.push('texture:つるっと')
+  return keys
+}
+
+/**
+ * 重複回避用のたんぱく源判定（2026-07-29 便CD/MP-04）。proteinSourceOf は主菜の週内分散
+ * （便BH-2）のための判定で、主食アイコン（丼・麺・パスタ）のときしか材料を見に行かない。
+ * そのため「ツナと蒸し大豆の香味サラダ」はサラダのアイコンになり 'その他' 判定で、
+ * 「えび主菜＋ツナ副菜」という魚介の重複を拾えなかった。
+ * ここでは 'その他' になったときに主材料まで見に行って、副菜側のたんぱく源も拾う。
+ * proteinSourceOf 自体には手を入れない（週内分散の挙動＝BH-2の回帰を動かさないため）。
+ */
+function avoidProteinSourceOf(
+  recipe: Pick<Recipe, 'title' | 'tags' | 'ingredients'>,
+): ProteinSource {
+  const direct = proteinSourceOf(recipe)
+  if (direct !== 'その他') return direct
+  for (const ing of pickMainIngredients(recipe.ingredients, 4)) {
+    const supplement = AVOID_PROTEIN_WORDS.find(([word]) => ing.name.includes(word))
+    if (supplement) return supplement[1]
+    const p = iconToProtein(pickIconKey({ title: ing.name, tags: [], ingredients: [] }))
+    if (p) return p
+  }
+  return 'その他'
+}
+
+/**
+ * アイコン辞書が（アイコンの都合で）たんぱく源として拾わない加工品の補い
+ * （2026-07-29 便CD/MP-04・重複回避の判定でだけ使う）。
+ * icon.ts の魚リストは「ちくわ等の練り物は含めない（あえ物と衝突するため）」という
+ * アイコン表示側の都合で作られており、ツナ缶もそこに入っていない。そのため
+ * 「えびの主菜＋ツナの副菜」という魚介の重なりを拾えなかった（差し替え理由の3件）。
+ * アイコン表示そのもの（icon.ts）と週内分散（proteinSourceOf）には影響させたくないので、
+ * 重複回避専用の最小の補いとしてここに置く。
+ */
+const AVOID_PROTEIN_WORDS: [string, ProteinSource][] = [['ツナ', '魚']]
+
+/**
  * その枠の主菜と、それ以外の品（副菜・汁物）のジャンルが食い違っているか
  * （「ジャンル混在」バッジ表示用・2026-07-23 便BH-2・docs/56 §3-10）。
  * 主菜のジャンルが定まっていて、他の品のいずれかが「別ジャンル」なら true。
@@ -325,6 +457,8 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
   const base = recipes.filter((r) => {
     // 季節外（例: 8月に冬タグのシチュー）は提案しない。通年・未設定は常に対象
     if (r.season && r.season !== 'all' && r.season !== season) return false
+    // ハード除外（同じ枠の主菜と副菜に同じ料理を入れない。便CD/MP-09）
+    if (r.id != null && options.excludeRecipeIds?.includes(r.id)) return false
     if (options.excludeNg && hasNgIngredient(r, options.ngIngredients)) return false
     if (options.quickOnly && !(r.cookMinutes != null && r.cookMinutes > 0 && r.cookMinutes <= 15))
       return false
@@ -341,16 +475,20 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
   // 主菜/副菜の役割で絞り込む（dishType優先・未設定はタグヒューリスティックにフォールバック。
   // isMainCandidate/isSideCandidate参照）。roleが指定されていればそれを優先し、未指定時は
   // 従来どおり夕食・昼食枠だけ主菜を優先する後方互換ロジックを使う
+  // 緩和段（該当0件で役割の絞り込みを解くとき）でも、おやつ・デザートだけは主菜にも副菜にも
+  // 出さない（2026-07-13 Fable裁定を緩和段にも適用。便CD/MP-09）。それも0件なら何も返さない
+  // ＝「副菜なし」のほうが「夕食の副菜に水ようかん」より正しい
+  const withoutDessert = () => slotPool.filter((r) => !isDessertRecipe(r))
   let rolePool = slotPool
   if (options.role === 'main') {
     const mains = slotPool.filter((r) => isMainCandidate(r))
-    if (mains.length > 0) rolePool = mains
+    rolePool = mains.length > 0 ? mains : withoutDessert()
   } else if (options.role === 'side') {
     const sides = slotPool.filter((r) => isSideCandidate(r))
-    if (sides.length > 0) rolePool = sides
+    rolePool = sides.length > 0 ? sides : withoutDessert()
   } else if (options.slot === 'dinner' || options.slot === 'lunch') {
     const mains = slotPool.filter((r) => isMainCandidate(r))
-    if (mains.length > 0) rolePool = mains
+    rolePool = mains.length > 0 ? mains : withoutDessert()
   }
 
   // ジャンル（和食/洋食/中華）の優先指定
@@ -370,12 +508,22 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
     if (matched.length > 0) dishTypePool = matched
   }
 
+  // 同じ食事の中での食材・食感の重複回避（2026-07-29 便CD/MP-04）。主菜のたんぱく源・食感キーと
+  // 重ならない品を優先する。一致0件なら緩和＝0件回避を優先（洋食・中華の副菜は3品しかないので、
+  // 1品外しても2品残る＝通常は緩和段に落ちない）
+  let avoidPool = dishTypePool
+  if (options.avoidKeys && options.avoidKeys.length > 0) {
+    const avoid = options.avoidKeys
+    const matched = dishTypePool.filter((r) => !dishAvoidKeys(r).some((k) => avoid.includes(k)))
+    if (matched.length > 0) avoidPool = matched
+  }
+
   // たんぱく源の週内分散（今週まだ少ないソースの主菜を優先。2026-07-23 便BH-2・docs/56 §3-6。
   // 該当0件なら緩和＝0件回避を優先。魚・卵・豆腐の主菜が限られるため厳格化はしない）
-  let proteinSourcePool = dishTypePool
+  let proteinSourcePool = avoidPool
   if (options.preferProteinSources && options.preferProteinSources.length > 0) {
     const wanted = options.preferProteinSources
-    const matched = dishTypePool.filter((r) => wanted.includes(proteinSourceOf(r)))
+    const matched = avoidPool.filter((r) => wanted.includes(proteinSourceOf(r)))
     if (matched.length > 0) proteinSourcePool = matched
   }
 
@@ -432,6 +580,10 @@ export function suggestPairForSlot(
     // 副菜スロットは純粋な副菜に寄せる。たんぱく源分散は主菜だけの都合なので副菜には効かせない
     preferDishType: 'side',
     preferProteinSources: undefined,
+    // 主菜と食材（たんぱく源）・食感が重ならない副菜を優先する（便CD/MP-04）
+    avoidKeys: main ? dishAvoidKeys(main) : undefined,
+    // 同じ枠に同じ料理が2回入るのを必ず防ぐ（便CD/MP-09。usedRecipeIdsは緩和段で復活しうる）
+    excludeRecipeIds: main?.id != null ? [...(options.excludeRecipeIds ?? []), main.id] : options.excludeRecipeIds,
     usedRecipeIds: main ? [...options.usedRecipeIds, main.id!] : options.usedRecipeIds,
     genre: options.genre ?? (main ? recipeGenre(main) : undefined),
   })

@@ -23,8 +23,8 @@ import { pantryAvailableNames } from '../logic/pantry'
 import { useTodayList } from '../db/todayList'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
-import { currentSeason, preferSeason } from '../logic/season'
-import { isMainDish } from '../logic/mealPlan'
+import { currentSeason, preferSeasonWithFallback } from '../logic/season'
+import { isMainDish, excludeYesterdayPlanRecipes } from '../logic/mealPlan'
 import { makePantryMatcher } from '../logic/pantry'
 import type { CookedLog, HomeWidgetKey, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
@@ -49,6 +49,13 @@ const conditions: { value: SuggestCondition; label: string }[] = [
 
 // 「◯分以内」で選べる分数(2026-07-24 便BN・タスク7)。既定は先頭の10分
 const QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
+
+/**
+ * 「ほかの候補を見る」で直近に出した候補を何件まで覚えておくか(2026-07-29 便CD/MP-12)。
+ * この件数ぶんは次の抽選から外し、同じ料理が続けて出るのを防ぐ。多くしすぎると
+ * 候補が尽きて除外が毎回解けてしまうので、連続を切れる最小限の3件にする
+ */
+const RECENT_SUGGEST_KEEP = 3
 
 function matchesCondition(
   recipe: Recipe,
@@ -179,6 +186,9 @@ export default function HomePage() {
   const [mainOnly, setMainOnly] = useState(true)
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
+  // 「ほかの候補を見る」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
+  // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
+  const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
   const [ingredients, setIngredients] = useState<string[]>([])
   // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
   const quickMinutes = settings?.homeQuickMinutes ?? 10
@@ -247,14 +257,17 @@ export default function HomePage() {
   }
 
   // 条件で絞り込んだ上で、今の季節に合うものを優先する。
-  // 「主菜から」がオンなら主菜(肉・魚・卵・豆腐が主役)に絞る(0件なら0件回避で全体から・便BH-2)
+  // 「主菜から」がオンなら主菜(肉・魚・卵・豆腐が主役)に絞る(0件なら0件回避で全体から・便BH-2)。
+  // 2026-07-29 便CD/MP-12: 季節ぴったりの品が少ないときは通年の品も自動で混ぜる
+  // (preferSeasonWithFallback)。同梱レシピの夏タグは5品しかなく、何度振り直しても
+  // その5品の中でしか回らず同じ料理が連発していた。設定は増やさず自動で広げる
   const candidates = useMemo(() => {
     let byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
     if (mainOnly) {
       const mains = byCondition.filter((r) => isMainDish(r))
       if (mains.length > 0) byCondition = mains
     }
-    return preferSeason(byCondition, currentSeason())
+    return preferSeasonWithFallback(byCondition, currentSeason())
   }, [recipes, condition, mainOnly, quickMinutes])
 
   // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
@@ -269,10 +282,27 @@ export default function HomePage() {
       : { list: candidates, fallback: true }
   }, [candidates, pantryOnly, pantryNames])
 
+  // 直前に出た候補を「ほかの候補を見る」の対象から外す(2026-07-29 便CD/MP-12)。
+  // 候補が尽きるなら除外を解く(空振りより重複がマシ)＝献立エンジンの
+  // excludeYesterdayPlanRecipes と同じ作法・同じ関数を使う
+  const shufflePool = useMemo(
+    () => excludeYesterdayPlanRecipes(finalCandidates, recentSuggestedIds),
+    [finalCandidates, recentSuggestedIds],
+  )
   const suggestion =
-    finalCandidates.length > 0
-      ? finalCandidates[Math.floor(seed * finalCandidates.length) % finalCandidates.length]
+    shufflePool.length > 0
+      ? shufflePool[Math.floor(seed * shufflePool.length) % shufflePool.length]
       : undefined
+  // 「ほかの候補を見る」: 今出ている候補を直近リストへ積んでから振り直す
+  const shuffleSuggestion = () => {
+    if (suggestion?.id != null) {
+      const shownId = suggestion.id
+      setRecentSuggestedIds((prev) =>
+        [shownId, ...prev.filter((id) => id !== shownId)].slice(0, RECENT_SUGGEST_KEEP),
+      )
+    }
+    setSeed(Math.random())
+  }
 
   // 最近作ったもの: 全レシピの「作った記録」を新しい順に5件
   const history = useMemo(() => {
@@ -429,7 +459,7 @@ export default function HomePage() {
 
             <button
               type="button"
-              onClick={() => setSeed(Math.random())}
+              onClick={shuffleSuggestion}
               className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
             >
               <Dices size={20} aria-hidden />

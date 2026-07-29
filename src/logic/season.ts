@@ -23,3 +23,29 @@ export function preferSeason(recipes: Recipe[], season: Exclude<Season, 'all'>):
   if (neutral.length > 0) return neutral
   return recipes
 }
+
+/**
+ * 季節候補が少なすぎるときに自動で候補を広げる版（2026-07-29 便CD/MP-12）。
+ *
+ * preferSeason は「その季節ぴったりの品が1つでもあれば、その品だけ」に絞る。同梱レシピの
+ * 夏タグは5品しかないため、ホームの「今日なに作る?」は何度振り直しても同じ5品の中でしか
+ * 回らず、同じ料理が連発していた（PDCA2周目・P3/P4/P5が独立に指摘）。献立エンジン側
+ * （suggestForSlot）は「季節外を除くだけ＝通年の品も候補に残す」ので、扱いも非対称だった。
+ *
+ * そこで「季節ぴったりの品が minCount 未満なら、通年・季節指定なしの品も混ぜる」ことで
+ * 自動的に候補を広げる。季節の品が十分あるときは従来どおり季節優先のまま＝設定は増やさない。
+ */
+export const SEASON_MIN_CANDIDATES = 10
+
+export function preferSeasonWithFallback(
+  recipes: Recipe[],
+  season: Exclude<Season, 'all'>,
+  minCount: number = SEASON_MIN_CANDIDATES,
+): Recipe[] {
+  if (recipes.length === 0) return recipes
+  const exact = recipes.filter((r) => r.season === season)
+  if (exact.length >= minCount) return exact
+  const neutral = recipes.filter((r) => r.season == null || r.season === 'all')
+  const widened = [...exact, ...neutral]
+  return widened.length > 0 ? widened : recipes
+}

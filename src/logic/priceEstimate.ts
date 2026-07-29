@@ -363,6 +363,35 @@ export function sumMealPlanEntriesCost<E extends { recipeId: number }>(
   return { total, fromMasterCount, personalTotal: Math.round(personalRaw), dishCount }
 }
 
+/**
+ * 献立エントリ群のうち「価格が分からない材料」の名前を重複なしで返す（2026-07-29 便CD/MP-11）。
+ * 個別入力(ing.price)もマスタ一致もない材料＝概算食費の合計に1円も入っていない材料。
+ * 「概算食費は実質使えない」（金額の信頼度が伝わらない）という指摘への対応で、
+ * 画面に「価格が分からない材料◯種類を除いた概算です」と正直に添えるために使う。
+ * 同じ材料名は何品に出てきても1件として数える（ユーザーが登録すべき件数と一致させるため）。
+ */
+export function pricelessIngredientNames<E extends { recipeId: number }>(
+  entries: E[],
+  recipeById: Map<
+    number,
+    { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[]; servings?: number }
+  >,
+  index: PriceIndexEntry[],
+): string[] {
+  const names = new Set<string>()
+  for (const e of entries) {
+    const recipe = recipeById.get(e.recipeId)
+    if (!recipe) continue
+    for (const ing of recipe.ingredients) {
+      if (ing.price != null && ing.price > 0) continue
+      const estimated = estimateIngredientYen(ing, index)
+      if (estimated != null && estimated.yen > 0) continue
+      names.add(ing.name)
+    }
+  }
+  return Array.from(names)
+}
+
 /** 「作った記録」群の実績原価合計と食数（1人1食＝1食）。2026-07-24 便BH-3・タスク9 */
 export interface CookedLogsCostSum {
   /** 実績原価の合計（記録した人数分にスケールした金額を合算する＝家族全員分） */

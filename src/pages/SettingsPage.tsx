@@ -124,11 +124,14 @@ const settingsSections: { id: string; label: string }[] = [
 // backupは2026-07-16 ホームリンクの遷移先として追加。値は該当節内のアンカー要素id。
 // テーマ全廃(2026-07-23)で ?section=themes は廃止したが、旧リンクで来ても無害に着地させるため
 // 「レシピ」節へ読み替える（recipe/themes のどちらでもレシピ節の先頭へ飛ぶ）
+// budgetは2026-07-29 便CD/MP-11: 献立タブの概算食費「週の食費予算を登録する」の遷移先。
+// 従来は「設定画面で登録すると比較できます」という案内文だけで行き止まりだった
 const sectionDeepLinks: Record<string, string> = {
   pro: 'pro-section',
   backup: 'backup-section',
   recipe: 'section-recipe',
   themes: 'section-recipe',
+  budget: 'budget-section',
 }
 
 // 各節の見出し(全般/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -852,8 +855,9 @@ export default function SettingsPage() {
             </Link>
           </section>
 
-          {/* 週の食費予算。2026-07-13 UI改善: NG食材の直下（食材と価格の次）に移動 */}
-          <section className={sectionCls}>
+          {/* 週の食費予算。2026-07-13 UI改善: NG食材の直下（食材と価格の次）に移動。
+              id は献立タブの概算食費からの直リンク(?section=budget)の着地点(2026-07-29 便CD/MP-11) */}
+          <section id="budget-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.weeklyBudgetTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.weeklyBudgetDescription}</p>
             <input

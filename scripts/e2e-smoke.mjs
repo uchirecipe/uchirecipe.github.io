@@ -116,7 +116,7 @@
 //         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
 //         その日の献立モーダル(朝昼夕・レシピ名リンク・「この週を開く」・献立なし文言)を出す) /
 //         MEALPLAN-03(献立タブ・主菜+副菜構成。2026-07-13 Fable設計: 各枠が既定で主菜+副菜の
-//         2行になっていること・「＋枠を追加」で行を増やせること・行単位のサイコロは他の行に
+//         2行になっていること・「＋料理を追加」で行を増やせること・行単位のサイコロは他の行に
 //         影響しないこと・枠が丸ごと空のときのサイコロ/まとめて献立を立てるは主菜+副菜のペアで
 //         埋まること・まとめて献立を立てるのアイコンがDicesであること) /
 //         MEALPLAN-04(修正1b・2026-07-14オーナー実機フィードバック: 「まとめて献立を立てる」は
@@ -3740,7 +3740,7 @@ try {
       await mpPage.waitForTimeout(300)
       check(
         'MEALPLAN-01(Fix6) 最後の1枠(夕食)を外そうとすると説明トーストが出る',
-        (await mpPage.textContent('body')).includes('少なくとも1つの食事帯は表示します'),
+        (await mpPage.textContent('body')).includes('少なくとも1つは表示したままにします'),
       )
       check(
         'MEALPLAN-01(Fix6) 夕食フィルタは外れずaria-pressed=trueのまま',
@@ -3750,7 +3750,7 @@ try {
       // 便U-4: 「この帯の今週分を空にする」。ここまでの操作で月曜夕食の主菜行に「肉じゃが」が
       // 割り当て済み(Fix4)。帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
       // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
-      const clearDinnerTargetBtn = mpPage.getByRole('button', { name: '空にする帯として夕食を選ぶ' })
+      const clearDinnerTargetBtn = mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' })
       check(
         'MEALPLAN-01(便U-4) 帯選択ボタンは既定で「夕食」がaria-pressed=true',
         (await clearDinnerTargetBtn.getAttribute('aria-pressed')) === 'true',
@@ -3759,11 +3759,42 @@ try {
       await mpPage.waitForTimeout(400)
       check(
         'MEALPLAN-01(便U-4) 確認後、削除完了のトーストが出る',
-        (await mpPage.textContent('body')).includes('夕食の今週分を削除しました'),
+        (await mpPage.textContent('body')).includes('夕食のこの週分を'),
       )
       check(
         'MEALPLAN-01(便U-4) 夕食を空にすると割り当て済みだった「肉じゃが」も消える(未定に戻る)',
         (await mpPage.getByText('肉じゃが', { exact: true }).count()) === 0,
+      )
+
+      // 2026-07-29 便CD/MP-02: 「今日から7日間」表示の曜日ラベルが日付と一致すること。
+      // 従来は7日カードの並び順(配列インデックス)で曜日を引いていたため、今日が月曜の日以外は
+      // 表示中の7行すべての曜日が日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る)。
+      // このモードは自動テストが1件も無く、ユーザーからも報告されにくい盲点だったので恒久化する
+      await mpPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await mpPage.waitForTimeout(500)
+      const rollingHeads = await mpPage.evaluate(() => {
+        const dow = ['月', '火', '水', '木', '金', '土', '日']
+        const found = []
+        const mismatch = []
+        document.querySelectorAll('h2').forEach((h) => {
+          const m = (h.textContent ?? '').match(/^([月火水木金土日])\s+(\d{4})\/(\d{2})\/(\d{2})/)
+          if (!m) return
+          const d = new Date(`${m[2]}-${m[3]}-${m[4]}T00:00:00`)
+          const expected = dow[(d.getDay() + 6) % 7]
+          found.push(`${m[1]} ${m[2]}/${m[3]}/${m[4]}`)
+          if (expected !== m[1]) mismatch.push(`${m[2]}/${m[3]}/${m[4]} は${expected}なのに${m[1]}と表示`)
+        })
+        return { found, mismatch }
+      })
+      check(
+        'MEALPLAN-01(便CD/MP-02) 「今日から7日間」で7日分のカード見出しが出る',
+        rollingHeads.found.length === 7,
+        `found=${rollingHeads.found.length}`,
+      )
+      check(
+        'MEALPLAN-01(便CD/MP-02) 「今日から7日間」の曜日ラベルが日付と一致する',
+        rollingHeads.mismatch.length === 0,
+        rollingHeads.mismatch.join(' / '),
       )
     } finally {
       await mpBrowser.close()
@@ -3931,7 +3962,7 @@ try {
   // ・各枠は既定で「主菜」「副菜」の2行(未定×2)が並ぶこと
   // ・行単位のサイコロは対象の役割の行だけに作用する(枠が部分的に埋まっているとき)こと
   // ・枠が丸ごと空のときのサイコロは主菜+副菜のペアで一度に埋まること
-  // ・「＋枠を追加」で行を増やせること
+  // ・「＋料理を追加」で行を増やせること
   // ・ジャンルチップ(指定なし/和食/洋食/中華)が単一選択で切り替わること
   // ・「まとめて献立を立てる」ボタンにDicesアイコンが付くこと(Sparklesから変更) ---
   currentCheck = 'MEALPLAN-03'
@@ -4055,15 +4086,15 @@ try {
         `before=${afterRowDiceEmptyCount} after=${afterPairEmptyCount} delta=${pairDelta}`,
       )
 
-      // ＋枠を追加: 水曜(3番目の「＋枠を追加」ボタン。まだ未着手の日)で主菜をもう1行追加すると
+      // ＋料理を追加: 水曜(3番目の「＋枠を追加」ボタン。まだ未着手の日)で主菜をもう1行追加すると
       // 「未定」が1件増える
-      const addRowButtons = mp3Page.getByRole('button', { name: '＋枠を追加' })
+      const addRowButtons = mp3Page.getByRole('button', { name: '＋料理を追加' })
       await addRowButtons.nth(2).click()
       await mp3Page.waitForTimeout(200)
       await mp3Page.getByRole('button', { name: '主菜', exact: true }).click()
       await mp3Page.waitForTimeout(300)
       check(
-        'MEALPLAN-03(＋枠を追加) 行を追加すると「未定」が1件増える',
+        'MEALPLAN-03(＋料理を追加) 行を追加すると空き枠が1件増える',
         (await mp3Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === afterPairEmptyCount + 1,
       )
     } finally {
@@ -4391,7 +4422,7 @@ try {
   // 週の枠に手動でレシピ(肉じゃが)を入れた直後に「まとめて献立を立てる」を押しても、
   // その手動配置が無警告で上書き削除されず、同じmealPlans行id・同じレシピのまま残ることを
   // IndexedDB直読みで検証する。旧実装は表示中の全枠を一旦クリアしていたため手動配置が消えていた。
-  // 併せて、空き枠は自動提案で埋まること・「手動で入れた◯枠は残した」トーストが出ること・
+  // 併せて、空き枠は自動提案で埋まること・「すでに決まっている◯食分は残した」トーストが出ること・
   // 2回押しても手動枠が保護され続けること(自動枠だけ再抽選)を確認する。
   // まっさらプロファイルで検証するため専用browser/contextを使う ---
   currentCheck = 'MEALPLAN-08'
@@ -4483,10 +4514,11 @@ try {
           (r) => r.date === manual.date && r.role === 'side' && r.auto === true,
         ) && rowsAfter.some((r) => r.id === manual.id && r.role === 'main' && r.auto === false),
       )
-      // 「手動で入れた◯枠は残した」トーストが出る(結果メッセージで明示)
+      // 「すでに決まっている◯食分はそのままにして◯品を新しく立てました」トーストが出る
+      // (2026-07-29 便CD/MP-06: 実際に立てた品数で出し分ける。0品なら0品と言う)
       check(
         'MEALPLAN-08 手動枠を残した旨のトーストが出る',
-        await mp8Page.getByText('手動で入れた', { exact: false }).first().isVisible(),
+        await mp8Page.getByText('すでに決まっている', { exact: false }).first().isVisible(),
       )
 
       // 2回目のタップでも手動枠は保護され続ける(自動枠だけ再抽選される)
@@ -5563,12 +5595,12 @@ try {
       await cwPage.waitForTimeout(700)
 
       check(
-        'MEALPLAN-S3 確認文が「入る件数」と「残る」を明示する(規約F準拠)',
-        /コピーします/.test(cwDialogMsg) && /件/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
+        'MEALPLAN-S3 確認文が「入る品数」と「残る」を明示する(規約F準拠)',
+        /コピーします/.test(cwDialogMsg) && /\d+品/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
         `dialog=${cwDialogMsg}`,
       )
       const cwToast = (await cwPage.textContent('body')) ?? ''
-      check('MEALPLAN-S3 コピー完了トーストが出る', /先週の献立を\d+件コピーしました/.test(cwToast))
+      check('MEALPLAN-S3 コピー完了トーストが出る', /先週の献立を\d+品コピーしました/.test(cwToast))
 
       // IndexedDBで結果を検証(day1=コピーされる / day0=手動配置が残る)
       const cwResult = await cwPage.evaluate(
