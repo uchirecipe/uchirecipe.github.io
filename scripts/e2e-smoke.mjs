@@ -10215,6 +10215,418 @@ try {
       await w1Browser.close()
     }
   }
+  // --- LOG-CI2-01(2026-07-29 便CI 第2波・記録の連鎖): C05 記録した人数の可視化と編集 /
+  // C19 「やめる」でメモが残らない / C08 記録が日付の新しい順に保たれる /
+  // C03 直近5件で打ち切られた記録の続きへ行ける / C04 履歴に写真サムネが出る /
+  // C02 作った記録を1件だけ削除できる(確認文は規約F) ---
+  currentCheck = 'LOG-CI2-01'
+  {
+    const tinyPng2 = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    )
+    const l2Browser = await chromium.launch()
+    const l2Context = await l2Browser.newContext()
+    const l2Page = await l2Context.newPage()
+    l2Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@LOG-CI2-01] ${err.message}`)
+    })
+    const l2Dialogs = []
+    let l2AcceptDialogs = true
+    l2Page.on('dialog', async (dialog) => {
+      l2Dialogs.push(dialog.message())
+      if (l2AcceptDialogs) await dialog.accept()
+      else await dialog.dismiss()
+    })
+    const openLogModal = async () => {
+      await l2Page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await l2Page.waitForTimeout(400)
+    }
+    const readLogs = (id) =>
+      l2Page.evaluate(
+        (recipeId) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const getReq = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+              getReq.onsuccess = () => {
+                const logs = getReq.result?.cookedLogs ?? []
+                resolve(
+                  logs.map((l) => ({
+                    date: l.date,
+                    servings: l.servings ?? null,
+                    hasPhoto: l.photo instanceof Blob,
+                  })),
+                )
+              }
+              getReq.onerror = () => reject(getReq.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        id,
+      )
+    try {
+      await l2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await l2Page.waitForTimeout(2000) // 初回シード完了待ち
+      await l2Page.getByText('肉じゃが', { exact: true }).first().click()
+      await l2Page.waitForTimeout(600)
+      const recipeId = Number(l2Page.url().match(/#\/recipes\/(\d+)/)?.[1])
+      const shownServings = Number(
+        ((await l2Page.locator('span.min-w-14').first().textContent()) ?? '').match(/\d+/)?.[0],
+      )
+
+      // --- C05: 記録窓に「何人分作った？」が出て、その場で直せる ---
+      await openLogModal()
+      const logDialog = l2Page.getByRole('dialog', { name: '作った記録をつける' })
+      const logDialogText = (await logDialog.textContent()) ?? ''
+      check(
+        'LOG-CI2-01/C05 記録窓に「何人分作った？」の欄が出る',
+        logDialogText.includes('何人分作った？'),
+        logDialogText,
+      )
+      check(
+        'LOG-CI2-01/C05 記録した人数が何に使われるかも書かれている(実績食費の分母)',
+        logDialogText.includes('作った記録の食費'),
+        logDialogText,
+      )
+      check(
+        'LOG-CI2-01/C05 初期値は詳細画面の表示人数',
+        ((await logDialog.locator('span.min-w-14').textContent()) ?? '').includes(String(shownServings)),
+        await logDialog.locator('span.min-w-14').textContent(),
+      )
+      await logDialog.getByRole('button', { name: '人数を増やす' }).click()
+      await l2Page.waitForTimeout(200)
+      await logDialog
+        .locator('input[type="file"]:not([capture])')
+        .setInputFiles({ name: 'h.png', mimeType: 'image/png', buffer: tinyPng2 })
+      await l2Page.waitForTimeout(600)
+      await l2Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await l2Page.waitForTimeout(700)
+      const afterFirst = await readLogs(recipeId)
+      check(
+        'LOG-CI2-01/C05 記録窓で直した人数がそのまま保存される',
+        afterFirst[0]?.servings === shownServings + 1,
+        JSON.stringify(afterFirst),
+      )
+      check(
+        'LOG-CI2-01/C05 記録一覧にも「◯人分」が出る',
+        (await l2Page.textContent('body')).includes(`${shownServings + 1}人分`),
+      )
+
+      // --- C19: メモを書いて「やめる」→ 次に開いたときメモが残っていない ---
+      await openLogModal()
+      await logDialog.locator('input[type="text"]').first().fill('やめるテストのメモ')
+      await l2Page.waitForTimeout(200)
+      await logDialog.getByRole('button', { name: 'やめる' }).click()
+      await l2Page.waitForTimeout(400)
+      await openLogModal()
+      check(
+        'LOG-CI2-01/C19 「やめる」で捨てたメモが次の記録に持ち越されない',
+        (await logDialog.locator('input[type="text"]').first().inputValue()) === '',
+        await logDialog.locator('input[type="text"]').first().inputValue(),
+      )
+      // --- C08: 過去の日付を後から記録しても、記録は日付の新しい順に保たれる ---
+      await logDialog.locator('input[type="date"]').fill('2026-06-01')
+      await l2Page.waitForTimeout(200)
+      await l2Page.getByRole('button', { name: '記録する', exact: true }).click()
+      await l2Page.waitForTimeout(700)
+      const afterPast = await readLogs(recipeId)
+      const sortedDates = [...afterPast.map((l) => l.date)].sort((a, b) => b.localeCompare(a))
+      check(
+        'LOG-CI2-01/C08 過去日を後から記録しても保存順は日付の新しい順のまま',
+        JSON.stringify(afterPast.map((l) => l.date)) === JSON.stringify(sortedDates),
+        JSON.stringify(afterPast.map((l) => l.date)),
+      )
+
+      // --- C03: 記録が5件を超えたら「すべて見る（他◯件）」で続きに行ける ---
+      for (let i = 0; i < 4; i++) {
+        await openLogModal()
+        await l2Page.getByRole('button', { name: '記録する', exact: true }).click()
+        await l2Page.waitForTimeout(600)
+      }
+      const seeAll = l2Page.getByRole('link', { name: /すべて見る（他\d+件）/ })
+      check('LOG-CI2-01/C03 記録が6件以上あると「すべて見る（他◯件）」が出る', (await seeAll.count()) === 1)
+      check(
+        'LOG-CI2-01/C03 「他◯件」の件数が「総数−表示中の5件」になっている',
+        ((await seeAll.textContent()) ?? '').includes(`他${(await readLogs(recipeId)).length - 5}件`),
+        await seeAll.textContent(),
+      )
+      await seeAll.click()
+      await l2Page.waitForTimeout(800)
+      check(
+        'LOG-CI2-01/C03 履歴ページがこのレシピの記録だけに絞られる',
+        (l2Page.url().split('#')[1] ?? '').startsWith(`/history?recipe=${recipeId}`),
+        l2Page.url(),
+      )
+      const historyText = await l2Page.textContent('body')
+      const totalLogs = (await readLogs(recipeId)).length
+      check(
+        'LOG-CI2-01/C03 絞り込み中であることと、外し方が画面に出る',
+        historyText.includes('「肉じゃが」の記録だけを表示しています') &&
+          historyText.includes('すべての記録を見る'),
+        historyText.slice(0, 300),
+      )
+      check(
+        'LOG-CI2-01/C03 履歴に件数が出る(全◯件)',
+        historyText.includes(`全${totalLogs}件`),
+        historyText.slice(0, 300),
+      )
+      check(
+        'LOG-CI2-01/C04 履歴の行に写真サムネイルが出る(記録写真→レシピ写真の順)',
+        (await l2Page.locator('ul li img').count()) >= 1,
+        `img=${await l2Page.locator('ul li img').count()}`,
+      )
+      check(
+        'LOG-CI2-01/C05 履歴の行にも記録した人数が出る',
+        historyText.includes(`${shownServings + 1}人分`),
+      )
+      await l2Page.getByRole('link', { name: 'すべての記録を見る' }).click()
+      await l2Page.waitForTimeout(600)
+      check(
+        'LOG-CI2-01/C03 「すべての記録を見る」で絞り込みが外れる',
+        !(await l2Page.textContent('body')).includes('の記録だけを表示しています'),
+      )
+
+      // --- C02: 作った記録を1件だけ削除できる。確認文は規約F ---
+      await l2Page.goto(`${BASE}/#/recipes/${recipeId}`, { waitUntil: 'networkidle' })
+      await l2Page.waitForTimeout(700)
+      const beforeDelete = (await readLogs(recipeId)).length
+      await l2Page.locator('button[aria-label="この記録を編集"]').first().click()
+      await l2Page.waitForTimeout(400)
+      const deleteLogBtn = l2Page.getByRole('button', { name: 'この記録を削除' })
+      check('LOG-CI2-01/C02 記録の編集行に「この記録を削除」が出る', (await deleteLogBtn.count()) === 1)
+      // まず確認文だけ読む(キャンセル=消えないこと)
+      l2AcceptDialogs = false
+      await deleteLogBtn.click()
+      await l2Page.waitForTimeout(500)
+      const delLogMessage = l2Dialogs[l2Dialogs.length - 1] ?? ''
+      check(
+        'LOG-CI2-01/C02 削除の確認文に、消える記録の日付と残る記録の件数が入る(規約F)',
+        /\d{4}\/\d{2}\/\d{2}の作った記録を削除します/.test(delLogMessage) &&
+          delLogMessage.includes(`ほかの作った記録${beforeDelete - 1}件は残ります`),
+        delLogMessage,
+      )
+      check(
+        'LOG-CI2-01/C02 確認文に「元に戻せません」と、レシピ本体は残ることが書かれている',
+        delLogMessage.includes('元に戻せません') && delLogMessage.includes('レシピ本体'),
+        delLogMessage,
+      )
+      check(
+        'LOG-CI2-01/C02 キャンセルすると記録は消えない',
+        (await readLogs(recipeId)).length === beforeDelete,
+      )
+      l2AcceptDialogs = true
+      await deleteLogBtn.click()
+      await l2Page.waitForTimeout(800)
+      check(
+        'LOG-CI2-01/C02 承諾すると作った記録が1件だけ減る(レシピは残る)',
+        (await readLogs(recipeId)).length === beforeDelete - 1 &&
+          (await l2Page.textContent('body')).includes('肉じゃが'),
+        `残り=${(await readLogs(recipeId)).length}`,
+      )
+      check(
+        'LOG-CI2-01/C02 削除したことがトーストで分かる',
+        (await l2Page.textContent('body')).includes('作った記録を削除しました'),
+      )
+
+      // --- C05: 記録の編集フォームからも人数を直せる ---
+      const beforeEditServings = (await readLogs(recipeId))[0]?.servings
+      await l2Page.locator('button[aria-label="この記録を編集"]').first().click()
+      await l2Page.waitForTimeout(400)
+      const editRow = l2Page.locator('li', { hasText: '何人分作った？' }).last()
+      check(
+        'LOG-CI2-01/C05 記録の編集フォームにも人数の欄があり、記録済みの値で開く',
+        ((await editRow.locator('span.min-w-12').textContent()) ?? '').includes(
+          String(beforeEditServings),
+        ),
+        await editRow.locator('span.min-w-12').textContent(),
+      )
+      await editRow.getByRole('button', { name: '人数を増やす' }).click()
+      await l2Page.waitForTimeout(200)
+      await l2Page.getByRole('button', { name: '保存する', exact: true }).click()
+      await l2Page.waitForTimeout(700)
+      const afterEdit = await readLogs(recipeId)
+      check(
+        'LOG-CI2-01/C05 記録の編集フォームで直した人数が保存される',
+        afterEdit[0]?.servings === beforeEditServings + 1,
+        `編集前=${beforeEditServings} 編集後=${afterEdit[0]?.servings}`,
+      )
+    } finally {
+      await l2Browser.close()
+    }
+  }
+
+  // --- CARRY-01(2026-07-29 便CI/C07): レシピ内リンク(だし汁→だしのとり方)で移動したとき、
+  // 前のレシピの表示人数と記録メモの下書きが持ち越されないこと。持ち越すと材料が誤スケールし、
+  // 誤った人数が黙って記録される(献立の実績食費の分母になる) ---
+  currentCheck = 'CARRY-01'
+  {
+    const cyBrowser = await chromium.launch()
+    const cyContext = await cyBrowser.newContext()
+    const cyPage = await cyContext.newPage()
+    cyPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@CARRY-01] ${err.message}`)
+    })
+    try {
+      await cyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cyPage.waitForTimeout(2200)
+      await cyPage.locator('input[type="search"]').fill('だし巻き卵')
+      await cyPage.waitForTimeout(500)
+      await cyPage.getByText('だし巻き卵', { exact: true }).first().click()
+      await cyPage.waitForTimeout(700)
+      // 人数を4回増やして6人分にし、記録メモの下書きも残す
+      for (let i = 0; i < 4; i++) {
+        await cyPage.locator('button[aria-label="人数を増やす"]').first().click()
+        await cyPage.waitForTimeout(120)
+      }
+      const beforeMove = await cyPage.locator('span.min-w-14').first().textContent()
+      await cyPage.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await cyPage.waitForTimeout(400)
+      const carryDialog = cyPage.getByRole('dialog', { name: '作った記録をつける' })
+      await carryDialog.locator('input[type="text"]').first().fill('だし巻き卵用のメモ')
+      await carryDialog.getByRole('button', { name: 'やめる' }).click()
+      await cyPage.waitForTimeout(400)
+
+      await cyPage.getByRole('link', { name: 'だしのとり方' }).first().click()
+      await cyPage.waitForTimeout(800)
+      const afterMove = await cyPage.locator('span.min-w-14').first().textContent()
+      check(
+        'CARRY-01/C07 レシピ内リンクで移動すると表示人数が移動先の登録人数に戻る(前の6人分が残らない)',
+        (beforeMove ?? '').includes('6') && !(afterMove ?? '').includes('6'),
+        `移動前=${beforeMove} 移動後=${afterMove}`,
+      )
+      await cyPage.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '作った！',
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await cyPage.waitForTimeout(400)
+      check(
+        'CARRY-01/C07 前のレシピの記録メモの下書きが移動先にプリフィルされない',
+        (await carryDialog.locator('input[type="text"]').first().inputValue()) === '',
+        await carryDialog.locator('input[type="text"]').first().inputValue(),
+      )
+    } finally {
+      await cyBrowser.close()
+    }
+  }
+
+  // --- FAV-CARD-01(2026-07-29 便CI/C15): レシピ一覧のカードのハートで、詳細を開かずに
+  // お気に入りを付け外しできること(カードのタップ=詳細へ、は壊さない) ---
+  currentCheck = 'FAV-CARD-01'
+  {
+    const fcBrowser = await chromium.launch()
+    const fcContext = await fcBrowser.newContext()
+    const fcPage = await fcContext.newPage()
+    fcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FAV-CARD-01] ${err.message}`)
+    })
+    try {
+      await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(2000)
+      const heart = fcPage.getByRole('button', { name: 'お気に入りに追加' }).first()
+      check('FAV-CARD-01 一覧カードに押せるお気に入りボタンが出る', (await heart.count()) >= 1)
+      await heart.click()
+      await fcPage.waitForTimeout(700)
+      check(
+        'FAV-CARD-01 ハートを押しても詳細へ遷移しない(一覧のまま)',
+        (fcPage.url().split('#')[1] ?? '').startsWith('/recipes') &&
+          !/^\/recipes\/\d/.test(fcPage.url().split('#')[1] ?? ''),
+        fcPage.url(),
+      )
+      const favCount = await fcPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const all = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              all.onsuccess = () => resolve(all.result.filter((r) => r.isFavorite).length)
+              all.onerror = () => reject(all.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('FAV-CARD-01 一覧のハートでお気に入りが1件付く', favCount === 1, `favCount=${favCount}`)
+      await fcPage.getByRole('button', { name: 'お気に入りを解除' }).first().click()
+      await fcPage.waitForTimeout(700)
+      const favCount2 = await fcPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const all = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              all.onsuccess = () => resolve(all.result.filter((r) => r.isFavorite).length)
+              all.onerror = () => reject(all.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('FAV-CARD-01 もう一度押すと外れる', favCount2 === 0, `favCount=${favCount2}`)
+    } finally {
+      await fcBrowser.close()
+    }
+  }
+
+  // --- SHARE-CANCEL-01(2026-07-29 便CI/C17): Web Share対応端末でテキスト共有をキャンセルしても、
+  // クリップボードを黙って上書きしないこと。navigator.shareをAbortErrorで拒否するスタブで再現する ---
+  currentCheck = 'SHARE-CANCEL-01'
+  {
+    const scBrowser = await chromium.launch()
+    const scContext = await scBrowser.newContext()
+    await scContext.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE })
+    await scContext.addInitScript(() => {
+      Object.defineProperty(navigator, 'share', {
+        configurable: true,
+        value: () => Promise.reject(new DOMException('canceled', 'AbortError')),
+      })
+    })
+    const scPage = await scContext.newPage()
+    scPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHARE-CANCEL-01] ${err.message}`)
+    })
+    try {
+      await scPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await scPage.waitForTimeout(2000)
+      await scPage.evaluate(() => navigator.clipboard.writeText('★元のクリップボード★'))
+      await scPage.getByText('肉じゃが', { exact: true }).first().click()
+      await scPage.waitForTimeout(600)
+      await scPage.locator('button[aria-label="シェア"]').click()
+      await scPage.waitForTimeout(300)
+      const scDialog = scPage.getByRole('dialog', { name: 'シェアする内容' })
+      await scDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await scPage.waitForTimeout(800)
+      const clip = await scPage.evaluate(() => navigator.clipboard.readText())
+      check(
+        'SHARE-CANCEL-01/C17 共有をキャンセルしてもクリップボードが書き換わらない',
+        clip === '★元のクリップボード★',
+        clip.slice(0, 80),
+      )
+      check(
+        'SHARE-CANCEL-01/C17 キャンセル時はシェアの窓も閉じない(やめたのに画面だけ変わらない)',
+        await scDialog.isVisible(),
+      )
+    } finally {
+      await scBrowser.close()
+    }
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

@@ -90,15 +90,27 @@ export function buildShareText(recipe: Recipe, opts?: ShareOptions): string {
     .replace('{url}', ja.app.url)
 }
 
-/** テキストを共有（非対応ならクリップボードへコピー）。戻り値は 'shared' | 'copied' */
-export async function shareText(recipe: Recipe, opts?: ShareOptions): Promise<'shared' | 'copied'> {
+/**
+ * テキストを共有（非対応ならクリップボードへコピー）。戻り値は 'shared' | 'copied' | 'cancelled'。
+ *
+ * 2026-07-29 便CI/C17: 共有シートをキャンセル（AbortError）したときにコピーへ落ちていたため、
+ * ユーザーが別の用途でコピーしていた内容がクリップボードごと黙って書き換わっていた。
+ * キャンセルは「やめる」という正常な選択なので何もしない（画像カード側の既存の作法に揃える）。
+ */
+export async function shareText(
+  recipe: Recipe,
+  opts?: ShareOptions,
+): Promise<'shared' | 'copied' | 'cancelled'> {
   const text = buildShareText(recipe, opts)
   if (typeof navigator.share === 'function') {
     try {
       await navigator.share({ text })
       return 'shared'
-    } catch {
-      /* キャンセル時などはコピーに切り替え */
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return 'cancelled'
+      }
+      /* それ以外のエラー(非対応環境など)はコピーに切り替え */
     }
   }
   await navigator.clipboard.writeText(text)

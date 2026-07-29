@@ -158,6 +158,7 @@ import {
   normalizeIngredients,
   normalizeInstructions,
 } from '../workers/recipe-import/src/normalize.ts'
+import { cookedWithinDays } from '../src/logic/cooked.ts'
 import { buildImageProxyUrl, isImageContentType } from '../src/logic/urlImportImage.ts'
 import { resolveImportErrorReason } from '../src/logic/urlImportReason.ts'
 import {
@@ -7864,6 +7865,35 @@ eq(
     'C7 idやendsAtが欠けた行は黙って捨てる',
     parseStoredTimers(JSON.stringify([{ label: 'こわれた行' }, null, 3]), now).length,
     0,
+  )
+}
+
+// ---------- cookedWithinDays: 「最近作った」判定(2026-07-29 便CI/C08) ----------
+// 旧実装は cookedLogs[0] の1件だけを見ており、addCookedLog が日付を見ずに先頭へ積むため、
+// 過去の日付を後から記録すると「今日作ったばかりのレシピ」が最近作っていない扱いになっていた
+// (ホーム「今日なに作る？」の候補と献立の自動提案が誤って拾う)。全件の最大日付で判定する。
+{
+  const day = 24 * 60 * 60 * 1000
+  const ymd = (offsetDays) => new Date(Date.now() - offsetDays * day).toISOString().slice(0, 10)
+  const recipeWith = (dates) => ({ cookedLogs: dates.map((date) => ({ date })) })
+
+  eq('C08 記録が無ければ false', cookedWithinDays(recipeWith([]), 14), false)
+  eq('C08 今日の記録だけなら true', cookedWithinDays(recipeWith([ymd(0)]), 14), true)
+  eq('C08 30日前の記録だけなら false', cookedWithinDays(recipeWith([ymd(30)]), 14), false)
+  eq(
+    'C08 今日の記録のあとに過去日を足しても(配列先頭が古くても)true のまま',
+    cookedWithinDays(recipeWith([ymd(60), ymd(0)]), 14),
+    true,
+  )
+  eq(
+    'C08 並び順に関わらず判定は同じ(全件の最大日付で見る)',
+    cookedWithinDays(recipeWith([ymd(0), ymd(60)]), 14),
+    cookedWithinDays(recipeWith([ymd(60), ymd(0)]), 14),
+  )
+  eq(
+    'C08 古い記録しか無ければ、何件あっても false',
+    cookedWithinDays(recipeWith([ymd(90), ymd(40), ymd(20)]), 14),
+    false,
   )
 }
 

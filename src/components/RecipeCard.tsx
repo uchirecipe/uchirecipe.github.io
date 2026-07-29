@@ -10,7 +10,9 @@ import {
   Leaf,
   Snowflake,
 } from 'lucide-react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { IconKey, Recipe, Season } from '../db/types'
+import { toggleFavorite } from '../db/recipes'
 import { hasNgIngredient } from '../logic/ng'
 import { pickIconKey } from '../logic/icon'
 import { ingredientColorToken } from '../logic/ingredientColor'
@@ -108,6 +110,39 @@ type Props = {
   nutrientBadgeText?: string
 }
 
+/**
+ * 一覧カードのお気に入りトグル（2026-07-29 便CI/C15）。
+ * 従来はハートが「お気に入り済みのときだけ出る表示専用アイコン」で、押しても詳細へ遷移するだけ
+ * だった（付け外しは詳細画面のハート1か所のみ＝10件整理するのに詳細を10回開くしかない）。
+ * カード全体が <Link> なので、遷移させないよう preventDefault + stopPropagation する。
+ * 一覧側のスクロール位置保存（RecipesPage の onClickCapture）はキャプチャ段階で走るため、
+ * そちら側でボタンのクリックを除外している。
+ */
+function FavoriteToggle({ recipe }: { recipe: Recipe }) {
+  const onClick = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (recipe.id === undefined) return
+    void toggleFavorite(recipe.id)
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={!!recipe.isFavorite}
+      aria-label={recipe.isFavorite ? ja.detail.favoriteOff : ja.detail.favoriteOn}
+      className={`-m-2 shrink-0 p-2 ${recipe.isFavorite ? 'text-accent' : 'text-ink-muted'}`}
+    >
+      <Heart
+        size={16}
+        fill={recipe.isFavorite ? 'currentColor' : 'none'}
+        className={recipe.isFavorite ? '' : 'opacity-50'}
+        aria-hidden
+      />
+    </button>
+  )
+}
+
 /** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ）。layout='list'なら縦一列の行表示 */
 export default function RecipeCard({
   recipe,
@@ -142,9 +177,9 @@ export default function RecipeCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-1">
             <p className="line-clamp-2 font-bold leading-snug">{recipe.title}</p>
-            {recipe.isFavorite && (
-              <Heart size={16} className="mt-0.5 shrink-0 text-accent" fill="currentColor" aria-hidden />
-            )}
+            <span className="mt-0.5 shrink-0">
+              <FavoriteToggle recipe={recipe} />
+            </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-muted">
             {displayMinutes != null && displayMinutes > 0 && (
@@ -292,9 +327,9 @@ export default function RecipeCard({
       <div className="p-[var(--space-sm)]">
         <div className="flex items-start justify-between gap-1">
           <p className="line-clamp-2 font-bold leading-snug">{recipe.title}</p>
-          {recipe.isFavorite && (
-            <Heart size={16} className="mt-0.5 shrink-0 text-accent" fill="currentColor" aria-hidden />
-          )}
+          <span className="mt-0.5 shrink-0">
+            <FavoriteToggle recipe={recipe} />
+          </span>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-muted">
           {displayMinutes != null && displayMinutes > 0 && (

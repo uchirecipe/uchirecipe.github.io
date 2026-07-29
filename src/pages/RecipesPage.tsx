@@ -451,7 +451,11 @@ export default function RecipesPage() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [filtersKey])
   const onClickCapture = (e: ReactMouseEvent) => {
-    if (!(e.target instanceof Element) || !e.target.closest('a')) return // リンク以外の操作では固定しない
+    if (!(e.target instanceof Element)) return
+    // カード内のボタン(お気に入りトグル・2026-07-29 便CI/C15)は遷移しないので、
+    // 「離脱する」扱いにしない(leavingRefを立てると以降のスクロール位置保存が止まってしまう)
+    if (e.target.closest('button')) return
+    if (!e.target.closest('a')) return // リンク以外の操作では固定しない
     saveListState(window.scrollY) // 遷移で高さが縮む前の、正しい位置を確定保存する
     leavingRef.current = true
   }

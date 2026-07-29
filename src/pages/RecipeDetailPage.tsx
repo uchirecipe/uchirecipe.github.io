@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import { db } from '../db/db'
-import { addCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
+import { addCookedLog, deleteCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
 import { lowerPantryLevelsForCooked } from '../db/pantry'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
@@ -212,6 +212,8 @@ export default function RecipeDetailPage() {
   const [editingLogIndex, setEditingLogIndex] = useState<number | null>(null)
   const [editingLogDate, setEditingLogDate] = useState('')
   const [editingLogNote, setEditingLogNote] = useState('')
+  // 記録した人数(2026-07-29 便CI/C05)。編集フォームにも欄が無く、間違った人数を直せなかった
+  const [editingLogServings, setEditingLogServings] = useState<number>()
   // 編集中の記録の写真(2026-07-16 便W-①: 追加・差し替え・削除に対応。既存写真で初期化し、
   // 新規選択で差し替え・undefinedにすれば削除。保存時は常にこの値をphotoとして書き戻す
   // (新規作成時=CookedLogModalと同じ保存形式・resizePhotoで圧縮)
@@ -258,10 +260,15 @@ export default function RecipeDetailPage() {
   // 調理中モードには材料一覧が無いので「分量を確認しにいったん閉じる」は例外操作ではなく
   // 常用の動線であり、そのたびに手順1へ戻るのは進捗を丸ごと失うのと同じだった。
   const [focusStep, setFocusStep] = useState(0)
-  // 詳細内リンク（「だしのとり方」など）でidだけ変わる場合、このページは作り直されないため
-  // 前のレシピの手順位置が残る。レシピが変わったら必ず先頭に戻す
+  // 詳細内リンク（「だしのとり方」など）や常駐タイマーのタップでidだけ変わる場合、
+  // このページは作り直されないため前のレシピの状態が残る。レシピが変わったら必ずリセットする。
+  // 2026-07-29 便CI/C07: 手順位置に加えて「表示人数」と「記録メモの下書き」も残っており、
+  // だし巻き卵を6人分にしてからリンクで「だしのとり方」へ移ると6人分表示のまま材料が3倍になり、
+  // そのまま記録すると誤った人数が保存されていた（実績食費の分母に効く）
   useEffect(() => {
     setFocusStep(0)
+    setServingsOverride(undefined) // 前のレシピの表示人数が残ると材料が誤スケールし記録にも漏れる
+    setLogNote('') // 前のレシピ用の記録メモ下書きがプリフィルされるのを防ぐ
   }, [id])
 
   // 「調理中モードで見る」の初回ヒント(2026-07-23 便BJ・docs/55 CEO提案1-5)。
@@ -363,12 +370,34 @@ export default function RecipeDetailPage() {
     date: string,
     note: string | undefined,
     photo: Blob | undefined,
+    logServingsValue: number | undefined,
   ) => {
     setEditingLogIndex(index)
     setEditingLogDate(date)
     setEditingLogNote(note ?? '')
     setEditingLogPhoto(photo)
     setEditingLogPhotoError('')
+    // 人数が未記録の古い記録は、レシピの登録人数を初期値にする(便CI/C05)
+    setEditingLogServings(logServingsValue ?? recipe?.servings ?? 1)
+  }
+
+  /**
+   * 作った記録を1件だけ削除する(2026-07-29 便CI/C02)。
+   * 元に戻せない操作なので、規約Fに沿って「何が消えるか」「何が残るか」を件数つきで確認する。
+   */
+  const removeCookedLog = async (index: number) => {
+    const log = recipe?.cookedLogs[index]
+    if (!log) return
+    const message = ja.detail.cookedLogDeleteConfirm
+      .replace('{date}', log.date.replaceAll('-', '/'))
+      .replace('{p}', log.photo ? ja.detail.cookedLogDeleteConfirmPhoto : '')
+      .replace('{n}', String(recipe.cookedLogs.length - 1))
+    if (!window.confirm(message)) return
+    await deleteCookedLog(id, index)
+    setEditingLogIndex(null)
+    setEditingLogPhoto(undefined)
+    setEditingLogPhotoError('')
+    setMessage(ja.detail.cookedLogDeletedToast)
   }
 
   // 記録編集中の写真選択(新規追加・差し替え共通)。保存形式は新規記録時と同一
@@ -415,6 +444,8 @@ export default function RecipeDetailPage() {
       // 常にeditingLogPhotoを書き戻す(未変更ならもとの写真、選び直せば新しい写真、
       // 削除ならundefined。新規時と同じ保存形式)
       photo: editingLogPhoto,
+      // 何人分作ったかも直せるようにする(2026-07-29 便CI/C05)
+      servings: editingLogServings,
     })
     setEditingLogIndex(null)
     setEditingLogPhoto(undefined)
@@ -447,14 +478,14 @@ export default function RecipeDetailPage() {
       nutritionHasGap: shareNutrition != null && hasMaterialGap(shareNutrition),
     }
     try {
-      if (kind === 'text') {
-        const result = await shareText(recipe, opts)
-        setShareMessage(result === 'copied' ? ja.share.copied : '')
-      } else {
-        const result = await shareImageCard(recipe, opts)
-        setShareMessage(result === 'downloaded' ? ja.share.downloaded : '')
-      }
-      if (navigator.share !== undefined) setShareOpen(false)
+      const result =
+        kind === 'text' ? await shareText(recipe, opts) : await shareImageCard(recipe, opts)
+      if (result === 'copied') setShareMessage(ja.share.copied)
+      else if (result === 'downloaded') setShareMessage(ja.share.downloaded)
+      else setShareMessage('')
+      // 共有シートでキャンセルしたときは何も起きていないので窓は閉じない
+      // (閉じてしまうと「やめたのに画面だけ変わる」になる。2026-07-29 便CI/C17)
+      if (navigator.share !== undefined && result !== 'cancelled') setShareOpen(false)
     } catch {
       setShareMessage(ja.share.failed)
     } finally {
@@ -1033,10 +1064,23 @@ export default function RecipeDetailPage() {
         {/* 作った記録 */}
         {recipe.cookedLogs.length > 0 && (
           <section className="mt-[var(--space-lg)]">
-            <h2 className="text-xl font-bold">
-              {ja.detail.cookedLogsTitle}（{recipe.cookedLogs.length}
-              {ja.detail.cookedCountSuffix}）
-            </h2>
+            {/* 見出しの横に、残りの記録へ行ける導線を置く(2026-07-29 便CI/C03)。
+                ここは直近5件しか出さないのに「(50回)」とだけ出ていて、残り45件へ辿る手段が
+                アプリのどこにも無かった。飛び先は履歴ページのこのレシピだけの絞り込み表示 */}
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-xl font-bold">
+                {ja.detail.cookedLogsTitle}（{recipe.cookedLogs.length}
+                {ja.detail.cookedCountSuffix}）
+              </h2>
+              {recipe.cookedLogs.length > 5 && (
+                <Link
+                  to={`/history?recipe=${id}`}
+                  className="shrink-0 text-sm font-bold text-accent underline"
+                >
+                  {ja.detail.cookedLogsSeeAll.replace('{n}', String(recipe.cookedLogs.length - 5))}
+                </Link>
+              )}
+            </div>
             <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
               {recipe.cookedLogs.slice(0, 5).map((log, index) => {
                 const logPhoto = log.photo
@@ -1050,6 +1094,33 @@ export default function RecipeDetailPage() {
                           onChange={(e) => setEditingLogDate(e.target.value)}
                           className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink"
                         />
+                        {/* 何人分作ったか(2026-07-29 便CI/C05)。人数の入力漏れ・持ち越しを
+                            後から直せる唯一の場所なので、記録窓と同じステッパーを置く */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-ink-muted">{ja.detail.cookedServings}</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingLogServings(Math.max(1, (editingLogServings ?? 1) - 1))
+                            }
+                            aria-label={ja.detail.servingsDown}
+                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent shadow-sm"
+                          >
+                            <Minus size={16} aria-hidden />
+                          </button>
+                          <span className="min-w-12 text-center font-bold">
+                            {editingLogServings ?? 1}
+                            {ja.detail.servingsUnit}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setEditingLogServings((editingLogServings ?? 1) + 1)}
+                            aria-label={ja.detail.servingsUp}
+                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent shadow-sm"
+                          >
+                            <Plus size={16} aria-hidden />
+                          </button>
+                        </div>
                         <input
                           type="text"
                           value={editingLogNote}
@@ -1139,6 +1210,16 @@ export default function RecipeDetailPage() {
                             {ja.detail.cookedLogCancel}
                           </button>
                         </div>
+                        {/* 記録そのものの削除(2026-07-29 便CI/C02)。写真だけ消せて記録本体は
+                            消せなかったため、誤タップ・重複記録の唯一の始末が「レシピごと削除」に
+                            なっていた。確認文は規約F(何が消えて何が残るかを件数つきで) */}
+                        <button
+                          type="button"
+                          onClick={() => void removeCookedLog(index)}
+                          className="text-sm text-warning underline"
+                        >
+                          {ja.detail.cookedLogDelete}
+                        </button>
                       </div>
                     ) : (
                       <div className="flex items-start justify-between gap-2">
@@ -1160,13 +1241,25 @@ export default function RecipeDetailPage() {
                           <div className="min-w-0 flex-1">
                             <span className="text-sm text-ink-muted">
                               {log.date.replaceAll('-', '/')}
+                              {/* 記録した人数を見えるようにする(2026-07-29 便CI/C05) */}
+                              {log.servings != null && (
+                                <>
+                                  {'　'}
+                                  {ja.detail.cookedServingsValue.replace(
+                                    '{n}',
+                                    String(log.servings),
+                                  )}
+                                </>
+                              )}
                             </span>
                             {log.note && <p className="mt-0.5">{log.note}</p>}
                           </div>
                         </div>
                         <button
                           type="button"
-                          onClick={() => openEditLog(index, log.date, log.note, log.photo)}
+                          onClick={() =>
+                            openEditLog(index, log.date, log.note, log.photo, log.servings)
+                          }
                           aria-label={ja.detail.cookedLogEdit}
                           className="shrink-0 rounded-full p-2 text-ink-muted"
                         >
@@ -1248,6 +1341,9 @@ export default function RecipeDetailPage() {
         date={logDate}
         note={logNote}
         photo={logPhoto}
+        // 何人分作ったかを見せて直せるようにする(2026-07-29 便CI/C05)
+        servings={logServings ?? servings}
+        onServingsChange={setLogServings}
         onDateChange={setLogDate}
         onNoteChange={setLogNote}
         onPhotoChange={setLogPhoto}
@@ -1255,10 +1351,14 @@ export default function RecipeDetailPage() {
         onClose={() => {
           setLogOpen(false)
           setLogPhoto(undefined)
+          // 「やめる」で写真だけ消えてメモが残るのは不揃い＝書きかけを捨てたつもりのメモが
+          // 次の記録に混ざっていた(2026-07-29 便CI/C19)。保存時(saveLog)と同じく必ず空に戻す
+          setLogNote('')
         }}
         // 在庫反映スイッチ(2026-07-23 #11): settingsを直接の真実の源にして即永続化＝選択を記憶する
         reflectPantry={settings?.cookedReflectPantry ?? false}
         onReflectPantryChange={(value) => void updateSettings({ cookedReflectPantry: value })}
+        inTodayList={isInTodayList}
       />
       {/* シェアの選択式モーダル(2026-07-16 裁定3)。栄養行はNUTRITION_TEASER_ENABLED=falseなら
           行ごと非表示(緊急停止フラグと連動)。選択は開くたび既定値に初期化・永続化しない */}
