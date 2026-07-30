@@ -1366,6 +1366,12 @@ export default function SettingsPage() {
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
                   {ja.settings.moveGuideTransferNote}
                 </p>
+                <a
+                  href="/about/manual.html#backup"
+                  className="mt-1 inline-block text-xs font-bold text-accent underline"
+                >
+                  {ja.settings.moveGuideTransferLink}
+                </a>
                 <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs font-bold text-warning">
                   <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
                   {ja.settings.moveGuideNote}
