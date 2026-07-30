@@ -92,7 +92,7 @@ export default function TermPopover({
           visibility: pos ? 'visible' : 'hidden',
         }}
       >
-        <p className="font-bold text-accent">{state.term.term}</p>
+        <p className="font-bold text-accent-ink">{state.term.term}</p>
         {/* 「｜」は説明文内の改行(MemoTextの行に変換され「・」の箇条書きも効く)。
             ▽折りたたみの長い詳細を小窓の中で読みやすくするため(2026-07-12オーナー要望) */}
         <div className="mt-1 max-w-[70vw] text-sm leading-relaxed text-ink">

@@ -101,7 +101,7 @@ export default function HistoryPage() {
                 ? ja.history.filteredBy.replace('{title}', filterRecipe.title)
                 : ja.history.filteredNotFound}
             </p>
-            <Link to="/history" className="mt-1 inline-block text-sm font-bold text-accent underline">
+            <Link to="/history" className="mt-1 inline-block text-sm font-bold text-accent-ink underline">
               {ja.history.filteredClear}
             </Link>
           </div>
@@ -134,7 +134,7 @@ export default function HistoryPage() {
           <button
             type="button"
             onClick={() => setShownCount((n) => n + PAGE_SIZE)}
-            className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+            className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
             {ja.history.more.replace('{n}', String(remaining))}
           </button>

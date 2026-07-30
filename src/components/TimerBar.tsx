@@ -123,7 +123,7 @@ export default function TimerBar() {
                     }
                   }}
                   aria-label={ja.timer.plusOneMinuteAria.replace('{label}', timer.label)}
-                  className="flex h-9 shrink-0 items-center justify-center rounded-sm px-1.5 text-xs font-bold text-accent"
+                  className="flex h-9 shrink-0 items-center justify-center rounded-sm px-1.5 text-xs font-bold text-accent-ink"
                 >
                   {ja.timer.plusOneMinute}
                 </span>

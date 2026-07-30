@@ -79,7 +79,7 @@ export default function NutritionTeaser({
           className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
         >
           <span className="min-w-0 flex-1 text-sm font-bold">
-            <Sparkles size={14} className="mr-1 inline-block shrink-0 text-accent" aria-hidden />
+            <Sparkles size={14} className="mr-1 inline-block shrink-0 text-accent-ink" aria-hidden />
             {ja.nutrition.title}
             {ja.nutrition.summaryLabel.replace('{s}', String(displayServings))}
             {summaryText}
@@ -113,7 +113,7 @@ function AssumedBlock({ nutrition }: { nutrition: Nutrition }) {
   if (nutrition.assumed.length === 0) return null
   return (
     <div className="rounded-md border border-edge p-[var(--space-sm)]">
-      <p className="text-sm font-bold text-accent">
+      <p className="text-sm font-bold text-accent-ink">
         {ja.nutrition.assumedLabel.replace('{n}', String(nutrition.assumed.length))}
       </p>
       <p className="mt-0.5 text-xs text-ink-muted">{ja.nutrition.assumedHint}</p>
@@ -221,7 +221,7 @@ export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
         ))}
       </div>
       <div className="relative flex flex-col items-center justify-center gap-1 bg-app/40 p-[var(--space-md)] text-center backdrop-blur-[2px]">
-        <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent shadow-sm">
+        <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent-ink shadow-sm">
           <Lock size={14} aria-hidden />
           {ja.nutrition.lockedBadge}
         </span>
@@ -230,7 +230,7 @@ export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
         {!isPro && (
           <Link
             to="/settings?section=pro"
-            className="mt-1 inline-block text-sm font-bold text-accent underline"
+            className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
           >
             {ja.nutrition.gateLink}
           </Link>
@@ -309,7 +309,7 @@ function UnlockedBody({ nutrition, displayServings }: { nutrition: Nutrition; di
   return (
     <div className="space-y-[var(--space-sm)]">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-edge px-2 py-0.5 text-xs font-bold text-accent">
+        <span className="rounded-full border border-edge px-2 py-0.5 text-xs font-bold text-accent-ink">
           {ja.nutrition.proBadge}
         </span>
         <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
@@ -324,14 +324,14 @@ function UnlockedBody({ nutrition, displayServings }: { nutrition: Nutrition; di
       >
         <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 gap-y-2">
           <span aria-hidden />
-          <span className="text-right text-xs font-bold text-accent">{ja.nutrition.servingHeader}</span>
+          <span className="text-right text-xs font-bold text-accent-ink">{ja.nutrition.servingHeader}</span>
           <span className="text-right text-xs text-ink-muted">
             {ja.nutrition.totalHeader.replace('{n}', String(displayServings))}
           </span>
           {rows.map(({ key, label }) => (
             <div key={key} className="contents">
               <span className="text-sm">{label}</span>
-              <span className="text-right text-base font-bold text-accent tabular-nums">
+              <span className="text-right text-base font-bold text-accent-ink tabular-nums">
                 {fmt(key, per[key])}
               </span>
               <span className="text-right text-sm text-ink-muted tabular-nums">

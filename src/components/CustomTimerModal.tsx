@@ -77,7 +77,7 @@ export default function CustomTimerModal({
             type="button"
             onClick={() => adjust(-60)}
             aria-label={ja.timer.customMinutesDown}
-            className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent shadow-sm"
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent-ink shadow-sm"
           >
             <Minus size={22} aria-hidden />
           </button>
@@ -88,7 +88,7 @@ export default function CustomTimerModal({
             type="button"
             onClick={() => adjust(60)}
             aria-label={ja.timer.customMinutesUp}
-            className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent shadow-sm"
+            className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent-ink shadow-sm"
           >
             <Plus size={22} aria-hidden />
           </button>
@@ -98,28 +98,28 @@ export default function CustomTimerModal({
           <button
             type="button"
             onClick={() => adjust(-30)}
-            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
           >
             {ja.timer.minusThirtySeconds}
           </button>
           <button
             type="button"
             onClick={() => adjust(-10)}
-            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
           >
             {ja.timer.minusTenSeconds}
           </button>
           <button
             type="button"
             onClick={() => adjust(10)}
-            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
           >
             {ja.timer.plusTenSeconds}
           </button>
           <button
             type="button"
             onClick={() => adjust(30)}
-            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+            className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
           >
             {ja.timer.plusThirtySeconds}
           </button>

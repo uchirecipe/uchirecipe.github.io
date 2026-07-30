@@ -179,7 +179,7 @@ export default function IngredientPricesPage() {
             type="button"
             onClick={() => void addNew()}
             disabled={!newName.trim() || !newUnitComposed || !(Number(newPrice) > 0)}
-            className="flex w-full items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+            className="flex w-full items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
           >
             <Plus size={16} aria-hidden />
             {ja.priceMaster.add}
@@ -314,7 +314,7 @@ function PriceRow({
               type="button"
               onClick={onReset}
               aria-label={ja.priceMaster.resetToDefaultAria.replace('{name}', entry.name)}
-              className="inline-flex items-center gap-0.5 text-xs font-bold text-accent underline"
+              className="inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
             >
               <RotateCcw size={12} aria-hidden />
               {ja.priceMaster.resetToDefault}

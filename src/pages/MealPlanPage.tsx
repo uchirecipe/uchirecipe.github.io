@@ -206,7 +206,7 @@ function TodayListRow({
         type="button"
         onClick={onCooked}
         aria-label={ja.mealPlan.todayMarkCooked}
-        className="shrink-0 rounded-full p-3 text-accent"
+        className="shrink-0 rounded-full p-3 text-accent-ink"
       >
         <CheckCircle2 size={20} aria-hidden />
       </button>
@@ -259,7 +259,7 @@ function CookedLogCard({
         <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
           {recipe.title}
         </span>
-        <CheckCircle2 size={16} className="shrink-0 text-accent" aria-hidden />
+        <CheckCircle2 size={16} className="shrink-0 text-accent-ink" aria-hidden />
       </Link>
     </li>
   )
@@ -353,7 +353,7 @@ function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
       <ul className="mt-[var(--space-sm)] divide-y divide-edge">
         {sheet.days.map((day) => (
           <li key={day.date} className="py-1.5">
-            <p className="text-sm font-bold text-accent">{day.label}</p>
+            <p className="text-sm font-bold text-accent-ink">{day.label}</p>
             {day.slots.map((slotRow) => (
               <p key={slotRow.slot} className="mt-0.5 pl-2 text-sm">
                 <span className="font-bold">{slotRow.label}</span>
@@ -469,7 +469,7 @@ function IntakeNutritionPanel({
           {PERIOD_NUTRIENT_ROWS.map(({ key, label }) => (
             <div key={key} className="flex flex-col">
               <span className="text-xs text-ink-muted">{label}</span>
-              <span className="text-sm font-bold text-accent tabular-nums">
+              <span className="text-sm font-bold text-accent-ink tabular-nums">
                 {formatNutrient(key, summary.nutrition.total[key])}
               </span>
             </div>
@@ -638,13 +638,13 @@ function MonthDayCell({
         )}
         {/* 作った記録の印(便CH/C3)。メモの点と同じ「小さな印」の作法で、位置だけ左上に分ける */}
         {hasLog && (
-          <span aria-hidden className="absolute left-0.5 top-0.5 text-accent">
+          <span aria-hidden className="absolute left-0.5 top-0.5 text-accent-ink">
             <Check size={10} strokeWidth={3} aria-hidden />
           </span>
         )}
         <span
           aria-hidden
-          className={`text-[10px] leading-none ${isToday ? 'font-bold text-accent' : 'text-ink-muted'}`}
+          className={`text-[10px] leading-none ${isToday ? 'font-bold text-accent-ink' : 'text-ink-muted'}`}
         >
           {dayNum}
         </span>
@@ -652,7 +652,7 @@ function MonthDayCell({
           <span
             aria-hidden
             className={`w-full truncate px-0.5 text-center text-[10px] font-bold leading-tight tabular-nums ${
-              stat?.basis === 'actual' ? 'text-accent' : 'text-ink-muted'
+              stat?.basis === 'actual' ? 'text-accent-ink' : 'text-ink-muted'
             }`}
           >
             {cellText}
@@ -717,7 +717,7 @@ function MonthDayCell({
       {hasLog && (
         <span
           aria-label={ja.mealPlan.monthDayHasLog}
-          className={`mt-0.5 ${isToday ? 'text-on-accent' : 'text-accent'}`}
+          className={`mt-0.5 ${isToday ? 'text-on-accent' : 'text-accent-ink'}`}
         >
           <Check size={10} strokeWidth={3} aria-hidden />
         </span>
@@ -2175,9 +2175,9 @@ export default function MealPlanPage() {
       >
         <span className="font-bold">{ja.mealPlan.planSheetTitle}</span>
         {planSheetOpen ? (
-          <ChevronUp size={18} className="shrink-0 text-accent" aria-hidden />
+          <ChevronUp size={18} className="shrink-0 text-accent-ink" aria-hidden />
         ) : (
-          <ChevronDown size={18} className="shrink-0 text-accent" aria-hidden />
+          <ChevronDown size={18} className="shrink-0 text-accent-ink" aria-hidden />
         )}
       </button>
       {planSheetOpen && (
@@ -2193,7 +2193,7 @@ export default function MealPlanPage() {
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                 >
                   <Printer size={14} aria-hidden />
                   {ja.mealPlan.planSheetPrint}
@@ -2201,7 +2201,7 @@ export default function MealPlanPage() {
                 <button
                   type="button"
                   onClick={() => void savePlanSheetImage(sheet)}
-                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                 >
                   <ImageDown size={14} aria-hidden />
                   {ja.mealPlan.planSheetImage}
@@ -2383,7 +2383,7 @@ export default function MealPlanPage() {
             isEmpty
               ? // タスク5: 空き枠は「＋ レシピを選ぶ」のボタン然とした見た目に(押せると分かるよう
                 // アクセント色＋Plusアイコン。従来は淡色「未定」で押せると分からない指摘への対応)
-                'border-dashed border-accent/50 bg-surface font-bold text-accent'
+                'border-dashed border-accent/50 bg-surface font-bold text-accent-ink'
               : isCooked
                 ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)
                   'border-edge bg-app/60 text-ink-muted opacity-80'
@@ -2398,7 +2398,7 @@ export default function MealPlanPage() {
           ) : (
             <>
               {isCooked && (
-                <CheckCircle2 size={14} className="shrink-0 text-accent" aria-hidden />
+                <CheckCircle2 size={14} className="shrink-0 text-accent-ink" aria-hidden />
               )}
               {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
                 <TriangleAlert
@@ -2418,7 +2418,7 @@ export default function MealPlanPage() {
             type="button"
             onClick={() => void suggestRow(date, slot, role, entryId, extraLocalId)}
             aria-label={ja.mealPlan.suggestAria}
-            className="rounded-full p-2 text-accent"
+            className="rounded-full p-2 text-accent-ink"
           >
             <Dices size={18} aria-hidden />
           </button>
@@ -2503,7 +2503,7 @@ export default function MealPlanPage() {
                 addExtraRow(date, slot, 'main')
                 setAddMenuFor(null)
               }}
-              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
+              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
             >
               {ja.mealPlan.role.main}
             </button>
@@ -2513,7 +2513,7 @@ export default function MealPlanPage() {
                 addExtraRow(date, slot, 'side')
                 setAddMenuFor(null)
               }}
-              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
+              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
             >
               {ja.mealPlan.role.side}
             </button>
@@ -2530,7 +2530,7 @@ export default function MealPlanPage() {
           <button
             type="button"
             onClick={() => setAddMenuFor(slotKey)}
-            className="mt-1 text-xs font-bold text-accent"
+            className="mt-1 text-xs font-bold text-accent-ink"
           >
             {ja.mealPlan.addRow}
           </button>
@@ -2736,7 +2736,7 @@ export default function MealPlanPage() {
                   <button
                     type="button"
                     onClick={() => void rerollTodayList()}
-                    className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                    className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
                   >
                     <Dices size={18} aria-hidden />
                     {ja.mealPlan.todayReroll}
@@ -2756,9 +2756,9 @@ export default function MealPlanPage() {
                     to="/cook-navi"
                     className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
                   >
-                    <Route size={20} className="shrink-0 text-accent" aria-hidden />
+                    <Route size={20} className="shrink-0 text-accent-ink" aria-hidden />
                     <span className="min-w-0 flex-1">
-                      <span className="block font-bold text-accent">{ja.mealPlan.cookNaviEntry}</span>
+                      <span className="block font-bold text-accent-ink">{ja.mealPlan.cookNaviEntry}</span>
                       <span className="block text-xs text-ink-muted">{ja.mealPlan.cookNaviEntrySub}</span>
                     </span>
                     <ChevronRight size={18} className="shrink-0 text-ink-muted" aria-hidden />
@@ -2788,7 +2788,7 @@ export default function MealPlanPage() {
                                   key={slot}
                                   type="button"
                                   onClick={() => void assignMismatchRecipe(slot, recipe)}
-                                  className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent"
+                                  className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
                                 >
                                   {ja.mealPlan.slot[slot]}
                                   <span className="ml-1 font-normal text-ink-muted">
@@ -2827,7 +2827,7 @@ export default function MealPlanPage() {
                   <button
                     type="button"
                     onClick={() => void suggestTodayList()}
-                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
                   >
                     <Dices size={18} aria-hidden />
                     {ja.mealPlan.todaySuggestButton}
@@ -2839,7 +2839,7 @@ export default function MealPlanPage() {
                     <button
                       type="button"
                       onClick={() => void importRecipeIdsToTodayList(todayFromPlanIds)}
-                      className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm"
+                      className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
                     >
                       {ja.mealPlan.todayImport.replace('{n}', String(todayFromPlanIds.length))}
                     </button>
@@ -2865,7 +2865,7 @@ export default function MealPlanPage() {
                 type="button"
                 onClick={() => setMonthAnchor((d) => shiftMonth(d, -1))}
                 aria-label={ja.mealPlan.prevMonth}
-                className="rounded-full border border-edge bg-surface p-2 text-accent shadow-sm"
+                className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
               >
                 <ChevronLeft size={20} aria-hidden />
               </button>
@@ -2875,14 +2875,14 @@ export default function MealPlanPage() {
                 aria-label={isAtCurrentMonth ? undefined : ja.mealPlan.thisMonth}
                 className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
               >
-                {!isAtCurrentMonth && <RotateCcw size={14} className="text-accent" aria-hidden />}
+                {!isAtCurrentMonth && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
                 {monthAnchor.slice(0, 4)}/{monthAnchor.slice(5, 7)}
               </button>
               <button
                 type="button"
                 onClick={() => setMonthAnchor((d) => shiftMonth(d, 1))}
                 aria-label={ja.mealPlan.nextMonth}
-                className="rounded-full border border-edge bg-surface p-2 text-accent shadow-sm"
+                className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
               >
                 <ChevronRight size={20} aria-hidden />
               </button>
@@ -2914,14 +2914,14 @@ export default function MealPlanPage() {
                   <div className="mt-1 flex flex-wrap items-end gap-x-[var(--space-md)] gap-y-1">
                     <div>
                       <p className="text-xs text-ink-muted">{ja.mealPlan.monthSummaryCostLabel}</p>
-                      <p className="text-2xl font-bold text-accent tabular-nums">
+                      <p className="text-2xl font-bold text-accent-ink tabular-nums">
                         約{monthSummary.personalYen.toLocaleString()}円
                       </p>
                     </div>
                     {isNutritionUnlocked(isPro) && monthSummary.nutrition.dishCount > 0 && (
                       <div>
                         <p className="text-xs text-ink-muted">{ja.nutrition.kcalLabel}</p>
-                        <p className="text-2xl font-bold text-accent tabular-nums">
+                        <p className="text-2xl font-bold text-accent-ink tabular-nums">
                           {formatNutrient('kcal', monthSummary.nutrition.total.kcal)}
                         </p>
                       </div>
@@ -2957,7 +2957,7 @@ export default function MealPlanPage() {
                     type="button"
                     onClick={() => setMonthSummaryOpen((v) => !v)}
                     aria-expanded={monthSummaryOpen}
-                    className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                    className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     {monthSummaryOpen
                       ? ja.mealPlan.monthSummaryDetailsClose
@@ -3000,7 +3000,7 @@ export default function MealPlanPage() {
                       )}
                       <Link
                         to="/prices"
-                        className="mt-1 inline-block text-xs font-bold text-accent underline"
+                        className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
                       >
                         {ja.mealPlan.weekCostNoteLink}
                       </Link>
@@ -3050,7 +3050,7 @@ export default function MealPlanPage() {
               <button
                 type="button"
                 onClick={() => void fillMonth()}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
               >
                 <Dices size={14} aria-hidden />
                 {ja.mealPlan.fillMonth}
@@ -3058,7 +3058,7 @@ export default function MealPlanPage() {
               <button
                 type="button"
                 onClick={() => openTemplateApply('month')}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
               >
                 <LayoutTemplate size={14} aria-hidden />
                 {ja.mealPlan.templateApply}
@@ -3082,7 +3082,7 @@ export default function MealPlanPage() {
                 {ja.mealPlan.rangeCostToggle}
               </button>
               {costMode && (rangeStart == null || rangeEnd == null) && (
-                <p className="text-sm font-bold text-accent">
+                <p className="text-sm font-bold text-accent-ink">
                   {rangeStart == null ? ja.mealPlan.rangeCostGuideStart : ja.mealPlan.rangeCostGuideEnd}
                 </p>
               )}
@@ -3179,7 +3179,7 @@ export default function MealPlanPage() {
                     <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
                       {ja.mealPlan.rangeIntakePersonalCostLabel}
                     </p>
-                    <p className="mt-0.5 text-2xl font-bold text-accent">
+                    <p className="mt-0.5 text-2xl font-bold text-accent-ink">
                       約{rangeSummary.personalYen.toLocaleString()}円
                     </p>
                     <p className="mt-1 text-sm text-ink-muted">
@@ -3202,7 +3202,7 @@ export default function MealPlanPage() {
                         <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
                           {ja.mealPlan.rangeIntakeHouseholdLabel}
                         </p>
-                        <p className="mt-0.5 text-lg font-bold text-accent">
+                        <p className="mt-0.5 text-lg font-bold text-accent-ink">
                           {ja.mealPlan.rangeIntakeHouseholdResult
                             .replace('{yen}', rangeSummary.cookedHouseholdYen.toLocaleString())
                             .replace('{n}', String(rangeSummary.cookedMealCount))}
@@ -3221,7 +3221,7 @@ export default function MealPlanPage() {
                 )}
                 <Link
                   to="/prices"
-                  className="mt-1 inline-block text-xs font-bold text-accent underline"
+                  className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
                 >
                   {ja.mealPlan.weekCostNoteLink}
                 </Link>
@@ -3279,7 +3279,7 @@ export default function MealPlanPage() {
               </div>
               {/* ロックの案内(機能の性質を素直に説明・購入圧を強くしすぎない) */}
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-app/40 p-[var(--space-md)] text-center backdrop-blur-[1px]">
-                <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent shadow-sm">
+                <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent-ink shadow-sm">
                   <Lock size={14} aria-hidden />
                   {ja.mealPlan.monthLockedBadge}
                 </span>
@@ -3287,7 +3287,7 @@ export default function MealPlanPage() {
                 <p className="text-sm text-ink-muted">{ja.mealPlan.monthLockedDescription}</p>
                 <Link
                   to="/settings?section=pro"
-                  className="mt-1 inline-block text-sm font-bold text-accent underline"
+                  className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
                 >
                   {ja.mealPlan.monthProGateLink}
                 </Link>
@@ -3336,7 +3336,7 @@ export default function MealPlanPage() {
           type="button"
           onClick={() => setWeekStart((d) => shiftWeek(d, -1))}
           aria-label={ja.mealPlan.prevWeek}
-          className="rounded-full border border-edge bg-surface p-2 text-accent shadow-sm"
+          className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
         >
           <ChevronLeft size={20} aria-hidden />
         </button>
@@ -3348,14 +3348,14 @@ export default function MealPlanPage() {
           }
           className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
         >
-          {!isAtCurrentWeek && <RotateCcw size={14} className="text-accent" aria-hidden />}
+          {!isAtCurrentWeek && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
           {dates[0].replaceAll('-', '/')} 〜 {dates[6].replaceAll('-', '/')}
         </button>
         <button
           type="button"
           onClick={() => setWeekStart((d) => shiftWeek(d, 1))}
           aria-label={ja.mealPlan.nextWeek}
-          className="rounded-full border border-edge bg-surface p-2 text-accent shadow-sm"
+          className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
         >
           <ChevronRight size={20} aria-hidden />
         </button>
@@ -3405,7 +3405,7 @@ export default function MealPlanPage() {
         <button
           type="button"
           onClick={() => void fillWeek()}
-          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
         >
           <Dices size={14} aria-hidden />
           {ja.mealPlan.fillWeek}
@@ -3414,7 +3414,7 @@ export default function MealPlanPage() {
         <button
           type="button"
           onClick={() => void copyLastWeek()}
-          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
         >
           <Copy size={14} aria-hidden />
           {ja.mealPlan.copyLastWeek}
@@ -3430,7 +3430,7 @@ export default function MealPlanPage() {
         <button
           type="button"
           onClick={openTemplateSave}
-          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
         >
           <BookmarkPlus size={14} aria-hidden />
           {ja.mealPlan.templateSave}
@@ -3438,7 +3438,7 @@ export default function MealPlanPage() {
         <button
           type="button"
           onClick={() => openTemplateApply('week')}
-          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
         >
           <LayoutTemplate size={14} aria-hidden />
           {ja.mealPlan.templateApply}
@@ -3461,7 +3461,7 @@ export default function MealPlanPage() {
                   引いていたため、「今日から7日間」表示では今日が月曜の日以外は全行の曜日が
                   日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る) */}
               {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
-              {date === today && <span className="ml-2 text-sm text-accent">{ja.mealPlan.todayBadge}</span>}
+              {date === today && <span className="ml-2 text-sm text-accent-ink">{ja.mealPlan.todayBadge}</span>}
             </h2>
             {/* 今日・未来日は編集可能な予定グリッド。過去日は予定を表示から消し、下の「作った記録」
                 だけを日記のように見せる(便BS・タスク2。mealPlansデータは非破壊で残す) */}
@@ -3478,7 +3478,7 @@ export default function MealPlanPage() {
               ((cookedLogsByDate.get(date)?.length ?? 0) > 0 ? (
                 <div className="mt-[var(--space-sm)]">
                   <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
-                    <CheckCircle2 size={14} className="text-accent" aria-hidden />
+                    <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
                     {ja.mealPlan.pastCookedTitle}
                   </p>
                   <ul className="mt-1 space-y-1">
@@ -3559,14 +3559,14 @@ export default function MealPlanPage() {
           >
             <span className="font-bold">{ja.mealPlan.weekCostTitle}</span>
             {weekCostOpen ? (
-              <ChevronUp size={18} className="shrink-0 text-accent" aria-hidden />
+              <ChevronUp size={18} className="shrink-0 text-accent-ink" aria-hidden />
             ) : (
-              <ChevronDown size={18} className="shrink-0 text-accent" aria-hidden />
+              <ChevronDown size={18} className="shrink-0 text-accent-ink" aria-hidden />
             )}
           </button>
           {weekCostOpen && (
             <div className="px-[var(--space-md)] pb-[var(--space-md)]">
-              <p className="text-2xl font-bold text-accent">
+              <p className="text-2xl font-bold text-accent-ink">
                 約{weekCost.toLocaleString()}円
                 <span className="ml-2 text-sm font-bold text-ink-muted">
                   （{ja.mealPlan.weekCostMealCount.replace('{n}', String(weekMealCount))}）
@@ -3590,7 +3590,7 @@ export default function MealPlanPage() {
                   {ja.mealPlan.weekCostPriceless.replace('{n}', String(weekPricelessCount))}
                 </p>
               )}
-              <Link to="/prices" className="mt-1 inline-block text-sm font-bold text-accent underline">
+              <Link to="/prices" className="mt-1 inline-block text-sm font-bold text-accent-ink underline">
                 {ja.mealPlan.weekCostNoteLink}
               </Link>
               {weeklyBudget != null && budgetDiff != null ? (
@@ -3606,7 +3606,7 @@ export default function MealPlanPage() {
                   <p className="text-sm text-ink-muted">{ja.mealPlan.budgetNotSet}</p>
                   <Link
                     to="/settings?section=budget"
-                    className="mt-1 inline-block rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                    className="mt-1 inline-block rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     {ja.mealPlan.budgetSetLink}
                   </Link>
@@ -3636,7 +3636,7 @@ export default function MealPlanPage() {
 
       <Link
         to="/history"
-        className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent underline"
+        className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
       >
         {ja.mealPlan.historyLink}
       </Link>
@@ -3684,7 +3684,7 @@ export default function MealPlanPage() {
                 aria-label={ja.search.filterToggle}
                 className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
                   pickerControlsOpen || pickerFilterActive || pickerSort !== 'updated'
-                    ? 'border-accent text-accent'
+                    ? 'border-accent text-accent-ink'
                     : 'border-edge text-ink-muted'
                 }`}
               >
@@ -3787,7 +3787,7 @@ export default function MealPlanPage() {
                       )}
                       <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
                       {isSelected && (
-                        <span className="shrink-0 rounded-sm border border-accent px-1.5 py-0.5 text-xs font-bold text-accent">
+                        <span className="shrink-0 rounded-sm border border-accent px-1.5 py-0.5 text-xs font-bold text-accent-ink">
                           {ja.mealPlan.pickCurrentBadge}
                         </span>
                       )}
@@ -4052,7 +4052,7 @@ export default function MealPlanPage() {
             {dayModalLogs.length > 0 && (
               <div className="mt-[var(--space-sm)]">
                 <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
-                  <CheckCircle2 size={14} className="text-accent" aria-hidden />
+                  <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
                   {ja.mealPlan.pastCookedTitle}
                 </p>
                 <ul className="mt-1 space-y-1">
@@ -4090,7 +4090,7 @@ export default function MealPlanPage() {
                 if (dayModalDate) goToWeekOf(dayModalDate)
                 setDayModalDate(null)
               }}
-              className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-app py-3 text-sm font-bold text-accent shadow-sm"
+              className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-app py-3 text-sm font-bold text-accent-ink shadow-sm"
             >
               {ja.mealPlan.monthDayModalOpenWeek}
             </button>

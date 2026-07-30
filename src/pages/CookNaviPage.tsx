@@ -78,7 +78,7 @@ function TimelineCard({
         <RecipePill title={item.recipeTitle} colorIndex={item.colorIndex} />
         <span
           className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-bold ${
-            isWait ? 'border-accent text-accent' : 'border-edge text-ink-muted'
+            isWait ? 'border-accent text-accent-ink' : 'border-edge text-ink-muted'
           }`}
         >
           {isWait ? <Hourglass size={12} aria-hidden /> : <Hand size={12} aria-hidden />}
@@ -100,7 +100,7 @@ function TimelineCard({
           style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
         >
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1 font-bold text-accent">
+            <span className="inline-flex items-center gap-1 font-bold text-accent-ink">
               <Hourglass size={16} aria-hidden />
               {ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
             </span>
@@ -108,7 +108,7 @@ function TimelineCard({
               <button
                 type="button"
                 onClick={() => onStartTimer(item, item.waitMinutes * 60)}
-                className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent shadow-sm"
+                className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
               >
                 <TimerIcon size={16} aria-hidden />
                 {ja.cookNavi.startTimer}
@@ -224,7 +224,7 @@ export default function CookNaviPage() {
       <BackHeader fallback="/meal-plan" title={ja.cookNavi.title} />
       <div className="px-[var(--space-md)]">
         <h1 className="flex items-center gap-2 text-2xl font-bold">
-          <Route size={24} className="text-accent" aria-hidden />
+          <Route size={24} className="text-accent-ink" aria-hidden />
           {ja.cookNavi.title}
         </h1>
 
@@ -236,7 +236,7 @@ export default function CookNaviPage() {
             <p className="mt-1 text-sm text-ink-muted">{ja.cookNavi.gateDescription}</p>
             <Link
               to="/settings?section=pro"
-              className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent underline"
+              className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
             >
               {ja.cookNavi.gateLink}
             </Link>
@@ -256,7 +256,7 @@ export default function CookNaviPage() {
                 <p className="text-sm text-ink-muted">{ja.cookNavi.emptyToday}</p>
                 <Link
                   to="/meal-plan"
-                  className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent underline"
+                  className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
                 >
                   {ja.cookNavi.goToday}
                 </Link>
@@ -343,7 +343,7 @@ export default function CookNaviPage() {
                           <RecipePill key={r.id} title={r.title} colorIndex={r.colorIndex} />
                         ))}
                       </div>
-                      <p className="mt-[var(--space-md)] text-2xl font-bold text-accent">
+                      <p className="mt-[var(--space-md)] text-2xl font-bold text-accent-ink">
                         {ja.cookNavi.totalEstimate.replace('{n}', String(timeline.totalMinutes))}
                       </p>
                       <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.totalNote}</p>
@@ -367,7 +367,7 @@ export default function CookNaviPage() {
                         <Link
                           key={r.id}
                           to={`/recipes/${r.id}`}
-                          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                          className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                         >
                           {r.title}
                           <ChevronRight size={16} aria-hidden />
@@ -378,7 +378,7 @@ export default function CookNaviPage() {
                     <button
                       type="button"
                       onClick={() => setShowTimeline(false)}
-                      className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                      className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
                     >
                       {ja.cookNavi.rebuild}
                     </button>

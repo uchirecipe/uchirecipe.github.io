@@ -318,7 +318,7 @@ export default function RecipeDetailPage() {
     return (
       <div className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]">
         <p className="text-ink-muted">{ja.detail.notFound}</p>
-        <Link to="/recipes" className="mt-2 inline-block font-bold text-accent">
+        <Link to="/recipes" className="mt-2 inline-block font-bold text-accent-ink">
           {ja.detail.backToList}
         </Link>
       </div>
@@ -547,7 +547,7 @@ export default function RecipeDetailPage() {
               type="button"
               onClick={() => toggleFavorite(id)}
               aria-label={recipe.isFavorite ? ja.detail.favoriteOff : ja.detail.favoriteOn}
-              className="rounded-full p-3 text-accent"
+              className="rounded-full p-3 text-accent-ink"
             >
               <Heart size={22} fill={recipe.isFavorite ? 'currentColor' : 'none'} aria-hidden />
             </button>
@@ -557,7 +557,7 @@ export default function RecipeDetailPage() {
               type="button"
               onClick={openCustomTimer}
               aria-label={ja.timer.customOpenAria}
-              className="rounded-full p-3 text-accent"
+              className="rounded-full p-3 text-accent-ink"
             >
               <TimerIcon size={22} aria-hidden />
             </button>
@@ -638,7 +638,7 @@ export default function RecipeDetailPage() {
             {recipe.tags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-sm px-2 py-0.5 text-sm text-accent"
+                className="rounded-sm px-2 py-0.5 text-sm text-accent-ink"
                 style={{ background: 'var(--icon-tile)' }}
               >
                 {tag}
@@ -659,7 +659,7 @@ export default function RecipeDetailPage() {
           className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
             isInTodayList
               ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-accent'
+              : 'border-edge bg-surface text-accent-ink'
           }`}
         >
           <CalendarPlus size={20} aria-hidden />
@@ -690,7 +690,7 @@ export default function RecipeDetailPage() {
                 className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
                   costMode !== 'hidden'
                     ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-accent'
+                    : 'border-edge bg-surface text-accent-ink'
                 }`}
               >
                 <JapaneseYen size={16} aria-hidden />
@@ -704,7 +704,7 @@ export default function RecipeDetailPage() {
                   className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
                     costMode === 'edit'
                       ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-accent'
+                      : 'border-edge bg-surface text-accent-ink'
                   }`}
                 >
                   <Pencil size={16} aria-hidden />
@@ -717,7 +717,7 @@ export default function RecipeDetailPage() {
                 type="button"
                 onClick={() => setServingsOverride(Math.max(1, servings - 1))}
                 aria-label={ja.detail.servingsDown}
-                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent shadow-sm"
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent-ink shadow-sm"
               >
                 <Minus size={22} aria-hidden />
               </button>
@@ -729,7 +729,7 @@ export default function RecipeDetailPage() {
                 type="button"
                 onClick={() => setServingsOverride(servings + 1)}
                 aria-label={ja.detail.servingsUp}
-                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent shadow-sm"
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-surface text-accent-ink shadow-sm"
               >
                 <Plus size={22} aria-hidden />
               </button>
@@ -795,7 +795,7 @@ export default function RecipeDetailPage() {
                             onClick={() =>
                               setPriceEdit({ name: matchedEntry.normalizedName, entryId: matchedEntry.id })
                             }
-                            className="inline-flex items-center gap-1 rounded-full border border-edge bg-app px-2.5 py-1 text-sm font-bold text-accent shadow-sm"
+                            className="inline-flex items-center gap-1 rounded-full border border-edge bg-app px-2.5 py-1 text-sm font-bold text-accent-ink shadow-sm"
                           >
                             {matchedEntry.pricePerUnit.toLocaleString()}
                             {ja.detail.priceYen}/{matchedEntry.unit}
@@ -810,7 +810,7 @@ export default function RecipeDetailPage() {
                             className="inline-flex items-center gap-1 text-sm text-ink-muted"
                           >
                             {ja.detail.priceNone}
-                            <span className="font-bold text-accent">＋{ja.detail.costAddPrice}</span>
+                            <span className="font-bold text-accent-ink">＋{ja.detail.costAddPrice}</span>
                           </button>
                         )}
                       </span>
@@ -851,7 +851,7 @@ export default function RecipeDetailPage() {
                     isDashiIngredientName(ing.name) && (
                       <Link
                         to={`/recipes/${dashiRecipe.id}`}
-                        className="mt-0.5 inline-flex items-center gap-0.5 text-sm font-bold text-accent"
+                        className="mt-0.5 inline-flex items-center gap-0.5 text-sm font-bold text-accent-ink"
                       >
                         {ja.detail.dashiRecipeLink}
                         <ChevronRight size={14} aria-hidden />
@@ -887,7 +887,7 @@ export default function RecipeDetailPage() {
                     setShowCookHint(false)
                     setFocusOpen(true)
                   }}
-                  className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold text-accent ${
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold text-accent-ink ${
                     showCookHint ? 'border-accent ring-2 ring-accent/30' : 'border-edge'
                   }`}
                 >
@@ -897,7 +897,7 @@ export default function RecipeDetailPage() {
                 {/* 初回のみ・1回だけの控えめなヒント(docs/55 CEO提案1-5)。表示済みフラグで再表示しない */}
                 {showCookHint && (
                   <div className="mt-1 flex items-center justify-end gap-1">
-                    <span className="rounded-sm border border-accent bg-accent/10 px-2 py-1 text-xs font-bold text-accent">
+                    <span className="rounded-sm border border-accent bg-accent/10 px-2 py-1 text-xs font-bold text-accent-ink">
                       {ja.focus.firstHint}
                     </span>
                     <button
@@ -1004,7 +1004,7 @@ export default function RecipeDetailPage() {
                           })
                         }
                         aria-label={ja.timer.start}
-                        className="mt-1 inline-flex items-center gap-1 rounded-sm px-2 py-1 text-sm font-bold text-accent underline underline-offset-2"
+                        className="mt-1 inline-flex items-center gap-1 rounded-sm px-2 py-1 text-sm font-bold text-accent-ink underline underline-offset-2"
                         style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
                       >
                         <TimerIcon size={14} aria-hidden />
@@ -1051,7 +1051,7 @@ export default function RecipeDetailPage() {
                 href={recipe.sourceUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-accent underline"
+                className="inline-flex items-center gap-1 text-accent-ink underline"
               >
                 <ExternalLink size={16} aria-hidden />
                 {ja.detail.source}
@@ -1078,7 +1078,7 @@ export default function RecipeDetailPage() {
               {recipe.cookedLogs.length > 5 && (
                 <Link
                   to={`/history?recipe=${id}`}
-                  className="shrink-0 text-sm font-bold text-accent underline"
+                  className="shrink-0 text-sm font-bold text-accent-ink underline"
                 >
                   {ja.detail.cookedLogsSeeAll.replace('{n}', String(recipe.cookedLogs.length - 5))}
                 </Link>
@@ -1107,7 +1107,7 @@ export default function RecipeDetailPage() {
                               setEditingLogServings(Math.max(1, (editingLogServings ?? 1) - 1))
                             }
                             aria-label={ja.detail.servingsDown}
-                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent shadow-sm"
+                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent-ink shadow-sm"
                           >
                             <Minus size={16} aria-hidden />
                           </button>
@@ -1119,7 +1119,7 @@ export default function RecipeDetailPage() {
                             type="button"
                             onClick={() => setEditingLogServings((editingLogServings ?? 1) + 1)}
                             aria-label={ja.detail.servingsUp}
-                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent shadow-sm"
+                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent-ink shadow-sm"
                           >
                             <Plus size={16} aria-hidden />
                           </button>
@@ -1168,7 +1168,7 @@ export default function RecipeDetailPage() {
                               onClick={() => editLogCameraInputRef.current?.click()}
                               className="flex flex-1 items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold shadow-sm"
                             >
-                              <Camera size={16} className="text-accent" aria-hidden />
+                              <Camera size={16} className="text-accent-ink" aria-hidden />
                               {ja.form.photoTake}
                             </button>
                             <button
@@ -1176,7 +1176,7 @@ export default function RecipeDetailPage() {
                               onClick={() => editLogAlbumInputRef.current?.click()}
                               className="flex flex-1 items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold shadow-sm"
                             >
-                              <ImageIcon size={16} className="text-accent" aria-hidden />
+                              <ImageIcon size={16} className="text-accent-ink" aria-hidden />
                               {ja.form.photoPick}
                             </button>
                           </div>
@@ -1302,7 +1302,7 @@ export default function RecipeDetailPage() {
             }}
             aria-haspopup="dialog"
             aria-label={ja.share.button}
-            className="flex items-center justify-center rounded-md border border-edge bg-surface px-4 py-4 font-bold text-accent shadow-sm"
+            className="flex items-center justify-center rounded-md border border-edge bg-surface px-4 py-4 font-bold text-accent-ink shadow-sm"
           >
             <Share2 size={22} aria-hidden />
           </button>

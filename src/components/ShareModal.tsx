@@ -150,7 +150,7 @@ export default function ShareModal({
             type="button"
             disabled={sharing}
             onClick={() => onShare('text', selection)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent shadow-sm disabled:opacity-60"
+            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-60"
           >
             <MessageSquareText size={20} aria-hidden />
             {ja.share.textOption}
@@ -159,7 +159,7 @@ export default function ShareModal({
             type="button"
             disabled={sharing}
             onClick={() => onShare('image', selection)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent shadow-sm disabled:opacity-60"
+            className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-60"
           >
             <ImageIcon size={20} aria-hidden />
             {ja.share.imageOption}
@@ -168,7 +168,7 @@ export default function ShareModal({
         {/* テキスト共有は貼り付け取込できる形式で出している(便BJ)。その使い道の告知(便CI/C14) */}
         <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.share.textImportNote}</p>
         {message && (
-          <p className="mt-[var(--space-sm)] text-sm font-bold text-accent">{message}</p>
+          <p className="mt-[var(--space-sm)] text-sm font-bold text-accent-ink">{message}</p>
         )}
       </div>
     </div>

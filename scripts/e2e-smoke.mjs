@@ -11353,7 +11353,7 @@ try {
       // C11: 「使いたい食材」を入れると、ぜんぶ使えるレシピが先頭に出る(並べ替えは更新順のまま)
       await openRecipesWith(`?ing=${encodeURIComponent('キャベツ にんじん')}`)
       const subLabels = await s3Page.evaluate(() =>
-        Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.text-accent')).map((p) =>
+        Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.text-accent-ink')).map((p) =>
           p.textContent.trim(),
         ),
       )

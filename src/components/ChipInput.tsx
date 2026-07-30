@@ -46,7 +46,7 @@ export default function ChipInput({ values, onChange, placeholder, addLabel, rem
           {values.map((value) => (
             <span
               key={value}
-              className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-bold text-accent"
+              className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-bold text-accent-ink"
               style={{ background: 'color-mix(in oklab, var(--accent) 14%, var(--bg))' }}
             >
               {value}
@@ -78,7 +78,7 @@ export default function ChipInput({ values, onChange, placeholder, addLabel, rem
           // 2026-07-16 UI総点検A-7: 空欄タップで無反応だったのをdisabled化(既存のdisabled:opacity-50を踏襲)。
           // ChipInputはHomePage/RecipesPage共通の部品で、空欄クリックが無意味なのはどちらでも同じため
           // コンポーネント側で対応する
-          className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm disabled:opacity-50"
+          className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent-ink shadow-sm disabled:opacity-50"
         >
           <Plus size={18} aria-hidden />
           {addLabel}

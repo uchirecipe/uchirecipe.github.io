@@ -17,8 +17,14 @@
     --bg: #faf5ec;
     --text: #43362a;
     --accent: #d9480f;
+    /* 文字として使うアクセント(2026-07-30 オーナー承認・docs/色調整見本.html)。
+       塗り(--accent #d9480f)はボタン地・注記の左罫にそのまま使い、文字だけ濃くしてAAを満たす。
+       ページ背景#faf5ec上5.36:1 / カード面#fffdf8上5.73:1 */
+    --accent-ink: #b8380a;
     --surface: #fffdf8;
-    --text-muted: #8c7b69;
+    /* 補足テキスト(2026-07-30)。旧#8c7b69は3.75:1/4.01:1でAA未達だった。
+       本文#43362aとの明度差を保ちつつAAを満たす値: ページ背景上4.77:1 / カード面上5.10:1 */
+    --text-muted: #7c6a56;
     --border: #e9dfd0;
   }
   @media (prefers-color-scheme: dark) {
@@ -26,6 +32,8 @@
       --bg: #211a13;
       --text: #f1e8db;
       --accent: #ff8a4c;
+      /* ダークは現行で7.36:1あり基準を満たしているため文字用も同色=見た目不変 */
+      --accent-ink: #ff8a4c;
       --surface: #2c241b;
       --text-muted: #a89680;
       --border: #3d3327;
@@ -144,7 +152,7 @@
     background: var(--accent);
     color: var(--bg);
     font-weight: bold;
-    font-size: 17px;
+    font-size: 19px;
     text-decoration: none;
     padding: 16px;
     border-radius: 14px;
@@ -155,7 +163,7 @@
     display: block;
     text-align: center;
     margin-top: 32px;
-    color: var(--accent);
+    color: var(--accent-ink);
     font-weight: bold;
     text-decoration: none;
   }

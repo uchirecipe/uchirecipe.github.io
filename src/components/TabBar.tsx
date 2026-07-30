@@ -47,7 +47,7 @@ export default function TabBar() {
           end
           className={({ isActive }) =>
             `flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
-              isActive ? 'font-bold text-accent' : 'text-ink-muted'
+              isActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
             }`
           }
         >
@@ -58,7 +58,7 @@ export default function TabBar() {
         <Link
           to={recipesTarget}
           className={`flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
-            isRecipesActive ? 'font-bold text-accent' : 'text-ink-muted'
+            isRecipesActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
           }`}
         >
           <BookOpen size={24} aria-hidden />
@@ -71,7 +71,7 @@ export default function TabBar() {
             to={to}
             className={({ isActive }) =>
               `flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
-                isActive ? 'font-bold text-accent' : 'text-ink-muted'
+                isActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
               }`
             }
           >

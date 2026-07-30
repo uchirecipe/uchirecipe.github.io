@@ -113,7 +113,7 @@ export default function NutritionBalancePanel({
         className="flex w-full items-center justify-between gap-2 p-[var(--space-sm)] text-left"
       >
         <span className="min-w-0 flex-1 text-xs text-ink-muted">
-          <Sparkles size={12} className="mr-1 inline-block shrink-0 text-accent" aria-hidden />
+          <Sparkles size={12} className="mr-1 inline-block shrink-0 text-accent-ink" aria-hidden />
           <span className="font-bold">{title}</span>:{' '}
           {summaryValues.map((value, i) => (
             <span key={value} className="whitespace-nowrap">
@@ -247,20 +247,20 @@ function NutrientRows({
     >
       <div className="flex flex-wrap items-center gap-2">
         {unlocked && (
-          <span className="rounded-full border border-edge px-2 py-0.5 text-xs font-bold text-accent">
+          <span className="rounded-full border border-edge px-2 py-0.5 text-xs font-bold text-accent-ink">
             {ja.nutrition.proBadge}
           </span>
         )}
         <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
           {ja.nutrition.estimateBadge}
         </span>
-        <span className="text-xs font-bold text-accent">{ja.nutrition.servingHeader}</span>
+        <span className="text-xs font-bold text-accent-ink">{ja.nutrition.servingHeader}</span>
       </div>
       <dl className="mt-1 grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-1">
         {rows.map(({ key, label }) => (
           <div key={key} className="contents">
             <dt className="text-sm">{label}</dt>
-            <dd className="text-right text-sm font-bold text-accent tabular-nums">
+            <dd className="text-right text-sm font-bold text-accent-ink tabular-nums">
               {formatNutrient(key, totals[key])}
             </dd>
           </div>
@@ -268,7 +268,7 @@ function NutrientRows({
         {/* 野菜量は無料でも出す（docs/60 §7 未決#3＝(a)） */}
         <div className="contents">
           <dt className="text-sm">{ja.nutritionBalance.vegetableLabel}</dt>
-          <dd className="text-right text-sm font-bold text-accent tabular-nums">
+          <dd className="text-right text-sm font-bold text-accent-ink tabular-nums">
             {vegetableG.toLocaleString()} {ja.nutrition.gramUnit}
           </dd>
         </div>

@@ -29,7 +29,8 @@ export const seasonIcons: Record<Exclude<Season, 'all'>, typeof Flower2> = {
 }
 
 /** 料理カテゴリの線画（Freepikのspecial-lineal PNG・512px透過・public/icons/配下）を
-   CSSマスクで描画する。塗り色は既定でvar(--accent)（従来のtext-accentと同色=テーマ追従）。
+   CSSマスクで描画する。塗り色は既定でvar(--accent)（線画=図形なので、文字用に濃くした
+   --accent-inkではなく塗り用のアクセントをそのまま使う。テーマ追従）。
    RecipeFormPageのアイコン選択UIのように、ボタンの選択状態で文字色が変わる場所では
    colorを渡して合わせる（未選択時はtext-ink-mutedのミュートグレー等）。
    iOS Safari向けに-webkit-mask-*プレフィックスを必須で併記する */
@@ -131,7 +132,7 @@ function FavoriteToggle({ recipe }: { recipe: Recipe }) {
       onClick={onClick}
       aria-pressed={!!recipe.isFavorite}
       aria-label={recipe.isFavorite ? ja.detail.favoriteOff : ja.detail.favoriteOn}
-      className={`-m-2 shrink-0 p-2 ${recipe.isFavorite ? 'text-accent' : 'text-ink-muted'}`}
+      className={`-m-2 shrink-0 p-2 ${recipe.isFavorite ? 'text-accent-ink' : 'text-ink-muted'}`}
     >
       <Heart
         size={16}
@@ -242,7 +243,7 @@ export default function RecipeCard({
               ))}
             </div>
           )}
-          {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
+          {subLabel && <p className="mt-1 text-xs font-bold text-accent-ink">{subLabel}</p>}
         </div>
         {/* 栄養価並び替え中の値(2026-07-16 便T-7): 一覧(list)表示は行の右下に重ねる。
             便T-7-2でラベル付き表示("たんぱく質: 24g")に変更し長くなったため、max-width+truncateで
@@ -353,7 +354,7 @@ export default function RecipeCard({
             </span>
           )}
         </div>
-        {subLabel && <p className="mt-1 text-xs font-bold text-accent">{subLabel}</p>}
+        {subLabel && <p className="mt-1 text-xs font-bold text-accent-ink">{subLabel}</p>}
       </div>
     </Link>
   )

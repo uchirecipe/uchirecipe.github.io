@@ -410,7 +410,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
               onClick={() => setListening((v) => !v)}
               aria-label={listening ? ja.focus.micStop : ja.focus.micStart}
               className={`flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 ${
-                listening ? 'text-accent' : 'text-ink-muted'
+                listening ? 'text-accent-ink' : 'text-ink-muted'
               }`}
             >
               {listening ? (
@@ -426,7 +426,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             onClick={toggleSpeak}
             disabled={!speechSupported}
             aria-label={speaking ? ja.focus.stop : ja.focus.read}
-            className="flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 text-accent disabled:opacity-30"
+            className="flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 text-accent-ink disabled:opacity-30"
           >
             {speaking ? <VolumeX size={24} aria-hidden /> : <Volume2 size={24} aria-hidden />}
             <span className="text-[10px] font-bold leading-none">{ja.focus.readLabel}</span>
@@ -439,11 +439,11 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           {ja.focus.micHint}
           {/* 聞いている最中・聞き取れた言葉・マイクが使えなかったことの手応え(機能④診断C14) */}
           {voiceMessage ? (
-            <span className={`ml-1 font-bold ${listening ? 'text-accent' : 'text-warning'}`}>
+            <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
               {voiceMessage}
             </span>
           ) : (
-            listening && <span className="ml-1 font-bold text-accent">{ja.focus.micListening}</span>
+            listening && <span className="ml-1 font-bold text-accent-ink">{ja.focus.micListening}</span>
           )}
         </p>
       )}
@@ -468,7 +468,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             <div
               key={t.id}
               className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
-                t.done ? 'animate-pulse border-warning text-warning' : 'border-accent text-accent'
+                t.done ? 'animate-pulse border-warning text-warning' : 'border-accent text-accent-ink'
               } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''} ${
                 isThisRecipe ? '' : 'opacity-90'
               }`}
@@ -509,7 +509,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           type="button"
           onClick={openCustomTimer}
           aria-label={ja.timer.customOpenAria}
-          className="inline-flex items-center gap-1 rounded-full border border-accent px-3 py-1.5 text-sm font-bold text-accent"
+          className="inline-flex items-center gap-1 rounded-full border border-accent px-3 py-1.5 text-sm font-bold text-accent-ink"
         >
           <TimerIcon size={16} aria-hidden />
           {ja.timer.customBarButton}
@@ -565,7 +565,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             type="button"
             onClick={() => startStepTimer((step.minutes ?? 0) * 60)}
             aria-label={ja.timer.start}
-            className="inline-flex items-center gap-1 rounded-md px-4 py-2 font-bold text-accent underline underline-offset-2"
+            className="inline-flex items-center gap-1 rounded-md px-4 py-2 font-bold text-accent-ink underline underline-offset-2"
             style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
           >
             <TimerIcon size={18} aria-hidden />
@@ -613,7 +613,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
                       type="button"
                       onClick={(e) => openTerm(term, e.currentTarget)}
                       aria-label={ja.term.openAria.replace('{term}', term.term)}
-                      className="rounded-sm px-1.5 py-0.5 font-bold text-accent underline decoration-dotted underline-offset-2"
+                      className="rounded-sm px-1.5 py-0.5 font-bold text-accent-ink underline decoration-dotted underline-offset-2"
                       style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
                     >
                       {term.term}
@@ -632,7 +632,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           type="button"
           onClick={() => goTo(index - 1)}
           disabled={index === 0}
-          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface py-4 text-lg font-bold text-accent shadow-sm disabled:opacity-30"
+          className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface py-4 text-lg font-bold text-accent-ink shadow-sm disabled:opacity-30"
         >
           <ChevronLeft size={22} aria-hidden />
           {ja.focus.prev}

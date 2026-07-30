@@ -70,7 +70,7 @@ export function MemoText({ text, className, onOpenTerm, seen }: Props) {
               <p key={i} className="text-left">
                 <button
                   type="button"
-                  className="rounded-sm border-b border-dotted border-accent/60 px-0.5 text-accent"
+                  className="rounded-sm border-b border-dotted border-accent/60 px-0.5 text-accent-ink"
                   style={{ background: 'color-mix(in oklab, var(--accent) 8%, transparent)' }}
                   onClick={(e) => onOpenTerm({ term: label, description: detail }, e.currentTarget)}
                 >

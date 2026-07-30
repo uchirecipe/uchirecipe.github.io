@@ -135,7 +135,7 @@ export default function CookedLogModal({
                 type="button"
                 onClick={() => onServingsChange(Math.max(1, (servings ?? 1) - 1))}
                 aria-label={ja.detail.servingsDown}
-                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-app text-accent shadow-sm"
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-app text-accent-ink shadow-sm"
               >
                 <Minus size={20} aria-hidden />
               </button>
@@ -147,7 +147,7 @@ export default function CookedLogModal({
                 type="button"
                 onClick={() => onServingsChange((servings ?? 1) + 1)}
                 aria-label={ja.detail.servingsUp}
-                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-app text-accent shadow-sm"
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-edge bg-app text-accent-ink shadow-sm"
               >
                 <Plus size={20} aria-hidden />
               </button>
@@ -202,7 +202,7 @@ export default function CookedLogModal({
               onClick={() => cameraInputRef.current?.click()}
               className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-app py-2 text-sm font-bold shadow-sm"
             >
-              <Camera size={18} className="text-accent" aria-hidden />
+              <Camera size={18} className="text-accent-ink" aria-hidden />
               {ja.form.photoTake}
             </button>
             <button
@@ -210,7 +210,7 @@ export default function CookedLogModal({
               onClick={() => albumInputRef.current?.click()}
               className="flex flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-app py-2 text-sm font-bold shadow-sm"
             >
-              <ImageIcon size={18} className="text-accent" aria-hidden />
+              <ImageIcon size={18} className="text-accent-ink" aria-hidden />
               {ja.form.photoPick}
             </button>
           </div>

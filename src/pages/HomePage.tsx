@@ -99,7 +99,7 @@ function SuggestionCard({ recipe }: { recipe: Recipe }) {
           )}
           <span>{ja.effort[recipe.effortLevel]}</span>
           {recipe.isFavorite && (
-            <Heart size={14} className="text-accent" fill="currentColor" aria-hidden />
+            <Heart size={14} className="text-accent-ink" fill="currentColor" aria-hidden />
           )}
         </div>
       </div>
@@ -329,7 +329,7 @@ export default function HomePage() {
       hasTodayList ? (
         <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
           <h2 className="flex items-center gap-2 font-bold">
-            <CalendarDays size={20} className="text-accent" aria-hidden />
+            <CalendarDays size={20} className="text-accent-ink" aria-hidden />
             {ja.home.mealPlanTitle}
           </h2>
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
@@ -464,7 +464,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={shuffleSuggestion}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >
               <Dices size={20} aria-hidden />
               {ja.home.shuffle}
@@ -476,7 +476,7 @@ export default function HomePage() {
     ingredientSearch: (
       <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
         <h2 className="flex items-center gap-2 font-bold">
-          <Carrot size={20} className="text-accent" aria-hidden />
+          <Carrot size={20} className="text-accent-ink" aria-hidden />
           {ja.home.ingShortcutTitle}
         </h2>
         <div className="mt-[var(--space-sm)]">
@@ -492,7 +492,7 @@ export default function HomePage() {
               onClick={() =>
                 setIngredients((prev) => Array.from(new Set([...prev, ...pantryNames])))
               }
-              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
             >
               <Refrigerator size={16} aria-hidden />
               {ja.pantry.addToSearch}
@@ -502,7 +502,7 @@ export default function HomePage() {
             type="button"
             onClick={submitIngredients}
             disabled={ingredients.length === 0}
-            className="mt-[var(--space-sm)] w-full shrink-0 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-50"
+            className="mt-[var(--space-sm)] w-full shrink-0 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-50"
           >
             {ja.home.ingButton}
           </button>
@@ -514,10 +514,10 @@ export default function HomePage() {
         <section>
           <div className="flex items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 font-bold">
-              <History size={20} className="text-accent" aria-hidden />
+              <History size={20} className="text-accent-ink" aria-hidden />
               {ja.home.historyTitle}
             </h2>
-            <Link to="/history" className="text-sm font-bold text-accent underline">
+            <Link to="/history" className="text-sm font-bold text-accent-ink underline">
               {ja.home.historyMore}
             </Link>
           </div>
@@ -550,9 +550,9 @@ export default function HomePage() {
               to="/settings?section=backup"
               className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-md"
             >
-              <HardDriveDownload size={16} className="shrink-0 text-accent" aria-hidden />
+              <HardDriveDownload size={16} className="shrink-0 text-accent-ink" aria-hidden />
               <span className="min-w-0 flex-1">{ja.home.backupReminder}</span>
-              <span className="shrink-0 font-bold text-accent">{ja.home.backupReminderLink}</span>
+              <span className="shrink-0 font-bold text-accent-ink">{ja.home.backupReminderLink}</span>
               <span
                 role="button"
                 tabIndex={0}
@@ -583,13 +583,13 @@ export default function HomePage() {
       {/* アプリ内お知らせ（最新1件・未読のときだけ） */}
       {showNews && latestNews && (
         <div className="mt-[var(--space-sm)] flex items-start gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm shadow-sm">
-          <Megaphone size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden />
+          <Megaphone size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="font-bold text-ink">{latestNews.title}</p>
             <p className="text-ink-muted">{latestNews.body}</p>
             {latestNews.link && (
               // アプリ内のリンク(#/…)も外部リンクも同じタブで開く(PWAとしては別タブより自然)
-              <a href={latestNews.link} className="font-bold text-accent underline">
+              <a href={latestNews.link} className="font-bold text-accent-ink underline">
                 {ja.home.newsLinkLabel}
               </a>
             )}

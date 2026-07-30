@@ -30,7 +30,7 @@ const BULK_SET_LEVELS: PantryLevel[] = ['have', 'low', 'none']
 /** 3段階それぞれの見た目（デザイントークンのみ使用。新しい色相は増やさない） */
 function levelClass(level: PantryLevel): string {
   if (level === 'have') return 'border-accent bg-accent text-on-accent'
-  if (level === 'low') return 'border-accent text-accent bg-app'
+  if (level === 'low') return 'border-accent text-accent-ink bg-app'
   return 'border-edge text-ink-muted bg-surface'
 }
 
@@ -144,7 +144,7 @@ export default function PantryBoard() {
     <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-xl font-bold">
-          <Refrigerator size={20} className="text-accent" aria-hidden />
+          <Refrigerator size={20} className="text-accent-ink" aria-hidden />
           {ja.pantry.title}
         </h2>
         {items && items.length > 0 && (
@@ -194,7 +194,7 @@ export default function PantryBoard() {
               type="button"
               onClick={selectAll}
               disabled={allSelected}
-              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
             >
               {ja.pantry.organizeSelectAll}
             </button>
@@ -211,7 +211,7 @@ export default function PantryBoard() {
             <button
               type="button"
               onClick={() => void deleteSelected()}
-              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >
               {ja.pantry.organizeDeleteSelected.replace('{n}', String(selectedIds.length))}
             </button>
@@ -240,14 +240,14 @@ export default function PantryBoard() {
                         onClick={() => toggleSelected(item.id!)}
                         aria-pressed={selected}
                         className={`relative inline-flex items-center rounded-full border-2 py-2 px-3 text-sm font-bold shadow-sm ${
-                          selected ? 'border-accent bg-accent/10 text-accent' : 'border-edge bg-surface text-ink-muted'
+                          selected ? 'border-accent bg-accent/10 text-accent-ink' : 'border-edge bg-surface text-ink-muted'
                         }`}
                       >
                         {item.name}
                         {selected && (
                           <CheckCircle2
                             size={16}
-                            className="absolute -right-1.5 -top-1.5 rounded-full bg-surface text-accent"
+                            className="absolute -right-1.5 -top-1.5 rounded-full bg-surface text-accent-ink"
                             aria-hidden
                           />
                         )}
@@ -325,7 +325,7 @@ export default function PantryBoard() {
               type="button"
               onClick={() => void applyGroup(undefined)}
               disabled={selectedIds.length === 0}
-              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent shadow-sm disabled:opacity-40"
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
             >
               {ja.pantry.organizeGroupAuto}
             </button>
@@ -356,7 +356,7 @@ export default function PantryBoard() {
                 <button
                   type="button"
                   onClick={() => void saveNote()}
-                  className="shrink-0 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
+                  className="shrink-0 rounded-sm border border-edge bg-surface px-3 font-bold text-accent-ink shadow-sm"
                 >
                   {ja.pantry.organizeNoteSave}
                 </button>
@@ -386,7 +386,7 @@ export default function PantryBoard() {
         <button
           type="button"
           onClick={() => void add()}
-          className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm"
+          className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent-ink shadow-sm"
         >
           <Plus size={18} aria-hidden />
           {ja.pantry.add}
