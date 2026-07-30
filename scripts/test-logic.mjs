@@ -174,6 +174,12 @@ import {
   seasoningGroupFromLetter,
   countAmountlessRows,
 } from '../src/logic/urlImportRows.ts'
+import { MIN_SERVINGS, MAX_SERVINGS, clampServings, isServingsInRange } from '../src/logic/servings.ts'
+import {
+  photoReplacePlan,
+  replaceConfirmTargets,
+  needsReplaceConfirm,
+} from '../src/logic/replaceConfirm.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -8327,6 +8333,83 @@ eq(
   eq('C18 表示人数4人分で共有すると「4人分」になる', asShown.includes('\n4人分\n'), true)
   eq('C18 材料の分量も4人分にスケールする', asShown.includes('・さわら(切り身) 4切れ'), true)
   eq('C18 調味料も一緒にスケールする', asShown.includes('・みそ 大さじ4'), true)
+}
+
+// ---------- 人数分の範囲ガード(2026-07-30 便CK/①-1) ----------
+// ±ボタンのonClickにしかクランプが無く、URL取り込み(50人分)・貼り付け(50人分)・下書き復元(99人分)は
+// 素通りしてそのまま保存できていた(手では21人分以上を作れないのに、詳細ページに
+// 「50人分レシピの1食あたり 約24円」が出る状態)。全経路がこのクランプを通る形に直した
+{
+  eq('便CK/①-1 人数分の範囲は1〜20', [MIN_SERVINGS, MAX_SERVINGS], [1, 20])
+  eq('便CK/①-1 範囲内の値はそのまま', clampServings(4), 4)
+  eq('便CK/①-1 下限・上限そのものは通る', [clampServings(1), clampServings(20)], [1, 20])
+  eq('便CK/①-1 貼り付けの50人分は20人分に収める', clampServings(50), 20)
+  eq('便CK/①-1 URL取り込みの48人分は20人分に収める', clampServings(48), 20)
+  eq('便CK/①-1 下書きの99人分は20人分に収める', clampServings(99), 20)
+  eq('便CK/①-1 0以下は下限に寄せる', [clampServings(0), clampServings(-3)], [1, 1])
+  eq('便CK/①-1 小数は切り捨てる(2.5人分は作れない)', clampServings(2.5), 2)
+  eq('便CK/①-1 壊れた値(NaN)は下限に寄せる', clampServings(Number.NaN), 1)
+  eq(
+    '便CK/①-1 保存前の範囲チェック: 範囲外はfalse',
+    [isServingsInRange(0), isServingsInRange(21), isServingsInRange(50), isServingsInRange(2.5)],
+    [false, false, false, false],
+  )
+  eq(
+    '便CK/①-1 保存前の範囲チェック: 範囲内はtrue',
+    [isServingsInRange(1), isServingsInRange(2), isServingsInRange(20)],
+    [true, true, true],
+  )
+}
+
+// ---------- 置き換え確認に写真を含める(2026-07-30 便CK/②-1・S1) ----------
+// 写真つきの既存レシピを編集中にURL取り込みすると、確認文にも判定にも写真が無いため
+// 確認なく写真が差し替わり、保存すると元の写真は復元できなくなっていた(規約Fの漏れ)
+{
+  eq('便CK/②-1 写真があり「写真も取り込む」ONなら置き換わる', photoReplacePlan(true, true), 'replace')
+  eq('便CK/②-1 写真があってもOFFならそのまま残る', photoReplacePlan(true, false), 'kept')
+  eq('便CK/②-1 写真が無ければ写真については何も起きない', photoReplacePlan(false, true), 'none')
+  const filled = { filledIngredients: 1, filledSteps: 1, parsedIngredients: 2, parsedSteps: 2 }
+  eq(
+    '便CK/②-1 材料・手順・写真の3つとも消えるものとして数える',
+    replaceConfirmTargets({ ...filled, photoPlan: 'replace' }),
+    { ingredients: true, steps: true, photo: true },
+  )
+  eq(
+    '便CK/②-1 写真がOFFで残るなら写真は「消えるもの」ではない',
+    replaceConfirmTargets({ ...filled, photoPlan: 'kept' }).photo,
+    false,
+  )
+  // 料理名と写真だけのレシピ(材料・手順が空)でも、写真が置き換わるなら確認を出す
+  const photoOnly = {
+    filledIngredients: 0,
+    filledSteps: 0,
+    parsedIngredients: 2,
+    parsedSteps: 2,
+    photoPlan: 'replace',
+  }
+  eq(
+    '便CK/②-1 材料・手順が空でも写真が置き換わるなら確認する',
+    needsReplaceConfirm(replaceConfirmTargets(photoOnly)),
+    true,
+  )
+  eq(
+    '便CK/②-1 消えるものが何も無ければ確認は出さない(便BW/C-04の仕様は維持)',
+    needsReplaceConfirm(
+      replaceConfirmTargets({ ...photoOnly, photoPlan: 'none' }),
+    ),
+    false,
+  )
+  eq(
+    '便CK/②-1 入力済みでも取り込み側が0件ならその項目は消えない(便BW/C-04の仕様は維持)',
+    replaceConfirmTargets({
+      filledIngredients: 3,
+      filledSteps: 3,
+      parsedIngredients: 0,
+      parsedSteps: 0,
+      photoPlan: 'none',
+    }),
+    { ingredients: false, steps: false, photo: false },
+  )
 }
 
 // ---------- 結果 ----------
