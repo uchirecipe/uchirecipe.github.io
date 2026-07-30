@@ -11276,6 +11276,47 @@ try {
     )
   }
 
+  // --- PRICEUNDO-01(2026-07-30 便CK/③-2): 「食材と価格」の行削除に取り消しを付ける。
+  // 従来は確認もトーストも無い1タップで目安価格の原本ごと消え、アプリ内に復旧導線が無かった
+  // (規約F違反。seedPriceDefaultsIfNeededは初回起動とPRICE_DEFAULTS_VERSION更新時しか走らない) ---
+  currentCheck = 'PRICEUNDO-01'
+  {
+    await page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1000)
+    await page.locator('input[aria-label="食材名で絞り込む"]').fill('玉ねぎ')
+    await page.waitForTimeout(400)
+    const priceBefore = await page
+      .locator('input[aria-label="玉ねぎの価格（円）"]')
+      .first()
+      .inputValue()
+    await page.locator('button[aria-label="この食材を削除"]').first().click()
+    await page.waitForTimeout(500)
+    const removedBody = await page.textContent('body')
+    check(
+      'PRICEUNDO-01 削除したことと、概算食費から外れることをその場で伝える',
+      removedBody.includes('「玉ねぎ」を削除しました。この食材を使うレシピの概算食費からも外れます'),
+    )
+    check(
+      'PRICEUNDO-01 行は実際に消えている',
+      (await page.locator('input[aria-label="玉ねぎの価格（円）"]').count()) === 0,
+    )
+    await page.getByRole('button', { name: '元に戻す' }).click()
+    await page.waitForTimeout(600)
+    check(
+      'PRICEUNDO-01 「元に戻す」で戻ったことを伝える',
+      (await page.textContent('body')).includes('「玉ねぎ」を戻しました（目安価格も元のままです）'),
+    )
+    const priceAfter = await page
+      .locator('input[aria-label="玉ねぎの価格（円）"]')
+      .first()
+      .inputValue()
+    check(
+      'PRICEUNDO-01 目安価格も削除前と同じ値で戻る',
+      priceAfter === priceBefore && priceAfter !== '',
+      `削除前=${priceBefore} 復元後=${priceAfter}`,
+    )
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

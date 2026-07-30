@@ -214,3 +214,16 @@ export async function resetPriceEntryToDefault(id: number): Promise<void> {
 export async function removePriceEntry(id: number): Promise<void> {
   await db.prices.delete(id)
 }
+
+/**
+ * 削除した1件を元に戻す（2026-07-30 便CK/③-2。買い物メモの restoreShoppingItem と同じ作法）。
+ * 削除直後のidはまだ空いているので、同じidで書き戻せば目安価格(defaultPricePerUnit)・
+ * 単位・isDefaultまで削除前の姿でそろって戻る。
+ *
+ * これが無かったため、行右端のXを1タップした時点で目安価格の原本ごと消え、
+ * アプリ内には復旧導線が無かった（seedPriceDefaultsIfNeededは初回起動と
+ * PRICE_DEFAULTS_VERSION更新時しか走らない＝バックアップ復元か次の既定価格更新待ちしかない）。
+ */
+export async function restorePriceEntry(entry: PriceEntry): Promise<void> {
+  await db.prices.put(entry)
+}
