@@ -163,7 +163,7 @@
 //         単体テストとコードレビューで別途担保。報告に明記) /
 //         BACKUPCARDS-01(2026-07-17バックアップ改修 修正5: バックアップタブを3カード
 //         (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成。②で「追加」
-//         「置き換え」ボタンが並んで見えること・①に購入コード注意文があることを確認) /
+//         「置き換え」ボタンが並んで見えること・①に解錠コード注意文があることを確認) /
 //         PRICEVIEW-01(レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
 //         全面改修・2026-07-20 便AJ(docs/45)で再改修。既定は非表示で材料行に金額表示は無く、
 //         見出し行の「原価を見る」チップを押すと各材料行の使用量表示が1食あたりの按分原価
@@ -1445,8 +1445,9 @@ try {
   )
 
   // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。目次チップの下・
-  // 全節共通の常設バナー。未実施は「まだバックアップしていません」、「今すぐ保存」はどこからでも
-  // バックアップ節の①書き出しカードへスクロールする(1本スクロール化でタブ切り替えは廃止) ---
+  // 全節共通の常設バナー。未実施は「まだバックアップしていません」、「書き出しへ」はどこからでも
+  // バックアップ節の①書き出しカードへスクロールする(1本スクロール化でタブ切り替えは廃止。
+  // ボタン文言は2026-07-30 便CJ/C7で「今すぐ保存」から改名: 押しても保存はせずスクロールするだけ) ---
   currentCheck = 'BANNER-01'
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.waitForTimeout(200)
@@ -1454,16 +1455,16 @@ try {
     'BANNER-01 全節共通のバックアップ状態バナーが見える(未実施表示)',
     (await page.textContent('body')).includes('まだバックアップしていません'),
   )
-  await page.getByRole('button', { name: '今すぐ保存', exact: true }).click()
+  await page.getByRole('button', { name: '書き出しへ', exact: true }).click()
   await waitScrollSettled()
   check(
-    'BANNER-01 「今すぐ保存」でバックアップの①書き出しカードへスクロールする(ボタンがDOMにある)',
+    'BANNER-01 「書き出しへ」でバックアップの①書き出しカードへスクロールする(ボタンがDOMにある)',
     (await page.textContent('body')).includes('ファイルに書き出す'),
   )
   {
     const exportCardTop = await settingsSectionTop('backup-section')
     check(
-      'BANNER-01 「今すぐ保存」で①バックアップを取るカードが上端付近へ来る(旧aria-pressed検証をスクロール位置検証へ)',
+      'BANNER-01 「書き出しへ」で①バックアップを取るカードが上端付近へ来る(旧aria-pressed検証をスクロール位置検証へ)',
       exportCardTop !== null && exportCardTop >= -5 && exportCardTop < 200,
       `exportCardTop=${exportCardTop}`,
     )
@@ -1490,7 +1491,9 @@ try {
     )
   }
   // --- MOVEGUIDE-01(2026-07-17設定ゼロベース裁定#5): 機種変更・引っ越しガイド(折りたたみ)。
-  // 既定は畳まれていて手順は見えず、タップで展開すると3ステップ+注意文が見えること ---
+  // 既定は畳まれていて手順は見えず、タップで展開すると4ステップ+注意文が見えること。
+  // 2026-07-30 便CJで手順を改訂: ①に「作った記録」の写真の扱い(C5)、②にファイルの受け渡し(C4)、
+  // ④は「解錠コードを入れ直す」誤情報の撤去(C3。実際はファイルから自動で戻る) ---
   currentCheck = 'MOVEGUIDE-01'
   check(
     'MOVEGUIDE-01 「機種変更するときは」の折りたたみ見出しが見える',
@@ -1505,10 +1508,22 @@ try {
   {
     const guideText = await page.textContent('body')
     check(
-      'MOVEGUIDE-01 展開すると3ステップが見える',
+      'MOVEGUIDE-01 展開すると4ステップが見える',
       guideText.includes('この端末で「ファイルに書き出す」') &&
-        guideText.includes('読み込む（置き換え）') &&
-        guideText.includes('購入コードを入れ直す'),
+        guideText.includes('読み込む（今のデータと置き換え）') &&
+        guideText.includes('Pro版は①のファイルから一緒に戻ります'),
+    )
+    check(
+      'MOVEGUIDE-01 便CJ/C5: ①に「作った記録」の写真を含める操作の案内がある(写真だけ静かに失わせない)',
+      guideText.includes('「作った記録」の写真も新しい端末へ移すなら'),
+    )
+    check(
+      'MOVEGUIDE-01 便CJ/C4: ファイルを新しい端末へ移す工程が独立したステップとして書かれている',
+      guideText.includes('書き出したファイルを新しい端末へ移す'),
+    )
+    check(
+      'MOVEGUIDE-01 便CJ/C3: 「解錠コードを入れ直す」という実装と矛盾した案内が無い',
+      !guideText.includes('購入コードを入れ直す') && !guideText.includes('解錠コードを入れ直す（'),
     )
     check('MOVEGUIDE-01 注意文が見える', guideText.includes('先にレシピを登録していた場合は消える'))
   }
@@ -1529,8 +1544,8 @@ try {
       (await page.textContent('body')).includes('読み込む（今のデータと置き換え）'),
   )
   check(
-    'BACKUPCARDS-01 修正1: バックアップに購入コードが含まれる旨の注意文が見える',
-    (await page.textContent('body')).includes('バックアップファイルには購入コードが含まれます'),
+    'BACKUPCARDS-01 修正1: バックアップに解錠コードが含まれる旨の注意文が見える(呼称は便CJ/C9で統一)',
+    (await page.textContent('body')).includes('バックアップファイルにはPro版の解錠コードが含まれます'),
   )
   // REFRESH-APP-01: 「アプリの表示を修復する」ボタン(2026-07-16新設・2026-07-17修正4で文言全面改訂。
   // SWとキャッシュだけ消してリロードする安全機能)が③困ったときカードに存在し、消えるもの/残るものの
@@ -1543,7 +1558,7 @@ try {
   check(
     'REFRESH-APP-01 説明文に「消えるもの」「残るもの」の内訳がある(修正4)',
     (await page.textContent('body')).includes('消えるもの: 画面の一時ファイルだけです') &&
-      (await page.textContent('body')).includes('残るもの: レシピ・価格・設定・購入コードなど'),
+      (await page.textContent('body')).includes('残るもの: レシピ・価格・設定・解錠コードなど'),
   )
   check(
     'REFRESH-APP-01 ブラウザのキャッシュクリアに関する注意(「Cookieと他のサイトデータ」)がある(修正4)',
@@ -7249,6 +7264,8 @@ try {
   currentCheck = 'BACKUP-01'
   {
     let downloadedJson = ''
+    // MERGE-01(便CJ/C1)でも参照するのでtryブロックの外で宣言する
+    let setup = null
 
     // 1)〜3) 書き出し元プロファイル: 価格を1件編集・週献立に1枠割当・在庫に1品を用意し、
     // 実際の「ファイルに書き出す」ボタンでバックアップJSONを書き出す
@@ -7277,7 +7294,7 @@ try {
       // 週献立に1枠割当・在庫に1品・Pro解錠コード(IndexedDBへ直接書き込み。理由は上のコメントの通り。
       // Pro解錠コードは2026-07-17バックアップ改修 修正1のコード往復確認用。実際の購入コードは
       // 販売台帳の原本のためNUT-02等と同様settings.proCodeの直書きで「解錠済み」を再現する)
-      const setup = await srcPage.evaluate(async () => {
+      setup = await srcPage.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((resolve, reject) => {
           req.onsuccess = () => resolve(req.result)
@@ -7306,8 +7323,28 @@ try {
           tx.oncomplete = () => resolve(undefined)
           tx.onerror = () => reject(tx.error)
         })
+        // 便CJ/C1(2026-07-30): 既にあるレシピに紐づくユーザーデータ(お気に入り・作った記録)も
+        // 用意する。まっさらな端末へ「追加」で読み込むと同梱の基本レシピは必ずID衝突するため、
+        // 以前はこれらが1件も戻らなかった(実機QA S1)。下のMERGE-01がその再発を検出する
+        const recipeTitle = await new Promise((resolve, reject) => {
+          const tx2 = idb.transaction('recipes', 'readwrite')
+          const store = tx2.objectStore('recipes')
+          const getReq = store.get(recipeId)
+          let title = null
+          getReq.onsuccess = () => {
+            const recipe = getReq.result
+            title = recipe.title
+            store.put({
+              ...recipe,
+              isFavorite: true,
+              cookedLogs: [{ date: '2026-07-19', note: 'E2Eマージ確認の記録' }],
+            })
+          }
+          tx2.oncomplete = () => resolve(title)
+          tx2.onerror = () => reject(tx2.error)
+        })
         idb.close()
-        return { recipeId }
+        return { recipeId, recipeTitle }
       })
       check('BACKUP-01 前提: 割当先レシピIDを取得できた', typeof setup.recipeId === 'number')
 
@@ -7447,8 +7484,112 @@ try {
       await dstBrowser.close()
     }
 
+    // 4b) MERGE-01(2026-07-30 便CJ/C1・実機QA S1事故の再発防止): 同じファイルをまっさらな別
+    //     プロファイルへ「読み込む(今のデータに追加)」で読み込む。以前はこの経路が
+    //     レシピ本体と解錠コードしか見ておらず、(a)在庫・買い物メモ・週献立・今日の献立・価格・
+    //     日付メモ・献立テンプレの7テーブルと、(b)既にあるレシピ(まっさら端末では同梱109品が
+    //     必ずID衝突する)の作った記録・お気に入り・写真が1件も戻らないまま「追加◯件・
+    //     スキップ◯件」と成功風に表示されていた。非破壊マージ(今のデータは1件も消さない)に
+    //     なったことと、今のデータを上書きしないことの両方を固定する
+    currentCheck = 'MERGE-01'
+    const mergeBrowser = await chromium.launch()
+    try {
+      const mergeContext = await mergeBrowser.newContext()
+      const mergePage = await mergeContext.newPage()
+      mergePage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@MERGE-01] ${err.message}`)
+      })
+      mergePage.on('dialog', (dialog) => dialog.accept())
+      await mergePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await mergePage.waitForTimeout(1800) // 初回シード完了待ち(まっさらな別プロファイル)
+      await mergePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await mergePage.waitForTimeout(500)
+      await mergePage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await mergePage.waitForTimeout(300)
+      const [mergeChooser] = await Promise.all([
+        mergePage.waitForEvent('filechooser'),
+        mergePage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+      ])
+      await mergeChooser.setFiles({
+        name: 'uchi-recipe-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(downloadedJson, 'utf-8'),
+      })
+      await mergePage.waitForTimeout(1200)
+      const mergeBody = await mergePage.textContent('body')
+      check(
+        'MERGE-01 結果に取り込みの内訳が出る(何が足されたかを画面で確認できる)',
+        mergeBody.includes('新しく足したレシピは') &&
+          mergeBody.includes('在庫・買い物メモ・献立・価格・日付メモ・献立テンプレを合わせて') &&
+          mergeBody.includes('「作った記録」'),
+        `body抜粋=${mergeBody.slice(mergeBody.indexOf('新しく足したレシピは'), mergeBody.indexOf('新しく足したレシピは') + 200)}`,
+      )
+      check('MERGE-01 エラーメッセージは出ない', !mergeBody.includes('ファイルを読み込めませんでした'))
+      const mergedData = await mergePage.evaluate(async (recipeId) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const getAll = (storeName) =>
+          new Promise((resolve, reject) => {
+            const req2 = idb.transaction(storeName, 'readonly').objectStore(storeName).getAll()
+            req2.onsuccess = () => resolve(req2.result)
+            req2.onerror = () => reject(req2.error)
+          })
+        const recipe = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
+        const [mealPlans, pantryItems, prices] = await Promise.all([
+          getAll('mealPlans'),
+          getAll('pantryItems'),
+          getAll('prices'),
+        ])
+        idb.close()
+        return { recipe, mealPlans, pantryItems, prices }
+      }, setup.recipeId)
+      check(
+        'MERGE-01 既にあるレシピ(ID衝突する同梱レシピ)へ「作った記録」が取り込まれる',
+        (mergedData.recipe?.cookedLogs ?? []).some((log) => log.note === 'E2Eマージ確認の記録'),
+        `cookedLogs=${JSON.stringify(mergedData.recipe?.cookedLogs)}`,
+      )
+      check(
+        'MERGE-01 既にあるレシピへお気に入りが取り込まれる',
+        mergedData.recipe?.isFavorite === true,
+      )
+      check(
+        'MERGE-01 既にあるレシピの内容(料理名)は書き換えない(今のデータを優先)',
+        mergedData.recipe?.title === setup.recipeTitle,
+      )
+      check(
+        'MERGE-01 週献立が取り込まれる(7テーブルの取りこぼしの再発防止)',
+        mergedData.mealPlans.some((m) => m.date === '2026-07-20' && m.slot === 'dinner'),
+        `mealPlans=${JSON.stringify(mergedData.mealPlans)}`,
+      )
+      check(
+        'MERGE-01 在庫が取り込まれる(7テーブルの取りこぼしの再発防止)',
+        mergedData.pantryItems.some((p) => p.name === 'E2Eバックアップ確認在庫'),
+        `pantryItems=${JSON.stringify(mergedData.pantryItems)}`,
+      )
+      const mergedOnion = mergedData.prices.filter((p) => p.name === '玉ねぎ')
+      check(
+        'MERGE-01 今の価格は上書きせず二重にも増やさない(非破壊マージ: 同じ名前の行は足さない)',
+        mergedOnion.length === 1 && mergedOnion[0].pricePerUnit !== 888,
+        `玉ねぎ=${JSON.stringify(mergedOnion)}`,
+      )
+    } finally {
+      await mergeBrowser.close()
+    }
+    currentCheck = 'BACKUP-01'
+
     // 5) 後方互換: 新5テーブルの項目が無い旧形式のbackup JSONを、既に価格・在庫データのある
-    //    プロファイルへ読み込んでもエラーにならず、既存の価格・在庫データが消えないことを確認する
+    //    プロファイルへ読み込んでもエラーにならず、既存の価格・在庫データが消えないことを確認する。
+    //    あわせて便CJ/C2(2026-07-30・実機QA S2)の再発防止: この旧形式JSONはsettings自体を
+    //    持たないため、以前は置き換えで読むと解錠コード・NG食材・テーマ・週の食費予算が
+    //    既定値へ初期化されていた(スプレッドが何も上書きせずdefaultSettingsが書かれていた)
     const compatBrowser = await chromium.launch()
     try {
       const compatContext = await compatBrowser.newContext()
@@ -7469,7 +7610,7 @@ try {
           req.onerror = () => reject(req.error)
         })
         await new Promise((resolve, reject) => {
-          const tx = idb.transaction(['prices', 'pantryItems'], 'readwrite')
+          const tx = idb.transaction(['prices', 'pantryItems', 'settings'], 'readwrite')
           tx.objectStore('prices').add({
             name: 'E2E後方互換確認価格',
             pricePerUnit: 321,
@@ -7478,6 +7619,21 @@ try {
             isDefault: false,
           })
           tx.objectStore('pantryItems').add({ name: 'E2E後方互換確認在庫', level: 'have', isFrequent: true })
+          // 便CJ/C2: 解錠コード・NG食材・テーマ・週の食費予算を入れた「使っている端末」を再現する
+          const settingsStore = tx.objectStore('settings')
+          const getReq = settingsStore.get(1)
+          getReq.onsuccess = () => {
+            const cur = getReq.result || { id: 1 }
+            settingsStore.put({
+              ...cur,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+              ngIngredients: ['E2E確認NG食材'],
+              theme: 'brown',
+              weeklyBudget: 4321,
+            })
+          }
           tx.oncomplete = () => resolve(undefined)
           tx.onerror = () => reject(tx.error)
         })
@@ -7529,8 +7685,13 @@ try {
           req2.onsuccess = () => resolve(req2.result)
           req2.onerror = () => reject(req2.error)
         })
+        const settings = await new Promise((resolve, reject) => {
+          const req2 = idb.transaction('settings', 'readonly').objectStore('settings').get(1)
+          req2.onsuccess = () => resolve(req2.result)
+          req2.onerror = () => reject(req2.error)
+        })
         idb.close()
-        return { prices, pantryItems, recipeCount }
+        return { prices, pantryItems, recipeCount, settings }
       })
       check(
         'BACKUP-01 旧形式の復元で既存の価格マスタが消えない(clearされない)',
@@ -7546,6 +7707,18 @@ try {
         'BACKUP-01 旧形式でもrecipesフィールド自体は従来どおり置き換わる(空配列→0件)',
         afterCompat.recipeCount === 0,
         `recipeCount=${afterCompat.recipeCount}`,
+      )
+      check(
+        'REPLACESETTINGS-01 便CJ/C2: settingsを持たないJSONの置き換えでPro解錠コードが消えない',
+        afterCompat.settings?.proCode === 'UR-E2E-TEST-ONLY',
+        `settings=${JSON.stringify(afterCompat.settings)}`,
+      )
+      check(
+        'REPLACESETTINGS-01 便CJ/C2: settingsを持たないJSONの置き換えでNG食材・テーマ・週の食費予算も初期化されない',
+        (afterCompat.settings?.ngIngredients ?? []).includes('E2E確認NG食材') &&
+          afterCompat.settings?.theme === 'brown' &&
+          afterCompat.settings?.weeklyBudget === 4321,
+        `settings=${JSON.stringify(afterCompat.settings)}`,
       )
     } finally {
       await compatBrowser.close()
@@ -7901,7 +8074,12 @@ try {
         })
         await new Promise((resolve, reject) => {
           const tx = idb.transaction('fileHandles', 'readwrite')
-          tx.objectStore('fileHandles').put({ id: 1, handle: {}, savedAt: Date.now() })
+          // 便CJ/C10: 注記にファイル名が出ることを確認するため、偽handleにもnameを持たせる
+          tx.objectStore('fileHandles').put({
+            id: 1,
+            handle: { name: 'uchi-recipe-backup-e2e.json' },
+            savedAt: Date.now(),
+          })
           tx.oncomplete = () => resolve(undefined)
           tx.onerror = () => reject(tx.error)
         })
@@ -7916,6 +8094,12 @@ try {
       check(
         'FILESAVE-01(a) 保存先の記録がある状態で再訪問すると「前回の場所に上書き」ボタンが出る',
         (await fsPage.textContent('body')).includes('前回の場所に上書き'),
+      )
+      check(
+        'FILESAVE-01(a) 便CJ/C10: 上書き先のファイル名が注記に出る(どのファイルに上書きされるか分かる)',
+        (await fsPage.textContent('body')).includes(
+          '前回選んだファイル「uchi-recipe-backup-e2e.json」にそのまま上書き保存します',
+        ),
       )
 
       // 「前回の場所に上書き」: 記録した偽handleにはrequestPermission等のメソッドが無いため
