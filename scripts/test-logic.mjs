@@ -5487,18 +5487,70 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       eq(
         'pricelessIngredientNamesOfRecipes(便CH/C2): マスタにも個別入力にも無い材料だけを数える',
         pricelessIngredientNamesOfRecipes(
-          [{ ingredients: [{ name: '塩', amount: '1', unit: 'g' }, { name: '水', amount: '200', unit: 'ml' }] }],
+          [
+            {
+              ingredients: [
+                { name: '塩', amount: '1', unit: 'g' },
+                { name: '秘伝のタレ', amount: '100', unit: 'g' },
+              ],
+            },
+          ],
           smallIndex,
         ),
-        ['水'],
+        ['秘伝のタレ'],
       )
       eq(
         'pricelessIngredientNamesOfRecipes(便CH/C2): 個別入力の価格があれば数えない',
         pricelessIngredientNamesOfRecipes(
-          [{ ingredients: [{ name: '水', amount: '200', unit: 'ml', price: 1 }] }],
+          [{ ingredients: [{ name: '秘伝のタレ', amount: '100', unit: 'g', price: 1 }] }],
           smallIndex,
         ),
         [],
+      )
+      // 2026-07-30 便CK/③-1: 水・湯・氷は栄養側(isZeroIngredient)で「計算上ゼロ扱い・対象外件数にも
+      // 数えない」と決めているのに、この関数だけ適用漏れで数えていた。同梱109品のうち22品で
+      // 「価格が分からない材料1種類を除いた概算です」＋「食材と価格を編集する」が常時出るが、
+      // 水の価格は登録できない(PriceEditModalはprice>0必須)ためユーザーには解消できなかった
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): 水は「価格が分からない材料」に数えない',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }, { name: '水', amount: '200', unit: 'ml' }] }],
+          index,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): 括弧書き付きの「水(水溶き片栗粉用)」も数えない',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '水(水溶き片栗粉用)', amount: '2', unit: '大さじ' }] }],
+          index,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): ぬるま湯・お湯・熱湯・氷も同じ扱い',
+        pricelessIngredientNamesOfRecipes(
+          [
+            {
+              ingredients: [
+                { name: 'ぬるま湯', amount: '100', unit: 'ml' },
+                { name: 'お湯', amount: '100', unit: 'ml' },
+                { name: '熱湯', amount: '100', unit: 'ml' },
+                { name: '氷', amount: '3', unit: '個' },
+              ],
+            },
+          ],
+          index,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): 水を除外しても本当に価格が無い材料は数える',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '水', amount: '200', unit: 'ml' }, { name: '秘伝のタレ', amount: '100', unit: 'g' }] }],
+          index,
+        ),
+        ['秘伝のタレ'],
       )
     }
 
