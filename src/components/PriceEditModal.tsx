@@ -132,7 +132,7 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
         </div>
 
         {notice && (
-          <p role="status" className="mt-2 text-sm font-bold text-accent">
+          <p role="status" className="mt-2 text-sm font-bold text-accent-ink">
             {notice}
           </p>
         )}
@@ -194,7 +194,7 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
           <button
             type="button"
             onClick={() => void handleReset()}
-            className="mt-2 inline-flex items-center gap-0.5 text-xs font-bold text-accent underline"
+            className="mt-2 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
           >
             <RotateCcw size={12} aria-hidden />
             {ja.priceMaster.resetToDefault}

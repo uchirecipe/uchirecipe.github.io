@@ -47,7 +47,7 @@ function timerChip(
         type="button"
         onClick={() => onStartTimer(tokenText, seconds)}
         aria-label={`${tokenText} ${ja.timer.start}`}
-        className="inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 font-bold text-accent underline underline-offset-2"
+        className="inline-flex items-center gap-0.5 rounded-sm px-1.5 py-0.5 font-bold text-accent-ink underline underline-offset-2"
         style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}
       >
         <TimerIcon size={16} aria-hidden />
@@ -75,7 +75,7 @@ export function termChip(match: ReturnType<typeof splitByTerms>[number], onOpenT
         }
       }}
       aria-label={ja.term.openAria.replace('{term}', term.term)}
-      className={`cursor-pointer rounded-sm px-1 py-0.5 font-bold text-accent underline decoration-dotted underline-offset-2 ${
+      className={`cursor-pointer rounded-sm px-1 py-0.5 font-bold text-accent-ink underline decoration-dotted underline-offset-2 ${
         match.match.text.length <= 7 ? 'whitespace-nowrap' : ''
       }`}
       style={{ background: 'color-mix(in oklab, var(--accent) 10%, var(--bg))' }}

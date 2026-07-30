@@ -49,7 +49,7 @@ export default function BackHeader({ fallback, title, onTitleClick, right, alway
       <button
         type="button"
         onClick={goBack}
-        className="flex shrink-0 items-center gap-1 rounded-sm px-2 py-2 font-bold text-accent"
+        className="flex shrink-0 items-center gap-1 rounded-sm px-2 py-2 font-bold text-accent-ink"
       >
         <ChevronLeft size={22} aria-hidden />
         {ja.common.back}

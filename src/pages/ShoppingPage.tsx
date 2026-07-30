@@ -424,7 +424,7 @@ export default function ShoppingPage() {
             <button
               type="button"
               onClick={openPicker}
-              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+              className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
             >
               <ChefHat size={16} aria-hidden />
               {ja.shopping.fromRecipeTitle}
@@ -503,7 +503,7 @@ export default function ShoppingPage() {
               <button
                 type="button"
                 onClick={() => void addManual()}
-                className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-4 py-3 font-bold text-accent shadow-sm"
+                className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-4 py-3 font-bold text-accent-ink shadow-sm"
               >
                 <Plus size={18} aria-hidden />
                 {ja.shopping.manualAdd}
@@ -625,7 +625,7 @@ export default function ShoppingPage() {
                 <button
                   type="button"
                   onClick={repickRecipes}
-                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                  className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
                 >
                   {ja.shopping.repickRecipes}
                 </button>
@@ -696,7 +696,7 @@ export default function ShoppingPage() {
               <button
                 type="button"
                 onClick={completeLater}
-                className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+                className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
               >
                 {ja.shopping.completeLater}
               </button>
@@ -822,7 +822,7 @@ export default function ShoppingPage() {
                       <div className="min-w-0 flex-1">
                         <span
                           className={`block line-clamp-2 break-words font-bold ${
-                            selected ? 'text-accent' : ''
+                            selected ? 'text-accent-ink' : ''
                           }`}
                         >
                           {recipe.title}
@@ -848,7 +848,7 @@ export default function ShoppingPage() {
                           onClick={() => setCount(recipe.id!, count + 1)}
                           aria-label={ja.shopping.pickerServingUp}
                           className={`flex h-9 w-9 items-center justify-center rounded-full border ${
-                            selected ? 'border-accent bg-accent text-on-accent' : 'border-edge text-accent'
+                            selected ? 'border-accent bg-accent text-on-accent' : 'border-edge text-accent-ink'
                           }`}
                         >
                           <Plus size={16} aria-hidden />

@@ -542,7 +542,7 @@ export default function RecipesPage() {
           aria-label={ja.search.sortToggle}
           className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
             sortPanelOpen || sortActive
-              ? 'border-accent text-accent'
+              ? 'border-accent text-accent-ink'
               : 'border-edge text-ink-muted'
           }`}
         >
@@ -555,7 +555,7 @@ export default function RecipesPage() {
           aria-label={ja.search.filterToggle}
           className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
             filterPanelOpen || filterActive
-              ? 'border-accent text-accent'
+              ? 'border-accent text-accent-ink'
               : 'border-edge text-ink-muted'
           }`}
         >
@@ -629,7 +629,7 @@ export default function RecipesPage() {
             <button
               type="button"
               onClick={clearFilters}
-              className="text-sm font-bold text-accent underline"
+              className="text-sm font-bold text-accent-ink underline"
             >
               {ja.search.clear}
             </button>
@@ -684,7 +684,7 @@ export default function RecipesPage() {
                 onClick={() =>
                   setIngredients((prev) => Array.from(new Set([...prev, ...pantryNames])))
                 }
-                className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
               >
                 <Refrigerator size={16} aria-hidden />
                 {ja.pantry.addToSearch}
@@ -826,7 +826,7 @@ export default function RecipesPage() {
                   <button
                     type="button"
                     onClick={clearFilters}
-                    className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent shadow-sm"
+                    className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     {ja.search.clear}
                   </button>

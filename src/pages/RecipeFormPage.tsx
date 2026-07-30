@@ -1491,7 +1491,7 @@ function RecipeFormInner() {
             type="button"
             onClick={() => setUrlImportOpen((open) => !open)}
             aria-expanded={urlImportOpen}
-            className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-accent py-3 font-bold text-accent"
+            className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-accent py-3 font-bold text-accent-ink"
           >
             <Globe size={20} aria-hidden />
             {ja.urlImport.open}
@@ -1529,7 +1529,7 @@ function RecipeFormInner() {
                   className={
                     urlImportMessageTone === 'warn'
                       ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
-                      : 'mt-[var(--space-sm)] text-sm font-bold text-accent'
+                      : 'mt-[var(--space-sm)] text-sm font-bold text-accent-ink'
                   }
                 >
                   {urlImportMessage}
@@ -1567,7 +1567,7 @@ function RecipeFormInner() {
         type="button"
         onClick={() => setPasteOpen((open) => !open)}
         aria-expanded={pasteOpen}
-        className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-accent py-3 font-bold text-accent"
+        className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-accent py-3 font-bold text-accent-ink"
       >
         <ClipboardPaste size={20} aria-hidden />
         {ja.paste.open}
@@ -1588,7 +1588,7 @@ function RecipeFormInner() {
               className={
                 pasteMessageTone === 'warn'
                   ? 'mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 text-sm font-bold text-warning'
-                  : 'mt-[var(--space-sm)] text-sm font-bold text-accent'
+                  : 'mt-[var(--space-sm)] text-sm font-bold text-accent-ink'
               }
             >
               {pasteMessage}
@@ -1623,7 +1623,7 @@ function RecipeFormInner() {
           aria-selected={activeTab === 'simple'}
           onClick={() => setActiveTab('simple')}
           className={`flex-1 border-b-2 py-3 text-center font-bold ${
-            activeTab === 'simple' ? 'border-accent text-accent' : 'border-transparent text-ink-muted'
+            activeTab === 'simple' ? 'border-accent text-accent-ink' : 'border-transparent text-ink-muted'
           }`}
         >
           {ja.form.formTabSimple}
@@ -1634,7 +1634,7 @@ function RecipeFormInner() {
           aria-selected={activeTab === 'detail'}
           onClick={() => setActiveTab('detail')}
           className={`flex-1 border-b-2 py-3 text-center font-bold ${
-            activeTab === 'detail' ? 'border-accent text-accent' : 'border-transparent text-ink-muted'
+            activeTab === 'detail' ? 'border-accent text-accent-ink' : 'border-transparent text-ink-muted'
           }`}
         >
           {ja.form.formTabDetail}
@@ -1736,7 +1736,7 @@ function RecipeFormInner() {
         {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。
             この画面には材料ごとの価格入力欄を置かず、案内だけ表示する */}
         <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientPriceGuide}</p>
-        <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent underline">
+        <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent-ink underline">
           {ja.form.ingredientPriceGuideLink}
         </Link>
 
@@ -1763,7 +1763,7 @@ function RecipeFormInner() {
             <button
               type="button"
               onClick={addQuickIngredient}
-              className="shrink-0 rounded-sm border border-edge bg-surface px-4 font-bold text-accent shadow-sm"
+              className="shrink-0 rounded-sm border border-edge bg-surface px-4 font-bold text-accent-ink shadow-sm"
             >
               {ja.form.quickIngredientAdd}
             </button>
@@ -1883,7 +1883,7 @@ function RecipeFormInner() {
         <button
           type="button"
           onClick={() => setIngredients((rows) => [...rows, { ...emptyIngredient }])}
-          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-edge py-3 font-bold text-accent"
+          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-edge py-3 font-bold text-accent-ink"
         >
           <Plus size={18} aria-hidden />
           {ja.form.addIngredient}
@@ -1964,7 +1964,7 @@ function RecipeFormInner() {
         <button
           type="button"
           onClick={() => setSteps((rows) => [...rows, { ...emptyStep }])}
-          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-edge py-3 font-bold text-accent"
+          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-edge py-3 font-bold text-accent-ink"
         >
           <Plus size={18} aria-hidden />
           {ja.form.addStep}
@@ -2013,7 +2013,7 @@ function RecipeFormInner() {
             onClick={() => cameraInputRef.current?.click()}
             className="flex flex-col items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-xs font-bold shadow-sm"
           >
-            <Camera size={20} className="text-accent" aria-hidden />
+            <Camera size={20} className="text-accent-ink" aria-hidden />
             {ja.form.photoTake}
           </button>
           <button
@@ -2021,7 +2021,7 @@ function RecipeFormInner() {
             onClick={() => albumInputRef.current?.click()}
             className="flex flex-col items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-xs font-bold shadow-sm"
           >
-            <ImageIcon size={20} className="text-accent" aria-hidden />
+            <ImageIcon size={20} className="text-accent-ink" aria-hidden />
             {ja.form.photoPick}
           </button>
           {/* アイコンから選ぶ: 折りたたみの開閉ボタン。ボタン内アイコンは現在の選択(手動指定 or
@@ -2086,7 +2086,7 @@ function RecipeFormInner() {
                       iconKey === key
                         ? 'border-accent bg-accent text-on-accent'
                         : isAutoPick
-                          ? 'border-accent bg-accent/10 text-accent'
+                          ? 'border-accent bg-accent/10 text-accent-ink'
                           : 'border-edge bg-surface text-ink-muted'
                     }`}
                   >
@@ -2256,7 +2256,7 @@ function RecipeFormInner() {
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1 rounded-sm py-1 pl-3 text-sm text-accent"
+                className="inline-flex items-center gap-1 rounded-sm py-1 pl-3 text-sm text-accent-ink"
                 style={{ background: 'color-mix(in oklab, var(--accent) 12%, var(--bg))' }}
               >
                 {tag}
@@ -2289,7 +2289,7 @@ function RecipeFormInner() {
           <button
             type="button"
             onClick={addTag}
-            className="rounded-sm border border-edge bg-surface px-4 font-bold text-accent shadow-sm"
+            className="rounded-sm border border-edge bg-surface px-4 font-bold text-accent-ink shadow-sm"
           >
             {ja.form.addTag}
           </button>
@@ -2307,7 +2307,7 @@ function RecipeFormInner() {
                   key={t}
                   type="button"
                   onClick={() => addTagValue(t)}
-                  className="rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent shadow-sm"
+                  className="rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                 >
                   {t}
                 </button>
@@ -2326,7 +2326,7 @@ function RecipeFormInner() {
             {keywords.map((keyword) => (
               <span
                 key={keyword}
-                className="inline-flex items-center gap-1 rounded-sm py-1 pl-3 text-sm text-accent"
+                className="inline-flex items-center gap-1 rounded-sm py-1 pl-3 text-sm text-accent-ink"
                 style={{ background: 'color-mix(in oklab, var(--accent) 12%, var(--bg))' }}
               >
                 {keyword}
@@ -2359,7 +2359,7 @@ function RecipeFormInner() {
           <button
             type="button"
             onClick={addKeyword}
-            className="rounded-sm border border-edge bg-surface px-4 font-bold text-accent shadow-sm"
+            className="rounded-sm border border-edge bg-surface px-4 font-bold text-accent-ink shadow-sm"
           >
             {ja.form.addKeyword}
           </button>
@@ -2473,7 +2473,7 @@ function RecipeFormInner() {
           <button
             type="button"
             onClick={handleResetClick}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-60"
           >
             <RotateCcw size={18} aria-hidden />
             {resetArmed
@@ -2483,7 +2483,7 @@ function RecipeFormInner() {
                 : ja.form.resetToDefaultLabel}
           </button>
           {resetMessage && (
-            <p className="mt-1 text-center text-sm font-bold text-accent">{resetMessage}</p>
+            <p className="mt-1 text-center text-sm font-bold text-accent-ink">{resetMessage}</p>
           )}
         </div>
       )}

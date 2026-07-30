@@ -53,15 +53,15 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
           onClick={onClose}
           className="flex min-w-0 flex-1 items-start gap-2 text-left"
         >
-          <span className="min-w-0 flex-1 text-sm font-bold text-accent">{message}</span>
-          {!hasAction && <X size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden />}
+          <span className="min-w-0 flex-1 text-sm font-bold text-accent-ink">{message}</span>
+          {!hasAction && <X size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />}
         </button>
         {hasAction && (
           <>
             <button
               type="button"
               onClick={onAction}
-              className="shrink-0 rounded-sm border border-accent px-3 py-1 text-sm font-bold text-accent"
+              className="shrink-0 rounded-sm border border-accent px-3 py-1 text-sm font-bold text-accent-ink"
             >
               {actionLabel}
             </button>
@@ -69,7 +69,7 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
               type="button"
               onClick={onClose}
               aria-label={ja.common.close}
-              className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-accent"
+              className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-accent-ink"
             >
               <X size={16} aria-hidden />
             </button>

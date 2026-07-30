@@ -83,7 +83,7 @@ export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose
             type="button"
             onClick={() => onAdjust(-30)}
             disabled={finished}
-            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent shadow-sm disabled:opacity-30"
+            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm disabled:opacity-30"
           >
             {ja.timer.minusThirtySeconds}
           </button>
@@ -91,7 +91,7 @@ export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose
             type="button"
             onClick={() => onAdjust(60)}
             disabled={finished}
-            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent shadow-sm disabled:opacity-30"
+            className="flex-1 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm disabled:opacity-30"
           >
             {ja.timer.plusOneMinute}
           </button>

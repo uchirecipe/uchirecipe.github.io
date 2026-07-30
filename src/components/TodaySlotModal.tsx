@@ -65,7 +65,7 @@ export default function TodaySlotModal({ open, onPickSlot, onPickUndecided, onCl
               className={`rounded-md border py-3 font-bold shadow-sm ${
                 slot === 'dinner'
                   ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-app text-accent'
+                  : 'border-edge bg-app text-accent-ink'
               }`}
             >
               {ja.mealPlan.slot[slot]}

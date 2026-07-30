@@ -267,8 +267,10 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
 
   const bg = tokenColor('--bg', '#faf5ec')
   const ink = tokenColor('--text', '#43362a')
+  // 線画のティントと下部の帯の「塗り」は--accent、見出しの「文字」は--accent-ink(2026-07-30)
   const accent = tokenColor('--accent', '#d9480f')
-  const muted = tokenColor('--text-muted', '#8c7b69')
+  const accentInk = tokenColor('--accent-ink', '#b8380a')
+  const muted = tokenColor('--text-muted', '#7c6a56')
 
   // 背景
   ctx.fillStyle = bg
@@ -338,7 +340,7 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
   y += infoGap
 
   // 材料（全部 or 最大8つ）
-  ctx.fillStyle = accent
+  ctx.fillStyle = accentInk
   ctx.font = 'bold 44px system-ui, sans-serif'
   ctx.fillText(ja.detail.ingredients, pad, y)
   y += 64

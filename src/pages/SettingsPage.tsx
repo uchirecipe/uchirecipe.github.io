@@ -252,7 +252,7 @@ function UnlockCodeDisplay({ code }: { code: string }) {
       <button
         type="button"
         onClick={() => void copy()}
-        className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge px-2 py-1 text-xs font-bold text-accent shadow-sm"
+        className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge px-2 py-1 text-xs font-bold text-accent-ink shadow-sm"
       >
         {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
         {copied ? ja.settings.unlockCodeCopied : ja.settings.unlockCodeCopy}
@@ -771,7 +771,7 @@ export default function SettingsPage() {
           type="button"
           onClick={goToBackupExport}
           className={`shrink-0 rounded-sm border px-2 py-1 text-xs font-bold shadow-sm ${
-            backupBannerWarning ? 'border-warning text-warning' : 'border-edge text-accent'
+            backupBannerWarning ? 'border-warning text-warning' : 'border-edge text-accent-ink'
           }`}
         >
           {ja.settings.bannerSaveNow}
@@ -851,7 +851,7 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => showHomeWidget(key)}
-                    className="rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent"
+                    className="rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent-ink"
                   >
                     {ja.settings.homeWidgetShow}
                   </button>
@@ -915,7 +915,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={addNg}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-4 font-bold text-accent shadow-sm"
+                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-4 font-bold text-accent-ink shadow-sm"
               >
                 <Plus size={18} aria-hidden />
                 {ja.settings.ngAdd}
@@ -936,7 +936,7 @@ export default function SettingsPage() {
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.priceMasterDescription}</p>
             <Link
               to="/prices"
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >
               <Coins size={18} aria-hidden />
               {ja.settings.priceMasterLink}
@@ -1069,14 +1069,14 @@ export default function SettingsPage() {
             {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
             <a
               href="/about/"
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >
               <Info size={18} aria-hidden />
               {ja.settings.aboutPageLink}
             </a>
             <a
               href="/about/terms.html"
-              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent underline"
+              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
             >
               {ja.settings.termsLink}
             </a>
@@ -1085,7 +1085,7 @@ export default function SettingsPage() {
               href={ja.settings.feedbackFormUrl}
               target="_blank"
               rel="noopener"
-              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent underline"
+              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
             >
               {ja.settings.feedbackLink}
             </a>
@@ -1130,7 +1130,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={reloadStarters}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >
               <RotateCcw size={18} aria-hidden />
               {ja.settings.starterReload}
@@ -1147,7 +1147,7 @@ export default function SettingsPage() {
             {recipeSetMessage && (
               <p
                 role="status"
-                className="mt-[var(--space-sm)] rounded-sm border border-accent bg-app px-3 py-2 text-sm font-bold text-accent"
+                className="mt-[var(--space-sm)] rounded-sm border border-accent bg-app px-3 py-2 text-sm font-bold text-accent-ink"
               >
                 {recipeSetMessage}
               </p>
@@ -1165,7 +1165,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => void loadRecipeSetFromUrl()}
                 disabled={recipeSetLoading || !recipeSetUrl.trim()}
-                className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent shadow-sm disabled:opacity-40"
+                className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
               >
                 <Link2 size={18} aria-hidden />
                 {ja.settings.recipeSetUrlLoad}
@@ -1186,7 +1186,7 @@ export default function SettingsPage() {
               type="button"
               onClick={() => recipeSetFileRef.current?.click()}
               disabled={recipeSetLoading}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-40"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
             >
               <Upload size={18} aria-hidden />
               {recipeSetLoading ? ja.settings.recipeSetLoading : ja.settings.recipeSetFileLoad}
@@ -1255,7 +1255,7 @@ export default function SettingsPage() {
                   type="button"
                   disabled={exportBusy}
                   onClick={() => void handleExportOverwrite()}
-                  className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm disabled:opacity-60"
+                  className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-60"
                 >
                   <Save size={18} aria-hidden />
                   {ja.settings.backupOverwrite}
@@ -1292,7 +1292,7 @@ export default function SettingsPage() {
                   type="button"
                   disabled={importBusy}
                   onClick={() => pickImportFile('merge')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent shadow-sm disabled:opacity-60"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent-ink shadow-sm disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportMerge}</span>
@@ -1318,13 +1318,13 @@ export default function SettingsPage() {
             {/* 読み込み中の進捗表示(便CJ/C15)と、読み込み結果の内訳(便CJ/C1(d)・C11・C12)。
                 結果はトーストと違って消えないので、あとから「本当に戻ったか」を確かめられる */}
             {importBusy && (
-              <p className="mt-[var(--space-md)] text-sm font-bold text-accent" role="status" aria-live="polite">
+              <p className="mt-[var(--space-md)] text-sm font-bold text-accent-ink" role="status" aria-live="polite">
                 {ja.settings.backupImportLoading}
               </p>
             )}
             {!importBusy && importResultLines.length > 0 && (
               <ul
-                className="mt-[var(--space-md)] space-y-1 rounded-sm bg-app px-3 py-2 text-sm font-bold text-accent"
+                className="mt-[var(--space-md)] space-y-1 rounded-sm bg-app px-3 py-2 text-sm font-bold text-accent-ink"
                 role="status"
                 aria-live="polite"
               >
@@ -1368,7 +1368,7 @@ export default function SettingsPage() {
                 </p>
                 <a
                   href="/about/manual.html#backup"
-                  className="mt-1 inline-block text-xs font-bold text-accent underline"
+                  className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
                 >
                   {ja.settings.moveGuideTransferLink}
                 </a>
@@ -1399,7 +1399,7 @@ export default function SettingsPage() {
                   })
                 }
               }}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent shadow-sm"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >
               <RefreshCw size={18} aria-hidden />
               {ja.settings.refreshAppButton}
@@ -1422,13 +1422,13 @@ export default function SettingsPage() {
               role="status"
             >
               <div className="flex w-full max-w-sm items-start gap-2 rounded-md border border-accent bg-surface px-4 py-3 shadow-md motion-safe:animate-toast-in">
-                <span className="min-w-0 flex-1 text-sm font-bold text-accent">
+                <span className="min-w-0 flex-1 text-sm font-bold text-accent-ink">
                   {ja.settings.replaceUndoMessage}
                 </span>
                 <button
                   type="button"
                   onClick={() => void handleUndoReplace()}
-                  className="shrink-0 rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent"
+                  className="shrink-0 rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent-ink"
                 >
                   {ja.settings.replaceUndoButton}
                 </button>
@@ -1438,7 +1438,7 @@ export default function SettingsPage() {
                   aria-label={ja.settings.replaceUndoDismiss}
                   className="shrink-0"
                 >
-                  <X size={16} className="text-accent" aria-hidden />
+                  <X size={16} className="text-accent-ink" aria-hidden />
                 </button>
               </div>
             </div>
@@ -1474,7 +1474,7 @@ export default function SettingsPage() {
                 </div>
                 {settings.proCode ? (
                   <>
-                    <p className="mt-1 text-sm font-bold text-accent">{ja.settings.proActivatedTitle}</p>
+                    <p className="mt-1 text-sm font-bold text-accent-ink">{ja.settings.proActivatedTitle}</p>
                     {settings.proActivatedAt && (
                       <p className="mt-0.5 text-xs text-ink-muted">
                         {ja.settings.proActivatedDate.replace('{date}', formatDate(settings.proActivatedAt))}
@@ -1528,7 +1528,7 @@ export default function SettingsPage() {
                       <p className="font-bold">・{feature.label}</p>
                       <p className="text-sm text-ink-muted">{feature.hint}</p>
                       {feature.to && feature.linkLabel && (
-                        <Link to={feature.to} className="text-sm font-bold text-accent underline">
+                        <Link to={feature.to} className="text-sm font-bold text-accent-ink underline">
                           {feature.linkLabel}
                         </Link>
                       )}
