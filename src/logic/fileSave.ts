@@ -58,17 +58,31 @@ export async function hasSavedFileHandle(): Promise<boolean> {
 }
 
 /**
+ * 前回選んだ保存先のファイル名（2026-07-30 便CJ/C10）。「前回の場所に上書き」がどのファイルへ
+ * 上書きするのか画面から確認できないという指摘への対応で、注記に出すために使う。
+ * 記録が無い場合・ハンドルに名前が無い場合（古い記録など）は undefined を返し、
+ * 呼び出し側はファイル名なしの注記へフォールバックする。
+ * フォルダのパスはブラウザから取得できないため、出せるのはファイル名だけ
+ */
+export async function savedFileHandleName(): Promise<string | undefined> {
+  const record = await db.fileHandles.get(HANDLE_ID)
+  const name = record?.handle?.name
+  return typeof name === 'string' && name ? name : undefined
+}
+
+/**
  * 保存先を選んでファイルに書き込む。選んだ場所は次回の「前回の場所に上書き」用に記録する。
  * ユーザーがピッカーをキャンセルするとAbortErrorを投げる（呼び出し側はisAbortErrorで判定し、
  * 何も起きなかった扱い＝エラー表示しない）
  */
-export async function saveWithPicker(json: string, suggestedName: string): Promise<void> {
+export async function saveWithPicker(json: string, suggestedName: string): Promise<string> {
   const handle = await window.showSaveFilePicker!({
     suggestedName,
     types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
   })
   await writeJsonToHandle(handle, json)
   await rememberHandle(handle)
+  return handle.name // 「前回の場所に上書き」の注記に出すファイル名（便CJ/C10）
 }
 
 /**

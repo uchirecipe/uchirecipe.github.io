@@ -95,6 +95,12 @@ import {
   mergeUnlockCodes,
   countReplaceImpact,
   daysSinceBackup,
+  buildReplaceSettings,
+  mergeTableRows,
+  mergeRowKeys,
+  resolveMergeRecipeAction,
+  mergeRecipeUserData,
+  remapBackupRecipeRefs,
 } from '../src/logic/backup.ts'
 import {
   supportsSaveFilePicker,
@@ -4011,6 +4017,279 @@ eq(
     '両方コード無しどうし→両方とも既存(undefined)のまま・エラーにならない',
     mergeUnlockCodes(noCode, noCode),
     noCode,
+  )
+}
+
+// ---------- buildReplaceSettings(2026-07-30 便CJ/C2・S2事故の再発防止)。
+// 「置き換え」でsettingsを持たないJSON(配布セット形式・レビュー用の書き出し・手編集)を読むと
+// 解錠コード・NG食材・週の食費予算・テーマが既定値へ初期化されていた。
+// settingsはあってもproCodeを含まないファイル(購入前に取った自分のバックアップ)でも
+// 購入状態が消えていた ----------
+{
+  const current = {
+    id: 1,
+    ngIngredients: ['パクチー'],
+    theme: 'dark',
+    weeklyBudget: 5000,
+    proCode: 'UR-AAAA-AAAA',
+    proActivatedAt: 1000,
+    starterSeeded: true,
+  }
+  const fromFile = {
+    ngIngredients: ['セロリ'],
+    theme: 'brown',
+    weeklyBudget: 3000,
+    proCode: 'UR-BBBB-BBBB',
+    proActivatedAt: 2000,
+  }
+  const replacedWithFile = buildReplaceSettings(current, fromFile)
+  eq(
+    '置き換えの設定: ファイルに設定があればファイルの内容になる(置き換えの意味は保つ)',
+    {
+      ng: replacedWithFile.ngIngredients,
+      theme: replacedWithFile.theme,
+      budget: replacedWithFile.weeklyBudget,
+      pro: replacedWithFile.proCode,
+    },
+    { ng: ['セロリ'], theme: 'brown', budget: 3000, pro: 'UR-BBBB-BBBB' },
+  )
+  const noSettings = buildReplaceSettings(current, undefined)
+  eq(
+    '置き換えの設定: settingsを持たないJSON(配布セット形式など)では今の設定を保つ(初期化しない)',
+    {
+      ng: noSettings.ngIngredients,
+      theme: noSettings.theme,
+      budget: noSettings.weeklyBudget,
+      pro: noSettings.proCode,
+    },
+    { ng: ['パクチー'], theme: 'dark', budget: 5000, pro: 'UR-AAAA-AAAA' },
+  )
+  const noCode = buildReplaceSettings(current, { ngIngredients: [], theme: 'light' })
+  eq(
+    '置き換えの設定: 解錠コードを含まないファイル(購入前に取ったバックアップ)でも購入状態を消さない',
+    { pro: noCode.proCode, proAt: noCode.proActivatedAt, ng: noCode.ngIngredients, theme: noCode.theme },
+    { pro: 'UR-AAAA-AAAA', proAt: 1000, ng: [], theme: 'light' },
+  )
+  eq(
+    '置き換えの設定: starterSeededは必ずtrue(基本レシピの二重投入を防ぐ既存の理由)',
+    buildReplaceSettings({ starterSeeded: false }, { starterSeeded: false }).starterSeeded,
+    true,
+  )
+  eq('置き換えの設定: idは必ず1(設定は1レコードだけ)', buildReplaceSettings(undefined, undefined).id, 1)
+  eq(
+    '置き換えの設定: 設定が空の端末+設定なしファイルでも既定値で成立する(エラーにならない)',
+    buildReplaceSettings(undefined, undefined).ngIngredients,
+    [],
+  )
+}
+
+// ---------- merge復元の非破壊マージ(2026-07-30 便CJ/C1・S1事故の再発防止)。
+// 「読み込む(今のデータに追加)」がレシピ本体と解錠コードしか見ておらず、
+// 7テーブルと「既にあるレシピの作った記録・写真・お気に入り」を無言で捨てていた。
+// さらに同一IDを内容も見ずにスキップしていたため、同梱レシピが増えた版とのズレで
+// 自作レシピが丸ごと落ちていた ----------
+{
+  // --- mergeTableRows: 既存に無い行だけ足す(既存行は消さない・上書きしない) ---
+  eq(
+    '非破壊マージ: 既存に無い行だけ返す(既存と同じキーの行は足さない)',
+    mergeTableRows([{ name: '牛乳' }], [{ name: '牛乳' }, { name: 'にんじん' }], mergeRowKeys.pantryItems),
+    [{ name: 'にんじん' }],
+  )
+  eq(
+    '非破壊マージ: 既存が空なら全部足す',
+    mergeTableRows([], [{ name: '牛乳' }, { name: 'にんじん' }], mergeRowKeys.pantryItems),
+    [{ name: '牛乳' }, { name: 'にんじん' }],
+  )
+  eq(
+    '非破壊マージ: ファイル内に同じキーが重複していても1件だけ足す',
+    mergeTableRows([], [{ name: '牛乳' }, { name: '牛乳' }], mergeRowKeys.pantryItems),
+    [{ name: '牛乳' }],
+  )
+  eq(
+    '非破壊マージ: 前後の空白は同じ行として扱う(名前の照合)',
+    mergeTableRows([{ name: '牛乳' }], [{ name: ' 牛乳 ' }], mergeRowKeys.pantryItems),
+    [],
+  )
+  eq(
+    '非破壊マージ: 週献立は日付+食事帯+レシピで照合する(同じ日の別の枠は別行として足す)',
+    mergeTableRows(
+      [{ date: '2026-08-01', slot: 'dinner', recipeId: 1 }],
+      [
+        { date: '2026-08-01', slot: 'dinner', recipeId: 1 },
+        { date: '2026-08-01', slot: 'dinner', recipeId: 2 },
+        { date: '2026-08-01', slot: 'lunch', recipeId: 1 },
+      ],
+      mergeRowKeys.mealPlans,
+    ),
+    [
+      { date: '2026-08-01', slot: 'dinner', recipeId: 2 },
+      { date: '2026-08-01', slot: 'lunch', recipeId: 1 },
+    ],
+  )
+  eq(
+    '非破壊マージ: 日付メモは日付(主キー)で照合し、今のメモを上書きしない',
+    mergeTableRows(
+      [{ date: '2026-08-02', text: '今の端末のメモ', updatedAt: 2 }],
+      [
+        { date: '2026-08-02', text: 'ファイル側のメモ', updatedAt: 1 },
+        { date: '2026-08-03', text: '来客あり', updatedAt: 1 },
+      ],
+      mergeRowKeys.dayNotes,
+    ),
+    [{ date: '2026-08-03', text: '来客あり', updatedAt: 1 }],
+  )
+  eq(
+    '非破壊マージ: 今日の献立はレシピで照合する',
+    mergeTableRows([{ recipeId: 3, addedAt: 1 }], [{ recipeId: 3, addedAt: 2 }, { recipeId: 4, addedAt: 2 }], mergeRowKeys.todayList),
+    [{ recipeId: 4, addedAt: 2 }],
+  )
+
+  // --- resolveMergeRecipeAction: ID衝突でレシピを落とさない(版ズレ対策) ---
+  const titleById = new Map([
+    [1, '肉じゃが'],
+    [2, 'カレー'],
+  ])
+  const idByTitle = new Map([
+    ['肉じゃが', 1],
+    ['カレー', 2],
+  ])
+  eq(
+    'ID照合: 同じIDに同じ料理名(まっさら端末の同梱レシピ)→本体はそのまま、記録などだけ足す',
+    resolveMergeRecipeAction({ id: 1, title: '肉じゃが' }, titleById, idByTitle),
+    { kind: 'enrich', targetId: 1 },
+  )
+  eq(
+    'ID照合: そのIDが空いている→従来どおり同じIDのまま追加する',
+    resolveMergeRecipeAction({ id: 9, title: '自作レシピ' }, titleById, idByTitle),
+    { kind: 'add' },
+  )
+  eq(
+    'ID照合(版ズレ): 同じIDが別の料理に使われている+同じ料理名が無い→新しいIDで追加する(自作レシピを落とさない)',
+    resolveMergeRecipeAction({ id: 2, title: 'わたしの唐揚げ' }, titleById, idByTitle),
+    { kind: 'addWithNewId' },
+  )
+  eq(
+    'ID照合(版ズレ): 同じIDが別の料理+同じ料理名が別のIDにある→そちらへ記録などを足す(二重登録しない)',
+    resolveMergeRecipeAction({ id: 2, title: '肉じゃが' }, titleById, idByTitle),
+    { kind: 'enrich', targetId: 1 },
+  )
+  eq(
+    'ID照合: 同じIDどうしの料理名は前後の空白を無視して同じ料理として扱う',
+    resolveMergeRecipeAction({ id: 1, title: ' 肉じゃが ' }, titleById, idByTitle),
+    { kind: 'enrich', targetId: 1 },
+  )
+  eq(
+    'ID照合(版ズレ): 料理名の突き合わせも前後の空白を無視する',
+    resolveMergeRecipeAction({ id: 2, title: ' 肉じゃが ' }, titleById, idByTitle),
+    { kind: 'enrich', targetId: 1 },
+  )
+  eq(
+    'ID照合: IDが無い古い形式は従来どおり新規として追加する',
+    resolveMergeRecipeAction({ title: '肉じゃが' }, titleById, idByTitle),
+    { kind: 'addWithNewId' },
+  )
+
+  // --- mergeRecipeUserData: 既にあるレシピへ記録・お気に入り・写真だけ足す ---
+  const photoA = 'photoA' // 実体(Blob)はDOM依存なので、ここでは同一性だけを見る代用値
+  const photoB = 'photoB'
+  const base = {
+    id: 1,
+    title: '肉じゃが',
+    memo: '今の端末で書いたメモ',
+    isFavorite: false,
+    cookedLogs: [],
+    servings: 2,
+  }
+  const fromFile = {
+    id: 1,
+    title: '肉じゃが',
+    memo: 'ファイル側のメモ',
+    isFavorite: true,
+    photo: photoB,
+    cookedLogs: [
+      { date: '2026-07-01', note: '記録1', photo: photoB },
+      { date: '2026-07-20', note: '記録2' },
+    ],
+    servings: 4,
+  }
+  const merged = mergeRecipeUserData(base, fromFile)
+  eq('記録の取り込み: 件数(作った記録2件・お気に入り1・写真2枚)', {
+    changed: merged.changed,
+    cookedLogsAdded: merged.cookedLogsAdded,
+    favoriteAdded: merged.favoriteAdded,
+    photosAdded: merged.photosAdded,
+  }, { changed: true, cookedLogsAdded: 2, favoriteAdded: true, photosAdded: 2 })
+  eq(
+    '記録の取り込み: レシピ本体(メモ・人数・料理名)は今のデータを優先し書き換えない',
+    { memo: merged.recipe.memo, servings: merged.recipe.servings, title: merged.recipe.title },
+    { memo: '今の端末で書いたメモ', servings: 2, title: '肉じゃが' },
+  )
+  eq('記録の取り込み: お気に入りはtrueを優先する', merged.recipe.isFavorite, true)
+  eq('記録の取り込み: 写真は今のレシピに無いときだけ入れる', merged.recipe.photo, photoB)
+  eq(
+    '記録の取り込み: 今のレシピに写真があればファイル側で上書きしない',
+    mergeRecipeUserData({ ...base, photo: photoA }, fromFile).recipe.photo,
+    photoA,
+  )
+  const dedup = mergeRecipeUserData(
+    { ...base, cookedLogs: [{ date: '2026-07-01', note: '記録1' }] },
+    { ...fromFile, photo: undefined, cookedLogs: [{ date: '2026-07-01', note: '記録1' }] },
+  )
+  eq(
+    '記録の取り込み: 同じ記録(日付+メモが同じ)は二重に足さない',
+    { added: dedup.cookedLogsAdded, total: dedup.recipe.cookedLogs.length },
+    { added: 0, total: 1 },
+  )
+  const fillPhoto = mergeRecipeUserData(
+    { ...base, isFavorite: true, cookedLogs: [{ date: '2026-07-01', note: '記録1' }] },
+    { ...fromFile, photo: undefined, cookedLogs: [{ date: '2026-07-01', note: '記録1', photo: photoB }] },
+  )
+  eq(
+    '記録の取り込み: 同じ記録に写真だけが無ければファイル側の写真で埋める(既存の写真は消さない)',
+    { photosAdded: fillPhoto.photosAdded, photo: fillPhoto.recipe.cookedLogs[0].photo },
+    { photosAdded: 1, photo: photoB },
+  )
+  eq(
+    '記録の取り込み: 同じ日でもメモが違えば別の記録として足す',
+    mergeRecipeUserData(
+      { ...base, cookedLogs: [{ date: '2026-07-01', note: '1回目' }] },
+      { ...fromFile, photo: undefined, cookedLogs: [{ date: '2026-07-01', note: '2回目' }] },
+    ).recipe.cookedLogs.length,
+    2,
+  )
+  eq(
+    '記録の取り込み: 足すものが何も無ければ changed=false(DBへ書き戻さない)',
+    mergeRecipeUserData({ ...base, isFavorite: true, photo: photoA }, { ...base, isFavorite: false, cookedLogs: [] })
+      .changed,
+    false,
+  )
+
+  // --- remapBackupRecipeRefs: 版ズレでIDを振り直したときの参照の付け替え ---
+  const remapFile = {
+    mealPlans: [{ date: '2026-08-01', slot: 'dinner', recipeId: 104 }],
+    todayList: [{ recipeId: 104, addedAt: 1 }],
+    shoppingItems: [{ name: 'にんじん', order: 1, isChecked: false, fromRecipeIds: [104, 7] }],
+    mealTemplates: [{ name: '平日', items: [{ dow: 0, slot: 'dinner', role: 'main', recipeId: 104 }], createdAt: 1 }],
+  }
+  eq(
+    '参照の付け替え: 振り直したレシピを指す献立・今日の献立・テンプレ・買い物メモが新しいIDを指す',
+    remapBackupRecipeRefs(remapFile, new Map([[104, 210]])),
+    {
+      mealPlans: [{ date: '2026-08-01', slot: 'dinner', recipeId: 210 }],
+      todayList: [{ recipeId: 210, addedAt: 1 }],
+      shoppingItems: [{ name: 'にんじん', order: 1, isChecked: false, fromRecipeIds: [210, 7] }],
+      mealTemplates: [{ name: '平日', items: [{ dow: 0, slot: 'dinner', role: 'main', recipeId: 210 }], createdAt: 1 }],
+    },
+  )
+  eq(
+    '参照の付け替え: 振り直しが無ければそのまま返す(項目の有無=undefinedも保つ)',
+    remapBackupRecipeRefs({ mealPlans: undefined, todayList: [{ recipeId: 1, addedAt: 1 }] }, new Map()),
+    { mealPlans: undefined, todayList: [{ recipeId: 1, addedAt: 1 }] },
+  )
+  eq(
+    '参照の付け替え: 項目自体が無い古いバックアップでもエラーにならない(undefinedのまま)',
+    remapBackupRecipeRefs({}, new Map([[1, 2]])),
+    { mealPlans: undefined, todayList: undefined, shoppingItems: undefined, mealTemplates: undefined },
   )
 }
 

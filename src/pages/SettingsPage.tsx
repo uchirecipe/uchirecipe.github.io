@@ -36,6 +36,7 @@ import {
   restorePreImportSnapshot,
   daysSinceBackup,
   type ReplaceImpactCounts,
+  type MergeImportDetail,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
 import { refreshApp } from '../logic/appRefresh'
@@ -44,6 +45,7 @@ import {
   saveWithPicker,
   overwriteSavedFile,
   hasSavedFileHandle,
+  savedFileHandleName,
   backupFileName,
   isAbortError,
 } from '../logic/fileSave'
@@ -167,6 +169,45 @@ function formatRecipeSetResult(result: {
 }
 
 /**
+ * 「読み込む（今のデータに追加）」の結果の内訳を組み立てる（2026-07-30 便CJ/C1(d)・C11・C12）。
+ * 足したものを項目ごとに1行ずつ返し、0件の行は出さない（「作った記録0件・写真0枚を足しました」
+ * のような無意味な行を並べない）。復元したつもりで実は戻っていない、という誤認を防ぐのが目的なので、
+ * 何も足さなかった場合もその旨を1行返す（無言で終わらせない）
+ */
+function buildMergeResultLines(detail: MergeImportDetail): string[] {
+  const lines = [
+    ja.settings.backupImportMergeResult
+      .replace('{a}', String(detail.recipesAdded))
+      .replace('{s}', String(detail.recipesMatched)),
+  ]
+  if (detail.recipesRenumbered > 0) {
+    lines.push(
+      ja.settings.backupImportMergeResultRenumbered.replace('{n}', String(detail.recipesRenumbered)),
+    )
+  }
+  const addedToExisting = [
+    detail.cookedLogsAdded > 0 &&
+      ja.settings.backupImportMergeResultLogsCooked.replace('{c}', String(detail.cookedLogsAdded)),
+    detail.favoritesAdded > 0 &&
+      ja.settings.backupImportMergeResultLogsFavorite.replace('{f}', String(detail.favoritesAdded)),
+    detail.photosAdded > 0 &&
+      ja.settings.backupImportMergeResultLogsPhoto.replace('{p}', String(detail.photosAdded)),
+  ].filter((item): item is string => !!item)
+  if (addedToExisting.length > 0) {
+    lines.push(ja.settings.backupImportMergeResultLogs.replace('{items}', addedToExisting.join('・')))
+  }
+  if (detail.tableRowsAdded > 0) {
+    lines.push(
+      ja.settings.backupImportMergeResultTables.replace('{t}', String(detail.tableRowsAdded)),
+    )
+  }
+  if (detail.recipesAdded === 0 && addedToExisting.length === 0 && detail.tableRowsAdded === 0) {
+    lines.push(ja.settings.backupImportMergeResultNothing)
+  }
+  return lines
+}
+
+/**
  * 「読み込む（今のデータと置き換え）」の確認文を件数入りで組み立てる
  * （2026-07-17設定ゼロベース裁定#6a）。ファイル選択を開く前(pickImportFile)・
  * ファイル選択後の最終確認(onImportFile)の両方で同じ文言を使い整合させる
@@ -252,7 +293,17 @@ export default function SettingsPage() {
   // 前回選んだ保存先ハンドルの記録があるか(2026-07-17バックアップ改修 修正2+3。
   // File System Access API対応ブラウザのみ意味を持つ。「前回の場所に上書き」ボタンの表示判定)
   const [savedHandleExists, setSavedHandleExists] = useState(false)
+  // 記録している保存先のファイル名(2026-07-30 便CJ/C10。「前回の場所に上書き」の注記に出す。
+  // 名前が取れない古い記録では空のままで、ファイル名なしの注記にフォールバックする)
+  const [savedHandleName, setSavedHandleName] = useState('')
   const [exportBusy, setExportBusy] = useState(false)
+  // バックアップ読み込み中の進捗表示+二重操作防止(2026-07-30 便CJ/C15。書き出し側のexportBusyと
+  // 揃える。写真の多いファイルは端末によって数秒〜十数秒かかり、その間ボタンが押せたままだった)
+  const [importBusy, setImportBusy] = useState(false)
+  // 読み込み結果の内訳(2026-07-30 便CJ/C1(d)・C11・C12)。トーストは数秒で消えてしまい
+  // 「本当に戻ったか」を確かめる手段にならないため、「バックアップから戻す」カード内に
+  // テキストとして残す(レシピセット読み込み欄の先例と同じ流儀。二重表示しないのでトーストは出さない)
+  const [importResultLines, setImportResultLines] = useState<string[]>([])
   // 目次チップの現在地ハイライト用(1本スクロール化)。スクロール監視で表示中の節idを保持する
   const [activeSection, setActiveSection] = useState<string>('section-basic')
   // 置き換え直後1回だけ出す「元に戻す」バナー(2026-07-17設定ゼロベース裁定#6c・三重の網の(c))。
@@ -268,6 +319,10 @@ export default function SettingsPage() {
     let cancelled = false
     void hasSavedFileHandle().then((exists) => {
       if (!cancelled) setSavedHandleExists(exists)
+    })
+    // 記録している保存先のファイル名も読む(便CJ/C10)
+    void savedFileHandleName().then((name) => {
+      if (!cancelled && name) setSavedHandleName(name)
     })
     return () => {
       cancelled = true
@@ -375,6 +430,21 @@ export default function SettingsPage() {
   const dataCounts = countReplaceImpact(recipes ?? [], prices?.length ?? 0)
 
   /**
+   * 書き出し完了の知らせ(2026-07-30 便CJ/C6)。経路ごとに言えることが違うので文言を分ける。
+   * 'picked'=保存先を選んで書き込んだ / 'overwritten'=前回と同じファイルへ上書きした /
+   * 'downloaded'=ブラウザの自動ダウンロード(結果を観測できないため「確認のお願い」にする)
+   */
+  const exportDoneMessage = (route: 'picked' | 'overwritten' | 'downloaded') => {
+    const template =
+      route === 'picked'
+        ? ja.settings.backupExportDonePicked
+        : route === 'overwritten'
+          ? ja.settings.backupExportDoneOverwritten
+          : ja.settings.backupExportDoneDownloaded
+    return template.replace('{n}', String(dataCounts.recipes))
+  }
+
+  /**
    * 「ファイルに書き出す」(2026-07-17バックアップ改修 修正2+3)。
    * File System Access API対応ブラウザ(Chrome/Edge等)では保存先選択ダイアログ
    * (showSaveFilePicker)を開き、選んだ場所へ書き込む。選んだハンドルはIndexedDBに記録し、
@@ -385,14 +455,17 @@ export default function SettingsPage() {
   const handleExportPick = async () => {
     if (!fileSaveSupported) {
       await downloadBackup(includeCookedPhotos) // 非対応ブラウザは従来どおりの自動ダウンロード
+      setMessage(exportDoneMessage('downloaded'))
       return
     }
     setExportBusy(true)
     try {
       const json = await exportBackup(includeCookedPhotos)
-      await saveWithPicker(json, backupFileName())
+      const savedName = await saveWithPicker(json, backupFileName())
       await updateSettings({ lastBackupAt: Date.now() })
       setSavedHandleExists(true)
+      if (savedName) setSavedHandleName(savedName) // 便CJ/C10: 次回の上書き先を注記に出す
+      setMessage(exportDoneMessage('picked'))
     } catch (err) {
       // ユーザーのキャンセル(AbortError)は何もしない。それ以外(権限拒否・headless等で
       // ピッカー自体が使えない環境)は、エラーで終わらせず従来の自動ダウンロードへ
@@ -401,6 +474,7 @@ export default function SettingsPage() {
         try {
           await downloadBackup(includeCookedPhotos)
           await updateSettings({ lastBackupAt: Date.now() })
+          setMessage(exportDoneMessage('downloaded'))
         } catch {
           setMessage(ja.settings.backupSaveError)
         }
@@ -427,6 +501,7 @@ export default function SettingsPage() {
       return
     }
     setExportBusy(false)
+    setMessage(exportDoneMessage('overwritten'))
   }
 
   /**
@@ -438,6 +513,7 @@ export default function SettingsPage() {
    * (2026-07-17設定ゼロベース裁定#6a)
    */
   const pickImportFile = (mode: 'replace' | 'merge') => {
+    if (importBusy) return // 読み込み中の二重操作を防ぐ(ボタンのdisabledと二重の歯止め・便CJ/C15)
     if (mode === 'replace' && !window.confirm(buildReplaceConfirmText(dataCounts))) return
     importModeRef.current = mode
     importFileRef.current?.click()
@@ -449,6 +525,10 @@ export default function SettingsPage() {
     const confirmText =
       mode === 'replace' ? buildReplaceConfirmText(dataCounts) : ja.settings.backupImportMergeConfirm
     if (!window.confirm(confirmText)) return
+    // 前回の結果を消してから始める(古い結果が新しい操作の結果に見えないように)。
+    // 読み込み中は「追加」「置き換え」を押せなくする(二重操作防止・便CJ/C15)
+    setImportResultLines([])
+    setImportBusy(true)
     try {
       const backup = parseBackup(await file.text())
       // 三重の網の(b): 置き換え実行前に現在の全データを内部へ自動退避する(2026-07-17設定
@@ -466,15 +546,20 @@ export default function SettingsPage() {
       }
       const result = await importBackup(backup, mode)
       if (mode === 'replace' && snapshotSaved) setReplaceUndoAvailable(true)
-      setMessage(
+      const lines =
         mode === 'replace'
-          ? ja.settings.backupImportDone.replace('{n}', String(result.added))
-          : ja.settings.backupImportMergeResult
-              .replace('{a}', String(result.added))
-              .replace('{s}', String(result.skipped)),
-      )
+          ? [ja.settings.backupImportDone.replace('{n}', String(result.added))]
+          : result.mergeDetail
+            ? buildMergeResultLines(result.mergeDetail)
+            : []
+      // 控えが取れなかったときは黙らずに伝える(2026-07-30 便CJ/C16)。確認文で「元に戻せます」と
+      // 約束しているので、成立しなかった事実を出さないと約束を破ったままになる
+      if (mode === 'replace' && !snapshotSaved) lines.push(ja.settings.replaceSnapshotFailed)
+      setImportResultLines(lines)
     } catch {
-      setMessage(ja.settings.backupImportError)
+      setImportResultLines([ja.settings.backupImportError])
+    } finally {
+      setImportBusy(false)
     }
   }
 
@@ -485,6 +570,8 @@ export default function SettingsPage() {
   const handleUndoReplace = async () => {
     const restored = await restorePreImportSnapshot()
     setReplaceUndoAvailable(false)
+    // 置き換えの結果表示は戻したあとは事実と違うので消す（便CJ/C11）
+    setImportResultLines([])
     setMessage(restored ? ja.settings.replaceUndoDone : ja.settings.replaceUndoError)
   }
 
@@ -657,9 +744,10 @@ export default function SettingsPage() {
       </nav>
 
       {/* バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。目次チップの下・全節共通の常設
-          バナー。タップ/[今すぐ保存]ボタンのどちらも「バックアップ節の書き出しへ」導く
+          バナー。タップ/[書き出しへ]ボタンのどちらも「バックアップ節の書き出しへ」導く
           (バナー自体は即ファイル保存を実行しない。写真込みチェック等を確認してから
-          「ファイルに書き出す」を押す既存の流れを維持するため)。30日超(または未実施)は警告色 */}
+          「ファイルに書き出す」を押す既存の流れを維持するため)。30日超(または未実施)は警告色。
+          ボタン文言は2026-07-30 便CJ/C7で「今すぐ保存」から改名(保存しないのに保存を名乗っていた) */}
       <div
         className={`mt-[var(--space-sm)] flex items-center gap-2 rounded-md border px-[var(--space-sm)] py-2 shadow-sm ${
           backupBannerWarning ? 'border-warning' : 'border-edge'
@@ -1172,7 +1260,13 @@ export default function SettingsPage() {
                   <Save size={18} aria-hidden />
                   {ja.settings.backupOverwrite}
                 </button>
-                <p className="mt-1 text-xs text-ink-muted">{ja.settings.backupOverwriteNote}</p>
+                {/* 便CJ/C10: 上書き先のファイル名が分かるときは出す(どのファイルに上書きされるのか
+                    画面から確認できなかった。フォルダの場所はブラウザから取得できない) */}
+                <p className="mt-1 text-xs text-ink-muted">
+                  {savedHandleName
+                    ? ja.settings.backupOverwriteNoteWithName.replace('{name}', savedHandleName)
+                    : ja.settings.backupOverwriteNote}
+                </p>
               </>
             )}
           </section>
@@ -1196,8 +1290,9 @@ export default function SettingsPage() {
               <div className="flex flex-col">
                 <button
                   type="button"
+                  disabled={importBusy}
                   onClick={() => pickImportFile('merge')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent shadow-sm"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent shadow-sm disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportMerge}</span>
@@ -1207,8 +1302,9 @@ export default function SettingsPage() {
               <div className="flex flex-col">
                 <button
                   type="button"
+                  disabled={importBusy}
                   onClick={() => pickImportFile('replace')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center font-bold text-warning"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center font-bold text-warning disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportReplace}</span>
@@ -1219,16 +1315,38 @@ export default function SettingsPage() {
                 </p>
               </div>
             </div>
+            {/* 読み込み中の進捗表示(便CJ/C15)と、読み込み結果の内訳(便CJ/C1(d)・C11・C12)。
+                結果はトーストと違って消えないので、あとから「本当に戻ったか」を確かめられる */}
+            {importBusy && (
+              <p className="mt-[var(--space-md)] text-sm font-bold text-accent" role="status" aria-live="polite">
+                {ja.settings.backupImportLoading}
+              </p>
+            )}
+            {!importBusy && importResultLines.length > 0 && (
+              <ul
+                className="mt-[var(--space-md)] space-y-1 rounded-sm bg-app px-3 py-2 text-sm font-bold text-accent"
+                role="status"
+                aria-live="polite"
+              >
+                {importResultLines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {/* 機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。折りたたみ式で、
               普段は畳んでおき機種変更のときだけ開く想定 */}
           <section className={sectionCls}>
+            {/* 開閉ボタンのタップ領域を44px級にする(py-[10px]+行の高さ24px。2026-07-30 便CJ/C14。
+                同じ節の他のボタンは全て40px以上あるのにここだけ24pxで、
+                「スマホ縦画面基準・ボタン大きめ」の方針から外れていた。上下の余白は
+                -my-[10px]で打ち消し、カードの見た目は変えない) */}
             <button
               type="button"
               onClick={() => setMoveGuideOpen((v) => !v)}
               aria-expanded={moveGuideOpen}
-              className="flex w-full items-center justify-between gap-2 text-left font-bold"
+              className="-my-[10px] flex w-full items-center justify-between gap-2 py-[10px] text-left font-bold"
             >
               {ja.settings.moveGuideToggle}
               <ChevronDown
@@ -1238,12 +1356,16 @@ export default function SettingsPage() {
               />
             </button>
             {moveGuideOpen && (
-              <div className="mt-[var(--space-sm)]">
+              <div className="mt-[var(--space-md)]">
                 <ol className="space-y-1 text-sm text-ink-muted">
                   <li>{ja.settings.moveGuideStep1}</li>
                   <li>{ja.settings.moveGuideStep2}</li>
                   <li>{ja.settings.moveGuideStep3}</li>
+                  <li>{ja.settings.moveGuideStep4}</li>
                 </ol>
+                <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+                  {ja.settings.moveGuideTransferNote}
+                </p>
                 <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs font-bold text-warning">
                   <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
                   {ja.settings.moveGuideNote}

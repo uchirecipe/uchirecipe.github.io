@@ -31,6 +31,15 @@ import { backupFileName } from './fileSave'
  * （2026-07-17バックアップ改修 修正1・オーナー実害「ブラウザデータ消去→復元しても購入状態が
  * 戻らない」の再発防止）。配布用のレシピセット（importRecipeSet）は別経路でsettingsを
  * 一切参照しないため、配布物に購入コードが混入する余地はない
+ *
+ * merge（「今のデータに追加」）は非破壊マージ（2026-07-30 便CJ/C1）。今あるデータは1件も
+ * 消さず・上書きせず、「今のデータに無いもの」だけを足す。対象はレシピ本体だけでなく、
+ * 在庫・買い物メモ・週献立・今日の献立・食材価格マスタ・日付メモ・マイ献立テンプレの7テーブルと、
+ * 既にあるレシピに紐づく「作った記録」・お気に入り・写真も含む（mergeTableRows /
+ * mergeRecipeUserData / resolveMergeRecipeAction 参照）。以前はレシピ本体と解錠コードしか
+ * 見ておらず、まっさらな端末（同梱の基本レシピが必ずID衝突する）へ読み込むと基本レシピの
+ * 記録・写真・お気に入りと7テーブルが1件も戻らないまま「追加◯件・スキップ◯件」と
+ * 成功風に表示されていた
  */
 
 interface BackupCookedLog extends Omit<CookedLog, 'photo'> {
@@ -250,6 +259,11 @@ type UnlockCodeFields = Pick<
  * バックアップにコードが含まれていれば自然に復元されるが、merge（今のデータに追加＝
  * 今のデータを消さない設計）は同じやり方（全置き換え）はできない。
  *
+ * replace（置き換え）側も2026-07-30 便CJ/C2から同じルールを使う（buildReplaceSettings）。
+ * 「バックアップにコードが含まれていれば自然に復元される」ことに任せていたため、コードを含まない
+ * ファイル（購入前に取った自分のバックアップ・settings自体を持たない配布セット形式）を
+ * 置き換えで復元すると購入状態が消えていた。
+ *
  * ルール（Fable裁定）: 「バックアップ側にコードがあれば設定、無ければ既存を保持」
  * （空で上書きしない）。proCode/recipePackCodeそれぞれ独立に判定する（Pro解錠済みの状態で
  * パックだけを含む古いバックアップをmergeしてもPro状態は消えない、等）。
@@ -273,6 +287,212 @@ export function mergeUnlockCodes(
   }
 }
 
+/**
+ * replace復元（「今のデータと置き換え」）で settings に書き込む内容を決める
+ * （純ロジック・DB非依存。2026-07-30 便CJ/C2）。
+ *
+ * 直していること: 以前は `{ ...defaultSettings, ...file.settings }` だったため、
+ * settingsを持たないJSON（配布レシピセット形式・レビュー用の書き出し・手編集ファイル）を
+ * 置き換えで読むと、スプレッドが何も上書きせず既定値がそのまま書かれ、解錠コード・NG食材・
+ * 週の食費予算・テーマがまるごと初期化されていた。さらに settings はあっても proCode を
+ * 含まないファイル（購入前に取った自分のバックアップ）を置き換えで復元すると、
+ * Pro解錠が消えていた（2026-07-17のオーナー実害と同じクラスの取りこぼしがreplace側に残っていた）。
+ *
+ * ルール:
+ * - 土台は「今の設定」（ファイルに無い項目は今の値を保つ＝tablesToReplaceの
+ *   「項目が無ければ触らない」という後方互換の考え方と揃える）
+ * - ファイルにある項目はファイルの内容で置き換える（置き換えの意味は保つ）
+ * - 解錠コードだけは mergeUnlockCodes と同じ「空で上書きしない」（＝購入状態は消さない）
+ * - starterSeeded は必ず true（基本レシピの二重投入を防ぐ既存の理由）
+ *
+ * 付随する挙動: 解錠コードを含むファイルで置き換えたあと「元に戻す」を押しても、解錠コードは
+ * 外れない（控えにコードが無くても既存を保持するルールのため）。購入状態は消さない側に倒す
+ * 既存方針（mergeUnlockCodes）と揃えた結果で、意図した挙動
+ */
+export function buildReplaceSettings(
+  current: Partial<Settings> | undefined,
+  fileSettings: Settings | undefined,
+): Settings {
+  const base: Settings = { ...defaultSettings, ...current }
+  return {
+    ...base,
+    ...fileSettings,
+    ...mergeUnlockCodes(base, fileSettings),
+    id: 1,
+    starterSeeded: true,
+  }
+}
+
+/**
+ * merge復元（「今のデータに追加」）で、テーブルの行のうち「今のデータに無い行」だけを選ぶ
+ * （純ロジック・DB非依存。2026-07-30 便CJ/C1）。
+ *
+ * 既存の行は1件も消さず・上書きもしない（clearを一切使わない）ので、項目自体を持たない古い
+ * バックアップでも安全＝replace側のtablesToReplaceのような undefined/[] の区別は要らない
+ * （呼び出し側で「ファイルにその項目が有るときだけ実行する」だけでよい）。
+ * ファイル内に同じキーの行が複数あった場合も1件だけ足す。
+ * keyOf は既存行・ファイル側の行の両方を受け取れる形（共通の項目だけを見る）で渡す
+ */
+export function mergeTableRows<E, I>(
+  existing: readonly E[],
+  incoming: readonly I[],
+  keyOf: (row: E | I) => string,
+): I[] {
+  const keys = new Set<string>(existing.map((row) => keyOf(row)))
+  const rows: I[] = []
+  for (const row of incoming) {
+    const key = keyOf(row)
+    if (keys.has(key)) continue
+    keys.add(key)
+    rows.push(row)
+  }
+  return rows
+}
+
+/**
+ * merge復元で各テーブルの「同じ行かどうか」を判定する照合キー（2026-07-30 便CJ/C1）。
+ * idは復元先で振り直す＝ファイル側と一致しないため使えない。テーブルごとに
+ * 「ユーザーから見て同じ1件」を表す項目を組み合わせる
+ * （在庫・買い物メモ・価格・テンプレ=名前、週献立=日付+食事帯+レシピ、
+ * 今日の献立=レシピ、日付メモ=日付（主キーそのもの・1日1件））
+ */
+export const mergeRowKeys = {
+  pantryItems: (row: { name: string }) => row.name.trim(),
+  shoppingItems: (row: { name: string }) => row.name.trim(),
+  mealPlans: (row: { date: string; slot: string; recipeId: number }) =>
+    `${row.date}\n${row.slot}\n${row.recipeId}`,
+  todayList: (row: { recipeId: number }) => String(row.recipeId),
+  prices: (row: { name: string }) => row.name.trim(),
+  dayNotes: (row: { date: string }) => row.date,
+  mealTemplates: (row: { name: string }) => row.name.trim(),
+}
+
+/**
+ * merge復元でファイル側の1品をどう扱うか決める（純ロジック・DB非依存。2026-07-30 便CJ/C1）。
+ * - 'enrich': 同じ料理が既にある。本体は上書きせず（今のデータを優先）、記録・お気に入り・写真だけ足す
+ * - 'add': そのIDが空いている。従来どおり同じIDのまま追加する（次回以降も照合できるように）
+ * - 'addWithNewId': そのIDが「別の料理」に使われている。新しいIDを振って追加する
+ *
+ * 'addWithNewId' が要る理由（版ズレ対策）: 同梱の基本レシピが増えると以降のIDがずれるため、
+ * 増える前に取ったバックアップを今のアプリへmergeすると、ユーザーの自作レシピのIDが
+ * 「別の品である新しい基本レシピ」に当たる。以前はこれを内容も見ずにスキップしていたので、
+ * 自作レシピが丸ごと取り込まれなかった。IDが埋まっていても料理名で突き合わせ直し、
+ * 別料理なら新しいIDで取り込む（ID衝突を理由にレシピを落とさない）
+ */
+export type MergeRecipeAction =
+  | { kind: 'enrich'; targetId: number }
+  | { kind: 'add' }
+  | { kind: 'addWithNewId' }
+
+export function resolveMergeRecipeAction(
+  incoming: Pick<Recipe, 'id' | 'title'>,
+  existingTitleById: ReadonlyMap<number, string>,
+  existingIdByTitle: ReadonlyMap<string, number>,
+): MergeRecipeAction {
+  // IDが無い古い形式は照合できないので従来どおり新規として追加する
+  if (incoming.id == null) return { kind: 'addWithNewId' }
+  const existingTitle = existingTitleById.get(incoming.id)
+  // そのIDが空いている: 従来どおり同じIDのまま追加する
+  if (existingTitle === undefined) return { kind: 'add' }
+  const title = incoming.title.trim()
+  if (existingTitle.trim() === title) return { kind: 'enrich', targetId: incoming.id }
+  // 同じIDが別の料理に使われている（版ズレ）。料理名で突き合わせ直す
+  const sameTitleId = existingIdByTitle.get(title)
+  if (sameTitleId !== undefined) return { kind: 'enrich', targetId: sameTitleId }
+  return { kind: 'addWithNewId' }
+}
+
+/** 「作った記録」の照合キー（日付＋メモ）。同じ日に複数回作った記録もメモが違えば別件として残る */
+function cookedLogKey(log: Pick<CookedLog, 'date' | 'note'>): string {
+  return `${log.date}\n${log.note ?? ''}`
+}
+
+export interface RecipeUserDataMerge {
+  /** 取り込み後のレシピ（変更が無ければ existing と同じ内容） */
+  recipe: Recipe
+  /** 1つでも足したものがあるか（falseならDBへ書き戻す必要が無い） */
+  changed: boolean
+  /** 足した「作った記録」の件数 */
+  cookedLogsAdded: number
+  /** お気に入りを付け直したか（false→true になったときだけ true） */
+  favoriteAdded: boolean
+  /** 足した写真の枚数（レシピ写真＋記録の写真） */
+  photosAdded: number
+}
+
+/**
+ * merge復元で「同じ料理が既にある」ときに、ファイル側のユーザーデータだけを足す
+ * （純ロジック・DB非依存。2026-07-30 便CJ/C1）。
+ *
+ * 足すもの: 作った記録（日付＋メモで重複排除）／お気に入り（trueを優先）／
+ *           写真（今のレシピに無いときだけ。記録の写真も、同じ記録に写真が無いときだけ入れる）
+ * 触らないもの: 料理名・材料・手順・メモなどレシピ本体の内容（今のデータを優先＝merge=追加のみ
+ *           という既存設計を保つ）。既にある記録・写真・お気に入りを消したり書き換えたりしない
+ */
+export function mergeRecipeUserData(existing: Recipe, incoming: Recipe): RecipeUserDataMerge {
+  let cookedLogsAdded = 0
+  let photosAdded = 0
+  const logs = existing.cookedLogs.map((log) => ({ ...log }))
+  const indexByKey = new Map<string, number>()
+  logs.forEach((log, index) => {
+    const key = cookedLogKey(log)
+    if (!indexByKey.has(key)) indexByKey.set(key, index)
+  })
+  for (const log of incoming.cookedLogs) {
+    const key = cookedLogKey(log)
+    const index = indexByKey.get(key)
+    if (index === undefined) {
+      logs.push({ ...log })
+      indexByKey.set(key, logs.length - 1)
+      cookedLogsAdded++
+      if (log.photo) photosAdded++
+      continue
+    }
+    // 同じ記録が既にある: 写真だけが欠けている場合に限り、ファイル側の写真で埋める
+    if (!logs[index].photo && log.photo) {
+      logs[index].photo = log.photo
+      photosAdded++
+    }
+  }
+  const favoriteAdded = !existing.isFavorite && incoming.isFavorite
+  const photoAdded = !existing.photo && !!incoming.photo
+  if (photoAdded) photosAdded++
+  const changed = cookedLogsAdded > 0 || photosAdded > 0 || favoriteAdded
+  const recipe: Recipe = changed
+    ? {
+        ...existing,
+        cookedLogs: logs,
+        isFavorite: existing.isFavorite || incoming.isFavorite,
+        ...(photoAdded ? { photo: incoming.photo } : {}),
+      }
+    : existing
+  return { recipe, changed, cookedLogsAdded, favoriteAdded, photosAdded }
+}
+
+/**
+ * 版ズレでレシピのIDを振り直したとき、ファイル側の行が持つレシピ参照を新しいIDへ付け替える
+ * （純ロジック・DB非依存。2026-07-30 便CJ/C1）。付け替えないと、取り込んだ週献立・今日の献立・
+ * マイ献立テンプレ・買い物メモが「実在しないレシピ」を指してしまう。
+ * 振り直しが1件も無ければ元のオブジェクトをそのまま返す（項目の有無＝undefinedも保つ）
+ */
+export function remapBackupRecipeRefs<
+  T extends Pick<BackupFile, 'mealPlans' | 'todayList' | 'shoppingItems' | 'mealTemplates'>,
+>(file: T, idRemap: ReadonlyMap<number, number>): Pick<BackupFile, 'mealPlans' | 'todayList' | 'shoppingItems' | 'mealTemplates'> {
+  if (idRemap.size === 0) return file
+  const ref = (id: number) => idRemap.get(id) ?? id
+  return {
+    mealPlans: file.mealPlans?.map((row) => ({ ...row, recipeId: ref(row.recipeId) })),
+    todayList: file.todayList?.map((row) => ({ ...row, recipeId: ref(row.recipeId) })),
+    shoppingItems: file.shoppingItems?.map((row) =>
+      row.fromRecipeIds ? { ...row, fromRecipeIds: row.fromRecipeIds.map(ref) } : row,
+    ),
+    mealTemplates: file.mealTemplates?.map((template) => ({
+      ...template,
+      items: template.items.map((item) => ({ ...item, recipeId: ref(item.recipeId) })),
+    })),
+  }
+}
+
 /** 'replace' 用: id を振り直さず、そのままの内容で取り込む */
 function toRecipe(backup: BackupRecipe): Recipe {
   const { photoBase64, photoType, cookedLogs, ...rest } = backup
@@ -290,6 +510,30 @@ function toRecipe(backup: BackupRecipe): Recipe {
   return recipe
 }
 
+/**
+ * merge復元（「今のデータに追加」）で「何が取り込まれ、何が取り込まれなかったか」の内訳
+ * （2026-07-30 便CJ/C1(d)・C11・C12）。結果表示に出して、復元したつもりで実際は戻っていない、
+ * という誤認（バックアップの本来の目的が無効になる）を防ぐために数える
+ */
+export interface MergeImportDetail {
+  /** 新しく追加したレシピ数（版ズレでIDを振り直した分も含む） */
+  recipesAdded: number
+  /** そのうち、IDが別の料理に使われていたため新しいIDで追加した数（版ズレ） */
+  recipesRenumbered: number
+  /** 同じ料理が既にあったため本体を取り込まなかったレシピ数 */
+  recipesMatched: number
+  /** そのうち、記録・お気に入り・写真を足したレシピ数 */
+  recipesEnriched: number
+  /** 既にあるレシピへ足した「作った記録」の件数 */
+  cookedLogsAdded: number
+  /** 既にあるレシピへ足したお気に入りの件数 */
+  favoritesAdded: number
+  /** 既にあるレシピへ足した写真の枚数（レシピ写真＋記録の写真） */
+  photosAdded: number
+  /** 足した在庫・買い物メモ・週献立・今日の献立・価格・日付メモ・献立テンプレの合計行数 */
+  tableRowsAdded: number
+}
+
 export interface ImportResult {
   /** 新規に追加したレシピ数 */
   added: number
@@ -305,15 +549,23 @@ export interface ImportResult {
    * （importRecipeSetのみ発生。importBackupでは常に0。2026-07-13トゥームストーン）
    */
   excluded: number
+  /** merge時のみ: 取り込みの内訳（結果表示に出す。2026-07-30 便CJ/C1） */
+  mergeDetail?: MergeImportDetail
 }
 
 /**
  * バックアップを取り込む。
  * mode 'replace': 今のデータを全部消してから復元（引っ越し・復旧向け）
- * mode 'merge'  : 今のデータは残し、バックアップのレシピを id で照合して取り込む。
- *   - 同一ID・同一内容 → スキップ（すでに入っている）
- *   - 同一ID・内容が違う → 取り込まずスキップ（今のデータを優先。上書きしない）
- *   - 新規ID → 追加
+ * mode 'merge'  : 今のデータは1件も消さず、バックアップの「今のデータに無いもの」だけを足す
+ *   （非破壊マージ。2026-07-30 便CJ/C1）。
+ *   - レシピ: 同じ料理が既にある → 本体はスキップ（今のデータを優先）。ただしファイル側の
+ *     作った記録・お気に入り・写真は足す（mergeRecipeUserData）
+ *   - レシピ: そのIDが空いている → 同じIDのまま追加
+ *   - レシピ: そのIDが別の料理に使われている（版ズレ） → 新しいIDを振って追加し、
+ *     献立などの参照も付け替える（resolveMergeRecipeAction / remapBackupRecipeRefs）
+ *   - 在庫・買い物メモ・週献立・今日の献立・価格・日付メモ・献立テンプレ:
+ *     「今のデータに無い行」だけ足す（mergeTableRows。既存行は消さない・上書きしない）
+ *   - 設定本体（NG食材・テーマ等）は従来どおり触らない。解錠コードだけ mergeUnlockCodes で復元
  */
 export async function importBackup(
   file: BackupFile,
@@ -348,13 +600,10 @@ export async function importBackup(
       ],
       async () => {
         await db.recipes.clear()
-        // 設定も復元。基本レシピの二重投入を防ぐため starterSeeded は必ず true にする
-        await db.settings.put({
-          ...defaultSettings,
-          ...file.settings,
-          id: 1,
-          starterSeeded: true,
-        })
+        // 設定も復元する（buildReplaceSettings参照。2026-07-30 便CJ/C2で「今の設定を土台にする＋
+        // 解錠コードは空で上書きしない」へ変更。以前はsettingsを持たないJSONを置き換えで読むと
+        // 解錠コード・NG食材・週の食費予算・テーマが既定値へ初期化されていた）
+        await db.settings.put(buildReplaceSettings(await db.settings.get(1), file.settings))
         await db.recipes.bulkAdd(recipes)
         // 再取込除外の記録も置き換える（復元で除外状態も戻る。
         // 記録の無い古いバックアップでは空になるだけで、復元自体は従来どおり成功する）
@@ -394,54 +643,163 @@ export async function importBackup(
     return { added: recipes.length, updated: 0, skipped: 0, excluded: 0 }
   }
 
-  // merge: 1件ずつ id で照合する
+  // merge: 今のデータは1件も消さず、「今のデータに無いもの」だけを足す（非破壊マージ）
   let added = 0
   let skipped = 0
-  await db.transaction('rw', db.recipes, db.setExclusions, db.settings, async () => {
-    for (const recipe of recipes) {
-      if (recipe.id == null) {
-        // 古い形式などIDが無い場合は照合できないので新規として追加
-        const { id: _unused, ...rest } = recipe
-        await db.recipes.add(rest as Recipe)
+  const detail: MergeImportDetail = {
+    recipesAdded: 0,
+    recipesRenumbered: 0,
+    recipesMatched: 0,
+    recipesEnriched: 0,
+    cookedLogsAdded: 0,
+    favoritesAdded: 0,
+    photosAdded: 0,
+    tableRowsAdded: 0,
+  }
+  await db.transaction(
+    'rw',
+    [
+      db.recipes,
+      db.setExclusions,
+      db.settings,
+      db.pantryItems,
+      db.shoppingItems,
+      db.mealPlans,
+      db.todayList,
+      db.prices,
+      db.dayNotes,
+      db.mealTemplates,
+    ],
+    async () => {
+      // 照合表（ID→料理名 / 料理名→ID）。ファイルのIDが別の料理に当たっていないか、
+      // 当たっていた場合に同じ料理が別のIDで居ないかを1件ずつ問い合わせずに判定するため
+      const existingTitleById = new Map<number, string>()
+      const existingIdByTitle = new Map<string, number>()
+      // toArray()ではなくeach()で1件ずつ読む（写真つきのレシピを全件メモリに抱えないため。
+      // 台数の多い端末での読み込み中のメモリ増加を避ける）
+      await db.recipes.each((existing) => {
+        if (existing.id == null) return
+        existingTitleById.set(existing.id, existing.title)
+        const key = existing.title.trim()
+        if (!existingIdByTitle.has(key)) existingIdByTitle.set(key, existing.id)
+      })
+      // 版ズレでIDを振り直したレシピ・別IDの同じ料理に合流したレシピの「ファイル側のID→今のID」。
+      // 週献立・今日の献立・献立テンプレ・買い物メモの参照を付け替えるのに使う
+      const idRemap = new Map<number, number>()
+
+      for (const recipe of recipes) {
+        const action = resolveMergeRecipeAction(recipe, existingTitleById, existingIdByTitle)
+        if (action.kind === 'enrich') {
+          // 同じ料理が既にある: 本体は上書きせず、ファイル側の記録・お気に入り・写真だけ足す
+          const target = await db.recipes.get(action.targetId)
+          if (target) {
+            const merged = mergeRecipeUserData(target, recipe)
+            if (merged.changed) {
+              await db.recipes.put(merged.recipe)
+              detail.recipesEnriched++
+              detail.cookedLogsAdded += merged.cookedLogsAdded
+              detail.photosAdded += merged.photosAdded
+              if (merged.favoriteAdded) detail.favoritesAdded++
+            }
+          }
+          if (recipe.id != null && recipe.id !== action.targetId) idRemap.set(recipe.id, action.targetId)
+          skipped++
+          detail.recipesMatched++
+          continue
+        }
+        if (action.kind === 'add') {
+          await db.recipes.add(recipe) // 同じIDのまま追加（次回以降も照合できるように）
+          existingTitleById.set(recipe.id!, recipe.title)
+          const key = recipe.title.trim()
+          if (!existingIdByTitle.has(key)) existingIdByTitle.set(key, recipe.id!)
+          added++
+          detail.recipesAdded++
+          continue
+        }
+        // そのIDが別の料理に使われている（版ズレ）／IDが無い古い形式: 新しいIDを振って追加する。
+        // ID衝突を理由に取り込まない（＝自作レシピを落とす）ことはしない
+        const { id: fileId, ...rest } = recipe
+        const newId = (await db.recipes.add(rest as Recipe)) as number
+        existingTitleById.set(newId, recipe.title)
+        const newKey = recipe.title.trim()
+        if (!existingIdByTitle.has(newKey)) existingIdByTitle.set(newKey, newId)
+        if (fileId != null) {
+          idRemap.set(fileId, newId)
+          detail.recipesRenumbered++
+        }
         added++
-        continue
+        detail.recipesAdded++
       }
-      const existing = await db.recipes.get(recipe.id)
-      if (!existing) {
-        await db.recipes.add(recipe) // 同じIDのまま追加（次回以降も照合できるように）
-        added++
-      } else {
-        // 同一IDが既にある: 内容が同じでも違ってもスキップ（今のデータを優先）
-        skipped++
+
+      // 在庫・買い物メモ・週献立・今日の献立・食材価格マスタ・日付メモ・マイ献立テンプレも
+      // 非破壊マージする（2026-07-30 便CJ/C1。以前はこのトランザクションが recipes/setExclusions/
+      // settings しか開いておらず、7テーブルは1件も戻らなかった）。clearは一切しないので、
+      // 項目自体を持たない古いバックアップでも既存データを消さない（ファイルに項目が有るときだけ実行）。
+      // レシピのIDを振り直した場合は、参照を新しいIDへ付け替えてから照合する
+      const refs = remapBackupRecipeRefs(file, idRemap)
+      if (file.pantryItems !== undefined) {
+        const rows = mergeTableRows(await db.pantryItems.toArray(), file.pantryItems, mergeRowKeys.pantryItems)
+        if (rows.length > 0) await db.pantryItems.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
       }
-    }
-    // 再取込除外の記録は (setId, title) で照合し、無いものだけ追加する（今の記録は消さない）
-    if (backupExclusions.length > 0) {
-      const existingKeys = new Set(
-        (await db.setExclusions.toArray()).map((e) => `${e.setId}\n${e.title}`),
-      )
-      for (const exclusion of backupExclusions) {
-        const key = `${exclusion.setId}\n${exclusion.title}`
-        if (existingKeys.has(key)) continue
-        existingKeys.add(key)
-        await db.setExclusions.add(exclusion)
+      if (refs.shoppingItems !== undefined) {
+        const rows = mergeTableRows(await db.shoppingItems.toArray(), refs.shoppingItems, mergeRowKeys.shoppingItems)
+        if (rows.length > 0) await db.shoppingItems.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
       }
-    }
-    // Pro・追加レシピパックの解錠コードも復元する（2026-07-17バックアップ改修 修正1・
-    // オーナー実害の再発防止: 「ブラウザデータ消去→バックアップ読み込み」で購入状態が戻らない
-    // 事故があった）。mergeUnlockCodesのルールどおり「バックアップ側にコードがあれば設定、
-    // 無ければ既存を保持」（空で上書きしない）。他の設定項目（NG食材・テーマ等）は
-    // mergeでは従来どおり一切触らない（merge=追加のみという既存設計を尊重する）
-    const currentSettings = { ...defaultSettings, ...(await db.settings.get(1)) }
-    const unlockCodes = mergeUnlockCodes(currentSettings, file.settings)
-    if (
-      unlockCodes.proCode !== currentSettings.proCode ||
-      unlockCodes.recipePackCode !== currentSettings.recipePackCode
-    ) {
-      await db.settings.put({ ...currentSettings, ...unlockCodes, id: 1 })
-    }
-  })
-  return { added, updated: 0, skipped, excluded: 0 }
+      if (refs.mealPlans !== undefined) {
+        const rows = mergeTableRows(await db.mealPlans.toArray(), refs.mealPlans, mergeRowKeys.mealPlans)
+        if (rows.length > 0) await db.mealPlans.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
+      }
+      if (refs.todayList !== undefined) {
+        const rows = mergeTableRows(await db.todayList.toArray(), refs.todayList, mergeRowKeys.todayList)
+        if (rows.length > 0) await db.todayList.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
+      }
+      if (file.prices !== undefined) {
+        const rows = mergeTableRows(await db.prices.toArray(), file.prices, mergeRowKeys.prices)
+        if (rows.length > 0) await db.prices.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
+      }
+      if (file.dayNotes !== undefined) {
+        const rows = mergeTableRows(await db.dayNotes.toArray(), file.dayNotes, mergeRowKeys.dayNotes)
+        if (rows.length > 0) await db.dayNotes.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
+      }
+      if (refs.mealTemplates !== undefined) {
+        const rows = mergeTableRows(await db.mealTemplates.toArray(), refs.mealTemplates, mergeRowKeys.mealTemplates)
+        if (rows.length > 0) await db.mealTemplates.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
+      }
+      // 再取込除外の記録は (setId, title) で照合し、無いものだけ追加する（今の記録は消さない）
+      if (backupExclusions.length > 0) {
+        const existingKeys = new Set(
+          (await db.setExclusions.toArray()).map((e) => `${e.setId}\n${e.title}`),
+        )
+        for (const exclusion of backupExclusions) {
+          const key = `${exclusion.setId}\n${exclusion.title}`
+          if (existingKeys.has(key)) continue
+          existingKeys.add(key)
+          await db.setExclusions.add(exclusion)
+        }
+      }
+      // Pro・追加レシピパックの解錠コードも復元する（2026-07-17バックアップ改修 修正1・
+      // オーナー実害の再発防止: 「ブラウザデータ消去→バックアップ読み込み」で購入状態が戻らない
+      // 事故があった）。mergeUnlockCodesのルールどおり「バックアップ側にコードがあれば設定、
+      // 無ければ既存を保持」（空で上書きしない）。他の設定項目（NG食材・テーマ等）は
+      // mergeでは従来どおり一切触らない（merge=追加のみという既存設計を尊重する）
+      const currentSettings = { ...defaultSettings, ...(await db.settings.get(1)) }
+      const unlockCodes = mergeUnlockCodes(currentSettings, file.settings)
+      if (
+        unlockCodes.proCode !== currentSettings.proCode ||
+        unlockCodes.recipePackCode !== currentSettings.recipePackCode
+      ) {
+        await db.settings.put({ ...currentSettings, ...unlockCodes, id: 1 })
+      }
+    },
+  )
+  return { added, updated: 0, skipped, excluded: 0, mergeDetail: detail }
 }
 
 /**
