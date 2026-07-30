@@ -114,6 +114,14 @@ export interface AssumedIngredient {
 export interface IngredientNutrition {
   name: string
   foodLabel: string
+  /**
+   * 名寄せできた食品の八訂の食品番号（NutritionFood.id。例: 玉ねぎ='06153'）。
+   * 2026-07-30 便CL/docs/60 第1段で追加。先頭2桁が食品群番号なので、
+   * 「野菜類（06）だけを合計する」のような食品群単位の集計を、
+   * グラム換算のロジックを二重に書かずに行える（logic/nutritionBalance.ts が使う）。
+   * 八訂に収載が無い食品（市販品参考の概算）は 'custom:◯◯' なのでどの食品群にも入らない。
+   */
+  foodId: string
   grams: number
   nutrients: NutrientTotals
 }
@@ -329,7 +337,7 @@ function computeIngredient(
       const grams = assumption.gramsPerServing * servings
       const nutrients = addScaled(emptyTotals(), food.per100g, grams)
       return {
-        item: { name: ing.name, foodLabel: food.label, grams, nutrients },
+        item: { name: ing.name, foodLabel: food.label, foodId: food.id, grams, nutrients },
         assumed: { name: ing.name, note: assumption.note },
       }
     }
@@ -338,7 +346,7 @@ function computeIngredient(
   const grams = convertToGrams(resolved.value, resolved.unit, food)
   if (grams === null) return { reason: 'unit' }
   const nutrients = addScaled(emptyTotals(), food.per100g, grams)
-  return { item: { name: ing.name, foodLabel: food.label, grams, nutrients } }
+  return { item: { name: ing.name, foodLabel: food.label, foodId: food.id, grams, nutrients } }
 }
 
 /**

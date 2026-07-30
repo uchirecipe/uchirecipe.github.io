@@ -192,8 +192,11 @@ function SourceNote() {
  * MealPlanPageの月間献立ゲートと同じ「ぼかした本体＋Lockバッジ＋見出し＋説明＋リンク」の様式に揃える。
  * 従来はテキスト1行だけで、同じPro導線なのに画面ごとに表現が3種類あった。
  * ぼかす中身は数値ではなく項目名と値の位置を示すバーで、実データは出さない（サンプル表示）。
+ *
+ * 2026-07-30 便CL: 献立タブの栄養バランスパネル（NutritionBalancePanel）からも同じ部品を使う。
+ * 鍵付き導線の表現を1つに保つため、同じ見た目を作り直さずここから流用する（PRO-01の作法）。
  */
-function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
+export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
   const sampleLabels = [
     ja.nutrition.proteinLabel,
     ja.nutrition.fatLabel,
