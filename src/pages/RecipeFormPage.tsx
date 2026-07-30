@@ -42,6 +42,9 @@ import {
 } from '../logic/seasoningGroup'
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { isHttpUrl } from '../logic/url'
+import { MAX_SERVINGS, MIN_SERVINGS, clampServings, isServingsInRange } from '../logic/servings'
+import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '../logic/replaceConfirm'
+import type { PhotoReplacePlan } from '../logic/replaceConfirm'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
@@ -246,9 +249,9 @@ function takePendingDraft(key: string): FormDraft | null {
 
 /** 料理名の上限(2026-07-28 便BW)。超えると詳細ページの見出しが画面をほぼ占有するため保存前に指摘する */
 const MAX_TITLE_LENGTH = 60
-/** 人数分の下限・上限(便BW)。家庭用レシピ帳として常識的な範囲に収め、範囲外はボタン自体を無効にする */
-const MIN_SERVINGS = 1
-const MAX_SERVINGS = 20
+// 人数分の下限・上限(便BW)とクランプは logic/servings.ts へ移した(2026-07-30 便CK/①-1)。
+// ±ボタンのonClickにしかクランプが無く、URL取り込み・貼り付け・下書き復元は素通りしていたため、
+// setServingsを呼ぶ全経路が同じ関数を通る形に揃える
 
 /** 「30」「0」のような0以上の数字だけを受け付ける(「-30」「abc」を弾く。便BW/C-20) */
 function isNonNegativeNumber(value: string): boolean {
@@ -394,6 +397,23 @@ function RecipeFormInner() {
   // 「どこを直せばよいか分からない」への最小限の答えで、大掛かりなプレビューUIは作らない。
   // 名前で覚えるので、行を並べ替えても印が付いたままになり、分量を入れれば自然に消える
   const [amountlessImportedNames, setAmountlessImportedNames] = useState<string[]>([])
+  /**
+   * URL取り込みの世代番号(2026-07-30 便CK/②-2・②-3)。「読み込む」を押すたび、
+   * およびこの画面を離れるときに繰り上げる。取り込みの途中で解決した処理は、自分の世代が
+   * まだ最新かを確かめてからフォームへ書き込む。
+   * これが無かったため、①連続して取り込むと前のURLの写真が後から現在の内容の上に着弾し
+   * (材料は新しいレシピ・写真は前のレシピ)「写真も取り込みました」も二重に付き、
+   * ②画面を離れた後に「入力済みの材料1件・手順1件は…置き換わって消えます」の確認ダイアログが
+   * 無関係な画面へ割り込んでいた(いま見ているレシピが壊されると誤解させる文面)
+   */
+  const urlImportGenerationRef = useRef(0)
+  useEffect(
+    () => () => {
+      // 画面を離れたら、走っている取り込みの結果はすべて捨てる
+      urlImportGenerationRef.current++
+    },
+    [],
+  )
 
   // テキスト貼り付けで自動入力
   const [pasteOpen, setPasteOpen] = useState(false)
@@ -422,14 +442,25 @@ function RecipeFormInner() {
   }
 
   /**
-   * 貼り付け・URL取り込みで入力済みの材料・手順が置き換わるときの確認(規約F・2026-07-28 便BW/C-04)。
+   * 貼り付け・URL取り込みで入力済みの内容が置き換わるときの確認(規約F・2026-07-28 便BW/C-04)。
    * 置き換え先が実際に埋まっているときだけ確認を出し、消えるもの(件数)と残るものを両方伝える。
    * 続けてよければ true。1行削除に確認を出しているのに全行の置き換えが無警告だった不整合の解消。
+   *
+   * 2026-07-30 便CK/②-1(S1): 判定に写真を加えた。URL取り込みは既存の写真も無条件に差し替えるのに、
+   * 確認文の「消えるもの」にも「残るもの」にも写真が無く、残るものを列挙しているぶん
+   * 「写真は触られない」と読めてしまっていた(写真は端末内にしか無く、保存したら復元できない)。
+   * photoPlanが'replace'なら、材料・手順が空でも確認を出す(料理名と写真だけのレシピを守るため)。
    */
   const confirmReplaceExisting = (
-    template: string,
+    itemsTemplate: string,
     parsedIngredientCount: number,
     parsedStepCount: number,
+    /**
+     * URL取り込み経路だけが渡す。写真の扱い(消える/残る)と「そのまま残るもの」の1文を
+     * 確認文の後ろに足す。渡さない貼り付け経路は写真に触らないため、
+     * テンプレート1本(末尾に残るものを含む形)で従来どおり完結する
+     */
+    photoPlan?: PhotoReplacePlan,
   ): boolean => {
     const filledIngredients = ingredients.filter(
       (row) => row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim(),
@@ -437,15 +468,32 @@ function RecipeFormInner() {
     const filledSteps = steps.filter(
       (row) => row.text.trim() || row.minutes.trim() || row.memo.trim(),
     ).length
+    const targets = replaceConfirmTargets({
+      filledIngredients,
+      filledSteps,
+      parsedIngredients: parsedIngredientCount,
+      parsedSteps: parsedStepCount,
+      photoPlan: photoPlan ?? 'none',
+    })
+    if (!needsReplaceConfirm(targets)) return true
     const items: string[] = []
-    if (parsedIngredientCount > 0 && filledIngredients > 0) {
+    if (targets.ingredients) {
       items.push(ja.paste.replaceItemIngredients.replace('{n}', String(filledIngredients)))
     }
-    if (parsedStepCount > 0 && filledSteps > 0) {
+    if (targets.steps) {
       items.push(ja.paste.replaceItemSteps.replace('{n}', String(filledSteps)))
     }
-    if (items.length === 0) return true
-    return window.confirm(template.replace('{items}', items.join(ja.paste.replaceItemSeparator)))
+    // 「消えるもの」→ 写真の扱い →「残るもの」の順に並べる(規約F)
+    const itemsText =
+      items.length > 0
+        ? itemsTemplate.replace('{items}', items.join(ja.paste.replaceItemSeparator))
+        : ''
+    // 貼り付け経路は写真に触らないので、従来どおりテンプレート1本で完結する(末尾に残るものを含む)
+    if (photoPlan === undefined) return window.confirm(itemsText)
+    const photoText = targets.photo ? ja.urlImport.confirmPhotoReplace : ''
+    const keptText =
+      photoPlan === 'kept' ? ja.urlImport.confirmReplaceKeptWithPhoto : ja.urlImport.confirmReplaceKept
+    return window.confirm(`${itemsText}${photoText}${keptText}`)
   }
 
   const photoUrl = usePhotoUrl(photo)
@@ -470,10 +518,19 @@ function RecipeFormInner() {
   // (非同期)がまだ終わっていないタイミングでこの画面を直接開いても、
   // 投入完了後に自動で正しく読み込まれる（以前は読み込みが一度きりで、
   // 投入前に空振りすると空欄のまま固まる不具合があった）
-  const loadedRecipe = useLiveQuery(
-    () => (editId !== undefined && !Number.isNaN(editId) ? getRecipe(editId) : undefined),
+  // 「まだ読み込み中」と「読み込んだが見つからなかった」を区別するため、結果を1枚くるんで返す
+  // (2026-07-30 便CK/①-2)。useLiveQueryは未解決のあいだも undefined を返すので、素の
+  // undefined では削除済み・存在しないIDの編集URLを見分けられず、案内も出せなかった
+  const loadedRecipeResult = useLiveQuery(
+    async () => ({
+      recipe:
+        editId !== undefined && !Number.isNaN(editId) ? await getRecipe(editId) : undefined,
+    }),
     [editId],
   )
+  const loadedRecipe = loadedRecipeResult?.recipe
+  /** 編集URLのレシピが存在しない(削除済み・IDまちがい)ことが確定した状態 */
+  const recipeMissing = isEdit && loadedRecipeResult !== undefined && loadedRecipeResult.recipe === undefined
   const settings = useSettings()
   const allRecipes = useLiveQuery(listRecipes, [])
 
@@ -506,12 +563,10 @@ function RecipeFormInner() {
     const recipe = loadedRecipe
     if (!recipe || hydratedRef.current) return
     hydratedRef.current = true
-    if (draftRestoredRef.current) {
-      // 下書きを先に復元済み: フォームは下書きの内容を優先し、
-      // 下書きに含まれない写真だけ既存レシピから引き継ぐ
-      setPhoto(recipe.photo)
-      return
-    }
+    // 「変更なし」の基準は、下書きを先に復元していても既存レシピ(保存済みの内容)にする。
+    // 2026-07-30 便CK/①-2: 以前はこの分岐で baselineRef を設定せずに抜けており、null のままだと
+    // 下書きの自動保存・離脱警告・キャンセル確認が3つまとめて無効になっていた
+    // (復元後に書き足した内容が、警告も下書きも無いまま丸ごと失われる)
     baselineRef.current = JSON.stringify({
       title: recipe.title,
       intro: recipe.intro ?? '',
@@ -533,6 +588,14 @@ function RecipeFormInner() {
       suitableFor: recipe.suitableFor ?? [],
       dishType: recipe.dishType,
     } satisfies FormDraft)
+    if (draftRestoredRef.current) {
+      // 下書きを先に復元済み: フォームは下書きの内容を優先し、
+      // 下書きに含まれない写真だけ既存レシピから引き継ぐ。
+      // 基準は上で保存済みレシピの内容にしてあるので、復元した内容は
+      // 「未保存の変更」として正しく扱われる(自動保存も離脱警告も効く)
+      setPhoto(recipe.photo)
+      return
+    }
     setTitle(recipe.title)
     setIntro(recipe.intro ?? '')
     setPhoto(recipe.photo)
@@ -600,9 +663,13 @@ function RecipeFormInner() {
     ],
   )
 
-  // 新規登録は「空フォーム」が基準(これと同じ内容なら未入力=保存しない)
+  // 新規登録は「空フォーム」が基準(これと同じ内容なら未入力=保存しない)。
+  // 2026-07-30 便CK/①-2: 編集モードでも同じ初期値を入れる。編集の基準は本来「読み込んだレシピ」で、
+  // 読み込みが終われば上のhydrateが上書きするが、それまで(と、レシピが見つからなかったとき)
+  // baselineRefがnullのままだと自動保存・離脱警告・キャンセル確認がまとめて止まっていた。
+  // 読み込み中は空フォームと同じ内容なので「変更なし」の判定は変わらない
   useEffect(() => {
-    if (!isEdit) baselineRef.current = currentSerialized
+    baselineRef.current = currentSerialized
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -649,7 +716,9 @@ function RecipeFormInner() {
     draftRestoredRef.current = true
     setTitle(d.title ?? '')
     setIntro(d.intro ?? '')
-    setServings(d.servings ?? 2)
+    // 下書きの人数分も範囲に収める(便CK/①-1)。以前は素通しで、servings:99 の下書きを復元すると
+    // 99人分になり、そのまま保存できていた
+    setServings(clampServings(d.servings ?? 2))
     setCookMinutes(d.cookMinutes ?? '')
     setEffortLevel(d.effortLevel ?? 'normal')
     setIngredients(d.ingredients?.length ? d.ingredients : [{ ...emptyIngredient }])
@@ -696,8 +765,11 @@ function RecipeFormInner() {
    * 呼び出し元(applyUrlImport)で「写真も取り込む」チェックがONのときだけ呼ばれる
    * (2026-07-21 オーナー指示のスイッチ。OFFならこの関数自体を呼ばない)。
    */
-  const importPhotoFromUrl = async (imageUrl: string) => {
+  const importPhotoFromUrl = async (imageUrl: string, generation: number, hadPhoto: boolean) => {
     const blob = await fetchImportedPhoto(IMPORT_ENDPOINT, imageUrl)
+    // 自分より後に始まった取り込みがあれば、この写真はもう「前のURLの写真」なので捨てる(便CK/②-2)。
+    // 画面を離れた場合(unmount)もここで止まる
+    if (generation !== urlImportGenerationRef.current) return
     // 2026-07-28 便BX/C01: 取れなかったときも完全な無言はやめる。レシピ本体は取り込めているので
     // 成功メッセージ(パネル内)はそのままにし、写真だけ入らなかったことをトーストで控えめに伝える
     if (!blob) {
@@ -705,14 +777,20 @@ function RecipeFormInner() {
       return
     }
     try {
-      setPhoto(await resizePhoto(blob))
+      const resized = await resizePhoto(blob)
+      if (generation !== urlImportGenerationRef.current) return
+      setPhoto(resized)
       // 写真を新しく取得できたら、それまでアイコン優先だったとしても取り込んだ写真を見せる
       // (onPhotoSelectedと同じ扱い。2026-07-16 Fable裁定docs/30 裁定2の状態対応を踏襲)
       setShowIconInsteadOfPhoto(false)
-      setUrlImportMessage((prev) => (prev ? `${prev} ${ja.urlImport.photoImported}` : prev))
+      // 元から写真があった場合は「置き換わった」と書く(便CK/②-1。「写真も取り込みました」は
+      // 足しただけのように読めるため)
+      const note = hadPhoto ? ja.urlImport.photoReplaced : ja.urlImport.photoImported
+      setUrlImportMessage((prev) => (prev ? `${prev} ${note}` : prev))
     } catch {
       // resizePhotoの失敗(壊れた画像等)もベストエフォート。取り込みは止めないが、
       // 「写真も取り込む」がONだった以上は結果を黙らせない(便BX/C01)
+      if (generation !== urlImportGenerationRef.current) return
       setUrlImportToast(ja.urlImport.photoNotImported)
     }
   }
@@ -730,21 +808,34 @@ function RecipeFormInner() {
       showUrlImportMessage(ja.urlImport.empty, 'warn')
       return
     }
+    // この取り込みの世代番号(便CK/②-2・②-3)。読み込むを押すたびに繰り上がり、
+    // 画面を離れるときにも繰り上がる。以降の処理は「自分がまだ最新か」を確認してから画面へ書く。
+    // 従来は連続して取り込むと、前のURLの写真が後から現在の内容の上に着弾し(材料は新しい
+    // レシピ・写真は前のレシピ)、画面を離れた後でも古い件数のままの確認ダイアログが割り込んでいた
+    const generation = ++urlImportGenerationRef.current
     setUrlImportLoading(true)
     setUrlImportMessage('')
     setUrlImportToast('')
     try {
       const result = await importRecipeFromUrl(target)
+      // 待っているあいだに画面を離れた・別のURLで取り込み直したなら、ここで静かに終わる。
+      // window.confirmは「いま見ている画面」を止めてしまうので、必ず出す前に確認する(便CK/②-3)
+      if (generation !== urlImportGenerationRef.current) return
       // 貼り付け経路と同じゴミ行判定を通し、グループ見出しをグループ色へ引き継ぐ(便BX/C07・C08)。
       // 以降の件数(確認文・結果メッセージ)はすべてこの整形後の件数で数える
       const importedRows = buildImportedIngredientRows(result.ingredients)
       const importedSteps = filterImportedSteps(result.steps)
-      // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
+      // 写真がどうなるかを先に決める(便CK/②-1)。「写真も取り込む」がONで、いま写真があるなら
+      // 置き換わって消える=確認文にそう書く。OFFなら残ることを書く
+      const hadPhoto = photo !== undefined
+      const photoPlan = photoReplacePlan(hadPhoto, urlImportFetchPhoto && !!result.imageUrl)
+      // 入力済みの材料・手順・写真を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
       if (
         !confirmReplaceExisting(
           ja.urlImport.confirmReplace,
           importedRows.length,
           importedSteps.length,
+          photoPlan,
         )
       ) {
         // 中止したことを必ず返事する(2026-07-28 便BX/C16・QA S3)。
@@ -755,7 +846,10 @@ function RecipeFormInner() {
       // 材料・手順以外にも黙って置き換わる項目(人数分・調理時間・参照元URL)があるので、
       // 実際に値が変わったものだけを後で結果メッセージに書き添える(便BX/C02・ペルソナ5/5一致)
       const alsoApplied: string[] = []
-      if (result.servings && result.servings !== servings) {
+      // 範囲に収めた後の値で見る(便CK/①-1。48人分→20人分のように丸めた結果、実際には
+      // 人数分が変わらないこともある)
+      const nextServings = result.servings ? clampServings(result.servings) : undefined
+      if (nextServings !== undefined && nextServings !== servings) {
         alsoApplied.push(ja.urlImport.alsoAppliedServings)
       }
       if (result.cookMinutes && String(result.cookMinutes) !== cookMinutes.trim()) {
@@ -773,7 +867,9 @@ function RecipeFormInner() {
             )}`
           : ''
       if (result.title && !title.trim()) setTitle(result.title)
-      if (result.servings) setServings(result.servings)
+      // 取り込んだ人数分も範囲(1〜20)に収める(便CK/①-1)。Worker側のextractServingsに上限が無く、
+      // 「24 cookies」等の表記から20超が入りうるが、手入力では作れない値なので保存させない
+      if (nextServings !== undefined) setServings(nextServings)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
       if (importedRows.length > 0) setIngredients(importedRows)
       // 分量が読み取れなかった行に印を付ける(便BX/C09)。取り込むたびに入れ替える
@@ -830,13 +926,15 @@ function RecipeFormInner() {
       // await しない: 材料・手順の取り込み結果メッセージをここで即座に確定させるため。
       // 「写真も取り込む」チェックがOFFのときは取得自体を行わない(2026-07-21 オーナー指示のスイッチ)
       if (result.imageUrl && urlImportFetchPhoto) {
-        void importPhotoFromUrl(result.imageUrl)
+        void importPhotoFromUrl(result.imageUrl, generation, hadPhoto)
       }
     } catch (e) {
+      // 画面を離れた後・取り込み直した後のエラーは出さない(便CK/②-3)
+      if (generation !== urlImportGenerationRef.current) return
       const reason = e instanceof UrlImportError ? e.reason : 'fetch_failed'
       showUrlImportMessage(URL_IMPORT_ERROR_MESSAGE[reason] ?? ja.urlImport.errorFetchFailed, 'warn')
     } finally {
-      setUrlImportLoading(false)
+      if (generation === urlImportGenerationRef.current) setUrlImportLoading(false)
     }
   }
 
@@ -856,7 +954,8 @@ function RecipeFormInner() {
       return
     }
     if (parsed.title && !title.trim()) setTitle(parsed.title)
-    if (parsed.servings) setServings(parsed.servings)
+    // 貼り付けた「50人分」も範囲に収める(便CK/①-1。手では21人分以上を作れないのに素通りしていた)
+    if (parsed.servings) setServings(clampServings(parsed.servings))
     // 「調理時間: 20分」のようなメタ情報行から拾った分数はフォームの調理時間欄へ
     if (parsed.cookMinutes) setCookMinutes(String(parsed.cookMinutes))
     if (parsed.ingredients.length > 0) {
@@ -1030,6 +1129,13 @@ function RecipeFormInner() {
   }
 
   const save = async () => {
+    // 編集しようとしたレシピが無いのに保存を続けると、updateRecipeが何も書き換えないまま
+    // 「レシピが見つかりませんでした」の画面へ飛び、書いた内容が無言で消える(便CK/①-2)。
+    // 保存を押す前から画面にも出しているが、ここでも最後の網として止める
+    if (recipeMissing) {
+      failValidation(ja.form.recipeNotFound, 'simple')
+      return
+    }
     if (!title.trim()) {
       failValidation(ja.form.nameRequired, 'simple')
       return
@@ -1076,6 +1182,13 @@ function RecipeFormInner() {
     // 参照元URLはhttp/httpsのみ(C-19)。押しても何も起きないリンクを作らない
     if (sourceUrl.trim() && !isHttpUrl(sourceUrl)) {
       failValidation(ja.form.sourceUrlInvalid, 'detail')
+      return
+    }
+    // 人数分の範囲(1〜20)は取り込み・貼り付け・下書き復元でも丸めるようにしたので、通常ここは通る。
+    // 保存前の最後の網として見ておく(便CK/①-1)。ただし、この対応より前に範囲外で保存されていた
+    // レシピをそのまま編集・保存できるよう、読み込んだレシピ自身の人数分は通す
+    if (!isServingsInRange(servings) && servings !== loadedRecipe?.servings) {
+      failValidation(ja.form.servingsOutOfRange.replace('{n}', String(servings)), 'simple')
       return
     }
     if (!isEdit && isAtFreeLimit(countFreeLimitRecipes(allRecipes ?? []), !!settings?.proCode)) {
@@ -1332,6 +1445,18 @@ function RecipeFormInner() {
       {error && (
         <p className="mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 font-bold text-warning">
           {error}
+        </p>
+      )}
+
+      {/* 編集しようとしたレシピが無いとき(削除済み・IDまちがい)は、保存を押す前に伝える
+          (2026-07-30 便CK/①-2)。以前は何の案内も出ないまま入力でき、「保存する」を押すと
+          無言で「レシピが見つかりませんでした」の画面へ飛び、1件も保存されていなかった */}
+      {recipeMissing && error !== ja.form.recipeNotFound && (
+        <p
+          role="alert"
+          className="mt-[var(--space-sm)] rounded-sm border border-warning px-3 py-2 font-bold text-warning"
+        >
+          {ja.form.recipeNotFound}
         </p>
       )}
 
@@ -2311,12 +2436,21 @@ function RecipeFormInner() {
       )}
       </div>
 
-      {/* 保存・キャンセル */}
-      <div className="mt-[var(--space-lg)] flex gap-2">
+      {/* 保存・キャンセル。URL取り込みの読み込み中は両方とも押せないようにする
+          (2026-07-30 便CK/②-3)。押せてしまうと、遷移した先の画面に「入力済みの材料◯件・手順◯件は
+          置き換わって消えます」の確認ダイアログが後から割り込み、いま見ている保存済みレシピが
+          壊されると誤解させたうえ、取り込み結果もどこにも出ないまま消えていた。
+          待ち時間はWorker側のFETCH_TIMEOUT_MS(8秒)で上限が担保されている */}
+      {urlImportLoading && (
+        <p role="status" className="mt-[var(--space-lg)] text-sm font-bold text-ink-muted">
+          {ja.form.urlImportBlocksSave}
+        </p>
+      )}
+      <div className={`${urlImportLoading ? 'mt-[var(--space-sm)]' : 'mt-[var(--space-lg)]'} flex gap-2`}>
         <button
           type="button"
           onClick={save}
-          disabled={saving}
+          disabled={saving || urlImportLoading}
           className="flex-1 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-60"
         >
           {saving ? ja.form.saving : ja.form.save}
@@ -2324,7 +2458,8 @@ function RecipeFormInner() {
         <button
           type="button"
           onClick={handleCancel}
-          className="flex items-center rounded-md border border-edge bg-surface px-5 py-4 text-ink-muted shadow-sm"
+          disabled={urlImportLoading}
+          className="flex items-center rounded-md border border-edge bg-surface px-5 py-4 text-ink-muted shadow-sm disabled:opacity-60"
         >
           {ja.form.cancel}
         </button>

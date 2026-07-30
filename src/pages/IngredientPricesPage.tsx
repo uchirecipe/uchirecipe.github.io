@@ -5,6 +5,7 @@ import {
   addPriceEntry,
   updatePriceEntry,
   removePriceEntry,
+  restorePriceEntry,
   resetPriceEntryToDefault,
 } from '../db/prices'
 import { toHiragana } from '../logic/kana'
@@ -12,6 +13,7 @@ import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
 import UnitQuantityFields from '../components/UnitQuantityFields'
 import BackHeader from '../components/BackHeader'
+import Toast from '../components/Toast'
 import { ja } from '../i18n/ja'
 import type { PriceEntry } from '../db/types'
 
@@ -63,6 +65,24 @@ export default function IngredientPricesPage() {
     if (!normalizedQuery) return entries
     return entries.filter((entry) => toHiragana(entry.name).includes(normalizedQuery))
   }, [entries, query])
+
+  // 行削除の結果と取り消し(2026-07-30 便CK/③-2)。削除は「確認で止める」より
+  // 「消してから戻せる」を選んだ(規約C: 可逆・非破壊を優先。買い物メモの✕=便CC/C19の先例に揃える)。
+  // 次のトーストが出たら取り消しは無効にする(古い1件が戻ってくる混乱を防ぐ)
+  const [message, setMessage] = useState('')
+  const [undoRemoved, setUndoRemoved] = useState<PriceEntry | null>(null)
+  const removeEntry = async (entry: PriceEntry) => {
+    await removePriceEntry(entry.id!)
+    setUndoRemoved(entry)
+    setMessage(ja.priceMaster.removedToast.replace('{name}', entry.name))
+  }
+  const undoRemoveEntry = async () => {
+    if (!undoRemoved) return
+    const restored = undoRemoved
+    setUndoRemoved(null)
+    await restorePriceEntry(restored)
+    setMessage(ja.priceMaster.restoredToast.replace('{name}', restored.name))
+  }
 
   const commitPrice = async (id: number, raw: string) => {
     const value = Number(raw)
@@ -201,7 +221,7 @@ export default function IngredientPricesPage() {
                     onCommitPrice={commitPrice}
                     onCommitUnit={commitUnit}
                     onReset={() => void resetPriceEntryToDefault(entry.id!)}
-                    onRemove={() => void removePriceEntry(entry.id!)}
+                    onRemove={() => void removeEntry(entry)}
                   />
                 ))}
               </ul>
@@ -209,6 +229,16 @@ export default function IngredientPricesPage() {
           </>
         )}
       </div>
+      {/* 行削除の取り消し(2026-07-30 便CK/③-2)。買い物メモと同じToast+actionLabelの形 */}
+      <Toast
+        message={message}
+        onClose={() => {
+          setMessage('')
+          setUndoRemoved(null)
+        }}
+        actionLabel={undoRemoved ? ja.common.undo : undefined}
+        onAction={undoRemoved ? () => void undoRemoveEntry() : undefined}
+      />
     </div>
   )
 }

@@ -7,7 +7,7 @@ import { typicalAmountFor } from './amountAssumption'
 // 原価の按分にも使うための参照。依存の向きは priceEstimate → nutrition の一方通行で、
 // nutrition側は単位換算の定義を unitGrams.ts から取るため循環importにはならない
 // （2026-07-28 便BY/COST-01。同じ材料の「量」を2つのエンジンが別々に解釈していたのを解消する）。
-import { convertToGrams, matchNutritionFood } from './nutrition'
+import { convertToGrams, isZeroIngredient, matchNutritionFood } from './nutrition'
 
 /**
  * 概算食費計算: レシピの「材料ごとの価格入力」(Ingredient.price)を優先し、
@@ -395,6 +395,13 @@ export function pricelessIngredientNames<E extends { recipeId: number }>(
  * 丸め前の rawYen で見るのが要点で、四捨五入後の yen で判定すると、マスタに載っていて
  * 小口按分で0円に丸まる材料（塩 小さじ1=約1円・砂糖 大さじ1=約2円の一部）まで
  * 「価格が分からない」に数えてしまい、注記が実態より多い件数を出していた。
+ *
+ * 2026-07-30 便CK/③-1: 水・湯・氷（isZeroIngredient）は数えない。栄養側は同じ材料を
+ * 「計算上ゼロ扱い・対象外件数にも数えない」と決めており（nutrition.ts）、この関数だけ
+ * 適用漏れだった。同梱109品のうち22品で「価格が分からない材料1種類を除いた概算です」＋
+ * 「食材と価格を編集する」が常時出ていたが、水の価格は登録できない（PriceEditModalは
+ * price>0必須）ためユーザーには解消できず、1円で登録すれば22品の原価が水の分だけ狂う——
+ * どちらにも進めない案内になっていた。
  */
 export function pricelessIngredientNamesOfRecipes(
   recipes: { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[] }[],
@@ -404,6 +411,8 @@ export function pricelessIngredientNamesOfRecipes(
   for (const recipe of recipes) {
     for (const ing of recipe.ingredients) {
       if (ing.price != null && ing.price > 0) continue
+      // 水・ぬるま湯・お湯・湯・熱湯・氷は価格を付ける対象ではない（便CK/③-1）
+      if (isZeroIngredient(ing.name)) continue
       const estimated = estimateIngredientYen(ing, index)
       if (estimated != null && estimated.rawYen > 0) continue
       names.add(ing.name)

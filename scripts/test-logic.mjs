@@ -174,6 +174,13 @@ import {
   seasoningGroupFromLetter,
   countAmountlessRows,
 } from '../src/logic/urlImportRows.ts'
+import { MIN_SERVINGS, MAX_SERVINGS, clampServings, isServingsInRange } from '../src/logic/servings.ts'
+import {
+  photoReplacePlan,
+  replaceConfirmTargets,
+  needsReplaceConfirm,
+} from '../src/logic/replaceConfirm.ts'
+import { matchVoiceCommand } from '../src/logic/voiceCommand.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -5481,18 +5488,70 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       eq(
         'pricelessIngredientNamesOfRecipes(便CH/C2): マスタにも個別入力にも無い材料だけを数える',
         pricelessIngredientNamesOfRecipes(
-          [{ ingredients: [{ name: '塩', amount: '1', unit: 'g' }, { name: '水', amount: '200', unit: 'ml' }] }],
+          [
+            {
+              ingredients: [
+                { name: '塩', amount: '1', unit: 'g' },
+                { name: '秘伝のタレ', amount: '100', unit: 'g' },
+              ],
+            },
+          ],
           smallIndex,
         ),
-        ['水'],
+        ['秘伝のタレ'],
       )
       eq(
         'pricelessIngredientNamesOfRecipes(便CH/C2): 個別入力の価格があれば数えない',
         pricelessIngredientNamesOfRecipes(
-          [{ ingredients: [{ name: '水', amount: '200', unit: 'ml', price: 1 }] }],
+          [{ ingredients: [{ name: '秘伝のタレ', amount: '100', unit: 'g', price: 1 }] }],
           smallIndex,
         ),
         [],
+      )
+      // 2026-07-30 便CK/③-1: 水・湯・氷は栄養側(isZeroIngredient)で「計算上ゼロ扱い・対象外件数にも
+      // 数えない」と決めているのに、この関数だけ適用漏れで数えていた。同梱109品のうち22品で
+      // 「価格が分からない材料1種類を除いた概算です」＋「食材と価格を編集する」が常時出るが、
+      // 水の価格は登録できない(PriceEditModalはprice>0必須)ためユーザーには解消できなかった
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): 水は「価格が分からない材料」に数えない',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }, { name: '水', amount: '200', unit: 'ml' }] }],
+          index,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): 括弧書き付きの「水(水溶き片栗粉用)」も数えない',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '水(水溶き片栗粉用)', amount: '2', unit: '大さじ' }] }],
+          index,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): ぬるま湯・お湯・熱湯・氷も同じ扱い',
+        pricelessIngredientNamesOfRecipes(
+          [
+            {
+              ingredients: [
+                { name: 'ぬるま湯', amount: '100', unit: 'ml' },
+                { name: 'お湯', amount: '100', unit: 'ml' },
+                { name: '熱湯', amount: '100', unit: 'ml' },
+                { name: '氷', amount: '3', unit: '個' },
+              ],
+            },
+          ],
+          index,
+        ),
+        [],
+      )
+      eq(
+        'pricelessIngredientNamesOfRecipes(便CK/③-1): 水を除外しても本当に価格が無い材料は数える',
+        pricelessIngredientNamesOfRecipes(
+          [{ ingredients: [{ name: '水', amount: '200', unit: 'ml' }, { name: '秘伝のタレ', amount: '100', unit: 'g' }] }],
+          index,
+        ),
+        ['秘伝のタレ'],
       )
     }
 
@@ -8327,6 +8386,107 @@ eq(
   eq('C18 表示人数4人分で共有すると「4人分」になる', asShown.includes('\n4人分\n'), true)
   eq('C18 材料の分量も4人分にスケールする', asShown.includes('・さわら(切り身) 4切れ'), true)
   eq('C18 調味料も一緒にスケールする', asShown.includes('・みそ 大さじ4'), true)
+}
+
+// ---------- 人数分の範囲ガード(2026-07-30 便CK/①-1) ----------
+// ±ボタンのonClickにしかクランプが無く、URL取り込み(50人分)・貼り付け(50人分)・下書き復元(99人分)は
+// 素通りしてそのまま保存できていた(手では21人分以上を作れないのに、詳細ページに
+// 「50人分レシピの1食あたり 約24円」が出る状態)。全経路がこのクランプを通る形に直した
+{
+  eq('便CK/①-1 人数分の範囲は1〜20', [MIN_SERVINGS, MAX_SERVINGS], [1, 20])
+  eq('便CK/①-1 範囲内の値はそのまま', clampServings(4), 4)
+  eq('便CK/①-1 下限・上限そのものは通る', [clampServings(1), clampServings(20)], [1, 20])
+  eq('便CK/①-1 貼り付けの50人分は20人分に収める', clampServings(50), 20)
+  eq('便CK/①-1 URL取り込みの48人分は20人分に収める', clampServings(48), 20)
+  eq('便CK/①-1 下書きの99人分は20人分に収める', clampServings(99), 20)
+  eq('便CK/①-1 0以下は下限に寄せる', [clampServings(0), clampServings(-3)], [1, 1])
+  eq('便CK/①-1 小数は切り捨てる(2.5人分は作れない)', clampServings(2.5), 2)
+  eq('便CK/①-1 壊れた値(NaN)は下限に寄せる', clampServings(Number.NaN), 1)
+  eq(
+    '便CK/①-1 保存前の範囲チェック: 範囲外はfalse',
+    [isServingsInRange(0), isServingsInRange(21), isServingsInRange(50), isServingsInRange(2.5)],
+    [false, false, false, false],
+  )
+  eq(
+    '便CK/①-1 保存前の範囲チェック: 範囲内はtrue',
+    [isServingsInRange(1), isServingsInRange(2), isServingsInRange(20)],
+    [true, true, true],
+  )
+}
+
+// ---------- 置き換え確認に写真を含める(2026-07-30 便CK/②-1・S1) ----------
+// 写真つきの既存レシピを編集中にURL取り込みすると、確認文にも判定にも写真が無いため
+// 確認なく写真が差し替わり、保存すると元の写真は復元できなくなっていた(規約Fの漏れ)
+{
+  eq('便CK/②-1 写真があり「写真も取り込む」ONなら置き換わる', photoReplacePlan(true, true), 'replace')
+  eq('便CK/②-1 写真があってもOFFならそのまま残る', photoReplacePlan(true, false), 'kept')
+  eq('便CK/②-1 写真が無ければ写真については何も起きない', photoReplacePlan(false, true), 'none')
+  const filled = { filledIngredients: 1, filledSteps: 1, parsedIngredients: 2, parsedSteps: 2 }
+  eq(
+    '便CK/②-1 材料・手順・写真の3つとも消えるものとして数える',
+    replaceConfirmTargets({ ...filled, photoPlan: 'replace' }),
+    { ingredients: true, steps: true, photo: true },
+  )
+  eq(
+    '便CK/②-1 写真がOFFで残るなら写真は「消えるもの」ではない',
+    replaceConfirmTargets({ ...filled, photoPlan: 'kept' }).photo,
+    false,
+  )
+  // 料理名と写真だけのレシピ(材料・手順が空)でも、写真が置き換わるなら確認を出す
+  const photoOnly = {
+    filledIngredients: 0,
+    filledSteps: 0,
+    parsedIngredients: 2,
+    parsedSteps: 2,
+    photoPlan: 'replace',
+  }
+  eq(
+    '便CK/②-1 材料・手順が空でも写真が置き換わるなら確認する',
+    needsReplaceConfirm(replaceConfirmTargets(photoOnly)),
+    true,
+  )
+  eq(
+    '便CK/②-1 消えるものが何も無ければ確認は出さない(便BW/C-04の仕様は維持)',
+    needsReplaceConfirm(
+      replaceConfirmTargets({ ...photoOnly, photoPlan: 'none' }),
+    ),
+    false,
+  )
+  eq(
+    '便CK/②-1 入力済みでも取り込み側が0件ならその項目は消えない(便BW/C-04の仕様は維持)',
+    replaceConfirmTargets({
+      filledIngredients: 3,
+      filledSteps: 3,
+      parsedIngredients: 0,
+      parsedSteps: 0,
+      photoPlan: 'none',
+    }),
+    { ingredients: false, steps: false, photo: false },
+  )
+}
+
+// ---------- 声で操作のコマンド判定(2026-07-30 便CK/④-1) ----------
+// 判定が /もう1?回|もういちど|もう一度/ で、「1」が半角数字だったため
+// 案内文どおりの「もう一回」(漢数字)と「もういっかい」が完全無反応だった
+// (読み上げが起きないだけでなく「聞き取りました」の手応えも出ない)
+{
+  eq('便CK/④-1 「もう一回」(漢数字)で読み上げ直す', matchVoiceCommand('もう一回'), 'repeat')
+  eq('便CK/④-1 「もういっかい」でも読み上げ直す', matchVoiceCommand('もういっかい'), 'repeat')
+  eq('便CK/④-1 「もう1回」(半角)は従来どおり動く', matchVoiceCommand('もう1回'), 'repeat')
+  eq('便CK/④-1 「もう１回」(全角)も動く', matchVoiceCommand('もう１回'), 'repeat')
+  eq('便CK/④-1 「もう一度」は従来どおり動く', matchVoiceCommand('もう一度'), 'repeat')
+  eq('便CK/④-1 「もういちど」は従来どおり動く', matchVoiceCommand('もういちど'), 'repeat')
+  eq('便CK/④-1 「次へ」は手順を進める', matchVoiceCommand('次へ'), 'next')
+  eq('便CK/④-1 「つぎ」も手順を進める', matchVoiceCommand('つぎ'), 'next')
+  eq('便CK/④-1 「戻って」は手順を戻す', matchVoiceCommand('戻って'), 'prev')
+  eq('便CK/④-1 「まえ」も手順を戻す', matchVoiceCommand('まえ'), 'prev')
+  eq('便CK/④-1 「ストップ」は読み上げを止める', matchVoiceCommand('ストップ'), 'stop')
+  eq('便CK/④-1 「止めて」も読み上げを止める', matchVoiceCommand('止めて'), 'stop')
+  eq('便CK/④-1 「タイマー」はタイマー', matchVoiceCommand('タイマー'), 'timer')
+  eq('便CK/④-1 「3分タイマー」もタイマー', matchVoiceCommand('3分タイマー'), 'timer')
+  eq('便CK/④-1 どれでもない言葉は無反応(手応えも出さない)', matchVoiceCommand('こんばんは'), undefined)
+  // 分岐の優先順位は従来のif-elseの順番どおり(先に「次へ」を見る)
+  eq('便CK/④-1 優先順位は従来どおり(「次へ」が先)', matchVoiceCommand('次へもう一回'), 'next')
 }
 
 // ---------- 結果 ----------

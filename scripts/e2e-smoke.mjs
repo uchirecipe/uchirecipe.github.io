@@ -9169,7 +9169,7 @@ try {
         // がWorker側 GET /image?url= を叩く設計をそのまま模す)
         await uiPage.route(
           (url) => url.href.startsWith(MOCK_ENDPOINT),
-          (route) => {
+          async (route) => {
             const requested = new URL(route.request().url())
             const target = requested.searchParams.get('url') ?? ''
             if (requested.pathname.endsWith('/image')) {
@@ -9181,11 +9181,38 @@ try {
                   body: JSON.stringify({ ok: false, error: 'invalid_content_type' }),
                 })
               }
+              // slow-photo-marker: レシピ本体はすぐ返るが写真だけ遅れて届くケース(2026-07-30 便CK/②-2)。
+              // 写真が届く前に別のURLで取り込み直すと、前のURLの写真が現在の内容の上に着弾していた
+              if (target.includes('slow-photo-marker')) {
+                await new Promise((resolve) => setTimeout(resolve, 1500))
+              }
               return route.fulfill({
                 status: 200,
                 contentType: 'image/png',
                 headers: { 'Cache-Control': 'public, max-age=86400' },
                 body: Buffer.from(DUMMY_PNG_BASE64, 'base64'),
+              })
+            }
+            // slow-recipe-marker: 読み込みに時間がかかるケース(2026-07-30 便CK/②-3)。
+            // 読み込み中に保存・キャンセルが押せると、遷移先の画面に置き換え確認が割り込んでいた
+            if (target.includes('slow-recipe-marker')) {
+              await new Promise((resolve) => setTimeout(resolve, 2500))
+            }
+            // over-servings-marker: アプリの上限20を超える人数分を返すケース(2026-07-30 便CK/①-1)
+            if (target.includes('over-servings-marker')) {
+              return route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                  ok: true,
+                  recipe: {
+                    title: '大鍋のカレー',
+                    ingredients: [{ name: 'じゃがいも', amount: '20個' }],
+                    steps: ['全部切る', '煮る'],
+                    servings: 48,
+                    sourceUrl: target,
+                  },
+                }),
               })
             }
             if (target.includes('no-recipe-marker')) {
@@ -9328,7 +9355,14 @@ try {
                   servings: 3,
                   cookMinutes: 25,
                   // photo-markerを含むURLで取り込んだときだけ画像ありのレシピを返す
-                  ...(target.includes('photo-marker') ? { imageUrl: 'https://example.com/photo-marker.jpg' } : {}),
+                  // (slow-photo-markerのときは、画像プロキシ側でも遅延させるURLを渡す)
+                  ...(target.includes('photo-marker')
+                    ? {
+                        imageUrl: target.includes('slow-photo-marker')
+                          ? 'https://example.com/slow-photo-marker.jpg'
+                          : 'https://example.com/photo-marker.jpg',
+                      }
+                    : {}),
                   sourceUrl: target,
                 },
               }),
@@ -9677,6 +9711,186 @@ try {
         await uiPage.locator('input[placeholder="例: 3"]').nth(1).fill('少々')
         await uiPage.waitForTimeout(300)
         check('URLIMPORT-12 分量を入れた行の印は消える', (await amountlessHints.count()) === 1)
+
+        // --- URLIMPORT-13(2026-07-30 便CK/①-1): 取り込んだ人数分もアプリの範囲(1〜20)に収める。
+        // 従来は setServings(result.servings) にクランプが無く、48人分がそのままフォームとDBに入り、
+        // 手では作れない値(＋ボタンは無効なのに範囲外)が保存できていた ---
+        currentCheck = 'URLIMPORT-13'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/over-servings-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(600)
+        const clampedServings = await uiPage
+          .locator('span.min-w-14.text-center.text-lg.font-bold.text-ink')
+          .textContent()
+        check(
+          'URLIMPORT-13 48人分を返すページを取り込んでも人数分は上限の20人分に収まる',
+          clampedServings === '20人分',
+          `実際=${clampedServings}`,
+        )
+        check(
+          'URLIMPORT-13 上限に達しているので「＋」は押せない(手入力と同じ状態になる)',
+          await uiPage.locator('button[aria-label="人数を増やす"]').first().isDisabled(),
+        )
+
+        // --- URLIMPORT-14(2026-07-30 便CK/②-1・S1): 置き換え確認に写真の扱いを書く。
+        // 従来の確認文は写真を「消えるもの」にも「残るもの」にも書いておらず、残るものを
+        // 列挙しているぶん「写真は触られない」と読めた。実際は既存の写真が無条件に差し替わり、
+        // 保存すると端末内にしか無い元の写真は復元できなくなっていた ---
+        currentCheck = 'URLIMPORT-14'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-first')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(1500)
+        check(
+          'URLIMPORT-14 前提: 1回目の取り込みで写真が入る',
+          await uiPage.locator('img[alt="E2Eモック鍋"]').isVisible(),
+        )
+        const ckDialogs = []
+        const ckAccept = (dialog) => {
+          ckDialogs.push(dialog.message())
+          dialog.accept()
+        }
+        uiPage.on('dialog', ckAccept)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-second')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(800)
+        uiPage.off('dialog', ckAccept)
+        check(
+          'URLIMPORT-14 写真が置き換わって消えることと、元に戻せないことを確認文に書く(規約F)',
+          ckDialogs.length === 1 &&
+            ckDialogs[0].includes(
+              'いまの写真は、読み込んだ写真に置き換わって消えます（元の写真には戻せません）',
+            ),
+          JSON.stringify(ckDialogs),
+        )
+        check(
+          'URLIMPORT-14 写真を守る方法(チェックを外す)も同じ確認文で伝える',
+          ckDialogs[0]?.includes('写真を残したいときは「写真も取り込む」のチェックを外してください'),
+        )
+        check(
+          'URLIMPORT-14 「何が残るか」も従来どおり書かれている(規約F)',
+          ckDialogs[0]?.includes('料理名・ひとこと説明・メモはそのまま残ります'),
+        )
+        check(
+          'URLIMPORT-14 置き換わった写真は「取り込みました」ではなく「置き換わりました」と伝える',
+          (await uiPage.textContent('body')).includes('写真は読み込んだ写真に置き換わりました'),
+        )
+        // 「写真も取り込む」をOFFにすれば写真は守られる。そのことも確認文に書く(規約F「何が残るか」)
+        const ckDialogsOff = []
+        const ckAcceptOff = (dialog) => {
+          ckDialogsOff.push(dialog.message())
+          dialog.accept()
+        }
+        await uiPage
+          .locator('label', { hasText: '写真も取り込む' })
+          .locator('input[type="checkbox"]')
+          .uncheck()
+        uiPage.on('dialog', ckAcceptOff)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-third')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(800)
+        uiPage.off('dialog', ckAcceptOff)
+        check(
+          'URLIMPORT-14 チェックOFFなら「写真はそのまま残る」と書く(消える予告は出さない)',
+          ckDialogsOff.length === 1 &&
+            ckDialogsOff[0].includes('写真・料理名・ひとこと説明・メモはそのまま残ります') &&
+            !ckDialogsOff[0].includes('置き換わって消えます（元の写真には戻せません）'),
+          JSON.stringify(ckDialogsOff),
+        )
+
+        // --- URLIMPORT-15(2026-07-30 便CK/②-2): 連続して取り込んだとき、前のURLの写真が
+        // 後から現在の内容の上に着弾しない。従来は「材料は新しいレシピ・写真は前のレシピ」の
+        // 取り合わせで保存でき、「写真も取り込みました」も二重に追記されていた ---
+        currentCheck = 'URLIMPORT-15'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/slow-photo-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(500) // 本体は入るが写真はまだ届いていない
+        const ckSeqDialogs = []
+        const ckSeqAccept = (dialog) => {
+          ckSeqDialogs.push(dialog.message())
+          dialog.accept()
+        }
+        uiPage.on('dialog', ckSeqAccept)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/second-no-photo')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(2500) // 前のURLの写真が届くだけの時間を置く
+        uiPage.off('dialog', ckSeqAccept)
+        const seqBody = await uiPage.textContent('body')
+        check(
+          'URLIMPORT-15 取り込み直したら、前のURLの写真は届いても捨てる',
+          !(await uiPage
+            .locator('img[alt="E2Eモック鍋"]')
+            .isVisible()
+            .catch(() => false)),
+        )
+        check(
+          'URLIMPORT-15 「写真も取り込みました」が二重に追記されない',
+          !seqBody.includes('写真も取り込みました') &&
+            !seqBody.includes('写真は読み込んだ写真に置き換わりました'),
+        )
+        check(
+          'URLIMPORT-15 2回目の取り込み結果は従来どおり出る(結果が消えたりしない)',
+          seqBody.includes('材料2件・手順2件を読み込みました'),
+        )
+
+        // --- URLIMPORT-16(2026-07-30 便CK/②-3): 読み込み中は保存・キャンセルを押せない。
+        // また読み込み中に画面を離れたら、遷移先へ置き換え確認が割り込まない
+        // (従来は詳細画面の上に「入力済みの材料1件・手順1件は…置き換わって消えます」が出て、
+        // いま見ている保存済みレシピが壊されると誤解させ、取り込み結果も消えていた) ---
+        currentCheck = 'URLIMPORT-16'
+        await uiPage.reload({ waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(500)
+        await uiPage.locator('input[placeholder="例: 肉じゃが"]').fill('手入力のレシピ')
+        await uiPage.locator('input[placeholder="例: じゃがいも"]').first().fill('じゃがいも')
+        await uiPage
+          .locator('textarea[placeholder="例: じゃがいもを一口大に切る"]')
+          .first()
+          .fill('切る')
+        await uiPage.getByText('URLから取り込む').click()
+        await uiPage.waitForTimeout(300)
+        await uiPage.locator('input[type="url"]').first().fill('https://example.com/slow-recipe-marker')
+        await uiPage.getByRole('button', { name: '読み込む' }).click()
+        await uiPage.waitForTimeout(700)
+        check(
+          'URLIMPORT-16 読み込み中は「保存する」が押せない',
+          await uiPage.getByRole('button', { name: '保存する' }).isDisabled(),
+        )
+        check(
+          'URLIMPORT-16 読み込み中は「キャンセル」も押せない',
+          await uiPage.getByRole('button', { name: 'キャンセル' }).isDisabled(),
+        )
+        check(
+          'URLIMPORT-16 押せない理由をその場に書く',
+          (await uiPage.textContent('body')).includes(
+            'URLの読み込み中です。読み込みが終わるまで保存・キャンセルは押せません',
+          ),
+        )
+        // 下部ナビ等で画面を離れた場合の「幽霊確認ダイアログ」の根絶
+        const ghostDialogs = []
+        const ghostCatch = (dialog) => {
+          ghostDialogs.push(dialog.message())
+          dialog.accept()
+        }
+        uiPage.on('dialog', ghostCatch)
+        await uiPage.goto(`${URLIMPORT_PREVIEW_BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await uiPage.waitForTimeout(3000) // 取り込みが解決するだけの時間を置く
+        uiPage.off('dialog', ghostCatch)
+        check(
+          'URLIMPORT-16 読み込み中に画面を離れても、遷移先に置き換え確認が割り込まない',
+          ghostDialogs.length === 0,
+          JSON.stringify(ghostDialogs),
+        )
       } finally {
         await uiBrowser.close()
       }
@@ -10984,6 +11198,194 @@ try {
       )
     } finally {
       await ssBrowser.close()
+    }
+  }
+  // --- PASTE-SERVINGS-01(2026-07-30 便CK/①-1): 貼り付けの人数分もアプリの範囲(1〜20)に収める。
+  // 「＋」は20人分で止まるのに、貼り付けからは50人分がそのまま入り保存できていた ---
+  currentCheck = 'PASTE-SERVINGS-01'
+  {
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(600)
+    await page.getByText('テキスト貼り付けで自動入力').click()
+    await page.waitForTimeout(300)
+    await page
+      .locator('textarea[placeholder="ここにレシピの文章を貼り付け"]')
+      .fill('大鍋のカレー\n50人分\n材料\nじゃがいも 20個\nにんじん 10本\n作り方\n1. 全部切る\n2. 煮る')
+    await page.getByRole('button', { name: '自動で振り分ける' }).click()
+    await page.waitForTimeout(500)
+    const pastedServings = await page
+      .locator('span.min-w-14.text-center.text-lg.font-bold.text-ink')
+      .textContent()
+    check(
+      'PASTE-SERVINGS-01 「50人分」を貼り付けても人数分は上限の20人分に収まる',
+      pastedServings === '20人分',
+      `実際=${pastedServings}`,
+    )
+    check(
+      'PASTE-SERVINGS-01 材料・手順の取り込み自体は従来どおり動く',
+      (await page.textContent('body')).includes('材料2件・手順2件を読み取りました'),
+    )
+    // 下書きを残さずに離脱する(以降のチェックに「復元しますか？」を持ち込まない)
+    await page.getByRole('button', { name: 'キャンセル' }).click()
+    await page.waitForTimeout(500)
+  }
+
+  // --- EDITMISSING-01(2026-07-30 便CK/①-2): 削除済み・存在しないIDの編集URL。
+  // 従来は案内が一切出ないまま入力でき、baselineRefがnullのままなので下書きの自動保存・
+  // 離脱警告・キャンセル確認が3つまとめて停止し、「保存する」を押すと無言で
+  // 「レシピが見つかりませんでした」の画面へ飛んで1件も保存されていなかった ---
+  currentCheck = 'EDITMISSING-01'
+  {
+    await page.goto(`${BASE}/#/recipes/424242/edit`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
+    check(
+      'EDITMISSING-01 レシピが見つからないことを保存前に画面で伝える',
+      (await page.textContent('body')).includes('このレシピは見つかりませんでした'),
+    )
+    await page.locator('input[placeholder="例: 肉じゃが"]').fill('存在しないIDの編集テスト')
+    await page.waitForTimeout(600)
+    const missingDraftKeys = await page.evaluate(() =>
+      Object.keys(localStorage).filter((k) => k.startsWith('uchirecipe:draft:')),
+    )
+    check(
+      'EDITMISSING-01 書いた内容の下書き自動保存が止まらない(全損しない)',
+      missingDraftKeys.includes('uchirecipe:draft:edit:424242'),
+      JSON.stringify(missingDraftKeys),
+    )
+    await page.getByRole('button', { name: '保存する' }).click()
+    await page.waitForTimeout(800)
+    check(
+      'EDITMISSING-01 保存を押しても無言で飛ばされず、編集画面に留まる',
+      page.url().includes('#/recipes/424242/edit'),
+      page.url(),
+    )
+    check(
+      'EDITMISSING-01 保存できない理由が画面に出る',
+      (await page.textContent('body')).includes('このレシピは見つかりませんでした'),
+    )
+    // キャンセル確認が復活していること(dirtyRefが効いている)＝確認を経て下書きも片付く
+    await page.getByRole('button', { name: 'キャンセル' }).click()
+    await page.waitForTimeout(600)
+    const missingDraftAfter = await page.evaluate(() =>
+      Object.keys(localStorage).filter((k) => k.startsWith('uchirecipe:draft:edit:424242')),
+    )
+    check(
+      'EDITMISSING-01 キャンセルの確認が効き、下書きも片付く',
+      missingDraftAfter.length === 0,
+      JSON.stringify(missingDraftAfter),
+    )
+  }
+
+  // --- PRICEUNDO-01(2026-07-30 便CK/③-2): 「食材と価格」の行削除に取り消しを付ける。
+  // 従来は確認もトーストも無い1タップで目安価格の原本ごと消え、アプリ内に復旧導線が無かった
+  // (規約F違反。seedPriceDefaultsIfNeededは初回起動とPRICE_DEFAULTS_VERSION更新時しか走らない) ---
+  currentCheck = 'PRICEUNDO-01'
+  {
+    await page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1000)
+    await page.locator('input[aria-label="食材名で絞り込む"]').fill('玉ねぎ')
+    await page.waitForTimeout(400)
+    const priceBefore = await page
+      .locator('input[aria-label="玉ねぎの価格（円）"]')
+      .first()
+      .inputValue()
+    await page.locator('button[aria-label="この食材を削除"]').first().click()
+    await page.waitForTimeout(500)
+    const removedBody = await page.textContent('body')
+    check(
+      'PRICEUNDO-01 削除したことと、概算食費から外れることをその場で伝える',
+      removedBody.includes('「玉ねぎ」を削除しました。この食材を使うレシピの概算食費からも外れます'),
+    )
+    check(
+      'PRICEUNDO-01 行は実際に消えている',
+      (await page.locator('input[aria-label="玉ねぎの価格（円）"]').count()) === 0,
+    )
+    await page.getByRole('button', { name: '元に戻す' }).click()
+    await page.waitForTimeout(600)
+    check(
+      'PRICEUNDO-01 「元に戻す」で戻ったことを伝える',
+      (await page.textContent('body')).includes('「玉ねぎ」を戻しました（目安価格も元のままです）'),
+    )
+    const priceAfter = await page
+      .locator('input[aria-label="玉ねぎの価格（円）"]')
+      .first()
+      .inputValue()
+    check(
+      'PRICEUNDO-01 目安価格も削除前と同じ値で戻る',
+      priceAfter === priceBefore && priceAfter !== '',
+      `削除前=${priceBefore} 復元後=${priceAfter}`,
+    )
+  }
+
+  // --- FOCUSVOICE-01(2026-07-30 便CK/④-1): 調理中モードの声の操作「もう一回」。
+  // 判定の正規表現が半角の「1」しか見ておらず、案内文どおりの「もう一回」(漢数字)と
+  // 「もういっかい」が完全無反応(読み上げも、聞き取りの手応えも出ない)だった。
+  // window.SpeechRecognitionを偽装して onresult に文字列を注入して検証する ---
+  currentCheck = 'FOCUSVOICE-01'
+  {
+    const fvBrowser = await chromium.launch()
+    const fvContext = await fvBrowser.newContext({ viewport: { width: 375, height: 667 } })
+    await fvContext.addInitScript(() => {
+      class FakeRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+        }
+        start() {
+          window.__fakeRecognition = this
+        }
+        stop() {}
+        abort() {}
+      }
+      window.SpeechRecognition = FakeRecognition
+      window.__emitVoice = (text) => {
+        const r = window.__fakeRecognition
+        if (!r || typeof r.onresult !== 'function') return false
+        r.onresult({ results: [[{ transcript: text }]] })
+        return true
+      }
+    })
+    const fvPage = await fvContext.newPage()
+    fvPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FOCUSVOICE-01] ${err.message}`)
+    })
+    try {
+      await fvPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fvPage.waitForTimeout(2000)
+      await fvPage.getByText('肉じゃが', { exact: true }).first().click()
+      await fvPage.waitForTimeout(700)
+      await fvPage.getByText('調理中モードで見る').click()
+      await fvPage.waitForTimeout(600)
+      await fvPage.locator('button[aria-label="声で操作する"]').click()
+      await fvPage.waitForTimeout(400)
+      check('FOCUSVOICE-01 前提: 「声で操作」ONで聞いている状態になる', (await fvPage.textContent('body')).includes('聞いています…'))
+      for (const phrase of ['もう一回', 'もういっかい', 'もう1回', 'もう一度']) {
+        const emitted = await fvPage.evaluate((text) => window.__emitVoice(text), phrase)
+        await fvPage.waitForTimeout(400)
+        check(
+          `FOCUSVOICE-01 「${phrase}」が読み上げのコマンドとして届く(聞き取りの手応えが出る)`,
+          emitted && (await fvPage.textContent('body')).includes(`「${phrase}」を聞き取りました`),
+          `注入=${emitted}`,
+        )
+        await fvPage.waitForTimeout(2300) // 手応え表示(2.5秒)が消えるのを待って次の語形へ
+      }
+      // 移動系のコマンドが従来どおり効くこと(正規表現の書き換えで壊していないことの確認)
+      await fvPage.evaluate(() => window.__emitVoice('次へ'))
+      await fvPage.waitForTimeout(500)
+      check(
+        'FOCUSVOICE-01 「次へ」は従来どおり手順を進める',
+        (await fvPage.textContent('body')).includes('手順 2/'),
+      )
+      await fvPage.evaluate(() => window.__emitVoice('戻って'))
+      await fvPage.waitForTimeout(500)
+      check(
+        'FOCUSVOICE-01 「戻って」は従来どおり手順を戻す',
+        (await fvPage.textContent('body')).includes('手順 1/'),
+      )
+    } finally {
+      await fvBrowser.close()
     }
   }
 } catch (err) {
