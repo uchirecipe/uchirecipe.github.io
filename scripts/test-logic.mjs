@@ -180,6 +180,7 @@ import {
   replaceConfirmTargets,
   needsReplaceConfirm,
 } from '../src/logic/replaceConfirm.ts'
+import { matchVoiceCommand } from '../src/logic/voiceCommand.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -8462,6 +8463,30 @@ eq(
     }),
     { ingredients: false, steps: false, photo: false },
   )
+}
+
+// ---------- 声で操作のコマンド判定(2026-07-30 便CK/④-1) ----------
+// 判定が /もう1?回|もういちど|もう一度/ で、「1」が半角数字だったため
+// 案内文どおりの「もう一回」(漢数字)と「もういっかい」が完全無反応だった
+// (読み上げが起きないだけでなく「聞き取りました」の手応えも出ない)
+{
+  eq('便CK/④-1 「もう一回」(漢数字)で読み上げ直す', matchVoiceCommand('もう一回'), 'repeat')
+  eq('便CK/④-1 「もういっかい」でも読み上げ直す', matchVoiceCommand('もういっかい'), 'repeat')
+  eq('便CK/④-1 「もう1回」(半角)は従来どおり動く', matchVoiceCommand('もう1回'), 'repeat')
+  eq('便CK/④-1 「もう１回」(全角)も動く', matchVoiceCommand('もう１回'), 'repeat')
+  eq('便CK/④-1 「もう一度」は従来どおり動く', matchVoiceCommand('もう一度'), 'repeat')
+  eq('便CK/④-1 「もういちど」は従来どおり動く', matchVoiceCommand('もういちど'), 'repeat')
+  eq('便CK/④-1 「次へ」は手順を進める', matchVoiceCommand('次へ'), 'next')
+  eq('便CK/④-1 「つぎ」も手順を進める', matchVoiceCommand('つぎ'), 'next')
+  eq('便CK/④-1 「戻って」は手順を戻す', matchVoiceCommand('戻って'), 'prev')
+  eq('便CK/④-1 「まえ」も手順を戻す', matchVoiceCommand('まえ'), 'prev')
+  eq('便CK/④-1 「ストップ」は読み上げを止める', matchVoiceCommand('ストップ'), 'stop')
+  eq('便CK/④-1 「止めて」も読み上げを止める', matchVoiceCommand('止めて'), 'stop')
+  eq('便CK/④-1 「タイマー」はタイマー', matchVoiceCommand('タイマー'), 'timer')
+  eq('便CK/④-1 「3分タイマー」もタイマー', matchVoiceCommand('3分タイマー'), 'timer')
+  eq('便CK/④-1 どれでもない言葉は無反応(手応えも出さない)', matchVoiceCommand('こんばんは'), undefined)
+  // 分岐の優先順位は従来のif-elseの順番どおり(先に「次へ」を見る)
+  eq('便CK/④-1 優先順位は従来どおり(「次へ」が先)', matchVoiceCommand('次へもう一回'), 'next')
 }
 
 // ---------- 結果 ----------

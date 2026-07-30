@@ -21,6 +21,7 @@ import { sortTimersForDisplay } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import { toSpeechText } from '../logic/toSpeechText'
+import { matchVoiceCommand } from '../logic/voiceCommand'
 import { renderJaUnits } from './jaUnits'
 import StepBadge from './StepBadge'
 import ComposedStepText from './ComposedStepText'
@@ -283,25 +284,29 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       const feedback = () =>
         showVoiceMessage(ja.focus.micHeard.replace('{text}', transcript.slice(0, 12)))
 
-      if (/次|つぎ/.test(transcript)) {
+      // コマンドの言い回し判定は logic/voiceCommand.ts に集約(2026-07-30 便CK/④-1)。
+      // 画面に直書きしていたため、案内文どおりの「もう一回」(漢数字)が読み上げのパターンから
+      // 漏れていることに誰も気づけなかった(単体テストで語形を固定する)
+      const command = matchVoiceCommand(transcript)
+      if (command === 'next') {
         feedback()
         if (currentIndex < total - 1) {
           stopSpeech()
           setIndex(currentIndex + 1)
         }
-      } else if (/戻|もど|前へ|まえ/.test(transcript)) {
+      } else if (command === 'prev') {
         feedback()
         if (currentIndex > 0) {
           stopSpeech()
           setIndex(currentIndex - 1)
         }
-      } else if (/もう1?回|もういちど|もう一度/.test(transcript)) {
+      } else if (command === 'repeat') {
         feedback()
         speak(currentStep.text)
-      } else if (/ストップ|とめて|止めて/.test(transcript)) {
+      } else if (command === 'stop') {
         feedback()
         stopSpeech()
-      } else if (/タイマー/.test(transcript)) {
+      } else if (command === 'timer') {
         feedback()
         // 「3分タイマー」のように分数の指定があればそれを使い、
         // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す

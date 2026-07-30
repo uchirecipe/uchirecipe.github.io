@@ -11317,6 +11317,77 @@ try {
     )
   }
 
+  // --- FOCUSVOICE-01(2026-07-30 便CK/④-1): 調理中モードの声の操作「もう一回」。
+  // 判定の正規表現が半角の「1」しか見ておらず、案内文どおりの「もう一回」(漢数字)と
+  // 「もういっかい」が完全無反応(読み上げも、聞き取りの手応えも出ない)だった。
+  // window.SpeechRecognitionを偽装して onresult に文字列を注入して検証する ---
+  currentCheck = 'FOCUSVOICE-01'
+  {
+    const fvBrowser = await chromium.launch()
+    const fvContext = await fvBrowser.newContext({ viewport: { width: 375, height: 667 } })
+    await fvContext.addInitScript(() => {
+      class FakeRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+        }
+        start() {
+          window.__fakeRecognition = this
+        }
+        stop() {}
+        abort() {}
+      }
+      window.SpeechRecognition = FakeRecognition
+      window.__emitVoice = (text) => {
+        const r = window.__fakeRecognition
+        if (!r || typeof r.onresult !== 'function') return false
+        r.onresult({ results: [[{ transcript: text }]] })
+        return true
+      }
+    })
+    const fvPage = await fvContext.newPage()
+    fvPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FOCUSVOICE-01] ${err.message}`)
+    })
+    try {
+      await fvPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fvPage.waitForTimeout(2000)
+      await fvPage.getByText('肉じゃが', { exact: true }).first().click()
+      await fvPage.waitForTimeout(700)
+      await fvPage.getByText('調理中モードで見る').click()
+      await fvPage.waitForTimeout(600)
+      await fvPage.locator('button[aria-label="声で操作する"]').click()
+      await fvPage.waitForTimeout(400)
+      check('FOCUSVOICE-01 前提: 「声で操作」ONで聞いている状態になる', (await fvPage.textContent('body')).includes('聞いています…'))
+      for (const phrase of ['もう一回', 'もういっかい', 'もう1回', 'もう一度']) {
+        const emitted = await fvPage.evaluate((text) => window.__emitVoice(text), phrase)
+        await fvPage.waitForTimeout(400)
+        check(
+          `FOCUSVOICE-01 「${phrase}」が読み上げのコマンドとして届く(聞き取りの手応えが出る)`,
+          emitted && (await fvPage.textContent('body')).includes(`「${phrase}」を聞き取りました`),
+          `注入=${emitted}`,
+        )
+        await fvPage.waitForTimeout(2300) // 手応え表示(2.5秒)が消えるのを待って次の語形へ
+      }
+      // 移動系のコマンドが従来どおり効くこと(正規表現の書き換えで壊していないことの確認)
+      await fvPage.evaluate(() => window.__emitVoice('次へ'))
+      await fvPage.waitForTimeout(500)
+      check(
+        'FOCUSVOICE-01 「次へ」は従来どおり手順を進める',
+        (await fvPage.textContent('body')).includes('手順 2/'),
+      )
+      await fvPage.evaluate(() => window.__emitVoice('戻って'))
+      await fvPage.waitForTimeout(500)
+      check(
+        'FOCUSVOICE-01 「戻って」は従来どおり手順を戻す',
+        (await fvPage.textContent('body')).includes('手順 1/'),
+      )
+    } finally {
+      await fvBrowser.close()
+    }
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
