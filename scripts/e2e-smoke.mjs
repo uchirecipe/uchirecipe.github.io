@@ -7361,6 +7361,7 @@ try {
   currentCheck = 'SMK-19'
   const staticPages = [
     ['/about/', 'うちレシピについて'],
+    ['/about/manual.html', 'うちレシピの使い方'],
     ['/about/terms.html', '利用規約'],
     ['/about/column/', 'コラム'],
     ['/about/column/kondate-kimaranai.html', '献立が決められない'],
