@@ -138,6 +138,17 @@ import {
   rangeIntakeRecipes,
   dayIntakeMap,
 } from '../src/logic/rangeSummary.ts'
+import {
+  DAILY_GUIDES,
+  RANGE_EXCLUDED_RATIO_LIMIT,
+  canCompareDay,
+  canCompareRange,
+  dayBalanceMap,
+  guideForDays,
+  sumBalance,
+  summarizeWeekBalance,
+  vegetableGrams,
+} from '../src/logic/nutritionBalance.ts'
 import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
@@ -8327,6 +8338,157 @@ eq(
   eq('C18 表示人数4人分で共有すると「4人分」になる', asShown.includes('\n4人分\n'), true)
   eq('C18 材料の分量も4人分にスケールする', asShown.includes('・さわら(切り身) 4切れ'), true)
   eq('C18 調味料も一緒にスケールする', asShown.includes('・みそ 大さじ4'), true)
+}
+
+// ---------- 栄養バランス第1段: 野菜量・日別集計・対象外混在(2026-07-30 便CL・docs/60 第1段) ----------
+{
+  // (1) 野菜量: docs/60 §4-3 で固定した代表品の期待値(1人分)。109品で再計算しても同値。
+  // 「野菜＝八訂の食品群06だけ」の定義が守られているかの見張り役として、
+  // ポテトサラダ(じゃがいも540g)と肉じゃが(じゃがいも405g)を必ず入れる(いも類は野菜に数えない)
+  const starterByTitle = (title) => {
+    const hit = starterDefs.find((r) => r.title === title)
+    if (!hit) throw new Error(`test-logic: 基本レシピ「${title}」が見つからない`)
+    return hit
+  }
+  const vegOf = (title) => Math.round(vegetableGrams(starterByTitle(title)))
+  eq('CL-VEG 野菜炒め(1人分)の野菜量', vegOf('野菜炒め'), 178)
+  eq('CL-VEG コールスロー(1人分)の野菜量', vegOf('コールスロー'), 142)
+  eq('CL-VEG ペペロンチーノ(1人分)の野菜量(にんにく・唐辛子だけ)', vegOf('ペペロンチーノ'), 6)
+  eq('CL-VEG 鮭の塩焼き(1人分)の野菜量は0g', vegOf('鮭の塩焼き'), 0)
+  eq('CL-VEG ポテトサラダ(1人分)はじゃがいもを野菜に数えない', vegOf('ポテトサラダ'), 36)
+  eq('CL-VEG 肉じゃが(1人分)もじゃがいもを野菜に数えない', vegOf('肉じゃが'), 134)
+
+  // (2) 食品群の線引き: いも・豆・きのこ・海藻・果物は野菜に入れない
+  const one = (name, amount, unit) => ({ servings: 1, ingredients: [{ name, amount, unit }] })
+  eq('CL-VEG キャベツ100gは野菜100g', Math.round(vegetableGrams(one('キャベツ', '100', 'g'))), 100)
+  eq('CL-VEG じゃがいも100gは野菜0g(いも類02)', vegetableGrams(one('じゃがいも', '100', 'g')), 0)
+  eq('CL-VEG しめじ100gは野菜0g(きのこ類08)', vegetableGrams(one('しめじ', '100', 'g')), 0)
+  eq('CL-VEG 木綿豆腐100gは野菜0g(豆類04)', vegetableGrams(one('木綿豆腐', '100', 'g')), 0)
+  // 名寄せできなかった材料は数えない=野菜量は必ず少なめ(下限側)に出る
+  eq('CL-VEG 成分データが無い材料は野菜量に入らない', vegetableGrams(one('クヌルプ', '100', 'g')), 0)
+  // 人数で割った1人分になっていること(全量ではない)
+  eq(
+    'CL-VEG 4人分レシピの野菜量は1人分に割ってから返す',
+    vegetableGrams({ servings: 4, ingredients: [{ name: 'キャベツ', amount: '400', unit: 'g' }] }),
+    100,
+  )
+
+  // (3) 日別集計: 過去日=作った記録・今日以降=登録した献立(便CA以降の統一規則。二重計上しない)
+  const cabbage = one('キャベツ', '100', 'g')
+  const carrot = one('にんじん', '50', 'g')
+  const clDates = ['2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31']
+  const clMap = dayBalanceMap({
+    dates: clDates,
+    today: '2026-07-30',
+    cooked: [
+      { date: '2026-07-28', recipe: cabbage },
+      // 今日の作った記録は「今日以降=予定」の規則により数えない(月タブと同じ境界)
+      { date: '2026-07-30', recipe: carrot },
+    ],
+    planned: [
+      // 過去日の予定は数えない(過去は実績だけ)
+      { date: '2026-07-28', recipe: carrot },
+      { date: '2026-07-30', recipe: cabbage },
+      { date: '2026-07-31', recipe: cabbage },
+    ],
+  })
+  eq('CL-DAY 記録も予定も無い日はMapに入れない', clMap.has('2026-07-29'), false)
+  eq('CL-DAY 過去日は作った記録で数える(基準)', clMap.get('2026-07-28').basis, 'actual')
+  eq(
+    'CL-DAY 過去日は作った記録だけ=同じ日の予定は足さない',
+    Math.round(clMap.get('2026-07-28').balance.vegetableG),
+    100,
+  )
+  eq('CL-DAY 今日は予定で数える(基準)', clMap.get('2026-07-30').basis, 'plan')
+  eq(
+    'CL-DAY 今日の作った記録は合計に入れない(二重計上しない)',
+    Math.round(clMap.get('2026-07-30').balance.vegetableG),
+    100,
+  )
+  eq('CL-DAY 未来日も予定で数える', clMap.get('2026-07-31').basis, 'plan')
+  eq('CL-DAY 数えた日数は記録/予定がある日だけ', summarizeWeekBalance(clMap.values()).countedDays, 3)
+  eq(
+    'CL-DAY 週まとめは各日の1人分を足した値',
+    Math.round(summarizeWeekBalance(clMap.values()).balance.vegetableG),
+    300,
+  )
+  eq(
+    'CL-DAY 週まとめの品数も各日の合算',
+    summarizeWeekBalance(clMap.values()).balance.nutrition.dishCount,
+    3,
+  )
+
+  // (4) 計算対象外が混ざる日の作法(docs/60 §5)。1品でもあれば「めやすとの並置」を出さない
+  const unknownOnly = one('クヌルプ', '100', 'g') // 1品も計算できない
+  const partial = {
+    servings: 1,
+    ingredients: [
+      { name: 'キャベツ', amount: '100', unit: 'g' },
+      { name: 'クヌルプ', amount: '100', unit: 'g' }, // 量は書いてあるのに計算できない
+    ],
+  }
+  const seasoningOnly = {
+    servings: 1,
+    ingredients: [
+      { name: 'キャベツ', amount: '100', unit: 'g' },
+      { name: 'こしょう', amount: '少々', unit: '' }, // 「少々」だけの除外は警告扱いにしない
+    ],
+  }
+  const cleanSum = sumBalance([cabbage, carrot])
+  eq('CL-MIX 全部計算できた日はめやすを並置できる', canCompareDay(cleanSum.nutrition), true)
+  eq('CL-MIX 1品も無い日は並置しない', canCompareDay(sumBalance([]).nutrition), false)
+  const excludedSum = sumBalance([cabbage, unknownOnly])
+  eq('CL-MIX 1品も計算できない料理を数える', excludedSum.nutrition.excludedDishCount, 1)
+  eq('CL-MIX 計算できない料理が混ざる日は並置しない', canCompareDay(excludedSum.nutrition), false)
+  eq(
+    'CL-MIX 計算できない料理があっても計算できた分の野菜量は出す',
+    Math.round(excludedSum.vegetableG),
+    100,
+  )
+  const partialSum = sumBalance([cabbage, partial])
+  eq('CL-MIX 一部の材料が計算できない料理を数える', partialSum.nutrition.partialDishCount, 1)
+  eq('CL-MIX 一部だけ計算できない日も並置しない', canCompareDay(partialSum.nutrition), false)
+  const seasoningSum = sumBalance([seasoningOnly])
+  eq(
+    'CL-MIX 「少々」だけが外れている日は並置を止めない(誤警告を増やさない)',
+    canCompareDay(seasoningSum.nutrition),
+    true,
+  )
+
+  // (5) 期間(週・月)は2割で切る(docs/60 §5-4・§7 未決#8=(a))
+  eq('CL-MIX 期間の打ち切り割合は2割', RANGE_EXCLUDED_RATIO_LIMIT, 0.2)
+  eq(
+    'CL-MIX 期間は5品中1品(2割ちょうど)なら並置する',
+    canCompareRange(sumBalance([cabbage, cabbage, cabbage, cabbage, unknownOnly]).nutrition),
+    true,
+  )
+  eq(
+    'CL-MIX 期間は4品中1品(2割超)なら並置しない',
+    canCompareRange(sumBalance([cabbage, cabbage, cabbage, unknownOnly]).nutrition),
+    false,
+  )
+  eq(
+    'CL-MIX 期間は一部だけ計算できない品があっても並置する(件数を明示して出す)',
+    canCompareRange(sumBalance([cabbage, partial]).nutrition),
+    true,
+  )
+  eq('CL-MIX 1品も無い期間は並置しない', canCompareRange(sumBalance([]).nutrition), false)
+
+  // (6) めやすの定数: 値と出典が必ず対で入っていること(出典なしの数値をコードに入れさせない)
+  eq('CL-GUIDE 食塩相当量のめやす(男性)', DAILY_GUIDES.saltG.male, 7.5)
+  eq('CL-GUIDE 食塩相当量のめやす(女性)', DAILY_GUIDES.saltG.female, 6.5)
+  eq('CL-GUIDE 野菜のめやす', DAILY_GUIDES.vegetableG.perDayG, 350)
+  for (const [key, guide] of Object.entries(DAILY_GUIDES)) {
+    eq(`CL-GUIDE ${key}に出典名がある`, typeof guide.source === 'string' && guide.source.length > 0, true)
+    eq(
+      `CL-GUIDE ${key}に出典URLがある`,
+      typeof guide.sourceUrl === 'string' && guide.sourceUrl.startsWith('https://'),
+      true,
+    )
+  }
+  // めやすは1日ぶん×日数に伸ばす(週まとめ。7日固定では掛けない)
+  eq('CL-GUIDE 3日ぶんの塩分めやす(男性)', guideForDays(DAILY_GUIDES.saltG.male, 3), 22.5)
+  eq('CL-GUIDE 3日ぶんの野菜めやす', guideForDays(DAILY_GUIDES.vegetableG.perDayG, 3), 1050)
 }
 
 // ---------- 結果 ----------

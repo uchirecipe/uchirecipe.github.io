@@ -114,6 +114,8 @@ import {
   type RangeIntakeSummary,
   type RangePlannedDish,
 } from '../logic/rangeSummary'
+import { dayBalanceMap, summarizeWeekBalance, type BalanceDish } from '../logic/nutritionBalance'
+import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
@@ -2276,6 +2278,47 @@ export default function MealPlanPage() {
   // 違和感への対応。既定閉・配置も7日分カードの下=邪魔にならない位置へ移動)
   const [weekCostOpen, setWeekCostOpen] = useState(false)
 
+  /**
+   * 栄養バランスの見える化(2026-07-30 便CL・docs/60 第1段)。
+   * 週タブの各日カードと週まとめに「その日/その週の献立ぶん(1人分)」の栄養と野菜量を出す。
+   *
+   * 数える基準は便CA以降の統一規則: **過去日=作った記録・今日以降=登録した献立**
+   * (rangeSummaryのdayIntakeMap・月カレンダーのセル表示と同じ。1日を両方で数えない)。
+   * 食費(weekCostEstimate)は「これから作る予定」だけを対象にするので activeEntries を見るが、
+   * こちらは過去日も対象に含める: 週タブの過去日には「作った記録」カードが出ているので、
+   * その日の数字がどこから来たのか画面から辿れる。
+   * 食事帯(visibleSlots)では絞らない(1日の合計は、その日に登録されている献立ぜんぶで数える)。
+   */
+  const weekBalanceCooked = useMemo<BalanceDish[]>(() => {
+    const list: BalanceDish[] = []
+    dates.forEach((date) => {
+      cookedLogsByDate.get(date)?.forEach(({ recipe }) => list.push({ date, recipe }))
+    })
+    return list
+  }, [dates, cookedLogsByDate])
+  const weekBalancePlanned = useMemo<BalanceDish[]>(() => {
+    const list: BalanceDish[] = []
+    ;(entries ?? []).forEach((e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (recipe) list.push({ date: e.date, recipe })
+    })
+    return list
+  }, [entries, recipeById])
+  const weekBalanceByDate = useMemo(
+    () =>
+      dayBalanceMap({
+        dates,
+        today,
+        cooked: weekBalanceCooked,
+        planned: weekBalancePlanned,
+      }),
+    [dates, today, weekBalanceCooked, weekBalancePlanned],
+  )
+  const weekBalance = useMemo(
+    () => summarizeWeekBalance(weekBalanceByDate.values()),
+    [weekBalanceByDate],
+  )
+
   const weeklyBudget = settings?.weeklyBudget
   const budgetDiff = weeklyBudget != null ? weeklyBudget - weekCost : undefined
 
@@ -3454,6 +3497,25 @@ export default function MealPlanPage() {
             {isPastDate(date, today) && (
               <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.pastPlanHidden}</p>
             )}
+            {/* この日の献立ぶんの栄養と野菜量(2026-07-30 便CL・docs/60 第1段)。
+                既定は1行の折りたたみ=控えめに置く。数える対象が無い日は何も出ない */}
+            {(() => {
+              const dayBalance = weekBalanceByDate.get(date)
+              if (!dayBalance) return null
+              return (
+                <div className="mt-[var(--space-sm)]">
+                  <NutritionBalancePanel
+                    scope="day"
+                    basis={dayBalance.basis}
+                    dateLabel={date.replaceAll('-', '/')}
+                    isPro={isPro}
+                    balance={dayBalance.balance}
+                    comparable={dayBalance.comparable}
+                    guideDays={1}
+                  />
+                </div>
+              )
+            })()}
             {/* 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。過去日にも出す
                 (「この日は外食だった」と後から書き残せるようにするため) */}
             <div className="mt-[var(--space-sm)]">
@@ -3466,6 +3528,22 @@ export default function MealPlanPage() {
           </section>
         ))}
       </div>
+
+      {/* 週まとめ: この週の献立ぶんの栄養と野菜量(2026-07-30 便CL・docs/60 第1段)。
+          各日カードと同じ部品・同じ数え方で、期間の合計だけを1人分で出す。
+          めやすは「1日のめやす × 献立や記録がある日数」で並べる(週まとめ側だけ日数の注記を添える)。
+          概算食費カードの隣(すぐ上)に置く: どちらも「この週ぜんぶを振り返る数字」なので同じ場所に集める */}
+      {weekBalance.countedDays > 0 && (
+        <div className="mt-[var(--space-md)]">
+          <NutritionBalancePanel
+            scope="week"
+            isPro={isPro}
+            balance={weekBalance.balance}
+            comparable={weekBalance.comparable}
+            guideDays={weekBalance.countedDays}
+          />
+        </div>
+      )}
 
       {/* 週の概算食費（2026-07-24 便BH-3・タスク4: 「まとめて献立」直後にいきなり金額が出る違和感を
           解消するため、7日分カードの下=邪魔にならない位置へ移動し、小さな折りたたみ(既定閉)にした。

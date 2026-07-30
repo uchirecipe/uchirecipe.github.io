@@ -245,6 +245,15 @@
 //         レシピを入れた後「まとめて献立を立てる」を押しても、手動配置の行が上書き削除されず
 //         同じid・同じレシピのまま残ること(旧実装は無警告で全消し)。空き枠は埋まり、手動枠を
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
+//         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
+//         2026-07-30 便CL・docs/60 第1段: 週タブの各日カードに「この日の献立ぶん（1人分）」の
+//         1行(kcal・塩分・野菜g)、週まとめに「この週の献立ぶん（1人分）」が出ること。既定は1行で
+//         めやすとの比較は展開時のみ。展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを
+//         **数値の並置**で出し、エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
+//         「監修」「推奨」「減塩」を使わないこと・「登録した料理ぶんだけの合計」等の但し書きと
+//         成分値/めやすの2つの出典が別行で出ること。無料では8項目の実数値が出ず鍵付き導線
+//         (PRO-01の様式)になり、Pro解錠後は8項目の実数値が出て鍵が消えること。野菜量は
+//         docs/60 §7 未決#3(a)で無料。週のめやすは1日ぶん×数えた日数に伸ばすこと) /
 //         (THEMESORT-01は「基本レシピ順」並び替えの廃止・2026-07-24 便BNに伴い削除) /
 //         ZENKAKU-01(全角入力の自動正規化・2026-07-21 オーナー実機報告:「アサリ 300ｇ」の
 //         全角ｇだと栄養計算に反映されない・数量も全角で入力できてしまう。材料の分量欄に全角数字
@@ -3813,6 +3822,243 @@ try {
       )
     } finally {
       await mpBrowser.close()
+    }
+  }
+
+  // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
+  // (2026-07-30 便CL・docs/60 第1段)。
+  // ・週タブの各日カードに「この日の献立ぶん（1人分）」が1行(kcal・塩分・野菜g)で出ること
+  // ・週まとめに「この週の献立ぶん（1人分）」が同じ構成で出ること
+  // ・展開すると「1日のめやすとくらべる」で塩分・野菜だけがめやすと**並置**されること
+  //   (不足・過多の断定をしない=「足りません」「摂りすぎ」の語がどこにも出ないこと)
+  // ・成分値の出典と「めやすの出典」が別行で出ること
+  // ・**未解錠(無料)では8項目が出ないこと**(たんぱく質等の実数値が出ず、鍵付き導線になること)
+  // 「まとめて献立を立てる」の対象を7日ぶん確実にするため「今日から7日間」表示に切り替えてから行う
+  // (週区切り表示だと実行日の曜日次第で対象日数が変わり、めやすの日数が日替わりになる) ---
+  currentCheck = 'NUTRI-DAY-01'
+  {
+    const nbBrowser = await chromium.launch()
+    const nbContext = await nbBrowser.newContext()
+    const nbPage = await nbContext.newPage()
+    nbPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@NUTRI-DAY-01] ${text}`)
+    })
+    nbPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NUTRI-DAY-01] ${err.message}`)
+    })
+    try {
+      await nbPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await nbPage.waitForTimeout(2000) // 初回シード完了待ち
+      await nbPage.getByRole('button', { name: '週', exact: true }).click()
+      await nbPage.waitForTimeout(300)
+      await nbPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await nbPage.waitForTimeout(500)
+
+      // 何も割り当てていない週にはパネルを出さない(「0kcal」を7日並べない)
+      const nbEmptyText = await nbPage.textContent('body')
+      check(
+        'NUTRI-DAY-01 未割当時は「この日の献立ぶん」の行が出ない',
+        !nbEmptyText.includes('この日の献立ぶん'),
+      )
+      check(
+        'NUTRI-WEEK-01 未割当時は「この週の献立ぶん」の行も出ない',
+        !nbEmptyText.includes('この週の献立ぶん'),
+      )
+
+      await nbPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await nbPage.waitForTimeout(1200)
+      const nbFilledText = await nbPage.textContent('body')
+      check(
+        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立ぶん（1人分）」が出る',
+        nbFilledText.includes('この日の献立ぶん（1人分）'),
+      )
+      const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
+      check(
+        'NUTRI-DAY-01 7日分すべてに折りたたみの栄養行が出る(読み上げ名に日付が入る)',
+        (await dayToggles.count()) === 7,
+        `count=${await dayToggles.count()}`,
+      )
+      // 既定は1行だけ(めやすとの比較は展開時のみ。2026-07-11の「面積を取りすぎる」の再発防止)
+      check(
+        'NUTRI-DAY-01 既定は1行=めやすとの比較は畳まれている',
+        !nbFilledText.includes('1日のめやすとくらべる'),
+      )
+      // 1行の中身: kcal・塩分・野菜gの3値(野菜gは無料でも出す)
+      check(
+        'NUTRI-DAY-01 1行に「約◯kcal」が出る',
+        /約[\d,]+kcal/.test(nbFilledText),
+      )
+      check('NUTRI-DAY-01 1行に「塩分約◯g」が出る', /塩分約[\d.]+g/.test(nbFilledText))
+      check(
+        'NUTRI-DAY-01(docs/60 §7 未決#3) 野菜量は無料でも1行に出る',
+        /野菜約[\d,]+g/.test(nbFilledText),
+      )
+      check(
+        'NUTRI-WEEK-01 週まとめに「この週の献立ぶん（1人分）」が出る',
+        nbFilledText.includes('この週の献立ぶん（1人分）'),
+      )
+
+      // 日カードを展開してめやすとの並置・注記・出典・鍵付き導線を確認する
+      await dayToggles.first().click()
+      await nbPage.waitForTimeout(400)
+      const nbDayOpenText = await nbPage.textContent('body')
+      check(
+        'NUTRI-DAY-01 展開すると「1日のめやすとくらべる」が出る',
+        nbDayOpenText.includes('1日のめやすとくらべる'),
+      )
+      check(
+        'NUTRI-DAY-01 塩分は男女のめやすを併記して並置する(docs/60 §7 未決#5)',
+        /塩分 [\d.]+g　／　めやす 男性 7\.5g・女性 6\.5g/.test(nbDayOpenText),
+      )
+      check(
+        'NUTRI-DAY-01 野菜は350gのめやすと並置する',
+        /野菜 [\d,]+g　／　めやす 350g/.test(nbDayOpenText),
+      )
+      check(
+        'NUTRI-DAY-01(docs/60 §7 未決#2) エネルギーにはめやすの線を引かない',
+        !/エネルギー.{0,12}めやす [\d,]+ ?kcal/.test(nbDayOpenText),
+      )
+      check(
+        'NUTRI-DAY-01(docs/60 §1-3-2) 不足・過多を断定する語を出さない',
+        !nbDayOpenText.includes('足りません') &&
+          !nbDayOpenText.includes('摂りすぎ') &&
+          !nbDayOpenText.includes('とりすぎ') &&
+          !nbDayOpenText.includes('不足しています'),
+      )
+      check(
+        'NUTRI-DAY-01(規約H・docs/60 §1-3-5) 「監修」「推奨」「減塩」は使わない',
+        !nbDayOpenText.includes('監修') &&
+          !nbDayOpenText.includes('推奨') &&
+          !nbDayOpenText.includes('減塩'),
+      )
+      check(
+        'NUTRI-DAY-01(docs/60 §1-3-3) 「登録した料理ぶんだけの合計」の但し書きが出る',
+        nbDayOpenText.includes(
+          'ここに出ているのは、献立に登録した料理ぶんだけの合計です（ごはん・飲みもの・おやつ・外食は入っていません）。',
+        ) && nbDayOpenText.includes('3食のうち夕食だけを登録している場合は'),
+      )
+      check(
+        'NUTRI-DAY-01(docs/60 §1-3-4) 除外分で下限側に出ることの但し書きが出る',
+        nbDayOpenText.includes('実際の値はこのめやすより大きくなります'),
+      )
+      check(
+        'NUTRI-DAY-01 野菜の数え方(いも・豆・きのこ・海藻・果物を含まない)を明示する',
+        nbDayOpenText.includes('いも・豆・きのこ・海藻・果物は入っていません'),
+      )
+      check(
+        'NUTRI-DAY-01(docs/60 §1-1) 成分値の出典と「めやすの出典」を別行で出す',
+        nbDayOpenText.includes('出典: 日本食品標準成分表（八訂）増補2023年（文部科学省）') &&
+          nbDayOpenText.includes(
+            'めやすの出典: 日本人の食事摂取基準（2025年版）（厚生労働省）／健康日本21（第三次）（厚生労働省）',
+          ),
+      )
+      check(
+        'NUTRI-DAY-01 めやすの適用範囲(治療中・妊娠中は主治医の指示)を1行置く',
+        nbDayOpenText.includes('治療中の方・妊娠中の方は、主治医や管理栄養士の指示に従ってください'),
+      )
+      // 無料視点の線引き: 8項目の実数値は出さず、鍵付き導線(PRO-01の様式)にする
+      check(
+        'NUTRI-DAY-01 未解錠では8項目の実数値が出ない(カルシウムのmg値が無い)',
+        !/カルシウム\s*[\d,.]+\s*mg/.test(nbDayOpenText),
+      )
+      check(
+        'NUTRI-DAY-01 未解錠では鍵付き導線(Pro版で使えます/栄養価8項目のめやす)になる',
+        nbDayOpenText.includes('Pro版で使えます') && nbDayOpenText.includes('栄養価8項目のめやす'),
+      )
+
+      // 週まとめを展開: めやすは「1日ぶん×数えた日数」に伸ばす(7日固定では掛けない)
+      await nbPage.getByRole('button', { name: 'この週の栄養のめやすを詳しく見る' }).click()
+      await nbPage.waitForTimeout(400)
+      const nbWeekOpenText = await nbPage.textContent('body')
+      check(
+        'NUTRI-WEEK-01 週まとめは「7日ぶんのめやすとくらべる」になる',
+        nbWeekOpenText.includes('7日ぶんのめやすとくらべる'),
+      )
+      check(
+        'NUTRI-WEEK-01 週のめやすは1日ぶん×7日(塩分52.5g/45.5g・野菜2,450g)',
+        /めやす 男性 52\.5g・女性 45\.5g/.test(nbWeekOpenText) &&
+          /めやす 2,450g/.test(nbWeekOpenText),
+      )
+      check(
+        'NUTRI-WEEK-01 めやすを何日ぶんに伸ばしたかを明示する',
+        nbWeekOpenText.includes('めやすは1日ぶんの数値を、献立や記録がある7日ぶんに伸ばした数です'),
+      )
+      check(
+        'NUTRI-WEEK-01 週は「過ぎた日は作った記録・今日から先は登録した献立」の基準を明示する',
+        nbWeekOpenText.includes('過ぎた日は作った記録、今日から先は登録した献立で計算しています'),
+      )
+    } finally {
+      await nbBrowser.close()
+    }
+  }
+
+  // --- NUTRI-PRO-01: 同じパネルのPro視点(2026-07-30 便CL・docs/60 第1段)。
+  // Pro解錠(コード入力UI経由)後は、日カード・週まとめの展開で栄養8項目の実数値＋野菜量が出て、
+  // 鍵付き導線が消えること。無料/Proの線引きは docs/08 の既存線引き(無料=エネルギー+食塩相当量、
+  // Pro=8項目)をそのまま踏襲し、野菜量だけ無料側にある ---
+  currentCheck = 'NUTRI-PRO-01'
+  {
+    const npBrowser = await chromium.launch()
+    const npContext = await npBrowser.newContext()
+    const npPage = await npContext.newPage()
+    npPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@NUTRI-PRO-01] ${text}`)
+    })
+    npPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NUTRI-PRO-01] ${err.message}`)
+    })
+    try {
+      await npPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await npPage.waitForTimeout(1800)
+      await npPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+      await npPage.getByRole('button', { name: '解錠する', exact: true }).first().click()
+      await npPage.waitForTimeout(1000)
+      check(
+        'NUTRI-PRO-01 前提: Pro解錠が成功する',
+        (await npPage.textContent('body')).includes('Pro版をご利用いただきありがとうございます'),
+      )
+
+      await npPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await npPage.waitForTimeout(900)
+      await npPage.getByRole('button', { name: '週', exact: true }).click()
+      await npPage.waitForTimeout(300)
+      await npPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await npPage.waitForTimeout(500)
+      await npPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await npPage.waitForTimeout(1200)
+      await npPage
+        .getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
+        .first()
+        .click()
+      await npPage.waitForTimeout(400)
+      const npOpenText = await npPage.textContent('body')
+      check('NUTRI-PRO-01 Pro解錠済みでたんぱく質が出る', npOpenText.includes('たんぱく質'))
+      check(
+        'NUTRI-PRO-01 Pro解錠済みでカルシウムがmg単位の実数値で出る',
+        /カルシウム\s*[\d,.]+\s*mg/.test(npOpenText),
+      )
+      check(
+        'NUTRI-PRO-01 Pro解錠済みでも野菜量は同じパネルに並ぶ',
+        /野菜\s*[\d,]+\s*g/.test(npOpenText),
+      )
+      check(
+        'NUTRI-PRO-01 Pro解錠済みでは鍵付き導線が出ない',
+        !npOpenText.includes('Pro版で使えます'),
+      )
+      check(
+        'NUTRI-PRO-01 Pro解錠済みでもめやすは塩分と野菜だけに並置する',
+        /めやす 男性 7\.5g・女性 6\.5g/.test(npOpenText) && /めやす 350g/.test(npOpenText),
+      )
+    } finally {
+      await npBrowser.close()
     }
   }
 
