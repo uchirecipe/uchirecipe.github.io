@@ -11,6 +11,7 @@ import { pickIconKey } from './icon'
  *
  * シェアの選択式(2026-07-16 Fable裁定docs/30裁定3):
  * 固定=料理名・人数分・材料先頭8件。任意=画像(カードのみ)/調理時間/原価/栄養/材料すべて。
+ * 栄養は無料=カロリーのみ・Pro解錠済み=カロリーと塩分(2026-08-01 線引きB')。
  * このモジュールは純ロジックに保つ(Dexie/priceIndex持ち込み禁止)。原価・栄養の実数値は
  * RecipeDetailPage側が既存のcostEstimate・computeRecipeNutritionから詰めて渡す。
  */
@@ -27,9 +28,14 @@ export interface ShareOptions {
   costTotalYen?: number
   /** 原価の1人分(登録人数基準・円)。表示人数には追従させない(裁定1と同値) */
   costPerServingYen?: number
-  /** 1食あたりエネルギー(kcal・表示用丸め済み)。栄養はカロリー・塩分の2項目固定(Pro解錠でも) */
+  /** 1食あたりエネルギー(kcal・表示用丸め済み)。シェアに入る栄養は無料=カロリーのみ */
   kcalPerServing?: number
-  /** 1食あたり食塩相当量(g・表示用丸め済み) */
+  /**
+   * 1食あたり食塩相当量(g・表示用丸め済み)。
+   * 2026-08-01 線引きB': 塩分はPro側の項目なので、**Pro解錠済みのときだけ**呼び出し側が詰める。
+   * 未指定ならシェア文の栄養行はカロリーだけになる（画面に出していない値をシェア文からだけ
+   * 外に出さないため）。
+   */
   saltPerServing?: number
   /**
    * 量が書いてあるのに計算できなかった材料があるか(2026-07-28 便BY/NUT-01)。
@@ -82,11 +88,20 @@ function buildCostNutritionLines(recipe: Recipe, opts: ShareOptions | undefined)
         .replace('{m}', opts.costTotalYen.toLocaleString()),
     )
   }
-  if (opts.nutrition && opts.kcalPerServing != null && opts.saltPerServing != null) {
+  // 栄養行: カロリーは常に、塩分は渡されたとき（＝Pro解錠済み）だけ添える（2026-08-01 線引きB'）
+  if (opts.nutrition && opts.kcalPerServing != null) {
+    const template =
+      opts.saltPerServing != null
+        ? opts.nutritionHasGap
+          ? ja.share.lineNutritionPartial
+          : ja.share.lineNutrition
+        : opts.nutritionHasGap
+          ? ja.share.lineNutritionKcalOnlyPartial
+          : ja.share.lineNutritionKcalOnly
     lines.push(
-      (opts.nutritionHasGap ? ja.share.lineNutritionPartial : ja.share.lineNutrition)
+      template
         .replace('{kcal}', opts.kcalPerServing.toLocaleString())
-        .replace('{salt}', opts.saltPerServing.toLocaleString()),
+        .replace('{salt}', opts.saltPerServing?.toLocaleString() ?? ''),
     )
   }
   return lines
