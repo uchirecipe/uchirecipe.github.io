@@ -21,6 +21,11 @@ type Props = {
   nutritionRowVisible: boolean
   /** 栄養の計算対象材料が1件以上あるか(0件ならグレーアウト) */
   nutritionAvailable: boolean
+  /**
+   * 栄養行に塩分が入るか(2026-08-01 線引きB': Pro解錠済みのときだけ入る)。
+   * 選択肢の名前を、実際にシェア文へ入る中身と一致させるために使う。
+   */
+  nutritionIncludesSalt: boolean
   sharing: boolean
   /** コピー完了・画像生成中などの結果メッセージ(空なら非表示) */
   message: string
@@ -33,7 +38,7 @@ type Props = {
  * 以前は詳細画面の下部にテキスト/画像カードの2ボタンをインライン展開していたが、
  * 「何を載せるか」を選べるようCookedLogModalと同じ中央カード型の窓に変更。
  * 固定=料理名・人数分・材料先頭8件(文言のみ)。任意=レシピ画像(画像カード専用・※併記)/
- * 調理時間/原価/栄養(カロリー・塩分のめやす)/材料すべて。
+ * 調理時間/原価/栄養(無料=カロリー・Pro解錠済み=カロリーと塩分のめやす)/材料すべて。
  * データが無い項目はdisabled+opacity-40で行は見せたまま選べなくする。
  * 選択は開くたびに既定値へ初期化し、永続化しない(裁定3)。
  */
@@ -44,6 +49,7 @@ export default function ShareModal({
   costAvailable,
   nutritionRowVisible,
   nutritionAvailable,
+  nutritionIncludesSalt,
   sharing,
   message,
   onShare,
@@ -139,9 +145,12 @@ export default function ShareModal({
           })}
           {optionRow(ja.share.optCost, cost, setCost, { disabled: !costAvailable })}
           {nutritionRowVisible &&
-            optionRow(ja.share.optNutrition, nutrition, setNutrition, {
-              disabled: !nutritionAvailable,
-            })}
+            optionRow(
+              nutritionIncludesSalt ? ja.share.optNutrition : ja.share.optNutritionKcalOnly,
+              nutrition,
+              setNutrition,
+              { disabled: !nutritionAvailable },
+            )}
           {optionRow(ja.share.optAllIngredients, allIngredients, setAllIngredients)}
         </div>
 

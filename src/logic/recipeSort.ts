@@ -5,12 +5,28 @@ import { computeRecipeNutrition } from './nutrition'
 import type { SearchResult } from './search'
 
 /**
- * 栄養並び替えの5種類（カロリー・たんぱく質・塩分・脂質・糖質=docs/08の「栄養価のめやす」Pro5項目と整合）。
+ * 栄養並び替えの5種類（カロリー・たんぱく質・塩分・脂質・糖質）。
  * 2026-07-16 便T: 従来はカロリーだけ無料でも選べたが、5項目まとめてPro機能化した
- * （オーナー指示による確定・docs/34便T-4。アプリ未公開・実ユーザー0のため後戻り問題なし）
+ * （オーナー指示による確定・docs/34便T-4）。
+ * 2026-08-01 線引きB'（オーナー確定）: このうち**カロリー順だけを無料に開放**し、
+ * たんぱく質・塩分・脂質・糖質はProのまま（FREE_NUTRIENT_SORT_OPTIONS参照）。
+ * 並べ替えの計算そのものは無料/Proで同じ（ここは選択肢の見せ方＝UIのゲートだけを分ける）。
  */
 export const NUTRIENT_SORT_OPTIONS = ['kcal', 'protein', 'salt', 'fat', 'carb'] as const
 export type NutrientSortOption = (typeof NUTRIENT_SORT_OPTIONS)[number]
+
+/**
+ * 無料でも選べる栄養並び替え（2026-08-01 線引きB'・オーナー確定）。
+ * カロリー順だけ。無料版で見える栄養の値がエネルギーだけなので、
+ * 「画面に出ている値で並べ替えられる」という対応関係を保つ。
+ */
+export const FREE_NUTRIENT_SORT_OPTIONS: readonly NutrientSortOption[] = ['kcal']
+
+/** Pro解錠が要る栄養並び替え（たんぱく質・塩分・脂質・糖質） */
+export const PRO_NUTRIENT_SORT_OPTIONS: readonly NutrientSortOption[] = NUTRIENT_SORT_OPTIONS.filter(
+  (option) => !FREE_NUTRIENT_SORT_OPTIONS.includes(option),
+)
+
 
 /** レシピ一覧の並べ替えオプション（kcal/protein/salt/fat/carb=栄養並び替え。2026-07-13 Fable設計、
  * 2026-07-16 便Tで塩分・脂質・糖質を追加。旧'theme'（基本レシピ順）は配布テーマ全廃で無意味化した
@@ -23,9 +39,18 @@ export type RecipeSortOption =
   | 'cooked'
   | NutrientSortOption
 
-/** 並べ替えオプションが栄養並び替え（Pro機能）かどうか */
+/** 並べ替えオプションが栄養並び替え（カロリー順のみ無料・残りはPro）かどうか */
 export function isNutrientSortOption(option: RecipeSortOption): option is NutrientSortOption {
   return (NUTRIENT_SORT_OPTIONS as readonly string[]).includes(option)
+}
+
+/**
+ * その並べ替えを無料版でも選べるか（2026-08-01 線引きB'）。
+ * 栄養並び替え以外（更新順・五十音順など）は元から無料なので常にtrue。
+ */
+export function isFreeSortOption(option: RecipeSortOption): boolean {
+  if (!isNutrientSortOption(option)) return true
+  return FREE_NUTRIENT_SORT_OPTIONS.includes(option)
 }
 
 /** 並べ替えの昇順/降順（2026-07-13 UI改善） */

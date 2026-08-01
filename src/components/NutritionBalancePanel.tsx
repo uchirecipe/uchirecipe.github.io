@@ -22,14 +22,17 @@ import { ja } from '../i18n/ja'
  * 週タブの各日カードと週まとめの両方で同じ部品を使う（同じ数字の出し方を2か所に書かないため）。
  *
  * 【表示の作法】
- * - 既定は1行だけ（「約◯kcal・塩分約◯g・野菜約◯g」）。めやすとの並置は展開時のみ。
+ * - 既定は1行だけ（無料「約◯kcal・野菜約◯g」／Pro「約◯kcal・塩分約◯g・野菜約◯g」）。
+ *   めやすとの並置は展開時のみ。
  *   2026-07-11 にレシピ詳細の栄養パネルを「面積を取りすぎる」で折りたたんだ経緯があり、
  *   7日分のカードに常時展開のパネルを並べると同じ問題が7倍で起きる。
- * - 無料＝エネルギー・食塩相当量・野菜量の3値／Pro＝8項目＋野菜量。
- *   無料/Proの線引きは docs/08 の既存線引きをそのまま踏襲し（無料＝エネルギー＋食塩相当量、
- *   Pro＝8項目）、野菜量だけ新しく無料側に置く（docs/60 §7 未決#3＝(a) オーナー承認済み。
- *   第2段のエンジンが使う基準そのものなので、無料ユーザーにも見えないと選定理由が説明できない）。
+ * - **無料＝エネルギー・野菜量の2値／Pro＝8項目＋野菜量**（2026-08-01 オーナー確定・線引きB'。
+ *   食塩相当量は無料側から外してPro側へ移した。野菜量は無料のまま＝docs/60 §7 未決#3＝(a)
+ *   オーナー承認済み。第2段のエンジンが使う基準そのものなので、無料ユーザーにも見えないと
+ *   選定理由が説明できない）。
  * - **めやすを並置するのは食塩相当量と野菜量だけ**（docs/60 §7 未決#2＝(a)）。
+ *   このうち食塩相当量のめやすはPro解錠時のみ出す（値そのものがPro側なので、めやすだけ先に
+ *   出すと無料側に塩分の話が残ってしまう）。野菜量のめやすは無料でも出す。
  *   エネルギー・たんぱく質・脂質・炭水化物にはめやすの線を引かない（docs/60 §1-2）。
  * - 不足・過多は断定しない。色でも善悪を表さない（数値の並置のみ）。
  * - 計算できない品が混ざる日は、めやすとの並置自体を出さない（docs/60 §5・NUT-01/02の作法）。
@@ -76,18 +79,23 @@ export default function NutritionBalancePanel({
       : basis === 'actual'
         ? ja.nutritionBalance.dayTitleActual
         : ja.nutritionBalance.dayTitlePlan
-  // 3値は「約516kcal」「塩分約0g」のように語と数字の途中で改行されないよう、値ごとに折り返し禁止で置く
-  // （390px幅では「塩分約」で改行されて読みにくかった）
+  // 各値は「約516kcal」「塩分約0g」のように語と数字の途中で改行されないよう、値ごとに折り返し禁止で置く
+  // （390px幅では「塩分約」で改行されて読みにくかった）。
+  // 塩分はPro解錠時のみ（2026-08-01 線引きB'。無料は「約◯kcal・野菜約◯g」の2値）
   const summaryValues = canShowNumbers
     ? [
         ja.nutritionBalance.summaryKcal.replace(
           '{n}',
           roundNutrient('kcal', per.kcal).toLocaleString(),
         ),
-        ja.nutritionBalance.summarySalt.replace(
-          '{n}',
-          roundNutrient('saltG', per.saltG).toLocaleString(),
-        ),
+        ...(unlocked
+          ? [
+              ja.nutritionBalance.summarySalt.replace(
+                '{n}',
+                roundNutrient('saltG', per.saltG).toLocaleString(),
+              ),
+            ]
+          : []),
         ja.nutritionBalance.summaryVegetable.replace('{n}', vegetableG.toLocaleString()),
       ]
     : [ja.nutrition.unavailableSummary]
@@ -145,6 +153,7 @@ export default function NutritionBalancePanel({
                 vegetableG={vegetableG}
                 guideDays={guideDays}
                 showDaysNote={scope === 'week'}
+                unlocked={unlocked}
               />
             ) : (
               <p className="text-xs text-ink-muted">
@@ -185,16 +194,18 @@ export default function NutritionBalancePanel({
             <p>{ja.nutrition.excludedDirectionNote}</p>
             <p>{ja.nutritionBalance.vegetableCountNote}</p>
             <p>{ja.nutrition.estimateNote}</p>
-            {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない） */}
+            {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。
+                めやすの出典は、画面に出しているめやすの分だけ挙げる
+                （無料は野菜量のめやすしか出していないので、塩分側の出典は挙げない） */}
             <p>
               {ja.nutrition.sourcePrefix}
               {nutritionSourceName()}
             </p>
             <p>
               {ja.nutritionBalance.guideSourcePrefix}
-              {DAILY_GUIDES.saltG.source}
-              {ja.nutritionBalance.guideSourceSeparator}
-              {DAILY_GUIDES.vegetableG.source}
+              {unlocked
+                ? `${DAILY_GUIDES.saltG.source}${ja.nutritionBalance.guideSourceSeparator}${DAILY_GUIDES.vegetableG.source}`
+                : DAILY_GUIDES.vegetableG.source}
             </p>
             <p>{ja.nutritionBalance.guideScopeNote}</p>
           </div>
@@ -214,9 +225,9 @@ function formatNutrient(key: keyof NutrientTotals, value: number): string {
 
 /**
  * 数値の一覧（1人分のみ）。
- * 無料＝エネルギー・食塩相当量・野菜量／Pro＝8項目＋野菜量。並びはNutritionTeaserと同じ
+ * 無料＝エネルギー・野菜量／Pro＝8項目＋野菜量（2026-08-01 線引きB'）。並びはNutritionTeaserと同じ
  * （たんぱく質→脂質→炭水化物→食物繊維→鉄→カルシウム、食塩相当量は末尾）。
- * 野菜量は栄養8項目には含まれない新しい指標なので、食塩相当量のあとに置く。
+ * 野菜量は栄養8項目には含まれない新しい指標なので、いちばん最後に置く。
  */
 function NutrientRows({
   totals,
@@ -227,6 +238,7 @@ function NutrientRows({
   vegetableG: number
   unlocked: boolean
 }) {
+  // 食塩相当量もPro側（2026-08-01 線引きB'）。8項目の末尾に置く並びは従来どおり
   const proRows: { key: keyof NutrientTotals; label: string }[] = [
     { key: 'proteinG', label: ja.nutrition.proteinLabel },
     { key: 'fatG', label: ja.nutrition.fatLabel },
@@ -234,11 +246,11 @@ function NutrientRows({
     { key: 'fiberG', label: ja.nutrition.fiberLabel },
     { key: 'ironMg', label: ja.nutrition.ironLabel },
     { key: 'calciumMg', label: ja.nutrition.calciumLabel },
+    { key: 'saltG', label: ja.nutrition.saltLabel },
   ]
   const rows: { key: keyof NutrientTotals; label: string }[] = [
     { key: 'kcal', label: ja.nutrition.kcalLabel },
     ...(unlocked ? proRows : []),
-    { key: 'saltG', label: ja.nutrition.saltLabel },
   ]
   return (
     <div
@@ -265,7 +277,7 @@ function NutrientRows({
             </dd>
           </div>
         ))}
-        {/* 野菜量は無料でも出す（docs/60 §7 未決#3＝(a)） */}
+        {/* 野菜量は無料でも出す（docs/60 §7 未決#3＝(a)・2026-08-01 線引きB'でも無料のまま） */}
         <div className="contents">
           <dt className="text-sm">{ja.nutritionBalance.vegetableLabel}</dt>
           <dd className="text-right text-sm font-bold text-accent-ink tabular-nums">
@@ -282,17 +294,21 @@ function NutrientRows({
  * 不足・過多は断定せず、バーや色による達成表示も出さない＝数値を並べるだけ（docs/60 §1-3-2）。
  * 男女の値は併記する（第3段の「めやすの基準」を作るまでは、どちらか一方に丸めると
  * 「自分の値ではない数字」を出すことになるため。docs/60 §7 未決#5＝(b)）。
+ *
+ * 2026-08-01 線引きB': 食塩相当量の行はPro解錠時のみ。無料では野菜量のめやすだけを並べる。
  */
 function GuideBlock({
   totals,
   vegetableG,
   guideDays,
   showDaysNote,
+  unlocked,
 }: {
   totals: NutrientTotals
   vegetableG: number
   guideDays: number
   showDaysNote: boolean
+  unlocked: boolean
 }) {
   const days = guideDays > 0 ? guideDays : 1
   const round1 = (v: number) => Math.round(v * 10) / 10
@@ -306,13 +322,16 @@ function GuideBlock({
           ? ja.nutritionBalance.guideTitleDay
           : ja.nutritionBalance.guideTitleDays.replace('{n}', String(days))}
       </p>
-      <p className="mt-1 text-sm tabular-nums">
-        {ja.nutritionBalance.guideSaltRow
-          .replace('{v}', roundNutrient('saltG', totals.saltG).toLocaleString())
-          .replace('{male}', saltMale.toLocaleString())
-          .replace('{female}', saltFemale.toLocaleString())}
-      </p>
-      <p className="mt-0.5 text-sm tabular-nums">
+      {unlocked && (
+        <p className="mt-1 text-sm tabular-nums">
+          {ja.nutritionBalance.guideSaltRow
+            .replace('{v}', roundNutrient('saltG', totals.saltG).toLocaleString())
+            .replace('{male}', saltMale.toLocaleString())
+            .replace('{female}', saltFemale.toLocaleString())}
+        </p>
+      )}
+      {/* 塩分の行が出るときは行間を詰め、無料（野菜だけ）のときは見出しからの間隔を空ける */}
+      <p className={`${unlocked ? 'mt-0.5' : 'mt-1'} text-sm tabular-nums`}>
         {ja.nutritionBalance.guideVegetableRow
           .replace('{v}', vegetableG.toLocaleString())
           .replace('{guide}', vegetableGuide.toLocaleString())}

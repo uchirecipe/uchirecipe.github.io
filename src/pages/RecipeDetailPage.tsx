@@ -41,6 +41,7 @@ import { shareText, shareImageCard, type ShareOptions } from '../logic/share'
 import {
   NUTRITION_TEASER_ENABLED,
   computeRecipeNutrition,
+  isNutritionUnlocked,
   roundNutrient,
   hasMaterialGap,
 } from '../logic/nutrition'
@@ -456,6 +457,9 @@ export default function RecipeDetailPage() {
   const shareCookMinutesAvailable = recipe.cookMinutes != null && recipe.cookMinutes > 0
   const shareCostAvailable = totalPrice > 0
   const shareNutritionAvailable = (shareNutrition?.items.length ?? 0) > 0
+  // シェア文に塩分を入れてよいのはPro解錠済みのときだけ(2026-08-01 線引きB')。
+  // 画面(栄養パネル)に出していない値が、シェア文からだけ外に出るのを防ぐ
+  const shareNutritionSalt = isNutritionUnlocked(!!settings?.proCode)
 
   /** テキスト or 画像カードでシェア（非対応環境ではコピー/保存に切替）。
    *  selection(モーダルの選択)に、原価・栄養の実数値を詰めてshare.tsへ渡す
@@ -474,9 +478,10 @@ export default function RecipeDetailPage() {
       kcalPerServing: shareNutritionAvailable
         ? roundNutrient('kcal', shareNutrition!.perServing.kcal)
         : undefined,
-      saltPerServing: shareNutritionAvailable
-        ? roundNutrient('saltG', shareNutrition!.perServing.saltG)
-        : undefined,
+      saltPerServing:
+        shareNutritionAvailable && shareNutritionSalt
+          ? roundNutrient('saltG', shareNutrition!.perServing.saltG)
+          : undefined,
       // 主材料が計算できていないまま数値だけシェアされるのを防ぐ(2026-07-28 便BY/NUT-01)
       nutritionHasGap: shareNutrition != null && hasMaterialGap(shareNutrition),
     }
@@ -1372,6 +1377,7 @@ export default function RecipeDetailPage() {
         costAvailable={shareCostAvailable}
         nutritionRowVisible={NUTRITION_TEASER_ENABLED}
         nutritionAvailable={shareNutritionAvailable}
+        nutritionIncludesSalt={shareNutritionSalt}
         sharing={sharing}
         message={shareMessage}
         onShare={(kind, selection) => void runShare(kind, selection)}

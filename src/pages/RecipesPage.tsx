@@ -32,7 +32,9 @@ import {
   defaultSortDirection,
   buildNutrientSortValues,
   isNutrientSortOption,
+  isFreeSortOption,
   NUTRIENT_SORT_OPTIONS,
+  FREE_NUTRIENT_SORT_OPTIONS,
   NUTRIENT_SORT_FIELD,
   type NutrientSortOption,
   type RecipeSortOption,
@@ -77,7 +79,7 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   // 「基本レシピ順」は2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で無意味化)
 ]
 
-/** 栄養並び替え5項目のラベル（2026-07-16 便T-4: カロリー・たんぱく質・塩分・脂質・糖質。Pro機能） */
+/** 栄養並び替え5項目のラベル（2026-07-16 便T-4: カロリー・たんぱく質・塩分・脂質・糖質） */
 const nutrientSortLabels: Record<NutrientSortOption, string> = {
   kcal: ja.search.sortKcal,
   protein: ja.search.sortProtein,
@@ -88,6 +90,9 @@ const nutrientSortLabels: Record<NutrientSortOption, string> = {
 const nutrientSortOptions: { value: RecipeSortOption; label: string }[] = NUTRIENT_SORT_OPTIONS.map(
   (value) => ({ value, label: nutrientSortLabels[value] }),
 )
+/** 無料版で選べる栄養並び替え（2026-08-01 線引きB': カロリー順のみ） */
+const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
+  FREE_NUTRIENT_SORT_OPTIONS.map((value) => ({ value, label: nutrientSortLabels[value] }))
 
 const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
@@ -267,9 +272,8 @@ export default function RecipesPage() {
 
   const hideStarters = settings?.hideStarters ?? false
 
-  // 栄養並び替え(2026-07-13 Fable設計→2026-07-16 便T-4でカロリー・たんぱく質・塩分・脂質・糖質の
-  // 5項目まとめてPro機能化。従来は無料でもカロリー順だけ選べたが、オーナー指示によりPro専用に変更した
-  // (アプリ未公開・実ユーザー0のため既存無料機能の有料化には当たらない)
+  // 栄養並び替え(2026-07-13 Fable設計→2026-07-16 便T-4で5項目まとめてPro機能化→
+  // 2026-08-01 線引きB'でカロリー順のみ無料に開放。たんぱく質・塩分・脂質・糖質はPro維持)
   const nutritionUnlocked = isNutritionUnlocked(!!settings?.proCode)
 
   // 栄養並び替え用の値(1食あたり)。計算が重いので栄養並び替えを選んでいる間だけ、
@@ -485,13 +489,16 @@ export default function RecipesPage() {
   /**
    * 栄養価順のとき、カードに表示する「並び替えに使っている栄養価の値」(便T-7)。
    * カロリー順→「◯kcal」、たんぱく質・塩分・脂質・糖質順→「◯g」。算出不能(null)なレシピは
-   * 表示しない(undefinedを返し、RecipeCard側でバッジ自体を出さない)。Pro機能なので
-   * nutritionUnlocked(=Pro解錠済み)のときだけ計算する。
+   * 表示しない(undefinedを返し、RecipeCard側でバッジ自体を出さない)。
+   * 2026-08-01 線引きB': 無料で選べるカロリー順のときは無料でも値を出し、
+   * Pro側の項目(たんぱく質・塩分・脂質・糖質)はPro解錠時だけ出す
+   * (無料の画面に塩分の数値が出ないようにするための表示ゲート)。
    * 2026-07-16オーナー指示: 「たんぱく質: 24g」のように並び替え項目のラベルを値の前に付ける
    * (ラベルはnutrientSortLabels=並び替えパネルの項目名と同じものを流用する)
    */
   const nutrientBadgeTextFor = (recipeId: number | undefined): string | undefined => {
-    if (!nutritionUnlocked || !nutrientSortActive || !isNutrientSortOption(sort)) return undefined
+    if (!nutrientSortActive || !isNutrientSortOption(sort)) return undefined
+    if (!nutritionUnlocked && !isFreeSortOption(sort)) return undefined
     if (recipeId === undefined) return undefined
     const field = NUTRIENT_SORT_FIELD[sort]
     const raw = nutrientSortValues?.get(recipeId)?.[field]
@@ -580,28 +587,29 @@ export default function RecipesPage() {
           {/* 「よく使う順」が何を数えた順かを一言で示す(2026-07-29 便CI/C13) */}
           <p className="mt-1 text-xs text-ink-muted">{ja.search.sortCookedHint}</p>
 
-          {/* 栄養価並び替え(便T-4: カロリー・たんぱく質・塩分・脂質・糖質の5項目をPro機能化。
-              無料版はグレーのティーザー行のみ・タップで既存のProゲート表現(Lock+ミュート色)でPro案内へ) */}
-          {nutritionUnlocked ? (
-            <>
-              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                {ja.search.sortNutritionTitle}
-              </p>
-              {/* 何のために並べ替えるのか(用途)を1行添える(2026-07-28 便BY/見せ方(c)) */}
-              <p className="text-xs text-ink-muted">{ja.search.sortNutritionHint}</p>
-              <CheckList
-                options={nutrientSortOptions}
-                value={sort}
-                onSelect={(next) => {
-                  setSort(next)
-                  setSortDirection(defaultSortDirection[next])
-                }}
-              />
-            </>
-          ) : (
+          {/* 栄養価並び替え(便T-4で5項目をPro機能化 → 2026-08-01 線引きB'でカロリー順のみ無料開放)。
+              無料版は「カロリー」だけを選べる欄＋残り4項目のグレーのティーザー行を出し、
+              タップで既存のProゲート表現(Lock+ミュート色)からPro案内へ送る */}
+          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+            {ja.search.sortNutritionTitle}
+          </p>
+          {/* 何のために並べ替えるのか(用途)を1行添える(2026-07-28 便BY/見せ方(c))。
+              無料版は使えるのがカロリー順だけなので、用途の言葉もカロリーの話にする */}
+          <p className="text-xs text-ink-muted">
+            {nutritionUnlocked ? ja.search.sortNutritionHint : ja.search.sortNutritionFreeHint}
+          </p>
+          <CheckList
+            options={nutritionUnlocked ? nutrientSortOptions : freeNutrientSortOptions}
+            value={sort}
+            onSelect={(next) => {
+              setSort(next)
+              setSortDirection(defaultSortDirection[next])
+            }}
+          />
+          {!nutritionUnlocked && (
             <Link
               to="/settings?section=pro"
-              className="mt-[var(--space-md)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
+              className="mt-[var(--space-sm)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
             >
               <Lock size={16} className="mt-0.5 shrink-0" aria-hidden />
               <span>

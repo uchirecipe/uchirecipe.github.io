@@ -112,7 +112,10 @@ import {
   defaultSortDirection,
   buildNutrientSortValues,
   isNutrientSortOption,
+  isFreeSortOption,
   NUTRIENT_SORT_OPTIONS,
+  FREE_NUTRIENT_SORT_OPTIONS,
+  PRO_NUTRIENT_SORT_OPTIONS,
 } from '../src/logic/recipeSort.ts'
 import {
   totalCookedLogPhotoBytes,
@@ -3835,6 +3838,22 @@ eq(
   ])
   eq('isNutrientSortOption: kcalは栄養並び替え', isNutrientSortOption('kcal'), true)
   eq('isNutrientSortOption: updatedは栄養並び替えでない', isNutrientSortOption('updated'), false)
+
+  // 2026-08-01 線引きB'(オーナー確定): 栄養並び替えのうちカロリー順だけを無料に開放し、
+  // たんぱく質・塩分・脂質・糖質はPro維持。並べ替えの計算自体は無料/Proで同じ
+  eq('FREE_NUTRIENT_SORT_OPTIONS: 無料はカロリー順のみ', [...FREE_NUTRIENT_SORT_OPTIONS], ['kcal'])
+  eq('PRO_NUTRIENT_SORT_OPTIONS: 残り4項目はPro', [...PRO_NUTRIENT_SORT_OPTIONS], [
+    'protein',
+    'salt',
+    'fat',
+    'carb',
+  ])
+  eq('isFreeSortOption: カロリー順は無料で使える', isFreeSortOption('kcal'), true)
+  eq('isFreeSortOption: 塩分順はPro', isFreeSortOption('salt'), false)
+  eq('isFreeSortOption: たんぱく質順はPro', isFreeSortOption('protein'), false)
+  eq('isFreeSortOption: 栄養以外(更新順)は無料', isFreeSortOption('updated'), true)
+  // 無料に開放したのはUIの選択肢だけで、並べ替えの計算(sortResults)には解錠状態が入らない。
+  // 上のカロリー昇順・塩分昇順の期待値がそのまま通っていることがその見張りになっている
 }
 
 // ---------- 「基本レシピ順」並び替えは2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で
@@ -4955,6 +4974,22 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
   eq('シェア: 部分欠落が無ければ従来どおりの栄養行', normal.includes('1食あたり 約100kcal・塩分 約1.2g（めやす）'), true)
   const partial = buildShareText(recipe, { ...base, nutritionHasGap: true })
   eq('シェア: 部分欠落があれば「一部の材料を除く」を添える', partial.includes('（めやす・一部の材料を除く）'), true)
+
+  // 2026-08-01 線引きB': 塩分はPro側の項目。無料(saltPerServing未指定)ではカロリーだけの行にする
+  // (従来はkcalとsaltが揃わないと栄養行そのものが出なかった)
+  const freeLine = buildShareText(recipe, { ...base, saltPerServing: undefined })
+  eq('シェア(B\'): 塩分なし(無料)はカロリーだけの栄養行', freeLine.includes('1食あたり 約100kcal（めやす）'), true)
+  eq('シェア(B\'): 塩分なし(無料)の栄養行に塩分が出ない', freeLine.includes('塩分'), false)
+  const freePartial = buildShareText(recipe, {
+    ...base,
+    saltPerServing: undefined,
+    nutritionHasGap: true,
+  })
+  eq(
+    'シェア(B\'): 塩分なし+部分欠落は「一部の材料を除く」を添える',
+    freePartial.includes('1食あたり 約100kcal（めやす・一部の材料を除く）'),
+    true,
+  )
 }
 
 // ---------- termSplit: 純粋性(StrictMode二重実行の再発防止・2026-07-11) ----------

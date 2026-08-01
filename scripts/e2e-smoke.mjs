@@ -55,16 +55,18 @@
 //         LOG-EDIT-PHOTO-01(2026-07-16 便W-①: 既存記録の編集フローからも画像の削除・追加
 //         (差し替え)ができること。削除→保存→サムネ消滅、再編集で追加→保存→サムネ再出現・
 //         圧縮後Blobが新規作成時と同じ形式でIndexedDBに保存されることを確認) /
-//         NUT-01(栄養価のめやす: 未解錠でもエネルギー・塩分の概算が閉じた1行から見え、
-//         展開すると「めやす」表記・出典・Pro案内リンクが出る) /
+//         NUT-01(栄養価のめやす: 未解錠でもエネルギーの概算が閉じた1行から見え、展開すると
+//         野菜量(g)・「めやす」表記・出典・Pro案内リンクが出る。塩分は2026-08-01 線引きB'で
+//         Pro側へ移したので無料側には出ない) /
 //         NUT-02(栄養価のめやす: Pro解錠済みで8項目の実パネルが出る(2026-07-13 第2弾で
 //         食物繊維・鉄・カルシウム+ビタミン注記を追加)・人数を変えても1人分の値は不変。
 //         M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED有効化) /
 //         STEP0-01(手順0件のレシピ・2026-07バグ修正: 手順欄を空のまま保存(steps:[])しても、
 //         詳細画面に「調理中モードで見る」ボタンが表示されない=空配列で調理中モードを開いて
 //         クラッシュすることがないこと) /
-//         NUTSORT-01(栄養並び替えの無料ティーザー・2026-07-16便T-4で5項目まとめてPro機能化:
-//         無料では栄養価の選択肢が出ず、グレーの「栄養価で並び替え（Pro機能）」行だけが出て
+//         NUTSORT-01(栄養並び替えの無料側・2026-08-01 線引きB'でカロリー順のみ無料開放:
+//         無料では選択肢が「カロリー」だけ出て実際に使え(カードに「カロリー: ◯kcal」)、
+//         残り4項目はグレーの「たんぱく質・塩分・脂質・糖質で探す（Pro機能）」行にまとまり
 //         タップ先が既存のPro案内であること) /
 //         NUTSORT-02(栄養並び替え・Pro解錠済み: カロリー/たんぱく質/塩分/脂質/糖質の5項目が出る・
 //         カロリー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
@@ -246,12 +248,13 @@
 //         同じid・同じレシピのまま残ること(旧実装は無警告で全消し)。空き枠は埋まり、手動枠を
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
-//         2026-07-30 便CL・docs/60 第1段: 週タブの各日カードに「この日の献立ぶん（1人分）」の
-//         1行(kcal・塩分・野菜g)、週まとめに「この週の献立ぶん（1人分）」が出ること。既定は1行で
-//         めやすとの比較は展開時のみ。展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを
-//         **数値の並置**で出し、エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
+//         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
+//         「この日の献立ぶん（1人分）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
+//         週まとめに「この週の献立ぶん（1人分）」が出ること。既定は1行でめやすとの比較は展開時のみ。
+//         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
+//         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
 //         「監修」「推奨」「減塩」を使わないこと・「登録した料理ぶんだけの合計」等の但し書きと
-//         成分値/めやすの2つの出典が別行で出ること。無料では8項目の実数値が出ず鍵付き導線
+//         成分値/めやすの出典が別行で出ること。無料では8項目(塩分含む)の実数値が出ず鍵付き導線
 //         (PRO-01の様式)になり、Pro解錠後は8項目の実数値が出て鍵が消えること。野菜量は
 //         docs/60 §7 未決#3(a)で無料。週のめやすは1日ぶん×数えた日数に伸ばすこと) /
 //         (THEMESORT-01は「基本レシピ順」並び替えの廃止・2026-07-24 便BNに伴い削除) /
@@ -472,12 +475,17 @@ try {
   check('合わせ調味料ヒント表示', detailText.includes('先にまとめて計量してOK'))
 
   // --- NUT-01: 栄養価のめやす(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
-  // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。エネルギー・食塩相当量の
-  // 2項目は無料でも常時計算表示(2026-07-10バッチH-4)、残り3項目はPro案内にとどめる設計) ---
+  // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。
+  // 2026-08-01 線引きB'(オーナー確定): 無料で出るのは**エネルギーと野菜量**の2つで、
+  // 食塩相当量は残り6項目と同じPro側へ移した。閉じた1行はエネルギーだけ) ---
   currentCheck = 'NUT-01'
   check('NUT-01 栄養価のめやす見出しが閉じた状態から見える', detailText.includes('栄養価のめやす'))
   check('NUT-01 エネルギー(kcal)の概算が閉じた1行から見える', /\d+kcal/.test(detailText))
-  check('NUT-01 塩分の概算が閉じた1行から見える', detailText.includes('塩分'))
+  check(
+    "NUT-01(B') 無料の閉じた1行に塩分が出ない",
+    !detailText.includes('塩分'),
+    '無料の要約行に「塩分」が残っている',
+  )
   await page.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
   await page.waitForTimeout(300)
   const nutExpandedText = await page.textContent('body')
@@ -488,8 +496,26 @@ try {
     nutExpandedText.includes('Pro版について見る'),
   )
   check(
-    'NUT-01 未解錠案内にPro版で増える項目(たんぱく質・脂質・炭水化物)が明記される(2026-07-13 UIペルソナQA)',
-    nutExpandedText.includes('Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウムのめやすも表示されます'),
+    'NUT-01 未解錠案内にPro版で増える項目が明記される(2026-07-13 UIペルソナQA・2026-08-01で塩分相当量を追加)',
+    nutExpandedText.includes(
+      'Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量のめやすも表示されます',
+    ),
+  )
+  // 2026-08-01 線引きB': 無料の展開部はエネルギーと野菜量だけ。塩分の数値は出さない
+  // (「塩分相当量」の語自体はPro案内のティーザーに出るので、語ではなく「値が続いているか」で判定する)
+  check(
+    "NUT-01(B') 無料の展開部に野菜量(g)の値が出る",
+    /野菜\s*[\d,]+\s*g/.test(nutExpandedText),
+    '無料の展開部に「野菜 ◯g」が無い',
+  )
+  check(
+    "NUT-01(B') 無料の展開部に塩分相当量の値が出ない",
+    !/塩分相当量\s*[\d,]/.test(nutExpandedText),
+    '無料の展開部に塩分相当量の数値が出ている',
+  )
+  check(
+    "NUT-01(B') 野菜量の数え方の注記が出る",
+    nutExpandedText.includes('食品成分表の「野菜類」に名寄せできた材料'),
   )
   // PRO-01(2026-07-28 便BY): 未解錠のティーザーを、月間献立ゲートと同じ blur+Lockバッジ+見出しの
   // 様式に揃える(同じPro導線なのに画面ごとに表現が3種類あった状態の解消)
@@ -978,12 +1004,11 @@ try {
   await page.getByRole('button', { name: 'このレシピを削除' }).click()
   await page.waitForTimeout(800)
 
-  // --- NUTSORT-01: 栄養並び替えの無料ティーザー(2026-07-13 Fable設計→2026-07-16 便T-4で
-  // カロリー・たんぱく質・塩分・脂質・糖質の5項目まとめてPro機能化。従来無料だったカロリー順も
-  // Pro側へ=オーナー確定)。無料(未解錠)では並び替えパネルに栄養価の選択肢が一切出ず、
-  // グレーの「栄養価で並び替え（Pro機能）」行だけが出て、タップ先が既存のPro案内
-  // (設定のProタブ)であることを確認する。実際の並び順の検証はPro解錠済みの
-  // NUTSORT-02側で行う ---
+  // --- NUTSORT-01: 栄養並び替えの無料側(2026-07-13 Fable設計→2026-07-16 便T-4で5項目まとめて
+  // Pro機能化→**2026-08-01 線引きB'(オーナー確定)でカロリー順だけ無料に開放**)。
+  // 無料(未解錠)では並び替えパネルに「カロリー」だけが選択肢として出て、たんぱく質・塩分・脂質・糖質は
+  // グレーのティーザー行にまとまり、タップ先が既存のPro案内(設定のProタブ)であることを確認する。
+  // 実際の並び順の検証はPro解錠済みのNUTSORT-02側で行う ---
   currentCheck = 'NUTSORT-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
@@ -993,12 +1018,20 @@ try {
   // 見出しは2026-07-28 便BY/見せ方(c)で「栄養価で並び替え」→「栄養価で探す」に変更
   // (操作名だけでなく何のために使うかが伝わる用途の言葉にする)
   check(
-    'NUTSORT-01 無料ではグレーの「栄養価で探す（Pro機能）」ティーザーが出る',
-    nutSortPanelText.includes('栄養価で探す（Pro機能）'),
+    "NUTSORT-01(B') 無料でも「栄養価で探す」の見出しが出る",
+    nutSortPanelText.includes('栄養価で探す'),
+  )
+  check(
+    "NUTSORT-01(B') 無料のティーザーはPro側4項目の案内になっている",
+    nutSortPanelText.includes('たんぱく質・塩分・脂質・糖質で探す（Pro機能）'),
   )
   check(
     'NUTSORT-01(便BY) ティーザーに用途の説明が添えられる(たんぱく質が多い順・塩分が低い順)',
     nutSortPanelText.includes('たんぱく質が多い順・塩分が低い順などで探せます'),
+  )
+  check(
+    "NUTSORT-01(B'・便BY見せ方(c)) 無料の用途の言葉はカロリーの話になっている",
+    nutSortPanelText.includes('カロリーが低い順・高い順に並べ替えて、目的からレシピを探せます'),
   )
   const freeNutrientButtons = await page.evaluate(() => {
     const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']
@@ -1006,13 +1039,13 @@ try {
     return names.filter((n) => buttons.some((b) => b.textContent?.trim() === n))
   })
   check(
-    'NUTSORT-01 無料では栄養価5項目が並び替えの選択肢に出ない(旧無料カロリー順もPro側へ)',
-    freeNutrientButtons.length === 0,
-    `出てしまった項目=${JSON.stringify(freeNutrientButtons)}`,
+    "NUTSORT-01(B') 無料で選べる栄養並び替えはカロリー順だけ",
+    freeNutrientButtons.length === 1 && freeNutrientButtons[0] === 'カロリー',
+    `出た項目=${JSON.stringify(freeNutrientButtons)}`,
   )
   const teaserHref = await page.evaluate(() => {
     const links = Array.from(document.querySelectorAll('a'))
-    const teaser = links.find((a) => a.textContent?.includes('栄養価で探す（Pro機能）'))
+    const teaser = links.find((a) => a.textContent?.includes('（Pro機能）'))
     return teaser?.getAttribute('href') ?? null
   })
   check(
@@ -1020,6 +1053,33 @@ try {
     teaserHref === '#/settings?section=pro',
     `href=${teaserHref}`,
   )
+  // 無料でもカロリー順が実際に使えること(選ぶとカードに「カロリー: ◯kcal」が出る)を確かめる。
+  // 「選択肢が出ている」だけでは、値の表示ゲート(nutrientBadgeTextFor)が閉じたままでも通ってしまう
+  await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === 'カロリー',
+    )
+    button?.click()
+  })
+  await page.waitForTimeout(600)
+  const freeKcalSortText = await page.textContent('body')
+  check(
+    "NUTSORT-01(B') 無料でカロリー順を選ぶとカードに「カロリー: ◯kcal」が出る",
+    /カロリー: [\d,]+kcal/.test(freeKcalSortText),
+    'カロリー順のバッジが出ていない',
+  )
+  check(
+    "NUTSORT-01(B') 無料のカードに塩分の値は出ない",
+    !/塩分: /.test(freeKcalSortText),
+  )
+  // 並び替えを既定(更新順)に戻してから閉じる
+  await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '更新順',
+    )
+    button?.click()
+  })
+  await page.waitForTimeout(400)
   // パネルを閉じ、以降のチェックに影響しないようにする(条件は何も変えていない)
   await page.getByRole('button', { name: '決定' }).click()
   await page.waitForTimeout(300)
@@ -2118,7 +2178,17 @@ try {
       }
       check('NUT-02 Pro解錠済みで脂質が表示される', unlockedText.includes('脂質'))
       check('NUT-02 Pro解錠済みで炭水化物が表示される', unlockedText.includes('炭水化物'))
-      check('NUT-02 Pro解錠済みで塩分相当量が表示される', unlockedText.includes('塩分相当量'))
+      // 2026-08-01 線引きB': 塩分相当量は無料側から外してPro側へ移した。
+      // 「語が出ている」だけだとPro案内の文言でも通ってしまうので、値が続いていることまで見る
+      check(
+        "NUT-02(B') Pro解錠済みで塩分相当量が値つきで表示される",
+        /塩分相当量\s*[\d,.]+\s*g/.test(unlockedText),
+      )
+      // 野菜量は無料・Proとも出す(2026-08-01 線引きB')
+      check(
+        "NUT-02(B') Pro解錠済みでも野菜量(g)が表示される",
+        /野菜\s*[\d,]+\s*g/.test(unlockedText),
+      )
       // 2026-07-13 第2弾(オーナー承認): 食物繊維(g)・鉄(mg)・カルシウム(mg)の3項目とビタミン注記
       check('NUT-02 Pro解錠済みで食物繊維が表示される', unlockedText.includes('食物繊維'))
       check('NUT-02 Pro解錠済みで鉄がmg単位で表示される', /鉄\s*[\d,.]+\s*mg/.test(unlockedText))
@@ -2174,7 +2244,7 @@ try {
       )
       check(
         'NUTSORT-02 Pro解錠済みではグレーのティーザー行(Pro機能)は出ない',
-        !proSortPanelText.includes('栄養価で探す（Pro機能）'),
+        !proSortPanelText.includes('（Pro機能）'),
       )
       check(
         'NUTSORT-02(便BY) 解錠後も用途の説明が添えられる',
@@ -3826,13 +3896,13 @@ try {
   }
 
   // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
-  // (2026-07-30 便CL・docs/60 第1段)。
-  // ・週タブの各日カードに「この日の献立ぶん（1人分）」が1行(kcal・塩分・野菜g)で出ること
+  // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
+  // ・週タブの各日カードに「この日の献立ぶん（1人分）」が1行(**無料は kcal・野菜g の2値**)で出ること
   // ・週まとめに「この週の献立ぶん（1人分）」が同じ構成で出ること
-  // ・展開すると「1日のめやすとくらべる」で塩分・野菜だけがめやすと**並置**されること
+  // ・展開すると「1日のめやすとくらべる」で**無料は野菜だけ**がめやすと**並置**されること
   //   (不足・過多の断定をしない=「足りません」「摂りすぎ」の語がどこにも出ないこと)
   // ・成分値の出典と「めやすの出典」が別行で出ること
-  // ・**未解錠(無料)では8項目が出ないこと**(たんぱく質等の実数値が出ず、鍵付き導線になること)
+  // ・**未解錠(無料)では8項目が出ないこと**(たんぱく質・塩分等の実数値が出ず、鍵付き導線になること)
   // 「まとめて献立を立てる」の対象を7日ぶん確実にするため「今日から7日間」表示に切り替えてから行う
   // (週区切り表示だと実行日の曜日次第で対象日数が変わり、めやすの日数が日替わりになる) ---
   currentCheck = 'NUTRI-DAY-01'
@@ -3887,12 +3957,16 @@ try {
         'NUTRI-DAY-01 既定は1行=めやすとの比較は畳まれている',
         !nbFilledText.includes('1日のめやすとくらべる'),
       )
-      // 1行の中身: kcal・塩分・野菜gの3値(野菜gは無料でも出す)
+      // 1行の中身(無料): kcal・野菜gの2値。塩分は2026-08-01 線引きB'でPro側へ移した
       check(
         'NUTRI-DAY-01 1行に「約◯kcal」が出る',
         /約[\d,]+kcal/.test(nbFilledText),
       )
-      check('NUTRI-DAY-01 1行に「塩分約◯g」が出る', /塩分約[\d.]+g/.test(nbFilledText))
+      check(
+        "NUTRI-DAY-01(B') 無料の1行に「塩分約◯g」は出ない",
+        !/塩分約[\d.]+g/.test(nbFilledText),
+        '無料の1行に塩分が残っている',
+      )
       check(
         'NUTRI-DAY-01(docs/60 §7 未決#3) 野菜量は無料でも1行に出る',
         /野菜約[\d,]+g/.test(nbFilledText),
@@ -3911,12 +3985,17 @@ try {
         nbDayOpenText.includes('1日のめやすとくらべる'),
       )
       check(
-        'NUTRI-DAY-01 塩分は男女のめやすを併記して並置する(docs/60 §7 未決#5)',
-        /塩分 [\d.]+g　／　めやす 男性 7\.5g・女性 6\.5g/.test(nbDayOpenText),
+        "NUTRI-DAY-01(B') 無料では塩分のめやす並置を出さない(値ごとPro側へ移した)",
+        !/めやす 男性 7\.5g・女性 6\.5g/.test(nbDayOpenText),
+        '無料に塩分のめやすが残っている',
       )
       check(
-        'NUTRI-DAY-01 野菜は350gのめやすと並置する',
+        'NUTRI-DAY-01 野菜は350gのめやすと並置する(無料でも出す)',
         /野菜 [\d,]+g　／　めやす 350g/.test(nbDayOpenText),
+      )
+      check(
+        "NUTRI-DAY-01(B') 無料は塩分のめやすを出さないので、その出典も挙げない",
+        !nbDayOpenText.includes('日本人の食事摂取基準（2025年版）'),
       )
       check(
         'NUTRI-DAY-01(docs/60 §7 未決#2) エネルギーにはめやすの線を引かない',
@@ -3952,9 +4031,7 @@ try {
       check(
         'NUTRI-DAY-01(docs/60 §1-1) 成分値の出典と「めやすの出典」を別行で出す',
         nbDayOpenText.includes('出典: 日本食品標準成分表（八訂）増補2023年（文部科学省）') &&
-          nbDayOpenText.includes(
-            'めやすの出典: 日本人の食事摂取基準（2025年版）（厚生労働省）／健康日本21（第三次）（厚生労働省）',
-          ),
+          nbDayOpenText.includes('めやすの出典: 健康日本21（第三次）（厚生労働省）'),
       )
       check(
         'NUTRI-DAY-01 めやすの適用範囲(治療中・妊娠中は主治医の指示)を1行置く',
@@ -3964,6 +4041,10 @@ try {
       check(
         'NUTRI-DAY-01 未解錠では8項目の実数値が出ない(カルシウムのmg値が無い)',
         !/カルシウム\s*[\d,.]+\s*mg/.test(nbDayOpenText),
+      )
+      check(
+        "NUTRI-DAY-01(B') 未解錠では塩分相当量の実数値も出ない",
+        !/塩分相当量\s*[\d,.]/.test(nbDayOpenText),
       )
       check(
         'NUTRI-DAY-01 未解錠では鍵付き導線(Pro版で使えます/栄養価8項目のめやす)になる',
@@ -3979,9 +4060,9 @@ try {
         nbWeekOpenText.includes('7日ぶんのめやすとくらべる'),
       )
       check(
-        'NUTRI-WEEK-01 週のめやすは1日ぶん×7日(塩分52.5g/45.5g・野菜2,450g)',
-        /めやす 男性 52\.5g・女性 45\.5g/.test(nbWeekOpenText) &&
-          /めやす 2,450g/.test(nbWeekOpenText),
+        "NUTRI-WEEK-01(B') 週のめやすは1日ぶん×7日(無料は野菜2,450gのみ・塩分はPro側)",
+        /めやす 2,450g/.test(nbWeekOpenText) &&
+          !/めやす 男性 52\.5g・女性 45\.5g/.test(nbWeekOpenText),
       )
       check(
         'NUTRI-WEEK-01 めやすを何日ぶんに伸ばしたかを明示する',
@@ -3998,8 +4079,9 @@ try {
 
   // --- NUTRI-PRO-01: 同じパネルのPro視点(2026-07-30 便CL・docs/60 第1段)。
   // Pro解錠(コード入力UI経由)後は、日カード・週まとめの展開で栄養8項目の実数値＋野菜量が出て、
-  // 鍵付き導線が消えること。無料/Proの線引きは docs/08 の既存線引き(無料=エネルギー+食塩相当量、
-  // Pro=8項目)をそのまま踏襲し、野菜量だけ無料側にある ---
+  // 鍵付き導線が消えること。線引きは2026-08-01のB'(オーナー確定)＝
+  // 無料はエネルギー＋野菜量、Proは8項目(食塩相当量を含む)＋野菜量。
+  // 塩分の値・塩分のめやす並置がPro側にだけ出ることも、ここで見張る ---
   currentCheck = 'NUTRI-PRO-01'
   {
     const npBrowser = await chromium.launch()
@@ -4046,6 +4128,14 @@ try {
         /カルシウム\s*[\d,.]+\s*mg/.test(npOpenText),
       )
       check(
+        "NUTRI-PRO-01(B') Pro解錠済みでは塩分相当量の実数値が出る",
+        /塩分相当量\s*[\d,.]+\s*g/.test(npOpenText),
+      )
+      check(
+        "NUTRI-PRO-01(B') Pro解錠済みでは1行サマリーにも「塩分約◯g」が出る",
+        /塩分約[\d.]+g/.test(npOpenText),
+      )
+      check(
         'NUTRI-PRO-01 Pro解錠済みでも野菜量は同じパネルに並ぶ',
         /野菜\s*[\d,]+\s*g/.test(npOpenText),
       )
@@ -4056,6 +4146,12 @@ try {
       check(
         'NUTRI-PRO-01 Pro解錠済みでもめやすは塩分と野菜だけに並置する',
         /めやす 男性 7\.5g・女性 6\.5g/.test(npOpenText) && /めやす 350g/.test(npOpenText),
+      )
+      check(
+        "NUTRI-PRO-01(B') 塩分のめやすを出すので、その出典もPro側では挙げる",
+        npOpenText.includes(
+          'めやすの出典: 日本人の食事摂取基準（2025年版）（厚生労働省）／健康日本21（第三次）（厚生労働省）',
+        ),
       )
     } finally {
       await npBrowser.close()
@@ -8771,8 +8867,11 @@ try {
       check('SHARE-01 既定: 調理時間ON', await optionCheckbox('調理時間').isChecked())
       check('SHARE-01 既定: 原価OFF', !(await optionCheckbox('原価').isChecked()))
       check(
-        'SHARE-01 既定: 栄養OFF(行はカロリー・塩分の文言で表示。チェック行ラベルから「（めやす）」は削除済み・シェア本文側は法務配慮で残す)',
-        !(await optionCheckbox('1食あたりのカロリー・塩分').isChecked()),
+        // 2026-08-01 線引きB': 無料の栄養は「1食あたりのカロリー」だけ(塩分はPro解錠時のみ入る)。
+        // チェック行ラベルから「（めやす）」は削除済み・シェア本文側は法務配慮で残す
+        "SHARE-01(B') 既定: 栄養OFF・無料のラベルは「1食あたりのカロリー」(塩分を含まない)",
+        !(await optionCheckbox('1食あたりのカロリー').isChecked()) &&
+          !dialogText.includes('1食あたりのカロリー・塩分'),
       )
       check('SHARE-01 既定: 材料をすべて載せるOFF', !(await optionCheckbox('材料をすべて載せる').isChecked()))
 
@@ -8819,6 +8918,22 @@ try {
         'SHARE-01(b) 原価行(1人分/全量・登録人数基準)が入る',
         /原価 1人分 約[\d,]+円／全量（4人分） 約[\d,]+円/.test(copiedFull),
       )
+
+      // (b-2) 栄養ON(無料視点) → カロリーだけの栄養行が入り、塩分は入らない(2026-08-01 線引きB')
+      await optionCheckbox('1食あたりのカロリー').check()
+      await shareDialog.getByRole('button', { name: 'テキストでシェア' }).click()
+      await shPage.waitForTimeout(600)
+      const copiedNutrition = await shPage.evaluate(() => navigator.clipboard.readText())
+      check(
+        "SHARE-01(b-2/B') 無料の栄養行はカロリーだけ(めやす表記は残す)",
+        /1食あたり 約[\d,]+kcal（めやす(・一部の材料を除く)?）/.test(copiedNutrition),
+        copiedNutrition.split('\n').find((l) => l.includes('kcal')) ?? '栄養行なし',
+      )
+      check(
+        "SHARE-01(b-2/B') 無料のシェア文に塩分は入らない",
+        !copiedNutrition.includes('塩分'),
+      )
+      await optionCheckbox('1食あたりのカロリー').uncheck()
 
       // (c) 画像カードでシェア → 非対応環境ではPNGダウンロード(=生成成功のみ確認)
       const [download] = await Promise.all([
