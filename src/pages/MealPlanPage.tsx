@@ -3346,14 +3346,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.mealPlan.title}</h1>
 
-      {/* 日／週／月の3タブ(便U-1)。サンプルデモは月の画面だけを見せるので出さない */}
+      {/* 日／週／月の3タブ(便U-1)。サンプルデモは月の画面だけを見せるので出さない。
+          2026-08-03 便DJ(オーナー指示): 3つを画面の幅いっぱいに広げる(flex-1で等分)。
+          左に小さく寄っていて、タブの切替だと気づきにくく指も当てにくかった */}
       {!isDemo && (
       <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
         <button
           type="button"
           onClick={() => setViewMode('day')}
           aria-pressed={viewMode === 'day'}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+          className={`flex-1 rounded-sm border px-3 py-2 text-sm font-bold ${
             viewMode === 'day'
               ? 'border-accent bg-accent text-on-accent'
               : 'border-edge bg-surface text-ink-muted'
@@ -3365,7 +3367,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           type="button"
           onClick={() => setViewMode('week')}
           aria-pressed={viewMode === 'week'}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+          className={`flex-1 rounded-sm border px-3 py-2 text-sm font-bold ${
             viewMode === 'week'
               ? 'border-accent bg-accent text-on-accent'
               : 'border-edge bg-surface text-ink-muted'
@@ -3377,7 +3379,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           type="button"
           onClick={() => setViewMode('month')}
           aria-pressed={viewMode === 'month'}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+          className={`flex-1 rounded-sm border px-3 py-2 text-sm font-bold ${
             viewMode === 'month'
               ? 'border-accent bg-accent text-on-accent'
               : 'border-edge bg-surface text-ink-muted'
