@@ -547,6 +547,12 @@ export const ja = {
     planSheetImageShared: '献立表の画像を共有しました',
     planSheetImageCancelled: '画像の保存をやめました（保存はしていません）',
     planSheetImageFailed: '画像を作れませんでした。もう一度お試しください',
+    // 週タブの操作をグループに分ける見出し(2026-08-02 便DE-10・オーナー指示)。
+    // 週タブの上部は「色も形も同じボタン」が6種類・3行にわたって並んでいて、どれが表示の切替で
+    // どれが献立を書き換える操作なのかが見た目から分からなかった。機能ごとに囲み＋見出しで分ける
+    weekGroupDisplayTitle: '表示のしかた',
+    weekGroupAutoTitle: '自動で献立を入れる',
+    weekGroupTemplateTitle: '献立テンプレ',
     // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がゴチャつきの一因)。
     // 既定閉。選択中の条件が既定以外のときは畳んだラベルにも現在値を出す（例:「提案の条件: 和食」）
     suggestConditionsToggle: '提案の条件',

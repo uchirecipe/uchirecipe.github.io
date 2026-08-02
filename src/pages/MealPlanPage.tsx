@@ -794,11 +794,12 @@ const SLOT_TONE: Record<MealSlot, { bar: string; bg: string }> = {
 function RowThumb({ recipe }: { recipe: Recipe }) {
   const photoUrl = usePhotoUrl(recipe.photo)
   return (
-    <span data-testid="row-thumb" className="h-7 w-7 shrink-0 overflow-hidden rounded-sm">
+    // 2026-08-02 便DE-6: 入っている行を厚く見せる（空き行との密度差）ため、少し大きくする
+    <span data-testid="row-thumb" className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
       {photoUrl ? (
         <img src={photoUrl} alt="" className="h-full w-full object-cover" />
       ) : (
-        <RecipePlaceholder recipe={recipe} iconSize={16} />
+        <RecipePlaceholder recipe={recipe} iconSize={18} />
       )}
     </span>
   )
@@ -2842,19 +2843,27 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const isCooked = entryId != null && cookedPlanEntryIdSet.has(entryId)
     return (
       <div key={key} className="flex items-center gap-2">
-        <span className="w-10 shrink-0 text-xs font-bold text-ink-muted">{ja.mealPlan.role[role]}</span>
+        <span
+          className={`w-10 shrink-0 text-ink-muted ${
+            isEmpty ? 'text-[10px]' : 'text-xs font-bold'
+          }`}
+        >
+          {ja.mealPlan.role[role]}
+        </span>
         <button
           type="button"
           onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
-          className={`flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border px-2 py-2 text-left text-sm ${
+          // 2026-08-02 便DE-6(オーナー指示): 入っている行と空いている行の見分けをさらに強くする。
+          // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
+          // 空き行の「押せる」見た目（破線＋Plusアイコン＋アクセント色。便BH-3タスク5）は維持し、
+          // 食事ごとの地色（SLOT_TONE・便CW-1）にも手を入れない
+          className={`flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border px-2 text-left ${
             isEmpty
-              ? // タスク5: 空き枠は「＋ レシピを選ぶ」のボタン然とした見た目に(押せると分かるよう
-                // アクセント色＋Plusアイコン。従来は淡色「未定」で押せると分からない指摘への対応)
-                'border-dashed border-accent/50 bg-surface font-bold text-accent-ink'
+              ? 'border-dashed border-accent/40 py-1.5 text-xs font-bold text-accent-ink'
               : isCooked
                 ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)
-                  'border-edge bg-app/60 text-ink-muted opacity-80'
-                : 'border-edge bg-app'
+                  'border-edge bg-app/60 py-2.5 text-base font-bold text-ink-muted opacity-80'
+                : 'border-edge bg-surface py-2.5 text-base font-bold text-ink shadow-sm'
           }`}
         >
           {isEmpty ? (
@@ -3965,37 +3974,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {viewMode === 'week' && (
       <>
-      {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
-          既定は週区切り・選択は記憶する */}
-      <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
-        <button
-          type="button"
-          onClick={() => setWeekLayout(false)}
-          aria-pressed={!rollingWeek}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            !rollingWeek
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.weekLayoutCalendar}
-        </button>
-        <button
-          type="button"
-          onClick={() => setWeekLayout(true)}
-          aria-pressed={rollingWeek}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            rollingWeek
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.weekLayoutRolling}
-        </button>
-      </div>
-      {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
-          3体が切替自体を触っていなかった */}
-      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
+      {/* 2026-08-02 便DE-10(オーナー指示): 週タブの操作は「色も形も同じボタン」が並んでいて
+          グループ分けが曖昧だったため、機能ごとに囲み＋見出しで分けた。
+          並びは 週の移動 → 表示のしかた → 自動で献立を入れる → 献立テンプレ。
+          週の移動だけは「いまどの週を見ているか」で、ほかのグループ全部の前提になるので先頭に置く */}
 
       {/* 週の移動 */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
@@ -4028,9 +4010,48 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
       </div>
 
-      {/* 表示する食事帯 */}
-      <div className="mt-[var(--space-md)]">{renderSlotFilter()}</div>
+      {/* グループ1: 表示のしかた(週の並べ方・出す食事)。献立そのものは1件も変わらない操作だけを入れる */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+        <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.weekGroupDisplayTitle}</p>
+      {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
+          既定は週区切り・選択は記憶する */}
+      <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
+        <button
+          type="button"
+          onClick={() => setWeekLayout(false)}
+          aria-pressed={!rollingWeek}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            !rollingWeek
+              ? 'border-accent bg-accent text-on-accent'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.weekLayoutCalendar}
+        </button>
+        <button
+          type="button"
+          onClick={() => setWeekLayout(true)}
+          aria-pressed={rollingWeek}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            rollingWeek
+              ? 'border-accent bg-accent text-on-accent'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.weekLayoutRolling}
+        </button>
+      </div>
+      {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
+          3体が切替自体を触っていなかった */}
+      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
 
+      {/* 表示する食事帯 */}
+      <div className="mt-[var(--space-sm)]">{renderSlotFilter()}</div>
+      </section>
+
+      {/* グループ2: 自動で献立を入れる(条件＋実行ボタン)。押すと献立が増える操作をここに集める */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+        <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.weekGroupAutoTitle}</p>
       {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
           既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
           畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
@@ -4059,9 +4080,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       {/* 「おまかせで提案」(日タブ)との違いが名前から分からないという指摘への1行説明
           (2026-07-29 便CD/MP-15) */}
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
+      </section>
 
-      {/* A-1 マイ献立テンプレ＋B-2 曜日固定の定番(2026-07-29 便CB-2・docs/59)。
-          保存＝表示中の週を曜日ごと覚える／流し込む＝空いているところにだけ入れる(非破壊) */}
+      {/* グループ3: 献立テンプレ(2026-07-29 便CB-2・docs/59 A-1＋B-2)。
+          保存＝表示中の週を曜日ごと覚える／入れる＝空いているところにだけ入れる(非破壊) */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+        <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.weekGroupTemplateTitle}</p>
       <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
         <button
           type="button"
@@ -4081,6 +4105,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
       </div>
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateSaveDescription}</p>
+      </section>
 
       {/* 7日分のカード */}
       <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
