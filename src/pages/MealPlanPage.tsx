@@ -34,7 +34,7 @@ import { useSettings, updateSettings } from '../db/settings'
 import { usePriceEntries } from '../db/prices'
 import { usePantryItems } from '../db/pantry'
 import { pantryAvailableNames } from '../logic/pantry'
-import { searchRecipes, type TimeFilter, type EffortFilter, type TagFilter } from '../logic/search'
+import { searchRecipes, topTagsByUsage, type TimeFilter, type EffortFilter, type TagFilter } from '../logic/search'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import {
   useMealPlanRange,
@@ -187,11 +187,6 @@ const PICKER_EFFORT_OPTIONS: { value: EffortFilter; label: string }[] = [
   { value: 'easy', label: ja.effort.easy },
   { value: 'normal', label: ja.effort.normal },
   { value: 'fancy', label: ja.effort.fancy },
-]
-const PICKER_TAG_OPTIONS: { value: TagFilter; label: string }[] = [
-  { value: 'all', label: ja.search.tagAll },
-  { value: '作り置き', label: '作り置き' },
-  { value: 'お弁当', label: 'お弁当' },
 ]
 const pickerChipCls = (active: boolean) =>
   `rounded-sm border px-3 py-1.5 text-sm font-bold ${
@@ -907,6 +902,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const navigate = useNavigate()
   const location = useLocation()
   const dbRecipes = useLiveQuery(listRecipes, [])
+  // レシピピッカーの「よく使うタグ」: 便DIのレシピ一覧側と同じ頻度集計に統一
+  // (2026-08-03 司令部追随。従来はコード直書きの「作り置き/お弁当」の2択だった)
+  const pickerTagOptions = useMemo<{ value: TagFilter; label: string }[]>(
+    () => [
+      { value: 'all', label: ja.search.tagAll },
+      ...topTagsByUsage(dbRecipes ?? [], 8).map((t) => ({ value: t, label: t })),
+    ],
+    [dbRecipes],
+  )
   const recipes = isDemo ? demo.recipes : dbRecipes
   const [searchParams, setSearchParams] = useSearchParams()
   const dbSettings = useSettings()
@@ -4892,7 +4896,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </div>
                 <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">{ja.search.tagTitle}</p>
                 <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-                  {PICKER_TAG_OPTIONS.map((o) => (
+                  {pickerTagOptions.map((o) => (
                     <button
                       key={o.value}
                       type="button"
