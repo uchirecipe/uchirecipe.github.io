@@ -28,7 +28,7 @@
 //         代表品が同梱される・設定にテーマUIが一切存在しない・旧?set=付きURLは無害に設定へ着地する。
 //         旧「?set=テーマ取り込み」検証はテーマ廃止に伴い「全品同梱・テーマUI不存在」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
-//         全般/レシピ/バックアップ/Proの4節が1画面に同時に存在・上部の目次チップのタップで該当節へ
+//         全般/レシピ/バックアップ/Pro/アプリについての5節が1画面に同時に存在・上部の目次チップのタップで該当節へ
 //         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
@@ -1449,10 +1449,12 @@ try {
   }
 
   // --- SETTINGS-TAB-01: 設定画面の1本スクロール化(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
-  // 全般→レシピ→バックアップ→Proの4節が1画面に同時に存在し(=どれも隠れない)、上部の目次チップ
-  // (全般/レシピ/バックアップ/Pro)のタップで該当節へスクロールすること・?section=/?set=直リンクが
-  // 該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は「4節が同時に存在する」検証へ、
-  // 旧aria-pressed検証はスクロール位置検証へ置き換えた(テスト意図: タブ選択→節スクロールに読み替え) ---
+  // 全般→レシピ→バックアップ→Pro→アプリについての5節が1画面に同時に存在し(=どれも隠れない)、
+  // 上部の目次チップ(全般/レシピ/バックアップ/Pro/アプリ)のタップで該当節へスクロールすること・
+  // ?section=/?set=直リンクが該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は
+  // 「全節が同時に存在する」検証へ、旧aria-pressed検証はスクロール位置検証へ置き換えた。
+  // 2026-08-02 オーナー指示: 旧「全般」節の中にあった「その他」(＝アプリについて)を
+  // ページ最後の独立した節へ移した(その他がページ途中にある違和感の解消) ---
   currentCheck = 'SETTINGS-TAB-01'
   await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1000)
@@ -1467,12 +1469,29 @@ try {
     )
   }
   check(
-    'SETTINGS-TAB-01 目次チップ(全般/レシピ/バックアップ/Pro)が4つとも存在する',
+    'SETTINGS-TAB-01 目次チップ(全般/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
     (await page.getByRole('button', { name: '全般', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'レシピ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'バックアップ', exact: true }).count()) === 1 &&
-      (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1,
+      (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1 &&
+      (await page.getByRole('button', { name: 'アプリ', exact: true }).count()) === 1,
   )
+  // 2026-08-02: 目次チップは5列。390px幅で1行に収まり、文字が折り返して高さが揃わなくならないこと
+  {
+    const chipRows = await page.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="設定の目次"]')
+      if (!nav) return null
+      const chips = Array.from(nav.querySelectorAll('button'))
+      const tops = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().top)))
+      const heights = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().height)))
+      return { count: chips.length, rows: tops.size, heights: heights.size }
+    })
+    check(
+      'SETTINGS-TAB-01 目次チップ5つが1行に収まり、高さが揃っている(文字の折り返しが起きない)',
+      chipRows !== null && chipRows.count === 5 && chipRows.rows === 1 && chipRows.heights === 1,
+      JSON.stringify(chipRows),
+    )
+  }
   // 節の上端(viewport相対top)を返すヘルパ。sticky目次チップ(約88px)の下付近(<200)へ来たら
   // 「その節の先頭までスクロールした」とみなす(scroll-mt-24でチップ分だけ下げている)
   const settingsSectionTop = (id) =>
@@ -1528,6 +1547,52 @@ try {
     recipeChipTop !== null && recipeChipTop >= -5 && recipeChipTop < 200,
     `recipeChipTop=${recipeChipTop}`,
   )
+  // 2026-08-02: 「アプリについて」節がページのいちばん最後(Pro節より下)にあること。
+  // 旧構成では全般節の途中(レシピ節より上)にあり、「その他」がページ途中に出ていた
+  {
+    const order = await page.evaluate(() =>
+      ['section-basic', 'section-recipe', 'section-backup', 'section-pro', 'section-about'].map(
+        (id) => {
+          const el = document.getElementById(id)
+          return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : null
+        },
+      ),
+    )
+    check(
+      'SETTINGS-TAB-01(2026-08-02) 節の並びは 全般→レシピ→バックアップ→Pro→アプリについて',
+      order.every((v) => v !== null) && order.every((v, i) => i === 0 || v > order[i - 1]),
+      JSON.stringify(order),
+    )
+    // 「その他」の小見出しが全般節から消えていること(売り場順カードの食材グループ名にも
+    // 「その他」があるので、本文まるごとではなく小見出しの<p>だけを見る)
+    const otherHeadingLeft = await page.evaluate(() => {
+      const basic = document.getElementById('section-basic')
+      if (!basic) return null
+      return Array.from(basic.querySelectorAll('p')).some((el) => el.textContent?.trim() === 'その他')
+    })
+    check(
+      'SETTINGS-TAB-01(2026-08-02) 全般節に「その他」の小見出しが残っていない',
+      otherHeadingLeft === false,
+      `otherHeadingLeft=${otherHeadingLeft}`,
+    )
+  }
+  // ?section=about の直リンクが「アプリについて」節へ着地する(既存の?section=値は不変)
+  {
+    await page.goto(`${BASE}/#/settings?section=about`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
+    await waitScrollSettled()
+    const aboutTop = await settingsSectionTop('section-about')
+    const aboutAtBottom = await page.evaluate(
+      () => window.innerHeight + Math.ceil(window.scrollY) >= document.body.scrollHeight - 8,
+    )
+    check(
+      'SETTINGS-TAB-01(2026-08-02) ?section=about で「アプリについて」節へ着地する',
+      aboutTop !== null && (aboutTop < 200 || aboutAtBottom),
+      `aboutTop=${aboutTop} atBottom=${aboutAtBottom}`,
+    )
+    await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(800)
+  }
 
   // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。目次チップの下・
   // 全節共通の常設バナー。未実施は「まだバックアップしていません」、「書き出しへ」はどこからでも
