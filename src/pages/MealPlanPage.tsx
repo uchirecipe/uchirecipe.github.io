@@ -58,6 +58,7 @@ import {
   useTodayList,
   removeFromTodayList,
   markTodayListCooked,
+  undoTodayListCooked,
   markAllTodayListCooked,
   importRecipeIdsToTodayList,
 } from '../db/todayList'
@@ -73,6 +74,7 @@ import {
   monthDates,
   shiftMonth,
   monthLeadingBlanks,
+  suggestCandidates,
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
@@ -1527,6 +1529,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3)。既定閉
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const [message, setMessage] = useState('')
+  /**
+   * 直前の「作った」を戻すための控え（2026-08-02 便DE-3）。トーストに「元に戻す」を出すのは、
+   * いま出ているトーストがその記録のものであるときだけにしたいので、対象のレシピと
+   * 一緒にそのときの文言も持っておく（別の操作でトーストが差し替わったら操作ごと消える）。
+   */
+  const [undoCooked, setUndoCooked] = useState<{ recipeId: number; message: string } | null>(null)
+  const undoCookedActive = undoCooked != null && undoCooked.message === message
+  const runUndoCooked = async () => {
+    if (!undoCooked) return
+    const done = await undoTodayListCooked(undoCooked.recipeId)
+    setUndoCooked(null)
+    if (!done) {
+      setMessage(ja.mealPlan.todayCookedUndoNothing)
+      return
+    }
+    // 在庫を1段階下げる設定がONのときは、戻していないものを黙らずに添える
+    setMessage(
+      settings?.cookedReflectPantry
+        ? `${ja.mealPlan.todayCookedUndone} ${ja.mealPlan.todayCookedUndoPantryNote}`
+        : ja.mealPlan.todayCookedUndone,
+    )
+  }
 
   // 日付メモ(2026-07-29 便CB-1・docs/59 A-2): レシピに紐付かない「その日1行の自由メモ」。
   // 週タブの各日カード・月タブの日モーダルで編集し、月カレンダーのセルには「メモあり」の点を出す。
@@ -1748,6 +1772,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       PURPOSE_REDRAW_ATTEMPTS,
     )
   }
+
+  /**
+   * 「おまかせで提案」がいまくじを引いている候補の数（2026-08-02 便DE-5・オーナー指示）。
+   * 候補が2品しかない条件では、振り直しても同じ料理が出続けて壊れているように見えるため、
+   * 数字を画面に出して理由が分かるようにする。数えるのは主菜の候補
+   * （ペア提案は主菜を引いてから、その主菜に合わせて副菜を引くので、変わり映えの元は主菜側）。
+   */
+  const suggestCandidateCount = useMemo(() => {
+    const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
+    return suggestCandidates(visibleRecipes, {
+      quickOnly,
+      excludeNg: true,
+      ngIngredients: settings?.ngIngredients ?? [],
+      usedRecipeIds: [],
+      slot,
+      genre: genreFilter,
+      preferHighProtein,
+      yesterdayRecipeIds,
+      role: 'main',
+    }).length
+  }, [
+    visibleRecipes,
+    quickOnly,
+    settings?.ngIngredients,
+    visibleSlots,
+    genreFilter,
+    preferHighProtein,
+    yesterdayRecipeIds,
+  ])
 
   // 主菜+副菜のペアを1組計算する(タスク1/2共用)。提案元の枠は「表示中の食事帯に夕食があれば
   // 夕食、無ければ先頭の帯」を使う。excludeIdsに渡したレシピは候補から外す(振り直しで直前の提案を
@@ -3277,7 +3330,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </div>
       )}
 
-      <Toast message={message} onClose={() => setMessage('')} />
+      {/* 「作った」の直後だけ「元に戻す」を添える(2026-08-02 便DE-3。買い物メモ・食材価格と同じ形) */}
+      <Toast
+        message={message}
+        onClose={() => {
+          setMessage('')
+          setUndoCooked(null)
+        }}
+        actionLabel={undoCookedActive ? ja.common.undo : undefined}
+        onAction={undoCookedActive ? () => void runUndoCooked() : undefined}
+      />
 
       {viewMode === 'day' && (
         <>
@@ -3293,9 +3355,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       key={recipe.id}
                       recipe={recipe}
                       onCooked={() => {
-                        void markTodayListCooked(recipe.id!)
-                        // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
-                        setMessage(ja.mealPlan.todayCookedToast)
+                        void (async () => {
+                          await markTodayListCooked(recipe.id!)
+                          // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示。
+                          // 2026-08-02 便DE-3: そのトーストから「元に戻す」で取り消せるようにする
+                          setMessage(ja.mealPlan.todayCookedToast)
+                          setUndoCooked({
+                            recipeId: recipe.id!,
+                            message: ja.mealPlan.todayCookedToast,
+                          })
+                        })()
                       }}
                       onRemove={() => void removeFromTodayList(recipe.id!)}
                     />
@@ -3312,6 +3381,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     <Dices size={18} aria-hidden />
                     {ja.mealPlan.todayReroll}
                   </button>
+                )}
+                {/* いま候補が何品あるか(2026-08-02 便DE-5)。少ない条件では振り直しても
+                    同じ料理が出続けるので、その理由が数字で分かるようにする */}
+                {lastSuggestedIds.length > 0 && (
+                  <p className="mt-1 text-center text-xs text-ink-muted">
+                    {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}
+                  </p>
                 )}
                 <button
                   type="button"
@@ -3405,7 +3481,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </button>
                   {/* 週タブの「まとめて献立を立てる」との違いを一言で示す
                       (2026-07-29 便CD/MP-15。名前が近く区別が付かないという指摘) */}
-                  <p className="-mt-1 text-xs text-ink-muted">{ja.mealPlan.todaySuggestHint}</p>
+                  <p className="-mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.todaySuggestHint}（
+                    {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}）
+                  </p>
                   {todayFromPlanIds.length > 0 && (
                     <button
                       type="button"

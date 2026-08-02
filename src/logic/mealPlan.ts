@@ -453,6 +453,21 @@ export function isOneDish(recipe: Pick<Recipe, 'title' | 'tags'>): boolean {
  * 候補が無くなったら段階的に条件を緩めて必ず何か返す（季節外しか無い場合を除き0件にはしない）。
  */
 export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Recipe | undefined {
+  const pool = suggestCandidates(recipes, options)
+  if (pool.length === 0) return undefined
+  return pool[Math.floor(Math.random() * pool.length)]
+}
+
+/**
+ * suggestForSlot が最後にくじを引く「候補の一覧」をそのまま返す（2026-08-02 便DE-5）。
+ * 抽選（Math.random）だけを suggestForSlot に残し、絞り込みはすべてこちらに置く＝
+ * **提案の中身は1ミリも変えずに**、候補が何品あるのかを画面に出せるようにするための分離。
+ *
+ * 何のために要るか: 候補が2品しかない状態でサイコロを何度も押すと、同じ料理が続けて出る。
+ * これが「壊れている」ように見える（オーナー指摘）ので、画面に「候補◯品」を出して
+ * 変わらない理由が分かるようにする。
+ */
+export function suggestCandidates(recipes: Recipe[], options: SuggestOptions): Recipe[] {
   const season = options.season ?? currentSeason()
   const base = recipes.filter((r) => {
     // 季節外（例: 8月に冬タグのシチュー）は提案しない。通年・未設定は常に対象
@@ -464,7 +479,7 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
       return false
     return true
   })
-  if (base.length === 0) return undefined
+  if (base.length === 0) return []
 
   // 時間帯が一致する(または未設定の)レシピを優先。無ければ全体まで含める
   const slotMatched = base.filter(
@@ -543,13 +558,11 @@ export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Reci
   const notUsedThisWeek = yesterdayFiltered.filter((r) => !options.usedRecipeIds.includes(r.id!))
   const freshAndUnused = notUsedThisWeek.filter((r) => !cookedWithinDays(r, 14))
 
-  const pool =
-    freshAndUnused.length > 0
-      ? freshAndUnused
-      : notUsedThisWeek.length > 0
-        ? notUsedThisWeek
-        : yesterdayFiltered
-  return pool[Math.floor(Math.random() * pool.length)]
+  return freshAndUnused.length > 0
+    ? freshAndUnused
+    : notUsedThisWeek.length > 0
+      ? notUsedThisWeek
+      : yesterdayFiltered
 }
 
 export interface SuggestPairResult {

@@ -46,6 +46,7 @@ import {
 import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
 import {
+  suggestCandidates,
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
@@ -1770,6 +1771,31 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     suggestForSlot([mkRecipe(1, { tags: ['汁物'] })], opts({ slot: 'breakfast' }))?.id,
     1,
   )
+
+  // ---- 候補数の表示(2026-08-02 便DE-5) ----
+  // suggestCandidates は「suggestForSlot が最後にくじを引く候補の一覧」をそのまま返す。
+  // 画面の「候補◯品」がこの関数の件数なので、①絞り込みの結果と一致すること
+  // ②suggestForSlot が返す品は必ずこの一覧に入っていること(＝提案の中身を変えていないこと)を固定する
+  {
+    const recipes = [
+      mkRecipe(1, { tags: ['和食'] }),
+      mkRecipe(2, { tags: ['汁物'] }),
+      mkRecipe(3, { season: 'winter' }),
+    ]
+    const mainPool = suggestCandidates(recipes, opts({ role: 'main' }))
+    eq('候補数: 主菜の候補は季節外・副菜系を除いた1品', mainPool.length, 1)
+    eq('候補数: 主菜の候補の中身', mainPool[0].id, 1)
+    const sidePool = suggestCandidates(recipes, opts({ role: 'side' }))
+    eq('候補数: 副菜の候補は汁物の1品', sidePool.map((r) => r.id).join(','), '2')
+    eq('候補数: 季節外しか無ければ0品', suggestCandidates([mkRecipe(9, { season: 'winter' })], opts()).length, 0)
+    const poolIds = suggestCandidates(recipes, opts({ role: 'main' })).map((r) => r.id)
+    const picked = Array.from({ length: 20 }, () => suggestForSlot(recipes, opts({ role: 'main' }))?.id)
+    eq(
+      '候補数: suggestForSlot は必ず候補一覧の中から選ぶ',
+      picked.every((id) => poolIds.includes(id)),
+      true,
+    )
+  }
 
   // ---- role指定・ジャンル優先・高たんぱく優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
 

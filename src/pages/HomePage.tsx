@@ -463,6 +463,11 @@ export default function HomePage() {
               <Dices size={20} aria-hidden />
               {ja.home.shuffle}
             </button>
+            {/* いま候補が何品あるか(2026-08-02 便DE-5・オーナー指示)。候補が少ない条件では
+                振り直しても同じ料理が続けて出るので、その理由が数字で分かるようにする */}
+            <p className="mt-1 text-center text-xs text-ink-muted">
+              {ja.common.candidateCount.replace('{n}', String(finalCandidates.length))}
+            </p>
           </>
         )}
       </section>
