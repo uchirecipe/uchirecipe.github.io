@@ -814,8 +814,10 @@ try {
     formText.includes('合わせ調味料は、材料の丸ボタンで色分けしておくと、調理中モードでまとめて表示されます'),
   )
   check(
-    'SMK-04 「食材と価格」への近道は材料欄の1本のみ(案内側のリンクは廃止)',
-    (await page.locator('a[href="#/prices"]').count()) === 1,
+    'SMK-04(2026-08-03改定) レシピ登録・編集画面に「食材と価格」への案内・リンクを置かない',
+    (await page.locator('a[href="#/prices"]').count()) === 0 &&
+      !formText.includes('価格は「食材と価格」ページでまとめて管理します') &&
+      !formText.includes('食材と価格を編集する'),
     `#/pricesリンク数=${await page.locator('a[href="#/prices"]').count()}`,
   )
   currentCheck = 'SMK-02'
@@ -1154,13 +1156,22 @@ try {
       await w390Page.waitForTimeout(1200)
       await w390Page.getByText('肉じゃが', { exact: true }).first().click()
       await w390Page.waitForTimeout(600)
+      // 2026-08-03 オーナー指示: 原価トグルは押しても場所が動かないこと。ボタン自身と
+      // 人数ステッパーの位置を毎回測り、開閉で1pxも動かないことを見張る(再発防止)
+      const costToggle = w390Page.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
       const measure = async () => {
         const doc = await w390Page.evaluate(() => ({
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
         }))
         const box = await w390Page.getByRole('button', { name: '人数を増やす' }).boundingBox()
-        return { ...doc, plusRight: box ? box.x + box.width : null }
+        const toggleBox = await costToggle.boundingBox()
+        return {
+          ...doc,
+          plusRight: box ? box.x + box.width : null,
+          plusPos: box ? `${Math.round(box.x)},${Math.round(box.y)}` : null,
+          togglePos: toggleBox ? `${Math.round(toggleBox.x)},${Math.round(toggleBox.y)}` : null,
+        }
       }
       const before = await measure()
       check(
@@ -1168,7 +1179,7 @@ try {
         before.scrollWidth === before.clientWidth,
         JSON.stringify(before),
       )
-      await w390Page.getByRole('button', { name: '原価を見る' }).click()
+      await costToggle.click()
       await w390Page.waitForTimeout(400)
       const view = await measure()
       check(
@@ -1181,6 +1192,11 @@ try {
         view.plusRight != null && view.plusRight <= view.clientWidth,
         JSON.stringify(view),
       )
+      check(
+        'UI-390-01(2026-08-03) 原価トグルを押してもボタンと人数ステッパーの位置が動かない',
+        view.togglePos === before.togglePos && view.plusPos === before.plusPos,
+        `OFF=${JSON.stringify(before)} ON=${JSON.stringify(view)}`,
+      )
       await w390Page.getByRole('button', { name: '原価を編集' }).click()
       await w390Page.waitForTimeout(400)
       const edit = await measure()
@@ -1190,6 +1206,11 @@ try {
           edit.plusRight != null &&
           edit.plusRight <= edit.clientWidth,
         JSON.stringify(edit),
+      )
+      check(
+        'UI-390-01(2026-08-03) 「原価を編集」を出しても原価トグル・人数ステッパーの位置は動かない',
+        edit.togglePos === before.togglePos && edit.plusPos === before.plusPos,
+        `OFF=${JSON.stringify(before)} EDIT=${JSON.stringify(edit)}`,
       )
       // --- UI-390-02: 時間トークン2連の接着(「[30分]〜[1時間]ほど漬ける。」)が横あふれを
       // 起こさないこと(2026-07-27 機能④診断C1。mergeTildeBoxesの無条件nowrap接着で
@@ -9573,7 +9594,9 @@ try {
       const ingredientsSection = pvPage.locator('section', {
         has: pvPage.getByRole('heading', { name: '材料', level: 2 }),
       })
-      const viewButton = pvPage.getByRole('button', { name: '原価を見る' })
+      // 2026-08-03 オーナー指示: 「原価を見る」は押した状態でラベルが「材料に戻す」に
+      // 入れ替わる同一ボタンのトグルになった。開閉どちらの表記でも同じボタンを掴めるようにする
+      const viewButton = pvPage.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
       const editButton = pvPage.getByRole('button', { name: '原価を編集' })
       const onionRow = ingredientsSection.locator('li', { hasText: '玉ねぎ' })
       const waterRow = ingredientsSection.locator('li', { hasText: '水' })
@@ -9590,10 +9613,22 @@ try {
         (await editButton.count()) === 0,
       )
 
+      check(
+        'PRICEVIEW-01(2026-08-03) 既定は「原価を見る」表記(戻す側の表記は出ていない)',
+        (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 1 &&
+          (await pvPage.getByRole('button', { name: '材料に戻す' }).count()) === 0,
+      )
+
       // ---------- 「原価を見る」ON: 「原価を編集」ボタンが出現し、各行が1食あたりの按分原価になる ----------
       await viewButton.click()
       await pvPage.waitForTimeout(300)
       check('PRICEVIEW-01 「原価を見る」ON: 押したボタンがaria-pressed=trueになる', (await viewButton.getAttribute('aria-pressed')) === 'true')
+      // 2026-08-03 オーナー指示「押しても場所が変わらず、表示中は戻し方が分かる表記にする」の再発防止
+      check(
+        'PRICEVIEW-01(2026-08-03) 原価表示中はラベルが「材料に戻す」に入れ替わる',
+        (await pvPage.getByRole('button', { name: '材料に戻す' }).count()) === 1 &&
+          (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 0,
+      )
       check('PRICEVIEW-01 「原価を見る」ON: 「原価を編集」ボタンが出現する(階層構造)', (await editButton.count()) === 1)
       const onText = await ingredientsSection.textContent()
       check(
@@ -9742,6 +9777,11 @@ try {
       await viewButton.click()
       await pvPage.waitForTimeout(300)
       check('PRICEVIEW-01 「原価を見る」を再度押すと非表示になる: aria-pressed=false', (await viewButton.getAttribute('aria-pressed')) === 'false')
+      check(
+        'PRICEVIEW-01(2026-08-03) 非表示に戻るとラベルも「原価を見る」に戻る',
+        (await pvPage.getByRole('button', { name: '原価を見る' }).count()) === 1 &&
+          (await pvPage.getByRole('button', { name: '材料に戻す' }).count()) === 0,
+      )
       check(
         'PRICEVIEW-01 非表示に戻る: 「原価を編集」ボタンも消える(階層構造)',
         (await editButton.count()) === 0,
