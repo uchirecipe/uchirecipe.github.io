@@ -765,8 +765,8 @@ try {
   } else if (await exportBtn.count()) {
     await crop(page, 'backup-export', exportBtn, { top: 300, padTop: 14, padBottom: 14 })
   }
-  const importBtn = page.getByRole('button', { name: /読み込む（今のデータに追加）/ }).first()
-  const replaceBtn = page.getByRole('button', { name: /読み込む（今のデータと置き換え）/ }).first()
+  const importBtn = page.getByRole('button', { name: /今のデータに追加/ }).first()
+  const replaceBtn = page.getByRole('button', { name: /データを上書き/ }).first()
   if ((await importBtn.count()) && (await replaceBtn.count())) {
     await cropRange(page, 'backup-import', importBtn, replaceBtn, { top: 160, padBottom: 110 })
   }

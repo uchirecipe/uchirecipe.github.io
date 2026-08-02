@@ -28,7 +28,7 @@
 //         代表品が同梱される・設定にテーマUIが一切存在しない・旧?set=付きURLは無害に設定へ着地する。
 //         旧「?set=テーマ取り込み」検証はテーマ廃止に伴い「全品同梱・テーマUI不存在」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
-//         全般/レシピ/バックアップ/Proの4節が1画面に同時に存在・上部の目次チップのタップで該当節へ
+//         全般/レシピ/バックアップ/Pro/アプリについての5節が1画面に同時に存在・上部の目次チップのタップで該当節へ
 //         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
@@ -165,7 +165,7 @@
 //         実際のJSON書き込み内容の往復まではここでは検証できない(scripts/test-logic.mjsの
 //         単体テストとコードレビューで別途担保。報告に明記) /
 //         BACKUPCARDS-01(2026-07-17バックアップ改修 修正5: バックアップタブを3カード
-//         (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成。②で「追加」
+//         (①バックアップを取る/②バックアップを読み込む/③困ったとき)に再構成。②で「追加」
 //         「置き換え」ボタンが並んで見えること・①に解錠コード注意文があることを確認) /
 //         PRICEVIEW-01(レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
 //         全面改修・2026-07-20 便AJ(docs/45)で再改修。既定は非表示で材料行に金額表示は無く、
@@ -487,10 +487,16 @@ try {
   // --- NUT-01: 栄養価の概算(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
   // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。
   // 2026-08-01 線引きB'(オーナー確定): 無料で出るのは**エネルギーと野菜量**の2つで、
-  // 食塩相当量は残り6項目と同じPro側へ移した。閉じた1行はエネルギーだけ) ---
+  // 食塩相当量は残り6項目と同じPro側へ移した。
+  // 2026-08-02 オーナー指示: 閉じた1行も無料の2値(エネルギー・野菜量)にそろえた) ---
   currentCheck = 'NUT-01'
   check('NUT-01 栄養価の概算 見出しが閉じた状態から見える', detailText.includes('栄養価の概算'))
   check('NUT-01 エネルギー(kcal)の概算が閉じた1行から見える', /\d+kcal/.test(detailText))
+  check(
+    'NUT-01(2026-08-02) 閉じた1行は「◯kcal・野菜約◯g」の2値',
+    /[\d,]+kcal・野菜約[\d,]+g/.test(detailText),
+    `閉じた1行=${detailText.match(/.{0,24}kcal.{0,16}/)?.[0]}`,
+  )
   check(
     "NUT-01(B') 無料の閉じた1行に塩分が出ない",
     !detailText.includes('塩分'),
@@ -1443,10 +1449,12 @@ try {
   }
 
   // --- SETTINGS-TAB-01: 設定画面の1本スクロール化(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
-  // 全般→レシピ→バックアップ→Proの4節が1画面に同時に存在し(=どれも隠れない)、上部の目次チップ
-  // (全般/レシピ/バックアップ/Pro)のタップで該当節へスクロールすること・?section=/?set=直リンクが
-  // 該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は「4節が同時に存在する」検証へ、
-  // 旧aria-pressed検証はスクロール位置検証へ置き換えた(テスト意図: タブ選択→節スクロールに読み替え) ---
+  // 全般→レシピ→バックアップ→Pro→アプリについての5節が1画面に同時に存在し(=どれも隠れない)、
+  // 上部の目次チップ(全般/レシピ/バックアップ/Pro/アプリ)のタップで該当節へスクロールすること・
+  // ?section=/?set=直リンクが該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は
+  // 「全節が同時に存在する」検証へ、旧aria-pressed検証はスクロール位置検証へ置き換えた。
+  // 2026-08-02 オーナー指示: 旧「全般」節の中にあった「その他」(＝アプリについて)を
+  // ページ最後の独立した節へ移した(その他がページ途中にある違和感の解消) ---
   currentCheck = 'SETTINGS-TAB-01'
   await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1000)
@@ -1461,12 +1469,29 @@ try {
     )
   }
   check(
-    'SETTINGS-TAB-01 目次チップ(全般/レシピ/バックアップ/Pro)が4つとも存在する',
+    'SETTINGS-TAB-01 目次チップ(全般/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
     (await page.getByRole('button', { name: '全般', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'レシピ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'バックアップ', exact: true }).count()) === 1 &&
-      (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1,
+      (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1 &&
+      (await page.getByRole('button', { name: 'アプリ', exact: true }).count()) === 1,
   )
+  // 2026-08-02: 目次チップは5列。390px幅で1行に収まり、文字が折り返して高さが揃わなくならないこと
+  {
+    const chipRows = await page.evaluate(() => {
+      const nav = document.querySelector('nav[aria-label="設定の目次"]')
+      if (!nav) return null
+      const chips = Array.from(nav.querySelectorAll('button'))
+      const tops = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().top)))
+      const heights = new Set(chips.map((el) => Math.round(el.getBoundingClientRect().height)))
+      return { count: chips.length, rows: tops.size, heights: heights.size }
+    })
+    check(
+      'SETTINGS-TAB-01 目次チップ5つが1行に収まり、高さが揃っている(文字の折り返しが起きない)',
+      chipRows !== null && chipRows.count === 5 && chipRows.rows === 1 && chipRows.heights === 1,
+      JSON.stringify(chipRows),
+    )
+  }
   // 節の上端(viewport相対top)を返すヘルパ。sticky目次チップ(約88px)の下付近(<200)へ来たら
   // 「その節の先頭までスクロールした」とみなす(scroll-mt-24でチップ分だけ下げている)
   const settingsSectionTop = (id) =>
@@ -1522,6 +1547,52 @@ try {
     recipeChipTop !== null && recipeChipTop >= -5 && recipeChipTop < 200,
     `recipeChipTop=${recipeChipTop}`,
   )
+  // 2026-08-02: 「アプリについて」節がページのいちばん最後(Pro節より下)にあること。
+  // 旧構成では全般節の途中(レシピ節より上)にあり、「その他」がページ途中に出ていた
+  {
+    const order = await page.evaluate(() =>
+      ['section-basic', 'section-recipe', 'section-backup', 'section-pro', 'section-about'].map(
+        (id) => {
+          const el = document.getElementById(id)
+          return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : null
+        },
+      ),
+    )
+    check(
+      'SETTINGS-TAB-01(2026-08-02) 節の並びは 全般→レシピ→バックアップ→Pro→アプリについて',
+      order.every((v) => v !== null) && order.every((v, i) => i === 0 || v > order[i - 1]),
+      JSON.stringify(order),
+    )
+    // 「その他」の小見出しが全般節から消えていること(売り場順カードの食材グループ名にも
+    // 「その他」があるので、本文まるごとではなく小見出しの<p>だけを見る)
+    const otherHeadingLeft = await page.evaluate(() => {
+      const basic = document.getElementById('section-basic')
+      if (!basic) return null
+      return Array.from(basic.querySelectorAll('p')).some((el) => el.textContent?.trim() === 'その他')
+    })
+    check(
+      'SETTINGS-TAB-01(2026-08-02) 全般節に「その他」の小見出しが残っていない',
+      otherHeadingLeft === false,
+      `otherHeadingLeft=${otherHeadingLeft}`,
+    )
+  }
+  // ?section=about の直リンクが「アプリについて」節へ着地する(既存の?section=値は不変)
+  {
+    await page.goto(`${BASE}/#/settings?section=about`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(1200)
+    await waitScrollSettled()
+    const aboutTop = await settingsSectionTop('section-about')
+    const aboutAtBottom = await page.evaluate(
+      () => window.innerHeight + Math.ceil(window.scrollY) >= document.body.scrollHeight - 8,
+    )
+    check(
+      'SETTINGS-TAB-01(2026-08-02) ?section=about で「アプリについて」節へ着地する',
+      aboutTop !== null && (aboutTop < 200 || aboutAtBottom),
+      `aboutTop=${aboutTop} atBottom=${aboutAtBottom}`,
+    )
+    await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(800)
+  }
 
   // --- BANNER-01(2026-07-17設定ゼロベース裁定#1): バックアップ状態バナー。目次チップの下・
   // 全節共通の常設バナー。未実施は「まだバックアップしていません」、「書き出しへ」はどこからでも
@@ -1589,7 +1660,7 @@ try {
     check(
       'MOVEGUIDE-01 展開すると4ステップが見える',
       guideText.includes('この端末で「ファイルに書き出す」') &&
-        guideText.includes('読み込む（今のデータと置き換え）') &&
+        guideText.includes('「データを上書き」を押してそのファイルを選ぶ') &&
         guideText.includes('Pro版は①のファイルから一緒に戻ります'),
     )
     check(
@@ -1612,15 +1683,16 @@ try {
 
   currentCheck = 'BACKUPCARDS-01'
   // 修正5(2026-07-17バックアップ改修): バックアップタブが3カード
-  // (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成されたこと
+  // (①バックアップを取る/②バックアップを読み込む/③困ったとき)に再構成されたこと
+  // (2026-08-02 オーナー指示で②の見出し・ボタン文言を短くした)
   check(
-    'BACKUPCARDS-01 「バックアップから戻す」の見出しが見える(カード②)',
-    (await page.textContent('body')).includes('バックアップから戻す'),
+    'BACKUPCARDS-01 「バックアップを読み込む」の見出しが見える(カード②)',
+    (await page.textContent('body')).includes('バックアップを読み込む'),
   )
   check(
-    'BACKUPCARDS-01 「追加」「置き換え」の両ボタンが同時に見える(並べて配置)',
-    (await page.textContent('body')).includes('読み込む（今のデータに追加）') &&
-      (await page.textContent('body')).includes('読み込む（今のデータと置き換え）'),
+    'BACKUPCARDS-01 「今のデータに追加」「データを上書き」の両ボタンが同時に見える(並べて配置)',
+    (await page.textContent('body')).includes('今のデータに追加') &&
+      (await page.textContent('body')).includes('データを上書き'),
   )
   check(
     'BACKUPCARDS-01 修正1: バックアップに解錠コードが含まれる旨の注意文が見える(呼称は便CJ/C9で統一)',
@@ -5728,9 +5800,9 @@ try {
         rcFutureText.includes('概算'),
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品を、1食ずつ足した概算です」',
-        rcFutureText.includes('登録した献立2品を、1食ずつ足した概算です'),
-        `注記=${rcFutureText.match(/.{0,10}1食ずつ足した概算です/)?.[0]}`,
+        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品の栄養価を、1食分ずつ足して算出した数値です」',
+        rcFutureText.includes('登録した献立2品の栄養価を、1食分ずつ足して算出した数値です'),
+        `注記=${rcFutureText.match(/.{0,10}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
 
       // 終了日<開始日の順にタップしても自動で入れ替わり同じ結果になる
@@ -5788,8 +5860,8 @@ try {
         `全体=${rcPastText.match(/作った記録の食費（作った人数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品を、1食ずつ足した概算です」',
-        rcPastText.includes('作った記録1品を、1食ずつ足した概算です'),
+        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品の栄養価を、1食分ずつ足して算出した数値です」',
+        rcPastText.includes('作った記録1品の栄養価を、1食分ずつ足して算出した数値です'),
       )
       // 記録も予定も無い期間は空案内
       await rcDay(`${rcPrevPrefix}-20`).click()
@@ -5826,8 +5898,8 @@ try {
           `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
         )
         check(
-          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品を、1食ずつ足した概算です」',
-          rcMixedText.includes('作った記録1品と登録した献立1品を、1食ずつ足した概算です'),
+          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です」',
+          rcMixedText.includes('作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
         )
         const rcMixedPersonal = Number(
           (rcMixedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
@@ -6555,7 +6627,7 @@ try {
       )
       check(
         'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
-        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算した概算です'),
+        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算した概算の数値です'),
       )
       await mePage.getByRole('button', { name: '内訳を見る' }).click()
       await mePage.waitForTimeout(300)
@@ -6917,6 +6989,67 @@ try {
         psSheetText.includes('うちレシピ') && psSheetText.includes('uchirecipe.com'),
       )
 
+      // 2026-08-02 オーナー指示(a): 登録のない日は既定で載せない。
+      // この週で中身があるのは今日だけなので、既定では1日ぶんしか出ない
+      const psDayCount = () => psPage.locator('.plan-sheet-preview li').count()
+      check(
+        'MEALPLAN-A4(2026-08-02) 既定では登録のない日を省く(中身のある日だけ載る)',
+        (await psDayCount()) === 1,
+        `days=${await psDayCount()}`,
+      )
+      await psPage.locator('[data-testid="plan-sheet-include-empty"]').check()
+      await psPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A4(2026-08-02) 「登録のない日も載せる」で週7日ぶんが戻る(可逆)',
+        (await psDayCount()) === 7,
+        `days=${await psDayCount()}`,
+      )
+      await psPage.locator('[data-testid="plan-sheet-include-empty"]').uncheck()
+      await psPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A4(2026-08-02) チェックを外すと省いた表に戻る',
+        (await psDayCount()) === 1,
+      )
+
+      // 2026-08-02 オーナー指示(b): 「夕食」「主菜」のラベルは料理名と同じ大きさで横並びだった。
+      // 小さく・薄く・行頭の別の列に分ける
+      const psLabelStyle = await psPage.evaluate(() => {
+        const root = document.querySelector('.plan-sheet-preview')
+        const row = root?.querySelector('.sheet-row')
+        const label = root?.querySelector('.sheet-row-label')
+        const role = root?.querySelector('.sheet-role')
+        if (!row || !label || !role) return null
+        const px = (el) => parseFloat(getComputedStyle(el).fontSize)
+        return {
+          row: px(row),
+          label: px(label),
+          role: px(role),
+          labelLeft: Math.round(label.getBoundingClientRect().left),
+          roleLeft: Math.round(role.getBoundingClientRect().left),
+          bodyLeft: Math.round(row.lastElementChild.getBoundingClientRect().left),
+        }
+      })
+      check(
+        'MEALPLAN-A4(2026-08-02) 食事・役割のラベルは料理名より小さい',
+        psLabelStyle !== null &&
+          psLabelStyle.label < psLabelStyle.row &&
+          psLabelStyle.role < psLabelStyle.row,
+        JSON.stringify(psLabelStyle),
+      )
+      check(
+        'MEALPLAN-A4(2026-08-02) 食事・役割のラベルは料理名と別の列(左)に分かれている',
+        psLabelStyle !== null &&
+          psLabelStyle.roleLeft > psLabelStyle.labelLeft + 20 &&
+          psLabelStyle.bodyLeft > psLabelStyle.roleLeft + 20,
+        JSON.stringify(psLabelStyle),
+      )
+      // 料理は1品につき1行(以前は「主菜 肉じゃが　副菜 …」と1行に詰めていた)
+      check(
+        'MEALPLAN-A4(2026-08-02) 料理は1品につき1行に分かれる',
+        (await psPage.locator('.plan-sheet-preview .sheet-row').count()) === 3,
+        `rows=${await psPage.locator('.plan-sheet-preview .sheet-row').count()}`,
+      )
+
       // 印刷: 画面のUIは紙に出さず、献立表だけを出す(index.cssの@media print)
       await psPage.emulateMedia({ media: 'print' })
       await psPage.waitForTimeout(200)
@@ -6934,6 +7067,55 @@ try {
       check(
         'MEALPLAN-A4(印刷) 印刷用の1枚にも同じ内容(日付・料理・メモ)が入る',
         ((await psPage.locator('.plan-sheet-print').textContent()) ?? '').includes('実家に行く'),
+      )
+      // 2026-08-02 オーナー指示(c): モノクロ印刷対応。紙では文字が全部黒一色になるので、
+      // 色ではなく「日付の上の罫線」「文字の太さ・大きさ」「ラベル列の灰色の階調」で区別する
+      const psPrintStyle = await psPage.evaluate(() => {
+        const root = document.querySelector('.plan-sheet-print')
+        const day = root?.querySelector('.sheet-day')
+        const dayLabel = root?.querySelector('.sheet-day-label')
+        const row = root?.querySelector('.sheet-row')
+        const label = root?.querySelector('.sheet-row-label')
+        if (!day || !dayLabel || !row || !label) return null
+        const cs = (el) => getComputedStyle(el)
+        return {
+          dayBorderWidth: parseFloat(cs(day).borderTopWidth),
+          dayBorderStyle: cs(day).borderTopStyle,
+          dayLabelSize: parseFloat(cs(dayLabel).fontSize),
+          dayLabelWeight: cs(dayLabel).fontWeight,
+          dayLabelColor: cs(dayLabel).color,
+          rowSize: parseFloat(cs(row).fontSize),
+          labelSize: parseFloat(cs(label).fontSize),
+          labelColor: cs(label).color,
+          breakInside: cs(day).breakInside,
+        }
+      })
+      check(
+        'MEALPLAN-A4(印刷・モノクロ) 日付の区切りが罫線で引かれる(色に頼らない)',
+        psPrintStyle !== null &&
+          psPrintStyle.dayBorderWidth > 0 &&
+          psPrintStyle.dayBorderStyle === 'solid',
+        JSON.stringify(psPrintStyle),
+      )
+      check(
+        'MEALPLAN-A4(印刷・モノクロ) 日付は本文より大きく太い(アクセント色が黒になっても区別できる)',
+        psPrintStyle !== null &&
+          psPrintStyle.dayLabelSize > psPrintStyle.rowSize &&
+          Number(psPrintStyle.dayLabelWeight) >= 700 &&
+          psPrintStyle.dayLabelColor === 'rgb(0, 0, 0)',
+        JSON.stringify(psPrintStyle),
+      )
+      check(
+        'MEALPLAN-A4(印刷・モノクロ) 行頭ラベルは本文より小さく、灰色の階調で分ける',
+        psPrintStyle !== null &&
+          psPrintStyle.labelSize < psPrintStyle.rowSize &&
+          psPrintStyle.labelColor !== 'rgb(0, 0, 0)',
+        JSON.stringify(psPrintStyle),
+      )
+      check(
+        'MEALPLAN-A4(印刷) 1日分が2ページに割れない',
+        psPrintStyle !== null && psPrintStyle.breakInside === 'avoid',
+        JSON.stringify(psPrintStyle),
       )
       await psPage.emulateMedia({ media: 'screen' })
       await psPage.waitForTimeout(200)
@@ -7927,7 +8109,7 @@ try {
       await dstPage.waitForTimeout(300)
       const [fileChooser] = await Promise.all([
         dstPage.waitForEvent('filechooser'),
-        dstPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+        dstPage.getByRole('button', { name: 'データを上書き' }).click(),
       ])
       await fileChooser.setFiles({
         name: 'uchi-recipe-backup.json',
@@ -8024,7 +8206,7 @@ try {
       await mergePage.waitForTimeout(300)
       const [mergeChooser] = await Promise.all([
         mergePage.waitForEvent('filechooser'),
-        mergePage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+        mergePage.getByRole('button', { name: '今のデータに追加' }).click(),
       ])
       await mergeChooser.setFiles({
         name: 'uchi-recipe-backup.json',
@@ -8169,7 +8351,7 @@ try {
       await compatPage.waitForTimeout(300)
       const [compatFileChooser] = await Promise.all([
         compatPage.waitForEvent('filechooser'),
-        compatPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+        compatPage.getByRole('button', { name: 'データを上書き' }).click(),
       ])
       await compatFileChooser.setFiles({
         name: 'old-format-backup.json',
@@ -8302,7 +8484,7 @@ try {
       })
       const [fileChooser] = await Promise.all([
         ruPage.waitForEvent('filechooser'),
-        ruPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+        ruPage.getByRole('button', { name: 'データを上書き' }).click(),
       ])
       await fileChooser.setFiles({
         name: 'empty-backup.json',
@@ -8374,7 +8556,7 @@ try {
 
   // --- CODEMERGE-01(2026-07-17バックアップ改修 修正1): merge復元(「読み込む(今のデータに追加)」)
   // でもPro解錠コードが戻ること、および旧形式(コード無し)バックアップをmergeしても既存の解錠
-  // コードが消えない(後方互換)ことを、実際の「バックアップから戻す」UI経由で確認する。
+  // コードが消えない(後方互換)ことを、実際の「バックアップを読み込む」UI経由で確認する。
   // (a) 既存プロファイルはコード未購入→コードを含むバックアップをmerge→復元後に解錠される
   // (b) 既存プロファイルはPro解錠済み→コードを含まない旧形式バックアップをmerge→解錠状態が
   //     消えない(mergeUnlockCodesの「バックアップに無ければ既存を保持」を実UIで固定する) ---
@@ -8406,7 +8588,7 @@ try {
       await cmaPage.waitForTimeout(300)
       const [cmaFileChooser] = await Promise.all([
         cmaPage.waitForEvent('filechooser'),
-        cmaPage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+        cmaPage.getByRole('button', { name: '今のデータに追加' }).click(),
       ])
       await cmaFileChooser.setFiles({
         name: 'with-code-backup.json',
@@ -8485,7 +8667,7 @@ try {
       await cmbPage.waitForTimeout(300)
       const [cmbFileChooser] = await Promise.all([
         cmbPage.waitForEvent('filechooser'),
-        cmbPage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+        cmbPage.getByRole('button', { name: '今のデータに追加' }).click(),
       ])
       await cmbFileChooser.setFiles({
         name: 'old-format-no-code-backup.json',
@@ -8665,11 +8847,11 @@ try {
       icPage.once('filechooser', () => {
         filechooserFired = true
       })
-      await icPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click()
+      await icPage.getByRole('button', { name: 'データを上書き' }).click()
       await icPage.waitForTimeout(500)
       check(
         'IMPORTCONFIRM-01 置き換えボタン押下でconfirmダイアログが出る',
-        dialogSeen?.type === 'confirm' && dialogSeen.message.includes('置き換えます'),
+        dialogSeen?.type === 'confirm' && dialogSeen.message.includes('内容で上書きします'),
         `dialogSeen=${JSON.stringify(dialogSeen)}`,
       )
       check(
@@ -8682,7 +8864,7 @@ try {
         icPage.waitForEvent('filechooser'),
         (async () => {
           icPage.once('dialog', (dialog) => void dialog.accept())
-          await icPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click()
+          await icPage.getByRole('button', { name: 'データを上書き' }).click()
         })(),
       ])
       check('IMPORTCONFIRM-01 confirmを承認するとファイル選択(filechooser)が開く', !!fileChooser)
@@ -12228,9 +12410,11 @@ try {
   }
 
   // --- TRIAL-02: 月間献立の恒常お試し（docs/62 決定③）。
-  // 未解錠のロックプレビューから「自分の記録でためしに見る（1回だけ）」で本物の月タブが開き、
+  // 未解錠のロックプレビューから「1回だけ表示」で本物の月タブが開き、
   // 「この画面がいつでも見られるようになります」の一言が出ること。
-  // 閉じたら（別タブへ移って戻ったら）ロック表示に戻り、2回目は出せないこと。 ---
+  // 閉じたら（別タブへ移って戻ったら）ロック表示に戻り、2回目は出せないこと。
+  // 2026-08-02 オーナー指摘: 「作った記録」が5件たまるまでは入口を出さず、控えめな一言に
+  // 差し替える（記録0件で1回きりのお試しを使い切り、ほぼ空のカレンダーを見て終わる事故を防ぐ）。---
   currentCheck = 'TRIAL-02'
   {
     const t2Browser = await chromium.launch()
@@ -12244,11 +12428,53 @@ try {
       await t2Page.getByRole('button', { name: '月', exact: true }).click()
       await t2Page.waitForTimeout(500)
 
-      const t2Start = t2Page.locator('[data-testid="month-trial-start"]')
-      check('TRIAL-02 ロックプレビューにお試しの入口が出る', await t2Start.isVisible())
+      // まず「作った記録」が0件の状態。入口は出さず、たまったら使えることだけ知らせる
       check(
-        'TRIAL-02 入口の文言は「自分の記録でためしに見る（1回だけ）」',
-        ((await t2Start.textContent()) ?? '').includes('自分の記録でためしに見る'),
+        'TRIAL-02(2026-08-02) 記録が少ないうちはお試しの入口を出さない',
+        (await t2Page.locator('[data-testid="month-trial-start"]').count()) === 0,
+      )
+      check(
+        'TRIAL-02(2026-08-02) 代わりに「5件たまったらお試しできます」を控えめに出す',
+        (
+          (await t2Page.locator('[data-testid="month-trial-pending"]').textContent()) ?? ''
+        ).includes('5件たまったらお試しできます'),
+      )
+
+      // 「作った記録」を5件入れると入口が出る（記録はレシピに埋め込みの配列）
+      await t2Page.evaluate(
+        (n) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const targets = g.result.slice(0, n)
+                const wtx = idb.transaction('recipes', 'readwrite')
+                const store = wtx.objectStore('recipes')
+                for (const r of targets) {
+                  store.put({ ...r, cookedLogs: [{ date: '2026-07-20' }] })
+                }
+                wtx.oncomplete = () => resolve(undefined)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        5,
+      )
+      await t2Page.reload({ waitUntil: 'networkidle' })
+      await t2Page.waitForTimeout(1200)
+      await t2Page.getByRole('button', { name: '月', exact: true }).click()
+      await t2Page.waitForTimeout(600)
+
+      const t2Start = t2Page.locator('[data-testid="month-trial-start"]')
+      check('TRIAL-02 記録が5件たまるとロックプレビューにお試しの入口が出る', await t2Start.isVisible())
+      check(
+        'TRIAL-02 入口の文言は「1回だけ表示」(2026-08-02 簡潔化)',
+        ((await t2Start.textContent()) ?? '').trim() === '1回だけ表示',
+        `文言=${(await t2Start.textContent()) ?? ''}`,
       )
       await t2Start.click()
       await t2Page.waitForTimeout(700)

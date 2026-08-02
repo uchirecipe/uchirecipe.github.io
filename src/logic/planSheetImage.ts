@@ -23,6 +23,18 @@ const DAY_FONT = 'bold 42px system-ui, sans-serif'
 const DISH_FONT = '38px system-ui, sans-serif'
 const NOTE_FONT = '34px system-ui, sans-serif'
 const LINE_HEIGHT = { day: 62, dish: 52, note: 48 } as const
+/** 日付見出し以外の行の左インデント（従来どおり） */
+const BODY_INDENT = 32
+/**
+ * 行頭ラベルの書体と列幅（2026-08-02 オーナー指示）。
+ * 「夕食」「主菜」が料理名と同じ大きさで横に並んでいて読みにくかったため、
+ * 本文より小さく・薄く・別の列に描く。列は2つで、左＝食事（夕食・作った記録・この日のメモ）、
+ * その右＝役割（主菜・副菜）。列幅はいちばん長いラベル「この日のメモ」6文字（24px×6＝144px）と
+ * 「主菜」2文字（48px）に、それぞれ余白を足した値。
+ */
+const LABEL_FONT = '24px system-ui, sans-serif'
+const LABEL_COLUMN = 156
+const ROLE_COLUMN = 68
 /**
  * 1行が長い場合の最大行数（料理名が多い日でも表が縦に伸びすぎないようにする）。
  *
@@ -35,14 +47,28 @@ const LINE_HEIGHT = { day: 62, dish: 52, note: 48 } as const
 export const MAX_WRAP_LINES = { day: 2, dish: 3, note: 2 } as const
 
 /**
- * 画像1行に入る全角文字数のめやす（38px・折り返し幅920pxをブラウザで実測して26字）。
- * 描画には使わない（実際の折り返しはCanvasの実測幅で決まる）。料理名が画像から欠けていないかを
- * 文字数で見張る回帰テスト（scripts/test-logic.mjs）のために公開している。
+ * 画像1行に入る全角文字数のめやす。描画には使わない（実際の折り返しはCanvasの実測幅で決まる）。
+ * 料理名が画像から欠けていないかを文字数で見張る回帰テスト（scripts/test-logic.mjs）のために公開する。
+ *
+ * 38px・折り返し幅920pxをブラウザで実測して26字だったところ、2026-08-02 の2つのラベル列
+ * （156+68px）で本文の幅が696pxに狭まったため 26×696/920 の切り捨てで19字にした。
  */
-export const IMAGE_WIDE_CHARS_PER_LINE = 26
+export const IMAGE_WIDE_CHARS_PER_LINE = 19
 
 function fontOf(kind: 'day' | 'dish' | 'note'): string {
   return kind === 'day' ? DAY_FONT : kind === 'dish' ? DISH_FONT : NOTE_FONT
+}
+
+/** その行の本文（ラベル列の右）が始まる位置。日付見出し以外はラベル2列ぶん右にそろえる */
+function textLeftOf(kind: 'day' | 'dish' | 'note'): number {
+  return kind === 'day' ? PAD : PAD + BODY_INDENT + LABEL_COLUMN + ROLE_COLUMN
+}
+
+/** その行の本文（ラベル列の右）に使える幅 */
+function textWidthOf(kind: 'day' | 'dish' | 'note', contentWidth: number): number {
+  return kind === 'day'
+    ? contentWidth
+    : contentWidth - BODY_INDENT - LABEL_COLUMN - ROLE_COLUMN
 }
 
 /** 献立表のPNGを生成する（週・月のどちらでも同じ関数で作る） */
@@ -56,11 +82,15 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
   if (!measureCtx) throw new Error('canvas unavailable')
   measureCtx.font = TITLE_FONT
   const titleLines = countWrappedLines(measureCtx, sheet.title, contentWidth, 2)
-  // 「本文のインデント幅」ぶん狭い幅で折り返す（日付見出しだけ左端から）
+  // 「本文のインデント幅」＋「行頭ラベルの列幅」ぶん狭い幅で折り返す（日付見出しだけ左端から）
   const wrapCounts = lines.map((line) => {
     measureCtx.font = fontOf(line.kind)
-    const width = line.kind === 'day' ? contentWidth : contentWidth - 32
-    return countWrappedLines(measureCtx, line.text, width, MAX_WRAP_LINES[line.kind])
+    return countWrappedLines(
+      measureCtx,
+      line.text,
+      textWidthOf(line.kind, contentWidth),
+      MAX_WRAP_LINES[line.kind],
+    )
   })
   const bodyHeight = lines.reduce(
     (sum, line, i) => sum + wrapCounts[i] * LINE_HEIGHT[line.kind] + (line.kind === 'day' ? 8 : 0),
@@ -94,19 +124,26 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
   y += titleLines * 76 + 52
 
   for (const [i, line] of lines.entries()) {
-    ctx.font = fontOf(line.kind)
     if (line.kind === 'day') {
       y += 8
+      ctx.font = fontOf(line.kind)
       ctx.fillStyle = accentInk
       drawWrappedText(ctx, line.text, PAD, y, contentWidth, LINE_HEIGHT.day, MAX_WRAP_LINES.day)
     } else {
+      // 行頭ラベル（食事＋役割）は小さく薄く、本文とは別の2列に描く（2026-08-02 オーナー指示）。
+      // 折り返さずに1行で置く＝いちばん長い「この日のメモ」がちょうど収まる列幅にしてある
+      ctx.font = LABEL_FONT
+      ctx.fillStyle = muted
+      if (line.label) ctx.fillText(line.label, PAD + BODY_INDENT, y)
+      if (line.role) ctx.fillText(line.role, PAD + BODY_INDENT + LABEL_COLUMN, y)
+      ctx.font = fontOf(line.kind)
       ctx.fillStyle = line.kind === 'note' ? muted : ink
       drawWrappedText(
         ctx,
         line.text,
-        PAD + 32,
+        textLeftOf(line.kind),
         y,
-        contentWidth - 32,
+        textWidthOf(line.kind, contentWidth),
         LINE_HEIGHT[line.kind],
         MAX_WRAP_LINES[line.kind],
       )

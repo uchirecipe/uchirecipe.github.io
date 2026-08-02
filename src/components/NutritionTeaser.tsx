@@ -19,7 +19,8 @@ import { ja } from '../i18n/ja'
  * レシピ詳細に置く「栄養価のめやす」枠（M6-1）。
  *
  * 折りたたみ式（2026-07-11 オーナー実機フィードバック「邪魔・面積を取りすぎる」）:
- * 既定は「{タイトル}（1食あたり）: 498kcal」の1行＋展開アイコンのみ。
+ * 既定は「{タイトル}（2人分レシピの1食あたり）: 498kcal・野菜約120g」の1行＋展開アイコンのみ
+ * （2026-08-02 オーナー指示で野菜量を追加。無料で見える2項目＝線引きB'とそろえる）。
  * タップで、これまでの内容（数値の表・注記・出典・Pro案内・計算対象外等）を展開表示する。
  * 計算対象の材料が1つも無い（分量不明・成分データ無し等ですべて計算対象外）場合は、
  * 「0kcal」という誤解を招く数値を出さず、計算できなかった旨の1行にする。
@@ -59,9 +60,17 @@ export default function NutritionTeaser({
   const displayServings = servings != null && servings > 0 ? servings : nutrition.servings
   // 計算に含められた材料が1つも無ければ「0kcal」表示は誤解を招くため出さない
   const canShowSummary = nutrition.items.length > 0
-  // 折りたたんだ1行はエネルギーだけにする（2026-08-01 線引きB'。塩分はPro側の8項目表へ移した）
+  // 折りたたんだ1行に出すのは無料で見える2値＝エネルギーと野菜量（2026-08-02 オーナー指示）。
+  // 線引きB'（無料＝エネルギー＋野菜量）と一致させ、展開しないと野菜量が分からない状態をなくす。
+  // 塩分はPro側の8項目表にあるのでここには出さない
   const summaryText = canShowSummary
-    ? `${roundNutrient('kcal', per.kcal).toLocaleString()}${ja.nutrition.kcalUnit}`
+    ? [
+        `${roundNutrient('kcal', per.kcal).toLocaleString()}${ja.nutrition.kcalUnit}`,
+        ja.nutritionBalance.summaryVegetable.replace(
+          '{n}',
+          roundVegetableGrams(vegetableGramsOf(nutrition)).toLocaleString(),
+        ),
+      ].join(ja.nutritionBalance.summarySeparator)
     : ja.nutrition.unavailableSummary
   // 量が書いてあるのに計算できなかった材料(主材料の脱落)がある状態。
   // 折りたたんだ既定の1行でも分かるようにする(2026-07-28 便BY/NUT-01)

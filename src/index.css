@@ -398,6 +398,49 @@
     background-color: transparent !important;
   }
 
+  /* モノクロ印刷対応(2026-08-02 オーナー指示)。
+     紙では上のルールで文字がすべて黒一色になるため、画面でアクセント色に頼っていた区別
+     (日付見出しが色付き・ラベルが薄い)が全部消え、日付も料理名も同じ見た目になっていた。
+     色を使わずに、①日付の上の罫線 ②文字の太さ・大きさ ③ラベル列の位置と灰色の階調
+     の3つで区別する。灰色はモノクロ機でも網点で薄く出るので、色相には頼らない。
+     .plan-sheet-print * の色指定より詳細度が高いので、ラベルの灰色はこちらが勝つ */
+  .plan-sheet-print .sheet-day {
+    border-top: 1pt solid #000 !important;
+    border-bottom: 0 !important;
+    padding-top: 5pt !important;
+    padding-bottom: 5pt !important;
+    /* 1日分が2ページに割れないようにする(冷蔵庫に貼る紙で日付と中身が離れると読めない) */
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .plan-sheet-print .sheet-title {
+    font-size: 15pt !important;
+  }
+
+  .plan-sheet-print .sheet-day-label {
+    font-size: 11pt !important;
+    font-weight: 700 !important;
+  }
+
+  .plan-sheet-print .sheet-row {
+    font-size: 10pt !important;
+  }
+
+  /* 行頭ラベル(夕食・作った記録・この日のメモ)と役割(主菜・副菜)は、
+     本文より小さく・細く・灰色にして料理名と混ざらないようにする */
+  .plan-sheet-print .sheet-row-label,
+  .plan-sheet-print .sheet-role {
+    font-size: 8pt !important;
+    font-weight: 400 !important;
+    color: #555 !important;
+  }
+
+  .plan-sheet-print .sheet-basis {
+    font-size: 8pt !important;
+    color: #555 !important;
+  }
+
   @page {
     margin: 12mm;
   }

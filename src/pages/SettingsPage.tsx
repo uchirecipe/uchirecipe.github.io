@@ -112,20 +112,30 @@ const fileSaveSupported = supportsSaveFilePicker()
 
 /**
  * 設定画面は1本スクロール(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
- * 縦に長い設定を「全般→レシピ→バックアップ→Pro」の順(旧タブ順)に並べ、各節を見出し+アンカーで
- * 区切る。ページ上部には節へ飛ぶ目次チップ(sticky)を置き、タップで該当節へスクロールする。
- * 各節の内訳(旧タブの区分をそのまま踏襲):
- * 全般=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算)/料理中(画面/タイマー)/アプリについて
+ * 縦に長い設定を使う頻度の高い順に並べ、各節を見出し+アンカーで区切る。
+ * ページ上部には節へ飛ぶ目次チップ(sticky)を置き、タップで該当節へスクロールする。
+ * 各節の内訳:
+ * 全般=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算/売り場順)/料理中(画面/タイマー)
  * レシピ=基本レシピ/レシピセットを読み込む（テーマ一覧は2026-07-23のテーマ全廃で撤去）
  * バックアップ=バックアップ一式
  * Pro=Pro版(有料の機能解錠。収録レシピは全て無料・有料はPro機能のみ)
- * 旧タブの表示名(ja.settings.tabBasic等)を目次チップ・節見出しの両方でそのまま流用する。
+ * うちレシピについて=バージョン・データ件数・紹介ページ・利用規約・ご意見箱
+ *
+ * 2026-08-02 オーナー指示: 以前は「その他」グループ(＝アプリについて)が全般節の途中にあり、
+ * そのあとにレシピ・バックアップ・Proが続いていた。「その他」は普通いちばん最後に来る名前なので、
+ * ページの途中に出ると「ここで終わり」と読めてしまう。中身は数日〜数か月に一度しか開かない
+ * 読み物(バージョン・利用規約・ご意見箱)なので、グループごとページ最後の独立した節に移した。
+ * 節の並び自体(全般→レシピ→バックアップ→Pro)は使用頻度の高い順なので変えていない。
+ *
+ * 目次チップは5つになるので、最後の節だけ短いラベル(tocAbout「アプリ」)を使う
+ * (節の見出しは「うちレシピについて」のまま。390px幅で5列に収める)。
  */
 const settingsSections: { id: string; label: string }[] = [
   { id: 'section-basic', label: ja.settings.tabBasic },
   { id: 'section-recipe', label: ja.settings.tabRecipe },
   { id: 'section-backup', label: ja.settings.tabBackup },
   { id: 'section-pro', label: ja.settings.tabPro },
+  { id: 'section-about', label: ja.settings.tocAbout },
 ]
 
 // ?section=pro / ?section=backup / ?section=recipe の直リンクが、どの要素まで自動スクロールするか。
@@ -145,6 +155,9 @@ const sectionDeepLinks: Record<string, string> = {
   // aisleは2026-08-02 便CT/C15: 買い物メモの「売り場順を変える」の遷移先。
   // 並びの由来と変え方が、買い物メモの画面から辿れるようにする
   aisle: 'aisle-section',
+  // aboutは2026-08-02: 「アプリについて」を全般節の途中からページ最後の独立した節へ移した際に追加。
+  // 既存の?section=値(pro/backup/recipe/themes/budget/aisle)の行き先は変えていない
+  about: 'section-about',
 }
 
 // 各節の見出し(全般/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -180,7 +193,7 @@ function formatRecipeSetResult(result: {
 }
 
 /**
- * 「読み込む（今のデータに追加）」の結果の内訳を組み立てる（2026-07-30 便CJ/C1(d)・C11・C12）。
+ * 「今のデータに追加」の結果の内訳を組み立てる（2026-07-30 便CJ/C1(d)・C11・C12）。
  * 足したものを項目ごとに1行ずつ返し、0件の行は出さない（「作った記録0件・写真0枚を足しました」
  * のような無意味な行を並べない）。復元したつもりで実は戻っていない、という誤認を防ぐのが目的なので、
  * 何も足さなかった場合もその旨を1行返す（無言で終わらせない）
@@ -219,7 +232,7 @@ function buildMergeResultLines(detail: MergeImportDetail): string[] {
 }
 
 /**
- * 「読み込む（今のデータと置き換え）」の確認文を件数入りで組み立てる
+ * 「データを上書き」の確認文を件数入りで組み立てる
  * （2026-07-17設定ゼロベース裁定#6a）。ファイル選択を開く前(pickImportFile)・
  * ファイル選択後の最終確認(onImportFile)の両方で同じ文言を使い整合させる
  */
@@ -312,7 +325,7 @@ export default function SettingsPage() {
   // 揃える。写真の多いファイルは端末によって数秒〜十数秒かかり、その間ボタンが押せたままだった)
   const [importBusy, setImportBusy] = useState(false)
   // 読み込み結果の内訳(2026-07-30 便CJ/C1(d)・C11・C12)。トーストは数秒で消えてしまい
-  // 「本当に戻ったか」を確かめる手段にならないため、「バックアップから戻す」カード内に
+  // 「本当に戻ったか」を確かめる手段にならないため、「バックアップを読み込む」カード内に
   // テキストとして残す(レシピセット読み込み欄の先例と同じ流儀。二重表示しないのでトーストは出さない)
   const [importResultLines, setImportResultLines] = useState<string[]>([])
   // 目次チップの現在地ハイライト用(1本スクロール化)。スクロール監視で表示中の節idを保持する
@@ -747,14 +760,18 @@ export default function SettingsPage() {
         aria-label={ja.settings.tocLabel}
         className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
       >
-        <div className="grid grid-cols-4 gap-1">
+        {/* 2026-08-02: 「アプリについて」を独立した節にしたのでチップは5つ。390px幅では
+            1枡およそ68pxになり、text-xs(12px)だと「バックアップ」の6文字が折り返して
+            チップの高さが揃わなくなるため、1px小さくし、字間も詰めて折り返しを止める
+            (端末のフォントが少し広くても2行にならないよう whitespace-nowrap も付ける) */}
+        <div className="grid grid-cols-5 gap-1">
           {settingsSections.map((section) => (
             <button
               key={section.id}
               type="button"
               onClick={() => scrollToSection(section.id)}
               aria-current={activeSection === section.id ? 'true' : undefined}
-              className={`rounded-md border py-[13px] text-xs font-bold shadow-sm ${
+              className={`overflow-hidden whitespace-nowrap rounded-md border py-[13px] text-[11px] font-bold tracking-tight shadow-sm ${
                 activeSection === section.id
                   ? 'border-accent bg-accent text-on-accent'
                   : 'border-edge bg-surface text-ink-muted'
@@ -1125,45 +1142,6 @@ export default function SettingsPage() {
             </label>
           </section>
 
-          {/* その他 */}
-          <p className={groupHeadingCls}>{ja.settings.groupOtherTitle}</p>
-
-          {/* アプリについて(区分表に明示は無いが、汎用の基本タブ末尾に置く) */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.aboutTitle}</h2>
-            {/* バージョン+データ件数(2026-07-17設定ゼロベース裁定#3。問い合わせ対応に必須) */}
-            <p className="mt-1 text-sm text-ink-muted">
-              {ja.settings.aboutVersion.replace('{v}', __APP_VERSION__)}
-            </p>
-            <p className="text-sm text-ink-muted">
-              {ja.settings.aboutDataCount
-                .replace('{r}', String(dataCounts.recipes))
-                .replace('{c}', String(dataCounts.cookedLogs))}
-            </p>
-            {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
-            <a
-              href="/about/"
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
-            >
-              <Info size={18} aria-hidden />
-              {ja.settings.aboutPageLink}
-            </a>
-            <a
-              href="/about/terms.html"
-              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
-            >
-              {ja.settings.termsLink}
-            </a>
-            {/* ご意見箱はGoogleフォーム(外部サイト)なので別窓でよい */}
-            <a
-              href={ja.settings.feedbackFormUrl}
-              target="_blank"
-              rel="noopener"
-              className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
-            >
-              {ja.settings.feedbackLink}
-            </a>
-          </section>
         </>
       </section>
 
@@ -1345,8 +1323,9 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {/* ②バックアップから戻す: 「追加」「置き換え」を並べて配置し、それぞれに説明キャプションを
-              付ける(2026-07-17修正5。以前は縦積みで置き換えだけ警告色が浮いて見えていたのを解消) */}
+          {/* ②バックアップを読み込む: 「今のデータに追加」「データを上書き」を並べて配置し、
+              それぞれに説明キャプションを付ける(2026-07-17修正5。以前は縦積みで上書きだけ警告色が
+              浮いて見えていたのを解消。ボタン文言は2026-08-02 オーナー指示で短くした) */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.backupRestoreTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupRestoreDescription}</p>
@@ -1366,7 +1345,7 @@ export default function SettingsPage() {
                   type="button"
                   disabled={importBusy}
                   onClick={() => pickImportFile('merge')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent-ink shadow-sm disabled:opacity-60"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center text-sm font-bold text-accent-ink shadow-sm disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportMerge}</span>
@@ -1378,7 +1357,7 @@ export default function SettingsPage() {
                   type="button"
                   disabled={importBusy}
                   onClick={() => pickImportFile('replace')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center font-bold text-warning disabled:opacity-60"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center text-sm font-bold text-warning disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportReplace}</span>
@@ -1637,6 +1616,53 @@ export default function SettingsPage() {
             )}
           </section>
         </>
+      </section>
+
+      {/* ===== うちレシピについて 節 =====
+          2026-08-02 オーナー指示: 旧「全般」節の中の「その他」グループをページ最後の独立した節に
+          移した。中身(バージョン・データ件数・紹介ページ・利用規約・ご意見箱)は変えていない。
+          節の見出しがカードの見出しを兼ねるので、カード側のh2は置かない */}
+      <section id="section-about" aria-labelledby="section-about-heading" className="scroll-mt-24">
+        <h2
+          id="section-about-heading"
+          className={`${nodeHeadingCls} mt-[var(--space-lg)] border-t border-edge pt-[var(--space-lg)]`}
+        >
+          {ja.settings.aboutTitle}
+        </h2>
+        <section className={sectionCls}>
+          {/* バージョン+データ件数(2026-07-17設定ゼロベース裁定#3。問い合わせ対応に必須) */}
+          <p className="text-sm text-ink-muted">
+            {ja.settings.aboutVersion.replace('{v}', __APP_VERSION__)}
+          </p>
+          <p className="text-sm text-ink-muted">
+            {ja.settings.aboutDataCount
+              .replace('{r}', String(dataCounts.recipes))
+              .replace('{c}', String(dataCounts.cookedLogs))}
+          </p>
+          {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
+          <a
+            href="/about/"
+            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+          >
+            <Info size={18} aria-hidden />
+            {ja.settings.aboutPageLink}
+          </a>
+          <a
+            href="/about/terms.html"
+            className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
+          >
+            {ja.settings.termsLink}
+          </a>
+          {/* ご意見箱はGoogleフォーム(外部サイト)なので別窓でよい */}
+          <a
+            href={ja.settings.feedbackFormUrl}
+            target="_blank"
+            rel="noopener"
+            className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
+          >
+            {ja.settings.feedbackLink}
+          </a>
+        </section>
       </section>
 
       <Toast message={message} onClose={() => setMessage('')} />
