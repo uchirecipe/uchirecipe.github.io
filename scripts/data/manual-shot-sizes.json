@@ -1,0 +1,126 @@
+{
+  "recipe-cards": {
+    "w": 780,
+    "h": 1056
+  },
+  "home-suggest": {
+    "w": 780,
+    "h": 668
+  },
+  "home-search": {
+    "w": 780,
+    "h": 408
+  },
+  "nav-tabs": {
+    "w": 780,
+    "h": 144
+  },
+  "search": {
+    "w": 780,
+    "h": 726
+  },
+  "register-tabs": {
+    "w": 780,
+    "h": 322
+  },
+  "ingredient-rows": {
+    "w": 780,
+    "h": 332
+  },
+  "bulk-input": {
+    "w": 780,
+    "h": 344
+  },
+  "register-detail": {
+    "w": 780,
+    "h": 982
+  },
+  "paste": {
+    "w": 780,
+    "h": 748
+  },
+  "url-import": {
+    "w": 780,
+    "h": 648
+  },
+  "plan-day-buttons": {
+    "w": 780,
+    "h": 316
+  },
+  "plan-week-nutrition-open": {
+    "w": 780,
+    "h": 800
+  },
+  "plan-week-day": {
+    "w": 780,
+    "h": 660
+  },
+  "cost-week": {
+    "w": 780,
+    "h": 532
+  },
+  "plan-month": {
+    "w": 780,
+    "h": 580
+  },
+  "plan-month-photo": {
+    "w": 780,
+    "h": 580
+  },
+  "shopping": {
+    "w": 780,
+    "h": 1080
+  },
+  "pantry": {
+    "w": 780,
+    "h": 840
+  },
+  "detail-photo": {
+    "w": 780,
+    "h": 676
+  },
+  "nutrition-open": {
+    "w": 780,
+    "h": 940
+  },
+  "share": {
+    "w": 780,
+    "h": 912
+  },
+  "logs": {
+    "w": 780,
+    "h": 724
+  },
+  "cookmode-voice": {
+    "w": 780,
+    "h": 268
+  },
+  "cookmode": {
+    "w": 780,
+    "h": 880
+  },
+  "timer": {
+    "w": 780,
+    "h": 580
+  },
+  "cooknavi": {
+    "w": 780,
+    "h": 432
+  },
+  "backup-export": {
+    "w": 780,
+    "h": 376
+  },
+  "backup-import": {
+    "w": 780,
+    "h": 480
+  },
+  "nutrition-row": {
+    "w": 780,
+    "h": 184
+  },
+  "plan-week-nutrition-row": {
+    "w": 780,
+    "h": 136
+  }
+}

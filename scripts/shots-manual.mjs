@@ -12,6 +12,10 @@
 //  - 390x844(iPhone相当)・ライトテーマ・deviceScaleFactor 2 のブラウザで操作する
 //  - 出力は「説明している箇所だけ」を切り出した部分スクリーンショット
 //    (2026-08-02 オーナー指示。縦長の全画面スクショは本文と対応が取りにくいためやめた)
+//  - トリミングの基準(2026-08-02 オーナー指示): 説明しているパネルが縦に丸ごと収まる
+//    ところまで切る(基準= 「URLから取り込む」パネル: 説明文・URL欄・写真チェック・
+//    読み込むボタンまで)。文字が途中で切れる狭い切り出しは作らない。
+//    横幅は全カットで画面幅(390px→実寸780px)に統一する = 各cropはfullWidth既定
 //  - 空画面を載せないため、撮影前に見栄えのするデモデータを投入する
 //    (Pro解錠・週/月の献立・買い物メモ・在庫・作った記録・料理写真)
 //  - 出力は public/about/img/manual/*.webp
@@ -128,7 +132,7 @@ async function cropInner(page, name, loc, opts = {}) {
     top = null,
     maxHeight = null,
     extraBottom = 0,
-    fullWidth = false,
+    fullWidth = true,
   } = opts
   const el = loc.first()
   await el.scrollIntoViewIfNeeded()
@@ -163,7 +167,7 @@ async function cropRange(page, name, topLoc, bottomLoc, opts = {}) {
 }
 
 async function cropRangeInner(page, name, topLoc, bottomLoc, opts = {}) {
-  const { padX = 8, padTop = 8, padBottom = 8, top = 16, fullWidth = false } = opts
+  const { padX = 8, padTop = 8, padBottom = 8, top = 16, fullWidth = true } = opts
   await topLoc.first().scrollIntoViewIfNeeded()
   await wait(page, 250)
   let a = await rectOf(topLoc)
@@ -344,6 +348,15 @@ try {
   // ---- 初回シード + デモデータ投入 ----
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await wait(page, 2500)
+
+  // §3「収録レシピ」に載せる一覧は、写真つきレシピが混ざると
+  //「収録レシピにも写真が付いてくる」と読めてしまうため、デモ写真を入れる前に撮る
+  //(2026-08-02 オーナー指示)
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await wait(page, 500)
+  const starterCard = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
+  await cropRange(page, 'recipe-cards', starterCard.first(), starterCard.nth(3), { top: 12 })
+
   const seeded = await seedDirect(page, photos)
   console.log('seed:', seeded.applied.length, '品に記録 /', seeded.photoIds.length, '品に写真')
   await page.reload({ waitUntil: 'networkidle' })
@@ -357,14 +370,14 @@ try {
   const suggestCard = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '今日なに作る？' }) })
-  await crop(page, 'home-suggest', suggestCard, { top: 60, padX: 6 })
+  await crop(page, 'home-suggest', suggestCard, { top: 60 })
 
   // 「レシピを探す」ショートカット(2026-08-02 便CRで旧「使いたい食材から探す」の検索欄から差し替え)。
   // 在庫を入れてあるので「在庫の食材から探す」も一緒に写る
   const searchShortcut = page
     .locator('section')
     .filter({ has: page.getByRole('button', { name: 'レシピを探す', exact: true }) })
-  await crop(page, 'home-search', searchShortcut, { top: 120, padX: 6 })
+  await crop(page, 'home-search', searchShortcut, { top: 120 })
 
   // 下タブ(画面の見取り図)
   await cropRect(page, 'nav-tabs', { x: 0, y: VIEW.height - 72, width: VIEW.width, height: 72 })
@@ -375,17 +388,12 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 400)
   const recipeCard = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
-  await cropRange(page, 'recipe-cards', recipeCard.first(), recipeCard.nth(3), {
-    top: 12,
-    fullWidth: true,
-  })
 
   // 検索(かな表記ゆれ): 検索欄 + ヒット件数
   await page.getByPlaceholder('料理名・材料・タグで検索').fill('たまねぎ')
   await wait(page, 900)
   await cropRange(page, 'search', page.getByPlaceholder('料理名・材料・タグで検索'), recipeCard.first(), {
     top: 64,
-    fullWidth: true,
   })
   await page.getByPlaceholder('料理名・材料・タグで検索').fill('')
   await wait(page, 500)
@@ -419,27 +427,19 @@ try {
     'register-tabs',
     page.getByText('かんたん', { exact: true }).first(),
     page.getByPlaceholder('例: 肉じゃが'),
-    { top: 64, padBottom: 12, fullWidth: true },
+    { top: 64, padBottom: 12 },
   )
 
   // 材料の行(名前・分量・単位の3欄)
-  await cropRange(
-    page,
-    'ingredient-rows',
-    names.first(),
-    units.nth(1),
-    { top: 120, padX: 6 },
-  )
+  await cropRange(page, 'ingredient-rows', names.first(), page.getByPlaceholder(/材料メモ/).first(), {
+    top: 120,
+    padBottom: 12,
+  })
 
-  // 「まとめて入力」
-  const bulk = page.getByPlaceholder(/まとめて入力|豚こま/).first()
-  if (await bulk.count()) {
-    await crop(page, 'bulk-input', bulk, {
-      top: 140,
-      padTop: 12,
-      extraBottom: 74,
-      fullWidth: true,
-    })
+  // 「まとめて入力」: 見出し「まとめて入力」から「材料に追加」まで、パネルを丸ごと切る
+  const bulkPanel = page.getByPlaceholder(/まとめて入力|豚こま/).first().locator('xpath=../..')
+  if (await bulkPanel.count()) {
+    await crop(page, 'bulk-input', bulkPanel, { top: 140, padTop: 12, padBottom: 12 })
   }
 
   // 「くわしく」タブの項目
@@ -452,7 +452,7 @@ try {
     'register-detail',
     page.getByText('くわしく', { exact: true }).first(),
     page.getByText('献立・検索に使う', { exact: true }).first(),
-    { top: 64, padBottom: 12, fullWidth: true },
+    { top: 64, padBottom: 12 },
   )
 
   // ---- テキスト貼り付けで自動入力 ----
@@ -466,12 +466,7 @@ try {
   )
   await page.getByRole('button', { name: '自動で振り分ける' }).click()
   await wait(page, 1200)
-  await crop(page, 'paste', pasteArea, {
-    top: 76,
-    padTop: 12,
-    extraBottom: 120,
-    fullWidth: true,
-  })
+  await crop(page, 'paste', pasteArea.locator('xpath=..'), { top: 60, padTop: 12, padBottom: 12 })
 
   // ---- URLから取り込む ----
   await openNewRecipeForm(page, BASE)
@@ -479,14 +474,11 @@ try {
   if (await urlToggle.count()) {
     await urlToggle.click()
     await wait(page, 600)
-    const urlBox = page.locator('input[type="url"], input[inputmode="url"]').first()
-    if (await urlBox.count()) {
-      await crop(page, 'url-import', urlBox, {
-        top: 96,
-        padTop: 20,
-        extraBottom: 96,
-        fullWidth: true,
-      })
+    // 説明文・URL欄・「写真も取り込む」・「読み込む」まで縦に丸ごと入れる
+    //(この切り出しが他のカットのトリミング基準。2026-08-02 オーナー指示)
+    const urlPanel = page.locator('input[type="url"], input[inputmode="url"]').first().locator('xpath=..')
+    if (await urlPanel.count()) {
+      await crop(page, 'url-import', urlPanel, { top: 96, padTop: 12, padBottom: 12 })
     }
   }
 
@@ -502,11 +494,7 @@ try {
     const pickBtn = page.getByRole('button', { name: '今日の献立を選ぶ' })
     const autoBtn = page.getByRole('button', { name: 'おまかせで提案' })
     if ((await pickBtn.count()) && (await autoBtn.count())) {
-      await cropRange(page, 'plan-day-buttons', pickBtn, autoBtn, {
-        top: 100,
-        padBottom: 44,
-        fullWidth: true,
-      })
+      await cropRange(page, 'plan-day-buttons', pickBtn, autoBtn, { top: 100, padBottom: 44 })
     }
   }
 
@@ -536,19 +524,14 @@ try {
   // 1日ぶんのカード(主菜・副菜が入った状態)
   const weekDayCard = page.locator('main section, main li').filter({ hasText: /主菜/ }).first()
   if (await weekDayCard.count()) {
-    await crop(page, 'plan-week-day', weekDayCard, { top: 40, padX: 6, maxHeight: 460 })
+    await crop(page, 'plan-week-day', weekDayCard, { top: 40, maxHeight: 500 })
   }
   // 今週の概算食費
   const costRow = page.getByRole('button', { name: /今週の概算食費/ }).first()
   if (await costRow.count()) {
     await costRow.click()
     await wait(page, 900)
-    await crop(page, 'cost-week', costRow, {
-      top: 200,
-      padTop: 12,
-      extraBottom: 190,
-      fullWidth: true,
-    })
+    await crop(page, 'cost-week', costRow, { top: 200, padTop: 12, extraBottom: 190 })
     await costRow.click()
     await wait(page, 500)
   }
@@ -563,13 +546,7 @@ try {
   }
   await wait(page, 6500) // 結果トーストが自動で消えるのを待つ
   const firstCell = page.locator('button[data-date]').first()
-  await crop(page, 'plan-month', firstCell, {
-    top: 130,
-    padTop: 26,
-    padBottom: 6,
-    extraBottom: 210,
-    fullWidth: true,
-  })
+  await crop(page, 'plan-month', firstCell, { top: 130, padTop: 26, padBottom: 6, extraBottom: 210 })
 
   // 前の月 = 作った記録が並ぶ「写真日記」の見え方
   const prevMonth = page.getByRole('button', { name: '前の月' })
@@ -577,13 +554,7 @@ try {
     await prevMonth.click()
     await wait(page, 1500)
     const cell = page.locator('button[data-date]').first()
-    await crop(page, 'plan-month-photo', cell, {
-      top: 130,
-      padTop: 26,
-      padBottom: 6,
-      extraBottom: 210,
-      fullWidth: true,
-    })
+    await crop(page, 'plan-month-photo', cell, { top: 130, padTop: 26, padBottom: 6, extraBottom: 210 })
     await page.getByRole('button', { name: '次の月' }).click()
     await wait(page, 1200)
   }
@@ -627,12 +598,7 @@ try {
   await wait(page, 400)
   const pantryGroup = page.getByText('肉・魚介', { exact: true }).first()
   if (await pantryGroup.count()) {
-    await crop(page, 'pantry', pantryGroup, {
-      top: 110,
-      padTop: 12,
-      extraBottom: 380,
-      fullWidth: true,
-    })
+    await crop(page, 'pantry', pantryGroup, { top: 110, padTop: 12, extraBottom: 380 })
   }
 
   // ======== レシピ詳細(写真つき) ========
@@ -668,7 +634,7 @@ try {
   await wait(page, 1000)
   const shareDialog = page.getByRole('dialog', { name: 'シェアする内容' })
   if (await shareDialog.count()) {
-    await crop(page, 'share', shareDialog, { top: 20, padX: 4, maxHeight: 560 })
+    await crop(page, 'share', shareDialog, { top: 20, maxHeight: 600 })
     const closeShare = shareDialog.getByRole('button', { name: '閉じる' })
     if (await closeShare.count()) {
       await closeShare.first().click()
@@ -702,7 +668,7 @@ try {
     await wait(page, 600)
     timerBtn = focusLayer.getByRole('button', { name: /タイマー開始/ })
   }
-  await cropRect(page, 'cookmode-voice', { x: 0, y: 34, width: VIEW.width, height: 92 })
+  await cropRect(page, 'cookmode-voice', { x: 0, y: 0, width: VIEW.width, height: 134 })
   await cropRect(page, 'cookmode', { x: 0, y: 240, width: VIEW.width, height: 440 })
   if (await timerBtn.count()) {
     await timerBtn.first().click()
@@ -715,7 +681,7 @@ try {
   }
   const timerDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
   if (await timerDialog.count()) {
-    await crop(page, 'timer', timerDialog, { top: 40, padX: 4, maxHeight: 520 })
+    await crop(page, 'timer', timerDialog, { top: 40, maxHeight: 290 })
   }
   const stopTimer = timerDialog.getByRole('button', { name: '停止' })
   if (await stopTimer.count()) {
@@ -783,22 +749,14 @@ try {
   const exportBtn = page.getByRole('button', { name: 'ファイルに書き出す' }).first()
   const photoCheck = page.getByText(/「作った記録」の写真もバックアップに含める/).first()
   if ((await photoCheck.count()) && (await exportBtn.count())) {
-    await cropRange(page, 'backup-export', photoCheck, exportBtn, {
-      top: 120,
-      padBottom: 14,
-      fullWidth: true,
-    })
+    await cropRange(page, 'backup-export', photoCheck, exportBtn, { top: 120, padBottom: 14 })
   } else if (await exportBtn.count()) {
-    await crop(page, 'backup-export', exportBtn, { top: 300, padTop: 14, padBottom: 14, fullWidth: true })
+    await crop(page, 'backup-export', exportBtn, { top: 300, padTop: 14, padBottom: 14 })
   }
   const importBtn = page.getByRole('button', { name: /読み込む（今のデータに追加）/ }).first()
   const replaceBtn = page.getByRole('button', { name: /読み込む（今のデータと置き換え）/ }).first()
   if ((await importBtn.count()) && (await replaceBtn.count())) {
-    await cropRange(page, 'backup-import', importBtn, replaceBtn, {
-      top: 160,
-      padBottom: 110,
-      fullWidth: true,
-    })
+    await cropRange(page, 'backup-import', importBtn, replaceBtn, { top: 160, padBottom: 110 })
   }
 
   // ======== 無料版での栄養の見え方(カロリー + 野菜量) ========
@@ -833,7 +791,7 @@ try {
   await wait(page, 1500)
   const freeNut = page.getByRole('button', { name: '栄養価のめやすを詳しく見る' })
   if (await freeNut.count()) {
-    await crop(page, 'nutrition-row', freeNut, { top: 300, padTop: 8, padBottom: 8, fullWidth: true })
+    await crop(page, 'nutrition-row', freeNut, { top: 300, padTop: 10, padBottom: 10 })
   }
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1500)
@@ -845,12 +803,7 @@ try {
       .getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
       .first()
     if (await freeDayRow.count()) {
-      await crop(page, 'plan-week-nutrition-row', freeDayRow, {
-        top: 300,
-        padTop: 8,
-        padBottom: 8,
-        fullWidth: true,
-      })
+      await crop(page, 'plan-week-nutrition-row', freeDayRow, { top: 300, padTop: 10, padBottom: 10 })
     }
   }
 
