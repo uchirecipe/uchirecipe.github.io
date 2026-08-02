@@ -40,7 +40,7 @@
 
 ## コーディング規約
 - UI文言はすべて `src/i18n/ja.ts` に集約（ハードコード禁止）。
-- 色は `src/index.css` のデザイントークン（CSS変数）のみ。直接色指定禁止。カラーテーマは 自動/ライト/ダーク/ブラウン/グリーン。
+- 色は `src/index.css` のデザイントークン（CSS変数）のみ。直接色指定禁止。文字用アクセントは --accent-ink-page／--accent-ink-surface の2本を持ち、実際に使う --accent-ink はカード面を塗るクラス(bg-surface/bg-app)内で自動で切り替わる(ブラウンのみ面で値が異なる #833a00/#ad4e01)。カラーテーマは 自動/ライト/ダーク/ブラウン/グリーン。
 - **アクセントは「塗り」と「文字」で別トークン**（2026-07-30 配色AA調整）。**文字色には `text-accent-ink`（`--accent-ink`）を使う**（`text-accent`は廃止）。塗り・枠・リング・アイコンは従来どおり `bg-accent` / `border-accent` / `ring-accent` / `var(--accent)`。ライトのみ文字用が濃い（#b8380a）で、他テーマは `--accent-ink: var(--accent)` と同値。`public/about/*.html` は同じ色定義を各ファイルが書き写しているため、色を変えるときは**7ファイル全部**に同じ値を入れる。
 - アイコンは lucide-react のみ。**例外**: レシピ料理カテゴリのプレースホルダー（`RecipeIcon`）は `public/icons/` のカスタムPNGをCSSマスクで描画しテーマ色（`var(--accent)`）に追従。
 - スマホ縦画面基準・料理中に使う前提でボタン大きめ。
