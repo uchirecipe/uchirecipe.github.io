@@ -54,7 +54,7 @@
 - **本番の準備中ページ表示は `MAINTENANCE_MODE`（`src/logic/maintenance.ts`）で制御**。うかつにdev→mainマージするとfalseが混入し意図せず再公開されうる。**再公開・発売はユーザーの明示指示があるまで行わない**。
 
 ## 検証とコミット
-- 完了条件: `npx tsc --noEmit` エラーゼロ ＋ `npm run build` 成功 ＋ **`npm test`**（ロジック単体・栄養回帰・レシピlint一括）。UIに触れた変更は **`npm run test:e2e`**（恒久Playwrightスモーク）も通す。
+- 完了条件: `npx tsc -b` エラーゼロ ＋ `npm run build` 成功 ＋ **`npm test`**（ロジック単体・栄養回帰・レシピlint一括）。UIに触れた変更は **`npm run test:e2e`**（恒久Playwrightスモーク）も通す。
 - **e2eの対象指定は環境変数 `BASE_URL`**（例: `BASE_URL=http://localhost:4173 node scripts/e2e-smoke.mjs`）。`E2E_BASE_URL`等の誤名は無視されデフォルト5173（オーナーdev・不可侵）に向かう事故が起きた。スクリプトに5173ガード（`ALLOW_DEV_SERVER=1`で解除）と対象URL表示あり。5173はvite devでSW無し・静的ページのディレクトリURLがSPAシェルに化けSMK-19が偽陽性で落ちる点に注意。
 - **バグを直すときは、再発防止ケースを`scripts/test-logic.mjs`に足してから直す**（docs/10 3章）。
 - コミットメッセージは日本語（`main`push=本番公開の詳細はブランチ運用参照）。
