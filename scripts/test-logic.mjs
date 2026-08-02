@@ -9298,12 +9298,15 @@ eq(
     true,
   )
 
-  // (4) 静的ページ7ファイルが同じ値を書き写していること
+  // (4) 静的ページ8ファイルが同じ値を書き写していること
+  //     (foods.htmlは便CXで追加した機械生成ページ。生成元 scripts/gen-food-price-page.mjs にも
+  //      同じ色定義が書いてあるので、色を変えるときは生成スクリプト側を直して再生成する)
   const aboutFiles = [
     'index.html',
     'manual.html',
     'terms.html',
     'unlock.html',
+    'foods.html',
     'column/index.html',
     'column/kondate-kimaranai.html',
     'column/recipe-screenshot-seiri.html',
@@ -9314,12 +9317,78 @@ eq(
     const pick = (name) => (src.match(new RegExp(`${name}:\\s*([^;]+);`, 'g')) ?? []).map((s) => s.split(':')[1].trim().replace(';', ''))
     return { file: f, accent: pick('--accent'), page: pick('--accent-ink-page'), surface: pick('--accent-ink-surface') }
   })
-  eq('CY 色 aboutは7ファイル', aboutColors.length, 7)
+  eq('CY 色 aboutは8ファイル', aboutColors.length, 8)
   for (const c of aboutColors) {
     // ライト→ダークの順に1回ずつ、計2つ出てくる
     eq(`CY 色 ${c.file} の塗り(ライト/ダーク)`, c.accent, ['#cc3f01', '#ff8a4c'])
     eq(`CY 色 ${c.file} のページ背景用文字色`, c.page, ['#b8380a', '#ff8a4c'])
     eq(`CY 色 ${c.file} のカード面用文字色`, c.surface, ['#b8380a', '#ff8a4c'])
+  }
+}
+
+// ---------- 便CX: 公開ページ「食品と目安価格の一覧」がマスタと一致していること ----------
+// public/about/foods.html は scripts/gen-food-price-page.mjs がマスタ2本(栄養=nutritionData.ts /
+// 価格=priceDefaults.ts)から機械生成する。マスタを直したのに再生成し忘れると、公開ページだけ
+// 古い数値が残る＝対外的に事実と違う表が出たままになる。ここで生成物とマスタを突き合わせる
+// (落ちたら `npm run gen:foods` で再生成する)。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const html = readFileSync(path.join(appRoot, 'public/about/foods.html'), 'utf-8')
+  const allRows = html.match(/<tr><th scope="row"[\s\S]*?<\/tr>/g) ?? []
+  const foodRows = allRows.filter((r) => r.includes('class="src"'))
+  const aliasRows = allRows.filter((r) => r.includes('class="ref"'))
+  const nameOf = (row) => row.match(/<th scope="row" class="nm">([^<]*)/)?.[1] ?? ''
+  const cellsOf = (row) => Array.from(row.matchAll(/<td[^>]*>([^<]*)<\/td>/g)).map((m) => m[1])
+  // 価格マスタの照合キー(logic/priceEstimate.tsと同じ「括弧を落としてかな正規化」)
+  const priceKey = (name) => toHiragana(name.replace(/[（(][^）)]*[）)]/g, '').trim())
+
+  // (1) 行数がマスタ件数と一致する
+  eq('CX foods.html 食品の行数=栄養マスタの件数', foodRows.length, NUTRITION_DATA.foods.length)
+  const listedFoods = foodRows.map(nameOf)
+  eq('CX foods.html 食品名の重複なし', new Set(listedFoods).size, listedFoods.length)
+  eq(
+    'CX foods.html 載っていない食品0件',
+    NUTRITION_DATA.foods.filter((f) => !listedFoods.includes(f.label)).map((f) => f.label),
+    [],
+  )
+
+  // (2) 価格マスタは1件残らずページのどこかに出る
+  //     (食品の行に目安価格として出るか、末尾の「別の名前でも登録している目安価格」に出るか)
+  const pricedFoodKeys = new Set(
+    foodRows.filter((r) => !cellsOf(r)[0].includes('価格なし')).map((r) => priceKey(nameOf(r))),
+  )
+  const aliasNames = new Set(aliasRows.map(nameOf))
+  eq(
+    'CX foods.html 一覧に出ていない目安価格0件',
+    PRICE_DEFAULTS.filter((p) => !aliasNames.has(p.name) && !pricedFoodKeys.has(priceKey(p.name))).map(
+      (p) => p.name,
+    ),
+    [],
+  )
+  eq(
+    'CX foods.html 食品行に出した価格の種類+別名の行数=価格マスタの件数',
+    pricedFoodKeys.size + aliasRows.length,
+    PRICE_DEFAULTS.length,
+  )
+
+  // (3) 抜き取り3品の値がマスタと一字一句一致する(桁の丸め・列の並びの取り違えを検知)
+  const dec1 = (v) => (Math.round(v * 10) / 10).toFixed(1)
+  for (const label of ['玉ねぎ', '鶏もも肉', 'しょうゆ']) {
+    const food = NUTRITION_DATA.foods.find((f) => f.label === label)
+    const master = PRICE_DEFAULTS.find((p) => priceKey(p.name) === priceKey(label))
+    const cells = cellsOf(foodRows.find((r) => nameOf(r) === label) ?? '')
+    eq(`CX foods.html ${label}の目安価格`, cells[0], `${master.pricePerUnit}円 / ${master.unit}`)
+    eq(`CX foods.html ${label}の成分値(8項目)`, cells.slice(1, 9), [
+      String(Math.round(food.per100g.kcal)),
+      dec1(food.per100g.proteinG),
+      dec1(food.per100g.fatG),
+      dec1(food.per100g.carbG),
+      dec1(food.per100g.fiberG),
+      dec1(food.per100g.saltG),
+      dec1(food.per100g.ironMg),
+      String(Math.round(food.per100g.calciumMg)),
+    ])
+    eq(`CX foods.html ${label}の成分表の収載名`, cells[9], food.mextName)
   }
 }
 
