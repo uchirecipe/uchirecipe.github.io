@@ -46,6 +46,7 @@ import {
 import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed } from '../src/logic/news.ts'
 import {
+  suggestCandidates,
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
@@ -1772,6 +1773,57 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     1,
   )
 
+  // ---- 候補数の表示(2026-08-02 便DE-5) ----
+  // suggestCandidates は「suggestForSlot が最後にくじを引く候補の一覧」をそのまま返す。
+  // 画面の「候補◯品」がこの関数の件数なので、①絞り込みの結果と一致すること
+  // ②suggestForSlot が返す品は必ずこの一覧に入っていること(＝提案の中身を変えていないこと)を固定する
+  {
+    const recipes = [
+      mkRecipe(1, { tags: ['和食'] }),
+      mkRecipe(2, { tags: ['汁物'] }),
+      mkRecipe(3, { season: 'winter' }),
+    ]
+    const mainPool = suggestCandidates(recipes, opts({ role: 'main' }))
+    eq('候補数: 主菜の候補は季節外・副菜系を除いた1品', mainPool.length, 1)
+    eq('候補数: 主菜の候補の中身', mainPool[0].id, 1)
+    const sidePool = suggestCandidates(recipes, opts({ role: 'side' }))
+    eq('候補数: 副菜の候補は汁物の1品', sidePool.map((r) => r.id).join(','), '2')
+    eq('候補数: 季節外しか無ければ0品', suggestCandidates([mkRecipe(9, { season: 'winter' })], opts()).length, 0)
+    const poolIds = suggestCandidates(recipes, opts({ role: 'main' })).map((r) => r.id)
+    const picked = Array.from({ length: 20 }, () => suggestForSlot(recipes, opts({ role: 'main' }))?.id)
+    eq(
+      '候補数: suggestForSlot は必ず候補一覧の中から選ぶ',
+      picked.every((id) => poolIds.includes(id)),
+      true,
+    )
+  }
+
+  // ---- 汁物・その他の区分(2026-08-02 便DE-4) ----
+  // 汁物の行は副菜と同じ候補プール(dishType: side/soup)から選び、寄せる種別だけが違う。
+  // 「その他」の行は分類の受け皿なので役割で絞らない(デザートも選べる)
+  {
+    const soup = mkRecipe(1, { title: 'わかめのみそ汁', dishType: 'soup' })
+    const side = mkRecipe(2, { title: 'ほうれん草のおひたし', dishType: 'side' })
+    const main = mkRecipe(3, { title: '豚の生姜焼き', dishType: 'main' })
+    const dessert = mkRecipe(4, { title: '水ようかん', dishType: 'dessert' })
+    const pool = [soup, side, main, dessert]
+    eq(
+      'role:soup は主菜・デザートを候補にしない',
+      suggestCandidates(pool, opts({ role: 'soup' })).map((r) => r.id).sort().join(','),
+      '1,2',
+    )
+    eq(
+      'role:soup + preferDishType:soup は汁物だけに寄せる',
+      suggestCandidates(pool, opts({ role: 'soup', preferDishType: 'soup' })).map((r) => r.id).join(','),
+      '1',
+    )
+    eq(
+      'role:other は役割で絞らない(デザートも候補になる)',
+      suggestCandidates(pool, opts({ role: 'other' })).length,
+      4,
+    )
+  }
+
   // ---- role指定・ジャンル優先・高たんぱく優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
 
   // role:'side'は副菜系タグ(汁物/サラダ。「副菜」専用タグは無いため代用。おやつは含めない=
@@ -2349,6 +2401,25 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     eq('planWeekFill(役割粒度): 手動副菜のレシピ(21)は重複回避のusedに入る', plan.usedRecipeIds.includes(21), true)
   }
 
+  // (3c) 便DE-4(汁物・その他の区分): 自動提案が触るのは主菜・副菜だけ。
+  //      汁物・その他の行は「消さない・埋め対象にしない・重複回避のusedには数える」。
+  //      汁物だけが入っている枠は「まだ決まっていない」扱い＝主菜+副菜のペアで埋める
+  {
+    const entries = [
+      mkEntry(1, '2026-07-20', 31, { role: 'soup' }), // 月・汁物(手で足した行)
+      mkEntry(2, '2026-07-21', 32, { role: 'other', auto: true }), // 火・その他(autoが付いていても消さない)
+    ]
+    const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
+    eq('planWeekFill(便DE-4): 汁物・その他は削除対象にしない', plan.autoEntryIdsToRemove, [])
+    eq(
+      'planWeekFill(便DE-4): 汁物だけの枠も主菜+副菜のペアで埋める',
+      keysOf(plan.slotsToFill).includes('2026-07-20|dinner'),
+      true,
+    )
+    eq('planWeekFill(便DE-4): 汁物・その他のレシピは重複回避のusedに入る', sortedNums(plan.usedRecipeIds), [31, 32])
+    eq('planWeekFill(便DE-4): 汁物・その他だけの枠は「残す枠」に数えない', plan.preservedSlotKeys.size, 0)
+  }
+
   // (4) 過去日・今日の手動・非表示帯・手動と自動が同居する枠、の複合ケース
   {
     const entries = [
@@ -2634,15 +2705,31 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'side'),
     { kind: 'add' },
   )
+  // 便DE-4(汁物・その他): 主菜以外はどれも「追加」＝既存の行を1件も消さない
+  eq(
+    '便DE-4: 汁物の料理は既存の主菜・副菜を消さず追加する',
+    planRoleAssign([main1, side1], 30, 'soup'),
+    { kind: 'add' },
+  )
+  eq(
+    '便DE-4: その他の料理も既存を消さず追加する',
+    planRoleAssign([main1, side1], 30, 'other'),
+    { kind: 'add' },
+  )
 }
 
 // ---------- マイ献立テンプレ(A-1)＋曜日固定の定番(B-2)・2026-07-29 便CB-2・docs/59 ----------
 // テンプレは日付ではなく曜日で持つ。全曜日を選べばA-1(1週間まるごと)・1曜日だけ選べばB-2
 // (毎週◯曜はカレー)になる、という統合設計をここで固定する。入るのは空いているところだけ(非破壊)
 {
-  const { buildTemplateItems, planTemplateFill, templateDowCounts } = await import(
-    '../src/logic/mealTemplate.ts'
-  )
+  const {
+    buildTemplateItems,
+    planTemplateFill,
+    templateDowCounts,
+    groupTemplateItems,
+    removeTemplateItemAt,
+    replaceTemplateItemRecipe,
+  } = await import('../src/logic/mealTemplate.ts')
   // 2026-07-27(月)〜08-02(日)の週
   const weekDatesArr = [
     '2026-07-27',
@@ -2676,6 +2763,48 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     'main',
   )
   eq('曜日ごとの品数を数えられる(曜日チップの表示用)', templateDowCounts(items), [2, 0, 0, 0, 1, 0, 0])
+
+  // ---- テンプレの中身を見る・直す(2026-08-02 便DE-9) ----
+  // 画面は「曜日→食事→役割」の順に出し、直す対象は元の配列の位置(index)で指す。
+  // 位置がずれると別の品を消す/差し替える事故になるので、並べ替えても位置が保たれることを固定する
+  {
+    const mixed = [
+      { dow: 4, slot: 'dinner', role: 'side', recipeId: 41 }, // 金・副菜(あとで足した想定)
+      { dow: 0, slot: 'dinner', role: 'side', recipeId: 20 },
+      { dow: 0, slot: 'breakfast', role: 'main', recipeId: 11 },
+      { dow: 0, slot: 'dinner', role: 'main', recipeId: 10 },
+    ]
+    const groups = groupTemplateItems(mixed)
+    eq('テンプレの中身: 曜日の並びは月→金', groups.map((g) => g.dow), [0, 4])
+    eq(
+      'テンプレの中身: 同じ曜日は朝食→夕食の順',
+      groups[0].slots.map((s) => s.slot),
+      ['breakfast', 'dinner'],
+    )
+    eq(
+      'テンプレの中身: 同じ食事は主菜→副菜の順',
+      groups[0].slots[1].items.map((v) => v.item.role),
+      ['main', 'side'],
+    )
+    eq(
+      'テンプレの中身: 並べ替えても元の位置(index)を保つ',
+      groups[0].slots[1].items.map((v) => v.index),
+      [3, 1],
+    )
+    // 取り外し・差し替えは元の配列を変えず、指定した位置だけを直す
+    const removed = removeTemplateItemAt(mixed, 3)
+    eq('テンプレの中身: 指定した1品だけ外す', removed.map((i) => i.recipeId), [41, 20, 11])
+    eq('テンプレの中身: 元の中身は変えない(非破壊)', mixed.length, 4)
+    eq('テンプレの中身: 範囲外の位置は何も変えない', removeTemplateItemAt(mixed, 9).length, 4)
+    const replaced = replaceTemplateItemRecipe(mixed, 1, 99)
+    eq('テンプレの中身: 指定した1品のレシピだけ差し替える', replaced[1].recipeId, 99)
+    eq(
+      'テンプレの中身: 差し替えても曜日・食事・役割は変えない',
+      [replaced[1].dow, replaced[1].slot, replaced[1].role],
+      [0, 'dinner', 'side'],
+    )
+    eq('テンプレの中身: 差し替えでほかの品は変わらない', replaced[0].recipeId, 41)
+  }
 
   // A-1: 翌週(8/3(月)〜8/9(日))へ丸ごと流し込む
   const nextWeek = [

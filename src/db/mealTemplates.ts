@@ -18,6 +18,26 @@ export async function saveMealTemplate(name: string, items: MealTemplateItem[]):
   return db.mealTemplates.add({ name, items, createdAt: Date.now() })
 }
 
+/**
+ * テンプレの名前を変える（2026-08-02 便DE-9・テンプレの中身の画面）。
+ * すでに献立へ入れた分には何の影響も無い（雛形の名前だけを直す）。
+ */
+export async function renameMealTemplate(id: number, name: string): Promise<void> {
+  await db.mealTemplates.update(id, { name })
+}
+
+/**
+ * テンプレの中身を差し替える（2026-08-02 便DE-9）。1品のレシピ変更・1品の削除の両方で使う。
+ * 中身の組み立て（どの位置をどう直すか）は純ロジック logic/mealTemplate.ts が決め、
+ * ここは書き込むだけ。すでに献立へ入れた分は変わらない（雛形だけを直す）。
+ */
+export async function updateMealTemplateItems(
+  id: number,
+  items: MealTemplateItem[],
+): Promise<void> {
+  await db.mealTemplates.update(id, { items })
+}
+
 /** テンプレを削除する（すでに献立へ流し込んだ分は消えない＝雛形だけを消す） */
 export async function deleteMealTemplate(id: number): Promise<void> {
   await db.mealTemplates.delete(id)

@@ -1,6 +1,6 @@
 import { dowIndex, isPastDate, MEAL_SLOTS } from './mealPlan'
 import { ja } from '../i18n/ja'
-import type { MealPlanEntry, MealRole, MealSlot } from '../db/types'
+import { MEAL_ROLES, type MealPlanEntry, type MealRole, type MealSlot } from '../db/types'
 
 /**
  * 献立表（2026-07-29 便CB-2・docs/59 A-4）の組み立て。
@@ -100,7 +100,8 @@ export function buildPlanSheet(options: {
     if (list) list.push(e)
     else byDateSlot.set(key, [e])
   }
-  const roleRank = (role: MealRole) => (role === 'main' ? 0 : 1)
+  // 役割の並びは ja.mealPlan.role と同じ（主菜→副菜→汁物→その他。2026-08-02 便DE-4）
+  const roleRank = (role: MealRole) => MEAL_ROLES.indexOf(role)
   const slotOrder = MEAL_SLOTS.filter((s) => visibleSlots.includes(s))
 
   const days: PlanSheetDay[] = dates.map((date) => {

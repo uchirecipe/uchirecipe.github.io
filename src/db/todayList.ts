@@ -71,6 +71,39 @@ export async function markTodayListCooked(recipeId: number): Promise<void> {
 }
 
 /**
+ * 直前の「作った」を取り消す（2026-08-02 便DE-3・オーナー指示）。
+ * markTodayListCooked と対になる操作で、今日の日付で付いた記録を1件消し、その品を
+ * 今日の献立へ戻す。トーストの「元に戻す」からだけ呼ぶ（誤タップの直後を想定した経路）。
+ *
+ * 消す対象は「今日の日付で、メモ・写真・人数のどれも付いていない記録」の先頭1件に限る。
+ * 記録フォーム（レシピ詳細の「作った！」）で書いたメモ・写真つきの記録は、同じ日でも
+ * この操作では消さない＝押し間違いの取り消しが、手で書いた記録を巻き込まないようにする。
+ * 対象が見つからなければ false を返し、何も変えない（呼び出し側はその旨を伝える）。
+ *
+ * 在庫（cookedReflectPantry がONのときに1段階下げた分）は戻さない。戻す量を機械的に
+ * 決められない（間に手で在庫を触っているかもしれない）ためで、呼び出し側は
+ * その事実をトーストに添える。
+ */
+export async function undoTodayListCooked(recipeId: number): Promise<boolean> {
+  const date = todayString()
+  return db.transaction('rw', db.recipes, db.todayList, async () => {
+    const recipe = await db.recipes.get(recipeId)
+    if (!recipe) return false
+    const index = recipe.cookedLogs.findIndex(
+      (log) =>
+        log.date === date && log.note == null && log.photo == null && log.servings == null,
+    )
+    if (index < 0) return false
+    await db.recipes.update(recipeId, {
+      cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
+    })
+    const existing = await db.todayList.where('recipeId').equals(recipeId).first()
+    if (!existing) await db.todayList.add({ recipeId, addedAt: Date.now() })
+    return true
+  })
+}
+
+/**
  * 「まとめて作った！」: 表示中の全レシピを今日の日付で記録し、リストを空にする。
  * 記録(addCookedLog)とクリア(todayList.clear)をrecipes+todayListを跨ぐ1トランザクションに
  * まとめて原子化する（2026-07バグ修正。従来は記録ループとclearが別トランザクションで、

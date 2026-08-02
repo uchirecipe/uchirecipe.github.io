@@ -113,7 +113,7 @@
 //         日週月タブのaria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみ
 //         aria-pressed=true)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。
 //         同日更新: 既定が夕食のみになったため夕食を外そうとするパターンで検証)・
-//         「この食事の予定をまとめて消す」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3で
+//         「この週の◯◯をまとめて空にする」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3/DE-12で
 //         改名+折りたたみ)の折りたたみ開閉・食事選択+confirm+一括削除(手動配置も消える)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
 //         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
@@ -255,8 +255,8 @@
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
 //         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
-//         「この日の献立（1人分）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
-//         週まとめに「この週の献立（1人分）」が出ること。既定は1行で、めやすの説明は展開時のみ。
+//         「この日の献立の栄養（1人分の概算）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
+//         週まとめに「この週の献立の栄養（1人分の概算）」が出ること。既定は1行で、めやすの説明は展開時のみ。
 //         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
 //         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
 //         「監修」「推奨」「減塩」を使わないこと・「登録したレシピだけの合計」等の但し書きと
@@ -2953,6 +2953,88 @@ try {
     }
   }
 
+  // --- TODAYUNDO-01: 今日の献立の☑(作った)に「元に戻す」を添える(2026-08-02 便DE-3・オーナー指示)。
+  // 押すと行が消えるだけで記録が付いたのか分からず、押し間違いを戻す手段も無かった。
+  // トーストの「元に戻す」で ①今日の日付の記録が1件消える ②その品が今日の献立へ戻る、を実データで確認する ---
+  currentCheck = 'TODAYUNDO-01'
+  {
+    const tuBrowser = await chromium.launch()
+    const tuContext = await tuBrowser.newContext()
+    const tuPage = await tuContext.newPage()
+    tuPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@TODAYUNDO-01] ${err.message}`)
+    })
+    try {
+      await tuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(1800) // 初回シード完了待ち
+      await tuPage.getByText('肉じゃが', { exact: true }).first().click()
+      await tuPage.waitForTimeout(500)
+      await tuPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tuPage.waitForTimeout(300)
+      await tuPage.getByRole('button', { name: '決めない' }).click()
+      await tuPage.waitForTimeout(300)
+
+      await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(800)
+      await tuPage.getByRole('button', { name: '作った', exact: true }).first().click()
+      await tuPage.waitForTimeout(700)
+      const tuAfterCooked = (await tuPage.textContent('body')) ?? ''
+      check(
+        'TODAYUNDO-01 ☑で記録した直後にトーストと「元に戻す」が出る',
+        tuAfterCooked.includes('作った記録をつけました') && tuAfterCooked.includes('元に戻す'),
+      )
+      const readState = () =>
+        tuPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction(['recipes', 'todayList'], 'readonly')
+                let recipes, today
+                const rq = tx.objectStore('recipes').getAll()
+                const tq = tx.objectStore('todayList').getAll()
+                rq.onsuccess = () => {
+                  recipes = rq.result
+                  if (today !== undefined) resolve({ recipes, today })
+                }
+                tq.onsuccess = () => {
+                  today = tq.result
+                  if (recipes !== undefined) resolve({ recipes, today })
+                }
+                rq.onerror = () => reject(rq.error)
+                tq.onerror = () => reject(tq.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      const tuCooked = await readState()
+      const tuNikujaga = tuCooked.recipes.find((r) => r.title === '肉じゃが')
+      check('TODAYUNDO-01 前提: 記録が1件付き、今日の献立から消える', 
+        (tuNikujaga?.cookedLogs?.length ?? 0) === 1 && tuCooked.today.length === 0)
+
+      await tuPage.getByRole('button', { name: '元に戻す' }).click()
+      await tuPage.waitForTimeout(800)
+      const tuUndone = await readState()
+      const tuNikujaga2 = tuUndone.recipes.find((r) => r.title === '肉じゃが')
+      check(
+        'TODAYUNDO-01 「元に戻す」で作った記録が消える',
+        (tuNikujaga2?.cookedLogs?.length ?? 0) === 0,
+        `logs=${JSON.stringify(tuNikujaga2?.cookedLogs ?? [])}`,
+      )
+      check(
+        'TODAYUNDO-01 「元に戻す」でその品が今日の献立へ戻る',
+        tuUndone.today.length === 1 && tuUndone.today[0].recipeId === tuNikujaga2?.id,
+      )
+      check(
+        'TODAYUNDO-01 取り消したことを結果メッセージで伝える',
+        ((await tuPage.textContent('body')) ?? '').includes('作った記録を取り消して、今日の献立に戻しました'),
+      )
+    } finally {
+      await tuBrowser.close()
+    }
+  }
+
   // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
   // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
   // 「日」タブへ固定される(2026-07-16 便U-1でタブ構成に再設計。以前はスクロール制御だったが、
@@ -3927,7 +4009,7 @@ try {
       )
       await suggestConditionsToggleBtn.click()
       await mpPage.waitForTimeout(200)
-      const quickToggleBtn = mpPage.getByRole('button', { name: '自動提案は時短レシピ優先' })
+      const quickToggleBtn = mpPage.getByRole('button', { name: '調理時間15分以内を優先' })
       check('MEALPLAN-01(Fix5) 時短優先トグルは既定でaria-pressed=false', (await quickToggleBtn.getAttribute('aria-pressed')) === 'false')
       await quickToggleBtn.click()
       await mpPage.waitForTimeout(200)
@@ -3968,14 +4050,14 @@ try {
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
 
-      // 便U-4 → 2026-08-02 便CW-3で「この食事の予定をまとめて消す」に改名し、既定閉の
+      // 便U-4 → 便CW-3 → 2026-08-02 便DE-12で「この週の◯◯をまとめて空にする」に改名し、既定閉の
       // 折りたたみにして週タブのいちばん下へ移した。ここまでの操作で月曜夕食の主菜行に
       // 「肉じゃが」が割り当て済み(Fix4)。まず畳まれていることを確かめてから開く
       check(
-        'MEALPLAN-01(便CW-3) 「この食事の予定をまとめて消す」は既定で畳まれている',
+        'MEALPLAN-01(便CW-3/DE-12) 「この週の夕食をまとめて空にする」は既定で畳まれている',
         (await mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' }).count()) === 0,
       )
-      await mpPage.getByRole('button', { name: 'この食事の予定をまとめて消す' }).click()
+      await mpPage.getByRole('button', { name: 'この週の夕食をまとめて空にする' }).click()
       await mpPage.waitForTimeout(300)
       // 帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
       // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
@@ -4032,8 +4114,8 @@ try {
 
   // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
   // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
-  // ・週タブの各日カードに「この日の献立（1人分）」が1行(**無料は kcal・野菜g の2値**)で出ること
-  // ・週まとめに「この週の献立（1人分）」が同じ構成で出ること
+  // ・週タブの各日カードに「この日の献立の栄養（1人分の概算）」が1行(**無料は kcal・野菜g の2値**)で出ること
+  // ・週まとめに「この週の献立の栄養（1人分の概算）」が同じ構成で出ること
   // ・展開すると1日のめやすが**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
   //   **無料は野菜350gだけ**で、塩分のめやすはPro側。不足・過多の断定をしない=
   //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
@@ -4068,19 +4150,19 @@ try {
       const nbEmptyText = await nbPage.textContent('body')
       check(
         'NUTRI-DAY-01 未割当時は「この日の献立」の行が出ない',
-        !nbEmptyText.includes('この日の献立（1人分）'),
+        !nbEmptyText.includes('この日の献立の栄養（1人分の概算）'),
       )
       check(
         'NUTRI-WEEK-01 未割当時は「この週の献立」の行も出ない',
-        !nbEmptyText.includes('この週の献立（1人分）'),
+        !nbEmptyText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
       await nbPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
       await nbPage.waitForTimeout(1200)
       const nbFilledText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立（1人分）」が出る',
-        nbFilledText.includes('この日の献立（1人分）'),
+        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('この日の献立の栄養（1人分の概算）'),
       )
       const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
       check(
@@ -4108,8 +4190,8 @@ try {
         /野菜約[\d,]+g/.test(nbFilledText),
       )
       check(
-        'NUTRI-WEEK-01 週まとめに「この週の献立（1人分）」が出る',
-        nbFilledText.includes('この週の献立（1人分）'),
+        'NUTRI-WEEK-01 週まとめに「この週の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
       // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
@@ -6849,15 +6931,15 @@ try {
         `items=${JSON.stringify(tpSaved[0].items)}`,
       )
 
-      // B-2: 月タブで翌月を開き、「金」だけを選んで流し込む
+      // B-2: 月タブで翌月を開き、「金」だけを選んで入れる(便DE-8で「流し込む」→「内容を入れる」に改名)
       await tpPage.getByRole('button', { name: '月', exact: true }).click()
       await tpPage.waitForTimeout(400)
       await tpPage.getByRole('button', { name: '次の月' }).click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByRole('button', { name: 'テンプレを流し込む' }).click()
+      await tpPage.getByRole('button', { name: 'テンプレの内容をこの月に入れる' }).click()
       await tpPage.waitForTimeout(400)
-      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレを流し込む' })
-      check('MEALPLAN-A1B2(B-2) 流し込みの窓が開く', (await tpApplyModal.count()) === 1)
+      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレの内容を入れる' })
+      check('MEALPLAN-A1B2(B-2) テンプレを入れる窓が開く', (await tpApplyModal.count()) === 1)
       check(
         'MEALPLAN-A1B2(B-2) 既定では全曜日が選ばれている(1週間まるごと＝A-1)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 7,
@@ -6871,7 +6953,7 @@ try {
         'MEALPLAN-A1B2(B-2) 曜日を絞れる(金だけを選べる)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 1,
       )
-      await tpApplyModal.getByRole('button', { name: '流し込む' }).click()
+      await tpApplyModal.getByRole('button', { name: '入れる', exact: true }).click()
       await tpPage.waitForTimeout(900)
       check(
         'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
@@ -6913,7 +6995,7 @@ try {
         `count=${tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length}`,
       )
       check(
-        'MEALPLAN-A1B2 流し込んだ枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
+        'MEALPLAN-A1B2 テンプレから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
         tpAfter
           .filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId)
           .every((e) => !e.auto),
@@ -7433,8 +7515,9 @@ try {
     }
   }
 
-  // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
-  // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
+  // --- MEALPLAN-ROLE: 日タブの「レシピ一覧から選択中」と「今週の献立の予定」の並列表示
+  // (2026-08-02 便DE-2で警告＋長い説明文から置き換え)の食事ボタンが、役割(主菜/副菜)の粒度を
+  // 守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
   // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を
   // 押すと夕食の主菜(肉じゃが)が消えていた。副菜は副菜として足され、主菜が残ることを実データで確認する ---
   currentCheck = 'MEALPLAN-ROLE'
@@ -7495,14 +7578,19 @@ try {
       await roPage.waitForTimeout(1200)
       const roBody = (await roPage.textContent('body')) ?? ''
       check(
-        'MEALPLAN-ROLE 前提: 食い違いの案内が出る',
-        roBody.includes('今日の献立と今週の予定が食い違っています'),
+        'MEALPLAN-ROLE(便DE-2) 前提: 2つの中身が左右に並んで出る',
+        roBody.includes('レシピ一覧から選択中') && roBody.includes('今週の献立の予定'),
       )
       check(
-        'MEALPLAN-ROLE 案内文が「主菜になる料理は主菜、副菜になる料理は副菜として入る」ことを説明する',
-        roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り、今ある献立は消えません'),
+        'MEALPLAN-ROLE(便DE-2) 長い説明文と「食い違っています」の警告は出さない',
+        !roBody.includes('今日の献立と今週の予定が食い違っています') &&
+          !roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り'),
       )
-      await roPage.getByRole('button', { name: /夕食.*現在/ }).first().click()
+      check(
+        'MEALPLAN-ROLE(便DE-2) 右側に今週の予定(夕食の肉じゃが)が並ぶ',
+        (await roPage.locator('[data-testid="plan-mismatch"]').textContent())?.includes('肉じゃが'),
+      )
+      await roPage.getByRole('button', { name: '夕食に入れる' }).first().click()
       await roPage.waitForTimeout(700)
       check(
         'MEALPLAN-ROLE どの食事のどの役割に入れたかをトーストで伝える',
@@ -12946,7 +13034,7 @@ try {
       )
       check(
         'DEMO-01 デモには献立を書き換える操作を出さない',
-        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレを流し込む'),
+        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレの内容をこの月に入れる'),
       )
       // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
       await dmPage.getByRole('button', { name: '食費', exact: true }).click()

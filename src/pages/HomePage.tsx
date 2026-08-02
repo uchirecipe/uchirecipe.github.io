@@ -10,6 +10,7 @@ import {
   Refrigerator,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   CalendarDays,
   Megaphone,
   X,
@@ -24,9 +25,16 @@ import { useTodayList } from '../db/todayList'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
 import { currentSeason, preferSeasonWithFallback } from '../logic/season'
-import { isMainDish, excludeYesterdayPlanRecipes } from '../logic/mealPlan'
+import {
+  isMainDish,
+  excludeYesterdayPlanRecipes,
+  MEAL_SLOTS,
+  sortMealSlots,
+} from '../logic/mealPlan'
+import { useMealPlanRange } from '../db/mealPlan'
+import { todayString } from '../logic/date'
 import { makePantryMatcher } from '../logic/pantry'
-import type { CookedLog, HomeWidgetKey, Recipe } from '../db/types'
+import type { CookedLog, HomeWidgetKey, MealSlot, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -226,6 +234,39 @@ export default function HomePage() {
       .map((item) => recipeById.get(item.recipeId))
       .filter((r): r is Recipe => r !== undefined)
   }, [todayList, recipeById])
+
+  /**
+   * ホームの「今日の献立」を朝食・昼食・夕食に分けて出す（2026-08-02 便DE-1・オーナー指示）。
+   *
+   * 「今日の献立」（todayList）は食事の情報を持たないリストなので、食事は**今日の週の予定**
+   * （mealPlans の今日の分）から引く。日タブの自動取り込み（便U-3）で今日の予定はこのリストへ
+   * 入るため、ふだんはこれで全部に食事が付く。予定に無い品（レシピ一覧から自分で足した品）は
+   * 食事が決められないので、見出しを付けずに最後へ並べる（勝手にどこかの食事に入れない）。
+   */
+  const today = useMemo(() => todayString(), [])
+  const todayPlanEntries = useMealPlanRange(today, today)
+  const slotOfRecipe = useMemo(() => {
+    const map = new Map<number, MealSlot>()
+    todayPlanEntries?.forEach((e) => {
+      if (!map.has(e.recipeId)) map.set(e.recipeId, e.slot)
+    })
+    return map
+  }, [todayPlanEntries])
+  const todayListBySlot = useMemo(() => {
+    const visible = sortMealSlots(settings?.visibleMealSlots ?? [...MEAL_SLOTS])
+    const groups: { slot: MealSlot; recipes: Recipe[] }[] = visible.map((slot) => ({
+      slot,
+      recipes: [],
+    }))
+    const rest: Recipe[] = []
+    todayListRecipes?.forEach((recipe) => {
+      const slot = recipe.id != null ? slotOfRecipe.get(recipe.id) : undefined
+      const group = slot ? groups.find((g) => g.slot === slot) : undefined
+      if (group) group.recipes.push(recipe)
+      else rest.push(recipe)
+    })
+    return { groups: groups.filter((g) => g.recipes.length > 0), rest }
+  }, [todayListRecipes, slotOfRecipe, settings?.visibleMealSlots])
   // 「今日の献立」ウィジェットが出るか(1品以上)。2026-07-16オーナー指示: 「今日なに作る?」
   // ウィジェットと常にどちらか片方だけを表示する（今日の献立が1品以上ならそちらを優先し、
   // 「今日なに作る?」はウィジェットごと非表示にする。読み込み中(undefined)は従来どおり0品扱い）
@@ -329,11 +370,36 @@ export default function HomePage() {
             <CalendarDays size={20} className="text-accent-ink" aria-hidden />
             {ja.home.mealPlanTitle}
           </h2>
-          <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-            {todayListRecipes.map((recipe) => (
-              <HomeTodayListItem key={recipe.id} recipe={recipe} />
-            ))}
-          </ul>
+          {/* 2026-08-02 便DE-1(オーナー指示): 朝食・昼食・夕食で分けて出し、
+              食事の見出しを押すと「週」タブのその日まで送る */}
+          {todayListBySlot.groups.map(({ slot, recipes: slotRecipes }) => (
+            <div key={slot} className="mt-[var(--space-sm)]">
+              <button
+                type="button"
+                data-testid="home-today-slot"
+                onClick={() => navigate(`/meal-plan?focus=week&date=${today}`)}
+                aria-label={ja.home.todaySlotOpenWeek.replace('{slot}', ja.mealPlan.slot[slot])}
+                className="flex w-full items-center gap-1 py-1 text-left text-sm font-bold text-accent-ink"
+              >
+                <span className="min-w-0 flex-1">{ja.mealPlan.slot[slot]}</span>
+                <ChevronRight size={16} className="shrink-0" aria-hidden />
+              </button>
+              <ul className="divide-y divide-edge rounded-md border border-edge bg-app">
+                {slotRecipes.map((recipe) => (
+                  <HomeTodayListItem key={recipe.id} recipe={recipe} />
+                ))}
+              </ul>
+            </div>
+          ))}
+          {/* 今週の予定に無い品（レシピ一覧から自分で足した品）は、食事が決まっていないので
+              見出しを付けずに並べる */}
+          {todayListBySlot.rest.length > 0 && (
+            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+              {todayListBySlot.rest.map((recipe) => (
+                <HomeTodayListItem key={recipe.id} recipe={recipe} />
+              ))}
+            </ul>
+          )}
         </section>
       ) : null,
     // 今日の献立が1品以上あるときはウィジェットごと非表示(2026-07-16オーナー指示。
@@ -466,6 +532,11 @@ export default function HomePage() {
               <Dices size={20} aria-hidden />
               {ja.home.shuffle}
             </button>
+            {/* いま候補が何品あるか(2026-08-02 便DE-5・オーナー指示)。候補が少ない条件では
+                振り直しても同じ料理が続けて出るので、その理由が数字で分かるようにする */}
+            <p className="mt-1 text-center text-xs text-ink-muted">
+              {ja.common.candidateCount.replace('{n}', String(finalCandidates.length))}
+            </p>
           </>
         )}
       </section>

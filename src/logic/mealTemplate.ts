@@ -1,5 +1,5 @@
 import { dowIndex, isPastDate, MEAL_SLOTS } from './mealPlan'
-import type { MealPlanEntry, MealRole, MealSlot, MealTemplateItem } from '../db/types'
+import { MEAL_ROLES, type MealPlanEntry, type MealRole, type MealSlot, type MealTemplateItem } from '../db/types'
 
 /**
  * マイ献立テンプレ（2026-07-29 便CB-2・docs/59 A-1＋B-2）の純ロジック。
@@ -35,7 +35,8 @@ export function buildTemplateItems(
       role: (e.role ?? 'main') as MealRole,
       recipeId: e.recipeId,
     }))
-  const roleRank = (role: MealRole) => (role === 'main' ? 0 : 1)
+  // 役割の並びは ja.mealPlan.role と同じ（主菜→副菜→汁物→その他。2026-08-02 便DE-4）
+  const roleRank = (role: MealRole) => MEAL_ROLES.indexOf(role)
   return items.sort(
     (a, b) =>
       a.dow - b.dow ||
@@ -134,6 +135,68 @@ export function planTemplateFill(options: {
     targetDayCount,
     hiddenSlots: MEAL_SLOTS.filter((s) => hiddenSlotSet.has(s)),
   }
+}
+
+/** テンプレの中身1品と、元の配列での位置（差し替え・削除はこの位置で指す） */
+export interface TemplateItemView {
+  index: number
+  item: MealTemplateItem
+}
+
+/** 曜日→食事の順に束ねたテンプレの中身（テンプレの中身を見る画面の表示用） */
+export interface TemplateDowGroup {
+  dow: number
+  slots: { slot: MealSlot; items: TemplateItemView[] }[]
+}
+
+/**
+ * テンプレの中身を「曜日 → 食事」で束ねる（2026-08-02 便DE-9・テンプレの中身の画面）。
+ * 並びは 曜日→食事→役割 に固定する（保存の順や編集の順で見え方が変わらないようにする）。
+ * 位置（index）は元の配列のままにして返す＝画面から差し替え・削除する対象を一意に指せる。
+ */
+export function groupTemplateItems(items: MealTemplateItem[]): TemplateDowGroup[] {
+  const views: TemplateItemView[] = items.map((item, index) => ({ index, item }))
+  const sorted = [...views].sort(
+    (a, b) =>
+      a.item.dow - b.item.dow ||
+      MEAL_SLOTS.indexOf(a.item.slot) - MEAL_SLOTS.indexOf(b.item.slot) ||
+      MEAL_ROLES.indexOf(a.item.role) - MEAL_ROLES.indexOf(b.item.role) ||
+      a.index - b.index,
+  )
+  const groups: TemplateDowGroup[] = []
+  for (const view of sorted) {
+    let group = groups.find((g) => g.dow === view.item.dow)
+    if (!group) {
+      group = { dow: view.item.dow, slots: [] }
+      groups.push(group)
+    }
+    let slotGroup = group.slots.find((s) => s.slot === view.item.slot)
+    if (!slotGroup) {
+      slotGroup = { slot: view.item.slot, items: [] }
+      group.slots.push(slotGroup)
+    }
+    slotGroup.items.push(view)
+  }
+  return groups
+}
+
+/** テンプレから1品だけ外した中身を返す（元の配列は変えない。位置が無ければそのまま返す） */
+export function removeTemplateItemAt(
+  items: MealTemplateItem[],
+  index: number,
+): MealTemplateItem[] {
+  if (index < 0 || index >= items.length) return items
+  return items.filter((_, i) => i !== index)
+}
+
+/** テンプレの1品のレシピだけを差し替えた中身を返す（曜日・食事・役割は変えない） */
+export function replaceTemplateItemRecipe(
+  items: MealTemplateItem[],
+  index: number,
+  recipeId: number,
+): MealTemplateItem[] {
+  if (index < 0 || index >= items.length) return items
+  return items.map((item, i) => (i === index ? { ...item, recipeId } : item))
 }
 
 /**
