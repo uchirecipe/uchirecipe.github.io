@@ -4,8 +4,12 @@ import type { Recipe } from '../db/types'
  * 無料版の登録件数制限。Pro販売手段の公開と同一リリースでtrueにする（それまでは寝かせる）。
  * ONにしても: 新規追加だけをブロックし、既存データの閲覧・編集・削除とバックアップ復元は
  * 絶対に制限しない（docs/08 2-4）。
+ *
+ * 2026-08-02 発売準備便DD: Pro版の発売と同一リリースで true にした（docs/08 §2 発売ゲート）。
+ * ONで変わるのは「新規追加のブロック(50件)」と「予告バナー(40件〜)」だけ。isStarter=true の
+ * 基本レシピは countFreeLimitRecipes で数えないので、同梱109品は上限に一切影響しない。
  */
-export const FREE_LIMIT_ENABLED = false
+export const FREE_LIMIT_ENABLED = true
 export const FREE_LIMIT = 50
 /**
  * 予告バナーを出し始める件数（2026-07-23 便BJ・docs/55 CEO提案「50件上限は40件あたりから
@@ -25,8 +29,8 @@ export function freeLimitRemaining(count: number): number {
 
 /**
  * 予告バナーを出す件数域か（FREE_LIMIT_ENABLEDフラグは考慮しない純粋判定）。
- * 発売時にフラグをONにしたときの挙動（40件以上・50件未満で予告）を、フラグOFFの
- * 現状でも単体テストで固定できるよう、フラグ判定と分離しておく。
+ * 「40件以上・50件未満で予告」という件数域の定義を、フラグの状態に関係なく
+ * 単体テストで固定できるよう、フラグ判定と分離してある。
  */
 export function isInWarningRange(count: number): boolean {
   return count >= FREE_LIMIT_WARNING_THRESHOLD && count < FREE_LIMIT

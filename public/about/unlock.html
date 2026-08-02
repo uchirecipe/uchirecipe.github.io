@@ -207,6 +207,7 @@
     color: var(--text-muted);
     text-decoration: underline;
   }
+  footer span.sep { margin: 0 8px; }
 </style>
 </head>
 <body>
@@ -252,7 +253,9 @@
     </details>
     <details>
       <summary>それでもうまくいかない</summary>
-      <p>お手数ですが、ご購入時のメール等の情報がわかる状態で <a href="mailto:hapillust@gmail.com">hapillust@gmail.com</a> までご連絡ください。折り返し対応いたします。</p>
+      <!-- 2026-08-02 便DD: 連絡先を特商法表記と同じ uchiapplication@gmail.com に揃えた
+           (docs/08 §3の既定値。旧 hapillust@gmail.com はイラスト活動用で、分離すると決めてある) -->
+      <p>お手数ですが、ご購入時のメール等の情報がわかる状態で <a href="mailto:uchiapplication@gmail.com">uchiapplication@gmail.com</a> までご連絡ください。折り返し対応いたします。</p>
     </details>
   </div>
 
@@ -262,6 +265,8 @@
 
   <footer>
     <a href="/about/terms.html">利用規約・プライバシーポリシー</a>
+    <span class="sep">|</span>
+    <a href="/about/tokushoho.html">特定商取引法に基づく表記</a>
   </footer>
 </main>
 <!-- Cloudflare Web Analytics -->

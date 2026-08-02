@@ -1,6 +1,14 @@
 import { PRO_CODE_HASHES } from './proCodes'
 import { sha256Hex as sha256HexFallback } from './sha256'
 
+/**
+ * Pro版の決済ページ（Stripe Payment Link・docs/08 §3で確定した本番リンク）。
+ * 決済が済むと購入完了画面に解錠コード(UR-)が表示される（workers/purchase-fulfill）。
+ * 紹介ページ(public/about/index.html)の購入ボタンにも同じURLを書いているので、
+ * リンクを差し替えるときは両方を直す。
+ */
+export const PRO_PURCHASE_URL = 'https://buy.stripe.com/9B69AV8idaXva3wa4KdQQ00'
+
 /** コード入力のゆらぎ(全角・小文字・前後の空白)を吸収する */
 export function normalizeProCode(code: string): string {
   return code.normalize('NFKC').toUpperCase().trim()
