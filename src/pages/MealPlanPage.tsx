@@ -149,7 +149,7 @@ import type {
   Recipe,
   Settings,
 } from '../db/types'
-import { MEAL_PURPOSES } from '../db/types'
+import { MEAL_PURPOSES, MEAL_ROLES } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -824,11 +824,15 @@ interface ExtraRow {
   role: MealRole
 }
 
-/** ある日×枠の役割(主菜/副菜)ごとに表示する行を組み立てる。
+/** ある日×枠の役割(主菜/副菜/汁物/その他)ごとに表示する行を組み立てる。
  * 実データが1件もない役割は「未定」の行を1つ表示し、+ボタンで増やした分を後ろに続ける。
  *
  * 2026-08-02 便CW-2: その既定の空欄行も×で畳めるようにした（hiddenRoles に入っている役割は
- * 空欄行を出さない）。戻すのは「＋料理を追加」→主菜/副菜 の既存の入口（addOrRestoreRow）。 */
+ * 空欄行を出さない）。戻すのは「＋料理を追加」→主菜/副菜 の既存の入口（addOrRestoreRow）。
+ *
+ * 2026-08-02 便DE-4: 汁物・その他を足した。**空欄行を既定で出すのは主菜と副菜だけ**にする
+ * （4つとも空欄行を出すと、1日の1食に空行が4本並んで週タブが読めなくなる）。
+ * 汁物・その他は、料理が入っているか「＋料理を追加」で足したときだけ行が出る。 */
 function buildRoleRows(
   slotEntries: MealPlanEntry[],
   role: MealRole,
@@ -837,7 +841,8 @@ function buildRoleRows(
 ): MealPlanRow[] {
   const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
   const rows: MealPlanRow[] = roleEntries.map((entry) => ({ kind: 'entry', entry }))
-  if (roleEntries.length === 0 && !hiddenRoles.includes(role)) {
+  const showsDefaultEmptyRow = role === 'main' || role === 'side'
+  if (showsDefaultEmptyRow && roleEntries.length === 0 && !hiddenRoles.includes(role)) {
     rows.push({ kind: 'empty', removable: true, isDefault: true })
   }
   extra
@@ -1936,7 +1941,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       preferHighProtein,
       yesterdayRecipeIds,
     }
-    if (isSlotEmpty && entryId == null) {
+    // 枠が丸ごと空のときのペア提案は主菜・副菜の行から押したときだけ（2026-08-02 便DE-4）。
+    // 汁物・その他の行のサイコロで主菜＋副菜が生えると、押した行と結果が食い違う
+    if (isSlotEmpty && entryId == null && (role === 'main' || role === 'side')) {
       const { main, side } = suggestPairForSlot(visibleRecipes, baseOptions)
       if (!main && !side) {
         setMessage(ja.mealPlan.noSuggestion)
@@ -1953,20 +1960,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 効いていなかったため、8割が別ジャンル・2割が汁物になっていた。最も使われる動線が
     // 最も手当てされていなかった箇所。あわせて主菜との食材・食感の重複回避も渡す(MP-04)。
     // 一品ものの主菜でもここでは提案する(ユーザーが明示的に押した行を無反応にしない)
-    const slotMainRecipe =
-      role === 'side'
-        ? slotEntries
-            .filter((e) => (e.role ?? 'main') === 'main')
-            .map((e) => recipeById.get(e.recipeId))
-            .find((r): r is Recipe => !!r)
-        : undefined
+    // 汁物の行(2026-08-02 便DE-4)も副菜と同じ扱いにする＝主菜に合わせて選ぶ。
+    // 違いは寄せる種別だけ(副菜=side・汁物=soup。どちらも0件なら自動で緩む)
+    const followsMain = role === 'side' || role === 'soup'
+    const slotMainRecipe = followsMain
+      ? slotEntries
+          .filter((e) => (e.role ?? 'main') === 'main')
+          .map((e) => recipeById.get(e.recipeId))
+          .find((r): r is Recipe => !!r)
+      : undefined
     const picked = suggestForSlot(
       visibleRecipes,
-      role === 'side'
+      followsMain
         ? {
             ...baseOptions,
             role,
-            preferDishType: 'side' as const,
+            preferDishType: role === 'soup' ? ('soup' as const) : ('side' as const),
             genre: genreFilter ?? (slotMainRecipe ? recipeGenre(slotMainRecipe) : undefined),
             avoidKeys: slotMainRecipe ? dishAvoidKeys(slotMainRecipe) : undefined,
             excludeRecipeIds: slotMainRecipe?.id != null ? [slotMainRecipe.id] : undefined,
@@ -2986,8 +2995,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const slotEntries = entriesByDateSlotAll.get(slotKey) ?? []
     const extra = extraRows[slotKey] ?? []
     const hiddenRoles = hiddenDefaultRows[slotKey] ?? []
-    const mainRows = buildRoleRows(slotEntries, 'main', extra, hiddenRoles)
-    const sideRows = buildRoleRows(slotEntries, 'side', extra, hiddenRoles)
+    // 2026-08-02 便DE-4: 主菜・副菜に汁物・その他を足した4区分(レシピ登録の「料理の種別」と同じ)。
+    // 空欄行を既定で出すのは主菜・副菜だけ(buildRoleRows)なので、行が4本並ぶのは自分で足したときだけ
+    const roleRows = MEAL_ROLES.map(
+      (role) => [role, buildRoleRows(slotEntries, role, extra, hiddenRoles)] as const,
+    )
     const isAddMenuOpen = addMenuFor === slotKey
     // ジャンル混在の控えめ表示(便BH-2・docs/56 §3-10): 主菜のジャンルに対して
     // 副菜が別ジャンルのとき「ジャンル混在」バッジを出す(揃っている枠は無表示)
@@ -2995,8 +3007,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       .filter((e) => (e.role ?? 'main') === 'main')
       .map((e) => recipeById.get(e.recipeId))
       .find((r): r is Recipe => !!r)
+    // 主菜以外の品（副菜・汁物・その他）をまとめて見る＝ジャンル混在の判定と
+    // 「一品ものの日は副菜が空く」の説明の対象を、区分を足しても取りこぼさない
     const slotSideRecipes = slotEntries
-      .filter((e) => (e.role ?? 'main') === 'side')
+      .filter((e) => (e.role ?? 'main') !== 'main')
       .map((e) => recipeById.get(e.recipeId))
       .filter((r): r is Recipe => !!r)
     const genreMixed = detectGenreMix(slotMainRecipe, slotSideRecipes)
@@ -3038,36 +3052,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           )}
         </div>
         <div className="mt-1 space-y-1">
-          {mainRows.map((row, i) =>
-            renderRow(date, slot, 'main', row, `main-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
-          )}
-          {sideRows.map((row, i) =>
-            renderRow(date, slot, 'side', row, `side-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
+          {roleRows.map(([role, rows]) =>
+            rows.map((row, i) =>
+              renderRow(
+                date,
+                slot,
+                role,
+                row,
+                `${role}-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`,
+              ),
+            ),
           )}
         </div>
         {showOneDishNote && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.oneDishNote}</p>}
         {isAddMenuOpen ? (
-          <div className="mt-1 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                addOrRestoreRow(date, slot, 'main')
-                setAddMenuFor(null)
-              }}
-              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-            >
-              {ja.mealPlan.role.main}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                addOrRestoreRow(date, slot, 'side')
-                setAddMenuFor(null)
-              }}
-              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-            >
-              {ja.mealPlan.role.side}
-            </button>
+          // 2026-08-02 便DE-4: 足せる区分は主菜・副菜・汁物・その他の4つ(レシピ登録と同じ区分)
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {MEAL_ROLES.map((role) => (
+              <button
+                key={role}
+                type="button"
+                onClick={() => {
+                  addOrRestoreRow(date, slot, role)
+                  setAddMenuFor(null)
+                }}
+                className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
+              >
+                {ja.mealPlan.role[role]}
+              </button>
+            ))}
             <button
               type="button"
               onClick={() => setAddMenuFor(null)}

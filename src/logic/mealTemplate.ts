@@ -1,5 +1,5 @@
 import { dowIndex, isPastDate, MEAL_SLOTS } from './mealPlan'
-import type { MealPlanEntry, MealRole, MealSlot, MealTemplateItem } from '../db/types'
+import { MEAL_ROLES, type MealPlanEntry, type MealRole, type MealSlot, type MealTemplateItem } from '../db/types'
 
 /**
  * マイ献立テンプレ（2026-07-29 便CB-2・docs/59 A-1＋B-2）の純ロジック。
@@ -35,7 +35,8 @@ export function buildTemplateItems(
       role: (e.role ?? 'main') as MealRole,
       recipeId: e.recipeId,
     }))
-  const roleRank = (role: MealRole) => (role === 'main' ? 0 : 1)
+  // 役割の並びは ja.mealPlan.role と同じ（主菜→副菜→汁物→その他。2026-08-02 便DE-4）
+  const roleRank = (role: MealRole) => MEAL_ROLES.indexOf(role)
   return items.sort(
     (a, b) =>
       a.dow - b.dow ||

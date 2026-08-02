@@ -1797,6 +1797,32 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     )
   }
 
+  // ---- 汁物・その他の区分(2026-08-02 便DE-4) ----
+  // 汁物の行は副菜と同じ候補プール(dishType: side/soup)から選び、寄せる種別だけが違う。
+  // 「その他」の行は分類の受け皿なので役割で絞らない(デザートも選べる)
+  {
+    const soup = mkRecipe(1, { title: 'わかめのみそ汁', dishType: 'soup' })
+    const side = mkRecipe(2, { title: 'ほうれん草のおひたし', dishType: 'side' })
+    const main = mkRecipe(3, { title: '豚の生姜焼き', dishType: 'main' })
+    const dessert = mkRecipe(4, { title: '水ようかん', dishType: 'dessert' })
+    const pool = [soup, side, main, dessert]
+    eq(
+      'role:soup は主菜・デザートを候補にしない',
+      suggestCandidates(pool, opts({ role: 'soup' })).map((r) => r.id).sort().join(','),
+      '1,2',
+    )
+    eq(
+      'role:soup + preferDishType:soup は汁物だけに寄せる',
+      suggestCandidates(pool, opts({ role: 'soup', preferDishType: 'soup' })).map((r) => r.id).join(','),
+      '1',
+    )
+    eq(
+      'role:other は役割で絞らない(デザートも候補になる)',
+      suggestCandidates(pool, opts({ role: 'other' })).length,
+      4,
+    )
+  }
+
   // ---- role指定・ジャンル優先・高たんぱく優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
 
   // role:'side'は副菜系タグ(汁物/サラダ。「副菜」専用タグは無いため代用。おやつは含めない=
@@ -2374,6 +2400,25 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     eq('planWeekFill(役割粒度): 手動副菜のレシピ(21)は重複回避のusedに入る', plan.usedRecipeIds.includes(21), true)
   }
 
+  // (3c) 便DE-4(汁物・その他の区分): 自動提案が触るのは主菜・副菜だけ。
+  //      汁物・その他の行は「消さない・埋め対象にしない・重複回避のusedには数える」。
+  //      汁物だけが入っている枠は「まだ決まっていない」扱い＝主菜+副菜のペアで埋める
+  {
+    const entries = [
+      mkEntry(1, '2026-07-20', 31, { role: 'soup' }), // 月・汁物(手で足した行)
+      mkEntry(2, '2026-07-21', 32, { role: 'other', auto: true }), // 火・その他(autoが付いていても消さない)
+    ]
+    const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
+    eq('planWeekFill(便DE-4): 汁物・その他は削除対象にしない', plan.autoEntryIdsToRemove, [])
+    eq(
+      'planWeekFill(便DE-4): 汁物だけの枠も主菜+副菜のペアで埋める',
+      keysOf(plan.slotsToFill).includes('2026-07-20|dinner'),
+      true,
+    )
+    eq('planWeekFill(便DE-4): 汁物・その他のレシピは重複回避のusedに入る', sortedNums(plan.usedRecipeIds), [31, 32])
+    eq('planWeekFill(便DE-4): 汁物・その他だけの枠は「残す枠」に数えない', plan.preservedSlotKeys.size, 0)
+  }
+
   // (4) 過去日・今日の手動・非表示帯・手動と自動が同居する枠、の複合ケース
   {
     const entries = [
@@ -2657,6 +2702,17 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq(
     'role未設定の既存データがあっても、副菜の料理は追加(既存を消さない)',
     planRoleAssign([{ id: 5, recipeId: 11 }], 30, 'side'),
+    { kind: 'add' },
+  )
+  // 便DE-4(汁物・その他): 主菜以外はどれも「追加」＝既存の行を1件も消さない
+  eq(
+    '便DE-4: 汁物の料理は既存の主菜・副菜を消さず追加する',
+    planRoleAssign([main1, side1], 30, 'soup'),
+    { kind: 'add' },
+  )
+  eq(
+    '便DE-4: その他の料理も既存を消さず追加する',
+    planRoleAssign([main1, side1], 30, 'other'),
     { kind: 'add' },
   )
 }

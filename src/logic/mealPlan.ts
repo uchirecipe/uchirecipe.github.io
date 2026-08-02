@@ -3,7 +3,18 @@ import { cookedWithinDays } from './cooked'
 import { currentSeason } from './season'
 import { pickIconKey } from './icon'
 import { pickMainIngredients } from './mainIngredients'
-import type { DishType, IconKey, MealPlanEntry, MealRole, MealSlot, Recipe, Season } from '../db/types'
+import {
+  AUTO_FILL_ROLES,
+  MEAL_ROLES,
+  type AutoFillRole,
+  type DishType,
+  type IconKey,
+  type MealPlanEntry,
+  type MealRole,
+  type MealSlot,
+  type Recipe,
+  type Season,
+} from '../db/types'
 
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
@@ -498,9 +509,14 @@ export function suggestCandidates(recipes: Recipe[], options: SuggestOptions): R
   if (options.role === 'main') {
     const mains = slotPool.filter((r) => isMainCandidate(r))
     rolePool = mains.length > 0 ? mains : withoutDessert()
-  } else if (options.role === 'side') {
+  } else if (options.role === 'side' || options.role === 'soup') {
+    // 汁物の行(2026-08-02 便DE-4)も副菜と同じプール(dishType: side/soup)から選ぶ。
+    // 「汁物だけ」に絞るのは呼び出し側の preferDishType:'soup' で行う（0件なら自動で緩む）
     const sides = slotPool.filter((r) => isSideCandidate(r))
     rolePool = sides.length > 0 ? sides : withoutDessert()
+  } else if (options.role === 'other') {
+    // 「その他」の行(便DE-4)は分類の受け皿なので役割で絞らない（デザートも選べる）
+    rolePool = slotPool
   } else if (options.slot === 'dinner' || options.slot === 'lunch') {
     const mains = slotPool.filter((r) => isMainCandidate(r))
     rolePool = mains.length > 0 ? mains : withoutDessert()
@@ -762,13 +778,19 @@ export function planWeekFill(
     if (!touchedKeys.has(`${e.date}|${e.slot}`)) usedRecipeIds.push(e.recipeId)
   }
 
-  // 対象枠を役割（main/side）単位で仕分ける
-  const roles: MealRole[] = ['main', 'side']
+  // 対象枠を役割（main/side）単位で仕分ける。
+  // 汁物・その他（2026-08-02 便DE-4）は自動提案が入れない役割なので、ここでは仕分けず
+  // 「触らないが重複回避には数える」扱いにする（勝手に消さないし、勝手に増やさない）
+  const roles = AUTO_FILL_ROLES
   for (const date of futureDates) {
     for (const slot of visibleSlots) {
       const slotEntries = entries.filter((e) => e.date === date && e.slot === slot)
       let hasManualAnything = false
-      const fillable: Record<MealRole, boolean> = { main: false, side: false }
+      const fillable: Record<AutoFillRole, boolean> = { main: false, side: false }
+      for (const e of slotEntries) {
+        const role = e.role ?? 'main'
+        if (role !== 'main' && role !== 'side') usedRecipeIds.push(e.recipeId)
+      }
       for (const role of roles) {
         const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
         // keepAuto=true のときは、自動提案で入った行も「すでに決まっている」として保護する
@@ -863,7 +885,7 @@ export function cookedPlanEntryIds(
 ): Set<number> {
   const remaining = new Map(cookedCounts)
   const slotRank = (slot: MealSlot) => MEAL_SLOTS.indexOf(slot)
-  const roleRank = (role: MealRole | undefined) => ((role ?? 'main') === 'main' ? 0 : 1)
+  const roleRank = (role: MealRole | undefined) => MEAL_ROLES.indexOf(role ?? 'main')
   const ordered = [...dayEntries].sort(
     (a, b) =>
       slotRank(a.slot) - slotRank(b.slot) ||
