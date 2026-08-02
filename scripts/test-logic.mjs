@@ -122,6 +122,7 @@ import {
 } from '../src/logic/fileSave.ts'
 import {
   sortResults,
+  lastCookedDate,
   defaultSortDirection,
   buildNutrientSortValues,
   isNutrientSortOption,
@@ -197,7 +198,7 @@ import {
   normalizeIngredientChipLabel,
   pickDisplayIngredientChips,
 } from '../src/logic/mainIngredients.ts'
-import { searchRecipes } from '../src/logic/search.ts'
+import { searchRecipes, topTagsByUsage } from '../src/logic/search.ts'
 import { buildShareText } from '../src/logic/share.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 import { pickIconKey } from '../src/logic/icon.ts'
@@ -4091,6 +4092,85 @@ eq(
   eq('isFreeSortOption: 栄養以外(更新順)は無料', isFreeSortOption('updated'), true)
   // 無料に開放したのはUIの選択肢だけで、並べ替えの計算(sortResults)には解錠状態が入らない。
   // 上のカロリー昇順・塩分昇順の期待値がそのまま通っていることがその見張りになっている
+}
+
+// ---------- 「最近作った順」(2026-08-03 オーナー指示・便DI-7) ----------
+// 「作った！」の記録の最新日付で並べる。記録が1件も無いレシピは昇順/降順に関わらず末尾。
+// 記録は追加した順に入っていて日付順とは限らないので、必ず最大値を取ること(再発防止)
+{
+  const mkCooked = (id, title, dates, updatedAt) => ({
+    id,
+    title,
+    servings: 2,
+    effortLevel: 'normal',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: dates.map((date) => ({ date })),
+    searchWords: [],
+    createdAt: updatedAt,
+    updatedAt,
+  })
+  // 記録の並びをわざと日付順にしない(2件目の方が古い)
+  const rNew = mkCooked(1, 'きのう作った', ['2026-07-01', '2026-08-02'], 100)
+  const rOld = mkCooked(2, '先月作った', ['2026-07-05'], 200)
+  const rNever = mkCooked(3, '作ったことがない', [], 300)
+  eq('最近作った順: 記録の最新日付を拾う(追加順が日付順でなくても)', lastCookedDate(rNew), '2026-08-02')
+  eq('最近作った順: 記録が1件なら その日付', lastCookedDate(rOld), '2026-07-05')
+  eq('最近作った順: 記録なしはnull', lastCookedDate(rNever), null)
+  const cookedResults = [rOld, rNever, rNew].map((recipe) => ({
+    recipe,
+    usedCount: 0,
+    wantedCount: 0,
+  }))
+  eq(
+    '最近作った順(既定=降順): 新しい順に並び、記録なしは末尾',
+    sortResults(cookedResults, 'recentCooked', []).map((r) => r.recipe.id),
+    [1, 2, 3],
+  )
+  eq(
+    '最近作った順(昇順=しばらく作っていない順): 古い順でも記録なしは末尾のまま',
+    sortResults(cookedResults, 'recentCooked', [], 'asc').map((r) => r.recipe.id),
+    [2, 1, 3],
+  )
+  eq('最近作った順の既定方向は降順(新しい方から)', defaultSortDirection.recentCooked, 'desc')
+  // 回数で数える「よく使う順」とは別物であること(記録2件のrNewが回数では先頭)
+  eq(
+    'よく使う順は回数順のまま(最近作った順の追加で壊れていない)',
+    sortResults(cookedResults, 'cooked', []).map((r) => r.recipe.id),
+    [1, 2, 3],
+  )
+}
+
+// ---------- 「よく使うタグ」チップの使用頻度集計(2026-08-03 オーナー指示・便DI-4) ----------
+// 従来は「作り置き」「お弁当」の直書き固定2択で、レシピを増やしても中身が変わらなかった。
+// 使用件数の多い順・同数はタグ名の五十音順で安定すること
+{
+  const withTags = (tags) => ({ tags })
+  const tagRecipes = [
+    withTags(['作り置き', 'お弁当']),
+    withTags(['作り置き']),
+    withTags(['作り置き', '朝ごはん']),
+    withTags(['お弁当']),
+    withTags(['朝ごはん']),
+    withTags([]),
+  ]
+  eq('よく使うタグ: 使用件数の多い順', topTagsByUsage(tagRecipes, 3), ['作り置き', 'お弁当', '朝ごはん'])
+  eq('よく使うタグ: limitで打ち切る', topTagsByUsage(tagRecipes, 1), ['作り置き'])
+  eq('よく使うタグ: タグが無ければ空', topTagsByUsage([withTags([]), withTags([])], 6), [])
+  eq('よく使うタグ: limit0は空', topTagsByUsage(tagRecipes, 0), [])
+  eq(
+    'よく使うタグ: 同じレシピ内の重複タグは1件と数える',
+    topTagsByUsage([withTags(['朝ごはん', '朝ごはん']), withTags(['お弁当']), withTags(['お弁当'])], 1),
+    ['お弁当'],
+  )
+  eq(
+    'よく使うタグ: 同数なら五十音順で安定する(開くたびに入れ替わらない)',
+    topTagsByUsage([withTags(['たまご', 'あさごはん', 'さかな'])], 3),
+    ['あさごはん', 'さかな', 'たまご'],
+  )
+  eq('よく使うタグ: 空白だけのタグは数えない', topTagsByUsage([withTags(['  ', 'お弁当'])], 6), ['お弁当'])
 }
 
 // ---------- 「基本レシピ順」並び替えは2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で

@@ -1856,12 +1856,11 @@ function RecipeFormInner() {
             {ja.form.ingredientGroupHint.replace('{last}', String(MAX_SEASONING_GROUP))}
           </p>
         )}
-        {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。
-            この画面には材料ごとの価格入力欄を置かず、案内だけ表示する */}
-        <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientPriceGuide}</p>
-        <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent-ink underline">
-          {ja.form.ingredientPriceGuideLink}
-        </Link>
+        {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。この画面には
+            材料ごとの価格入力欄を置かない。
+            2026-08-03 オーナー指示: 案内の一文と「食材と価格を編集する」リンクもこの画面から撤去した。
+            価格の入口は設定画面の「食材と価格」に一本化し、材料欄の頭を「選んで削除」等の
+            材料の操作だけにする(この案内2行が挟まって操作ボタンが見つけにくかった) */}
 
         {/* まとめて入力(2026-07-28 便BW/C-07): 「豚こま 200g」と1行で書いて材料を足せる速記欄。
             分解は貼り付け取込と同じロジック。3マスの入力欄はそのまま残している */}

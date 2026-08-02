@@ -53,6 +53,36 @@ export interface SearchResult {
   wantedCount: number
 }
 
+const tagCollator = new Intl.Collator('ja')
+
+/**
+ * 「よく使うタグ」チップの候補（2026-08-03 オーナー指示）。
+ * 従来は「作り置き」「お弁当」をコードに直書きした固定2択で、レシピを増やしても
+ * 中身が変わらなかった。実際に付いているタグを数え、そのタグが付いたレシピの件数が
+ * 多い順に limit 件返す。
+ * 同数のときはタグ名の五十音順にして、開くたびに並びが入れ替わらないようにする。
+ * タグは自由入力なので、絞り込み側の判定（recipe.tags.includes）と食い違わないよう
+ * 表記をまとめず、保存されている文字列そのままで数える（trimもしない。チップの文字列が
+ * 保存値と1文字でも違うと、押しても何も絞り込めないチップになる）。
+ * 中身が空白だけのタグは数えない。同じレシピ内の重複タグは1件と数える。
+ */
+export function topTagsByUsage(recipes: { tags: string[] }[], limit: number): string[] {
+  if (limit <= 0) return []
+  const counts = new Map<string, number>()
+  for (const recipe of recipes) {
+    const seen = new Set<string>()
+    for (const tag of recipe.tags) {
+      if (tag.trim() === '' || seen.has(tag)) continue
+      seen.add(tag)
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || tagCollator.compare(a[0], b[0]))
+    .slice(0, limit)
+    .map(([tag]) => tag)
+}
+
 /** 入力文字列を検索語の配列に分ける（空白・カンマ・読点区切り→ひらがな化） */
 export function splitTerms(input: string): string[] {
   return splitValues(input).map(toHiragana)

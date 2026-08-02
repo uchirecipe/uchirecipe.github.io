@@ -679,10 +679,12 @@ export default function RecipeDetailPage() {
                   既定は非表示・状態はページローカル)。2026-07-20 便AJ(docs/45)で「原価を見る」
                   (閲覧=1食あたり按分)と「原価を編集」(単価編集)の2ボタンに改修。
                   2026-07-21 オーナー実機FB: 横並びの独立トグルをやめ、「見る」を押すと
-                  「編集」ボタンが出現する階層構造に変更。「見る」はhidden⇔view/editの親トグルを
-                  兼ね、開いている間(view/edit)に再度押すと編集ボタンごと非表示に戻る。
-                  「編集」はview⇔editの子トグル(見るボタンが閉じられない限り出続ける) */}
-              <span className="flex items-center gap-2">
+                  「編集」ボタンが出現する階層構造に変更。
+                  2026-08-03 オーナー指示: 押しても位置が動かない・押した状態から戻り方が分かる
+                  トグルにする。①ラベルを開閉で入れ替える(原価を見る⇔材料に戻す。右端そろえの行なので
+                  文字数が変わるとボタンがずれる。戻す側も同じ5文字にして幅を変えない)
+                  ②「原価を編集」は同じ行に足すとこのボタンと人数ステッパーを押しのけるため、
+                  見出し行から外して下の行に出す(この行の中身は開閉で変わらない) */}
               <button
                 type="button"
                 onClick={() => setCostMode((m) => (m === 'hidden' ? 'view' : 'hidden'))}
@@ -694,24 +696,8 @@ export default function RecipeDetailPage() {
                 }`}
               >
                 <JapaneseYen size={16} aria-hidden />
-                {ja.detail.priceViewShow}
+                {costMode !== 'hidden' ? ja.detail.priceViewHide : ja.detail.priceViewShow}
               </button>
-              {costMode !== 'hidden' && (
-                <button
-                  type="button"
-                  onClick={() => setCostMode((m) => (m === 'edit' ? 'view' : 'edit'))}
-                  aria-pressed={costMode === 'edit'}
-                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
-                    costMode === 'edit'
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-accent-ink'
-                  }`}
-                >
-                  <Pencil size={16} aria-hidden />
-                  {ja.detail.priceEditShow}
-                </button>
-              )}
-              </span>
               <span className="flex items-center gap-2">
               <button
                 type="button"
@@ -736,6 +722,25 @@ export default function RecipeDetailPage() {
               </span>
             </div>
           </div>
+          {/* 「原価を編集」(view⇔editの子トグル)。2026-08-03 オーナー指示で見出し行から
+              この行へ移した。原価を開いている間だけ出る */}
+          {costMode !== 'hidden' && (
+            <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCostMode((m) => (m === 'edit' ? 'view' : 'edit'))}
+                aria-pressed={costMode === 'edit'}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold shadow-sm ${
+                  costMode === 'edit'
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-accent-ink'
+                }`}
+              >
+                <Pencil size={16} aria-hidden />
+                {ja.detail.priceEditShow}
+              </button>
+            </div>
+          )}
           {/* 原価サマリーカード(2026-07-16 裁定1で新設)は2026-07-20 便AJ(docs/45)で丸ごと削除
               (オーナー指示。上部メタ行の概算食費「約◯円」「1食あたり 約◯円」は不変のため重複していた)。
               代わりに「原価を編集」モードの説明を1文だけ出す(チップ表の上・編集モード時のみ) */}
