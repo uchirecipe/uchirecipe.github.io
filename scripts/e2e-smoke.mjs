@@ -10751,8 +10751,10 @@ try {
           ),
         )
         check(
-          'URLIMPORT-02 「食材と価格」への近道は材料欄の1本のみ(案内側のリンクは廃止)',
-          (await uiPage.locator('a[href="#/prices"]').count()) === 1,
+          'URLIMPORT-02(2026-08-03改定) URL取り込み後の編集画面にも「食材と価格」への案内・リンクを置かない',
+          (await uiPage.locator('a[href="#/prices"]').count()) === 0 &&
+            !importedText.includes('価格は「食材と価格」ページでまとめて管理します') &&
+            !importedText.includes('食材と価格を編集する'),
           `#/pricesリンク数=${await uiPage.locator('a[href="#/prices"]').count()}`,
         )
         check(
