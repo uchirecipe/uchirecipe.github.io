@@ -2778,6 +2778,8 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     dates: ['2026-07-28', '2026-07-29', '2026-07-30'],
     today: '2026-07-29',
     visibleSlots: ['breakfast', 'dinner'],
+    // 2026-08-02 オーナー指示で既定は「登録のない日を省く」。この一式は3日とも中身があるので
+    // 省いても日数は変わらない(省く挙動そのものは下の専用ケースで固定する)
     entries: [
       { date: '2026-07-28', slot: 'dinner', role: 'main', recipeId: 30 }, // 過去日の未達成予定
       { date: '2026-07-29', slot: 'dinner', role: 'side', recipeId: 20 },
@@ -2812,6 +2814,8 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       titleOf: () => undefined,
       notes: new Map(),
       cookedTitlesByDate: new Map(),
+      // 孤児行そのものが載らないことを見たいので、空の日を省く既定は切って日を残す
+      includeEmptyDays: true,
     }).days[0].slots.length,
     0,
   )
@@ -2831,18 +2835,62 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     true,
   )
   const lines = planSheetLines(sheet)
+  // 2026-08-02 オーナー指示: 行頭ラベル(夕食・作った記録・この日のメモ)は本文と別に持つ。
+  // 画像・画面・紙のいずれでも、ラベルだけを小さく薄く別の位置に描けるようにするため
   eq(
-    '献立表(画像化): 日付見出し→中身→メモの順に1行ずつ平らにする',
-    lines.map((l) => `${l.kind}:${l.text}`),
+    '献立表(画像化): 日付見出し→中身→メモの順に平らにする(料理は1品1行・ラベルは本文と分けて持つ)',
+    lines.map((l) => `${l.kind}:${l.label ?? ''}:${l.role ?? ''}:${l.text}`),
     [
-      'day:7/28（火）',
-      'dish:作った記録　カレー',
-      'day:7/29（水）',
-      'dish:夕食　主菜 肉じゃが　副菜 きんぴらごぼう',
-      'day:7/30（木）',
-      'note:この日のメモ　外食',
+      'day:::7/28（火）',
+      'dish:作った記録::カレー',
+      'day:::7/29（水）',
+      'dish:夕食:主菜:肉じゃが',
+      'dish::副菜:きんぴらごぼう',
+      'day:::7/30（木）',
+      'note:この日のメモ::外食',
     ],
   )
+
+  // 2026-08-02 オーナー指示: 献立も作った記録も日付メモも無い日は既定で載せない。
+  // 以前は日付だけの行が並び、夕食しか登録していない月では書いてある日を探しにくかった。
+  // チェックを入れれば元どおり全日出る(可逆・非破壊)
+  {
+    const sparseArgs = {
+      title: 'x',
+      dates: ['2026-07-28', '2026-07-29', '2026-07-30'],
+      today: '2026-07-28',
+      visibleSlots: ['dinner'],
+      entries: [{ date: '2026-07-29', slot: 'dinner', role: 'main', recipeId: 10 }],
+      titleOf: (id) => titles[id],
+      notes: new Map(),
+      cookedTitlesByDate: new Map(),
+    }
+    eq(
+      '献立表: 既定では登録のない日を載せない(2026-08-02)',
+      buildPlanSheet(sparseArgs).days.map((d) => d.date),
+      ['2026-07-29'],
+    )
+    eq(
+      '献立表: includeEmptyDays=trueなら従来どおり全日載せる',
+      buildPlanSheet({ ...sparseArgs, includeEmptyDays: true }).days.map((d) => d.date),
+      ['2026-07-28', '2026-07-29', '2026-07-30'],
+    )
+    eq(
+      '献立表: 省いた結果0日でも「白紙」判定は省く前の全日で決める(案内文が変わらない)',
+      buildPlanSheet({ ...sparseArgs, entries: [] }).isEmpty,
+      true,
+    )
+    eq(
+      '献立表: 中身のある日が1日でもあれば isEmpty=false のまま',
+      buildPlanSheet(sparseArgs).isEmpty,
+      false,
+    )
+    eq(
+      '献立表(画像化): 省いた日は行にも出ない',
+      planSheetLines(buildPlanSheet(sparseArgs)).map((l) => `${l.kind}:${l.text}`),
+      ['day:7/29（水）', 'dish:肉じゃが'],
+    )
+  }
 
   // 2026-07-30 便CH/C6: 画像だけ料理名が「…」で切り捨てられていた(画面プレビューと印刷には
   // 出ているので、家族に送った先で初めて欠ける)。料理名の行を3行まで許して直したので、
@@ -2871,16 +2919,25 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       notes: new Map(),
       cookedTitlesByDate: new Map(),
     })
-    const longLine = planSheetLines(longSheet).find((l) => l.kind === 'dish')?.text ?? ''
+    // 2026-08-02: 料理を1品1行にしたので、1行に載るのは料理名1つだけになった。
+    // 便CH/C6の趣旨（画像だけ料理名が「…」で欠けるのを防ぐ）は、いちばん長い料理名が
+    // 行数上限に収まることで守る。ラベル2列ぶん本文幅が狭くなっている点も一緒に見張る
+    const longLines = planSheetLines(longSheet).filter((l) => l.kind === 'dish')
+    const longestDish = Math.max(...longLines.map((l) => l.text.length))
     eq(
-      '献立表(画像化・便CH/C6): 収録レシピで最長級の主菜1+副菜2が、料理名の行数上限に収まる',
-      longLine.length <= MAX_WRAP_LINES.dish * IMAGE_WIDE_CHARS_PER_LINE,
+      '献立表(画像化・便CH/C6): 収録レシピで最長級の料理名が、画像の行数上限に収まる',
+      longestDish <= MAX_WRAP_LINES.dish * IMAGE_WIDE_CHARS_PER_LINE,
       true,
     )
     eq(
-      '献立表(画像化・便CH/C6): この組み合わせは2行では収まらない(=上限を戻すと再発する)',
-      longLine.length > 2 * IMAGE_WIDE_CHARS_PER_LINE,
-      true,
+      '献立表(画像化・2026-08-02): 主菜1+副菜2は3行(1品1行)になる',
+      longLines.length,
+      3,
+    )
+    eq(
+      '献立表(画像化・2026-08-02): ラベル2列を引いた本文幅の文字数めやすで測っている',
+      IMAGE_WIDE_CHARS_PER_LINE,
+      19,
     )
   }
 }

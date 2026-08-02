@@ -6989,6 +6989,67 @@ try {
         psSheetText.includes('うちレシピ') && psSheetText.includes('uchirecipe.com'),
       )
 
+      // 2026-08-02 オーナー指示(a): 登録のない日は既定で載せない。
+      // この週で中身があるのは今日だけなので、既定では1日ぶんしか出ない
+      const psDayCount = () => psPage.locator('.plan-sheet-preview li').count()
+      check(
+        'MEALPLAN-A4(2026-08-02) 既定では登録のない日を省く(中身のある日だけ載る)',
+        (await psDayCount()) === 1,
+        `days=${await psDayCount()}`,
+      )
+      await psPage.locator('[data-testid="plan-sheet-include-empty"]').check()
+      await psPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A4(2026-08-02) 「登録のない日も載せる」で週7日ぶんが戻る(可逆)',
+        (await psDayCount()) === 7,
+        `days=${await psDayCount()}`,
+      )
+      await psPage.locator('[data-testid="plan-sheet-include-empty"]').uncheck()
+      await psPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A4(2026-08-02) チェックを外すと省いた表に戻る',
+        (await psDayCount()) === 1,
+      )
+
+      // 2026-08-02 オーナー指示(b): 「夕食」「主菜」のラベルは料理名と同じ大きさで横並びだった。
+      // 小さく・薄く・行頭の別の列に分ける
+      const psLabelStyle = await psPage.evaluate(() => {
+        const root = document.querySelector('.plan-sheet-preview')
+        const row = root?.querySelector('.sheet-row')
+        const label = root?.querySelector('.sheet-row-label')
+        const role = root?.querySelector('.sheet-role')
+        if (!row || !label || !role) return null
+        const px = (el) => parseFloat(getComputedStyle(el).fontSize)
+        return {
+          row: px(row),
+          label: px(label),
+          role: px(role),
+          labelLeft: Math.round(label.getBoundingClientRect().left),
+          roleLeft: Math.round(role.getBoundingClientRect().left),
+          bodyLeft: Math.round(row.lastElementChild.getBoundingClientRect().left),
+        }
+      })
+      check(
+        'MEALPLAN-A4(2026-08-02) 食事・役割のラベルは料理名より小さい',
+        psLabelStyle !== null &&
+          psLabelStyle.label < psLabelStyle.row &&
+          psLabelStyle.role < psLabelStyle.row,
+        JSON.stringify(psLabelStyle),
+      )
+      check(
+        'MEALPLAN-A4(2026-08-02) 食事・役割のラベルは料理名と別の列(左)に分かれている',
+        psLabelStyle !== null &&
+          psLabelStyle.roleLeft > psLabelStyle.labelLeft + 20 &&
+          psLabelStyle.bodyLeft > psLabelStyle.roleLeft + 20,
+        JSON.stringify(psLabelStyle),
+      )
+      // 料理は1品につき1行(以前は「主菜 肉じゃが　副菜 …」と1行に詰めていた)
+      check(
+        'MEALPLAN-A4(2026-08-02) 料理は1品につき1行に分かれる',
+        (await psPage.locator('.plan-sheet-preview .sheet-row').count()) === 3,
+        `rows=${await psPage.locator('.plan-sheet-preview .sheet-row').count()}`,
+      )
+
       // 印刷: 画面のUIは紙に出さず、献立表だけを出す(index.cssの@media print)
       await psPage.emulateMedia({ media: 'print' })
       await psPage.waitForTimeout(200)
@@ -7006,6 +7067,55 @@ try {
       check(
         'MEALPLAN-A4(印刷) 印刷用の1枚にも同じ内容(日付・料理・メモ)が入る',
         ((await psPage.locator('.plan-sheet-print').textContent()) ?? '').includes('実家に行く'),
+      )
+      // 2026-08-02 オーナー指示(c): モノクロ印刷対応。紙では文字が全部黒一色になるので、
+      // 色ではなく「日付の上の罫線」「文字の太さ・大きさ」「ラベル列の灰色の階調」で区別する
+      const psPrintStyle = await psPage.evaluate(() => {
+        const root = document.querySelector('.plan-sheet-print')
+        const day = root?.querySelector('.sheet-day')
+        const dayLabel = root?.querySelector('.sheet-day-label')
+        const row = root?.querySelector('.sheet-row')
+        const label = root?.querySelector('.sheet-row-label')
+        if (!day || !dayLabel || !row || !label) return null
+        const cs = (el) => getComputedStyle(el)
+        return {
+          dayBorderWidth: parseFloat(cs(day).borderTopWidth),
+          dayBorderStyle: cs(day).borderTopStyle,
+          dayLabelSize: parseFloat(cs(dayLabel).fontSize),
+          dayLabelWeight: cs(dayLabel).fontWeight,
+          dayLabelColor: cs(dayLabel).color,
+          rowSize: parseFloat(cs(row).fontSize),
+          labelSize: parseFloat(cs(label).fontSize),
+          labelColor: cs(label).color,
+          breakInside: cs(day).breakInside,
+        }
+      })
+      check(
+        'MEALPLAN-A4(印刷・モノクロ) 日付の区切りが罫線で引かれる(色に頼らない)',
+        psPrintStyle !== null &&
+          psPrintStyle.dayBorderWidth > 0 &&
+          psPrintStyle.dayBorderStyle === 'solid',
+        JSON.stringify(psPrintStyle),
+      )
+      check(
+        'MEALPLAN-A4(印刷・モノクロ) 日付は本文より大きく太い(アクセント色が黒になっても区別できる)',
+        psPrintStyle !== null &&
+          psPrintStyle.dayLabelSize > psPrintStyle.rowSize &&
+          Number(psPrintStyle.dayLabelWeight) >= 700 &&
+          psPrintStyle.dayLabelColor === 'rgb(0, 0, 0)',
+        JSON.stringify(psPrintStyle),
+      )
+      check(
+        'MEALPLAN-A4(印刷・モノクロ) 行頭ラベルは本文より小さく、灰色の階調で分ける',
+        psPrintStyle !== null &&
+          psPrintStyle.labelSize < psPrintStyle.rowSize &&
+          psPrintStyle.labelColor !== 'rgb(0, 0, 0)',
+        JSON.stringify(psPrintStyle),
+      )
+      check(
+        'MEALPLAN-A4(印刷) 1日分が2ページに割れない',
+        psPrintStyle !== null && psPrintStyle.breakInside === 'avoid',
+        JSON.stringify(psPrintStyle),
       )
       await psPage.emulateMedia({ media: 'screen' })
       await psPage.waitForTimeout(200)

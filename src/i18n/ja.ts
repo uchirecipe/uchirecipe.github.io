@@ -507,6 +507,9 @@ export const ja = {
       '週または月の献立を1枚にまとめます。印刷して冷蔵庫に貼ったり、画像にして家族へ送ったりできます',
     planSheetBasisNote:
       '過ぎた日は作った記録、今日から先は登録した献立を載せています。この日のメモも一緒に出ます',
+    // 2026-08-02 オーナー指示: 献立も記録もメモも無い日は既定で省く（夕食だけを登録している月では
+    // 日付だけの行が20行以上並び、書いてある日を探しにくかった）。抜けも一覧したいときだけ戻す
+    planSheetIncludeEmptyDays: '登録のない日も載せる',
     planSheetWeekHeading: '{start}〜{end}の献立',
     planSheetMonthHeading: '{y}年{m}月の献立',
     planSheetPrint: '印刷する',

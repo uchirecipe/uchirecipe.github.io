@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -372,38 +372,45 @@ function DayNoteEditor({
  * 白地に白文字になって読めないため）。ここでは画面用のテーマ色だけを指定する。
  */
 function PlanSheetView({ sheet }: { sheet: PlanSheet }) {
+  /**
+   * 1行分。左から「食事のラベル／役割のラベル／本文」の3列で、ラベルは本文より小さく薄くする
+   * （2026-08-02 オーナー指示: 「朝食」「主菜」が料理名と同じ大きさで数珠つなぎになっていた）。
+   * 料理は1品につき1行にし、同じ食事の2品目以降はラベルの列を空けたまま料理名の位置をそろえる。
+   * 画像（logic/planSheetImage.ts）も planSheetLines を通して同じ3列で描く。
+   */
+  const row = (key: string, label: string, role: string, body: ReactNode, note = false) => (
+    <div key={key} className={`sheet-row mt-0.5 flex gap-2 pl-2 ${note ? 'text-xs' : 'text-sm'}`}>
+      <span className="sheet-row-label w-16 shrink-0 pt-[3px] text-[10px] leading-tight text-ink-muted">
+        {label}
+      </span>
+      <span className="sheet-role w-8 shrink-0 pt-[3px] text-[10px] leading-tight text-ink-muted">
+        {role}
+      </span>
+      <span className="min-w-0 flex-1">{body}</span>
+    </div>
+  )
   return (
     <>
-      <h3 className="text-lg font-bold">{sheet.title}</h3>
-      <p className="mt-0.5 text-[10px] text-ink-muted">{ja.mealPlan.planSheetBasisNote}</p>
+      <h3 className="sheet-title text-lg font-bold">{sheet.title}</h3>
+      <p className="sheet-basis mt-0.5 text-[10px] text-ink-muted">{ja.mealPlan.planSheetBasisNote}</p>
       <ul className="mt-[var(--space-sm)] divide-y divide-edge">
         {sheet.days.map((day) => (
-          <li key={day.date} className="py-1.5">
-            <p className="text-sm font-bold text-accent-ink">{day.label}</p>
-            {day.slots.map((slotRow) => (
-              <p key={slotRow.slot} className="mt-0.5 pl-2 text-sm">
-                <span className="font-bold">{slotRow.label}</span>
-                {'　'}
-                {slotRow.dishes.map((dish, i) => (
-                  <span key={`${dish.role}-${i}`}>
-                    {i > 0 && '　'}
-                    <span className="text-ink-muted">{ja.mealPlan.role[dish.role]}</span> {dish.title}
-                  </span>
-                ))}
-              </p>
-            ))}
-            {day.cookedTitles.length > 0 && (
-              <p className="mt-0.5 pl-2 text-sm">
-                <span className="font-bold">{ja.mealPlan.pastCookedTitle}</span>
-                {'　'}
-                {day.cookedTitles.join('　')}
-              </p>
+          <li key={day.date} className="sheet-day py-1.5">
+            <p className="sheet-day-label text-sm font-bold text-accent-ink">{day.label}</p>
+            {day.slots.map((slotRow) =>
+              slotRow.dishes.map((dish, i) =>
+                row(
+                  `${slotRow.slot}-${i}`,
+                  i === 0 ? slotRow.label : '',
+                  ja.mealPlan.role[dish.role],
+                  dish.title,
+                ),
+              ),
             )}
-            {day.note && (
-              <p className="mt-0.5 pl-2 text-xs text-ink-muted">
-                {ja.mealPlan.dayNoteLabel}　{day.note}
-              </p>
+            {day.cookedTitles.map((title, i) =>
+              row(`cooked-${i}`, i === 0 ? ja.mealPlan.pastCookedTitle : '', '', title),
             )}
+            {day.note && row('note', ja.mealPlan.dayNoteLabel, '', day.note, true)}
           </li>
         ))}
       </ul>
@@ -2325,6 +2332,13 @@ export default function MealPlanPage() {
    * 載せる中身の規則はアプリの他の画面と同じ（過ぎた日＝作った記録・今日から先＝登録した献立）＋日付メモ。
    */
   const [planSheetOpen, setPlanSheetOpen] = useState(false)
+  /**
+   * 献立も記録もメモも無い日を載せるか（2026-08-02 オーナー指示）。既定は載せない。
+   * 夕食だけを登録している月では日付だけの行が20行以上並び、書いてある日を探しにくかったため。
+   * 「1か月の抜けも一覧したい」使い方のために、チェック1つで元の見え方に戻せるようにしている
+   * （この画面を離れると既定＝省くに戻る。設定として保存はしない）。
+   */
+  const [planSheetIncludeEmptyDays, setPlanSheetIncludeEmptyDays] = useState(false)
   // 日付→その日の「作った記録」の料理名（献立表の過去日の行に使う）
   const cookedTitlesByDate = useMemo(() => {
     const map = new Map<string, string[]>()
@@ -2353,8 +2367,18 @@ export default function MealPlanPage() {
         titleOf: sheetTitleOf,
         notes: new Map((weekDayNotes ?? []).map((n) => [n.date, n.text])),
         cookedTitlesByDate,
+        includeEmptyDays: planSheetIncludeEmptyDays,
       }),
-    [dates, today, visibleSlots, entries, sheetTitleOf, weekDayNotes, cookedTitlesByDate],
+    [
+      dates,
+      today,
+      visibleSlots,
+      entries,
+      sheetTitleOf,
+      weekDayNotes,
+      cookedTitlesByDate,
+      planSheetIncludeEmptyDays,
+    ],
   )
   const monthPlanSheet = useMemo(
     () =>
@@ -2369,6 +2393,7 @@ export default function MealPlanPage() {
         titleOf: sheetTitleOf,
         notes: new Map((monthDayNotes ?? []).map((n) => [n.date, n.text])),
         cookedTitlesByDate,
+        includeEmptyDays: planSheetIncludeEmptyDays,
       }),
     [
       monthAnchor,
@@ -2379,6 +2404,7 @@ export default function MealPlanPage() {
       sheetTitleOf,
       monthDayNotes,
       cookedTitlesByDate,
+      planSheetIncludeEmptyDays,
     ],
   )
   const savePlanSheetImage = async (sheet: PlanSheet) => {
@@ -2443,6 +2469,18 @@ export default function MealPlanPage() {
                   {ja.mealPlan.planSheetImage}
                 </button>
               </div>
+              {/* 登録のない日の扱い(2026-08-02 オーナー指示)。既定は省き、
+                  1か月の抜けも一覧したいときだけチェックで戻す */}
+              <label className="mt-[var(--space-sm)] flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  data-testid="plan-sheet-include-empty"
+                  checked={planSheetIncludeEmptyDays}
+                  onChange={(e) => setPlanSheetIncludeEmptyDays(e.target.checked)}
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--accent)]"
+                />
+                <span>{ja.mealPlan.planSheetIncludeEmptyDays}</span>
+              </label>
               {/* 画面のプレビュー。長い月の表が画面を占領しないよう高さを抑える */}
               <div className="mt-[var(--space-sm)] max-h-[60vh] overflow-y-auto">
                 <div className="plan-sheet-preview rounded-sm border border-edge bg-app p-[var(--space-md)]">

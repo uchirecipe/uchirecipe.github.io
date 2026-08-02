@@ -73,8 +73,26 @@ export function buildPlanSheet(options: {
   notes: Map<string, string>
   /** 日付→その日の「作った記録」の料理名 */
   cookedTitlesByDate: Map<string, string[]>
+  /**
+   * 献立も記録もメモも無い日を載せるか（2026-08-02 オーナー指示。既定＝載せない）。
+   *
+   * 以前は「1週間・1か月の抜けが紙の上で分かるように」空の日も日付だけの行で出していたが、
+   * 夕食だけを登録している月では日付だけの行が20行以上並び、書いてある日を探しにくかった。
+   * 既定で省き、抜けも一覧したいときのために呼び出し側（献立表のチェック）で戻せるようにする。
+   */
+  includeEmptyDays?: boolean
 }): PlanSheet {
-  const { title, dates, today, visibleSlots, entries, titleOf, notes, cookedTitlesByDate } = options
+  const {
+    title,
+    dates,
+    today,
+    visibleSlots,
+    entries,
+    titleOf,
+    notes,
+    cookedTitlesByDate,
+    includeEmptyDays = false,
+  } = options
   const byDateSlot = new Map<string, Pick<MealPlanEntry, 'date' | 'slot' | 'role' | 'recipeId'>[]>()
   for (const e of entries) {
     const key = `${e.date}|${e.slot}`
@@ -107,10 +125,15 @@ export function buildPlanSheet(options: {
     }
   })
 
-  const isEmpty = days.every(
-    (d) => d.slots.length === 0 && d.cookedTitles.length === 0 && !d.note,
-  )
-  return { title, days, isEmpty }
+  const isEmpty = days.every(isPlanSheetDayEmpty)
+  // isEmpty（＝1枚まるごと白紙か）は省く前の全日で判定する。省いた結果0日になったのか、
+  // そもそも何も無いのかで呼び出し側の案内が変わらないようにするため
+  return { title, days: includeEmptyDays ? days : days.filter((d) => !isPlanSheetDayEmpty(d)), isEmpty }
+}
+
+/** その日に載せるものが何も無い（献立も作った記録も日付メモも無い）か */
+export function isPlanSheetDayEmpty(day: PlanSheetDay): boolean {
+  return day.slots.length === 0 && day.cookedTitles.length === 0 && !day.note
 }
 
 /** YYYY-MM-DD を「7/29（水）」の形にする（献立表の日付見出し） */
@@ -120,35 +143,57 @@ export function formatSheetDayLabel(date: string): string {
   return `${month}/${day}（${ja.mealPlan.dow[dowIndex(date)]}）`
 }
 
-/** 献立表を1行ずつの文字列にしたもの（画像化のCanvas描画がそのまま上から並べるための形） */
+/** 献立表を1行ずつにしたもの（画像化のCanvas描画がそのまま上から並べるための形） */
 export interface PlanSheetLine {
   /** 'day'=日付見出し / 'dish'=その日の中身 / 'note'=日付メモ・記録の但し書き */
   kind: 'day' | 'dish' | 'note'
+  /**
+   * 行頭に小さく置くラベル（「夕食」「作った記録」「この日のメモ」）。日付見出しには無い。
+   * 同じ食事の2品目以降は空文字（ラベルの列は空けたまま、料理名の位置をそろえる）。
+   *
+   * 2026-08-02 オーナー指示: ラベルが料理名と同じ大きさで横並びになっていて読みにくかったため、
+   * 本文と別に持たせ、画像・画面・紙のいずれでも小さく薄く別の位置に描けるようにした。
+   */
+  label?: string
+  /** 2つ目のラベル（「主菜」「副菜」）。料理の行だけに付く */
+  role?: string
+  /** ラベルの右に出す本文（料理名1品ぶん・記録1品ぶん・メモ本文） */
   text: string
 }
 
 /**
  * 献立表を行の配列に平らにする（画像化＝logic/planSheetImage.ts 用。純ロジックなのでテストできる）。
  * 画面・印刷のHTMLと同じ内容・同じ並びになるよう、buildPlanSheetの結果だけを見て組み立てる。
- * 献立も記録もメモも無い日は日付だけの行を出す（1週間・1か月の抜けが紙の上で分かるように）。
+ * 何も無い日を載せるかどうかは buildPlanSheet の includeEmptyDays で決まっている（ここでは絞らない）。
+ *
+ * 2026-08-02 オーナー指示: 料理は1品につき1行にする。以前は「夕食　主菜 肉じゃが　副菜 きんぴら」と
+ * 1行に詰めていたため、ラベルと料理名が同じ大きさで数珠つなぎになり読みにくかった。
+ * 1品1行にすると、ラベル（食事・役割）を列で分けられるうえ、長い料理名が「…」で
+ * 打ち切られる余地も無くなる。
  */
 export function planSheetLines(sheet: PlanSheet): PlanSheetLine[] {
   const lines: PlanSheetLine[] = []
   for (const day of sheet.days) {
     lines.push({ kind: 'day', text: day.label })
     for (const slotRow of day.slots) {
-      const dishes = slotRow.dishes
-        .map((d) => `${ja.mealPlan.role[d.role]} ${d.title}`)
-        .join('　')
-      lines.push({ kind: 'dish', text: `${slotRow.label}　${dishes}` })
-    }
-    if (day.cookedTitles.length > 0) {
-      lines.push({
-        kind: 'dish',
-        text: `${ja.mealPlan.pastCookedTitle}　${day.cookedTitles.join('　')}`,
+      slotRow.dishes.forEach((dish, i) => {
+        lines.push({
+          kind: 'dish',
+          // 食事のラベルはその食事の1品目にだけ出す（2品目以降は列を空けたままそろえる）
+          label: i === 0 ? slotRow.label : '',
+          role: ja.mealPlan.role[dish.role],
+          text: dish.title,
+        })
       })
     }
-    if (day.note) lines.push({ kind: 'note', text: `${ja.mealPlan.dayNoteLabel}　${day.note}` })
+    day.cookedTitles.forEach((title, i) => {
+      lines.push({
+        kind: 'dish',
+        label: i === 0 ? ja.mealPlan.pastCookedTitle : '',
+        text: title,
+      })
+    })
+    if (day.note) lines.push({ kind: 'note', label: ja.mealPlan.dayNoteLabel, text: day.note })
   }
   return lines
 }
