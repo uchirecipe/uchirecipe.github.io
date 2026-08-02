@@ -16,11 +16,23 @@
   :root {
     --bg: #faf5ec;
     --text: #43362a;
-    --accent: #d9480f;
-    /* 文字として使うアクセント(2026-07-30 オーナー承認・docs/色調整見本.html)。
-       塗り(--accent #d9480f)はボタン地・注記の左罫にそのまま使い、文字だけ濃くしてAAを満たす。
-       ページ背景#faf5ec上5.36:1 / カード面#fffdf8上5.73:1 */
-    --accent-ink: #b8380a;
+    /* 塗り用のアクセント(ボタン地・CTA・注記の左罫)。2026-08-02 オーナー確定で
+       #d9480f → #cc3f01。旧色はこの地に生成りの文字を載せると3.96:1でAAに届かず、
+       新色は4.52:1で満たす(色みの差はごくわずか) */
+    --accent: #cc3f01;
+    /* 文字として使うアクセント(2026-07-30 オーナー承認・docs/色調整見本.html
+       → 2026-08-02 面別トークンに拡張・docs/色調整見本2_ブラウングリーン.html)。
+       塗りのオレンジは面の上で明るすぎて通常サイズの文字がAAに届かないため文字用を分けている。
+       アプリ本体(app/src/index.css)と同じく「載る面」で値を持つ構造に揃える:
+         --accent-ink-page    ページ背景(--bg #faf5ec)の上   #b8380a → 5.36:1
+         --accent-ink-surface カード面(--surface #fffdf8)の上 #b8380a → 5.73:1
+       この静的ページはライト/ダークの2テーマだけなので両方とも同じ値になる
+       (面で色が分かれるのはアプリのブラウンテーマだけ)。
+       使う側は --accent-ink 1つだけを見ればよく、カード面を塗るルール
+       (background: var(--surface))の中でカード面用の値に差し替えている */
+    --accent-ink-page: #b8380a;
+    --accent-ink-surface: #b8380a;
+    --accent-ink: var(--accent-ink-page);
     --surface: #fffdf8;
     /* 補足テキスト(2026-07-30)。旧#8c7b69は3.75:1/4.01:1でAA未達だった。
        本文#43362aとの明度差を保ちつつAAを満たす値: ページ背景上4.77:1 / カード面上5.10:1 */
@@ -32,8 +44,10 @@
       --bg: #211a13;
       --text: #f1e8db;
       --accent: #ff8a4c;
-      /* ダークは現行で7.36:1あり基準を満たしているため文字用も同色=見た目不変 */
-      --accent-ink: #ff8a4c;
+      /* ダークは現行で7.36:1あり基準を満たしているため文字用も同色=見た目不変。
+         2026-08-02の面別化でもページ背景の上・カード面の上とも同値＝ダークは一切変えない */
+      --accent-ink-page: #ff8a4c;
+      --accent-ink-surface: #ff8a4c;
       --surface: #2c241b;
       --text-muted: #a89680;
       --border: #3d3327;
@@ -77,6 +91,7 @@
   }
   .card {
     background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 16px;
@@ -128,6 +143,7 @@
   }
   .note {
     background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
     border: 1px solid var(--border);
     border-left: 4px solid var(--accent);
     border-radius: 10px;

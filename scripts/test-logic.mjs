@@ -9179,6 +9179,83 @@ eq(
   )
 }
 
+// ---------- 便CY: 配色トークンの取りこぼし防止(2026-08-02 オーナー確定の面別アクセント) ----------
+// 色は src/index.css と public/about 配下7ファイルが「同じ値を別々に書き写している」構造で、
+// 片方だけ直して見た目がずれる事故が実際に起きている(規約E-③)。ここで静的に突き合わせる。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const css = readFileSync(path.join(appRoot, 'src/index.css'), 'utf-8')
+
+  // (1) 4テーマすべてが「面別」の2本を持つこと。1本だけの --accent-ink: <色> の直書きが
+  //     残っていると、テーマを足したときに面別の切り替えから漏れる
+  const themeBlocks = [
+    ['ライト', /:root \{[\s\S]*?\n\}/],
+    ['ダーク(端末設定)', /@media \(prefers-color-scheme: dark\) \{[\s\S]*?\n {2}\}\n\}/],
+    ['ダーク(手動)', /:root\[data-theme="dark"\] \{[\s\S]*?\n\}/],
+    ['ブラウン', /:root\[data-theme="brown"\] \{[\s\S]*?\n\}/],
+    ['グリーン', /:root\[data-theme="green"\] \{[\s\S]*?\n\}/],
+  ]
+  for (const [name, re] of themeBlocks) {
+    const block = css.match(re)?.[0] ?? ''
+    eq(`CY 色 ${name}が--accent-ink-pageを持つ`, /--accent-ink-page:/.test(block), true)
+    eq(`CY 色 ${name}が--accent-ink-surfaceを持つ`, /--accent-ink-surface:/.test(block), true)
+  }
+
+  // (2) オーナー確定値そのもの(2026-08-02・docs/色調整見本2_ブラウングリーン.html)
+  const val = (block, name) => css.match(block)?.[0]?.match(new RegExp(`${name}:\\s*([^;]+);`))?.[1]
+  eq('CY 色 ライトの塗り--accentは#cc3f01', val(/:root \{[\s\S]*?\n\}/, '--accent'), '#cc3f01')
+  eq(
+    'CY 色 ブラウンはページ背景用#833a00',
+    val(/:root\[data-theme="brown"\] \{[\s\S]*?\n\}/, '--accent-ink-page'),
+    '#833a00',
+  )
+  eq(
+    'CY 色 ブラウンはカード面用#ad4e01',
+    val(/:root\[data-theme="brown"\] \{[\s\S]*?\n\}/, '--accent-ink-surface'),
+    '#ad4e01',
+  )
+  eq(
+    'CY 色 グリーンは両面とも#c25200',
+    [
+      val(/:root\[data-theme="green"\] \{[\s\S]*?\n\}/, '--accent-ink-page'),
+      val(/:root\[data-theme="green"\] \{[\s\S]*?\n\}/, '--accent-ink-surface'),
+    ],
+    ['#c25200', '#c25200'],
+  )
+
+  // (3) カード面で値を差し替えるスコープ規則が消えていないこと
+  //     (これが無いとブラウンのカード面が濃すぎる方の色に戻る)
+  eq(
+    'CY 色 カード面スコープの規則がある',
+    /\[class~="bg-surface"\][\s\S]{0,80}--accent-ink: var\(--accent-ink-surface\)/.test(css),
+    true,
+  )
+
+  // (4) 静的ページ7ファイルが同じ値を書き写していること
+  const aboutFiles = [
+    'index.html',
+    'manual.html',
+    'terms.html',
+    'unlock.html',
+    'column/index.html',
+    'column/kondate-kimaranai.html',
+    'column/recipe-screenshot-seiri.html',
+  ]
+  const aboutDir = path.join(appRoot, 'public/about')
+  const aboutColors = aboutFiles.map((f) => {
+    const src = readFileSync(path.join(aboutDir, f), 'utf-8')
+    const pick = (name) => (src.match(new RegExp(`${name}:\\s*([^;]+);`, 'g')) ?? []).map((s) => s.split(':')[1].trim().replace(';', ''))
+    return { file: f, accent: pick('--accent'), page: pick('--accent-ink-page'), surface: pick('--accent-ink-surface') }
+  })
+  eq('CY 色 aboutは7ファイル', aboutColors.length, 7)
+  for (const c of aboutColors) {
+    // ライト→ダークの順に1回ずつ、計2つ出てくる
+    eq(`CY 色 ${c.file} の塗り(ライト/ダーク)`, c.accent, ['#cc3f01', '#ff8a4c'])
+    eq(`CY 色 ${c.file} のページ背景用文字色`, c.page, ['#b8380a', '#ff8a4c'])
+    eq(`CY 色 ${c.file} のカード面用文字色`, c.surface, ['#b8380a', '#ff8a4c'])
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
