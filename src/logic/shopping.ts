@@ -171,6 +171,19 @@ export function combineAmountTexts(texts: (string | undefined)[]): string {
  * 週に何度も作る料理の材料が足りない量で下書きに出ていた。
  * 同じIDが複数回並んだ場合（旧形式で重複が残っていた場合）も回数として足し合わせる。
  */
+export function parseRecipeIdsParam(raw: string): { id: number; times: number }[] {
+  const counts = new Map<number, number>()
+  for (const token of raw.split(',')) {
+    const [idPart, timesPart] = token.split('x')
+    const id = Number(idPart)
+    if (!Number.isFinite(id) || !idPart.trim()) continue
+    const times = Number(timesPart)
+    const add = timesPart !== undefined && Number.isFinite(times) && times > 0 ? Math.floor(times) : 1
+    counts.set(id, (counts.get(id) ?? 0) + add)
+  }
+  return [...counts].map(([id, times]) => ({ id, times }))
+}
+
 /**
  * 献立の「この週の買い物リストを作る」から渡る ?servings= を解釈する
  * （2026-08-03 便DJ・食数設定）。形は「レシピID:その週に作る食数の合計」をカンマで並べたもの
@@ -194,19 +207,6 @@ export function parseServingsParam(raw: string): Map<number, number> {
     map.set(id, (map.get(id) ?? 0) + servings)
   }
   return map
-}
-
-export function parseRecipeIdsParam(raw: string): { id: number; times: number }[] {
-  const counts = new Map<number, number>()
-  for (const token of raw.split(',')) {
-    const [idPart, timesPart] = token.split('x')
-    const id = Number(idPart)
-    if (!Number.isFinite(id) || !idPart.trim()) continue
-    const times = Number(timesPart)
-    const add = timesPart !== undefined && Number.isFinite(times) && times > 0 ? Math.floor(times) : 1
-    counts.set(id, (counts.get(id) ?? 0) + add)
-  }
-  return [...counts].map(([id, times]) => ({ id, times }))
 }
 
 /**

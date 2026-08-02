@@ -6420,6 +6420,112 @@ try {
     }
   }
 
+  // --- MEALPLAN-SERV: 献立の食数(2026-08-03 便DJ・オーナー指示)。週の1品ごとに「何人分作るか」を
+  // 決められ、それが買い物リストの分量に効くこと・「1人分」の栄養表示は動かないことを確認する。
+  // 再発防止の要点: 既定(食数を触っていない)ときの分量が従来と1gも変わらないこと。 ---
+  currentCheck = 'MEALPLAN-SERV'
+  {
+    const svBrowser = await chromium.launch()
+    const svContext = await svBrowser.newContext()
+    const svPage = await svContext.newPage()
+    svPage.on('dialog', (dialog) => dialog.accept())
+    svPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-SERV] ${text}`)
+    })
+    svPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-SERV] ${err.message}`)
+    })
+    try {
+      await svPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await svPage.waitForTimeout(2000) // 初回シード完了待ち
+      await svPage.getByRole('button', { name: '週', exact: true }).click()
+      await svPage.waitForTimeout(400)
+      // 今日の夕食・主菜にレシピを1品入れる
+      await svPage.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await svPage.waitForTimeout(500)
+      await svPage.locator('ul li button').first().click()
+      await svPage.waitForTimeout(700)
+
+      const svServingsBtn = svPage.getByRole('button', { name: /この行の食数を変える/ }).first()
+      check(
+        'MEALPLAN-SERV 入っている行に食数のボタンが出る(既定はレシピの登録人数分)',
+        (await svServingsBtn.count()) === 1 &&
+          /^\d+人分$/.test(((await svServingsBtn.textContent()) ?? '').trim()),
+        `label=${(await svServingsBtn.textContent()) ?? ''}`,
+      )
+      const svBase = Number(((await svServingsBtn.textContent()) ?? '').replace(/[^0-9]/g, ''))
+
+      // 既定(食数を触っていない)ときの買い物メモの分量を控える
+      await svPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await svPage.waitForTimeout(1500)
+      const svAmountsBefore = await svPage.evaluate(() =>
+        [...document.querySelectorAll('input')]
+          .map((i) => i.value)
+          .filter((v) => v && /[0-9]/.test(v)),
+      )
+      check(
+        'MEALPLAN-SERV 前提: 献立から買い物メモの下書きができる',
+        svAmountsBefore.length > 0,
+        `amounts=${JSON.stringify(svAmountsBefore)}`,
+      )
+
+      // 食数を2倍にすると、同じ材料の分量も2倍になる
+      await svPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await svPage.waitForTimeout(900)
+      await svPage.getByRole('button', { name: '週', exact: true }).click()
+      await svPage.waitForTimeout(400)
+      await svPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
+      await svPage.waitForTimeout(400)
+      for (let i = 0; i < svBase; i++) {
+        await svPage.getByRole('button', { name: '食数を増やす' }).click()
+      }
+      await svPage.getByRole('button', { name: '決定' }).click()
+      await svPage.waitForTimeout(700)
+      check(
+        'MEALPLAN-SERV 食数を変えると結果がトーストに出る',
+        ((await svPage.textContent('body')) ?? '').includes(`を${svBase * 2}人分にしました`),
+      )
+      const svSaved = await svPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-SERV 食数は献立の行に任意項目として保存される',
+        svSaved.length === 1 && svSaved[0].servings === svBase * 2,
+        `saved=${JSON.stringify(svSaved)}`,
+      )
+      await svPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await svPage.waitForTimeout(1500)
+      const svAmountsAfter = await svPage.evaluate(() =>
+        [...document.querySelectorAll('input')]
+          .map((i) => i.value)
+          .filter((v) => v && /[0-9]/.test(v)),
+      )
+      const svNum = (v) => Number((v.match(/[\d.]+/) ?? ['0'])[0])
+      check(
+        'MEALPLAN-SERV 食数を2倍にすると買い物メモの分量も2倍になる',
+        svAmountsAfter.length === svAmountsBefore.length &&
+          svAmountsBefore.every((v, i) => svNum(svAmountsAfter[i]) === svNum(v) * 2),
+        `before=${JSON.stringify(svAmountsBefore)} after=${JSON.stringify(svAmountsAfter)}`,
+      )
+    } finally {
+      await svBrowser.close()
+    }
+  }
+
   // --- MEALPLAN-A2: 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。レシピに紐付かない1行メモを
   // 週タブの日カードで書き、月タブのセルに「メモあり」の印が出て、日モーダルからも同じメモを
   // 読み書きできること、空にすると消えること(データも消えること)を確認する。
