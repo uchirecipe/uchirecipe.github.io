@@ -77,6 +77,7 @@ import {
   normalizeProCode,
   detectCodeKind,
   maskUnlockCode,
+  PRO_PURCHASE_URL,
 } from '../logic/pro'
 import {
   normalizeAisleOrder,
@@ -1878,6 +1879,33 @@ export default function SettingsPage() {
                 )}
               </li>
             </ul>
+
+            {/* 購入導線(2026-08-02 便DD・発売と同時)。決済ページ(Stripe)は別サイトなので新しいタブで
+                開く(アプリを閉じずに戻ってこられる)。解錠済みの人には出さない。
+                精度開示(pro-accuracy-notice)はこのボタンより上にある＝docs/62 決定④の
+                「購入ボタンの上」を満たす。特商法表記は購入ボタンのそばに置く */}
+            {!settings.proCode && (
+              <div className="mt-[var(--space-md)]">
+                <a
+                  href={PRO_PURCHASE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="pro-buy-link"
+                  className="flex w-full items-center justify-center rounded-md bg-accent px-4 py-3 text-center font-bold text-on-accent shadow-sm"
+                >
+                  {ja.settings.proBuyLabel}
+                </a>
+                <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.settings.proBuyNote}</p>
+                <a
+                  href="/about/tokushoho.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-block text-xs text-ink-muted underline"
+                >
+                  {ja.settings.proBuyLegalLink}
+                </a>
+              </div>
+            )}
 
             {/* 月間画面のサンプルデモ(2026-08-02 便DC)。買う前に、月の画面そのものを見本のデータ入りで
                 確かめられる。解錠済みの人は本物の月タブが使えるので出さない */}

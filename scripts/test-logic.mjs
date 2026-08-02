@@ -40,6 +40,7 @@ import {
   isNearFreeLimit,
   isInWarningRange,
   freeLimitRemaining,
+  countFreeLimitRecipes,
   FREE_LIMIT,
   FREE_LIMIT_WARNING_THRESHOLD,
 } from '../src/logic/freeLimit.ts'
@@ -4485,12 +4486,19 @@ eq(
   )
 }
 
-// ---------- freeLimit(本番はフラグOFF=絶対にブロックしない不変条件) ----------
-eq('フラグOFF: 50件でもブロックしない', isAtFreeLimit(50, false), false)
-eq('フラグOFF: 予告バナーも出ない', isNearFreeLimit(45, false), false)
+// ---------- freeLimit(2026-08-02 発売便DD: FREE_LIMIT_ENABLED=true) ----------
+// 発売と同一リリースでフラグをONにした(docs/08 §2)。ONで変わるのは「新規追加のブロック」と
+// 「予告バナー」だけで、既存レシピの閲覧・編集・削除・バックアップ復元は絶対に制限しない
+// (それらはisAtFreeLimitを一切呼ばない=RecipeFormPageの新規保存パスだけが呼ぶ)
+eq('フラグON: 50件に達したら新規追加はブロックする', isAtFreeLimit(50, false), true)
+eq('フラグON: 49件まではブロックしない', isAtFreeLimit(49, false), false)
+eq('Pro解錠済みは50件でもブロックしない', isAtFreeLimit(50, true), false)
+eq('Pro解錠済みは1000件でもブロックしない', isAtFreeLimit(1000, true), false)
+eq('フラグON: 45件は予告バナーを出す', isNearFreeLimit(45, false), true)
+eq('フラグON: 39件はまだ予告バナーを出さない', isNearFreeLimit(39, false), false)
+eq('フラグON: 50件は予告でなくブロック(予告バナーは出さない)', isNearFreeLimit(50, false), false)
 // 予告閾値を45→40へ引き下げ(2026-07-23 便BJ・docs/55 CEO提案:「40件あたりから静かにあと◯件を
-// 表示する。突然壁に当てるのが一番心証が悪い」)。発売時にFREE_LIMIT_ENABLEDをONにしたときの
-// 挙動を、フラグOFFの現状でも単体テストで固定する(フラグ非依存のisInWarningRangeで検証)
+// 表示する。突然壁に当てるのが一番心証が悪い」)
 eq('予告閾値は40件', FREE_LIMIT_WARNING_THRESHOLD, 40)
 eq('上限は50件', FREE_LIMIT, 50)
 eq('39件はまだ予告域でない', isInWarningRange(39), false)
@@ -4500,9 +4508,24 @@ eq('50件は予告でなくブロック域(予告域からは外れる)', isInWa
 eq('「あと◯件」: 40件時点はあと10件', freeLimitRemaining(40), 10)
 eq('「あと◯件」: 49件時点はあと1件', freeLimitRemaining(49), 1)
 eq('「あと◯件」: 50件以上でも負にならない', freeLimitRemaining(51), 0)
-// フラグOFFの現状は予告域でもバナーを出さない/Pro解錠済みは(将来ON時も)予告しない=不変条件
-eq('フラグOFF: 予告域(40件)でもisNearFreeLimitはfalse', isNearFreeLimit(40, false), false)
+eq('フラグON: 予告域の入口(40件)でバナーが出る', isNearFreeLimit(40, false), true)
 eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
+// 上限のカウント対象はisStarter=falseだけ(同梱の基本レシピは何品あっても上限に効かない)。
+// 発売でフラグをONにしたため、この不変条件が破れると初回起動直後の人がいきなりブロックされる
+eq(
+  '基本レシピ(isStarter)は上限に数えない',
+  countFreeLimitRecipes([
+    ...Array.from({ length: 109 }, () => ({ isStarter: true })),
+    { isStarter: false },
+    {},
+  ]),
+  2,
+)
+eq(
+  'フラグON: 基本レシピ109品だけならブロックしない',
+  isAtFreeLimit(countFreeLimitRecipes(Array.from({ length: 109 }, () => ({ isStarter: true }))), false),
+  false,
+)
 
 // ---------- pickMainIngredients(一覧カードの主要食材=調味料・水・油・粉類・だし系・薬味少量
 // の名前辞書で除外。UI改善バッチ 2026-07-11 オーナー実機フィードバック「メインをはる材料に絞って」) ----------

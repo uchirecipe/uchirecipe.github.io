@@ -1507,6 +1507,23 @@ function RecipeFormInner() {
         </p>
       )}
 
+      {/* 上限到達のときだけ、そのまま購入・解錠へ進める導線を添える(2026-08-02 便DD・規約H)。
+          警告の枠内に混ぜず、独立したカードにして「保存できない理由」と「解錠の入口」を分ける */}
+      {error === ja.form.freeLimitBlocked && (
+        <div
+          data-testid="free-limit-pro-cta"
+          className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface p-[var(--space-md)] shadow-sm"
+        >
+          <p className="text-sm text-ink">{ja.form.freeLimitBlockedProNote}</p>
+          <Link
+            to="/settings?section=pro"
+            className="mt-[var(--space-sm)] inline-flex items-center justify-center rounded-md border border-accent bg-app px-4 py-3 font-bold text-accent-ink"
+          >
+            {ja.form.freeLimitBlockedProLink}
+          </Link>
+        </div>
+      )}
+
       {/* 編集しようとしたレシピが無いとき(削除済み・IDまちがい)は、保存を押す前に伝える
           (2026-07-30 便CK/①-2)。以前は何の案内も出ないまま入力でき、「保存する」を押すと
           無言で「レシピが見つかりませんでした」の画面へ飛び、1件も保存されていなかった */}

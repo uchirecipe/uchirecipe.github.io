@@ -7822,6 +7822,8 @@ try {
     ['/about/', 'うちレシピについて'],
     ['/about/manual.html', 'うちレシピの使い方'],
     ['/about/terms.html', '利用規約'],
+    ['/about/tokushoho.html', '特定商取引法に基づく表記'], // 2026-08-02 便DD: 発売と同時に公開
+    ['/about/unlock.html', '解錠コード'],
     ['/about/column/', 'コラム'],
     ['/about/column/kondate-kimaranai.html', '献立が決められない'],
     ['/about/column/recipe-screenshot-seiri.html', 'スクショ'],
@@ -7864,6 +7866,203 @@ try {
     for (const url of foodsInfo.urls) {
       const res = await page.request.get(url)
       check(`SMK-19b リンク/画像 ${url.replace(BASE, '')}`, res.status() === 200, `status=${res.status()}`)
+    }
+  }
+
+  // --- LAUNCH-01: 発売後に残ってはいけない語の掃引と、発売に必要な導線(2026-08-02 便DD)。
+  // 「準備期間」「販売準備中」は買い切り版の発売前だけの言い回しで、発売後に1箇所でも残ると
+  // 「まだ買えない」と読ませてしまう。静的ページ全体を機械的に見張る。
+  // 語を増やすときは FORBIDDEN_AFTER_LAUNCH に足す ---
+  currentCheck = 'LAUNCH-01'
+  {
+    const FORBIDDEN_AFTER_LAUNCH = ['準備期間', '販売準備中']
+    // 決済リンク(docs/08 §3で確定した本番のPayment Link)。src/logic/pro.ts の
+    // PRO_PURCHASE_URL・紹介ページの購入ボタンと同じ値であることを固定する
+    const STRIPE_PAY_URL = 'https://buy.stripe.com/9B69AV8idaXva3wa4KdQQ00'
+    // 精度開示(docs/62 決定④)。購入ボタンより前に出ていること＝買う前に読んで買った状態
+    const ACCURACY_TAIL = '治療中の方・妊娠中の方の食事管理には使えません'
+
+    const launchPages = [
+      '/about/',
+      '/about/manual.html',
+      '/about/terms.html',
+      '/about/unlock.html',
+      '/about/tokushoho.html',
+      '/about/column/',
+    ]
+    for (const p of launchPages) {
+      const res = await page.request.get(`${BASE}${p}`)
+      const html = await res.text()
+      const hit = FORBIDDEN_AFTER_LAUNCH.filter((w) => html.includes(w))
+      check(
+        `LAUNCH-01 ${p} に発売前の言い回しが残っていない`,
+        res.status() === 200 && hit.length === 0,
+        `status=${res.status()} 残存=${hit.join('/') || 'なし'}`,
+      )
+    }
+
+    // 特商法表記ページ(発売の必須ゲート・docs/08 §2)
+    const tokushoRes = await page.request.get(`${BASE}/about/tokushoho.html`)
+    const tokushoHtml = await tokushoRes.text()
+    check(
+      'LAUNCH-01 特商法表記ページが公開され、必須項目が入っている',
+      tokushoRes.status() === 200 &&
+        ['販売業者', '所在地', '販売価格', '返品', 'お支払い方法'].every((k) => tokushoHtml.includes(k)),
+      `status=${tokushoRes.status()}`,
+    )
+    check(
+      'LAUNCH-01 特商法表記は検索結果に出さない(noindex・氏名を含むため)',
+      /<meta[^>]+name="robots"[^>]+noindex/.test(tokushoHtml),
+    )
+
+    const lpHtml = await (await page.request.get(`${BASE}/about/`)).text()
+    check('LAUNCH-01 紹介ページに購入ボタン(決済リンク)がある', lpHtml.includes(STRIPE_PAY_URL))
+    check('LAUNCH-01 紹介ページのフッターから特商法表記へ辿れる', lpHtml.includes('/about/tokushoho.html'))
+    check(
+      'LAUNCH-01 精度開示が購入ボタンより前にある(docs/62 決定④)',
+      lpHtml.includes(ACCURACY_TAIL) && lpHtml.indexOf(ACCURACY_TAIL) < lpHtml.indexOf(STRIPE_PAY_URL),
+    )
+    check('LAUNCH-01 紹介ページの価格は総額(税込)のみ', lpHtml.includes('800円（税込）'))
+    check('LAUNCH-01 紹介ページに50品上限の案内がある', lpHtml.includes('無料で登録できるレシピは50品までです'))
+
+    // 使い方ページ: 購入の3歩(購入→コード表示→設定で入力)が書いてある
+    const manualHtml = await (await page.request.get(`${BASE}/about/manual.html`)).text()
+    check('LAUNCH-01 使い方ページに買い方の節がある', manualHtml.includes('買い切り版の買い方'))
+    check(
+      'LAUNCH-01 使い方ページの買い方が購入→コード表示→設定で入力の3歩になっている',
+      manualHtml.includes('/about/#buy') &&
+        manualHtml.includes('購入完了の画面に解錠コード') &&
+        manualHtml.includes('「購入と解錠」にそのコードを入れて'),
+    )
+    check('LAUNCH-01 使い方ページのフッターから特商法表記へ辿れる', manualHtml.includes('/about/tokushoho.html'))
+    // 紹介ページ側のアンカー(#buy)が実在する＝使い方からのリンクが空振りしない
+    check('LAUNCH-01 紹介ページに#buyのアンカーがある', /id="buy"/.test(lpHtml))
+  }
+
+  // --- LAUNCH-02: アプリ内の発売状態(2026-08-02 便DD)。設定の「Pro」に購入導線が出ること・
+  // アプリ画面にも発売前の言い回しが残っていないこと・お知らせに発売の告知が入っていることを見る ---
+  currentCheck = 'LAUNCH-02'
+  {
+    const l2Browser = await chromium.launch()
+    const l2Context = await l2Browser.newContext()
+    const l2Page = await l2Context.newPage()
+    l2Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@LAUNCH-02] ${err.message}`)
+    })
+    try {
+      await l2Page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await l2Page.waitForTimeout(2400) // 初回シード(109品)の完了待ち
+      const buyHref = await l2Page.getAttribute('[data-testid="pro-buy-link"]', 'href')
+      check(
+        'LAUNCH-02 設定のPro節に購入ボタンがあり、決済リンクを指している',
+        buyHref === 'https://buy.stripe.com/9B69AV8idaXva3wa4KdQQ00',
+        `href=${buyHref}`,
+      )
+      const settingsText = (await l2Page.textContent('body')) ?? ''
+      check(
+        'LAUNCH-02 設定のPro節に発売前の言い回しが残っていない',
+        !/準備期間|販売準備中/.test(settingsText),
+      )
+      check(
+        'LAUNCH-02 購入ボタンの上に精度開示が出ている(docs/62 決定④)',
+        settingsText.includes('治療中の方・妊娠中の方の食事管理には使えません'),
+      )
+      check(
+        'LAUNCH-02 購入ボタンのそばに特商法表記へのリンクがある',
+        (await l2Page.locator('a[href="/about/tokushoho.html"]').count()) > 0,
+      )
+
+      // お知らせ(public/news.json)の最新が発売の告知になっている
+      const news = await l2Page.evaluate(async () => {
+        const res = await fetch('/news.json')
+        return res.ok ? await res.json() : []
+      })
+      check(
+        'LAUNCH-02 お知らせの最新が買い切り版の発売告知',
+        Array.isArray(news) && news[0]?.title === '買い切り版の販売を開始しました',
+        `latest=${JSON.stringify(news[0]?.title)}`,
+      )
+      check(
+        'LAUNCH-02 発売告知は設定のPro節へ誘導する',
+        news[0]?.link === '#/settings?section=pro',
+        `link=${news[0]?.link}`,
+      )
+
+      // --- 50件到達の実挙動: 上限ちょうどの自作レシピを流し込んでから新規追加を試す。
+      // 同梱の基本レシピ(isStarter)は上限に数えないので、ここで入れた50件だけで到達する ---
+      await l2Page.evaluate(
+        (n) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['recipes'], 'readwrite')
+              const store = tx.objectStore('recipes')
+              for (let i = 0; i < n; i += 1) {
+                store.add({
+                  title: `上限確認用レシピ${i + 1}`,
+                  servings: 2,
+                  effortLevel: 'easy',
+                  tags: [],
+                  ingredients: [{ name: 'にんじん', amount: '1', unit: '本' }],
+                  steps: [{ text: '切る' }],
+                  isFavorite: false,
+                  cookedLogs: [],
+                  searchWords: [],
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                })
+              }
+              tx.oncomplete = () => {
+                idb.close()
+                resolve(undefined)
+              }
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        50,
+      )
+      // 生IndexedDBへの書き込みはDexieのliveQueryに伝わらないので、ハッシュ移動でなく再読込で入り直す
+      await l2Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await l2Page.reload({ waitUntil: 'networkidle' })
+      await l2Page.waitForTimeout(1600)
+      await l2Page.getByPlaceholder('例: 肉じゃが').fill('51品目のレシピ')
+      await l2Page.getByRole('button', { name: '保存する' }).first().click()
+      await l2Page.waitForTimeout(800)
+      const blockedText = (await l2Page.textContent('body')) ?? ''
+      check(
+        'LAUNCH-02 50件に達したら新規追加はブロックされる',
+        blockedText.includes('無料で登録できるレシピは50品までです'),
+      )
+      check(
+        'LAUNCH-02 ブロックの案内に「残るもの」(閲覧・編集・削除・復元)が書いてある(規約F)',
+        blockedText.includes('見る・編集する・削除する・バックアップから戻すことができます'),
+      )
+      check(
+        'LAUNCH-02 ブロックの案内から購入導線に進める(規約H)',
+        (await l2Page.locator('[data-testid="free-limit-pro-cta"]').count()) > 0,
+      )
+      // 既存レシピが閲覧できることまで確認する(上限で止めるのは新規追加だけ)
+      await l2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await l2Page.waitForTimeout(1200)
+      const listText = (await l2Page.textContent('body')) ?? ''
+      check('LAUNCH-02 上限到達後も既存レシピは一覧に出る', /上限確認用レシピ\d+/.test(listText))
+      // 予告バナー(40〜49件)は50件では出ない=ブロック域に入っている
+      check(
+        'LAUNCH-02 50件では「あと◯件」の予告バナーを出さない(ブロック域)',
+        !/あと\d+件登録できます/.test(listText),
+      )
+      await l2Page.getByText(/^上限確認用レシピ\d+$/).first().click()
+      await l2Page.waitForTimeout(800)
+      const detailText = (await l2Page.textContent('body')) ?? ''
+      check(
+        'LAUNCH-02 上限到達後も既存レシピを開ける',
+        /上限確認用レシピ\d+/.test(detailText) && detailText.includes('にんじん'),
+      )
+    } finally {
+      await l2Browser.close()
     }
   }
 
