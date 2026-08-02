@@ -18,9 +18,10 @@ import {
   HardDriveDownload,
   Copy,
   Check,
+  Eye,
 } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
-import { listRecipes } from '../db/recipes'
+import { listRecipes, deleteArchivedCookedLogs } from '../db/recipes'
 import { usePriceEntries } from '../db/prices'
 import { reloadStarterRecipes, starterCount } from '../db/starters'
 import {
@@ -43,12 +44,29 @@ import { refreshApp } from '../logic/appRefresh'
 import {
   supportsSaveFilePicker,
   saveWithPicker,
+  saveJsonWithPicker,
+  downloadJson,
   overwriteSavedFile,
   hasSavedFileHandle,
   savedFileHandleName,
   backupFileName,
   isAbortError,
 } from '../logic/fileSave'
+import {
+  ARCHIVE_MONTH_OPTIONS,
+  DEFAULT_ARCHIVE_MONTHS,
+  archiveCutoffDate,
+  archiveFileName,
+  buildArchiveFile,
+  collectArchiveTargets,
+  countArchiveTargets,
+  formatArchiveDate,
+  mergeArchiveLogs,
+  parseArchiveFile,
+  toArchivedLogs,
+  ArchiveFileError,
+  type ArchivedCookedLog,
+} from '../logic/cookedArchive'
 import {
   totalCookedLogPhotoBytes,
   isOverCookedPhotoLimit,
@@ -69,6 +87,7 @@ import {
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
 import { ja } from '../i18n/ja'
 import Toast from '../components/Toast'
+import ArchiveViewerModal from '../components/ArchiveViewerModal'
 
 const themeOptions: { value: ThemeSetting; label: string }[] = [
   { value: 'auto', label: ja.settings.themeAuto },
@@ -336,6 +355,28 @@ export default function SettingsPage() {
   // バックアップタブ「機種変更するときは」の折りたたみ開閉(2026-07-17設定ゼロベース裁定#5)
   const [moveGuideOpen, setMoveGuideOpen] = useState(false)
 
+  // ===== 古い記録の書き出し(2026-08-02 オーナー採用。端末容量の軽量化) =====
+  // 「◯ヶ月より前」の選択(既定1ヶ月)。設定には保存しない(書き出しのたびに選び直す一度きりの指定で、
+  // 覚えておくと「前に6ヶ月にしたまま1ヶ月分だけ消すつもりで押す」取り違えが起きるため)
+  const [archiveMonths, setArchiveMonths] = useState<number>(DEFAULT_ARCHIVE_MONTHS)
+  // 追記型: 前回のアーカイブファイルを選んだときの中身(選ばなければnull=新規作成)
+  const [archiveBaseLogs, setArchiveBaseLogs] = useState<ArchivedCookedLog[] | null>(null)
+  const [archiveBusy, setArchiveBusy] = useState(false)
+  const [archiveMessage, setArchiveMessage] = useState('')
+  // 書き出しが済んだ結果。これがある間だけ「書き出した記録を端末から消す」を出す
+  // (書き出しと削除を1ボタンにしない＝ファイル保存に失敗したときの全損を防ぐ)
+  const [archiveExported, setArchiveExported] = useState<{
+    ids: string[]
+    logs: number
+    photos: number
+    cutoff: string
+  } | null>(null)
+  // 「アーカイブを見る」で開く一時閲覧の窓(IndexedDBには書かない・閉じたら端末に残らない)
+  const [archiveViewLogs, setArchiveViewLogs] = useState<ArchivedCookedLog[] | null>(null)
+  const [archiveViewBroken, setArchiveViewBroken] = useState(0)
+  const archiveAppendFileRef = useRef<HTMLInputElement>(null)
+  const archiveViewFileRef = useRef<HTMLInputElement>(null)
+
   // 前回の保存先ハンドルの記録有無を起動時に1回確認する(2026-07-17バックアップ改修 修正2+3。
   // 非対応ブラウザでは常にfalseのまま=ボタン自体を出さない)
   useEffect(() => {
@@ -597,6 +638,126 @@ export default function SettingsPage() {
     // 置き換えの結果表示は戻したあとは事実と違うので消す（便CJ/C11）
     setImportResultLines([])
     setMessage(restored ? ja.settings.replaceUndoDone : ja.settings.replaceUndoError)
+  }
+
+  // ===== 古い記録の書き出し(2026-08-02) =====
+  // 「◯ヶ月より前」の境目と、その対象になる記録。recipesが更新されれば自動で数え直される
+  const archiveCutoff = archiveCutoffDate(archiveMonths)
+  const archiveTargets = collectArchiveTargets(recipes ?? [], archiveCutoff)
+  const archiveCounts = countArchiveTargets(archiveTargets)
+
+  /** 読み込んだアーカイブファイルのエラーを、理由別の文言にする(バックアップと取り違えた場合を言い分ける) */
+  const archiveFileErrorMessage = (err: unknown): string =>
+    err instanceof ArchiveFileError && err.reason === 'backup'
+      ? ja.settings.archiveFileErrorBackup
+      : ja.settings.archiveFileErrorInvalid
+
+  /** 追記型: 前回のアーカイブファイルを選ぶ(中身を読むだけ。端末には書かない) */
+  const onArchiveAppendFile = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const parsed = parseArchiveFile(await file.text())
+      setArchiveBaseLogs(parsed.logs)
+      // 読み込めた件数はボタンの位置に出る（archiveAppendLoaded）ので、ここでは繰り返さない。
+      // 読めなかった記録があるときだけ、その事実を出す（黙って減らさない）
+      setArchiveMessage(
+        parsed.brokenCount > 0
+          ? ja.settings.archiveViewBroken.replace('{n}', String(parsed.brokenCount))
+          : '',
+      )
+    } catch (err) {
+      setArchiveBaseLogs(null)
+      setArchiveMessage(archiveFileErrorMessage(err))
+    }
+  }
+
+  /**
+   * 「ファイルに書き出す」(古い記録)。前回のファイルを選んでいれば中身を引き継いで統合し、
+   * 1つのファイルとして出す。書き出しただけでは端末の記録は消さない(削除は別ボタン)。
+   * 保存経路はバックアップと同じ考え方(保存先を選べる端末はピッカー・それ以外はダウンロード)だが、
+   * バックアップの「前回の場所」は記録し直さない(saveJsonWithPicker)
+   */
+  const handleArchiveExport = async () => {
+    if (archiveBusy || archiveTargets.length === 0) return
+    setArchiveBusy(true)
+    setArchiveMessage('')
+    try {
+      const incoming = await toArchivedLogs(archiveTargets)
+      const logs = mergeArchiveLogs(archiveBaseLogs ?? [], incoming)
+      const json = JSON.stringify(buildArchiveFile(logs))
+      const name = archiveFileName()
+      let picked = false
+      if (fileSaveSupported) {
+        try {
+          await saveJsonWithPicker(json, name)
+          picked = true
+        } catch (err) {
+          if (isAbortError(err)) return // ユーザーが保存先選択を閉じた: 何も起きなかった扱い
+          downloadJson(json, name) // 権限拒否・ピッカーが使えない環境はダウンロードへ切り替える
+        }
+      } else {
+        downloadJson(json, name)
+      }
+      // 消せるのは「今回ファイルに入れた端末側の記録」だけ(前回のファイルから引き継いだ分は
+      // もう端末に無い)。IDで指定するので、書き出したあとに足した記録を巻き込むことはない
+      setArchiveExported({
+        ids: archiveTargets.map((t) => t.id),
+        logs: archiveCounts.logs,
+        photos: archiveCounts.photos,
+        cutoff: archiveCutoff,
+      })
+      setArchiveMessage(
+        (picked
+          ? ja.settings.archiveExportDonePicked
+          : ja.settings.archiveExportDoneDownloaded
+        )
+          .replace('{c}', String(archiveCounts.logs))
+          .replace('{p}', String(archiveCounts.photos)),
+      )
+    } catch {
+      setArchiveMessage(ja.settings.archiveExportError)
+    } finally {
+      setArchiveBusy(false)
+    }
+  }
+
+  /**
+   * 「書き出した記録を端末から消す」(2段階の2段目)。書き出しが済んだ直後だけ出るボタンで、
+   * 確認文は規約F(消えるもの・残るものを件数つきで両方書く)
+   */
+  const handleArchiveDelete = async () => {
+    if (!archiveExported) return
+    const confirmText = ja.settings.archiveDeleteConfirm
+      .replace('{c}', String(archiveExported.logs))
+      .replace('{p}', String(archiveExported.photos))
+      .replace('{date}', formatArchiveDate(archiveExported.cutoff))
+    if (!window.confirm(confirmText)) return
+    setArchiveBusy(true)
+    try {
+      const removed = await deleteArchivedCookedLogs(archiveExported.ids)
+      setArchiveExported(null)
+      setArchiveMessage(
+        removed.logs === 0
+          ? ja.settings.archiveDeleteNothing
+          : ja.settings.archiveDeleteDone
+              .replace('{c}', String(removed.logs))
+              .replace('{p}', String(removed.photos)),
+      )
+    } finally {
+      setArchiveBusy(false)
+    }
+  }
+
+  /** 「アーカイブを見る」: 選んだファイルの中身をその場で読むだけ(端末には保存しない) */
+  const onArchiveViewFile = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const parsed = parseArchiveFile(await file.text())
+      setArchiveViewLogs(parsed.logs)
+      setArchiveViewBroken(parsed.brokenCount)
+    } catch (err) {
+      setArchiveMessage(archiveFileErrorMessage(err))
+    }
   }
 
   // 「レシピセットを読み込む」欄の「URLから読み込む」「ファイルから読み込む」専用
@@ -1388,6 +1549,168 @@ export default function SettingsPage() {
             )}
           </section>
 
+          {/* ③古い記録の書き出し(2026-08-02 オーナー採用「1ヶ月だけ端末に残して古い記録は外へ」)。
+              目的は端末容量の軽量化。書き出し→(ファイルを確かめてから)削除の2段階で、
+              1つのボタンにまとめない(保存に失敗したまま消えると控えが無くなるため) */}
+          <section id="archive-section" className={`${sectionCls} scroll-mt-24`}>
+            <h2 className="font-bold">{ja.settings.archiveTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.archiveDescription}</p>
+
+            {/* 「◯ヶ月より前」の選択(既定1ヶ月)。切り替えたら書き出し済みの状態は消す
+                (別の範囲で書き出したファイルに対する削除ボタンが残ると取り違えるため) */}
+            <fieldset className="mt-[var(--space-md)]">
+              <legend className="text-sm font-bold">{ja.settings.archivePeriodLabel}</legend>
+              <div className="mt-[var(--space-sm)] grid grid-cols-3 gap-[var(--space-sm)]">
+                {ARCHIVE_MONTH_OPTIONS.map((months) => (
+                  <button
+                    key={months}
+                    type="button"
+                    aria-pressed={archiveMonths === months}
+                    onClick={() => {
+                      setArchiveMonths(months)
+                      setArchiveExported(null)
+                      setArchiveMessage('')
+                    }}
+                    className={`rounded-md border py-3 text-sm font-bold shadow-sm ${
+                      archiveMonths === months
+                        ? 'border-accent bg-accent text-on-accent'
+                        : 'border-edge bg-app text-accent-ink'
+                    }`}
+                  >
+                    {ja.settings.archivePeriodOption.replace('{n}', String(months))}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <p
+              data-testid="archive-target-count"
+              className="mt-[var(--space-md)] text-sm font-bold text-accent-ink"
+            >
+              {archiveCounts.logs === 0
+                ? ja.settings.archiveTargetNone.replace('{n}', String(archiveMonths))
+                : ja.settings.archiveTargetCount
+                    .replace('{n}', String(archiveMonths))
+                    .replace('{c}', String(archiveCounts.logs))
+                    .replace('{p}', String(archiveCounts.photos))}
+            </p>
+            <p className="mt-1 text-xs text-ink-muted">
+              {ja.settings.archiveKeepNote.replace('{date}', formatArchiveDate(archiveCutoff))}
+            </p>
+
+            {/* 対象が0件のときは書き出しボタン自体を出さない(押せないボタンを置かない) */}
+            {archiveCounts.logs > 0 && (
+              <>
+                <input
+                  ref={archiveAppendFileRef}
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => {
+                    void onArchiveAppendFile(e.target.files?.[0])
+                    e.target.value = ''
+                  }}
+                />
+                {archiveBaseLogs ? (
+                  <div className="mt-[var(--space-md)] flex items-start gap-2 rounded-sm bg-app px-3 py-2 text-sm">
+                    <span className="min-w-0 flex-1 font-bold text-accent-ink">
+                      {ja.settings.archiveAppendLoaded.replace(
+                        '{n}',
+                        String(archiveBaseLogs.length),
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setArchiveBaseLogs(null)
+                        setArchiveMessage('')
+                      }}
+                      className="shrink-0 rounded-sm border border-edge px-2 py-1 text-xs font-bold text-accent-ink"
+                    >
+                      {ja.settings.archiveAppendClear}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={archiveBusy}
+                    onClick={() => archiveAppendFileRef.current?.click()}
+                    className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-60"
+                  >
+                    <Upload size={18} aria-hidden />
+                    {ja.settings.archiveAppendButton}
+                  </button>
+                )}
+                <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveAppendNote}</p>
+                <button
+                  type="button"
+                  disabled={archiveBusy}
+                  onClick={() => void handleArchiveExport()}
+                  className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-60"
+                >
+                  <HardDriveDownload size={18} aria-hidden />
+                  {archiveBusy ? ja.settings.archiveExportBusy : ja.settings.archiveExportButton}
+                </button>
+              </>
+            )}
+
+            {/* 2段目: 書き出しが済んで初めて出す削除ボタン */}
+            {archiveExported && (
+              <>
+                <button
+                  type="button"
+                  disabled={archiveBusy}
+                  onClick={() => void handleArchiveDelete()}
+                  className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-warning py-3 font-bold text-warning disabled:opacity-60"
+                >
+                  <TriangleAlert size={18} aria-hidden />
+                  {ja.settings.archiveDeleteButton}
+                </button>
+                <p className="mt-1 text-xs font-bold text-warning">
+                  {ja.settings.archiveDeleteNote}
+                </p>
+              </>
+            )}
+
+            {archiveMessage && (
+              <p
+                data-testid="archive-message"
+                className="mt-[var(--space-md)] rounded-sm bg-app px-3 py-2 text-sm font-bold text-accent-ink"
+                role="status"
+                aria-live="polite"
+              >
+                {archiveMessage}
+              </p>
+            )}
+
+            {/* 通常のバックアップとの関係(端末から消した記録はバックアップに入らない) */}
+            <p className="mt-[var(--space-md)] flex items-start gap-1 text-xs text-ink-muted">
+              <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+              {ja.settings.archiveBackupNote}
+            </p>
+
+            {/* アーカイブを見る: 読み込み専用の一時閲覧(端末には保存しない) */}
+            <input
+              ref={archiveViewFileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => {
+                void onArchiveViewFile(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => archiveViewFileRef.current?.click()}
+              className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+            >
+              <Eye size={18} aria-hidden />
+              {ja.settings.archiveViewButton}
+            </button>
+            <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveViewNote}</p>
+          </section>
+
           {/* 機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。折りたたみ式で、
               普段は畳んでおき機種変更のときだけ開く想定 */}
           <section className={sectionCls}>
@@ -1664,6 +1987,18 @@ export default function SettingsPage() {
           </a>
         </section>
       </section>
+
+      {/* アーカイブファイルの一時閲覧(2026-08-02)。開いている間だけ中身をメモリに持ち、
+          閉じると何も残らない(IndexedDBには一切書かない) */}
+      <ArchiveViewerModal
+        open={archiveViewLogs !== null}
+        logs={archiveViewLogs ?? []}
+        brokenCount={archiveViewBroken}
+        onClose={() => {
+          setArchiveViewLogs(null)
+          setArchiveViewBroken(0)
+        }}
+      />
 
       <Toast message={message} onClose={() => setMessage('')} />
     </div>

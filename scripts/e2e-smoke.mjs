@@ -155,6 +155,11 @@
 //         Pro解錠コードが戻ることを実UI経由で確認。(a)未購入プロファイル+コード入りバックアップを
 //         mergeで解錠される (b)Pro解錠済みプロファイル+コード無し旧形式バックアップをmergeしても
 //         解錠状態が消えない=mergeUnlockCodesの「バックアップに無ければ既存を保持」の実固定) /
+//         ARCHIVE-01(古い記録の書き出し・2026-08-02: 「1ヶ月より前」の記録だけが対象になる・
+//         書き出す前は削除ボタンが出ない(2段階)・書き出したファイルに種別マーク(kind)と記録の写真が
+//         入る・書き出しただけでは端末の記録は減らない・削除で古い記録だけが消えレシピ本体と
+//         最近の記録は残る・「アーカイブを見る」は帯付きの閲覧だけで端末に書き戻さない・
+//         バックアップファイルを選んだときは壊れている扱いにせず言い分ける、をIndexedDB直読み込みで確認) /
 //         FILESAVE-01(2026-07-17バックアップ改修 修正2+3: 保存先選択+前回の場所に上書き。
 //         File System Access API(showSaveFilePicker)はheadless chromiumに実装が無いことを実測
 //         確認済みのため、addInitScriptで注入して「対応ブラウザ」を模す。(a)保存先の記録が無い間は
@@ -8700,6 +8705,238 @@ try {
       )
     } finally {
       await cmbBrowser.close()
+    }
+  }
+
+  // --- ARCHIVE-01(2026-08-02 古い記録の書き出し): 書き出し→削除→閲覧の一連。
+  // 目的は端末容量の軽量化(直近だけ端末に残し、古い記録は写真ごとファイルへ出す)なので、
+  // ①境目より前の記録だけが対象になる ②書き出す前は削除ボタンが出ない(2段階) ③書き出したファイルに
+  // 種別マークと写真が入る ④削除で対象だけが端末から消え、境目以降の記録・レシピ本体は残る
+  // ⑤「アーカイブを見る」は閲覧だけで、端末(IndexedDB)に書き戻さない、を実UI経由で確認する。
+  // 前提の記録(古い記録・新しい記録・写真)はIndexedDBへ直接書き込む(記録UI自体はLOG-PHOTO-01等で
+  // 別途カバー済みのため、ここはアーカイブ機構そのものに的を絞る) ---
+  currentCheck = 'ARCHIVE-01'
+  {
+    const arBrowser = await chromium.launch()
+    try {
+      const arContext = await arBrowser.newContext({ acceptDownloads: true })
+      const arPage = await arContext.newPage()
+      arPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@ARCHIVE-01] ${err.message}`)
+      })
+      arPage.on('dialog', (dialog) => dialog.accept())
+      await arPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await arPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 前提: 1品目に「古い記録2件(うち1件は写真つき)」と「今日の記録1件」を入れる。
+      // 日付は実行日から数えて作る(固定日付だと日が経つほど境目との関係が変わるため)
+      const arSetup = await arPage.evaluate(async () => {
+        const ymd = (offsetDays) => {
+          const d = new Date()
+          d.setDate(d.getDate() - offsetDays)
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        }
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const recipeId = await new Promise((resolve, reject) => {
+          const cursorReq = idb.transaction('recipes', 'readonly').objectStore('recipes').openCursor()
+          cursorReq.onsuccess = () => resolve(cursorReq.result ? cursorReq.result.primaryKey : null)
+          cursorReq.onerror = () => reject(cursorReq.error)
+        })
+        // 1x1のJPEGを作って写真つきの記録にする(記録の写真がファイルへ入ることの確認用)
+        const canvas = document.createElement('canvas')
+        canvas.width = 1
+        canvas.height = 1
+        const photo = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8))
+        const dates = { old1: ymd(200), old2: ymd(100), recent: ymd(1) }
+        const title = await new Promise((resolve, reject) => {
+          const tx = idb.transaction('recipes', 'readwrite')
+          const store = tx.objectStore('recipes')
+          const getReq = store.get(recipeId)
+          let recipeTitle = null
+          getReq.onsuccess = () => {
+            const recipe = getReq.result
+            recipeTitle = recipe.title
+            store.put({
+              ...recipe,
+              cookedLogs: [
+                { date: dates.recent, note: 'E2E最近の記録' },
+                { date: dates.old2, note: 'E2E古い記録(写真つき)', photo },
+                { date: dates.old1, note: 'E2E古い記録' },
+              ],
+            })
+          }
+          tx.oncomplete = () => resolve(recipeTitle)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+        return { recipeId, title, dates }
+      })
+      check('ARCHIVE-01 前提: 記録を入れるレシピを取得できた', typeof arSetup.recipeId === 'number')
+
+      // 記録はDexieを通さず直接書いたので、画面のライブクエリは気づかない。
+      // 読み直させるためにページごと読み込み直す(shots-manual.mjsと同じ理由)
+      await arPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await arPage.reload({ waitUntil: 'networkidle' })
+      await arPage.waitForTimeout(1500)
+      const arCount = await arPage.locator('[data-testid="archive-target-count"]').textContent()
+      check(
+        'ARCHIVE-01 既定(1ヶ月より前)で古い記録2件・写真1枚が対象になる',
+        arCount.includes('2件') && arCount.includes('1枚'),
+        `表示=${arCount}`,
+      )
+      check(
+        'ARCHIVE-01 書き出す前は「書き出した記録を端末から消す」が出ない(2段階)',
+        !(await arPage.textContent('body')).includes('書き出した記録を端末から消す'),
+      )
+
+      // 書き出し(保存先を選べない環境=自動ダウンロード経路)
+      const [arDownload] = await Promise.all([
+        arPage.waitForEvent('download'),
+        arPage.getByRole('button', { name: '古い記録をファイルに書き出す' }).click(),
+      ])
+      const arJson = readFileSync(await arDownload.path(), 'utf-8')
+      const arFile = JSON.parse(arJson)
+      check(
+        'ARCHIVE-01 書き出したファイルにアーカイブの種別マークが入る(バックアップと区別できる)',
+        arFile.kind === 'cooked-log-archive' && arFile.app === 'uchi-recipe',
+        `kind=${arFile.kind}`,
+      )
+      check('ARCHIVE-01 書き出したファイルに古い記録2件が入る', (arFile.logs ?? []).length === 2)
+      check(
+        'ARCHIVE-01 書き出したファイルは日付の新しい順',
+        arFile.logs[0].date > arFile.logs[1].date,
+        `${arFile.logs[0].date} / ${arFile.logs[1].date}`,
+      )
+      check(
+        'ARCHIVE-01 書き出したファイルに記録の写真が入る',
+        arFile.logs.some((l) => typeof l.photoBase64 === 'string' && l.photoBase64.length > 0),
+      )
+      check(
+        'ARCHIVE-01 書き出したファイルに最近の記録は入らない',
+        !arFile.logs.some((l) => l.date === arSetup.dates.recent),
+      )
+      check(
+        'ARCHIVE-01 書き出しただけでは端末の記録は減らない',
+        (
+          await arPage.evaluate(async (recipeId) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            const recipe = await new Promise((resolve, reject) => {
+              const r = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+            idb.close()
+            return recipe.cookedLogs.length
+          }, arSetup.recipeId)
+        ) === 3,
+      )
+
+      // 書き出しが済んで初めて出る削除ボタン→端末から消す
+      const arDeleteBtn = arPage.getByRole('button', { name: '書き出した記録を端末から消す' })
+      check('ARCHIVE-01 書き出したあとに削除ボタンが出る', (await arDeleteBtn.count()) === 1)
+      await arDeleteBtn.click()
+      await arPage.waitForTimeout(900)
+      const arAfterDelete = await arPage.evaluate(async (recipeId) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const recipe = await new Promise((resolve, reject) => {
+          const r = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        idb.close()
+        return { title: recipe.title, dates: recipe.cookedLogs.map((l) => l.date) }
+      }, arSetup.recipeId)
+      check(
+        'ARCHIVE-01 削除で古い記録だけが端末から消える',
+        arAfterDelete.dates.length === 1 && arAfterDelete.dates[0] === arSetup.dates.recent,
+        `残った記録=${JSON.stringify(arAfterDelete.dates)}`,
+      )
+      check('ARCHIVE-01 レシピ本体は残る', arAfterDelete.title === arSetup.title)
+      const arAfterText = await arPage.textContent('body')
+      check(
+        'ARCHIVE-01 削除後は対象0件になり書き出しボタンが消える',
+        arAfterText.includes('より前の記録はありません') &&
+          !arAfterText.includes('古い記録をファイルに書き出す'),
+      )
+
+      // アーカイブを見る: 書き出したファイルを選ぶと中身が読める(端末には保存しない)
+      const [arViewChooser] = await Promise.all([
+        arPage.waitForEvent('filechooser'),
+        arPage.getByRole('button', { name: 'アーカイブを見る' }).click(),
+      ])
+      await arViewChooser.setFiles({
+        name: 'uchi-recipe-records.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(arJson, 'utf-8'),
+      })
+      await arPage.waitForTimeout(800)
+      const arViewText = await arPage.textContent('body')
+      check(
+        'ARCHIVE-01 閲覧の窓に「端末には保存されません」の帯が出る',
+        arViewText.includes('これは閲覧だけです。端末には保存されません'),
+      )
+      check('ARCHIVE-01 閲覧の窓に記録件数が出る', arViewText.includes('記録2件'))
+      check(
+        'ARCHIVE-01 閲覧の窓に書き出した記録のメモが出る',
+        arViewText.includes('E2E古い記録(写真つき)'),
+      )
+      check(
+        'ARCHIVE-01 閲覧しても端末の記録は増えない(読み込み専用)',
+        (
+          await arPage.evaluate(async (recipeId) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            const recipe = await new Promise((resolve, reject) => {
+              const r = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+            idb.close()
+            return recipe.cookedLogs.length
+          }, arSetup.recipeId)
+        ) === 1,
+      )
+
+      // バックアップファイルを「アーカイブを見る」に渡したときは、壊れている扱いにせず言い分ける
+      const [arWrongChooser] = await Promise.all([
+        arPage.waitForEvent('filechooser'),
+        (async () => {
+          await arPage.keyboard.press('Escape') // 閲覧の窓を閉じてから
+          await arPage.waitForTimeout(400)
+          await arPage.getByRole('button', { name: 'アーカイブを見る' }).click()
+        })(),
+      ])
+      await arWrongChooser.setFiles({
+        name: 'uchi-recipe-backup.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(
+          JSON.stringify({ app: 'uchi-recipe', version: 1, exportedAt: '', recipes: [] }),
+          'utf-8',
+        ),
+      })
+      await arPage.waitForTimeout(600)
+      check(
+        'ARCHIVE-01 バックアップファイルを選んだときは「バックアップファイルです」と案内する',
+        (await arPage.textContent('body')).includes('選んだファイルはバックアップファイルです'),
+      )
+    } finally {
+      await arBrowser.close()
     }
   }
 
