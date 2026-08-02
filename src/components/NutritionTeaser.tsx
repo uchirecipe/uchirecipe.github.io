@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { Sparkles, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import {
   NUTRITION_TEASER_ENABLED,
@@ -13,6 +13,7 @@ import {
 } from '../logic/nutrition'
 import { roundVegetableGrams, vegetableGramsOf } from '../logic/nutritionBalance'
 import type { Recipe } from '../db/types'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
 /**
@@ -320,6 +321,9 @@ function SourceNote() {
  * （無料で見えるのはエネルギーと野菜量だけ＝ここに並ぶのがPro側で増える項目の全部になる）。
  */
 export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
+  // Pro案内から設定へ飛んだあと、いま見ている画面へ帰れるようにする(2026-08-02 便DF)。
+  // この部品はレシピ詳細・献立の栄養バランスパネルの両方で使うため、戻り先は現在地から作る
+  const location = useLocation()
   const sampleLabels = [
     ja.nutrition.proteinLabel,
     ja.nutrition.fatLabel,
@@ -353,7 +357,7 @@ export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
         <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
         {!isPro && (
           <Link
-            to="/settings?section=pro"
+            to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
             className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
           >
             {ja.nutrition.gateLink}

@@ -6,7 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -56,6 +56,7 @@ import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
 import Toast from '../components/Toast'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
 /**
@@ -218,6 +219,8 @@ export default function RecipesPage() {
   // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
   // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
   const [searchParams, setSearchParams] = useSearchParams()
+  // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
+  const location = useLocation()
   // ホームの「レシピを探す」ショートカットからの遷移(2026-08-02 オーナー実機FB)。
   // ?focus=search = 検索欄にフォーカスした状態で開く / ?pantry=1 = 「在庫の食材で絞る」をONで開く。
   // どちらも「明示的な新規検索」なので、?q=・?ing= と同じくsessionStorageの保存状態は復元しない
@@ -787,7 +790,7 @@ export default function RecipesPage() {
           />
           {!nutritionUnlocked && (
             <Link
-              to="/settings?section=pro"
+              to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
               className="mt-[var(--space-sm)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
             >
               <Lock size={16} className="mt-0.5 shrink-0" aria-hidden />

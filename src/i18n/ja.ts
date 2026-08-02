@@ -20,6 +20,19 @@ export const ja = {
   chip: {
     remove: 'このチップを削除',
   },
+  // 設定画面へ飛ばされたあと、元のページへ帰るボタンの文言(2026-08-02 オーナー指示・便DF)。
+  // どこへ帰るのかが分かるよう、画面名を入れて出す(logic/backLink.ts が組み立てる)
+  backLink: {
+    backTo: '{page}に戻る',
+    home: 'ホーム',
+    recipes: 'レシピ一覧',
+    recipeDetail: 'レシピ',
+    mealPlan: '献立',
+    cookNavi: '並行調理ナビ',
+    shopping: '食材',
+    history: '作った記録',
+    prices: '食材と価格',
+  },
   icon: {
     rice: 'ご飯・丼',
     pasta: 'パスタ',
@@ -1551,10 +1564,14 @@ export const ja = {
     quickIngredientPlaceholder: '例: 豚こま 200g',
     quickIngredientAdd: '材料に追加',
     // 材料行のまとめて削除(2026-08-02 オーナー実機FB。食材の在庫の整理モード=ja.pantry.organize* に倣う)。
-    // 整理中は上下移動・1行ずつの削除を隠し、チェックを付けて選んだ行だけをまとめて消す
-    ingredientOrganizeToggle: '整理',
+    // このモード中は上下移動・1行ずつの削除を隠し、チェックを付けて選んだ行だけをまとめて消す。
+    // 2026-08-02 オーナー指示(便DF): ボタン名が「整理」だけでは何ができるのか分からなかった。
+    // この画面のモードでできるのは複数選択して消すことだけなので、操作(選ぶ)と結果(削除)を
+    // そのままボタン名にする。「まとめて削除」は全部消えるようにも読めるため採らない。
+    // 説明の1行はモードに入ったときに出し、消し方(チェック→削除ボタン)を書く
+    ingredientOrganizeToggle: '選んで削除',
     ingredientOrganizeDone: '完了',
-    ingredientOrganizeHint: 'チェックを付けた材料をまとめて削除できます',
+    ingredientOrganizeHint: '消したい材料にチェックを付けて、「選んだ材料◯行を削除」を押します',
     ingredientOrganizeSelectAll: '全選択',
     ingredientOrganizeClearSelection: '選択解除',
     ingredientOrganizeSelectRow: 'この材料を選ぶ',

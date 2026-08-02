@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Clock,
   Dices,
@@ -30,6 +30,7 @@ import type { CookedLog, HomeWidgetKey, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
 // バックアップ浮遊バナーの「×で閉じたらセッション中は再表示しない」用キー(2026-07-16 便S)。
@@ -173,6 +174,8 @@ function HistoryCard({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
  */
 export default function HomePage() {
   const navigate = useNavigate()
+  // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
+  const location = useLocation()
   const allRecipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
 
@@ -535,7 +538,7 @@ export default function HomePage() {
         >
           <div className="mx-auto max-w-md px-[var(--space-md)]">
             <Link
-              to="/settings?section=backup"
+              to={settingsLinkWithBack('/settings?section=backup', location.pathname + location.search)}
               className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-md"
             >
               <HardDriveDownload size={16} className="shrink-0 text-accent-ink" aria-hidden />

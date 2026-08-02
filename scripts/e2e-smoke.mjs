@@ -293,6 +293,9 @@
 //         常時出る(1回だけのお試しとは独立)・押すと見本の1か月分が入った本物の月タブが開き、
 //         写真つきのセル・写真/栄養/食費の切り替え・日の窓が触れる・献立を書き換える操作は出ない・
 //         触ってもIndexedDBが1バイトも変わらない・1回だけのお試しを消費しない・閉じると入口の画面へ戻る) /
+//         SETBACK-01(設定へ飛ばされたあとの帰り道・2026-08-02 便DF: Pro案内から?back=付きで飛び、
+//         設定の目次チップの上に「◯◯に戻る」が出る・節へスクロールした後も見えている・
+//         押すと元のページ(レシピ一覧/レシピ詳細)へ帰る・タブから直接開いた設定には出さない) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -13229,11 +13232,17 @@ try {
         handlesBeforeOrganize >= 3,
         `ハンドル数=${handlesBeforeOrganize}`,
       )
-      // (a) 整理モード→2行選択→まとめて削除
-      await fiPage.getByRole('button', { name: '整理', exact: true }).click()
+      // (a) 「選んで削除」モード→2行選択→まとめて削除
+      // ボタン名は2026-08-02 オーナー指示(便DF)で「整理」から「選んで削除」に変更(何ができるか
+      // 読み取れなかったため)。名前が戻ってしまわないよう、ここで名指しして押す
+      await fiPage.getByRole('button', { name: '選んで削除', exact: true }).click()
       await fiPage.waitForTimeout(300)
       check(
-        'FORMING-01(a) 整理中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
+        'FORMING-01(便DF) モードに入ると消し方の説明が出る',
+        (await fiPage.textContent('body')).includes('消したい材料にチェックを付けて、「選んだ材料◯行を削除」を押します'),
+      )
+      check(
+        'FORMING-01(a) 選択中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
         (await handleCount()) === handlesBeforeOrganize - 3,
         `整理前=${handlesBeforeOrganize} 整理中=${await handleCount()}`,
       )
@@ -13254,7 +13263,7 @@ try {
       )
       // 1行になったら整理することが無くなるので通常の入力に戻る(「完了」に戻れなくなるのを防ぐ)
       check(
-        'FORMING-01(a) 1行まで消すと整理モードから自動で抜ける',
+        'FORMING-01(a) 1行まで消すと「選んで削除」モードから自動で抜ける',
         (await handleCount()) === handlesBeforeOrganize - 2 &&
           (await fiPage.getByRole('button', { name: 'この材料を選ぶ' }).count()) === 0,
         `ハンドル数=${await handleCount()}`,
@@ -13263,6 +13272,79 @@ try {
       await fiBrowser.close()
     }
   }
+  // --- SETBACK-01: 設定へ飛ばされたあとの帰り道(2026-08-02 オーナー指示・便DF)。
+  // 各ページのPro版の説明などから設定の該当欄へ飛ぶと、着いた先に元のページへ戻る手段が
+  // 無かった。?back=<元のパス>を載せて飛び、設定画面の目次チップの上に「◯◯に戻る」を出す。
+  // 直接開いた設定(タブから)には出さないことも確認する ---
+  currentCheck = 'SETBACK-01'
+  {
+    const sbBrowser = await chromium.launch()
+    const sbContext = await sbBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const sbPage = await sbContext.newPage()
+    sbPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SETBACK-01] ${err.message}`)
+    })
+    const backBtn = sbPage.locator('[data-testid="settings-back"]')
+    try {
+      await sbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await sbPage.waitForTimeout(1800)
+
+      // (a) タブから開いた設定には戻るボタンを出さない(帰る先が無いため)
+      await sbPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await sbPage.waitForTimeout(700)
+      check('SETBACK-01 直接開いた設定には戻るボタンを出さない', (await backBtn.count()) === 0)
+
+      // (b) レシピ一覧の栄養並び替えのPro案内 → 設定(Pro節) → 「レシピ一覧に戻る」
+      await sbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await sbPage.waitForTimeout(900)
+      await sbPage.locator('button[aria-label="並び替え"]').click()
+      await sbPage.waitForTimeout(300)
+      await sbPage.getByText('たんぱく質・塩分・脂質・糖質で探す').click()
+      await sbPage.waitForTimeout(800)
+      check(
+        'SETBACK-01 Pro案内のリンクに戻り先(?back=)が載っている',
+        sbPage.url().includes('#/settings') && sbPage.url().includes('back=%2Frecipes'),
+        `現在URL: ${sbPage.url()}`,
+      )
+      check(
+        'SETBACK-01 設定に「レシピ一覧に戻る」が出る',
+        (await backBtn.textContent())?.includes('レシピ一覧に戻る'),
+      )
+      // Pro節へ自動スクロールした後でも押せる位置にある(目次チップと同じ固定領域に置いている)
+      check('SETBACK-01 節へスクロールした後も戻るボタンが見えている', await backBtn.isVisible())
+      await backBtn.click()
+      await sbPage.waitForTimeout(600)
+      check(
+        'SETBACK-01 押すとレシピ一覧へ帰る',
+        sbPage.url().endsWith('#/recipes'),
+        `現在URL: ${sbPage.url()}`,
+      )
+
+      // (c) レシピ詳細の栄養のPro案内 → 設定 → 元のレシピ詳細へ帰る(画面名も「レシピ」になる)
+      await sbPage.locator('a[href^="#/recipes/"]').first().click()
+      await sbPage.waitForTimeout(800)
+      const sbDetailUrl = sbPage.url()
+      await sbPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+      await sbPage.waitForTimeout(500)
+      await sbPage.locator('a[href^="#/settings?section=pro"]').first().click()
+      await sbPage.waitForTimeout(800)
+      check(
+        'SETBACK-01 レシピ詳細発では「レシピに戻る」になる',
+        (await backBtn.textContent())?.includes('レシピに戻る'),
+      )
+      await backBtn.click()
+      await sbPage.waitForTimeout(600)
+      check(
+        'SETBACK-01 押すと元のレシピ詳細へ帰る',
+        sbPage.url() === sbDetailUrl,
+        `現在URL: ${sbPage.url()} 期待=${sbDetailUrl}`,
+      )
+    } finally {
+      await sbBrowser.close()
+    }
+  }
+
   // --- BULKDEL-01: レシピ一覧のまとめて削除(2026-08-02 便CT・オーナー承認)。
   // 食材の在庫の「整理」モードに倣った選択モードで複数品を選び、規約Fの確認文
   // (消えるもの＝レシピ本体+作った記録{n}件(写真{p}枚)+献立の予定・今日の献立/残るもの、を件数つき)

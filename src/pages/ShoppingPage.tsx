@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChefHat,
@@ -38,6 +38,7 @@ import type { SearchResult } from '../logic/search'
 import type { ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
 type CandidateRow = ShoppingCandidate & { checked: boolean }
@@ -206,6 +207,8 @@ export default function ShoppingPage() {
   // 計算せず、週に2回作る料理の材料が足りない量で出ていた。「1x2」=その週に2回ぶん、として
   // 回数を倍率に使う。C18: 渡ったレシピが1件も見つからないときは無言で終わらず理由を出す
   const [searchParams, setSearchParams] = useSearchParams()
+  // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
+  const location = useLocation()
   useEffect(() => {
     const raw = searchParams.get('recipeIds')
     if (raw == null || !recipes) return
@@ -447,7 +450,7 @@ export default function ShoppingPage() {
                   買い物メモの画面から辿れるようにする) */}
               <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
                 <Link
-                  to="/settings?section=aisle"
+                  to={settingsLinkWithBack('/settings?section=aisle', location.pathname + location.search)}
                   className="min-w-0 truncate text-sm text-ink-muted underline decoration-dotted underline-offset-4"
                 >
                   {ja.shopping.aisleOrderLink}
