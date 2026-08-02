@@ -30,3 +30,39 @@ export function clampServings(value: number): number {
   if (!Number.isFinite(value)) return MIN_SERVINGS
   return Math.min(MAX_SERVINGS, Math.max(MIN_SERVINGS, Math.floor(value)))
 }
+
+/**
+ * 献立の枠の「既定の食数」（2026-08-03 便DK）。枠ごとに食数を決めていないときに、
+ * 何人分として扱うかを返す。
+ *
+ * 設定「ふだん作る人数」(Settings.householdServings)があればその人数、無ければ
+ * 従来どおりその料理に登録されている人数分(Recipe.servings)。どちらも無い・壊れた値なら1人分。
+ *
+ * 「既定に戻す」の戻り先もこの値なので、ボタンの文言（何人分に戻るか）と実際の戻り先が
+ * ずれないよう、判定はこの1か所だけに置く。
+ */
+export function defaultMealServings(
+  householdServings: number | undefined,
+  recipeServings: number | undefined,
+): number {
+  if (householdServings != null && householdServings > 0) return clampServings(householdServings)
+  if (recipeServings != null && recipeServings > 0) return clampServings(recipeServings)
+  return MIN_SERVINGS
+}
+
+/**
+ * 献立の枠を実際に何人分作るか＝実効食数（2026-08-03 便DK）。優先順位は
+ *  ①その枠に決めた食数(MealPlanEntry.servings) ②設定「ふだん作る人数」 ③レシピの登録人数分。
+ *
+ * 買い物メモの分量と、これから作る予定の概算食費は必ずこの値で数える
+ * （画面ごとに優先順位を書き分けると、買い物メモと食費で違う人数分が出る）。
+ * ①②とも未設定なら③＝従来とまったく同じ値になる（後方互換）。
+ */
+export function effectiveMealServings(
+  entryServings: number | undefined,
+  householdServings: number | undefined,
+  recipeServings: number | undefined,
+): number {
+  if (entryServings != null && entryServings > 0) return clampServings(entryServings)
+  return defaultMealServings(householdServings, recipeServings)
+}

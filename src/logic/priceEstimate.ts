@@ -8,6 +8,9 @@ import { typicalAmountFor } from './amountAssumption'
 // nutrition側は単位換算の定義を unitGrams.ts から取るため循環importにはならない
 // （2026-07-28 便BY/COST-01。同じ材料の「量」を2つのエンジンが別々に解釈していたのを解消する）。
 import { convertToGrams, isZeroIngredient, matchNutritionFood } from './nutrition'
+// 実効食数(枠ごとの食数 > 設定「ふだん作る人数」 > レシピの登録人数分)の判定は1か所に集約する
+// （2026-08-03 便DK。買い物メモの分量と概算食費が違う人数分で計算されないようにするため）
+import { effectiveMealServings } from './servings'
 
 /**
  * 概算食費計算: レシピの「材料ごとの価格入力」(Ingredient.price)を優先し、
@@ -314,10 +317,16 @@ export function estimateIngredientRowCost(
 
 /** 献立エントリ群(mealPlans)の概算食費の合計・内訳 */
 export interface MealPlanCostSum {
-  /** 円換算の合計（レシピ登録時の基準人数分＝家族全員分） */
+  /**
+   * 円換算の合計（作る食数ぶん＝実効食数で数えた金額）。
+   * 2026-08-03 便DK以前は「レシピ登録時の基準人数分」固定だった。枠ごとの食数も
+   * 設定「ふだん作る人数」も無いときは実効食数＝登録人数分なので、その場合の値は従来と同じ。
+   */
   total: number
   /** マスタ価格で補完した材料の件数の合計 */
   fromMasterCount: number
+  /** 合計に数えた実効食数の総和（人分・2026-08-03 便DK。「作る食数ぶん」の内訳表示に使う） */
+  servingsTotal: number
   /**
    * 1人分の合計（円・2026-07-28 便CA）。料理1品につき「合計÷登録人数」を1回だけ足した金額。
    * 「1人が期間内に食べた分の食費」を出すために使う（栄養の sumPersonalNutrition と同じ数え方）。
@@ -335,32 +344,49 @@ export interface MealPlanCostSum {
  * 共通で使う集計ロジック。recipeが見つからないエントリ(削除済みレシピ等を指す孤児行)はスキップする。
  *
  * 2026-07-28 便CA: 「1人が期間内に食べた分の食費」を出すため personalTotal（合計÷登録人数を
- * 品ごとに1回足した金額）と dishCount も返す。従来の total/fromMasterCount の値は変えていない
- * （週の概算食費の表示は据え置き）。personalTotalは丸め誤差を溜めないよう最後に一度だけ四捨五入する。
+ * 品ごとに1回足した金額）と dishCount も返す。personalTotalは丸め誤差を溜めないよう最後に一度だけ
+ * 四捨五入する。
+ *
+ * 2026-08-03 便DK（オーナー確定「3人家族なら予算や買い物メモは3人分で計算した数値が必要」）:
+ * total を「作る食数ぶん」にした＝1人分の単価に実効食数（枠ごとの食数 > 設定「ふだん作る人数」 >
+ * レシピの登録人数分）を掛けて足す。枠ごとの食数も「ふだん作る人数」も無いときは実効食数が
+ * 登録人数分そのものなので、従来と1円も変わらない（後方互換）。
+ * personalTotal（1人分）は栄養と対になる数字なのでここでも変えない。
  */
-export function sumMealPlanEntriesCost<E extends { recipeId: number }>(
+export function sumMealPlanEntriesCost<E extends { recipeId: number; servings?: number }>(
   entries: E[],
   recipeById: Map<
     number,
     { ingredients: Pick<Ingredient, 'name' | 'amount' | 'unit' | 'price'>[]; servings?: number }
   >,
   index: PriceIndexEntry[],
+  householdServings?: number,
 ): MealPlanCostSum {
-  let total = 0
+  let totalRaw = 0
   let fromMasterCount = 0
   let personalRaw = 0
   let dishCount = 0
+  let servingsTotal = 0
   for (const e of entries) {
     const recipe = recipeById.get(e.recipeId)
     if (!recipe) continue
     const estimate = estimateRecipeCost(recipe.ingredients, index)
-    const servings = recipe.servings != null && recipe.servings > 0 ? recipe.servings : 1
-    total += estimate.total
+    const registered = recipe.servings != null && recipe.servings > 0 ? recipe.servings : 1
+    const servings = effectiveMealServings(e.servings, householdServings, recipe.servings)
+    const perServing = estimate.total / registered
+    totalRaw += perServing * servings
     fromMasterCount += estimate.fromMasterCount
-    personalRaw += estimate.total / servings
+    personalRaw += perServing
     dishCount++
+    servingsTotal += servings
   }
-  return { total, fromMasterCount, personalTotal: Math.round(personalRaw), dishCount }
+  return {
+    total: Math.round(totalRaw),
+    fromMasterCount,
+    servingsTotal,
+    personalTotal: Math.round(personalRaw),
+    dishCount,
+  }
 }
 
 /**

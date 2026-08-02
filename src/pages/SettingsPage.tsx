@@ -41,6 +41,7 @@ import {
   type MergeImportDetail,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
+import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
 import { restoreHomeWidget } from '../logic/homeWidgets'
 import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
@@ -120,6 +121,13 @@ const homeWidgetLabels: Record<HomeWidgetKey, string> = {
 const sectionCls =
   'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
 
+// 「ふだん作る人数」の選択肢(2026-08-03 便DK)。範囲はレシピの人数分と同じ1〜20
+// (logic/servings.ts。手で作れない人数がここからだけ入る、という穴を作らない)
+const householdServingsOptions = Array.from(
+  { length: MAX_SERVINGS - MIN_SERVINGS + 1 },
+  (_, i) => MIN_SERVINGS + i,
+)
+
 // パーソナライズ節の小見出し(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理)。
 // 既存のセクション見出しパターン(RecipesPageの絞り込みパネル等)に合わせ、小さめの text-sm font-bold
 const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
@@ -180,6 +188,9 @@ const sectionDeepLinks: Record<string, string> = {
   recipe: 'section-recipe',
   themes: 'section-recipe',
   budget: 'budget-section',
+  // householdは2026-08-03 便DK: 設定「ふだん作る人数」へ名前で飛べる値(?section=household)。
+  // 献立の食数・買い物メモの分量・概算食費の既定がどこで決まっているかを案内するときの行き先
+  household: 'household-section',
   // aisleは2026-08-02 便CT/C15: 買い物メモの「売り場順を変える」の遷移先。
   // 並びの由来と変え方が、買い物メモの画面から辿れるようにする
   aisle: 'aisle-section',
@@ -1206,6 +1217,36 @@ export default function SettingsPage() {
               <Coins size={18} aria-hidden />
               {ja.settings.priceMasterLink}
             </Link>
+          </section>
+
+          {/* ふだん作る人数（2026-08-03 便DK・オーナー指示）。献立に入れた料理を最初から
+              この人数分として扱う＝買い物メモの分量と、これから作る予定の概算食費に効く。
+              未設定なら従来どおりレシピに登録されている人数分。栄養は1人分のままで動かさない。
+              週の食費予算のすぐ上に置く（同じ「この金額は何人ぶんか」の話で、予算との比較にも効くため）。
+              id は直リンク(?section=household)の着地点 */}
+          <section id="household-section" className={`${sectionCls} scroll-mt-24`}>
+            <h2 className="font-bold">{ja.settings.householdServingsTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              {ja.settings.householdServingsDescription}
+            </p>
+            <select
+              value={settings.householdServings ?? ''}
+              onChange={(e) => {
+                const value = e.target.value
+                void updateSettings({
+                  householdServings: value === '' ? undefined : clampServings(Number(value)),
+                })
+              }}
+              aria-label={ja.settings.householdServingsTitle}
+              className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink"
+            >
+              <option value="">{ja.settings.householdServingsNone}</option>
+              {householdServingsOptions.map((n) => (
+                <option key={n} value={n}>
+                  {ja.settings.householdServingsOption.replace('{n}', String(n))}
+                </option>
+              ))}
+            </select>
           </section>
 
           {/* 週の食費予算。2026-07-13 UI改善: NG食材の直下（食材と価格の次）に移動。

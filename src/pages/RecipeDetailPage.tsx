@@ -29,6 +29,8 @@ import { addMealEntryIfAbsent } from '../db/mealPlan'
 import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
+// 表示人数の既定（設定「ふだん作る人数」→レシピの登録人数分）は献立の実効食数と同じ判定を使う
+import { defaultMealServings } from '../logic/servings'
 import {
   buildPriceIndex,
   matchPriceEntry,
@@ -143,9 +145,18 @@ export default function RecipeDetailPage() {
   const keepScreenOn = settings?.keepScreenOn ?? false
   useWakeLock(keepScreenOn)
 
-  // 人数分の表示用（変更していない間はレシピ登録時の人数）
+  /**
+   * 人数分の表示用。
+   * 変更していない間は「ふだん作る人数」(設定・2026-08-03 便DK オーナー決定)で開き、
+   * 未設定なら従来どおりレシピ登録時の人数で開く。判定は献立の実効食数と同じ
+   * logic/servings.ts に集約してある（画面ごとに既定を書き分けない）。
+   * ＋−で手で変えたらこの画面の中ではそちらが優先（従来どおり）。
+   * 材料の分量・原価の見え方はこの表示人数に連動する既存の仕組みのままで、
+   * 栄養の「1人分」表示は何人分にしても変わらない。
+   */
   const [servingsOverride, setServingsOverride] = useState<number>()
-  const servings = servingsOverride ?? recipe?.servings ?? 1
+  const servings =
+    servingsOverride ?? defaultMealServings(settings?.householdServings, recipe?.servings)
 
   // 材料ごとの原価ビュー切り替え(2026-07-15 オーナー要望「どの食材が値段に反映されているか
   // 分からない」への対応)。常時表示は「うるさい」の理由で2026-07-14に廃止済みなので、
@@ -722,6 +733,15 @@ export default function RecipeDetailPage() {
               </span>
             </div>
           </div>
+          {/* 元のレシピが何人分で書かれているかの併記(2026-08-03 便DK・オーナー決定)。
+              設定「ふだん作る人数」を入れているとこの画面は最初からその人数で開くため、
+              登録人数が画面から消えないようにする。出したり消したりすると材料の行が
+              上下に動くので、人数を変えているかどうかに関わらず常に同じ場所に出す */}
+          {recipe.servings > 0 && (
+            <p className="mt-1 text-right text-xs text-ink-muted">
+              {ja.detail.servingsRegisteredNote.replace('{n}', String(recipe.servings))}
+            </p>
+          )}
           {/* 「原価を編集」(view⇔editの子トグル)。2026-08-03 オーナー指示で見出し行から
               この行へ移した。原価を開いている間だけ出る */}
           {costMode !== 'hidden' && (

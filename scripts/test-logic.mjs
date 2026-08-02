@@ -244,7 +244,14 @@ import {
   seasoningGroupFromLetter,
   countAmountlessRows,
 } from '../src/logic/urlImportRows.ts'
-import { MIN_SERVINGS, MAX_SERVINGS, clampServings, isServingsInRange } from '../src/logic/servings.ts'
+import {
+  MIN_SERVINGS,
+  MAX_SERVINGS,
+  clampServings,
+  isServingsInRange,
+  defaultMealServings,
+  effectiveMealServings,
+} from '../src/logic/servings.ts'
 import {
   photoReplacePlan,
   replaceConfirmTargets,
@@ -5812,7 +5819,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   // sumMealPlanEntriesCost(2026-07-17 便AB・docs/35 §5「期間の食費」): 週の概算食費と
   // 期間の食費が共通で使う、mealPlansエントリ群の合算ロジック。
   // 2026-07-28 便CAで personalTotal(1人分の合計)と dishCount(品数)を追加したため、
-  // 期待値オブジェクトにその2項目を足している(total/fromMasterCountの値は据え置き=週の表示は不変)
+  // 期待値オブジェクトにその2項目を足している。
+  // 2026-08-03 便DKで total が「作る食数ぶん」になり servingsTotal(数えた食数の合計)が増えたが、
+  // 食数を1つも触らず「ふだん作る人数」も渡さない下の各ケースの total は従来と同じ値のまま
+  // (＝後方互換の見張り。値が動いたらここが落ちる)
   {
     const recipeById = new Map([
       [1, { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 }], // 全量50円
@@ -5827,21 +5837,28 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         recipeById,
         index,
       ),
-      { total: 50 + 260 + 50, fromMasterCount: 3, personalTotal: 25 + 130 + 25, dishCount: 3 },
+      {
+        total: 50 + 260 + 50,
+        fromMasterCount: 3,
+        servingsTotal: 6,
+        personalTotal: 25 + 130 + 25,
+        dishCount: 3,
+      },
     )
     eq(
       'sumMealPlanEntriesCost: 価格情報のないレシピは0円扱いで合計に影響しない',
       sumMealPlanEntriesCost([{ recipeId: 3 }], recipeById, index),
-      { total: 0, fromMasterCount: 0, personalTotal: 0, dishCount: 1 },
+      { total: 0, fromMasterCount: 0, servingsTotal: 2, personalTotal: 0, dishCount: 1 },
     )
     eq(
       'sumMealPlanEntriesCost: recipeByIdに無いエントリ(削除済みレシピ等の孤児行)はスキップする',
       sumMealPlanEntriesCost([{ recipeId: 999 }, { recipeId: 1 }], recipeById, index),
-      { total: 50, fromMasterCount: 1, personalTotal: 25, dishCount: 1 },
+      { total: 50, fromMasterCount: 1, servingsTotal: 2, personalTotal: 25, dishCount: 1 },
     )
     eq('sumMealPlanEntriesCost: エントリ0件は0円', sumMealPlanEntriesCost([], recipeById, index), {
       total: 0,
       fromMasterCount: 0,
+      servingsTotal: 0,
       personalTotal: 0,
       dishCount: 0,
     })
@@ -5854,6 +5871,47 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       'sumMealPlanEntriesCost(便CA): 登録人数が分からないレシピは1人分として扱う',
       sumMealPlanEntriesCost([{ recipeId: 4 }], recipeById, index).personalTotal,
       50,
+    )
+
+    // ---- 2026-08-03 便DK: 概算食費の食数連動 ----
+    // オーナー確定「3人家族なら予算や買い物メモは3人分で計算した数値が必要。栄養は1人当たりのみで十分」。
+    // 再発防止の要点は3つ: ①後方互換(未設定なら1円も変わらない) ②優先順位(枠>設定>レシピ)
+    // ③1人分(personalTotal)は食数で動かない(栄養と対の数字なので連動させない)
+    eq(
+      'DK-COST 後方互換: 食数もふだん作る人数も無ければ従来と同じ金額(登録人数分)',
+      sumMealPlanEntriesCost([{ recipeId: 1 }, { recipeId: 2 }], recipeById, index, undefined).total,
+      50 + 260,
+    )
+    eq(
+      'DK-COST ふだん作る人数3人分＝1人分の単価×3で数える(登録2人分の玉ねぎ50円→75円)',
+      sumMealPlanEntriesCost([{ recipeId: 1 }], recipeById, index, 3).total,
+      75,
+    )
+    eq(
+      'DK-COST 枠ごとに決めた食数はふだん作る人数より優先する(4人分なら100円)',
+      sumMealPlanEntriesCost([{ recipeId: 1, servings: 4 }], recipeById, index, 3).total,
+      100,
+    )
+    eq(
+      'DK-COST 数えた食数の合計も返す(枠4人分+既定3人分=7人分)',
+      sumMealPlanEntriesCost([{ recipeId: 1, servings: 4 }, { recipeId: 2 }], recipeById, index, 3)
+        .servingsTotal,
+      7,
+    )
+    eq(
+      'DK-COST 1人分(personalTotal)は食数を変えても動かない(栄養と対の数字)',
+      sumMealPlanEntriesCost([{ recipeId: 1, servings: 8 }], recipeById, index, 5).personalTotal,
+      25,
+    )
+    eq(
+      'DK-COST 登録人数が分からないレシピも1人分単価×ふだん作る人数で数える(50円×3)',
+      sumMealPlanEntriesCost([{ recipeId: 4 }], recipeById, index, 3).total,
+      150,
+    )
+    eq(
+      'DK-COST 端数は最後に一度だけ丸める(260円÷2人×3人=390円)',
+      sumMealPlanEntriesCost([{ recipeId: 2 }], recipeById, index, 3).total,
+      390,
     )
 
     // pricelessIngredientNames(2026-07-29 便CD/MP-11): 概算食費に1円も入っていない材料を数え、
@@ -6116,6 +6174,51 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       { yen: wholeMonth.cookedHouseholdYen, meals: wholeMonth.cookedMealCount },
       { yen: 310, meals: 4 },
     )
+    // 2026-08-03 便DK: 予定側にも「これから作る食数ぶん」の金額を出す。
+    // 食数を渡していない(=従来の呼び出し)ときは登録人数どおり＝玉ねぎ全量50円・のべ2食
+    eq(
+      'DK-RANGE 予定側の「作る食数ぶん」: 食数未指定なら登録人数分(50円・のべ2食)',
+      { yen: wholeMonth.planHouseholdYen, meals: wholeMonth.planMealCount },
+      { yen: 50, meals: 2 },
+    )
+    {
+      // 同じ予定を「3人分作る」にすると、金額とのべ食数だけが3人分になる。
+      // 1人分の食費と栄養(＝栄養は1人当たりのみで十分、というオーナー確定)は動かないこと
+      const withServings = summarizeRangeIntake({
+        start: '2026-07-01',
+        end: '2026-07-31',
+        today: TODAY,
+        cooked,
+        planned: [
+          { date: '2026-07-10', recipe: chicken2, servings: 3 },
+          { date: '2026-07-20', recipe: onion2, servings: 3 },
+        ],
+        priceIndex: index,
+      })
+      eq(
+        'DK-RANGE 予定を3人分にすると「作る食数ぶん」は1人分単価×3(25円×3=75円・のべ3食)',
+        { yen: withServings.planHouseholdYen, meals: withServings.planMealCount },
+        { yen: 75, meals: 3 },
+      )
+      eq(
+        'DK-RANGE 食数を変えても1人分の食費は変わらない(栄養と対の数字)',
+        withServings.plan.personalYen,
+        25,
+      )
+      eq(
+        'DK-RANGE 食数を変えても栄養の品数(1人分の数え方)は変わらない',
+        withServings.nutrition.dishCount,
+        wholeMonth.nutrition.dishCount,
+      )
+      eq(
+        'DK-RANGE 実績側(作った記録)は食数設定の影響を受けない',
+        {
+          yen: withServings.cookedHouseholdYen,
+          meals: withServings.cookedMealCount,
+        },
+        { yen: 310, meals: 4 },
+      )
+    }
     // 2026-07-30 便CH/C2: 「価格が分からない材料◯種類」の注記は合計と同じ料理から数える。
     // rangeIntakeRecipes が summarizeRangeIntake と同じ切り分け(過去=記録・今日以降=予定)を返す
     eq(
@@ -8979,6 +9082,35 @@ eq(
     [isServingsInRange(1), isServingsInRange(2), isServingsInRange(20)],
     [true, true, true],
   )
+}
+
+// ---------- 実効食数の優先順位(2026-08-03 便DK・設定「ふだん作る人数」) ----------
+// オーナー確定「3人家族なら予算や買い物メモは3人分で計算した数値が必要」。
+// 優先順位は ①枠ごとに決めた食数 ②設定「ふだん作る人数」 ③レシピの登録人数分 の順で、
+// 買い物メモの分量と概算食費が別々の人数分で計算されないよう、この1本だけを使う。
+// 再発防止の要点: ①②とも未設定なら③＝従来とまったく同じ値になること(後方互換)
+{
+  eq('DK-SERV 枠ごとに決めた食数が最優先(設定より強い)', effectiveMealServings(4, 3, 2), 4)
+  eq('DK-SERV 枠が未設定なら設定「ふだん作る人数」', effectiveMealServings(undefined, 3, 2), 3)
+  eq(
+    'DK-SERV 後方互換: 枠も設定も無ければレシピの登録人数分(従来と同値)',
+    effectiveMealServings(undefined, undefined, 2),
+    2,
+  )
+  eq(
+    'DK-SERV どれも無い/壊れた値なら1人分',
+    [
+      effectiveMealServings(undefined, undefined, undefined),
+      effectiveMealServings(0, 0, 0),
+      effectiveMealServings(undefined, undefined, -3),
+    ],
+    [1, 1, 1],
+  )
+  eq('DK-SERV 範囲外の値は1〜20に収める(設定経由でも上限を破らせない)', effectiveMealServings(undefined, 50, 2), 20)
+  // 「既定に戻す」の戻り先＝枠の食数を無視した値。ボタンの文言と実際の戻り先を同じ関数から出す
+  eq('DK-SERV 既定の食数: 設定があればその人数', defaultMealServings(3, 2), 3)
+  eq('DK-SERV 既定の食数: 設定が無ければレシピの登録人数分', defaultMealServings(undefined, 4), 4)
+  eq('DK-SERV 既定の食数は枠ごとの食数を見ない', defaultMealServings(undefined, 2), 2)
 }
 
 // ---------- 置き換え確認に写真を含める(2026-07-30 便CK/②-1・S1) ----------
