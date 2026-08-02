@@ -3438,6 +3438,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （2026-08-03 便DJ・オーナー指示）。3つが常に全部開いていて縦に長く、下の7日分カードまで
    * 遠かったため、それぞれ畳めるようにした。既定で開くのは「自動で献立を提案」だけ。
    */
+  // py-1.5 は指で押す当たり判定を広げるため（文字だけの高さでは料理中に押しにくい）
   const renderWeekGroupHeader = (key: keyof typeof weekGroupOpen, title: string) => {
     const open = weekGroupOpen[key]
     return (
@@ -3449,7 +3450,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           ? ja.mealPlan.weekGroupToggleCloseAria
           : ja.mealPlan.weekGroupToggleOpenAria
         ).replace('{group}', title)}
-        className="flex w-full items-center justify-between gap-2 text-left"
+        className="flex w-full items-center justify-between gap-2 py-1.5 text-left"
       >
         <span className="text-xs font-bold text-ink-muted">{title}</span>
         {open ? (
@@ -4537,7 +4538,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   ? ja.mealPlan.weekDayToggleOpenAria
                   : ja.mealPlan.weekDayToggleCloseAria
                 ).replace('{date}', date.replaceAll('-', '/'))}
-                className="flex w-full items-center justify-between gap-2 text-left"
+                className="flex w-full items-center justify-between gap-2 py-1 text-left"
               >
                 <span>
                   {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
