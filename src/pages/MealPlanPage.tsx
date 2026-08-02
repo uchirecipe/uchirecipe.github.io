@@ -130,7 +130,7 @@ import {
   type BalanceRecipeLike,
   type SlotBalance,
 } from '../logic/nutritionBalance'
-import { canUseMonthTrial } from '../logic/proTrial'
+import { canUseMonthTrial, isMonthTrialReady, MONTH_TRIAL_MIN_COOKED } from '../logic/proTrial'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -924,7 +924,19 @@ export default function MealPlanPage() {
    * 使ったかどうかだけを settings.monthTrialUsed に残す（端末内の緩いフラグ）。
    */
   const [monthTrialActive, setMonthTrialActive] = useState(false)
-  const monthTrialAvailable = !isPro && canUseMonthTrial(settings?.monthTrialUsed)
+  /**
+   * 「作った記録」の総件数。記録が少ないうちはお試しの入口を出さないための判定に使う
+   * （2026-08-02 オーナー指摘。記録0件で1回きりのお試しを使い切ると、ほぼ空のカレンダーを
+   * 見せて終わってしまう）。記録はレシピに埋め込みの配列なので全レシピぶんを合算する
+   */
+  const cookedLogCount = useMemo(
+    () => (recipes ?? []).reduce((sum, r) => sum + r.cookedLogs.length, 0),
+    [recipes],
+  )
+  const monthTrialReady = isMonthTrialReady(cookedLogCount)
+  const monthTrialUnused = !isPro && canUseMonthTrial(settings?.monthTrialUsed)
+  /** お試しの入口を出してよいか（まだ使っていない＋記録が十分たまっている） */
+  const monthTrialAvailable = monthTrialUnused && monthTrialReady
   /** 月タブの中身を出してよいか（解錠済み or お試し表示中）。月タブ配下のPro表示はこれで判定する */
   const monthUnlocked = isPro || monthTrialActive
   const startMonthTrial = async () => {
@@ -3833,7 +3845,10 @@ export default function MealPlanPage() {
                 <p className="mt-1 font-bold">{ja.mealPlan.monthLockedTitle}</p>
                 <p className="text-sm text-ink-muted">{ja.mealPlan.monthLockedDescription}</p>
                 {/* 恒常のお試し(2026-08-02 便CP-2・docs/62 決定③)。押すと、この画面のサンプルではなく
-                    本人の記録・献立が入った本物の月タブが1回だけフル表示になる（閉じたらここへ戻る） */}
+                    本人の記録・献立が入った本物の月タブが1回だけフル表示になる（閉じたらここへ戻る）。
+                    2026-08-02 オーナー指摘: 「作った記録」が少ないうちは入口を出さず、
+                    たまったら使えることだけを控えめに知らせる（1回きりのお試しを、ほぼ空の
+                    カレンダーで使い切ってしまう事故を防ぐ）。使用済みの知らせが最優先 */}
                 {monthTrialAvailable ? (
                   <button
                     type="button"
@@ -3843,6 +3858,13 @@ export default function MealPlanPage() {
                   >
                     {ja.mealPlan.monthTrialButton}
                   </button>
+                ) : monthTrialUnused ? (
+                  <p data-testid="month-trial-pending" className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.monthTrialPendingNote.replace(
+                      '{n}',
+                      String(MONTH_TRIAL_MIN_COOKED),
+                    )}
+                  </p>
                 ) : (
                   <p data-testid="month-trial-used" className="mt-1 text-xs text-ink-muted">
                     {ja.mealPlan.monthTrialUsedNote}

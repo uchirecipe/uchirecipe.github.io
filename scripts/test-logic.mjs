@@ -174,11 +174,13 @@ import {
 import {
   COOK_NAVI_TRIAL_LIMIT,
   MONTH_TRIAL_LIMIT,
+  MONTH_TRIAL_MIN_COOKED,
   canUseCookNaviTrial,
   canUseMonthTrial,
   consumeCookNaviTrial,
   cookNaviTrialRemaining,
   isCookNaviTrialExhausted,
+  isMonthTrialReady,
 } from '../src/logic/proTrial.ts'
 import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
@@ -9048,6 +9050,14 @@ eq(
   eq('CP2-TRIAL 月間は未設定ならまだ使える', canUseMonthTrial(undefined), true)
   eq('CP2-TRIAL 月間はfalseでもまだ使える', canUseMonthTrial(false), true)
   eq('CP2-TRIAL 月間は1回使ったら使えない', canUseMonthTrial(true), false)
+  // 2026-08-02 オーナー指摘: 「作った記録」が少ないうちは、1回きりのお試しを使っても
+  // ほぼ空のカレンダーしか見えない。5件たまるまでは入口を出さない(時期をずらすだけ)
+  eq('月間お試し: 記録の件数のしきい値は5件', MONTH_TRIAL_MIN_COOKED, 5)
+  eq('月間お試し: 記録0件では出さない', isMonthTrialReady(0), false)
+  eq('月間お試し: 記録4件でもまだ出さない', isMonthTrialReady(4), false)
+  eq('月間お試し: 記録5件で出す', isMonthTrialReady(5), true)
+  eq('月間お試し: 記録が多ければもちろん出す', isMonthTrialReady(40), true)
+  eq('月間お試し: 未定義は0件として扱う(落ちない)', isMonthTrialReady(undefined), false)
 }
 
 // ---------- 便CT/C15: 買い物メモの売り場順カスタム(2026-08-02 オーナー承認) ----------

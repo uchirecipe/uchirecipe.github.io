@@ -12410,9 +12410,11 @@ try {
   }
 
   // --- TRIAL-02: 月間献立の恒常お試し（docs/62 決定③）。
-  // 未解錠のロックプレビューから「自分の記録でためしに見る（1回だけ）」で本物の月タブが開き、
+  // 未解錠のロックプレビューから「1回だけ表示」で本物の月タブが開き、
   // 「この画面がいつでも見られるようになります」の一言が出ること。
-  // 閉じたら（別タブへ移って戻ったら）ロック表示に戻り、2回目は出せないこと。 ---
+  // 閉じたら（別タブへ移って戻ったら）ロック表示に戻り、2回目は出せないこと。
+  // 2026-08-02 オーナー指摘: 「作った記録」が5件たまるまでは入口を出さず、控えめな一言に
+  // 差し替える（記録0件で1回きりのお試しを使い切り、ほぼ空のカレンダーを見て終わる事故を防ぐ）。---
   currentCheck = 'TRIAL-02'
   {
     const t2Browser = await chromium.launch()
@@ -12426,11 +12428,53 @@ try {
       await t2Page.getByRole('button', { name: '月', exact: true }).click()
       await t2Page.waitForTimeout(500)
 
-      const t2Start = t2Page.locator('[data-testid="month-trial-start"]')
-      check('TRIAL-02 ロックプレビューにお試しの入口が出る', await t2Start.isVisible())
+      // まず「作った記録」が0件の状態。入口は出さず、たまったら使えることだけ知らせる
       check(
-        'TRIAL-02 入口の文言は「自分の記録でためしに見る（1回だけ）」',
-        ((await t2Start.textContent()) ?? '').includes('自分の記録でためしに見る'),
+        'TRIAL-02(2026-08-02) 記録が少ないうちはお試しの入口を出さない',
+        (await t2Page.locator('[data-testid="month-trial-start"]').count()) === 0,
+      )
+      check(
+        'TRIAL-02(2026-08-02) 代わりに「5件たまったらお試しできます」を控えめに出す',
+        (
+          (await t2Page.locator('[data-testid="month-trial-pending"]').textContent()) ?? ''
+        ).includes('5件たまったらお試しできます'),
+      )
+
+      // 「作った記録」を5件入れると入口が出る（記録はレシピに埋め込みの配列）
+      await t2Page.evaluate(
+        (n) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const targets = g.result.slice(0, n)
+                const wtx = idb.transaction('recipes', 'readwrite')
+                const store = wtx.objectStore('recipes')
+                for (const r of targets) {
+                  store.put({ ...r, cookedLogs: [{ date: '2026-07-20' }] })
+                }
+                wtx.oncomplete = () => resolve(undefined)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        5,
+      )
+      await t2Page.reload({ waitUntil: 'networkidle' })
+      await t2Page.waitForTimeout(1200)
+      await t2Page.getByRole('button', { name: '月', exact: true }).click()
+      await t2Page.waitForTimeout(600)
+
+      const t2Start = t2Page.locator('[data-testid="month-trial-start"]')
+      check('TRIAL-02 記録が5件たまるとロックプレビューにお試しの入口が出る', await t2Start.isVisible())
+      check(
+        'TRIAL-02 入口の文言は「1回だけ表示」(2026-08-02 簡潔化)',
+        ((await t2Start.textContent()) ?? '').trim() === '1回だけ表示',
+        `文言=${(await t2Start.textContent()) ?? ''}`,
       )
       await t2Start.click()
       await t2Page.waitForTimeout(700)
