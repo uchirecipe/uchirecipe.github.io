@@ -7988,12 +7988,15 @@ try {
   }
 
   // --- LAUNCH-01: 発売後に残ってはいけない語の掃引と、発売に必要な導線(2026-08-02 便DD)。
-  // 「準備期間」「販売準備中」は買い切り版の発売前だけの言い回しで、発売後に1箇所でも残ると
+  // 「準備期間」「販売準備中」はPro版の発売前だけの言い回しで、発売後に1箇所でも残ると
   // 「まだ買えない」と読ませてしまう。静的ページ全体を機械的に見張る。
+  // 「買い切り版」は商品名の旧表記(2026-08-02 オーナー指示で商品名は「Pro版」に統一し、
+  // 「買い切り」は購入形態の説明語としてだけ使う)。商品名として復活すると表記が再び混ざるので
+  // 禁止語に入れる。説明語の「買い切り」単体は禁止していない。
   // 語を増やすときは FORBIDDEN_AFTER_LAUNCH に足す ---
   currentCheck = 'LAUNCH-01'
   {
-    const FORBIDDEN_AFTER_LAUNCH = ['準備期間', '販売準備中']
+    const FORBIDDEN_AFTER_LAUNCH = ['準備期間', '販売準備中', '買い切り版']
     // 決済リンク(docs/08 §3で確定した本番のPayment Link)。src/logic/pro.ts の
     // PRO_PURCHASE_URL・紹介ページの購入ボタンと同じ値であることを固定する
     const STRIPE_PAY_URL = 'https://buy.stripe.com/9B69AV8idaXva3wa4KdQQ00'
@@ -8045,7 +8048,7 @@ try {
 
     // 使い方ページ: 購入の3歩(購入→コード表示→設定で入力)が書いてある
     const manualHtml = await (await page.request.get(`${BASE}/about/manual.html`)).text()
-    check('LAUNCH-01 使い方ページに買い方の節がある', manualHtml.includes('買い切り版の買い方'))
+    check('LAUNCH-01 使い方ページに買い方の節がある', manualHtml.includes('Pro版の買い方'))
     check(
       'LAUNCH-01 使い方ページの買い方が購入→コード表示→設定で入力の3歩になっている',
       manualHtml.includes('/about/#buy') &&
@@ -8097,8 +8100,8 @@ try {
         return res.ok ? await res.json() : []
       })
       check(
-        'LAUNCH-02 お知らせの最新が買い切り版の発売告知',
-        Array.isArray(news) && news[0]?.title === '買い切り版の販売を開始しました',
+        'LAUNCH-02 お知らせの最新がPro版の発売告知',
+        Array.isArray(news) && news[0]?.title === 'Pro版の販売を開始しました',
         `latest=${JSON.stringify(news[0]?.title)}`,
       )
       check(

@@ -43,13 +43,13 @@ export async function fetchCheckoutSession(
   return data
 }
 
-/** うちレシピ買い切り版の価格(税込・円)。docs/44に記載の現行価格。値上げ時はここも更新すること。 */
+/** うちレシピ Pro版の価格(税込・円)。docs/44に記載の現行価格。値上げ時はここも更新すること。 */
 export const EXPECTED_AMOUNT_JPY = 800
 const EXPECTED_CURRENCY = 'jpy'
 const EXPECTED_MODE = 'payment'
 
 /**
- * セッションが「うちレシピ買い切り版」の決済リンク由来らしいか軽く検証する(なりすまし・
+ * セッションが「うちレシピ Pro版」の決済リンク由来らしいか軽く検証する(なりすまし・
  * 別リンク流用の抑止。過剰にはしない=docs/44の方針どおり)。amount_total/currency/modeの
  * 3点が一致することだけを見る(Payment LinkのID自体はbuy.stripe.comの短縮URLから逆算できず
  * 未確定のため対象にしない)。

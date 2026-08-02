@@ -2,7 +2,7 @@ import { PRO_CODE_HASHES } from './proCodes'
 import { sha256Hex as sha256HexFallback } from './sha256'
 
 /**
- * 買い切り版の決済ページ（Stripe Payment Link・docs/08 §3で確定した本番リンク）。
+ * Pro版の決済ページ（Stripe Payment Link・docs/08 §3で確定した本番リンク）。
  * 決済が済むと購入完了画面に解錠コード(UR-)が表示される（workers/purchase-fulfill）。
  * 紹介ページ(public/about/index.html)の購入ボタンにも同じURLを書いているので、
  * リンクを差し替えるときは両方を直す。
