@@ -591,8 +591,8 @@ try {
   // 直前に「人数を増やす」を押しているので基準人数は表示中の人数に追従する
   check(
     'NUT-01(便BY COST-03) 栄養・原価の「1食あたり」に基準人数が併記される',
-    /\d+人分レシピの1食あたり/.test(nutExpandedText),
-    `本文に「◯人分レシピの1食あたり」が無い`,
+    /\d+人分で作るときの1食あたり/.test(nutExpandedText),
+    `本文に「◯人分で作るときの1食あたり」が無い`,
   )
   await page.getByRole('button', { name: '栄養価の概算を閉じる' }).click()
   await page.waitForTimeout(200)
@@ -3722,8 +3722,8 @@ try {
   )
   // 2026-07-28 便BY/COST-03: 何人分を1食に分けた額なのかを常時添える
   check(
-    'PRICE-01(便BY COST-03) 概算食費に基準人数が併記される(「2人分レシピの1食あたり」)',
-    priceDetailBefore.includes('2人分レシピの1食あたり 約25円'),
+    'PRICE-01(便BY COST-03) 概算食費に基準人数が併記される(「2人分で作るときの1食あたり」)',
+    priceDetailBefore.includes('2人分で作るときの1食あたり 約25円'),
   )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
