@@ -1157,7 +1157,9 @@ try {
       await w390Page.getByText('肉じゃが', { exact: true }).first().click()
       await w390Page.waitForTimeout(600)
       // 2026-08-03 オーナー指示: 原価トグルは押しても場所が動かないこと。ボタン自身と
-      // 人数ステッパーの位置を毎回測り、開閉で1pxも動かないことを見張る(再発防止)
+      // 人数ステッパーの位置を毎回測り、開閉で動かないことを見張る(再発防止)。
+      // 位置は見出し「材料」を原点にした相対座標で測る(クリックで画面がスクロールしても
+      // ずれない。ビューポート座標のままだと「スクロールした」だけで落ちてしまう)
       const costToggle = w390Page.getByRole('button', { name: /^(原価を見る|材料に戻す)$/ })
       const measure = async () => {
         const doc = await w390Page.evaluate(() => ({
@@ -1166,11 +1168,16 @@ try {
         }))
         const box = await w390Page.getByRole('button', { name: '人数を増やす' }).boundingBox()
         const toggleBox = await costToggle.boundingBox()
+        const headBox = await w390Page
+          .getByRole('heading', { name: '材料', level: 2 })
+          .boundingBox()
+        const rel = (b) =>
+          b && headBox ? `${Math.round(b.x - headBox.x)},${Math.round(b.y - headBox.y)}` : null
         return {
           ...doc,
           plusRight: box ? box.x + box.width : null,
-          plusPos: box ? `${Math.round(box.x)},${Math.round(box.y)}` : null,
-          togglePos: toggleBox ? `${Math.round(toggleBox.x)},${Math.round(toggleBox.y)}` : null,
+          plusPos: rel(box),
+          togglePos: rel(toggleBox),
         }
       }
       const before = await measure()
@@ -11629,6 +11636,185 @@ try {
     }
   }
 
+  // --- LISTPANEL-01: レシピ一覧の並び替え/絞り込みパネルの再構成(2026-08-03 オーナー指示・便DI)。
+  //   ③ 並び替えパネルの「並び順」(昇順/降順)がパネルの一番上に来ていること
+  //   ⑦ 並べ替えに「最近作った順」があること
+  //   ⑤ 絞り込みパネルの先頭が「表示するレシピ」(お気に入り等の頻用条件)で、
+  //      「よく使うタグ」「調理時間」「手間レベル」より上にあること
+  //   ④ 「よく使うタグ」が直書きの固定2択ではなく、実際の使用頻度で並んでいること
+  //   ⑥ 「自分で登録したレシピのみ」だけがONのときも「条件をクリア」が出て、押すと戻ること ---
+  currentCheck = 'LISTPANEL-01'
+  {
+    const lpBrowser = await chromium.launch()
+    const lpContext = await lpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const lpPage = await lpContext.newPage()
+    lpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@LISTPANEL-01] ${err.message}`)
+    })
+    try {
+      await lpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await lpPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 見出し・チップの縦位置を測って「上にあるか」を判定する共通関数
+      const topOf = (text) =>
+        lpPage.evaluate((t) => {
+          const el = Array.from(document.querySelectorAll('p, button')).find(
+            (n) => n.textContent?.trim() === t,
+          )
+          return el ? el.getBoundingClientRect().top + window.scrollY : null
+        }, text)
+
+      // ---------- ③ 並び順がパネルの最上部 / ⑦ 最近作った順 ----------
+      await lpPage.locator('button[aria-label="並び替え"]').click()
+      await lpPage.waitForTimeout(300)
+      const dirTop = await topOf('並び順')
+      const sortTop = await topOf('並べ替え')
+      check(
+        'LISTPANEL-01(③) 並び替えパネルの「並び順」が「並べ替え」より上にある',
+        dirTop != null && sortTop != null && dirTop < sortTop,
+        `並び順=${dirTop} 並べ替え=${sortTop}`,
+      )
+      const nutritionTop = await topOf('栄養価で探す')
+      check(
+        'LISTPANEL-01(③) 「並び順」は栄養価の区分よりも上(末尾に埋もれていない)',
+        dirTop != null && nutritionTop != null && dirTop < nutritionTop,
+        `並び順=${dirTop} 栄養価で探す=${nutritionTop}`,
+      )
+      const recentBtn = lpPage.getByRole('button', { name: '最近作った順', exact: true })
+      check('LISTPANEL-01(⑦) 並べ替えに「最近作った順」がある', (await recentBtn.count()) === 1)
+      await recentBtn.click()
+      await lpPage.waitForTimeout(300)
+      check(
+        'LISTPANEL-01(⑦) 「最近作った順」を選ぶと既定で降順(新しい方から)になる',
+        await lpPage.evaluate(() => {
+          const target = Array.from(document.querySelectorAll('button')).find(
+            (b) => b.textContent?.trim() === '降順',
+          )
+          return target ? target.className.includes('border-accent') : false
+        }),
+      )
+      // 記録が1件も無い状態では全レシピが同着なので、件数が減っていない(絞り込みではない)ことだけ見る
+      const recentCards = await lpPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+      check(
+        'LISTPANEL-01(⑦) 「最近作った順」は並べ替えなので件数が減らない',
+        recentCards > 0,
+        `件数=${recentCards}`,
+      )
+      // 既定(更新順)に戻してパネルを閉じる
+      await lpPage.getByRole('button', { name: '更新順', exact: true }).click()
+      await lpPage.waitForTimeout(200)
+      await lpPage.getByRole('button', { name: '決定' }).click()
+      await lpPage.waitForTimeout(300)
+
+      // ---------- ⑤ 絞り込みパネルの区分見出しと並び ----------
+      await lpPage.locator('button[aria-label="絞り込み"]').click()
+      await lpPage.waitForTimeout(300)
+      const shownTop = await topOf('表示するレシピ')
+      const tagTop = await topOf('よく使うタグ')
+      const timeTop = await topOf('調理時間')
+      const effortTop = await topOf('手間レベル')
+      const favTop = await topOf('お気に入り')
+      check(
+        'LISTPANEL-01(⑤) 「表示するレシピ」の区分見出しがある',
+        shownTop != null,
+      )
+      check(
+        'LISTPANEL-01(⑤) 「表示するレシピ」がよく使うタグ・調理時間・手間レベルより上にある',
+        shownTop != null &&
+          tagTop != null &&
+          timeTop != null &&
+          effortTop != null &&
+          shownTop < tagTop &&
+          tagTop < timeTop &&
+          timeTop < effortTop,
+        `表示するレシピ=${shownTop} よく使うタグ=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
+      )
+      check(
+        'LISTPANEL-01(⑤) 「お気に入り」が手間レベルより上に来た(旧: パネル末尾で見えなかった)',
+        favTop != null && effortTop != null && favTop < effortTop,
+        `お気に入り=${favTop} 手間レベル=${effortTop}`,
+      )
+
+      // ---------- ④ よく使うタグが使用頻度ベース ----------
+      // 「よく使うタグ」見出しの次のチップ行のラベルを読む
+      const tagChips = await lpPage.evaluate(() => {
+        const heading = Array.from(document.querySelectorAll('p')).find(
+          (n) => n.textContent?.trim() === 'よく使うタグ',
+        )
+        const row = heading?.nextElementSibling
+        if (!row) return []
+        return Array.from(row.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '')
+      })
+      check(
+        'LISTPANEL-01(④) よく使うタグが直書きの2択(作り置き・お弁当)ではなくなっている',
+        tagChips.length > 3,
+        `チップ=${JSON.stringify(tagChips)}`,
+      )
+      check(
+        'LISTPANEL-01(④) 使用件数の多い順に並ぶ(基本レシピ109品: 和食66→作り置き44→定番28)',
+        JSON.stringify(tagChips.slice(0, 4)) === JSON.stringify(['すべて', '和食', '作り置き', '定番']),
+        `チップ=${JSON.stringify(tagChips)}`,
+      )
+      check(
+        'LISTPANEL-01(④) 上位8件までに収まる(「すべて」を除く)',
+        tagChips.length <= 9,
+        `チップ=${JSON.stringify(tagChips)}`,
+      )
+      // 実際に絞り込みとして効く(チップの文字列と絞り込みの判定が食い違っていない)
+      const beforeTagCount = await lpPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+      await lpPage.getByRole('button', { name: '和食', exact: true }).click()
+      await lpPage.waitForTimeout(400)
+      const afterTagCount = await lpPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+      check(
+        'LISTPANEL-01(④) タグチップを押すとそのタグのレシピだけに絞られる',
+        afterTagCount > 0 && afterTagCount < beforeTagCount,
+        `全件=${beforeTagCount} 和食=${afterTagCount}`,
+      )
+      await lpPage.getByRole('button', { name: 'すべて', exact: true }).first().click()
+      await lpPage.waitForTimeout(300)
+
+      // ---------- ⑥ 「自分で登録したレシピのみ」だけでも条件をクリアが出る ----------
+      const clearInPanel = () => lpPage.getByRole('button', { name: '条件をクリア' })
+      check(
+        'LISTPANEL-01(⑥) 条件が何も無いうちは「条件をクリア」が出ない(前提)',
+        (await clearInPanel().count()) === 0,
+      )
+      await lpPage.getByRole('button', { name: '自分で登録したレシピのみ', exact: true }).click()
+      await lpPage.waitForTimeout(400)
+      // 自作レシピ0件だと一覧が0件になり、空状態側にも「条件をクリア」が出る。
+      // 見たいのは絞り込みパネルの中(=「表示するレシピ」の見出しより上)に出ているかどうか
+      check(
+        'LISTPANEL-01(⑥) 「自分で登録したレシピのみ」だけでも絞り込みパネルに「条件をクリア」が出る',
+        await lpPage.evaluate(() => {
+          const heading = Array.from(document.querySelectorAll('p')).find(
+            (n) => n.textContent?.trim() === '表示するレシピ',
+          )
+          const clears = Array.from(document.querySelectorAll('button')).filter(
+            (b) => b.textContent?.trim() === '条件をクリア',
+          )
+          if (!heading || clears.length === 0) return false
+          const headingTop = heading.getBoundingClientRect().top
+          return clears.some((b) => b.getBoundingClientRect().top < headingTop)
+        }),
+      )
+      await clearInPanel().first().click()
+      await lpPage.waitForTimeout(500)
+      check(
+        'LISTPANEL-01(⑥) 「条件をクリア」で「自分で登録したレシピのみ」もOFFに戻る',
+        (await lpPage
+          .getByRole('button', { name: '自分で登録したレシピのみ', exact: true })
+          .getAttribute('aria-pressed')) === 'false',
+      )
+      check(
+        'LISTPANEL-01(⑥) クリア後は基本レシピが一覧に戻る',
+        (await lpPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()) > 0,
+      )
+    } finally {
+      await lpBrowser.close()
+    }
+  }
+
   // --- SHOP-COUNT-01: 買い物メモ「レシピから追加」の食数+/-方式(2026-07-23 #3)と、
   // 「下書きを作る」押下時のトースト(#4/文言は2026-07-24 #14で「候補」→「下書き」に改称)。
   // 食数0では下書きを作るがdisabled、+で1食にすると押せて、押すと下書きセクションとトーストが出る ---
@@ -11927,7 +12113,9 @@ try {
       const sortPanelText = await w1Page.textContent('body')
       check(
         'WORD-CI1-01/C13 並び替えパネルに「よく使う順」が何を数えた順かの説明が出る',
-        sortPanelText.includes('「よく使う順」は、「作った！」の記録が多い順です'),
+        sortPanelText.includes(
+          '「よく使う順」は「作った！」の記録が多い順、「最近作った順」は記録がいちばん新しい順です',
+        ),
       )
       await w1Page.getByRole('button', { name: '決定' }).click()
       await w1Page.waitForTimeout(300)

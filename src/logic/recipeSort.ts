@@ -37,7 +37,24 @@ export type RecipeSortOption =
   | 'pantryMatch'
   | 'kana'
   | 'cooked'
+  /** 最近作った順（2026-08-03 オーナー指示）。「作った！」の記録の最新日付で並べる */
+  | 'recentCooked'
   | NutrientSortOption
+
+/**
+ * そのレシピの「作った！」の記録のうち、いちばん新しい日付（YYYY-MM-DD）。
+ * 記録が1件も無ければ null（並べ替えでは昇順/降順に関わらず常に末尾へ回す）。
+ * CookedLog.date は日付までしか持たないので、同じ日の複数記録は同着になる。
+ * 記録は追加順のまま保存されており日付順とは限らないため、必ず最大値を取る
+ */
+export function lastCookedDate(recipe: Pick<Recipe, 'cookedLogs'>): string | null {
+  let latest: string | null = null
+  for (const log of recipe.cookedLogs) {
+    if (!log.date) continue
+    if (latest === null || log.date > latest) latest = log.date
+  }
+  return latest
+}
 
 /** 並べ替えオプションが栄養並び替え（カロリー順のみ無料・残りはPro）かどうか */
 export function isNutrientSortOption(option: RecipeSortOption): option is NutrientSortOption {
@@ -69,6 +86,8 @@ export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   pantryMatch: 'desc',
   kana: 'asc',
   cooked: 'desc',
+  // 「最近作った順」は新しい方から（2026-08-03）
+  recentCooked: 'desc',
   kcal: 'asc',
   protein: 'desc',
   salt: 'asc',
@@ -138,9 +157,10 @@ function pantryMatchCount(
   return matchers.filter((matches) => recipe.ingredients.some((i) => matches(i.name))).length
 }
 
-/** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか） */
+/** 各並べ替えの「昇順」方向の比較値（updatedAt・かな順・作った回数・在庫一致数のいずれか。
+ * 'recentCooked' は「記録なしを常に末尾へ」の扱いが要るので sortResults 側で個別に処理する） */
 function compareAscending(
-  option: Exclude<RecipeSortOption, NutrientSortOption>,
+  option: Exclude<RecipeSortOption, NutrientSortOption | 'recentCooked'>,
   a: SearchResult,
   b: SearchResult,
   pantryMatchers: ((ingredientName: string) => boolean)[],
@@ -202,6 +222,21 @@ export function sortResults(
       // 算出不能（null）は昇順/降順に関わらず常に末尾へ
       if ((av === null) !== (bv === null)) return av === null ? 1 : -1
       if (av !== null && bv !== null && av !== bv) return sign * (av - bv)
+      return b.recipe.updatedAt - a.recipe.updatedAt
+    })
+    return sorted
+  }
+
+  // 最近作った順(2026-08-03 オーナー指示)。「作った！」の記録の最新日付で並べ、
+  // 記録が1件も無いレシピは昇順/降順に関わらず常に末尾へ回す(栄養並び替えのnullと同じ扱い)
+  if (option === 'recentCooked') {
+    sorted.sort((a, b) => {
+      const used = byUsedCount(a, b)
+      if (used !== 0) return used
+      const av = lastCookedDate(a.recipe)
+      const bv = lastCookedDate(b.recipe)
+      if ((av === null) !== (bv === null)) return av === null ? 1 : -1
+      if (av !== null && bv !== null && av !== bv) return sign * (av < bv ? -1 : 1)
       return b.recipe.updatedAt - a.recipe.updatedAt
     })
     return sorted

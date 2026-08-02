@@ -33,6 +33,7 @@ import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
+  topTagsByUsage,
   type EffortFilter,
   type TagFilter,
   type TimeFilter,
@@ -83,20 +84,19 @@ const effortOptions: { value: EffortFilter; label: string }[] = [
 ]
 
 /**
- * よく使う用途タグの絞り込み。タグは自由入力だが、ここでは既存レシピで使用実績のある少数だけをチップ化する。
- * 「時短」タグは調理時間の絞り込みと役割が重なり内容も薄くなるため廃止した（2026-07-05）
+ * 「よく使うタグ」チップに出す最大件数（「すべて」は別枠）。
+ * スマホ縦画面（390px）で2行に収まる範囲。同梱の基本レシピ109品では
+ * 和食・作り置き・定番・洋食・中華・高たんぱく・お弁当・冷凍ストックまでが入る（2026-08-03）
  */
-const tagOptions: { value: TagFilter; label: string }[] = [
-  { value: 'all', label: ja.search.tagAll },
-  { value: '作り置き', label: '作り置き' },
-  { value: 'お弁当', label: 'お弁当' },
-]
+const TAG_CHIP_LIMIT = 8
 
 const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'updated', label: ja.search.sortUpdated },
   { value: 'pantryMatch', label: ja.search.sortPantryMatch },
   { value: 'kana', label: ja.search.sortKana },
   { value: 'cooked', label: ja.search.sortCooked },
+  // 最近作った順(2026-08-03 オーナー指示)。回数で数える「よく使う順」の隣に置く
+  { value: 'recentCooked', label: ja.search.sortRecentCooked },
   // 「基本レシピ順」は2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で無意味化)
 ]
 
@@ -327,18 +327,35 @@ export default function RecipesPage() {
     return buildNutrientSortValues(recipes)
   }, [recipes, nutrientSortActive])
 
-  // 絞り込み無しでも常に見える総件数(2026-07-13 UI改善)。「基本レシピを表示しない」設定は
-  // 一覧の表示そのものに反映される設定なのでここにも反映し、検索語等の絞り込みは反映しない
-  const totalCount = useMemo(() => {
+  // 「基本レシピを表示しない」設定を反映した、この一覧が扱う全レシピ。
+  // 総件数・検索対象・よく使うタグの集計をすべてこの同じ集合から作る(食い違いを作らない)
+  const visibleRecipes = useMemo(() => {
     if (!recipes) return undefined
-    return hideStarters ? recipes.filter((r) => !r.isStarter).length : recipes.length
+    return hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
   }, [recipes, hideStarters])
 
+  // 絞り込み無しでも常に見える総件数(2026-07-13 UI改善)。「基本レシピを表示しない」設定は
+  // 一覧の表示そのものに反映される設定なのでここにも反映し、検索語等の絞り込みは反映しない
+  const totalCount = visibleRecipes?.length
+
+  /**
+   * 「よく使うタグ」チップ(2026-08-03 オーナー指示)。
+   * 従来はコードに直書きした「作り置き／お弁当」の固定2択で、レシピを増やしても中身が
+   * 変わらなかった。いま一覧に出るレシピのタグを数え、使用件数の多い順に出す。
+   * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
+   */
+  const tagOptions = useMemo(() => {
+    const tags = topTagsByUsage(visibleRecipes ?? [], TAG_CHIP_LIMIT)
+    if (tag !== 'all' && !tags.includes(tag)) tags.push(tag)
+    return [
+      { value: 'all' as TagFilter, label: ja.search.tagAll },
+      ...tags.map((value) => ({ value: value as TagFilter, label: value })),
+    ]
+  }, [visibleRecipes, tag])
+
   const results = useMemo(() => {
-    if (!recipes) return undefined
-    // 「基本レシピを表示しない」設定を反映してから検索する
-    const visible = hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
-    const found = searchRecipes(visible, {
+    if (!visibleRecipes) return undefined
+    const found = searchRecipes(visibleRecipes, {
       query,
       ingredients: ingredients.join(' '),
       time,
@@ -353,8 +370,7 @@ export default function RecipesPage() {
     })
     return sortResults(found, sort, pantryNames, sortDirection, nutrientSortValues)
   }, [
-    recipes,
-    hideStarters,
+    visibleRecipes,
     query,
     ingredients,
     time,
@@ -384,7 +400,11 @@ export default function RecipesPage() {
     quickOnly ||
     pantryOnly
   const sortActive = sort !== 'updated' || sortDirection !== defaultSortDirection[sort]
-  const anyConditionActive = filterActive || sortActive
+  // 「自分で登録したレシピのみ」(hideStarters)は絞り込みパネルのチップだが、実体は設定に
+  // 保存する項目なのでfilterActive(件数表記の出し分けに使う)には入れない。
+  // 2026-08-03 オーナー指示: これだけがONのときも「条件をクリア」が出るようにする
+  // (従来はクリアの導線が出ず、どこで戻すのか分からなかった)
+  const anyConditionActive = filterActive || sortActive || hideStarters
 
   // 一覧の状態（検索語・絞り込み・並べ替え・スクロール位置）の保存・復元。
   // filtersKeyは「保存時と復元時で条件一式が一致しているか」の判定にのみ使う
@@ -640,6 +660,10 @@ export default function RecipesPage() {
     setPantryOnly(false)
     setSort('updated')
     setSortDirection(defaultSortDirection.updated)
+    // 「自分で登録したレシピのみ」も一緒に戻す(2026-08-03 オーナー指示。これがONのときも
+    // クリアが出る以上、押して残っていては条件をクリアしたことにならない)。
+    // 設定に保存する項目なので、ONのときだけ書き込む
+    if (hideStarters) void updateSettings({ hideStarters: false })
   }
 
   const subLabelFor = (usedCount: number, wantedCount: number) => {
@@ -755,7 +779,34 @@ export default function RecipesPage() {
       {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
       {sortPanelOpen && (
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-          <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
+          {/* 昇順/降順(2026-08-02 便DFで件数表記の横からこのパネル内へ移動 → 2026-08-03
+              オーナー指示でパネルの一番上へ。従来はパネル末尾(栄養価の区分より下)にあり、
+              スクロールしないと見えなかった) */}
+          <p className="text-sm font-bold text-ink-muted">{ja.search.sortDirectionTitle}</p>
+          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            <button
+              type="button"
+              onClick={() => setSortDirection('asc')}
+              aria-pressed={sortDirection === 'asc'}
+              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'asc')}`}
+            >
+              <ArrowUpNarrowWide size={16} aria-hidden />
+              {ja.search.sortAsc}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortDirection('desc')}
+              aria-pressed={sortDirection === 'desc'}
+              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'desc')}`}
+            >
+              <ArrowDownWideNarrow size={16} aria-hidden />
+              {ja.search.sortDesc}
+            </button>
+          </div>
+
+          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+            {ja.search.sortTitle}
+          </p>
           <CheckList
             options={baseSortOptions}
             value={sort}
@@ -801,33 +852,6 @@ export default function RecipesPage() {
             </Link>
           )}
 
-          {/* 昇順/降順(2026-08-02 オーナー指示・便DF: 件数表記の横に常設していた独立ボタンを
-              やめ、並べ替えパネルの中に入れた)。上で選んだ並べ替えの向きを変えるものなので、
-              選択肢のすぐ下・決定ボタンの上に置く */}
-          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-            {ja.search.sortDirectionTitle}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setSortDirection('asc')}
-              aria-pressed={sortDirection === 'asc'}
-              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'asc')}`}
-            >
-              <ArrowUpNarrowWide size={16} aria-hidden />
-              {ja.search.sortAsc}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSortDirection('desc')}
-              aria-pressed={sortDirection === 'desc'}
-              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'desc')}`}
-            >
-              <ArrowDownWideNarrow size={16} aria-hidden />
-              {ja.search.sortDesc}
-            </button>
-          </div>
-
           {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
           <button
             type="button"
@@ -852,24 +876,25 @@ export default function RecipesPage() {
             </button>
           )}
 
-          {/* よく使うタグ(2026-07-24 便BN・タスク3: 絞り込みパネルの上部へ移動。よく使う「作り置き・
-              お弁当」の切替を最初に見せる) */}
+          {/* 表示するレシピ(2026-08-03 オーナー指示で新設・最上段へ移動)。
+              「お気に入り」など毎回使う条件がパネルの一番下にあって見えていなかったため、
+              『どのレシピを出すか』のON/OFFをここに集めて先頭に置く。
+              「在庫の食材で絞る」も同じ性質(出すレシピを絞るトグル)なので、
+              見出しと中身が食い違っていた「よく使うタグ」の行からここへ移した */}
           <p
             className={`text-sm font-bold text-ink-muted ${anyConditionActive ? 'mt-[var(--space-md)]' : ''}`}
           >
-            {ja.search.tagTitle}
+            {ja.search.shownRecipesTitle}
           </p>
           <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-            {tagOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => setTag(option.value)}
-                className={chipCls(tag === option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => setFavoriteOnly((v) => !v)}
+              aria-pressed={favoriteOnly}
+              className={chipCls(favoriteOnly)}
+            >
+              {ja.search.favoriteOnly}
+            </button>
             {/* 在庫の食材で絞る(2026-07-24 便BN・司令部追加)。在庫(ある/少ない)が1件以上あるときだけ出す */}
             {pantryNames.length > 0 && (
               <button
@@ -882,7 +907,47 @@ export default function RecipesPage() {
                 {ja.search.pantryFilter}
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setExcludeNg((v) => !v)}
+              aria-pressed={excludeNg}
+              className={chipCls(excludeNg)}
+            >
+              {ja.search.excludeNg}
+            </button>
+            <button
+              type="button"
+              onClick={() => updateSettings({ hideStarters: !hideStarters })}
+              aria-pressed={hideStarters}
+              className={chipCls(hideStarters)}
+            >
+              {ja.search.myRecipesOnly}
+            </button>
           </div>
+
+          {/* よく使うタグ(2026-07-24 便BN・タスク3: 絞り込みパネルの上部へ移動)。
+              2026-08-03 オーナー指示で、直書きの固定2択から使用頻度の集計(topTagsByUsage)に変更。
+              タグが1つも付いていないときは「すべて」だけの空の欄になるので、区分ごと出さない */}
+          {tagOptions.length > 1 && (
+            <>
+              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                {ja.search.tagTitle}
+              </p>
+              <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                {tagOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setTag(option.value)}
+                    aria-pressed={tag === option.value}
+                    className={chipCls(tag === option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
           {/* 使いたい食材 */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
@@ -936,31 +1001,8 @@ export default function RecipesPage() {
             {ja.search.effortTitle}
           </p>
           <CheckList options={effortOptions} value={effort} onSelect={setEffort} />
-
-          {/* お気に入り / NG除外 */}
-          <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setFavoriteOnly((v) => !v)}
-              className={chipCls(favoriteOnly)}
-            >
-              {ja.search.favoriteOnly}
-            </button>
-            <button
-              type="button"
-              onClick={() => setExcludeNg((v) => !v)}
-              className={chipCls(excludeNg)}
-            >
-              {ja.search.excludeNg}
-            </button>
-            <button
-              type="button"
-              onClick={() => updateSettings({ hideStarters: !hideStarters })}
-              className={chipCls(hideStarters)}
-            >
-              {ja.search.myRecipesOnly}
-            </button>
-          </div>
+          {/* お気に入り・NG食材・自分で登録したレシピのみは、2026-08-03 オーナー指示で
+              このパネルの先頭「表示するレシピ」へ移動した */}
 
           {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
           <button
