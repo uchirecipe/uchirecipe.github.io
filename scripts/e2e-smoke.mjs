@@ -487,10 +487,16 @@ try {
   // --- NUT-01: 栄養価の概算(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
   // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。
   // 2026-08-01 線引きB'(オーナー確定): 無料で出るのは**エネルギーと野菜量**の2つで、
-  // 食塩相当量は残り6項目と同じPro側へ移した。閉じた1行はエネルギーだけ) ---
+  // 食塩相当量は残り6項目と同じPro側へ移した。
+  // 2026-08-02 オーナー指示: 閉じた1行も無料の2値(エネルギー・野菜量)にそろえた) ---
   currentCheck = 'NUT-01'
   check('NUT-01 栄養価の概算 見出しが閉じた状態から見える', detailText.includes('栄養価の概算'))
   check('NUT-01 エネルギー(kcal)の概算が閉じた1行から見える', /\d+kcal/.test(detailText))
+  check(
+    'NUT-01(2026-08-02) 閉じた1行は「◯kcal・野菜約◯g」の2値',
+    /[\d,]+kcal・野菜約[\d,]+g/.test(detailText),
+    `閉じた1行=${detailText.match(/.{0,24}kcal.{0,16}/)?.[0]}`,
+  )
   check(
     "NUT-01(B') 無料の閉じた1行に塩分が出ない",
     !detailText.includes('塩分'),
@@ -5728,9 +5734,9 @@ try {
         rcFutureText.includes('概算'),
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品を、1食ずつ足した概算です」',
-        rcFutureText.includes('登録した献立2品を、1食ずつ足した概算です'),
-        `注記=${rcFutureText.match(/.{0,10}1食ずつ足した概算です/)?.[0]}`,
+        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品の栄養価を、1食分ずつ足して算出した数値です」',
+        rcFutureText.includes('登録した献立2品の栄養価を、1食分ずつ足して算出した数値です'),
+        `注記=${rcFutureText.match(/.{0,10}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
 
       // 終了日<開始日の順にタップしても自動で入れ替わり同じ結果になる
@@ -5788,8 +5794,8 @@ try {
         `全体=${rcPastText.match(/作った記録の食費（作った人数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品を、1食ずつ足した概算です」',
-        rcPastText.includes('作った記録1品を、1食ずつ足した概算です'),
+        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品の栄養価を、1食分ずつ足して算出した数値です」',
+        rcPastText.includes('作った記録1品の栄養価を、1食分ずつ足して算出した数値です'),
       )
       // 記録も予定も無い期間は空案内
       await rcDay(`${rcPrevPrefix}-20`).click()
@@ -5826,8 +5832,8 @@ try {
           `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
         )
         check(
-          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品を、1食ずつ足した概算です」',
-          rcMixedText.includes('作った記録1品と登録した献立1品を、1食ずつ足した概算です'),
+          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です」',
+          rcMixedText.includes('作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
         )
         const rcMixedPersonal = Number(
           (rcMixedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
@@ -6555,7 +6561,7 @@ try {
       )
       check(
         'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
-        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算した概算です'),
+        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算した概算の数値です'),
       )
       await mePage.getByRole('button', { name: '内訳を見る' }).click()
       await mePage.waitForTimeout(300)
