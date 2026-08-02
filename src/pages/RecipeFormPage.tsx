@@ -278,19 +278,15 @@ const iconBtnCls =
   'flex h-10 w-10 items-center justify-center rounded-sm border border-edge bg-surface text-ink-muted'
 
 /**
- * URL取り込み・貼り付けが成功したときだけ、結果メッセージの下に出す価格の案内
- * （2026-08-02 オーナー指示・便DF）。取り込んだレシピにはしょうゆ・みりんのような調味料まで
- * 材料として並ぶが、「食材と価格」に価格の無い食材は概算食費に入らない。
- * 取り込んだ直後にその場から登録先へ行けるようにする（自動での価格設定はしない）。
- * 合わせ調味料の色分け（seasoningGroup）は概算の数値に影響しないため、この案内には含めない。
+ * URL取り込み・貼り付けが成功したときだけ、結果メッセージの下に出す合わせ調味料の案内
+ * （2026-08-02 オーナー指示・便DF→司令部で文言差し替え）。「A」「B」等の記号がある
+ * ページからは色分けを自動継承するが、無印のページでは手動で付けてもらう必要がある。
+ * 色分けの設定先は同じ画面の材料行（丸ボタン）なのでリンクは置かない。
  */
-function ImportPriceGuide() {
+function ImportSeasoningGuide() {
   return (
     <div className="mt-[var(--space-sm)]">
-      <p className="text-sm text-ink-muted">{ja.form.importPriceGuide}</p>
-      <Link to="/prices" className="mt-0.5 inline-block text-sm font-bold text-accent-ink underline">
-        {ja.form.ingredientPriceGuideLink}
-      </Link>
+      <p className="text-sm text-ink-muted">{ja.form.importSeasoningGuide}</p>
     </div>
   )
 }
@@ -1615,7 +1611,7 @@ function RecipeFormInner() {
               {/* 取り込めたときだけ出す価格の案内(2026-08-02 オーナー指示・便DF)。
                   取り込んだレシピには調味料まで材料に並ぶが、「食材と価格」に価格が無い食材は
                   概算食費に入らない。結果メッセージ(info=成功時のみ)の下に1行＋登録先への近道を置く */}
-              {urlImportMessage && urlImportMessageTone === 'info' && <ImportPriceGuide />}
+              {urlImportMessage && urlImportMessageTone === 'info' && <ImportSeasoningGuide />}
               <div className="mt-[var(--space-sm)] flex gap-2">
                 <button
                   type="button"
@@ -1676,7 +1672,7 @@ function RecipeFormInner() {
             </p>
           )}
           {/* 貼り付け経路にも同じ案内を出す(2026-08-02 オーナー指示・便DF。URL取り込みと同じ扱い) */}
-          {pasteMessage && pasteMessageTone === 'info' && <ImportPriceGuide />}
+          {pasteMessage && pasteMessageTone === 'info' && <ImportSeasoningGuide />}
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"

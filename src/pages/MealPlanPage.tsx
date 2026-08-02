@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronLeft,
@@ -882,6 +883,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /** サンプルデモとして開いているか（データの差し替えと、書き込み操作を出さない判定に使う） */
   const isDemo = demo != null
   const navigate = useNavigate()
+  const location = useLocation()
   const dbRecipes = useLiveQuery(listRecipes, [])
   const recipes = isDemo ? demo.recipes : dbRecipes
   const [searchParams, setSearchParams] = useSearchParams()
@@ -3291,7 +3293,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         )
       ) : (
         <Link
-          to="/settings?section=pro"
+          to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
           data-testid="purpose-locked-row"
           className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-sm border border-edge bg-surface px-3 py-2 shadow-sm"
         >
@@ -4128,7 +4130,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </Link>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
                 <Link
-                  to="/settings?section=pro"
+                  to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
                   className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
                 >
                   {ja.mealPlan.monthProGateLink}
