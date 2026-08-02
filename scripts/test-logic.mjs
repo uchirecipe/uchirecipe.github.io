@@ -244,6 +244,7 @@ import {
   needsReplaceConfirm,
 } from '../src/logic/replaceConfirm.ts'
 import { matchVoiceCommand } from '../src/logic/voiceCommand.ts'
+import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -9605,6 +9606,68 @@ eq(
     ])
     eq(`CX foods.html ${label}の成分表の収載名`, cells[9], food.mextName)
   }
+}
+
+// ---------- 設定画面からの帰り道(2026-08-02 オーナー指示・便DF) ----------
+// 各ページのPro版の説明などから設定の該当欄へ飛んだあと、元のページへ戻れるようにする受け渡し。
+// 外部URLへ飛ばす踏み台にならないこと・画面名が入った文言になることを固定する
+{
+  eq(
+    'DF-BACK レシピ一覧からのPro案内リンクに戻り先が載る',
+    settingsLinkWithBack('/settings?section=pro', '/recipes'),
+    '/settings?section=pro&back=%2Frecipes',
+  )
+  eq(
+    'DF-BACK クエリの無い設定リンクでは?で付ける',
+    settingsLinkWithBack('/settings', '/shopping'),
+    '/settings?back=%2Fshopping',
+  )
+  eq(
+    'DF-BACK 検索条件つきの現在地もそのまま持ち回れる',
+    settingsLinkWithBack('/settings?section=pro', '/recipes?q=鶏'),
+    '/settings?section=pro&back=%2Frecipes%3Fq%3D%E9%B6%8F',
+  )
+  eq(
+    'DF-BACK アプリ外のURLは戻り先に載せない',
+    settingsLinkWithBack('/settings?section=pro', 'https://example.com'),
+    '/settings?section=pro',
+  )
+  eq('DF-BACK 空の現在地は載せない', settingsLinkWithBack('/settings', ''), '/settings')
+
+  eq('DF-BACK ?back=無しでは戻るボタンを出さない(null)', resolveBackTarget(null), null)
+  eq('DF-BACK 外部URLは受け付けない', resolveBackTarget('https://example.com'), null)
+  eq('DF-BACK //で始まる値(プロトコル相対)も受け付けない', resolveBackTarget('//example.com'), null)
+  eq('DF-BACK 知らないパスは受け付けない', resolveBackTarget('/unknown-page'), null)
+  eq('DF-BACK レシピ一覧', resolveBackTarget('/recipes'), {
+    to: '/recipes',
+    label: 'レシピ一覧に戻る',
+  })
+  eq('DF-BACK レシピ詳細は一覧と区別する', resolveBackTarget('/recipes/12'), {
+    to: '/recipes/12',
+    label: 'レシピに戻る',
+  })
+  eq('DF-BACK 献立', resolveBackTarget('/meal-plan'), { to: '/meal-plan', label: '献立に戻る' })
+  eq('DF-BACK 並行調理ナビ', resolveBackTarget('/cook-navi'), {
+    to: '/cook-navi',
+    label: '並行調理ナビに戻る',
+  })
+  eq('DF-BACK 食材(買い物メモ)', resolveBackTarget('/shopping'), {
+    to: '/shopping',
+    label: '食材に戻る',
+  })
+  eq('DF-BACK ホーム', resolveBackTarget('/'), { to: '/', label: 'ホームに戻る' })
+  eq('DF-BACK クエリ付きの戻り先はクエリごと戻す', resolveBackTarget('/recipes?q=鶏'), {
+    to: '/recipes?q=鶏',
+    label: 'レシピ一覧に戻る',
+  })
+  // 実際の受け渡し(付けて→読む)が往復で壊れないこと
+  const roundTrip = new URLSearchParams(
+    settingsLinkWithBack('/settings?section=pro', '/recipes?q=鶏 もも').split('?')[1],
+  ).get('back')
+  eq('DF-BACK 付けた戻り先をそのまま読み戻せる', resolveBackTarget(roundTrip), {
+    to: '/recipes?q=鶏 もも',
+    label: 'レシピ一覧に戻る',
+  })
 }
 
 // ---------- 結果 ----------

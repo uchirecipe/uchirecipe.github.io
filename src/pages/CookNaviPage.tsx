@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Lock,
@@ -27,6 +27,7 @@ import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
 import { buildCookTimeline, hasLaterHandsOnStep, type TimelineItem } from '../logic/cookNavi'
 import type { Recipe } from '../db/types'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
 /** レシピの色分け（最大3品）。デザイントークンのチップ色を流用する */
@@ -185,6 +186,8 @@ export default function CookNaviPage() {
   // ナビから単品詳細へ飛ばしていた）。RecipeDetailPage の ?step= と同じ流儀で、着地後に
   // パラメータを消して同じ手順に何度でも飛べるようにする。
   const [searchParams, setSearchParams] = useSearchParams()
+  // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
+  const location = useLocation()
   const [highlightKey, setHighlightKey] = useState<string | null>(null)
   useEffect(() => {
     const focus = searchParams.get('focusStep')
@@ -284,7 +287,7 @@ export default function CookNaviPage() {
               </p>
             )}
             <Link
-              to="/settings?section=pro"
+              to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
               className="mt-[var(--space-sm)] block text-sm font-bold text-accent-ink underline"
             >
               {ja.cookNavi.gateLink}
