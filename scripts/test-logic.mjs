@@ -182,6 +182,12 @@ import {
   isCookNaviTrialExhausted,
   isMonthTrialReady,
 } from '../src/logic/proTrial.ts'
+import {
+  buildMonthDemoData,
+  demoRecipeTitles,
+  DEMO_PHOTO_KEYS,
+  DEMO_TODAY,
+} from '../src/logic/monthDemo.ts'
 import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
@@ -9058,6 +9064,41 @@ eq(
   eq('月間お試し: 記録5件で出す', isMonthTrialReady(5), true)
   eq('月間お試し: 記録が多ければもちろん出す', isMonthTrialReady(40), true)
   eq('月間お試し: 未定義は0件として扱う(落ちない)', isMonthTrialReady(undefined), false)
+}
+
+// ---------- 月間画面のサンプルデモの見本データ(2026-08-02 便DC) ----------
+{
+  // 見本は同梱の基本レシピの名前で組む。レシピ名を変えたらここで気づけるようにする
+  const known = new Set(starterDefs.map((d) => d.title))
+  const unknown = demoRecipeTitles().filter((t) => !known.has(t))
+  eq('DC-DEMO 見本の料理名はすべて基本レシピにある', unknown, [])
+
+  const demo = buildMonthDemoData()
+  eq('DC-DEMO 見本の「今日」は固定', demo.today, DEMO_TODAY)
+  eq('DC-DEMO デモの中ではPro機能が開く', !!demo.settings.proCode, true)
+  // 過ぎた日=作った記録・今日から先=登録した献立、の切り分けが見本データ側で崩れていないこと
+  // (崩れると月間サマリーの合計に入らない記録・献立が出て、見本が実物と違う説明になる)
+  const logDates = demo.recipes.flatMap((r) => r.cookedLogs.map((l) => l.date))
+  eq('DC-DEMO 作った記録はすべて過ぎた日', logDates.every((d) => d < DEMO_TODAY), true)
+  eq(
+    'DC-DEMO 登録した献立はすべて今日から先',
+    demo.entries.every((e) => e.date >= DEMO_TODAY),
+    true,
+  )
+  eq('DC-DEMO 見本は同じ月に収まっている', [...logDates, ...demo.entries.map((e) => e.date)].every((d) => d.slice(0, 7) === DEMO_TODAY.slice(0, 7)), true)
+  // 献立エントリのidは重複しない(週+月を束ねるときにidをキーにしているため)
+  eq('DC-DEMO 献立のidは重複しない', new Set(demo.entries.map((e) => e.id)).size, demo.entries.length)
+  // 写真を渡さなくても組み立てられる(オフライン初回など、写真が読めない環境で落ちない)
+  eq('DC-DEMO 写真なしでも組み立てられる', logDates.length > 0, true)
+  eq('DC-DEMO 写真なしなら記録に写真は付かない', demo.recipes.every((r) => r.cookedLogs.every((l) => l.photo === undefined)), true)
+  // 写真を渡した分だけ付く(キーはpublic/demo/*.webpのファイル名と対応する)
+  const photos = new Map(DEMO_PHOTO_KEYS.map((k) => [k, new Blob([k])]))
+  const withPhotos = buildMonthDemoData(photos)
+  const photoCount = withPhotos.recipes.reduce(
+    (sum, r) => sum + r.cookedLogs.filter((l) => l.photo).length,
+    0,
+  )
+  eq('DC-DEMO 写真は用意した枚数ぶん使う', photoCount, DEMO_PHOTO_KEYS.length)
 }
 
 // ---------- 便CT/C15: 買い物メモの売り場順カスタム(2026-08-02 オーナー承認) ----------

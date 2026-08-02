@@ -284,6 +284,10 @@
 //         AISLE-01(買い物メモの売り場順カスタム・2026-08-02 便CT/C15: 既定は従来の並び・設定の
 //         上下移動で入れ替えると買い物メモの整列に即反映されリロードしても維持される・
 //         「既定の順番に戻す」で戻る・買い物メモの控えめな入口から設定へ辿れる) /
+//         DEMO-01(月間画面のサンプルデモ・2026-08-02 便DC: 記録0件でロック案内に「サンプルで見る」が
+//         常時出る(1回だけのお試しとは独立)・押すと見本の1か月分が入った本物の月タブが開き、
+//         写真つきのセル・写真/栄養/食費の切り替え・日の窓が触れる・献立を書き換える操作は出ない・
+//         触ってもIndexedDBが1バイトも変わらない・1回だけのお試しを消費しない・閉じると入口の画面へ戻る) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -12505,6 +12509,172 @@ try {
       )
     } finally {
       await t2Browser.close()
+    }
+  }
+
+  // --- DEMO-01: 月間画面のサンプルデモ（2026-08-02 便DC）。
+  // 未解錠・記録0件（＝1回だけのお試しの入口がまだ出ない状態）でも「サンプルで見る」は常時出て、
+  // 押すと見本の1か月分が入った本物の月タブが開くこと。写真つきのセル・カレンダーに出す情報の
+  // 切り替え・日の窓が実際に触れること。そしてデモを触っても端末のIndexedDBが1バイトも変わらず、
+  // 1回だけのお試し（settings.monthTrialUsed）も消費しないこと。---
+  currentCheck = 'DEMO-01'
+  {
+    const dmBrowser = await chromium.launch()
+    const dmContext = await dmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dmPage = await dmContext.newPage()
+    dmPage.on('pageerror', (err) => errors.push(`[pageerror@DEMO-01] ${err.message}`))
+    /** IndexedDBの全ストアを丸ごと文字列化する（Blobは中身ではなくバイト数で比べる） */
+    const dmSnapshot = () =>
+      dmPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const names = Array.from(idb.objectStoreNames)
+              if (names.length === 0) return resolve('{}')
+              const tx = idb.transaction(names, 'readonly')
+              const out = {}
+              let left = names.length
+              for (const name of names) {
+                const g = tx.objectStore(name).getAll()
+                g.onsuccess = () => {
+                  out[name] = g.result.map((row) =>
+                    JSON.stringify(row, (_k, v) =>
+                      typeof Blob !== 'undefined' && v instanceof Blob ? `blob:${v.size}` : v,
+                    ),
+                  )
+                  left -= 1
+                  if (left === 0) resolve(JSON.stringify(out))
+                }
+                g.onerror = () => reject(g.error)
+              }
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      await dmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(2000)
+      await dmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dmPage.getByRole('button', { name: '月', exact: true }).click()
+      await dmPage.waitForTimeout(600)
+
+      // 記録0件＝1回だけのお試しはまだ出ない状態でも、サンプルの入口は出る（お試しとは独立）
+      check(
+        'DEMO-01 記録が無くてもロック案内に「サンプルで見る」が出る',
+        (await dmPage.locator('[data-testid="month-trial-start"]').count()) === 0 &&
+          (await dmPage.locator('[data-testid="month-demo-link"]').isVisible()),
+      )
+      const dmBefore = await dmSnapshot()
+
+      await dmPage.locator('[data-testid="month-demo-link"]').click()
+      await dmPage.waitForTimeout(1500)
+      check(
+        'DEMO-01 サンプルであることを帯で言い切る',
+        ((await dmPage.locator('[data-testid="month-demo-banner"]').textContent()) ?? '').includes(
+          'サンプルデータを表示中',
+        ),
+      )
+      const dmBody = (await dmPage.textContent('body')) ?? ''
+      check(
+        'DEMO-01 本物の月タブが見本のデータで開く（ロック案内は出ない）',
+        !dmBody.includes('1か月分の献立をカレンダーで') &&
+          dmBody.includes('5月の食費と栄養') &&
+          dmBody.includes('5/1〜5/23は作った記録'),
+        `body先頭=${dmBody.slice(0, 160)}`,
+      )
+      check(
+        'DEMO-01 カレンダーに写真つきのセルが出る',
+        (await dmPage.locator('[data-date="2026-05-09"] img').count()) === 1,
+      )
+      check(
+        'DEMO-01 デモには献立を書き換える操作を出さない',
+        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレを流し込む'),
+      )
+      // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
+      await dmPage.getByRole('button', { name: '食費', exact: true }).click()
+      await dmPage.waitForTimeout(500)
+      check(
+        'DEMO-01 「食費」に切り替えると各日に金額が出る',
+        ((await dmPage.locator('[data-date="2026-05-09"]').textContent()) ?? '').includes('円'),
+      )
+      await dmPage.getByRole('button', { name: '栄養', exact: true }).click()
+      await dmPage.waitForTimeout(500)
+      check(
+        'DEMO-01 「栄養」に切り替えると各日にエネルギーが出る',
+        (
+          (await dmPage.locator('[data-date="2026-05-09"]').getAttribute('aria-label')) ?? ''
+        ).includes('kcal'),
+      )
+      await dmPage.getByRole('button', { name: '写真', exact: true }).click()
+      await dmPage.waitForTimeout(400)
+      // 日の窓は読むだけ（編集欄・メモ欄・週へのジャンプは出さない）
+      await dmPage.locator('[data-date="2026-05-07"]').click()
+      await dmPage.waitForTimeout(500)
+      const dmModal = (await dmPage.getByRole('dialog').textContent()) ?? ''
+      check(
+        'DEMO-01 過ぎた日の窓にその日の作った記録が出る',
+        dmModal.includes('作った記録') && dmModal.includes('鮭の塩焼き'),
+        `modal=${dmModal.slice(0, 160)}`,
+      )
+      check(
+        'DEMO-01 デモの日の窓に編集欄・週へのジャンプは出さない',
+        !dmModal.includes('この週を開く') && !dmModal.includes('この日のメモ'),
+      )
+      await dmPage.keyboard.press('Escape')
+      await dmPage.waitForTimeout(300)
+      // 月を移動して戻る（見本は5月だけなので、移動先は空になるのが正しい）
+      await dmPage.getByRole('button', { name: '次の月' }).click()
+      await dmPage.waitForTimeout(500)
+      await dmPage.getByRole('button', { name: '今月へ戻る' }).click()
+      await dmPage.waitForTimeout(500)
+      check(
+        'DEMO-01 月を移動して戻ると見本の月に戻る',
+        (await dmPage.locator('[data-date="2026-05-09"] img').count()) === 1,
+      )
+
+      const dmAfter = await dmSnapshot()
+      check('DEMO-01 デモを触っても端末のデータ(IndexedDB)は変わらない', dmAfter === dmBefore)
+
+      // 閉じると元の画面（月タブ）へ戻り、1回だけのお試しは使われていない
+      await dmPage.locator('[data-testid="month-demo-close"]').click()
+      await dmPage.waitForTimeout(800)
+      await dmPage.getByRole('button', { name: '月', exact: true }).click()
+      await dmPage.waitForTimeout(600)
+      check(
+        'DEMO-01 閉じたら元の月タブ（ロック案内）へ戻る',
+        ((await dmPage.textContent('body')) ?? '').includes('1か月分の献立をカレンダーで'),
+      )
+      check(
+        'DEMO-01 デモは1回だけのお試しを消費しない',
+        (
+          (await dmPage.locator('[data-testid="month-trial-pending"]').textContent()) ?? ''
+        ).includes('5件たまったらお試しできます'),
+      )
+      check(
+        'DEMO-01 サンプルの入口は回数制限なく出続ける',
+        await dmPage.locator('[data-testid="month-demo-link"]').isVisible(),
+      )
+
+      // 設定のPro節からも同じデモへ入れて、閉じると設定へ戻る
+      await dmPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(1200)
+      await dmPage.locator('[data-testid="settings-month-demo-link"]').click()
+      await dmPage.waitForTimeout(1500)
+      check(
+        'DEMO-01 設定のPro紹介からもデモへ入れる',
+        await dmPage.locator('[data-testid="month-demo-banner"]').isVisible(),
+      )
+      await dmPage.locator('[data-testid="month-demo-close"]').click()
+      await dmPage.waitForTimeout(800)
+      check(
+        'DEMO-01 設定から入ったときは閉じると設定へ戻る',
+        ((await dmPage.textContent('body')) ?? '').includes('購入と解錠'),
+        `url=${dmPage.url()}`,
+      )
+    } finally {
+      await dmBrowser.close()
     }
   }
 

@@ -71,8 +71,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // ビルドされた HTML / JS / CSS / SVG をオフライン用にキャッシュする
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // ビルドされた HTML / JS / CSS / SVG をオフライン用にキャッシュする。
+        // webp を足したのは月間画面のサンプルデモ用の写真(public/demo/*.webp・合計23KB)だけを
+        // オフラインでも出すため(2026-08-02 便DC)。説明書・LPのスクリーンショット
+        // (public/about/img/**・約2MB)は読み物側の画像なので、アプリ本体の事前キャッシュには入れない
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,webp}'],
+        globIgnores: ['about/img/**'],
         // /sets/ ・ /about/ 配下(アプリ本体ではないSPA外の静的ページ)は、
         // Service Workerの「未知の遷移はアプリ本体にフォールバック」対象から外す
         // (外さないと、配布ページ等を開いたつもりがアプリ本体の白紙/ホーム画面に化けてしまう)

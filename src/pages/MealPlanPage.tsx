@@ -131,6 +131,7 @@ import {
   type SlotBalance,
 } from '../logic/nutritionBalance'
 import { canUseMonthTrial, isMonthTrialReady, MONTH_TRIAL_MIN_COOKED } from '../logic/proTrial'
+import type { MonthDemoData } from '../logic/monthDemo'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -144,6 +145,7 @@ import type {
   MealSlot,
   MonthCellMode,
   Recipe,
+  Settings,
 } from '../db/types'
 import { MEAL_PURPOSES } from '../db/types'
 import { ja } from '../i18n/ja'
@@ -260,33 +262,45 @@ function CookedLogCard({
   recipe,
   log,
   onNavigate,
+  readOnly = false,
 }: {
   recipe: Recipe
   log: CookedLog
   onNavigate?: () => void
+  /**
+   * レシピ詳細へのリンクにしない（2026-08-02 便DC）。サンプルデモの記録はメモリ上の見本で、
+   * 端末に無いレシピを指すため、押せる見た目にすると行き止まりになる
+   */
+  readOnly?: boolean
 }) {
   const logPhotoUrl = usePhotoUrl(log.photo)
   const recipePhotoUrl = usePhotoUrl(recipe.photo)
   const photoUrl = logPhotoUrl ?? recipePhotoUrl
+  const inner = (
+    <>
+      <div className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
+        {photoUrl ? (
+          <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <RecipePlaceholder recipe={recipe} iconSize={16} />
+        )}
+      </div>
+      <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
+        {recipe.title}
+      </span>
+      <CheckCircle2 size={16} className="shrink-0 text-accent-ink" aria-hidden />
+    </>
+  )
+  const cls = 'flex items-center gap-2 rounded-sm border border-edge bg-app/60 px-2 py-1.5 opacity-80'
   return (
     <li>
-      <Link
-        to={`/recipes/${recipe.id}`}
-        onClick={onNavigate}
-        className="flex items-center gap-2 rounded-sm border border-edge bg-app/60 px-2 py-1.5 opacity-80"
-      >
-        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
-          {photoUrl ? (
-            <img src={photoUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <RecipePlaceholder recipe={recipe} iconSize={16} />
-          )}
-        </div>
-        <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
-          {recipe.title}
-        </span>
-        <CheckCircle2 size={16} className="shrink-0 text-accent-ink" aria-hidden />
-      </Link>
+      {readOnly ? (
+        <div className={cls}>{inner}</div>
+      ) : (
+        <Link to={`/recipes/${recipe.id}`} onClick={onNavigate} className={cls}>
+          {inner}
+        </Link>
+      )}
     </li>
   )
 }
@@ -831,6 +845,9 @@ function buildRoleRows(
   return rows
 }
 
+/** 参照が変わらない空配列（デモで「端末の予定は使わない」を表すために使う） */
+const EMPTY_ENTRIES: MealPlanEntry[] = []
+
 /** 日×枠キーで束ねられたエントリ配列を、日付をキーに持つ配列からMap化する共通ヘルパー */
 function groupBySlot(entries: MealPlanEntry[] | undefined): Map<MealSlot, MealPlanEntry[]> {
   const map = new Map<MealSlot, MealPlanEntry[]>()
@@ -842,20 +859,50 @@ function groupBySlot(entries: MealPlanEntry[] | undefined): Map<MealSlot, MealPl
   return map
 }
 
-/** 献立タブ: 「日」「週」「月」の3タブでレシピを割り当てる（2026-07-16 便U再構成） */
-export default function MealPlanPage() {
+/**
+ * 献立タブ: 「日」「週」「月」の3タブでレシピを割り当てる（2026-07-16 便U再構成）。
+ *
+ * demo を渡すと「月間画面のサンプルデモ」になる（2026-08-02 便DC・pages/MonthDemoPage.tsx）。
+ * デモ用の作り物の画面を別に作るのではなく、この本物の画面にサンプル1か月分を流し込む
+ * （＝実物と食い違わない）。デモのときは次の3つだけが変わる:
+ *   1. データの出どころが IndexedDB ではなく渡された見本データになる（読み込みも書き込みもしない）
+ *   2. 月タブ固定で開き、Pro のゲートはデモの中だけ開く（端末に保存している解錠状態は読まないし変えない）
+ *   3. 予定を書き換える操作（まとめて提案・テンプレの流し込み・日の窓での追加/変更・メモの保存）は出さない
+ *      ＝サンプルは見て確かめるためのもので、書き込み先が無い
+ */
+export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
+  /** サンプルデモとして開いているか（データの差し替えと、書き込み操作を出さない判定に使う） */
+  const isDemo = demo != null
   const navigate = useNavigate()
-  const recipes = useLiveQuery(listRecipes, [])
+  const dbRecipes = useLiveQuery(listRecipes, [])
+  const recipes = isDemo ? demo.recipes : dbRecipes
   const [searchParams, setSearchParams] = useSearchParams()
-  const settings = useSettings()
+  const dbSettings = useSettings()
+  /** デモ中の設定はメモリだけに持つ（カレンダーの表示切替などをその場で試せるようにするため） */
+  const [demoSettings, setDemoSettings] = useState<Settings | undefined>(() => demo?.settings)
+  const settings = isDemo ? demoSettings : dbSettings
+  /**
+   * この画面からの設定変更は必ずここを通す。デモ中はメモリ上の設定だけを書き換え、
+   * 端末の設定（IndexedDB）には一切触れない
+   */
+  const saveSettings = (patch: Partial<Omit<Settings, 'id'>>) => {
+    if (isDemo) {
+      setDemoSettings((current) => (current ? { ...current, ...patch } : current))
+      return
+    }
+    void updateSettings(patch)
+  }
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
-  const priceEntries = usePriceEntries()
+  const dbPriceEntries = usePriceEntries()
+  const priceEntries = isDemo ? demo.priceEntries : dbPriceEntries
   const priceIndex = useMemo(() => buildPriceIndex(priceEntries ?? []), [priceEntries])
   // レシピ選択ピッカーの並び替え「在庫一致順」用の在庫食材名（2026-07-24 便BH-3・タスク6・
   // 一覧画面の並び替え機構を流用）
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
-  const today = useMemo(todayString, [])
+  // デモは固定の見本月なので「今日」も見本の日付にする（過ぎた日=記録・今日から先=献立の
+  // 切り分けが、実時間で開いた日によって変わらないようにするため）
+  const today = useMemo(() => demo?.today ?? todayString(), [demo])
   const [weekStart, setWeekStart] = useState(() => weekDates(new Date())[0])
   // 週タブの表示起点(2026-07-24 便BH-3・タスク3): 従来の週区切り(月曜始まり)⇄今日を先頭に7日間。
   // 既定は従来(週区切り)・選択は設定に記憶。ローリング表示はweekStartを起点に7日連続で並べる
@@ -878,7 +925,7 @@ export default function MealPlanPage() {
   }, [settings, today])
   // 週タブの表示起点を切り替える(選択を設定に記憶し、weekStartを各モードの「現在」に合わせ直す)
   const setWeekLayout = (rolling: boolean) => {
-    void updateSettings({ weekStartsToday: rolling })
+    saveSettings({ weekStartsToday: rolling })
     setWeekStart(rolling ? today : weekDates(new Date())[0])
   }
   // 今、当週(=各モードの「現在」)を見ているか(Fix1: 中央チップの「戻る」ラベル/アイコンは
@@ -886,7 +933,9 @@ export default function MealPlanPage() {
   const currentWeekAnchor = rollingWeek ? today : weekDates(new Date())[0]
   const isAtCurrentWeek = dates[0] === currentWeekAnchor
 
-  const entries = useMealPlanRange(dates[0], dates[6])
+  // デモでは週タブを出さないので、端末の週の予定は読んでも使わない（見本の月の予定だけで組む）
+  const dbEntries = useMealPlanRange(dates[0], dates[6])
+  const entries = isDemo ? EMPTY_ENTRIES : dbEntries
   // 表示中の週のうち「今日以降」の予定だけ(2026-07-29 便CD/MP-07)。
   // 便BS(2026-07-24)で過去日の予定は週タブの表示から消した(記録だけ残す)が、概算食費と
   // 買い物リストは entries をそのまま集計していたため、画面のどこにも出ていない過去日の献立が
@@ -912,9 +961,9 @@ export default function MealPlanPage() {
     [yesterdayEntries],
   )
 
-  // 3タブ（日/週/月。月はPro機能・既存ゲート維持）。既定は「日」タブ
-  const [viewMode, setViewMode] = useState<MealPlanViewMode>('day')
-  const [monthAnchor, setMonthAnchor] = useState(() => todayString())
+  // 3タブ（日/週/月。月はPro機能・既存ゲート維持）。既定は「日」タブ（デモは月タブ固定で開く）
+  const [viewMode, setViewMode] = useState<MealPlanViewMode>(isDemo ? 'month' : 'day')
+  const [monthAnchor, setMonthAnchor] = useState(() => demo?.today ?? todayString())
   const isPro = !!settings?.proCode
   /**
    * 月間献立の恒常お試し（2026-08-02 便CP-2・docs/62 決定③）。
@@ -939,10 +988,10 @@ export default function MealPlanPage() {
   const monthTrialAvailable = monthTrialUnused && monthTrialReady
   /** 月タブの中身を出してよいか（解錠済み or お試し表示中）。月タブ配下のPro表示はこれで判定する */
   const monthUnlocked = isPro || monthTrialActive
-  const startMonthTrial = async () => {
+  const startMonthTrial = () => {
     if (!monthTrialAvailable) return
     setMonthTrialActive(true)
-    await updateSettings({ monthTrialUsed: true })
+    saveSettings({ monthTrialUsed: true })
   }
   // 「閉じたらロックへ戻る」: 月タブから離れた時点でお試し表示を終える
   useEffect(() => {
@@ -957,11 +1006,19 @@ export default function MealPlanPage() {
     [monthAnchor],
   )
   // 今、当月を見ているか(Fix2: 中央チップの「今月へ戻る」ラベル/アイコンは当月以外のときだけ出す)
-  const isAtCurrentMonth = monthAnchor.slice(0, 7) === todayString().slice(0, 7)
-  const monthEntries = useMealPlanRange(
+  const isAtCurrentMonth = monthAnchor.slice(0, 7) === today.slice(0, 7)
+  const dbMonthEntries = useMealPlanRange(
     monthDatesList[0],
     monthDatesList[monthDatesList.length - 1],
   )
+  // デモは見本の献立をそのまま使う（月を移動すると、その月には見本の予定が無いので空になる）
+  const demoMonthEntries = useMemo(() => {
+    if (!demo) return EMPTY_ENTRIES
+    const start = monthDatesList[0]
+    const end = monthDatesList[monthDatesList.length - 1]
+    return demo.entries.filter((e) => e.date >= start && e.date <= end)
+  }, [demo, monthDatesList])
+  const monthEntries = isDemo ? demoMonthEntries : dbMonthEntries
   const monthDaysWithPlan = useMemo(() => {
     const set = new Set<string>()
     monthEntries?.forEach((e) => set.add(e.date))
@@ -1166,7 +1223,7 @@ export default function MealPlanPage() {
       setMessage(ja.mealPlan.slotFilterKeepOne)
       return
     }
-    void updateSettings({ visibleMealSlots: next })
+    saveSettings({ visibleMealSlots: next })
   }
   /**
    * レシピID→レシピ（すでに登録されている献立・記録を「表示する／数える」ための引き当て表）。
@@ -1440,6 +1497,8 @@ export default function MealPlanPage() {
   // それでも「消した品の再出現」は起きない：消せる品が今日の献立にあった=取り込みが実行済み
   // =日付記録済み、なのでその日のうちの再実行は必ずスキップされる
   useEffect(() => {
+    // デモは日タブを出さない＝ここへは来ないが、端末のデータへ書き込む唯一の自動処理なので明示的に止める
+    if (isDemo) return
     if (viewMode !== 'day') return
     if (settings === undefined || todayEntries === undefined) return
     if (settings.lastAutoImportDate === today) return
@@ -1448,7 +1507,7 @@ export default function MealPlanPage() {
       await importRecipeIdsToTodayList(todayFromPlanIds)
       await updateSettings({ lastAutoImportDate: today })
     })()
-  }, [viewMode, settings, todayEntries, todayFromPlanIds, today])
+  }, [isDemo, viewMode, settings, todayEntries, todayFromPlanIds, today])
 
   const [quickOnly, setQuickOnly] = useState(false)
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
@@ -1461,8 +1520,8 @@ export default function MealPlanPage() {
    * （Pro端末のバックアップを未解錠端末へ復元したときに、条件だけ生き残らないようにする）。
    */
   const planPurpose: MealPurpose | undefined = isPro ? settings?.planPurpose : undefined
-  const changePurpose = async (next: MealPurpose | undefined) => {
-    await updateSettings({ planPurpose: next })
+  const changePurpose = (next: MealPurpose | undefined) => {
+    saveSettings({ planPurpose: next })
   }
   // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3)。既定閉
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
@@ -1478,10 +1537,11 @@ export default function MealPlanPage() {
     weekDayNotes?.forEach((n) => map.set(n.date, n))
     return map
   }, [weekDayNotes])
-  const monthDayNotes = useDayNoteRange(
+  const dbMonthDayNotes = useDayNoteRange(
     monthDatesList[0],
     monthDatesList[monthDatesList.length - 1],
   )
+  const monthDayNotes = isDemo ? demo.dayNotes : dbMonthDayNotes
   const monthDayNoteByDate = useMemo(() => {
     const map = new Map<string, DayNote>()
     monthDayNotes?.forEach((n) => map.set(n.date, n))
@@ -3161,7 +3221,8 @@ export default function MealPlanPage() {
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
       <h1 className="text-2xl font-bold">{ja.mealPlan.title}</h1>
 
-      {/* 日／週／月の3タブ(便U-1) */}
+      {/* 日／週／月の3タブ(便U-1)。サンプルデモは月の画面だけを見せるので出さない */}
+      {!isDemo && (
       <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
         <button
           type="button"
@@ -3200,6 +3261,7 @@ export default function MealPlanPage() {
           {ja.mealPlan.viewMonth}
         </button>
       </div>
+      )}
 
       <Toast message={message} onClose={() => setMessage('')} />
 
@@ -3376,7 +3438,7 @@ export default function MealPlanPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setMonthAnchor(todayString())}
+                onClick={() => setMonthAnchor(today)}
                 aria-label={isAtCurrentMonth ? undefined : ja.mealPlan.thisMonth}
                 className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
               >
@@ -3574,7 +3636,7 @@ export default function MealPlanPage() {
                 <button
                   key={m.value}
                   type="button"
-                  onClick={() => void updateSettings({ monthCellMode: m.value })}
+                  onClick={() => saveSettings({ monthCellMode: m.value })}
                   aria-pressed={monthCellMode === m.value}
                   className={`flex-1 rounded-sm border px-3 py-2 text-sm font-bold ${
                     monthCellMode === m.value
@@ -3589,32 +3651,37 @@ export default function MealPlanPage() {
 
             {/* 自動提案の条件(2026-07-30 便CH/C11)。この条件は月の「未定の日をまとめて提案」にも
                 そのまま効く(週タブでしか変えられず、月が全部同じジャンルになる理由が
-                画面から分からなかった)。週タブと同じ部品・同じ状態を共有する */}
-            {renderSuggestConditions()}
+                画面から分からなかった)。週タブと同じ部品・同じ状態を共有する。
+                サンプルデモには献立を書き換える操作を出さないので、その条件も出さない */}
+            {!isDemo && renderSuggestConditions()}
 
             {/* 月タブの操作(2026-07-29 便CB-2・docs/59)。
                 A-5: この月のまだ決まっていない日に、主菜と副菜をまとめて入れる（実行前に確認）
                 A-1＋B-2: 保存したテンプレを、表示中の月の空いているところへ流し込む
                 （曜日を絞れば「毎週金曜はカレー」になる） */}
-            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => void fillMonth()}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <Dices size={14} aria-hidden />
-                {ja.mealPlan.fillMonth}
-              </button>
-              <button
-                type="button"
-                onClick={() => openTemplateApply('month')}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <LayoutTemplate size={14} aria-hidden />
-                {ja.mealPlan.templateApply}
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillMonthHint}</p>
+            {!isDemo && (
+              <>
+                <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+                  <button
+                    type="button"
+                    onClick={() => void fillMonth()}
+                    className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                  >
+                    <Dices size={14} aria-hidden />
+                    {ja.mealPlan.fillMonth}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openTemplateApply('month')}
+                    className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                  >
+                    <LayoutTemplate size={14} aria-hidden />
+                    {ja.mealPlan.templateApply}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillMonthHint}</p>
+              </>
+            )}
 
             {/* 期間の栄養と食費モード(2026-07-17 便AB・docs/35 §5 → 2026-07-28 便CAで改訂)。
                 押すたびにON/OFFを切り替え、切り替え時は選択もリセットする(再度押せば選び直せる) */}
@@ -3870,6 +3937,16 @@ export default function MealPlanPage() {
                     {ja.mealPlan.monthTrialUsedNote}
                   </p>
                 )}
+                {/* サンプルデモ(2026-08-02 便DC)。1回だけのお試しとは別枠で、記録がまだ少ない人も
+                    お試しを使い切った人も、見本の1か月分が入った月の画面をここから何度でも開ける */}
+                <Link
+                  to="/month-demo?back=/meal-plan"
+                  data-testid="month-demo-link"
+                  className="mt-[var(--space-sm)] inline-flex items-center justify-center rounded-md border border-accent bg-surface px-4 py-3 font-bold text-accent-ink shadow-sm"
+                >
+                  {ja.mealPlan.monthDemoLink}
+                </Link>
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
                 <Link
                   to="/settings?section=pro"
                   className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
@@ -4649,6 +4726,34 @@ export default function MealPlanPage() {
               dayModalLogs.length === 0 ? (
                 <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.mealPlan.pastNoRecord}</p>
               ) : null
+            ) : isDemo ? (
+              // サンプルデモ: その日の献立を読むだけにする（書き込み先が無いので編集欄は出さない）
+              <div className="mt-[var(--space-sm)]">
+                {dayModalEntries.length === 0 ? (
+                  <p className="text-sm text-ink-muted">{ja.mealPlan.monthDayModalEmpty}</p>
+                ) : (
+                  <ul className="space-y-1">
+                    {dayModalEntries.map((entry) => {
+                      const recipe = recipeById.get(entry.recipeId)
+                      if (!recipe) return null
+                      return (
+                        <li
+                          key={entry.id}
+                          className="flex items-center gap-2 rounded-sm border border-edge bg-app px-2 py-1.5"
+                        >
+                          <RowThumb recipe={recipe} />
+                          <span className="shrink-0 text-xs text-ink-muted">
+                            {ja.mealPlan.slot[entry.slot]}・{ja.mealPlan.role[entry.role ?? 'main']}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-bold">
+                            {recipe.title}
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+              </div>
             ) : (
               // 今日・未来日: 週タブと同じ編集ブロック(2026-07-29 便CB-1・docs/59 A-3)。
               // 週へ飛ばずに この窓のまま レシピの追加・差し替え・削除ができる。
@@ -4678,6 +4783,7 @@ export default function MealPlanPage() {
                       key={`${recipe.id}-${i}`}
                       recipe={recipe}
                       log={log}
+                      readOnly={isDemo}
                       onNavigate={() => setDayModalDate(null)}
                     />
                   ))}
@@ -4693,24 +4799,38 @@ export default function MealPlanPage() {
               </p>
             )}
             {/* 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。週タブの各日カードと同じ入力欄。
-                過去日にも出す(「この日は外食だった」と後から書き残せるようにするため) */}
-            <div className="mt-[var(--space-md)]">
-              <DayNoteEditor
-                date={dayModalDate}
-                note={monthDayNoteByDate.get(dayModalDate)}
-                onSave={(d, text) => void handleSaveDayNote(d, text)}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (dayModalDate) goToWeekOf(dayModalDate)
-                setDayModalDate(null)
-              }}
-              className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-app py-3 text-sm font-bold text-accent-ink shadow-sm"
-            >
-              {ja.mealPlan.monthDayModalOpenWeek}
-            </button>
+                過去日にも出す(「この日は外食だった」と後から書き残せるようにするため)。
+                サンプルデモは書き込み先が無いので、メモがある日はその中身だけを読む形で出す */}
+            {isDemo ? (
+              monthDayNoteByDate.get(dayModalDate) && (
+                <div className="mt-[var(--space-md)]">
+                  <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.dayNoteLabel}</p>
+                  <p className="mt-1 rounded-sm border border-edge bg-app px-2 py-1.5 text-sm">
+                    {monthDayNoteByDate.get(dayModalDate)?.text}
+                  </p>
+                </div>
+              )
+            ) : (
+              <>
+                <div className="mt-[var(--space-md)]">
+                  <DayNoteEditor
+                    date={dayModalDate}
+                    note={monthDayNoteByDate.get(dayModalDate)}
+                    onSave={(d, text) => void handleSaveDayNote(d, text)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (dayModalDate) goToWeekOf(dayModalDate)
+                    setDayModalDate(null)
+                  }}
+                  className="mt-[var(--space-md)] w-full rounded-md border border-edge bg-app py-3 text-sm font-bold text-accent-ink shadow-sm"
+                >
+                  {ja.mealPlan.monthDayModalOpenWeek}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

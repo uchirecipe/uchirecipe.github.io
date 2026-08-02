@@ -1556,6 +1556,21 @@ export default function SettingsPage() {
               </li>
             </ul>
 
+            {/* 月間画面のサンプルデモ(2026-08-02 便DC)。買う前に、月の画面そのものを見本のデータ入りで
+                確かめられる。解錠済みの人は本物の月タブが使えるので出さない */}
+            {!settings.proCode && (
+              <div className="mt-[var(--space-sm)]">
+                <Link
+                  to="/month-demo?back=%2Fsettings%3Fsection%3Dpro"
+                  data-testid="settings-month-demo-link"
+                  className="inline-flex items-center justify-center rounded-md border border-accent bg-app px-4 py-3 font-bold text-accent-ink shadow-sm"
+                >
+                  {ja.settings.monthDemoLink}
+                </Link>
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
+              </div>
+            )}
+
             {/* 未解錠ならコード入力を出す。Pro解錠済みなら入力の必要が無いため入力欄自体を隠す */}
             {!settings.proCode && (
               <div className="mt-[var(--space-md)]">
