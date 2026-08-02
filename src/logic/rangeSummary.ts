@@ -17,6 +17,13 @@
  *    予定を出す」（isPastDateが境界）で動いており、表示と集計の境界を揃えるため。
  *    同じ日を実績と予定の両方で数えない＝二重計上しない、が最優先。
  *
+ * 2026-08-03 便DK（オーナー確定「3人家族なら予算や買い物メモは3人分で計算した数値が必要。
+ * 栄養は1人当たりのみで十分」）で規則3が加わった:
+ *  規則3（作る食数ぶんの食費）: 「これから作る予定」の食費は、実際に作る食数（実効食数＝
+ *    枠ごとに決めた食数 > 設定「ふだん作る人数」 > レシピの登録人数分）ぶんの金額も出す。
+ *    実績側が記録した人数でスケールした金額（cookedHouseholdYen）を出しているのと同じ考え方で、
+ *    規則1の「1人分」は栄養と対の数字なのでいっさい変えない（1人分と食数ぶんを別の値として並べる）。
+ *
  * 集計自体は栄養(nutrition.ts)と食費(priceEstimate.ts)の既存ロジックを組み合わせるだけで、
  * この層は「どの日をどちらの基準で数えるか」と「1人分の合計」に責任を持つ純関数だけを置く。
  * 金額・栄養はあくまで概算・めやす（医療・効能の文脈では使わない）。
@@ -49,6 +56,14 @@ export interface RangePlannedDish {
   /** YYYY-MM-DD */
   date: string
   recipe: RangeRecipeLike
+  /**
+   * その枠を何人分作るか＝実効食数（任意・2026-08-03 便DK）。
+   * 呼び出し側が logic/servings.ts effectiveMealServings で解決してから渡す
+   * （枠ごとの食数 > 設定「ふだん作る人数」 > レシピの登録人数分）。
+   * 未指定＝レシピの登録人数分。「これから作る予定の食費（作る食数ぶん）」だけに効き、
+   * 1人分の食費・栄養はこの値では変わらない。
+   */
+  servings?: number
 }
 
 /** 期間を「実績で数える日」と「予定で数える日」に分けた結果 */
@@ -109,6 +124,14 @@ export interface RangeIntakeSummary {
   cookedHouseholdYen: number
   /** 作った記録の食数（延べ人数。2人分作った記録は2食）。同じく「作った食数の合算」用 */
   cookedMealCount: number
+  /**
+   * これから作る予定の食費（作る食数ぶん・今日以降のみ・2026-08-03 便DK）。
+   * 実績側の cookedHouseholdYen と対になる数字で、数え方も同じ＝1人分の単価×実際に作る人数。
+   * 予定側は「記録した人数」の代わりに実効食数（枠ごとの食数 > ふだん作る人数 > 登録人数分）を使う。
+   */
+  planHouseholdYen: number
+  /** これから作る予定の食数（延べ人数。3人分作る予定は3食）。cookedMealCountと対 */
+  planMealCount: number
 }
 
 /**
@@ -172,9 +195,13 @@ export function summarizeRangeIntake(input: {
 
   const actualCost = sumCookedRecipesCost(actualDishes, priceIndex)
   const actualNutrition = sumPersonalNutrition(actualDishes.map((d) => d.recipe))
-  // 予定側は「何人分作ったか」の記録が無い＝登録人数どおり。log無しで同じ集計に通せば
-  // personalTotal（全量÷登録人数を1品1回）は sumMealPlanEntriesCost と同じ値になる
-  const planCost = sumCookedRecipesCost(planDishes, priceIndex)
+  // 予定側は「これから何人分作るか」＝実効食数を、実績側の「記録した人数」と同じ枠に入れて
+  // 同じ集計に通す（2026-08-03 便DK）。実効食数が未指定なら登録人数どおりで従来と同値になり、
+  // personalTotal（全量÷登録人数を1品1回）はどちらにしても sumMealPlanEntriesCost と同じ値になる
+  const planCost = sumCookedRecipesCost(
+    planDishes.map((d) => ({ recipe: d.recipe, log: { servings: d.servings } })),
+    priceIndex,
+  )
   const planNutrition = sumPersonalNutrition(planDishes.map((d) => d.recipe))
 
   const actual: RangeBasisPart = {
@@ -196,6 +223,8 @@ export function summarizeRangeIntake(input: {
     nutrition: addPersonalNutritionSum(actualNutrition, planNutrition),
     cookedHouseholdYen: actualCost.total,
     cookedMealCount: actualCost.count,
+    planHouseholdYen: planCost.total,
+    planMealCount: planCost.count,
   }
 }
 

@@ -416,6 +416,24 @@ export interface Settings {
   timerNoticeShown: boolean
   /** 週の食費予算（円・任意）。献立プランナーで概算食費と比較する */
   weeklyBudget?: number
+  /**
+   * ふだん作る人数（任意・2026-08-03 便DK・オーナー指示）。
+   *
+   * 献立に入れた料理を、最初から何人分として扱うか。未設定＝従来どおり、その料理に
+   * 登録されている人数分（Recipe.servings）で扱う。設定していても、枠ごとに決めた食数
+   * （MealPlanEntry.servings）があればそちらが優先（優先順位は logic/servings.ts
+   * effectiveMealServings に1本化してある）。
+   *
+   * 効く先は「作る量」だけ＝買い物メモに渡す分量、これから作る予定の概算食費、
+   * レシピ詳細を開いたときの人数ステッパーの初期値（2026-08-03 オーナー決定・A/B提示のB採用。
+   * 元のレシピが何人分かは「登録: ◯人分」で併記する）。
+   * 栄養は何人分作っても1人が食べる量は1人分のままなので、この値では一切変えない
+   * （logic/nutrition.ts・logic/nutritionBalance.ts はこの値を見ない）。
+   *
+   * 範囲は人数分と同じ1〜20（logic/servings.ts clampServings）。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  householdServings?: number
   /** 献立タブに表示する食事帯（任意・未指定は朝昼夜すべて表示） */
   visibleMealSlots?: MealSlot[]
   /**

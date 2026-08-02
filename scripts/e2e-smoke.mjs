@@ -83,6 +83,10 @@
 //         2群に分けてそれぞれ折りたたむ・既定は選択中だけ開く/「今日なに作る？」は今週の献立に今日の予定が
 //         あれば出さない(設定「常に表示」で上書き可)/「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が
 //         「条件をしぼる」の中にあり既定は主菜だけON/設定でいったん隠したパーツは既定の位置へ復帰) /
+//         MEALPLAN-HOUSE(2026-08-03 便DK: 設定「ふだん作る人数」。未設定なら従来どおり登録人数分・
+//         4人分に設定すると献立の行/概算食費/買い物メモの分量/レシピ詳細の人数がすべてその人数分になり、
+//         レシピ詳細には元の登録人数が「登録: 2人分」で併記される。枠ごとに決めた食数はこの設定より優先し、
+//         「既定に戻す」は戻り先の人数を名乗る。栄養の「1人分」は人数を変えても動かない) /
 //         DASH-01(だし紐づけ・2026-07-23: 材料「だし汁」の行から収録レシピ「だしのとり方」の詳細へ
 //         飛べるリンクが出てタップで遷移する・収録レシピを削除するとリンクは出ない) /
 //         TODAYALL-01(「全て作った！」の一括反映・2026-07バグ修正: 記録追加(addCookedLog)と
@@ -6606,6 +6610,224 @@ try {
       )
     } finally {
       await svBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-HOUSE: 設定「ふだん作る人数」(2026-08-03 便DK・オーナー確定
+  // 「3人家族なら予算や買い物メモは3人分で計算した数値が必要。栄養は1人当たりのみで十分」)。
+  // 設定→献立→買い物→食費を一続きに通し、同じ献立が
+  //   ①未設定なら従来どおり(登録人数分) ②設定するとその人数分の分量・金額になる
+  // ことを、同じ画面・同じ献立の前後比較で見張る。
+  // 4人分を選ぶのは、同梱の「肉じゃが」が2人分登録なのでちょうど2倍になり、
+  // 丸め誤差なしで分量・金額を突き合わせられるため。 ---
+  currentCheck = 'MEALPLAN-HOUSE'
+  {
+    const hhBrowser = await chromium.launch()
+    const hhContext = await hhBrowser.newContext()
+    const hhPage = await hhContext.newPage()
+    hhPage.on('dialog', (dialog) => dialog.accept())
+    hhPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-HOUSE] ${text}`)
+    })
+    hhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-HOUSE] ${err.message}`)
+    })
+    try {
+      await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await hhPage.waitForTimeout(2000) // 初回シード完了待ち
+      await hhPage.getByRole('button', { name: '週', exact: true }).click()
+      await hhPage.waitForTimeout(400)
+      // 今日の最初の空き枠に「肉じゃが」(登録2人分)を入れる
+      await hhPage.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await hhPage.waitForTimeout(500)
+      await hhPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await hhPage.waitForTimeout(300)
+      await hhPage.getByText('肉じゃが', { exact: true }).first().click()
+      await hhPage.waitForTimeout(800)
+
+      const hhChip = () =>
+        hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().textContent()
+      const hhNum = (v) => Number((v ?? '').replace(/[^0-9]/g, ''))
+      const hhBase = hhNum(await hhChip())
+      check(
+        'MEALPLAN-HOUSE 前提: ふだん作る人数が未設定なら行はレシピの登録人数分(2人分)',
+        hhBase === 2,
+        `chip=${await hhChip()}`,
+      )
+      // 未設定のときの概算食費(合計金額)と注記を控える
+      const hhOpenCost = async () => {
+        await hhPage.getByRole('button', { name: '今週の概算食費' }).click()
+        await hhPage.waitForTimeout(400)
+        const text = (await hhPage.textContent('body')) ?? ''
+        return {
+          yen: Number((text.match(/約([\d,]+)円/)?.[1] ?? '0').replace(/,/g, '')),
+          note: text.match(/この週に作る食数ぶん（合計(\d+)人分）の金額です/)?.[1],
+        }
+      }
+      const hhCostBefore = await hhOpenCost()
+      check(
+        'MEALPLAN-HOUSE 概算食費の注記が「作る食数ぶん（合計◯人分）」になっている',
+        hhCostBefore.note === '2' && hhCostBefore.yen > 0,
+        JSON.stringify(hhCostBefore),
+      )
+      // 未設定のときの買い物メモの分量(下書きの分量欄はtextarea)
+      const hhReadAmounts = async () => {
+        await hhPage.waitForSelector('textarea', { timeout: 15000 })
+        return hhPage.evaluate(() =>
+          [...document.querySelectorAll('textarea')]
+            .map((t) => t.value)
+            .filter((v) => v && /[0-9]/.test(v)),
+        )
+      }
+      await hhPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await hhPage.waitForTimeout(1200)
+      const hhAmountsBefore = await hhReadAmounts()
+      check(
+        'MEALPLAN-HOUSE 前提: 献立から買い物メモの下書きができる',
+        hhAmountsBefore.length > 0,
+        `amounts=${JSON.stringify(hhAmountsBefore)}`,
+      )
+
+      // レシピ詳細の人数ステッパーは、未設定なら従来どおり登録人数分(2人分)で開く
+      await hhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await hhPage.waitForTimeout(800)
+      const hhOpenDetail = async () => {
+        await hhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await hhPage.waitForTimeout(900)
+        await hhPage.getByText('肉じゃが', { exact: true }).first().click()
+        await hhPage.waitForTimeout(700)
+        const shown = await hhPage.locator('span.min-w-14').first().textContent()
+        return {
+          servings: hhNum(shown),
+          registered: ((await hhPage.textContent('body')) ?? '').match(/登録: (\d+)人分/)?.[1],
+        }
+      }
+      const hhDetailBefore = await hhOpenDetail()
+      check(
+        'MEALPLAN-HOUSE 未設定ならレシピ詳細は登録人数分(2人分)で開く',
+        hhDetailBefore.servings === 2,
+        JSON.stringify(hhDetailBefore),
+      )
+
+      // --- 設定「ふだん作る人数」を4人分にする ---
+      await hhPage.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
+      await hhPage.waitForTimeout(900)
+      const hhSelect = hhPage.getByLabel('ふだん作る人数')
+      check(
+        'MEALPLAN-HOUSE 設定のパーソナライズ節に「ふだん作る人数」がある(既定は設定しない)',
+        (await hhSelect.count()) === 1 && (await hhSelect.inputValue()) === '',
+        `count=${await hhSelect.count()} value=${await hhSelect.inputValue()}`,
+      )
+      check(
+        'MEALPLAN-HOUSE 説明は「最初からこの人数分として扱う」ことだけを書く',
+        ((await hhPage.textContent('body')) ?? '').includes(
+          '献立に入れた料理を、最初からこの人数分として扱います',
+        ),
+      )
+      await hhSelect.selectOption('4')
+      await hhPage.waitForTimeout(600)
+
+      // 献立の行・概算食費・買い物メモが4人分になる
+      await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await hhPage.waitForTimeout(1200)
+      await hhPage.getByRole('button', { name: '週', exact: true }).click()
+      await hhPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-HOUSE 食数を決めていない行は「ふだん作る人数」で表示される(4人分)',
+        hhNum(await hhChip()) === 4,
+        `chip=${await hhChip()}`,
+      )
+      const hhCostAfter = await hhOpenCost()
+      check(
+        'MEALPLAN-HOUSE 概算食費は作る食数ぶん(2人分→4人分でちょうど2倍・注記も4人分)',
+        hhCostAfter.note === '4' && hhCostAfter.yen === hhCostBefore.yen * 2,
+        `before=${JSON.stringify(hhCostBefore)} after=${JSON.stringify(hhCostAfter)}`,
+      )
+      await hhPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await hhPage.waitForTimeout(1200)
+      const hhAmountsAfter = await hhReadAmounts()
+      const hhAmountNum = (v) => {
+        const mixed = v.match(/(\d+)\s*と\s*(\d+)\/(\d+)/)
+        if (mixed) return Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3])
+        const frac = v.match(/(\d+)\/(\d+)/)
+        if (frac) return Number(frac[1]) / Number(frac[2])
+        const dec = v.match(/\d+(?:\.\d+)?/)
+        return dec ? Number(dec[0]) : 0
+      }
+      check(
+        'MEALPLAN-HOUSE 買い物メモの分量も「ふだん作る人数」ぶん(2倍)になる',
+        hhAmountsAfter.length === hhAmountsBefore.length &&
+          hhAmountsBefore.every((v, i) => hhAmountNum(hhAmountsAfter[i]) === hhAmountNum(v) * 2),
+        `before=${JSON.stringify(hhAmountsBefore)} after=${JSON.stringify(hhAmountsAfter)}`,
+      )
+
+      // レシピ詳細も「ふだん作る人数」で開き、元の登録人数は併記で残る
+      const hhDetailAfter = await hhOpenDetail()
+      check(
+        'MEALPLAN-HOUSE レシピ詳細は「ふだん作る人数」(4人分)で開く',
+        hhDetailAfter.servings === 4,
+        JSON.stringify(hhDetailAfter),
+      )
+      check(
+        'MEALPLAN-HOUSE レシピ詳細に元の登録人数(登録: 2人分)が併記される',
+        hhDetailAfter.registered === '2',
+        JSON.stringify(hhDetailAfter),
+      )
+      // 栄養の「1人分」(折りたたんだ1行のkcal)は、開いた人数が何人分でも動かないこと
+      const hhKcal = async () =>
+        ((await hhPage.textContent('body')) ?? '').match(/([\d,]+)kcal/)?.[1]
+      const hhKcalBefore = await hhKcal()
+      await hhPage.getByRole('button', { name: '人数を増やす' }).click()
+      await hhPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-HOUSE 詳細で手で人数を変えるとその画面ではそちらが優先(4→5人分)',
+        hhNum(await hhPage.locator('span.min-w-14').first().textContent()) === 5,
+      )
+      const hhKcalAfter = await hhKcal()
+      check(
+        'MEALPLAN-HOUSE 栄養の「1人分」は人数を変えても動かない',
+        hhKcalBefore != null && hhKcalAfter === hhKcalBefore,
+        `before=${hhKcalBefore} after=${hhKcalAfter}`,
+      )
+
+      // 枠ごとに決めた食数は「ふだん作る人数」より強い。戻すボタンは既定(=4人分)を名乗る
+      await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await hhPage.waitForTimeout(1000)
+      await hhPage.getByRole('button', { name: '週', exact: true }).click()
+      await hhPage.waitForTimeout(400)
+      await hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
+      await hhPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-HOUSE 食数の窓に設定「ふだん作る人数」の値が出る',
+        ((await hhPage.textContent('body')) ?? '').includes('設定「ふだん作る人数」は4人分です'),
+      )
+      await hhPage.getByRole('button', { name: '食数を増やす' }).click()
+      await hhPage.getByRole('button', { name: '決定' }).click()
+      await hhPage.waitForTimeout(700)
+      check(
+        'MEALPLAN-HOUSE 枠ごとに決めた食数は「ふだん作る人数」より優先される(5人分)',
+        hhNum(await hhChip()) === 5,
+        `chip=${await hhChip()}`,
+      )
+      await hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
+      await hhPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-HOUSE 戻すボタンは戻り先の人数(既定の4人分)を名乗る',
+        (await hhPage.getByRole('button', { name: '既定の4人分に戻す' }).count()) === 1,
+      )
+      await hhPage.getByRole('button', { name: '既定の4人分に戻す' }).click()
+      await hhPage.waitForTimeout(700)
+      check(
+        'MEALPLAN-HOUSE 「既定に戻す」でふだん作る人数(4人分)に戻る',
+        hhNum(await hhChip()) === 4,
+        `chip=${await hhChip()}`,
+      )
+    } finally {
+      await hhBrowser.close()
     }
   }
 

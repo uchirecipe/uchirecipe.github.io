@@ -97,8 +97,9 @@ import {
   PURPOSE_REDRAW_ATTEMPTS,
 } from '../logic/mealPlan'
 import type { FillWeekPlan, MealGenre, ProteinSource, SuggestPairResult } from '../logic/mealPlan'
-// 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)
-import { clampServings } from '../logic/servings'
+// 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)。
+// 実効食数・既定の食数の判定も同じ場所に集約してある(2026-08-03 便DK)
+import { clampServings, effectiveMealServings, defaultMealServings } from '../logic/servings'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -928,6 +929,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     void updateSettings(patch)
   }
+  /**
+   * 設定「ふだん作る人数」（2026-08-03 便DK・オーナー確定
+   * 「3人家族なら予算や買い物メモは3人分で計算した数値が必要。栄養は1人当たりのみで十分」）。
+   * 枠ごとに食数を決めていない献立を、最初から何人分として扱うか。未設定＝従来どおり
+   * レシピの登録人数分。効く先は買い物メモの分量と、これから作る予定の概算食費だけで、
+   * 栄養（1人分）はこの値をいっさい見ない。
+   */
+  const householdServings = settings?.householdServings
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
   const dbPriceEntries = usePriceEntries()
   const priceEntries = isDemo ? demo.priceEntries : dbPriceEntries
@@ -1326,10 +1335,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const out: RangePlannedDish[] = []
     monthEntries?.forEach((e) => {
       const recipe = recipeById.get(e.recipeId)
-      if (recipe) out.push({ date: e.date, recipe })
+      // 実効食数(枠ごとの食数 > ふだん作る人数 > 登録人数分)を添えて渡す(2026-08-03 便DK)。
+      // 「これから作る予定の食費(作る食数ぶん)」だけに効き、1人分の食費・栄養は変わらない
+      if (recipe)
+        out.push({
+          date: e.date,
+          recipe,
+          servings: effectiveMealServings(e.servings, householdServings, recipe.servings),
+        })
     })
     return out
-  }, [monthEntries, recipeById])
+  }, [monthEntries, recipeById, householdServings])
   /**
    * 期間の集計(2026-07-28 便CA・オーナー確定仕様)。
    * ①平均をやめ「1人が期間内に食べた分の合計」を出す ②過去日は作った記録・今日以降は登録した献立
@@ -2758,26 +2774,29 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   /**
    * 食数（何人分作るか）を決める窓（2026-08-03 便DJ・オーナー指示）。
-   * 開いている枠のid・料理名・レシピに登録されている人数分・いまの値を持つ。
-   * isCustom＝その枠に食数を決めてある（＝レシピの人数分に戻すボタンを出す）。
+   * 開いている枠のid・料理名・レシピに登録されている人数分・既定の食数・いまの値を持つ。
+   * isCustom＝その枠に食数を決めてある（＝既定に戻すボタンを出す）。
+   * 2026-08-03 便DK: defaultServings＝決めていない枠が使う人数（設定「ふだん作る人数」があれば
+   * その人数・無ければレシピの登録人数分）。戻すボタンの文言と実際の戻り先をここで一致させる。
    */
   const [servingsEditor, setServingsEditor] = useState<{
     entryId: number
     title: string
     recipeServings: number
+    defaultServings: number
     value: number
     isCustom: boolean
   } | null>(null)
   const submitServings = async (value: number | undefined) => {
     if (!servingsEditor) return
-    const { entryId, title, recipeServings } = servingsEditor
+    const { entryId, title, defaultServings } = servingsEditor
     await updateMealEntryServings(entryId, value)
     setServingsEditor(null)
     setMessage(
       value == null
         ? ja.mealPlan.servingsResetDone
             .replace('{title}', title)
-            .replace('{n}', String(recipeServings))
+            .replace('{n}', String(defaultServings))
         : ja.mealPlan.servingsDone.replace('{title}', title).replace('{n}', String(value)),
     )
   }
@@ -2918,9 +2937,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 週の概算食費（材料ごとの価格入力を優先し、未入力の材料は食材価格マスタで補う。docs/20 §3）
   // 集計対象は activeEntries(今日以降)。過去日は週タブに表示されないので金額から辿れない
   // (2026-07-29 便CD/MP-07)。過ぎた分の実績は月タブの「期間の栄養と食費」が担当する
+  // 2026-08-03 便DK: 金額は「作る食数ぶん」(1人分の単価×実効食数)。食数を1つも触らず
+  // 「ふだん作る人数」も未設定なら実効食数＝登録人数分で、従来と1円も変わらない
   const weekCostEstimate = useMemo(
-    () => sumMealPlanEntriesCost(activeEntries, recipeById, priceIndex),
-    [activeEntries, recipeById, priceIndex],
+    () => sumMealPlanEntriesCost(activeEntries, recipeById, priceIndex, householdServings),
+    [activeEntries, recipeById, priceIndex, householdServings],
   )
   /** ごはん1杯ぶんの金額(食材価格マスタから引く。マスタに価格が無ければ0円=足さない) */
   const riceYen = useMemo(
@@ -2930,15 +2951,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 週の概算食費に足すごはんの杯数。金額の集計範囲(activeEntries=今日以降)に合わせて数える
    * ＝画面に出ている予定と金額が一致する(2026-07-29 便CD/MP-07と同じ考え方)。
+   *
+   * 2026-08-03 便DK: 設定「ふだん作る人数」を入れているときは、1食につきその人数ぶんの杯数で
+   * 数える(3人家族なら1食3杯)。おかず側が作る食数ぶんの金額になったので、ごはんだけ1杯のままだと
+   * 予算と比べる金額が食い違うため。未設定なら従来どおり1食1杯。
+   * 栄養側(weekBalanceの ricePlanServingsByDate)は1人分のままで、こちらの倍率は使わない。
    */
   const riceCostServings = useMemo(() => {
     if (!includeRice) return 0
+    const perMeal = householdServings != null && householdServings > 0 ? householdServings : 1
     let total = 0
     ricePlanServingsByDate.forEach((n, date) => {
-      if (!isPastDate(date, today)) total += n
+      if (!isPastDate(date, today)) total += n * perMeal
     })
     return total
-  }, [includeRice, ricePlanServingsByDate, today])
+  }, [includeRice, ricePlanServingsByDate, today, householdServings])
   const weekCost = weekCostEstimate.total + riceCostServings * riceYen
   // 概算食費の食数(=食事の回数。主菜+副菜が並ぶ枠も1食。2026-07-24 便BH-3・タスク8「◯食分」併記)
   const weekMealCount = useMemo(() => mealOccasionCount(activeEntries), [activeEntries])
@@ -3067,28 +3094,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 買い物リストに渡す「この週に作る食数の合計」（2026-08-03 便DJ・食数設定）。
    * 枠ごとに決めた食数（MealPlanEntry.servings）を足し合わせ、決めていない枠は
-   * そのレシピに登録されている人数分で数える＝食数を1つも触っていなければ
-   * 「回数 × 登録人数」と同じ値になり、従来と分量が1gも変わらない。
+   * 設定「ふだん作る人数」、それも無ければそのレシピに登録されている人数分で数える
+   * （2026-08-03 便DK。優先順位は logic/servings.ts effectiveMealServings に集約）
+   * ＝食数を1つも触らず「ふだん作る人数」も未設定なら「回数 × 登録人数」と同じ値になり、
+   * 従来と分量が1gも変わらない。
    */
   const weekRecipeServings = useMemo(() => {
     const totals = new Map<number, number>()
     const add = (recipeId: number, servings: number) =>
       totals.set(recipeId, (totals.get(recipeId) ?? 0) + servings)
-    const baseServings = (recipeId: number) => {
-      const s = recipeById.get(recipeId)?.servings
-      return s != null && s > 0 ? s : 1
-    }
     activeEntries.forEach((e) => {
       if (!visibleSlots.includes(e.slot)) return
-      add(e.recipeId, e.servings != null && e.servings > 0 ? e.servings : baseServings(e.recipeId))
+      add(
+        e.recipeId,
+        effectiveMealServings(e.servings, householdServings, recipeById.get(e.recipeId)?.servings),
+      )
     })
-    // 週の表に無い「今日の献立」の分は1回分＝登録人数ぶん（weekRecipeCountsと同じ数え方）
+    // 週の表に無い「今日の献立」の分は1回分＝既定の食数（weekRecipeCountsと同じ数え方）。
+    // こちらには枠ごとの食数を決める場所が無いので、既定＝ふだん作る人数／登録人数分で数える
     todayList?.forEach((item) => {
-      if (!totals.has(item.recipeId)) add(item.recipeId, baseServings(item.recipeId))
+      if (!totals.has(item.recipeId))
+        add(
+          item.recipeId,
+          defaultMealServings(householdServings, recipeById.get(item.recipeId)?.servings),
+        )
     })
     return totals
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEntries, settings?.visibleMealSlots, todayList, recipeById])
+  }, [activeEntries, settings?.visibleMealSlots, todayList, recipeById, householdServings])
 
   const goShopping = () => {
     if (weekRecipeCounts.size === 0) return
@@ -3114,13 +3147,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const isEmpty = !recipe
     // 「作った見た目」対応付け(タスク2): この枠が「作った記録」に対応していれば作った見た目に変える
     const isCooked = entryId != null && cookedPlanEntryIdSet.has(entryId)
-    // 食数(何人分作るか。2026-08-03 便DJ)。枠に決めていなければレシピの登録人数分
-    const rowServings =
-      row.kind === 'entry' && row.entry.servings != null && row.entry.servings > 0
-        ? row.entry.servings
-        : recipe?.servings != null && recipe.servings > 0
-          ? recipe.servings
-          : 1
+    // 食数(何人分作るか。2026-08-03 便DJ)。枠に決めていなければ設定「ふだん作る人数」、
+    // それも無ければレシピの登録人数分(便DK。優先順位は logic/servings.ts に集約)
+    const rowServings = effectiveMealServings(
+      row.kind === 'entry' ? row.entry.servings : undefined,
+      householdServings,
+      recipe?.servings,
+    )
     return (
       <div key={key} className="flex items-center gap-2">
         {/* 役割ラベルの列。入っている行では、その下に食数(何人分作るか)のボタンを重ねて置く
@@ -3139,6 +3172,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   entryId: row.entry.id!,
                   title: recipe.title,
                   recipeServings: recipe.servings > 0 ? recipe.servings : 1,
+                  defaultServings: defaultMealServings(householdServings, recipe.servings),
                   value: rowServings,
                   isCustom: row.entry.servings != null,
                 })
@@ -3889,6 +3923,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         .replace('{n}', String(monthSummary.cookedMealCount))}
                     </p>
                   )}
+                  {/* これから作る予定の分も、実際に作る食数ぶんの金額で同じ形で並べる
+                      (2026-08-03 便DK。実績と予定を同じスケールで見比べられるようにする) */}
+                  {monthSummary.planMealCount > 0 && (
+                    <p className="mt-0.5 text-sm text-ink-muted">
+                      {ja.mealPlan.monthSummaryPlanHousehold
+                        .replace('{yen}', monthSummary.planHouseholdYen.toLocaleString())
+                        .replace('{n}', String(monthSummary.planMealCount))}
+                    </p>
+                  )}
                   {/* どの日をどちらの基準で数えたかは、期間の集計カードと同じ文言で必ず出す */}
                   <p className="mt-0.5 text-xs text-ink-muted">{intakeBasisText(monthSummary)}</p>
                   {/* 数字の前提(何をもとにしためやすか)も同じ場所に置く(2026-07-30 便CH/C12) */}
@@ -4198,6 +4241,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           {ja.mealPlan.rangeIntakeHouseholdResult
                             .replace('{yen}', rangeSummary.cookedHouseholdYen.toLocaleString())
                             .replace('{n}', String(rangeSummary.cookedMealCount))}
+                        </p>
+                      </>
+                    )}
+                    {/* これから作る予定の分も、実際に作る食数ぶんの金額を同じ形で出す(2026-08-03 便DK) */}
+                    {rangeSummary.planMealCount > 0 && (
+                      <>
+                        <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                          {ja.mealPlan.rangeIntakePlanHouseholdLabel}
+                        </p>
+                        <p className="mt-0.5 text-lg font-bold text-accent-ink">
+                          {ja.mealPlan.rangeIntakeHouseholdResult
+                            .replace('{yen}', rangeSummary.planHouseholdYen.toLocaleString())
+                            .replace('{n}', String(rangeSummary.planMealCount))}
                         </p>
                       </>
                     )}
@@ -4717,8 +4773,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   （{ja.mealPlan.weekCostMealCount.replace('{n}', String(weekMealCount))}）
                 </span>
               </p>
-              {/* 何人ぶんの金額かを言い切る(2026-07-30 便CH/C8。月間サマリーの「1人分」と対にする) */}
-              <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.weekCostWholeNote}</p>
+              {/* 何人ぶんの金額かを言い切る(2026-07-30 便CH/C8。月間サマリーの「1人分」と対にする)。
+                  2026-08-03 便DK: 金額が実効食数に連動するようになったので、実際に数えた
+                  食数の合計を出す(「登録した人数ぶん」固定の言い方をやめる) */}
+              <p className="mt-1 text-sm text-ink-muted">
+                {ja.mealPlan.weekCostWholeNote.replace(
+                  '{n}',
+                  String(weekCostEstimate.servingsTotal),
+                )}
+              </p>
               {/* ごはんを含めて計算する(便CW-10)がONのとき、金額に何を足したかを必ず書く */}
               {riceCostServings > 0 && riceYen > 0 && (
                 <p className="mt-1 text-sm text-ink-muted">
@@ -4971,8 +5034,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       )}
 
       {/* 食数(何人分作るか)を決める窓(2026-08-03 便DJ・オーナー指示)。
-          既定はレシピに登録されている人数分で、枠ごとに変えられる。
-          変わるのは買い物メモへ渡す材料の分量だけで、栄養・食費の「1人分」の表示は変えない
+          既定は設定「ふだん作る人数」(未設定ならレシピに登録されている人数分)で、枠ごとに変えられる。
+          変わるのは買い物メモへ渡す材料の分量と、これから作る予定の概算食費(2026-08-03 便DK)。
+          栄養の「1人分」の表示は変えない
           (何人分作っても1人が食べる量は1人分のままのため。db/types.ts MealPlanEntry.servings参照) */}
       {servingsEditor && (
         <div
@@ -5035,6 +5099,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 String(servingsEditor.recipeServings),
               )}
             </p>
+            {/* 設定「ふだん作る人数」を入れているときは、既定がそちらに変わっていることを添える
+                (2026-08-03 便DK)。どこで変えられるかは画面名で示す(規約H: 指示語で場所を言わない) */}
+            {householdServings != null && (
+              <p className="mt-1 text-xs text-ink-muted">
+                {ja.mealPlan.servingsHouseholdNote.replace('{n}', String(householdServings))}
+              </p>
+            )}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.servingsScopeNote}</p>
             <button
               type="button"
@@ -5049,7 +5120,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 onClick={() => void submitServings(undefined)}
                 className="mt-[var(--space-sm)] w-full rounded-md border border-edge bg-app py-3 text-sm font-bold text-accent-ink shadow-sm"
               >
-                {ja.mealPlan.servingsReset}
+                {ja.mealPlan.servingsReset.replace('{n}', String(servingsEditor.defaultServings))}
               </button>
             )}
           </div>
