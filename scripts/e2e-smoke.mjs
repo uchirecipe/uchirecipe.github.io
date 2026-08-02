@@ -165,7 +165,7 @@
 //         実際のJSON書き込み内容の往復まではここでは検証できない(scripts/test-logic.mjsの
 //         単体テストとコードレビューで別途担保。報告に明記) /
 //         BACKUPCARDS-01(2026-07-17バックアップ改修 修正5: バックアップタブを3カード
-//         (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成。②で「追加」
+//         (①バックアップを取る/②バックアップを読み込む/③困ったとき)に再構成。②で「追加」
 //         「置き換え」ボタンが並んで見えること・①に解錠コード注意文があることを確認) /
 //         PRICEVIEW-01(レシピ詳細の材料「原価ビュー」トグル。2026-07-15新設・2026-07-16裁定1で
 //         全面改修・2026-07-20 便AJ(docs/45)で再改修。既定は非表示で材料行に金額表示は無く、
@@ -1595,7 +1595,7 @@ try {
     check(
       'MOVEGUIDE-01 展開すると4ステップが見える',
       guideText.includes('この端末で「ファイルに書き出す」') &&
-        guideText.includes('読み込む（今のデータと置き換え）') &&
+        guideText.includes('「データを上書き」を押してそのファイルを選ぶ') &&
         guideText.includes('Pro版は①のファイルから一緒に戻ります'),
     )
     check(
@@ -1618,15 +1618,16 @@ try {
 
   currentCheck = 'BACKUPCARDS-01'
   // 修正5(2026-07-17バックアップ改修): バックアップタブが3カード
-  // (①バックアップを取る/②バックアップから戻す/③困ったとき)に再構成されたこと
+  // (①バックアップを取る/②バックアップを読み込む/③困ったとき)に再構成されたこと
+  // (2026-08-02 オーナー指示で②の見出し・ボタン文言を短くした)
   check(
-    'BACKUPCARDS-01 「バックアップから戻す」の見出しが見える(カード②)',
-    (await page.textContent('body')).includes('バックアップから戻す'),
+    'BACKUPCARDS-01 「バックアップを読み込む」の見出しが見える(カード②)',
+    (await page.textContent('body')).includes('バックアップを読み込む'),
   )
   check(
-    'BACKUPCARDS-01 「追加」「置き換え」の両ボタンが同時に見える(並べて配置)',
-    (await page.textContent('body')).includes('読み込む（今のデータに追加）') &&
-      (await page.textContent('body')).includes('読み込む（今のデータと置き換え）'),
+    'BACKUPCARDS-01 「今のデータに追加」「データを上書き」の両ボタンが同時に見える(並べて配置)',
+    (await page.textContent('body')).includes('今のデータに追加') &&
+      (await page.textContent('body')).includes('データを上書き'),
   )
   check(
     'BACKUPCARDS-01 修正1: バックアップに解錠コードが含まれる旨の注意文が見える(呼称は便CJ/C9で統一)',
@@ -7933,7 +7934,7 @@ try {
       await dstPage.waitForTimeout(300)
       const [fileChooser] = await Promise.all([
         dstPage.waitForEvent('filechooser'),
-        dstPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+        dstPage.getByRole('button', { name: 'データを上書き' }).click(),
       ])
       await fileChooser.setFiles({
         name: 'uchi-recipe-backup.json',
@@ -8030,7 +8031,7 @@ try {
       await mergePage.waitForTimeout(300)
       const [mergeChooser] = await Promise.all([
         mergePage.waitForEvent('filechooser'),
-        mergePage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+        mergePage.getByRole('button', { name: '今のデータに追加' }).click(),
       ])
       await mergeChooser.setFiles({
         name: 'uchi-recipe-backup.json',
@@ -8175,7 +8176,7 @@ try {
       await compatPage.waitForTimeout(300)
       const [compatFileChooser] = await Promise.all([
         compatPage.waitForEvent('filechooser'),
-        compatPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+        compatPage.getByRole('button', { name: 'データを上書き' }).click(),
       ])
       await compatFileChooser.setFiles({
         name: 'old-format-backup.json',
@@ -8308,7 +8309,7 @@ try {
       })
       const [fileChooser] = await Promise.all([
         ruPage.waitForEvent('filechooser'),
-        ruPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click(),
+        ruPage.getByRole('button', { name: 'データを上書き' }).click(),
       ])
       await fileChooser.setFiles({
         name: 'empty-backup.json',
@@ -8380,7 +8381,7 @@ try {
 
   // --- CODEMERGE-01(2026-07-17バックアップ改修 修正1): merge復元(「読み込む(今のデータに追加)」)
   // でもPro解錠コードが戻ること、および旧形式(コード無し)バックアップをmergeしても既存の解錠
-  // コードが消えない(後方互換)ことを、実際の「バックアップから戻す」UI経由で確認する。
+  // コードが消えない(後方互換)ことを、実際の「バックアップを読み込む」UI経由で確認する。
   // (a) 既存プロファイルはコード未購入→コードを含むバックアップをmerge→復元後に解錠される
   // (b) 既存プロファイルはPro解錠済み→コードを含まない旧形式バックアップをmerge→解錠状態が
   //     消えない(mergeUnlockCodesの「バックアップに無ければ既存を保持」を実UIで固定する) ---
@@ -8412,7 +8413,7 @@ try {
       await cmaPage.waitForTimeout(300)
       const [cmaFileChooser] = await Promise.all([
         cmaPage.waitForEvent('filechooser'),
-        cmaPage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+        cmaPage.getByRole('button', { name: '今のデータに追加' }).click(),
       ])
       await cmaFileChooser.setFiles({
         name: 'with-code-backup.json',
@@ -8491,7 +8492,7 @@ try {
       await cmbPage.waitForTimeout(300)
       const [cmbFileChooser] = await Promise.all([
         cmbPage.waitForEvent('filechooser'),
-        cmbPage.getByRole('button', { name: '読み込む（今のデータに追加）' }).click(),
+        cmbPage.getByRole('button', { name: '今のデータに追加' }).click(),
       ])
       await cmbFileChooser.setFiles({
         name: 'old-format-no-code-backup.json',
@@ -8671,11 +8672,11 @@ try {
       icPage.once('filechooser', () => {
         filechooserFired = true
       })
-      await icPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click()
+      await icPage.getByRole('button', { name: 'データを上書き' }).click()
       await icPage.waitForTimeout(500)
       check(
         'IMPORTCONFIRM-01 置き換えボタン押下でconfirmダイアログが出る',
-        dialogSeen?.type === 'confirm' && dialogSeen.message.includes('置き換えます'),
+        dialogSeen?.type === 'confirm' && dialogSeen.message.includes('内容で上書きします'),
         `dialogSeen=${JSON.stringify(dialogSeen)}`,
       )
       check(
@@ -8688,7 +8689,7 @@ try {
         icPage.waitForEvent('filechooser'),
         (async () => {
           icPage.once('dialog', (dialog) => void dialog.accept())
-          await icPage.getByRole('button', { name: '読み込む（今のデータと置き換え）' }).click()
+          await icPage.getByRole('button', { name: 'データを上書き' }).click()
         })(),
       ])
       check('IMPORTCONFIRM-01 confirmを承認するとファイル選択(filechooser)が開く', !!fileChooser)

@@ -180,7 +180,7 @@ function formatRecipeSetResult(result: {
 }
 
 /**
- * 「読み込む（今のデータに追加）」の結果の内訳を組み立てる（2026-07-30 便CJ/C1(d)・C11・C12）。
+ * 「今のデータに追加」の結果の内訳を組み立てる（2026-07-30 便CJ/C1(d)・C11・C12）。
  * 足したものを項目ごとに1行ずつ返し、0件の行は出さない（「作った記録0件・写真0枚を足しました」
  * のような無意味な行を並べない）。復元したつもりで実は戻っていない、という誤認を防ぐのが目的なので、
  * 何も足さなかった場合もその旨を1行返す（無言で終わらせない）
@@ -219,7 +219,7 @@ function buildMergeResultLines(detail: MergeImportDetail): string[] {
 }
 
 /**
- * 「読み込む（今のデータと置き換え）」の確認文を件数入りで組み立てる
+ * 「データを上書き」の確認文を件数入りで組み立てる
  * （2026-07-17設定ゼロベース裁定#6a）。ファイル選択を開く前(pickImportFile)・
  * ファイル選択後の最終確認(onImportFile)の両方で同じ文言を使い整合させる
  */
@@ -312,7 +312,7 @@ export default function SettingsPage() {
   // 揃える。写真の多いファイルは端末によって数秒〜十数秒かかり、その間ボタンが押せたままだった)
   const [importBusy, setImportBusy] = useState(false)
   // 読み込み結果の内訳(2026-07-30 便CJ/C1(d)・C11・C12)。トーストは数秒で消えてしまい
-  // 「本当に戻ったか」を確かめる手段にならないため、「バックアップから戻す」カード内に
+  // 「本当に戻ったか」を確かめる手段にならないため、「バックアップを読み込む」カード内に
   // テキストとして残す(レシピセット読み込み欄の先例と同じ流儀。二重表示しないのでトーストは出さない)
   const [importResultLines, setImportResultLines] = useState<string[]>([])
   // 目次チップの現在地ハイライト用(1本スクロール化)。スクロール監視で表示中の節idを保持する
@@ -1345,8 +1345,9 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {/* ②バックアップから戻す: 「追加」「置き換え」を並べて配置し、それぞれに説明キャプションを
-              付ける(2026-07-17修正5。以前は縦積みで置き換えだけ警告色が浮いて見えていたのを解消) */}
+          {/* ②バックアップを読み込む: 「今のデータに追加」「データを上書き」を並べて配置し、
+              それぞれに説明キャプションを付ける(2026-07-17修正5。以前は縦積みで上書きだけ警告色が
+              浮いて見えていたのを解消。ボタン文言は2026-08-02 オーナー指示で短くした) */}
           <section className={sectionCls}>
             <h2 className="font-bold">{ja.settings.backupRestoreTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.backupRestoreDescription}</p>
