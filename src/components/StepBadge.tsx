@@ -1,7 +1,7 @@
 import { Timer } from 'lucide-react'
 
 type Props = {
-  /** 'custom' = 手順に紐付かないタイマー(じぶんタイマー)用。数字の代わりにタイマーアイコンを出す */
+  /** 'custom' = 手順に紐付かないタイマー(ja.timer.customLabel「タイマー」)用。数字の代わりにタイマーアイコンを出す */
   number: number | 'custom'
   size?: number
 }

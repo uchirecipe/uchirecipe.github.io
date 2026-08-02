@@ -8,6 +8,9 @@ import {
   X,
   ChevronUp,
   ChevronDown,
+  GripVertical,
+  ListChecks,
+  CheckCircle2,
   Trash2,
   ClipboardPaste,
   RotateCcw,
@@ -274,6 +277,16 @@ const sectionHeadingCls =
 const iconBtnCls =
   'flex h-10 w-10 items-center justify-center rounded-sm border border-edge bg-surface text-ink-muted'
 
+/**
+ * 押されたEnterが「日本語入力の変換を確定するEnter」かどうか（2026-08-02 オーナー実機FB
+ * 「エンターで行が増えて注力しづらい」の対策）。変換中のEnterで材料行・タグを作ってしまうと、
+ * 変換を確定しただけのつもりが勝手に行が増える。
+ * isComposing が本命で、keyCode 229 は compositionend が keydown より先に来る環境向けの保険
+ */
+function isImeConfirmKey(e: React.KeyboardEvent<HTMLInputElement>): boolean {
+  return e.nativeEvent.isComposing || e.keyCode === 229
+}
+
 /** 配列の要素を上下に入れ替える */
 function move<T>(list: T[], from: number, to: number): T[] {
   if (to < 0 || to >= list.length) return list
@@ -343,6 +356,11 @@ function RecipeFormInner() {
   // 材料の「まとめて入力」欄(2026-07-28 便BW/C-07)。入力途中の文字はフォームの値ではないので
   // 下書き(FormDraft)には含めない=「追加」を押した時点で材料行になる
   const [quickIngredient, setQuickIngredient] = useState('')
+  // 材料行の整理(複数選択→まとめて削除。2026-08-02 オーナー実機FB)。食材の在庫の整理モードに倣う。
+  // 選択は行の位置(index)で持つため、整理中は上下移動・1行ずつの削除を隠して位置がずれないようにし、
+  // 行が増える操作(まとめて入力・材料を追加)では選択をいったん解除する
+  const [ingredientOrganizing, setIngredientOrganizing] = useState(false)
+  const [selectedIngredientIndexes, setSelectedIngredientIndexes] = useState<number[]>([])
   const [steps, setSteps] = useState<StepRow[]>([{ ...emptyStep }])
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
@@ -1064,7 +1082,48 @@ function RecipeFormInner() {
         last && !last.name.trim() && !last.amount.trim() && !last.unit.trim() && !last.memo.trim()
       return lastIsEmpty ? [...rows.slice(0, -1), row] : [...rows, row]
     })
+    // 整理中に行が増えると、位置で持っている選択がずれる(最後の空行が差し替わる場合がある)。
+    // 消す行を取り違えないよう、選択はいったん解除する
+    setSelectedIngredientIndexes([])
     setQuickIngredient('')
+  }
+
+  /** 材料の「整理」モードの出入り。抜けるときは選択を空にする（次に入ったとき選択が残っていない） */
+  const toggleIngredientOrganizing = () => {
+    setIngredientOrganizing((on) => !on)
+    setSelectedIngredientIndexes([])
+  }
+  const toggleIngredientSelected = (index: number) => {
+    setSelectedIngredientIndexes((prev) =>
+      prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index],
+    )
+  }
+  const selectAllIngredients = () => setSelectedIngredientIndexes(ingredients.map((_, i) => i))
+  const clearIngredientSelection = () => setSelectedIngredientIndexes([])
+  /**
+   * 選んだ材料行をまとめて削除する（2026-08-02 オーナー実機FB）。
+   * 規約F: 何が消えて何が残るかを件数つきで両方書いてから消す。
+   * すべて選んだときは行が0になるので、1行ずつの削除と同じく空の1行を残す
+   */
+  const removeSelectedIngredients = () => {
+    const count = selectedIngredientIndexes.length
+    if (count === 0) return
+    const remaining = ingredients.length - count
+    const message =
+      remaining > 0
+        ? ja.form.ingredientOrganizeConfirm
+            .replace('{n}', String(count))
+            .replace('{m}', String(remaining))
+        : ja.form.ingredientOrganizeConfirmAll.replace('{n}', String(count))
+    if (!window.confirm(message)) return
+    const drop = new Set(selectedIngredientIndexes)
+    setIngredients((rows) => {
+      const kept = rows.filter((_, i) => !drop.has(i))
+      return kept.length > 0 ? kept : [{ ...emptyIngredient }]
+    })
+    setSelectedIngredientIndexes([])
+    // 1行になったら整理することが無くなるので、そのまま通常の入力に戻す
+    if (remaining <= 1) setIngredientOrganizing(false)
   }
   /**
    * 材料の数量欄・単位欄のblurで、全角入力を自動でNFKC半角化する(2026-07-21全角対応。
@@ -1729,10 +1788,37 @@ function RecipeFormInner() {
 
       {/* 材料（追加・削除・並べ替え） */}
       <div className="mt-[var(--space-lg)]">
-        <span className={labelCls}>{ja.form.ingredientsLabel}</span>
-        <p className="mt-1 text-sm text-ink-muted">
-          {ja.form.ingredientGroupHint.replace('{last}', String(MAX_SEASONING_GROUP))}
-        </p>
+        {/* 「整理」= 複数選択してまとめて削除するモード(2026-08-02 オーナー実機FB。
+            食材の在庫の整理モードと同じ様式)。1行しかないときは選ぶ意味がないので出さないが、
+            整理中は必ず出す(「完了」で戻れなくなるのを防ぐ) */}
+        <div className="flex items-center justify-between gap-2">
+          <span className={labelCls}>{ja.form.ingredientsLabel}</span>
+          {(ingredients.length > 1 || ingredientOrganizing) && (
+            <button
+              type="button"
+              onClick={toggleIngredientOrganizing}
+              aria-pressed={ingredientOrganizing}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                ingredientOrganizing
+                  ? 'border-accent bg-accent text-on-accent'
+                  : 'border-edge bg-surface text-ink-muted'
+              }`}
+            >
+              <ListChecks size={14} aria-hidden />
+              {ingredientOrganizing
+                ? ja.form.ingredientOrganizeDone
+                : ja.form.ingredientOrganizeToggle}
+            </button>
+          )}
+        </div>
+        {/* 合わせ調味料の色分けの使い方。整理中は色ボタン自体を隠していて、丸いボタン＝
+            「選ぶ」チェックに変わるため、説明と食い違わないようこの案内も隠す
+            (食材の在庫の整理モードと同じ扱い) */}
+        {!ingredientOrganizing && (
+          <p className="mt-1 text-sm text-ink-muted">
+            {ja.form.ingredientGroupHint.replace('{last}', String(MAX_SEASONING_GROUP))}
+          </p>
+        )}
         {/* 価格管理は「食材と価格」ページに一元化(2026-07-14 オーナー要望)。
             この画面には材料ごとの価格入力欄を置かず、案内だけ表示する */}
         <p className="mt-1 text-sm text-ink-muted">{ja.form.ingredientPriceGuide}</p>
@@ -1744,6 +1830,10 @@ function RecipeFormInner() {
             分解は貼り付け取込と同じロジック。3マスの入力欄はそのまま残している */}
         <div className="mt-[var(--space-sm)] rounded-md border border-dashed border-edge p-[var(--space-sm)]">
           <span className="text-sm font-bold text-ink-muted">{ja.form.quickIngredientLabel}</span>
+          {/* 書き方の注意(2026-08-02 オーナー実機FB)。欄のすぐ上に1行だけ置く */}
+          <p className="mt-0.5 text-xs font-bold text-ink-muted">
+            {ja.form.quickIngredientSpaceHint}
+          </p>
           <p className="mt-0.5 text-xs text-ink-muted">{ja.form.quickIngredientDescription}</p>
           <div className="mt-1 flex gap-[var(--space-sm)]">
             <input
@@ -1751,7 +1841,12 @@ function RecipeFormInner() {
               value={quickIngredient}
               onChange={(e) => setQuickIngredient(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                // 日本語入力の変換確定のEnterでは行を足さない(2026-08-02 オーナー実機FB
+                // 「エンターで行が増えて注力しづらい」の原因)。IMEで変換中に押したEnterは
+                // 「変換を確定するEnter」なので、そのときは何もしない。確定後にもう一度
+                // Enterを押したときだけ材料行になる。
+                // keyCode 229 はcompositionendがkeydownより先に来る環境向けの保険
+                if (e.key === 'Enter' && !isImeConfirmKey(e)) {
                   e.preventDefault()
                   addQuickIngredient()
                 }
@@ -1770,11 +1865,53 @@ function RecipeFormInner() {
           </div>
         </div>
 
+        {/* 整理モードの操作(全選択・選択解除・まとめて削除)。案内文のすぐ下・材料行の上に置き、
+            下までスクロールしなくても選べるようにする(食材の在庫の整理モードと同じ配置) */}
+        {ingredientOrganizing && (
+          <div className="mt-[var(--space-sm)] flex flex-col gap-2">
+            <p className="text-sm text-ink-muted">{ja.form.ingredientOrganizeHint}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={selectAllIngredients}
+                disabled={selectedIngredientIndexes.length === ingredients.length}
+                className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+              >
+                {ja.form.ingredientOrganizeSelectAll}
+              </button>
+              <button
+                type="button"
+                onClick={clearIngredientSelection}
+                disabled={selectedIngredientIndexes.length === 0}
+                className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm disabled:opacity-40"
+              >
+                {ja.form.ingredientOrganizeClearSelection}
+              </button>
+            </div>
+            {selectedIngredientIndexes.length > 0 && (
+              <button
+                type="button"
+                onClick={removeSelectedIngredients}
+                className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-warning shadow-sm"
+              >
+                {ja.form.ingredientOrganizeDeleteSelected.replace(
+                  '{n}',
+                  String(selectedIngredientIndexes.length),
+                )}
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
-          {ingredients.map((row, index) => (
+          {ingredients.map((row, index) => {
+            const rowSelected = selectedIngredientIndexes.includes(index)
+            return (
             <div
               key={index}
-              className="rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
+              className={`rounded-md border bg-surface p-[var(--space-sm)] shadow-sm ${
+                rowSelected ? 'border-accent ring-2 ring-accent' : 'border-edge'
+              }`}
               style={
                 row.group
                   ? { borderLeft: `4px solid var(${seasoningGroupColorToken(row.group)})` }
@@ -1815,59 +1952,97 @@ function RecipeFormInner() {
                 <p className="mt-1 text-xs text-ink-muted">{ja.form.importedAmountlessHint}</p>
               )}
               <div className="mt-[var(--space-sm)] flex items-center justify-between gap-[var(--space-sm)]">
-                <button
-                  type="button"
-                  onClick={() => updateIngredient(index, { group: nextSeasoningGroup(row.group) })}
-                  aria-label={
-                    row.group
-                      ? ja.form.ingredientGroupSet
-                          .replace('{n}', String(row.group))
-                          .replace('{last}', String(MAX_SEASONING_GROUP))
-                      : ja.form.ingredientGroupNone
-                  }
-                  className={iconBtnCls}
-                >
-                  <span
-                    className={`h-5 w-5 rounded-full border-2 ${row.group ? '' : 'border-dashed border-edge'}`}
-                    style={
-                      row.group
-                        ? {
-                            borderColor: `var(${seasoningGroupColorToken(row.group)})`,
-                            background: `var(${seasoningGroupColorToken(row.group)})`,
-                          }
-                        : undefined
-                    }
-                  />
-                </button>
                 <div className="flex items-center gap-[var(--space-sm)]">
-                  {/* 先頭行の「上へ」・末尾行の「下へ」は押しても動かないため無効にする(便BW・QA S3) */}
-                  <button
-                    type="button"
-                    onClick={() => setIngredients((rows) => move(rows, index, index - 1))}
-                    disabled={index === 0}
-                    aria-label={ja.form.moveUp}
-                    className={`${iconBtnCls} disabled:opacity-40`}
-                  >
-                    <ChevronUp size={20} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIngredients((rows) => move(rows, index, index + 1))}
-                    disabled={index === ingredients.length - 1}
-                    aria-label={ja.form.moveDown}
-                    className={`${iconBtnCls} disabled:opacity-40`}
-                  >
-                    <ChevronDown size={20} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeIngredientRow(index)}
-                    aria-label={ja.form.removeRow}
-                    className={`${iconBtnCls} text-warning`}
-                  >
-                    <X size={20} aria-hidden />
-                  </button>
+                  {/* 整理モードのチェック(2026-08-02)。付けた行が「選んだ材料◯行を削除」の対象になる */}
+                  {ingredientOrganizing && (
+                    <button
+                      type="button"
+                      onClick={() => toggleIngredientSelected(index)}
+                      aria-pressed={rowSelected}
+                      aria-label={ja.form.ingredientOrganizeSelectRow}
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${
+                        rowSelected
+                          ? 'border-accent bg-accent text-on-accent'
+                          : 'border-edge text-ink-muted'
+                      }`}
+                    >
+                      <CheckCircle2 size={20} aria-hidden />
+                    </button>
+                  )}
+                  {/* 合わせ調味料グループの色ボタン。整理中は隠す: 丸いボタンが2つ並ぶと
+                      どちらが「選ぶ」なのか紛らわしく、色を変える操作も選択中には要らない */}
+                  {!ingredientOrganizing && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateIngredient(index, { group: nextSeasoningGroup(row.group) })
+                      }
+                      aria-label={
+                        row.group
+                          ? ja.form.ingredientGroupSet
+                              .replace('{n}', String(row.group))
+                              .replace('{last}', String(MAX_SEASONING_GROUP))
+                          : ja.form.ingredientGroupNone
+                      }
+                      className={iconBtnCls}
+                    >
+                      <span
+                        className={`h-5 w-5 rounded-full border-2 ${row.group ? '' : 'border-dashed border-edge'}`}
+                        style={
+                          row.group
+                            ? {
+                                borderColor: `var(${seasoningGroupColorToken(row.group)})`,
+                                background: `var(${seasoningGroupColorToken(row.group)})`,
+                              }
+                            : undefined
+                        }
+                      />
+                    </button>
+                  )}
                 </div>
+                {/* 整理中は上下移動・1行ずつの削除を隠す。行の位置で選択を持っているため、
+                    選んだ後に並びが変わると消す行を取り違えるおそれがあるため */}
+                {!ingredientOrganizing && (
+                  <div className="flex items-center gap-[var(--space-sm)]">
+                    {/* 並び替えのつまみ(2026-08-02 オーナー実機FB: 上下矢印だけだと分量の数値調整に
+                        見える。買い物メモで先に採った様式=GripVerticalのつまみ+枠でくくる にそろえ、
+                        「順番の入れ替え」だと分かる見た目にする)。
+                        先頭行の「上へ」・末尾行の「下へ」は押しても動かないため無効にする(便BW・QA S3) */}
+                    <div
+                      className="flex shrink-0 items-center rounded-sm border border-edge text-ink-muted"
+                      role="group"
+                      aria-label={ja.form.reorderHandle}
+                    >
+                      <GripVertical size={14} className="ml-0.5 opacity-50" aria-hidden />
+                      <button
+                        type="button"
+                        onClick={() => setIngredients((rows) => move(rows, index, index - 1))}
+                        disabled={index === 0}
+                        aria-label={ja.form.moveUp}
+                        className="flex h-10 w-9 items-center justify-center disabled:opacity-30"
+                      >
+                        <ChevronUp size={20} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIngredients((rows) => move(rows, index, index + 1))}
+                        disabled={index === ingredients.length - 1}
+                        aria-label={ja.form.moveDown}
+                        className="flex h-10 w-9 items-center justify-center disabled:opacity-30"
+                      >
+                        <ChevronDown size={20} aria-hidden />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeIngredientRow(index)}
+                      aria-label={ja.form.removeRow}
+                      className={`${iconBtnCls} text-warning`}
+                    >
+                      <X size={20} aria-hidden />
+                    </button>
+                  </div>
+                )}
               </div>
               <input
                 type="text"
@@ -1878,11 +2053,16 @@ function RecipeFormInner() {
                 className="mt-[var(--space-sm)] block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink-muted placeholder:text-ink-muted/60"
               />
             </div>
-          ))}
+            )
+          })}
         </div>
         <button
           type="button"
-          onClick={() => setIngredients((rows) => [...rows, { ...emptyIngredient }])}
+          onClick={() => {
+            setIngredients((rows) => [...rows, { ...emptyIngredient }])
+            // 整理中に行が増えたときは、位置で持っている選択をいったん解除する(addQuickIngredientと同じ)
+            setSelectedIngredientIndexes([])
+          }}
           className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-edge py-3 font-bold text-accent-ink"
         >
           <Plus size={18} aria-hidden />
@@ -1923,24 +2103,33 @@ function RecipeFormInner() {
                   className="min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60"
                 />
                 <span className="text-sm text-ink-muted">{ja.form.stepMinutes}</span>
-                <button
-                  type="button"
-                  onClick={() => setSteps((rows) => move(rows, index, index - 1))}
-                  disabled={index === 0}
-                  aria-label={ja.form.moveUp}
-                  className={`${iconBtnCls} disabled:opacity-40`}
+                {/* 材料行と同じ並び替えのつまみ(2026-08-02)。手順行も「分」の数値欄の真横に
+                    上下矢印が並んでいて、分数の増減ボタンに見えるため様式をそろえる */}
+                <div
+                  className="flex shrink-0 items-center rounded-sm border border-edge text-ink-muted"
+                  role="group"
+                  aria-label={ja.form.reorderHandle}
                 >
-                  <ChevronUp size={20} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSteps((rows) => move(rows, index, index + 1))}
-                  disabled={index === steps.length - 1}
-                  aria-label={ja.form.moveDown}
-                  className={`${iconBtnCls} disabled:opacity-40`}
-                >
-                  <ChevronDown size={20} aria-hidden />
-                </button>
+                  <GripVertical size={14} className="ml-0.5 opacity-50" aria-hidden />
+                  <button
+                    type="button"
+                    onClick={() => setSteps((rows) => move(rows, index, index - 1))}
+                    disabled={index === 0}
+                    aria-label={ja.form.moveUp}
+                    className="flex h-10 w-9 items-center justify-center disabled:opacity-30"
+                  >
+                    <ChevronUp size={20} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSteps((rows) => move(rows, index, index + 1))}
+                    disabled={index === steps.length - 1}
+                    aria-label={ja.form.moveDown}
+                    className="flex h-10 w-9 items-center justify-center disabled:opacity-30"
+                  >
+                    <ChevronDown size={20} aria-hidden />
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => removeStepRow(index)}
@@ -2278,7 +2467,8 @@ function RecipeFormInner() {
             value={tagInput}
             onChange={(e) => setTagInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              // 変換確定のEnterではタグを作らない(まとめて入力と同じ理由。2026-08-02)
+              if (e.key === 'Enter' && !isImeConfirmKey(e)) {
                 e.preventDefault()
                 addTag()
               }
@@ -2348,7 +2538,8 @@ function RecipeFormInner() {
             value={keywordInput}
             onChange={(e) => setKeywordInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              // 変換確定のEnterではキーワードを作らない(まとめて入力と同じ理由。2026-08-02)
+              if (e.key === 'Enter' && !isImeConfirmKey(e)) {
                 e.preventDefault()
                 addKeyword()
               }

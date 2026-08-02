@@ -48,7 +48,7 @@
 //         2026-07-12深夜フィードバック再調査で判明した本当の原因の再発防止。PC Chrome相当) /
 //         TIMER-ADJ-01(実行中タイマーの±調整窓。タップで開き「+1分」「−30秒」で残り秒が変わる。
 //         常駐バー行の「+1分」ミニボタン単体での即+60秒も確認。2026-07-13 UIペルソナQA) /
-//         TIMER-CUSTOM-01(じぶんタイマー。入口Aから起動し、0未満にならない floor 挙動も確認。
+//         TIMER-CUSTOM-01(自由な時間のタイマー「タイマー」。入口Aから起動し、0未満にならない floor 挙動も確認。
 //         2026-07-12秒刻み対応で±30秒・±10秒の分+秒表示・10秒未満にならない floor も確認) /
 //         LOG-PHOTO-01(「作った！」記録への写真添付。選択→プレビュー→保存→一覧サムネイル→
 //         原寸表示窓、圧縮後Blobと自動記録された表示人数をIndexedDBから直接検証。2026-07-12) /
@@ -267,7 +267,7 @@
 //         375px幅で横あふれしない=説明文を足したときのボタン画面外落ち防止 /
 //         表示中は背景のレシピ詳細がスクロールしない・閉じたら戻る) /
 //         FOCUS-COPY-01(入口の説明で読み上げ・声の操作・タイマーが伝わる・声のコマンドに結果が
-//         添えられている・アイコンだけのボタンに名前がある・じぶんタイマーの窓に用途説明。C13/C15/C16/C17) /
+//         添えられている・アイコンだけのボタンに名前がある・タイマーの窓に用途説明。C13/C15/C16/C17) /
 //         TIMER-KEEP-01(リロードでタイマーが消えず残り時間が続きから復元される・注意書きが実態に
 //         合った文言になっている。C7) / TIMER-ORDER-01(残りが少ない順に並ぶ=起動順ではない。C6) /
 //         FOCUS-TIMER-01(重複タップの点滅が調理中モードでも見える=C12・終了バッジにベル+点滅=C5) /
@@ -1317,12 +1317,12 @@ try {
       )
       await fsPage
         .locator('.fixed.inset-0.z-50')
-        .getByRole('button', { name: 'じぶんタイマーを開く' })
+        .getByRole('button', { name: 'タイマーを開く' })
         .click()
       await fsPage.waitForTimeout(400)
       check(
-        'FOCUS-COPY-01 じぶんタイマーの窓に用途の説明がある',
-        (await fsPage.getByRole('dialog', { name: 'じぶんタイマー' }).textContent()).includes(
+        'FOCUS-COPY-01 タイマーの窓に用途の説明がある',
+        (await fsPage.getByRole('dialog', { name: 'タイマー', exact: true }).textContent()).includes(
           'レシピの手順とは関係なく、好きな時間ではかれます',
         ),
       )
@@ -2997,21 +2997,21 @@ try {
     !(await adjustOpenBtn.isVisible().catch(() => false)),
   )
 
-  // --- TIMER-CUSTOM-01: じぶんタイマー(自由な分数で始めるタイマー。同バッチ)。
+  // --- TIMER-CUSTOM-01: 自由な時間で始めるタイマー(ja.timer.customLabel「タイマー」)。
   // レシピ詳細のBackHeaderにあるタイマーアイコン(入口A)から開き、既定3分→1分まで減らして起動する。
   // 続けて同じ調整窓で「−30秒」を重ねても残りが0未満にならない(即完了扱いにしない)ことも確認する ---
   currentCheck = 'TIMER-CUSTOM-01'
-  await page.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
+  await page.getByRole('button', { name: 'タイマーを開く' }).click()
   await page.waitForTimeout(300)
-  const customDialog = page.getByRole('dialog', { name: 'じぶんタイマー' })
+  const customDialog = page.getByRole('dialog', { name: 'タイマー', exact: true })
   // 残り時間の表示だけを拾うロケータ(ボタン文言「−30秒」等と紛れないよう、表示専用のspanをクラスで狙う)
   const customCounter = customDialog.locator('.tabular-nums')
   check(
-    'TIMER-CUSTOM-01 じぶんタイマーの窓が開く(初回既定3分)',
+    'TIMER-CUSTOM-01 タイマーの窓が開く(初回既定3分)',
     (await customDialog.textContent()).includes('3分'),
   )
-  await customDialog.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
-  await customDialog.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+  await customDialog.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+  await customDialog.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
   await page.waitForTimeout(150)
   check(
     'TIMER-CUSTOM-01 分数ステッパー(±1分)で1分まで減らせる',
@@ -3032,7 +3032,7 @@ try {
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 秒刻み「−10秒」で1分10秒→1分ちょうどに戻る', (await customCounter.textContent()) === '1分')
   // 開始前の秒数も10秒未満にならない(floor挙動)。−1分→10秒未満は10秒で止まる。その後+30+10+10=+50秒で1分に戻す
-  await customDialog.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+  await customDialog.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
   await page.waitForTimeout(150)
   check('TIMER-CUSTOM-01 開始前の秒数も10秒未満にならない(1分→10秒で床止め)', (await customCounter.textContent()) === '10秒')
   await customDialog.getByRole('button', { name: '−10秒' }).click()
@@ -3045,10 +3045,14 @@ try {
   check('TIMER-CUSTOM-01 1分まで戻して開始する', (await customCounter.textContent()) === '1分')
   await customDialog.getByRole('button', { name: '開始' }).click()
   await page.waitForTimeout(400)
-  const customBarText = await page.textContent('body')
+  // 「タイマー」への改名(2026-08-02)後は body 全文の includes だと「タイマー開始」等に当たって
+  // 常に真になるため、常駐バーの行(=調整を開くボタン)のテキストに限定して確かめる
+  const customBarRow = page.getByRole('button', { name: /のタイマーを調整/ })
+  const customBarText = await customBarRow.textContent()
   check(
-    'TIMER-CUSTOM-01 じぶんタイマーが起動する(常駐バーに「じぶんタイマー」表示)',
-    customBarText.includes('じぶんタイマー'),
+    'TIMER-CUSTOM-01 タイマーが起動する(常駐バーに「タイマー」表示)',
+    customBarText.includes('タイマー'),
+    customBarText,
   )
   await page.getByRole('button', { name: /のタイマーを調整/ }).click()
   await page.waitForTimeout(300)
@@ -3138,14 +3142,14 @@ try {
         `リロード前=${beforeReload}s リロード後=${afterReload}s`,
       )
 
-      // (3) C6 並び順。15分の後に「じぶんタイマー1分」を足すと、後から起動した1分が上に来る
+      // (3) C6 並び順。15分の後に「タイマー1分」を足すと、後から起動した1分が上に来る
       currentCheck = 'TIMER-ORDER-01'
-      await tkPage.getByRole('button', { name: 'じぶんタイマーを開く' }).first().click()
+      await tkPage.getByRole('button', { name: 'タイマーを開く' }).first().click()
       await tkPage.waitForTimeout(300)
       {
-        const dlg = tkPage.getByRole('dialog', { name: 'じぶんタイマー' })
-        await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
-        await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+        const dlg = tkPage.getByRole('dialog', { name: 'タイマー', exact: true })
+        await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
+        await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
         await tkPage.waitForTimeout(150)
         await dlg.getByRole('button', { name: '開始' }).click()
       }
@@ -3157,7 +3161,7 @@ try {
       )
       check(
         'TIMER-ORDER-01 後から起動しても残りが少ないタイマーが上に来る(起動順ではない)',
-        orderLabels.length === 2 && orderLabels[0].includes('じぶんタイマー'),
+        orderLabels.length === 2 && orderLabels[0].startsWith('タイマーの'),
         JSON.stringify(orderLabels),
       )
 
@@ -3181,13 +3185,13 @@ try {
         flashInFocus >= 1,
         `点滅要素=${flashInFocus}`,
       )
-      // じぶんタイマー10秒 → 終了バッジのベル+点滅
-      await focus.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
+      // 自由な時間のタイマー10秒 → 終了バッジのベル+点滅
+      await focus.getByRole('button', { name: 'タイマーを開く' }).click()
       await tkPage.waitForTimeout(300)
       {
-        const dlg = tkPage.getByRole('dialog', { name: 'じぶんタイマー' })
+        const dlg = tkPage.getByRole('dialog', { name: 'タイマー', exact: true })
         for (let i = 0; i < 3; i++)
-          await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+          await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
         await tkPage.waitForTimeout(150)
         await dlg.getByRole('button', { name: '開始' }).click()
       }
@@ -3209,12 +3213,12 @@ try {
 
       // (6) C10 ±調整の窓を開いたままタイマーが終わる
       currentCheck = 'TIMER-ADJ-02'
-      await focus.getByRole('button', { name: 'じぶんタイマーを開く' }).click()
+      await focus.getByRole('button', { name: 'タイマーを開く' }).click()
       await tkPage.waitForTimeout(300)
       {
-        const dlg = tkPage.getByRole('dialog', { name: 'じぶんタイマー' })
+        const dlg = tkPage.getByRole('dialog', { name: 'タイマー', exact: true })
         for (let i = 0; i < 3; i++)
-          await dlg.getByRole('button', { name: 'じぶんタイマーの分数を減らす' }).click()
+          await dlg.getByRole('button', { name: 'タイマーの分数を減らす' }).click()
         await tkPage.waitForTimeout(150)
         await dlg.getByRole('button', { name: '開始' }).click()
       }
@@ -12182,6 +12186,168 @@ try {
     }
   }
 
+  // --- HOMESEARCH-01(2026-08-02 オーナー実機FB・便CR-1): ホームの「使いたい食材から探す」を
+  // レシピタブへのショートカットに置き換えた。ホームからは検索欄が消え、
+  // 「レシピを探す」でレシピタブへ移動して検索欄にフォーカスが当たること・
+  // 「在庫の食材から探す」で「在庫の食材で絞る」がONの状態で開くことを見る ---
+  currentCheck = 'HOMESEARCH-01'
+  {
+    const hsBrowser = await chromium.launch()
+    const hsContext = await hsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const hsPage = await hsContext.newPage()
+    hsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@HOMESEARCH-01] ${err.message}`)
+    })
+    try {
+      await hsPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await hsPage.waitForTimeout(2200)
+      const homeText = await hsPage.textContent('body')
+      check(
+        'HOMESEARCH-01 ホームに「レシピを探す」の導線がある',
+        homeText.includes('レシピを探す') && homeText.includes('レシピタブで、料理名・材料・タグ・使いたい食材から探せます'),
+      )
+      check(
+        'HOMESEARCH-01 ホームから食材の検索欄(旧「この食材で探す」)が無くなっている',
+        !homeText.includes('この食材で探す') && !homeText.includes('使いたい食材から探す'),
+      )
+      await hsPage.getByRole('button', { name: 'レシピを探す' }).click()
+      await hsPage.waitForTimeout(900)
+      check(
+        'HOMESEARCH-01 「レシピを探す」でレシピタブへ移動し、検索欄にフォーカスが当たる',
+        (await hsPage.evaluate(() => location.hash)).startsWith('#/recipes') &&
+          (await hsPage.evaluate(() => document.activeElement?.getAttribute('type'))) === 'search',
+      )
+      check(
+        'HOMESEARCH-01 一度きりの指示(?focus=search)はURLに残らない',
+        !(await hsPage.evaluate(() => location.hash)).includes('focus='),
+      )
+      // 在庫を1件「ある」にすると、ホームに「在庫の食材から探す」が出る
+      await hsPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await hsPage.waitForTimeout(1200)
+      // 食材タブが既定。プリセットの初期状態は「ない」なので、1回タップすると「ある」になる
+      await hsPage.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await hsPage.waitForTimeout(400)
+      await hsPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await hsPage.waitForTimeout(1200)
+      const pantryShortcut = hsPage.getByRole('button', { name: '在庫の食材から探す' })
+      check('HOMESEARCH-01 在庫があるときは「在庫の食材から探す」が出る', (await pantryShortcut.count()) === 1)
+      await pantryShortcut.click()
+      await hsPage.waitForTimeout(900)
+      check(
+        'HOMESEARCH-01 「在庫の食材から探す」は絞り込み(在庫の食材で絞る)ONでレシピタブを開く',
+        (await hsPage.getByRole('button', { name: '在庫の食材で絞る' }).getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'HOMESEARCH-01 一度きりの指示(?pantry=1)はURLに残らない',
+        !(await hsPage.evaluate(() => location.hash)).includes('pantry='),
+      )
+    } finally {
+      await hsBrowser.close()
+    }
+  }
+
+  // --- FORMING-01(2026-08-02 オーナー実機FB・便CR-2): レシピ登録の「まとめて入力」まわり。
+  // (a)材料行の複数選択→まとめて削除 (b)名前と分量の間はスペース、の注意書き
+  // (c)上下移動が数値調整に見えないつまみ(並び替えハンドル) (d)日本語入力の変換確定Enterで
+  // 行が増えないこと(「エンターで行が増えて注力しづらい」の真因) ---
+  currentCheck = 'FORMING-01'
+  {
+    const fiBrowser = await chromium.launch()
+    const fiContext = await fiBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fiPage = await fiContext.newPage()
+    fiPage.on('dialog', (dialog) => dialog.accept())
+    fiPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FORMING-01] ${err.message}`)
+    })
+    try {
+      await fiPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await fiPage.waitForTimeout(2000)
+      check(
+        'FORMING-01(b) まとめて入力の欄に「名前と分量の間はスペース」の注意書きがある',
+        (await fiPage.textContent('body')).includes('「豚こま 200g」のように、名前と分量の間はスペースを空けます'),
+      )
+      const quick = fiPage.getByLabel('まとめて入力')
+      const rowCount = () => fiPage.locator('input[aria-label="名前"]').count()
+      // 材料名は入力欄の値なので textContent には出ない(注意書きの「豚こま 200g」を拾って
+      // 偽陽性になる)。value を直接読んで確かめる
+      const nameValues = () =>
+        fiPage.locator('input[aria-label="名前"]').evaluateAll((els) => els.map((el) => el.value))
+      // 並び替えハンドルは材料行と手順行の両方にあるので、材料行のぶんの増減で見る
+      const handleCount = () => fiPage.getByRole('group', { name: '並び替え（上下に移動）' }).count()
+      // (d) IMEの変換確定Enter(isComposing=true)では行を足さない
+      await quick.fill('たまねぎ 1個')
+      const beforeIme = await rowCount()
+      await fiPage.evaluate(() => {
+        const el = document.querySelector('input[aria-label="まとめて入力"]')
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))
+      })
+      await fiPage.waitForTimeout(400)
+      check(
+        'FORMING-01(d) 変換確定のEnter(isComposing)では材料行が増えない',
+        (await rowCount()) === beforeIme && (await quick.inputValue()) === 'たまねぎ 1個',
+        `行数 ${beforeIme}→${await rowCount()} / 欄の値=${await quick.inputValue()}`,
+      )
+      // 確定後のEnterでは従来どおり行になる
+      await quick.press('Enter')
+      await fiPage.waitForTimeout(400)
+      check(
+        'FORMING-01(d) 変換確定後のEnterでは従来どおり材料行になる',
+        (await quick.inputValue()) === '' && (await nameValues()).includes('たまねぎ'),
+        JSON.stringify(await nameValues()),
+      )
+      for (const line of ['豚こま 200g', 'しょうゆ 大さじ2']) {
+        await quick.fill(line)
+        await fiPage.getByRole('button', { name: '材料に追加' }).click()
+        await fiPage.waitForTimeout(250)
+      }
+      check(
+        'FORMING-01 前提: 材料が3行(たまねぎ・豚こま・しょうゆ)になっている',
+        JSON.stringify(await nameValues()) === JSON.stringify(['たまねぎ', '豚こま', 'しょうゆ']),
+        JSON.stringify(await nameValues()),
+      )
+      // (c) 上下移動は「つまみ+枠」のハンドルにまとまっている
+      const handlesBeforeOrganize = await handleCount()
+      check(
+        'FORMING-01(c) 材料行の上下移動が並び替えハンドル(つまみ)にまとまっている',
+        handlesBeforeOrganize >= 3,
+        `ハンドル数=${handlesBeforeOrganize}`,
+      )
+      // (a) 整理モード→2行選択→まとめて削除
+      await fiPage.getByRole('button', { name: '整理', exact: true }).click()
+      await fiPage.waitForTimeout(300)
+      check(
+        'FORMING-01(a) 整理中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
+        (await handleCount()) === handlesBeforeOrganize - 3,
+        `整理前=${handlesBeforeOrganize} 整理中=${await handleCount()}`,
+      )
+      const selectBtns = fiPage.getByRole('button', { name: 'この材料を選ぶ' })
+      await selectBtns.nth(0).click()
+      await selectBtns.nth(2).click()
+      await fiPage.waitForTimeout(300)
+      check(
+        'FORMING-01(a) 選んだ件数が削除ボタンに出る',
+        (await fiPage.textContent('body')).includes('選んだ材料2行を削除'),
+      )
+      await fiPage.getByRole('button', { name: '選んだ材料2行を削除' }).click()
+      await fiPage.waitForTimeout(500)
+      check(
+        'FORMING-01(a) 選んだ2行だけが消え、残りの1行(豚こま)はそのまま残る',
+        JSON.stringify(await nameValues()) === JSON.stringify(['豚こま']),
+        JSON.stringify(await nameValues()),
+      )
+      // 1行になったら整理することが無くなるので通常の入力に戻る(「完了」に戻れなくなるのを防ぐ)
+      check(
+        'FORMING-01(a) 1行まで消すと整理モードから自動で抜ける',
+        (await handleCount()) === handlesBeforeOrganize - 2 &&
+          (await fiPage.getByRole('button', { name: 'この材料を選ぶ' }).count()) === 0,
+        `ハンドル数=${await handleCount()}`,
+      )
+    } finally {
+      await fiBrowser.close()
+    }
+  }
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

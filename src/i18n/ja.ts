@@ -68,10 +68,16 @@ export const ja = {
     noCandidate: 'この条件に合うレシピがありません',
     empty: 'レシピを登録すると、ここにおすすめが表示されます',
     goRegister: 'レシピを登録する',
-    ingShortcutTitle: '使いたい食材から探す',
-    ingPlaceholder: '食材を1つずつ入力',
-    ingAdd: '追加',
-    ingButton: 'この食材で探す',
+    // ホームの「レシピを探す」ショートカット(2026-08-02 オーナー実機FB)。
+    // 旧「使いたい食材から探す」はホームにも検索欄を置いていたため、探す機能がレシピタブにも
+    // あることに気づきにくかった。検索そのものはレシピタブ1か所にまとめ、ホームには
+    // 「レシピタブで探せる」と分かる入口だけを残す。
+    // ウィジェットの並び順設定(settings.homeWidgets)のキーは既存の'ingredientSearch'のまま
+    searchShortcutTitle: 'レシピを探す',
+    searchShortcutDescription: 'レシピタブで、料理名・材料・タグ・使いたい食材から探せます',
+    searchShortcutButton: 'レシピを探す',
+    // 在庫が1件以上あるときだけ出す。押すとレシピタブを「在庫の食材で絞る」ONの状態で開く
+    searchShortcutPantry: '在庫の食材から探す',
     mealPlanTitle: '今日の献立',
     historyTitle: '最近作ったもの',
     historyMore: 'すべて見る',
@@ -1060,6 +1066,8 @@ export const ja = {
     filterToggle: '絞り込み',
     ingredientTitle: '使いたい食材から探す',
     ingredientPlaceholder: '食材を1つずつ入力',
+    // 使いたい食材チップの「追加」(2026-08-02: ホームの検索欄撤去に伴い ja.home.ingAdd から移設)
+    ingredientAdd: '追加',
     timeTitle: '調理時間',
     timeAll: 'すべて',
     timeUnder10: '〜10分',
@@ -1385,10 +1393,29 @@ export const ja = {
     // まとめて入力(2026-07-28 便BW/C-07): 「豚こま 200g」のように1行で書いて材料を足せる速記欄。
     // 分解は貼り付け取込と同じロジック(parseRecipeText)を使い、3マスの入力欄はそのまま残す
     quickIngredientLabel: 'まとめて入力',
-    quickIngredientDescription:
-      '名前と分量をまとめて1行で書いて追加できます。分けられなかったときは名前の欄に入ります',
+    // 書き方の注意(2026-08-02 オーナー実機FB)。欄のすぐ上に1行で置く。
+    // 旧「名前と分量をまとめて1行で書いて追加できます」は、この1行と内容が重なるので置き換えた
+    quickIngredientSpaceHint: '「豚こま 200g」のように、名前と分量の間はスペースを空けます',
+    quickIngredientDescription: '分けられなかったときは、すべて名前の欄に入ります',
     quickIngredientPlaceholder: '例: 豚こま 200g',
     quickIngredientAdd: '材料に追加',
+    // 材料行のまとめて削除(2026-08-02 オーナー実機FB。食材の在庫の整理モード=ja.pantry.organize* に倣う)。
+    // 整理中は上下移動・1行ずつの削除を隠し、チェックを付けて選んだ行だけをまとめて消す
+    ingredientOrganizeToggle: '整理',
+    ingredientOrganizeDone: '完了',
+    ingredientOrganizeHint: 'チェックを付けた材料をまとめて削除できます',
+    ingredientOrganizeSelectAll: '全選択',
+    ingredientOrganizeClearSelection: '選択解除',
+    ingredientOrganizeSelectRow: 'この材料を選ぶ',
+    ingredientOrganizeDeleteSelected: '選んだ材料{n}行を削除',
+    // 規約F: 何が消えるか/何が残るかを件数つきで両方書く
+    ingredientOrganizeConfirm:
+      '選んだ材料{n}行を消します（元に戻せません）。残りの材料{m}行と、料理名・手順・写真などの入力はそのまま残ります。',
+    ingredientOrganizeConfirmAll:
+      '材料{n}行をすべて消して、空の1行に戻します（元に戻せません）。料理名・手順・写真などの入力はそのまま残ります。',
+    // 並べ替えの上下矢印を囲むつまみ(2026-08-02 オーナー実機FB: 矢印だけだと分量の数値調整に見える。
+    // 買い物メモで先に採った様式=GripVerticalのつまみ+枠 にそろえる)
+    reorderHandle: '並び替え（上下に移動）',
     stepsLabel: '手順',
     stepTextPlaceholder: '例: じゃがいもを一口大に切る',
     stepMinutes: '分（任意）',
@@ -1826,16 +1853,19 @@ export const ja = {
     plusOneMinuteAria: '{label}に1分追加',
     minusThirtySeconds: '−30秒',
     stopTimer: '停止',
-    // じぶんタイマー(自由な分数で始めるタイマー。同バッチ)。ラベルは常にこの文言(レシピ名にしない)
-    customLabel: 'じぶんタイマー',
-    customOpenAria: 'じぶんタイマーを開く',
-    customBarButton: 'じぶんタイマー',
+    // 手順に紐付かない自由な時間のタイマー(2026-07-12タイマー自由設定バッチ)。
+    // ラベルは常にこの文言(レシピ名にしない)。
+    // 2026-08-02 オーナー実機FB: 「じぶんタイマー」→「タイマー」に改名。手順から始めるタイマーは
+    // 常駐バーで「手順{n}」バッジとレシピ名が付くため、名前だけのこちらとは表示で区別が付く
+    customLabel: 'タイマー',
+    customOpenAria: 'タイマーを開く',
+    customBarButton: 'タイマー',
     // 2026-07-28 機能④診断C17: 名前だけでは何をするタイマーか分からず使われていなかった。
     // 窓を開いた人にまず用途が伝わるよう、一言添える
     customHint: 'レシピの手順とは関係なく、好きな時間ではかれます（ゆで時間・つけおきなど）',
     customStart: '開始',
-    customMinutesDown: 'じぶんタイマーの分数を減らす',
-    customMinutesUp: 'じぶんタイマーの分数を増やす',
+    customMinutesDown: 'タイマーの分数を減らす',
+    customMinutesUp: 'タイマーの分数を増やす',
     // 秒刻み操作の追加分(2026-07-12オーナー実機フィードバック)。visible textをそのままaria-labelとして
     // 使う(TimerAdjustModalの「−30秒」「+1分」ボタンと同じ流儀。aria-label重複はダイアログのスコープが
     // 別なので問題ない)。±1分ボタンはアイコンのまま(テキスト化しない)にする: 残り時間の表示自体に

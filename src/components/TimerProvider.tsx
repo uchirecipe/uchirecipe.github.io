@@ -29,7 +29,7 @@ export interface ActiveTimer {
   recipeId: number
   /**
    * 手順番号（1始まり。常駐タイマーのタップ先スクロールに使う）。
-   * 0 = どの手順にも紐付かない（じぶんタイマーなど自由起動のタイマー）
+   * 0 = どの手順にも紐付かない（自由な時間で始めるタイマー=ja.timer.customLabel「タイマー」）
    */
   stepNumber: number
   /** 終了予定時刻（ミリ秒） */
@@ -144,7 +144,7 @@ function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, s
   }
   // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
   // 通知本文はtruncateされないので手順番号も含めた完全な説明にする。
-  // stepNumber<=0（じぶんタイマーなど手順に紐付かないタイマー）は手順表記を付けない
+  // stepNumber<=0（手順に紐付かない自由な時間のタイマー）は手順表記を付けない
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
       const fullLabel =

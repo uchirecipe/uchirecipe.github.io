@@ -77,7 +77,7 @@ export default function TimerBar() {
           const remaining = Math.ceil((timer.endsAt - now) / 1000)
           const isFlashing = flashingId === timer.id
           // ±調整の窓を開くボタンの読み上げ名（複数タイマー同時進行でも区別できるよう手順番号を含める。
-          // 手順に紐付かないじぶんタイマーはラベルのみ）
+          // 手順に紐付かない自由な時間のタイマーはラベルのみ）
           const adjustAriaLabel = ja.timer.adjustOpenAria.replace(
             '{label}',
             timer.stepNumber > 0
