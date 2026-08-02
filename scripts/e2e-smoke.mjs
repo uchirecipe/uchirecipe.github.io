@@ -1103,9 +1103,11 @@ try {
     const teaser = links.find((a) => a.textContent?.includes('（Pro機能）'))
     return teaser?.getAttribute('href') ?? null
   })
+  // 2026-08-02 便DF: 行き先は従来どおり設定のPro節で、末尾に戻り先(?back=)が付く
+  // (帰り道の検証はSETBACK-01。ここでは行き先が変わっていないことだけを見る)
   check(
     'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のPro節)',
-    teaserHref === '#/settings?section=pro',
+    teaserHref === '#/settings?section=pro&back=%2Frecipes',
     `href=${teaserHref}`,
   )
   // 無料でもカロリー順が実際に使えること(選ぶとカードに「カロリー: ◯kcal」が出る)を確かめる。
