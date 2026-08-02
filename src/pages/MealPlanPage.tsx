@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Trash2,
   Plus,
+  Minus,
   SlidersHorizontal,
   BookmarkPlus,
   LayoutTemplate,
@@ -42,6 +43,7 @@ import {
   removeMealEntry,
   assignMealEntryByRole,
   clearMealSlotsInRange,
+  updateMealEntryServings,
 } from '../db/mealPlan'
 import { useDayNoteRange, saveDayNote } from '../db/dayNotes'
 import { useMealTemplates, saveMealTemplate, deleteMealTemplate } from '../db/mealTemplates'
@@ -95,6 +97,8 @@ import {
   PURPOSE_REDRAW_ATTEMPTS,
 } from '../logic/mealPlan'
 import type { FillWeekPlan, MealGenre, ProteinSource, SuggestPairResult } from '../logic/mealPlan'
+// 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)
+import { clampServings } from '../logic/servings'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -2690,6 +2694,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // ただし過去日は集計から外している(2026-07-29 便CD/MP-07。表示から消えている予定が
   // 金額に入っていると何を消せば減るのか辿れないため)
   /**
+   * 食数（何人分作るか）を決める窓（2026-08-03 便DJ・オーナー指示）。
+   * 開いている枠のid・料理名・レシピに登録されている人数分・いまの値を持つ。
+   * isCustom＝その枠に食数を決めてある（＝レシピの人数分に戻すボタンを出す）。
+   */
+  const [servingsEditor, setServingsEditor] = useState<{
+    entryId: number
+    title: string
+    recipeServings: number
+    value: number
+    isCustom: boolean
+  } | null>(null)
+  const submitServings = async (value: number | undefined) => {
+    if (!servingsEditor) return
+    const { entryId, title, recipeServings } = servingsEditor
+    await updateMealEntryServings(entryId, value)
+    setServingsEditor(null)
+    setMessage(
+      value == null
+        ? ja.mealPlan.servingsResetDone
+            .replace('{title}', title)
+            .replace('{n}', String(recipeServings))
+        : ja.mealPlan.servingsDone.replace('{title}', title).replace('{n}', String(value)),
+    )
+  }
+
+  /**
    * 週タブで畳んでいる曜日カードの日付（2026-08-03 便DJ・オーナー指示）。
    * 畳むと日付の行だけが残る。7日ぶんが常に全部開いていて、ほかの曜日を探すのに
    * 何画面もスクロールしていたための対応。既定は全部開いた状態（従来と同じ見え方）で、
@@ -2964,13 +2994,43 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   const weekRecipeIds = useMemo(() => Array.from(weekRecipeCounts.keys()), [weekRecipeCounts])
 
+  /**
+   * 買い物リストに渡す「この週に作る食数の合計」（2026-08-03 便DJ・食数設定）。
+   * 枠ごとに決めた食数（MealPlanEntry.servings）を足し合わせ、決めていない枠は
+   * そのレシピに登録されている人数分で数える＝食数を1つも触っていなければ
+   * 「回数 × 登録人数」と同じ値になり、従来と分量が1gも変わらない。
+   */
+  const weekRecipeServings = useMemo(() => {
+    const totals = new Map<number, number>()
+    const add = (recipeId: number, servings: number) =>
+      totals.set(recipeId, (totals.get(recipeId) ?? 0) + servings)
+    const baseServings = (recipeId: number) => {
+      const s = recipeById.get(recipeId)?.servings
+      return s != null && s > 0 ? s : 1
+    }
+    activeEntries.forEach((e) => {
+      if (!visibleSlots.includes(e.slot)) return
+      add(e.recipeId, e.servings != null && e.servings > 0 ? e.servings : baseServings(e.recipeId))
+    })
+    // 週の表に無い「今日の献立」の分は1回分＝登録人数ぶん（weekRecipeCountsと同じ数え方）
+    todayList?.forEach((item) => {
+      if (!totals.has(item.recipeId)) add(item.recipeId, baseServings(item.recipeId))
+    })
+    return totals
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEntries, settings?.visibleMealSlots, todayList, recipeById])
+
   const goShopping = () => {
     if (weekRecipeCounts.size === 0) return
     // 「id」または「idx回数」の並び（買い物側は logic/shopping.ts parseRecipeIdsParam で読む）
     const param = Array.from(weekRecipeCounts, ([id, times]) =>
       times > 1 ? `${id}x${times}` : String(id),
     ).join(',')
-    navigate(`/shopping?recipeIds=${param}`)
+    // 食数の合計（便DJ）。「レシピID:合計食数」の並びで、買い物側は parseServingsParam で読む
+    const servingsParam = Array.from(weekRecipeServings, ([id, servings]) => `${id}:${servings}`).join(
+      ',',
+    )
+    navigate(`/shopping?recipeIds=${param}&servings=${servingsParam}`)
   }
 
   const dowLabels = ja.mealPlan.dow
@@ -2984,15 +3044,42 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const isEmpty = !recipe
     // 「作った見た目」対応付け(タスク2): この枠が「作った記録」に対応していれば作った見た目に変える
     const isCooked = entryId != null && cookedPlanEntryIdSet.has(entryId)
+    // 食数(何人分作るか。2026-08-03 便DJ)。枠に決めていなければレシピの登録人数分
+    const rowServings =
+      row.kind === 'entry' && row.entry.servings != null && row.entry.servings > 0
+        ? row.entry.servings
+        : recipe?.servings != null && recipe.servings > 0
+          ? recipe.servings
+          : 1
     return (
       <div key={key} className="flex items-center gap-2">
-        <span
-          className={`w-10 shrink-0 text-ink-muted ${
-            isEmpty ? 'text-[10px]' : 'text-xs font-bold'
-          }`}
-        >
-          {ja.mealPlan.role[role]}
-        </span>
+        {/* 役割ラベルの列。入っている行では、その下に食数(何人分作るか)のボタンを重ねて置く
+            (2026-08-03 便DJ・オーナー指示)。横に足すと料理名の幅を削ってしまうため縦に積む */}
+        <div className="w-10 shrink-0">
+          <span
+            className={`block text-ink-muted ${isEmpty ? 'text-[10px]' : 'text-xs font-bold'}`}
+          >
+            {ja.mealPlan.role[role]}
+          </span>
+          {row.kind === 'entry' && recipe && (
+            <button
+              type="button"
+              onClick={() =>
+                setServingsEditor({
+                  entryId: row.entry.id!,
+                  title: recipe.title,
+                  recipeServings: recipe.servings > 0 ? recipe.servings : 1,
+                  value: rowServings,
+                  isCustom: row.entry.servings != null,
+                })
+              }
+              aria-label={ja.mealPlan.servingsEditAria.replace('{n}', String(rowServings))}
+              className="mt-0.5 block text-[10px] font-bold text-accent-ink underline"
+            >
+              {ja.mealPlan.servingsChip.replace('{n}', String(rowServings))}
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
@@ -3405,6 +3492,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   useOverlayDismiss(pickerOpen, () => closePicker())
   useOverlayDismiss(templateSaveOpen, () => setTemplateSaveOpen(false))
   useOverlayDismiss(templateApplyScope != null, () => setTemplateApplyScope(null))
+  useOverlayDismiss(servingsEditor != null, () => setServingsEditor(null))
 
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
@@ -4827,6 +4915,92 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   )
                 })}
               </ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 食数(何人分作るか)を決める窓(2026-08-03 便DJ・オーナー指示)。
+          既定はレシピに登録されている人数分で、枠ごとに変えられる。
+          変わるのは買い物メモへ渡す材料の分量だけで、栄養・食費の「1人分」の表示は変えない
+          (何人分作っても1人が食べる量は1人分のままのため。db/types.ts MealPlanEntry.servings参照) */}
+      {servingsEditor && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-[var(--space-md)]"
+          onClick={() => setServingsEditor(null)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-label={ja.mealPlan.servingsTitle}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="min-w-0 flex-1 truncate font-bold">{ja.mealPlan.servingsTitle}</h3>
+              <button
+                type="button"
+                onClick={() => setServingsEditor(null)}
+                aria-label={ja.common.close}
+                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-ink-muted">
+              {ja.mealPlan.servingsDescription.replace('{title}', servingsEditor.title)}
+            </p>
+            <div className="mt-[var(--space-md)] flex items-center justify-center gap-[var(--space-md)]">
+              <button
+                type="button"
+                onClick={() =>
+                  setServingsEditor((s) =>
+                    s ? { ...s, value: clampServings(s.value - 1) } : s,
+                  )
+                }
+                aria-label={ja.mealPlan.servingsDown}
+                className="rounded-full border border-edge bg-app p-3 text-accent-ink shadow-sm"
+              >
+                <Minus size={20} aria-hidden />
+              </button>
+              <p aria-live="polite" className="min-w-[5rem] text-center text-2xl font-bold">
+                {ja.mealPlan.servingsChip.replace('{n}', String(servingsEditor.value))}
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setServingsEditor((s) =>
+                    s ? { ...s, value: clampServings(s.value + 1) } : s,
+                  )
+                }
+                aria-label={ja.mealPlan.servingsUp}
+                className="rounded-full border border-edge bg-app p-3 text-accent-ink shadow-sm"
+              >
+                <Plus size={20} aria-hidden />
+              </button>
+            </div>
+            <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+              {ja.mealPlan.servingsRecipeNote.replace(
+                '{n}',
+                String(servingsEditor.recipeServings),
+              )}
+            </p>
+            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.servingsScopeNote}</p>
+            <button
+              type="button"
+              onClick={() => void submitServings(servingsEditor.value)}
+              className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+            >
+              {ja.mealPlan.servingsSave}
+            </button>
+            {servingsEditor.isCustom && (
+              <button
+                type="button"
+                onClick={() => void submitServings(undefined)}
+                className="mt-[var(--space-sm)] w-full rounded-md border border-edge bg-app py-3 text-sm font-bold text-accent-ink shadow-sm"
+              >
+                {ja.mealPlan.servingsReset}
+              </button>
             )}
           </div>
         </div>

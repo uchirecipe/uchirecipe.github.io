@@ -74,6 +74,28 @@ export async function updateMealEntryRecipe(entryId: number, recipeId: number): 
   await db.mealPlans.update(entryId, { recipeId, auto: false })
 }
 
+/**
+ * 指定エントリの「食数（何人分作るか）」だけを書き換える（2026-08-03 便DJ・オーナー指示）。
+ * レシピ・日付・食事・役割は変えない。auto（自動提案由来かどうか）も変えない
+ * ＝食数を直しただけで「まとめて献立を立てる」の埋め直し対象から外れたりはしない。
+ * servings に undefined を渡すと項目ごと消し、そのレシピに登録されている人数分に戻す。
+ */
+export async function updateMealEntryServings(
+  entryId: number,
+  servings: number | undefined,
+): Promise<void> {
+  if (servings == null) {
+    await db.mealPlans
+      .where('id')
+      .equals(entryId)
+      .modify((e) => {
+        delete e.servings
+      })
+    return
+  }
+  await db.mealPlans.update(entryId, { servings })
+}
+
 /** 指定エントリを削除する（その行だけを外す） */
 export async function removeMealEntry(entryId: number): Promise<void> {
   await db.mealPlans.delete(entryId)

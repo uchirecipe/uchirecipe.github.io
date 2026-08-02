@@ -4048,27 +4048,43 @@ try {
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
 
-      // 便U-4 → 便CW-3 → 2026-08-02 便DE-12で「この週の◯◯をまとめて空にする」に改名し、既定閉の
-      // 折りたたみにして週タブのいちばん下へ移した。ここまでの操作で月曜夕食の主菜行に
-      // 「肉じゃが」が割り当て済み(Fix4)。まず畳まれていることを確かめてから開く
+      // 便U-4 → 便CW-3 → 便DE-12で「この週の◯◯をまとめて空にする」に改名 →
+      // 2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移動し、対象の食事を
+      // 複数選べるようにした。ここまでの操作で月曜夕食の主菜行に「肉じゃが」が割り当て済み(Fix4)。
+      // まず「表示のしかた」が畳まれていて中身が見えないことを確かめてから開く
       check(
-        'MEALPLAN-01(便CW-3/DE-12) 「この週の夕食をまとめて空にする」は既定で畳まれている',
+        'MEALPLAN-01(便DJ) 「表示のしかた」は既定で畳まれ、空にする操作も見えない',
         (await mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' }).count()) === 0,
       )
-      await mpPage.getByRole('button', { name: 'この週の夕食をまとめて空にする' }).click()
+      await mpPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await mpPage.waitForTimeout(300)
-      // 帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
-      // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
+      // 対象の食事は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
+      // aria-labelで対象の食事ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
       const clearDinnerTargetBtn = mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' })
       check(
-        'MEALPLAN-01(便U-4) 帯選択ボタンは既定で「夕食」がaria-pressed=true',
+        'MEALPLAN-01(便U-4) 対象の食事ボタンは既定で「夕食」がaria-pressed=true',
         (await clearDinnerTargetBtn.getAttribute('aria-pressed')) === 'true',
+      )
+      // 便DJ: 複数選択。朝食も足してから空にすると、選んだ2つが両方消える
+      const clearBreakfastTargetBtn = mpPage.getByRole('button', {
+        name: '空にする食事として朝食を選ぶ',
+      })
+      await clearBreakfastTargetBtn.click()
+      await mpPage.waitForTimeout(200)
+      check(
+        'MEALPLAN-01(便DJ) 空にする食事は複数選べる(朝食+夕食がaria-pressed=true)',
+        (await clearBreakfastTargetBtn.getAttribute('aria-pressed')) === 'true' &&
+          (await clearDinnerTargetBtn.getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'MEALPLAN-01(便DJ) 見出しは選んだ食事を並べて出す',
+        ((await mpPage.textContent('body')) ?? '').includes('この週の朝食・夕食をまとめて空にする'),
       )
       await mpPage.getByRole('button', { name: '空にする', exact: true }).click()
       await mpPage.waitForTimeout(400)
       check(
-        'MEALPLAN-01(便U-4) 確認後、削除完了のトーストが出る',
-        (await mpPage.textContent('body')).includes('夕食のこの週分を'),
+        'MEALPLAN-01(便U-4/便DJ) 確認後、選んだ食事を並べた削除完了のトーストが出る',
+        (await mpPage.textContent('body')).includes('朝食・夕食のこの週分を'),
       )
       check(
         'MEALPLAN-01(便U-4/便CW-3) 手で選んで入れた「肉じゃが」も消える(改名の根拠になる実挙動)',
@@ -4079,6 +4095,7 @@ try {
       // 従来は7日カードの並び順(配列インデックス)で曜日を引いていたため、今日が月曜の日以外は
       // 表示中の7行すべての曜日が日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る)。
       // このモードは自動テストが1件も無く、ユーザーからも報告されにくい盲点だったので恒久化する
+      // 「表示のしかた」グループは上の「まとめて空にする」の検証で既に開いてある(2026-08-03 便DJ)
       await mpPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
       await mpPage.waitForTimeout(500)
       const rollingHeads = await mpPage.evaluate(() => {
@@ -4141,6 +4158,9 @@ try {
       await nbPage.waitForTimeout(2000) // 初回シード完了待ち
       await nbPage.getByRole('button', { name: '週', exact: true }).click()
       await nbPage.waitForTimeout(300)
+      // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
+      await nbPage.getByRole('button', { name: '表示のしかたを開く' }).click()
+      await nbPage.waitForTimeout(200)
       await nbPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
       await nbPage.waitForTimeout(500)
 
@@ -4378,6 +4398,9 @@ try {
       await npPage.waitForTimeout(900)
       await npPage.getByRole('button', { name: '週', exact: true }).click()
       await npPage.waitForTimeout(300)
+      // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
+      await npPage.getByRole('button', { name: '表示のしかたを開く' }).click()
+      await npPage.waitForTimeout(200)
       await npPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
       await npPage.waitForTimeout(500)
       // 2026-08-02 便CW-6の「食事ごとの内訳」は2つ以上の食事に献立がある日にだけ出るので、
@@ -6309,6 +6332,9 @@ try {
       await cwPage.waitForTimeout(500)
       await cwPage.getByRole('button', { name: '週', exact: true }).click()
       await cwPage.waitForTimeout(300)
+      // 2026-08-03 便DJ: 「表示のしかた」グループは既定で畳まれているので先に開く
+      await cwPage.getByRole('button', { name: '表示のしかたを開く' }).click()
+      await cwPage.waitForTimeout(200)
       await cwPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
       await cwPage.waitForTimeout(300)
 
@@ -6795,8 +6821,8 @@ try {
     }
   }
 
-  // --- MEALPLAN-A1B2: マイ献立テンプレ(A-1)＋曜日固定の定番(B-2)。2026-07-29 便CB-2・docs/59。
-  // 表示中の週(月曜に副菜1品・金曜に肉じゃが)を「この週をテンプレとして保存」→ 月タブで翌月を開き
+  // --- MEALPLAN-A1B2: マイ献立テンプレート(A-1)＋曜日固定の定番(B-2)。2026-07-29 便CB-2・docs/59。
+  // 表示中の週(月曜に副菜1品・金曜に肉じゃが)を「表示している週をテンプレートとして保存」→ 月タブで翌月を開き
   //  ・入れる曜日を「金」だけに絞って流し込む＝毎週金曜に同じ献立が入る(B-2)
   //  ・すでに献立が入っている金曜は上書きされず残る(非破壊)
   //  ・確認文が規約F(何品が入るか＋何が消えないか)を満たしている
@@ -6887,19 +6913,22 @@ try {
       await tpPage.reload({ waitUntil: 'networkidle' })
       await tpPage.waitForTimeout(900)
 
-      // A-1: 週タブで「この週をテンプレとして保存」
+      // A-1: 週タブで「表示している週をテンプレートとして保存」
+      // (2026-08-03 便DJ: 「献立テンプレート」グループは既定で畳まれているので先に開く)
       await tpPage.getByRole('button', { name: '週', exact: true }).click()
       await tpPage.waitForTimeout(400)
-      await tpPage.getByRole('button', { name: 'この週をテンプレとして保存' }).click()
+      await tpPage.getByRole('button', { name: '献立テンプレートを開く' }).click()
+      await tpPage.waitForTimeout(200)
+      await tpPage.getByRole('button', { name: '表示している週をテンプレートとして保存' }).click()
       await tpPage.waitForTimeout(300)
-      const tpSaveModal = tpPage.getByRole('dialog', { name: 'この週をテンプレとして保存' })
+      const tpSaveModal = tpPage.getByRole('dialog', { name: '表示している週をテンプレートとして保存' })
       check('MEALPLAN-A1B2(A-1) 保存の窓が開き、名前を付けられる', (await tpSaveModal.count()) === 1)
-      await tpSaveModal.getByLabel('テンプレの名前').fill('定番セット')
+      await tpSaveModal.getByLabel('テンプレートの名前').fill('定番セット')
       await tpSaveModal.getByRole('button', { name: '保存する' }).click()
       await tpPage.waitForTimeout(600)
       check(
         'MEALPLAN-A1B2(A-1) 保存すると品数つきで結果が出る',
-        ((await tpPage.textContent('body')) ?? '').includes('テンプレ「定番セット」を2品で保存しました'),
+        ((await tpPage.textContent('body')) ?? '').includes('テンプレート「定番セット」を2品で保存しました'),
       )
       const tpSaved = await tpPage.evaluate(
         () =>
@@ -6915,7 +6944,7 @@ try {
           }),
       )
       check(
-        'MEALPLAN-A1B2(A-1) テンプレは献立とは別の専用テーブルに1件保存される',
+        'MEALPLAN-A1B2(A-1) テンプレートは献立とは別の専用テーブルに1件保存される',
         tpSaved.length === 1 && tpSaved[0].name === '定番セット' && tpSaved[0].items.length === 2,
         `saved=${JSON.stringify(tpSaved)}`,
       )
@@ -6929,15 +6958,16 @@ try {
         `items=${JSON.stringify(tpSaved[0].items)}`,
       )
 
-      // B-2: 月タブで翌月を開き、「金」だけを選んで入れる(便DE-8で「流し込む」→「内容を入れる」に改名)
+      // B-2: 月タブで翌月を開き、「金」だけを選んで入れる
+      // (便DE-8で「流し込む」→「内容を入れる」、便DJで「テンプレートを適用」に改名)
       await tpPage.getByRole('button', { name: '月', exact: true }).click()
       await tpPage.waitForTimeout(400)
       await tpPage.getByRole('button', { name: '次の月' }).click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByRole('button', { name: 'テンプレの内容をこの月に入れる' }).click()
+      await tpPage.getByRole('button', { name: 'テンプレートを適用' }).click()
       await tpPage.waitForTimeout(400)
-      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレの内容を入れる' })
-      check('MEALPLAN-A1B2(B-2) テンプレを入れる窓が開く', (await tpApplyModal.count()) === 1)
+      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレートを適用' })
+      check('MEALPLAN-A1B2(B-2) テンプレートを適用する窓が開く', (await tpApplyModal.count()) === 1)
       check(
         'MEALPLAN-A1B2(B-2) 既定では全曜日が選ばれている(1週間まるごと＝A-1)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 7,
@@ -6955,7 +6985,7 @@ try {
       await tpPage.waitForTimeout(900)
       check(
         'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
-        tpConfirmMsg.includes('テンプレ「定番セット」から') &&
+        tpConfirmMsg.includes('テンプレート「定番セット」から') &&
           /まだ決まっていない\d+食分に入れます/.test(tpConfirmMsg) &&
           tpConfirmMsg.includes('消えません'),
         `confirm=${tpConfirmMsg}`,
@@ -6993,14 +7023,14 @@ try {
         `count=${tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length}`,
       )
       check(
-        'MEALPLAN-A1B2 テンプレから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
+        'MEALPLAN-A1B2 テンプレートから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
         tpAfter
           .filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId)
           .every((e) => !e.auto),
       )
       check(
         'MEALPLAN-A1B2 結果は入れた品数つきで伝える',
-        ((await tpPage.textContent('body')) ?? '').includes('テンプレ「定番セット」から'),
+        ((await tpPage.textContent('body')) ?? '').includes('テンプレート「定番セット」から'),
       )
     } finally {
       await tpBrowser.close()
@@ -8543,7 +8573,7 @@ try {
     // 4b) MERGE-01(2026-07-30 便CJ/C1・実機QA S1事故の再発防止): 同じファイルをまっさらな別
     //     プロファイルへ「読み込む(今のデータに追加)」で読み込む。以前はこの経路が
     //     レシピ本体と解錠コードしか見ておらず、(a)在庫・買い物メモ・週献立・今日の献立・価格・
-    //     日付メモ・献立テンプレの7テーブルと、(b)既にあるレシピ(まっさら端末では同梱109品が
+    //     日付メモ・献立テンプレートの7テーブルと、(b)既にあるレシピ(まっさら端末では同梱109品が
     //     必ずID衝突する)の作った記録・お気に入り・写真が1件も戻らないまま「追加◯件・
     //     スキップ◯件」と成功風に表示されていた。非破壊マージ(今のデータは1件も消さない)に
     //     なったことと、今のデータを上書きしないことの両方を固定する
@@ -8577,7 +8607,7 @@ try {
       check(
         'MERGE-01 結果に取り込みの内訳が出る(何が足されたかを画面で確認できる)',
         mergeBody.includes('新しく足したレシピは') &&
-          mergeBody.includes('在庫・買い物メモ・献立・価格・日付メモ・献立テンプレを合わせて') &&
+          mergeBody.includes('在庫・買い物メモ・献立・価格・日付メモ・献立テンプレートを合わせて') &&
           mergeBody.includes('「作った記録」'),
         `body抜粋=${mergeBody.slice(mergeBody.indexOf('新しく足したレシピは'), mergeBody.indexOf('新しく足したレシピは') + 200)}`,
       )
@@ -13232,7 +13262,7 @@ try {
       )
       check(
         'DEMO-01 デモには献立を書き換える操作を出さない',
-        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレの内容をこの月に入れる'),
+        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレートを適用'),
       )
       // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
       await dmPage.getByRole('button', { name: '食費', exact: true }).click()
