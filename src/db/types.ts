@@ -267,6 +267,21 @@ export interface MealPlanEntry {
    * 手動配置・目的なしの自動配置には付かない（未設定＝目的を指定せずに置いた枠）。
    */
   purpose?: MealPurpose
+  /**
+   * この枠を何人分作るか（任意・2026-08-03 便DJ・オーナー指示）。
+   *
+   * 未設定＝そのレシピに登録されている人数分（Recipe.servings）で作る、という既定の扱い。
+   * 既存データは全て未設定なので、この項目が増えても見え方も計算結果も変わらない
+   * （任意項目なのでスキーマ変更・マイグレーションも不要）。
+   *
+   * 意味は「作る量の記録」だけに限る。栄養と食費の「1人分」の表示は、何人分作っても
+   * 1人が食べる量は1人分のままなので**この値では変えない**（logic/nutrition.ts の perServing、
+   * logic/nutritionBalance.ts の1人分集計はいずれもこの値を見ない）。
+   * 効くのは買い物メモへ渡す材料の分量だけ（MealPlanPage goShopping → ShoppingPage）。
+   *
+   * 範囲は人数分と同じ1〜20（logic/servings.ts clampServings）。
+   */
+  servings?: number
 }
 
 /**

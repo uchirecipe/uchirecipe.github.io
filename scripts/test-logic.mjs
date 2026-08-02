@@ -83,6 +83,7 @@ import {
   sortShoppingByAisle,
   combineAmountTexts,
   parseRecipeIdsParam,
+  parseServingsParam,
 } from '../src/logic/shopping.ts'
 import { selectPantryDowngrades } from '../src/logic/pantry.ts'
 import {
@@ -3263,6 +3264,23 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     { id: 2, times: 1 },
   ])
   eq('献立経路: 空パラメータは0件', parseRecipeIdsParam(''), [])
+}
+
+// ---------- parseServingsParam(2026-08-03 便DJ。献立の枠ごとの食数を買い物メモへ渡す) ----------
+// 再発防止: 食数を渡す経路が増えても「回数」経路の分量計算を壊さないこと、
+// 壊れた値(0・負・数値でない)が分量計算に流れ込まないことを固定する
+{
+  const toObj = (m) => Object.fromEntries([...m].map(([k, v]) => [String(k), v]))
+  eq('食数: 「1:8,3:4」はレシピごとの合計食数', toObj(parseServingsParam('1:8,3:4')), {
+    1: 8,
+    3: 4,
+  })
+  eq('食数: 同じIDが並んだら足し合わせる', toObj(parseServingsParam('2:3,2:5')), { 2: 8 })
+  eq('食数: 0以下は捨てる(分量が0や負にならない)', toObj(parseServingsParam('1:0,2:-3,3:2')), {
+    3: 2,
+  })
+  eq('食数: 数値でない値・欠けた値は捨てる', toObj(parseServingsParam('1:abc,2,,3:4')), { 3: 4 })
+  eq('食数: 空パラメータは0件', toObj(parseServingsParam('')), {})
 }
 
 // ---------- toPantryKey(2026-07-29 便CC/C4。在庫照合の名寄せキーを1本化) ----------

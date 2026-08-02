@@ -185,6 +185,31 @@ export function parseRecipeIdsParam(raw: string): { id: number; times: number }[
 }
 
 /**
+ * 献立の「この週の買い物リストを作る」から渡る ?servings= を解釈する
+ * （2026-08-03 便DJ・食数設定）。形は「レシピID:その週に作る食数の合計」をカンマで並べたもの
+ * （例: "1:8,3:4" ＝ レシピ1を合計8人分、レシピ3を合計4人分）。
+ *
+ * recipeIds の「回数」だけでは、1回を何人分作るかを変えた枠を表せない
+ * （2人分のレシピを4人分作る日がある、など）。回数はそのまま残し、人数の合計をこちらで渡す。
+ * このパラメータが無い＝食数を触っていない古い形の呼び出しで、その場合は呼び出し側が
+ * 従来どおり「回数 × レシピの登録人数」で計算する。
+ *
+ * 0以下・数値でない値は捨てる（分量が0や負になる計算に進ませない）。
+ */
+export function parseServingsParam(raw: string): Map<number, number> {
+  const map = new Map<number, number>()
+  for (const token of raw.split(',')) {
+    const [idPart, servingsPart] = token.split(':')
+    const id = Number(idPart)
+    const servings = Number(servingsPart)
+    if (!Number.isFinite(id) || !idPart?.trim()) continue
+    if (!Number.isFinite(servings) || servings <= 0) continue
+    map.set(id, (map.get(id) ?? 0) + servings)
+  }
+  return map
+}
+
+/**
  * 選んだレシピの材料を名前でまとめ、在庫「ある」の食材を除いた買い物候補を作る。
  * ここで作った候補はまだ買い物メモではなく、確認してから確定してもらう「下書き」。
  *

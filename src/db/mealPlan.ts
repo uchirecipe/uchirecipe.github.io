@@ -74,26 +74,52 @@ export async function updateMealEntryRecipe(entryId: number, recipeId: number): 
   await db.mealPlans.update(entryId, { recipeId, auto: false })
 }
 
+/**
+ * 指定エントリの「食数（何人分作るか）」だけを書き換える（2026-08-03 便DJ・オーナー指示）。
+ * レシピ・日付・食事・役割は変えない。auto（自動提案由来かどうか）も変えない
+ * ＝食数を直しただけで「まとめて献立を立てる」の埋め直し対象から外れたりはしない。
+ * servings に undefined を渡すと項目ごと消し、そのレシピに登録されている人数分に戻す。
+ */
+export async function updateMealEntryServings(
+  entryId: number,
+  servings: number | undefined,
+): Promise<void> {
+  if (servings == null) {
+    await db.mealPlans
+      .where('id')
+      .equals(entryId)
+      .modify((e) => {
+        delete e.servings
+      })
+    return
+  }
+  await db.mealPlans.update(entryId, { servings })
+}
+
 /** 指定エントリを削除する（その行だけを外す） */
 export async function removeMealEntry(entryId: number): Promise<void> {
   await db.mealPlans.delete(entryId)
 }
 
 /**
- * 指定期間のうち、指定した食事帯（例: 朝食）のエントリだけをまとめて削除する。
- * 週タブの「この帯の今週分を空にする」用（2026-07-16 便U-4 Fable設計:
- * 「朝のみ削除したい」というオーナー要望への回答。帯を選んで確認ダイアログを経てから
- * 呼び出す想定）。他の帯・他の日付には影響しない
+ * 指定期間のうち、選んだ食事（例: 朝食・昼食）のエントリだけをまとめて削除する。
+ * 週タブの「この週の◯◯をまとめて空にする」用（2026-07-16 便U-4 Fable設計:
+ * 「朝のみ削除したい」というオーナー要望への回答。食事を選んで確認ダイアログを経てから
+ * 呼び出す想定）。2026-08-03 便DJ（オーナー指示）で、1つだけだった指定を複数選択にした。
+ * 指定が空のときは何もしない（誤って全消しにならないようにする）。
+ * 選んでいない食事・他の日付には影響しない。
  */
-export async function clearMealSlotInRange(
+export async function clearMealSlotsInRange(
   startDate: string,
   endDate: string,
-  slot: MealSlot,
+  slots: MealSlot[],
 ): Promise<void> {
+  if (slots.length === 0) return
+  const targets = new Set(slots)
   const rows = await db.mealPlans
     .where('date')
     .between(startDate, endDate, true, true)
-    .and((e) => e.slot === slot)
+    .and((e) => targets.has(e.slot))
     .toArray()
   const ids = rows.map((r) => r.id).filter((id): id is number => id != null)
   if (ids.length > 0) await db.mealPlans.bulkDelete(ids)

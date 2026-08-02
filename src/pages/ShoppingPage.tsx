@@ -31,6 +31,7 @@ import {
   buildShoppingCandidates,
   sortShoppingByAisle,
   parseRecipeIdsParam,
+  parseServingsParam,
   type ShoppingCandidate,
 } from '../logic/shopping'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
@@ -213,23 +214,32 @@ export default function ShoppingPage() {
     const raw = searchParams.get('recipeIds')
     if (raw == null || !recipes) return
     const requested = parseRecipeIdsParam(raw)
+    // 献立で枠ごとに決めた食数の合計(2026-08-03 便DJ)。無ければ従来どおり
+    // 「回数 × レシピの登録人数」で数える(食数を1つも触っていない献立では同じ値になる)
+    const servingsParam = searchParams.get('servings')
+    const servingsById = servingsParam ? parseServingsParam(servingsParam) : null
     const chosen = requested
       .map(({ id, times }) => ({ recipe: recipes.find((r) => r.id === id), times }))
       .filter((x): x is { recipe: (typeof recipes)[number]; times: number } => x.recipe != null)
+      .map(({ recipe, times }) => {
+        const base = recipe.servings > 0 ? recipe.servings : 1
+        const totalServings = servingsById?.get(recipe.id!) ?? base * times
+        return { recipe, totalServings, scale: totalServings / base }
+      })
     if (chosen.length > 0) {
       const built = buildShoppingCandidates(
-        chosen.map(({ recipe, times }) => ({
+        chosen.map(({ recipe, scale }) => ({
           id: recipe.id!,
           ingredients: recipe.ingredients,
-          scale: times,
+          scale,
         })),
         haveNames,
       )
       setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
       // 「レシピを選び直す」で復元できるよう選択を覚えておく(#8)。献立由来は
-      // 「登録人数 × 献立に入っている回数」を初期の食数にする
+      // 献立で決めた食数の合計(未設定なら「登録人数 × 献立に入っている回数」)を初期の食数にする
       setLastPickerCounts(
-        Object.fromEntries(chosen.map(({ recipe, times }) => [recipe.id!, recipe.servings * times])),
+        Object.fromEntries(chosen.map(({ recipe, totalServings }) => [recipe.id!, totalServings])),
       )
       // 献立プランナーの「この週の買い物リストを作る」から来た場合は、候補が乗る
       // 「買い物メモ」タブを開いた状態で迎える(在庫タブのまま候補が見えない事故を防ぐ)
@@ -237,11 +247,13 @@ export default function ShoppingPage() {
     } else if (requested.length > 0) {
       showToast(ja.shopping.fromMealPlanNotFoundToast)
     }
-    // 値が空(?recipeIds=)でもURLからは必ず消す(従来は早期returnでパラメータが残り続けていた)
+    // 値が空(?recipeIds=)でもURLからは必ず消す(従来は早期returnでパラメータが残り続けていた)。
+    // 食数(?servings=)も対で消す
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
         next.delete('recipeIds')
+        next.delete('servings')
         return next
       },
       { replace: true },
