@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>うちレシピについて｜うちレシピ</title>
-<meta name="description" content="おうちのレシピをまとめて管理できるレシピ帳アプリ「うちレシピ」の紹介ページ。できること・使い方・よくある質問をまとめています。">
+<meta name="description" content="レシピ帳アプリ「うちレシピ」の紹介ページ。URLや文章を貼るだけでレシピを登録でき、調理中の大きな手順表示、カロリーと材料費の概算、献立と買い物メモまで使えます。ブラウザで開くだけ・会員登録なし・広告なし。">
 <meta property="og:title" content="うちレシピについて｜うちレシピ">
-<meta property="og:description" content="おうちのレシピをまとめて管理できるレシピ帳アプリ「うちレシピ」の紹介ページ。できること・使い方・よくある質問をまとめています。">
+<meta property="og:description" content="レシピを集めて登録すると、調理中の大きな手順表示・カロリーと材料費の概算・献立と買い物メモまで使えます。ブラウザで開くだけ・会員登録なし・広告なし。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://uchirecipe.com/about/">
 <meta property="og:image" content="https://uchirecipe.com/ogp.png">
 <meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://uchirecipe.com/about/">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <style>
   :root {
@@ -40,104 +41,287 @@
     }
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
-    line-height: 1.7;
+    line-height: 1.8;
   }
   main {
-    max-width: 560px;
+    max-width: 680px;
     margin: 0 auto;
-    padding: 24px 20px 48px;
+    padding: 20px 16px 48px;
   }
-  header {
+  header.page {
     text-align: center;
-    padding: 8px 0 4px;
+    padding: 4px 0 0;
   }
-  header img {
-    width: 56px;
-    height: 56px;
-  }
-  header p {
+  header.page img { width: 56px; height: 56px; }
+  header.page p {
     margin: 4px 0 0;
     font-size: 13px;
     color: var(--text-muted);
     font-weight: bold;
   }
+  /* 上部ラベル: 何をするアプリかの前提を最初の1行で置く */
+  p.top-label {
+    margin: 12px 0 0;
+    text-align: center;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+
+  /* ===== ヒーロー ===== */
   h1 {
-    font-size: 22px;
-    line-height: 1.5;
-    margin: 16px 0 8px;
+    font-size: 26px;
+    line-height: 1.45;
+    margin: 14px 0 10px;
+    text-align: center;
   }
   .lead {
-    color: var(--text-muted);
-    margin: 0 0 20px;
+    margin: 0 0 14px;
+    font-size: 15.5px;
   }
-  .card {
+  .three-zero {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px 8px;
+    margin: 0 0 14px;
+    padding: 0;
+    list-style: none;
+  }
+  .three-zero li {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 3px 12px;
+    font-size: 13px;
+    font-weight: bold;
+    color: var(--accent-ink);
+  }
+
+  /* ===== セクション ===== */
+  .sec {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 16px;
+    padding: 18px 16px;
     margin-bottom: 16px;
     box-shadow: 0 1px 3px rgba(67, 54, 42, 0.08);
   }
-  .card h2 {
-    font-size: 16px;
-    margin: 0 0 8px;
+  .sec > h2 {
+    font-size: 19px;
+    line-height: 1.45;
+    margin: 0 0 10px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
   }
-  ul.feature-list {
-    margin: 0;
-    padding-left: 1.3em;
+  .sec h3 {
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 18px 0 6px;
+    color: var(--accent-ink);
   }
-  ul.feature-list li {
-    margin-bottom: 6px;
-  }
-  .gallery {
-    display: flex;
-    gap: 12px;
-    overflow-x: auto;
-    margin: 0 0 20px;
-    padding: 4px 2px 12px;
-    scroll-snap-type: x mandatory;
-    -webkit-overflow-scrolling: touch;
-  }
-  .gallery figure {
-    flex: 0 0 auto;
-    margin: 0;
-    width: 66%;
-    max-width: 220px;
-    scroll-snap-align: start;
-  }
-  .gallery img {
-    width: 100%;
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    display: block;
-    box-shadow: 0 2px 8px rgba(67, 54, 42, 0.1);
-  }
-  .gallery figcaption {
-    text-align: center;
+  .sec p, .sec li { font-size: 15px; }
+  .sec p { margin: 0 0 10px; }
+  .sec p:last-child { margin-bottom: 0; }
+  .eyebrow {
+    display: inline-block;
+    margin: 0 0 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--bg);
     font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 6px;
     font-weight: bold;
+    letter-spacing: 0.04em;
   }
-  ol.steps {
-    margin: 0;
+  ul.feature-list, ol.steps {
+    margin: 0 0 10px;
     padding-left: 1.3em;
   }
-  ol.steps li {
-    margin-bottom: 6px;
+  ul.feature-list li, ol.steps li { margin-bottom: 8px; }
+  ul.feature-list li:last-child, ol.steps li:last-child { margin-bottom: 0; }
+  p.muted, .muted {
+    color: var(--text-muted);
+    font-size: 13.5px;
   }
-  details {
-    margin-bottom: 10px;
+
+  /* ===== 部分スクリーンショット =====
+     実機(390x844・2倍)から切り出したもの。--w に実寸の半分(CSS px)を入れて等倍で置く */
+  figure.shot { margin: 12px 0 14px; }
+  figure.shot img {
+    display: block;
+    width: 100%;
+    max-width: var(--w, 390px);
+    height: auto;
+    margin: 0 auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(67, 54, 42, 0.12);
+    background: var(--surface);
+  }
+  figure.shot figcaption {
+    margin: 6px auto 0;
+    max-width: 420px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    text-align: center;
+  }
+  /* 2枚並べるとき(広い画面では横に、狭い画面では縦に積む) */
+  .shots {
+    display: grid;
+    gap: 4px 14px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 620px) {
+    .shots { grid-template-columns: 1fr 1fr; align-items: start; }
+  }
+
+  .note {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 14.5px;
+    margin: 12px 0 0;
+  }
+  .note strong { display: block; margin-bottom: 4px; }
+  .note p { font-size: 14.5px; }
+  .note p:last-child { margin-bottom: 0; }
+
+  /* 使い方ページの該当箇所への導線 */
+  .more {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 14px;
+    font-weight: bold;
+    color: var(--accent-ink);
+    text-decoration: none;
+    border-bottom: 1px solid currentColor;
+  }
+  .more--sm { font-size: 13px; margin-top: 6px; }
+
+  /* ===== 痛み(3つ) ===== */
+  .pains {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr;
+    margin: 0 0 12px;
+    padding: 0;
+    list-style: none;
+  }
+  @media (min-width: 620px) {
+    .pains { grid-template-columns: repeat(3, 1fr); }
+  }
+  .pains li {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .pains b {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 15px;
+    color: var(--accent-ink);
+  }
+  .pains span {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
+  /* ===== 網羅グリッド(献立まわりだけ大きい1枠) ===== */
+  .grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 1fr;
+    margin-top: 14px;
+  }
+  @media (min-width: 560px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+    .grid .wide { grid-column: 1 / -1; }
+  }
+  .grid > div {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .grid h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    color: var(--accent-ink);
+  }
+  .grid .wide h3 { font-size: 17px; }
+  .grid p {
+    margin: 0;
     font-size: 14px;
   }
-  details:last-child {
-    margin-bottom: 0;
+  .grid .wide p { font-size: 15px; }
+  .grid .tiny {
+    display: block;
+    margin-top: 6px;
+    font-size: 12.5px;
+    color: var(--text-muted);
   }
+
+  /* ===== 無料と買い切り版 ===== */
+  .free-line {
+    margin: 0 0 12px;
+    padding: 12px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    font-size: 15.5px;
+    font-weight: bold;
+  }
+  .pro-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    color: var(--accent-ink);
+    font-size: 11px;
+    font-weight: bold;
+    vertical-align: middle;
+  }
+  .price {
+    margin: 14px 0 0;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg);
+  }
+  .price b {
+    display: block;
+    font-size: 20px;
+    color: var(--accent-ink);
+  }
+  .price span {
+    display: block;
+    font-size: 13.5px;
+    color: var(--text-muted);
+  }
+
+  /* ===== FAQ ===== */
+  details {
+    margin-bottom: 10px;
+    font-size: 14.5px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+  }
+  details:last-child { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
   details summary {
     cursor: pointer;
     font-weight: bold;
@@ -145,7 +329,11 @@
   details p {
     margin: 8px 0 0;
     color: var(--text-muted);
+    font-size: 14.5px;
   }
+
+  a { color: var(--accent-ink); }
+  code { font-size: 13px; word-break: break-all; }
   .cta {
     display: block;
     text-align: center;
@@ -156,13 +344,19 @@
     text-decoration: none;
     padding: 16px;
     border-radius: 14px;
-    margin: 8px 0 24px;
+    margin: 8px 0 8px;
     box-shadow: 0 4px 14px rgba(67, 54, 42, 0.12);
+  }
+  .cta-note {
+    margin: 0 0 22px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--text-muted);
   }
   .back {
     display: block;
     text-align: center;
-    margin-top: 32px;
+    margin-top: 28px;
     color: var(--accent-ink);
     font-weight: bold;
     text-decoration: none;
@@ -177,62 +371,285 @@
     color: var(--text-muted);
     text-decoration: underline;
   }
-  footer span.sep {
-    margin: 0 8px;
+  footer span.sep { margin: 0 8px; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus {
+    left: 8px;
+    top: 8px;
+    z-index: 60;
+    background: var(--surface);
+    padding: 8px 12px;
+    border-radius: 8px;
   }
 </style>
 </head>
 <body>
-<main>
-  <header>
+<a class="skip" href="#main">本文へ移動</a>
+<main id="main">
+  <header class="page">
     <img src="/icon.svg" alt="" aria-hidden="true">
     <p>うちレシピ</p>
   </header>
+  <p class="top-label">ブラウザで開くだけ。インストールも会員登録もいりません</p>
 
-  <h1>毎日の「今日何作ろう」をラクにする、自分専用のレシピ帳</h1>
-  <p class="lead">
-    材料・手順・写真を登録してためていくだけで、食材や時間から今日作るものを提案してくれます。
-    料理中は声で操作できる調理中モードで、手が汚れていても安心です。
-  </p>
+  <h1>レシピを集めて登録。<br>できることが増える。</h1>
+  <p class="lead">ネットで見つけたレシピはURLを貼るだけ。家で作ってきた味は、手入力やまとめて入力で。うちレシピに登録すると、調理中の大きな手順表示・カロリーと材料費の概算・献立と買い物メモまで、そのレシピで使えるようになります。</p>
+  <ul class="three-zero">
+    <li>広告なし</li>
+    <li>会員登録なし</li>
+    <li>月額なし</li>
+  </ul>
 
-  <div class="gallery">
-    <figure>
-      <img src="/about/img/home.png" alt="ホーム画面。今日の献立と、条件に合わせたレシピ提案が並ぶ" loading="lazy">
-      <figcaption>今日なに作るか、開いてすぐ分かる</figcaption>
-    </figure>
-    <figure>
-      <img src="/about/img/recipes.png" alt="レシピ一覧画面。カード形式でタグ付きのレシピが並ぶ" loading="lazy">
-      <figcaption>登録したレシピを一覧・検索</figcaption>
-    </figure>
-    <figure>
-      <img src="/about/img/detail.png" alt="レシピ詳細画面。材料と人数調整、今日つくるボタンがある" loading="lazy">
-      <figcaption>人数に合わせて分量も自動計算</figcaption>
-    </figure>
-    <figure>
-      <img src="/about/img/focus.png" alt="調理中モードの画面。手順が大きく表示され、声で操作できる" loading="lazy">
-      <figcaption>調理中は声とタイマーで手ぶら操作</figcaption>
-    </figure>
-  </div>
+  <figure class="shot" style="--w: 390px;">
+    <img src="/about/img/manual/recipe-cards.webp" width="780" height="1056" loading="eager" decoding="async" alt="レシピ一覧のカード4枚。3枚は料理の写真つき、1枚は魚のアイコン。どのカードにも料理名・調理時間・手間レベル・主な食材のチップが付いている">
+    <figcaption>集めたレシピは、写真があってもなくても同じ形で並びます</figcaption>
+  </figure>
 
-  <div class="card">
-    <h2>できること</h2>
-    <ul class="feature-list">
-      <li>レシピの登録・写真・材料・手順の管理（文章を貼り付けての自動振り分けにも対応）</li>
-      <li>食材や時間・気分の条件で「今日なに作るか」を提案</li>
-      <li>調理中モード: 手順を1画面ずつ大きく表示し、声で「次へ」「タイマー」等を操作</li>
-      <li>週間献立プランナーと、そこから作る買い物リスト・在庫ボード</li>
-      <li>作った記録・お気に入り・NG食材（アレルギー等）の警告</li>
-      <li>レシピ帳まるごとのバックアップ書き出し・読み込み</li>
+  <a class="cta" href="/">無料で使ってみる</a>
+  <p class="cta-note">最初から基本のレシピが109品入っています</p>
+
+  <section class="sec">
+    <h2>こんなとき、ありませんか</h2>
+    <ul class="pains">
+      <li>
+        <b>作りたいレシピが、また探すところから</b>
+        <span>ブックマークやリンクはたまるのに、作りたい日に限って、どれだったか分からなくなる。</span>
+      </li>
+      <li>
+        <b>いくらかかるのか、あとになって分かる</b>
+        <span>今日の1食がいくらぐらいで、どれくらいのカロリーなのかは、作ってからでないと見当がつかない。</span>
+      </li>
+      <li>
+        <b>手が濡れていて、スマホにさわれない</b>
+        <span>画面はすぐ暗くなるし、文字は小さいし、いま何番目の手順だったかを見失う。</span>
+      </li>
     </ul>
-  </div>
+    <p class="muted">うちレシピは、レシピを1か所に登録するところから始めて、この3つをまとめて引き受けます。</p>
+  </section>
 
-  <div class="card">
+  <section class="sec">
+    <p class="eyebrow">まず、集めて登録する</p>
+    <h2>URLを貼る。文章を貼る。手で書く。</h2>
+    <p>レシピのページのURLを貼り付けると、料理名・材料・手順・写真が自動で入ります。レシピのページなら多くのサイトで取り込めます（取り込めるかどうかはページごとに自動で判定します）。</p>
+
+    <div class="shots">
+      <figure class="shot" style="--w: 390px;">
+        <img src="/about/img/lp/url-import.webp" width="780" height="442" loading="lazy" decoding="async" alt="レシピ登録画面の「URLから取り込む」。説明文の下に、https:// と書かれた入力欄がある">
+        <figcaption>URLを貼るだけ。写真も一緒に取り込めます（サイトによります）</figcaption>
+      </figure>
+      <figure class="shot" style="--w: 390px;">
+        <img src="/about/img/manual/paste.webp" width="780" height="604" loading="lazy" decoding="async" alt="テキスト貼り付けの欄。貼り付けた文章の下に「材料4件・手順3件を読み取りました。内容を確認して修正してください」と出ている">
+        <figcaption>文章を貼れば、材料と手順に自動で振り分けます</figcaption>
+      </figure>
+    </div>
+
+    <ul class="feature-list">
+      <li><strong>文章の貼り付け</strong>: 材料と作り方がまとまった文章を貼ると、材料と手順に振り分けます</li>
+      <li><strong>手入力・まとめて入力</strong>: 家で作ってきた味も残せます。「豚こま 200g」のように1行ずつ足していけます</li>
+      <li><strong>写真</strong>: 撮った写真を付けられます。写真がないレシピは料理の種類のアイコンで並びます</li>
+      <li><strong>人数分の計算</strong>: 2人分のレシピを5人分にすると、材料の分量も一緒に変わります</li>
+    </ul>
+    <a class="more" href="/about/manual.html#register">登録のしかたをくわしく →</a>
+
+    <p class="note">
+      <strong>「URLから取り込む」を使うときだけ、貼り付けたURLを読み取り用のサーバーに送ります</strong>
+      送るのはURLだけです。レシピの中身・写真は端末の外に出ません。
+    </p>
+  </section>
+
+  <section class="sec">
+    <p class="eyebrow">登録すると、できること 1</p>
+    <h2>調理中に、見やすい。</h2>
+    <p>登録したレシピは、調理中モードで開けます。手順が1つずつ大きな文字で出るので、少し離れたところからでも読めます。</p>
+
+    <div class="shots">
+      <figure class="shot" style="--w: 390px;">
+        <img src="/about/img/manual/cookmode.webp" width="780" height="880" loading="lazy" decoding="async" alt="調理中モードの手順表示。丸い「3」の下に手順の本文が大きな文字で出て、「15分」の時間表記がタイマーのボタンになっている">
+        <figcaption>手順は1つずつ。文中の「15分」はタイマーのボタンです</figcaption>
+      </figure>
+      <figure class="shot" style="--w: 366px;">
+        <img src="/about/img/manual/timer.webp" width="732" height="596" loading="lazy" decoding="async" alt="「タイマーを調整」の窓。料理名と残り時間14:58が大きく出て、「−30秒」「+1分」「停止」のボタンが並んでいる">
+        <figcaption>タイマーは複数同時に動かせます</figcaption>
+      </figure>
+    </div>
+
+    <ul class="feature-list">
+      <li><strong>手順の拡大表示</strong>: 1画面に1手順。いま何番目かが分かります</li>
+      <li><strong>タップでタイマー</strong>: 手順の中の「15分」を押すとタイマーが始まります。煮ている間に別のタイマーも足せます</li>
+      <li><strong>声で操作・読み上げ</strong>: 「次」と言うと次の手順へ進みます。手順を読み上げることもできます</li>
+      <li><strong>画面が暗くならない</strong>: 調理中モードの間は、画面の自動消灯を止めます</li>
+    </ul>
+    <a class="more" href="/about/manual.html#cookmode">調理中モードをくわしく →</a>
+    <p class="muted" style="margin-top: 10px;">声での操作と画面の自動消灯を止める働きは、対応しているブラウザでのみ使えます。お使いの環境により動作が異なります。</p>
+  </section>
+
+  <section class="sec">
+    <p class="eyebrow">登録すると、できること 2</p>
+    <h2>栄養と材料費が、自動でそろう。</h2>
+    <p>材料を入れておくと、1食あたりのカロリーと材料費が概算で出ます。作る前に、だいたいの数字が分かります。</p>
+
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/manual/detail-photo.webp" width="780" height="676" loading="lazy" decoding="async" alt="レシピ詳細画面の上部。料理の写真の下に料理名「カレーライス」・調理時間・手間レベル・全体の金額「約715円」・「4人分レシピの1食あたり 約179円」が並んでいる">
+      <figcaption>材料費は全体と1食あたりの両方が出ます</figcaption>
+    </figure>
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/manual/nutrition-row.webp" width="780" height="176" loading="lazy" decoding="async" alt="レシピ詳細の「栄養価のめやす（4人分レシピの1食あたり）: 563kcal」の1行">
+      <figcaption>カロリーは1食あたりで出ます</figcaption>
+    </figure>
+
+    <ul class="feature-list">
+      <li><strong>カロリーの概算</strong>: 文部科学省「日本食品標準成分表」の数値をもとに計算します</li>
+      <li><strong>野菜量の概算</strong>: 献立に入れた料理から、その日の野菜のグラム数も出ます</li>
+      <li><strong>材料費の概算</strong>: 食材の価格から計算します。価格は自分の買っている値段に書き換えられます</li>
+      <li><strong>計算できなかった分は隠しません</strong>: 数えられなかった材料がある料理は、その旨を添えて出します</li>
+    </ul>
+    <a class="more" href="/about/manual.html#nutrition">栄養と食費をくわしく →</a>
+    <p class="muted" style="margin-top: 10px;">数字はどれも概算です。実際の食材や分量によって変わります。</p>
+  </section>
+
+  <section class="sec">
+    <p class="eyebrow">登録すると、できること 3</p>
+    <h2>まだまだ、あります。</h2>
+
+    <div class="grid">
+      <div class="wide">
+        <h3>献立を立てると、買い物メモまでつながります</h3>
+        <p>「日」「週」の献立を組めます。決まっていない日は、まとめて提案させることもできます。献立に入れた料理の材料は買い物メモに集まり、スーパーの売り場順に並びます。在庫で「ある」にした食材は下書きに出ないので、二度買いを避けられます。週の概算食費も出ます。</p>
+        <div class="shots" style="margin-top: 10px;">
+          <figure class="shot" style="--w: 370px;">
+            <img src="/about/img/lp/plan-week-free.webp" width="740" height="660" loading="lazy" decoding="async" alt="献立の「週」タブの1日ぶんのカード。日付と「今日」の印、夕食の主菜と副菜、料理を追加のボタン、その日の献立ぶんのカロリーと野菜量、この日のメモの欄が並んでいる">
+            <figcaption>週の献立。1日ぶんのカードが7日並びます</figcaption>
+          </figure>
+          <figure class="shot" style="--w: 390px;">
+            <img src="/about/img/manual/shopping.webp" width="780" height="1080" loading="lazy" decoding="async" alt="買い物メモの画面。キャベツ・ピーマン・にんにく・玉ねぎ・長ねぎ・しょうがと野菜が続いたあとに豚バラ薄切り肉が並び、売り場順になっている">
+            <figcaption>買い物メモは売り場順。買いながらチェックできます</figcaption>
+          </figure>
+        </div>
+        <figure class="shot" style="--w: 390px;">
+          <img src="/about/img/lp/cost-week-free.webp" width="780" height="336" loading="lazy" decoding="async" alt="献立の「週」タブの「今週の概算食費」を開いたところ。1週間ぶんの概算金額と食数、計算のもとにした期間が出ている">
+          <figcaption>今週の概算食費。過ぎた日は含みません</figcaption>
+        </figure>
+        <a class="more" href="/about/manual.html#mealplan">献立の立て方をくわしく →</a>
+        <span class="tiny"><a class="more more--sm" href="/about/manual.html#shopping">買い物メモをくわしく →</a></span>
+      </div>
+
+      <div>
+        <h3>基本のレシピ109品</h3>
+        <p>肉じゃが・鶏の唐揚げ・回鍋肉などの定番から、お弁当のおかずや作り置きまで、うちレシピのために書き下ろした109品が最初から入っています。全部無料で使えます。</p>
+        <span class="tiny">必要なければ、設定で一覧に出さないようにもできます。</span>
+        <a class="more more--sm" href="/about/manual.html#starters">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>食材の在庫</h3>
+        <p>よく使う食材を「ある・少ない・ない」の3段階で持っておけます。買い物メモや、在庫からのレシピ探しに使えます。</p>
+        <a class="more more--sm" href="/about/manual.html#pantry">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>NG食材の警告</h3>
+        <p>食べられない食材を登録しておくと、その食材を使うレシピに印が出ます。「豚」を登録すれば「豚バラ肉」を使うレシピも拾います。</p>
+        <a class="more more--sm" href="/about/manual.html#search">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>作った記録</h3>
+        <p>作った日・人数・ひとことメモ・写真を残せます。あとから「前はどうしたか」を見返せます。</p>
+        <a class="more more--sm" href="/about/manual.html#logs">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>検索・タグ・並べ替え</h3>
+        <p>料理名・材料・タグで探せます。「たまねぎ」のようにかなで書いても見つかります。更新順・在庫との一致順などで並べ替えもできます。</p>
+        <a class="more more--sm" href="/about/manual.html#search">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>お気に入り・共有</h3>
+        <p>お気に入りの印を付けて絞り込めます。レシピは画像カードやテキストにして、家族や友人に送れます。</p>
+        <a class="more more--sm" href="/about/manual.html#search">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>献立表の印刷・画像保存</h3>
+        <p>1週間の献立を1枚の表にして、印刷したり画像で保存したりできます。冷蔵庫に貼っておく使い方もできます。</p>
+        <a class="more more--sm" href="/about/manual.html#mealplan">くわしく →</a>
+      </div>
+
+      <div>
+        <h3>オフラインでも開ける</h3>
+        <p>一度開いたあとなら、電波のない台所や買い物先でも、レシピと買い物メモを開けます。</p>
+        <a class="more more--sm" href="/about/manual.html#start">くわしく →</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>データは、この端末の中に。</h2>
+    <p>登録したレシピ・記録・写真は、お使いの端末の中だけに保存されます。開発者のサーバーには送られません。会員登録もログインもないので、メールアドレスを預ける必要もありません。</p>
+
+    <h3>どれくらいの容量を使うか</h3>
+    <ul class="feature-list">
+      <li><strong>文字だけのレシピ</strong>: 1件あたりおよそ2KBです（最初から入っている109品を全部合わせても250KB程度）</li>
+      <li><strong>写真</strong>: 1枚あたりおよそ150〜300KBです。保存するときに自動で縮小しています（長い辺を1200pxまで）</li>
+    </ul>
+    <p class="muted">写真を100枚残すと、およそ15〜30MBになります。文字だけならたくさん登録しても大きくなりません。</p>
+
+    <h3>バックアップと、クラウドの使い方</h3>
+    <p>設定の「バックアップ」から、レシピ帳ぜんぶを1つのファイルに書き出せます。新しい端末でそのファイルを読み込めば、そのまま続きを使えます。</p>
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/manual/backup-export.webp" width="780" height="376" loading="lazy" decoding="async" alt="設定のバックアップ画面。「「作った記録」の写真もバックアップに含める」のチェックと説明文の下に、「ファイルに書き出す」のボタンがある">
+      <figcaption>書き出しは1ファイル。写真を含めるかどうかも選べます</figcaption>
+    </figure>
+    <p>書き出したファイルは、Googleドライブなどのクラウドに置いておくこともできます。別の端末で同じファイルを読み込めば、同じレシピ帳を開けます。写真を含めて書き出したファイルを預けておけば、端末の中の古い写真を減らしたあとでも、そのファイルから戻せます。</p>
+    <p class="muted">端末どうしが自動で同期する仕組みはありません。書き出しと読み込みは、そのつどご自身の操作で行います。</p>
+    <a class="more" href="/about/manual.html#backup">バックアップと機種変更をくわしく →</a>
+  </section>
+
+  <section class="sec">
+    <h2>ここまでの機能は、すべて無料です。</h2>
+    <p class="free-line">レシピの登録も、調理中モードも、栄養と材料費の概算も、献立と買い物メモも、バックアップも。期間の制限はありません。広告は表示しません。</p>
+
+    <h3>さらにできること（買い切り版）<span class="pro-tag">Pro版</span></h3>
+    <ul class="feature-list">
+      <li><strong>栄養価の8項目表示と「栄養価で探す」</strong>: たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・食塩相当量まで見られます。栄養価での並べ替えもできます</li>
+      <li><strong>月間の献立</strong>: カレンダーで1か月を見渡せます。未定の日をまとめて提案、月の食費と栄養のまとめ、1か月分の献立表の印刷・画像保存も使えます</li>
+      <li><strong>並行調理ナビ</strong>: 2〜3品を選ぶと、待ち時間の長い工程を先にした「1本の段取り」にまとめます</li>
+      <li><strong>目的から組む</strong>: 「たんぱく質を多めに」「塩分をひかえめに」を選んで献立を組めます</li>
+      <li><strong>レシピの登録数の上限なし</strong>: いまは無料でも登録できる件数に上限はありません。上限を設けるときは、事前にこのページと使い方ページでお知らせします</li>
+    </ul>
+
+    <div class="shots">
+      <figure class="shot" style="--w: 390px;">
+        <img src="/about/img/manual/nutrition-open.webp" width="780" height="940" loading="lazy" decoding="async" alt="レシピ詳細の栄養価を開いた画面。エネルギー・たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・食塩相当量・野菜が、1人分と全量の2列で並んでいる">
+        <figcaption>栄養価の8項目表示（買い切り版）</figcaption>
+      </figure>
+      <figure class="shot" style="--w: 390px;">
+        <img src="/about/img/manual/plan-month.webp" width="780" height="580" loading="lazy" decoding="async" alt="献立の「月」タブのカレンダー。日ごとのマスに予定した主菜の名前が入っている">
+        <figcaption>月間の献立（買い切り版）</figcaption>
+      </figure>
+    </div>
+
+    <p class="note">
+      <strong>買う前に、そのまま試せます</strong>
+      月間の献立は、自分の記録が入った本物の画面を1回だけ表示できます。並行調理ナビは3回まで、買い切り版と同じものをそのまま使えます。
+    </p>
+
+    <div class="price">
+      <b>買い切り 早期価格 800円（税込）</b>
+      <span>お支払いは1回だけです。月額・年額・追加のお支払いはありません。</span>
+      <span style="margin-top: 6px; color: var(--text);"><strong>買い切り版は販売準備中です。</strong>準備ができましたら、このページと使い方ページでお知らせします。</span>
+    </div>
+    <a class="more" href="/about/manual.html#pro">無料で使える範囲と買い切り版をくわしく →</a>
+  </section>
+
+  <section class="sec">
     <h2>ホーム画面に追加する</h2>
-    <p style="margin: 0 0 10px; font-size: 14px;">アプリストア不要。ブラウザからそのままホーム画面に追加でき、次回からアプリのように起動できます。</p>
+    <p>アプリストアは使いません。ブラウザからホーム画面に追加すると、次からはアイコンから開けます。</p>
     <details>
       <summary>iPhone・iPad（Safari）の場合</summary>
       <ol class="steps">
-        <li>Safariで <code style="word-break: break-all;">https://uchirecipe.com/</code> を開く</li>
+        <li>Safariで <code>https://uchirecipe.com/</code> を開く</li>
         <li>下部の共有ボタン（四角から矢印が上に伸びたアイコン）をタップ</li>
         <li>「ホーム画面に追加」を選んで「追加」をタップ</li>
       </ol>
@@ -240,39 +657,51 @@
     <details>
       <summary>Android（Chrome）の場合</summary>
       <ol class="steps">
-        <li>Chromeで <code style="word-break: break-all;">https://uchirecipe.com/</code> を開く</li>
+        <li>Chromeで <code>https://uchirecipe.com/</code> を開く</li>
         <li>右上のメニュー（縦三点）をタップし「アプリをインストール」または「ホーム画面に追加」を選ぶ</li>
         <li>表示に従って追加する</li>
       </ol>
     </details>
-  </div>
+  </section>
 
-  <div class="card">
+  <section class="sec">
     <h2>よくある質問</h2>
     <details>
       <summary>無料ですか？</summary>
-      <p>基本の機能は無料でお使いいただけます。月間の献立（カレンダー）・並行調理ナビ・栄養価8項目の表示と「栄養価で探す」は買い切り版（Pro版）の機能です。くわしくは<a href="/about/manual.html#pro">使い方ページの「無料で使える範囲とPro版」</a>をご覧ください。</p>
+      <p>紹介したほとんどの機能を無料でお使いいただけます。期間の制限はありません。買い切り版で増えるのは、栄養価の8項目表示と「栄養価で探す」・月間の献立・並行調理ナビ・目的から組む・レシピの登録数の上限なし、の5つです。</p>
+    </details>
+    <details>
+      <summary>献立や買い物メモも無料ですか？</summary>
+      <p>「日」「週」の献立、買い物メモ、食材の在庫、週の概算食費は無料です。カレンダーで見渡す月間の献立は買い切り版の機能です。</p>
     </details>
     <details>
       <summary>会員登録は必要ですか？</summary>
-      <p>不要です。メールアドレスの登録やログインなしでそのまま使えます。</p>
+      <p>不要です。メールアドレスの登録やログインなしで、開いたその日から使えます。</p>
     </details>
     <details>
       <summary>データはどこに保存されますか？</summary>
-      <p>入力したレシピや記録は、お使いの端末の中だけに保存されます。サーバーに送信されることはありません。</p>
-      <p>ただし「URLから取り込む」機能を使うときだけ、貼り付けたレシピページのURLを、読み取り用の変換サーバー（Cloudflare Workers）に送信します。送るのはURLだけで、変換に使った後は保存も記録もしません。あなたのレシピの中身・写真・個人情報が送られることはありません。</p>
+      <p>入力したレシピや記録は、お使いの端末の中だけに保存されます。開発者のサーバーに送信されることはありません。</p>
+      <p>ただし「URLから取り込む」を使うときだけ、貼り付けたレシピページのURLを、読み取り用の変換サーバー（Cloudflare Workers）に送信します。送るのはURLだけで、変換に使った後は保存も記録もしません。レシピの中身・写真・個人情報が送られることはありません。</p>
     </details>
     <details>
       <summary>複数の端末で同じデータを使えますか？</summary>
-      <p>データは端末ごとに保存されるため、自動では同期されません。機種変更のときなどは、設定画面の「バックアップ」からファイルを書き出し、新しい端末で読み込んでください。</p>
+      <p>端末どうしが自動で同期する仕組みはありません。設定の「バックアップ」からファイルを書き出し、もう一方の端末で読み込んでお使いください。書き出したファイルをGoogleドライブなどのクラウドに置いておくと、受け渡しがしやすくなります。</p>
     </details>
     <details>
       <summary>インターネットに繋がっていなくても使えますか？</summary>
-      <p>一度開いた後であれば、電波が無い状態でも登録済みのレシピの閲覧・調理に使えます。</p>
+      <p>一度開いた後であれば、電波が無い状態でも登録済みのレシピの閲覧・調理に使えます。「URLから取り込む」だけはインターネットに繋がっているときに使えます。</p>
     </details>
-  </div>
+    <details>
+      <summary>栄養や材料費の数字は正確ですか？</summary>
+      <p>どちらも概算です。栄養は文部科学省「日本食品標準成分表」の数値をもとに、材料費は食材の価格をもとに計算しています。実際の食材・産地・分量によって変わりますので、概算としてお使いください。食材の価格は、自分の買っている値段に書き換えられます。</p>
+    </details>
+  </section>
 
-  <a class="back" href="/">← うちレシピを開く</a>
+  <h2 style="text-align: center; font-size: 18px; margin: 26px 0 10px;">今日の「なに作ろう」から、使ってみてください。</h2>
+  <a class="cta" href="/">うちレシピを開く</a>
+  <p class="cta-note">ブラウザで開くだけ。会員登録はいりません</p>
+
+  <a class="back" href="/about/manual.html">使い方をひととおり見る →</a>
 
   <footer>
     <a href="/about/manual.html">使い方</a>
