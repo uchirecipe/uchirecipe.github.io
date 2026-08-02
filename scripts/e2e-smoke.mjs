@@ -113,7 +113,7 @@
 //         日週月タブのaria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみ
 //         aria-pressed=true)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。
 //         同日更新: 既定が夕食のみになったため夕食を外そうとするパターンで検証)・
-//         「この食事の予定をまとめて消す」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3で
+//         「この週の◯◯をまとめて空にする」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3/DE-12で
 //         改名+折りたたみ)の折りたたみ開閉・食事選択+confirm+一括削除(手動配置も消える)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
 //         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
@@ -255,8 +255,8 @@
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
 //         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
-//         「この日の献立（1人分）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
-//         週まとめに「この週の献立（1人分）」が出ること。既定は1行で、めやすの説明は展開時のみ。
+//         「この日の献立の栄養（1人分の概算）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
+//         週まとめに「この週の献立の栄養（1人分の概算）」が出ること。既定は1行で、めやすの説明は展開時のみ。
 //         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
 //         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
 //         「監修」「推奨」「減塩」を使わないこと・「登録したレシピだけの合計」等の但し書きと
@@ -3895,7 +3895,7 @@ try {
       )
       await suggestConditionsToggleBtn.click()
       await mpPage.waitForTimeout(200)
-      const quickToggleBtn = mpPage.getByRole('button', { name: '自動提案は時短レシピ優先' })
+      const quickToggleBtn = mpPage.getByRole('button', { name: '調理時間15分以内を優先' })
       check('MEALPLAN-01(Fix5) 時短優先トグルは既定でaria-pressed=false', (await quickToggleBtn.getAttribute('aria-pressed')) === 'false')
       await quickToggleBtn.click()
       await mpPage.waitForTimeout(200)
@@ -3936,14 +3936,14 @@ try {
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
 
-      // 便U-4 → 2026-08-02 便CW-3で「この食事の予定をまとめて消す」に改名し、既定閉の
+      // 便U-4 → 便CW-3 → 2026-08-02 便DE-12で「この週の◯◯をまとめて空にする」に改名し、既定閉の
       // 折りたたみにして週タブのいちばん下へ移した。ここまでの操作で月曜夕食の主菜行に
       // 「肉じゃが」が割り当て済み(Fix4)。まず畳まれていることを確かめてから開く
       check(
-        'MEALPLAN-01(便CW-3) 「この食事の予定をまとめて消す」は既定で畳まれている',
+        'MEALPLAN-01(便CW-3/DE-12) 「この週の夕食をまとめて空にする」は既定で畳まれている',
         (await mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' }).count()) === 0,
       )
-      await mpPage.getByRole('button', { name: 'この食事の予定をまとめて消す' }).click()
+      await mpPage.getByRole('button', { name: 'この週の夕食をまとめて空にする' }).click()
       await mpPage.waitForTimeout(300)
       // 帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
       // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
@@ -4000,8 +4000,8 @@ try {
 
   // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
   // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
-  // ・週タブの各日カードに「この日の献立（1人分）」が1行(**無料は kcal・野菜g の2値**)で出ること
-  // ・週まとめに「この週の献立（1人分）」が同じ構成で出ること
+  // ・週タブの各日カードに「この日の献立の栄養（1人分の概算）」が1行(**無料は kcal・野菜g の2値**)で出ること
+  // ・週まとめに「この週の献立の栄養（1人分の概算）」が同じ構成で出ること
   // ・展開すると1日のめやすが**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
   //   **無料は野菜350gだけ**で、塩分のめやすはPro側。不足・過多の断定をしない=
   //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
@@ -4036,19 +4036,19 @@ try {
       const nbEmptyText = await nbPage.textContent('body')
       check(
         'NUTRI-DAY-01 未割当時は「この日の献立」の行が出ない',
-        !nbEmptyText.includes('この日の献立（1人分）'),
+        !nbEmptyText.includes('この日の献立の栄養（1人分の概算）'),
       )
       check(
         'NUTRI-WEEK-01 未割当時は「この週の献立」の行も出ない',
-        !nbEmptyText.includes('この週の献立（1人分）'),
+        !nbEmptyText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
       await nbPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
       await nbPage.waitForTimeout(1200)
       const nbFilledText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立（1人分）」が出る',
-        nbFilledText.includes('この日の献立（1人分）'),
+        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('この日の献立の栄養（1人分の概算）'),
       )
       const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
       check(
@@ -4076,8 +4076,8 @@ try {
         /野菜約[\d,]+g/.test(nbFilledText),
       )
       check(
-        'NUTRI-WEEK-01 週まとめに「この週の献立（1人分）」が出る',
-        nbFilledText.includes('この週の献立（1人分）'),
+        'NUTRI-WEEK-01 週まとめに「この週の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
       // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する

@@ -3064,6 +3064,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </button>
 
       {suggestConditionsOpen && (
+        <>
         <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
           <button
             type="button"
@@ -3117,6 +3118,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {ja.mealPlan.preferHighProteinToggle}
           </button>
         </div>
+        {/* 2026-08-02 便DE-7: 「調理時間15分以内を優先」が何を見ているか(全レシピの調理時間)と、
+            自分で登録したレシピも対象になる条件を1行で添える */}
+        <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>
+        </>
       )}
 
       {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
@@ -3676,7 +3681,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     <LayoutTemplate size={14} aria-hidden />
-                    {ja.mealPlan.templateApply}
+                    {ja.mealPlan.templateApplyMonth}
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillMonthHint}</p>
@@ -4072,7 +4077,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
         >
           <LayoutTemplate size={14} aria-hidden />
-          {ja.mealPlan.templateApply}
+          {ja.mealPlan.templateApplyWeek}
         </button>
       </div>
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateSaveDescription}</p>
@@ -4293,7 +4298,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           aria-expanded={clearWeekSlotOpen}
           className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
         >
-          <span className="text-sm font-bold text-ink-muted">{ja.mealPlan.clearWeekSlotTitle}</span>
+          <span className="text-sm font-bold text-ink-muted">
+            {ja.mealPlan.clearWeekSlotTitle.replace(
+              '{slot}',
+              ja.mealPlan.slot[clearSlotTarget],
+            )}
+          </span>
           {clearWeekSlotOpen ? (
             <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
           ) : (

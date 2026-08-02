@@ -200,7 +200,10 @@ export default function NutritionBalancePanel({
                 )}
               </p>
             )}
-            <p>
+            {/* 2026-08-02 便DE-12(オーナー指示): 「何が入っていないか」の行だけ太字にする。
+                合計に含めていないもの（ごはん・飲みもの・おやつ・外食／野菜に数えない食品群）は、
+                数字の読み方が変わる情報なのに、ほかの注記と同じ細い小文字で埋もれていた */}
+            <p className="font-bold">
               {includeRice
                 ? ja.nutritionBalance.registeredOnlyNoteWithRice
                 : ja.nutritionBalance.registeredOnlyNote}
@@ -209,7 +212,7 @@ export default function NutritionBalancePanel({
             {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
                 （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す） */}
             <p>{ja.nutrition.excludedDirectionNote}</p>
-            <p>{ja.nutritionBalance.vegetableCountNote}</p>
+            <p className="font-bold">{ja.nutritionBalance.vegetableCountNote}</p>
             <p>{ja.nutrition.estimateNote}</p>
             {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。
                 めやすの出典は、画面に出しているめやすの分だけ挙げる
