@@ -1,7 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { planRoleAssign } from '../logic/mealPlan'
-import type { MealPlanEntry, MealRole, MealSlot } from './types'
+import type { MealPlanEntry, MealPurpose, MealRole, MealSlot } from './types'
 
 export async function listMealPlanRange(startDate: string, endDate: string) {
   return db.mealPlans.where('date').between(startDate, endDate, true, true).toArray()
@@ -25,11 +25,20 @@ export async function addMealEntry(
   recipeId: number,
   role: MealRole,
   auto = false,
+  /**
+   * 自動提案が「目的」を指定した状態で入れた枠なら、その目的（2026-08-02 便CP-2）。
+   * 月タブの答え合わせ（目的を指定して組んだ日の事実表示）にだけ使う記録。
+   */
+  purpose?: MealPurpose,
 ): Promise<void> {
   // auto=true は「まとめて献立を立てる」由来の枠だけに付ける。手動追加(既定)は付けない
   // （＝手動配置として保護される。types.ts MealPlanEntry.auto 参照）。falseはあえて保存せず
-  // 既存の「未設定=手動」の後方互換とそろえる（レコードを余計な項目で汚さない）
-  await db.mealPlans.add(auto ? { date, slot, recipeId, role, auto: true } : { date, slot, recipeId, role })
+  // 既存の「未設定=手動」の後方互換とそろえる（レコードを余計な項目で汚さない）。
+  // purpose も同じ流儀で、指定があるときだけ書く
+  const entry: MealPlanEntry = { date, slot, recipeId, role }
+  if (auto) entry.auto = true
+  if (auto && purpose) entry.purpose = purpose
+  await db.mealPlans.add(entry)
 }
 
 /**

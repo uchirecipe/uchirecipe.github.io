@@ -590,6 +590,73 @@ export function suggestPairForSlot(
   return { main, side }
 }
 
+/**
+ * 目的モード（docs/62 決定②）の引き直し回数 k。docs/60 §3-2-3 の実測でk=3を推奨:
+ * kを上げるほど目的の軸には沿うが、同じ料理ばかり出るようになる（上位10品のシェアが
+ * k=1で28.8%→k=10で55.4%）。便CD/MP-03で直したばかりの「振り直しても代わり映えしない」を
+ * 逆走させないための上限として3で止める。
+ */
+export const PURPOSE_REDRAW_ATTEMPTS = 3
+
+/**
+ * 【引き直し方式】同じ枠を最大 attempts 回引き直し、penalty が最も小さいペアを採る純関数
+ * （2026-08-02 便CP-2・docs/60 §3-2-2 案A）。
+ *
+ * この関数の存在意義は「**献立エンジン本体を1行も変えない**」こと。
+ * suggestForSlot / suggestPairForSlot の段階的緩和・0件回避・ジャンル統一・副菜のdishType純化・
+ * 重複回避・たんぱく源分散は一切触らず、その**呼び出し側のラッパー**としてだけ選び直す。
+ * attempts=1 なら1回目をそのまま返す＝現行と完全に等価（いつでも無効化できる）。
+ *
+ * @param draw    1回ぶんの抽選（= () => suggestPairForSlot(recipes, options)）。呼ぶたびに違う結果が出る
+ * @param penalty ペアの「目的からの遠さ」。**小さいほど目的に沿う**。0以下＝理想としてそこで打ち切る
+ * @param attempts 最大の抽選回数 k
+ *
+ * 【ガード1: 一品もの（docs/60 §3-2-2「一品ものガード（必須）」）】
+ *   1回目に引いた主菜が一品もの（丼・麺・鍋・カレー・シチュー）なら、引き直さずそのまま採る。
+ *   2回目以降に一品ものが出たら候補にしない。
+ *   理由（docs/60の実測）: ガード無しで最適化すると一品ものの日が25.3%→17.9%に減る。
+ *   一品ものは野菜が少なく塩分が高いので構造的に締め出されるが、カレー・丼が出にくくなるのは
+ *   献立の性格を変える副作用であり、オーナー要望のどこにも書かれていない。
+ *
+ * 【ガード2: 構成（本便で追加）】
+ *   2回目以降は「主菜がある」かつ「1回目に副菜があったなら副菜もある」ものだけを候補にする。
+ *   これが無いと「塩分をひかえめに」の軸で**品数の少ないペア（主菜だけ・0件）が常に勝つ**——
+ *   料理を減らせば塩分は必ず下がるため。目的モードは献立の組み合わせを選ぶ機能であって、
+ *   品数を削る機能ではないので、比べる対象を同じ構成のペアどうしに揃える。
+ *
+ * どちらのガードでも候補が1つも残らなければ1回目の結果を返す（0件回避は既存のまま＝提案が消えない）。
+ */
+export function chooseBalancedPair(
+  draw: () => SuggestPairResult,
+  penalty: (pair: SuggestPairResult) => number,
+  attempts: number,
+): SuggestPairResult {
+  const first = draw()
+  if (attempts <= 1) return first
+  // ガード1: 1回目が一品ものなら引き直さない（その日はそれで完結する献立）
+  if (first.main && isOneDish(first.main)) return first
+  // 主菜が引けなかった枠（季節・NG等で候補0件）は引き直しても同じなので触らない
+  if (!first.main) return first
+
+  const wantSide = first.side != null
+  let best = first
+  let bestPenalty = penalty(first)
+  if (bestPenalty <= 0) return best // 理想に届いたらそこで打ち切る
+  for (let i = 1; i < attempts; i++) {
+    const next = draw()
+    if (!next.main) continue // ガード2: 主菜のないペアとは比べない
+    if (isOneDish(next.main)) continue // ガード1: 2回目以降の一品ものは捨てる
+    if (wantSide && !next.side) continue // ガード2: 副菜を削って軸を稼がない
+    const p = penalty(next)
+    if (p < bestPenalty) {
+      best = next
+      bestPenalty = p
+    }
+    if (bestPenalty <= 0) break
+  }
+  return best
+}
+
 /** 「まとめて献立を立てる」の埋め方を決める計画（planWeekFill の戻り値） */
 export interface FillWeekPlan {
   /**

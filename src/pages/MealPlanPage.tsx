@@ -88,8 +88,10 @@ import {
   dishAvoidKeys,
   cookedPlanEntryIds,
   mealOccasionCount,
+  chooseBalancedPair,
+  PURPOSE_REDRAW_ATTEMPTS,
 } from '../logic/mealPlan'
-import type { FillWeekPlan, MealGenre, ProteinSource } from '../logic/mealPlan'
+import type { FillWeekPlan, MealGenre, ProteinSource, SuggestPairResult } from '../logic/mealPlan'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -100,6 +102,7 @@ import {
   pricelessIngredientNamesOfRecipes,
 } from '../logic/priceEstimate'
 import {
+  computeRecipeNutrition,
   roundNutrient,
   isNutritionUnlocked,
   nutritionSourceName,
@@ -114,7 +117,15 @@ import {
   type RangeIntakeSummary,
   type RangePlannedDish,
 } from '../logic/rangeSummary'
-import { dayBalanceMap, summarizeWeekBalance, type BalanceDish } from '../logic/nutritionBalance'
+import {
+  dayBalanceMap,
+  summarizeWeekBalance,
+  purposePenalty,
+  reviewPurposeDays,
+  PURPOSE_NUTRIENT_KEY,
+  type BalanceDish,
+} from '../logic/nutritionBalance'
+import { canUseMonthTrial } from '../logic/proTrial'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -123,15 +134,25 @@ import type {
   CookedLog,
   DayNote,
   MealPlanEntry,
+  MealPurpose,
   MealRole,
   MealSlot,
   MonthCellMode,
   Recipe,
 } from '../db/types'
+import { MEAL_PURPOSES } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
 type MealPlanViewMode = 'day' | 'week' | 'month'
+
+/** 目的（2026-08-02 便CP-2）の表示ラベル。数値の項目名（たんぱく質/塩分相当量）とは別物 */
+const purposeLabelOf = (purpose: MealPurpose): string =>
+  purpose === 'protein' ? ja.mealPlan.purposeProtein : ja.mealPlan.purposeLowSalt
+
+/** 目的の軸になっている栄養素の表示名（月タブの答え合わせで数値に添える） */
+const purposeNutrientLabelOf = (purpose: MealPurpose): string =>
+  purpose === 'protein' ? ja.nutrition.proteinLabel : ja.nutrition.saltLabel
 
 /** レシピ選択ピッカーの絞り込み・並び替え（2026-07-24 便BH-3・タスク6: 一覧画面の機構を流用）。
  * 栄養並び替え（Pro機能）は複雑なのでピッカーには出さず、基本の並び替えだけを提供する */
@@ -839,6 +860,26 @@ export default function MealPlanPage() {
   const [viewMode, setViewMode] = useState<MealPlanViewMode>('day')
   const [monthAnchor, setMonthAnchor] = useState(() => todayString())
   const isPro = !!settings?.proCode
+  /**
+   * 月間献立の恒常お試し（2026-08-02 便CP-2・docs/62 決定③）。
+   * 未解錠でも1回だけ、**本人の記録・献立が入った本物の月タブ**をフル表示する
+   * （空のカレンダーを試用させるのは、いちばん貧しい状態を見せることになるため）。
+   * monthTrialActive はこの画面の状態なので、月タブを離れる／画面を離れるとロック表示に戻る。
+   * 使ったかどうかだけを settings.monthTrialUsed に残す（端末内の緩いフラグ）。
+   */
+  const [monthTrialActive, setMonthTrialActive] = useState(false)
+  const monthTrialAvailable = !isPro && canUseMonthTrial(settings?.monthTrialUsed)
+  /** 月タブの中身を出してよいか（解錠済み or お試し表示中）。月タブ配下のPro表示はこれで判定する */
+  const monthUnlocked = isPro || monthTrialActive
+  const startMonthTrial = async () => {
+    if (!monthTrialAvailable) return
+    setMonthTrialActive(true)
+    await updateSettings({ monthTrialUsed: true })
+  }
+  // 「閉じたらロックへ戻る」: 月タブから離れた時点でお試し表示を終える
+  useEffect(() => {
+    if (viewMode !== 'month') setMonthTrialActive(false)
+  }, [viewMode])
   const monthDatesList = useMemo(
     () => monthDates(new Date(`${monthAnchor}T00:00:00`)),
     [monthAnchor],
@@ -1209,6 +1250,48 @@ export default function MealPlanPage() {
   // 常設カードが画面上部を占領してカレンダーを押し下げないようにするため(数字自体は畳んでも見える)
   const [monthSummaryOpen, setMonthSummaryOpen] = useState(false)
 
+  /**
+   * 月タブの「答え合わせ」（2026-08-02 便CP-2・docs/62 決定②）。
+   * 目的を指定して組んだ日が、この月に何日あったか＝献立エントリに残した purpose から数える。
+   * 同じ日に複数の目的が混ざることは通常ないが、混ざったら最後に入った枠の目的を採る
+   * （日単位の事実表示なので1日1つに決める。どちらでも「その日は目的から組んだ」ことに変わりはない）。
+   */
+  const monthPurposeByDate = useMemo(() => {
+    const map = new Map<string, MealPurpose>()
+    monthEntries?.forEach((e) => {
+      if (e.purpose) map.set(e.date, e.purpose)
+    })
+    return map
+  }, [monthEntries])
+  // 日ごとの合計は週タブと同じ dayBalanceMap（過去日=作った記録・今日以降=登録した献立）で出す
+  const monthBalanceCooked = useMemo<BalanceDish[]>(() => {
+    const list: BalanceDish[] = []
+    const prefix = monthAnchor.slice(0, 7)
+    cookedLogsByDate.forEach((logs, date) => {
+      if (!date.startsWith(prefix)) return
+      logs.forEach(({ recipe }) => list.push({ date, recipe }))
+    })
+    return list
+  }, [cookedLogsByDate, monthAnchor])
+  const monthBalancePlanned = useMemo<BalanceDish[]>(() => {
+    const list: BalanceDish[] = []
+    monthEntries?.forEach((e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (recipe) list.push({ date: e.date, recipe })
+    })
+    return list
+  }, [monthEntries, recipeById])
+  const monthPurposeReviews = useMemo(() => {
+    if (monthPurposeByDate.size === 0) return []
+    const byDate = dayBalanceMap({
+      dates: monthDatesList,
+      today,
+      cooked: monthBalanceCooked,
+      planned: monthBalancePlanned,
+    })
+    return reviewPurposeDays(byDate.values(), monthPurposeByDate)
+  }, [monthPurposeByDate, monthDatesList, today, monthBalanceCooked, monthBalancePlanned])
+
   // 月カレンダーのセル表示(便CA・タスク2): 既定は写真。栄養/食費モードのときだけ日ごとの1人分を計算する
   const monthCellMode: MonthCellMode = settings?.monthCellMode ?? 'photo'
   const monthDayStats = useMemo(() => {
@@ -1303,6 +1386,16 @@ export default function MealPlanPage() {
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
   const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
   const [preferHighProtein, setPreferHighProtein] = useState(false)
+  /**
+   * 目的モード（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
+   * 時短・ジャンルと違って設定に保存するのは、この指定が「1か月続ける」ためのものだから
+   * （画面を開き直すたびに選び直させない）。未解錠のときは保存値があっても効かせない
+   * （Pro端末のバックアップを未解錠端末へ復元したときに、条件だけ生き残らないようにする）。
+   */
+  const planPurpose: MealPurpose | undefined = isPro ? settings?.planPurpose : undefined
+  const changePurpose = async (next: MealPurpose | undefined) => {
+    await updateSettings({ planPurpose: next })
+  }
   // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3)。既定閉
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const [message, setMessage] = useState('')
@@ -1450,13 +1543,55 @@ export default function MealPlanPage() {
     setPickerTarget(null)
   }
 
+  /**
+   * 1人分の栄養（perServing）のキャッシュ（2026-08-02 便CP-2・docs/60 §3-2-2「栄養値はキャッシュする」）。
+   * 目的モードの引き直しは同じレシピを何度も評価するので、computeRecipeNutrition を毎回呼ばない。
+   * レシピが更新されたら（useLiveQueryのrecipesが差し替わったら）Mapごと作り直す＝古い値が残らない。
+   */
+  const perServingCacheRef = useRef(new Map<number, NutrientTotals>())
+  useEffect(() => {
+    perServingCacheRef.current = new Map()
+  }, [recipes])
+  const perServingOf = (recipe: Recipe): NutrientTotals => {
+    const id = recipe.id
+    if (id == null) return computeRecipeNutrition(recipe).perServing
+    const cached = perServingCacheRef.current.get(id)
+    if (cached) return cached
+    const value = computeRecipeNutrition(recipe).perServing
+    perServingCacheRef.current.set(id, value)
+    return value
+  }
+
+  /**
+   * 主菜+副菜のペアを1組引く（2026-08-02 便CP-2・docs/62 決定②・docs/60 §3-2-2 案A）。
+   *
+   * 目的が指定されていなければ suggestPairForSlot を1回呼ぶだけ＝**従来と完全に同じ挙動**。
+   * 目的が指定されているときだけ、同じ引数で最大 PURPOSE_REDRAW_ATTEMPTS 回引き直して、
+   * 目的の軸に最も沿うペアを採る（エンジン本体は無改造。一品ものガード等は chooseBalancedPair 側）。
+   */
+  const drawPair = (options: Parameters<typeof suggestPairForSlot>[1]): SuggestPairResult => {
+    const draw = () => suggestPairForSlot(visibleRecipes, options)
+    const purpose = planPurpose
+    if (!purpose) return draw()
+    return chooseBalancedPair(
+      draw,
+      (pair) =>
+        purposePenalty(
+          purpose,
+          [pair.main, pair.side].filter((r): r is Recipe => r != null).map(perServingOf),
+        ),
+      PURPOSE_REDRAW_ATTEMPTS,
+    )
+  }
+
   // 主菜+副菜のペアを1組計算する(タスク1/2共用)。提案元の枠は「表示中の食事帯に夕食があれば
   // 夕食、無ければ先頭の帯」を使う。excludeIdsに渡したレシピは候補から外す(振り直しで直前の提案を
   // 避けるために使う)。候補が0件のときはundefinedを返す
   const computeSuggestionIds = (excludeIds: number[]): number[] | undefined => {
     if (!recipes) return undefined
     const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
-    const { main, side } = suggestPairForSlot(visibleRecipes, {
+    // 「おまかせで提案」も目的モードの引き直しを通す（docs/62 決定②のオーナー指示）
+    const { main, side } = drawPair({
       quickOnly,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
@@ -1674,22 +1809,24 @@ export default function MealPlanPage() {
     // plan.slotsToFill.length で判定してはいけない(一品ものスキップ・候補0件で0品追加になる)
     let added = 0
 
-    // 両役割が空 or 自動だけの枠: 主菜+副菜のペアで埋める(一品ものの主菜なら副菜は付かない=空く)
+    // 両役割が空 or 自動だけの枠: 主菜+副菜のペアで埋める(一品ものの主菜なら副菜は付かない=空く)。
+    // 目的が指定されていれば drawPair が引き直す(2026-08-02 便CP-2)。入れた枠には目的を記録し、
+    // 月タブの答え合わせ(「目的から組んだ日」の事実表示)から辿れるようにする
     for (const { date, slot } of plan.slotsToFill) {
-      const { main, side } = suggestPairForSlot(visibleRecipes, {
+      const { main, side } = drawPair({
         ...baseOpts,
         slot,
         usedRecipeIds,
         preferProteinSources: preferProteinSources(),
       })
       if (main) {
-        await addMealEntry(date, slot, main.id!, 'main', true)
+        await addMealEntry(date, slot, main.id!, 'main', true, planPurpose)
         usedRecipeIds.push(main.id!)
         bumpProtein(main)
         added++
       }
       if (side) {
-        await addMealEntry(date, slot, side.id!, 'side', true)
+        await addMealEntry(date, slot, side.id!, 'side', true, planPurpose)
         usedRecipeIds.push(side.id!)
         added++
       }
@@ -2545,6 +2682,8 @@ export default function MealPlanPage() {
     quickOnly ? ja.mealPlan.quickOnlySummary : undefined,
     genreFilter,
     preferHighProtein ? ja.mealPlan.preferHighProteinToggle : undefined,
+    // 目的は「まとめて献立」の結果を最も大きく変える条件なので、畳んだラベルにも必ず出す
+    planPurpose ? purposeLabelOf(planPurpose) : undefined,
   ]
   const conditionsSummary = activeConditionSummaries.filter((v): v is string => Boolean(v)).join('・')
 
@@ -2626,6 +2765,70 @@ export default function MealPlanPage() {
             {ja.mealPlan.preferHighProteinToggle}
           </button>
         </div>
+      )}
+
+      {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
+          解錠済み: 3択で選ぶ（他の条件と同じく折りたたみの中）。
+          未解錠: 控えめな鍵付き1行を**折りたたみの外に常設**し、押すとPro案内へ行く
+          （docs/62「売り場を変える」＝設定の奥ではなく無料の献立画面に入口を置く。
+          既定で閉じている折りたたみの中に入れると、結局その入口は誰にも見えない）。
+          押し売りはしない＝1行の控えめな鍵付き行にとどめる（規約H） */}
+      {isPro ? (
+        suggestConditionsOpen && (
+          <div className="mt-[var(--space-md)]" data-testid="purpose-picker">
+            <p className="flex items-center gap-1 text-sm font-bold text-ink-muted">
+              {ja.mealPlan.purposeLabel}
+              <span className="rounded-full border border-accent px-2 py-0.5 text-xs text-accent-ink">
+                {ja.mealPlan.purposeProTag}
+              </span>
+            </p>
+            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+              <button
+                type="button"
+                onClick={() => void changePurpose(undefined)}
+                aria-pressed={planPurpose === undefined}
+                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                  planPurpose === undefined
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-ink-muted'
+                }`}
+              >
+                {ja.mealPlan.purposeNone}
+              </button>
+              {MEAL_PURPOSES.map((purpose) => (
+                <button
+                  key={purpose}
+                  type="button"
+                  onClick={() => void changePurpose(purpose)}
+                  aria-pressed={planPurpose === purpose}
+                  className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                    planPurpose === purpose
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  {purposeLabelOf(purpose)}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
+          </div>
+        )
+      ) : (
+        <Link
+          to="/settings?section=pro"
+          data-testid="purpose-locked-row"
+          className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-sm border border-edge bg-surface px-3 py-2 shadow-sm"
+        >
+          <Lock size={16} className="shrink-0 text-ink-muted" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-bold text-ink-muted">
+              {ja.mealPlan.purposeLockedRow}
+            </span>
+            <span className="block text-xs text-ink-muted">{ja.mealPlan.purposeLockedRowSub}</span>
+          </span>
+          <ChevronRight size={16} className="shrink-0 text-ink-muted" aria-hidden />
+        </Link>
       )}
     </div>
   )
@@ -2858,8 +3061,18 @@ export default function MealPlanPage() {
       )}
 
       {viewMode === 'month' &&
-        (isPro ? (
+        (monthUnlocked ? (
           <div className="mt-[var(--space-md)]">
+            {/* お試し表示中の控えめな一言(2026-08-02 便CP-2・docs/62 決定③)。
+                いま見ているものが何なのかと、解錠すると何が変わるのかを1行だけ添える */}
+            {monthTrialActive && (
+              <p
+                data-testid="month-trial-active"
+                className="mb-[var(--space-sm)] rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink-muted"
+              >
+                {ja.mealPlan.monthTrialActiveNote}
+              </p>
+            )}
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -2918,7 +3131,7 @@ export default function MealPlanPage() {
                         約{monthSummary.personalYen.toLocaleString()}円
                       </p>
                     </div>
-                    {isNutritionUnlocked(isPro) && monthSummary.nutrition.dishCount > 0 && (
+                    {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
                       <div>
                         <p className="text-xs text-ink-muted">{ja.nutrition.kcalLabel}</p>
                         <p className="text-2xl font-bold text-accent-ink tabular-nums">
@@ -2953,6 +3166,51 @@ export default function MealPlanPage() {
                   <p className="mt-0.5 text-xs text-ink-muted">
                     {ja.mealPlan.monthSummaryEstimateNote}
                   </p>
+
+                  {/* 目的モードの「答え合わせ」(2026-08-02 便CP-2・docs/62 決定②)。
+                      目的を指定して組んだ日がこの月に1日もなければ、この節ごと出さない。
+                      出すのは事実だけ＝日数と、1日あたりの数字の並置。達成/未達の判定はせず、
+                      色分けもしない(docs/60 §1-3 の文言規律。「多い方がよい」とも言わない) */}
+                  {isNutritionUnlocked(monthUnlocked) && monthPurposeReviews.length > 0 && (
+                    <section
+                      data-testid="purpose-review"
+                      className="mt-[var(--space-sm)] rounded-sm border border-edge bg-app p-[var(--space-sm)]"
+                    >
+                      <h3 className="text-sm font-bold">{ja.mealPlan.purposeReviewTitle}</h3>
+                      {monthPurposeReviews.map((review) => {
+                        const key = PURPOSE_NUTRIENT_KEY[review.purpose]
+                        const nutrient = purposeNutrientLabelOf(review.purpose)
+                        return (
+                          <div key={review.purpose} className="mt-1">
+                            <p className="text-sm tabular-nums">
+                              {ja.mealPlan.purposeReviewDays
+                                .replace('{purpose}', purposeLabelOf(review.purpose))
+                                .replace('{n}', String(review.days))
+                                .replace('{total}', String(review.totalDays))}
+                            </p>
+                            {review.averageWith != null && (
+                              <p className="mt-0.5 text-xs text-ink-muted tabular-nums">
+                                {review.averageWithout != null
+                                  ? ja.mealPlan.purposeReviewAverage
+                                      .replace('{nutrient}', nutrient)
+                                      .replace('{a}', String(roundNutrient(key, review.averageWith)))
+                                      .replace(
+                                        '{b}',
+                                        String(roundNutrient(key, review.averageWithout)),
+                                      )
+                                      .replaceAll('{unit}', ja.nutrition.gramUnit)
+                                  : ja.mealPlan.purposeReviewAverageOnly
+                                      .replace('{nutrient}', nutrient)
+                                      .replace('{a}', String(roundNutrient(key, review.averageWith)))
+                                      .replaceAll('{unit}', ja.nutrition.gramUnit)}
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })}
+                      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeReviewNote}</p>
+                    </section>
+                  )}
                   <button
                     type="button"
                     onClick={() => setMonthSummaryOpen((v) => !v)}
@@ -2970,7 +3228,7 @@ export default function MealPlanPage() {
                   </button>
                   {monthSummaryOpen && (
                     <div className="mt-[var(--space-sm)]">
-                      {isNutritionUnlocked(isPro) && monthSummary.nutrition.dishCount > 0 && (
+                      {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
                         <IntakeNutritionPanel
                           summary={monthSummary}
                           label={ja.mealPlan.monthSummaryNutritionLabel}
@@ -3019,7 +3277,7 @@ export default function MealPlanPage() {
               className="mt-[var(--space-sm)] flex gap-1"
             >
               {MONTH_CELL_MODES.filter(
-                (m) => m.value !== 'nutrition' || isNutritionUnlocked(isPro),
+                (m) => m.value !== 'nutrition' || isNutritionUnlocked(monthUnlocked),
               ).map((m) => (
                 <button
                   key={m.value}
@@ -3169,7 +3427,7 @@ export default function MealPlanPage() {
                     {/* 期間内に摂取できた栄養(1人分・便CA): 期間内の料理を1食ずつ足した合計。
                         既存のPro8項目計算を流用し「めやす／概算」表記を厳守する。
                         栄養フラグ&&Pro(isNutritionUnlocked)かつ計算できた品数>0のときだけ出す */}
-                    {isNutritionUnlocked(isPro) && rangeSummary.nutrition.dishCount > 0 && (
+                    {isNutritionUnlocked(monthUnlocked) && rangeSummary.nutrition.dishCount > 0 && (
                       <div className="mt-[var(--space-sm)]">
                         <IntakeNutritionPanel summary={rangeSummary} />
                       </div>
@@ -3236,10 +3494,14 @@ export default function MealPlanPage() {
           // 隠さず、ぼかしたサンプルカレンダーの上に、機能の性質を素直に説明するロック案内を重ねる
           // (卑下しない・購入圧を強くしない)。サンプルは飾りなのでaria-hidden
           <div className="mt-[var(--space-md)]">
-            <div className="relative overflow-hidden rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+            {/* 2026-08-02 便CP-2: お試しの入口を足して案内が縦に伸びたため、重ね方を反転した。
+                以前は「ぼかしたサンプル＝高さの基準／案内＝absoluteで中央に重ねる」だったので、
+                案内がサンプルより高くなるとバッジとリンクがカードからはみ出して切れていた。
+                サンプル（飾り）を絶対配置の背景にし、案内を通常のflowに置く＝案内の高さでカードが伸びる */}
+            <div className="relative overflow-hidden rounded-md border border-edge bg-surface shadow-sm">
               <div
                 aria-hidden
-                className="pointer-events-none select-none opacity-70 blur-[3px]"
+                className="pointer-events-none absolute inset-0 select-none p-[var(--space-md)] opacity-70 blur-[3px]"
               >
                 <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
                   {ja.mealPlan.dow.map((d) => (
@@ -3277,14 +3539,35 @@ export default function MealPlanPage() {
                   })}
                 </div>
               </div>
+              {/* サンプルを覆う膜（案内を読みやすくするための薄い幕。飾りなのでaria-hidden） */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 bg-app/40 backdrop-blur-[1px]"
+              />
               {/* ロックの案内(機能の性質を素直に説明・購入圧を強くしすぎない) */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-app/40 p-[var(--space-md)] text-center backdrop-blur-[1px]">
+              <div className="relative flex min-h-[16rem] flex-col items-center justify-center gap-1 p-[var(--space-md)] text-center">
                 <span className="inline-flex items-center gap-1 rounded-full border border-accent bg-surface px-3 py-1 text-sm font-bold text-accent-ink shadow-sm">
                   <Lock size={14} aria-hidden />
                   {ja.mealPlan.monthLockedBadge}
                 </span>
                 <p className="mt-1 font-bold">{ja.mealPlan.monthLockedTitle}</p>
                 <p className="text-sm text-ink-muted">{ja.mealPlan.monthLockedDescription}</p>
+                {/* 恒常のお試し(2026-08-02 便CP-2・docs/62 決定③)。押すと、この画面のサンプルではなく
+                    本人の記録・献立が入った本物の月タブが1回だけフル表示になる（閉じたらここへ戻る） */}
+                {monthTrialAvailable ? (
+                  <button
+                    type="button"
+                    data-testid="month-trial-start"
+                    onClick={() => void startMonthTrial()}
+                    className="mt-[var(--space-sm)] inline-flex items-center justify-center rounded-md bg-accent px-4 py-3 font-bold text-on-accent shadow-sm"
+                  >
+                    {ja.mealPlan.monthTrialButton}
+                  </button>
+                ) : (
+                  <p data-testid="month-trial-used" className="mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.monthTrialUsedNote}
+                  </p>
+                )}
                 <Link
                   to="/settings?section=pro"
                   className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
