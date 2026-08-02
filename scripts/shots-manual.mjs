@@ -505,9 +505,12 @@ try {
   await wait(page, 600)
   await page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
   await wait(page, 2200)
-  const dayToggle = page
-    .getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
-    .first()
+  // 野菜量が3桁gの日を優先して選ぶ(主菜だけの一品ものの日だと極端に小さい数字が載るため)
+  const dayToggles = page.getByRole('button', {
+    name: /^この日（.+）の栄養の概算を詳しく見る$/,
+  })
+  const richDayToggles = dayToggles.filter({ hasText: /野菜約\d{3}g/ })
+  const dayToggle = (await richDayToggles.count()) ? richDayToggles.first() : dayToggles.first()
   if (await dayToggle.count()) {
     // クリックすると読み上げ名が変わるので実体を掴んでから操作する
     const toggleEl = await dayToggle.elementHandle()
@@ -517,12 +520,21 @@ try {
     await wait(page, 1000)
     await toggleEl.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 60))
     await wait(page, 400)
-    await cropRect(page, 'plan-week-nutrition-open', { x: 0, y: 50, width: VIEW.width, height: 400 })
+    // 2026-08-02 便CW-7で並置UI→説明文1行になったので、8項目・「ごはんを含めて計算する」・
+    // 「1日分のめやすは〜」の1行までが入る高さに広げる(説明している範囲を途中で切らない)
+    await cropRect(page, 'plan-week-nutrition-open', { x: 0, y: 50, width: VIEW.width, height: 466 })
     await toggleEl.click()
     await wait(page, 600)
   }
   // 1日ぶんのカード(主菜・副菜が入った状態)
-  const weekDayCard = page.locator('main section, main li').filter({ hasText: /主菜/ }).first()
+  // 主菜と副菜の両方が埋まっている日を選ぶ(一品ものの日だと副菜が空欄のまま載る)
+  const weekDayCards = page.locator('main section, main li').filter({ hasText: /主菜/ })
+  const filledWeekDayCards = weekDayCards
+    .filter({ hasText: /副菜/ })
+    .filter({ hasNotText: 'レシピを選ぶ' })
+  const weekDayCard = (await filledWeekDayCards.count())
+    ? filledWeekDayCards.first()
+    : weekDayCards.first()
   if (await weekDayCard.count()) {
     await crop(page, 'plan-week-day', weekDayCard, { top: 40, maxHeight: 500 })
   }
@@ -612,8 +624,8 @@ try {
   await wait(page, 400)
   await cropRect(page, 'detail-photo', { x: 0, y: 44, width: VIEW.width, height: 338 })
 
-  // 栄養価のめやす(閉じた1行)
-  const nutToggle = page.getByRole('button', { name: '栄養価のめやすを詳しく見る' })
+  // 栄養価の概算(閉じた1行)
+  const nutToggle = page.getByRole('button', { name: '栄養価の概算を詳しく見る' })
   if (await nutToggle.count()) {
     const nutEl = await nutToggle.first().elementHandle()
     await nutEl.scrollIntoViewIfNeeded()
@@ -789,7 +801,7 @@ try {
   await wait(page, 900)
   await page.locator('main a[href*="/recipes/"]:not([href$="/new"])').first().click()
   await wait(page, 1500)
-  const freeNut = page.getByRole('button', { name: '栄養価のめやすを詳しく見る' })
+  const freeNut = page.getByRole('button', { name: '栄養価の概算を詳しく見る' })
   if (await freeNut.count()) {
     await crop(page, 'nutrition-row', freeNut, { top: 300, padTop: 10, padBottom: 10 })
   }
@@ -799,9 +811,13 @@ try {
   if (await weekTab2.count()) {
     await weekTab2.click()
     await wait(page, 900)
-    const freeDayRow = page
-      .getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
-      .first()
+    const freeDayRows = page.getByRole('button', {
+      name: /^この日（.+）の栄養の概算を詳しく見る$/,
+    })
+    const richFreeDayRows = freeDayRows.filter({ hasText: /野菜約\d{3}g/ })
+    const freeDayRow = (await richFreeDayRows.count())
+      ? richFreeDayRows.first()
+      : freeDayRows.first()
     if (await freeDayRow.count()) {
       await crop(page, 'plan-week-nutrition-row', freeDayRow, { top: 300, padTop: 10, padBottom: 10 })
     }
