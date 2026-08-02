@@ -85,7 +85,16 @@ import {
   resolvePantryGroup,
   groupPantryItems,
   categorizedFoodLabels,
+  normalizeAisleOrder,
+  moveAisleGroup,
+  isDefaultAisleOrder,
+  SHOPPING_AISLE_ORDER,
 } from '../src/logic/pantryGroups.ts'
+import {
+  summarizeRecipeDeleteImpact,
+  buildBulkDeleteConfirmText,
+  isRestorableStarter,
+} from '../src/logic/recipeDelete.ts'
 import { NUTRITION_DATA } from '../src/logic/nutritionData.ts'
 import { hasLaterHandsOnStep, classifyStep, resolveStepMinutes, buildCookTimeline } from '../src/logic/cookNavi.ts'
 import {
@@ -8936,6 +8945,192 @@ eq(
   eq('CP2-TRIAL 月間は未設定ならまだ使える', canUseMonthTrial(undefined), true)
   eq('CP2-TRIAL 月間はfalseでもまだ使える', canUseMonthTrial(false), true)
   eq('CP2-TRIAL 月間は1回使ったら使えない', canUseMonthTrial(true), false)
+}
+
+// ---------- 便CT/C15: 買い物メモの売り場順カスタム(2026-08-02 オーナー承認) ----------
+{
+  // 未設定(既存ユーザー)は従来どおりの既定順のまま
+  eq('CT-AISLE 未設定は既定順', normalizeAisleOrder(undefined), [
+    'vegetable',
+    'meatFish',
+    'soyEgg',
+    'staple',
+    'seasoning',
+    'other',
+  ])
+  eq('CT-AISLE 空配列も既定順', normalizeAisleOrder([]), [...SHOPPING_AISLE_ORDER])
+  // 保存した並びはそのまま使う
+  eq(
+    'CT-AISLE 保存した並びをそのまま使う',
+    normalizeAisleOrder(['seasoning', 'other', 'staple', 'soyEgg', 'meatFish', 'vegetable']),
+    ['seasoning', 'other', 'staple', 'soyEgg', 'meatFish', 'vegetable'],
+  )
+  // 欠けているグループは既定順で末尾に補う(グループが増えても買い物メモから消えない)
+  eq('CT-AISLE 欠けたグループは末尾に補う', normalizeAisleOrder(['seasoning', 'vegetable']), [
+    'seasoning',
+    'vegetable',
+    'meatFish',
+    'soyEgg',
+    'staple',
+    'other',
+  ])
+  // 壊れた保存値(未知のキー・重複)は黙って捨て、必ず6グループ揃った並びにする
+  eq(
+    'CT-AISLE 未知のキーは捨てる',
+    normalizeAisleOrder(['sweets', 'seasoning', 'vegetable']),
+    ['seasoning', 'vegetable', 'meatFish', 'soyEgg', 'staple', 'other'],
+  )
+  eq(
+    'CT-AISLE 重複は最初の1つだけ残す',
+    normalizeAisleOrder(['seasoning', 'seasoning', 'vegetable']),
+    ['seasoning', 'vegetable', 'meatFish', 'soyEgg', 'staple', 'other'],
+  )
+  eq('CT-AISLE 常に6グループ揃う', normalizeAisleOrder(['other']).length, 6)
+
+  // 上下移動(設定のホームカスタマイズと同じ入れ替え方式)
+  eq('CT-AISLE 下へ移動', moveAisleGroup(SHOPPING_AISLE_ORDER, 0, 1), [
+    'meatFish',
+    'vegetable',
+    'soyEgg',
+    'staple',
+    'seasoning',
+    'other',
+  ])
+  eq('CT-AISLE 上へ移動', moveAisleGroup(SHOPPING_AISLE_ORDER, 1, -1), [
+    'meatFish',
+    'vegetable',
+    'soyEgg',
+    'staple',
+    'seasoning',
+    'other',
+  ])
+  eq('CT-AISLE 先頭を上へ押しても変わらない', moveAisleGroup(SHOPPING_AISLE_ORDER, 0, -1), [
+    ...SHOPPING_AISLE_ORDER,
+  ])
+  eq('CT-AISLE 末尾を下へ押しても変わらない', moveAisleGroup(SHOPPING_AISLE_ORDER, 5, 1), [
+    ...SHOPPING_AISLE_ORDER,
+  ])
+  eq('CT-AISLE 元の配列は書き換えない', SHOPPING_AISLE_ORDER[0], 'vegetable')
+
+  eq('CT-AISLE 未設定は既定扱い', isDefaultAisleOrder(undefined), true)
+  eq('CT-AISLE 既定と同じ並びは既定扱い', isDefaultAisleOrder([...SHOPPING_AISLE_ORDER]), true)
+  eq(
+    'CT-AISLE 入れ替えたら既定ではない',
+    isDefaultAisleOrder(moveAisleGroup(SHOPPING_AISLE_ORDER, 0, 1)),
+    false,
+  )
+
+  // 買い物メモの整列に即反映される(表示専用の並べ替え・同グループ内は追加順を保つ)
+  const memo = [
+    { name: 'しょうゆ' },
+    { name: '玉ねぎ' },
+    { name: '豚こま切れ肉' },
+    { name: 'にんじん' },
+  ]
+  eq(
+    'CT-AISLE 既定順では野菜→肉→調味料',
+    sortShoppingByAisle(memo).map((i) => i.name),
+    ['玉ねぎ', 'にんじん', '豚こま切れ肉', 'しょうゆ'],
+  )
+  eq(
+    'CT-AISLE 調味料を先頭にした並びが整列に反映される',
+    sortShoppingByAisle(memo, ['seasoning', 'meatFish', 'vegetable', 'soyEgg', 'staple', 'other']).map(
+      (i) => i.name,
+    ),
+    ['しょうゆ', '豚こま切れ肉', '玉ねぎ', 'にんじん'],
+  )
+  eq(
+    'CT-AISLE 欠けた保存値でも整列できる(補完した既定順で並ぶ)',
+    sortShoppingByAisle(memo, ['seasoning']).map((i) => i.name),
+    ['しょうゆ', '玉ねぎ', 'にんじん', '豚こま切れ肉'],
+  )
+  eq(
+    'CT-AISLE 同じグループ内は元の追加順を保つ',
+    sortShoppingByAisle([{ name: 'にんじん' }, { name: '玉ねぎ' }]).map((i) => i.name),
+    ['にんじん', '玉ねぎ'],
+  )
+}
+
+// ---------- 便CT: レシピ一覧のまとめて削除の確認文(規約F。2026-08-02 オーナー承認) ----------
+{
+  const log = (photo) => (photo ? { date: '2026-08-01', photo: { size: 1 } } : { date: '2026-08-01' })
+  // 「入れ直しで戻せる基本レシピ」は同梱の基本レシピだけ。配布セット由来(sourceSetIdあり)は
+  // 削除でトゥームストーンが残り入れ直しでも復活しないので、戻せる扱いにしない
+  eq('CT-DEL 同梱の基本レシピは戻せる', isRestorableStarter({ isStarter: true }), true)
+  eq(
+    'CT-DEL 配布セット由来は戻せない',
+    isRestorableStarter({ isStarter: true, sourceSetId: 'kintore' }),
+    false,
+  )
+  eq('CT-DEL 自作レシピは戻せない', isRestorableStarter({ isStarter: false }), false)
+
+  const impact = summarizeRecipeDeleteImpact(
+    [
+      { isStarter: true, cookedLogs: [log(true), log(false)] },
+      { isStarter: false, cookedLogs: [log(true)] },
+      { isStarter: true, sourceSetId: 'kintore', cookedLogs: [] },
+    ],
+    { totalRecipes: 109, mealPlanEntries: 4, todayEntries: 2 },
+  )
+  eq('CT-DEL 削除する品数', impact.recipes, 3)
+  eq('CT-DEL 作った記録の合計', impact.cookedLogs, 3)
+  eq('CT-DEL 写真つきの枚数', impact.photos, 2)
+  eq('CT-DEL 戻せる基本レシピの品数', impact.restorableStarters, 1)
+  eq('CT-DEL 献立の予定の件数', impact.mealPlanEntries, 4)
+  eq('CT-DEL 今日の献立の件数', impact.todayEntries, 2)
+  eq('CT-DEL 残るレシピの品数', impact.remaining, 106)
+
+  const text = buildBulkDeleteConfirmText(impact)
+  // 規約F: 何が消えるか・何が残るかを件数つきで両方書く(「よろしいですか？」だけは禁止)
+  eq('CT-DEL 確認文に削除する品数が入る', /レシピ3品を削除します/.test(text), true)
+  eq('CT-DEL 確認文に作った記録の件数が入る', /作った記録3件/.test(text), true)
+  eq('CT-DEL 確認文に写真の枚数が入る', /写真2枚/.test(text), true)
+  eq('CT-DEL 確認文に献立の予定の件数が入る', /献立の予定4件/.test(text), true)
+  eq('CT-DEL 確認文に今日の献立の件数が入る', /今日の献立2件/.test(text), true)
+  eq('CT-DEL 確認文に元に戻せないことが入る', text.includes('元に戻せません'), true)
+  eq('CT-DEL 確認文に残るレシピの品数が入る', /ほかのレシピ106品/.test(text), true)
+  eq('CT-DEL 確認文に残るものが入る', /買い物メモ・食材の在庫は残ります/.test(text), true)
+  eq('CT-DEL 「よろしいですか？」だけで終わらせない', text.includes('よろしいですか'), false)
+  // 基本レシピだけは入れ直しで戻せる(ただし記録は戻らない)ことを区別して書く。
+  // 規約H: 場所は指示語ではなく画面名・ボタン名で言う
+  eq('CT-DEL 基本レシピの戻し方を添える', /基本レシピ1品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(text), true)
+  eq('CT-DEL 記録は戻らないことを添える', text.includes('作った記録は戻りません'), true)
+
+  // 基本レシピを含まない選択では、入れ直しの一文を出さない(戻せない品に戻せると言わない)
+  const ownOnly = summarizeRecipeDeleteImpact([{ isStarter: false, cookedLogs: [] }], {
+    totalRecipes: 5,
+    mealPlanEntries: 0,
+    todayEntries: 0,
+  })
+  eq('CT-DEL 自作だけなら入れ直しの一文は出さない', ownOnly.restorableStarters, 0)
+  eq(
+    'CT-DEL 自作だけの確認文に入れ直しの案内を出さない',
+    buildBulkDeleteConfirmText(ownOnly).includes('基本レシピを入れ直す'),
+    false,
+  )
+  eq(
+    'CT-DEL 記録0件でも件数を明示する(0件と書く)',
+    /作った記録0件（うち写真0枚）/.test(buildBulkDeleteConfirmText(ownOnly)),
+    true,
+  )
+  // 全部消す選択でも「残り0品」と正直に書く(残るものの行自体は消さない)
+  const allGone = summarizeRecipeDeleteImpact([{ isStarter: false }, { isStarter: false }], {
+    totalRecipes: 2,
+    mealPlanEntries: 0,
+    todayEntries: 0,
+  })
+  eq('CT-DEL 全件削除なら残りは0品', allGone.remaining, 0)
+  eq('CT-DEL 残り0品でも残るものを書く', /ほかのレシピ0品/.test(buildBulkDeleteConfirmText(allGone)), true)
+  // 記録の配列が無いレシピ(cookedLogs未設定)でも落ちない
+  eq(
+    'CT-DEL cookedLogs未設定でも数えられる',
+    summarizeRecipeDeleteImpact([{ isStarter: true }], {
+      totalRecipes: 1,
+      mealPlanEntries: 0,
+      todayEntries: 0,
+    }).cookedLogs,
+    0,
+  )
 }
 
 // ---------- 結果 ----------

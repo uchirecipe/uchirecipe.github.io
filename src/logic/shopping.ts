@@ -7,17 +7,25 @@ import {
   parseAmountNumber,
   resolveCalcAmount,
 } from './amount'
-import { categorizePantryName, SHOPPING_AISLE_ORDER } from './pantryGroups'
-import type { Ingredient } from '../db/types'
+import { categorizePantryName, normalizeAisleOrder } from './pantryGroups'
+import type { Ingredient, PantryGroupKey } from '../db/types'
 
 /**
- * 買い物メモを一般的なスーパーの売り場順に自動整列する（2026-07-24 実機FB #11）。
- * 食材名から在庫グループを判定し（pantryGroups の分類を流用）、SHOPPING_AISLE_ORDER の
- * 順に並べる。同じグループ内は元の並び（＝既存の追加順）を保つ安定ソート。
+ * 買い物メモを売り場順に自動整列する（2026-07-24 実機FB #11）。
+ * 食材名から在庫グループを判定し（pantryGroups の分類を流用）、売り場順に並べる。
+ * 同じグループ内は元の並び（＝既存の追加順）を保つ安定ソート。
  * 表示専用で、DBの保存順（order）は書き換えない。
+ *
+ * 2026-08-02 便CT/C15: 売り場の回り方は店ごと・家庭ごとに違うので、設定で並び順を
+ * 入れ替えられるようにした。order を省略すると従来どおりの既定順（SHOPPING_AISLE_ORDER＝
+ * 野菜・きのこ→肉・魚介→…）で並ぶ。渡された並びは normalizeAisleOrder で必ず6グループに
+ * 整えてから使うので、保存値が欠けていても未知のキーが混ざっていても整列は壊れない。
  */
-export function sortShoppingByAisle<T extends { name: string }>(items: T[]): T[] {
-  const rank = new Map(SHOPPING_AISLE_ORDER.map((key, index) => [key, index]))
+export function sortShoppingByAisle<T extends { name: string }>(
+  items: T[],
+  order?: readonly PantryGroupKey[],
+): T[] {
+  const rank = new Map(normalizeAisleOrder(order).map((key, index) => [key, index]))
   return items
     .map((item, index) => ({ item, index, group: categorizePantryName(item.name) }))
     .sort((a, b) => (rank.get(a.group)! - rank.get(b.group)!) || a.index - b.index)

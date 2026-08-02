@@ -3,6 +3,7 @@ import { defaultSettings } from './types'
 import type { CookedLog, Recipe, RecipeInput } from './types'
 import { buildSearchWords, SEARCH_INDEX_VERSION, searchIndexNeedsRebuild } from '../logic/kana'
 import { exclusionRecordFor } from '../logic/backup'
+import { summarizeRecipeDeleteImpact, type RecipeDeleteImpact } from '../logic/recipeDelete'
 import { READINGS_VERSION } from '../logic/ingredientReadings'
 
 /** 入力の掃除: 名前が空の材料行・本文が空の手順行は保存しない */
@@ -86,6 +87,67 @@ export async function deleteRecipe(id: number): Promise<void> {
     const orphanMealPlanIds = await db.mealPlans.filter((e) => e.recipeId === id).primaryKeys()
     if (orphanMealPlanIds.length > 0) await db.mealPlans.bulkDelete(orphanMealPlanIds)
     await db.todayList.where('recipeId').equals(id).delete()
+  })
+}
+
+/**
+ * レシピ一覧の「まとめて削除」で選んだ複数品を削除し、削除できた件数を返す
+ * （2026-08-02 便CT・オーナー承認）。
+ * 1品削除（deleteRecipe）を選択件数ぶん繰り返すのと同じことを1トランザクションで行う:
+ * 配布セット由来の品には再取込除外の記録（トゥームストーン）を残し、週の献立・今日の献立から
+ * 当該レシピの行も消して孤児データを作らない。同梱の基本レシピ（sourceSetIdなし）に
+ * トゥームストーンを付けないのも1品削除と同じで、設定の「基本レシピを入れ直す」で戻せる
+ * （＝確認文でその違いを伝える。logic/recipeDelete.ts）。
+ * mealPlansはrecipeIdに索引が無いためfilterで該当行を洗い出してから削除する。
+ */
+export async function deleteRecipes(ids: readonly number[]): Promise<number> {
+  if (ids.length === 0) return 0
+  return db.transaction('rw', db.recipes, db.setExclusions, db.mealPlans, db.todayList, async () => {
+    const targets = (await db.recipes.bulkGet([...ids])).filter((r): r is Recipe => !!r)
+    const targetIds = targets.map((r) => r.id).filter((id): id is number => id != null)
+    if (targetIds.length === 0) return 0
+    for (const recipe of targets) {
+      const record = exclusionRecordFor(recipe)
+      if (!record) continue
+      // 同じ (setId, title) の記録が既にあれば増やさない（何度削除しても記録は1件のまま）
+      const already = await db.setExclusions
+        .where('setId')
+        .equals(record.setId)
+        .and((e) => e.title === record.title)
+        .count()
+      if (already === 0) await db.setExclusions.add({ ...record, excludedAt: Date.now() })
+    }
+    await db.recipes.bulkDelete(targetIds)
+    const idSet = new Set(targetIds)
+    const orphanMealPlanIds = await db.mealPlans.filter((e) => idSet.has(e.recipeId)).primaryKeys()
+    if (orphanMealPlanIds.length > 0) await db.mealPlans.bulkDelete(orphanMealPlanIds)
+    await db.todayList.where('recipeId').anyOf(targetIds).delete()
+    return targetIds.length
+  })
+}
+
+/**
+ * 「まとめて削除」の確認文（規約F）に入れる件数を数える（2026-08-02 便CT）。
+ * 削除で巻き添えになる作った記録・写真・週の献立の予定・今日の献立と、削除後に残るレシピ数を
+ * 実データから数え、集計そのものは純ロジック（logic/recipeDelete.ts）に任せる。
+ * 読み取り専用トランザクションで一括して読むので、数えている途中で件数がずれない。
+ */
+export async function countRecipesDeleteImpact(
+  ids: readonly number[],
+): Promise<RecipeDeleteImpact> {
+  return db.transaction('r', db.recipes, db.mealPlans, db.todayList, async () => {
+    const targets = (await db.recipes.bulkGet([...ids])).filter((r): r is Recipe => !!r)
+    const idSet = new Set(targets.map((r) => r.id))
+    const totalRecipes = await db.recipes.count()
+    const mealPlanEntries = await db.mealPlans.filter((e) => idSet.has(e.recipeId)).count()
+    const todayEntries =
+      idSet.size === 0
+        ? 0
+        : await db.todayList
+            .where('recipeId')
+            .anyOf([...idSet].filter((id): id is number => id != null))
+            .count()
+    return summarizeRecipeDeleteImpact(targets, { totalRecipes, mealPlanEntries, todayEntries })
   })
 }
 

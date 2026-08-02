@@ -60,6 +60,12 @@ import {
   detectCodeKind,
   maskUnlockCode,
 } from '../logic/pro'
+import {
+  normalizeAisleOrder,
+  moveAisleGroup,
+  isDefaultAisleOrder,
+  SHOPPING_AISLE_ORDER,
+} from '../logic/pantryGroups'
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
 import { ja } from '../i18n/ja'
 import Toast from '../components/Toast'
@@ -134,6 +140,9 @@ const sectionDeepLinks: Record<string, string> = {
   recipe: 'section-recipe',
   themes: 'section-recipe',
   budget: 'budget-section',
+  // aisleは2026-08-02 便CT/C15: 買い物メモの「売り場順を変える」の遷移先。
+  // 並びの由来と変え方が、買い物メモの画面から辿れるようにする
+  aisle: 'aisle-section',
 }
 
 // 各節の見出し(全般/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -701,6 +710,18 @@ export default function SettingsPage() {
     void updateSettings({ homeWidgets: next })
   }
 
+  // 買い物メモの売り場順(2026-08-02 便CT/C15)。保存値は必ず normalizeAisleOrder を通し、
+  // 未設定・欠け・未知のキーがあっても6グループ揃った並びとして扱う
+  const aisleOrder = normalizeAisleOrder(settings.shoppingAisleOrder)
+  const aisleOrderIsDefault = isDefaultAisleOrder(settings.shoppingAisleOrder)
+  const moveAisle = (index: number, direction: -1 | 1) => {
+    void updateSettings({ shoppingAisleOrder: moveAisleGroup(aisleOrder, index, direction) })
+  }
+  const resetAisleOrder = () => {
+    void updateSettings({ shoppingAisleOrder: [...SHOPPING_AISLE_ORDER] })
+    setMessage(ja.settings.aisleOrderResetDone)
+  }
+
   // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。30日超(または未実施)で警告色にする
   const backupDaysAgo = daysSinceBackup(settings.lastBackupAt)
   const backupBannerWarning = backupDaysAgo === null || backupDaysAgo > 30
@@ -960,6 +981,57 @@ export default function SettingsPage() {
               placeholder={ja.settings.weeklyBudgetPlaceholder}
               className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
             />
+          </section>
+
+          {/* 買い物メモの売り場順(2026-08-02 便CT/C15 オーナー承認)。回る順番は店ごとに違うので、
+              6グループの並び順だけ入れ替えられるようにする(グループの中身=食材の振り分けは変えない)。
+              操作方法はホーム画面のカスタマイズと同じ上下移動に揃える。
+              id は買い物メモからの直リンク(?section=aisle)の着地点 */}
+          <section id="aisle-section" className={`${sectionCls} scroll-mt-24`}>
+            <h2 className="font-bold">{ja.settings.aisleOrderTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.aisleOrderDescription}</p>
+            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
+              {aisleOrder.map((key, index) => (
+                <li key={key} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
+                  <span className="w-6 shrink-0 text-sm font-bold tabular-nums text-ink-muted">
+                    {index + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 font-bold">{ja.pantry.group[key]}</span>
+                  <button
+                    type="button"
+                    onClick={() => moveAisle(index, -1)}
+                    disabled={index === 0}
+                    aria-label={ja.settings.aisleOrderMoveUp}
+                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+                  >
+                    <ChevronUp size={18} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveAisle(index, 1)}
+                    disabled={index === aisleOrder.length - 1}
+                    aria-label={ja.settings.aisleOrderMoveDown}
+                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+                  >
+                    <ChevronDown size={18} aria-hidden />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {aisleOrderIsDefault ? (
+              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                {ja.settings.aisleOrderDefaultNote}
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={resetAisleOrder}
+                className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+              >
+                <RotateCcw size={16} aria-hidden />
+                {ja.settings.aisleOrderReset}
+              </button>
+            )}
           </section>
 
           {/* 料理中 */}
