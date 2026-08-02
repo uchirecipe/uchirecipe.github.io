@@ -462,6 +462,8 @@ export function isOneDish(recipe: Pick<Recipe, 'title' | 'tags'>): boolean {
  * 続けて「昨日の週プランに入っていたレシピを除外」（2026-07-16 便W-⑤b・こちらも
  * 除外して尽きれば解除）、その中で「最近作ってない」「週内で重複しない」の順にも絞り込む。
  * 候補が無くなったら段階的に条件を緩めて必ず何か返す（季節外しか無い場合を除き0件にはしない）。
+ *
+ * 絞り込みの中身は suggestCandidates（2026-08-02 便DE-5で切り出し）。ここは最後の抽選だけを行う。
  */
 export function suggestForSlot(recipes: Recipe[], options: SuggestOptions): Recipe | undefined {
   const pool = suggestCandidates(recipes, options)

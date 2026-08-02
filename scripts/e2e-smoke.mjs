@@ -2921,6 +2921,88 @@ try {
     }
   }
 
+  // --- TODAYUNDO-01: 今日の献立の☑(作った)に「元に戻す」を添える(2026-08-02 便DE-3・オーナー指示)。
+  // 押すと行が消えるだけで記録が付いたのか分からず、押し間違いを戻す手段も無かった。
+  // トーストの「元に戻す」で ①今日の日付の記録が1件消える ②その品が今日の献立へ戻る、を実データで確認する ---
+  currentCheck = 'TODAYUNDO-01'
+  {
+    const tuBrowser = await chromium.launch()
+    const tuContext = await tuBrowser.newContext()
+    const tuPage = await tuContext.newPage()
+    tuPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@TODAYUNDO-01] ${err.message}`)
+    })
+    try {
+      await tuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(1800) // 初回シード完了待ち
+      await tuPage.getByText('肉じゃが', { exact: true }).first().click()
+      await tuPage.waitForTimeout(500)
+      await tuPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tuPage.waitForTimeout(300)
+      await tuPage.getByRole('button', { name: '決めない' }).click()
+      await tuPage.waitForTimeout(300)
+
+      await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(800)
+      await tuPage.getByRole('button', { name: '作った', exact: true }).first().click()
+      await tuPage.waitForTimeout(700)
+      const tuAfterCooked = (await tuPage.textContent('body')) ?? ''
+      check(
+        'TODAYUNDO-01 ☑で記録した直後にトーストと「元に戻す」が出る',
+        tuAfterCooked.includes('作った記録をつけました') && tuAfterCooked.includes('元に戻す'),
+      )
+      const readState = () =>
+        tuPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction(['recipes', 'todayList'], 'readonly')
+                let recipes, today
+                const rq = tx.objectStore('recipes').getAll()
+                const tq = tx.objectStore('todayList').getAll()
+                rq.onsuccess = () => {
+                  recipes = rq.result
+                  if (today !== undefined) resolve({ recipes, today })
+                }
+                tq.onsuccess = () => {
+                  today = tq.result
+                  if (recipes !== undefined) resolve({ recipes, today })
+                }
+                rq.onerror = () => reject(rq.error)
+                tq.onerror = () => reject(tq.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      const tuCooked = await readState()
+      const tuNikujaga = tuCooked.recipes.find((r) => r.title === '肉じゃが')
+      check('TODAYUNDO-01 前提: 記録が1件付き、今日の献立から消える', 
+        (tuNikujaga?.cookedLogs?.length ?? 0) === 1 && tuCooked.today.length === 0)
+
+      await tuPage.getByRole('button', { name: '元に戻す' }).click()
+      await tuPage.waitForTimeout(800)
+      const tuUndone = await readState()
+      const tuNikujaga2 = tuUndone.recipes.find((r) => r.title === '肉じゃが')
+      check(
+        'TODAYUNDO-01 「元に戻す」で作った記録が消える',
+        (tuNikujaga2?.cookedLogs?.length ?? 0) === 0,
+        `logs=${JSON.stringify(tuNikujaga2?.cookedLogs ?? [])}`,
+      )
+      check(
+        'TODAYUNDO-01 「元に戻す」でその品が今日の献立へ戻る',
+        tuUndone.today.length === 1 && tuUndone.today[0].recipeId === tuNikujaga2?.id,
+      )
+      check(
+        'TODAYUNDO-01 取り消したことを結果メッセージで伝える',
+        ((await tuPage.textContent('body')) ?? '').includes('作った記録を取り消して、今日の献立に戻しました'),
+      )
+    } finally {
+      await tuBrowser.close()
+    }
+  }
+
   // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
   // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
   // 「日」タブへ固定される(2026-07-16 便U-1でタブ構成に再設計。以前はスクロール制御だったが、
