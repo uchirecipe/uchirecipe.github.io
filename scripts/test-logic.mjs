@@ -210,6 +210,19 @@ import {
   normalizeInstructions,
 } from '../workers/recipe-import/src/normalize.ts'
 import { cookedWithinDays } from '../src/logic/cooked.ts'
+import {
+  ARCHIVE_KIND,
+  ArchiveFileError,
+  archiveCutoffDate,
+  archiveFileName,
+  archiveIdsForRecipe,
+  buildArchiveFile,
+  collectArchiveTargets,
+  countArchiveTargets,
+  formatArchiveDate,
+  mergeArchiveLogs,
+  parseArchiveFile,
+} from '../src/logic/cookedArchive.ts'
 import { buildImageProxyUrl, isImageContentType } from '../src/logic/urlImportImage.ts'
 import { resolveImportErrorReason } from '../src/logic/urlImportReason.ts'
 import {
@@ -8367,6 +8380,167 @@ eq(
     cookedWithinDays(recipeWith([ymd(90), ymd(40), ymd(20)]), 14),
     false,
   )
+}
+
+// ---------- 古い記録の書き出し(アーカイブ。2026-08-02 オーナー採用) ----------
+// 期間の境目・追記型の重複排除・壊れたファイルの読み取りを固定する。
+// 事故になるのは①境目がずれて「残すはずの記録」まで書き出して消す
+// ②追記で同じ記録が二重に増える／逆に別件が1件に潰れる ③1件壊れているだけで全部読めなくなる、の3つ。
+{
+  // (1) 期間の境目: 「◯ヶ月より前」はちょうど◯ヶ月前の当日を含まない
+  eq('ARCH 1ヶ月前の境目', archiveCutoffDate(1, new Date(2026, 7, 2)), '2026-07-02')
+  eq('ARCH 3ヶ月前の境目', archiveCutoffDate(3, new Date(2026, 7, 2)), '2026-05-02')
+  eq('ARCH 6ヶ月前の境目(年をまたぐ)', archiveCutoffDate(6, new Date(2026, 2, 15)), '2025-09-15')
+  // 月末の丸め: 3/31の1ヶ月前は「2/31」=JSでは3/3になるため、月末へ丸めないと境目が未来へずれる
+  eq('ARCH 月末は月末へ丸める(3/31→2/28)', archiveCutoffDate(1, new Date(2026, 2, 31)), '2026-02-28')
+  eq('ARCH 月末は月末へ丸める(5/31→4/30)', archiveCutoffDate(1, new Date(2026, 4, 31)), '2026-04-30')
+
+  const archRecipes = [
+    {
+      id: 1,
+      title: '肉じゃが',
+      cookedLogs: [
+        { date: '2026-08-01', note: '今月の記録' }, // 残る
+        { date: '2026-07-02' }, // 境目ちょうど = 残る
+        { date: '2026-07-01', note: 'メモあり' }, // 対象
+        { date: '2026-06-30' }, // 対象(写真なし)
+      ],
+    },
+    {
+      id: 2,
+      title: 'カレーライス',
+      cookedLogs: [
+        { date: '2026-05-05', photo: { size: 1 } }, // 対象(写真あり)
+        { date: '2026-05-05' }, // 同じ日・メモ無しの2件目(対象)
+      ],
+    },
+  ]
+  const archCutoff = archiveCutoffDate(1, new Date(2026, 7, 2))
+  const archTargets = collectArchiveTargets(archRecipes, archCutoff)
+  eq(
+    'ARCH 境目ちょうどの記録は書き出さない(残す)',
+    archTargets.every((t) => t.log.date < '2026-07-02'),
+    true,
+  )
+  eq('ARCH 対象件数', countArchiveTargets(archTargets).logs, 4)
+  eq('ARCH 対象の写真枚数', countArchiveTargets(archTargets).photos, 1)
+  eq('ARCH 対象のレシピ数', countArchiveTargets(archTargets).recipes, 2)
+  eq('ARCH 並びは日付の新しい順', archTargets.map((t) => t.log.date), [
+    '2026-07-01',
+    '2026-06-30',
+    '2026-05-05',
+    '2026-05-05',
+  ])
+  // 同じ料理・同じ日・メモ無しが2件あっても、連番で別件として残る(潰れない)
+  const archDupIds = archTargets.filter((t) => t.recipeId === 2).map((t) => t.id)
+  eq('ARCH 同じ日の重複記録は連番で別件になる', new Set(archDupIds).size, 2)
+  // 端末から消すときも同じIDが作られる(消す対象の取り違え防止)
+  eq(
+    'ARCH 消すとき用のIDは書き出し時と同じ',
+    archiveIdsForRecipe(archRecipes[1]),
+    archDupIds,
+  )
+  // 同じ料理名のレシピを2品登録していても、記録のIDはぶつからない
+  // (ぶつかると、ファイルに入っていない方の記録まで「書き出した記録を消す」で消える)
+  eq(
+    'ARCH 同名レシピが2品あってもIDがぶつからない',
+    archiveIdsForRecipe({ id: 10, title: 'カレー', cookedLogs: [{ date: '2026-05-05' }] })[0] ===
+      archiveIdsForRecipe({ id: 11, title: 'カレー', cookedLogs: [{ date: '2026-05-05' }] })[0],
+    false,
+  )
+
+  // (2) 追記型の統合: 同じIDは1件にまとめ、写真は「有る方」を残す
+  const archOld = [
+    { id: 'a', date: '2026-05-01', recipeTitle: '肉じゃが' },
+    { id: 'b', date: '2026-04-01', recipeTitle: 'カレーライス', photoBase64: 'AAA', photoType: 'image/jpeg' },
+  ]
+  const archNew = [
+    { id: 'a', date: '2026-05-01', recipeTitle: '肉じゃが', photoBase64: 'BBB', photoType: 'image/jpeg' },
+    { id: 'c', date: '2026-06-01', recipeTitle: '肉豆腐' },
+  ]
+  const archMerged = mergeArchiveLogs(archOld, archNew)
+  eq('ARCH 統合で同じIDは1件にまとまる', archMerged.length, 3)
+  eq('ARCH 統合の並びは日付の新しい順', archMerged.map((l) => l.id), ['c', 'a', 'b'])
+  eq(
+    'ARCH 統合で欠けていた写真は新しい方から埋まる',
+    archMerged.find((l) => l.id === 'a').photoBase64,
+    'BBB',
+  )
+  eq(
+    'ARCH 統合で既にある写真は消えない',
+    archMerged.find((l) => l.id === 'b').photoBase64,
+    'AAA',
+  )
+  eq('ARCH 同じ内容を2回統合しても増えない', mergeArchiveLogs(archMerged, archMerged).length, 3)
+
+  // (3) ファイルの読み取り: 種別マークで区別し、壊れた記録は数えて残りは読む
+  const archFileJson = JSON.stringify(buildArchiveFile(archMerged, '2026-08-02T00:00:00.000Z'))
+  eq('ARCH 書き出したファイルに種別マークが入る', JSON.parse(archFileJson).kind, ARCHIVE_KIND)
+  const archParsed = parseArchiveFile(archFileJson)
+  eq('ARCH 書き出し→読み込みで件数が保たれる', archParsed.logs.length, 3)
+  eq('ARCH 壊れた記録は0件', archParsed.brokenCount, 0)
+
+  const archBroken = parseArchiveFile(
+    JSON.stringify({
+      app: 'uchi-recipe',
+      kind: ARCHIVE_KIND,
+      version: 1,
+      exportedAt: '2026-08-02T00:00:00.000Z',
+      logs: [
+        { id: 'ok1', date: '2026-05-01', recipeTitle: '肉じゃが' },
+        { id: 'ng1', date: '2026-05-02' }, // 料理名が無い
+        { id: 'ng2', date: 'こわれた', recipeTitle: 'カレーライス' }, // 日付の形が違う
+        null,
+        { date: '2026-05-03', recipeTitle: '肉豆腐' }, // IDが無い(手編集)→作り直す
+      ],
+    }),
+  )
+  eq('ARCH 壊れたファイルでも読める記録は読む', archBroken.logs.length, 2)
+  // 同じIDが二重に入っているファイルでも1件にまとめる(閲覧の件数と引き継ぐ件数を合わせる)
+  eq(
+    'ARCH 同じIDが二重に入っていても1件にまとめる',
+    parseArchiveFile(
+      JSON.stringify({
+        app: 'uchi-recipe',
+        kind: ARCHIVE_KIND,
+        version: 1,
+        exportedAt: '',
+        logs: [
+          { id: 'dup', date: '2026-05-01', recipeTitle: '肉じゃが' },
+          { id: 'dup', date: '2026-05-01', recipeTitle: '肉じゃが' },
+        ],
+      }),
+    ).logs.length,
+    1,
+  )
+  eq('ARCH 読めなかった記録の件数を数える', archBroken.brokenCount, 3)
+  eq(
+    'ARCH IDの無い記録はIDを作り直す',
+    archBroken.logs.some((l) => l.id.includes('肉豆腐')),
+    true,
+  )
+
+  const archReason = (json) => {
+    try {
+      parseArchiveFile(json)
+      return 'ok'
+    } catch (e) {
+      return e instanceof ArchiveFileError ? e.reason : 'other'
+    }
+  }
+  eq(
+    'ARCH バックアップファイルは「バックアップです」と言い分ける',
+    archReason(JSON.stringify({ app: 'uchi-recipe', version: 1, recipes: [] })),
+    'backup',
+  )
+  eq('ARCH JSONでないファイルは読めない扱い', archReason('これはJSONではない'), 'invalid')
+  eq(
+    'ARCH 他アプリのJSONは読めない扱い',
+    archReason(JSON.stringify({ app: 'other', logs: [] })),
+    'invalid',
+  )
+  eq('ARCH ファイル名にバックアップと同じ名前を使わない', archiveFileName(new Date(2026, 7, 2)), 'uchi-recipe-records-2026-08-02.json')
+  eq('ARCH 日付の表示', formatArchiveDate('2026-07-02'), '2026年7月2日')
 }
 
 // ---------- 便CI 第3波: 検索の配線(C09/C21/C12/C11/C16) ----------

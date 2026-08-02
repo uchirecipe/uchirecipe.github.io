@@ -3,6 +3,7 @@ import { defaultSettings } from './types'
 import type { CookedLog, Recipe, RecipeInput } from './types'
 import { buildSearchWords, SEARCH_INDEX_VERSION, searchIndexNeedsRebuild } from '../logic/kana'
 import { exclusionRecordFor } from '../logic/backup'
+import { archiveIdsForRecipe } from '../logic/cookedArchive'
 import { summarizeRecipeDeleteImpact, type RecipeDeleteImpact } from '../logic/recipeDelete'
 import { READINGS_VERSION } from '../logic/ingredientReadings'
 
@@ -268,4 +269,37 @@ export async function deleteCookedLog(id: number, index: number): Promise<void> 
       cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
     })
   })
+}
+
+/**
+ * ファイルへ書き出し済みの「作った記録」を端末から消す（2026-08-02 古い記録のアーカイブ）。
+ * 書き出しと削除を1つのボタンにまとめない設計なので、消す対象は「今の端末の記録」ではなく
+ * 「書き出したファイルに入っているID」で指定する。消す直前にDBを読み直してIDを作り直すため、
+ * 書き出したあとに追加・編集された記録を巻き込むことはない
+ * （IDはレシピ番号＋日付＋メモから作る＝logic/cookedArchive.ts の archiveIdsForRecipe）。
+ * レシピ本体・境目以降の記録・お気に入り・写真つきのレシピ画像には触れない。
+ */
+export async function deleteArchivedCookedLogs(
+  ids: readonly string[],
+): Promise<{ logs: number; photos: number }> {
+  const idSet = new Set(ids)
+  let logs = 0
+  let photos = 0
+  if (idSet.size === 0) return { logs, photos }
+  await db.transaction('rw', db.recipes, async () => {
+    const recipes = await db.recipes.toArray()
+    for (const recipe of recipes) {
+      if (recipe.id == null || recipe.cookedLogs.length === 0) continue
+      const logIds = archiveIdsForRecipe(recipe)
+      const kept = recipe.cookedLogs.filter((log, i) => {
+        if (!idSet.has(logIds[i])) return true
+        logs++
+        if (log.photo) photos++
+        return false
+      })
+      if (kept.length === recipe.cookedLogs.length) continue
+      await db.recipes.update(recipe.id, { cookedLogs: kept })
+    }
+  })
+  return { logs, photos }
 }

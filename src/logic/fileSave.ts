@@ -86,6 +86,32 @@ export async function saveWithPicker(json: string, suggestedName: string): Promi
 }
 
 /**
+ * 保存先を選んでJSONを書き込む（保存先は記録しない）。2026-08-02 古い記録のアーカイブ用。
+ * saveWithPickerと違って db.fileHandles を書き換えない＝バックアップの「前回の場所に上書き」の
+ * 行き先を、アーカイブの保存先で塗り替えてしまわないようにするための別入口。
+ * キャンセル時にAbortErrorを投げるのは saveWithPicker と同じ。
+ */
+export async function saveJsonWithPicker(json: string, suggestedName: string): Promise<string> {
+  const handle = await window.showSaveFilePicker!({
+    suggestedName,
+    types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }],
+  })
+  await writeJsonToHandle(handle, json)
+  return handle.name
+}
+
+/** JSONをファイルとしてダウンロードする（保存先を選べない端末＝iPhone・iPad等の経路） */
+export function downloadJson(json: string, fileName: string): void {
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
  * 前回選んだ場所に上書き保存する。書き込み権限を確認(requestPermission)し、
  * 許可されなければ例外を投げる。記録が無い場合も例外を投げる。
  * 呼び出し側は失敗時に saveWithPicker（保存先選択）へフォールバックすること
