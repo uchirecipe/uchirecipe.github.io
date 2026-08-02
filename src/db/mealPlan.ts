@@ -102,24 +102,12 @@ export async function removeMealEntry(entryId: number): Promise<void> {
 }
 
 /**
- * 指定期間のうち、指定した食事帯（例: 朝食）のエントリだけをまとめて削除する。
- * 週タブの「この帯の今週分を空にする」用（2026-07-16 便U-4 Fable設計:
- * 「朝のみ削除したい」というオーナー要望への回答。帯を選んで確認ダイアログを経てから
- * 呼び出す想定）。他の帯・他の日付には影響しない
- */
-export async function clearMealSlotInRange(
-  startDate: string,
-  endDate: string,
-  slot: MealSlot,
-): Promise<void> {
-  await clearMealSlotsInRange(startDate, endDate, [slot])
-}
-
-/**
- * clearMealSlotInRange の複数指定版（2026-08-03 便DJ・オーナー指示:
- * 「朝昼夜の複数選択で空にできるように」）。指定した食事のどれかに当たるエントリだけを
- * まとめて削除する。指定が空のときは何もしない（誤って全消しにならないようにする）。
- * 他の食事・他の日付には影響しない点は1つ指定のときと同じ。
+ * 指定期間のうち、選んだ食事（例: 朝食・昼食）のエントリだけをまとめて削除する。
+ * 週タブの「この週の◯◯をまとめて空にする」用（2026-07-16 便U-4 Fable設計:
+ * 「朝のみ削除したい」というオーナー要望への回答。食事を選んで確認ダイアログを経てから
+ * 呼び出す想定）。2026-08-03 便DJ（オーナー指示）で、1つだけだった指定を複数選択にした。
+ * 指定が空のときは何もしない（誤って全消しにならないようにする）。
+ * 選んでいない食事・他の日付には影響しない。
  */
 export async function clearMealSlotsInRange(
   startDate: string,
