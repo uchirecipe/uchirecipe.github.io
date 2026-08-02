@@ -455,8 +455,24 @@ try {
   currentCheck = 'SORTDIR-01'
   const cardTitles = () =>
     page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
+  // 2026-08-02 オーナー指示(便DF): 昇順/降順は件数表記の横の常設ボタンをやめ、並べ替えパネルの
+  // 中へ移した。パネルを開く前は画面に出ていないことを見張る(元の位置に戻ってしまう再発防止)
+  const dirButtonCount = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll('button')).filter((b) =>
+        ['昇順', '降順'].includes(b.textContent?.trim() ?? ''),
+      ).length,
+    )
+  check(
+    'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開く前は昇順/降順ボタンが出ていない',
+    (await dirButtonCount()) === 0,
+  )
   await page.locator('button[aria-label="並び替え"]').click()
   await page.waitForTimeout(300)
+  check(
+    'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開くと昇順/降順ボタンが中に出る',
+    (await dirButtonCount()) === 2,
+  )
   await page.getByRole('button', { name: '五十音順', exact: true }).click()
   await page.waitForTimeout(300)
   const ascActive = await page.evaluate(() => {
@@ -717,13 +733,14 @@ try {
     `現在URL: ${page.url()}`,
   )
 
-  // --- DET-01: 詳細の戻るボタン(2026-07-16オーナー改定)。
-  // 従来(2026-07-10決定): 一覧以外の画面から来た場合でも常に一覧へ戻る
+  // --- DET-01: 詳細の戻るボタン(2026-08-02オーナー指示・便DFで一覧固定に統一)。
+  // 2026-07-10決定: 一覧以外の画面から来た場合でも常に一覧へ戻る
   // (ブラウザ履歴があると直前の画面に戻ってしまっていた不具合の再発防止)。
-  // 改定(2026-07-16): ホームの候補カード(「今日なに作る?」)発だけは例外でホームへ戻る
-  // (todayList方式の拡張)。それ以外(一覧・直接URL等、履歴/state無し)は従来どおり一覧へ ---
+  // 2026-07-12・07-16の例外(今日の献立発は献立へ・ホームの候補カード発はホームへ)は
+  // 2026-08-02に廃止し、どこから開いても必ずレシピ一覧へ戻す。
+  // ホーム発でも一覧へ行くこと自体がオーナー指示なので、(a)はその再発防止ケース ---
   currentCheck = 'DET-01'
-  // (a) ホームの候補カードから詳細→戻る→ホーム(#/)へ戻る
+  // (a) ホームの候補カードから詳細→戻る→レシピ一覧(#/recipes)へ
   await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(800)
   await page.locator('a[href^="#/recipes/"]').first().click()
@@ -737,12 +754,12 @@ try {
   await page.getByRole('button', { name: '戻る' }).click()
   await page.waitForTimeout(400)
   check(
-    'DET-01(2026-07-16改定) ホームの候補カード発の戻るはホーム(#/)へ戻る',
-    page.url() === `${BASE}/#/`,
+    'DET-01(2026-08-02改定) ホームの候補カード発の戻るもレシピ一覧へ戻る',
+    page.url().endsWith('#/recipes'),
     `現在URL: ${page.url()}`,
   )
 
-  // (b) 戻り先の保全: 直接URL(ブラウザ履歴なし・state無し)で詳細を開いた場合は従来どおり一覧へ
+  // (b) 戻り先の保全: 直接URL(ブラウザ履歴なし・state無し)で詳細を開いた場合も一覧へ
   await page.goto(det01DetailUrl, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: '戻る' }).click()
@@ -11175,6 +11192,20 @@ try {
         'PANTRYFILTER-01 在庫が空のうちはチップが出ない',
         !(await pfPage.textContent('body')).includes('在庫の食材で絞る'),
       )
+      // 1b) 「食材の在庫から入れる」(2026-08-02 オーナー指示・便DF)は、入れられる食材が
+      // 無いときもボタン自体は出し、押せない状態＋理由の1行を添える(旧実装はボタンごと
+      // 消えていて、機能があること自体に気づけなかった)
+      const pfFillBtn = pfPage.getByRole('button', { name: '食材の在庫から入れる' })
+      check(
+        'PANTRYFILTER-01(便DF) 在庫が空でも「食材の在庫から入れる」ボタンは出る(押せない状態)',
+        (await pfFillBtn.count()) === 1 && (await pfFillBtn.isDisabled()),
+      )
+      check(
+        'PANTRYFILTER-01(便DF) 押せない理由が1行で出る',
+        (await pfPage.textContent('body')).includes(
+          '食材の在庫で「ある」「少ない」にした食材が、使いたい食材に入ります',
+        ),
+      )
       // パネルを閉じる
       await pfPage.getByRole('button', { name: '決定' }).click()
       await pfPage.waitForTimeout(200)
@@ -11199,6 +11230,29 @@ try {
         'PANTRYFILTER-01 在庫があるとチップが出る',
         (await pfPage.textContent('body')).includes('在庫の食材で絞る'),
       )
+
+      // 3b) 「食材の在庫から入れる」が押せるようになり、押すと在庫の食材が
+      // 「使いたい食材」のチップとして入る(2026-08-02 オーナー指示・便DF)
+      const pfFillBtn2 = pfPage.getByRole('button', { name: '食材の在庫から入れる' })
+      check('PANTRYFILTER-01(便DF) 在庫があると「食材の在庫から入れる」が押せる', await pfFillBtn2.isEnabled())
+      await pfFillBtn2.click()
+      await pfPage.waitForTimeout(400)
+      // 「使いたい食材」のチップは ChipInput(span+✗ボタン)。在庫の「玉ねぎ」が入ったことを見る
+      const wantedChips = () =>
+        pfPage.evaluate(() =>
+          Array.from(document.querySelectorAll('span'))
+            .filter((s) => s.querySelector('button[aria-label="このチップを削除"]'))
+            .map((s) => s.textContent?.trim() ?? ''),
+        )
+      check(
+        'PANTRYFILTER-01(便DF) 押すと在庫の食材が使いたい食材に入る',
+        (await wantedChips()).includes('玉ねぎ'),
+        `チップ=${JSON.stringify(await wantedChips())}`,
+      )
+      // 入れた食材を外して、以降の件数チェックに影響させない
+      await pfPage.getByRole('button', { name: 'このチップを削除' }).first().click()
+      await pfPage.waitForTimeout(400)
+      check('PANTRYFILTER-01(便DF) 入れた食材は✗で外せる', (await wantedChips()).length === 0)
 
       // 4) ONにすると在庫の食材(玉ねぎ)を使うレシピだけに件数が絞られる
       await pfPage.getByRole('button', { name: '在庫の食材で絞る', exact: true }).click()

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Heart,
@@ -79,23 +79,16 @@ export default function RecipeDetailPage() {
   const params = useParams()
   const id = Number(params.id)
   const [searchParams, setSearchParams] = useSearchParams()
-  const location = useLocation()
 
-  // 戻る先の決定（2026-07-12オーナー指示）:
-  // 「今日の献立」（ホームのmealPlanウィジェット・献立タブの今日の献立セクション）から
-  // 開いた場合はそこへ、それ以外（一覧・検索結果・提案カード・履歴・タイマー通知等、
-  // 従来どおり）は常にレシピ一覧へ（2026-07-10オーナー指示は据え置き）。
-  // 出所はLinkのstate（{from:'todayList', fromPath}）で受け渡す。ブラウザの実際の戻る操作
-  // （履歴のpop）は、この画面へ遷移してきた直前の画面へそのまま戻るため、上記の出所と
-  // 基本的に一致し乖離しない（今日の献立からのリンクはpush遷移のため、実際の1つ前の
-  // 履歴エントリも呼び出し元と同じになる）。
-  // 2026-07-16オーナー決定: ホームの候補カード発はホームへ(2026-07-10の「常に一覧へ」の例外を追加)。
-  // todayList方式をそのまま流用し、from:'home'のときも同様にfromPathへ戻す
-  const navState = location.state as { from?: string; fromPath?: string } | null
-  const backFallback =
-    navState?.from === 'todayList' || navState?.from === 'home'
-      ? (navState.fromPath ?? '/meal-plan')
-      : '/recipes'
+  // 戻る先(2026-08-02 オーナー指示・便DF): この画面の「戻る」は、どこから開いても必ず
+  // レシピ一覧へ行く。以前は出所(Linkのstate {from:'todayList'|'home', fromPath})を見て
+  // 今日の献立・ホームへ帰す例外(2026-07-12・2026-07-16)を持っていたが、行き先が場面で
+  // 変わることをやめる指示があったため、例外ごと廃止して一覧固定に戻した。
+  // 献立・ホームから開いた場合も一覧へ行く(この副作用は指示時点で織り込み済み)。
+  // ブラウザ自身の「戻る」(履歴のpop)は従来どおり直前の画面へ帰るので、元の画面へ
+  // 帰りたいときはそちらを使える。
+  // 出所のstateは呼び出し側(HomePage・MealPlanPage)にまだ付いているが、この画面では見ない。
+  const backFallback = '/recipes'
 
   // undefined = 読み込み中 / null = 該当レシピなし、を区別する
   const recipe = useLiveQuery(async () => (await db.recipes.get(id)) ?? null, [id])

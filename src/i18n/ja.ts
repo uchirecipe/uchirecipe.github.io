@@ -99,7 +99,8 @@ export const ja = {
     addPlaceholder: '例: 豚肉',
     add: '追加',
     empty: 'よく使う食材を登録すると、ここに並びます',
-    addToSearch: '在庫から追加',
+    // 旧 addToSearch「在庫から追加」はレシピ一覧側の文言(ja.search.pantryToIngredients)へ
+    // 移して書き直した(2026-08-02 便DF)
     // 整理モード(2026-07-16 UI総点検B-10: チップ常時×が状態切替タップと隣接し誤操作の元
     // だったため廃止。代わりにモードに入って複数選択→一括削除にする)。
     // 手動並び替えはグループ表示化(#1)で並び順がグループ主体になり無意味になったため廃止(2026-07-24 実機FB #6)
@@ -1199,6 +1200,13 @@ export const ja = {
     ingredientPlaceholder: '食材を1つずつ入力',
     // 使いたい食材チップの「追加」(2026-08-02: ホームの検索欄撤去に伴い ja.home.ingAdd から移設)
     ingredientAdd: '追加',
+    // 食材の在庫にある食材を「使いたい食材」へまとめて入れるボタン(2026-08-02 オーナー指示・便DF)。
+    // 旧文言「在庫から追加」(ja.pantry.addToSearch)は、何がどこへ入るのかが読み取れなかったため
+    // 入れ先(使いたい食材)と出どころ(食材の在庫)の両方を書く。ボタンは常に出し、
+    // 入れられる食材が1つも無いときは押せない状態にして、その理由を下の1行で示す
+    pantryToIngredients: '食材の在庫から入れる',
+    pantryToIngredientsEmpty:
+      '食材の在庫で「ある」「少ない」にした食材が、使いたい食材に入ります',
     timeTitle: '調理時間',
     timeAll: 'すべて',
     timeUnder10: '〜10分',
@@ -1248,7 +1256,10 @@ export const ja = {
     sortNutritionGate: 'たんぱく質・塩分・脂質・糖質で探す（Pro機能）',
     sortNutritionGateHint: 'たんぱく質が多い順・塩分が低い順などで探せます',
     // 並べ替えの昇順/降順トグル(2026-07-13 UI改善)。既定は並べ替えの種類ごとに異なる
-    // (五十音順のみ昇順が既定、それ以外は降順が既定。logic/recipeSort.tsのdefaultSortDirection参照)
+    // (五十音順のみ昇順が既定、それ以外は降順が既定。logic/recipeSort.tsのdefaultSortDirection参照)。
+    // 2026-08-02 オーナー指示(便DF): 件数表記の横の独立ボタンをやめ、並べ替えパネルの中に入れた。
+    // パネル内では他の欄と同じ形式の見出しを付ける
+    sortDirectionTitle: '並び順',
     sortAsc: '昇順',
     sortDesc: '降順',
     // 絞り込み無しでも常に表示する総件数(2026-07-13 UI改善)
