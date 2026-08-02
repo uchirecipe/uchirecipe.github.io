@@ -1345,7 +1345,7 @@ export default function SettingsPage() {
                   type="button"
                   disabled={importBusy}
                   onClick={() => pickImportFile('merge')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center font-bold text-accent-ink shadow-sm disabled:opacity-60"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center text-sm font-bold text-accent-ink shadow-sm disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportMerge}</span>
@@ -1357,7 +1357,7 @@ export default function SettingsPage() {
                   type="button"
                   disabled={importBusy}
                   onClick={() => pickImportFile('replace')}
-                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center font-bold text-warning disabled:opacity-60"
+                  className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center text-sm font-bold text-warning disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportReplace}</span>
