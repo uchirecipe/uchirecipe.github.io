@@ -74,6 +74,7 @@ import {
   todayListPickedIds,
   recipeDishType,
 } from '../src/logic/mealPlan.ts'
+import { restoreHomeWidget } from '../src/logic/homeWidgets.ts'
 import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
@@ -9871,6 +9872,33 @@ eq(
     true,
   )
 
+  // restoreHomeWidget: 「表示しない」→「表示する」で標準の位置へ戻る(末尾に足さない)
+  eq(
+    'DH-HOMEW 先頭のパーツは先頭へ戻る',
+    restoreHomeWidget(['suggestion', 'ingredientSearch', 'history'], 'mealPlan'),
+    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
+  )
+  eq(
+    'DH-HOMEW 途中のパーツは標準の並びの位置へ戻る',
+    restoreHomeWidget(['mealPlan', 'ingredientSearch', 'history'], 'suggestion'),
+    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
+  )
+  eq(
+    'DH-HOMEW 標準で最後のパーツは末尾へ戻る',
+    restoreHomeWidget(['mealPlan', 'suggestion', 'ingredientSearch'], 'history'),
+    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
+  )
+  // 手で入れ替えた並びは崩さない(既に表示中のパーツの相対順は動かさない)
+  eq(
+    'DH-HOMEW 手で入れ替えた並びの相対順は変えない',
+    restoreHomeWidget(['history', 'ingredientSearch'], 'suggestion'),
+    ['suggestion', 'history', 'ingredientSearch'],
+  )
+  eq(
+    'DH-HOMEW 既に表示中なら何もしない',
+    restoreHomeWidget(['mealPlan', 'suggestion'], 'suggestion'),
+    ['mealPlan', 'suggestion'],
+  )
 }
 
 // ---------- 結果 ----------

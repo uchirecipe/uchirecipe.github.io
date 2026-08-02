@@ -28,8 +28,8 @@
 //         代表品が同梱される・設定にテーマUIが一切存在しない・旧?set=付きURLは無害に設定へ着地する。
 //         旧「?set=テーマ取り込み」検証はテーマ廃止に伴い「全品同梱・テーマUI不存在」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
-//         全般/レシピ/バックアップ/Pro/アプリについての5節が1画面に同時に存在・上部の目次チップのタップで該当節へ
-//         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA) /
+//         パーソナライズ/レシピ/バックアップ/Pro/アプリについての5節が1画面に同時に存在・上部の目次チップのタップで該当節へ
+//         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA・「全般」→「パーソナライズ」は2026-08-03 便DH) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
 //         STARTER-RELOAD-01(「基本レシピを入れ直す」でユーザーデータ(お気に入り)が保持されること。
@@ -81,8 +81,8 @@
 //         残らないことをIndexedDB直読みで確認。旧「テーマ一括削除」はテーマUI撤去で1品削除経路へ置換) /
 //         HOME-DH-01(2026-08-03 便DH: ホームの「今日の献立」を「レシピ一覧から選択中」「今週の献立の予定」の
 //         2群に分けてそれぞれ折りたたむ・既定は選択中だけ開く/「今日なに作る？」は今週の献立に今日の予定が
-//         あれば出さない/「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり
-//         既定は主菜だけON) /
+//         あれば出さない(設定「常に表示」で上書き可)/「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が
+//         「条件をしぼる」の中にあり既定は主菜だけON/設定でいったん隠したパーツは既定の位置へ復帰) /
 //         DASH-01(だし紐づけ・2026-07-23: 材料「だし汁」の行から収録レシピ「だしのとり方」の詳細へ
 //         飛べるリンクが出てタップで遷移する・収録レシピを削除するとリンクは出ない) /
 //         TODAYALL-01(「全て作った！」の一括反映・2026-07バグ修正: 記録追加(addCookedLog)と
@@ -1492,8 +1492,8 @@ try {
   }
 
   // --- SETTINGS-TAB-01: 設定画面の1本スクロール化(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
-  // 全般→レシピ→バックアップ→Pro→アプリについての5節が1画面に同時に存在し(=どれも隠れない)、
-  // 上部の目次チップ(全般/レシピ/バックアップ/Pro/アプリ)のタップで該当節へスクロールすること・
+  // パーソナライズ→レシピ→バックアップ→Pro→アプリについての5節が1画面に同時に存在し(=どれも隠れない)、
+  // 上部の目次チップ(パーソナライズ/レシピ/バックアップ/Pro/アプリ)のタップで該当節へスクロールすること・
   // ?section=/?set=直リンクが該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は
   // 「全節が同時に存在する」検証へ、旧aria-pressed検証はスクロール位置検証へ置き換えた。
   // 2026-08-02 オーナー指示: 旧「全般」節の中にあった「その他」(＝アプリについて)を
@@ -1504,7 +1504,7 @@ try {
   {
     const body = await page.textContent('body')
     check(
-      'SETTINGS-TAB-01 1本スクロール: 全般(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
+      'SETTINGS-TAB-01 1本スクロール: パーソナライズ(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
       body.includes('NG食材（アレルギー・苦手）') &&
         body.includes('レシピセットを読み込む') &&
         body.includes('ファイルに書き出す') &&
@@ -1512,8 +1512,8 @@ try {
     )
   }
   check(
-    'SETTINGS-TAB-01 目次チップ(全般/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
-    (await page.getByRole('button', { name: '全般', exact: true }).count()) === 1 &&
+    'SETTINGS-TAB-01(便DH) 目次チップ(パーソナライズ/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
+    (await page.getByRole('button', { name: 'パーソナライズ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'レシピ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'バックアップ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1 &&
@@ -1602,7 +1602,7 @@ try {
       ),
     )
     check(
-      'SETTINGS-TAB-01(2026-08-02) 節の並びは 全般→レシピ→バックアップ→Pro→アプリについて',
+      'SETTINGS-TAB-01(2026-08-02) 節の並びは パーソナライズ→レシピ→バックアップ→Pro→アプリについて',
       order.every((v) => v !== null) && order.every((v, i) => i === 0 || v > order[i - 1]),
       JSON.stringify(order),
     )
@@ -1614,7 +1614,7 @@ try {
       return Array.from(basic.querySelectorAll('p')).some((el) => el.textContent?.trim() === 'その他')
     })
     check(
-      'SETTINGS-TAB-01(2026-08-02) 全般節に「その他」の小見出しが残っていない',
+      'SETTINGS-TAB-01(2026-08-02) パーソナライズ節に「その他」の小見出しが残っていない',
       otherHeadingLeft === false,
       `otherHeadingLeft=${otherHeadingLeft}`,
     )
@@ -1801,7 +1801,7 @@ try {
     )
   }
   check(
-    'SETTINGS-TAB-01 1本スクロールなので?section=proでも全般節(NG食材)は同じページに存在する',
+    'SETTINGS-TAB-01 1本スクロールなので?section=proでもパーソナライズ節(NG食材)は同じページに存在する',
     (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
   )
 
@@ -1809,7 +1809,7 @@ try {
   // (2026-07-12オーナー実機フィードバック。以前はページ最上部固定でスクロールしないと見えなかった。
   // 自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) ---
   currentCheck = 'TOAST-01'
-  await page.getByRole('button', { name: '全般', exact: true }).click()
+  await page.getByRole('button', { name: 'パーソナライズ', exact: true }).click()
   await page.waitForTimeout(200)
   await page.getByPlaceholder('例: えび').fill('E2Eトースト確認食材')
   await page.getByRole('button', { name: '追加', exact: true }).click()
@@ -3695,7 +3695,7 @@ try {
   )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
-  // 「食材と価格を編集する」リンクは既定タブ「全般」のNG食材の直下にある
+  // 「食材と価格を編集する」リンクはパーソナライズ節のNG食材の直下にある
   // (2026-07-13 UI改善で「レシピ」タブから移動)ため、タブ切り替え不要でそのまま開ける
   await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
@@ -7836,6 +7836,49 @@ try {
         )
       }
 
+      // (3) 設定「常に表示」を選ぶと、予定があってもホームに「今日なに作る？」が出る
+      await dhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(800)
+      await dhPage.getByRole('button', { name: '常に表示', exact: true }).click()
+      await dhPage.waitForTimeout(400)
+      await dhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(900)
+      check(
+        'HOME-DH-01 設定「常に表示」なら今日の予定があっても「今日なに作る？」が出る',
+        ((await dhPage.textContent('body')) ?? '').includes('今日なに作る？'),
+      )
+
+      // (4) 「表示しない」→「表示する」で既定の位置(先頭)に戻る(末尾に付け足さない)
+      const homeWidgetsInDb = () =>
+        dhPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const g = req.result.transaction('settings', 'readonly').objectStore('settings').get(1)
+                g.onsuccess = () => resolve(g.result?.homeWidgets ?? null)
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      await dhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(800)
+      const widgetRow = dhPage.locator('li').filter({ hasText: '今日の献立' }).first()
+      await widgetRow.getByRole('button', { name: '表示しない' }).click()
+      await dhPage.waitForTimeout(500)
+      check(
+        'HOME-DH-01 「表示しない」で並びから外れる',
+        !((await homeWidgetsInDb()) ?? []).includes('mealPlan'),
+      )
+      await dhPage.getByRole('button', { name: '表示する', exact: true }).first().click()
+      await dhPage.waitForTimeout(500)
+      check(
+        'HOME-DH-01 「表示する」に戻すと最下部ではなく既定の位置(先頭)へ復帰する',
+        JSON.stringify(await homeWidgetsInDb()) ===
+          JSON.stringify(['mealPlan', 'suggestion', 'ingredientSearch', 'history']),
+        `homeWidgets=${JSON.stringify(await homeWidgetsInDb())}`,
+      )
     } finally {
       await dhBrowser.close()
     }

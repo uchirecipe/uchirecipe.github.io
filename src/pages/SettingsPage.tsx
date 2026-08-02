@@ -41,6 +41,7 @@ import {
   type MergeImportDetail,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
+import { restoreHomeWidget } from '../logic/homeWidgets'
 import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
 import {
@@ -119,7 +120,7 @@ const homeWidgetLabels: Record<HomeWidgetKey, string> = {
 const sectionCls =
   'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
 
-// 全般タブの小見出し(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理)。
+// パーソナライズ節の小見出し(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理)。
 // 既存のセクション見出しパターン(RecipesPageの絞り込みパネル等)に合わせ、小さめの text-sm font-bold
 const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
 
@@ -137,7 +138,7 @@ const fileSaveSupported = supportsSaveFilePicker()
  * 縦に長い設定を使う頻度の高い順に並べ、各節を見出し+アンカーで区切る。
  * ページ上部には節へ飛ぶ目次チップ(sticky)を置き、タップで該当節へスクロールする。
  * 各節の内訳:
- * 全般=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算/売り場順)/料理中(画面/タイマー)
+ * パーソナライズ=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算/売り場順)/料理中(画面/タイマー)
  * レシピ=基本レシピ/レシピセットを読み込む（テーマ一覧は2026-07-23のテーマ全廃で撤去）
  * バックアップ=バックアップ一式
  * Pro=Pro版(有料の機能解錠。収録レシピは全て無料・有料はPro機能のみ)
@@ -147,7 +148,7 @@ const fileSaveSupported = supportsSaveFilePicker()
  * そのあとにレシピ・バックアップ・Proが続いていた。「その他」は普通いちばん最後に来る名前なので、
  * ページの途中に出ると「ここで終わり」と読めてしまう。中身は数日〜数か月に一度しか開かない
  * 読み物(バージョン・利用規約・ご意見箱)なので、グループごとページ最後の独立した節に移した。
- * 節の並び自体(全般→レシピ→バックアップ→Pro)は使用頻度の高い順なので変えていない。
+ * 節の並び自体(パーソナライズ→レシピ→バックアップ→Pro)は使用頻度の高い順なので変えていない。
  *
  * 目次チップは5つになるので、最後の節だけ短いラベル(tocAbout「アプリ」)を使う
  * (節の見出しは「うちレシピについて」のまま。390px幅で5列に収める)。
@@ -169,6 +170,11 @@ const settingsSections: { id: string; label: string }[] = [
 // budgetは2026-07-29 便CD/MP-11: 献立タブの概算食費「週の食費予算を登録する」の遷移先。
 // 従来は「設定画面で登録すると比較できます」という案内文だけで行き止まりだった
 const sectionDeepLinks: Record<string, string> = {
+  // 2026-08-03 便DH: 「全般」→「パーソナライズ」への改名にあわせて、この節にも名前で飛べる値を
+  // 用意した(?section=personalize)。DOM側のid('section-basic')は既存の目次チップ・スクロール監視が
+  // 参照しているのでそのまま。既存の?section=値(pro/backup/recipe/themes/budget/aisle/about)の
+  // 行き先は変えていない
+  personalize: 'section-basic',
   pro: 'pro-section',
   backup: 'backup-section',
   recipe: 'section-recipe',
@@ -182,7 +188,7 @@ const sectionDeepLinks: Record<string, string> = {
   about: 'section-about',
 }
 
-// 各節の見出し(全般/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
+// 各節の見出し(パーソナライズ/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
 // 大きくする(スクロール位置の調整=scroll-mt-24は節ラッパーの<section>側に付ける)
 const nodeHeadingCls = 'text-lg font-bold'
 
@@ -880,8 +886,10 @@ export default function SettingsPage() {
   const homeWidgets = settings.homeWidgets
   const hiddenHomeWidgets = allHomeWidgets.filter((key) => !homeWidgets.includes(key))
 
+  // 2026-08-03 便DH(オーナー指示): 「表示しない」から戻したパーツは末尾ではなく標準の並びの
+  // 位置へ返す(従来は必ずホームのいちばん下に出ていた)。入れ先の計算は logic/homeWidgets.ts
   const showHomeWidget = (key: HomeWidgetKey) => {
-    void updateSettings({ homeWidgets: [...homeWidgets, key] })
+    void updateSettings({ homeWidgets: restoreHomeWidget(homeWidgets, key) })
   }
   const hideHomeWidget = (key: HomeWidgetKey) => {
     void updateSettings({ homeWidgets: homeWidgets.filter((w) => w !== key) })
@@ -921,7 +929,7 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold">{ja.settings.title}</h1>
 
       {/* 目次チップ(2026-07-17オーナー採用決定で設定を1本スクロール化。旧: 上部タブ4分割2026-07-12〜)。
-          全般/レシピ/バックアップ/Proの各節へタップでスクロールし、スクロール監視で表示中の節を
+          パーソナライズ/レシピ/バックアップ/Proの各節へタップでスクロールし、スクロール監視で表示中の節を
           ハイライトする。スクロールしても上部に固定(sticky)。settings-tabbarクラスはindex.cssで
           is-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している。
           タップ領域は44px相当(py-[13px]・2026-07-16 UI総点検A-5から踏襲) */}
@@ -1000,7 +1008,7 @@ export default function SettingsPage() {
         </button>
       </div>
 
-      {/* ===== 全般 節 ===== */}
+      {/* ===== パーソナライズ 節(旧「全般」・2026-08-03 便DHで改名) ===== */}
       <section id="section-basic" aria-labelledby="section-basic-heading" className="scroll-mt-24">
         <h2 id="section-basic-heading" className={`${nodeHeadingCls} mt-[var(--space-lg)]`}>
           {ja.settings.tabBasic}
@@ -1038,33 +1046,68 @@ export default function SettingsPage() {
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.homeWidgetsDescription}</p>
             <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
               {homeWidgets.map((key, index) => (
-                <li key={key} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
-                  <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
-                  <button
-                    type="button"
-                    onClick={() => moveHomeWidget(index, -1)}
-                    disabled={index === 0}
-                    aria-label={ja.settings.homeWidgetMoveUp}
-                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                  >
-                    <ChevronUp size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveHomeWidget(index, 1)}
-                    disabled={index === homeWidgets.length - 1}
-                    aria-label={ja.settings.homeWidgetMoveDown}
-                    className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                  >
-                    <ChevronDown size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => hideHomeWidget(key)}
-                    className="rounded-sm border border-edge px-2 py-1 text-xs font-bold text-ink-muted"
-                  >
-                    {ja.settings.homeWidgetHide}
-                  </button>
+                <li key={key} className="px-[var(--space-sm)] py-2">
+                  <div className="flex items-center gap-1">
+                    <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
+                    <button
+                      type="button"
+                      onClick={() => moveHomeWidget(index, -1)}
+                      disabled={index === 0}
+                      aria-label={ja.settings.homeWidgetMoveUp}
+                      className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+                    >
+                      <ChevronUp size={18} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveHomeWidget(index, 1)}
+                      disabled={index === homeWidgets.length - 1}
+                      aria-label={ja.settings.homeWidgetMoveDown}
+                      className="rounded-full p-2 text-ink-muted disabled:opacity-30"
+                    >
+                      <ChevronDown size={18} aria-hidden />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => hideHomeWidget(key)}
+                      className="rounded-sm border border-edge px-2 py-1 text-xs font-bold text-ink-muted"
+                    >
+                      {ja.settings.homeWidgetHide}
+                    </button>
+                  </div>
+                  {/* 「今日なに作る？」だけは、いつ出すかも選べる(2026-08-03 便DH・オーナー指示)。
+                      既定は今週の献立に今日の予定がない日だけ・「常に表示」で予定があっても出す */}
+                  {key === 'suggestion' && (
+                    <div className="mt-1">
+                      <p className="text-xs text-ink-muted">
+                        {ja.settings.homeSuggestionWhenTitle}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {[
+                          { always: false, label: ja.settings.homeSuggestionWhenPlanEmpty },
+                          { always: true, label: ja.settings.homeSuggestionWhenAlways },
+                        ].map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            onClick={() =>
+                              void updateSettings({ homeSuggestionAlways: option.always })
+                            }
+                            aria-pressed={
+                              (settings.homeSuggestionAlways === true) === option.always
+                            }
+                            className={`rounded-sm border px-2 py-1.5 text-xs font-bold ${
+                              (settings.homeSuggestionAlways === true) === option.always
+                                ? 'border-accent bg-accent text-on-accent'
+                                : 'border-edge bg-surface text-ink-muted'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </li>
               ))}
               {hiddenHomeWidgets.map((key) => (
