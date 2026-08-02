@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   Plus,
@@ -13,9 +20,12 @@ import {
   SquareCheck,
   Square,
   Lock,
+  ListChecks,
+  CheckCircle2,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { listRecipes } from '../db/recipes'
+import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
+import { buildBulkDeleteConfirmText } from '../logic/recipeDelete'
 import { useSettings, updateSettings } from '../db/settings'
 import type { RecipeListLayout } from '../db/types'
 import { usePantryItems } from '../db/pantry'
@@ -45,7 +55,17 @@ import { countFreeLimitRecipes, isNearFreeLimit, freeLimitRemaining } from '../l
 import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
+import Toast from '../components/Toast'
 import { ja } from '../i18n/ja'
+
+/**
+ * 長押しで選択モードに入るまでの時間（ミリ秒）。
+ * 料理中に片手で触る画面なので、スクロールの押し始めと区別できるだけの長さを取る
+ * （短すぎるとスクロール開始が選択に化ける）。指が動いたら長押しは取り消す
+ */
+const LONG_PRESS_MS = 550
+/** 長押し判定を取り消す指の移動量（px） */
+const LONG_PRESS_MOVE_TOLERANCE = 10
 
 const timeOptions: { value: TimeFilter; label: string }[] = [
   { value: 'all', label: ja.search.timeAll },
@@ -481,8 +501,129 @@ export default function RecipesPage() {
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [filtersKey])
+  // ---- まとめて削除の選択モード(2026-08-02 便CT・オーナー承認) ----
+  // 作法は食材の在庫の「整理」モード(components/PantryBoard.tsx)の先例に倣う:
+  // 見出し横のボタンで入る／抜ける・全選択／選択解除・「選択した◯品を削除」を選択操作のすぐ下に置く。
+  // 入口は「選択」ボタンとカードの長押しの2つ(長押しは在庫チップには無いが、一覧は
+  // 「消したい1品を見つけた流れでそのまま片づけ始める」動きが自然なため足した)
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [message, setMessage] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  const visibleIds = useMemo(
+    () => (results ?? []).map((r) => r.recipe.id).filter((id): id is number => id != null),
+    [results],
+  )
+  // 選択中に絞り込み・検索を変えたら、画面から消えた品の選択は落とす。
+  // 「選択したレシピ◯品を削除」の◯が、いま見えているカードの選択数と必ず一致するようにする
+  // (見えないところで選ばれたままの品を巻き込んで消さないための歯止め)
+  useEffect(() => {
+    if (!selecting) return
+    setSelectedIds((prev) => {
+      const visible = new Set(visibleIds)
+      const next = prev.filter((id) => visible.has(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [selecting, visibleIds])
+  // 一覧が0件になったら選択モードから自動で抜ける(PantryBoardと同じ理由: 0件だと
+  // 選択できるものが無いまま、抜ける導線だけが分かりにくい状態が残るため)
+  useEffect(() => {
+    if (selecting && recipes && recipes.length === 0) {
+      setSelecting(false)
+      setSelectedIds([])
+    }
+  }, [selecting, recipes])
+
+  const toggleSelecting = () => {
+    setSelecting((v) => !v)
+    setSelectedIds([])
+  }
+  const toggleSelected = (id: number) => {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
+  }
+  const selectAllVisible = () => setSelectedIds(visibleIds)
+  const clearSelection = () => setSelectedIds([])
+  const allVisibleSelected = visibleIds.length > 0 && selectedIds.length === visibleIds.length
+
+  // 長押しで選択モードに入る。押した指が動いたら(スクロール)取り消し、成立したら
+  // 直後のクリック(=カードのリンク遷移)を1回だけ握りつぶす
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const longPressFiredRef = useRef(false)
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null)
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    }
+  }, [])
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    longPressTimerRef.current = undefined
+    longPressOriginRef.current = null
+  }
+  const onCardPointerDown = (e: ReactPointerEvent, id: number | undefined) => {
+    // 前回の長押しの後始末(クリックが来ずに終わった場合)。持ち越すと次の1タップを飲み込む
+    longPressFiredRef.current = false
+    if (selecting || id == null) return
+    // 右クリック等は対象外(スマホ縦画面での長押しだけを拾う)
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+    longPressOriginRef.current = { x: e.clientX, y: e.clientY }
+    longPressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true
+      setSelecting(true)
+      setSelectedIds([id])
+    }, LONG_PRESS_MS)
+  }
+  /**
+   * 長押しの最中だけ、ブラウザ標準の長押しメニュー（Androidのコンテキストメニュー等）を抑える。
+   * 常に抑えるとPCの右クリック（新しいタブで開く等）まで奪ってしまうので、
+   * 長押し判定が動いている間に限定する（右クリックはpointerdownで対象外にしているため通る）
+   */
+  const onCardContextMenu = (e: ReactMouseEvent) => {
+    if (longPressTimerRef.current || longPressFiredRef.current) e.preventDefault()
+  }
+  const onCardPointerMove = (e: ReactPointerEvent) => {
+    const origin = longPressOriginRef.current
+    if (!origin) return
+    if (
+      Math.abs(e.clientX - origin.x) > LONG_PRESS_MOVE_TOLERANCE ||
+      Math.abs(e.clientY - origin.y) > LONG_PRESS_MOVE_TOLERANCE
+    ) {
+      cancelLongPress()
+    }
+  }
+  const onCardClickCapture = (e: ReactMouseEvent) => {
+    if (!longPressFiredRef.current) return
+    longPressFiredRef.current = false
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  // 選択したレシピをまとめて削除する。確認文は規約F(何が消えて何が残るかを件数つきで
+  // 両方書く)＝1品削除(RecipeFormPageのconfirmDelete・便CI/C01)と同じ範囲を数える。
+  // 実行後も選択モードは維持し、選択だけ解除する(在庫の整理モードと同じ。片づけの途中で
+  // モードから追い出されると、続けて消したいときに毎回入り直すことになるため)
+  const deleteSelected = async () => {
+    if (selectedIds.length === 0 || deleting) return
+    setDeleting(true)
+    try {
+      const impact = await countRecipesDeleteImpact(selectedIds)
+      if (impact.recipes === 0) return
+      if (!window.confirm(buildBulkDeleteConfirmText(impact))) return
+      const removed = await deleteRecipes(selectedIds)
+      setSelectedIds([])
+      setMessage(ja.recipes.bulkDeletedToast.replace('{r}', String(removed)))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const onClickCapture = (e: ReactMouseEvent) => {
     if (!(e.target instanceof Element)) return
+    // 長押しで選択モードに入った直後のクリックと、選択モード中のカードのタップは詳細へ
+    // 遷移しない(2026-08-02 便CT)。ここでleavingRefを立ててしまうと、遷移していないのに
+    // 以降のスクロール位置保存が止まる
+    if (longPressFiredRef.current || selecting) return
     // カード内のボタン(お気に入りトグル・2026-07-29 便CI/C15)は遷移しないので、
     // 「離脱する」扱いにしない(leavingRefを立てると以降のスクロール位置保存が止まってしまう)
     if (e.target.closest('button')) return
@@ -541,7 +682,24 @@ export default function RecipesPage() {
       className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]"
       onClickCapture={onClickCapture}
     >
-      <h1 className="text-2xl font-bold">{ja.recipes.title}</h1>
+      {/* 見出し行に選択モードの出入り口を置く(食材の在庫の「整理」ボタンと同じ位置づけ)。
+          レシピが1品も無いうちは選ぶものが無いので出さない */}
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">{ja.recipes.title}</h1>
+        {recipes && recipes.length > 0 && (
+          <button
+            type="button"
+            onClick={toggleSelecting}
+            aria-pressed={selecting}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+              selecting ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
+            }`}
+          >
+            <ListChecks size={14} aria-hidden />
+            {selecting ? ja.recipes.selectDone : ja.recipes.selectToggle}
+          </button>
+        )}
+      </div>
 
       {recipes && isNearFreeLimit(countFreeLimitRecipes(recipes), !!settings?.proCode) && (
         <p className="mt-[var(--space-sm)] rounded-sm bg-surface px-3 py-2 text-sm text-ink-muted">
@@ -875,6 +1033,43 @@ export default function RecipesPage() {
         </div>
       )}
 
+      {/* 選択モードの操作パネル(2026-08-02 便CT)。食材の在庫の整理モードと同じ並びで、
+          案内文→全選択/選択解除→「選択したレシピ◯品を削除」をカードのすぐ上に置く
+          (下までスクロールしなくても全選択・削除に手が届くように) */}
+      {selecting && results && results.length > 0 && (
+        <div className="mt-[var(--space-sm)] flex flex-col gap-2">
+          <p className="text-sm text-ink-muted">{ja.recipes.selectHint}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={selectAllVisible}
+              disabled={allVisibleSelected}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+            >
+              {ja.recipes.selectAll}
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              disabled={selectedIds.length === 0}
+              className="rounded-md border border-edge bg-surface py-2 text-sm font-bold text-ink-muted shadow-sm disabled:opacity-40"
+            >
+              {ja.recipes.clearSelection}
+            </button>
+          </div>
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void deleteSelected()}
+              disabled={deleting}
+              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
+            >
+              {ja.recipes.deleteSelected.replace('{r}', String(selectedIds.length))}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替) */}
       <div
         className={
@@ -883,28 +1078,72 @@ export default function RecipesPage() {
             : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]'
         }
       >
-        {results?.map(({ recipe, usedCount, wantedCount }) => (
-          <RecipeCard
-            key={recipe.id}
-            recipe={recipe}
-            layout={recipeListLayout}
-            ngIngredients={ngIngredients}
-            subLabel={subLabelFor(usedCount, wantedCount)}
-            inTodayList={todayRecipeIds.has(recipe.id!)}
-            showQuickTime={quickOnly}
-            nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
-          />
-        ))}
+        {results?.map(({ recipe, usedCount, wantedCount }) => {
+          const selected = recipe.id != null && selectedIds.includes(recipe.id)
+          return (
+            <div
+              key={recipe.id}
+              className="relative"
+              // 長押しで選択モードに入る(2026-08-02 便CT)。iOS Safariの長押しメニュー
+              // (リンクのプレビュー・コピー)が割り込むと選択に入れないので、この一覧では出さない
+              style={{ WebkitTouchCallout: 'none' }}
+              onPointerDown={(e) => onCardPointerDown(e, recipe.id)}
+              onPointerMove={onCardPointerMove}
+              onPointerUp={cancelLongPress}
+              onPointerCancel={cancelLongPress}
+              onPointerLeave={cancelLongPress}
+              onClickCapture={onCardClickCapture}
+              onContextMenu={onCardContextMenu}
+            >
+              <RecipeCard
+                recipe={recipe}
+                layout={recipeListLayout}
+                ngIngredients={ngIngredients}
+                subLabel={subLabelFor(usedCount, wantedCount)}
+                inTodayList={todayRecipeIds.has(recipe.id!)}
+                showQuickTime={quickOnly}
+                nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
+              />
+              {/* 選択モード中はカード全面を選択ボタンで覆い、詳細への遷移の代わりに選択の
+                  ON/OFFにする(カード自体は<Link>なので、覆って遷移させない方が確実)。
+                  選択の印はカードの寸法を変えないよう角に重ねる(在庫チップと同じ作法) */}
+              {selecting && recipe.id != null && (
+                <button
+                  type="button"
+                  onClick={() => toggleSelected(recipe.id!)}
+                  aria-pressed={selected}
+                  aria-label={recipe.title}
+                  className={`absolute inset-0 z-10 rounded-md border-2 ${
+                    selected ? 'border-accent bg-accent/15' : 'border-transparent bg-transparent'
+                  }`}
+                >
+                  {selected && (
+                    <CheckCircle2
+                      size={22}
+                      className="absolute left-1 top-1 rounded-full bg-surface text-accent-ink"
+                      aria-hidden
+                    />
+                  )}
+                </button>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      {/* 新規登録ボタン（親指が届く右下に固定、タブナビの上） */}
-      <Link
-        to="/recipes/new"
-        aria-label={ja.recipes.addRecipe}
-        className="fixed bottom-24 right-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-on-accent shadow-md"
-      >
-        <Plus size={30} aria-hidden />
-      </Link>
+      {/* 新規登録ボタン（親指が届く右下に固定、タブナビの上）。
+          選択モード中は「消す」作業の最中なので出さない(誤タップで登録画面に飛ばない) */}
+      {!selecting && (
+        <Link
+          to="/recipes/new"
+          aria-label={ja.recipes.addRecipe}
+          className="fixed bottom-24 right-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-on-accent shadow-md"
+        >
+          <Plus size={30} aria-hidden />
+        </Link>
+      )}
+
+      <Toast message={message} onClose={() => setMessage('')} />
     </div>
   )
 }

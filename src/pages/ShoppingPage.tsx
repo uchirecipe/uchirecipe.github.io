@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChefHat,
@@ -325,9 +325,14 @@ export default function ShoppingPage() {
     setManualAmount('')
   }
 
-  // 買い物メモは一般的なスーパーの売り場順に自動整列する(2026-07-24 実機FB #11)。
-  // 表示専用の並べ替えで、DBの保存順(order)は書き換えない
-  const memoItems = useMemo(() => sortShoppingByAisle(shoppingItems ?? []), [shoppingItems])
+  // 買い物メモは売り場順に自動整列する(2026-07-24 実機FB #11)。表示専用の並べ替えで、
+  // DBの保存順(order)は書き換えない。並び順は設定「買い物メモの売り場順」で入れ替えられる
+  // (2026-08-02 便CT/C15)。未設定なら従来どおりの既定順
+  const aisleOrder = settings?.shoppingAisleOrder
+  const memoItems = useMemo(
+    () => sortShoppingByAisle(shoppingItems ?? [], aisleOrder),
+    [shoppingItems, aisleOrder],
+  )
   // まとめてチェック/解除(2026-07-23 #6)
   const allChecked = memoItems.length > 0 && memoItems.every((i) => i.isChecked)
 
@@ -437,12 +442,20 @@ export default function ShoppingPage() {
 
           {memoItems.length > 0 && (
             <>
-              {/* まとめてチェック/解除(2026-07-23 #6) */}
-              <div className="mt-[var(--space-md)] flex justify-end">
+              {/* まとめてチェック/解除(2026-07-23 #6)と、売り場順の設定への控えめな入口
+                  (2026-08-02 便CT/C15。並びが自動整列であることと、変えられることが
+                  買い物メモの画面から辿れるようにする) */}
+              <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
+                <Link
+                  to="/settings?section=aisle"
+                  className="min-w-0 truncate text-sm text-ink-muted underline decoration-dotted underline-offset-4"
+                >
+                  {ja.shopping.aisleOrderLink}
+                </Link>
                 <button
                   type="button"
                   onClick={() => void setAllShoppingChecked(!allChecked)}
-                  className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
                 >
                   <CheckCheck size={16} aria-hidden />
                   {allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}

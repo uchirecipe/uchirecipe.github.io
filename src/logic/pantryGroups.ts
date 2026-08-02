@@ -40,6 +40,54 @@ export const SHOPPING_AISLE_ORDER: PantryGroupKey[] = [
 ]
 
 /**
+ * 設定に保存した売り場順（Settings.shoppingAisleOrder・2026-08-02 便CT/C15）を、
+ * 必ず6グループ揃った並びに整えて返す純ロジック。
+ * 店の回り方は家庭ごとに違うので順番だけ入れ替えられるようにしたが、保存値には
+ * ①未設定 ②将来グループが増減したときの欠け・余り ③壊れた値、が混ざりうる。
+ * 設定のホームカスタマイズ（db/settings.ts の sanitizeHomeWidgets）と同じ考え方で、
+ * 知らないキーは黙って捨て、足りないキーは既定順（SHOPPING_AISLE_ORDER）の並びで末尾に補う。
+ * 重複したキーは最初の1つだけ残す（同じグループが2回並ぶと整列が不定になるため）。
+ */
+export function normalizeAisleOrder(saved: readonly PantryGroupKey[] | undefined): PantryGroupKey[] {
+  if (!saved || saved.length === 0) return [...SHOPPING_AISLE_ORDER]
+  const known = new Set<PantryGroupKey>(SHOPPING_AISLE_ORDER)
+  const seen = new Set<PantryGroupKey>()
+  const order: PantryGroupKey[] = []
+  for (const key of saved) {
+    if (!known.has(key) || seen.has(key)) continue
+    seen.add(key)
+    order.push(key)
+  }
+  for (const key of SHOPPING_AISLE_ORDER) {
+    if (!seen.has(key)) order.push(key)
+  }
+  return order
+}
+
+/**
+ * 売り場順の1グループを上（-1）／下（+1）へ1つ動かした並びを返す純ロジック。
+ * 端で押しても並びは変えない（呼び出し側のボタンもdisabledにする）。
+ * 設定のホームカスタマイズ（moveHomeWidget）と同じ「上下の入れ替え」方式に揃えている。
+ */
+export function moveAisleGroup(
+  order: readonly PantryGroupKey[],
+  index: number,
+  direction: -1 | 1,
+): PantryGroupKey[] {
+  const target = index + direction
+  if (index < 0 || index >= order.length || target < 0 || target >= order.length) return [...order]
+  const next = [...order]
+  ;[next[index], next[target]] = [next[target], next[index]]
+  return next
+}
+
+/** 保存済みの売り場順が既定（SHOPPING_AISLE_ORDER）と同じかどうか（「既定に戻す」の出し分け用） */
+export function isDefaultAisleOrder(order: readonly PantryGroupKey[] | undefined): boolean {
+  const normalized = normalizeAisleOrder(order)
+  return normalized.every((key, index) => key === SHOPPING_AISLE_ORDER[index])
+}
+
+/**
  * グループ → そのグループに属する栄養食品の label 一覧。
  * label は src/logic/nutritionData.ts（= scripts/nutrition-foods.mjs）の表示名そのまま。
  */

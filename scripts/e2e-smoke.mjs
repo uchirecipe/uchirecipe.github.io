@@ -276,6 +276,13 @@
 //         FOCUS-KEEP-01(閉じた手順から再開する・完成！や別レシピ経由では手順1から。C3) /
 //         FOCUS-BACK-01(端末の戻るで調理中モードだけが閉じる。C11) /
 //         FOCUS-OTHER-01(別の料理のタイマーも料理名つきで出る・タップで調整窓が開き停止できる。C4/C8) /
+//         BULKDEL-01(レシピ一覧のまとめて削除・2026-08-02 便CT: 「選択」ボタンと長押しで選択モードに入り、
+//         規約Fの確認文(レシピ本体+作った記録{n}件(写真{p}枚)+献立の予定・今日の献立/残るもの、を件数つき)を
+//         出してから削除する・削除後に週の献立/今日の献立の孤児が残らない・基本レシピには
+//         トゥームストーンを残さず「基本レシピを入れ直す」で戻る(記録は戻らない)) /
+//         AISLE-01(買い物メモの売り場順カスタム・2026-08-02 便CT/C15: 既定は従来の並び・設定の
+//         上下移動で入れ替えると買い物メモの整列に即反映されリロードしても維持される・
+//         「既定の順番に戻す」で戻る・買い物メモの控えめな入口から設定へ辿れる) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -380,7 +387,9 @@ try {
       const links = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
         /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
       )
-      const container = links[0]?.parentElement
+      // カードは1枚ずつ相対配置のラッパー(選択モードの覆いを重ねるため。2026-08-02 便CT)に
+      // 包まれているので、グリッド/リストのコンテナはリンクの2つ親になる
+      const container = links[0]?.parentElement?.parentElement
       return { className: container?.className ?? '', count: links.length }
     })
   const layoutBefore = await layoutContainerInfo()
@@ -12348,6 +12357,357 @@ try {
       await fiBrowser.close()
     }
   }
+  // --- BULKDEL-01: レシピ一覧のまとめて削除(2026-08-02 便CT・オーナー承認)。
+  // 食材の在庫の「整理」モードに倣った選択モードで複数品を選び、規約Fの確認文
+  // (消えるもの＝レシピ本体+作った記録{n}件(写真{p}枚)+献立の予定・今日の献立/残るもの、を件数つき)
+  // を出してから削除できること・削除後に孤児データ(週の献立・今日の献立)が残らないこと・
+  // 基本レシピにはトゥームストーン(再取込除外の記録)を残さない＝入れ直しで戻せる既存挙動が
+  // 維持されていること、を確認する。長押しでも選択モードに入れることも確認する。 ---
+  currentCheck = 'BULKDEL-01'
+  {
+    const bdBrowser = await chromium.launch()
+    const bdContext = await bdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const bdPage = await bdContext.newPage()
+    let bdDialogMsg = ''
+    bdPage.on('dialog', (dialog) => {
+      bdDialogMsg = dialog.message()
+      return dialog.accept()
+    })
+    bdPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@BULKDEL-01] ${text}`)
+    })
+    bdPage.on('pageerror', (err) => errors.push(`[pageerror@BULKDEL-01] ${err.message}`))
+    try {
+      await bdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await bdPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 削除の巻き添え(作った記録・写真・週の献立・今日の献立)をIndexedDB直書きで仕込む
+      const bdIds = await bdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['recipes', 'mealPlans', 'todayList'], 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const nikujaga = g.result.find((r) => r.title === '肉じゃが')
+                const curry = g.result.find((r) => r.title === 'カレーライス')
+                // 作った記録2件(うち1件は写真つき)＋1件
+                store.put({
+                  ...nikujaga,
+                  cookedLogs: [
+                    { date: '2026-08-01', photo: new Blob(['x'], { type: 'image/jpeg' }) },
+                    { date: '2026-07-31' },
+                  ],
+                })
+                store.put({ ...curry, cookedLogs: [{ date: '2026-07-30' }] })
+                const plans = tx.objectStore('mealPlans')
+                plans.add({ date: '2026-08-05', slot: 'dinner', recipeId: nikujaga.id, role: 'main' })
+                plans.add({ date: '2026-08-06', slot: 'dinner', recipeId: curry.id, role: 'main' })
+                const today = tx.objectStore('todayList')
+                today.add({ recipeId: nikujaga.id, addedAt: Date.now() })
+                tx.oncomplete = () => resolve({ nikujaga: nikujaga.id, curry: curry.id })
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await bdPage.reload({ waitUntil: 'networkidle' })
+      await bdPage.waitForTimeout(1500)
+
+      // 長押しで選択モードに入る(カードを押したまま動かさない)。詳細へは遷移しない
+      const bdFirstCard = bdPage.locator('a[href^="#/recipes/"]').first()
+      const bdBox = await bdFirstCard.boundingBox()
+      await bdPage.mouse.move(bdBox.x + bdBox.width / 2, bdBox.y + 20)
+      await bdPage.mouse.down()
+      await bdPage.waitForTimeout(900)
+      await bdPage.mouse.up()
+      await bdPage.waitForTimeout(400)
+      check(
+        'BULKDEL-01 長押しで選択モードに入る',
+        await bdPage.getByRole('button', { name: '完了', exact: true }).isVisible(),
+      )
+      check('BULKDEL-01 長押しで詳細に遷移しない', !/#\/recipes\/\d+/.test(bdPage.url()), bdPage.url())
+      check(
+        'BULKDEL-01 長押ししたレシピが1品選ばれている',
+        ((await bdPage.textContent('body')) ?? '').includes('選択したレシピ1品を削除'),
+      )
+      // いったん選択モードを抜けてから、「選択」ボタン経由の通常の流れを検証する
+      await bdPage.getByRole('button', { name: '完了', exact: true }).click()
+      await bdPage.waitForTimeout(300)
+      check(
+        'BULKDEL-01 「完了」で選択モードを抜ける',
+        await bdPage.getByRole('button', { name: '選択', exact: true }).isVisible(),
+      )
+
+      await bdPage.getByRole('button', { name: '選択', exact: true }).click()
+      await bdPage.waitForTimeout(300)
+      const bdSelectingText = (await bdPage.textContent('body')) ?? ''
+      check('BULKDEL-01 選択モードの案内が出る', bdSelectingText.includes('タップして選択'))
+      check(
+        'BULKDEL-01 全選択・選択解除が選択操作のすぐ上に出る',
+        bdSelectingText.includes('全選択') && bdSelectingText.includes('選択解除'),
+      )
+      check(
+        'BULKDEL-01 0件選択では削除ボタンを出さない',
+        !bdSelectingText.includes('選択したレシピ'),
+      )
+
+      // カード全面が選択ボタンになる(aria-labelは料理名)
+      await bdPage.getByRole('button', { name: '肉じゃが', exact: true }).click()
+      await bdPage.waitForTimeout(200)
+      await bdPage.getByRole('button', { name: 'カレーライス', exact: true }).click()
+      await bdPage.waitForTimeout(300)
+      check(
+        'BULKDEL-01 選んだ品数が削除ボタンに出る',
+        ((await bdPage.textContent('body')) ?? '').includes('選択したレシピ2品を削除'),
+      )
+
+      const bdBeforeCount = await bdPage.locator('a[href^="#/recipes/"]').count()
+      await bdPage.getByRole('button', { name: '選択したレシピ2品を削除' }).click()
+      await bdPage.waitForTimeout(1200)
+
+      // 規約F: 何が消えるか/何が残るかを件数つきで両方書く
+      check('BULKDEL-01 確認文に削除する品数が入る', /レシピ2品を削除します/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に作った記録の件数が入る', /作った記録3件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に写真の枚数が入る', /写真1枚/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に献立の予定の件数が入る', /献立の予定2件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に今日の献立の件数が入る', /今日の献立1件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
+      check('BULKDEL-01 確認文に残るものが件数つきで入る', /ほかのレシピ\d+品・買い物メモ・食材の在庫は残ります/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check(
+        'BULKDEL-01 基本レシピは入れ直しで戻せることを区別して書く',
+        /基本レシピ2品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(bdDialogMsg) &&
+          bdDialogMsg.includes('作った記録は戻りません'),
+        `dialog=${bdDialogMsg}`,
+      )
+      check('BULKDEL-01 「よろしいですか？」で終わらせない', !bdDialogMsg.includes('よろしいですか'))
+
+      const bdAfterText = (await bdPage.textContent('body')) ?? ''
+      check('BULKDEL-01 削除の完了をトーストで知らせる', bdAfterText.includes('レシピ2品を削除しました'))
+      // 判定は「カードの料理名」だけで行う。body全体のtextContentだと、隣り合う主要食材チップが
+      // つながって(「豚こま切れ肉」+「じゃがいも」→"…肉じゃが…")料理名と誤一致する
+      const bdTitles = await bdPage.evaluate(() =>
+        Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.line-clamp-2')).map(
+          (p) => p.textContent,
+        ),
+      )
+      check(
+        'BULKDEL-01 削除した2品が一覧から消える',
+        !bdTitles.includes('肉じゃが') && !bdTitles.includes('カレーライス'),
+        JSON.stringify(bdTitles.slice(0, 5)),
+      )
+      const bdAfterCount = await bdPage.locator('a[href^="#/recipes/"]').count()
+      check('BULKDEL-01 カード数が2枚減る', bdAfterCount === bdBeforeCount - 2, `前=${bdBeforeCount} 後=${bdAfterCount}`)
+      check(
+        'BULKDEL-01 削除後も選択モードは維持し選択だけ解除する(在庫の整理モードと同じ)',
+        await bdPage.getByRole('button', { name: '完了', exact: true }).isVisible(),
+      )
+
+      // 孤児防止(deleteRecipeと同じ範囲)とトゥームストーンの扱いをIndexedDB直読みで確認
+      const bdState = await bdPage.evaluate(
+        (ids) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction(['recipes', 'mealPlans', 'todayList', 'setExclusions'], 'readonly')
+              const out = {}
+              const rq = tx.objectStore('recipes').getAll()
+              rq.onsuccess = () => {
+                out.remaining = rq.result.filter((r) => ids.includes(r.id)).length
+              }
+              const pq = tx.objectStore('mealPlans').getAll()
+              pq.onsuccess = () => {
+                out.orphanPlans = pq.result.filter((e) => ids.includes(e.recipeId)).length
+              }
+              const tq = tx.objectStore('todayList').getAll()
+              tq.onsuccess = () => {
+                out.orphanToday = tq.result.filter((e) => ids.includes(e.recipeId)).length
+              }
+              const eq2 = tx.objectStore('setExclusions').getAll()
+              eq2.onsuccess = () => {
+                out.exclusions = eq2.result.length
+              }
+              tx.oncomplete = () => resolve(out)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        [bdIds.nikujaga, bdIds.curry],
+      )
+      check('BULKDEL-01 レシピ本体が消える', bdState.remaining === 0, JSON.stringify(bdState))
+      check('BULKDEL-01 週の献立に孤児が残らない', bdState.orphanPlans === 0, JSON.stringify(bdState))
+      check('BULKDEL-01 今日の献立に孤児が残らない', bdState.orphanToday === 0, JSON.stringify(bdState))
+      check(
+        'BULKDEL-01 基本レシピには再取込除外の記録を残さない(入れ直しで戻せる既存挙動を維持)',
+        bdState.exclusions === 0,
+        JSON.stringify(bdState),
+      )
+
+      // 実際に設定の「基本レシピを入れ直す」で2品が戻ること(記録は戻らないこと)まで確認する
+      await bdPage.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
+      await bdPage.waitForTimeout(900)
+      await bdPage.getByRole('button', { name: '基本レシピを入れ直す' }).click()
+      await bdPage.waitForTimeout(1500)
+      await bdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await bdPage.waitForTimeout(1200)
+      const bdRestored = (await bdPage.textContent('body')) ?? ''
+      check(
+        'BULKDEL-01 削除した基本レシピは「基本レシピを入れ直す」で戻る',
+        bdRestored.includes('肉じゃが') && bdRestored.includes('カレーライス'),
+      )
+      const bdRestoredLogs = await bdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () =>
+                resolve(
+                  g.result
+                    .filter((r) => r.title === '肉じゃが' || r.title === 'カレーライス')
+                    .reduce((sum, r) => sum + (r.cookedLogs?.length ?? 0), 0),
+                )
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('BULKDEL-01 戻ってきても作った記録は戻らない(確認文どおり)', bdRestoredLogs === 0, `logs=${bdRestoredLogs}`)
+    } finally {
+      await bdBrowser.close()
+    }
+  }
+
+  // --- AISLE-01: 買い物メモの売り場順カスタム(2026-08-02 便CT/C15・オーナー承認)。
+  // 既定は従来どおり(野菜・きのこ→肉・魚介→…)で、設定「買い物メモの売り場順」で並びを
+  // 入れ替えると買い物メモの整列に即反映され、リロードしても維持され、「既定の順番に戻す」で
+  // 元に戻ること。買い物メモ側の控えめな入口から設定の該当欄へ辿れることも確認する。 ---
+  currentCheck = 'AISLE-01'
+  {
+    const aiBrowser = await chromium.launch()
+    const aiContext = await aiBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const aiPage = await aiContext.newPage()
+    aiPage.on('dialog', (dialog) => dialog.accept())
+    aiPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@AISLE-01] ${text}`)
+    })
+    aiPage.on('pageerror', (err) => errors.push(`[pageerror@AISLE-01] ${err.message}`))
+    try {
+      await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await aiPage.waitForTimeout(1800)
+      await aiPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await aiPage.waitForTimeout(400)
+      // 3グループにまたがる食材を手入力で足す(入力順は売り場順とわざとずらす)
+      for (const name of ['しょうゆ', '玉ねぎ', '豚こま切れ肉']) {
+        await aiPage.getByPlaceholder('食材を入力').fill(name)
+        await aiPage.getByRole('button', { name: '追加', exact: true }).click()
+        await aiPage.waitForTimeout(350)
+      }
+      const memoNames = () =>
+        aiPage.evaluate(() =>
+          Array.from(document.querySelectorAll('ul.divide-y > li > div > span.font-bold')).map(
+            (el) => el.textContent,
+          ),
+        )
+      check(
+        'AISLE-01 既定は野菜・きのこ→肉・魚介→調味料の順',
+        JSON.stringify(await memoNames()) === JSON.stringify(['玉ねぎ', '豚こま切れ肉', 'しょうゆ']),
+        JSON.stringify(await memoNames()),
+      )
+
+      // 買い物メモ内の控えめな入口 →設定の「買い物メモの売り場順」へ着地する
+      await aiPage.getByRole('link', { name: '売り場順を変える' }).click()
+      await aiPage.waitForTimeout(1000)
+      check('AISLE-01 買い物メモから売り場順の設定へ辿れる', aiPage.url().includes('section=aisle'), aiPage.url())
+      check(
+        'AISLE-01 設定に売り場順の欄がある',
+        await aiPage.locator('#aisle-section').isVisible(),
+      )
+      check(
+        'AISLE-01 未変更なら既定の順番であることを示す',
+        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは既定の順番です'),
+      )
+
+      // 「調味料」を4回上へ動かして先頭にする
+      const seasoningUp = aiPage
+        .locator('#aisle-section li', { hasText: '調味料' })
+        .getByRole('button', { name: '上へ移動' })
+      for (let i = 0; i < 4; i += 1) {
+        await seasoningUp.click()
+        await aiPage.waitForTimeout(350)
+      }
+      // 行は「連番 + グループ名 + 上下ボタン」なので、グループ名だけを拾う(連番のspanは w-6)
+      const aiOrderLabels = await aiPage.evaluate(() =>
+        Array.from(document.querySelectorAll('#aisle-section li > span.flex-1')).map(
+          (el) => el.textContent,
+        ),
+      )
+      check(
+        'AISLE-01 上へ移動で「調味料」が先頭になる',
+        aiOrderLabels[0] === '調味料',
+        JSON.stringify(aiOrderLabels),
+      )
+      check(
+        'AISLE-01 並びを変えると「既定の順番に戻す」が出る',
+        await aiPage.locator('#aisle-section').getByRole('button', { name: '既定の順番に戻す' }).isVisible(),
+      )
+
+      await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await aiPage.waitForTimeout(1200)
+      await aiPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await aiPage.waitForTimeout(500)
+      check(
+        'AISLE-01 買い物メモの整列に即反映される',
+        JSON.stringify(await memoNames()) === JSON.stringify(['しょうゆ', '玉ねぎ', '豚こま切れ肉']),
+        JSON.stringify(await memoNames()),
+      )
+      // 設定に保存されるのでリロードしても維持される
+      await aiPage.reload({ waitUntil: 'networkidle' })
+      await aiPage.waitForTimeout(1500)
+      await aiPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await aiPage.waitForTimeout(500)
+      check(
+        'AISLE-01 リロードしても売り場順が維持される',
+        JSON.stringify(await memoNames()) === JSON.stringify(['しょうゆ', '玉ねぎ', '豚こま切れ肉']),
+        JSON.stringify(await memoNames()),
+      )
+
+      // 「既定の順番に戻す」で従来の並びへ戻る
+      await aiPage.goto(`${BASE}/#/settings?section=aisle`, { waitUntil: 'networkidle' })
+      await aiPage.waitForTimeout(1000)
+      await aiPage.locator('#aisle-section').getByRole('button', { name: '既定の順番に戻す' }).click()
+      await aiPage.waitForTimeout(600)
+      check(
+        'AISLE-01 既定に戻すと案内が「いまは既定の順番です」に変わる',
+        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは既定の順番です'),
+      )
+      await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await aiPage.waitForTimeout(1200)
+      await aiPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await aiPage.waitForTimeout(500)
+      check(
+        'AISLE-01 既定に戻すと買い物メモも元の並びに戻る',
+        JSON.stringify(await memoNames()) === JSON.stringify(['玉ねぎ', '豚こま切れ肉', 'しょうゆ']),
+        JSON.stringify(await memoNames()),
+      )
+    } finally {
+      await aiBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

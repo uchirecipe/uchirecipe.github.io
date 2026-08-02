@@ -516,6 +516,16 @@ export interface Settings {
    * cookNaviTrialCount と同じく端末内の緩いフラグ。
    */
   monthTrialUsed?: boolean
+  /**
+   * 買い物メモを並べる売り場の順番（任意・2026-08-02 便CT/C15 オーナー承認）。
+   * 未設定（既存ユーザー含む）は logic/pantryGroups.ts の SHOPPING_AISLE_ORDER
+   * （野菜・きのこ→肉・魚介→豆腐・卵・乳→主食・粉→調味料→その他）をそのまま使う。
+   * 店の回り方は家庭ごとに違うので、6グループの並び順だけを入れ替えられるようにする
+   * （グループの中身＝食材の振り分けは変えない）。読み出しは normalizeAisleOrder を通し、
+   * 未知のキーや欠けたキーがあっても既定順で補って必ず6グループ揃った配列にする。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  shoppingAisleOrder?: PantryGroupKey[]
 }
 
 /** レシピ一覧の表示形式 */
