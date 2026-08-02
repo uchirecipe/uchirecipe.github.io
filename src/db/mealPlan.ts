@@ -90,10 +90,26 @@ export async function clearMealSlotInRange(
   endDate: string,
   slot: MealSlot,
 ): Promise<void> {
+  await clearMealSlotsInRange(startDate, endDate, [slot])
+}
+
+/**
+ * clearMealSlotInRange の複数指定版（2026-08-03 便DJ・オーナー指示:
+ * 「朝昼夜の複数選択で空にできるように」）。指定した食事のどれかに当たるエントリだけを
+ * まとめて削除する。指定が空のときは何もしない（誤って全消しにならないようにする）。
+ * 他の食事・他の日付には影響しない点は1つ指定のときと同じ。
+ */
+export async function clearMealSlotsInRange(
+  startDate: string,
+  endDate: string,
+  slots: MealSlot[],
+): Promise<void> {
+  if (slots.length === 0) return
+  const targets = new Set(slots)
   const rows = await db.mealPlans
     .where('date')
     .between(startDate, endDate, true, true)
-    .and((e) => e.slot === slot)
+    .and((e) => targets.has(e.slot))
     .toArray()
   const ids = rows.map((r) => r.id).filter((id): id is number => id != null)
   if (ids.length > 0) await db.mealPlans.bulkDelete(ids)
