@@ -2721,9 +2721,14 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
 // テンプレは日付ではなく曜日で持つ。全曜日を選べばA-1(1週間まるごと)・1曜日だけ選べばB-2
 // (毎週◯曜はカレー)になる、という統合設計をここで固定する。入るのは空いているところだけ(非破壊)
 {
-  const { buildTemplateItems, planTemplateFill, templateDowCounts } = await import(
-    '../src/logic/mealTemplate.ts'
-  )
+  const {
+    buildTemplateItems,
+    planTemplateFill,
+    templateDowCounts,
+    groupTemplateItems,
+    removeTemplateItemAt,
+    replaceTemplateItemRecipe,
+  } = await import('../src/logic/mealTemplate.ts')
   // 2026-07-27(月)〜08-02(日)の週
   const weekDatesArr = [
     '2026-07-27',
@@ -2757,6 +2762,48 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     'main',
   )
   eq('曜日ごとの品数を数えられる(曜日チップの表示用)', templateDowCounts(items), [2, 0, 0, 0, 1, 0, 0])
+
+  // ---- テンプレの中身を見る・直す(2026-08-02 便DE-9) ----
+  // 画面は「曜日→食事→役割」の順に出し、直す対象は元の配列の位置(index)で指す。
+  // 位置がずれると別の品を消す/差し替える事故になるので、並べ替えても位置が保たれることを固定する
+  {
+    const mixed = [
+      { dow: 4, slot: 'dinner', role: 'side', recipeId: 41 }, // 金・副菜(あとで足した想定)
+      { dow: 0, slot: 'dinner', role: 'side', recipeId: 20 },
+      { dow: 0, slot: 'breakfast', role: 'main', recipeId: 11 },
+      { dow: 0, slot: 'dinner', role: 'main', recipeId: 10 },
+    ]
+    const groups = groupTemplateItems(mixed)
+    eq('テンプレの中身: 曜日の並びは月→金', groups.map((g) => g.dow), [0, 4])
+    eq(
+      'テンプレの中身: 同じ曜日は朝食→夕食の順',
+      groups[0].slots.map((s) => s.slot),
+      ['breakfast', 'dinner'],
+    )
+    eq(
+      'テンプレの中身: 同じ食事は主菜→副菜の順',
+      groups[0].slots[1].items.map((v) => v.item.role),
+      ['main', 'side'],
+    )
+    eq(
+      'テンプレの中身: 並べ替えても元の位置(index)を保つ',
+      groups[0].slots[1].items.map((v) => v.index),
+      [3, 1],
+    )
+    // 取り外し・差し替えは元の配列を変えず、指定した位置だけを直す
+    const removed = removeTemplateItemAt(mixed, 3)
+    eq('テンプレの中身: 指定した1品だけ外す', removed.map((i) => i.recipeId), [41, 20, 11])
+    eq('テンプレの中身: 元の中身は変えない(非破壊)', mixed.length, 4)
+    eq('テンプレの中身: 範囲外の位置は何も変えない', removeTemplateItemAt(mixed, 9).length, 4)
+    const replaced = replaceTemplateItemRecipe(mixed, 1, 99)
+    eq('テンプレの中身: 指定した1品のレシピだけ差し替える', replaced[1].recipeId, 99)
+    eq(
+      'テンプレの中身: 差し替えても曜日・食事・役割は変えない',
+      [replaced[1].dow, replaced[1].slot, replaced[1].role],
+      [0, 'dinner', 'side'],
+    )
+    eq('テンプレの中身: 差し替えでほかの品は変わらない', replaced[0].recipeId, 41)
+  }
 
   // A-1: 翌週(8/3(月)〜8/9(日))へ丸ごと流し込む
   const nextWeek = [

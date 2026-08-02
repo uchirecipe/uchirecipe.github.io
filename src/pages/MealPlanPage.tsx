@@ -4271,6 +4271,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
       </div>
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateSaveDescription}</p>
+      {/* テンプレの中身を見る・直す画面への入口(2026-08-02 便DE-9・オーナー指示)。
+          保存したあと中身を確かめる手段が無く、直すには保存し直すしかなかった */}
+      <Link
+        to="/meal-templates"
+        className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
+      >
+        {ja.mealPlan.templateManageLink}
+      </Link>
       </section>
 
       {/* 7日分のカード */}
@@ -4888,6 +4896,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 >
                   {ja.mealPlan.templateApplyButton}
                 </button>
+                {/* 入れる前に中身を確かめたいときの入口(2026-08-02 便DE-9) */}
+                <Link
+                  to="/meal-templates"
+                  className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
+                >
+                  {ja.mealPlan.templateManageLink}
+                </Link>
               </>
             )}
           </div>
