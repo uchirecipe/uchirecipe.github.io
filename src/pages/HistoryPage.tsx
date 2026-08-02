@@ -55,10 +55,26 @@ function HistoryRow({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
 }
 
 /** 「作った記録」の全履歴。全レシピのcookedLogsを日付降順・月区切りで一覧表示する */
+/**
+ * 呼び出し元へ戻すための行き先（2026-08-02 便DE-11・オーナー指示）。
+ * 献立の週タブ／月タブから開いたときは ?back=week / ?back=month が付いてくる。
+ * これが無いときは従来どおり（ブラウザ履歴があれば1つ戻る・無ければホーム）。
+ *
+ * 直った問題: 週タブの「過去の記録を見る」→ 記録一覧 → 戻る、で献立タブの「日」に落ちていた。
+ * 履歴を1つ戻るだけでは献立タブのタブ状態（日/週/月）までは戻らないため、
+ * 開いた場所を持ち回って、そのタブを指定して戻す。
+ */
+function backTargetOf(back: string | null): string | null {
+  if (back === 'week') return '/meal-plan?focus=week'
+  if (back === 'month') return '/meal-plan?focus=month'
+  return null
+}
+
 export default function HistoryPage() {
   const recipes = useLiveQuery(listRecipes, [])
   // レシピ詳細の「すべて見る（他◯件）」からの絞り込み(2026-07-29 便CI/C03)
   const [searchParams] = useSearchParams()
+  const backTarget = backTargetOf(searchParams.get('back'))
   const filterRecipeId = Number(searchParams.get('recipe'))
   const hasFilter = Number.isFinite(filterRecipeId) && searchParams.get('recipe') !== null
   const filterRecipe = hasFilter ? recipes?.find((r) => r.id === filterRecipeId) : undefined
@@ -90,7 +106,11 @@ export default function HistoryPage() {
 
   return (
     <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
-      <BackHeader fallback="/" title={ja.history.title} />
+      <BackHeader
+        fallback={backTarget ?? '/'}
+        alwaysFallback={backTarget != null}
+        title={ja.history.title}
+      />
 
       <div className="px-[var(--space-md)] pt-[var(--space-md)]">
         {/* 絞り込み中であることと、その外し方を必ず出す(便CI/C03) */}

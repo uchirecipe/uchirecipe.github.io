@@ -1475,22 +1475,65 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // パラメータは消費したら消す(次の「素の献立タブ開き」で通常の既定=日タブに戻すため)。
   // 初回1回だけ処理する(liveQueryの再評価のたびに動かないようinitialFocusRefで守る)
   const initialFocusRef = useRef(false)
+  /**
+   * 週タブを開いたあとにスクロールして見せる日（2026-08-02 便DE-1/DE-11）。
+   * ?focus=week&date=YYYY-MM-DD で開いたときだけ入り、その日のカードまで送ってから空にする。
+   */
+  const [pendingScrollDate, setPendingScrollDate] = useState<string | null>(null)
   useEffect(() => {
     if (initialFocusRef.current) return
     initialFocusRef.current = true
-    if (searchParams.get('focus') === 'today') {
+    const focus = searchParams.get('focus')
+    if (focus == null) return
+    // 2026-08-02 便DE-1/DE-11: 開くタブを指定して戻ってこられるようにした。
+    //  today … 今日の献立(日タブ)へ。従来からの動き
+    //  week  … 週タブへ。date が付いていればその日のカードまでスクロールする
+    //          (ホームの「今日の献立」の食事ごとの見出しから来る)
+    //  month … 月タブへ(「作った記録」の一覧から月タブへ戻るときに使う)
+    if (focus === 'today') {
       setViewMode('day')
       window.scrollTo(0, 0)
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          next.delete('focus')
-          return next
-        },
-        { replace: true },
-      )
+    } else if (focus === 'week') {
+      const date = searchParams.get('date')
+      if (date) {
+        // 「今日から7日間」表示ならその日を先頭に、週区切り表示ならその日を含む週を出す
+        setWeekStart(
+          settings?.weekStartsToday ? date : weekDates(new Date(`${date}T00:00:00`))[0],
+        )
+        setPendingScrollDate(date)
+      }
+      setViewMode('week')
+    } else if (focus === 'month') {
+      setViewMode('month')
+      window.scrollTo(0, 0)
     }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('focus')
+        next.delete('date')
+        return next
+      },
+      { replace: true },
+    )
+    // settings は初回描画では未取得のことがある。参照するのは「今日から7日間」表示かどうかだけで、
+    // その場合も weekModeInitRef の初期化が今日を先頭に寄せるため、依存に足して再実行はさせない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams])
+
+  // 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）
+  useEffect(() => {
+    if (pendingScrollDate == null || viewMode !== 'week') return
+    const frame = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`section[data-date="${pendingScrollDate}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        setPendingScrollDate(null)
+      }),
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [pendingScrollDate, viewMode])
 
   // 自動取り込み(便U-3・設計確定): 日タブを開いたとき、今日の日付の週プラン登録
   // (表示中の食事帯のみ)を今日の献立へ自動取り込みする。既存の手動取り込みボタンと同じ
@@ -3425,45 +3468,65 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </Link>
                 )}
 
+                {/* 「今日の献立」と「今週の予定」の並列表示(2026-08-02 便DE-2・オーナー指示)。
+                    警告と長い説明文をやめ、2つの中身を左右に並べて見比べられるようにした。
+                    左の品は今週の予定に入っていないので、その場で入れられるボタンを下に置く
+                    (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
                 {mismatchRecipes.length > 0 && (
-                  <div className="mt-[var(--space-sm)] rounded-md border border-warning bg-surface p-[var(--space-sm)]">
-                    <p className="flex items-center gap-1 text-sm font-bold text-warning">
-                      <TriangleAlert size={16} aria-hidden />
-                      {ja.mealPlan.planMismatchNotice}
-                    </p>
-                    <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.planMismatchDescription}</p>
-                    <div className="mt-[var(--space-sm)] space-y-2">
-                      {mismatchRecipes.map((recipe) => (
-                        <div key={recipe.id}>
-                          <p className="truncate text-sm font-bold">{recipe.title}</p>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {visibleSlots.map((slot) => {
-                              const slotEntries = todayEntriesBySlot.get(slot) ?? []
-                              const mainEntry = slotEntries.find((e) => (e.role ?? 'main') === 'main')
-                              const currentTitle = mainEntry
-                                ? recipeById.get(mainEntry.recipeId)?.title
-                                : undefined
-                              return (
-                                <button
-                                  key={slot}
-                                  type="button"
-                                  onClick={() => void assignMismatchRecipe(slot, recipe)}
-                                  className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-                                >
-                                  {ja.mealPlan.slot[slot]}
-                                  <span className="ml-1 font-normal text-ink-muted">
-                                    (
-                                    {currentTitle
-                                      ? ja.mealPlan.planMismatchCurrent.replace('{title}', currentTitle)
-                                      : ja.mealPlan.planMismatchEmpty}
-                                    )
-                                  </span>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      ))}
+                  <div
+                    data-testid="plan-mismatch"
+                    className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]"
+                  >
+                    <div className="grid grid-cols-2 gap-[var(--space-sm)]">
+                      <div>
+                        <p className="text-xs font-bold text-ink-muted">
+                          {ja.mealPlan.planMismatchListLabel}
+                        </p>
+                        <ul className="mt-1 space-y-[var(--space-sm)]">
+                          {mismatchRecipes.map((recipe) => (
+                            <li key={recipe.id}>
+                              <p className="text-sm font-bold">{recipe.title}</p>
+                              <div className="mt-1 flex flex-col gap-1">
+                                {visibleSlots.map((slot) => (
+                                  <button
+                                    key={slot}
+                                    type="button"
+                                    onClick={() => void assignMismatchRecipe(slot, recipe)}
+                                    className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink"
+                                  >
+                                    {ja.mealPlan.planMismatchAddToSlot.replace(
+                                      '{slot}',
+                                      ja.mealPlan.slot[slot],
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-ink-muted">
+                          {ja.mealPlan.planMismatchPlanLabel}
+                        </p>
+                        <ul className="mt-1 space-y-[var(--space-sm)]">
+                          {visibleSlots.map((slot) => {
+                            const titles = (todayEntriesBySlot.get(slot) ?? [])
+                              .map((e) => recipeById.get(e.recipeId)?.title)
+                              .filter((t): t is string => !!t)
+                            return (
+                              <li key={slot}>
+                                <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                                <p className="text-sm font-bold">
+                                  {titles.length > 0
+                                    ? titles.join('・')
+                                    : ja.mealPlan.planMismatchPlanEmpty}
+                                </p>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -3953,6 +4016,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
             {/* A-4 献立表(印刷・画像で保存)。この月の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
             {renderPlanSheetSection(monthPlanSheet)}
+
+            {/* 「作った記録」の一覧への入口(2026-08-02 便DE-11・オーナー指示)。
+                週タブにしか無かったので月からも開けるようにし、戻るはこの月タブへ返す(?back=month) */}
+            {!isDemo && (
+              <Link
+                to="/history?back=month"
+                className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
+              >
+                {ja.mealPlan.historyLink}
+              </Link>
+            )}
           </div>
         ) : (
           // 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。月タブを完全に
@@ -4204,6 +4278,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         {dates.map((date) => (
           <section
             key={date}
+            data-date={date}
             ref={date === today ? todaySectionRef : undefined}
             className={`scroll-mt-[var(--space-md)] rounded-md border p-[var(--space-md)] shadow-sm ${
               date === today ? 'border-accent bg-surface' : 'border-edge bg-surface'
@@ -4396,8 +4471,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         <p className="mt-1 text-center text-sm text-ink-muted">{ja.mealPlan.goToShoppingEmpty}</p>
       )}
 
+      {/* 2026-08-02 便DE-11(オーナー指示): ここから開いた「作った記録」の戻るは、
+          呼び出し元の週タブへ返す(?back=week)。従来はブラウザの戻りで献立タブに戻るだけで、
+          タブの状態は既定の「日」に落ちていた */}
       <Link
-        to="/history"
+        to="/history?back=week"
         className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
       >
         {ja.mealPlan.historyLink}
