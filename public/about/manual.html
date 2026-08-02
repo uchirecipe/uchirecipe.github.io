@@ -27,6 +27,9 @@
        本文#43362aとの明度差を保ちつつAAを満たす値: ページ背景上4.77:1 / カード面上5.10:1 */
     --text-muted: #7c6a56;
     --border: #e9dfd0;
+    /* 追従バーの高さ。アンカーの着地位置(scroll-padding-top)と目次パネルの位置に使う */
+    --bar-h: 50px;
+    --bar-bg: rgba(250, 245, 236, 0.94);
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -38,75 +41,254 @@
       --surface: #2c241b;
       --text-muted: #a89680;
       --border: #3d3327;
+      --bar-bg: rgba(33, 26, 19, 0.94);
     }
   }
   * { box-sizing: border-box; }
+  html {
+    /* 追従バーの下にアンカー先が隠れないようにする */
+    scroll-padding-top: calc(var(--bar-h) + 14px);
+    scroll-behavior: smooth;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
-    line-height: 1.7;
+    line-height: 1.8;
   }
-  main {
-    max-width: 560px;
+
+  /* ===== 追従バー(現在地 + 目次の開閉 + 読み進みバー) ===== */
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--bar-h);
+    background: var(--bar-bg);
+    backdrop-filter: saturate(180%) blur(8px);
+    -webkit-backdrop-filter: saturate(180%) blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .bar__inner {
+    max-width: 856px;
     margin: 0 auto;
-    padding: 24px 20px 48px;
+    height: 100%;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-  header {
+  .bar__home {
+    flex: 0 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: bold;
+    text-decoration: none;
+    padding: 6px 4px;
+  }
+  .bar__home img { flex: none; width: 22px; height: 22px; }
+  .bar__home .t {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* 画面がとても狭いときは、現在地の表示を優先してページ名を畳む */
+  @media (max-width: 379px) {
+    .bar__home .t { display: none; }
+  }
+  .bar__toggle {
+    margin-left: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 38px;
+    max-width: 72%;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--accent-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 1.3;
+    cursor: pointer;
+  }
+  .bar__toggle .label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bar__toggle .caret {
+    flex: none;
+    transition: transform 0.15s;
+  }
+  .bar__toggle[aria-expanded="true"] .caret { transform: rotate(180deg); }
+  .progress {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    height: 3px;
+    width: 0;
+    background: var(--accent);
+    border-radius: 0 3px 3px 0;
+    transition: width 0.08s linear;
+  }
+
+  /* ===== 目次 ===== */
+  .toc {
+    display: none;
+    background: var(--surface);
+  }
+  .toc.is-open {
+    display: block;
+    position: fixed;
+    top: var(--bar-h);
+    left: 0;
+    right: 0;
+    z-index: 45;
+    max-height: calc(100dvh - var(--bar-h));
+    overflow-y: auto;
+    padding: 10px 16px 20px;
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 10px 24px rgba(67, 54, 42, 0.16);
+  }
+  .toc__title {
+    margin: 6px 0 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: var(--text-muted);
+  }
+  .toc__group {
+    margin: 12px 0 2px;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  .toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .toc li { margin: 0; }
+  .toc a {
+    display: block;
+    padding: 7px 10px;
+    border-radius: 8px;
+    border-left: 3px solid transparent;
+    color: var(--accent-ink);
+    font-size: 14px;
+    line-height: 1.5;
+    text-decoration: none;
+  }
+  .toc a:hover { background: var(--bg); }
+  .toc a.is-current {
+    border-left-color: var(--accent);
+    background: var(--bg);
+    font-weight: bold;
+  }
+  .toc__backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 44;
+    background: rgba(67, 54, 42, 0.35);
+  }
+  .toc__backdrop.is-open { display: block; }
+
+  /* ===== 全体レイアウト ===== */
+  .layout {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px 20px 48px;
+  }
+  main { min-width: 0; }
+  header.page {
     text-align: center;
-    padding: 8px 0 4px;
+    padding: 4px 0 0;
   }
-  header img {
-    width: 56px;
-    height: 56px;
-  }
-  header p {
+  header.page img { width: 56px; height: 56px; }
+  header.page p {
     margin: 4px 0 0;
     font-size: 13px;
     color: var(--text-muted);
     font-weight: bold;
   }
   h1 {
-    font-size: 22px;
+    font-size: 24px;
     line-height: 1.5;
-    margin: 16px 0 8px;
+    margin: 14px 0 10px;
   }
   .lead {
     color: var(--text-muted);
     margin: 0 0 8px;
   }
-  .card {
+
+  /* ===== セクション ===== */
+  .sec {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 16px;
-    margin-bottom: 16px;
+    padding: 18px 16px;
+    margin-bottom: 18px;
     box-shadow: 0 1px 3px rgba(67, 54, 42, 0.08);
-    scroll-margin-top: 12px;
   }
-  .card h2 {
-    font-size: 16px;
-    margin: 0 0 8px;
+  .sec > h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 18px;
+    line-height: 1.45;
+    margin: 0 0 10px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
   }
-  .card h3 {
+  .sec__num {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
     font-size: 14px;
-    margin: 18px 0 4px;
+    line-height: 1;
+  }
+  @media (prefers-color-scheme: dark) {
+    .sec__num { color: #211a13; }
+  }
+  .sec h3 {
+    font-size: 15px;
+    line-height: 1.5;
+    margin: 22px 0 6px;
     color: var(--accent-ink);
   }
-  .card p,
-  .card li {
+  .sec h4 {
     font-size: 14px;
+    line-height: 1.5;
+    margin: 16px 0 4px;
+    padding-left: 10px;
+    border-left: 3px solid var(--accent);
   }
-  .card p {
-    margin: 0 0 10px;
-  }
-  .card p:last-child {
-    margin-bottom: 0;
-  }
+  .sec p,
+  .sec li { font-size: 15px; }
+  .sec p { margin: 0 0 10px; }
+  .sec p:last-child { margin-bottom: 0; }
   p.muted {
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 13.5px;
   }
   ul.feature-list,
   ol.steps {
@@ -114,45 +296,34 @@
     padding-left: 1.3em;
   }
   ul.feature-list li,
-  ol.steps li {
-    margin-bottom: 6px;
-  }
+  ol.steps li { margin-bottom: 8px; }
   ul.feature-list li:last-child,
-  ol.steps li:last-child {
-    margin-bottom: 0;
-  }
-  nav.toc ol {
-    margin: 0;
-    padding-left: 1.3em;
-  }
-  nav.toc li {
-    margin-bottom: 4px;
-  }
-  nav.toc a {
-    color: var(--accent-ink);
-    text-decoration: none;
-    font-weight: bold;
-  }
-  /* 実機のスクリーンショット(390x844で撮影。等倍だと縦に長すぎるので幅を決め打ちして並べる) */
+  ol.steps li:last-child { margin-bottom: 0; }
+
+  /* ===== 部分スクリーンショット =====
+     実機(390x844・2倍)から「説明している箇所だけ」を切り出したもの。
+     --w に実寸の半分(CSS px)を入れて等倍で置き、引き伸ばさない */
   figure.shot {
-    margin: 14px 0 16px;
-    text-align: center;
+    margin: 12px 0 16px;
   }
   figure.shot img {
-    width: 232px;
-    max-width: 100%;
+    display: block;
+    width: 100%;
+    max-width: var(--w, 390px);
     height: auto;
+    margin: 0 auto;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     box-shadow: 0 2px 10px rgba(67, 54, 42, 0.12);
     background: var(--surface);
   }
   figure.shot figcaption {
     margin: 6px auto 0;
-    max-width: 340px;
-    font-size: 12px;
+    max-width: 420px;
+    font-size: 12.5px;
     line-height: 1.6;
     color: var(--text-muted);
+    text-align: center;
   }
   .note {
     background: var(--bg);
@@ -160,19 +331,26 @@
     border-left: 4px solid var(--accent);
     border-radius: 10px;
     padding: 12px 14px;
-    font-size: 14px;
+    font-size: 14.5px;
     margin: 0 0 10px;
   }
   .note strong {
     display: block;
     margin-bottom: 4px;
   }
-  .note p:last-child {
-    margin-bottom: 0;
-  }
-  a {
+  .note p:last-child { margin-bottom: 0; }
+  .pro-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
     color: var(--accent-ink);
+    font-size: 11px;
+    font-weight: bold;
+    vertical-align: middle;
   }
+  a { color: var(--accent-ink); }
   code {
     font-size: 13px;
     word-break: break-all;
@@ -208,47 +386,147 @@
     color: var(--text-muted);
     text-decoration: underline;
   }
-  footer span.sep {
-    margin: 0 8px;
+  footer span.sep { margin: 0 8px; }
+  .skip {
+    position: absolute;
+    left: -9999px;
+  }
+  .skip:focus {
+    left: 8px;
+    top: 8px;
+    z-index: 60;
+    background: var(--surface);
+    padding: 8px 12px;
+    border-radius: 8px;
+  }
+
+  /* ===== 画面が広いとき: 目次を左に固定して置く ===== */
+  @media (min-width: 900px) {
+    .layout {
+      /* 1行が長くなりすぎないよう本文の幅は上限を決めて中央に置く */
+      max-width: 900px;
+      display: grid;
+      grid-template-columns: 236px minmax(0, 610px);
+      justify-content: center;
+      gap: 34px;
+    }
+    /* 目次の列は行の高さいっぱいに伸ばす。伸ばさないと、列の下端を過ぎた時点で
+       sticky が効かなくなり目次が画面から消えてしまう */
+    .toc-col { min-width: 0; }
+    .grid-head { max-width: 680px; }
+    .toc,
+    .toc.is-open {
+      display: block;
+      inset: auto;
+      position: sticky;
+      top: calc(var(--bar-h) + 18px);
+      max-height: calc(100dvh - var(--bar-h) - 36px);
+      overflow-y: auto;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: none;
+    }
+    .toc__backdrop.is-open { display: none; }
+    .bar__toggle { display: none; }
+    header.page { text-align: left; }
+    .grid-head { grid-column: 1 / -1; }
+  }
+
+  @media print {
+    .bar, .toc, .toc__backdrop, .cta, .back { display: none !important; }
+    .layout { display: block; max-width: none; }
+    .sec {
+      box-shadow: none;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    body { line-height: 1.6; }
   }
 </style>
 </head>
-<body>
-<main>
-  <header>
-    <img src="/icon.svg" alt="" aria-hidden="true">
-    <p>うちレシピ</p>
-  </header>
+<body id="top">
+<a class="skip" href="#main">本文へ移動</a>
 
-  <h1>うちレシピの使い方</h1>
-  <p class="lead">
-    まず「何ができるアプリか」から始めて、レシピの登録・献立・買い物・調理中の使い方まで、画面に出ている言葉のまま順に説明します。
-    気になるところだけ読んでいただいてかまいません。
-  </p>
-  <p class="muted">画面の写真は実際のアプリのものです（説明用のデータを入れた状態で撮っています）。</p>
+<div class="bar">
+  <div class="bar__inner">
+    <a class="bar__home" href="#top">
+      <img src="/icon.svg" alt="" aria-hidden="true">
+      <span class="t">うちレシピの使い方</span>
+    </a>
+    <button type="button" class="bar__toggle" id="tocToggle" aria-expanded="false" aria-controls="toc">
+      <span class="label" id="tocCurrent">目次</span>
+      <svg class="caret" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+        <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+  <div class="progress" id="progress"></div>
+</div>
+<div class="toc__backdrop" id="tocBackdrop"></div>
 
-  <nav class="card toc" aria-label="目次">
-    <h2>目次</h2>
-    <ol>
-      <li><a href="#start">はじめに（できること・画面の見取り図）</a></li>
-      <li><a href="#register">レシピを登録する</a></li>
-      <li><a href="#starters">収録レシピ（基本レシピ109品）</a></li>
-      <li><a href="#mealplan">献立を立てる</a></li>
-      <li><a href="#nutrition">栄養と食費</a></li>
-      <li><a href="#shopping">買い物メモ</a></li>
-      <li><a href="#pantry">食材の在庫</a></li>
-      <li><a href="#cookmode">調理中モード</a></li>
-      <li><a href="#cooknavi">並行調理ナビ</a></li>
-      <li><a href="#logs">作った記録</a></li>
-      <li><a href="#search">検索・お気に入り・共有</a></li>
-      <li><a href="#backup">バックアップと機種変更</a></li>
-      <li><a href="#pro">無料で使える範囲とPro版</a></li>
-      <li><a href="#trouble">困ったとき</a></li>
-    </ol>
+<div class="layout">
+  <div class="grid-head">
+    <header class="page">
+      <img src="/icon.svg" alt="" aria-hidden="true">
+      <p>うちレシピ</p>
+    </header>
+    <h1>うちレシピの使い方</h1>
+    <p class="lead">
+      まず「何ができるアプリか」から始めて、レシピの登録・献立・買い物・調理中の使い方まで、画面に出ている言葉のまま順に説明します。
+      気になるところだけ読んでいただいてかまいません。
+    </p>
+    <p class="muted">画面の写真は実際のアプリのものです（説明用のデータを入れた状態で、説明している部分だけを切り出しています）。</p>
+  </div>
+
+  <div class="toc-col">
+  <nav class="toc" id="toc" aria-label="目次">
+    <p class="toc__title">目次</p>
+
+    <p class="toc__group">まず知る</p>
+    <ul>
+      <li><a href="#start">1. はじめに（できること・画面の見取り図）</a></li>
+    </ul>
+
+    <p class="toc__group">レシピをためる</p>
+    <ul>
+      <li><a href="#register">2. レシピを登録する</a></li>
+      <li><a href="#starters">3. 収録レシピ（基本レシピ109品）</a></li>
+    </ul>
+
+    <p class="toc__group">献立を決める</p>
+    <ul>
+      <li><a href="#mealplan">4. 献立を立てる</a></li>
+      <li><a href="#nutrition">5. 栄養と食費</a></li>
+    </ul>
+
+    <p class="toc__group">買い物と食材</p>
+    <ul>
+      <li><a href="#shopping">6. 買い物メモ</a></li>
+      <li><a href="#pantry">7. 食材の在庫</a></li>
+    </ul>
+
+    <p class="toc__group">つくる・残す</p>
+    <ul>
+      <li><a href="#cookmode">8. 調理中モード</a></li>
+      <li><a href="#cooknavi">9. 並行調理ナビ</a></li>
+      <li><a href="#logs">10. 作った記録</a></li>
+    </ul>
+
+    <p class="toc__group">探す・渡す・守る</p>
+    <ul>
+      <li><a href="#search">11. 検索・お気に入り・共有</a></li>
+      <li><a href="#backup">12. バックアップと機種変更</a></li>
+      <li><a href="#pro">13. 無料で使える範囲とPro版</a></li>
+      <li><a href="#trouble">14. 困ったとき</a></li>
+    </ul>
   </nav>
+  </div>
 
-  <div class="card" id="start">
-    <h2>1. はじめに（できること・画面の見取り図）</h2>
+  <main id="main">
+
+  <section class="sec" id="start">
+    <h2><span class="sec__num">1</span>はじめに（できること・画面の見取り図）</h2>
     <p>うちレシピは、ブラウザで開いて使うレシピ帳です。会員登録もログインも要りません。開いたその日から使えます。</p>
 
     <h3>このアプリでできること</h3>
@@ -262,13 +540,14 @@
       <li><strong>数字で見る</strong>: 1食あたりのカロリーと野菜量のめやす、献立の概算食費が自動で出ます</li>
     </ul>
 
-    <figure class="shot">
-      <img src="/about/img/manual/home.webp" width="780" height="1688" loading="lazy" alt="ホーム画面。今日の献立、使いたい食材から探す、最近作ったものが上から順に並んでいる">
-      <figcaption>ホーム画面。今日の献立と、最近作ったものが並びます</figcaption>
-    </figure>
-
     <h3>画面の見取り図</h3>
     <p>画面の下に5つのタブがあります。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/nav-tabs.webp" width="780" height="144" loading="lazy" decoding="async" alt="画面の下に並ぶ5つのタブ。左から ホーム・レシピ・献立・食材・設定">
+      <figcaption>画面の下のタブ。いまいる場所がアクセント色で示されます</figcaption>
+    </figure>
+
     <ul class="feature-list">
       <li><strong>ホーム</strong>: 「今日なに作る？」の提案、今日の献立、最近作ったもの</li>
       <li><strong>レシピ</strong>: 登録したレシピの一覧・検索。右下の「＋」から登録</li>
@@ -285,34 +564,55 @@
     <h3>データは端末の中だけに保存されます</h3>
     <p>登録したレシピ・写真・献立・記録・設定は、お使いの端末（ブラウザ）の中だけに保存されます。開発者のサーバーに送られることはありません。そのぶん、端末を変えるときやブラウザのデータを消すときは、ご自身でファイルを書き出して移していただく必要があります（<a href="#backup">バックアップと機種変更</a>）。</p>
     <p class="muted">例外として「URLから取り込む」機能を使ったときだけ、貼り付けたページのURLを読み取り用の変換サーバーへ送ります。送るのはURLだけです。くわしくは<a href="/about/terms.html">プライバシーポリシー</a>をご覧ください。</p>
-  </div>
+  </section>
 
-  <div class="card" id="register">
-    <h2>2. レシピを登録する</h2>
+  <section class="sec" id="register">
+    <h2><span class="sec__num">2</span>レシピを登録する</h2>
     <p>「レシピ」タブの右下の「＋」を押すと登録画面が開きます。入れ方はいくつかあり、どれで入れても同じレシピになります。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/register-form.webp" width="780" height="1688" loading="lazy" alt="レシピ登録画面の「かんたん」タブ。料理名・人数分・料理の種別・材料の入力欄が並んでいる">
-      <figcaption>登録画面。「かんたん」タブの項目だけで保存できます</figcaption>
+    <h3>入力欄は「かんたん」と「くわしく」に分かれています</h3>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/register-tabs.webp" width="780" height="322" loading="lazy" decoding="async" alt="登録画面の上部。「かんたん」と「くわしく」の2つのタブがあり、その下に「料理名」の入力欄が並んでいる">
+      <figcaption>登録画面の上部。タブを押すと入力欄が切り替わります</figcaption>
     </figure>
 
-    <h3>入力欄は「かんたん」と「くわしく」に分かれています</h3>
-    <p>最初に出るのは「かんたん」です。上から順に料理名・人数分・料理の種別・材料・手順・画像があり、<strong>ここだけで保存できます</strong>。</p>
+    <h4>「かんたん」の入力欄</h4>
+    <p>上から順に料理名・人数分・料理の種別・材料・手順・画像があります。<strong>「かんたん」の欄だけでもレシピを保存できます。</strong></p>
     <ul class="feature-list">
-      <li>「くわしく」の項目（ひとこと説明・調理時間・手間レベル・季節・向いている時間帯・タグ・検索キーワード・ワンポイント・メモ・参照元URL）はすべて任意です。何か入れるとタブに●が付きます</li>
       <li>料理名だけは必須で、60文字までです</li>
       <li>「料理の種別」（主菜・副菜・汁物・その他）は料理名から自動で選ばれます。ちがっていたら押して直してください。この種別が、献立の主菜・副菜の自動提案に使われます</li>
     </ul>
 
+    <h4>「くわしく」の入力欄</h4>
+    <p>ひとこと説明・調理時間・手間レベル・季節・向いている時間帯・タグ・検索キーワード・ワンポイント・メモ・参照元URLが入ります。<strong>「くわしく」の項目はすべて任意です。</strong>何か入れるとタブに●が付きます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/register-detail.webp" width="780" height="982" loading="lazy" decoding="async" alt="「くわしく」タブを開いた画面。「このレシピについて」の見出しの下に、ひとこと説明・調理時間・手間レベルの欄が並び、続いて「献立・検索に使う」の見出しがある">
+      <figcaption>「くわしく」タブ。項目は「このレシピについて」「献立・検索に使う」「書き残す」に分かれています</figcaption>
+    </figure>
+
     <h3>手入力する</h3>
+    <p>材料は「名前」「分量」「単位」の3つの欄に分けて入れます。</p>
+
+    <figure class="shot" style="--w:352px">
+      <img src="/about/img/manual/ingredient-rows.webp" width="704" height="472" loading="lazy" decoding="async" alt="材料の入力行。「鶏むね肉」「1」「枚」と3つの欄に分かれて入り、その下に丸いボタン・並べ替えの矢印・削除の×と、材料メモの欄がある">
+      <figcaption>材料1行ぶんの入力欄。左下の丸いボタンが合わせ調味料の色分けです</figcaption>
+    </figure>
+
     <ul class="feature-list">
-      <li>材料は「名前」「分量」「単位」の3つの欄に分けて入れます</li>
       <li>手順は本文と、任意の「分」「手順メモ」です。手順に入れた「分」は、あとで調理中モードのタイマーになります</li>
       <li>材料の丸いボタンをタップすると色がつきます。同じ色の材料は先にまとめて計量してOKという意味です（合わせ調味料）。タップするたびに色が変わり、4色目のあとは色なし（解除）に戻ります</li>
     </ul>
 
     <h3>「まとめて入力」で1行ずつ足す</h3>
     <p>材料欄の「まとめて入力」に <code>豚こま 200g</code> のように書いて「材料に追加」を押すと、名前と分量に分けて足します。分けられなかったときは名前の欄に入るので、そのまま直せます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/bulk-input.webp" width="780" height="288" loading="lazy" decoding="async" alt="材料欄の「まとめて入力」。「例: 豚こま 200g」と書かれた入力欄と「材料に追加」のボタンが並んでいる">
+      <figcaption>「まとめて入力」の欄。書いて「材料に追加」を押します</figcaption>
+    </figure>
+
     <p class="muted">「名前」「分量」「単位」の3つの欄に直接入れる方法も、そのまま使えます。</p>
 
     <h3>文章を貼り付けて自動入力する</h3>
@@ -321,19 +621,26 @@
       <li>レシピの文章を貼って「自動で振り分ける」を押す</li>
       <li>読み取った件数が出るので、中身を確認して直す</li>
     </ol>
-    <p>「材料」「作り方」の見出しや改行のある文章はうまく読み取れます。材料か手順の片方しか読み取れなかったときは、どちらが読み取れなかったかを名指しでお知らせしますので、その分は手で入れてください。結果は必ず確認して直せます。</p>
-    <p class="muted">すでに材料・手順を入力している状態で振り分けると、材料・手順に加え、人数分・調理時間も貼り付けたものに置き換わります。置き換わる前に確認が出ます（料理名・ひとこと説明・メモはそのまま残ります）。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/paste.webp" width="780" height="1688" loading="lazy" alt="テキスト貼り付けで自動入力の画面。貼り付けた文章の下に「材料4件・手順3件を読み取りました」と出ている">
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/paste.webp" width="780" height="604" loading="lazy" decoding="async" alt="テキスト貼り付けの欄。貼り付けた文章の下に「材料4件・手順3件を読み取りました。内容を確認して修正してください」と出ている">
       <figcaption>貼り付けて「自動で振り分ける」を押すと、読み取った件数が出ます</figcaption>
     </figure>
+
+    <p>「材料」「作り方」の見出しや改行のある文章はうまく読み取れます。材料か手順の片方しか読み取れなかったときは、どちらが読み取れなかったかを名指しでお知らせしますので、その分は手で入れてください。結果は必ず確認して直せます。</p>
+    <p class="muted">すでに材料・手順を入力している状態で振り分けると、材料・手順に加え、人数分・調理時間も貼り付けたものに置き換わります。置き換わる前に確認が出ます（料理名・ひとこと説明・メモはそのまま残ります）。</p>
 
     <h3>URLから取り込む</h3>
     <ol class="steps">
       <li>「URLから取り込む」にレシピページのURLを貼る</li>
       <li>「読み込む」を押すと、材料と手順を自動で読み込みます</li>
     </ol>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/url-import.webp" width="780" height="332" loading="lazy" decoding="async" alt="「URLから取り込む」の入力欄と、その下のチェック「写真も取り込む」がONになっている状態">
+      <figcaption>URLを貼る欄。「写真も取り込む」は最初からONです</figcaption>
+    </figure>
+
     <p>レシピのページなら多くのサイトで取り込めます。取り込めるかどうかはページごとに自動で判定します。「写真も取り込む」は最初からONで、取り込んだ写真は自動で縮小されます（1枚あたりおよそ100〜300KB）。サイトによっては写真だけ取り込めないことがあり、そのときはその旨をお知らせします。</p>
     <p class="note">
       <strong>すでに写真を登録しているときはご注意ください</strong>
@@ -344,21 +651,27 @@
 
     <h3>写真とアイコン</h3>
     <p>画像は「カメラで撮る」「アルバムから選ぶ」のほか、「アイコンから選ぶ」で料理カテゴリのアイコンを使えます。アイコンの「自動」は、料理名・材料から自動で選びます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/detail-photo.webp" width="780" height="676" loading="lazy" decoding="async" alt="写真を登録したレシピの詳細画面の上部。料理の写真が大きく出て、その下に料理名「カレーライス」・調理時間・手間レベル・概算の金額が並んでいる">
+      <figcaption>写真を登録すると、詳細画面の上に大きく出ます</figcaption>
+    </figure>
+
     <p class="muted">写真を登録していてもアイコンを出したいときは「写真ではなくアイコンを表示」をONにしてください。</p>
 
     <h3>書きかけは自動で残ります</h3>
     <p>入力中の内容は自動で保存されます。途中で画面を離れても、次に登録画面を開いたときに「書きかけの下書きがあります。復元しますか？」と出るので、「復元する」を押せば続きから書けます。復元せずにそのまま書き続けても、いまの入力は別に自動保存されます。</p>
     <p class="muted">写真は下書きに含まれません。写真は保存し直してください。</p>
-  </div>
+  </section>
 
-  <div class="card" id="starters">
-    <h2>3. 収録レシピ（基本レシピ109品）</h2>
+  <section class="sec" id="starters">
+    <h2><span class="sec__num">3</span>収録レシピ（基本レシピ109品）</h2>
     <p>初めて開いたときに、定番の「基本レシピ」109品が入ります。肉・魚・卵・豆腐の主菜から、副菜・汁物・ご飯もの・おやつ・だしのとり方まで入っています。レシピ一覧では「基本レシピ」のバッジが付きます。</p>
     <p><strong>109品はすべて無料です。</strong>あとから買い足すレシピはありません。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/recipes.webp" width="780" height="1688" loading="lazy" alt="レシピ一覧。カードに料理名・調理時間・主な食材のチップと「基本レシピ」のバッジが付いている">
-      <figcaption>レシピ一覧。「基本レシピ」のバッジが付いているものが収録レシピです</figcaption>
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/recipe-cards.webp" width="780" height="1056" loading="lazy" decoding="async" alt="レシピ一覧のカード4枚。3枚は料理の写真つき、1枚は魚のアイコン。どのカードにも「基本レシピ」のバッジと、料理名・調理時間・手間レベル・主な食材のチップが付いている">
+      <figcaption>レシピ一覧。写真を登録していないレシピは料理カテゴリのアイコンが出ます</figcaption>
     </figure>
 
     <p>基本レシピも自分のレシピと同じように編集・削除できます。設定の「レシピ」にある「基本レシピ」では、次の2つが使えます。</p>
@@ -370,15 +683,28 @@
     <h3>配布されているレシピ集を足す</h3>
     <p>設定の「レシピ」にある「レシピセットを読み込む」で、配布されているレシピ集（JSONファイル）を追加で読み込めます。URLからでも、端末に保存したファイルからでも読み込めます。</p>
     <p class="muted">同じ料理名のレシピはスキップされるので、二重に増えることはありません。</p>
-  </div>
+  </section>
 
-  <div class="card" id="mealplan">
-    <h2>4. 献立を立てる</h2>
+  <section class="sec" id="mealplan">
+    <h2><span class="sec__num">4</span>献立を立てる</h2>
     <p>「献立」タブは上に「日」「週」「月」のタブがあります。今日1食だけ決めたいときは「日」、1週間まとめて決めたいときは「週」です。</p>
-    <p class="muted">1品だけすぐ決めたいときは、ホームの「今日なに作る？」が早いです。「ほかの候補を見る」で次の候補に切り替わり、「条件をしぼる」から「お気に入り」「最近作ってない」「◯分以内」などを選べます。</p>
+
+    <h3>ホームの「今日なに作る？」で1品だけ決める</h3>
+    <p>1品だけすぐ決めたいときは、ホームの「今日なに作る？」が早いです。「ほかの候補を見る」で次の候補に切り替わり、「条件をしぼる」から「お気に入り」「最近作ってない」「◯分以内」などを選べます。</p>
+
+    <figure class="shot" style="--w:370px">
+      <img src="/about/img/manual/home-suggest.webp" width="740" height="668" loading="lazy" decoding="async" alt="ホームの「今日なに作る？」。「条件をしぼる」と「主菜」「在庫の食材から」の絞り込み、提案されたレシピ1品、「ほかの候補を見る」のボタンが並んでいる">
+      <figcaption>ホームの「今日なに作る？」。今日の献立が空のときに出ます</figcaption>
+    </figure>
 
     <h3>「日」タブ: 今日の分だけ決める</h3>
     <p>まだ何も決まっていないときは、2つのボタンが出ます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/plan-day-buttons.webp" width="780" height="316" loading="lazy" decoding="async" alt="献立の「日」タブ。「＋今日の献立を選ぶ」と「おまかせで提案」の2つのボタンが縦に並んでいる">
+      <figcaption>「日」タブ。まだ何も決まっていないときに出る2つのボタン</figcaption>
+    </figure>
+
     <ul class="feature-list">
       <li>「今日の献立を選ぶ」: レシピ一覧へ移り、「今日の献立に追加」で足します</li>
       <li>「おまかせで提案」: 今日の分だけ、主菜と副菜を1品ずつ選びます</li>
@@ -388,9 +714,9 @@
     <h3>「週」タブ: 1週間をまとめて立てる</h3>
     <p>表示は「週区切り」（月曜から日曜まで）と「今日から7日間」から選べます。「表示する食事（朝食・昼食・夕食）」で、使う食事だけを出せます。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/plan-week.webp" width="780" height="1688" loading="lazy" alt="献立の「週」タブ。今日のカードに主菜・副菜が入り、その日の献立ぶんの栄養のめやすを開いた状態">
-      <figcaption>「週」タブ。各日のカードに主菜・副菜と、その日ぶんの栄養のめやすが出ます（開いた8項目の表示はPro版）</figcaption>
+    <figure class="shot" style="--w:370px">
+      <img src="/about/img/manual/plan-week-day.webp" width="740" height="660" loading="lazy" decoding="async" alt="献立の「週」タブの1日ぶんのカード。日付と「今日」の印、夕食の主菜・副菜、料理を追加のボタン、その日の栄養のめやすの行、この日のメモの欄が並んでいる">
+      <figcaption>「週」タブの1日ぶんのカード。サイコロのマークでその行だけ振り直せます</figcaption>
     </figure>
 
     <p><strong>「まとめて献立を立てる」</strong>を押すと、今週のまだ決まっていない日に主菜と副菜をまとめて入れます。</p>
@@ -418,11 +744,13 @@
     <p>「週」タブの「献立表（印刷・画像で保存）」を開くと、その週の献立を1枚にまとめられます。「印刷する」で冷蔵庫に貼る紙にでき、「画像で保存」で家族に送れます。過ぎた日は作った記録、今日から先は登録した献立を載せ、その日のメモも一緒に出ます。</p>
     <p class="muted">1か月分をまとめた献立表は、Pro版の「月」タブから使えます。無料でお使いいただけるのは週の献立表です。</p>
 
-    <h3>「月」タブ: 1か月をカレンダーで見渡す（Pro版）</h3>
-    <figure class="shot">
-      <img src="/about/img/manual/plan-month.webp" width="780" height="1688" loading="lazy" alt="献立の「月」タブ。月ごとの食費と栄養のまとめの下に、日ごとの主菜名が入ったカレンダーが並んでいる">
+    <h3>「月」タブ: 1か月をカレンダーで見渡す<span class="pro-tag">Pro版</span></h3>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/plan-month.webp" width="780" height="580" loading="lazy" decoding="async" alt="献立の「月」タブのカレンダー。日ごとのマスに予定した主菜の名前が入っている">
       <figcaption>「月」タブ。カレンダーの各日に予定した料理が出ます</figcaption>
     </figure>
+
     <ul class="feature-list">
       <li>日付をタップするとその日の献立が窓で開き、そこから直接追加・変更できます</li>
       <li>「未定の日をまとめて提案」で、その月のまだ決まっていない日に主菜と副菜をまとめて入れられます（すでに決まっている献立は上書きせず、<strong>メモを書いた日は入れません</strong>。「外食」と書いた日を献立で埋めないためです）</li>
@@ -438,18 +766,38 @@
       <li>両者が食い違うと「今日の献立と今週の予定が食い違っています」と出て、時間帯を押すとその品を今週の予定に登録できます</li>
       <li>レシピ詳細の「今日の献立に追加」では「どの食事に入れますか？」と聞かれ、朝食・昼食・夕食を選ぶと今週の予定（今日の枠）と今日の献立の両方に入ります。「決めない」を選ぶと今日の献立にだけ入ります</li>
     </ul>
-  </div>
+  </section>
 
-  <div class="card" id="nutrition">
-    <h2>5. 栄養と食費</h2>
+  <section class="sec" id="nutrition">
+    <h2><span class="sec__num">5</span>栄養と食費</h2>
 
     <h3>無料で見られるのはカロリーと野菜量です</h3>
-    <p>レシピ詳細の「栄養価のめやす」の行に、その料理1食あたりのエネルギー（kcal）が出ています。タップすると野菜量（g）や注記も開きます。献立の「週」タブでは、各日のカードと週まとめに「この日の献立ぶん（1人分）」として、約◯kcal・野菜約◯gが出ます。ここまでは無料でお使いいただけます。塩分相当量をふくむ8項目の表示は、Pro版の機能です。</p>
+    <p>レシピ詳細の「栄養価のめやす」の行に、その料理1食あたりのエネルギー（kcal）が出ています。タップすると野菜量（g）や注記も開きます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/nutrition-row.webp" width="780" height="176" loading="lazy" decoding="async" alt="レシピ詳細の「栄養価のめやす（4人分レシピの1食あたり）: 563kcal」の1行。右端に開くための矢印が付いている">
+      <figcaption>レシピ詳細の「栄養価のめやす」の行（無料でお使いいただける表示）</figcaption>
+    </figure>
+
+    <p>献立の「週」タブでは、各日のカードと週まとめに「この日の献立ぶん（1人分）」として、約◯kcal・野菜約◯gが出ます。ここまでは無料でお使いいただけます。塩分相当量をふくむ8項目の表示は、Pro版の機能です。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/plan-week-nutrition-row.webp" width="780" height="128" loading="lazy" decoding="async" alt="献立の「週」タブの1行。「この日の献立ぶん（1人分）: 約264kcal・野菜約178g」と出ている">
+      <figcaption>献立の「週」タブに出る1日ぶんの行（無料でお使いいただける表示）</figcaption>
+    </figure>
+
     <p class="muted">たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウムまで含む8項目の表示はPro版の機能です。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/nutrition.webp" width="780" height="1688" loading="lazy" alt="レシピ詳細の栄養価のめやすを開いた画面。エネルギー・たんぱく質・脂質・炭水化物が1人分と全量で並んでいる">
-      <figcaption>レシピ詳細の「栄養価のめやす」。タップすると内訳が開きます（8項目はPro版）</figcaption>
+    <h3>Pro版で開くと8項目が並びます<span class="pro-tag">Pro版</span></h3>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/nutrition-open.webp" width="780" height="940" loading="lazy" decoding="async" alt="レシピ詳細の栄養価のめやすを開いた画面。エネルギー・たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・食塩相当量・野菜が、1人分と全量の2列で並んでいる">
+      <figcaption>Pro版で開いた「栄養価のめやす」。1人分と全量が並びます</figcaption>
+    </figure>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/plan-week-nutrition-open.webp" width="780" height="800" loading="lazy" decoding="async" alt="献立の「週」タブで栄養のめやすを開いた画面。8項目の下に「1日のめやすとくらべる」として、塩分と野菜の数値がめやすと並べて出ている">
+      <figcaption>献立の栄養パネル。「1日のめやすとくらべる」で数字を並べて出します</figcaption>
     </figure>
 
     <h3>「めやす」の考え方</h3>
@@ -472,21 +820,22 @@
 
     <h3>概算食費</h3>
     <p>献立の「週」タブの「今週の概算食費」に、その週の金額と「◯食分」が出ます。これは<strong>レシピの分量ぜんぶ（登録した人数ぶん）</strong>の金額で、今日から先の予定で計算します（過ぎた日は含みません）。設定で「週の食費予算」を入れておくと、予算との差も出ます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/cost-week.webp" width="780" height="532" loading="lazy" decoding="async" alt="献立の「週」タブの「今週の概算食費」を開いたところ。約4,039円（7食分）と、計算のもとにした期間や「食材と価格を編集する」のリンクが出ている">
+      <figcaption>「今週の概算食費」。何をもとに計算しているかも一緒に出ます</figcaption>
+    </figure>
+
     <p>レシピ詳細では「原価を見る」で材料1行ずつの1食あたりの金額が、「原価を編集」で単価そのものが見られます。金額が乗っていない材料には「価格なし」と出るので、どの材料が金額に反映されていないかが分かります。</p>
 
     <h3>食材と価格を自分の値に直す</h3>
     <p>アプリには最初から食材の<strong>目安価格</strong>が入っているので、何も入力しなくてもほとんどの材料に金額が乗ります。設定の「食材と価格を編集する」から、行をタップして自分の買っている値段に書き換えられます。書き換えるほど概算が実際に近づきます。</p>
     <p class="muted">価格が分からない材料があるときは「価格が分からない材料◯種類を除いた概算です」と出ます。書き換えた行は「デフォルトに戻す」で最初の目安価格に戻せます。</p>
-  </div>
+  </section>
 
-  <div class="card" id="shopping">
-    <h2>6. 買い物メモ</h2>
+  <section class="sec" id="shopping">
+    <h2><span class="sec__num">6</span>買い物メモ</h2>
     <p>「食材」タブの「買い物メモ」を開きます。手で1つずつ足すこともできますが、レシピや献立から作るのが早いです。</p>
-
-    <figure class="shot">
-      <img src="/about/img/manual/shopping.webp" width="780" height="1688" loading="lazy" alt="買い物メモの画面。野菜・魚・肉の順に食材と分量が並び、それぞれにチェックの丸が付いている">
-      <figcaption>買い物メモ。野菜・きのこ → 肉・魚介 …と売り場順に並びます</figcaption>
-    </figure>
 
     <h3>レシピから下書きを作る</h3>
     <ol class="steps">
@@ -501,6 +850,11 @@
     <h3>売り場順に自動で並びます</h3>
     <p>買い物メモは、一般的なスーパーの導線に合わせて「野菜・きのこ → 肉・魚介 → 豆腐・卵・乳 → 主食・粉 → 調味料 → その他」の順に自動で並びます。売り場を行ったり戻ったりしなくてすむように、並べ替えの操作は要りません。</p>
 
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/shopping.webp" width="780" height="1080" loading="lazy" decoding="async" alt="買い物メモの画面。キャベツ・ピーマン・にんにく・玉ねぎ・長ねぎ・しょうがと野菜が続いたあとに豚バラ薄切り肉が並び、売り場順になっている">
+      <figcaption>買い物メモ。野菜・きのこが並んだあとに肉・魚介が来ます</figcaption>
+    </figure>
+
     <h3>買いながらチェックする</h3>
     <p>買ったものをタップしてチェックします。「全部チェック」「チェックを外す」でまとめて操作できます。「✕」で消したものは、その場に出る「元に戻す」で戻せます。</p>
 
@@ -512,18 +866,19 @@
       <li>「あとにする」: いま決めません。チェックは残るので、帰ってから同じ手順で反映できます</li>
     </ul>
     <p class="muted">反映してもしなくても、チェック済みの分は買い物メモから消え、未チェックの分は残ります。件数も確認の文に出ます。</p>
-  </div>
+  </section>
 
-  <div class="card" id="pantry">
-    <h2>7. 食材の在庫</h2>
+  <section class="sec" id="pantry">
+    <h2><span class="sec__num">7</span>食材の在庫</h2>
     <p>「食材」タブの「食材の在庫」です。よく使う食材をタップして「ある→少ない→ない」の3段階を切り替えます。<strong>数は数えず、ざっくりでOK</strong>です。「少ない」は、次の買い物で買うか迷うくらいが目安です。細かい数量までは管理しません。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/pantry.webp" width="780" height="1688" loading="lazy" alt="食材の在庫の画面。肉・魚介、野菜・きのこ、豆腐・卵・乳のグループごとに食材のチップが「ある」「少ない」「ない」の状態で並んでいる">
-      <figcaption>食材の在庫。グループごとに並び、タップで3段階を切り替えます</figcaption>
+    <h3>グループに分かれて並びます</h3>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/pantry.webp" width="780" height="840" loading="lazy" decoding="async" alt="食材の在庫の画面。「肉・魚介」「野菜・きのこ」「豆腐・卵・乳」の見出しごとに、食材名と（ある）（少ない）（ない）が書かれたチップが並んでいる">
+      <figcaption>食材の在庫。見出しごとに並び、タップで3段階を切り替えます</figcaption>
     </figure>
 
-    <h3>グループに分かれて並びます</h3>
     <p>食材は「肉・魚介」「野菜・きのこ」「豆腐・卵・乳」「主食・粉」「調味料」「その他」のグループに自動で振り分けられ、その見出しごとに並びます。振り分けが合わないときは「整理」を押して食材を選び、「選んだ食材をグループへ移動」で移せます。「自動に戻す」を押すと、食材名からの自動振り分けに戻ります。</p>
     <p class="muted">「調味料」に入れた食材は、「作った！」の在庫反映では減りません。</p>
 
@@ -540,14 +895,14 @@
 
     <h3>在庫からレシピを探す</h3>
     <p>在庫を入れておくと、ホームの「在庫の食材から」、レシピ一覧の絞り込み「在庫の食材で絞る」、並べ替えの「在庫との一致が多いレシピ順」が使えます。</p>
-  </div>
+  </section>
 
-  <div class="card" id="cookmode">
-    <h2>8. 調理中モード</h2>
+  <section class="sec" id="cookmode">
+    <h2><span class="sec__num">8</span>調理中モード</h2>
     <p>レシピ詳細の<strong>「調理中モードで見る」</strong>を押すと、手順を1つずつ大きな文字で表示する画面になります。読み上げ・声での操作・タイマーもここで使えます。手が汚れていても進められるように作った画面です。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/cookmode.webp" width="780" height="1688" loading="lazy" alt="調理中モードの画面。手順3/4が大きな文字で表示され、「15分」の時間表記がタイマーのボタンになっている">
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/cookmode.webp" width="780" height="880" loading="lazy" decoding="async" alt="調理中モードの手順表示。丸い「3」の下に手順の本文が大きな文字で出て、「15分」の時間表記がタイマーのボタンになっており、「落としぶた」に点線の下線と用語の説明が付いている">
       <figcaption>調理中モード。手順が1つずつ大きく出ます</figcaption>
     </figure>
 
@@ -563,6 +918,12 @@
 
     <h3>声で操作する</h3>
     <p>右上の「声で操作」を押すと、次の言葉で操作できます。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/cookmode-voice.webp" width="780" height="184" loading="lazy" decoding="async" alt="調理中モードの上部。「手順 3/4」の右に「声で操作」「読み上げ」のボタンが並び、その下に使える言葉の案内が出ている">
+      <figcaption>調理中モードの上部。「声で操作」と「読み上げ」はここにあります</figcaption>
+    </figure>
+
     <ul class="feature-list">
       <li>「次へ」「戻って」: 手順の移動</li>
       <li>「もう一回」: 読み上げ</li>
@@ -579,8 +940,8 @@
     <h3>タイマー</h3>
     <p>手順の文章の中の「10分」のような時間表記はボタンになっています。<strong>タップするとその時間のタイマーが始まります。</strong>時間が本文に出てこない手順には「目安◯分」のボタンが付きます。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/timer.webp" width="780" height="1688" loading="lazy" alt="調理中モードでタイマーが動いている画面。上に残り時間のバー、中央に「タイマーを調整」の窓が開き、−30秒・+1分・停止のボタンが並んでいる">
+    <figure class="shot" style="--w:366px">
+      <img src="/about/img/manual/timer.webp" width="732" height="596" loading="lazy" decoding="async" alt="「タイマーを調整」の窓。料理名と残り時間14:58が大きく出て、「−30秒」「+1分」「停止」のボタンが並んでいる">
       <figcaption>動いているタイマーをタップすると「タイマーを調整」の窓が開きます</figcaption>
     </figure>
 
@@ -594,15 +955,15 @@
 
     <h3>分からない言葉をタップして調べる</h3>
     <p>手順やメモの中の「粗熱」「乱切り」「ささがき」などの調理用語には点線の下線が付いています。<strong>タップすると説明が出ます。</strong>調理中モードでは、その手順に出てくる用語がチップとして並ぶので、そこからも開けます。</p>
-  </div>
+  </section>
 
-  <div class="card" id="cooknavi">
-    <h2>9. 並行調理ナビ</h2>
+  <section class="sec" id="cooknavi">
+    <h2><span class="sec__num">9</span>並行調理ナビ<span class="pro-tag">Pro版</span></h2>
     <p>「献立」タブの「日」で今日の献立に2品以上入れると、その下に<strong>「並行調理ナビ」の入口</strong>が出ます。ここから開き、今日の献立から2〜3品を選んで「段取りを作る」を押すと、<strong>待ち時間の長い工程を先にして、その隙間に別の手作業を差し込んだ「1本の段取り」</strong>を提案します。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/cooknavi.webp" width="780" height="1688" loading="lazy" alt="並行調理ナビの画面。組み合わせる2品と全体の目安時間が出て、手順が番号順に並び「待ち」「手を動かす」の印が付いている">
-      <figcaption>2品を1本の段取りにまとめたところ。「待ち」の間に次の手作業が入ります</figcaption>
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/cooknavi.webp" width="780" height="432" loading="lazy" decoding="async" alt="並行調理ナビの手順。「約1分の待ち時間 この間に、次の手作業を進められます」の帯の下に、次の手順が「肉じゃが」「手を動かす」の印つきで並んでいる">
+      <figcaption>「待ち」の間に、次の手作業の手順が入ります</figcaption>
     </figure>
 
     <p>手順には「待ち」「手を動かす」の区別が付き、待ち時間には「約◯分の待ち時間」「この間に、次の手作業を進められます」と出ます。全体の目安の時間も出ます。</p>
@@ -611,10 +972,10 @@
       アプリの中でもお伝えしていますが、これはあくまで段取りの叩き台（目安）です。火加減や進み具合を見ながら、自分のやりやすい順に調整してください。この通りに進めなくても大丈夫です。
     </p>
     <p class="muted">並行調理ナビはPro版の機能です。未解錠のときは鍵のマークと案内が出ます。</p>
-  </div>
+  </section>
 
-  <div class="card" id="logs">
-    <h2>10. 作った記録</h2>
+  <section class="sec" id="logs">
+    <h2><span class="sec__num">10</span>作った記録</h2>
     <p>レシピ詳細の「作った！」を押すと「作った記録をつける」窓が開きます。記録できるのは次の4つです。</p>
     <ul class="feature-list">
       <li>「日付」（既定は今日。あとから作った日に直せます）</li>
@@ -624,8 +985,8 @@
     </ul>
     <p class="muted">今日の献立に入っている料理を記録すると、その料理は今日の献立から外れます（記録前にその旨を表示します）。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/logs.webp" width="780" height="1688" loading="lazy" alt="作った記録の一覧。月ごとの見出しの下に、料理名・ひとことメモ・日付・人数分が並んでいる">
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/logs.webp" width="780" height="724" loading="lazy" decoding="async" alt="作った記録の一覧。「2026年8月」「2026年7月」と月ごとの見出しの下に、料理のサムネイル・料理名・ひとことメモ・日付・人数分が並んでいる">
       <figcaption>「作った記録」のページ。月ごとに振り返れます</figcaption>
     </figure>
 
@@ -635,25 +996,31 @@
 
     <h3>写真日記のように振り返る</h3>
     <p>写真を添えて記録していくと、献立の「月」タブのカレンダーに写真が並び、その月の食卓の写真日記のように振り返れます。過ぎた日は作った記録だけが残ります。</p>
-    <p class="muted">月のカレンダーはPro版の機能です。</p>
-  </div>
 
-  <div class="card" id="search">
-    <h2>11. 検索・お気に入り・共有</h2>
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/plan-month-photo.webp" width="780" height="580" loading="lazy" decoding="async" alt="献立の「月」タブのカレンダー。作った記録のある日のマスに料理の写真が敷かれ、1か月ぶんが写真日記のように並んでいる">
+      <figcaption>「月」タブのカレンダー。作った記録の写真がその日のマスに入ります</figcaption>
+    </figure>
+
+    <p class="muted">月のカレンダーはPro版の機能です。</p>
+  </section>
+
+  <section class="sec" id="search">
+    <h2><span class="sec__num">11</span>検索・お気に入り・共有</h2>
 
     <h3>かなで書いても見つかります</h3>
     <p>「レシピ」タブ上部の検索欄（「料理名・材料・タグで検索」）は、表記のゆれを吸収します。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/search.webp" width="780" height="726" loading="lazy" decoding="async" alt="レシピ一覧で「たまねぎ」と検索した画面。検索欄の下に「17件 / 全109件」と出て、玉ねぎを使うレシピのカードが並んでいる">
+      <figcaption>「たまねぎ」で検索したところ。「玉ねぎ」の表記でもヒットします</figcaption>
+    </figure>
+
     <ul class="feature-list">
       <li>「タマネギ」「たまねぎ」「玉ねぎ」のどれで打っても同じ食材にたどり着きます</li>
       <li>「しめじ」で探しても「きのこ」で探しても、どちらでも出ます</li>
       <li>「作った！」のひとことメモも検索の対象なので、「子どもが完食」のような手がかりからも引けます</li>
     </ul>
-
-    <figure class="shot">
-      <img src="/about/img/manual/search.webp" width="780" height="1688" loading="lazy" alt="レシピ一覧で「たまねぎ」と検索した画面。17件 / 全109件と出て、玉ねぎを使うレシピのカードが並んでいる">
-      <figcaption>「たまねぎ」で検索したところ。「玉ねぎ」の表記でもヒットします</figcaption>
-    </figure>
-
     <p class="muted">食材名の辞書に無い漢字表記は変換されないことがあります。そのときは、同じ食材を同じ表記で登録しておくと確実です。気づいた食材はご意見箱からお知らせください。</p>
 
     <h3>「タグ」と「検索キーワード」の使い分け</h3>
@@ -678,8 +1045,8 @@
     <h3>共有</h3>
     <p>レシピ詳細の「シェア」を押すと「シェアする内容」の窓が開き、「テキストでシェア」と「画像カードでシェア」を選べます。</p>
 
-    <figure class="shot">
-      <img src="/about/img/manual/share.webp" width="780" height="1688" loading="lazy" alt="「シェアする内容」の窓。レシピ画像・調理時間・原価などのチェック項目と、テキストでシェア・画像カードでシェアのボタンが並んでいる">
+    <figure class="shot" style="--w:366px">
+      <img src="/about/img/manual/share.webp" width="732" height="912" loading="lazy" decoding="async" alt="「シェアする内容」の窓。レシピ画像・調理時間・原価・1食あたりのカロリー・材料をすべて載せる、のチェック項目と、「テキストでシェア」「画像カードでシェア」のボタンが並んでいる">
       <figcaption>「シェアする内容」。入れる項目を選んでから送れます</figcaption>
     </figure>
 
@@ -689,19 +1056,20 @@
       <li>分量は、いま画面で表示している人数分で出ます</li>
     </ul>
     <p><strong>テキストは、受け取った人がうちレシピの「テキスト貼り付けで自動入力」に貼ると、レシピとして取り込めます。</strong>同期の仕組みはありませんが、この形なら家族や友人とレシピを渡し合えます。</p>
-  </div>
+  </section>
 
-  <div class="card" id="backup">
-    <h2>12. バックアップと機種変更</h2>
+  <section class="sec" id="backup">
+    <h2><span class="sec__num">12</span>バックアップと機種変更</h2>
     <p>データは端末の中だけにあります。<strong>ファイルに書き出しておくことが、そのまま引っ越しの準備になります。</strong>設定の「バックアップ」から操作します。</p>
-
-    <figure class="shot">
-      <img src="/about/img/manual/backup.webp" width="780" height="1688" loading="lazy" alt="設定のバックアップ画面。「ファイルに書き出す」のボタンと、「読み込む（今のデータに追加）」「読み込む（今のデータと置き換え）」が並んでいる">
-      <figcaption>設定の「バックアップ」。書き出しと読み込みはここから</figcaption>
-    </figure>
 
     <h3>書き出す</h3>
     <p>「バックアップを取る」の「ファイルに書き出す」で、レシピ・写真・記録・設定を1つのファイルに保存します。設定画面の上には「最終バックアップ: ◯日前」が出ていて、「書き出しへ」を押すと書き出しのカードまで移動します。</p>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/backup-export.webp" width="780" height="376" loading="lazy" decoding="async" alt="設定のバックアップ画面。「「作った記録」の写真もバックアップに含める」のチェック（OFF）と説明文の下に、「ファイルに書き出す」のボタンがある">
+      <figcaption>書き出しのカード。写真を含めるかはチェックで切り替えます</figcaption>
+    </figure>
+
     <p><strong>「「作った記録」の写真もバックアップに含める」は最初はOFFです。</strong>OFFのままだと「作った記録」の写真はファイルに入らず、別の端末では戻せません。記録の写真も移したいときはONにしてから書き出してください。ONにするとファイルは大きくなります（写真1枚あたりおおよそ150〜300KB）。このチェックは書き出すたびにOFFに戻ります。</p>
     <p class="muted">バックアップファイルにはPro版の解錠コードが含まれます。他の人に渡さないでください。</p>
 
@@ -714,6 +1082,12 @@
     </ul>
 
     <h3>読み込む: 「追加」と「置き換え」</h3>
+
+    <figure class="shot" style="--w:390px">
+      <img src="/about/img/manual/backup-import.webp" width="780" height="480" loading="lazy" decoding="async" alt="バックアップの読み込みの2つのボタン。「読み込む（今のデータに追加）」と、赤い枠の「読み込む（今のデータと置き換え）」が並び、それぞれの下に説明が付いている">
+      <figcaption>読み込みは2種類。置き換えのほうは赤い枠で区別しています</figcaption>
+    </figure>
+
     <ul class="feature-list">
       <li><strong>「読み込む（今のデータに追加）」</strong>: 今のデータは1件も消さずに、ファイルの中で今のデータに無いものだけを足します（レシピ・作った記録・お気に入り・写真・在庫・買い物メモ・献立・価格・日付メモ・献立テンプレ）。今あるレシピの内容は書き換えません</li>
       <li><strong>「読み込む（今のデータと置き換え）」</strong>: 今のデータを消して、選んだファイルの内容だけにします。設定（NG食材・テーマ・週の食費予算など）もファイルの内容になります。<strong>Pro版の解錠コードは置き換えでも残ります</strong></li>
@@ -733,10 +1107,10 @@
       3の読み込みは、新しい端末の中身をファイルの内容に置き換えます。新しい端末で先にレシピを登録していた場合は消えるのでご注意ください。今の端末の初期化・下取りは、新しい端末でレシピと「作った記録」が見えることを確かめてからにしてください。
     </p>
     <p class="muted">データは端末ごとに保存されるため、複数の端末で自動同期はされません。同じ手順で、使いたい端末へファイルを移してお使いください。</p>
-  </div>
+  </section>
 
-  <div class="card" id="pro">
-    <h2>13. 無料で使える範囲とPro版</h2>
+  <section class="sec" id="pro">
+    <h2><span class="sec__num">13</span>無料で使える範囲とPro版</h2>
 
     <h3>無料で使えること</h3>
     <ul class="feature-list">
@@ -763,10 +1137,10 @@
       <strong>買い切り版は販売準備中です</strong>
       準備ができましたら、このページと紹介ページでお知らせします。
     </p>
-  </div>
+  </section>
 
-  <div class="card" id="trouble">
-    <h2>14. 困ったとき</h2>
+  <section class="sec" id="trouble">
+    <h2><span class="sec__num">14</span>困ったとき</h2>
 
     <h3>表示がおかしいとき</h3>
     <p>設定の「バックアップ」にある「困ったとき」から、<strong>「アプリの表示を修復する」</strong>が使えます。</p>
@@ -782,7 +1156,7 @@
 
     <h3>それでも解決しないとき</h3>
     <p>使い方のご質問・うまく動かないところ・「こうだったら使いやすい」というご意見は、<a href="https://forms.gle/NcyrQTg1hbgtMMPTA" target="_blank" rel="noopener">ご意見箱</a>からお寄せください。設定の「全般」→「うちレシピについて」にある「ご意見箱」からも開けます。</p>
-  </div>
+  </section>
 
   <a class="cta" href="/">うちレシピを開く</a>
 
@@ -797,7 +1171,97 @@
     <span class="sep">|</span>
     <a href="https://forms.gle/NcyrQTg1hbgtMMPTA" target="_blank" rel="noopener">ご意見箱</a>
   </footer>
-</main>
+  </main>
+</div>
+
+<script>
+(function () {
+  var toc = document.getElementById('toc')
+  var toggle = document.getElementById('tocToggle')
+  var current = document.getElementById('tocCurrent')
+  var backdrop = document.getElementById('tocBackdrop')
+  var progress = document.getElementById('progress')
+  if (!toc || !toggle) return
+
+  var links = Array.prototype.slice.call(toc.querySelectorAll('a[href^="#"]'))
+  var sections = links
+    .map(function (a) {
+      return document.getElementById(a.getAttribute('href').slice(1))
+    })
+    .filter(Boolean)
+
+  // --- 目次の開閉(狭い画面のみ。広い画面ではCSSで常時表示にしている) ---
+  function isPanelMode() {
+    return window.matchMedia('(max-width: 899px)').matches
+  }
+  function openToc() {
+    toc.classList.add('is-open')
+    backdrop.classList.add('is-open')
+    toggle.setAttribute('aria-expanded', 'true')
+  }
+  function closeToc() {
+    toc.classList.remove('is-open')
+    backdrop.classList.remove('is-open')
+    toggle.setAttribute('aria-expanded', 'false')
+  }
+  toggle.addEventListener('click', function () {
+    if (toc.classList.contains('is-open')) closeToc()
+    else openToc()
+  })
+  backdrop.addEventListener('click', closeToc)
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && toc.classList.contains('is-open')) {
+      closeToc()
+      toggle.focus()
+    }
+  })
+  links.forEach(function (a) {
+    a.addEventListener('click', function () {
+      if (isPanelMode()) closeToc()
+    })
+  })
+  window.addEventListener('resize', function () {
+    if (!isPanelMode()) closeToc()
+  })
+
+  // --- 現在地の表示(追従バーの見出し + 目次の強調) ---
+  var activeIndex = -1
+  function setActive(i) {
+    if (i === activeIndex) return
+    activeIndex = i
+    links.forEach(function (a, n) {
+      if (n === i) a.classList.add('is-current')
+      else a.classList.remove('is-current')
+    })
+    current.textContent = i < 0 ? '目次' : links[i].textContent
+  }
+
+  var ticking = false
+  function update() {
+    ticking = false
+    var line = window.scrollY + 76
+    var i = -1
+    for (var n = 0; n < sections.length; n++) {
+      if (sections[n].getBoundingClientRect().top + window.scrollY <= line) i = n
+    }
+    // 最下部まで来たら最後の見出しを現在地にする(短い最終節でも切り替わるように)
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+      i = sections.length - 1
+    }
+    setActive(i)
+    var max = document.documentElement.scrollHeight - window.innerHeight
+    progress.style.width = (max > 0 ? Math.min(100, (window.scrollY / max) * 100) : 0) + '%'
+  }
+  function onScroll() {
+    if (ticking) return
+    ticking = true
+    window.requestAnimationFrame(update)
+  }
+  window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('resize', onScroll)
+  update()
+})()
+</script>
 <!-- Cloudflare Web Analytics -->
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "9386f480590d44cdae47f8526841e1ab"}'></script>
 <!-- End Cloudflare Web Analytics -->
