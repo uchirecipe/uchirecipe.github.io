@@ -6817,15 +6817,15 @@ try {
         `items=${JSON.stringify(tpSaved[0].items)}`,
       )
 
-      // B-2: 月タブで翌月を開き、「金」だけを選んで流し込む
+      // B-2: 月タブで翌月を開き、「金」だけを選んで入れる(便DE-8で「流し込む」→「内容を入れる」に改名)
       await tpPage.getByRole('button', { name: '月', exact: true }).click()
       await tpPage.waitForTimeout(400)
       await tpPage.getByRole('button', { name: '次の月' }).click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByRole('button', { name: 'テンプレを流し込む' }).click()
+      await tpPage.getByRole('button', { name: 'テンプレの内容をこの月に入れる' }).click()
       await tpPage.waitForTimeout(400)
-      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレを流し込む' })
-      check('MEALPLAN-A1B2(B-2) 流し込みの窓が開く', (await tpApplyModal.count()) === 1)
+      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレの内容を入れる' })
+      check('MEALPLAN-A1B2(B-2) テンプレを入れる窓が開く', (await tpApplyModal.count()) === 1)
       check(
         'MEALPLAN-A1B2(B-2) 既定では全曜日が選ばれている(1週間まるごと＝A-1)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 7,
@@ -6839,7 +6839,7 @@ try {
         'MEALPLAN-A1B2(B-2) 曜日を絞れる(金だけを選べる)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 1,
       )
-      await tpApplyModal.getByRole('button', { name: '流し込む' }).click()
+      await tpApplyModal.getByRole('button', { name: '入れる', exact: true }).click()
       await tpPage.waitForTimeout(900)
       check(
         'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
@@ -6881,7 +6881,7 @@ try {
         `count=${tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length}`,
       )
       check(
-        'MEALPLAN-A1B2 流し込んだ枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
+        'MEALPLAN-A1B2 テンプレから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
         tpAfter
           .filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId)
           .every((e) => !e.auto),
@@ -7401,8 +7401,9 @@ try {
     }
   }
 
-  // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
-  // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
+  // --- MEALPLAN-ROLE: 日タブの「レシピ一覧から選択中」と「今週の献立の予定」の並列表示
+  // (2026-08-02 便DE-2で警告＋長い説明文から置き換え)の食事ボタンが、役割(主菜/副菜)の粒度を
+  // 守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
   // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を
   // 押すと夕食の主菜(肉じゃが)が消えていた。副菜は副菜として足され、主菜が残ることを実データで確認する ---
   currentCheck = 'MEALPLAN-ROLE'
@@ -7463,14 +7464,19 @@ try {
       await roPage.waitForTimeout(1200)
       const roBody = (await roPage.textContent('body')) ?? ''
       check(
-        'MEALPLAN-ROLE 前提: 食い違いの案内が出る',
-        roBody.includes('今日の献立と今週の予定が食い違っています'),
+        'MEALPLAN-ROLE(便DE-2) 前提: 2つの中身が左右に並んで出る',
+        roBody.includes('レシピ一覧から選択中') && roBody.includes('今週の献立の予定'),
       )
       check(
-        'MEALPLAN-ROLE 案内文が「主菜になる料理は主菜、副菜になる料理は副菜として入る」ことを説明する',
-        roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り、今ある献立は消えません'),
+        'MEALPLAN-ROLE(便DE-2) 長い説明文と「食い違っています」の警告は出さない',
+        !roBody.includes('今日の献立と今週の予定が食い違っています') &&
+          !roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り'),
       )
-      await roPage.getByRole('button', { name: /夕食.*現在/ }).first().click()
+      check(
+        'MEALPLAN-ROLE(便DE-2) 右側に今週の予定(夕食の肉じゃが)が並ぶ',
+        (await roPage.locator('[data-testid="plan-mismatch"]').textContent())?.includes('肉じゃが'),
+      )
+      await roPage.getByRole('button', { name: '夕食に入れる' }).first().click()
       await roPage.waitForTimeout(700)
       check(
         'MEALPLAN-ROLE どの食事のどの役割に入れたかをトーストで伝える',
@@ -12857,7 +12863,7 @@ try {
       )
       check(
         'DEMO-01 デモには献立を書き換える操作を出さない',
-        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレを流し込む'),
+        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレの内容をこの月に入れる'),
       )
       // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
       await dmPage.getByRole('button', { name: '食費', exact: true }).click()
