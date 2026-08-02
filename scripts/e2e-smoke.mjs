@@ -807,6 +807,16 @@ try {
   await page.waitForTimeout(300)
   const formText = await page.textContent('body')
   check('SMK-04 貼り付け整形の読み取り結果', formText.includes('材料2件・手順2件を読み取りました'))
+  // 2026-08-02 オーナー指示(便DF): 貼り付けでも取り込めたときだけ価格の案内1行＋近道を出す
+  check(
+    'SMK-04(便DF) 貼り付け成功時にも価格の案内1行が出る',
+    formText.includes('調味料をふくむ材料の価格を「食材と価格」に登録すると、食費の概算が正確になります'),
+  )
+  check(
+    'SMK-04(便DF) 貼り付け欄にも「食材と価格」への近道が出る',
+    (await page.locator('a[href="#/prices"]').count()) === 2,
+    `#/pricesリンク数=${await page.locator('a[href="#/prices"]').count()}`,
+  )
   currentCheck = 'SMK-02'
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
@@ -10393,6 +10403,20 @@ try {
           'URLIMPORT-02 成功時に材料2件・手順2件を読み込んだ旨のメッセージが出る',
           importedText.includes('材料2件・手順2件を読み込みました。内容を確認して修正してください'),
         )
+        // 2026-08-02 オーナー指示(便DF): 取り込めたときだけ、調味料をふくむ価格の案内1行と
+        // 「食材と価格」への近道を出す
+        check(
+          'URLIMPORT-02(便DF) 取り込み成功時に価格の案内1行が出る',
+          importedText.includes(
+            '調味料をふくむ材料の価格を「食材と価格」に登録すると、食費の概算が正確になります',
+          ),
+        )
+        // 近道は取り込み欄の中に増える(材料欄の既存リンクとは別に1本増えることで確認する)
+        check(
+          'URLIMPORT-02(便DF) 「食材と価格」への近道が取り込み欄にも出る',
+          (await uiPage.locator('a[href="#/prices"]').count()) === 2,
+          `#/pricesリンク数=${await uiPage.locator('a[href="#/prices"]').count()}`,
+        )
         check(
           'URLIMPORT-02 タイトルが自動入力される',
           (await uiPage.locator('input[placeholder="例: 肉じゃが"]').inputValue()) === 'E2Eモック鍋',
@@ -10526,8 +10550,14 @@ try {
         )
         await uiPage.waitForTimeout(1000)
         check(
-          'URLIMPORT-05 写真も取り込みました、の追記メッセージが出る',
-          (await uiPage.textContent('body')).includes('写真も取り込みました'),
+          'URLIMPORT-05 料理の写真を1枚取り込みました、の追記メッセージが出る',
+          (await uiPage.textContent('body')).includes('料理の写真を1枚取り込みました'),
+        )
+        // 2026-08-02 オーナー指示(便DF): 取り込むのは料理の写真1枚だけで手順の写真は取り込まない。
+        // 「写真も取り込みました」だけだと手順の写真まで入ったと誤解されるため、その場で言い切る
+        check(
+          'URLIMPORT-05(便DF) 手順の写真は取り込まないことを同じ行で伝える',
+          (await uiPage.textContent('body')).includes('（手順の写真は取り込みません）'),
         )
         check(
           'URLIMPORT-05 取り込んだ写真がフォームのプレビューに表示される(アイコンでなくimg)',
@@ -10556,8 +10586,8 @@ try {
         )
         await uiPage.waitForTimeout(1000)
         check(
-          'URLIMPORT-06 チェックOFFなら「写真も取り込みました」の追記メッセージは出ない',
-          !(await uiPage.textContent('body')).includes('写真も取り込みました'),
+          'URLIMPORT-06 チェックOFFなら「料理の写真を1枚取り込みました」の追記メッセージは出ない',
+          !(await uiPage.textContent('body')).includes('料理の写真を1枚取り込みました'),
         )
         check(
           'URLIMPORT-06 チェックOFFなら写真はセットされない(imgが出ずアイコン表示のまま)',
@@ -10656,7 +10686,7 @@ try {
         check(
           'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
           photoFailBody.includes('材料1件・手順1件を読み込みました') &&
-            !photoFailBody.includes('写真も取り込みました'),
+            !photoFailBody.includes('料理の写真を1枚取り込みました'),
         )
 
         // --- URLIMPORT-11(便BX/C07・C08): ゴミ行の除去とグループの引き継ぎ ---
@@ -10784,7 +10814,7 @@ try {
         )
         check(
           'URLIMPORT-14 置き換わった写真は「取り込みました」ではなく「置き換わりました」と伝える',
-          (await uiPage.textContent('body')).includes('写真は読み込んだ写真に置き換わりました'),
+          (await uiPage.textContent('body')).includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
         )
         // 「写真も取り込む」をOFFにすれば写真は守られる。そのことも確認文に書く(規約F「何が残るか」)
         const ckDialogsOff = []
@@ -10811,7 +10841,7 @@ try {
 
         // --- URLIMPORT-15(2026-07-30 便CK/②-2): 連続して取り込んだとき、前のURLの写真が
         // 後から現在の内容の上に着弾しない。従来は「材料は新しいレシピ・写真は前のレシピ」の
-        // 取り合わせで保存でき、「写真も取り込みました」も二重に追記されていた ---
+        // 取り合わせで保存でき、「料理の写真を1枚取り込みました」も二重に追記されていた ---
         currentCheck = 'URLIMPORT-15'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
@@ -10839,9 +10869,9 @@ try {
             .catch(() => false)),
         )
         check(
-          'URLIMPORT-15 「写真も取り込みました」が二重に追記されない',
-          !seqBody.includes('写真も取り込みました') &&
-            !seqBody.includes('写真は読み込んだ写真に置き換わりました'),
+          'URLIMPORT-15 「料理の写真を1枚取り込みました」が二重に追記されない',
+          !seqBody.includes('料理の写真を1枚取り込みました') &&
+            !seqBody.includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
         )
         check(
           'URLIMPORT-15 2回目の取り込み結果は従来どおり出る(結果が消えたりしない)',
