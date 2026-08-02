@@ -123,8 +123,11 @@ import {
   summarizeWeekBalance,
   purposePenalty,
   reviewPurposeDays,
+  riceServingRecipes,
   PURPOSE_NUTRIENT_KEY,
+  RICE_SERVING_RECIPE,
   type BalanceDish,
+  type BalanceRecipeLike,
   type SlotBalance,
 } from '../logic/nutritionBalance'
 import { canUseMonthTrial } from '../logic/proTrial'
@@ -770,7 +773,7 @@ const SLOT_TONE: Record<MealSlot, { bar: string; bg: string }> = {
 function RowThumb({ recipe }: { recipe: Recipe }) {
   const photoUrl = usePhotoUrl(recipe.photo)
   return (
-    <span className="h-7 w-7 shrink-0 overflow-hidden rounded-sm">
+    <span data-testid="row-thumb" className="h-7 w-7 shrink-0 overflow-hidden rounded-sm">
       {photoUrl ? (
         <img src={photoUrl} alt="" className="h-full w-full object-cover" />
       ) : (
@@ -2494,6 +2497,70 @@ export default function MealPlanPage() {
     )
   }
 
+  /**
+   * 「ごはんを含めて計算する」(2026-08-02 便CW-10・オーナー承認。無料・既定OFF)。
+   *
+   * 献立に登録するのはおかずだけ、という使い方が前提なので、本人が選んだときだけ
+   * 各食に「ごはん1杯」を足して栄養と食費を出す。足す条件は次の2つだけ:
+   *  ・その食事(朝食/昼食/夕食)に料理が1品でも入っている
+   *  ・その食事の主菜が一品もの(丼・麺・カレー・鍋)ではない(主食が重なるため)
+   * 数え方は登録した献立と同じで、ごはんの成分値・量・金額は成分表と食材価格マスタから引く
+   * (アプリ側に150gや◯kcalを書き写さない)。
+   */
+  const includeRice = !!settings?.includeRice
+  /**
+   * ごはんを足す食事の「日付|食事」キー(登録した献立から数える。今日以降の日に使う)。
+   * 日ごとの杯数・食事ごとの内訳・週の概算食費は、すべてこの1か所の判定から作る
+   * （同じ「どの食事に足すか」の規則を2か所に書かない）。
+   */
+  const riceSlotKeys = useMemo(() => {
+    const keys = new Set<string>()
+    if (!includeRice) return keys
+    const bySlotKey = new Map<string, MealPlanEntry[]>()
+    ;(entries ?? []).forEach((e) => {
+      const key = `${e.date}|${e.slot}`
+      const list = bySlotKey.get(key)
+      if (list) list.push(e)
+      else bySlotKey.set(key, [e])
+    })
+    bySlotKey.forEach((slotEntries, key) => {
+      const mainRecipe = slotEntries
+        .filter((e) => (e.role ?? 'main') === 'main')
+        .map((e) => recipeById.get(e.recipeId))
+        .find((r): r is Recipe => !!r)
+      // 一品もの(丼・麺・カレー・鍋)が主菜の食事は、主食が重なるので足さない
+      if (mainRecipe && isOneDish(mainRecipe)) return
+      keys.add(key)
+    })
+    return keys
+  }, [includeRice, entries, recipeById])
+  /** 日付→その日に足すごはんの杯数 */
+  const ricePlanServingsByDate = useMemo(() => {
+    const counts = new Map<string, number>()
+    riceSlotKeys.forEach((key) => {
+      const date = key.split('|')[0]
+      counts.set(date, (counts.get(date) ?? 0) + 1)
+    })
+    return counts
+  }, [riceSlotKeys])
+  /**
+   * 日付→その日に足すごはんの杯数(作った記録から数える。過ぎた日に使う)。
+   * 作った記録には食事(朝/昼/夕)の情報が無いため、食事の数では数えられない。
+   * 「主菜になる料理1品＝1食」と見なして数える(副菜だけの記録には足さない)。
+   */
+  const riceActualServingsByDate = useMemo(() => {
+    const counts = new Map<string, number>()
+    if (!includeRice) return counts
+    cookedLogsByDate.forEach((logs, date) => {
+      let n = 0
+      logs.forEach(({ recipe }) => {
+        if (isMainDish(recipe) && !isOneDish(recipe)) n++
+      })
+      if (n > 0) counts.set(date, n)
+    })
+    return counts
+  }, [includeRice, cookedLogsByDate])
+
   // 週の概算食費（材料ごとの価格入力を優先し、未入力の材料は食材価格マスタで補う。docs/20 §3）
   // 集計対象は activeEntries(今日以降)。過去日は週タブに表示されないので金額から辿れない
   // (2026-07-29 便CD/MP-07)。過ぎた分の実績は月タブの「期間の栄養と食費」が担当する
@@ -2501,7 +2568,24 @@ export default function MealPlanPage() {
     () => sumMealPlanEntriesCost(activeEntries, recipeById, priceIndex),
     [activeEntries, recipeById, priceIndex],
   )
-  const weekCost = weekCostEstimate.total
+  /** ごはん1杯ぶんの金額(食材価格マスタから引く。マスタに価格が無ければ0円=足さない) */
+  const riceYen = useMemo(
+    () => estimateRecipeCost(RICE_SERVING_RECIPE.ingredients, priceIndex).total,
+    [priceIndex],
+  )
+  /**
+   * 週の概算食費に足すごはんの杯数。金額の集計範囲(activeEntries=今日以降)に合わせて数える
+   * ＝画面に出ている予定と金額が一致する(2026-07-29 便CD/MP-07と同じ考え方)。
+   */
+  const riceCostServings = useMemo(() => {
+    if (!includeRice) return 0
+    let total = 0
+    ricePlanServingsByDate.forEach((n, date) => {
+      if (!isPastDate(date, today)) total += n
+    })
+    return total
+  }, [includeRice, ricePlanServingsByDate, today])
+  const weekCost = weekCostEstimate.total + riceCostServings * riceYen
   // 概算食費の食数(=食事の回数。主菜+副菜が並ぶ枠も1食。2026-07-24 便BH-3・タスク8「◯食分」併記)
   const weekMealCount = useMemo(() => mealOccasionCount(activeEntries), [activeEntries])
   // 価格が分からない材料の種類数(2026-07-29 便CD/MP-11)。この分は合計に1円も入っていない
@@ -2528,17 +2612,24 @@ export default function MealPlanPage() {
     const list: BalanceDish[] = []
     dates.forEach((date) => {
       cookedLogsByDate.get(date)?.forEach(({ recipe }) => list.push({ date, recipe }))
+      // 「ごはんを含めて計算する」がONのときだけ、その日のごはんを1品として足す(便CW-10)
+      riceServingRecipes(riceActualServingsByDate.get(date) ?? 0).forEach((recipe) =>
+        list.push({ date, recipe }),
+      )
     })
     return list
-  }, [dates, cookedLogsByDate])
+  }, [dates, cookedLogsByDate, riceActualServingsByDate])
   const weekBalancePlanned = useMemo<BalanceDish[]>(() => {
     const list: BalanceDish[] = []
     ;(entries ?? []).forEach((e) => {
       const recipe = recipeById.get(e.recipeId)
       if (recipe) list.push({ date: e.date, recipe })
     })
+    ricePlanServingsByDate.forEach((n, date) => {
+      riceServingRecipes(n).forEach((recipe) => list.push({ date, recipe }))
+    })
     return list
-  }, [entries, recipeById])
+  }, [entries, recipeById, ricePlanServingsByDate])
   const weekBalanceByDate = useMemo(
     () =>
       dayBalanceMap({
@@ -2560,13 +2651,21 @@ export default function MealPlanPage() {
    * （1食だけの日は1日の合計と同じ数字がもう一度並ぶだけになるため）。
    */
   const weekSlotBalanceByDate = useMemo(() => {
-    const byDate = new Map<string, { slot: MealSlot; recipe: Recipe }[]>()
+    const byDate = new Map<string, { slot: MealSlot; recipe: BalanceRecipeLike }[]>()
+    const push = (date: string, slot: MealSlot, recipe: BalanceRecipeLike) => {
+      const list = byDate.get(date)
+      if (list) list.push({ slot, recipe })
+      else byDate.set(date, [{ slot, recipe }])
+    }
     ;(entries ?? []).forEach((e) => {
       const recipe = recipeById.get(e.recipeId)
       if (!recipe) return
-      const list = byDate.get(e.date)
-      if (list) list.push({ slot: e.slot, recipe })
-      else byDate.set(e.date, [{ slot: e.slot, recipe }])
+      push(e.date, e.slot, recipe)
+    })
+    // 「ごはんを含めて計算する」がONなら、足す対象の食事にだけごはんを1品として入れる(便CW-10)
+    riceSlotKeys.forEach((key) => {
+      const [date, slot] = key.split('|')
+      push(date, slot as MealSlot, RICE_SERVING_RECIPE)
     })
     const result = new Map<string, SlotBalance[]>()
     byDate.forEach((dishes, date) => {
@@ -2575,7 +2674,7 @@ export default function MealPlanPage() {
       if (list.length > 1) result.set(date, list)
     })
     return result
-  }, [entries, recipeById, weekBalanceByDate])
+  }, [entries, recipeById, weekBalanceByDate, riceSlotKeys])
 
   const weeklyBudget = settings?.weeklyBudget
   const budgetDiff = weeklyBudget != null ? weeklyBudget - weekCost : undefined
@@ -2740,6 +2839,8 @@ export default function MealPlanPage() {
       // 食事ごとに囲みを付け、左の帯と地色をトークンで段階的に変える(SLOT_TONE)
       <div
         key={slot}
+        data-testid="slot-block"
+        data-slot={slot}
         className="rounded-md border border-l-4 p-[var(--space-sm)]"
         style={{
           background: SLOT_TONE[slot].bg,
@@ -3903,6 +4004,8 @@ export default function MealPlanPage() {
                     dateLabel={date.replaceAll('-', '/')}
                     isPro={isPro}
                     balance={dayBalance.balance}
+                    includeRice={includeRice}
+                    onToggleIncludeRice={(next) => void updateSettings({ includeRice: next })}
                     slotBreakdown={weekSlotBalanceByDate.get(date)}
                   />
                 </div>
@@ -3927,7 +4030,13 @@ export default function MealPlanPage() {
           概算食費カードの隣(すぐ上)に置く: どちらも「この週ぜんぶを振り返る数字」なので同じ場所に集める */}
       {weekBalance.countedDays > 0 && (
         <div className="mt-[var(--space-md)]">
-          <NutritionBalancePanel scope="week" isPro={isPro} balance={weekBalance.balance} />
+          <NutritionBalancePanel
+            scope="week"
+            isPro={isPro}
+            balance={weekBalance.balance}
+            includeRice={includeRice}
+            onToggleIncludeRice={(next) => void updateSettings({ includeRice: next })}
+          />
         </div>
       )}
 
@@ -3960,6 +4069,14 @@ export default function MealPlanPage() {
               </p>
               {/* 何人ぶんの金額かを言い切る(2026-07-30 便CH/C8。月間サマリーの「1人分」と対にする) */}
               <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.weekCostWholeNote}</p>
+              {/* ごはんを含めて計算する(便CW-10)がONのとき、金額に何を足したかを必ず書く */}
+              {riceCostServings > 0 && riceYen > 0 && (
+                <p className="mt-1 text-sm text-ink-muted">
+                  {ja.nutritionBalance.includeRiceCostNote
+                    .replace('{n}', String(riceCostServings))
+                    .replace('{yen}', (riceCostServings * riceYen).toLocaleString())}
+                </p>
+              )}
               {/* どの範囲を数えているか(2026-07-29 便CD/MP-07)。過ぎた日は集計から外したので、
                   黙って数字だけ変えずに範囲を明記する */}
               <p className="mt-1 text-sm text-ink-muted">

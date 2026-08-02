@@ -153,7 +153,10 @@ import {
   guideForDays,
   purposeAxisValue,
   purposePenalty,
+  RICE_SERVING_RECIPE,
   reviewPurposeDays,
+  riceServingGrams,
+  riceServingRecipes,
   slotBalances,
   sumBalance,
   summarizeWeekBalance,
@@ -8650,6 +8653,26 @@ eq(
     Math.round(sumBalance([cabbage, carrot, carrot]).vegetableG),
   )
   eq('CL-SLOT 献立が1件も無ければ空', slotBalances([]).length, 0)
+
+  // (3c) ごはんを含めて計算する(2026-08-02 便CW-10)。量・成分値・金額はすべてマスタ参照で、
+  // アプリ側に数字を書き写していないこと(成分表を直せばここも自動で変わる)を見張る
+  eq('CL-RICE ごはん1杯は成分表の「杯=150g」から引く', riceServingGrams(), 150)
+  const riceSum = sumBalance([RICE_SERVING_RECIPE])
+  eq('CL-RICE ごはん1杯は1品として数える', riceSum.nutrition.dishCount, 1)
+  eq('CL-RICE ごはん1杯のエネルギー(成分表 01088 の156kcal/100g×1.5)', Math.round(riceSum.nutrition.total.kcal), 234)
+  eq('CL-RICE ごはんは野菜量に入らない', Math.round(riceSum.vegetableG), 0)
+  eq('CL-RICE 杯数ぶんの品を作る', riceServingRecipes(3).length, 3)
+  eq('CL-RICE 0杯なら1品も作らない(OFFのときは何も足さない)', riceServingRecipes(0).length, 0)
+  eq(
+    'CL-RICE 2杯足すとエネルギーも2杯ぶん',
+    Math.round(sumBalance(riceServingRecipes(2)).nutrition.total.kcal),
+    468,
+  )
+  eq(
+    'CL-RICE ごはん1杯の金額は食材価格マスタから引く',
+    estimateRecipeCost(RICE_SERVING_RECIPE.ingredients, buildPriceIndex(PRICE_DEFAULTS)).total,
+    30,
+  )
 
   // (4) 計算対象外が混ざる日の作法(docs/60 §5)。1品でもあれば「めやすとの並置」を出さない
   const unknownOnly = one('クヌルプ', '100', 'g') // 1品も計算できない

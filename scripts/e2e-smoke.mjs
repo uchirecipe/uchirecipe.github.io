@@ -55,10 +55,10 @@
 //         LOG-EDIT-PHOTO-01(2026-07-16 便W-①: 既存記録の編集フローからも画像の削除・追加
 //         (差し替え)ができること。削除→保存→サムネ消滅、再編集で追加→保存→サムネ再出現・
 //         圧縮後Blobが新規作成時と同じ形式でIndexedDBに保存されることを確認) /
-//         NUT-01(栄養価のめやす: 未解錠でもエネルギーの概算が閉じた1行から見え、展開すると
+//         NUT-01(栄養価の概算: 未解錠でもエネルギーの概算が閉じた1行から見え、展開すると
 //         野菜量(g)・「めやす」表記・出典・Pro案内リンクが出る。塩分は2026-08-01 線引きB'で
 //         Pro側へ移したので無料側には出ない) /
-//         NUT-02(栄養価のめやす: Pro解錠済みで8項目の実パネルが出る(2026-07-13 第2弾で
+//         NUT-02(栄養価の概算: Pro解錠済みで8項目の実パネルが出る(2026-07-13 第2弾で
 //         食物繊維・鉄・カルシウム+ビタミン注記を追加)・人数を変えても1人分の値は不変。
 //         M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED有効化) /
 //         STEP0-01(手順0件のレシピ・2026-07バグ修正: 手順欄を空のまま保存(steps:[])しても、
@@ -113,7 +113,8 @@
 //         日週月タブのaria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみ
 //         aria-pressed=true)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。
 //         同日更新: 既定が夕食のみになったため夕食を外そうとするパターンで検証)・
-//         「この帯の今週分を空にする」の帯選択+confirm+一括削除(便U-4)) /
+//         「この食事の予定をまとめて消す」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3で
+//         改名+折りたたみ)の折りたたみ開閉・食事選択+confirm+一括削除(手動配置も消える)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
 //         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
 //         その日の献立モーダル(朝昼夕・レシピ名リンク・「この週を開く」・献立なし文言)を出す) /
@@ -249,11 +250,11 @@
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
 //         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
-//         「この日の献立ぶん（1人分）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
-//         週まとめに「この週の献立ぶん（1人分）」が出ること。既定は1行でめやすとの比較は展開時のみ。
+//         「この日の献立（1人分）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
+//         週まとめに「この週の献立（1人分）」が出ること。既定は1行で、めやすの説明は展開時のみ。
 //         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
 //         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
-//         「監修」「推奨」「減塩」を使わないこと・「登録した料理ぶんだけの合計」等の但し書きと
+//         「監修」「推奨」「減塩」を使わないこと・「登録したレシピだけの合計」等の但し書きと
 //         成分値/めやすの出典が別行で出ること。無料では8項目(塩分含む)の実数値が出ず鍵付き導線
 //         (PRO-01の様式)になり、Pro解錠後は8項目の実数値が出て鍵が消えること。野菜量は
 //         docs/60 §7 未決#3(a)で無料。週のめやすは1日ぶん×数えた日数に伸ばすこと) /
@@ -474,22 +475,22 @@ try {
   // --- 合わせ調味料の色ライン(共通説明文の表示) ---
   check('合わせ調味料ヒント表示', detailText.includes('先にまとめて計量してOK'))
 
-  // --- NUT-01: 栄養価のめやす(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
+  // --- NUT-01: 栄養価の概算(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
   // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。
   // 2026-08-01 線引きB'(オーナー確定): 無料で出るのは**エネルギーと野菜量**の2つで、
   // 食塩相当量は残り6項目と同じPro側へ移した。閉じた1行はエネルギーだけ) ---
   currentCheck = 'NUT-01'
-  check('NUT-01 栄養価のめやす見出しが閉じた状態から見える', detailText.includes('栄養価のめやす'))
+  check('NUT-01 栄養価の概算 見出しが閉じた状態から見える', detailText.includes('栄養価の概算'))
   check('NUT-01 エネルギー(kcal)の概算が閉じた1行から見える', /\d+kcal/.test(detailText))
   check(
     "NUT-01(B') 無料の閉じた1行に塩分が出ない",
     !detailText.includes('塩分'),
     '無料の要約行に「塩分」が残っている',
   )
-  await page.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+  await page.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
   await page.waitForTimeout(300)
   const nutExpandedText = await page.textContent('body')
-  check('NUT-01 展開すると断定しない「めやす」表記の注記が出る', nutExpandedText.includes('めやす'))
+  check('NUT-01 展開すると断定しない「概算」表記の注記が出る', nutExpandedText.includes('概算'))
   check('NUT-01 出典表記がある', nutExpandedText.includes('出典'))
   check(
     'NUT-01 未解錠には月間献立と同じ「Pro版について見る」リンクが出る',
@@ -498,7 +499,7 @@ try {
   check(
     'NUT-01 未解錠案内にPro版で増える項目が明記される(2026-07-13 UIペルソナQA・2026-08-01で塩分相当量を追加)',
     nutExpandedText.includes(
-      'Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量のめやすも表示されます',
+      'Pro版では、たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量の概算も表示されます',
     ),
   )
   // 2026-08-01 線引きB': 無料の展開部はエネルギーと野菜量だけ。塩分の数値は出さない
@@ -521,7 +522,7 @@ try {
   // 様式に揃える(同じPro導線なのに画面ごとに表現が3種類あった状態の解消)
   check(
     'NUT-01(便BY PRO-01) 未解錠ティーザーに月間献立と同じLockバッジ「Pro版で使えます」が出る',
-    nutExpandedText.includes('Pro版で使えます') && nutExpandedText.includes('栄養価8項目のめやす'),
+    nutExpandedText.includes('Pro版で使えます') && nutExpandedText.includes('栄養価8項目の概算'),
   )
   const nutBlurCount = await page.evaluate(
     () =>
@@ -542,7 +543,7 @@ try {
     /\d+人分レシピの1食あたり/.test(nutExpandedText),
     `本文に「◯人分レシピの1食あたり」が無い`,
   )
-  await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
+  await page.getByRole('button', { name: '栄養価の概算を閉じる' }).click()
   await page.waitForTimeout(200)
 
   // --- ZENKAKU-01: 全角入力の自動正規化(2026-07-21 オーナー実機報告:「アサリ 300ｇ」の全角ｇだと
@@ -578,8 +579,8 @@ try {
   await page.waitForTimeout(800)
   check('ZENKAKU-01 保存後にレシピ詳細へ遷移する', page.url().includes('#/recipes/'))
   const zenkakuDetailText = await page.textContent('body')
-  check('ZENKAKU-01 栄養価のめやす見出しが見える', zenkakuDetailText.includes('栄養価のめやす'))
-  await page.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+  check('ZENKAKU-01 栄養価の概算 見出しが見える', zenkakuDetailText.includes('栄養価の概算'))
+  await page.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
   await page.waitForTimeout(300)
   const zenkakuNutritionText = await page.textContent('body')
   check(
@@ -587,7 +588,7 @@ try {
     // ラベルは2026-07-28 便BY/NUT-02で「計算対象外 n件」→「計算に含めていない材料 n件」に変更
     !zenkakuNutritionText.includes('計算に含めていない材料'),
   )
-  await page.getByRole('button', { name: '栄養価のめやすを閉じる' }).click()
+  await page.getByRole('button', { name: '栄養価の概算を閉じる' }).click()
   await page.waitForTimeout(200)
 
   // 以降のTERM-01が「肉じゃが」の詳細を開いたままである前提のため、その状態に戻す
@@ -2095,7 +2096,7 @@ try {
     }
   }
 
-  // --- NUT-02: 栄養価のめやす(Pro解錠済み)。5項目の実パネル(たんぱく質・脂質・炭水化物を含む)が
+  // --- NUT-02: 栄養価の概算(Pro解錠済み)。5項目の実パネル(たんぱく質・脂質・炭水化物を含む)が
   // 出ること、人数を変えても「1人分」の値は変わらないこと(全量だけが連動する)を確認する。
   // 実際のPro解錠コード(UR-...)は販売台帳の原本なのでリポジトリにコミットできないため、
   // ここではsettings.proCodeをIndexedDBへ直接書き込んで「解錠済み」状態だけを再現する
@@ -2137,7 +2138,7 @@ try {
       await nutPage.waitForTimeout(800)
       await nutPage.getByText('肉じゃが', { exact: true }).first().click()
       await nutPage.waitForTimeout(600)
-      await nutPage.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+      await nutPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
       await nutPage.waitForTimeout(300)
       const unlockedText = await nutPage.textContent('body')
       check('NUT-02 Pro解錠済みでたんぱく質が表示される', unlockedText.includes('たんぱく質'))
@@ -2149,7 +2150,7 @@ try {
         check(
           'DISC-01 解錠後の「使えるようになった機能」に8項目表の見つけ方が書かれている',
           proSectionText.includes('栄養価の8項目表示') &&
-            proSectionText.includes('レシピを開いて「栄養価のめやす」をタップする'),
+            proSectionText.includes('レシピを開いて「栄養価の概算」をタップする'),
         )
         check(
           // 2026-07-28 便CA: 月タブのボタン名を「期間の栄養と食費」に変えたため、案内文の期待値も更新
@@ -2173,7 +2174,7 @@ try {
         await nutPage.waitForTimeout(600)
         await nutPage.getByText('肉じゃが', { exact: true }).first().click()
         await nutPage.waitForTimeout(600)
-        await nutPage.getByRole('button', { name: '栄養価のめやすを詳しく見る' }).click()
+        await nutPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
         await nutPage.waitForTimeout(300)
       }
       check('NUT-02 Pro解錠済みで脂質が表示される', unlockedText.includes('脂質'))
@@ -3845,8 +3846,16 @@ try {
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
 
-      // 便U-4: 「この帯の今週分を空にする」。ここまでの操作で月曜夕食の主菜行に「肉じゃが」が
-      // 割り当て済み(Fix4)。帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
+      // 便U-4 → 2026-08-02 便CW-3で「この食事の予定をまとめて消す」に改名し、既定閉の
+      // 折りたたみにして週タブのいちばん下へ移した。ここまでの操作で月曜夕食の主菜行に
+      // 「肉じゃが」が割り当て済み(Fix4)。まず畳まれていることを確かめてから開く
+      check(
+        'MEALPLAN-01(便CW-3) 「この食事の予定をまとめて消す」は既定で畳まれている',
+        (await mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' }).count()) === 0,
+      )
+      await mpPage.getByRole('button', { name: 'この食事の予定をまとめて消す' }).click()
+      await mpPage.waitForTimeout(300)
+      // 帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
       // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
       const clearDinnerTargetBtn = mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' })
       check(
@@ -3860,7 +3869,7 @@ try {
         (await mpPage.textContent('body')).includes('夕食のこの週分を'),
       )
       check(
-        'MEALPLAN-01(便U-4) 夕食を空にすると割り当て済みだった「肉じゃが」も消える(未定に戻る)',
+        'MEALPLAN-01(便U-4/便CW-3) 手で選んで入れた「肉じゃが」も消える(改名の根拠になる実挙動)',
         (await mpPage.getByText('肉じゃが', { exact: true }).count()) === 0,
       )
 
@@ -3901,10 +3910,11 @@ try {
 
   // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
   // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
-  // ・週タブの各日カードに「この日の献立ぶん（1人分）」が1行(**無料は kcal・野菜g の2値**)で出ること
-  // ・週まとめに「この週の献立ぶん（1人分）」が同じ構成で出ること
-  // ・展開すると「1日のめやすとくらべる」で**無料は野菜だけ**がめやすと**並置**されること
-  //   (不足・過多の断定をしない=「足りません」「摂りすぎ」の語がどこにも出ないこと)
+  // ・週タブの各日カードに「この日の献立（1人分）」が1行(**無料は kcal・野菜g の2値**)で出ること
+  // ・週まとめに「この週の献立（1人分）」が同じ構成で出ること
+  // ・展開すると1日のめやすが**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
+  //   **無料は野菜350gだけ**で、塩分のめやすはPro側。不足・過多の断定をしない=
+  //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
   // ・成分値の出典と「めやすの出典」が別行で出ること
   // ・**未解錠(無料)では8項目が出ないこと**(たんぱく質・塩分等の実数値が出ず、鍵付き導線になること)
   // 「まとめて献立を立てる」の対象を7日ぶん確実にするため「今日から7日間」表示に切り替えてから行う
@@ -3935,31 +3945,31 @@ try {
       // 何も割り当てていない週にはパネルを出さない(「0kcal」を7日並べない)
       const nbEmptyText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01 未割当時は「この日の献立ぶん」の行が出ない',
-        !nbEmptyText.includes('この日の献立ぶん'),
+        'NUTRI-DAY-01 未割当時は「この日の献立」の行が出ない',
+        !nbEmptyText.includes('この日の献立（1人分）'),
       )
       check(
-        'NUTRI-WEEK-01 未割当時は「この週の献立ぶん」の行も出ない',
-        !nbEmptyText.includes('この週の献立ぶん'),
+        'NUTRI-WEEK-01 未割当時は「この週の献立」の行も出ない',
+        !nbEmptyText.includes('この週の献立（1人分）'),
       )
 
       await nbPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
       await nbPage.waitForTimeout(1200)
       const nbFilledText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立ぶん（1人分）」が出る',
-        nbFilledText.includes('この日の献立ぶん（1人分）'),
+        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立（1人分）」が出る',
+        nbFilledText.includes('この日の献立（1人分）'),
       )
-      const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
+      const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
       check(
         'NUTRI-DAY-01 7日分すべてに折りたたみの栄養行が出る(読み上げ名に日付が入る)',
         (await dayToggles.count()) === 7,
         `count=${await dayToggles.count()}`,
       )
-      // 既定は1行だけ(めやすとの比較は展開時のみ。2026-07-11の「面積を取りすぎる」の再発防止)
+      // 既定は1行だけ(めやすの説明は展開時のみ。2026-07-11の「面積を取りすぎる」の再発防止)
       check(
-        'NUTRI-DAY-01 既定は1行=めやすとの比較は畳まれている',
-        !nbFilledText.includes('1日のめやすとくらべる'),
+        'NUTRI-DAY-01 既定は1行=めやすの説明は畳まれている',
+        !nbFilledText.includes('1日分のめやすは'),
       )
       // 1行の中身(無料): kcal・野菜gの2値。塩分は2026-08-01 線引きB'でPro側へ移した
       check(
@@ -3976,26 +3986,26 @@ try {
         /野菜約[\d,]+g/.test(nbFilledText),
       )
       check(
-        'NUTRI-WEEK-01 週まとめに「この週の献立ぶん（1人分）」が出る',
-        nbFilledText.includes('この週の献立ぶん（1人分）'),
+        'NUTRI-WEEK-01 週まとめに「この週の献立（1人分）」が出る',
+        nbFilledText.includes('この週の献立（1人分）'),
       )
 
-      // 日カードを展開してめやすとの並置・注記・出典・鍵付き導線を確認する
+      // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
       await dayToggles.first().click()
       await nbPage.waitForTimeout(400)
       const nbDayOpenText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01 展開すると「1日のめやすとくらべる」が出る',
-        nbDayOpenText.includes('1日のめやすとくらべる'),
+        'NUTRI-DAY-01(便CW-7) 展開すると1日のめやすが説明文1行で出る(無料は野菜だけ)',
+        nbDayOpenText.includes('1日分のめやすは、野菜350gです。'),
       )
       check(
-        "NUTRI-DAY-01(B') 無料では塩分のめやす並置を出さない(値ごとPro側へ移した)",
-        !/めやす 男性 7\.5g・女性 6\.5g/.test(nbDayOpenText),
+        "NUTRI-DAY-01(B') 無料では塩分のめやすを出さない(値ごとPro側へ移した)",
+        !nbDayOpenText.includes('塩分7.5g（男性）'),
         '無料に塩分のめやすが残っている',
       )
       check(
-        'NUTRI-DAY-01 野菜は350gのめやすと並置する(無料でも出す)',
-        /野菜 [\d,]+g　／　めやす 350g/.test(nbDayOpenText),
+        'NUTRI-DAY-01(便CW-7) 自分の数値とめやすを並べる旧UIは出さない',
+        !nbDayOpenText.includes('めやすとくらべる') && !/　／　めやす /.test(nbDayOpenText),
       )
       check(
         "NUTRI-DAY-01(B') 無料は塩分のめやすを出さないので、その出典も挙げない",
@@ -4019,14 +4029,14 @@ try {
           !nbDayOpenText.includes('減塩'),
       )
       check(
-        'NUTRI-DAY-01(docs/60 §1-3-3) 「登録した料理ぶんだけの合計」の但し書きが出る',
+        'NUTRI-DAY-01(docs/60 §1-3-3・便CW-8) 「登録したレシピだけの合計」の但し書きが出る',
         nbDayOpenText.includes(
-          'ここに出ているのは、献立に登録した料理ぶんだけの合計です（ごはん・飲みもの・おやつ・外食は入っていません）。',
+          'ここに出ているのは、献立に登録したレシピだけの合計です（ごはん・飲みもの・おやつ・外食は入っていません）。',
         ) && nbDayOpenText.includes('3食のうち夕食だけを登録している場合は'),
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-4) 除外分で下限側に出ることの但し書きが出る',
-        nbDayOpenText.includes('実際の値はこのめやすより大きくなります'),
+        nbDayOpenText.includes('実際の値はこの概算より大きくなります'),
       )
       check(
         'NUTRI-DAY-01 野菜の数え方(いも・豆・きのこ・海藻・果物を含まない)を明示する',
@@ -4041,6 +4051,10 @@ try {
         'NUTRI-DAY-01 めやすの適用範囲(治療中・妊娠中は主治医の指示)を1行置く',
         nbDayOpenText.includes('治療中の方・妊娠中の方は、主治医や管理栄養士の指示に従ってください'),
       )
+      check(
+        'NUTRI-DAY-01(便CW-6) 食事ごとの内訳は無料では出さない(Pro限定)',
+        !nbDayOpenText.includes('食事ごとの内訳'),
+      )
       // 無料視点の線引き: 8項目の実数値は出さず、鍵付き導線(PRO-01の様式)にする
       check(
         'NUTRI-DAY-01 未解錠では8項目の実数値が出ない(カルシウムのmg値が無い)',
@@ -4051,30 +4065,76 @@ try {
         !/塩分相当量\s*[\d,.]/.test(nbDayOpenText),
       )
       check(
-        'NUTRI-DAY-01 未解錠では鍵付き導線(Pro版で使えます/栄養価8項目のめやす)になる',
-        nbDayOpenText.includes('Pro版で使えます') && nbDayOpenText.includes('栄養価8項目のめやす'),
+        'NUTRI-DAY-01 未解錠では鍵付き導線(Pro版で使えます/栄養価8項目の概算)になる',
+        nbDayOpenText.includes('Pro版で使えます') && nbDayOpenText.includes('栄養価8項目の概算'),
       )
 
-      // 週まとめを展開: めやすは「1日ぶん×数えた日数」に伸ばす(7日固定では掛けない)
-      await nbPage.getByRole('button', { name: 'この週の栄養のめやすを詳しく見る' }).click()
+      // 週まとめを展開: めやすは日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
+      await nbPage.getByRole('button', { name: 'この週の栄養の概算を詳しく見る' }).click()
       await nbPage.waitForTimeout(400)
       const nbWeekOpenText = await nbPage.textContent('body')
       check(
-        'NUTRI-WEEK-01 週まとめは「7日ぶんのめやすとくらべる」になる',
-        nbWeekOpenText.includes('7日ぶんのめやすとくらべる'),
+        'NUTRI-WEEK-01(便CW-7) 週まとめも1日分のめやすを説明文1行で書く',
+        nbWeekOpenText.includes('1日分のめやすは、野菜350gです。'),
       )
       check(
-        "NUTRI-WEEK-01(B') 週のめやすは1日ぶん×7日(無料は野菜2,450gのみ・塩分はPro側)",
-        /めやす 2,450g/.test(nbWeekOpenText) &&
-          !/めやす 男性 52\.5g・女性 45\.5g/.test(nbWeekOpenText),
-      )
-      check(
-        'NUTRI-WEEK-01 めやすを何日ぶんに伸ばしたかを明示する',
-        nbWeekOpenText.includes('めやすは1日ぶんの数値を、献立や記録がある7日ぶんに伸ばした数です'),
+        'NUTRI-WEEK-01(便CW-7) めやすを日数倍した数字は出さない',
+        !/めやす 2,450g/.test(nbWeekOpenText) &&
+          !nbWeekOpenText.includes('日ぶんに伸ばした数です'),
       )
       check(
         'NUTRI-WEEK-01 週は「過ぎた日は作った記録・今日から先は登録した献立」の基準を明示する',
         nbWeekOpenText.includes('過ぎた日は作った記録、今日から先は登録した献立で計算しています'),
+      )
+
+      // --- 2026-08-02 便CW-10: 「ごはんを含めて計算する」(無料・既定OFF)。
+      // ONにすると各食にごはん1杯ぶんの栄養と食費が足され、選択は設定に残る。
+      // 量(150g)・成分値・金額はマスタ参照なので、ここでは「増えること」と「残ること」を見る
+      const riceCheckbox = nbPage.locator('[data-testid="include-rice"]').first()
+      check(
+        'NUTRI-DAY-01(便CW-10) 「ごはん1杯（150g）を含めて計算する」が展開部に出る(既定OFF)',
+        nbWeekOpenText.includes('ごはん1杯（150g）を含めて計算する') &&
+          (await riceCheckbox.isChecked()) === false,
+      )
+      check(
+        'NUTRI-DAY-10(便CW-10) 何が起きるかの説明(足す食事・足さない食事)を添える',
+        nbWeekOpenText.includes('丼・麺・カレー・鍋のように主食を含む料理が主菜の食事には足しません'),
+      )
+      const kcalNumbers = (text) =>
+        Array.from(text.matchAll(/約([\d,]+)kcal/g)).map((m) => Number(m[1].replace(/,/g, '')))
+      const beforeRiceKcal = kcalNumbers(nbWeekOpenText)
+      // check()ではなくclick(): 表示は設定(IndexedDB)の読み直しで切り替わるため、
+      // クリック直後の同期チェックでは まだ false のまま＝check()が「変わらなかった」と判定する
+      await riceCheckbox.click()
+      await nbPage.waitForTimeout(900)
+      check(
+        'NUTRI-DAY-01(便CW-10) チェックを押すとONになる',
+        await riceCheckbox.isChecked(),
+      )
+      const afterRiceText = await nbPage.textContent('body')
+      const afterRiceKcal = kcalNumbers(afterRiceText)
+      check(
+        'NUTRI-DAY-01(便CW-10) ONにすると週の合計エネルギーが増える(ごはんぶん)',
+        afterRiceKcal.at(-1) > beforeRiceKcal.at(-1),
+        `before=${beforeRiceKcal.at(-1)} after=${afterRiceKcal.at(-1)}`,
+      )
+      // 選択は設定に記憶する(読み込み直しても外れない)
+      await nbPage.reload({ waitUntil: 'networkidle' })
+      await nbPage.waitForTimeout(1200)
+      await nbPage.getByRole('button', { name: '週', exact: true }).click()
+      await nbPage.waitForTimeout(400)
+      await nbPage.getByRole('button', { name: 'この週の栄養の概算を詳しく見る' }).click()
+      await nbPage.waitForTimeout(400)
+      check(
+        'NUTRI-DAY-01(便CW-10) 選択は設定に残る(読み込み直してもONのまま)',
+        await nbPage.locator('[data-testid="include-rice"]').first().isChecked(),
+      )
+      // 食費にも同じ選択が効き、何を足した金額なのかを必ず書く
+      await nbPage.getByRole('button', { name: '今週の概算食費' }).click()
+      await nbPage.waitForTimeout(400)
+      check(
+        'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯ぶんを含めた金額です」を添える',
+        /ごはん\d+杯ぶん（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
       )
     } finally {
       await nbBrowser.close()
@@ -4118,10 +4178,14 @@ try {
       await npPage.waitForTimeout(300)
       await npPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
       await npPage.waitForTimeout(500)
+      // 2026-08-02 便CW-6の「食事ごとの内訳」は2つ以上の食事に献立がある日にだけ出るので、
+      // 既定(夕食のみ)に朝食を足してから献立を立てる
+      await npPage.getByRole('button', { name: '朝食', exact: true }).click()
+      await npPage.waitForTimeout(300)
       await npPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
-      await npPage.waitForTimeout(1200)
+      await npPage.waitForTimeout(1500)
       await npPage
-        .getByRole('button', { name: /^この日（.+）の栄養のめやすを詳しく見る$/ })
+        .getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
         .first()
         .click()
       await npPage.waitForTimeout(400)
@@ -4148,14 +4212,33 @@ try {
         !npOpenText.includes('Pro版で使えます'),
       )
       check(
-        'NUTRI-PRO-01 Pro解錠済みでもめやすは塩分と野菜だけに並置する',
-        /めやす 男性 7\.5g・女性 6\.5g/.test(npOpenText) && /めやす 350g/.test(npOpenText),
+        'NUTRI-PRO-01(便CW-7) Pro解錠済みは塩分と野菜のめやすを説明文1行で出す',
+        npOpenText.includes('1日分のめやすは、塩分7.5g（男性）・6.5g（女性）、野菜350gです。'),
       )
       check(
         "NUTRI-PRO-01(B') 塩分のめやすを出すので、その出典もPro側では挙げる",
         npOpenText.includes(
           'めやすの出典: 日本人の食事摂取基準（2025年版）（厚生労働省）／健康日本21（第三次）（厚生労働省）',
         ),
+      )
+      // 便CW-6: 食事ごとの内訳(Pro)。朝食・夕食の2食に献立があるので小計が2行出る
+      check(
+        'NUTRI-PRO-01(便CW-6) Pro解錠済みは展開部に「食事ごとの内訳（1人分）」が出る',
+        npOpenText.includes('食事ごとの内訳（1人分）'),
+      )
+      const npSlotRows = await npPage
+        .locator('dt', { hasText: /^(朝食|昼食|夕食)$/ })
+        .count()
+      check(
+        'NUTRI-PRO-01(便CW-6) 内訳は献立のある食事の数だけ並ぶ(朝食・夕食の2行)',
+        npSlotRows === 2,
+        `rows=${npSlotRows}`,
+      )
+      // 便CW-10: 「ごはんを含めて計算する」は無料機能だがPro画面にも同じ場所に出る(既定OFF)
+      check(
+        'NUTRI-PRO-01(便CW-10) 「ごはん1杯（150g）を含めて計算する」が既定OFFで出る',
+        npOpenText.includes('ごはん1杯（150g）を含めて計算する') &&
+          (await npPage.locator('[data-testid="include-rice"]').first().isChecked()) === false,
       )
     } finally {
       await npBrowser.close()
@@ -4464,6 +4547,82 @@ try {
       check(
         'MEALPLAN-03(＋料理を追加) 行を追加すると空き枠が1件増える',
         (await mp3Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === afterPairEmptyCount + 1,
+      )
+
+      // --- 2026-08-02 便CW-2: 既定の主菜/副菜の空欄行も×で畳める。畳んでも献立データは
+      // 消えず(空欄行を隠すだけ)、戻すのは既存の「＋料理を追加」→主菜/副菜。
+      // 最後の日(日曜)の空欄行で、閉じる→同じ役割で戻す、が1行ぶんで往復することを確認する
+      const hideBtns = mp3Page.getByRole('button', { name: /の空いている行を閉じる$/ })
+      const beforeHideEmpty = await mp3Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()
+      const beforeHideCount = await hideBtns.count()
+      // 空欄行は「既定の空欄行(×=閉じる)」と「＋料理を追加で増やした行(×=この追加した行をやめる)」の
+      // 2種類。どちらの×も付いていること＝合計が空欄行の数と一致することで確かめる
+      const extraRowCloseCount = await mp3Page
+        .getByRole('button', { name: 'この追加した行をやめる' })
+        .count()
+      check(
+        'MEALPLAN-03(便CW-2) 既定の空欄行にも×(閉じる)が付く',
+        beforeHideCount > 0 && beforeHideCount + extraRowCloseCount === beforeHideEmpty,
+        `close=${beforeHideCount} extra=${extraRowCloseCount} empty=${beforeHideEmpty}`,
+      )
+      const lastHideLabel = await hideBtns.last().getAttribute('aria-label')
+      const hiddenRole = lastHideLabel?.startsWith('主菜') ? '主菜' : '副菜'
+      await hideBtns.last().click()
+      await mp3Page.waitForTimeout(300)
+      check(
+        'MEALPLAN-03(便CW-2) ×を押すとその空欄行だけが畳まれる',
+        (await mp3Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) ===
+          beforeHideEmpty - 1,
+      )
+      // 戻す: 同じ食事の「＋料理を追加」→畳んだ役割。行が2つに増えず、元の1行に戻ること
+      await mp3Page.getByRole('button', { name: '＋料理を追加' }).last().click()
+      await mp3Page.waitForTimeout(200)
+      await mp3Page.getByRole('button', { name: hiddenRole, exact: true }).click()
+      await mp3Page.waitForTimeout(300)
+      check(
+        'MEALPLAN-03(便CW-2) 「＋料理を追加」で畳んだ空欄行が戻る(二重に増えない)',
+        (await mp3Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) ===
+          beforeHideEmpty,
+      )
+
+      // --- 2026-08-02 便CW-1: 朝食/昼食/夕食を1日のカードの中で見分けられること。
+      // 3つの食事を表示にしてから、各ブロックの地色と左帯の色が互いに違うことを見る
+      // (色そのものはテーマトークン依存なので、値ではなく「3つとも違う」ことだけを固定する)
+      await mp3Page.getByRole('button', { name: '朝食', exact: true }).click()
+      await mp3Page.waitForTimeout(200)
+      await mp3Page.getByRole('button', { name: '昼食', exact: true }).click()
+      await mp3Page.waitForTimeout(400)
+      const slotTones = await mp3Page.$$eval('[data-testid="slot-block"]', (els) =>
+        els.slice(0, 3).map((el) => {
+          const cs = getComputedStyle(el)
+          return `${el.getAttribute('data-slot')}|${cs.backgroundColor}|${cs.borderLeftColor}`
+        }),
+      )
+      check(
+        'MEALPLAN-03(便CW-1) 1日のカードに朝食・昼食・夕食の囲みが並ぶ',
+        slotTones.length === 3 &&
+          slotTones.map((t) => t.split('|')[0]).join(',') === 'breakfast,lunch,dinner',
+        slotTones.join(' / '),
+      )
+      check(
+        'MEALPLAN-03(便CW-1) 3つの食事は地色も左帯の色も互いに違う',
+        new Set(slotTones.map((t) => t.split('|')[1])).size === 3 &&
+          new Set(slotTones.map((t) => t.split('|')[2])).size === 3,
+        slotTones.join(' / '),
+      )
+      check(
+        'MEALPLAN-03(便CW-1) 囲みの左帯は0pxではない(区分が見えている)',
+        await mp3Page.$eval(
+          '[data-testid="slot-block"]',
+          (el) => parseFloat(getComputedStyle(el).borderLeftWidth) > 0,
+        ),
+      )
+
+      // --- 2026-08-02 便CW-4: 予定の行に小さなサムネ(写真 or 料理アイコン)が付くこと。
+      // ここまでにサイコロで料理が入っている行があるので、その行から数える
+      check(
+        'MEALPLAN-03(便CW-4) レシピが入っている行にはサムネが付く',
+        (await mp3Page.locator('[data-testid="row-thumb"]').count()) > 0,
       )
     } finally {
       await mp3Browser.close()
@@ -5556,13 +5715,13 @@ try {
           rcFutureText.includes('食物繊維'),
       )
       check(
-        'MEALPLAN-07 摂取栄養は「概算／めやす」表記で出す',
-        rcFutureText.includes('概算') && rcFutureText.includes('めやす'),
+        'MEALPLAN-07 摂取栄養は「概算」表記で出す(2026-08-02 便CW-9で数値側の表記を統一)',
+        rcFutureText.includes('概算'),
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品を、1食ずつ足しためやすです」',
-        rcFutureText.includes('登録した献立2品を、1食ずつ足しためやすです'),
-        `注記=${rcFutureText.match(/.{0,10}1食ずつ足しためやすです/)?.[0]}`,
+        'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品を、1食ずつ足した概算です」',
+        rcFutureText.includes('登録した献立2品を、1食ずつ足した概算です'),
+        `注記=${rcFutureText.match(/.{0,10}1食ずつ足した概算です/)?.[0]}`,
       )
 
       // 終了日<開始日の順にタップしても自動で入れ替わり同じ結果になる
@@ -5620,8 +5779,8 @@ try {
         `全体=${rcPastText.match(/作った記録の食費（作った人数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品を、1食ずつ足しためやすです」',
-        rcPastText.includes('作った記録1品を、1食ずつ足しためやすです'),
+        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品を、1食ずつ足した概算です」',
+        rcPastText.includes('作った記録1品を、1食ずつ足した概算です'),
       )
       // 記録も予定も無い期間は空案内
       await rcDay(`${rcPrevPrefix}-20`).click()
@@ -5658,8 +5817,8 @@ try {
           `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
         )
         check(
-          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品を、1食ずつ足しためやすです」',
-          rcMixedText.includes('作った記録1品と登録した献立1品を、1食ずつ足しためやすです'),
+          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品を、1食ずつ足した概算です」',
+          rcMixedText.includes('作った記録1品と登録した献立1品を、1食ずつ足した概算です'),
         )
         const rcMixedPersonal = Number(
           (rcMixedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
@@ -5731,7 +5890,7 @@ try {
       check(
         'MEALPLAN-07(便CA②) 栄養モードには単位と基準の凡例を添える',
         ((await rcPage.textContent('body')) ?? '').includes(
-          '数字はその日に1人が食べる分のエネルギー（kcal）のめやすです',
+          '数字はその日に1人が食べる分のエネルギー（kcal）の概算です',
         ),
       )
       check(
@@ -5751,7 +5910,7 @@ try {
       check(
         'MEALPLAN-07(便CA②) 食費モードには単位と基準の凡例を添える',
         ((await rcPage.textContent('body')) ?? '').includes(
-          '数字はその日に1人が食べる分の食費のめやすです',
+          '数字はその日に1人が食べる分の食費の概算です',
         ),
       )
 
@@ -6386,8 +6545,8 @@ try {
         `本文=${meBodyAfter.match(/\d+月の\d+日で割ると[^。]{0,30}/)?.[0]}`,
       )
       check(
-        'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにしためやすか)を常設で出す',
-        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算しためやすです'),
+        'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
+        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算した概算です'),
       )
       await mePage.getByRole('button', { name: '内訳を見る' }).click()
       await mePage.waitForTimeout(300)
@@ -8929,8 +9088,8 @@ try {
       await shPage.waitForTimeout(600)
       const copiedNutrition = await shPage.evaluate(() => navigator.clipboard.readText())
       check(
-        "SHARE-01(b-2/B') 無料の栄養行はカロリーだけ(めやす表記は残す)",
-        /1食あたり 約[\d,]+kcal（めやす(・一部の材料を除く)?）/.test(copiedNutrition),
+        "SHARE-01(b-2/B') 無料の栄養行はカロリーだけ(概算表記は残す)",
+        /1食あたり 約[\d,]+kcal（概算(・一部の材料を除く)?）/.test(copiedNutrition),
         copiedNutrition.split('\n').find((l) => l.includes('kcal')) ?? '栄養行なし',
       )
       check(
@@ -11947,8 +12106,8 @@ try {
         `text=${p2ReviewText}`,
       )
       check(
-        'PURPOSE-02 答え合わせに「めやす」と「良し悪しは判定していない」旨が添えられる',
-        p2ReviewText.includes('めやす') && p2ReviewText.includes('判定していません'),
+        'PURPOSE-02 答え合わせに「概算」と「良し悪しは判定していない」旨が添えられる',
+        p2ReviewText.includes('概算') && p2ReviewText.includes('判定していません'),
         `text=${p2ReviewText}`,
       )
     } finally {
@@ -12134,8 +12293,8 @@ try {
         ['解錠コード入力欄の直上', d1UnlockNotice],
       ]) {
         check(
-          `DISCLOSE-01 ${label}に「めやす」であることが書かれている`,
-          text.includes('めやす'),
+          `DISCLOSE-01 ${label}に「概算」であることが書かれている`,
+          text.includes('概算'),
           `text=${text}`,
         )
         check(

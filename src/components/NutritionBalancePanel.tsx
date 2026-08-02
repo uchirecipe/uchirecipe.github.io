@@ -9,6 +9,7 @@ import {
 } from '../logic/nutrition'
 import {
   DAILY_GUIDES,
+  riceServingGrams,
   roundVegetableGrams,
   type BalanceBasis,
   type BalanceSum,
@@ -43,6 +44,8 @@ export default function NutritionBalancePanel({
   dateLabel,
   isPro,
   balance,
+  includeRice,
+  onToggleIncludeRice,
   slotBreakdown,
 }: {
   /** 'day' = 週タブの各日カード / 'week' = 週まとめ */
@@ -53,6 +56,10 @@ export default function NutritionBalancePanel({
   dateLabel?: string
   isPro: boolean
   balance: BalanceSum
+  /** 「ごはんを含めて計算する」の現在値（2026-08-02 便CW-10。無料・既定OFF） */
+  includeRice: boolean
+  /** 同チェックの切り替え（設定に保存する。押した瞬間から日・週・食費の数字に効く） */
+  onToggleIncludeRice: (next: boolean) => void
   /**
    * 食事ごとの小計（2026-08-02 便CW-6。Pro解錠時だけ展開部に出す）。
    * 2つ以上の食事に献立があるときだけ渡す＝1食だけの日は1日の合計と同じ数字になるので出さない。
@@ -148,6 +155,23 @@ export default function NutritionBalancePanel({
             <SlotBreakdown slots={slotBreakdown} />
           )}
           {!unlocked && <ProNutrientTeaser isPro={isPro} />}
+          {/* ごはんを含めて計算する（2026-08-02 便CW-10・無料・既定OFF）。
+              選択は設定に残り、日・週の合計と週の概算食費に同時に効く */}
+          <div className="rounded-md border border-edge p-[var(--space-sm)]">
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={includeRice}
+                onChange={(e) => onToggleIncludeRice(e.target.checked)}
+                data-testid="include-rice"
+                className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--accent)]"
+              />
+              <span className="text-sm font-bold">
+                {ja.nutritionBalance.includeRiceLabel.replace('{g}', String(riceServingGrams()))}
+              </span>
+            </label>
+            <p className="mt-1 text-xs text-ink-muted">{ja.nutritionBalance.includeRiceHint}</p>
+          </div>
           {/* 1日のめやすは説明文1行だけにする（2026-08-02 便CW-7・オーナー指示）。
               自分の数値との並置・良し悪しの判定はしない */}
           {canShowNumbers && <p className="text-xs text-ink-muted">{guideNote}</p>}
@@ -176,7 +200,11 @@ export default function NutritionBalancePanel({
                 )}
               </p>
             )}
-            <p>{ja.nutritionBalance.registeredOnlyNote}</p>
+            <p>
+              {includeRice
+                ? ja.nutritionBalance.registeredOnlyNoteWithRice
+                : ja.nutritionBalance.registeredOnlyNote}
+            </p>
             <p>{ja.nutritionBalance.registeredOnlyMealNote}</p>
             {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
                 （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す） */}

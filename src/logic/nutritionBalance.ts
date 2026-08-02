@@ -178,6 +178,44 @@ export function sumBalance(recipes: BalanceRecipeLike[]): BalanceSum {
   return { nutrition, vegetableG }
 }
 
+// ---------- ごはんを含めて計算する（2026-08-02 便CW-10・オーナー承認。無料・既定OFF） ----------
+
+/**
+ * 「ごはん1杯」を1品として数えるための擬似レシピ（1人分＝1杯）。
+ *
+ * 量も成分値も、日本食品標準成分表の「ご飯」（01088・logic/nutritionData.ts）から
+ * **機械的に**引く。「1杯＝150g」は成分表側の unitGrams が持っている定義で、
+ * ここにも画面にも数字を書き写さない（書き写すと成分表を直したときに片方だけ古くなる）。
+ *
+ * 献立に登録するのは「おかず」だけで、ごはんは登録しない人が大半という前提の機能。
+ * 加えるのは各食1杯だけで、丼・麺・カレーのように主食を含む主菜の食事には加えない
+ * （どの食事に加えるかの判定は、一品ものの定義を持つ献立エンジン側＝呼び出し側が決める）。
+ */
+export const RICE_SERVING_RECIPE: BalanceRecipeLike = {
+  servings: 1,
+  ingredients: [{ name: 'ご飯', amount: '1', unit: '杯' }],
+}
+
+/**
+ * ごはん1杯のグラム数（UI文言に埋める値）。成分表の換算をそのまま使う＝手書きしない。
+ * 名寄せできない・換算できない場合は 0 を返す（そのときUIは量を出さない）。
+ */
+let riceGramsCache: number | undefined
+export function riceServingGrams(): number {
+  if (riceGramsCache != null) return riceGramsCache
+  const nutrition = computeRecipeNutrition(RICE_SERVING_RECIPE)
+  let grams = 0
+  for (const item of nutrition.items) grams += item.grams
+  riceGramsCache = Math.round(grams)
+  return riceGramsCache
+}
+
+/** ごはん{n}杯ぶんの擬似レシピ列（日・週の合計に足し込むために使う） */
+export function riceServingRecipes(servings: number): BalanceRecipeLike[] {
+  const count = Math.max(0, Math.floor(servings))
+  return Array.from({ length: count }, () => RICE_SERVING_RECIPE)
+}
+
 // ---------- めやすとの並置を出してよいかの判定（docs/60 §5） ----------
 
 /**
