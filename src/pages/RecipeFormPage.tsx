@@ -278,6 +278,20 @@ const iconBtnCls =
   'flex h-10 w-10 items-center justify-center rounded-sm border border-edge bg-surface text-ink-muted'
 
 /**
+ * URL取り込み・貼り付けが成功したときだけ、結果メッセージの下に出す合わせ調味料の案内
+ * （2026-08-02 オーナー指示・便DF→司令部で文言差し替え）。「A」「B」等の記号がある
+ * ページからは色分けを自動継承するが、無印のページでは手動で付けてもらう必要がある。
+ * 色分けの設定先は同じ画面の材料行（丸ボタン）なのでリンクは置かない。
+ */
+function ImportSeasoningGuide() {
+  return (
+    <div className="mt-[var(--space-sm)]">
+      <p className="text-sm text-ink-muted">{ja.form.importSeasoningGuide}</p>
+    </div>
+  )
+}
+
+/**
  * 押されたEnterが「日本語入力の変換を確定するEnter」かどうか（2026-08-02 オーナー実機FB
  * 「エンターで行が増えて注力しづらい」の対策）。変換中のEnterで材料行・タグを作ってしまうと、
  * 変換を確定しただけのつもりが勝手に行が増える。
@@ -1611,6 +1625,10 @@ function RecipeFormInner() {
                   {urlImportMessage}
                 </p>
               )}
+              {/* 取り込めたときだけ出す価格の案内(2026-08-02 オーナー指示・便DF)。
+                  取り込んだレシピには調味料まで材料に並ぶが、「食材と価格」に価格が無い食材は
+                  概算食費に入らない。結果メッセージ(info=成功時のみ)の下に1行＋登録先への近道を置く */}
+              {urlImportMessage && urlImportMessageTone === 'info' && <ImportSeasoningGuide />}
               <div className="mt-[var(--space-sm)] flex gap-2">
                 <button
                   type="button"
@@ -1670,6 +1688,8 @@ function RecipeFormInner() {
               {pasteMessage}
             </p>
           )}
+          {/* 貼り付け経路にも同じ案内を出す(2026-08-02 オーナー指示・便DF。URL取り込みと同じ扱い) */}
+          {pasteMessage && pasteMessageTone === 'info' && <ImportSeasoningGuide />}
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"

@@ -199,10 +199,26 @@ export interface TodayListItem {
 export type MealSlot = 'breakfast' | 'lunch' | 'dinner'
 
 /**
- * 献立1品の役割: 主菜/副菜（2026-07-13 献立の主菜+副菜構成対応）。
- * 同じ日×枠に主菜1件+副菜1件（またはそれ以上）を並べて登録できるようにするための区分
+ * 献立1品の役割: 主菜/副菜/汁物/その他（2026-07-13 献立の主菜+副菜構成対応 →
+ * 2026-08-02 便DE-4 オーナー指示で汁物・その他を追加）。
+ * 同じ日×枠に主菜1件+副菜1件（またはそれ以上）を並べて登録できるようにするための区分で、
+ * 区分の名前と並びはレシピ登録の「料理の種別」（DishType・ja.dishType）とそろえてある
+ * （画面ごとに違う言葉で同じ分類を出さない）。
+ *
+ * 自動提案（まとめて献立を立てる・行のサイコロのペア提案）が扱うのは従来どおり主菜と副菜だけ。
+ * 汁物・その他は「＋料理を追加」で自分で足す行で、勝手に増えたり消えたりしない。
  */
-export type MealRole = 'main' | 'side'
+export type MealRole = 'main' | 'side' | 'soup' | 'other'
+
+/** 献立の役割の並び（画面の行順・並べ替えのランクに使う。ja.mealPlan.role と同じ並び） */
+export const MEAL_ROLES: MealRole[] = ['main', 'side', 'soup', 'other']
+
+/**
+ * 自動提案（まとめて献立を立てる・ペア提案）が埋める役割（2026-08-02 便DE-4）。
+ * 汁物・その他は自動で入れない＝planWeekFill が触る役割をここに固定する。
+ */
+export const AUTO_FILL_ROLES = ['main', 'side'] as const
+export type AutoFillRole = (typeof AUTO_FILL_ROLES)[number]
 
 /**
  * 自動提案の「目的」（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Plus,
   X,
+  ChevronLeft,
   Download,
   Save,
   Upload,
@@ -40,6 +41,7 @@ import {
   type MergeImportDetail,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
+import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
 import {
   supportsSaveFilePicker,
@@ -327,6 +329,11 @@ export default function SettingsPage() {
   const [recipeSetMessage, setRecipeSetMessage] = useState('')
   const recipeSetFileRef = useRef<HTMLInputElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
+  // 元のページへの帰り道(2026-08-02 オーナー指示・便DF)。各ページのPro版の説明などから
+  // ?back=<元のパス> 付きで飛んできたときだけ、目次チップの上に「◯◯に戻る」を出す。
+  // 直接この画面を開いた場合(タブから等)は元のページが無いので出さない
+  const backTarget = useMemo(() => resolveBackTarget(searchParams.get('back')), [searchParams])
   // 「購入と解錠」1画面統合(2026-07-17設定ゼロベース裁定#7)。入力欄1つでPro・追加レシピパック
   // 両方のコードを受け付け、種類(UR-/UP-)はdetectCodeKindが自動判定する
   const [unlockCodeInput, setUnlockCodeInput] = useState('')
@@ -918,32 +925,45 @@ export default function SettingsPage() {
           ハイライトする。スクロールしても上部に固定(sticky)。settings-tabbarクラスはindex.cssで
           is-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している。
           タップ領域は44px相当(py-[13px]・2026-07-16 UI総点検A-5から踏襲) */}
-      <nav
-        aria-label={ja.settings.tocLabel}
-        className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
-      >
-        {/* 2026-08-02: 「アプリについて」を独立した節にしたのでチップは5つ。390px幅では
-            1枡およそ68pxになり、text-xs(12px)だと「バックアップ」の6文字が折り返して
-            チップの高さが揃わなくなるため、1px小さくし、字間も詰めて折り返しを止める
-            (端末のフォントが少し広くても2行にならないよう whitespace-nowrap も付ける) */}
-        <div className="grid grid-cols-5 gap-1">
-          {settingsSections.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => scrollToSection(section.id)}
-              aria-current={activeSection === section.id ? 'true' : undefined}
-              className={`overflow-hidden whitespace-nowrap rounded-md border py-[13px] text-[11px] font-bold tracking-tight shadow-sm ${
-                activeSection === section.id
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
-            >
-              {section.label}
-            </button>
-          ))}
-        </div>
-      </nav>
+      <div className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur">
+        {/* 元のページへの帰り道(2026-08-02 オーナー指示・便DF)。Pro版の説明などから
+            設定の該当欄へ飛んできたときだけ出す。目次チップと同じ固定領域に置くので、
+            節へ自動スクロールした後でも画面から消えない */}
+        {backTarget && (
+          <button
+            type="button"
+            data-testid="settings-back"
+            onClick={() => navigate(backTarget.to)}
+            className="mb-2 flex items-center gap-1 rounded-sm py-1 font-bold text-accent-ink"
+          >
+            <ChevronLeft size={22} aria-hidden />
+            {backTarget.label}
+          </button>
+        )}
+        <nav aria-label={ja.settings.tocLabel}>
+          {/* 2026-08-02: 「アプリについて」を独立した節にしたのでチップは5つ。390px幅では
+              1枡およそ68pxになり、text-xs(12px)だと「バックアップ」の6文字が折り返して
+              チップの高さが揃わなくなるため、1px小さくし、字間も詰めて折り返しを止める
+              (端末のフォントが少し広くても2行にならないよう whitespace-nowrap も付ける) */}
+          <div className="grid grid-cols-5 gap-1">
+            {settingsSections.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => scrollToSection(section.id)}
+                aria-current={activeSection === section.id ? 'true' : undefined}
+                className={`overflow-hidden whitespace-nowrap rounded-md border py-[13px] text-[11px] font-bold tracking-tight shadow-sm ${
+                  activeSection === section.id
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-ink-muted'
+                }`}
+              >
+                {section.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+      </div>
 
       {/* バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。目次チップの下・全節共通の常設
           バナー。タップ/[書き出しへ]ボタンのどちらも「バックアップ節の書き出しへ」導く

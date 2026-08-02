@@ -113,7 +113,7 @@
 //         日週月タブのaria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみ
 //         aria-pressed=true)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。
 //         同日更新: 既定が夕食のみになったため夕食を外そうとするパターンで検証)・
-//         「この食事の予定をまとめて消す」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3で
+//         「この週の◯◯をまとめて空にする」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3/DE-12で
 //         改名+折りたたみ)の折りたたみ開閉・食事選択+confirm+一括削除(手動配置も消える)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
 //         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
@@ -255,8 +255,8 @@
 //         残した旨のトーストが出ること。2回押しても手動枠は保護され続けることを確認する) /
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
 //         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
-//         「この日の献立（1人分）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
-//         週まとめに「この週の献立（1人分）」が出ること。既定は1行で、めやすの説明は展開時のみ。
+//         「この日の献立の栄養（1人分の概算）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
+//         週まとめに「この週の献立の栄養（1人分の概算）」が出ること。既定は1行で、めやすの説明は展開時のみ。
 //         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
 //         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
 //         「監修」「推奨」「減塩」を使わないこと・「登録したレシピだけの合計」等の但し書きと
@@ -293,6 +293,9 @@
 //         常時出る(1回だけのお試しとは独立)・押すと見本の1か月分が入った本物の月タブが開き、
 //         写真つきのセル・写真/栄養/食費の切り替え・日の窓が触れる・献立を書き換える操作は出ない・
 //         触ってもIndexedDBが1バイトも変わらない・1回だけのお試しを消費しない・閉じると入口の画面へ戻る) /
+//         SETBACK-01(設定へ飛ばされたあとの帰り道・2026-08-02 便DF: Pro案内から?back=付きで飛び、
+//         設定の目次チップの上に「◯◯に戻る」が出る・節へスクロールした後も見えている・
+//         押すと元のページ(レシピ一覧/レシピ詳細)へ帰る・タブから直接開いた設定には出さない) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -455,8 +458,24 @@ try {
   currentCheck = 'SORTDIR-01'
   const cardTitles = () =>
     page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
+  // 2026-08-02 オーナー指示(便DF): 昇順/降順は件数表記の横の常設ボタンをやめ、並べ替えパネルの
+  // 中へ移した。パネルを開く前は画面に出ていないことを見張る(元の位置に戻ってしまう再発防止)
+  const dirButtonCount = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll('button')).filter((b) =>
+        ['昇順', '降順'].includes(b.textContent?.trim() ?? ''),
+      ).length,
+    )
+  check(
+    'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開く前は昇順/降順ボタンが出ていない',
+    (await dirButtonCount()) === 0,
+  )
   await page.locator('button[aria-label="並び替え"]').click()
   await page.waitForTimeout(300)
+  check(
+    'SORTDIR-01(2026-08-02改定) 並べ替えパネルを開くと昇順/降順ボタンが中に出る',
+    (await dirButtonCount()) === 2,
+  )
   await page.getByRole('button', { name: '五十音順', exact: true }).click()
   await page.waitForTimeout(300)
   const ascActive = await page.evaluate(() => {
@@ -717,13 +736,12 @@ try {
     `現在URL: ${page.url()}`,
   )
 
-  // --- DET-01: 詳細の戻るボタン(2026-07-16オーナー改定)。
-  // 従来(2026-07-10決定): 一覧以外の画面から来た場合でも常に一覧へ戻る
-  // (ブラウザ履歴があると直前の画面に戻ってしまっていた不具合の再発防止)。
-  // 改定(2026-07-16): ホームの候補カード(「今日なに作る?」)発だけは例外でホームへ戻る
-  // (todayList方式の拡張)。それ以外(一覧・直接URL等、履歴/state無し)は従来どおり一覧へ ---
+  // --- DET-01: 詳細の戻るボタン(2026-08-02オーナー指示・同日追補で確定)。
+  // 確定形: ホーム・今日の献立発の例外(2026-07-12・07-16)は残し、出所state無し・
+  // 不明時は必ずレシピ一覧へ(一覧へ行く手段が消える不具合の再発防止)。
+  // (a)=ホーム発は例外どおりホームへ帰る/(b)=state無しの直接URLは一覧へ ---
   currentCheck = 'DET-01'
-  // (a) ホームの候補カードから詳細→戻る→ホーム(#/)へ戻る
+  // (a) ホームの候補カードから詳細→戻る→レシピ一覧(#/recipes)へ
   await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(800)
   await page.locator('a[href^="#/recipes/"]').first().click()
@@ -737,12 +755,12 @@ try {
   await page.getByRole('button', { name: '戻る' }).click()
   await page.waitForTimeout(400)
   check(
-    'DET-01(2026-07-16改定) ホームの候補カード発の戻るはホーム(#/)へ戻る',
-    page.url() === `${BASE}/#/`,
+    'DET-01(2026-08-02追補) ホームの候補カード発の戻るはホームへ帰る(例外復元)',
+    page.url().endsWith('#/') || /#\/$/.test(page.url()),
     `現在URL: ${page.url()}`,
   )
 
-  // (b) 戻り先の保全: 直接URL(ブラウザ履歴なし・state無し)で詳細を開いた場合は従来どおり一覧へ
+  // (b) 戻り先の保全: 直接URL(ブラウザ履歴なし・state無し)で詳細を開いた場合も一覧へ
   await page.goto(det01DetailUrl, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
   await page.getByRole('button', { name: '戻る' }).click()
@@ -790,6 +808,16 @@ try {
   await page.waitForTimeout(300)
   const formText = await page.textContent('body')
   check('SMK-04 貼り付け整形の読み取り結果', formText.includes('材料2件・手順2件を読み取りました'))
+  // 2026-08-02 オーナー指示(便DF→司令部差し替え): 取り込めたときだけ合わせ調味料の案内1行を出す
+  check(
+    'SMK-04(司令部差替) 貼り付け成功時に合わせ調味料の案内1行が出る',
+    formText.includes('合わせ調味料は、材料の丸ボタンで色分けしておくと、調理中モードでまとめて表示されます'),
+  )
+  check(
+    'SMK-04 「食材と価格」への近道は材料欄の1本のみ(案内側のリンクは廃止)',
+    (await page.locator('a[href="#/prices"]').count()) === 1,
+    `#/pricesリンク数=${await page.locator('a[href="#/prices"]').count()}`,
+  )
   currentCheck = 'SMK-02'
   await page.getByRole('button', { name: '保存する' }).click()
   await page.waitForTimeout(800)
@@ -1073,9 +1101,11 @@ try {
     const teaser = links.find((a) => a.textContent?.includes('（Pro機能）'))
     return teaser?.getAttribute('href') ?? null
   })
+  // 2026-08-02 便DF: 行き先は従来どおり設定のPro節で、末尾に戻り先(?back=)が付く
+  // (帰り道の検証はSETBACK-01。ここでは行き先が変わっていないことだけを見る)
   check(
     'NUTSORT-01 ティーザーのタップ先は既存のPro案内(設定のPro節)',
-    teaserHref === '#/settings?section=pro',
+    teaserHref === '#/settings?section=pro&back=%2Frecipes',
     `href=${teaserHref}`,
   )
   // 無料でもカロリー順が実際に使えること(選ぶとカードに「カロリー: ◯kcal」が出る)を確かめる。
@@ -2921,6 +2951,88 @@ try {
     }
   }
 
+  // --- TODAYUNDO-01: 今日の献立の☑(作った)に「元に戻す」を添える(2026-08-02 便DE-3・オーナー指示)。
+  // 押すと行が消えるだけで記録が付いたのか分からず、押し間違いを戻す手段も無かった。
+  // トーストの「元に戻す」で ①今日の日付の記録が1件消える ②その品が今日の献立へ戻る、を実データで確認する ---
+  currentCheck = 'TODAYUNDO-01'
+  {
+    const tuBrowser = await chromium.launch()
+    const tuContext = await tuBrowser.newContext()
+    const tuPage = await tuContext.newPage()
+    tuPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@TODAYUNDO-01] ${err.message}`)
+    })
+    try {
+      await tuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(1800) // 初回シード完了待ち
+      await tuPage.getByText('肉じゃが', { exact: true }).first().click()
+      await tuPage.waitForTimeout(500)
+      await tuPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tuPage.waitForTimeout(300)
+      await tuPage.getByRole('button', { name: '決めない' }).click()
+      await tuPage.waitForTimeout(300)
+
+      await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tuPage.waitForTimeout(800)
+      await tuPage.getByRole('button', { name: '作った', exact: true }).first().click()
+      await tuPage.waitForTimeout(700)
+      const tuAfterCooked = (await tuPage.textContent('body')) ?? ''
+      check(
+        'TODAYUNDO-01 ☑で記録した直後にトーストと「元に戻す」が出る',
+        tuAfterCooked.includes('作った記録をつけました') && tuAfterCooked.includes('元に戻す'),
+      )
+      const readState = () =>
+        tuPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction(['recipes', 'todayList'], 'readonly')
+                let recipes, today
+                const rq = tx.objectStore('recipes').getAll()
+                const tq = tx.objectStore('todayList').getAll()
+                rq.onsuccess = () => {
+                  recipes = rq.result
+                  if (today !== undefined) resolve({ recipes, today })
+                }
+                tq.onsuccess = () => {
+                  today = tq.result
+                  if (recipes !== undefined) resolve({ recipes, today })
+                }
+                rq.onerror = () => reject(rq.error)
+                tq.onerror = () => reject(tq.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      const tuCooked = await readState()
+      const tuNikujaga = tuCooked.recipes.find((r) => r.title === '肉じゃが')
+      check('TODAYUNDO-01 前提: 記録が1件付き、今日の献立から消える', 
+        (tuNikujaga?.cookedLogs?.length ?? 0) === 1 && tuCooked.today.length === 0)
+
+      await tuPage.getByRole('button', { name: '元に戻す' }).click()
+      await tuPage.waitForTimeout(800)
+      const tuUndone = await readState()
+      const tuNikujaga2 = tuUndone.recipes.find((r) => r.title === '肉じゃが')
+      check(
+        'TODAYUNDO-01 「元に戻す」で作った記録が消える',
+        (tuNikujaga2?.cookedLogs?.length ?? 0) === 0,
+        `logs=${JSON.stringify(tuNikujaga2?.cookedLogs ?? [])}`,
+      )
+      check(
+        'TODAYUNDO-01 「元に戻す」でその品が今日の献立へ戻る',
+        tuUndone.today.length === 1 && tuUndone.today[0].recipeId === tuNikujaga2?.id,
+      )
+      check(
+        'TODAYUNDO-01 取り消したことを結果メッセージで伝える',
+        ((await tuPage.textContent('body')) ?? '').includes('作った記録を取り消して、今日の献立に戻しました'),
+      )
+    } finally {
+      await tuBrowser.close()
+    }
+  }
+
   // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
   // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
   // 「日」タブへ固定される(2026-07-16 便U-1でタブ構成に再設計。以前はスクロール制御だったが、
@@ -3895,7 +4007,7 @@ try {
       )
       await suggestConditionsToggleBtn.click()
       await mpPage.waitForTimeout(200)
-      const quickToggleBtn = mpPage.getByRole('button', { name: '自動提案は時短レシピ優先' })
+      const quickToggleBtn = mpPage.getByRole('button', { name: '調理時間15分以内を優先' })
       check('MEALPLAN-01(Fix5) 時短優先トグルは既定でaria-pressed=false', (await quickToggleBtn.getAttribute('aria-pressed')) === 'false')
       await quickToggleBtn.click()
       await mpPage.waitForTimeout(200)
@@ -3936,14 +4048,14 @@ try {
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
 
-      // 便U-4 → 2026-08-02 便CW-3で「この食事の予定をまとめて消す」に改名し、既定閉の
+      // 便U-4 → 便CW-3 → 2026-08-02 便DE-12で「この週の◯◯をまとめて空にする」に改名し、既定閉の
       // 折りたたみにして週タブのいちばん下へ移した。ここまでの操作で月曜夕食の主菜行に
       // 「肉じゃが」が割り当て済み(Fix4)。まず畳まれていることを確かめてから開く
       check(
-        'MEALPLAN-01(便CW-3) 「この食事の予定をまとめて消す」は既定で畳まれている',
+        'MEALPLAN-01(便CW-3/DE-12) 「この週の夕食をまとめて空にする」は既定で畳まれている',
         (await mpPage.getByRole('button', { name: '空にする食事として夕食を選ぶ' }).count()) === 0,
       )
-      await mpPage.getByRole('button', { name: 'この食事の予定をまとめて消す' }).click()
+      await mpPage.getByRole('button', { name: 'この週の夕食をまとめて空にする' }).click()
       await mpPage.waitForTimeout(300)
       // 帯選択は既定で「夕食」なので、選び直しは不要にconfirmだけ操作する。
       // aria-labelで対象の帯選択ボタン(表示帯フィルタの「夕食」ボタンとは別物)を特定する
@@ -4000,8 +4112,8 @@ try {
 
   // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
   // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
-  // ・週タブの各日カードに「この日の献立（1人分）」が1行(**無料は kcal・野菜g の2値**)で出ること
-  // ・週まとめに「この週の献立（1人分）」が同じ構成で出ること
+  // ・週タブの各日カードに「この日の献立の栄養（1人分の概算）」が1行(**無料は kcal・野菜g の2値**)で出ること
+  // ・週まとめに「この週の献立の栄養（1人分の概算）」が同じ構成で出ること
   // ・展開すると1日のめやすが**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
   //   **無料は野菜350gだけ**で、塩分のめやすはPro側。不足・過多の断定をしない=
   //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
@@ -4036,19 +4148,19 @@ try {
       const nbEmptyText = await nbPage.textContent('body')
       check(
         'NUTRI-DAY-01 未割当時は「この日の献立」の行が出ない',
-        !nbEmptyText.includes('この日の献立（1人分）'),
+        !nbEmptyText.includes('この日の献立の栄養（1人分の概算）'),
       )
       check(
         'NUTRI-WEEK-01 未割当時は「この週の献立」の行も出ない',
-        !nbEmptyText.includes('この週の献立（1人分）'),
+        !nbEmptyText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
       await nbPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
       await nbPage.waitForTimeout(1200)
       const nbFilledText = await nbPage.textContent('body')
       check(
-        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立（1人分）」が出る',
-        nbFilledText.includes('この日の献立（1人分）'),
+        'NUTRI-DAY-01 献立を入れると各日カードに「この日の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('この日の献立の栄養（1人分の概算）'),
       )
       const dayToggles = nbPage.getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
       check(
@@ -4076,8 +4188,8 @@ try {
         /野菜約[\d,]+g/.test(nbFilledText),
       )
       check(
-        'NUTRI-WEEK-01 週まとめに「この週の献立（1人分）」が出る',
-        nbFilledText.includes('この週の献立（1人分）'),
+        'NUTRI-WEEK-01 週まとめに「この週の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
       // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
@@ -6817,15 +6929,15 @@ try {
         `items=${JSON.stringify(tpSaved[0].items)}`,
       )
 
-      // B-2: 月タブで翌月を開き、「金」だけを選んで流し込む
+      // B-2: 月タブで翌月を開き、「金」だけを選んで入れる(便DE-8で「流し込む」→「内容を入れる」に改名)
       await tpPage.getByRole('button', { name: '月', exact: true }).click()
       await tpPage.waitForTimeout(400)
       await tpPage.getByRole('button', { name: '次の月' }).click()
       await tpPage.waitForTimeout(500)
-      await tpPage.getByRole('button', { name: 'テンプレを流し込む' }).click()
+      await tpPage.getByRole('button', { name: 'テンプレの内容をこの月に入れる' }).click()
       await tpPage.waitForTimeout(400)
-      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレを流し込む' })
-      check('MEALPLAN-A1B2(B-2) 流し込みの窓が開く', (await tpApplyModal.count()) === 1)
+      const tpApplyModal = tpPage.getByRole('dialog', { name: 'テンプレの内容を入れる' })
+      check('MEALPLAN-A1B2(B-2) テンプレを入れる窓が開く', (await tpApplyModal.count()) === 1)
       check(
         'MEALPLAN-A1B2(B-2) 既定では全曜日が選ばれている(1週間まるごと＝A-1)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 7,
@@ -6839,7 +6951,7 @@ try {
         'MEALPLAN-A1B2(B-2) 曜日を絞れる(金だけを選べる)',
         (await tpApplyModal.locator('button[data-dow][aria-pressed="true"]').count()) === 1,
       )
-      await tpApplyModal.getByRole('button', { name: '流し込む' }).click()
+      await tpApplyModal.getByRole('button', { name: '入れる', exact: true }).click()
       await tpPage.waitForTimeout(900)
       check(
         'MEALPLAN-A1B2(規約F) 確認文に「何品が入るか」と「何が消えないか」が両方ある',
@@ -6881,7 +6993,7 @@ try {
         `count=${tpAfter.filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.sideId).length}`,
       )
       check(
-        'MEALPLAN-A1B2 流し込んだ枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
+        'MEALPLAN-A1B2 テンプレから入れた枠は手動配置扱い(auto無し)＝まとめて献立で上書きされない',
         tpAfter
           .filter((e) => e.date.startsWith(tpNextPrefix) && e.recipeId === tpIds.curryId)
           .every((e) => !e.auto),
@@ -7401,8 +7513,9 @@ try {
     }
   }
 
-  // --- MEALPLAN-ROLE: 日タブ「今日の献立と今週の予定が食い違っています」の食事ボタンが
-  // 役割(主菜/副菜)の粒度を守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
+  // --- MEALPLAN-ROLE: 日タブの「レシピ一覧から選択中」と「今週の献立の予定」の並列表示
+  // (2026-08-02 便DE-2で警告＋長い説明文から置き換え)の食事ボタンが、役割(主菜/副菜)の粒度を
+  // 守ること(2026-07-29 便CB-1・便CD報告の不具合の再発防止)。
   // 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜(ほうれん草のおひたし)を
   // 押すと夕食の主菜(肉じゃが)が消えていた。副菜は副菜として足され、主菜が残ることを実データで確認する ---
   currentCheck = 'MEALPLAN-ROLE'
@@ -7463,14 +7576,19 @@ try {
       await roPage.waitForTimeout(1200)
       const roBody = (await roPage.textContent('body')) ?? ''
       check(
-        'MEALPLAN-ROLE 前提: 食い違いの案内が出る',
-        roBody.includes('今日の献立と今週の予定が食い違っています'),
+        'MEALPLAN-ROLE(便DE-2) 前提: 2つの中身が左右に並んで出る',
+        roBody.includes('レシピ一覧から選択中') && roBody.includes('今週の献立の予定'),
       )
       check(
-        'MEALPLAN-ROLE 案内文が「主菜になる料理は主菜、副菜になる料理は副菜として入る」ことを説明する',
-        roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り、今ある献立は消えません'),
+        'MEALPLAN-ROLE(便DE-2) 長い説明文と「食い違っています」の警告は出さない',
+        !roBody.includes('今日の献立と今週の予定が食い違っています') &&
+          !roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り'),
       )
-      await roPage.getByRole('button', { name: /夕食.*現在/ }).first().click()
+      check(
+        'MEALPLAN-ROLE(便DE-2) 右側に今週の予定(夕食の肉じゃが)が並ぶ',
+        (await roPage.locator('[data-testid="plan-mismatch"]').textContent())?.includes('肉じゃが'),
+      )
+      await roPage.getByRole('button', { name: '夕食に入れる' }).first().click()
       await roPage.waitForTimeout(700)
       check(
         'MEALPLAN-ROLE どの食事のどの役割に入れたかをトーストで伝える',
@@ -10575,6 +10693,18 @@ try {
           'URLIMPORT-02 成功時に材料2件・手順2件を読み込んだ旨のメッセージが出る',
           importedText.includes('材料2件・手順2件を読み込みました。内容を確認して修正してください'),
         )
+        // 2026-08-02 オーナー指示(便DF→司令部差し替え): 取り込めたときだけ合わせ調味料の案内1行を出す
+        check(
+          'URLIMPORT-02(司令部差替) 取り込み成功時に合わせ調味料の案内1行が出る',
+          importedText.includes(
+            '合わせ調味料は、材料の丸ボタンで色分けしておくと、調理中モードでまとめて表示されます',
+          ),
+        )
+        check(
+          'URLIMPORT-02 「食材と価格」への近道は材料欄の1本のみ(案内側のリンクは廃止)',
+          (await uiPage.locator('a[href="#/prices"]').count()) === 1,
+          `#/pricesリンク数=${await uiPage.locator('a[href="#/prices"]').count()}`,
+        )
         check(
           'URLIMPORT-02 タイトルが自動入力される',
           (await uiPage.locator('input[placeholder="例: 肉じゃが"]').inputValue()) === 'E2Eモック鍋',
@@ -10708,8 +10838,14 @@ try {
         )
         await uiPage.waitForTimeout(1000)
         check(
-          'URLIMPORT-05 写真も取り込みました、の追記メッセージが出る',
-          (await uiPage.textContent('body')).includes('写真も取り込みました'),
+          'URLIMPORT-05 料理の写真を1枚取り込みました、の追記メッセージが出る',
+          (await uiPage.textContent('body')).includes('料理の写真を1枚取り込みました'),
+        )
+        // 2026-08-02 オーナー指示(便DF): 取り込むのは料理の写真1枚だけで手順の写真は取り込まない。
+        // 「写真も取り込みました」だけだと手順の写真まで入ったと誤解されるため、その場で言い切る
+        check(
+          'URLIMPORT-05(便DF) 手順の写真は取り込まないことを同じ行で伝える',
+          (await uiPage.textContent('body')).includes('（手順の写真は取り込みません）'),
         )
         check(
           'URLIMPORT-05 取り込んだ写真がフォームのプレビューに表示される(アイコンでなくimg)',
@@ -10738,8 +10874,8 @@ try {
         )
         await uiPage.waitForTimeout(1000)
         check(
-          'URLIMPORT-06 チェックOFFなら「写真も取り込みました」の追記メッセージは出ない',
-          !(await uiPage.textContent('body')).includes('写真も取り込みました'),
+          'URLIMPORT-06 チェックOFFなら「料理の写真を1枚取り込みました」の追記メッセージは出ない',
+          !(await uiPage.textContent('body')).includes('料理の写真を1枚取り込みました'),
         )
         check(
           'URLIMPORT-06 チェックOFFなら写真はセットされない(imgが出ずアイコン表示のまま)',
@@ -10838,7 +10974,7 @@ try {
         check(
           'URLIMPORT-10 レシピ本体の成功メッセージは従来どおり(写真の失敗で成功文言を変えない)',
           photoFailBody.includes('材料1件・手順1件を読み込みました') &&
-            !photoFailBody.includes('写真も取り込みました'),
+            !photoFailBody.includes('料理の写真を1枚取り込みました'),
         )
 
         // --- URLIMPORT-11(便BX/C07・C08): ゴミ行の除去とグループの引き継ぎ ---
@@ -10966,7 +11102,7 @@ try {
         )
         check(
           'URLIMPORT-14 置き換わった写真は「取り込みました」ではなく「置き換わりました」と伝える',
-          (await uiPage.textContent('body')).includes('写真は読み込んだ写真に置き換わりました'),
+          (await uiPage.textContent('body')).includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
         )
         // 「写真も取り込む」をOFFにすれば写真は守られる。そのことも確認文に書く(規約F「何が残るか」)
         const ckDialogsOff = []
@@ -10993,7 +11129,7 @@ try {
 
         // --- URLIMPORT-15(2026-07-30 便CK/②-2): 連続して取り込んだとき、前のURLの写真が
         // 後から現在の内容の上に着弾しない。従来は「材料は新しいレシピ・写真は前のレシピ」の
-        // 取り合わせで保存でき、「写真も取り込みました」も二重に追記されていた ---
+        // 取り合わせで保存でき、「料理の写真を1枚取り込みました」も二重に追記されていた ---
         currentCheck = 'URLIMPORT-15'
         await uiPage.reload({ waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(500)
@@ -11021,9 +11157,9 @@ try {
             .catch(() => false)),
         )
         check(
-          'URLIMPORT-15 「写真も取り込みました」が二重に追記されない',
-          !seqBody.includes('写真も取り込みました') &&
-            !seqBody.includes('写真は読み込んだ写真に置き換わりました'),
+          'URLIMPORT-15 「料理の写真を1枚取り込みました」が二重に追記されない',
+          !seqBody.includes('料理の写真を1枚取り込みました') &&
+            !seqBody.includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
         )
         check(
           'URLIMPORT-15 2回目の取り込み結果は従来どおり出る(結果が消えたりしない)',
@@ -11374,6 +11510,20 @@ try {
         'PANTRYFILTER-01 在庫が空のうちはチップが出ない',
         !(await pfPage.textContent('body')).includes('在庫の食材で絞る'),
       )
+      // 1b) 「食材の在庫から入れる」(2026-08-02 オーナー指示・便DF)は、入れられる食材が
+      // 無いときもボタン自体は出し、押せない状態＋理由の1行を添える(旧実装はボタンごと
+      // 消えていて、機能があること自体に気づけなかった)
+      const pfFillBtn = pfPage.getByRole('button', { name: '食材の在庫から入れる' })
+      check(
+        'PANTRYFILTER-01(便DF) 在庫が空でも「食材の在庫から入れる」ボタンは出る(押せない状態)',
+        (await pfFillBtn.count()) === 1 && (await pfFillBtn.isDisabled()),
+      )
+      check(
+        'PANTRYFILTER-01(便DF) 押せない理由が1行で出る',
+        (await pfPage.textContent('body')).includes(
+          '食材の在庫で「ある」「少ない」にした食材が、使いたい食材に入ります',
+        ),
+      )
       // パネルを閉じる
       await pfPage.getByRole('button', { name: '決定' }).click()
       await pfPage.waitForTimeout(200)
@@ -11398,6 +11548,29 @@ try {
         'PANTRYFILTER-01 在庫があるとチップが出る',
         (await pfPage.textContent('body')).includes('在庫の食材で絞る'),
       )
+
+      // 3b) 「食材の在庫から入れる」が押せるようになり、押すと在庫の食材が
+      // 「使いたい食材」のチップとして入る(2026-08-02 オーナー指示・便DF)
+      const pfFillBtn2 = pfPage.getByRole('button', { name: '食材の在庫から入れる' })
+      check('PANTRYFILTER-01(便DF) 在庫があると「食材の在庫から入れる」が押せる', await pfFillBtn2.isEnabled())
+      await pfFillBtn2.click()
+      await pfPage.waitForTimeout(400)
+      // 「使いたい食材」のチップは ChipInput(span+✗ボタン)。在庫の「玉ねぎ」が入ったことを見る
+      const wantedChips = () =>
+        pfPage.evaluate(() =>
+          Array.from(document.querySelectorAll('span'))
+            .filter((s) => s.querySelector('button[aria-label="このチップを削除"]'))
+            .map((s) => s.textContent?.trim() ?? ''),
+        )
+      check(
+        'PANTRYFILTER-01(便DF) 押すと在庫の食材が使いたい食材に入る',
+        (await wantedChips()).includes('玉ねぎ'),
+        `チップ=${JSON.stringify(await wantedChips())}`,
+      )
+      // 入れた食材を外して、以降の件数チェックに影響させない
+      await pfPage.getByRole('button', { name: 'このチップを削除' }).first().click()
+      await pfPage.waitForTimeout(400)
+      check('PANTRYFILTER-01(便DF) 入れた食材は✗で外せる', (await wantedChips()).length === 0)
 
       // 4) ONにすると在庫の食材(玉ねぎ)を使うレシピだけに件数が絞られる
       await pfPage.getByRole('button', { name: '在庫の食材で絞る', exact: true }).click()
@@ -13056,7 +13229,7 @@ try {
       )
       check(
         'DEMO-01 デモには献立を書き換える操作を出さない',
-        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレを流し込む'),
+        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレの内容をこの月に入れる'),
       )
       // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
       await dmPage.getByRole('button', { name: '食費', exact: true }).click()
@@ -13344,11 +13517,17 @@ try {
         handlesBeforeOrganize >= 3,
         `ハンドル数=${handlesBeforeOrganize}`,
       )
-      // (a) 整理モード→2行選択→まとめて削除
-      await fiPage.getByRole('button', { name: '整理', exact: true }).click()
+      // (a) 「選んで削除」モード→2行選択→まとめて削除
+      // ボタン名は2026-08-02 オーナー指示(便DF)で「整理」から「選んで削除」に変更(何ができるか
+      // 読み取れなかったため)。名前が戻ってしまわないよう、ここで名指しして押す
+      await fiPage.getByRole('button', { name: '選んで削除', exact: true }).click()
       await fiPage.waitForTimeout(300)
       check(
-        'FORMING-01(a) 整理中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
+        'FORMING-01(便DF) モードに入ると消し方の説明が出る',
+        (await fiPage.textContent('body')).includes('消したい材料にチェックを付けて、「選んだ材料◯行を削除」を押します'),
+      )
+      check(
+        'FORMING-01(a) 選択中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
         (await handleCount()) === handlesBeforeOrganize - 3,
         `整理前=${handlesBeforeOrganize} 整理中=${await handleCount()}`,
       )
@@ -13369,7 +13548,7 @@ try {
       )
       // 1行になったら整理することが無くなるので通常の入力に戻る(「完了」に戻れなくなるのを防ぐ)
       check(
-        'FORMING-01(a) 1行まで消すと整理モードから自動で抜ける',
+        'FORMING-01(a) 1行まで消すと「選んで削除」モードから自動で抜ける',
         (await handleCount()) === handlesBeforeOrganize - 2 &&
           (await fiPage.getByRole('button', { name: 'この材料を選ぶ' }).count()) === 0,
         `ハンドル数=${await handleCount()}`,
@@ -13378,6 +13557,79 @@ try {
       await fiBrowser.close()
     }
   }
+  // --- SETBACK-01: 設定へ飛ばされたあとの帰り道(2026-08-02 オーナー指示・便DF)。
+  // 各ページのPro版の説明などから設定の該当欄へ飛ぶと、着いた先に元のページへ戻る手段が
+  // 無かった。?back=<元のパス>を載せて飛び、設定画面の目次チップの上に「◯◯に戻る」を出す。
+  // 直接開いた設定(タブから)には出さないことも確認する ---
+  currentCheck = 'SETBACK-01'
+  {
+    const sbBrowser = await chromium.launch()
+    const sbContext = await sbBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const sbPage = await sbContext.newPage()
+    sbPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SETBACK-01] ${err.message}`)
+    })
+    const backBtn = sbPage.locator('[data-testid="settings-back"]')
+    try {
+      await sbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await sbPage.waitForTimeout(1800)
+
+      // (a) タブから開いた設定には戻るボタンを出さない(帰る先が無いため)
+      await sbPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await sbPage.waitForTimeout(700)
+      check('SETBACK-01 直接開いた設定には戻るボタンを出さない', (await backBtn.count()) === 0)
+
+      // (b) レシピ一覧の栄養並び替えのPro案内 → 設定(Pro節) → 「レシピ一覧に戻る」
+      await sbPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await sbPage.waitForTimeout(900)
+      await sbPage.locator('button[aria-label="並び替え"]').click()
+      await sbPage.waitForTimeout(300)
+      await sbPage.getByText('たんぱく質・塩分・脂質・糖質で探す').click()
+      await sbPage.waitForTimeout(800)
+      check(
+        'SETBACK-01 Pro案内のリンクに戻り先(?back=)が載っている',
+        sbPage.url().includes('#/settings') && sbPage.url().includes('back=%2Frecipes'),
+        `現在URL: ${sbPage.url()}`,
+      )
+      check(
+        'SETBACK-01 設定に「レシピ一覧に戻る」が出る',
+        (await backBtn.textContent())?.includes('レシピ一覧に戻る'),
+      )
+      // Pro節へ自動スクロールした後でも押せる位置にある(目次チップと同じ固定領域に置いている)
+      check('SETBACK-01 節へスクロールした後も戻るボタンが見えている', await backBtn.isVisible())
+      await backBtn.click()
+      await sbPage.waitForTimeout(600)
+      check(
+        'SETBACK-01 押すとレシピ一覧へ帰る',
+        sbPage.url().endsWith('#/recipes'),
+        `現在URL: ${sbPage.url()}`,
+      )
+
+      // (c) レシピ詳細の栄養のPro案内 → 設定 → 元のレシピ詳細へ帰る(画面名も「レシピ」になる)
+      await sbPage.locator('a[href^="#/recipes/"]').first().click()
+      await sbPage.waitForTimeout(800)
+      const sbDetailUrl = sbPage.url()
+      await sbPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+      await sbPage.waitForTimeout(500)
+      await sbPage.locator('a[href^="#/settings?section=pro"]').first().click()
+      await sbPage.waitForTimeout(800)
+      check(
+        'SETBACK-01 レシピ詳細発では「レシピに戻る」になる',
+        (await backBtn.textContent())?.includes('レシピに戻る'),
+      )
+      await backBtn.click()
+      await sbPage.waitForTimeout(600)
+      check(
+        'SETBACK-01 押すと元のレシピ詳細へ帰る',
+        sbPage.url() === sbDetailUrl,
+        `現在URL: ${sbPage.url()} 期待=${sbDetailUrl}`,
+      )
+    } finally {
+      await sbBrowser.close()
+    }
+  }
+
   // --- BULKDEL-01: レシピ一覧のまとめて削除(2026-08-02 便CT・オーナー承認)。
   // 食材の在庫の「整理」モードに倣った選択モードで複数品を選び、規約Fの確認文
   // (消えるもの＝レシピ本体+作った記録{n}件(写真{p}枚)+献立の予定・今日の献立/残るもの、を件数つき)

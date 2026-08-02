@@ -6,7 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -56,6 +56,7 @@ import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
 import Toast from '../components/Toast'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
 /**
@@ -116,13 +117,6 @@ const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
 
 const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
-    active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
-  }`
-
-// 昇順/降順トグル用(2026-07-16 UI総点検B-7: パネルの外・件数表記の横に常設するため、
-// 通常のchipClsより一回り小さいサイズにする)
-const dirChipCls = (active: boolean) =>
-  `inline-flex shrink-0 items-center rounded-sm border px-2 py-1.5 text-xs font-bold ${
     active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
   }`
 
@@ -225,6 +219,8 @@ export default function RecipesPage() {
   // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
   // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
   const [searchParams, setSearchParams] = useSearchParams()
+  // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
+  const location = useLocation()
   // ホームの「レシピを探す」ショートカットからの遷移(2026-08-02 オーナー実機FB)。
   // ?focus=search = 検索欄にフォーカスした状態で開く / ?pantry=1 = 「在庫の食材で絞る」をONで開く。
   // どちらも「明示的な新規検索」なので、?q=・?ing= と同じくsessionStorageの保存状態は復元しない
@@ -794,7 +790,7 @@ export default function RecipesPage() {
           />
           {!nutritionUnlocked && (
             <Link
-              to="/settings?section=pro"
+              to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
               className="mt-[var(--space-sm)] flex w-full items-start gap-2 rounded-md border border-edge bg-app px-3 py-2.5 text-left text-sm text-ink-muted opacity-60"
             >
               <Lock size={16} className="mt-0.5 shrink-0" aria-hidden />
@@ -804,6 +800,33 @@ export default function RecipesPage() {
               </span>
             </Link>
           )}
+
+          {/* 昇順/降順(2026-08-02 オーナー指示・便DF: 件数表記の横に常設していた独立ボタンを
+              やめ、並べ替えパネルの中に入れた)。上で選んだ並べ替えの向きを変えるものなので、
+              選択肢のすぐ下・決定ボタンの上に置く */}
+          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+            {ja.search.sortDirectionTitle}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            <button
+              type="button"
+              onClick={() => setSortDirection('asc')}
+              aria-pressed={sortDirection === 'asc'}
+              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'asc')}`}
+            >
+              <ArrowUpNarrowWide size={16} aria-hidden />
+              {ja.search.sortAsc}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortDirection('desc')}
+              aria-pressed={sortDirection === 'desc'}
+              className={`inline-flex items-center gap-1 ${chipCls(sortDirection === 'desc')}`}
+            >
+              <ArrowDownWideNarrow size={16} aria-hidden />
+              {ja.search.sortDesc}
+            </button>
+          </div>
 
           {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
           <button
@@ -872,17 +895,21 @@ export default function RecipesPage() {
               placeholder={ja.search.ingredientPlaceholder}
               addLabel={ja.search.ingredientAdd}
             />
-            {pantryNames.length > 0 && (
-              <button
-                type="button"
-                onClick={() =>
-                  setIngredients((prev) => Array.from(new Set([...prev, ...pantryNames])))
-                }
-                className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <Refrigerator size={16} aria-hidden />
-                {ja.pantry.addToSearch}
-              </button>
+            {/* 食材の在庫にある食材を、この欄へ1タップで入れる(2026-08-02 オーナー指示・便DF)。
+                従来も同じボタンがあったが、①文言が「在庫から追加」で何がどこへ入るのか読めず
+                ②「ある/少ない」が1件も無いと消えていて、押せない理由も分からなかった。
+                ボタンは常に出し、入れられる食材が無いときは押せない状態＋理由を1行で示す */}
+            <button
+              type="button"
+              onClick={() => setIngredients((prev) => Array.from(new Set([...prev, ...pantryNames])))}
+              disabled={pantryNames.length === 0}
+              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+            >
+              <Refrigerator size={16} aria-hidden />
+              {ja.search.pantryToIngredients}
+            </button>
+            {pantryNames.length === 0 && (
+              <p className="mt-1 text-xs text-ink-muted">{ja.search.pantryToIngredientsEmpty}</p>
             )}
           </div>
 
@@ -949,9 +976,9 @@ export default function RecipesPage() {
       {/* 件数: 絞り込み無しでも総件数を常に表示する(2026-07-13 UI改善)。絞り込み中は
           既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる(件数が変わるのは絞り込みのみ・
           並べ替えでは変わらないのでfilterActiveで判定する)。
-          昇順/降順トグルは2026-07-16 UI総点検B-7オーナー個別指示によりパネルの外・この件数表記の
-          横に常設する(従来はパネル内にあった)。列表示切替(グリッド/一覧)も便T-2で同じ行に移動した:
-          全◯件 | 昇順/降順 | 列切替 の並び */}
+          昇順/降順は2026-08-02 オーナー指示(便DF)で並べ替えパネルの中へ移した(2026-07-16
+          UI総点検B-7でここに出していたものを取りやめ)。列表示切替(グリッド/一覧)は
+          便T-2からこの行のまま: 全◯件 | 列切替 の並び */}
       {results && totalCount !== undefined && (
         <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
           <p className="min-w-0 flex-1 text-sm text-ink-muted">
@@ -962,22 +989,6 @@ export default function RecipesPage() {
               : ja.search.totalCount.replace('{n}', String(totalCount))}
           </p>
           <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setSortDirection('asc')}
-              className={dirChipCls(sortDirection === 'asc')}
-            >
-              <ArrowUpNarrowWide size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
-              {ja.search.sortAsc}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSortDirection('desc')}
-              className={dirChipCls(sortDirection === 'desc')}
-            >
-              <ArrowDownWideNarrow size={14} className="-mt-0.5 mr-1 inline" aria-hidden />
-              {ja.search.sortDesc}
-            </button>
             {/* 一覧の表示形式(グリッド/リスト)切替。押すたびに逆の表示へ切り替わる(2026-07-13 UI改善。
                 2026-07-16 便T-2でヘッダーからこの常設列へ移動) */}
             <button

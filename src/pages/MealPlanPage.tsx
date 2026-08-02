@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { settingsLinkWithBack } from '../logic/backLink'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   ChevronLeft,
@@ -58,6 +59,7 @@ import {
   useTodayList,
   removeFromTodayList,
   markTodayListCooked,
+  undoTodayListCooked,
   markAllTodayListCooked,
   importRecipeIdsToTodayList,
 } from '../db/todayList'
@@ -73,6 +75,7 @@ import {
   monthDates,
   shiftMonth,
   monthLeadingBlanks,
+  suggestCandidates,
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
@@ -147,7 +150,7 @@ import type {
   Recipe,
   Settings,
 } from '../db/types'
-import { MEAL_PURPOSES } from '../db/types'
+import { MEAL_PURPOSES, MEAL_ROLES } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -794,11 +797,12 @@ const SLOT_TONE: Record<MealSlot, { bar: string; bg: string }> = {
 function RowThumb({ recipe }: { recipe: Recipe }) {
   const photoUrl = usePhotoUrl(recipe.photo)
   return (
-    <span data-testid="row-thumb" className="h-7 w-7 shrink-0 overflow-hidden rounded-sm">
+    // 2026-08-02 便DE-6: 入っている行を厚く見せる（空き行との密度差）ため、少し大きくする
+    <span data-testid="row-thumb" className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
       {photoUrl ? (
         <img src={photoUrl} alt="" className="h-full w-full object-cover" />
       ) : (
-        <RecipePlaceholder recipe={recipe} iconSize={16} />
+        <RecipePlaceholder recipe={recipe} iconSize={18} />
       )}
     </span>
   )
@@ -821,11 +825,15 @@ interface ExtraRow {
   role: MealRole
 }
 
-/** ある日×枠の役割(主菜/副菜)ごとに表示する行を組み立てる。
+/** ある日×枠の役割(主菜/副菜/汁物/その他)ごとに表示する行を組み立てる。
  * 実データが1件もない役割は「未定」の行を1つ表示し、+ボタンで増やした分を後ろに続ける。
  *
  * 2026-08-02 便CW-2: その既定の空欄行も×で畳めるようにした（hiddenRoles に入っている役割は
- * 空欄行を出さない）。戻すのは「＋料理を追加」→主菜/副菜 の既存の入口（addOrRestoreRow）。 */
+ * 空欄行を出さない）。戻すのは「＋料理を追加」→主菜/副菜 の既存の入口（addOrRestoreRow）。
+ *
+ * 2026-08-02 便DE-4: 汁物・その他を足した。**空欄行を既定で出すのは主菜と副菜だけ**にする
+ * （4つとも空欄行を出すと、1日の1食に空行が4本並んで週タブが読めなくなる）。
+ * 汁物・その他は、料理が入っているか「＋料理を追加」で足したときだけ行が出る。 */
 function buildRoleRows(
   slotEntries: MealPlanEntry[],
   role: MealRole,
@@ -834,7 +842,8 @@ function buildRoleRows(
 ): MealPlanRow[] {
   const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
   const rows: MealPlanRow[] = roleEntries.map((entry) => ({ kind: 'entry', entry }))
-  if (roleEntries.length === 0 && !hiddenRoles.includes(role)) {
+  const showsDefaultEmptyRow = role === 'main' || role === 'side'
+  if (showsDefaultEmptyRow && roleEntries.length === 0 && !hiddenRoles.includes(role)) {
     rows.push({ kind: 'empty', removable: true, isDefault: true })
   }
   extra
@@ -874,6 +883,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /** サンプルデモとして開いているか（データの差し替えと、書き込み操作を出さない判定に使う） */
   const isDemo = demo != null
   const navigate = useNavigate()
+  const location = useLocation()
   const dbRecipes = useLiveQuery(listRecipes, [])
   const recipes = isDemo ? demo.recipes : dbRecipes
   const [searchParams, setSearchParams] = useSearchParams()
@@ -1467,22 +1477,65 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // パラメータは消費したら消す(次の「素の献立タブ開き」で通常の既定=日タブに戻すため)。
   // 初回1回だけ処理する(liveQueryの再評価のたびに動かないようinitialFocusRefで守る)
   const initialFocusRef = useRef(false)
+  /**
+   * 週タブを開いたあとにスクロールして見せる日（2026-08-02 便DE-1/DE-11）。
+   * ?focus=week&date=YYYY-MM-DD で開いたときだけ入り、その日のカードまで送ってから空にする。
+   */
+  const [pendingScrollDate, setPendingScrollDate] = useState<string | null>(null)
   useEffect(() => {
     if (initialFocusRef.current) return
     initialFocusRef.current = true
-    if (searchParams.get('focus') === 'today') {
+    const focus = searchParams.get('focus')
+    if (focus == null) return
+    // 2026-08-02 便DE-1/DE-11: 開くタブを指定して戻ってこられるようにした。
+    //  today … 今日の献立(日タブ)へ。従来からの動き
+    //  week  … 週タブへ。date が付いていればその日のカードまでスクロールする
+    //          (ホームの「今日の献立」の食事ごとの見出しから来る)
+    //  month … 月タブへ(「作った記録」の一覧から月タブへ戻るときに使う)
+    if (focus === 'today') {
       setViewMode('day')
       window.scrollTo(0, 0)
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          next.delete('focus')
-          return next
-        },
-        { replace: true },
-      )
+    } else if (focus === 'week') {
+      const date = searchParams.get('date')
+      if (date) {
+        // 「今日から7日間」表示ならその日を先頭に、週区切り表示ならその日を含む週を出す
+        setWeekStart(
+          settings?.weekStartsToday ? date : weekDates(new Date(`${date}T00:00:00`))[0],
+        )
+        setPendingScrollDate(date)
+      }
+      setViewMode('week')
+    } else if (focus === 'month') {
+      setViewMode('month')
+      window.scrollTo(0, 0)
     }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('focus')
+        next.delete('date')
+        return next
+      },
+      { replace: true },
+    )
+    // settings は初回描画では未取得のことがある。参照するのは「今日から7日間」表示かどうかだけで、
+    // その場合も weekModeInitRef の初期化が今日を先頭に寄せるため、依存に足して再実行はさせない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams])
+
+  // 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）
+  useEffect(() => {
+    if (pendingScrollDate == null || viewMode !== 'week') return
+    const frame = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        document
+          .querySelector(`section[data-date="${pendingScrollDate}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        setPendingScrollDate(null)
+      }),
+    )
+    return () => cancelAnimationFrame(frame)
+  }, [pendingScrollDate, viewMode])
 
   // 自動取り込み(便U-3・設計確定): 日タブを開いたとき、今日の日付の週プラン登録
   // (表示中の食事帯のみ)を今日の献立へ自動取り込みする。既存の手動取り込みボタンと同じ
@@ -1526,6 +1579,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3)。既定閉
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const [message, setMessage] = useState('')
+  /**
+   * 直前の「作った」を戻すための控え（2026-08-02 便DE-3）。トーストに「元に戻す」を出すのは、
+   * いま出ているトーストがその記録のものであるときだけにしたいので、対象のレシピと
+   * 一緒にそのときの文言も持っておく（別の操作でトーストが差し替わったら操作ごと消える）。
+   */
+  const [undoCooked, setUndoCooked] = useState<{ recipeId: number; message: string } | null>(null)
+  const undoCookedActive = undoCooked != null && undoCooked.message === message
+  const runUndoCooked = async () => {
+    if (!undoCooked) return
+    const done = await undoTodayListCooked(undoCooked.recipeId)
+    setUndoCooked(null)
+    if (!done) {
+      setMessage(ja.mealPlan.todayCookedUndoNothing)
+      return
+    }
+    // 在庫を1段階下げる設定がONのときは、戻していないものを黙らずに添える
+    setMessage(
+      settings?.cookedReflectPantry
+        ? `${ja.mealPlan.todayCookedUndone} ${ja.mealPlan.todayCookedUndoPantryNote}`
+        : ja.mealPlan.todayCookedUndone,
+    )
+  }
 
   // 日付メモ(2026-07-29 便CB-1・docs/59 A-2): レシピに紐付かない「その日1行の自由メモ」。
   // 週タブの各日カード・月タブの日モーダルで編集し、月カレンダーのセルには「メモあり」の点を出す。
@@ -1748,6 +1823,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     )
   }
 
+  /**
+   * 「おまかせで提案」がいまくじを引いている候補の数（2026-08-02 便DE-5・オーナー指示）。
+   * 候補が2品しかない条件では、振り直しても同じ料理が出続けて壊れているように見えるため、
+   * 数字を画面に出して理由が分かるようにする。数えるのは主菜の候補
+   * （ペア提案は主菜を引いてから、その主菜に合わせて副菜を引くので、変わり映えの元は主菜側）。
+   */
+  const suggestCandidateCount = useMemo(() => {
+    const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
+    return suggestCandidates(visibleRecipes, {
+      quickOnly,
+      excludeNg: true,
+      ngIngredients: settings?.ngIngredients ?? [],
+      usedRecipeIds: [],
+      slot,
+      genre: genreFilter,
+      preferHighProtein,
+      yesterdayRecipeIds,
+      role: 'main',
+    }).length
+  }, [
+    visibleRecipes,
+    quickOnly,
+    settings?.ngIngredients,
+    visibleSlots,
+    genreFilter,
+    preferHighProtein,
+    yesterdayRecipeIds,
+  ])
+
   // 主菜+副菜のペアを1組計算する(タスク1/2共用)。提案元の枠は「表示中の食事帯に夕食があれば
   // 夕食、無ければ先頭の帯」を使う。excludeIdsに渡したレシピは候補から外す(振り直しで直前の提案を
   // 避けるために使う)。候補が0件のときはundefinedを返す
@@ -1882,7 +1986,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       preferHighProtein,
       yesterdayRecipeIds,
     }
-    if (isSlotEmpty && entryId == null) {
+    // 枠が丸ごと空のときのペア提案は主菜・副菜の行から押したときだけ（2026-08-02 便DE-4）。
+    // 汁物・その他の行のサイコロで主菜＋副菜が生えると、押した行と結果が食い違う
+    if (isSlotEmpty && entryId == null && (role === 'main' || role === 'side')) {
       const { main, side } = suggestPairForSlot(visibleRecipes, baseOptions)
       if (!main && !side) {
         setMessage(ja.mealPlan.noSuggestion)
@@ -1899,20 +2005,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 効いていなかったため、8割が別ジャンル・2割が汁物になっていた。最も使われる動線が
     // 最も手当てされていなかった箇所。あわせて主菜との食材・食感の重複回避も渡す(MP-04)。
     // 一品ものの主菜でもここでは提案する(ユーザーが明示的に押した行を無反応にしない)
-    const slotMainRecipe =
-      role === 'side'
-        ? slotEntries
-            .filter((e) => (e.role ?? 'main') === 'main')
-            .map((e) => recipeById.get(e.recipeId))
-            .find((r): r is Recipe => !!r)
-        : undefined
+    // 汁物の行(2026-08-02 便DE-4)も副菜と同じ扱いにする＝主菜に合わせて選ぶ。
+    // 違いは寄せる種別だけ(副菜=side・汁物=soup。どちらも0件なら自動で緩む)
+    const followsMain = role === 'side' || role === 'soup'
+    const slotMainRecipe = followsMain
+      ? slotEntries
+          .filter((e) => (e.role ?? 'main') === 'main')
+          .map((e) => recipeById.get(e.recipeId))
+          .find((r): r is Recipe => !!r)
+      : undefined
     const picked = suggestForSlot(
       visibleRecipes,
-      role === 'side'
+      followsMain
         ? {
             ...baseOptions,
             role,
-            preferDishType: 'side' as const,
+            preferDishType: role === 'soup' ? ('soup' as const) : ('side' as const),
             genre: genreFilter ?? (slotMainRecipe ? recipeGenre(slotMainRecipe) : undefined),
             avoidKeys: slotMainRecipe ? dishAvoidKeys(slotMainRecipe) : undefined,
             excludeRecipeIds: slotMainRecipe?.id != null ? [slotMainRecipe.id] : undefined,
@@ -2842,19 +2950,27 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const isCooked = entryId != null && cookedPlanEntryIdSet.has(entryId)
     return (
       <div key={key} className="flex items-center gap-2">
-        <span className="w-10 shrink-0 text-xs font-bold text-ink-muted">{ja.mealPlan.role[role]}</span>
+        <span
+          className={`w-10 shrink-0 text-ink-muted ${
+            isEmpty ? 'text-[10px]' : 'text-xs font-bold'
+          }`}
+        >
+          {ja.mealPlan.role[role]}
+        </span>
         <button
           type="button"
           onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
-          className={`flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border px-2 py-2 text-left text-sm ${
+          // 2026-08-02 便DE-6(オーナー指示): 入っている行と空いている行の見分けをさらに強くする。
+          // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
+          // 空き行の「押せる」見た目（破線＋Plusアイコン＋アクセント色。便BH-3タスク5）は維持し、
+          // 食事ごとの地色（SLOT_TONE・便CW-1）にも手を入れない
+          className={`flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border px-2 text-left ${
             isEmpty
-              ? // タスク5: 空き枠は「＋ レシピを選ぶ」のボタン然とした見た目に(押せると分かるよう
-                // アクセント色＋Plusアイコン。従来は淡色「未定」で押せると分からない指摘への対応)
-                'border-dashed border-accent/50 bg-surface font-bold text-accent-ink'
+              ? 'border-dashed border-accent/40 py-1.5 text-xs font-bold text-accent-ink'
               : isCooked
                 ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)
-                  'border-edge bg-app/60 text-ink-muted opacity-80'
-                : 'border-edge bg-app'
+                  'border-edge bg-app/60 py-2.5 text-base font-bold text-ink-muted opacity-80'
+                : 'border-edge bg-surface py-2.5 text-base font-bold text-ink shadow-sm'
           }`}
         >
           {isEmpty ? (
@@ -2924,8 +3040,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const slotEntries = entriesByDateSlotAll.get(slotKey) ?? []
     const extra = extraRows[slotKey] ?? []
     const hiddenRoles = hiddenDefaultRows[slotKey] ?? []
-    const mainRows = buildRoleRows(slotEntries, 'main', extra, hiddenRoles)
-    const sideRows = buildRoleRows(slotEntries, 'side', extra, hiddenRoles)
+    // 2026-08-02 便DE-4: 主菜・副菜に汁物・その他を足した4区分(レシピ登録の「料理の種別」と同じ)。
+    // 空欄行を既定で出すのは主菜・副菜だけ(buildRoleRows)なので、行が4本並ぶのは自分で足したときだけ
+    const roleRows = MEAL_ROLES.map(
+      (role) => [role, buildRoleRows(slotEntries, role, extra, hiddenRoles)] as const,
+    )
     const isAddMenuOpen = addMenuFor === slotKey
     // ジャンル混在の控えめ表示(便BH-2・docs/56 §3-10): 主菜のジャンルに対して
     // 副菜が別ジャンルのとき「ジャンル混在」バッジを出す(揃っている枠は無表示)
@@ -2933,8 +3052,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       .filter((e) => (e.role ?? 'main') === 'main')
       .map((e) => recipeById.get(e.recipeId))
       .find((r): r is Recipe => !!r)
+    // 主菜以外の品（副菜・汁物・その他）をまとめて見る＝ジャンル混在の判定と
+    // 「一品ものの日は副菜が空く」の説明の対象を、区分を足しても取りこぼさない
     const slotSideRecipes = slotEntries
-      .filter((e) => (e.role ?? 'main') === 'side')
+      .filter((e) => (e.role ?? 'main') !== 'main')
       .map((e) => recipeById.get(e.recipeId))
       .filter((r): r is Recipe => !!r)
     const genreMixed = detectGenreMix(slotMainRecipe, slotSideRecipes)
@@ -2976,36 +3097,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           )}
         </div>
         <div className="mt-1 space-y-1">
-          {mainRows.map((row, i) =>
-            renderRow(date, slot, 'main', row, `main-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
-          )}
-          {sideRows.map((row, i) =>
-            renderRow(date, slot, 'side', row, `side-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`),
+          {roleRows.map(([role, rows]) =>
+            rows.map((row, i) =>
+              renderRow(
+                date,
+                slot,
+                role,
+                row,
+                `${role}-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`,
+              ),
+            ),
           )}
         </div>
         {showOneDishNote && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.oneDishNote}</p>}
         {isAddMenuOpen ? (
-          <div className="mt-1 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                addOrRestoreRow(date, slot, 'main')
-                setAddMenuFor(null)
-              }}
-              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-            >
-              {ja.mealPlan.role.main}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                addOrRestoreRow(date, slot, 'side')
-                setAddMenuFor(null)
-              }}
-              className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-            >
-              {ja.mealPlan.role.side}
-            </button>
+          // 2026-08-02 便DE-4: 足せる区分は主菜・副菜・汁物・その他の4つ(レシピ登録と同じ区分)
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {MEAL_ROLES.map((role) => (
+              <button
+                key={role}
+                type="button"
+                onClick={() => {
+                  addOrRestoreRow(date, slot, role)
+                  setAddMenuFor(null)
+                }}
+                className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
+              >
+                {ja.mealPlan.role[role]}
+              </button>
+            ))}
             <button
               type="button"
               onClick={() => setAddMenuFor(null)}
@@ -3064,6 +3184,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </button>
 
       {suggestConditionsOpen && (
+        <>
         <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
           <button
             type="button"
@@ -3117,6 +3238,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {ja.mealPlan.preferHighProteinToggle}
           </button>
         </div>
+        {/* 2026-08-02 便DE-7: 「調理時間15分以内を優先」が何を見ているか(全レシピの調理時間)と、
+            自分で登録したレシピも対象になる条件を1行で添える */}
+        <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>
+        </>
       )}
 
       {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
@@ -3168,7 +3293,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         )
       ) : (
         <Link
-          to="/settings?section=pro"
+          to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
           data-testid="purpose-locked-row"
           className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-sm border border-edge bg-surface px-3 py-2 shadow-sm"
         >
@@ -3263,7 +3388,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </div>
       )}
 
-      <Toast message={message} onClose={() => setMessage('')} />
+      {/* 「作った」の直後だけ「元に戻す」を添える(2026-08-02 便DE-3。買い物メモ・食材価格と同じ形) */}
+      <Toast
+        message={message}
+        onClose={() => {
+          setMessage('')
+          setUndoCooked(null)
+        }}
+        actionLabel={undoCookedActive ? ja.common.undo : undefined}
+        onAction={undoCookedActive ? () => void runUndoCooked() : undefined}
+      />
 
       {viewMode === 'day' && (
         <>
@@ -3279,9 +3413,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       key={recipe.id}
                       recipe={recipe}
                       onCooked={() => {
-                        void markTodayListCooked(recipe.id!)
-                        // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
-                        setMessage(ja.mealPlan.todayCookedToast)
+                        void (async () => {
+                          await markTodayListCooked(recipe.id!)
+                          // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示。
+                          // 2026-08-02 便DE-3: そのトーストから「元に戻す」で取り消せるようにする
+                          setMessage(ja.mealPlan.todayCookedToast)
+                          setUndoCooked({
+                            recipeId: recipe.id!,
+                            message: ja.mealPlan.todayCookedToast,
+                          })
+                        })()
                       }}
                       onRemove={() => void removeFromTodayList(recipe.id!)}
                     />
@@ -3298,6 +3439,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     <Dices size={18} aria-hidden />
                     {ja.mealPlan.todayReroll}
                   </button>
+                )}
+                {/* いま候補が何品あるか(2026-08-02 便DE-5)。少ない条件では振り直しても
+                    同じ料理が出続けるので、その理由が数字で分かるようにする */}
+                {lastSuggestedIds.length > 0 && (
+                  <p className="mt-1 text-center text-xs text-ink-muted">
+                    {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}
+                  </p>
                 )}
                 <button
                   type="button"
@@ -3322,45 +3470,65 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </Link>
                 )}
 
+                {/* 「今日の献立」と「今週の予定」の並列表示(2026-08-02 便DE-2・オーナー指示)。
+                    警告と長い説明文をやめ、2つの中身を左右に並べて見比べられるようにした。
+                    左の品は今週の予定に入っていないので、その場で入れられるボタンを下に置く
+                    (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
                 {mismatchRecipes.length > 0 && (
-                  <div className="mt-[var(--space-sm)] rounded-md border border-warning bg-surface p-[var(--space-sm)]">
-                    <p className="flex items-center gap-1 text-sm font-bold text-warning">
-                      <TriangleAlert size={16} aria-hidden />
-                      {ja.mealPlan.planMismatchNotice}
-                    </p>
-                    <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.planMismatchDescription}</p>
-                    <div className="mt-[var(--space-sm)] space-y-2">
-                      {mismatchRecipes.map((recipe) => (
-                        <div key={recipe.id}>
-                          <p className="truncate text-sm font-bold">{recipe.title}</p>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {visibleSlots.map((slot) => {
-                              const slotEntries = todayEntriesBySlot.get(slot) ?? []
-                              const mainEntry = slotEntries.find((e) => (e.role ?? 'main') === 'main')
-                              const currentTitle = mainEntry
-                                ? recipeById.get(mainEntry.recipeId)?.title
-                                : undefined
-                              return (
-                                <button
-                                  key={slot}
-                                  type="button"
-                                  onClick={() => void assignMismatchRecipe(slot, recipe)}
-                                  className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
-                                >
-                                  {ja.mealPlan.slot[slot]}
-                                  <span className="ml-1 font-normal text-ink-muted">
-                                    (
-                                    {currentTitle
-                                      ? ja.mealPlan.planMismatchCurrent.replace('{title}', currentTitle)
-                                      : ja.mealPlan.planMismatchEmpty}
-                                    )
-                                  </span>
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      ))}
+                  <div
+                    data-testid="plan-mismatch"
+                    className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]"
+                  >
+                    <div className="grid grid-cols-2 gap-[var(--space-sm)]">
+                      <div>
+                        <p className="text-xs font-bold text-ink-muted">
+                          {ja.mealPlan.planMismatchListLabel}
+                        </p>
+                        <ul className="mt-1 space-y-[var(--space-sm)]">
+                          {mismatchRecipes.map((recipe) => (
+                            <li key={recipe.id}>
+                              <p className="text-sm font-bold">{recipe.title}</p>
+                              <div className="mt-1 flex flex-col gap-1">
+                                {visibleSlots.map((slot) => (
+                                  <button
+                                    key={slot}
+                                    type="button"
+                                    onClick={() => void assignMismatchRecipe(slot, recipe)}
+                                    className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink"
+                                  >
+                                    {ja.mealPlan.planMismatchAddToSlot.replace(
+                                      '{slot}',
+                                      ja.mealPlan.slot[slot],
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-ink-muted">
+                          {ja.mealPlan.planMismatchPlanLabel}
+                        </p>
+                        <ul className="mt-1 space-y-[var(--space-sm)]">
+                          {visibleSlots.map((slot) => {
+                            const titles = (todayEntriesBySlot.get(slot) ?? [])
+                              .map((e) => recipeById.get(e.recipeId)?.title)
+                              .filter((t): t is string => !!t)
+                            return (
+                              <li key={slot}>
+                                <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                                <p className="text-sm font-bold">
+                                  {titles.length > 0
+                                    ? titles.join('・')
+                                    : ja.mealPlan.planMismatchPlanEmpty}
+                                </p>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -3391,7 +3559,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </button>
                   {/* 週タブの「まとめて献立を立てる」との違いを一言で示す
                       (2026-07-29 便CD/MP-15。名前が近く区別が付かないという指摘) */}
-                  <p className="-mt-1 text-xs text-ink-muted">{ja.mealPlan.todaySuggestHint}</p>
+                  <p className="-mt-1 text-xs text-ink-muted">
+                    {ja.mealPlan.todaySuggestHint}（
+                    {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}）
+                  </p>
                   {todayFromPlanIds.length > 0 && (
                     <button
                       type="button"
@@ -3676,7 +3847,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     <LayoutTemplate size={14} aria-hidden />
-                    {ja.mealPlan.templateApply}
+                    {ja.mealPlan.templateApplyMonth}
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillMonthHint}</p>
@@ -3847,6 +4018,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
             {/* A-4 献立表(印刷・画像で保存)。この月の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
             {renderPlanSheetSection(monthPlanSheet)}
+
+            {/* 「作った記録」の一覧への入口(2026-08-02 便DE-11・オーナー指示)。
+                週タブにしか無かったので月からも開けるようにし、戻るはこの月タブへ返す(?back=month) */}
+            {!isDemo && (
+              <Link
+                to="/history?back=month"
+                className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
+              >
+                {ja.mealPlan.historyLink}
+              </Link>
+            )}
           </div>
         ) : (
           // 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。月タブを完全に
@@ -3948,7 +4130,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </Link>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
                 <Link
-                  to="/settings?section=pro"
+                  to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
                   className="mt-1 inline-block text-sm font-bold text-accent-ink underline"
                 >
                   {ja.mealPlan.monthProGateLink}
@@ -3960,37 +4142,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {viewMode === 'week' && (
       <>
-      {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
-          既定は週区切り・選択は記憶する */}
-      <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
-        <button
-          type="button"
-          onClick={() => setWeekLayout(false)}
-          aria-pressed={!rollingWeek}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            !rollingWeek
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.weekLayoutCalendar}
-        </button>
-        <button
-          type="button"
-          onClick={() => setWeekLayout(true)}
-          aria-pressed={rollingWeek}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            rollingWeek
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
-        >
-          {ja.mealPlan.weekLayoutRolling}
-        </button>
-      </div>
-      {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
-          3体が切替自体を触っていなかった */}
-      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
+      {/* 2026-08-02 便DE-10(オーナー指示): 週タブの操作は「色も形も同じボタン」が並んでいて
+          グループ分けが曖昧だったため、機能ごとに囲み＋見出しで分けた。
+          並びは 週の移動 → 表示のしかた → 自動で献立を入れる → 献立テンプレ。
+          週の移動だけは「いまどの週を見ているか」で、ほかのグループ全部の前提になるので先頭に置く */}
 
       {/* 週の移動 */}
       <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
@@ -4023,9 +4178,48 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
       </div>
 
-      {/* 表示する食事帯 */}
-      <div className="mt-[var(--space-md)]">{renderSlotFilter()}</div>
+      {/* グループ1: 表示のしかた(週の並べ方・出す食事)。献立そのものは1件も変わらない操作だけを入れる */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+        <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.weekGroupDisplayTitle}</p>
+      {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
+          既定は週区切り・選択は記憶する */}
+      <div className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
+        <button
+          type="button"
+          onClick={() => setWeekLayout(false)}
+          aria-pressed={!rollingWeek}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            !rollingWeek
+              ? 'border-accent bg-accent text-on-accent'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.weekLayoutCalendar}
+        </button>
+        <button
+          type="button"
+          onClick={() => setWeekLayout(true)}
+          aria-pressed={rollingWeek}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            rollingWeek
+              ? 'border-accent bg-accent text-on-accent'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.weekLayoutRolling}
+        </button>
+      </div>
+      {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
+          3体が切替自体を触っていなかった */}
+      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
 
+      {/* 表示する食事帯 */}
+      <div className="mt-[var(--space-sm)]">{renderSlotFilter()}</div>
+      </section>
+
+      {/* グループ2: 自動で献立を入れる(条件＋実行ボタン)。押すと献立が増える操作をここに集める */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+        <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.weekGroupAutoTitle}</p>
       {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
           既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
           畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
@@ -4054,9 +4248,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       {/* 「おまかせで提案」(日タブ)との違いが名前から分からないという指摘への1行説明
           (2026-07-29 便CD/MP-15) */}
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
+      </section>
 
-      {/* A-1 マイ献立テンプレ＋B-2 曜日固定の定番(2026-07-29 便CB-2・docs/59)。
-          保存＝表示中の週を曜日ごと覚える／流し込む＝空いているところにだけ入れる(非破壊) */}
+      {/* グループ3: 献立テンプレ(2026-07-29 便CB-2・docs/59 A-1＋B-2)。
+          保存＝表示中の週を曜日ごと覚える／入れる＝空いているところにだけ入れる(非破壊) */}
+      <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
+        <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.weekGroupTemplateTitle}</p>
       <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
         <button
           type="button"
@@ -4072,16 +4269,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
         >
           <LayoutTemplate size={14} aria-hidden />
-          {ja.mealPlan.templateApply}
+          {ja.mealPlan.templateApplyWeek}
         </button>
       </div>
       <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateSaveDescription}</p>
+      {/* テンプレの中身を見る・直す画面への入口(2026-08-02 便DE-9・オーナー指示)。
+          保存したあと中身を確かめる手段が無く、直すには保存し直すしかなかった */}
+      <Link
+        to="/meal-templates"
+        className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
+      >
+        {ja.mealPlan.templateManageLink}
+      </Link>
+      </section>
 
       {/* 7日分のカード */}
       <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
         {dates.map((date) => (
           <section
             key={date}
+            data-date={date}
             ref={date === today ? todaySectionRef : undefined}
             className={`scroll-mt-[var(--space-md)] rounded-md border p-[var(--space-md)] shadow-sm ${
               date === today ? 'border-accent bg-surface' : 'border-edge bg-surface'
@@ -4274,8 +4481,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         <p className="mt-1 text-center text-sm text-ink-muted">{ja.mealPlan.goToShoppingEmpty}</p>
       )}
 
+      {/* 2026-08-02 便DE-11(オーナー指示): ここから開いた「作った記録」の戻るは、
+          呼び出し元の週タブへ返す(?back=week)。従来はブラウザの戻りで献立タブに戻るだけで、
+          タブの状態は既定の「日」に落ちていた */}
       <Link
-        to="/history"
+        to="/history?back=week"
         className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
       >
         {ja.mealPlan.historyLink}
@@ -4293,7 +4503,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           aria-expanded={clearWeekSlotOpen}
           className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
         >
-          <span className="text-sm font-bold text-ink-muted">{ja.mealPlan.clearWeekSlotTitle}</span>
+          <span className="text-sm font-bold text-ink-muted">
+            {ja.mealPlan.clearWeekSlotTitle.replace(
+              '{slot}',
+              ja.mealPlan.slot[clearSlotTarget],
+            )}
+          </span>
           {clearWeekSlotOpen ? (
             <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
           ) : (
@@ -4683,6 +4898,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 >
                   {ja.mealPlan.templateApplyButton}
                 </button>
+                {/* 入れる前に中身を確かめたいときの入口(2026-08-02 便DE-9) */}
+                <Link
+                  to="/meal-templates"
+                  className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
+                >
+                  {ja.mealPlan.templateManageLink}
+                </Link>
               </>
             )}
           </div>
