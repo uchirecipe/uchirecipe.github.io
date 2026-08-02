@@ -47,6 +47,21 @@
      既定(ライト/ダーク)はアクセントを淡く混ぜた色 */
   --icon-tile: color-mix(in oklab, var(--accent) 12%, var(--surface));
 
+  /* 献立の時間帯（朝食/昼食/夕食）の区分色（2026-08-02 便CW-1）。
+     1日のカードの中で朝・昼・夕がどこで切り替わるのかが分からない、というオーナー指摘への対応。
+     新しい色相は増やさず、アクセントを面に混ぜる比率だけを3段階に変えて区別する
+     （--accent と --surface はテーマごとに再定義されるので、4テーマとも自動で追従する）。
+     ・--slot-bar-* … 各ブロックの左に立てる帯（文字を載せないので濃く振れる＝一番見分けやすい）
+     ・--slot-bg-*  … ブロックの地色。文字（--text-muted）を載せるため 3/6/9% までに抑えている
+       （ライト #fffdf8 と --text-muted #7c6a56 の組で 9% が 4.58:1・ダークで 4.56:1。
+        これ以上濃くすると補足テキストがAA(4.5:1)を割る） */
+  --slot-bar-breakfast: color-mix(in oklab, var(--accent) 35%, var(--surface));
+  --slot-bar-lunch: color-mix(in oklab, var(--accent) 65%, var(--surface));
+  --slot-bar-dinner: var(--accent);
+  --slot-bg-breakfast: color-mix(in oklab, var(--accent) 3%, var(--surface));
+  --slot-bg-lunch: color-mix(in oklab, var(--accent) 6%, var(--surface));
+  --slot-bg-dinner: color-mix(in oklab, var(--accent) 9%, var(--surface));
+
   /* 角丸（3段階） */
   --radius-sm: 8px;
   --radius-md: 14px;

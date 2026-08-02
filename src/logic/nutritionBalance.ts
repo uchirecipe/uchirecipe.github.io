@@ -7,7 +7,7 @@ import {
   type PersonalNutritionSum,
   type RecipeNutrition,
 } from './nutrition'
-import { MEAL_PURPOSES, type MealPurpose, type Recipe } from '../db/types'
+import { MEAL_PURPOSES, type MealPurpose, type MealSlot, type Recipe } from '../db/types'
 
 /**
  * 栄養バランス献立 第1段「見える化」の純ロジック（2026-07-30 便CL・docs/60 第1段）。
@@ -285,6 +285,49 @@ export function dayBalanceMap(input: {
       balance,
       comparable: canCompareDay(balance.nutrition),
     })
+  }
+  return result
+}
+
+/**
+ * 食事（朝食/昼食/夕食）1つぶんの小計（2026-08-02 便CW-6・オーナー要望「朝昼夜別の栄養内訳」）。
+ * 数え方は1日の合計とまったく同じ（sumBalance）で、分ける軸が増えただけ。
+ */
+export interface SlotBalance {
+  slot: MealSlot
+  balance: BalanceSum
+}
+
+/**
+ * 小計を並べる順（朝食→昼食→夕食）。
+ * 同じ並びの定数が logic/mealPlan.ts に MEAL_SLOTS としてあるが、この層は献立エンジンに
+ * 依存しない方針（ファイル冒頭）なので、順序だけをここに持つ。
+ * `satisfies` を付けてあるので、MealSlot に食事が増えたらここで型エラーになる。
+ */
+const SLOT_ORDER = ['breakfast', 'lunch', 'dinner'] as const satisfies readonly MealSlot[]
+
+/**
+ * 1日の献立を食事ごとに小計する（Pro表示用）。
+ *
+ * 並びは MEAL_SLOTS（朝食→昼食→夕食）に固定し、料理が1品も無い食事は返さない
+ * （空の行を並べない）。呼び出し側は「2つ以上の食事に献立がある日」だけ表示に使う
+ * ＝1食しか登録していない日は、1日の合計と同じ数字がもう一度並ぶだけになるため。
+ *
+ * 対象は**登録した献立だけ**。作った記録（CookedLog）には食事の情報が無いので、
+ * 過ぎた日（basis='actual'）の小計は作れない（作れないものを推測で埋めない）。
+ */
+export function slotBalances(dishes: { slot: MealSlot; recipe: BalanceRecipeLike }[]): SlotBalance[] {
+  const bySlot = new Map<MealSlot, BalanceRecipeLike[]>()
+  for (const dish of dishes) {
+    const list = bySlot.get(dish.slot)
+    if (list) list.push(dish.recipe)
+    else bySlot.set(dish.slot, [dish.recipe])
+  }
+  const result: SlotBalance[] = []
+  for (const slot of SLOT_ORDER) {
+    const recipes = bySlot.get(slot)
+    if (!recipes || recipes.length === 0) continue
+    result.push({ slot, balance: sumBalance(recipes) })
   }
   return result
 }

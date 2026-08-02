@@ -119,11 +119,13 @@ import {
 } from '../logic/rangeSummary'
 import {
   dayBalanceMap,
+  slotBalances,
   summarizeWeekBalance,
   purposePenalty,
   reviewPurposeDays,
   PURPOSE_NUTRIENT_KEY,
   type BalanceDish,
+  type SlotBalance,
 } from '../logic/nutritionBalance'
 import { canUseMonthTrial } from '../logic/proTrial'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
@@ -748,10 +750,46 @@ function MonthDayCell({
   )
 }
 
+/**
+ * 時間帯（朝食/昼食/夕食）ごとの区分色（2026-08-02 便CW-1・オーナー実機フィードバック:
+ * 1日のブロックの中で朝・昼・夕の切り替わりが分からない）。
+ * 値は src/index.css のデザイントークン（テーマごとに --accent / --surface から作られる）。
+ * bar=ブロック左の帯・bg=ブロックの地色。色の濃さだけで区別し、新しい色相は増やさない。
+ */
+const SLOT_TONE: Record<MealSlot, { bar: string; bg: string }> = {
+  breakfast: { bar: 'var(--slot-bar-breakfast)', bg: 'var(--slot-bg-breakfast)' },
+  lunch: { bar: 'var(--slot-bar-lunch)', bg: 'var(--slot-bg-lunch)' },
+  dinner: { bar: 'var(--slot-bar-dinner)', bg: 'var(--slot-bg-dinner)' },
+}
+
+/**
+ * 週・月の予定1行の先頭に出す小さなサムネ（2026-08-02 便CW-4・オーナー実機フィードバック:
+ * 週の予定が文字だけで、どの料理か掴みにくい）。写真があれば写真・無ければ料理アイコン。
+ * usePhotoUrl（フック）を呼ぶため、行の描画関数から切り出した部品にしている。
+ */
+function RowThumb({ recipe }: { recipe: Recipe }) {
+  const photoUrl = usePhotoUrl(recipe.photo)
+  return (
+    <span className="h-7 w-7 shrink-0 overflow-hidden rounded-sm">
+      {photoUrl ? (
+        <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <RecipePlaceholder recipe={recipe} iconSize={16} />
+      )}
+    </span>
+  )
+}
+
 /** 献立の1枠内の1行分（主菜/副菜の実データ行、または未割り当てのプレースホルダー行） */
 type MealPlanRow =
   | { kind: 'entry'; entry: MealPlanEntry }
-  | { kind: 'empty'; removable: boolean; extraLocalId?: string }
+  | {
+      kind: 'empty'
+      removable: boolean
+      extraLocalId?: string
+      /** 主菜/副菜が1品も入っていないときに既定で出る空欄行（「＋料理を追加」で増やした行と区別する） */
+      isDefault?: boolean
+    }
 
 /** 「＋枠を追加」で増やした、まだレシピが割り当てられていない行（DBには保存しないUIだけの状態） */
 interface ExtraRow {
@@ -760,12 +798,20 @@ interface ExtraRow {
 }
 
 /** ある日×枠の役割(主菜/副菜)ごとに表示する行を組み立てる。
- * 実データが1件もない役割は「未定」の行を1つ必ず表示し、+ボタンで増やした分を後ろに続ける */
-function buildRoleRows(slotEntries: MealPlanEntry[], role: MealRole, extra: ExtraRow[]): MealPlanRow[] {
+ * 実データが1件もない役割は「未定」の行を1つ表示し、+ボタンで増やした分を後ろに続ける。
+ *
+ * 2026-08-02 便CW-2: その既定の空欄行も×で畳めるようにした（hiddenRoles に入っている役割は
+ * 空欄行を出さない）。戻すのは「＋料理を追加」→主菜/副菜 の既存の入口（addOrRestoreRow）。 */
+function buildRoleRows(
+  slotEntries: MealPlanEntry[],
+  role: MealRole,
+  extra: ExtraRow[],
+  hiddenRoles: MealRole[],
+): MealPlanRow[] {
   const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
   const rows: MealPlanRow[] = roleEntries.map((entry) => ({ kind: 'entry', entry }))
-  if (roleEntries.length === 0) {
-    rows.push({ kind: 'empty', removable: false })
+  if (roleEntries.length === 0 && !hiddenRoles.includes(role)) {
+    rows.push({ kind: 'empty', removable: true, isDefault: true })
   }
   extra
     .filter((x) => x.role === role)
@@ -1443,6 +1489,42 @@ export default function MealPlanPage() {
       [key]: (prev[key] ?? []).filter((r) => r.localId !== localId),
     }))
   }
+  /**
+   * ×で畳んだ「既定の空欄行」（date|slotキー→畳んだ役割の一覧。2026-08-02 便CW-2）。
+   * 「まだ何も入っていない主菜/副菜の枠まで常に出ていて邪魔」というオーナー指摘への対応。
+   * 「＋料理を追加」で増やした行（extraRows）と同じくUI上だけの状態＝DBには保存しない
+   * （献立データは1件も消さない。畳んでいるだけなので、同じ入口から戻せる）。
+   */
+  const [hiddenDefaultRows, setHiddenDefaultRows] = useState<Record<string, MealRole[]>>({})
+  const hideDefaultRow = (date: string, slot: MealSlot, role: MealRole) => {
+    const key = `${date}|${slot}`
+    setHiddenDefaultRows((prev) => ({
+      ...prev,
+      [key]: [...(prev[key] ?? []).filter((r) => r !== role), role],
+    }))
+  }
+  const showDefaultRow = (date: string, slot: MealSlot, role: MealRole) => {
+    const key = `${date}|${slot}`
+    setHiddenDefaultRows((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).filter((r) => r !== role),
+    }))
+  }
+  /**
+   * 「＋料理を追加」→主菜/副菜 の実処理。畳んである既定の空欄行があるときは、それを戻すだけにする
+   * （行を2つ出さない）。畳んでいなければ従来どおり行を1つ増やす。
+   */
+  const addOrRestoreRow = (date: string, slot: MealSlot, role: MealRole) => {
+    const key = `${date}|${slot}`
+    const hasEntry = (entriesByDateSlotAll.get(key) ?? []).some((e) => (e.role ?? 'main') === role)
+    // 既にその役割の料理が入っている枠では、畳んだ記録があっても空欄行は出ない
+    // （＝押しても何も起きない）ので、その場合は従来どおり行を1つ増やす
+    if (!hasEntry && (hiddenDefaultRows[key] ?? []).includes(role)) {
+      showDefaultRow(date, slot, role)
+      return
+    }
+    addExtraRow(date, slot, role)
+  }
   // 「＋枠を追加」タップ後、主菜/副菜どちらを足すか選ぶ小さなメニューの開閉(date|slotキー。同時に1つだけ)
   const [addMenuFor, setAddMenuFor] = useState<string | null>(null)
 
@@ -1658,12 +1740,26 @@ export default function MealPlanPage() {
     )
   }
 
-  /** 行の「×」: 既存の割り当てなら削除、追加しただけの未割り当て行ならUI上から取り消す */
-  const clearRow = async (date: string, slot: MealSlot, entryId?: number, extraLocalId?: string) => {
+  /**
+   * 行の「×」: 既存の割り当てなら削除、追加しただけの未割り当て行ならUI上から取り消す。
+   * 2026-08-02 便CW-2: 既定の空欄行（entryIdもextraLocalIdも無い行）は、その役割の枠ごと畳む。
+   * 料理の入っている行を消したときは、その役割の「畳んだ記録」も消す
+   * （空になった枠に「＋レシピを選ぶ」が戻らないと、次に入れる入口が分からなくなるため）。
+   */
+  const clearRow = async (
+    date: string,
+    slot: MealSlot,
+    role: MealRole,
+    entryId?: number,
+    extraLocalId?: string,
+  ) => {
     if (entryId != null) {
+      showDefaultRow(date, slot, role)
       await removeMealEntry(entryId)
     } else if (extraLocalId) {
       removeExtraRowState(date, slot, extraLocalId)
+    } else {
+      hideDefaultRow(date, slot, role)
     }
   }
 
@@ -2373,6 +2469,8 @@ export default function MealPlanPage() {
   // ただし過去日は集計から外している(2026-07-29 便CD/MP-07。表示から消えている予定が
   // 金額に入っていると何を消せば減るのか辿れないため)
   const [clearSlotTarget, setClearSlotTarget] = useState<MealSlot>('dinner')
+  // 2026-08-02 便CW-3: 既定閉の折りたたみ(週タブのいちばん下)。普段は目に入らない位置に置く
+  const [clearWeekSlotOpen, setClearWeekSlotOpen] = useState(false)
   const clearWeekSlot = async () => {
     const label = ja.mealPlan.slot[clearSlotTarget]
     // 規約F(2026-07-29 便CD/MP-19): 「何が消えるか(件数つき)」と「何が残るか」を両方書く。
@@ -2455,6 +2553,29 @@ export default function MealPlanPage() {
     () => summarizeWeekBalance(weekBalanceByDate.values()),
     [weekBalanceByDate],
   )
+  /**
+   * 日ごと・食事ごとの栄養の小計（2026-08-02 便CW-6・オーナー要望。Pro解錠時だけ画面に出す）。
+   * 元は「登録した献立」だけ＝作った記録には食事(朝/昼/夕)の情報が無いので、
+   * 過ぎた日(basis='actual'の日)には出さない。2つ以上の食事に献立がある日だけMapに入れる
+   * （1食だけの日は1日の合計と同じ数字がもう一度並ぶだけになるため）。
+   */
+  const weekSlotBalanceByDate = useMemo(() => {
+    const byDate = new Map<string, { slot: MealSlot; recipe: Recipe }[]>()
+    ;(entries ?? []).forEach((e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (!recipe) return
+      const list = byDate.get(e.date)
+      if (list) list.push({ slot: e.slot, recipe })
+      else byDate.set(e.date, [{ slot: e.slot, recipe }])
+    })
+    const result = new Map<string, SlotBalance[]>()
+    byDate.forEach((dishes, date) => {
+      if (weekBalanceByDate.get(date)?.basis !== 'plan') return
+      const list = slotBalances(dishes)
+      if (list.length > 1) result.set(date, list)
+    })
+    return result
+  }, [entries, recipeById, weekBalanceByDate])
 
   const weeklyBudget = settings?.weeklyBudget
   const budgetDiff = weeklyBudget != null ? weeklyBudget - weekCost : undefined
@@ -2534,6 +2655,8 @@ export default function MealPlanPage() {
             </>
           ) : (
             <>
+              {/* 2026-08-02 便CW-4: 文字だけの行に小さなサムネ(写真か料理アイコン)を足す */}
+              <RowThumb recipe={recipe!} />
               {isCooked && (
                 <CheckCircle2 size={14} className="shrink-0 text-accent-ink" aria-hidden />
               )}
@@ -2563,8 +2686,15 @@ export default function MealPlanPage() {
         {showRemove && (
           <button
             type="button"
-            onClick={() => void clearRow(date, slot, entryId, extraLocalId)}
-            aria-label={row.kind === 'entry' ? ja.mealPlan.clear : ja.mealPlan.removeExtraRow}
+            onClick={() => void clearRow(date, slot, role, entryId, extraLocalId)}
+            aria-label={
+              row.kind === 'entry'
+                ? ja.mealPlan.clear
+                : row.isDefault
+                  ? // 2026-08-02 便CW-2: 既定の空欄行を畳む×。何が起きるかを読み上げでも言い分ける
+                    ja.mealPlan.hideEmptyRow.replace('{role}', ja.mealPlan.role[role])
+                  : ja.mealPlan.removeExtraRow
+            }
             className="rounded-full p-2 text-ink-muted"
           >
             <X size={18} aria-hidden />
@@ -2584,8 +2714,9 @@ export default function MealPlanPage() {
     const slotKey = `${date}|${slot}`
     const slotEntries = entriesByDateSlotAll.get(slotKey) ?? []
     const extra = extraRows[slotKey] ?? []
-    const mainRows = buildRoleRows(slotEntries, 'main', extra)
-    const sideRows = buildRoleRows(slotEntries, 'side', extra)
+    const hiddenRoles = hiddenDefaultRows[slotKey] ?? []
+    const mainRows = buildRoleRows(slotEntries, 'main', extra, hiddenRoles)
+    const sideRows = buildRoleRows(slotEntries, 'side', extra, hiddenRoles)
     const isAddMenuOpen = addMenuFor === slotKey
     // ジャンル混在の控えめ表示(便BH-2・docs/56 §3-10): 主菜のジャンルに対して
     // 副菜が別ジャンルのとき「ジャンル混在」バッジを出す(揃っている枠は無表示)
@@ -2605,7 +2736,17 @@ export default function MealPlanPage() {
     const showOneDishNote =
       !!slotMainRecipe && isOneDish(slotMainRecipe) && slotSideRecipes.length === 0
     return (
-      <div key={slot}>
+      // 2026-08-02 便CW-1: 朝食/昼食/夕食を1日のカードの中で見分けられるように、
+      // 食事ごとに囲みを付け、左の帯と地色をトークンで段階的に変える(SLOT_TONE)
+      <div
+        key={slot}
+        className="rounded-md border border-l-4 p-[var(--space-sm)]"
+        style={{
+          background: SLOT_TONE[slot].bg,
+          borderColor: 'var(--border)',
+          borderLeftColor: SLOT_TONE[slot].bar,
+        }}
+      >
         <div className="flex items-center gap-2">
           <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
           {/* 2026-07-29 便CD/MP-08: 説明がtitle属性(ホバー)にしかなく、スマホでは
@@ -2637,7 +2778,7 @@ export default function MealPlanPage() {
             <button
               type="button"
               onClick={() => {
-                addExtraRow(date, slot, 'main')
+                addOrRestoreRow(date, slot, 'main')
                 setAddMenuFor(null)
               }}
               className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
@@ -2647,7 +2788,7 @@ export default function MealPlanPage() {
             <button
               type="button"
               onClick={() => {
-                addExtraRow(date, slot, 'side')
+                addOrRestoreRow(date, slot, 'side')
                 setAddMenuFor(null)
               }}
               className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
@@ -3647,37 +3788,6 @@ export default function MealPlanPage() {
       {/* 表示する食事帯 */}
       <div className="mt-[var(--space-md)]">{renderSlotFilter()}</div>
 
-      {/* この帯の今週分を空にする(便U-4)。表示帯フィルタのすぐ近くに配置 */}
-      <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-sm)]">
-        <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.clearWeekSlotTitle}</p>
-        <div className="mt-1 flex flex-wrap gap-2">
-          {MEAL_SLOTS.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              onClick={() => setClearSlotTarget(slot)}
-              aria-pressed={clearSlotTarget === slot}
-              aria-label={ja.mealPlan.clearWeekSlotTargetAria.replace('{slot}', ja.mealPlan.slot[slot])}
-              className={`rounded-sm border px-3 py-1.5 text-sm font-bold ${
-                clearSlotTarget === slot
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-app text-ink-muted'
-              }`}
-            >
-              {ja.mealPlan.slot[slot]}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          onClick={() => void clearWeekSlot()}
-          className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-warning underline"
-        >
-          <Trash2 size={14} aria-hidden />
-          {ja.mealPlan.clearWeekSlotButton}
-        </button>
-      </div>
-
       {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
           既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
           畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
@@ -3793,8 +3903,7 @@ export default function MealPlanPage() {
                     dateLabel={date.replaceAll('-', '/')}
                     isPro={isPro}
                     balance={dayBalance.balance}
-                    comparable={dayBalance.comparable}
-                    guideDays={1}
+                    slotBreakdown={weekSlotBalanceByDate.get(date)}
                   />
                 </div>
               )
@@ -3818,13 +3927,7 @@ export default function MealPlanPage() {
           概算食費カードの隣(すぐ上)に置く: どちらも「この週ぜんぶを振り返る数字」なので同じ場所に集める */}
       {weekBalance.countedDays > 0 && (
         <div className="mt-[var(--space-md)]">
-          <NutritionBalancePanel
-            scope="week"
-            isPro={isPro}
-            balance={weekBalance.balance}
-            comparable={weekBalance.comparable}
-            guideDays={weekBalance.countedDays}
-          />
+          <NutritionBalancePanel scope="week" isPro={isPro} balance={weekBalance.balance} />
         </div>
       )}
 
@@ -3923,6 +4026,60 @@ export default function MealPlanPage() {
       >
         {ja.mealPlan.historyLink}
       </Link>
+
+      {/* 食事を選んでこの週の予定をまとめて消す(便U-4 → 2026-08-02 便CW-3で改名・折りたたみ・移動)。
+          自動提案で入った予定も手で入れた予定も区別なく消える実挙動に合わせて名前を付け直し、
+          普段は目に入らないよう既定閉の折りたたみにして週タブのいちばん下へ移した
+          (従来は「表示する食事」のすぐ下＝毎回目に入る位置に開いたまま置いていた)。
+          確認文は規約Fのまま(何が消えるか・何が残るかを件数つきで両方書く) */}
+      <section className="mt-[var(--space-lg)] rounded-md border border-edge bg-surface shadow-sm">
+        <button
+          type="button"
+          onClick={() => setClearWeekSlotOpen((v) => !v)}
+          aria-expanded={clearWeekSlotOpen}
+          className="flex w-full items-center justify-between gap-2 p-[var(--space-md)] text-left"
+        >
+          <span className="text-sm font-bold text-ink-muted">{ja.mealPlan.clearWeekSlotTitle}</span>
+          {clearWeekSlotOpen ? (
+            <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
+          ) : (
+            <ChevronDown size={18} className="shrink-0 text-ink-muted" aria-hidden />
+          )}
+        </button>
+        {clearWeekSlotOpen && (
+          <div className="px-[var(--space-md)] pb-[var(--space-md)]">
+            <div className="flex flex-wrap gap-2">
+              {MEAL_SLOTS.map((slot) => (
+                <button
+                  key={slot}
+                  type="button"
+                  onClick={() => setClearSlotTarget(slot)}
+                  aria-pressed={clearSlotTarget === slot}
+                  aria-label={ja.mealPlan.clearWeekSlotTargetAria.replace(
+                    '{slot}',
+                    ja.mealPlan.slot[slot],
+                  )}
+                  className={`rounded-sm border px-3 py-1.5 text-sm font-bold ${
+                    clearSlotTarget === slot
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-app text-ink-muted'
+                  }`}
+                >
+                  {ja.mealPlan.slot[slot]}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => void clearWeekSlot()}
+              className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-warning underline"
+            >
+              <Trash2 size={14} aria-hidden />
+              {ja.mealPlan.clearWeekSlotButton}
+            </button>
+          </div>
+        )}
+      </section>
       </>
       )}
 
