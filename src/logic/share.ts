@@ -282,9 +282,12 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
 
   const bg = tokenColor('--bg', '#faf5ec')
   const ink = tokenColor('--text', '#43362a')
-  // 線画のティントと下部の帯の「塗り」は--accent、見出しの「文字」は--accent-ink(2026-07-30)
-  const accent = tokenColor('--accent', '#d9480f')
-  const accentInk = tokenColor('--accent-ink', '#b8380a')
+  // 線画のティントと下部の帯の「塗り」は--accent、見出しの「文字」は文字用の--accent-ink(2026-07-30)。
+  // 文字用は2026-08-02から「載る面」で値が分かれる(--accent-ink-page / --accent-ink-surface)。
+  // ここで描く1枚絵の地は上の--bg＝カード面と同じクリームなので、カード面用の値を読む
+  // (tokenColorは<html>から読むため、そのまま--accent-inkを読むとページ背景用の濃い方になる)
+  const accent = tokenColor('--accent', '#cc3f01')
+  const accentInk = tokenColor('--accent-ink-surface', '#b8380a')
   const muted = tokenColor('--text-muted', '#7c6a56')
 
   // 背景

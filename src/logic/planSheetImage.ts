@@ -77,9 +77,11 @@ export async function generatePlanSheetImage(sheet: PlanSheet): Promise<Blob> {
 
   const bg = tokenColor('--bg', '#faf5ec')
   const ink = tokenColor('--text', '#43362a')
-  // 帯の「塗り」は--accent、日付見出しの「文字」は文字用に濃くした--accent-ink(2026-07-30)
-  const accent = tokenColor('--accent', '#d9480f')
-  const accentInk = tokenColor('--accent-ink', '#b8380a')
+  // 帯の「塗り」は--accent、日付見出しの「文字」は文字用に濃くした--accent-ink(2026-07-30)。
+  // 文字用は2026-08-02から面別(--accent-ink-page / --accent-ink-surface)。この1枚絵の地は
+  // --bg＝カード面と同じクリームなので、share.tsの画像カードと同じくカード面用の値を読む
+  const accent = tokenColor('--accent', '#cc3f01')
+  const accentInk = tokenColor('--accent-ink-surface', '#b8380a')
   const muted = tokenColor('--text-muted', '#7c6a56')
 
   ctx.fillStyle = bg
