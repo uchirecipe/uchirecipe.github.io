@@ -6460,13 +6460,18 @@ try {
       const svBase = Number(((await svServingsBtn.textContent()) ?? '').replace(/[^0-9]/g, ''))
 
       // 既定(食数を触っていない)ときの買い物メモの分量を控える
+      // (下書きの分量欄はtextarea。inputではないので取り違えないこと)
+      const svReadAmounts = async () => {
+        await svPage.waitForSelector('textarea', { timeout: 15000 })
+        return svPage.evaluate(() =>
+          [...document.querySelectorAll('textarea')]
+            .map((t) => t.value)
+            .filter((v) => v && /[0-9]/.test(v)),
+        )
+      }
       await svPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
-      await svPage.waitForTimeout(1500)
-      const svAmountsBefore = await svPage.evaluate(() =>
-        [...document.querySelectorAll('input')]
-          .map((i) => i.value)
-          .filter((v) => v && /[0-9]/.test(v)),
-      )
+      await svPage.waitForTimeout(1200)
+      const svAmountsBefore = await svReadAmounts()
       check(
         'MEALPLAN-SERV 前提: 献立から買い物メモの下書きができる',
         svAmountsBefore.length > 0,
@@ -6508,13 +6513,17 @@ try {
         `saved=${JSON.stringify(svSaved)}`,
       )
       await svPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
-      await svPage.waitForTimeout(1500)
-      const svAmountsAfter = await svPage.evaluate(() =>
-        [...document.querySelectorAll('input')]
-          .map((i) => i.value)
-          .filter((v) => v && /[0-9]/.test(v)),
-      )
-      const svNum = (v) => Number((v.match(/[\d.]+/) ?? ['0'])[0])
+      await svPage.waitForTimeout(1200)
+      const svAmountsAfter = await svReadAmounts()
+      // 分量は「小さじ1/2」のような分数表記も出るので、分数のまま数値にして比べる
+      const svNum = (v) => {
+        const mixed = v.match(/(\d+)\s*と\s*(\d+)\/(\d+)/)
+        if (mixed) return Number(mixed[1]) + Number(mixed[2]) / Number(mixed[3])
+        const frac = v.match(/(\d+)\/(\d+)/)
+        if (frac) return Number(frac[1]) / Number(frac[2])
+        const dec = v.match(/\d+(?:\.\d+)?/)
+        return dec ? Number(dec[0]) : 0
+      }
       check(
         'MEALPLAN-SERV 食数を2倍にすると買い物メモの分量も2倍になる',
         svAmountsAfter.length === svAmountsBefore.length &&
