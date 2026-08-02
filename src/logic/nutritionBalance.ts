@@ -7,7 +7,7 @@ import {
   type PersonalNutritionSum,
   type RecipeNutrition,
 } from './nutrition'
-import { MEAL_PURPOSES, type MealPurpose, type Recipe } from '../db/types'
+import { MEAL_PURPOSES, type MealPurpose, type MealSlot, type Recipe } from '../db/types'
 
 /**
  * 栄養バランス献立 第1段「見える化」の純ロジック（2026-07-30 便CL・docs/60 第1段）。
@@ -178,6 +178,44 @@ export function sumBalance(recipes: BalanceRecipeLike[]): BalanceSum {
   return { nutrition, vegetableG }
 }
 
+// ---------- ごはんを含めて計算する（2026-08-02 便CW-10・オーナー承認。無料・既定OFF） ----------
+
+/**
+ * 「ごはん1杯」を1品として数えるための擬似レシピ（1人分＝1杯）。
+ *
+ * 量も成分値も、日本食品標準成分表の「ご飯」（01088・logic/nutritionData.ts）から
+ * **機械的に**引く。「1杯＝150g」は成分表側の unitGrams が持っている定義で、
+ * ここにも画面にも数字を書き写さない（書き写すと成分表を直したときに片方だけ古くなる）。
+ *
+ * 献立に登録するのは「おかず」だけで、ごはんは登録しない人が大半という前提の機能。
+ * 加えるのは各食1杯だけで、丼・麺・カレーのように主食を含む主菜の食事には加えない
+ * （どの食事に加えるかの判定は、一品ものの定義を持つ献立エンジン側＝呼び出し側が決める）。
+ */
+export const RICE_SERVING_RECIPE: BalanceRecipeLike = {
+  servings: 1,
+  ingredients: [{ name: 'ご飯', amount: '1', unit: '杯' }],
+}
+
+/**
+ * ごはん1杯のグラム数（UI文言に埋める値）。成分表の換算をそのまま使う＝手書きしない。
+ * 名寄せできない・換算できない場合は 0 を返す（そのときUIは量を出さない）。
+ */
+let riceGramsCache: number | undefined
+export function riceServingGrams(): number {
+  if (riceGramsCache != null) return riceGramsCache
+  const nutrition = computeRecipeNutrition(RICE_SERVING_RECIPE)
+  let grams = 0
+  for (const item of nutrition.items) grams += item.grams
+  riceGramsCache = Math.round(grams)
+  return riceGramsCache
+}
+
+/** ごはん{n}杯ぶんの擬似レシピ列（日・週の合計に足し込むために使う） */
+export function riceServingRecipes(servings: number): BalanceRecipeLike[] {
+  const count = Math.max(0, Math.floor(servings))
+  return Array.from({ length: count }, () => RICE_SERVING_RECIPE)
+}
+
 // ---------- めやすとの並置を出してよいかの判定（docs/60 §5） ----------
 
 /**
@@ -285,6 +323,49 @@ export function dayBalanceMap(input: {
       balance,
       comparable: canCompareDay(balance.nutrition),
     })
+  }
+  return result
+}
+
+/**
+ * 食事（朝食/昼食/夕食）1つぶんの小計（2026-08-02 便CW-6・オーナー要望「朝昼夜別の栄養内訳」）。
+ * 数え方は1日の合計とまったく同じ（sumBalance）で、分ける軸が増えただけ。
+ */
+export interface SlotBalance {
+  slot: MealSlot
+  balance: BalanceSum
+}
+
+/**
+ * 小計を並べる順（朝食→昼食→夕食）。
+ * 同じ並びの定数が logic/mealPlan.ts に MEAL_SLOTS としてあるが、この層は献立エンジンに
+ * 依存しない方針（ファイル冒頭）なので、順序だけをここに持つ。
+ * `satisfies` を付けてあるので、MealSlot に食事が増えたらここで型エラーになる。
+ */
+const SLOT_ORDER = ['breakfast', 'lunch', 'dinner'] as const satisfies readonly MealSlot[]
+
+/**
+ * 1日の献立を食事ごとに小計する（Pro表示用）。
+ *
+ * 並びは MEAL_SLOTS（朝食→昼食→夕食）に固定し、料理が1品も無い食事は返さない
+ * （空の行を並べない）。呼び出し側は「2つ以上の食事に献立がある日」だけ表示に使う
+ * ＝1食しか登録していない日は、1日の合計と同じ数字がもう一度並ぶだけになるため。
+ *
+ * 対象は**登録した献立だけ**。作った記録（CookedLog）には食事の情報が無いので、
+ * 過ぎた日（basis='actual'）の小計は作れない（作れないものを推測で埋めない）。
+ */
+export function slotBalances(dishes: { slot: MealSlot; recipe: BalanceRecipeLike }[]): SlotBalance[] {
+  const bySlot = new Map<MealSlot, BalanceRecipeLike[]>()
+  for (const dish of dishes) {
+    const list = bySlot.get(dish.slot)
+    if (list) list.push(dish.recipe)
+    else bySlot.set(dish.slot, [dish.recipe])
+  }
+  const result: SlotBalance[] = []
+  for (const slot of SLOT_ORDER) {
+    const recipes = bySlot.get(slot)
+    if (!recipes || recipes.length === 0) continue
+    result.push({ slot, balance: sumBalance(recipes) })
   }
   return result
 }

@@ -9,10 +9,11 @@ import {
 } from '../logic/nutrition'
 import {
   DAILY_GUIDES,
-  guideForDays,
+  riceServingGrams,
   roundVegetableGrams,
   type BalanceBasis,
   type BalanceSum,
+  type SlotBalance,
 } from '../logic/nutritionBalance'
 import { ProNutrientTeaser } from './NutritionTeaser'
 import { ja } from '../i18n/ja'
@@ -30,12 +31,12 @@ import { ja } from '../i18n/ja'
  *   食塩相当量は無料側から外してPro側へ移した。野菜量は無料のまま＝docs/60 §7 未決#3＝(a)
  *   オーナー承認済み。第2段のエンジンが使う基準そのものなので、無料ユーザーにも見えないと
  *   選定理由が説明できない）。
- * - **めやすを並置するのは食塩相当量と野菜量だけ**（docs/60 §7 未決#2＝(a)）。
- *   このうち食塩相当量のめやすはPro解錠時のみ出す（値そのものがPro側なので、めやすだけ先に
- *   出すと無料側に塩分の話が残ってしまう）。野菜量のめやすは無料でも出す。
+ * - **1日のめやす（食塩相当量・野菜量）は説明文1行で書く**（2026-08-02 便CW-7・オーナー指示。
+ *   従来の「1日のめやすとくらべる」＝値ごとの並置UIは廃止した）。食塩相当量のめやすは
+ *   Pro解錠時のみ出す（値そのものがPro側なので、めやすだけ先に出すと無料側に塩分の話が残る）。
  *   エネルギー・たんぱく質・脂質・炭水化物にはめやすの線を引かない（docs/60 §1-2）。
- * - 不足・過多は断定しない。色でも善悪を表さない（数値の並置のみ）。
- * - 計算できない品が混ざる日は、めやすとの並置自体を出さない（docs/60 §5・NUT-01/02の作法）。
+ * - 不足・過多は断定しない。色でも善悪を表さない。
+ * - **食事（朝食/昼食/夕食）ごとの小計はPro解錠時のみ**（2026-08-02 便CW-6・オーナー要望）。
  */
 export default function NutritionBalancePanel({
   scope,
@@ -43,8 +44,9 @@ export default function NutritionBalancePanel({
   dateLabel,
   isPro,
   balance,
-  comparable,
-  guideDays,
+  includeRice,
+  onToggleIncludeRice,
+  slotBreakdown,
 }: {
   /** 'day' = 週タブの各日カード / 'week' = 週まとめ */
   scope: 'day' | 'week'
@@ -54,10 +56,16 @@ export default function NutritionBalancePanel({
   dateLabel?: string
   isPro: boolean
   balance: BalanceSum
-  /** めやすとの並置を出してよいか（canCompareDay / canCompareRange の結果） */
-  comparable: boolean
-  /** めやすを何日ぶんに伸ばすか（day=1・week=献立や記録がある日数） */
-  guideDays: number
+  /** 「ごはんを含めて計算する」の現在値（2026-08-02 便CW-10。無料・既定OFF） */
+  includeRice: boolean
+  /** 同チェックの切り替え（設定に保存する。押した瞬間から日・週・食費の数字に効く） */
+  onToggleIncludeRice: (next: boolean) => void
+  /**
+   * 食事ごとの小計（2026-08-02 便CW-6。Pro解錠時だけ展開部に出す）。
+   * 2つ以上の食事に献立があるときだけ渡す＝1食だけの日は1日の合計と同じ数字になるので出さない。
+   * 作った記録には食事の情報が無いため、過ぎた日（basis='actual'）には渡らない
+   */
+  slotBreakdown?: SlotBalance[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const unlocked = isNutritionUnlocked(isPro)
@@ -83,22 +91,19 @@ export default function NutritionBalancePanel({
   // （390px幅では「塩分約」で改行されて読みにくかった）。
   // 塩分はPro解錠時のみ（2026-08-01 線引きB'。無料は「約◯kcal・野菜約◯g」の2値）
   const summaryValues = canShowNumbers
-    ? [
-        ja.nutritionBalance.summaryKcal.replace(
-          '{n}',
-          roundNutrient('kcal', per.kcal).toLocaleString(),
-        ),
-        ...(unlocked
-          ? [
-              ja.nutritionBalance.summarySalt.replace(
-                '{n}',
-                roundNutrient('saltG', per.saltG).toLocaleString(),
-              ),
-            ]
-          : []),
-        ja.nutritionBalance.summaryVegetable.replace('{n}', vegetableG.toLocaleString()),
-      ]
+    ? summaryValuesOf(balance, unlocked)
     : [ja.nutrition.unavailableSummary]
+  // 1日のめやす（食塩相当量・野菜量）の説明文1行（2026-08-02 便CW-7）。
+  // 数値は DAILY_GUIDES から埋める＝基準値をUIに直書きしない（docs/60 §1-1）
+  const guideNote = unlocked
+    ? ja.nutritionBalance.guideNote
+        .replace('{male}', DAILY_GUIDES.saltG.male.toLocaleString())
+        .replace('{female}', DAILY_GUIDES.saltG.female.toLocaleString())
+        .replace('{veg}', DAILY_GUIDES.vegetableG.perDayG.toLocaleString())
+    : ja.nutritionBalance.guideNoteFree.replace(
+        '{veg}',
+        DAILY_GUIDES.vegetableG.perDayG.toLocaleString(),
+      )
 
   const ChevronIcon = expanded ? ChevronUp : ChevronDown
   const toggleLabel =
@@ -145,23 +150,31 @@ export default function NutritionBalancePanel({
           {canShowNumbers && (
             <NutrientRows totals={per} vegetableG={vegetableG} unlocked={unlocked} />
           )}
+          {/* 食事ごとの小計（Pro・2026-08-02 便CW-6）。1日の合計のすぐ下に置く */}
+          {canShowNumbers && unlocked && slotBreakdown && slotBreakdown.length > 1 && (
+            <SlotBreakdown slots={slotBreakdown} />
+          )}
           {!unlocked && <ProNutrientTeaser isPro={isPro} />}
-          {canShowNumbers &&
-            (comparable ? (
-              <GuideBlock
-                totals={per}
-                vegetableG={vegetableG}
-                guideDays={guideDays}
-                showDaysNote={scope === 'week'}
-                unlocked={unlocked}
+          {/* ごはんを含めて計算する（2026-08-02 便CW-10・無料・既定OFF）。
+              選択は設定に残り、日・週の合計と週の概算食費に同時に効く */}
+          <div className="rounded-md border border-edge p-[var(--space-sm)]">
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={includeRice}
+                onChange={(e) => onToggleIncludeRice(e.target.checked)}
+                data-testid="include-rice"
+                className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--accent)]"
               />
-            ) : (
-              <p className="text-xs text-ink-muted">
-                {scope === 'week'
-                  ? ja.nutritionBalance.noCompareRange
-                  : ja.nutritionBalance.noCompareDay}
-              </p>
-            ))}
+              <span className="text-sm font-bold">
+                {ja.nutritionBalance.includeRiceLabel.replace('{g}', String(riceServingGrams()))}
+              </span>
+            </label>
+            <p className="mt-1 text-xs text-ink-muted">{ja.nutritionBalance.includeRiceHint}</p>
+          </div>
+          {/* 1日のめやすは説明文1行だけにする（2026-08-02 便CW-7・オーナー指示）。
+              自分の数値との並置・良し悪しの判定はしない */}
+          {canShowNumbers && <p className="text-xs text-ink-muted">{guideNote}</p>}
           <div className="space-y-0.5 text-xs text-ink-muted">
             <p>
               {scope === 'week'
@@ -187,7 +200,11 @@ export default function NutritionBalancePanel({
                 )}
               </p>
             )}
-            <p>{ja.nutritionBalance.registeredOnlyNote}</p>
+            <p>
+              {includeRice
+                ? ja.nutritionBalance.registeredOnlyNoteWithRice
+                : ja.nutritionBalance.registeredOnlyNote}
+            </p>
             <p>{ja.nutritionBalance.registeredOnlyMealNote}</p>
             {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
                 （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す） */}
@@ -290,57 +307,57 @@ function NutrientRows({
 }
 
 /**
- * めやすとの並置（食塩相当量・野菜量のみ）。
- * 不足・過多は断定せず、バーや色による達成表示も出さない＝数値を並べるだけ（docs/60 §1-3-2）。
- * 男女の値は併記する（第3段の「めやすの基準」を作るまでは、どちらか一方に丸めると
- * 「自分の値ではない数字」を出すことになるため。docs/60 §7 未決#5＝(b)）。
- *
- * 2026-08-01 線引きB': 食塩相当量の行はPro解錠時のみ。無料では野菜量のめやすだけを並べる。
+ * 折りたたんだ1行と同じ値の並び（「約516kcal・塩分約2.1g・野菜約120g」）を組み立てる。
+ * 1日の合計にも食事ごとの小計にも同じ関数を使う＝同じ数字の出し方を2か所に書かない。
+ * 塩分はPro解錠時のみ（2026-08-01 線引きB'）。
  */
-function GuideBlock({
-  totals,
-  vegetableG,
-  guideDays,
-  showDaysNote,
-  unlocked,
-}: {
-  totals: NutrientTotals
-  vegetableG: number
-  guideDays: number
-  showDaysNote: boolean
-  unlocked: boolean
-}) {
-  const days = guideDays > 0 ? guideDays : 1
-  const round1 = (v: number) => Math.round(v * 10) / 10
-  const saltMale = round1(guideForDays(DAILY_GUIDES.saltG.male, days))
-  const saltFemale = round1(guideForDays(DAILY_GUIDES.saltG.female, days))
-  const vegetableGuide = guideForDays(DAILY_GUIDES.vegetableG.perDayG, days)
+function summaryValuesOf(balance: BalanceSum, unlocked: boolean): string[] {
+  const per = balance.nutrition.total
+  return [
+    ja.nutritionBalance.summaryKcal.replace(
+      '{n}',
+      roundNutrient('kcal', per.kcal).toLocaleString(),
+    ),
+    ...(unlocked
+      ? [
+          ja.nutritionBalance.summarySalt.replace(
+            '{n}',
+            roundNutrient('saltG', per.saltG).toLocaleString(),
+          ),
+        ]
+      : []),
+    ja.nutritionBalance.summaryVegetable.replace(
+      '{n}',
+      roundVegetableGrams(balance.vegetableG).toLocaleString(),
+    ),
+  ]
+}
+
+/**
+ * 食事（朝食/昼食/夕食）ごとの小計（2026-08-02 便CW-6・オーナー要望。Pro解錠時のみ）。
+ * 1日の合計と同じ値の並びを、食事ごとに1行ずつ出すだけ＝新しい計算も新しい判定も足さない。
+ */
+function SlotBreakdown({ slots }: { slots: SlotBalance[] }) {
   return (
     <div className="rounded-md border border-edge p-[var(--space-sm)]">
       <p className="text-sm font-bold text-ink-muted">
-        {days === 1
-          ? ja.nutritionBalance.guideTitleDay
-          : ja.nutritionBalance.guideTitleDays.replace('{n}', String(days))}
+        {ja.nutritionBalance.slotBreakdownTitle}
       </p>
-      {unlocked && (
-        <p className="mt-1 text-sm tabular-nums">
-          {ja.nutritionBalance.guideSaltRow
-            .replace('{v}', roundNutrient('saltG', totals.saltG).toLocaleString())
-            .replace('{male}', saltMale.toLocaleString())
-            .replace('{female}', saltFemale.toLocaleString())}
-        </p>
-      )}
-      {/* 塩分の行が出るときは行間を詰め、無料（野菜だけ）のときは見出しからの間隔を空ける */}
-      <p className={`${unlocked ? 'mt-0.5' : 'mt-1'} text-sm tabular-nums`}>
-        {ja.nutritionBalance.guideVegetableRow
-          .replace('{v}', vegetableG.toLocaleString())
-          .replace('{guide}', vegetableGuide.toLocaleString())}
-      </p>
-      {showDaysNote && (
-        <p className="mt-1 text-xs text-ink-muted">
-          {ja.nutritionBalance.guideDaysNote.replace('{n}', String(days))}
-        </p>
-      )}
+      <dl className="mt-1 space-y-0.5">
+        {slots.map(({ slot, balance }) => (
+          <div key={slot} className="flex flex-wrap items-baseline gap-x-2">
+            <dt className="text-sm font-bold">{ja.mealPlan.slot[slot]}</dt>
+            <dd className="text-sm tabular-nums text-ink-muted">
+              {summaryValuesOf(balance, true).map((value, i) => (
+                <span key={value} className="whitespace-nowrap">
+                  {i > 0 && ja.nutritionBalance.summarySeparator}
+                  {value}
+                </span>
+              ))}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   )
 }

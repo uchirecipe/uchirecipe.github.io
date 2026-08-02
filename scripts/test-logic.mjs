@@ -162,7 +162,11 @@ import {
   guideForDays,
   purposeAxisValue,
   purposePenalty,
+  RICE_SERVING_RECIPE,
   reviewPurposeDays,
+  riceServingGrams,
+  riceServingRecipes,
+  slotBalances,
   sumBalance,
   summarizeWeekBalance,
   vegetableGrams,
@@ -4995,14 +4999,14 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
     kcalPerServing: 100, saltPerServing: 1.2,
   }
   const normal = buildShareText(recipe, { ...base })
-  eq('シェア: 部分欠落が無ければ従来どおりの栄養行', normal.includes('1食あたり 約100kcal・塩分 約1.2g（めやす）'), true)
+  eq('シェア: 部分欠落が無ければ従来どおりの栄養行', normal.includes('1食あたり 約100kcal・塩分 約1.2g（概算）'), true)
   const partial = buildShareText(recipe, { ...base, nutritionHasGap: true })
-  eq('シェア: 部分欠落があれば「一部の材料を除く」を添える', partial.includes('（めやす・一部の材料を除く）'), true)
+  eq('シェア: 部分欠落があれば「一部の材料を除く」を添える', partial.includes('（概算・一部の材料を除く）'), true)
 
   // 2026-08-01 線引きB': 塩分はPro側の項目。無料(saltPerServing未指定)ではカロリーだけの行にする
   // (従来はkcalとsaltが揃わないと栄養行そのものが出なかった)
   const freeLine = buildShareText(recipe, { ...base, saltPerServing: undefined })
-  eq('シェア(B\'): 塩分なし(無料)はカロリーだけの栄養行', freeLine.includes('1食あたり 約100kcal（めやす）'), true)
+  eq('シェア(B\'): 塩分なし(無料)はカロリーだけの栄養行', freeLine.includes('1食あたり 約100kcal（概算）'), true)
   eq('シェア(B\'): 塩分なし(無料)の栄養行に塩分が出ない', freeLine.includes('塩分'), false)
   const freePartial = buildShareText(recipe, {
     ...base,
@@ -5011,7 +5015,7 @@ eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
   })
   eq(
     'シェア(B\'): 塩分なし+部分欠落は「一部の材料を除く」を添える',
-    freePartial.includes('1食あたり 約100kcal（めやす・一部の材料を除く）'),
+    freePartial.includes('1食あたり 約100kcal（概算・一部の材料を除く）'),
     true,
   )
 }
@@ -6924,7 +6928,7 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   // 組合せ3: 栄養ON → カロリー・塩分の2項目のみ+「めやす」表記必須
   const expectedWithNutrition = expectedDefault.replace(
     '肉じゃが\n2人分\n【材料】',
-    '肉じゃが\n2人分\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n【材料】',
+    '肉じゃが\n2人分\n1食あたり 約498kcal・塩分 約4.1g（概算）\n【材料】',
   )
   eq(
     'share: 栄養ONでカロリー・塩分(めやす)の行が入る',
@@ -6960,7 +6964,7 @@ eq('端数は丸める', formatMinutesSecondsLabel(60.4), '1分')
   // 全部ON: 任意行の順序は 調理時間→原価→栄養(仕様のモーダル並び順と同じ)
   const expectedFull = expectedAll.replace(
     '肉じゃが\n2人分\n【材料】',
-    '肉じゃが\n2人分\n調理時間 約30分\n原価 1人分 約210円／全量（2人分） 約420円\n1食あたり 約498kcal・塩分 約4.1g（めやす）\n【材料】',
+    '肉じゃが\n2人分\n調理時間 約30分\n原価 1人分 約210円／全量（2人分） 約420円\n1食あたり 約498kcal・塩分 約4.1g（概算）\n【材料】',
   )
   eq(
     'share: 全部ONの行順は調理時間→原価→栄養',
@@ -8635,6 +8639,48 @@ eq(
     'CL-DAY 週まとめの品数も各日の合算',
     summarizeWeekBalance(clMap.values()).balance.nutrition.dishCount,
     3,
+  )
+
+  // (3b) 食事ごとの小計(2026-08-02 便CW-6。Pro表示の「食事ごとの内訳」)。
+  // 並びは朝食→昼食→夕食に固定・料理が無い食事は返さない・数え方は1日の合計と同じ
+  const clSlots = slotBalances([
+    { slot: 'dinner', recipe: cabbage },
+    { slot: 'breakfast', recipe: carrot },
+    { slot: 'dinner', recipe: carrot },
+  ])
+  eq('CL-SLOT 料理のある食事だけを返す', clSlots.length, 2)
+  eq(
+    'CL-SLOT 並びは朝食→昼食→夕食に固定する',
+    clSlots.map((s) => s.slot).join(','),
+    'breakfast,dinner',
+  )
+  eq('CL-SLOT 朝食の小計は朝食の料理だけ', Math.round(clSlots[0].balance.vegetableG), 50)
+  eq('CL-SLOT 夕食の小計は同じ食事の2品を足す', Math.round(clSlots[1].balance.vegetableG), 150)
+  eq(
+    'CL-SLOT 小計の合計は1日の合計と一致する',
+    Math.round(clSlots.reduce((sum, s) => sum + s.balance.vegetableG, 0)),
+    Math.round(sumBalance([cabbage, carrot, carrot]).vegetableG),
+  )
+  eq('CL-SLOT 献立が1件も無ければ空', slotBalances([]).length, 0)
+
+  // (3c) ごはんを含めて計算する(2026-08-02 便CW-10)。量・成分値・金額はすべてマスタ参照で、
+  // アプリ側に数字を書き写していないこと(成分表を直せばここも自動で変わる)を見張る
+  eq('CL-RICE ごはん1杯は成分表の「杯=150g」から引く', riceServingGrams(), 150)
+  const riceSum = sumBalance([RICE_SERVING_RECIPE])
+  eq('CL-RICE ごはん1杯は1品として数える', riceSum.nutrition.dishCount, 1)
+  eq('CL-RICE ごはん1杯のエネルギー(成分表 01088 の156kcal/100g×1.5)', Math.round(riceSum.nutrition.total.kcal), 234)
+  eq('CL-RICE ごはんは野菜量に入らない', Math.round(riceSum.vegetableG), 0)
+  eq('CL-RICE 杯数ぶんの品を作る', riceServingRecipes(3).length, 3)
+  eq('CL-RICE 0杯なら1品も作らない(OFFのときは何も足さない)', riceServingRecipes(0).length, 0)
+  eq(
+    'CL-RICE 2杯足すとエネルギーも2杯ぶん',
+    Math.round(sumBalance(riceServingRecipes(2)).nutrition.total.kcal),
+    468,
+  )
+  eq(
+    'CL-RICE ごはん1杯の金額は食材価格マスタから引く',
+    estimateRecipeCost(RICE_SERVING_RECIPE.ingredients, buildPriceIndex(PRICE_DEFAULTS)).total,
+    30,
   )
 
   // (4) 計算対象外が混ざる日の作法(docs/60 §5)。1品でもあれば「めやすとの並置」を出さない
