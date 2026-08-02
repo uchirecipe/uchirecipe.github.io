@@ -292,7 +292,7 @@ export default function RecipeDetailPage() {
   // 時短モード（レンジ活用など、通常より手早い代替手順がある料理だけ切り替えを表示。表示中だけの一時的な選択）
   const [quickMode, setQuickMode] = useState(false)
 
-  // じぶんタイマー（自由な分数で始めるタイマー。2026-07-12タイマー自由設定・入口A。
+  // 自由な時間のタイマー（ja.timer.customLabel「タイマー」。2026-07-12タイマー自由設定・入口A。
   // 同日の秒刻み対応でstateは秒単位に統一）の窓
   const [customTimerOpen, setCustomTimerOpen] = useState(false)
   const [customSeconds, setCustomSeconds] = useState(180)
@@ -413,7 +413,7 @@ export default function RecipeDetailPage() {
     }
   }
 
-  // じぶんタイマー（入口A: BackHeaderのタイマーアイコン）。詳細画面はFocusModeと違い
+  // 自由な時間のタイマー（入口A: BackHeaderのタイマーアイコン）。詳細画面はFocusModeと違い
   // 「今見ている手順」の概念が無いため、どの手順にも紐付かないタイマーとして起動する。
   // 秒刻み対応(2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、無ければ旧フィールド
   // lastCustomTimerMinutes(分)を秒換算して読む(後方互換)。どちらも無ければ既定3分
@@ -556,7 +556,7 @@ export default function RecipeDetailPage() {
             >
               <Heart size={22} fill={recipe.isFavorite ? 'currentColor' : 'none'} aria-hidden />
             </button>
-            {/* じぶんタイマー入口A（2026-07-12タイマー自由設定・Fable設計docs/20 §6）:
+            {/* 自由な時間のタイマー入口A（2026-07-12タイマー自由設定・Fable設計docs/20 §6）:
                 料理名横に常設の入口を置く。フローティングボタンは不採用（オーナー裁定） */}
             <button
               type="button"

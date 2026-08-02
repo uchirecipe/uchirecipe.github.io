@@ -30,7 +30,7 @@ import TimerAdjustModal from './TimerAdjustModal'
 import CustomTimerModal from './CustomTimerModal'
 import { ja } from '../i18n/ja'
 
-// じぶんタイマーの既定値(秒)。2026-07-12秒刻み対応で分単位のstateを廃止し秒単位に統一
+// 自由な時間のタイマー(ja.timer.customLabel「タイマー」)の既定値(秒)。2026-07-12秒刻み対応で分単位のstateを廃止し秒単位に統一
 const DEFAULT_CUSTOM_TIMER_SECONDS = 180
 
 type Props = {
@@ -77,7 +77,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const touchStartX = useRef<number | null>(null)
   // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
-  // じぶんタイマー（自由な分数で始めるタイマー。同バッチ）の窓
+  // 自由な時間のタイマー（ja.timer.customLabel「タイマー」。同バッチ）の窓
   const [customTimerOpen, setCustomTimerOpen] = useState(false)
   const [customSeconds, setCustomSeconds] = useState(DEFAULT_CUSTOM_TIMER_SECONDS)
 
@@ -114,7 +114,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   )
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
 
-  // じぶんタイマーの既定値(秒刻み対応・2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、
+  // 自由な時間のタイマーの既定値(秒刻み対応・2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、
   // 無ければ旧フィールドlastCustomTimerMinutes(分)を秒に換算して読む(後方互換)。どちらも無ければ既定3分
   const openCustomTimer = () => {
     setCustomSeconds(
@@ -448,14 +448,14 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         </p>
       )}
 
-      {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋じぶんタイマー起動ボタン(2026-07-12・入口B)。
-          タイマーが無い時も「じぶんタイマー」ボタンの置き場所として常に表示する */}
+      {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋自由な時間のタイマー起動ボタン(2026-07-12・入口B)。
+          タイマーが無い時も「タイマー」ボタンの置き場所として常に表示する */}
       <div className="flex max-h-[30vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1">
         {shownTimers.map((t) => {
           const isThisRecipe = t.recipeId === recipeId
           // この料理の手順タイマー以外は、どれの時間か分かるよう名前を併記する
-          // (他の料理=料理名 / じぶんタイマー=「じぶんタイマー」。機能④診断C4・C19)。
-          // じぶんタイマーは起動場所によって手順番号が入るため、番号ではなく名前で判定する
+          // (他の料理=料理名 / 自由な時間のタイマー=「タイマー」。機能④診断C4・C19)。
+          // 自由な時間のタイマーは起動場所によって手順番号が入るため、番号ではなく名前で判定する
           const showLabel = !isThisRecipe || t.label !== recipe.title
           const fullLabel =
             t.stepNumber > 0

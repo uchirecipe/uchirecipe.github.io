@@ -82,7 +82,9 @@ const allHomeWidgets: HomeWidgetKey[] = [
 const homeWidgetLabels: Record<HomeWidgetKey, string> = {
   mealPlan: ja.home.mealPlanTitle,
   suggestion: ja.home.suggestTitle,
-  ingredientSearch: ja.home.ingShortcutTitle,
+  // キーは'ingredientSearch'のままだが、中身は2026-08-02にレシピタブへのショートカットへ置き換えた
+  // (保存済みの並び順・表示設定を壊さないためキー名は変えていない)
+  ingredientSearch: ja.home.searchShortcutTitle,
   history: ja.home.historyTitle,
 }
 

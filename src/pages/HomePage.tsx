@@ -5,7 +5,7 @@ import {
   Dices,
   Heart,
   History,
-  Carrot,
+  Search,
   HardDriveDownload,
   Refrigerator,
   ChevronDown,
@@ -30,7 +30,6 @@ import type { CookedLog, HomeWidgetKey, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
-import ChipInput from '../components/ChipInput'
 import { ja } from '../i18n/ja'
 
 // バックアップ浮遊バナーの「×で閉じたらセッション中は再表示しない」用キー(2026-07-16 便S)。
@@ -169,7 +168,8 @@ function HistoryCard({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
 
 /**
  * ホーム: 表示パーツは設定でオン・オフ＆並べ替えできる。
- * 検索窓は2026-07-16 便Sでホームから削除（検索はレシピタブで行う）
+ * 検索窓は2026-07-16 便Sでホームから削除し、2026-08-02（便CR）に残っていた食材の検索欄も撤去した。
+ * 探す操作はレシピタブ1か所にまとめ、ホームにはそこへ渡すショートカットだけを置く
  */
 export default function HomePage() {
   const navigate = useNavigate()
@@ -189,7 +189,6 @@ export default function HomePage() {
   // 「ほかの候補を見る」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
   // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
   const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
-  const [ingredients, setIngredients] = useState<string[]>([])
   // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
   const quickMinutes = settings?.homeQuickMinutes ?? 10
   // 「◯分以内」チップのラベルは選択中の分数を差し込む。他の条件はそのままのラベルを使う
@@ -316,11 +315,6 @@ export default function HomePage() {
       .sort((a, b) => b.log.date.localeCompare(a.log.date))
       .slice(0, 5)
   }, [recipes])
-
-  const submitIngredients = () => {
-    if (ingredients.length === 0) return
-    navigate(`/recipes?ing=${encodeURIComponent(ingredients.join(' '))}`)
-  }
 
   const widgetSections: Record<HomeWidgetKey, ReactNode> = {
     // 登録0品なら非表示(2026-07-16 便S。直近実装の「1行に薄く」表示を置き換え。
@@ -473,40 +467,34 @@ export default function HomePage() {
         )}
       </section>
     ) : null,
+    // レシピを探すショートカット(2026-08-02 オーナー実機FB・司令部裁定)。
+    // 旧「使いたい食材から探す」の検索欄(ChipInput+この食材で探す)はここから撤去し、
+    // 検索の入口はレシピタブ1か所にまとめた。ホームには「レシピタブで探せる」と伝える
+    // 導線だけを残す(入口を消すと発見性が落ちるため、集約と発見性を両立させる)。
+    // ウィジェットのキーは既存の'ingredientSearch'のまま＝保存済みの並び順・表示設定を壊さない
     ingredientSearch: (
       <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-        <h2 className="flex items-center gap-2 font-bold">
-          <Carrot size={20} className="text-accent-ink" aria-hidden />
-          {ja.home.ingShortcutTitle}
-        </h2>
-        <div className="mt-[var(--space-sm)]">
-          <ChipInput
-            values={ingredients}
-            onChange={setIngredients}
-            placeholder={ja.home.ingPlaceholder}
-            addLabel={ja.home.ingAdd}
-          />
-          {pantryNames.length > 0 && (
-            <button
-              type="button"
-              onClick={() =>
-                setIngredients((prev) => Array.from(new Set([...prev, ...pantryNames])))
-              }
-              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-            >
-              <Refrigerator size={16} aria-hidden />
-              {ja.pantry.addToSearch}
-            </button>
-          )}
+        <p className="text-sm text-ink-muted">{ja.home.searchShortcutDescription}</p>
+        <button
+          type="button"
+          onClick={() => navigate('/recipes?focus=search')}
+          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+        >
+          <Search size={20} aria-hidden />
+          {ja.home.searchShortcutButton}
+        </button>
+        {/* 在庫から探す導線は「在庫の食材で絞る」をONにした状態でレシピタブへ渡す(絞り込み付きの遷移)。
+            在庫が1件も無いときは押しても結果が変わらないので出さない */}
+        {pantryNames.length > 0 && (
           <button
             type="button"
-            onClick={submitIngredients}
-            disabled={ingredients.length === 0}
-            className="mt-[var(--space-sm)] w-full shrink-0 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-50"
+            onClick={() => navigate('/recipes?pantry=1')}
+            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
-            {ja.home.ingButton}
+            <Refrigerator size={20} aria-hidden />
+            {ja.home.searchShortcutPantry}
           </button>
-        </div>
+        )}
       </section>
     ),
     history:

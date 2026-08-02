@@ -6583,7 +6583,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('MB換算の丸め(52.6MB相当)', bytesToMB(55_000_000), 52.5)
 }
 
-// ---------- じぶんタイマーの秒刻み表示(formatMinutesSecondsLabel。2026-07-12秒刻み対応) ----------
+// ---------- 自由な時間のタイマーの秒刻み表示(formatMinutesSecondsLabel。2026-07-12秒刻み対応) ----------
 eq('分のみ(秒0)は「3分」', formatMinutesSecondsLabel(180), '3分')
 eq('分+秒は「3分30秒」', formatMinutesSecondsLabel(210), '3分30秒')
 eq('1分未満は秒のみ「45秒」', formatMinutesSecondsLabel(45), '45秒')

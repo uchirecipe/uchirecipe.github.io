@@ -205,7 +205,19 @@ export default function RecipesPage() {
   // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
   // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
   const [searchParams, setSearchParams] = useSearchParams()
-  const [saved] = useState(() => readSavedListState())
+  // ホームの「レシピを探す」ショートカットからの遷移(2026-08-02 オーナー実機FB)。
+  // ?focus=search = 検索欄にフォーカスした状態で開く / ?pantry=1 = 「在庫の食材で絞る」をONで開く。
+  // どちらも「明示的な新規検索」なので、?q=・?ing= と同じくsessionStorageの保存状態は復元しない
+  // (前回の検索語が残ったまま検索欄にフォーカスすると、何を打てばいいのか分からなくなるため)。
+  // 初回マウント時のURLだけを見る(下のURL同期でパラメータを消すので、以後は再発火しない)
+  const [entry] = useState(() => ({
+    focusSearch: searchParams.get('focus') === 'search',
+    pantry: searchParams.get('pantry') === '1',
+  }))
+  const [saved] = useState(() =>
+    entry.focusSearch || entry.pantry ? null : readSavedListState(),
+  )
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [query, setQuery] = useState(() => searchParams.get('q') ?? saved?.query ?? '')
   const [ingredients, setIngredients] = useState<string[]>(() => {
     const ingParam = searchParams.get('ing')
@@ -214,7 +226,9 @@ export default function RecipesPage() {
   })
   // 並び替え/絞り込みパネル(2026-07-16 便T: 従来は1つのpanelOpenで両方を出し分けていたが、
   // ボタンを分離したのに合わせて開閉状態も分離する。片方を開くともう片方は閉じる(同時に出さない)
-  const [filterPanelOpen, setFilterPanelOpen] = useState(searchParams.get('ing') !== null)
+  const [filterPanelOpen, setFilterPanelOpen] = useState(
+    searchParams.get('ing') !== null || entry.pantry,
+  )
   const [sortPanelOpen, setSortPanelOpen] = useState(false)
   const toggleFilterPanel = () => {
     setFilterPanelOpen((open) => !open)
@@ -235,20 +249,33 @@ export default function RecipesPage() {
         else next.delete('q')
         if (ingredients.length > 0) next.set('ing', ingredients.join(' '))
         else next.delete('ing')
+        // ホームからの一度きりの指示(2026-08-02)はURLに残さない。残すと、詳細から戻るたびに
+        // 検索欄へフォーカスが飛んだり在庫の絞り込みが復活したりする
+        next.delete('focus')
+        next.delete('pantry')
         return next
       },
       { replace: true },
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, ingredients])
+
+  // ホームの「レシピを探す」から来たときだけ検索欄にフォーカスする(2026-08-02)。
+  // 初回マウント時に1回だけ。スマホではここでキーボードが開き、すぐ打ち始められる
+  useEffect(() => {
+    if (!entry.focusSearch) return
+    searchInputRef.current?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [time, setTime] = useState<TimeFilter>(saved?.time ?? 'all')
   const [effort, setEffort] = useState<EffortFilter>(saved?.effort ?? 'all')
   const [tag, setTag] = useState<TagFilter>(saved?.tag ?? 'all')
   const [favoriteOnly, setFavoriteOnly] = useState(saved?.favoriteOnly ?? false)
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
-  // 在庫(ある/少ない)の食材を使うレシピだけに絞る(2026-07-24 便BN・司令部追加)
-  const [pantryOnly, setPantryOnly] = useState(saved?.pantryOnly ?? false)
+  // 在庫(ある/少ない)の食材を使うレシピだけに絞る(2026-07-24 便BN・司令部追加)。
+  // ホームの「在庫の食材から探す」(?pantry=1)から来たときは最初からONで開く(2026-08-02)
+  const [pantryOnly, setPantryOnly] = useState(entry.pantry || (saved?.pantryOnly ?? false))
   const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
   // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
   // その種類の既定方向にリセットする(選ぶ側のonClickで一緒にsetする。下記baseSortOptions/
@@ -535,6 +562,7 @@ export default function RecipesPage() {
             aria-hidden
           />
           <input
+            ref={searchInputRef}
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -684,7 +712,7 @@ export default function RecipesPage() {
               values={ingredients}
               onChange={setIngredients}
               placeholder={ja.search.ingredientPlaceholder}
-              addLabel={ja.home.ingAdd}
+              addLabel={ja.search.ingredientAdd}
             />
             {pantryNames.length > 0 && (
               <button
