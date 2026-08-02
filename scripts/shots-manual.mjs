@@ -5,6 +5,9 @@
 //   npm run preview -- --port 4284 --strictPort   (別ターミナル)
 //   BASE_URL=http://localhost:4284 npx tsx scripts/shots-manual.mjs
 //
+//   一部だけ撮り直すとき(下の ONLY を参照):
+//   BASE_URL=http://localhost:4284 ONLY=home-suggest,home-search npx tsx scripts/shots-manual.mjs
+//
 // 仕様:
 //  - 390x844(iPhone相当)・ライトテーマ・deviceScaleFactor 2 のブラウザで操作する
 //  - 出力は「説明している箇所だけ」を切り出した部分スクリーンショット
@@ -52,6 +55,21 @@ const failures = []
 /** manual.html の <img width height> に入れる実寸(px)。表示は半分のCSS pxにする */
 const manifest = {}
 
+/**
+ * ONLY=home-suggest,home-search のように指定すると、その名前のスクショだけを書き出す(部分撮り直し)。
+ * 料理写真(MANUAL_PHOTO_DIR)を持っていない環境で全部を撮り直すと、写真つきのスクショ
+ * (recipe-cards / detail-photo / plan-month-photo)が写真なしの絵に置き換わってしまうため、
+ * 一部の画面だけ追随させたいときは対象を絞る。指定ぶんを撮り終えた時点で撮影を打ち切る。
+ */
+const ONLY = new Set(
+  (process.env.ONLY ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+/** ONLYで指定したぶんを撮り終えた合図。撮影の失敗と取り違えないよう専用のクラスにする */
+class AllRequestedDone extends Error {}
+
 const wait = (page, ms) => page.waitForTimeout(ms)
 
 /** 料理写真(任意)をdataURLで読み込む */
@@ -71,12 +89,14 @@ function loadPhotos() {
 }
 
 async function save(png, name) {
+  if (ONLY.size && !ONLY.has(name)) return
   const meta = await sharp(png).metadata()
   const webp = await sharp(png).webp({ quality: 78, effort: 6 }).toBuffer()
   fs.writeFileSync(path.join(OUT_DIR, `${name}.webp`), webp)
   sizes.push([name, webp.length])
   manifest[name] = { w: meta.width, h: meta.height }
   console.log(`  ${name}.webp  ${meta.width}x${meta.height}  ${(webp.length / 1024).toFixed(1)}KB`)
+  if (ONLY.size && sizes.length === ONLY.size) throw new AllRequestedDone()
 }
 
 /** 要素の位置(ビューポート基準)を測る */
@@ -94,6 +114,7 @@ async function crop(page, name, loc, opts = {}) {
   try {
     return await cropInner(page, name, loc, opts)
   } catch (e) {
+    if (e instanceof AllRequestedDone) throw e
     failures.push(name)
     console.warn(`  ⚠ ${name} 失敗: ${String(e).split('\n')[0].slice(0, 110)}`)
   }
@@ -135,6 +156,7 @@ async function cropRange(page, name, topLoc, bottomLoc, opts = {}) {
   try {
     return await cropRangeInner(page, name, topLoc, bottomLoc, opts)
   } catch (e) {
+    if (e instanceof AllRequestedDone) throw e
     failures.push(name)
     console.warn(`  ⚠ ${name} 失敗: ${String(e).split('\n')[0].slice(0, 110)}`)
   }
@@ -166,6 +188,23 @@ async function cropRangeInner(page, name, topLoc, bottomLoc, opts = {}) {
 async function cropRect(page, name, rect) {
   const png = await page.screenshot({ clip: rect })
   await save(png, name)
+}
+
+/** 撮影結果のまとめ表示と、manual.html の width/height を直すときの控えの書き出し */
+function report() {
+  if (failures.length) console.log(`\n⚠ 撮影できなかったもの: ${failures.join(', ')}`)
+  const total = sizes.reduce((s, [, n]) => s + n, 0)
+  console.log(`\n合計 ${sizes.length}枚 / ${(total / 1024).toFixed(1)}KB`)
+  console.log('\n--- manifest (manual.html の width/height 用) ---')
+  console.log(JSON.stringify(manifest, null, 0))
+  // manual.html の <img width height> を直すときの控え(公開物には含めない)。
+  // 部分撮り直し(ONLY)のときは、撮っていないぶんの控えを消さないよう既存の内容に上書きする
+  const file = path.join(ROOT, 'scripts/data/manual-shot-sizes.json')
+  let merged = manifest
+  if (ONLY.size && fs.existsSync(file)) {
+    merged = { ...JSON.parse(fs.readFileSync(file, 'utf8')), ...manifest }
+  }
+  fs.writeFileSync(file, JSON.stringify(merged, null, 2) + '\n')
 }
 
 /** 登録画面を「かんたん」タブの初期状態で開き直す(同じハッシュへのgotoでは再マウントされないため) */
@@ -319,6 +358,13 @@ try {
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '今日なに作る？' }) })
   await crop(page, 'home-suggest', suggestCard, { top: 60, padX: 6 })
+
+  // 「レシピを探す」ショートカット(2026-08-02 便CRで旧「使いたい食材から探す」の検索欄から差し替え)。
+  // 在庫を入れてあるので「在庫の食材から探す」も一緒に写る
+  const searchShortcut = page
+    .locator('section')
+    .filter({ has: page.getByRole('button', { name: 'レシピを探す', exact: true }) })
+  await crop(page, 'home-search', searchShortcut, { top: 120, padX: 6 })
 
   // 下タブ(画面の見取り図)
   await cropRect(page, 'nav-tabs', { x: 0, y: VIEW.height - 72, width: VIEW.width, height: 72 })
@@ -808,16 +854,11 @@ try {
     }
   }
 
-  if (failures.length) console.log(`\n⚠ 撮影できなかったもの: ${failures.join(', ')}`)
-  const total = sizes.reduce((s, [, n]) => s + n, 0)
-  console.log(`\n合計 ${sizes.length}枚 / ${(total / 1024).toFixed(1)}KB`)
-  console.log('\n--- manifest (manual.html の width/height 用) ---')
-  console.log(JSON.stringify(manifest, null, 0))
-  // manual.html の <img width height> を直すときの控え(公開物には含めない)
-  fs.writeFileSync(
-    path.join(ROOT, 'scripts/data/manual-shot-sizes.json'),
-    JSON.stringify(manifest, null, 2) + '\n',
-  )
+  report()
+} catch (e) {
+  if (!(e instanceof AllRequestedDone)) throw e
+  console.log('\nONLYで指定したぶんを撮り終えたので、ここで打ち切りました')
+  report()
 } finally {
   await browser.close()
 }
