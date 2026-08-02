@@ -16,7 +16,12 @@ import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
 import { listRecipes } from '../db/recipes'
 import { useTodayList } from '../db/todayList'
-import { useSettings } from '../db/settings'
+import { useSettings, updateSettings } from '../db/settings'
+import {
+  canUseCookNaviTrial,
+  consumeCookNaviTrial,
+  cookNaviTrialRemaining,
+} from '../logic/proTrial'
 import { useTimers } from '../components/TimerProvider'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
@@ -126,7 +131,18 @@ function TimelineCard({
 
 export default function CookNaviPage() {
   const settings = useSettings()
-  const isPro = !!settings?.proCode
+  const isProUnlocked = !!settings?.proCode
+  /**
+   * 恒常のお試し（2026-08-02 便CP-2・docs/62 決定③）。未解錠でも期限なしで3回まで、
+   * 本物のナビをそのまま使える。1回目は操作を覚えて終わることが多く、価値が分かるのは
+   * 2〜3回目なので回数制にしている（時限だと試す前に失効する）。
+   *
+   * 回数は「お試しを開始したとき」に1回消費する（その画面を開いている間は何度でも組み直せる）。
+   * trialActive はこの画面の状態なので、画面を離れれば消える＝次に開くと残り回数の案内に戻る。
+   */
+  const trialRemaining = cookNaviTrialRemaining(settings?.cookNaviTrialCount)
+  const [trialActive, setTrialActive] = useState(false)
+  const canUseNavi = isProUnlocked || trialActive
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
   const { startTimer, timers } = useTimers()
@@ -144,6 +160,20 @@ export default function CookNaviPage() {
       .map((item) => recipeById.get(item.recipeId))
       .filter((r): r is Recipe => r !== undefined)
   }, [todayList, recipeById])
+
+  /**
+   * お試しを開始する（2026-08-02 便CP-2）。
+   * **段取りを組める献立が無いとき（今日の献立が2品未満）は回数を減らさない**:
+   * 画面は本物のナビをそのまま開くが、この状態では「今日の献立にレシピがありません」の案内しか
+   * 受け取れない＝価値を受け取っていないのに3回のうち1回を失うことになるため
+   * （献立タブのナビ入口は2品以上のときにしか出ないので、通常はここに来ない経路の保険）。
+   */
+  const startTrial = async () => {
+    if (!canUseCookNaviTrial(settings?.cookNaviTrialCount)) return
+    setTrialActive(true)
+    if ((todayRecipes?.length ?? 0) < 2) return
+    await updateSettings({ cookNaviTrialCount: consumeCookNaviTrial(settings?.cookNaviTrialCount) })
+  }
 
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [showTimeline, setShowTimeline] = useState(false)
@@ -228,21 +258,51 @@ export default function CookNaviPage() {
           {ja.cookNavi.title}
         </h1>
 
-        {/* Pro未解錠ゲート（M3-1の月間ビューと同じパターン） */}
-        {!isPro ? (
+        {/* Pro未解錠ゲート（M3-1の月間ビューと同じパターン）。
+            2026-08-02 便CP-2・docs/62 決定③: お試しが残っていれば、鍵の代わりに
+            「お試しで使ってみる（あと{n}回）」を出す。使い切ったあとは終了の一言＋鍵表示に戻る */}
+        {!canUseNavi ? (
           <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-lg)] text-center shadow-sm">
             <Lock size={28} className="mx-auto text-ink-muted" aria-hidden />
             <p className="mt-[var(--space-sm)] font-bold">{ja.cookNavi.gateTitle}</p>
             <p className="mt-1 text-sm text-ink-muted">{ja.cookNavi.gateDescription}</p>
+            {trialRemaining > 0 ? (
+              <button
+                type="button"
+                data-testid="cook-navi-trial-start"
+                onClick={() => void startTrial()}
+                className="mt-[var(--space-sm)] inline-flex items-center justify-center rounded-md bg-accent px-4 py-3 font-bold text-on-accent shadow-sm"
+              >
+                {ja.cookNavi.trialButton.replace('{n}', String(trialRemaining))}
+              </button>
+            ) : (
+              <p
+                data-testid="cook-navi-trial-exhausted"
+                className="mt-[var(--space-sm)] text-sm font-bold"
+              >
+                {ja.cookNavi.trialExhausted}
+              </p>
+            )}
             <Link
               to="/settings?section=pro"
-              className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
+              className="mt-[var(--space-sm)] block text-sm font-bold text-accent-ink underline"
             >
               {ja.cookNavi.gateLink}
             </Link>
           </div>
         ) : (
           <>
+            {/* お試しで使っている間だけ、いまの状態と残り回数を控えめに出す（機能は制限しない） */}
+            {!isProUnlocked && (
+              <p
+                data-testid="cook-navi-trial-active"
+                className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink-muted"
+              >
+                {trialRemaining > 0
+                  ? ja.cookNavi.trialActiveNote.replace('{n}', String(trialRemaining))
+                  : ja.cookNavi.trialActiveLastNote}
+              </p>
+            )}
             <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.cookNavi.intro}</p>
 
             {/* 叩き台であることの控えめな注記（過信させない） */}

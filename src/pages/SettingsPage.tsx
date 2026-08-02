@@ -1465,6 +1465,19 @@ export default function SettingsPage() {
             <h2 className="font-bold">{ja.settings.unlockTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.unlockDescription}</p>
 
+            {/* 精度開示①「購入案内の位置」(2026-08-02 便CP-2・docs/62 決定④)。
+                買う前に読んで買った＝合意にするため、購入と解錠の案内のすぐ下に置く。
+                解錠済みの人にも出し続ける（買ったあとに前提が消えるのは不誠実なので隠さない）。
+                ②（入力欄の直上）と同じ文をこの画面に2回出すことになるが、docs/62 決定④が
+                「購入ボタンの上」と「解錠コード入力画面」の2箇所を指定しているため両方に置く。
+                同じ段落が続けて並ばないよう、①はPro版カードの上に置いて間に情報を挟む */}
+            <p
+              data-testid="pro-accuracy-notice"
+              className="mt-[var(--space-sm)] text-xs text-ink-muted"
+            >
+              {ja.settings.unlockAccuracyNotice}
+            </p>
+
             <ul className="mt-[var(--space-sm)] rounded-md border border-edge bg-app">
               {/* Pro版の行 */}
               <li className="px-[var(--space-sm)] py-2">
@@ -1493,6 +1506,15 @@ export default function SettingsPage() {
             {/* 未解錠ならコード入力を出す。Pro解錠済みなら入力の必要が無いため入力欄自体を隠す */}
             {!settings.proCode && (
               <div className="mt-[var(--space-md)]">
+                {/* 精度開示②「解錠コード入力欄の直上」(2026-08-02 便CP-2・docs/62 決定④)。
+                    購入導線と解錠導線は別々に辿られるため、同じ文を両方に置く（片方だけだと
+                    購入ページから直接コードを入れた人が読まないまま解錠してしまう） */}
+                <p
+                  data-testid="unlock-accuracy-notice"
+                  className="mb-[var(--space-sm)] text-xs text-ink-muted"
+                >
+                  {ja.settings.unlockAccuracyNotice}
+                </p>
                 <div className="flex gap-[var(--space-sm)]">
                   <input
                     type="text"

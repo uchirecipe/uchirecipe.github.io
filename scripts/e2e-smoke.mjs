@@ -11750,6 +11750,438 @@ try {
       await fvBrowser.close()
     }
   }
+
+  // ============================================================================
+  // 便CP-2（2026-08-02・docs/62 決定②③④）: 目的モード / 恒常のお試し2種 / 精度開示2箇所
+  // ============================================================================
+
+  // --- PURPOSE-01: 無料ユーザーの入口（docs/62 決定②「売り場を変える」）。
+  // 週タブの提案条件に「目的から組む（Pro）」の鍵付き行が**折りたたみを開かなくても**常設で出て、
+  // タップすると設定のPro節へ着地すること。未解錠では目的の3択自体は出ないこと。 ---
+  currentCheck = 'PURPOSE-01'
+  {
+    const p1Browser = await chromium.launch()
+    const p1Context = await p1Browser.newContext({ viewport: { width: 390, height: 844 } })
+    const p1Page = await p1Context.newPage()
+    p1Page.on('pageerror', (err) => errors.push(`[pageerror@PURPOSE-01] ${err.message}`))
+    try {
+      await p1Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await p1Page.waitForTimeout(1800) // 初回シード待ち
+      await p1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await p1Page.getByRole('button', { name: '週', exact: true }).click()
+      await p1Page.waitForTimeout(400)
+
+      const p1Locked = p1Page.locator('[data-testid="purpose-locked-row"]')
+      check('PURPOSE-01 未解錠の週タブに「目的から組む（Pro）」の鍵付き行が常設される', await p1Locked.isVisible())
+      const p1LockedText = (await p1Locked.textContent()) ?? ''
+      check(
+        'PURPOSE-01 鍵付き行に何ができるかが書かれている',
+        p1LockedText.includes('目的から組む') && p1LockedText.includes('たんぱく質を多めに'),
+        `text=${p1LockedText}`,
+      )
+      check(
+        'PURPOSE-01 未解錠では目的の3択は出さない',
+        (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
+      )
+      // 折りたたみを開いても、未解錠なら3択は出ない（鍵付き行だけ）
+      await p1Page.getByRole('button', { name: /^提案の条件/ }).click()
+      await p1Page.waitForTimeout(300)
+      check(
+        'PURPOSE-01 条件を開いても未解錠に3択は出ない',
+        (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
+      )
+      await p1Locked.click()
+      await p1Page.waitForTimeout(600)
+      check(
+        'PURPOSE-01 鍵付き行のタップでPro案内（設定のPro節）へ着地する',
+        p1Page.url().includes('/settings') && p1Page.url().includes('section=pro'),
+        `url=${p1Page.url()}`,
+      )
+    } finally {
+      await p1Browser.close()
+    }
+  }
+
+  // --- PURPOSE-02: 目的モード（Pro）。3択で「たんぱく質を多めに」を選ぶと
+  //  ①選択が設定に残る（再読み込み後も維持）②畳んだ条件ラベルに現在値が出る
+  //  ③「まとめて献立を立てる」で実際に献立が入り、その枠に目的が記録される
+  //  ④月タブの答え合わせ（「この月の「目的から組む」」）に日数と数字が並置される
+  // Pro解錠はMEALPLAN-07等と同じ settings.proCode 直書きで再現する。 ---
+  currentCheck = 'PURPOSE-02'
+  {
+    const p2Browser = await chromium.launch()
+    const p2Context = await p2Browser.newContext({ viewport: { width: 390, height: 844 } })
+    const p2Page = await p2Context.newPage()
+    p2Page.on('pageerror', (err) => errors.push(`[pageerror@PURPOSE-02] ${err.message}`))
+    try {
+      await p2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await p2Page.waitForTimeout(1800)
+      await p2Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await p2Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await p2Page.reload({ waitUntil: 'networkidle' })
+      await p2Page.waitForTimeout(800)
+      await p2Page.getByRole('button', { name: '週', exact: true }).click()
+      await p2Page.waitForTimeout(400)
+
+      check(
+        'PURPOSE-02 解錠済みなら鍵付き行は出さない',
+        (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) === 0,
+      )
+      await p2Page.getByRole('button', { name: /^提案の条件/ }).click()
+      await p2Page.waitForTimeout(300)
+      const p2Picker = p2Page.locator('[data-testid="purpose-picker"]')
+      check('PURPOSE-02 解錠済みの条件欄に目的の3択が出る', await p2Picker.isVisible())
+      const p2PickerText = (await p2Picker.textContent()) ?? ''
+      check(
+        'PURPOSE-02 選択肢は 指定なし / たんぱく質を多めに / 塩分をひかえめに',
+        p2PickerText.includes('指定なし') &&
+          p2PickerText.includes('たんぱく質を多めに') &&
+          p2PickerText.includes('塩分をひかえめに'),
+        `text=${p2PickerText}`,
+      )
+      check(
+        'PURPOSE-02 既定は「指定なし」（従来どおりの提案）',
+        (await p2Picker.getByRole('button', { name: '指定なし', exact: true }).getAttribute('aria-pressed')) ===
+          'true',
+      )
+      // 断定・効能の語（「バランスの良い」等）を出していないこと（docs/60 §1-3・規約H）
+      check(
+        'PURPOSE-02 目的の説明に断定・効能の語を使っていない',
+        !p2PickerText.includes('バランスの良い') &&
+          !p2PickerText.includes('健康的') &&
+          !p2PickerText.includes('不足'),
+        `text=${p2PickerText}`,
+      )
+
+      await p2Picker.getByRole('button', { name: 'たんぱく質を多めに', exact: true }).click()
+      await p2Page.waitForTimeout(500)
+      check(
+        'PURPOSE-02 目的を選ぶと選択状態になる',
+        (await p2Picker.getByRole('button', { name: 'たんぱく質を多めに', exact: true }).getAttribute('aria-pressed')) ===
+          'true',
+      )
+      // 折りたたむと、条件トグルのラベルに現在の目的が出る（何が効いているか畳んでも分かる）
+      await p2Page.getByRole('button', { name: /^提案の条件/ }).click()
+      await p2Page.waitForTimeout(300)
+      check(
+        'PURPOSE-02 畳んだ条件ラベルに現在の目的が出る',
+        ((await p2Page.getByRole('button', { name: /^提案の条件/ }).textContent()) ?? '').includes(
+          'たんぱく質を多めに',
+        ),
+      )
+      // 設定に保存され、再読み込みしても選び直さずに済む（1か月続けるための指定）
+      await p2Page.reload({ waitUntil: 'networkidle' })
+      await p2Page.waitForTimeout(800)
+      await p2Page.getByRole('button', { name: '週', exact: true }).click()
+      await p2Page.waitForTimeout(400)
+      check(
+        'PURPOSE-02 選んだ目的は再読み込み後も残る',
+        ((await p2Page.getByRole('button', { name: /^提案の条件/ }).textContent()) ?? '').includes(
+          'たんぱく質を多めに',
+        ),
+      )
+
+      // まとめて献立: 目的が効いていても提案は0件にならず、入れた枠に目的が記録される
+      await p2Page.getByRole('button', { name: 'まとめて献立を立てる', exact: true }).click()
+      await p2Page.waitForTimeout(1500)
+      const p2Entries = await p2Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('PURPOSE-02 目的を指定しても献立が入る（0件回避が壊れていない）', p2Entries.length > 0, `n=${p2Entries.length}`)
+      check(
+        'PURPOSE-02 自動で入れた枠に目的が記録される',
+        p2Entries.filter((e) => e.purpose === 'protein').length > 0,
+        `purpose付き=${p2Entries.filter((e) => e.purpose === 'protein').length}/${p2Entries.length}`,
+      )
+
+      // 月タブの答え合わせ（事実表示）
+      await p2Page.getByRole('button', { name: '月', exact: true }).click()
+      await p2Page.waitForTimeout(800)
+      const p2Review = p2Page.locator('[data-testid="purpose-review"]')
+      check('PURPOSE-02 月タブに「目的から組む」の答え合わせが出る', await p2Review.isVisible())
+      const p2ReviewText = (await p2Review.textContent()) ?? ''
+      check(
+        'PURPOSE-02 答え合わせは日数を「◯日 / ◯日」で並置する',
+        /「たんぱく質を多めに」で組んだ日: \d+日 \/ \d+日/.test(p2ReviewText),
+        `text=${p2ReviewText}`,
+      )
+      check(
+        'PURPOSE-02 答え合わせは達成/未達を判定しない（断定語を出さない）',
+        !p2ReviewText.includes('クリア') &&
+          !p2ReviewText.includes('達成') &&
+          !p2ReviewText.includes('不足') &&
+          !p2ReviewText.includes('バランスの良い'),
+        `text=${p2ReviewText}`,
+      )
+      check(
+        'PURPOSE-02 答え合わせに「めやす」と「良し悪しは判定していない」旨が添えられる',
+        p2ReviewText.includes('めやす') && p2ReviewText.includes('判定していません'),
+        `text=${p2ReviewText}`,
+      )
+    } finally {
+      await p2Browser.close()
+    }
+  }
+
+  // --- TRIAL-01: 並行調理ナビの恒常お試し（docs/62 決定③）。
+  // 未解錠の入口の鍵が「お試しで使ってみる（あと{n}回）」になり、押すと本物のナビが開く。
+  // 3回で使い切ると「お試しは終了しました。続きはPro版で」＋鍵表示に戻ること。 ---
+  currentCheck = 'TRIAL-01'
+  {
+    const t1Browser = await chromium.launch()
+    const t1Context = await t1Browser.newContext({ viewport: { width: 390, height: 844 } })
+    const t1Page = await t1Context.newPage()
+    t1Page.on('pageerror', (err) => errors.push(`[pageerror@TRIAL-01] ${err.message}`))
+    try {
+      await t1Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await t1Page.waitForTimeout(1800)
+      // 「お試し中は本物のナビ全機能」を確かめるため、今日の献立に2品を入れておく
+      // （NAVI-01と同じ直書き。Pro解錠はしない＝お試しだけで動くことを見る）
+      await t1Page.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const db = await openDb()
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const all = await P(store('recipes').getAll())
+        const picked = all.slice(0, 2)
+        let addedAt = Date.now()
+        for (const r of picked) await P(store('todayList').add({ recipeId: r.id, addedAt: addedAt++ }))
+        db.close()
+      })
+      // 直書きはDexieの変更通知を出さないため、購読中のliveQueryが空のままになる。必ず読み直す
+      await t1Page.reload({ waitUntil: 'networkidle' })
+      await t1Page.waitForTimeout(1000)
+
+      const t1Start = t1Page.locator('[data-testid="cook-navi-trial-start"]')
+      for (let i = 3; i >= 1; i--) {
+        // 一度ほかの画面へ出てから入り直す（＝画面を離れたらお試し表示は終わる、を実際の動線でなぞる）
+        await t1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await t1Page.waitForTimeout(300)
+        await t1Page.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+        await t1Page.waitForTimeout(600)
+        check(
+          `TRIAL-01 ${4 - i}回目: 入口の鍵が「お試しで使ってみる（あと${i}回）」になる`,
+          ((await t1Start.textContent()) ?? '').includes(`あと${i}回`),
+          `text=${await t1Start.textContent()}`,
+        )
+        await t1Start.click()
+        await t1Page.waitForTimeout(600)
+        const t1Body = (await t1Page.textContent('body')) ?? ''
+        check(
+          `TRIAL-01 ${4 - i}回目: お試し中は本物のナビが開く（ゲートが消える・全機能そのまま）`,
+          !t1Body.includes('並行調理ナビはPro版の機能です') &&
+            t1Body.includes('組み合わせるレシピを選ぶ') &&
+            t1Body.includes('2品を選択中'),
+          `body先頭=${t1Body.slice(0, 200)}`,
+        )
+        const t1ActiveText =
+          (await t1Page.locator('[data-testid="cook-navi-trial-active"]').textContent()) ?? ''
+        check(
+          `TRIAL-01 ${4 - i}回目: お試し中である旨と残り回数を控えめに出す`,
+          i > 1 ? t1ActiveText.includes(`このあと${i - 1}回`) : t1ActiveText.includes('最後の1回'),
+          `text=${t1ActiveText}`,
+        )
+      }
+      // 3回使い切ったら、鍵表示＋「お試しは終了しました。続きはPro版で」に戻る
+      await t1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await t1Page.waitForTimeout(300)
+      await t1Page.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+      await t1Page.waitForTimeout(600)
+      check('TRIAL-01 使い切ったらお試しボタンは出ない', (await t1Start.count()) === 0)
+      check(
+        'TRIAL-01 使い切ったら「お試しは終了しました。続きはPro版で」を出す',
+        ((await t1Page.locator('[data-testid="cook-navi-trial-exhausted"]').textContent()) ?? '').includes(
+          'お試しは終了しました',
+        ),
+      )
+      check(
+        'TRIAL-01 使い切ったらゲート（鍵）表示に戻る',
+        ((await t1Page.textContent('body')) ?? '').includes('並行調理ナビはPro版の機能です'),
+      )
+      const t1Count = await t1Page.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readonly')
+              const g = tx.objectStore('settings').get(1)
+              g.onsuccess = () => resolve(g.result?.cookNaviTrialCount)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('TRIAL-01 お試し回数は端末内（settings）に3で止まる', t1Count === 3, `count=${t1Count}`)
+    } finally {
+      await t1Browser.close()
+    }
+  }
+
+  // --- TRIAL-02: 月間献立の恒常お試し（docs/62 決定③）。
+  // 未解錠のロックプレビューから「自分の記録でためしに見る（1回だけ）」で本物の月タブが開き、
+  // 「この画面がいつでも見られるようになります」の一言が出ること。
+  // 閉じたら（別タブへ移って戻ったら）ロック表示に戻り、2回目は出せないこと。 ---
+  currentCheck = 'TRIAL-02'
+  {
+    const t2Browser = await chromium.launch()
+    const t2Context = await t2Browser.newContext({ viewport: { width: 390, height: 844 } })
+    const t2Page = await t2Context.newPage()
+    t2Page.on('pageerror', (err) => errors.push(`[pageerror@TRIAL-02] ${err.message}`))
+    try {
+      await t2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await t2Page.waitForTimeout(1800)
+      await t2Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await t2Page.getByRole('button', { name: '月', exact: true }).click()
+      await t2Page.waitForTimeout(500)
+
+      const t2Start = t2Page.locator('[data-testid="month-trial-start"]')
+      check('TRIAL-02 ロックプレビューにお試しの入口が出る', await t2Start.isVisible())
+      check(
+        'TRIAL-02 入口の文言は「自分の記録でためしに見る（1回だけ）」',
+        ((await t2Start.textContent()) ?? '').includes('自分の記録でためしに見る'),
+      )
+      await t2Start.click()
+      await t2Page.waitForTimeout(700)
+      const t2Body = (await t2Page.textContent('body')) ?? ''
+      check(
+        'TRIAL-02 お試しで本物の月タブが開く（ロック案内が消える）',
+        !t2Body.includes('1か月分の献立をカレンダーで') && t2Body.includes('月の食費と栄養'),
+      )
+      check(
+        'TRIAL-02 表示中に「この画面がいつでも見られるようになります」を控えめに添える',
+        ((await t2Page.locator('[data-testid="month-trial-active"]').textContent()) ?? '').includes(
+          'いつでも見られるようになります',
+        ),
+      )
+      // 閉じる（別タブへ移って戻る）とロックへ戻り、2回目は出せない
+      await t2Page.getByRole('button', { name: '週', exact: true }).click()
+      await t2Page.waitForTimeout(400)
+      await t2Page.getByRole('button', { name: '月', exact: true }).click()
+      await t2Page.waitForTimeout(500)
+      check(
+        'TRIAL-02 閉じたらロック表示に戻る',
+        ((await t2Page.textContent('body')) ?? '').includes('1か月分の献立をカレンダーで'),
+      )
+      check('TRIAL-02 お試しは1回だけ（2回目のボタンは出ない）', (await t2Start.count()) === 0)
+      check(
+        'TRIAL-02 使い切ったことを控えめに知らせる',
+        ((await t2Page.locator('[data-testid="month-trial-used"]').textContent()) ?? '').includes('ご利用済み'),
+      )
+    } finally {
+      await t2Browser.close()
+    }
+  }
+
+  // --- DISCLOSE-01: 購入前の精度開示2箇所（docs/62 決定④）。
+  // 設定のPro節（購入案内の位置）と、解錠コード入力欄の直上の両方に同じ開示が出ること。
+  // 断定・脅しの文体になっていないこと。 ---
+  currentCheck = 'DISCLOSE-01'
+  {
+    const d1Browser = await chromium.launch()
+    const d1Context = await d1Browser.newContext({ viewport: { width: 390, height: 844 } })
+    const d1Page = await d1Context.newPage()
+    d1Page.on('pageerror', (err) => errors.push(`[pageerror@DISCLOSE-01] ${err.message}`))
+    try {
+      await d1Page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await d1Page.waitForTimeout(1500)
+      const d1Notice = (await d1Page.locator('[data-testid="pro-accuracy-notice"]').textContent()) ?? ''
+      const d1UnlockNotice =
+        (await d1Page.locator('[data-testid="unlock-accuracy-notice"]').textContent()) ?? ''
+      for (const [label, text] of [
+        ['購入案内の位置', d1Notice],
+        ['解錠コード入力欄の直上', d1UnlockNotice],
+      ]) {
+        check(
+          `DISCLOSE-01 ${label}に「めやす」であることが書かれている`,
+          text.includes('めやす'),
+          `text=${text}`,
+        )
+        check(
+          `DISCLOSE-01 ${label}に「調理による変化は反映していない」が書かれている`,
+          text.includes('調理による変化'),
+          `text=${text}`,
+        )
+        check(
+          `DISCLOSE-01 ${label}に「治療中・妊娠中の方の食事管理には使えない」が書かれている`,
+          text.includes('治療中') && text.includes('妊娠中') && text.includes('使えません'),
+          `text=${text}`,
+        )
+      }
+      check('DISCLOSE-01 2箇所の開示は同じ文言', d1Notice.trim() === d1UnlockNotice.trim())
+      // 解錠済みでも購入案内側の開示は残す（買ったあとに前提が消えない）
+      await d1Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({ ...current, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await d1Page.reload({ waitUntil: 'networkidle' })
+      await d1Page.waitForTimeout(1200)
+      check(
+        'DISCLOSE-01 解錠後も購入案内側の開示は残る',
+        await d1Page.locator('[data-testid="pro-accuracy-notice"]').isVisible(),
+      )
+      check(
+        'DISCLOSE-01 解錠後は入力欄ごと開示も消える（入力欄が無いため）',
+        (await d1Page.locator('[data-testid="unlock-accuracy-notice"]').count()) === 0,
+      )
+    } finally {
+      await d1Browser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

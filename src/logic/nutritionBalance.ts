@@ -3,10 +3,11 @@ import {
   computeRecipeNutrition,
   emptyPersonalNutritionSum,
   sumPersonalNutrition,
+  type NutrientTotals,
   type PersonalNutritionSum,
   type RecipeNutrition,
 } from './nutrition'
-import type { Recipe } from '../db/types'
+import { MEAL_PURPOSES, type MealPurpose, type Recipe } from '../db/types'
 
 /**
  * 栄養バランス献立 第1段「見える化」の純ロジック（2026-07-30 便CL・docs/60 第1段）。
@@ -296,6 +297,119 @@ export interface WeekBalance {
   countedDays: number
   /** めやすとの並置を出してよいか（canCompareRange） */
   comparable: boolean
+}
+
+// ---------- 目的モード（docs/62 決定②）: 目的の軸と、その軸での比べ方 ----------
+
+/**
+ * 目的ごとに見る栄養素（1人分・8項目のどれか）。
+ * 「たんぱく質を多めに」＝たんぱく質(g)、「塩分をひかえめに」＝食塩相当量(g)。
+ * UIの表示ラベルもこのキーから引く（数値と項目名がずれないように1か所で決める）。
+ */
+export const PURPOSE_NUTRIENT_KEY = {
+  protein: 'proteinG',
+  lowSalt: 'saltG',
+} as const satisfies Record<MealPurpose, keyof NutrientTotals>
+
+/**
+ * 目的の軸で見た「1食ぶんの合計」（主菜＋副菜の1人分を足した値）。
+ * perServingTotals には、そのペアに入っている料理の1人分（perServing）を並べて渡す。
+ */
+export function purposeAxisValue(
+  purpose: MealPurpose,
+  perServingTotals: Pick<NutrientTotals, 'proteinG' | 'saltG'>[],
+): number {
+  const key = PURPOSE_NUTRIENT_KEY[purpose]
+  let sum = 0
+  for (const t of perServingTotals) sum += t[key]
+  return sum
+}
+
+/**
+ * 引き直し（chooseBalancedPair）に渡す「目的からの遠さ」。**小さいほど目的に沿う**。
+ *
+ * 【なぜ「めやすからの距離」にしないか】
+ * docs/60 §1-2 のとおり、たんぱく質には**1日のめやすを出さない**（推定必要量は年齢・性別・
+ * 身体活動レベルで大きく変わり、1本の線を引くと誤誘導になる）。目的モードのために
+ * 表に出さない目標値をこっそり決めるのは、その規律を裏口から破ることになる。
+ * そこで「線に近いか」ではなく「引いた候補どうしを比べてどちらが軸に沿うか」だけで決める。
+ *
+ *  - 'protein'（たんぱく質を多めに）… 1 / (1 + たんぱく質g)。
+ *    多いほど小さくなる（＝多い方を採る）が、必ず正の値なので0以下にはならない
+ *    ＝「ここで満足」という打ち切り点を作らない（満たすべき線が無いことを式でも表す）。
+ *  - 'lowSalt'（塩分をひかえめに）… 食塩相当量(g) そのもの。
+ *    少ないほど小さくなる。0g（＝塩分が計算上ゼロ）のときだけ打ち切る。
+ *
+ * どちらも「良い/悪い」の判定ではなく、候補の並べ替えに使う相対値でしかない。
+ */
+export function purposePenalty(
+  purpose: MealPurpose,
+  perServingTotals: Pick<NutrientTotals, 'proteinG' | 'saltG'>[],
+): number {
+  const value = purposeAxisValue(purpose, perServingTotals)
+  if (purpose === 'protein') return 1 / (1 + Math.max(0, value))
+  return value
+}
+
+// ---------- 目的モードの「答え合わせ」（月タブ・docs/62 決定②） ----------
+
+/** 1つの目的についての事実表示（断定・達成/未達の判定はしない。数字の並置だけ） */
+export interface PurposeDayReview {
+  purpose: MealPurpose
+  /** その目的を指定して組んだ日のうち、数字が出た日数 */
+  days: number
+  /** 期間内で数字が出た日数（分母。献立も記録も無い日は数えない） */
+  totalDays: number
+  /** 目的を指定して組んだ日の「1日あたり」の軸の値（1人分・g）。0日なら null */
+  averageWith: number | null
+  /** それ以外の日の「1日あたり」の軸の値（1人分・g）。0日なら null */
+  averageWithout: number | null
+}
+
+/**
+ * 「目的を指定して組んだ日」の答え合わせ（2026-08-02 便CP-2・docs/62 決定②）。
+ *
+ * 出すのは**事実だけ**: ①その目的で組んだ日が期間内に何日あったか ②その日の1日あたりの
+ * 軸の値（1人分）と、それ以外の日の同じ値。達成/未達の判定も、良し悪しの色分けもしない
+ * （docs/60 §1-3 の文言規律。「多い方がよい」とも言わない）。
+ *
+ * 日ごとの合計は dayBalanceMap の結果をそのまま使う＝過去日は作った記録・今日以降は登録した献立
+ * という既存の数え方（rangeSummary.ts 規則2）と必ず一致する。
+ * 1品も計算できなかった日（dishCount=0）は平均も日数も数えない（0gの日として平均を薄めない）。
+ */
+export function reviewPurposeDays(
+  days: Iterable<DayBalance>,
+  purposeByDate: ReadonlyMap<string, MealPurpose>,
+): PurposeDayReview[] {
+  const countable = [...days].filter((d) => d.balance.nutrition.dishCount > 0)
+  const totalDays = countable.length
+  const result: PurposeDayReview[] = []
+  for (const purpose of MEAL_PURPOSES) {
+    const key = PURPOSE_NUTRIENT_KEY[purpose]
+    let withDays = 0
+    let withSum = 0
+    let withoutDays = 0
+    let withoutSum = 0
+    for (const day of countable) {
+      const value = day.balance.nutrition.total[key]
+      if (purposeByDate.get(day.date) === purpose) {
+        withDays++
+        withSum += value
+      } else {
+        withoutDays++
+        withoutSum += value
+      }
+    }
+    if (withDays === 0) continue // その目的で組んだ日が無い期間には何も出さない
+    result.push({
+      purpose,
+      days: withDays,
+      totalDays,
+      averageWith: withSum / withDays,
+      averageWithout: withoutDays > 0 ? withoutSum / withoutDays : null,
+    })
+  }
+  return result
 }
 
 /**

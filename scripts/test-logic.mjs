@@ -59,6 +59,8 @@ import {
   isOneDish,
   proteinSourceOf,
   preferredProteinSources,
+  chooseBalancedPair,
+  PURPOSE_REDRAW_ATTEMPTS,
   isSlipperyDish,
   dishAvoidKeys,
   detectGenreMix,
@@ -144,14 +146,27 @@ import {
 import {
   DAILY_GUIDES,
   RANGE_EXCLUDED_RATIO_LIMIT,
+  PURPOSE_NUTRIENT_KEY,
   canCompareDay,
   canCompareRange,
   dayBalanceMap,
   guideForDays,
+  purposeAxisValue,
+  purposePenalty,
+  reviewPurposeDays,
   sumBalance,
   summarizeWeekBalance,
   vegetableGrams,
 } from '../src/logic/nutritionBalance.ts'
+import {
+  COOK_NAVI_TRIAL_LIMIT,
+  MONTH_TRIAL_LIMIT,
+  canUseCookNaviTrial,
+  canUseMonthTrial,
+  consumeCookNaviTrial,
+  cookNaviTrialRemaining,
+  isCookNaviTrialExhausted,
+} from '../src/logic/proTrial.ts'
 import { normalizeUnit, parseUnitQuantity } from '../src/logic/unitGrams.ts'
 import { KNOWN_UNITS, OTHER_UNIT, decomposeUnit, composeUnit } from '../src/logic/unitForm.ts'
 import {
@@ -8684,6 +8699,243 @@ eq(
   // めやすは1日ぶん×日数に伸ばす(週まとめ。7日固定では掛けない)
   eq('CL-GUIDE 3日ぶんの塩分めやす(男性)', guideForDays(DAILY_GUIDES.saltG.male, 3), 22.5)
   eq('CL-GUIDE 3日ぶんの野菜めやす', guideForDays(DAILY_GUIDES.vegetableG.perDayG, 3), 1050)
+}
+
+// ---------- 目的モード: 引き直し方式・目的の軸・答え合わせ(2026-08-02 便CP-2・docs/62 決定② / docs/60 第2段) ----------
+{
+  // --- (1) chooseBalancedPair: 引き直しの規則(エンジン本体は無改造。この関数だけが選び直す) ---
+  // ペアは「主菜・副菜」の器だけ見ればよいので、テストからは素の物体を渡す
+  const dish = (title, tags = []) => ({ title, tags })
+  const curry = dish('カレーライス') // ONE_DISH_TITLE_WORDS でも一品もの判定になる
+  const donburi = dish('親子丼', ['ご飯もの'])
+  // penalty はペアに載せた score をそのまま返す(引き直しの規則だけを検査するため)
+  const scored = (main, side, score) => ({ main, side, score })
+  const scoreOf = (pair) => (pair.score == null ? 999 : pair.score)
+  const drawsOf = (list) => {
+    let i = 0
+    const calls = []
+    const draw = () => {
+      const next = list[Math.min(i, list.length - 1)]
+      i++
+      calls.push(next)
+      return next
+    }
+    return { draw, count: () => i, calls }
+  }
+
+  eq('CP2-K k=3が引き直しの既定回数(docs/60 §3-2-3)', PURPOSE_REDRAW_ATTEMPTS, 3)
+
+  {
+    // k=1 は1回目をそのまま返す = 現行と完全に等価(いつでも無効化できる)
+    const d = drawsOf([scored(dish('A'), dish('a'), 5), scored(dish('B'), dish('b'), 1)])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 1)
+    eq('CP2-K k=1は1回目をそのまま返す', picked.main.title, 'A')
+    eq('CP2-K k=1は1回しか引かない', d.count(), 1)
+  }
+  {
+    // k回引いて penalty 最小を返す
+    const d = drawsOf([
+      scored(dish('A'), dish('a'), 5),
+      scored(dish('B'), dish('b'), 2),
+      scored(dish('C'), dish('c'), 3),
+    ])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K k回引いて最小のペアを採る', picked.main.title, 'B')
+    eq('CP2-K k回きっちり引く', d.count(), 3)
+  }
+  {
+    // penalty<=0(理想)が出たらそこで打ち切る
+    const d = drawsOf([
+      scored(dish('A'), dish('a'), 5),
+      scored(dish('B'), dish('b'), 0),
+      scored(dish('C'), dish('c'), -1),
+    ])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K ペナルティ0で打ち切る', picked.main.title, 'B')
+    eq('CP2-K 打ち切ったら3回目は引かない', d.count(), 2)
+  }
+  {
+    // 1回目のペナルティが最初から0なら1回で終わる
+    const d = drawsOf([scored(dish('A'), dish('a'), 0), scored(dish('B'), dish('b'), -5)])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 1回目が理想なら引き直さない', picked.main.title, 'A')
+    eq('CP2-K 1回目が理想なら1回しか引かない', d.count(), 1)
+  }
+  {
+    // 一品ものガード①: 1回目が一品ものなら引き直さない(カレー・丼の日を締め出さない)
+    const d = drawsOf([scored(curry, undefined, 9), scored(dish('B'), dish('b'), 1)])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 1回目が一品ものならそのまま採る', picked.main.title, 'カレーライス')
+    eq('CP2-K 1回目が一品ものなら引き直さない', d.count(), 1)
+  }
+  {
+    // 一品ものガード②: 2回目以降に出た一品ものは(どんなに軸に沿っても)捨てる
+    const d = drawsOf([
+      scored(dish('A'), dish('a'), 5),
+      scored(donburi, undefined, -100),
+      scored(dish('C'), dish('c'), 4),
+    ])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 2回目以降の一品ものは捨てる', picked.main.title, 'C')
+  }
+  {
+    // 構成ガード①: 主菜が引けなかった枠は引き直さない(候補0件は引き直しても同じ)
+    const d = drawsOf([scored(undefined, dish('a'), 5), scored(dish('B'), dish('b'), 1)])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 主菜が無い1回目はそのまま返す', picked.side.title, 'a')
+    eq('CP2-K 主菜が無い1回目では引き直さない', d.count(), 1)
+  }
+  {
+    // 構成ガード②: 2回目以降の「主菜なし」は候補にしない
+    const d = drawsOf([
+      scored(dish('A'), dish('a'), 5),
+      scored(undefined, undefined, -100),
+      scored(dish('C'), dish('c'), 4),
+    ])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 2回目以降の主菜なしは候補にしない', picked.main.title, 'C')
+  }
+  {
+    // 構成ガード③: 副菜を削って軸を稼がない(「塩分をひかえめに」で品数の少ないペアが勝つのを防ぐ)
+    const d = drawsOf([
+      scored(dish('A'), dish('a'), 5),
+      scored(dish('B'), undefined, -100),
+      scored(dish('C'), dish('c'), 4),
+    ])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 1回目に副菜があるなら副菜なしのペアは採らない', picked.main.title, 'C')
+  }
+  {
+    // 全部の引き直しが捨てられたら1回目を返す(0件回避=提案が消えない)
+    const d = drawsOf([
+      scored(dish('A'), dish('a'), 5),
+      scored(curry, undefined, -100),
+      scored(donburi, undefined, -100),
+    ])
+    const picked = chooseBalancedPair(d.draw, scoreOf, 3)
+    eq('CP2-K 引き直しが全部捨てられたら1回目を採る', picked.main.title, 'A')
+  }
+
+  // --- (2) 目的の軸: 何を比べているか(めやすからの距離ではなく、候補どうしの比較) ---
+  const totals = (proteinG, saltG) => ({ proteinG, saltG })
+  eq('CP2-AXIS たんぱく質軸の項目は proteinG', PURPOSE_NUTRIENT_KEY.protein, 'proteinG')
+  eq('CP2-AXIS 塩分軸の項目は saltG', PURPOSE_NUTRIENT_KEY.lowSalt, 'saltG')
+  eq(
+    'CP2-AXIS 軸の値は主菜+副菜の1人分の合計',
+    purposeAxisValue('protein', [totals(20, 1), totals(5, 0.5)]),
+    25,
+  )
+  eq('CP2-AXIS 塩分の軸も合計', purposeAxisValue('lowSalt', [totals(20, 1), totals(5, 0.5)]), 1.5)
+  eq('CP2-AXIS 品が無ければ0', purposeAxisValue('lowSalt', []), 0)
+  eq(
+    'CP2-AXIS たんぱく質は多いほうがペナルティが小さい',
+    purposePenalty('protein', [totals(30, 2)]) < purposePenalty('protein', [totals(10, 2)]),
+    true,
+  )
+  eq(
+    'CP2-AXIS たんぱく質のペナルティは必ず正(満たすべき線を作らない=打ち切り点が無い)',
+    purposePenalty('protein', [totals(999, 0)]) > 0,
+    true,
+  )
+  eq(
+    'CP2-AXIS 塩分は少ないほうがペナルティが小さい',
+    purposePenalty('lowSalt', [totals(10, 1.2)]) < purposePenalty('lowSalt', [totals(10, 3.4)]),
+    true,
+  )
+  eq('CP2-AXIS 塩分のペナルティは塩分そのもの', purposePenalty('lowSalt', [totals(10, 2.5)]), 2.5)
+  eq('CP2-AXIS 塩分0gだけが打ち切り点', purposePenalty('lowSalt', [totals(10, 0)]), 0)
+
+  // --- (3) 答え合わせ: 日数と1日あたりの数字だけ(達成/未達の判定はしない) ---
+  const dayOf = (date, proteinG, saltG, dishCount = 1) => ({
+    date,
+    basis: 'plan',
+    balance: {
+      nutrition: {
+        total: { kcal: 0, proteinG, fatG: 0, carbG: 0, saltG, fiberG: 0, ironMg: 0, calciumMg: 0 },
+        dishCount,
+        excludedDishCount: 0,
+        partialDishCount: 0,
+      },
+      vegetableG: 0,
+    },
+    comparable: true,
+  })
+  {
+    const days = [
+      dayOf('2026-08-03', 70, 3),
+      dayOf('2026-08-04', 60, 3),
+      dayOf('2026-08-05', 40, 3),
+      dayOf('2026-08-06', 20, 3),
+    ]
+    const purposeByDate = new Map([
+      ['2026-08-03', 'protein'],
+      ['2026-08-04', 'protein'],
+    ])
+    const review = reviewPurposeDays(days, purposeByDate)
+    eq('CP2-REV 目的の指定が無い軸は出さない', review.length, 1)
+    eq('CP2-REV 目的から組んだ日数', review[0].days, 2)
+    eq('CP2-REV 分母は数字が出た日数', review[0].totalDays, 4)
+    eq('CP2-REV 目的から組んだ日の1日あたり', review[0].averageWith, 65)
+    eq('CP2-REV ほかの日の1日あたり', review[0].averageWithout, 30)
+  }
+  {
+    // 1品も計算できなかった日(dishCount=0)は、日数にも平均にも入れない(0gの日で平均を薄めない)
+    const days = [dayOf('2026-08-03', 70, 3), dayOf('2026-08-04', 0, 0, 0)]
+    const review = reviewPurposeDays(
+      days,
+      new Map([
+        ['2026-08-03', 'protein'],
+        ['2026-08-04', 'protein'],
+      ]),
+    )
+    eq('CP2-REV 計算できなかった日は数えない', review[0].days, 1)
+    eq('CP2-REV 計算できなかった日は分母にも入れない', review[0].totalDays, 1)
+    eq('CP2-REV ほかの日が無ければ並置しない', review[0].averageWithout, null)
+  }
+  {
+    // 目的を一度も指定していない期間には何も出さない(節ごと出さない)
+    eq('CP2-REV 目的の記録が無ければ空', reviewPurposeDays([dayOf('2026-08-03', 70, 3)], new Map()), [])
+  }
+  {
+    // 2つの目的が混ざった月は、目的ごとに1件ずつ出す(並びは MEAL_PURPOSES の順)
+    const days = [dayOf('2026-08-03', 70, 4), dayOf('2026-08-04', 30, 1), dayOf('2026-08-05', 50, 2)]
+    const review = reviewPurposeDays(
+      days,
+      new Map([
+        ['2026-08-03', 'protein'],
+        ['2026-08-04', 'lowSalt'],
+      ]),
+    )
+    eq('CP2-REV 目的ごとに1件ずつ', review.map((r) => r.purpose), ['protein', 'lowSalt'])
+    eq('CP2-REV 塩分軸は塩分の数字を見る', review[1].averageWith, 1)
+    eq('CP2-REV 塩分軸の「ほかの日」は残り2日の平均', review[1].averageWithout, 3)
+  }
+}
+
+// ---------- 恒常のお試し2種: 端末内カウント(2026-08-02 便CP-2・docs/62 決定③) ----------
+{
+  eq('CP2-TRIAL 並行調理ナビのお試しは3回', COOK_NAVI_TRIAL_LIMIT, 3)
+  eq('CP2-TRIAL 月間献立のお試しは1回', MONTH_TRIAL_LIMIT, 1)
+  // 未設定(この項目導入前の既存ユーザーを含む)は0回使用として扱う
+  eq('CP2-TRIAL 未設定なら残り3回', cookNaviTrialRemaining(undefined), 3)
+  eq('CP2-TRIAL 1回使ったら残り2回', cookNaviTrialRemaining(1), 2)
+  eq('CP2-TRIAL 3回使ったら残り0回', cookNaviTrialRemaining(3), 0)
+  eq('CP2-TRIAL 記録が上限を超えていても負にしない', cookNaviTrialRemaining(9), 0)
+  eq('CP2-TRIAL 壊れた値(NaN)は0回使用として扱う', cookNaviTrialRemaining(NaN), 3)
+  eq('CP2-TRIAL 負の値も0回使用として扱う', cookNaviTrialRemaining(-2), 3)
+  eq('CP2-TRIAL 未設定なら使える', canUseCookNaviTrial(undefined), true)
+  eq('CP2-TRIAL 2回目までは使える', canUseCookNaviTrial(2), true)
+  eq('CP2-TRIAL 3回使ったら使えない', canUseCookNaviTrial(3), false)
+  eq('CP2-TRIAL 3回使ったら「終了」表示', isCookNaviTrialExhausted(3), true)
+  eq('CP2-TRIAL 途中は「終了」表示にしない', isCookNaviTrialExhausted(2), false)
+  // 消費: 上限を超えて増やさない(何度押しても3で止まる)
+  eq('CP2-TRIAL 未設定から1回使う', consumeCookNaviTrial(undefined), 1)
+  eq('CP2-TRIAL 2→3', consumeCookNaviTrial(2), 3)
+  eq('CP2-TRIAL 上限を超えて増やさない', consumeCookNaviTrial(3), 3)
+  // 月間献立は1回だけのフラグ
+  eq('CP2-TRIAL 月間は未設定ならまだ使える', canUseMonthTrial(undefined), true)
+  eq('CP2-TRIAL 月間はfalseでもまだ使える', canUseMonthTrial(false), true)
+  eq('CP2-TRIAL 月間は1回使ったら使えない', canUseMonthTrial(true), false)
 }
 
 // ---------- 結果 ----------
