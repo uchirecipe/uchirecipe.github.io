@@ -366,7 +366,7 @@ try {
   await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
   await wait(page, 1800)
 
-  // 「今日なに作る？」(今日の献立が空のときだけ出るので、献立を入れる前に撮る)
+  // 「今日なに作る？」(2026-08-03 便DH: 今週の献立に今日の予定があると出ないので、献立を入れる前に撮る)
   const suggestCard = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '今日なに作る？' }) })

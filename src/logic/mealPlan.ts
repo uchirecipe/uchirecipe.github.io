@@ -2,6 +2,7 @@ import { hasNgIngredient } from './ng'
 import { cookedWithinDays } from './cooked'
 import { currentSeason } from './season'
 import { pickIconKey } from './icon'
+import { guessDishType } from './dishTypeGuess'
 import { pickMainIngredients } from './mainIngredients'
 import {
   AUTO_FILL_ROLES,
@@ -829,14 +830,38 @@ export function planWeekFill(
 }
 
 /**
- * 「今日の献立」（todayList）と週間プランの今日の枠が食い違っているレシピIDを返す。
- * 週プランの今日の枠が1件も無いとき（＝週プランを使っていない）は食い違い扱いにしない
- * （毎回警告が出て煩わしくなるのを防ぐため）。同期はしない設計を維持し、
- * この結果はあくまで「気づかせる」表示にのみ使う。
+ * 「今日の献立」（todayList）のうち、**レシピ一覧から自分で選んだ分**のレシピIDを返す
+ * （＝今日の週プランには入っていない分。2026-08-03 便DH）。
+ *
+ * ホームと献立タブの日タブは、今日つくるものを
+ *   ①「レシピ一覧から選択中」＝この関数の結果
+ *   ②「今週の献立の予定」＝今日の週プラン（朝食・昼食・夕食）
+ * の2つに分けて縦に並べる。日タブを開くと今日の週プランは todayList へ自動取り込みされる
+ * （便U-3）ので、todayList から週プランぶんを引くと①だけが残る。
+ *
+ * 旧 todayPlanMismatch との違い: 週プランの今日の枠が0件でも空配列にせず、todayList を
+ * そのまま①として返す。旧関数は「食い違いの警告」を出すためのもので、週プランを使って
+ * いない人に警告を出さないよう0件時は空にしていた。いまは警告ではなく**内訳の見出し**
+ * なので、週プランが空でも「レシピ一覧から選択中」として並べる必要がある。
  */
-export function todayPlanMismatch(todayListIds: number[], todayPlanRecipeIds: number[]): number[] {
-  if (todayPlanRecipeIds.length === 0) return []
+export function todayListPickedIds(
+  todayListIds: number[],
+  todayPlanRecipeIds: number[],
+): number[] {
   return todayListIds.filter((id) => !todayPlanRecipeIds.includes(id))
+}
+
+/**
+ * レシピの「料理の種別」を4区分（主菜・副菜・汁物・その他）で確定させる（2026-08-03 便DH）。
+ * 登録済みの dishType を最優先で使い、未設定のレシピ（主にユーザー自作）は
+ * 新規登録時の初期値提案と同じ推定（logic/dishTypeGuess.ts）に倒す。
+ *
+ * ホームの「今日なに作る？」の種別しぼりが使う。4つのチップが**互いに重ならない**ことが
+ * 前提の表示なので、主菜だけ別判定（isMainDish）にせず、4区分すべてをこの1関数で決める。
+ * 同梱の基本レシピは全品 dishType を持つため、既定（主菜のみON）の見え方は変わらない。
+ */
+export function recipeDishType(r: Recipe): DishType {
+  return r.dishType ?? guessDishType(r)
 }
 
 /** planRoleAssign の結果（呼び出し側はこれを見て DB 操作を1つだけ行う） */

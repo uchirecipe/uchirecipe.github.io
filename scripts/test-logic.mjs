@@ -71,7 +71,10 @@ import {
   cookedPlanEntryIds,
   mealOccasionCount,
   planRoleAssign,
+  todayListPickedIds,
+  recipeDishType,
 } from '../src/logic/mealPlan.ts'
+import { restoreHomeWidget } from '../src/logic/homeWidgets.ts'
 import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
@@ -9900,6 +9903,82 @@ eq(
     to: '/recipes?q=鶏 もも',
     label: 'レシピ一覧に戻る',
   })
+}
+
+// ---------- 便DH: ホーム・日タブの内訳／種別／ホーム画面のカスタマイズ(2026-08-03) ----------
+{
+  const mk = (id, over = {}) => ({
+    id,
+    title: `レシピ${id}`,
+    servings: 2,
+    effortLevel: 'easy',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+    ...over,
+  })
+
+  // todayListPickedIds: 「レシピ一覧から選択中」＝今日の献立から今日の週プランぶんを引いた残り
+  eq('DH-PICK 週プランに無い品だけが残る', todayListPickedIds([1, 2, 3], [2]), [1, 3])
+  eq('DH-PICK 並び順は今日の献立の登録順のまま', todayListPickedIds([3, 1, 2], [2]), [3, 1])
+  eq('DH-PICK 全部が予定なら空', todayListPickedIds([1, 2], [1, 2]), [])
+  // 再発防止(旧todayPlanMismatch): 週プランが空のときに空配列を返してはいけない。
+  // 旧関数は「食い違い警告を出さない」ために0件時は空を返していたが、便DHでは同じ結果を
+  // 「レシピ一覧から選択中」の見出しの中身として使うため、週プランが空なら全部がこちらに入る
+  eq('DH-PICK 週プランが空でも今日の献立はそのまま選択中に入る', todayListPickedIds([1, 2], []), [1, 2])
+
+  // recipeDishType: dishTypeがあれば最優先・無ければ登録時と同じ推定にフォールバック
+  eq('DH-TYPE 登録済みのdishTypeをそのまま使う', recipeDishType(mk(1, { dishType: 'soup' })), 'soup')
+  eq('DH-TYPE その他(dessert)もそのまま', recipeDishType(mk(2, { dishType: 'dessert' })), 'dessert')
+  eq(
+    'DH-TYPE 未設定は推定に倒す(みそ汁→汁物)',
+    recipeDishType(mk(3, { title: 'わかめのみそ汁' })),
+    'soup',
+  )
+  eq(
+    'DH-TYPE 未設定の肉料理は主菜',
+    recipeDishType(mk(4, { title: '豚の生姜焼き', ingredients: [{ name: '豚こま' }] })),
+    'main',
+  )
+  // 4区分は重ならない(ホームの種別チップは「どれか1つ」に必ず入る前提で並べている)
+  eq(
+    'DH-TYPE 判定結果は必ず4区分のどれか1つ',
+    ['main', 'side', 'soup', 'dessert'].includes(recipeDishType(mk(5, { title: '謎の料理' }))),
+    true,
+  )
+
+  // restoreHomeWidget: 「表示しない」→「表示する」で標準の位置へ戻る(末尾に足さない)
+  eq(
+    'DH-HOMEW 先頭のパーツは先頭へ戻る',
+    restoreHomeWidget(['suggestion', 'ingredientSearch', 'history'], 'mealPlan'),
+    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
+  )
+  eq(
+    'DH-HOMEW 途中のパーツは標準の並びの位置へ戻る',
+    restoreHomeWidget(['mealPlan', 'ingredientSearch', 'history'], 'suggestion'),
+    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
+  )
+  eq(
+    'DH-HOMEW 標準で最後のパーツは末尾へ戻る',
+    restoreHomeWidget(['mealPlan', 'suggestion', 'ingredientSearch'], 'history'),
+    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
+  )
+  // 手で入れ替えた並びは崩さない(既に表示中のパーツの相対順は動かさない)
+  eq(
+    'DH-HOMEW 手で入れ替えた並びの相対順は変えない',
+    restoreHomeWidget(['history', 'ingredientSearch'], 'suggestion'),
+    ['suggestion', 'history', 'ingredientSearch'],
+  )
+  eq(
+    'DH-HOMEW 既に表示中なら何もしない',
+    restoreHomeWidget(['mealPlan', 'suggestion'], 'suggestion'),
+    ['mealPlan', 'suggestion'],
+  )
 }
 
 // ---------- 結果 ----------

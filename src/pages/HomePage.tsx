@@ -26,15 +26,15 @@ import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
 import { currentSeason, preferSeasonWithFallback } from '../logic/season'
 import {
-  isMainDish,
+  recipeDishType,
+  todayListPickedIds,
   excludeYesterdayPlanRecipes,
   MEAL_SLOTS,
-  sortMealSlots,
 } from '../logic/mealPlan'
 import { useMealPlanRange } from '../db/mealPlan'
 import { todayString } from '../logic/date'
 import { makePantryMatcher } from '../logic/pantry'
-import type { CookedLog, HomeWidgetKey, MealSlot, Recipe } from '../db/types'
+import type { CookedLog, DishType, HomeWidgetKey, MealSlot, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -57,6 +57,14 @@ const conditions: { value: SuggestCondition; label: string }[] = [
 
 // 「◯分以内」で選べる分数(2026-07-24 便BN・タスク7)。既定は先頭の10分
 const QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
+
+/**
+ * 「今日なに作る？」で選べる料理の種別(2026-08-03 便DH・オーナー指示)。
+ * レシピ登録の「料理の種別」と同じ4区分・同じ並び。既定は主菜だけON(従来の「主菜」トグルON相当)で、
+ * 献立の中心になる主菜が出るようにする。1つも選ばなければ種別では絞らない
+ */
+const DISH_TYPE_OPTIONS: DishType[] = ['main', 'side', 'soup', 'dessert']
+const DEFAULT_DISH_TYPES: DishType[] = ['main']
 
 /**
  * 「ほかの候補を見る」で直近に出した候補を何件まで覚えておくか(2026-07-29 便CD/MP-12)。
@@ -191,10 +199,13 @@ export default function HomePage() {
   // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
   // MealPlanPage「提案の条件」と同じパターン)
   const [conditionsOpen, setConditionsOpen] = useState(false)
-  // 「今日なに作る?」を主菜から提案する(2026-07-23 便BH-2・docs/56 §3-5)。既定オン=献立の中心に
-  // なる主菜(肉・魚・卵・豆腐が主役)を提案し、「1品ランダムに副菜が出てがっかり」を防ぐ。
-  // オフにすると副菜・その他も候補に入る。主菜が0件になる場合は0件回避で全体から選ぶ
-  const [mainOnly, setMainOnly] = useState(true)
+  // 「今日なに作る?」の種別しぼり(2026-07-23 便BH-2「主菜」トグル → 2026-08-03 便DHで4区分の
+  // 複数選択へ)。既定は主菜だけ=献立の中心になる主菜(肉・魚・卵・豆腐が主役)を提案し、
+  // 「1品ランダムに副菜が出てがっかり」を防ぐ。副菜・汁物・その他も足して選べる。
+  // 選んだ種別に合う品が0件になる場合は0件回避で全体から選ぶ
+  const [dishTypes, setDishTypes] = useState<DishType[]>(DEFAULT_DISH_TYPES)
+  const toggleDishType = (type: DishType) =>
+    setDishTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]))
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
   // 「ほかの候補を見る」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
@@ -236,41 +247,68 @@ export default function HomePage() {
   }, [todayList, recipeById])
 
   /**
-   * ホームの「今日の献立」を朝食・昼食・夕食に分けて出す（2026-08-02 便DE-1・オーナー指示）。
+   * ホームの「今日の献立」を2つの内訳に分けて出す（2026-08-03 便DH・オーナー指示。
+   * 2026-08-02 便DE-1の「todayListを朝昼夜に振り分ける」形を差し替え）。
    *
-   * 「今日の献立」（todayList）は食事の情報を持たないリストなので、食事は**今日の週の予定**
-   * （mealPlans の今日の分）から引く。日タブの自動取り込み（便U-3）で今日の予定はこのリストへ
-   * 入るため、ふだんはこれで全部に食事が付く。予定に無い品（レシピ一覧から自分で足した品）は
-   * 食事が決められないので、見出しを付けずに最後へ並べる（勝手にどこかの食事に入れない）。
+   *   ①「レシピ一覧から選択中」… todayList のうち今日の週の予定に無い分（食事は決めない）
+   *   ②「今週の献立の予定」    … 今日の週の予定そのもの（朝食・昼食・夕食）
+   *
+   * 両方をそれぞれ折りたたみ可能にして**両方とも**並べる（従来はtodayList側しか出ていなかった）。
+   * 既定は①だけを開き、①が0品のときは②を開く＝開いた先が空になるのを避ける。
+   * 日タブの自動取り込み（便U-3）で今日の予定は todayList にも入るため、todayList から
+   * 予定ぶんを引いたものが①になる（logic/mealPlan.ts の todayListPickedIds）。
    */
   const today = useMemo(() => todayString(), [])
   const todayPlanEntries = useMealPlanRange(today, today)
-  const slotOfRecipe = useMemo(() => {
-    const map = new Map<number, MealSlot>()
+  const todayPlanRecipeIds = useMemo(
+    () => Array.from(new Set((todayPlanEntries ?? []).map((e) => e.recipeId))),
+    [todayPlanEntries],
+  )
+  const pickedRecipes = useMemo(() => {
+    if (!todayListRecipes) return []
+    const pickedIds = todayListPickedIds(
+      todayListRecipes.map((r) => r.id!),
+      todayPlanRecipeIds,
+    )
+    return todayListRecipes.filter((r) => pickedIds.includes(r.id!))
+  }, [todayListRecipes, todayPlanRecipeIds])
+  /**
+   * 今日の予定を朝食→昼食→夕食の順にまとめる。
+   * 「表示する食事」の設定では絞らない（2026-07-30 便CH/C7と同じ切り分け＝設定は
+   * 「選ぶ・提案する対象」に効かせ、登録済みの予定は隠さない）。
+   */
+  const plannedGroups = useMemo(() => {
+    const bySlot = new Map<MealSlot, Recipe[]>()
     todayPlanEntries?.forEach((e) => {
-      if (!map.has(e.recipeId)) map.set(e.recipeId, e.slot)
+      const recipe = recipeById.get(e.recipeId)
+      if (!recipe) return
+      const list = bySlot.get(e.slot)
+      if (list) {
+        if (!list.some((r) => r.id === recipe.id)) list.push(recipe)
+      } else bySlot.set(e.slot, [recipe])
     })
-    return map
-  }, [todayPlanEntries])
-  const todayListBySlot = useMemo(() => {
-    const visible = sortMealSlots(settings?.visibleMealSlots ?? [...MEAL_SLOTS])
-    const groups: { slot: MealSlot; recipes: Recipe[] }[] = visible.map((slot) => ({
-      slot,
-      recipes: [],
-    }))
-    const rest: Recipe[] = []
-    todayListRecipes?.forEach((recipe) => {
-      const slot = recipe.id != null ? slotOfRecipe.get(recipe.id) : undefined
-      const group = slot ? groups.find((g) => g.slot === slot) : undefined
-      if (group) group.recipes.push(recipe)
-      else rest.push(recipe)
-    })
-    return { groups: groups.filter((g) => g.recipes.length > 0), rest }
-  }, [todayListRecipes, slotOfRecipe, settings?.visibleMealSlots])
-  // 「今日の献立」ウィジェットが出るか(1品以上)。2026-07-16オーナー指示: 「今日なに作る?」
-  // ウィジェットと常にどちらか片方だけを表示する（今日の献立が1品以上ならそちらを優先し、
-  // 「今日なに作る?」はウィジェットごと非表示にする。読み込み中(undefined)は従来どおり0品扱い）
-  const hasTodayList = !!todayListRecipes && todayListRecipes.length > 0
+    return MEAL_SLOTS.map((slot) => ({ slot, recipes: bySlot.get(slot) ?? [] })).filter(
+      (g) => g.recipes.length > 0,
+    )
+  }, [todayPlanEntries, recipeById])
+
+  // 折りたたみの開閉。nullのあいだは上のルール(①を開く・①が0品なら②)で決まり、
+  // ユーザーが一度でも押したらその選択を優先する
+  const [pickedOpenState, setPickedOpenState] = useState<boolean | null>(null)
+  const [plannedOpenState, setPlannedOpenState] = useState<boolean | null>(null)
+  const hasPicked = pickedRecipes.length > 0
+  const pickedOpen = pickedOpenState ?? hasPicked
+  const plannedOpen = plannedOpenState ?? !hasPicked
+  // 「今日の献立」ウィジェットが出るか(どちらかに1品以上)
+  const hasTodayPlanOrPick = hasPicked || plannedGroups.length > 0
+  /**
+   * 「今日なに作る?」を出すか（2026-08-03 便DH・オーナー指示）。
+   * 判定材料を「今日の献立(todayList)が空か」から「**今週の献立に今日の予定があるか**」へ変えた。
+   * 予定が立っている日は作るものが決まっているので提案を重ねない。予定が無ければ、
+   * レシピ一覧から選択中の品があっても提案は出す（1品決めただけで提案が消えていた）。
+   * 設定で「常に表示」を選んでいるときは予定があっても出す。
+   */
+  const showSuggestion = settings?.homeSuggestionAlways === true || todayPlanRecipeIds.length === 0
 
   // 自分のレシピが1件以上あり、30日以上（または一度も）バックアップしていないとき
   const showBackupReminder =
@@ -304,18 +342,18 @@ export default function HomePage() {
   }
 
   // 条件で絞り込んだ上で、今の季節に合うものを優先する。
-  // 「主菜から」がオンなら主菜(肉・魚・卵・豆腐が主役)に絞る(0件なら0件回避で全体から・便BH-2)。
+  // 選んだ種別(既定=主菜)に絞る(0件なら0件回避で全体から・便BH-2の作法を4区分に広げたもの)。
   // 2026-07-29 便CD/MP-12: 季節ぴったりの品が少ないときは通年の品も自動で混ぜる
   // (preferSeasonWithFallback)。同梱レシピの夏タグは5品しかなく、何度振り直しても
   // その5品の中でしか回らず同じ料理が連発していた。設定は増やさず自動で広げる
   const candidates = useMemo(() => {
     let byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
-    if (mainOnly) {
-      const mains = byCondition.filter((r) => isMainDish(r))
-      if (mains.length > 0) byCondition = mains
+    if (dishTypes.length > 0) {
+      const byType = byCondition.filter((r) => dishTypes.includes(recipeDishType(r)))
+      if (byType.length > 0) byCondition = byType
     }
     return preferSeasonWithFallback(byCondition, currentSeason())
-  }, [recipes, condition, mainOnly, quickMinutes])
+  }, [recipes, condition, dishTypes, quickMinutes])
 
   // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
   // 0件ならズレの不満を防ぐため通常候補にフォールバックし、その旨を表示する
@@ -361,50 +399,90 @@ export default function HomePage() {
   }, [recipes])
 
   const widgetSections: Record<HomeWidgetKey, ReactNode> = {
-    // 登録0品なら非表示(2026-07-16 便S。直近実装の「1行に薄く」表示を置き換え。
-    // 読み込み中(todayListRecipesがundefined)も同様に何も出さない)
+    // 選択中も今日の予定も0品なら非表示(2026-07-16 便S。直近実装の「1行に薄く」表示を置き換え。
+    // 読み込み中も同様に何も出さない)
     mealPlan:
-      hasTodayList ? (
+      hasTodayPlanOrPick ? (
         <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
           <h2 className="flex items-center gap-2 font-bold">
             <CalendarDays size={20} className="text-accent-ink" aria-hidden />
             {ja.home.mealPlanTitle}
           </h2>
-          {/* 2026-08-02 便DE-1(オーナー指示): 朝食・昼食・夕食で分けて出し、
-              食事の見出しを押すと「週」タブのその日まで送る */}
-          {todayListBySlot.groups.map(({ slot, recipes: slotRecipes }) => (
-            <div key={slot} className="mt-[var(--space-sm)]">
+
+          {/* ①レシピ一覧から選択中(2026-08-03 便DH)。食事は決めない＝朝昼夜に分けない */}
+          {hasPicked && (
+            <div className="mt-[var(--space-sm)]">
               <button
                 type="button"
-                data-testid="home-today-slot"
-                onClick={() => navigate(`/meal-plan?focus=week&date=${today}`)}
-                aria-label={ja.home.todaySlotOpenWeek.replace('{slot}', ja.mealPlan.slot[slot])}
-                className="flex w-full items-center gap-1 py-1 text-left text-sm font-bold text-accent-ink"
+                data-testid="home-today-picked-toggle"
+                onClick={() => setPickedOpenState(!pickedOpen)}
+                aria-expanded={pickedOpen}
+                className="flex w-full items-center gap-1 py-1 text-left text-sm font-bold text-ink-muted"
               >
-                <span className="min-w-0 flex-1">{ja.mealPlan.slot[slot]}</span>
-                <ChevronRight size={16} className="shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  {ja.mealPlan.todayPickedLabel}（{pickedRecipes.length}）
+                </span>
+                {pickedOpen ? (
+                  <ChevronUp size={16} className="shrink-0" aria-hidden />
+                ) : (
+                  <ChevronDown size={16} className="shrink-0" aria-hidden />
+                )}
               </button>
-              <ul className="divide-y divide-edge rounded-md border border-edge bg-app">
-                {slotRecipes.map((recipe) => (
-                  <HomeTodayListItem key={recipe.id} recipe={recipe} />
-                ))}
-              </ul>
+              {pickedOpen && (
+                <ul className="divide-y divide-edge rounded-md border border-edge bg-app">
+                  {pickedRecipes.map((recipe) => (
+                    <HomeTodayListItem key={recipe.id} recipe={recipe} />
+                  ))}
+                </ul>
+              )}
             </div>
-          ))}
-          {/* 今週の予定に無い品（レシピ一覧から自分で足した品）は、食事が決まっていないので
-              見出しを付けずに並べる */}
-          {todayListBySlot.rest.length > 0 && (
-            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-              {todayListBySlot.rest.map((recipe) => (
-                <HomeTodayListItem key={recipe.id} recipe={recipe} />
-              ))}
-            </ul>
+          )}
+
+          {/* ②今週の献立の予定(2026-08-02 便DE-1 → 便DHで折りたたみの中へ)。
+              食事の見出しを押すと「週」タブのその日まで送る */}
+          {plannedGroups.length > 0 && (
+            <div className="mt-[var(--space-sm)]">
+              <button
+                type="button"
+                data-testid="home-today-planned-toggle"
+                onClick={() => setPlannedOpenState(!plannedOpen)}
+                aria-expanded={plannedOpen}
+                className="flex w-full items-center gap-1 py-1 text-left text-sm font-bold text-ink-muted"
+              >
+                <span className="min-w-0 flex-1">{ja.mealPlan.todayPlannedLabel}</span>
+                {plannedOpen ? (
+                  <ChevronUp size={16} className="shrink-0" aria-hidden />
+                ) : (
+                  <ChevronDown size={16} className="shrink-0" aria-hidden />
+                )}
+              </button>
+              {plannedOpen &&
+                plannedGroups.map(({ slot, recipes: slotRecipes }) => (
+                  <div key={slot} className="mt-1">
+                    <button
+                      type="button"
+                      data-testid="home-today-slot"
+                      onClick={() => navigate(`/meal-plan?focus=week&date=${today}`)}
+                      aria-label={ja.home.todaySlotOpenWeek.replace('{slot}', ja.mealPlan.slot[slot])}
+                      className="flex w-full items-center gap-1 py-1 text-left text-sm font-bold text-accent-ink"
+                    >
+                      <span className="min-w-0 flex-1">{ja.mealPlan.slot[slot]}</span>
+                      <ChevronRight size={16} className="shrink-0" aria-hidden />
+                    </button>
+                    <ul className="divide-y divide-edge rounded-md border border-edge bg-app">
+                      {slotRecipes.map((recipe) => (
+                        <HomeTodayListItem key={recipe.id} recipe={recipe} />
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+            </div>
           )}
         </section>
       ) : null,
-    // 今日の献立が1品以上あるときはウィジェットごと非表示(2026-07-16オーナー指示。
-    // mealPlanウィジェットと常に排他=どちらか片方だけが表示される)
-    suggestion: !hasTodayList ? (
+    // 今週の献立に今日の予定があるときは非表示(2026-08-03 便DH・オーナー指示)。
+    // 設定「常に表示」を選んでいれば予定があっても出す
+    suggestion: showSuggestion ? (
       <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
         <h2 className="text-xl font-bold">{ja.home.suggestTitle}</h2>
 
@@ -475,26 +553,36 @@ export default function HomePage() {
                       </div>
                     </div>
                   )}
+                  {/* 料理の種別(2026-08-03 便DH・オーナー指示)。旧「主菜」トグル1つを
+                      レシピ登録と同じ4区分の複数選択にし、置き場所も「条件をしぼる」の中へ移した */}
+                  <div className="mt-[var(--space-sm)]">
+                    <p className="text-xs text-ink-muted">{ja.home.dishTypeLabel}</p>
+                    <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                      {DISH_TYPE_OPTIONS.map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => toggleDishType(type)}
+                          aria-pressed={dishTypes.includes(type)}
+                          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                            dishTypes.includes(type)
+                              ? 'border-accent bg-accent text-on-accent'
+                              : 'border-edge bg-surface text-ink-muted'
+                          }`}
+                        >
+                          {ja.dishType[type]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </>
               )}
             </div>
 
-            {/* 「主菜」「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6で横並び化)。
-                主菜=既定オンで主菜(肉・魚・卵・豆腐が主役)に絞る。在庫の食材から=在庫にある食材を使う
-                レシピに絞る(在庫が1件以上あるときだけ出す) */}
+            {/* 「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6)。
+                在庫にある食材を使うレシピに絞る(在庫が1件以上あるときだけ出す)。
+                2026-08-03 便DH: 隣にあった「主菜」は「条件をしぼる」の中の種別チップへ移した */}
             <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => setMainOnly((v) => !v)}
-                aria-pressed={mainOnly}
-                className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
-                  mainOnly
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
-              >
-                {ja.home.mainOnlyToggle}
-              </button>
               {pantryNames.length > 0 && (
                 <button
                   type="button"
@@ -524,10 +612,12 @@ export default function HomePage() {
               <p className="mt-[var(--space-sm)] text-ink-muted">{ja.home.noCandidate}</p>
             )}
 
+            {/* 2026-08-03 便DH(オーナー指示): 「ほかの候補を見る」→「ランダムで選ぶ」に改名し、
+                既存のCTAと同じオレンジ地・白字(bg-accent/text-on-accent)にする */}
             <button
               type="button"
               onClick={shuffleSuggestion}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
             >
               <Dices size={20} aria-hidden />
               {ja.home.shuffle}
