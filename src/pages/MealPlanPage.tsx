@@ -79,7 +79,7 @@ import {
   suggestForSlot,
   suggestPairForSlot,
   planWeekFill,
-  todayPlanMismatch,
+  todayListPickedIds,
   normalizeDateRange,
   rangeDayCount,
   isOneDish,
@@ -194,15 +194,24 @@ const pickerChipCls = (active: boolean) =>
     active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
   }`
 
-/** 今日の献立の1行（小サムネ＋名前＋作った/×） */
+/**
+ * 今日の献立の1行（小サムネ＋名前＋作った/×）。
+ *
+ * 2026-08-03 便DH: 日タブを「レシピ一覧から選択中」と「今週の献立の予定」の縦一列に分けたので、
+ * ×（外す）は前者だけに出す（onRemove を渡さない＝週の予定の行には出ない）。週の予定は
+ * 週タブで組んだものなので、日タブから消せると「どちらが正か」が分からなくなる。
+ * footer には行の下に置く操作（レシピ一覧から選んだ品を今日の予定へ入れるボタン）を渡す。
+ */
 function TodayListRow({
   recipe,
   onCooked,
   onRemove,
+  footer,
 }: {
   recipe: Recipe
   onCooked: () => void
-  onRemove: () => void
+  onRemove?: () => void
+  footer?: ReactNode
 }) {
   const photoUrl = usePhotoUrl(recipe.photo)
   // state.from/fromPathで「今日の献立から開いた」ことを詳細画面へ持ち回る。
@@ -215,40 +224,49 @@ function TodayListRow({
   // 「戻ったら必ず日タブ」という保証は維持する）
   const fromState = { from: 'todayList' as const, fromPath: '/meal-plan?focus=today' }
   return (
-    <li className="flex items-center gap-2 px-[var(--space-sm)] py-2">
-      <Link
-        to={`/recipes/${recipe.id}`}
-        state={fromState}
-        className="h-10 w-10 shrink-0 overflow-hidden rounded-sm"
-      >
-        {photoUrl ? (
-          <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
-        ) : (
-          <RecipePlaceholder recipe={recipe} iconSize={20} />
+    <li className="px-[var(--space-sm)] py-2">
+      <div className="flex items-center gap-2">
+        <Link
+          to={`/recipes/${recipe.id}`}
+          state={fromState}
+          className="h-10 w-10 shrink-0 overflow-hidden rounded-sm"
+        >
+          {photoUrl ? (
+            <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
+          ) : (
+            <RecipePlaceholder recipe={recipe} iconSize={20} />
+          )}
+        </Link>
+        <Link
+          to={`/recipes/${recipe.id}`}
+          state={fromState}
+          className="min-w-0 flex-1 truncate font-bold"
+        >
+          {recipe.title}
+        </Link>
+        {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
+            破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
+            押し間違いを減らす(アイコンの大きさ・aria-labelは据え置き) */}
+        <button
+          type="button"
+          onClick={onCooked}
+          aria-label={ja.mealPlan.todayMarkCooked}
+          className="shrink-0 rounded-full p-3 text-accent-ink"
+        >
+          <CheckCircle2 size={20} aria-hidden />
+        </button>
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={ja.mealPlan.todayRemove}
+            className="ml-[var(--space-sm)] shrink-0 rounded-full p-3 text-ink-muted"
+          >
+            <X size={20} aria-hidden />
+          </button>
         )}
-      </Link>
-      <Link to={`/recipes/${recipe.id}`} state={fromState} className="min-w-0 flex-1 truncate font-bold">
-        {recipe.title}
-      </Link>
-      {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
-          破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-          押し間違いを減らす(アイコンの大きさ・aria-labelは据え置き) */}
-      <button
-        type="button"
-        onClick={onCooked}
-        aria-label={ja.mealPlan.todayMarkCooked}
-        className="shrink-0 rounded-full p-3 text-accent-ink"
-      >
-        <CheckCircle2 size={20} aria-hidden />
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={ja.mealPlan.todayRemove}
-        className="ml-[var(--space-sm)] shrink-0 rounded-full p-3 text-ink-muted"
-      >
-        <X size={20} aria-hidden />
-      </button>
+      </div>
+      {footer}
     </li>
   )
 }
@@ -1189,8 +1207,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return map
   }, [prevWeekEntries])
 
-  // 「今日」だけの枠別マップ（食い違い検出UI用。todayEntries由来でweekStartに依存しない）
-  const todayEntriesBySlot = useMemo(() => groupBySlot(todayEntries), [todayEntries])
   // 月タブの日タップモーダル用（monthEntries由来なので表示帯フィルタに関係なく朝昼夕すべてを見せる）
   const dayModalEntries = useMemo(() => {
     if (!dayModalDate) return []
@@ -1440,14 +1456,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     })
   }, [monthCellMode, monthDatesList, today, monthCookedDishes, monthPlannedDishes, priceIndex])
 
-  // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）
+  // 今日の献立（週間プランナーとは別の「今日これ作る」リスト）。
+  // 日タブでの見せ方は pickedRecipes / plannedGroups（2026-08-03 便DH）が決める
   const todayList = useTodayList()
-  const todayListRecipes = useMemo(() => {
-    if (!todayList) return undefined
-    return todayList
-      .map((item) => recipeById.get(item.recipeId))
-      .filter((r): r is Recipe => r !== undefined)
-  }, [todayList, recipeById])
 
   // 今日の日付の週プラン登録のうち「表示中の食事帯」に入っているレシピID
   // （手動取り込みボタン・自動取り込み(便U-3)・食い違い検出の3つで共通利用。todayEntries由来
@@ -1461,15 +1472,55 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayEntries, settings?.visibleMealSlots])
 
-  // 「今日の献立」にあるのに、今日の週プラン枠には入っていないレシピ
-  // (週プランを使っていない=今日の枠が0件のときは食い違い扱いにしない)
-  const mismatchRecipes = useMemo(() => {
+  /**
+   * 日タブの縦一列の内訳（2026-08-03 便DH・オーナー指示。便DEの左右2列を差し替え）。
+   *
+   *   pickedRecipes … ①「レシピ一覧から選択中」＝今日の献立のうち今日の週プランに無い分。
+   *                    食事(朝昼夜)には分けない（レシピ詳細から直接「作った」を押すのと同じ扱い）
+   *   plannedGroups … ②「今週の献立の予定」＝今日の週プランを朝食→昼食→夕食の順に
+   *
+   * ②は「表示する食事」の設定では絞らない（登録済みの予定を設定で隠さない＝便CH/C7の切り分け）。
+   * そのため①の判定にも**全ての食事帯**の今日の予定を使う（表示帯だけで引くと、隠した帯の
+   * 予定が①と②の両方に出て二重になる）。
+   */
+  const todayPlanAllRecipeIds = useMemo(
+    () => Array.from(new Set((todayEntries ?? []).map((e) => e.recipeId))),
+    [todayEntries],
+  )
+  const pickedRecipes = useMemo(() => {
     const todayListIds = todayList?.map((item) => item.recipeId) ?? []
-    const mismatchIds = todayPlanMismatch(todayListIds, todayFromPlanIds)
-    return mismatchIds
+    return todayListPickedIds(todayListIds, todayPlanAllRecipeIds)
       .map((id) => recipeById.get(id))
       .filter((r): r is Recipe => r !== undefined)
-  }, [todayList, todayFromPlanIds, recipeById])
+  }, [todayList, todayPlanAllRecipeIds, recipeById])
+  const plannedGroups = useMemo(() => {
+    const bySlot = new Map<MealSlot, Recipe[]>()
+    todayEntries?.forEach((e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (!recipe) return
+      // 今日すでに作った品は出さない（オーナー「作った後は予定でなく記録」）。①の品は
+      // 「作った」で今日の献立から外れて消えるので、②も同じ見え方に揃える。
+      // トーストの「元に戻す」で記録を消せば、この行もそのまま戻る
+      if (recipe.cookedLogs.some((log) => log.date === today)) return
+      const list = bySlot.get(e.slot)
+      if (list) {
+        if (!list.some((r) => r.id === recipe.id)) list.push(recipe)
+      } else bySlot.set(e.slot, [recipe])
+    })
+    return MEAL_SLOTS.map((slot) => ({ slot, recipes: bySlot.get(slot) ?? [] })).filter(
+      (g) => g.recipes.length > 0,
+    )
+  }, [todayEntries, recipeById, today])
+  /** 日タブに並んでいる全レシピID（①→②の順・重複なし）。まとめて記録・並行調理ナビへ渡す */
+  const dayRecipeIds = useMemo(() => {
+    const ids = pickedRecipes.map((r) => r.id!)
+    plannedGroups.forEach(({ recipes: slotRecipes }) =>
+      slotRecipes.forEach((r) => {
+        if (!ids.includes(r.id!)) ids.push(r.id!)
+      }),
+    )
+    return ids
+  }, [pickedRecipes, plannedGroups])
 
   // 献立タブを開いたときの初期タブ(2026-07-16 便U-1でタブ構成に再設計): 既定は「日」タブ。
   // ?focus=today が付いている場合(今日の献立からレシピを開いて戻ってきた場合)は、明示的に
@@ -1903,7 +1954,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
-   * 「今日の献立と今週の予定が食い違っています」の食事ボタン: その料理を今日のその食事へ登録する
+   * 日タブの行の「作った」（2026-08-03 便DH）。①レシピ一覧から選択中・②今週の献立の予定の
+   * どちらの行からも同じ処理を呼ぶ。今日の日付で記録し、今日の献立に入っていれば外す
+   * （②の品は「作った後は予定でなく記録」＝記録が付いた時点でこの行は消える）。
+   * トーストの「元に戻す」で直前の1件を取り消せる（便DE-3）。
+   */
+  const markDayRecipeCooked = (recipeId: number) => {
+    void (async () => {
+      await markTodayListCooked(recipeId)
+      // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
+      setMessage(ja.mealPlan.todayCookedToast)
+      setUndoCooked({ recipeId, message: ja.mealPlan.todayCookedToast })
+    })()
+  }
+
+  /**
+   * 「レシピ一覧から選択中」の行の食事ボタン: その料理を今日のその食事へ登録する
    * （2026-07-29 便CB-1・便CD報告の不具合修正）。
    *
    * 直った点: 以前は料理の種類を見ずに必ず「その枠の主菜」を置き換えていたため、副菜（きんぴら等）を
@@ -3405,29 +3471,71 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
             <h2 className="text-xl font-bold">{ja.mealPlan.todayTitle}</h2>
 
-            {todayListRecipes && todayListRecipes.length > 0 ? (
+            {dayRecipeIds.length > 0 ? (
               <>
-                <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-                  {todayListRecipes.map((recipe) => (
-                    <TodayListRow
-                      key={recipe.id}
-                      recipe={recipe}
-                      onCooked={() => {
-                        void (async () => {
-                          await markTodayListCooked(recipe.id!)
-                          // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示。
-                          // 2026-08-02 便DE-3: そのトーストから「元に戻す」で取り消せるようにする
-                          setMessage(ja.mealPlan.todayCookedToast)
-                          setUndoCooked({
-                            recipeId: recipe.id!,
-                            message: ja.mealPlan.todayCookedToast,
-                          })
-                        })()
-                      }}
-                      onRemove={() => void removeFromTodayList(recipe.id!)}
-                    />
-                  ))}
-                </ul>
+                {/* 2026-08-03 便DH(オーナー指示): 便DEの左右2列をやめ、縦一列で
+                    「レシピ一覧から選択中」→「今週の献立の予定(朝食・昼食・夕食)」の順に並べる */}
+
+                {/* ①レシピ一覧から選択中。×(外す)が押せるのはこちらだけ。
+                    今日の予定へ入れたいときは行の下の「◯食に入れる」から
+                    (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
+                {pickedRecipes.length > 0 && (
+                  <div data-testid="day-picked" className="mt-[var(--space-sm)]">
+                    <p className="text-sm font-bold text-ink-muted">
+                      {ja.mealPlan.todayPickedLabel}
+                    </p>
+                    <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                      {pickedRecipes.map((recipe) => (
+                        <TodayListRow
+                          key={recipe.id}
+                          recipe={recipe}
+                          onCooked={() => markDayRecipeCooked(recipe.id!)}
+                          onRemove={() => void removeFromTodayList(recipe.id!)}
+                          footer={
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {MEAL_SLOTS.map((slot) => (
+                                <button
+                                  key={slot}
+                                  type="button"
+                                  onClick={() => void assignMismatchRecipe(slot, recipe)}
+                                  className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink"
+                                >
+                                  {ja.mealPlan.planMismatchAddToSlot.replace(
+                                    '{slot}',
+                                    ja.mealPlan.slot[slot],
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          }
+                        />
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* ②今週の献立の予定。週タブで組んだものなので、日タブからは外せない(×を出さない) */}
+                {plannedGroups.length > 0 && (
+                  <div data-testid="day-planned" className="mt-[var(--space-md)]">
+                    <p className="text-sm font-bold text-ink-muted">
+                      {ja.mealPlan.todayPlannedLabel}
+                    </p>
+                    {plannedGroups.map(({ slot, recipes: slotRecipes }) => (
+                      <div key={slot} className="mt-1">
+                        <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+                        <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                          {slotRecipes.map((recipe) => (
+                            <TodayListRow
+                              key={recipe.id}
+                              recipe={recipe}
+                              onCooked={() => markDayRecipeCooked(recipe.id!)}
+                            />
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {/* 「おまかせで提案」の直後だけ出す振り直し(2026-07-24 便BN・タスク2)。
                     前回のおまかせ分を入れ替えて別の主菜+副菜を提案し直す */}
                 {lastSuggestedIds.length > 0 && (
@@ -3447,16 +3555,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}
                   </p>
                 )}
+                {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する */}
                 <button
                   type="button"
-                  onClick={() => void markAllTodayListCooked(todayListRecipes.map((r) => r.id!))}
+                  onClick={() => void markAllTodayListCooked(dayRecipeIds)}
                   className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
                 >
                   <CheckCircle2 size={18} aria-hidden />
                   {ja.mealPlan.todayMarkAllCooked}
                 </button>
 
-                {todayListRecipes.length >= 2 && (
+                {/* 並行調理ナビは①②の両方を渡す(2026-08-03 便DH)。どの品で段取りを組むかは
+                    ナビの画面で選ぶ(最大3品) */}
+                {dayRecipeIds.length >= 2 && (
                   <Link
                     to="/cook-navi"
                     className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
@@ -3468,69 +3579,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     </span>
                     <ChevronRight size={18} className="shrink-0 text-ink-muted" aria-hidden />
                   </Link>
-                )}
-
-                {/* 「今日の献立」と「今週の予定」の並列表示(2026-08-02 便DE-2・オーナー指示)。
-                    警告と長い説明文をやめ、2つの中身を左右に並べて見比べられるようにした。
-                    左の品は今週の予定に入っていないので、その場で入れられるボタンを下に置く
-                    (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
-                {mismatchRecipes.length > 0 && (
-                  <div
-                    data-testid="plan-mismatch"
-                    className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]"
-                  >
-                    <div className="grid grid-cols-2 gap-[var(--space-sm)]">
-                      <div>
-                        <p className="text-xs font-bold text-ink-muted">
-                          {ja.mealPlan.planMismatchListLabel}
-                        </p>
-                        <ul className="mt-1 space-y-[var(--space-sm)]">
-                          {mismatchRecipes.map((recipe) => (
-                            <li key={recipe.id}>
-                              <p className="text-sm font-bold">{recipe.title}</p>
-                              <div className="mt-1 flex flex-col gap-1">
-                                {visibleSlots.map((slot) => (
-                                  <button
-                                    key={slot}
-                                    type="button"
-                                    onClick={() => void assignMismatchRecipe(slot, recipe)}
-                                    className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink"
-                                  >
-                                    {ja.mealPlan.planMismatchAddToSlot.replace(
-                                      '{slot}',
-                                      ja.mealPlan.slot[slot],
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-ink-muted">
-                          {ja.mealPlan.planMismatchPlanLabel}
-                        </p>
-                        <ul className="mt-1 space-y-[var(--space-sm)]">
-                          {visibleSlots.map((slot) => {
-                            const titles = (todayEntriesBySlot.get(slot) ?? [])
-                              .map((e) => recipeById.get(e.recipeId)?.title)
-                              .filter((t): t is string => !!t)
-                            return (
-                              <li key={slot}>
-                                <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slot]}</p>
-                                <p className="text-sm font-bold">
-                                  {titles.length > 0
-                                    ? titles.join('・')
-                                    : ja.mealPlan.planMismatchPlanEmpty}
-                                </p>
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
                 )}
               </>
             ) : (
@@ -3576,12 +3624,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               </div>
             )}
           </section>
-
-          {/* 表示する食事帯（便U-2。今日の献立への自動取り込み(便U-3)がここで選んだ帯だけを対象にする） */}
-          <div className="mt-[var(--space-md)]">
-            {renderSlotFilter()}
-            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.daySlotFilterHint}</p>
-          </div>
+          {/* 2026-08-03 便DH(オーナー指示): 日タブの「表示する食事」は削除した。
+              日タブは今日の予定を朝食・昼食・夕食すべて並べるようになり、絞る意味が無くなったため
+              (設定そのもの=visibleMealSlots は週タブに残り、自動取り込みの対象もそちらで決まる) */}
         </>
       )}
 

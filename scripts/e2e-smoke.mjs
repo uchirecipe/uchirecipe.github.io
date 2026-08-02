@@ -79,6 +79,10 @@
 //         ORPHAN-01(レシピ削除の孤児防止・2026-07バグ修正・deleteRecipe: 基本レシピを週間献立・
 //         今日の献立の両方に登録した状態で1品削除しても、両テーブルに削除済みレシピを指す孤児行が
 //         残らないことをIndexedDB直読みで確認。旧「テーマ一括削除」はテーマUI撤去で1品削除経路へ置換) /
+//         HOME-DH-01(2026-08-03 便DH: ホームの「今日の献立」を「レシピ一覧から選択中」「今週の献立の予定」の
+//         2群に分けてそれぞれ折りたたむ・既定は選択中だけ開く/「今日なに作る？」は今週の献立に今日の予定が
+//         あれば出さない/「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり
+//         既定は主菜だけON) /
 //         DASH-01(だし紐づけ・2026-07-23: 材料「だし汁」の行から収録レシピ「だしのとり方」の詳細へ
 //         飛べるリンクが出てタップで遷移する・収録レシピを削除するとリンクは出ない) /
 //         TODAYALL-01(「全て作った！」の一括反映・2026-07バグ修正: 記録追加(addCookedLog)と
@@ -5037,15 +5041,17 @@ try {
         'MEALPLAN-05 日タブを開くと夕食(表示帯)の週プラン2件が今日の献立に自動で入る',
         mp5BodyAfterFirst.includes('肉じゃが') && mp5BodyAfterFirst.includes('カレーライス'),
       )
-      check(
-        'MEALPLAN-05 朝食(非表示帯)の登録は取り込まれない',
-        !mp5BodyAfterFirst.includes('豚の生姜焼き'),
-      )
       const idsAfterFirstOpen = await todayListRecipeIds()
       check(
-        'MEALPLAN-05 todayListの実データは2件(夕食の2件のみ)',
+        'MEALPLAN-05 朝食(非表示帯)の登録は今日の献立(todayList)に取り込まれない',
         idsAfterFirstOpen.length === 2,
         `ids=${JSON.stringify(idsAfterFirstOpen)}`,
+      )
+      // 2026-08-03 便DH: 日タブは今日の週プランを朝食・昼食・夕食すべて並べる(取り込みの対象=
+      // 表示帯だけ、という切り分けは上のtodayListの件数で担保する)
+      check(
+        'MEALPLAN-05(便DH) 取り込まない朝食の予定も「今週の献立の予定」には並ぶ',
+        mp5BodyAfterFirst.includes('豚の生姜焼き') && mp5BodyAfterFirst.includes('今週の献立の予定'),
       )
 
       // 2回目: 一旦別ページへ抜けて開き直す(再マウント)→重複しない(冪等)
@@ -5060,17 +5066,37 @@ try {
         `ids=${JSON.stringify(idsAfterSecondOpen)}`,
       )
 
-      // 削除→開き直し: 肉じゃがを×で外す→開き直しても再出現しない
-      // (lastAutoImportDateに今日が記録済みのため、その日のうちの自動再取り込みはスキップ)
-      const removeButtons = mp5Page.locator('button[aria-label="この献立から外す"]')
-      const removeCountBefore = await removeButtons.count()
-      check('MEALPLAN-05 前提: 今日の献立に×ボタンが2つ出ている', removeCountBefore === 2)
-      // 1行目(肉じゃが)の×を押す
-      await removeButtons.first().click()
-      await mp5Page.waitForTimeout(500)
+      // 削除→開き直し: 今日の献立から1件外す→開き直しても再出現しない
+      // (lastAutoImportDateに今日が記録済みのため、その日のうちの自動再取り込みはスキップ)。
+      // 2026-08-03 便DH: 週の予定から来た品は「今週の献立の予定」に並び×は出ない(外すのは週タブの仕事)
+      // ため、ここは todayList を直接1件消して再取り込みが起きないことだけを検証する
+      check(
+        'MEALPLAN-05(便DH) 週の予定から来た品に×(この献立から外す)は出ない',
+        (await mp5Page.locator('button[aria-label="この献立から外す"]').count()) === 0,
+      )
+      await mp5Page.evaluate(
+        (recipeId) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('todayList', 'readwrite')
+              const store = tx.objectStore('todayList')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const row = g.result.find((r) => r.recipeId === recipeId)
+                if (row) store.delete(row.id)
+              }
+              tx.oncomplete = () => resolve(true)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        idsAfterSecondOpen[0],
+      )
+      await mp5Page.waitForTimeout(300)
       const idsAfterRemove = await todayListRecipeIds()
       check(
-        'MEALPLAN-05 ×で1件外すとtodayListは1件になる',
+        'MEALPLAN-05 1件外すとtodayListは1件になる',
         idsAfterRemove.length === 1,
         `ids=${JSON.stringify(idsAfterRemove)}`,
       )
@@ -5470,13 +5496,33 @@ try {
       )
 
       // (b) 重複ガード: 今日の献立から一旦外し(ボタンを「追加」状態に戻す)、
-      // もう一度窓→夕食を選ぶと、重複させずトーストで案内される
-      await swPage.getByRole('button', { name: '日', exact: true }).click()
-      await swPage.waitForTimeout(500)
-      await swPage.locator('button[aria-label="この献立から外す"]').first().click()
-      await swPage.waitForTimeout(500)
+      // もう一度窓→夕食を選ぶと、重複させずトーストで案内される。
+      // 2026-08-03 便DH: 週の予定に入った品は日タブの「今週の献立の予定」に並び×が出ない
+      // (外すのは週タブの仕事)ので、todayListから直接1件消して同じ状態を作る
+      await swPage.evaluate(
+        (recipeId) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('todayList', 'readwrite')
+              const store = tx.objectStore('todayList')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const row = g.result.find((r) => r.recipeId === recipeId)
+                if (row) store.delete(row.id)
+              }
+              tx.oncomplete = () => resolve(true)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        swRecipeId,
+      )
+      await swPage.waitForTimeout(300)
       await swPage.goto(`${BASE}/#/recipes/${swRecipeId}`, { waitUntil: 'networkidle' })
-      await swPage.waitForTimeout(500)
+      // 生IDB書き込みはDexieのliveQueryを更新しないので、読み直してから操作する
+      await swPage.reload({ waitUntil: 'networkidle' })
+      await swPage.waitForTimeout(800)
       await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await swPage.waitForTimeout(300)
       await swPage.getByRole('button', { name: '夕食', exact: true }).click()
@@ -7576,7 +7622,7 @@ try {
       await roPage.waitForTimeout(1200)
       const roBody = (await roPage.textContent('body')) ?? ''
       check(
-        'MEALPLAN-ROLE(便DE-2) 前提: 2つの中身が左右に並んで出る',
+        'MEALPLAN-ROLE(便DH) 前提: 2つの見出しが縦一列で出る',
         roBody.includes('レシピ一覧から選択中') && roBody.includes('今週の献立の予定'),
       )
       check(
@@ -7584,9 +7630,30 @@ try {
         !roBody.includes('今日の献立と今週の予定が食い違っています') &&
           !roBody.includes('主菜になる料理は主菜、副菜になる料理は副菜として入り'),
       )
+      // 2026-08-03 便DH: 「レシピ一覧から選択中」＝週の予定に無い品 /
+      // 「今週の献立の予定」＝今日の週プラン。中身がそれぞれの側に入っていること
       check(
-        'MEALPLAN-ROLE(便DE-2) 右側に今週の予定(夕食の肉じゃが)が並ぶ',
-        (await roPage.locator('[data-testid="plan-mismatch"]').textContent())?.includes('肉じゃが'),
+        'MEALPLAN-ROLE(便DH) 「レシピ一覧から選択中」に副菜(ほうれん草のおひたし)が並ぶ',
+        (await roPage.locator('[data-testid="day-picked"]').textContent())?.includes(
+          'ほうれん草のおひたし',
+        ),
+      )
+      check(
+        'MEALPLAN-ROLE(便DH) 「今週の献立の予定」の夕食に肉じゃがが並ぶ',
+        (await roPage.locator('[data-testid="day-planned"]').textContent())?.includes('肉じゃが'),
+      )
+      check(
+        'MEALPLAN-ROLE(便DH) ×(この献立から外す)が押せるのは「レシピ一覧から選択中」だけ',
+        (await roPage
+          .locator('[data-testid="day-picked"] button[aria-label="この献立から外す"]')
+          .count()) === 1 &&
+          (await roPage
+            .locator('[data-testid="day-planned"] button[aria-label="この献立から外す"]')
+            .count()) === 0,
+      )
+      check(
+        'MEALPLAN-ROLE(便DH) 日タブから「表示する食事」は消えている',
+        !roBody.includes('表示する食事（朝食・昼食・夕食）'),
       )
       await roPage.getByRole('button', { name: '夕食に入れる' }).first().click()
       await roPage.waitForTimeout(700)
@@ -7628,6 +7695,149 @@ try {
       )
     } finally {
       await roBrowser.close()
+    }
+  }
+
+  // --- HOME-DH-01: ホームの「今日の献立」2群の折りたたみ・「今日なに作る？」の表示条件・
+  // 「ランダムで選ぶ」・種別4区分、設定「ホーム画面のカスタマイズ」の常に表示/既定位置復帰
+  // (2026-08-03 便DH・オーナー指示)。まっさらプロファイルで通しで確認する ---
+  currentCheck = 'HOME-DH-01'
+  {
+    const dhBrowser = await chromium.launch()
+    const dhContext = await dhBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const dhPage = await dhContext.newPage()
+    dhPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@HOME-DH-01] ${text}`)
+    })
+    dhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@HOME-DH-01] ${err.message}`)
+    })
+    try {
+      await dhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // (1) 今日の予定は無し・今日の献立に1品だけ入れた状態
+      await dhPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const side = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                const tx = idb.transaction('todayList', 'readwrite')
+                tx.objectStore('todayList').add({ recipeId: side.id, addedAt: Date.now() })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await dhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await dhPage.reload({ waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(1200)
+      {
+        const body = (await dhPage.textContent('body')) ?? ''
+        check(
+          'HOME-DH-01 予定が無い日は「今日なに作る？」が出る(今日の献立に品があっても消えない)',
+          body.includes('今日なに作る？') && body.includes('レシピ一覧から選択中'),
+        )
+        check(
+          'HOME-DH-01 振り直しは「ランダムで選ぶ」(旧「ほかの候補を見る」は残っていない)',
+          body.includes('ランダムで選ぶ') && !body.includes('ほかの候補を見る'),
+        )
+        // オレンジ地・白字(既存CTAと同じトークン)。直接色指定ではなくクラスで確認する
+        const shuffleClass =
+          (await dhPage.getByRole('button', { name: 'ランダムで選ぶ' }).getAttribute('class')) ?? ''
+        check(
+          'HOME-DH-01 「ランダムで選ぶ」はオレンジ地・白字(bg-accent/text-on-accent)',
+          shuffleClass.includes('bg-accent') && shuffleClass.includes('text-on-accent'),
+        )
+        // 種別4区分は「条件をしぼる」の中。畳んでいる間は出ない
+        check(
+          'HOME-DH-01 種別チップは「条件をしぼる」を開くまで出ない',
+          (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 0,
+        )
+        await dhPage.getByRole('button', { name: /条件をしぼる/ }).click()
+        await dhPage.waitForTimeout(400)
+        check(
+          'HOME-DH-01 「条件をしぼる」の中にレシピと同じ4区分(主菜・副菜・汁物・その他)が並ぶ',
+          (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 1 &&
+            (await dhPage.getByRole('button', { name: '副菜', exact: true }).count()) === 1 &&
+            (await dhPage.getByRole('button', { name: '汁物', exact: true }).count()) === 1 &&
+            (await dhPage.getByRole('button', { name: 'その他', exact: true }).count()) === 1,
+        )
+        check(
+          'HOME-DH-01 既定は主菜だけON',
+          (await dhPage
+            .getByRole('button', { name: '主菜', exact: true })
+            .getAttribute('aria-pressed')) === 'true' &&
+            (await dhPage
+              .getByRole('button', { name: '副菜', exact: true })
+              .getAttribute('aria-pressed')) === 'false',
+        )
+      }
+
+      // (2) 今日の夕食に予定を入れる → 2群が並び、既定は「レシピ一覧から選択中」だけ開く
+      await dhPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.find((r) => r.title === '肉じゃが')
+                const tx = idb.transaction('mealPlans', 'readwrite')
+                tx.objectStore('mealPlans').add({
+                  date,
+                  slot: 'dinner',
+                  recipeId: main.id,
+                  role: 'main',
+                })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await dhPage.reload({ waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(1200)
+      {
+        const body = (await dhPage.textContent('body')) ?? ''
+        check(
+          'HOME-DH-01 2つの見出しがどちらも出る(片方だけの表示ではない)',
+          body.includes('レシピ一覧から選択中') && body.includes('今週の献立の予定'),
+        )
+        check(
+          'HOME-DH-01 既定は「レシピ一覧から選択中」だけ開く(今週の予定は畳まれている)',
+          body.includes('ほうれん草のおひたし') && !body.includes('肉じゃが'),
+        )
+        check(
+          'HOME-DH-01 今日の予定があるときは「今日なに作る？」を出さない',
+          !body.includes('今日なに作る？'),
+        )
+        await dhPage.locator('[data-testid="home-today-planned-toggle"]').click()
+        await dhPage.waitForTimeout(400)
+        check(
+          'HOME-DH-01 「今週の献立の予定」を開くと夕食の予定が出る',
+          ((await dhPage.textContent('body')) ?? '').includes('肉じゃが'),
+        )
+      }
+
+    } finally {
+      await dhBrowser.close()
     }
   }
 

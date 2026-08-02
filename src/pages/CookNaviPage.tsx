@@ -16,6 +16,9 @@ import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
 import { listRecipes } from '../db/recipes'
 import { useTodayList } from '../db/todayList'
+import { useMealPlanRange } from '../db/mealPlan'
+import { MEAL_SLOTS, todayListPickedIds } from '../logic/mealPlan'
+import { todayString } from '../logic/date'
 import { useSettings, updateSettings } from '../db/settings'
 import {
   canUseCookNaviTrial,
@@ -154,13 +157,38 @@ export default function CookNaviPage() {
     return map
   }, [recipes])
 
-  // 今日の献立のレシピ（登録順）
+  /**
+   * 段取りを組む候補（2026-08-03 便DH・オーナー指示「両方から複数選択して並行調理ナビに渡せる」）。
+   *
+   * 献立タブの日タブと同じ順・同じ中身にする:
+   *   ①「レシピ一覧から選択中」＝今日の献立のうち今日の週プランに無い分（登録順）
+   *   ②「今週の献立の予定」    ＝今日の週プランを朝食→昼食→夕食の順に
+   * 従来は①（今日の献立）しか候補に出せず、週タブで組んだ予定のうち「表示する食事」から
+   * 外した帯の品はナビに渡せなかった。どちらから選んでも段取りを組めるようにする。
+   * 今日すでに作った品は候補から外す（日タブと同じ＝作った後は予定でなく記録）。
+   */
+  const today = useMemo(() => todayString(), [])
+  const todayPlanEntries = useMealPlanRange(today, today)
   const todayRecipes = useMemo(() => {
     if (!todayList) return undefined
-    return todayList
-      .map((item) => recipeById.get(item.recipeId))
+    const planIds: number[] = []
+    // MEAL_SLOTS は朝食→昼食→夕食の順で定義されている
+    MEAL_SLOTS.forEach((slot) =>
+      todayPlanEntries
+        ?.filter((e) => e.slot === slot)
+        .forEach((e) => {
+          if (!planIds.includes(e.recipeId)) planIds.push(e.recipeId)
+        }),
+    )
+    const pickedIds = todayListPickedIds(
+      todayList.map((item) => item.recipeId),
+      planIds,
+    )
+    return [...pickedIds, ...planIds]
+      .map((id) => recipeById.get(id))
       .filter((r): r is Recipe => r !== undefined)
-  }, [todayList, recipeById])
+      .filter((r) => !r.cookedLogs.some((log) => log.date === today))
+  }, [todayList, todayPlanEntries, recipeById, today])
 
   /**
    * お試しを開始する（2026-08-02 便CP-2）。
