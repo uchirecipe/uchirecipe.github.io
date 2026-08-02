@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import {
   Heart,
@@ -80,15 +80,17 @@ export default function RecipeDetailPage() {
   const id = Number(params.id)
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // 戻る先(2026-08-02 オーナー指示・便DF): この画面の「戻る」は、どこから開いても必ず
-  // レシピ一覧へ行く。以前は出所(Linkのstate {from:'todayList'|'home', fromPath})を見て
-  // 今日の献立・ホームへ帰す例外(2026-07-12・2026-07-16)を持っていたが、行き先が場面で
-  // 変わることをやめる指示があったため、例外ごと廃止して一覧固定に戻した。
-  // 献立・ホームから開いた場合も一覧へ行く(この副作用は指示時点で織り込み済み)。
-  // ブラウザ自身の「戻る」(履歴のpop)は従来どおり直前の画面へ帰るので、元の画面へ
-  // 帰りたいときはそちらを使える。
-  // 出所のstateは呼び出し側(HomePage・MealPlanPage)にまだ付いているが、この画面では見ない。
-  const backFallback = '/recipes'
+  // 戻る先(2026-08-02 オーナー指示・同日追補): ホーム・今日の献立から開いたときだけ
+  // 元の画面へ帰す例外(2026-07-12・2026-07-16)を残し、それ以外＝出所のstateが無い・
+  // 不明なときは必ずレシピ一覧へ。以前は不明時の戻り先が場面によってレシピ一覧に
+  // ならないことがあり(一覧へ行く手段が消える)、いったん全て一覧固定にしたが、
+  // 「ホーム発の例外は残す・不明時は一覧」が確定形。
+  const location = useLocation()
+  const backState = location.state as { from?: string; fromPath?: string } | null
+  const backFallback =
+    (backState?.from === 'home' || backState?.from === 'todayList') && backState.fromPath
+      ? backState.fromPath
+      : '/recipes'
 
   // undefined = 読み込み中 / null = 該当レシピなし、を区別する
   const recipe = useLiveQuery(async () => (await db.recipes.get(id)) ?? null, [id])
