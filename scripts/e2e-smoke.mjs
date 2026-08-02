@@ -7634,6 +7634,7 @@ try {
     ['/about/column/', 'コラム'],
     ['/about/column/kondate-kimaranai.html', '献立が決められない'],
     ['/about/column/recipe-screenshot-seiri.html', 'スクショ'],
+    ['/about/foods.html', '食品と目安価格の一覧'],
     // /sets/(配布ページ)は2026-07-23のテーマ全廃で撤去
   ]
   for (const [path, titleKeyword] of staticPages) {
@@ -7644,6 +7645,35 @@ try {
       res.status() === 200 && title.includes(titleKeyword),
       `status=${res.status()} title=「${title}」`,
     )
+  }
+
+  // --- SMK-19b: 「食品と目安価格の一覧」(機械生成ページ)の中身とリンク・画像が生きている ---
+  // 生成物なので手で崩れることはないが、リンク先の移動・アイコンの改名で静かに404になりうる。
+  // 同一オリジンのリンクと画像を全部たどって200を確かめる(外部リンクは対象外)。
+  {
+    currentCheck = 'SMK-19b'
+    await page.goto(`${BASE}/about/foods.html`, { waitUntil: 'networkidle' })
+    const foodsInfo = await page.evaluate(() => ({
+      rows: document.querySelectorAll('table.fd tbody tr').length,
+      sections: document.querySelectorAll('section.cat').length,
+      urls: [
+        ...new Set(
+          [
+            ...Array.from(document.querySelectorAll('a[href]')).map((a) => a.href),
+            ...Array.from(document.querySelectorAll('img[src]')).map((i) => i.src),
+          ]
+            // ページ内アンカー(#cat-…)はfoods.html自身を指すので#以降を落としてから重複を除く
+            .map((u) => u.split('#')[0])
+            .filter((u) => u.startsWith(location.origin)),
+        ),
+      ],
+    }))
+    check('SMK-19b 一覧の行が生成されている', foodsInfo.rows > 200, `rows=${foodsInfo.rows}`)
+    check('SMK-19b 分類の見出しがある', foodsInfo.sections === 7, `sections=${foodsInfo.sections}`)
+    for (const url of foodsInfo.urls) {
+      const res = await page.request.get(url)
+      check(`SMK-19b リンク/画像 ${url.replace(BASE, '')}`, res.status() === 200, `status=${res.status()}`)
+    }
   }
 
   // --- PRICEUNIT-01: 「食材と価格」の単位入力UI改修(2026-07-15オーナー実機フィードバック:

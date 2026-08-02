@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "gen:foods": "npx tsx scripts/gen-food-price-page.mjs",
     "test": "npx tsx scripts/test-logic.mjs && npx tsx scripts/test-nutrition.mjs && npx tsx scripts/test-price.mjs && npx tsx scripts/test-recipe-import.mjs && npx tsx scripts/lint-recipes.mjs",
     "test:e2e": "npx tsx scripts/e2e-smoke.mjs"
   },
