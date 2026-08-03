@@ -3268,6 +3268,194 @@ try {
     }
   }
 
+  // --- WEEKUI-01: 週タブの見分け・並び(2026-08-03 便DP・オーナー指示)。
+  //  DP-5 記録が付いた枠に「作った」バッジ+淡い面/文字を出して予定と見分ける
+  //       (司令部裁定: 見た目で強く区別し、編集は可能なまま残す=間違えた記録を直せない方が害が大きい)
+  //  DP-6 「表示のしかた」を畳んでいるときは「表示する食事」の見出し文字を出さずボタン群だけ残す
+  //  DP-7 開いたときの並びは 週の区切り → 表示する食事 → まとめて空にする
+  //  DP-8 今日のカードの囲み線を太く/まとめ3つ(栄養価・概算食費・献立表)を曜日カードと区切る ---
+  currentCheck = 'WEEKUI-01'
+  {
+    const wuBrowser = await chromium.launch()
+    const wuContext = await wuBrowser.newContext()
+    const wuPage = await wuContext.newPage()
+    wuPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WEEKUI-01] ${err.message}`)
+    })
+    const wuToday = (() => {
+      const now = new Date()
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    })()
+    try {
+      await wuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await wuPage.waitForTimeout(1800) // 初回シード完了待ち
+      await wuPage.getByRole('button', { name: '週', exact: true }).click()
+      await wuPage.waitForTimeout(600)
+
+      // DP-6: 既定は「表示のしかた」が畳まれた状態。見出しの文字は出さず、食事ボタンだけ残す
+      const wuSlotGroup = wuPage.getByRole('group', { name: '表示する食事' })
+      check(
+        'WEEKUI-01(便DP-6) 畳んでいるときは「表示する食事」の見出し文字を出さない',
+        !((await wuPage.textContent('body')) ?? '').includes('表示する食事'),
+      )
+      check(
+        'WEEKUI-01(便DP-6) 畳んでいても食事のボタン群は出したまま',
+        (await wuSlotGroup.getByRole('button').count()) === 3,
+      )
+
+      // DP-7: 開くと 週の区切り → 表示する食事 → まとめて空にする の順に並ぶ
+      await wuPage.getByRole('button', { name: '表示のしかたを開く' }).click()
+      await wuPage.waitForTimeout(400)
+      const wuOrder = await wuPage.evaluate(() => {
+        const sec = [...document.querySelectorAll('section')].find(
+          (s) => s.textContent?.includes('表示のしかた') && s.textContent?.includes('週区切り'),
+        )
+        const txt = sec?.textContent ?? ''
+        return {
+          layout: txt.indexOf('週区切り'),
+          slot: txt.indexOf('表示する食事'),
+          clear: txt.indexOf('まとめて空にする'),
+        }
+      })
+      check(
+        'WEEKUI-01(便DP-7) 「表示のしかた」の並びが 週の区切り→表示する食事→まとめて空にする',
+        wuOrder.layout >= 0 && wuOrder.layout < wuOrder.slot && wuOrder.slot < wuOrder.clear,
+        `order=${JSON.stringify(wuOrder)}`,
+      )
+      await wuPage.getByRole('button', { name: '表示のしかたを閉じる' }).click()
+      await wuPage.waitForTimeout(300)
+
+      // DP-8: 今日のカードだけ囲み線が太い(border-2)
+      const wuCardCls = await wuPage.evaluate((d) => {
+        const cards = [...document.querySelectorAll('section[data-date]')]
+        const todayCard = cards.find((c) => c.getAttribute('data-date') === d)
+        const other = cards.find((c) => c.getAttribute('data-date') !== d)
+        return { today: todayCard?.className ?? '', other: other?.className ?? '' }
+      }, wuToday)
+      check(
+        'WEEKUI-01(便DP-8) 今日の曜日カードの囲み線が太い(border-2 border-accent)',
+        wuCardCls.today.includes('border-2') && wuCardCls.today.includes('border-accent'),
+        `today=${wuCardCls.today}`,
+      )
+      check(
+        'WEEKUI-01(便DP-8) ほかの曜日カードは細い線のまま(今日だけを強めている)',
+        !wuCardCls.other.includes('border-2'),
+        `other=${wuCardCls.other}`,
+      )
+
+      // DP-5: 今日の枠に2品入れ、片方だけ「作った！」を付けて見分けを確認する
+      const wuCard = wuPage.locator(`section[data-date="${wuToday}"]`)
+      for (const title of ['肉じゃが', 'カレーライス']) {
+        await wuCard.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+        await wuPage.waitForTimeout(400)
+        await wuPage.getByPlaceholder('レシピ名で絞り込み').fill(title)
+        await wuPage.waitForTimeout(300)
+        await wuPage.getByText(title, { exact: true }).first().click()
+        await wuPage.waitForTimeout(500)
+      }
+      await wuPage.getByRole('button', { name: '日', exact: true }).click()
+      await wuPage.waitForTimeout(900)
+      // 肉じゃがの行の「作った！」だけを押す
+      await wuPage.evaluate(() => {
+        const li = [...document.querySelectorAll('li')].find((el) => el.textContent?.includes('肉じゃが'))
+        const b = [...(li?.querySelectorAll('button') ?? [])].find((x) => x.textContent?.includes('作った！'))
+        b?.click()
+      })
+      await wuPage.waitForTimeout(900)
+      await wuPage.getByRole('button', { name: '週', exact: true }).click()
+      await wuPage.waitForTimeout(700)
+      const wuRows = await wuPage.evaluate((d) => {
+        const sec = document.querySelector(`section[data-date="${d}"]`)
+        const btns = [...(sec?.querySelectorAll('button') ?? [])]
+        const cooked = btns.find((b) => b.textContent?.includes('肉じゃが'))
+        const planned = btns.find((b) => b.textContent?.includes('カレーライス'))
+        return {
+          cookedCls: cooked?.className ?? '',
+          cookedText: cooked?.textContent ?? '',
+          cookedDisabled: cooked?.disabled ?? true,
+          plannedCls: planned?.className ?? '',
+          plannedText: planned?.textContent ?? '',
+        }
+      }, wuToday)
+      check(
+        'WEEKUI-01(便DP-5) 記録が付いた枠に「作った」バッジが出る',
+        wuRows.cookedText.includes('作った'),
+        `cooked=${JSON.stringify(wuRows.cookedText)}`,
+      )
+      check(
+        'WEEKUI-01(便DP-5) まだ作っていない予定の枠にはバッジを出さない',
+        !wuRows.plannedText.includes('作った'),
+        `planned=${JSON.stringify(wuRows.plannedText)}`,
+      )
+      check(
+        'WEEKUI-01(便DP-5) 記録済みは面と文字を落とし、予定は塗った面のまま(見た目で区別)',
+        wuRows.cookedCls.includes('bg-app/60') &&
+          wuRows.cookedCls.includes('text-ink-muted') &&
+          wuRows.plannedCls.includes('bg-surface') &&
+          wuRows.plannedCls.includes('text-ink'),
+        `cooked=${wuRows.cookedCls} / planned=${wuRows.plannedCls}`,
+      )
+      // 司令部裁定: 見た目だけ区別し、編集は可能なまま残す(間違えた記録を直せない方が害が大きい)
+      check(
+        'WEEKUI-01(便DP-5) 記録済みの枠も押して選び直せる(編集不可にはしない)',
+        wuRows.cookedDisabled === false,
+      )
+      await wuPage.evaluate((d) => {
+        const sec = document.querySelector(`section[data-date="${d}"]`)
+        const b = [...(sec?.querySelectorAll('button') ?? [])].find((x) => x.textContent?.includes('肉じゃが'))
+        b?.click()
+      }, wuToday)
+      await wuPage.waitForTimeout(500)
+      check(
+        'WEEKUI-01(便DP-5) 記録済みの枠を押すとレシピ選択の窓が開く',
+        !!(await wuPage.getByPlaceholder('レシピ名で絞り込み').count()),
+      )
+      await wuPage.keyboard.press('Escape')
+      await wuPage.waitForTimeout(400)
+
+      // DP-8: まとめ3つ(栄養価・概算食費・献立表)は7日分と区切り線+広い間隔で分かれ、面を塗らない
+      const wuSummary = await wuPage.evaluate(() => {
+        const wrap = [...document.querySelectorAll('div')].find(
+          (d) =>
+            d.className.includes('border-t') &&
+            d.className.includes('space-lg') &&
+            (d.textContent ?? '').includes('献立表'),
+        )
+        if (!wrap) return null
+        const costSec = [...wrap.querySelectorAll('section')].find((s) =>
+          (s.textContent ?? '').includes('今週の概算食費'),
+        )
+        const sheetSec = [...wrap.querySelectorAll('section')].find((s) =>
+          (s.textContent ?? '').includes('献立表'),
+        )
+        return {
+          wrapCls: wrap.className,
+          costCls: costSec?.className ?? '',
+          sheetCls: sheetSec?.className ?? '',
+        }
+      })
+      check(
+        'WEEKUI-01(便DP-8) まとめ3つは7日分の下に区切り線+広い間隔で分かれている',
+        !!wuSummary &&
+          wuSummary.wrapCls.includes('border-t') &&
+          wuSummary.wrapCls.includes('mt-[var(--space-lg)]'),
+        `wrap=${wuSummary?.wrapCls}`,
+      )
+      check(
+        'WEEKUI-01(便DP-8) まとめの折りたたみは面を塗らない(曜日カード=面+影と区別)',
+        !!wuSummary &&
+          !wuSummary.costCls.includes('bg-surface') &&
+          !wuSummary.costCls.includes('shadow-sm') &&
+          !wuSummary.sheetCls.includes('bg-surface') &&
+          !wuSummary.sheetCls.includes('shadow-sm'),
+        `cost=${wuSummary?.costCls} / sheet=${wuSummary?.sheetCls}`,
+      )
+    } finally {
+      await wuBrowser.close()
+    }
+  }
+
   // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
   // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
   // 「日」タブへ固定される(2026-07-16 便U-1でタブ構成に再設計。以前はスクロール制御だったが、

@@ -2772,9 +2772,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 献立表の折りたたみ（週タブ・月タブで同じものを使う）。開いている間だけ .plan-sheet が
    * 画面とDOMに存在し、その状態で「印刷する」を押す＝紙に出るのは必ず今見えている1枚になる。
+   *
+   * surfaceCls は面の見た目だけを呼び出し側から差し替えるためのもの（2026-08-03 便DP-8）。
+   * 週タブは7日分のカード（面＋影）のすぐ下に並ぶので、面を塗らず枠だけにして
+   * 「曜日カードがもう1枚ある」ように見えるのを避ける。月タブは従来のまま。
    */
-  const renderPlanSheetSection = (sheet: PlanSheet) => (
-    <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface shadow-sm">
+  const renderPlanSheetSection = (sheet: PlanSheet, surfaceCls = 'bg-surface shadow-sm') => (
+    <section
+      className={`mt-[var(--space-md)] rounded-md border border-edge ${surfaceCls}`.trimEnd()}
+    >
       <button
         type="button"
         onClick={() => setPlanSheetOpen((v) => !v)}
@@ -3271,8 +3277,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             isEmpty
               ? 'border-dashed border-accent/40 py-1.5 text-xs font-bold text-accent-ink'
               : isCooked
-                ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)
-                  'border-edge bg-app/60 py-2.5 text-base font-bold text-ink-muted opacity-80'
+                ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)。
+                  // 2026-08-03 便DP-5(オーナー「予定と記録がわかりづらい」): 面と文字をさらに落とし、
+                  // 「作った」バッジで言い切る。押して選び直せる状態は変えない
+                  // (間違えて記録した枠を直せなくなる方が害が大きい・司令部裁定)
+                  // 破線は空き枠の意味に使っているので、線は実線のまま面と文字だけを落とす
+                  'border-edge bg-app/60 py-2.5 text-base font-normal text-ink-muted opacity-70'
                 : 'border-edge bg-surface py-2.5 text-base font-bold text-ink shadow-sm'
           }`}
         >
@@ -3286,7 +3296,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {/* 2026-08-02 便CW-4: 文字だけの行に小さなサムネ(写真か料理アイコン)を足す */}
               <RowThumb recipe={recipe!} />
               {isCooked && (
-                <CheckCircle2 size={14} className="shrink-0 text-accent-ink" aria-hidden />
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">
+                  <CheckCircle2 size={11} aria-hidden />
+                  {ja.mealPlan.cookedEntryBadge}
+                </span>
               )}
               {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
                 <TriangleAlert
@@ -3642,11 +3655,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     )
   }
 
-  /** 表示する食事帯トグル（日タブ・週タブで共用。便U-2: 既存visibleMealSlotsを日タブにも適用） */
-  const renderSlotFilter = () => (
-    <>
-      <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slotFilterTitle}</p>
-      <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+  /**
+   * 表示する食事帯トグル（週タブ「表示のしかた」グループの中。便U-2で入り、
+   * 便DHで日タブからは外れた）。
+   *
+   * 2026-08-03 便DP-6（オーナー指示）: グループを畳んでいるときは見出しの文字を出さず、
+   * ボタン群だけを残す。畳んだ状態では見出し「表示のしかた」がすぐ上にあり、
+   * 「表示する食事」の文字が重なって2段の見出しに見えていた。
+   * 見出しを出さないときも、読み上げでは何のボタン群かが分かるようグループ名を付ける。
+   */
+  const renderSlotFilter = (showTitle: boolean) => (
+    <div role="group" aria-label={ja.mealPlan.slotFilterTitle}>
+      {showTitle && (
+        <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slotFilterTitle}</p>
+      )}
+      <div className={`flex flex-wrap gap-[var(--space-sm)] ${showTitle ? 'mt-1' : ''}`}>
         {MEAL_SLOTS.map((slot) => (
           <button
             key={slot}
@@ -3663,7 +3686,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </button>
         ))}
       </div>
-    </>
+    </div>
   )
 
   // 重ね窓はEscapeキーと端末の「戻る」で1枚ずつ閉じる(2026-07-30 便CH/C13)。
@@ -4519,8 +4542,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
       </div>
 
-      {/* グループ1: 表示のしかた(週の並べ方・出す食事・まとめて空にする)。
-          「表示する食事」だけは折りたたみの外に置き、畳んでも常に見えるようにする(便DJ) */}
+      {/* グループ1: 表示のしかた(週の区切り・表示する食事・まとめて空にする)。
+          「表示する食事」だけは折りたたみの外に置き、畳んでも常に見えるようにする(便DJ)。
+          2026-08-03 便DP-6/7(オーナー指示): ①畳んでいるときは「表示する食事」の見出し文字を
+          出さずボタン群だけ残す ②開いたときの並びを 週の区切り → 表示する食事 → まとめて空にする
+          にする(表示を決める2つを隣に置き、消す操作を最後に離す) */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('display', ja.mealPlan.weekGroupDisplayTitle)}
         {weekGroupOpen.display && (
@@ -4556,7 +4582,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
                 3体が切替自体を触っていなかった */}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
+          </>
+        )}
 
+        {/* 表示する食事帯。折りたたみの外＝グループを畳んでも常に見える(便DJ・オーナー指示)。
+            畳んでいるときは見出しの文字を出さずボタン群だけ残す(便DP-6・オーナー指示) */}
+        <div className="mt-[var(--space-sm)]">{renderSlotFilter(weekGroupOpen.display)}</div>
+
+        {weekGroupOpen.display && (
+          <>
             {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
                 2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した)。
                 従来は週タブのいちばん下に置いていて、そこまで下がらないと気づけなかった。
@@ -4600,9 +4634,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </div>
           </>
         )}
-
-        {/* 表示する食事帯。折りたたみの外＝グループを畳んでも常に見える(便DJ・オーナー指示) */}
-        <div className="mt-[var(--space-sm)]">{renderSlotFilter()}</div>
       </section>
 
       {/* グループ2: 自動で献立を提案(条件＋実行ボタン)。押すと献立が増える操作をここに集める。
@@ -4701,8 +4732,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             key={date}
             data-date={date}
             ref={date === today ? todaySectionRef : undefined}
-            className={`scroll-mt-[var(--space-md)] rounded-md border p-[var(--space-md)] shadow-sm ${
-              date === today ? 'border-accent bg-surface' : 'border-edge bg-surface'
+            // 2026-08-03 便DP-8(オーナー指示): 今日のカードの囲み線を太くして、ほかの曜日との
+            // 区別を強める(食事ごとの地色=SLOT_TONEによる時間帯の区分はそのまま維持)
+            className={`scroll-mt-[var(--space-md)] rounded-md p-[var(--space-md)] shadow-sm ${
+              date === today
+                ? 'border-2 border-accent bg-surface'
+                : 'border border-edge bg-surface'
             }`}
           >
             <h2 className="font-bold">
@@ -4808,6 +4843,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         })}
       </div>
 
+      {/* この週ぜんぶをまとめて見る3つ（栄養価・概算食費・献立表の印刷）。
+          2026-08-03 便DP-8(オーナー指摘「曜日カードと紛れる」): 曜日カードと同じ「白い面＋影」の
+          折りたたみが同じ間隔で続いていて、7日目の下にもう1日あるように見えていた。
+          ①7日分との間を1段広く空けて区切り線を引く ②3つは面を塗らず枠だけにする
+          （面＋影＝日ごとのカード／枠だけ＝まとめ、と役割で見た目を分ける）。
+          栄養価パネルは元から枠だけの見た目なので、残る2つをそれに揃えた */}
+      <div className="mt-[var(--space-lg)] border-t border-edge pt-[var(--space-sm)]">
+
       {/* 週まとめ: この週の献立ぶんの栄養と野菜量(2026-07-30 便CL・docs/60 第1段)。
           各日カードと同じ部品・同じ数え方で、期間の合計だけを1人分で出す。
           めやすは「1日のめやす × 献立や記録がある日数」で並べる(週まとめ側だけ日数の注記を添える)。
@@ -4829,7 +4872,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           価格情報が1件も無い/何も割り当てていない(weekCost===0)ときはセクションごと非表示のまま。
           タスク8: 展開時に「◯食分」も併記する） */}
       {hasPricedRecipe && weekCost > 0 && (
-        <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface shadow-sm">
+        <section className="mt-[var(--space-md)] rounded-md border border-edge">
           <button
             type="button"
             onClick={() => setWeekCostOpen((v) => !v)}
@@ -4911,8 +4954,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </section>
       )}
 
-      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
-      {renderPlanSheetSection(weekPlanSheet)}
+      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59)。
+          週タブでは面を塗らない見た目にする(便DP-8。曜日カードと紛れないため) */}
+      {renderPlanSheetSection(weekPlanSheet, '')}
+
+      </div>
 
       {/* この週の買い物リストを作る */}
       <button
