@@ -13,6 +13,13 @@ import {
 } from '../src/stripe.ts'
 import { handleSuccess, handleWebhook } from '../src/index.ts'
 import { CODE_EMAIL_SUBJECT, renderCodeEmailHtml, renderCodeEmailText } from '../src/email.ts'
+import {
+  renderInvalidPage,
+  renderNotPaidPage,
+  renderOutOfStockPage,
+  renderSuccessPage,
+  renderTemporaryErrorPage,
+} from '../src/html.ts'
 
 let passCount = 0
 function test(name, fn) {
@@ -609,6 +616,103 @@ await asyncTest('メール文面: HTML版は外部リソースを読み込まな
   for (const href of html.match(/href="([^"]+)"/g) ?? []) {
     assert.ok(href.includes('uchirecipe.com'), `想定外のリンク先: ${href}`)
   }
+})
+
+// ============================================================================
+// html.ts: 購入後ページのブランド統一(2026-08-03 オーナー指摘
+// 「うちレシピのマークがない・配色もうちレシピっぽくない」)と外部参照ゼロの検査
+// ============================================================================
+
+/** 5種類すべての購入後ページ(成功・未払い・在庫切れ・確認できない・一時エラー)。 */
+const ALL_PAGES = [
+  ['成功', renderSuccessPage('UR-AAAA-1111')],
+  ['未払い', renderNotPaidPage()],
+  ['在庫切れ', renderOutOfStockPage()],
+  ['確認できない', renderInvalidPage()],
+  ['一時エラー', renderTemporaryErrorPage()],
+]
+
+await asyncTest('全ページ: うちレシピのアイコンをインラインSVGで上部に表示している(鍋モチーフ・ブランド色#d9480f)', () => {
+  for (const [name, html] of ALL_PAGES) {
+    assert.ok(html.includes('<header class="brand">'), `${name}: ブランドヘッダーが無い`)
+    assert.ok(html.includes('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080"'), `${name}: インラインSVGが無い`)
+    assert.ok(html.includes('fill:#d9480f'), `${name}: アイコンのブランド色が無い`)
+    // 鍋本体と湯気(public/icon.svg のパス先頭)がそのまま入っていること
+    assert.ok(html.includes('M564.752,422.292C839.128,426.299'), `${name}: 鍋のパスが無い`)
+    assert.ok(html.includes('M540,218.765C540,218.765 506.513,279.047 540,331.069'), `${name}: 湯気のパスが無い`)
+  }
+})
+
+await asyncTest('全ページ: 配色が about/index.html のトークン値と同じ(ライト/ダーク両方)', () => {
+  // public/about/index.html の :root と @media (prefers-color-scheme: dark) の値。
+  // どちらかを変えるときは about 側の全ファイルと一緒に直すこと。
+  const lightTokens = ['--bg: #faf5ec', '--text: #43362a', '--accent: #cc3f01', '--accent-ink-page: #b8380a', '--accent-ink-surface: #b8380a', '--surface: #fffdf8', '--text-muted: #7c6a56', '--border: #e9dfd0']
+  const darkTokens = ['--bg: #211a13', '--text: #f1e8db', '--accent: #ff8a4c', '--surface: #2c241b', '--text-muted: #a89680', '--border: #3d3327']
+  for (const [name, html] of ALL_PAGES) {
+    for (const token of [...lightTokens, ...darkTokens]) {
+      assert.ok(html.includes(token), `${name}: ${token} が無い`)
+    }
+    assert.ok(html.includes('@media (prefers-color-scheme: dark)'), `${name}: ダーク指定が無い`)
+    // 旧・うちレシピ以外の配色(黄土色系)が残っていないこと
+    assert.ok(!html.includes('#d9a441'), `${name}: 旧アクセント色が残っている`)
+    assert.ok(!html.includes('#faf7f2'), `${name}: 旧背景色が残っている`)
+  }
+})
+
+await asyncTest('全ページ: faviconが同じアイコンのdata URI(外部ファイルを取りに行かない)', () => {
+  for (const [name, html] of ALL_PAGES) {
+    const match = html.match(/<link rel="icon" href="(data:image\/svg\+xml,[^"]+)"/)
+    assert.ok(match, `${name}: data URIのfaviconが無い`)
+    const decoded = decodeURIComponent(match[1].slice('data:image/svg+xml,'.length))
+    assert.ok(decoded.startsWith('<svg'), `${name}: faviconのSVGが壊れている`)
+    assert.ok(decoded.includes('fill:#d9480f'), `${name}: faviconが同じブランド色でない`)
+    assert.ok(decoded.includes('M564.752,422.292'), `${name}: faviconが同じ鍋アイコンでない`)
+  }
+})
+
+await asyncTest('全ページ: titleが「うちレシピ Pro版」を名乗る', () => {
+  for (const [name, html] of ALL_PAGES) {
+    assert.ok(/<title>[^<]*｜うちレシピ Pro版<\/title>/.test(html), `${name}: titleが想定と違う`)
+  }
+})
+
+await asyncTest('全ページ: 外部参照ゼロ(画像・外部CSS/JS・Webフォント・外部への通信を一切持たない)', () => {
+  for (const [name, html] of ALL_PAGES) {
+    assert.ok(!html.includes('<img'), `${name}: <img>がある`)
+    assert.ok(!html.includes('<iframe'), `${name}: <iframe>がある`)
+    assert.ok(!html.includes('@import'), `${name}: CSSの@importがある`)
+    assert.ok(!html.includes('@font-face'), `${name}: Webフォント読み込みがある`)
+    assert.ok(!/url\(\s*['"]?(https?:)?\/\//.test(html), `${name}: CSSから外部URLを読んでいる`)
+    // <script src="..."> は無く、インラインのみ(成功ページのコピーボタン用)
+    assert.ok(!/<script[^>]+src=/.test(html), `${name}: 外部スクリプトを読んでいる`)
+    // 属性でリソースを読みに行くもの(src=)が無いこと
+    assert.ok(!/\ssrc=/.test(html), `${name}: src属性がある`)
+    // link要素はdata URIのfaviconだけ
+    const links = html.match(/<link[^>]*>/g) ?? []
+    assert.equal(links.length, 1, `${name}: link要素はfaviconの1つだけのはず`)
+    assert.ok(links[0].includes('data:image/svg+xml,'), `${name}: linkがdata URIでない`)
+    // 出てくるURLはうちレシピ自身(リンク先)とSVGの名前空間(通信は発生しない)だけ
+    for (const url of html.match(/https?:\/\/[^"' )]+/g) ?? []) {
+      assert.ok(
+        url.startsWith('https://uchirecipe.com') || url === 'http://www.w3.org/2000/svg',
+        `${name}: 想定外の外部URL: ${url}`,
+      )
+    }
+  }
+})
+
+await asyncTest('成功ページ: コードの視認性(大きい等幅表示)とコピー導線・既存の文言/リンクを保っている', () => {
+  const html = renderSuccessPage('UR-AAAA-1111')
+  assert.ok(html.includes('font-family: ui-monospace, SFMono-Regular, Menlo, monospace'))
+  assert.ok(html.includes('font-size: 1.6rem'))
+  assert.ok(html.includes('id="unlock-code"'))
+  assert.ok(html.includes('onclick="copyUnlockCode()"'))
+  assert.ok(html.includes('コードをコピーする'))
+  assert.ok(html.includes('うちレシピの解錠コードです。'))
+  assert.ok(html.includes(`<a class="btn" href="https://uchirecipe.com/">うちレシピを開く</a>`))
+  assert.ok(html.includes('href="https://uchirecipe.com/about/unlock.html" target="_blank" rel="noopener"'))
+  assert.ok(html.includes('画像付きの詳しい使い方はこちら（新しいタブで開きます）'))
+  assert.ok(html.includes('uchiapplication@gmail.com'))
 })
 
 console.log(`purchase-fulfill: ${passCount}件のテストに合格しました`)
