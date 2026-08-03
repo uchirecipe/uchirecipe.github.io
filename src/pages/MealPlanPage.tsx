@@ -64,6 +64,7 @@ import {
   undoTodayListCooked,
   markAllTodayListCooked,
   importRecipeIdsToTodayList,
+  removeStaleFromPlanTodayList,
 } from '../db/todayList'
 import {
   MEAL_SLOTS,
@@ -246,15 +247,7 @@ function TodayListRow({
         </Link>
         {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
             破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-            押し間違いを減らす(アイコンの大きさ・aria-labelは据え置き) */}
-        <button
-          type="button"
-          onClick={onCooked}
-          aria-label={ja.mealPlan.todayMarkCooked}
-          className="shrink-0 rounded-full p-3 text-accent-ink"
-        >
-          <CheckCircle2 size={20} aria-hidden />
-        </button>
+            押し間違いを減らす */}
         {onRemove && (
           <button
             type="button"
@@ -265,6 +258,19 @@ function TodayListRow({
             <X size={20} aria-hidden />
           </button>
         )}
+      </div>
+      {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+          枠・地色・文字ラベルの付いたボタンにした。料理名の幅を削らないよう行の下へ置き、
+          高さは44px(min-h-11)＝従来のp-3のアイコンボタンと同じ当たり判定を下回らないようにする */}
+      <div className="mt-1">
+        <button
+          type="button"
+          onClick={onCooked}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-sm border border-accent bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+        >
+          <CheckCircle2 size={18} aria-hidden />
+          {ja.mealPlan.todayMarkCooked}
+        </button>
       </div>
       {footer}
     </li>
@@ -1632,10 +1638,33 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (settings.lastAutoImportDate === today) return
     if (todayFromPlanIds.length === 0) return
     void (async () => {
-      await importRecipeIdsToTodayList(todayFromPlanIds)
+      // fromPlan=true: 「予定の写しとして入った品」の印。週の予定を消したときに
+      // 下の後始末(便DP-4)が片付ける対象になる
+      await importRecipeIdsToTodayList(todayFromPlanIds, { fromPlan: true })
       await updateSettings({ lastAutoImportDate: today })
     })()
   }, [isDemo, viewMode, settings, todayEntries, todayFromPlanIds, today])
+
+  /**
+   * 自動取り込みの後始末（2026-08-03 便DP-4・バグ修正）。
+   *
+   * 直したバグ: 「週の予定を削除したあと、今日の献立に『レシピ一覧から選択中』として残る」。
+   * 上の自動取り込み（便U-3）は今日の予定を todayList へ写すが、予定が消えたときに写しを
+   * 片付ける経路がどこにも無かった。写しは孤立して「今日の予定に無い品」になり、
+   * todayListPickedIds の定義どおり①「レシピ一覧から選択中」として並んでしまっていた。
+   *
+   * タブに関係なく（週タブで消したその場で消えるように）走らせる。突き合わせる相手は
+   * **全ての食事帯**の今日の予定（todayPlanAllRecipeIds）で、表示中の帯だけで判定すると
+   * 「朝食を非表示にしただけ」で朝食の写しを消してしまう。
+   * 消すのは fromPlan の印が付いた写しだけなので、自分でレシピ一覧から足した品は残る。
+   */
+  useEffect(() => {
+    if (isDemo) return
+    // liveQueryの初回はundefined。読めていない状態で突き合わせると全部を「予定が無い」と
+    // 誤判定して消してしまうので、両方そろうまで何もしない
+    if (todayEntries === undefined || todayList === undefined) return
+    void removeStaleFromPlanTodayList(todayPlanAllRecipeIds)
+  }, [isDemo, todayEntries, todayList, todayPlanAllRecipeIds])
 
   const [quickOnly, setQuickOnly] = useState(false)
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
@@ -1659,21 +1688,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * いま出ているトーストがその記録のものであるときだけにしたいので、対象のレシピと
    * 一緒にそのときの文言も持っておく（別の操作でトーストが差し替わったら操作ごと消える）。
    */
-  const [undoCooked, setUndoCooked] = useState<{ recipeId: number; message: string } | null>(null)
+  // 2026-08-03 便DP-1: 「全て作った！」でも戻せるよう、控えは品ごとの配列で持つ
+  // （1品の「作った！」は1件だけの配列。取り消しの処理は複数件と共通）。
+  // fromPlan＝記録を付けた時点で「今週の予定の写し」だったかどうか。戻すときに同じ印を
+  // 付け直さないと、取り消した品だけが週の予定と切り離される（便DP-4のバグが戻る）
+  const [undoCooked, setUndoCooked] = useState<{
+    items: { recipeId: number; fromPlan?: boolean }[]
+    message: string
+  } | null>(null)
   const undoCookedActive = undoCooked != null && undoCooked.message === message
   const runUndoCooked = async () => {
     if (!undoCooked) return
-    const done = await undoTodayListCooked(undoCooked.recipeId)
+    const requested = undoCooked.items.length
+    const undone = await undoTodayListCooked(undoCooked.items)
     setUndoCooked(null)
-    if (!done) {
+    if (undone === 0) {
       setMessage(ja.mealPlan.todayCookedUndoNothing)
       return
     }
+    // 1品だけのときは件数を出さない（数字が情報を足さない）。複数件は実際に戻した品数を出す
+    const base =
+      requested === 1
+        ? ja.mealPlan.todayCookedUndone
+        : ja.mealPlan.todayCookedUndoneMany.replace('{n}', String(undone))
     // 在庫を1段階下げる設定がONのときは、戻していないものを黙らずに添える
     setMessage(
       settings?.cookedReflectPantry
-        ? `${ja.mealPlan.todayCookedUndone} ${ja.mealPlan.todayCookedUndoPantryNote}`
-        : ja.mealPlan.todayCookedUndone,
+        ? `${base} ${ja.mealPlan.todayCookedUndoPantryNote}`
+        : base,
     )
   }
 
@@ -1983,13 +2025,47 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （②の品は「作った後は予定でなく記録」＝記録が付いた時点でこの行は消える）。
    * トーストの「元に戻す」で直前の1件を取り消せる（便DE-3）。
    */
+  /**
+   * 「元に戻す」の控えに残す1品ぶんの情報（2026-08-03 便DP-4）。
+   * 記録を付けた時点で「今週の予定の写し」だったかを一緒に控える＝今日の予定に入っている品か、
+   * 今日の献立に写しの印が付いている品。戻すときに同じ印を付け直すために使う。
+   */
+  const undoItemOf = (recipeId: number) => ({
+    recipeId,
+    fromPlan:
+      todayPlanAllRecipeIds.includes(recipeId) ||
+      (todayList?.some((item) => item.recipeId === recipeId && item.fromPlan) ?? false),
+  })
+
   const markDayRecipeCooked = (recipeId: number) => {
+    const undoItem = undoItemOf(recipeId)
     void (async () => {
       await markTodayListCooked(recipeId)
       // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
       setMessage(ja.mealPlan.todayCookedToast)
-      setUndoCooked({ recipeId, message: ja.mealPlan.todayCookedToast })
+      setUndoCooked({ items: [undoItem], message: ja.mealPlan.todayCookedToast })
     })()
+  }
+
+  /**
+   * 日タブの「全て作った！」（2026-08-03 便DP-1・オーナー指示）。
+   * 押す前に「何件を記録するか・何が消えて何が残るか」を確認し（規約F）、記録したあとは
+   * 件数つきのトーストと「元に戻す」を出す（1品の「作った！」と同じ戻し方を複数件へ広げた）。
+   * 在庫を1段階下げる設定がONのときは、確認文にもその旨を足す（黙って在庫を動かさない）。
+   */
+  const markAllDayRecipesCooked = async () => {
+    const count = dayRecipeIds.length
+    if (count === 0) return
+    const confirmText =
+      ja.mealPlan.todayMarkAllCookedConfirm.replaceAll('{n}', String(count)) +
+      (settings?.cookedReflectPantry ? ja.mealPlan.todayMarkAllCookedConfirmPantry : '') +
+      ja.mealPlan.todayMarkAllCookedConfirmAsk
+    if (!window.confirm(confirmText)) return
+    const recorded = dayRecipeIds.map(undoItemOf)
+    await markAllTodayListCooked(recorded.map((item) => item.recipeId))
+    const toast = ja.mealPlan.todayMarkAllCookedToast.replace('{n}', String(recorded.length))
+    setMessage(toast)
+    setUndoCooked({ items: recorded, message: toast })
   }
 
   /**
@@ -3669,6 +3745,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {/* 2026-08-03 便DH(オーナー指示): 便DEの左右2列をやめ、縦一列で
                     「レシピ一覧から選択中」→「今週の献立の予定(朝食・昼食・夕食)」の順に並べる */}
 
+                {/* 各行の「作った！」ボタンが何をするものかの1行説明(2026-08-03 便DP-3・規約H)。
+                    リストの上に1回だけ置く(行ごとに繰り返さない) */}
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.todayMarkCookedHint}</p>
+
                 {/* ①レシピ一覧から選択中。×(外す)が押せるのはこちらだけ。
                     今日の予定へ入れたいときは行の下の「◯食に入れる」から
                     (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
@@ -3748,10 +3828,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}
                   </p>
                 )}
-                {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する */}
+                {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する。
+                    2026-08-03 便DP-1: 押す前に件数つきの確認(規約F)、押したあとは件数つきの
+                    トーストと「元に戻す」を出す */}
                 <button
                   type="button"
-                  onClick={() => void markAllTodayListCooked(dayRecipeIds)}
+                  onClick={() => void markAllDayRecipesCooked()}
                   className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
                 >
                   <CheckCircle2 size={18} aria-hidden />
@@ -3804,15 +3886,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     {ja.mealPlan.todaySuggestHint}（
                     {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}）
                   </p>
-                  {todayFromPlanIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => void importRecipeIdsToTodayList(todayFromPlanIds)}
-                      className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
-                    >
-                      {ja.mealPlan.todayImport.replace('{n}', String(todayFromPlanIds.length))}
-                    </button>
-                  )}
+                  {/* 2026-08-03 便DP-2(オーナー指示): 「今週の献立から今日の分を取り込む」ボタンは
+                      削除した。日タブは今日の予定を②として常に並べるようになり(便DH)、さらに
+                      自動取り込み(便U-3)も効くため、このボタンが出る条件
+                      (日タブが空 かつ 今日の予定がある)は実際にはほぼ成立しない＝押す機会が無かった。
+                      自動取り込みそのものは残す */}
                 </div>
               </div>
             )}

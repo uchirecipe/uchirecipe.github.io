@@ -852,6 +852,27 @@ export function todayListPickedIds(
 }
 
 /**
+ * 「今日の献立」に取り残された、**予定の写しだけ**のレシピIDを返す（2026-08-03 便DP-4）。
+ *
+ * 直したバグ: 週の予定を消したあと、その品が今日の献立に「レシピ一覧から選択中」として
+ * 残り続けた。日タブを開くと今日の予定は今日の献立へ自動取り込みされる（便U-3）が、
+ * 予定を消したときにその写しを片付ける経路がどこにも無かったため、写しだけが孤立し、
+ * 今日の予定に無い＝自分で選んだ分（todayListPickedIds）として並んでしまっていた。
+ *
+ * 対象は fromPlan の印が付いた品だけ＝自動取り込みで入った写しだけを片付ける。
+ * 自分でレシピ一覧から足した品（印なし）は、今日の予定に無くても残す（消したのは予定であって、
+ * 自分で選んだ「今日つくるもの」ではないため）。印は自動取り込みのときだけ付く（db/todayList.ts）。
+ */
+export function staleTodayListFromPlanIds(
+  todayListItems: { recipeId: number; fromPlan?: boolean }[],
+  todayPlanRecipeIds: number[],
+): number[] {
+  return todayListItems
+    .filter((item) => item.fromPlan === true && !todayPlanRecipeIds.includes(item.recipeId))
+    .map((item) => item.recipeId)
+}
+
+/**
  * レシピの「料理の種別」を4区分（主菜・副菜・汁物・その他）で確定させる（2026-08-03 便DH）。
  * 登録済みの dishType を最優先で使い、未設定のレシピ（主にユーザー自作）は
  * 新規登録時の初期値提案と同じ推定（logic/dishTypeGuess.ts）に倒す。

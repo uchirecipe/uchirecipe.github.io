@@ -2940,6 +2940,12 @@ try {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@TODAYALL-01] ${err.message}`)
     })
+    // 2026-08-03 便DP-1: 「全て作った！」に規約Fの確認文を付けた。確認文の中身も検査する
+    let taConfirmText = ''
+    taPage.on('dialog', (dialog) => {
+      taConfirmText = dialog.message()
+      return dialog.accept()
+    })
     try {
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(1800) // 初回シード完了待ち
@@ -2972,42 +2978,84 @@ try {
 
       await taPage.getByRole('button', { name: '全て作った！' }).click()
       await taPage.waitForTimeout(800)
+      // 便DP-1: 押す前の確認文が規約F(何件・何が消える・何が残る)を満たす
+      check(
+        'TODAYALL-01(便DP-1) 「全て作った！」の前に件数つきの確認が出る',
+        taConfirmText.includes('2品に、作った記録をつけます'),
+        `confirm=${JSON.stringify(taConfirmText)}`,
+      )
+      check(
+        'TODAYALL-01(便DP-1) 確認文に「消えるもの」と「残るもの」が件数つきで両方ある(規約F)',
+        taConfirmText.includes('消えるもの: 今日の献立の2品') &&
+          taConfirmText.includes('残るもの: 作った記録2件') &&
+          taConfirmText.includes('レシピそのものは消えません'),
+        `confirm=${JSON.stringify(taConfirmText)}`,
+      )
       const afterText = await taPage.textContent('body')
       check(
         'TODAYALL-01 「全て作った！」の後、今日の献立が空になる(clearが実行される)',
         afterText.includes('まだ今日つくるものが決まっていません'),
       )
+      // 便DP-1: 記録したあとは件数つきのトーストと「元に戻す」を出す
+      check(
+        'TODAYALL-01(便DP-1) 件数つきのトーストと「元に戻す」が出る',
+        afterText.includes('2件の作った記録をつけました') && afterText.includes('元に戻す'),
+      )
 
       // IndexedDBを直読みし、両方のレシピにcookedLogsが実際に追加され、todayListが空になったことを確認する
-      const state = await taPage.evaluate(
-        () =>
-          new Promise((resolve, reject) => {
-            const req = indexedDB.open('uchi-recipe')
-            req.onsuccess = () => {
-              const idb = req.result
-              const tx = idb.transaction(['recipes', 'todayList'], 'readonly')
-              let recipes, today
-              const recipesReq = tx.objectStore('recipes').getAll()
-              const todayReq = tx.objectStore('todayList').getAll()
-              recipesReq.onsuccess = () => {
-                recipes = recipesReq.result
-                if (today !== undefined) resolve({ recipes, today })
+      const taReadState = () =>
+        taPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const tx = idb.transaction(['recipes', 'todayList'], 'readonly')
+                let recipes, today
+                const recipesReq = tx.objectStore('recipes').getAll()
+                const todayReq = tx.objectStore('todayList').getAll()
+                recipesReq.onsuccess = () => {
+                  recipes = recipesReq.result
+                  if (today !== undefined) resolve({ recipes, today })
+                }
+                todayReq.onsuccess = () => {
+                  today = todayReq.result
+                  if (recipes !== undefined) resolve({ recipes, today })
+                }
+                recipesReq.onerror = () => reject(recipesReq.error)
+                todayReq.onerror = () => reject(todayReq.error)
               }
-              todayReq.onsuccess = () => {
-                today = todayReq.result
-                if (recipes !== undefined) resolve({ recipes, today })
-              }
-              recipesReq.onerror = () => reject(recipesReq.error)
-              todayReq.onerror = () => reject(todayReq.error)
-            }
-            req.onerror = () => reject(req.error)
-          }),
-      )
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      const state = await taReadState()
       const nikujaga = state.recipes.find((r) => r.title === '肉じゃが')
       const curry = state.recipes.find((r) => r.title === 'カレーライス')
       check('TODAYALL-01 肉じゃがに作った記録が追加される', (nikujaga?.cookedLogs?.length ?? 0) > 0)
       check('TODAYALL-01 カレーライスに作った記録が追加される', (curry?.cookedLogs?.length ?? 0) > 0)
       check('TODAYALL-01 今日の献立テーブルが空になる(clear実行)', state.today.length === 0)
+
+      // 便DP-1: 複数件の「元に戻す」＝2件の記録が消え、2品とも今日の献立へ戻る
+      await taPage.getByRole('button', { name: '元に戻す' }).click()
+      await taPage.waitForTimeout(900)
+      const taUndone = await taReadState()
+      const taNikujaga2 = taUndone.recipes.find((r) => r.title === '肉じゃが')
+      const taCurry2 = taUndone.recipes.find((r) => r.title === 'カレーライス')
+      check(
+        'TODAYALL-01(便DP-1) 「元に戻す」で2件の記録がまとめて消える',
+        (taNikujaga2?.cookedLogs?.length ?? 0) === 0 && (taCurry2?.cookedLogs?.length ?? 0) === 0,
+      )
+      check(
+        'TODAYALL-01(便DP-1) 「元に戻す」で2品とも今日の献立へ戻る',
+        taUndone.today.length === 2,
+        `today=${JSON.stringify(taUndone.today)}`,
+      )
+      check(
+        'TODAYALL-01(便DP-1) 取り消した品数を結果メッセージで伝える',
+        ((await taPage.textContent('body')) ?? '').includes(
+          '2件の作った記録を取り消して、今日の献立に戻しました',
+        ),
+      )
     } finally {
       await taBrowser.close()
     }
@@ -3037,7 +3085,22 @@ try {
 
       await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tuPage.waitForTimeout(800)
-      await tuPage.getByRole('button', { name: '作った', exact: true }).first().click()
+      // 2026-08-03 便DP-3: 行の☑アイコンを、枠と文字ラベルの付いたボタン「作った！」にした。
+      // ボタンの見た目(枠+地色)と、何が起きるかの1行説明が出ていることも合わせて確認する
+      const tuCookedBtn = tuPage.getByRole('button', { name: '作った！', exact: true }).first()
+      const tuBtnCls = (await tuCookedBtn.getAttribute('class')) ?? ''
+      check(
+        'TODAYUNDO-01(便DP-3) 行の「作った！」が枠・地色つきのボタンになっている',
+        tuBtnCls.includes('border-accent') && tuBtnCls.includes('bg-surface'),
+        `class=${tuBtnCls}`,
+      )
+      check(
+        'TODAYUNDO-01(便DP-3) 「作った！」が何をするかの1行説明が添えてある',
+        ((await tuPage.textContent('body')) ?? '').includes(
+          '「作った！」を押すと、その料理に今日の日付で作った記録がつきます',
+        ),
+      )
+      await tuCookedBtn.click()
       await tuPage.waitForTimeout(700)
       const tuAfterCooked = (await tuPage.textContent('body')) ?? ''
       check(
@@ -3092,6 +3155,116 @@ try {
       )
     } finally {
       await tuBrowser.close()
+    }
+  }
+
+  // --- TODAYSYNC-01: 「週の予定を削除したあと、今日の献立に『レシピ一覧から選択中』として残る」
+  // バグの再発防止(2026-08-03 便DP-4・オーナー報告)。
+  // 原因: 日タブを開くと今日の予定が今日の献立へ自動取り込みされる(便U-3)が、その予定を消したときに
+  // 写しを片付ける経路が無く、写しが「今日の予定に無い品」=①レシピ一覧から選択中 として残っていた。
+  // 再現手順どおりに ①週タブで今日の夕食に割り当て ②日タブを開いて自動取り込みさせる
+  // ③週タブでその割り当てを外す ④日タブに戻る、を通し、今日の献立テーブルが空になることを確認する ---
+  currentCheck = 'TODAYSYNC-01'
+  {
+    const tsBrowser = await chromium.launch()
+    const tsContext = await tsBrowser.newContext()
+    const tsPage = await tsContext.newPage()
+    tsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@TODAYSYNC-01] ${err.message}`)
+    })
+    const tsToday = (() => {
+      const now = new Date()
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    })()
+    const tsReadToday = () =>
+      tsPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tq = req.result.transaction(['todayList'], 'readonly').objectStore('todayList').getAll()
+              tq.onsuccess = () => resolve(tq.result)
+              tq.onerror = () => reject(tq.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      await tsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tsPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // ①週タブへ切り替え、今日のカードの空き枠に「肉じゃが」を割り当てる
+      await tsPage.getByRole('button', { name: '週', exact: true }).click()
+      await tsPage.waitForTimeout(500)
+      const tsTodayCard = tsPage.locator(`section[data-date="${tsToday}"]`)
+      await tsTodayCard.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await tsPage.waitForTimeout(400)
+      await tsPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await tsPage.waitForTimeout(300)
+      await tsPage.getByText('肉じゃが', { exact: true }).first().click()
+      await tsPage.waitForTimeout(500)
+      check(
+        'TODAYSYNC-01 前提: 今日のカードに肉じゃがを割り当てられる',
+        ((await tsTodayCard.textContent()) ?? '').includes('肉じゃが'),
+      )
+
+      // ②日タブを開く＝自動取り込み(便U-3)で今日の献立へ写しが入る
+      await tsPage.getByRole('button', { name: '日', exact: true }).click()
+      await tsPage.waitForTimeout(900)
+      const tsImported = await tsReadToday()
+      check(
+        'TODAYSYNC-01 前提: 日タブを開くと今日の予定が今日の献立へ自動取り込みされる',
+        tsImported.length === 1,
+        `today=${JSON.stringify(tsImported)}`,
+      )
+      check(
+        'TODAYSYNC-01(便DP-4) 自動取り込みで入った品には「予定の写し」の印(fromPlan)が付く',
+        tsImported[0]?.fromPlan === true,
+        `today=${JSON.stringify(tsImported)}`,
+      )
+
+      // ③週タブへ戻り、その割り当てを外す
+      await tsPage.getByRole('button', { name: '週', exact: true }).click()
+      await tsPage.waitForTimeout(600)
+      await tsTodayCard.getByRole('button', { name: 'この割り当てを外す' }).first().click()
+      await tsPage.waitForTimeout(900)
+
+      // ④今日の献立から写しも片付いている(バグの本体)
+      const tsAfter = await tsReadToday()
+      check(
+        'TODAYSYNC-01(便DP-4) 週の予定を外すと、自動取り込みされた写しも今日の献立から消える',
+        tsAfter.length === 0,
+        `today=${JSON.stringify(tsAfter)}`,
+      )
+      await tsPage.getByRole('button', { name: '日', exact: true }).click()
+      await tsPage.waitForTimeout(700)
+      const tsDayText = (await tsPage.textContent('body')) ?? ''
+      check(
+        'TODAYSYNC-01(便DP-4) 日タブに「レシピ一覧から選択中」として取り残されない',
+        !tsDayText.includes('レシピ一覧から選択中') &&
+          tsDayText.includes('まだ今日つくるものが決まっていません'),
+      )
+
+      // 自分でレシピ一覧から足した品は巻き込まない(印が無いものは消さない)
+      await tsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tsPage.waitForTimeout(600)
+      await tsPage.getByText('カレーライス', { exact: true }).first().click()
+      await tsPage.waitForTimeout(500)
+      await tsPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tsPage.waitForTimeout(300)
+      await tsPage.getByRole('button', { name: '決めない' }).click()
+      await tsPage.waitForTimeout(300)
+      await tsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tsPage.waitForTimeout(900)
+      const tsManual = await tsReadToday()
+      check(
+        'TODAYSYNC-01(便DP-4) 自分で足した品は今日の予定に無くても消さない',
+        tsManual.length === 1 && tsManual[0]?.fromPlan === undefined,
+        `today=${JSON.stringify(tsManual)}`,
+      )
+    } finally {
+      await tsBrowser.close()
     }
   }
 
