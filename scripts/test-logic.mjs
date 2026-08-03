@@ -72,6 +72,7 @@ import {
   mealOccasionCount,
   planRoleAssign,
   todayListPickedIds,
+  staleTodayListFromPlanIds,
   recipeDishType,
 } from '../src/logic/mealPlan.ts'
 import { restoreHomeWidget } from '../src/logic/homeWidgets.ts'
@@ -10081,6 +10082,41 @@ eq(
   // 旧関数は「食い違い警告を出さない」ために0件時は空を返していたが、便DHでは同じ結果を
   // 「レシピ一覧から選択中」の見出しの中身として使うため、週プランが空なら全部がこちらに入る
   eq('DH-PICK 週プランが空でも今日の献立はそのまま選択中に入る', todayListPickedIds([1, 2], []), [1, 2])
+
+  // staleTodayListFromPlanIds: 「週の予定を削除したあと、今日の献立に『レシピ一覧から選択中』
+  // として残る」バグの再発防止(2026-08-03 便DP-4)。日タブの自動取り込み(便U-3)で入った写しは
+  // fromPlan の印が付き、その予定が消えたら一緒に片付ける。自分で足した品(印なし)は残す
+  {
+    const item = (recipeId, fromPlan) =>
+      fromPlan === undefined ? { recipeId } : { recipeId, fromPlan }
+    eq(
+      'DP-STALE 予定が消えた写しだけを片付ける',
+      staleTodayListFromPlanIds([item(1, true), item(2, true)], [2]),
+      [1],
+    )
+    eq(
+      'DP-STALE 自分で足した品は予定に無くても残す(印なしは対象外)',
+      staleTodayListFromPlanIds([item(1), item(2, true)], []),
+      [2],
+    )
+    eq(
+      'DP-STALE 予定がそのまま残っていれば何も消さない',
+      staleTodayListFromPlanIds([item(1, true), item(2, true)], [1, 2]),
+      [],
+    )
+    eq(
+      'DP-STALE fromPlan:false も自分で足した扱い(消さない)',
+      staleTodayListFromPlanIds([item(1, false)], []),
+      [],
+    )
+    eq('DP-STALE 今日の献立が空なら何も消さない', staleTodayListFromPlanIds([], [1, 2]), [])
+    // 週の予定を全部消した直後の再現ケース: 写しが2件とも取り残される
+    eq(
+      'DP-STALE 週の予定をまとめて空にしたら写しも全部片付ける',
+      staleTodayListFromPlanIds([item(1, true), item(2, true), item(3)], []),
+      [1, 2],
+    )
+  }
 
   // recipeDishType: dishTypeがあれば最優先・無ければ登録時と同じ推定にフォールバック
   eq('DH-TYPE 登録済みのdishTypeをそのまま使う', recipeDishType(mk(1, { dishType: 'soup' })), 'soup')

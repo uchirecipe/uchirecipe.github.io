@@ -64,6 +64,7 @@ import {
   undoTodayListCooked,
   markAllTodayListCooked,
   importRecipeIdsToTodayList,
+  removeStaleFromPlanTodayList,
 } from '../db/todayList'
 import {
   MEAL_SLOTS,
@@ -246,15 +247,7 @@ function TodayListRow({
         </Link>
         {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
             破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-            押し間違いを減らす(アイコンの大きさ・aria-labelは据え置き) */}
-        <button
-          type="button"
-          onClick={onCooked}
-          aria-label={ja.mealPlan.todayMarkCooked}
-          className="shrink-0 rounded-full p-3 text-accent-ink"
-        >
-          <CheckCircle2 size={20} aria-hidden />
-        </button>
+            押し間違いを減らす */}
         {onRemove && (
           <button
             type="button"
@@ -265,6 +258,19 @@ function TodayListRow({
             <X size={20} aria-hidden />
           </button>
         )}
+      </div>
+      {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+          枠・地色・文字ラベルの付いたボタンにした。料理名の幅を削らないよう行の下へ置き、
+          高さは44px(min-h-11)＝従来のp-3のアイコンボタンと同じ当たり判定を下回らないようにする */}
+      <div className="mt-1">
+        <button
+          type="button"
+          onClick={onCooked}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-sm border border-accent bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+        >
+          <CheckCircle2 size={18} aria-hidden />
+          {ja.mealPlan.todayMarkCooked}
+        </button>
       </div>
       {footer}
     </li>
@@ -1632,10 +1638,33 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (settings.lastAutoImportDate === today) return
     if (todayFromPlanIds.length === 0) return
     void (async () => {
-      await importRecipeIdsToTodayList(todayFromPlanIds)
+      // fromPlan=true: 「予定の写しとして入った品」の印。週の予定を消したときに
+      // 下の後始末(便DP-4)が片付ける対象になる
+      await importRecipeIdsToTodayList(todayFromPlanIds, { fromPlan: true })
       await updateSettings({ lastAutoImportDate: today })
     })()
   }, [isDemo, viewMode, settings, todayEntries, todayFromPlanIds, today])
+
+  /**
+   * 自動取り込みの後始末（2026-08-03 便DP-4・バグ修正）。
+   *
+   * 直したバグ: 「週の予定を削除したあと、今日の献立に『レシピ一覧から選択中』として残る」。
+   * 上の自動取り込み（便U-3）は今日の予定を todayList へ写すが、予定が消えたときに写しを
+   * 片付ける経路がどこにも無かった。写しは孤立して「今日の予定に無い品」になり、
+   * todayListPickedIds の定義どおり①「レシピ一覧から選択中」として並んでしまっていた。
+   *
+   * タブに関係なく（週タブで消したその場で消えるように）走らせる。突き合わせる相手は
+   * **全ての食事帯**の今日の予定（todayPlanAllRecipeIds）で、表示中の帯だけで判定すると
+   * 「朝食を非表示にしただけ」で朝食の写しを消してしまう。
+   * 消すのは fromPlan の印が付いた写しだけなので、自分でレシピ一覧から足した品は残る。
+   */
+  useEffect(() => {
+    if (isDemo) return
+    // liveQueryの初回はundefined。読めていない状態で突き合わせると全部を「予定が無い」と
+    // 誤判定して消してしまうので、両方そろうまで何もしない
+    if (todayEntries === undefined || todayList === undefined) return
+    void removeStaleFromPlanTodayList(todayPlanAllRecipeIds)
+  }, [isDemo, todayEntries, todayList, todayPlanAllRecipeIds])
 
   const [quickOnly, setQuickOnly] = useState(false)
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
@@ -1659,21 +1688,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * いま出ているトーストがその記録のものであるときだけにしたいので、対象のレシピと
    * 一緒にそのときの文言も持っておく（別の操作でトーストが差し替わったら操作ごと消える）。
    */
-  const [undoCooked, setUndoCooked] = useState<{ recipeId: number; message: string } | null>(null)
+  // 2026-08-03 便DP-1: 「全て作った！」でも戻せるよう、控えは品ごとの配列で持つ
+  // （1品の「作った！」は1件だけの配列。取り消しの処理は複数件と共通）。
+  // fromPlan＝記録を付けた時点で「今週の予定の写し」だったかどうか。戻すときに同じ印を
+  // 付け直さないと、取り消した品だけが週の予定と切り離される（便DP-4のバグが戻る）
+  const [undoCooked, setUndoCooked] = useState<{
+    items: { recipeId: number; fromPlan?: boolean }[]
+    message: string
+  } | null>(null)
   const undoCookedActive = undoCooked != null && undoCooked.message === message
   const runUndoCooked = async () => {
     if (!undoCooked) return
-    const done = await undoTodayListCooked(undoCooked.recipeId)
+    const requested = undoCooked.items.length
+    const undone = await undoTodayListCooked(undoCooked.items)
     setUndoCooked(null)
-    if (!done) {
+    if (undone === 0) {
       setMessage(ja.mealPlan.todayCookedUndoNothing)
       return
     }
+    // 1品だけのときは件数を出さない（数字が情報を足さない）。複数件は実際に戻した品数を出す
+    const base =
+      requested === 1
+        ? ja.mealPlan.todayCookedUndone
+        : ja.mealPlan.todayCookedUndoneMany.replace('{n}', String(undone))
     // 在庫を1段階下げる設定がONのときは、戻していないものを黙らずに添える
     setMessage(
       settings?.cookedReflectPantry
-        ? `${ja.mealPlan.todayCookedUndone} ${ja.mealPlan.todayCookedUndoPantryNote}`
-        : ja.mealPlan.todayCookedUndone,
+        ? `${base} ${ja.mealPlan.todayCookedUndoPantryNote}`
+        : base,
     )
   }
 
@@ -1983,13 +2025,47 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （②の品は「作った後は予定でなく記録」＝記録が付いた時点でこの行は消える）。
    * トーストの「元に戻す」で直前の1件を取り消せる（便DE-3）。
    */
+  /**
+   * 「元に戻す」の控えに残す1品ぶんの情報（2026-08-03 便DP-4）。
+   * 記録を付けた時点で「今週の予定の写し」だったかを一緒に控える＝今日の予定に入っている品か、
+   * 今日の献立に写しの印が付いている品。戻すときに同じ印を付け直すために使う。
+   */
+  const undoItemOf = (recipeId: number) => ({
+    recipeId,
+    fromPlan:
+      todayPlanAllRecipeIds.includes(recipeId) ||
+      (todayList?.some((item) => item.recipeId === recipeId && item.fromPlan) ?? false),
+  })
+
   const markDayRecipeCooked = (recipeId: number) => {
+    const undoItem = undoItemOf(recipeId)
     void (async () => {
       await markTodayListCooked(recipeId)
       // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
       setMessage(ja.mealPlan.todayCookedToast)
-      setUndoCooked({ recipeId, message: ja.mealPlan.todayCookedToast })
+      setUndoCooked({ items: [undoItem], message: ja.mealPlan.todayCookedToast })
     })()
+  }
+
+  /**
+   * 日タブの「全て作った！」（2026-08-03 便DP-1・オーナー指示）。
+   * 押す前に「何件を記録するか・何が消えて何が残るか」を確認し（規約F）、記録したあとは
+   * 件数つきのトーストと「元に戻す」を出す（1品の「作った！」と同じ戻し方を複数件へ広げた）。
+   * 在庫を1段階下げる設定がONのときは、確認文にもその旨を足す（黙って在庫を動かさない）。
+   */
+  const markAllDayRecipesCooked = async () => {
+    const count = dayRecipeIds.length
+    if (count === 0) return
+    const confirmText =
+      ja.mealPlan.todayMarkAllCookedConfirm.replaceAll('{n}', String(count)) +
+      (settings?.cookedReflectPantry ? ja.mealPlan.todayMarkAllCookedConfirmPantry : '') +
+      ja.mealPlan.todayMarkAllCookedConfirmAsk
+    if (!window.confirm(confirmText)) return
+    const recorded = dayRecipeIds.map(undoItemOf)
+    await markAllTodayListCooked(recorded.map((item) => item.recipeId))
+    const toast = ja.mealPlan.todayMarkAllCookedToast.replace('{n}', String(recorded.length))
+    setMessage(toast)
+    setUndoCooked({ items: recorded, message: toast })
   }
 
   /**
@@ -2696,9 +2772,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 献立表の折りたたみ（週タブ・月タブで同じものを使う）。開いている間だけ .plan-sheet が
    * 画面とDOMに存在し、その状態で「印刷する」を押す＝紙に出るのは必ず今見えている1枚になる。
+   *
+   * surfaceCls は面の見た目だけを呼び出し側から差し替えるためのもの（2026-08-03 便DP-8）。
+   * 週タブは7日分のカード（面＋影）のすぐ下に並ぶので、面を塗らず枠だけにして
+   * 「曜日カードがもう1枚ある」ように見えるのを避ける。月タブは従来のまま。
    */
-  const renderPlanSheetSection = (sheet: PlanSheet) => (
-    <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface shadow-sm">
+  const renderPlanSheetSection = (sheet: PlanSheet, surfaceCls = 'bg-surface shadow-sm') => (
+    <section
+      className={`mt-[var(--space-md)] rounded-md border border-edge ${surfaceCls}`.trimEnd()}
+    >
       <button
         type="button"
         onClick={() => setPlanSheetOpen((v) => !v)}
@@ -3195,8 +3277,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             isEmpty
               ? 'border-dashed border-accent/40 py-1.5 text-xs font-bold text-accent-ink'
               : isCooked
-                ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)
-                  'border-edge bg-app/60 py-2.5 text-base font-bold text-ink-muted opacity-80'
+                ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)。
+                  // 2026-08-03 便DP-5(オーナー「予定と記録がわかりづらい」): 面と文字をさらに落とし、
+                  // 「作った」バッジで言い切る。押して選び直せる状態は変えない
+                  // (間違えて記録した枠を直せなくなる方が害が大きい・司令部裁定)
+                  // 破線は空き枠の意味に使っているので、線は実線のまま面と文字だけを落とす
+                  'border-edge bg-app/60 py-2.5 text-base font-normal text-ink-muted opacity-70'
                 : 'border-edge bg-surface py-2.5 text-base font-bold text-ink shadow-sm'
           }`}
         >
@@ -3210,7 +3296,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {/* 2026-08-02 便CW-4: 文字だけの行に小さなサムネ(写真か料理アイコン)を足す */}
               <RowThumb recipe={recipe!} />
               {isCooked && (
-                <CheckCircle2 size={14} className="shrink-0 text-accent-ink" aria-hidden />
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">
+                  <CheckCircle2 size={11} aria-hidden />
+                  {ja.mealPlan.cookedEntryBadge}
+                </span>
               )}
               {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
                 <TriangleAlert
@@ -3566,11 +3655,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     )
   }
 
-  /** 表示する食事帯トグル（日タブ・週タブで共用。便U-2: 既存visibleMealSlotsを日タブにも適用） */
-  const renderSlotFilter = () => (
-    <>
-      <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slotFilterTitle}</p>
-      <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+  /**
+   * 表示する食事帯トグル（週タブ「表示のしかた」グループの中。便U-2で入り、
+   * 便DHで日タブからは外れた）。
+   *
+   * 2026-08-03 便DP-6（オーナー指示）: グループを畳んでいるときは見出しの文字を出さず、
+   * ボタン群だけを残す。畳んだ状態では見出し「表示のしかた」がすぐ上にあり、
+   * 「表示する食事」の文字が重なって2段の見出しに見えていた。
+   * 見出しを出さないときも、読み上げでは何のボタン群かが分かるようグループ名を付ける。
+   */
+  const renderSlotFilter = (showTitle: boolean) => (
+    <div role="group" aria-label={ja.mealPlan.slotFilterTitle}>
+      {showTitle && (
+        <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slotFilterTitle}</p>
+      )}
+      <div className={`flex flex-wrap gap-[var(--space-sm)] ${showTitle ? 'mt-1' : ''}`}>
         {MEAL_SLOTS.map((slot) => (
           <button
             key={slot}
@@ -3587,7 +3686,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </button>
         ))}
       </div>
-    </>
+    </div>
   )
 
   // 重ね窓はEscapeキーと端末の「戻る」で1枚ずつ閉じる(2026-07-30 便CH/C13)。
@@ -3669,6 +3768,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {/* 2026-08-03 便DH(オーナー指示): 便DEの左右2列をやめ、縦一列で
                     「レシピ一覧から選択中」→「今週の献立の予定(朝食・昼食・夕食)」の順に並べる */}
 
+                {/* 各行の「作った！」ボタンが何をするものかの1行説明(2026-08-03 便DP-3・規約H)。
+                    リストの上に1回だけ置く(行ごとに繰り返さない) */}
+                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.todayMarkCookedHint}</p>
+
                 {/* ①レシピ一覧から選択中。×(外す)が押せるのはこちらだけ。
                     今日の予定へ入れたいときは行の下の「◯食に入れる」から
                     (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
@@ -3748,10 +3851,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}
                   </p>
                 )}
-                {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する */}
+                {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する。
+                    2026-08-03 便DP-1: 押す前に件数つきの確認(規約F)、押したあとは件数つきの
+                    トーストと「元に戻す」を出す */}
                 <button
                   type="button"
-                  onClick={() => void markAllTodayListCooked(dayRecipeIds)}
+                  onClick={() => void markAllDayRecipesCooked()}
                   className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
                 >
                   <CheckCircle2 size={18} aria-hidden />
@@ -3804,15 +3909,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     {ja.mealPlan.todaySuggestHint}（
                     {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}）
                   </p>
-                  {todayFromPlanIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => void importRecipeIdsToTodayList(todayFromPlanIds)}
-                      className="w-full rounded-sm border border-edge bg-surface py-2 text-sm font-bold text-accent-ink shadow-sm"
-                    >
-                      {ja.mealPlan.todayImport.replace('{n}', String(todayFromPlanIds.length))}
-                    </button>
-                  )}
+                  {/* 2026-08-03 便DP-2(オーナー指示): 「今週の献立から今日の分を取り込む」ボタンは
+                      削除した。日タブは今日の予定を②として常に並べるようになり(便DH)、さらに
+                      自動取り込み(便U-3)も効くため、このボタンが出る条件
+                      (日タブが空 かつ 今日の予定がある)は実際にはほぼ成立しない＝押す機会が無かった。
+                      自動取り込みそのものは残す */}
                 </div>
               </div>
             )}
@@ -4441,8 +4542,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
       </div>
 
-      {/* グループ1: 表示のしかた(週の並べ方・出す食事・まとめて空にする)。
-          「表示する食事」だけは折りたたみの外に置き、畳んでも常に見えるようにする(便DJ) */}
+      {/* グループ1: 表示のしかた(週の区切り・表示する食事・まとめて空にする)。
+          「表示する食事」だけは折りたたみの外に置き、畳んでも常に見えるようにする(便DJ)。
+          2026-08-03 便DP-6/7(オーナー指示): ①畳んでいるときは「表示する食事」の見出し文字を
+          出さずボタン群だけ残す ②開いたときの並びを 週の区切り → 表示する食事 → まとめて空にする
+          にする(表示を決める2つを隣に置き、消す操作を最後に離す) */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('display', ja.mealPlan.weekGroupDisplayTitle)}
         {weekGroupOpen.display && (
@@ -4478,7 +4582,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
                 3体が切替自体を触っていなかった */}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
+          </>
+        )}
 
+        {/* 表示する食事帯。折りたたみの外＝グループを畳んでも常に見える(便DJ・オーナー指示)。
+            畳んでいるときは見出しの文字を出さずボタン群だけ残す(便DP-6・オーナー指示) */}
+        <div className="mt-[var(--space-sm)]">{renderSlotFilter(weekGroupOpen.display)}</div>
+
+        {weekGroupOpen.display && (
+          <>
             {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
                 2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した)。
                 従来は週タブのいちばん下に置いていて、そこまで下がらないと気づけなかった。
@@ -4522,9 +4634,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </div>
           </>
         )}
-
-        {/* 表示する食事帯。折りたたみの外＝グループを畳んでも常に見える(便DJ・オーナー指示) */}
-        <div className="mt-[var(--space-sm)]">{renderSlotFilter()}</div>
       </section>
 
       {/* グループ2: 自動で献立を提案(条件＋実行ボタン)。押すと献立が増える操作をここに集める。
@@ -4623,8 +4732,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             key={date}
             data-date={date}
             ref={date === today ? todaySectionRef : undefined}
-            className={`scroll-mt-[var(--space-md)] rounded-md border p-[var(--space-md)] shadow-sm ${
-              date === today ? 'border-accent bg-surface' : 'border-edge bg-surface'
+            // 2026-08-03 便DP-8(オーナー指示): 今日のカードの囲み線を太くして、ほかの曜日との
+            // 区別を強める(食事ごとの地色=SLOT_TONEによる時間帯の区分はそのまま維持)
+            className={`scroll-mt-[var(--space-md)] rounded-md p-[var(--space-md)] shadow-sm ${
+              date === today
+                ? 'border-2 border-accent bg-surface'
+                : 'border border-edge bg-surface'
             }`}
           >
             <h2 className="font-bold">
@@ -4730,6 +4843,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         })}
       </div>
 
+      {/* この週ぜんぶをまとめて見る3つ（栄養価・概算食費・献立表の印刷）。
+          2026-08-03 便DP-8(オーナー指摘「曜日カードと紛れる」): 曜日カードと同じ「白い面＋影」の
+          折りたたみが同じ間隔で続いていて、7日目の下にもう1日あるように見えていた。
+          ①7日分との間を1段広く空けて区切り線を引く ②3つは面を塗らず枠だけにする
+          （面＋影＝日ごとのカード／枠だけ＝まとめ、と役割で見た目を分ける）。
+          栄養価パネルは元から枠だけの見た目なので、残る2つをそれに揃えた */}
+      <div className="mt-[var(--space-lg)] border-t border-edge pt-[var(--space-sm)]">
+
       {/* 週まとめ: この週の献立ぶんの栄養と野菜量(2026-07-30 便CL・docs/60 第1段)。
           各日カードと同じ部品・同じ数え方で、期間の合計だけを1人分で出す。
           めやすは「1日のめやす × 献立や記録がある日数」で並べる(週まとめ側だけ日数の注記を添える)。
@@ -4751,7 +4872,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           価格情報が1件も無い/何も割り当てていない(weekCost===0)ときはセクションごと非表示のまま。
           タスク8: 展開時に「◯食分」も併記する） */}
       {hasPricedRecipe && weekCost > 0 && (
-        <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface shadow-sm">
+        <section className="mt-[var(--space-md)] rounded-md border border-edge">
           <button
             type="button"
             onClick={() => setWeekCostOpen((v) => !v)}
@@ -4833,8 +4954,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </section>
       )}
 
-      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59) */}
-      {renderPlanSheetSection(weekPlanSheet)}
+      {/* A-4 献立表(印刷・画像で保存)。この週の分を1枚にまとめる(2026-07-29 便CB-2・docs/59)。
+          週タブでは面を塗らない見た目にする(便DP-8。曜日カードと紛れないため) */}
+      {renderPlanSheetSection(weekPlanSheet, '')}
+
+      </div>
 
       {/* この週の買い物リストを作る */}
       <button

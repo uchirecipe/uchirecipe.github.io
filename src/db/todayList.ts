@@ -3,6 +3,7 @@ import { db } from './db'
 import { addCookedLog } from './recipes'
 import { lowerPantryLevelsForCooked } from './pantry'
 import { todayString } from '../logic/date'
+import { staleTodayListFromPlanIds } from '../logic/mealPlan'
 
 /**
  * 献立ページの「作った」「全て作った！」でも、レシピ詳細の「作った！」と同じように
@@ -71,35 +72,52 @@ export async function markTodayListCooked(recipeId: number): Promise<void> {
 }
 
 /**
- * 直前の「作った」を取り消す（2026-08-02 便DE-3・オーナー指示）。
- * markTodayListCooked と対になる操作で、今日の日付で付いた記録を1件消し、その品を
- * 今日の献立へ戻す。トーストの「元に戻す」からだけ呼ぶ（誤タップの直後を想定した経路）。
+ * 直前の「作った」を取り消す（2026-08-02 便DE-3・オーナー指示。
+ * 2026-08-03 便DP-1で「全て作った！」の複数件にも使えるよう配列を受け取る形へ拡張）。
+ * markTodayListCooked / markAllTodayListCooked と対になる操作で、今日の日付で付いた記録を
+ * 1品につき1件消し、その品を今日の献立へ戻す。トーストの「元に戻す」からだけ呼ぶ
+ * （誤タップの直後を想定した経路）。実際に取り消せた品数を返す。
  *
  * 消す対象は「今日の日付で、メモ・写真・人数のどれも付いていない記録」の先頭1件に限る。
  * 記録フォーム（レシピ詳細の「作った！」）で書いたメモ・写真つきの記録は、同じ日でも
  * この操作では消さない＝押し間違いの取り消しが、手で書いた記録を巻き込まないようにする。
- * 対象が見つからなければ false を返し、何も変えない（呼び出し側はその旨を伝える）。
+ * 対象が1件も見つからなければ0を返し、何も変えない（呼び出し側はその旨を伝える）。
+ * 一部だけ取り消せた場合も、取り消せた分の品数をそのまま返す（黙って「全部戻した」と言わない）。
  *
  * 在庫（cookedReflectPantry がONのときに1段階下げた分）は戻さない。戻す量を機械的に
  * 決められない（間に手で在庫を触っているかもしれない）ためで、呼び出し側は
  * その事実をトーストに添える。
+ *
+ * fromPlan（予定の写しかどうか）は、記録を付けた時点の状態を呼び出し側が控えて渡す
+ * （2026-08-03 便DP-4）。ここで印を復元しないと、取り消した品だけが印の無い状態に変わり、
+ * そのあと週の予定を消したときに今日の献立へ取り残される（＝直したバグが取り消し経由で戻る）。
  */
-export async function undoTodayListCooked(recipeId: number): Promise<boolean> {
+export async function undoTodayListCooked(
+  items: { recipeId: number; fromPlan?: boolean }[],
+): Promise<number> {
+  if (items.length === 0) return 0
   const date = todayString()
   return db.transaction('rw', db.recipes, db.todayList, async () => {
-    const recipe = await db.recipes.get(recipeId)
-    if (!recipe) return false
-    const index = recipe.cookedLogs.findIndex(
-      (log) =>
-        log.date === date && log.note == null && log.photo == null && log.servings == null,
-    )
-    if (index < 0) return false
-    await db.recipes.update(recipeId, {
-      cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
-    })
-    const existing = await db.todayList.where('recipeId').equals(recipeId).first()
-    if (!existing) await db.todayList.add({ recipeId, addedAt: Date.now() })
-    return true
+    let undone = 0
+    for (const { recipeId, fromPlan } of items) {
+      const recipe = await db.recipes.get(recipeId)
+      if (!recipe) continue
+      const index = recipe.cookedLogs.findIndex(
+        (log) =>
+          log.date === date && log.note == null && log.photo == null && log.servings == null,
+      )
+      if (index < 0) continue
+      await db.recipes.update(recipeId, {
+        cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
+      })
+      const existing = await db.todayList.where('recipeId').equals(recipeId).first()
+      if (!existing)
+        await db.todayList.add(
+          fromPlan ? { recipeId, addedAt: Date.now(), fromPlan: true } : { recipeId, addedAt: Date.now() },
+        )
+      undone += 1
+    }
+    return undone
   })
 }
 
@@ -123,13 +141,53 @@ export async function markAllTodayListCooked(recipeIds: number[]): Promise<void>
   await reflectPantryForCooked(recipeIds) // 在庫反映(便CC/C3。設定ONのときだけ)
 }
 
-/** 今週の献立から、指定したレシピIDをまとめて取り込む（既に入っているものはスキップ） */
-export async function importRecipeIdsToTodayList(recipeIds: number[]): Promise<void> {
+/**
+ * 指定したレシピIDをまとめて今日の献立へ入れる（既に入っているものはスキップ）。
+ *
+ * fromPlan=true で呼ぶのは日タブの自動取り込み（便U-3）だけ。「予定の写しとして入った品」の
+ * 印になり、週の予定を消したときに removeStaleFromPlanTodayList が片付ける対象になる
+ * （2026-08-03 便DP-4）。おまかせ提案など自分で入れた品には印を付けない＝勝手に消えない。
+ * 既に入っている品はスキップするので、自分で足した品が後から自動取り込みで
+ * 「予定の写し」に格上げされることもない。
+ */
+export async function importRecipeIdsToTodayList(
+  recipeIds: number[],
+  options?: { fromPlan?: boolean },
+): Promise<void> {
   const existing = await listTodayList()
   const existingIds = new Set(existing.map((item) => item.recipeId))
   const toAdd = recipeIds.filter((id) => !existingIds.has(id))
   let addedAt = Date.now()
   for (const recipeId of toAdd) {
-    await db.todayList.add({ recipeId, addedAt: addedAt++ })
+    await db.todayList.add(
+      options?.fromPlan
+        ? { recipeId, addedAt: addedAt++, fromPlan: true }
+        : { recipeId, addedAt: addedAt++ },
+    )
   }
+}
+
+/**
+ * 週の予定から自動取り込みした品のうち、その予定がもう無いものを今日の献立から片付ける
+ * （2026-08-03 便DP-4・バグ修正）。消した品数を返す。
+ *
+ * 直したバグ: 週の予定を削除しても、日タブを開いたときに自動取り込みされた写しが今日の献立に
+ * 残り、「レシピ一覧から選択中」として並び続けた（自分で選んだわけではない品が、自分で
+ * 選んだ扱いで出てしまう）。予定を消す入口は週タブ・月タブの日モーダル・まとめて空にする、と
+ * 複数あるため、消す側それぞれに後始末を足すのではなく、「今日の予定と写しを突き合わせて
+ * 合わなくなったものを片付ける」1か所に集約している。
+ *
+ * 対象は fromPlan の印が付いた品だけ（logic/mealPlan.ts staleTodayListFromPlanIds）。
+ * 自分でレシピ一覧から足した品は今日の予定に無くても残す。
+ */
+export async function removeStaleFromPlanTodayList(
+  todayPlanRecipeIds: number[],
+): Promise<number> {
+  const items = await listTodayList()
+  const staleIds = staleTodayListFromPlanIds(items, todayPlanRecipeIds)
+  if (staleIds.length === 0) return 0
+  for (const recipeId of staleIds) {
+    await removeFromTodayList(recipeId)
+  }
+  return staleIds.length
 }
