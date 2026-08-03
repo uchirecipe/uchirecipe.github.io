@@ -1,30 +1,72 @@
 // 月間画面のサンプルデモ（/#/month-demo）で「作った記録」の写真として使う画像を作るスクリプト。
-// 出力: public/demo/*.webp （生成物はリポジトリにコミットする）
+// 入力: .demo-photos/<キー>.jpg （原本。リポジトリには置かない＝.gitignore）
+// 出力: public/demo/*.webp （240px角・生成物はリポジトリにコミットする）
 //
 // 実行: export PATH="$HOME/.local/node/bin:$PATH" && npx tsx scripts/build-demo-photos.mjs
 //
-// ── 素材の出所について（2026-08-02 便DC）─────────────────────────────
-// ここで作る画像は、このスクリプトが描いている**自前のイラスト**で、第三者の写真素材は
-// 一切使っていない（＝権利者への確認・クレジット表記・再配布条件のいずれも発生しない）。
+// ── 素材の出所（2026-08-03 便DL）──────────────────────────────────
+// 素材はフリー素材サイト「ぱくたそ」（https://www.pakutaso.com/）の写真素材10枚。
+// 説明書のスクリーンショット（scripts/shots-manual.mjs）と同じ素材元・同じ取り方。
 //
-// 説明書のスクリーンショット撮影（scripts/shots-manual.mjs）ではフリー素材サイト「ぱくたそ」
-// （https://www.pakutaso.com/）の料理写真を使っているが、次の2点からアプリ本体に同梱する
-// 素材としては採用しなかった。オーナー判断が要る論点なので、判断がつくまでは自前イラストで動かす。
-//   1. ぱくたその利用規約（https://www.pakutaso.com/userpolicy.html・2026-08-02 確認）は
-//      商用利用可・加工可・クレジット表記は原則不要だが、禁止事項に
-//      「フリー素材を自動化されたプログラム等により体系的に収集・複製・蓄積する行為」がある。
-//      この便がスクリプトで素材を取得するのは、その禁止事項に触れる。
-//   2. 同規約の「二次配布について」は、素材を第三者が利用可能な状態で配布する場合に
-//      Sサイズのみ・最大100枚・クレジット表記・規約の提示と同意の取得を求めている。
-//      アプリの配信ファイルに素材そのものを同梱する行為がこれに当たるかは解釈が分かれ、
-//      本リポジトリはこれまで「素材そのものはリポジトリに置かない（再配布にあたりうるため）」
-//      という方針で運用してきた（scripts/shots-manual.mjs 冒頭）。方針の変更は法務・対外公開の
-//      判断なので、便の裁量では行わない。
+// 利用規約の確認（https://www.pakutaso.com/userpolicy.html・規約の最終更新 2026-04-15 /
+// 本文を読んで確認したのは 2026-08-03）。この10枚に効く条項だけ抜き出すと:
+//   - 商用利用可。ただし「商品化して販売」は不可（＝素材をほぼそのままの状態で売る行為。
+//     例に挙がっているのはカレンダー・ポストカード・ポスター・写真集・グッズ）。
+//     ここでの使い方は、アプリのサンプル画面に敷く240px角のサムネイルで、写真を売っては
+//     いないため素材利用の範囲。
+//   - 「加工、合成、変形または変換して利用いただけます」＝切り出し・再圧縮は可。
+//   - クレジット表記は「二次配布や本の装丁以外では必須ではない」。
+//   - 正規の取得は「ぱくたその各素材ページから直接取得したもの」。下の手順はこれに沿っている。
+//   - 禁止事項に「フリー素材を自動化されたプログラム等により体系的に収集・複製・蓄積する行為」
+//     と「ネットワーク又はシステムなどに過度な負荷をかける行為」がある。
+//     → **一括クロール・URLの直叩きによる量産・並列取得はしない**（下の手順を守ること）。
+//   - 禁止事項に「フリー素材を直接リンクする利用」がある。
+//     → ぱくたそのURLを参照せず、public/demo/ に置いた自前のファイルを配信している。
+//   - 「二次配布について」＝素材を第三者が利用可能な状態で配布する場合は
+//     Sサイズのみ・最大100枚・クレジット表記・規約の提示と同意の取得。
+//     ここで配るのは素材そのものではなく **240px角に切り出して再圧縮した webp 10枚**
+//     （Sサイズの800pxより小さい・枚数も10枚）で、二次配布の上限は下回っている。
+//     原本（Sサイズのjpg）はリポジトリに置かない。
+//     ※ アプリに同梱して配信する行為が二次配布に当たるかは解釈が分かれる。当たると読むなら
+//       クレジット表記が要る。クレジットを出すかは対外表記＝オーナー判断（2026-08-03 時点で未定）。
 //
-// オーナーがぱくたそ等の写真に差し替えると決めた場合は、手元に置いた写真から同じファイル名で
-// webpを書き出せばよい（DEMO_PHOTOS のキーと public/demo/ のファイル名だけ合っていればアプリ側は
-// そのまま動く）。DEMO_PHOTO_DIR に <キー>.jpg を置いてこのスクリプトを実行すると、
-// イラストの代わりにその写真を正方形に切り出して webp にする。
+// 取得方法（2026-08-03・オーナー承認済みの手順。以後も同じやり方で差し替えること）:
+//   1. ぱくたそのトップページを開き、検索ボックスに料理名を打って検索する
+//   2. 検索結果のサムネイルを見て、料理が合っているものを1枚選ぶ
+//   3. その写真ページを開いて写真の中身を確認する
+//   4. ページ内の「S 長辺 800 px ［ JPG ］」ダウンロードボタンをクリックして保存する
+//   5. 次の1枚まで数秒あける
+//   ※ 全面広告（Google Vignette）がボタンのクリックを横取りすることがある。
+//      広告配信のリクエストを止めた状態（広告ブロッカー入りのブラウザと同じ）で操作する。
+//
+// 取得した10枚（すべて2026-08-03取得・Sサイズ長辺800px）:
+//   curry       カレーライス   https://www.pakutaso.com/20251010299post-55605.html
+//               「白いお皿に盛られた福神漬とカレーライス」
+//   hamburg     ハンバーグ     https://www.pakutaso.com/20250535143post-54483.html
+//               「鉄板の上に置かれたハンバーグと野菜の料理」
+//   nikujaga    肉じゃが       https://www.pakutaso.com/20170358089post-10811.html
+//               「旅館栄太郎の季節の煮物の炊き合わせ～かぼちゃと大根と筍」
+//               ※ ぱくたそに肉じゃがの写真が無いため、見た目の近い和風の煮物で代用
+//   salmon      鮭の塩焼き     https://www.pakutaso.com/20140412111post-4082.html
+//               「レモンを添えた焼き魚の一皿」
+//               ※ 鮭の塩焼きそのものが無いため、皿に盛った焼き魚で代用
+//   mabo        麻婆豆腐       https://www.pakutaso.com/20250638167post-54632.html
+//               「刻みネギをトッピングした熱々の手作り麻婆豆腐」
+//   napolitan   ナポリタン     https://www.pakutaso.com/20260624173post-57583.html
+//               「ベーコンとピーマンのナポリタン」
+//   tonjiru     豚汁           https://www.pakutaso.com/20150952261post-6067.html
+//               「豚汁に入った里芋と豆腐と豚肉の具だくさん和食料理」
+//   karaage     鶏の唐揚げ     https://www.pakutaso.com/20250840216post-54866.html
+//               「木皿に盛られた鶏の唐揚げ」
+//   potatosalad ポテトサラダ   https://www.pakutaso.com/20200806227post-30280.html
+//               「スーパーで買ってきたポテサラを食卓に並べた様子」
+//               ※ ぱくたそのポテトサラダは惣菜パックの写真しか無い。容器が写り込まない
+//                 ところまで寄せて切り出している（下の CROPS）
+//   oyakodon    親子丼         https://www.pakutaso.com/20110604180post-307.html
+//               「赤い椀に盛った生卵のせの親子丼」
+//
+// 原本を無くしたとき: 上のURLから同じ手順で取り直し、.demo-photos/<キー>.jpg として置く。
+// キー名は src/logic/monthDemo.ts の DEMO_PHOTO_KEYS と一致させること。
 // ────────────────────────────────────────────────
 
 import fs from 'node:fs'
@@ -34,197 +76,67 @@ import sharp from 'sharp'
 
 const ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
 const OUT_DIR = path.join(ROOT, 'public/demo')
-/** 差し替え用の写真置き場（任意）。<キー>.jpg があればイラストではなくその写真を使う */
+/** 原本の置き場。リポジトリには入れない（.gitignore） */
 const PHOTO_DIR = process.env.DEMO_PHOTO_DIR ?? path.join(ROOT, '.demo-photos')
-/** 出力サイズ。月カレンダーのセルは実機で約46px、レシピ行のサムネは28pxなので240pxで十分足りる */
+/** 出力サイズ。月カレンダーのセルは実機で約46px、レシピ行のサムネは28pxなので240pxで足りる */
 const SIZE = 240
+
+/** 作る画像のキー（src/logic/monthDemo.ts の DEMO_PHOTO_KEYS と対応） */
+const KEYS = [
+  'curry',
+  'hamburg',
+  'nikujaga',
+  'salmon',
+  'mabo',
+  'napolitan',
+  'tonjiru',
+  'karaage',
+  'potatosalad',
+  'oyakodon',
+]
+
+/**
+ * 中央を正方形に切ると料理が入りきらない写真だけ、切り出す位置を指定する。
+ * 値は原本（長辺800px）での [左, 上, 一辺] px。指定が無いキーは中央から正方形に切る。
+ */
+const CROPS = {
+  // 惣菜パックの容器が写り込まないところまで寄せる
+  potatosalad: [260, 130, 240],
+  // 器のふたが写り込まないよう、器の中身だけにする
+  nikujaga: [60, 90, 440],
+}
 
 fs.mkdirSync(OUT_DIR, { recursive: true })
 
-/** 乱数（見た目を毎回同じにするため、キーから決まる疑似乱数を使う） */
-function makeRandom(seed) {
-  let s = 0
-  for (const ch of seed) s = (s * 31 + ch.charCodeAt(0)) >>> 0
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0
-    return s / 4294967296
-  }
-}
-
-/** 中心(cx,cy)のまわりに、少しゆがんだ円（食材の塊）を描くパス */
-function blob(rand, cx, cy, r, fill, opacity = 1) {
-  const points = 9
-  const parts = []
-  for (let i = 0; i < points; i++) {
-    const angle = (Math.PI * 2 * i) / points
-    const radius = r * (0.82 + rand() * 0.32)
-    const x = cx + Math.cos(angle) * radius
-    const y = cy + Math.sin(angle) * radius
-    parts.push(`${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`)
-  }
-  return `<path d="${parts.join(' ')}Z" fill="${fill}" opacity="${opacity}"/>`
-}
-
-/** 料理ごとの絵柄。table=卓の色 / vessel=器の色 / items=器の上に散らす食材 */
-const DISHES = {
-  curry: {
-    table: '#c9b090',
-    vessel: '#fffdf8',
-    items: [
-      { n: 1, color: '#ede0bd', r: 62, cx: -34, cy: 4 },
-      { n: 1, color: '#8a4a1c', r: 60, cx: 34, cy: 4 },
-      { n: 4, color: '#c8791f', r: 12, cx: 36, cy: 6, spread: 34 },
-      { n: 3, color: '#e8cf92', r: 11, cx: 30, cy: -14, spread: 30 },
-    ],
-  },
-  hamburg: {
-    table: '#bfa98a',
-    vessel: '#fffdf8',
-    items: [
-      { n: 1, color: '#6b3d21', r: 56, cx: -8, cy: 6 },
-      { n: 1, color: '#4a2715', r: 44, cx: -8, cy: 10 },
-      { n: 3, color: '#4f7a35', r: 17, cx: 52, cy: -26, spread: 22 },
-      { n: 2, color: '#d97a20', r: 14, cx: 48, cy: 34, spread: 20 },
-    ],
-  },
-  nikujaga: {
-    table: '#c0a882',
-    vessel: '#efe6d5',
-    items: [
-      { n: 3, color: '#e7d59a', r: 26, cx: -18, cy: -6, spread: 34 },
-      { n: 3, color: '#c8791f', r: 17, cx: 26, cy: 18, spread: 30 },
-      { n: 3, color: '#7b4a2a', r: 20, cx: 14, cy: -24, spread: 30 },
-      { n: 3, color: '#5d8b3a', r: 9, cx: 0, cy: 30, spread: 34 },
-    ],
-  },
-  salmon: {
-    table: '#c9b090',
-    vessel: '#fffdf8',
-    items: [
-      { n: 1, color: '#d97a52', r: 58, cx: -6, cy: 2 },
-      { n: 3, color: '#e8a184', r: 10, cx: -6, cy: 2, spread: 40 },
-      { n: 1, color: '#e8c93c', r: 20, cx: 54, cy: 40 },
-      { n: 2, color: '#4f7a35', r: 14, cx: -46, cy: 44, spread: 18 },
-    ],
-  },
-  mabo: {
-    table: '#b8a184',
-    vessel: '#f3ece0',
-    items: [
-      { n: 1, color: '#a8391c', r: 66, cx: 0, cy: 4 },
-      { n: 6, color: '#f5f0e2', r: 15, cx: 0, cy: 4, spread: 44 },
-      { n: 5, color: '#5d8b3a', r: 7, cx: 0, cy: -8, spread: 46 },
-    ],
-  },
-  napolitan: {
-    table: '#c9b090',
-    vessel: '#fffdf8',
-    items: [
-      { n: 10, color: '#d4641f', r: 17, cx: 0, cy: 2, spread: 46 },
-      { n: 6, color: '#e07c2c', r: 12, cx: 4, cy: -6, spread: 48 },
-      { n: 3, color: '#4f7a35', r: 12, cx: -20, cy: 26, spread: 34 },
-      { n: 3, color: '#b8452c', r: 11, cx: 26, cy: -22, spread: 30 },
-    ],
-  },
-  tonjiru: {
-    table: '#b8a184',
-    vessel: '#4a3328',
-    items: [
-      { n: 1, color: '#a97b46', r: 62, cx: 0, cy: 2 },
-      { n: 3, color: '#efe6d5', r: 14, cx: -14, cy: 6, spread: 40 },
-      { n: 3, color: '#c8791f', r: 11, cx: 20, cy: -6, spread: 36 },
-      { n: 4, color: '#5d8b3a', r: 7, cx: 0, cy: 10, spread: 40 },
-    ],
-  },
-  karaage: {
-    table: '#c9b090',
-    vessel: '#fffdf8',
-    items: [
-      { n: 5, color: '#b9762a', r: 26, cx: 4, cy: 4, spread: 38 },
-      { n: 4, color: '#d29a4c', r: 15, cx: 4, cy: -2, spread: 36 },
-      { n: 2, color: '#6f9b46', r: 20, cx: -46, cy: 40, spread: 18 },
-      { n: 1, color: '#e8c93c', r: 17, cx: 52, cy: 42 },
-    ],
-  },
-  potatosalad: {
-    table: '#c0a882',
-    vessel: '#f3ece0',
-    items: [
-      { n: 1, color: '#f0e3c4', r: 62, cx: 0, cy: 4 },
-      { n: 4, color: '#c8791f', r: 8, cx: 0, cy: 0, spread: 40 },
-      { n: 4, color: '#6f9b46', r: 10, cx: 4, cy: 10, spread: 42 },
-    ],
-  },
-  oyakodon: {
-    table: '#b8a184',
-    vessel: '#3f5a4a',
-    items: [
-      { n: 1, color: '#f7f2e4', r: 64, cx: 0, cy: 4 },
-      { n: 1, color: '#e8b93c', r: 52, cx: 2, cy: 2 },
-      { n: 4, color: '#c88a3a', r: 15, cx: 0, cy: 4, spread: 34 },
-      { n: 3, color: '#5d8b3a', r: 8, cx: 0, cy: -6, spread: 36 },
-    ],
-  },
-}
-
-/** 1品ぶんのSVGを組み立てる */
-function buildSvg(key, dish) {
-  const rand = makeRandom(key)
-  const c = SIZE / 2
-  const parts = []
-  parts.push(`<rect width="${SIZE}" height="${SIZE}" fill="${dish.table}"/>`)
-  // 卓の質感（濃淡の帯）
-  for (let i = 0; i < 6; i++) {
-    const y = rand() * SIZE
-    parts.push(
-      `<rect x="0" y="${y.toFixed(1)}" width="${SIZE}" height="${(6 + rand() * 14).toFixed(1)}" fill="#000" opacity="0.035"/>`,
-    )
-  }
-  // 器の影と器
-  parts.push(`<ellipse cx="${c + 3}" cy="${c + 6}" rx="104" ry="104" fill="#000" opacity="0.12"/>`)
-  parts.push(`<circle cx="${c}" cy="${c}" r="102" fill="${dish.vessel}"/>`)
-  parts.push(
-    `<circle cx="${c}" cy="${c}" r="102" fill="none" stroke="#000" stroke-opacity="0.08" stroke-width="3"/>`,
-  )
-  parts.push(`<circle cx="${c}" cy="${c}" r="86" fill="#000" opacity="0.04"/>`)
-  // 食材
-  for (const item of dish.items) {
-    for (let i = 0; i < item.n; i++) {
-      const spread = item.spread ?? 0
-      const angle = rand() * Math.PI * 2
-      const dist = spread === 0 ? 0 : spread * (0.35 + rand() * 0.65)
-      const cx = c + item.cx + Math.cos(angle) * dist
-      const cy = c + item.cy + Math.sin(angle) * dist
-      parts.push(blob(rand, cx, cy, item.r * (0.85 + rand() * 0.3), item.color))
-      // 上面のハイライト（立体感）
-      parts.push(
-        blob(rand, cx - item.r * 0.2, cy - item.r * 0.28, item.r * 0.42, '#ffffff', 0.14),
-      )
-    }
-  }
-  // 全体の光（左上から）
-  parts.push(
-    `<radialGradient id="lg" cx="30%" cy="24%" r="80%"><stop offset="0%" stop-color="#fff" stop-opacity="0.18"/><stop offset="100%" stop-color="#000" stop-opacity="0.14"/></radialGradient>`,
-    `<rect width="${SIZE}" height="${SIZE}" fill="url(#lg)"/>`,
-  )
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">${parts.join('')}</svg>`
+const missing = KEYS.filter((k) => !fs.existsSync(path.join(PHOTO_DIR, `${k}.jpg`)))
+if (missing.length > 0) {
+  console.error(`原本が見つかりません: ${missing.join(', ')}`)
+  console.error(`置き場: ${PHOTO_DIR}（取り直し方はこのファイル冒頭のコメントを参照）`)
+  console.error('public/demo/*.webp は書き換えずに終了します。')
+  process.exit(1)
 }
 
 let total = 0
 const rows = []
-for (const [key, dish] of Object.entries(DISHES)) {
-  const replacement = path.join(PHOTO_DIR, `${key}.jpg`)
-  const source = fs.existsSync(replacement)
-    ? sharp(replacement).resize(SIZE, SIZE, { fit: 'cover' })
-    : sharp(Buffer.from(buildSvg(key, dish)))
-  const webp = await source.webp({ quality: 72, effort: 6 }).toBuffer()
+for (const key of KEYS) {
+  const src = path.join(PHOTO_DIR, `${key}.jpg`)
+  let image = sharp(src)
+  const crop = CROPS[key]
+  if (crop) {
+    const [left, top, side] = crop
+    image = image.extract({ left, top, width: side, height: side })
+  }
+  const webp = await image
+    .resize(SIZE, SIZE, { fit: 'cover' })
+    .webp({ quality: 72, effort: 6 })
+    .toBuffer()
   fs.writeFileSync(path.join(OUT_DIR, `${key}.webp`), webp)
   total += webp.length
-  rows.push([key, webp.length, fs.existsSync(replacement) ? '写真(差し替え)' : 'イラスト(自前)'])
+  rows.push([key, webp.length, crop ? `切り出し指定 ${crop.join(',')}` : '中央から正方形'])
 }
 
-for (const [key, size, kind] of rows) {
-  console.log(`  ${key}.webp  ${(size / 1024).toFixed(1)}KB  ${kind}`)
+for (const [key, size, how] of rows) {
+  console.log(`  ${key}.webp  ${(size / 1024).toFixed(1)}KB  ${how}`)
 }
 console.log(`合計 ${(total / 1024).toFixed(1)}KB / ${rows.length}枚`)
 if (total > 200 * 1024) {
