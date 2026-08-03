@@ -1944,32 +1944,27 @@ export default function SettingsPage() {
               解錠済みコードはマスク表示+コピー(2026-07-17設定ゼロベース裁定#4)を添える */}
           <section id="pro-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.unlockTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.unlockDescription}</p>
 
-            {/* 精度開示①「購入案内の位置」(2026-08-02 便CP-2・docs/62 決定④)。
-                買う前に読んで買った＝合意にするため、購入と解錠の案内のすぐ下に置く。
-                解錠済みの人にも出し続ける（買ったあとに前提が消えるのは不誠実なので隠さない）。
-                ②（入力欄の直上）と同じ文をこの画面に2回出すことになるが、docs/62 決定④が
-                「購入ボタンの上」と「解錠コード入力画面」の2箇所を指定しているため両方に置く。
-                同じ段落が続けて並ばないよう、①はPro版カードの上に置いて間に情報を挟む */}
-            <p
-              data-testid="pro-accuracy-notice"
-              className="mt-[var(--space-sm)] text-xs text-ink-muted"
-            >
-              {ja.settings.unlockAccuracyNotice}
-            </p>
+            {settings.proCode ? (
+              /* ===== 解錠済み(2026-08-03 便DNの再構成では触っていない) ===== */
+              <>
+                <p className="mt-1 text-sm text-ink-muted">{ja.settings.unlockDescription}</p>
 
-            <ul className="mt-[var(--space-sm)] rounded-md border border-edge bg-app">
-              {/* Pro版の行 */}
-              <li className="px-[var(--space-sm)] py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold">{ja.settings.proTitle}</span>
-                  {!settings.proCode && (
-                    <span className="shrink-0 text-sm text-ink-muted">{ja.settings.unlockStatusInactive}</span>
-                  )}
-                </div>
-                {settings.proCode ? (
-                  <>
+                {/* 精度開示(2026-08-02 便CP-2・docs/62 決定④)。解錠済みの人にも出し続ける
+                    （買ったあとに前提が消えるのは不誠実なので隠さない） */}
+                <p
+                  data-testid="pro-accuracy-notice"
+                  className="mt-[var(--space-sm)] text-xs text-ink-muted"
+                >
+                  {ja.settings.unlockAccuracyNotice}
+                </p>
+
+                <ul className="mt-[var(--space-sm)] rounded-md border border-edge bg-app">
+                  {/* Pro版の行 */}
+                  <li className="px-[var(--space-sm)] py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold">{ja.settings.proTitle}</span>
+                    </div>
                     <p className="mt-1 text-sm font-bold text-accent-ink">{ja.settings.proActivatedTitle}</p>
                     {settings.proActivatedAt && (
                       <p className="mt-0.5 text-xs text-ink-muted">
@@ -1977,68 +1972,75 @@ export default function SettingsPage() {
                       </p>
                     )}
                     <UnlockCodeDisplay code={settings.proCode} />
-                  </>
-                ) : (
-                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
-                )}
-              </li>
-            </ul>
+                  </li>
+                </ul>
 
-            {/* 購入導線(2026-08-02 便DD・発売と同時)。決済ページ(Stripe)は別サイトなので新しいタブで
-                開く(アプリを閉じずに戻ってこられる)。解錠済みの人には出さない。
-                精度開示(pro-accuracy-notice)はこのボタンより上にある＝docs/62 決定④の
-                「購入ボタンの上」を満たす。特商法表記は購入ボタンのそばに置く */}
-            {!settings.proCode && (
-              <div className="mt-[var(--space-md)]">
+                {/* Pro解錠直後に「何が使えるようになったか」を控えめに案内する(2026-07-09ペルソナ第2波)。
+                    解錠中ずっと表示され続ける(2026-07-13 UI改善) */}
+                <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
+                  <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
+                  {/* 機能名だけでなく「どこを開けば見られるか」と、その画面への入口を添える
+                      (2026-07-28 便BY/DISC-01。8項目表・期間の集計は数手先にあり到達しにくかった) */}
+                  <ul className="mt-1 space-y-2 text-sm">
+                    {ja.settings.proActivatedFeatures.map((feature) => (
+                      <li key={feature.label}>
+                        <p className="font-bold">・{feature.label}</p>
+                        <p className="text-sm text-ink-muted">{feature.hint}</p>
+                        {feature.to && feature.linkLabel && (
+                          <Link to={feature.to} className="text-sm font-bold text-accent-ink underline">
+                            {feature.linkLabel}
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            ) : (
+              /* ===== 未解錠(2026-08-03 オーナー指示・便DNで1枠に再構成) =====
+                 指示: 「解錠コードの入力欄がわかりづらい。購入とコード入力欄は隣り合わせにして。
+                 機能説明は最低限にして一つの枠内に収める」。
+                 並びは (1)Pro版の一言 (2)精度開示 (3)購入ボタン (4)解錠コード入力欄 (5)購入後の手順
+                 (6)説明リンク。(3)と(4)の間には何も挟まない＝「買う→すぐ下に入力」の動線。
+                 機能の詳しい説明と月間サンプルの入口は、この枠の外へ下げた(下記) */
+              <>
+                <p className="mt-1 text-sm">{ja.settings.proLead}</p>
+
+                {/* 精度開示(2026-08-02 便CP-2・docs/62 決定④)。「購入ボタンの上」と
+                    「解錠コード入力欄の直上」の両方を満たす位置に1つだけ置く
+                    (購入ボタンと入力欄が隣り合わせになったため、同じ文を2回出すと
+                     枠の中で同じ段落が続けて並んでしまう) */}
+                <p
+                  data-testid="pro-accuracy-notice"
+                  className="mt-[var(--space-sm)] text-xs text-ink-muted"
+                >
+                  {ja.settings.unlockAccuracyNotice}
+                </p>
+
+                {/* 早期価格の注記(2026-08-03 オーナー指示)。購入ボタンのすぐ上に1行だけ置く
+                    (ボタンと入力欄の間には何も挟まないため、注記は上側)。
+                    正式版の金額はアプリには書かない＝対外表記は早期価格のみ */}
+                <p
+                  data-testid="pro-early-price-note"
+                  className="mt-[var(--space-sm)] text-xs text-ink-muted"
+                >
+                  {ja.settings.proEarlyPriceNote}
+                </p>
+
+                {/* 購入導線(2026-08-02 便DD・発売と同時)。決済ページ(Stripe)は別サイトなので
+                    新しいタブで開く(アプリを閉じずに戻ってこられる) */}
                 <a
                   href={PRO_PURCHASE_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   data-testid="pro-buy-link"
-                  className="flex w-full items-center justify-center rounded-md bg-accent px-4 py-3 text-center font-bold text-on-accent shadow-sm"
+                  className="mt-[var(--space-sm)] flex w-full items-center justify-center rounded-md bg-accent px-4 py-3 text-center font-bold text-on-accent shadow-sm"
                 >
                   {ja.settings.proBuyLabel}
                 </a>
-                <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.settings.proBuyNote}</p>
-                <a
-                  href="/about/tokushoho.html"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-block text-xs text-ink-muted underline"
-                >
-                  {ja.settings.proBuyLegalLink}
-                </a>
-              </div>
-            )}
 
-            {/* 月間画面のサンプルデモ(2026-08-02 便DC)。買う前に、月の画面そのものを見本のデータ入りで
-                確かめられる。解錠済みの人は本物の月タブが使えるので出さない */}
-            {!settings.proCode && (
-              <div className="mt-[var(--space-sm)]">
-                <Link
-                  to="/month-demo?back=%2Fsettings%3Fsection%3Dpro"
-                  data-testid="settings-month-demo-link"
-                  className="inline-flex items-center justify-center rounded-md border border-accent bg-app px-4 py-3 font-bold text-accent-ink shadow-sm"
-                >
-                  {ja.settings.monthDemoLink}
-                </Link>
-                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
-              </div>
-            )}
-
-            {/* 未解錠ならコード入力を出す。Pro解錠済みなら入力の必要が無いため入力欄自体を隠す */}
-            {!settings.proCode && (
-              <div className="mt-[var(--space-md)]">
-                {/* 精度開示②「解錠コード入力欄の直上」(2026-08-02 便CP-2・docs/62 決定④)。
-                    購入導線と解錠導線は別々に辿られるため、同じ文を両方に置く（片方だけだと
-                    購入ページから直接コードを入れた人が読まないまま解錠してしまう） */}
-                <p
-                  data-testid="unlock-accuracy-notice"
-                  className="mb-[var(--space-sm)] text-xs text-ink-muted"
-                >
-                  {ja.settings.unlockAccuracyNotice}
-                </p>
-                <div className="flex gap-[var(--space-sm)]">
+                {/* 解錠コード入力欄。購入ボタンの直後に置く(間に要素を入れない・便DN) */}
+                <div data-testid="unlock-code-row" className="mt-[var(--space-sm)] flex gap-[var(--space-sm)]">
                   <input
                     type="text"
                     value={unlockCodeInput}
@@ -2059,32 +2061,57 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 {unlockError && <p className="mt-1 text-sm font-bold text-warning">{unlockError}</p>}
-              </div>
-            )}
 
-            {/* Pro解錠直後に「何が使えるようになったか」を控えめに案内する(2026-07-09ペルソナ第2波)。
-                解錠中ずっと表示され続ける(2026-07-13 UI改善) */}
-            {settings.proCode && (
-              <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
-                <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
-                {/* 機能名だけでなく「どこを開けば見られるか」と、その画面への入口を添える
-                    (2026-07-28 便BY/DISC-01。8項目表・期間の集計は数手先にあり到達しにくかった) */}
-                <ul className="mt-1 space-y-2 text-sm">
-                  {ja.settings.proActivatedFeatures.map((feature) => (
-                    <li key={feature.label}>
-                      <p className="font-bold">・{feature.label}</p>
-                      <p className="text-sm text-ink-muted">{feature.hint}</p>
-                      {feature.to && feature.linkLabel && (
-                        <Link to={feature.to} className="text-sm font-bold text-accent-ink underline">
-                          {feature.linkLabel}
-                        </Link>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.settings.proBuyNote}</p>
+
+                {/* 説明リンク1本と特商法表記(特商法表記は購入ボタンと同じ枠内に置く) */}
+                <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-x-[var(--space-md)] gap-y-1">
+                  <a
+                    href="/about/manual.html#pro"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="pro-detail-link"
+                    className="text-sm font-bold text-accent-ink underline"
+                  >
+                    {ja.settings.proDetailLink}
+                  </a>
+                  <a
+                    href="/about/tokushoho.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-ink-muted underline"
+                  >
+                    {ja.settings.proBuyLegalLink}
+                  </a>
+                </div>
+              </>
             )}
           </section>
+
+          {/* 機能説明とお試しの入口は枠の外・小さく(2026-08-03 オーナー指示・便DN)。
+              「月間の献立をサンプルで見る」が枠の中でアクセント枠のボタンとして出ていたため、
+              解錠コードの入力欄より目立ってしまっていた。機能は消さずに、
+              説明は折りたたみ・サンプルの入口は文字リンクへ格下げする */}
+          {!settings.proCode && (
+            <div className="mt-[var(--space-sm)] px-[var(--space-md)]">
+              <details data-testid="pro-features-details">
+                <summary className="cursor-pointer text-sm text-ink-muted">
+                  {ja.settings.proFeaturesToggle}
+                </summary>
+                <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
+              </details>
+              <p className="mt-[var(--space-sm)]">
+                <Link
+                  to="/month-demo?back=%2Fsettings%3Fsection%3Dpro"
+                  data-testid="settings-month-demo-link"
+                  className="text-sm text-accent-ink underline"
+                >
+                  {ja.settings.monthDemoLink}
+                </Link>
+              </p>
+              <p className="mt-0.5 text-xs text-ink-muted">{ja.mealPlan.monthDemoLinkNote}</p>
+            </div>
+          )}
         </>
       </section>
 

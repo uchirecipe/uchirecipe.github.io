@@ -2548,9 +2548,35 @@ try {
         'UNLOCK-01(a) 「購入と解錠」カードがある',
         (await ulPage.textContent('body')).includes('購入と解錠'),
       )
+      // 2026-08-03 便DN: 未解錠の枠は「Pro版の一言→精度開示→購入ボタン→解錠コード入力欄」に
+      // 再構成した(旧「未解錠」バッジ付きのPro版行は撤去)。購入ボタンと入力欄の両方が
+      // 同じ枠にあり、解錠済みのお礼文言はまだ出ていないことで未解錠を判定する
       check(
-        'UNLOCK-01(a) 解錠前はPro版が「未解錠」表示(パック行は撤去済みで1つだけ)',
-        (await ulPage.getByText('未解錠').count()) === 1,
+        'UNLOCK-01(a) 未解錠のときは購入ボタンと解錠コード入力欄が同じ枠に出る(便DN)',
+        (await ulPage.locator('[data-testid="pro-buy-link"]').count()) === 1 &&
+          (await ulPage.locator('[data-testid="unlock-code-row"]').count()) === 1,
+      )
+      check(
+        'UNLOCK-01(a) 未解錠のときは解錠のお礼文言が出ない',
+        !(await ulPage.textContent('body')).includes('ご利用いただきありがとうございます'),
+      )
+      // オーナー指示(2026-08-03)の核: 購入ボタンとコード入力欄を隣り合わせにする。
+      // DOM上で購入ボタンの次の要素が入力欄の行であること＝間に他の要素を挟んでいないこと
+      check(
+        'UNLOCK-01(a) 購入ボタンの直後が解錠コード入力欄(間に他の要素を挟まない・便DN)',
+        await ulPage.evaluate(() => {
+          const buy = document.querySelector('[data-testid="pro-buy-link"]')
+          return buy?.nextElementSibling?.getAttribute('data-testid') === 'unlock-code-row'
+        }),
+      )
+      check(
+        'UNLOCK-01(a) 機能説明と月間サンプルの入口は「購入と解錠」の枠の外にある(便DN)',
+        await ulPage.evaluate(() => {
+          const card = document.querySelector('#pro-section')
+          const details = document.querySelector('[data-testid="pro-features-details"]')
+          const demo = document.querySelector('[data-testid="settings-month-demo-link"]')
+          return !!card && !!details && !!demo && !card.contains(details) && !card.contains(demo)
+        }),
       )
 
       const unlockInput = ulPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)')
@@ -8741,6 +8767,23 @@ try {
         'LAUNCH-02 購入ボタンのそばに特商法表記へのリンクがある',
         (await l2Page.locator('a[href="/about/tokushoho.html"]').count()) > 0,
       )
+      // 早期価格の注記(2026-08-03 オーナー指示・便DN)。購入ボタンのそばに1行だけ出し、
+      // 正式版の金額はアプリには書かない(対外表記は早期価格のみ)
+      check(
+        'LAUNCH-02 購入ボタンのそばに「800円は早期価格」の1行が出る',
+        ((await l2Page.locator('[data-testid="pro-early-price-note"]').textContent()) ?? '').includes(
+          '早期価格',
+        ) &&
+          (await l2Page.evaluate(() => {
+            const note = document.querySelector('[data-testid="pro-early-price-note"]')
+            const buy = document.querySelector('[data-testid="pro-buy-link"]')
+            return note?.nextElementSibling === buy
+          })),
+      )
+      check(
+        'LAUNCH-02 アプリには正式版の金額を書かない(早期価格の表記のみ)',
+        !/1[,，]?500\s*円/.test(settingsText),
+      )
 
       // お知らせ(public/news.json)の最新が発売の告知になっている
       const news = await l2Page.evaluate(async () => {
@@ -14170,8 +14213,9 @@ try {
     }
   }
 
-  // --- DISCLOSE-01: 購入前の精度開示2箇所（docs/62 決定④）。
-  // 設定のPro節（購入案内の位置）と、解錠コード入力欄の直上の両方に同じ開示が出ること。
+  // --- DISCLOSE-01: 購入前の精度開示（docs/62 決定④「購入ボタンの上」と「解錠コード入力画面」）。
+  // 2026-08-03 便DN で購入ボタンと解錠コード入力欄が隣り合わせになったため、開示は1つで
+  // 両方の位置条件を満たす（開示 → 購入ボタン → 入力欄 の順に並んでいること）。
   // 断定・脅しの文体になっていないこと。 ---
   currentCheck = 'DISCLOSE-01'
   {
@@ -14183,12 +14227,7 @@ try {
       await d1Page.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
       await d1Page.waitForTimeout(1500)
       const d1Notice = (await d1Page.locator('[data-testid="pro-accuracy-notice"]').textContent()) ?? ''
-      const d1UnlockNotice =
-        (await d1Page.locator('[data-testid="unlock-accuracy-notice"]').textContent()) ?? ''
-      for (const [label, text] of [
-        ['購入案内の位置', d1Notice],
-        ['解錠コード入力欄の直上', d1UnlockNotice],
-      ]) {
+      for (const [label, text] of [['購入案内の位置', d1Notice]]) {
         check(
           `DISCLOSE-01 ${label}に「概算」であることが書かれている`,
           text.includes('概算'),
@@ -14205,7 +14244,21 @@ try {
           `text=${text}`,
         )
       }
-      check('DISCLOSE-01 2箇所の開示は同じ文言', d1Notice.trim() === d1UnlockNotice.trim())
+      // 開示 → 購入ボタン → 解錠コード入力欄 の順に並ぶ＝docs/62 決定④の2箇所を1つの開示で満たす
+      check(
+        'DISCLOSE-01 開示は購入ボタンより上、かつ解錠コード入力欄より上にある(便DN)',
+        await d1Page.evaluate(() => {
+          const notice = document.querySelector('[data-testid="pro-accuracy-notice"]')
+          const buy = document.querySelector('[data-testid="pro-buy-link"]')
+          const row = document.querySelector('[data-testid="unlock-code-row"]')
+          if (!notice || !buy || !row) return false
+          const before = Node.DOCUMENT_POSITION_FOLLOWING
+          return (
+            (notice.compareDocumentPosition(buy) & before) !== 0 &&
+            (notice.compareDocumentPosition(row) & before) !== 0
+          )
+        }),
+      )
       // 解錠済みでも購入案内側の開示は残す（買ったあとに前提が消えない）
       await d1Page.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
@@ -14234,8 +14287,9 @@ try {
         await d1Page.locator('[data-testid="pro-accuracy-notice"]').isVisible(),
       )
       check(
-        'DISCLOSE-01 解錠後は入力欄ごと開示も消える（入力欄が無いため）',
-        (await d1Page.locator('[data-testid="unlock-accuracy-notice"]').count()) === 0,
+        'DISCLOSE-01 解錠後は購入ボタンと入力欄が消える（買う必要が無いため）',
+        (await d1Page.locator('[data-testid="pro-buy-link"]').count()) === 0 &&
+          (await d1Page.locator('[data-testid="unlock-code-row"]').count()) === 0,
       )
     } finally {
       await d1Browser.close()
