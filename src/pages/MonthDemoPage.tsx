@@ -73,7 +73,12 @@ export default function MonthDemoPage() {
         </div>
       </div>
       {data ? (
-        <MealPlanPage demo={data} />
+        <>
+          <MealPlanPage demo={data} />
+          <p className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-md)] text-xs text-ink-muted">
+            {ja.mealPlan.monthDemoPhotoCredit}
+          </p>
+        </>
       ) : (
         <p className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)] text-sm text-ink-muted">
           {ja.mealPlan.monthDemoLoading}

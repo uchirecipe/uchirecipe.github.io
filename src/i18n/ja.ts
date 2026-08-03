@@ -444,6 +444,7 @@ export const ja = {
     monthDemoLink: 'サンプルで見る',
     monthDemoLinkNote: '見本の1か月分を入れた月の画面を、何度でも開けます',
     monthDemoBannerTitle: 'サンプルデータを表示中',
+    monthDemoPhotoCredit: '写真素材: ぱくたそ（pakutaso.com）',
     monthDemoBannerNote: '見本の1か月分です。ご自分のレシピ・記録・献立は変わりません',
     // 見本データを組み立てている数百ミリ秒のあいだだけ出る（写真の読み込みを待つ）
     monthDemoLoading: 'サンプルを準備しています',
