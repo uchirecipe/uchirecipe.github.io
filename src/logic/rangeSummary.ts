@@ -24,6 +24,12 @@
  *    実績側が記録した人数でスケールした金額（cookedHouseholdYen）を出しているのと同じ考え方で、
  *    規則1の「1人分」は栄養と対の数字なのでいっさい変えない（1人分と食数ぶんを別の値として並べる）。
  *
+ * 2026-08-03 便DQ（オーナー指示「価格は一人分と食数、全員分と食数、1日あたりの平均食費、を表で出す」）
+ * で規則4が加わった:
+ *  規則4（1日あたりの平均の分母）: 作った記録がある日数で割る（cookedDayCount）。実績は過ぎた日にしか
+ *    無いので暦日数で割ると当月は必ず極端に小さい額になる。分子(cookedHouseholdYen)と分母を同じ料理から
+ *    数え、画面の表でも「全員分 ÷ 作った記録のある◯日」と分母を書いて検算できるようにする。
+ *
  * 集計自体は栄養(nutrition.ts)と食費(priceEstimate.ts)の既存ロジックを組み合わせるだけで、
  * この層は「どの日をどちらの基準で数えるか」と「1人分の合計」に責任を持つ純関数だけを置く。
  * 金額・栄養はあくまで概算・めやす（医療・効能の文脈では使わない）。
@@ -132,6 +138,15 @@ export interface RangeIntakeSummary {
   planHouseholdYen: number
   /** これから作る予定の食数（延べ人数。3人分作る予定は3食）。cookedMealCountと対 */
   planMealCount: number
+  /**
+   * 作った記録がある日数（実績側・同じ日に何品作っても1日。2026-08-03 便DQ）。
+   * 月タブの表に出す「1日あたりの平均」の分母。暦日数で割ると、実績が過ぎた日にしか無い当月は
+   * 必ず極端に小さい額になる。cookedHouseholdYen とまったく同じ料理から数えるので、
+   * 画面上で「全員分 ÷ この日数 ＝ 1日あたりの平均」を検算できる。
+   */
+  cookedDayCount: number
+  /** cookedHouseholdYen を cookedDayCount で割った1日あたりの金額（円・記録が1日も無ければ0） */
+  cookedPerDayYen: number
 }
 
 /**
@@ -203,6 +218,8 @@ export function summarizeRangeIntake(input: {
     priceIndex,
   )
   const planNutrition = sumPersonalNutrition(planDishes.map((d) => d.recipe))
+  // 「1日あたりの平均」の分母（便DQ）。同じ日に3品作っても1日として数える
+  const cookedDayCount = new Set(actualDishes.map((d) => d.date)).size
 
   const actual: RangeBasisPart = {
     dishCount: actualCost.dishCount,
@@ -225,6 +242,8 @@ export function summarizeRangeIntake(input: {
     cookedMealCount: actualCost.count,
     planHouseholdYen: planCost.total,
     planMealCount: planCost.count,
+    cookedDayCount,
+    cookedPerDayYen: cookedDayCount > 0 ? Math.round(actualCost.total / cookedDayCount) : 0,
   }
 }
 

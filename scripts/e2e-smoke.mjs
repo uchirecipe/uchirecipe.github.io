@@ -6124,7 +6124,7 @@ try {
       )
       // 2026-07-30 便CH/C3: 写真モードでは記録の印が出るのに、数字モードに切り替えると
       // 印ごと消えていた(同じ画面で「記録はある/数字には無い」が同居して見える)。
-      // 便CH/C8: 家族の実支出(作った人数ぶん)は内訳を開かずに読めるところへ上げた
+      // 便CH/C8: 家族の実支出(作った食数ぶん)は内訳を開かずに読めるところへ上げた
       await plPage.getByRole('button', { name: '食費', exact: true }).click()
       await plPage.waitForTimeout(400)
       check(
@@ -6133,11 +6133,13 @@ try {
           .locator(`button[data-date="${plYesterday}"][aria-label*="作った記録あり"]`)
           .count()) === 1,
       )
-      const plMonthText = (await plPage.textContent('body')) ?? ''
+      // 2026-08-03 便DQ: 常設1行だった全体食費は、食費の表の「全員分／作った食数ぶん」の行になった
+      const plMonthTable =
+        (await plPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
       check(
-        'PASTLOG-01(便CH/C8) 月間サマリーに「作った記録（過ぎた日）は、作った人数ぶんで…」が常設で出る',
-        /作った記録（過ぎた日）は、作った人数ぶんで約[\d,]+円（のべ\d+食分）/.test(plMonthText),
-        `本文=${plMonthText.match(/作った記録（過ぎた日）[^。]{0,40}/)?.[0]}`,
+        'PASTLOG-01(便CH/C8・便DQ) 月の食費の表に「全員分／作った食数ぶん」が内訳を開かずに出る',
+        /全員分作った食数ぶん約[\d,]+円のべ\d+食/.test(plMonthTable),
+        `表=${plMonthTable.slice(0, 200)}`,
       )
       // 以降の「記録あり」マーク経由のタップのため写真モードへ戻す
       await plPage.getByRole('button', { name: '写真', exact: true }).click()
@@ -6394,9 +6396,9 @@ try {
         !/1食あたり 約[\d,]+円/.test(rcFutureText),
       )
       check(
-        // 2026-07-30 便CH/C8: ラベルを「作った記録の食費（作った人数ぶん）」に言い換えた
-        'MEALPLAN-07(便CA) 未来だけの期間には「作った記録の食費（作った人数ぶん）」を出さない',
-        !rcFutureText.includes('作った記録の食費（作った人数ぶん）'),
+        // 2026-07-30 便CH/C8＋2026-08-03 便DQ: ラベルは「作った記録の食費（作った食数ぶん）」
+        'MEALPLAN-07(便CA) 未来だけの期間には「作った記録の食費（作った食数ぶん）」を出さない',
+        !rcFutureText.includes('作った記録の食費（作った食数ぶん）'),
       )
       check(
         'MEALPLAN-07(便CA①) 「期間内に摂取できた栄養（1人分）」が8項目で出る',
@@ -6461,12 +6463,13 @@ try {
         `内訳=${rcPastText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
-        // 2026-07-30 便CH/C8: 「全体」→「作った人数ぶん」・「◯食分」→「のべ◯食分」
-        'MEALPLAN-07(便CA) オーナー指示で残す「作った記録の食費（作った人数ぶん）約◯円（のべ◯食分）」が出る',
+        // 2026-07-30 便CH/C8: 「全体」→数え方を言い切る・「◯食分」→「のべ◯食分」
+        // 2026-08-03 便DQ: 予定側「作る食数ぶん」と語をそろえて「作った食数ぶん」に統一
+        'MEALPLAN-07(便CA) オーナー指示で残す「作った記録の食費（作った食数ぶん）約◯円（のべ◯食分）」が出る',
         rcPastText.includes(
-          `作った記録の食費（作った人数ぶん）約${rcSingleCost.toLocaleString()}円（のべ${rcServings}食分）`,
+          `作った記録の食費（作った食数ぶん）約${rcSingleCost.toLocaleString()}円（のべ${rcServings}食分）`,
         ),
-        `全体=${rcPastText.match(/作った記録の食費（作った人数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
+        `全体=${rcPastText.match(/作った記録の食費（作った食数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品の栄養価を、1食分ずつ足して算出した数値です」',
@@ -7434,7 +7437,8 @@ try {
 
       // B-3: 期間を1日も選んでいない状態で、月間サマリーが最初から出ている
       const meNow = new Date()
-      const meThisMonthTitle = `${meNow.getMonth() + 1}月の食費と栄養（1人分）`
+      // 2026-08-03 便DQ: 見出しは「◯月の食費」と「◯月の栄養（1人分）」の2枚に分かれた
+      const meThisMonthTitle = `${meNow.getMonth() + 1}月の食費`
       const meBodyBefore = (await mePage.textContent('body')) ?? ''
       check(
         'MEALPLAN-A3B3(B-3) 期間を選ばなくても月間サマリーが月タブ上部に出ている',
@@ -7537,7 +7541,7 @@ try {
         `auto=${meSaved[0].auto}`,
       )
       // B-3: 予定を入れた翌月のサマリーに金額が出る(期間選択なし)
-      const meMonthTitle = `${meNext.getMonth() + 1}月の食費と栄養（1人分）`
+      const meMonthTitle = `${meNext.getMonth() + 1}月の食費`
       await meModal.locator('button[aria-label="閉じる"]').first().click()
       await mePage.waitForTimeout(400)
       const meBodyAfter = (await mePage.textContent('body')) ?? ''
@@ -7550,38 +7554,64 @@ try {
         'MEALPLAN-A3B3(B-3) 未来の月は「今日から先の期間なので、登録した献立で計算しています」と基準を明示する',
         meBodyAfter.includes('今日から先の期間なので、登録した献立で計算しています'),
       )
-      const meSummaryYen = /食費[\s\S]{0,40}?約([\d,]+)円/.exec(meBodyAfter)
+      // 2026-08-03 便DQ: 食費は表になった。1行目「一人分／献立を1食ずつ足した合計」の金額を読む
+      const meCostTable = mePage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first()
+      const meCostTableText = (await meCostTable.textContent()) ?? ''
+      const meSummaryYen = /1人分献立を1食ずつ足した合計約([\d,]+)円(\d+)食/.exec(meCostTableText)
       check(
-        'MEALPLAN-A3B3(B-3) 期間を選ばなくても1人分の食費が0円ではない金額で出る',
-        !!meSummaryYen && Number(meSummaryYen[1].replaceAll(',', '')) > 0,
-        `matched=${meSummaryYen?.[1]}`,
+        'MEALPLAN-A3B3(B-3・便DQ) 食費の表の「1人分」行に0円ではない金額と食数が出る',
+        !!meSummaryYen &&
+          Number(meSummaryYen[1].replaceAll(',', '')) > 0 &&
+          Number(meSummaryYen[2]) > 0,
+        `表=${meCostTableText.slice(0, 160)}`,
       )
       check(
         'MEALPLAN-A3B3(B-3) 内訳は既定で畳まれている(カレンダーを押し下げない)',
         !meBodyAfter.includes('内訳 作った記録'),
       )
-      // 2026-07-30 便CH/C4: 「1人あたり1日」の分母は月の日数。期間カードと違って日数の
-      // 文脈が無く、経過日数と勘違いされていたので月では分母を言い切る
-      const meMonthDays = new Date(meNext.getFullYear(), meNext.getMonth() + 1, 0).getDate()
+      // 2026-08-03 便DQ(オーナー指示「予定は合計と一人当たりの合計を下に」): 全部が今日から先の月は
+      // 実績の行が無く、「これから作る予定」の合計(作る食数ぶん)と一人当たりの合計だけが出る
       check(
-        'MEALPLAN-A3B3(便CH/C4) 「1人あたり1日」の分母(月の日数)を文言で言い切る',
-        new RegExp(
-          `${meNext.getMonth() + 1}月の${meMonthDays}日で割ると 1人あたり1日 約[\\d,]+円`,
-        ).test(meBodyAfter),
-        `本文=${meBodyAfter.match(/\d+月の\d+日で割ると[^。]{0,30}/)?.[0]}`,
+        'MEALPLAN-A3B3(便DQ) 未来の月は「これから作る予定」の全員分(作る食数ぶん)と1人分が表に出る',
+        /これから作る予定全員分作る食数ぶん約[\d,]+円のべ\d+食1人分献立を1食ずつ足した合計約[\d,]+円\d+食/.test(
+          meCostTableText,
+        ),
+        `表=${meCostTableText.slice(0, 240)}`,
+      )
+      check(
+        'MEALPLAN-A3B3(便DQ) 作った記録が無い月は「全員分(作った食数ぶん)」「1日あたりの平均」を出さない',
+        !meCostTableText.includes('作った食数ぶん') &&
+          !meCostTableText.includes('1日あたりの平均'),
+        `表=${meCostTableText.slice(0, 240)}`,
       )
       check(
         'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
-        meBodyAfter.includes('食材の目安価格や食品成分表をもとに自動計算した概算の数値です'),
+        meBodyAfter.includes('食材の目安価格をもとに自動計算した概算の数値です'),
+      )
+      // 2026-08-03 便DQ: 栄養は別カードになり、8項目は畳まずに出る(見出しは「◯月の栄養（1人分）」)
+      check(
+        'MEALPLAN-A3B3(便DQ) 栄養は食費と別のカードになり、8項目が畳まずに出ている',
+        meBodyAfter.includes(`${meNext.getMonth() + 1}月の栄養（1人分）`) &&
+          meBodyAfter.includes('たんぱく質') &&
+          meBodyAfter.includes('カルシウム'),
+      )
+      check(
+        'MEALPLAN-A3B3(便DQ) 栄養の長い但し書きと出典は折りたたみの中(既定では出さない)',
+        !meBodyAfter.includes('調理による変化などは反映しておらず') && !meBodyAfter.includes('出典: '),
+      )
+      await mePage.getByRole('button', { name: '注記と出典を見る' }).click()
+      await mePage.waitForTimeout(300)
+      check(
+        'MEALPLAN-A3B3(便DQ) 「注記と出典を見る」で概算の但し書きと成分表の出典が出る',
+        ((await mePage.textContent('body')) ?? '').includes('調理による変化などは反映しておらず') &&
+          ((await mePage.textContent('body')) ?? '').includes('出典: '),
       )
       await mePage.getByRole('button', { name: '内訳を見る' }).click()
       await mePage.waitForTimeout(300)
       const meBodyOpen = (await mePage.textContent('body')) ?? ''
       check(
-        'MEALPLAN-A3B3(B-3) 「内訳を見る」で栄養8項目と実績/予定の内訳が出る',
-        meBodyOpen.includes('この月に摂取できた栄養（1人分）') &&
-          meBodyOpen.includes('たんぱく質') &&
-          meBodyOpen.includes('内訳 作った記録'),
+        'MEALPLAN-A3B3(B-3) 「内訳を見る」で実績/予定の1人分の内訳が出る',
+        meBodyOpen.includes('内訳 作った記録'),
       )
       check(
         'MEALPLAN-A3B3(B-3) 常設サマリーも「概算・めやす」の但し書きを外さない',
@@ -14381,7 +14411,7 @@ try {
       const t2Body = (await t2Page.textContent('body')) ?? ''
       check(
         'TRIAL-02 お試しで本物の月タブが開く（ロック案内が消える）',
-        !t2Body.includes('1か月分の献立をカレンダーで') && t2Body.includes('月の食費と栄養'),
+        !t2Body.includes('1か月分の献立をカレンダーで') && t2Body.includes('月の食費'),
       )
       check(
         'TRIAL-02 表示中に「この画面がいつでも見られるようになります」を控えめに添える',
@@ -14476,9 +14506,27 @@ try {
       check(
         'DEMO-01 本物の月タブが見本のデータで開く（ロック案内は出ない）',
         !dmBody.includes('1か月分の献立をカレンダーで') &&
-          dmBody.includes('5月の食費と栄養') &&
+          dmBody.includes('5月の食費') &&
           dmBody.includes('5/1〜5/23は作った記録'),
         `body先頭=${dmBody.slice(0, 160)}`,
+      )
+      // 2026-08-03 便DQ: 食費の表(一人分・全員分・1日あたりの平均・これから作る予定)と、
+      // 別カードになった栄養の8項目が、見本の1か月でも数値としてそろって出る。
+      // 1日あたりの平均は「全員分 ÷ 作った記録のある◯日」＝画面の上だけで検算できる形で出す
+      const dmCostTable = (await dmPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
+      const dmPerDay = /全員分作った食数ぶん約([\d,]+)円のべ\d+食1日あたりの平均全員分÷作った記録のある(\d+)日約([\d,]+)円/.exec(dmCostTable)
+      check(
+        'DEMO-01(便DQ) 食費の表に「全員分」と「1日あたりの平均(全員分÷記録のある◯日)」が出て、割り算が合う',
+        !!dmPerDay &&
+          Math.round(Number(dmPerDay[1].replaceAll(',', '')) / Number(dmPerDay[2])) ===
+            Number(dmPerDay[3].replaceAll(',', '')),
+        `表=${dmCostTable.slice(0, 260)}`,
+      )
+      check(
+        'DEMO-01(便DQ) 栄養は「5月の栄養（1人分）」の別カードで、8項目が畳まずに出る',
+        dmBody.includes('5月の栄養（1人分）') &&
+          dmBody.includes('たんぱく質') &&
+          dmBody.includes('カルシウム'),
       )
       check(
         'DEMO-01 カレンダーに写真つきのセルが出る',

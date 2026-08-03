@@ -6220,6 +6220,89 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         { yen: 310, meals: 4 },
       )
     }
+    // 2026-08-03 便DQ: 月タブの食費の表に出す5つの数値が、手計算とそのまま一致すること。
+    // オーナー指示「価格は一人分（全ての献立を1食ずつ足した合計）と食数、全員分（実際に作った献立×
+    // 食数の合計）と食数、1日あたりの平均食費、を表で出す。予定は合計と一人当たりの合計を下に」。
+    // 表の行と1対1で対応させ、画面で「全員分 ÷ 作った記録のある日数 = 1日あたりの平均」を検算できること
+    // (規則4)も確かめる。想定する月(today=7/15):
+    //   作った記録 7/10 玉ねぎ3人分・7/10 鶏もも(人数の記録なし=登録2人分)・7/12 玉ねぎ2人分・
+    //             7/13 玉ねぎ2人分  → 3日ぶんの記録
+    //   登録した献立 7/20 鶏もも3人分・7/25 玉ねぎ4人分
+    {
+      const dqCooked = [
+        { date: '2026-07-10', recipe: onion2, log: { servings: 3 } }, // 50円×3/2=75円・3食
+        { date: '2026-07-10', recipe: chicken2 }, // 260円×2/2=260円・2食
+        { date: '2026-07-12', recipe: onion2, log: { servings: 2 } }, // 50円・2食
+        { date: '2026-07-13', recipe: onion2, log: { servings: 2 } }, // 50円・2食
+      ]
+      const dqPlanned = [
+        { date: '2026-07-20', recipe: chicken2, servings: 3 }, // 260円×3/2=390円・3食
+        { date: '2026-07-25', recipe: onion2, servings: 4 }, // 50円×4/2=100円・4食
+      ]
+      const dq = summarizeRangeIntake({
+        start: '2026-07-01',
+        end: '2026-07-31',
+        today: TODAY,
+        cooked: dqCooked,
+        planned: dqPlanned,
+        priceIndex: index,
+      })
+      eq(
+        'DQ-MONTH 表1行目「1人分」: 献立を1食ずつ足した合計(25+130+25+25 + 130+25=360円)と食数6',
+        { yen: dq.personalYen, meals: dq.actual.dishCount + dq.plan.dishCount },
+        { yen: 360, meals: 6 },
+      )
+      eq(
+        'DQ-MONTH 表2行目「全員分(作った食数ぶん)」: 75+260+50+50=435円・のべ9食',
+        { yen: dq.cookedHouseholdYen, meals: dq.cookedMealCount },
+        { yen: 435, meals: 9 },
+      )
+      eq(
+        'DQ-MONTH 1日あたりの平均の分母は「作った記録がある日数」(7/10に2品作っても1日)',
+        dq.cookedDayCount,
+        3,
+      )
+      eq(
+        'DQ-MONTH 表3行目「1日あたりの平均」= 全員分435円 ÷ 作った記録のある3日 = 145円',
+        dq.cookedPerDayYen,
+        Math.round(435 / 3),
+      )
+      eq(
+        'DQ-MONTH 予定の「合計」: 作る食数ぶん 390+100=490円・のべ7食',
+        { yen: dq.planHouseholdYen, meals: dq.planMealCount },
+        { yen: 490, meals: 7 },
+      )
+      eq(
+        'DQ-MONTH 予定の「1人分」(オーナー原文の「一人当たりの合計」): 130+25=155円・2品',
+        { yen: dq.plan.personalYen, dishes: dq.plan.dishCount },
+        { yen: 155, dishes: 2 },
+      )
+      eq(
+        'DQ-MONTH 1人分の合計は「実績の1人分＋予定の1人分」と必ず一致する(表の内訳が割れない)',
+        dq.actual.personalYen + dq.plan.personalYen,
+        dq.personalYen,
+      )
+      // 作った記録が1件も無い月(未来の月)は、全員分・1日あたりの行を出さない側に倒す。
+      // 0で割った値を出さないこと(分母0→0円と言い切らない=行ごと出さない判断の材料)
+      const dqFuture = summarizeRangeIntake({
+        start: '2026-07-16',
+        end: '2026-07-31',
+        today: TODAY,
+        cooked: dqCooked,
+        planned: dqPlanned,
+        priceIndex: index,
+      })
+      eq(
+        'DQ-MONTH 作った記録が無い期間は 記録日数0・1日あたり0(0除算しない)・全員分も0',
+        {
+          days: dqFuture.cookedDayCount,
+          perDay: dqFuture.cookedPerDayYen,
+          yen: dqFuture.cookedHouseholdYen,
+          meals: dqFuture.cookedMealCount,
+        },
+        { days: 0, perDay: 0, yen: 0, meals: 0 },
+      )
+    }
     // 2026-07-30 便CH/C2: 「価格が分からない材料◯種類」の注記は合計と同じ料理から数える。
     // rangeIntakeRecipes が summarizeRangeIntake と同じ切り分け(過去=記録・今日以降=予定)を返す
     eq(
