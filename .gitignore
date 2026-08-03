@@ -43,3 +43,7 @@ workers/purchase-fulfill/.dev.vars*
 
 # 使い方ページのスクショ撮影で使うデモ用の料理写真(ぱくたそ・再配布しないためコミットしない)
 .manual-photos/
+
+# 月間デモの写真の原本(ぱくたそ・再配布しないためコミットしない。
+# コミットするのは scripts/build-demo-photos.mjs が作る public/demo/*.webp だけ)
+.demo-photos/

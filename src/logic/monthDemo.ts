@@ -13,7 +13,8 @@
  *  - 見本の月は固定（2026年5月・その月の「今日」は5/24）。実時間で動かすと、
  *    月初に開いた人だけ記録がほとんど無い月を見ることになるため。
  *
- * 写真は public/demo/*.webp（自前のイラスト。出所と経緯は scripts/build-demo-photos.mjs 冒頭）。
+ * 写真は public/demo/*.webp（フリー素材サイト「ぱくたそ」の写真。出所・取得方法・
+ * 利用規約の確認は scripts/build-demo-photos.mjs 冒頭）。
  */
 import { starterDefs } from '../db/starters'
 import { PRICE_DEFAULTS } from '../data/priceDefaults'
