@@ -69,6 +69,10 @@ export function renderCodeEmailHtml(code: string): string {
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>
 <body style="margin:0;padding:24px 16px;background:#faf5ec;color:#43362a;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif;line-height:1.7;">
 <div style="max-width:420px;margin:0 auto;">
+<div style="text-align:center;margin:0 0 16px;">
+<img src="https://uchirecipe.com/apple-touch-icon.png" width="56" height="56" alt="うちレシピ" style="border-radius:12px;" />
+<p style="margin:6px 0 0;font-weight:700;">うちレシピ</p>
+</div>
 <p style="margin:0 0 16px;">うちレシピ Pro版をご購入いただきありがとうございます。</p>
 <p style="margin:0 0 8px;font-size:0.9rem;">解錠コード</p>
 <div style="background:#ffffff;border:2px solid #cc3f01;border-radius:12px;padding:20px 12px;text-align:center;margin:0 0 20px;">

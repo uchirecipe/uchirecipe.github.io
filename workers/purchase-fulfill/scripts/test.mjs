@@ -607,9 +607,13 @@ await asyncTest('メール文面: 件名・コード・入力手順3歩・精度
   }
 })
 
-await asyncTest('メール文面: HTML版は外部リソースを読み込まない(画像・スクリプト・外部CSS無し)', () => {
+await asyncTest('メール文面: 画像はうちレシピ自身のアイコン1枚のみ・スクリプト/外部CSS無し', () => {
   const html = renderCodeEmailHtml('UR-AAAA-1111')
-  assert.ok(!html.includes('<img'))
+  // メールはWorkerページと違い、data URIが使えない(Gmailが弾く)ため
+  // uchirecipe.com に置いた実アイコンを参照する(2026-08-03 オーナー指摘)
+  const imgs = html.match(/<img [^>]+>/g) ?? []
+  assert.equal(imgs.length, 1)
+  assert.ok(imgs[0].includes('src="https://uchirecipe.com/apple-touch-icon.png"'))
   assert.ok(!html.includes('<script'))
   assert.ok(!html.includes('<link'))
   // リンク先はうちレシピ自身のみ
