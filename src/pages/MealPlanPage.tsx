@@ -514,18 +514,28 @@ const intakeBasisText = (summary: RangeIntakeSummary): string =>
 function IntakeNutritionPanel({
   summary,
   label = ja.mealPlan.rangeIntakeNutritionLabel,
+  notes = 'full',
 }: {
   summary: RangeIntakeSummary
-  label?: string
+  /** null を渡すと見出しごと出さない（カードの見出しで既に言い切っている月タブ用・2026-08-03 便DQ） */
+  label?: string | null
+  /**
+   * 添える注記の量（2026-08-03 便DQ・規約H「長文は折りたたみ・表で構成する」）。
+   * 'full'=従来どおり（算出方法＋概算の但し書き＋出典まで）。
+   * 'brief'=数と警告だけ。長い但し書きと出典は呼び出し側の折りたたみ（NutritionSourceNotes）へ移す
+   */
+  notes?: 'full' | 'brief'
 }) {
   return (
     <div>
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm font-bold text-ink-muted">{label}</p>
-        <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
-          {ja.nutrition.estimateBadge}
-        </span>
-      </div>
+      {label !== null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-bold text-ink-muted">{label}</p>
+          <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
+            {ja.nutrition.estimateBadge}
+          </span>
+        </div>
+      )}
       <div
         className="mt-1 rounded-md border border-edge p-[var(--space-sm)]"
         style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
@@ -572,6 +582,20 @@ function IntakeNutritionPanel({
           )}
         </p>
       )}
+      {notes === 'full' && <NutritionSourceNotes />}
+    </div>
+  )
+}
+
+/**
+ * 栄養の数字の但し書きと出典（2026-08-03 便DQで部品化）。
+ * 期間の集計カードは従来どおり数値のすぐ下に置き、月タブの栄養カードは折りたたみの中に置く
+ * （オーナー指示「文字が多すぎ。ここでユーザーが見たいのは数値です」・規約H）。
+ * どちらの置き場所でも文面は同じで、出典を落とすことはしない。
+ */
+function NutritionSourceNotes() {
+  return (
+    <>
       <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.estimateNote}</p>
       <p className="mt-0.5 text-xs text-ink-muted">
         {ja.nutrition.sourcePrefix}
@@ -579,7 +603,7 @@ function IntakeNutritionPanel({
         {'　'}
         {ja.nutrition.sourceCommercialNote}
       </p>
-    </div>
+    </>
   )
 }
 
@@ -1387,7 +1411,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     [monthDatesList, today, monthCookedDishes, monthPlannedDishes, priceIndex],
   )
   const monthSummaryDishCount = monthSummary.actual.dishCount + monthSummary.plan.dishCount
-  const monthPersonalPerDay = Math.round(monthSummary.personalYen / monthDatesList.length)
   /**
    * 「価格が分からない材料◯種類を除いた概算です」の件数（2026-07-30 便CH/C2・C4）。
    * 週の概算食費にだけ入っていた注記（便CD/MP-11）を、月間サマリーと期間カードにも同じ作法で出す
@@ -1421,9 +1444,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       priceIndex,
     ).length
   }, [rangeStart, rangeEnd, today, monthCookedDishes, monthPlannedDishes, priceIndex])
-  // 内訳(8項目の栄養・実績/予定の分解・作った記録の全体食費)は既定で畳んでおく。
-  // 常設カードが画面上部を占領してカレンダーを押し下げないようにするため(数字自体は畳んでも見える)
+  // 食費の内訳(実績/予定の1人分の分解・価格の但し書き)は既定で畳んでおく。
+  // 常設カードが画面上部を占領してカレンダーを押し下げないようにするため(表の数値は畳んでも見える)
   const [monthSummaryOpen, setMonthSummaryOpen] = useState(false)
+  // 栄養の但し書きと出典も同じ理由で畳む(2026-08-03 便DQ・規約H。8項目の数値は常に見える)
+  const [monthNutritionNotesOpen, setMonthNutritionNotesOpen] = useState(false)
 
   /**
    * 月タブの「答え合わせ」（2026-08-02 便CP-2・docs/62 決定②）。
@@ -3864,18 +3889,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               </button>
             </div>
 
-            {/* 月間サマリー(2026-07-29 便CB-1・docs/59 B-3・常設)。期間を選ばなくても、
-                表示中の月の「1人が食べる分」の食費と栄養(エネルギー)がここに常に出る。
-                数え方は下の「期間の栄養と食費」と同一(過ぎた日=作った記録・今日から先=登録した献立)で、
-                栄養はPro解錠時のみ(既存のゲートと同じisNutritionUnlocked判定)。
-                内訳(8項目・実績/予定の分解・作った記録の全体食費)は既定で畳み、カレンダーを押し下げない */}
+            {/* 月の食費(2026-08-03 便DQ・オーナー指示「食費と栄養は完全に分けて表示したい。
+                文字が多すぎ。ここでユーザーが見たいのは数値です」)。
+                食費と栄養を別のカードに分け、食費は表で数値を主役にする。順序は食費→栄養。
+                数え方は下の「期間の栄養と食費」と同一(過ぎた日=作った記録・今日から先=登録した献立)。
+                価格の但し書きと1人分の内訳は既定で畳み、カレンダーを押し下げない */}
             <section className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-              <h2 className="font-bold">
-                {ja.mealPlan.monthSummaryTitle.replace(
-                  '{m}',
-                  String(Number(monthAnchor.slice(5, 7))),
-                )}
-              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-bold">
+                  {ja.mealPlan.monthCostTitle.replace(
+                    '{m}',
+                    String(Number(monthAnchor.slice(5, 7))),
+                  )}
+                </h2>
+                <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
+                  {ja.nutrition.estimateBadge}
+                </span>
+              </div>
               {monthSummaryDishCount === 0 ? (
                 // 2026-07-30 便CH/C3: 合計が0品でも「作った記録も献立もまだありません」と
                 // 言い切れるのは、その月に作った記録が1件も無いときだけ。今日の記録だけがある月は
@@ -3887,63 +3917,248 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </p>
               ) : (
                 <>
-                  <div className="mt-1 flex flex-wrap items-end gap-x-[var(--space-md)] gap-y-1">
-                    <div>
-                      <p className="text-xs text-ink-muted">{ja.mealPlan.monthSummaryCostLabel}</p>
-                      <p className="text-2xl font-bold text-accent-ink tabular-nums">
-                        約{monthSummary.personalYen.toLocaleString()}円
-                      </p>
-                    </div>
-                    {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
-                      <div>
-                        <p className="text-xs text-ink-muted">{ja.nutrition.kcalLabel}</p>
-                        <p className="text-2xl font-bold text-accent-ink tabular-nums">
-                          {formatNutrient('kcal', monthSummary.nutrition.total.kcal)}
-                        </p>
-                      </div>
+                  {/* 行の見出し＝何の数字か、その下の小さい字＝数え方。
+                      「1人分」は月ぜんぶ(過ぎた日の記録＋今日から先の献立)を1食ずつ足した合計、
+                      「全員分」は作った記録だけ＝実際に出ていった食費、と対象が違うので必ず書く */}
+                  <table className="mt-[var(--space-sm)] w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-edge text-xs text-ink-muted">
+                        <th scope="col" className="pb-1 text-left font-normal">
+                          {ja.mealPlan.monthCostColItem}
+                        </th>
+                        <th scope="col" className="pb-1 pl-2 text-right font-normal">
+                          {ja.mealPlan.monthCostColYen}
+                        </th>
+                        <th scope="col" className="pb-1 pl-2 text-right font-normal">
+                          {ja.mealPlan.monthCostColMeals}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-edge">
+                        <th scope="row" className="py-1.5 text-left align-top font-normal">
+                          <span className="block font-bold">
+                            {ja.mealPlan.monthCostRowPersonal}
+                          </span>
+                          <span className="block text-xs text-ink-muted">
+                            {ja.mealPlan.monthCostRowPersonalNote}
+                          </span>
+                        </th>
+                        <td className="py-1.5 pl-2 text-right align-top font-bold whitespace-nowrap text-accent-ink tabular-nums">
+                          {ja.mealPlan.monthCostYen.replace(
+                            '{n}',
+                            monthSummary.personalYen.toLocaleString(),
+                          )}
+                        </td>
+                        <td className="py-1.5 pl-2 text-right align-top whitespace-nowrap tabular-nums">
+                          {ja.mealPlan.monthCostMeals.replace('{n}', String(monthSummaryDishCount))}
+                        </td>
+                      </tr>
+                      {/* 家族の実支出。作った記録が1件も無い月(未来の月など)は行ごと出さない */}
+                      {monthSummary.cookedMealCount > 0 && (
+                        <>
+                          <tr className="border-b border-edge">
+                            <th scope="row" className="py-1.5 text-left align-top font-normal">
+                              <span className="block font-bold">
+                                {ja.mealPlan.monthCostRowHousehold}
+                              </span>
+                              <span className="block text-xs text-ink-muted">
+                                {ja.mealPlan.monthCostRowHouseholdNote}
+                              </span>
+                            </th>
+                            <td className="py-1.5 pl-2 text-right align-top font-bold whitespace-nowrap text-accent-ink tabular-nums">
+                              {ja.mealPlan.monthCostYen.replace(
+                                '{n}',
+                                monthSummary.cookedHouseholdYen.toLocaleString(),
+                              )}
+                            </td>
+                            <td className="py-1.5 pl-2 text-right align-top whitespace-nowrap tabular-nums">
+                              {ja.mealPlan.monthCostMealsTotal.replace(
+                                '{n}',
+                                String(monthSummary.cookedMealCount),
+                              )}
+                            </td>
+                          </tr>
+                          {/* 1つ上の「全員分」を、作った記録がある日数で割った値。分母を行に書いて
+                              画面の上だけで検算できるようにする(暦日数で割らない理由はrangeSummary規則4) */}
+                          <tr className="border-b border-edge">
+                            <th scope="row" className="py-1.5 text-left align-top font-normal">
+                              <span className="block font-bold">
+                                {ja.mealPlan.monthCostRowPerDay}
+                              </span>
+                              {/* 390px幅では2行になる長さなので、割り算の記号で折り返して
+                                  「日」だけが次の行に落ちないようにする(前後それぞれは折り返さない) */}
+                              <span className="block text-xs text-ink-muted">
+                                <span className="whitespace-nowrap">
+                                  {ja.mealPlan.monthCostRowPerDayNote.split('÷')[0]}÷
+                                </span>
+                                <span className="whitespace-nowrap">
+                                  {(ja.mealPlan.monthCostRowPerDayNote.split('÷')[1] ?? '').replace(
+                                    '{d}',
+                                    String(monthSummary.cookedDayCount),
+                                  )}
+                                </span>
+                              </span>
+                            </th>
+                            <td className="py-1.5 pl-2 text-right align-top font-bold whitespace-nowrap text-accent-ink tabular-nums">
+                              {ja.mealPlan.monthCostYen.replace(
+                                '{n}',
+                                monthSummary.cookedPerDayYen.toLocaleString(),
+                              )}
+                            </td>
+                            <td className="py-1.5 pl-2 text-right align-top" />
+                          </tr>
+                        </>
+                      )}
+                    </tbody>
+                    {/* これから作る予定(今日から先)は実績と混ざらないよう表の下段に分ける
+                        (オーナー指示「予定は合計と一人当たりの合計を下に」)。
+                        合計＝実際に作る食数ぶん、一人当たり＝献立を1食ずつ足した合計 */}
+                    {monthSummary.planMealCount > 0 && (
+                      <tbody>
+                        <tr>
+                          <th
+                            scope="rowgroup"
+                            colSpan={3}
+                            className="pt-[var(--space-sm)] pb-1 text-left text-xs font-bold text-ink-muted"
+                          >
+                            {ja.mealPlan.monthCostPlanGroup}
+                          </th>
+                        </tr>
+                        <tr className="border-b border-edge">
+                          <th scope="row" className="py-1.5 text-left align-top font-normal">
+                            <span className="block font-bold">
+                              {ja.mealPlan.monthCostRowHousehold}
+                            </span>
+                            <span className="block text-xs text-ink-muted">
+                              {ja.mealPlan.monthCostRowPlanHouseholdNote}
+                            </span>
+                          </th>
+                          <td className="py-1.5 pl-2 text-right align-top font-bold whitespace-nowrap text-accent-ink tabular-nums">
+                            {ja.mealPlan.monthCostYen.replace(
+                              '{n}',
+                              monthSummary.planHouseholdYen.toLocaleString(),
+                            )}
+                          </td>
+                          <td className="py-1.5 pl-2 text-right align-top whitespace-nowrap tabular-nums">
+                            {ja.mealPlan.monthCostMealsTotal.replace(
+                              '{n}',
+                              String(monthSummary.planMealCount),
+                            )}
+                          </td>
+                        </tr>
+                        <tr className="border-b border-edge">
+                          <th scope="row" className="py-1.5 text-left align-top font-normal">
+                            <span className="block font-bold">
+                              {ja.mealPlan.monthCostRowPersonal}
+                            </span>
+                            <span className="block text-xs text-ink-muted">
+                              {ja.mealPlan.monthCostRowPersonalNote}
+                            </span>
+                          </th>
+                          <td className="py-1.5 pl-2 text-right align-top font-bold whitespace-nowrap text-accent-ink tabular-nums">
+                            {ja.mealPlan.monthCostYen.replace(
+                              '{n}',
+                              monthSummary.plan.personalYen.toLocaleString(),
+                            )}
+                          </td>
+                          <td className="py-1.5 pl-2 text-right align-top whitespace-nowrap tabular-nums">
+                            {ja.mealPlan.monthCostMeals.replace(
+                              '{n}',
+                              String(monthSummary.plan.dishCount),
+                            )}
+                          </td>
+                        </tr>
+                      </tbody>
                     )}
+                  </table>
+                  {/* どの日をどちらの基準で数えたかは、期間の集計カードと同じ文言で必ず出す */}
+                  <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+                    {intakeBasisText(monthSummary)}
+                  </p>
+                  {/* 数字の前提(何をもとにした概算か)も同じ場所に置く(2026-07-30 便CH/C12) */}
+                  <p className="mt-0.5 text-xs text-ink-muted">
+                    {ja.mealPlan.monthCostEstimateNote}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMonthSummaryOpen((v) => !v)}
+                    aria-expanded={monthSummaryOpen}
+                    className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                  >
+                    {monthSummaryOpen
+                      ? ja.mealPlan.monthSummaryDetailsClose
+                      : ja.mealPlan.monthSummaryDetailsOpen}
+                    {monthSummaryOpen ? (
+                      <ChevronUp size={16} aria-hidden />
+                    ) : (
+                      <ChevronDown size={16} aria-hidden />
+                    )}
+                  </button>
+                  {monthSummaryOpen && (
+                    <div className="mt-[var(--space-sm)]">
+                      {/* 表の「1人分」を、過ぎた日の記録ぶんと今日から先の献立ぶんに割った内訳 */}
+                      <p className="text-xs text-ink-muted">
+                        {ja.mealPlan.rangeIntakeCostBreakdown
+                          .replace('{a}', monthSummary.actual.personalYen.toLocaleString())
+                          .replace('{an}', String(monthSummary.actual.dishCount))
+                          .replace('{p}', monthSummary.plan.personalYen.toLocaleString())
+                          .replace('{pn}', String(monthSummary.plan.dishCount))}
+                      </p>
+                      <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+                        {ja.mealPlan.weekCostNote}
+                      </p>
+                      {/* 価格が分からない材料の分は1円も入っていない＝この金額の信頼度を月にも出す
+                          (2026-07-30 便CH/C2。週の概算食費にだけ入っていた注記を揃えた) */}
+                      {monthPricelessCount > 0 && (
+                        <p className="mt-1 text-xs text-ink-muted">
+                          {ja.mealPlan.weekCostPriceless.replace(
+                            '{n}',
+                            String(monthPricelessCount),
+                          )}
+                        </p>
+                      )}
+                      <Link
+                        to="/prices"
+                        className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
+                      >
+                        {ja.mealPlan.weekCostNoteLink}
+                      </Link>
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+
+            {/* 月の栄養(2026-08-03 便DQで食費と分離)。8項目の数値を畳まずに出し、
+                長い但し書きと出典だけを折りたたみへ回す(規約H)。
+                Pro解錠時のみ(既存のゲートと同じisNutritionUnlocked判定)。
+                目的モードの「答え合わせ」も栄養の数字なのでこのカードに置く */}
+            {isNutritionUnlocked(monthUnlocked) &&
+              (monthSummary.nutrition.dishCount > 0 || monthPurposeReviews.length > 0) && (
+                <section className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-bold">
+                      {ja.mealPlan.monthNutritionTitle.replace(
+                        '{m}',
+                        String(Number(monthAnchor.slice(5, 7))),
+                      )}
+                    </h2>
                     <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-ink-muted">
                       {ja.nutrition.estimateBadge}
                     </span>
                   </div>
-                  {/* 1人あたり1日の分母は「月の日数」。期間カードと違って日数の文脈が無いので、
-                      月では何日で割ったかを文言で言い切る(2026-07-30 便CH/C4) */}
-                  <p className="mt-1 text-sm text-ink-muted">
-                    {ja.mealPlan.monthSummaryPersonalCostPerDay
-                      .replace('{m}', String(Number(monthAnchor.slice(5, 7))))
-                      .replace('{d}', String(monthDatesList.length))
-                      .replace('{n}', monthPersonalPerDay.toLocaleString())}
-                  </p>
-                  {/* 家族の実支出にあたる「作った記録の全体食費」は内訳に畳まず1行だけ常設で出す
-                      (2026-07-30 便CH/C8)。1人分の見出しと並ぶので、いつの分か・何人分かを言い切る */}
-                  {monthSummary.cookedMealCount > 0 && (
-                    <p className="mt-0.5 text-sm text-ink-muted">
-                      {ja.mealPlan.monthSummaryHousehold
-                        .replace('{yen}', monthSummary.cookedHouseholdYen.toLocaleString())
-                        .replace('{n}', String(monthSummary.cookedMealCount))}
-                    </p>
+                  {monthSummary.nutrition.dishCount > 0 && (
+                    <div className="mt-[var(--space-sm)]">
+                      <IntakeNutritionPanel summary={monthSummary} label={null} notes="brief" />
+                    </div>
                   )}
-                  {/* これから作る予定の分も、実際に作る食数ぶんの金額で同じ形で並べる
-                      (2026-08-03 便DK。実績と予定を同じスケールで見比べられるようにする) */}
-                  {monthSummary.planMealCount > 0 && (
-                    <p className="mt-0.5 text-sm text-ink-muted">
-                      {ja.mealPlan.monthSummaryPlanHousehold
-                        .replace('{yen}', monthSummary.planHouseholdYen.toLocaleString())
-                        .replace('{n}', String(monthSummary.planMealCount))}
-                    </p>
-                  )}
-                  {/* どの日をどちらの基準で数えたかは、期間の集計カードと同じ文言で必ず出す */}
-                  <p className="mt-0.5 text-xs text-ink-muted">{intakeBasisText(monthSummary)}</p>
-                  {/* 数字の前提(何をもとにしためやすか)も同じ場所に置く(2026-07-30 便CH/C12) */}
-                  <p className="mt-0.5 text-xs text-ink-muted">
-                    {ja.mealPlan.monthSummaryEstimateNote}
-                  </p>
 
                   {/* 目的モードの「答え合わせ」(2026-08-02 便CP-2・docs/62 決定②)。
                       目的を指定して組んだ日がこの月に1日もなければ、この節ごと出さない。
                       出すのは事実だけ＝日数と、1日あたりの数字の並置。達成/未達の判定はせず、
                       色分けもしない(docs/60 §1-3 の文言規律。「多い方がよい」とも言わない) */}
-                  {isNutritionUnlocked(monthUnlocked) && monthPurposeReviews.length > 0 && (
+                  {monthPurposeReviews.length > 0 && (
                     <section
                       data-testid="purpose-review"
                       className="mt-[var(--space-sm)] rounded-sm border border-edge bg-app p-[var(--space-sm)]"
@@ -3985,60 +4200,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   )}
                   <button
                     type="button"
-                    onClick={() => setMonthSummaryOpen((v) => !v)}
-                    aria-expanded={monthSummaryOpen}
+                    onClick={() => setMonthNutritionNotesOpen((v) => !v)}
+                    aria-expanded={monthNutritionNotesOpen}
                     className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                   >
-                    {monthSummaryOpen
-                      ? ja.mealPlan.monthSummaryDetailsClose
-                      : ja.mealPlan.monthSummaryDetailsOpen}
-                    {monthSummaryOpen ? (
+                    {monthNutritionNotesOpen
+                      ? ja.mealPlan.monthNutritionNotesClose
+                      : ja.mealPlan.monthNutritionNotesOpen}
+                    {monthNutritionNotesOpen ? (
                       <ChevronUp size={16} aria-hidden />
                     ) : (
                       <ChevronDown size={16} aria-hidden />
                     )}
                   </button>
-                  {monthSummaryOpen && (
+                  {monthNutritionNotesOpen && (
                     <div className="mt-[var(--space-sm)]">
-                      {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
-                        <IntakeNutritionPanel
-                          summary={monthSummary}
-                          label={ja.mealPlan.monthSummaryNutritionLabel}
-                        />
-                      )}
-                      <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
-                        {ja.mealPlan.rangeIntakeCostBreakdown
-                          .replace('{a}', monthSummary.actual.personalYen.toLocaleString())
-                          .replace('{an}', String(monthSummary.actual.dishCount))
-                          .replace('{p}', monthSummary.plan.personalYen.toLocaleString())
-                          .replace('{pn}', String(monthSummary.plan.dishCount))}
-                      </p>
-                      {/* 作った食数の合算(全体食費)はオーナー指示で残す。2026-07-30 便CH/C8で
-                          カード上部の常設1行へ昇格させたので、内訳では重ねて出さない */}
-                      <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
-                        {ja.mealPlan.weekCostNote}
-                      </p>
-                      {/* 価格が分からない材料の分は1円も入っていない＝この金額の信頼度を月にも出す
-                          (2026-07-30 便CH/C2。週の概算食費にだけ入っていた注記を揃えた) */}
-                      {monthPricelessCount > 0 && (
-                        <p className="mt-1 text-xs text-ink-muted">
-                          {ja.mealPlan.weekCostPriceless.replace(
-                            '{n}',
-                            String(monthPricelessCount),
-                          )}
-                        </p>
-                      )}
-                      <Link
-                        to="/prices"
-                        className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
-                      >
-                        {ja.mealPlan.weekCostNoteLink}
-                      </Link>
+                      <NutritionSourceNotes />
                     </div>
                   )}
-                </>
+                </section>
               )}
-            </section>
 
             {/* カレンダーに出す情報の切り替え(2026-07-28 便CA・タスク2・オーナー指示)。
                 既定は写真＞献立プレビュー。栄養/食費に切り替えると各セルにその日の1人分の数字が出る。
