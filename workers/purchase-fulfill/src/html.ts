@@ -126,7 +126,7 @@ export function renderSuccessPage(code: string): string {
 </ol>
 <p class="warn">このコードは大切に保管してください。このページは後から開き直せない場合があります(機種変更のときも、同じコードをもう一度入力すれば使えます)。</p>
 <a class="btn" href="${escapeHtml(APP_URL)}">うちレシピを開く</a>
-<p class="guide-link"><a href="${escapeHtml(UNLOCK_GUIDE_URL)}">画面つきの詳しい使い方はこちら</a></p>
+<p class="guide-link"><a href="${escapeHtml(UNLOCK_GUIDE_URL)}" target="_blank" rel="noopener">画像付きの詳しい使い方はこちら（新しいタブで開きます）</a></p>
 <p class="contact">コードについて困ったときは ${escapeHtml(CONTACT_EMAIL)} までご連絡ください。</p>
 </main>
 <script>
