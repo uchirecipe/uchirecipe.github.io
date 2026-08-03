@@ -17,3 +17,4 @@ id = "9d2a92cb7efc433f91653cde905ac82e"
 # 以下はコードに値を書かず、wrangler secret で設定する(手順は scripts/load-codes.md):
 #   npx wrangler secret put STRIPE_SECRET_KEY
 #   npx wrangler secret put STRIPE_WEBHOOK_SECRET
+#   npx wrangler secret put RESEND_API_KEY   # 任意。解錠コードのメール自動送付(未設定なら送信をスキップ)
