@@ -70,12 +70,14 @@ npx wrangler deploy
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
 cd ~/Documents/Claude/Projects/料理アプリ/app/workers/purchase-fulfill
-npx wrangler kv key put pool '["TEST-0001","TEST-0002"]' --namespace-id <①でコピーしたid>
+npx wrangler kv key put pool '["TEST-0001","TEST-0002"]' --namespace-id <①でコピーしたid> --remote
 ```
 
 (`<①でコピーしたid>` の部分は実際のidに置き換える。以下同様)
 
 ## ⑤ テストモードで通し確認する(実際にお金は動かない)
+
+> **重要(2026-08-03追記)**: wrangler v4では `kv key` コマンドは**既定で手元の疑似ストア**に読み書きします。本番KVを操作するときは**必ず `--remote` を付ける**こと。付け忘れると「投入したのに本番は空」になります(発売初日に実発生・検収で発見)。本番Workerが見ている在庫数は `curl https://uchirecipe-purchase-fulfill.hapillust.workers.dev/stock` でいつでも確認できます(コード本体は返しません)。
 
 これは `docs/44_購入後コード自動配信_設計.md` に書かれている「未確定・検証事項」を確かめる
 いちばん重要なステップ。Stripeの「テストモード」を使えば、本物のクレジットカードなしで
@@ -147,7 +149,7 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET
       `TEST-0001` または `TEST-0002` が大きく表示される
 - [ ] そのページを再読み込みしても同じコードが表示され続ける(2回目でコードが変わらない=冪等の確認)
 - [ ] Stripeダッシュボードの Webhooks の画面で、さきほどのイベントが「200 成功」で届いていることを確認
-- [ ] `npx wrangler kv key get pool --namespace-id <①のid>` を実行し、残りが1個(消費された分だけ減っている)ことを確認
+- [ ] `npx wrangler kv key get pool --namespace-id <①のid> --remote` を実行し、残りが1個(消費された分だけ減っている)ことを確認
 
 うまくいかない場合は下の「よくあるトラブル」を見る。ここで問題が起きた場合、
 `docs/44_購入後コード自動配信_設計.md` の「未確定・検証事項」(Managed Paymentsのリダイレクトで
@@ -158,11 +160,11 @@ session_idが渡るか等)に関わる可能性があるので、結果をその
 ```bash
 export PATH="$HOME/.local/node/bin:$PATH"
 cd ~/Documents/Claude/Projects/料理アプリ/app/workers/purchase-fulfill
-npx wrangler kv key delete pool --namespace-id <①のid>
+npx wrangler kv key delete pool --namespace-id <①のid> --remote
 ```
 
 (`session:cs_test_...` のキーも残るが、実害はないのでそのままで問題ない。気になる場合は
-`npx wrangler kv key list --namespace-id <①のid>` で一覧を見て `wrangler kv key delete` で消してもよい)
+`npx wrangler kv key list --namespace-id <①のid> --remote` で一覧を見て `wrangler kv key delete` で消してもよい)
 
 ## ⑥ 本番切り替え
 
@@ -179,7 +181,7 @@ JSON配列。このファイルもリポジトリの外にあるのでコミッ�
 
 ```bash
 cd ~/Documents/Claude/Projects/料理アプリ/app/workers/purchase-fulfill
-npx wrangler kv key put pool --path ../../../private/pro-codes-pool.json --namespace-id <①のid>
+npx wrangler kv key put pool --path ../../../private/pro-codes-pool.json --namespace-id <①のid> --remote
 ```
 
 ### ⑥-2 本番用の制限付きAPIキー・Webhookシークレットに差し替える
@@ -208,7 +210,7 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET
 
 ### ⑥-4 最終確認
 
-- `npx wrangler kv key get pool --namespace-id <①のid>` で100件入っていることを確認
+- `npx wrangler kv key get pool --namespace-id <①のid> --remote` で100件入っていることを確認
 - 可能であれば本番でごく少額の実購入(自分で購入)を1回行い、コードが届くこと・
   `private/pro-codes-master.txt` 上でそのコードに「済」を手動で書き足すことを確認する
   (在庫管理は今までどおりこのファイルへの手動追記が正=KVのpoolはあくまで配信用のコピー)

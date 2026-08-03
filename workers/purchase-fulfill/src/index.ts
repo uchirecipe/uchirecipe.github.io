@@ -169,6 +169,21 @@ export default {
       return handleWebhook(request, env)
     }
 
+    // 在庫数の確認(コード本体は一切返さない)。オーナーの死活監視用+障害切り分け用
+    // (2026-08-03 発売直後に「在庫100件投入済みなのに在庫切れ表示」が実発生し、
+    //  本番Workerが見ている在庫数を外から確認する手段が無かった反省)。
+    if (url.pathname === '/stock') {
+      if (request.method !== 'GET') return jsonResponse({ ok: false, error: 'method_not_allowed' }, 405)
+      if (!env.PRO_CODES) return jsonResponse({ ok: false, error: 'not_configured' }, 500)
+      try {
+        const raw = await env.PRO_CODES.get('pool')
+        const count = raw ? (JSON.parse(raw) as string[]).length : 0
+        return jsonResponse({ ok: true, poolCount: count, poolKeyExists: raw !== null }, 200)
+      } catch {
+        return jsonResponse({ ok: false, error: 'kv_read_failed' }, 503)
+      }
+    }
+
     return jsonResponse({ ok: false, error: 'not_found' }, 404)
   },
 }
