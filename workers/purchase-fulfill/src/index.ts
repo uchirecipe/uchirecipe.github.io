@@ -8,7 +8,8 @@
  * POST /webhook
  *   Stripeの checkout.session.completed イベントを受け取り、同じ払い出しロジックで
  *   コードを予約しておく(顧客が完了ページを開かずタブを閉じてしまっても割当が確定するための保険)。
- *   署名検証(Stripe-Signature)必須。
+ *   署名検証(Stripe-Signature)必須。割当に成功したら、購入時のメールアドレス宛に
+ *   解錠コードをメールで送る(2026-08-03 オーナー指示。送信手段はResend・src/email.ts)。
  *
  * プライバシー方針: このWorkerはconsole.log等を使わない(recipe-import Workerと同じ方針)。
  * 検知が必要な状態(在庫切れ・想定外の決済内容)はレスポンスの内容/ステータスで表現する。
@@ -22,7 +23,8 @@ import {
   type FetchLike,
   type StripeCheckoutSession,
 } from './stripe'
-import { allocateCodeForSession } from './pool'
+import { allocateCodeForSession, markSessionEmailed, readSessionRecord } from './pool'
+import { sendCodeEmail } from './email'
 import {
   renderInvalidPage,
   renderNotPaidPage,
@@ -97,8 +99,39 @@ interface CheckoutSessionCompletedEvent {
   data: { object: StripeCheckoutSession }
 }
 
-/** POST /webhook のハンドラ本体。 */
-export async function handleWebhook(request: Request, env: Env): Promise<Response> {
+/** メール送付の結果(レスポンスbodyに出す。宛先そのものは出さない)。 */
+type EmailOutcome = 'sent' | 'send_failed' | 'skipped_not_configured' | 'skipped_no_customer_email' | 'skipped_already_emailed'
+
+/**
+ * 割当済みの解錠コードを購入者にメールで送る(送れない条件はすべてスキップとして扱い、例外は投げない)。
+ *
+ * 多重送信の防止: 送信に成功したら session:{id} レコードに emailedAt を書き込み、
+ * 次回以降(Stripeのwebhookリトライ・同じセッションの再通知)は送らない。送信に失敗した場合は
+ * emailedAt を書かないので、Stripeが再送してきたときに再挑戦できる。
+ */
+async function deliverCodeByEmail(
+  env: Env,
+  session: StripeCheckoutSession,
+  code: string,
+  fetchImpl: FetchLike,
+): Promise<EmailOutcome> {
+  if (!env.RESEND_API_KEY) return 'skipped_not_configured'
+
+  const to = session.customer_details?.email
+  if (!to) return 'skipped_no_customer_email'
+
+  const record = await readSessionRecord(env.PRO_CODES, session.id)
+  if (record?.emailedAt) return 'skipped_already_emailed'
+
+  const result = await sendCodeEmail(env.RESEND_API_KEY, to, code, session.id, fetchImpl)
+  if (result === 'sent') {
+    await markSessionEmailed(env.PRO_CODES, session.id)
+  }
+  return result
+}
+
+/** POST /webhook のハンドラ本体。fetchImplはテストからResend APIをスタブするために注入できる。 */
+export async function handleWebhook(request: Request, env: Env, fetchImpl: FetchLike = fetch): Promise<Response> {
   const signatureHeader = request.headers.get('Stripe-Signature')
   const rawBody = await request.text()
 
@@ -144,15 +177,29 @@ export async function handleWebhook(request: Request, env: Env): Promise<Respons
     return jsonResponse({ ok: false, error: 'not_configured' }, 500)
   }
 
+  let result
   try {
-    const result = await allocateCodeForSession(env.PRO_CODES, session.id)
-    // メール送信はこの設計では実装しない(Managed Paymentsが確認メールを代行するため、
-    // またこちらで顧客メールアドレスを確実に取得できるか未確定なため。docs/44参照)。
-    return jsonResponse({ ok: true, status: result.status }, 200)
+    result = await allocateCodeForSession(env.PRO_CODES, session.id)
   } catch {
     // KV障害等の一時的な問題はStripeにリトライしてほしいので500を返す。
     return jsonResponse({ ok: false, error: 'allocation_failed' }, 500)
   }
+
+  if (result.status === 'out_of_stock') {
+    // 在庫切れ。自動追送は行わない(在庫補充後にオーナーが手動で送る運用。/successの在庫切れページと同じ案内)。
+    return jsonResponse({ ok: true, status: result.status, alert: 'out-of-stock' }, 200)
+  }
+
+  // 割当は確定しているので、メールで失敗しても200を返す(500にするとStripeが無限にリトライし、
+  // 割当済みのセッションへ何度も再処理が走る)。emailedAtが無いままなので次のリトライで再挑戦される。
+  let email: EmailOutcome
+  try {
+    email = await deliverCodeByEmail(env, session, result.code, fetchImpl)
+  } catch {
+    email = 'send_failed'
+  }
+
+  return jsonResponse({ ok: true, status: result.status, email }, 200)
 }
 
 export default {

@@ -5,6 +5,8 @@
  * - `pool`            : 未使用コードのJSON配列(例: ["UR-XXXX-XXXX", ...])。払い出すたびに1件popして書き戻す。
  * - `session:{id}`     : そのCheckout Sessionに割り当てたコードのJSON(`{ code, allocatedAt }`)。
  *                        これが既にあれば新規に払い出さず同じコードを返す(= 再読込・二重発行防止の冪等キー)。
+ *                        メール送付に成功したら `emailedAt` を追記する(= 多重送信防止の印。
+ *                        Stripeのwebhookリトライと/successとの競合の両方で再送しないため)。
  *
  * 原子性についての注意(設計どおりbest-effort。docs/44参照):
  * CloudflareのKVは単一キーに対する read→modify→write を原子的に行う機能を持たない
@@ -24,9 +26,11 @@ export type AllocationResult =
   | { status: 'already_allocated'; code: string }
   | { status: 'out_of_stock' }
 
-interface SessionRecord {
+export interface SessionRecord {
   code: string
   allocatedAt: number
+  /** 解錠コードのメール送付に成功した時刻(未送付なら無し)。メールアドレス自体は保存しない。 */
+  emailedAt?: number
 }
 
 /**
@@ -57,4 +61,26 @@ export async function allocateCodeForSession(kv: KVNamespace, sessionId: string)
   await kv.put(sessionKey(sessionId), JSON.stringify(record))
 
   return { status: 'allocated', code }
+}
+
+/** そのセッションの割当レコードを読む(未割当・壊れたJSONならnull)。 */
+export async function readSessionRecord(kv: KVNamespace, sessionId: string): Promise<SessionRecord | null> {
+  const raw = await kv.get(sessionKey(sessionId))
+  if (!raw) return null
+  try {
+    const record = JSON.parse(raw) as SessionRecord
+    return typeof record?.code === 'string' ? record : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * メール送付済みの印(`emailedAt`)を割当レコードに書き足す。
+ * 割当レコードが無い場合は何もしない(コードの払い出しはこの関数では絶対に行わない)。
+ */
+export async function markSessionEmailed(kv: KVNamespace, sessionId: string, now: number = Date.now()): Promise<void> {
+  const record = await readSessionRecord(kv, sessionId)
+  if (!record) return
+  await kv.put(sessionKey(sessionId), JSON.stringify({ ...record, emailedAt: now } satisfies SessionRecord))
 }

@@ -20,6 +20,12 @@ export interface StripeCheckoutSession {
   amount_total: number | null
   currency: string | null
   mode: string // 'payment' | 'setup' | 'subscription'
+  /**
+   * 購入者の連絡先。解錠コードのメール送付先に使う(webhookのイベントにも同じ形で入る)。
+   * Managed Payments経由ではemailが取れない可能性があるためすべて任意扱いにし、
+   * 取れないときは送信しない(docs/44の既知事項)。
+   */
+  customer_details?: { email?: string | null } | null
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>

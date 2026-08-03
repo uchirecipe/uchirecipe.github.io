@@ -12,6 +12,7 @@ import {
   verifyStripeWebhookSignature,
 } from '../src/stripe.ts'
 import { handleSuccess, handleWebhook } from '../src/index.ts'
+import { CODE_EMAIL_SUBJECT, renderCodeEmailHtml, renderCodeEmailText } from '../src/email.ts'
 
 let passCount = 0
 function test(name, fn) {
@@ -266,7 +267,22 @@ await asyncTest('handleSuccess: プール空→在庫切れページ(200・専�
   assert.equal(res.status, 200)
   assert.equal(res.headers.get('X-Purchase-Fulfill-Alert'), 'out-of-stock')
   const body = await res.text()
-  assert.ok(body.includes('hapillust@gmail.com'))
+  // 連絡先はhtml.tsのCONTACT_EMAILと同じであること(2026-08-03: この行はhapillust@…を見ており、
+  // 実装がuchiapplication@…に変わった後もテストだけ古いまま落ちていた=回帰の見落とし)
+  assert.ok(body.includes('uchiapplication@gmail.com'))
+})
+
+await asyncTest('在庫切れページ: 購入者に連絡を催促せず「こちらから送る」案内になっている(2026-08-03オーナー指示)', async () => {
+  const kv = poolKV([])
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: 'whsec' }
+  const stubFetch = async () => stripeSessionResponse()
+  const res = await handleSuccess(new URL('https://worker.example/success?session_id=cs_test_a1B2c3D4e5F6g7H8i9J0'), env, stubFetch)
+  const body = await res.text()
+  assert.ok(body.includes('ご購入時のメールアドレスにコードをお送りします'))
+  assert.ok(body.includes('1日たってもメールが届かない場合は'))
+  // 旧文面(購入者に連絡を催促する言い回し)が残っていないこと
+  assert.ok(!body.includes('担当者が確認しております'))
+  assert.ok(!body.includes('お手数ですが'))
 })
 
 await asyncTest('handleSuccess: session_id形式が不正なら400・Stripeを呼ばない', async () => {
@@ -325,10 +341,22 @@ function completedEvent(sessionOverrides = {}) {
         amount_total: 800,
         currency: 'jpy',
         mode: 'payment',
+        customer_details: { email: 'buyer@example.com' },
         ...sessionOverrides,
       },
     },
   }
+}
+
+/** Resend APIのスタブ。呼ばれた回数とリクエスト内容を記録する(実際には送信しない)。 */
+function createResendStub({ status = 200 } = {}) {
+  const calls = []
+  const fetchImpl = async (input, init) => {
+    calls.push({ input, init, body: JSON.parse(init.body) })
+    return new Response(JSON.stringify({ id: 'stub-email-id' }), { status })
+  }
+  fetchImpl.calls = calls
+  return fetchImpl
 }
 
 await asyncTest('handleWebhook: 署名OK・checkout.session.completed→200・コード割当(GET /successと同じロジックを共有)', async () => {
@@ -388,6 +416,199 @@ await asyncTest('handleWebhook: GET /successで既に払い出し済みのsessio
   const body = await res.json()
   assert.equal(body.status, 'already_allocated')
   assert.deepEqual(JSON.parse(kv._dump().pool), ['UR-BBBB-2222'])
+})
+
+// ============================================================================
+// email.ts + handleWebhook: 解錠コードの自動メール送付
+// (2026-08-03 オーナー指示「購入者に連絡を催促するのではなく、コードが自動でメールなどで届くように」)
+// ============================================================================
+
+const RESEND_URL = 'https://api.resend.com/emails'
+
+await asyncTest('メール送付: 割当成功→Resendへ1通送り、KVにemailedAtが記録される', async () => {
+  const kv = poolKV(['UR-AAAA-1111'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const resend = createResendStub()
+  const req = await makeWebhookRequest(secret, completedEvent())
+  const res = await handleWebhook(req, env, resend)
+
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.email, 'sent')
+  assert.equal(resend.calls.length, 1)
+  assert.equal(resend.calls[0].input, RESEND_URL)
+  assert.equal(resend.calls[0].init.headers.Authorization, 'Bearer re_test_dummy')
+  assert.deepEqual(resend.calls[0].body.to, ['buyer@example.com'])
+  assert.equal(resend.calls[0].body.subject, CODE_EMAIL_SUBJECT)
+  assert.equal(resend.calls[0].body.reply_to, 'uchiapplication@gmail.com')
+  assert.ok(resend.calls[0].body.from.includes('code@uchirecipe.com'))
+  assert.ok(resend.calls[0].body.text.includes('UR-AAAA-1111'))
+  assert.ok(resend.calls[0].body.html.includes('UR-AAAA-1111'))
+  const record = JSON.parse(kv._dump()['session:cs_test_webhook'])
+  assert.equal(record.code, 'UR-AAAA-1111')
+  assert.equal(typeof record.emailedAt, 'number')
+  // 宛先(個人情報)はKVに残さない
+  assert.ok(!kv._dump()['session:cs_test_webhook'].includes('buyer@example.com'))
+})
+
+await asyncTest('メール送付: RESEND_API_KEY未設定なら送信をスキップし、割当は従来どおり成功する', async () => {
+  const kv = poolKV(['UR-AAAA-1111'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret }
+  const resend = createResendStub()
+  const req = await makeWebhookRequest(secret, completedEvent())
+  const res = await handleWebhook(req, env, resend)
+
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.status, 'allocated')
+  assert.equal(body.email, 'skipped_not_configured')
+  assert.equal(resend.calls.length, 0)
+  assert.equal(JSON.parse(kv._dump()['session:cs_test_webhook']).emailedAt, undefined)
+})
+
+await asyncTest('メール送付: 宛先(customer_details.email)が取れないときは送らず、割当だけ確定する', async () => {
+  const kv = poolKV(['UR-AAAA-1111'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const resend = createResendStub()
+  const req = await makeWebhookRequest(secret, completedEvent({ customer_details: null }))
+  const res = await handleWebhook(req, env, resend)
+
+  const body = await res.json()
+  assert.equal(body.status, 'allocated')
+  assert.equal(body.email, 'skipped_no_customer_email')
+  assert.equal(resend.calls.length, 0)
+  assert.equal(JSON.parse(kv._dump()['session:cs_test_webhook']).code, 'UR-AAAA-1111')
+})
+
+await asyncTest('メール送付: customer_detailsはあるがemailが空でも送らない', async () => {
+  const kv = poolKV(['UR-AAAA-1111'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const resend = createResendStub()
+  const req = await makeWebhookRequest(secret, completedEvent({ customer_details: { email: null } }))
+  const res = await handleWebhook(req, env, resend)
+
+  const body = await res.json()
+  assert.equal(body.email, 'skipped_no_customer_email')
+  assert.equal(resend.calls.length, 0)
+})
+
+await asyncTest('メール送付: Stripeが同じイベントを再送しても2通目は送らない(emailedAtで冪等)', async () => {
+  const kv = poolKV(['UR-AAAA-1111', 'UR-BBBB-2222'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const resend = createResendStub()
+  const res1 = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, resend)
+  const res2 = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, resend)
+
+  assert.equal((await res1.json()).email, 'sent')
+  const body2 = await res2.json()
+  assert.equal(body2.status, 'already_allocated')
+  assert.equal(body2.email, 'skipped_already_emailed')
+  assert.equal(resend.calls.length, 1)
+  // 2通目を試みていないのでプールも減っていない
+  assert.deepEqual(JSON.parse(kv._dump().pool), ['UR-BBBB-2222'])
+})
+
+await asyncTest('メール送付: /successで先に払い出されたセッションでも、webhookは同じコードをメールする', async () => {
+  const kv = poolKV(['UR-AAAA-1111', 'UR-BBBB-2222'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const stubFetch = async () => stripeSessionResponse({ id: 'cs_test_webhook' })
+  await handleSuccess(new URL('https://worker.example/success?session_id=cs_test_webhook'), env, stubFetch)
+  const resend = createResendStub()
+  const res = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, resend)
+
+  const body = await res.json()
+  assert.equal(body.status, 'already_allocated')
+  assert.equal(body.email, 'sent')
+  assert.ok(resend.calls[0].body.text.includes('UR-AAAA-1111'))
+})
+
+await asyncTest('メール送付: Resendが失敗してもwebhookは200(割当優先)・emailedAtは書かず次回再挑戦できる', async () => {
+  const kv = poolKV(['UR-AAAA-1111'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const failing = createResendStub({ status: 500 })
+  const res = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, failing)
+
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).email, 'send_failed')
+  assert.equal(JSON.parse(kv._dump()['session:cs_test_webhook']).emailedAt, undefined)
+
+  // Stripeの再送で今度は成功する
+  const retry = createResendStub()
+  const res2 = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, retry)
+  assert.equal((await res2.json()).email, 'sent')
+  assert.equal(retry.calls.length, 1)
+})
+
+await asyncTest('メール送付: fetch自体が例外を投げてもwebhookは200のまま', async () => {
+  const kv = poolKV(['UR-AAAA-1111'])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const throwingFetch = async () => {
+    throw new Error('network down')
+  }
+  const res = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, throwingFetch)
+  assert.equal(res.status, 200)
+  assert.equal((await res.json()).email, 'send_failed')
+})
+
+await asyncTest('メール送付: 在庫切れのときは送らない(送るコードが無いため)', async () => {
+  const kv = poolKV([])
+  const secret = 'whsec_test_secret'
+  const env = { PRO_CODES: kv, STRIPE_SECRET_KEY: 'sk_test_dummy', STRIPE_WEBHOOK_SECRET: secret, RESEND_API_KEY: 're_test_dummy' }
+  const resend = createResendStub()
+  const res = await handleWebhook(await makeWebhookRequest(secret, completedEvent()), env, resend)
+
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.equal(body.status, 'out_of_stock')
+  assert.equal(body.alert, 'out-of-stock')
+  assert.equal(resend.calls.length, 0)
+})
+
+await asyncTest('メール送付: 未払い・署名NGのイベントではメールを送らない', async () => {
+  const secret = 'whsec_test_secret'
+  const base = { STRIPE_SECRET_KEY: 'sk_test_dummy', RESEND_API_KEY: 're_test_dummy' }
+  const resend = createResendStub()
+
+  const unpaidEnv = { ...base, PRO_CODES: poolKV(['UR-AAAA-1111']), STRIPE_WEBHOOK_SECRET: secret }
+  await handleWebhook(await makeWebhookRequest(secret, completedEvent({ payment_status: 'unpaid' })), unpaidEnv, resend)
+
+  const badSigEnv = { ...base, PRO_CODES: poolKV(['UR-AAAA-1111']), STRIPE_WEBHOOK_SECRET: 'whsec_correct' }
+  await handleWebhook(await makeWebhookRequest('whsec_wrong', completedEvent()), badSigEnv, resend)
+
+  assert.equal(resend.calls.length, 0)
+})
+
+await asyncTest('メール文面: 件名・コード・入力手順3歩・精度開示・問い合わせ先がテキスト/HTML両方に入る', () => {
+  assert.equal(CODE_EMAIL_SUBJECT, 'うちレシピ Pro版 解錠コード')
+  const accuracy = '栄養と食費の数字は、材料と分量から計算した概算です。調理による変化は反映していません。治療中の方・妊娠中の方の食事管理には使えません。'
+  for (const bodyText of [renderCodeEmailText('UR-AAAA-1111'), renderCodeEmailHtml('UR-AAAA-1111')]) {
+    assert.ok(bodyText.includes('UR-AAAA-1111'))
+    assert.ok(bodyText.includes('うちレシピを開く→設定'))
+    assert.ok(bodyText.includes('「Pro」→「購入と解錠」にこのコードを入力'))
+    assert.ok(bodyText.includes('「解錠する」を押すと全機能が使えます'))
+    // 精度開示は about/index.html の購入ボタン上の一文と同じであること(片方だけ変えない)
+    assert.ok(bodyText.includes(accuracy))
+    assert.ok(bodyText.includes('uchiapplication@gmail.com'))
+  }
+})
+
+await asyncTest('メール文面: HTML版は外部リソースを読み込まない(画像・スクリプト・外部CSS無し)', () => {
+  const html = renderCodeEmailHtml('UR-AAAA-1111')
+  assert.ok(!html.includes('<img'))
+  assert.ok(!html.includes('<script'))
+  assert.ok(!html.includes('<link'))
+  // リンク先はうちレシピ自身のみ
+  for (const href of html.match(/href="([^"]+)"/g) ?? []) {
+    assert.ok(href.includes('uchirecipe.com'), `想定外のリンク先: ${href}`)
+  }
 })
 
 console.log(`purchase-fulfill: ${passCount}件のテストに合格しました`)
