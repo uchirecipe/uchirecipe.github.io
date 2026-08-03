@@ -16,7 +16,7 @@
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 
 /** 送信元。uchirecipe.com をResendで認証済みであること(手順は scripts/load-codes.md)。 */
-const FROM = 'コード配信 <code@uchirecipe.com>'
+const FROM = 'うちレシピ <code@uchirecipe.com>'
 /** 返信先。購入者が「返信」したときに届く先(Resendの送信元アドレスは受信できないため必須)。 */
 const REPLY_TO = 'uchiapplication@gmail.com'
 
