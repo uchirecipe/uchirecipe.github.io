@@ -249,7 +249,7 @@
 //         維持されること。合わせて整理モード一括削除も同じセッションで検証し、削除ボタンが
 //         「選択した食材◯件を削除」で全選択/選択解除の下に出ること(補足#15)、削除後も整理
 //         モードのままであること(補足#16。2026-07-24オーナー補足で挙動を統一)を確認する) /
-//         MEALPLAN-07(献立タブ・月タブ「期間の栄養と食費」・2026-07-17 便AB → 2026-07-28 便CAで
+//         MEALPLAN-07(献立タブ・月タブ「期間の食費と栄養」・2026-07-17 便AB → 2026-07-28 便CAで
 //         オーナー確定仕様に改訂: ①平均(1食あたり)を廃止し「1人が期間内に摂取した食事の合計
 //         (1人分)」を出す ②過去日は作った記録・今日以降は登録した献立だけで数える(過去の予定
 //         ベース表示は廃止) ③カレンダーのセル表示を写真/栄養/食費で切り替えられる。
@@ -2309,10 +2309,10 @@ try {
             proSectionText.includes('レシピを開いて「栄養価の概算」をタップする'),
         )
         check(
-          // 2026-07-28 便CA: 月タブのボタン名を「期間の栄養と食費」に変えたため、案内文の期待値も更新
-          'DISC-01 解錠後の案内に期間の集計(期間の栄養と食費)への行き方が書かれている',
-          proSectionText.includes('期間の食費と摂取できた栄養') &&
-            proSectionText.includes('献立タブ →「月」→「期間の栄養と食費」'),
+          // 2026-07-28 便CA → 2026-08-03 便DR: 月タブのボタン名を変えたため、案内文の期待値も更新
+          'DISC-01 解錠後の案内に期間の集計(期間の食費と栄養)への行き方が書かれている',
+          proSectionText.includes('期間の食費と栄養') &&
+            proSectionText.includes('献立タブ →「月」→「期間の食費と栄養」'),
         )
         const discLinks = await nutPage.evaluate(() => {
           const hrefs = Array.from(document.querySelectorAll('#pro-section a')).map((a) =>
@@ -6161,7 +6161,7 @@ try {
     }
   }
 
-  // --- MEALPLAN-07: 献立タブ・月タブ「期間の栄養と食費」
+  // --- MEALPLAN-07: 献立タブ・月タブ「期間の食費と栄養」
   // (2026-07-17 便AB → 2026-07-28 便CAでオーナー確定仕様に改訂)。
   //
   // 【旧テストを書き換えた理由】便CAでオーナー確定の仕様変更が2点入り、旧テストが固定していた
@@ -6328,7 +6328,11 @@ try {
 
       // 日セルは data-date で掴む(予定プレビュー・数字が入っても壊れない)
       const rcDay = (date) => rcPage.locator(`button[data-date="${date}"]`)
-      const rcModeBtn = rcPage.getByRole('button', { name: '期間の栄養と食費', exact: true })
+      const rcModeBtn = rcPage.getByRole('button', { name: '期間の食費と栄養', exact: true })
+      // 便DRで期間カードも月タブと同じ体裁(食費の表＋折りたたみ)になったため、
+      // 本文全体ではなくカード/表を掴んで読む(同じ画面に月の食費の表があり、文言が重なるため)
+      const rcCard = rcPage.locator('[data-testid="range-result-card"]')
+      const rcTable = rcPage.locator('[data-testid="range-cost-table"]')
       const rcNextMonthBtn = rcPage.getByRole('button', { name: '次の月', exact: true })
       const rcPrevMonthBtn = rcPage.getByRole('button', { name: '前の月', exact: true })
 
@@ -6361,7 +6365,7 @@ try {
         (await rcPage.locator('[role="dialog"]').count()) === 0,
       )
       const rcFutureText = (await rcPage.textContent('body')) ?? ''
-      check('MEALPLAN-07 結果カードの見出しが出る', rcFutureText.includes('期間の栄養と食費'))
+      check('MEALPLAN-07 結果カードの見出しが出る', rcFutureText.includes('期間の食費と栄養'))
       check('MEALPLAN-07 結果カードに日数(6日間)が出る', rcFutureText.includes('6日間'))
       check(
         'MEALPLAN-07(便CA③) 未来だけの期間は「登録した献立で計算」と明示する',
@@ -6372,48 +6376,83 @@ try {
         'MEALPLAN-07(便CA③) 未来だけの期間に「作った記録だけで計算」は出さない',
         !rcFutureText.includes('過ぎた日なので、作った記録だけで計算しています'),
       )
-      const rcFuturePersonalMatch = rcFutureText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)
+      // 2026-08-03 便DR: 1人分の合計は食費の表の1行目(「1人分／献立を1食ずつ足した合計」)に入った
+      const rcFutureTableText = (await rcTable.textContent()) ?? ''
+      const rcFuturePersonalMatch = rcFutureTableText.match(
+        /1人分献立を1食ずつ足した合計約([\d,]+)円(\d+)食/,
+      )
       const rcFuturePersonal = Number((rcFuturePersonalMatch?.[1] ?? '-1').replace(/,/g, ''))
       check(
-        'MEALPLAN-07(便CA①) 1人分の期間合計＝単品概算食費÷登録人数×2品(平均ではなく合計)',
-        rcFuturePersonal === Math.round(rcPersonalOne * 2),
-        `表示=${rcFuturePersonal} 期待=${Math.round(rcPersonalOne * 2)} single=${rcSingleCost} servings=${rcServings}`,
+        'MEALPLAN-07(便CA①・便DR) 表の「1人分」＝単品概算食費÷登録人数×2品(平均ではなく合計)と2食',
+        rcFuturePersonal === Math.round(rcPersonalOne * 2) && rcFuturePersonalMatch?.[2] === '2',
+        `表=${rcFutureTableText.slice(0, 200)} 期待=${Math.round(rcPersonalOne * 2)}`,
+      )
+      // 同じ画面の月カードにも同じ文言があるので、並びの検査は期間カードの中だけを読む
+      const rcFutureCardText = (await rcCard.textContent()) ?? ''
+      check(
+        'MEALPLAN-07(便DR) 期間カードの並びは月タブと同じ「食費→栄養」(食費の表が栄養8項目より先)',
+        rcFutureCardText.indexOf('献立を1食ずつ足した合計') > 0 &&
+          rcFutureCardText.indexOf('献立を1食ずつ足した合計') <
+            rcFutureCardText.indexOf('たんぱく質'),
+        `カード=${rcFutureCardText.slice(0, 200)}`,
       )
       check(
-        'MEALPLAN-07(便CA①) 内訳に「作った記録 約0円（0品）／登録した献立 …（2品）」が出る',
-        /内訳 作った記録 約0円（0品）／登録した献立 約[\d,]+円（2品）/.test(rcFutureText),
-        `内訳=${rcFutureText.match(/内訳[^。]{0,60}/)?.[0]}`,
-      )
-      check(
-        'MEALPLAN-07(便CA①) 1人あたり1日の金額＝1人分合計÷6日',
-        rcFutureText.includes(
-          `1人あたり1日 約${Math.round(Math.round(rcPersonalOne * 2) / 6).toLocaleString()}円`,
+        'MEALPLAN-07(便CA①・便DR) 1日あたりの平均＝1人分合計÷6日(分母を行に書く)',
+        rcFutureTableText.includes(
+          `1日あたりの平均1人分÷選んだ6日約${Math.round(Math.round(rcPersonalOne * 2) / 6).toLocaleString()}円`,
         ),
-        `本文=${rcFutureText.match(/1人あたり1日 約[\d,]+円/)?.[0]}`,
+        `表=${rcFutureTableText.match(/1日あたりの平均[^円]{0,30}円/)?.[0]}`,
       )
       check(
         'MEALPLAN-07(便CA①) 廃止した「1食あたり 約◯円」は出さない',
         !/1食あたり 約[\d,]+円/.test(rcFutureText),
       )
       check(
-        // 2026-07-30 便CH/C8＋2026-08-03 便DQ: ラベルは「作った記録の食費（作った食数ぶん）」
-        'MEALPLAN-07(便CA) 未来だけの期間には「作った記録の食費（作った食数ぶん）」を出さない',
-        !rcFutureText.includes('作った記録の食費（作った食数ぶん）'),
+        // 2026-07-30 便CH/C8＋2026-08-03 便DQ/DR: 実績の行は表の「全員分／作った食数ぶん」
+        'MEALPLAN-07(便CA・便DR) 未来だけの期間の表に「作った食数ぶん」の行は出ない(予定の行だけ)',
+        !rcFutureTableText.includes('作った食数ぶん') &&
+          /これから作る予定全員分作る食数ぶん約[\d,]+円のべ\d+食/.test(rcFutureTableText),
+        `表=${rcFutureTableText.slice(0, 240)}`,
+      )
+      // 2026-08-03 便DR: 内訳と価格の但し書きは月タブと同じく折りたたみの中(既定は畳む)
+      check(
+        'MEALPLAN-07(便DR) 内訳と価格の但し書きは既定で畳まれている',
+        !rcFutureCardText.includes('内訳 作った記録'),
+      )
+      await rcCard.getByRole('button', { name: '内訳を見る' }).click()
+      await rcPage.waitForTimeout(200)
+      const rcFutureOpenText = (await rcCard.textContent()) ?? ''
+      check(
+        'MEALPLAN-07(便CA①) 内訳に「作った記録 約0円（0品）／登録した献立 …（2品）」が出る',
+        /内訳 作った記録 約0円（0品）／登録した献立 約[\d,]+円（2品）/.test(rcFutureOpenText),
+        `内訳=${rcFutureOpenText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
-        'MEALPLAN-07(便CA①) 「期間内に摂取できた栄養（1人分）」が8項目で出る',
-        rcFutureText.includes('期間内に摂取できた栄養（1人分）') &&
-          rcFutureText.includes('エネルギー') &&
-          rcFutureText.includes('食物繊維'),
+        'MEALPLAN-07(便CA①・便DR) 見出し「栄養（1人分）」の下に8項目が出る',
+        rcFutureOpenText.includes('栄養（1人分）') &&
+          rcFutureOpenText.includes('エネルギー') &&
+          rcFutureOpenText.includes('食物繊維'),
       )
       check(
         'MEALPLAN-07 摂取栄養は「概算」表記で出す(2026-08-02 便CW-9で数値側の表記を統一)',
-        rcFutureText.includes('概算'),
+        rcFutureOpenText.includes('概算'),
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品の栄養価を、1食分ずつ足して算出した数値です」',
-        rcFutureText.includes('登録した献立2品の栄養価を、1食分ずつ足して算出した数値です'),
-        `注記=${rcFutureText.match(/.{0,10}1食分ずつ足して算出した数値です/)?.[0]}`,
+        rcFutureOpenText.includes('登録した献立2品の栄養価を、1食分ずつ足して算出した数値です'),
+        `注記=${rcFutureOpenText.match(/.{0,10}1食分ずつ足して算出した数値です/)?.[0]}`,
+      )
+      // 便DR: 栄養の長い但し書きと出典も月タブと同じく折りたたみの中
+      check(
+        'MEALPLAN-07(便DR) 栄養の長い但し書きと出典は既定では出さない',
+        !rcFutureOpenText.includes('調理による変化などは反映しておらず'),
+      )
+      await rcCard.getByRole('button', { name: '注記と出典を見る' }).click()
+      await rcPage.waitForTimeout(200)
+      check(
+        'MEALPLAN-07(便DR) 「注記と出典を見る」で概算の但し書きと成分表の出典が出る',
+        ((await rcCard.textContent()) ?? '').includes('調理による変化などは反映しておらず') &&
+          ((await rcCard.textContent()) ?? '').includes('出典: '),
       )
 
       // 終了日<開始日の順にタップしても自動で入れ替わり同じ結果になる
@@ -6427,7 +6466,9 @@ try {
         rcSwappedText.includes('6日間'),
       )
       const rcSwappedPersonal = Number(
-        (rcSwappedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
+        (((await rcTable.textContent()) ?? '').match(/1人分献立を1食ずつ足した合計約([\d,]+)円/)?.[1] ??
+          '-1'
+        ).replace(/,/g, ''),
       )
       check(
         'MEALPLAN-07 逆順タップでも1人分の合計は変わらない(自動入れ替え)',
@@ -6449,8 +6490,12 @@ try {
         'MEALPLAN-07(便CA③) 過去だけの期間は「作った記録だけで計算」と明示する',
         rcPastText.includes('過ぎた日なので、作った記録だけで計算しています'),
       )
+      const rcPastTableText = (await rcTable.textContent()) ?? ''
       const rcPastPersonal = Number(
-        (rcPastText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
+        (rcPastTableText.match(/1人分献立を1食ずつ足した合計約([\d,]+)円/)?.[1] ?? '-1').replace(
+          /,/g,
+          '',
+        ),
       )
       check(
         'MEALPLAN-07(便CA①) 過去期間の1人分合計＝作った記録1品の1人分(何人分作ったかでは増えない)',
@@ -6465,11 +6510,17 @@ try {
       check(
         // 2026-07-30 便CH/C8: 「全体」→数え方を言い切る・「◯食分」→「のべ◯食分」
         // 2026-08-03 便DQ: 予定側「作る食数ぶん」と語をそろえて「作った食数ぶん」に統一
-        'MEALPLAN-07(便CA) オーナー指示で残す「作った記録の食費（作った食数ぶん）約◯円（のべ◯食分）」が出る',
-        rcPastText.includes(
-          `作った記録の食費（作った食数ぶん）約${rcSingleCost.toLocaleString()}円（のべ${rcServings}食分）`,
+        // 2026-08-03 便DR: 表の「全員分／作った食数ぶん」の行になった(数字と数え方は同じ)
+        'MEALPLAN-07(便CA・便DR) オーナー指示で残す「全員分／作った食数ぶん」の行が金額と延べ食数で出る',
+        rcPastTableText.includes(
+          `全員分作った食数ぶん約${rcSingleCost.toLocaleString()}円のべ${rcServings}食`,
         ),
-        `全体=${rcPastText.match(/作った記録の食費（作った食数ぶん）約[\d,]+円（のべ\d+食分）/)?.[0]} single=${rcSingleCost} servings=${rcServings}`,
+        `表=${rcPastTableText.slice(0, 240)} single=${rcSingleCost} servings=${rcServings}`,
+      )
+      check(
+        'MEALPLAN-07(便DR) 過去だけの期間の表に「これから作る予定」の下段は出ない',
+        !rcPastTableText.includes('これから作る予定'),
+        `表=${rcPastTableText.slice(0, 240)}`,
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品の栄養価を、1食分ずつ足して算出した数値です」',
@@ -6514,7 +6565,10 @@ try {
           rcMixedText.includes('作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
         )
         const rcMixedPersonal = Number(
-          (rcMixedText.match(/期間内の食費（1人分）\s*約([\d,]+)円/)?.[1] ?? '-1').replace(/,/g, ''),
+          (((await rcTable.textContent()) ?? '').match(
+            /1人分献立を1食ずつ足した合計約([\d,]+)円/,
+          )?.[1] ?? '-1'
+          ).replace(/,/g, ''),
         )
         check(
           'MEALPLAN-07(便CA①) 混在期間の1人分合計＝実績1品＋予定1品',
@@ -7446,8 +7500,8 @@ try {
         `title=${meThisMonthTitle}`,
       )
       check(
-        'MEALPLAN-A3B3(B-3) 期間指定のUI(期間の栄養と食費)も従来どおり残っている',
-        (await mePage.getByRole('button', { name: '期間の栄養と食費', exact: true }).count()) === 1,
+        'MEALPLAN-A3B3(B-3) 期間指定のUI(期間の食費と栄養)も従来どおり残っている',
+        (await mePage.getByRole('button', { name: '期間の食費と栄養', exact: true }).count()) === 1,
       )
 
       // 翌月へ移動(全日が未来日=編集対象)。10日のセルを開く
