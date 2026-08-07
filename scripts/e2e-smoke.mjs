@@ -3272,7 +3272,8 @@ try {
   //  DP-5 記録が付いた枠に「作った」バッジ+淡い面/文字を出して予定と見分ける
   //       (司令部裁定: 見た目で強く区別し、編集は可能なまま残す=間違えた記録を直せない方が害が大きい)
   //  DP-6 「表示のしかた」を畳んでいるときは「表示する食事」の見出し文字を出さずボタン群だけ残す
-  //  DP-7 開いたときの並びは 週の区切り → 表示する食事 → まとめて空にする
+  //  DP-7/DT-6 食事のボタン群は「表示のしかた」の見出しの横に置き、開閉に関わらず同じ場所に出す。
+  //       開いたときの中身の並びは 週の区切り → まとめて空にする
   //  DP-8 今日のカードの囲み線を太く/まとめ3つ(栄養価・概算食費・献立表)を曜日カードと区切る ---
   currentCheck = 'WEEKUI-01'
   {
@@ -3304,9 +3305,30 @@ try {
         (await wuSlotGroup.getByRole('button').count()) === 3,
       )
 
-      // DP-7: 開くと 週の区切り → 表示する食事 → まとめて空にする の順に並ぶ
+      // DT-6: 食事のボタン群は見出し「表示のしかた」と同じ行(＝折りたたみボタンの直後)にある
+      const wuSlotInHeader = await wuPage.evaluate(() => {
+        const group = document.querySelector('[role="group"][aria-label="表示する食事"]')
+        const toggle = group?.parentElement?.querySelector('button[aria-expanded]')
+        return {
+          sameRow: !!toggle,
+          afterToggle:
+            !!toggle &&
+            !!group &&
+            (toggle.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+        }
+      })
+      check(
+        'WEEKUI-01(便DT-6) 食事のボタン群は「表示のしかた」の見出し(折りたたみボタン)の横にある',
+        wuSlotInHeader.sameRow && wuSlotInHeader.afterToggle,
+        `pos=${JSON.stringify(wuSlotInHeader)}`,
+      )
+      // DP-7: 開くと 週の区切り → まとめて空にする の順に並ぶ
       await wuPage.getByRole('button', { name: '表示のしかたを開く' }).click()
       await wuPage.waitForTimeout(400)
+      check(
+        'WEEKUI-01(便DT-6) 開いても食事のボタン群は見出しの横のまま(1組だけ)',
+        (await wuPage.getByRole('group', { name: '表示する食事' }).count()) === 1,
+      )
       const wuOrder = await wuPage.evaluate(() => {
         const sec = [...document.querySelectorAll('section')].find(
           (s) => s.textContent?.includes('表示のしかた') && s.textContent?.includes('週区切り'),
@@ -3314,13 +3336,12 @@ try {
         const txt = sec?.textContent ?? ''
         return {
           layout: txt.indexOf('週区切り'),
-          slot: txt.indexOf('表示する食事'),
           clear: txt.indexOf('まとめて空にする'),
         }
       })
       check(
-        'WEEKUI-01(便DP-7) 「表示のしかた」の並びが 週の区切り→表示する食事→まとめて空にする',
-        wuOrder.layout >= 0 && wuOrder.layout < wuOrder.slot && wuOrder.slot < wuOrder.clear,
+        'WEEKUI-01(便DP-7) 「表示のしかた」の並びが 週の区切り→まとめて空にする',
+        wuOrder.layout >= 0 && wuOrder.layout < wuOrder.clear,
         `order=${JSON.stringify(wuOrder)}`,
       )
       await wuPage.getByRole('button', { name: '表示のしかたを閉じる' }).click()
@@ -3453,6 +3474,264 @@ try {
       )
     } finally {
       await wuBrowser.close()
+    }
+  }
+
+  // --- WEEKUI-DT: 2026-08-07 便DT(オーナー実機確認)の10件。
+  //  DT-1  日タブの「作った！」ボタンをカードの右下へ(押し間違いを減らす配置)
+  //  DT-2  週タブの記録カード→レシピ詳細→戻る で、同じ週・同じスクロール位置へ戻り、
+  //        その後「レシピ」タブを押すと(詳細ではなく)レシピ一覧が開く
+  //  DT-3  日付の切り替え欄は「すべて畳む」の上(7日分カードの直前)
+  //  DT-4  グループ見出しは「献立を提案」
+  //  DT-5  実行ボタンは「まとめて献立を入力」。畳んでいても見える・塗りつぶしで目立つ
+  //  DT-6  畳んでも使うボタンは見出しの横に集約
+  //  DT-7  「先週の献立をコピー」はスイッチのみ(ONで他の条件を無効化)…MEALPLAN-S3で検証
+  //  DT-8  入れかたスイッチ。既定は非破壊(まだ決まっていない枠だけ埋める)
+  //  DT-9  目的の軸は8つ…PURPOSE-02で検証
+  //  DT-10 食事(朝食/昼食/夕食)の文字を少し大きく ---
+  currentCheck = 'WEEKUI-DT'
+  {
+    const dtBrowser = await chromium.launch()
+    const dtContext = await dtBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dtPage = await dtContext.newPage()
+    dtPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WEEKUI-DT] ${err.message}`)
+    })
+    try {
+      await dtPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dtPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // ---------- DT-1: 日タブの「作った！」は行の右端に寄る ----------
+      // 「おまかせで提案」で今日の献立に品を入れてから、行の中でボタンが右寄せか見る
+      await dtPage.getByRole('button', { name: /おまかせで提案/ }).first().click()
+      await dtPage.waitForTimeout(1500)
+      const dtCookedBtn = await dtPage.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find((b) =>
+          b.textContent?.includes('作った！'),
+        )
+        const li = btn?.closest('li')
+        if (!btn || !li) return null
+        const wrap = btn.parentElement
+        const liRect = li.getBoundingClientRect()
+        const btnRect = btn.getBoundingClientRect()
+        return {
+          wrapCls: wrap?.className ?? '',
+          // 行の右端との差(px)。右寄せなら数px以内に収まる
+          rightGap: Math.round(liRect.right - btnRect.right),
+          leftGap: Math.round(btnRect.left - liRect.left),
+        }
+      })
+      check(
+        'WEEKUI-DT(便DT-1) 日タブの「作った！」はカードの右下に寄っている',
+        !!dtCookedBtn &&
+          dtCookedBtn.wrapCls.includes('justify-end') &&
+          dtCookedBtn.rightGap < dtCookedBtn.leftGap,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+
+      // ---------- 週タブへ ----------
+      await dtPage.getByRole('button', { name: '週', exact: true }).click()
+      await dtPage.waitForTimeout(700)
+
+      // ---------- DT-4/5/6: 見出しの名前・実行ボタンの位置と見た目 ----------
+      const dtBody = (await dtPage.textContent('body')) ?? ''
+      check(
+        'WEEKUI-DT(便DT-4) グループ見出しが「献立を提案」になっている(「自動で献立を提案」は残っていない)',
+        dtBody.includes('献立を提案') && !dtBody.includes('自動で献立を提案'),
+      )
+      const dtFillBtn = dtPage.getByRole('button', { name: 'まとめて献立を入力' })
+      check('WEEKUI-DT(便DT-5) 実行ボタンは「まとめて献立を入力」', await dtFillBtn.isVisible())
+      check(
+        'WEEKUI-DT(便DT-5) 実行ボタンは塗りつぶしで目立たせている',
+        ((await dtFillBtn.getAttribute('class')) ?? '').includes('bg-accent'),
+      )
+      const dtFillInHeader = await dtPage.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent?.trim() === 'まとめて献立を入力',
+        )
+        const toggle = btn?.parentElement?.querySelector('button[aria-expanded]')
+        return { sameRow: !!toggle, toggleLabel: toggle?.textContent ?? '' }
+      })
+      check(
+        'WEEKUI-DT(便DT-6) 実行ボタンは「献立を提案」の見出しの横にある',
+        dtFillInHeader.sameRow && dtFillInHeader.toggleLabel.includes('献立を提案'),
+        `header=${JSON.stringify(dtFillInHeader)}`,
+      )
+      // 畳んでも押せる位置に残る
+      await dtPage.getByRole('button', { name: '献立を提案を閉じる' }).click()
+      await dtPage.waitForTimeout(300)
+      check(
+        'WEEKUI-DT(便DT-5) グループを畳んでも「まとめて献立を入力」は見えたまま',
+        await dtFillBtn.isVisible(),
+      )
+      check(
+        'WEEKUI-DT(便DT-6) 畳むと提案の条件・入れかたは隠れる(実行ボタンだけ残る)',
+        (await dtPage.getByRole('button', { name: /^提案の条件/ }).count()) === 0 &&
+          (await dtPage.getByRole('button', { name: 'レシピを総入れ替え', exact: true }).count()) === 0,
+      )
+      await dtPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await dtPage.waitForTimeout(300)
+
+      // ---------- DT-3: 日付の切り替え欄は「すべて畳む」の上・7日分カードの直前 ----------
+      const dtOrder = await dtPage.evaluate(() => {
+        const all = [...document.querySelectorAll('button')]
+        const prev = document.querySelector('button[aria-label="前の週"]')
+        const collapse = all.find((b) => b.textContent?.trim() === 'すべて畳む')
+        const firstCard = document.querySelector('section[data-date]')
+        const autoToggle = all.find((b) => b.textContent?.includes('献立を提案'))
+        const pos = (a, b) =>
+          a && b ? (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 : false
+        return {
+          hasAll: !!prev && !!collapse && !!firstCard && !!autoToggle,
+          afterGroups: pos(autoToggle, prev),
+          beforeCollapse: pos(prev, collapse),
+          beforeCards: pos(collapse, firstCard),
+        }
+      })
+      check(
+        'WEEKUI-DT(便DT-3) 日付の切り替え欄は操作グループより下・「すべて畳む」の上にある',
+        dtOrder.hasAll && dtOrder.afterGroups && dtOrder.beforeCollapse && dtOrder.beforeCards,
+        `order=${JSON.stringify(dtOrder)}`,
+      )
+
+      // ---------- DT-8: 入れかたスイッチ。既定は非破壊 ----------
+      check(
+        'WEEKUI-DT(便DT-8) 既定の入れかたは「まだ決まっていない枠だけ埋める」(非破壊)',
+        (await dtPage
+          .getByRole('button', { name: 'まだ決まっていない枠だけ埋める', exact: true })
+          .getAttribute('aria-pressed')) === 'true',
+      )
+      // 既定のまま2回押しても、1回目に入った献立のidが1件も入れ替わらない(=1品も消していない)
+      const dtDinnerIds = () =>
+        dtPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () => resolve(g.result.map((e) => e.id).sort((a, b) => a - b))
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      await dtFillBtn.click()
+      await dtPage.waitForTimeout(1200)
+      const dtIds1 = await dtDinnerIds()
+      check('WEEKUI-DT(便DT-8) 1回目で献立が入る', dtIds1.length > 0, `n=${dtIds1.length}`)
+      await dtFillBtn.click()
+      await dtPage.waitForTimeout(1200)
+      const dtIds2 = await dtDinnerIds()
+      check(
+        'WEEKUI-DT(便DT-8) 既定では2回押しても既存の献立が1件も消えない(完全に非破壊)',
+        dtIds1.every((id) => dtIds2.includes(id)),
+        `1=${JSON.stringify(dtIds1)} / 2=${JSON.stringify(dtIds2)}`,
+      )
+
+      // ---------- DT-10: 食事(朝食/昼食/夕食)の文字を少し大きく ----------
+      const dtSlotLabel = await dtPage.evaluate(() => {
+        const block = document.querySelector('[data-testid="slot-block"]')
+        const p = block?.querySelector('p')
+        if (!p) return null
+        return { text: p.textContent ?? '', size: getComputedStyle(p).fontSize, cls: p.className }
+      })
+      check(
+        'WEEKUI-DT(便DT-10) 提案結果の「夕食」等の文字が14px(text-sm)になっている',
+        !!dtSlotLabel &&
+          ['朝食', '昼食', '夕食'].includes(dtSlotLabel.text) &&
+          dtSlotLabel.size === '14px',
+        `slot=${JSON.stringify(dtSlotLabel)}`,
+      )
+
+      // ---------- DT-2: 週タブの記録カード→詳細→戻る の往復 ----------
+      // 過去日(昨日)に作った記録を仕込み、週タブに記録カードを出す
+      await dtPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const d = new Date()
+            d.setDate(d.getDate() - 1)
+            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const r = g.result.find((x) => x.title === 'カレーライス')
+                if (!r) {
+                  reject(new Error('カレーライスが見つからない'))
+                  return
+                }
+                r.cookedLogs = [{ date }, ...(r.cookedLogs ?? [])]
+                store.put(r)
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await dtPage.reload({ waitUntil: 'networkidle' })
+      await dtPage.waitForTimeout(1200)
+      await dtPage.getByRole('button', { name: '週', exact: true }).click()
+      await dtPage.waitForTimeout(900)
+      // 記録カードが見えるところまでスクロールしてから開く(戻ったときの復元位置の比較用)
+      const dtLogLink = dtPage.locator('a[href*="#/recipes/"]').filter({ hasText: 'カレーライス' }).first()
+      await dtLogLink.scrollIntoViewIfNeeded()
+      await dtPage.waitForTimeout(400)
+      const dtScrollBefore = await dtPage.evaluate(() => Math.round(window.scrollY))
+      const dtWeekBefore =
+        (await dtPage.locator('button[aria-label="前の週"] ~ button').first().textContent()) ?? ''
+      check(
+        'WEEKUI-DT(便DT-2) 前提: 記録カードを開く前に週タブをスクロールしている',
+        dtScrollBefore > 0,
+        `scrollY=${dtScrollBefore}`,
+      )
+      await dtLogLink.click()
+      await dtPage.waitForTimeout(900)
+      check(
+        'WEEKUI-DT(便DT-2) 記録カードからレシピ詳細が開く',
+        /#\/recipes\/\d+/.test(dtPage.url()),
+        `url=${dtPage.url()}`,
+      )
+      // 詳細の「戻る」で週タブへ帰る(従来はレシピ一覧へ飛んでいた)
+      await dtPage.getByRole('button', { name: '戻る' }).first().click()
+      await dtPage.waitForTimeout(1500)
+      check(
+        'WEEKUI-DT(便DT-2) 詳細の「戻る」で献立タブへ戻る(レシピ一覧へ飛ばない)',
+        dtPage.url().includes('#/meal-plan'),
+        `url=${dtPage.url()}`,
+      )
+      check(
+        'WEEKUI-DT(便DT-2) 復元に使ったクエリ(focus/restore)はURLから消える',
+        !dtPage.url().includes('focus=') && !dtPage.url().includes('restore='),
+        `url=${dtPage.url()}`,
+      )
+      const dtWeekAfter =
+        (await dtPage.locator('button[aria-label="前の週"] ~ button').first().textContent()) ?? ''
+      check(
+        'WEEKUI-DT(便DT-2) 戻ると週タブが開き、離れる前と同じ週を見ている',
+        dtWeekAfter.trim() === dtWeekBefore.trim() && dtWeekAfter.trim() !== '',
+        `before=${dtWeekBefore} / after=${dtWeekAfter}`,
+      )
+      const dtScrollAfter = await dtPage.evaluate(() => Math.round(window.scrollY))
+      check(
+        'WEEKUI-DT(便DT-2) 戻ると離れる前とほぼ同じスクロール位置に復元される(誤差40px以内)',
+        Math.abs(dtScrollAfter - dtScrollBefore) <= 40,
+        `before=${dtScrollBefore} / after=${dtScrollAfter}`,
+      )
+      // その後「レシピ」タブを押すと、さっき閉じた詳細ではなくレシピ一覧が開く
+      await dtPage.locator('nav a[href^="#/recipes"]').first().click()
+      await dtPage.waitForTimeout(900)
+      check(
+        'WEEKUI-DT(便DT-2) その後「レシピ」タブを押すとレシピ一覧が開く(詳細が開いたままにならない)',
+        /#\/recipes(\?|$)/.test(dtPage.url()),
+        `url=${dtPage.url()}`,
+      )
+    } finally {
+      await dtBrowser.close()
     }
   }
 
@@ -4559,7 +4838,7 @@ try {
   //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
   // ・成分値の出典と「めやすの出典」が別行で出ること
   // ・**未解錠(無料)では8項目が出ないこと**(たんぱく質・塩分等の実数値が出ず、鍵付き導線になること)
-  // 「まとめて献立を立てる」の対象を7日ぶん確実にするため「今日から7日間」表示に切り替えてから行う
+  // 「まとめて献立を入力」の対象を7日ぶん確実にするため「今日から7日間」表示に切り替えてから行う
   // (週区切り表示だと実行日の曜日次第で対象日数が変わり、めやすの日数が日替わりになる) ---
   currentCheck = 'NUTRI-DAY-01'
   {
@@ -4598,7 +4877,7 @@ try {
         !nbEmptyText.includes('この週の献立の栄養（1人分の概算）'),
       )
 
-      await nbPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await nbPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
       await nbPage.waitForTimeout(1200)
       const nbFilledText = await nbPage.textContent('body')
       check(
@@ -4830,7 +5109,7 @@ try {
       // 既定(夕食のみ)に朝食を足してから献立を立てる
       await npPage.getByRole('button', { name: '朝食', exact: true }).click()
       await npPage.waitForTimeout(300)
-      await npPage.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await npPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
       await npPage.waitForTimeout(1500)
       await npPage
         .getByRole('button', { name: /^この日（.+）の栄養の概算を詳しく見る$/ })
@@ -5104,10 +5383,10 @@ try {
           (await mp3Page.getByText('副菜', { exact: true }).count()) === 7,
       )
 
-      // 「まとめて献立を立てる」ボタンにアイコン(svg)が付く(SparklesからDicesへ変更。2026-07-13)
-      const fillWeekBtn = mp3Page.getByRole('button', { name: 'まとめて献立を立てる' })
+      // 「まとめて献立を入力」ボタンにアイコン(svg)が付く(SparklesからDicesへ変更。2026-07-13)
+      const fillWeekBtn = mp3Page.getByRole('button', { name: 'まとめて献立を入力' })
       check(
-        'MEALPLAN-03 「まとめて献立を立てる」ボタンにアイコンが付く',
+        'MEALPLAN-03 「まとめて献立を入力」ボタンにアイコンが付く',
         (await fillWeekBtn.locator('svg').count()) > 0,
       )
 
@@ -5277,11 +5556,13 @@ try {
     }
   }
 
-  // --- MEALPLAN-04: 「まとめて献立を立てる」の再抽選(修正1b・2026-07-14オーナー実機
+  // --- MEALPLAN-04: 「まとめて献立を入力」の再抽選(修正1b・2026-07-14オーナー実機
   // フィードバック)。以前は空き枠だけ埋めるため2回目以降のタップが無反応だった。
-  // 押すたびに「自動提案由来の枠」を一旦クリアしてから主菜+副菜のペアで埋め直す(再抽選)。
-  // 2026-07-22 便BEで「手動配置の枠は保護する」仕様が入ったが、このテストは手動配置が
-  // 一切ない(全枠が自動提案由来)状態なので、全枠が再抽選対象になり従来どおり全idが入れ替わる。
+  // 押すたびに枠を一旦クリアしてから主菜+副菜のペアで埋め直す(再抽選)。
+  // 2026-08-07 便DT-8(オーナー指示)で入れかたがスイッチになり、再抽選は
+  // 「レシピを総入れ替え」側の動きになった(既定は非破壊の「まだ決まっていない枠だけ埋める」)。
+  // このテストはスイッチを総入れ替えに倒してから押す。総入れ替えは消す操作なので、
+  // 2回目以降は規約Fの確認文が出る＝ダイアログを受け入れてから進む。
   // mealPlansテーブルの行idがクリア→再作成で入れ替わる(削除+追加のため必ず新しいautoIncrement
   // idになる)ことで再抽選を検証する。手動枠が保護されることは MEALPLAN-08 で別途検証する ---
   currentCheck = 'MEALPLAN-04'
@@ -5300,9 +5581,15 @@ try {
       errors.push(`[pageerror@MEALPLAN-04] ${err.message}`)
     })
     try {
+      // 総入れ替えの確認文(規約F)は自動で受け入れる。何が出たかは本文の検査で別途見る
+      let mp4DialogText = ''
+      mp4Page.on('dialog', (d) => {
+        mp4DialogText = d.message()
+        void d.accept()
+      })
       await mp4Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp4Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
-      // 便U-1: 既定タブは「日」になったため、「まとめて献立を立てる」がある「週」タブへ切り替える
+      // 便U-1: 既定タブは「日」になったため、「まとめて献立を入力」がある「週」タブへ切り替える
       await mp4Page.getByRole('button', { name: '週', exact: true }).click()
       await mp4Page.waitForTimeout(300)
       // 2026-07-16 便W-⑤a: 過去日はまとめて献立の対象外になったため、実行日の曜日に関係なく
@@ -5353,7 +5640,16 @@ try {
             }),
         )
 
-      const fillWeekBtn = mp4Page.getByRole('button', { name: 'まとめて献立を立てる' })
+      // 便DT-8: 入れかたを「レシピを総入れ替え」に倒す(既定は非破壊の「まだ決まっていない枠だけ埋める」)
+      await mp4Page.getByRole('button', { name: 'レシピを総入れ替え', exact: true }).click()
+      await mp4Page.waitForTimeout(200)
+      check(
+        'MEALPLAN-04(便DT-8) 入れかたを「レシピを総入れ替え」に切り替えられる',
+        (await mp4Page
+          .getByRole('button', { name: 'レシピを総入れ替え', exact: true })
+          .getAttribute('aria-pressed')) === 'true',
+      )
+      const fillWeekBtn = mp4Page.getByRole('button', { name: 'まとめて献立を入力' })
       await fillWeekBtn.click()
       await mp4Page.waitForTimeout(1000)
       const rowsAfterFirst = await dinnerRows()
@@ -5382,6 +5678,13 @@ try {
       check(
         'MEALPLAN-04 2回目のタップも無反応にならず、7日すべてに主菜が立つ(以前は無反応バグがあった)',
         rowsAfterSecond.filter((r) => r.role === 'main').length === 7,
+      )
+      check(
+        'MEALPLAN-04(便DT-8) 総入れ替えは消す前に確認文を出し、消える件数と残るものを両方書く(規約F)',
+        mp4DialogText.includes('消して') &&
+          mp4DialogText.includes('作った記録') &&
+          /\d+品/.test(mp4DialogText),
+        `dialog=${mp4DialogText}`,
       )
       const idsAfterSecond = rowsAfterSecond.map((r) => r.id)
       const overlappingIds = idsAfterSecond.filter((id) => idsAfterFirst.includes(id))
@@ -5604,7 +5907,7 @@ try {
         (await mp6Page.getByRole('button', { name: 'この行にレシピを自動提案する' }).count()) === 0,
       )
       // (a) 「まとめて献立を立てる」を押しても過去週には予定が生まれない(グリッドを出さないまま)
-      await mp6Page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await mp6Page.getByRole('button', { name: 'まとめて献立を入力' }).click()
       await mp6Page.waitForTimeout(600)
       check(
         'MEALPLAN-06(過去日保護a) 「まとめて献立を立てる」を押しても過去週に予定は出ない(0のまま)',
@@ -5682,7 +5985,7 @@ try {
       check('MEALPLAN-08 前提: 手動配置の行はauto=false(手動扱い)', manual.auto === false)
 
       // 「まとめて献立を立てる」を押す
-      const fillWeekBtn = mp8Page.getByRole('button', { name: 'まとめて献立を立てる' })
+      const fillWeekBtn = mp8Page.getByRole('button', { name: 'まとめて献立を入力' })
       await fillWeekBtn.click()
       await mp8Page.waitForTimeout(1000)
 
@@ -5780,7 +6083,7 @@ try {
 
       // (A) 火曜: 主菜=カレーライス(一品もの)を手動で入れる(次の先頭の未定=火曜の主菜)
       await assign('カレーライス')
-      await mp9Page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+      await mp9Page.getByRole('button', { name: 'まとめて献立を入力' }).click()
       await mp9Page.waitForTimeout(1200)
 
       // カレーの入った枠(date)に副菜行が無いことをIndexedDBで確認
@@ -6802,7 +7105,10 @@ try {
 
   // --- MEALPLAN-S3: 先週の献立をコピー(2026-07-25 便BU・docs/59)。週タブ「今日から7日間」表示にし、
   // 1週間前(source)にだけ夕食主菜を仕込み、今日(day0)には別の主菜を手動配置しておく。
-  // 「先週の献立をコピー」→確認ダイアログ承認で:
+  // 2026-08-07 便DT-7(オーナー指示): 独立したボタンをやめてスイッチにしたので、
+  // 「先週の献立をコピー」をONにしてから「まとめて献立を入力」を押す2段になった。
+  // ONのあいだは提案の条件・入れかたが効かないので、画面でも無効化されていることを併せて見る。
+  // 確認ダイアログ承認で:
   //  ・空いている未来日(day1=今日+1)に先週の主菜(カレーライス)がコピーされること
   //  ・既に手動配置がある今日(day0)は上書きされず元のまま(肉じゃが)残ること(非破壊)
   //  ・確認文が「入る件数」と「残る」を明示する規約F準拠であること
@@ -6890,8 +7196,23 @@ try {
       await cwPage.getByRole('button', { name: '週', exact: true }).click()
       await cwPage.waitForTimeout(400)
 
-      // 「先週の献立をコピー」実行(confirmは自動承認・メッセージを捕捉)
-      await cwPage.getByRole('button', { name: '先週の献立をコピー', exact: true }).click()
+      // 便DT-7: スイッチをONにしてから「まとめて献立を入力」で実行(confirmは自動承認・メッセージを捕捉)
+      const cwCopyToggle = cwPage.getByRole('button', { name: '先週の献立をコピー', exact: true })
+      await cwCopyToggle.click()
+      await cwPage.waitForTimeout(300)
+      check(
+        'MEALPLAN-S3(便DT-7) 「先週の献立をコピー」はスイッチで、押すとONになる',
+        (await cwCopyToggle.getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'MEALPLAN-S3(便DT-7) ONのあいだは提案の条件が効かないので押せない状態になる',
+        await cwPage.getByRole('button', { name: /^提案の条件/ }).isDisabled(),
+      )
+      check(
+        'MEALPLAN-S3(便DT-7) ONのあいだは入れかたのスイッチも押せない状態になる',
+        await cwPage.getByRole('button', { name: 'レシピを総入れ替え', exact: true }).isDisabled(),
+      )
+      await cwPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
       await cwPage.waitForTimeout(700)
 
       check(
@@ -14114,11 +14435,11 @@ try {
       const p1LockedText = (await p1Locked.textContent()) ?? ''
       check(
         'PURPOSE-01 鍵付き行に何ができるかが書かれている',
-        p1LockedText.includes('目的から組む') && p1LockedText.includes('たんぱく質を多めに'),
+        p1LockedText.includes('目的から組む') && p1LockedText.includes('たんぱく質多め'),
         `text=${p1LockedText}`,
       )
       check(
-        'PURPOSE-01 未解錠では目的の3択は出さない',
+        'PURPOSE-01 未解錠では目的の選択肢は出さない',
         (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
       )
       // 折りたたみを開いても、未解錠なら3択は出ない（鍵付き行だけ）
@@ -14140,7 +14461,7 @@ try {
     }
   }
 
-  // --- PURPOSE-02: 目的モード（Pro）。3択で「たんぱく質を多めに」を選ぶと
+  // --- PURPOSE-02: 目的モード（Pro）。「たんぱく質多め」を選ぶと
   //  ①選択が設定に残る（再読み込み後も維持）②畳んだ条件ラベルに現在値が出る
   //  ③「まとめて献立を立てる」で実際に献立が入り、その枠に目的が記録される
   //  ④月タブの答え合わせ（「この月の「目的から組む」」）に日数と数字が並置される
@@ -14187,13 +14508,15 @@ try {
       await p2Page.getByRole('button', { name: /^提案の条件/ }).click()
       await p2Page.waitForTimeout(300)
       const p2Picker = p2Page.locator('[data-testid="purpose-picker"]')
-      check('PURPOSE-02 解錠済みの条件欄に目的の3択が出る', await p2Picker.isVisible())
+      check('PURPOSE-02 解錠済みの条件欄に目的の選択肢が出る', await p2Picker.isVisible())
       const p2PickerText = (await p2Picker.textContent()) ?? ''
       check(
-        'PURPOSE-02 選択肢は 指定なし / たんぱく質を多めに / 塩分をひかえめに',
+        'PURPOSE-02 選択肢は 指定なし＋「多め」4つ＋「ひかえめ」4つの計8軸(2026-08-07 便DT-9)',
         p2PickerText.includes('指定なし') &&
-          p2PickerText.includes('たんぱく質を多めに') &&
-          p2PickerText.includes('塩分をひかえめに'),
+          ['たんぱく質多め', '食物繊維多め', '鉄多め', 'カルシウム多め',
+           'エネルギーひかえめ', '脂質ひかえめ', '炭水化物ひかえめ', '塩分ひかえめ'].every(
+            (label) => p2PickerText.includes(label),
+          ),
         `text=${p2PickerText}`,
       )
       check(
@@ -14210,11 +14533,11 @@ try {
         `text=${p2PickerText}`,
       )
 
-      await p2Picker.getByRole('button', { name: 'たんぱく質を多めに', exact: true }).click()
+      await p2Picker.getByRole('button', { name: 'たんぱく質多め', exact: true }).click()
       await p2Page.waitForTimeout(500)
       check(
         'PURPOSE-02 目的を選ぶと選択状態になる',
-        (await p2Picker.getByRole('button', { name: 'たんぱく質を多めに', exact: true }).getAttribute('aria-pressed')) ===
+        (await p2Picker.getByRole('button', { name: 'たんぱく質多め', exact: true }).getAttribute('aria-pressed')) ===
           'true',
       )
       // 折りたたむと、条件トグルのラベルに現在の目的が出る（何が効いているか畳んでも分かる）
@@ -14223,7 +14546,7 @@ try {
       check(
         'PURPOSE-02 畳んだ条件ラベルに現在の目的が出る',
         ((await p2Page.getByRole('button', { name: /^提案の条件/ }).textContent()) ?? '').includes(
-          'たんぱく質を多めに',
+          'たんぱく質多め',
         ),
       )
       // 設定に保存され、再読み込みしても選び直さずに済む（1か月続けるための指定）
@@ -14234,12 +14557,12 @@ try {
       check(
         'PURPOSE-02 選んだ目的は再読み込み後も残る',
         ((await p2Page.getByRole('button', { name: /^提案の条件/ }).textContent()) ?? '').includes(
-          'たんぱく質を多めに',
+          'たんぱく質多め',
         ),
       )
 
       // まとめて献立: 目的が効いていても提案は0件にならず、入れた枠に目的が記録される
-      await p2Page.getByRole('button', { name: 'まとめて献立を立てる', exact: true }).click()
+      await p2Page.getByRole('button', { name: 'まとめて献立を入力', exact: true }).click()
       await p2Page.waitForTimeout(1500)
       const p2Entries = await p2Page.evaluate(
         () =>
@@ -14269,7 +14592,7 @@ try {
       const p2ReviewText = (await p2Review.textContent()) ?? ''
       check(
         'PURPOSE-02 答え合わせは日数を「◯日 / ◯日」で並置する',
-        /「たんぱく質を多めに」で組んだ日: \d+日 \/ \d+日/.test(p2ReviewText),
+        /「たんぱく質多め」で組んだ日: \d+日 \/ \d+日/.test(p2ReviewText),
         `text=${p2ReviewText}`,
       )
       check(

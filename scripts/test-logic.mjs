@@ -168,6 +168,7 @@ import {
   canCompareRange,
   dayBalanceMap,
   guideForDays,
+  isMorePurpose,
   purposeAxisValue,
   purposePenalty,
   RICE_SERVING_RECIPE,
@@ -179,6 +180,18 @@ import {
   summarizeWeekBalance,
   vegetableGrams,
 } from '../src/logic/nutritionBalance.ts'
+import {
+  LESS_MEAL_PURPOSES,
+  MEAL_PURPOSES,
+  MORE_MEAL_PURPOSES,
+} from '../src/db/types.ts'
+import {
+  WEEK_RETURN_KEY,
+  WEEK_RETURN_PARAM,
+  LAST_RECIPES_PATH_KEY,
+  parseWeekReturn,
+  serializeWeekReturn,
+} from '../src/logic/navMemory.ts'
 import {
   COOK_NAVI_TRIAL_LIMIT,
   MONTH_TRIAL_LIMIT,
@@ -2359,7 +2372,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       '2026-07-24|dinner', '2026-07-25|dinner', '2026-07-26|dinner',
     ])
     eq('planWeekFill(空の週): 残す手動枠は0', plan.preservedSlotKeys.size, 0)
-    eq('planWeekFill(空の週): 削除対象なし', plan.autoEntryIdsToRemove, [])
+    eq('planWeekFill(空の週): 削除対象なし', plan.entryIdsToRemove, [])
     eq('planWeekFill(空の週): used除外なし', plan.usedRecipeIds, [])
   }
 
@@ -2369,7 +2382,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     const entries = week.map((date, i) => mkEntry(i + 1, date, 10 + i, { auto: true }))
     const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
     eq('planWeekFill(全自動枠): 全7枠が埋め直し対象', plan.slotsToFill.length, 7)
-    eq('planWeekFill(全自動枠): 自動行は全件削除対象', sortedNums(plan.autoEntryIdsToRemove), [1, 2, 3, 4, 5, 6, 7])
+    eq('planWeekFill(全自動枠): 自動行は全件削除対象', sortedNums(plan.entryIdsToRemove), [1, 2, 3, 4, 5, 6, 7])
     eq('planWeekFill(全自動枠): 残す手動枠は0(再抽選できる)', plan.preservedSlotKeys.size, 0)
   }
 
@@ -2386,7 +2399,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       keysOf(plan.slotsToFill),
       ['2026-07-21|dinner', '2026-07-22|dinner', '2026-07-23|dinner', '2026-07-24|dinner', '2026-07-25|dinner', '2026-07-26|dinner'],
     )
-    eq('planWeekFill(手動保護): 手動行(id=1)は削除されず、火の自動行(id=2)だけ削除', plan.autoEntryIdsToRemove, [2])
+    eq('planWeekFill(手動保護): 手動行(id=1)は削除されず、火の自動行(id=2)だけ削除', plan.entryIdsToRemove, [2])
     eq('planWeekFill(手動保護): 手動枠のレシピ(11)は重複回避のusedに入る', plan.usedRecipeIds.includes(11), true)
     // 便BH-2(役割粒度): 手動で主菜だけ入れた月曜は、主菜を残したまま副菜だけを追加で埋める
     eq(
@@ -2405,8 +2418,8 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     ]
     const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
     eq('planWeekFill(役割粒度): 手動副菜のある月曜は残す枠に入る', sortedStrs(plan.preservedSlotKeys), ['2026-07-20|dinner'])
-    eq('planWeekFill(役割粒度): 自動主菜(id=2)は削除して主菜だけ埋め直す', plan.autoEntryIdsToRemove.includes(2), true)
-    eq('planWeekFill(役割粒度): 手動副菜(id=1)は削除されない', plan.autoEntryIdsToRemove.includes(1), false)
+    eq('planWeekFill(役割粒度): 自動主菜(id=2)は削除して主菜だけ埋め直す', plan.entryIdsToRemove.includes(2), true)
+    eq('planWeekFill(役割粒度): 手動副菜(id=1)は削除されない', plan.entryIdsToRemove.includes(1), false)
     eq(
       'planWeekFill(役割粒度): 月曜は主菜だけ埋める(partialFills=main)',
       plan.partialFills.find((p) => p.date === '2026-07-20')?.fillRole,
@@ -2424,7 +2437,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       mkEntry(2, '2026-07-21', 32, { role: 'other', auto: true }), // 火・その他(autoが付いていても消さない)
     ]
     const plan = planWeekFill(entries, week, ['dinner'], '2026-07-20')
-    eq('planWeekFill(便DE-4): 汁物・その他は削除対象にしない', plan.autoEntryIdsToRemove, [])
+    eq('planWeekFill(便DE-4): 汁物・その他は削除対象にしない', plan.entryIdsToRemove, [])
     eq(
       'planWeekFill(便DE-4): 汁物だけの枠も主菜+副菜のペアで埋める',
       keysOf(plan.slotsToFill).includes('2026-07-20|dinner'),
@@ -2449,7 +2462,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     eq('planWeekFill(複合): 埋めるのは木・土・日の夕食', keysOf(plan.slotsToFill), [
       '2026-07-23|dinner', '2026-07-25|dinner', '2026-07-26|dinner',
     ])
-    eq('planWeekFill(複合): 削除は木の自動(id=3)のみ。金の自動(id=4)は枠ごと残すので消さない', plan.autoEntryIdsToRemove, [3])
+    eq('planWeekFill(複合): 削除は木の自動(id=3)のみ。金の自動(id=4)は枠ごと残すので消さない', plan.entryIdsToRemove, [3])
     eq('planWeekFill(複合): 過去日・非表示帯・残す枠の全レシピがusedに入る', sortedNums(plan.usedRecipeIds), [100, 200, 400, 401, 500])
     // 便BH-2(役割粒度): 手動主菜だけの水(今日)・金は、副菜だけを追加で埋める
     eq(
@@ -2490,7 +2503,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     )
     eq(
       'planWeekFill(月レンジ): 自動提案由来の行だけを消して振り直す(手動は消さない)',
-      plan.autoEntryIdsToRemove,
+      plan.entryIdsToRemove,
       [3],
     )
     eq(
@@ -2519,7 +2532,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       [again.slotsToFill.length, again.partialFills.length],
       [0, 0],
     )
-    eq('planWeekFill(便CH/C1): 削除する行は0件（自動配置分も消さない）', again.autoEntryIdsToRemove, [])
+    eq('planWeekFill(便CH/C1): 削除する行は0件（自動配置分も消さない）', again.entryIdsToRemove, [])
     eq(
       'planWeekFill(便CH/C1): 全31日が「すでに決まっている」枠として数えられる',
       again.preservedSlotKeys.size,
@@ -2538,7 +2551,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     const weekDefault = planWeekFill(filled.slice(0, 2), august, ['dinner'], '2026-08-01')
     eq(
       'planWeekFill(便CH/C1): 既定(keepAuto無し)は従来どおり自動枠を振り直す＝週タブは不変',
-      [weekDefault.preservedSlotKeys.size, sortedNums(weekDefault.autoEntryIdsToRemove)],
+      [weekDefault.preservedSlotKeys.size, sortedNums(weekDefault.entryIdsToRemove)],
       [0, [1, 2]],
     )
   }
@@ -2580,7 +2593,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     )
     eq(
       'planWeekFill(便CH/C10): メモの日に入っている献立は消さない(非破壊)',
-      withNoteEntry.autoEntryIdsToRemove,
+      withNoteEntry.entryIdsToRemove,
       [],
     )
     eq(
@@ -2589,6 +2602,101 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       [777],
     )
   }
+
+  // (8) 便DT-8(2026-08-07 オーナー指示): 週タブ「まとめて献立を入力」の入れかたスイッチ。
+  //  fillEmpty  … keepAuto=true と同じ＝1品も消さない(完全に非破壊)
+  //  replaceAll … 対象範囲の献立を手動配置も含めて全部消してから入れ直す
+  // 総入れ替えでも「過去日・表示していない食事」には触らない＝対象範囲の定義は変えない、が要。
+  {
+    const entries = [
+      mkEntry(1, '2026-07-19', 900), // 過去日(対象外)
+      mkEntry(2, '2026-07-20', 100), // 手動(今日)
+      mkEntry(3, '2026-07-21', 200, { auto: true }), // 自動
+      mkEntry(4, '2026-07-21', 201, { auto: true, role: 'side' }),
+      mkEntry(5, '2026-07-22', 300, { role: 'soup' }), // 汁物(自動提案は入れない役割)
+      mkEntry(6, '2026-07-23', 400, { slot: 'breakfast' }), // 非表示帯(対象外)
+    ]
+    // 「まだ決まっていない枠だけ埋める」= keepAuto:true。1品も消さない
+    const fillEmpty = planWeekFill(entries, week, ['dinner'], '2026-07-20', { keepAuto: true })
+    eq('planWeekFill(便DT-8/空き枠だけ): 削除する行は0件(完全に非破壊)', fillEmpty.entryIdsToRemove, [])
+    eq(
+      'planWeekFill(便DT-8/空き枠だけ): すでに入っている3日は残す枠に数える',
+      sortedStrs(fillEmpty.preservedSlotKeys),
+      ['2026-07-20|dinner', '2026-07-21|dinner'],
+    )
+    eq(
+      'planWeekFill(便DT-8/空き枠だけ): 空いている日だけ埋める(7日-すでに入っている2日=5日)',
+      fillEmpty.slotsToFill.length,
+      5,
+    )
+
+    // 「レシピを総入れ替え」= replaceAll:true。対象範囲の行は手動も自動も汁物も消す
+    const replaceAll = planWeekFill(entries, week, ['dinner'], '2026-07-20', { replaceAll: true })
+    eq(
+      'planWeekFill(便DT-8/総入れ替え): 対象範囲の行は手動(2)・自動(3,4)・汁物(5)とも削除対象',
+      sortedNums(replaceAll.entryIdsToRemove),
+      [2, 3, 4, 5],
+    )
+    eq(
+      'planWeekFill(便DT-8/総入れ替え): 過去日(id=1)と非表示帯(id=6)は消さない',
+      replaceAll.entryIdsToRemove.includes(1) || replaceAll.entryIdsToRemove.includes(6),
+      false,
+    )
+    eq(
+      'planWeekFill(便DT-8/総入れ替え): 残す枠は0＝7日ぜんぶをペアで入れ直す',
+      [replaceAll.preservedSlotKeys.size, replaceAll.slotsToFill.length, replaceAll.partialFills.length],
+      [0, 7, 0],
+    )
+    eq(
+      'planWeekFill(便DT-8/総入れ替え): 消す行のレシピは重複回避のusedに入れない(引き直せる)',
+      sortedNums(replaceAll.usedRecipeIds),
+      [400, 900], // 対象外の過去日・非表示帯だけ
+    )
+    // keepAuto と同時に指定されても、総入れ替えを優先する（矛盾した指定で「何も起きない」を作らない）
+    const bothFlags = planWeekFill(entries, week, ['dinner'], '2026-07-20', {
+      keepAuto: true,
+      replaceAll: true,
+    })
+    eq(
+      'planWeekFill(便DT-8): keepAutoと同時指定なら総入れ替えを優先する',
+      sortedNums(bothFlags.entryIdsToRemove),
+      [2, 3, 4, 5],
+    )
+  }
+}
+
+// ---------- navMemory(画面をまたぐ短期の記憶・2026-08-07 便DT-2) ----------
+// 週タブからレシピ詳細を開いて戻ってきたとき、同じ週・同じスクロール位置に復元するための覚え書き。
+// 壊れた値を読んだときに「変な場所へ飛ぶ」ことがないよう、受け付ける形をここで固定する。
+{
+  eq('DT2-NAV 覚えるキーは固定(別便が別名で書かない)', [WEEK_RETURN_KEY, LAST_RECIPES_PATH_KEY], [
+    'mealPlan:weekReturn',
+    'tabbar:lastRecipesPath',
+  ])
+  eq('DT2-NAV 復元の印は restore', WEEK_RETURN_PARAM, 'restore')
+  eq(
+    'DT2-NAV 覚えた形をそのまま読み戻せる',
+    parseWeekReturn(serializeWeekReturn({ weekStart: '2026-08-03', scrollY: 1234 })),
+    { weekStart: '2026-08-03', scrollY: 1234 },
+  )
+  eq(
+    'DT2-NAV スクロール位置は整数に丸めて覚える(小数のpxを持ち回らない)',
+    parseWeekReturn(serializeWeekReturn({ weekStart: '2026-08-03', scrollY: 12.7 })).scrollY,
+    13,
+  )
+  eq(
+    'DT2-NAV 負のスクロール位置は0に丸める',
+    parseWeekReturn(serializeWeekReturn({ weekStart: '2026-08-03', scrollY: -50 })).scrollY,
+    0,
+  )
+  eq('DT2-NAV 覚えが無ければnull(復元しない)', parseWeekReturn(null), null)
+  eq('DT2-NAV 空文字はnull', parseWeekReturn(''), null)
+  eq('DT2-NAV JSONでなければnull', parseWeekReturn('{壊れた'), null)
+  eq('DT2-NAV 物体でなければnull', parseWeekReturn('123'), null)
+  eq('DT2-NAV 日付の形が違えばnull', parseWeekReturn('{"weekStart":"2026/08/03","scrollY":0}'), null)
+  eq('DT2-NAV 日付が無ければnull', parseWeekReturn('{"scrollY":10}'), null)
+  eq('DT2-NAV スクロール位置が数値でなければnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":"10"}'), null)
+  eq('DT2-NAV NaNはnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":null}'), null)
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------
@@ -9584,6 +9692,75 @@ eq(
   const totals = (proteinG, saltG) => ({ proteinG, saltG })
   eq('CP2-AXIS たんぱく質軸の項目は proteinG', PURPOSE_NUTRIENT_KEY.protein, 'proteinG')
   eq('CP2-AXIS 塩分軸の項目は saltG', PURPOSE_NUTRIENT_KEY.lowSalt, 'saltG')
+
+  // --- (2b) 便DT-9(2026-08-07 オーナー指示): 目的の軸を8つへ拡張した ---
+  // 多め=たんぱく質・食物繊維・鉄・カルシウム / ひかえめ=エネルギー・脂質・炭水化物・塩分。
+  // 見る項目はすべて既存の NutrientTotals のキーで、新しい栄養計算は足していない。
+  eq('DT9-AXIS 目的は8つ', MEAL_PURPOSES.length, 8)
+  eq('DT9-AXIS 並びは「多め」4つ→「ひかえめ」4つ', MEAL_PURPOSES, [
+    'protein', 'fiber', 'iron', 'calcium', 'lowEnergy', 'lowFat', 'lowCarb', 'lowSalt',
+  ])
+  eq('DT9-AXIS 多めの目的は4つ', [...MORE_MEAL_PURPOSES], ['protein', 'fiber', 'iron', 'calcium'])
+  eq('DT9-AXIS ひかえめの目的は4つ', [...LESS_MEAL_PURPOSES], ['lowEnergy', 'lowFat', 'lowCarb', 'lowSalt'])
+  eq('DT9-AXIS 「多め」と「ひかえめ」は重ならず、8つで全目的を覆う', new Set([...MORE_MEAL_PURPOSES, ...LESS_MEAL_PURPOSES]).size, 8)
+  // 軸→栄養項目の対応（表示の項目名・単位もこの対応から引くので、ずれると画面の単位が嘘になる）
+  eq('DT9-AXIS 食物繊維軸は fiberG', PURPOSE_NUTRIENT_KEY.fiber, 'fiberG')
+  eq('DT9-AXIS 鉄軸は ironMg', PURPOSE_NUTRIENT_KEY.iron, 'ironMg')
+  eq('DT9-AXIS カルシウム軸は calciumMg', PURPOSE_NUTRIENT_KEY.calcium, 'calciumMg')
+  eq('DT9-AXIS エネルギー軸は kcal', PURPOSE_NUTRIENT_KEY.lowEnergy, 'kcal')
+  eq('DT9-AXIS 脂質軸は fatG', PURPOSE_NUTRIENT_KEY.lowFat, 'fatG')
+  eq('DT9-AXIS 炭水化物軸は carbG', PURPOSE_NUTRIENT_KEY.lowCarb, 'carbG')
+  eq(
+    'DT9-AXIS すべての目的に栄養項目が対応している(足し忘れが無い)',
+    MEAL_PURPOSES.every((p) => typeof PURPOSE_NUTRIENT_KEY[p] === 'string'),
+    true,
+  )
+  eq(
+    'DT9-AXIS 多め/ひかえめの向きは isMorePurpose が唯一の正',
+    MEAL_PURPOSES.map((p) => isMorePurpose(p)),
+    [true, true, true, true, false, false, false, false],
+  )
+  {
+    // 軸の値は主菜+副菜の1人分の合計（どの軸でも数え方は同じ）
+    const full = (over) => ({
+      kcal: 0, proteinG: 0, fatG: 0, carbG: 0, saltG: 0, fiberG: 0, ironMg: 0, calciumMg: 0, ...over,
+    })
+    eq('DT9-AXIS 食物繊維の軸も合計', purposeAxisValue('fiber', [full({ fiberG: 3.2 }), full({ fiberG: 1.8 })]), 5)
+    eq('DT9-AXIS 鉄の軸も合計', purposeAxisValue('iron', [full({ ironMg: 1.5 }), full({ ironMg: 0.5 })]), 2)
+    eq('DT9-AXIS エネルギーの軸も合計', purposeAxisValue('lowEnergy', [full({ kcal: 300 }), full({ kcal: 120 })]), 420)
+    // 「多め」の4軸: 多いほどペナルティが小さい・必ず正(打ち切り点を作らない)
+    for (const [purpose, key] of [
+      ['protein', 'proteinG'], ['fiber', 'fiberG'], ['iron', 'ironMg'], ['calcium', 'calciumMg'],
+    ]) {
+      eq(
+        `DT9-AXIS ${purpose}: 多いほうがペナルティが小さい`,
+        purposePenalty(purpose, [full({ [key]: 30 })]) < purposePenalty(purpose, [full({ [key]: 10 })]),
+        true,
+      )
+      eq(
+        `DT9-AXIS ${purpose}: ペナルティは必ず正(満たすべき線を作らない)`,
+        purposePenalty(purpose, [full({ [key]: 9999 })]) > 0,
+        true,
+      )
+    }
+    // 「ひかえめ」の4軸: 少ないほどペナルティが小さい・0のときだけ打ち切る
+    for (const [purpose, key] of [
+      ['lowEnergy', 'kcal'], ['lowFat', 'fatG'], ['lowCarb', 'carbG'], ['lowSalt', 'saltG'],
+    ]) {
+      eq(
+        `DT9-AXIS ${purpose}: 少ないほうがペナルティが小さい`,
+        purposePenalty(purpose, [full({ [key]: 10 })]) < purposePenalty(purpose, [full({ [key]: 30 })]),
+        true,
+      )
+      eq(`DT9-AXIS ${purpose}: ペナルティは軸の値そのもの`, purposePenalty(purpose, [full({ [key]: 12.5 })]), 12.5)
+      eq(`DT9-AXIS ${purpose}: 0だけが打ち切り点`, purposePenalty(purpose, [full({ [key]: 0 })]), 0)
+    }
+    // 既存の2軸(protein/lowSalt)の値は1ミリも変わっていない＝保存済みの目的の挙動は不変
+    eq('DT9-AXIS 既存のたんぱく質軸の式は不変', purposePenalty('protein', [full({ proteinG: 24 })]), 1 / 25)
+    eq('DT9-AXIS 既存の塩分軸の式は不変', purposePenalty('lowSalt', [full({ saltG: 2.5 })]), 2.5)
+    // 項目が欠けた物体を渡しても NaN にしない(0として数える)
+    eq('DT9-AXIS 項目が無ければ0として数える(NaNにしない)', purposeAxisValue('iron', [{}, { ironMg: 2 }]), 2)
+  }
   eq(
     'CP2-AXIS 軸の値は主菜+副菜の1人分の合計',
     purposeAxisValue('protein', [totals(20, 1), totals(5, 0.5)]),
