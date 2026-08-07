@@ -290,6 +290,14 @@
 //         FOCUS-KEEP-01(閉じた手順から再開する・完成！や別レシピ経由では手順1から。C3) /
 //         FOCUS-BACK-01(端末の戻るで調理中モードだけが閉じる。C11) /
 //         FOCUS-OTHER-01(別の料理のタイマーも料理名つきで出る・タップで調整窓が開き停止できる。C4/C8) /
+//         【2026-08-03 便DS オーナー実機フィードバック8件(調理中モード・タイマー・声で操作)】
+//         DS-MIC-01(①マイクを断られた状態を見つけて直し方を出す・自動再開ループを止める) /
+//         DS-VOICE-01(⑤時間の手掛かりが無い手順の「タイマー」に言い方の案内) /
+//         DS-NAME-01(②この料理のタイマーにも料理名を出す) /
+//         DS-BACK-01(③動作中タイマーから該当手順へ戻る導線=2026-07-12 0f62248の退行の復活) /
+//         DS-MUTE-01(④調理中モードのチップと調整の窓から消音できる) /
+//         DS-CUSTOMBTN-01(⑥「タイマー」ボタンはアイコンのみ・定位置で動かない) /
+//         DS-VIB-01(⑦終了で振動を呼ぶ) / DS-DONE-01(⑧終わりの表示が390pxで重ならず薄くならない) /
 //         BULKDEL-01(レシピ一覧のまとめて削除・2026-08-02 便CT: 「選択」ボタンと長押しで選択モードに入り、
 //         規約Fの確認文(レシピ本体+作った記録{n}件(写真{p}枚)+献立の予定・今日の献立/残るもの、を件数つき)を
 //         出してから削除する・削除後に週の献立/今日の献立の孤児が残らない・基本レシピには
@@ -1286,8 +1294,13 @@ try {
         await fsPage.waitForTimeout(250)
       }
       const reach = await fsPage.evaluate(() => {
+        // 手順本文の枠。2026-08-03 便DS でタイマー行にも「flex-1 + overflow-y-auto」を持つ
+        // 入れ物ができたため、縦並び(flex-col)であることまで見て本文の枠だけを選ぶ
         const scroller = Array.from(document.querySelectorAll('div')).find(
-          (d) => d.className.includes('overflow-y-auto') && d.className.includes('flex-1'),
+          (d) =>
+            d.className.includes('overflow-y-auto') &&
+            d.className.includes('flex-1') &&
+            d.className.includes('flex-col'),
         )
         const body = scroller?.querySelector('p.ja-phrase')
         const badge = scroller?.firstElementChild
@@ -3827,13 +3840,30 @@ try {
         const pill = Array.from(overlay.querySelectorAll('div.inline-flex')).find((p) =>
           p.className.includes('border-warning'),
         )
-        return pill
-          ? { pulses: pill.className.includes('animate-pulse'), bell: !!pill.querySelector('svg.animate-pulse') }
-          : null
+        if (!pill) return null
+        const fill = getComputedStyle(pill).backgroundColor
+        return {
+          // 2026-08-03 便DS/実機FB⑧: チップ全体の点滅は文字ごと薄くして読めなくするのでやめた。
+          // 点滅はベルだけに残し、代わりにチップを塗って一目で見分けられるようにした
+          pillPulses: pill.className.includes('animate-pulse'),
+          bell: !!pill.querySelector('svg.animate-pulse'),
+          fill,
+          filled: fill !== 'rgba(0, 0, 0, 0)' && fill !== 'transparent',
+        }
       })
       check(
-        'FOCUS-TIMER-01 調理中モードの終了バッジにベルと点滅が付く(常駐バーと同じ合図)',
-        donePill != null && donePill.pulses && donePill.bell,
+        'FOCUS-TIMER-01 調理中モードの終了バッジにベルの点滅が付く(常駐バーと同じ合図)',
+        donePill != null && donePill.bell,
+        JSON.stringify(donePill),
+      )
+      check(
+        'FOCUS-TIMER-01 終了チップ全体は点滅させない(文字が薄くなって読めなくなるため。便DS⑧)',
+        donePill != null && donePill.pillPulses === false,
+        JSON.stringify(donePill),
+      )
+      check(
+        'FOCUS-TIMER-01 終了チップは面が塗られていて一目で見分けられる(便DS⑧)',
+        donePill != null && donePill.filled,
         JSON.stringify(donePill),
       )
 
@@ -4069,6 +4099,452 @@ try {
       )
     } finally {
       await fnBrowser.close()
+    }
+  }
+
+  // --- 便DS: 2026-08-03 オーナー実機フィードバック8件(調理中モード・タイマー・声で操作)の再発防止。
+  //  DS-MIC-01(①マイクを一度断ると押しても無反応に見えた → 断られている状態を見つけて直し方を出す) /
+  //  DS-VOICE-01(⑤時間の書かれていない手順で「タイマー」と言うと無反応だった → 言い方の案内) /
+  //  DS-NAME-01(②どのレシピのタイマーか分からない → この料理の分にも名前を出す) /
+  //  DS-BACK-01(③動作中タイマーからレシピの手順へ戻れない(2026-07-12の退行) → 調整の窓に導線) /
+  //  DS-MUTE-01(④調理中モードから消音できない → チップと調整の窓の両方に切り替え) /
+  //  DS-CUSTOMBTN-01(⑥「タイマー」ボタンがアイコンのみ・定位置で動かない) /
+  //  DS-VIB-01(⑦終了時にバイブレーションを呼ぶ・画面に戻ったときの鳴らし直し) /
+  //  DS-DONE-01(⑧終わりの表示が390pxで重ならない・文字が薄くならない) ---
+  {
+    const dsBrowser = await chromium.launch()
+    try {
+      // 声で操作の実機挙動は自動では再現できないため、SpeechRecognition と
+      // navigator.permissions を差し替えて画面側の分岐だけを固定する
+      const micStubs = (permissionState) => `
+        (() => {
+          class FakeRecognition {
+            constructor() { window.__recognition = this; this.started = 0 }
+            start() { this.started++; window.__recognitionStarts = (window.__recognitionStarts || 0) + 1 }
+            stop() {}
+            abort() {}
+          }
+          window.SpeechRecognition = FakeRecognition
+          window.webkitSpeechRecognition = FakeRecognition
+          const state = ${JSON.stringify(permissionState)}
+          if (state === null) {
+            Object.defineProperty(navigator, 'permissions', { value: undefined, configurable: true })
+          } else {
+            Object.defineProperty(navigator, 'permissions', {
+              value: { query: async () => ({ state, addEventListener() {}, removeEventListener() {} }) },
+              configurable: true,
+            })
+          }
+          window.__vibrations = []
+          Object.defineProperty(navigator, 'vibrate', {
+            value: (pattern) => { window.__vibrations.push(pattern); return true },
+            configurable: true,
+          })
+        })()
+      `
+      const openFocus = async (p, name) => {
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1400)
+        await p.getByPlaceholder('料理名・材料・タグで検索').fill(name)
+        await p.waitForTimeout(500)
+        await p.getByText(name, { exact: true }).first().click()
+        await p.waitForTimeout(700)
+        await p.getByText('調理中モードで見る').click()
+        await p.waitForTimeout(500)
+      }
+
+      // --- DS-MIC-01(a): ブラウザに断られていることが分かる場合。押した時点で案内を出す ---
+      currentCheck = 'DS-MIC-01'
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        await ctx.addInitScript(micStubs('denied'))
+        const p = await ctx.newPage()
+        await openFocus(p, '肉じゃが')
+        const focus = p.locator('.fixed.inset-0.z-50')
+        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await p.waitForTimeout(600)
+        const guide = await focus.textContent()
+        check(
+          'DS-MIC-01 断られている状態で押すと、原因と直し方の案内が出る(無反応にしない)',
+          guide.includes('マイクの使用がブラウザで断られています') &&
+            guide.includes('ブラウザの設定でマイクの使用を許可すると'),
+        )
+        check(
+          'DS-MIC-01 端末ごとの開き方が1行ずつ添えられている(iPhone/Android)',
+          guide.includes('iPhone（Safari）') && guide.includes('Android（Chrome）'),
+        )
+        check(
+          'DS-MIC-01 断られたまま聞き取りを始めない(聞いています…にならない)',
+          !guide.includes('聞いています…'),
+        )
+        // 短い手応えのように数秒で消えないこと(以前は流れて気づけなかった)
+        await p.waitForTimeout(4000)
+        check(
+          'DS-MIC-01 案内は数秒で消えない(閉じるまで残る)',
+          (await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+        )
+        // 2回目に押しても同じ案内が出る(押しても何も起きないボタンにしない)
+        await focus.locator('div.border-warning').getByRole('button', { name: '閉じる' }).click()
+        await p.waitForTimeout(300)
+        check(
+          'DS-MIC-01 案内は閉じられる(閉じたら消える)',
+          !(await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+        )
+        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await p.waitForTimeout(600)
+        check(
+          'DS-MIC-01 2回目に押しても同じ案内が出る(黙って失敗しない)',
+          (await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+        )
+        await ctx.close()
+      }
+
+      // --- DS-MIC-01(b): 許可の状態を調べられないブラウザ(Safari等)。開始して失敗してから案内 ---
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        await ctx.addInitScript(micStubs(null))
+        const p = await ctx.newPage()
+        await openFocus(p, '肉じゃが')
+        const focus = p.locator('.fixed.inset-0.z-50')
+        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await p.waitForTimeout(500)
+        // ブラウザが「許可されていません」を返した想定
+        const restarts = await p.evaluate(() => {
+          window.__recognition.onerror({ error: 'not-allowed' })
+          const before = window.__recognitionStarts
+          window.__recognition.onend()
+          return { before, after: window.__recognitionStarts }
+        })
+        await p.waitForTimeout(500)
+        check(
+          'DS-MIC-01 許可の状態を調べられない環境でも、失敗を受けて案内が出る',
+          (await focus.textContent()).includes('マイクの使用がブラウザで断られています'),
+        )
+        check(
+          'DS-MIC-01 断られた後は自動再開を止める(開始→即失敗の繰り返しにしない)',
+          restarts.before === restarts.after,
+          JSON.stringify(restarts),
+        )
+        await ctx.close()
+      }
+
+      // --- DS-VOICE-01(⑤) / DS-NAME-01(②) / DS-MUTE-01(④) / DS-BACK-01(③調理中モード側) ---
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        await ctx.addInitScript(micStubs('granted'))
+        const p = await ctx.newPage()
+        await openFocus(p, '肉じゃが')
+        const focus = p.locator('.fixed.inset-0.z-50')
+
+        // ⑤ 時間の書かれていない手順(手順1)で「タイマー」とだけ言う → 言い方の案内
+        currentCheck = 'DS-VOICE-01'
+        await focus.getByRole('button', { name: '声で操作する' }).click()
+        await p.waitForTimeout(600)
+        const say = async (text) => {
+          await p.evaluate((t) => {
+            window.__recognition.onresult({ results: [[{ transcript: t }]] })
+          }, text)
+          await p.waitForTimeout(500)
+        }
+        await say('タイマー')
+        check(
+          'DS-VOICE-01 時間の手掛かりが無い手順で「タイマー」と言うと言い方の案内が出る(無反応にしない)',
+          (await focus.textContent()).includes('「3分タイマー」のように言うと設定できます'),
+          await focus.textContent(),
+        )
+        check(
+          'DS-VOICE-01 案内だけでタイマーは起動しない(0秒タイマーを作らない)',
+          (await focus.getByRole('button', { name: /のタイマーを調整/ }).count()) === 0,
+        )
+        // 言い方どおりに言えば起動する
+        await say('3分タイマー')
+        check(
+          'DS-VOICE-01 案内どおり「3分タイマー」と言えばタイマーが起動する',
+          (await focus.getByRole('button', { name: /のタイマーを調整/ }).count()) === 1,
+        )
+
+        // ② この料理のタイマーにも料理名が出る
+        currentCheck = 'DS-NAME-01'
+        const ownPill = await p.evaluate(() => {
+          const overlay = document.querySelector('.fixed.inset-0.z-50')
+          const pill = Array.from(overlay.querySelectorAll('div.inline-flex.rounded-full'))[0]
+          return pill ? pill.textContent.replace(/\s+/g, ' ').trim() : null
+        })
+        check(
+          'DS-NAME-01 この料理のタイマーにも料理名が出る(どのレシピの分か分かる)',
+          ownPill != null && ownPill.includes('肉じゃが'),
+          JSON.stringify(ownPill),
+        )
+
+        // ④ 調理中モードから消音できる(チップの切り替え・調整の窓の切り替えの両方)
+        currentCheck = 'DS-MUTE-01'
+        const muteBtn = focus.getByRole('button', { name: 'このタイマーを消音' })
+        check('DS-MUTE-01 調理中モードのタイマーに消音の切り替えがある', await muteBtn.isVisible())
+        await muteBtn.click()
+        await p.waitForTimeout(300)
+        check(
+          'DS-MUTE-01 押すと「音を戻す」に変わる(消音できている)',
+          await focus.getByRole('button', { name: 'このタイマーの音を戻す' }).isVisible(),
+        )
+        await focus.getByRole('button', { name: /のタイマーを調整/ }).click()
+        await p.waitForTimeout(400)
+        const dsDialog = p.getByRole('dialog', { name: 'タイマーを調整' })
+        check(
+          'DS-MUTE-01 調整の窓からも消音を切り替えられる(常駐バーと同じ働き)',
+          await dsDialog.getByRole('button', { name: 'このタイマーの音を戻す' }).isVisible(),
+        )
+        await dsDialog.getByRole('button', { name: 'このタイマーの音を戻す' }).click()
+        await p.waitForTimeout(300)
+        check(
+          'DS-MUTE-01 窓の中で音を戻すと表示も戻る',
+          await dsDialog.getByRole('button', { name: 'このタイマーを消音' }).isVisible(),
+        )
+
+        // ③ 調整の窓から手順へ戻る(調理中モードの中では手順が移動する)
+        currentCheck = 'DS-BACK-01'
+        check(
+          'DS-BACK-01 調整の窓に手順へ戻る導線がある',
+          await dsDialog.getByRole('button', { name: /手順\d+を開く/ }).isVisible(),
+        )
+        await ctx.close()
+      }
+
+      // --- DS-CUSTOMBTN-01(⑥): 「タイマー」ボタンはアイコンのみ・タイマーが増減しても定位置 ---
+      // 声で操作の入り切りは案内文の行数を変えてタイマー行ごと上下させるため、
+      // ここでは声には触れず「タイマーの本数だけが変わる」条件で位置を測る
+      currentCheck = 'DS-CUSTOMBTN-01'
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        await openFocus(p, '肉じゃが')
+        const focus = p.locator('.fixed.inset-0.z-50')
+        const customBtn = focus.getByRole('button', { name: 'タイマーを開く' })
+        check(
+          'DS-CUSTOMBTN-01 調理中モードの「タイマー」ボタンはアイコンのみ(文字を出さない)',
+          (await customBtn.textContent()).trim() === '',
+          JSON.stringify(await customBtn.textContent()),
+        )
+        const before = await customBtn.boundingBox()
+        await customBtn.click()
+        await p.waitForTimeout(400)
+        await p
+          .getByRole('dialog', { name: 'タイマー', exact: true })
+          .getByRole('button', { name: '開始' })
+          .click()
+        await p.waitForTimeout(600)
+        const after = await customBtn.boundingBox()
+        check(
+          'DS-CUSTOMBTN-01 タイマーが増えても「タイマー」ボタンの位置は動かない(定位置)',
+          before != null &&
+            after != null &&
+            Math.abs(before.x - after.x) < 1 &&
+            Math.abs(before.y - after.y) < 1,
+          JSON.stringify({ before, after }),
+        )
+        // 折り返しの列に混ざっていないこと(タイマーのチップより右端に固定されている)
+        const pinned = await p.evaluate(() => {
+          const overlay = document.querySelector('.fixed.inset-0.z-50')
+          const row = Array.from(overlay.children).find((el) =>
+            el.className.includes('items-start gap-2'),
+          )
+          const btn = Array.from(row.querySelectorAll('button')).find(
+            (b) => b.getAttribute('aria-label') === 'タイマーを開く',
+          )
+          const pill = row.querySelector('div.inline-flex.rounded-full')
+          return {
+            sameParent: btn?.parentElement === row,
+            rightOfPill:
+              pill != null &&
+              btn.getBoundingClientRect().left >= pill.getBoundingClientRect().right,
+          }
+        })
+        check(
+          'DS-CUSTOMBTN-01 「タイマー」ボタンは折り返しの列の外・タイマーより右に固定されている',
+          pinned.sameParent && pinned.rightOfPill,
+          JSON.stringify(pinned),
+        )
+        await ctx.close()
+      }
+
+      // --- DS-BACK-01(③): 他の画面(ホーム)からタイマーを触ってレシピの該当手順へ戻る ---
+      currentCheck = 'DS-BACK-01'
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1400)
+        await p.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+        await p.waitForTimeout(500)
+        await p.getByText('肉じゃが', { exact: true }).first().click()
+        await p.waitForTimeout(700)
+        const recipeHash = p.url().split('#')[1]
+        await p.getByRole('button', { name: '15分 タイマー開始' }).click()
+        await p.waitForTimeout(500)
+        // 別の画面へ移ってから常駐バーのタイマーを触る
+        await p.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(900)
+        await p.getByRole('button', { name: /のタイマーを調整/ }).first().click()
+        await p.waitForTimeout(400)
+        const barDialog = p.getByRole('dialog', { name: 'タイマーを調整' })
+        const goBtn = barDialog.getByRole('button', { name: /手順\d+を開く/ })
+        check(
+          'DS-BACK-01 他の画面でも動作中タイマーから「手順◯を開く」が出る(2026-07-12の退行の復活)',
+          await goBtn.isVisible(),
+          await barDialog.textContent().catch(() => 'なし'),
+        )
+        await goBtn.click()
+        await p.waitForTimeout(1200)
+        check(
+          'DS-BACK-01 押すとそのタイマーのレシピ詳細へ戻る',
+          (p.url().split('#')[1] ?? '').startsWith(recipeHash),
+          p.url(),
+        )
+        check(
+          'DS-BACK-01 該当手順が一時的に目立つ状態になる(?step=は使い終わったら消える)',
+          !(p.url().split('#')[1] ?? '').includes('step='),
+          p.url(),
+        )
+        await ctx.close()
+      }
+
+      // --- DS-VIB-01(⑦): 終了時にバイブレーションを呼ぶ / 画面に戻ったときの鳴らし直し ---
+      currentCheck = 'DS-VIB-01'
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        await ctx.addInitScript(micStubs('granted'))
+        const p = await ctx.newPage()
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1400)
+        // 2秒後に終わるタイマーを仕込んで読み直す(15分待たずに終了の合図だけを見る)
+        await p.evaluate(() => {
+          localStorage.setItem(
+            'uchirecipe:activeTimers',
+            JSON.stringify([
+              {
+                id: 901,
+                key: 'vib',
+                label: '肉じゃが',
+                doneLabel: '煮込み終わり',
+                recipeId: 1,
+                stepNumber: 3,
+                endsAt: Date.now() + 2500,
+                totalSeconds: 900,
+                done: false,
+                muted: false,
+              },
+            ]),
+          )
+        })
+        await p.reload({ waitUntil: 'networkidle' })
+        await p.waitForTimeout(5000)
+        const vibrations = await p.evaluate(() => window.__vibrations)
+        check(
+          'DS-VIB-01 タイマー終了で振動を呼ぶ(対応端末で震える)',
+          Array.isArray(vibrations) && vibrations.length >= 1,
+          JSON.stringify(vibrations),
+        )
+        check(
+          'DS-VIB-01 振動は複数拍の並び(短い1回で終わらせない)',
+          Array.isArray(vibrations) && Array.isArray(vibrations[0]) && vibrations[0].length >= 3,
+          JSON.stringify(vibrations),
+        )
+        await ctx.close()
+      }
+
+      // --- DS-DONE-01(⑧): 390pxの実DOMで、終わったタイマーの表示が重ならず読める ---
+      currentCheck = 'DS-DONE-01'
+      {
+        const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1400)
+        // 終わったタイマー2本(この料理の手順 / 自分で決めた時間)＋動作中1本(別の料理)を並べる
+        await p.evaluate(() => {
+          const now = Date.now()
+          localStorage.setItem(
+            'uchirecipe:activeTimers',
+            JSON.stringify([
+              { id: 801, key: 'a', label: '肉じゃが', doneLabel: '煮込み終わり', recipeId: 1, stepNumber: 3, endsAt: now - 4000, totalSeconds: 900, done: true, muted: false },
+              { id: 802, key: 'b', label: 'タイマー', doneLabel: '終わり', recipeId: 1, stepNumber: 1, endsAt: now - 3000, totalSeconds: 180, done: true, muted: false, isCustom: true },
+              { id: 803, key: 'c', label: 'カレーライス', doneLabel: '煮込み終わり', recipeId: 2, stepNumber: 5, endsAt: now + 600000, totalSeconds: 900, done: false, muted: false },
+            ]),
+          )
+        })
+        await p.goto(`${BASE}/#/recipes/1`, { waitUntil: 'networkidle' })
+        await p.reload({ waitUntil: 'networkidle' })
+        await p.waitForTimeout(1500)
+        await p.getByText('調理中モードで見る').click()
+        await p.waitForTimeout(700)
+        const layout = await p.evaluate(() => {
+          const overlay = document.querySelector('.fixed.inset-0.z-50')
+          const row = Array.from(overlay.children).find((el) =>
+            el.className.includes('items-start gap-2'),
+          )
+          if (!row) return { error: 'タイマー行が見つからない' }
+          const leaves = []
+          const walk = (el) => {
+            const kids = Array.from(el.children)
+            const ownText = Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent.trim())
+            // アイコン(svg)は1つの塊として数える。中の線同士は「×」の形そのものが交差しているので
+            // 掘り下げると必ず重なり判定になってしまう
+            const isIcon = el.tagName.toLowerCase() === 'svg'
+            if (kids.length === 0 || ownText || isIcon) {
+              const r = el.getBoundingClientRect()
+              if (r.width > 0 && r.height > 0)
+                leaves.push({ text: (el.textContent || '').trim().slice(0, 12) || el.tagName.toLowerCase(), r: { x: r.x, y: r.y, w: r.width, h: r.height } })
+            }
+            if (!isIcon) kids.forEach(walk)
+          }
+          walk(row)
+          const bad = []
+          for (let i = 0; i < leaves.length; i++)
+            for (let j = i + 1; j < leaves.length; j++) {
+              const a = leaves[i].r
+              const b = leaves[j].r
+              const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+              const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+              if (ox > 0.5 && oy > 0.5) bad.push(`${leaves[i].text}×${leaves[j].text}`)
+            }
+          // 終わったチップの文字が薄くなっていないか(透明度を下げる演出を残していないか)
+          const donePills = Array.from(overlay.querySelectorAll('div.inline-flex.rounded-full')).filter((el) =>
+            el.className.includes('border-warning'),
+          )
+          const faded = donePills.filter((el) => Number(getComputedStyle(el).opacity) < 1).length
+          return {
+            bad,
+            faded,
+            donePills: donePills.length,
+            texts: donePills.map((el) => el.textContent.replace(/\s+/g, ' ').trim()),
+            pageScrollWidth: document.documentElement.scrollWidth,
+            pageClientWidth: document.documentElement.clientWidth,
+          }
+        })
+        check(
+          'DS-DONE-01 390pxで終わったタイマーの表示が重ならない(バッジ・名前・終わり・閉じる)',
+          layout.bad != null && layout.bad.length === 0,
+          JSON.stringify(layout.bad ?? layout),
+        )
+        check(
+          'DS-DONE-01 終わったタイマーの文字が薄くならない(点滅で読めなくならない)',
+          layout.faded === 0,
+          JSON.stringify(layout),
+        )
+        check(
+          'DS-DONE-01 終わったタイマーに名前と終了の文言が両方出る',
+          layout.texts != null &&
+            layout.texts.some((t) => t.includes('肉じゃが') && t.includes('煮込み終わり')) &&
+            layout.texts.some((t) => t.includes('タイマー') && t.includes('終わり')),
+          JSON.stringify(layout.texts),
+        )
+        check(
+          'DS-DONE-01 タイマーが3本並んでも390pxで横あふれしない',
+          layout.pageScrollWidth <= layout.pageClientWidth,
+          JSON.stringify(layout),
+        )
+        await ctx.close()
+      }
+    } finally {
+      await dsBrowser.close()
     }
   }
 
