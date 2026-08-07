@@ -87,10 +87,14 @@ export default function RecipeDetailPage() {
   // 不明なときは必ずレシピ一覧へ。以前は不明時の戻り先が場面によってレシピ一覧に
   // ならないことがあり(一覧へ行く手段が消える)、いったん全て一覧固定にしたが、
   // 「ホーム発の例外は残す・不明時は一覧」が確定形。
+  // 2026-08-07 便DT-2(オーナー指示): 献立タブの週('mealPlanWeek')を**同じ仕組みの例外**として
+  // 足した。週の各日にある「作った記録」からレシピを開くと、戻ったときに週の並びを
+  // 探し直すことになっていたため(スクロール位置の復元はMealPlanPage側が持つ)。
   const location = useLocation()
   const backState = location.state as { from?: string; fromPath?: string } | null
+  const BACK_TO_ORIGIN_FROM = ['home', 'todayList', 'mealPlanWeek']
   const backFallback =
-    (backState?.from === 'home' || backState?.from === 'todayList') && backState.fromPath
+    backState?.from && BACK_TO_ORIGIN_FROM.includes(backState.from) && backState.fromPath
       ? backState.fromPath
       : '/recipes'
 

@@ -156,19 +156,72 @@ import type {
   Recipe,
   Settings,
 } from '../db/types'
-import { MEAL_PURPOSES, MEAL_ROLES } from '../db/types'
+import { LESS_MEAL_PURPOSES, MEAL_ROLES, MORE_MEAL_PURPOSES } from '../db/types'
+import {
+  WEEK_RETURN_KEY,
+  WEEK_RETURN_PARAM,
+  forgetRecipesTabPath,
+  parseWeekReturn,
+  readSessionItem,
+  removeSessionItem,
+  serializeWeekReturn,
+  writeSessionItem,
+} from '../logic/navMemory'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
 type MealPlanViewMode = 'day' | 'week' | 'month'
 
-/** 目的（2026-08-02 便CP-2）の表示ラベル。数値の項目名（たんぱく質/塩分相当量）とは別物 */
-const purposeLabelOf = (purpose: MealPurpose): string =>
-  purpose === 'protein' ? ja.mealPlan.purposeProtein : ja.mealPlan.purposeLowSalt
+/**
+ * 週タブからレシピ詳細を開くときに持ち回る出所（2026-08-07 便DT-2・オーナー指示）。
+ * 詳細画面の「戻る」は、ホーム・今日の献立と同じ例外としてここへ帰る（RecipeDetailPage）。
+ * `restore=1` が付いているときだけ、週タブは覚えた週とスクロール位置を復元する。
+ */
+const WEEK_RETURN_LINK_STATE = {
+  from: 'mealPlanWeek',
+  fromPath: `/meal-plan?focus=week&${WEEK_RETURN_PARAM}=1`,
+} as const
+
+/**
+ * 目的（2026-08-02 便CP-2 → 2026-08-07 便DT-9で8軸へ）の表示ラベル。
+ * 数値の項目名（たんぱく質/塩分相当量）とは別物。目的が増えたら型エラーになるよう
+ * Record で全件を書き切る（if の連鎖にすると足し忘れが黙って通る）。
+ */
+const PURPOSE_LABEL: Record<MealPurpose, string> = {
+  protein: ja.mealPlan.purposeProtein,
+  fiber: ja.mealPlan.purposeFiber,
+  iron: ja.mealPlan.purposeIron,
+  calcium: ja.mealPlan.purposeCalcium,
+  lowEnergy: ja.mealPlan.purposeLowEnergy,
+  lowFat: ja.mealPlan.purposeLowFat,
+  lowCarb: ja.mealPlan.purposeLowCarb,
+  lowSalt: ja.mealPlan.purposeLowSalt,
+}
+const purposeLabelOf = (purpose: MealPurpose): string => PURPOSE_LABEL[purpose]
 
 /** 目的の軸になっている栄養素の表示名（月タブの答え合わせで数値に添える） */
-const purposeNutrientLabelOf = (purpose: MealPurpose): string =>
-  purpose === 'protein' ? ja.nutrition.proteinLabel : ja.nutrition.saltLabel
+const PURPOSE_NUTRIENT_LABEL: Record<MealPurpose, string> = {
+  protein: ja.nutrition.proteinLabel,
+  fiber: ja.nutrition.fiberLabel,
+  iron: ja.nutrition.ironLabel,
+  calcium: ja.nutrition.calciumLabel,
+  lowEnergy: ja.nutrition.kcalLabel,
+  lowFat: ja.nutrition.fatLabel,
+  lowCarb: ja.nutrition.carbLabel,
+  lowSalt: ja.nutrition.saltLabel,
+}
+const purposeNutrientLabelOf = (purpose: MealPurpose): string => PURPOSE_NUTRIENT_LABEL[purpose]
+
+/**
+ * 目的の軸の単位（2026-08-07 便DT-9）。軸が8つになり g だけではなくなったので、
+ * 数値に添える単位も軸から引く（栄養パネルの formatNutrient と同じ対応にそろえる）。
+ */
+const purposeUnitOf = (purpose: MealPurpose): string => {
+  const key = PURPOSE_NUTRIENT_KEY[purpose]
+  if (key === 'kcal') return ja.nutrition.kcalUnit
+  if (key === 'ironMg' || key === 'calciumMg') return ja.nutrition.mgUnit
+  return ja.nutrition.gramUnit
+}
 
 /** レシピ選択ピッカーの絞り込み・並び替え（2026-07-24 便BH-3・タスク6: 一覧画面の機構を流用）。
  * 栄養並び替え（Pro機能）は複雑なのでピッカーには出さず、基本の並び替えだけを提供する */
@@ -261,8 +314,10 @@ function TodayListRow({
       </div>
       {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
           枠・地色・文字ラベルの付いたボタンにした。料理名の幅を削らないよう行の下へ置き、
-          高さは44px(min-h-11)＝従来のp-3のアイコンボタンと同じ当たり判定を下回らないようにする */}
-      <div className="mt-1">
+          高さは44px(min-h-11)＝従来のp-3のアイコンボタンと同じ当たり判定を下回らないようにする。
+          2026-08-07 便DT-1(オーナー指示): カードの右下へ寄せる。左寄せだと、すぐ上の行にある
+          料理名のリンク・×(外す)と縦にそろってしまい、押し間違いが起きやすかった */}
+      <div className="mt-1 flex justify-end">
         <button
           type="button"
           onClick={onCooked}
@@ -289,11 +344,17 @@ function CookedLogCard({
   recipe,
   log,
   onNavigate,
+  linkState,
   readOnly = false,
 }: {
   recipe: Recipe
   log: CookedLog
   onNavigate?: () => void
+  /**
+   * レシピ詳細へ持ち回る出所（2026-08-07 便DT-2）。週タブから開いたときだけ渡し、
+   * 詳細画面の「戻る」が週タブへ帰るようにする（RecipeDetailPage の backFallback）。
+   */
+  linkState?: { from: string; fromPath: string }
   /**
    * レシピ詳細へのリンクにしない（2026-08-02 便DC）。サンプルデモの記録はメモリ上の見本で、
    * 端末に無いレシピを指すため、押せる見た目にすると行き止まりになる
@@ -324,7 +385,7 @@ function CookedLogCard({
       {readOnly ? (
         <div className={cls}>{inner}</div>
       ) : (
-        <Link to={`/recipes/${recipe.id}`} onClick={onNavigate} className={cls}>
+        <Link to={`/recipes/${recipe.id}`} state={linkState} onClick={onNavigate} className={cls}>
           {inner}
         </Link>
       )}
@@ -1741,6 +1802,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * ?focus=week&date=YYYY-MM-DD で開いたときだけ入り、その日のカードまで送ってから空にする。
    */
   const [pendingScrollDate, setPendingScrollDate] = useState<string | null>(null)
+  /**
+   * レシピ詳細から週タブへ戻ってきたときに復元する縦スクロール位置（2026-08-07 便DT-2）。
+   * 日付カードへ送る pendingScrollDate と違い、離れる直前の位置をそのまま復元する。
+   */
+  const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
   useEffect(() => {
     if (initialFocusRef.current) return
     initialFocusRef.current = true
@@ -1762,6 +1828,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           settings?.weekStartsToday ? date : weekDates(new Date(`${date}T00:00:00`))[0],
         )
         setPendingScrollDate(date)
+      } else if (searchParams.get(WEEK_RETURN_PARAM) === '1') {
+        // 2026-08-07 便DT-2(オーナー指示): レシピ詳細の「戻る」で帰ってきたときは、
+        // 離れる直前に見ていた週と縦スクロール位置をそのまま復元する。
+        // あわせて「レシピ」タブが覚えている行き先も捨てる＝次にレシピタブを押すと
+        // 一覧が開く(いま閉じた詳細がまた開かない)
+        const point = parseWeekReturn(readSessionItem(WEEK_RETURN_KEY))
+        removeSessionItem(WEEK_RETURN_KEY)
+        forgetRecipesTabPath()
+        if (point) {
+          setWeekStart(point.weekStart)
+          setPendingScrollY(point.scrollY)
+          // 「今日を先頭に7日間」表示の初期化(weekModeInitRef)が、あとから設定を読み終えた
+          // タイミングで週を今日へ寄せ直してしまうと、復元した週が消える。復元したときは
+          // その初期化を済み扱いにする＝覚えていた週をそのまま見せる
+          weekModeInitRef.current = true
+        }
       }
       setViewMode('week')
     } else if (focus === 'month') {
@@ -1773,6 +1855,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         const next = new URLSearchParams(prev)
         next.delete('focus')
         next.delete('date')
+        next.delete(WEEK_RETURN_PARAM)
         return next
       },
       { replace: true },
@@ -1781,6 +1864,33 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // その場合も weekModeInitRef の初期化が今日を先頭に寄せるため、依存に足して再実行はさせない
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams])
+
+  /**
+   * 覚えていた縦スクロール位置まで戻す（2026-08-07 便DT-2）。
+   *
+   * 献立・レシピ・作った記録は liveQuery で後から届くので、描画直後は本文がまだ短く、
+   * その時点で scrollTo しても指定の位置まで下がれない。ページの高さが足りるまで
+   * 数フレーム待ってから1回だけ動かし、諦める上限（RESTORE_MAX_FRAMES）も置く
+   * （データが少ない週では永遠に足りないため）。
+   */
+  useEffect(() => {
+    if (pendingScrollY == null || viewMode !== 'week') return
+    const RESTORE_MAX_FRAMES = 60
+    let frames = 0
+    let raf = 0
+    const tick = () => {
+      const reachable = document.documentElement.scrollHeight - window.innerHeight
+      if (reachable >= pendingScrollY || frames >= RESTORE_MAX_FRAMES) {
+        window.scrollTo(0, Math.min(pendingScrollY, Math.max(0, reachable)))
+        setPendingScrollY(null)
+        return
+      }
+      frames++
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [pendingScrollY, viewMode])
 
   // 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）
   useEffect(() => {
@@ -2404,7 +2514,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     rangeEntries: MealPlanEntry[],
   ): Promise<number> => {
     // 埋め直す役割に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
-    for (const id of plan.autoEntryIdsToRemove) {
+    for (const id of plan.entryIdsToRemove) {
       await removeMealEntry(id)
     }
     const usedRecipeIds = [...plan.usedRecipeIds]
@@ -2417,7 +2527,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     for (const e of rangeEntries) {
       if ((e.role ?? 'main') !== 'main') continue
-      if (e.id != null && plan.autoEntryIdsToRemove.includes(e.id)) continue // これから消える主菜は数えない
+      if (e.id != null && plan.entryIdsToRemove.includes(e.id)) continue // これから消える主菜は数えない
       const r = recipeById.get(e.recipeId)
       if (r) bumpProtein(r)
     }
@@ -2474,7 +2584,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             e.date === date &&
             e.slot === slot &&
             (e.role ?? 'main') === 'main' &&
-            !(e.id != null && plan.autoEntryIdsToRemove.includes(e.id)),
+            !(e.id != null && plan.entryIdsToRemove.includes(e.id)),
         )
         const mainRecipe = existingMain ? recipeById.get(existingMain.recipeId) : undefined
         if (mainRecipe && isOneDish(mainRecipe)) continue // 一品ものの主菜には副菜を足さない
@@ -2519,6 +2629,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 埋め方そのものは executeFill が担う（便CB-2で月タブの一括提案と共通化した）。
    */
   const fillWeek = async () => {
+    // 2026-08-07 便DT-7(オーナー指示): 「先週の献立をコピー」がONのときは、このボタンが
+    // 提案ではなく先週の写しを実行する。提案の条件・入れかたはこの経路では一切読まない
+    if (copyLastWeekMode) {
+      await copyLastWeek()
+      return
+    }
     if (!recipes) return
     setMessage('')
     // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
@@ -2527,7 +2643,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       setMessage(ja.mealPlan.noSuggestion)
       return
     }
-    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today)
+    // 2026-08-07 便DT-8(オーナー指示): 入れかたのスイッチで対象を切り替える。
+    //  fillEmpty  … keepAuto=true＝すでに入っている献立は自動・手動を問わず1品も消さない
+    //  replaceAll … これからの献立を消してから入れ直す。消す前に必ず確認を出す(規約F)
+    const replaceAll = fillMode === 'replaceAll'
+    const plan = planWeekFill(entries ?? [], dates, visibleSlots, today, {
+      keepAuto: !replaceAll,
+      replaceAll,
+    })
+    if (replaceAll) {
+      const removeCount = plan.entryIdsToRemove.length
+      const targetSlotCount = plan.slotsToFill.length + plan.partialFills.length
+      if (removeCount === 0 && targetSlotCount === 0) {
+        setMessage(ja.mealPlan.fillModeReplaceAllNothing)
+        return
+      }
+      if (removeCount > 0) {
+        const confirmText = ja.mealPlan.fillModeReplaceAllConfirm
+          .replace('{s}', String(targetSlotCount))
+          .replace('{n}', String(removeCount))
+        if (!window.confirm(confirmText)) return
+      }
+    }
     const added = await executeFill(plan, entries ?? [])
 
     // 結果メッセージ(2026-07-29 便CD/MP-06で正直な出し分けに修正)。
@@ -2537,7 +2674,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const messages: string[] = []
     const preserved = plan.preservedSlotKeys.size
     if (added > 0) {
-      if (preserved > 0) {
+      if (replaceAll) {
+        // 総入れ替えは消す操作なので、終わったことと入った品数を必ず言う(便DT-8)
+        messages.push(ja.mealPlan.fillModeReplaceAllDone.replace('{a}', String(added)))
+      } else if (preserved > 0) {
         messages.push(
           ja.mealPlan.fillWeekKeptManual
             .replace('{n}', String(preserved))
@@ -2621,7 +2761,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             e.date === p.date &&
             e.slot === p.slot &&
             (e.role ?? 'main') === 'main' &&
-            !(e.id != null && rawPlan.autoEntryIdsToRemove.includes(e.id)),
+            !(e.id != null && rawPlan.entryIdsToRemove.includes(e.id)),
         )
         const mainRecipe = keptMain ? recipeById.get(keptMain.recipeId) : undefined
         return !(mainRecipe && isOneDish(mainRecipe))
@@ -3071,6 +3211,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const allDaysCollapsed = dates.every((d) => collapsedDates.includes(d))
 
   /**
+   * 週タブからレシピ詳細へ移る直前に、いまの居場所（見ている週と縦スクロール位置）を覚える
+   * （2026-08-07 便DT-2・オーナー指示）。戻ってきたときに同じ場所へ復元するために使う。
+   * 覚えるのは sessionStorage だけ＝端末に残るユーザーデータには何も書かない。
+   */
+  const rememberWeekReturn = () => {
+    writeSessionItem(
+      WEEK_RETURN_KEY,
+      serializeWeekReturn({ weekStart: dates[0], scrollY: window.scrollY }),
+    )
+  }
+
+  /**
    * 週タブの操作3グループの開閉（2026-08-03 便DJ・オーナー指示）。
    * 既定で開くのは「自動で献立を提案」だけ。画面を離れると既定に戻る（設定には残さない）。
    */
@@ -3079,6 +3231,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     auto: true,
     template: false,
   })
+
+  /**
+   * 「まとめて献立を入力」が何をするか（2026-08-07 便DT-8・オーナー指示）。
+   *  - 'fillEmpty'  … まだ決まっていない枠だけ埋める（今ある献立は1品も消さない＝完全に非破壊）
+   *  - 'replaceAll' … レシピを総入れ替え（これからの献立を消してから入れ直す。確認文を必ず出す）
+   *
+   * 既定を 'fillEmpty' にしたのは、可逆・非破壊の側を既定にする運用（規約C）に合わせるため。
+   * 従来の「押すたびに自動提案の枠だけ振り直す」（2026-07-14確定）は 'replaceAll' 側に含まれる
+   * （総入れ替えは自動・手動を問わず入れ直すので、振り直したい人はこちらを選ぶ）。
+   * 画面を離れると既定に戻す＝消す側の選択を黙って覚えない。
+   */
+  const [fillMode, setFillMode] = useState<'fillEmpty' | 'replaceAll'>('fillEmpty')
+
+  /**
+   * 「先週の献立をコピー」のスイッチ（2026-08-07 便DT-7・オーナー指示）。
+   * 独立したボタンをやめ、ONのまま「まとめて献立を入力」を押すとコピーが走る形にした。
+   * ONのあいだ、提案の条件（時短・ジャンル・高たんぱく・目的）と入れかたは意味を持たないので、
+   * 画面でも無効化して「効きません」を見た目で示す（効かない操作を押せる状態で置かない）。
+   */
+  const [copyLastWeekMode, setCopyLastWeekMode] = useState(false)
 
   // 週タブ「この週の◯◯をまとめて空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 食事を選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
@@ -3574,7 +3746,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         }}
       >
         <div className="flex items-center gap-2">
-          <p className="text-xs font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+          {/* 2026-08-07 便DT-10(オーナー指示): 提案結果の「朝食」「昼食」「夕食」を少し大きくする
+              (12px→14px)。1日のカードの中で、どの食事の枠を見ているかの目印になる文字なので、
+              周りの補助文字と同じ大きさだと見つけにくかった */}
+          <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
           {/* 2026-07-29 便CD/MP-08: 説明がtitle属性(ホバー)にしかなく、スマホでは
               物理的に到達できなかった。タップで説明をトーストに出すボタンにする
               (静止時の見た目は従来と同じ＝docs/56 §3-10「うるさくしない」を維持) */}
@@ -3659,11 +3834,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 「未定の日をまとめて提案」にも100%効いている（executeFillが同じ値を読む）。
    * 月から条件が見えず変えられないため、「なぜ月が全部中華になったのか」が画面から分からなかった。
    * 同じ部品を週・月の両方で出す＝どちらから見ても今の条件が分かり、その場で変えられる。
+   *
+   * 2026-08-07 便DT-7: disabled を足した。週タブの「先週の献立をコピー」がONのあいだは
+   * この条件がひとつも効かないので、押せない見た目（グレーアウト）にして触れなくする。
+   * 月タブからの呼び出しは引数なし＝従来どおり常に有効。
    */
-  const renderSuggestConditions = () => (
-    <div className="mt-[var(--space-sm)]">
+  const renderSuggestConditions = (disabled = false) => (
+    <div
+      className={`mt-[var(--space-sm)] ${disabled ? 'pointer-events-none opacity-40' : ''}`}
+      aria-disabled={disabled || undefined}
+    >
       <button
         type="button"
+        disabled={disabled}
         onClick={() => setSuggestConditionsOpen((v) => !v)}
         aria-expanded={suggestConditionsOpen}
         className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
@@ -3766,22 +3949,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               >
                 {ja.mealPlan.purposeNone}
               </button>
-              {MEAL_PURPOSES.map((purpose) => (
-                <button
-                  key={purpose}
-                  type="button"
-                  onClick={() => void changePurpose(purpose)}
-                  aria-pressed={planPurpose === purpose}
-                  className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                    planPurpose === purpose
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                  }`}
-                >
-                  {purposeLabelOf(purpose)}
-                </button>
-              ))}
             </div>
+            {/* 2026-08-07 便DT-9(オーナー指示): 軸が8つになったので「多め」「ひかえめ」の
+                2群に分けて並べる。8個を1列に混ぜると、どちらの向きの指定なのかが読み取れない */}
+            {(
+              [
+                [ja.mealPlan.purposeGroupMore, MORE_MEAL_PURPOSES],
+                [ja.mealPlan.purposeGroupLess, LESS_MEAL_PURPOSES],
+              ] as const
+            ).map(([groupLabel, purposes]) => (
+              <div key={groupLabel} className="mt-[var(--space-sm)]">
+                <p className="text-xs font-bold text-ink-muted">{groupLabel}</p>
+                <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                  {purposes.map((purpose) => (
+                    <button
+                      key={purpose}
+                      type="button"
+                      onClick={() => void changePurpose(purpose)}
+                      aria-pressed={planPurpose === purpose}
+                      className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                        planPurpose === purpose
+                          ? 'border-accent bg-accent text-on-accent'
+                          : 'border-edge bg-surface text-ink-muted'
+                      }`}
+                    >
+                      {purposeLabelOf(purpose)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
           </div>
         )
@@ -3810,26 +4007,39 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 遠かったため、それぞれ畳めるようにした。既定で開くのは「自動で献立を提案」だけ。
    */
   // py-1.5 は指で押す当たり判定を広げるため（文字だけの高さでは料理中に押しにくい）
-  const renderWeekGroupHeader = (key: keyof typeof weekGroupOpen, title: string) => {
+  //
+  // 2026-08-07 便DT-6（オーナー指示）: 畳んでいても操作できるボタンは、グループの見出しの
+  // 「横」に置いて1か所に集める。以前は折りたたみの外に別の行として置いていたため、
+  // 畳んだときに見出しの行とボタンの行で2段になり、どのグループのものか読み取りづらかった。
+  // 見出しの折りたたみボタンの中には入れない（ボタンの入れ子は押し分けられなくなる）ので、
+  // 見出しの行を flex にして「折りたたみボタン＋常設の操作」を横に並べる。
+  const renderWeekGroupHeader = (
+    key: keyof typeof weekGroupOpen,
+    title: string,
+    alwaysVisible?: ReactNode,
+  ) => {
     const open = weekGroupOpen[key]
     return (
-      <button
-        type="button"
-        onClick={() => setWeekGroupOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
-        aria-expanded={open}
-        aria-label={(open
-          ? ja.mealPlan.weekGroupToggleCloseAria
-          : ja.mealPlan.weekGroupToggleOpenAria
-        ).replace('{group}', title)}
-        className="flex w-full items-center justify-between gap-2 py-1.5 text-left"
-      >
-        <span className="text-xs font-bold text-ink-muted">{title}</span>
-        {open ? (
-          <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
-        ) : (
-          <ChevronDown size={18} className="shrink-0 text-ink-muted" aria-hidden />
-        )}
-      </button>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <button
+          type="button"
+          onClick={() => setWeekGroupOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
+          aria-expanded={open}
+          aria-label={(open
+            ? ja.mealPlan.weekGroupToggleCloseAria
+            : ja.mealPlan.weekGroupToggleOpenAria
+          ).replace('{group}', title)}
+          className="flex shrink-0 items-center gap-1 py-1.5 text-left"
+        >
+          <span className="text-xs font-bold text-ink-muted">{title}</span>
+          {open ? (
+            <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
+          ) : (
+            <ChevronDown size={18} className="shrink-0 text-ink-muted" aria-hidden />
+          )}
+        </button>
+        {alwaysVisible}
+      </div>
     )
   }
 
@@ -3841,29 +4051,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * ボタン群だけを残す。畳んだ状態では見出し「表示のしかた」がすぐ上にあり、
    * 「表示する食事」の文字が重なって2段の見出しに見えていた。
    * 見出しを出さないときも、読み上げでは何のボタン群かが分かるようグループ名を付ける。
+   *
+   * 2026-08-07 便DT-6（オーナー指示）: 「表示のしかた」の見出しの横へ移し、開閉に関わらず
+   * 常に同じ場所に出す。見出しがすぐ左にあるので文字の見出しは持たない
+   * （読み上げ用のグループ名は role/aria-label で残す）。
    */
-  const renderSlotFilter = (showTitle: boolean) => (
-    <div role="group" aria-label={ja.mealPlan.slotFilterTitle}>
-      {showTitle && (
-        <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slotFilterTitle}</p>
-      )}
-      <div className={`flex flex-wrap gap-[var(--space-sm)] ${showTitle ? 'mt-1' : ''}`}>
-        {MEAL_SLOTS.map((slot) => (
-          <button
-            key={slot}
-            type="button"
-            onClick={() => toggleSlot(slot)}
-            aria-pressed={visibleSlots.includes(slot)}
-            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-              visibleSlots.includes(slot)
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
-          >
-            {ja.mealPlan.slot[slot]}
-          </button>
-        ))}
-      </div>
+  const renderSlotFilter = () => (
+    <div
+      role="group"
+      aria-label={ja.mealPlan.slotFilterTitle}
+      className="flex flex-wrap gap-[var(--space-sm)]"
+    >
+      {MEAL_SLOTS.map((slot) => (
+        <button
+          key={slot}
+          type="button"
+          onClick={() => toggleSlot(slot)}
+          aria-pressed={visibleSlots.includes(slot)}
+          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+            visibleSlots.includes(slot)
+              ? 'border-accent bg-accent text-on-accent'
+              : 'border-edge bg-surface text-ink-muted'
+          }`}
+        >
+          {ja.mealPlan.slot[slot]}
+        </button>
+      ))}
     </div>
   )
 
@@ -4302,6 +4515,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       {monthPurposeReviews.map((review) => {
                         const key = PURPOSE_NUTRIENT_KEY[review.purpose]
                         const nutrient = purposeNutrientLabelOf(review.purpose)
+                        // 2026-08-07 便DT-9: 軸が8つ(g/mg/kcal)になったので単位も軸から引く
+                        const purposeUnit = purposeUnitOf(review.purpose)
                         return (
                           <div key={review.purpose} className="mt-1">
                             <p className="text-sm tabular-nums">
@@ -4320,11 +4535,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                                         '{b}',
                                         String(roundNutrient(key, review.averageWithout)),
                                       )
-                                      .replaceAll('{unit}', ja.nutrition.gramUnit)
+                                      .replaceAll('{unit}', purposeUnit)
                                   : ja.mealPlan.purposeReviewAverageOnly
                                       .replace('{nutrient}', nutrient)
                                       .replace('{a}', String(roundNutrient(key, review.averageWith)))
-                                      .replaceAll('{unit}', ja.nutrition.gramUnit)}
+                                      .replaceAll('{unit}', purposeUnit)}
                               </p>
                             )}
                           </div>
@@ -4760,50 +4975,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       <>
       {/* 2026-08-02 便DE-10(オーナー指示): 週タブの操作は「色も形も同じボタン」が並んでいて
           グループ分けが曖昧だったため、機能ごとに囲み＋見出しで分けた。
-          並びは 週の移動 → 表示のしかた → 自動で献立を提案 → 献立テンプレート。
-          週の移動だけは「いまどの週を見ているか」で、ほかのグループ全部の前提になるので先頭に置く。
           2026-08-03 便DJ(オーナー指示): 3グループをそれぞれ折りたたみにし、既定で開くのは
-          「自動で献立を提案」だけにした。「表示する食事」のボタン群だけは畳んでも見えるよう、
-          折りたたみの外（グループの見出しのすぐ下）に置く */}
-
-      {/* 週の移動 */}
-      <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => setWeekStart((d) => shiftWeek(d, -1))}
-          aria-label={ja.mealPlan.prevWeek}
-          className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
-        >
-          <ChevronLeft size={20} aria-hidden />
-        </button>
-        <button
-          type="button"
-          onClick={() => setWeekStart(currentWeekAnchor)}
-          aria-label={
-            isAtCurrentWeek ? undefined : rollingWeek ? ja.mealPlan.thisWeekRolling : ja.mealPlan.thisWeek
-          }
-          className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
-        >
-          {!isAtCurrentWeek && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
-          {dates[0].replaceAll('-', '/')} 〜 {dates[6].replaceAll('-', '/')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setWeekStart((d) => shiftWeek(d, 1))}
-          aria-label={ja.mealPlan.nextWeek}
-          className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
-        >
-          <ChevronRight size={20} aria-hidden />
-        </button>
-      </div>
+          「献立を提案」だけにした。
+          2026-08-07 便DT-3/6(オーナー指示): ①日付(週)の切り替え欄を「すべて畳む」の上へ移し、
+          7日分のカードのすぐ上に置く（見ている週を変える操作を、カードの並びの直前に置く）
+          ②畳んでいても使うボタンは各グループの見出しの横に集める。
+          並びは 表示のしかた → 献立を提案 → 献立テンプレート → 週の移動 → すべて畳む → 7日分 */}
 
       {/* グループ1: 表示のしかた(週の区切り・表示する食事・まとめて空にする)。
-          「表示する食事」だけは折りたたみの外に置き、畳んでも常に見えるようにする(便DJ)。
-          2026-08-03 便DP-6/7(オーナー指示): ①畳んでいるときは「表示する食事」の見出し文字を
-          出さずボタン群だけ残す ②開いたときの並びを 週の区切り → 表示する食事 → まとめて空にする
-          にする(表示を決める2つを隣に置き、消す操作を最後に離す) */}
+          「表示する食事」は見出しの横＝畳んでも常に同じ場所に見える(便DT-6)。
+          2026-08-03 便DP-7(オーナー指示): 開いたときの並びは 週の区切り → まとめて空にする
+          (表示を決めるものを先に置き、消す操作を最後に離す) */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
-        {renderWeekGroupHeader('display', ja.mealPlan.weekGroupDisplayTitle)}
+        {renderWeekGroupHeader(
+          'display',
+          ja.mealPlan.weekGroupDisplayTitle,
+          renderSlotFilter(),
+        )}
         {weekGroupOpen.display && (
           <>
             {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
@@ -4837,15 +5025,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
                 3体が切替自体を触っていなかった */}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
-          </>
-        )}
-
-        {/* 表示する食事帯。折りたたみの外＝グループを畳んでも常に見える(便DJ・オーナー指示)。
-            畳んでいるときは見出しの文字を出さずボタン群だけ残す(便DP-6・オーナー指示) */}
-        <div className="mt-[var(--space-sm)]">{renderSlotFilter(weekGroupOpen.display)}</div>
-
-        {weekGroupOpen.display && (
-          <>
             {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
                 2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した)。
                 従来は週タブのいちばん下に置いていて、そこまで下がらないと気づけなかった。
@@ -4891,40 +5070,102 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         )}
       </section>
 
-      {/* グループ2: 自動で献立を提案(条件＋実行ボタン)。押すと献立が増える操作をここに集める。
-          3グループのうちここだけが既定で開く(便DJ・オーナー指示) */}
+      {/* グループ2: 献立を提案(条件＋実行ボタン)。押すと献立が増える操作をここに集める。
+          3グループのうちここだけが既定で開く(便DJ・オーナー指示)。
+          2026-08-07 便DT-5/6(オーナー指示): 実行ボタン「まとめて献立を入力」は見出しの横に置き、
+          畳んでいても押せるようにしたうえで、塗りつぶしのボタンにして目立たせる
+          (このグループで唯一「実行する」ボタンなので、条件のボタン群と見た目を変える) */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
-        {renderWeekGroupHeader('auto', ja.mealPlan.weekGroupAutoTitle)}
+        {renderWeekGroupHeader(
+          'auto',
+          ja.mealPlan.weekGroupAutoTitle,
+          <button
+            type="button"
+            onClick={() => void fillWeek()}
+            className="ml-auto inline-flex items-center gap-1 rounded-sm border border-accent bg-accent px-3 py-2 text-sm font-bold text-on-accent shadow-sm"
+          >
+            {copyLastWeekMode ? <Copy size={16} aria-hidden /> : <Dices size={16} aria-hidden />}
+            {ja.mealPlan.fillWeek}
+          </button>,
+        )}
         {weekGroupOpen.auto && (
           <>
             {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
                 既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
                 畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
-                2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions) */}
-            {renderSuggestConditions()}
+                2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
+                2026-08-07 便DT-7: 先週コピーがONのあいだは効かないのでグレーアウトする */}
+            {renderSuggestConditions(copyLastWeekMode)}
 
-            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => void fillWeek()}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+            {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
+                空いている枠だけを埋めるのか、これからの献立を総入れ替えするのかを選ぶ。
+                先週コピーがONのあいだは効かないのでグレーアウトする */}
+            <div
+              className={`mt-[var(--space-md)] ${copyLastWeekMode ? 'pointer-events-none opacity-40' : ''}`}
+              aria-disabled={copyLastWeekMode || undefined}
+            >
+              <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.fillModeTitle}</p>
+              <div
+                role="group"
+                aria-label={ja.mealPlan.fillModeTitle}
+                className="mt-1 flex flex-wrap gap-[var(--space-sm)]"
               >
-                <Dices size={14} aria-hidden />
-                {ja.mealPlan.fillWeek}
-              </button>
-              {/* S-3(docs/59): 先週の献立を空き枠だけにコピー。上書きはしない=非破壊(確認文で件数と「残る」を明示) */}
+                {(
+                  [
+                    ['fillEmpty', ja.mealPlan.fillModeFillEmpty],
+                    ['replaceAll', ja.mealPlan.fillModeReplaceAll],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={copyLastWeekMode}
+                    onClick={() => setFillMode(value)}
+                    aria-pressed={fillMode === value}
+                    className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                      fillMode === value
+                        ? 'border-accent bg-accent text-on-accent'
+                        : 'border-edge bg-surface text-ink-muted'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-xs text-ink-muted">
+                {fillMode === 'replaceAll'
+                  ? ja.mealPlan.fillModeReplaceAllHint
+                  : ja.mealPlan.fillModeFillEmptyHint}
+              </p>
+            </div>
+
+            {/* S-3(docs/59): 先週の献立を空き枠だけにコピー。上書きはしない=非破壊
+                (確認文で件数と「残る」を明示)。
+                2026-08-07 便DT-7(オーナー指示): 独立したボタンをやめてスイッチにした。
+                ONのまま「まとめて献立を入力」を押すとコピーが走る */}
+            <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app p-[var(--space-sm)]">
               <button
                 type="button"
-                onClick={() => void copyLastWeek()}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                onClick={() => setCopyLastWeekMode((v) => !v)}
+                aria-pressed={copyLastWeekMode}
+                className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                  copyLastWeekMode
+                    ? 'border-accent bg-accent text-on-accent'
+                    : 'border-edge bg-surface text-ink-muted'
+                }`}
               >
                 <Copy size={14} aria-hidden />
-                {ja.mealPlan.copyLastWeek}
+                {ja.mealPlan.copyLastWeekToggle}
               </button>
+              <p className="mt-1 text-xs text-ink-muted">
+                {copyLastWeekMode
+                  ? ja.mealPlan.copyLastWeekToggleHintOn
+                  : ja.mealPlan.copyLastWeekToggleHintOff}
+              </p>
             </div>
             {/* 「おまかせで提案」(日タブ)との違いが名前から分からないという指摘への1行説明
                 (2026-07-29 便CD/MP-15) */}
-            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
+            <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
           </>
         )}
       </section>
@@ -4966,11 +5207,43 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         )}
       </section>
 
+      {/* 週の移動。2026-08-07 便DT-3(オーナー指示)で、画面のいちばん上から
+          「すべて畳む」の上へ移した＝7日分のカードのすぐ手前に置く */}
+      <div className="mt-[var(--space-md)] flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setWeekStart((d) => shiftWeek(d, -1))}
+          aria-label={ja.mealPlan.prevWeek}
+          className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
+        >
+          <ChevronLeft size={20} aria-hidden />
+        </button>
+        <button
+          type="button"
+          onClick={() => setWeekStart(currentWeekAnchor)}
+          aria-label={
+            isAtCurrentWeek ? undefined : rollingWeek ? ja.mealPlan.thisWeekRolling : ja.mealPlan.thisWeek
+          }
+          className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+        >
+          {!isAtCurrentWeek && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
+          {dates[0].replaceAll('-', '/')} 〜 {dates[6].replaceAll('-', '/')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setWeekStart((d) => shiftWeek(d, 1))}
+          aria-label={ja.mealPlan.nextWeek}
+          className="rounded-full border border-edge bg-surface p-2 text-accent-ink shadow-sm"
+        >
+          <ChevronRight size={20} aria-hidden />
+        </button>
+      </div>
+
       {/* 7日分のカード。
           2026-08-03 便DJ(オーナー指示): 曜日ごとに日付の行だけへ畳めるようにした
           (7日ぶんが全部開いたままだと、ほかの曜日を探しづらい)。既定は全部開いた状態のままで、
           「すべて畳む」を押すと7日ぶんが一度に日付だけになる */}
-      <div className="mt-[var(--space-md)] flex justify-end">
+      <div className="mt-[var(--space-sm)] flex justify-end">
         <button
           type="button"
           onClick={() => setCollapsedDates(allDaysCollapsed ? [] : [...dates])}
@@ -5048,7 +5321,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </p>
                   <ul className="mt-1 space-y-1">
                     {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log }, i) => (
-                      <CookedLogCard key={`${recipe.id}-${i}`} recipe={recipe} log={log} />
+                      <CookedLogCard
+                        key={`${recipe.id}-${i}`}
+                        recipe={recipe}
+                        log={log}
+                        // 2026-08-07 便DT-2(オーナー指示): 週タブから開いた詳細の「戻る」は
+                        // 週タブへ帰し、離れる直前の週とスクロール位置を復元する
+                        linkState={WEEK_RETURN_LINK_STATE}
+                        onNavigate={rememberWeekReturn}
+                      />
                     ))}
                   </ul>
                 </div>

@@ -2,8 +2,9 @@ import { useEffect } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { House, BookOpen, CalendarDays, Refrigerator, Settings } from 'lucide-react'
 import { ja } from '../i18n/ja'
-
-const LAST_RECIPES_PATH_KEY = 'tabbar:lastRecipesPath'
+// 覚えるキーと「覚えを捨てる」操作は logic/navMemory.ts に置いてある
+// （捨てる側＝献立タブからも同じキーを触るため。2026-08-07 便DT-2）
+import { LAST_RECIPES_PATH_KEY } from '../logic/navMemory'
 
 const otherTabs = [
   { to: '/meal-plan', label: ja.nav.mealPlan, Icon: CalendarDays },
