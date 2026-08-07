@@ -439,6 +439,7 @@ export default function RecipeDetailPage() {
       seconds: customSeconds,
       recipeId: id,
       stepNumber: 0,
+      isCustom: true,
     })
     setCustomTimerOpen(false)
   }

@@ -92,13 +92,23 @@ export default function TimerBar() {
                 timer.done ? goToStep(timer.recipeId, timer.stepNumber) : setAdjustingId(timer.id)
               }
               aria-label={timer.done ? undefined : adjustAriaLabel}
+              // 終わった行は薄い赤みの面で塗る（2026-08-03 オーナー実機フィードバック⑧）。
+              // 枠線と文字色だけだと、動作中の行と面の色が同じで一目では見分けにくかった
+              style={
+                timer.done
+                  ? { background: 'color-mix(in oklab, var(--warning) 12%, var(--surface))' }
+                  : undefined
+              }
               className={`flex w-full items-center gap-2 rounded-md border px-[var(--space-md)] py-2 text-left shadow-md transition-transform ${
                 timer.done
-                  ? 'border-warning bg-surface text-warning'
+                  ? 'border-warning text-warning'
                   : 'border-edge bg-surface'
               } ${isFlashing ? 'animate-pulse ring-2 ring-accent' : ''}`}
             >
-              <StepBadge number={timer.stepNumber > 0 ? timer.stepNumber : 'custom'} size={28} />
+              <StepBadge
+                number={timer.isCustom || timer.stepNumber <= 0 ? 'custom' : timer.stepNumber}
+                size={28}
+              />
               {timer.done && <BellRing size={18} className="shrink-0 animate-pulse" aria-hidden />}
               <span className="min-w-0 flex-1 truncate text-sm font-bold">{timer.label}</span>
               <span className="text-lg font-bold tabular-nums">
@@ -181,6 +191,20 @@ export default function TimerBar() {
           setAdjustingId(null)
         }}
         onClose={() => setAdjustingId(null)}
+        /* 動作中タイマーからレシピの手順へ戻る導線(2026-08-03 実機FB③の復活)。
+           終わった行は従来どおり行タップで直接その手順へ飛ぶ */
+        onGoToStep={
+          adjustingTimer
+            ? () => {
+                const { recipeId, stepNumber } = adjustingTimer
+                setAdjustingId(null)
+                goToStep(recipeId, stepNumber)
+              }
+            : undefined
+        }
+        onToggleMute={
+          adjustingTimer ? () => toggleMute(adjustingTimer.id) : undefined
+        }
       />
     </div>
   )

@@ -31,6 +31,8 @@ export interface StoredTimer {
   totalSeconds: number
   done: boolean
   muted: boolean
+  /** 自分で時間を決めて始めたタイマー（2026-08-03 実機FB②）。古い保存には無いので任意 */
+  isCustom?: boolean
 }
 
 /** localStorage のキー */
@@ -73,6 +75,8 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
       totalSeconds: typeof t.totalSeconds === 'number' ? t.totalSeconds : 0,
       done: t.endsAt <= now,
       muted: t.muted === true,
+      // 印が無い古い保存は「手順のタイマー」として読み戻す（従来どおりの見た目に戻る）
+      isCustom: t.isCustom === true,
     })
   }
   return restored

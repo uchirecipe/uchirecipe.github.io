@@ -258,7 +258,7 @@ import {
   replaceConfirmTargets,
   needsReplaceConfirm,
 } from '../src/logic/replaceConfirm.ts'
-import { matchVoiceCommand } from '../src/logic/voiceCommand.ts'
+import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceCommand.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -8798,6 +8798,38 @@ eq(
     parseStoredTimers(JSON.stringify([{ label: 'こわれた行' }, null, 3]), now).length,
     0,
   )
+
+  // 2026-08-03 便DS/実機FB②: 自分で時間を決めたタイマーを、手順のタイマーと見分けるための印。
+  // 調理中モードから始めると戻り先として手順番号を持つため、番号バッジだけでは区別できず
+  // 「どのレシピのどの手順のタイマーか」と誤読されていた。印は保存・読み戻しでも保たれること、
+  // 印を持たない古い保存は従来どおり手順のタイマー扱いに落ちることを固定する
+  const customStored = JSON.stringify([
+    {
+      id: 8,
+      key: 'custom-1-180',
+      label: 'タイマー',
+      doneLabel: '終わり',
+      recipeId: 1,
+      stepNumber: 2,
+      endsAt: now + 60_000,
+      totalSeconds: 180,
+      done: false,
+      muted: false,
+      isCustom: true,
+    },
+  ])
+  eq('便DS② 自分で決めたタイマーの印が読み戻しでも保たれる', parseStoredTimers(customStored, now)[0].isCustom, true)
+  eq(
+    '便DS② 印を持ったまま戻り先の手順番号も保たれる(タップで手順へ戻れる)',
+    parseStoredTimers(customStored, now)[0].stepNumber,
+    2,
+  )
+  eq('便DS② 印の無い古い保存は手順のタイマー扱い(既存の見た目のまま)', parseStoredTimers(stored, now)[0].isCustom, false)
+  eq(
+    '便DS② 印が真偽値でない壊れた保存でも手順のタイマー扱いに倒す',
+    parseStoredTimers(customStored.replace('"isCustom":true', '"isCustom":"はい"'), now)[0].isCustom,
+    false,
+  )
 }
 
 // ---------- cookedWithinDays: 「最近作った」判定(2026-07-29 便CI/C08) ----------
@@ -9270,6 +9302,33 @@ eq(
   eq('便CK/④-1 どれでもない言葉は無反応(手応えも出さない)', matchVoiceCommand('こんばんは'), undefined)
   // 分岐の優先順位は従来のif-elseの順番どおり(先に「次へ」を見る)
   eq('便CK/④-1 優先順位は従来どおり(「次へ」が先)', matchVoiceCommand('次へもう一回'), 'next')
+
+  // 2026-08-03 便DS/実機FB⑤: 時間の書かれていない手順で「タイマー」とだけ言うと、
+  // 聞き取れていても何秒にすればよいか決められず、画面に何も出ないまま終わっていた。
+  // 「決められない」ことが呼び出し側に伝わる形(undefined)を固定し、案内を出す道を守る
+  eq('便DS⑤ 「3分タイマー」は発話の分数を使う', resolveVoiceTimerSeconds('3分タイマー', undefined, undefined), 180)
+  eq(
+    '便DS⑤ 発話の分数は手順の分数より優先される',
+    resolveVoiceTimerSeconds('10分タイマー', 15, 300),
+    600,
+  )
+  eq('便DS⑤ 「タイマー」だけなら手順に設定された分数を使う', resolveVoiceTimerSeconds('タイマー', 15, undefined), 900)
+  eq(
+    '便DS⑤ 手順に分数が無ければ本文中の最初の時間表記を使う',
+    resolveVoiceTimerSeconds('タイマー', undefined, 300),
+    300,
+  )
+  eq(
+    '便DS⑤ 時間の手掛かりが何も無ければ「決められない」を返す(案内を出す合図)',
+    resolveVoiceTimerSeconds('タイマー', undefined, undefined),
+    undefined,
+  )
+  eq('便DS⑤ 「0分タイマー」は時間として使わず次の候補へ譲る', resolveVoiceTimerSeconds('0分タイマー', 5, undefined), 300)
+  eq(
+    '便DS⑤ 手順の分数が0でも「決められない」に落ちる(0秒タイマーを作らない)',
+    resolveVoiceTimerSeconds('タイマー', 0, 0),
+    undefined,
+  )
 }
 
 // ---------- 栄養バランス第1段: 野菜量・日別集計・対象外混在(2026-07-30 便CL・docs/60 第1段) ----------

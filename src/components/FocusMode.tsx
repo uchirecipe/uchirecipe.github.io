@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { MemoText } from './MemoText'
 import {
   X,
@@ -9,6 +10,8 @@ import {
   VolumeX,
   Mic,
   MicOff,
+  Bell,
+  BellOff,
   Timer as TimerIcon,
   BellRing,
 } from 'lucide-react'
@@ -21,7 +24,7 @@ import { sortTimersForDisplay } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import { toSpeechText } from '../logic/toSpeechText'
-import { matchVoiceCommand } from '../logic/voiceCommand'
+import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../logic/voiceCommand'
 import { renderJaUnits } from './jaUnits'
 import StepBadge from './StepBadge'
 import ComposedStepText from './ComposedStepText'
@@ -52,6 +55,24 @@ const micSupported =
   typeof window !== 'undefined' && !!(window.SpeechRecognition ?? window.webkitSpeechRecognition)
 
 /**
+ * マイクの使用がブラウザ側で断られたままになっていないかを調べる（2026-08-03 実機FB①）。
+ * 一度「許可しない」を選ぶとブラウザがその判断を覚え、以後は許可を尋ねる画面すら出ないまま
+ * 音声認識が即座に失敗する。押しても何も起きないボタンに見えるので、開始する前に確かめる。
+ * Permissions API を持たないブラウザ（Safariなど）では判定できないので false を返し、
+ * 従来どおり一度開始してみて、失敗（not-allowed）を受けてから案内を出す。
+ */
+async function isMicPermissionDenied(): Promise<boolean> {
+  try {
+    const permissions = navigator.permissions
+    if (!permissions?.query) return false
+    const status = await permissions.query({ name: 'microphone' as PermissionName })
+    return status.state === 'denied'
+  } catch {
+    return false
+  }
+}
+
+/**
  * 手順を1つずつ画面いっぱいに表示するモード。
  * スワイプ or 大ボタンで前後に移動でき、読み上げ・音声操作・タイマーもその場で使える。
  * 「画面を暗くしない」設定は詳細画面(呼び出し元)側のWake Lockがそのまま効く。
@@ -63,14 +84,19 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
     now,
     dismissTimer,
     adjustTimer,
+    toggleMute,
     flashingId,
     showFirstTimeNotice,
     dismissFirstTimeNotice,
   } = useTimers()
   const settings = useSettings()
+  const navigate = useNavigate()
   const [index, setIndex] = useState(initialStep)
   const [speaking, setSpeaking] = useState(false)
   const [listening, setListening] = useState(false)
+  // マイクの使用がブラウザで断られている状態（2026-08-03 実機FB①）。
+  // 閉じるまで出しっぱなしにする（1行の手応えでは流れてしまい、気づけなかった）
+  const [micDenied, setMicDenied] = useState(false)
   // 声の操作の手応え(2026-07-28 機能④診断C14)。聞き取れた言葉・マイクが使えなかったことを
   // その場に短く出す。以前は認識しても拒否されても画面に何の変化も無く、効いたのか分からなかった
   const [voiceMessage, setVoiceMessage] = useState('')
@@ -134,6 +160,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       seconds: customSeconds,
       recipeId,
       stepNumber,
+      // 戻り先として手順番号は持たせるが、見た目は時計のバッジにする（2026-08-03 実機FB②）
+      isCustom: true,
     })
     setCustomTimerOpen(false)
   }
@@ -159,6 +187,40 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
     voiceMessageTimeout.current = setTimeout(() => setVoiceMessage(''), ms)
   }, [])
   useEffect(() => () => clearTimeout(voiceMessageTimeout.current), [])
+
+  /**
+   * 「声で操作」の入り切り（2026-08-03 実機FB①）。
+   * 断られたままの状態で start しても即座に失敗して黙って戻るだけなので、
+   * 始める前に許可の状態を確かめ、断られていたら直し方の案内を出す。
+   * ブラウザの設定で許可し直したら、その場で案内を引っ込めて聞き始められるようにする。
+   */
+  const toggleListening = useCallback(() => {
+    setListening((wasListening) => {
+      if (wasListening) return false
+      void isMicPermissionDenied().then((denied) => {
+        setMicDenied(denied)
+        if (denied) setListening(false)
+      })
+      return true
+    })
+  }, [])
+
+  // ブラウザの設定でマイクを許可し直したら案内を引っ込める（Permissions APIがある環境のみ）
+  useEffect(() => {
+    if (!micSupported) return
+    let status: PermissionStatus | undefined
+    const onChange = () => setMicDenied(status?.state === 'denied')
+    void (async () => {
+      try {
+        if (!navigator.permissions?.query) return
+        status = await navigator.permissions.query({ name: 'microphone' as PermissionName })
+        status.addEventListener('change', onChange)
+      } catch {
+        /* 判定できない環境では何もしない（開始してみて失敗したら案内を出す） */
+      }
+    })()
+    return () => status?.removeEventListener('change', onChange)
+  }, [])
 
   const stopSpeech = () => {
     if (speechSupported) window.speechSynthesis.cancel()
@@ -307,17 +369,16 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         feedback()
         stopSpeech()
       } else if (command === 'timer') {
-        feedback()
         // 「3分タイマー」のように分数の指定があればそれを使い、
         // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す
-        const minuteMatch = transcript.match(/(\d+)分/)
-        const fallbackToken = findTimeTokens(currentStep.text)[0]
-        const seconds = minuteMatch
-          ? Number(minuteMatch[1]) * 60
-          : currentStep.minutes
-            ? currentStep.minutes * 60
-            : fallbackToken?.seconds
+        // (判定は logic/voiceCommand.ts の純関数に集約。2026-08-03 便DS/実機FB⑤)
+        const seconds = resolveVoiceTimerSeconds(
+          transcript,
+          currentStep.minutes,
+          findTimeTokens(currentStep.text)[0]?.seconds,
+        )
         if (seconds) {
+          feedback()
           startTimerRef.current({
             key: `${recipeId}-${currentIndex}-${seconds}`,
             label: recipe.title,
@@ -326,19 +387,32 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             recipeId,
             stepNumber: currentStepNumber,
           })
+        } else {
+          // 時間の書かれていない手順では何分にすればよいか決められず、聞き取れていても
+          // 無反応になっていた(2026-08-03 実機FB⑤)。言い方を同じ場所に出す
+          showVoiceMessage(ja.focus.micTimerHint, 5000)
         }
       }
     }
 
+    // マイクを断られたら、この認識オブジェクトはもう使えない。onend からの自動再開が
+    // 「開始→即エラー」を延々と繰り返してしまうため、断られた印を立てて再開を止める
+    // (2026-08-03 実機FB①。以前は再開ループの分だけエラーが積み重なっていた)
+    let denied = false
+
     recognition.onerror = (event) => {
       // マイク拒否は聞き続けても無駄なのでOFFにする。無音タイムアウト等はonendから再開に任せる
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        denied = true
         setListening(false)
-        // 以前は無言でOFFに戻るだけで、なぜ効かないのかが分からなかった(機能④診断C14)
+        // 以前は無言でOFFに戻るだけで、なぜ効かないのかが分からなかった(機能④診断C14)。
+        // 2026-08-03 実機FB①: 短い1行では流れてしまうので、直し方の案内を閉じるまで出す
         showVoiceMessage(ja.focus.micDenied, 6000)
+        setMicDenied(true)
       }
     }
     recognition.onend = () => {
+      if (denied) return
       // ブラウザは無音が続くと自動停止するため、聞いている間は再開し続ける
       try {
         recognition.start()
@@ -407,7 +481,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           {micSupported && (
             <button
               type="button"
-              onClick={() => setListening((v) => !v)}
+              onClick={toggleListening}
               aria-label={listening ? ja.focus.micStop : ja.focus.micStart}
               className={`flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 ${
                 listening ? 'text-accent-ink' : 'text-ink-muted'
@@ -448,52 +522,92 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         </p>
       )}
 
+      {/* マイクがブラウザで断られている案内(2026-08-03 実機FB①)。
+          「声で操作」を押しても何も起きないように見える状態の原因と直し方をその場に出す */}
+      {micDenied && (
+        <div className="mx-[var(--space-md)] mb-1 flex items-start gap-2 rounded-md border border-warning bg-surface px-[var(--space-md)] py-2 text-xs">
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-warning">{ja.focus.micDeniedTitle}</p>
+            <p className="mt-0.5 text-ink-muted">{ja.focus.micDeniedBody}</p>
+            <p className="mt-0.5 text-ink-muted">{ja.focus.micDeniedIphone}</p>
+            <p className="text-ink-muted">{ja.focus.micDeniedAndroid}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMicDenied(false)}
+            aria-label={ja.focus.close}
+            className="shrink-0 rounded-full p-1 text-ink-muted"
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+      )}
+
       {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋自由な時間のタイマー起動ボタン(2026-07-12・入口B)。
-          タイマーが無い時も「タイマー」ボタンの置き場所として常に表示する */}
-      <div className="flex max-h-[30vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1">
+          タイマーが無い時も「タイマー」ボタンの置き場所として常に表示する。
+          2026-08-03 実機FB⑥: 「タイマー」ボタンを折り返しの列から出して右端の定位置に固定し、
+          動いているタイマーが増減しても置き場所が動かないようにした(アイコンのみ) */}
+      <div className="flex items-start gap-2 px-[var(--space-md)] pb-1">
+        <div className="flex max-h-[30vh] min-w-0 flex-1 flex-wrap items-center justify-center gap-2 overflow-y-auto">
         {shownTimers.map((t) => {
           const isThisRecipe = t.recipeId === recipeId
-          // この料理の手順タイマー以外は、どれの時間か分かるよう名前を併記する
-          // (他の料理=料理名 / 自由な時間のタイマー=「タイマー」。機能④診断C4・C19)。
-          // 自由な時間のタイマーは起動場所によって手順番号が入るため、番号ではなく名前で判定する
-          const showLabel = !isThisRecipe || t.label !== recipe.title
+          // 2026-08-03 実機FB②: どのレシピのタイマーかが分からなかったため、この料理の分も含め
+          // 名前を必ず出す(以前はこの料理の手順タイマーだけ名前を省いていた)。
+          // 自分で時間を決めたタイマーは名前が「タイマー」・バッジが時計になる
+          const isCustom = t.isCustom === true || t.stepNumber <= 0
           const fullLabel =
             t.stepNumber > 0
               ? `${t.label}・${ja.timer.stepLabel.replace('{n}', String(t.stepNumber))}`
               : t.label
           // この料理の終わったタイマーだけ、タップでその手順へ戻る(他の料理の手順番号へは飛べない)。
-          // それ以外は調整の窓を開く=残り時間の±も停止も、調理中モードから出ずにできる
+          // それ以外は調整の窓を開く=残り時間の±も消音も停止も、調理中モードから出ずにできる
           const jumpsToStep = t.done && isThisRecipe && t.stepNumber > 0
           return (
             <div
               key={t.id}
-              className={`inline-flex items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1.5 ${
-                t.done ? 'animate-pulse border-warning text-warning' : 'border-accent text-accent-ink'
-              } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''} ${
-                isThisRecipe ? '' : 'opacity-90'
-              }`}
+              // 2026-08-03 実機FB⑧: 以前は終了したチップ全体をanimate-pulseで点滅させていたため、
+              // 文字ごと薄くなって「終わり」の文言が読み取れない瞬間があった。
+              // 点滅はベルのアイコンだけに残し、チップは薄い赤みの面で塗って一目で見分ける
+              style={
+                t.done
+                  ? { background: 'color-mix(in oklab, var(--warning) 14%, var(--surface))' }
+                  : undefined
+              }
+              className={`inline-flex max-w-full items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1 ${
+                t.done ? 'border-warning text-warning' : 'border-accent text-accent-ink'
+              } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''}`}
             >
               <button
                 type="button"
                 onClick={() => (jumpsToStep ? goTo(t.stepNumber - 1) : setAdjustingId(t.id))}
                 aria-label={
                   jumpsToStep
-                    ? ja.timer.stepLabel.replace('{n}', String(t.stepNumber))
+                    ? ja.timer.goToStep.replace('{n}', String(t.stepNumber))
                     : ja.timer.adjustOpenAria.replace('{label}', fullLabel)
                 }
                 className="flex min-w-0 items-center gap-1.5"
               >
-                <StepBadge number={t.stepNumber > 0 ? t.stepNumber : 'custom'} size={24} />
+                <StepBadge number={isCustom ? 'custom' : t.stepNumber} size={24} />
                 {/* 終了の合図(2026-07-28 機能④診断C5): 常駐バー(TimerBar)と同じベル+点滅にそろえる。
                     以前は色が変わるだけの静止ピルで、音を聞き逃すと画面上の手掛かりが実質無かった */}
                 {t.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
-                {showLabel && (
-                  <span className="max-w-24 truncate text-xs font-bold">{t.label}</span>
-                )}
-                <span className="text-lg font-bold tabular-nums">
+                <span className="max-w-[7rem] truncate text-xs font-bold">{t.label}</span>
+                <span className="whitespace-nowrap text-base font-bold tabular-nums">
                   {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
                 </span>
               </button>
+              {/* このタイマーだけ消音する(2026-08-03 実機FB④)。常駐バーの行と同じ位置・同じ働き。
+                  終わったタイマーには効く音がもう無いので出さない */}
+              {!t.done && (
+                <button
+                  type="button"
+                  onClick={() => toggleMute(t.id)}
+                  aria-label={t.muted ? ja.timer.unmute : ja.timer.mute}
+                  className="shrink-0 rounded-full p-1.5 text-ink-muted"
+                >
+                  {t.muted ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => dismissTimer(t.id)}
@@ -505,14 +619,14 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             </div>
           )
         })}
+        </div>
         <button
           type="button"
           onClick={openCustomTimer}
           aria-label={ja.timer.customOpenAria}
-          className="inline-flex items-center gap-1 rounded-full border border-accent px-3 py-1.5 text-sm font-bold text-accent-ink"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-accent text-accent-ink"
         >
-          <TimerIcon size={16} aria-hidden />
-          {ja.timer.customBarButton}
+          <TimerIcon size={20} aria-hidden />
         </button>
       </div>
 
@@ -669,6 +783,27 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           setAdjustingId(null)
         }}
         onClose={() => setAdjustingId(null)}
+        /* このタイマーを始めた手順へ戻る(2026-08-03 実機FB③)。
+           この料理の分は調理中モードの中で手順を送るだけ。別の料理の分は、その料理の
+           レシピ詳細の該当手順を開いて調理中モードを閉じる(navigateが履歴を1つ積むので、
+           閉じるときの履歴の後始末はそちらに任せる) */
+        onGoToStep={
+          adjustingTimer && adjustingTimer.stepNumber > 0
+            ? adjustingTimer.recipeId === recipeId
+              ? () => {
+                  const target = adjustingTimer.stepNumber - 1
+                  setAdjustingId(null)
+                  goTo(target)
+                }
+              : () => {
+                  const { recipeId: otherId, stepNumber: otherStep } = adjustingTimer
+                  setAdjustingId(null)
+                  navigate(`/recipes/${otherId}?step=${otherStep}`)
+                  onClose(index)
+                }
+            : undefined
+        }
+        onToggleMute={adjustingTimer ? () => toggleMute(adjustingTimer.id) : undefined}
       />
       <CustomTimerModal
         open={customTimerOpen}
