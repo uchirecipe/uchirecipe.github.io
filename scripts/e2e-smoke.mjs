@@ -4126,7 +4126,11 @@ try {
     'PRICE-01 初期値が投入されている(玉ねぎ・鶏もも肉を含む)',
     priceListBefore.includes('玉ねぎ') && priceListBefore.includes('鶏もも肉'),
   )
-  check('PRICE-01 目安価格の注意書きが表示される', priceListBefore.includes('価格は目安です'))
+  // 2026-08-04 便DV-9: 「目安です」から「何を基準にした価格か」を書く形に変えた
+  check(
+    'PRICE-01 はじめから入っている価格の根拠が表示される',
+    priceListBefore.includes('一般的なスーパーで売られている標準的な商品の価格を基準に設定しています'),
+  )
 
   // --- INLINE-01: 一覧の行内編集(2026-07-12 UX改修)。玉ねぎの行を名前で特定し、
   // 編集ボタン・別窓を経由せず、価格欄に直接入力してEnter(=blur)で即保存できることを確認する。
@@ -8649,6 +8653,39 @@ try {
               .getByRole('button', { name: '副菜', exact: true })
               .getAttribute('aria-pressed')) === 'false',
         )
+
+        // 2026-08-04 便DV-1 再発防止(オーナー実機報告「全ボタンを選択すると候補が減る」)。
+        // 種別を足すたびに「候補◯品」が増える(減らない)・全選択と未選択が同じ品数になること
+        const candidateCount = async () => {
+          const text = (await dhPage.textContent('body')) ?? ''
+          const m = text.match(/候補(\d+)品/)
+          return m ? Number(m[1]) : -1
+        }
+        const tapType = async (name) => {
+          await dhPage.getByRole('button', { name, exact: true }).click()
+          await dhPage.waitForTimeout(350)
+        }
+        const cMainOnly = await candidateCount()
+        await tapType('副菜')
+        const cMainSide = await candidateCount()
+        await tapType('汁物')
+        await tapType('その他')
+        const cAll = await candidateCount()
+        check(
+          'HOME-DH-01(便DV) 種別を足すと候補は減らない(主菜のみ→+副菜→全選択)',
+          cMainOnly > 0 && cMainSide >= cMainOnly && cAll >= cMainSide,
+          `主菜のみ=${cMainOnly} +副菜=${cMainSide} 全選択=${cAll}`,
+        )
+        // 全部OFF(=種別で絞らない)にすると、全選択とまったく同じ品数になる
+        for (const name of ['主菜', '副菜', '汁物', 'その他']) await tapType(name)
+        const cNone = await candidateCount()
+        check(
+          'HOME-DH-01(便DV) 未選択(絞らない)と全選択の候補数が一致する',
+          cNone === cAll,
+          `未選択=${cNone} 全選択=${cAll}`,
+        )
+        // 既定(主菜だけON)へ戻してから次のケースへ進む
+        await tapType('主菜')
       }
 
       // (2) 今日の夕食に予定を入れる → 2群が並び、既定は「レシピ一覧から選択中」だけ開く
@@ -9235,15 +9272,22 @@ try {
         const res = await fetch('/news.json')
         return res.ok ? await res.json() : []
       })
+      // 2026-08-04 便DV-10(オーナー指摘): 押し売りに見えないよう題も文面も短くし、
+      // 解錠済みには出さない印(hideWhenPro)を付けた
       check(
-        'LAUNCH-02 お知らせの最新がPro版の発売告知',
-        Array.isArray(news) && news[0]?.title === 'Pro版の販売を開始しました',
+        'LAUNCH-02 お知らせの最新がPro版の公開の告知',
+        Array.isArray(news) && news[0]?.title === 'Pro版を公開しました',
         `latest=${JSON.stringify(news[0]?.title)}`,
       )
       check(
         'LAUNCH-02 発売告知は設定のPro節へ誘導する',
         news[0]?.link === '#/settings?section=pro',
         `link=${news[0]?.link}`,
+      )
+      check(
+        'LAUNCH-02 発売告知は解錠済みには出さない印が付いている',
+        news[0]?.hideWhenPro === true,
+        `hideWhenPro=${news[0]?.hideWhenPro}`,
       )
 
       // --- 50件到達の実挙動: 上限ちょうどの自作レシピを流し込んでから新規追加を試す。
