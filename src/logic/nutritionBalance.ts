@@ -7,7 +7,13 @@ import {
   type PersonalNutritionSum,
   type RecipeNutrition,
 } from './nutrition'
-import { MEAL_PURPOSES, type MealPurpose, type MealSlot, type Recipe } from '../db/types'
+import {
+  MEAL_PURPOSES,
+  MORE_MEAL_PURPOSES,
+  type MealPurpose,
+  type MealSlot,
+  type Recipe,
+} from '../db/types'
 
 /**
  * 栄養バランス献立 第1段「見える化」の純ロジック（2026-07-30 便CL・docs/60 第1段）。
@@ -384,13 +390,31 @@ export interface WeekBalance {
 
 /**
  * 目的ごとに見る栄養素（1人分・8項目のどれか）。
- * 「たんぱく質を多めに」＝たんぱく質(g)、「塩分をひかえめに」＝食塩相当量(g)。
+ * 例:「たんぱく質多め」＝たんぱく質(g)、「塩分ひかえめ」＝食塩相当量(g)。
  * UIの表示ラベルもこのキーから引く（数値と項目名がずれないように1か所で決める）。
+ *
+ * 2026-08-07 便DT-9（オーナー指示）で8軸へ拡張した。使うのは既存の NutrientTotals の項目だけで、
+ * 新しい栄養計算は1つも足していない＝成分値の出どころ（日本食品標準成分表）は変わらない。
+ * `satisfies Record<MealPurpose, …>` を付けてあるので、目的が増えたらここで型エラーになる。
  */
 export const PURPOSE_NUTRIENT_KEY = {
   protein: 'proteinG',
+  fiber: 'fiberG',
+  iron: 'ironMg',
+  calcium: 'calciumMg',
+  lowEnergy: 'kcal',
+  lowFat: 'fatG',
+  lowCarb: 'carbG',
   lowSalt: 'saltG',
 } as const satisfies Record<MealPurpose, keyof NutrientTotals>
+
+/**
+ * その目的が「多め」を狙うものか（true＝値が大きいほど目的に沿う）。
+ * 分類そのものは db/types.ts の MORE_MEAL_PURPOSES が持つ＝2か所に書かない。
+ */
+export function isMorePurpose(purpose: MealPurpose): boolean {
+  return (MORE_MEAL_PURPOSES as readonly MealPurpose[]).includes(purpose)
+}
 
 /**
  * 目的の軸で見た「1食ぶんの合計」（主菜＋副菜の1人分を足した値）。
@@ -398,11 +422,11 @@ export const PURPOSE_NUTRIENT_KEY = {
  */
 export function purposeAxisValue(
   purpose: MealPurpose,
-  perServingTotals: Pick<NutrientTotals, 'proteinG' | 'saltG'>[],
+  perServingTotals: Partial<NutrientTotals>[],
 ): number {
   const key = PURPOSE_NUTRIENT_KEY[purpose]
   let sum = 0
-  for (const t of perServingTotals) sum += t[key]
+  for (const t of perServingTotals) sum += t[key] ?? 0
   return sum
 }
 
@@ -415,20 +439,24 @@ export function purposeAxisValue(
  * 表に出さない目標値をこっそり決めるのは、その規律を裏口から破ることになる。
  * そこで「線に近いか」ではなく「引いた候補どうしを比べてどちらが軸に沿うか」だけで決める。
  *
- *  - 'protein'（たんぱく質を多めに）… 1 / (1 + たんぱく質g)。
+ *  - 「多め」の目的（たんぱく質・食物繊維・鉄・カルシウム）… 1 / (1 + 軸の値)。
  *    多いほど小さくなる（＝多い方を採る）が、必ず正の値なので0以下にはならない
  *    ＝「ここで満足」という打ち切り点を作らない（満たすべき線が無いことを式でも表す）。
- *  - 'lowSalt'（塩分をひかえめに）… 食塩相当量(g) そのもの。
- *    少ないほど小さくなる。0g（＝塩分が計算上ゼロ）のときだけ打ち切る。
+ *  - 「ひかえめ」の目的（エネルギー・脂質・炭水化物・塩分）… 軸の値そのもの。
+ *    少ないほど小さくなる。0（＝計算上ゼロ）のときだけ打ち切る。
+ *
+ * 2026-08-07 便DT-9: 軸が8つになっても式は上の2種類のままで、向き（多め/ひかえめ）だけで
+ * 決まる＝軸ごとの重み付け・目標値は持たない。単位（g / mg / kcal）が違っても、
+ * 比べるのは**同じ軸どうしの相対値**だけなので単位換算は要らない。
  *
  * どちらも「良い/悪い」の判定ではなく、候補の並べ替えに使う相対値でしかない。
  */
 export function purposePenalty(
   purpose: MealPurpose,
-  perServingTotals: Pick<NutrientTotals, 'proteinG' | 'saltG'>[],
+  perServingTotals: Partial<NutrientTotals>[],
 ): number {
   const value = purposeAxisValue(purpose, perServingTotals)
-  if (purpose === 'protein') return 1 / (1 + Math.max(0, value))
+  if (isMorePurpose(purpose)) return 1 / (1 + Math.max(0, value))
   return value
 }
 

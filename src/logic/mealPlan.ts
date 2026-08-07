@@ -705,8 +705,13 @@ export interface FillWeekPlan {
   partialFills: { date: string; slot: MealSlot; fillRole: MealRole }[]
   /** 手動配置がある（＝丸ごとは消さない）枠のキー("date|slot")の集合。件数はメッセージにも使う */
   preservedSlotKeys: Set<string>
-  /** 埋め直す役割に残っている「自動提案由来」エントリのid（削除してから提案し直す） */
-  autoEntryIdsToRemove: number[]
+  /**
+   * 埋め直す役割に残っていて、提案し直す前に削除するエントリのid。
+   * 既定では「自動提案由来」の行だけが入る（手動配置は消さない）。
+   * replaceAll=true（2026-08-07 便DT-8「レシピを総入れ替え」）のときだけ、対象範囲の
+   * 手動配置の行も入る＝スイッチを入れて確認に答えたときにしか手動配置は消えない。
+   */
+  entryIdsToRemove: number[]
   /** 重複回避で used とみなす recipeId（対象外の枠＋残す手動役割の中身）。提案の同一週内重複を避ける */
   usedRecipeIds: number[]
   /**
@@ -751,8 +756,19 @@ export function planWeekFill(
   visibleSlots: MealSlot[],
   today: string,
   options: {
-    /** 自動提案由来の枠も保護する（消さない）。月の一括提案だけ true */
+    /** 自動提案由来の枠も保護する（消さない）。月の一括提案と、週タブの「まだ決まっていない枠だけ埋める」 */
     keepAuto?: boolean
+    /**
+     * 対象範囲の献立を、手動配置も含めて全部消してから入れ直す
+     * （2026-08-07 便DT-8「レシピを総入れ替え」・オーナー指示）。
+     *
+     * 既定は false＝2026-07-22 便BEの非破壊原則（手動配置は無警告で消さない）のまま。
+     * true にできるのは、ユーザーが週タブのスイッチを「レシピを総入れ替え」に倒し、
+     * 規約Fの確認文（何が消えて何が残るか・件数つき）に「はい」と答えたときだけ。
+     * 対象範囲の定義は変えない＝過去日・表示していない食事・メモで外した日には触らない。
+     * keepAuto と同時に true にしても意味が矛盾するので、replaceAll を優先する。
+     */
+    replaceAll?: boolean
     /**
      * 丸ごと対象から外す日（2026-07-30 便CH/C10）。月の一括提案が「その日のメモ」を書いた日
      * （外食・実家に帰る等）に献立を入れてしまうのを防ぐために使う。
@@ -761,7 +777,8 @@ export function planWeekFill(
     skipDates?: string[]
   } = {},
 ): FillWeekPlan {
-  const keepAuto = options.keepAuto ?? false
+  const replaceAll = options.replaceAll ?? false
+  const keepAuto = !replaceAll && (options.keepAuto ?? false)
   const skipDates = new Set(options.skipDates ?? [])
   const notPastDates = weekDatesArr.filter((date) => !isPastDate(date, today))
   const skippedDates = notPastDates.filter((date) => skipDates.has(date))
@@ -773,7 +790,7 @@ export function planWeekFill(
   const slotsToFill: { date: string; slot: MealSlot }[] = []
   const partialFills: { date: string; slot: MealSlot; fillRole: MealRole }[] = []
   const preservedSlotKeys = new Set<string>()
-  const autoEntryIdsToRemove: number[] = []
+  const entryIdsToRemove: number[] = []
   const usedRecipeIds: number[] = []
 
   // 対象外の枠（過去日・非表示帯）のレシピは触らない＝重複回避のusedに入れるだけ
@@ -792,20 +809,30 @@ export function planWeekFill(
       const fillable: Record<AutoFillRole, boolean> = { main: false, side: false }
       for (const e of slotEntries) {
         const role = e.role ?? 'main'
-        if (role !== 'main' && role !== 'side') usedRecipeIds.push(e.recipeId)
+        // 汁物・その他は自動提案が入れない役割なので、既定では触らず重複回避にだけ数える。
+        // 総入れ替え（便DT-8）は「この枠の献立を全部入れ直す」なので、この2役割も消す
+        // （主菜・副菜だけ入れ替わって汁物が前のまま残ると、総入れ替えになっていない）
+        if (role !== 'main' && role !== 'side') {
+          if (replaceAll && e.id != null) entryIdsToRemove.push(e.id)
+          else usedRecipeIds.push(e.recipeId)
+        }
       }
       for (const role of roles) {
         const roleEntries = slotEntries.filter((e) => (e.role ?? 'main') === role)
-        // keepAuto=true のときは、自動提案で入った行も「すでに決まっている」として保護する
-        const hasManual = roleEntries.some((e) => keepAuto || !e.auto)
+        // keepAuto=true のときは、自動提案で入った行も「すでに決まっている」として保護する。
+        // replaceAll=true のときは何も保護しない＝全役割が埋め対象になる
+        const hasManual = !replaceAll && roleEntries.some((e) => keepAuto || !e.auto)
         if (hasManual) {
           // 手動で埋まっている役割: 同役割のエントリ（手動+自動とも）を残し、重複回避のusedに入れる
           hasManualAnything = true
           for (const e of roleEntries) usedRecipeIds.push(e.recipeId)
         } else {
-          // 空 or 自動提案由来だけの役割 = 埋め対象。自動行は削除してから提案し直す（再抽選）
+          // 空 or 自動提案由来だけの役割 = 埋め対象。自動行は削除してから提案し直す（再抽選）。
+          // 総入れ替えでは手動配置の行も削除対象にする（スイッチ＋確認を経たときだけここへ来る）
           fillable[role] = true
-          for (const e of roleEntries) if (e.auto && e.id != null) autoEntryIdsToRemove.push(e.id)
+          for (const e of roleEntries) {
+            if ((replaceAll || e.auto) && e.id != null) entryIdsToRemove.push(e.id)
+          }
         }
       }
       if (hasManualAnything) preservedSlotKeys.add(`${date}|${slot}`)
@@ -823,7 +850,7 @@ export function planWeekFill(
     slotsToFill,
     partialFills,
     preservedSlotKeys,
-    autoEntryIdsToRemove,
+    entryIdsToRemove,
     usedRecipeIds,
     skippedDates,
   }

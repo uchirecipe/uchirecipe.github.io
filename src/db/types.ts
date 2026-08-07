@@ -235,18 +235,42 @@ export type AutoFillRole = (typeof AUTO_FILL_ROLES)[number]
  * 自動提案の「目的」（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
  * ユーザーが「今週はこの軸で組みたい」を指定すると、提案が同じ枠を数回引き直して
  * その軸に最も沿う組み合わせを採る（docs/60 第2段の引き直し方式）。
- *  - 'protein'  … たんぱく質を多めに（1人分のたんぱく質が多い組み合わせを採る）
- *  - 'lowSalt'  … 塩分をひかえめに（1人分の食塩相当量が少ない組み合わせを採る）
+ *  - 'protein'  … たんぱく質多め（1人分のたんぱく質が多い組み合わせを採る）
+ *  - 'lowSalt'  … 塩分ひかえめ（1人分の食塩相当量が少ない組み合わせを採る）
  * 未指定（undefined）は従来どおりの提案＝引き直しをしない（k=1で現行と完全に等価）。
+ *
+ * 2026-08-07 便DT-9（オーナー指示）で軸を8つへ広げた。「多め」4つ（たんぱく質・食物繊維・鉄・
+ * カルシウム）と「ひかえめ」4つ（エネルギー・脂質・炭水化物・塩分）で、どれも
+ * logic/nutrition.ts の NutrientTotals にすでにある項目だけを使う（新しい計算は足していない）。
+ * **既存の 'protein' / 'lowSalt' の値はそのまま残す**＝設定・献立に保存済みの目的が読めなくなる
+ * マイグレーションを起こさない（新フィールドは任意項目にして既存データを壊さない、と同じ作法）。
  *
  * 「バランスの良い」「不足しています」等の断定はしない。あくまで
  * 「たんぱく質が多めになる組み合わせを選ぶ」という選び方の指定であり、
  * 栄養指導・目標達成の約束ではない（logic/nutritionBalance.ts 冒頭の規律に従う）。
  */
-export type MealPurpose = 'protein' | 'lowSalt'
+export type MealPurpose =
+  | 'protein'
+  | 'fiber'
+  | 'iron'
+  | 'calcium'
+  | 'lowEnergy'
+  | 'lowFat'
+  | 'lowCarb'
+  | 'lowSalt'
+
+/**
+ * 「多め」を狙う目的（値が大きいほど目的に沿う）。
+ * この2本の配列が目的の分類の唯一の正で、ペナルティの向き（logic/nutritionBalance.ts の
+ * purposePenalty）も画面の並び（MealPlanPage の2群表示）もここから引く。
+ */
+export const MORE_MEAL_PURPOSES = ['protein', 'fiber', 'iron', 'calcium'] as const satisfies readonly MealPurpose[]
+
+/** 「ひかえめ」を狙う目的（値が小さいほど目的に沿う） */
+export const LESS_MEAL_PURPOSES = ['lowEnergy', 'lowFat', 'lowCarb', 'lowSalt'] as const satisfies readonly MealPurpose[]
 
 /** 目的の選択肢（UIの並び順もこの順。'none'に当たる「指定なし」は undefined で表す） */
-export const MEAL_PURPOSES: MealPurpose[] = ['protein', 'lowSalt']
+export const MEAL_PURPOSES: MealPurpose[] = [...MORE_MEAL_PURPOSES, ...LESS_MEAL_PURPOSES]
 
 /**
  * 週間献立の1品分（日付＋枠にレシピを割り当てる）。
