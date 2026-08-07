@@ -45,7 +45,7 @@ import {
   FREE_LIMIT_WARNING_THRESHOLD,
 } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
-import { isNewsSuppressed } from '../src/logic/news.ts'
+import { isNewsSuppressed, isNewsVisibleFor } from '../src/logic/news.ts'
 import {
   suggestCandidates,
   suggestForSlot,
@@ -76,6 +76,11 @@ import {
   recipeDishType,
 } from '../src/logic/mealPlan.ts'
 import { restoreHomeWidget } from '../src/logic/homeWidgets.ts'
+import { suggestionCandidates, DISH_TYPE_OPTIONS } from '../src/logic/homeSuggest.ts'
+import {
+  shouldShowPermissionHelp,
+  shouldShowUnsupportedNote,
+} from '../src/logic/cookingSupport.ts'
 import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
@@ -10248,6 +10253,169 @@ eq(
     restoreHomeWidget(['mealPlan', 'suggestion'], 'suggestion'),
     ['mealPlan', 'suggestion'],
   )
+}
+
+// ---------- 便DV-1: ホーム「今日なに作る?」の種別しぼり(2026-08-04 オーナー実機報告) ----------
+// 再発防止: 「主菜〜その他の全ボタンを選択すると候補が減る」。
+// 原因は「種別で絞ってから季節の優先(preferSeasonWithFallback)をかける」順で、季節の優先が
+// 「季節の品が10品以上あればその季節だけに絞る」しきい値を持つため、入れる集合が大きいほど
+// 出てくる集合が小さくなる逆転が起きていた。
+{
+  const mk = (id, over = {}) => ({
+    id,
+    title: `レシピ${id}`,
+    servings: 2,
+    effortLevel: 'easy',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+    ...over,
+  })
+  // 主菜: 夏5品+通年50品 / 副菜: 夏4品+通年5品 / 汁物: 通年3品 / その他: 夏1品+通年2品
+  // → 全体の夏はちょうど10品(=SEASON_MIN_CANDIDATES)で、実機で起きた条件と同じ形
+  const pool = []
+  let nextId = 1
+  const add = (dishType, season, count) => {
+    for (let i = 0; i < count; i += 1) {
+      pool.push(mk(nextId++, { dishType, season }))
+    }
+  }
+  add('main', 'summer', 5)
+  add('main', 'all', 50)
+  add('side', 'summer', 4)
+  add('side', 'all', 5)
+  add('soup', 'all', 3)
+  add('dessert', 'summer', 1)
+  add('dessert', 'all', 2)
+
+  const ids = (list) => list.map((r) => r.id).sort((a, b) => a - b)
+  const count = (types) => suggestionCandidates(pool, types, 'summer').length
+
+  eq('DV-SUG 未選択(絞らない)は全レシピが候補', count([]), pool.length)
+  eq('DV-SUG 全選択は未選択と同じ件数', count(DISH_TYPE_OPTIONS), count([]))
+  eq(
+    'DV-SUG 全選択と未選択は候補の中身まで一致する',
+    ids(suggestionCandidates(pool, DISH_TYPE_OPTIONS, 'summer')),
+    ids(suggestionCandidates(pool, [], 'summer')),
+  )
+  // 本丸: 種別を足していくと候補は必ず増える(減らない)
+  eq('DV-SUG 主菜だけ=主菜の全品', count(['main']), 55)
+  eq('DV-SUG 主菜+副菜は主菜だけより多い', count(['main', 'side']) > count(['main']), true)
+  eq(
+    'DV-SUG 主菜+副菜+汁物はさらに多い',
+    count(['main', 'side', 'soup']) > count(['main', 'side']),
+    true,
+  )
+  eq(
+    'DV-SUG 全選択が最多(種別を増やして減らない)',
+    count(DISH_TYPE_OPTIONS) >= count(['main', 'side', 'soup']),
+    true,
+  )
+  // 種別ごとの候補は、その種別のレシピだけで構成される(混ざらない)
+  eq(
+    'DV-SUG 汁物だけ選べば汁物しか出ない',
+    suggestionCandidates(pool, ['soup'], 'summer').every((r) => r.dishType === 'soup'),
+    true,
+  )
+  // 選ぶ順番を変えても候補の並びは同じ(抽選のブレを作らない)
+  eq(
+    'DV-SUG 選んだ順番では候補の並びは変わらない',
+    suggestionCandidates(pool, ['soup', 'main'], 'summer').map((r) => r.id),
+    suggestionCandidates(pool, ['main', 'soup'], 'summer').map((r) => r.id),
+  )
+  // 季節の優先は種別ごとに効く: その種別に季節の品が10品以上あれば、その種別は季節の品だけになる
+  {
+    const seasonal = []
+    for (let i = 0; i < 12; i += 1) seasonal.push(mk(100 + i, { dishType: 'main', season: 'summer' }))
+    for (let i = 0; i < 20; i += 1) seasonal.push(mk(200 + i, { dishType: 'main', season: 'all' }))
+    eq(
+      'DV-SUG 季節の品が十分あればその種別は季節の品だけに絞る',
+      suggestionCandidates(seasonal, ['main'], 'summer').length,
+      12,
+    )
+  }
+  // 0件回避(従来どおり): 選んだ種別に1品も無いときだけ、種別を外して全体から選ぶ
+  {
+    const onlyMain = [mk(1, { dishType: 'main', season: 'all' }), mk(2, { dishType: 'main', season: 'all' })]
+    eq('DV-SUG 選んだ種別が0件なら種別を外して全体から選ぶ', suggestionCandidates(onlyMain, ['soup'], 'summer').length, 2)
+    eq('DV-SUG 候補が空なら空のまま(0件回避も空)', suggestionCandidates([], ['soup'], 'summer').length, 0)
+  }
+  // dishType未設定のレシピも4区分のどれかに必ず入る(未選択と全選択が食い違わない担保)
+  {
+    const guessed = [
+      mk(1, { title: 'わかめのみそ汁', season: 'all' }),
+      mk(2, { title: '豚の生姜焼き', ingredients: [{ name: '豚こま' }], season: 'all' }),
+      mk(3, { title: 'ほうれん草のおひたし', ingredients: [{ name: 'ほうれん草' }], season: 'all' }),
+    ]
+    eq(
+      'DV-SUG dishType未設定でも全選択=未選択',
+      ids(suggestionCandidates(guessed, DISH_TYPE_OPTIONS, 'summer')),
+      ids(suggestionCandidates(guessed, [], 'summer')),
+    )
+  }
+}
+
+// ---------- 便DV-6/7: 「料理中」の設定の注記の出し分け(2026-08-04 オーナー指示) ----------
+// 対応ブラウザには「対応ブラウザのみ」を出さない・許可の案内はスイッチONで許可が無いときだけ
+{
+  eq('DV-CAP 非対応のときだけ「対応していません」を出す', shouldShowUnsupportedNote(false), true)
+  eq('DV-CAP 対応ブラウザには注記自体を出さない', shouldShowUnsupportedNote(true), false)
+
+  eq(
+    'DV-CAP ONで許可が下りていないときだけ案内を出す',
+    shouldShowPermissionHelp(true, true, 'blocked'),
+    true,
+  )
+  eq(
+    'DV-CAP OFFのあいだは出さない(常時出す注記にしない)',
+    shouldShowPermissionHelp(false, true, 'blocked'),
+    false,
+  )
+  eq('DV-CAP 許可済みなら出さない', shouldShowPermissionHelp(true, true, 'granted'), false)
+  eq(
+    'DV-CAP まだ調べていない/調べようがないときは出さない',
+    shouldShowPermissionHelp(true, true, 'unknown'),
+    false,
+  )
+  eq(
+    'DV-CAP 非対応のときは許可の案内ではなく「対応していません」だけを出す',
+    shouldShowPermissionHelp(true, false, 'blocked'),
+    false,
+  )
+}
+
+// ---------- 便DV-10: Pro版の販売のお知らせを解錠済みの人に出さない(2026-08-04 オーナー指摘) ----------
+{
+  const news = (over = {}) => ({ id: 'x', date: '2026-08-02', title: 't', body: 'b', ...over })
+  eq(
+    'DV-NEWS 販売のお知らせは解錠済みには出さない',
+    isNewsVisibleFor(news({ hideWhenPro: true }), true),
+    false,
+  )
+  eq(
+    'DV-NEWS 販売のお知らせは未解錠には出す',
+    isNewsVisibleFor(news({ hideWhenPro: true }), false),
+    true,
+  )
+  eq('DV-NEWS 印の無いお知らせは解錠済みにも出す', isNewsVisibleFor(news(), true), true)
+  eq('DV-NEWS 印の無いお知らせは未解錠にも出す', isNewsVisibleFor(news(), false), true)
+  eq(
+    'DV-NEWS hideWhenPro:false は印なしと同じ扱い',
+    isNewsVisibleFor(news({ hideWhenPro: false }), true),
+    true,
+  )
+  // 配信中の public/news.json 側に印が付いていること（アプリ側だけ直して取りこぼす事故の防止）
+  {
+    const items = JSON.parse(readFileSync(new URL('../public/news.json', import.meta.url), 'utf8'))
+    const proNews = items.find((n) => n.id === '2026-08-02-pro-release')
+    eq('DV-NEWS public/news.json のPro版のお知らせに hideWhenPro が付いている', proNews?.hideWhenPro, true)
+    eq('DV-NEWS 解錠済みには表示されない(実データで確認)', isNewsVisibleFor(proNews, true), false)
+  }
 }
 
 // ---------- 結果 ----------

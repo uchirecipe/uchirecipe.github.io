@@ -90,6 +90,16 @@ import {
   SHOPPING_AISLE_ORDER,
 } from '../logic/pantryGroups'
 import type { HomeWidgetKey, ThemeSetting } from '../db/types'
+import { defaultHomeWidgets } from '../db/types'
+import {
+  shouldShowPermissionHelp,
+  shouldShowUnsupportedNote,
+  probeAudioPermission,
+  probeWakeLockPermission,
+  wakeLockSupported,
+  audioSupported,
+  type CapabilityPermission,
+} from '../logic/cookingSupport'
 import { ja } from '../i18n/ja'
 import Toast from '../components/Toast'
 import ArchiveViewerModal from '../components/ArchiveViewerModal'
@@ -132,9 +142,11 @@ const householdServingsOptions = Array.from(
 // 既存のセクション見出しパターン(RecipesPageの絞り込みパネル等)に合わせ、小さめの text-sm font-bold
 const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
 
-// Wake Lock API非対応環境（'wakeLock' in navigator が false）かどうか。
-// 画面が消えない系トグルの説明の下に注記を出すために使う(useWakeLock.tsのロジック自体は変更しない)
-const wakeLockSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
+// ブラウザが「画面を暗くしない」「タイマー音」に対応しているか(logic/cookingSupport.ts)。
+// 対応可否はブラウザ機能そのものの話なのでセッション中は変わらない。
+// 対応していないときだけ注記を出す＝対応ブラウザに「対応ブラウザのみ」と書き続けない(便DV-6)
+const wakeLockIsSupported = wakeLockSupported()
+const audioIsSupported = audioSupported()
 
 // File System Access API対応ブラウザ(Chrome/Edge等)かどうか(2026-07-17バックアップ改修
 // 修正2+3)。対応環境のみ保存先選択・「前回の場所に上書き」を出し、非対応(Safari/Firefox)は
@@ -379,6 +391,25 @@ export default function SettingsPage() {
   const [replaceUndoAvailable, setReplaceUndoAvailable] = useState(false)
   // バックアップタブ「機種変更するときは」の折りたたみ開閉(2026-07-17設定ゼロベース裁定#5)
   const [moveGuideOpen, setMoveGuideOpen] = useState(false)
+
+  /**
+   * 「料理中」の設定が実際に働くか（2026-08-04 便DV-7・オーナー指示）。
+   * ブラウザが対応していても、端末の低電力モードやサイトごとの音の許可で止められていると働かない。
+   * 画面を開いたときと、スイッチをONにした直後に一度だけ試して、失敗したときだけ案内を出す。
+   * 試すだけで、取得した画面ロックはすぐ解放する（設定画面が画面を占有し続けない）。
+   */
+  const [wakeLockPermission, setWakeLockPermission] = useState<CapabilityPermission>('unknown')
+  const [audioPermission, setAudioPermission] = useState<CapabilityPermission>('unknown')
+  const checkWakeLockPermission = () => {
+    void probeWakeLockPermission().then(setWakeLockPermission)
+  }
+  const checkAudioPermission = () => {
+    void probeAudioPermission().then(setAudioPermission)
+  }
+  useEffect(() => {
+    void probeWakeLockPermission().then(setWakeLockPermission)
+    void probeAudioPermission().then(setAudioPermission)
+  }, [])
 
   // ===== 古い記録の書き出し(2026-08-02 オーナー採用。端末容量の軽量化) =====
   // 「◯ヶ月より前」の選択(既定1ヶ月)。設定には保存しない(書き出しのたびに選び直す一度きりの指定で、
@@ -920,9 +951,26 @@ export default function SettingsPage() {
   const moveAisle = (index: number, direction: -1 | 1) => {
     void updateSettings({ shoppingAisleOrder: moveAisleGroup(aisleOrder, index, direction) })
   }
+  // 2026-08-04 便DV-3(オーナー指示): 並びを変えていないうちも押せるボタンとして出し、
+  // 何が戻って何が変わらないかを確認文で言い切る(規約F)
   const resetAisleOrder = () => {
+    if (!window.confirm(ja.settings.aisleOrderResetConfirm)) return
     void updateSettings({ shoppingAisleOrder: [...SHOPPING_AISLE_ORDER] })
     setMessage(ja.settings.aisleOrderResetDone)
+  }
+
+  /**
+   * ホーム画面のカスタマイズを初期設定に戻す(2026-08-04 便DV-3・オーナー指示)。
+   * 戻す対象は「表示するパーツ」「並び順」「『今日なに作る？』を出すとき」の3つ＝この
+   * カードの中で変えられるものだけ。レシピ・献立・記録などのデータには触らない(規約F)
+   */
+  const resetHomeWidgets = () => {
+    if (!window.confirm(ja.settings.homeWidgetsResetConfirm)) return
+    void updateSettings({
+      homeWidgets: [...defaultHomeWidgets],
+      homeSuggestionAlways: false,
+    })
+    setMessage(ja.settings.homeWidgetsResetDone)
   }
 
   // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。30日超(または未実施)で警告色にする
@@ -1134,10 +1182,49 @@ export default function SettingsPage() {
                 </li>
               ))}
             </ul>
+            {/* 初期設定に戻す(2026-08-04 便DV-3・オーナー指示)。売り場順と同じ名前・同じ体裁 */}
+            <button
+              type="button"
+              onClick={resetHomeWidgets}
+              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+            >
+              <RotateCcw size={16} aria-hidden />
+              {ja.settings.homeWidgetsReset}
+            </button>
           </section>
 
           {/* 食材と価格 */}
           <p className={groupHeadingCls}>{ja.settings.groupIngredientsTitle}</p>
+
+          {/* 食数の設定（2026-08-03 便DK・オーナー指示。名前は2026-08-04 便DVで「ふだん作る人数」から改名）。
+              献立に入れた料理を最初からこの人数分として扱う＝買い物メモの分量と、これから作る予定の
+              概算食費に効く。未設定なら従来どおりレシピに登録されている人数分。栄養は1人分のまま動かさない。
+              2026-08-04 便DV-4(オーナー指示): 並びを 食数の設定→NG食材→予算→食材と価格→売り場順 にした。
+              id は直リンク(?section=household)の着地点 */}
+          <section id="household-section" className={`${sectionCls} scroll-mt-24`}>
+            <h2 className="font-bold">{ja.settings.householdServingsTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              {ja.settings.householdServingsDescription}
+            </p>
+            <select
+              value={settings.householdServings ?? ''}
+              onChange={(e) => {
+                const value = e.target.value
+                void updateSettings({
+                  householdServings: value === '' ? undefined : clampServings(Number(value)),
+                })
+              }}
+              aria-label={ja.settings.householdServingsTitle}
+              className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink"
+            >
+              <option value="">{ja.settings.householdServingsNone}</option>
+              {householdServingsOptions.map((n) => (
+                <option key={n} value={n}>
+                  {ja.settings.householdServingsOption.replace('{n}', String(n))}
+                </option>
+              ))}
+            </select>
+          </section>
 
           {/* NG食材。見出し行に件数を常時表示する(2026-07-17設定ゼロベース裁定#2。
               未登録は「未設定」で登録を促す) */}
@@ -1205,50 +1292,6 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {/* 食材と価格（食材価格マスタ。詳細・献立の概算食費のフォールバックに使う）。
-              2026-07-13 UI改善: 「レシピ」タブからNG食材の直下に移動 */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.priceMasterTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.priceMasterDescription}</p>
-            <Link
-              to="/prices"
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
-            >
-              <Coins size={18} aria-hidden />
-              {ja.settings.priceMasterLink}
-            </Link>
-          </section>
-
-          {/* ふだん作る人数（2026-08-03 便DK・オーナー指示）。献立に入れた料理を最初から
-              この人数分として扱う＝買い物メモの分量と、これから作る予定の概算食費に効く。
-              未設定なら従来どおりレシピに登録されている人数分。栄養は1人分のままで動かさない。
-              週の食費予算のすぐ上に置く（同じ「この金額は何人ぶんか」の話で、予算との比較にも効くため）。
-              id は直リンク(?section=household)の着地点 */}
-          <section id="household-section" className={`${sectionCls} scroll-mt-24`}>
-            <h2 className="font-bold">{ja.settings.householdServingsTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">
-              {ja.settings.householdServingsDescription}
-            </p>
-            <select
-              value={settings.householdServings ?? ''}
-              onChange={(e) => {
-                const value = e.target.value
-                void updateSettings({
-                  householdServings: value === '' ? undefined : clampServings(Number(value)),
-                })
-              }}
-              aria-label={ja.settings.householdServingsTitle}
-              className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink"
-            >
-              <option value="">{ja.settings.householdServingsNone}</option>
-              {householdServingsOptions.map((n) => (
-                <option key={n} value={n}>
-                  {ja.settings.householdServingsOption.replace('{n}', String(n))}
-                </option>
-              ))}
-            </select>
-          </section>
-
           {/* 週の食費予算。2026-07-13 UI改善: NG食材の直下（食材と価格の次）に移動。
               id は献立タブの概算食費からの直リンク(?section=budget)の着地点(2026-07-29 便CD/MP-11) */}
           <section id="budget-section" className={`${sectionCls} scroll-mt-24`}>
@@ -1266,6 +1309,20 @@ export default function SettingsPage() {
               placeholder={ja.settings.weeklyBudgetPlaceholder}
               className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
             />
+          </section>
+
+          {/* 食材と価格（食材価格マスタ。詳細・献立の概算食費のフォールバックに使う）。
+              2026-07-13 UI改善: 「レシピ」タブからNG食材の直下に移動 */}
+          <section className={sectionCls}>
+            <h2 className="font-bold">{ja.settings.priceMasterTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.priceMasterDescription}</p>
+            <Link
+              to="/prices"
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+            >
+              <Coins size={18} aria-hidden />
+              {ja.settings.priceMasterLink}
+            </Link>
           </section>
 
           {/* 買い物メモの売り場順(2026-08-02 便CT/C15 オーナー承認)。回る順番は店ごとに違うので、
@@ -1303,33 +1360,40 @@ export default function SettingsPage() {
                 </li>
               ))}
             </ul>
-            {aisleOrderIsDefault ? (
+            {aisleOrderIsDefault && (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
                 {ja.settings.aisleOrderDefaultNote}
               </p>
-            ) : (
-              <button
-                type="button"
-                onClick={resetAisleOrder}
-                className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <RotateCcw size={16} aria-hidden />
-                {ja.settings.aisleOrderReset}
-              </button>
             )}
+            <button
+              type="button"
+              onClick={resetAisleOrder}
+              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+            >
+              <RotateCcw size={16} aria-hidden />
+              {ja.settings.aisleOrderReset}
+            </button>
           </section>
 
           {/* 料理中 */}
           <p className={groupHeadingCls}>{ja.settings.groupCookingTitle}</p>
 
-          {/* 画面を暗くしない */}
+          {/* 画面を暗くしない。非対応のときだけ「対応していません」・スイッチONで許可が
+              下りていないときだけ許可の取り方を出す(2026-08-04 便DV-6/7) */}
           <section className={sectionCls}>
             <label className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="font-bold">{ja.settings.screenTitle}</h2>
                 <p className="mt-1 text-sm text-ink-muted">{ja.settings.screenDescription}</p>
-                {!wakeLockSupported && (
+                {shouldShowUnsupportedNote(wakeLockIsSupported) && (
                   <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
+                )}
+                {shouldShowPermissionHelp(
+                  settings.keepScreenOn,
+                  wakeLockIsSupported,
+                  wakeLockPermission,
+                ) && (
+                  <p className="mt-1 text-sm text-warning">{ja.settings.wakeLockBlockedNote}</p>
                 )}
               </div>
               <button
@@ -1337,7 +1401,11 @@ export default function SettingsPage() {
                 role="switch"
                 aria-checked={settings.keepScreenOn}
                 aria-label={ja.settings.screenTitle}
-                onClick={() => updateSettings({ keepScreenOn: !settings.keepScreenOn })}
+                onClick={() => {
+                  const next = !settings.keepScreenOn
+                  void updateSettings({ keepScreenOn: next })
+                  if (next) checkWakeLockPermission()
+                }}
                 className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
                   settings.keepScreenOn ? 'bg-accent' : 'bg-edge'
                 }`}
@@ -1357,8 +1425,15 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <h2 className="font-bold">{ja.settings.timerWakeLockTitle}</h2>
                 <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerWakeLockDescription}</p>
-                {!wakeLockSupported && (
+                {shouldShowUnsupportedNote(wakeLockIsSupported) && (
                   <p className="mt-1 text-sm text-ink-muted">{ja.settings.wakeLockUnsupportedNote}</p>
+                )}
+                {shouldShowPermissionHelp(
+                  settings.timerWakeLockEnabled,
+                  wakeLockIsSupported,
+                  wakeLockPermission,
+                ) && (
+                  <p className="mt-1 text-sm text-warning">{ja.settings.wakeLockBlockedNote}</p>
                 )}
               </div>
               <button
@@ -1366,9 +1441,11 @@ export default function SettingsPage() {
                 role="switch"
                 aria-checked={settings.timerWakeLockEnabled}
                 aria-label={ja.settings.timerWakeLockTitle}
-                onClick={() =>
-                  updateSettings({ timerWakeLockEnabled: !settings.timerWakeLockEnabled })
-                }
+                onClick={() => {
+                  const next = !settings.timerWakeLockEnabled
+                  void updateSettings({ timerWakeLockEnabled: next })
+                  if (next) checkWakeLockPermission()
+                }}
                 className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
                   settings.timerWakeLockEnabled ? 'bg-accent' : 'bg-edge'
                 }`}
@@ -1388,13 +1465,24 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
                 <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
+                {shouldShowPermissionHelp(
+                  settings.timerSoundEnabled,
+                  audioIsSupported,
+                  audioPermission,
+                ) && (
+                  <p className="mt-1 text-sm text-warning">{ja.settings.timerSoundBlockedNote}</p>
+                )}
               </div>
               <button
                 type="button"
                 role="switch"
                 aria-checked={settings.timerSoundEnabled}
                 aria-label={ja.settings.timerSoundTitle}
-                onClick={() => updateSettings({ timerSoundEnabled: !settings.timerSoundEnabled })}
+                onClick={() => {
+                  const next = !settings.timerSoundEnabled
+                  void updateSettings({ timerSoundEnabled: next })
+                  if (next) checkAudioPermission()
+                }}
                 className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
                   settings.timerSoundEnabled ? 'bg-accent' : 'bg-edge'
                 }`}
