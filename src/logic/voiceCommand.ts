@@ -27,3 +27,26 @@ export function matchVoiceCommand(transcript: string): VoiceCommand | undefined 
   if (/タイマー/.test(transcript)) return 'timer'
   return undefined
 }
+
+/**
+ * 「タイマー」と言われたときに何秒ではかるかを決める（2026-08-03 便DS/実機FB⑤）。
+ * ①発話の中の「◯分」→②その手順に設定された分数→③手順の文章の最初の時間表記、の順に探す。
+ * どれも無ければ undefined を返す＝時間を決められない。画面側はこのときに
+ * 言い方の案内（ja.focus.micTimerHint）を出す。
+ * 以前はこの判定が画面に直書きされていて、undefined のときに何も起こらず黙って終わっていた。
+ */
+export function resolveVoiceTimerSeconds(
+  transcript: string,
+  stepMinutes: number | undefined,
+  fallbackSeconds: number | undefined,
+): number | undefined {
+  const minuteMatch = transcript.match(/(\d+)分/)
+  if (minuteMatch) {
+    const seconds = Number(minuteMatch[1]) * 60
+    // 「0分タイマー」は時間として使えないので、下の候補に譲る
+    if (seconds > 0) return seconds
+  }
+  if (stepMinutes && stepMinutes > 0) return stepMinutes * 60
+  if (fallbackSeconds && fallbackSeconds > 0) return fallbackSeconds
+  return undefined
+}

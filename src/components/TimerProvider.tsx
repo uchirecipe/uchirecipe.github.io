@@ -38,6 +38,13 @@ export interface ActiveTimer {
   done: boolean
   /** このタイマーだけ消音しているか */
   muted: boolean
+  /**
+   * 手順の時間ではなく、自分で時間を決めて始めたタイマーか（2026-08-03 オーナー実機フィードバック②）。
+   * 調理中モードから始めると「始めた時点の手順番号」を持つため、番号バッジだけでは
+   * 手順の時間をはかるタイマーと見分けが付かなかった。この印が立っているものは
+   * 番号ではなく時計のバッジで描く（戻り先としての手順番号は保持したまま）。
+   */
+  isCustom?: boolean
 }
 
 export interface StartTimerOptions {
@@ -48,6 +55,8 @@ export interface StartTimerOptions {
   seconds: number
   recipeId: number
   stepNumber: number
+  /** 自分で時間を決めて始めたタイマー（ja.timer.customLabel「タイマー」）のとき true */
+  isCustom?: boolean
 }
 
 interface TimerContextValue {
@@ -128,7 +137,11 @@ function playChime(ctx: AudioContext | undefined) {
   }
 }
 
-function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, soundOn: boolean) {
+/**
+ * 終了の合図のうち「その場で鳴る・震える」分だけ（2026-08-03 オーナー実機フィードバック⑦）。
+ * 画面を見ていないときに終わった分をあとから鳴らし直すため、通知（1回きりでよい）と分けてある。
+ */
+function alertFinished(timer: ActiveTimer, audio: AudioContext | undefined, soundOn: boolean) {
   if (soundOn && !timer.muted) {
     playChime(audio)
   }
@@ -136,12 +149,20 @@ function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, s
   // 2026-07-28 機能④診断C5: 以前はチャイムと同じ `soundOn && !muted` の中にあり、
   // 設定「タイマー音」をOFFにする・その行を消音すると振動まで止まっていた。
   // 「音は出せないが振動で気づきたい」（夜間・子どもが寝ている・イヤホン使用中）が
-  // 消音の主目的なので、振動は音の条件から切り離して常に出す
+  // 消音の主目的なので、振動は音の条件から切り離して常に出す。
+  // 2026-08-03 オーナー実機フィードバック⑦: 振動の長さを300msから400msに伸ばし、
+  // 3拍にする（鍋の音・換気扇の音の中でも気づけるようにするため）。
+  // 仕様上、画面が表示されていない間の vibrate は端末側で捨てられるので、
+  // その場合は下の再通知（visibilitychange）で戻ってきたときに鳴らし直す
   try {
-    if (typeof navigator.vibrate === 'function') navigator.vibrate([300, 120, 300])
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([400, 150, 400, 150, 400])
   } catch {
     /* 無視 */
   }
+}
+
+function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, soundOn: boolean) {
+  alertFinished(timer, audio, soundOn)
   // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
   // 通知本文はtruncateされないので手順番号も含めた完全な説明にする。
   // stepNumber<=0（手順に紐付かない自由な時間のタイマー）は手順表記を付けない
@@ -171,6 +192,17 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const settings = useSettings()
   const soundOn = settings?.timerSoundEnabled ?? true
   const wakeLockOn = settings?.timerWakeLockEnabled ?? true
+  // 画面が表示されていない間に終わったタイマー（戻ってきたら鳴らし直す。実機FB⑦）
+  const pendingAlertRef = useRef<Set<number>>(new Set())
+  // 鳴らし直しの効果は張り替えたくないので、最新の値はrefで参照する
+  const timersRef = useRef(timers)
+  const soundOnRef = useRef(soundOn)
+  useEffect(() => {
+    timersRef.current = timers
+  }, [timers])
+  useEffect(() => {
+    soundOnRef.current = soundOn
+  }, [soundOn])
 
   const startTimer = useCallback((options: StartTimerOptions) => {
     // 同じ手順・同じ時間ボタンの連打防止: 既に動作中なら新規起動せず、既存タイマーを点滅で知らせる
@@ -218,6 +250,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       totalSeconds: options.seconds,
       done: false,
       muted: false,
+      isCustom: options.isCustom === true,
     }
     setNow(Date.now())
     setTimers((prev) => [...prev, timer])
@@ -270,11 +303,41 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const finished = timers.filter((t) => !t.done && t.endsAt <= now)
     if (finished.length === 0) return
-    finished.forEach((t) => announceFinished(t, audioRef.current, soundOn))
+    const hidden = typeof document !== 'undefined' && document.hidden
+    finished.forEach((t) => {
+      announceFinished(t, audioRef.current, soundOn)
+      // 画面が表示されていない間の振動・音はブラウザ側で捨てられる（振動は仕様で明示的に中止、
+      // 音も自動再生の制限で鳴らないことがある）。戻ってきたときに鳴らし直すため覚えておく
+      if (hidden) pendingAlertRef.current.add(t.id)
+    })
     setTimers((prev) =>
       prev.map((t) => (t.endsAt <= now ? { ...t, done: true } : t)),
     )
   }, [now, timers, soundOn])
+
+  /**
+   * 画面に戻ってきたときの鳴らし直し（2026-08-03 オーナー実機フィードバック⑦）。
+   * 他のアプリを見ている間・画面が消えている間にタイマーが終わると、その瞬間の振動と音は
+   * 端末側で捨てられ、戻ってきても「終わり」の表示が出ているだけで何も起きなかった。
+   * まだ片付けていない（画面に残っている）分だけ、戻ってきた時点で一度だけ鳴らし直す。
+   * 通知は終わった時点で1回出ているので、ここでは出さない（二重通知にしない）。
+   */
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) return
+      setNow(Date.now())
+      const pending = pendingAlertRef.current
+      if (pending.size === 0) return
+      const ids = [...pending]
+      pending.clear()
+      for (const id of ids) {
+        const t = timersRef.current.find((x) => x.id === id)
+        if (t?.done) alertFinished(t, audioRef.current, soundOnRef.current)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
 
   return (
     <TimerContext.Provider

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { X, BellRing } from 'lucide-react'
+import { X, BellRing, Bell, BellOff, CornerUpLeft } from 'lucide-react'
 import type { ActiveTimer } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
 import StepBadge from './StepBadge'
@@ -13,6 +13,13 @@ type Props = {
   onAdjust: (deltaSeconds: number) => void
   onStop: () => void
   onClose: () => void
+  /**
+   * このタイマーを始めたレシピの手順へ戻る（2026-08-03 オーナー実機フィードバック③）。
+   * 未指定なら導線を出さない（戻り先が無い＝別の料理の手順へは飛べない場面）。
+   */
+  onGoToStep?: () => void
+  /** このタイマーだけ消音する／音を戻す（同④）。未指定なら切り替えを出さない */
+  onToggleMute?: () => void
 }
 
 /**
@@ -21,7 +28,15 @@ type Props = {
  * 常駐バー(TimerBar)・調理中モード(FocusMode)の動作中タイマー表示をタップすると開く。
  * 「+1分」「−30秒」「停止」の3操作のみを置く。背景タップ・×ボタン・Escapeで閉じる。
  */
-export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose }: Props) {
+export default function TimerAdjustModal({
+  timer,
+  now,
+  onAdjust,
+  onStop,
+  onClose,
+  onGoToStep,
+  onToggleMute,
+}: Props) {
   useEffect(() => {
     if (!timer) return
     const onKey = (e: KeyboardEvent) => {
@@ -65,8 +80,18 @@ export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose
           </button>
         </div>
         <div className="mt-[var(--space-sm)] flex items-center justify-center gap-2">
-          <StepBadge number={timer.stepNumber > 0 ? timer.stepNumber : 'custom'} size={32} />
+          <StepBadge
+            number={timer.isCustom || timer.stepNumber <= 0 ? 'custom' : timer.stepNumber}
+            size={32}
+          />
           <span className="min-w-0 truncate font-bold">{timer.label}</span>
+          {/* 手順のタイマーは、どの手順の時間かを名前の横に添える(2026-08-03 実機FB②)。
+              時計バッジの「自分で時間を決めたタイマー」には手順表記を付けない */}
+          {!timer.isCustom && timer.stepNumber > 0 && (
+            <span className="shrink-0 text-sm text-ink-muted">
+              {ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))}
+            </span>
+          )}
         </div>
         {finished ? (
           <p className="mt-1 flex items-center justify-center gap-2 text-center text-3xl font-bold text-warning">
@@ -100,6 +125,33 @@ export default function TimerAdjustModal({ timer, now, onAdjust, onStop, onClose
           <p className="mt-[var(--space-sm)] text-center text-sm text-ink-muted">
             {ja.timer.adjustFinishedHint}
           </p>
+        )}
+        {/* このタイマーだけ消音する切り替え(2026-08-03 オーナー実機フィードバック④)。
+            常駐バーの行にある切り替えと同じ働きで、全画面の調理中モードからも触れるようにここに置く。
+            終わったタイマーには効く音がもう無いので出さない */}
+        {onToggleMute && !finished && (
+          <button
+            type="button"
+            onClick={onToggleMute}
+            aria-label={timer.muted ? ja.timer.unmute : ja.timer.mute}
+            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
+          >
+            {timer.muted ? <BellOff size={20} aria-hidden /> : <Bell size={20} aria-hidden />}
+            {timer.muted ? ja.timer.unmute : ja.timer.mute}
+          </button>
+        )}
+        {/* このタイマーを始めた手順へ戻る(2026-08-03 オーナー実機フィードバック③) */}
+        {onGoToStep && (
+          <button
+            type="button"
+            onClick={onGoToStep}
+            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
+          >
+            <CornerUpLeft size={20} aria-hidden />
+            {timer.stepNumber > 0
+              ? ja.timer.goToStep.replace('{n}', String(timer.stepNumber))
+              : ja.timer.goToRecipe}
+          </button>
         )}
         <button
           type="button"
