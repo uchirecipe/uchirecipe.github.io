@@ -18,19 +18,15 @@ import {
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
-import { fetchNews, isNewsSuppressed, type NewsItem } from '../logic/news'
+import { fetchNews, isNewsSuppressed, isNewsVisibleFor, type NewsItem } from '../logic/news'
 import { usePantryItems } from '../db/pantry'
 import { pantryAvailableNames } from '../logic/pantry'
 import { useTodayList } from '../db/todayList'
 import { backupOverdue } from '../logic/backup'
 import { cookedWithinDays } from '../logic/cooked'
-import { currentSeason, preferSeasonWithFallback } from '../logic/season'
-import {
-  recipeDishType,
-  todayListPickedIds,
-  excludeYesterdayPlanRecipes,
-  MEAL_SLOTS,
-} from '../logic/mealPlan'
+import { currentSeason } from '../logic/season'
+import { DISH_TYPE_OPTIONS, suggestionCandidates } from '../logic/homeSuggest'
+import { todayListPickedIds, excludeYesterdayPlanRecipes, MEAL_SLOTS } from '../logic/mealPlan'
 import { useMealPlanRange } from '../db/mealPlan'
 import { todayString } from '../logic/date'
 import { makePantryMatcher } from '../logic/pantry'
@@ -59,11 +55,10 @@ const conditions: { value: SuggestCondition; label: string }[] = [
 const QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
 
 /**
- * 「今日なに作る？」で選べる料理の種別(2026-08-03 便DH・オーナー指示)。
- * レシピ登録の「料理の種別」と同じ4区分・同じ並び。既定は主菜だけON(従来の「主菜」トグルON相当)で、
- * 献立の中心になる主菜が出るようにする。1つも選ばなければ種別では絞らない
+ * 「今日なに作る？」で選べる料理の種別の既定(2026-08-03 便DH・オーナー指示)。
+ * 選択肢そのもの(DISH_TYPE_OPTIONS)と候補の作り方は logic/homeSuggest.ts。
+ * 既定は主菜だけON(従来の「主菜」トグルON相当)で、献立の中心になる主菜が出るようにする
  */
-const DISH_TYPE_OPTIONS: DishType[] = ['main', 'side', 'soup', 'dessert']
 const DEFAULT_DISH_TYPES: DishType[] = ['main']
 
 /**
@@ -331,28 +326,24 @@ export default function HomePage() {
     void fetchNews().then(setNews)
   }, [])
   const latestNews = news[0]
-  // 初見ユーザーのファーストビューをお知らせで塞がない: 初回起動から24時間は出さない
+  // 初見ユーザーのファーストビューをお知らせで塞がない: 初回起動から24時間は出さない。
+  // 2026-08-04 便DV-10(オーナー指摘): Pro版を解錠済みの人には、販売のお知らせは出さない
   const showNews =
     settings !== undefined &&
     latestNews !== undefined &&
     latestNews.id !== settings.lastSeenNewsId &&
+    isNewsVisibleFor(latestNews, !!settings.proCode) &&
     !isNewsSuppressed(settings.firstLaunchAt, Date.now())
   const dismissNews = () => {
     if (latestNews) void updateSettings({ lastSeenNewsId: latestNews.id })
   }
 
-  // 条件で絞り込んだ上で、今の季節に合うものを優先する。
-  // 選んだ種別(既定=主菜)に絞る(0件なら0件回避で全体から・便BH-2の作法を4区分に広げたもの)。
-  // 2026-07-29 便CD/MP-12: 季節ぴったりの品が少ないときは通年の品も自動で混ぜる
-  // (preferSeasonWithFallback)。同梱レシピの夏タグは5品しかなく、何度振り直しても
-  // その5品の中でしか回らず同じ料理が連発していた。設定は増やさず自動で広げる
+  // 条件(すべて/最近作っていない/お気に入り/◯分以内)で絞り込んだ上で、選んだ種別ごとに
+  // 今の季節を優先した候補を作って合わせる(logic/homeSuggest.ts)。
+  // 2026-08-04 便DV-1: 種別を増やすほど候補が減っていたバグを、この関数側で直した
   const candidates = useMemo(() => {
-    let byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
-    if (dishTypes.length > 0) {
-      const byType = byCondition.filter((r) => dishTypes.includes(recipeDishType(r)))
-      if (byType.length > 0) byCondition = byType
-    }
-    return preferSeasonWithFallback(byCondition, currentSeason())
+    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
+    return suggestionCandidates(byCondition, dishTypes, currentSeason())
   }, [recipes, condition, dishTypes, quickMinutes])
 
   // 「在庫の食材で」がONのとき、在庫(ある/少ない)の食材を1つ以上使うレシピに絞る。
@@ -732,16 +723,19 @@ export default function HomePage() {
 
       <h1 className="text-2xl font-bold">{ja.app.name}</h1>
 
-      {/* アプリ内お知らせ（最新1件・未読のときだけ） */}
+      {/* アプリ内お知らせ（最新1件・未読のときだけ）。
+          2026-08-04 便DV-10(オーナー指摘): 紹介ページの「無料で使ってみる」から来た人の
+          ファーストビューでいちばん目立つのが有料版の案内では押し売りに見える。
+          カード(bg-surface+影+アクセント色のアイコン)をやめ、ページ地の上の控えめな囲みにする */}
       {showNews && latestNews && (
-        <div className="mt-[var(--space-sm)] flex items-start gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm shadow-sm">
-          <Megaphone size={16} className="mt-0.5 shrink-0 text-accent-ink" aria-hidden />
+        <div className="mt-[var(--space-sm)] flex items-start gap-2 rounded-md border border-edge bg-app px-[var(--space-md)] py-2 text-sm">
+          <Megaphone size={16} className="mt-0.5 shrink-0 text-ink-muted" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="font-bold text-ink">{latestNews.title}</p>
             <p className="text-ink-muted">{latestNews.body}</p>
             {latestNews.link && (
               // アプリ内のリンク(#/…)も外部リンクも同じタブで開く(PWAとしては別タブより自然)
-              <a href={latestNews.link} className="font-bold text-accent-ink underline">
+              <a href={latestNews.link} className="text-ink-muted underline">
                 {ja.home.newsLinkLabel}
               </a>
             )}
