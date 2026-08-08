@@ -137,6 +137,7 @@ import {
   stepIngredientAmounts,
   recipeIngredientList,
 } from '../src/logic/naviIngredients.ts'
+import { stepMinutesFromText, importedStepMinutes } from '../src/logic/importStepMinutes.ts'
 import {
   resolveDuplicateTitleAction,
   buildUpdatedSetRecipe,
@@ -4045,6 +4046,26 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       text: '鍋にたっぷりの湯を沸かし、冷凍うどんを袋の表示に沿って茹でる。茹で上がったら流水でぬめりを洗い流し、氷水でしっかり締める。',
     }),
     'active',
+  )
+}
+
+// ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。
+// 2026-08-08 便ED・docs/68 打ち手#2。URL取り込み・貼り付け取り込みは分数欄が必ず空になり、
+// 本文に「20分煮る」と書いてあってもタイマーにも並行調理ナビにも使えていなかった。
+// 入れるのは本文に書いてある時間の転記だけ＝機械の推測値は入れない) ----------
+{
+  eq('取り込み分数: 「鍋で15分煮る」→15', stepMinutesFromText('鍋で15分煮る'), 15)
+  eq('取り込み分数: 「弱火で1時間半煮込む」→90', stepMinutesFromText('弱火で1時間半煮込む'), 90)
+  eq('取り込み分数: 「600Wで3分加熱する」→3', stepMinutesFromText('600Wで3分加熱する'), 3)
+  eq('取り込み分数: 複数あれば最長(10分煮て5分蒸らす→10)', stepMinutesFromText('10分煮て5分蒸らす'), 10)
+  eq('取り込み分数: 秒だけ(30秒ゆでる)は入れない', stepMinutesFromText('30秒ゆでる'), undefined)
+  eq('取り込み分数: 時間表記が無ければ入れない', stepMinutesFromText('材料を切る'), undefined)
+  // 推測はしない: 待ち動詞があっても本文に時間が無ければ空のまま(ナビの既定分数は保存しない)
+  eq('取り込み分数: 「じっくり煮込む」は空のまま(推測値を保存しない)', stepMinutesFromText('じっくり煮込む'), undefined)
+  eq(
+    '取り込み分数: 手順の並びぶんを返す',
+    importedStepMinutes(['材料を切る', '鍋で15分煮る', '器に盛る']).join(','),
+    ',15,',
   )
 }
 

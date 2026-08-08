@@ -35,6 +35,7 @@ import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOIN
 import type { ImportErrorReason } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
 import { buildImportedIngredientRows, countAmountlessRows, filterImportedSteps } from '../logic/urlImportRows'
+import { stepMinutesFromText } from '../logic/importStepMinutes'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
 import { toTagKey } from '../logic/kana'
@@ -67,7 +68,10 @@ type IngredientRow = {
   memo: string
   group: number | undefined
 }
-type StepRow = { text: string; minutes: string; memo: string }
+/* minutesAuto = 取り込み時に手順の本文から自動で入れた分数の印（2026-08-08 便ED・docs/68 打ち手#2）。
+ * 画面にその旨を出し、ユーザーが書き換えるか消すと印は落ちる。保存する Step には持たせない
+ * （レシピのデータは従来のまま＝text / minutes / memo の3つ）。 */
+type StepRow = { text: string; minutes: string; memo: string; minutesAuto?: boolean }
 
 const emptyIngredient: IngredientRow = {
   name: '',
@@ -104,6 +108,23 @@ function toIngredientRows(ingredients: Ingredient[]): IngredientRow[] {
         group: i.seasoningGroup,
       }))
     : [{ ...emptyIngredient }]
+}
+
+/**
+ * 取り込んだ手順（文章だけ）→ StepRow[]。本文に書いてある時間を「分」の欄に写す
+ * （2026-08-08 便ED・docs/68 打ち手#2。URL取り込み・貼り付け取り込みの両方で使う）。
+ * 写すのは本文に書いてある時間だけで、機械の推測値は入れない。手順の本文は1文字も書き換えない。
+ */
+function toImportedStepRows(texts: string[]): StepRow[] {
+  return texts.map((text) => {
+    const minutes = stepMinutesFromText(text)
+    return {
+      text,
+      minutes: minutes != null ? String(minutes) : '',
+      memo: '',
+      minutesAuto: minutes != null,
+    }
+  })
 }
 
 /** Step[]（DB形）→ StepRow[]（フォーム形）。toIngredientRowsと同じ理由で共通化 */
@@ -898,6 +919,11 @@ function RecipeFormInner() {
               alsoApplied.join(ja.urlImport.alsoAppliedSeparator),
             )}`
           : ''
+      /** 手順の「分」を本文から入れた件数の一言（0件のときは何も言わない） */
+      const stepMinutesNote = (filled: number) =>
+        filled > 0
+          ? `${alsoAppliedNote ? '' : '。'}${ja.form.stepMinutesFilled.replace('{n}', String(filled))}`
+          : ''
       if (result.title && !title.trim()) setTitle(result.title)
       // 取り込んだ人数分も範囲(1〜20)に収める(便CK/①-1)。Worker側のextractServingsに上限が無く、
       // 「24 cookies」等の表記から20超が入りうるが、手入力では作れない値なので保存させない
@@ -908,8 +934,11 @@ function RecipeFormInner() {
       setAmountlessImportedNames(
         importedRows.filter((row) => !row.amount.trim() && !row.unit.trim()).map((row) => row.name),
       )
-      if (importedSteps.length > 0) {
-        setSteps(importedSteps.map((text) => ({ text, minutes: '', memo: '' })))
+      // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2）
+      const importedStepRows = toImportedStepRows(importedSteps)
+      const filledMinutes = importedStepRows.filter((row) => row.minutesAuto).length
+      if (importedStepRows.length > 0) {
+        setSteps(importedStepRows)
       }
       setSourceUrl(nextSourceUrl)
       // 取り込んだ内容から役割(dishType)を自動推定して初期値にする(2026-07-23 便BH-1・docs/56 §3-4)。
@@ -929,7 +958,9 @@ function RecipeFormInner() {
       // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
       if (importedRows.length === 0) {
         showUrlImportMessage(
-          ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
+          ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) +
+            alsoAppliedNote +
+            stepMinutesNote(filledMinutes),
           'warn',
         )
       } else if (importedSteps.length === 0) {
@@ -950,7 +981,9 @@ function RecipeFormInner() {
                 ? ja.urlImport.resultAmountless.replace('{n}', String(amountless))
                 : '',
             )
-            .replace('{s}', String(importedSteps.length)) + alsoAppliedNote,
+            .replace('{s}', String(importedSteps.length)) +
+            alsoAppliedNote +
+            stepMinutesNote(filledMinutes),
           'info',
         )
       }
@@ -1002,8 +1035,13 @@ function RecipeFormInner() {
         })),
       )
     }
-    if (parsed.steps.length > 0) {
-      setSteps(parsed.steps.map((text) => ({ text, minutes: '', memo: '' })))
+    // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2。URL取り込みと同じ扱い）
+    const pastedStepRows = toImportedStepRows(parsed.steps)
+    const filledMinutes = pastedStepRows.filter((row) => row.minutesAuto).length
+    const stepMinutesNote =
+      filledMinutes > 0 ? `。${ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes))}` : ''
+    if (pastedStepRows.length > 0) {
+      setSteps(pastedStepRows)
     }
     // 「コツ」「ポイント」「メモ」見出し以降の文章は、メモ欄が空ならそこへ流し込む
     if (parsed.memo && !memo.trim()) setMemo(parsed.memo)
@@ -1041,7 +1079,7 @@ function RecipeFormInner() {
     showPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
-        .replace('{s}', String(parsed.steps.length)),
+        .replace('{s}', String(parsed.steps.length)) + stepMinutesNote,
       'info',
     )
   }
@@ -1153,7 +1191,14 @@ function RecipeFormInner() {
       if (normalized !== e.target.value) updateIngredient(index, { [field]: normalized })
     }
   const updateStep = (index: number, patch: Partial<StepRow>) => {
-    setSteps((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    setSteps((rows) =>
+      rows.map((row, i) =>
+        i === index
+          ? // 「分」を自分で書き換えた/消した時点で、自動入力の印は外す（便ED・docs/68 打ち手#2）
+            { ...row, ...patch, minutesAuto: patch.minutes !== undefined ? false : row.minutesAuto }
+          : row,
+      ),
+    )
   }
 
   /** 材料行を削除する（入力内容がある行だけ確認を挟む。空行は従来どおり即削除） */
@@ -2182,6 +2227,13 @@ function RecipeFormInner() {
                   <X size={20} aria-hidden />
                 </button>
               </div>
+              {/* 取り込みで本文から入れた分数であることを示す（便ED・docs/68 打ち手#2）。
+                  書き換える・消すと印は消える＝保存前にユーザーが必ず確かめられる */}
+              {row.minutesAuto && row.minutes.trim() !== '' && (
+                <p data-testid="step-minutes-auto" className="mt-1 text-xs text-ink-muted">
+                  {ja.form.stepMinutesAuto}
+                </p>
+              )}
               <input
                 type="text"
                 value={row.memo}
