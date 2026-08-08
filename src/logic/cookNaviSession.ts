@@ -81,3 +81,35 @@ export function clearCookNaviSession(): void {
 export function hasCookNaviTimeline(): boolean {
   return loadCookNaviSession()?.showTimeline === true
 }
+
+/**
+ * レシピ詳細を見に行くときの「ナビのどこを見ていたか」（2026-08-08 便EG・オーナー実機報告
+ * 「レシピ詳細リンクから戻ると、ナビの末尾に戻りたい。現在は別の場所に戻る」）。
+ *
+ * 段取りの下にあるレシピ名のリンクは、タイムラインを最後まで読んでから押すことが多い。
+ * 押した時点の縦スクロール位置を覚えておき、戻ってきたら同じ位置に戻す
+ * （週タブの居場所の覚え方 logic/navMemory.ts と同じ作法）。読んだら消す＝1回だけ効く。
+ */
+export const COOK_NAVI_SCROLL_KEY = 'uchi-recipe-cook-navi-scroll'
+
+export function saveCookNaviScroll(scrollY: number): void {
+  try {
+    sessionStorage.setItem(COOK_NAVI_SCROLL_KEY, String(Math.max(0, Math.round(scrollY))))
+  } catch {
+    /* 覚えられない環境では、戻ったときに先頭から読むだけ */
+  }
+}
+
+/** 覚えた位置を読み出して消す。覚えていない・壊れているときは undefined */
+export function takeCookNaviScroll(): number | undefined {
+  let raw: string | null = null
+  try {
+    raw = sessionStorage.getItem(COOK_NAVI_SCROLL_KEY)
+    sessionStorage.removeItem(COOK_NAVI_SCROLL_KEY)
+  } catch {
+    return undefined
+  }
+  if (raw == null) return undefined
+  const value = Number(raw)
+  return Number.isFinite(value) && value >= 0 ? value : undefined
+}

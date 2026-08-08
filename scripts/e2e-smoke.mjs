@@ -15042,6 +15042,165 @@ try {
     }
   }
 
+  // --- EG-01: 便EG(2026-08-08 オーナー実機フィードバック⑤〜⑩)。実際に3品を作って見つかった
+  //     画面の不備の回帰防止:
+  //       ⑤ レシピ名の頭にそのレシピ内の番号(①②③)／行内の「手順◯」表記は出さない
+  //       ③ ゆでる工程の前に「湯を沸かす」が「ナビが追加」の印つきで入る
+  //       ⑥ 注意書きの箇条書きが行ごとに分かれて表示される
+  //       ⑦ そのレシピの最後の手順カードに「完成」が出る
+  //       ⑧ レシピ詳細から「戻る」でナビへ帰る(レシピ一覧へ飛ばされない)
+  //       ⑨ 献立タブの日に「並行調理を再開」が出て、押すと段取りの続きが開く
+  //       ⑩ 献立タブの「全て作った！」は、段取りも終わることを押す前に伝える(規約F) ---
+  currentCheck = 'EG-01'
+  {
+    const egBrowser = await chromium.launch()
+    const egContext = await egBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const egPage = await egContext.newPage()
+    let egConfirmText = ''
+    egPage.on('dialog', (dialog) => {
+      egConfirmText = dialog.message()
+      void dialog.accept()
+    })
+    egPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EG-01] ${err.message}`)
+    })
+    try {
+      await egPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await egPage.waitForTimeout(1800)
+      await egPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('EGゆで野菜', [
+          { text: 'にんじんを切る' },
+          { text: 'にんじんをゆでる', memo: '・かたさは竹串で見ること。\n・ゆですぎないこと。' },
+          { text: 'ごまで和える' },
+        ])))
+        const idB = await P(store('recipes').add(mk('EG煮物', [
+          { text: '大根を切る' }, { text: '鍋で15分煮る' }, { text: '器に盛る' },
+        ])))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await egPage.goto(`${BASE}/#/cook-navi`)
+      await egPage.reload({ waitUntil: 'networkidle' })
+      await egPage.waitForTimeout(1200)
+      await egPage.getByRole('button', { name: '段取りを作る' }).click()
+      await egPage.waitForTimeout(700)
+
+      const egCards = await egPage.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
+      // ⑤ レシピ名の頭に丸数字。行内の「手順◯」という見出しは出さない
+      check(
+        'EG-01 レシピ名の頭にそのレシピ内の番号(①②③)が付く',
+        egCards.some((t) => t.includes('①EG煮物')) && egCards.some((t) => t.includes('②EG煮物')),
+        `cards=${JSON.stringify(egCards.map((t) => t.slice(0, 30)))}`,
+      )
+      check(
+        'EG-01 行内の「手順◯」の表記は消えている(読み上げ用の隠し文字だけ)',
+        (await egPage.locator('ol > li p > span.text-ink-muted', { hasText: /^手順\d+$/ }).count()) === 0,
+      )
+      // ③ 湯を沸かすの差し込み
+      check(
+        'EG-01 ゆでる工程の前に「湯を沸かす」が入る',
+        (await egPage.locator('[data-testid="navi-added-step"]').count()) === 1 &&
+          egCards.some((t) => t.includes('湯を沸かす') && t.includes('ナビが追加')),
+        `cards=${JSON.stringify(egCards.map((t) => t.slice(0, 40)))}`,
+      )
+      check(
+        'EG-01 足した工程は待ち5分として出る',
+        egCards.some((t) => t.includes('湯を沸かす') && t.includes('約5分の待ち時間')),
+      )
+      // ⑥ メモの箇条書きが行ごとに分かれる（1本の棒読みにならない）
+      const memoCard = egPage.locator('ol > li', { hasText: 'にんじんをゆでる' }).first()
+      const memoLines = await memoCard.locator('[data-testid="navi-step-memo"] p').count()
+      const memoText = await memoCard.locator('[data-testid="navi-step-memo"]').innerText()
+      check(
+        'EG-01 注意書きの箇条書きが行ごとに分かれて表示される',
+        memoLines === 2 && memoText.includes('かたさは竹串で見ること。') && memoText.includes('ゆですぎないこと。'),
+        `行数=${memoLines} 本文=${JSON.stringify(memoText)}`,
+      )
+      // ⑦ 各レシピの最後の手順に「完成」
+      check(
+        'EG-01 レシピごとに最後の手順カードへ「完成」が出る(2品ぶん)',
+        (await egPage.locator('[data-testid="navi-recipe-done"]').count()) === 2,
+      )
+      const doneCards = egCards.filter((t) => t.includes('完成'))
+      check(
+        'EG-01 「完成」が付くのはそのレシピの最後の手順',
+        doneCards.length === 2 &&
+          doneCards.some((t) => t.includes('器に盛る')) &&
+          doneCards.some((t) => t.includes('ごまで和える')),
+        `done=${JSON.stringify(doneCards.map((t) => t.slice(0, 40)))}`,
+      )
+
+      // ⑧ レシピ詳細へ行って「戻る」でナビへ帰る
+      await egPage.getByRole('link', { name: /EG煮物/ }).last().click()
+      await egPage.waitForTimeout(800)
+      check('EG-01 段取りの下のリンクからレシピ詳細が開く', /#\/recipes\/\d+/.test(egPage.url()), `url=${egPage.url()}`)
+      await egPage.getByRole('button', { name: '戻る' }).first().click()
+      await egPage.waitForTimeout(1000)
+      check(
+        'EG-01 レシピ詳細の「戻る」でナビに帰る(レシピ一覧へ飛ばされない)',
+        egPage.url().includes('/cook-navi'),
+        `url=${egPage.url()}`,
+      )
+      check(
+        'EG-01 帰ってきたナビに段取りが残っている',
+        (await egPage.textContent('body')).includes('組み合わせる2品'),
+      )
+
+      // ⑨ 献立タブの日に「並行調理を再開」
+      await egPage.goto(`${BASE}/#/meal-plan`)
+      await egPage.waitForTimeout(1000)
+      check(
+        'EG-01 段取りが残っているとき献立タブに「並行調理を再開」が出る',
+        (await egPage.locator('[data-testid="navi-resume"]').count()) === 1 &&
+          (await egPage.textContent('body')).includes('並行調理を再開'),
+      )
+      await egPage.locator('[data-testid="navi-resume"]').click()
+      await egPage.waitForTimeout(1000)
+      check(
+        'EG-01 「並行調理を再開」で段取りの続きが開く',
+        egPage.url().includes('/cook-navi') &&
+          (await egPage.textContent('body')).includes('組み合わせる2品'),
+        `url=${egPage.url()}`,
+      )
+
+      // ⑩ 献立タブの「全て作った！」は段取りも終わることを先に伝える
+      await egPage.goto(`${BASE}/#/meal-plan`)
+      await egPage.waitForTimeout(1000)
+      egConfirmText = ''
+      await egPage.getByRole('button', { name: '全て作った！' }).click()
+      await egPage.waitForTimeout(1000)
+      check(
+        'EG-01 「全て作った！」の確認文に、段取りも終わることが書いてある(規約F)',
+        egConfirmText.includes('作りかけの並行調理ナビの段取りも終わります'),
+        egConfirmText.slice(0, 240),
+      )
+      check(
+        'EG-01 記録したあとは「並行調理を再開」も消える(押せない入口を残さない)',
+        (await egPage.locator('[data-testid="navi-resume"]').count()) === 0,
+      )
+    } finally {
+      await egBrowser.close()
+    }
+  }
+
   // --- PANTRY-GROUP-01: 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1)。
   // 通常表示でグループ見出し(肉・魚介／野菜・きのこ／調味料 …)が出ること、整理モードで選んだ
   // 食材を別グループへ手動移動でき(group手動指定)、IndexedDBに保存されトーストが出ることを確認する ---

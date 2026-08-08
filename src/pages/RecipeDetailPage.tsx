@@ -92,7 +92,11 @@ export default function RecipeDetailPage() {
   // 探し直すことになっていたため(スクロール位置の復元はMealPlanPage側が持つ)。
   const location = useLocation()
   const backState = location.state as { from?: string; fromPath?: string } | null
-  const BACK_TO_ORIGIN_FROM = ['home', 'todayList', 'mealPlanWeek']
+  // 2026-08-08 便EG(オーナー実機報告「レシピ詳細リンクから戻ると、ナビの末尾に戻りたい。
+  // 現在は別の場所に戻る」): 並行調理ナビ('cookNavi')も同じ仕組みの例外に足した。
+  // 段取りの下にあるレシピ名を開いて戻ると、レシピ一覧に飛ばされて段取りを開き直していた
+  // (スクロール位置の復元はCookNaviPage側が持つ)
+  const BACK_TO_ORIGIN_FROM = ['home', 'todayList', 'mealPlanWeek', 'cookNavi']
   const backFallback =
     backState?.from && BACK_TO_ORIGIN_FROM.includes(backState.from) && backState.fromPath
       ? backState.fromPath
