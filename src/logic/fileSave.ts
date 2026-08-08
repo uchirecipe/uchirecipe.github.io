@@ -37,6 +37,17 @@ export function backupFileName(date: Date = new Date()): string {
   return `uchi-recipe-backup-${stamp}.json`
 }
 
+/**
+ * 「選択したレシピの書き出し」の既定ファイル名（2026-08-09 便EM）。
+ * 全体のバックアップ（uchi-recipe-backup-）・古い記録（uchi-recipe-records-）と
+ * 名前で見分けられるようにする。中身の範囲が違うファイルが同じ名前で並ぶと、
+ * 復元のときにどれを選べばよいか分からなくなるため
+ */
+export function selectedRecipesFileName(date: Date = new Date()): string {
+  const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return `uchi-recipe-recipes-${stamp}.json`
+}
+
 /** キャンセル（ユーザーがピッカーを閉じた）ことを示すDOMExceptionか */
 export function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === 'AbortError'

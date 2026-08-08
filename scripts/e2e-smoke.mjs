@@ -20307,6 +20307,187 @@ try {
   }
 
 
+  // --- RECIPEEXPORT-EM: 「選択したレシピの書き出し」(2026-08-09 便EM。2026-08-02 オーナー決定
+  // 「バックアップの内容分割は見送り・選択レシピの書き出しが代替」)。
+  // 確かめること:
+  //  (a) レシピ一覧の「選択」に書き出しボタンが出て、確認文が規約F(含まれるもの/含まれないもの)を満たす
+  //  (b) 書き出したファイルは選んだ品だけで、設定(=Pro解錠コード)も他テーブルも入っていない
+  //  (c) 書き出しても端末のレシピは1品も減らない
+  //  (d) そのファイルが既存の読み込み経路(設定「バックアップを読み込む」→「今のデータに追加」)に
+  //      そのまま載る＝消したレシピが戻る（新しい読み込み口を作っていないことの確認） ---
+  currentCheck = 'RECIPEEXPORT-EM'
+  {
+    const reBrowser = await chromium.launch()
+    try {
+      const reContext = await reBrowser.newContext({ acceptDownloads: true })
+      const rePage = await reContext.newPage()
+      rePage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@RECIPEEXPORT-EM] ${err.message}`)
+      })
+      let lastDialog = ''
+      rePage.on('dialog', (dialog) => {
+        lastDialog = dialog.message()
+        void dialog.accept()
+      })
+
+      await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await rePage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // Pro解錠コードを入れておく(書き出したファイルに混ざらないことを確かめるため)。
+      // 実際の販売コードは台帳の原本なので、他チェックと同じくsettingsへ直書きで再現する
+      await rePage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            store.put({ ...current, id: 1, proCode: 'UR-E2E-EXPORT-ONLY', proActivatedAt: Date.now() })
+          }
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      })
+      await rePage.reload({ waitUntil: 'networkidle' })
+      await rePage.waitForTimeout(1200)
+
+      // 検索で対象を絞ってから「選択」→「全選択」。絞った結果の枚数がそのまま書き出す品数になる
+      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.waitForTimeout(700)
+      const reCardSel = 'main a[href^="#/recipes/"]'
+      const rePicked = await rePage.locator(reCardSel).count()
+      check('RECIPEEXPORT-EM 前提: 検索で対象を絞れている', rePicked > 0 && rePicked < 10, `件数=${rePicked}`)
+      const rePickedTitles = await rePage.locator(reCardSel).locator('h3, p.font-bold').allTextContents()
+
+      await rePage.getByRole('button', { name: '選択', exact: true }).click()
+      await rePage.waitForTimeout(400)
+      await rePage.getByRole('button', { name: '全選択', exact: true }).click()
+      await rePage.waitForTimeout(400)
+
+      const reExportBtn = rePage.getByRole('button', { name: `選択したレシピ${rePicked}品を書き出す` })
+      check('RECIPEEXPORT-EM(a) 選択モードに「選択したレシピ◯品を書き出す」が出る', await reExportBtn.isVisible())
+
+      const [reDownload] = await Promise.all([
+        rePage.waitForEvent('download'),
+        reExportBtn.click(),
+      ])
+      await rePage.waitForTimeout(600)
+
+      // (a) 確認文(規約F): 含まれるもの・含まれないもの・端末のレシピが残ること・戻し方
+      check(
+        'RECIPEEXPORT-EM(a) 確認文に「含まれるもの」と「含まれないもの」が両方ある',
+        lastDialog.includes('含まれるもの') && lastDialog.includes('含まれないもの'),
+        lastDialog,
+      )
+      check(
+        'RECIPEEXPORT-EM(a) 確認文に「作った記録」の写真・アプリの設定が含まれないと書いてある',
+        lastDialog.includes('「作った記録」の写真') && lastDialog.includes('アプリの設定'),
+        lastDialog,
+      )
+      check(
+        'RECIPEEXPORT-EM(a) 確認文に端末のレシピが残ることと戻し方が書いてある',
+        lastDialog.includes('端末のレシピはそのまま残ります') &&
+          lastDialog.includes('設定の「バックアップを読み込む」から「今のデータに追加」'),
+        lastDialog,
+      )
+      check(
+        'RECIPEEXPORT-EM(b) ファイル名が全体のバックアップと見分けられる',
+        /^uchi-recipe-recipes-\d{4}-\d{2}-\d{2}\.json$/.test(reDownload.suggestedFilename()),
+        reDownload.suggestedFilename(),
+      )
+
+      const reJson = readFileSync(await reDownload.path(), 'utf-8')
+      const reFile = JSON.parse(reJson)
+      check(
+        'RECIPEEXPORT-EM(b) バックアップと同じ書式で書き出される',
+        reFile.app === 'uchi-recipe' && reFile.version === 1 && Array.isArray(reFile.recipes),
+        `app=${reFile.app} version=${reFile.version}`,
+      )
+      check(
+        'RECIPEEXPORT-EM(b) 選んだ品だけが入る',
+        reFile.recipes.length === rePicked &&
+          rePickedTitles.every((t) => reFile.recipes.some((r) => r.title === t)),
+        `件数=${reFile.recipes.length}/${rePicked}`,
+      )
+      check(
+        'RECIPEEXPORT-EM(b) 設定(Pro解錠コード)は入らない',
+        reFile.settings === undefined && !reJson.includes('UR-E2E-EXPORT-ONLY'),
+        `settings=${JSON.stringify(reFile.settings)}`,
+      )
+      check(
+        'RECIPEEXPORT-EM(b) 在庫・買い物メモ・献立・価格などの項目自体を持たない(上書きで消さないため)',
+        ['pantryItems', 'shoppingItems', 'mealPlans', 'todayList', 'prices', 'dayNotes', 'mealTemplates', 'mealPlanLocks'].every(
+          (key) => reFile[key] === undefined,
+        ),
+      )
+      check(
+        'RECIPEEXPORT-EM(b) レシピには「作った記録」の配列が付いている(記録も一緒に持ち出せる)',
+        reFile.recipes.every((r) => Array.isArray(r.cookedLogs)),
+      )
+      check('RECIPEEXPORT-EM(c) 書き出し完了の知らせが出る', ((await rePage.textContent('body')) ?? '').includes('書き出しました'))
+
+      // (c) 端末のレシピは減らない
+      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('')
+      await rePage.waitForTimeout(600)
+      const reTotalAfterExport = await rePage.locator(reCardSel).count()
+      check(
+        'RECIPEEXPORT-EM(c) 書き出しても端末のレシピは減らない',
+        reTotalAfterExport > rePicked,
+        `件数=${reTotalAfterExport}`,
+      )
+
+      // (d) 消してから、既存の読み込み経路(「今のデータに追加」)で戻す
+      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.waitForTimeout(700)
+      await rePage.getByRole('button', { name: '全選択', exact: true }).click()
+      await rePage.waitForTimeout(300)
+      await rePage.getByRole('button', { name: `選択したレシピ${rePicked}品を削除` }).click()
+      await rePage.waitForTimeout(1200)
+      check(
+        'RECIPEEXPORT-EM(d) 前提: 書き出した品を削除できた',
+        (await rePage.locator(reCardSel).count()) === 0,
+        `残り=${await rePage.locator(reCardSel).count()}`,
+      )
+
+      await rePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await rePage.waitForTimeout(600)
+      await rePage.getByRole('button', { name: 'バックアップ', exact: true }).click()
+      await rePage.waitForTimeout(300)
+      const [reChooser] = await Promise.all([
+        rePage.waitForEvent('filechooser'),
+        rePage.getByRole('button', { name: /今のデータに追加/ }).first().click(),
+      ])
+      await reChooser.setFiles({
+        name: reDownload.suggestedFilename(),
+        mimeType: 'application/json',
+        buffer: Buffer.from(reJson, 'utf-8'),
+      })
+      await rePage.waitForTimeout(1400)
+      check(
+        'RECIPEEXPORT-EM(d) 既存の読み込み経路でエラーにならない',
+        !((await rePage.textContent('body')) ?? '').includes('ファイルを読み込めませんでした'),
+      )
+      await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await rePage.waitForTimeout(1200)
+      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.waitForTimeout(700)
+      check(
+        'RECIPEEXPORT-EM(d) 書き出したファイルから消したレシピが戻る',
+        (await rePage.locator(reCardSel).count()) === rePicked,
+        `戻った件数=${await rePage.locator(reCardSel).count()}/${rePicked}`,
+      )
+    } finally {
+      await reBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

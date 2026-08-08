@@ -22,11 +22,20 @@ import {
   Lock,
   ListChecks,
   CheckCircle2,
+  Download,
   X,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
 import { buildBulkDeleteConfirmText } from '../logic/recipeDelete'
+import { exportSelectedRecipes, buildSelectedRecipesExportConfirmText } from '../logic/backup'
+import {
+  supportsSaveFilePicker,
+  saveJsonWithPicker,
+  downloadJson,
+  isAbortError,
+  selectedRecipesFileName,
+} from '../logic/fileSave'
 import { useSettings, updateSettings } from '../db/settings'
 import type { RecipeListLayout } from '../db/types'
 import { usePantryItems } from '../db/pantry'
@@ -547,6 +556,7 @@ export default function RecipesPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const visibleIds = useMemo(
     () => (results ?? []).map((r) => r.recipe.id).filter((id): id is number => id != null),
@@ -652,6 +662,54 @@ export default function RecipesPage() {
       setMessage(ja.recipes.bulkDeletedToast.replace('{r}', String(removed)))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  /**
+   * 選んだレシピだけをファイルに書き出す（2026-08-09 便EM。2026-08-02 オーナー決定
+   * 「バックアップの内容分割は見送り・選択レシピの書き出しが代替」）。
+   *
+   * 書式は全体のバックアップと同じで、読み込みも設定の「バックアップを読み込む」を使う
+   * （新しい読み込み口は作らない）。保存経路は古い記録の書き出しと同じ考え方で、
+   * 保存先を選べる端末はピッカー・それ以外は自動ダウンロード。バックアップの
+   * 「前回の場所に上書き」の行き先は塗り替えない（saveJsonWithPicker）。
+   * 「最終バックアップ」の日時も更新しない＝全体のバックアップを取ったことにはしない。
+   * 実行しても端末のレシピは1品も減らないので、選択は解除せずそのまま残す
+   */
+  const exportSelected = async () => {
+    if (selectedIds.length === 0 || exporting) return
+    const remaining = Math.max(0, (recipes?.length ?? selectedIds.length) - selectedIds.length)
+    if (!window.confirm(buildSelectedRecipesExportConfirmText(selectedIds.length, remaining))) return
+    setExporting(true)
+    try {
+      const { json, count } = await exportSelectedRecipes(selectedIds)
+      if (count === 0) {
+        setMessage(ja.recipes.exportSelectedError)
+        return
+      }
+      const name = selectedRecipesFileName()
+      let picked = false
+      if (supportsSaveFilePicker()) {
+        try {
+          await saveJsonWithPicker(json, name)
+          picked = true
+        } catch (err) {
+          if (isAbortError(err)) return // 保存先選択を閉じた: 何も起きなかった扱い
+          downloadJson(json, name) // 権限拒否・ピッカーが使えない環境はダウンロードへ切り替える
+        }
+      } else {
+        downloadJson(json, name)
+      }
+      setMessage(
+        (picked
+          ? ja.recipes.exportSelectedDonePicked
+          : ja.recipes.exportSelectedDoneDownloaded
+        ).replace('{r}', String(count)),
+      )
+    } catch {
+      setMessage(ja.recipes.exportSelectedError)
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -1172,6 +1230,19 @@ export default function RecipesPage() {
               {ja.recipes.clearSelection}
             </button>
           </div>
+          {/* 書き出しは消す作業の前に置く(取り出してから片づける流れ。押し間違いで
+              削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM) */}
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void exportSelected()}
+              disabled={exporting}
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
+            >
+              <Download size={16} aria-hidden />
+              {ja.recipes.exportSelected.replace('{r}', String(selectedIds.length))}
+            </button>
+          )}
           {selectedIds.length > 0 && (
             <button
               type="button"

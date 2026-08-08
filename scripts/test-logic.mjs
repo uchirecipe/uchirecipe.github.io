@@ -187,10 +187,12 @@ import {
   resolveMergeRecipeAction,
   mergeRecipeUserData,
   remapBackupRecipeRefs,
+  buildSelectedRecipesExportConfirmText,
 } from '../src/logic/backup.ts'
 import {
   supportsSaveFilePicker,
   backupFileName,
+  selectedRecipesFileName,
   isAbortError,
 } from '../src/logic/fileSave.ts'
 import {
@@ -6227,6 +6229,18 @@ eq(
     'backupFileName: 1桁の月日も0埋めする',
     backupFileName(new Date(2026, 0, 9)),
     'uchi-recipe-backup-2026-01-09.json',
+  )
+  // 選択したレシピの書き出し(2026-08-09 便EM)。中身の範囲が違うファイルなので、
+  // 全体のバックアップ・古い記録と名前で見分けられること
+  eq(
+    'selectedRecipesFileName: バックアップと見分けの付く名前になる',
+    selectedRecipesFileName(new Date(2026, 6, 5)),
+    'uchi-recipe-recipes-2026-07-05.json',
+  )
+  eq(
+    'selectedRecipesFileName: 全体のバックアップと同じ名前にならない',
+    selectedRecipesFileName(new Date(2026, 6, 5)) === backupFileName(new Date(2026, 6, 5)),
+    false,
   )
   eq('isAbortError: DOMExceptionでもAbortError以外はfalse', isAbortError(new DOMException('x', 'NotFoundError')), false)
   eq('isAbortError: DOMException以外(普通のError)はfalse', isAbortError(new Error('x')), false)
@@ -13056,6 +13070,31 @@ eq(
     const ranges = [...new Set(src.match(/\d+〜\d+KB/g) ?? [])]
     eq(`EI-4 ${rel} の写真容量の範囲表記が1種類に揃っている`, ranges, ranges.length ? [PHOTO_SIZE_TEXT] : [])
   }
+}
+
+// ---------- 便EM: 選択したレシピの書き出しの確認文(規約F) ----------
+// 何が含まれ、何が含まれないかを両方書く。ファイルを作るだけで端末のレシピは減らないので、
+// そのことも書く(すぐ下に削除ボタンが並ぶため)。戻し方まで書いて行き止まりにしない。
+{
+  const text = buildSelectedRecipesExportConfirmText(3, 106)
+  eq('EM-6 確認文に選んだ品数が入る', text.includes('レシピ3品をファイルに書き出します'), true)
+  eq('EM-6 確認文に「含まれるもの」がある', text.includes('含まれるもの'), true)
+  eq('EM-6 確認文に「含まれないもの」がある', text.includes('含まれないもの'), true)
+  eq('EM-6 含まれないものに選んでいない品数が入る', text.includes('選んでいないレシピ106品'), true)
+  eq('EM-6 記録の写真は含まれないと書いてある', text.includes('「作った記録」の写真'), true)
+  eq('EM-6 アプリの設定は含まれないと書いてある', text.includes('アプリの設定'), true)
+  eq('EM-6 端末のレシピが残ることを書いてある', text.includes('端末のレシピはそのまま残ります'), true)
+  eq(
+    'EM-6 戻し方を画面名・ボタン名で書いてある(規約H: 指示語で場所を示さない)',
+    text.includes('設定の「バックアップを読み込む」から「今のデータに追加」'),
+    true,
+  )
+  eq('EM-6 差し込みの取り残しが無い', /\{[a-z]+\}/.test(text), false)
+  eq(
+    'EM-6 選んでいない品が0でも文が壊れない',
+    buildSelectedRecipesExportConfirmText(109, 0).includes('選んでいないレシピ0品'),
+    true,
+  )
 }
 
 // ---------- 便EK-1: 週タブの文言に「今週」を使わない ----------

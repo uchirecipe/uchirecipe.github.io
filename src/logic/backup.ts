@@ -17,6 +17,7 @@ import {
 } from '../db/types'
 import { buildSearchWords } from './kana'
 import { backupFileName } from './fileSave'
+import { ja } from '../i18n/ja'
 
 /**
  * バックアップ: 全データ（レシピ・写真・作った記録・設定・在庫・買い物メモ・週献立・
@@ -120,6 +121,23 @@ function base64ToBlob(base64: string, type: string): Blob {
   return new Blob([bytes], { type })
 }
 
+/** レシピ1品をバックアップの形（写真はBase64）に変換する。全体・選択どちらの書き出しでも使う */
+async function toBackupRecipe(recipe: Recipe, includeCookedLogPhotos: boolean): Promise<BackupRecipe> {
+  const { photo, cookedLogs, ...rest } = recipe
+  return {
+    ...rest,
+    photoBase64: photo ? await blobToBase64(photo) : undefined,
+    photoType: photo?.type || undefined,
+    cookedLogs: await Promise.all(
+      cookedLogs.map(async ({ photo: logPhoto, ...logRest }) => ({
+        ...logRest,
+        photoBase64: includeCookedLogPhotos && logPhoto ? await blobToBase64(logPhoto) : undefined,
+        photoType: includeCookedLogPhotos && logPhoto ? logPhoto.type || undefined : undefined,
+      })),
+    ),
+  }
+}
+
 /**
  * 全データをJSON文字列にまとめる。
  * includeCookedLogPhotos: 「作った記録」の写真も含めるか（既定false。設定画面のチェックボックスで指定）
@@ -144,19 +162,7 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
   // 献立のロック（便DX）。日付メモと同じく主キーが文字列そのものなので、そのまま入れる
   const mealPlanLocks = await db.mealPlanLocks.toArray()
   const backupRecipes: BackupRecipe[] = await Promise.all(
-    recipes.map(async ({ photo, cookedLogs, ...rest }) => ({
-      ...rest,
-      photoBase64: photo ? await blobToBase64(photo) : undefined,
-      photoType: photo?.type || undefined,
-      cookedLogs: await Promise.all(
-        cookedLogs.map(async ({ photo: logPhoto, ...logRest }) => ({
-          ...logRest,
-          photoBase64:
-            includeCookedLogPhotos && logPhoto ? await blobToBase64(logPhoto) : undefined,
-          photoType: includeCookedLogPhotos && logPhoto ? logPhoto.type || undefined : undefined,
-        })),
-      ),
-    })),
+    recipes.map((recipe) => toBackupRecipe(recipe, includeCookedLogPhotos)),
   )
   const file: BackupFile = {
     app: 'uchi-recipe',
@@ -175,6 +181,50 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
     mealPlanLocks,
   }
   return JSON.stringify(file)
+}
+
+/**
+ * 選んだレシピだけをJSON文字列にまとめる（2026-08-09 便EM。2026-08-02 オーナー決定
+ * 「バックアップの内容分割は見送り・選択レシピの書き出しが代替」の実装）。
+ *
+ * 書式はバックアップと同じ（BackupFile）なので、設定の「バックアップを読み込む」から
+ * そのまま読み込める。全体のバックアップと違うのは中身の範囲だけ:
+ * - recipes … 選んだ品だけ。レシピの写真は含める（exportBackup と同じ作法）。
+ *   「作った記録」はレシピに埋め込まれた配列なのでそのまま入り、記録の写真は既定で含めない
+ *   （includeCookedLogPhotos。ファイルが重くなるのを避ける既定も exportBackup と同じ）
+ * - settings … **含めない**。全体のバックアップではないので個人設定の器を持たせない。
+ *   Pro解錠コードを持ち出さないという配布用レシピセット（importRecipeSet）と同じ考え方
+ * - 在庫・買い物メモ・献立・価格・日付メモ・テンプレ・ロック … 含めない（項目自体を置かない）。
+ *   tablesToReplace が「項目が無ければ触らない」を保証するので、このファイルを
+ *   「データを上書き」で読んでも、これらのテーブルは1件も消えない
+ *
+ * 存在しないID（選んだ直後に別の場所で消された等）は黙って飛ばし、実際に入った品数を返す。
+ */
+export async function exportSelectedRecipes(
+  ids: readonly number[],
+  includeCookedLogPhotos = false,
+): Promise<{ json: string; count: number }> {
+  const found = (await db.recipes.bulkGet([...ids])).filter((r): r is Recipe => r != null)
+  const recipes = await Promise.all(found.map((r) => toBackupRecipe(r, includeCookedLogPhotos)))
+  const file: BackupFile = {
+    app: 'uchi-recipe',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    recipes,
+  }
+  return { json: JSON.stringify(file), count: recipes.length }
+}
+
+/**
+ * 「選択したレシピの書き出し」の確認文（純ロジック・DB非依存。2026-08-09 便EM）。
+ * 規約F: 何が含まれ、何が含まれないかを件数つきで両方書く。文言そのものは src/i18n/ja.ts が持ち、
+ * ここは件数の差し込みだけを行う（scripts/test-logic.mjs で固定する）。
+ * selected=選んだ品数 / remaining=選んでいない品数（ファイルに入らない品数）
+ */
+export function buildSelectedRecipesExportConfirmText(selected: number, remaining: number): string {
+  return ja.recipes.exportSelectedConfirm
+    .replace('{r}', String(selected))
+    .replace('{rest}', String(remaining))
 }
 
 /** JSONをファイルとしてダウンロードし、最終バックアップ日時を記録する */
