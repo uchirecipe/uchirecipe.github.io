@@ -1521,11 +1521,12 @@ export default function SettingsPage() {
             {/* 音量と鳴る長さ(2026-08-08 オーナー実機フィードバック③)。
                 「調整や確認できるように」なので、その場で鳴らして確かめるボタンを必ず添える。
                 タイマー音がOFFのあいだは押せない状態にし、理由を1行で書く */}
+            {/* 画面には出したまま押せなくする（存在ごと消すと「音量を変えられる」こと自体が
+                見えなくなるため）。読み上げからも隠さない＝aria-hiddenは付けない */}
             <div
               className={`mt-[var(--space-md)] ${
-                settings.timerSoundEnabled ? '' : 'pointer-events-none opacity-40'
+                settings.timerSoundEnabled ? '' : 'opacity-40'
               }`}
-              aria-hidden={!settings.timerSoundEnabled}
             >
               <p className="text-sm font-bold text-ink-muted">{ja.settings.timerSoundVolumeLabel}</p>
               <div className="mt-1 grid grid-cols-3 gap-1">

@@ -536,8 +536,15 @@ export default function ShoppingPage() {
                               チェックの丸と✕は別ボタンのままなので、消し込みの操作は変わらない */}
                           <button
                             type="button"
-                            onClick={() => openSourcePopup('memo', item)}
-                            aria-label={ja.shopping.memoSourceOpen}
+                            onClick={() =>
+                              openSourcePopup('memo', {
+                                name: item.name,
+                                sources: item.fromRecipes,
+                                recipeIds: item.fromRecipeIds,
+                                manualAdded: item.manualAdded,
+                              })
+                            }
+                            aria-label={`${item.name} ${ja.shopping.memoSourceOpen}`}
                             className={`min-w-0 flex-1 px-2 py-1 text-left ${
                               item.isChecked ? 'text-ink-muted line-through' : ''
                             }`}
@@ -816,12 +823,15 @@ export default function ShoppingPage() {
               </button>
             </div>
             {/* 下書きは「まだ入れる前」なので従来どおり「使うレシピ」、確定した買い物メモは
-                「どのレシピから入ったか」を答える見出しにする */}
-            <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
-              {namePopup.kind === 'memo'
-                ? ja.shopping.memoSourceTitle
-                : ja.shopping.candidateUsedInRecipes}
-            </p>
+                「どのレシピから入ったか」を答える見出しにする。
+                手で足しただけの行はレシピが1件も無いので、見出しごと出さない */}
+            {namePopup.recipes.length > 0 && (
+              <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
+                {namePopup.kind === 'memo'
+                  ? ja.shopping.memoSourceTitle
+                  : ja.shopping.candidateUsedInRecipes}
+              </p>
+            )}
             {namePopup.recipes.length > 0 && (
               // レシピ名を押すとそのレシピ詳細へ（既存の遷移作法＝Linkで /recipes/:id）。
               // 右側にそのレシピでの分量を並べる
