@@ -111,6 +111,16 @@ import type { FillWeekPlan, MealGenre, ProteinSource, SuggestPairResult } from '
 // 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)。
 // 実効食数・既定の食数の判定も同じ場所に集約してある(2026-08-03 便DK)
 import { clampServings, effectiveMealServings, defaultMealServings } from '../logic/servings'
+// 買い物リストの範囲えらび(2026-08-08 便EA)。集計に入れる枠の判定と、範囲の言い表しは
+// logic/shopping.ts の純関数に置いてある(scripts/test-logic.mjs で固定)
+import {
+  filterShoppingEntries,
+  formatShoppingRangeDates,
+  formatShoppingRangeLabel,
+  isShoppingRangeNarrowed,
+  shoppingRangeIncludesTodayList,
+  type ShoppingRange,
+} from '../logic/shopping'
 import { todayString } from '../logic/date'
 import { hasNgIngredient } from '../logic/ng'
 import {
@@ -3799,27 +3809,81 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     [recipes, priceIndex],
   )
 
+  /* ---- 買い物リストの範囲えらび（2026-08-08 便EA・オーナー要望）----
+     オーナー原文「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
+     １週間分まとめて買い物とは限らない」。
+     null＝絞っていない＝従来どおり表示中の週ぜんぶ（＝開かない人の手数も分量も変わらない）。
+     チップを押して全部選び直した状態は null に戻す＝「絞っていない」の意味を1つに保つ。
+     献立のロックとは無関係（買い物は献立を読むだけ）。 */
+  const [shopRangeOpen, setShopRangeOpen] = useState(false)
+  const [shopDates, setShopDates] = useState<string[] | null>(null)
+  const [shopSlots, setShopSlots] = useState<MealSlot[] | null>(null)
+  /** 範囲に選べる日付＝週タブで買い物の対象になっている日（過ぎた日は元から対象外） */
+  const shopSelectableDates = useMemo(
+    () => dates.filter((d) => !isPastDate(d, today)),
+    [dates, today],
+  )
+  // 週を移動したら選択は白紙に戻す（別の週の日付を選んだまま残さない）
+  const shopRangeWeekKey = dates[0]
+  useEffect(() => {
+    setShopDates(null)
+  }, [shopRangeWeekKey])
+  // 「表示する食事」を変えたら食事の選択も白紙に戻す（表示していない食事を選んだまま残さない）
+  useEffect(() => {
+    setShopSlots(null)
+  }, [settings?.visibleMealSlots])
+  const shopRange: ShoppingRange = { dates: shopDates, slots: shopSlots }
+  const shopRangeNarrowed = isShoppingRangeNarrowed(shopRange, shopSelectableDates, visibleSlots)
+  /** いま集計の対象になっている日付・食事（絞っていなければ「全部」） */
+  const shopRangeDates = shopDates ?? shopSelectableDates
+  const shopRangeSlots = shopSlots ?? visibleSlots
+  const shopIncludesTodayList = shoppingRangeIncludesTodayList(today, shopRange)
+  const toggleShopDate = (date: string) => {
+    setShopDates((prev) => {
+      const base = prev ?? shopSelectableDates
+      const next = base.includes(date) ? base.filter((d) => d !== date) : [...base, date]
+      const sorted = shopSelectableDates.filter((d) => next.includes(d))
+      return sorted.length === shopSelectableDates.length ? null : sorted
+    })
+  }
+  const toggleShopSlot = (slot: MealSlot) => {
+    setShopSlots((prev) => {
+      const base = prev ?? visibleSlots
+      const next = base.includes(slot) ? base.filter((s) => s !== slot) : [...base, slot]
+      const sorted = visibleSlots.filter((s) => next.includes(s))
+      return sorted.length === visibleSlots.length ? null : sorted
+    })
+  }
+  const resetShopRange = () => {
+    setShopDates(null)
+    setShopSlots(null)
+  }
+
   /**
    * 買い物リストに渡すレシピと、その週に作る回数（2026-07-29 便CC/C10）。
    * 従来はレシピIDの重複を捨てていたため、同じ料理が週に2回入っていても材料は1回分しか
    * 出ず、買い物メモが実際の必要量に足りていなかった。回数を数えて倍率として渡す。
+   *
+   * 2026-08-08 便EA: 日付・食事で絞れるようにした（filterShoppingEntries）。
+   * 絞っていなければ従来と同じ集計（過ぎた日を除く今日以降 × 表示している食事）。
    */
   const weekRecipeCounts = useMemo(() => {
     const counts = new Map<number, number>()
     // 過ぎた日の材料は買わせない(2026-07-29 便CD/MP-07): 集計対象は activeEntries(今日以降)
-    activeEntries.forEach((e) => {
-      if (visibleSlots.includes(e.slot)) counts.set(e.recipeId, (counts.get(e.recipeId) ?? 0) + 1)
+    filterShoppingEntries(activeEntries, visibleSlots, shopRange).forEach((e) => {
+      counts.set(e.recipeId, (counts.get(e.recipeId) ?? 0) + 1)
     })
     // 「今日の献立」(今日つくるリスト)の分も買い物候補に含める。
     // 週の表を使わず今日の献立だけで運用する人の材料が漏れないように
     // (2026-07-09 ペルソナテスト第1波)。週の表に既にある品は回数を増やさない
     // (同じ食事を週の表と今日の献立で二重に数えないため)
-    todayList?.forEach((item) => {
-      if (!counts.has(item.recipeId)) counts.set(item.recipeId, 1)
-    })
+    if (shopIncludesTodayList)
+      todayList?.forEach((item) => {
+        if (!counts.has(item.recipeId)) counts.set(item.recipeId, 1)
+      })
     return counts
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEntries, settings?.visibleMealSlots, todayList])
+  }, [activeEntries, settings?.visibleMealSlots, todayList, shopDates, shopSlots, shopIncludesTodayList])
 
   const weekRecipeIds = useMemo(() => Array.from(weekRecipeCounts.keys()), [weekRecipeCounts])
 
@@ -3835,8 +3899,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const totals = new Map<number, number>()
     const add = (recipeId: number, servings: number) =>
       totals.set(recipeId, (totals.get(recipeId) ?? 0) + servings)
-    activeEntries.forEach((e) => {
-      if (!visibleSlots.includes(e.slot)) return
+    filterShoppingEntries(activeEntries, visibleSlots, shopRange).forEach((e) => {
       add(
         e.recipeId,
         effectiveMealServings(e.servings, householdServings, recipeById.get(e.recipeId)?.servings),
@@ -3844,16 +3907,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     })
     // 週の表に無い「今日の献立」の分は1回分＝既定の食数（weekRecipeCountsと同じ数え方）。
     // こちらには枠ごとの食数を決める場所が無いので、既定＝ふだん作る人数／登録人数分で数える
-    todayList?.forEach((item) => {
-      if (!totals.has(item.recipeId))
-        add(
-          item.recipeId,
-          defaultMealServings(householdServings, recipeById.get(item.recipeId)?.servings),
-        )
-    })
+    if (shopIncludesTodayList)
+      todayList?.forEach((item) => {
+        if (!totals.has(item.recipeId))
+          add(
+            item.recipeId,
+            defaultMealServings(householdServings, recipeById.get(item.recipeId)?.servings),
+          )
+      })
     return totals
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEntries, settings?.visibleMealSlots, todayList, recipeById, householdServings])
+  }, [
+    activeEntries,
+    settings?.visibleMealSlots,
+    todayList,
+    recipeById,
+    householdServings,
+    shopDates,
+    shopSlots,
+    shopIncludesTodayList,
+  ])
 
   const goShopping = () => {
     if (weekRecipeCounts.size === 0) return
@@ -3865,8 +3938,127 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const servingsParam = Array.from(weekRecipeServings, ([id, servings]) => `${id}:${servings}`).join(
       ',',
     )
-    navigate(`/shopping?recipeIds=${param}&servings=${servingsParam}`)
+    // どの範囲から作ったか（2026-08-08 便EA）。買い物メモの下書きに1行そのまま出す
+    // （出所の内訳=fromRecipes は従来どおり食材ごとに持つので、こちらは「範囲」だけを伝える）
+    const rangeLabel = formatShoppingRangeLabel({
+      dates: shopRangeDates,
+      slots: shopRangeSlots,
+      includesTodayList: shopIncludesTodayList && (todayList?.length ?? 0) > 0,
+    })
+    const rangeParam = rangeLabel ? `&range=${encodeURIComponent(rangeLabel)}` : ''
+    navigate(`/shopping?recipeIds=${param}&servings=${servingsParam}${rangeParam}`)
   }
+
+  /**
+   * 「この週の買い物リストを作る」の範囲えらび（2026-08-08 便EA）。
+   * 既定は閉じていて、開かなければ従来どおり表示中の週ぜんぶから作る。
+   * チップの見た目は「表示する食事」のボタン（renderSlotFilter）と同じ作法にそろえる。
+   */
+  const renderShopRange = () => (
+    <div className="mt-[var(--space-md)] rounded-md border border-edge">
+      <button
+        type="button"
+        data-testid="shop-range-toggle"
+        onClick={() => setShopRangeOpen((v) => !v)}
+        aria-expanded={shopRangeOpen}
+        className="flex w-full items-center justify-between gap-2 p-[var(--space-sm)] text-left"
+      >
+        <span className="text-sm font-bold">{ja.mealPlan.shopRangeToggle}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate text-xs text-ink-muted" data-testid="shop-range-summary">
+            {shopRangeNarrowed
+              ? ja.mealPlan.shopRangeSummaryPicked
+                  .replace('{dates}', formatShoppingRangeDates(shopRangeDates))
+                  .replace('{slots}', shopRangeSlots.map((s) => ja.mealPlan.slot[s]).join('・'))
+              : ja.mealPlan.shopRangeSummaryAll}
+          </span>
+          {shopRangeOpen ? (
+            <ChevronUp size={16} className="shrink-0 text-ink-muted" aria-hidden />
+          ) : (
+            <ChevronDown size={16} className="shrink-0 text-ink-muted" aria-hidden />
+          )}
+        </span>
+      </button>
+      {shopRangeOpen && (
+        <div className="px-[var(--space-sm)] pb-[var(--space-sm)]">
+          <p className="text-xs text-ink-muted">{ja.mealPlan.shopRangeNote}</p>
+          <p className="mt-[var(--space-sm)] text-xs font-bold text-ink-muted">
+            {ja.mealPlan.shopRangeDateLabel}
+          </p>
+          <div
+            role="group"
+            aria-label={ja.mealPlan.shopRangeDateAria}
+            className="mt-1 flex flex-wrap gap-1"
+          >
+            {shopSelectableDates.map((date) => {
+              const picked = shopRangeDates.includes(date)
+              return (
+                <button
+                  key={date}
+                  type="button"
+                  data-testid="shop-range-date"
+                  data-date={date}
+                  onClick={() => toggleShopDate(date)}
+                  aria-pressed={picked}
+                  className={`rounded-sm border px-2 py-2 text-xs font-bold ${
+                    picked
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  {dowLabels[dowIndex(date)]} {formatShoppingRangeDates([date])}
+                </button>
+              )
+            })}
+          </div>
+          {shopRangeDates.length === 0 && (
+            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.shopRangeEmptyDates}</p>
+          )}
+          <p className="mt-[var(--space-sm)] text-xs font-bold text-ink-muted">
+            {ja.mealPlan.shopRangeSlotLabel}
+          </p>
+          <div
+            role="group"
+            aria-label={ja.mealPlan.shopRangeSlotAria}
+            className="mt-1 flex flex-wrap gap-1"
+          >
+            {visibleSlots.map((slot) => {
+              const picked = shopRangeSlots.includes(slot)
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  data-testid="shop-range-slot"
+                  data-slot={slot}
+                  onClick={() => toggleShopSlot(slot)}
+                  aria-pressed={picked}
+                  className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                    picked
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  {ja.mealPlan.slot[slot]}
+                </button>
+              )
+            })}
+          </div>
+          {shopRangeSlots.length === 0 && (
+            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.shopRangeEmptySlots}</p>
+          )}
+          {shopRangeNarrowed && (
+            <button
+              type="button"
+              onClick={resetShopRange}
+              className="mt-[var(--space-sm)] rounded-sm border border-edge bg-surface px-3 py-2 text-xs font-bold text-accent-ink shadow-sm"
+            >
+              {ja.mealPlan.shopRangeReset}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 
   const dowLabels = ja.mealPlan.dow
 
@@ -5889,18 +6081,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       </div>
 
-      {/* この週の買い物リストを作る */}
+      {/* この週の買い物リストを作る。2026-08-08 便EA: 日付と食事を選んでから作れるようにした
+          （既定は表示中の週ぜんぶ＝従来どおり）。範囲を絞ったときはボタン名も言い換える */}
+      {renderShopRange()}
       <button
         type="button"
         onClick={goShopping}
         disabled={weekRecipeIds.length === 0}
-        className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
+        className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
       >
         <ShoppingCart size={20} aria-hidden />
-        {ja.mealPlan.goToShopping}
+        {shopRangeNarrowed ? ja.mealPlan.goToShoppingPicked : ja.mealPlan.goToShopping}
       </button>
       {weekRecipeIds.length === 0 && (
-        <p className="mt-1 text-center text-sm text-ink-muted">{ja.mealPlan.goToShoppingEmpty}</p>
+        <p className="mt-1 text-center text-sm text-ink-muted">
+          {shopRangeNarrowed
+            ? ja.mealPlan.goToShoppingPickedEmpty
+            : ja.mealPlan.goToShoppingEmpty}
+        </p>
       )}
 
       {/* 2026-08-02 便DE-11(オーナー指示): ここから開いた「作った記録」の戻るは、

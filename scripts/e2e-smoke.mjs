@@ -8116,6 +8116,162 @@ try {
     }
   }
 
+  // --- SHOPRANGE-EA: 買い物リストの範囲えらび(2026-08-08 便EA・オーナー要望
+  // 「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
+  // １週間分まとめて買い物とは限らない」)。
+  // 再発防止の要点: ①開かなければ従来どおり(ボタン名・下書きの中身が変わらない)
+  // ②日付/食事を絞ると、その範囲の献立だけで下書きができる
+  // ③買い物メモ側に「どの範囲から作ったか」が出る ---
+  currentCheck = 'SHOPRANGE-EA'
+  {
+    const srBrowser = await chromium.launch()
+    const srContext = await srBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const srPage = await srContext.newPage()
+    srPage.on('dialog', (dialog) => dialog.accept())
+    srPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHOPRANGE-EA] ${err.message}`)
+    })
+    try {
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(2000) // 初回シード完了待ち
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      // 既定の「表示する食事」は夕食だけなので、朝食・昼食も出して3食で検証する
+      // (範囲えらびの食事チップは「表示している食事」だけを出す仕様のため)
+      const srSlotFilter = srPage.getByRole('group', { name: '表示する食事' })
+      for (const name of ['朝食', '昼食']) {
+        const btn = srSlotFilter.getByRole('button', { name, exact: true })
+        if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
+        await srPage.waitForTimeout(300)
+      }
+      // 「次の週」へ移す＝7日とも未来日になり、実行日によって選べる日数が変わらない
+      // (当週は今日より前の日が対象外なので、日曜に走らせると選べる日が1日しか無い)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      // 週ぜんぶに献立を入れる(絞る前/絞った後を比べる材料を作る)
+      await srPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await srPage.waitForTimeout(3000)
+
+      // ---------- ①既定: 開かなければ従来どおり ----------
+      check(
+        'SHOPRANGE-EA(既定) 範囲えらびは閉じていて、要約は「この週ぜんぶ」',
+        (await srPage.getByTestId('shop-range-toggle').getAttribute('aria-expanded')) === 'false' &&
+          ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
+            'この週ぜんぶ',
+          ),
+      )
+      check(
+        'SHOPRANGE-EA(既定) ボタン名は従来どおり「この週の買い物リストを作る」',
+        await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).isVisible(),
+      )
+      const srCountDraft = () => srPage.locator('textarea').count()
+      await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await srPage.waitForTimeout(1500)
+      const srAll = await srCountDraft()
+      check('SHOPRANGE-EA(既定) 週ぜんぶから下書きができる', srAll > 0, `rows=${srAll}`)
+      // 絞っていないときは範囲の1行にも「この週ぜんぶ」に当たる日付範囲が出る
+      const srAllRange = (await srPage.getByTestId('candidate-range').textContent()) ?? ''
+      check(
+        'SHOPRANGE-EA(既定) 下書きに「どの範囲から作ったか」が出る',
+        srAllRange.includes('から作りました') && /\d+\/\d+/.test(srAllRange),
+        `range=${srAllRange}`,
+      )
+
+      // ---------- ②日付と食事で絞る ----------
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(1200)
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      await srPage.getByTestId('shop-range-toggle').click()
+      await srPage.waitForTimeout(300)
+      const srDateChips = srPage.getByTestId('shop-range-date')
+      const srDateCount = await srDateChips.count()
+      check(
+        'SHOPRANGE-EA(絞る) 日付のボタンは、今日以降の日だけ出る',
+        srDateCount > 0 && srDateCount <= 7,
+        `dates=${srDateCount}`,
+      )
+      check(
+        'SHOPRANGE-EA(絞る) 開いた直後はすべての日付が選ばれている(既定=全部)',
+        (await srPage.locator('[data-testid="shop-range-date"][aria-pressed="true"]').count()) ===
+          srDateCount,
+      )
+      // 先頭の1日だけ残す
+      for (let i = 1; i < srDateCount; i++) await srDateChips.nth(i).click()
+      await srPage.waitForTimeout(300)
+      check(
+        'SHOPRANGE-EA(絞る) 絞るとボタン名が「選んだ範囲の買い物リストを作る」に変わる',
+        await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).isVisible(),
+      )
+      const srKeptDate = await srDateChips.nth(0).getAttribute('data-date')
+      await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).click()
+      await srPage.waitForTimeout(1500)
+      const srOneDay = await srCountDraft()
+      check(
+        'SHOPRANGE-EA(絞る) 1日だけ選ぶと、下書きは週ぜんぶより少なくなる',
+        srOneDay > 0 && srOneDay < srAll,
+        `oneDay=${srOneDay} all=${srAll}`,
+      )
+      const srRangeText = (await srPage.getByTestId('candidate-range').textContent()) ?? ''
+      const srExpectedMd = `${Number(srKeptDate.slice(5, 7))}/${Number(srKeptDate.slice(8, 10))}`
+      check(
+        'SHOPRANGE-EA(絞る) 買い物メモ側に、選んだ日付が範囲として出る',
+        srRangeText.includes(srExpectedMd) && srRangeText.includes('から作りました'),
+        `range=${srRangeText} expected=${srExpectedMd}`,
+      )
+
+      // ---------- ③食事で絞る + 「この週ぜんぶに戻す」 ----------
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(1200)
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      await srPage.getByTestId('shop-range-toggle').click()
+      await srPage.waitForTimeout(300)
+      const srSlotChips = srPage.getByTestId('shop-range-slot')
+      const srSlotCount = await srSlotChips.count()
+      for (let i = 0; i < srSlotCount - 1; i++) await srSlotChips.nth(i).click()
+      await srPage.waitForTimeout(300)
+      check(
+        'SHOPRANGE-EA(絞る) 食事を絞ると要約にその食事だけが出る',
+        ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes('夕食'),
+        `summary=${await srPage.getByTestId('shop-range-summary').textContent()}`,
+      )
+      await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).click()
+      await srPage.waitForTimeout(1500)
+      const srDinnerOnly = await srCountDraft()
+      check(
+        'SHOPRANGE-EA(絞る) 夕食だけに絞ると、下書きは週ぜんぶより少なくなる',
+        srDinnerOnly > 0 && srDinnerOnly < srAll,
+        `dinner=${srDinnerOnly} all=${srAll}`,
+      )
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(1200)
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      await srPage.getByTestId('shop-range-toggle').click()
+      await srPage.waitForTimeout(300)
+      await srPage.getByTestId('shop-range-slot').nth(0).click()
+      await srPage.waitForTimeout(200)
+      await srPage.getByRole('button', { name: 'この週ぜんぶに戻す' }).click()
+      await srPage.waitForTimeout(300)
+      check(
+        'SHOPRANGE-EA(絞る) 「この週ぜんぶに戻す」で既定へ戻る',
+        ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
+          'この週ぜんぶ',
+        ) && (await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).isVisible()),
+      )
+    } finally {
+      await srBrowser.close()
+    }
+  }
+
   // --- MEALPLAN-HOUSE: 設定「食数の設定」(2026-08-03 便DK・オーナー確定
   // 「3人家族なら予算や買い物メモは3人分で計算した数値が必要。栄養は1人当たりのみで十分」)。
   // 設定→献立→買い物→食費を一続きに通し、同じ献立が

@@ -61,7 +61,15 @@ type ShoppingTab = 'pantry' | 'memo'
 const SHOPPING_DRAFT_KEY = 'uchirecipe:draft:shopping'
 const SHOPPING_DRAFT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
-type ShoppingDraft = { candidates: CandidateRow[]; lastPickerCounts: Record<number, number> }
+type ShoppingDraft = {
+  candidates: CandidateRow[]
+  lastPickerCounts: Record<number, number>
+  /**
+   * 献立から作った下書きの「どの範囲から作ったか」（2026-08-08 便EA）。
+   * 献立の週タブが組み立てた1行をそのまま持つ。レシピを手で選んで作った下書きには無い。
+   */
+  rangeLabel?: string
+}
 
 function readShoppingDraft(): ShoppingDraft | null {
   try {
@@ -82,6 +90,7 @@ function readShoppingDraft(): ShoppingDraft | null {
         draft.lastPickerCounts && typeof draft.lastPickerCounts === 'object'
           ? draft.lastPickerCounts
           : {},
+      rangeLabel: typeof draft.rangeLabel === 'string' ? draft.rangeLabel : undefined,
     }
   } catch {
     return null
@@ -201,6 +210,10 @@ export default function ShoppingPage() {
   // 買い物候補（下書き。確定するまでDBには保存しない。画面を離れても消えないよう
   // localStorageに保存する＝2026-07-29 便CC/C2）
   const [candidates, setCandidates] = useState<CandidateRow[] | null>(restoredDraft?.candidates ?? null)
+  // どの範囲の献立から作った下書きか(2026-08-08 便EA)。献立から来たときだけ入る
+  const [candidateRangeLabel, setCandidateRangeLabel] = useState<string | undefined>(
+    restoredDraft?.rangeLabel,
+  )
   // 生成した下書きへ自動スクロールする(2026-07-24 実機FB #13)。候補がDOMに乗ってから実行するため
   // フラグ+useEffectで1テンポ遅らせる
   const candidatesRef = useRef<HTMLElement>(null)
@@ -257,6 +270,8 @@ export default function ShoppingPage() {
         haveNames,
       )
       setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
+      // どの範囲の献立から作ったか(2026-08-08 便EA)。献立側が組み立てた1行をそのまま出す
+      setCandidateRangeLabel(searchParams.get('range') ?? undefined)
       // 「レシピを選び直す」で復元できるよう選択を覚えておく(#8)。献立由来は
       // 献立で決めた食数の合計(未設定なら「登録人数 × 献立に入っている回数」)を初期の食数にする
       setLastPickerCounts(
@@ -275,6 +290,7 @@ export default function ShoppingPage() {
         const next = new URLSearchParams(prev)
         next.delete('recipeIds')
         next.delete('servings')
+        next.delete('range')
         return next
       },
       { replace: true },
@@ -285,9 +301,10 @@ export default function ShoppingPage() {
   // 下書きの保存/破棄(2026-07-29 便CC/C2)。画面を離れてもリロードしても残るようにする。
   // 確定・キャンセルで candidates が null になったら保存も消す
   useEffect(() => {
-    if (candidates && candidates.length > 0) writeShoppingDraft({ candidates, lastPickerCounts })
+    if (candidates && candidates.length > 0)
+      writeShoppingDraft({ candidates, lastPickerCounts, rangeLabel: candidateRangeLabel })
     else clearShoppingDraft()
-  }, [candidates, lastPickerCounts])
+  }, [candidates, lastPickerCounts, candidateRangeLabel])
 
   const makeCandidates = () => {
     // 既に下書きがあるときの作り直しは、手で直した分量が自動計算に戻るので先に一言確認する
@@ -306,6 +323,8 @@ export default function ShoppingPage() {
       }))
     const built = buildShoppingCandidates(chosen, haveNames)
     setCandidates(built.map((c) => ({ ...c, checked: !c.isSeasoningLike })))
+    // 手でレシピを選び直した下書きなので、献立から来た「範囲」の1行は外す(嘘になるため)
+    setCandidateRangeLabel(undefined)
     setLastPickerCounts(pickerCounts) // 「レシピを選び直す」で復元できるよう、直前の選択を覚えておく(#8)
     setPickerOpen(false)
     setPickerCounts({})
@@ -326,6 +345,7 @@ export default function ShoppingPage() {
       chosen.map(({ name, amount, recipeIds, sources }) => ({ name, amount, recipeIds, sources })),
     )
     setCandidates(null)
+    setCandidateRangeLabel(undefined)
     showToast(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
   }
 
@@ -335,6 +355,7 @@ export default function ShoppingPage() {
     const ok = window.confirm(ja.shopping.discardConfirm.replace('{n}', String(candidates.length)))
     if (!ok) return
     setCandidates(null)
+    setCandidateRangeLabel(undefined)
     showToast(ja.shopping.discardedToast)
   }
 
@@ -630,6 +651,14 @@ export default function ShoppingPage() {
             </button>
             {showCandidateDescription && (
               <p className="mt-1 text-sm text-ink-muted">{ja.shopping.candidateDescription}</p>
+            )}
+            {/* どの範囲の献立から作ったか(2026-08-08 便EA)。献立の週タブで日付・食事を選べる
+                ようにしたので、下書きを見たときに範囲が分かるようにする。
+                レシピを手で選んで作った下書きには出ない */}
+            {candidateRangeLabel && (
+              <p className="mt-1 text-sm text-ink-muted" data-testid="candidate-range">
+                {candidateRangeLabel}
+              </p>
             )}
 
             {candidates.length === 0 ? (

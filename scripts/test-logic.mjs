@@ -94,6 +94,11 @@ import {
   combineAmountTexts,
   parseRecipeIdsParam,
   parseServingsParam,
+  filterShoppingEntries,
+  shoppingRangeIncludesTodayList,
+  isShoppingRangeNarrowed,
+  formatShoppingRangeDates,
+  formatShoppingRangeLabel,
 } from '../src/logic/shopping.ts'
 import {
   TIMER_SOUND_VOLUMES,
@@ -11243,6 +11248,154 @@ eq(
     eq('DX-LOCK 鍵は別の日の同じ食事には効かない', isMealSlotLocked(locked, '2026-08-11', 'dinner'), false)
     eq('DX-LOCK 掛けた食事にだけ効く', sortedStrs(locked), ['2026-08-10|dinner'])
   }
+}
+
+// ---------- 便EA: 買い物リストの範囲えらび(オーナー要望「3日分とか」) ----------
+// オーナー原文「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
+// １週間分まとめて買い物とは限らない」。
+// 既定(絞っていない=null)は表示中の週ぜんぶ＝従来と1品も変わらないことを最優先で固定する。
+{
+  const week = ['2026-08-08', '2026-08-09', '2026-08-10', '2026-08-11']
+  const entries = [
+    { date: '2026-08-08', slot: 'breakfast', recipeId: 1 },
+    { date: '2026-08-08', slot: 'dinner', recipeId: 2 },
+    { date: '2026-08-09', slot: 'lunch', recipeId: 3 },
+    { date: '2026-08-09', slot: 'dinner', recipeId: 4 },
+    { date: '2026-08-10', slot: 'dinner', recipeId: 5 },
+    { date: '2026-08-11', slot: 'breakfast', recipeId: 6 },
+  ]
+  const all = ['breakfast', 'lunch', 'dinner']
+  const ids = (rows) => rows.map((r) => r.recipeId)
+
+  // --- 既定(絞っていない): 表示している食事の枠が全部そのまま入る ---
+  eq(
+    'EA-RANGE 既定(range無し)は表示中の週ぜんぶ',
+    ids(filterShoppingEntries(entries, all)),
+    [1, 2, 3, 4, 5, 6],
+  )
+  eq(
+    'EA-RANGE 既定(dates/slotsともnull)も表示中の週ぜんぶ',
+    ids(filterShoppingEntries(entries, all, { dates: null, slots: null })),
+    [1, 2, 3, 4, 5, 6],
+  )
+  // 表示していない食事は、絞る前から対象外(従来どおり)
+  eq(
+    'EA-RANGE 表示していない食事は元から入らない',
+    ids(filterShoppingEntries(entries, ['dinner'])),
+    [2, 4, 5],
+  )
+
+  // --- 日付だけで絞る(オーナーの「3日分とか」) ---
+  eq(
+    'EA-RANGE 選んだ日付だけが集計される',
+    ids(filterShoppingEntries(entries, all, { dates: ['2026-08-09', '2026-08-10'] })),
+    [3, 4, 5],
+  )
+  eq(
+    'EA-RANGE 選んでいない日は1品も入らない',
+    ids(filterShoppingEntries(entries, all, { dates: ['2026-08-11'] })),
+    [6],
+  )
+
+  // --- 食事だけで絞る(時間帯) ---
+  eq(
+    'EA-RANGE 選んだ食事だけが集計される',
+    ids(filterShoppingEntries(entries, all, { slots: ['dinner'] })),
+    [2, 4, 5],
+  )
+
+  // --- 日付と食事の両方で絞る(かけ算で効く) ---
+  eq(
+    'EA-RANGE 日付と食事の両方で絞ると、その交わりだけが集計される',
+    ids(
+      filterShoppingEntries(entries, all, {
+        dates: ['2026-08-08', '2026-08-09'],
+        slots: ['dinner'],
+      }),
+    ),
+    [2, 4],
+  )
+  eq(
+    'EA-RANGE 選んだ範囲に献立が無ければ0件',
+    ids(filterShoppingEntries(entries, all, { dates: ['2026-08-10'], slots: ['breakfast'] })),
+    [],
+  )
+  // 表示していない食事は、範囲で選んでも入らない(表示の設定が優先)
+  eq(
+    'EA-RANGE 表示していない食事は範囲で選んでも入らない',
+    ids(filterShoppingEntries(entries, ['dinner'], { slots: ['breakfast', 'dinner'] })),
+    [2, 4, 5],
+  )
+
+  // --- 「今日の献立」(食事の情報が無いリスト)を足すかの判定 ---
+  eq('EA-RANGE 既定では「今日の献立」も足す', shoppingRangeIncludesTodayList('2026-08-08'), true)
+  eq(
+    'EA-RANGE 今日を含む日付を選んだら「今日の献立」も足す',
+    shoppingRangeIncludesTodayList('2026-08-08', { dates: ['2026-08-08', '2026-08-09'] }),
+    true,
+  )
+  eq(
+    'EA-RANGE 今日を外したら「今日の献立」は足さない',
+    shoppingRangeIncludesTodayList('2026-08-08', { dates: ['2026-08-09'] }),
+    false,
+  )
+  eq(
+    'EA-RANGE 食事で絞ったら「今日の献立」は足さない(食事の情報が無く多く買わせるため)',
+    shoppingRangeIncludesTodayList('2026-08-08', { slots: ['dinner'] }),
+    false,
+  )
+
+  // --- 「絞っているか」の判定(全部選び直した状態は絞っていない扱い) ---
+  eq('EA-RANGE 未選択は絞っていない', isShoppingRangeNarrowed(undefined, week, all), false)
+  eq(
+    'EA-RANGE 全部選び直した状態は絞っていない扱い',
+    isShoppingRangeNarrowed({ dates: [...week], slots: [...all] }, week, all),
+    false,
+  )
+  eq(
+    'EA-RANGE 1日でも外れていれば絞っている',
+    isShoppingRangeNarrowed({ dates: week.slice(0, 3) }, week, all),
+    true,
+  )
+  eq(
+    'EA-RANGE 食事が1つでも外れていれば絞っている',
+    isShoppingRangeNarrowed({ slots: ['dinner'] }, week, all),
+    true,
+  )
+
+  // --- 範囲の言い表し(買い物メモの下書きに出す1行) ---
+  eq('EA-RANGE 日付が連続していれば「8/8〜8/11」', formatShoppingRangeDates(week), '8/8〜8/11')
+  eq('EA-RANGE 1日だけなら「8/9」', formatShoppingRangeDates(['2026-08-09']), '8/9')
+  eq(
+    'EA-RANGE 飛んでいれば「・」で並べる',
+    formatShoppingRangeDates(['2026-08-08', '2026-08-10']),
+    '8/8・8/10',
+  )
+  eq('EA-RANGE 月をまたいでも連続なら範囲表記', formatShoppingRangeDates(['2026-08-31', '2026-09-01']), '8/31〜9/1')
+  eq('EA-RANGE 日付が0件なら空文字(行を出さない)', formatShoppingRangeDates([]), '')
+  eq(
+    'EA-RANGE 範囲の1行に日付と食事が入る',
+    formatShoppingRangeLabel({
+      dates: ['2026-08-08', '2026-08-09'],
+      slots: ['dinner'],
+      includesTodayList: false,
+    }),
+    '献立の8/8〜8/9・夕食から作りました',
+  )
+  eq(
+    'EA-RANGE 「今日の献立」を足したときは、その旨も書く',
+    formatShoppingRangeLabel({
+      dates: ['2026-08-08'],
+      slots: ['breakfast', 'lunch', 'dinner'],
+      includesTodayList: true,
+    }),
+    '献立の8/8・朝食・昼食・夕食から作りました（「今日の献立」の分も入れています）',
+  )
+  eq(
+    'EA-RANGE 対象の日が0件なら範囲の行は出さない',
+    formatShoppingRangeLabel({ dates: [], slots: ['dinner'], includesTodayList: false }),
+    '',
+  )
 }
 
 // ---------- 便EA: 申し送り2件(Pro機能一覧・目的の効き先)の文言整合 ----------
