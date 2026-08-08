@@ -1,5 +1,6 @@
 import type { Recipe, Step } from '../db/types'
 import { findTimeTokens } from './time'
+import { ja } from '../i18n/ja'
 
 /**
  * 並行調理ナビ（Pro）の中核ロジック。
@@ -416,6 +417,133 @@ export function cutOrderRank(step: Step): number {
   return RAW_MEAT_PATTERN.test(step.text) ? 1 : 0
 }
 
+/**
+ * 漬け込み・寝かせの待ちか（2026-08-08 便EG・オーナー実機報告
+ * 「切る手順が後ろに行ってた。マリネしてつけ置きが先に来ていたが、マリネ液→カット→混ぜる、に
+ * した方がいい」）。
+ *
+ * 待ち工程はふつう早く仕掛けるほど得だが、漬け込み・寝かせだけは事情が違う。
+ * 生の肉・魚を漬けたあとで別の品の野菜を切ると、まな板と手を洗い直すことになる
+ * （切る工程は「野菜→肉・魚」の順に並べてある。cutOrderRank と同じ台所の定石）。
+ * 漬け込みは数十分の長い待ちで、数分の切る工程を先に入れても全体はほとんど伸びない。
+ */
+const SOAK_WAIT_PATTERN = /漬|浸|マリネ|もみ込|もみこ|なじま|寝かせ|寝かし|ねかせ|冷蔵庫/
+
+export function isSoakWait(step: Step): boolean {
+  return SOAK_WAIT_PATTERN.test(maskNonWaitNouns(step.text))
+}
+
+/**
+ * 出したい温度（2026-08-08 便EG・オーナー実機報告
+ * 「仕上げてすぐ提供したいレシピの優先度が決まってるといいのか？ 冷たい方がいいものは先に
+ * 仕上げて冷蔵庫で冷やしたい」）。
+ *
+ * 料理名と手順文から機械的に見分ける。**判断が付かないものは 'neutral'**＝従来どおりの順番に
+ * 任せる（無理に前後させない）。
+ *   - cold  … 仕上げてから冷やす品。先に仕上げて冷蔵庫に入れられる
+ *   - hot   … できたてが温かい品。最後に仕上げたい
+ *   - neutral … どちらとも読めない品
+ */
+export type ServeTemp = 'cold' | 'hot' | 'neutral'
+
+/** 手順文に出てくる「冷やしてから食べる」の言い回し */
+const CHILL_STEP_PATTERN =
+  /冷蔵庫で冷や|冷蔵庫に入れて冷や|冷蔵庫で.{0,6}冷や|よく冷や|しっかり冷や|冷やし固め|冷やしてから|氷水で冷や|冷めるまで|冷ましてから/
+/** 料理名から分かる冷たい料理（サラダ・和え物・酢の物のように、熱々では出さない品） */
+const COLD_TITLE_PATTERN =
+  /冷やし|冷製|冷たい|サラダ|マリネ|和え|あえ|酢の物|おひたし|お浸し|浅漬け|ナムル|ゼリー|ムース|アイス|ヨーグルト|冷奴|冷や奴/
+/**
+ * 最後の手順が火を使っている＝できたてが温かい品。
+ * endsWithHeat は「盛り付け・味つけ」を読み飛ばして段階で見るため、
+ * 「フライパンで豚肉を炒める。器に盛る。」のように1手順に炒めと盛り付けが同居する品を
+ * 拾えない（同梱109品で炒めもの6品が漏れていた）。最後の手順の本文も直接見る。
+ */
+const HEAT_FINISH_PATTERN = /焼く|焼き|焼い|炒め|炒る|揚げ|煮|蒸|茹で|ゆで|炊|温め|熱し|加熱|レンジ|グリル|オーブン|沸か/
+
+export function recipeServeTemp(recipe: Pick<Recipe, 'title' | 'steps'>): ServeTemp {
+  const steps = recipe.steps ?? []
+  if (steps.length === 0) return 'neutral'
+  if (steps.some((s) => CHILL_STEP_PATTERN.test(s.text))) return 'cold'
+  if (COLD_TITLE_PATTERN.test(recipe.title ?? '')) return 'cold'
+  if (endsWithHeat(recipe)) return 'hot'
+  return HEAT_FINISH_PATTERN.test(maskNonWaitNouns(steps[steps.length - 1].text)) ? 'hot' : 'neutral'
+}
+
+const SERVE_RANK: Record<ServeTemp, number> = { cold: 0, neutral: 1, hot: 2 }
+
+/** 完成の順番に使う数字（小さいほど先に仕上げたい） */
+export function serveTempRank(recipe: Pick<Recipe, 'title' | 'steps'>): number {
+  return SERVE_RANK[recipeServeTemp(recipe)]
+}
+
+/**
+ * 「湯を沸かす」を段取りに差し込む（2026-08-08 便EG・オーナー実機報告
+ * 「茹でる工程に湯を沸かすが考慮されていない」）。
+ *
+ * 多くのレシピは「〜をゆでる」とだけ書き、その前に必要な湯沸かしを手順にしていない。
+ * 湯が沸くまでは手が空くので、**段取りの上でだけ**待ち工程として差し込む。
+ * **レシピのデータ（手順本文）には一切書き込まない**（表示と計算だけの工程）。
+ */
+
+/** ゆでる工程の合図。masked（NON_WAIT_NOUN_PATTERN で伏せた）本文に対して使う */
+const BOIL_STEP_PATTERN = /茹で|ゆで|湯がく|ゆがく/
+/**
+ * 「ゆで上がったら」「ゆでたじゃがいも」は、すでにゆで終わったものを指す言い方なので
+ * 湯沸かしの合図にしない（同じ長さの伏せ字に置き換えて位置をずらさない）。
+ */
+const BOILED_ALREADY_PATTERN = /ゆで上が|茹で上が|ゆであが|ゆでた|茹でた/g
+/** すでに湯を沸かす工程が書かれている（「鍋にたっぷりの湯を沸かし」「沸騰したら」） */
+const BOIL_WATER_MENTION = /沸/
+
+/**
+ * 湯が沸くまでの既定の待ち分数。
+ * 根拠: 家庭のコンロ（約3kW相当の強火）で鍋1〜1.5Lの水を沸騰させるのにかかる目安が5分前後。
+ * 待ち動詞の既定分数表（DEFAULT_WAIT_MINUTES の「沸か」）と同じ値にそろえてある
+ * ＝手順に「湯を沸かす」と書いてあるレシピと、書いていないレシピで見積りが食い違わないようにするため。
+ */
+export const BOIL_WATER_MINUTES = 5
+
+/** 段取りに載せる手順1つ（レシピの手順そのもの、またはナビが足した工程） */
+export interface PlanStep {
+  step: Step
+  /** 元レシピの手順の添字（0始まり）。ナビが足した工程は負の値（重複しない一時的な鍵） */
+  stepIndex: number
+  /** 元レシピ内の手順番号（1始まり）。ナビが足した工程は 0（番号を持たない） */
+  stepNumber: number
+  /** ナビが段取りに足した工程か（レシピには書かれていない） */
+  addedByNavi: boolean
+}
+
+/**
+ * レシピの手順を、段取りに載せる形に展開する（必要なら「湯を沸かす」を1つ差し込む）。
+ *
+ * 差し込むのは次を全部満たすときだけで、1レシピにつき1回まで（鍋を何度も沸かす想定はしない）:
+ *   - ゆでる工程がある
+ *   - その工程までのどこにも「沸」の字が無い（湯を沸かす手順が書かれていない）
+ */
+export function buildPlanSteps(steps: readonly Step[]): PlanStep[] {
+  const plain = steps.map((s, i) => ({
+    step: s,
+    stepIndex: i,
+    stepNumber: i + 1,
+    addedByNavi: false,
+  }))
+  const masked = steps.map((s) =>
+    maskNonWaitNouns(s.text).replace(BOILED_ALREADY_PATTERN, (m) => '＊'.repeat(m.length)),
+  )
+  const boilAt = masked.findIndex((t) => BOIL_STEP_PATTERN.test(t))
+  if (boilAt === -1) return plain
+  // その工程までに湯沸かしが書かれていれば足さない（同じ手順の中に書かれている場合も含む）
+  if (masked.slice(0, boilAt + 1).some((t) => BOIL_WATER_MENTION.test(t))) return plain
+  const added: PlanStep = {
+    step: { text: ja.cookNavi.addedBoilWaterStep, minutes: BOIL_WATER_MINUTES },
+    stepIndex: -1,
+    stepNumber: 0,
+    addedByNavi: true,
+  }
+  return [...plain.slice(0, boilAt), added, ...plain.slice(boilAt)]
+}
+
 /** レシピの色分け用パレット添字（0,1,2）。CookNaviPage 側で CSS 変数のチップ色に対応づける */
 export interface TimelineRecipe {
   id: number
@@ -431,10 +559,12 @@ export interface TimelineItem {
   recipeTitle: string
   /** 0,1,2 のレシピ色添字 */
   colorIndex: number
-  /** 元レシピ内の手順番号（1始まり。タイマー起動やレシピ内の位置表示に使う） */
+  /** 元レシピ内の手順番号（1始まり。タイマー起動やレシピ内の位置表示に使う）。ナビが足した工程は0 */
   stepNumber: number
-  /** 元レシピ内の手順の添字（0始まり） */
+  /** 元レシピ内の手順の添字（0始まり）。ナビが足した工程は負の値 */
   stepIndex: number
+  /** ナビが段取りに足した工程か（レシピの手順には無い。2026-08-08 便EG） */
+  addedByNavi: boolean
   text: string
   memo?: string
   minutes?: number
@@ -463,9 +593,12 @@ interface Job {
   recipeId: number
   title: string
   colorIndex: number
+  /** 出したい温度（冷やす=0 / どちらでもない=1 / 熱々=2。完成の順番を決めるのに使う） */
+  serveRank: number
   steps: {
     stepIndex: number
     stepNumber: number
+    addedByNavi: boolean
     text: string
     memo?: string
     minutes?: number
@@ -477,6 +610,8 @@ interface Job {
     stageRank: number
     /** 切る工程の中での順番（0=野菜など / 1=生の肉・魚。切る工程どうしのときだけ使う） */
     cutRank: number
+    /** 漬け込み・寝かせの待ちか（先に切る工程を済ませたい待ち。2026-08-08 便EG） */
+    soakWait: boolean
   }[]
   /** 次に着手する手順の添字 */
   ptr: number
@@ -491,9 +626,10 @@ function buildJobs(recipes: Recipe[]): Job[] {
       recipeId: r.id!,
       title: r.title,
       colorIndex,
+      serveRank: serveTempRank(r),
       ptr: 0,
       readyAt: 0,
-      steps: r.steps.map((s, i) => {
+      steps: buildPlanSteps(r.steps).map(({ step: s, stepIndex, stepNumber, addedByNavi }) => {
         const kind = classifyStep(s)
         // 待ちの分数は明示 minutes ＞本文の時間表記＞調理法ごとの既定分数の順で解決する
         // （classifyStep が wait を返した時点で resolveWaitMinutes は必ず値を持つ）。手作業系の
@@ -507,19 +643,22 @@ function buildJobs(recipes: Recipe[]): Job[] {
               : DEFAULT_ACTIVE_MINUTES
             : 0
         return {
-          stepIndex: i,
-          stepNumber: i + 1,
+          stepIndex,
+          stepNumber,
+          addedByNavi,
           text: s.text,
           memo: s.memo,
           minutes: s.minutes,
           kind,
           waitMinutes,
           // 手順に時間が書かれておらず、調理法から当てた分数で待ちにした手順
-          waitEstimated: kind === 'wait' && resolveStepMinutes(s) == null,
+          // （ナビが足した工程は「ナビが追加」の印だけを出す＝印は1つにする）
+          waitEstimated: kind === 'wait' && !addedByNavi && resolveStepMinutes(s) == null,
           activeMinutes,
           category: stepCategory(s),
           stageRank: stepStageRank(s),
           cutRank: cutOrderRank(s),
+          soakWait: kind === 'wait' && isSoakWait(s),
         }
       }),
     }))
@@ -576,6 +715,17 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
   /** 直前に出した手作業の種類（同じ種類の作業を続けてまとめるために覚えておく） */
   let lastActiveCategory: StepCategory | null = null
 
+  /**
+   * 完成の順番の重み（2026-08-08 便EG・オーナー実機報告
+   * 「冷たい方がいいものは先に仕上げて冷蔵庫で冷やしたい」「肉が焼き上がってから
+   * オムライスの卵を焼いて仕上げる手順が理想」）。
+   *
+   * **その品の最後の手順にだけ**効かせる（＝完成のタイミングだけを動かし、途中の順番は変えない）。
+   * 冷やす品の仕上げは早め（0）、熱々の品の仕上げは最後（2）、それ以外は据え置き（1）。
+   * 温度が読めない品は serveRank が 1 なので、従来とまったく同じ順番になる。
+   */
+  const finishBias = (j: Job) => (j.ptr === j.steps.length - 1 ? j.serveRank : 1)
+
   while (hasRemaining()) {
     const active = jobs.filter((j) => j.ptr < j.steps.length)
     let ready = active.filter((j) => j.readyAt <= cookAt)
@@ -585,34 +735,46 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       ready = active.filter((j) => j.readyAt <= cookAt)
     }
 
-    const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
-    let chosen: Job
-    if (waits.length > 0) {
-      // 待ちが長いものから仕掛ける（同着はレシピの選択順で安定させる）
-      waits.sort(
-        (a, b) =>
-          b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex,
-      )
-      chosen = waits[0]
-    } else {
-      // 手作業のみ。残り時間→段階→同じ種類の作業→選択順、の順に見て決める。
-      // ただし**切る工程どうし**のときだけは、まな板の順序（野菜→肉・魚）を先に見る
-      // （2026-08-08 便ED・オーナー指示。生の肉を先に切ると、そのあとの野菜に菌が移りうる）
-      const sameCat = (j: Job) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
-      const acts = ready.slice().sort((a, b) => {
+    // 手作業の選び方（下のコメントの1〜5）。切る工程どうしだけは、まな板の順序（野菜→肉・魚）を先に見る
+    const sameCat = (j: Job) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
+    const pickActive = (candidates: Job[]): Job =>
+      candidates.slice().sort((a, b) => {
         const stepA = a.steps[a.ptr]
         const stepB = b.steps[b.ptr]
         if (stepA.category === 'cut' && stepB.category === 'cut' && stepA.cutRank !== stepB.cutRank) {
           return stepA.cutRank - stepB.cutRank
         }
         return (
+          finishBias(a) - finishBias(b) ||
           remainingSpan(b) - remainingSpan(a) ||
           stepA.stageRank - stepB.stageRank ||
           sameCat(a) - sameCat(b) ||
           a.colorIndex - b.colorIndex
         )
-      })
-      chosen = acts[0]
+      })[0]
+
+    const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
+    let chosen: Job
+    // 漬け込み・寝かせを仕掛ける前に、いま着手できる「切る」工程を先に片付ける
+    // （2026-08-08 便EG・オーナー実機報告。生の肉・魚を漬けたあとで野菜を切りたくない）。
+    // 対象は「いま着手できる待ちが全部、漬け込み・寝かせのとき」だけ＝煮る・ゆでるのような
+    // ふつうの待ちは今までどおり最優先で仕掛ける
+    const readyCuts = ready.filter(
+      (j) => j.steps[j.ptr].kind === 'active' && j.steps[j.ptr].category === 'cut',
+    )
+    const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
+    if (waits.length > 0 && !(soakOnly && readyCuts.length > 0)) {
+      // 待ちが長いものから仕掛ける（同着はレシピの選択順で安定させる）
+      waits.sort(
+        (a, b) =>
+          b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex,
+      )
+      chosen = waits[0]
+    } else if (soakOnly && readyCuts.length > 0) {
+      chosen = pickActive(readyCuts)
+    } else {
+      // 手作業のみ。完成の順番→残り時間→段階→同じ種類の作業→選択順、の順に見て決める
+      chosen = pickActive(ready)
     }
 
     const step = chosen.steps[chosen.ptr]
@@ -667,7 +829,7 @@ export const MIN_GAIN_PERCENT = 5
  * 最後の「切る・下処理・加熱」のどれで終わっているかで決める。
  * 「炒める→塩こしょうで味をつける→皿に盛る」は温かい品、「切る→和える」は冷たい品。
  */
-function endsWithHeat(recipe: Recipe): boolean {
+function endsWithHeat(recipe: Pick<Recipe, 'steps'>): boolean {
   for (let i = recipe.steps.length - 1; i >= 0; i--) {
     const category = stepCategory(recipe.steps[i])
     if (category === 'finish' || category === 'season' || category === 'other') continue
@@ -678,14 +840,15 @@ function endsWithHeat(recipe: Recipe): boolean {
 
 /**
  * 1品ずつ順に作る段取り（2026-08-08 便ED・docs/68 打ち手#4）。
- * 1品を最後まで作り終えてから次の品に移る。**加熱で終わる温かい品を最後にまわす**ので、
- * できあがった料理が冷めるのを最小限にできる。
+ * 1品を最後まで作り終えてから次の品に移る。**冷やす品を先に、熱々の品を最後にまわす**ので、
+ * 冷やす品は冷蔵庫に入れる時間が取れ、温かい品は冷めるのを最小限にできる
+ * （2026-08-08 便EG。従来の「加熱で終わる品を最後」に、冷やす品を先へ回す並びを足した）。
  */
 function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
   const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
   const ordered = valid
     .map((recipe, index) => ({ recipe, index }))
-    .sort((a, b) => Number(endsWithHeat(a.recipe)) - Number(endsWithHeat(b.recipe)) || a.index - b.index)
+    .sort((a, b) => serveTempRank(a.recipe) - serveTempRank(b.recipe) || a.index - b.index)
 
   const items: TimelineItem[] = []
   let offset = 0
@@ -766,6 +929,7 @@ function makeItem(
     kind: step.kind,
     waitMinutes: step.waitMinutes,
     waitEstimated: step.waitEstimated,
+    addedByNavi: step.addedByNavi,
     startMin,
     endMin,
   }

@@ -16,11 +16,16 @@
  * そのまま流用する。表記ゆれ（「豚バラ薄切り肉」→本文の「豚バラ肉」「豚肉」、「むきえび」→「えび」）は
  * 同ファイルの別名生成が吸収する。
  *
- * **誤検出は出さない方に倒す**（嘘の分量を出さない）。具体的には:
- *   - 1つの表記に材料欄の複数行が当たるとき（「片栗粉(肉だね用)」と「片栗粉(あん用)」）は出さない
- *   - 1文字の材料名（水・塩・油・酒など）は、直後が助詞のときだけ拾う
- *     （「水気を絞る」「塩ゆでする」の“水”“塩”は計量する材料ではない）
- *   - 材料名が別の意味で使われる定型句（流水・冷水・水にさらす 等）は名指しで除外する
+ * **誤検出は出さない方に倒す**（嘘の分量を出さない）。1文字の材料名の扱い（「水を加える」は拾い
+ * 「水気を絞る」は拾わない）や、材料名が別の意味で使われる定型句（流水・水溶き・甘酢 等）の除外は
+ * すべて logic/ingredientSpans.ts の findIngredientMatches に集約してある。
+ *
+ * **下線と分量は必ず一致させる**（2026-08-08 便EG・オーナー実機報告
+ * 「手順文の下線は出るのに、オリーブオイルとハーブの分量だけ出ない」）。
+ * 同じ突き合わせ結果（findIngredientMatches）を両方の根拠にし、片方だけ当たる状態を作らない。
+ * 1つの表記に材料欄の複数行が当たるとき（「オリーブオイル(下味用)」と「オリーブオイル(焼く用)」）は、
+ * どちらか一方を機械が選ぶと嘘の分量になりうるので、**当たった行を全部、括弧の注記つきの名前で並べる**
+ * （分量を出さずに黙るのは、下線だけが浮くのでやらない）。
  */
 import type { Ingredient } from '../db/types'
 import { buildIngredientNames, findIngredientMatches } from './ingredientSpans'
@@ -39,40 +44,6 @@ export interface NaviIngredientAmount {
    * レシピ詳細の材料欄と同じ色の線で示し、先にまとめて計量してよい材料を見分けられるようにする。
    */
   seasoningGroup?: number
-}
-
-/**
- * 1文字の材料名を拾ってよい直後の文字（助詞・区切り）。
- * 「水を加える」は拾い、「水気を絞る」「塩ゆで」は拾わない、を分けるための最小限の規則。
- */
-const PARTICLE_AFTER = /[をはがともにでやか、。・）)　 ]/
-
-/**
- * 材料名が「その材料そのもの」を指していない定型句。ここに当たる範囲のマッチは捨てる。
- * 拡張時はこの配列に1件追記する（name＝正規化後の材料名、words＝その語を含む定型句）。
- */
-const CONFUSABLE_PHRASES: { name: string; words: readonly string[] }[] = [
-  {
-    name: '水',
-    words: ['水気', '水分', '流水', '冷水', '熱水', '水洗い', '水にさらす', '水にさらし', '水切り', '水きり', '打ち水'],
-  },
-  { name: '油', words: ['油揚げ', '油分', '油通し'] },
-  { name: '塩', words: ['塩ゆで', '塩茹で', '塩水', '塩気', '塩加減'] },
-]
-
-const confusableByName = new Map(CONFUSABLE_PHRASES.map((rule) => [rule.name, rule.words]))
-
-/** text の [start,end) のマッチが、紛らわしい定型句の一部になっていないか */
-function isConfusableUse(text: string, name: string, start: number): boolean {
-  const words = confusableByName.get(name)
-  if (!words) return false
-  for (const word of words) {
-    const offset = word.indexOf(name)
-    if (offset === -1) continue
-    const wordStart = start - offset
-    if (wordStart >= 0 && text.slice(wordStart, wordStart + word.length) === word) return true
-  }
-  return false
 }
 
 /**
@@ -130,10 +101,41 @@ function buildNameToIngredients(
 }
 
 /**
+ * 材料名の括弧の中身から、用途を表す語を取り出す（「オリーブオイル(下味用)」→「下味」）。
+ * 末尾の「用」は落とす＝手順文には「下味だれを作る」「焼き色がつくまで焼く」のように
+ * 用途の語だけが出てくるため。用途に読めない注記（「すりおろし」「1かけ=約5g」等）も
+ * そのまま返すが、手順文に出てこなければ使われない。
+ */
+function usageNoteOf(name: string): string {
+  const inner = name.match(/[（(]([^）)]*)[）)]/)?.[1]?.trim() ?? ''
+  return inner.replace(/用$/, '')
+}
+
+/**
+ * 同じ表記に材料欄の複数行が当たったとき、手順文に用途が書いてあれば1行に絞る。
+ *
+ * レシピの書き手は「片栗粉(あん用)」「だし汁(卵液用)」のように、**材料欄と手順文の両方に**
+ * 同じ用途の語を書く。手順文に出てくる用途がちょうど1行ぶんだけなら、それがその手順で使う行。
+ * 2行とも当たる／1行も当たらないときは絞り込まない（機械が選ぶと嘘の分量になるため）。
+ */
+function narrowByUsage(rows: readonly Ingredient[], stepText: string): readonly Ingredient[] {
+  const hit = rows.filter((ing) => {
+    const usage = usageNoteOf(ing.name)
+    return usage.length > 0 && stepText.includes(usage)
+  })
+  return hit.length === 1 ? hit : rows
+}
+
+/**
  * ②手順の文に出てくる材料だけを、分量つきで拾う。
  *
- * 出てこない材料は返さない。取り違えのおそれがあるものも返さない（出さない方に倒す）。
- * 返す順は手順文に出てきた順（読みながら手に取る順と一致させる）。
+ * 手順本文に出てこない材料は返さない。返す順は手順文に出てきた順
+ * （読みながら手に取る順と一致させる）。
+ *
+ * 拾う語は手順本文の下線とまったく同じ（findIngredientMatches の結果をそのまま使う）。
+ * 1つの表記に材料欄の複数行が当たるときは、まず手順文に書かれた用途で絞り、
+ * それでも決まらなければ当たった行を材料欄の並び順で全部返す
+ * （名前には括弧の注記が残るので、どちらの分量かは読んで見分けられる）。
  */
 export function stepIngredientAmounts(
   stepText: string,
@@ -149,18 +151,10 @@ export function stepIngredientAmounts(
   const picked: Ingredient[] = []
   for (const match of matches) {
     const rows = nameToIngredients.get(match.text)
-    // 1つの表記に材料欄の複数行が当たる（「片栗粉(肉だね用)」と「片栗粉(あん用)」）＝
-    // どちらの分量か決められないので出さない
-    if (!rows || rows.length !== 1) continue
-    const ing = rows[0]
-    if (picked.includes(ing)) continue
-    // 1文字の材料名は、直後が助詞・区切りのときだけ（「水を」は拾い「水気」は拾わない）
-    if (match.text.length === 1) {
-      const next = stepText[match.end] ?? '。'
-      if (!PARTICLE_AFTER.test(next)) continue
+    if (!rows) continue
+    for (const ing of rows.length > 1 ? narrowByUsage(rows, stepText) : rows) {
+      if (!picked.includes(ing)) picked.push(ing)
     }
-    if (isConfusableUse(stepText, match.text, match.start)) continue
-    picked.push(ing)
   }
   return picked.map((ing) => formatNaviIngredient(ing, baseServings, targetServings))
 }

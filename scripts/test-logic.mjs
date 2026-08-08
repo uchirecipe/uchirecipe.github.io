@@ -136,12 +136,20 @@ import {
   isHandsOnStep,
   stepCategory,
   cutOrderRank,
+  buildPlanSteps,
+  isSoakWait,
+  recipeServeTemp,
+  BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import { parseCookNaviSession } from '../src/logic/cookNaviSession.ts'
 import {
   stepIngredientAmounts,
   recipeIngredientList,
 } from '../src/logic/naviIngredients.ts'
+import {
+  buildIngredientNames as naviIngredientNames,
+  findIngredientMatches as naviIngredientMatches,
+} from '../src/logic/ingredientSpans.ts'
 import { stepMinutesFromText, importedStepMinutes } from '../src/logic/importStepMinutes.ts'
 import {
   resolveDuplicateTitleAction,
@@ -4181,8 +4189,12 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
 // 既定分数は「時間が読める調理法」だけに当て、歯止め3つ(位置ルール・「さっと」・「〜ておく」)を必ず添える。
 // **推定した分数はナビの計算にだけ使い、レシピのデータには書き込まない** ----------
 {
-  /** 手順1つだけのレシピを組んで、その手順の判定と待ち分数を実際のタイムラインから読む */
-  const only = (step) => buildCookTimeline([{ id: 1, title: 'テスト', steps: [step] }]).items[0]
+  /**
+   * 手順1つだけのレシピを組んで、その手順の判定と待ち分数を実際のタイムラインから読む。
+   * ナビが足した工程（ゆでる手順の前の「湯を沸かす」）は読み飛ばす（2026-08-08 便EG）。
+   */
+  const only = (step) =>
+    buildCookTimeline([{ id: 1, title: 'テスト', steps: [step] }]).items.find((it) => !it.addedByNavi)
 
   // (a) 既定分数テーブル: 時間の手掛かりが無い待ち工程も、調理法から分かる分だけ待ちにする
   eq('ナビ既定分数: 「水を沸かす」は待ち5分', only({ text: '水を沸かす' }).kind, 'wait')
@@ -4311,6 +4323,116 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     classifyStep({ text: 'フライパンに水を1cmほど張り、包みを並べてふたをし、中火で15分蒸し焼きにします。' }),
     'wait',
   )
+}
+
+// ---------- 2026-08-08 便EG・オーナー実機フィードバック（3品を実際に作って見つかった段取りの不備）
+// (2)漬け込みの前に切る工程を片付ける (3)ゆでる工程に「湯を沸かす」を差し込む
+// (4)冷やす品は先に・熱々の品は最後に仕上げる ----------
+{
+  const recipe = (id, title, steps) => ({ id, title, steps: steps.map((text) => ({ text })) })
+
+  // ---- (3) 湯を沸かす。レシピ本文は1文字も変えず、段取りの表示にだけ足す ----
+  const boil = buildPlanSteps([{ text: 'じゃがいもをゆでる' }, { text: 'つぶす' }])
+  eq('ナビ湯沸かし: ゆでる手順の前に1つ足す', boil.length, 3)
+  eq('ナビ湯沸かし: 足す位置はゆでる手順の直前', boil[0].step.text, '湯を沸かす')
+  eq('ナビ湯沸かし: 足した工程には印が付く', boil[0].addedByNavi, true)
+  eq('ナビ湯沸かし: 足した工程は既定5分', boil[0].step.minutes, BOIL_WATER_MINUTES)
+  eq('ナビ湯沸かし: 元の手順は番号も本文もそのまま', [boil[1].stepNumber, boil[1].step.text], [1, 'じゃがいもをゆでる'])
+  const boiled = buildCookTimeline([recipe(1, 'テスト', ['じゃがいもをゆでる'])]).items[0]
+  eq('ナビ湯沸かし: 足した工程は待ち5分として段取りに載る', [boiled.kind, boiled.waitMinutes], ['wait', 5])
+  eq('ナビ湯沸かし: 足した工程は手順番号を持たない', boiled.stepNumber, 0)
+  eq('ナビ湯沸かし: 足した工程には「目安です」の注記を重ねない（印は1つ）', boiled.waitEstimated, false)
+  // すでに湯を沸かす手順があるレシピには足さない
+  eq(
+    'ナビ湯沸かし: 「鍋に湯を沸かし…ゆでる」には足さない',
+    buildPlanSteps([{ text: '鍋にたっぷりの湯を沸かし、ほうれん草をゆでる' }]).length,
+    1,
+  )
+  eq(
+    'ナビ湯沸かし: 前の手順で沸かしていれば足さない',
+    buildPlanSteps([{ text: '鍋に水を入れて沸騰させる' }, { text: '卵をゆでる' }]).length,
+    2,
+  )
+  // ゆで終わったものを指す言い方は湯沸かしの合図にしない
+  eq('ナビ湯沸かし: 「ゆで上がったら湯を切る」には足さない', buildPlanSteps([{ text: 'ゆで上がったら湯を切る' }]).length, 1)
+  eq('ナビ湯沸かし: 「ゆで卵を切る」には足さない', buildPlanSteps([{ text: 'ゆで卵を切る' }]).length, 1)
+  eq('ナビ湯沸かし: 「しょうゆで味をつける」には足さない', buildPlanSteps([{ text: 'しょうゆで味をつける' }]).length, 1)
+  eq('ナビ湯沸かし: ゆでる工程が無ければ足さない', buildPlanSteps([{ text: '野菜を炒める' }]).length, 1)
+  eq(
+    'ナビ湯沸かし: 1レシピにつき1回まで',
+    buildPlanSteps([{ text: 'にんじんをゆでる' }, { text: 'ブロッコリーをゆでる' }]).filter(
+      (p) => p.addedByNavi,
+    ).length,
+    1,
+  )
+
+  // ---- (2) 漬け込み・寝かせの前に、着手できる切る工程を片付ける ----
+  eq('ナビ漬け込み: 「冷蔵庫で30分漬け込む」は漬け込みの待ち', isSoakWait({ text: '鶏肉を入れて冷蔵庫で30分漬け込む。' }), true)
+  eq('ナビ漬け込み: 「弱火で15分煮る」は漬け込みではない', isSoakWait({ text: '弱火で15分煮る。' }), false)
+  const soak = buildCookTimeline([
+    recipe(1, 'マリネ肉', [
+      'ボウルにオリーブオイルとレモン汁を混ぜてマリネ液を作る。',
+      '鶏肉を入れて冷蔵庫で30分漬け込む。',
+      'フライパンで焼く。',
+    ]),
+    recipe(2, 'サラダ', ['きゅうりとトマトを切る。', 'ドレッシングで和える。']),
+  ])
+  const soakOrder = soak.items.map((it) => it.text)
+  eq(
+    'ナビ漬け込み: マリネ液→カット→漬け込み の順になる（切る工程が漬け込みより後ろに落ちない）',
+    soakOrder.slice(0, 3),
+    [
+      'ボウルにオリーブオイルとレモン汁を混ぜてマリネ液を作る。',
+      'きゅうりとトマトを切る。',
+      '鶏肉を入れて冷蔵庫で30分漬け込む。',
+    ],
+  )
+  // ふつうの待ち（煮る）は今までどおり最優先で仕掛ける＝切る工程で遅らせない
+  const simmer = buildCookTimeline([
+    recipe(1, '煮物', ['鍋に材料と水を入れて15分煮る。', '器に盛る。']),
+    recipe(2, 'サラダ', ['きゅうりとトマトを切る。', 'ドレッシングで和える。']),
+  ])
+  eq('ナビ漬け込み: 煮る待ちは切る工程より先に仕掛ける（従来どおり）', simmer.items[0].text, '鍋に材料と水を入れて15分煮る。')
+
+  // ---- (4) 出したい温度の推定と、完成の順番 ----
+  eq(
+    'ナビ温度: 「冷蔵庫でよく冷やす」がある品は冷やす品',
+    recipeServeTemp(recipe(1, '茶碗蒸し', ['卵液を作る。', '蒸す。', '粗熱を取り、冷蔵庫でよく冷やす。'])),
+    'cold',
+  )
+  eq('ナビ温度: 料理名がサラダなら冷やす品', recipeServeTemp(recipe(1, '大根サラダ', ['大根を切る。', '和える。'])), 'cold')
+  eq(
+    'ナビ温度: 加熱で終わる品は熱々の品',
+    recipeServeTemp(recipe(1, '野菜炒め', ['野菜を切る。', 'フライパンで炒める。', '器に盛る。'])),
+    'hot',
+  )
+  eq(
+    'ナビ温度: 最後の手順に加熱と盛り付けが同居していても熱々の品',
+    recipeServeTemp(recipe(1, '豚肉のケチャップ炒め', ['下味だれを作る。', 'フライパンで豚肉を炒める。器に盛る。'])),
+    'hot',
+  )
+  eq(
+    'ナビ温度: どちらとも読めない品は現状維持（どちらでもない）',
+    recipeServeTemp(recipe(1, 'コールスロー', ['キャベツを塩もみして水気を絞る。'])),
+    'neutral',
+  )
+  // 熱々の品の仕上げは最後、冷やす品の仕上げは先に
+  const serve = buildCookTimeline([
+    recipe(1, 'オムライス', ['ご飯を炒める。', '卵を焼いて包む。']),
+    recipe(2, '鶏の照り焼き', ['鶏肉に下味をつける。', '皮目から焼く。', '裏返して中まで焼く。']),
+    recipe(3, 'トマトサラダ', ['トマトを切る。', 'ドレッシングで和える。']),
+  ])
+  const lastOf = (title) =>
+    serve.items.reduce((at, it, i) => (it.recipeTitle === title ? i : at), -1)
+  eq('ナビ完成順: 冷やす品を先に仕上げる', lastOf('トマトサラダ') < lastOf('オムライス'), true)
+  eq('ナビ完成順: 熱々の品どうしは、他の品の作業が終わってから仕上げる', lastOf('オムライス') > lastOf('トマトサラダ'), true)
+  // 1品ずつ作る順番でも同じ（冷やす品→どちらでもない→熱々）
+  const seq = buildCookPlan([
+    recipe(1, '野菜炒め', ['野菜を切る。', 'フライパンで炒める。']),
+    recipe(2, 'トマトサラダ', ['トマトを切る。', 'ドレッシングで和える。']),
+  ])
+  eq('ナビ完成順: 1品ずつのときも冷やす品が先', seq.items[0].recipeTitle, 'トマトサラダ')
+  eq('ナビ完成順: 1品ずつのときも熱々の品が最後', seq.items[seq.items.length - 1].recipeTitle, '野菜炒め')
 }
 
 // ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。
@@ -4522,16 +4644,77 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('ナビ材料: 「冷水にとる」の水は拾わない', label(stepIngredientAmounts('ざるにあげて冷水にとる。', water, 2, 2)), [])
   eq('ナビ材料: 「塩ゆで」の塩は拾わない', label(stepIngredientAmounts('塩ゆでする。', water, 2, 2)), [])
   eq('ナビ材料: 「塩をふる」の塩は拾う', label(stepIngredientAmounts('塩をふる。', water, 2, 2)), ['塩 少々'])
-  // 同じ表記に材料欄の2行が当たるときは、どちらの分量か決められないので出さない
+  // 同じ表記に材料欄の2行が当たるとき(2026-08-08 便EG・オーナー実機報告
+  // 「下線は出るのに分量が出ない材料がある」)。黙って出さないと下線だけが浮くので、
+  // 手順文に書かれた用途で絞り、決まらなければ括弧の注記つきで両方出す
   const katakuriko = [
     { name: '片栗粉(肉だね用)', amount: '1', unit: '大さじ' },
     { name: '片栗粉(あん用)', amount: '2', unit: '小さじ' },
   ]
   eq(
-    'ナビ材料: 同名の材料が2行あるときは出さない(嘘の分量を出さない)',
+    'ナビ材料: 同名の材料が2行あり用途が読めないときは両方出す(下線だけ浮かせない)',
     label(stepIngredientAmounts('片栗粉を加えて混ぜる。', katakuriko, 2, 2)),
-    [],
+    ['片栗粉(肉だね用) 大さじ1', '片栗粉(あん用) 小さじ2'],
   )
+  eq(
+    'ナビ材料: 手順文に用途が書いてあれば1行に絞る(あん用)',
+    label(stepIngredientAmounts('別の器に酢と片栗粉(あん用)を混ぜる。', katakuriko, 2, 2)),
+    ['片栗粉(あん用) 小さじ2'],
+  )
+  // オーナー実機の例: 「オリーブオイル(下味用)」「オリーブオイル(焼く用)」
+  const oliveOil = [
+    { name: 'オリーブオイル(下味用)', amount: '1', unit: '大さじ' },
+    { name: 'オリーブオイル(焼く用)', amount: '適量', unit: '' },
+  ]
+  eq(
+    'ナビ材料: 「下味だれを作る」手順では下味用のオリーブオイルだけ出す',
+    label(stepIngredientAmounts('袋にオリーブオイル・塩・こしょうを入れて下味だれを作る。', oliveOil, 2, 2)),
+    ['オリーブオイル(下味用) 大さじ1'],
+  )
+  eq(
+    'ナビ材料: 「焼く」手順では焼く用のオリーブオイルだけ出す',
+    label(stepIngredientAmounts('フライパンにオリーブオイルを熱し、皮目を下にして焼く。', oliveOil, 2, 2)),
+    ['オリーブオイル(焼く用) 適量'],
+  )
+  // 接頭語つきの材料名(2026-08-08 便EG): 材料欄「乾燥ハーブ(…)」・本文「ハーブ」でも拾う
+  eq(
+    'ナビ材料: 「乾燥ハーブ(オレガノ)」は本文の「ハーブ」で拾う',
+    label(
+      stepIngredientAmounts(
+        '袋にハーブを入れて混ぜる。',
+        [{ name: '乾燥ハーブ(オレガノまたはローズマリー)', amount: '1/2', unit: '小さじ' }],
+        2,
+        2,
+      ),
+    ),
+    ['乾燥ハーブ(オレガノまたはローズマリー) 小さじ1/2'],
+  )
+  eq(
+    'ナビ材料: 「乾燥わかめ」は本文の「わかめ」で拾う',
+    label(
+      stepIngredientAmounts('豆腐とわかめを加える。', [{ name: '乾燥わかめ', amount: '2', unit: 'g' }], 2, 2),
+    ),
+    ['乾燥わかめ 2g'],
+  )
+  // 下線と分量は必ず一致する(片方だけ当たる状態を作らない)。
+  // 下線の根拠 findIngredientMatches をそのまま分量の根拠にしているかを、代表例で固定する
+  {
+    const names = naviIngredientNames(water)
+    const cases = [
+      '鍋に水を入れる。',
+      '水気をしっかり絞る。',
+      'ざるにあげて冷水にとる。',
+      '水溶き片栗粉を回し入れる。',
+      '塩ゆでする。',
+      '塩をふる。',
+    ]
+    const mismatch = cases.filter((text) => {
+      const underlined = naviIngredientMatches(text, names).length > 0
+      const shown = stepIngredientAmounts(text, water, 2, 2).length > 0
+      return underlined !== shown
+    })
+    eq('ナビ材料: 下線が引かれた語には必ず分量が出る(不一致0件)', mismatch, [])
+  }
   // 「卵液」の卵など、既存の除外規則(ingredientSpans)はそのまま効く
   eq(
     'ナビ材料: 「卵液」の卵は拾わない(既存の除外規則を流用)',
