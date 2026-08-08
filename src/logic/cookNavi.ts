@@ -124,8 +124,13 @@ export const EXTRA_WAIT_VERB_PATTERNS: RegExp[] = [
  *
  * 「オーブンシート」も同じ誤りで、紙を敷くだけの手順が「オーブン15分」に化けていた
  * （フルーツヨーグルトバーク 手順3。同梱109品の目視で判明）。
+ *
+ * 「しょうゆで味をつける」が**8分の待ち**になっていたのが最悪の例（「しょう**ゆで**」が
+ * 「ゆでる」に当たっていた）。ホールドアウト標本で見つかった。
+ * ここに載せるのは「その字を含むだけで、待ち時間ではない**名詞**」だけ。
  */
-const NON_WAIT_NOUN_PATTERN = /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|オーブンシート|オーブンペーパー/g
+const NON_WAIT_NOUN_PATTERN =
+  /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|漬物|漬け物|オーブンシート|オーブンペーパー|しょうゆ|つゆ|煮干し|蒸し器|蒸しパン|ゆで卵|ゆでうどん|ゆで麺|お浸し/g
 
 function maskNonWaitNouns(text: string): string {
   return text.replace(NON_WAIT_NOUN_PATTERN, (m) => '＊'.repeat(m.length))
@@ -169,7 +174,15 @@ const TE_OKU_PATTERN = /[てで](?:お|置)[くきい]/
  * 置くと「油をなじませる」「たれを作っておく」まで待ちに化ける（診断で実測済み）。
  * 上から順に見て最初に当たったものを使う。
  */
-const DEFAULT_WAIT_MINUTES: { pattern: RegExp; minutes: number }[] = [
+/**
+ * 麺類（2026-08-08 便ED・ホールドアウト標本）。
+ * 「そうめんをゆでる」に既定の8分を当てると、実際は1〜2分で吹きこぼれる工程から目を離させる。
+ * 麺のゆで時間は袋の表示どおりで短いので、**時間が書かれていない麺のゆでには既定分数を当てない**
+ * （本文に「8分ゆでる」と書いてあればそれは従来どおり使う）。
+ */
+const NOODLE_PATTERN = /そうめん|素麺|そば|うどん|パスタ|スパゲ|マカロニ|中華麺|ラーメン|春雨|ビーフン|フォー/
+
+const DEFAULT_WAIT_MINUTES: { pattern: RegExp; minutes: number; skipForNoodles?: boolean }[] = [
   { pattern: /解凍/, minutes: 30 },
   { pattern: /炊/, minutes: 30 },
   { pattern: /発酵/, minutes: 40 },
@@ -180,12 +193,32 @@ const DEFAULT_WAIT_MINUTES: { pattern: RegExp; minutes: number }[] = [
   // 「煮立てる」は沸かすのと同じで、煮込みほど長くない（同梱109品の目視。10分は長すぎた）
   { pattern: /煮立て/, minutes: 5 },
   { pattern: /煮/, minutes: 10 },
-  { pattern: /茹で|ゆで/, minutes: 8 },
+  { pattern: /茹で|ゆで/, minutes: 8, skipForNoodles: true },
   { pattern: /蒸/, minutes: 8 },
   { pattern: /ふたをして|フタをして|蓋をして/, minutes: 8 },
   { pattern: /沸か|沸騰させ/, minutes: 5 },
   { pattern: /レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/, minutes: 3 },
 ]
+
+/**
+ * text 中で pattern 群のどれかが最後に**終わる**位置（無ければ -1）。
+ *
+ * 位置ルールで待ち動詞の位置を測るときは、始まりではなく終わりで比べる（2026-08-08 便ED）。
+ * 「ふたをして中火で15分蒸し焼きにします」は、待ち動詞「蒸し焼き」の中に手作業動詞「焼き」が
+ * 入っているため、始まりで比べると手作業が後ろに来て待ちが消えてしまう（ホールドアウト標本で判明）。
+ */
+function lastEndOfPatterns(text: string, patterns: readonly RegExp[]): number {
+  let last = -1
+  for (const re of patterns) {
+    const global = new RegExp(re.source, 'g')
+    let m: RegExpExecArray | null
+    while ((m = global.exec(text)) !== null) {
+      last = Math.max(last, m.index + m[0].length)
+      if (m.index === global.lastIndex) global.lastIndex++
+    }
+  }
+  return last
+}
 
 /** text 中で pattern 群のどれかが最後に現れる位置（無ければ -1） */
 function lastIndexOfPatterns(text: string, patterns: readonly RegExp[]): number {
@@ -257,7 +290,10 @@ export function resolveWaitMinutes(step: Step): number | undefined {
   if (SHORT_CUE_PATTERN.test(step.text)) return undefined
   if (TE_OKU_PATTERN.test(step.text)) return undefined
   const text = maskNonWaitNouns(step.text)
-  return DEFAULT_WAIT_MINUTES.find((v) => v.pattern.test(text))?.minutes
+  const hit = DEFAULT_WAIT_MINUTES.find((v) => v.pattern.test(text))
+  if (!hit) return undefined
+  if (hit.skipForNoodles && NOODLE_PATTERN.test(text)) return undefined
+  return hit.minutes
 }
 
 /**
@@ -278,10 +314,10 @@ export function classifyStep(step: Step): StepKind {
   // 短い待ちほど「2分しかないのに他の作業を挟まれる」実害が大きいので最優先で判定する
   if (isHandsOnStep(step)) return 'active'
   const text = maskNonWaitNouns(step.text)
-  const waitAt = lastIndexOfPatterns(text, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
+  const waitAt = lastEndOfPatterns(text, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
   if (waitAt === -1) return 'active'
   const hasExplicitMinutes = step.minutes != null && step.minutes > 0
-  if (!hasExplicitMinutes && lastIndexOfPatterns(text, [ACTION_VERB_PATTERN]) > waitAt) return 'active'
+  if (!hasExplicitMinutes && lastIndexOfPatterns(text, [ACTION_VERB_PATTERN]) >= waitAt) return 'active'
   return resolveWaitMinutes(step) != null ? 'wait' : 'active'
 }
 

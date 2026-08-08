@@ -14668,6 +14668,163 @@ try {
     }
   }
 
+  // --- NAVI-05: 並行できないときの正直表示(2026-08-08 便ED・docs/68 打ち手#4)。
+  //     待ち時間が1つも見つからない組み合わせでは、1品ずつ順に作るのと1分も変わらないのに
+  //     「全体の目安 約◯分」とだけ出ていた(縮んでいないのに縮んだように見える)。
+  //     期待挙動: 理由の1文＋次の一手の1文が出る／段取りは1品ずつ完結する並びになり、
+  //     加熱で仕上げる温かい品が最後に来る ---
+  currentCheck = 'NAVI-05'
+  {
+    const nav5Browser = await chromium.launch()
+    const nav5Context = await nav5Browser.newContext({ viewport: { width: 390, height: 820 } })
+    const nav5Page = await nav5Context.newPage()
+    nav5Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI-05] ${err.message}`)
+    })
+    try {
+      await nav5Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await nav5Page.waitForTimeout(1800)
+      await nav5Page.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        // 手入力そのもの: 短文・分数なし・時間表記なし=待ちが1つも見つからない2品。
+        // 「炒めもの」は加熱で終わる=温かい品なので、正直表示では後ろに回るのが正解
+        const idA = await P(store('recipes').add(mk('E2Eナビ炒めもの', [
+          { text: '野菜を切る' }, { text: 'フライパンで炒める' },
+        ])))
+        const idB = await P(store('recipes').add(mk('E2Eナビ和えもの', [
+          { text: 'きゅうりを切る' }, { text: 'ごまと和える' },
+        ])))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await nav5Page.goto(`${BASE}/#/cook-navi`)
+      await nav5Page.reload({ waitUntil: 'networkidle' })
+      await nav5Page.waitForTimeout(1200)
+      await nav5Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav5Page.waitForTimeout(600)
+      const body5 = await nav5Page.textContent('body')
+      check(
+        'NAVI-05 待ちが見つからない組み合わせでは理由を正直に出す',
+        body5.includes('この2品では、手が空く待ち時間が見つかりませんでした。1品ずつ作る順番で表示します。'),
+        body5.slice(0, 200),
+      )
+      check(
+        'NAVI-05 次にどうすれば段取りが作れるかも書く',
+        body5.includes('手順に「10分煮る」のように時間があると、待ち時間を使った段取りになります。'),
+      )
+      check(
+        'NAVI-05 正直表示の枠が出ている',
+        (await nav5Page.locator('[data-testid="navi-no-parallel"]').count()) === 1,
+      )
+      const cards5 = await nav5Page.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
+      check(
+        'NAVI-05 1品ずつ完結する並びになる(和えもの→炒めもの)',
+        cards5.length === 4 &&
+          cards5[0].includes('E2Eナビ和えもの') &&
+          cards5[1].includes('E2Eナビ和えもの') &&
+          cards5[2].includes('E2Eナビ炒めもの') &&
+          cards5[3].includes('E2Eナビ炒めもの'),
+        `cards=${JSON.stringify(cards5.map((t) => t.slice(0, 20)))}`,
+      )
+      check(
+        'NAVI-05 加熱で仕上げる温かい品を最後にまわす',
+        cards5[cards5.length - 1].includes('E2Eナビ炒めもの'),
+      )
+      check('NAVI-05 番号の意味も1品ずつ作る場合の説明に切り替わる', body5.includes('番号は作る順番です。'))
+    } finally {
+      await nav5Browser.close()
+    }
+  }
+
+  // --- NAVI-06: 取り込み時の分数自動入力(2026-08-08 便ED・docs/68 打ち手#2)。
+  //     貼り付け取り込みは手順の「分」の欄が必ず空になり、本文に「15分煮る」と書いてあっても
+  //     タイマーにも並行調理ナビにも使えていなかった。本文にある時間を「分」の欄へ写し、
+  //     自動で入れたことが分かる表示が出て、書き換え・削除ができることを実UIで確認する ---
+  currentCheck = 'NAVI-06'
+  {
+    const nav6Browser = await chromium.launch()
+    const nav6Context = await nav6Browser.newContext({ viewport: { width: 390, height: 820 } })
+    const nav6Page = await nav6Context.newPage()
+    nav6Page.on('dialog', (dialog) => dialog.accept())
+    nav6Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI-06] ${err.message}`)
+    })
+    try {
+      await nav6Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await nav6Page.waitForTimeout(1500)
+      await nav6Page.getByText('テキスト貼り付けで自動入力').click()
+      await nav6Page.waitForTimeout(300)
+      await nav6Page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+        'E2E分数自動入力レシピ\n\n材料（2人分）\n・大根　1/4本\n・しょうゆ　大さじ2\n\n作り方\n1. 大根を切る\n2. 鍋に入れて15分煮る\n3. 器に盛る',
+      )
+      await nav6Page.getByRole('button', { name: '自動で振り分ける' }).click()
+      await nav6Page.waitForTimeout(400)
+      const minutesInputs = nav6Page.locator('input[aria-label="分（任意）"]')
+      check(
+        'NAVI-06 本文の「15分」が手順2の分数欄に入る',
+        (await minutesInputs.nth(1).inputValue()) === '15',
+        `値=${await minutesInputs.nth(1).inputValue()}`,
+      )
+      check(
+        'NAVI-06 時間の書かれていない手順の分数欄は空のまま(推測値を入れない)',
+        (await minutesInputs.nth(0).inputValue()) === '' &&
+          (await minutesInputs.nth(2).inputValue()) === '',
+      )
+      const body6 = await nav6Page.textContent('body')
+      check(
+        'NAVI-06 自動で入れた分数であることが手順に表示される',
+        body6.includes('手順の文にある時間から入れました。書き換え・削除ができます'),
+      )
+      check('NAVI-06 取り込みの結果にも件数が出る', body6.includes('手順1件は本文の時間を「分」の欄に入れました。'))
+      check(
+        'NAVI-06 自動入力の印は1件だけ(時間のある手順のみ)',
+        (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 1,
+      )
+      // 消せる: 分数欄を空にすると印も消える(ユーザーが保存前に直せる)
+      await minutesInputs.nth(1).fill('')
+      await nav6Page.waitForTimeout(300)
+      check(
+        'NAVI-06 分数を消すと自動入力の印も消える',
+        (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 0,
+      )
+      // 直せる: 別の値を入れても印は出ない(ユーザーが入れた分数として扱う)
+      await minutesInputs.nth(1).fill('8')
+      await nav6Page.waitForTimeout(300)
+      check(
+        'NAVI-06 分数を書き換えると自動入力の印は出ない',
+        (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 0 &&
+          (await minutesInputs.nth(1).inputValue()) === '8',
+      )
+      // 手順の本文は書き換えていない(転記だけ)
+      const stepTexts = await nav6Page.$$eval('textarea', (els) => els.map((e) => e.value))
+      check(
+        'NAVI-06 手順の本文は1文字も書き換えない',
+        stepTexts.includes('鍋に入れて15分煮る'),
+        `textareas=${JSON.stringify(stepTexts.slice(0, 5))}`,
+      )
+    } finally {
+      await nav6Browser.close()
+    }
+  }
+
   // --- PANTRY-GROUP-01: 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1)。
   // 通常表示でグループ見出し(肉・魚介／野菜・きのこ／調味料 …)が出ること、整理モードで選んだ
   // 食材を別グループへ手動移動でき(group手動指定)、IndexedDBに保存されトーストが出ることを確認する ---
