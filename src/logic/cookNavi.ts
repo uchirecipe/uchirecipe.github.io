@@ -632,11 +632,16 @@ export interface CookPlan extends CookTimeline {
  */
 export const MIN_GAIN_PERCENT = 5
 
-/** その品が加熱で終わるか（＝できたてが温かい品）。「器に盛る」等の仕上げは判断材料にしない */
+/**
+ * その品が加熱で終わるか（＝できたてが温かい品）。
+ * 後ろから見て、加熱の後始末にあたる工程（盛り付け・味つけ・分類できなかった手順）は読み飛ばし、
+ * 最後の「切る・下処理・加熱」のどれで終わっているかで決める。
+ * 「炒める→塩こしょうで味をつける→皿に盛る」は温かい品、「切る→和える」は冷たい品。
+ */
 function endsWithHeat(recipe: Recipe): boolean {
   for (let i = recipe.steps.length - 1; i >= 0; i--) {
     const category = stepCategory(recipe.steps[i])
-    if (category === 'finish') continue
+    if (category === 'finish' || category === 'season' || category === 'other') continue
     return category === 'heat'
   }
   return false

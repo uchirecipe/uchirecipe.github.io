@@ -4130,6 +4130,22 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('ナビ正直表示: 並行の余地なし', warm.mode, 'sequential')
   eq('ナビ正直表示: 加熱で終わる品を最後に作る', warm.items[warm.items.length - 1].recipeTitle, '炒めもの')
 
+  // 加熱のあとに味つけ・盛り付けが続く品も「温かい品」として最後にまわす（実機スクショで判明）
+  const warm2 = buildCookPlan([
+    {
+      id: 1,
+      title: '野菜炒め',
+      steps: [{ text: '材料を切る' }, { text: '肉を炒める' }, { text: '塩こしょうで味をつける' }, { text: '皿に盛る' }],
+    },
+    { id: 2, title: 'ツナサラダ', steps: [{ text: 'レタスをちぎる' }, { text: 'ドレッシングと和える' }] },
+  ])
+  eq('ナビ正直表示: 「炒める→味をつける→盛る」も温かい品として最後', warm2.items[0].recipeTitle, 'ツナサラダ')
+  eq(
+    'ナビ正直表示: 温かい品は最後まで通しで作る',
+    warm2.items[warm2.items.length - 1].recipeTitle,
+    '野菜炒め',
+  )
+
   // 待ちが活きる組み合わせは従来どおり並行の段取り
   const par = buildCookPlan([
     { id: 1, title: '煮物', steps: [{ text: '材料を切る' }, { text: '鍋で15分煮る' }, { text: '盛る' }] },
