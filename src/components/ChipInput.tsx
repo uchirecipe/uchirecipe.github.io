@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { splitValues } from '../logic/textSplit'
+import { isImeConfirmKey } from '../logic/imeKey'
 import { ja } from '../i18n/ja'
 
 type Props = {
@@ -63,7 +64,9 @@ export default function ChipInput({ values, onChange, placeholder, addLabel, rem
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            // 日本語入力の変換確定のEnterではチップを作らない(2026-08-09 便EI。レシピ登録画面には
+            // 2026-08-02から入っていたガードの適用漏れ。変換を確定しただけで意図しないチップが増えていた)
+            if (e.key === 'Enter' && !isImeConfirmKey(e)) {
               e.preventDefault()
               add()
             }

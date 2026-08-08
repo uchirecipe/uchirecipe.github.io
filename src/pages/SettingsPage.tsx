@@ -80,6 +80,7 @@ import {
   bytesToMB,
 } from '../logic/cookedPhotoStorage'
 import { isLaunchedFromHomeScreen } from '../logic/standalone'
+import { isImeConfirmKey } from '../logic/imeKey'
 import {
   isValidProCode,
   normalizeProCode,
@@ -1318,7 +1319,8 @@ export default function SettingsPage() {
                 value={ngInput}
                 onChange={(e) => setNgInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  // 変換確定のEnterではNG食材を足さない(2026-08-09 便EI。レシピ登録画面と同じガード)
+                  if (e.key === 'Enter' && !isImeConfirmKey(e)) {
                     e.preventDefault()
                     addNg()
                   }

@@ -30,6 +30,7 @@ import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from
 import { useSettings, updateSettings } from '../db/settings'
 import { countFreeLimitRecipes, freeLimitNoticeFor, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
+import { isImeConfirmKey } from '../logic/imeKey'
 import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
 import type { ImportErrorReason } from '../logic/urlImport'
@@ -310,16 +311,6 @@ function ImportSeasoningGuide() {
       <p className="text-sm text-ink-muted">{ja.form.importSeasoningGuide}</p>
     </div>
   )
-}
-
-/**
- * 押されたEnterが「日本語入力の変換を確定するEnter」かどうか（2026-08-02 オーナー実機FB
- * 「エンターで行が増えて注力しづらい」の対策）。変換中のEnterで材料行・タグを作ってしまうと、
- * 変換を確定しただけのつもりが勝手に行が増える。
- * isComposing が本命で、keyCode 229 は compositionend が keydown より先に来る環境向けの保険
- */
-function isImeConfirmKey(e: React.KeyboardEvent<HTMLInputElement>): boolean {
-  return e.nativeEvent.isComposing || e.keyCode === 229
 }
 
 /** 配列の要素を上下に入れ替える */

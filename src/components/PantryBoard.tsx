@@ -21,6 +21,7 @@ import {
 import type { PantryGroupKey, PantryLevel } from '../db/types'
 import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
 import { splitValues } from '../logic/textSplit'
+import { isImeConfirmKey } from '../logic/imeKey'
 import { ja } from '../i18n/ja'
 import Toast from './Toast'
 
@@ -343,7 +344,8 @@ export default function PantryBoard() {
                   value={noteDraft}
                   onChange={(e) => setNoteDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
+                    // 変換確定のEnterでは保存しない(2026-08-09 便EI。レシピ登録画面と同じガード)
+                    if (e.key === 'Enter' && !isImeConfirmKey(e)) {
                       e.preventDefault()
                       void saveNote()
                     }
@@ -375,7 +377,9 @@ export default function PantryBoard() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            // 変換確定のEnterでは食材を足さない(2026-08-09 便EI。レシピ登録画面と同じガード。
+            // 「にんじん」を変換した時点で登録されてしまうのを止める)
+            if (e.key === 'Enter' && !isImeConfirmKey(e)) {
               e.preventDefault()
               void add()
             }

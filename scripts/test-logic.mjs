@@ -326,6 +326,7 @@ import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceC
 import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { isStandaloneDisplay } from '../src/logic/standalone.ts'
+import { isImeConfirmKey } from '../src/logic/imeKey.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -12533,6 +12534,36 @@ eq(
   eq('EI-1 リンク名が手順ページと同じ表記', ja.settings.installPageLink, 'ホーム画面への追加方法')
   eq('EI-1 案内文がiOSのデータ分離に触れている', ja.settings.installPageNote.includes('別々に保存されます'), true)
   eq('EI-1 案内文が「使い始める前に」を伝えている', ja.settings.installPageNote.includes('使い始める前に'), true)
+}
+
+// ---------- 便EI-2: 日本語入力の変換確定Enterのガード ----------
+// 2026-08-02にレシピ登録画面で直した「変換確定のEnterで行/タグが増える」を、
+// ChipInput・在庫ボード・設定のNG食材でも同じ判定で止める(logic/imeKey.tsへ集約)。
+// isComposing が本命・keyCode 229 は compositionend が先に来る環境向けの保険。
+{
+  const key = (isComposing, keyCode = 13) => ({ nativeEvent: { isComposing }, keyCode })
+  eq('EI-2 変換中のEnter(isComposing=true)は確定用と判定', isImeConfirmKey(key(true)), true)
+  eq('EI-2 確定後のEnterは通常のEnter', isImeConfirmKey(key(false)), false)
+  eq('EI-2 keyCode 229(compositionendが先に来る環境)も確定用と判定', isImeConfirmKey(key(false, 229)), true)
+  eq('EI-2 変換中かつ229でも確定用', isImeConfirmKey(key(true, 229)), true)
+  // Enterで確定する入力欄すべてに当てているか(適用漏れの再発防止)。
+  // 「e.key === 'Enter'」で始まる分岐が isImeConfirmKey で守られていることをソースで機械検査する。
+  // 対象はテキスト入力欄のEnterだけで、ボタン相当要素のEnter/Space(role=button)は対象外
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const imeGuardTargets = [
+    'src/components/ChipInput.tsx',
+    'src/components/PantryBoard.tsx',
+    'src/pages/SettingsPage.tsx',
+    'src/pages/RecipeFormPage.tsx',
+  ]
+  for (const rel of imeGuardTargets) {
+    const src = readFileSync(path.join(appRoot, rel), 'utf-8')
+    const enterBranches = src.match(/e\.key === 'Enter'[^\n]*/g) ?? []
+    const unguarded = enterBranches.filter(
+      (line) => !line.includes('isImeConfirmKey') && !line.includes("e.key === ' '"),
+    )
+    eq(`EI-2 ${rel} に未ガードのEnter分岐が無い`, unguarded, [])
+  }
 }
 
 // ---------- 結果 ----------
