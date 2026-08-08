@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Camera, Image as ImageIcon, Minus, Plus } from 'lucide-react'
+import { X, Camera, Image as ImageIcon, Minus, Plus, RotateCw } from 'lucide-react'
 import { ja } from '../i18n/ja'
-import { resizePhoto } from '../logic/image'
+import { resizePhoto, rotatePhoto } from '../logic/image'
 import { usePhotoUrl } from './usePhotoUrl'
 
 // 記録写真は長辺1280px・JPEG品質0.8に圧縮する（docs/20 §4。レシピ写真本体の
@@ -71,6 +71,9 @@ export default function CookedLogModal({
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const albumInputRef = useRef<HTMLInputElement>(null)
   const [photoError, setPhotoError] = useState('')
+  // 写真の回転(2026-08-09 便EN)。記録の編集フォーム(RecipeDetailPage)と同じ操作を、
+  // 撮った直後のこの窓でも使えるようにする（向きを直してから記録できる）
+  const [rotating, setRotating] = useState(false)
   const photoUrl = usePhotoUrl(photo)
 
   useEffect(() => {
@@ -91,6 +94,20 @@ export default function CookedLogModal({
       setPhotoError('')
     } catch {
       setPhotoError(ja.form.photoError)
+    }
+  }
+
+  /** 時計回りに90度回す。4回押せば元の向きに戻る（2026-08-09 便EN・オーナー要望） */
+  const rotateCurrentPhoto = async () => {
+    if (!photo || rotating) return
+    setRotating(true)
+    try {
+      onPhotoChange(await rotatePhoto(photo, 1, LOG_PHOTO_QUALITY))
+      setPhotoError('')
+    } catch {
+      setPhotoError(ja.form.photoError)
+    } finally {
+      setRotating(false)
     }
   }
 
@@ -215,13 +232,25 @@ export default function CookedLogModal({
             </button>
           </div>
           {photo && (
-            <button
-              type="button"
-              onClick={() => onPhotoChange(undefined)}
-              className="mt-2 text-sm text-warning underline"
-            >
-              {ja.detail.cookedLogPhotoRemove}
-            </button>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+              {/* 向きを直してから記録できるようにする(2026-08-09 便EN)。押すたびに時計回りに90度 */}
+              <button
+                type="button"
+                onClick={() => void rotateCurrentPhoto()}
+                disabled={rotating}
+                className="inline-flex items-center gap-1 text-sm font-bold text-accent-ink disabled:opacity-40"
+              >
+                <RotateCw size={16} aria-hidden />
+                {rotating ? ja.detail.cookedLogPhotoRotating : ja.detail.cookedLogPhotoRotate}
+              </button>
+              <button
+                type="button"
+                onClick={() => onPhotoChange(undefined)}
+                className="text-sm text-warning underline"
+              >
+                {ja.detail.cookedLogPhotoRemove}
+              </button>
+            </div>
           )}
           {photoError && <p className="mt-1 text-sm text-warning">{photoError}</p>}
         </div>

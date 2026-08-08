@@ -10,6 +10,7 @@ import {
 } from '../src/logic/amount.ts'
 import { leadingRangeAmount } from '../src/logic/amount.ts'
 import { isHttpUrl } from '../src/logic/url.ts'
+import { normalizeQuarterTurns, rotatedSize } from '../src/logic/image.ts'
 import {
   parseRecipeText,
   splitQuantity,
@@ -13068,6 +13069,21 @@ eq(
       ja.nutritionBalance.dayTitleMixed.includes('献立'),
     true,
   )
+}
+
+// ---------- 便EN: 記録写真の回転(2026-08-09 オーナー要望「記録した写真を回転させることは可能?」) ----------
+// 「4回押すと元の向きに戻る」ことと、90度・270度で縦横が入れ替わることを固定する。
+// 実際の描画(canvas)はブラウザ側なのでここでは扱わず、向きと大きさの計算だけを見張る。
+{
+  eq('EN-ROT 1回押すと90度(1/4回転)', normalizeQuarterTurns(1), 1)
+  eq('EN-ROT 4回押すと元の向きに戻る', normalizeQuarterTurns(4), 0)
+  eq('EN-ROT 5回押すと1回押したのと同じ', normalizeQuarterTurns(5), 1)
+  eq('EN-ROT 8回押しても元の向き', normalizeQuarterTurns(8), 0)
+  eq('EN-ROT 左に1回(-1)は右に3回と同じ', normalizeQuarterTurns(-1), 3)
+  eq('EN-ROT 90度は縦横が入れ替わる', rotatedSize(1280, 960, 1), { width: 960, height: 1280 })
+  eq('EN-ROT 270度も縦横が入れ替わる', rotatedSize(1280, 960, 3), { width: 960, height: 1280 })
+  eq('EN-ROT 180度は縦横そのまま', rotatedSize(1280, 960, 2), { width: 1280, height: 960 })
+  eq('EN-ROT 4回で元の大きさに戻る', rotatedSize(1280, 960, 4), { width: 1280, height: 960 })
 }
 
 // ---------- 結果 ----------

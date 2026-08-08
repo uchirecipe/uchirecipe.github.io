@@ -2437,6 +2437,16 @@ export const ja = {
     cookedPhotoLabel: '写真（任意）',
     cookedPhotoView: '写真を拡大表示',
     cookedLogPhotoRemove: 'この記録の写真を削除',
+    /**
+     * 写真の回転（2026-08-09 便EN・オーナー要望「記録した写真を回転させることは可能?」）。
+     * 押すたびに時計回りに90度回る＝4回押すと元の向きに戻る。向きの情報が付いていない写真
+     * （貼り付け・古い端末で撮ったもの）はアプリ側で自動では直せないため、本人が直せるようにする。
+     */
+    cookedLogPhotoRotate: '写真を右に90度回す',
+    /** 回したあと、まだ保存していないあいだだけ出す（回しっぱなしで閉じると元の向きに戻るため） */
+    cookedLogPhotoRotateUnsaved: '回した向きは「保存する」を押すと残ります',
+    /** 回している最中（再読み込みのあいだ）だけボタンに出す */
+    cookedLogPhotoRotating: '回しています',
     cookedSave: '記録する',
     cookedRecordedToast: '作った記録をつけました',
     cookedCancel: 'やめる',
