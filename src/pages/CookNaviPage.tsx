@@ -30,7 +30,7 @@ import {
 import { useTimers } from '../components/TimerProvider'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
-import { buildCookTimeline, hasLaterHandsOnStep, type TimelineItem } from '../logic/cookNavi'
+import { buildCookPlan, hasLaterHandsOnStep, type TimelineItem } from '../logic/cookNavi'
 import {
   recipeIngredientList,
   stepIngredientAmounts,
@@ -172,6 +172,13 @@ function TimelineCard({
           </div>
           {showFillHint && (
             <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitFillHint}</p>
+          )}
+          {/* 手順に時間が書かれていない待ち工程（調理法から当てた分数）はその旨を添える。
+              書いてある分数と同じ顔で出さない（2026-08-08 便ED・docs/68 打ち手#1） */}
+          {item.waitEstimated && (
+            <p data-testid="navi-wait-estimated" className="mt-1 text-xs text-ink-muted">
+              {ja.cookNavi.waitEstimatedNote}
+            </p>
           )}
         </div>
       )}
@@ -408,10 +415,16 @@ export default function CookNaviPage() {
     [selectedIds, recipeById],
   )
 
+  /**
+   * 段取り。並行の余地が無い（1品ずつ作るのとほとんど変わらない）ときは、
+   * 並行に組まず1品ずつ作る順番を出して、待ち時間が見つからなかったことを画面に書く
+   * （2026-08-08 便ED・docs/68 打ち手#4）。
+   */
   const timeline = useMemo(
-    () => (showTimeline && selectedRecipes.length >= 2 ? buildCookTimeline(selectedRecipes) : null),
+    () => (showTimeline && selectedRecipes.length >= 2 ? buildCookPlan(selectedRecipes) : null),
     [showTimeline, selectedRecipes],
   )
+  const isSequential = timeline?.mode === 'sequential'
 
   /**
    * 各レシピを何人分として扱うか（2026-08-08 便EB）。分量は「作る量」なので、
@@ -634,8 +647,29 @@ export default function CookNaviPage() {
                         {ja.cookNavi.totalEstimate.replace('{n}', String(timeline.totalMinutes))}
                       </p>
                       <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.totalNote}</p>
-                      <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.orderNote}</p>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        {isSequential ? ja.cookNavi.sequentialOrderNote : ja.cookNavi.orderNote}
+                      </p>
                     </div>
+
+                    {/* 並行の余地が無かったときの説明（2026-08-08 便ED・docs/68 打ち手#4）。
+                        縮んでいないのに縮んだように見せないため、理由と次の一手を書く */}
+                    {isSequential && (
+                      <div
+                        data-testid="navi-no-parallel"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                      >
+                        <p className="ja-phrase font-bold">
+                          {ja.cookNavi.noParallelNote.replace(
+                            '{n}',
+                            String(timeline.recipes.length),
+                          )}
+                        </p>
+                        <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
+                          {ja.cookNavi.noParallelHint}
+                        </p>
+                      </div>
+                    )}
 
                     {/* 材料一覧の入口。調理を始める前に先に計量したい人がここから開く */}
                     <IngredientsPanel recipes={ingredientsByRecipe} />
@@ -646,7 +680,9 @@ export default function CookNaviPage() {
                           key={`${item.recipeId}-${item.stepIndex}`}
                           item={item}
                           ingredients={stepIngredientsByKey.get(`${item.recipeId}-${item.stepIndex}`) ?? []}
-                          showFillHint={hasLaterHandsOnStep(timeline.items, index)}
+                          /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
+                             （次の手順は同じ品の続きで、待ち終わってからやる作業のため） */
+                          showFillHint={!isSequential && hasLaterHandsOnStep(timeline.items, index)}
                           highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
                           onStartTimer={startStepTimer}
                         />
