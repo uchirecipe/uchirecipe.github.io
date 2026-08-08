@@ -139,9 +139,13 @@ import {
   buildPlanSteps,
   isSoakWait,
   recipeServeTemp,
+  estimateActiveMinutes,
+  waitUrgency,
+  waitOverrunAllowance,
+  splitBoilWaterClause,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
-import { parseCookNaviSession } from '../src/logic/cookNaviSession.ts'
+import { parseCookNaviSession, reconcileSelectedIds } from '../src/logic/cookNaviSession.ts'
 import {
   stepIngredientAmounts,
   recipeIngredientList,
@@ -4343,10 +4347,12 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('ナビ湯沸かし: 足した工程は手順番号を持たない', boiled.stepNumber, 0)
   eq('ナビ湯沸かし: 足した工程には「目安です」の注記を重ねない（印は1つ）', boiled.waitEstimated, false)
   // すでに湯を沸かす手順があるレシピには足さない
+  // 2026-08-09 便EH: 同じ手順の中に湯沸かしが書かれている場合は「足さない」ではなく
+  // 「その部分だけ前の工程に切り出す」に変わった（沸かし始めからの時間を段取りに乗せるため）
   eq(
-    'ナビ湯沸かし: 「鍋に湯を沸かし…ゆでる」には足さない',
-    buildPlanSteps([{ text: '鍋にたっぷりの湯を沸かし、ほうれん草をゆでる' }]).length,
-    1,
+    'ナビ湯沸かし: 「鍋に湯を沸かし…ゆでる」は湯沸かしだけを切り出す',
+    buildPlanSteps([{ text: '鍋にたっぷりの湯を沸かし、ほうれん草をゆでる' }]).map((p) => p.step.text),
+    ['鍋にたっぷりの湯を沸かす', 'ほうれん草をゆでる'],
   )
   eq(
     'ナビ湯沸かし: 前の手順で沸かしていれば足さない',
@@ -4433,6 +4439,166 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   ])
   eq('ナビ完成順: 1品ずつのときも冷やす品が先', seq.items[0].recipeTitle, 'トマトサラダ')
   eq('ナビ完成順: 1品ずつのときも熱々の品が最後', seq.items[seq.items.length - 1].recipeTitle, '野菜炒め')
+}
+
+// ---------- 2026-08-09 便EH・オーナー実機フィードバック
+// (1)並行調理中に1品だけ「作った！」したときの選択の整合
+// (2)待ち時間に詰め込みすぎない  (3)切る工程をレシピをまたいで隣接させる
+// (4)手順に埋もれた「湯を沸かす」を段取り上で分離  (5)手作業の所要時間の見積り ----------
+{
+  const recipe = (id, title, steps) => ({ id, title, steps })
+  const t = (text, minutes) => (minutes == null ? { text } : { text, minutes })
+
+  // ---- (1) 1品だけ「作った！」したときに、覚えていた選択から確実に外れる ----
+  // 起きていた不具合: 作った記録が付いた品は候補一覧から消えるので画面から外せず、
+  // 段取りと「まとめて作った！」の対象にだけ残り続け、記録が二重に付いていた
+  eq(
+    'ナビ選択整合: 今日の献立から消えた品（作った記録が付いた品）は選択から外れる',
+    reconcileSelectedIds([1, 2, 3], [1, 3]),
+    [1, 3],
+  )
+  eq('ナビ選択整合: 残る品の順番（＝色の順）は変えない', reconcileSelectedIds([3, 1, 2], [1, 2, 3]), [3, 1, 2])
+  eq('ナビ選択整合: 全部消えたら空になる', reconcileSelectedIds([1, 2], []), [])
+  eq('ナビ選択整合: 変化が無ければそのまま', reconcileSelectedIds([1, 2], [1, 2, 5]), [1, 2])
+
+  // ---- (5) 手作業の所要時間の見積り ----
+  eq('ナビ所要: 手順に分数があればそれを使う', estimateActiveMinutes(t('鶏肉を焼く', 7)), {
+    minutes: 7,
+    estimated: false,
+  })
+  eq('ナビ所要: 短い手順の「3分炒める」は本文の3分をそのまま使う', estimateActiveMinutes(t('強火で3分炒める')), {
+    minutes: 3,
+    estimated: false,
+  })
+  eq('ナビ所要: 盛り付けは2分（一律4分をやめた）', estimateActiveMinutes(t('器に盛る')).minutes, 2)
+  eq('ナビ所要: 切る工程は4分', estimateActiveMinutes(t('玉ねぎをみじん切りにする')).minutes, 4)
+  eq('ナビ所要: 炒める工程は5分', estimateActiveMinutes(t('ひき肉を炒める')).minutes, 5)
+  eq('ナビ所要: 「鍋に水を入れて火にかける」は準備動作で2分', estimateActiveMinutes(t('鍋に水とだしの素を入れて火にかける。')).minutes, 2)
+  eq('ナビ所要: 見積りには印が付く', estimateActiveMinutes(t('器に盛る')).estimated, true)
+  // 1段落まるごとが1手順になった取り込みレシピ（診断 docs/68 3-3）は、長さぶん上乗せする
+  const paragraph = t(
+    'なすを乱切りにして水に5分さらし、水気をふきます。フライパンにサラダ油を熱してなすを入れ、しんなりするまで3分炒めます。豚ひき肉を加えてほぐしながら炒め、色が変わったらしょうゆとみりんを加えて全体にからめます。汁気がなくなったら火を止めて器に盛ります。',
+  )
+  eq('ナビ所要: 1段落まるごとの手順を4分と数えない（長さぶん上乗せする）', estimateActiveMinutes(paragraph).minutes, 12)
+
+  // ---- 待ちの「手を戻す締め切り」の厳しさ ----
+  eq('ナビ締め切り: ゆでるは時間どおり（超過を許さない）', waitUrgency(t('にんじんを2分茹でる')), 'onTime')
+  eq('ナビ締め切り: レンジは時間どおり', waitUrgency(t('600Wで3分加熱する')), 'onTime')
+  eq('ナビ締め切り: 煮込みは少しの超過を許す', waitUrgency(t('弱火で15分煮る')), 'simmer')
+  eq('ナビ締め切り: 漬け込みは超過を気にしない', waitUrgency(t('冷蔵庫で30分漬ける')), 'relaxed')
+  eq('ナビ締め切り: 「火を止めてそのまま冷ます」は冷ますが主役', waitUrgency(t('煮汁がなくなったら火を止め、そのまま冷ます')), 'relaxed')
+  eq('ナビ締め切り: ゆでるの猶予は0分', waitOverrunAllowance(t('にんじんを2分茹でる'), 2), 0)
+  eq('ナビ締め切り: 15分煮るの猶予は3分（2割・上限5分）', waitOverrunAllowance(t('弱火で15分煮る'), 15), 3)
+  eq('ナビ締め切り: 60分煮るの猶予は上限の5分', waitOverrunAllowance(t('弱火で60分煮込む'), 60), 5)
+  eq('ナビ締め切り: 漬け込みの猶予は無制限', waitOverrunAllowance(t('冷蔵庫で30分漬ける'), 30), Infinity)
+
+  // ---- (2) 待ち時間に詰め込みすぎない（オーナー実機報告の再現ケース） ----
+  // 報告: 「茹で時間＝待ち時間4分想定の手順から、次の手順でザルにあげるまでに、
+  // オムライスの鶏肉炒め＋玉ねぎしんなり＋ご飯ケチャップ＋皿に盛り付けまで入っている。無理。不可能」
+  const packed = buildCookTimeline([
+    recipe(1, 'にんじんのナムル', [
+      t('にんじんは細切りにする。'),
+      t('鍋にたっぷりの湯を沸かし、にんじんを4分茹でて冷水にとる。'),
+      t('ごま油と塩で和える。'),
+    ]),
+    recipe(2, 'オムライス', [
+      t('鶏肉と玉ねぎを切る。'),
+      t('鶏肉を炒める。'),
+      t('玉ねぎがしんなりするまで炒める。'),
+      t('ご飯を入れてケチャップで炒める。'),
+      t('卵を焼いて包み、皿に盛る。'),
+    ]),
+  ])
+  const boilItem = packed.items.find((it) => it.text.startsWith('にんじんを4分'))
+  eq('ナビ詰め込み: 4分のゆでが待ちとして載る', [boilItem.kind, boilItem.waitMinutes], ['wait', 4])
+  // ゆで上がりまでに差し込まれた手作業の合計が、その4分を越えない
+  const inserted = packed.items.filter(
+    (it) => it.kind === 'active' && it.startMin >= boilItem.startMin && it.startMin < boilItem.endMin,
+  )
+  eq(
+    'ナビ詰め込み: 4分の待ちに入れる手作業の合計は4分まで',
+    inserted.reduce((a, it) => a + it.activeMinutes, 0) <= 4,
+    true,
+  )
+  // ゆで上がったら、その品の次の手順が最優先で来る（ざるに上げるのを後回しにしない）
+  const afterBoil = packed.items.find(
+    (it) => it.recipeTitle === 'にんじんのナムル' && it.startMin >= boilItem.endMin,
+  )
+  eq('ナビ詰め込み: ゆで上がりの直後にその品の続きへ戻る', afterBoil.startMin, boilItem.endMin)
+  // 漬け込みの待ちには上限を掛けない（数分の遅れは料理に影響しないため）
+  const soaked = buildCookTimeline([
+    recipe(1, 'マリネ', [t('鶏肉をマリネ液に入れて冷蔵庫で30分漬ける。'), t('フライパンで焼く。')]),
+    recipe(2, '煮物', [t('大根を切る。'), t('鍋で20分煮る。'), t('器に盛る。')]),
+  ])
+  eq(
+    'ナビ詰め込み: 漬け込み30分の間は今までどおり他の作業を詰められる',
+    soaked.items.filter((it) => it.kind === 'active' && it.startMin < 30).length >= 2,
+    true,
+  )
+
+  // ---- (3) 切る工程をレシピをまたいで隣接させる ----
+  // 報告: 「切る手順がまだ後回しになっている。全部レシピ分カットの流れが自然」
+  const cutting = buildCookTimeline([
+    recipe(1, 'マリネ野菜', [
+      t('マリネ用の野菜を切る。'),
+      t('マリネ液と和える。'),
+      t('冷蔵庫で20分冷やす。'),
+    ]),
+    recipe(2, '鶏の照り焼き', [
+      t('鶏もも肉に切り込みを入れる。'),
+      t('下味だれを混ぜ合わせる。'),
+      t('鶏もも肉にもみ込んで冷蔵庫で20分おく。'),
+      t('皮目から焼く。'),
+    ]),
+    recipe(3, 'オムライス', [
+      t('鶏肉と玉ねぎを切る。'),
+      t('ご飯を炒める。'),
+      t('卵を焼いて包む。'),
+    ]),
+  ])
+  const cutPositions = cutting.items
+    .map((it, i) => (/切る|切り込み/.test(it.text) ? i : -1))
+    .filter((i) => i >= 0)
+  eq('ナビ切る工程: 3品とも切る工程が段取りに載る', cutPositions.length, 3)
+  eq(
+    'ナビ切る工程: 3品の切る工程が途中で分断されずに並ぶ',
+    cutPositions[cutPositions.length - 1] - cutPositions[0],
+    cutPositions.length - 1,
+  )
+
+  // ---- (4) 手順に埋もれた「湯を沸かす」を段取り上で分離する ----
+  // 報告: 「茹でるための湯沸かしが手順にない。もとのレシピでひとくくりにされているが、
+  // 『沸かす』だけ分離できない?」
+  eq('ナビ湯沸かし分離: 読点の直前の「沸かし」で切り、終止形にそろえる', splitBoilWaterClause('鍋にたっぷりの湯を沸かし、にんじんを2分茹でる。'), {
+    boilWater: '鍋にたっぷりの湯を沸かす',
+    rest: 'にんじんを2分茹でる。',
+  })
+  eq('ナビ湯沸かし分離: 「沸騰させて、」も切れる', splitBoilWaterClause('鍋に水を沸騰させて、卵をゆでる。').boilWater, '鍋に水を沸騰させる')
+  eq(
+    'ナビ湯沸かし分離: 別の作業が挟まる書き方は切らない（読める文にならないため）',
+    splitBoilWaterClause('鍋に湯を沸かして塩を入れ、にんじんをゆでる。'),
+    undefined,
+  )
+  eq(
+    'ナビ湯沸かし分離: ゆでる作業が残らない書き方は切らない',
+    splitBoilWaterClause('鍋にたっぷりの湯を沸かし、火を止める。'),
+    undefined,
+  )
+  const separated = buildPlanSteps([
+    t('にんじんは細切りにする。'),
+    t('鍋にたっぷりの湯を沸かし、にんじんを2分茹でる。'),
+  ])
+  eq('ナビ湯沸かし分離: 手順が1つ増える', separated.length, 3)
+  eq('ナビ湯沸かし分離: 湯沸かしが前の工程として入る', [separated[1].step.text, separated[1].step.minutes, separated[1].addedByNavi], ['鍋にたっぷりの湯を沸かす', BOIL_WATER_MINUTES, false || true])
+  eq('ナビ湯沸かし分離: 残りの手順は元の手順番号を保つ', [separated[2].stepNumber, separated[2].step.text], [2, 'にんじんを2分茹でる。'])
+  const separatedPlan = buildCookTimeline([
+    recipe(1, 'ナムル', [t('にんじんは細切りにする。'), t('鍋にたっぷりの湯を沸かし、にんじんを2分茹でる。')]),
+  ])
+  eq(
+    'ナビ湯沸かし分離: 沸かし始めからの5分が待ちとして段取りに乗る',
+    separatedPlan.items.filter((it) => it.kind === 'wait').map((it) => it.waitMinutes),
+    [5, 2],
+  )
 }
 
 // ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。

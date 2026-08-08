@@ -323,8 +323,8 @@ export function classifyStep(step: Step): StepKind {
 }
 
 /**
- * 手作業系で minutes が書かれていない工程に、順番を組むためだけに使う仮の所要時間（分）。
- * 表示はせず、内部の並べ替え計算だけに使う。
+ * 手作業系で minutes が書かれていない工程に当てる、いちばん基本の所要時間（分）。
+ * 作業の種類ごとの見積り（ACTIVE_MINUTES_BY_CATEGORY）が使えないときの土台になる。
  */
 export const DEFAULT_ACTIVE_MINUTES = 4
 
@@ -395,6 +395,133 @@ const CATEGORY_STAGE: Record<StepCategory, number> = {
 
 export function stepStageRank(step: Step): number {
   return CATEGORY_STAGE[stepCategory(step)]
+}
+
+/**
+ * 手作業の所要時間の見積り（2026-08-09 便EH・オーナー実機報告
+ * 「茹で時間＝待ち時間4分想定の手順から、次の手順でザルにあげるまでに、鶏肉炒め＋玉ねぎ＋
+ * ご飯＋盛り付けまで入っている。無理。不可能。余裕を持って時間設定して」）。
+ *
+ * 従来は minutes の無い手作業をすべて一律4分とみなしていた。この見積りは
+ *   - 「器に盛る」まで4分と数える（長すぎる）
+ *   - 1段落まるごとが1手順になった取り込みレシピも4分と数える（短すぎる。診断 docs/68 3-3）
+ * の両方でずれており、**待ち時間に何工程まで入るか**の計算をこの値で行うようになった今は、
+ * ずれがそのまま「物理的に不可能な段取り」になる。
+ *
+ * 見積りの決め方（AIは使わない）:
+ *   1. 手順に分数が書かれていればそれを使う（ユーザーの入力が最優先）
+ *   2. 本文に「3分炒める」のような時間表記があり、手順が短ければそれを使う
+ *   3. どちらも無ければ、作業の種類ごとの目安に、手順文の長さぶんを足す
+ *      （およそ60字ごとに1工程分＝DEFAULT_ACTIVE_MINUTES を足す。長い1手順は作業量も多い）
+ */
+const ACTIVE_MINUTES_BY_CATEGORY: Record<StepCategory, number> = {
+  // 切る: 数種類の野菜を刻む想定
+  cut: 4,
+  // 洗う・水気を取る・筋を取る等の下処理
+  wash: 3,
+  // 混ぜる・和える・下味をもみ込む・成形
+  season: 3,
+  // 炒める・焼く・揚げる（時間が書かれていない加熱は、切る作業より長く見る）
+  heat: 5,
+  // 器に盛る・散らす・添える
+  finish: 2,
+  other: 4,
+}
+
+/**
+ * 加熱の中でも「火にかける」「油を熱する」だけの手順は、手を動かす時間そのものは短い
+ * （そのあと沸くのを待つ時間は、次の手順の待ちとして別に数える）。
+ * 炒める・焼く・揚げる・煮るのように**続けて手を動かす語**が無い加熱は、準備動作として短く見る。
+ */
+const SUSTAINED_COOK_PATTERN = /炒め|炒る|焼|揚げ|煮|蒸/
+const QUICK_HEAT_MINUTES = 2
+
+/** 手順文が何字ごとに「1工程ぶん」の作業量を持つとみなすか */
+const ACTIVE_BULK_CHARS = 60
+/** 長い手順への足し上げの上限（＋4分×4＝最大16分まで） */
+const ACTIVE_BULK_MAX = 5
+
+export interface ActiveMinutesEstimate {
+  minutes: number
+  /** レシピに書かれた時間ではなく、ナビが当てた見積りか（画面ではその旨を添えて出す） */
+  estimated: boolean
+}
+
+export function estimateActiveMinutes(step: Step): ActiveMinutesEstimate {
+  if (step.minutes != null && step.minutes > 0) return { minutes: step.minutes, estimated: false }
+  const text = step.text ?? ''
+  const bulk = Math.max(1, Math.min(ACTIVE_BULK_MAX, Math.ceil(text.length / ACTIVE_BULK_CHARS)))
+  const fromText = resolveStepMinutes(step)
+  // 短い手順に「3分炒める」と書いてあれば、それがその手順の所要時間そのもの
+  if (fromText != null && bulk === 1) return { minutes: fromText, estimated: false }
+  const category = stepCategory(step)
+  // 作業の種類ごとの目安は「1つの動作を書いた短い手順」に当てはまるもの。
+  // 1手順に何段落も書かれているレシピは、最後の動作だけでは作業量が読めないので基本の4分に戻す
+  const base =
+    bulk > 1
+      ? DEFAULT_ACTIVE_MINUTES
+      : category === 'heat' && !SUSTAINED_COOK_PATTERN.test(text)
+        ? QUICK_HEAT_MINUTES
+        : ACTIVE_MINUTES_BY_CATEGORY[category]
+  const guess = base + (bulk - 1) * DEFAULT_ACTIVE_MINUTES
+  // 長い手順は、本文に書かれた時間（その一部の作業の時間）より短くならないようにする
+  return { minutes: Math.max(guess, fromText ?? 0), estimated: true }
+}
+
+/**
+ * 待ちの「手を戻す締め切りの厳しさ」（2026-08-09 便EH）。
+ *
+ * 待ちには性質の違うものがある。
+ *   - onTime  … ゆでる・湯を沸かす・レンジ。**1分の超過でゆですぎ・吹きこぼれ**になる
+ *   - simmer  … 煮る・蒸す・オーブン・グリル。弱火やふたの中で進むので、
+ *               レシピ自体「15〜20分」のように幅で書かれることが多い
+ *   - relaxed … 漬ける・冷やす・寝かせる・もどす・味をなじませる。数分の遅れは料理に影響しない
+ *
+ * この違いを、待ち時間に差し込む手作業の上限（buildCookTimeline）に使う。
+ * 判定は本文の中で**最後に出てきた語**で決める（この画面のほかの位置ルールと同じ考え方）。
+ * 「煮汁がなくなったら火を止め、そのまま冷ます」は冷ますが主役＝relaxed。
+ * どの語にも当たらないときは、いちばん厳しい onTime に倒す（安全側）。
+ */
+export type WaitUrgency = 'onTime' | 'simmer' | 'relaxed'
+
+const ON_TIME_WAIT_PATTERN =
+  /茹で|ゆで|湯がく|ゆがく|レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]|温め|あたため/
+const SIMMER_WAIT_PATTERN =
+  /煮|蒸|オーブン|グリル|トースター|焼き|揚げ|ふたをして|フタをして|蓋をして|火を通|沸か|沸騰/
+const RELAXED_WAIT_PATTERN =
+  /漬|浸|マリネ|寝かせ|寝かし|ねかせ|休ませ|休ます|冷ま|冷や|粗熱|冷蔵庫|なじ|馴染|しみ|染み|発酵|解凍|もどす|もどし|戻す|戻し|さらす|さらし|水切り|水きり|炊|置い|置く|おく|おき/
+
+export function waitUrgency(step: Step): WaitUrgency {
+  const text = maskNonWaitNouns(step.text)
+  const onTime = lastEndOfPatterns(text, [ON_TIME_WAIT_PATTERN])
+  const simmer = lastEndOfPatterns(text, [SIMMER_WAIT_PATTERN])
+  const relaxed = lastEndOfPatterns(text, [RELAXED_WAIT_PATTERN])
+  if (onTime === -1 && simmer === -1 && relaxed === -1) return 'onTime'
+  if (onTime >= simmer && onTime >= relaxed) return 'onTime'
+  if (simmer >= relaxed) return 'simmer'
+  return 'relaxed'
+}
+
+/**
+ * 煮込み等で、締め切りを何分まで越えてよいか（待ち時間の2割・上限5分）。
+ * 15分煮るなら3分、5分煮るなら1分まで。**ゆでる・レンジには一切与えない**。
+ */
+const SIMMER_OVERRUN_RATIO = 0.2
+const SIMMER_OVERRUN_MAX = 5
+
+/**
+ * その待ちを仕掛けたあと、**遅くともいつまでに手を戻さないといけないか**（待ち終了からの猶予・分）。
+ * relaxed は上限なし（Infinity）。
+ */
+export function waitOverrunAllowance(step: Step, waitMinutes: number): number {
+  switch (waitUrgency(step)) {
+    case 'onTime':
+      return 0
+    case 'simmer':
+      return Math.min(SIMMER_OVERRUN_MAX, Math.floor(waitMinutes * SIMMER_OVERRUN_RATIO))
+    default:
+      return Number.POSITIVE_INFINITY
+  }
 }
 
 /**
@@ -515,11 +642,57 @@ export interface PlanStep {
 }
 
 /**
- * レシピの手順を、段取りに載せる形に展開する（必要なら「湯を沸かす」を1つ差し込む）。
+ * 「鍋にたっぷりの湯を沸かし、にんじんを2分茹でます。」のように、**湯沸かしとゆでる作業が
+ * 1つの手順にまとまっている**ときの切れ目を探す（2026-08-09 便EH・オーナー実機報告
+ * 「茹でるための湯沸かしが手順にない。茹で時間のみで待ち時間4分だが、沸かし始めから
+ * 考えたらもっとかかる。もとのレシピでひとくくりにされているが、『沸かす』だけ分離できない?」）。
  *
- * 差し込むのは次を全部満たすときだけで、1レシピにつき1回まで（鍋を何度も沸かす想定はしない）:
- *   - ゆでる工程がある
- *   - その工程までのどこにも「沸」の字が無い（湯を沸かす手順が書かれていない）
+ * 切り出すのは、湯を沸かす言い方が**読点・句点の直前**に来ている場合だけにする。
+ * 「湯を沸かして塩を入れ、…」のように別の作業が挟まっているものは切らない
+ * （切ると読める文にならないため。その場合は従来どおり1手順のまま扱う）。
+ *
+ * **レシピのデータは書き換えない**。段取りに載せるときの見え方だけを分ける。
+ */
+const BOIL_WATER_CLAUSE = /(沸かして|沸かし|沸かす|沸騰させて|沸騰させ)([、。，,])/
+/** 切り出した前半を、単独の手順として読める形にそろえる（連用形→終止形） */
+const BOIL_WATER_PLAIN_FORM: [RegExp, string][] = [
+  [/沸かして$/, '沸かす'],
+  [/沸かし$/, '沸かす'],
+  [/沸騰させて$/, '沸騰させる'],
+  [/沸騰させ$/, '沸騰させる'],
+]
+
+export function splitBoilWaterClause(
+  text: string,
+): { boilWater: string; rest: string } | undefined {
+  const m = BOIL_WATER_CLAUSE.exec(text)
+  if (!m) return undefined
+  const head = text.slice(0, m.index + m[1].length).trim()
+  const rest = text.slice(m.index + m[0].length).trim()
+  if (!head || !rest) return undefined
+  // 切り出したあとの手順にゆでる作業が残っていること（作業そのものを消してしまわない）
+  const maskedRest = maskNonWaitNouns(rest).replace(BOILED_ALREADY_PATTERN, (x) =>
+    '＊'.repeat(x.length),
+  )
+  if (!BOIL_STEP_PATTERN.test(maskedRest)) return undefined
+  let boilWater = head
+  for (const [pattern, replacement] of BOIL_WATER_PLAIN_FORM) {
+    if (pattern.test(boilWater)) {
+      boilWater = boilWater.replace(pattern, replacement)
+      break
+    }
+  }
+  return { boilWater, rest }
+}
+
+/**
+ * レシピの手順を、段取りに載せる形に展開する（必要なら「湯を沸かす」を1つ足す）。
+ *
+ * 1レシピにつき1回まで（鍋を何度も沸かす想定はしない）。次の2通りがある:
+ *   - ゆでる工程はあるが湯沸かしがどこにも書かれていない → 「湯を沸かす」を直前に差し込む
+ *   - 湯沸かしがゆでる工程と**同じ手順の中に**書かれている → その部分だけを前の工程に切り出す
+ *     （2026-08-09 便EH。沸かし始めからの時間が段取りに乗らず、待ちが短く出ていた）
+ * 前の手順ですでに湯を沸かしているレシピには何もしない。
  */
 export function buildPlanSteps(steps: readonly Step[]): PlanStep[] {
   const plain = steps.map((s, i) => ({
@@ -533,15 +706,25 @@ export function buildPlanSteps(steps: readonly Step[]): PlanStep[] {
   )
   const boilAt = masked.findIndex((t) => BOIL_STEP_PATTERN.test(t))
   if (boilAt === -1) return plain
-  // その工程までに湯沸かしが書かれていれば足さない（同じ手順の中に書かれている場合も含む）
-  if (masked.slice(0, boilAt + 1).some((t) => BOIL_WATER_MENTION.test(t))) return plain
-  const added: PlanStep = {
-    step: { text: ja.cookNavi.addedBoilWaterStep, minutes: BOIL_WATER_MINUTES },
+  // 前の手順ですでに湯を沸かしていれば何もしない
+  if (masked.slice(0, boilAt).some((t) => BOIL_WATER_MENTION.test(t))) return plain
+  const addedAt = (text: string): PlanStep => ({
+    step: { text, minutes: BOIL_WATER_MINUTES },
     stepIndex: -1,
     stepNumber: 0,
     addedByNavi: true,
+  })
+  if (BOIL_WATER_MENTION.test(masked[boilAt])) {
+    // 同じ手順の中に湯沸かしが書かれている＝そこだけを前の工程として切り出す
+    const split = splitBoilWaterClause(steps[boilAt].text)
+    if (!split) return plain
+    const rest: PlanStep = {
+      ...plain[boilAt],
+      step: { ...steps[boilAt], text: split.rest },
+    }
+    return [...plain.slice(0, boilAt), addedAt(split.boilWater), rest, ...plain.slice(boilAt + 1)]
   }
-  return [...plain.slice(0, boilAt), added, ...plain.slice(boilAt)]
+  return [...plain.slice(0, boilAt), addedAt(ja.cookNavi.addedBoilWaterStep), ...plain.slice(boilAt)]
 }
 
 /** レシピの色分け用パレット添字（0,1,2）。CookNaviPage 側で CSS 変数のチップ色に対応づける */
@@ -576,6 +759,14 @@ export interface TimelineItem {
    * 画面では目安であることを添えて出す（書いてある分数と同じ顔で出さない）。
    */
   waitEstimated: boolean
+  /**
+   * 手作業のときの目安の所要時間（分）。待ち系は0（2026-08-09 便EH・オーナー指示
+   * 「炒めたりする工程でも単品レシピの手順では目安時間が書いてあるのに並行ではない。
+   * 手順カードの右下（完成ある場合は上）に目安時間入れて」）。
+   */
+  activeMinutes: number
+  /** その所要時間が、レシピに書かれた時間ではなくナビの見積りか */
+  activeEstimated: boolean
   /** 開始からの目安の開始位置（分）。おおよその並び計算用 */
   startMin: number
   /** 目安の終了位置（分） */
@@ -606,17 +797,28 @@ interface Job {
     waitMinutes: number
     waitEstimated: boolean
     activeMinutes: number
+    activeEstimated: boolean
     category: StepCategory
     stageRank: number
     /** 切る工程の中での順番（0=野菜など / 1=生の肉・魚。切る工程どうしのときだけ使う） */
     cutRank: number
     /** 漬け込み・寝かせの待ちか（先に切る工程を済ませたい待ち。2026-08-08 便EG） */
     soakWait: boolean
+    /**
+     * その待ちを仕掛けたあと、遅くとも何分後までに手を戻さないといけないか（2026-08-09 便EH）。
+     * ゆでる=待ち時間ちょうど／煮込み=待ち時間+2割／漬け込み・冷やす=上限なし
+     */
+    attendWithin: number
   }[]
   /** 次に着手する手順の添字 */
   ptr: number
   /** 次の手順を始められるようになる時刻（前の手順の終了 or 待ちの完了） */
   readyAt: number
+  /**
+   * 「この時刻までに手を戻さないといけない」待ちを仕掛けている状態（0＝無し。2026-08-09 便EH）。
+   * ゆで上がり・煮上がりの時刻。ここを過ぎて別の作業を続ける段取りは物理的に成立しない。
+   */
+  attendUntil: number
 }
 
 function buildJobs(recipes: Recipe[]): Job[] {
@@ -629,6 +831,7 @@ function buildJobs(recipes: Recipe[]): Job[] {
       serveRank: serveTempRank(r),
       ptr: 0,
       readyAt: 0,
+      attendUntil: 0,
       steps: buildPlanSteps(r.steps).map(({ step: s, stepIndex, stepNumber, addedByNavi }) => {
         const kind = classifyStep(s)
         // 待ちの分数は明示 minutes ＞本文の時間表記＞調理法ごとの既定分数の順で解決する
@@ -636,12 +839,9 @@ function buildJobs(recipes: Recipe[]): Job[] {
         // 順序計算は従来どおり明示 minutes か DEFAULT_ACTIVE_MINUTES を使う（推定は待ちの認識
         // だけに使い、手作業の所要時間は変えない＝順序への影響を待ち認識の改善だけに限定する）
         const waitMinutes = kind === 'wait' ? (resolveWaitMinutes(s) ?? 0) : 0
-        const activeMinutes =
-          kind === 'active'
-            ? s.minutes != null && s.minutes > 0
-              ? s.minutes
-              : DEFAULT_ACTIVE_MINUTES
-            : 0
+        // 手作業の所要時間は、作業の種類と手順文の長さから見積る（2026-08-09 便EH）。
+        // 従来の一律4分では、待ち時間に入る工程数の計算がそのままずれていた
+        const active = estimateActiveMinutes(s)
         return {
           stepIndex,
           stepNumber,
@@ -654,11 +854,14 @@ function buildJobs(recipes: Recipe[]): Job[] {
           // 手順に時間が書かれておらず、調理法から当てた分数で待ちにした手順
           // （ナビが足した工程は「ナビが追加」の印だけを出す＝印は1つにする）
           waitEstimated: kind === 'wait' && !addedByNavi && resolveStepMinutes(s) == null,
-          activeMinutes,
+          activeMinutes: kind === 'active' ? active.minutes : 0,
+          activeEstimated: kind === 'active' && active.estimated,
           category: stepCategory(s),
           stageRank: stepStageRank(s),
           cutRank: cutOrderRank(s),
           soakWait: kind === 'wait' && isSoakWait(s),
+          attendWithin:
+            kind === 'wait' ? waitMinutes + waitOverrunAllowance(s, waitMinutes) : 0,
         }
       }),
     }))
@@ -696,19 +899,32 @@ function remainingSpan(job: Job): number {
  *   - どれも前の手順待ちで着手できなければ、次に待ちが明ける時刻まで時間を進める
  * レシピ内の手順の順序は必ず保たれる（前の手順が終わるまで次は着手できない）。
  *
+ * **待ち時間に詰め込みすぎない**（2026-08-09 便EH・オーナー実機報告
+ * 「茹で時間＝待ち時間4分想定の手順から、次の手順でザルにあげるまでに…入っている。無理。
+ * 不可能。余裕を持って時間設定して」）。手を戻す締め切りのある待ち（waitUrgency）を
+ * 仕掛けている間は、
+ *   - 差し込む手作業の**見積り時間の合計が、その締め切りを越えないようにする**
+ *     （越える工程は入れず、待ちが明けるまで手を空けておく）
+ *   - 待ちが明けた品の**次の手順を最優先で進める**（ゆで上がりを放置しない）
+ *   - 逆に、**仕掛けても中に入る手作業が1つも無い短い待ちは、先に手作業を片付けてから仕掛ける**
+ *     （4分のゆでを先に始めて4分立ち尽くすより、5分の切る作業を済ませてから湯に入れる）
+ * 漬け込み・冷やすなど数分の遅れが問題にならない待ちには、この上限を掛けない。
+ *
  * 手作業系が複数あるときの選び方（2026-08-08 便EB・オーナー要望「3品全体の流れを整えたい」）。
  * 上から順に見て、決まらなければ次の基準に進む:
- *   1. **完成の順番**（finishBias・2026-08-08 便EG）。その品の最後の手順のときだけ効く。
+ *   1. **明けた待ちの後始末**（attendDue・2026-08-09 便EH）。ゆで上がった品をざるに上げる、
+ *      煮上がった鍋の火を止める、が最優先
+ *   2. **完成の順番**（finishBias・2026-08-08 便EG）。その品の最後の手順のときだけ効く。
  *      冷やす品は先に仕上げて冷蔵庫へ、熱々の品は最後に仕上げる。温度が読めない品は据え置き
- *   2. **残り時間が長いレシピを先に**（remainingSpan）。長く掛かる品を後回しにすると
+ *   3. **切る工程を続ける**（cutRun・2026-08-09 便EH・オーナー実機報告
+ *      「切る手順がまだ後回しになっている。全部レシピ分カットの流れが自然」）。
+ *      直前が“切る”なら、別レシピの“切る”をレシピをまたいで続けて片付ける
+ *   4. **残り時間が長いレシピを先に**（remainingSpan）。長く掛かる品を後回しにすると
  *      全体が伸びるため。待ちを早く仕掛けることにもなる
- *   3. **段階の大枠**（下ごしらえ→加熱→仕上げ）。同じくらい急ぐ品どうしなら、
+ *   5. **段階の大枠**（下ごしらえ→加熱→仕上げ）。同じくらい急ぐ品どうしなら、
  *      切る・洗う・下味などの準備を先に、盛り付けは最後にまわす
- *   4. **直前と同じ種類の作業を続ける**。「野菜を切る工程がバラける」を防ぐため、
- *      直前が“切る”なら別レシピの“切る”を続けて片付ける
- *   5. レシピの選択順（ここまで同点なら並びを安定させるだけ）
- * 2を1の次に置いているのは、流れを整えるために全体の所要時間を延ばさないため
- * （3・4は「2が同点のときだけ」効く）。
+ *   6. **直前と同じ種類の作業を続ける**（切る以外）
+ *   7. レシピの選択順（ここまで同点なら並びを安定させるだけ）
  */
 export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
   const jobs = buildJobs(recipes)
@@ -739,7 +955,22 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       ready = active.filter((j) => j.readyAt <= cookAt)
     }
 
-    // 手作業の選び方（下のコメントの1〜5）。切る工程どうしだけは、まな板の順序（野菜→肉・魚）を先に見る
+    /**
+     * 「この時刻までに手を戻さないといけない」いちばん早い締め切り（2026-08-09 便EH）。
+     * ゆで上がり・煮上がりのうち、まだ手を付けていないものの中でいちばん早い時刻。
+     * 該当が無ければ Infinity（＝上限なし）。
+     */
+    const attendDeadline = jobs.reduce(
+      (min, j) => (j.attendUntil > cookAt ? Math.min(min, j.attendUntil) : min),
+      Number.POSITIVE_INFINITY,
+    )
+    /** その手作業を今から始めても、締め切りまでに手が空くか */
+    const fitsBeforeDeadline = (j: Job) => cookAt + j.steps[j.ptr].activeMinutes <= attendDeadline
+
+    // 手作業の選び方（上のコメントの1〜7）。切る工程どうしだけは、まな板の順序（野菜→肉・魚）を先に見る
+    const attendDue = (j: Job) => (j.attendUntil > 0 && j.readyAt <= cookAt ? 0 : 1)
+    const cutRun = (j: Job) =>
+      lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1
     const sameCat = (j: Job) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
     const pickActive = (candidates: Job[]): Job =>
       candidates.slice().sort((a, b) => {
@@ -749,7 +980,9 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
           return stepA.cutRank - stepB.cutRank
         }
         return (
+          attendDue(a) - attendDue(b) ||
           finishBias(a) - finishBias(b) ||
+          cutRun(a) - cutRun(b) ||
           remainingSpan(b) - remainingSpan(a) ||
           stepA.stageRank - stepB.stageRank ||
           sameCat(a) - sameCat(b) ||
@@ -758,34 +991,66 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       })[0]
 
     const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
+    // 待ちが長いものから仕掛ける（同着はレシピの選択順で安定させる）
+    waits.sort(
+      (a, b) =>
+        b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex,
+    )
+    // 待ちの締め切りに間に合う手作業だけを差し込みの候補にする
+    const fittingActives = ready.filter(
+      (j) => j.steps[j.ptr].kind === 'active' && fitsBeforeDeadline(j),
+    )
+    const shortestActive = fittingActives.reduce(
+      (min, j) => Math.min(min, j.steps[j.ptr].activeMinutes),
+      Number.POSITIVE_INFINITY,
+    )
+    // 締め切りのある待ちが明けた品は、続きの待ちも待たせない
+    // （湯が沸いたらすぐ材料を入れる。沸いた湯を放置する段取りにしない）
+    const dueWaits = waits.filter((j) => j.attendUntil > 0)
+    // 仕掛けても中に入る手作業が1つも無い短い待ちは、先に手作業を片付けてから仕掛ける
+    const waitWouldIdle =
+      waits.length > 0 &&
+      dueWaits.length === 0 &&
+      fittingActives.length > 0 &&
+      waits[0].steps[waits[0].ptr].attendWithin < shortestActive
     let chosen: Job
     // 漬け込み・寝かせを仕掛ける前に、いま着手できる「切る」工程を先に片付ける
     // （2026-08-08 便EG・オーナー実機報告。生の肉・魚を漬けたあとで野菜を切りたくない）。
     // 対象は「いま着手できる待ちが全部、漬け込み・寝かせのとき」だけ＝煮る・ゆでるのような
     // ふつうの待ちは今までどおり最優先で仕掛ける
-    const readyCuts = ready.filter(
-      (j) => j.steps[j.ptr].kind === 'active' && j.steps[j.ptr].category === 'cut',
-    )
+    const readyCuts = fittingActives.filter((j) => j.steps[j.ptr].category === 'cut')
     const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
-    if (waits.length > 0 && !(soakOnly && readyCuts.length > 0)) {
-      // 待ちが長いものから仕掛ける（同着はレシピの選択順で安定させる）
-      waits.sort(
-        (a, b) =>
-          b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex,
-      )
+    if (dueWaits.length > 0) {
+      chosen = dueWaits[0]
+    } else if (waits.length > 0 && !(soakOnly && readyCuts.length > 0) && !waitWouldIdle) {
       chosen = waits[0]
     } else if (soakOnly && readyCuts.length > 0) {
       chosen = pickActive(readyCuts)
+    } else if (fittingActives.length > 0) {
+      // 手作業のみ。上のコメント1〜7の順に見て決める
+      chosen = pickActive(fittingActives)
+    } else if (waits.length > 0) {
+      chosen = waits[0]
     } else {
-      // 手作業のみ。完成の順番→残り時間→段階→同じ種類の作業→選択順、の順に見て決める
-      chosen = pickActive(ready)
+      // 締め切りまでに終わる手作業が1つも無い＝ここは手を空けて待つ（詰め込まない）。
+      // 進める先は「次に何かが起きる時刻」＝手を戻す締め切りと、裏の待ちが明ける時刻の早い方
+      cookAt = active.reduce(
+        (next, j) => (j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
+        attendDeadline,
+      )
+      continue
     }
 
     const step = chosen.steps[chosen.ptr]
     const startMin = cookAt
+    // 前に仕掛けた待ちの後始末はここで済む（締め切りの管理から外す）
+    chosen.attendUntil = 0
     if (step.kind === 'wait') {
       const endMin = startMin + step.waitMinutes
       chosen.readyAt = endMin
+      // 「遅くともこの時刻までに手を戻す」締め切り。上限なしの待ち（漬け込み等）は 0＝管理しない
+      const attendUntil = startMin + step.attendWithin
+      chosen.attendUntil = Number.isFinite(attendUntil) ? attendUntil : 0
       // 待ちは仕掛けたら裏で進むので、料理人（cookAt）はその場で手すきのまま
       items.push(makeItem(items.length + 1, chosen, step, startMin, endMin))
     } else {
@@ -933,6 +1198,8 @@ function makeItem(
     kind: step.kind,
     waitMinutes: step.waitMinutes,
     waitEstimated: step.waitEstimated,
+    activeMinutes: step.activeMinutes,
+    activeEstimated: step.activeEstimated,
     addedByNavi: step.addedByNavi,
     startMin,
     endMin,

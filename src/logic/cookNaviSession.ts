@@ -49,6 +49,30 @@ export function parseCookNaviSession(raw: string | null): CookNaviSession | unde
   }
 }
 
+/**
+ * 覚えている選択を、いま選べる品と突き合わせて整える（2026-08-09 便EH・オーナー実機報告
+ * 「並行調理中に献立タブから1品だけ『作った！』すると、候補からは消えるのに段取りには
+ * 組み込まれたまま。段取りを作るを押しても無反応。選び直しても作った品が残り、削除できない。
+ * まとめて作った！するとその品が再度記録され、記録が2つになる」）。
+ *
+ * 原因は、覚えていた選択（selectedIds）と、いま選べる品（今日の献立から、今日すでに作った品を
+ * 除いたもの）を**一度も突き合わせていなかった**こと。作った記録が付いた品は候補一覧から
+ * 消えるので画面からは外せなくなり、段取りと「まとめて作った！」の対象にだけ残り続けていた。
+ *
+ * ここでは「いま選べる品に無いIDを落とす」だけを行う純粋な関数にして、
+ * 画面・端末内の覚え書きの両方が同じ規則で整えられるようにする。
+ */
+export function reconcileSelectedIds(
+  selectedIds: readonly number[],
+  availableIds: readonly number[],
+): number[] {
+  const available = new Set(availableIds)
+  return selectedIds.filter((id) => available.has(id))
+}
+
+/** 段取りを組める品数（これ未満になったら段取りは出せない） */
+export const COOK_NAVI_MIN_RECIPES = 2
+
 export function loadCookNaviSession(): CookNaviSession | undefined {
   try {
     return parseCookNaviSession(sessionStorage.getItem(COOK_NAVI_SESSION_KEY))

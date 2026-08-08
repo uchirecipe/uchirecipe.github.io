@@ -32,6 +32,8 @@ import {
   buildPlanSteps,
   isSoakWait,
   serveTempRank,
+  estimateActiveMinutes,
+  waitOverrunAllowance,
   WAIT_VERB_PATTERNS,
   DEFAULT_ACTIVE_MINUTES,
 } from '../src/logic/cookNavi.ts'
@@ -337,8 +339,7 @@ function simulateTimeline(recipes, opt) {
         ({ step: s }, i) => {
           const kind = opt.classify(s)
           const waitMinutes = kind === 'wait' ? (opt.waitMinutes(s) ?? 0) : 0
-          const activeMinutes =
-            kind === 'active' ? (s.minutes != null && s.minutes > 0 ? s.minutes : DEFAULT_ACTIVE_MINUTES) : 0
+          const activeMinutes = kind === 'active' ? estimateActiveMinutes(s).minutes : 0
           return {
             i,
             kind,
@@ -348,11 +349,21 @@ function simulateTimeline(recipes, opt) {
             stageRank: stepStageRank(s),
             cutRank: cutOrderRank(s),
             soakWait: kind === 'wait' && isSoakWait(s),
+            // 手を戻す締め切り（2026-08-09 便EH。アプリ本体と同じ規則）
+            attendWithin: kind === 'wait' ? waitMinutes + waitOverrunAllowance(s, waitMinutes) : 0,
             text: s.text,
           }
         },
       )
-      return { colorIndex, steps, ptr: 0, readyAt: 0, title: r.title, serveRank: serveTempRank(r) }
+      return {
+        colorIndex,
+        steps,
+        ptr: 0,
+        readyAt: 0,
+        attendUntil: 0,
+        title: r.title,
+        serveRank: serveTempRank(r),
+      }
     })
 
   const remainingSpan = (j) => {
@@ -373,6 +384,13 @@ function simulateTimeline(recipes, opt) {
       cookAt = Math.min(...active.map((j) => j.readyAt))
       ready = active.filter((j) => j.readyAt <= cookAt)
     }
+    // 手を戻す締め切り（2026-08-09 便EH。アプリ本体と同じ規則）
+    const attendDeadline = jobs.reduce(
+      (min, j) => (j.attendUntil > cookAt ? Math.min(min, j.attendUntil) : min),
+      Number.POSITIVE_INFINITY,
+    )
+    const attendDue = (j) => (j.attendUntil > 0 && j.readyAt <= cookAt ? 0 : 1)
+    const cutRun = (j) => (lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1)
     const sameCat = (j) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
     // 完成の順番（冷やす品は先に・熱々の品は最後に仕上げる）。その品の最後の手順にだけ効かせる
     const finishBias = (j) => (j.ptr === j.steps.length - 1 ? j.serveRank : 1)
@@ -385,7 +403,9 @@ function simulateTimeline(recipes, opt) {
           return stepA.cutRank - stepB.cutRank
         }
         return (
+          attendDue(a) - attendDue(b) ||
           finishBias(a) - finishBias(b) ||
+          cutRun(a) - cutRun(b) ||
           remainingSpan(b) - remainingSpan(a) ||
           stepA.stageRank - stepB.stageRank ||
           sameCat(a) - sameCat(b) ||
@@ -393,24 +413,47 @@ function simulateTimeline(recipes, opt) {
         )
       })[0]
     const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
+    waits.sort((a, b) => b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex)
+    const fittingActives = ready.filter(
+      (j) => j.steps[j.ptr].kind === 'active' && cookAt + j.steps[j.ptr].activeMinutes <= attendDeadline,
+    )
+    const shortestActive = fittingActives.reduce(
+      (min, j) => Math.min(min, j.steps[j.ptr].activeMinutes),
+      Number.POSITIVE_INFINITY,
+    )
+    const dueWaits = waits.filter((j) => j.attendUntil > 0)
+    const waitWouldIdle =
+      waits.length > 0 &&
+      dueWaits.length === 0 &&
+      fittingActives.length > 0 &&
+      waits[0].steps[waits[0].ptr].attendWithin < shortestActive
     // 漬け込み・寝かせの前に、いま着手できる切る工程を先に片付ける（アプリ本体と同じ規則）
-    const readyCuts = ready.filter((j) => j.steps[j.ptr].kind === 'active' && j.steps[j.ptr].category === 'cut')
+    const readyCuts = fittingActives.filter((j) => j.steps[j.ptr].category === 'cut')
     const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
     let chosen
-    if (waits.length > 0 && !(soakOnly && readyCuts.length > 0)) {
-      waits.sort((a, b) => b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex)
+    if (dueWaits.length > 0) {
+      chosen = dueWaits[0]
+    } else if (waits.length > 0 && !(soakOnly && readyCuts.length > 0) && !waitWouldIdle) {
       chosen = waits[0]
     } else if (soakOnly && readyCuts.length > 0) {
       chosen = pickActive(readyCuts)
+    } else if (fittingActives.length > 0) {
+      chosen = pickActive(fittingActives)
+    } else if (waits.length > 0) {
+      chosen = waits[0]
     } else {
-      chosen = pickActive(ready)
+      cookAt = active.reduce((next, j) => (j.readyAt > cookAt ? Math.min(next, j.readyAt) : next), attendDeadline)
+      continue
     }
     const step = chosen.steps[chosen.ptr]
     const startMin = cookAt
+    chosen.attendUntil = 0
     let endMin
     if (step.kind === 'wait') {
       endMin = startMin + step.waitMinutes
       chosen.readyAt = endMin
+      const attendUntil = startMin + step.attendWithin
+      chosen.attendUntil = Number.isFinite(attendUntil) ? attendUntil : 0
     } else {
       endMin = startMin + step.activeMinutes
       cookAt = endMin
