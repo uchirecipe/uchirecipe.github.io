@@ -257,6 +257,7 @@ export default function CookSessionOverlay({
         <div className="min-w-0 flex-1 px-1 text-center">
           <p className="truncate">
             <span
+              data-testid="cook-session-recipe"
               className="inline-block max-w-full truncate rounded-full px-2 py-0.5 text-sm font-bold"
               style={{ backgroundColor: color, color: 'var(--chip-ink)' }}
             >

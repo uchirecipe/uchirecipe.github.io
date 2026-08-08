@@ -659,7 +659,7 @@ export default function CookNaviPage() {
     if (!showTimeline && current) setCurrent(undefined)
   }, [showTimeline, current])
 
-  /** 調理中の位置が段取りのどこか（一覧に戻ったときの「{n}/{t}から続きます」に使う） */
+  /** 調理中の位置が段取りの何番目か（途中でやめるときの確認文に出す件数に使う） */
   const currentIndex = timeline ? findCursorIndex(timeline.items, current) : -1
 
   /**
