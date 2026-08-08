@@ -100,6 +100,7 @@ import {
   chooseBalancedPair,
   PURPOSE_REDRAW_ATTEMPTS,
   isMealSlotLocked,
+  isMealEditBlocked,
   isDayMealLocked,
   planDayLockToggle,
   planSlotLockToggle,
@@ -107,7 +108,13 @@ import {
   planCopyLastWeek,
   planClearMealSlots,
 } from '../logic/mealPlan'
-import type { FillWeekPlan, MealGenre, ProteinSource, SuggestPairResult } from '../logic/mealPlan'
+import type {
+  FillWeekPlan,
+  MealGenre,
+  MealSlotEdit,
+  ProteinSource,
+  SuggestPairResult,
+} from '../logic/mealPlan'
 // 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)。
 // 実効食数・既定の食数の判定も同じ場所に集約してある(2026-08-03 便DK)
 import { clampServings, effectiveMealServings, defaultMealServings } from '../logic/servings'
@@ -618,19 +625,44 @@ const formatNutrient = (key: keyof NutrientTotals, value: number): string => {
 }
 
 /**
- * 「どの日をどちらの基準で数えたか」の1行（便CA・規則2）。過去日=作った記録・今日以降=登録した献立で、
- * 混在する期間は両方の範囲を出す。期間の集計カードと月間サマリー(便CB-1・B-3)で同じ文言を使う。
+ * 「どの日をどちらの基準で数えたか」の1行（便CA・規則2）。
+ * 過去日=作った記録・未来日=登録した献立で、混在する期間は両方の範囲を出す。
+ * 期間の集計カードと月間サマリー(便CB-1・B-3)で同じ文言を使う。
+ *
+ * 2026-08-08 便EA（オーナー指摘）: 今日は「作った分は記録・まだの分は献立」で数えるように直したので、
+ * 今日を含む期間ではその1文を必ず添える（従来は今日が予定側に丸ごと入った文面のままだった）。
  */
-const intakeBasisText = (summary: RangeIntakeSummary): string =>
-  summary.actual.range && summary.plan.range
-    ? ja.mealPlan.rangeBasisBoth
-        .replace('{ps}', formatMonthDay(summary.actual.range.start))
-        .replace('{pe}', formatMonthDay(summary.actual.range.end))
-        .replace('{fs}', formatMonthDay(summary.plan.range.start))
-        .replace('{fe}', formatMonthDay(summary.plan.range.end))
-    : summary.actual.range
-      ? ja.mealPlan.rangeBasisActualOnly
-      : ja.mealPlan.rangeBasisPlanOnly
+const intakeBasisText = (summary: RangeIntakeSummary): string => {
+  const { past, future, includesToday } = summary.basis
+  const lines: string[] = []
+  if (past && future) {
+    lines.push(
+      ja.mealPlan.rangeBasisBoth
+        .replace('{ps}', formatMonthDay(past.start))
+        .replace('{pe}', formatMonthDay(past.end))
+        .replace('{fs}', formatMonthDay(future.start))
+        .replace('{fe}', formatMonthDay(future.end)),
+    )
+  } else if (past) {
+    lines.push(
+      includesToday
+        ? ja.mealPlan.rangeBasisPastRange
+            .replace('{ps}', formatMonthDay(past.start))
+            .replace('{pe}', formatMonthDay(past.end))
+        : ja.mealPlan.rangeBasisActualOnly,
+    )
+  } else if (future) {
+    lines.push(
+      includesToday
+        ? ja.mealPlan.rangeBasisFutureRange
+            .replace('{fs}', formatMonthDay(future.start))
+            .replace('{fe}', formatMonthDay(future.end))
+        : ja.mealPlan.rangeBasisPlanOnly,
+    )
+  }
+  if (includesToday) lines.push(ja.mealPlan.rangeBasisToday)
+  return lines.join('。')
+}
 
 /**
  * 栄養（1人分・8項目）のパネル（2026-07-28 便CAの表示をそのまま部品化）。
@@ -1006,14 +1038,16 @@ function MonthDayCell({
 
   // 栄養／食費モード: その日の1人分の数字を主役にする(写真は敷かない=視認性優先)
   if (mode !== 'photo') {
-    // 7列のセルは375px幅で約46px。「498kcal」は入りきらず途中で切れてしまったため、
-    // 栄養モードのセルは数字だけを出し、単位(kcal)は下の凡例と読み上げ(aria-label)で補う。
-    // 「314円」は収まるので食費モードは単位を付けたまま(数字だけだと金額に見えないため)
+    // 7列のセルは375px幅で約46px。「498kcal」を1行に入れると途中で切れるので、
+    // 数字の下に単位だけを小さく置く(2026-08-08 便EA・オーナー「なんの栄養価かわからない」)。
+    // 項目名(エネルギー)は幅に入らないので、ボタンのすぐ下の凡例と読み上げ(aria-label)が言う
     const cellText = stat
       ? mode === 'nutrition'
         ? Math.round(stat.kcal).toLocaleString()
-        : ja.mealPlan.monthCellYen.replace('{n}', stat.yen.toLocaleString())
+        : stat.yen.toLocaleString()
       : null
+    const cellUnit =
+      mode === 'nutrition' ? ja.mealPlan.monthCellKcalUnit : ja.mealPlan.monthCellYenUnit
     const value = stat
       ? mode === 'nutrition'
         ? ja.mealPlan.monthCellKcal.replace('{n}', Math.round(stat.kcal).toLocaleString())
@@ -1064,11 +1098,14 @@ function MonthDayCell({
         {cellText && (
           <span
             aria-hidden
-            className={`w-full truncate px-0.5 text-center text-[10px] font-bold leading-tight tabular-nums ${
+            className={`flex w-full flex-col items-center px-0.5 ${
               stat?.basis === 'actual' ? 'text-accent-ink' : 'text-ink-muted'
             }`}
           >
-            {cellText}
+            <span className="w-full truncate text-center text-[10px] font-bold leading-tight tabular-nums">
+              {cellText}
+            </span>
+            <span className="text-[8px] leading-none">{cellUnit}</span>
           </span>
         )}
         {noteMark()}
@@ -1564,12 +1601,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     setRangeStart(null)
     setRangeEnd(null)
   }
-  // 月を移動すると選択を無効化する(段階1は「表示中の月のカレンダー内で完結」の仕様のため、
-  // 月をまたいだ範囲を組めないようにする。表示中の月が変われば選び直してもらう)
-  useEffect(() => {
-    setRangeStart(null)
-    setRangeEnd(null)
-  }, [monthAnchor])
+  /* 2026-08-08 便EA(オーナーの質問「手入力で日付変更もできるようにすれば月跨ぎでも計算できる?」
+     への対応): 月をまたぐ期間を計算できるようにした。
+     従来は①月を移動すると選択をリセット ②集計の入力が表示中の月のぶんだけ、の2点で
+     月またぎができなかった。①はこの便で廃止し、②は選んだ期間そのものを読む
+     （rangeCookedDishes / rangePlannedDishes）に差し替えた。
+     開始日・終了日は日付欄への手入力でも変えられる（カレンダーのタップと併用）。 */
+  /** 日付欄（手入力）から開始日・終了日を差し替える。両方そろったら開始<=終了に正規化する */
+  const setRangeBound = (which: 'start' | 'end', value: string) => {
+    const next = value || null
+    const start = which === 'start' ? next : rangeStart
+    const end = which === 'end' ? next : rangeEnd
+    if (start != null && end != null) {
+      const [s, e] = normalizeDateRange(start, end)
+      setRangeStart(s)
+      setRangeEnd(e)
+      return
+    }
+    setRangeStart(start)
+    setRangeEnd(end)
+  }
   // 日タップ時の範囲選択ロジック。未選択→開始日。開始日のみ→終了日(自動で開始<=終了に正規化)。
   // 両方選択済み(結果カード表示中)にさらにタップ→そのタップを新しい開始日として選び直す
   const handleRangeDayTap = (date: string) => {
@@ -1732,7 +1783,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const out: RangeCookedDish[] = []
     cookedLogsByDate.forEach((list, date) => {
       if (!date.startsWith(prefix)) return
-      list.forEach(({ recipe, log }) => out.push({ date, recipe, log }))
+      // recipeId は「今日の記録と今日の予定を二重に数えない」照合キー(2026-08-08 便EA)
+      list.forEach(({ recipe, log }) => out.push({ date, recipe, log, recipeId: recipe.id }))
     })
     return out
   }, [cookedLogsByDate, monthAnchor])
@@ -1747,6 +1799,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           date: e.date,
           recipe,
           servings: effectiveMealServings(e.servings, householdServings, recipe.servings),
+          recipeId: e.recipeId,
         })
     })
     return out
@@ -1756,17 +1809,46 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * ①平均をやめ「1人が期間内に食べた分の合計」を出す ②過去日は作った記録・今日以降は登録した献立
    * だけで数える(過去の予定ベース表示は廃止)。詳細な理由は logic/rangeSummary.ts のコメント。
    */
+  /* 選んだ期間そのものを読む（2026-08-08 便EA）。従来は表示中の月のぶんしか入力に無く、
+     月をまたぐ期間を選べても月の外の日が0で計算されてしまうため、期間用に引き直す。
+     献立はDBから期間で引き（useMealPlanRange）、作った記録は全レシピ分を持っている
+     cookedLogsByDate から期間で絞る。期間を選んでいない間は今日1日ぶんだけを引く（軽い空引き）。 */
+  const rangeQueryEntries = useMealPlanRange(rangeStart ?? today, rangeEnd ?? today)
+  const rangeCookedDishes = useMemo(() => {
+    if (rangeStart == null || rangeEnd == null) return [] as RangeCookedDish[]
+    const out: RangeCookedDish[] = []
+    cookedLogsByDate.forEach((list, date) => {
+      if (date < rangeStart || date > rangeEnd) return
+      list.forEach(({ recipe, log }) => out.push({ date, recipe, log, recipeId: recipe.id }))
+    })
+    return out
+  }, [cookedLogsByDate, rangeStart, rangeEnd])
+  const rangePlannedDishes = useMemo(() => {
+    if (rangeStart == null || rangeEnd == null) return [] as RangePlannedDish[]
+    const out: RangePlannedDish[] = []
+    ;(rangeQueryEntries ?? []).forEach((e) => {
+      const recipe = recipeById.get(e.recipeId)
+      if (recipe)
+        out.push({
+          date: e.date,
+          recipe,
+          servings: effectiveMealServings(e.servings, householdServings, recipe.servings),
+          recipeId: e.recipeId,
+        })
+    })
+    return out
+  }, [rangeQueryEntries, rangeStart, rangeEnd, recipeById, householdServings])
   const rangeSummary = useMemo(() => {
     if (rangeStart == null || rangeEnd == null) return null
     return summarizeRangeIntake({
       start: rangeStart,
       end: rangeEnd,
       today,
-      cooked: monthCookedDishes,
-      planned: monthPlannedDishes,
+      cooked: rangeCookedDishes,
+      planned: rangePlannedDishes,
       priceIndex,
     })
-  }, [rangeStart, rangeEnd, today, monthCookedDishes, monthPlannedDishes, priceIndex])
+  }, [rangeStart, rangeEnd, today, rangeCookedDishes, rangePlannedDishes, priceIndex])
   // 1人あたり1日の食費(便CA): 期間の1人分合計を日数で割る。従来の「1日あたり」は予定ベースの
   // 全体金額÷日数だったが、予定が今日以降だけになったので「1人分の合計÷日数」に置き換えた
   const rangePersonalPerDay =
@@ -1819,12 +1901,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         start: rangeStart,
         end: rangeEnd,
         today,
-        cooked: monthCookedDishes,
-        planned: monthPlannedDishes,
+        cooked: rangeCookedDishes,
+        planned: rangePlannedDishes,
       }),
       priceIndex,
     ).length
-  }, [rangeStart, rangeEnd, today, monthCookedDishes, monthPlannedDishes, priceIndex])
+  }, [rangeStart, rangeEnd, today, rangeCookedDishes, rangePlannedDishes, priceIndex])
   // 食費の内訳(実績/予定の1人分の分解・価格の但し書き)は既定で畳んでおく。
   // 常設カードが画面上部を占領してカレンダーを押し下げないようにするため(表の数値は畳んでも見える)
   const [monthSummaryOpen, setMonthSummaryOpen] = useState(false)
@@ -2149,6 +2231,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const [message, setMessage] = useState('')
   /**
+   * 鍵の掛かった食事への手での操作を止める（2026-08-08 便EA・オーナー指示
+   * 「ロックしたら、手動削除もできなくして」）。
+   * 画面側でもボタンを押せない見た目にするが、実処理の入口でも必ず通す
+   * ＝週タブ・月タブの日モーダルなど、どの入口から来ても同じところで止まる。
+   */
+  const blockedByLock = (date: string, slot: MealSlot, edit: MealSlotEdit): boolean => {
+    if (!isMealEditBlocked(lockedKeys, date, slot, edit)) return false
+    setMessage(ja.mealPlan.lockedEditBlocked)
+    return true
+  }
+  /**
    * 直前の「作った」を戻すための控え（2026-08-02 便DE-3）。トーストに「元に戻す」を出すのは、
    * いま出ているトーストがその記録のものであるときだけにしたいので、対象のレシピと
    * 一緒にそのときの文言も持っておく（別の操作でトーストが差し替わったら操作ごと消える）。
@@ -2339,6 +2432,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （行を2つ出さない）。畳んでいなければ従来どおり行を1つ増やす。
    */
   const addOrRestoreRow = (date: string, slot: MealSlot, role: MealRole) => {
+    if (blockedByLock(date, slot, 'add')) return
     const key = `${date}|${slot}`
     const hasEntry = (entriesByDateSlotAll.get(key) ?? []).some((e) => (e.role ?? 'main') === role)
     // 既にその役割の料理が入っている枠では、畳んだ記録があっても空欄行は出ない
@@ -2433,6 +2527,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     entryId?: number,
     extraLocalId?: string,
   ) => {
+    // 鍵が掛かっていれば差し替え・新規割り当てとも開かない(2026-08-08 便EA)
+    if (blockedByLock(date, slot, 'replace')) return
     setPickerTarget({ date, slot, role, entryId, extraLocalId })
     setPickerQuery('')
   }
@@ -2629,6 +2725,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 何が起きたか（どの役割に入ったか・すでに入っていたか）は必ずトーストで伝える。
    */
   const assignMismatchRecipe = async (slot: MealSlot, recipe: Recipe) => {
+    // 日タブの「◯食に入れる」も、鍵の掛かった食事には入れない(2026-08-08 便EA)
+    if (blockedByLock(today, slot, 'add')) return
     const role: MealRole = isMainDish(recipe) ? 'main' : 'side'
     const result = await assignMealEntryByRole(today, slot, recipe.id!, role)
     setMessage(
@@ -2655,6 +2753,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     entryId?: number,
     extraLocalId?: string,
   ) => {
+    if (blockedByLock(date, slot, 'remove')) return
     if (entryId != null) {
       showDefaultRow(date, slot, role)
       await removeMealEntry(entryId)
@@ -2687,6 +2786,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   ) => {
     if (!recipes) return
     if (isPastDate(date, today)) return
+    if (blockedByLock(date, slot, 'suggest')) return
     setMessage('')
     const slotEntries = entriesByDateSlotAll.get(`${date}|${slot}`) ?? []
     const isSlotEmpty = slotEntries.length === 0
@@ -3482,6 +3582,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [servingsEditor, setServingsEditor] = useState<{
     entryId: number
+    /** どの日のどの食事の枠か(2026-08-08 便EA)。鍵が掛かっていれば食数も変えられない */
+    date: string
+    slot: MealSlot
     title: string
     recipeServings: number
     defaultServings: number
@@ -3490,7 +3593,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   } | null>(null)
   const submitServings = async (value: number | undefined) => {
     if (!servingsEditor) return
-    const { entryId, title, defaultServings } = servingsEditor
+    const { entryId, date, slot, title, defaultServings } = servingsEditor
+    if (blockedByLock(date, slot, 'servings')) {
+      setServingsEditor(null)
+      return
+    }
     await updateMealEntryServings(entryId, value)
     setServingsEditor(null)
     setMessage(
@@ -3828,10 +3935,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   useEffect(() => {
     setShopDates(null)
   }, [shopRangeWeekKey])
-  // 「表示する食事」を変えたら食事の選択も白紙に戻す（表示していない食事を選んだまま残さない）
+  // 「表示する食事」を変えたら食事の選択も白紙に戻す（表示していない食事を選んだまま残さない）。
+  // 監視するのは中身を並べた文字列＝設定の再読み込みで配列の実体だけが変わったときに
+  // 選択を巻き戻さないため
+  const shopRangeSlotKey = visibleSlots.join(',')
   useEffect(() => {
     setShopSlots(null)
-  }, [settings?.visibleMealSlots])
+  }, [shopRangeSlotKey])
   const shopRange: ShoppingRange = { dates: shopDates, slots: shopSlots }
   const shopRangeNarrowed = isShoppingRangeNarrowed(shopRange, shopSelectableDates, visibleSlots)
   /** いま集計の対象になっている日付・食事（絞っていなければ「全部」） */
@@ -4062,8 +4172,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   const dowLabels = ja.mealPlan.dow
 
-  /** 1行分のUI（役割ラベル＋レシピ名ボタン＋サイコロ＋×） */
-  const renderRow = (date: string, slot: MealSlot, role: MealRole, row: MealPlanRow, key: string) => {
+  /**
+   * 1行分のUI（役割ラベル＋レシピ名ボタン＋サイコロ＋×）。
+   * 2026-08-08 便EA: 鍵が掛かっている食事では、行の操作（食数・差し替え・サイコロ・×）を
+   * 押せない見た目にする。理由は枠の下の1行（lockedSlotNote）で言う。
+   */
+  const renderRow = (
+    date: string,
+    slot: MealSlot,
+    role: MealRole,
+    row: MealPlanRow,
+    key: string,
+    locked = false,
+  ) => {
     const recipe = row.kind === 'entry' ? recipeById.get(row.entry.recipeId) : undefined
     const entryId = row.kind === 'entry' ? row.entry.id : undefined
     const extraLocalId = row.kind === 'empty' ? row.extraLocalId : undefined
@@ -4094,6 +4215,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               onClick={() =>
                 setServingsEditor({
                   entryId: row.entry.id!,
+                  date,
+                  slot,
                   title: recipe.title,
                   recipeServings: recipe.servings > 0 ? recipe.servings : 1,
                   defaultServings: defaultMealServings(householdServings, recipe.servings),
@@ -4101,8 +4224,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   isCustom: row.entry.servings != null,
                 })
               }
+              disabled={locked}
               aria-label={ja.mealPlan.servingsEditAria.replace('{n}', String(rowServings))}
-              className="mt-0.5 block text-[10px] font-bold text-accent-ink underline"
+              className={`mt-0.5 block text-[10px] font-bold text-accent-ink underline ${
+                locked ? 'opacity-40' : ''
+              }`}
             >
               {ja.mealPlan.servingsChip.replace('{n}', String(rowServings))}
             </button>
@@ -4110,6 +4236,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </div>
         <button
           type="button"
+          disabled={locked}
           onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
           // 2026-08-02 便DE-6(オーナー指示): 入っている行と空いている行の見分けをさらに強くする。
           // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
@@ -4156,7 +4283,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
         {/* 過去日(今日より前)・作った記録のある枠はサイコロ非表示(2026-07-16 便W-⑤a: ランダム提案の
             対象外。過去/作った献立は振り返る対象であり、上書きも新規埋めもしない) */}
-        {!isPastDate(date, today) && !isCooked && (
+        {!isPastDate(date, today) && !isCooked && !locked && (
           <button
             type="button"
             onClick={() => void suggestRow(date, slot, role, entryId, extraLocalId)}
@@ -4178,7 +4305,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     ja.mealPlan.hideEmptyRow.replace('{role}', ja.mealPlan.role[role])
                   : ja.mealPlan.removeExtraRow
             }
-            className="rounded-full p-2 text-ink-muted"
+            disabled={locked}
+            className={`rounded-full p-2 text-ink-muted ${locked ? 'opacity-40' : ''}`}
           >
             <X size={18} aria-hidden />
           </button>
@@ -4291,12 +4419,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 role,
                 row,
                 `${role}-${i}-${row.kind === 'entry' ? row.entry.id : row.extraLocalId ?? 'default'}`,
+                slotLocked,
               ),
             ),
           )}
         </div>
         {showOneDishNote && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.oneDishNote}</p>}
-        {isAddMenuOpen ? (
+        {/* 2026-08-08 便EA(オーナー指示「削除と変更ができない事がわかる一文にして」):
+            鍵の掛かった枠では操作のボタンを押せない見た目にし、その理由をこの1行で言う。
+            「＋料理を追加」は押しても何もできないので出さない */}
+        {slotLocked ? (
+          <p data-testid="slot-lock-note" className="mt-1 text-xs text-ink-muted">
+            {ja.mealPlan.lockedSlotNote}
+          </p>
+        ) : isAddMenuOpen ? (
           // 2026-08-02 便DE-4: 足せる区分は主菜・副菜・汁物・その他の4つ(レシピ登録と同じ区分)
           <div className="mt-1 flex flex-wrap items-center gap-2">
             {MEAL_ROLES.map((role) => (
@@ -4960,6 +5096,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </p>
               )}
             </div>
+            {/* 開始日・終了日の手入力(2026-08-08 便EA・オーナー指示)。
+                カレンダーのタップと同じ値を書き換える。月をまたぐ期間もここから組める
+                (集計はrangeCookedDishes/rangePlannedDishesが選んだ期間そのものを読む) */}
+            {costMode && (
+              <div className="mt-[var(--space-sm)] rounded-md border border-edge p-[var(--space-sm)]">
+                <p className="text-xs text-ink-muted">{ja.mealPlan.rangeDateInputNote}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1 text-xs font-bold text-ink-muted">
+                    {ja.mealPlan.rangeDateStartLabel}
+                    <input
+                      type="date"
+                      data-testid="range-date-start"
+                      value={rangeStart ?? ''}
+                      onChange={(e) => setRangeBound('start', e.target.value)}
+                      className="rounded-sm border border-edge bg-surface px-2 py-2 text-sm text-ink"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-xs font-bold text-ink-muted">
+                    {ja.mealPlan.rangeDateEndLabel}
+                    <input
+                      type="date"
+                      data-testid="range-date-end"
+                      value={rangeEnd ?? ''}
+                      onChange={(e) => setRangeBound('end', e.target.value)}
+                      className="rounded-sm border border-edge bg-surface px-2 py-2 text-sm text-ink"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
 
             <div className="mt-[var(--space-sm)] grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
               {ja.mealPlan.dow.map((d) => (
@@ -5016,8 +5182,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 data-testid="range-result-card"
                 className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
               >
-                <h2 className="font-bold">{ja.mealPlan.rangeCostResultTitle}</h2>
-                <p className="mt-0.5 text-xs text-ink-muted">
+                <h2 className="text-xs font-bold text-ink-muted">
+                  {ja.mealPlan.rangeCostResultTitle}
+                </h2>
+                {/* 2026-08-08 便EA(オーナー指示「選んだ期間の文字を大きく」): いま何日ぶんを
+                    見ているかがこのカードの主役なので、見出しより大きく出す */}
+                <p
+                  data-testid="range-selected-period"
+                  className="mt-0.5 text-xl font-bold text-accent-ink"
+                >
                   {ja.mealPlan.rangeCostResultRange
                     .replace('{sm}', String(Number(rangeStart.slice(5, 7))))
                     .replace('{sd}', String(Number(rangeStart.slice(8, 10))))
@@ -5170,14 +5343,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               />
               {monthCostCardOpen &&
                 (monthSummaryDishCount === 0 ? (
-                // 2026-07-30 便CH/C3: 合計が0品でも「作った記録も献立もまだありません」と
-                // 言い切れるのは、その月に作った記録が1件も無いときだけ。今日の記録だけがある月は
-                // カレンダーに記録の印が出ているので、集計に入っていない理由を正直に出す
-                <p className="mt-1 text-sm text-ink-muted">
-                  {monthCookedDishes.length > 0
-                    ? ja.mealPlan.monthSummaryTodayOnly
-                    : ja.mealPlan.monthSummaryEmpty}
-                </p>
+                // 2026-08-08 便EA: 今日の作った記録も合計に入るようになったので、
+                // 「今日の記録だけがある月」は0品にならない＝ここは本当に何も無い月だけになった
+                // （従来はその場合に monthSummaryTodayOnly を出していた）
+                <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthSummaryEmpty}</p>
               ) : (
                 <>
                   {/* 行の見出し＝何の数字か、その下の小さい字＝数え方。

@@ -177,6 +177,7 @@ import {
 } from '../src/logic/priceEstimate.ts'
 import {
   splitRangeByToday,
+  rangeBasisParts,
   summarizeRangeIntake,
   rangeIntakeRecipes,
   dayIntakeMap,
@@ -6450,26 +6451,58 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       splitRangeByToday('2026-07-20', '2026-07-25', TODAY),
       { actual: null, plan: { start: '2026-07-20', end: '2026-07-25' } },
     )
+    // 2026-08-08 便EA(オーナー指摘): 今日は記録・予定の両方の範囲に入る
+    // (「作った記録があるものは記録・まだのものは予定」。二重計上は品の側で防ぐ)
     eq(
-      'splitRangeByToday: 今日が始まりの期間は全部予定(今日は予定側=カレンダー表示の境界と揃える)',
+      'EA-TODAY splitRangeByToday: 今日が始まりの期間は、今日が記録側にも入る',
       splitRangeByToday(TODAY, '2026-07-31', TODAY),
-      { actual: null, plan: { start: TODAY, end: '2026-07-31' } },
+      { actual: { start: TODAY, end: TODAY }, plan: { start: TODAY, end: '2026-07-31' } },
     )
     eq(
-      'splitRangeByToday: またぐ期間は今日の前日までが実績・今日から先が予定(同じ日を二重に数えない)',
+      'EA-TODAY splitRangeByToday: またぐ期間は「開始〜今日」が記録・「今日〜終了」が予定',
       splitRangeByToday('2026-07-01', '2026-07-31', TODAY),
       {
-        actual: { start: '2026-07-01', end: '2026-07-14' },
+        actual: { start: '2026-07-01', end: TODAY },
         plan: { start: TODAY, end: '2026-07-31' },
       },
     )
     eq(
-      'splitRangeByToday: 月をまたぐ境界(今日が1日)でも前日は前月末になる',
+      'EA-TODAY splitRangeByToday: 月をまたぐ期間でも今日が両方の境界になる',
       splitRangeByToday('2026-06-25', '2026-07-05', '2026-07-01'),
       {
-        actual: { start: '2026-06-25', end: '2026-06-30' },
+        actual: { start: '2026-06-25', end: '2026-07-01' },
         plan: { start: '2026-07-01', end: '2026-07-05' },
       },
+    )
+    eq(
+      'EA-TODAY splitRangeByToday: 期間が今日1日だけなら、記録・予定とも今日だけ',
+      splitRangeByToday(TODAY, TODAY, TODAY),
+      { actual: { start: TODAY, end: TODAY }, plan: { start: TODAY, end: TODAY } },
+    )
+    // 基準行(画面の1行)の材料: 過去・未来・今日を分けて持つ
+    eq(
+      'EA-TODAY rangeBasisParts: またぐ期間は過去・未来・今日の3つに分かれる',
+      rangeBasisParts('2026-07-01', '2026-07-31', TODAY),
+      {
+        past: { start: '2026-07-01', end: '2026-07-14' },
+        future: { start: '2026-07-16', end: '2026-07-31' },
+        includesToday: true,
+      },
+    )
+    eq(
+      'EA-TODAY rangeBasisParts: 全部過去の期間に今日は入らない',
+      rangeBasisParts('2026-07-01', '2026-07-14', TODAY),
+      { past: { start: '2026-07-01', end: '2026-07-14' }, future: null, includesToday: false },
+    )
+    eq(
+      'EA-TODAY rangeBasisParts: 全部未来の期間に今日は入らない',
+      rangeBasisParts('2026-07-20', '2026-07-25', TODAY),
+      { past: null, future: { start: '2026-07-20', end: '2026-07-25' }, includesToday: false },
+    )
+    eq(
+      'EA-TODAY rangeBasisParts: 今日1日だけの期間は過去も未来も無い',
+      rangeBasisParts(TODAY, TODAY, TODAY),
+      { past: null, future: null, includesToday: true },
     )
     eq(
       'splitRangeByToday: 単日(今日より前)は実績だけ',
@@ -11248,6 +11281,160 @@ eq(
     eq('DX-LOCK 鍵は別の日の同じ食事には効かない', isMealSlotLocked(locked, '2026-08-11', 'dinner'), false)
     eq('DX-LOCK 掛けた食事にだけ効く', sortedStrs(locked), ['2026-08-10|dinner'])
   }
+}
+
+// ---------- 便EA: 今日の「作った記録」を集計に入れる(オーナー指摘) ----------
+// 従来は「過去日=作った記録／今日以降=登録した献立」で切っていたため、今日すでに作ったものが
+// 記録として数えられず予定側で数えられていた。今日は「作った記録があるものは記録・
+// まだのものは予定」で数え、同じ料理を二重に数えないことを固定する。
+{
+  const TODAY = '2026-08-08'
+  // 玉ねぎ1個=50円(全量)/2人分 → 1人分25円、鶏もも200g=260円(全量)/2人分 → 1人分130円
+  const idx = buildPriceIndex([
+    { name: '玉ねぎ', pricePerUnit: 50, unit: '1個' },
+    { name: '鶏もも肉', pricePerUnit: 130, unit: '100g' },
+  ])
+  const onion = { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 }
+  const chicken = { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }], servings: 2 }
+
+  // 今日: 肉じゃが(id=1)を予定に入れていて、もう作った。副菜(id=2)はまだ作っていない
+  const cooked = [{ date: TODAY, recipe: chicken, recipeId: 1, log: { servings: 2 } }]
+  const planned = [
+    { date: TODAY, recipe: chicken, recipeId: 1 },
+    { date: TODAY, recipe: onion, recipeId: 2 },
+  ]
+  const sum = summarizeRangeIntake({
+    start: TODAY,
+    end: TODAY,
+    today: TODAY,
+    cooked,
+    planned,
+    priceIndex: idx,
+  })
+  eq('EA-TODAY 今日の作った記録が記録側に入る(1品)', sum.actual.dishCount, 1)
+  eq('EA-TODAY 作ったぶんは今日の予定から外れる(残り1品)', sum.plan.dishCount, 1)
+  eq('EA-TODAY 二重計上ゼロ: 1人分の合計は 130 + 25 = 155円', sum.personalYen, 155)
+  eq('EA-TODAY 二重計上ゼロ: 栄養も3品ではなく2品で数える', sum.nutrition.dishCount, 2)
+  eq('EA-TODAY 今日の記録は「全員分(作った食数ぶん)」にも入る', sum.cookedHouseholdYen, 260)
+  eq('EA-TODAY 今日の記録がある日は「記録がある日数」に数える', sum.cookedDayCount, 1)
+
+  // 同じ料理を今日2枠に予定して1回だけ作った日は、片方だけが記録へ移り、もう片方は予定に残る
+  {
+    const twice = summarizeRangeIntake({
+      start: TODAY,
+      end: TODAY,
+      today: TODAY,
+      cooked,
+      planned: [
+        { date: TODAY, recipe: chicken, recipeId: 1 },
+        { date: TODAY, recipe: chicken, recipeId: 1 },
+      ],
+      priceIndex: idx,
+    })
+    eq('EA-TODAY 同じ料理を2枠に予定して1回作った日: 記録1品・予定1品', {
+      actual: twice.actual.dishCount,
+      plan: twice.plan.dishCount,
+    }, { actual: 1, plan: 1 })
+  }
+  // 予定に無いものを今日作った日は、記録として足されるだけ(予定は減らない)
+  {
+    const extra = summarizeRangeIntake({
+      start: TODAY,
+      end: TODAY,
+      today: TODAY,
+      cooked: [{ date: TODAY, recipe: onion, recipeId: 9 }],
+      planned: [{ date: TODAY, recipe: chicken, recipeId: 1 }],
+      priceIndex: idx,
+    })
+    eq('EA-TODAY 予定に無い品を作った日は、記録1品+予定1品の2品', {
+      actual: extra.actual.dishCount,
+      plan: extra.plan.dishCount,
+    }, { actual: 1, plan: 1 })
+  }
+  // recipeId を渡さない古い呼び出しでは照合しない(今日の予定はそのまま予定で数える)
+  {
+    const noId = summarizeRangeIntake({
+      start: TODAY,
+      end: TODAY,
+      today: TODAY,
+      cooked: [{ date: TODAY, recipe: chicken }],
+      planned: [{ date: TODAY, recipe: chicken }],
+      priceIndex: idx,
+    })
+    eq('EA-TODAY recipeIdが無ければ照合しない(記録1品+予定1品)', {
+      actual: noId.actual.dishCount,
+      plan: noId.plan.dishCount,
+    }, { actual: 1, plan: 1 })
+  }
+  // 明日の予定は、今日の記録があっても落とさない
+  {
+    const tomorrow = summarizeRangeIntake({
+      start: TODAY,
+      end: '2026-08-09',
+      today: TODAY,
+      cooked,
+      planned: [
+        { date: TODAY, recipe: chicken, recipeId: 1 },
+        { date: '2026-08-09', recipe: chicken, recipeId: 1 },
+      ],
+      priceIndex: idx,
+    })
+    eq('EA-TODAY 明日の同じ料理の予定は落とさない', tomorrow.plan.dishCount, 1)
+  }
+
+  // カレンダーのセルも同じ規則(今日のセルが「予定だけ」にならない)
+  {
+    const cells = dayIntakeMap({
+      dates: ['2026-08-07', TODAY, '2026-08-09'],
+      today: TODAY,
+      cooked: [{ date: '2026-08-07', recipe: onion, recipeId: 5 }, ...cooked],
+      planned: [...planned, { date: '2026-08-09', recipe: onion, recipeId: 2 }],
+      priceIndex: idx,
+    })
+    eq('EA-TODAY カレンダー: 今日のセルは記録1品+まだの予定1品の2品', cells.get(TODAY).dishCount, 2)
+    eq('EA-TODAY カレンダー: 今日のセルは記録があれば「作った記録」の基準になる', cells.get(TODAY).basis, 'actual')
+    eq('EA-TODAY カレンダー: 過去日は従来どおり記録だけ', cells.get('2026-08-07').basis, 'actual')
+    eq('EA-TODAY カレンダー: 未来日は従来どおり予定だけ', cells.get('2026-08-09').basis, 'plan')
+    eq('EA-TODAY カレンダー: 今日の1人分は 130 + 25 = 155円', cells.get(TODAY).yen, 155)
+  }
+}
+
+// ---------- 便EA: ロックは手での削除・変更も止める(オーナー指示) ----------
+{
+  const { mealLockKey, isMealEditBlocked, MEAL_SLOT_EDITS } = await import(
+    '../src/logic/mealPlan.ts'
+  )
+  const keys = new Set([mealLockKey('2026-08-10', 'dinner')])
+  for (const edit of MEAL_SLOT_EDITS) {
+    eq(
+      `EA-LOCK 鍵の掛かった食事では「${edit}」が止まる`,
+      isMealEditBlocked(keys, '2026-08-10', 'dinner', edit),
+      true,
+    )
+    eq(
+      `EA-LOCK 鍵の無い食事では「${edit}」は止まらない`,
+      isMealEditBlocked(keys, '2026-08-10', 'lunch', edit),
+      false,
+    )
+    eq(
+      `EA-LOCK 別の日の同じ食事では「${edit}」は止まらない`,
+      isMealEditBlocked(keys, '2026-08-11', 'dinner', edit),
+      false,
+    )
+  }
+  eq(
+    'EA-LOCK 止める操作は 追加・差し替え・削除・食数変更・行のサイコロ の5つ',
+    [...MEAL_SLOT_EDITS],
+    ['add', 'replace', 'remove', 'servings', 'suggest'],
+  )
+  eq('EA-LOCK 鍵を外せば元どおり操作できる', isMealEditBlocked(new Set(), '2026-08-10', 'dinner', 'remove'), false)
+  // 注意書きは1文(オーナー指示「削除と変更ができない事がわかる一文にして」)
+  eq('EA-LOCK 注意書きは1文', ja.mealPlan.lockEffectNote.split('。').filter(Boolean).length, 1)
+  eq(
+    'EA-LOCK 注意書きが「削除」と「変更」の両方に触れている',
+    ja.mealPlan.lockEffectNote.includes('削除') && ja.mealPlan.lockEffectNote.includes('変更'),
+    true,
+  )
 }
 
 // ---------- 便EA: 買い物リストの範囲えらび(オーナー要望「3日分とか」) ----------

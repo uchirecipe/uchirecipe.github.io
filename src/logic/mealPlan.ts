@@ -44,6 +44,30 @@ export function isMealSlotLocked(
 }
 
 /**
+ * 鍵が掛かっている食事で止める「手での操作」の種類（2026-08-08 便EA・オーナー指示
+ * 「ロックしたら、手動削除もできなくして」）。
+ *
+ * 便DX（2026-08-08）の鍵は自動でまとめて動かす操作だけを止めていたが、手で削除・差し替え
+ * できたままだったので「ロックした」と言えなかった。ここに並べた操作は鍵が掛かっているあいだ
+ * すべて止める＝鍵を外せば従来どおり全部できる（鍵は掛け外しが自由な可逆の操作）。
+ */
+export const MEAL_SLOT_EDITS = ['add', 'replace', 'remove', 'servings', 'suggest'] as const
+export type MealSlotEdit = (typeof MEAL_SLOT_EDITS)[number]
+
+/**
+ * その食事に対する手での操作が、鍵で止まるか。
+ * 止まる操作は MEAL_SLOT_EDITS のすべて（追加・差し替え・削除・食数変更・行のサイコロ）。
+ */
+export function isMealEditBlocked(
+  lockedKeys: ReadonlySet<string>,
+  date: string,
+  slot: MealSlot,
+  _edit: MealSlotEdit,
+): boolean {
+  return isMealSlotLocked(lockedKeys, date, slot)
+}
+
+/**
  * その日が「日ごとのロック」状態か＝朝食・昼食・夕食の3つとも鍵が掛かっているか。
  * 表示している食事だけでは数えない（画面に出していない食事の鍵が外れたまま
  * 「この日はロック済み」と見せると、表示を増やした瞬間に嘘になるため）。
