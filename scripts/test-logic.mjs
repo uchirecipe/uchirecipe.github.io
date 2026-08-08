@@ -291,6 +291,7 @@ import {
   needsReplaceConfirm,
 } from '../src/logic/replaceConfirm.ts'
 import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceCommand.ts'
+import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -11241,6 +11242,29 @@ eq(
     eq('DX-LOCK 鍵は同じ日の別の食事には効かない', isMealSlotLocked(locked, '2026-08-10', 'lunch'), false)
     eq('DX-LOCK 鍵は別の日の同じ食事には効かない', isMealSlotLocked(locked, '2026-08-11', 'dinner'), false)
     eq('DX-LOCK 掛けた食事にだけ効く', sortedStrs(locked), ['2026-08-10|dinner'])
+  }
+}
+
+// ---------- 便EA: 申し送り2件(Pro機能一覧・目的の効き先)の文言整合 ----------
+// 便DWが見つけたアプリ側の食い違い。文言そのものは規約Hで書き直しうるので、
+// 「どの機能名が挙がっているか」だけを機械検査して再発を止める。
+{
+  // ①Pro機能は5つ(登録数の上限なし・栄養価の8項目表示と並び替え・月間の献立・並行調理ナビ・
+  //   目的から組む)。設定のPro案内3か所すべてに「目的から組む」が入っていること
+  eq('EA-DW1 設定のPro案内(枠内)に「目的から組む」がある', ja.settings.proLead.includes('目的から組む'), true)
+  eq(
+    'EA-DW1 設定の「Pro版でできることを見る」に「目的から組む」がある',
+    ja.settings.proDescription.includes('目的から組む'),
+    true,
+  )
+  eq(
+    'EA-DW1 解錠後の「使えるようになった機能」に「目的から組む」がある',
+    ja.settings.proActivatedFeatures.some((f) => f.label.includes('目的から組む')),
+    true,
+  )
+  // ②目的が効く経路は3つ。月タブの「未定の日をまとめて提案」も executeFill→drawPair を通る
+  for (const entry of ['まとめて献立を入力', 'おまかせで提案', '未定の日をまとめて提案']) {
+    eq(`EA-DW2 目的の説明が「${entry}」を挙げている`, ja.mealPlan.purposeHint.includes(entry), true)
   }
 }
 
