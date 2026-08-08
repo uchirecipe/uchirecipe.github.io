@@ -142,6 +142,26 @@ export async function markAllTodayListCooked(recipeIds: number[]): Promise<void>
 }
 
 /**
+ * 選んだ品だけをまとめて「作った」記録にする（2026-08-08 便ED・並行調理ナビの
+ * 「まとめて作った！」）。今日の日付で記録し、記録した品だけを今日の献立から外す。
+ *
+ * markAllTodayListCooked（日タブの「全て作った！」）との違いは、今日の献立を丸ごと空に
+ * しないこと。ナビで組むのは今日の献立の一部（2〜3品）なので、選んでいない品まで
+ * 消してはいけない。記録・献立からの削除は1トランザクションにまとめて原子化する。
+ */
+export async function markRecipesCooked(recipeIds: number[]): Promise<void> {
+  if (recipeIds.length === 0) return
+  const date = todayString()
+  await db.transaction('rw', db.recipes, db.todayList, async () => {
+    for (const recipeId of recipeIds) {
+      await addCookedLog(recipeId, { date })
+      await db.todayList.where('recipeId').equals(recipeId).delete()
+    }
+  })
+  await reflectPantryForCooked(recipeIds) // 在庫反映(便CC/C3。設定ONのときだけ)
+}
+
+/**
  * 指定したレシピIDをまとめて今日の献立へ入れる（既に入っているものはスキップ）。
  *
  * fromPlan=true で呼ぶのは日タブの自動取り込み（便U-3）だけ。「予定の写しとして入った品」の

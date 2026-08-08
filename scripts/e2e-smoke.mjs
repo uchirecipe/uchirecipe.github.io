@@ -14716,6 +14716,332 @@ try {
     }
   }
 
+  // --- NAVI-05: 並行できないときの正直表示(2026-08-08 便ED・docs/68 打ち手#4)。
+  //     待ち時間が1つも見つからない組み合わせでは、1品ずつ順に作るのと1分も変わらないのに
+  //     「全体の目安 約◯分」とだけ出ていた(縮んでいないのに縮んだように見える)。
+  //     期待挙動: 理由の1文＋次の一手の1文が出る／段取りは1品ずつ完結する並びになり、
+  //     加熱で仕上げる温かい品が最後に来る ---
+  currentCheck = 'NAVI-05'
+  {
+    const nav5Browser = await chromium.launch()
+    const nav5Context = await nav5Browser.newContext({ viewport: { width: 390, height: 820 } })
+    const nav5Page = await nav5Context.newPage()
+    nav5Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI-05] ${err.message}`)
+    })
+    try {
+      await nav5Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await nav5Page.waitForTimeout(1800)
+      await nav5Page.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        // 手入力そのもの: 短文・分数なし・時間表記なし=待ちが1つも見つからない2品。
+        // 「炒めもの」は加熱で終わる=温かい品なので、正直表示では後ろに回るのが正解
+        const idA = await P(store('recipes').add(mk('E2Eナビ炒めもの', [
+          { text: '野菜を切る' }, { text: 'フライパンで炒める' },
+        ])))
+        const idB = await P(store('recipes').add(mk('E2Eナビ和えもの', [
+          { text: 'きゅうりを切る' }, { text: 'ごまと和える' },
+        ])))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await nav5Page.goto(`${BASE}/#/cook-navi`)
+      await nav5Page.reload({ waitUntil: 'networkidle' })
+      await nav5Page.waitForTimeout(1200)
+      await nav5Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav5Page.waitForTimeout(600)
+      const body5 = await nav5Page.textContent('body')
+      check(
+        'NAVI-05 待ちが見つからない組み合わせでは理由を正直に出す',
+        body5.includes('この2品では、手が空く待ち時間が見つかりませんでした。1品ずつ作る順番で表示します。'),
+        body5.slice(0, 200),
+      )
+      check(
+        'NAVI-05 次にどうすれば段取りが作れるかも書く',
+        body5.includes('手順に「10分煮る」のように時間があると、待ち時間を使った段取りになります。'),
+      )
+      check(
+        'NAVI-05 正直表示の枠が出ている',
+        (await nav5Page.locator('[data-testid="navi-no-parallel"]').count()) === 1,
+      )
+      const cards5 = await nav5Page.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
+      check(
+        'NAVI-05 1品ずつ完結する並びになる(和えもの→炒めもの)',
+        cards5.length === 4 &&
+          cards5[0].includes('E2Eナビ和えもの') &&
+          cards5[1].includes('E2Eナビ和えもの') &&
+          cards5[2].includes('E2Eナビ炒めもの') &&
+          cards5[3].includes('E2Eナビ炒めもの'),
+        `cards=${JSON.stringify(cards5.map((t) => t.slice(0, 20)))}`,
+      )
+      check(
+        'NAVI-05 加熱で仕上げる温かい品を最後にまわす',
+        cards5[cards5.length - 1].includes('E2Eナビ炒めもの'),
+      )
+      check('NAVI-05 番号の意味も1品ずつ作る場合の説明に切り替わる', body5.includes('番号は作る順番です。'))
+    } finally {
+      await nav5Browser.close()
+    }
+  }
+
+  // --- NAVI-06: 取り込み時の分数自動入力(2026-08-08 便ED・docs/68 打ち手#2)。
+  //     貼り付け取り込みは手順の「分」の欄が必ず空になり、本文に「15分煮る」と書いてあっても
+  //     タイマーにも並行調理ナビにも使えていなかった。本文にある時間を「分」の欄へ写し、
+  //     自動で入れたことが分かる表示が出て、書き換え・削除ができることを実UIで確認する ---
+  currentCheck = 'NAVI-06'
+  {
+    const nav6Browser = await chromium.launch()
+    const nav6Context = await nav6Browser.newContext({ viewport: { width: 390, height: 820 } })
+    const nav6Page = await nav6Context.newPage()
+    nav6Page.on('dialog', (dialog) => dialog.accept())
+    nav6Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI-06] ${err.message}`)
+    })
+    try {
+      await nav6Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await nav6Page.waitForTimeout(1500)
+      await nav6Page.getByText('テキスト貼り付けで自動入力').click()
+      await nav6Page.waitForTimeout(300)
+      await nav6Page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+        'E2E分数自動入力レシピ\n\n材料（2人分）\n・大根　1/4本\n・しょうゆ　大さじ2\n\n作り方\n1. 大根を切る\n2. 鍋に入れて15分煮る\n3. 器に盛る',
+      )
+      await nav6Page.getByRole('button', { name: '自動で振り分ける' }).click()
+      await nav6Page.waitForTimeout(400)
+      const minutesInputs = nav6Page.locator('input[aria-label="分（任意）"]')
+      check(
+        'NAVI-06 本文の「15分」が手順2の分数欄に入る',
+        (await minutesInputs.nth(1).inputValue()) === '15',
+        `値=${await minutesInputs.nth(1).inputValue()}`,
+      )
+      check(
+        'NAVI-06 時間の書かれていない手順の分数欄は空のまま(推測値を入れない)',
+        (await minutesInputs.nth(0).inputValue()) === '' &&
+          (await minutesInputs.nth(2).inputValue()) === '',
+      )
+      const body6 = await nav6Page.textContent('body')
+      check(
+        'NAVI-06 自動で入れた分数であることが手順に表示される',
+        body6.includes('手順の文にある時間から入れました。書き換え・削除ができます'),
+      )
+      check('NAVI-06 取り込みの結果にも件数が出る', body6.includes('手順1件は本文の時間を「分」の欄に入れました。'))
+      check(
+        'NAVI-06 自動入力の印は1件だけ(時間のある手順のみ)',
+        (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 1,
+      )
+      // 消せる: 分数欄を空にすると印も消える(ユーザーが保存前に直せる)
+      await minutesInputs.nth(1).fill('')
+      await nav6Page.waitForTimeout(300)
+      check(
+        'NAVI-06 分数を消すと自動入力の印も消える',
+        (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 0,
+      )
+      // 直せる: 別の値を入れても印は出ない(ユーザーが入れた分数として扱う)
+      await minutesInputs.nth(1).fill('8')
+      await nav6Page.waitForTimeout(300)
+      check(
+        'NAVI-06 分数を書き換えると自動入力の印は出ない',
+        (await nav6Page.locator('[data-testid="step-minutes-auto"]').count()) === 0 &&
+          (await minutesInputs.nth(1).inputValue()) === '8',
+      )
+      // 手順の本文は書き換えていない(転記だけ)
+      const stepTexts = await nav6Page.$$eval('textarea', (els) => els.map((e) => e.value))
+      check(
+        'NAVI-06 手順の本文は1文字も書き換えない',
+        stepTexts.includes('鍋に入れて15分煮る'),
+        `textareas=${JSON.stringify(stepTexts.slice(0, 5))}`,
+      )
+    } finally {
+      await nav6Browser.close()
+    }
+  }
+
+  // --- NAVI-07/08/09: 便ED第2段(2026-08-08 オーナー実機フィードバック)。
+  //     NAVI-07 画面を移動しても作りかけの段取りが残る／「戻る」で終わる
+  //     NAVI-08 ナビから始めたタイマーは、別の画面から押してもナビの該当手順へ戻る＋
+  //             ハイライトが2秒で消える（タイマーを消しても色が戻らない不具合の回帰防止）
+  //     NAVI-09 「まとめて作った！」で3品まとめて記録＋トーストの「元に戻す」で戻せる ---
+  currentCheck = 'NAVI-07'
+  {
+    const nav7Browser = await chromium.launch()
+    const nav7Context = await nav7Browser.newContext({ viewport: { width: 390, height: 820 } })
+    const nav7Page = await nav7Context.newPage()
+    let confirmText = ''
+    nav7Page.on('dialog', (dialog) => {
+      confirmText = dialog.message()
+      void dialog.accept()
+    })
+    nav7Page.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI-07] ${err.message}`)
+    })
+    try {
+      await nav7Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await nav7Page.waitForTimeout(1800)
+      await nav7Page.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        // 「2秒煮る」= TimeTextの「2秒」ボタンで短いタイマーを起動できる
+        const idA = await P(store('recipes').add(mk('E2E保持煮物', [
+          { text: '材料を切る' }, { text: '鍋に入れて2秒煮る', minutes: 1 }, { text: '盛り付ける' },
+        ])))
+        const idB = await P(store('recipes').add(mk('E2E保持サラダ', [
+          { text: '野菜を切る' }, { text: 'ドレッシングと和える' },
+        ])))
+        let addedAt = Date.now()
+        await P(store('todayList').add({ recipeId: idA, addedAt: addedAt++ }))
+        await P(store('todayList').add({ recipeId: idB, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await nav7Page.goto(`${BASE}/#/cook-navi`)
+      await nav7Page.reload({ waitUntil: 'networkidle' })
+      await nav7Page.waitForTimeout(1200)
+      await nav7Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav7Page.waitForTimeout(600)
+      check(
+        'NAVI-07 段取りが作れる',
+        (await nav7Page.textContent('body')).includes('組み合わせる2品'),
+      )
+      // 別のタブへ移動して戻る＝段取りが残っている（作り直しにならない）
+      await nav7Page.goto(`${BASE}/#/recipes`)
+      await nav7Page.waitForTimeout(600)
+      await nav7Page.goto(`${BASE}/#/cook-navi`)
+      await nav7Page.waitForTimeout(900)
+      check(
+        'NAVI-07 画面を移動して戻っても段取りが残っている',
+        (await nav7Page.textContent('body')).includes('組み合わせる2品'),
+        (await nav7Page.textContent('body')).slice(0, 160),
+      )
+
+      // NAVI-08: ナビから2秒タイマーを起動→別の画面へ→完了タイマーをタップ→ナビへ戻る
+      currentCheck = 'NAVI-08'
+      await nav7Page.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await nav7Page.waitForTimeout(300)
+      await nav7Page.goto(`${BASE}/#/shopping`)
+      await nav7Page.waitForTimeout(500)
+      await nav7Page.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
+      await nav7Page.locator('div.fixed button.border-warning').first().click()
+      await nav7Page.waitForTimeout(900)
+      check(
+        'NAVI-08 別の画面から完了タイマーを押すとナビへ戻る(レシピ詳細へ飛ばない)',
+        nav7Page.url().includes('/cook-navi') && !/#\/recipes\/\d+/.test(nav7Page.url()),
+        `url=${nav7Page.url()}`,
+      )
+      check(
+        'NAVI-08 戻ったナビに段取りが残っている(最初からになっていない)',
+        (await nav7Page.textContent('body')).includes('組み合わせる2品'),
+      )
+      check(
+        'NAVI-08 該当手順カードがハイライトされる',
+        (await nav7Page.locator('li[class*="ring-2"]').count()) >= 1,
+      )
+      // ハイライトは2秒で消える（タイマーを消しても色が戻らない不具合の回帰防止）
+      await nav7Page.waitForTimeout(2600)
+      check(
+        'NAVI-08 ハイライトは2秒ほどで消える(色が付いたまま残らない)',
+        (await nav7Page.locator('li[class*="ring-2"]').count()) === 0,
+      )
+
+      // NAVI-09: まとめて作った！
+      currentCheck = 'NAVI-09'
+      await nav7Page.getByRole('button', { name: 'まとめて作った！' }).click()
+      await nav7Page.waitForTimeout(900)
+      check(
+        'NAVI-09 確認文に件数・料理名・何が変わるかが書かれている(規約F)',
+        confirmText.includes('2件') &&
+          confirmText.includes('E2E保持煮物') &&
+          confirmText.includes('今日の献立から外れます') &&
+          confirmText.includes('記録をつけますか？'),
+        confirmText.slice(0, 200),
+      )
+      const afterCooked = await nav7Page.textContent('body')
+      check('NAVI-09 件数つきのトーストが出る', afterCooked.includes('2件の作った記録をつけました'))
+      const cookedCount = await nav7Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const all = await new Promise((res, rej) => {
+          const r = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        idb.close()
+        return all.filter((r) => r.title.startsWith('E2E保持') && r.cookedLogs.length > 0).length
+      })
+      check('NAVI-09 2品とも作った記録が付く', cookedCount === 2, `記録が付いた品=${cookedCount}`)
+      check(
+        'NAVI-09 記録したら段取りは終わる(選び直しの状態に戻る)',
+        !afterCooked.includes('組み合わせる2品'),
+      )
+      // トーストの「元に戻す」で記録を取り消せる
+      await nav7Page.getByRole('button', { name: '元に戻す' }).click()
+      await nav7Page.waitForTimeout(800)
+      const undoneCount = await nav7Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const all = await new Promise((res, rej) => {
+          const r = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        idb.close()
+        return all.filter((r) => r.title.startsWith('E2E保持') && r.cookedLogs.length > 0).length
+      })
+      check('NAVI-09 「元に戻す」で記録が取り消される', undoneCount === 0, `残った記録=${undoneCount}`)
+      check(
+        'NAVI-09 取り消した件数がトーストに出る',
+        (await nav7Page.textContent('body')).includes('2件の作った記録を取り消して、今日の献立に戻しました'),
+      )
+
+      // 「戻る」を押すと作りかけの段取りは終わる
+      currentCheck = 'NAVI-07'
+      await nav7Page.goto(`${BASE}/#/cook-navi`)
+      await nav7Page.reload({ waitUntil: 'networkidle' })
+      await nav7Page.waitForTimeout(1200)
+      await nav7Page.getByRole('button', { name: '段取りを作る' }).click()
+      await nav7Page.waitForTimeout(600)
+      await nav7Page.getByRole('button', { name: '戻る' }).first().click()
+      await nav7Page.waitForTimeout(600)
+      await nav7Page.goto(`${BASE}/#/cook-navi`)
+      await nav7Page.waitForTimeout(900)
+      check(
+        'NAVI-07 「戻る」を押したあとは段取りが残らない',
+        !(await nav7Page.textContent('body')).includes('組み合わせる2品'),
+      )
+    } finally {
+      await nav7Browser.close()
+    }
+  }
+
   // --- PANTRY-GROUP-01: 在庫チップの大分類グループ(2026-07-23 オーナー実機FB #1)。
   // 通常表示でグループ見出し(肉・魚介／野菜・きのこ／調味料 …)が出ること、整理モードで選んだ
   // 食材を別グループへ手動移動でき(group手動指定)、IndexedDBに保存されトーストが出ることを確認する ---
@@ -16436,7 +16762,14 @@ try {
 
   // --- TRIAL-01: 並行調理ナビの恒常お試し（docs/62 決定③）。
   // 未解錠の入口の鍵が「お試しで使ってみる（あと{n}回）」になり、押すと本物のナビが開く。
-  // 3回で使い切ると「お試しは終了しました。続きはPro版で」＋鍵表示に戻ること。 ---
+  // 3回で使い切ると「お試しは終了しました。続きはPro版で」＋鍵表示に戻ること。
+  //
+  // 2026-08-08 便ED で「1回」の数え方が変わった（オーナー実機フィードバック①の帰結）:
+  // 作りかけの段取りを覚えるようにしたため、**他のタブへ行って戻ってもお試しは続く**
+  // （以前は画面を離れるたびに1回ずつ失っていた＝タブを移動するだけで3回使い切る）。
+  // 1回のお試しが終わるのは「戻る」を押したとき・「まとめて作った！」で記録したとき・
+  // アプリのウィンドウを閉じたとき。回数の消費（settings.cookNaviTrialCount）は従来どおり
+  // 「お試しで使ってみる」を押した瞬間の1回だけ。 ---
   currentCheck = 'TRIAL-01'
   {
     const t1Browser = await chromium.launch()
@@ -16474,9 +16807,6 @@ try {
 
       const t1Start = t1Page.locator('[data-testid="cook-navi-trial-start"]')
       for (let i = 3; i >= 1; i--) {
-        // 一度ほかの画面へ出てから入り直す（＝画面を離れたらお試し表示は終わる、を実際の動線でなぞる）
-        await t1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-        await t1Page.waitForTimeout(300)
         await t1Page.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
         await t1Page.waitForTimeout(600)
         check(
@@ -16501,10 +16831,21 @@ try {
           i > 1 ? t1ActiveText.includes(`このあと${i - 1}回`) : t1ActiveText.includes('最後の1回'),
           `text=${t1ActiveText}`,
         )
+        // 便ED: 他のタブへ行って戻ってもお試しは続く（回数を余分に失わない）
+        await t1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await t1Page.waitForTimeout(300)
+        await t1Page.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+        await t1Page.waitForTimeout(600)
+        check(
+          `TRIAL-01 ${4 - i}回目: 画面を移動して戻ってもお試しは続く（回数を余分に消費しない）`,
+          (await t1Start.count()) === 0 &&
+            ((await t1Page.textContent('body')) ?? '').includes('組み合わせるレシピを選ぶ'),
+        )
+        // 「戻る」でこの1回のお試しを終える（次に開くと残り回数の案内に戻る）
+        await t1Page.getByRole('button', { name: '戻る' }).first().click()
+        await t1Page.waitForTimeout(500)
       }
       // 3回使い切ったら、鍵表示＋「お試しは終了しました。続きはPro版で」に戻る
-      await t1Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await t1Page.waitForTimeout(300)
       await t1Page.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
       await t1Page.waitForTimeout(600)
       check('TRIAL-01 使い切ったらお試しボタンは出ない', (await t1Start.count()) === 0)

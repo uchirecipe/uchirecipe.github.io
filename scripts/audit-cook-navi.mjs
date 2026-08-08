@@ -22,6 +22,9 @@
 import {
   classifyStep,
   resolveStepMinutes,
+  resolveWaitMinutes,
+  buildCookPlan,
+  cutOrderRank,
   isHandsOnStep,
   stepCategory,
   stepStageRank,
@@ -35,6 +38,11 @@ import { parseRecipeText } from '../src/logic/parseRecipeText.ts'
 import { buildImportedIngredientRows, filterImportedSteps } from '../src/logic/urlImportRows.ts'
 import { starterDefs } from '../src/db/starters.ts'
 import { urlSamples, pasteSamples, manualSamples } from './data/navi-wild-recipes.mjs'
+import {
+  urlSamples as holdoutUrlSamples,
+  pasteSamples as holdoutPasteSamples,
+  manualSamples as holdoutManualSamples,
+} from './data/navi-holdout-recipes.mjs'
 
 const DUMP = process.argv.includes('--dump')
 
@@ -78,57 +86,75 @@ const starterRecipes = starterDefs.map((d) =>
 )
 
 /** A: URL取り込み。Worker応答→フォーム行→保存レシピ、と実装と同じ順で通す（minutes/memoは付かない） */
-const aRecipes = urlSamples.map((s) => {
-  const rows = buildImportedIngredientRows(s.ingredients.map((i) => ({ name: i.name, amount: i.amount })))
-  const steps = filterImportedSteps(s.steps).map((text) => ({ text }))
-  return makeRecipe({
-    title: s.title,
-    servings: s.servings,
-    cookMinutes: s.cookMinutes,
-    ingredients: rows.map((r) => ({ name: r.name, amount: r.amount, unit: r.unit, memo: r.memo })),
-    steps,
-    truth: s.truth,
-    realWaits: s.realWaits,
-    realMinutes: s.realMinutes,
-    group: 'A: URL取込',
+const buildUrlRecipes = (samples, group) =>
+  samples.map((s) => {
+    const rows = buildImportedIngredientRows(s.ingredients.map((i) => ({ name: i.name, amount: i.amount })))
+    const steps = filterImportedSteps(s.steps).map((text) => ({ text }))
+    return makeRecipe({
+      title: s.title,
+      servings: s.servings,
+      cookMinutes: s.cookMinutes,
+      ingredients: rows.map((r) => ({ name: r.name, amount: r.amount, unit: r.unit, memo: r.memo })),
+      steps,
+      truth: s.truth,
+      realWaits: s.realWaits,
+      realMinutes: s.realMinutes,
+      group,
+    })
   })
-})
 
 /** B: 貼り付け取り込み。生テキストを parseRecipeText に通した結果をそのまま使う */
-const bRecipes = pasteSamples.map((s) => {
-  const parsed = parseRecipeText(s.raw)
-  return makeRecipe({
-    title: parsed.title ?? s.id,
-    servings: parsed.servings ?? 2,
-    cookMinutes: parsed.cookMinutes,
-    ingredients: parsed.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit, memo: i.memo })),
-    steps: parsed.steps.map((text) => ({ text })),
-    truth: s.truth,
-    realWaits: s.realWaits,
-    realMinutes: s.realMinutes,
-    group: 'B: 貼り付け取込',
+const buildPasteRecipes = (samples, group) =>
+  samples.map((s) => {
+    const parsed = parseRecipeText(s.raw)
+    return makeRecipe({
+      title: parsed.title ?? s.id,
+      servings: parsed.servings ?? 2,
+      cookMinutes: parsed.cookMinutes,
+      ingredients: parsed.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit, memo: i.memo })),
+      steps: parsed.steps.map((text) => ({ text })),
+      truth: s.truth,
+      realWaits: s.realWaits,
+      realMinutes: s.realMinutes,
+      group,
+    })
   })
-})
 
 /** C: 手入力（短い手順・minutes無し・memo無し） */
-const cRecipes = manualSamples.map((s) =>
-  makeRecipe({
-    title: s.title,
-    servings: s.servings,
-    ingredients: s.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit })),
-    steps: s.steps.map((text) => ({ text })),
-    truth: s.truth,
-    realWaits: s.realWaits,
-    realMinutes: s.realMinutes,
-    group: 'C: 手入力',
-  }),
-)
+const buildManualRecipes = (samples, group) =>
+  samples.map((s) =>
+    makeRecipe({
+      title: s.title,
+      servings: s.servings,
+      ingredients: s.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit })),
+      steps: s.steps.map((text) => ({ text })),
+      truth: s.truth,
+      realWaits: s.realWaits,
+      realMinutes: s.realMinutes,
+      group,
+    }),
+  )
+
+const aRecipes = buildUrlRecipes(urlSamples, 'A: URL取込')
+const bRecipes = buildPasteRecipes(pasteSamples, 'B: 貼り付け取込')
+const cRecipes = buildManualRecipes(manualSamples, 'C: 手入力')
+
+// ホールドアウト標本（docs/68 合格ライン「合格の追加条件」。修繕後に書き下ろした初見の9品）
+const haRecipes = buildUrlRecipes(holdoutUrlSamples, 'ホA: URL取込')
+const hbRecipes = buildPasteRecipes(holdoutPasteSamples, 'ホB: 貼り付け取込')
+const hcRecipes = buildManualRecipes(holdoutManualSamples, 'ホC: 手入力')
 
 const groups = [
   { key: '同梱109品', recipes: starterRecipes },
   { key: 'A: URL取込', recipes: aRecipes },
   { key: 'B: 貼り付け取込', recipes: bRecipes },
   { key: 'C: 手入力', recipes: cRecipes },
+]
+
+const holdoutGroups = [
+  { key: 'ホA: URL取込', recipes: haRecipes },
+  { key: 'ホB: 貼り付け取込', recipes: hbRecipes },
+  { key: 'ホC: 手入力', recipes: hcRecipes },
 ]
 
 // ---------------------------------------------------------------- 1レシピの計測
@@ -167,7 +193,7 @@ function measureRecipe(r) {
 
   const solo = buildCookTimeline([r]).totalMinutes
   const detectedWaitMinutes = steps.reduce(
-    (sum, s, i) => sum + (kinds[i] === 'wait' ? (resolveStepMinutes(s) ?? 0) : 0),
+    (sum, s, i) => sum + (kinds[i] === 'wait' ? (resolveWaitMinutes(s) ?? 0) : 0),
     0,
   )
   const realWaitMinutes = (r._realWaits ?? []).reduce((a, w) => a + w.minutes, 0)
@@ -197,7 +223,7 @@ function measureRecipe(r) {
 }
 
 const measures = new Map()
-for (const g of groups) for (const r of g.recipes) measures.set(r.id, measureRecipe(r))
+for (const g of [...groups, ...holdoutGroups]) for (const r of g.recipes) measures.set(r.id, measureRecipe(r))
 
 // ---------------------------------------------------------------- 組み合わせ（3品）の計測
 
@@ -237,6 +263,8 @@ function sampleTriples(list, count, seed) {
 
 function measureTriple(trio) {
   const timeline = buildCookTimeline(trio)
+  // 画面に出る形（並行の段取り／1品ずつ順に作る正直表示）はアプリと同じ関数で決める
+  const plan = buildCookPlan(trio)
   const solos = trio.map((r) => measures.get(r.id).solo)
   const seq = solos.reduce((a, b) => a + b, 0)
   const lower = Math.max(...solos)
@@ -249,6 +277,7 @@ function measureTriple(trio) {
     lower,
     gainPct: pct(seq - par, seq),
     idealGainPct: pct(seq - lower, seq),
+    honest: plan.mode === 'sequential',
     waitSteps: timeline.items.filter((it) => it.kind === 'wait').length,
     steps: timeline.items.length,
   }
@@ -266,6 +295,7 @@ function summarizeTriples(triples) {
     maxGain: Math.max(...gains),
     zeroRate: pct(zero, rows.length),
     under5Rate: pct(under5, rows.length),
+    honestRate: pct(rows.filter((r) => r.honest).length, rows.length),
     avgIdeal: rows.reduce((a, r) => a + r.idealGainPct, 0) / rows.length,
     avgSeq: rows.reduce((a, r) => a + r.seq, 0) / rows.length,
     avgPar: rows.reduce((a, r) => a + r.par, 0) / rows.length,
@@ -289,7 +319,16 @@ function simulateTimeline(recipes, opt) {
         const waitMinutes = kind === 'wait' ? (opt.waitMinutes(s) ?? 0) : 0
         const activeMinutes =
           kind === 'active' ? (s.minutes != null && s.minutes > 0 ? s.minutes : DEFAULT_ACTIVE_MINUTES) : 0
-        return { i, kind, waitMinutes, activeMinutes, category: stepCategory(s), stageRank: stepStageRank(s), text: s.text }
+        return {
+          i,
+          kind,
+          waitMinutes,
+          activeMinutes,
+          category: stepCategory(s),
+          stageRank: stepStageRank(s),
+          cutRank: cutOrderRank(s),
+          text: s.text,
+        }
       })
       return { colorIndex, steps, ptr: 0, readyAt: 0, title: r.title }
     })
@@ -319,15 +358,20 @@ function simulateTimeline(recipes, opt) {
       chosen = waits[0]
     } else {
       const sameCat = (j) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
-      chosen = ready
-        .slice()
-        .sort(
-          (a, b) =>
-            remainingSpan(b) - remainingSpan(a) ||
-            a.steps[a.ptr].stageRank - b.steps[b.ptr].stageRank ||
-            sameCat(a) - sameCat(b) ||
-            a.colorIndex - b.colorIndex,
-        )[0]
+      chosen = ready.slice().sort((a, b) => {
+        const stepA = a.steps[a.ptr]
+        const stepB = b.steps[b.ptr]
+        // 切る工程どうしは、まな板の順序（野菜→肉・魚）を先に見る（アプリ本体と同じ規則）
+        if (stepA.category === 'cut' && stepB.category === 'cut' && stepA.cutRank !== stepB.cutRank) {
+          return stepA.cutRank - stepB.cutRank
+        }
+        return (
+          remainingSpan(b) - remainingSpan(a) ||
+          stepA.stageRank - stepB.stageRank ||
+          sameCat(a) - sameCat(b) ||
+          a.colorIndex - b.colorIndex
+        )
+      })[0]
     }
     const step = chosen.steps[chosen.ptr]
     const startMin = cookAt
@@ -348,10 +392,10 @@ function simulateTimeline(recipes, opt) {
   return { totalMinutes: total, items }
 }
 
-/** 打ち手なし（＝現行アプリと同じ判定） */
+/** 打ち手なし（＝いまのアプリと同じ判定。便EDの修繕後はこれが「修繕後の実装」になる） */
 const BASELINE = {
   classify: classifyStep,
-  waitMinutes: resolveStepMinutes,
+  waitMinutes: resolveWaitMinutes,
   splitSteps: false,
 }
 
@@ -663,6 +707,7 @@ say()
 say('| レシピ群 | 手順数 | 一致 | 見逃し(本当は待ち→手作業) | 危険(本当は手作業→待ち) | 一致率 |')
 say('|---|---|---|---|---|---|')
 const truthDetail = []
+const truthTotal = { ok: 0, missed: 0, dangerous: 0, total: 0 }
 for (const g of groups.slice(1)) {
   let ok = 0
   let missed = 0
@@ -688,7 +733,14 @@ for (const g of groups.slice(1)) {
     })
   }
   say(`| ${g.key} | ${total} | ${ok} | ${missed} | ${dangerous} | ${f1(pct(ok, total))}% |`)
+  truthTotal.ok += ok
+  truthTotal.missed += missed
+  truthTotal.dangerous += dangerous
+  truthTotal.total += total
 }
+say(
+  `| **合計** | ${truthTotal.total} | ${truthTotal.ok} | ${truthTotal.missed} | **${truthTotal.dangerous}** | **${f1(pct(truthTotal.ok, truthTotal.total))}%** |`,
+)
 say()
 for (const line of truthDetail) say(line)
 say()
@@ -757,14 +809,14 @@ const comboSets = [
     triples: sampleTriples([...aRecipes, ...bRecipes, ...cRecipes], 200, 424242),
   },
 ]
-say('| 組み合わせ | 通り数 | 順に作る平均(分) | ナビの平均(分) | 平均短縮率 | 短縮ゼロの割合 | 短縮5%未満の割合 | 理論上の最大短縮率 |')
-say('|---|---|---|---|---|---|---|---|')
+say('| 組み合わせ | 通り数 | 順に作る平均(分) | ナビの平均(分) | 平均短縮率 | 短縮ゼロの割合 | 短縮5%未満の割合 | 正直表示になった割合 | 理論上の最大短縮率 |')
+say('|---|---|---|---|---|---|---|---|---|')
 const comboSummaries = new Map()
 for (const c of comboSets) {
   const s = summarizeTriples(c.triples)
   comboSummaries.set(c.key, s)
   say(
-    `| ${c.key} | ${s.n} | ${f1(s.avgSeq)} | ${f1(s.avgPar)} | ${f1(s.avgGain)}% | ${f1(s.zeroRate)}% | ${f1(s.under5Rate)}% | ${f1(s.avgIdeal)}% |`,
+    `| ${c.key} | ${s.n} | ${f1(s.avgSeq)} | ${f1(s.avgPar)} | ${f1(s.avgGain)}% | ${f1(s.zeroRate)}% | ${f1(s.under5Rate)}% | ${f1(s.honestRate)}% | ${f1(s.avgIdeal)}% |`,
   )
 }
 say()
@@ -880,6 +932,76 @@ say()
   for (const l of flips.toWait) say(`    - ${l}`)
 }
 say()
+
+// --- 8: ホールドアウト標本（docs/68 合格ラインの追加条件） ---
+say('■ 8. ホールドアウト標本（修繕後に書き下ろした初見の9品。標本に合わせた調整が効いていないかの確認）')
+say()
+{
+  const all = holdoutGroups.flatMap((g) => g.recipes)
+  const comboSets8 = [
+    ...holdoutGroups.map((g) => ({ key: g.key, triples: allTriples(g.recipes) })),
+    { key: 'ホ混合（全84通り）', triples: allTriples(all) },
+  ]
+  say('| 組み合わせ | 通り数 | 順に作る平均(分) | ナビの平均(分) | 平均短縮率 | 短縮ゼロ | 短縮5%未満 | 正直表示になった割合 |')
+  say('|---|---|---|---|---|---|---|---|')
+  for (const c of comboSets8) {
+    const s = summarizeTriples(c.triples)
+    say(
+      `| ${c.key} | ${s.n} | ${f1(s.avgSeq)} | ${f1(s.avgPar)} | ${f1(s.avgGain)}% | ${f1(s.zeroRate)}% | ${f1(s.under5Rate)}% | ${f1(s.honestRate)}% |`,
+    )
+  }
+  say()
+  say('| レシピ群 | 品数 | 手順数 | 待ちと判定 | 待ちゼロの品 |')
+  say('|---|---|---|---|---|')
+  for (const g of holdoutGroups) {
+    const ms = g.recipes.map((r) => measures.get(r.id))
+    const stepCount = ms.reduce((a, m) => a + m.stepCount, 0)
+    const waitCount = ms.reduce((a, m) => a + m.waitCount, 0)
+    const zero = ms.filter((m) => m.waitCount === 0).length
+    say(`| ${g.key} | ${ms.length} | ${stepCount} | ${f1(pct(waitCount, stepCount))}% | ${zero} |`)
+  }
+  say()
+  say('| レシピ群 | 手順数 | 一致 | 見逃し | 危険(手作業→待ち) | 一致率 |')
+  say('|---|---|---|---|---|---|')
+  const hTotal = { ok: 0, missed: 0, danger: 0, total: 0 }
+  const hDetail = []
+  for (const g of holdoutGroups) {
+    let ok = 0
+    let missed = 0
+    let danger = 0
+    let total = 0
+    for (const r of g.recipes) {
+      const m = measures.get(r.id)
+      const truth = r._truth
+      if (!truth || truth.length !== m.kinds.length) {
+        hDetail.push(`  !! ${r.title}: 答え合わせの数が合わない（手順${m.kinds.length} / 答え${truth?.length}）`)
+        continue
+      }
+      truth.forEach((t, i) => {
+        total++
+        if (t === m.kinds[i]) ok++
+        else if (t === 'wait') {
+          missed++
+          hDetail.push(`  [見逃し] ${r.title} 手順${i + 1}: ${r.steps[i].text.slice(0, 46)}`)
+        } else {
+          danger++
+          hDetail.push(`  [危険]   ${r.title} 手順${i + 1}: ${r.steps[i].text.slice(0, 46)}`)
+        }
+      })
+    }
+    say(`| ${g.key} | ${total} | ${ok} | ${missed} | ${danger} | ${f1(pct(ok, total))}% |`)
+    hTotal.ok += ok
+    hTotal.missed += missed
+    hTotal.danger += danger
+    hTotal.total += total
+  }
+  say(
+    `| **合計** | ${hTotal.total} | ${hTotal.ok} | ${hTotal.missed} | **${hTotal.danger}** | **${f1(pct(hTotal.ok, hTotal.total))}%** |`,
+  )
+  say()
+  for (const line of hDetail) say(line)
+  say()
+}
 
 // --- 段取り全文（B/C） ---
 function dumpTimeline(title, trio) {

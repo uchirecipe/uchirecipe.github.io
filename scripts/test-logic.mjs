@@ -132,13 +132,17 @@ import {
   classifyStep,
   resolveStepMinutes,
   buildCookTimeline,
+  buildCookPlan,
   isHandsOnStep,
   stepCategory,
+  cutOrderRank,
 } from '../src/logic/cookNavi.ts'
+import { parseCookNaviSession } from '../src/logic/cookNaviSession.ts'
 import {
   stepIngredientAmounts,
   recipeIngredientList,
 } from '../src/logic/naviIngredients.ts'
+import { stepMinutesFromText, importedStepMinutes } from '../src/logic/importStepMinutes.ts'
 import {
   resolveDuplicateTitleAction,
   buildUpdatedSetRecipe,
@@ -4026,8 +4030,15 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('ナビ推定: 「フライパンで3分焼く」(minutes無)は手作業系(素の焼く)', classifyStep({ text: 'フライパンで3分焼く' }), 'active')
   // 安全側: 1分未満(秒だけ)の待ちは並行の実益が無いので手作業系に倒す
   eq('ナビ推定: 「30秒茹でる」(minutes無)は手作業系(秒だけの待ちは並行しない)', classifyStep({ text: '30秒茹でる' }), 'active')
-  // 安全側: 待ち動詞でも分数の手掛かりが全く無ければ手作業系に倒す
-  eq('ナビ推定: 「じっくり煮込む」(時間表記なし)は手作業系(分数不明)', classifyStep({ text: 'じっくり煮込む' }), 'active')
+  // 2026-08-08 便ED で仕様変更: 時間の書かれていない待ち工程にも、時間が読める調理法
+  // (煮る・ゆでる・蒸す 等)なら既定分数を当てる(docs/68 打ち手#1(a))。「じっくり煮込む」は待ち10分。
+  // 表に無い待ち動詞(なじませる 等)は従来どおり手作業系のまま＝汎用フォールバックは置かない
+  eq('ナビ推定: 「じっくり煮込む」は待ち系(調理法から既定分数10分)', classifyStep({ text: 'じっくり煮込む' }), 'wait')
+  eq(
+    'ナビ推定: 「味がなじむまでおく」は手作業系(既定分数の表に無い動詞)',
+    classifyStep({ text: '味がなじむまでおく' }),
+    'active',
+  )
   // 待ち動詞も時間も無いふつうの工程は手作業系
   eq('ナビ推定: 「材料を切る」は手作業系', classifyStep({ text: '材料を切る' }), 'active')
 
@@ -4164,6 +4175,218 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
+// ---------- classifyStep(並行調理ナビ: 時間の書かれていない待ち工程に調理法ごとの既定分数を当てる。
+// 2026-08-08 便ED・docs/68 6-4。ユーザーが登録したレシピ(取り込み・手入力)は手順の分数欄が空で、
+// 本文にも時間が書かれていないため待ちが1つも見つからず、段取りが1品ずつ作るのと同じになっていた。
+// 既定分数は「時間が読める調理法」だけに当て、歯止め3つ(位置ルール・「さっと」・「〜ておく」)を必ず添える。
+// **推定した分数はナビの計算にだけ使い、レシピのデータには書き込まない** ----------
+{
+  /** 手順1つだけのレシピを組んで、その手順の判定と待ち分数を実際のタイムラインから読む */
+  const only = (step) => buildCookTimeline([{ id: 1, title: 'テスト', steps: [step] }]).items[0]
+
+  // (a) 既定分数テーブル: 時間の手掛かりが無い待ち工程も、調理法から分かる分だけ待ちにする
+  eq('ナビ既定分数: 「水を沸かす」は待ち5分', only({ text: '水を沸かす' }).kind, 'wait')
+  eq('ナビ既定分数: 「水を沸かす」の待ちは5分', only({ text: '水を沸かす' }).waitMinutes, 5)
+  eq('ナビ既定分数: 「じゃがいもをゆでる」は待ち8分', only({ text: 'じゃがいもをゆでる' }).kind, 'wait')
+  eq('ナビ既定分数: 「じゃがいもをゆでる」の待ちは8分', only({ text: 'じゃがいもをゆでる' }).waitMinutes, 8)
+  eq('ナビ既定分数: 「水を入れて煮る」は待ち10分', only({ text: '水を入れて煮る' }).kind, 'wait')
+  eq('ナビ既定分数: 「水を入れて煮る」の待ちは10分', only({ text: '水を入れて煮る' }).waitMinutes, 10)
+
+  // (a') 汎用フォールバックは置かない: 表に無い待ち動詞(なじませる)は従来どおり手作業のまま
+  eq(
+    'ナビ既定分数: 「残りの野菜も加えて油をなじませる」は手作業(表に無い動詞に一律の分数を当てない)',
+    classifyStep({ text: '残りの野菜も加えて油をなじませる' }),
+    'active',
+  )
+
+  // (b) 位置ルール: 手順の最後に来る動作が待ち動詞のときだけ待ちにする
+  eq(
+    'ナビ位置ルール: 「…中火にかけ、表面全体に焼き色をつけていきます」は手作業',
+    classifyStep({ text: 'フライパンを強めの中火にかけ、表面全体に焼き色をつけていきます' }),
+    'active',
+  )
+  eq(
+    'ナビ位置ルール: 「…煮立ったら浮いてきたアクを取ります」は手作業',
+    classifyStep({ text: '大根としょうが、水と調味料をすべて加え、煮立ったら浮いてきたアクを取ります' }),
+    'active',
+  )
+  eq(
+    'ナビ位置ルール: 「粗熱が取れたら殻をむく」は手作業(むく=手作業動詞)',
+    classifyStep({ text: 'ゆで上がったらすぐ冷水にとり、粗熱が取れたら殻をむく。' }),
+    'active',
+  )
+  eq(
+    'ナビ位置ルール: 分数が入っている手順には位置ルールを当てない(ユーザーの入力を尊重)',
+    classifyStep({ text: '落としぶたをして15分煮る。途中でアクを取る。', minutes: 15 }),
+    'wait',
+  )
+
+  // (c) 除外語: 「さっと」「〜ておく」には既定分数を当てない
+  eq('ナビ除外語: 「熱湯でさっとゆでる」は手作業', classifyStep({ text: '熱湯でさっとゆでる' }), 'active')
+  eq(
+    'ナビ除外語: 「…混ぜ合わせてたれを作っておく」は手作業(〜ておく)',
+    classifyStep({ text: 'しょうゆ・みりん・酒・砂糖を混ぜ合わせてたれを作っておく' }),
+    'active',
+  )
+  // 名詞の除外: 「漬け汁」「漬けだれ」を作る工程は漬け込みではない
+  eq(
+    'ナビ名詞除外: 「…混ぜ、漬け汁を作る」は手作業(「漬」に反応させない)',
+    classifyStep({
+      text: '保存容器(なければ深さのあるボウルや耐熱皿)にだし汁・しょうゆ・酢・砂糖を混ぜ、漬け汁を作る。',
+    }),
+    'active',
+  )
+  eq(
+    'ナビ名詞除外: 「漬けだれを合わせる」は手作業',
+    classifyStep({ text: 'ボウルに漬けだれの調味料を合わせる。' }),
+    'active',
+  )
+  // 本物の漬け込みは従来どおり待ち
+  eq(
+    'ナビ名詞除外: 「冷蔵庫で半日〜一晩漬ける」は待ちのまま',
+    classifyStep({ text: '保存袋にめんつゆと水、殻をむいた卵を入れて空気を抜き、冷蔵庫で半日〜一晩漬ける。' }),
+    'wait',
+  )
+
+  // 安全側: 本文に秒だけの時間が書いてあるときは既定分数で上書きしない(1分未満と分かっているため)
+  eq('ナビ既定分数: 「30秒茹でる」は手作業のまま(秒だけの時間を8分に化けさせない)', classifyStep({ text: '30秒茹でる' }), 'active')
+
+  // 同梱109品を1件ずつ目視して見つけた4件の直し(2026-08-08 便ED・docs/68 6-3の裁定)
+  eq(
+    'ナビ既定分数: 「煮立てる」は5分(煮込み10分と同じにしない・さばの味噌煮)',
+    only({ text: '鍋に水・酒・みりん・砂糖・薄切りしょうがを入れて煮立てる。' }).waitMinutes,
+    5,
+  )
+  eq(
+    'ナビ名詞除外: 「オーブンシートを敷き」は手作業(オーブン加熱ではない・ヨーグルトバーク)',
+    classifyStep({ text: 'バットにオーブンシートを敷き、ヨーグルトを平らに広げる。' }),
+    'active',
+  )
+  eq(
+    'ナビ付きっきり: 「沸騰直前まで温めたら火を弱める」は手作業(沸くのを見ている工程・冷しゃぶ)',
+    classifyStep({ text: '鍋にたっぷりの湯を沸かし、酒を加えて沸騰直前まで温めたら火を弱める。' }),
+    'active',
+  )
+  eq(
+    'ナビ位置ルール: 「茹で上がったら…洗い流し、氷水でしっかり締める」は手作業(うどんが伸びる)',
+    classifyStep({
+      text: '鍋にたっぷりの湯を沸かし、冷凍うどんを袋の表示に沿って茹でる。茹で上がったら流水でぬめりを洗い流し、氷水でしっかり締める。',
+    }),
+    'active',
+  )
+
+  // ホールドアウト標本(初見の9品)で見つかった危険側の誤り3件(2026-08-08 便ED)
+  eq(
+    'ナビ名詞除外: 「しょうゆで味をつける」は手作業(「しょう"ゆで"」を「ゆでる」と読まない)',
+    classifyStep({ text: 'しょうゆで味をつける' }),
+    'active',
+  )
+  eq(
+    'ナビ名詞除外: 「めんつゆで味をととのえる」は手作業',
+    classifyStep({ text: 'めんつゆで味をととのえる' }),
+    'active',
+  )
+  eq('ナビ名詞除外: 「煮干しでだしをとる」は手作業', classifyStep({ text: '煮干しでだしをとる' }), 'active')
+  eq('ナビ名詞除外: 「蒸し器にセットする」は手作業', classifyStep({ text: '蒸し器にセットする' }), 'active')
+  eq('ナビ名詞除外: 「漬物を器に出す」は手作業', classifyStep({ text: '漬物を器に出す' }), 'active')
+  eq(
+    'ナビ麺類: 「そうめんをゆでる」は手作業(1〜2分で吹きこぼれる工程に既定8分を当てない)',
+    classifyStep({ text: 'そうめんをゆでる' }),
+    'active',
+  )
+  eq('ナビ麺類: 「パスタをゆでる」は手作業', classifyStep({ text: 'パスタをゆでる' }), 'active')
+  eq(
+    'ナビ麺類: 本文に時間があれば従来どおり待ち(スパゲッティを8分ゆでる)',
+    only({ text: 'スパゲッティを8分ゆでる' }).waitMinutes,
+    8,
+  )
+  eq(
+    'ナビ麺類: 麺以外の「ゆでる」は既定8分のまま(じゃがいもをゆでる)',
+    only({ text: 'じゃがいもをゆでる' }).waitMinutes,
+    8,
+  )
+  // 位置ルールは待ち動詞の「終わり」で比べる: 「蒸し焼き」の中の「焼き」で待ちを消さない
+  eq(
+    'ナビ位置ルール: 「ふたをし、中火で15分蒸し焼きにします」は待ち(蒸し焼きの中の「焼き」で消さない)',
+    classifyStep({ text: 'フライパンに水を1cmほど張り、包みを並べてふたをし、中火で15分蒸し焼きにします。' }),
+    'wait',
+  )
+}
+
+// ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。
+// 2026-08-08 便ED・docs/68 打ち手#2。URL取り込み・貼り付け取り込みは分数欄が必ず空になり、
+// 本文に「20分煮る」と書いてあってもタイマーにも並行調理ナビにも使えていなかった。
+// 入れるのは本文に書いてある時間の転記だけ＝機械の推測値は入れない) ----------
+{
+  eq('取り込み分数: 「鍋で15分煮る」→15', stepMinutesFromText('鍋で15分煮る'), 15)
+  eq('取り込み分数: 「弱火で1時間半煮込む」→90', stepMinutesFromText('弱火で1時間半煮込む'), 90)
+  eq('取り込み分数: 「600Wで3分加熱する」→3', stepMinutesFromText('600Wで3分加熱する'), 3)
+  eq('取り込み分数: 複数あれば最長(10分煮て5分蒸らす→10)', stepMinutesFromText('10分煮て5分蒸らす'), 10)
+  eq('取り込み分数: 秒だけ(30秒ゆでる)は入れない', stepMinutesFromText('30秒ゆでる'), undefined)
+  eq('取り込み分数: 時間表記が無ければ入れない', stepMinutesFromText('材料を切る'), undefined)
+  // 推測はしない: 待ち動詞があっても本文に時間が無ければ空のまま(ナビの既定分数は保存しない)
+  eq('取り込み分数: 「じっくり煮込む」は空のまま(推測値を保存しない)', stepMinutesFromText('じっくり煮込む'), undefined)
+  eq(
+    '取り込み分数: 手順の並びぶんを返す',
+    importedStepMinutes(['材料を切る', '鍋で15分煮る', '器に盛る']).join(','),
+    ',15,',
+  )
+}
+
+// ---------- buildCookPlan(並行調理ナビ: 並行できないときは正直にそう言い、1品ずつ作る順番を出す。
+// 2026-08-08 便ED・docs/68 打ち手#4。短縮5%未満で「約◯分」とだけ出すと、縮んでいないのに
+// 縮んだように見える) ----------
+{
+  // 待ちが1つも無い2品=並行の余地なし
+  const flat = buildCookPlan([
+    { id: 1, title: 'サラダ', steps: [{ text: 'レタスをちぎる' }, { text: 'ドレッシングと和える' }] },
+    { id: 2, title: 'あえもの', steps: [{ text: 'きゅうりを切る' }, { text: 'ごまと和える' }] },
+  ])
+  eq('ナビ正直表示: 待ちが無い2品は1品ずつ作る順番になる', flat.mode, 'sequential')
+  eq('ナビ正直表示: 短縮率は0%', Math.round(flat.gainPercent), 0)
+  eq('ナビ正直表示: 1品ずつの合計と全体の目安が一致する', flat.totalMinutes, flat.sequentialMinutes)
+  // 1品ずつ完結する順番になっている(レシピが途中で入れ替わらない)
+  const titles = flat.items.map((it) => it.recipeTitle)
+  eq('ナビ正直表示: 1品ずつ完結する並び', titles.join(','), 'サラダ,サラダ,あえもの,あえもの')
+
+  // 加熱で終わる温かい品は最後にまわす
+  const warm = buildCookPlan([
+    { id: 1, title: '炒めもの', steps: [{ text: '野菜を切る' }, { text: 'フライパンで炒める' }] },
+    { id: 2, title: 'あえもの', steps: [{ text: 'きゅうりを切る' }, { text: 'ごまと和える' }] },
+  ])
+  eq('ナビ正直表示: 並行の余地なし', warm.mode, 'sequential')
+  eq('ナビ正直表示: 加熱で終わる品を最後に作る', warm.items[warm.items.length - 1].recipeTitle, '炒めもの')
+
+  // 加熱のあとに味つけ・盛り付けが続く品も「温かい品」として最後にまわす（実機スクショで判明）
+  const warm2 = buildCookPlan([
+    {
+      id: 1,
+      title: '野菜炒め',
+      steps: [{ text: '材料を切る' }, { text: '肉を炒める' }, { text: '塩こしょうで味をつける' }, { text: '皿に盛る' }],
+    },
+    { id: 2, title: 'ツナサラダ', steps: [{ text: 'レタスをちぎる' }, { text: 'ドレッシングと和える' }] },
+  ])
+  eq('ナビ正直表示: 「炒める→味をつける→盛る」も温かい品として最後', warm2.items[0].recipeTitle, 'ツナサラダ')
+  eq(
+    'ナビ正直表示: 温かい品は最後まで通しで作る',
+    warm2.items[warm2.items.length - 1].recipeTitle,
+    '野菜炒め',
+  )
+
+  // 待ちが活きる組み合わせは従来どおり並行の段取り
+  const par = buildCookPlan([
+    { id: 1, title: '煮物', steps: [{ text: '材料を切る' }, { text: '鍋で15分煮る' }, { text: '盛る' }] },
+    { id: 2, title: 'サラダ', steps: [{ text: '野菜を切る' }, { text: 'ドレッシングと和える' }] },
+  ])
+  eq('ナビ正直表示: 待ちが活きる組み合わせは並行の段取りのまま', par.mode, 'parallel')
+  eq('ナビ正直表示: 並行のときは短縮率が5%以上', par.gainPercent >= 5, true)
+  eq(
+    'ナビ正直表示: 並行の段取りは1品ずつの合計より短い',
+    par.totalMinutes < par.sequentialMinutes,
+    true,
+  )
+}
+
 // ---------- stepCategory / buildCookTimeline(並行調理ナビ: 3品全体の流れを整える。
 // 2026-08-08 便EB・オーナー要望「野菜を切る工程はまとめたい」「準備→加熱→仕上げの流れ」) ----------
 {
@@ -4203,6 +4426,52 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   ])
   eq('ナビ流れ: 長い待ちが控えている品の下ごしらえを先に始める', span.items[0].recipeTitle, '長い')
   eq('ナビ流れ: 2番目には30分の待ちを仕掛ける', span.items[1].kind, 'wait')
+}
+
+// ---------- cutOrderRank / buildCookTimeline(並行調理ナビ: 切る順番は野菜→肉。
+// 2026-08-08 便ED・オーナー指示「切る順番を野菜→肉、肉は最後に」＝まな板の交差汚染を避ける定石) ----------
+{
+  eq('ナビ切る順: 「玉ねぎを切る」は先に切る側', cutOrderRank({ text: '玉ねぎを薄切りにする' }), 0)
+  eq('ナビ切る順: 「鶏もも肉を切る」は最後に切る側', cutOrderRank({ text: '鶏もも肉を一口大に切る' }), 1)
+  eq('ナビ切る順: 「豚バラ肉を切る」は最後に切る側', cutOrderRank({ text: '豚バラ薄切り肉を食べやすく切る' }), 1)
+  eq('ナビ切る順: 「鮭の切り身」は最後に切る側', cutOrderRank({ text: '鮭の切り身を半分に切る' }), 1)
+  // 判断が付かない語は野菜あつかい（余計に並べ替えない）
+  eq('ナビ切る順: 「材料を切る」は先に切る側(判断が付かないものは動かさない)', cutOrderRank({ text: '材料を切る' }), 0)
+
+  // 2品の「切る」が同時に着手できるとき、野菜の方が先に来る
+  const cutOrder = buildCookTimeline([
+    { id: 1, title: '肉料理', steps: [{ text: '鶏もも肉を一口大に切る' }, { text: 'フライパンで焼く' }] },
+    { id: 2, title: 'サラダ', steps: [{ text: 'レタスとトマトを切る' }, { text: 'ドレッシングと和える' }] },
+  ])
+  const cutTexts = cutOrder.items.map((it) => it.text)
+  eq(
+    'ナビ切る順: 野菜を切る工程が肉を切る工程より先に来る',
+    cutTexts.indexOf('レタスとトマトを切る') < cutTexts.indexOf('鶏もも肉を一口大に切る'),
+    true,
+  )
+}
+
+// ---------- parseCookNaviSession(並行調理ナビ: 作りかけの段取りを覚える。
+// 2026-08-08 便ED・オーナー実機フィードバック①「画面移動するたびに段取りを作るところからやり直し」) ----------
+{
+  eq(
+    'ナビ状態保持: 保存した内容をそのまま読み戻せる',
+    JSON.stringify(parseCookNaviSession('{"selectedIds":[3,7],"showTimeline":true,"trialActive":false}')),
+    JSON.stringify({ selectedIds: [3, 7], showTimeline: true, trialActive: false }),
+  )
+  eq('ナビ状態保持: 空の保存は覚えていない扱い', parseCookNaviSession(null), undefined)
+  eq('ナビ状態保持: 壊れた保存は覚えていない扱い', parseCookNaviSession('{壊れ'), undefined)
+  eq('ナビ状態保持: 選んだ品が無ければ覚えていない扱い', parseCookNaviSession('{"selectedIds":[]}'), undefined)
+  eq(
+    'ナビ状態保持: 数字でないIDは捨てる',
+    JSON.stringify(parseCookNaviSession('{"selectedIds":[1,"x",null,2]}')?.selectedIds),
+    JSON.stringify([1, 2]),
+  )
+  eq(
+    'ナビ状態保持: お試し中かどうかも覚える(戻るたびに回数を失わないため)',
+    parseCookNaviSession('{"selectedIds":[1],"trialActive":true}')?.trialActive,
+    true,
+  )
 }
 
 // ---------- stepIngredientAmounts / recipeIngredientList(並行調理ナビ: 段取り中に分量が見える。
