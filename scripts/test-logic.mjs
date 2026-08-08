@@ -12211,10 +12211,16 @@ eq(
 }
 
 // ---------- 献立のロック(2026-08-08 便DX・オーナー指示) ----------
-// 鍵の掛かった食事は「自動でまとめて動かす操作」の対象から外れる。守る経路は4つ:
+// 鍵の掛かった食事は「自動でまとめて動かす操作」の対象から外れる。守る経路は5つ:
 // ①まとめて献立を入力(空き枠だけ/レシピを総入れ替えの両方) ②テンプレートを適用
-// ③先週の献立をコピー ④まとめて空にする。手での編集は鍵が掛かっていても自由(=画面側の話)。
+// ③先週の献立をコピー ④まとめて空にする ⑤月の未定の日をまとめて提案。
+// 手での編集は鍵が掛かっていても自由(=画面側の話)。
 // 保存の粒度は「日付×食事」の1階層で、画面の「日ごと」は3食まとめての掛け外しとして表す
+//
+// 2026-08-09 便EJ: どの経路も「鍵ありの結果」だけを見ると、そもそも動く対象が無くて
+// 何も起きなかっただけでも合格してしまう(実際にe2eのLOCK-5がこの形で素通りしていた)。
+// 以後この節の断定は必ず「鍵なしなら動く／鍵ありでは鍵の枠だけが動かない」の対で書き、
+// 鍵を掛けていない枠が実際に埋まった・実際に消えたことを同時に固定する
 {
   const {
     mealLockKey,
@@ -12294,35 +12300,58 @@ eq(
   }
 
   // --- ①まとめて献立を入力(planWeekFill) ---
+  // 4日ぶんを用意し、鍵あり／鍵なしを必ず対で比べる。
+  //  08-10 … 鍵あり・自動の献立が入っている  → 消されないことを見る
+  //  08-11 … 鍵あり・空                      → 埋められないことを見る
+  //  08-12 … 鍵なし・自動の献立が入っている  → 総入れ替えで実際に消えることを見る
+  //  08-13 … 鍵なし・空                      → どちらの入れかたでも実際に埋まることを見る
   {
-    const week = ['2026-08-10', '2026-08-11']
+    const week = ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']
     const today = '2026-08-10'
     const entries = [
       { id: 1, date: '2026-08-10', slot: 'dinner', recipeId: 11, role: 'main', auto: true },
-      { id: 2, date: '2026-08-11', slot: 'dinner', recipeId: 12, role: 'main', auto: true },
+      { id: 2, date: '2026-08-12', slot: 'dinner', recipeId: 12, role: 'main', auto: true },
     ]
-    const locked = keys(['2026-08-10', 'dinner'])
-    // 空き枠だけ埋める(keepAuto=true)
+    const locked = keys(['2026-08-10', 'dinner'], ['2026-08-11', 'dinner'])
+    const slotDates = (plan) => plan.slotsToFill.map((s) => s.date)
+
+    // 空き枠だけ埋める(keepAuto=true)。鍵が無ければ空いている08-11と08-13が埋まる
+    const fillEmptyFree = planWeekFill(entries, week, ['dinner'], today, { keepAuto: true })
+    eq(
+      'DX-LOCK 一括入力(空き枠だけ・鍵なし): 空いている2日とも埋め対象になる',
+      slotDates(fillEmptyFree),
+      ['2026-08-11', '2026-08-13'],
+    )
     const fillEmpty = planWeekFill(entries, week, ['dinner'], today, { keepAuto: true, lockedKeys: locked })
-    eq('DX-LOCK 一括入力(空き枠だけ): ロック枠は埋め対象にならない', fillEmpty.slotsToFill, [])
+    eq(
+      'DX-LOCK 一括入力(空き枠だけ): ロック枠(空の08-11)だけが埋め対象から外れ、08-13は埋まる',
+      slotDates(fillEmpty),
+      ['2026-08-13'],
+    )
     eq('DX-LOCK 一括入力(空き枠だけ): ロック枠の行は消さない', fillEmpty.entryIdsToRemove, [])
-    eq('DX-LOCK 一括入力(空き枠だけ): ロック枠の数を返す', fillEmpty.lockedSlotCount, 1)
-    // レシピを総入れ替え(replaceAll=true)でもロック枠は触らない
+    eq('DX-LOCK 一括入力(空き枠だけ): ロック枠の数を返す', fillEmpty.lockedSlotCount, 2)
+
+    // レシピを総入れ替え(replaceAll=true)でもロック枠は触らない。
+    // 鍵が無ければ4日とも入れ直し、入っている2品(id=1,2)とも消える
+    const replaceAllFree = planWeekFill(entries, week, ['dinner'], today, { replaceAll: true })
+    eq('DX-LOCK 一括入力(総入れ替え・鍵なし): 4日とも入れ直す', slotDates(replaceAllFree), week)
+    eq('DX-LOCK 一括入力(総入れ替え・鍵なし): 入っている2品とも消える', replaceAllFree.entryIdsToRemove, [1, 2])
     const replaceAll = planWeekFill(entries, week, ['dinner'], today, { replaceAll: true, lockedKeys: locked })
     eq(
-      'DX-LOCK 一括入力(総入れ替え): ロックしていない11日だけ埋め直す',
+      'DX-LOCK 一括入力(総入れ替え): ロックしていない2日だけ埋め直す',
       replaceAll.slotsToFill.map((s) => `${s.date}|${s.slot}`),
-      ['2026-08-11|dinner'],
+      ['2026-08-12|dinner', '2026-08-13|dinner'],
     )
     eq('DX-LOCK 一括入力(総入れ替え): 消すのはロックしていない行だけ', replaceAll.entryIdsToRemove, [2])
     eq('DX-LOCK 一括入力(総入れ替え): ロック枠の中身は重複回避のusedに入る', replaceAll.usedRecipeIds.includes(11), true)
-    eq('DX-LOCK 一括入力(総入れ替え): ロック枠の数を返す', replaceAll.lockedSlotCount, 1)
+    eq('DX-LOCK 一括入力(総入れ替え): ロック枠の数を返す', replaceAll.lockedSlotCount, 2)
+
     // 料理が入っていない空の食事でも、鍵が掛かっていれば埋めない
     const emptyLocked = planWeekFill([], week, ['dinner'], today, { lockedKeys: locked })
     eq(
       'DX-LOCK 一括入力: 空の食事でも鍵が掛かっていれば入れない',
-      emptyLocked.slotsToFill.map((s) => s.date),
-      ['2026-08-11'],
+      slotDates(emptyLocked),
+      ['2026-08-12', '2026-08-13'],
     )
     eq('DX-LOCK 一括入力: 鍵を使っていなければ従来どおり(件数0)', planWeekFill([], week, ['dinner'], today).lockedSlotCount, 0)
   }
@@ -12330,7 +12359,7 @@ eq(
   // --- ②テンプレートを適用(planTemplateFill) ---
   {
     // 2026-08-10(月)・2026-08-11(火)。月=dow0・火=dow1
-    const plan = planTemplateFill({
+    const base = {
       items: [
         { dow: 0, slot: 'dinner', role: 'main', recipeId: 21 },
         { dow: 1, slot: 'dinner', role: 'main', recipeId: 22 },
@@ -12340,9 +12369,13 @@ eq(
       today: '2026-08-10',
       allowedDows: [0, 1, 2, 3, 4, 5, 6],
       visibleSlots: ['dinner'],
-      lockedKeys: keys(['2026-08-10', 'dinner']),
-    })
-    eq('DX-LOCK テンプレ適用: ロック枠には入れない', plan.ops, [
+    }
+    // 鍵が無ければ2日とも入る(=鍵ありの結果が「元から入らなかっただけ」ではない証明)
+    const free = planTemplateFill(base)
+    eq('DX-LOCK テンプレ適用(鍵なし): 2日とも入る', free.ops.length, 2)
+    eq('DX-LOCK テンプレ適用(鍵なし): ロック件数は0', free.lockedSlotCount, 0)
+    const plan = planTemplateFill({ ...base, lockedKeys: keys(['2026-08-10', 'dinner']) })
+    eq('DX-LOCK テンプレ適用: ロック枠には入れない(鍵の無い11日には入る)', plan.ops, [
       { date: '2026-08-11', slot: 'dinner', role: 'main', recipeId: 22 },
     ])
     eq('DX-LOCK テンプレ適用: ロック枠の数を返す', plan.lockedSlotCount, 1)
@@ -12390,6 +12423,34 @@ eq(
       planClearMealSlots(entries, ['dinner'], new Set()).entryIdsToRemove,
       [1, 2, 3],
     )
+  }
+
+  // --- ⑤月タブ「未定の日をまとめて提案」(planWeekFill を月の日付範囲＋keepAuto＋skipDatesで呼ぶ) ---
+  // 画面側(fillMonth)は週の一括入力と同じ純ロジックを、対象範囲だけ月に広げて使う。
+  // メモを書いた日(skipDates)を外す仕組みと鍵が同時に効くことを、鍵なしとの対で固定する
+  {
+    const month = ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13']
+    const today = '2026-08-10'
+    const noteDates = ['2026-08-12'] // 「外食」などのメモを書いた日
+    const monthArgs = { keepAuto: true, skipDates: noteDates }
+    const free = planWeekFill([], month, ['dinner'], today, monthArgs)
+    eq(
+      'DX-LOCK 月の未定日提案(鍵なし): メモの日だけ外し、残り3日は埋め対象になる',
+      free.slotsToFill.map((s) => s.date),
+      ['2026-08-10', '2026-08-11', '2026-08-13'],
+    )
+    const locked = planWeekFill([], month, ['dinner'], today, {
+      ...monthArgs,
+      lockedKeys: keys(['2026-08-11', 'dinner']),
+    })
+    eq(
+      'DX-LOCK 月の未定日提案: 鍵の日も外れ、鍵もメモも無い2日は実際に埋まる',
+      locked.slotsToFill.map((s) => s.date),
+      ['2026-08-10', '2026-08-13'],
+    )
+    eq('DX-LOCK 月の未定日提案: ロック枠の数を返す(確認文の件数に使う)', locked.lockedSlotCount, 1)
+    eq('DX-LOCK 月の未定日提案: メモの日は鍵とは別に数える', locked.skippedDates, noteDates)
+    eq('DX-LOCK 月の未定日提案: 非破壊(1品も消さない)', locked.entryIdsToRemove, [])
   }
 
   // 鍵は「その日その食事」だけに効く(隣の日・隣の食事へ漏れない)
