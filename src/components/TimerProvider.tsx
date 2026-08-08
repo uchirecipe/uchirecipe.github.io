@@ -144,11 +144,33 @@ function getSharedAudio(): AudioContext | undefined {
  * 2026-08-08 オーナー実機フィードバック③: 音量と鳴る長さを設定から変えられるようにしたので、
  * 回数とピークの音量を logic/timerSound.ts の対応表から引く。未設定なら従来と同じ音
  * （880Hz・0.45秒間隔で3回・ピーク0.4）。
+ *
+ * 2026-08-08 オーナー実機フィードバック⑥「音が重なって確認しづらい。他のボタン押下で音は
+ * 重複でなく切り替えしたい」: この呼び出しが鳴らす分だけを止める後始末を返す。
+ * 呼び出し側（設定の試聴ボタン）が前回の後始末を先に呼べば、鳴っている音を止めてから
+ * 次の音に切り替わる。タイマー本体の鳴らし方は変えない＝止めるかどうかは呼び出し側が決める
+ * （同時に終わったタイマーの音を、あとから終わった側が消してしまわないようにするため）。
  */
-export function playTimerChime(ctx: AudioContext | undefined, options?: TimerChimeOptions) {
+export function playTimerChime(
+  ctx: AudioContext | undefined,
+  options?: TimerChimeOptions,
+): () => void {
+  const started: OscillatorNode[] = []
+  /** この呼び出しで鳴らす音だけを今すぐ止める（まだ鳴り始めていない分の予約も解除される） */
+  const stop = () => {
+    for (const osc of started) {
+      try {
+        osc.stop()
+        osc.disconnect()
+      } catch {
+        /* 既に止まっている分は無視 */
+      }
+    }
+    started.length = 0
+  }
   try {
     const audio = ctx ?? getSharedAudio()
-    if (!audio) return
+    if (!audio) return stop
     void audio.resume().catch(() => {
       /* 無視（ユーザー操作なしのresumeはブラウザによって拒否されることがある） */
     })
@@ -167,10 +189,12 @@ export function playTimerChime(ctx: AudioContext | undefined, options?: TimerChi
       gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35)
       osc.start(at)
       osc.stop(at + 0.4)
+      started.push(osc)
     }
   } catch {
     /* 無視 */
   }
+  return stop
 }
 
 /**

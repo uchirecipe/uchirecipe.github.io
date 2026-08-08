@@ -373,6 +373,23 @@ export default function SettingsPage() {
   const [message, setMessage] = useState('')
   const importFileRef = useRef<HTMLInputElement>(null)
   const importModeRef = useRef<'replace' | 'merge'>('merge')
+  /**
+   * 直前に試聴で鳴らした音を止めるための後始末（2026-08-08 オーナー実機フィードバック⑥
+   * 「音量となる長さのボタンを押すと、音が重なって確認しづらい。他のボタン押下で音は
+   * 重複でなく切り替えしたい」）。
+   * 「鳴る長さ」を長くすると1回が約5秒鳴るので、続けて押すと前の音の上に次の音が重なって
+   * 聴き比べにならない。次を鳴らす前に、前の音を止める。
+   */
+  const stopPreviewRef = useRef<(() => void) | null>(null)
+  const previewTimerSound = () => {
+    stopPreviewRef.current?.()
+    stopPreviewRef.current = playTimerChime(undefined, {
+      volume: settings?.timerSoundVolume,
+      length: settings?.timerSoundLength,
+    })
+  }
+  // 設定画面を離れるときも、鳴らしっぱなしにしない
+  useEffect(() => () => stopPreviewRef.current?.(), [])
   const [recipeSetUrl, setRecipeSetUrl] = useState('')
   const [recipeSetLoading, setRecipeSetLoading] = useState(false)
   // 「レシピセットを読み込む」欄の「URLから読み込む」「ファイルから読み込む」の結果メッセージ
@@ -1530,6 +1547,10 @@ export default function SettingsPage() {
                 タイマー音がOFFのあいだは押せない状態にし、理由を1行で書く */}
             {/* 画面には出したまま押せなくする（存在ごと消すと「音量を変えられる」こと自体が
                 見えなくなるため）。読み上げからも隠さない＝aria-hiddenは付けない */}
+            {/* 2026-08-08 オーナー実機フィードバック⑦「音量と長さのボタン押下では音を鳴らさず、
+                『音を鳴らして〜』ボタン押下ではじめて音が鳴るようにする」: 音量・鳴る長さの
+                ボタンは選ぶだけ＝音を鳴らさない。鳴るのは「音を鳴らして確かめる」だけにして、
+                そのことをボタンの上に書く */}
             <div
               className={`mt-[var(--space-md)] ${
                 settings.timerSoundEnabled ? '' : 'opacity-40'
@@ -1545,11 +1566,7 @@ export default function SettingsPage() {
                       type="button"
                       disabled={!settings.timerSoundEnabled}
                       aria-pressed={selected}
-                      onClick={() => {
-                        void updateSettings({ timerSoundVolume: value })
-                        // 選んだ音をその場で鳴らす（押した瞬間＝ユーザー操作中なので音が出せる）
-                        playTimerChime(undefined, { volume: value, length: settings.timerSoundLength })
-                      }}
+                      onClick={() => void updateSettings({ timerSoundVolume: value })}
                       className={`rounded-sm border py-2 text-sm font-bold shadow-sm ${
                         selected
                           ? 'border-accent bg-accent text-on-accent'
@@ -1574,10 +1591,7 @@ export default function SettingsPage() {
                       type="button"
                       disabled={!settings.timerSoundEnabled}
                       aria-pressed={selected}
-                      onClick={() => {
-                        void updateSettings({ timerSoundLength: value })
-                        playTimerChime(undefined, { volume: settings.timerSoundVolume, length: value })
-                      }}
+                      onClick={() => void updateSettings({ timerSoundLength: value })}
                       className={`rounded-sm border py-2 text-sm font-bold tabular-nums shadow-sm ${
                         selected
                           ? 'border-accent bg-accent text-on-accent'
@@ -1590,17 +1604,20 @@ export default function SettingsPage() {
                 })}
               </div>
 
+              {/* 音が鳴るのはこのボタンだけ、ということを押す前に書いておく
+                  (オーナー指摘「ボタン押下で音が鳴る注意書きがない」) */}
+              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                {ja.settings.timerSoundPreviewNote}
+              </p>
               <button
                 type="button"
                 disabled={!settings.timerSoundEnabled}
                 onClick={() => {
-                  playTimerChime(undefined, {
-                    volume: settings.timerSoundVolume,
-                    length: settings.timerSoundLength,
-                  })
+                  // 鳴っている音を止めてから鳴らす＝続けて押しても重ならず切り替わる(⑥)
+                  previewTimerSound()
                   checkAudioPermission()
                 }}
-                className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+                className="mt-1 flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
               >
                 <Volume2 size={18} aria-hidden />
                 {ja.settings.timerSoundPreview}

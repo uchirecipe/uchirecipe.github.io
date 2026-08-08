@@ -3830,6 +3830,72 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   ], [0.4, 3])
 }
 
+// ---------- EE-7 タイマー音の注意書き(2026-08-08 オーナー実機フィードバック) ----------
+// 「音量と長さのボタン押下では音を鳴らさず、『音を鳴らして〜』ボタン押下ではじめて音が
+// 鳴るようにする」「ボタン押下で音が鳴る注意書きがない」。
+// どのボタンで鳴るかを言い切っているかを機械検査して、書き換えで曖昧に戻るのを止める
+{
+  eq(
+    'EE-7 注意書きが「音量と鳴る長さのボタンでは鳴らない」と言っている',
+    ja.settings.timerSoundPreviewNote.includes('音量と鳴る長さのボタンでは音は鳴りません'),
+    true,
+  )
+  eq(
+    'EE-7 注意書きが音の鳴るボタンを名前で挙げている',
+    ja.settings.timerSoundPreviewNote.includes(ja.settings.timerSoundPreview),
+    true,
+  )
+  // 規約H: 説明文で「ここ」「これ」等の指示語で場所を示さない
+  eq(
+    'EE-7 注意書きに指示語が入っていない',
+    /ここ|これ|それ|そこ|あちら/.test(ja.settings.timerSoundPreviewNote),
+    false,
+  )
+}
+
+// ---------- EE-3/EE-4 買い物完了の確認文(2026-08-08 オーナー実機フィードバック) ----------
+// ③「『買い物終了』後の文章が読みづらい」→内容ごとに改行。
+// ④「あとにする＝キャンセルだから処理をしないということ？」→実装(何も書き換えない)を
+//   そのまま書き、あとで反映する手順を押すボタンの名前で示す
+{
+  eq('EE-3 買い物完了の確認は4行に分かれている', ja.shopping.completeConfirmLines.length, 4)
+  // 規約F: 何が消えて何が残るかを件数つきで両方書く
+  eq(
+    'EE-3 消える件数({n})と残る件数({m})を両方書いている',
+    [
+      ja.shopping.completeConfirmLines.some((l) => l.includes('{n}') && l.includes('消えます')),
+      ja.shopping.completeConfirmLines.some((l) => l.includes('{m}') && l.includes('残ります')),
+    ],
+    [true, true],
+  )
+  // 2つのボタンが何をするかを、どちらも名前で書いている
+  for (const label of [ja.shopping.completeYes, ja.shopping.completeNo]) {
+    eq(
+      `EE-3 確認文が「${label}」を押したときの結果を書いている`,
+      ja.shopping.completeConfirmLines.some((l) => l.includes(`「${label}」を押すと`)),
+      true,
+    )
+  }
+  eq(
+    'EE-4 「あとにする」を押すと何も変わらないと書いている',
+    ja.shopping.completeLaterLines[0].includes(`「${ja.shopping.completeLater}」を押すと`) &&
+      ja.shopping.completeLaterLines[0].includes('変わりません'),
+    true,
+  )
+  eq(
+    'EE-4 あとで反映する手順を、押すボタンの名前で書いている',
+    ja.shopping.completeLaterLines.some(
+      (l) => l.includes(`「${ja.shopping.complete}」`) && l.includes(`「${ja.shopping.completeYes}」`),
+    ),
+    true,
+  )
+  eq(
+    'EE-4 手順の説明に指示語が入っていない',
+    ja.shopping.completeLaterLines.some((l) => /ここ|これ|それ|そこ|あちら/.test(l)),
+    false,
+  )
+}
+
 // ---------- selectPantryDowngrades(2026-07-23 オーナー実機FB #11「作った!」の在庫反映) ----------
 {
   const items = [
