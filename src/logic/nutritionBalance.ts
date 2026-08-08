@@ -268,30 +268,83 @@ export interface BalanceDish {
   /** YYYY-MM-DD */
   date: string
   recipe: BalanceRecipeLike
+  /**
+   * 「記録と献立で同じ料理か」を照合するキー（任意・2026-08-09 便EK）。
+   *
+   * 今日は作った記録と登録した献立が同居しうるので、同じ料理を両方で数えないための鍵に使う。
+   * レシピIDそのものではなく文字列にしてあるのは、ごはん（RICE_SERVING_RECIPE）のように
+   * レシピIDを持たない料理も記録側・献立側の両方に積まれるため（キーが無いと二重に数える）。
+   * 渡さなければ照合しない＝その品は必ず両方に残る。
+   */
+  matchKey?: string
 }
 
-/** その日を数えた基準（rangeSummary.ts の DayIntake.basis と同じ語彙） */
-export type BalanceBasis = 'actual' | 'plan'
+/**
+ * その日を数えた基準（rangeSummary.ts の DayIntake.basis と同じ語彙）。
+ * mixed＝今日で「作った記録」と「まだ作っていない献立」の両方を数えた日（2026-08-09 便EK）。
+ */
+export type BalanceBasis = 'actual' | 'plan' | 'mixed'
 
 /** 1日分のバランス集計結果 */
 export interface DayBalance {
   /** YYYY-MM-DD */
   date: string
-  /** 過去日=作った記録（actual）／今日以降=登録した献立（plan） */
+  /** 作った記録だけ（actual）／登録した献立だけ（plan）／今日で両方を数えた日（mixed） */
   basis: BalanceBasis
   /** その日の1人分の合計 */
   balance: BalanceSum
   /** めやすとの並置を出してよいか（canCompareDay） */
   comparable: boolean
+  /**
+   * 合計に入れた品のうち、どの食事（朝/昼/夕）のものか分からない品数（2026-08-09 便EK）。
+   * ＝その日の献立と結び付かなかった「作った記録」の品数。
+   * 0でない日は、食事ごとの小計を出すと1日の合計と足し算が合わない（呼び出し側で出さない）。
+   */
+  slotUnknownDishCount: number
+}
+
+/**
+ * 今日ぶんの二重計上を防ぐ（2026-08-09 便EK。rangeSummary.ts の同名処理と同じ数え方）。
+ * 今日の作った記録の件数だけ、今日の献立を先着で取り下げる＝記録1件につき献立1枠を消費する。
+ * 照合キーの無い品は落とさない（＝従来どおり献立として数える）。
+ */
+function dropPlannedAlreadyCooked(
+  plannedDishes: BalanceDish[],
+  cookedDishes: BalanceDish[],
+): { remaining: BalanceDish[]; matched: number } {
+  const left = new Map<string, number>()
+  for (const dish of cookedDishes) {
+    if (dish.matchKey == null) continue
+    left.set(dish.matchKey, (left.get(dish.matchKey) ?? 0) + 1)
+  }
+  if (left.size === 0) return { remaining: plannedDishes, matched: 0 }
+  const remaining: BalanceDish[] = []
+  let matched = 0
+  for (const dish of plannedDishes) {
+    const key = dish.matchKey
+    const n = key == null ? 0 : (left.get(key) ?? 0)
+    if (key == null || n <= 0) {
+      remaining.push(dish)
+      continue
+    }
+    left.set(key, n - 1)
+    matched++
+  }
+  return { remaining, matched }
 }
 
 /**
  * 日付ごとの「その日1人分」のバランスを集計する（週タブの各日カード用）。
  *
  * 数える基準は便CA以降の統一規則（rangeSummary.ts §規則2）と同じ:
- * **過去日（date < today）は作った記録だけ・今日以降（date >= today）は登録した献立だけ**。
+ * **過去日（date < today）は作った記録だけ・未来日（date > today）は登録した献立だけ・
+ * 今日は「作った記録があるものは記録、まだのものは登録した献立」**。
  * 1日を実績と予定の両方で数えない＝二重計上しない、が最優先。
  * 日付比較は YYYY-MM-DD の辞書式比較がそのまま日付比較になる前提（isPastDate と同じ）。
+ *
+ * 2026-08-09 便EK: 従来は今日を予定側だけで数えていたため、**今日すでに作ったものが1日の合計に
+ * 入らず**、同じ規則で数えているはずの期間集計（summarizeRangeIntake・dayIntakeMap。2026-08-08
+ * 便EAで修正済み）と食い違っていた。今日の数え方をそちらへそろえる。
  *
  * 数字が出ない日（記録も予定も無い日）はMapに入れない＝呼び出し側でその日は何も出さない。
  * 食事帯（朝/昼/夕）では絞らない: 1日の合計は「その日に登録されている献立ぜんぶ」で数える
@@ -305,12 +358,12 @@ export function dayBalanceMap(input: {
   planned: BalanceDish[]
 }): Map<string, DayBalance> {
   const { dates, today, cooked, planned } = input
-  const byDate = (dishes: BalanceDish[]): Map<string, BalanceRecipeLike[]> => {
-    const map = new Map<string, BalanceRecipeLike[]>()
+  const byDate = (dishes: BalanceDish[]): Map<string, BalanceDish[]> => {
+    const map = new Map<string, BalanceDish[]>()
     dishes.forEach((d) => {
       const list = map.get(d.date)
-      if (list) list.push(d.recipe)
-      else map.set(d.date, [d.recipe])
+      if (list) list.push(d)
+      else map.set(d.date, [d])
     })
     return map
   }
@@ -319,15 +372,39 @@ export function dayBalanceMap(input: {
 
   const result = new Map<string, DayBalance>()
   for (const date of dates) {
-    const basis: BalanceBasis = date < today ? 'actual' : 'plan'
-    const recipes = (basis === 'actual' ? cookedByDate.get(date) : plannedByDate.get(date)) ?? []
-    if (recipes.length === 0) continue
-    const balance = sumBalance(recipes)
+    let dishes: BalanceDish[]
+    let basis: BalanceBasis
+    // 合計に入れたが、どの食事のものか分からない品数（＝献立と結び付かなかった記録）
+    let slotUnknownDishCount: number
+    if (date < today) {
+      dishes = cookedByDate.get(date) ?? []
+      basis = 'actual'
+      // 作った記録には食事（朝/昼/夕）の情報が無い＝過去日は全品が「食事の分からない品」
+      slotUnknownDishCount = dishes.length
+    } else if (date > today) {
+      dishes = plannedByDate.get(date) ?? []
+      basis = 'plan'
+      slotUnknownDishCount = 0
+    } else {
+      const cookedDishes = cookedByDate.get(date) ?? []
+      const { remaining, matched } = dropPlannedAlreadyCooked(
+        plannedByDate.get(date) ?? [],
+        cookedDishes,
+      )
+      dishes = [...cookedDishes, ...remaining]
+      basis =
+        cookedDishes.length === 0 ? 'plan' : remaining.length === 0 ? 'actual' : 'mixed'
+      // 献立に無い料理を作った記録だけが「食事の分からない品」として残る
+      slotUnknownDishCount = cookedDishes.length - matched
+    }
+    if (dishes.length === 0) continue
+    const balance = sumBalance(dishes.map((d) => d.recipe))
     result.set(date, {
       date,
       basis,
       balance,
       comparable: canCompareDay(balance.nutrition),
+      slotUnknownDishCount,
     })
   }
   return result
@@ -358,7 +435,9 @@ const SLOT_ORDER = ['breakfast', 'lunch', 'dinner'] as const satisfies readonly 
  * ＝1食しか登録していない日は、1日の合計と同じ数字がもう一度並ぶだけになるため。
  *
  * 対象は**登録した献立だけ**。作った記録（CookedLog）には食事の情報が無いので、
- * 過ぎた日（basis='actual'）の小計は作れない（作れないものを推測で埋めない）。
+ * 過ぎた日の小計は作れない（作れないものを推測で埋めない）。
+ * 今日は記録と献立が同居しうるが、記録がすべて献立の中の料理なら
+ * 「献立ぜんぶ＝その日の合計」なので小計を出せる（DayBalance.slotUnknownDishCount が0の日）。
  */
 export function slotBalances(dishes: { slot: MealSlot; recipe: BalanceRecipeLike }[]): SlotBalance[] {
   const bySlot = new Map<MealSlot, BalanceRecipeLike[]>()

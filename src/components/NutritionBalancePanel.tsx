@@ -41,6 +41,7 @@ import { ja } from '../i18n/ja'
 export default function NutritionBalancePanel({
   scope,
   basis,
+  isToday,
   dateLabel,
   isPro,
   balance,
@@ -50,8 +51,14 @@ export default function NutritionBalancePanel({
 }: {
   /** 'day' = 週タブの各日カード / 'week' = 週まとめ */
   scope: 'day' | 'week'
-  /** 'day' のとき、その日を数えた基準（過去日=作った記録・今日以降=登録した献立） */
+  /** 'day' のとき、その日を数えた基準（作った記録／登録した献立／今日で両方＝mixed） */
   basis?: BalanceBasis
+  /**
+   * 今日を含むか（'day'＝その日が今日／'week'＝表示中の週に今日が入っている。2026-08-09 便EK）。
+   * 今日だけは「作った記録があるものは記録、まだのものは登録した献立」で数えるので、
+   * 数え方の1行を過ぎた日・先の日と書き分ける。
+   */
+  isToday?: boolean
   /** 'day' のとき、開閉ボタンの読み上げ名に入れる日付表記（7日分が同名で並ぶのを避ける） */
   dateLabel?: string
   isPro: boolean
@@ -63,7 +70,8 @@ export default function NutritionBalancePanel({
   /**
    * 食事ごとの小計（2026-08-02 便CW-6。Pro解錠時だけ展開部に出す）。
    * 2つ以上の食事に献立があるときだけ渡す＝1食だけの日は1日の合計と同じ数字になるので出さない。
-   * 作った記録には食事の情報が無いため、過ぎた日（basis='actual'）には渡らない
+   * 作った記録には食事の情報が無いため、過ぎた日と、献立に無い料理を作った記録がある日には渡らない
+   * （小計を足しても1日の合計にならない日には出さない。2026-08-09 便EK）
    */
   slotBreakdown?: SlotBalance[]
 }) {
@@ -84,9 +92,11 @@ export default function NutritionBalancePanel({
   const title =
     scope === 'week'
       ? ja.nutritionBalance.weekTitle
-      : basis === 'actual'
-        ? ja.nutritionBalance.dayTitleActual
-        : ja.nutritionBalance.dayTitlePlan
+      : basis === 'mixed'
+        ? ja.nutritionBalance.dayTitleMixed
+        : basis === 'actual'
+          ? ja.nutritionBalance.dayTitleActual
+          : ja.nutritionBalance.dayTitlePlan
   // 各値は「約516kcal」「塩分約0g」のように語と数字の途中で改行されないよう、値ごとに折り返し禁止で置く
   // （390px幅では「塩分約」で改行されて読みにくかった）。
   // 塩分はPro解錠時のみ（2026-08-01 線引きB'。無料は「約◯kcal・野菜約◯g」の2値）
@@ -176,13 +186,18 @@ export default function NutritionBalancePanel({
               自分の数値との並置・良し悪しの判定はしない */}
           {canShowNumbers && <p className="text-xs text-ink-muted">{guideNote}</p>}
           <div className="space-y-0.5 text-xs text-ink-muted">
+            {/* どの基準で数えたか。今日だけは記録と献立が同居しうるので1行を分ける
+                （2026-08-09 便EK。期間カードの基準行と同じ言い方にそろえてある） */}
             <p>
               {scope === 'week'
                 ? ja.nutritionBalance.weekBasisNote
-                : basis === 'actual'
-                  ? ja.nutritionBalance.basisNoteActual
-                  : ja.nutritionBalance.basisNotePlan}
+                : isToday
+                  ? ja.nutritionBalance.basisNoteToday
+                  : basis === 'actual'
+                    ? ja.nutritionBalance.basisNoteActual
+                    : ja.nutritionBalance.basisNotePlan}
             </p>
+            {scope === 'week' && isToday && <p>{ja.nutritionBalance.basisNoteToday}</p>}
             {/* 計算できなかった品の件数（既存の月タブと同じ文言・同じ作法で明示する） */}
             {sum.excludedDishCount > 0 && (
               <p>

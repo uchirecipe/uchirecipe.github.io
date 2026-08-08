@@ -10862,7 +10862,8 @@ eq(
     100,
   )
 
-  // (3) 日別集計: 過去日=作った記録・今日以降=登録した献立(便CA以降の統一規則。二重計上しない)
+  // (3) 日別集計: 過去日=作った記録・未来日=登録した献立・今日は「作った記録があるものは記録、
+  // まだのものは登録した献立」(便CA以降の統一規則＋2026-08-08 便EA。1日を両方で数えない)
   const cabbage = one('キャベツ', '100', 'g')
   const carrot = one('にんじん', '50', 'g')
   const clDates = ['2026-07-28', '2026-07-29', '2026-07-30', '2026-07-31']
@@ -10871,13 +10872,13 @@ eq(
     today: '2026-07-30',
     cooked: [
       { date: '2026-07-28', recipe: cabbage },
-      // 今日の作った記録は「今日以降=予定」の規則により数えない(月タブと同じ境界)
-      { date: '2026-07-30', recipe: carrot },
+      // 今日の作った記録も数える(2026-08-09 便EK。以前は予定側だけを見ていて記録が落ちていた)
+      { date: '2026-07-30', recipe: carrot, matchKey: 'r:carrot' },
     ],
     planned: [
       // 過去日の予定は数えない(過去は実績だけ)
       { date: '2026-07-28', recipe: carrot },
-      { date: '2026-07-30', recipe: cabbage },
+      { date: '2026-07-30', recipe: cabbage, matchKey: 'r:cabbage' },
       { date: '2026-07-31', recipe: cabbage },
     ],
   })
@@ -10888,24 +10889,91 @@ eq(
     Math.round(clMap.get('2026-07-28').balance.vegetableG),
     100,
   )
-  eq('CL-DAY 今日は予定で数える(基準)', clMap.get('2026-07-30').basis, 'plan')
   eq(
-    'CL-DAY 今日の作った記録は合計に入れない(二重計上しない)',
+    'CL-DAY 過去日は全品が「どの食事か分からない品」(記録に食事の情報が無い)',
+    clMap.get('2026-07-28').slotUnknownDishCount,
+    1,
+  )
+  eq('CL-DAY 今日に記録と献立が両方あれば基準はmixed', clMap.get('2026-07-30').basis, 'mixed')
+  eq(
+    'CL-DAY 今日は「作った記録＋まだ作っていない献立」を足す(記録を落とさない)',
     Math.round(clMap.get('2026-07-30').balance.vegetableG),
-    100,
+    150,
   )
   eq('CL-DAY 未来日も予定で数える', clMap.get('2026-07-31').basis, 'plan')
+  eq('CL-DAY 未来日に「食事の分からない品」は無い', clMap.get('2026-07-31').slotUnknownDishCount, 0)
   eq('CL-DAY 数えた日数は記録/予定がある日だけ', summarizeWeekBalance(clMap.values()).countedDays, 3)
   eq(
     'CL-DAY 週まとめは各日の1人分を足した値',
     Math.round(summarizeWeekBalance(clMap.values()).balance.vegetableG),
-    300,
+    350,
   )
   eq(
     'CL-DAY 週まとめの品数も各日の合算',
     summarizeWeekBalance(clMap.values()).balance.nutrition.dishCount,
-    3,
+    4,
   )
+
+  // (3a) 2026-08-09 便EK: 今日の二重計上ゼロ。同じ料理を記録と献立の両方で数えない
+  // (数え方は logic/rangeSummary.ts の期間集計＝便EAで直したものと同じ規則)
+  {
+    const todayOf = (cooked, planned) =>
+      dayBalanceMap({ dates: ['2026-07-30'], today: '2026-07-30', cooked, planned }).get('2026-07-30')
+    // 予定どおり作った日: 記録と献立に同じ料理が並んでも1品だけ数える
+    const done = todayOf(
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' }],
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' }],
+    )
+    eq('CL-TODAY 予定どおり作った品は1回だけ数える(二重計上ゼロ)', done.balance.nutrition.dishCount, 1)
+    eq('CL-TODAY 予定どおり作った品の野菜量も1品ぶん', Math.round(done.balance.vegetableG), 100)
+    eq('CL-TODAY 献立が全部記録に変わった日の基準はactual', done.basis, 'actual')
+    eq('CL-TODAY 記録が献立の中の料理なら食事は分かる(小計を出せる)', done.slotUnknownDishCount, 0)
+    // 2品の予定のうち1品だけ作った日: 記録1品＋まだの献立1品＝2品
+    const half = todayOf(
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' }],
+      [
+        { date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' },
+        { date: '2026-07-30', recipe: carrot, matchKey: 'r:2' },
+      ],
+    )
+    eq('CL-TODAY 作った分は記録・まだの分は献立で、合わせて2品', half.balance.nutrition.dishCount, 2)
+    eq('CL-TODAY 半分作った日の基準はmixed', half.basis, 'mixed')
+    eq('CL-TODAY 半分作った日も食事は全部分かる', half.slotUnknownDishCount, 0)
+    // 同じ料理を2枠に予定して1回だけ作った日: 記録1枠ぶんだけを記録に振り替える
+    const twice = todayOf(
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' }],
+      [
+        { date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' },
+        { date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' },
+      ],
+    )
+    eq('CL-TODAY 同じ料理を2枠に予定して1回作った日は2品のまま', twice.balance.nutrition.dishCount, 2)
+    eq('CL-TODAY 記録1件につき献立1枠だけを消費する', twice.basis, 'mixed')
+    // 予定に無いものを作った日: 合計には入るが、どの食事のものかは分からない
+    const extra = todayOf(
+      [{ date: '2026-07-30', recipe: carrot, matchKey: 'r:9' }],
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' }],
+    )
+    eq('CL-TODAY 献立に無い料理の記録も合計に入る', extra.balance.nutrition.dishCount, 2)
+    eq('CL-TODAY 献立に無い記録は「食事の分からない品」に数える', extra.slotUnknownDishCount, 1)
+    // 照合キーが無い品(ごはんのようにレシピIDを持たない品)は落とさない=従来どおり両方に残る。
+    // 画面側(MealPlanPage)はごはんにも専用キーを渡して二重計上を防いでいる
+    const rice = todayOf(
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'rice' }],
+      [{ date: '2026-07-30', recipe: cabbage, matchKey: 'rice' }],
+    )
+    eq('CL-TODAY レシピID以外のキー(ごはん)でも二重計上しない', rice.balance.nutrition.dishCount, 1)
+    const noKey = todayOf(
+      [{ date: '2026-07-30', recipe: cabbage }],
+      [{ date: '2026-07-30', recipe: cabbage }],
+    )
+    eq('CL-TODAY 照合キーが無ければ突き合わせない(記録と献立で2品)', noKey.balance.nutrition.dishCount, 2)
+    // 記録だけの今日: 献立が空でも数字が出る(便EK以前は今日の記録が丸ごと落ちていた)
+    const cookedOnly = todayOf([{ date: '2026-07-30', recipe: cabbage, matchKey: 'r:1' }], [])
+    eq('CL-TODAY 献立が無くても今日の記録だけで数字が出る', cookedOnly.balance.nutrition.dishCount, 1)
+    eq('CL-TODAY 記録だけの今日の基準はactual', cookedOnly.basis, 'actual')
+    eq('CL-TODAY 献立に無い記録なので食事は分からない', cookedOnly.slotUnknownDishCount, 1)
+  }
 
   // (3b) 食事ごとの小計(2026-08-02 便CW-6。Pro表示の「食事ごとの内訳」)。
   // 並びは朝食→昼食→夕食に固定・料理が無い食事は返さない・数え方は1日の合計と同じ
@@ -12898,6 +12966,28 @@ eq(
       eq(`EK-1 ${rel} に古い見出し「今週の概算食費」が残っていない`, src.includes('今週の概算食費'), false)
     }
   }
+}
+
+// ---------- 便EK-5: 「今日をどう数えるか」の言い方を、期間カードと週タブでそろえる ----------
+// 期間カード(便EA)と週タブの栄養パネル(便EK)は同じ規則で数えるので、画面の言い方も1つにする。
+// 週まとめの1行に「今日から先は登録した献立」が残っていると、今日の記録を数えている実装と食い違う。
+{
+  eq(
+    'EK-5 今日の数え方の1文が期間カードと同じ',
+    ja.nutritionBalance.basisNoteToday,
+    ja.mealPlan.rangeBasisToday,
+  )
+  eq(
+    'EK-5 週まとめの1行が今日を予定側に丸ごと入れる言い方をしていない',
+    ja.nutritionBalance.weekBasisNote.includes('今日から先'),
+    false,
+  )
+  eq(
+    'EK-5 今日の日カードの見出し(記録と献立の両方を足した日)がある',
+    ja.nutritionBalance.dayTitleMixed.includes('作った記録') &&
+      ja.nutritionBalance.dayTitleMixed.includes('献立'),
+    true,
+  )
 }
 
 // ---------- 結果 ----------

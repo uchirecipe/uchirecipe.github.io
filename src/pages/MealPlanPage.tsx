@@ -628,6 +628,15 @@ const MONTH_CELL_MODES: { value: MonthCellMode; label: string }[] = [
   { value: 'nutrition', label: ja.mealPlan.monthCellModeNutrition },
   { value: 'cost', label: ja.mealPlan.monthCellModeCost },
 ]
+/**
+ * 栄養の日ごと集計で「記録と献立が同じ料理か」を突き合わせるキー（2026-08-09 便EK）。
+ * 今日は記録と献立が同居しうるので、同じ料理を両方で数えないための鍵になる。
+ * ごはん（便CW-10で足す1杯）はレシピIDを持たないため、専用のキーを1つ用意する。
+ */
+const RICE_BALANCE_MATCH_KEY = 'rice'
+const balanceMatchKey = (recipeId: number | undefined): string | undefined =>
+  recipeId == null ? undefined : `recipe:${recipeId}`
+
 const formatNutrient = (key: keyof NutrientTotals, value: number): string => {
   const n = roundNutrient(key, value).toLocaleString()
   if (key === 'kcal') return `${n} ${ja.nutrition.kcalUnit}`
@@ -1994,7 +2003,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const prefix = monthAnchor.slice(0, 7)
     cookedLogsByDate.forEach((logs, date) => {
       if (!date.startsWith(prefix)) return
-      logs.forEach(({ recipe }) => list.push({ date, recipe }))
+      logs.forEach(({ recipe }) =>
+        list.push({ date, recipe, matchKey: balanceMatchKey(recipe.id) }),
+      )
     })
     return list
   }, [cookedLogsByDate, monthAnchor])
@@ -2002,7 +2013,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const list: BalanceDish[] = []
     monthEntries?.forEach((e) => {
       const recipe = recipeById.get(e.recipeId)
-      if (recipe) list.push({ date: e.date, recipe })
+      if (recipe) list.push({ date: e.date, recipe, matchKey: balanceMatchKey(e.recipeId) })
     })
     return list
   }, [monthEntries, recipeById])
@@ -3920,20 +3931,27 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 栄養バランスの見える化(2026-07-30 便CL・docs/60 第1段)。
    * 週タブの各日カードと週まとめに「その日/その週の献立ぶん(1人分)」の栄養と野菜量を出す。
    *
-   * 数える基準は便CA以降の統一規則: **過去日=作った記録・今日以降=登録した献立**
+   * 数える基準は便CA以降の統一規則: **過去日=作った記録・未来日=登録した献立・
+   * 今日は「作った記録があるものは記録、まだのものは登録した献立」**
    * (rangeSummaryのdayIntakeMap・月カレンダーのセル表示と同じ。1日を両方で数えない)。
    * 食費(weekCostEstimate)は「これから作る予定」だけを対象にするので activeEntries を見るが、
    * こちらは過去日も対象に含める: 週タブの過去日には「作った記録」カードが出ているので、
    * その日の数字がどこから来たのか画面から辿れる。
    * 食事帯(visibleSlots)では絞らない(1日の合計は、その日に登録されている献立ぜんぶで数える)。
+   *
+   * matchKey は「今日の記録と今日の献立で同じ料理を二重に数えない」ための照合キー(2026-08-09 便EK)。
+   * ごはん(便CW-10で足す1杯)はレシピIDを持たず記録側・献立側の両方に積まれるので、
+   * 専用のキーを与えて同じ料理として突き合わせる。
    */
   const weekBalanceCooked = useMemo<BalanceDish[]>(() => {
     const list: BalanceDish[] = []
     dates.forEach((date) => {
-      cookedLogsByDate.get(date)?.forEach(({ recipe }) => list.push({ date, recipe }))
+      cookedLogsByDate
+        .get(date)
+        ?.forEach(({ recipe }) => list.push({ date, recipe, matchKey: balanceMatchKey(recipe.id) }))
       // 「ごはんを含めて計算する」がONのときだけ、その日のごはんを1品として足す(便CW-10)
       riceServingRecipes(riceActualServingsByDate.get(date) ?? 0).forEach((recipe) =>
-        list.push({ date, recipe }),
+        list.push({ date, recipe, matchKey: RICE_BALANCE_MATCH_KEY }),
       )
     })
     return list
@@ -3942,10 +3960,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const list: BalanceDish[] = []
     ;(entries ?? []).forEach((e) => {
       const recipe = recipeById.get(e.recipeId)
-      if (recipe) list.push({ date: e.date, recipe })
+      if (recipe) list.push({ date: e.date, recipe, matchKey: balanceMatchKey(e.recipeId) })
     })
     ricePlanServingsByDate.forEach((n, date) => {
-      riceServingRecipes(n).forEach((recipe) => list.push({ date, recipe }))
+      riceServingRecipes(n).forEach((recipe) =>
+        list.push({ date, recipe, matchKey: RICE_BALANCE_MATCH_KEY }),
+      )
     })
     return list
   }, [entries, recipeById, ricePlanServingsByDate])
@@ -3966,8 +3986,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 日ごと・食事ごとの栄養の小計（2026-08-02 便CW-6・オーナー要望。Pro解錠時だけ画面に出す）。
    * 元は「登録した献立」だけ＝作った記録には食事(朝/昼/夕)の情報が無いので、
-   * 過ぎた日(basis='actual'の日)には出さない。2つ以上の食事に献立がある日だけMapに入れる
+   * 過ぎた日には出さない。2つ以上の食事に献立がある日だけMapに入れる
    * （1食だけの日は1日の合計と同じ数字がもう一度並ぶだけになるため）。
+   *
+   * 2026-08-09 便EK: 今日を「作った記録があるものは記録」で数えるようにしたので、条件を
+   * 「基準が予定の日」から「合計に入れた品が全部どの食事のものか分かる日
+   * （slotUnknownDishCount===0）」へ変えた。今日ぶんを記録で数えても、その記録が献立の中の
+   * 料理なら合計＝献立ぜんぶなので、小計と1日の合計はぴったり足し算が合う。
+   * 献立に無い料理を作った記録がある日だけ、小計を出さない（足し算が合わなくなるため）。
    */
   const weekSlotBalanceByDate = useMemo(() => {
     const byDate = new Map<string, { slot: MealSlot; recipe: BalanceRecipeLike }[]>()
@@ -3988,7 +4014,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     })
     const result = new Map<string, SlotBalance[]>()
     byDate.forEach((dishes, date) => {
-      if (weekBalanceByDate.get(date)?.basis !== 'plan') return
+      const dayBalance = weekBalanceByDate.get(date)
+      if (!dayBalance || dayBalance.slotUnknownDishCount > 0) return
       const list = slotBalances(dishes)
       if (list.length > 1) result.set(date, list)
     })
@@ -6278,6 +6305,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <NutritionBalancePanel
                     scope="day"
                     basis={dayBalance.basis}
+                    // 今日は「作った記録があるものは記録、まだのものは献立」で数えるので、
+                    // 数え方の1行を過ぎた日と書き分ける(2026-08-09 便EK)
+                    isToday={date === today}
                     dateLabel={date.replaceAll('-', '/')}
                     isPro={isPro}
                     balance={dayBalance.balance}
@@ -6320,6 +6350,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         <div className="mt-[var(--space-md)]">
           <NutritionBalancePanel
             scope="week"
+            // 今日を含む週だけ、今日の数え方の1行を足す(2026-08-09 便EK)
+            isToday={dates.includes(today)}
             isPro={isPro}
             balance={weekBalance.balance}
             includeRice={includeRice}
