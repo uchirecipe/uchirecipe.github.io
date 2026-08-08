@@ -29,6 +29,7 @@ import {
   cookNaviTrialRemaining,
 } from '../logic/proTrial'
 import { useTimers } from '../components/TimerProvider'
+import { useWakeLock } from '../components/useWakeLock'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
 import { buildCookPlan, hasLaterHandsOnStep, type TimelineItem } from '../logic/cookNavi'
@@ -327,6 +328,12 @@ export default function CookNaviPage() {
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
   const { startTimer, timers } = useTimers()
+  /**
+   * 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
+   * （2026-08-08 便ED。レシピ詳細・調理中モードと同じ扱い。ナビも手を動かしながら見る画面で、
+   * 消灯するたびに解除するのは同じように困るため。設定がオフなら従来どおり何もしない）。
+   */
+  useWakeLock(settings?.keepScreenOn ?? false)
 
   const recipeById = useMemo(() => {
     const map = new Map<number, Recipe>()
@@ -400,9 +407,13 @@ export default function CookNaviPage() {
   const [toast, setToast] = useState('')
   const [undoCooked, setUndoCooked] = useState<{ recipeId: number }[] | null>(null)
 
-  // 選択・表示状態が変わるたびに覚え直す（保存するのは選択と表示中かどうかだけ。段取りは開くたびに組み直す）
+  // 選択・表示状態が変わるたびに覚え直す（保存するのは選択と表示中かどうかだけ。段取りは開くたびに組み直す）。
+  // 1品も選んでいない状態は覚えない＝選択を全部外したら、次に開いたときは今日の献立から選び直す
   useEffect(() => {
-    if (selectedIds.length === 0) return
+    if (selectedIds.length === 0) {
+      clearCookNaviSession()
+      return
+    }
     saveCookNaviSession({ selectedIds, showTimeline, trialActive })
   }, [selectedIds, showTimeline, trialActive])
 
@@ -415,14 +426,18 @@ export default function CookNaviPage() {
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
   const [highlightKey, setHighlightKey] = useState<string | null>(null)
-  useEffect(() => {
+  /** ?focusStep= の着地。段取りがまだ描かれていないうちは何もせず、描かれてからやり直す */
+  const applyFocusStep = () => {
     const focus = searchParams.get('focusStep')
     if (!focus) return
     const el = document.getElementById(`navi-step-${focus}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setHighlightKey(focus)
-    }
+    // 別の画面から戻ってきた直後は、レシピの読み込みが終わるまで段取りが描かれていない。
+    // ここで諦めて focusStep を消してしまうと二度とハイライトできないので、
+    // パラメータを残したまま何もしない（段取りが描けたらこの処理が呼び直される）
+    // ＝2026-08-08 便ED・オーナー実機フィードバック②の着地が効かない不具合の修正
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightKey(focus)
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -431,8 +446,7 @@ export default function CookNaviPage() {
       },
       { replace: true },
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+  }
 
   /**
    * ハイライトを2秒で消す（2026-08-08 便ED・オーナー実機フィードバック③
@@ -484,6 +498,15 @@ export default function CookNaviPage() {
     [showTimeline, selectedRecipes],
   )
   const isSequential = timeline?.mode === 'sequential'
+
+  // ?focusStep= の着地は、段取りの手順カードが描かれてから行う（2026-08-08 便ED）。
+  // 常駐タイマーから別の画面 → ナビ、と飛んできたときは、この画面が組み上がるより先に
+  // 副作用が走る。手順カードが出るのは「今日の献立（todayRecipes）の読み込みが終わって、
+  // かつ段取り（timeline）が組めたとき」なので、その両方を依存に入れて描けた時点でやり直す
+  useEffect(() => {
+    applyFocusStep()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, timeline, todayRecipes])
 
   /**
    * 各レシピを何人分として扱うか（2026-08-08 便EB）。分量は「作る量」なので、
