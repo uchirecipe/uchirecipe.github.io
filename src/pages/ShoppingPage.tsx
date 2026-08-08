@@ -30,13 +30,16 @@ import {
 import {
   buildShoppingCandidates,
   sortShoppingByAisle,
+  groupShoppingByAisle,
+  resolveShoppingSources,
   parseRecipeIdsParam,
   parseServingsParam,
   type ShoppingCandidate,
+  type ShoppingSourceResult,
 } from '../logic/shopping'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import type { SearchResult } from '../logic/search'
-import type { ShoppingItem } from '../db/types'
+import type { Ingredient, ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
 import { settingsLinkWithBack } from '../logic/backLink'
@@ -145,10 +148,14 @@ export default function ShoppingPage() {
     return settings?.hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
   }, [recipes, settings?.hideStarters])
 
-  // recipeId → レシピ名(下書きの食材名タップで「使うレシピ」を出すため。2026-07-24 実機FB #10)
-  const recipeTitleById = useMemo(() => {
-    const map = new Map<number, string>()
-    for (const r of recipes ?? []) if (r.id != null) map.set(r.id, r.title)
+  // recipeId → レシピ(名前と材料)。食材名タップの出所の小窓に使う。
+  // 材料まで持つのは、出所の分量を持たない古い行でレシピの材料欄から読み直すため
+  // (2026-07-24 実機FB #10 → 2026-08-08 オーナー実機フィードバック②で買い物メモにも拡張)
+  const recipeById = useMemo(() => {
+    const map = new Map<number, { title: string; ingredients: Ingredient[] }>()
+    for (const r of recipes ?? []) {
+      if (r.id != null) map.set(r.id, { title: r.title, ingredients: r.ingredients })
+    }
     return map
   }, [recipes])
 
@@ -199,8 +206,23 @@ export default function ShoppingPage() {
   // フラグ+useEffectで1テンポ遅らせる
   const candidatesRef = useRef<HTMLElement>(null)
   const [scrollToCandidates, setScrollToCandidates] = useState(false)
-  // 下書きの食材名タップで出す「全文＋その食材を使うレシピ名」ポップ(2026-07-24 実機FB #10)
-  const [namePopup, setNamePopup] = useState<{ name: string; recipeIds: number[] } | null>(null)
+  // 食材名タップで出す「全文＋出所のレシピ」ポップ。下書き(2026-07-24 実機FB #10)に加え、
+  // 確定した買い物メモの行からも開けるようにした(2026-08-08 オーナー実機フィードバック②)。
+  // 開くときに出所を解決して持たせる＝下書き/メモのどちらから開いても同じ見た目になる
+  const [namePopup, setNamePopup] = useState<
+    ({ name: string; kind: 'draft' | 'memo' } & ShoppingSourceResult) | null
+  >(null)
+  const openSourcePopup = (
+    kind: 'draft' | 'memo',
+    item: {
+      name: string
+      sources?: readonly { recipeId: number; amount?: string }[]
+      recipeIds?: readonly number[]
+      manualAdded?: boolean
+    },
+  ) => {
+    setNamePopup({ name: item.name, kind, ...resolveShoppingSources(item, recipeById) })
+  }
 
   // 献立プランナーの「この週の買い物リストを作る」から来た場合（?recipeIds=1x2,3）は
   // ピッカーを介さず自動で候補を作る。
@@ -301,7 +323,9 @@ export default function ShoppingPage() {
     if (!candidates) return
     const chosen = candidates.filter((c) => c.checked)
     if (chosen.length === 0) return
-    await addConfirmedItems(chosen.map(({ name, amount, recipeIds }) => ({ name, amount, recipeIds })))
+    await addConfirmedItems(
+      chosen.map(({ name, amount, recipeIds, sources }) => ({ name, amount, recipeIds, sources })),
+    )
     setCandidates(null)
     showToast(ja.shopping.addedToMemoToast.replace('{n}', String(chosen.length)))
   }
@@ -346,6 +370,12 @@ export default function ShoppingPage() {
   const aisleOrder = settings?.shoppingAisleOrder
   const memoItems = useMemo(
     () => sortShoppingByAisle(shoppingItems ?? [], aisleOrder),
+    [shoppingItems, aisleOrder],
+  )
+  // 売り場ごとのブロック表示(2026-08-08 オーナー実機フィードバック①)。並びは memoItems と同じで、
+  // 見出しつきの塊に切り直すだけ。中身が0件の売り場は出さない
+  const memoGroups = useMemo(
+    () => groupShoppingByAisle(shoppingItems ?? [], aisleOrder),
     [shoppingItems, aisleOrder],
   )
   // まとめてチェック/解除(2026-07-23 #6)
@@ -476,37 +506,62 @@ export default function ShoppingPage() {
                   {allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}
                 </button>
               </div>
-              {/* 並び順は売り場順の自動整列に一本化したため、手動の上下矢印UIは廃止(2026-07-24 実機FB #11・#12) */}
-              <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-                {memoItems.map((item) => (
-                  <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
-                    <button
-                      type="button"
-                      onClick={() => void toggleShoppingChecked(item.id!)}
-                      aria-pressed={item.isChecked}
-                      aria-label={ja.shopping.toggleCheck}
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
-                        item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
-                      }`}
-                    >
-                      <CheckCircle2 size={18} aria-hidden />
-                    </button>
-                    <div className={`min-w-0 flex-1 px-2 ${item.isChecked ? 'text-ink-muted line-through' : ''}`}>
-                      <span className="font-bold">{item.name}</span>
-                      {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
-                    </div>
-                    {/* 料理中・買い物中に片手で触るので44px確保(2026-07-29 便CC/C19。旧34px) */}
-                    <button
-                      type="button"
-                      onClick={() => void removeMemoItem(item)}
-                      aria-label={ja.shopping.remove}
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
-                    >
-                      <X size={18} aria-hidden />
-                    </button>
-                  </li>
+              {/* 並び順は売り場順の自動整列に一本化したため、手動の上下矢印UIは廃止(2026-07-24 実機FB #11・#12)。
+                  2026-08-08 オーナー実機フィードバック①: 一列の羅列をやめ、売り場ごとの見出し(件数つき)で
+                  ブロックに分ける。並び自体は従来と同じで、区切りを入れただけ */}
+              <div className="mt-[var(--space-sm)] space-y-[var(--space-md)]">
+                {memoGroups.map((group) => (
+                  <div key={group.key}>
+                    <h3 className="flex items-baseline justify-between gap-2 px-1 text-sm font-bold text-ink-muted">
+                      <span className="min-w-0 truncate">{ja.pantry.group[group.key]}</span>
+                      <span className="shrink-0 tabular-nums">
+                        {ja.shopping.aisleGroupCount.replace('{n}', String(group.items.length))}
+                      </span>
+                    </h3>
+                    <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                      {group.items.map((item) => (
+                        <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
+                          <button
+                            type="button"
+                            onClick={() => void toggleShoppingChecked(item.id!)}
+                            aria-pressed={item.isChecked}
+                            aria-label={ja.shopping.toggleCheck}
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+                              item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
+                            }`}
+                          >
+                            <CheckCircle2 size={18} aria-hidden />
+                          </button>
+                          {/* 食材名タップで出所の小窓(2026-08-08 オーナー実機フィードバック②)。
+                              チェックの丸と✕は別ボタンのままなので、消し込みの操作は変わらない */}
+                          <button
+                            type="button"
+                            onClick={() => openSourcePopup('memo', item)}
+                            aria-label={ja.shopping.memoSourceOpen}
+                            className={`min-w-0 flex-1 px-2 py-1 text-left ${
+                              item.isChecked ? 'text-ink-muted line-through' : ''
+                            }`}
+                          >
+                            <span className="font-bold underline decoration-dotted decoration-ink-muted/40 underline-offset-4">
+                              {item.name}
+                            </span>
+                            {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
+                          </button>
+                          {/* 料理中・買い物中に片手で触るので44px確保(2026-07-29 便CC/C19。旧34px) */}
+                          <button
+                            type="button"
+                            onClick={() => void removeMemoItem(item)}
+                            aria-label={ja.shopping.remove}
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
+                          >
+                            <X size={18} aria-hidden />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </>
           )}
 
@@ -598,7 +653,7 @@ export default function ShoppingPage() {
                         名前は truncate で省略されるので、タップで確認できるようにする */}
                     <button
                       type="button"
-                      onClick={() => setNamePopup({ name: c.name, recipeIds: c.recipeIds })}
+                      onClick={() => openSourcePopup('draft', c)}
                       className="min-w-0 flex-1 truncate pt-2 text-left font-bold underline decoration-dotted decoration-ink-muted/40 underline-offset-4"
                     >
                       {c.name}
@@ -734,7 +789,8 @@ export default function ShoppingPage() {
         </div>
       )}
 
-      {/* 下書きの食材名タップで出す「全文＋使うレシピ名」ポップ(2026-07-24 実機FB #10)。
+      {/* 食材名タップで出す「全文＋出所のレシピ」ポップ(2026-07-24 実機FB #10 →
+          2026-08-08 オーナー実機フィードバック②で買い物メモの行からも開けるようにした)。
           背景タップ・X・Escで閉じる(他モーダルと同じ作法) */}
       {namePopup && (
         <div
@@ -759,25 +815,48 @@ export default function ShoppingPage() {
                 <X size={20} aria-hidden />
               </button>
             </div>
+            {/* 下書きは「まだ入れる前」なので従来どおり「使うレシピ」、確定した買い物メモは
+                「どのレシピから入ったか」を答える見出しにする */}
             <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
-              {ja.shopping.candidateUsedInRecipes}
+              {namePopup.kind === 'memo'
+                ? ja.shopping.memoSourceTitle
+                : ja.shopping.candidateUsedInRecipes}
             </p>
-            {(() => {
-              const titles = namePopup.recipeIds
-                .map((id) => recipeTitleById.get(id))
-                .filter((t): t is string => !!t)
-              return titles.length > 0 ? (
-                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-ink">
-                  {titles.map((title, i) => (
-                    <li key={i} className="break-words">
-                      {title}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-1 text-sm text-ink-muted">{ja.shopping.candidateUsedInNoRecipe}</p>
-              )
-            })()}
+            {namePopup.recipes.length > 0 && (
+              // レシピ名を押すとそのレシピ詳細へ（既存の遷移作法＝Linkで /recipes/:id）。
+              // 右側にそのレシピでの分量を並べる
+              <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                {namePopup.recipes.map((source, i) => (
+                  <li key={`${source.recipeId}-${i}`}>
+                    <Link
+                      to={`/recipes/${source.recipeId}`}
+                      onClick={() => setNamePopup(null)}
+                      className="flex items-center gap-2 px-[var(--space-sm)] py-3"
+                    >
+                      <span className="min-w-0 flex-1 break-words text-sm font-bold text-accent-ink underline decoration-dotted underline-offset-4">
+                        {source.title}
+                      </span>
+                      {source.amount && (
+                        <span className="shrink-0 text-sm text-ink-muted">{source.amount}</span>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* 手で足した分は正直に出す(レシピ由来が0件のときも、レシピ由来に足したときも) */}
+            {namePopup.manual && (
+              <p className="mt-[var(--space-sm)] text-sm text-ink">{ja.shopping.memoSourceManual}</p>
+            )}
+            {/* 記録は残っているのにレシピが見つからない＝そのレシピが削除されている */}
+            {namePopup.missing > 0 && (
+              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                {ja.shopping.memoSourceMissing.replace('{n}', String(namePopup.missing))}
+              </p>
+            )}
+            {namePopup.recipes.length === 0 && !namePopup.manual && namePopup.missing === 0 && (
+              <p className="mt-1 text-sm text-ink-muted">{ja.shopping.candidateUsedInNoRecipe}</p>
+            )}
           </div>
         </div>
       )}

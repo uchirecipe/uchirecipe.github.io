@@ -89,6 +89,8 @@ import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import {
   buildShoppingCandidates,
   sortShoppingByAisle,
+  groupShoppingByAisle,
+  resolveShoppingSources,
   combineAmountTexts,
   parseRecipeIdsParam,
   parseServingsParam,
@@ -3499,6 +3501,138 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   ])
 }
 
+// ---------- DY-1 買い物メモの売り場ブロック(2026-08-08 オーナー実機フィードバック①) ----------
+// 「売り場順ごとに食材をブロック分けして表示して。たくさんの食材が羅列していて見づらい」。
+// 見出しつきの塊に切り直すだけで、並べ替えの規則(sortShoppingByAisle)は一切変えない
+{
+  const items = [
+    { id: 1, name: 'しょうゆ' }, // 調味料
+    { id: 2, name: '豚肉' }, // 肉・魚介
+    { id: 3, name: '玉ねぎ' }, // 野菜・きのこ
+    { id: 4, name: 'にんじん' }, // 野菜・きのこ(玉ねぎより後=既存順を維持する)
+    { id: 5, name: '卵', isChecked: true }, // 豆腐・卵・乳(チェック済みでも同じグループに残す)
+  ]
+  const groups = groupShoppingByAisle(items)
+  eq(
+    'DY-1 売り場ブロック: 既定順で見出しが並び、中身が0件の売り場(主食・粉/その他)は出さない',
+    groups.map((g) => g.key),
+    ['vegetable', 'meatFish', 'soyEgg', 'seasoning'],
+  )
+  eq(
+    'DY-1 売り場ブロック: グループ内は元の並び(追加順)を保つ',
+    groups.map((g) => g.items.map((i) => i.name)),
+    [['玉ねぎ', 'にんじん'], ['豚肉'], ['卵'], ['しょうゆ']],
+  )
+  eq(
+    'DY-1 売り場ブロック: チェック済みも元のグループに残す(買ったものが別枠へ飛ばない)',
+    groups.find((g) => g.key === 'soyEgg').items.map((i) => i.isChecked),
+    [true],
+  )
+  // 平らにすると従来の整列と完全に一致する＝並べ替えの既存挙動を壊していないことの担保
+  eq(
+    'DY-1 売り場ブロック: 平らにすると sortShoppingByAisle と同じ並び',
+    groups.flatMap((g) => g.items).map((i) => i.name),
+    sortShoppingByAisle(items).map((i) => i.name),
+  )
+  // 設定のカスタム売り場順にも従う(未知のキー・欠けは normalizeAisleOrder が補う)
+  const custom = groupShoppingByAisle(items, ['seasoning', 'soyEgg'])
+  eq(
+    'DY-1 売り場ブロック: 設定のカスタム順に従い、残りは既定順で続く',
+    custom.map((g) => g.key),
+    ['seasoning', 'soyEgg', 'vegetable', 'meatFish'],
+  )
+  eq(
+    'DY-1 売り場ブロック: カスタム順でも平らにすれば sortShoppingByAisle と同じ',
+    custom.flatMap((g) => g.items).map((i) => i.name),
+    sortShoppingByAisle(items, ['seasoning', 'soyEgg']).map((i) => i.name),
+  )
+  eq('DY-1 売り場ブロック: 空の買い物メモは見出しを1つも出さない', groupShoppingByAisle([]), [])
+}
+
+// ---------- DY-2 買い物メモの出所(2026-08-08 オーナー実機フィードバック②) ----------
+// 「食材をタップしたら、どのレシピから登録したのか確認できるように小窓出して欲しい」。
+// 実装確認の結果、行が持っていたのは fromRecipeIds(レシピIDの並び)だけで分量は持っていなかった。
+// 生成時にレシピごとの分量(sources)を持たせ、古い行はレシピの材料欄から読み直す
+{
+  // 下書きを作った時点で、レシピごとの内訳が食数スケール込みで載る
+  const built = buildShoppingCandidates(
+    [
+      { id: 1, ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], scale: 2 },
+      { id: 2, ingredients: [{ name: '玉ねぎ', amount: '100', unit: 'g' }], scale: 1 },
+    ],
+    [],
+  )
+  eq('DY-2 出所: レシピごとの分量を持つ(食数スケール込み)', built[0].sources, [
+    { recipeId: 1, amount: '2個' },
+    { recipeId: 2, amount: '100g' },
+  ])
+  eq('DY-2 出所: recipeIds は sources と同じ並びのまま(既存の呼び出しを壊さない)', built[0].recipeIds, [1, 2])
+  // 同じレシピが同じ材料を2行書いていたら、そのレシピの内訳の中で合算する
+  const dup = buildShoppingCandidates(
+    [{ id: 5, ingredients: [{ name: '砂糖', amount: '1', unit: '大さじ' }, { name: '砂糖', amount: '2', unit: '大さじ' }] }],
+    [],
+  )
+  eq('DY-2 出所: 同じレシピ内の重複行は1件にまとめる', dup[0].sources, [{ recipeId: 5, amount: '大さじ3' }])
+
+  const recipeById = new Map([
+    [1, { title: '肉じゃが', ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }] }],
+    [2, { title: 'カレーライス', ingredients: [{ name: '玉ねぎ', amount: '100', unit: 'g' }] }],
+  ])
+  eq(
+    'DY-2 出所: sources があればレシピ名と分量をそのまま出す',
+    resolveShoppingSources({ name: '玉ねぎ', sources: built[0].sources }, recipeById),
+    {
+      recipes: [
+        { recipeId: 1, title: '肉じゃが', amount: '2個' },
+        { recipeId: 2, title: 'カレーライス', amount: '100g' },
+      ],
+      manual: false,
+      missing: 0,
+    },
+  )
+  // 後方互換: この機能より前に作った行は fromRecipeIds しか持たない→レシピの材料欄から分量を読む
+  eq(
+    'DY-2 出所: 古い行(レシピIDだけ)はレシピの材料欄から分量を読む',
+    resolveShoppingSources({ name: '玉ねぎ', recipeIds: [1, 2] }, recipeById),
+    {
+      recipes: [
+        { recipeId: 1, title: '肉じゃが', amount: '1個' },
+        { recipeId: 2, title: 'カレーライス', amount: '100g' },
+      ],
+      manual: false,
+      missing: 0,
+    },
+  )
+  eq(
+    'DY-2 出所: 手で足した行は「自分で追加」(レシピは0件)',
+    resolveShoppingSources({ name: 'ラップ', manualAdded: true }, recipeById),
+    { recipes: [], manual: true, missing: 0 },
+  )
+  eq(
+    'DY-2 出所: 出所の記録が何も無い行も「自分で追加」として扱う',
+    resolveShoppingSources({ name: 'ラップ' }, recipeById),
+    { recipes: [], manual: true, missing: 0 },
+  )
+  eq(
+    'DY-2 出所: レシピ由来の行に手で足した分があれば両方出す',
+    resolveShoppingSources(
+      { name: '玉ねぎ', sources: [{ recipeId: 1, amount: '2個' }], manualAdded: true },
+      recipeById,
+    ),
+    { recipes: [{ recipeId: 1, title: '肉じゃが', amount: '2個' }], manual: true, missing: 0 },
+  )
+  eq(
+    'DY-2 出所: 削除されたレシピは一覧から落として件数だけ返す',
+    resolveShoppingSources({ name: '玉ねぎ', recipeIds: [1, 999] }, recipeById),
+    { recipes: [{ recipeId: 1, title: '肉じゃが', amount: '1個' }], manual: false, missing: 1 },
+  )
+  eq(
+    'DY-2 出所: レシピに無い食材(在庫から手で足した等)は分量を作文せず空にする',
+    resolveShoppingSources({ name: 'ラップ', recipeIds: [1] }, recipeById).recipes,
+    [{ recipeId: 1, title: '肉じゃが', amount: '' }],
+  )
+}
+
 // ---------- selectPantryDowngrades(2026-07-23 オーナー実機FB #11「作った!」の在庫反映) ----------
 {
   const items = [
@@ -4778,6 +4912,48 @@ eq(
       shoppingItems: [{ name: 'にんじん', order: 1, isChecked: false, fromRecipeIds: [210, 7] }],
       mealTemplates: [{ name: '平日', items: [{ dow: 0, slot: 'dinner', role: 'main', recipeId: 210 }], createdAt: 1 }],
     },
+  )
+  // DY-2 再発防止: 出所の内訳(fromRecipes・2026-08-08)も付け替える。
+  // 片方だけ直すと、出所の小窓が実在しないレシピを指す
+  eq(
+    '参照の付け替え: 買い物メモの出所の内訳(fromRecipes)も新しいIDを指す',
+    remapBackupRecipeRefs(
+      {
+        shoppingItems: [
+          {
+            name: 'にんじん',
+            order: 1,
+            isChecked: false,
+            fromRecipeIds: [104, 7],
+            fromRecipes: [
+              { recipeId: 104, amount: '1本' },
+              { recipeId: 7, amount: '50g' },
+            ],
+          },
+        ],
+      },
+      new Map([[104, 210]]),
+    ).shoppingItems,
+    [
+      {
+        name: 'にんじん',
+        order: 1,
+        isChecked: false,
+        fromRecipeIds: [210, 7],
+        fromRecipes: [
+          { recipeId: 210, amount: '1本' },
+          { recipeId: 7, amount: '50g' },
+        ],
+      },
+    ],
+  )
+  eq(
+    '参照の付け替え: 手で足しただけの行(出所なし)はそのまま返す',
+    remapBackupRecipeRefs(
+      { shoppingItems: [{ name: 'ラップ', order: 1, isChecked: false, manualAdded: true }] },
+      new Map([[104, 210]]),
+    ).shoppingItems,
+    [{ name: 'ラップ', order: 1, isChecked: false, manualAdded: true }],
   )
   eq(
     '参照の付け替え: 振り直しが無ければそのまま返す(項目の有無=undefinedも保つ)',

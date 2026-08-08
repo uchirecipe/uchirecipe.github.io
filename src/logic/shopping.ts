@@ -8,7 +8,7 @@ import {
   resolveCalcAmount,
 } from './amount'
 import { categorizePantryName, normalizeAisleOrder } from './pantryGroups'
-import type { Ingredient, PantryGroupKey } from '../db/types'
+import type { Ingredient, PantryGroupKey, ShoppingItemSource } from '../db/types'
 
 /**
  * 買い物メモを売り場順に自動整列する（2026-07-24 実機FB #11）。
@@ -32,11 +32,44 @@ export function sortShoppingByAisle<T extends { name: string }>(
     .map((entry) => entry.item)
 }
 
+/**
+ * 買い物メモを売り場のグループごとのブロックに分ける
+ * （2026-08-08 オーナー実機フィードバック①「売り場順ごとに食材をブロック分けして表示して。
+ * たくさんの食材が羅列していて見づらい」）。
+ *
+ * 並びの規則は sortShoppingByAisle と同じ（設定の売り場順→normalizeAisleOrder→
+ * グループ内は元の並び）で、平らな1本の配列を見出しつきの塊に切り直すだけ。
+ * つまり groupShoppingByAisle(...).flatMap(g => g.items) は sortShoppingByAisle(...) と一致する
+ * （並べ替えの既存挙動を変えないための取り決め。scripts/test-logic.mjs で固定してある）。
+ * 中身が0件のグループは返さない（空の見出しを画面に出さないため）。
+ * チェック済みの行も元のグループに残す（買ったものが別枠へ飛んで位置を見失わないようにする）。
+ */
+export function groupShoppingByAisle<T extends { name: string }>(
+  items: T[],
+  order?: readonly PantryGroupKey[],
+): { key: PantryGroupKey; items: T[] }[] {
+  const buckets = new Map<PantryGroupKey, T[]>()
+  for (const item of items) {
+    const key = categorizePantryName(item.name)
+    const list = buckets.get(key)
+    if (list) list.push(item)
+    else buckets.set(key, [item])
+  }
+  return normalizeAisleOrder(order)
+    .filter((key) => buckets.has(key))
+    .map((key) => ({ key, items: buckets.get(key)! }))
+}
+
 export interface ShoppingCandidate {
   name: string
   /** 表示用にまとめた分量。単位が揃えば合計し、揃わなければ「・」で列挙する */
   amount: string
   recipeIds: number[]
+  /**
+   * レシピごとの内訳（2026-08-08 オーナー実機フィードバック②）。
+   * recipeIds と同じ並びで、そのレシピが出した分量（指定食数で計算済み）を持つ。
+   */
+  sources: ShoppingItemSource[]
   /**
    * 全レシピでの使われ方が調味料的（大さじ/小さじ/単位なし/少々等）、
    * または水道から出るもの（水・お湯・湯）なら true。
@@ -227,7 +260,7 @@ export function buildShoppingCandidates(
   const order: string[] = []
   const map = new Map<
     string,
-    { name: string; parts: AmountPart[]; recipeIds: number[] }
+    { name: string; parts: AmountPart[]; partsByRecipe: Map<number, AmountPart[]> }
   >()
 
   for (const recipe of recipes) {
@@ -240,22 +273,97 @@ export function buildShoppingCandidates(
 
       let entry = map.get(key)
       if (!entry) {
-        entry = { name: trimmedName, parts: [], recipeIds: [] }
+        entry = { name: trimmedName, parts: [], partsByRecipe: new Map() }
         map.set(key, entry)
         order.push(key)
       }
-      entry.parts.push({ amount: ing.amount, unit: ing.unit, scale })
-      if (!entry.recipeIds.includes(recipe.id)) entry.recipeIds.push(recipe.id)
+      const part = { amount: ing.amount, unit: ing.unit, scale }
+      entry.parts.push(part)
+      // レシピごとの内訳も同時に貯める（同じレシピが同じ材料を2行書いていたらそこで合算する）
+      const own = entry.partsByRecipe.get(recipe.id)
+      if (own) own.push(part)
+      else entry.partsByRecipe.set(recipe.id, [part])
     }
   }
 
   return order.map((key) => {
     const entry = map.get(key)!
+    const sources = [...entry.partsByRecipe].map(([recipeId, parts]) => ({
+      recipeId,
+      amount: combineAmounts(parts),
+    }))
     return {
       name: entry.name,
       amount: combineAmounts(entry.parts),
-      recipeIds: entry.recipeIds,
+      recipeIds: sources.map((s) => s.recipeId),
+      sources,
       isSeasoningLike: TAP_WATER_NAMES.has(key) || entry.parts.every(isSeasoningLike),
     }
   })
+}
+
+/** 出所の小窓に出す1件（レシピ名と、そのレシピでの分量） */
+export interface ShoppingSourceView {
+  recipeId: number
+  title: string
+  /** そのレシピでの分量。分からなければ空文字 */
+  amount: string
+}
+
+export interface ShoppingSourceResult {
+  recipes: ShoppingSourceView[]
+  /** 手で足した分が含まれるか（レシピ由来が1件も無い行もここが true になる） */
+  manual: boolean
+  /** 記録は残っているのに、レシピ側が見つからなかった件数（削除されたレシピ） */
+  missing: number
+}
+
+/**
+ * 買い物メモ・下書きの1行から「どのレシピから来たか」を組み立てる
+ * （2026-08-08 オーナー実機フィードバック②）。
+ *
+ * 出所の持ち方は3世代ある。どれで保存された行でも同じ形に揃えて返す:
+ *  ① sources（2026-08-08以降）… レシピごとの分量まで持っている。そのまま使う
+ *  ② recipeIds だけ（2026-07-29〜）… レシピの並びしか無いので、分量はそのレシピの材料欄から読む
+ *  ③ どちらも無い … 手入力で足した行。manual を立てる
+ * ②の分量は「レシピに登録されている分量（登録人数のまま）」で、買い物メモの合計とは
+ * 食数のぶんだけ違いうる。分からない分量を作文するより、レシピの値をそのまま見せる方を採る。
+ *
+ * 削除されたレシピ（recipeById に無いID）は一覧から落とし、件数だけ missing で返す
+ * （名前が出せないものを「不明」と並べても行動に繋がらないため）。
+ */
+export function resolveShoppingSources(
+  item: {
+    name: string
+    sources?: readonly ShoppingItemSource[]
+    recipeIds?: readonly number[]
+    manualAdded?: boolean
+  },
+  recipeById: ReadonlyMap<number, { title: string; ingredients: Ingredient[] }>,
+): ShoppingSourceResult {
+  const raw: ShoppingItemSource[] =
+    item.sources && item.sources.length > 0
+      ? [...item.sources]
+      : [...(item.recipeIds ?? [])].map((recipeId) => ({ recipeId }))
+  const key = toPantryKey(item.name)
+  const recipes: ShoppingSourceView[] = []
+  let missing = 0
+  for (const source of raw) {
+    const recipe = recipeById.get(source.recipeId)
+    if (!recipe) {
+      missing++
+      continue
+    }
+    const amount = source.amount?.trim() || ingredientAmountInRecipe(recipe.ingredients, key)
+    recipes.push({ recipeId: source.recipeId, title: recipe.title, amount })
+  }
+  return { recipes, manual: item.manualAdded === true || raw.length === 0, missing }
+}
+
+/** レシピの材料欄から、その食材の分量を読む（同名が複数行あれば合算する。無ければ空文字） */
+function ingredientAmountInRecipe(ingredients: Ingredient[], pantryKey: string): string {
+  const parts = ingredients
+    .filter((ing) => toPantryKey(ing.name.trim()) === pantryKey)
+    .map((ing) => ({ amount: ing.amount, unit: ing.unit, scale: 1 }))
+  return parts.length > 0 ? combineAmounts(parts) : ''
 }
