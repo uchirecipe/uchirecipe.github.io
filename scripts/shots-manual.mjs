@@ -60,10 +60,33 @@ const failures = []
 const manifest = {}
 
 /**
+ * このスクリプトが撮るカットの名前(出力は public/about/img/manual/<名前>.webp)。
+ * ONLY= の指定を照合するために持つ(2026-08-09 便EM)。名前を打ち間違えると、
+ * 「1枚も撮れないまま全カット走り切って何も変わらない」という分かりにくい失敗になっていた。
+ */
+const SHOT_NAMES = [
+  'recipe-cards', 'home-suggest', 'home-search', 'nav-tabs', 'search',
+  'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
+  'plan-day-buttons', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
+  'plan-month', 'plan-month-photo', 'shopping', 'pantry',
+  'detail-photo', 'nutrition-open', 'share', 'logs',
+  'cookmode-voice', 'cookmode', 'timer', 'cooknavi',
+  'backup-export', 'backup-import', 'nutrition-row', 'plan-week-nutrition-row',
+]
+
+/**
  * ONLY=home-suggest,home-search のように指定すると、その名前のスクショだけを書き出す(部分撮り直し)。
  * 料理写真(MANUAL_PHOTO_DIR)を持っていない環境で全部を撮り直すと、写真つきのスクショ
- * (recipe-cards / detail-photo / plan-month-photo)が写真なしの絵に置き換わってしまうため、
- * 一部の画面だけ追随させたいときは対象を絞る。指定ぶんを撮り終えた時点で撮影を打ち切る。
+ * (recipe-cards / detail-photo / plan-month-photo / search / logs)が写真なしの絵に
+ * 置き換わってしまうため、一部の画面だけ追随させたいときは対象を絞る。
+ * 指定ぶんを撮り終えた時点で撮影を打ち切る。
+ *
+ * 2026-08-09 便EM:
+ *  - 指定名を SHOT_NAMES と照合し、打ち間違いはその場で止める
+ *  - 指定外のカットは切り出しごと飛ばす(紹介ページ側 scripts/shots-lp.mjs の want() と同じ流儀)。
+ *    以前は切り出しまで実行して保存だけ止めていたため、関係のないカットの失敗が
+ *    「撮影できなかったもの」に並び、本当に撮りたいカットの成否が読み取りにくかった。
+ *    画面を進める操作(タブの切り替え・トグルの開閉)は飛ばさないので、後続のカットには影響しない
  */
 const ONLY = new Set(
   (process.env.ONLY ?? '')
@@ -71,6 +94,14 @@ const ONLY = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 )
+const unknownOnly = [...ONLY].filter((name) => !SHOT_NAMES.includes(name))
+if (unknownOnly.length) {
+  console.error(`ONLYに知らないカット名があります: ${unknownOnly.join(', ')}`)
+  console.error(`使える名前: ${SHOT_NAMES.join(', ')}`)
+  process.exit(1)
+}
+/** そのカットを撮るか(ONLY未指定なら全部撮る) */
+const want = (name) => ONLY.size === 0 || ONLY.has(name)
 /** ONLYで指定したぶんを撮り終えた合図。撮影の失敗と取り違えないよう専用のクラスにする */
 class AllRequestedDone extends Error {}
 
@@ -93,7 +124,7 @@ function loadPhotos() {
 }
 
 async function save(png, name) {
-  if (ONLY.size && !ONLY.has(name)) return
+  if (!want(name)) return
   const meta = await sharp(png).metadata()
   const webp = await sharp(png).webp({ quality: 78, effort: 6 }).toBuffer()
   fs.writeFileSync(path.join(OUT_DIR, `${name}.webp`), webp)
@@ -115,6 +146,7 @@ const rectOf = (loc) =>
  * top: 画面の上から何pxの位置に要素の上端を置くか(既定=なるべく中央寄り)
  */
 async function crop(page, name, loc, opts = {}) {
+  if (!want(name)) return
   try {
     return await cropInner(page, name, loc, opts)
   } catch (e) {
@@ -157,6 +189,7 @@ async function cropInner(page, name, loc, opts = {}) {
 
 /** 上端の要素から下端の要素までをひとまとめに切り出す */
 async function cropRange(page, name, topLoc, bottomLoc, opts = {}) {
+  if (!want(name)) return
   try {
     return await cropRangeInner(page, name, topLoc, bottomLoc, opts)
   } catch (e) {
@@ -190,6 +223,7 @@ async function cropRangeInner(page, name, topLoc, bottomLoc, opts = {}) {
 
 /** 画面下端の固定要素(タブバー)など、位置を直接指定して切り出す */
 async function cropRect(page, name, rect) {
+  if (!want(name)) return
   const png = await page.screenshot({ clip: rect })
   await save(png, name)
 }
@@ -776,7 +810,9 @@ try {
     await wait(page, 300)
     await waitStep.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 120))
     await wait(page, 400)
-    await cropRect(page, 'cooknavi', { x: 0, y: 108, width: VIEW.width, height: 216 })
+    // 2026-08-09 便EM: 待ち時間の帯に「タイマーを始める」が入って背が高くなり、216pxでは
+    // 次の手順の本文が途中で切れていた(トリミング基準=説明している範囲を途中で切らない)
+    await cropRect(page, 'cooknavi', { x: 0, y: 108, width: VIEW.width, height: 320 })
   } else {
     await cropRect(page, 'cooknavi', { x: 0, y: 60, width: VIEW.width, height: 300 })
   }

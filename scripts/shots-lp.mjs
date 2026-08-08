@@ -34,10 +34,17 @@ const VIEW = { width: 390, height: 844 }
 const failures = []
 const wait = (page, ms) => page.waitForTimeout(ms)
 
+/** このスクリプトが撮るカットの名前(出力は public/about/img/lp/<名前>.webp) */
+const SHOT_NAMES = ['plan-week-free', 'cost-week-free', 'url-import', 'recipe-cards-photo']
+
 /**
  * ONLY=recipe-cards-photo のように指定すると、その名前のカットだけを撮り直す
  * (2026-08-04 便DV-11。使い方ページ側 scripts/shots-manual.mjs と同じ流儀)。
  * 1枚だけ差し替えたいときに、ほかのカットを今の画面に巻き込んで撮り直さないための切り分け。
+ *
+ * 2026-08-09 便EM: 名前の打ち間違いをその場で止める。あわせて、同じ操作のまとまりに
+ * 2枚入っているカット(plan-week-free と cost-week-free)は片方だけを指定しても
+ * もう片方が上書きされていたので、保存の直前でも1枚ずつ確かめる
  */
 const ONLY = new Set(
   (process.env.ONLY ?? '')
@@ -45,9 +52,16 @@ const ONLY = new Set(
     .map((s) => s.trim())
     .filter(Boolean),
 )
+const unknownOnly = [...ONLY].filter((name) => !SHOT_NAMES.includes(name))
+if (unknownOnly.length) {
+  console.error(`ONLYに知らないカット名があります: ${unknownOnly.join(', ')}`)
+  console.error(`使える名前: ${SHOT_NAMES.join(', ')}`)
+  process.exit(1)
+}
 const want = (name) => ONLY.size === 0 || ONLY.has(name)
 
 async function save(png, name) {
+  if (!want(name)) return
   const meta = await sharp(png).metadata()
   const webp = await sharp(png).webp({ quality: 78, effort: 6 }).toBuffer()
   fs.writeFileSync(path.join(OUT_DIR, `${name}.webp`), webp)
@@ -62,6 +76,7 @@ const rectOf = (loc) =>
 
 /** 要素の周りだけを切り出して保存する */
 async function crop(page, name, loc, opts = {}) {
+  if (!want(name)) return
   try {
     const {
       padX = 8,
@@ -98,6 +113,7 @@ async function crop(page, name, loc, opts = {}) {
 
 /** 上端の要素から下端の要素までをひとまとめに切り出す */
 async function cropRange(page, name, topLoc, bottomLoc, opts = {}) {
+  if (!want(name)) return
   try {
     const { padX = 8, padTop = 8, padBottom = 8, top = 16, fullWidth = false } = opts
     await topLoc.first().scrollIntoViewIfNeeded()
