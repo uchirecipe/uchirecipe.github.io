@@ -222,6 +222,51 @@ export function riceServingRecipes(servings: number): BalanceRecipeLike[] {
   return Array.from({ length: count }, () => RICE_SERVING_RECIPE)
 }
 
+/** 「ごはんを含めて計算する」の対象を数えるための、食事1つぶんの入力（純関数用の最小形） */
+export interface RiceSlotInput {
+  /** YYYY-MM-DD */
+  date: string
+  /** その日の中で食事を区別するキー（朝食/昼食/夕食） */
+  slot: string
+  /** その食事の主菜が一品もの（丼・麺・カレー・鍋）か＝主食が重なるので足さない */
+  oneDishMain: boolean
+}
+
+/** 「日付|食事」の照合キー（杯数の数え方を1か所に閉じるための内部表現） */
+export function riceSlotKey(date: string, slot: string): string {
+  return `${date}|${slot}`
+}
+
+/**
+ * ごはんを足す食事を選ぶ（2026-08-09 便EN でUIから切り出した純関数）。
+ *
+ * 規則は便CW-10のまま変えていない:
+ *  ・料理が1品でも入っている食事ごとに1杯（**1日1杯ではなく食事の数だけ**）
+ *  ・一品もの（丼・麺・カレー・鍋）が主菜の食事には足さない
+ * 渡すのは「料理が入っている食事」だけ＝空の食事は呼び出し側で除く。
+ *
+ * オーナー質問（2026-08-09 実機）「昼食と夕食がおかずのみになっていても1杯のみの追加で
+ * 計算している?」への回答をテストで固定するために切り出した。答えは「食事ごとに1杯」。
+ */
+export function riceSlotKeysOf(slots: RiceSlotInput[]): Set<string> {
+  const keys = new Set<string>()
+  for (const slot of slots) {
+    if (slot.oneDishMain) continue
+    keys.add(riceSlotKey(slot.date, slot.slot))
+  }
+  return keys
+}
+
+/** 「日付|食事」キーの集合から、日付ごとの杯数を数える */
+export function riceServingsByDate(keys: Iterable<string>): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const key of keys) {
+    const date = key.split('|')[0]
+    counts.set(date, (counts.get(date) ?? 0) + 1)
+  }
+  return counts
+}
+
 // ---------- めやすとの並置を出してよいかの判定（docs/60 §5） ----------
 
 /**

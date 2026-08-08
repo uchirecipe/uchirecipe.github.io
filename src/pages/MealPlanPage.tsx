@@ -170,6 +170,10 @@ import {
   purposePenalty,
   reviewPurposeDays,
   riceServingRecipes,
+  riceSlotKey,
+  riceSlotKeysOf,
+  riceServingsByDate,
+  type RiceSlotInput,
   PURPOSE_NUTRIENT_KEY,
   RICE_SERVING_RECIPE,
   type BalanceDish,
@@ -3863,35 +3867,29 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （同じ「どの食事に足すか」の規則を2か所に書かない）。
    */
   const riceSlotKeys = useMemo(() => {
-    const keys = new Set<string>()
-    if (!includeRice) return keys
+    if (!includeRice) return new Set<string>()
     const bySlotKey = new Map<string, MealPlanEntry[]>()
     ;(entries ?? []).forEach((e) => {
-      const key = `${e.date}|${e.slot}`
+      const key = riceSlotKey(e.date, e.slot)
       const list = bySlotKey.get(key)
       if (list) list.push(e)
       else bySlotKey.set(key, [e])
     })
+    // 「どの食事に足すか」の規則そのものは logic/nutritionBalance.ts の純関数が持つ
+    // （2026-08-09 便EN。1日1杯ではなく食事ごとに1杯であることを単体テストで固定するため）
+    const slots: RiceSlotInput[] = []
     bySlotKey.forEach((slotEntries, key) => {
+      const [date, slot] = key.split('|')
       const mainRecipe = slotEntries
         .filter((e) => (e.role ?? 'main') === 'main')
         .map((e) => recipeById.get(e.recipeId))
         .find((r): r is Recipe => !!r)
-      // 一品もの(丼・麺・カレー・鍋)が主菜の食事は、主食が重なるので足さない
-      if (mainRecipe && isOneDish(mainRecipe)) return
-      keys.add(key)
+      slots.push({ date, slot, oneDishMain: !!mainRecipe && isOneDish(mainRecipe) })
     })
-    return keys
+    return riceSlotKeysOf(slots)
   }, [includeRice, entries, recipeById])
-  /** 日付→その日に足すごはんの杯数 */
-  const ricePlanServingsByDate = useMemo(() => {
-    const counts = new Map<string, number>()
-    riceSlotKeys.forEach((key) => {
-      const date = key.split('|')[0]
-      counts.set(date, (counts.get(date) ?? 0) + 1)
-    })
-    return counts
-  }, [riceSlotKeys])
+  /** 日付→その日に足すごはんの杯数（食事の数だけ数える） */
+  const ricePlanServingsByDate = useMemo(() => riceServingsByDate(riceSlotKeys), [riceSlotKeys])
   /**
    * 日付→その日に足すごはんの杯数(作った記録から数える。過ぎた日に使う)。
    * 作った記録には食事(朝/昼/夕)の情報が無いため、食事の数では数えられない。
@@ -4546,8 +4544,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             aria-label={(slotLocked ? ja.mealPlan.unlockSlotAria : ja.mealPlan.lockSlotAria)
               .replace('{date}', date.replaceAll('-', '/'))
               .replace('{slot}', ja.mealPlan.slot[slot])}
-            className={`ml-auto shrink-0 rounded-sm p-1.5 ${
-              slotLocked ? 'text-accent-ink' : 'text-ink-muted'
+            /* 2026-08-09 便EN(オーナー実機「今はどちらも細い線の記号なので、パッと見て
+               違いが分かりづらい」): 掛かっているときはアクセント色で塗りつぶした丸にし、
+               外れているときは線だけの開いた鍵にする＝塗りの有無で一目で見分けられるようにする */
+            className={`ml-auto shrink-0 rounded-full p-1.5 ${
+              slotLocked ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-muted'
             }`}
           >
             {slotLocked ? <Lock size={16} aria-hidden /> : <LockOpen size={16} aria-hidden />}
@@ -6271,8 +6272,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   ? ja.mealPlan.unlockDayAria
                   : ja.mealPlan.lockDayAria
                 ).replace('{date}', date.replaceAll('-', '/'))}
-                className={`shrink-0 rounded-sm p-1.5 ${
-                  dayLocked ? 'text-accent-ink' : 'text-ink-muted'
+                /* 掛かっているときは塗りつぶし（2026-08-09 便EN。時間帯ごとの鍵と同じ作法） */
+                className={`shrink-0 rounded-full p-1.5 ${
+                  dayLocked ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-muted'
                 }`}
               >
                 {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
