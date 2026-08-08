@@ -323,6 +323,22 @@ export const ja = {
     monthDayModalTitle: '{m}月{d}日の献立',
     monthDayModalEmpty: '献立はありません',
     monthDayModalOpenWeek: 'この週を開く',
+    // 2026-08-07 便DU(オーナー指示⑦⑧): 日の窓の下に閉じる導線を置く。
+    // 何も変えていないときは「閉じる」1つ、変えたときは「キャンセル」と「保存」の2つにする
+    // (変えていないのに「保存」を出すと、何が保存されるのか分からないため)。
+    // 中身の追加・差し替え・削除・メモはその場でデータに入る作りなので、「保存」は確定して閉じるだけ。
+    // 「キャンセル」は開いたときの状態へ戻す操作＝規約Fの確認文を必ず通す
+    monthDayModalClose: '閉じる',
+    monthDayModalCancel: 'キャンセル',
+    monthDayModalSave: '保存',
+    monthDayModalDirtyNote: 'この画面での変更は、すでにこの日の献立に入っています',
+    monthDayCancelConfirm:
+      'この画面で行った変更を取り消しますか？\n\n取り消すもの: {changes}\n戻るもの: この画面を開いたときの献立{n}品と、そのときの日付メモ\n\n作った記録と写真、ほかの日の献立は変わりません。',
+    monthDayCancelAdded: '追加した{n}品',
+    monthDayCancelRemoved: '外した{n}品',
+    monthDayCancelChanged: '入れ替えた{n}品',
+    monthDayCancelNoteChanged: '日付メモの変更',
+    monthDayCancelDone: 'この画面での変更を取り消しました',
     // 週/月の過去振り返り(2026-07-17 便Z-2・docs/35 §3 Fable設計)。週タブの過去日と
     // 月タブの日モーダルに、その日の「作った記録」(cookedLogs日付一致)を表示する。
     // 月間献立への機能追加はPro v2まで凍結が既定だったが、オーナー指示で解除して実装
@@ -416,9 +432,11 @@ export const ja = {
     intakeCostDetailsOpen: '内訳を見る',
     intakeCostDetailsClose: '内訳を閉じる',
     // 栄養の但し書きと出典の折りたたみ(便DQ・便DR)。見出しで「何を集計した数字か」を言い切るので、
-    // 中の栄養パネルは見出しを持たず数値だけを出し、長い但し書きと出典は畳んでおく(規約H)
-    intakeNutritionNotesOpen: '注記と出典を見る',
-    intakeNutritionNotesClose: '注記と出典を閉じる',
+    // 中の栄養パネルは見出しを持たず数値だけを出し、長い但し書きと出典は畳んでおく(規約H)。
+    // 2026-08-07 便DU(オーナー指示「『注記と出典を見る』→『注記と出典』」): 中身の名前だけにする。
+    // 開いているか閉じているかはボタンの矢印と読み上げ(aria-expanded)が示すので、開閉で文言は変えない
+    intakeNutritionNotesOpen: '注記と出典',
+    intakeNutritionNotesClose: '注記と出典',
     // 月間サマリー(2026-07-29 便CB-1・docs/59 B-3): 期間を選ばなくても、表示中の月の
     // 食費と栄養が最初から見える常設カード。数え方は期間の集計と同じ
     // (過ぎた日は作った記録・今日から先は登録した献立)。便DQで食費カードと栄養カードの2枚に分けた
@@ -434,6 +452,25 @@ export const ja = {
     monthCellModePhoto: '写真',
     monthCellModeNutrition: '栄養',
     monthCellModeCost: '食費',
+    // 2026-08-07 便DU(オーナー指示「何のボタンか分からない。特に栄養と食費が何の数値か」):
+    // 3つのボタンの上に見出しを出し、下に「選んだときカレンダーに何が出るか」を1行で添える。
+    // 栄養・食費は「1人分か／その日ぶんか／どの日をどちらの基準で数えるか」まで言い切る。
+    // 従来カレンダーの下に置いていた凡例(monthCellNutritionLegend/monthCellCostLegend)は
+    // ボタンのすぐ下へ移し、写真モードにも同じ位置で説明を出す(場所を1か所に集める)
+    monthCellModePhotoLegend:
+      'その日の「作った記録」の写真を出します。写真の無い日は、登録した献立の主菜名を出します',
+    // 2026-08-07 便DU(オーナー指示): カレンダーの写真は「作った記録の写真 ＞ レシピに登録した写真」の
+    // 順で選ぶ。レシピの写真を使わない選択肢も置き、自分で撮った写真だけのカレンダーにできるようにする
+    monthHideRecipePhotoToggle: 'レシピの写真は使わない',
+    // すぐ上のmonthCellModePhotoLegendが「写真の無い日は主菜名」を既に言っているので繰り返さない(規約H)
+    monthHideRecipePhotoNote: '作った記録の写真がある日だけ、カレンダーに写真を出します',
+    // 2026-08-07 便DU(オーナー指示「カレンダーのサムネに使うレシピを日ごとに選べるように」)。
+    // その日に写真の候補が2つ以上あるときだけ日の窓に出す
+    monthDayCoverTitle: 'カレンダーに出す写真',
+    monthDayCoverHint: 'この日のカレンダーに出す1枚を選べます',
+    monthDayCoverAuto: '自動で選ぶ',
+    monthDayCoverAutoAria: 'カレンダーに出す写真を自動で選ぶ',
+    monthDayCoverOptionAria: '{title}の写真をカレンダーに出す',
     monthCellNutritionLegend:
       '数字はその日に1人が食べる分のエネルギー（kcal）の概算です。過ぎた日は作った記録、今日から先は登録した献立で計算しています',
     monthCellCostLegend:
@@ -452,8 +489,9 @@ export const ja = {
     // 記録の無い過去日に控えめに出す案内
     pastNoRecord: 'この日の記録はありません',
     // 2026-07-29 便CD/MP-07: 過去日は「予定を消したのではなく表示していないだけ」を明示する。
-    // 枠が突然消えて一瞬止まる、という指摘への対応（データは非破壊で残っている）
-    pastPlanHidden: '過ぎた日の予定は表示していません（作った記録だけが残ります）',
+    // 枠が突然消えて一瞬止まる、という指摘への対応（データは非破壊で残っている）。
+    // 2026-08-07 便DU(オーナー指示「『過ぎた日の予定は』→『過去に予定していた献立は』」)
+    pastPlanHidden: '過去に予定していた献立は表示していません（作った記録だけが残ります）',
     // 未解錠ユーザーへの鍵付きプレビュー(2026-07-24 便BS・タスク6・規約H準拠)。月タブを完全に隠さず、
     // ぼかしたサンプルカレンダーの上に、機能の性質を素直に説明するロック案内を重ねる(購入圧を強くしない)
     monthLockedBadge: 'Pro版で使えます',
