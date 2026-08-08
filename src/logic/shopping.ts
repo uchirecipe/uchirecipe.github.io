@@ -565,10 +565,12 @@ export function resolveShoppingSources(
  * レシピの材料欄から、その食材の分量を読む（同名が複数行あれば合算する。無ければ空文字）。
  * 買い物メモ側の行は炊いたごはんを「米」に置き換えてあるので、照合するレシピの材料も
  * 同じ置き換えを通してから名前を合わせる（2026-08-08 オーナー実機フィードバック）。
+ * 置き換える前の名前で一致する行（この変更より前に「ご飯」で保存された買い物メモ）は、
+ * 置き換えずレシピに書いてあるままの分量を出す＝行の見た目と小窓の中身が食い違わない。
  */
 function ingredientAmountInRecipe(ingredients: Ingredient[], pantryKey: string): string {
   const parts = ingredients
-    .map(toRawRiceIngredient)
+    .map((ing) => (toPantryKey(ing.name.trim()) === pantryKey ? ing : toRawRiceIngredient(ing)))
     .filter((ing) => toPantryKey(ing.name.trim()) === pantryKey)
     .map((ing) => ({ amount: ing.amount, unit: ing.unit, scale: 1 }))
   return parts.length > 0 ? combineAmounts(parts) : ''

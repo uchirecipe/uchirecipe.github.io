@@ -3658,6 +3658,22 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     eq('EE-2 在庫に「米」があれば候補に出さない', buildShoppingCandidates(recipes, ['米']), [])
     eq('EE-2 在庫に「ご飯」があれば候補に出さない', buildShoppingCandidates(recipes, ['ご飯']), [])
   }
+  // 出所の小窓: 換算後の行(米)も、この変更より前に保存された行(ご飯)も分量が読める
+  {
+    const recipeById = new Map([
+      [1, { title: '牛丼', ingredients: [{ name: 'ご飯', amount: '2', unit: '杯分' }] }],
+    ])
+    eq(
+      'EE-2 出所の小窓: 「米」の行はレシピのご飯を換算した分量を出す',
+      resolveShoppingSources({ name: '米', recipeIds: [1] }, recipeById).recipes[0].amount,
+      '140g',
+    )
+    eq(
+      'EE-2 出所の小窓: 換算前に保存された「ご飯」の行はレシピのままの分量を出す',
+      resolveShoppingSources({ name: 'ご飯', recipeIds: [1] }, recipeById).recipes[0].amount,
+      '2杯分',
+    )
+  }
   // 同じ食材として合算される＝「ご飯」と「米」で2行に割れない
   {
     const built = buildShoppingCandidates(
