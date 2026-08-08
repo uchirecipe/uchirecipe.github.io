@@ -1034,10 +1034,12 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     } else {
       // 締め切りまでに終わる手作業が1つも無い＝ここは手を空けて待つ（詰め込まない）。
       // 進める先は「次に何かが起きる時刻」＝手を戻す締め切りと、裏の待ちが明ける時刻の早い方
-      cookAt = active.reduce(
+      const nextAt = active.reduce(
         (next, j) => (j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
         attendDeadline,
       )
+      // 時刻を必ず前へ進める（何かの取りこぼしで進まなくなっても、段取りの計算が止まらないように）
+      cookAt = Number.isFinite(nextAt) && nextAt > cookAt ? nextAt : cookAt + DEFAULT_ACTIVE_MINUTES
       continue
     }
 

@@ -15258,8 +15258,8 @@ try {
           { text: 'ごま油と塩で和える。' },
         ], [
           { name: 'にんじん', amount: '1', unit: '本' },
-          { name: 'ごま油', amount: '大さじ1', unit: '', seasoningGroup: 1 },
-          { name: '塩', amount: '少々', unit: '', seasoningGroup: 1 },
+          { name: 'ごま油', amount: '大さじ1', unit: '' },
+          { name: '塩', amount: '少々', unit: '' },
         ])))
         const idB = await P(store('recipes').add(mk('EHオムライス', [
           { text: '鶏肉と玉ねぎを切る。' },
@@ -15268,8 +15268,14 @@ try {
           { text: 'ご飯を入れてケチャップで炒める。', minutes: 3 },
           { text: '卵を焼いて包み、皿に盛る。' },
         ])))
+        // 合わせ調味料は3品目(色の添字2=--chip-pink)に置く。1品目だとレシピの色と
+        // 合わせ調味料のグループ色がどちらも--chip-blueで、色を直したか判別できないため
         const idC = await P(store('recipes').add(mk('EH煮物', [
           { text: '大根を切る。' }, { text: '鍋で15分煮る。' }, { text: '器に盛る。' },
+        ], [
+          { name: '大根', amount: '1/3', unit: '本' },
+          { name: 'しょうゆ', amount: '大さじ2', unit: '', seasoningGroup: 1 },
+          { name: 'みりん', amount: '大さじ2', unit: '', seasoningGroup: 1 },
         ])))
         let addedAt = Date.now()
         for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
@@ -15346,15 +15352,21 @@ try {
         (lis) =>
           lis
             .map((li) => ({
-              text: li.textContent || '',
+              text: (li.textContent || '').slice(0, 12),
               border: getComputedStyle(li).borderLeftColor,
-              parent: getComputedStyle(li.closest('li[style]')).borderLeftColor,
+              // 材料のliの外側にある「レシピの1件」のli（色の線を持つ）と突き合わせる
+              recipe: getComputedStyle(li.parentElement.closest('li[style]')).borderLeftColor,
             }))
-            .filter((x) => /ごま油|塩/.test(x.text)),
+            .filter((x) => /しょうゆ|みりん/.test(x.text)),
       )
       check(
         'EH-01 合わせ調味料の線の色が、そのレシピの色と同じ',
-        ehSeasoningColors.length >= 2 && ehSeasoningColors.every((x) => x.border === x.parent),
+        ehSeasoningColors.length === 2 && ehSeasoningColors.every((x) => x.border === x.recipe),
+        JSON.stringify(ehSeasoningColors),
+      )
+      check(
+        'EH-01 レシピ詳細の合わせ調味料の色(--chip-blue)を持ち込まない',
+        ehSeasoningColors.every((x) => x.border !== 'rgb(25, 113, 194)'),
         JSON.stringify(ehSeasoningColors),
       )
 
