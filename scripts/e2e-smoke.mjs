@@ -4268,6 +4268,445 @@ try {
     }
   }
 
+  // --- WEEKLOCK-BULK: 一括操作4経路のロックを「画面のボタンから」確かめる
+  // (2026-08-09 便EK・便EJの申し送り)。
+  // 純ロジック(logic/mealPlan.ts planCopyLastWeek/planClearMealSlots・
+  // logic/mealTemplate.ts planTemplateFill)には単体テストがあるが、画面のボタンから同じ結果に
+  // なるかは「まとめて献立を入力(レシピを総入れ替え)」(WEEKLOCK LOCK-5)しか見ていなかった。
+  // 残る4経路 ①テンプレートを適用 ②先週の献立をコピー ③まとめて空にする
+  // ④月の未定の日をまとめて提案 を、実際の操作で確かめる(④は月タブなので別ブロック)。
+  //
+  // 便EJが確立した「素通り不可能」の形をそのまま踏襲する:
+  //  ①その操作が効くはずの前提(入る中身がある/消える中身がある)を先に断定
+  //  ②鍵の無い日が実際に変わったことを先に断定(何も起きなくても合格、を防ぐ)
+  //  ③そのうえで鍵の日が不変(主キーidまで同じ)であることを見る
+  //  ④鍵を外すと同じ操作が鍵の日にも効く(=「この経路はもともと動かない」ではないことの証明)
+  //
+  // 日付依存を避けるため、週タブを「今日から7日間」表示にしてから「次の週」へ送る
+  // (曜日に関係なく7日とも未来日になり、1週間前は必ず「今日から7日間」＝先に埋めた週になる) ---
+  currentCheck = 'WEEKLOCK-BULK'
+  {
+    const bkBrowser = await chromium.launch()
+    const bkContext = await bkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const bkPage = await bkContext.newPage()
+    bkPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WEEKLOCK-BULK] ${err.message}`)
+    })
+    const bkDialogs = []
+    bkPage.on('dialog', (dialog) => {
+      bkDialogs.push(dialog.message())
+      void dialog.accept()
+    })
+    try {
+      // 献立(mealPlans)をその日付ぶんだけ、主キーidまで含めて読む。
+      // idを混ぜるのは「消して入れ直した」と「触っていない」を取り違えないため(便EJ)
+      const bkPlanOf = (date) =>
+        bkPage.evaluate(
+          (d) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(
+                    g.result
+                      .filter((e) => e.date === d)
+                      .map((e) => `${e.slot}|${e.role ?? 'main'}|${e.recipeId}|id=${e.id}`)
+                      .sort(),
+                  )
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          date,
+        )
+      const bkWeekDates = () =>
+        bkPage.evaluate(() =>
+          [...document.querySelectorAll('section[data-date]')].map((s) => s.getAttribute('data-date')),
+        )
+      // 折りたたみグループ(表示のしかた/献立を提案/献立テンプレート)を開く。
+      // 開いているときは「◯◯を開く」ボタンが存在しない＝何もしない
+      const bkOpenGroup = async (title) => {
+        const btn = bkPage.getByRole('button', { name: `${title}を開く` })
+        if ((await btn.count()) > 0) {
+          await btn.first().click()
+          await bkPage.waitForTimeout(400)
+        }
+      }
+      const bkDayLock = (date) => bkPage.locator(`[data-testid="day-lock"][data-date="${date}"]`)
+      const bkLockedState = (date) => bkDayLock(date).getAttribute('aria-pressed')
+      const bkNextWeek = async () => {
+        await bkPage.getByRole('button', { name: '次の週' }).click()
+        await bkPage.waitForTimeout(900)
+      }
+
+      await bkPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await bkPage.waitForTimeout(1800) // 初回シード完了待ち
+      await bkPage.getByRole('button', { name: '週', exact: true }).click()
+      await bkPage.waitForTimeout(700)
+      await bkOpenGroup('表示のしかた')
+      await bkPage.getByRole('button', { name: '今日から7日間', exact: true }).click()
+      await bkPage.waitForTimeout(900)
+      const bkWeekA = await bkWeekDates()
+      check(
+        'WEEKLOCK-BULK 前提: 「今日から7日間」で7日とも出る(曜日に左右されない土台)',
+        bkWeekA.length === 7,
+        `dates=${JSON.stringify(bkWeekA)}`,
+      )
+
+      // 土台: 今日から7日間を埋め、その週を献立テンプレートとして保存する
+      // (テンプレート適用と先週コピーの「入れる中身」をここで作る)
+      const bkFill = bkPage.getByRole('button', { name: 'まとめて献立を入力' })
+      await bkFill.click()
+      await bkPage.waitForTimeout(3500) // 7日ぶん書き込むので長めに待つ
+      await bkOpenGroup('献立テンプレート')
+      await bkPage.getByRole('button', { name: '表示している週をテンプレートとして保存' }).click()
+      await bkPage.waitForTimeout(500)
+      await bkPage.getByPlaceholder('平日の定番 など').fill('EK検証用')
+      await bkPage.getByRole('button', { name: '保存する', exact: true }).click()
+      await bkPage.waitForTimeout(800)
+      check(
+        'WEEKLOCK-BULK 前提: 埋めた週をテンプレートとして保存できた',
+        ((await bkPage.textContent('body')) ?? '').includes('テンプレート「EK検証用」を'),
+      )
+
+      // ---------- ① テンプレートを適用（非破壊＝空いているところにだけ入る） ----------
+      await bkNextWeek()
+      const bkWeekB = await bkWeekDates()
+      const bkLockedB = bkWeekB[0]
+      const bkFreeB = bkWeekB[1]
+      check(
+        'WEEKLOCK-BULK(テンプレ) 前提: 入れる先の週は空(鍵の日・鍵の無い日とも0件)',
+        (await bkPlanOf(bkLockedB)).length === 0 && (await bkPlanOf(bkFreeB)).length === 0,
+        `locked=${bkLockedB} free=${bkFreeB}`,
+      )
+      await bkDayLock(bkLockedB).click()
+      await bkPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK-BULK(テンプレ) 前提: 入れる先の1日に鍵を掛けた',
+        (await bkLockedState(bkLockedB)) === 'true',
+      )
+      const bkApplyTemplate = async () => {
+        await bkOpenGroup('献立テンプレート')
+        await bkPage.getByRole('button', { name: 'テンプレートを適用', exact: true }).first().click()
+        await bkPage.waitForTimeout(600)
+        bkDialogs.length = 0
+        await bkPage.getByRole('button', { name: '入れる', exact: true }).click()
+        await bkPage.waitForTimeout(3000)
+      }
+      await bkApplyTemplate()
+      // 先に「本当にテンプレートが入った」ことを断定する。ここが通らないうちは
+      // 下のロックの合格は「何も起きていないだけ」なので意味を持たない
+      check(
+        'WEEKLOCK-BULK(テンプレ) 鍵の無い日にはテンプレートの献立が入った(素通り防止)',
+        (await bkPlanOf(bkFreeB)).length > 0,
+        `date=${bkFreeB} / plan=${JSON.stringify(await bkPlanOf(bkFreeB))}`,
+      )
+      check(
+        'WEEKLOCK-BULK(テンプレ) 鍵の日にはテンプレートの献立が入らない',
+        (await bkPlanOf(bkLockedB)).length === 0,
+        `date=${bkLockedB} / plan=${JSON.stringify(await bkPlanOf(bkLockedB))}`,
+      )
+      check(
+        'WEEKLOCK-BULK(テンプレ) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
+        bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        `dialogs=${JSON.stringify(bkDialogs)}`,
+      )
+      // 対の確認: 鍵を外すと同じ操作で入る＝「テンプレートがそもそも入らない日」ではない
+      await bkDayLock(bkLockedB).click()
+      await bkPage.waitForTimeout(700)
+      await bkApplyTemplate()
+      check(
+        'WEEKLOCK-BULK(テンプレ) 鍵を外すと同じ操作で入る(対の確認)',
+        (await bkPlanOf(bkLockedB)).length > 0,
+        `date=${bkLockedB} / plan=${JSON.stringify(await bkPlanOf(bkLockedB))}`,
+      )
+
+      // ---------- ② 先週の献立をコピー（非破壊＝空いているところにだけ入る） ----------
+      // コピー元は1週間前＝いまテンプレートで埋めた週
+      await bkNextWeek()
+      const bkWeekC = await bkWeekDates()
+      const bkLockedC = bkWeekC[0]
+      const bkFreeC = bkWeekC[1]
+      check(
+        'WEEKLOCK-BULK(先週コピー) 前提: コピー元(1週間前)の対象2日に献立がある',
+        (await bkPlanOf(bkWeekB[0])).length > 0 && (await bkPlanOf(bkWeekB[1])).length > 0,
+        `src=${JSON.stringify([bkWeekB[0], bkWeekB[1]])}`,
+      )
+      check(
+        'WEEKLOCK-BULK(先週コピー) 前提: コピー先の2日は空',
+        (await bkPlanOf(bkLockedC)).length === 0 && (await bkPlanOf(bkFreeC)).length === 0,
+        `locked=${bkLockedC} free=${bkFreeC}`,
+      )
+      await bkDayLock(bkLockedC).click()
+      await bkPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK-BULK(先週コピー) 前提: コピー先の1日に鍵を掛けた',
+        (await bkLockedState(bkLockedC)) === 'true',
+      )
+      await bkOpenGroup('献立を提案')
+      const bkCopyToggle = bkPage.getByRole('button', { name: '先週の献立をコピー', exact: true })
+      await bkCopyToggle.click()
+      await bkPage.waitForTimeout(400)
+      check(
+        'WEEKLOCK-BULK(先週コピー) 前提: 「先週の献立をコピー」のスイッチがONになった',
+        (await bkCopyToggle.getAttribute('aria-pressed')) === 'true',
+      )
+      bkDialogs.length = 0
+      await bkFill.click()
+      await bkPage.waitForTimeout(3000)
+      check(
+        'WEEKLOCK-BULK(先週コピー) 鍵の無い日には先週の献立が写った(素通り防止)',
+        (await bkPlanOf(bkFreeC)).length > 0,
+        `date=${bkFreeC} / plan=${JSON.stringify(await bkPlanOf(bkFreeC))}`,
+      )
+      check(
+        'WEEKLOCK-BULK(先週コピー) 鍵の日には先週の献立が写らない',
+        (await bkPlanOf(bkLockedC)).length === 0,
+        `date=${bkLockedC} / plan=${JSON.stringify(await bkPlanOf(bkLockedC))}`,
+      )
+      check(
+        'WEEKLOCK-BULK(先週コピー) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
+        bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        `dialogs=${JSON.stringify(bkDialogs)}`,
+      )
+      // 対の確認: 鍵を外すと同じ操作で写る
+      await bkDayLock(bkLockedC).click()
+      await bkPage.waitForTimeout(700)
+      await bkFill.click()
+      await bkPage.waitForTimeout(3000)
+      check(
+        'WEEKLOCK-BULK(先週コピー) 鍵を外すと同じ操作で写る(対の確認)',
+        (await bkPlanOf(bkLockedC)).length > 0,
+        `date=${bkLockedC} / plan=${JSON.stringify(await bkPlanOf(bkLockedC))}`,
+      )
+      // 以降の操作に影響させないためスイッチを戻す
+      await bkCopyToggle.click()
+      await bkPage.waitForTimeout(400)
+
+      // ---------- ③ まとめて空にする（破壊的＝選んだ食事の予定を消す） ----------
+      await bkDayLock(bkLockedC).click()
+      await bkPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK-BULK(まとめて空) 前提: 消す対象の週の1日に鍵を掛け直した',
+        (await bkLockedState(bkLockedC)) === 'true',
+      )
+      const bkLockedCBefore = await bkPlanOf(bkLockedC)
+      const bkFreeCBefore = await bkPlanOf(bkFreeC)
+      check(
+        'WEEKLOCK-BULK(まとめて空) 前提: 鍵の日・鍵の無い日とも献立が入っている',
+        bkLockedCBefore.length > 0 && bkFreeCBefore.length > 0,
+        `locked=${JSON.stringify(bkLockedCBefore)} / free=${JSON.stringify(bkFreeCBefore)}`,
+      )
+      await bkOpenGroup('表示のしかた')
+      bkDialogs.length = 0
+      await bkPage.getByRole('button', { name: '空にする', exact: true }).click()
+      await bkPage.waitForTimeout(1500)
+      check(
+        'WEEKLOCK-BULK(まとめて空) 鍵の無い日の予定は実際に消えた(素通り防止)',
+        (await bkPlanOf(bkFreeC)).length === 0,
+        `date=${bkFreeC} / before=${JSON.stringify(bkFreeCBefore)} / after=${JSON.stringify(await bkPlanOf(bkFreeC))}`,
+      )
+      check(
+        'WEEKLOCK-BULK(まとめて空) 鍵の日の献立は主キーidまで1つも変わらない',
+        JSON.stringify(await bkPlanOf(bkLockedC)) === JSON.stringify(bkLockedCBefore),
+        `before=${JSON.stringify(bkLockedCBefore)} / after=${JSON.stringify(await bkPlanOf(bkLockedC))}`,
+      )
+      check(
+        'WEEKLOCK-BULK(まとめて空) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
+        bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        `dialogs=${JSON.stringify(bkDialogs)}`,
+      )
+      // 対の確認: 鍵を外すと同じ操作で消える
+      await bkDayLock(bkLockedC).click()
+      await bkPage.waitForTimeout(700)
+      await bkPage.getByRole('button', { name: '空にする', exact: true }).click()
+      await bkPage.waitForTimeout(1500)
+      check(
+        'WEEKLOCK-BULK(まとめて空) 鍵を外すと同じ操作で消える(対の確認)',
+        (await bkPlanOf(bkLockedC)).length === 0,
+        `date=${bkLockedC} / after=${JSON.stringify(await bkPlanOf(bkLockedC))}`,
+      )
+    } finally {
+      await bkBrowser.close()
+    }
+  }
+
+  // --- WEEKLOCK-MONTH: 4経路目「月の未定の日をまとめて提案」のロックを画面から確かめる。
+  // 月タブはPro版の機能なので解錠コードを入れてから使う。まっさらなプロファイルで、
+  // 必ず「次の月」(まるごと未来の月＝全日が未定)を対象にする＝実行日の日付に左右されない。
+  // 鍵は週タブにしか無いので、その月の連続2日が7日分に入るまで「次の週」を送ってから掛ける ---
+  currentCheck = 'WEEKLOCK-MONTH'
+  {
+    const bmBrowser = await chromium.launch()
+    const bmContext = await bmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const bmPage = await bmContext.newPage()
+    bmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WEEKLOCK-MONTH] ${err.message}`)
+    })
+    const bmDialogs = []
+    bmPage.on('dialog', (dialog) => {
+      bmDialogs.push(dialog.message())
+      void dialog.accept()
+    })
+    try {
+      const bmPlanOf = (date) =>
+        bmPage.evaluate(
+          (d) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(
+                    g.result
+                      .filter((e) => e.date === d)
+                      .map((e) => `${e.slot}|${e.role ?? 'main'}|${e.recipeId}|id=${e.id}`)
+                      .sort(),
+                  )
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          date,
+        )
+      // Pro解錠(月タブはPro版の機能)。コードはUNLOCK-01と同じ検証用の1本を使う
+      await bmPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await bmPage.waitForTimeout(1800)
+      await bmPage.getByPlaceholder('解錠コード (例: UR-XXXX-XXXX)').fill('UR-96QS-2VSZ')
+      await bmPage.getByRole('button', { name: '解錠する', exact: true }).click()
+      await bmPage.waitForTimeout(900)
+      check(
+        'WEEKLOCK-MONTH 前提: Pro版を解錠した(月タブが使える)',
+        ((await bmPage.textContent('body')) ?? '').includes('Pro版をご利用いただきありがとうございます'),
+      )
+
+      // 週タブで「次の月」の連続2日を探し、その最初の日に鍵を掛ける
+      await bmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await bmPage.waitForTimeout(1800)
+      await bmPage.getByRole('button', { name: '週', exact: true }).click()
+      await bmPage.waitForTimeout(700)
+      const bmNextMonth = await bmPage.evaluate(() => {
+        const d = new Date()
+        d.setDate(1)
+        d.setMonth(d.getMonth() + 1)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      })
+      let bmPair = null
+      for (let i = 0; i < 8 && bmPair == null; i++) {
+        const ds = await bmPage.evaluate(() =>
+          [...document.querySelectorAll('section[data-date]')].map((s) => s.getAttribute('data-date')),
+        )
+        for (let j = 0; j + 1 < ds.length; j++) {
+          if (ds[j].startsWith(bmNextMonth) && ds[j + 1].startsWith(bmNextMonth)) {
+            bmPair = [ds[j], ds[j + 1]]
+            break
+          }
+        }
+        if (bmPair == null) {
+          await bmPage.getByRole('button', { name: '次の週' }).click()
+          await bmPage.waitForTimeout(800)
+        }
+      }
+      check(
+        'WEEKLOCK-MONTH 前提: 次の月の連続2日を週タブで開けた',
+        bmPair != null,
+        `nextMonth=${bmNextMonth}`,
+      )
+      const bmLocked = bmPair[0]
+      const bmFree = bmPair[1]
+      await bmPage.locator(`[data-testid="day-lock"][data-date="${bmLocked}"]`).click()
+      await bmPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK-MONTH 前提: 次の月の1日に鍵を掛けた',
+        (await bmPage
+          .locator(`[data-testid="day-lock"][data-date="${bmLocked}"]`)
+          .getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'WEEKLOCK-MONTH 前提: 対象の2日はどちらも未定(0件)',
+        (await bmPlanOf(bmLocked)).length === 0 && (await bmPlanOf(bmFree)).length === 0,
+        `locked=${bmLocked} free=${bmFree}`,
+      )
+
+      // 月タブ→次の月→未定の日をまとめて提案。
+      // 月タブの表示月はタブを離れても保たれるので、毎回「今月へ戻る」で起点をそろえてから
+      // 1つだけ進める（そろえずに「次の月」を押すと2か月先へ行き、鍵の日と別の月を埋めてしまう）
+      const bmOpenNextMonth = async () => {
+        await bmPage.getByRole('button', { name: '月', exact: true }).click()
+        await bmPage.waitForTimeout(1000)
+        const backToThisMonth = bmPage.getByRole('button', { name: '今月へ戻る' })
+        if ((await backToThisMonth.count()) > 0) {
+          await backToThisMonth.first().click()
+          await bmPage.waitForTimeout(900)
+        }
+        await bmPage.getByRole('button', { name: '次の月' }).click()
+        await bmPage.waitForTimeout(1200)
+      }
+      await bmOpenNextMonth()
+      check(
+        'WEEKLOCK-MONTH 前提: 月タブに次の月のカレンダーが出ている',
+        (await bmPage.locator(`[data-date="${bmLocked}"]`).count()) > 0 &&
+          (await bmPage.locator(`[data-date="${bmFree}"]`).count()) > 0,
+        `locked=${bmLocked} free=${bmFree}`,
+      )
+      const bmFillMonth = bmPage.getByRole('button', { name: '未定の日をまとめて提案' })
+      bmDialogs.length = 0
+      await bmFillMonth.click()
+      await bmPage.waitForTimeout(9000) // 1か月ぶん書き込むので長めに待つ
+      check(
+        'WEEKLOCK-MONTH 鍵の無い日には献立が入った(素通り防止)',
+        (await bmPlanOf(bmFree)).length > 0,
+        `date=${bmFree} / plan=${JSON.stringify(await bmPlanOf(bmFree))}`,
+      )
+      check(
+        'WEEKLOCK-MONTH 鍵の日には献立が入らない',
+        (await bmPlanOf(bmLocked)).length === 0,
+        `date=${bmLocked} / plan=${JSON.stringify(await bmPlanOf(bmLocked))}`,
+      )
+      check(
+        'WEEKLOCK-MONTH 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
+        bmDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        `dialogs=${JSON.stringify(bmDialogs)}`,
+      )
+      // 対の確認: 鍵を外すと同じ操作で入る
+      await bmPage.getByRole('button', { name: '週', exact: true }).click()
+      await bmPage.waitForTimeout(900)
+      for (let i = 0; i < 8; i++) {
+        if ((await bmPage.locator(`[data-testid="day-lock"][data-date="${bmLocked}"]`).count()) > 0) break
+        await bmPage.getByRole('button', { name: '次の週' }).click()
+        await bmPage.waitForTimeout(800)
+      }
+      await bmPage.locator(`[data-testid="day-lock"][data-date="${bmLocked}"]`).click()
+      await bmPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK-MONTH 前提: 鍵を外せた(対の確認の前提)',
+        (await bmPage
+          .locator(`[data-testid="day-lock"][data-date="${bmLocked}"]`)
+          .getAttribute('aria-pressed')) === 'false',
+      )
+      await bmOpenNextMonth()
+      check(
+        'WEEKLOCK-MONTH 前提: 対の確認も同じ月(次の月)を対象にしている',
+        (await bmPage.locator(`[data-date="${bmLocked}"]`).count()) > 0,
+        `date=${bmLocked}`,
+      )
+      await bmFillMonth.click()
+      await bmPage.waitForTimeout(6000)
+      check(
+        'WEEKLOCK-MONTH 鍵を外すと同じ操作で入る(対の確認)',
+        (await bmPlanOf(bmLocked)).length > 0,
+        `date=${bmLocked} / plan=${JSON.stringify(await bmPlanOf(bmLocked))}`,
+      )
+    } finally {
+      await bmBrowser.close()
+    }
+  }
+
   // --- BACKNAV-01: 今日の献立からレシピを開いて戻ると今週の献立に飛ばされるバグの回帰
   // (2026-07-15オーナー実機フィードバック)。戻り遷移には ?focus=today が付き、これがあると
   // 「日」タブへ固定される(2026-07-16 便U-1でタブ構成に再設計。以前はスクロール制御だったが、
@@ -5601,7 +6040,13 @@ try {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@MEALPLAN-01] ${err.message}`)
     })
-    mpPage.on('dialog', (dialog) => dialog.accept()) // 便U-4の削除確認confirmを自動承認
+    // 便U-4の削除確認confirmを自動承認する。2026-08-09 便EK: 規約F(何が消えて何が残るか)の
+    // 確認文そのものも検証するので、承認する前に文面を控える
+    const mpDialogs = []
+    mpPage.on('dialog', (dialog) => {
+      mpDialogs.push(dialog.message())
+      void dialog.accept()
+    })
     try {
       await mpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mpPage.waitForTimeout(1800) // 初回シード完了待ち
@@ -5750,6 +6195,49 @@ try {
         (await dinnerFilterBtn.getAttribute('aria-pressed')) === 'true',
       )
 
+      // 2026-08-09 便EK: 「選んでいない食事は残る」を件数で断定するための土台を作る。
+      // ここまでで献立が入っているのは夕食(肉じゃが)だけなので、消す側だけを見ても
+      // 「消えた」しか言えない。昼食を表示に足して1品入れ、残る側にも中身を持たせる
+      await lunchFilterBtn.click()
+      await mpPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-01(便EK) 前提: 昼食を表示に足せた(残る側の食事を用意する)',
+        (await lunchFilterBtn.getAttribute('aria-pressed')) === 'true',
+      )
+      await mpPage.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await mpPage.waitForTimeout(400)
+      await mpPage.getByPlaceholder('レシピ名で絞り込み').fill('ほうれん草のおひたし')
+      await mpPage.waitForTimeout(300)
+      await mpPage.getByText('ほうれん草のおひたし', { exact: true }).first().click()
+      await mpPage.waitForTimeout(500)
+      /** 献立(mealPlans)を食事ごとに数える。まっさらプロファイルなのでこの週の分しか無い */
+      const mpSlotCounts = () =>
+        mpPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () => {
+                  const counts = { breakfast: 0, lunch: 0, dinner: 0 }
+                  g.result.forEach((e) => {
+                    counts[e.slot] = (counts[e.slot] ?? 0) + 1
+                  })
+                  resolve(counts)
+                }
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+      const mpBeforeClear = await mpSlotCounts()
+      check(
+        'MEALPLAN-01(便EK) 前提: 消す側(夕食)と残る側(昼食)の両方に献立が入っている',
+        mpBeforeClear.dinner > 0 && mpBeforeClear.lunch > 0,
+        `before=${JSON.stringify(mpBeforeClear)}`,
+      )
+
       // 便U-4 → 便CW-3 → 便DE-12で「この週の◯◯をまとめて空にする」に改名 →
       // 2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移動し、対象の食事を
       // 複数選べるようにした。ここまでの操作で月曜夕食の主菜行に「肉じゃが」が割り当て済み(Fix4)。
@@ -5782,8 +6270,9 @@ try {
         'MEALPLAN-01(便DJ) 見出しは選んだ食事を並べて出す',
         ((await mpPage.textContent('body')) ?? '').includes('この週の朝食・夕食をまとめて空にする'),
       )
+      mpDialogs.length = 0
       await mpPage.getByRole('button', { name: '空にする', exact: true }).click()
-      await mpPage.waitForTimeout(400)
+      await mpPage.waitForTimeout(600)
       check(
         'MEALPLAN-01(便U-4/便DJ) 確認後、選んだ食事を並べた削除完了のトーストが出る',
         (await mpPage.textContent('body')).includes('朝食・夕食のこの週分を'),
@@ -5791,6 +6280,37 @@ try {
       check(
         'MEALPLAN-01(便U-4/便CW-3) 手で選んで入れた「肉じゃが」も消える(改名の根拠になる実挙動)',
         (await mpPage.getByText('肉じゃが', { exact: true }).count()) === 0,
+      )
+      // 2026-08-09 便EK: 「消えた」だけでなく「選んでいない食事は残る」も件数で断定する。
+      // 消える側が0件になったことと、残る側が1件も減っていないことを対で見る
+      const mpAfterClear = await mpSlotCounts()
+      check(
+        'MEALPLAN-01(便EK) 選んだ食事(朝食・夕食)の予定は0件になる',
+        mpAfterClear.dinner === 0 && mpAfterClear.breakfast === 0,
+        `before=${JSON.stringify(mpBeforeClear)} / after=${JSON.stringify(mpAfterClear)}`,
+      )
+      check(
+        'MEALPLAN-01(便EK) 選んでいない昼食の予定は1件も減らない(件数まで同じ)',
+        mpAfterClear.lunch === mpBeforeClear.lunch && mpAfterClear.lunch > 0,
+        `before=${JSON.stringify(mpBeforeClear)} / after=${JSON.stringify(mpAfterClear)}`,
+      )
+      check(
+        'MEALPLAN-01(便EK) 昼食に入れた「ほうれん草のおひたし」は画面にも残る',
+        (await mpPage.getByText('ほうれん草のおひたし', { exact: true }).count()) > 0,
+      )
+      check(
+        'MEALPLAN-01(便EK・規約F) 確認文が残る食事とその件数を名指しする',
+        mpDialogs.some((m) =>
+          m.includes(`ほかの食事（昼食）の予定${mpBeforeClear.lunch}品と、作った記録は残ります`),
+        ),
+        `dialogs=${JSON.stringify(mpDialogs)}`,
+      )
+      check(
+        'MEALPLAN-01(便EK・規約F) 確認文が消える品数も書く',
+        mpDialogs.some((m) =>
+          new RegExp(`朝食・夕食のこの週の予定${mpBeforeClear.dinner}品を削除します`).test(m),
+        ),
+        `dialogs=${JSON.stringify(mpDialogs)}`,
       )
 
       // 2026-07-29 便CD/MP-02: 「今日から7日間」表示の曜日ラベルが日付と一致すること。
