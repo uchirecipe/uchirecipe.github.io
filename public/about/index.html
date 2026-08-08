@@ -388,6 +388,14 @@
     font-size: 12.5px;
     color: var(--text-muted);
   }
+  /* 直後に「ホーム画面への追加方法」のリンクを置くときだけ、間を詰める */
+  .cta-note--tight { margin-bottom: 5px; }
+  .cta-link {
+    margin: 0 0 22px;
+    text-align: center;
+    font-size: 13.5px;
+    font-weight: bold;
+  }
   .back {
     display: block;
     text-align: center;
@@ -442,7 +450,8 @@
   </figure>
 
   <a class="cta" href="/">無料で使ってみる</a>
-  <p class="cta-note">最初から基本のレシピが100品以上入っています</p>
+  <p class="cta-note cta-note--tight">最初から基本のレシピが100品以上入っています</p>
+  <p class="cta-link"><a href="/about/install.html">ホーム画面への追加方法</a></p>
 
   <section class="sec">
     <h2>こんなとき、ありませんか</h2>
@@ -683,22 +692,11 @@
   <section class="sec">
     <h2>ホーム画面に追加する</h2>
     <p>アプリストアは使いません。ブラウザからホーム画面に追加すると、次からはアイコンから開けます。</p>
-    <details>
-      <summary>iPhone・iPad（Safari）の場合</summary>
-      <ol class="steps">
-        <li>Safariで <code>https://uchirecipe.com/</code> を開く</li>
-        <li>下部の共有ボタン（四角から矢印が上に伸びたアイコン）をタップ</li>
-        <li>「ホーム画面に追加」を選んで「追加」をタップ</li>
-      </ol>
-    </details>
-    <details>
-      <summary>Android（Chrome）の場合</summary>
-      <ol class="steps">
-        <li>Chromeで <code>https://uchirecipe.com/</code> を開く</li>
-        <li>右上のメニュー（縦三点）をタップし「アプリをインストール」または「ホーム画面に追加」を選ぶ</li>
-        <li>表示に従って追加する</li>
-      </ol>
-    </details>
+    <!-- 2026-08-08 便EF: iPhone(Safari)・Android(Chrome)・パソコンの手順は、押す場所を図で
+         示した専用ページ(/about/install.html)に集約した。ここに同じ手順を重ねて置くと
+         片方だけ古くなるため、紹介ページからはリンクだけを出す -->
+    <p>iPhone・iPad（Safari）、Android（Chrome）、パソコンそれぞれの手順を、押す場所を示した図つきで説明しています。</p>
+    <a class="more" href="/about/install.html">ホーム画面への追加方法 →</a>
   </section>
 
   <section class="sec">
