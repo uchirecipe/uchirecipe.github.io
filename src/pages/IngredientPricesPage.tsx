@@ -9,6 +9,7 @@ import {
   resetPriceEntryToDefault,
 } from '../db/prices'
 import { toHiragana } from '../logic/kana'
+import { isImeConfirmKey } from '../logic/imeKey'
 import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
 import UnitQuantityFields from '../components/UnitQuantityFields'
@@ -20,9 +21,13 @@ import type { PriceEntry } from '../db/types'
 const inputCls =
   'min-w-0 flex-1 rounded-sm border border-edge bg-app px-3 py-2 text-base text-ink placeholder:text-ink-muted/60'
 
-/** blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる) */
+/**
+ * blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる)。
+ * 今の当て先は数字の欄だけだが、日本語の欄に付け替えても穴にならないよう
+ * 変換確定のEnterを除外しておく(2026-08-09 便EK。判定は logic/imeKey.ts）
+ */
 const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
-  if (e.key === 'Enter') e.currentTarget.blur()
+  if (e.key === 'Enter' && !isImeConfirmKey(e)) e.currentTarget.blur()
 }
 
 // 2026-07-15 UI改修: 単位欄(自由入力)を「数量(数字)＋単位(選択)」に分離
