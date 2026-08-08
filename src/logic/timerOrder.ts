@@ -37,6 +37,8 @@ export interface StoredTimer {
   fromNavi?: boolean
   /** ナビのレシピ色の添字（0,1,2）。常駐バーの左端の色に使う */
   naviColorIndex?: number
+  /** ナビの段取りでの通し番号（2026-08-09 便EH）。常駐バーの番号バッジに出す */
+  naviOrder?: number
 }
 
 /** localStorage のキー */
@@ -86,6 +88,11 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
       naviColorIndex:
         typeof t.naviColorIndex === 'number' && Number.isFinite(t.naviColorIndex)
           ? t.naviColorIndex
+          : undefined,
+      // 通し番号が無い古い保存は、従来どおりレシピ内の手順番号を出す
+      naviOrder:
+        typeof t.naviOrder === 'number' && Number.isFinite(t.naviOrder) && t.naviOrder > 0
+          ? t.naviOrder
           : undefined,
     })
   }

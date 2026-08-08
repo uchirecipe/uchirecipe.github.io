@@ -149,16 +149,41 @@ export async function markAllTodayListCooked(recipeIds: number[]): Promise<void>
  * しないこと。ナビで組むのは今日の献立の一部（2〜3品）なので、選んでいない品まで
  * 消してはいけない。記録・献立からの削除は1トランザクションにまとめて原子化する。
  */
-export async function markRecipesCooked(recipeIds: number[]): Promise<void> {
-  if (recipeIds.length === 0) return
+/**
+ * 2026-08-09 便EH（オーナー実機報告「まとめて作った！すると、その品が再度記録され、記録が2つになる」）:
+ * **今日すでに同じ品の記録が付いているときは、記録を足さない**。
+ *
+ * 対象から外すのは「今日の日付で、メモ・写真・人数のどれも付いていない記録」がある品だけ
+ * ＝この関数が付ける記録とまったく同じものが既にある品。レシピ詳細の「作った！」で
+ * メモや写真を添えて記録した品は別物なので、ここでは判断材料にしない
+ * （undoTodayListCooked が取り消す対象の決め方と同じ規則）。
+ * 同じ料理を1日に2回作ったときに記録を残せなくなる心配はある。ただしその場合は
+ * レシピ詳細の記録フォーム（人数・メモつき）から付けられるので、
+ * **黙って二重に付くことの害の方が大きい**と判断した。
+ *
+ * 実際に記録した品のIDを返す（呼び出し側はその件数をそのまま画面に出す）。
+ */
+export async function markRecipesCooked(recipeIds: number[]): Promise<number[]> {
+  if (recipeIds.length === 0) return []
   const date = todayString()
-  await db.transaction('rw', db.recipes, db.todayList, async () => {
+  const recorded = await db.transaction('rw', db.recipes, db.todayList, async () => {
+    const done: number[] = []
     for (const recipeId of recipeIds) {
-      await addCookedLog(recipeId, { date })
+      const recipe = await db.recipes.get(recipeId)
+      const alreadyLogged = recipe?.cookedLogs.some(
+        (log) =>
+          log.date === date && log.note == null && log.photo == null && log.servings == null,
+      )
+      if (!alreadyLogged) {
+        await addCookedLog(recipeId, { date })
+        done.push(recipeId)
+      }
       await db.todayList.where('recipeId').equals(recipeId).delete()
     }
+    return done
   })
-  await reflectPantryForCooked(recipeIds) // 在庫反映(便CC/C3。設定ONのときだけ)
+  await reflectPantryForCooked(recorded) // 在庫反映(便CC/C3。設定ONのときだけ)
+  return recorded
 }
 
 /**

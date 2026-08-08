@@ -58,6 +58,13 @@ export interface ActiveTimer {
   fromNavi?: boolean
   /** ナビのレシピ色の添字（0,1,2）。常駐バーの左端をこの色で塗り、どの料理か一目で分かるようにする */
   naviColorIndex?: number
+  /**
+   * 並行調理ナビの段取りでの通し番号（2026-08-09 便EH・オーナー実機報告
+   * 「タイマーの番号が元のレシピの手順番号のまま」）。
+   * 常駐バーの番号バッジはこちらを出す。stepNumber（レシピ内の手順番号）は
+   * 戻り先を決めるのに使うので、そのまま持ち続ける。
+   */
+  naviOrder?: number
 }
 
 export interface StartTimerOptions {
@@ -74,6 +81,8 @@ export interface StartTimerOptions {
   fromNavi?: boolean
   /** ナビのレシピ色の添字（0,1,2） */
   naviColorIndex?: number
+  /** ナビの段取りでの通し番号（常駐バーの番号バッジに出す） */
+  naviOrder?: number
 }
 
 interface TimerContextValue {
@@ -341,6 +350,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       isCustom: options.isCustom === true,
       fromNavi: options.fromNavi === true,
       naviColorIndex: options.naviColorIndex,
+      naviOrder: options.naviOrder,
     }
     setNow(Date.now())
     setTimers((prev) => [...prev, timer])
