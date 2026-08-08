@@ -615,6 +615,23 @@ say(`     DEFAULT_ACTIVE_MINUTES=${DEFAULT_ACTIVE_MINUTES}分 と仮定して順
 say()
 
 // --- 5: 段階分けの内訳 ---
+say('■ 1b. 手順文そのものの形（なぜ待ちが見つからないのかの手掛かり）')
+say()
+say('| レシピ群 | 平均字数 | 1分以上の時間表記がある手順 | 12字以下の短い手順 | 80字以上の長い手順 | 手順が1つだけの品 |')
+say('|---|---|---|---|---|---|')
+for (const g of groups) {
+  const texts = g.recipes.flatMap((r) => r.steps.map((s) => s.text))
+  const withTime = texts.filter((t) => findTimeTokens(t).some((x) => x.seconds >= 60)).length
+  const shortS = texts.filter((t) => t.length <= 12).length
+  const longS = texts.filter((t) => t.length >= 80).length
+  const one = g.recipes.filter((r) => r.steps.length <= 1).length
+  say(
+    `| ${g.key} | ${Math.round(texts.reduce((a, t) => a + t.length, 0) / texts.length)}字 | ${f1(pct(withTime, texts.length))}% | ` +
+      `${f1(pct(shortS, texts.length))}% | ${f1(pct(longS, texts.length))}% | ${one}品 |`,
+  )
+}
+say()
+
 say('■ 5. 段階分け（stepCategory）の内訳')
 say()
 say('| レシピ群 | cut 切る | wash 下処理 | season 味/成形 | heat 加熱 | finish 仕上げ | other 不明 |')
