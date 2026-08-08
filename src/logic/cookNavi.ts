@@ -95,7 +95,41 @@ export const HANDS_ON_PATTERNS: RegExp[] = [
   /焦げやす/, // 焦げやすいので〜
   /つきっきり|付きっきり/,
   /手を止めず|手を離さ/,
+  // 「沸騰直前まで温めたら火を弱める」（冷しゃぶ）は、沸くのを見ていないと成り立たない工程。
+  // 「沸かす」の待ちと同じ顔をしているので明示的に付きっきり側へ倒す（2026-08-08 便ED・同梱109品の目視）
+  /沸騰直前|煮立つ直前|沸く直前/,
 ]
+
+/**
+ * 待ち動詞の辞書に足りていなかった家庭の言い回し（2026-08-08 便ED・docs/68 打ち手#1(a)）。
+ * 「水を沸かす」「乾物をもどす」「解凍する」「冷蔵庫で冷やす」「ふたをして火にかける」は
+ * どれも手が空く工程だが、辞書に無いため実測で全部が手作業に落ちていた。
+ *
+ * WAIT_VERB_PATTERNS 本体に足さず別に持つのは、isHandsOnStep の位置判定
+ * （炒め・揚げが待ち動詞より後ろにあるか）の基準を従来のまま動かさないため。
+ */
+export const EXTRA_WAIT_VERB_PATTERNS: RegExp[] = [
+  /沸か|沸騰させ|湯を沸/, // 湯を沸かす
+  /もどす|もどし|戻す|戻し/, // 乾物をもどす
+  /解凍/,
+  /冷蔵庫に入れ|冷蔵庫で/,
+  /ふたをして|フタをして|蓋をして/, // ふたをして火にかける（多くは放置工程）
+]
+
+/**
+ * 待ち動詞の字は入っているが、待ち時間ではない名詞（2026-08-08 便ED・docs/68 6-3の×2件）。
+ * 「だし汁・しょうゆ・酢・砂糖を混ぜ、漬け汁を作る」は調味液を作る手作業なのに、
+ * 「漬」に反応して20分の漬け込みに化けていた。判定の前に伏せ字へ置き換える
+ * （位置ルールで文字位置を使うので、**同じ長さ**の伏せ字にして位置をずらさない）。
+ *
+ * 「オーブンシート」も同じ誤りで、紙を敷くだけの手順が「オーブン15分」に化けていた
+ * （フルーツヨーグルトバーク 手順3。同梱109品の目視で判明）。
+ */
+const NON_WAIT_NOUN_PATTERN = /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|オーブンシート|オーブンペーパー/g
+
+function maskNonWaitNouns(text: string): string {
+  return text.replace(NON_WAIT_NOUN_PATTERN, (m) => '＊'.repeat(m.length))
+}
 
 /**
  * 手を動かし続ける調理動詞（炒める・揚げる）。**待ち動詞より後ろに出てきたとき**だけ
@@ -108,6 +142,50 @@ export const HANDS_ON_PATTERNS: RegExp[] = [
  * 「最後に来る動作がその手順の主役」という単純な規則で両者を分ける。
  */
 const HANDS_ON_COOK_PATTERN = /炒め|炒る|揚げ/
+
+/**
+ * 手作業の動作（2026-08-08 便ED・docs/68 打ち手#1(b)）。
+ * HANDS_ON_COOK_PATTERN（炒め・揚げ）の位置ルールを、手を動かす動作全般に広げるための辞書。
+ * これが待ち動詞より後ろに来る手順は、待ち動詞が入っていても実体は手作業
+ * （「煮立ったらアクを取る」「粗熱が取れたら殻をむく」）。
+ *
+ * 「むく／むき」は docs/68 6-3 で見つかった欠落（「粗熱が取れたら殻をむく」が20分の待ちに化けていた）。
+ * 「洗う／締める」は同梱109品の目視で見つかった欠落（「茹で上がったら流水で洗い流し、氷水で
+ * しっかり締める」が8分の待ちに化け、うどんが伸びる段取りになっていた）。
+ */
+const ACTION_VERB_PATTERN =
+  /炒め|炒る|揚げ|焼く|焼き|焼い|取る|取り|取っ|加え|入れ|混ぜ|溶き|溶い|溶か|絞る|絞り|絞っ|切る|切り|切っ|盛る|盛り|盛っ|かける|かけて|ふる|ふり|返す|返し|のせ|散ら|和え|あえ|つぶ|こね|まぶ|止め|ぬぐ|添え|よそ|包む|巻く|にぎ|ほぐ|むく|むき|洗う|洗い|洗っ|締め/
+
+/** 短時間の合図。既定分数を当てない（「熱湯でさっとゆでる」を8分の待ちにしない） */
+const SHORT_CUE_PATTERN = /さっと|ざっと|軽く|手早く|素早く/
+
+/** 「〜ておく／〜ておき／〜ておいて」＝先に済ませる言い方であって放置時間ではない */
+const TE_OKU_PATTERN = /[てで](?:お|置)[くきい]/
+
+/**
+ * 時間が書かれていない待ち工程に当てる既定の分数（2026-08-08 便ED・docs/68 打ち手#1(a)）。
+ *
+ * **時間の読める調理法だけを載せる。汎用のフォールバック（該当なし＝10分）は置かない。**
+ * 置くと「油をなじませる」「たれを作っておく」まで待ちに化ける（診断で実測済み）。
+ * 上から順に見て最初に当たったものを使う。
+ */
+const DEFAULT_WAIT_MINUTES: { pattern: RegExp; minutes: number }[] = [
+  { pattern: /解凍/, minutes: 30 },
+  { pattern: /炊/, minutes: 30 },
+  { pattern: /発酵/, minutes: 40 },
+  { pattern: /漬|浸/, minutes: 20 },
+  { pattern: /もどす|もどし|戻す|戻し/, minutes: 15 },
+  { pattern: /オーブン|グリル/, minutes: 15 },
+  { pattern: /冷蔵庫/, minutes: 30 },
+  // 「煮立てる」は沸かすのと同じで、煮込みほど長くない（同梱109品の目視。10分は長すぎた）
+  { pattern: /煮立て/, minutes: 5 },
+  { pattern: /煮/, minutes: 10 },
+  { pattern: /茹で|ゆで/, minutes: 8 },
+  { pattern: /蒸/, minutes: 8 },
+  { pattern: /ふたをして|フタをして|蓋をして/, minutes: 8 },
+  { pattern: /沸か|沸騰させ/, minutes: 5 },
+  { pattern: /レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/, minutes: 3 },
+]
 
 /** text 中で pattern 群のどれかが最後に現れる位置（無ければ -1） */
 function lastIndexOfPatterns(text: string, patterns: readonly RegExp[]): number {
@@ -132,9 +210,10 @@ export function isHandsOnStep(step: Step): boolean {
   if (HANDS_ON_PATTERNS.some((re) => re.test(haystack))) return true
   // 炒め・揚げは「待ち動詞より後ろにあるとき」だけ付きっきり（本文のみで判断する。
   // memo の「炒めたときに水っぽくならない」等の言及で本物の待ちを潰さないため）
-  const cookAt = lastIndexOfPatterns(step.text, [HANDS_ON_COOK_PATTERN])
+  const text = maskNonWaitNouns(step.text)
+  const cookAt = lastIndexOfPatterns(text, [HANDS_ON_COOK_PATTERN])
   if (cookAt === -1) return false
-  return cookAt > lastIndexOfPatterns(step.text, WAIT_VERB_PATTERNS)
+  return cookAt > lastIndexOfPatterns(text, WAIT_VERB_PATTERNS)
 }
 
 /**
@@ -156,19 +235,54 @@ export function resolveStepMinutes(step: Step): number | undefined {
 }
 
 /**
+ * 待ち工程として扱うときの待ち分数（分）。
+ * 明示 minutes ＞ 本文の時間表記 ＞ 調理法ごとの既定分数、の順に決める
+ * （2026-08-08 便ED・docs/68 打ち手#1）。
+ *
+ * 歯止め（これが無いと目を離させる誤りが増える。診断で実測済み）:
+ *   - 本文に時間表記があるのに1分未満（「30秒ゆでる」）なら既定分数を当てない。
+ *     書いてある時間より長い分数を機械が上書きするのは危険側の誤り
+ *   - 「さっと」「軽く」等の短時間の合図がある工程には当てない
+ *   - 「〜ておく」（作っておく・溶いておく）は放置時間ではないので当てない
+ *   - 表に無い待ち動詞（なじませる・味をしみ込ませる・温める・置く）には当てない＝undefined を返し、
+ *     呼び出し側で手作業系に倒す（**汎用フォールバックは置かない**）
+ *
+ * ここで求めた既定分数は**ナビの計算と表示にだけ使い、レシピのデータには書き込まない**。
+ */
+export function resolveWaitMinutes(step: Step): number | undefined {
+  const explicit = resolveStepMinutes(step)
+  if (explicit != null) return explicit
+  // 本文に時間が書いてあって1分未満だった＝短いと分かっている。既定分数で上書きしない
+  if (findTimeTokens(step.text).length > 0) return undefined
+  if (SHORT_CUE_PATTERN.test(step.text)) return undefined
+  if (TE_OKU_PATTERN.test(step.text)) return undefined
+  const text = maskNonWaitNouns(step.text)
+  return DEFAULT_WAIT_MINUTES.find((v) => v.pattern.test(text))?.minutes
+}
+
+/**
  * 手順1つを「待ち系」か「手作業系」かに分類する。
- * 待ち動詞（WAIT_VERB_PATTERNS）を含まない手順（切る・混ぜる・炒める・素の焼く等）は
- * 常に手作業系（安全側の既定）。待ち動詞を含む手順は、待ち分数が分かるとき（明示 minutes
- * または本文の時間表記から推定できるとき）だけ待ち系にする。時間が全く分からない待ち動詞
- * （「じっくり煮込む」等、分数の手掛かりが無いもの）は、どれだけ手を離してよいか不明なので
- * 手作業系に倒す（安全側。誤って待ち扱いにして別作業を挟ませる方が実害が大きい）。
+ * 待ち動詞（WAIT_VERB_PATTERNS ＋ EXTRA_WAIT_VERB_PATTERNS）を含まない手順（切る・混ぜる・
+ * 炒める・素の焼く等）は常に手作業系（安全側の既定）。
+ *
+ * 待ち動詞を含む手順でも、次のときは手作業系に倒す:
+ *   - 目を離せない工程（isHandsOnStep）
+ *   - **手順の最後に来る動作が手作業のとき**（2026-08-08 便ED・位置ルール）。
+ *     「煮立ったら浮いてきたアクを取ります」「粗熱が取れたら殻をむく」は待ちではない。
+ *     ただし**ユーザーが自分で分数を入れた手順には当てない**（入力の意思を尊重する）
+ *   - 待ち分数がどうしても分からないとき（resolveWaitMinutes が undefined）。
+ *     どれだけ手を離してよいか不明なものを待ちにする方が実害が大きい
  */
 export function classifyStep(step: Step): StepKind {
   // 目を離せない工程は、待ち動詞・待ち分数に関係なく手作業系（2026-08-08 便EB）。
   // 短い待ちほど「2分しかないのに他の作業を挟まれる」実害が大きいので最優先で判定する
   if (isHandsOnStep(step)) return 'active'
-  if (!WAIT_VERB_PATTERNS.some((re) => re.test(step.text))) return 'active'
-  return resolveStepMinutes(step) != null ? 'wait' : 'active'
+  const text = maskNonWaitNouns(step.text)
+  const waitAt = lastIndexOfPatterns(text, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
+  if (waitAt === -1) return 'active'
+  const hasExplicitMinutes = step.minutes != null && step.minutes > 0
+  if (!hasExplicitMinutes && lastIndexOfPatterns(text, [ACTION_VERB_PATTERN]) > waitAt) return 'active'
+  return resolveWaitMinutes(step) != null ? 'wait' : 'active'
 }
 
 /**
@@ -271,6 +385,11 @@ export interface TimelineItem {
   kind: StepKind
   /** 待ち系のときの待ち分数（手作業系は0） */
   waitMinutes: number
+  /**
+   * 待ち分数が「手順に書かれていない」ため調理法から当てた既定値かどうか（2026-08-08 便ED）。
+   * 画面では目安であることを添えて出す（書いてある分数と同じ顔で出さない）。
+   */
+  waitEstimated: boolean
   /** 開始からの目安の開始位置（分）。おおよその並び計算用 */
   startMin: number
   /** 目安の終了位置（分） */
@@ -296,6 +415,7 @@ interface Job {
     minutes?: number
     kind: StepKind
     waitMinutes: number
+    waitEstimated: boolean
     activeMinutes: number
     category: StepCategory
     stageRank: number
@@ -317,11 +437,11 @@ function buildJobs(recipes: Recipe[]): Job[] {
       readyAt: 0,
       steps: r.steps.map((s, i) => {
         const kind = classifyStep(s)
-        // 待ちの分数は明示 minutes ＞本文推定の順で解決する（classifyStep が wait を返した
-        // 時点で resolveStepMinutes は必ず値を持つ）。手作業系の順序計算は従来どおり明示
-        // minutes か DEFAULT_ACTIVE_MINUTES を使う（本文推定は待ちの認識だけに使い、
-        // 手作業の所要時間は変えない＝順序への影響を待ち認識の改善だけに限定する）
-        const waitMinutes = kind === 'wait' ? (resolveStepMinutes(s) ?? 0) : 0
+        // 待ちの分数は明示 minutes ＞本文の時間表記＞調理法ごとの既定分数の順で解決する
+        // （classifyStep が wait を返した時点で resolveWaitMinutes は必ず値を持つ）。手作業系の
+        // 順序計算は従来どおり明示 minutes か DEFAULT_ACTIVE_MINUTES を使う（推定は待ちの認識
+        // だけに使い、手作業の所要時間は変えない＝順序への影響を待ち認識の改善だけに限定する）
+        const waitMinutes = kind === 'wait' ? (resolveWaitMinutes(s) ?? 0) : 0
         const activeMinutes =
           kind === 'active'
             ? s.minutes != null && s.minutes > 0
@@ -336,6 +456,8 @@ function buildJobs(recipes: Recipe[]): Job[] {
           minutes: s.minutes,
           kind,
           waitMinutes,
+          // 手順に時間が書かれておらず、調理法から当てた分数で待ちにした手順
+          waitEstimated: kind === 'wait' && resolveStepMinutes(s) == null,
           activeMinutes,
           category: stepCategory(s),
           stageRank: stepStageRank(s),
@@ -455,6 +577,96 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
   return { items, totalMinutes, recipes: recipes2 }
 }
 
+/** 段取りの出し方（2026-08-08 便ED） */
+export type CookPlanMode = 'parallel' | 'sequential'
+
+export interface CookPlan extends CookTimeline {
+  mode: CookPlanMode
+  /** 1品ずつ順に作ったときの合計（分）。ナビと同じ物差しで数えた値 */
+  sequentialMinutes: number
+  /** 並行の段取りにしたときの合計（分） */
+  parallelMinutes: number
+  /** 1品ずつ作るのに比べて何%縮むか */
+  gainPercent: number
+}
+
+/**
+ * これ未満の短縮率なら「並行の余地なし」として1品ずつ作る順番を出す（docs/68 打ち手#4）。
+ * 誤差の範囲でしか縮まないのに「約◯分」とだけ出すと、縮んでいないのに縮んだように見えるため。
+ */
+export const MIN_GAIN_PERCENT = 5
+
+/** その品が加熱で終わるか（＝できたてが温かい品）。「器に盛る」等の仕上げは判断材料にしない */
+function endsWithHeat(recipe: Recipe): boolean {
+  for (let i = recipe.steps.length - 1; i >= 0; i--) {
+    const category = stepCategory(recipe.steps[i])
+    if (category === 'finish') continue
+    return category === 'heat'
+  }
+  return false
+}
+
+/**
+ * 1品ずつ順に作る段取り（2026-08-08 便ED・docs/68 打ち手#4）。
+ * 1品を最後まで作り終えてから次の品に移る。**加熱で終わる温かい品を最後にまわす**ので、
+ * できあがった料理が冷めるのを最小限にできる。
+ */
+function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
+  const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
+  const ordered = valid
+    .map((recipe, index) => ({ recipe, index }))
+    .sort((a, b) => Number(endsWithHeat(a.recipe)) - Number(endsWithHeat(b.recipe)) || a.index - b.index)
+
+  const items: TimelineItem[] = []
+  let offset = 0
+  for (const { recipe, index } of ordered) {
+    const single = buildCookTimeline([recipe])
+    for (const item of single.items) {
+      items.push({
+        ...item,
+        order: items.length + 1,
+        colorIndex: index,
+        startMin: item.startMin + offset,
+        endMin: item.endMin + offset,
+      })
+    }
+    offset += single.totalMinutes
+  }
+  return {
+    items,
+    totalMinutes: offset,
+    recipes: valid.map((r, colorIndex) => ({ id: r.id!, title: r.title, colorIndex })),
+  }
+}
+
+/**
+ * 選んだレシピの段取りを作る。**並行の余地があるかどうかを同じ物差しで測ってから出し分ける**
+ * （2026-08-08 便ED・docs/68 打ち手#4）。
+ *
+ * 診断（docs/68）で、ユーザーが登録したレシピ3品の約3回に1回は1分も縮んでいないのに、
+ * 画面には「全体の目安 約◯分」とだけ出ていた（縮んでいないのに縮んだように見える）。
+ * 短縮率が MIN_GAIN_PERCENT 未満のときは並行に組まず、1品ずつ作る順番をそのまま出して、
+ * 待ち時間が見つからなかったことを画面に書く。
+ */
+export function buildCookPlan(recipes: Recipe[]): CookPlan {
+  const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
+  const parallel = buildCookTimeline(valid)
+  const sequentialMinutes = valid.reduce((sum, r) => sum + buildCookTimeline([r]).totalMinutes, 0)
+  const parallelMinutes = parallel.totalMinutes
+  const gainPercent =
+    sequentialMinutes > 0 ? ((sequentialMinutes - parallelMinutes) / sequentialMinutes) * 100 : 0
+  if (gainPercent >= MIN_GAIN_PERCENT) {
+    return { ...parallel, mode: 'parallel', sequentialMinutes, parallelMinutes, gainPercent }
+  }
+  return {
+    ...buildSequentialTimeline(valid),
+    mode: 'sequential',
+    sequentialMinutes,
+    parallelMinutes,
+    gainPercent,
+  }
+}
+
 /**
  * タイムライン上で index の手順より後に「手作業系」の手順が残っているか。
  * 待ち手順の「この間に、次の手作業を進められます」ヒントは、実際に後続の手作業が
@@ -483,6 +695,7 @@ function makeItem(
     minutes: step.minutes,
     kind: step.kind,
     waitMinutes: step.waitMinutes,
+    waitEstimated: step.waitEstimated,
     startMin,
     endMin,
   }

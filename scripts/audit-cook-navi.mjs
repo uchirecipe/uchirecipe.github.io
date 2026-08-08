@@ -22,6 +22,8 @@
 import {
   classifyStep,
   resolveStepMinutes,
+  resolveWaitMinutes,
+  buildCookPlan,
   isHandsOnStep,
   stepCategory,
   stepStageRank,
@@ -167,7 +169,7 @@ function measureRecipe(r) {
 
   const solo = buildCookTimeline([r]).totalMinutes
   const detectedWaitMinutes = steps.reduce(
-    (sum, s, i) => sum + (kinds[i] === 'wait' ? (resolveStepMinutes(s) ?? 0) : 0),
+    (sum, s, i) => sum + (kinds[i] === 'wait' ? (resolveWaitMinutes(s) ?? 0) : 0),
     0,
   )
   const realWaitMinutes = (r._realWaits ?? []).reduce((a, w) => a + w.minutes, 0)
@@ -237,6 +239,8 @@ function sampleTriples(list, count, seed) {
 
 function measureTriple(trio) {
   const timeline = buildCookTimeline(trio)
+  // 画面に出る形（並行の段取り／1品ずつ順に作る正直表示）はアプリと同じ関数で決める
+  const plan = buildCookPlan(trio)
   const solos = trio.map((r) => measures.get(r.id).solo)
   const seq = solos.reduce((a, b) => a + b, 0)
   const lower = Math.max(...solos)
@@ -249,6 +253,7 @@ function measureTriple(trio) {
     lower,
     gainPct: pct(seq - par, seq),
     idealGainPct: pct(seq - lower, seq),
+    honest: plan.mode === 'sequential',
     waitSteps: timeline.items.filter((it) => it.kind === 'wait').length,
     steps: timeline.items.length,
   }
@@ -266,6 +271,7 @@ function summarizeTriples(triples) {
     maxGain: Math.max(...gains),
     zeroRate: pct(zero, rows.length),
     under5Rate: pct(under5, rows.length),
+    honestRate: pct(rows.filter((r) => r.honest).length, rows.length),
     avgIdeal: rows.reduce((a, r) => a + r.idealGainPct, 0) / rows.length,
     avgSeq: rows.reduce((a, r) => a + r.seq, 0) / rows.length,
     avgPar: rows.reduce((a, r) => a + r.par, 0) / rows.length,
@@ -348,10 +354,10 @@ function simulateTimeline(recipes, opt) {
   return { totalMinutes: total, items }
 }
 
-/** 打ち手なし（＝現行アプリと同じ判定） */
+/** 打ち手なし（＝いまのアプリと同じ判定。便EDの修繕後はこれが「修繕後の実装」になる） */
 const BASELINE = {
   classify: classifyStep,
-  waitMinutes: resolveStepMinutes,
+  waitMinutes: resolveWaitMinutes,
   splitSteps: false,
 }
 
@@ -663,6 +669,7 @@ say()
 say('| レシピ群 | 手順数 | 一致 | 見逃し(本当は待ち→手作業) | 危険(本当は手作業→待ち) | 一致率 |')
 say('|---|---|---|---|---|---|')
 const truthDetail = []
+const truthTotal = { ok: 0, missed: 0, dangerous: 0, total: 0 }
 for (const g of groups.slice(1)) {
   let ok = 0
   let missed = 0
@@ -688,7 +695,14 @@ for (const g of groups.slice(1)) {
     })
   }
   say(`| ${g.key} | ${total} | ${ok} | ${missed} | ${dangerous} | ${f1(pct(ok, total))}% |`)
+  truthTotal.ok += ok
+  truthTotal.missed += missed
+  truthTotal.dangerous += dangerous
+  truthTotal.total += total
 }
+say(
+  `| **合計** | ${truthTotal.total} | ${truthTotal.ok} | ${truthTotal.missed} | **${truthTotal.dangerous}** | **${f1(pct(truthTotal.ok, truthTotal.total))}%** |`,
+)
 say()
 for (const line of truthDetail) say(line)
 say()
@@ -757,14 +771,14 @@ const comboSets = [
     triples: sampleTriples([...aRecipes, ...bRecipes, ...cRecipes], 200, 424242),
   },
 ]
-say('| 組み合わせ | 通り数 | 順に作る平均(分) | ナビの平均(分) | 平均短縮率 | 短縮ゼロの割合 | 短縮5%未満の割合 | 理論上の最大短縮率 |')
-say('|---|---|---|---|---|---|---|---|')
+say('| 組み合わせ | 通り数 | 順に作る平均(分) | ナビの平均(分) | 平均短縮率 | 短縮ゼロの割合 | 短縮5%未満の割合 | 正直表示になった割合 | 理論上の最大短縮率 |')
+say('|---|---|---|---|---|---|---|---|---|')
 const comboSummaries = new Map()
 for (const c of comboSets) {
   const s = summarizeTriples(c.triples)
   comboSummaries.set(c.key, s)
   say(
-    `| ${c.key} | ${s.n} | ${f1(s.avgSeq)} | ${f1(s.avgPar)} | ${f1(s.avgGain)}% | ${f1(s.zeroRate)}% | ${f1(s.under5Rate)}% | ${f1(s.avgIdeal)}% |`,
+    `| ${c.key} | ${s.n} | ${f1(s.avgSeq)} | ${f1(s.avgPar)} | ${f1(s.avgGain)}% | ${f1(s.zeroRate)}% | ${f1(s.under5Rate)}% | ${f1(s.honestRate)}% | ${f1(s.avgIdeal)}% |`,
   )
 }
 say()
