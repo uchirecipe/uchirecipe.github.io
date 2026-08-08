@@ -102,27 +102,13 @@ export async function removeMealEntry(entryId: number): Promise<void> {
 }
 
 /**
- * 指定期間のうち、選んだ食事（例: 朝食・昼食）のエントリだけをまとめて削除する。
- * 週タブの「この週の◯◯をまとめて空にする」用（2026-07-16 便U-4 Fable設計:
- * 「朝のみ削除したい」というオーナー要望への回答。食事を選んで確認ダイアログを経てから
- * 呼び出す想定）。2026-08-03 便DJ（オーナー指示）で、1つだけだった指定を複数選択にした。
- * 指定が空のときは何もしない（誤って全消しにならないようにする）。
- * 選んでいない食事・他の日付には影響しない。
+ * 指定したidの献立をまとめて削除する（2026-08-08 便DX）。
+ * 「まとめて空にする」が使う。どの行を消すかの判断は純ロジック
+ * （logic/mealPlan.ts の planClearMealSlots。鍵の掛かった食事を外す）が持ち、ここは消すだけ。
  */
-export async function clearMealSlotsInRange(
-  startDate: string,
-  endDate: string,
-  slots: MealSlot[],
-): Promise<void> {
-  if (slots.length === 0) return
-  const targets = new Set(slots)
-  const rows = await db.mealPlans
-    .where('date')
-    .between(startDate, endDate, true, true)
-    .and((e) => targets.has(e.slot))
-    .toArray()
-  const ids = rows.map((r) => r.id).filter((id): id is number => id != null)
-  if (ids.length > 0) await db.mealPlans.bulkDelete(ids)
+export async function removeMealEntries(entryIds: number[]): Promise<void> {
+  if (entryIds.length === 0) return
+  await db.mealPlans.bulkDelete(entryIds)
 }
 
 /**

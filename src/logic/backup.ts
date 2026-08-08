@@ -5,6 +5,7 @@ import {
   type CookedLog,
   type DayNote,
   type MealPlanEntry,
+  type MealPlanLock,
   type MealTemplate,
   type PantryItem,
   type PriceEntry,
@@ -92,6 +93,13 @@ export interface BackupFile {
    * 採番し直すため含めない。これも任意項目＝この項目が無い古いバックアップも従来どおり復元できる
    */
   mealTemplates?: Omit<MealTemplate, 'id'>[]
+  /**
+   * 献立のロック（2026-08-08 便DX）。端末内保存なので、端末移行で鍵が全部外れないように
+   * バックアップへ含める（日付メモ＝便CB-1と同じ扱い）。主キーが '日付|食事' の文字列
+   * そのものなので、idを外さずそのまま入れる。これも任意項目＝この項目が無い古いバックアップも
+   * 従来どおり復元できる
+   */
+  mealPlanLocks?: MealPlanLock[]
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -133,6 +141,8 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
   const dayNotes = await db.dayNotes.toArray()
   // マイ献立テンプレ（便CB-2）。他のテーブルと同じくidを除いて保存する（復元先で振り直す）
   const mealTemplates = (await db.mealTemplates.toArray()).map(({ id: _unused, ...rest }) => rest)
+  // 献立のロック（便DX）。日付メモと同じく主キーが文字列そのものなので、そのまま入れる
+  const mealPlanLocks = await db.mealPlanLocks.toArray()
   const backupRecipes: BackupRecipe[] = await Promise.all(
     recipes.map(async ({ photo, cookedLogs, ...rest }) => ({
       ...rest,
@@ -162,6 +172,7 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
     prices,
     dayNotes,
     mealTemplates,
+    mealPlanLocks,
   }
   return JSON.stringify(file)
 }
@@ -204,6 +215,7 @@ export function tablesToReplace(file: BackupFile): {
   prices: boolean
   dayNotes: boolean
   mealTemplates: boolean
+  mealPlanLocks: boolean
 } {
   return {
     pantryItems: file.pantryItems !== undefined,
@@ -216,6 +228,8 @@ export function tablesToReplace(file: BackupFile): {
     dayNotes: file.dayNotes !== undefined,
     // マイ献立テンプレ（2026-07-29 便CB-2）。日付メモと同じ後方互換のルール
     mealTemplates: file.mealTemplates !== undefined,
+    // 献立のロック（2026-08-08 便DX）。日付メモと同じ後方互換のルール
+    mealPlanLocks: file.mealPlanLocks !== undefined,
   }
 }
 
@@ -365,6 +379,8 @@ export const mergeRowKeys = {
   prices: (row: { name: string }) => row.name.trim(),
   dayNotes: (row: { date: string }) => row.date,
   mealTemplates: (row: { name: string }) => row.name.trim(),
+  // 献立のロック（便DX）＝日付+食事（主キーそのもの・1食1件）
+  mealPlanLocks: (row: { key: string }) => row.key,
 }
 
 /**
@@ -606,6 +622,7 @@ export async function importBackup(
         db.prices,
         db.dayNotes,
         db.mealTemplates,
+        db.mealPlanLocks,
       ],
       async () => {
         await db.recipes.clear()
@@ -647,6 +664,10 @@ export async function importBackup(
           await db.mealTemplates.clear()
           if (file.mealTemplates!.length > 0) await db.mealTemplates.bulkAdd(file.mealTemplates!)
         }
+        if (replace.mealPlanLocks) {
+          await db.mealPlanLocks.clear()
+          if (file.mealPlanLocks!.length > 0) await db.mealPlanLocks.bulkAdd(file.mealPlanLocks!)
+        }
       },
     )
     return { added: recipes.length, updated: 0, skipped: 0, excluded: 0 }
@@ -678,6 +699,7 @@ export async function importBackup(
       db.prices,
       db.dayNotes,
       db.mealTemplates,
+      db.mealPlanLocks,
     ],
     async () => {
       // 照合表（ID→料理名 / 料理名→ID）。ファイルのIDが別の料理に当たっていないか、
@@ -779,6 +801,11 @@ export async function importBackup(
       if (refs.mealTemplates !== undefined) {
         const rows = mergeTableRows(await db.mealTemplates.toArray(), refs.mealTemplates, mergeRowKeys.mealTemplates)
         if (rows.length > 0) await db.mealTemplates.bulkAdd(rows)
+        detail.tableRowsAdded += rows.length
+      }
+      if (file.mealPlanLocks !== undefined) {
+        const rows = mergeTableRows(await db.mealPlanLocks.toArray(), file.mealPlanLocks, mergeRowKeys.mealPlanLocks)
+        if (rows.length > 0) await db.mealPlanLocks.bulkAdd(rows)
         detail.tableRowsAdded += rows.length
       }
       // 再取込除外の記録は (setId, title) で照合し、無いものだけ追加する（今の記録は消さない）

@@ -4541,6 +4541,7 @@ eq(
       prices: false,
       dayNotes: false,
       mealTemplates: false,
+      mealPlanLocks: false,
     },
   )
   eq(
@@ -4554,6 +4555,7 @@ eq(
       prices: true,
       dayNotes: false,
       mealTemplates: false,
+      mealPlanLocks: false,
     },
   )
   eq(
@@ -4571,6 +4573,7 @@ eq(
       prices: false,
       dayNotes: false,
       mealTemplates: false,
+      mealPlanLocks: false,
     },
   )
   eq(
@@ -4584,6 +4587,7 @@ eq(
       prices: [],
       dayNotes: [],
       mealTemplates: [],
+      mealPlanLocks: [],
     }),
     {
       pantryItems: true,
@@ -4593,6 +4597,7 @@ eq(
       prices: true,
       dayNotes: true,
       mealTemplates: true,
+      mealPlanLocks: true,
     },
   )
   // 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。新テーブルを足したときの後方互換の要:
@@ -11026,6 +11031,197 @@ eq(
     diffDayEdit(state([e(1, 10), e(2, 11)], 'もと'), state([e(1, 12), e(3, 13)], 'あと')),
     { added: 1, removed: 1, changed: 1, noteChanged: true, dirty: true },
   )
+}
+
+// ---------- 献立のロック(2026-08-08 便DX・オーナー指示) ----------
+// 鍵の掛かった食事は「自動でまとめて動かす操作」の対象から外れる。守る経路は4つ:
+// ①まとめて献立を入力(空き枠だけ/レシピを総入れ替えの両方) ②テンプレートを適用
+// ③先週の献立をコピー ④まとめて空にする。手での編集は鍵が掛かっていても自由(=画面側の話)。
+// 保存の粒度は「日付×食事」の1階層で、画面の「日ごと」は3食まとめての掛け外しとして表す
+{
+  const {
+    mealLockKey,
+    isMealSlotLocked,
+    isDayMealLocked,
+    planDayLockToggle,
+    planSlotLockToggle,
+    planAllLockToggle,
+    planCopyLastWeek,
+    planClearMealSlots,
+  } = await import('../src/logic/mealPlan.ts')
+  const { planTemplateFill } = await import('../src/logic/mealTemplate.ts')
+  const keys = (...pairs) => new Set(pairs.map(([d, s]) => mealLockKey(d, s)))
+  const sortedStrs = (set) => [...set].sort()
+
+  // --- 2階層(日ごと/時間帯ごと)の掛け外し ---
+  eq('DX-LOCK キーは 日付|食事', mealLockKey('2026-08-10', 'dinner'), '2026-08-10|dinner')
+  eq(
+    'DX-LOCK 時間帯ごと: 掛かっていなければ掛ける',
+    planSlotLockToggle(new Set(), '2026-08-10', 'dinner'),
+    { lock: [{ date: '2026-08-10', slot: 'dinner' }], unlock: [] },
+  )
+  eq(
+    'DX-LOCK 時間帯ごと: 掛かっていれば外す',
+    planSlotLockToggle(keys(['2026-08-10', 'dinner']), '2026-08-10', 'dinner'),
+    { lock: [], unlock: [{ date: '2026-08-10', slot: 'dinner' }] },
+  )
+  eq(
+    'DX-LOCK 日ごと: 3食とも掛かっているときだけ「日がロック済み」',
+    isDayMealLocked(keys(['2026-08-10', 'breakfast'], ['2026-08-10', 'lunch']), '2026-08-10'),
+    false,
+  )
+  eq(
+    'DX-LOCK 日ごと: 3食そろえばロック済み',
+    isDayMealLocked(
+      keys(['2026-08-10', 'breakfast'], ['2026-08-10', 'lunch'], ['2026-08-10', 'dinner']),
+      '2026-08-10',
+    ),
+    true,
+  )
+  eq(
+    'DX-LOCK 日ごと: 掛かっていない食事にだけ掛ける(すでに掛かっている夕食は二重にしない)',
+    planDayLockToggle(keys(['2026-08-10', 'dinner']), '2026-08-10'),
+    {
+      lock: [
+        { date: '2026-08-10', slot: 'breakfast' },
+        { date: '2026-08-10', slot: 'lunch' },
+      ],
+      unlock: [],
+    },
+  )
+  eq(
+    'DX-LOCK 日ごと: 3食そろっていれば3食とも外す',
+    planDayLockToggle(
+      keys(['2026-08-10', 'breakfast'], ['2026-08-10', 'lunch'], ['2026-08-10', 'dinner']),
+      '2026-08-10',
+    ).unlock.length,
+    3,
+  )
+  // 「すべてロック」→ もう一度押すと「すべて解除」(トグル)
+  {
+    const dates = ['2026-08-10', '2026-08-11']
+    const first = planAllLockToggle(new Set(), dates)
+    eq('DX-LOCK すべてロック: 2日×3食=6件を掛ける', first.lock.length, 6)
+    eq('DX-LOCK すべてロック: 外すものは無い', first.unlock.length, 0)
+    const allLocked = new Set(first.lock.map(({ date, slot }) => mealLockKey(date, slot)))
+    const second = planAllLockToggle(allLocked, dates)
+    eq('DX-LOCK すべて解除: 全部掛かっていれば6件とも外す', second.unlock.length, 6)
+    eq('DX-LOCK すべて解除: 掛けるものは無い', second.lock.length, 0)
+    // 時間帯ごとに掛けた鍵だけが残っている状態から押すと、まず「全部掛ける」側になる
+    const partial = keys(['2026-08-10', 'dinner'])
+    eq(
+      'DX-LOCK すべてロック: 一部だけ掛かっていれば残り5件を掛ける(解除にはしない)',
+      planAllLockToggle(partial, dates).lock.length,
+      5,
+    )
+  }
+
+  // --- ①まとめて献立を入力(planWeekFill) ---
+  {
+    const week = ['2026-08-10', '2026-08-11']
+    const today = '2026-08-10'
+    const entries = [
+      { id: 1, date: '2026-08-10', slot: 'dinner', recipeId: 11, role: 'main', auto: true },
+      { id: 2, date: '2026-08-11', slot: 'dinner', recipeId: 12, role: 'main', auto: true },
+    ]
+    const locked = keys(['2026-08-10', 'dinner'])
+    // 空き枠だけ埋める(keepAuto=true)
+    const fillEmpty = planWeekFill(entries, week, ['dinner'], today, { keepAuto: true, lockedKeys: locked })
+    eq('DX-LOCK 一括入力(空き枠だけ): ロック枠は埋め対象にならない', fillEmpty.slotsToFill, [])
+    eq('DX-LOCK 一括入力(空き枠だけ): ロック枠の行は消さない', fillEmpty.entryIdsToRemove, [])
+    eq('DX-LOCK 一括入力(空き枠だけ): ロック枠の数を返す', fillEmpty.lockedSlotCount, 1)
+    // レシピを総入れ替え(replaceAll=true)でもロック枠は触らない
+    const replaceAll = planWeekFill(entries, week, ['dinner'], today, { replaceAll: true, lockedKeys: locked })
+    eq(
+      'DX-LOCK 一括入力(総入れ替え): ロックしていない11日だけ埋め直す',
+      replaceAll.slotsToFill.map((s) => `${s.date}|${s.slot}`),
+      ['2026-08-11|dinner'],
+    )
+    eq('DX-LOCK 一括入力(総入れ替え): 消すのはロックしていない行だけ', replaceAll.entryIdsToRemove, [2])
+    eq('DX-LOCK 一括入力(総入れ替え): ロック枠の中身は重複回避のusedに入る', replaceAll.usedRecipeIds.includes(11), true)
+    eq('DX-LOCK 一括入力(総入れ替え): ロック枠の数を返す', replaceAll.lockedSlotCount, 1)
+    // 料理が入っていない空の食事でも、鍵が掛かっていれば埋めない
+    const emptyLocked = planWeekFill([], week, ['dinner'], today, { lockedKeys: locked })
+    eq(
+      'DX-LOCK 一括入力: 空の食事でも鍵が掛かっていれば入れない',
+      emptyLocked.slotsToFill.map((s) => s.date),
+      ['2026-08-11'],
+    )
+    eq('DX-LOCK 一括入力: 鍵を使っていなければ従来どおり(件数0)', planWeekFill([], week, ['dinner'], today).lockedSlotCount, 0)
+  }
+
+  // --- ②テンプレートを適用(planTemplateFill) ---
+  {
+    // 2026-08-10(月)・2026-08-11(火)。月=dow0・火=dow1
+    const plan = planTemplateFill({
+      items: [
+        { dow: 0, slot: 'dinner', role: 'main', recipeId: 21 },
+        { dow: 1, slot: 'dinner', role: 'main', recipeId: 22 },
+      ],
+      dates: ['2026-08-10', '2026-08-11'],
+      entries: [],
+      today: '2026-08-10',
+      allowedDows: [0, 1, 2, 3, 4, 5, 6],
+      visibleSlots: ['dinner'],
+      lockedKeys: keys(['2026-08-10', 'dinner']),
+    })
+    eq('DX-LOCK テンプレ適用: ロック枠には入れない', plan.ops, [
+      { date: '2026-08-11', slot: 'dinner', role: 'main', recipeId: 22 },
+    ])
+    eq('DX-LOCK テンプレ適用: ロック枠の数を返す', plan.lockedSlotCount, 1)
+    eq('DX-LOCK テンプレ適用: ロック枠は「すでに決まっている」とは別に数える', plan.keptSlotCount, 0)
+  }
+
+  // --- ③先週の献立をコピー(planCopyLastWeek) ---
+  {
+    const base = {
+      dates: ['2026-08-10', '2026-08-11'],
+      today: '2026-08-10',
+      visibleSlots: ['dinner'],
+      entries: [],
+      prevEntries: [
+        { date: '2026-08-03', slot: 'dinner', recipeId: 31, role: 'main' },
+        { date: '2026-08-04', slot: 'dinner', recipeId: 32, role: 'main' },
+      ],
+    }
+    const free = planCopyLastWeek(base)
+    eq('DX-LOCK 先週コピー(鍵なし): 2日分とも写す', free.ops.length, 2)
+    eq('DX-LOCK 先週コピー(鍵なし): ロック件数は0', free.lockedSlotCount, 0)
+    const locked = planCopyLastWeek({ ...base, lockedKeys: keys(['2026-08-10', 'dinner']) })
+    eq('DX-LOCK 先週コピー: ロック枠には写さない', locked.ops, [
+      { date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' },
+    ])
+    eq('DX-LOCK 先週コピー: ロック枠の数を返す', locked.lockedSlotCount, 1)
+    eq('DX-LOCK 先週コピー: コピー元の品数は鍵に関わらず数える', locked.sourceTotal, 2)
+  }
+
+  // --- ④まとめて空にする(planClearMealSlots) ---
+  {
+    const entries = [
+      { id: 1, date: '2026-08-10', slot: 'dinner', recipeId: 41 },
+      { id: 2, date: '2026-08-10', slot: 'dinner', recipeId: 42 },
+      { id: 3, date: '2026-08-11', slot: 'dinner', recipeId: 43 },
+      { id: 4, date: '2026-08-11', slot: 'breakfast', recipeId: 44 },
+    ]
+    const plan = planClearMealSlots(entries, ['dinner'], keys(['2026-08-10', 'dinner']))
+    eq('DX-LOCK まとめて空にする: ロック枠の行は消さない', plan.entryIdsToRemove, [3])
+    eq('DX-LOCK まとめて空にする: 消す品数はロックぶんを引いた数', plan.targetCount, 1)
+    eq('DX-LOCK まとめて空にする: 残す品数を返す', plan.lockedEntryCount, 2)
+    eq('DX-LOCK まとめて空にする: ロック枠の数(食分)を返す', plan.lockedSlotCount, 1)
+    eq(
+      'DX-LOCK まとめて空にする: 選んでいない食事は鍵に関わらず触らない',
+      planClearMealSlots(entries, ['dinner'], new Set()).entryIdsToRemove,
+      [1, 2, 3],
+    )
+  }
+
+  // 鍵は「その日その食事」だけに効く(隣の日・隣の食事へ漏れない)
+  {
+    const locked = keys(['2026-08-10', 'dinner'])
+    eq('DX-LOCK 鍵は同じ日の別の食事には効かない', isMealSlotLocked(locked, '2026-08-10', 'lunch'), false)
+    eq('DX-LOCK 鍵は別の日の同じ食事には効かない', isMealSlotLocked(locked, '2026-08-11', 'dinner'), false)
+    eq('DX-LOCK 掛けた食事にだけ効く', sortedStrs(locked), ['2026-08-10|dinner'])
+  }
 }
 
 // ---------- 結果 ----------
