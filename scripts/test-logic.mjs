@@ -99,6 +99,9 @@ import {
   isShoppingRangeNarrowed,
   formatShoppingRangeDates,
   formatShoppingRangeLabel,
+  toRawRiceIngredient,
+  splitCheckedShoppingItems,
+  COOKED_RICE_TO_RAW_RATIO,
 } from '../src/logic/shopping.ts'
 import {
   TIMER_SOUND_VOLUMES,
@@ -3575,6 +3578,146 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     sortShoppingByAisle(items, ['seasoning', 'soyEgg']).map((i) => i.name),
   )
   eq('DY-1 売り場ブロック: 空の買い物メモは見出しを1つも出さない', groupShoppingByAisle([]), [])
+}
+
+// ---------- EE-2 買い物メモのごはん→お米換算(2026-08-08 オーナー実機フィードバック) ----------
+// 「ご飯はお米換算（g）にして欲しい」。レシピの材料は炊きあがりの重さで書くので、
+// 買い物メモに入る分だけ生米のグラム(炊きあがり÷2.2)に置き換える
+{
+  eq('EE-2 炊きあがり→生米の倍率は2.2倍', COOKED_RICE_TO_RAW_RATIO, 2.2)
+  // 茶碗1杯=炊きあがり150g(成分表 01088 の unitGrams) → 150÷2.2=68.2g → gの丸め(5g刻み)で70g
+  eq('EE-2 「ご飯 1杯」→「米 70g」', toRawRiceIngredient({ name: 'ご飯', amount: '1', unit: '杯' }), {
+    name: '米',
+    amount: '70',
+    unit: 'g',
+  })
+  // 2杯=300g → 136.4g → 100g以上は10g刻みで140g
+  eq('EE-2 「ご飯 2杯」→「米 140g」', toRawRiceIngredient({ name: 'ご飯', amount: '2', unit: '杯' }), {
+    name: '米',
+    amount: '140',
+    unit: 'g',
+  })
+  eq(
+    'EE-2 ひらがな「ごはん」と単位「杯分」でも換算する',
+    toRawRiceIngredient({ name: 'ごはん', amount: '2', unit: '杯分' }),
+    { name: '米', amount: '140', unit: 'g' },
+  )
+  eq(
+    'EE-2 炊きあがりをgで書いてあっても生米に戻す(300g→140g)',
+    toRawRiceIngredient({ name: 'ご飯', amount: '300', unit: 'g' }),
+    { name: '米', amount: '140', unit: 'g' },
+  )
+  // 量を数値にできない行は、買う量を作文せずそのまま出す
+  eq(
+    'EE-2 「ご飯 適量」は換算せずそのまま',
+    toRawRiceIngredient({ name: 'ご飯', amount: '適量', unit: '' }),
+    { name: 'ご飯', amount: '適量', unit: '' },
+  )
+  // 最初から生米で書いてある行・関係ない食材には触らない
+  eq('EE-2 「米 2合」はそのまま', toRawRiceIngredient({ name: '米', amount: '2', unit: '合' }), {
+    name: '米',
+    amount: '2',
+    unit: '合',
+  })
+  eq('EE-2 「玉ねぎ 1個」はそのまま', toRawRiceIngredient({ name: '玉ねぎ', amount: '1', unit: '個' }), {
+    name: '玉ねぎ',
+    amount: '1',
+    unit: '個',
+  })
+  eq(
+    'EE-2 「五目炊き込みご飯」のような料理名は換算しない',
+    toRawRiceIngredient({ name: '五目炊き込みご飯', amount: '1', unit: '個' }).name,
+    '五目炊き込みご飯',
+  )
+  // 買い物候補まで通したときの見え方(名前が「米」・分量が「140g」・調味料扱いにならない)
+  {
+    const built = buildShoppingCandidates(
+      [
+        {
+          id: 1,
+          ingredients: [
+            { name: 'ご飯', amount: '2', unit: '杯' },
+            { name: '卵', amount: '2', unit: '個' },
+          ],
+        },
+      ],
+      [],
+    )
+    eq('EE-2 買い物候補の食材名が「米」になる', built[0].name, '米')
+    eq('EE-2 買い物候補の分量が「140g」になる', built[0].amount, '140g')
+    eq('EE-2 換算した米は調味料あつかいにしない(既定でチェックが付く)', built[0].isSeasoningLike, false)
+    eq(
+      'EE-2 出所の内訳にも換算後の分量が入る',
+      built[0].sources,
+      [{ recipeId: 1, amount: '140g' }],
+    )
+  }
+  // 在庫「ある」の照合は、元の名前(ご飯)と換算後の名前(米)の両方で効く
+  {
+    const recipes = [{ id: 1, ingredients: [{ name: 'ご飯', amount: '2', unit: '杯' }] }]
+    eq('EE-2 在庫に「米」があれば候補に出さない', buildShoppingCandidates(recipes, ['米']), [])
+    eq('EE-2 在庫に「ご飯」があれば候補に出さない', buildShoppingCandidates(recipes, ['ご飯']), [])
+  }
+  // 同じ食材として合算される＝「ご飯」と「米」で2行に割れない
+  {
+    const built = buildShoppingCandidates(
+      [
+        { id: 1, ingredients: [{ name: 'ご飯', amount: '2', unit: '杯' }] },
+        { id: 2, ingredients: [{ name: 'ご飯', amount: '2', unit: '杯' }] },
+      ],
+      [],
+    )
+    eq('EE-2 複数レシピのごはんは「米」1行にまとまる', built.length, 1)
+    eq('EE-2 まとまった分量は合算される(140+140=280g)', built[0].amount, '280g')
+  }
+}
+
+// ---------- EE-5 チェック済みを下にまとめる(2026-08-08 オーナー実機フィードバック) ----------
+// 「スイッチで、チェックした商品をまとめてページの下方に表示し、チェックしていない食材だけが
+// 上に残るようにしたい」。既定(スイッチOFF)はこの関数を通さない＝従来どおり
+{
+  const items = [
+    { id: 1, name: 'しょうゆ' }, // 調味料
+    { id: 2, name: '豚肉', isChecked: true }, // 肉・魚介(この売り場は全部チェック済みになる)
+    { id: 3, name: '玉ねぎ' }, // 野菜・きのこ
+    { id: 4, name: 'にんじん', isChecked: true }, // 野菜・きのこ
+    { id: 5, name: '卵', isChecked: true }, // 豆腐・卵・乳(この売り場も全部チェック済み)
+  ]
+  const groups = groupShoppingByAisle(items)
+  const split = splitCheckedShoppingItems(groups)
+  eq(
+    'EE-5 上に残るのは未チェックだけ',
+    split.groups.map((g) => g.items.map((i) => i.name)),
+    [['玉ねぎ'], ['しょうゆ']],
+  )
+  eq(
+    'EE-5 中身が全部チェック済みになった売り場は見出しごと消える',
+    split.groups.map((g) => g.key),
+    ['vegetable', 'seasoning'],
+  )
+  eq(
+    'EE-5 下にまとめたチェック済みは売り場順のまま',
+    split.checked.map((i) => i.name),
+    ['にんじん', '豚肉', '卵'],
+  )
+  // 1件も落とさない＝上＋下で元の全件がそろう(買い物メモから食材が消えたように見せない)
+  eq(
+    'EE-5 上と下を合わせると元の全件がそろう',
+    [...split.groups.flatMap((g) => g.items), ...split.checked].map((i) => i.id).sort(),
+    [1, 2, 3, 4, 5],
+  )
+  // 全部チェック済み/1件もチェックしていないときの端
+  eq(
+    'EE-5 全部チェック済みなら上の売り場ブロックは1つも残らない',
+    splitCheckedShoppingItems(groupShoppingByAisle([{ id: 1, name: '卵', isChecked: true }])).groups,
+    [],
+  )
+  eq(
+    'EE-5 1件もチェックしていなければ売り場ブロックは元のまま',
+    splitCheckedShoppingItems(groupShoppingByAisle([{ id: 1, name: '卵' }])).groups.map((g) => g.key),
+    ['soyEgg'],
+  )
+  eq('EE-5 空の買い物メモでも壊れない', splitCheckedShoppingItems([]), { groups: [], checked: [] })
 }
 
 // ---------- DY-2 買い物メモの出所(2026-08-08 オーナー実機フィードバック②) ----------
