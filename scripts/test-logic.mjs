@@ -28,6 +28,8 @@ import {
   SEARCH_INDEX_VERSION,
 } from '../src/logic/kana.ts'
 import { READINGS_VERSION } from '../src/logic/ingredientReadings.ts'
+import { pickDayCoverPhoto, setDayCoverChoice } from '../src/logic/monthCover.ts'
+import { diffDayEdit } from '../src/logic/dayEdit.ts'
 import { formatMinutesSecondsLabel } from '../src/logic/time.ts'
 import {
   normalizeProCode,
@@ -10247,6 +10249,141 @@ eq(
     'DH-HOMEW 既に表示中なら何もしない',
     restoreHomeWidget(['mealPlan', 'suggestion'], 'suggestion'),
     ['mealPlan', 'suggestion'],
+  )
+}
+
+// ---------- 便DU: 月カレンダーの写真の選び方(logic/monthCover.ts) ----------
+{
+  // 写真はBlobでなくても選べる純関数なので、テストでは見分けのつく文字列を入れる
+  const cand = (recipeId, logPhoto, recipePhoto) => ({ recipeId, logPhoto, recipePhoto })
+
+  // 再発防止(2026-08-07 便DU・オーナー指摘「カレンダーにレシピのサムネしか出ない」の真因):
+  // 旧実装は「その日の**先頭の記録**の写真 ?? そのレシピの写真」だったため、
+  // 1品目に記録写真が無く2品目にある日は、自分で撮った写真ではなくレシピの写真が出ていた
+  eq(
+    'DU-COVER 記録の写真は、その日の何品目にあってもレシピの写真より優先する',
+    pickDayCoverPhoto([cand(1, undefined, 'recipe1'), cand(2, 'log2', 'recipe2')]),
+    { photo: 'log2', source: 'log', recipeId: 2 },
+  )
+  eq(
+    'DU-COVER 記録の写真が複数あれば先頭の1枚',
+    pickDayCoverPhoto([cand(1, 'log1', 'recipe1'), cand(2, 'log2')]),
+    { photo: 'log1', source: 'log', recipeId: 1 },
+  )
+  eq(
+    'DU-COVER 記録の写真が1枚も無ければレシピの写真に落ちる',
+    pickDayCoverPhoto([cand(1, undefined, undefined), cand(2, undefined, 'recipe2')]),
+    { photo: 'recipe2', source: 'recipe', recipeId: 2 },
+  )
+  eq('DU-COVER 写真が1枚も無い日は選ばない', pickDayCoverPhoto([cand(1)]), undefined)
+  eq('DU-COVER 記録が無い日も選ばない', pickDayCoverPhoto([]), undefined)
+
+  // 「レシピの写真は使わない」(オーナー指示②)
+  eq(
+    'DU-COVER レシピの写真を使わない設定では、記録の写真だけを出す',
+    pickDayCoverPhoto([cand(1, undefined, 'recipe1'), cand(2, 'log2')], { hideRecipePhoto: true }),
+    { photo: 'log2', source: 'log', recipeId: 2 },
+  )
+  eq(
+    'DU-COVER レシピの写真を使わない設定で記録の写真が無ければ、写真は出さない',
+    pickDayCoverPhoto([cand(1, undefined, 'recipe1')], { hideRecipePhoto: true }),
+    undefined,
+  )
+
+  // 日ごとの指名(オーナー指示③)
+  eq(
+    'DU-COVER 日ごとに選んだ料理の写真を最優先で出す',
+    pickDayCoverPhoto([cand(1, 'log1'), cand(2, 'log2')], { chosenRecipeId: 2 }),
+    { photo: 'log2', source: 'log', recipeId: 2 },
+  )
+  eq(
+    'DU-COVER 選んだ料理に記録の写真が無ければ、その料理のレシピの写真を出す',
+    pickDayCoverPhoto([cand(1, 'log1'), cand(2, undefined, 'recipe2')], { chosenRecipeId: 2 }),
+    { photo: 'recipe2', source: 'recipe', recipeId: 2 },
+  )
+  eq(
+    'DU-COVER 選んだ料理から1枚も取れないときは既定の優先順に戻す(写真が消えない)',
+    pickDayCoverPhoto([cand(1, 'log1'), cand(2)], { chosenRecipeId: 2 }),
+    { photo: 'log1', source: 'log', recipeId: 1 },
+  )
+  eq(
+    'DU-COVER その日に無いレシピが選ばれたまま残っていても既定の優先順に戻す',
+    pickDayCoverPhoto([cand(1, 'log1')], { chosenRecipeId: 99 }),
+    { photo: 'log1', source: 'log', recipeId: 1 },
+  )
+  eq(
+    'DU-COVER 同じ料理を1日に2回作った日は、写真のある記録を採る',
+    pickDayCoverPhoto([cand(1, undefined), cand(1, 'log1b')], { chosenRecipeId: 1 }),
+    { photo: 'log1b', source: 'log', recipeId: 1 },
+  )
+
+  // 日ごとの選択の持ち方(設定に日付→レシピidで残す。選ばない日は載せない)
+  eq('DU-COVER 選ぶと日付→レシピidで残る', setDayCoverChoice(undefined, '2026-08-07', 3), {
+    '2026-08-07': 3,
+  })
+  eq(
+    'DU-COVER 自動に戻すとその日の分だけ消える',
+    setDayCoverChoice({ '2026-08-07': 3, '2026-08-08': 4 }, '2026-08-07', undefined),
+    { '2026-08-08': 4 },
+  )
+  eq(
+    'DU-COVER 選び直しは上書き(他の日は触らない)',
+    setDayCoverChoice({ '2026-08-07': 3, '2026-08-08': 4 }, '2026-08-07', 9),
+    { '2026-08-07': 9, '2026-08-08': 4 },
+  )
+}
+
+// ---------- 便DU: 日の窓で何を変えたか(logic/dayEdit.ts) ----------
+{
+  const e = (id, recipeId, extra = {}) => ({ id, slot: 'dinner', role: 'main', recipeId, ...extra })
+  const state = (entries, note = '') => ({ entries, note })
+
+  eq(
+    'DU-DAYEDIT 何も変えていなければ dirty=false(下は「閉じる」1つだけ)',
+    diffDayEdit(state([e(1, 10)]), state([e(1, 10)])),
+    { added: 0, removed: 0, changed: 0, noteChanged: false, dirty: false },
+  )
+  eq(
+    'DU-DAYEDIT 追加は added',
+    diffDayEdit(state([e(1, 10)]), state([e(1, 10), e(2, 11)])),
+    { added: 1, removed: 0, changed: 0, noteChanged: false, dirty: true },
+  )
+  eq(
+    'DU-DAYEDIT 外したら removed',
+    diffDayEdit(state([e(1, 10), e(2, 11)]), state([e(1, 10)])),
+    { added: 0, removed: 1, changed: 0, noteChanged: false, dirty: true },
+  )
+  // 再発防止: 差し替え(updateMealEntryRecipe)は同じidのままレシピだけ変わる。
+  // idで突き合わせないと「1品外して1品足した」に見え、確認文の件数が二重に出る
+  eq(
+    'DU-DAYEDIT 差し替えは changed 1件(外した+足したにしない)',
+    diffDayEdit(state([e(1, 10)]), state([e(1, 12)])),
+    { added: 0, removed: 0, changed: 1, noteChanged: false, dirty: true },
+  )
+  eq(
+    'DU-DAYEDIT 食数だけ変えても changed',
+    diffDayEdit(state([e(1, 10)]), state([e(1, 10, { servings: 3 })])),
+    { added: 0, removed: 0, changed: 1, noteChanged: false, dirty: true },
+  )
+  eq(
+    'DU-DAYEDIT role未設定と主菜は同じ扱い(既存データを「変わった」と誤検知しない)',
+    diffDayEdit(state([{ id: 1, slot: 'dinner', recipeId: 10 }]), state([e(1, 10)])),
+    { added: 0, removed: 0, changed: 0, noteChanged: false, dirty: false },
+  )
+  eq(
+    'DU-DAYEDIT 日付メモを書いたら noteChanged',
+    diffDayEdit(state([e(1, 10)], ''), state([e(1, 10)], '外食')),
+    { added: 0, removed: 0, changed: 0, noteChanged: true, dirty: true },
+  )
+  eq(
+    'DU-DAYEDIT メモの前後の空白だけの違いは変更としない(保存側もtrimするため)',
+    diffDayEdit(state([e(1, 10)], '外食'), state([e(1, 10)], ' 外食 ')),
+    { added: 0, removed: 0, changed: 0, noteChanged: false, dirty: false },
+  )
+  eq(
+    'DU-DAYEDIT 追加・差し替え・外す・メモが混ざっても全部数える',
+    diffDayEdit(state([e(1, 10), e(2, 11)], 'もと'), state([e(1, 12), e(3, 13)], 'あと')),
+    { added: 1, removed: 1, changed: 1, noteChanged: true, dirty: true },
   )
 }
 

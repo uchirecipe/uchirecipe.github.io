@@ -156,5 +156,26 @@ export async function assignMealEntryByRole(
   })
 }
 
+/**
+ * その日の献立を、渡した内容そのものへ戻す（2026-08-07 便DU・オーナー指示
+ * 「日の窓の変更をキャンセルで取り消せるように」）。
+ *
+ * 月タブの日の窓は、開いている間の追加・差し替え・削除がその場でDBへ入る作り
+ * （週タブと同じ編集部品をそのまま使っているため）。「キャンセル」は、窓を開いた時点で
+ * 控えておいたその日の行を、この関数でまるごと入れ直して元に戻す。
+ * id ごと入れ直すので、戻した後の行は開いたときと同じidになる（他の日には一切触らない）。
+ */
+export async function restoreDayMealPlan(
+  date: string,
+  entries: MealPlanEntry[],
+): Promise<void> {
+  await db.transaction('rw', db.mealPlans, async () => {
+    const current = await db.mealPlans.where('date').equals(date).toArray()
+    const ids = current.map((e) => e.id).filter((id): id is number => id != null)
+    if (ids.length > 0) await db.mealPlans.bulkDelete(ids)
+    if (entries.length > 0) await db.mealPlans.bulkPut(entries.map((e) => ({ ...e, date })))
+  })
+}
+
 /** 型の再エクスポート（呼び出し側がdb/typesを個別importしなくてよいように） */
 export type { MealPlanEntry }
