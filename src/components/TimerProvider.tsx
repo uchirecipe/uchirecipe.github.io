@@ -11,6 +11,12 @@ import {
 import { useSettings, updateSettings } from '../db/settings'
 import { useWakeLock } from './useWakeLock'
 import { parseStoredTimers, TIMERS_STORAGE_KEY } from '../logic/timerOrder'
+import {
+  TIMER_BEEP_INTERVAL_SECONDS,
+  timerSoundBeepCount,
+  timerSoundGain,
+} from '../logic/timerSound'
+import type { TimerSoundLength, TimerSoundVolume } from '../db/types'
 import { ja } from '../i18n/ja'
 
 /**
@@ -111,15 +117,28 @@ function saveTimers(timers: ActiveTimer[]) {
   }
 }
 
-/** 終了の合図: ピピピと3回鳴らす（音が出せない環境では静かに無視） */
-function playChime(ctx: AudioContext | undefined) {
+/** タイマー終了音の鳴らし方（設定「タイマー音」の音量・長さ。未指定は従来の音） */
+export interface TimerChimeOptions {
+  volume?: TimerSoundVolume
+  length?: TimerSoundLength
+}
+
+/**
+ * 終了の合図: ピピピと鳴らす（音が出せない環境では静かに無視）。
+ * 2026-08-08 オーナー実機フィードバック③: 音量と鳴る長さを設定から変えられるようにしたので、
+ * 回数とピークの音量を logic/timerSound.ts の対応表から引く。未設定なら従来と同じ音
+ * （880Hz・0.45秒間隔で3回・ピーク0.4）。
+ */
+export function playTimerChime(ctx: AudioContext | undefined, options?: TimerChimeOptions) {
   try {
     const audio = ctx ?? new AudioContext()
     void audio.resume().catch(() => {
       /* 無視（ユーザー操作なしのresumeはブラウザによって拒否されることがある） */
     })
-    for (let i = 0; i < 3; i++) {
-      const at = audio.currentTime + i * 0.45
+    const peak = timerSoundGain(options?.volume)
+    const beeps = timerSoundBeepCount(options?.length)
+    for (let i = 0; i < beeps; i++) {
+      const at = audio.currentTime + i * TIMER_BEEP_INTERVAL_SECONDS
       const osc = audio.createOscillator()
       const gain = audio.createGain()
       osc.type = 'sine'
@@ -127,7 +146,7 @@ function playChime(ctx: AudioContext | undefined) {
       osc.connect(gain)
       gain.connect(audio.destination)
       gain.gain.setValueAtTime(0.0001, at)
-      gain.gain.exponentialRampToValueAtTime(0.4, at + 0.02)
+      gain.gain.exponentialRampToValueAtTime(peak, at + 0.02)
       gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.35)
       osc.start(at)
       osc.stop(at + 0.4)
@@ -141,9 +160,14 @@ function playChime(ctx: AudioContext | undefined) {
  * 終了の合図のうち「その場で鳴る・震える」分だけ（2026-08-03 オーナー実機フィードバック⑦）。
  * 画面を見ていないときに終わった分をあとから鳴らし直すため、通知（1回きりでよい）と分けてある。
  */
-function alertFinished(timer: ActiveTimer, audio: AudioContext | undefined, soundOn: boolean) {
+function alertFinished(
+  timer: ActiveTimer,
+  audio: AudioContext | undefined,
+  soundOn: boolean,
+  chime?: TimerChimeOptions,
+) {
   if (soundOn && !timer.muted) {
-    playChime(audio)
+    playTimerChime(audio, chime)
   }
   // バイブレーション（対応端末のみ）。
   // 2026-07-28 機能④診断C5: 以前はチャイムと同じ `soundOn && !muted` の中にあり、
@@ -161,8 +185,13 @@ function alertFinished(timer: ActiveTimer, audio: AudioContext | undefined, soun
   }
 }
 
-function announceFinished(timer: ActiveTimer, audio: AudioContext | undefined, soundOn: boolean) {
-  alertFinished(timer, audio, soundOn)
+function announceFinished(
+  timer: ActiveTimer,
+  audio: AudioContext | undefined,
+  soundOn: boolean,
+  chime?: TimerChimeOptions,
+) {
+  alertFinished(timer, audio, soundOn, chime)
   // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
   // 通知本文はtruncateされないので手順番号も含めた完全な説明にする。
   // stepNumber<=0（手順に紐付かない自由な時間のタイマー）は手順表記を付けない
@@ -192,17 +221,24 @@ export function TimerProvider({ children }: { children: ReactNode }) {
   const settings = useSettings()
   const soundOn = settings?.timerSoundEnabled ?? true
   const wakeLockOn = settings?.timerWakeLockEnabled ?? true
+  // 音量・鳴る長さ（2026-08-08 オーナー実機フィードバック③）。未設定なら従来と同じ音
+  const soundVolume = settings?.timerSoundVolume
+  const soundLength = settings?.timerSoundLength
   // 画面が表示されていない間に終わったタイマー（戻ってきたら鳴らし直す。実機FB⑦）
   const pendingAlertRef = useRef<Set<number>>(new Set())
   // 鳴らし直しの効果は張り替えたくないので、最新の値はrefで参照する
   const timersRef = useRef(timers)
   const soundOnRef = useRef(soundOn)
+  const chimeRef = useRef<TimerChimeOptions>({ volume: soundVolume, length: soundLength })
   useEffect(() => {
     timersRef.current = timers
   }, [timers])
   useEffect(() => {
     soundOnRef.current = soundOn
   }, [soundOn])
+  useEffect(() => {
+    chimeRef.current = { volume: soundVolume, length: soundLength }
+  }, [soundVolume, soundLength])
 
   const startTimer = useCallback((options: StartTimerOptions) => {
     // 同じ手順・同じ時間ボタンの連打防止: 既に動作中なら新規起動せず、既存タイマーを点滅で知らせる
@@ -305,7 +341,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     if (finished.length === 0) return
     const hidden = typeof document !== 'undefined' && document.hidden
     finished.forEach((t) => {
-      announceFinished(t, audioRef.current, soundOn)
+      announceFinished(t, audioRef.current, soundOn, { volume: soundVolume, length: soundLength })
       // 画面が表示されていない間の振動・音はブラウザ側で捨てられる（振動は仕様で明示的に中止、
       // 音も自動再生の制限で鳴らないことがある）。戻ってきたときに鳴らし直すため覚えておく
       if (hidden) pendingAlertRef.current.add(t.id)
@@ -313,7 +349,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     setTimers((prev) =>
       prev.map((t) => (t.endsAt <= now ? { ...t, done: true } : t)),
     )
-  }, [now, timers, soundOn])
+  }, [now, timers, soundOn, soundVolume, soundLength])
 
   /**
    * 画面に戻ってきたときの鳴らし直し（2026-08-03 オーナー実機フィードバック⑦）。
@@ -332,7 +368,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       pending.clear()
       for (const id of ids) {
         const t = timersRef.current.find((x) => x.id === id)
-        if (t?.done) alertFinished(t, audioRef.current, soundOnRef.current)
+        if (t?.done) alertFinished(t, audioRef.current, soundOnRef.current, chimeRef.current)
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange)

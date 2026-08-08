@@ -668,7 +668,25 @@ export interface Settings {
    * 任意項目なのでスキーマ変更・マイグレーション不要。
    */
   shoppingAisleOrder?: PantryGroupKey[]
+  /**
+   * タイマー終了音の音量（任意・2026-08-08 オーナー実機フィードバック③
+   * 「タイマー音量や長さは、設定から調整や確認できるようにしたい」）。
+   * 未設定（既存ユーザー含む）は 'normal' ＝これまで鳴っていた音そのまま。
+   * 実際の値は logic/timerSound.ts が持つ（任意項目なのでマイグレーション不要）。
+   */
+  timerSoundVolume?: TimerSoundVolume
+  /**
+   * タイマー終了音の鳴る長さ（任意・2026-08-08 オーナー実機フィードバック③）。
+   * 未設定（既存ユーザー含む）は 'short' ＝これまでどおりの3回（約1秒）。
+   */
+  timerSoundLength?: TimerSoundLength
 }
+
+/** タイマー終了音の音量（3段階。既定は 'normal' ＝従来の音量） */
+export type TimerSoundVolume = 'low' | 'normal' | 'high'
+
+/** タイマー終了音の鳴る長さ（3段階。既定は 'short' ＝従来の長さ） */
+export type TimerSoundLength = 'short' | 'medium' | 'long'
 
 /** レシピ一覧の表示形式 */
 export type RecipeListLayout = 'grid' | 'list'

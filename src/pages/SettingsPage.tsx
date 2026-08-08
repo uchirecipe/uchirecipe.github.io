@@ -20,6 +20,7 @@ import {
   Copy,
   Check,
   Eye,
+  Volume2,
 } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteArchivedCookedLogs } from '../db/recipes'
@@ -89,8 +90,19 @@ import {
   isDefaultAisleOrder,
   SHOPPING_AISLE_ORDER,
 } from '../logic/pantryGroups'
-import type { HomeWidgetKey, ThemeSetting } from '../db/types'
+import type {
+  HomeWidgetKey,
+  ThemeSetting,
+  TimerSoundLength,
+  TimerSoundVolume,
+} from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
+import {
+  TIMER_SOUND_LENGTHS,
+  TIMER_SOUND_VOLUMES,
+  timerSoundSeconds,
+} from '../logic/timerSound'
+import { playTimerChime } from '../components/TimerProvider'
 import {
   shouldShowPermissionHelp,
   shouldShowUnsupportedNote,
@@ -103,6 +115,17 @@ import {
 import { ja } from '../i18n/ja'
 import Toast from '../components/Toast'
 import ArchiveViewerModal from '../components/ArchiveViewerModal'
+
+/** タイマー音の音量の選択肢(2026-08-08 オーナー実機フィードバック③)。未設定＝'normal'＝従来の音 */
+const timerVolumeLabels: Record<TimerSoundVolume, string> = {
+  low: ja.settings.timerSoundVolumeLow,
+  normal: ja.settings.timerSoundVolumeNormal,
+  high: ja.settings.timerSoundVolumeHigh,
+}
+
+/** 鳴る長さの選択肢。段階名ではなく秒数で見せる＝押す前にどれだけ鳴るか分かるようにする */
+const timerLengthLabel = (length: TimerSoundLength): string =>
+  ja.settings.timerSoundLengthOption.replace('{n}', String(timerSoundSeconds(length)))
 
 const themeOptions: { value: ThemeSetting; label: string }[] = [
   { value: 'auto', label: ja.settings.themeAuto },
@@ -1494,6 +1517,92 @@ export default function SettingsPage() {
                 />
               </button>
             </label>
+
+            {/* 音量と鳴る長さ(2026-08-08 オーナー実機フィードバック③)。
+                「調整や確認できるように」なので、その場で鳴らして確かめるボタンを必ず添える。
+                タイマー音がOFFのあいだは押せない状態にし、理由を1行で書く */}
+            <div
+              className={`mt-[var(--space-md)] ${
+                settings.timerSoundEnabled ? '' : 'pointer-events-none opacity-40'
+              }`}
+              aria-hidden={!settings.timerSoundEnabled}
+            >
+              <p className="text-sm font-bold text-ink-muted">{ja.settings.timerSoundVolumeLabel}</p>
+              <div className="mt-1 grid grid-cols-3 gap-1">
+                {TIMER_SOUND_VOLUMES.map((value) => {
+                  const selected = (settings.timerSoundVolume ?? 'normal') === value
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={!settings.timerSoundEnabled}
+                      aria-pressed={selected}
+                      onClick={() => {
+                        void updateSettings({ timerSoundVolume: value })
+                        // 選んだ音をその場で鳴らす（押した瞬間＝ユーザー操作中なので音が出せる）
+                        playTimerChime(undefined, { volume: value, length: settings.timerSoundLength })
+                      }}
+                      className={`rounded-sm border py-2 text-sm font-bold shadow-sm ${
+                        selected
+                          ? 'border-accent bg-accent text-on-accent'
+                          : 'border-edge bg-surface text-ink-muted'
+                      }`}
+                    >
+                      {timerVolumeLabels[value]}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
+                {ja.settings.timerSoundLengthLabel}
+              </p>
+              <div className="mt-1 grid grid-cols-3 gap-1">
+                {TIMER_SOUND_LENGTHS.map((value) => {
+                  const selected = (settings.timerSoundLength ?? 'short') === value
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={!settings.timerSoundEnabled}
+                      aria-pressed={selected}
+                      onClick={() => {
+                        void updateSettings({ timerSoundLength: value })
+                        playTimerChime(undefined, { volume: settings.timerSoundVolume, length: value })
+                      }}
+                      className={`rounded-sm border py-2 text-sm font-bold tabular-nums shadow-sm ${
+                        selected
+                          ? 'border-accent bg-accent text-on-accent'
+                          : 'border-edge bg-surface text-ink-muted'
+                      }`}
+                    >
+                      {timerLengthLabel(value)}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <button
+                type="button"
+                disabled={!settings.timerSoundEnabled}
+                onClick={() => {
+                  playTimerChime(undefined, {
+                    volume: settings.timerSoundVolume,
+                    length: settings.timerSoundLength,
+                  })
+                  checkAudioPermission()
+                }}
+                className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+              >
+                <Volume2 size={18} aria-hidden />
+                {ja.settings.timerSoundPreview}
+              </button>
+            </div>
+            {!settings.timerSoundEnabled && (
+              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+                {ja.settings.timerSoundOffNote}
+              </p>
+            )}
           </section>
 
         </>

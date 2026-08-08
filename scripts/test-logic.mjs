@@ -95,6 +95,13 @@ import {
   parseRecipeIdsParam,
   parseServingsParam,
 } from '../src/logic/shopping.ts'
+import {
+  TIMER_SOUND_VOLUMES,
+  TIMER_SOUND_LENGTHS,
+  timerSoundGain,
+  timerSoundBeepCount,
+  timerSoundSeconds,
+} from '../src/logic/timerSound.ts'
 import { selectPantryDowngrades } from '../src/logic/pantry.ts'
 import {
   categorizePantryName,
@@ -3631,6 +3638,32 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     resolveShoppingSources({ name: 'ラップ', recipeIds: [1] }, recipeById).recipes,
     [{ recipeId: 1, title: '肉じゃが', amount: '' }],
   )
+}
+
+// ---------- DY-3 タイマー音の音量・長さ(2026-08-08 オーナー実機フィードバック③) ----------
+// 「タイマー音量や長さは、設定から調整や確認できるようにしたい」。
+// 既定値は必ず従来の音のまま＝設定を触っていない既存ユーザーの音を勝手に変えない
+{
+  eq('DY-3 タイマー音: 未設定の音量は従来値(0.4)', timerSoundGain(undefined), 0.4)
+  eq('DY-3 タイマー音: 未設定の回数は従来値(3回)', timerSoundBeepCount(undefined), 3)
+  eq('DY-3 タイマー音: 「ふつう」は未設定と同じ音量', timerSoundGain('normal'), timerSoundGain(undefined))
+  eq('DY-3 タイマー音: 「約1秒」は未設定と同じ回数', timerSoundBeepCount('short'), timerSoundBeepCount(undefined))
+  eq('DY-3 タイマー音: 音量は小さめ<ふつう<大きめ', [
+    timerSoundGain('low') < timerSoundGain('normal'),
+    timerSoundGain('normal') < timerSoundGain('high'),
+  ], [true, true])
+  eq('DY-3 タイマー音: 長さは短い<ふつう<長い', [
+    timerSoundBeepCount('short') < timerSoundBeepCount('medium'),
+    timerSoundBeepCount('medium') < timerSoundBeepCount('long'),
+  ], [true, true])
+  eq('DY-3 タイマー音: 選択肢は音量3段階・長さ3段階', [TIMER_SOUND_VOLUMES.length, TIMER_SOUND_LENGTHS.length], [3, 3])
+  // 画面に出す秒数(選択肢のラベル)。1回0.4秒+0.45秒間隔で数えた値
+  eq('DY-3 タイマー音: 選択肢のラベルは約1秒/約3秒/約5秒', TIMER_SOUND_LENGTHS.map(timerSoundSeconds), [1, 3, 5])
+  // 壊れた保存値(将来の型変更・手で書き換えたIndexedDB)でも音が消えない
+  eq('DY-3 タイマー音: 知らない値が保存されていても従来の音で鳴らす', [
+    timerSoundGain('とんでもない値'),
+    timerSoundBeepCount('とんでもない値'),
+  ], [0.4, 3])
 }
 
 // ---------- selectPantryDowngrades(2026-07-23 オーナー実機FB #11「作った!」の在庫反映) ----------
