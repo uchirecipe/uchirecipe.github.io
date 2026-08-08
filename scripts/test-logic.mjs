@@ -325,6 +325,8 @@ import {
 import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceCommand.ts'
 import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
+import { isStandaloneDisplay } from '../src/logic/standalone.ts'
+import { isImeConfirmKey } from '../src/logic/imeKey.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -12515,6 +12517,70 @@ eq(
   // ②目的が効く経路は3つ。月タブの「未定の日をまとめて提案」も executeFill→drawPair を通る
   for (const entry of ['まとめて献立を入力', 'おまかせで提案', '未定の日をまとめて提案']) {
     eq(`EA-DW2 目的の説明が「${entry}」を挙げている`, ja.mealPlan.purposeHint.includes(entry), true)
+  }
+}
+
+// ---------- 便EI-1: ホーム画面から起動しているかの判定(設定の追加案内の出し分け) ----------
+// 設定「うちレシピについて」の「ホーム画面への追加方法」は、すでにアイコンから起動している人には
+// 出さない。判定材料はAndroid/PC=display-mode、iOS=navigator.standaloneの2本で、
+// どちらか一方でも真ならアイコン起動(iOSは古い版でdisplay-modeを返さないことがあるため)。
+{
+  const env = (displayModeStandalone, navigatorStandalone) => ({ displayModeStandalone, navigatorStandalone })
+  eq('EI-1 ブラウザのタブで開いている(両方false)＝案内を出す', isStandaloneDisplay(env(false, false)), false)
+  eq('EI-1 display-mode:standalone＝アイコン起動', isStandaloneDisplay(env(true, false)), true)
+  eq('EI-1 iOSのnavigator.standalone＝アイコン起動', isStandaloneDisplay(env(false, true)), true)
+  eq('EI-1 両方true＝アイコン起動', isStandaloneDisplay(env(true, true)), true)
+  // 案内の中身: 手順ページへのリンクと、先に追加したほうがよい理由(iOSでデータが分かれる)
+  eq('EI-1 リンク名が手順ページと同じ表記', ja.settings.installPageLink, 'ホーム画面への追加方法')
+  eq('EI-1 案内文がiOSのデータ分離に触れている', ja.settings.installPageNote.includes('別々に保存されます'), true)
+  eq('EI-1 案内文が「使い始める前に」を伝えている', ja.settings.installPageNote.includes('使い始める前に'), true)
+}
+
+// ---------- 便EI-2: 日本語入力の変換確定Enterのガード ----------
+// 2026-08-02にレシピ登録画面で直した「変換確定のEnterで行/タグが増える」を、
+// ChipInput・在庫ボード・設定のNG食材でも同じ判定で止める(logic/imeKey.tsへ集約)。
+// isComposing が本命・keyCode 229 は compositionend が先に来る環境向けの保険。
+{
+  const key = (isComposing, keyCode = 13) => ({ nativeEvent: { isComposing }, keyCode })
+  eq('EI-2 変換中のEnter(isComposing=true)は確定用と判定', isImeConfirmKey(key(true)), true)
+  eq('EI-2 確定後のEnterは通常のEnter', isImeConfirmKey(key(false)), false)
+  eq('EI-2 keyCode 229(compositionendが先に来る環境)も確定用と判定', isImeConfirmKey(key(false, 229)), true)
+  eq('EI-2 変換中かつ229でも確定用', isImeConfirmKey(key(true, 229)), true)
+  // Enterで確定する入力欄すべてに当てているか(適用漏れの再発防止)。
+  // 「e.key === 'Enter'」で始まる分岐が isImeConfirmKey で守られていることをソースで機械検査する。
+  // 対象はテキスト入力欄のEnterだけで、ボタン相当要素のEnter/Space(role=button)は対象外
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const imeGuardTargets = [
+    'src/components/ChipInput.tsx',
+    'src/components/PantryBoard.tsx',
+    'src/pages/SettingsPage.tsx',
+    'src/pages/RecipeFormPage.tsx',
+  ]
+  for (const rel of imeGuardTargets) {
+    const src = readFileSync(path.join(appRoot, rel), 'utf-8')
+    const enterBranches = src.match(/e\.key === 'Enter'[^\n]*/g) ?? []
+    const unguarded = enterBranches.filter(
+      (line) => !line.includes('isImeConfirmKey') && !line.includes("e.key === ' '"),
+    )
+    eq(`EI-2 ${rel} に未ガードのEnter分岐が無い`, unguarded, [])
+  }
+}
+
+// ---------- 便EI-4: 写真1枚あたりの容量表記を1つに揃える ----------
+// 「150〜300KB」と「100〜300KB」が混在していた(2026-08-09 便EI)。実測は使い方ページ§12の表
+// (scripts/measure-storage.mjs でIndexedDBの増分を実測。レシピの写真 約170KB・
+// 「作った記録」の写真 約160KB)で、docs/20 §4 の記録写真の実測も150〜300KB。
+// 圧縮設定はレシピ写真=長辺1200px/JPEG0.85(logic/image.ts)、記録写真=長辺1280px/JPEG0.80
+// (CookedLogModal.tsx)で、どちらも同じ水準に落ちる。以後は全箇所を同じ範囲で書く。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const PHOTO_SIZE_TEXT = '150〜300KB'
+  const targets = ['src/i18n/ja.ts', 'public/about/index.html', 'public/about/manual.html']
+  for (const rel of targets) {
+    const src = readFileSync(path.join(appRoot, rel), 'utf-8')
+    // 「◯〜◯KB」の形で書かれた範囲表記だけを拾う(「約170KB」等の単一値は対象外)
+    const ranges = [...new Set(src.match(/\d+〜\d+KB/g) ?? [])]
+    eq(`EI-4 ${rel} の写真容量の範囲表記が1種類に揃っている`, ranges, ranges.length ? [PHOTO_SIZE_TEXT] : [])
   }
 }
 

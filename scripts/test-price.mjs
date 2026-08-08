@@ -18,6 +18,7 @@
 import { PRICE_DEFAULTS } from '../src/data/priceDefaults.ts'
 import { buildPriceIndex, matchPriceEntry } from '../src/logic/priceEstimate.ts'
 import { isZeroIngredient } from '../src/logic/nutrition.ts'
+import { toHiragana } from '../src/logic/kana.ts'
 import { starterDefs } from '../src/db/starters.ts'
 
 let failures = 0
@@ -60,6 +61,57 @@ const nameCounts = new Map()
 for (const d of PRICE_DEFAULTS) nameCounts.set(d.name, (nameCounts.get(d.name) ?? 0) + 1)
 for (const [name, count] of nameCounts) {
   check(count === 1, `PRICE_DEFAULTSに同名が${count}件: ${name}`)
+}
+
+// ---------- 1-b. 件数のピン留め(2026-08-09 便EI) ----------
+// priceDefaults.tsの冒頭コメントに「172件」と書いてあったが実際は170件で、追加・整理のたびに
+// コメントだけが取り残されていた。件数はコメントに書かず、ここで実配列と突き合わせる。
+// 意図して増減させたときは、この数を直すこと(直し忘れれば必ずここで落ちる)。
+const PRICE_DEFAULTS_COUNT = 168
+check(
+  PRICE_DEFAULTS.length === PRICE_DEFAULTS_COUNT,
+  `PRICE_DEFAULTSの件数が想定と違う: 実際=${PRICE_DEFAULTS.length}件 / 想定=${PRICE_DEFAULTS_COUNT}件。` +
+    '意図した増減なら scripts/test-price.mjs の PRICE_DEFAULTS_COUNT を直すこと',
+)
+console.log(`件数のピン留め: ${PRICE_DEFAULTS.length}件`)
+
+// ---------- 1-c. かな正規化して同じキーになる二重登録が無いこと(2026-08-09 便EI) ----------
+// 照合(matchPriceEntry)も重複チェック(db/prices.tsのnormalizeForDuplicateCheck)もかな正規化した
+// キーで比べるので、「にんじん」と「人参」のような組は同じ1件として扱われる。両方を載せると
+// 片方だけ値を変えたときに、どちらが使われるか分からない不整合になる(値が同じうちは実害が出ず
+// 気づけない)。別表記は logic/ingredientReadings.ts の読み辞書に載せて1件へ寄せること。
+const kanaGroups = new Map()
+for (const d of PRICE_DEFAULTS) {
+  const key = toHiragana(d.name)
+  if (!kanaGroups.has(key)) kanaGroups.set(key, [])
+  kanaGroups.get(key).push(d.name)
+}
+for (const [key, names] of kanaGroups) {
+  check(
+    names.length === 1,
+    `かな正規化すると同じキー「${key}」になる二重登録: ${names.join('・')}。` +
+      '片方に寄せ、別表記は logic/ingredientReadings.ts の読み辞書で吸収すること',
+  )
+}
+
+// 統合した別表記が、読み辞書経由で今までどおり同じ1件に解決すること(照合が壊れていない証明)
+{
+  const aliasIndex = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+  const aliasCases = [
+    ['人参', 'にんじん'],
+    ['にんじん', 'にんじん'],
+    ['ニンジン', 'にんじん'],
+    ['味噌', 'みそ'],
+    ['みそ', 'みそ'],
+    ['ミソ', 'みそ'],
+  ]
+  for (const [written, expected] of aliasCases) {
+    const hit = matchPriceEntry(written, aliasIndex)
+    check(
+      hit?.normalizedName === expected,
+      `「${written}」がマスタの「${expected}」に解決しない(実際=${hit?.normalizedName ?? 'なし'})`,
+    )
+  }
 }
 
 // ---------- 2. 全カタログ109品の価格カバー ----------

@@ -18506,6 +18506,134 @@ try {
     }
   }
 
+  // --- EI-01: 日本語入力の変換確定Enterのガードの適用漏れ(2026-08-09 便EI)。
+  // 2026-08-02にレシピ登録画面で直した「変換確定のEnterで行/タグが増える」が、
+  // ChipInput(レシピタブの絞り込み「使いたい食材」)・在庫ボードの食材追加欄・
+  // 設定のNG食材の3箇所に当たっていなかった。FORMING-01(d)と同じやり方で、
+  // isComposing=true のEnterを直接dispatchして「増えないこと」と「確定後は増えること」を見る。
+  // あわせて設定「うちレシピについて」に足した「ホーム画面への追加方法」の導線も確かめる ---
+  currentCheck = 'EI-01'
+  {
+    const eiBrowser = await chromium.launch()
+    const eiContext = await eiBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const eiPage = await eiContext.newPage()
+    eiPage.on('dialog', (dialog) => dialog.accept())
+    eiPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EI-01] ${err.message}`)
+    })
+    /** IMEで変換中に押したEnter(isComposing=true)を、指定の入力欄へそのまま流し込む */
+    const imeEnter = (selector) =>
+      eiPage.evaluate((sel) => {
+        document
+          .querySelector(sel)
+          .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))
+      }, selector)
+    try {
+      // (a) ChipInput: レシピタブの絞り込みパネル「使いたい食材」
+      await eiPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eiPage.waitForTimeout(1800) // 初回シード完了待ち
+      await eiPage.locator('button[aria-label="絞り込み"]').click()
+      await eiPage.waitForTimeout(400)
+      const chipSel = 'input[placeholder="食材を1つずつ入力"]'
+      const chipCount = () => eiPage.getByRole('button', { name: 'このチップを削除' }).count()
+      await eiPage.fill(chipSel, 'たまねぎ')
+      await imeEnter(chipSel)
+      await eiPage.waitForTimeout(400)
+      check(
+        'EI-01(a) ChipInput 変換確定のEnterではチップにならない',
+        (await chipCount()) === 0 && (await eiPage.inputValue(chipSel)) === 'たまねぎ',
+        `チップ${await chipCount()}件 / 欄の値=${await eiPage.inputValue(chipSel)}`,
+      )
+      await eiPage.press(chipSel, 'Enter')
+      await eiPage.waitForTimeout(400)
+      check(
+        'EI-01(a) ChipInput 確定後のEnterでは従来どおりチップになる',
+        (await chipCount()) === 1 && (await eiPage.inputValue(chipSel)) === '',
+        `チップ${await chipCount()}件 / 欄の値=${await eiPage.inputValue(chipSel)}`,
+      )
+
+      // (b) 在庫ボード: 食材タブの「よく使う食材」追加欄。増減はIndexedDBの実データで見る
+      const pantryCount = () =>
+        eiPage.evaluate(async () => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+          const items = await new Promise((res, rej) => {
+            const r = idb.transaction('pantryItems', 'readonly').objectStore('pantryItems').getAll()
+            r.onsuccess = () => res(r.result)
+            r.onerror = () => rej(r.error)
+          })
+          idb.close()
+          return items.length
+        })
+      await eiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await eiPage.waitForTimeout(1200)
+      const pantrySel = 'input[placeholder="例: 豚肉"]'
+      const beforePantry = await pantryCount()
+      await eiPage.fill(pantrySel, 'ずいき')
+      await imeEnter(pantrySel)
+      await eiPage.waitForTimeout(600)
+      check(
+        'EI-01(b) 在庫ボード 変換確定のEnterでは食材が増えない',
+        (await pantryCount()) === beforePantry && (await eiPage.inputValue(pantrySel)) === 'ずいき',
+        `件数 ${beforePantry}→${await pantryCount()} / 欄の値=${await eiPage.inputValue(pantrySel)}`,
+      )
+      await eiPage.press(pantrySel, 'Enter')
+      await eiPage.waitForTimeout(800)
+      check(
+        'EI-01(b) 在庫ボード 確定後のEnterでは従来どおり食材が増える',
+        (await pantryCount()) === beforePantry + 1 && (await eiPage.inputValue(pantrySel)) === '',
+        `件数 ${beforePantry}→${await pantryCount()} / 欄の値=${await eiPage.inputValue(pantrySel)}`,
+      )
+
+      // (c) 設定のNG食材
+      await eiPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await eiPage.waitForTimeout(1200)
+      const ngSel = 'input[placeholder="例: えび"]'
+      const ngCount = () => eiPage.getByRole('button', { name: 'このNG食材を削除' }).count()
+      const beforeNg = await ngCount()
+      await eiPage.fill(ngSel, 'かき')
+      await imeEnter(ngSel)
+      await eiPage.waitForTimeout(500)
+      check(
+        'EI-01(c) 設定のNG食材 変換確定のEnterでは増えない',
+        (await ngCount()) === beforeNg && (await eiPage.inputValue(ngSel)) === 'かき',
+        `件数 ${beforeNg}→${await ngCount()} / 欄の値=${await eiPage.inputValue(ngSel)}`,
+      )
+      await eiPage.press(ngSel, 'Enter')
+      await eiPage.waitForTimeout(600)
+      check(
+        'EI-01(c) 設定のNG食材 確定後のEnterでは従来どおり増える',
+        (await ngCount()) === beforeNg + 1 && (await eiPage.inputValue(ngSel)) === '',
+        `件数 ${beforeNg}→${await ngCount()} / 欄の値=${await eiPage.inputValue(ngSel)}`,
+      )
+
+      // (d) 設定「うちレシピについて」の「ホーム画面への追加方法」(便EIの導線追加)。
+      // ブラウザのタブで開いている状態＝アイコン起動ではないので出る
+      const installLink = eiPage.locator('[data-testid="settings-install-link"]')
+      check(
+        'EI-01(d) 設定に「ホーム画面への追加方法」のリンクがある',
+        (await installLink.count()) === 1 &&
+          (await installLink.getAttribute('href')) === '/about/install.html' &&
+          (await installLink.innerText()).includes('ホーム画面への追加方法'),
+        `件数=${await installLink.count()}`,
+      )
+      check(
+        'EI-01(d) 先に追加したほうがよい理由(iOSでデータが分かれる)が添えてある',
+        ((await eiPage.textContent('body')) ?? '').includes(
+          'iPhone・iPadでは、Safariで登録したレシピと、ホーム画面のアイコンから開いたときのレシピが別々に保存されます',
+        ),
+      )
+      const installRes = await eiPage.request.get(`${BASE}/about/install.html`)
+      check('EI-01(d) リンク先の手順ページが開ける', installRes.status() === 200, `status=${installRes.status()}`)
+    } finally {
+      await eiBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
