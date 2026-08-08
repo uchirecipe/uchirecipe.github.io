@@ -41,9 +41,11 @@ import {
   saveCookNaviSession,
   saveCookNaviScroll,
   takeCookNaviScroll,
-  reconcileSelectedIds,
+  reconcileSelectedIdsForSession,
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
+import CookSessionOverlay from '../components/CookSessionOverlay'
+import { findCursorIndex, startCursor, type CookCursor } from '../logic/cookSession'
 import {
   recipeIngredientList,
   stepIngredientAmounts,
@@ -488,6 +490,14 @@ export default function CookNaviPage() {
     () => restoredSession.current?.showTimeline ?? false,
   )
   const initializedRef = useRef(restoredSession.current != null)
+  /**
+   * 調理中の手順（2026-08-09 便EL・docs/69 第1段）。**書ける調理の状態はこの1つだけ**。
+   * これが入っていれば全画面の調理中セッションを開いている、という決め方にして、
+   * 「開いているかどうか」を別のフラグで二重に持たない（片方だけ更新される瞬間を作らない）。
+   */
+  const [current, setCurrent] = useState<CookCursor | undefined>(
+    () => restoredSession.current?.current,
+  )
   // 記録したあとのトースト（「元に戻す」つき）
   const [toast, setToast] = useState('')
   const [undoCooked, setUndoCooked] = useState<{ recipeId: number }[] | null>(null)
@@ -496,16 +506,22 @@ export default function CookNaviPage() {
    * 黙って段取りの中身を変えないための1行。選び直したら消す
    */
   const [droppedNotice, setDroppedNotice] = useState('')
+  /**
+   * 覚えていた調理中の手順が、組み直した段取りに見つからなかったときの知らせ（2026-08-09 便EL）。
+   * 近い手順を当てにいかず、段取りの一覧に戻したことをその場に書く（docs/69「復元」）。
+   */
+  const [sessionLostNotice, setSessionLostNotice] = useState(false)
 
-  // 選択・表示状態が変わるたびに覚え直す（保存するのは選択と表示中かどうかだけ。段取りは開くたびに組み直す）。
+  // 選択・表示状態が変わるたびに覚え直す（保存するのは選択・表示中かどうか・調理中の手順だけ。
+  // 段取りそのもの・進み具合・済んだ手順の一覧は保存せず、開くたびに組み直して導く）。
   // 1品も選んでいない状態は覚えない＝選択を全部外したら、次に開いたときは今日の献立から選び直す
   useEffect(() => {
     if (selectedIds.length === 0) {
       clearCookNaviSession()
       return
     }
-    saveCookNaviSession({ selectedIds, showTimeline, trialActive })
-  }, [selectedIds, showTimeline, trialActive])
+    saveCookNaviSession({ selectedIds, showTimeline, trialActive, current })
+  }, [selectedIds, showTimeline, trialActive, current])
 
   // 常駐タイマーバーの「完了タイマー」タップからの着地（?focusStep=レシピID-手順番号）。
   // ナビ実行中はタップで単品レシピ詳細へ離脱させず、ナビ内の該当手順カードへスクロール＆
@@ -575,7 +591,13 @@ export default function CookNaviPage() {
    */
   useEffect(() => {
     if (!todayRecipes) return
-    const next = reconcileSelectedIds(selectedIds, todayRecipes.map((r) => r.id!))
+    // 調理中（全画面のセッションを開いている間）は、記録を段取りへ逆流させない
+    // ＝作りかけの段取りが目の前で組み替わらない（2026-08-09 便EL・docs/69「記録は一方通行」）
+    const next = reconcileSelectedIdsForSession(
+      selectedIds,
+      todayRecipes.map((r) => r.id!),
+      current != null,
+    )
     if (next.length === selectedIds.length) return
     setSelectedIds(next)
     // 段取りを表示中だったなら、残りで組み直せるかどうかで知らせ方を変える
@@ -586,7 +608,7 @@ export default function CookNaviPage() {
         ? ja.cookNavi.selectionDroppedRebuilt.replace('{n}', String(next.length))
         : ja.cookNavi.selectionDropped,
     )
-  }, [todayRecipes, selectedIds, showTimeline])
+  }, [todayRecipes, selectedIds, showTimeline, current])
 
   const toggleSelect = (id: number) => {
     setDroppedNotice('')
@@ -616,6 +638,29 @@ export default function CookNaviPage() {
     [showTimeline, selectedRecipes],
   )
   const isSequential = timeline?.mode === 'sequential'
+
+  /**
+   * 調理中の手順の復元（2026-08-09 便EL・docs/69）。再読み込みや他タブからの復帰では、
+   * 段取りは保存していないので毎回組み直す。**覚えていた手順がその段取りに見つからなければ、
+   * 推測せずカーソルを捨てて一覧に戻す**（近い手順を当てにいくと、違う手順を大きく出したまま
+   * 作業が進んでしまう）。レシピの読み込みが終わるまでは何もしない。
+   */
+  useEffect(() => {
+    if (!current || !recipes) return
+    // 自分で畳んだ・選び直したときは下の後片付けに任せる（知らせは出さない）
+    if (!showTimeline) return
+    if (timeline && findCursorIndex(timeline.items, current) !== -1) return
+    setCurrent(undefined)
+    setSessionLostNotice(true)
+  }, [current, recipes, timeline, showTimeline])
+
+  /** 段取りを畳んだ・選び直した・記録した、のいずれでも調理中の位置は残さない */
+  useEffect(() => {
+    if (!showTimeline && current) setCurrent(undefined)
+  }, [showTimeline, current])
+
+  /** 調理中の位置が段取りのどこか（一覧に戻ったときの「{n}/{t}から続きます」に使う） */
+  const currentIndex = timeline ? findCursorIndex(timeline.items, current) : -1
 
   /**
    * その品の最後の手順（＝そこで完成する手順）の位置。段取りの並びで最後に出てくるものを採る
@@ -721,11 +766,44 @@ export default function CookNaviPage() {
   const timelineRef = useRef<HTMLElement | null>(null)
   const buildTimeline = () => {
     setDroppedNotice('')
+    setSessionLostNotice(false)
     if (showTimeline) {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
     setShowTimeline(true)
+  }
+
+  /**
+   * 調理中セッション（2026-08-09 便EL・docs/69 第1段）。
+   * 「調理をはじめる」＝段取りの先頭にカーソルを置くだけ。全画面を開いているかどうかは
+   * **カーソルが入っているかどうかで決まる**ので、開閉のフラグを別に持たない
+   * （2つ持つと、片方だけ更新される瞬間が必ずできる）。
+   */
+  const startSession = () => {
+    if (!timeline) return
+    setSessionLostNotice(false)
+    setCurrent(startCursor(timeline.items))
+  }
+  /** 調理を終える（調理中の位置だけを消す。選んだ品・段取り・作った記録には触らない） */
+  const finishSession = () => setCurrent(undefined)
+  /**
+   * 段取りの途中でやめるとき（規約F: 何が消えて何が残るかを両方書く）。
+   * 最後の手順まで進んだあとの「調理を終える」は確認しない（そこで失うものが無いため）。
+   */
+  const exitSession = () => {
+    if (!timeline) {
+      finishSession()
+      return
+    }
+    const ok = window.confirm(
+      ja.cookNavi.sessionFinishConfirm
+        .replace('{n}', String(currentIndex + 1))
+        .replace('{t}', String(timeline.items.length))
+        .replace('{m}', String(timeline.recipes.length)),
+    )
+    if (!ok) return
+    finishSession()
   }
 
   const startStepTimer = (item: TimelineItem, seconds: number) => {
@@ -768,6 +846,7 @@ export default function CookNaviPage() {
     clearCookNaviSession()
     setSelectedIds([])
     setShowTimeline(false)
+    setCurrent(undefined)
     setDroppedNotice('')
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
     setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
@@ -985,6 +1064,31 @@ export default function CookNaviPage() {
                     {/* 材料一覧の入口。調理を始める前に先に計量したい人がここから開く */}
                     <IngredientsPanel recipes={ingredientsByRecipe} />
 
+                    {/* 調理中の画面へ（2026-08-09 便EL・docs/69 第1段）。
+                        段取りの一覧は作る前に読む画面で、手を動かしながら見るには文字が小さい。
+                        押すと全画面に切り替わり、いまやる手順だけを大きく出す */}
+                    <button
+                      type="button"
+                      data-testid="cook-session-start"
+                      onClick={startSession}
+                      className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
+                    >
+                      <ChefHat size={20} aria-hidden />
+                      {ja.cookNavi.sessionStart}
+                    </button>
+                    <p className="ja-phrase mt-1 text-center text-xs text-ink-muted">
+                      {ja.cookNavi.sessionStartHint}
+                    </p>
+                    {/* 覚えていた調理中の手順が、組み直した段取りに見つからなかったとき */}
+                    {sessionLostNotice && (
+                      <p
+                        data-testid="cook-session-lost"
+                        className="ja-phrase mt-[var(--space-sm)] rounded-sm border border-accent bg-surface px-3 py-2 text-sm text-accent-ink"
+                      >
+                        {ja.cookNavi.sessionLost}
+                      </p>
+                    )}
+
                     <ol className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
                       {timeline.items.map((item, index) => (
                         <TimelineCard
@@ -1045,6 +1149,22 @@ export default function CookNaviPage() {
           </>
         )}
       </div>
+      {/* 調理中の画面（2026-08-09 便EL）。カーソルが入っている間だけ全画面で重なる。
+          今日の献立の中身が変わっても閉じないよう、画面の分岐の外側に置く
+          （＝作りかけの段取りが調理中に消えない） */}
+      {canUseNavi && current && timeline && (
+        <CookSessionOverlay
+          items={timeline.items}
+          recipes={timeline.recipes}
+          cursor={current}
+          stepIngredients={stepIngredientsByKey}
+          ingredientNamesByRecipeId={ingredientNamesByRecipeId}
+          onMove={setCurrent}
+          onExit={exitSession}
+          onFinish={finishSession}
+          onStartTimer={startStepTimer}
+        />
+      )}
       <Toast
         message={toast}
         onClose={() => {
