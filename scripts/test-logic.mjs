@@ -4527,6 +4527,46 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     (it) => it.recipeTitle === 'にんじんのナムル' && it.startMin >= boilItem.endMin,
   )
   eq('ナビ詰め込み: ゆで上がりの直後にその品の続きへ戻る', afterBoil.startMin, boilItem.endMin)
+  // 3品での再現（司令部の検証e2eで赤になった組み合わせをそのまま単体に固定する）。
+  // ゆで上がりまでに差し込まれた手作業の合計が、待ちの4分を超えないこと
+  const packed3 = buildCookTimeline([
+    recipe(1, 'ナムル', [
+      t('にんじんは細切りにする。'),
+      t('鍋にたっぷりの湯を沸かし、にんじんを4分茹でて冷水にとる。'),
+      t('ごま油と塩で和える。'),
+    ]),
+    recipe(2, 'オムライス', [
+      t('鶏肉と玉ねぎを切る。'),
+      t('鶏肉を炒める。'),
+      t('玉ねぎがしんなりするまで炒める。'),
+      t('ご飯を入れてケチャップで炒める。', 3),
+      t('卵を焼いて包み、皿に盛る。'),
+    ]),
+    recipe(3, '煮物', [t('大根を切る。'), t('鍋で15分煮る。'), t('器に盛る。')]),
+  ])
+  const boil3 = packed3.items.findIndex((it) => it.text.startsWith('にんじんを4分'))
+  const back3 = packed3.items.findIndex(
+    (it, i) => i > boil3 && it.recipeTitle === 'ナムル' && it.kind === 'active',
+  )
+  eq('ナビ詰め込み(3品): ゆで上がりのあとにその品の続きが来る', boil3 >= 0 && back3 > boil3, true)
+  eq(
+    'ナビ詰め込み(3品): 4分のゆで待ちに差し込む手作業の合計は4分まで',
+    packed3.items
+      .slice(boil3 + 1, back3)
+      .filter((it) => it.kind === 'active')
+      .reduce((a, it) => a + it.activeMinutes, 0) <= 4,
+    true,
+  )
+  // 段取り全体が物理的に成り立つか（手作業どうしが重なっていない）も見ておく
+  const activeSpans = packed3.items
+    .filter((it) => it.kind === 'active')
+    .sort((a, b) => a.startMin - b.startMin)
+  eq(
+    'ナビ詰め込み(3品): 手作業どうしが時間で重ならない（1人で作れる段取りになっている）',
+    activeSpans.every((it, i) => i === 0 || it.startMin >= activeSpans[i - 1].endMin),
+    true,
+  )
+
   // 漬け込みの待ちには上限を掛けない（数分の遅れは料理に影響しないため）
   const soaked = buildCookTimeline([
     recipe(1, 'マリネ', [t('鶏肉をマリネ液に入れて冷蔵庫で30分漬ける。'), t('フライパンで焼く。')]),

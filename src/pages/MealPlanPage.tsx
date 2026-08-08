@@ -133,7 +133,6 @@ import {
   clearCookNaviSession,
   hasCookNaviTimeline,
   loadCookNaviSession,
-  saveCookNaviSession,
   reconcileSelectedIds,
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
@@ -2734,10 +2733,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   })
 
   /**
-   * 作りかけの段取りに組んでいる品を1品だけ記録するときの後始末（2026-08-09 便EH・
-   * オーナー実機報告の重大バグ）。押す前に段取りがどう変わるかを伝え（規約F）、
-   * 記録するならその品を段取りの選択から外す。残りが2品未満になるなら段取りごと終える。
-   * 記録を中止したときは false を返す。
+   * 作りかけの段取りに組んでいる品を1品だけ記録するときの確認（2026-08-09 便EH・
+   * オーナー実機報告の重大バグ）。押す前に「その品が段取りから外れること」「残り何品で
+   * 組み直すか」を伝える（規約F）。記録を中止したときは false を返す。
+   * 段取りの組み直しそのものは並行調理ナビの画面が受け持つ（下のコメント参照）。
    */
   const confirmCookedAgainstNavi = (recipe: Recipe): boolean => {
     const session = loadCookNaviSession()
@@ -2754,11 +2753,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         .replaceAll('{title}', recipe.title)
         .replaceAll('{n}', String(remaining.length)) + ja.mealPlan.todayCookedNaviConfirmAsk
     if (!window.confirm(confirmText)) return false
-    if (remaining.length >= COOK_NAVI_MIN_RECIPES) {
-      saveCookNaviSession({ ...session, selectedIds: remaining })
-    } else {
-      clearCookNaviSession()
-    }
+    // 段取りが続くとき（2品以上残る）は、覚えている選択には手を触れない。
+    // 組み直しと「何を外したか」の知らせは、並行調理ナビの画面が1か所で受け持つ
+    // （どの入口から記録しても同じように直る形にしておく）。
+    // 残りが2品未満で段取りが成り立たなくなるときだけ、押せない入口を残さないようここで畳む
+    if (remaining.length < COOK_NAVI_MIN_RECIPES) clearCookNaviSession()
     return true
   }
 
