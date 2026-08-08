@@ -76,6 +76,11 @@ export default function NutritionBalancePanel({
   slotBreakdown?: SlotBalance[]
 }) {
   const [expanded, setExpanded] = useState(false)
+  // 但し書きと出典の折りたたみ（2026-08-09 便EN）。既定は畳む
+  const [notesOpen, setNotesOpen] = useState(false)
+  // 週まとめは「この週ぜんぶを振り返る主役の数字」なので、日カードより大きく組む
+  // （2026-08-09 便EN・オーナー実機「文字を大きく・縦幅を曜日ごとの献立より大きく」）
+  const isWeek = scope === 'week'
   const unlocked = isNutritionUnlocked(isPro)
   if (!unlocked && !NUTRITION_TEASER_ENABLED) return null
 
@@ -126,6 +131,20 @@ export default function NutritionBalancePanel({
           : ja.nutritionBalance.dayToggleExpand
         ).replace('{d}', dateLabel ?? '')
 
+  // 折りたたんだままでも「この数字は下振れしている」と分かるようにする
+  // （便BY/NUT-01と同じ作法。展開しないと分からない状態にしない）
+  const gapBadge = canShowNumbers && gapDishCount > 0 && (
+    <span className="ml-1 whitespace-nowrap font-bold text-warning">
+      {ja.nutritionBalance.gapBadge.replace('{n}', String(gapDishCount))}
+    </span>
+  )
+  const valueSpans = summaryValues.map((value, i) => (
+    <span key={value} className="whitespace-nowrap">
+      {i > 0 && ja.nutritionBalance.summarySeparator}
+      {value}
+    </span>
+  ))
+
   return (
     <div className="rounded-md border border-edge bg-app">
       <button
@@ -133,26 +152,30 @@ export default function NutritionBalancePanel({
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
         aria-label={toggleLabel}
-        className="flex w-full items-center justify-between gap-2 p-[var(--space-sm)] text-left"
+        className={`flex w-full items-center justify-between gap-2 text-left ${
+          isWeek ? 'p-[var(--space-md)]' : 'p-[var(--space-sm)]'
+        }`}
       >
-        <span className="min-w-0 flex-1 text-xs text-ink-muted">
-          <Sparkles size={12} className="mr-1 inline-block shrink-0 text-accent-ink" aria-hidden />
-          <span className="font-bold">{title}</span>:{' '}
-          {summaryValues.map((value, i) => (
-            <span key={value} className="whitespace-nowrap">
-              {i > 0 && ja.nutritionBalance.summarySeparator}
-              {value}
+        {isWeek ? (
+          /* 週まとめ: 見出しと数字を2段に分け、数字を大きく置く（日カードは1行のまま） */
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1 text-sm font-bold text-ink-muted">
+              <Sparkles size={14} className="shrink-0 text-accent-ink" aria-hidden />
+              {title}
             </span>
-          ))}
-          {/* 折りたたんだままでも「この数字は下振れしている」と分かるようにする
-              （便BY/NUT-01と同じ作法。展開しないと分からない状態にしない） */}
-          {canShowNumbers && gapDishCount > 0 && (
-            <span className="ml-1 whitespace-nowrap font-bold text-warning">
-              {ja.nutritionBalance.gapBadge.replace('{n}', String(gapDishCount))}
+            <span className="mt-1 block text-lg font-bold">
+              {valueSpans}
+              {gapBadge}
             </span>
-          )}
-        </span>
-        <ChevronIcon size={16} className="shrink-0 text-ink-muted" aria-hidden />
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 text-xs text-ink-muted">
+            <Sparkles size={12} className="mr-1 inline-block shrink-0 text-accent-ink" aria-hidden />
+            <span className="font-bold">{title}</span>: {valueSpans}
+            {gapBadge}
+          </span>
+        )}
+        <ChevronIcon size={isWeek ? 20 : 16} className="shrink-0 text-ink-muted" aria-hidden />
       </button>
 
       {expanded && (
@@ -217,32 +240,51 @@ export default function NutritionBalancePanel({
             )}
             {/* 2026-08-02 便DE-12(オーナー指示): 「何が入っていないか」の行だけ太字にする。
                 合計に含めていないもの（ごはん・飲みもの・おやつ・外食／野菜に数えない食品群）は、
-                数字の読み方が変わる情報なのに、ほかの注記と同じ細い小文字で埋もれていた */}
+                数字の読み方が変わる情報なのに、ほかの注記と同じ細い小文字で埋もれていた。
+                2026-08-09 便EN: 残りの但し書き・出典は折りたたみへ移したが、この1行だけは
+                「合計に何が入っていないか」＝数字の意味そのものなので畳まずに残す */}
             <p className="font-bold">
               {includeRice
                 ? ja.nutritionBalance.registeredOnlyNoteWithRice
                 : ja.nutritionBalance.registeredOnlyNote}
             </p>
-            <p>{ja.nutritionBalance.registeredOnlyMealNote}</p>
-            {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
-                （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す） */}
-            <p>{ja.nutrition.excludedDirectionNote}</p>
-            <p className="font-bold">{ja.nutritionBalance.vegetableCountNote}</p>
-            <p>{ja.nutrition.estimateNote}</p>
-            {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。
-                めやすの出典は、画面に出しているめやすの分だけ挙げる
-                （無料は野菜量のめやすしか出していないので、塩分側の出典は挙げない） */}
-            <p>
-              {ja.nutrition.sourcePrefix}
-              {nutritionSourceName()}
-            </p>
-            <p>
-              {ja.nutritionBalance.guideSourcePrefix}
-              {unlocked
-                ? `${DAILY_GUIDES.saltG.source}${ja.nutritionBalance.guideSourceSeparator}${DAILY_GUIDES.vegetableG.source}`
-                : DAILY_GUIDES.vegetableG.source}
-            </p>
-            <p>{ja.nutritionBalance.guideScopeNote}</p>
+          </div>
+          {/* 但し書きと出典（2026-08-09 便EN・オーナー実機「注意説明が長い」）。
+              月タブの栄養カードと同じ文言・同じ作法で畳む */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setNotesOpen((v) => !v)}
+              aria-expanded={notesOpen}
+              className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-xs font-bold text-accent-ink shadow-sm"
+            >
+              {ja.nutritionBalance.notesToggle}
+              {notesOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+            </button>
+            {notesOpen && (
+              <div className="mt-[var(--space-sm)] space-y-0.5 text-xs text-ink-muted">
+                <p>{ja.nutritionBalance.registeredOnlyMealNote}</p>
+                {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
+                    （docs/60 §1-3-4: レシピ詳細と同じ方向の但し書きを日・週の合計にも出す） */}
+                <p>{ja.nutrition.excludedDirectionNote}</p>
+                <p className="font-bold">{ja.nutritionBalance.vegetableCountNote}</p>
+                <p>{ja.nutrition.estimateNote}</p>
+                {/* 成分値の出典と「めやす」の出典は必ず別行にする（docs/60 §1-1。2つの出典を混ぜない）。
+                    めやすの出典は、画面に出しているめやすの分だけ挙げる
+                    （無料は野菜量のめやすしか出していないので、塩分側の出典は挙げない） */}
+                <p>
+                  {ja.nutrition.sourcePrefix}
+                  {nutritionSourceName()}
+                </p>
+                <p>
+                  {ja.nutritionBalance.guideSourcePrefix}
+                  {unlocked
+                    ? `${DAILY_GUIDES.saltG.source}${ja.nutritionBalance.guideSourceSeparator}${DAILY_GUIDES.vegetableG.source}`
+                    : DAILY_GUIDES.vegetableG.source}
+                </p>
+                <p>{ja.nutritionBalance.guideScopeNote}</p>
+              </div>
+            )}
           </div>
         </div>
       )}
