@@ -3791,7 +3791,16 @@ try {
   //  LOCK-4 日ごとの鍵は、その日の朝食・昼食・夕食3つをまとめて掛ける
   //  LOCK-5 ロックした食事は「まとめて献立を入力(レシピを総入れ替え)」で変わらない
   //  LOCK-6 ロックは端末に残る(再読み込みしても掛かったまま)
-  //  LOCK-7 文言統一: 画面に「畳む」が出ず「すべて折りたたむ」になっている ---
+  //  LOCK-7 文言統一: 画面に「畳む」が出ず「すべて折りたたむ」になっている
+  //
+  // 2026-08-09 便EJで見つかった落とし穴(必ず守ること):
+  //  ・週タブの既定表示は月曜〜日曜の「週区切り」なので、今日が日曜だと、これからの日は
+  //    今日1日しか出ない。その1日をロックすると総入れ替えの対象が0件になり、確認文が
+  //    出ないまま「1品も変わらない」だけが素通りで合格する(＝守れている証明にならない)。
+  //    そこでこのブロックは常に「次の週」へ送り、7日とも未来日の状態で検証する。
+  //  ・ロックの検証は必ず「鍵の無い日が実際に入れ替わったこと」と対で断定する。
+  //    行の照合には自動採番のid(uchi-recipe/mealPlansの主キー)も含める＝同じレシピが
+  //    たまたま入り直しても「消して入れ直した」と「触っていない」を取り違えない ---
   currentCheck = 'WEEKLOCK'
   {
     const lkBrowser = await chromium.launch()
@@ -3807,10 +3816,31 @@ try {
       void dialog.accept()
     })
     try {
+      // 週タブを開き、必ず「次の週」へ送る(7日とも未来日にする)。
+      // 曜日によって未来日の数が変わると検証の中身が変わってしまうため、日曜でも土曜でも
+      // 同じ条件で回るようにここで固定する
+      const lkOpenWeekTab = async () => {
+        await lkPage.getByRole('button', { name: '週', exact: true }).click()
+        await lkPage.waitForTimeout(700)
+        await lkPage.getByRole('button', { name: '次の週' }).click()
+        await lkPage.waitForTimeout(800)
+        return await lkPage.evaluate(() =>
+          [...document.querySelectorAll('section[data-date]')].map((s) => s.getAttribute('data-date')),
+        )
+      }
       await lkPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await lkPage.waitForTimeout(1800) // 初回シード完了待ち
-      await lkPage.getByRole('button', { name: '週', exact: true }).click()
-      await lkPage.waitForTimeout(700)
+      const lkWeekDates = await lkOpenWeekTab()
+      const lkTodayIso = await lkPage.evaluate(() => {
+        const d = new Date()
+        const p = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      })
+      check(
+        'WEEKLOCK 前提: 次の週を開くと7日とも今日以降になる(曜日に左右されない土台)',
+        lkWeekDates.length === 7 && lkWeekDates.every((d) => d > lkTodayIso),
+        `dates=${JSON.stringify(lkWeekDates)} / today=${lkTodayIso}`,
+      )
 
       // ---------- LOCK-7: 文言統一(「畳む」を残さない) ----------
       const lkBody = (await lkPage.textContent('body')) ?? ''
@@ -3870,16 +3900,15 @@ try {
       )
 
       // ---------- LOCK-2/4: 日ごとの鍵は3食まとめて掛かり、見た目でも分かる ----------
-      // 対象は週のいちばん最後の日(必ず今日か未来日＝編集グリッドが出ている日)にする。
-      // 週区切り表示では先頭が過ぎた日になりうるので、そこを使うと食事カードが出ていない
-      const lkDate = await lkPage.evaluate(() => {
-        const all = [...document.querySelectorAll('section[data-date]')]
-        return all[all.length - 1]?.getAttribute('data-date') ?? ''
-      })
+      // 鍵を掛ける日=週のいちばん最後の日／鍵を掛けない日=週のいちばん最初の日。
+      // 総入れ替え(LOCK-5)では「鍵の日は動かない」と「鍵の無い日は実際に動いた」を対で見るので、
+      // 対象の日を2つ取っておく
+      const lkDate = lkWeekDates[lkWeekDates.length - 1]
+      const lkFreeDate = lkWeekDates[0]
       // 先に献立を入れておく(ロックが「今ある献立を守る」ことを確かめるため)
       const lkFillBtn = lkPage.getByRole('button', { name: 'まとめて献立を入力' })
       await lkFillBtn.click()
-      await lkPage.waitForTimeout(2000)
+      await lkPage.waitForTimeout(3000) // 7日ぶん書き込むので長めに待つ
       const lkSlotState = () =>
         lkPage.evaluate((date) => {
           const section = document.querySelector(`section[data-date="${date}"]`)
@@ -3903,7 +3932,9 @@ try {
       )
       check(
         'WEEKLOCK(LOCK-2) ロック中の食事は面の色が変わる(鍵アイコンだけに頼らない)',
-        lkBefore.length === lkAfter.length && lkBefore.every((s, i) => s.bg !== lkAfter[i].bg),
+        lkBefore.length > 0 &&
+          lkBefore.length === lkAfter.length &&
+          lkBefore.every((s, i) => s.bg !== lkAfter[i].bg),
         `before=${JSON.stringify(lkBefore.map((s) => s.bg))} / after=${JSON.stringify(lkAfter.map((s) => s.bg))}`,
       )
       check(
@@ -3912,10 +3943,15 @@ try {
       )
 
       // ---------- LOCK-6: 再読み込みしても掛かったまま(端末に残る) ----------
+      // 再読み込みで表示週は当週へ戻るので、同じ手順でもう一度「次の週」へ送ってから見る
       await lkPage.reload({ waitUntil: 'networkidle' })
       await lkPage.waitForTimeout(1500)
-      await lkPage.getByRole('button', { name: '週', exact: true }).click()
-      await lkPage.waitForTimeout(700)
+      const lkWeekDatesReloaded = await lkOpenWeekTab()
+      check(
+        'WEEKLOCK(LOCK-6) 再読み込み後も同じ週を開き直せている(検証する日がずれていない)',
+        JSON.stringify(lkWeekDatesReloaded) === JSON.stringify(lkWeekDates),
+        `before=${JSON.stringify(lkWeekDates)} / after=${JSON.stringify(lkWeekDatesReloaded)}`,
+      )
       const lkReloaded = await lkSlotState()
       check(
         'WEEKLOCK(LOCK-6) 再読み込みしてもロックは残る',
@@ -3924,6 +3960,8 @@ try {
       )
 
       // ---------- LOCK-5: 総入れ替えでもロックした食事は変わらない ----------
+      // 行の照合には主キーのidも入れる。総入れ替えは「消してから入れ直す」ので、
+      // 触られた行はidが必ず変わる＝同じレシピが引き直されても取り違えない
       const lkPlanOf = (date) =>
         lkPage.evaluate(
           (d) =>
@@ -3936,7 +3974,7 @@ try {
                   resolve(
                     g.result
                       .filter((e) => e.date === d)
-                      .map((e) => `${e.slot}|${e.role ?? 'main'}|${e.recipeId}`)
+                      .map((e) => `${e.slot}|${e.role ?? 'main'}|${e.recipeId}|id=${e.id}`)
                       .sort(),
                   )
                 g.onerror = () => reject(g.error)
@@ -3946,18 +3984,42 @@ try {
           date,
         )
       const lkLockedPlan = await lkPlanOf(lkDate)
+      const lkFreePlan = await lkPlanOf(lkFreeDate)
       check(
         'WEEKLOCK(LOCK-5) 前提: ロックした日には献立が入っている',
         lkLockedPlan.length > 0,
         `plan=${JSON.stringify(lkLockedPlan)}`,
       )
+      // 「何も起きないので合格」を防ぐための前提。鍵を掛けていない日にも献立が入っていないと、
+      // 総入れ替えは消すものが無くて確認文すら出さずに終わる(2026-08-09 便EJで実際に起きた)
+      check(
+        'WEEKLOCK(LOCK-5) 前提: ロックしていない日にも献立が入っている(入れ替える対象がある)',
+        lkFreePlan.length > 0,
+        `date=${lkFreeDate} / plan=${JSON.stringify(lkFreePlan)}`,
+      )
       // 「レシピを総入れ替え」に切り替えて実行する(確認文は自動承認)
-      await lkPage.getByRole('button', { name: 'レシピを総入れ替え', exact: true }).click()
+      const lkReplaceBtn = lkPage.getByRole('button', { name: 'レシピを総入れ替え', exact: true })
+      await lkReplaceBtn.click()
       await lkPage.waitForTimeout(300)
+      check(
+        'WEEKLOCK(LOCK-5) 「レシピを総入れ替え」を押すと入れかたが総入れ替えに切り替わる',
+        (await lkReplaceBtn.getAttribute('aria-pressed')) === 'true',
+        `aria-pressed=${await lkReplaceBtn.getAttribute('aria-pressed')}`,
+      )
       lkDialogs.length = 0
       await lkFillBtn.click()
-      await lkPage.waitForTimeout(2500)
+      await lkPage.waitForTimeout(3500) // 消してから入れ直すので長めに待つ
       const lkAfterReplace = await lkPlanOf(lkDate)
+      const lkFreeAfter = await lkPlanOf(lkFreeDate)
+      // 先に「本当に総入れ替えが走った」ことを断定する。ここが通らないうちは
+      // 下のロックの合格は「何も起きていないだけ」なので意味を持たない
+      check(
+        'WEEKLOCK(LOCK-5) 前提: ロックしていない日の献立は実際に入れ替わった(素通り防止)',
+        lkFreeAfter.length > 0 &&
+          lkFreeAfter.every((row) => !lkFreePlan.includes(row)) &&
+          lkFreePlan.every((row) => !lkFreeAfter.includes(row)),
+        `date=${lkFreeDate} / before=${JSON.stringify(lkFreePlan)} / after=${JSON.stringify(lkFreeAfter)}`,
+      )
       check(
         'WEEKLOCK(LOCK-5) 総入れ替えでもロック中の日の献立は1品も変わらない',
         JSON.stringify(lkAfterReplace) === JSON.stringify(lkLockedPlan),
@@ -3966,6 +4028,12 @@ try {
       check(
         'WEEKLOCK(LOCK-5) 総入れ替えの確認文に「ロック中の◯食分は変わりません」がある(規約F)',
         lkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        `dialogs=${JSON.stringify(lkDialogs)}`,
+      )
+      // 規約F: 消えるものも件数つきで書く。「変わりません」だけでは片手落ち
+      check(
+        'WEEKLOCK(LOCK-5) 総入れ替えの確認文に消える品数と食分が入っている(規約F)',
+        lkDialogs.some((m) => /これからの[1-9]\d*食分に入っている献立[1-9]\d*品を消して/.test(m)),
         `dialogs=${JSON.stringify(lkDialogs)}`,
       )
 
@@ -3978,25 +4046,28 @@ try {
         (await lkLockAll.textContent())?.trim() === 'すべて解除',
         `text=${await lkLockAll.textContent()}`,
       )
-      const lkAllLocked = await lkPage.evaluate(
-        () =>
-          [...document.querySelectorAll('[data-testid="slot-block"]')].every(
-            (b) => b.getAttribute('data-locked') === 'true',
-          ),
+      // 数え方に注意: 食事カードが1枚も無いと every() は空配列で true を返し、
+      // 「ロックできている」と「そもそも何も出ていない」を取り違える。必ず枚数も見る
+      const lkBlockLockState = () =>
+        lkPage.evaluate(() => {
+          const blocks = [...document.querySelectorAll('[data-testid="slot-block"]')]
+          return { total: blocks.length, locked: blocks.filter((b) => b.getAttribute('data-locked') === 'true').length }
+        })
+      const lkAllLocked = await lkBlockLockState()
+      check(
+        'WEEKLOCK(LOCK-3) 「すべてロック」で表示中の食事がすべてロックされる',
+        lkAllLocked.total > 0 && lkAllLocked.locked === lkAllLocked.total,
+        `state=${JSON.stringify(lkAllLocked)}`,
       )
-      check('WEEKLOCK(LOCK-3) 「すべてロック」で表示中の食事がすべてロックされる', lkAllLocked)
       await lkLockAll.click()
       await lkPage.waitForTimeout(800)
-      const lkAllReleased = await lkPage.evaluate(
-        () =>
-          [...document.querySelectorAll('[data-testid="slot-block"]')].every(
-            (b) => b.getAttribute('data-locked') !== 'true',
-          ),
-      )
+      const lkAllReleased = await lkBlockLockState()
       check(
         'WEEKLOCK(LOCK-3) もう一度押すとすべて解除される(時間帯ごとの鍵も残さない)',
-        lkAllReleased && (await lkLockAll.textContent())?.trim() === 'すべてロック',
-        `released=${lkAllReleased}`,
+        lkAllReleased.total > 0 &&
+          lkAllReleased.locked === 0 &&
+          (await lkLockAll.textContent())?.trim() === 'すべてロック',
+        `state=${JSON.stringify(lkAllReleased)}`,
       )
 
       // ---------- 便EA: ロックは「手での削除・変更」も止める(オーナー指示) ----------
@@ -4048,20 +4119,26 @@ try {
         !!lkLockedCtl && lkLockedCtl.note === '鍵を外すまで、削除も変更もできません',
         `note=${lkLockedCtl?.note}`,
       )
-      // 実際に消えないこと(DBの献立が1品も変わらない)
+      // 実際に消えないこと(DBの献立が1品も変わらない)。
+      // 消える対象が1品も無ければ「消えなかった」に意味が無いので、件数も前提として見る
+      const lkClickRemove = () =>
+        lkPage.evaluate((date) => {
+          const section = document.querySelector(`section[data-date="${date}"]`)
+          const block = section?.querySelector('[data-testid="slot-block"]')
+          const remove = [...(block?.querySelectorAll('button') ?? [])].find(
+            (b) => b.getAttribute('aria-label') === 'この割り当てを外す',
+          )
+          if (!remove) return false
+          remove.click()
+          return true
+        }, lkDate)
       const lkPlanBeforeManual = await lkPlanOf(lkDate)
-      await lkPage.evaluate((date) => {
-        const section = document.querySelector(`section[data-date="${date}"]`)
-        const block = section?.querySelector('[data-testid="slot-block"]')
-        const remove = [...(block?.querySelectorAll('button') ?? [])].find(
-          (b) => b.getAttribute('aria-label') === 'この割り当てを外す',
-        )
-        remove?.click()
-      }, lkDate)
+      await lkClickRemove()
       await lkPage.waitForTimeout(700)
       check(
         'WEEKLOCK(便EA) ロック中は×を押しても献立が消えない',
-        JSON.stringify(await lkPlanOf(lkDate)) === JSON.stringify(lkPlanBeforeManual),
+        lkPlanBeforeManual.length > 0 &&
+          JSON.stringify(await lkPlanOf(lkDate)) === JSON.stringify(lkPlanBeforeManual),
         `before=${JSON.stringify(lkPlanBeforeManual)}`,
       )
       // 鍵を外せば元どおり操作できる
@@ -4076,6 +4153,115 @@ try {
           lkUnlockedCtl.servingsDisabled === false &&
           lkUnlockedCtl.note === '',
         `ctl=${JSON.stringify(lkUnlockedCtl)}`,
+      )
+      // 「出さない」側の断定も、外したら戻ることまで見て対にする
+      // (出ていないだけの状態と、鍵で消している状態を取り違えないため)
+      check(
+        'WEEKLOCK(便EA) 鍵を外すとサイコロと「＋料理を追加」も戻る',
+        !!lkUnlockedCtl && lkUnlockedCtl.diceCount === 1 && lkUnlockedCtl.addRow === true,
+        `ctl=${JSON.stringify(lkUnlockedCtl)}`,
+      )
+      // 素通り防止(2026-08-09 便EJ): 同じ×を、鍵を外した状態でもう一度押すと今度は実際に消える。
+      // これが無いと「ロック中は消えない」は「×はもともと効かないボタン」でも合格してしまう
+      const lkPlanBeforeRealRemove = await lkPlanOf(lkDate)
+      await lkClickRemove()
+      await lkPage.waitForTimeout(900)
+      const lkPlanAfterRealRemove = await lkPlanOf(lkDate)
+      check(
+        'WEEKLOCK(便EA) 鍵を外すと同じ×で実際に1品消える(効かないボタンではないことの対の確認)',
+        lkPlanBeforeRealRemove.length > 0 &&
+          lkPlanAfterRealRemove.length === lkPlanBeforeRealRemove.length - 1,
+        `before=${JSON.stringify(lkPlanBeforeRealRemove)} / after=${JSON.stringify(lkPlanAfterRealRemove)}`,
+      )
+
+      // ---------- 便EA: 押せるままのボタンから来ても、実処理の入口で止まる ----------
+      // 週の行の×・料理名・食数はボタン自体を押せなくしているので、実処理側の関所
+      // (blockedByLock)まで届かない。日タブの「◯食に入れる」は鍵が掛かっていても押せる
+      // 作りなので、この経路で「関所で止まる・黙らず案内する」を確かめる。
+      // 鍵を外すと同じ操作が通ることまで対で見る(2026-08-09 便EJ)
+      const lkTodayDinner = () =>
+        lkPage.evaluate(
+          (d) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(g.result.filter((e) => e.date === d && e.slot === 'dinner').length)
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          lkTodayIso,
+        ).catch(() => -1)
+      // 「レシピ一覧から選択中」に1品置く(日タブの「夕食に入れる」を出すため)
+      const lkSeeded = await lkPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const rtx = idb.transaction('recipes', 'readonly')
+              const g = rtx.objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const side = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                if (!side) {
+                  resolve(false)
+                  return
+                }
+                const wtx = idb.transaction('todayList', 'readwrite')
+                wtx.objectStore('todayList').add({ recipeId: side.id, addedAt: Date.now() })
+                wtx.oncomplete = () => resolve(true)
+                wtx.onerror = () => reject(wtx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('WEEKLOCK(便EA) 前提: 日タブの「レシピ一覧から選択中」に1品置けた', lkSeeded === true)
+      await lkPage.reload({ waitUntil: 'networkidle' })
+      await lkPage.waitForTimeout(1500)
+      // 今日の夕食に鍵を掛ける(週タブは再読み込みで当週へ戻っているのでそのまま使う)
+      await lkPage.getByRole('button', { name: '週', exact: true }).click()
+      await lkPage.waitForTimeout(700)
+      const lkTodaySlotLock = lkPage.locator(
+        `section[data-date="${lkTodayIso}"] [data-testid="slot-block"][data-slot="dinner"] [data-testid="slot-lock"]`,
+      )
+      await lkTodaySlotLock.click()
+      await lkPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK(便EA) 前提: 今日の夕食に鍵が掛かった',
+        (await lkTodaySlotLock.getAttribute('aria-pressed')) === 'true',
+      )
+      const lkDinnerBeforeBlocked = await lkTodayDinner()
+      await lkPage.getByRole('button', { name: '日', exact: true }).click()
+      await lkPage.waitForTimeout(700)
+      await lkPage.getByRole('button', { name: '夕食に入れる' }).first().click()
+      await lkPage.waitForTimeout(900)
+      check(
+        'WEEKLOCK(便EA) 押せるままのボタンから来ても、鍵が掛かっていれば献立は増えない',
+        (await lkTodayDinner()) === lkDinnerBeforeBlocked,
+        `before=${lkDinnerBeforeBlocked} / after=${await lkTodayDinner()}`,
+      )
+      check(
+        'WEEKLOCK(便EA) 止めたことを黙らず案内する(ロック中です。鍵を外すと変更できます)',
+        ((await lkPage.textContent('body')) ?? '').includes('ロック中です。鍵を外すと変更できます'),
+      )
+      // 鍵を外すと同じ操作が通る＝「この経路はもともと動かない」ではないことの証明
+      await lkPage.getByRole('button', { name: '週', exact: true }).click()
+      await lkPage.waitForTimeout(700)
+      await lkTodaySlotLock.click()
+      await lkPage.waitForTimeout(700)
+      await lkPage.getByRole('button', { name: '日', exact: true }).click()
+      await lkPage.waitForTimeout(700)
+      await lkPage.getByRole('button', { name: '夕食に入れる' }).first().click()
+      await lkPage.waitForTimeout(900)
+      check(
+        'WEEKLOCK(便EA) 鍵を外すと同じボタンで今日の夕食に1品入る(対の確認)',
+        (await lkTodayDinner()) === lkDinnerBeforeBlocked + 1,
+        `before=${lkDinnerBeforeBlocked} / after=${await lkTodayDinner()}`,
       )
     } finally {
       await lkBrowser.close()
