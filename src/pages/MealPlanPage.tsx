@@ -261,7 +261,7 @@ const pickerChipCls = (active: boolean) =>
   }`
 
 /**
- * 今日の献立の1行（小サムネ＋名前＋作った/×）。
+ * 今日の献立の1行（小サムネ＋名前＋作った！＋×）。
  *
  * 2026-08-03 便DH: 日タブを「レシピ一覧から選択中」と「今週の献立の予定」の縦一列に分けたので、
  * ×（外す）は前者だけに出す（onRemove を渡さない＝週の予定の行には出ない）。週の予定は
@@ -303,13 +303,30 @@ function TodayListRow({
             <RecipePlaceholder recipe={recipe} iconSize={20} />
           )}
         </Link>
+        {/* 料理名は2行まで折り返す(便EAでボタンを横に並べたぶん幅が狭くなるため)。
+            行の高さは「作った！」ボタンの44pxで決まるので、2行になっても行は高くならない */}
         <Link
           to={`/recipes/${recipe.id}`}
           state={fromState}
-          className="min-w-0 flex-1 truncate font-bold"
+          className="line-clamp-2 min-w-0 flex-1 font-bold leading-snug break-words"
         >
           {recipe.title}
         </Link>
+        {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+            枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
+            ボタンと同じ当たり判定を下回らないようにする。
+            2026-08-08 便EA(オーナー指示「作ったボタンをレシピ名横に」): 行の下の専用行をやめ、
+            料理名の右へ移す。便DT-1で右下へ寄せたが、ボタン1つだけの行の左半分が空いて
+            実機で空白が目立っていた。×(外す)との押し間違いは、間の余白を12px取り(gap-2＋ml-1)、
+            枠・地色つきのボタンと枠なしの✕という見た目の差で分ける */}
+        <button
+          type="button"
+          onClick={onCooked}
+          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm border border-accent bg-surface px-2.5 py-2 text-sm font-bold text-accent-ink shadow-sm"
+        >
+          <CheckCircle2 size={16} aria-hidden />
+          {ja.mealPlan.todayMarkCooked}
+        </button>
         {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
             破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
             押し間違いを減らす */}
@@ -318,26 +335,11 @@ function TodayListRow({
             type="button"
             onClick={onRemove}
             aria-label={ja.mealPlan.todayRemove}
-            className="ml-[var(--space-sm)] shrink-0 rounded-full p-3 text-ink-muted"
+            className="ml-1 shrink-0 rounded-full p-3 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>
         )}
-      </div>
-      {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
-          枠・地色・文字ラベルの付いたボタンにした。料理名の幅を削らないよう行の下へ置き、
-          高さは44px(min-h-11)＝従来のp-3のアイコンボタンと同じ当たり判定を下回らないようにする。
-          2026-08-07 便DT-1(オーナー指示): カードの右下へ寄せる。左寄せだと、すぐ上の行にある
-          料理名のリンク・×(外す)と縦にそろってしまい、押し間違いが起きやすかった */}
-      <div className="mt-1 flex justify-end">
-        <button
-          type="button"
-          onClick={onCooked}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-sm border border-accent bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-        >
-          <CheckCircle2 size={18} aria-hidden />
-          {ja.mealPlan.todayMarkCooked}
-        </button>
       </div>
       {footer}
     </li>

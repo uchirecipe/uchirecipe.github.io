@@ -3500,7 +3500,7 @@ try {
   }
 
   // --- WEEKUI-DT: 2026-08-07 便DT(オーナー実機確認)の10件。
-  //  DT-1  日タブの「作った！」ボタンをカードの右下へ(押し間違いを減らす配置)
+  //  DT-1  日タブの「作った！」ボタンの位置(2026-08-08 便EAで「料理名の横」へ変更)
   //  DT-2  週タブの記録カード→レシピ詳細→戻る で、同じ週・同じスクロール位置へ戻り、
   //        その後「レシピ」タブを押すと(詳細ではなく)レシピ一覧が開く
   //  DT-3  日付の切り替え欄は「すべて折りたたむ」の上(7日分カードの直前)
@@ -3524,8 +3524,11 @@ try {
       await dtPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await dtPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // ---------- DT-1: 日タブの「作った！」は行の右端に寄る ----------
-      // 「おまかせで提案」で今日の献立に品を入れてから、行の中でボタンが右寄せか見る
+      // ---------- DT-1→EA-1: 日タブの「作った！」は料理名の横(同じ行) ----------
+      // 2026-08-08 便EA(オーナー指示「作ったボタンをレシピ名横に」): 便DT-1で作った
+      // 「ボタンだけの行」をやめ、料理名と同じ行の右へ置いた(左半分の空白が実機で目立っていた)。
+      // 検査するのは①料理名と同じ行に並んでいる ②当たり判定44px以上
+      // ③✕(外す)と12px以上離れている(押し間違い対策) の3点
       await dtPage.getByRole('button', { name: /おまかせで提案/ }).first().click()
       await dtPage.waitForTimeout(1500)
       const dtCookedBtn = await dtPage.evaluate(() => {
@@ -3534,21 +3537,44 @@ try {
         )
         const li = btn?.closest('li')
         if (!btn || !li) return null
-        const wrap = btn.parentElement
-        const liRect = li.getBoundingClientRect()
+        const title = li.querySelector('a[href*="/recipes/"]:not(:first-child)')
         const btnRect = btn.getBoundingClientRect()
+        const titleRect = title?.getBoundingClientRect()
+        // ✕(外す)は同じ行にあるときだけ距離を測る(「今週の献立の予定」の行には出ない)
+        const removeBtn = [...li.querySelectorAll('button')].find(
+          (b) => b.getAttribute('aria-label') === 'この献立から外す',
+        )
+        const removeRect = removeBtn?.getBoundingClientRect()
         return {
-          wrapCls: wrap?.className ?? '',
-          // 行の右端との差(px)。右寄せなら数px以内に収まる
-          rightGap: Math.round(liRect.right - btnRect.right),
-          leftGap: Math.round(btnRect.left - liRect.left),
+          height: Math.round(btnRect.height),
+          // 料理名と同じ行か(縦の中心が近く、ボタンが名前より右にある)
+          sameRow:
+            !!titleRect &&
+            Math.abs(btnRect.top + btnRect.height / 2 - (titleRect.top + titleRect.height / 2)) < 12,
+          rightOfTitle: !!titleRect && btnRect.left >= titleRect.right,
+          // 「作った！」の下に専用行が残っていないこと(親が横並びのflex行)
+          parentCls: btn.parentElement?.className ?? '',
+          removeGap: removeRect ? Math.round(removeRect.left - btnRect.right) : null,
         }
       })
       check(
-        'WEEKUI-DT(便DT-1) 日タブの「作った！」はカードの右下に寄っている',
-        !!dtCookedBtn &&
-          dtCookedBtn.wrapCls.includes('justify-end') &&
-          dtCookedBtn.rightGap < dtCookedBtn.leftGap,
+        'WEEKUI-DT(便EA-1) 日タブの「作った！」は料理名の横(同じ行)にある',
+        !!dtCookedBtn && dtCookedBtn.sameRow && dtCookedBtn.rightOfTitle,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便EA-1) 「作った！」の当たり判定は44px以上',
+        !!dtCookedBtn && dtCookedBtn.height >= 44,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便EA-1) 「作った！」と✕(外す)は12px以上離れている',
+        !!dtCookedBtn && dtCookedBtn.removeGap !== null && dtCookedBtn.removeGap >= 12,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便EA-1) 「作った！」だけの行(justify-end)は残っていない',
+        !!dtCookedBtn && !dtCookedBtn.parentCls.includes('justify-end'),
         `btn=${JSON.stringify(dtCookedBtn)}`,
       )
 
