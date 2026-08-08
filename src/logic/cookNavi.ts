@@ -158,12 +158,26 @@ const HANDS_ON_COOK_PATTERN = /炒め|炒る|揚げ/
  * 「むく／むき」は docs/68 6-3 で見つかった欠落（「粗熱が取れたら殻をむく」が20分の待ちに化けていた）。
  * 「洗う／締める」は同梱109品の目視で見つかった欠落（「茹で上がったら流水で洗い流し、氷水で
  * しっかり締める」が8分の待ちに化け、うどんが伸びる段取りになっていた）。
+ * 「水気をきる」型のひらがな表記は docs/68「残る限界」に記録されていた欠落（2026-08-09 便EM）。
+ * 「ごぼうを水に5分さらして水気をきります」の末尾が手作業だと読めず、5分の待ちに化けていた。
+ * ひらがなの「きる」は単独だと「はりきる」「使いきる」等に当たるので、
+ * 水気・湯・油・汁気を落とす言い回しの形だけを拾う。
  */
 const ACTION_VERB_PATTERN =
-  /炒め|炒る|揚げ|焼く|焼き|焼い|取る|取り|取っ|加え|入れ|混ぜ|溶き|溶い|溶か|絞る|絞り|絞っ|切る|切り|切っ|盛る|盛り|盛っ|かける|かけて|ふる|ふり|返す|返し|のせ|散ら|和え|あえ|つぶ|こね|まぶ|止め|ぬぐ|添え|よそ|包む|巻く|にぎ|ほぐ|むく|むき|洗う|洗い|洗っ|締め/
+  /炒め|炒る|揚げ|焼く|焼き|焼い|取る|取り|取っ|加え|入れ|混ぜ|溶き|溶い|溶か|絞る|絞り|絞っ|切る|切り|切っ|盛る|盛り|盛っ|かける|かけて|ふる|ふり|返す|返し|のせ|散ら|和え|あえ|つぶ|こね|まぶ|止め|ぬぐ|添え|よそ|包む|巻く|にぎ|ほぐ|むく|むき|洗う|洗い|洗っ|締め|(?:水気|水け|湯|油|汁気|汁け)をき[るりっ]/
 
 /** 短時間の合図。既定分数を当てない（「熱湯でさっとゆでる」を8分の待ちにしない） */
 const SHORT_CUE_PATTERN = /さっと|ざっと|軽く|手早く|素早く/
+
+/**
+ * 並行の材料にする待ちの下限（分）。2026-08-09 便EM・docs/68「残る限界」の危険側1件。
+ *
+ * 「にんじんを1分、ほうれん草を30秒ゆでます」は待ち1分と判定され、その1分に別の料理の
+ * 手作業が差し込まれていた。1分では鍋の前を離れる余地が無く、離れればゆですぎになる。
+ * 秒だけの待ち（30秒ゆでる）を既に手作業へ倒しているのと同じ理由で、1分もここに含める。
+ * 2分以上は従来どおり待ちのまま（味噌汁の「2分温める」等）。
+ */
+const MIN_PARALLEL_WAIT_MINUTES = 2
 
 /** 「〜ておく／〜ておき／〜ておいて」＝先に済ませる言い方であって放置時間ではない */
 const TE_OKU_PATTERN = /[てで](?:お|置)[くきい]/
@@ -309,6 +323,8 @@ export function resolveWaitMinutes(step: Step): number | undefined {
  *     ただし**ユーザーが自分で分数を入れた手順には当てない**（入力の意思を尊重する）
  *   - 待ち分数がどうしても分からないとき（resolveWaitMinutes が undefined）。
  *     どれだけ手を離してよいか不明なものを待ちにする方が実害が大きい
+ *   - 待ちが2分に満たないとき（MIN_PARALLEL_WAIT_MINUTES。2026-08-09 便EM）。
+ *     1分では別の料理へ移る余地が無く、移らせると元の鍋から目を離すだけになる
  */
 export function classifyStep(step: Step): StepKind {
   // 目を離せない工程は、待ち動詞・待ち分数に関係なく手作業系（2026-08-08 便EB）。
@@ -319,7 +335,8 @@ export function classifyStep(step: Step): StepKind {
   if (waitAt === -1) return 'active'
   const hasExplicitMinutes = step.minutes != null && step.minutes > 0
   if (!hasExplicitMinutes && lastIndexOfPatterns(text, [ACTION_VERB_PATTERN]) >= waitAt) return 'active'
-  return resolveWaitMinutes(step) != null ? 'wait' : 'active'
+  const minutes = resolveWaitMinutes(step)
+  return minutes != null && minutes >= MIN_PARALLEL_WAIT_MINUTES ? 'wait' : 'active'
 }
 
 /**

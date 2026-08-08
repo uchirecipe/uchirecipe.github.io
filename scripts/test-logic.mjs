@@ -4348,6 +4348,42 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     classifyStep({ text: 'フライパンに水を1cmほど張り、包みを並べてふたをし、中火で15分蒸し焼きにします。' }),
     'wait',
   )
+
+  // ---- docs/68「残る限界」2件の解消(2026-08-09 便EM) ----
+  // (1) 1分の待ちは並行の材料にしない。ゆで上げの1分は鍋の前を離れられない工程で、
+  //     ここに別の料理の作業を差し込むと「ゆですぎ」になる(診断で唯一残っていた危険側1件)
+  eq(
+    'ナビ最短待ち: 「にんじんを1分、ほうれん草を30秒ゆでます」は手作業(1分は並行の材料にしない)',
+    classifyStep({ text: '鍋にたっぷりの湯を沸かし、塩を入れてにんじんを1分、ほうれん草を30秒ゆでます。' }),
+    'active',
+  )
+  eq(
+    'ナビ最短待ち: 分数欄に1分と入っていても手作業',
+    classifyStep({ text: 'にんじんを1分ゆでる。', minutes: 1 }),
+    'active',
+  )
+  eq(
+    'ナビ最短待ち: 2分の待ちは従来どおり待ち(下限は2分)',
+    classifyStep({ text: '沸いたら豆腐とわかめを入れて2分温める。', minutes: 2 }),
+    'wait',
+  )
+  // (2) ひらがなの「水気をきる」も手作業動詞として位置ルールに載せる。
+  //     「水に5分さらして水気をきります」は、末尾が手作業なので待ちにしない
+  eq(
+    'ナビ位置ルール: 「水に5分さらして水気をきります」は手作業(ひらがなの「きる」)',
+    classifyStep({ text: 'ごぼうはささがき、にんじんは細切りにし、ごぼうは水に5分さらして水気をきります。' }),
+    'active',
+  )
+  eq(
+    'ナビ位置ルール: 「10分ゆでて湯をきる」は手作業(ひらがなの「きる」)',
+    classifyStep({ text: 'マカロニを10分ゆでて湯をきる。' }),
+    'active',
+  )
+  eq(
+    'ナビ位置ルール: 「水気をきってから冷蔵庫で冷やす」は待ちのまま(最後の動作が待ち)',
+    classifyStep({ text: '水気をきってから冷蔵庫で30分冷やす。' }),
+    'wait',
+  )
 }
 
 // ---------- 2026-08-08 便EG・オーナー実機フィードバック（3品を実際に作って見つかった段取りの不備）
@@ -13049,9 +13085,25 @@ eq(
     lockAllReleaseDone: ja.mealPlan.lockAllReleaseDone,
     nutritionWeekTitle: ja.nutritionBalance.weekTitle,
   }
+  // 2026-08-09 便EM: 週タブの範囲えらび・栄養の開閉ボタン・空メッセージも同じ規律に載せる
+  Object.assign(weekScopeTexts, {
+    clearWeekSlotEmpty: ja.mealPlan.clearWeekSlotEmpty,
+    templateSaveEmpty: ja.mealPlan.templateSaveEmpty,
+    shopRangeSummaryAll: ja.mealPlan.shopRangeSummaryAll,
+    shopRangeReset: ja.mealPlan.shopRangeReset,
+    nutritionWeekToggleExpand: ja.nutritionBalance.weekToggleExpand,
+    nutritionWeekToggleCollapse: ja.nutritionBalance.weekToggleCollapse,
+  })
   for (const [key, text] of Object.entries(weekScopeTexts)) {
     eq(`EK-1 ${key} が開いている週を「今週」と呼んでいない`, text.includes('今週'), false)
+    // 2026-08-09 便EM: 呼び方は1つにそろえる。同じ画面に「この週の献立の栄養」と
+    // 「表示している週の概算食費」が隣り合って並び、別々の範囲に読めた(実DOMで確認)。
+    // 週を名乗るなら「表示している週」だけを使う(名乗らない文言はそのままでよい)
+    eq(`EM-2 ${key} が開いている週を「この週」と呼んでいない`, text.includes('この週'), false)
   }
+  // 例外: 月タブの日モーダルの「この週を開く」は、タップした日を含む週へ移動するボタン。
+  // その週はまだ表示されていないので「表示している週」では意味が通らない＝ここだけ残す
+  eq('EM-2 月タブの日モーダルは「この週を開く」のまま', ja.mealPlan.monthDayModalOpenWeek, 'この週を開く')
   // 週タブの見出しは削除済み(便EK)。当週以外を開くと嘘になる文言を、未使用のまま残さない
   eq('EK-1 使われていない週タブ見出し(weekTitle)を残していない', 'weekTitle' in ja.mealPlan, false)
   // 使い方ページ・LPは、アプリの見出しと同じ名前で書く（画面を見ながら読めるようにする）

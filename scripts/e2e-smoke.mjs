@@ -3,6 +3,9 @@
 // 実行: 開発サーバー(npm run dev)またはpreviewを起動した状態で
 //   npx tsx scripts/e2e-smoke.mjs             (既定: http://localhost:5173)
 //   BASE_URL=http://localhost:4173 npx tsx scripts/e2e-smoke.mjs   (preview等)
+// このスクリプトが自前で立てるpreviewサーバー(PRO-FALLBACK-01・URLIMPORT-01)のポートは、
+// 既定で空きポートをその場で取る(2026-08-09 便EM。旧: 4194/4203固定で並行実行と衝突していた)。
+// 固定したいときだけ E2E_PREVIEW_PORT / E2E_URLIMPORT_PREVIEW_PORT を指定する。
 // カバー: SMK-01(起動) / COUNT-01(一覧上部の総件数「全◯件」が絞り込み無しでも常に表示され、
 //         絞り込み中は「◯件 / 全◯件」の形になる。2026-07-13 UI改善) /
 //         QF-01(「時短レシピのみに絞る」絞り込みで件数が変わる。チップ文言は2026-07-13と
@@ -112,8 +115,8 @@
 //         合わせ調味料ライン表示 /
 //         PRO-FALLBACK-01(crypto.subtleが使えないinsecure context(LAN実機のhttp://等)でも、
 //         純JSのSHA-256フォールバック(src/logic/sha256.ts)でPro解錠コード検証が動くこと。
-//         2026-07-13。他チェックが使う既存サーバーとは別に自前でpreviewサーバーをport 4194で
-//         起動して検証する) /
+//         2026-07-13。他チェックが使う既存サーバーとは別に、自前のpreviewサーバー(空きポートを
+//         その場で取る。2026-08-09 便EM)を起動して検証する) /
 //         MEALPLAN-01(献立タブ・週プランナー。第4波ペルソナPDCA・2026-07-13裁定。2026-07-16
 //         便U-1で献立タブは日/週/月の3タブ構成になり、既定は「日」タブ・週の検証は「週」タブへ
 //         切り替えてから行う:
@@ -123,7 +126,7 @@
 //         日週月タブのaria-pressed(Fix5。2026-07-13更新: 新規ユーザーは既定で夕食のみ
 //         aria-pressed=true)・最後の食事帯フィルタを外そうとしたときの説明トースト(Fix6。
 //         同日更新: 既定が夕食のみになったため夕食を外そうとするパターンで検証)・
-//         「この週の◯◯をまとめて空にする」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3/DE-12で
+//         「表示している週の◯◯をまとめて空にする」(旧「この帯の今週分を空にする」・便U-4 → 便CW-3/DE-12で
 //         改名+折りたたみ)の折りたたみ開閉・食事選択+confirm+一括削除(手動配置も消える)) /
 //         MEALPLAN-02(献立タブ・月カレンダー。同波Fix2: 月移動の中央チップの「今月へ戻る」導線。
 //         Pro解錠コード入力UI経由で解錠してから検証。2026-07-16便U-5: 日タップは即週ジャンプせず
@@ -266,7 +269,7 @@
 //         NUTRI-DAY-01 / NUTRI-WEEK-01 / NUTRI-PRO-01(栄養バランス献立 第1段「見える化」・
 //         2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB': 週タブの各日カードに
 //         「この日の献立の栄養（1人分の概算）」の1行(無料=kcal・野菜g / Pro=kcal・塩分・野菜g)、
-//         週まとめに「この週の献立の栄養（1人分の概算）」が出ること。既定は1行で、めやすの説明は展開時のみ。
+//         週まとめに「表示している週の献立の栄養（1人分の概算）」が出ること。既定は1行で、めやすの説明は展開時のみ。
 //         展開時は塩分(男女併記の7.5/6.5g)と野菜(350g)だけを**数値の並置**で出し(塩分側はPro解錠時のみ)、
 //         エネルギーにはめやすの線を引かないこと・不足/過多の断定語や
 //         「監修」「推奨」「減塩」を使わないこと・「登録したレシピだけの合計」等の但し書きと
@@ -319,6 +322,7 @@ import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import net from 'node:net'
 import path from 'node:path'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -339,6 +343,78 @@ if (/:5173(\/|$)/.test(BASE) && process.env.ALLOW_DEV_SERVER !== '1') {
       '意図的にdevサーバーへ実行する場合のみ ALLOW_DEV_SERVER=1 を付けてください。',
   )
   process.exit(1)
+}
+
+/**
+ * このスクリプトが自前で立てるpreviewサーバーのポートを決める(2026-08-09 便EM)。
+ *
+ * 直していること: PRO-FALLBACK-01(旧4194)とURLIMPORT-01(旧4203)が固定ポートだったため、
+ * 別の作業ブランチのe2eと同時に走ると「previewサーバーが起動しなかった」で落ちていた
+ * (--strictPortなので先着が居ると即失敗する)。実装の不具合ではないのに赤くなるので、
+ * 原因調査に何度も時間を取られていた。既定はOSに空きポートを聞いて取る。
+ *
+ * 環境変数(E2E_PREVIEW_PORT / E2E_URLIMPORT_PREVIEW_PORT)で明示指定もできる
+ * (BASE_URLと同じ流儀。特定のポートで動かしたいときのため)。
+ * 5173(オーナーのdevサーバー)は指定されても使わない。
+ */
+async function pickFreePort(envName) {
+  const specified = process.env[envName]
+  if (specified) {
+    const port = Number(specified)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new Error(`${envName} にポート番号として使えない値が入っています: ${specified}`)
+    }
+    if (port === 5173) {
+      throw new Error(`${envName}=5173 は使えません(オーナーのdevサーバー・不可侵)`)
+    }
+    return port
+  }
+  return await new Promise((resolve, reject) => {
+    const probe = net.createServer()
+    probe.unref()
+    probe.on('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address()
+      probe.close(() => resolve(port))
+    })
+  })
+}
+
+/**
+ * 自前のpreviewサーバーを立てて、起動を待ってから返す(2026-08-09 便EM)。
+ * 空きポートを取ってから実際にlistenするまでの隙に別プロセスが同じポートを掴むことは
+ * ありうるので、ポートを取り直して数回やり直す(環境変数で明示指定されたときは
+ * 指定を尊重して別ポートへ逃げない)。killするのは自分が起動したPIDだけ。
+ */
+async function startPreviewServer({ envName, label, extraArgs = [], attempts = 3 }) {
+  let lastOutput = ''
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const port = await pickFreePort(envName)
+    const base = `http://localhost:${port}`
+    const proc = spawn(
+      'npx',
+      ['vite', 'preview', '--port', String(port), '--strictPort', ...extraArgs],
+      { cwd: appRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    let ready = false
+    let exited = false
+    let output = ''
+    proc.stdout.on('data', (buf) => {
+      output += buf.toString()
+      if (output.includes('Local:')) ready = true
+    })
+    proc.stderr.on('data', (buf) => (output += buf.toString()))
+    proc.on('exit', () => (exited = true))
+    const start = Date.now()
+    while (!ready && !exited && Date.now() - start < 15000) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    if (ready) return { proc, base, port }
+    proc.kill()
+    lastOutput = output
+    if (process.env[envName]) break // 明示指定は尊重する(勝手に別ポートへ移らない)
+  }
+  throw new Error(`${label}のpreviewサーバーが起動しなかった: ${lastOutput}`)
 }
 
 const errors = []
@@ -791,8 +867,8 @@ try {
 
   // --- URLIMPORT-00: VITE_RECIPE_IMPORT_ENDPOINT未設定(通常のdev/preview起動)では
   // 「URLから取り込む」ボタン自体が出ない(Workerデプロイ前でも壊れない設計。src/logic/urlImport.ts
-  // のisUrlImportEnabled)。設定済みの場合の表示・取り込みフローはURLIMPORT-01以降(自前previewサーバー
-  // port 4203・VITE_RECIPE_IMPORT_ENDPOINTをダミー値でビルド)で確認する ---
+  // のisUrlImportEnabled)。設定済みの場合の表示・取り込みフローはURLIMPORT-01以降(自前preview
+  // サーバー・VITE_RECIPE_IMPORT_ENDPOINTをダミー値でビルド)で確認する ---
   currentCheck = 'URLIMPORT-00'
   // 2026-07-21改定: 本番Workerのデプロイに伴い .env.production にエンドポイントが設定された。
   // このチェックは「ビルド時の設定状態と表示が一致すること」を検証する適応型にする
@@ -6253,7 +6329,7 @@ try {
         `before=${JSON.stringify(mpBeforeClear)}`,
       )
 
-      // 便U-4 → 便CW-3 → 便DE-12で「この週の◯◯をまとめて空にする」に改名 →
+      // 便U-4 → 便CW-3 → 便DE-12で「表示している週の◯◯をまとめて空にする」に改名 →
       // 2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移動し、対象の食事を
       // 複数選べるようにした。ここまでの操作で月曜夕食の主菜行に「肉じゃが」が割り当て済み(Fix4)。
       // まず「表示のしかた」が畳まれていて中身が見えないことを確かめてから開く
@@ -6283,14 +6359,14 @@ try {
       )
       check(
         'MEALPLAN-01(便DJ) 見出しは選んだ食事を並べて出す',
-        ((await mpPage.textContent('body')) ?? '').includes('この週の朝食・夕食をまとめて空にする'),
+        ((await mpPage.textContent('body')) ?? '').includes('表示している週の朝食・夕食をまとめて空にする'),
       )
       mpDialogs.length = 0
       await mpPage.getByRole('button', { name: '空にする', exact: true }).click()
       await mpPage.waitForTimeout(600)
       check(
         'MEALPLAN-01(便U-4/便DJ) 確認後、選んだ食事を並べた削除完了のトーストが出る',
-        (await mpPage.textContent('body')).includes('朝食・夕食のこの週分を'),
+        (await mpPage.textContent('body')).includes('表示している週の朝食・夕食の予定を'),
       )
       check(
         'MEALPLAN-01(便U-4/便CW-3) 手で選んで入れた「肉じゃが」も消える(改名の根拠になる実挙動)',
@@ -6323,7 +6399,7 @@ try {
       check(
         'MEALPLAN-01(便EK・規約F) 確認文が消える品数も書く',
         mpDialogs.some((m) =>
-          new RegExp(`朝食・夕食のこの週の予定${mpBeforeClear.dinner}品を削除します`).test(m),
+          new RegExp(`表示している週の朝食・夕食の予定${mpBeforeClear.dinner}品を削除します`).test(m),
         ),
         `dialogs=${JSON.stringify(mpDialogs)}`,
       )
@@ -6367,7 +6443,7 @@ try {
   // --- NUTRI-DAY-01 / NUTRI-WEEK-01: 栄養バランス献立 第1段「見える化」の無料視点
   // (2026-07-30 便CL・docs/60 第1段 / 2026-08-01 線引きB'で無料側の内訳を変更)。
   // ・週タブの各日カードに「この日の献立の栄養（1人分の概算）」が1行(**無料は kcal・野菜g の2値**)で出ること
-  // ・週まとめに「この週の献立の栄養（1人分の概算）」が同じ構成で出ること
+  // ・週まとめに「表示している週の献立の栄養（1人分の概算）」が同じ構成で出ること
   // ・展開すると1日のめやすが**説明文1行**で出ること(2026-08-02 便CW-7で並置UIから置換。
   //   **無料は野菜350gだけ**で、塩分のめやすはPro側。不足・過多の断定をしない=
   //   「足りません」「摂りすぎ」の語がどこにも出ないこと)
@@ -6408,8 +6484,8 @@ try {
         !nbEmptyText.includes('この日の献立の栄養（1人分の概算）'),
       )
       check(
-        'NUTRI-WEEK-01 未割当時は「この週の献立」の行も出ない',
-        !nbEmptyText.includes('この週の献立の栄養（1人分の概算）'),
+        'NUTRI-WEEK-01 未割当時は「表示している週の献立」の行も出ない',
+        !nbEmptyText.includes('表示している週の献立の栄養（1人分の概算）'),
       )
 
       await nbPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
@@ -6445,8 +6521,8 @@ try {
         /野菜約[\d,]+g/.test(nbFilledText),
       )
       check(
-        'NUTRI-WEEK-01 週まとめに「この週の献立の栄養（1人分の概算）」が出る',
-        nbFilledText.includes('この週の献立の栄養（1人分の概算）'),
+        'NUTRI-WEEK-01 週まとめに「表示している週の献立の栄養（1人分の概算）」が出る',
+        nbFilledText.includes('表示している週の献立の栄養（1人分の概算）'),
       )
 
       // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
@@ -6544,7 +6620,7 @@ try {
       )
 
       // 週まとめを展開: めやすは日数で掛けず、1日分の基準を説明文1行で書く(便CW-7)
-      await nbPage.getByRole('button', { name: 'この週の栄養の概算を詳しく見る' }).click()
+      await nbPage.getByRole('button', { name: '表示している週の栄養の概算を詳しく見る' }).click()
       await nbPage.waitForTimeout(400)
       const nbWeekOpenText = await nbPage.textContent('body')
       check(
@@ -6605,7 +6681,7 @@ try {
       await nbPage.waitForTimeout(1200)
       await nbPage.getByRole('button', { name: '週', exact: true }).click()
       await nbPage.waitForTimeout(400)
-      await nbPage.getByRole('button', { name: 'この週の栄養の概算を詳しく見る' }).click()
+      await nbPage.getByRole('button', { name: '表示している週の栄養の概算を詳しく見る' }).click()
       await nbPage.waitForTimeout(400)
       check(
         'NUTRI-DAY-01(便CW-10) 選択は設定に残る(読み込み直してもONのまま)',
@@ -9087,7 +9163,7 @@ try {
             .filter((v) => v && /[0-9]/.test(v)),
         )
       }
-      await svPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await svPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
       await svPage.waitForTimeout(1200)
       const svAmountsBefore = await svReadAmounts()
       check(
@@ -9130,7 +9206,7 @@ try {
         svSaved.length === 1 && svSaved[0].servings === svBase * 2,
         `saved=${JSON.stringify(svSaved)}`,
       )
-      await svPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await svPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
       await svPage.waitForTimeout(1200)
       const svAmountsAfter = await svReadAmounts()
       // 分量は「小さじ1/2」のような分数表記も出るので、分数のまま数値にして比べる
@@ -9192,22 +9268,22 @@ try {
 
       // ---------- ①既定: 開かなければ従来どおり ----------
       check(
-        'SHOPRANGE-EA(既定) 範囲えらびは閉じていて、要約は「この週ぜんぶ」',
+        'SHOPRANGE-EA(既定) 範囲えらびは閉じていて、要約は「表示している週ぜんぶ」',
         (await srPage.getByTestId('shop-range-toggle').getAttribute('aria-expanded')) === 'false' &&
           ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
-            'この週ぜんぶ',
+            '表示している週ぜんぶ',
           ),
       )
       check(
-        'SHOPRANGE-EA(既定) ボタン名は従来どおり「この週の買い物リストを作る」',
-        await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).isVisible(),
+        'SHOPRANGE-EA(既定) ボタン名は従来どおり「表示している週の買い物リストを作る」',
+        await srPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).isVisible(),
       )
       const srCountDraft = () => srPage.locator('textarea').count()
-      await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await srPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
       await srPage.waitForTimeout(1500)
       const srAll = await srCountDraft()
       check('SHOPRANGE-EA(既定) 週ぜんぶから下書きができる', srAll > 0, `rows=${srAll}`)
-      // 絞っていないときは範囲の1行にも「この週ぜんぶ」に当たる日付範囲が出る
+      // 絞っていないときは範囲の1行にも「表示している週ぜんぶ」に当たる日付範囲が出る
       const srAllRange = (await srPage.getByTestId('candidate-range').textContent()) ?? ''
       check(
         'SHOPRANGE-EA(既定) 下書きに「どの範囲から作ったか」が出る',
@@ -9260,7 +9336,7 @@ try {
         `range=${srRangeText} expected=${srExpectedMd}`,
       )
 
-      // ---------- ③食事で絞る + 「この週ぜんぶに戻す」 ----------
+      // ---------- ③食事で絞る + 「表示している週ぜんぶに戻す」 ----------
       await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await srPage.waitForTimeout(1200)
       await srPage.getByRole('button', { name: '週', exact: true }).click()
@@ -9296,13 +9372,13 @@ try {
       await srPage.waitForTimeout(300)
       await srPage.getByTestId('shop-range-slot').nth(0).click()
       await srPage.waitForTimeout(200)
-      await srPage.getByRole('button', { name: 'この週ぜんぶに戻す' }).click()
+      await srPage.getByRole('button', { name: '表示している週ぜんぶに戻す' }).click()
       await srPage.waitForTimeout(300)
       check(
-        'SHOPRANGE-EA(絞る) 「この週ぜんぶに戻す」で既定へ戻る',
+        'SHOPRANGE-EA(絞る) 「表示している週ぜんぶに戻す」で既定へ戻る',
         ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
-          'この週ぜんぶ',
-        ) && (await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).isVisible()),
+          '表示している週ぜんぶ',
+        ) && (await srPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).isVisible()),
       )
     } finally {
       await srBrowser.close()
@@ -9361,7 +9437,7 @@ try {
         const text = (await hhPage.textContent('body')) ?? ''
         return {
           yen: Number((text.match(/約([\d,]+)円/)?.[1] ?? '0').replace(/,/g, '')),
-          note: text.match(/この週に作る食数ぶん（合計(\d+)人分）の金額です/)?.[1],
+          note: text.match(/作る食数ぶん（合計(\d+)人分）の金額です/)?.[1],
         }
       }
       const hhCostBefore = await hhOpenCost()
@@ -9379,7 +9455,7 @@ try {
             .filter((v) => v && /[0-9]/.test(v)),
         )
       }
-      await hhPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await hhPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
       await hhPage.waitForTimeout(1200)
       const hhAmountsBefore = await hhReadAmounts()
       check(
@@ -9443,7 +9519,7 @@ try {
         hhCostAfter.note === '4' && hhCostAfter.yen === hhCostBefore.yen * 2,
         `before=${JSON.stringify(hhCostBefore)} after=${JSON.stringify(hhCostAfter)}`,
       )
-      await hhPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await hhPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
       await hhPage.waitForTimeout(1200)
       const hhAmountsAfter = await hhReadAmounts()
       const hhAmountNum = (v) => {
@@ -13502,7 +13578,7 @@ try {
   // 等でのiPhone実機テストが該当。docs/22)でも、純JSのSHA-256フォールバック(src/logic/sha256.ts)
   // でPro解錠コード検証が最後まで動くことを確認する(2026-07-13)。crypto.subtleの有無自体は
   // オリジンがhttp/httpsかで決まらずaddInitScriptで直接再現できるが、production buildの
-  // 挙動を見るため他チェックのdevサーバーとは別にpreviewサーバーを自前でport 4194に立てる ---
+  // 挙動を見るため他チェックのdevサーバーとは別にpreviewサーバーを自前で立てる(ポートは空きを取る) ---
   currentCheck = 'PRO-FALLBACK-01'
   {
     const distIndex = path.join(appRoot, 'dist', 'index.html')
@@ -13511,30 +13587,14 @@ try {
       execSync('npx vite build', { cwd: appRoot, stdio: 'inherit' })
     }
 
-    const PREVIEW_PORT = 4194
-    const PREVIEW_BASE = `http://localhost:${PREVIEW_PORT}`
-    const previewProc = spawn(
-      'npx',
-      ['vite', 'preview', '--port', String(PREVIEW_PORT), '--strictPort'],
-      { cwd: appRoot, stdio: ['ignore', 'pipe', 'pipe'] },
-    )
-    let previewReady = false
-    let previewOutput = ''
-    previewProc.stdout.on('data', (buf) => {
-      previewOutput += buf.toString()
-      if (previewOutput.includes('Local:')) previewReady = true
+    // ポートは空きを取る(2026-08-09 便EM。旧: 4194固定。並行して走る別のe2eと衝突して
+    // 偽の失敗になっていた)。E2E_PREVIEW_PORT で明示指定もできる
+    const { proc: previewProc, base: PREVIEW_BASE } = await startPreviewServer({
+      envName: 'E2E_PREVIEW_PORT',
+      label: 'PRO-FALLBACK-01',
     })
-    previewProc.stderr.on('data', (buf) => (previewOutput += buf.toString()))
 
     try {
-      const start = Date.now()
-      while (!previewReady && Date.now() - start < 15000) {
-        await new Promise((resolve) => setTimeout(resolve, 200))
-      }
-      if (!previewReady) {
-        throw new Error(`previewサーバーが起動しなかった: ${previewOutput}`)
-      }
-
       const fbBrowser = await chromium.launch()
       try {
         const fbContext = await fbBrowser.newContext()
@@ -14473,9 +14533,9 @@ try {
   // (成功/no_recipe/fetch_failed)を、実際のCloudflare Workerを立てずに検証する。
   // VITE_RECIPE_IMPORT_ENDPOINT を(実在しない.invalidドメインの)ダミー値で焼き込んでビルドし、
   // page.route()でその宛先へのfetchだけをブラウザ内で横取りしてWorkerの応答を模す(実ネットワークには
-  // 出ない)。他チェックが使うBASE(通常5173。オーナー検証時等はport 4202を使うこともある)・
-  // PRO-FALLBACK-01が使うport 4194とは別に、自前previewサーバーをport 4203に立てる
-  // (CLAUDE.md運用ルール: 自分が起動したPIDのみkill・4190には触れない) ---
+  // 出ない)。他チェックが使うBASE・PRO-FALLBACK-01のpreviewとは別に、自前previewサーバーを
+  // もう1つ立てる(ポートは空きをその場で取る。2026-08-09 便EM)
+  // (CLAUDE.md運用ルール: 自分が起動したPIDのみkill・オーナーのdevサーバー(5173)には触れない) ---
   currentCheck = 'URLIMPORT-01'
   {
     const MOCK_ENDPOINT = 'https://recipe-import.example.invalid/api'
@@ -14489,30 +14549,14 @@ try {
       env: { ...process.env, VITE_RECIPE_IMPORT_ENDPOINT: MOCK_ENDPOINT },
     })
 
-    const URLIMPORT_PREVIEW_PORT = 4203
-    const URLIMPORT_PREVIEW_BASE = `http://localhost:${URLIMPORT_PREVIEW_PORT}`
-    const urlImportPreviewProc = spawn(
-      'npx',
-      ['vite', 'preview', '--port', String(URLIMPORT_PREVIEW_PORT), '--strictPort', '--outDir', URLIMPORT_OUT_DIR],
-      { cwd: appRoot, stdio: ['ignore', 'pipe', 'pipe'] },
-    )
-    let uiPreviewReady = false
-    let uiPreviewOutput = ''
-    urlImportPreviewProc.stdout.on('data', (buf) => {
-      uiPreviewOutput += buf.toString()
-      if (uiPreviewOutput.includes('Local:')) uiPreviewReady = true
+    // ポートは空きを取る(2026-08-09 便EM。旧: 4203固定)。E2E_URLIMPORT_PREVIEW_PORT で明示指定も可
+    const { proc: urlImportPreviewProc, base: URLIMPORT_PREVIEW_BASE } = await startPreviewServer({
+      envName: 'E2E_URLIMPORT_PREVIEW_PORT',
+      label: 'URLIMPORT-01',
+      extraArgs: ['--outDir', URLIMPORT_OUT_DIR],
     })
-    urlImportPreviewProc.stderr.on('data', (buf) => (uiPreviewOutput += buf.toString()))
 
     try {
-      const start = Date.now()
-      while (!uiPreviewReady && Date.now() - start < 15000) {
-        await new Promise((resolve) => setTimeout(resolve, 200))
-      }
-      if (!uiPreviewReady) {
-        throw new Error(`URLIMPORT用previewサーバーが起動しなかった: ${uiPreviewOutput}`)
-      }
-
       const uiBrowser = await chromium.launch()
       try {
         const uiContext = await uiBrowser.newContext()
