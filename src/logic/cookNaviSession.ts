@@ -15,6 +15,8 @@
  * 他のタブへ移動しても、レシピを見に行っても残る。
  */
 
+import type { CookCursor } from './cookSession'
+
 export const COOK_NAVI_SESSION_KEY = 'uchi-recipe-cook-navi-session'
 
 export interface CookNaviSession {
@@ -27,6 +29,24 @@ export interface CookNaviSession {
    * これを覚えていないと、他のタブへ行って戻るたびにお試しの回数を1回ずつ失う。
    */
   trialActive: boolean
+  /**
+   * 調理中の手順（2026-08-09 便EL・docs/69）。全画面の調理中セッションを開いている間だけ入る。
+   *
+   * **書き込める調理の状態はこの1つだけ**にする。進み具合（済んだ手順の一覧）も、
+   * 各品の次の手順も、段取りそのものも保存しない＝すべてこの1点から導く。
+   * 覚えた手順が組み直した段取りに見つからないときは、推測せずカーソルを捨てて
+   * 段取りの一覧表示に戻す（logic/cookSession.ts の resolveCursor）。
+   */
+  current?: CookCursor
+}
+
+/** 保存された値がカーソルの形をしているか（stepIndex はナビが足した工程で負になる） */
+function parseCursor(value: unknown): CookCursor | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const { recipeId, stepIndex } = value as Partial<CookCursor>
+  if (typeof recipeId !== 'number' || !Number.isFinite(recipeId)) return undefined
+  if (typeof stepIndex !== 'number' || !Number.isFinite(stepIndex)) return undefined
+  return { recipeId, stepIndex }
 }
 
 /** 保存された文字列を読む（形が違う・壊れているときは undefined＝覚えていない扱い） */
@@ -39,10 +59,14 @@ export function parseCookNaviSession(raw: string | null): CookNaviSession | unde
       (id): id is number => typeof id === 'number' && Number.isFinite(id),
     )
     if (selectedIds.length === 0) return undefined
+    const current = parseCursor(data.current)
+    // 段取りを表示していない状態で調理中の手順だけが残ることはない（不整合は捨てる）
+    const showTimeline = data.showTimeline === true
     return {
       selectedIds,
-      showTimeline: data.showTimeline === true,
+      showTimeline,
       trialActive: data.trialActive === true,
+      ...(showTimeline && current ? { current } : {}),
     }
   } catch {
     return undefined
@@ -68,6 +92,26 @@ export function reconcileSelectedIds(
 ): number[] {
   const available = new Set(availableIds)
   return selectedIds.filter((id) => available.has(id))
+}
+
+/**
+ * 調理中（全画面のセッションを開いている間）は、**記録を段取りへ逆流させない**
+ * （2026-08-09 便EL・docs/69「記録は一方通行」）。
+ *
+ * 実行中の段取りの母集合は `selectedIds` だけと決める。調理の最中に献立タブや別の端末操作で
+ * 1品に「作った！」が付くと、その品は候補一覧（今日の献立から今日作った品を除いたもの）から
+ * 消える。ここで選択まで落とすと、**作りかけの段取りが目の前で組み替わる**
+ * ＝2026-08-09 に実発した重大バグと同じ壊れ方になる。
+ *
+ * 調理を終える（カーソルを捨てる）と、次に整合を取るときに従来どおり落ちる。
+ */
+export function reconcileSelectedIdsForSession(
+  selectedIds: readonly number[],
+  availableIds: readonly number[],
+  cookingInProgress: boolean,
+): number[] {
+  if (cookingInProgress) return [...selectedIds]
+  return reconcileSelectedIds(selectedIds, availableIds)
 }
 
 /** 段取りを組める品数（これ未満になったら段取りは出せない） */
