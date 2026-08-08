@@ -14,7 +14,7 @@ import {
   HelpCircle,
 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
-import { useSettings } from '../db/settings'
+import { updateSettings, useSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
 import { pantryHaveNames, pantryAvailableNames } from '../logic/pantry'
 import {
@@ -33,6 +33,7 @@ import {
   resolveShoppingSources,
   parseRecipeIdsParam,
   parseServingsParam,
+  splitCheckedShoppingItems,
   type ShoppingCandidate,
   type ShoppingSourceResult,
 } from '../logic/shopping'
@@ -395,10 +396,25 @@ export default function ShoppingPage() {
     [shoppingItems, aisleOrder],
   )
   // まとめてチェック・買い物完了など「メモ全体」を見る処理用の平らな並び。
-  // ブロックを順につないだもの＝画面に見えている並びそのもの(従来の sortShoppingByAisle と同じ)
+  // ブロックを順につないだもの＝従来の sortShoppingByAisle と同じ
   const memoItems = useMemo(() => memoGroups.flatMap((group) => group.items), [memoGroups])
   // まとめてチェック/解除(2026-07-23 #6)
   const allChecked = memoItems.length > 0 && memoItems.every((i) => i.isChecked)
+  /**
+   * チェックした食材を下にまとめるスイッチ(2026-08-08 オーナー実機フィードバック)。
+   * 既定はOFF＝従来どおり売り場ブロックの中に残る。ONのときだけ、売り場ブロックには
+   * 未チェックだけを残し、チェック済みを下の1ブロックに集める。
+   * 表示の切り替えだけなので、買い物メモ全体を見る処理(まとめてチェック・買い物完了)は
+   * 上の memoItems をそのまま使い、スイッチの状態に左右されない。
+   */
+  const checkedAtBottom = !!settings?.shoppingCheckedAtBottom
+  const memoView = useMemo(
+    () =>
+      checkedAtBottom
+        ? splitCheckedShoppingItems(memoGroups)
+        : { groups: memoGroups, checked: [] as ShoppingItem[] },
+    [checkedAtBottom, memoGroups],
+  )
 
   // 買い物完了(2026-07-23 #7: 下部インラインパネル→作った!と同じ中央モーダルに変更)
   const [completeOpen, setCompleteOpen] = useState(false)
@@ -446,6 +462,58 @@ export default function ShoppingPage() {
 
   // 買い物候補の説明文の折りたたみ(2026-07-16 UI総点検B-5)。既定は閉
   const [showCandidateDescription, setShowCandidateDescription] = useState(false)
+
+  /**
+   * 買い物メモの1行（2026-08-08 オーナー実機フィードバック⑤で売り場ブロックと
+   * 「チェック済み」ブロックの2か所から描くようになったので、1か所にまとめた）。
+   * 見た目・操作は従来のまま＝チェックの丸・食材名(出所の小窓)・✕の削除の3つ。
+   */
+  const renderMemoRow = (item: ShoppingItem) => (
+    <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
+      <button
+        type="button"
+        onClick={() => void toggleShoppingChecked(item.id!)}
+        aria-pressed={item.isChecked}
+        aria-label={ja.shopping.toggleCheck}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+          item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
+        }`}
+      >
+        <CheckCircle2 size={18} aria-hidden />
+      </button>
+      {/* 食材名タップで出所の小窓(2026-08-08 オーナー実機フィードバック②)。
+          チェックの丸と✕は別ボタンのままなので、消し込みの操作は変わらない */}
+      <button
+        type="button"
+        onClick={() =>
+          openSourcePopup('memo', {
+            name: item.name,
+            sources: item.fromRecipes,
+            recipeIds: item.fromRecipeIds,
+            manualAdded: item.manualAdded,
+          })
+        }
+        aria-label={`${item.name} ${ja.shopping.memoSourceOpen}`}
+        className={`min-w-0 flex-1 px-2 py-1 text-left ${
+          item.isChecked ? 'text-ink-muted line-through' : ''
+        }`}
+      >
+        <span className="font-bold underline decoration-dotted decoration-ink-muted/40 underline-offset-4">
+          {item.name}
+        </span>
+        {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
+      </button>
+      {/* 料理中・買い物中に片手で触るので44px確保(2026-07-29 便CC/C19。旧34px) */}
+      <button
+        type="button"
+        onClick={() => void removeMemoItem(item)}
+        aria-label={ja.shopping.remove}
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
+      >
+        <X size={18} aria-hidden />
+      </button>
+    </li>
+  )
 
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
@@ -525,11 +593,36 @@ export default function ShoppingPage() {
                   {allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}
                 </button>
               </div>
+              {/* チェックした食材を下にまとめるスイッチ(2026-08-08 オーナー実機フィードバック)。
+                  既定はOFF。設定に保存するので、次に買い物メモを開いたときも同じ見え方になる */}
+              <label className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
+                <span className="min-w-0 text-sm text-ink-muted">
+                  {ja.shopping.checkedAtBottomLabel}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={checkedAtBottom}
+                  aria-label={ja.shopping.checkedAtBottomLabel}
+                  onClick={() =>
+                    void updateSettings({ shoppingCheckedAtBottom: !checkedAtBottom })
+                  }
+                  className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                    checkedAtBottom ? 'bg-accent' : 'bg-edge'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                      checkedAtBottom ? 'left-7' : 'left-1'
+                    }`}
+                  />
+                </button>
+              </label>
               {/* 並び順は売り場順の自動整列に一本化したため、手動の上下矢印UIは廃止(2026-07-24 実機FB #11・#12)。
                   2026-08-08 オーナー実機フィードバック①: 一列の羅列をやめ、売り場ごとの見出し(件数つき)で
                   ブロックに分ける。並び自体は従来と同じで、区切りを入れただけ */}
               <div className="mt-[var(--space-sm)] space-y-[var(--space-md)]">
-                {memoGroups.map((group) => (
+                {memoView.groups.map((group) => (
                   <div key={group.key}>
                     <h3 className="flex items-baseline justify-between gap-2 px-1 text-sm font-bold text-ink-muted">
                       <span className="min-w-0 truncate">{ja.pantry.group[group.key]}</span>
@@ -538,55 +631,29 @@ export default function ShoppingPage() {
                       </span>
                     </h3>
                     <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
-                      {group.items.map((item) => (
-                        <li key={item.id} className="flex items-center gap-1 px-[var(--space-sm)] py-2">
-                          <button
-                            type="button"
-                            onClick={() => void toggleShoppingChecked(item.id!)}
-                            aria-pressed={item.isChecked}
-                            aria-label={ja.shopping.toggleCheck}
-                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
-                              item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
-                            }`}
-                          >
-                            <CheckCircle2 size={18} aria-hidden />
-                          </button>
-                          {/* 食材名タップで出所の小窓(2026-08-08 オーナー実機フィードバック②)。
-                              チェックの丸と✕は別ボタンのままなので、消し込みの操作は変わらない */}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openSourcePopup('memo', {
-                                name: item.name,
-                                sources: item.fromRecipes,
-                                recipeIds: item.fromRecipeIds,
-                                manualAdded: item.manualAdded,
-                              })
-                            }
-                            aria-label={`${item.name} ${ja.shopping.memoSourceOpen}`}
-                            className={`min-w-0 flex-1 px-2 py-1 text-left ${
-                              item.isChecked ? 'text-ink-muted line-through' : ''
-                            }`}
-                          >
-                            <span className="font-bold underline decoration-dotted decoration-ink-muted/40 underline-offset-4">
-                              {item.name}
-                            </span>
-                            {item.amount && <span className="ml-2 text-sm">{item.amount}</span>}
-                          </button>
-                          {/* 料理中・買い物中に片手で触るので44px確保(2026-07-29 便CC/C19。旧34px) */}
-                          <button
-                            type="button"
-                            onClick={() => void removeMemoItem(item)}
-                            aria-label={ja.shopping.remove}
-                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
-                          >
-                            <X size={18} aria-hidden />
-                          </button>
-                        </li>
-                      ))}
+                      {group.items.map(renderMemoRow)}
                     </ul>
                   </div>
                 ))}
+                {/* スイッチONのときだけ出る、チェック済みをまとめたブロック。
+                    売り場ブロックと同じ見出し・同じ行の作りにして、消し込み(チェックの丸)も
+                    ✕の削除も同じように使えるようにする(下へ移っても操作が変わらない) */}
+                {memoView.checked.length > 0 && (
+                  <div data-testid="memo-checked-block">
+                    <h3 className="flex items-baseline justify-between gap-2 px-1 text-sm font-bold text-ink-muted">
+                      <span className="min-w-0 truncate">{ja.shopping.checkedAtBottomTitle}</span>
+                      <span className="shrink-0 tabular-nums">
+                        {ja.shopping.aisleGroupCount.replace(
+                          '{n}',
+                          String(memoView.checked.length),
+                        )}
+                      </span>
+                    </h3>
+                    <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                      {memoView.checked.map(renderMemoRow)}
+                    </ul>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -785,12 +852,21 @@ export default function ShoppingPage() {
                 <X size={20} aria-hidden />
               </button>
             </div>
-            {/* 件数を明示する(2026-07-29 便CC/C7・規約F: 何が消えて何が残るかを件数つきで) */}
-            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-              {ja.shopping.completeConfirmDescription
-                .replace(/\{n\}/g, String(checkedItems.length))
-                .replace('{m}', String(memoItems.length - checkedItems.length))}
-            </p>
+            {/* 件数を明示する(2026-07-29 便CC/C7・規約F: 何が消えて何が残るかを件数つきで)。
+                2026-08-08 オーナー実機フィードバック「『買い物終了』後の文章が読みづらい」:
+                1段落に詰めるのをやめ、ボタンごと・結果ごとに1行ずつ並べる(規約H) */}
+            <ul className="mt-[var(--space-sm)] space-y-1 text-sm text-ink-muted">
+              {ja.shopping.completeConfirmLines.map((line) => (
+                <li key={line} className="flex gap-1.5">
+                  <span aria-hidden>・</span>
+                  <span className="min-w-0">
+                    {line
+                      .replace(/\{n\}/g, String(checkedItems.length))
+                      .replace('{m}', String(memoItems.length - checkedItems.length))}
+                  </span>
+                </li>
+              ))}
+            </ul>
             <div className="mt-[var(--space-md)] flex flex-col gap-2">
               <div className="flex gap-2">
                 <button
@@ -809,7 +885,9 @@ export default function ShoppingPage() {
                 </button>
               </div>
               {/* 後回しの導線(2026-07-29 便CC/C7)。レジ前でその場の判断を強いない。
-                  チェックは残るので、帰ってから同じ手順で反映できる */}
+                  2026-08-08 オーナー実機フィードバック「あとにする＝キャンセルだから処理を
+                  しないということ？」: 押したとき何が起きるか(＝買い物メモも在庫も変わらない)と、
+                  あとで反映する手順を、押すボタンの名前で書き分ける */}
               <button
                 type="button"
                 onClick={completeLater}
@@ -817,7 +895,16 @@ export default function ShoppingPage() {
               >
                 {ja.shopping.completeLater}
               </button>
-              <p className="text-xs text-ink-muted">{ja.shopping.completeLaterNote}</p>
+              <ul className="space-y-1 text-xs text-ink-muted">
+                {ja.shopping.completeLaterLines.map((line) => (
+                  <li key={line} className="flex gap-1.5">
+                    <span aria-hidden>・</span>
+                    <span className="min-w-0">
+                      {line.replace(/\{n\}/g, String(checkedItems.length))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>

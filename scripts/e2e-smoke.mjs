@@ -17775,6 +17775,236 @@ try {
     }
   }
 
+  // --- EE-01: 買い物メモの3件(2026-08-08 オーナー実機フィードバック)。
+  //  ② ごはん→お米換算: 「牛丼」(ご飯2杯分)から下書きを作ると「米 140g」で出る
+  //  ⑤ チェックした食材を下にまとめるスイッチ: 既定OFF・ONで「チェック済み」ブロックへ移る・
+  //     設定に保存されリロードしても維持される・買い物メモから件数は減らない
+  //  ③④ 買い物完了の確認: ボタンごとに行が分かれ、「あとにする」は何も書き換えない ---
+  currentCheck = 'EE-01'
+  {
+    const eeBrowser = await chromium.launch()
+    const eeContext = await eeBrowser.newContext()
+    const eePage = await eeContext.newPage()
+    eePage.on('dialog', (dialog) => dialog.accept())
+    eePage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EE-01] ${err.message}`)
+    })
+    try {
+      await eePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eePage.waitForTimeout(1800)
+      await eePage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await eePage.waitForTimeout(400)
+      await eePage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await eePage.waitForTimeout(300)
+
+      // ② ごはん→お米換算
+      await eePage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await eePage.waitForTimeout(400)
+      await eePage.getByPlaceholder('レシピ名で絞り込み').fill('牛丼')
+      await eePage.waitForTimeout(500)
+      await eePage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await eePage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await eePage.waitForTimeout(200)
+      await eePage.getByRole('button', { name: '下書きを作る' }).click()
+      await eePage.waitForTimeout(600)
+      const eeDraft = eePage.locator('section', { hasText: '買い物メモ（下書き）' })
+      const eeDraftText = (await eeDraft.textContent()) ?? ''
+      check(
+        'EE-01(②) 下書きの食材名が「ご飯」ではなく「米」になる',
+        eeDraftText.includes('米') && !eeDraftText.includes('ご飯'),
+        `下書き=${eeDraftText.slice(0, 160)}`,
+      )
+      const eeRiceAmount = await eeDraft
+        .locator('li', { hasText: '米' })
+        .first()
+        .locator('textarea')
+        .inputValue()
+      check(
+        'EE-01(②) 生米のグラム(炊きあがり300g÷2.2→140g)で出る',
+        eeRiceAmount === '140g',
+        `分量=${eeRiceAmount}`,
+      )
+      await eePage.getByRole('button', { name: '買い物メモに追加' }).click()
+      await eePage.waitForTimeout(600)
+
+      // ⑤ チェックした食材を下にまとめるスイッチ
+      const eeSwitch = eePage.getByRole('switch', { name: 'チェックした食材を下にまとめる' })
+      check('EE-01(⑤) スイッチは既定でOFF', (await eeSwitch.getAttribute('aria-checked')) === 'false')
+      const eeMemoSection = eePage.locator('section', { hasText: '買い物メモ' }).first()
+      const eeRowCount = await eeMemoSection.locator('ul > li').count()
+      // 1件だけカゴに入れる
+      await eePage.locator('[aria-label="チェックの切り替え"]').first().click()
+      await eePage.waitForTimeout(300)
+      check(
+        'EE-01(⑤) OFFのあいだはチェック済みも売り場ブロックに残る(従来どおり)',
+        (await eePage.locator('[data-testid="memo-checked-block"]').count()) === 0,
+      )
+      await eeSwitch.click()
+      await eePage.waitForTimeout(400)
+      const eeCheckedBlock = eePage.locator('[data-testid="memo-checked-block"]')
+      check('EE-01(⑤) ONでチェック済みブロックが下に出る', (await eeCheckedBlock.count()) === 1)
+      check(
+        'EE-01(⑤) チェック済みブロックに移るだけで件数は減らない',
+        (await eeMemoSection.locator('ul > li').count()) === eeRowCount,
+        `件数=${await eeMemoSection.locator('ul > li').count()} / 元=${eeRowCount}`,
+      )
+      check(
+        'EE-01(⑤) チェック済みブロックの中身は1件',
+        (await eeCheckedBlock.locator('li').count()) === 1,
+      )
+      await eePage.reload({ waitUntil: 'networkidle' })
+      await eePage.waitForTimeout(1200)
+      await eePage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await eePage.waitForTimeout(400)
+      check(
+        'EE-01(⑤) スイッチの状態は設定に保存されリロードしても維持される',
+        (await eePage
+          .getByRole('switch', { name: 'チェックした食材を下にまとめる' })
+          .getAttribute('aria-checked')) === 'true' &&
+          (await eePage.locator('[data-testid="memo-checked-block"]').count()) === 1,
+      )
+
+      // ③④ 買い物完了の確認モーダル
+      await eePage.getByRole('button', { name: '買い物完了', exact: true }).click()
+      await eePage.waitForTimeout(400)
+      const eeDialog = eePage.getByRole('dialog', { name: '食材の在庫に反映しますか？' })
+      const eeDialogText = (await eeDialog.innerText()) ?? ''
+      check(
+        'EE-01(③) 確認は「反映する」「反映せず完了」それぞれの結果を別々の行で書く',
+        eeDialogText.includes('「反映する」を押すと') &&
+          eeDialogText.includes('「反映せず完了」を押すと'),
+        `本文=${eeDialogText.slice(0, 200)}`,
+      )
+      check(
+        'EE-01(③) 消える件数と残る件数を両方書く(規約F)',
+        /チェック済みの1件は買い物メモから消えます/.test(eeDialogText) &&
+          /未チェックの\d+件は買い物メモに残ります/.test(eeDialogText),
+      )
+      check(
+        'EE-01(④) 「あとにする」で何が起きるかと、あとで反映する手順が書いてある',
+        eeDialogText.includes('「あとにする」を押すと、買い物メモも食材の在庫も変わりません') &&
+          eeDialogText.includes('「買い物完了」を押して「反映する」を選びます'),
+        `本文=${eeDialogText.slice(-200)}`,
+      )
+      // 実挙動: 「あとにする」は買い物メモも在庫も書き換えない
+      const eePantryBefore = await eePage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const get = (name) => new Promise((res, rej) => { const r = idb.transaction(name, 'readonly').objectStore(name).getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+        const out = { pantry: (await get('pantryItems')).length, memo: (await get('shoppingItems')).length }
+        idb.close()
+        return out
+      })
+      await eePage.getByRole('button', { name: 'あとにする', exact: true }).click()
+      await eePage.waitForTimeout(600)
+      const eePantryAfter = await eePage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const get = (name) => new Promise((res, rej) => { const r = idb.transaction(name, 'readonly').objectStore(name).getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+        const items = await get('shoppingItems')
+        const out = { pantry: (await get('pantryItems')).length, memo: items.length, checked: items.filter((i) => i.isChecked).length }
+        idb.close()
+        return out
+      })
+      check(
+        'EE-01(④) 「あとにする」は買い物メモも食材の在庫も1件も書き換えない',
+        eePantryAfter.memo === eePantryBefore.memo &&
+          eePantryAfter.pantry === eePantryBefore.pantry &&
+          eePantryAfter.checked === 1,
+        `前=${JSON.stringify(eePantryBefore)} 後=${JSON.stringify(eePantryAfter)}`,
+      )
+      // トーストが自動で消えるのを待ってから押し直す(下部の固定トーストがボタンに重なるため)
+      await eePage.waitForTimeout(6500)
+      check(
+        'EE-01(④) 書いてあるとおり「買い物完了」を押し直すと同じ確認が出る',
+        await (async () => {
+          await eePage.getByRole('button', { name: '買い物完了', exact: true }).click()
+          await eePage.waitForTimeout(400)
+          return eePage.getByRole('dialog', { name: '食材の在庫に反映しますか？' }).isVisible()
+        })(),
+      )
+      await eePage.keyboard.press('Escape')
+      await eePage.waitForTimeout(200)
+
+      // ⑦ 設定のタイマー音: 音が鳴るボタンの注意書き
+      await eePage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await eePage.waitForTimeout(1500)
+      check(
+        'EE-01(⑦) 音量・鳴る長さでは鳴らず試聴で鳴る、という注意書きが出ている',
+        ((await eePage.textContent('body')) ?? '').includes(
+          '音量と鳴る長さのボタンでは音は鳴りません。「音を鳴らして確かめる」を押すと、選んでいる音量と鳴る長さで音が鳴ります',
+        ),
+      )
+
+      // ① 月タブ: 畳んだままでも数値が読める。
+      // 月タブはPro機能なので、他のブロックと同じやり方で先に解錠しておく
+      // (未解錠だと月タブはPro案内に差し替わり、食費カードそのものが存在しない)
+      await eePage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+        const cur = (await P(idb.transaction('settings', 'readonly').objectStore('settings').get(1))) || { id: 1 }
+        await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        idb.close()
+      })
+      await eePage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await eePage.reload({ waitUntil: 'networkidle' })
+      await eePage.waitForTimeout(1800)
+      await eePage.getByRole('button', { name: '月', exact: true }).first().click()
+      await eePage.waitForTimeout(1200)
+      const eeCostCardBtn = eePage.getByRole('button', { name: /月の食費/ })
+      await eeCostCardBtn.waitFor({ state: 'visible', timeout: 15000 })
+      check(
+        'EE-01(①) 月の食費カードは畳まれたまま',
+        (await eeCostCardBtn.getAttribute('aria-expanded')) === 'false',
+      )
+      // 献立も記録も無い月なので数値は出ないが、畳んだ側にも理由が書かれている
+      check(
+        'EE-01(①) 数字が無い月は、畳んだままでも理由が読める',
+        ((await eePage.textContent('body')) ?? '').includes(
+          'この月には、作った記録も登録した献立もまだありません',
+        ),
+      )
+      // 献立を1枠入れると、畳んだままでも金額が出る
+      await eePage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+        const all = await P(idb.transaction('recipes', 'readonly').objectStore('recipes').getAll())
+        const target = all.find((r) => (r.ingredients?.length ?? 0) > 3)
+        const d = new Date()
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        await P(idb.transaction('mealPlans', 'readwrite').objectStore('mealPlans').add({ date: iso, slot: 'dinner', recipeId: target.id, role: 'main' }))
+        idb.close()
+      })
+      await eePage.reload({ waitUntil: 'networkidle' })
+      await eePage.waitForTimeout(1800)
+      await eePage.getByRole('button', { name: '月', exact: true }).first().click()
+      await eePage.waitForTimeout(1200)
+      await eePage.locator('[data-testid="month-cost-folded"]').waitFor({ state: 'visible', timeout: 15000 })
+      const eeFolded = eePage.locator('[data-testid="month-cost-folded"]')
+      const eeFoldedText = (await eeFolded.count()) ? await eeFolded.innerText() : ''
+      check(
+        'EE-01(①) 畳んだままでも「1人分」の金額が読める',
+        /1人分[\s\S]*約[\d,]+円/.test(eeFoldedText),
+        `畳んだ食費=${eeFoldedText.replace(/\n/g, ' / ')}`,
+      )
+      check(
+        'EE-01(①) 畳んだ数値は、開いたときの表と同じ金額を出す',
+        await (async () => {
+          const folded = (eeFoldedText.match(/約[\d,]+円/g) ?? [])[0]
+          await eeCostCardBtn.click()
+          await eePage.waitForTimeout(500)
+          const table = (await eePage.locator('[data-testid="month-cost-table"]').innerText()) ?? ''
+          return !!folded && table.includes(folded)
+        })(),
+      )
+    } finally {
+      await eeBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

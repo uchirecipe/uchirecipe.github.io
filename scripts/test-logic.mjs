@@ -99,6 +99,9 @@ import {
   isShoppingRangeNarrowed,
   formatShoppingRangeDates,
   formatShoppingRangeLabel,
+  toRawRiceIngredient,
+  splitCheckedShoppingItems,
+  COOKED_RICE_TO_RAW_RATIO,
 } from '../src/logic/shopping.ts'
 import {
   TIMER_SOUND_VOLUMES,
@@ -3577,6 +3580,162 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('DY-1 売り場ブロック: 空の買い物メモは見出しを1つも出さない', groupShoppingByAisle([]), [])
 }
 
+// ---------- EE-2 買い物メモのごはん→お米換算(2026-08-08 オーナー実機フィードバック) ----------
+// 「ご飯はお米換算（g）にして欲しい」。レシピの材料は炊きあがりの重さで書くので、
+// 買い物メモに入る分だけ生米のグラム(炊きあがり÷2.2)に置き換える
+{
+  eq('EE-2 炊きあがり→生米の倍率は2.2倍', COOKED_RICE_TO_RAW_RATIO, 2.2)
+  // 茶碗1杯=炊きあがり150g(成分表 01088 の unitGrams) → 150÷2.2=68.2g → gの丸め(5g刻み)で70g
+  eq('EE-2 「ご飯 1杯」→「米 70g」', toRawRiceIngredient({ name: 'ご飯', amount: '1', unit: '杯' }), {
+    name: '米',
+    amount: '70',
+    unit: 'g',
+  })
+  // 2杯=300g → 136.4g → 100g以上は10g刻みで140g
+  eq('EE-2 「ご飯 2杯」→「米 140g」', toRawRiceIngredient({ name: 'ご飯', amount: '2', unit: '杯' }), {
+    name: '米',
+    amount: '140',
+    unit: 'g',
+  })
+  eq(
+    'EE-2 ひらがな「ごはん」と単位「杯分」でも換算する',
+    toRawRiceIngredient({ name: 'ごはん', amount: '2', unit: '杯分' }),
+    { name: '米', amount: '140', unit: 'g' },
+  )
+  eq(
+    'EE-2 炊きあがりをgで書いてあっても生米に戻す(300g→140g)',
+    toRawRiceIngredient({ name: 'ご飯', amount: '300', unit: 'g' }),
+    { name: '米', amount: '140', unit: 'g' },
+  )
+  // 量を数値にできない行は、買う量を作文せずそのまま出す
+  eq(
+    'EE-2 「ご飯 適量」は換算せずそのまま',
+    toRawRiceIngredient({ name: 'ご飯', amount: '適量', unit: '' }),
+    { name: 'ご飯', amount: '適量', unit: '' },
+  )
+  // 最初から生米で書いてある行・関係ない食材には触らない
+  eq('EE-2 「米 2合」はそのまま', toRawRiceIngredient({ name: '米', amount: '2', unit: '合' }), {
+    name: '米',
+    amount: '2',
+    unit: '合',
+  })
+  eq('EE-2 「玉ねぎ 1個」はそのまま', toRawRiceIngredient({ name: '玉ねぎ', amount: '1', unit: '個' }), {
+    name: '玉ねぎ',
+    amount: '1',
+    unit: '個',
+  })
+  eq(
+    'EE-2 「五目炊き込みご飯」のような料理名は換算しない',
+    toRawRiceIngredient({ name: '五目炊き込みご飯', amount: '1', unit: '個' }).name,
+    '五目炊き込みご飯',
+  )
+  // 買い物候補まで通したときの見え方(名前が「米」・分量が「140g」・調味料扱いにならない)
+  {
+    const built = buildShoppingCandidates(
+      [
+        {
+          id: 1,
+          ingredients: [
+            { name: 'ご飯', amount: '2', unit: '杯' },
+            { name: '卵', amount: '2', unit: '個' },
+          ],
+        },
+      ],
+      [],
+    )
+    eq('EE-2 買い物候補の食材名が「米」になる', built[0].name, '米')
+    eq('EE-2 買い物候補の分量が「140g」になる', built[0].amount, '140g')
+    eq('EE-2 換算した米は調味料あつかいにしない(既定でチェックが付く)', built[0].isSeasoningLike, false)
+    eq(
+      'EE-2 出所の内訳にも換算後の分量が入る',
+      built[0].sources,
+      [{ recipeId: 1, amount: '140g' }],
+    )
+  }
+  // 在庫「ある」の照合は、元の名前(ご飯)と換算後の名前(米)の両方で効く
+  {
+    const recipes = [{ id: 1, ingredients: [{ name: 'ご飯', amount: '2', unit: '杯' }] }]
+    eq('EE-2 在庫に「米」があれば候補に出さない', buildShoppingCandidates(recipes, ['米']), [])
+    eq('EE-2 在庫に「ご飯」があれば候補に出さない', buildShoppingCandidates(recipes, ['ご飯']), [])
+  }
+  // 出所の小窓: 換算後の行(米)も、この変更より前に保存された行(ご飯)も分量が読める
+  {
+    const recipeById = new Map([
+      [1, { title: '牛丼', ingredients: [{ name: 'ご飯', amount: '2', unit: '杯分' }] }],
+    ])
+    eq(
+      'EE-2 出所の小窓: 「米」の行はレシピのご飯を換算した分量を出す',
+      resolveShoppingSources({ name: '米', recipeIds: [1] }, recipeById).recipes[0].amount,
+      '140g',
+    )
+    eq(
+      'EE-2 出所の小窓: 換算前に保存された「ご飯」の行はレシピのままの分量を出す',
+      resolveShoppingSources({ name: 'ご飯', recipeIds: [1] }, recipeById).recipes[0].amount,
+      '2杯分',
+    )
+  }
+  // 同じ食材として合算される＝「ご飯」と「米」で2行に割れない
+  {
+    const built = buildShoppingCandidates(
+      [
+        { id: 1, ingredients: [{ name: 'ご飯', amount: '2', unit: '杯' }] },
+        { id: 2, ingredients: [{ name: 'ご飯', amount: '2', unit: '杯' }] },
+      ],
+      [],
+    )
+    eq('EE-2 複数レシピのごはんは「米」1行にまとまる', built.length, 1)
+    eq('EE-2 まとまった分量は合算される(140+140=280g)', built[0].amount, '280g')
+  }
+}
+
+// ---------- EE-5 チェック済みを下にまとめる(2026-08-08 オーナー実機フィードバック) ----------
+// 「スイッチで、チェックした商品をまとめてページの下方に表示し、チェックしていない食材だけが
+// 上に残るようにしたい」。既定(スイッチOFF)はこの関数を通さない＝従来どおり
+{
+  const items = [
+    { id: 1, name: 'しょうゆ' }, // 調味料
+    { id: 2, name: '豚肉', isChecked: true }, // 肉・魚介(この売り場は全部チェック済みになる)
+    { id: 3, name: '玉ねぎ' }, // 野菜・きのこ
+    { id: 4, name: 'にんじん', isChecked: true }, // 野菜・きのこ
+    { id: 5, name: '卵', isChecked: true }, // 豆腐・卵・乳(この売り場も全部チェック済み)
+  ]
+  const groups = groupShoppingByAisle(items)
+  const split = splitCheckedShoppingItems(groups)
+  eq(
+    'EE-5 上に残るのは未チェックだけ',
+    split.groups.map((g) => g.items.map((i) => i.name)),
+    [['玉ねぎ'], ['しょうゆ']],
+  )
+  eq(
+    'EE-5 中身が全部チェック済みになった売り場は見出しごと消える',
+    split.groups.map((g) => g.key),
+    ['vegetable', 'seasoning'],
+  )
+  eq(
+    'EE-5 下にまとめたチェック済みは売り場順のまま',
+    split.checked.map((i) => i.name),
+    ['にんじん', '豚肉', '卵'],
+  )
+  // 1件も落とさない＝上＋下で元の全件がそろう(買い物メモから食材が消えたように見せない)
+  eq(
+    'EE-5 上と下を合わせると元の全件がそろう',
+    [...split.groups.flatMap((g) => g.items), ...split.checked].map((i) => i.id).sort(),
+    [1, 2, 3, 4, 5],
+  )
+  // 全部チェック済み/1件もチェックしていないときの端
+  eq(
+    'EE-5 全部チェック済みなら上の売り場ブロックは1つも残らない',
+    splitCheckedShoppingItems(groupShoppingByAisle([{ id: 1, name: '卵', isChecked: true }])).groups,
+    [],
+  )
+  eq(
+    'EE-5 1件もチェックしていなければ売り場ブロックは元のまま',
+    splitCheckedShoppingItems(groupShoppingByAisle([{ id: 1, name: '卵' }])).groups.map((g) => g.key),
+    ['soyEgg'],
+  )
+  eq('EE-5 空の買い物メモでも壊れない', splitCheckedShoppingItems([]), { groups: [], checked: [] })
+}
+
 // ---------- DY-2 買い物メモの出所(2026-08-08 オーナー実機フィードバック②) ----------
 // 「食材をタップしたら、どのレシピから登録したのか確認できるように小窓出して欲しい」。
 // 実装確認の結果、行が持っていたのは fromRecipeIds(レシピIDの並び)だけで分量は持っていなかった。
@@ -3685,6 +3844,72 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     timerSoundGain('とんでもない値'),
     timerSoundBeepCount('とんでもない値'),
   ], [0.4, 3])
+}
+
+// ---------- EE-7 タイマー音の注意書き(2026-08-08 オーナー実機フィードバック) ----------
+// 「音量と長さのボタン押下では音を鳴らさず、『音を鳴らして〜』ボタン押下ではじめて音が
+// 鳴るようにする」「ボタン押下で音が鳴る注意書きがない」。
+// どのボタンで鳴るかを言い切っているかを機械検査して、書き換えで曖昧に戻るのを止める
+{
+  eq(
+    'EE-7 注意書きが「音量と鳴る長さのボタンでは鳴らない」と言っている',
+    ja.settings.timerSoundPreviewNote.includes('音量と鳴る長さのボタンでは音は鳴りません'),
+    true,
+  )
+  eq(
+    'EE-7 注意書きが音の鳴るボタンを名前で挙げている',
+    ja.settings.timerSoundPreviewNote.includes(ja.settings.timerSoundPreview),
+    true,
+  )
+  // 規約H: 説明文で「ここ」「これ」等の指示語で場所を示さない
+  eq(
+    'EE-7 注意書きに指示語が入っていない',
+    /ここ|これ|それ|そこ|あちら/.test(ja.settings.timerSoundPreviewNote),
+    false,
+  )
+}
+
+// ---------- EE-3/EE-4 買い物完了の確認文(2026-08-08 オーナー実機フィードバック) ----------
+// ③「『買い物終了』後の文章が読みづらい」→内容ごとに改行。
+// ④「あとにする＝キャンセルだから処理をしないということ？」→実装(何も書き換えない)を
+//   そのまま書き、あとで反映する手順を押すボタンの名前で示す
+{
+  eq('EE-3 買い物完了の確認は4行に分かれている', ja.shopping.completeConfirmLines.length, 4)
+  // 規約F: 何が消えて何が残るかを件数つきで両方書く
+  eq(
+    'EE-3 消える件数({n})と残る件数({m})を両方書いている',
+    [
+      ja.shopping.completeConfirmLines.some((l) => l.includes('{n}') && l.includes('消えます')),
+      ja.shopping.completeConfirmLines.some((l) => l.includes('{m}') && l.includes('残ります')),
+    ],
+    [true, true],
+  )
+  // 2つのボタンが何をするかを、どちらも名前で書いている
+  for (const label of [ja.shopping.completeYes, ja.shopping.completeNo]) {
+    eq(
+      `EE-3 確認文が「${label}」を押したときの結果を書いている`,
+      ja.shopping.completeConfirmLines.some((l) => l.includes(`「${label}」を押すと`)),
+      true,
+    )
+  }
+  eq(
+    'EE-4 「あとにする」を押すと何も変わらないと書いている',
+    ja.shopping.completeLaterLines[0].includes(`「${ja.shopping.completeLater}」を押すと`) &&
+      ja.shopping.completeLaterLines[0].includes('変わりません'),
+    true,
+  )
+  eq(
+    'EE-4 あとで反映する手順を、押すボタンの名前で書いている',
+    ja.shopping.completeLaterLines.some(
+      (l) => l.includes(`「${ja.shopping.complete}」`) && l.includes(`「${ja.shopping.completeYes}」`),
+    ),
+    true,
+  )
+  eq(
+    'EE-4 手順の説明に指示語が入っていない',
+    ja.shopping.completeLaterLines.some((l) => /ここ|これ|それ|そこ|あちら/.test(l)),
+    false,
+  )
 }
 
 // ---------- selectPantryDowngrades(2026-07-23 オーナー実機FB #11「作った!」の在庫反映) ----------

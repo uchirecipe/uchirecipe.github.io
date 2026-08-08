@@ -926,6 +926,41 @@ function MonthCardHeader({
 }
 
 /**
+ * 畳んだ月カード（食費・栄養）に出す数値の並び（2026-08-08 オーナー実機フィードバック
+ * 「◯月の食費、栄養の折りたたみ状態で、それぞれ食費全部の数値と1ヶ月分の栄養（一人分）を
+ * 表示して」）。
+ *
+ * カードを開かなくても数値が読めることが目的なので、出すのは「行の名前＋数値」だけにする。
+ * 数え方の但し書き・内訳・出典は開いたときのまま（畳んだ側に長文を持ち込むと畳む意味が
+ * 無くなる。規約H）。
+ *
+ * 体裁は開いたときの栄養パネルと同じ2列で、名前を値の上に置く。390px幅では
+ * 「1日あたりの平均 約1,234円」を1行に並べると名前が途中で折れるため、横並びにはしない。
+ */
+function MonthFoldedFigures({
+  testId,
+  items,
+}: {
+  testId: string
+  items: { label: string; value: string }[]
+}) {
+  if (items.length === 0) return null
+  return (
+    <dl
+      data-testid={testId}
+      className="mt-[var(--space-sm)] grid grid-cols-2 gap-x-3 gap-y-[var(--space-sm)]"
+    >
+      {items.map(({ label, value }) => (
+        <div key={label} className="min-w-0">
+          <dt className="truncate text-xs text-ink-muted">{label}</dt>
+          <dd className="text-sm font-bold text-accent-ink tabular-nums">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/**
  * 食費の折りたたみの中身（2026-08-03 便DR）。表の「1人分」を実績ぶんと予定ぶんに割った内訳と、
  * この金額に何が入っていないか（価格が分からない材料）の注記。月タブと期間カードで共用する。
  */
@@ -5341,6 +5376,50 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 open={monthCostCardOpen}
                 onToggle={() => setMonthCostCardOpen((v) => !v)}
               />
+              {/* 畳んでいるときも金額は全部読めるようにする(2026-08-08 オーナー実機フィードバック)。
+                  出す金額は開いたときの表とまったく同じ値で、数え方の但し書き・内訳だけを
+                  開いたときに回す */}
+              {!monthCostCardOpen &&
+                (monthSummaryDishCount === 0 ? (
+                  <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthSummaryEmpty}</p>
+                ) : (
+                  <MonthFoldedFigures
+                    testId="month-cost-folded"
+                    items={[
+                      {
+                        label: ja.mealPlan.intakeCostRowPersonal,
+                        yen: monthSummary.personalYen,
+                      },
+                      ...(monthSummary.cookedMealCount > 0
+                        ? [
+                            {
+                              label: ja.mealPlan.intakeCostRowHousehold,
+                              yen: monthSummary.cookedHouseholdYen,
+                            },
+                            {
+                              label: ja.mealPlan.intakeCostRowPerDay,
+                              yen: monthSummary.cookedPerDayYen,
+                            },
+                          ]
+                        : []),
+                      ...(monthSummary.planMealCount > 0
+                        ? [
+                            {
+                              label: ja.mealPlan.monthFoldedPlanHousehold,
+                              yen: monthSummary.planHouseholdYen,
+                            },
+                            {
+                              label: ja.mealPlan.monthFoldedPlanPersonal,
+                              yen: monthSummary.plan.personalYen,
+                            },
+                          ]
+                        : []),
+                    ].map(({ label, yen }) => ({
+                      label,
+                      value: ja.mealPlan.intakeCostYen.replace('{n}', yen.toLocaleString()),
+                    }))}
+                  />
+                ))}
               {monthCostCardOpen &&
                 (monthSummaryDishCount === 0 ? (
                 // 2026-08-08 便EA: 今日の作った記録も合計に入るようになったので、
@@ -5459,6 +5538,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     open={monthNutritionCardOpen}
                     onToggle={() => setMonthNutritionCardOpen((v) => !v)}
                   />
+                  {/* 畳んでいるときも1か月ぶんの栄養（1人分・8項目）を読めるようにする
+                      (2026-08-08 オーナー実機フィードバック)。値は開いたときの栄養パネルと同じ。
+                      計算できた品数・除いた品数の注記と「答え合わせ」は開いたときに回す */}
+                  {!monthNutritionCardOpen && monthSummary.nutrition.dishCount > 0 && (
+                    <MonthFoldedFigures
+                      testId="month-nutrition-folded"
+                      items={PERIOD_NUTRIENT_ROWS.map(({ key, label }) => ({
+                        label,
+                        value: formatNutrient(key, monthSummary.nutrition.total[key]),
+                      }))}
+                    />
+                  )}
                   {monthNutritionCardOpen && (
                   <>
                   {monthSummary.nutrition.dishCount > 0 && (

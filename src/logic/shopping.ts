@@ -9,6 +9,7 @@ import {
 } from './amount'
 import { categorizePantryName, normalizeAisleOrder } from './pantryGroups'
 import { shiftDate } from './mealPlan'
+import { convertToGrams, matchNutritionFood } from './nutrition'
 import { ja } from '../i18n/ja'
 import type { Ingredient, MealSlot, PantryGroupKey, ShoppingItemSource } from '../db/types'
 
@@ -60,6 +61,92 @@ export function groupShoppingByAisle<T extends { name: string }>(
   return normalizeAisleOrder(order)
     .filter((key) => buckets.has(key))
     .map((key) => ({ key, items: buckets.get(key)! }))
+}
+
+/* ============================================================
+   炊いたごはん → 生米のグラム換算（2026-08-08 オーナー実機フィードバック）
+
+   オーナー原文: 「ご飯はお米換算（g）にして欲しい」
+
+   レシピの材料欄は「ご飯 2杯」のように**炊きあがった重さ**で書く。そのまま買い物メモへ
+   出すと店で買えない（売っているのは生米）ので、買い物メモに入る分だけ生米のグラムへ
+   置き換える。レシピ本体・栄養計算・食費計算は炊きあがりのまま（そちらは食べる量の話）。
+   ============================================================ */
+
+/**
+ * 炊きあがりの重さを生米の重さに戻すときの倍率。
+ *
+ * 【根拠】精白米は炊飯で水を吸い、重さが約2.2倍になる。日本食品標準成分表2020年版（八訂）の
+ * 「こめ ［水稲穀粒］ 精白米」（01083）と「こめ ［水稲めし］ 精白米」（01088）が同じ関係で、
+ * 1合＝生米150g → 炊きあがり約330g（150×2.2）、茶碗1杯＝炊きあがり150g → 生米約68g。
+ * どちらの数字も logic/nutritionData.ts の unitGrams（米「合」＝150g／ご飯「杯」＝150g）と
+ * 突き合わせて検算できる。倍率だけがこの1か所にあり、量そのものは成分表から機械的に引く。
+ */
+export const COOKED_RICE_TO_RAW_RATIO = 2.2
+
+/** 成分表の「ご飯」（炊いたもの）。この食品に名寄せできた材料だけを生米に置き換える */
+const COOKED_RICE_FOOD_ID = '01088'
+
+/** 置き換え後の食材名。成分表の「米」（01083）のラベルと同じ語にして、在庫・価格とも噛み合わせる */
+const RAW_RICE_NAME = '米'
+
+/**
+ * 材料1行が「炊いたごはん」なら、生米のグラム表記（例:「米 70g」）に置き換える。
+ *
+ * 置き換えるのは、成分表で「ご飯」に名寄せでき、かつ量をグラムに換算できた行だけ。
+ * 「ご飯 適量」のように量を数値にできない行は、勝手な量を作らず**そのまま返す**
+ * （買う量を推測して書くより、レシピに書いてあるとおり出す方を採る）。
+ * 「米 2合」のように最初から生米で書いてある行は名寄せ先が別の食品なので触らない。
+ *
+ * 丸めは他の材料と同じ formatScaledAmount（gは10g刻み・100g未満は5g刻み）に任せる。
+ * 例: 2杯＝炊きあがり300g → 300÷2.2＝136.4g → 「米 140g」。
+ * 食数スケールは、この丸めた後のグラム数に掛かる（合算する combineAmounts の規則）ので、
+ * 何食分かを増やすと丸め1段ぶん（5g・10g）だけ多めに出ることがある。買う量なので多い側に
+ * 寄せる方を採り、店頭で読める丸い数字を優先した。
+ */
+export function toRawRiceIngredient(ing: Ingredient): Ingredient {
+  const food = matchNutritionFood(ing.name.trim())
+  if (!food || food.id !== COOKED_RICE_FOOD_ID) return ing
+  const calc = resolveCalcAmount(ing.amount, ing.unit)
+  const value = calc ? calc.value : parseAmountNumber(ing.amount)
+  const unit = calc ? calc.unit : ing.unit
+  if (value == null || !(value > 0)) return ing
+  const cookedGrams = convertToGrams(value, unit, food)
+  if (cookedGrams == null || !(cookedGrams > 0)) return ing
+  return {
+    ...ing,
+    name: RAW_RICE_NAME,
+    amount: formatScaledAmount(cookedGrams / COOKED_RICE_TO_RAW_RATIO, 'g'),
+    unit: 'g',
+  }
+}
+
+/**
+ * チェック済みの行を売り場ブロックから抜き出し、下にまとめるために切り分ける
+ * （2026-08-08 オーナー実機フィードバック
+ * 「買い物メモが多いと、カゴに入れた（チェックしてオレンジになった）食材の表示は邪魔になるので
+ * 消したい。→スイッチで、チェックした商品をまとめてページの下方に表示し、
+ * チェックしていない食材だけが上に残るようにしたい」）。
+ *
+ * 既定（スイッチOFF）ではこの関数を通さない＝従来どおりチェック済みも売り場ブロックに残る。
+ * 抜き出したチェック済みは、抜き出す前の並び（売り場順→ブロック内の並び）をそのまま保つので、
+ * groupShoppingByAisle の結果を平らにした並びの部分列になる。
+ * 中身が全部チェック済みになった売り場は返さない（食材が1つも無い見出しを画面に出さないため）。
+ */
+export function splitCheckedShoppingItems<T extends { isChecked?: boolean }>(
+  groups: readonly { key: PantryGroupKey; items: T[] }[],
+): { groups: { key: PantryGroupKey; items: T[] }[]; checked: T[] } {
+  const checked: T[] = []
+  const rest: { key: PantryGroupKey; items: T[] }[] = []
+  for (const group of groups) {
+    const remaining: T[] = []
+    for (const item of group.items) {
+      if (item.isChecked) checked.push(item)
+      else remaining.push(item)
+    }
+    if (remaining.length > 0) rest.push({ key: group.key, items: remaining })
+  }
+  return { groups: rest, checked }
 }
 
 export interface ShoppingCandidate {
@@ -373,11 +460,17 @@ export function buildShoppingCandidates(
 
   for (const recipe of recipes) {
     const scale = recipe.scale && recipe.scale > 0 ? recipe.scale : 1
-    for (const ing of recipe.ingredients) {
+    for (const raw of recipe.ingredients) {
+      const rawName = raw.name.trim()
+      if (!rawName) continue
+      if (haveKeys.has(toPantryKey(rawName))) continue // 在庫「ある」は候補に出さない
+      // 炊いたごはんは、店で買える形＝生米のグラムに置き換えてから集計する
+      // （2026-08-08 オーナー実機フィードバック。該当しない材料はそのまま返る）
+      const ing = toRawRiceIngredient(raw)
       const trimmedName = ing.name.trim()
-      if (!trimmedName) continue
       const key = toPantryKey(trimmedName)
-      if (haveKeys.has(key)) continue // 在庫「ある」は候補に出さない
+      // 置き換え後の名前（米）で在庫「ある」にしてある場合も候補に出さない
+      if (haveKeys.has(key)) continue
 
       let entry = map.get(key)
       if (!entry) {
@@ -468,9 +561,16 @@ export function resolveShoppingSources(
   return { recipes, manual: item.manualAdded === true || raw.length === 0, missing }
 }
 
-/** レシピの材料欄から、その食材の分量を読む（同名が複数行あれば合算する。無ければ空文字） */
+/**
+ * レシピの材料欄から、その食材の分量を読む（同名が複数行あれば合算する。無ければ空文字）。
+ * 買い物メモ側の行は炊いたごはんを「米」に置き換えてあるので、照合するレシピの材料も
+ * 同じ置き換えを通してから名前を合わせる（2026-08-08 オーナー実機フィードバック）。
+ * 置き換える前の名前で一致する行（この変更より前に「ご飯」で保存された買い物メモ）は、
+ * 置き換えずレシピに書いてあるままの分量を出す＝行の見た目と小窓の中身が食い違わない。
+ */
 function ingredientAmountInRecipe(ingredients: Ingredient[], pantryKey: string): string {
   const parts = ingredients
+    .map((ing) => (toPantryKey(ing.name.trim()) === pantryKey ? ing : toRawRiceIngredient(ing)))
     .filter((ing) => toPantryKey(ing.name.trim()) === pantryKey)
     .map((ing) => ({ amount: ing.amount, unit: ing.unit, scale: 1 }))
   return parts.length > 0 ? combineAmounts(parts) : ''
