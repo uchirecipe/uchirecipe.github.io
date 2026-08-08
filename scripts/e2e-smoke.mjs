@@ -6133,7 +6133,10 @@ try {
           .locator(`button[data-date="${plYesterday}"][aria-label*="作った記録あり"]`)
           .count()) === 1,
       )
-      // 2026-08-03 便DQ: 常設1行だった全体食費は、食費の表の「全員分／作った食数ぶん」の行になった
+      // 2026-08-03 便DQ: 常設1行だった全体食費は、食費の表の「全員分／作った食数ぶん」の行になった。
+      // 2026-08-07 便DU: 月の食費カードは折りたたみになった(既定は畳む)ので、見出しを押して開いてから読む
+      await plPage.getByRole('button', { name: /月の食費/ }).click()
+      await plPage.waitForTimeout(300)
       const plMonthTable =
         (await plPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
       check(
@@ -6447,10 +6450,10 @@ try {
         'MEALPLAN-07(便DR) 栄養の長い但し書きと出典は既定では出さない',
         !rcFutureOpenText.includes('調理による変化などは反映しておらず'),
       )
-      await rcCard.getByRole('button', { name: '注記と出典を見る' }).click()
+      await rcCard.getByRole('button', { name: '注記と出典' }).click()
       await rcPage.waitForTimeout(200)
       check(
-        'MEALPLAN-07(便DR) 「注記と出典を見る」で概算の但し書きと成分表の出典が出る',
+        'MEALPLAN-07(便DR) 「注記と出典」で概算の但し書きと成分表の出典が出る',
         ((await rcCard.textContent()) ?? '').includes('調理による変化などは反映しておらず') &&
           ((await rcCard.textContent()) ?? '').includes('出典: '),
       )
@@ -7509,6 +7512,15 @@ try {
       await mePage.waitForTimeout(400)
       const meNext = new Date(meNow.getFullYear(), meNow.getMonth() + 1, 1)
       const meDate = `${meNext.getFullYear()}-${String(meNext.getMonth() + 1).padStart(2, '0')}-10`
+      // 2026-08-07 便DU: 月の食費カードは折りたたみになった(既定は畳む)。
+      // 見出しは畳んだままでも出るので、中身を読む検査の前に押して開く（開閉は月を移動しても保つ）
+      const meCostCardBtn = mePage.getByRole('button', { name: /月の食費/ })
+      check(
+        'MEALPLAN-A3B3(便DU) 月の食費カードは既定で畳まれている(カレンダーを押し下げない)',
+        (await meCostCardBtn.getAttribute('aria-expanded')) === 'false',
+      )
+      await meCostCardBtn.click()
+      await mePage.waitForTimeout(300)
       check(
         'MEALPLAN-A3B3(B-3) 記録も予定も無い月は、数字の代わりに空の案内を出す',
         ((await mePage.textContent('body')) ?? '').includes(
@@ -7596,8 +7608,20 @@ try {
       )
       // B-3: 予定を入れた翌月のサマリーに金額が出る(期間選択なし)
       const meMonthTitle = `${meNext.getMonth() + 1}月の食費`
-      await meModal.locator('button[aria-label="閉じる"]').first().click()
+      // 2026-08-07 便DU: この画面で献立を1品足したので、窓の下は「キャンセル」「保存」になる。
+      // 「保存」は入っている内容を確定して閉じる(データはこの時点ですでに入っている)
+      check(
+        'MEALPLAN-A3B3(便DU) 献立を変えた日の窓は下が「キャンセル」「保存」になる',
+        (await meModal.locator('[data-testid="day-modal-save"]').count()) === 1 &&
+          (await meModal.locator('[data-testid="day-modal-cancel"]').count()) === 1 &&
+          (await meModal.locator('[data-testid="day-modal-close"]').count()) === 0,
+      )
+      await meModal.locator('[data-testid="day-modal-save"]').click()
       await mePage.waitForTimeout(400)
+      check('MEALPLAN-A3B3(便DU) 「保存」で日の窓が閉じる', !(await meModal.isVisible()))
+      // 便DU: 栄養カードも折りたたみになったので、8項目を読む前に開く
+      await mePage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await mePage.waitForTimeout(300)
       const meBodyAfter = (await mePage.textContent('body')) ?? ''
       check(
         'MEALPLAN-A3B3(B-3) 表示中の月のサマリーが見出しに月を出す',
@@ -7642,9 +7666,10 @@ try {
         'MEALPLAN-A3B3(便CH/C12) 数字の前提(何をもとにした概算か)を常設で出す',
         meBodyAfter.includes('食材の目安価格をもとに自動計算した概算の数値です'),
       )
-      // 2026-08-03 便DQ: 栄養は別カードになり、8項目は畳まずに出る(見出しは「◯月の栄養（1人分）」)
+      // 2026-08-03 便DQ: 栄養は別カード(見出しは「◯月の栄養（1人分）」)。
+      // 2026-08-07 便DU: そのカード自体が折りたたみになり、開けば8項目がまとめて出る
       check(
-        'MEALPLAN-A3B3(便DQ) 栄養は食費と別のカードになり、8項目が畳まずに出ている',
+        'MEALPLAN-A3B3(便DQ・便DU) 栄養は食費と別のカードで、開くと8項目がまとめて出る',
         meBodyAfter.includes(`${meNext.getMonth() + 1}月の栄養（1人分）`) &&
           meBodyAfter.includes('たんぱく質') &&
           meBodyAfter.includes('カルシウム'),
@@ -7653,10 +7678,10 @@ try {
         'MEALPLAN-A3B3(便DQ) 栄養の長い但し書きと出典は折りたたみの中(既定では出さない)',
         !meBodyAfter.includes('調理による変化などは反映しておらず') && !meBodyAfter.includes('出典: '),
       )
-      await mePage.getByRole('button', { name: '注記と出典を見る' }).click()
+      await mePage.getByRole('button', { name: '注記と出典' }).click()
       await mePage.waitForTimeout(300)
       check(
-        'MEALPLAN-A3B3(便DQ) 「注記と出典を見る」で概算の但し書きと成分表の出典が出る',
+        'MEALPLAN-A3B3(便DQ) 「注記と出典」で概算の但し書きと成分表の出典が出る',
         ((await mePage.textContent('body')) ?? '').includes('調理による変化などは反映しておらず') &&
           ((await mePage.textContent('body')) ?? '').includes('出典: '),
       )
@@ -7700,6 +7725,344 @@ try {
       )
     } finally {
       await meBrowser.close()
+    }
+  }
+
+  // --- MEALPLAN-DU: 月カレンダーの写真の選び方と、日の窓の閉じる/キャンセル(2026-08-07 便DU・オーナー指示)。
+  //  ⑤ その日の「作った記録」の写真をレシピの写真より優先する＋「レシピの写真は使わない」の切り替え
+  //  ⑥ その日に写真の候補が複数あるとき、カレンダーに出す1枚を日ごとに選べる
+  //  ⑦ 日の窓の下に「閉じる」を置く
+  //  ⑧ この画面で献立を変えたら「キャンセル」で開いたときの状態へ戻せる(確認文は規約F)
+  //  ⑨ 「カレンダーに出す情報」の切り替えに見出しと説明を付ける
+  // 月タブはPro機能のためIndexedDB直書きで解錠する(MEALPLAN-07と同手法)。 ---
+  currentCheck = 'MEALPLAN-DU'
+  {
+    const duBrowser = await chromium.launch()
+    const duContext = await duBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const duPage = await duContext.newPage()
+    let duDialog = ''
+    duPage.on('dialog', (dialog) => {
+      duDialog = dialog.message()
+      return dialog.accept()
+    })
+    duPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@MEALPLAN-DU] ${text}`)
+    })
+    duPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@MEALPLAN-DU] ${err.message}`)
+    })
+    try {
+      await duPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await duPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      const duNow = new Date()
+      const duPad = (n) => String(n).padStart(2, '0')
+      const duPrefix = `${duNow.getFullYear()}-${duPad(duNow.getMonth() + 1)}`
+      const duToday = `${duPrefix}-${duPad(duNow.getDate())}`
+      // 今日と重ならない検証用の日を、必ず当月内に2つ取る
+      const duFallback = `${duPrefix}-${duPad(duNow.getDate() === 15 ? 16 : 15)}`
+      const duOrder = `${duPrefix}-${duPad(duNow.getDate() === 20 ? 21 : 20)}`
+
+      // 検証用の作った記録を仕込む。写真は本物の1x1 PNG(壊れた画像で読み込みエラーを出さないため)。
+      //  today   … 2品とも記録に写真あり＝日ごとに選べる候補が2つになる
+      //  order   … idの小さい方(その日の先頭の記録)には写真が無く、2品目にだけ写真がある
+      //            ＝便DU以前の「先頭の記録しか見ない」実装なら写真が出ない日
+      //  fallback… 記録の写真は無く、レシピに登録した写真だけがある＝代用が効く日
+      const duIds = await duPage.evaluate(
+        ({ today, fallback, order }) =>
+          new Promise((resolve, reject) => {
+            const b64 =
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+            const bin = atob(b64)
+            const bytes = new Uint8Array(bin.length)
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+            const png = () => new Blob([bytes], { type: 'image/png' })
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const a = g.result.find((r) => r.title === '肉じゃが')
+                const b = g.result.find((r) => r.title === 'カレーライス')
+                // recipesはid順で読まれるので、idの小さい方がその日の「先頭の記録」になる
+                const first = a.id < b.id ? a : b
+                const second = a.id < b.id ? b : a
+                store.put({
+                  ...first,
+                  photo: undefined,
+                  cookedLogs: [{ date: today, photo: png() }, { date: order }],
+                })
+                store.put({
+                  ...second,
+                  photo: png(),
+                  cookedLogs: [
+                    { date: today, photo: png() },
+                    { date: fallback },
+                    { date: order, photo: png() },
+                  ],
+                })
+                tx.oncomplete = () =>
+                  resolve({
+                    first: first.id,
+                    second: second.id,
+                    firstTitle: first.title,
+                    secondTitle: second.title,
+                  })
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { today: duToday, fallback: duFallback, order: duOrder },
+      )
+      // Pro解錠(IndexedDB直書き)
+      await duPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({
+              ...current,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+      await duPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await duPage.reload({ waitUntil: 'networkidle' })
+      await duPage.waitForTimeout(900)
+      await duPage.getByRole('button', { name: '月', exact: true }).click()
+      await duPage.waitForTimeout(600)
+
+      const duCell = (date) => duPage.locator(`button[data-date="${date}"]`)
+      const duBody0 = (await duPage.textContent('body')) ?? ''
+
+      // ⑨ 表示の切り替えに見出しと説明が付く
+      check(
+        'MEALPLAN-DU(⑨) 「カレンダーに出す情報」の見出しが画面に出る',
+        duBody0.includes('カレンダーに出す情報'),
+      )
+      check(
+        'MEALPLAN-DU(⑨) 写真モードでは「何が出るのか」の説明が切り替えのすぐ下に出る',
+        duBody0.includes('その日の「作った記録」の写真を出します'),
+      )
+      // ① カレンダーが月タブの先頭側にある(食費・栄養のカードより前に描かれる)
+      const duCalendarIndex = duBody0.indexOf('月火水木金土日')
+      check(
+        'MEALPLAN-DU(①) カレンダーが月の食費カードより先に出る',
+        duCalendarIndex >= 0 && duCalendarIndex < duBody0.indexOf('月の食費'),
+        `カレンダー=${duCalendarIndex} 食費=${duBody0.indexOf('月の食費')}`,
+      )
+
+      // ⑤ 記録の写真は「その日の何品目にあっても」レシピの写真より先に拾う(便DU以前の回帰防止)
+      check(
+        'MEALPLAN-DU(⑤) 先頭の記録に写真が無くても、2品目の記録の写真をセルに出す',
+        (await duCell(duOrder).locator('img').count()) === 1,
+      )
+      check(
+        'MEALPLAN-DU(⑤) 記録に写真が無い日はレシピの写真で代用する(従来どおり)',
+        (await duCell(duFallback).locator('img').count()) === 1,
+      )
+      // ⑤ 「レシピの写真は使わない」
+      const duHideBtn = duPage.locator('[data-testid="month-hide-recipe-photo"]')
+      check('MEALPLAN-DU(⑤) 写真モードに「レシピの写真は使わない」が出る', (await duHideBtn.count()) === 1)
+      check(
+        'MEALPLAN-DU(⑤) 既定は「使う」(押されていない)',
+        (await duHideBtn.getAttribute('aria-pressed')) === 'false',
+      )
+      await duHideBtn.click()
+      await duPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-DU(⑤) 「レシピの写真は使わない」でレシピ写真だけの日から写真が消える',
+        (await duCell(duFallback).locator('img').count()) === 0,
+      )
+      check(
+        'MEALPLAN-DU(⑤) 記録の写真がある日は残る',
+        (await duCell(duOrder).locator('img').count()) === 1 &&
+          (await duCell(duToday).locator('img').count()) === 1,
+      )
+      // 選択は設定に記憶される
+      await duPage.reload({ waitUntil: 'networkidle' })
+      await duPage.waitForTimeout(900)
+      await duPage.getByRole('button', { name: '月', exact: true }).click()
+      await duPage.waitForTimeout(500)
+      check(
+        'MEALPLAN-DU(⑤) 「レシピの写真は使わない」は設定に記憶される',
+        (await duPage.locator('[data-testid="month-hide-recipe-photo"]').getAttribute('aria-pressed')) ===
+          'true',
+      )
+      await duPage.locator('[data-testid="month-hide-recipe-photo"]').click()
+      await duPage.waitForTimeout(400)
+      // 栄養/食費モードでは写真を敷かないので、この切り替えも出さない
+      await duPage.getByRole('button', { name: '食費', exact: true }).click()
+      await duPage.waitForTimeout(400)
+      check(
+        'MEALPLAN-DU(⑤) 食費モードでは「レシピの写真は使わない」を出さない',
+        (await duPage.locator('[data-testid="month-hide-recipe-photo"]').count()) === 0,
+      )
+      check(
+        'MEALPLAN-DU(⑨) 食費モードの説明は「その日に1人が食べる分」と数え方まで言い切る',
+        ((await duPage.textContent('body')) ?? '').includes(
+          '数字はその日に1人が食べる分の食費の概算です。過ぎた日は作った記録、今日から先は登録した献立で計算しています',
+        ),
+      )
+      await duPage.getByRole('button', { name: '写真', exact: true }).click()
+      await duPage.waitForTimeout(400)
+
+      // ⑥⑦ 今日(記録が2品ある日)の窓を開く
+      await duCell(duToday).click()
+      await duPage.waitForTimeout(500)
+      const duModal = duPage.locator('[role="dialog"]')
+      check('MEALPLAN-DU(⑦) 日の窓が開く', await duModal.isVisible())
+      check(
+        'MEALPLAN-DU(⑦) 何も変えていない窓の下は「閉じる」1つだけ',
+        (await duModal.locator('[data-testid="day-modal-close"]').count()) === 1 &&
+          (await duModal.locator('[data-testid="day-modal-save"]').count()) === 0 &&
+          (await duModal.locator('[data-testid="day-modal-cancel"]').count()) === 0,
+      )
+      const duPicker = duModal.locator('[data-testid="day-cover-picker"]')
+      check('MEALPLAN-DU(⑥) 候補が2つ以上ある日に写真の選び直しが出る', (await duPicker.count()) === 1)
+      check(
+        'MEALPLAN-DU(⑥) 候補は「自動で選ぶ」＋その日の料理2品',
+        (await duPicker.locator('button').count()) === 3,
+        `件数=${await duPicker.locator('button').count()}`,
+      )
+      check(
+        'MEALPLAN-DU(⑥) 既定は「自動で選ぶ」が選ばれている',
+        (await duPicker.getByRole('button', { name: 'カレンダーに出す写真を自動で選ぶ' }).getAttribute(
+          'aria-pressed',
+        )) === 'true',
+      )
+      await duPicker
+        .getByRole('button', { name: `${duIds.secondTitle}の写真をカレンダーに出す` })
+        .click()
+      await duPage.waitForTimeout(500)
+      const duChosen = await duPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readonly')
+              const g = tx.objectStore('settings').get(1)
+              g.onsuccess = () => resolve(g.result?.monthDayCoverRecipe ?? null)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-DU(⑥) 選んだ料理は日付ごとに設定へ残る',
+        !!duChosen && duChosen[duToday] === duIds.second,
+        `保存=${JSON.stringify(duChosen)} 期待=${duToday}:${duIds.second}`,
+      )
+      await duPicker.getByRole('button', { name: 'カレンダーに出す写真を自動で選ぶ' }).click()
+      await duPage.waitForTimeout(500)
+      const duCleared = await duPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('settings', 'readonly')
+              const g = tx.objectStore('settings').get(1)
+              g.onsuccess = () => resolve(g.result?.monthDayCoverRecipe ?? null)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'MEALPLAN-DU(⑥) 「自動で選ぶ」に戻すとその日の指名が消える',
+        !duCleared || duCleared[duToday] === undefined,
+        `保存=${JSON.stringify(duCleared)}`,
+      )
+
+      // ⑧ 献立を1品足すと「キャンセル」「保存」に変わり、キャンセルで開いたときへ戻る
+      await duModal.getByRole('button', { name: 'レシピを選ぶ' }).first().click()
+      await duPage.waitForTimeout(400)
+      // 同じ画面に「◯◯の写真をカレンダーに出す」ボタンもあるので、レシピの選択はピッカーの中だけを見る
+      const duRecipePicker = duPage.locator('[data-testid="recipe-picker"]')
+      await duRecipePicker.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await duPage.waitForTimeout(300)
+      await duRecipePicker.getByRole('button', { name: /肉じゃが/ }).first().click()
+      await duPage.waitForTimeout(700)
+      check(
+        'MEALPLAN-DU(⑧) 献立を足すと窓の下が「キャンセル」「保存」になる',
+        (await duModal.locator('[data-testid="day-modal-cancel"]').count()) === 1 &&
+          (await duModal.locator('[data-testid="day-modal-save"]').count()) === 1 &&
+          (await duModal.locator('[data-testid="day-modal-close"]').count()) === 0,
+      )
+      check(
+        'MEALPLAN-DU(⑧) 変更がすでに入っていることを窓の中で正直に書く',
+        ((await duModal.textContent()) ?? '').includes(
+          'この画面での変更は、すでにこの日の献立に入っています',
+        ),
+      )
+      const duBeforeCancel = await duPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.filter((e) => e.date === date).length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        duToday,
+      )
+      check('MEALPLAN-DU(⑧) 前提: 足した献立が1件入っている', duBeforeCancel === 1, `件数=${duBeforeCancel}`)
+      duDialog = ''
+      await duModal.locator('[data-testid="day-modal-cancel"]').click()
+      await duPage.waitForTimeout(900)
+      check(
+        'MEALPLAN-DU(⑧・規約F) キャンセルの確認文が「取り消すもの」と「戻るもの」を両方件数つきで書く',
+        duDialog.includes('取り消すもの: 追加した1品') &&
+          duDialog.includes('戻るもの: この画面を開いたときの献立0品') &&
+          duDialog.includes('作った記録と写真、ほかの日の献立は変わりません'),
+        `確認文=${duDialog}`,
+      )
+      const duAfterCancel = await duPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readonly')
+              const g = tx.objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.filter((e) => e.date === date).length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        duToday,
+      )
+      check('MEALPLAN-DU(⑧) キャンセルで足した献立が消え、開いたときの0件へ戻る', duAfterCancel === 0)
+      check('MEALPLAN-DU(⑧) キャンセルで日の窓が閉じる', !(await duModal.isVisible()))
+      check(
+        'MEALPLAN-DU(⑧) 作った記録は消えない(取り消しの対象外)',
+        (await duCell(duToday).locator('img').count()) === 1,
+      )
+    } finally {
+      await duBrowser.close()
     }
   }
 
@@ -14261,9 +14624,12 @@ try {
         `purpose付き=${p2Entries.filter((e) => e.purpose === 'protein').length}/${p2Entries.length}`,
       )
 
-      // 月タブの答え合わせ（事実表示）
+      // 月タブの答え合わせ（事実表示）。
+      // 2026-08-07 便DU: 答え合わせは月の栄養カードの中にあり、そのカードは折りたたみ(既定は畳む)
       await p2Page.getByRole('button', { name: '月', exact: true }).click()
       await p2Page.waitForTimeout(800)
+      await p2Page.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await p2Page.waitForTimeout(400)
       const p2Review = p2Page.locator('[data-testid="purpose-review"]')
       check('PURPOSE-02 月タブに「目的から組む」の答え合わせが出る', await p2Review.isVisible())
       const p2ReviewText = (await p2Review.textContent()) ?? ''
@@ -14556,6 +14922,11 @@ try {
           'サンプルデータを表示中',
         ),
       )
+      // 2026-08-07 便DU: 食費・栄養のカードは折りたたみになった(既定は畳む)ので、中身を読む前に開く
+      await dmPage.getByRole('button', { name: /月の食費/ }).click()
+      await dmPage.waitForTimeout(300)
+      await dmPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await dmPage.waitForTimeout(300)
       const dmBody = (await dmPage.textContent('body')) ?? ''
       check(
         'DEMO-01 本物の月タブが見本のデータで開く（ロック案内は出ない）',
@@ -14577,7 +14948,7 @@ try {
         `表=${dmCostTable.slice(0, 260)}`,
       )
       check(
-        'DEMO-01(便DQ) 栄養は「5月の栄養（1人分）」の別カードで、8項目が畳まずに出る',
+        'DEMO-01(便DQ・便DU) 栄養は「5月の栄養（1人分）」の別カードで、開くと8項目が出る',
         dmBody.includes('5月の栄養（1人分）') &&
           dmBody.includes('たんぱく質') &&
           dmBody.includes('カルシウム'),
