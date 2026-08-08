@@ -20,6 +20,12 @@ type Props = {
   onGoToStep?: () => void
   /** このタイマーだけ消音する／音を戻す（同④）。未指定なら切り替えを出さない */
   onToggleMute?: () => void
+  /**
+   * 番号を「並行調理ナビの段取りの通し番号」で出すか（2026-08-09 便EH）。
+   * 常駐タイマーバーから開いたときだけ true。調理中モード（1品の画面）から開いたときは
+   * そのレシピ内の手順番号のままにする。
+   */
+  useNaviOrder?: boolean
 }
 
 /**
@@ -36,6 +42,7 @@ export default function TimerAdjustModal({
   onClose,
   onGoToStep,
   onToggleMute,
+  useNaviOrder,
 }: Props) {
   useEffect(() => {
     if (!timer) return
@@ -47,6 +54,14 @@ export default function TimerAdjustModal({
   }, [timer, onClose])
 
   if (!timer) return null
+  /** 画面に出す番号（ナビの通し番号を使う場面ではそちらを優先する） */
+  const naviOrder = useNaviOrder ? timer.naviOrder : undefined
+  const stepText =
+    naviOrder != null
+      ? ja.timer.naviStepLabel.replace('{n}', String(naviOrder))
+      : timer.stepNumber > 0
+        ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
+        : null
 
   const remaining = Math.max(0, Math.ceil((timer.endsAt - now) / 1000))
   // 窓を開いたままタイマーが終わった場合(2026-07-28 機能④診断C10)。
@@ -81,16 +96,18 @@ export default function TimerAdjustModal({
         </div>
         <div className="mt-[var(--space-sm)] flex items-center justify-center gap-2">
           <StepBadge
-            number={timer.isCustom || timer.stepNumber <= 0 ? 'custom' : timer.stepNumber}
+            number={
+              timer.isCustom
+                ? 'custom'
+                : (naviOrder ?? (timer.stepNumber > 0 ? timer.stepNumber : 'custom'))
+            }
             size={32}
           />
           <span className="min-w-0 truncate font-bold">{timer.label}</span>
           {/* 手順のタイマーは、どの手順の時間かを名前の横に添える(2026-08-03 実機FB②)。
               時計バッジの「自分で時間を決めたタイマー」には手順表記を付けない */}
-          {!timer.isCustom && timer.stepNumber > 0 && (
-            <span className="shrink-0 text-sm text-ink-muted">
-              {ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))}
-            </span>
+          {!timer.isCustom && stepText && (
+            <span className="shrink-0 text-sm text-ink-muted">{stepText}</span>
           )}
         </div>
         {finished ? (
@@ -148,9 +165,11 @@ export default function TimerAdjustModal({
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
           >
             <CornerUpLeft size={20} aria-hidden />
-            {timer.stepNumber > 0
-              ? ja.timer.goToStep.replace('{n}', String(timer.stepNumber))
-              : ja.timer.goToRecipe}
+            {naviOrder != null
+              ? ja.timer.naviGoToStep.replace('{n}', String(naviOrder))
+              : timer.stepNumber > 0
+                ? ja.timer.goToStep.replace('{n}', String(timer.stepNumber))
+                : ja.timer.goToRecipe}
           </button>
         )}
         <button

@@ -15104,11 +15104,22 @@ try {
       await egPage.waitForTimeout(700)
 
       const egCards = await egPage.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
-      // ⑤ レシピ名の頭に丸数字。行内の「手順◯」という見出しは出さない
+      // ⑤ レシピごとの手順番号。2026-08-09 便EHで丸数字(①②③)をやめ、レシピ色の丸バッジにした
+      // （丸数字は12pxでは中の数字が潰れて読めなかった）。行内の「手順◯」という見出しは出さない
+      const egCutCard = egPage.locator('ol > li', { hasText: '大根を切る' }).first()
+      const egServeCard = egPage.locator('ol > li', { hasText: '器に盛る' }).first()
       check(
-        'EG-01 レシピ名の頭にそのレシピ内の番号(①②③)が付く',
-        egCards.some((t) => t.includes('①EG煮物')) && egCards.some((t) => t.includes('②EG煮物')),
-        `cards=${JSON.stringify(egCards.map((t) => t.slice(0, 30)))}`,
+        'EG-01 レシピごとの手順番号が、料理名の手前の丸バッジで出る',
+        (await egCutCard.locator('[data-testid="navi-recipe-step-number"]').textContent()) === '1' &&
+          (await egServeCard.locator('[data-testid="navi-recipe-step-number"]').textContent()) === '3',
+      )
+      check(
+        'EG-01 ナビが足した工程には手順番号を付けない',
+        (await egPage
+          .locator('ol > li', { hasText: '湯を沸かす' })
+          .first()
+          .locator('[data-testid="navi-recipe-step-number"]')
+          .count()) === 0,
       )
       check(
         'EG-01 行内の「手順◯」の表記は消えている(読み上げ用の隠し文字だけ)',
@@ -15169,14 +15180,14 @@ try {
       await egPage.goto(`${BASE}/#/meal-plan`)
       await egPage.waitForTimeout(1000)
       check(
-        'EG-01 段取りが残っているとき献立タブに「並行調理を再開」が出る',
+        'EG-01 段取りが残っているとき献立タブに「並行調理ナビを再開」が出る',
         (await egPage.locator('[data-testid="navi-resume"]').count()) === 1 &&
-          (await egPage.textContent('body')).includes('並行調理を再開'),
+          (await egPage.textContent('body')).includes('並行調理ナビを再開'),
       )
       await egPage.locator('[data-testid="navi-resume"]').click()
       await egPage.waitForTimeout(1000)
       check(
-        'EG-01 「並行調理を再開」で段取りの続きが開く',
+        'EG-01 「並行調理ナビを再開」で段取りの続きが開く',
         egPage.url().includes('/cook-navi') &&
           (await egPage.textContent('body')).includes('組み合わせる2品'),
         `url=${egPage.url()}`,
@@ -15194,11 +15205,238 @@ try {
         egConfirmText.slice(0, 240),
       )
       check(
-        'EG-01 記録したあとは「並行調理を再開」も消える(押せない入口を残さない)',
+        'EG-01 記録したあとは「並行調理ナビを再開」も消える(押せない入口を残さない)',
         (await egPage.locator('[data-testid="navi-resume"]').count()) === 0,
       )
     } finally {
       await egBrowser.close()
+    }
+  }
+
+  // --- EH-01: 便EH(2026-08-09 オーナー実機フィードバック)。並行調理ナビの重大バグと段取り精度:
+  //       ① 並行調理中に献立タブから1品だけ「作った！」しても状態が壊れない
+  //          (段取りから外れる／押す前に確認が出る／記録が二重にならない)
+  //       ② 待ち時間に手作業を詰め込みすぎない
+  //       ④ 手順に埋もれた「湯を沸かす」が前の工程として分離される
+  //       ⑤ 手作業の手順カードに目安時間が出る
+  //       ⑥ ナビから始めたタイマーの番号が段取りの通し番号になる ---
+  currentCheck = 'EH-01'
+  {
+    const ehBrowser = await chromium.launch()
+    const ehContext = await ehBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const ehPage = await ehContext.newPage()
+    let ehConfirmText = ''
+    let ehAccept = true
+    ehPage.on('dialog', (dialog) => {
+      ehConfirmText = dialog.message()
+      void (ehAccept ? dialog.accept() : dialog.dismiss())
+    })
+    ehPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EH-01] ${err.message}`)
+    })
+    try {
+      await ehPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ehPage.waitForTimeout(1800)
+      await ehPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('EHナムル', [
+          { text: 'にんじんは細切りにする。' },
+          { text: '鍋にたっぷりの湯を沸かし、にんじんを4分茹でて冷水にとる。' },
+          { text: 'ごま油と塩で和える。' },
+        ], [
+          { name: 'にんじん', amount: '1', unit: '本' },
+          { name: 'ごま油', amount: '大さじ1', unit: '', seasoningGroup: 1 },
+          { name: '塩', amount: '少々', unit: '', seasoningGroup: 1 },
+        ])))
+        const idB = await P(store('recipes').add(mk('EHオムライス', [
+          { text: '鶏肉と玉ねぎを切る。' },
+          { text: '鶏肉を炒める。' },
+          { text: '玉ねぎがしんなりするまで炒める。' },
+          { text: 'ご飯を入れてケチャップで炒める。', minutes: 3 },
+          { text: '卵を焼いて包み、皿に盛る。' },
+        ])))
+        const idC = await P(store('recipes').add(mk('EH煮物', [
+          { text: '大根を切る。' }, { text: '鍋で15分煮る。' }, { text: '器に盛る。' },
+        ])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await ehPage.goto(`${BASE}/#/cook-navi`)
+      await ehPage.reload({ waitUntil: 'networkidle' })
+      await ehPage.waitForTimeout(1200)
+      await ehPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ehPage.waitForTimeout(800)
+
+      // ④ 手順に埋もれた「湯を沸かす」が前の工程として分離される
+      const ehCards = await ehPage.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
+      check(
+        'EH-01 手順に書かれた湯沸かしが、前の待ち工程として切り出される',
+        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('約5分の待ち時間')),
+        `cards=${JSON.stringify(ehCards.map((t) => t.slice(0, 40)))}`,
+      )
+      check(
+        'EH-01 切り出したあとの手順は、ゆでる作業だけになる',
+        ehCards.some((t) => t.includes('にんじんを4分茹でて冷水にとる。') && !t.includes('湯を沸かし、')),
+      )
+
+      // ⑤ 手作業の手順カードに目安時間が出る（書かれた時間と、ナビの見積りを書き分ける）
+      check(
+        'EH-01 手順に分数があれば「目安◯分」で出る',
+        (
+          await ehPage
+            .locator('ol > li', { hasText: 'ご飯を入れてケチャップで炒める。' })
+            .first()
+            .locator('[data-testid="navi-active-minutes"]')
+            .textContent()
+        ) === '目安3分',
+      )
+      check(
+        'EH-01 分数の無い手作業は「ナビの見積り◯分」と書き分ける',
+        /^ナビの見積り\d+分$/.test(
+          (await ehPage
+            .locator('ol > li', { hasText: '鶏肉と玉ねぎを切る。' })
+            .first()
+            .locator('[data-testid="navi-active-minutes"]')
+            .textContent()) ?? '',
+        ),
+      )
+      check(
+        'EH-01 待ちの手順には手作業の目安時間を重ねて出さない',
+        (await ehPage
+          .locator('ol > li', { hasText: '鍋で15分煮る。' })
+          .first()
+          .locator('[data-testid="navi-active-minutes"]')
+          .count()) === 0,
+      )
+
+      // ② 4分のゆで待ちに、4分を超える手作業を詰め込まない
+      const ehPlan = await ehPage.$$eval('ol > li', (lis) =>
+        lis.map((li) => (li.textContent || '').replace(/\s+/g, ' ')),
+      )
+      const boilAt = ehPlan.findIndex((t) => t.includes('にんじんを4分茹でて'))
+      const backAt = ehPlan.findIndex((t) => t.includes('ごま油と塩で和える'))
+      const insertedBetween = ehPlan.slice(boilAt + 1, backAt)
+      check(
+        'EH-01 4分のゆで待ちのあいだに詰め込む手作業は1工程まで',
+        boilAt >= 0 && backAt > boilAt && insertedBetween.length <= 1,
+        `間に入った工程=${JSON.stringify(insertedBetween.map((t) => t.slice(0, 30)))}`,
+      )
+
+      // 合わせ調味料の線は、そのレシピの色（レシピ詳細のグループ色を持ち込まない）
+      await ehPage.locator('[data-testid="navi-ingredients-toggle"]').click()
+      await ehPage.waitForTimeout(400)
+      const ehSeasoningColors = await ehPage.$$eval(
+        '[data-testid="navi-ingredients-panel"] li ul li',
+        (lis) =>
+          lis
+            .map((li) => ({
+              text: li.textContent || '',
+              border: getComputedStyle(li).borderLeftColor,
+              parent: getComputedStyle(li.closest('li[style]')).borderLeftColor,
+            }))
+            .filter((x) => /ごま油|塩/.test(x.text)),
+      )
+      check(
+        'EH-01 合わせ調味料の線の色が、そのレシピの色と同じ',
+        ehSeasoningColors.length >= 2 && ehSeasoningColors.every((x) => x.border === x.parent),
+        JSON.stringify(ehSeasoningColors),
+      )
+
+      // ⑥ ナビから始めたタイマーの番号は段取りの通し番号
+      const ehTimerCard = ehPage.locator('ol > li', { hasText: '鍋で15分煮る。' }).first()
+      const ehTimerOrder = await ehTimerCard.locator('span.rounded-full').first().textContent()
+      await ehTimerCard.getByRole('button', { name: /タイマーを始める/ }).click()
+      await ehPage.waitForTimeout(500)
+      const ehBarNumber = await ehPage.locator('div.fixed button span.rounded-full').first().textContent()
+      check(
+        'EH-01 常駐タイマーの番号が、ナビの段取りの通し番号になる',
+        ehBarNumber === ehTimerOrder,
+        `段取りの番号=${ehTimerOrder} タイマーの番号=${ehBarNumber}`,
+      )
+      await ehPage.locator('div.fixed [aria-label="タイマーを閉じる"]').first().click()
+      await ehPage.waitForTimeout(300)
+
+      // ① 献立タブから1品だけ「作った！」したときの挙動
+      await ehPage.goto(`${BASE}/#/meal-plan`)
+      await ehPage.waitForTimeout(1000)
+      check(
+        'EH-01 段取り中は「作った！」が段取りに与える影響を先に書いてある(規約F)',
+        (await ehPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 1,
+      )
+      ehConfirmText = ''
+      await ehPage
+        .locator('li', { hasText: 'EH煮物' })
+        .first()
+        .getByRole('button', { name: '作った！' })
+        .click()
+      await ehPage.waitForTimeout(1200)
+      check(
+        'EH-01 段取りに組んだ品を1品だけ記録するときは、段取りがどう変わるかを先に伝える',
+        ehConfirmText.includes('並行調理ナビの段取りからも「EH煮物」が外れ') &&
+          ehConfirmText.includes('残りの2品で組み直します'),
+        ehConfirmText.slice(0, 240),
+      )
+      await ehPage.goto(`${BASE}/#/cook-navi`)
+      await ehPage.waitForTimeout(1200)
+      const ehBody = await ehPage.textContent('body')
+      check(
+        'EH-01 記録した品は段取りから外れ、残りの2品で組み直される',
+        ehBody.includes('組み合わせる2品') && !ehBody.includes('大根を切る'),
+      )
+      check(
+        'EH-01 段取りから外したことを黙って済ませない',
+        (await ehPage.locator('[data-testid="navi-selection-dropped"]').count()) === 1,
+      )
+      check(
+        'EH-01 記録した品は「組み合わせるレシピを選ぶ」からも消えている',
+        !ehBody.includes('EH煮物'),
+      )
+      // 「まとめて作った！」で残り2品を記録しても、EH煮物の記録は増えない
+      ehConfirmText = ''
+      await ehPage.locator('[data-testid="navi-mark-all-cooked"]').click()
+      await ehPage.waitForTimeout(1500)
+      const ehLogCounts = await ehPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const rows = await new Promise((res, rej) => {
+          const req = db.transaction('recipes').objectStore('recipes').getAll()
+          req.onsuccess = () => res(req.result)
+          req.onerror = () => rej(req.error)
+        })
+        db.close()
+        return rows
+          .filter((r) => String(r.title).startsWith('EH'))
+          .map((r) => [r.title, r.cookedLogs.length])
+      })
+      check(
+        'EH-01 記録が二重に付かない(1品ずつ記録した品も、まとめて記録した品も1件ずつ)',
+        ehLogCounts.length === 3 && ehLogCounts.every(([, n]) => n === 1),
+        JSON.stringify(ehLogCounts),
+      )
+      void ehAccept
+    } finally {
+      await ehBrowser.close()
     }
   }
 

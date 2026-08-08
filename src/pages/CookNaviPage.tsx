@@ -41,6 +41,8 @@ import {
   saveCookNaviSession,
   saveCookNaviScroll,
   takeCookNaviScroll,
+  reconcileSelectedIds,
+  COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
 import {
   recipeIngredientList,
@@ -48,7 +50,7 @@ import {
   type NaviIngredientAmount,
 } from '../logic/naviIngredients'
 import { buildIngredientNames } from '../logic/ingredientSpans'
-import { seasoningGroupColorToken } from '../logic/seasoningGroup'
+import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { markRecipesCooked, undoTodayListCooked } from '../db/todayList'
 import Toast from '../components/Toast'
 import { effectiveMealServings } from '../logic/servings'
@@ -61,40 +63,37 @@ const RECIPE_COLORS = NAVI_RECIPE_COLORS
 const MAX_SELECT = 3
 
 /**
- * そのレシピ内の手順番号を丸数字にする（①〜⑳。21手順目以降は素の数字）。
- * 2026-08-08 便EG・オーナー案「①をレシピ名頭につければ、全体の番号とレシピごとの番号が
- * 並んで見やすい」。丸数字にすると全体の通し番号（左の丸バッジ）と見分けが付く。
+ * そのレシピ内の手順番号（2026-08-09 便EH・オーナー実機報告
+ * 「レシピごとの手順番号（丸数字）が小さくて潰れて読めない」）。
+ *
+ * 便EGでは料理名のピルの頭に丸数字（①②③）を置いていたが、ピルの文字寸法（12px）では
+ * 丸数字の中の数字が潰れて読めなかった。オーナー案どおり**番号だけを分けて**、
+ * 全体の通し番号と同じ丸バッジを**そのレシピの色**で、一回り小さく描く。
  */
-function circledNumber(n: number): string {
-  return n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : String(n)
+function RecipeStepNumber({ stepNumber, colorIndex }: { stepNumber: number; colorIndex: number }) {
+  return (
+    <>
+      <span className="sr-only">
+        {ja.cookNavi.stepNumberLabel.replace('{n}', String(stepNumber))}
+      </span>
+      <span aria-hidden data-testid="navi-recipe-step-number">
+        <StepBadge
+          number={stepNumber}
+          size={24}
+          color={RECIPE_COLORS[colorIndex % RECIPE_COLORS.length]}
+        />
+      </span>
+    </>
+  )
 }
 
-/**
- * レシピ名の色付きピル（どのレシピの手順かを一目で分かるようにする）。
- * stepNumber を渡すと、そのレシピ内の手順番号を料理名の頭に付ける（2026-08-08 便EG）。
- */
-function RecipePill({
-  title,
-  colorIndex,
-  stepNumber,
-}: {
-  title: string
-  colorIndex: number
-  stepNumber?: number
-}) {
+/** レシピ名の色付きピル（どのレシピの手順かを一目で分かるようにする） */
+function RecipePill({ title, colorIndex }: { title: string; colorIndex: number }) {
   return (
     <span
       className="inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs font-bold"
       style={{ backgroundColor: RECIPE_COLORS[colorIndex % RECIPE_COLORS.length], color: 'var(--chip-ink)' }}
     >
-      {stepNumber != null && stepNumber > 0 && (
-        <>
-          <span className="sr-only">
-            {ja.cookNavi.stepNumberLabel.replace('{n}', String(stepNumber))}
-          </span>
-          <span aria-hidden>{circledNumber(stepNumber)}</span>
-        </>
-      )}
       {title}
     </span>
   )
@@ -144,13 +143,12 @@ function TimelineCard({
     >
       <div className="flex items-center gap-2">
         <StepBadge number={item.order} size={28} />
-        {/* レシピ名の頭に、そのレシピ内の手順番号（①②③）を置く。行内の「手順◯」は廃止
-            （2026-08-08 便EG・オーナー案）。ナビが足した工程には番号を付けない */}
-        <RecipePill
-          title={item.recipeTitle}
-          colorIndex={item.colorIndex}
-          stepNumber={item.stepNumber}
-        />
+        {/* そのレシピ内の手順番号は、レシピ色の丸バッジで料理名の手前に置く
+            （2026-08-09 便EH）。ナビが足した工程には番号を付けない */}
+        {item.stepNumber > 0 && (
+          <RecipeStepNumber stepNumber={item.stepNumber} colorIndex={item.colorIndex} />
+        )}
+        <RecipePill title={item.recipeTitle} colorIndex={item.colorIndex} />
         <span
           className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-bold ${
             isWait ? 'border-accent text-accent-ink' : 'border-edge text-ink-muted'
@@ -239,6 +237,18 @@ function TimelineCard({
             </p>
           )}
         </div>
+      )}
+
+      {/* 手作業の目安時間（2026-08-09 便EH・オーナー指示「手順カードの右下（完成ある場合は上）に
+          目安時間入れて」）。レシピに書かれた時間と、ナビが当てた見積りは書き分ける。
+          待ち系は上の待ちブロックに分数が出るので重ねて出さない */}
+      {!isWait && item.activeMinutes > 0 && (
+        <p data-testid="navi-active-minutes" className="mt-[var(--space-sm)] text-right text-xs text-ink-muted">
+          {(item.activeEstimated ? ja.cookNavi.activeMinutesEstimated : ja.cookNavi.activeMinutes).replace(
+            '{n}',
+            String(item.activeMinutes),
+          )}
+        </p>
       )}
 
       {/* その品がここで出来上がる（2026-08-08 便EG・オーナー指示
@@ -344,12 +354,16 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                             <li
                               key={`${ing.name}-${i}`}
                               className="flex items-baseline justify-between gap-2 py-0.5 pl-2 text-sm"
-                              /* 合わせ調味料（先にまとめて計量してよい材料）はレシピ詳細と同じ色の線で示す
-                                 （2026-08-08 便ED・オーナー実機フィードバック⑤） */
+                              /* 合わせ調味料（先にまとめて計量してよい材料）の線。
+                                 色は**そのレシピの色**にそろえる（2026-08-09 便EH・オーナー実機報告
+                                 「なんでこっちに青で描いてるの？って混乱する」）。同じレシピに
+                                 2組以上あるときだけ線の引き方で分ける */
                               style={
                                 ing.seasoningGroup
                                   ? {
-                                      borderLeft: `4px solid var(${seasoningGroupColorToken(ing.seasoningGroup)})`,
+                                      borderLeft: `4px ${seasoningGroupLineStyle(ing.seasoningGroup)} ${
+                                        RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length]
+                                      }`,
                                     }
                                   : { borderLeft: '4px solid transparent' }
                               }
@@ -364,7 +378,7 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                             data-testid="navi-seasoning-group-hint"
                             className="pb-1 text-xs text-ink-muted"
                           >
-                            {ja.detail.seasoningGroupHint}
+                            {ja.cookNavi.seasoningGroupHint}
                           </p>
                         )}
                       </>
@@ -423,7 +437,9 @@ export default function CookNaviPage() {
   const today = useMemo(() => todayString(), [])
   const todayPlanEntries = useMealPlanRange(today, today)
   const todayRecipes = useMemo(() => {
-    if (!todayList) return undefined
+    // レシピ本体の読み込みが終わるまでは「候補が決まっていない」（undefined）とする。
+    // ここを空配列で返すと、下の選択の整合が「今日の献立が空になった」と読み違える（2026-08-09 便EH）
+    if (!todayList || !recipes) return undefined
     const planIds: number[] = []
     // MEAL_SLOTS は朝食→昼食→夕食の順で定義されている
     MEAL_SLOTS.forEach((slot) =>
@@ -441,7 +457,7 @@ export default function CookNaviPage() {
       .map((id) => recipeById.get(id))
       .filter((r): r is Recipe => r !== undefined)
       .filter((r) => !r.cookedLogs.some((log) => log.date === today))
-  }, [todayList, todayPlanEntries, recipeById, today])
+  }, [todayList, recipes, todayPlanEntries, recipeById, today])
 
   /**
    * お試しを開始する（2026-08-02 便CP-2）。
@@ -475,6 +491,11 @@ export default function CookNaviPage() {
   // 記録したあとのトースト（「元に戻す」つき）
   const [toast, setToast] = useState('')
   const [undoCooked, setUndoCooked] = useState<{ recipeId: number }[] | null>(null)
+  /**
+   * 覚えていた選択のうち、今日の献立から外れた品を落としたことの知らせ（2026-08-09 便EH）。
+   * 黙って段取りの中身を変えないための1行。選び直したら消す
+   */
+  const [droppedNotice, setDroppedNotice] = useState('')
 
   // 選択・表示状態が変わるたびに覚え直す（保存するのは選択と表示中かどうかだけ。段取りは開くたびに組み直す）。
   // 1品も選んでいない状態は覚えない＝選択を全部外したら、次に開いたときは今日の献立から選び直す
@@ -540,7 +561,35 @@ export default function CookNaviPage() {
     setSelectedIds(todayRecipes.slice(0, MAX_SELECT).map((r) => r.id!))
   }, [todayRecipes])
 
+  /**
+   * 覚えていた選択を、いま選べる品と突き合わせて整える（2026-08-09 便EH・オーナー実機報告の
+   * 重大バグ「並行調理中に献立タブから1品だけ『作った！』すると状態が壊れる」の根本修正）。
+   *
+   * 起きていたこと: 作った記録が付いた品は候補一覧（todayRecipes）から消えるのに、
+   * 覚えていた選択（selectedIds）には残り続けていた。そのため
+   *   - 段取りには組み込まれたまま（画面から外す手段が無い）
+   *   - 「段取りを作る」を押しても、すでに表示中なので何も起きない
+   *   - 「まとめて作った！」でその品にもう一度記録が付く（記録が2件になる）
+   * が同時に起きていた。**選択の整合はここ1か所で取る**（作った記録・今日の献立からの削除・
+   * 予定の取り消し、どの経路で候補から消えても同じように直る）。
+   */
+  useEffect(() => {
+    if (!todayRecipes) return
+    const next = reconcileSelectedIds(selectedIds, todayRecipes.map((r) => r.id!))
+    if (next.length === selectedIds.length) return
+    setSelectedIds(next)
+    // 段取りを表示中だったなら、残りで組み直せるかどうかで知らせ方を変える
+    const canRebuild = showTimeline && next.length >= COOK_NAVI_MIN_RECIPES
+    if (showTimeline && !canRebuild) setShowTimeline(false)
+    setDroppedNotice(
+      canRebuild
+        ? ja.cookNavi.selectionDroppedRebuilt.replace('{n}', String(next.length))
+        : ja.cookNavi.selectionDropped,
+    )
+  }, [todayRecipes, selectedIds, showTimeline])
+
   const toggleSelect = (id: number) => {
+    setDroppedNotice('')
     setShowTimeline(false)
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
@@ -664,6 +713,21 @@ export default function CookNaviPage() {
     return map
   }, [timeline, recipeById, servingsByRecipeId])
 
+  /**
+   * 「段取りを作る」（2026-08-09 便EH）。すでに段取りが出ているときは状態が変わらず、
+   * 押しても何も起きないように見えていた（オーナー報告「押しても無反応で押せない」）。
+   * 表示中なら段取りの先頭まで送る。
+   */
+  const timelineRef = useRef<HTMLElement | null>(null)
+  const buildTimeline = () => {
+    setDroppedNotice('')
+    if (showTimeline) {
+      timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    setShowTimeline(true)
+  }
+
   const startStepTimer = (item: TimelineItem, seconds: number) => {
     if (seconds <= 0) return
     startTimer({
@@ -677,6 +741,9 @@ export default function CookNaviPage() {
       // 別の画面から押してもナビの該当手順へ戻り、常駐バーの左端がこの料理の色になる
       fromNavi: true,
       naviColorIndex: item.colorIndex,
+      // 常駐バーの番号は段取りの通し番号にする（2026-08-09 便EH・オーナー実機報告
+      // 「タイマーの番号が元のレシピの手順番号のまま」）
+      naviOrder: item.order,
     })
   }
 
@@ -696,13 +763,14 @@ export default function CookNaviPage() {
       (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
       ja.cookNavi.markAllCookedConfirmAsk
     if (!window.confirm(confirmText)) return
-    const recorded = targets.map((r) => ({ recipeId: r.id! }))
-    await markRecipesCooked(recorded.map((item) => item.recipeId))
+    // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
+    const recordedIds = await markRecipesCooked(targets.map((r) => r.id!))
     clearCookNaviSession()
     setSelectedIds([])
     setShowTimeline(false)
-    setUndoCooked(recorded)
-    setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recorded.length)))
+    setDroppedNotice('')
+    setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
+    setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
   }
 
   /** トーストの「元に戻す」（記録を取り消して今日の献立に戻す。日タブと同じ関数を使う） */
@@ -800,6 +868,15 @@ export default function CookNaviPage() {
                 {/* レシピ選択 */}
                 <section className="mt-[var(--space-md)]">
                   <h2 className="font-bold">{ja.cookNavi.selectTitle}</h2>
+                  {/* 覚えていた選択から品を落としたことの知らせ（2026-08-09 便EH） */}
+                  {droppedNotice && (
+                    <p
+                      data-testid="navi-selection-dropped"
+                      className="ja-phrase mt-[var(--space-sm)] rounded-sm border border-accent bg-surface px-3 py-2 text-sm text-accent-ink"
+                    >
+                      {droppedNotice}
+                    </p>
+                  )}
                   <p className="mt-0.5 text-xs text-ink-muted">{ja.cookNavi.selectHint}</p>
                   {todayRecipes.length === 1 && (
                     <p className="mt-[var(--space-sm)] rounded-sm border border-edge bg-surface px-3 py-2 text-sm text-ink-muted">
@@ -852,21 +929,21 @@ export default function CookNaviPage() {
 
                   <button
                     type="button"
-                    onClick={() => setShowTimeline(true)}
-                    disabled={selectedRecipes.length < 2}
+                    onClick={buildTimeline}
+                    disabled={selectedRecipes.length < COOK_NAVI_MIN_RECIPES}
                     className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
                   >
                     <Route size={20} aria-hidden />
                     {ja.cookNavi.build}
                   </button>
-                  {selectedRecipes.length < 2 && (
+                  {selectedRecipes.length < COOK_NAVI_MIN_RECIPES && (
                     <p className="mt-1 text-center text-sm text-ink-muted">{ja.cookNavi.needTwo}</p>
                   )}
                 </section>
 
                 {/* タイムライン */}
                 {timeline && (
-                  <section className="mt-[var(--space-lg)]">
+                  <section ref={timelineRef} className="mt-[var(--space-lg)]">
                     {/* 凡例 */}
                     <div className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
                       <p className="text-sm font-bold text-ink-muted">

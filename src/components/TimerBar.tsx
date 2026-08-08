@@ -88,11 +88,17 @@ export default function TimerBar() {
           const isFlashing = flashingId === timer.id
           // ±調整の窓を開くボタンの読み上げ名（複数タイマー同時進行でも区別できるよう手順番号を含める。
           // 手順に紐付かない自由な時間のタイマーはラベルのみ）
+          // 並行調理ナビから始めたタイマーは、ナビの段取りの通し番号で呼ぶ
+          // （2026-08-09 便EH。画面の番号と読み上げがずれないように）
+          const stepText =
+            timer.naviOrder != null
+              ? ja.timer.naviStepLabel.replace('{n}', String(timer.naviOrder))
+              : timer.stepNumber > 0
+                ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
+                : null
           const adjustAriaLabel = ja.timer.adjustOpenAria.replace(
             '{label}',
-            timer.stepNumber > 0
-              ? `${timer.label}・${ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))}`
-              : timer.label,
+            stepText ? `${timer.label}・${stepText}` : timer.label,
           )
           return (
             <button
@@ -122,7 +128,11 @@ export default function TimerBar() {
               } ${isFlashing ? 'animate-pulse ring-2 ring-accent' : ''}`}
             >
               <StepBadge
-                number={timer.isCustom || timer.stepNumber <= 0 ? 'custom' : timer.stepNumber}
+                number={
+                  timer.isCustom
+                    ? 'custom'
+                    : (timer.naviOrder ?? (timer.stepNumber > 0 ? timer.stepNumber : 'custom'))
+                }
                 size={28}
               />
               {timer.done && <BellRing size={18} className="shrink-0 animate-pulse" aria-hidden />}
@@ -199,6 +209,8 @@ export default function TimerBar() {
       <TimerAdjustModal
         timer={adjustingTimer}
         now={now}
+        /* 常駐バーから開いた窓は、ナビの段取りの通し番号で呼ぶ（2026-08-09 便EH） */
+        useNaviOrder
         onAdjust={(delta) => {
           if (adjustingId !== null) adjustTimer(adjustingId, delta)
         }}

@@ -129,7 +129,14 @@ import {
   type ShoppingRange,
 } from '../logic/shopping'
 import { todayString } from '../logic/date'
-import { clearCookNaviSession, hasCookNaviTimeline } from '../logic/cookNaviSession'
+import {
+  clearCookNaviSession,
+  hasCookNaviTimeline,
+  loadCookNaviSession,
+  saveCookNaviSession,
+  reconcileSelectedIds,
+  COOK_NAVI_MIN_RECIPES,
+} from '../logic/cookNaviSession'
 import { hasNgIngredient } from '../logic/ng'
 import {
   buildPriceIndex,
@@ -2726,7 +2733,38 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       (todayList?.some((item) => item.recipeId === recipeId && item.fromPlan) ?? false),
   })
 
-  const markDayRecipeCooked = (recipeId: number) => {
+  /**
+   * 作りかけの段取りに組んでいる品を1品だけ記録するときの後始末（2026-08-09 便EH・
+   * オーナー実機報告の重大バグ）。押す前に段取りがどう変わるかを伝え（規約F）、
+   * 記録するならその品を段取りの選択から外す。残りが2品未満になるなら段取りごと終える。
+   * 記録を中止したときは false を返す。
+   */
+  const confirmCookedAgainstNavi = (recipe: Recipe): boolean => {
+    const session = loadCookNaviSession()
+    if (!session?.selectedIds.includes(recipe.id!)) return true
+    const remaining = reconcileSelectedIds(
+      session.selectedIds,
+      session.selectedIds.filter((id) => id !== recipe.id),
+    )
+    const confirmText =
+      (remaining.length >= COOK_NAVI_MIN_RECIPES
+        ? ja.mealPlan.todayCookedNaviConfirm
+        : ja.mealPlan.todayCookedNaviConfirmEnd
+      )
+        .replaceAll('{title}', recipe.title)
+        .replaceAll('{n}', String(remaining.length)) + ja.mealPlan.todayCookedNaviConfirmAsk
+    if (!window.confirm(confirmText)) return false
+    if (remaining.length >= COOK_NAVI_MIN_RECIPES) {
+      saveCookNaviSession({ ...session, selectedIds: remaining })
+    } else {
+      clearCookNaviSession()
+    }
+    return true
+  }
+
+  const markDayRecipeCooked = (recipe: Recipe) => {
+    const recipeId = recipe.id!
+    if (!confirmCookedAgainstNavi(recipe)) return
     const undoItem = undoItemOf(recipeId)
     void (async () => {
       await markTodayListCooked(recipeId)
@@ -4858,9 +4896,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             <Link
               to="/cook-navi"
               data-testid="navi-resume"
-              className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
+              /* 2026-08-09 便EH・オーナー指示「白地にオレンジ文字でオレンジで囲って。
+                 ボタンはもう気持ち大きく」。塗りボタンだと下の「全て作った！」と見分けが付かず、
+                 献立の操作と紛れていた */
+              className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border-2 border-accent bg-surface py-5 text-xl font-bold text-accent-ink shadow-md"
             >
-              <Route size={20} aria-hidden />
+              <Route size={24} aria-hidden />
               {ja.mealPlan.cookNaviResume}
             </Link>
           )}
@@ -4876,7 +4917,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
                 {/* 各行の「作った！」ボタンが何をするものかの1行説明(2026-08-03 便DP-3・規約H)。
                     リストの上に1回だけ置く(行ごとに繰り返さない) */}
-                <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.todayMarkCookedHint}</p>
+                <p className="mt-1 text-xs text-ink-muted">
+                  {ja.mealPlan.todayMarkCookedHint}
+                  {/* 段取りを組んでいる間だけ、1品の記録が段取りに与える影響を先に伝える
+                      （2026-08-09 便EH・規約F） */}
+                  {naviInProgress && (
+                    <span data-testid="day-navi-cooked-hint" className="block">
+                      {ja.mealPlan.todayMarkCookedNaviHint}
+                    </span>
+                  )}
+                </p>
 
                 {/* ①レシピ一覧から選択中。×(外す)が押せるのはこちらだけ。
                     今日の予定へ入れたいときは行の下の「◯食に入れる」から
@@ -4891,7 +4941,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         <TodayListRow
                           key={recipe.id}
                           recipe={recipe}
-                          onCooked={() => markDayRecipeCooked(recipe.id!)}
+                          onCooked={() => markDayRecipeCooked(recipe)}
                           onRemove={() => void removeFromTodayList(recipe.id!)}
                           footer={
                             <div className="mt-1 flex flex-wrap gap-1">
@@ -4930,7 +4980,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                             <TodayListRow
                               key={recipe.id}
                               recipe={recipe}
-                              onCooked={() => markDayRecipeCooked(recipe.id!)}
+                              onCooked={() => markDayRecipeCooked(recipe)}
                             />
                           ))}
                         </ul>
