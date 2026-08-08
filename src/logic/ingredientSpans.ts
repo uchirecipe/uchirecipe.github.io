@@ -52,20 +52,77 @@ const EXCLUSION_RULES: readonly ExclusionRule[] = [
 
 const exclusionRuleByName = new Map(EXCLUSION_RULES.map((rule) => [rule.name, rule]))
 
-function isExcludedMatch(text: string, name: string, start: number): boolean {
-  const rule = exclusionRuleByName.get(name)
-  if (!rule) return false
-  const end = start + name.length
-  if (rule.blockedNextChars?.includes(text[end] ?? '')) return true
-  if (rule.blockedWords) {
-    for (const word of rule.blockedWords) {
-      const offset = word.indexOf(name)
-      if (offset === -1) continue
-      const wordStart = start - offset
-      if (wordStart >= 0 && text.slice(wordStart, wordStart + word.length) === word) return true
-    }
+/**
+ * 1文字の材料名(水・塩・酒・卵・米・酢)を拾ってよい直後の文字。
+ * 「水を加える」「鮭の皮目」は拾い、「水気を絞る」「塩ゆで」は拾わない、を分けるための規則。
+ * 助詞のほか、区切り記号・矢印・括弧・行末も「材料名がそこで終わっている」合図として認める
+ * (2026-08-08 便EG: 「鮭の皮目」の“の”、「溶き卵→すぐにご飯」の“→”、
+ *  「片栗粉と水(水溶き片栗粉用)を入れ」の“(”が抜けており、
+ *  下線は出るのに分量が出ない不一致の原因になっていた)。
+ */
+const PARTICLE_AFTER = /[のをはがともにでやかへ、。，・（）()「」『』【】＜＞<>→\/／＋+…！？!?\s]/
+
+/**
+ * 材料名が「その材料そのもの」を指していない定型句。ここに当たる範囲は材料と認めない。
+ * 拡張時はこの配列に1件追記する(name＝正規化後の材料名、words＝その語を含む定型句)。
+ */
+const CONFUSABLE_PHRASES: { name: string; words: readonly string[] }[] = [
+  {
+    name: '水',
+    words: [
+      '水気',
+      '水分',
+      '流水',
+      '冷水',
+      '熱水',
+      '水洗い',
+      '水にさらす',
+      '水にさらし',
+      '水切り',
+      '水きり',
+      '打ち水',
+      // 「水溶き片栗粉を回し入れ」の“水”は、前の手順で溶いたものを指すので計量対象ではない
+      '水溶き',
+    ],
+  },
+  { name: '油', words: ['油揚げ', '油分', '油通し'] },
+  { name: '塩', words: ['塩ゆで', '塩茹で', '塩水', '塩気', '塩加減'] },
+  // 「甘酢あんのもとをもう一度混ぜて」の“酢”は合わせ調味料の名前の一部
+  { name: '酢', words: ['甘酢', '酢飯', '酢水', 'すし酢', '寿司酢'] },
+]
+
+const confusableByName = new Map(CONFUSABLE_PHRASES.map((rule) => [rule.name, rule.words]))
+
+/** text の start 位置のマッチが、紛らわしい定型句の一部になっていないか */
+function isConfusableUse(text: string, name: string, start: number): boolean {
+  const words = confusableByName.get(name)
+  if (!words) return false
+  for (const word of words) {
+    const offset = word.indexOf(name)
+    if (offset === -1) continue
+    const wordStart = start - offset
+    if (wordStart >= 0 && text.slice(wordStart, wordStart + word.length) === word) return true
   }
   return false
+}
+
+function isExcludedMatch(text: string, name: string, start: number): boolean {
+  const rule = exclusionRuleByName.get(name)
+  if (rule) {
+    const end = start + name.length
+    if (rule.blockedNextChars?.includes(text[end] ?? '')) return true
+    if (rule.blockedWords) {
+      for (const word of rule.blockedWords) {
+        const offset = word.indexOf(name)
+        if (offset === -1) continue
+        const wordStart = start - offset
+        if (wordStart >= 0 && text.slice(wordStart, wordStart + word.length) === word) return true
+      }
+    }
+  }
+  // 1文字の材料名は、直後が助詞・区切りのときだけ本物とみなす
+  if (name.length === 1 && !PARTICLE_AFTER.test(text[start + 1] ?? '。')) return true
+  return isConfusableUse(text, name, start)
 }
 
 /**
@@ -85,6 +142,10 @@ const MODIFIER_PREFIXES = [
   '蒸し',
   'ゆで',
   'プレーン',
+  // 2026-08-08 便EG・オーナー実機報告: 材料欄「乾燥ハーブ(オレガノまたはローズマリー)」に対して
+  // 手順本文は「ハーブ」と書くため一致せず、下線も分量も出ていなかった。
+  // 「乾燥わかめ」→本文「わかめ」も同じ取りこぼし(docs/68 2-6で既知の例として挙がっていたもの)
+  '乾燥',
 ] as const
 
 function stripModifierPrefixes(name: string): string {
@@ -159,6 +220,12 @@ export function buildIngredientNames(ingredients: readonly { name: string }[]): 
  * 一度マッチした範囲は次の探索開始位置にし、重なりは作らない。namesは長さ降順(buildIngredientNames)前提。
  * EXCLUSION_RULESに該当するマッチ(例:「卵液」の「卵」)は不採用にし、他の候補名・次の文字位置で
  * 探索を続ける(複合語の内部にだけ下線が付くのを防ぐ)。
+ *
+ * **この関数の結果が、手順本文の下線とナビの分量表示の両方の唯一の根拠**
+ * (2026-08-08 便EG・オーナー実機報告「下線は出るのに分量が出ない材料がある」)。
+ * 以前は誤検出よけの規則(1文字の材料名・紛らわしい定型句)が分量側にだけ入っており、
+ * 「水気を絞る」の“水”に下線が付くのに分量は出ない、という食い違いが起きていた。
+ * 規則はすべてここに集約し、**下線が引かれた語には必ず分量が出る**状態を保つこと。
  */
 export function findIngredientMatches(text: string, names: readonly string[]): IngredientMatch[] {
   if (names.length === 0) return []

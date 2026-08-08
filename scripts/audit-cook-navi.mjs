@@ -29,11 +29,15 @@ import {
   stepCategory,
   stepStageRank,
   buildCookTimeline,
+  buildPlanSteps,
+  isSoakWait,
+  serveTempRank,
   WAIT_VERB_PATTERNS,
   DEFAULT_ACTIVE_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import { findTimeTokens } from '../src/logic/time.ts'
 import { stepIngredientAmounts } from '../src/logic/naviIngredients.ts'
+import { buildIngredientNames, findIngredientMatches } from '../src/logic/ingredientSpans.ts'
 import { parseRecipeText } from '../src/logic/parseRecipeText.ts'
 import { buildImportedIngredientRows, filterImportedSteps } from '../src/logic/urlImportRows.ts'
 import { starterDefs } from '../src/db/starters.ts'
@@ -183,6 +187,19 @@ function measureRecipe(r) {
     return hits
   })
 
+  // 下線と分量の食い違い（2026-08-08 便EG・オーナー実機報告
+  // 「下線は出るのに分量が出ない材料がある」）。手順本文に下線が引かれた語のうち、
+  // 分量として出なかったものを数える。**0件であることが要件**
+  const underlineNames = buildIngredientNames(r.ingredients)
+  const underlineOnly = []
+  steps.forEach((s, i) => {
+    const underlined = [...new Set(findIngredientMatches(s.text, underlineNames).map((m) => m.text))]
+    if (underlined.length === 0) return
+    const shownNames = new Set()
+    for (const hit of stepMatches[i]) for (const n of buildIngredientNames([{ name: hit.name }])) shownNames.add(n)
+    for (const word of underlined) if (!shownNames.has(word)) underlineOnly.push({ step: s.text, word })
+  })
+
   // 待ち動詞は有るのに分数が分からず手作業に落ちた手順（＝あと一歩で待ちにできた手順）
   const waitVerbNoTime = steps.filter(
     (s, i) => kinds[i] === 'active' && !isHandsOnStep(s) && /煮|蒸|漬|炊|茹で|ゆで|冷ま|冷や|粗熱|寝かせ|浸|さらす|温め|オーブン|レンジ|発酵|なじ|しみ|置い|おく/.test(s.text) && resolveStepMinutes(s) == null,
@@ -211,6 +228,7 @@ function measureRecipe(r) {
     activeCount: activeSteps.length,
     activeNoMinutes,
     stepsWithAmount,
+    underlineOnly,
     ingredientCount: r.ingredients.length,
     matchedIngredients: matchedNames.size,
     waitVerbNoTime,
@@ -314,23 +332,27 @@ function simulateTimeline(recipes, opt) {
   const jobs = recipes
     .filter((r) => r.steps.length > 0)
     .map((r, colorIndex) => {
-      const steps = (opt.splitSteps ? splitLongSteps(r.steps) : r.steps).map((s, i) => {
-        const kind = opt.classify(s)
-        const waitMinutes = kind === 'wait' ? (opt.waitMinutes(s) ?? 0) : 0
-        const activeMinutes =
-          kind === 'active' ? (s.minutes != null && s.minutes > 0 ? s.minutes : DEFAULT_ACTIVE_MINUTES) : 0
-        return {
-          i,
-          kind,
-          waitMinutes,
-          activeMinutes,
-          category: stepCategory(s),
-          stageRank: stepStageRank(s),
-          cutRank: cutOrderRank(s),
-          text: s.text,
-        }
-      })
-      return { colorIndex, steps, ptr: 0, readyAt: 0, title: r.title }
+      // アプリ本体と同じく「湯を沸かす」を差し込んでから組む（2026-08-08 便EG）
+      const steps = buildPlanSteps(opt.splitSteps ? splitLongSteps(r.steps) : r.steps).map(
+        ({ step: s }, i) => {
+          const kind = opt.classify(s)
+          const waitMinutes = kind === 'wait' ? (opt.waitMinutes(s) ?? 0) : 0
+          const activeMinutes =
+            kind === 'active' ? (s.minutes != null && s.minutes > 0 ? s.minutes : DEFAULT_ACTIVE_MINUTES) : 0
+          return {
+            i,
+            kind,
+            waitMinutes,
+            activeMinutes,
+            category: stepCategory(s),
+            stageRank: stepStageRank(s),
+            cutRank: cutOrderRank(s),
+            soakWait: kind === 'wait' && isSoakWait(s),
+            text: s.text,
+          }
+        },
+      )
+      return { colorIndex, steps, ptr: 0, readyAt: 0, title: r.title, serveRank: serveTempRank(r) }
     })
 
   const remainingSpan = (j) => {
@@ -351,14 +373,11 @@ function simulateTimeline(recipes, opt) {
       cookAt = Math.min(...active.map((j) => j.readyAt))
       ready = active.filter((j) => j.readyAt <= cookAt)
     }
-    const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
-    let chosen
-    if (waits.length > 0) {
-      waits.sort((a, b) => b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex)
-      chosen = waits[0]
-    } else {
-      const sameCat = (j) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
-      chosen = ready.slice().sort((a, b) => {
+    const sameCat = (j) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
+    // 完成の順番（冷やす品は先に・熱々の品は最後に仕上げる）。その品の最後の手順にだけ効かせる
+    const finishBias = (j) => (j.ptr === j.steps.length - 1 ? j.serveRank : 1)
+    const pickActive = (cands) =>
+      cands.slice().sort((a, b) => {
         const stepA = a.steps[a.ptr]
         const stepB = b.steps[b.ptr]
         // 切る工程どうしは、まな板の順序（野菜→肉・魚）を先に見る（アプリ本体と同じ規則）
@@ -366,12 +385,25 @@ function simulateTimeline(recipes, opt) {
           return stepA.cutRank - stepB.cutRank
         }
         return (
+          finishBias(a) - finishBias(b) ||
           remainingSpan(b) - remainingSpan(a) ||
           stepA.stageRank - stepB.stageRank ||
           sameCat(a) - sameCat(b) ||
           a.colorIndex - b.colorIndex
         )
       })[0]
+    const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
+    // 漬け込み・寝かせの前に、いま着手できる切る工程を先に片付ける（アプリ本体と同じ規則）
+    const readyCuts = ready.filter((j) => j.steps[j.ptr].kind === 'active' && j.steps[j.ptr].category === 'cut')
+    const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
+    let chosen
+    if (waits.length > 0 && !(soakOnly && readyCuts.length > 0)) {
+      waits.sort((a, b) => b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex)
+      chosen = waits[0]
+    } else if (soakOnly && readyCuts.length > 0) {
+      chosen = pickActive(readyCuts)
+    } else {
+      chosen = pickActive(ready)
     }
     const step = chosen.steps[chosen.ptr]
     const startMin = cookAt
@@ -698,6 +730,34 @@ for (const g of groups) {
   say(
     `| ${g.key} | ${f1(pct(st.stepsWithAmount, st.stepCount))}% | ${f1(pct(st.matchedIngredients, st.ingredientCount))}% |`,
   )
+}
+say()
+
+// --- 4b: 下線と分量の食い違い（2026-08-08 便EG。0件が要件） ---
+say('■ 4b. 手順本文の下線と、分量表示の食い違い（下線が引かれたのに分量が出ない語）')
+say()
+say('| レシピ群 | 手順数 | 食い違いのある手順 | 食い違いの語の数 |')
+say('|---|---|---|---|')
+const underlineSamples = []
+for (const g of [...groups, ...holdoutGroups]) {
+  let stepsWith = 0
+  let words = 0
+  let stepCount = 0
+  for (const r of g.recipes) {
+    const m = measures.get(r.id)
+    stepCount += m.stepCount
+    const bySteps = new Set(m.underlineOnly.map((x) => x.step))
+    stepsWith += bySteps.size
+    words += m.underlineOnly.length
+    for (const x of m.underlineOnly)
+      if (underlineSamples.length < 12) underlineSamples.push(`${r.title}: ${x.word} ← ${x.step.slice(0, 40)}`)
+  }
+  say(`| ${g.key} | ${stepCount} | ${stepsWith} | ${words} |`)
+}
+if (underlineSamples.length > 0) {
+  say()
+  say('  食い違いの例（0件が要件。1件でも出たら下線か分量のどちらかを直す）:')
+  for (const s of underlineSamples) say(`    - ${s}`)
 }
 say()
 

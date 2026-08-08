@@ -17,6 +17,7 @@ import {
 import BackHeader from '../components/BackHeader'
 import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
+import { MemoText } from '../components/MemoText'
 import { listRecipes } from '../db/recipes'
 import { useTodayList } from '../db/todayList'
 import { useMealPlanRange } from '../db/mealPlan'
@@ -38,6 +39,8 @@ import {
   clearCookNaviSession,
   loadCookNaviSession,
   saveCookNaviSession,
+  saveCookNaviScroll,
+  takeCookNaviScroll,
 } from '../logic/cookNaviSession'
 import {
   recipeIngredientList,
@@ -57,13 +60,41 @@ import { ja } from '../i18n/ja'
 const RECIPE_COLORS = NAVI_RECIPE_COLORS
 const MAX_SELECT = 3
 
-/** レシピ名の色付きピル（どのレシピの手順かを一目で分かるようにする） */
-function RecipePill({ title, colorIndex }: { title: string; colorIndex: number }) {
+/**
+ * そのレシピ内の手順番号を丸数字にする（①〜⑳。21手順目以降は素の数字）。
+ * 2026-08-08 便EG・オーナー案「①をレシピ名頭につければ、全体の番号とレシピごとの番号が
+ * 並んで見やすい」。丸数字にすると全体の通し番号（左の丸バッジ）と見分けが付く。
+ */
+function circledNumber(n: number): string {
+  return n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : String(n)
+}
+
+/**
+ * レシピ名の色付きピル（どのレシピの手順かを一目で分かるようにする）。
+ * stepNumber を渡すと、そのレシピ内の手順番号を料理名の頭に付ける（2026-08-08 便EG）。
+ */
+function RecipePill({
+  title,
+  colorIndex,
+  stepNumber,
+}: {
+  title: string
+  colorIndex: number
+  stepNumber?: number
+}) {
   return (
     <span
       className="inline-block max-w-full truncate rounded-full px-2 py-0.5 text-xs font-bold"
       style={{ backgroundColor: RECIPE_COLORS[colorIndex % RECIPE_COLORS.length], color: 'var(--chip-ink)' }}
     >
+      {stepNumber != null && stepNumber > 0 && (
+        <>
+          <span className="sr-only">
+            {ja.cookNavi.stepNumberLabel.replace('{n}', String(stepNumber))}
+          </span>
+          <span aria-hidden>{circledNumber(stepNumber)}</span>
+        </>
+      )}
       {title}
     </span>
   )
@@ -83,6 +114,7 @@ function TimelineCard({
   ingredients,
   ingredientNames,
   showFillHint,
+  isRecipeLast,
   highlighted,
   onStartTimer,
 }: {
@@ -93,6 +125,8 @@ function TimelineCard({
   ingredientNames: readonly string[]
   /** 待ちブロックに「この間に、次の手作業を進められます」を出すか（後続に手作業があるときだけ） */
   showFillHint: boolean
+  /** そのレシピの最後の手順か（「完成」を出す。2026-08-08 便EG） */
+  isRecipeLast: boolean
   /** 常駐タイマーバーの完了タップから飛んできた直後の一時ハイライト対象か */
   highlighted: boolean
   onStartTimer: (item: TimelineItem, seconds: number) => void
@@ -110,7 +144,13 @@ function TimelineCard({
     >
       <div className="flex items-center gap-2">
         <StepBadge number={item.order} size={28} />
-        <RecipePill title={item.recipeTitle} colorIndex={item.colorIndex} />
+        {/* レシピ名の頭に、そのレシピ内の手順番号（①②③）を置く。行内の「手順◯」は廃止
+            （2026-08-08 便EG・オーナー案）。ナビが足した工程には番号を付けない */}
+        <RecipePill
+          title={item.recipeTitle}
+          colorIndex={item.colorIndex}
+          stepNumber={item.stepNumber}
+        />
         <span
           className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-bold ${
             isWait ? 'border-accent text-accent-ink' : 'border-edge text-ink-muted'
@@ -122,9 +162,15 @@ function TimelineCard({
       </div>
 
       <p className="ja-phrase mt-[var(--space-sm)] leading-relaxed">
-        <span className="mr-1 text-xs font-bold text-ink-muted">
-          {ja.cookNavi.stepNumberLabel.replace('{n}', String(item.stepNumber))}
-        </span>
+        {/* レシピには無く、ナビが段取りに足した工程であることの印（2026-08-08 便EG） */}
+        {item.addedByNavi && (
+          <span
+            data-testid="navi-added-step"
+            className="mr-1 rounded-sm border border-edge px-1 py-0.5 text-xs font-bold text-ink-muted"
+          >
+            {ja.cookNavi.addedByNaviTag}
+          </span>
+        )}
         {/* 手順本文の材料名に控えめな下線（レシピ詳細と同じ・2026-08-08 便ED） */}
         <TimeText
           text={item.text}
@@ -132,7 +178,13 @@ function TimelineCard({
           onStart={(_t, seconds) => onStartTimer(item, seconds)}
         />
       </p>
-      {item.memo && <p className="mt-1 text-sm text-ink-muted">{item.memo}</p>}
+      {/* 注意書きは改行・箇条書きを保って出す（2026-08-08 便EG・オーナー実機報告
+          「メモが箇条書きでも改行されず読みにくい」）。レシピ詳細と同じ描き方にそろえる */}
+      {item.memo && (
+        <div data-testid="navi-step-memo">
+          <MemoText text={item.memo} className="mt-1 text-sm text-ink-muted" />
+        </div>
+      )}
 
       {/* この手順で使う材料と分量（2026-08-08 便EB）。
           3品を並行で作ると材料欄が混ざるため、同じ材料を別のレシピに使ってしまう事故を
@@ -187,6 +239,23 @@ function TimelineCard({
             </p>
           )}
         </div>
+      )}
+
+      {/* その品がここで出来上がる（2026-08-08 便EG・オーナー指示
+          「最後の手順は右下に色付きで完成と出して」）。色はそのレシピの色 */}
+      {isRecipeLast && (
+        <p className="mt-[var(--space-sm)] text-right">
+          <span
+            data-testid="navi-recipe-done"
+            className="inline-block rounded-full px-3 py-0.5 text-sm font-bold"
+            style={{
+              backgroundColor: RECIPE_COLORS[item.colorIndex % RECIPE_COLORS.length],
+              color: 'var(--chip-ink)',
+            }}
+          >
+            {ja.cookNavi.recipeDone}
+          </span>
+        </p>
       )}
     </li>
   )
@@ -498,6 +567,33 @@ export default function CookNaviPage() {
     [showTimeline, selectedRecipes],
   )
   const isSequential = timeline?.mode === 'sequential'
+
+  /**
+   * その品の最後の手順（＝そこで完成する手順）の位置。段取りの並びで最後に出てくるものを採る
+   * （2026-08-08 便EG・オーナー指示「最後の手順は右下に色付きで完成と出して」）。
+   */
+  const lastIndexByRecipeId = useMemo(() => {
+    const map = new Map<number, number>()
+    timeline?.items.forEach((item, index) => map.set(item.recipeId, index))
+    return map
+  }, [timeline])
+
+  /**
+   * レシピ詳細から戻ってきたときに、見ていた位置へ帰す（2026-08-08 便EG・実機フィードバック⑧）。
+   * 段取りが描き上がってからでないと高さが足りずスクロールできないので、timeline を依存に入れる。
+   */
+  const scrollRestoredRef = useRef(false)
+  useEffect(() => {
+    if (scrollRestoredRef.current || !timeline) return
+    const y = takeCookNaviScroll()
+    if (y == null) {
+      scrollRestoredRef.current = true
+      return
+    }
+    scrollRestoredRef.current = true
+    // 描画直後は本文の高さが確定していないことがあるので、1フレーム置いてから戻す
+    requestAnimationFrame(() => window.scrollTo({ top: y }))
+  }, [timeline])
 
   // ?focusStep= の着地は、段取りの手順カードが描かれてから行う（2026-08-08 便ED）。
   // 常駐タイマーから別の画面 → ナビ、と飛んできたときは、この画面が組み上がるより先に
@@ -822,17 +918,22 @@ export default function CookNaviPage() {
                           /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
                              （次の手順は同じ品の続きで、待ち終わってからやる作業のため） */
                           showFillHint={!isSequential && hasLaterHandsOnStep(timeline.items, index)}
+                          isRecipeLast={lastIndexByRecipeId.get(item.recipeId) === index}
                           highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
                           onStartTimer={startStepTimer}
                         />
                       ))}
                     </ol>
 
+                    {/* レシピ詳細への入口。戻ったときはナビの見ていた位置に帰す
+                        （2026-08-08 便EG・実機フィードバック⑧。従来はレシピ一覧へ飛ばされていた） */}
                     <div className="mt-[var(--space-md)] flex flex-wrap gap-2">
                       {timeline.recipes.map((r) => (
                         <Link
                           key={r.id}
                           to={`/recipes/${r.id}`}
+                          state={{ from: 'cookNavi', fromPath: '/cook-navi' }}
+                          onClick={() => saveCookNaviScroll(window.scrollY)}
                           className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
                         >
                           {r.title}

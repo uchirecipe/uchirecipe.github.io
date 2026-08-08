@@ -129,6 +129,7 @@ import {
   type ShoppingRange,
 } from '../logic/shopping'
 import { todayString } from '../logic/date'
+import { clearCookNaviSession, hasCookNaviTimeline } from '../logic/cookNaviSession'
 import { hasNgIngredient } from '../logic/ng'
 import {
   buildPriceIndex,
@@ -2085,6 +2086,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return ids
   }, [pickedRecipes, plannedGroups])
 
+  /**
+   * 並行調理ナビに作りかけの段取りが残っているか（2026-08-08 便EG・オーナー実機報告
+   * 「タブ移動しても並行調理が維持されているが、再開したい時に迷う」）。
+   * 端末内の一時的な覚え書き（sessionStorage）なので、この画面を開くたびに読み直す。
+   */
+  const naviInProgress = hasCookNaviTimeline()
+
   // 献立タブを開いたときの初期タブ(2026-07-16 便U-1でタブ構成に再設計): 既定は「日」タブ。
   // ?focus=today が付いている場合(今日の献立からレシピを開いて戻ってきた場合)は、明示的に
   // 「日」タブへ固定し最上部へスクロールする（2026-07-15オーナー実機フィードバック対策を維持）。
@@ -2739,11 +2747,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (count === 0) return
     const confirmText =
       ja.mealPlan.todayMarkAllCookedConfirm.replaceAll('{n}', String(count)) +
+      // 記録すると今日の献立が空になり、並行調理ナビは段取りを出せなくなる。
+      // 押す前に「段取りも終わる」ことを伝える（2026-08-08 便EG・規約F）
+      (naviInProgress ? ja.mealPlan.todayMarkAllCookedConfirmNavi : '') +
       (settings?.cookedReflectPantry ? ja.mealPlan.todayMarkAllCookedConfirmPantry : '') +
       ja.mealPlan.todayMarkAllCookedConfirmAsk
     if (!window.confirm(confirmText)) return
     const recorded = dayRecipeIds.map(undoItemOf)
     await markAllTodayListCooked(recorded.map((item) => item.recipeId))
+    // 予告どおり、作りかけの段取りもここで終える（再開ボタンだけが残る状態にしない）
+    if (naviInProgress) clearCookNaviSession()
     const toast = ja.mealPlan.todayMarkAllCookedToast.replace('{n}', String(recorded.length))
     setMessage(toast)
     setUndoCooked({ items: recorded, message: toast })
@@ -4838,6 +4851,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {viewMode === 'day' && (
         <>
+          {/* 作りかけの段取りに戻る（2026-08-08 便EG・オーナー実機報告「タブ移動しても
+              並行調理が維持されているが、再開したい時に迷う。今日の献立タブの目立つ位置に
+              再開ボタン欲しい」）。段取りが残っているときだけ、今日の献立の上に出す */}
+          {naviInProgress && (
+            <Link
+              to="/cook-navi"
+              data-testid="navi-resume"
+              className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
+            >
+              <Route size={20} aria-hidden />
+              {ja.mealPlan.cookNaviResume}
+            </Link>
+          )}
+
           {/* 今日の献立（週間プランナーとは別の「今日これ作る」リスト） */}
           <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
             <h2 className="text-xl font-bold">{ja.mealPlan.todayTitle}</h2>
