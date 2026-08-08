@@ -16473,9 +16473,11 @@ try {
         await aiPage.getByRole('button', { name: '追加', exact: true }).click()
         await aiPage.waitForTimeout(350)
       }
+      // 2026-08-08 便DY-1: 買い物メモは売り場ごとのブロック(見出し+ul)になったので、
+      // 食材名はブロックを跨いで document 順に拾う(=見た目の並びと同じ)
       const memoNames = () =>
         aiPage.evaluate(() =>
-          Array.from(document.querySelectorAll('ul.divide-y > li > div > span.font-bold')).map(
+          Array.from(document.querySelectorAll('ul.divide-y > li > button > span.font-bold')).map(
             (el) => el.textContent,
           ),
         )
@@ -16570,6 +16572,271 @@ try {
       )
     } finally {
       await aiBrowser.close()
+    }
+  }
+
+  // --- DY-01: 買い物メモの売り場ブロック(2026-08-08 オーナー実機フィードバック①)。
+  // 「売り場順ごとに食材をブロック分けして表示して。たくさんの食材が羅列していて見づらい」。
+  // 売り場名+件数の見出しつきの塊に分かれること、中身が0件の売り場は出ないこと、
+  // ブロックを跨いだ並びは従来の売り場順のままであること。
+  // あわせて、手で足した食材の出所の小窓が「自分で追加」を出すこと(FB②の一部)も見る ---
+  currentCheck = 'DY-01'
+  {
+    const dyBrowser = await chromium.launch()
+    const dyContext = await dyBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dyPage = await dyContext.newPage()
+    dyPage.on('dialog', (dialog) => dialog.accept())
+    dyPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@DY-01] ${err.message}`)
+    })
+    try {
+      await dyPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await dyPage.waitForTimeout(1800)
+      await dyPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await dyPage.waitForTimeout(400)
+      // わざと売り場順と違う順で手入力する(調味料→野菜→肉→野菜)
+      for (const name of ['しょうゆ', '玉ねぎ', '豚こま切れ肉', 'にんじん']) {
+        await dyPage.getByPlaceholder('食材を入力').fill(name)
+        await dyPage.getByRole('button', { name: '追加', exact: true }).click()
+        await dyPage.waitForTimeout(350)
+      }
+      // ブロックの見出し(売り場名・件数)は、各リストの直前の要素にある
+      const dyBlocks = () =>
+        dyPage.evaluate(() =>
+          Array.from(document.querySelectorAll('ul.divide-y')).map((ul) => {
+            const spans = ul.previousElementSibling
+              ? Array.from(ul.previousElementSibling.querySelectorAll('span'))
+              : []
+            return {
+              group: spans[0]?.textContent ?? '',
+              count: spans[1]?.textContent ?? '',
+              names: Array.from(ul.querySelectorAll('li > button > span.font-bold')).map(
+                (el) => el.textContent,
+              ),
+            }
+          }),
+        )
+      const blocks = await dyBlocks()
+      check(
+        'DY-01 売り場名の見出しが売り場順に並び、中身が0件の売り場(豆腐卵乳・主食粉・その他)は出ない',
+        JSON.stringify(blocks.map((b) => b.group)) ===
+          JSON.stringify(['野菜・きのこ', '肉・魚介', '調味料']),
+        JSON.stringify(blocks.map((b) => b.group)),
+      )
+      check(
+        'DY-01 見出しにそのブロックの件数が出る',
+        JSON.stringify(blocks.map((b) => b.count)) === JSON.stringify(['2件', '1件', '1件']),
+        JSON.stringify(blocks.map((b) => b.count)),
+      )
+      check(
+        'DY-01 ブロックを跨いだ並びは従来の売り場順のまま(グループ内は追加順)',
+        JSON.stringify(blocks.flatMap((b) => b.names)) ===
+          JSON.stringify(['玉ねぎ', 'にんじん', '豚こま切れ肉', 'しょうゆ']),
+        JSON.stringify(blocks.flatMap((b) => b.names)),
+      )
+      // チェックを入れても、買ったものが別枠へ飛ばずそのブロックに残る
+      await dyPage.getByRole('button', { name: 'チェックの切り替え', exact: true }).first().click()
+      await dyPage.waitForTimeout(400)
+      const afterCheck = await dyBlocks()
+      check(
+        'DY-01 チェック済みも元の売り場ブロックに残る(並びが変わらない)',
+        JSON.stringify(afterCheck.flatMap((b) => b.names)) ===
+          JSON.stringify(['玉ねぎ', 'にんじん', '豚こま切れ肉', 'しょうゆ']),
+        JSON.stringify(afterCheck.flatMap((b) => b.names)),
+      )
+
+      // 手で足した食材の出所は「自分で追加」と正直に出す
+      await dyPage.getByRole('button', { name: '追加したレシピを見る' }).first().click()
+      await dyPage.waitForTimeout(350)
+      const dyManualPopup = dyPage.getByRole('dialog')
+      check(
+        'DY-01 手で足した食材の小窓は「自分で追加」を出す',
+        (await dyManualPopup.isVisible()) &&
+          ((await dyManualPopup.textContent()) ?? '').includes('自分で追加'),
+        (await dyManualPopup.textContent()) ?? '(小窓が出ていない)',
+      )
+      await dyPage.keyboard.press('Escape')
+      await dyPage.waitForTimeout(250)
+    } finally {
+      await dyBrowser.close()
+    }
+  }
+
+  // --- DY-02: 買い物メモの出所の小窓(2026-08-08 オーナー実機フィードバック②)。
+  // 「食材をタップしたら、どのレシピから登録したのか確認できるように小窓出して欲しい」。
+  // レシピから確定した行をタップすると、レシピ名とそのレシピでの分量が出て、
+  // レシピ名からレシピ詳細へ移動できること ---
+  currentCheck = 'DY-02'
+  {
+    const dsBrowser = await chromium.launch()
+    const dsContext = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dsPage = await dsContext.newPage()
+    dsPage.on('dialog', (dialog) => dialog.accept())
+    dsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@DY-02] ${err.message}`)
+    })
+    try {
+      await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(1800)
+      await dsPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(500)
+      await dsPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await dsPage.waitForTimeout(300)
+      await dsPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await dsPage.waitForTimeout(500)
+      // ピッカーの先頭のレシピを1食で選ぶ(料理名は小窓の照合に使う)
+      const dsTitle = (await dsPage.locator('span.line-clamp-2').first().textContent()) ?? ''
+      await dsPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await dsPage.waitForTimeout(250)
+      await dsPage.getByRole('button', { name: '下書きを作る' }).click()
+      await dsPage.waitForTimeout(600)
+      await dsPage.getByRole('button', { name: '買い物メモに追加', exact: true }).click()
+      await dsPage.waitForTimeout(700)
+
+      // 買い物メモの先頭の食材をタップ→出所の小窓
+      await dsPage.getByRole('button', { name: '追加したレシピを見る' }).first().click()
+      await dsPage.waitForTimeout(400)
+      const dsPopup = dsPage.getByRole('dialog')
+      const dsPopupText = (await dsPopup.textContent()) ?? ''
+      check(
+        'DY-02 買い物メモの食材タップで出所の小窓が出る',
+        (await dsPopup.isVisible()) && dsPopupText.includes('この食材を追加したレシピ'),
+        dsPopupText,
+      )
+      check(
+        'DY-02 小窓に、その食材を追加したレシピ名が出る',
+        dsTitle.length > 0 && dsPopupText.includes(dsTitle),
+        `title=${dsTitle} popup=${dsPopupText}`,
+      )
+      // レシピ名の右にそのレシピでの分量が並ぶ(数量+単位。「少々」等もありうるので存在だけ見る)
+      const dsRow = dsPopup.locator('li a')
+      check(
+        'DY-02 小窓のレシピ名はレシピ詳細へのリンクになっている',
+        (await dsRow.count()) === 1 &&
+          ((await dsRow.first().getAttribute('href')) ?? '').includes('/recipes/'),
+        (await dsRow.first().getAttribute('href')) ?? '(リンクなし)',
+      )
+      check(
+        'DY-02 小窓に手入力の印(自分で追加)は出ない(レシピ由来の行なので)',
+        !dsPopupText.includes('自分で追加'),
+        dsPopupText,
+      )
+      // レシピ名を押すとレシピ詳細へ移動する
+      await dsRow.first().click()
+      await dsPage.waitForTimeout(900)
+      check(
+        'DY-02 小窓のレシピ名からレシピ詳細へ移動できる',
+        dsPage.url().includes('/recipes/') &&
+          ((await dsPage.textContent('body')) ?? '').includes(dsTitle),
+        dsPage.url(),
+      )
+    } finally {
+      await dsBrowser.close()
+    }
+  }
+
+  // --- DY-03: タイマー音の音量・鳴る長さ(2026-08-08 オーナー実機フィードバック③)。
+  // 「タイマー音量や長さは、設定から調整や確認できるようにしたい」。
+  // 設定「料理中」の「タイマー音」から音量3段階・長さ3段階を選べ、その場で試聴でき、
+  // 選択が保存され、タイマー音をOFFにすると触れなくなること ---
+  currentCheck = 'DY-03'
+  {
+    const dtBrowser = await chromium.launch()
+    const dtContext = await dtBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dtPage = await dtContext.newPage()
+    dtPage.on('dialog', (dialog) => dialog.accept())
+    dtPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      // 音の出せない実行環境(ヘッドレス)のAudioContext関連は本筋ではないので拾わない
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      if (text.includes('AudioContext') || text.includes('audio')) return
+      errors.push(`[console@DY-03] ${text}`)
+    })
+    dtPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@DY-03] ${err.message}`)
+    })
+    const readTimerSound = () =>
+      dtPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const s = await new Promise((resolve, reject) => {
+          const r2 = idb.transaction('settings', 'readonly').objectStore('settings').get(1)
+          r2.onsuccess = () => resolve(r2.result)
+          r2.onerror = () => reject(r2.error)
+        })
+        idb.close()
+        return { volume: s?.timerSoundVolume, length: s?.timerSoundLength }
+      })
+    try {
+      await dtPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await dtPage.waitForTimeout(1800)
+      const dtBody = (await dtPage.textContent('body')) ?? ''
+      check(
+        'DY-03 タイマー音に音量・鳴る長さ・試聴ボタンがある',
+        dtBody.includes('音量') && dtBody.includes('鳴る長さ') && dtBody.includes('音を鳴らして確かめる'),
+      )
+      check(
+        'DY-03 鳴る長さの選択肢は秒数で書かれている(約1秒/約3秒/約5秒)',
+        dtBody.includes('約1秒') && dtBody.includes('約3秒') && dtBody.includes('約5秒'),
+      )
+      // 初期状態は従来の音(ふつう・約1秒)が選ばれている＝既存ユーザーの音を勝手に変えない
+      check(
+        'DY-03 初期は従来の音(ふつう・約1秒)が選ばれている',
+        (await dtPage.getByRole('button', { name: 'ふつう', exact: true }).getAttribute('aria-pressed')) ===
+          'true' &&
+          (await dtPage.getByRole('button', { name: '約1秒', exact: true }).getAttribute('aria-pressed')) ===
+            'true',
+      )
+      check('DY-03 初期は設定に何も保存されていない(既定のまま)', JSON.stringify(await readTimerSound()) === JSON.stringify({}), JSON.stringify(await readTimerSound()))
+
+      await dtPage.getByRole('button', { name: '大きめ', exact: true }).click()
+      await dtPage.waitForTimeout(400)
+      await dtPage.getByRole('button', { name: '約3秒', exact: true }).click()
+      await dtPage.waitForTimeout(400)
+      check(
+        'DY-03 選んだ音量・長さが設定に保存される',
+        JSON.stringify(await readTimerSound()) ===
+          JSON.stringify({ volume: 'high', length: 'medium' }),
+        JSON.stringify(await readTimerSound()),
+      )
+      // 試聴ボタンはエラーにならず押せる(音そのものは実行環境に依存するので押せることだけ見る)
+      await dtPage.getByRole('button', { name: '音を鳴らして確かめる', exact: true }).click()
+      await dtPage.waitForTimeout(500)
+
+      await dtPage.reload({ waitUntil: 'networkidle' })
+      await dtPage.waitForTimeout(1500)
+      check(
+        'DY-03 リロードしても選択が維持される',
+        (await dtPage.getByRole('button', { name: '大きめ', exact: true }).getAttribute('aria-pressed')) ===
+          'true' &&
+          (await dtPage.getByRole('button', { name: '約3秒', exact: true }).getAttribute('aria-pressed')) ===
+            'true',
+      )
+
+      // タイマー音をOFFにすると音量・長さ・試聴は触れなくなり、理由が出る
+      await dtPage.getByRole('switch', { name: 'タイマー音', exact: true }).click()
+      await dtPage.waitForTimeout(500)
+      check(
+        'DY-03 タイマー音をOFFにすると音量・長さ・試聴が押せなくなる',
+        (await dtPage.getByRole('button', { name: '大きめ', exact: true }).isDisabled()) &&
+          (await dtPage.getByRole('button', { name: '約3秒', exact: true }).isDisabled()) &&
+          (await dtPage.getByRole('button', { name: '音を鳴らして確かめる', exact: true }).isDisabled()),
+      )
+      check(
+        'DY-03 押せない理由が書かれている(無言で灰色にしない)',
+        ((await dtPage.textContent('body')) ?? '').includes(
+          '「タイマー音」をオンにすると、音量と鳴る長さを選べます',
+        ),
+      )
+    } finally {
+      await dtBrowser.close()
     }
   }
 
