@@ -1698,6 +1698,15 @@ export const ja = {
     // {max}=logic/freeLimit.ts の FREE_LIMIT
     aboutDataCountFree: 'レシピ {r}件（自分で登録 {u}/{max}品）・作った記録 {c}件',
     aboutPageLink: 'アプリの紹介ページを見る',
+    // ホーム画面への追加の案内(2026-08-09 便EI)。手順そのものは public/about/install.html にあり、
+    // アプリ内からは辿れなかったので設定に導線を置く。リンク名は紹介ページ・使い方ページに
+    // 置いてある同じリンクと同一表記に揃える。
+    // 添える一文は「先に追加してから使い始めたほうがよい」理由=iOSのデータ分離を事実として書く
+    // (docs/15の実測。Safariで登録したレシピはホーム画面のアイコンから開くと出ない)。
+    // すでに登録したあとの移行手順は install.html に書いてあるのでリンクで足りる
+    installPageLink: 'ホーム画面への追加方法',
+    installPageNote:
+      'iPhone・iPadでは、Safariで登録したレシピと、ホーム画面のアイコンから開いたときのレシピが別々に保存されます。使い始める前に追加しておくと、あとから移す手間がかかりません。',
     termsLink: '利用規約・プライバシーポリシー',
     feedbackLink: 'ご意見箱',
     feedbackFormUrl: 'https://forms.gle/NcyrQTg1hbgtMMPTA',

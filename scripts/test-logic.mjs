@@ -325,6 +325,7 @@ import {
 import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceCommand.ts'
 import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
+import { isStandaloneDisplay } from '../src/logic/standalone.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -12516,6 +12517,22 @@ eq(
   for (const entry of ['まとめて献立を入力', 'おまかせで提案', '未定の日をまとめて提案']) {
     eq(`EA-DW2 目的の説明が「${entry}」を挙げている`, ja.mealPlan.purposeHint.includes(entry), true)
   }
+}
+
+// ---------- 便EI-1: ホーム画面から起動しているかの判定(設定の追加案内の出し分け) ----------
+// 設定「うちレシピについて」の「ホーム画面への追加方法」は、すでにアイコンから起動している人には
+// 出さない。判定材料はAndroid/PC=display-mode、iOS=navigator.standaloneの2本で、
+// どちらか一方でも真ならアイコン起動(iOSは古い版でdisplay-modeを返さないことがあるため)。
+{
+  const env = (displayModeStandalone, navigatorStandalone) => ({ displayModeStandalone, navigatorStandalone })
+  eq('EI-1 ブラウザのタブで開いている(両方false)＝案内を出す', isStandaloneDisplay(env(false, false)), false)
+  eq('EI-1 display-mode:standalone＝アイコン起動', isStandaloneDisplay(env(true, false)), true)
+  eq('EI-1 iOSのnavigator.standalone＝アイコン起動', isStandaloneDisplay(env(false, true)), true)
+  eq('EI-1 両方true＝アイコン起動', isStandaloneDisplay(env(true, true)), true)
+  // 案内の中身: 手順ページへのリンクと、先に追加したほうがよい理由(iOSでデータが分かれる)
+  eq('EI-1 リンク名が手順ページと同じ表記', ja.settings.installPageLink, 'ホーム画面への追加方法')
+  eq('EI-1 案内文がiOSのデータ分離に触れている', ja.settings.installPageNote.includes('別々に保存されます'), true)
+  eq('EI-1 案内文が「使い始める前に」を伝えている', ja.settings.installPageNote.includes('使い始める前に'), true)
 }
 
 // ---------- 結果 ----------

@@ -21,6 +21,7 @@ import {
   Check,
   Eye,
   Volume2,
+  Smartphone,
 } from 'lucide-react'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteArchivedCookedLogs } from '../db/recipes'
@@ -78,6 +79,7 @@ import {
   isOverCookedPhotoLimit,
   bytesToMB,
 } from '../logic/cookedPhotoStorage'
+import { isLaunchedFromHomeScreen } from '../logic/standalone'
 import {
   isValidProCode,
   normalizeProCode,
@@ -179,6 +181,11 @@ const vibrationIsSupported = vibrationSupported()
 // 修正2+3)。対応環境のみ保存先選択・「前回の場所に上書き」を出し、非対応(Safari/Firefox)は
 // 従来どおりの自動ダウンロードのままにする(ブラウザ機能自体の対応可否なのでセッション中は不変)
 const fileSaveSupported = supportsSaveFilePicker()
+
+// ホーム画面のアイコンから起動しているか(logic/standalone.ts)。アイコン起動の人には
+// 「ホーム画面への追加方法」の導線を出さない(2026-08-09 便EI)。
+// 表示モードはページを開いている間は変わらないので、上の対応可否と同じくモジュール読み込み時に1度だけ見る
+const launchedFromHomeScreen = isLaunchedFromHomeScreen()
 
 /**
  * 設定画面は1本スクロール(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
@@ -2375,6 +2382,24 @@ export default function SettingsPage() {
             <Info size={18} aria-hidden />
             {ja.settings.aboutPageLink}
           </a>
+          {/* ホーム画面への追加方法(2026-08-09 便EI)。手順ページは2026-08-08に作ったが
+              アプリ内から辿れる場所が無かった。紹介ページのリンクと同じ並び・同じ見た目にする。
+              すでにアイコンから起動している人には出さない(launchedFromHomeScreen) */}
+          {!launchedFromHomeScreen && (
+            <>
+              <a
+                href="/about/install.html"
+                data-testid="settings-install-link"
+                className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+              >
+                <Smartphone size={18} aria-hidden />
+                {ja.settings.installPageLink}
+              </a>
+              <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+                {ja.settings.installPageNote}
+              </p>
+            </>
+          )}
           <a
             href="/about/terms.html"
             className="mt-[var(--space-sm)] block text-center text-sm font-bold text-accent-ink underline"
