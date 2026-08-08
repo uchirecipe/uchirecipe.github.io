@@ -10944,6 +10944,7 @@ try {
   const staticPages = [
     ['/about/', 'うちレシピについて'],
     ['/about/manual.html', 'うちレシピの使い方'],
+    ['/about/install.html', 'ホーム画面に追加する方法'], // 2026-08-08 便EF: 追加手順の専用ページ
     ['/about/terms.html', '利用規約'],
     ['/about/tokushoho.html', '特定商取引法に基づく表記'], // 2026-08-02 便DD: 発売と同時に公開
     ['/about/unlock.html', '解錠コード'],
@@ -10992,6 +10993,52 @@ try {
     }
   }
 
+  // --- SMK-19c:「ホーム画面に追加する方法」(2026-08-08 便EF)。
+  // 説明図は scripts/shots-install.mjs で描いて public/about/img/install/ に置いた自作の画像で、
+  // 手で書いたHTMLから参照している。ファイル名の打ち間違い・図の作り直しでの改名で
+  // 静かに404になりうるため、同一オリジンのリンクと画像を全部たどって200を確かめる。
+  // あわせて「必ず目に入る位置」の導線(紹介ページのCTA直下・使い方ページの冒頭)が
+  // 消えていないことと、押す場所を示した図が3系統(iPhone/Android/パソコン)そろっていることを見る ---
+  {
+    currentCheck = 'SMK-19c'
+    await page.goto(`${BASE}/about/install.html`, { waitUntil: 'networkidle' })
+    const installInfo = await page.evaluate(() => ({
+      figures: document.querySelectorAll('figure.shot img').length,
+      headings: Array.from(document.querySelectorAll('h2')).map((h) => h.textContent?.trim() ?? ''),
+      urls: [
+        ...new Set(
+          [
+            ...Array.from(document.querySelectorAll('a[href]')).map((a) => a.href),
+            ...Array.from(document.querySelectorAll('img[src]')).map((i) => i.src),
+          ]
+            .map((u) => u.split('#')[0])
+            .filter((u) => u.startsWith(location.origin)),
+        ),
+      ],
+    }))
+    check('SMK-19c 説明図が6枚ある', installInfo.figures === 6, `枚数=${installInfo.figures}`)
+    for (const kw of ['iPhone・iPad（Safari）', 'Android（Chrome）', 'パソコン（Chrome・Edge）']) {
+      check(`SMK-19c ${kw} の手順がある`, installInfo.headings.some((h) => h.includes(kw)))
+    }
+    for (const url of installInfo.urls) {
+      const res = await page.request.get(url)
+      check(`SMK-19c リンク/画像 ${url.replace(BASE, '')}`, res.status() === 200, `status=${res.status()}`)
+    }
+    // 導線: 紹介ページは「無料で使ってみる」の直後、使い方ページは本文の冒頭に置いている
+    const lpForInstall = await (await page.request.get(`${BASE}/about/`)).text()
+    check(
+      'SMK-19c 紹介ページの「無料で使ってみる」の近くに追加方法へのリンクがある',
+      lpForInstall.includes('無料で使ってみる') &&
+        lpForInstall.indexOf('/about/install.html') > lpForInstall.indexOf('無料で使ってみる') &&
+        lpForInstall.indexOf('/about/install.html') - lpForInstall.indexOf('無料で使ってみる') < 400,
+    )
+    const manualForInstall = await (await page.request.get(`${BASE}/about/manual.html`)).text()
+    check(
+      'SMK-19c 使い方ページの冒頭に追加方法へのリンクがある',
+      manualForInstall.includes('class="head-link"') && manualForInstall.includes('/about/install.html'),
+    )
+  }
+
   // --- LAUNCH-01: 発売後に残ってはいけない語の掃引と、発売に必要な導線(2026-08-02 便DD)。
   // 「準備期間」「販売準備中」はPro版の発売前だけの言い回しで、発売後に1箇所でも残ると
   // 「まだ買えない」と読ませてしまう。静的ページ全体を機械的に見張る。
@@ -11011,6 +11058,7 @@ try {
     const launchPages = [
       '/about/',
       '/about/manual.html',
+      '/about/install.html',
       '/about/terms.html',
       '/about/unlock.html',
       '/about/tokushoho.html',
