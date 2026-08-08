@@ -22,6 +22,7 @@ import {
   Lock,
   ListChecks,
   CheckCircle2,
+  X,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
@@ -52,7 +53,13 @@ import {
   type SortDirection,
 } from '../logic/recipeSort'
 import { isNutritionUnlocked, roundNutrient } from '../logic/nutrition'
-import { countFreeLimitRecipes, isNearFreeLimit, freeLimitRemaining } from '../logic/freeLimit'
+import {
+  countFreeLimitRecipes,
+  freeLimitNoticeFor,
+  freeLimitRemaining,
+  FREE_LIMIT,
+  FREE_LIMIT_ENABLED,
+} from '../logic/freeLimit'
 import { splitValues } from '../logic/textSplit'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
@@ -337,6 +344,20 @@ export default function RecipesPage() {
   // 絞り込み無しでも常に見える総件数(2026-07-13 UI改善)。「基本レシピを表示しない」設定は
   // 一覧の表示そのものに反映される設定なのでここにも反映し、検索語等の絞り込みは反映しない
   const totalCount = visibleRecipes?.length
+
+  /**
+   * 無料版の登録件数まわり(2026-08-08 便DZ)。
+   * - 件数表記の横に出す「自分で登録 ◯/30品」: 上限に数えるのは自分で登録したレシピだけなので、
+   *   総件数(基本レシピを含む)とは別に数える。解錠済みは上限が無いので出さない
+   * - 節目の案内: 登録し終えた時点の件数が20件目・27件目・30件目だったときだけ、
+   *   RecipeFormPageが settings.freeLimitNoticeCount に控える。閉じたら0に戻して再表示しない
+   */
+  const isPro = !!settings?.proCode
+  const freeLimitCount = recipes ? countFreeLimitRecipes(recipes) : undefined
+  const freeLimitNotice = freeLimitNoticeFor(settings?.freeLimitNoticeCount, isPro)
+  const dismissFreeLimitNotice = () => {
+    void updateSettings({ freeLimitNoticeCount: 0 })
+  }
 
   /**
    * 「よく使うタグ」チップ(2026-08-03 オーナー指示)。
@@ -721,13 +742,43 @@ export default function RecipesPage() {
         )}
       </div>
 
-      {recipes && isNearFreeLimit(countFreeLimitRecipes(recipes), !!settings?.proCode) && (
-        <p className="mt-[var(--space-sm)] rounded-sm bg-surface px-3 py-2 text-sm text-ink-muted">
-          {ja.recipes.freeLimitNearBanner.replace(
-            '{n}',
-            String(freeLimitRemaining(countFreeLimitRecipes(recipes))),
-          )}
-        </p>
+      {/* 登録件数の節目の案内(2026-08-08 便DZ・オーナー指示「２０件目、２７件目、３０件目の
+          登録完了時といった感じで」)。従来は40件以上なら一覧を開くたびに常時出していたが、
+          同じ案内が毎回出るのを避け、節目ちょうどで登録し終えたときだけ1回出して×で閉じられる形にした。
+          上限に達したときだけPro版への導線を添える(予告のうちは案内文だけにする) */}
+      {freeLimitNotice && settings?.freeLimitNoticeCount !== undefined && (
+        <div
+          data-testid="free-limit-notice"
+          className="mt-[var(--space-sm)] flex items-start gap-2 rounded-sm bg-surface px-3 py-2 text-sm text-ink-muted"
+        >
+          <div className="min-w-0 flex-1">
+            <p>
+              {freeLimitNotice === 'reached'
+                ? ja.recipes.freeLimitReachedNotice
+                : ja.recipes.freeLimitNearNotice.replace(
+                    '{n}',
+                    String(freeLimitRemaining(settings.freeLimitNoticeCount)),
+                  )}
+            </p>
+            {freeLimitNotice === 'reached' && (
+              <Link
+                to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+                className="mt-0.5 inline-block font-bold text-accent-ink underline"
+              >
+                {ja.recipes.freeLimitProLink}
+              </Link>
+            )}
+          </div>
+          {/* -m-2 + p-3.5: ×の見た目は16pxのまま、タップ領域を44px四方に広げる(ホームのお知らせと同じ) */}
+          <button
+            type="button"
+            onClick={dismissFreeLimitNotice}
+            aria-label={ja.common.close}
+            className="-m-2 shrink-0 rounded-full p-3.5 text-ink-muted"
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
       )}
 
       {/* 検索バー＋並び替え/絞り込みボタン(2026-07-16 便T-1: 従来は絞り込みボタン1つに両方の
@@ -1029,6 +1080,17 @@ export default function RecipesPage() {
                   .replace('{n}', String(results.length))
                   .replace('{t}', String(totalCount))
               : ja.search.totalCount.replace('{n}', String(totalCount))}
+            {/* 無料版の登録件数(2026-08-08 便DZ・オーナー要望「利用者がどう確認できるか」)。
+                レシピを登録する場所で残りが分かるよう、総件数の横に「自分で登録 ◯/30品」を出す。
+                総件数には基本レシピが入るが上限には数えないので、別の数として並べる。
+                解錠済みは上限が無いので出さない */}
+            {FREE_LIMIT_ENABLED && !isPro && freeLimitCount !== undefined && (
+              <span data-testid="free-limit-count" className="ml-2 whitespace-nowrap">
+                {ja.recipes.freeLimitCount
+                  .replace('{n}', String(freeLimitCount))
+                  .replace('{max}', String(FREE_LIMIT))}
+              </span>
+            )}
           </p>
           <div className="flex shrink-0 items-center gap-1">
             {/* 一覧の表示形式(グリッド/リスト)切替。押すたびに逆の表示へ切り替わる(2026-07-13 UI改善。

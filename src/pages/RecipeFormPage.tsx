@@ -27,8 +27,8 @@ import type {
   Step,
 } from '../db/types'
 import { createRecipe, deleteRecipe, getRecipe, listRecipes, updateRecipe } from '../db/recipes'
-import { useSettings } from '../db/settings'
-import { countFreeLimitRecipes, isAtFreeLimit } from '../logic/freeLimit'
+import { useSettings, updateSettings } from '../db/settings'
+import { countFreeLimitRecipes, freeLimitNoticeFor, isAtFreeLimit } from '../logic/freeLimit'
 import { resizePhoto } from '../logic/image'
 import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, looksPoorlyParsed } from '../logic/parseRecipeText'
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
@@ -1324,6 +1324,13 @@ function RecipeFormInner() {
         await updateRecipe(editId, input)
       } else {
         id = await createRecipe(input)
+        // 登録し終えた件数が節目(20件目・27件目・30件目)なら、レシピ一覧で1回だけ出す案内を
+        // 予約する(2026-08-08 便DZ・オーナー指示)。節目でなければ何も書き込まない＝
+        // 登録のたびに同じ案内が出ることはない
+        const savedCount = countFreeLimitRecipes(allRecipes ?? []) + 1
+        if (freeLimitNoticeFor(savedCount, !!settings?.proCode)) {
+          await updateSettings({ freeLimitNoticeCount: savedCount })
+        }
       }
       // 保存に成功したら下書きは不要(残すと次回また「復元しますか？」が出てしまう)
       clearDraft()

@@ -42,6 +42,7 @@ import {
   type MergeImportDetail,
 } from '../logic/backup'
 import { hasNgIngredient } from '../logic/ng'
+import { countFreeLimitRecipes, FREE_LIMIT, FREE_LIMIT_ENABLED } from '../logic/freeLimit'
 import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
 import { restoreHomeWidget } from '../logic/homeWidgets'
 import { resolveBackTarget } from '../logic/backLink'
@@ -2335,10 +2336,19 @@ export default function SettingsPage() {
           <p className="text-sm text-ink-muted">
             {ja.settings.aboutVersion.replace('{v}', __APP_VERSION__)}
           </p>
-          <p className="text-sm text-ink-muted">
-            {ja.settings.aboutDataCount
-              .replace('{r}', String(dataCounts.recipes))
-              .replace('{c}', String(dataCounts.cookedLogs))}
+          {/* データ件数。未解錠のときは、レシピ一覧の件数表記と同じ「自分で登録 ◯/30品」も出す
+              (2026-08-08 便DZ・オーナー要望「利用者がどう確認できるか」)。
+              解錠済みは上限が無いので従来どおりの件数だけにする */}
+          <p className="text-sm text-ink-muted" data-testid="about-data-count">
+            {FREE_LIMIT_ENABLED && !settings.proCode
+              ? ja.settings.aboutDataCountFree
+                  .replace('{r}', String(dataCounts.recipes))
+                  .replace('{u}', String(countFreeLimitRecipes(recipes ?? [])))
+                  .replace('{max}', String(FREE_LIMIT))
+                  .replace('{c}', String(dataCounts.cookedLogs))
+              : ja.settings.aboutDataCount
+                  .replace('{r}', String(dataCounts.recipes))
+                  .replace('{c}', String(dataCounts.cookedLogs))}
           </p>
           {/* 別窓(target="_blank")にしない: iOSのホーム画面追加アプリはSafariとストレージが別のため */}
           <a

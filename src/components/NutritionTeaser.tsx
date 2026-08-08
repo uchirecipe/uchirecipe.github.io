@@ -14,6 +14,8 @@ import {
 import { roundVegetableGrams, vegetableGramsOf } from '../logic/nutritionBalance'
 import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
+import { useSettings, updateSettings } from '../db/settings'
+import { canUseNutritionTrial } from '../logic/proTrial'
 import { ja } from '../i18n/ja'
 
 /**
@@ -35,6 +37,11 @@ import { ja } from '../i18n/ja'
  *    食物繊維・鉄・カルシウムを追加、2026-08-01 で野菜量を追加）。
  *    「概算・めやす」表記と計算対象外n件の明示が必須。
  *
+ * 2026-08-08 便DZ: 未解錠の人が**好きなレシピ1つで1回だけ**、状態2と同じ8項目のフル表示を
+ * 見られるお試しを足した（logic/proTrial.ts・並行調理ナビ3回/月間献立1回と同じ作法）。
+ * 使ったことは端末内（settings.nutritionTrialUsed）にだけ残し、Proの表示ゲート
+ * （isNutritionUnlocked）は変えない＝この画面を離れればロック表示に戻る。
+ *
  * 数値の表は無料/Proで同じ部品（NutrientTable）を使い、行数だけを変える。
  * 同じ数字を2通りの見た目で出さないため（丸め・全量の掛け算規則も1か所に集約する）。
  */
@@ -50,9 +57,14 @@ export default function NutritionTeaser({
   servings?: number
 }) {
   const [expanded, setExpanded] = useState(false)
-  const unlocked = isNutritionUnlocked(isPro)
+  // お試しで8項目を開いている状態（2026-08-08 便DZ）。この画面の中だけの状態なので、
+  // 別のレシピを開けばロック表示に戻る（RecipeDetailPage側でレシピごとに作り直している）
+  const [trialActive, setTrialActive] = useState(false)
+  const settings = useSettings()
+  const proUnlocked = isNutritionUnlocked(isPro)
+  const unlocked = proUnlocked || trialActive
 
-  if (!unlocked && !NUTRITION_TEASER_ENABLED) return null
+  if (!proUnlocked && !NUTRITION_TEASER_ENABLED) return null
 
   const nutrition = computeRecipeNutrition(recipe)
   const per = nutrition.perServing
@@ -79,6 +91,21 @@ export default function NutritionTeaser({
   const gapCount = nutrition.excluded.filter(
     (e) => e.reason === 'food' || e.reason === 'unit',
   ).length
+
+  /**
+   * 8項目のお試し表示（1回だけ・2026-08-08 便DZ）。
+   * 入口は「数値が出るレシピ」でだけ出す: 分量不明・成分データ無しで1品も計算できないレシピで
+   * 使うと、数字が並ばない画面を見て1回きりのお試しを使い切ってしまう
+   * （月間献立のお試しを「作った記録が5件たまるまで出さない」のと同じ考え方）。
+   */
+  const trialUnused = !isPro && canUseNutritionTrial(settings?.nutritionTrialUsed)
+  const trialAvailable = trialUnused && canShowSummary
+  const trialExhausted = !isPro && !trialUnused
+  const startTrial = () => {
+    if (!trialAvailable) return
+    setTrialActive(true)
+    void updateSettings({ nutritionTrialUsed: true })
+  }
 
   const ChevronIcon = expanded ? ChevronUp : ChevronDown
 
@@ -109,9 +136,22 @@ export default function NutritionTeaser({
         {expanded && (
           <div className="border-t border-edge p-[var(--space-md)] pt-[var(--space-sm)]">
             {unlocked ? (
-              <UnlockedBody nutrition={nutrition} displayServings={displayServings} />
+              <UnlockedBody
+                nutrition={nutrition}
+                displayServings={displayServings}
+                trialActive={trialActive}
+              />
             ) : (
-              <LockedBody nutrition={nutrition} displayServings={displayServings} isPro={isPro} />
+              <LockedBody
+                nutrition={nutrition}
+                displayServings={displayServings}
+                isPro={isPro}
+                trial={{
+                  available: trialAvailable,
+                  exhausted: trialExhausted,
+                  onStart: startTrial,
+                }}
+              />
             )}
           </div>
         )}
@@ -320,7 +360,18 @@ function SourceNote() {
  * 2026-08-01 線引きB': 食塩相当量が無料側からPro側へ移ったので、ぼかしのサンプルも7項目にする
  * （無料で見えるのはエネルギーと野菜量だけ＝ここに並ぶのがPro側で増える項目の全部になる）。
  */
-export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
+export function ProNutrientTeaser({
+  isPro,
+  trial,
+}: {
+  isPro: boolean
+  /**
+   * 8項目を1回だけ開くお試しの入口（2026-08-08 便DZ）。渡された場所にだけ出す。
+   * レシピ詳細の栄養枠からは渡し、献立タブの栄養バランスパネルからは渡さない
+   * （お試しは「1つのレシピの8項目を見る」体験なので、入口も栄養価の枠に置く）。
+   */
+  trial?: { available: boolean; exhausted: boolean; onStart: () => void }
+}) {
   // Pro案内から設定へ飛んだあと、いま見ている画面へ帰れるようにする(2026-08-02 便DF)。
   // この部品はレシピ詳細・献立の栄養バランスパネルの両方で使うため、戻り先は現在地から作る
   const location = useLocation()
@@ -355,6 +406,22 @@ export function ProNutrientTeaser({ isPro }: { isPro: boolean }) {
         </span>
         <p className="mt-1 font-bold">{ja.nutrition.lockedTitle}</p>
         <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
+        {/* 買う前に中身を確かめられる1回だけのお試し(2026-08-08 便DZ)。
+            使えるうちはボタン、使い切ったら同じ場所に一言だけ置く(入口が消えて理由が
+            分からなくなるのを避ける。並行調理ナビ・月間献立のお試しと同じ作法) */}
+        {trial?.available && (
+          <button
+            type="button"
+            data-testid="nutrition-trial-button"
+            onClick={trial.onStart}
+            className="mt-1 rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
+          >
+            {ja.nutrition.trialButton}
+          </button>
+        )}
+        {trial?.exhausted && (
+          <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.trialUsedNote}</p>
+        )}
         {!isPro && (
           <Link
             to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
@@ -375,10 +442,12 @@ function LockedBody({
   nutrition,
   displayServings,
   isPro,
+  trial,
 }: {
   nutrition: Nutrition
   displayServings: number
   isPro: boolean
+  trial: { available: boolean; exhausted: boolean; onStart: () => void }
 }) {
   return (
     <div className="space-y-[var(--space-sm)]">
@@ -388,7 +457,7 @@ function LockedBody({
       )}
       {/* Pro版で増える項目のティーザー(2026-07-28 便BY/PRO-01で blur+Lock 様式に統一)。
           詳しい提供時期の話(freeDescription系)より先に、まず「何が増えるか」を見せる */}
-      <ProNutrientTeaser isPro={isPro} />
+      <ProNutrientTeaser isPro={isPro} trial={trial} />
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
@@ -413,12 +482,23 @@ function LockedBody({
 function UnlockedBody({
   nutrition,
   displayServings,
+  trialActive,
 }: {
   nutrition: Nutrition
   displayServings: number
+  /** お試しで開いている状態か（2026-08-08 便DZ）。1回だけの表示であることを画面上でも伝える */
+  trialActive?: boolean
 }) {
   return (
     <div className="space-y-[var(--space-sm)]">
+      {trialActive && (
+        <p
+          data-testid="nutrition-trial-active"
+          className="rounded-sm border border-accent px-3 py-2 text-sm font-bold text-accent-ink"
+        >
+          {ja.nutrition.trialActiveNote}
+        </p>
+      )}
       <NutrientTable nutrition={nutrition} displayServings={displayServings} unlocked />
 
       <MaterialGapNote nutrition={nutrition} />
