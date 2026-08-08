@@ -143,9 +143,16 @@ try {
   await wait(page, 1500)
   await page.getByRole('button', { name: '週', exact: true }).click()
   await wait(page, 700)
+  // 2026-08-08 便DW: 「今日から7日間」は折りたたみグループ「表示のしかた」の中にあり、
+  // 既定では畳まれている(2026-08-03 便DJ)。先に見出しを押して開かないとボタンを掴めない。
+  // 実行ボタンの名前は「まとめて献立を立てる」→「まとめて献立を入力」(2026-08-07 便DT-5)
+  await page.getByRole('button', { name: '表示のしかたを開く' }).click()
+  await wait(page, 500)
   await page.getByRole('button', { name: '今日から7日間', exact: true }).click()
   await wait(page, 700)
-  await page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+  await page.getByRole('button', { name: '表示のしかたを閉じる' }).click()
+  await wait(page, 400)
+  await page.getByRole('button', { name: 'まとめて献立を入力' }).click()
   await wait(page, 2600)
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 500)

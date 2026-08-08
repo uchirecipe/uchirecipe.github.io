@@ -98,6 +98,7 @@ import {
   probeWakeLockPermission,
   wakeLockSupported,
   audioSupported,
+  vibrationSupported,
   type CapabilityPermission,
 } from '../logic/cookingSupport'
 import { ja } from '../i18n/ja'
@@ -147,6 +148,8 @@ const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
 // 対応していないときだけ注記を出す＝対応ブラウザに「対応ブラウザのみ」と書き続けない(便DV-6)
 const wakeLockIsSupported = wakeLockSupported()
 const audioIsSupported = audioSupported()
+// 振動(Vibration API)の対応可否。iPhone(Safari)は非対応なので注記を出す(2026-08-08 便DW)
+const vibrationIsSupported = vibrationSupported()
 
 // File System Access API対応ブラウザ(Chrome/Edge等)かどうか(2026-07-17バックアップ改修
 // 修正2+3)。対応環境のみ保存先選択・「前回の場所に上書き」を出し、非対応(Safari/Firefox)は
@@ -1465,6 +1468,9 @@ export default function SettingsPage() {
               <div className="min-w-0">
                 <h2 className="font-bold">{ja.settings.timerSoundTitle}</h2>
                 <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerSoundDescription}</p>
+                {shouldShowUnsupportedNote(vibrationIsSupported) && (
+                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.timerVibrationUnsupportedNote}</p>
+                )}
                 {shouldShowPermissionHelp(
                   settings.timerSoundEnabled,
                   audioIsSupported,

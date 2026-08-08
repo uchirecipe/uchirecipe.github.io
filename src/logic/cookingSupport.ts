@@ -43,6 +43,16 @@ export function audioSupported(): boolean {
 }
 
 /**
+ * Vibration API（タイマー終了時の振動）を持つブラウザか（2026-08-08 便DW・オーナー実機報告）。
+ * iOS Safari は Vibration API を持たないため、iPhone では何をしても振動しない。
+ * Android Chrome など対応ブラウザでは動くので、非対応のときだけ注記を出す
+ * （wakeLockSupported と同じ出し分け＝shouldShowUnsupportedNote に渡す）。
+ */
+export function vibrationSupported(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
+}
+
+/**
  * 画面をつけたままにする許可が下りているかを実際に試して確かめる。
  * 取得できたらすぐ解放するので、設定画面が画面を占有し続けることはない。
  * 低電力モード・タブが非表示のときなどは失敗する（＝許可が下りていない）。
