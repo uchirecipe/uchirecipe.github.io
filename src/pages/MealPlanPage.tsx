@@ -222,8 +222,31 @@ const WEEK_RETURN_LINK_STATE = {
 } as const
 
 /**
- * 目的（2026-08-02 便CP-2 → 2026-08-07 便DT-9で8軸へ）の表示ラベル。
- * 数値の項目名（たんぱく質/塩分相当量）とは別物。目的が増えたら型エラーになるよう
+ * 「選ぶボタン」と「実行ボタン」を見た目で分ける（2026-08-09 便EN・オーナー実機
+ * 「ボタンの見た目が全て同じため、選択と実行の区別がつかない。選択と実行はわかりやすくしたい」）。
+ *
+ * 従来はどちらも「アクセント色で塗りつぶした角丸の四角」だったため、条件を選んだだけで
+ * 実行し終えたように見えていた（「まとめて献立を入力」を押す必要に気づけない）。
+ *  - 選ぶボタン（条件・表示の切り替え・対象の選択）＝**丸い枠のチップ**。選んでいるあいだも
+ *    面は塗らず、アクセント色の薄い地・アクセント色の枠と文字・チェック印で示す。
+ *  - 実行ボタン（押すと献立が変わるもの）＝**アクセント色で塗りつぶした角丸の四角**。
+ * 塗りつぶしを使うのは実行ボタンだけにする＝塗ってあるものは押すと何かが起きる、と
+ * 見た目だけで読み取れるようにする。
+ */
+const chipClass = (on: boolean): string =>
+  `inline-flex items-center gap-1 rounded-full border px-3 py-2 text-sm font-bold ${
+    on ? 'border-accent text-accent-ink' : 'border-edge bg-surface text-ink-muted'
+  }`
+/** 選択中のチップの地色。アクセント色から作る＝色を直書きしない（コーディング規約） */
+const chipStyle = (on: boolean): { background: string } | undefined =>
+  on ? { background: 'color-mix(in oklab, var(--accent) 14%, var(--bg))' } : undefined
+/** 選択中のチップの先頭に置くチェック印（色だけでなく形でも選択が分かるようにする） */
+const ChipCheck = ({ on }: { on: boolean }) =>
+  on ? <Check size={14} className="shrink-0" aria-hidden /> : null
+
+/**
+ * 「栄養から組む」（2026-08-02 便CP-2 → 2026-08-07 便DT-9で8軸へ。旧称「目的」）の表示ラベル。
+ * 数値の項目名（たんぱく質/塩分相当量）とは別物。軸が増えたら型エラーになるよう
  * Record で全件を書き切る（if の連鎖にすると足し忘れが黙って通る）。
  */
 const PURPOSE_LABEL: Record<MealPurpose, string> = {
@@ -3734,11 +3757,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   /**
    * 週タブの操作3グループの開閉（2026-08-03 便DJ・オーナー指示）。
-   * 既定で開くのは「自動で献立を提案」だけ。画面を離れると既定に戻る（設定には残さない）。
+   * 画面を離れると既定に戻る（設定には残さない）。
+   *
+   * 2026-08-09 便EN（オーナー実機「『献立を提案』も既定で折りたたみに」）: 3つとも畳んだ状態で
+   * 始める。実行ボタン「まとめて献立を入力」は見出しの横にあり畳んでいても押せる（便DT-5/6）ので、
+   * 畳んでも操作は失われない。7日分のカードが画面のいちばん上に近づく。
    */
   const [weekGroupOpen, setWeekGroupOpen] = useState({
     display: false,
-    auto: true,
+    auto: false,
     template: false,
   })
 
@@ -4608,7 +4635,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * この条件がひとつも効かないので、押せない見た目（グレーアウト）にして触れなくする。
    * 月タブからの呼び出しは引数なし＝従来どおり常に有効。
    */
-  const renderSuggestConditions = (disabled = false) => (
+  /**
+   * 未解錠ユーザー向けの「栄養から組む（Pro）」の鍵付き1行（docs/62 決定②「売り場を変える」＝
+   * 設定の奥ではなく無料の献立画面に入口を置く）。押し売りはしない＝控えめな1行にとどめる。
+   *
+   * 2026-08-09 便EN: 週タブの「献立を提案」グループを既定で畳んだ（オーナー指示）ため、
+   * この行をグループの中に置いたままだと、畳んだ画面から入口が消えてしまう。
+   * 週タブでは折りたたみの外へ出して同じ深さのまま残す（月タブは折りたたみが無いので中のまま）。
+   */
+  const renderPurposeLockedRow = () => (
+    <Link
+      to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
+      data-testid="purpose-locked-row"
+      className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-sm border border-edge bg-surface px-3 py-2 shadow-sm"
+    >
+      <Lock size={16} className="shrink-0 text-ink-muted" aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-bold text-ink-muted">
+          {ja.mealPlan.purposeLockedRow}
+        </span>
+        <span className="block text-xs text-ink-muted">{ja.mealPlan.purposeLockedRowSub}</span>
+      </span>
+      <ChevronRight size={16} className="shrink-0 text-ink-muted" aria-hidden />
+    </Link>
+  )
+
+  const renderSuggestConditions = (disabled = false, showLockedRow = true) => (
     <div
       className={`mt-[var(--space-sm)] ${disabled ? 'pointer-events-none opacity-40' : ''}`}
       aria-disabled={disabled || undefined}
@@ -4636,24 +4688,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             type="button"
             onClick={() => setQuickOnly((v) => !v)}
             aria-pressed={quickOnly}
-            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-              quickOnly
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
+            className={chipClass(quickOnly)}
+            style={chipStyle(quickOnly)}
           >
+            <ChipCheck on={quickOnly} />
             {ja.mealPlan.quickOnlyToggle}
           </button>
           <button
             type="button"
             onClick={() => setGenreFilter(undefined)}
             aria-pressed={genreFilter === undefined}
-            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-              genreFilter === undefined
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
+            className={chipClass(genreFilter === undefined)}
+            style={chipStyle(genreFilter === undefined)}
           >
+            <ChipCheck on={genreFilter === undefined} />
             {ja.mealPlan.genreAny}
           </button>
           {MEAL_GENRES.map((genre) => (
@@ -4662,12 +4710,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               type="button"
               onClick={() => setGenreFilter(genre)}
               aria-pressed={genreFilter === genre}
-              className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                genreFilter === genre
-                  ? 'border-accent bg-accent text-on-accent'
-                  : 'border-edge bg-surface text-ink-muted'
-              }`}
+              className={chipClass(genreFilter === genre)}
+              style={chipStyle(genreFilter === genre)}
             >
+              <ChipCheck on={genreFilter === genre} />
               {genre}
             </button>
           ))}
@@ -4675,18 +4721,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             type="button"
             onClick={() => setPreferHighProtein((v) => !v)}
             aria-pressed={preferHighProtein}
-            className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-              preferHighProtein
-                ? 'border-accent bg-accent text-on-accent'
-                : 'border-edge bg-surface text-ink-muted'
-            }`}
+            className={chipClass(preferHighProtein)}
+            style={chipStyle(preferHighProtein)}
           >
+            <ChipCheck on={preferHighProtein} />
             {ja.mealPlan.preferHighProteinToggle}
           </button>
         </div>
-        {/* 2026-08-02 便DE-7: 「調理時間15分以内を優先」が何を見ているか(全レシピの調理時間)と、
-            自分で登録したレシピも対象になる条件を1行で添える */}
-        <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>
+        {/* 条件の説明は、その条件を選んでいるあいだだけ出す（2026-08-09 便EN・オーナー実機
+            「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
+            優先されているように読めた）。
+            ・調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること
+            ・高たんぱく: 見ているのはレシピに付いた「高たんぱく」タグで、栄養価の計算値ではないこと
+              （すぐ下にPro版の「栄養から組む」の「たんぱく質多め」が並ぶため） */}
+        {quickOnly && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>}
+        {preferHighProtein && (
+          <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.preferHighProteinHint}</p>
+        )}
         </>
       )}
 
@@ -4710,12 +4761,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => void changePurpose(undefined)}
                 aria-pressed={planPurpose === undefined}
-                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                  planPurpose === undefined
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
+                className={chipClass(planPurpose === undefined)}
+                style={chipStyle(planPurpose === undefined)}
               >
+                <ChipCheck on={planPurpose === undefined} />
                 {ja.mealPlan.purposeNone}
               </button>
             </div>
@@ -4736,12 +4785,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       type="button"
                       onClick={() => void changePurpose(purpose)}
                       aria-pressed={planPurpose === purpose}
-                      className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                        planPurpose === purpose
-                          ? 'border-accent bg-accent text-on-accent'
-                          : 'border-edge bg-surface text-ink-muted'
-                      }`}
+                      className={chipClass(planPurpose === purpose)}
+                      style={chipStyle(planPurpose === purpose)}
                     >
+                      <ChipCheck on={planPurpose === purpose} />
                       {purposeLabelOf(purpose)}
                     </button>
                   ))}
@@ -4752,20 +4799,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </div>
         )
       ) : (
-        <Link
-          to={settingsLinkWithBack('/settings?section=pro', location.pathname + location.search)}
-          data-testid="purpose-locked-row"
-          className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-sm border border-edge bg-surface px-3 py-2 shadow-sm"
-        >
-          <Lock size={16} className="shrink-0 text-ink-muted" aria-hidden />
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-bold text-ink-muted">
-              {ja.mealPlan.purposeLockedRow}
-            </span>
-            <span className="block text-xs text-ink-muted">{ja.mealPlan.purposeLockedRowSub}</span>
-          </span>
-          <ChevronRight size={16} className="shrink-0 text-ink-muted" aria-hidden />
-        </Link>
+        showLockedRow && renderPurposeLockedRow()
       )}
     </div>
   )
@@ -4837,12 +4871,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           type="button"
           onClick={() => toggleSlot(slot)}
           aria-pressed={visibleSlots.includes(slot)}
-          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-            visibleSlots.includes(slot)
-              ? 'border-accent bg-accent text-on-accent'
-              : 'border-edge bg-surface text-ink-muted'
-          }`}
+          className={chipClass(visibleSlots.includes(slot))}
+          style={chipStyle(visibleSlots.includes(slot))}
         >
+          <ChipCheck on={visibleSlots.includes(slot)} />
           {ja.mealPlan.slot[slot]}
         </button>
       ))}
@@ -5915,24 +5947,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setWeekLayout(false)}
                 aria-pressed={!rollingWeek}
-                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                  !rollingWeek
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
+                className={chipClass(!rollingWeek)}
+                style={chipStyle(!rollingWeek)}
               >
+                <ChipCheck on={!rollingWeek} />
                 {ja.mealPlan.weekLayoutCalendar}
               </button>
               <button
                 type="button"
                 onClick={() => setWeekLayout(true)}
                 aria-pressed={rollingWeek}
-                className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                  rollingWeek
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
+                className={chipClass(rollingWeek)}
+                style={chipStyle(rollingWeek)}
               >
+                <ChipCheck on={rollingWeek} />
                 {ja.mealPlan.weekLayoutRolling}
               </button>
             </div>
@@ -5961,12 +5989,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       '{slot}',
                       ja.mealPlan.slot[slot],
                     )}
-                    className={`rounded-sm border px-3 py-1.5 text-sm font-bold ${
-                      clearSlotTargets.includes(slot)
-                        ? 'border-accent bg-accent text-on-accent'
-                        : 'border-edge bg-surface text-ink-muted'
-                    }`}
+                    className={chipClass(clearSlotTargets.includes(slot))}
+                    style={chipStyle(clearSlotTargets.includes(slot))}
                   >
+                    <ChipCheck on={clearSlotTargets.includes(slot)} />
                     {ja.mealPlan.slot[slot]}
                   </button>
                 ))}
@@ -5996,12 +6022,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           <button
             type="button"
             onClick={() => void fillWeek()}
-            className="ml-auto inline-flex items-center gap-1 rounded-sm border border-accent bg-accent px-3 py-2 text-sm font-bold text-on-accent shadow-sm"
+            /* 2026-08-09 便EN: このグループで唯一の実行ボタン。条件のチップ(丸い枠・塗らない)と
+               はっきり違う形にするため、角丸の四角のまま塗りつぶしを残し、一回り大きくする */
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-accent bg-accent px-4 py-3 text-base font-bold text-on-accent shadow-md"
           >
             {copyLastWeekMode ? <Copy size={16} aria-hidden /> : <Dices size={16} aria-hidden />}
             {ja.mealPlan.fillWeek}
           </button>,
         )}
+        {/* 未解錠のときだけ出る「栄養から組む（Pro）」の鍵付き1行。折りたたみの外に置く
+            （2026-08-09 便EN。グループを既定で畳んだので、中に置くと入口が画面から消える。
+            docs/62 決定②「売り場を変える」＝無料の献立画面に入口を残す） */}
+        {!isPro && renderPurposeLockedRow()}
         {weekGroupOpen.auto && (
           <>
             {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
@@ -6009,7 +6041,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
                 2026-08-07 便DT-7: 先週コピーがONのあいだは効かないのでグレーアウトする */}
-            {renderSuggestConditions(copyLastWeekMode)}
+            {renderSuggestConditions(copyLastWeekMode, false)}
 
             {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
                 空いている枠だけを埋めるのか、これからの献立を総入れ替えするのかを選ぶ。
@@ -6036,12 +6068,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     disabled={copyLastWeekMode}
                     onClick={() => setFillMode(value)}
                     aria-pressed={fillMode === value}
-                    className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                      fillMode === value
-                        ? 'border-accent bg-accent text-on-accent'
-                        : 'border-edge bg-surface text-ink-muted'
-                    }`}
+                    className={chipClass(fillMode === value)}
+                    style={chipStyle(fillMode === value)}
                   >
+                    <ChipCheck on={fillMode === value} />
                     {label}
                   </button>
                 ))}
@@ -6062,13 +6092,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setCopyLastWeekMode((v) => !v)}
                 aria-pressed={copyLastWeekMode}
-                className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
-                  copyLastWeekMode
-                    ? 'border-accent bg-accent text-on-accent'
-                    : 'border-edge bg-surface text-ink-muted'
-                }`}
+                className={chipClass(copyLastWeekMode)}
+                style={chipStyle(copyLastWeekMode)}
               >
-                <Copy size={14} aria-hidden />
+                {copyLastWeekMode ? <ChipCheck on /> : <Copy size={14} aria-hidden />}
                 {ja.mealPlan.copyLastWeekToggle}
               </button>
               <p className="mt-1 text-xs text-ink-muted">
