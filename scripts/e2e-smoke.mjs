@@ -15128,7 +15128,8 @@ try {
       // ⑥ メモの箇条書きが行ごとに分かれる（1本の棒読みにならない）
       const memoCard = egPage.locator('ol > li', { hasText: 'にんじんをゆでる' }).first()
       const memoLines = await memoCard.locator('[data-testid="navi-step-memo"] p').count()
-      const memoText = await memoCard.locator('[data-testid="navi-step-memo"]').innerText()
+      // 本文はBudouXの折返し用ゼロ幅スペース(U+200B)を含むので、比較の前に取り除く
+      const memoText = (await memoCard.locator('[data-testid="navi-step-memo"]').innerText()).replace(/\u200B/g, '')
       check(
         'EG-01 注意書きの箇条書きが行ごとに分かれて表示される',
         memoLines === 2 && memoText.includes('かたさは竹串で見ること。') && memoText.includes('ゆですぎないこと。'),
