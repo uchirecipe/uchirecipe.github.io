@@ -691,6 +691,20 @@ export interface Settings {
    */
   monthTrialUsed?: boolean
   /**
+   * 栄養8項目の見本表示（レシピ詳細の「栄養価の概算」の「1回だけ表示」）を使ったか
+   * （任意・2026-08-08 便DZ・オーナー決定）。未解錠のまま、任意の1レシピで栄養8項目を
+   * 1回だけフル表示できる。未設定＝まだ使っていない。monthTrialUsed と同じ端末内の緩いフラグで、
+   * Proの表示ゲート（isNutritionUnlocked）自体は変えない（見本を出すのはこの1回だけ）。
+   */
+  nutritionTrialUsed?: boolean
+  /**
+   * 登録件数の案内を出す予約（任意・2026-08-08 便DZ・オーナー指示）。
+   * レシピを登録し終えた時点の件数が節目（20件目・27件目・30件目）だったときにその件数を控え、
+   * レシピ一覧で1回だけ案内を出す。閉じたら0に戻して再表示しない。
+   * 0・未設定＝出す案内は無い（logic/freeLimit.ts の freeLimitNoticeFor で判定する）。
+   */
+  freeLimitNoticeCount?: number
+  /**
    * 買い物メモを並べる売り場の順番（任意・2026-08-02 便CT/C15 オーナー承認）。
    * 未設定（既存ユーザー含む）は logic/pantryGroups.ts の SHOPPING_AISLE_ORDER
    * （野菜・きのこ→肉・魚介→豆腐・卵・乳→主食・粉→調味料→その他）をそのまま使う。
