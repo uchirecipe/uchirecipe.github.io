@@ -19634,6 +19634,258 @@ try {
     }
   }
 
+
+  // --- EL-01〜06: 並行調理ナビの「調理中セッション」(2026-08-09 便EL・docs/69 第1段) ---
+  //     EL-01 「調理をはじめる」で全画面が開き、現在手順1枚＋ほかの品の次の手順が1行ずつ出る
+  //     EL-02 次へ／前へでカーソルが1つずつ動き、下部の投影も一緒に動く（手順飛ばしが起きない）
+  //     EL-03 下部の行をタップしても現在手順は変わらない（全文が出るだけ）
+  //     EL-04 **調理中に1品へ「作った記録」が付いても段取りが変わらない**（記録は一方通行）。
+  //           終えたあとは従来どおり候補から落ちる
+  //     EL-05 覚えていた手順が段取りに見つからないときは、推測せず一覧に戻して理由を出す
+  //     EL-06 この画面から単品レシピ詳細へ離脱する導線が無い
+  currentCheck = 'EL-01'
+  {
+    const elBrowser = await chromium.launch()
+    const elContext = await elBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const elPage = await elContext.newPage()
+    elPage.on('dialog', (d) => void d.accept())
+    elPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EL] ${err.message}`)
+    })
+    elPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@EL] ${t}`)
+    })
+    const counter = () => elPage.locator('[data-testid="cook-session-counter"]').innerText()
+    const rowTexts = () =>
+      elPage.locator('[data-testid="cook-session-other-row"]').allInnerTexts()
+    try {
+      await elPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await elPage.waitForTimeout(1800)
+      const ids = await elPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('EL照り焼き', [
+          { text: '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれを加えて煮からめ、器に盛る。' },
+        ], [{ name: '鶏もも肉', amount: '250', unit: 'g' }])))
+        const idB = await P(store('recipes').add(mk('EL煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて10分おき、味をしみ込ませてから器に盛る。', minutes: 10 },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        const idC = await P(store('recipes').add(mk('ELマリネ', [
+          { text: 'ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。' },
+          { text: 'パプリカときゅうりを細切りにする。' },
+          { text: 'マリネ液と和えて冷蔵庫で20分冷やす。', minutes: 20 },
+        ], [{ name: 'パプリカ', amount: '1', unit: '個' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return { idA, idB, idC }
+      })
+
+      await elPage.goto(`${BASE}/#/cook-navi`)
+      await elPage.reload({ waitUntil: 'networkidle' })
+      await elPage.waitForTimeout(1200)
+      await elPage.getByRole('button', { name: '段取りを作る' }).click()
+      await elPage.waitForTimeout(700)
+      check(
+        'EL-01 段取りの一覧に「調理をはじめる」の入口がある',
+        (await elPage.locator('[data-testid="cook-session-start"]').count()) === 1,
+      )
+      await elPage.locator('[data-testid="cook-session-start"]').click()
+      await elPage.waitForTimeout(600)
+      check(
+        'EL-01 全画面の調理中セッションが開く',
+        (await elPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+      const first = await counter()
+      check('EL-01 段取りの先頭から始まる', /^段取り 1\//.test(first), `表示=${first}`)
+      const rows1 = await rowTexts()
+      check(
+        'EL-01 ほかの2品の次の手順が1行ずつ出る',
+        rows1.length === 2,
+        `行数=${rows1.length} / ${JSON.stringify(rows1)}`,
+      )
+      check(
+        'EL-01 長い手順は「文頭…文末」に畳んで1行に収める',
+        rows1.some((t) => t.includes('…') && t.includes('マリネ液を作る。')),
+        JSON.stringify(rows1),
+      )
+      check(
+        'EL-01 いま開いている品は下部に出さない',
+        !rows1.some((t) => t.includes('EL煮物')),
+        JSON.stringify(rows1),
+      )
+
+      // EL-02: 次へ→前へで元の手順に帰る（手順飛ばし・戻り先の誤りが起きない）
+      currentCheck = 'EL-02'
+      await elPage.locator('[data-testid="cook-session-next"]').click()
+      await elPage.waitForTimeout(400)
+      const second = await counter()
+      check('EL-02 「次へ」で1つ進む', second === first.replace('1/', '2/'), `${first}→${second}`)
+      await elPage.getByRole('button', { name: '前へ' }).click()
+      await elPage.waitForTimeout(400)
+      check('EL-02 「前へ」で元の手順に帰る', (await counter()) === first, `表示=${await counter()}`)
+      check(
+        'EL-02 下部の行も元に戻る（戻り先が別の手順にならない）',
+        JSON.stringify(await rowTexts()) === JSON.stringify(rows1),
+      )
+      // 下部の行は「カーソルの投影」なので、別の品の手順を通り過ぎたときに動く
+      // （同じ品の中を進んでいる間は、ほかの品の次の手順は変わらないのが正しい）
+      const recipeTitle = () => elPage.locator('[data-testid="cook-session-recipe"]').innerText()
+      const startTitle = await recipeTitle()
+      for (let i = 0; i < 12 && (await recipeTitle()) === startTitle; i++) {
+        await elPage.locator('[data-testid="cook-session-next"]').click()
+        await elPage.waitForTimeout(300)
+      }
+      const movedTitle = await recipeTitle()
+      const rows2 = await rowTexts()
+      check('EL-02 別の品の手順に移る', movedTitle !== startTitle, `${startTitle}→${movedTitle}`)
+      check(
+        'EL-02 いま開いている品は下部から消える',
+        !rows2.some((t) => t.startsWith(movedTitle)),
+        JSON.stringify(rows2),
+      )
+      check(
+        'EL-02 直前まで開いていた品が下部に出る（済んだ手順ではなく次の手順）',
+        rows2.some((t) => t.startsWith(startTitle)) &&
+          !rows2.some((t) => t.includes('大根は一口大に切る')),
+        JSON.stringify(rows2),
+      )
+
+      // EL-03: 下部の行をタップしても現在手順は変わらない（見るだけ）
+      currentCheck = 'EL-03'
+      const beforePeek = await counter()
+      await elPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await elPage.waitForTimeout(400)
+      check(
+        'EL-03 タップで手順の全文が出る',
+        (await elPage.locator('[data-testid="cook-session-peek"]').count()) === 1,
+      )
+      check(
+        'EL-03 全文を開いても調理中の手順は動かない',
+        (await counter()) === beforePeek,
+        `${beforePeek}→${await counter()}`,
+      )
+      check(
+        'EL-03 見るだけであることを画面に書く',
+        ((await elPage.textContent('[data-testid="cook-session-peek"]')) ?? '').includes(
+          '確認するだけです。調理中の手順は変わりません',
+        ),
+      )
+      await elPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await elPage.waitForTimeout(300)
+
+      // EL-06: この画面から単品レシピ詳細へ離脱する導線を置かない
+      currentCheck = 'EL-06'
+      check(
+        'EL-06 調理中セッションの中にレシピ詳細への遷移が無い',
+        (await elPage.locator('[data-testid="cook-session"] a').count()) === 0,
+      )
+
+      // EL-04: 調理中に1品へ「作った記録」が付いても段取りが変わらない（記録は一方通行）
+      currentCheck = 'EL-04'
+      await elPage.locator('[data-testid="cook-session-next"]').click()
+      await elPage.waitForTimeout(300)
+      await elPage.locator('[data-testid="cook-session-next"]').click()
+      await elPage.waitForTimeout(400)
+      const beforeCooked = await counter()
+      await elPage.evaluate(async (recipeId) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = db.transaction('recipes', 'readwrite').objectStore('recipes')
+        const recipe = await P(store.get(recipeId))
+        const now = new Date()
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+        recipe.cookedLogs = [...(recipe.cookedLogs ?? []), { date: today }]
+        await P(store.put(recipe))
+        db.close()
+      }, ids.idC)
+      await elPage.reload({ waitUntil: 'networkidle' })
+      await elPage.waitForTimeout(1500)
+      check(
+        'EL-04 記録が付いても調理中セッションは開いたまま復元される',
+        (await elPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+      check(
+        'EL-04 調理中の手順が同じ位置に戻る（段取りが組み替わらない）',
+        (await counter()) === beforeCooked,
+        `${beforeCooked}→${await counter()}`,
+      )
+      check(
+        'EL-04 記録が付いた品も段取りに残る（母集合は選んだ3品のまま）',
+        ((await elPage.textContent('[data-testid="cook-session"]')) ?? '').includes('ELマリネ') ||
+          (await rowTexts()).some((t) => t.includes('ELマリネ')),
+        JSON.stringify(await rowTexts()),
+      )
+      // 調理を終えると、従来どおり候補から落ちる（一方通行なのは「調理中だけ」）
+      await elPage.locator('[data-testid="cook-session-close"]').click()
+      await elPage.waitForTimeout(900)
+      check(
+        'EL-04 調理を終えると全画面が閉じる',
+        (await elPage.locator('[data-testid="cook-session"]').count()) === 0,
+      )
+      check(
+        'EL-04 終えたあとは記録が付いた品が組み合わせから落ちる',
+        (await elPage.locator('[data-testid="navi-selection-dropped"]').count()) === 1,
+        (await elPage.textContent('body')).includes('今日の献立にない品') ? '文言あり' : '文言なし',
+      )
+
+      // EL-05: 覚えていた手順が段取りに無いときは推測せず一覧に戻す
+      currentCheck = 'EL-05'
+      await elPage.getByRole('button', { name: '段取りを作る' }).click()
+      await elPage.waitForTimeout(700)
+      await elPage.evaluate(() => {
+        const key = 'uchi-recipe-cook-navi-session'
+        const raw = JSON.parse(sessionStorage.getItem(key))
+        sessionStorage.setItem(
+          key,
+          JSON.stringify({ ...raw, showTimeline: true, current: { recipeId: raw.selectedIds[0], stepIndex: 98 } }),
+        )
+      })
+      await elPage.reload({ waitUntil: 'networkidle' })
+      await elPage.waitForTimeout(1500)
+      check(
+        'EL-05 見つからない手順は推測せず、全画面を開かない',
+        (await elPage.locator('[data-testid="cook-session"]').count()) === 0,
+      )
+      check(
+        'EL-05 段取りの一覧に戻したことと理由を画面に出す',
+        (await elPage.locator('[data-testid="cook-session-lost"]').count()) === 1 &&
+          ((await elPage.textContent('body')) ?? '').includes(
+            '調理中だった手順が、組み直した段取りに見つかりませんでした。',
+          ),
+      )
+    } finally {
+      await elBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

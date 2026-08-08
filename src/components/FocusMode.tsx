@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MemoText } from './MemoText'
 import {
@@ -23,8 +23,13 @@ import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/
 import { sortTimersForDisplay } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
-import { toSpeechText } from '../logic/toSpeechText'
-import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../logic/voiceCommand'
+import { resolveVoiceTimerSeconds } from '../logic/voiceCommand'
+import {
+  micSupported,
+  speechSupported,
+  useSpeech,
+  useVoiceCommands,
+} from './useVoiceCommands'
 import { renderJaUnits } from './jaUnits'
 import StepBadge from './StepBadge'
 import ComposedStepText from './ComposedStepText'
@@ -50,28 +55,6 @@ type Props = {
   onComplete?: () => void
 }
 
-const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
-const micSupported =
-  typeof window !== 'undefined' && !!(window.SpeechRecognition ?? window.webkitSpeechRecognition)
-
-/**
- * マイクの使用がブラウザ側で断られたままになっていないかを調べる（2026-08-03 実機FB①）。
- * 一度「許可しない」を選ぶとブラウザがその判断を覚え、以後は許可を尋ねる画面すら出ないまま
- * 音声認識が即座に失敗する。押しても何も起きないボタンに見えるので、開始する前に確かめる。
- * Permissions API を持たないブラウザ（Safariなど）では判定できないので false を返し、
- * 従来どおり一度開始してみて、失敗（not-allowed）を受けてから案内を出す。
- */
-async function isMicPermissionDenied(): Promise<boolean> {
-  try {
-    const permissions = navigator.permissions
-    if (!permissions?.query) return false
-    const status = await permissions.query({ name: 'microphone' as PermissionName })
-    return status.state === 'denied'
-  } catch {
-    return false
-  }
-}
-
 /**
  * 手順を1つずつ画面いっぱいに表示するモード。
  * スワイプ or 大ボタンで前後に移動でき、読み上げ・音声操作・タイマーもその場で使える。
@@ -92,14 +75,12 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   const settings = useSettings()
   const navigate = useNavigate()
   const [index, setIndex] = useState(initialStep)
-  const [speaking, setSpeaking] = useState(false)
-  const [listening, setListening] = useState(false)
-  // マイクの使用がブラウザで断られている状態（2026-08-03 実機FB①）。
-  // 閉じるまで出しっぱなしにする（1行の手応えでは流れてしまい、気づけなかった）
-  const [micDenied, setMicDenied] = useState(false)
-  // 声の操作の手応え(2026-07-28 機能④診断C14)。聞き取れた言葉・マイクが使えなかったことを
-  // その場に短く出す。以前は認識しても拒否されても画面に何の変化も無く、効いたのか分からなかった
-  const [voiceMessage, setVoiceMessage] = useState('')
+  /**
+   * 読み上げ・声の操作は components/useVoiceCommands.ts に切り出して、並行調理ナビの
+   * 調理中セッション（CookSessionOverlay）と**同じコード**を使う（2026-08-09 便EL・docs/69）。
+   * この画面の挙動は切り出し前と同じ（受ける言葉・手応えの出し方・許可まわりの案内は不変）。
+   */
+  const { speaking, speak, stopSpeech } = useSpeech()
   const touchStartX = useRef<number | null>(null)
   // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
@@ -179,72 +160,6 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる
   const autoReadRef = useRef(false)
 
-  // 声の操作の手応えを一定時間だけ出す(機能④診断C14)
-  const voiceMessageTimeout = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const showVoiceMessage = useCallback((message: string, ms = 2500) => {
-    setVoiceMessage(message)
-    clearTimeout(voiceMessageTimeout.current)
-    voiceMessageTimeout.current = setTimeout(() => setVoiceMessage(''), ms)
-  }, [])
-  useEffect(() => () => clearTimeout(voiceMessageTimeout.current), [])
-
-  /**
-   * 「声で操作」の入り切り（2026-08-03 実機FB①）。
-   * 断られたままの状態で start しても即座に失敗して黙って戻るだけなので、
-   * 始める前に許可の状態を確かめ、断られていたら直し方の案内を出す。
-   * ブラウザの設定で許可し直したら、その場で案内を引っ込めて聞き始められるようにする。
-   */
-  const toggleListening = useCallback(() => {
-    setListening((wasListening) => {
-      if (wasListening) return false
-      void isMicPermissionDenied().then((denied) => {
-        setMicDenied(denied)
-        if (denied) setListening(false)
-      })
-      return true
-    })
-  }, [])
-
-  // ブラウザの設定でマイクを許可し直したら案内を引っ込める（Permissions APIがある環境のみ）
-  useEffect(() => {
-    if (!micSupported) return
-    let status: PermissionStatus | undefined
-    const onChange = () => setMicDenied(status?.state === 'denied')
-    void (async () => {
-      try {
-        if (!navigator.permissions?.query) return
-        status = await navigator.permissions.query({ name: 'microphone' as PermissionName })
-        status.addEventListener('change', onChange)
-      } catch {
-        /* 判定できない環境では何もしない（開始してみて失敗したら案内を出す） */
-      }
-    })()
-    return () => status?.removeEventListener('change', onChange)
-  }, [])
-
-  const stopSpeech = () => {
-    if (speechSupported) window.speechSynthesis.cancel()
-    setSpeaking(false)
-  }
-
-  // 依存なし(setSpeakingはuseStateの安定した関数)なので、音声認識の効果からも安全に呼べる
-  // 用語辞書の読み仮名を発話直前に適用(表示のtextはそのまま。docs/20 §2)
-  const speak = useCallback((text: string) => {
-    if (!speechSupported) return
-    const utterance = new SpeechSynthesisUtterance(toSpeechText(text))
-    utterance.lang = 'ja-JP'
-    const jaVoice = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith('ja'))
-    if (jaVoice) utterance.voice = jaVoice
-    utterance.onend = () => setSpeaking(false)
-    utterance.onerror = () => setSpeaking(false)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(utterance)
-    setSpeaking(true)
-  }, [])
-
-  // モードを閉じるとき・切り替え中は読み上げを止める
-  useEffect(() => stopSpeech, [])
-
   // 開いている間は背景(レシピ詳細)をスクロールさせない(2026-07-28 機能④診断)。
   // 手順を読むための縦スワイプが背後のページに抜けてしまい、閉じたときに
   // 詳細画面の見当違いな位置へ着地していた。スクロール位置そのものは保たれる
@@ -320,55 +235,33 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       stepNumber,
     })
 
-  // 音声コマンド:「次へ」「戻って」「もう一回」「◯分タイマー」「ストップ」
-  useEffect(() => {
-    if (!listening) return
-    const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition
-    if (!Ctor) {
-      setListening(false)
-      return
-    }
-    const recognition = new Ctor()
-    recognition.lang = 'ja-JP'
-    recognition.continuous = true
-    recognition.interimResults = false
-
-    recognition.onresult = (event) => {
-      const last = event.results[event.results.length - 1]
-      const transcript = (last?.[0]?.transcript ?? '').replace(/\s/g, '')
-      if (!transcript) return
-      const currentIndex = indexRef.current
-      const currentStep = recipe.steps[currentIndex]
-      if (!currentStep) return
-      const currentStepNumber = currentIndex + 1
-      // 聞き取れた言葉をその場に短く出す(機能④診断C14)。
-      // 手応えが無いと「聞こえたのか・効いたのか」が分からず、同じ言葉を繰り返すことになる
-      const feedback = () =>
-        showVoiceMessage(ja.focus.micHeard.replace('{text}', transcript.slice(0, 12)))
-
-      // コマンドの言い回し判定は logic/voiceCommand.ts に集約(2026-07-30 便CK/④-1)。
-      // 画面に直書きしていたため、案内文どおりの「もう一回」(漢数字)が読み上げのパターンから
-      // 漏れていることに誰も気づけなかった(単体テストで語形を固定する)
-      const command = matchVoiceCommand(transcript)
-      if (command === 'next') {
-        feedback()
+  // 音声コマンド:「次へ」「戻って」「もう一回」「◯分タイマー」「ストップ」。
+  // 聞き取りの仕組みは components/useVoiceCommands.ts（並行調理ナビの調理中セッションと共用）
+  const { listening, toggleListening, micDenied, dismissMicDenied, voiceMessage } =
+    useVoiceCommands({
+      onNext: () => {
+        const currentIndex = indexRef.current
         if (currentIndex < total - 1) {
           stopSpeech()
           setIndex(currentIndex + 1)
         }
-      } else if (command === 'prev') {
-        feedback()
+      },
+      onPrev: () => {
+        const currentIndex = indexRef.current
         if (currentIndex > 0) {
           stopSpeech()
           setIndex(currentIndex - 1)
         }
-      } else if (command === 'repeat') {
-        feedback()
-        speak(currentStep.text)
-      } else if (command === 'stop') {
-        feedback()
-        stopSpeech()
-      } else if (command === 'timer') {
+      },
+      onRepeat: () => {
+        const currentStep = recipe.steps[indexRef.current]
+        if (currentStep) speak(currentStep.text)
+      },
+      onStop: () => stopSpeech(),
+      onTimer: (transcript) => {
+        const currentIndex = indexRef.current
+        const currentStep = recipe.steps[currentIndex]
+        if (!currentStep) return false
         // 「3分タイマー」のように分数の指定があればそれを使い、
         // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す
         // (判定は logic/voiceCommand.ts の純関数に集約。2026-08-03 便DS/実機FB⑤)
@@ -377,64 +270,18 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           currentStep.minutes,
           findTimeTokens(currentStep.text)[0]?.seconds,
         )
-        if (seconds) {
-          feedback()
-          startTimerRef.current({
-            key: `${recipeId}-${currentIndex}-${seconds}`,
-            label: recipe.title,
-            doneLabel: deriveDoneLabel(currentStep.text),
-            seconds,
-            recipeId,
-            stepNumber: currentStepNumber,
-          })
-        } else {
-          // 時間の書かれていない手順では何分にすればよいか決められず、聞き取れていても
-          // 無反応になっていた(2026-08-03 実機FB⑤)。言い方を同じ場所に出す
-          showVoiceMessage(ja.focus.micTimerHint, 5000)
-        }
-      }
-    }
-
-    // マイクを断られたら、この認識オブジェクトはもう使えない。onend からの自動再開が
-    // 「開始→即エラー」を延々と繰り返してしまうため、断られた印を立てて再開を止める
-    // (2026-08-03 実機FB①。以前は再開ループの分だけエラーが積み重なっていた)
-    let denied = false
-
-    recognition.onerror = (event) => {
-      // マイク拒否は聞き続けても無駄なのでOFFにする。無音タイムアウト等はonendから再開に任せる
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        denied = true
-        setListening(false)
-        // 以前は無言でOFFに戻るだけで、なぜ効かないのかが分からなかった(機能④診断C14)。
-        // 2026-08-03 実機FB①: 短い1行では流れてしまうので、直し方の案内を閉じるまで出す
-        showVoiceMessage(ja.focus.micDenied, 6000)
-        setMicDenied(true)
-      }
-    }
-    recognition.onend = () => {
-      if (denied) return
-      // ブラウザは無音が続くと自動停止するため、聞いている間は再開し続ける
-      try {
-        recognition.start()
-      } catch {
-        /* 既に開始処理中などは無視 */
-      }
-    }
-
-    try {
-      recognition.start()
-    } catch {
-      /* 無視 */
-    }
-
-    return () => {
-      recognition.onend = null
-      recognition.onerror = null
-      recognition.onresult = null
-      recognition.abort()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listening, recipe, recipeId, total, speak])
+        if (!seconds) return false
+        startTimerRef.current({
+          key: `${recipeId}-${currentIndex}-${seconds}`,
+          label: recipe.title,
+          doneLabel: deriveDoneLabel(currentStep.text),
+          seconds,
+          recipeId,
+          stepNumber: currentIndex + 1,
+        })
+        return true
+      },
+    })
 
   // 手順0件の防御: ここまでで全フックを呼び終えているので、以降は何も描画しない
   // (上のuseEffectがonCloseを呼ぶので、呼び出し元は自然に閉じる)
@@ -534,7 +381,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           </div>
           <button
             type="button"
-            onClick={() => setMicDenied(false)}
+            onClick={dismissMicDenied}
             aria-label={ja.focus.close}
             className="shrink-0 rounded-full p-1 text-ink-muted"
           >

@@ -145,7 +145,23 @@ import {
   splitBoilWaterClause,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
-import { parseCookNaviSession, reconcileSelectedIds } from '../src/logic/cookNaviSession.ts'
+import {
+  parseCookNaviSession,
+  reconcileSelectedIds,
+  reconcileSelectedIdsForSession,
+} from '../src/logic/cookNaviSession.ts'
+import {
+  advanceCursor,
+  backCursor,
+  collapseStepText,
+  cursorEquals,
+  findCursorIndex,
+  isCursorAtFirst,
+  isCursorAtLast,
+  nextStepsByRecipe,
+  resolveCursor,
+  startCursor,
+} from '../src/logic/cookSession.ts'
 import {
   stepIngredientAmounts,
   recipeIngredientList,
@@ -12987,6 +13003,182 @@ eq(
     ja.nutritionBalance.dayTitleMixed.includes('作った記録') &&
       ja.nutritionBalance.dayTitleMixed.includes('献立'),
     true,
+  )
+}
+
+// ---------- 便EL: 調理中セッション（並行調理ナビの全画面表示）のカーソル遷移 ----------
+// docs/69「状態の持ち方」。書ける状態はカーソル1つだけで、済んだ手順・各品の次手順・段取りは
+// すべてここから導く。遷移表を先に固定してから画面を作る（docs/10 3章）。
+{
+  // 3品を並行に組んだ段取りの縮小版。stepIndex が -1 の行は「ナビが足した工程（湯を沸かす）」
+  const plan = [
+    { recipeId: 10, stepIndex: 0, text: '玉ねぎをみじん切りにする。' }, // 0
+    { recipeId: 20, stepIndex: -1, text: '湯を沸かす' }, //               1
+    { recipeId: 20, stepIndex: 0, text: 'にんじんを2分ゆでる。' }, //     2
+    { recipeId: 10, stepIndex: 1, text: '鍋で15分煮る。' }, //            3
+    { recipeId: 30, stepIndex: 0, text: 'ボウルに調味料を入れて混ぜ、マリネ液を作る。' }, // 4
+    { recipeId: 10, stepIndex: 2, text: '器に盛る。' }, //                5
+  ]
+  const ids = [10, 20, 30]
+  const at = (i) => ({ recipeId: plan[i].recipeId, stepIndex: plan[i].stepIndex })
+
+  // 位置の特定（識別子は「レシピID＋レシピ内の手順の添字」。段取りの通し番号では持たない）
+  eq('EL-CUR 先頭の位置', findCursorIndex(plan, at(0)), 0)
+  eq('EL-CUR ナビが足した工程（添字-1）も指せる', findCursorIndex(plan, at(1)), 1)
+  eq('EL-CUR 段取りに無い手順は-1', findCursorIndex(plan, { recipeId: 10, stepIndex: 9 }), -1)
+  eq('EL-CUR 別レシピの同じ添字と取り違えない', findCursorIndex(plan, { recipeId: 30, stepIndex: 1 }), -1)
+  eq('EL-CUR カーソル未設定は-1', findCursorIndex(plan, undefined), -1)
+  eq('EL-CUR 同じ手順の判定', cursorEquals(at(3), { recipeId: 10, stepIndex: 1 }), true)
+  eq('EL-CUR レシピが違えば別の手順', cursorEquals(at(3), { recipeId: 20, stepIndex: 1 }), false)
+  eq('EL-CUR 片方が未設定なら常にfalse', cursorEquals(undefined, at(0)), false)
+
+  // 開始
+  eq('EL-CUR 開始は段取りの先頭', startCursor(plan), { recipeId: 10, stepIndex: 0 })
+  eq('EL-CUR 段取りが空なら開始できない', startCursor([]), undefined)
+
+  // 遷移表: 次へ
+  eq('EL-CUR 次へ（先頭→2番目）', advanceCursor(plan, at(0)), { recipeId: 20, stepIndex: -1 })
+  eq('EL-CUR 次へ（ナビが足した工程→本来の手順）', advanceCursor(plan, at(1)), { recipeId: 20, stepIndex: 0 })
+  eq('EL-CUR 次へ（末尾では動かない）', advanceCursor(plan, at(5)), undefined)
+  eq('EL-CUR 次へ（段取りに無い手順からは動かない）', advanceCursor(plan, { recipeId: 10, stepIndex: 9 }), undefined)
+
+  // 遷移表: 戻る
+  eq('EL-CUR 戻る（2番目→先頭）', backCursor(plan, at(1)), { recipeId: 10, stepIndex: 0 })
+  eq('EL-CUR 戻る（先頭では動かない）', backCursor(plan, at(0)), undefined)
+  eq('EL-CUR 戻る（段取りに無い手順からは動かない）', backCursor(plan, { recipeId: 99, stepIndex: 0 }), undefined)
+  // 「次へ→戻って」で必ず元の手順に帰る（オーナーが挙げた懸念「戻ってと言っても違う手順にとばされる」）
+  for (let i = 0; i < plan.length - 1; i++) {
+    eq(
+      `EL-CUR 次へ→戻るで元の手順に帰る(${i})`,
+      backCursor(plan, advanceCursor(plan, at(i))),
+      at(i),
+    )
+  }
+  // 「戻って→次へ」も同じ手順に帰る（手順飛ばしが起きない）
+  for (let i = 1; i < plan.length; i++) {
+    eq(
+      `EL-CUR 戻る→次へで元の手順に帰る(${i})`,
+      advanceCursor(plan, backCursor(plan, at(i))),
+      at(i),
+    )
+  }
+
+  // 端の判定
+  eq('EL-CUR 先頭にいる', isCursorAtFirst(plan, at(0)), true)
+  eq('EL-CUR 先頭にいない', isCursorAtFirst(plan, at(1)), false)
+  eq('EL-CUR 末尾にいる', isCursorAtLast(plan, at(5)), true)
+  eq('EL-CUR 末尾にいない', isCursorAtLast(plan, at(4)), false)
+  eq('EL-CUR 段取りに無い手順は末尾扱いにしない', isCursorAtLast(plan, { recipeId: 10, stepIndex: 9 }), false)
+
+  // 復元（再読み込み時）。見つからなければ推測せず undefined＝段取りの一覧表示に戻す
+  eq('EL-CUR 復元できる', resolveCursor(plan, { recipeId: 20, stepIndex: 0 }), { recipeId: 20, stepIndex: 0 })
+  eq('EL-CUR 復元の失敗（手順が消えた）は推測しない', resolveCursor(plan, { recipeId: 20, stepIndex: 5 }), undefined)
+  eq('EL-CUR 復元の失敗（レシピが段取りから外れた）', resolveCursor(plan, { recipeId: 40, stepIndex: 0 }), undefined)
+  eq('EL-CUR 覚えていない状態からの復元', resolveCursor(plan, undefined), undefined)
+
+  // 各品の次の手順＝カーソルの投影（済みセットを持たない）
+  eq(
+    'EL-NEXT 先頭にいるとき、他2品の次の手順',
+    nextStepsByRecipe(plan, at(0), ids).map((x) => [x.recipeId, x.item?.stepIndex]),
+    [
+      [20, -1],
+      [30, 0],
+    ],
+  )
+  eq(
+    'EL-NEXT 進むと投影も進む（20の湯沸かしは済み扱いになる）',
+    nextStepsByRecipe(plan, at(1), ids).map((x) => [x.recipeId, x.item?.stepIndex]),
+    [
+      [10, 1],
+      [30, 0],
+    ],
+  )
+  eq(
+    'EL-NEXT 残っていない品は undefined（作り終えた表示にする）',
+    nextStepsByRecipe(plan, at(5), ids).map((x) => [x.recipeId, x.item?.stepIndex]),
+    [
+      [20, undefined],
+      [30, undefined],
+    ],
+  )
+  eq('EL-NEXT いま開いている品は下部に出さない', nextStepsByRecipe(plan, at(0), ids).some((x) => x.recipeId === 10), false)
+  eq('EL-NEXT 並びはレシピの色の順で固定', nextStepsByRecipe(plan, at(4), ids).map((x) => x.recipeId), [10, 20])
+  eq('EL-NEXT カーソルが段取りに無ければ何も出さない', nextStepsByRecipe(plan, { recipeId: 99, stepIndex: 0 }, ids), [])
+
+  // 畳んだ1行の書式（2026-08-09 オーナー決定「文頭…文末」）
+  eq('EL-FOLD 上限内はそのまま', collapseStepText('玉ねぎをみじん切りにする。', 20), '玉ねぎをみじん切りにする。')
+  eq(
+    'EL-FOLD 長い手順は文頭と文末を残して中央を省く',
+    collapseStepText('ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。', 20),
+    'ボウルにオリーブオイル…マリネ液を作る。',
+  )
+  eq('EL-FOLD 省略しても上限の文字数を超えない', [...collapseStepText('あ'.repeat(80), 20)].length, 20)
+  eq('EL-FOLD 前後の空白は落とす', collapseStepText('  器に盛る。  ', 20), '器に盛る。')
+  eq('EL-FOLD 文末の残す量は指定できる', collapseStepText('あいうえおかきくけこさしすせそたちつてと', 11, 5), 'あいうえお…たちつてと')
+  eq('EL-FOLD 上限ちょうどは省略しない', collapseStepText('あ'.repeat(20), 20), 'あ'.repeat(20))
+  eq('EL-FOLD 1文字超えたら省略する', [...collapseStepText('あ'.repeat(21), 20)].join('').includes('…'), true)
+}
+
+// ---------- 便EL: 調理中は「作った記録」を段取りへ逆流させない（記録は一方通行） ----------
+// docs/69 の不変条件。2026-08-09 に実発した「並行調理中に1品だけ『作った！』すると
+// 段取りが崩壊する」と同型の事故を、実行中は母集合を動かさないことで封じる。
+{
+  eq(
+    'EL-ONEWAY 調理中は1品がcookedになっても段取りの母集合が変わらない',
+    reconcileSelectedIdsForSession([1, 2, 3], [1, 3], true),
+    [1, 2, 3],
+  )
+  eq(
+    'EL-ONEWAY 調理中でなければ従来どおり候補から消えた品を落とす',
+    reconcileSelectedIdsForSession([1, 2, 3], [1, 3], false),
+    [1, 3],
+  )
+  eq(
+    'EL-ONEWAY 調理中に候補が全部消えても段取りは残る',
+    reconcileSelectedIdsForSession([1, 2, 3], [], true),
+    [1, 2, 3],
+  )
+  eq(
+    'EL-ONEWAY 調理中でなければ従来の整合と同じ結果になる',
+    reconcileSelectedIdsForSession([3, 1, 2], [1, 2, 3], false),
+    reconcileSelectedIds([3, 1, 2], [1, 2, 3]),
+  )
+}
+
+// ---------- 便EL: 調理中の手順の覚え書き（sessionStorage の読み取り） ----------
+{
+  eq(
+    'EL-SESSION 調理中の手順を覚えられる',
+    parseCookNaviSession(
+      JSON.stringify({ selectedIds: [1, 2], showTimeline: true, trialActive: false, current: { recipeId: 2, stepIndex: 0 } }),
+    ),
+    { selectedIds: [1, 2], showTimeline: true, trialActive: false, current: { recipeId: 2, stepIndex: 0 } },
+  )
+  eq(
+    'EL-SESSION ナビが足した工程（添字-1）も覚えられる',
+    parseCookNaviSession(
+      JSON.stringify({ selectedIds: [1, 2], showTimeline: true, trialActive: false, current: { recipeId: 2, stepIndex: -1 } }),
+    )?.current,
+    { recipeId: 2, stepIndex: -1 },
+  )
+  eq(
+    'EL-SESSION 壊れたカーソルは覚えていない扱い',
+    parseCookNaviSession(
+      JSON.stringify({ selectedIds: [1, 2], showTimeline: true, current: { recipeId: 'x', stepIndex: 0 } }),
+    )?.current,
+    undefined,
+  )
+  eq(
+    'EL-SESSION 段取りを表示していないのに調理中、という不整合は捨てる',
+    parseCookNaviSession(
+      JSON.stringify({ selectedIds: [1, 2], showTimeline: false, current: { recipeId: 2, stepIndex: 0 } }),
+    )?.current,
+    undefined,
+  )
+  eq(
+    'EL-SESSION 旧形式（カーソルなし）はそのまま読める',
+    parseCookNaviSession(JSON.stringify({ selectedIds: [1, 2], showTimeline: true, trialActive: true })),
+    { selectedIds: [1, 2], showTimeline: true, trialActive: true },
   )
 }
 
