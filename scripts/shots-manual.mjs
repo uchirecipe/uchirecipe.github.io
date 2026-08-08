@@ -501,9 +501,16 @@ try {
   // 「週」タブ: まとめて献立を立てる → 1日ぶんのカード + 栄養行
   await page.getByRole('button', { name: '週', exact: true }).click()
   await wait(page, 600)
+  // 2026-08-08 便DW: 「今日から7日間」は折りたたみグループ「表示のしかた」の中にあり、
+  // 既定では畳まれている(2026-08-03 便DJ)。先に見出しを押して開かないとボタンを掴めない。
+  // 実行ボタンの名前は「まとめて献立を立てる」→「まとめて献立を入力」(2026-08-07 便DT-5)
+  await page.getByRole('button', { name: '表示のしかたを開く' }).click()
+  await wait(page, 500)
   await page.getByRole('button', { name: '今日から7日間', exact: true }).click()
   await wait(page, 600)
-  await page.getByRole('button', { name: 'まとめて献立を立てる' }).click()
+  await page.getByRole('button', { name: '表示のしかたを閉じる' }).click()
+  await wait(page, 400)
+  await page.getByRole('button', { name: 'まとめて献立を入力' }).click()
   await wait(page, 2200)
   // 野菜量が3桁gの日を優先して選ぶ(主菜だけの一品ものの日だと極端に小さい数字が載るため)
   const dayToggles = page.getByRole('button', {
@@ -528,7 +535,13 @@ try {
   }
   // 1日ぶんのカード(主菜・副菜が入った状態)
   // 主菜と副菜の両方が埋まっている日を選ぶ(一品ものの日だと副菜が空欄のまま載る)
-  const weekDayCards = page.locator('main section, main li').filter({ hasText: /主菜/ })
+  // 2026-08-08 便DW: 「主菜」「副菜」だけの絞り込みでは、説明文に「主菜と副菜でまとめて
+  // 入れます」を持つ「献立を提案」グループを掴んでしまっていた(実際に取り違えが起きた)。
+  // 曜日カードにしか無い「この日のメモ」を条件に足して、日のカードだけに絞る
+  const weekDayCards = page
+    .locator('main section, main li')
+    .filter({ hasText: /主菜/ })
+    .filter({ hasText: 'この日のメモ' })
   const filledWeekDayCards = weekDayCards
     .filter({ hasText: /副菜/ })
     .filter({ hasNotText: 'レシピを選ぶ' })
@@ -557,8 +570,18 @@ try {
     await wait(page, 2500)
   }
   await wait(page, 6500) // 結果トーストが自動で消えるのを待つ
-  const firstCell = page.locator('button[data-date]').first()
-  await crop(page, 'plan-month', firstCell, { top: 130, padTop: 26, padBottom: 6, extraBottom: 210 })
+  // 2026-08-08 便DW(オーナー指摘「献立月ページサンプルが実際の画面と違う」): カレンダーの
+  // マスだけを切り出していたため、月タブのどこを見ているのか実機と結び付かなかった。
+  // 2026-08-07 便DUでカレンダーが月タブの先頭に上がったので、「カレンダーに出す情報」から
+  // カレンダーの最終行までを1枚に収める(画面を開いたときに最初に見える範囲そのもの)
+  const monthCellModeLabel = page.getByText('カレンダーに出す情報', { exact: true }).first()
+  const lastCell = page.locator('button[data-date]').last()
+  await cropRange(page, 'plan-month', monthCellModeLabel, lastCell, {
+    top: 16,
+    padTop: 10,
+    padBottom: 10,
+    fullWidth: true,
+  })
 
   // 前の月 = 作った記録が並ぶ「写真日記」の見え方
   const prevMonth = page.getByRole('button', { name: '前の月' })
@@ -693,7 +716,10 @@ try {
   }
   const timerDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
   if (await timerDialog.count()) {
-    await crop(page, 'timer', timerDialog, { top: 40, maxHeight: 290 })
+    // 2026-08-08 便DW: 調整の窓に「このタイマーを消音」「手順◯を開く」が増えた
+    // (2026-08-03 実機FB③④)ので、maxHeight 290 では下が切れる。窓が丸ごと入る高さにする
+    // (トリミング基準=説明しているパネルを縦に丸ごと収める)
+    await crop(page, 'timer', timerDialog, { top: 40, maxHeight: 560 })
   }
   const stopTimer = timerDialog.getByRole('button', { name: '停止' })
   if (await stopTimer.count()) {

@@ -82,6 +82,7 @@ import { suggestionCandidates, DISH_TYPE_OPTIONS } from '../src/logic/homeSugges
 import {
   shouldShowPermissionHelp,
   shouldShowUnsupportedNote,
+  vibrationSupported,
 } from '../src/logic/cookingSupport.ts'
 import { preferSeasonWithFallback, SEASON_MIN_CANDIDATES } from '../src/logic/season.ts'
 import { guessDishType } from '../src/logic/dishTypeGuess.ts'
@@ -10625,6 +10626,33 @@ eq(
     shouldShowPermissionHelp(true, false, 'blocked'),
     false,
   )
+}
+
+// ---------- 便DW-1: 振動(Vibration API)の対応可否(2026-08-08 オーナー実機報告) ----------
+// iPhone(Safari)はVibration APIを持たないので、アプリが何をしても振動しない。
+// 「振動しない端末なのか、設定が悪いのか」を切り分けられるよう、非対応のときだけ注記を出す。
+// navigator.vibrate の有無だけで判定する＝UserAgent文字列で端末を当てにいかない(偽装・変更に弱い)
+{
+  const orig = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const setNav = (value) =>
+    Object.defineProperty(globalThis, 'navigator', { value, configurable: true, writable: true })
+  try {
+    setNav({ vibrate: () => true })
+    eq('DW-VIB vibrateを持つブラウザは対応と判定する', vibrationSupported(), true)
+    eq('DW-VIB 対応ブラウザには注記を出さない', shouldShowUnsupportedNote(vibrationSupported()), false)
+
+    // iOS Safari: navigator はあるが vibrate が無い
+    setNav({})
+    eq('DW-VIB vibrateが無いブラウザ(iOS Safari)は非対応', vibrationSupported(), false)
+    eq('DW-VIB 非対応のときだけ注記を出す', shouldShowUnsupportedNote(vibrationSupported()), true)
+
+    // vibrate という名前のプロパティがあっても関数でなければ呼べない(非対応扱い)
+    setNav({ vibrate: true })
+    eq('DW-VIB vibrateが関数でなければ非対応扱い', vibrationSupported(), false)
+  } finally {
+    if (orig) Object.defineProperty(globalThis, 'navigator', orig)
+    else delete globalThis.navigator
+  }
 }
 
 // ---------- 便DV-10: Pro版の販売のお知らせを解錠済みの人に出さない(2026-08-04 オーナー指摘) ----------
