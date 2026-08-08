@@ -62,6 +62,11 @@ export interface TemplateFillPlan {
    * 事実と違う理由を返していたので、本当の理由を言い分けるために返す。
    */
   hiddenSlots: MealSlot[]
+  /**
+   * 鍵が掛かっていて対象から外した食事の数（2026-08-08 便DX）。
+   * 「ロック中の◯食分は変わりません」と確認文に書くための件数に使う（規約F）。
+   */
+  lockedSlotCount: number
 }
 
 /**
@@ -73,6 +78,8 @@ export interface TemplateFillPlan {
  * - 過去日（今日より前）は対象外。上書きも新規埋めもしない（便W-⑤a以来の共通ルール）。
  * - 表示していない食事（visibleSlots外）には入れない。画面に出ない献立が黙って増えるのを防ぐ。
  * - allowedDows で曜日を絞れる（B-2「毎週この曜日だけ」）。既定は全曜日（ALL_DOWS）。
+ * - 鍵の掛かっている食事には入れない（2026-08-08 便DX）。空いていても入れない
+ *   ＝「この食事は自分で決めるから自動で入れないで」を守る。
  */
 export function planTemplateFill(options: {
   items: MealTemplateItem[]
@@ -86,8 +93,11 @@ export function planTemplateFill(options: {
   allowedDows: number[]
   /** 表示中の食事（朝食・昼食・夕食のうち画面に出しているもの） */
   visibleSlots: MealSlot[]
+  /** 鍵の掛かっている食事（'YYYY-MM-DD|slot'。2026-08-08 便DX） */
+  lockedKeys?: ReadonlySet<string>
 }): TemplateFillPlan {
   const { items, dates, entries, today, allowedDows, visibleSlots } = options
+  const lockedKeys = options.lockedKeys ?? new Set<string>()
   const filledSlotKeys = new Set(entries.map((e) => `${e.date}|${e.slot}`))
   const itemsByDowSlot = new Map<string, MealTemplateItem[]>()
   for (const item of items) {
@@ -101,6 +111,7 @@ export function planTemplateFill(options: {
   let fillSlotCount = 0
   let keptSlotCount = 0
   let targetDayCount = 0
+  let lockedSlotCount = 0
   const hiddenSlotSet = new Set<MealSlot>()
   for (const date of dates) {
     if (isPastDate(date, today)) continue
@@ -117,6 +128,12 @@ export function planTemplateFill(options: {
       const slotItems = itemsByDowSlot.get(`${dow}|${slot}`)
       if (!slotItems || slotItems.length === 0) continue
       dayHasTemplateItems = true
+      // 鍵の掛かっている食事には入れない（2026-08-08 便DX）。すでに献立が入っている食事とは
+      // 別に数える＝確認文で「残る理由」を言い分けられるようにするため
+      if (lockedKeys.has(`${date}|${slot}`)) {
+        lockedSlotCount++
+        continue
+      }
       if (filledSlotKeys.has(`${date}|${slot}`)) {
         keptSlotCount++
         continue
@@ -134,6 +151,7 @@ export function planTemplateFill(options: {
     keptSlotCount,
     targetDayCount,
     hiddenSlots: MEAL_SLOTS.filter((s) => hiddenSlotSet.has(s)),
+    lockedSlotCount,
   }
 }
 

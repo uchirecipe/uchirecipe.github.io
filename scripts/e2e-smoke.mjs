@@ -3494,7 +3494,7 @@ try {
   //  DT-1  日タブの「作った！」ボタンをカードの右下へ(押し間違いを減らす配置)
   //  DT-2  週タブの記録カード→レシピ詳細→戻る で、同じ週・同じスクロール位置へ戻り、
   //        その後「レシピ」タブを押すと(詳細ではなく)レシピ一覧が開く
-  //  DT-3  日付の切り替え欄は「すべて畳む」の上(7日分カードの直前)
+  //  DT-3  日付の切り替え欄は「すべて折りたたむ」の上(7日分カードの直前)
   //  DT-4  グループ見出しは「献立を提案」
   //  DT-5  実行ボタンは「まとめて献立を入力」。畳んでいても見える・塗りつぶしで目立つ
   //  DT-6  畳んでも使うボタンは見出しの横に集約
@@ -3586,11 +3586,11 @@ try {
       await dtPage.getByRole('button', { name: '献立を提案を開く' }).click()
       await dtPage.waitForTimeout(300)
 
-      // ---------- DT-3: 日付の切り替え欄は「すべて畳む」の上・7日分カードの直前 ----------
+      // ---------- DT-3: 日付の切り替え欄は「すべて折りたたむ」の上・7日分カードの直前 ----------
       const dtOrder = await dtPage.evaluate(() => {
         const all = [...document.querySelectorAll('button')]
         const prev = document.querySelector('button[aria-label="前の週"]')
-        const collapse = all.find((b) => b.textContent?.trim() === 'すべて畳む')
+        const collapse = all.find((b) => b.textContent?.trim() === 'すべて折りたたむ')
         const firstCard = document.querySelector('section[data-date]')
         const autoToggle = all.find((b) => b.textContent?.includes('献立を提案'))
         const pos = (a, b) =>
@@ -3603,7 +3603,7 @@ try {
         }
       })
       check(
-        'WEEKUI-DT(便DT-3) 日付の切り替え欄は操作グループより下・「すべて畳む」の上にある',
+        'WEEKUI-DT(便DT-3) 日付の切り替え欄は操作グループより下・「すべて折りたたむ」の上にある',
         dtOrder.hasAll && dtOrder.afterGroups && dtOrder.beforeCollapse && dtOrder.beforeCards,
         `order=${JSON.stringify(dtOrder)}`,
       )
@@ -3745,6 +3745,226 @@ try {
       )
     } finally {
       await dtBrowser.close()
+    }
+  }
+
+  // --- WEEKLOCK: 2026-08-08 便DX(オーナー提案)の献立のロック＋文言統一。
+  //  LOCK-1 日付の右に日ごとの鍵・食事カードの右上に時間帯ごとの鍵がある
+  //  LOCK-2 鍵を掛けると見た目でも分かる(鍵アイコンが閉じ、面の色が変わる)
+  //  LOCK-3 「すべてロック」は「すべて折りたたむ」の隣。押すと7日分が掛かり、
+  //         もう一度押すと「すべて解除」になる(トグル)
+  //  LOCK-4 日ごとの鍵は、その日の朝食・昼食・夕食3つをまとめて掛ける
+  //  LOCK-5 ロックした食事は「まとめて献立を入力(レシピを総入れ替え)」で変わらない
+  //  LOCK-6 ロックは端末に残る(再読み込みしても掛かったまま)
+  //  LOCK-7 文言統一: 画面に「畳む」が出ず「すべて折りたたむ」になっている ---
+  currentCheck = 'WEEKLOCK'
+  {
+    const lkBrowser = await chromium.launch()
+    const lkContext = await lkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const lkPage = await lkContext.newPage()
+    lkPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WEEKLOCK] ${err.message}`)
+    })
+    const lkDialogs = []
+    lkPage.on('dialog', (dialog) => {
+      lkDialogs.push(dialog.message())
+      void dialog.accept()
+    })
+    try {
+      await lkPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await lkPage.waitForTimeout(1800) // 初回シード完了待ち
+      await lkPage.getByRole('button', { name: '週', exact: true }).click()
+      await lkPage.waitForTimeout(700)
+
+      // ---------- LOCK-7: 文言統一(「畳む」を残さない) ----------
+      const lkBody = (await lkPage.textContent('body')) ?? ''
+      check(
+        'WEEKLOCK(LOCK-7) 週タブに「すべて折りたたむ」があり「畳む」は出ていない',
+        lkBody.includes('すべて折りたたむ') && !lkBody.includes('畳む'),
+      )
+
+      // ---------- LOCK-1/3: 鍵の置き場所 ----------
+      const lkPlacement = await lkPage.evaluate(() => {
+        const dayLock = document.querySelector('[data-testid="day-lock"]')
+        const dayHeading = dayLock?.closest('h2')
+        const dateText = dayHeading?.querySelector('span')?.textContent ?? ''
+        const slotLock = document.querySelector('[data-testid="slot-lock"]')
+        const slotBlock = slotLock?.closest('[data-testid="slot-block"]')
+        const lockAll = document.querySelector('[data-testid="lock-all"]')
+        const collapseAll = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent?.trim() === 'すべて折りたたむ',
+        )
+        const blockRect = slotBlock?.getBoundingClientRect()
+        const slotRect = slotLock?.getBoundingClientRect()
+        return {
+          hasDayLock: !!dayLock,
+          // 日ごとの鍵は日付と同じ行(見出し)にあり、日付より右
+          dayLockRightOfDate:
+            !!dayHeading &&
+            !!dayLock &&
+            dayLock.getBoundingClientRect().left >
+              (dayHeading.querySelector('span')?.getBoundingClientRect().left ?? 0),
+          dateText: dateText.trim(),
+          // 時間帯ごとの鍵は食事カードの右上(右端に寄り、カードの上半分にある)
+          slotLockTopRight:
+            !!blockRect &&
+            !!slotRect &&
+            blockRect.right - slotRect.right < 20 &&
+            slotRect.top - blockRect.top < 20,
+          // 「すべてロック」は「すべて折りたたむ」と同じ行
+          lockAllNextToCollapse:
+            !!lockAll && !!collapseAll && lockAll.parentElement === collapseAll.parentElement,
+          lockAllText: lockAll?.textContent?.trim() ?? '',
+        }
+      })
+      check(
+        'WEEKLOCK(LOCK-1) 日付の右に日ごとの鍵がある',
+        lkPlacement.hasDayLock && lkPlacement.dayLockRightOfDate,
+        `placement=${JSON.stringify(lkPlacement)}`,
+      )
+      check(
+        'WEEKLOCK(LOCK-1) 食事カードの右上に時間帯ごとの鍵がある',
+        lkPlacement.slotLockTopRight,
+        `placement=${JSON.stringify(lkPlacement)}`,
+      )
+      check(
+        'WEEKLOCK(LOCK-3) 「すべてロック」は「すべて折りたたむ」の隣にある',
+        lkPlacement.lockAllNextToCollapse && lkPlacement.lockAllText === 'すべてロック',
+        `placement=${JSON.stringify(lkPlacement)}`,
+      )
+
+      // ---------- LOCK-2/4: 日ごとの鍵は3食まとめて掛かり、見た目でも分かる ----------
+      // 対象は週のいちばん最後の日(必ず今日か未来日＝編集グリッドが出ている日)にする。
+      // 週区切り表示では先頭が過ぎた日になりうるので、そこを使うと食事カードが出ていない
+      const lkDate = await lkPage.evaluate(() => {
+        const all = [...document.querySelectorAll('section[data-date]')]
+        return all[all.length - 1]?.getAttribute('data-date') ?? ''
+      })
+      // 先に献立を入れておく(ロックが「今ある献立を守る」ことを確かめるため)
+      const lkFillBtn = lkPage.getByRole('button', { name: 'まとめて献立を入力' })
+      await lkFillBtn.click()
+      await lkPage.waitForTimeout(2000)
+      const lkSlotState = () =>
+        lkPage.evaluate((date) => {
+          const section = document.querySelector(`section[data-date="${date}"]`)
+          const blocks = [...(section?.querySelectorAll('[data-testid="slot-block"]') ?? [])]
+          return blocks.map((b) => ({
+            slot: b.getAttribute('data-slot'),
+            locked: b.getAttribute('data-locked') === 'true',
+            bg: getComputedStyle(b).backgroundColor,
+            pressed:
+              b.querySelector('[data-testid="slot-lock"]')?.getAttribute('aria-pressed') === 'true',
+          }))
+        }, lkDate)
+      const lkBefore = await lkSlotState()
+      await lkPage.locator(`[data-testid="day-lock"][data-date="${lkDate}"]`).click()
+      await lkPage.waitForTimeout(600)
+      const lkAfter = await lkSlotState()
+      check(
+        'WEEKLOCK(LOCK-4) 日ごとの鍵で、その日の表示中の食事がすべてロックされる',
+        lkAfter.length > 0 && lkAfter.every((s) => s.locked && s.pressed),
+        `after=${JSON.stringify(lkAfter)}`,
+      )
+      check(
+        'WEEKLOCK(LOCK-2) ロック中の食事は面の色が変わる(鍵アイコンだけに頼らない)',
+        lkBefore.length === lkAfter.length && lkBefore.every((s, i) => s.bg !== lkAfter[i].bg),
+        `before=${JSON.stringify(lkBefore.map((s) => s.bg))} / after=${JSON.stringify(lkAfter.map((s) => s.bg))}`,
+      )
+      check(
+        'WEEKLOCK(LOCK-2) ロックしたことを案内で伝える(何が変わらなくなるかも書く)',
+        ((await lkPage.textContent('body')) ?? '').includes('ロックしました'),
+      )
+
+      // ---------- LOCK-6: 再読み込みしても掛かったまま(端末に残る) ----------
+      await lkPage.reload({ waitUntil: 'networkidle' })
+      await lkPage.waitForTimeout(1500)
+      await lkPage.getByRole('button', { name: '週', exact: true }).click()
+      await lkPage.waitForTimeout(700)
+      const lkReloaded = await lkSlotState()
+      check(
+        'WEEKLOCK(LOCK-6) 再読み込みしてもロックは残る',
+        lkReloaded.length > 0 && lkReloaded.every((s) => s.locked),
+        `reloaded=${JSON.stringify(lkReloaded)}`,
+      )
+
+      // ---------- LOCK-5: 総入れ替えでもロックした食事は変わらない ----------
+      const lkPlanOf = (date) =>
+        lkPage.evaluate(
+          (d) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(
+                    g.result
+                      .filter((e) => e.date === d)
+                      .map((e) => `${e.slot}|${e.role ?? 'main'}|${e.recipeId}`)
+                      .sort(),
+                  )
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          date,
+        )
+      const lkLockedPlan = await lkPlanOf(lkDate)
+      check(
+        'WEEKLOCK(LOCK-5) 前提: ロックした日には献立が入っている',
+        lkLockedPlan.length > 0,
+        `plan=${JSON.stringify(lkLockedPlan)}`,
+      )
+      // 「レシピを総入れ替え」に切り替えて実行する(確認文は自動承認)
+      await lkPage.getByRole('button', { name: 'レシピを総入れ替え', exact: true }).click()
+      await lkPage.waitForTimeout(300)
+      lkDialogs.length = 0
+      await lkFillBtn.click()
+      await lkPage.waitForTimeout(2500)
+      const lkAfterReplace = await lkPlanOf(lkDate)
+      check(
+        'WEEKLOCK(LOCK-5) 総入れ替えでもロック中の日の献立は1品も変わらない',
+        JSON.stringify(lkAfterReplace) === JSON.stringify(lkLockedPlan),
+        `before=${JSON.stringify(lkLockedPlan)} / after=${JSON.stringify(lkAfterReplace)}`,
+      )
+      check(
+        'WEEKLOCK(LOCK-5) 総入れ替えの確認文に「ロック中の◯食分は変わりません」がある(規約F)',
+        lkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
+        `dialogs=${JSON.stringify(lkDialogs)}`,
+      )
+
+      // ---------- LOCK-3: すべてロック → すべて解除(トグル) ----------
+      const lkLockAll = lkPage.locator('[data-testid="lock-all"]')
+      await lkLockAll.click()
+      await lkPage.waitForTimeout(800)
+      check(
+        'WEEKLOCK(LOCK-3) 「すべてロック」を押すとボタンが「すべて解除」に変わる',
+        (await lkLockAll.textContent())?.trim() === 'すべて解除',
+        `text=${await lkLockAll.textContent()}`,
+      )
+      const lkAllLocked = await lkPage.evaluate(
+        () =>
+          [...document.querySelectorAll('[data-testid="slot-block"]')].every(
+            (b) => b.getAttribute('data-locked') === 'true',
+          ),
+      )
+      check('WEEKLOCK(LOCK-3) 「すべてロック」で表示中の食事がすべてロックされる', lkAllLocked)
+      await lkLockAll.click()
+      await lkPage.waitForTimeout(800)
+      const lkAllReleased = await lkPage.evaluate(
+        () =>
+          [...document.querySelectorAll('[data-testid="slot-block"]')].every(
+            (b) => b.getAttribute('data-locked') !== 'true',
+          ),
+      )
+      check(
+        'WEEKLOCK(LOCK-3) もう一度押すとすべて解除される(時間帯ごとの鍵も残さない)',
+        lkAllReleased && (await lkLockAll.textContent())?.trim() === 'すべてロック',
+        `released=${lkAllReleased}`,
+      )
+    } finally {
+      await lkBrowser.close()
     }
   }
 

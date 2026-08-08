@@ -83,6 +83,13 @@
   --slot-bg-breakfast: color-mix(in oklab, var(--accent) 3%, var(--surface));
   --slot-bg-lunch: color-mix(in oklab, var(--accent) 6%, var(--surface));
   --slot-bg-dinner: color-mix(in oklab, var(--accent) 9%, var(--surface));
+  /* ロック中の食事の地色（2026-08-08 便DX・オーナー指示「鍵アイコン＋わずかな面の差」）。
+     上の地色を --surface で半分に薄めたもの（アクセント混合比が 3/6/9% → 約1.5/3/4.5%）。
+     薄くする向きなので、この面に載る補足文字（--text-muted）のコントラストは上の実測値より
+     必ず上がる＝AAの下限だった夕食(4.53:1)も改善する。新しい色相は増やさない */
+  --slot-bg-locked-breakfast: color-mix(in oklab, var(--slot-bg-breakfast) 50%, var(--surface));
+  --slot-bg-locked-lunch: color-mix(in oklab, var(--slot-bg-lunch) 50%, var(--surface));
+  --slot-bg-locked-dinner: color-mix(in oklab, var(--slot-bg-dinner) 50%, var(--surface));
 
   /* 角丸（3段階） */
   --radius-sm: 8px;

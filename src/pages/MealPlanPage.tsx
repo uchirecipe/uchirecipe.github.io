@@ -18,6 +18,7 @@ import {
   Copy,
   TriangleAlert,
   Lock,
+  LockOpen,
   Route,
   RotateCcw,
   Trash2,
@@ -42,11 +43,12 @@ import {
   updateMealEntryRecipe,
   removeMealEntry,
   assignMealEntryByRole,
-  clearMealSlotsInRange,
+  removeMealEntries,
   updateMealEntryServings,
   restoreDayMealPlan,
 } from '../db/mealPlan'
 import { useDayNoteRange, saveDayNote } from '../db/dayNotes'
+import { useMealPlanLocks, toLockKeySet, applyMealLockToggle } from '../db/mealPlanLocks'
 import { useMealTemplates, saveMealTemplate, deleteMealTemplate } from '../db/mealTemplates'
 import {
   buildTemplateItems,
@@ -97,6 +99,13 @@ import {
   mealOccasionCount,
   chooseBalancedPair,
   PURPOSE_REDRAW_ATTEMPTS,
+  isMealSlotLocked,
+  isDayMealLocked,
+  planDayLockToggle,
+  planSlotLockToggle,
+  planAllLockToggle,
+  planCopyLastWeek,
+  planClearMealSlots,
 } from '../logic/mealPlan'
 import type { FillWeekPlan, MealGenre, ProteinSource, SuggestPairResult } from '../logic/mealPlan'
 // 食数の範囲ガード(1〜20)はレシピの人数分と同じものを使う(2026-08-03 便DJ)。
@@ -1124,11 +1133,25 @@ function MonthDayCell({
  * 1日のブロックの中で朝・昼・夕の切り替わりが分からない）。
  * 値は src/index.css のデザイントークン（テーマごとに --accent / --surface から作られる）。
  * bar=ブロック左の帯・bg=ブロックの地色。色の濃さだけで区別し、新しい色相は増やさない。
+ * lockedBg=ロック中（2026-08-08 便DX）の地色。bgのアクセント混合比を半分にした薄い面で、
+ * 「自動では触らない食事」を鍵アイコンに加えて面でも示す。
  */
-const SLOT_TONE: Record<MealSlot, { bar: string; bg: string }> = {
-  breakfast: { bar: 'var(--slot-bar-breakfast)', bg: 'var(--slot-bg-breakfast)' },
-  lunch: { bar: 'var(--slot-bar-lunch)', bg: 'var(--slot-bg-lunch)' },
-  dinner: { bar: 'var(--slot-bar-dinner)', bg: 'var(--slot-bg-dinner)' },
+const SLOT_TONE: Record<MealSlot, { bar: string; bg: string; lockedBg: string }> = {
+  breakfast: {
+    bar: 'var(--slot-bar-breakfast)',
+    bg: 'var(--slot-bg-breakfast)',
+    lockedBg: 'var(--slot-bg-locked-breakfast)',
+  },
+  lunch: {
+    bar: 'var(--slot-bar-lunch)',
+    bg: 'var(--slot-bg-lunch)',
+    lockedBg: 'var(--slot-bg-locked-lunch)',
+  },
+  dinner: {
+    bar: 'var(--slot-bar-dinner)',
+    bg: 'var(--slot-bg-dinner)',
+    lockedBg: 'var(--slot-bg-locked-dinner)',
+  },
 }
 
 /**
@@ -1315,6 +1338,31 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     () => (entries ?? []).filter((e) => !isPastDate(e.date, today)),
     [entries, today],
   )
+  /**
+   * 献立のロック（2026-08-08 便DX・オーナー指示）。
+   * 鍵の掛かっている食事（'日付|食事'）は、自動でまとめて動かす操作
+   * （まとめて献立を入力・テンプレートを適用・先週の献立をコピー・まとめて空にする・
+   * 月タブの未定の日をまとめて提案）の対象から外れる。手での追加・差し替え・削除は自由。
+   * 期間で切らず全件を読む＝週・月・日の窓のどこから見ても同じ鍵を見るため
+   * （1件が数十バイトの小さな表で、掛けた食事のぶんしか行が無い）。
+   */
+  const mealPlanLocks = useMealPlanLocks()
+  const lockedKeys = useMemo(() => toLockKeySet(mealPlanLocks), [mealPlanLocks])
+  /** 鍵の掛け外しを1か所に集約する（掛けた/外したの案内もここで出す） */
+  const toggleMealLock = async (toggle: { lock: { date: string; slot: MealSlot }[]; unlock: { date: string; slot: MealSlot }[] }, scope: 'one' | 'all') => {
+    await applyMealLockToggle(toggle)
+    const locking = toggle.lock.length > 0
+    const done = locking
+      ? (scope === 'all' ? ja.mealPlan.lockAllDone : ja.mealPlan.lockDone).replace(
+          '{effect}',
+          ja.mealPlan.lockEffectNote,
+        )
+      : scope === 'all'
+        ? ja.mealPlan.lockAllReleaseDone
+        : ja.mealPlan.lockReleaseDone
+    setMessage(done)
+  }
+
   // 「今日」の週プラン登録は、週タブで表示中の週(weekStart)に依存させない
   // （2026-07-16 便U: 日タブが週タブから独立した別タブになったため。以前はentries(週タブの
   // 表示中の週)からtoday部分を抜き出していたが、週タブで別の週へ移動した状態のまま
@@ -1522,18 +1570,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       setRangeEnd(end)
     }
   }
-  // 日×枠キー("date|slot")ごとの全エントリ（主菜+副菜など複数件を保持する。2026-07-13対応）。
-  // 表示中の週の分だけ（先週コピーの空き枠判定など、週タブの範囲に閉じた処理で使う）
-  const entriesByDateSlot = useMemo(() => {
-    const map = new Map<string, MealPlanEntry[]>()
-    entries?.forEach((e) => {
-      const key = `${e.date}|${e.slot}`
-      const list = map.get(key)
-      if (list) list.push(e)
-      else map.set(key, [e])
-    })
-    return map
-  }, [entries])
   // 同じものを週+月の合算で持つ（2026-07-29 便CB-1・A-3）。月タブの日モーダルの行は
   // 表示中の週の外の日を扱うので、行の描画・行サイコロはこちらを見る
   const entriesByDateSlotAll = useMemo(() => {
@@ -1551,16 +1587,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // ローリング表示・週区切り表示のどちらでも「同じ曜日の1週間前」を指す(shiftDate(-7)が常に週差になるため)
   const prevWeekDates = useMemo(() => dates.map((d) => shiftDate(d, -7)), [dates])
   const prevWeekEntries = useMealPlanRange(prevWeekDates[0], prevWeekDates[6])
-  const prevEntriesByDateSlot = useMemo(() => {
-    const map = new Map<string, MealPlanEntry[]>()
-    prevWeekEntries?.forEach((e) => {
-      const key = `${e.date}|${e.slot}`
-      const list = map.get(key)
-      if (list) list.push(e)
-      else map.set(key, [e])
-    })
-    return map
-  }, [prevWeekEntries])
 
   // 月タブの日タップモーダル用（monthEntries由来なので表示帯フィルタに関係なく朝昼夕すべてを見せる）
   const dayModalEntries = useMemo(() => {
@@ -2718,6 +2744,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
+   * 確認文・結果に差し込む「ロック中の◯食分は変わりません。」（2026-08-08 便DX・規約F）。
+   * 0件のときは空文字＝文が増えない（鍵を1つも使っていない人の文面は今までと同じ）。
+   */
+  const lockNoticeOf = (count: number) =>
+    count > 0 ? ja.mealPlan.lockedSlotNotice.replace('{n}', String(count)) : ''
+  /** トーストへ一文を足す（既存の作法どおり半角スペースでつなぐ。空文字なら足さない） */
+  const withNotice = (text: string, notice: string) => (notice ? `${text} ${notice}` : text)
+
+  /**
    * 「まとめて献立を立てる」の実行本体（2026-07-29 便CB-2・docs/59 A-5で週タブ専用から切り出した）。
    * 計画(planWeekFill)と対象期間の献立を受け取り、自動提案由来の行を消してから提案で埋め直し、
    * **実際にDBへ追加できた品数**を返す。週タブ(fillWeek)と月タブの一括提案(fillMonth)は
@@ -2871,21 +2906,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     //  fillEmpty  … keepAuto=true＝すでに入っている献立は自動・手動を問わず1品も消さない
     //  replaceAll … これからの献立を消してから入れ直す。消す前に必ず確認を出す(規約F)
     const replaceAll = fillMode === 'replaceAll'
+    // 2026-08-08 便DX(オーナー指示): 鍵の掛かった食事は、総入れ替えでも触らない
     const plan = planWeekFill(entries ?? [], dates, visibleSlots, today, {
       keepAuto: !replaceAll,
       replaceAll,
+      lockedKeys,
     })
+    const lockNotice = lockNoticeOf(plan.lockedSlotCount)
     if (replaceAll) {
       const removeCount = plan.entryIdsToRemove.length
       const targetSlotCount = plan.slotsToFill.length + plan.partialFills.length
       if (removeCount === 0 && targetSlotCount === 0) {
-        setMessage(ja.mealPlan.fillModeReplaceAllNothing)
+        setMessage(withNotice(ja.mealPlan.fillModeReplaceAllNothing, lockNotice))
         return
       }
       if (removeCount > 0) {
         const confirmText = ja.mealPlan.fillModeReplaceAllConfirm
           .replace('{s}', String(targetSlotCount))
           .replace('{n}', String(removeCount))
+          .replace('{lock}', lockNotice)
         if (!window.confirm(confirmText)) return
       }
     }
@@ -2913,6 +2952,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     } else {
       messages.push(ja.mealPlan.fillWeekNoAdded)
     }
+    // 鍵で外した食事があるなら、結果でも必ず言う（黙って飛ばさない。便DX）
+    if (lockNotice) messages.push(lockNotice)
     // 今日を含む週で「今日の献立」(日タブ)がどうなるかの案内(2026-07-22 便BE・タスク2 →
     // 2026-07-29 便CD/MP-01で出し分けを修正)。自動取り込みは「同じ日につき1回だけ」なので、
     // まだ今日の取り込みが済んでいなければ、次に日タブを開いた時点で今日の分が取り込まれる。
@@ -2967,6 +3008,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     const rawPlan = planWeekFill(monthEntries ?? [], monthDatesList, visibleSlots, today, {
       keepAuto: true,
+      // 鍵の掛かった食事は触らない（2026-08-08 便DX）
+      lockedKeys,
       // メモを書いた日（外食・実家に帰る 等）は埋めない（2026-07-30 便CH/C10）。
       // 日付メモは「この日は献立が要らない」を表せる唯一の手段なのに一括提案が無視しており、
       // 外食の日の分まで月の食費・栄養に乗っていた
@@ -2998,8 +3041,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       plan.skippedDates.length > 0
         ? ja.mealPlan.fillMonthNoteSkipped.replace('{n}', String(plan.skippedDates.length))
         : ''
+    // 鍵で外した食事の一文（便DX）。確認文にも結果にも同じ文を出す
+    const lockNotice = lockNoticeOf(plan.lockedSlotCount)
     // トーストは既存の作法どおり半角スペースでつなぐ（確認文は文中に差し込むので noteSkipped をそのまま使う）
-    const withNoteSkipped = (text: string) => (noteSkipped ? `${text} ${noteSkipped}` : text)
+    const withNoteSkipped = (text: string) =>
+      withNotice(noteSkipped ? `${text} ${noteSkipped}` : text, lockNotice)
     if (targetSlots.length === 0) {
       setMessage(
         withNoteSkipped(
@@ -3018,6 +3064,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       .replace('{s}', String(targetSlots.length))
       .replace('{k}', String(preserved))
       .replace('{note}', noteSkipped)
+      .replace('{lock}', lockNotice)
     if (!window.confirm(confirmText)) return
     const added = await executeFill(plan, monthEntries ?? [])
     // 正直な完了報告: 実際にDBへ入った品数で出し分ける
@@ -3053,32 +3100,40 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const copyLastWeek = async () => {
     setMessage('')
-    const ops: { date: string; slot: MealSlot; recipeId: number; role: MealRole }[] = []
-    let sourceTotal = 0
-    for (const date of dates) {
-      if (isPastDate(date, today)) continue
-      const src = shiftDate(date, -7)
-      for (const slot of visibleSlots) {
-        const srcEntries = prevEntriesByDateSlot.get(`${src}|${slot}`) ?? []
-        sourceTotal += srcEntries.length
-        // 既にある枠は上書きしない(手動・自動とも残す)。空いている枠にだけ先週の分を入れる
-        if ((entriesByDateSlot.get(`${date}|${slot}`) ?? []).length > 0) continue
-        srcEntries.forEach((e) => {
-          ops.push({ date, slot, recipeId: e.recipeId, role: e.role ?? 'main' })
-        })
-      }
-    }
+    // どこへ何を写すかの判断は純ロジックへ切り出した（2026-08-08 便DX。鍵の掛かった食事を
+    // 外す条件も含めてテストで固定するため）
+    const { ops, sourceTotal, lockedSlotCount } = planCopyLastWeek({
+      dates,
+      today,
+      visibleSlots,
+      entries: entries ?? [],
+      prevEntries: prevWeekEntries ?? [],
+      lockedKeys,
+    })
+    const lockNotice = lockNoticeOf(lockedSlotCount)
     if (ops.length === 0) {
       // 先週にそもそも献立が無い場合と、空き枠が無い(全部埋まっている)場合を出し分ける
-      setMessage(sourceTotal === 0 ? ja.mealPlan.copyLastWeekNoSource : ja.mealPlan.copyLastWeekNoRoom)
+      setMessage(
+        withNotice(
+          sourceTotal === 0 ? ja.mealPlan.copyLastWeekNoSource : ja.mealPlan.copyLastWeekNoRoom,
+          lockNotice,
+        ),
+      )
       return
     }
-    if (!window.confirm(ja.mealPlan.copyLastWeekConfirm.replace('{n}', String(ops.length)))) return
+    if (
+      !window.confirm(
+        ja.mealPlan.copyLastWeekConfirm
+          .replace('{n}', String(ops.length))
+          .replace('{lock}', lockNotice),
+      )
+    )
+      return
     // auto=false(既定)で追加＝手動配置として保護される
     for (const op of ops) {
       await addMealEntry(op.date, op.slot, op.recipeId, op.role)
     }
-    setMessage(ja.mealPlan.copyLastWeekDone.replace('{n}', String(ops.length)))
+    setMessage(withNotice(ja.mealPlan.copyLastWeekDone.replace('{n}', String(ops.length)), lockNotice))
   }
 
   /**
@@ -3161,20 +3216,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       today,
       allowedDows: templateDows,
       visibleSlots,
+      // 鍵の掛かった食事には入れない（2026-08-08 便DX）
+      lockedKeys,
     })
+    const lockNotice = lockNoticeOf(plan.lockedSlotCount)
     if (plan.ops.length === 0) {
       // 入らなかった理由を3つに言い分ける(2026-07-30 便CH/C14で「表示していない食事」を追加)。
       // 従来は表示していない食事のテンプレを流し込むと「選んだ曜日には、このテンプレの献立が
       // ありません」と出ていたが、同じ窓の曜日チップには「木 1品」と出ており矛盾していた
       setMessage(
-        plan.keptSlotCount > 0
-          ? ja.mealPlan.templateApplyNoRoom.replace('{n}', String(plan.keptSlotCount))
-          : plan.hiddenSlots.length > 0
-            ? ja.mealPlan.templateApplyHiddenSlots.replaceAll(
-                '{slots}',
-                plan.hiddenSlots.map((s) => ja.mealPlan.slot[s]).join('・'),
-              )
-            : ja.mealPlan.templateApplyNoItems,
+        withNotice(
+          plan.keptSlotCount > 0
+            ? ja.mealPlan.templateApplyNoRoom.replace('{n}', String(plan.keptSlotCount))
+            : plan.hiddenSlots.length > 0
+              ? ja.mealPlan.templateApplyHiddenSlots.replaceAll(
+                  '{slots}',
+                  plan.hiddenSlots.map((s) => ja.mealPlan.slot[s]).join('・'),
+                )
+              : ja.mealPlan.templateApplyNoItems,
+          lockNotice,
+        ),
       )
       return
     }
@@ -3188,6 +3249,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       .replace('{n}', String(plan.ops.length))
       .replace('{d}', String(plan.fillSlotCount))
       .replace('{k}', String(plan.keptSlotCount))
+      .replace('{lock}', lockNotice)
     if (!window.confirm(confirmText)) return
     // auto=false(既定)で追加＝手動配置として保護される（ユーザーが意図して入れた献立のため）
     for (const op of plan.ops) {
@@ -3195,9 +3257,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     setTemplateApplyScope(null)
     setMessage(
-      ja.mealPlan.templateApplyDone
-        .replace('{name}', template.name)
-        .replace('{n}', String(plan.ops.length)),
+      withNotice(
+        ja.mealPlan.templateApplyDone
+          .replace('{name}', template.name)
+          .replace('{n}', String(plan.ops.length)),
+        lockNotice,
+      ),
     )
   }
   const removeTemplate = async (id: number, name: string, itemCount: number) => {
@@ -3433,6 +3498,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [collapsedDates, setCollapsedDates] = useState<string[]>([])
   const allDaysCollapsed = dates.every((d) => collapsedDates.includes(d))
+  /** 表示中の7日が全部ロック済みか（「すべてロック」ボタンが「すべて解除」に変わる条件） */
+  const allDaysLocked = dates.every((d) => isDayMealLocked(lockedKeys, d))
 
   /**
    * 週タブからレシピ詳細へ移る直前に、いまの居場所（見ている週と縦スクロール位置）を覚える
@@ -3501,17 +3568,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     const label = clearSlotLabel
     // 規約F(2026-07-29 便CD/MP-19): 「何が消えるか(件数つき)」と「何が残るか」を両方書く。
-    // clearMealSlotsInRangeは表示中の週の全日(過去日を含む)を消すので、件数も同じ範囲で数える
+    // 対象は表示中の週の全日(過去日を含む)。2026-08-08 便DX: どの行を消すかの判断
+    // (鍵の掛かった食事は消さない)を純ロジックへ切り出し、テストで固定した
     const weekEntries = entries ?? []
-    const targetCount = weekEntries.filter((e) => clearSlotTargets.includes(e.slot)).length
+    const clearPlan = planClearMealSlots(weekEntries, clearSlotTargets, lockedKeys)
+    const targetCount = clearPlan.targetCount
+    const lockNotice = lockNoticeOf(clearPlan.lockedSlotCount)
     if (targetCount === 0) {
-      setMessage(ja.mealPlan.clearWeekSlotEmpty.replace('{slot}', label))
+      setMessage(withNotice(ja.mealPlan.clearWeekSlotEmpty.replace('{slot}', label), lockNotice))
       return
     }
     // 残る食事とその件数（朝昼夜を全部選んだときは残るほかの食事が無いので専用の文にする）
     const restSlots = MEAL_SLOTS.filter((s) => !clearSlotTargets.includes(s))
     const restCount = weekEntries.filter((e) => restSlots.includes(e.slot)).length
-    const confirmText =
+    const confirmText = (
       restSlots.length === 0
         ? ja.mealPlan.clearWeekSlotConfirmAll.replace('{n}', String(targetCount))
         : ja.mealPlan.clearWeekSlotConfirm
@@ -3519,10 +3589,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             .replace('{n}', String(targetCount))
             .replace('{rest}', restSlots.map((s) => ja.mealPlan.slot[s]).join('・'))
             .replace('{r}', String(restCount))
+    ).replace('{lock}', lockNotice)
     if (!window.confirm(confirmText)) return
-    await clearMealSlotsInRange(dates[0], dates[6], clearSlotTargets)
+    await removeMealEntries(clearPlan.entryIdsToRemove)
     setMessage(
-      ja.mealPlan.clearWeekSlotDone.replace('{slot}', label).replace('{n}', String(targetCount)),
+      withNotice(
+        ja.mealPlan.clearWeekSlotDone.replace('{slot}', label).replace('{n}', String(targetCount)),
+        lockNotice,
+      ),
     )
   }
 
@@ -3955,6 +4029,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 「足したい人」も選べることを併記して、足す/足さないの好みの割れに両対応する
     const showOneDishNote =
       !!slotMainRecipe && isOneDish(slotMainRecipe) && slotSideRecipes.length === 0
+    // 2026-08-08 便DX(オーナー指示): 時間帯ごとのロック。鍵が掛かっている食事は、
+    // 自動でまとめて動かす操作の対象から外れる（手での編集は今までどおりできる）
+    const slotLocked = isMealSlotLocked(lockedKeys, date, slot)
     return (
       // 2026-08-02 便CW-1: 朝食/昼食/夕食を1日のカードの中で見分けられるように、
       // 食事ごとに囲みを付け、左の帯と地色をトークンで段階的に変える(SLOT_TONE)
@@ -3962,10 +4039,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         key={slot}
         data-testid="slot-block"
         data-slot={slot}
+        data-locked={slotLocked ? 'true' : undefined}
         className="rounded-md border border-l-4 p-[var(--space-sm)]"
         style={{
-          background: SLOT_TONE[slot].bg,
-          borderColor: 'var(--border)',
+          // ロック中は地色を薄め、囲みをアクセント色にする(便DX・オーナー指示
+          // 「鍵アイコン+わずかな面の差」)。薄くする向きなので、地色に載る補足文字の
+          // コントラストは元の実測値より上がる(index.css の --slot-bg-locked-* 参照)
+          background: slotLocked ? SLOT_TONE[slot].lockedBg : SLOT_TONE[slot].bg,
+          borderColor: slotLocked ? 'var(--accent)' : 'var(--border)',
           borderLeftColor: SLOT_TONE[slot].bar,
         }}
       >
@@ -3988,6 +4069,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {ja.mealPlan.genreMixedBadge}
             </button>
           )}
+          {/* 時間帯ごとのロック(2026-08-08 便DX・オーナー指示「献立カードの右上」)。
+              押すたびに掛ける⇄外すが入れ替わる。開いた鍵＝掛かっていない */}
+          <button
+            type="button"
+            data-testid="slot-lock"
+            data-date={date}
+            data-slot={slot}
+            onClick={() => void toggleMealLock(planSlotLockToggle(lockedKeys, date, slot), 'one')}
+            aria-pressed={slotLocked}
+            aria-label={(slotLocked ? ja.mealPlan.unlockSlotAria : ja.mealPlan.lockSlotAria)
+              .replace('{date}', date.replaceAll('-', '/'))
+              .replace('{slot}', ja.mealPlan.slot[slot])}
+            className={`ml-auto shrink-0 rounded-sm p-1.5 ${
+              slotLocked ? 'text-accent-ink' : 'text-ink-muted'
+            }`}
+          >
+            {slotLocked ? <Lock size={16} aria-hidden /> : <LockOpen size={16} aria-hidden />}
+          </button>
         </div>
         <div className="mt-1 space-y-1">
           {roleRows.map(([role, rows]) =>
@@ -5497,7 +5596,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           2026-08-03 便DJ(オーナー指示): 曜日ごとに日付の行だけへ畳めるようにした
           (7日ぶんが全部開いたままだと、ほかの曜日を探しづらい)。既定は全部開いた状態のままで、
           「すべて畳む」を押すと7日ぶんが一度に日付だけになる */}
-      <div className="mt-[var(--space-sm)] flex justify-end">
+      <div className="mt-[var(--space-sm)] flex justify-end gap-[var(--space-sm)]">
+        {/* 2026-08-08 便DX(オーナー指示「『すべて畳む』の隣に『すべてロック』ボタンも」)。
+            表示中の7日分をまとめて掛け外しする。7日とも3食に鍵が掛かっていれば「すべて解除」になる */}
+        <button
+          type="button"
+          data-testid="lock-all"
+          onClick={() => void toggleMealLock(planAllLockToggle(lockedKeys, dates), 'all')}
+          aria-pressed={allDaysLocked}
+          className={`inline-flex items-center gap-1 rounded-sm border px-3 py-1.5 text-xs font-bold shadow-sm ${
+            allDaysLocked
+              ? 'border-accent bg-accent text-on-accent'
+              : 'border-edge bg-surface text-accent-ink'
+          }`}
+        >
+          {allDaysLocked ? <Lock size={14} aria-hidden /> : <LockOpen size={14} aria-hidden />}
+          {allDaysLocked ? ja.mealPlan.lockAllReleaseButton : ja.mealPlan.lockAllButton}
+        </button>
         <button
           type="button"
           onClick={() => setCollapsedDates(allDaysCollapsed ? [] : [...dates])}
@@ -5509,6 +5624,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
         {dates.map((date) => {
           const dayCollapsed = collapsedDates.includes(date)
+          const dayLocked = isDayMealLocked(lockedKeys, date)
           return (
           <section
             key={date}
@@ -5522,7 +5638,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 : 'border border-edge bg-surface'
             }`}
           >
-            <h2 className="font-bold">
+            {/* 2026-08-08 便DX(オーナー指示「献立日付の右」): 日付の行に日ごとのロックを置く。
+                折りたたみボタンの入れ子にはできないので、見出しの行を flex にして
+                「折りたたみボタン＋鍵」を横に並べる(便DT-6のグループ見出しと同じ作法) */}
+            <h2 className="flex items-center gap-1 font-bold">
               {/* 曜日は必ず日付から引く(2026-07-29 便CD/MP-02)。並び順(配列インデックス)で
                   引いていたため、「今日から7日間」表示では今日が月曜の日以外は全行の曜日が
                   日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る) */}
@@ -5538,7 +5657,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   ? ja.mealPlan.weekDayToggleOpenAria
                   : ja.mealPlan.weekDayToggleCloseAria
                 ).replace('{date}', date.replaceAll('-', '/'))}
-                className="flex w-full items-center justify-between gap-2 py-1 text-left"
+                className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
               >
                 <span>
                   {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
@@ -5551,6 +5670,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 ) : (
                   <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
                 )}
+              </button>
+              {/* 日ごとのロック: その日の朝食・昼食・夕食をまとめて掛け外しする。
+                  3食とも掛かっているときだけ閉じた鍵になる(表示していない食事も数える) */}
+              <button
+                type="button"
+                data-testid="day-lock"
+                data-date={date}
+                onClick={() => void toggleMealLock(planDayLockToggle(lockedKeys, date), 'one')}
+                aria-pressed={dayLocked}
+                aria-label={(dayLocked
+                  ? ja.mealPlan.unlockDayAria
+                  : ja.mealPlan.lockDayAria
+                ).replace('{date}', date.replaceAll('-', '/'))}
+                className={`shrink-0 rounded-sm p-1.5 ${
+                  dayLocked ? 'text-accent-ink' : 'text-ink-muted'
+                }`}
+              >
+                {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
               </button>
             </h2>
             {!dayCollapsed && (

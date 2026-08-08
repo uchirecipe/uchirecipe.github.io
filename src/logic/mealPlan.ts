@@ -19,6 +19,98 @@ import {
 
 export const MEAL_SLOTS = ['breakfast', 'lunch', 'dinner'] as const
 
+/* ============================================================
+   献立のロック（2026-08-08 便DX・オーナー指示）
+   鍵の掛かった食事は「自動でまとめて動かす操作」の対象から外れる:
+     まとめて献立を入力（空き枠だけ／レシピを総入れ替えの両方）・テンプレートを適用・
+     先週の献立をコピー・まとめて空にする・未定の日をまとめて提案（月）
+   手での追加・差し替え・削除は鍵が掛かっていても自由（鍵は自動入力から守るためのもの）。
+   保存の粒度は「日付×食事」の1階層だけ（db/types.ts MealPlanLock 参照）。
+   画面の「日ごと」は、その日の朝食・昼食・夕食3件をまとめて掛け外しする操作として表す。
+   ============================================================ */
+
+/** ロックの記録キー（'YYYY-MM-DD|slot'）。DBの主キーであり、画面・計画の照合キーでもある */
+export function mealLockKey(date: string, slot: MealSlot): string {
+  return `${date}|${slot}`
+}
+
+/** その日その食事に鍵が掛かっているか */
+export function isMealSlotLocked(
+  lockedKeys: ReadonlySet<string>,
+  date: string,
+  slot: MealSlot,
+): boolean {
+  return lockedKeys.has(mealLockKey(date, slot))
+}
+
+/**
+ * その日が「日ごとのロック」状態か＝朝食・昼食・夕食の3つとも鍵が掛かっているか。
+ * 表示している食事だけでは数えない（画面に出していない食事の鍵が外れたまま
+ * 「この日はロック済み」と見せると、表示を増やした瞬間に嘘になるため）。
+ */
+export function isDayMealLocked(lockedKeys: ReadonlySet<string>, date: string): boolean {
+  return MEAL_SLOTS.every((slot) => isMealSlotLocked(lockedKeys, date, slot))
+}
+
+/** ロックの掛け外しの計画（呼び出し側はこの通りにDBへ書く。空配列なら何もしない） */
+export interface MealLockToggle {
+  /** これから鍵を掛ける食事 */
+  lock: { date: string; slot: MealSlot }[]
+  /** これから鍵を外す食事 */
+  unlock: { date: string; slot: MealSlot }[]
+}
+
+/**
+ * 日付の横の鍵ボタンの計画（日ごとの掛け外し）。
+ * その日が3食とも鍵なら全部外し、そうでなければ掛かっていない食事に掛ける
+ * （＝押すたびに「その日ぜんぶ施錠」⇄「その日ぜんぶ解錠」を行き来する）。
+ */
+export function planDayLockToggle(
+  lockedKeys: ReadonlySet<string>,
+  date: string,
+): MealLockToggle {
+  if (isDayMealLocked(lockedKeys, date)) {
+    return { lock: [], unlock: MEAL_SLOTS.map((slot) => ({ date, slot })) }
+  }
+  return {
+    lock: MEAL_SLOTS.filter((slot) => !isMealSlotLocked(lockedKeys, date, slot)).map((slot) => ({
+      date,
+      slot,
+    })),
+    unlock: [],
+  }
+}
+
+/** 食事カードの鍵ボタンの計画（時間帯ごとの掛け外し）。掛かっていれば外す・無ければ掛ける */
+export function planSlotLockToggle(
+  lockedKeys: ReadonlySet<string>,
+  date: string,
+  slot: MealSlot,
+): MealLockToggle {
+  return isMealSlotLocked(lockedKeys, date, slot)
+    ? { lock: [], unlock: [{ date, slot }] }
+    : { lock: [{ date, slot }], unlock: [] }
+}
+
+/**
+ * 「すべてロック」ボタンの計画（表示中の7日ぶん）。
+ * 7日とも3食に鍵が掛かっていれば全部外し（＝「すべて解除」）、1つでも外れていれば全部掛ける。
+ * 解除のときは、日ごと・時間帯ごとのどちらで掛けた鍵も残さず外す
+ * （ボタンが「すべて解除」と言っている以上、押した後に鍵が残っていてはいけない）。
+ */
+export function planAllLockToggle(
+  lockedKeys: ReadonlySet<string>,
+  dates: string[],
+): MealLockToggle {
+  const allLocked = dates.length > 0 && dates.every((date) => isDayMealLocked(lockedKeys, date))
+  const pairs = dates.flatMap((date) => MEAL_SLOTS.map((slot) => ({ date, slot })))
+  if (allLocked) return { lock: [], unlock: pairs }
+  return {
+    lock: pairs.filter(({ date, slot }) => !isMealSlotLocked(lockedKeys, date, slot)),
+    unlock: [],
+  }
+}
+
 /**
  * 食事帯を必ず 朝食→昼食→夕食 の順に並べ直す（2026-07-29 便CD/MP-10）。
  * 「表示する食事帯」は押した順に配列へ足されるだけだったため、あとから朝食・昼食を
@@ -719,6 +811,12 @@ export interface FillWeekPlan {
    * 「メモを書いた◯日には入れません」と確認文に書くための件数に使う（2026-07-30 便CH/C10）。
    */
   skippedDates: string[]
+  /**
+   * 鍵が掛かっていて対象から外した食事の数（2026-08-08 便DX）。
+   * 「ロック中の◯食分は変わりません」と確認文に書くための件数に使う（規約F）。
+   * 料理が入っていない食事も数える（鍵は「触らない」印なので、空でも変わらないことに変わりはない）。
+   */
+  lockedSlotCount: number
 }
 
 /**
@@ -775,11 +873,18 @@ export function planWeekFill(
      * 外した日の献立は触らないだけ＝非破壊で、重複回避の used にだけ入る。
      */
     skipDates?: string[]
+    /**
+     * 鍵の掛かっている食事（'YYYY-MM-DD|slot' の集合。2026-08-08 便DX・オーナー指示）。
+     * ここに入っている食事は、総入れ替え（replaceAll）でも触らない＝1品も消さず1品も入れない。
+     * 中身は重複回避の used にだけ数える（鍵の中の料理と同じものを隣の日に出さないため）。
+     */
+    lockedKeys?: ReadonlySet<string>
   } = {},
 ): FillWeekPlan {
   const replaceAll = options.replaceAll ?? false
   const keepAuto = !replaceAll && (options.keepAuto ?? false)
   const skipDates = new Set(options.skipDates ?? [])
+  const lockedKeys = options.lockedKeys ?? EMPTY_LOCK_KEYS
   const notPastDates = weekDatesArr.filter((date) => !isPastDate(date, today))
   const skippedDates = notPastDates.filter((date) => skipDates.has(date))
   const futureDates = notPastDates.filter((date) => !skipDates.has(date))
@@ -792,6 +897,7 @@ export function planWeekFill(
   const preservedSlotKeys = new Set<string>()
   const entryIdsToRemove: number[] = []
   const usedRecipeIds: number[] = []
+  let lockedSlotCount = 0
 
   // 対象外の枠（過去日・非表示帯）のレシピは触らない＝重複回避のusedに入れるだけ
   for (const e of entries) {
@@ -805,6 +911,13 @@ export function planWeekFill(
   for (const date of futureDates) {
     for (const slot of visibleSlots) {
       const slotEntries = entries.filter((e) => e.date === date && e.slot === slot)
+      // 鍵の掛かっている食事（2026-08-08 便DX）は、総入れ替えでも一切触らない。
+      // 過去日・非表示帯と同じ「対象外」の扱いにそろえ、中身は重複回避のusedにだけ数える
+      if (lockedKeys.has(`${date}|${slot}`)) {
+        lockedSlotCount++
+        for (const e of slotEntries) usedRecipeIds.push(e.recipeId)
+        continue
+      }
       let hasManualAnything = false
       const fillable: Record<AutoFillRole, boolean> = { main: false, side: false }
       for (const e of slotEntries) {
@@ -853,6 +966,124 @@ export function planWeekFill(
     entryIdsToRemove,
     usedRecipeIds,
     skippedDates,
+    lockedSlotCount,
+  }
+}
+
+/** ロック未指定の呼び出し用の空集合（毎回 new Set しないための共有インスタンス） */
+const EMPTY_LOCK_KEYS: ReadonlySet<string> = new Set<string>()
+
+/** 「先週の献立をコピー」の計画（planCopyLastWeek の戻り値） */
+export interface CopyLastWeekPlan {
+  /** 実際に追加する行。空ならコピーするものが無い */
+  ops: { date: string; slot: MealSlot; recipeId: number; role: MealRole }[]
+  /** コピー元（1週間前の同じ曜日）にあった品数。0なら「先週に献立が無い」 */
+  sourceTotal: number
+  /** 鍵が掛かっていて対象から外した食事の数（確認文の件数に使う。2026-08-08 便DX） */
+  lockedSlotCount: number
+}
+
+/**
+ * S-3「先週の献立をコピー」の計画を立てる純ロジック
+ * （2026-07-25 便BU・docs/59。2026-08-08 便DXでロック対応と同時に画面から切り出した）。
+ *
+ * 守ること:
+ * - 過去日（今日より前）は対象外。表示していない食事にも入れない（週タブの編集範囲と同じ）。
+ * - すでに1品でも入っている食事には入れない＝上書きしない（手動・自動のどちらも残す）。
+ * - 鍵の掛かっている食事には入れない（2026-08-08 便DX）。空いていても入れない
+ *   ＝「この食事は自分で決めるから自動で入れないで」を守る。
+ */
+export function planCopyLastWeek(options: {
+  /** コピー先の日付（表示中の週の7日） */
+  dates: string[]
+  /** YYYY-MM-DD（今日） */
+  today: string
+  /** 表示中の食事 */
+  visibleSlots: MealSlot[]
+  /** コピー先に今ある献立 */
+  entries: Pick<MealPlanEntry, 'date' | 'slot'>[]
+  /** コピー元（1週間前の週）の献立 */
+  prevEntries: Pick<MealPlanEntry, 'date' | 'slot' | 'recipeId' | 'role'>[]
+  /** 鍵の掛かっている食事（'YYYY-MM-DD|slot'） */
+  lockedKeys?: ReadonlySet<string>
+}): CopyLastWeekPlan {
+  const { dates, today, visibleSlots, entries, prevEntries } = options
+  const lockedKeys = options.lockedKeys ?? EMPTY_LOCK_KEYS
+  const filledKeys = new Set(entries.map((e) => `${e.date}|${e.slot}`))
+  const prevByKey = new Map<string, typeof prevEntries>()
+  for (const e of prevEntries) {
+    const key = `${e.date}|${e.slot}`
+    const list = prevByKey.get(key)
+    if (list) list.push(e)
+    else prevByKey.set(key, [e])
+  }
+  const ops: CopyLastWeekPlan['ops'] = []
+  let sourceTotal = 0
+  let lockedSlotCount = 0
+  for (const date of dates) {
+    if (isPastDate(date, today)) continue
+    const src = shiftDate(date, -7)
+    for (const slot of visibleSlots) {
+      const srcEntries = prevByKey.get(`${src}|${slot}`) ?? []
+      sourceTotal += srcEntries.length
+      if (lockedKeys.has(`${date}|${slot}`)) {
+        lockedSlotCount++
+        continue
+      }
+      // 既にある食事は上書きしない（手動・自動とも残す）。空いている食事にだけ先週の分を入れる
+      if (filledKeys.has(`${date}|${slot}`)) continue
+      for (const e of srcEntries) {
+        ops.push({ date, slot, recipeId: e.recipeId, role: e.role ?? 'main' })
+      }
+    }
+  }
+  return { ops, sourceTotal, lockedSlotCount }
+}
+
+/** 「まとめて空にする」の計画（planClearMealSlots の戻り値） */
+export interface ClearMealSlotsPlan {
+  /** 実際に消す行のid */
+  entryIdsToRemove: number[]
+  /** 消す品数（＝entryIdsToRemove.length。確認文・結果の件数に使う） */
+  targetCount: number
+  /** 鍵が掛かっていて消さずに残す品数 */
+  lockedEntryCount: number
+  /** 鍵が掛かっていて対象から外した食事の数（確認文の件数に使う） */
+  lockedSlotCount: number
+}
+
+/**
+ * 週タブ「この週の◯◯をまとめて空にする」の計画を立てる純ロジック
+ * （2026-07-16 便U-4。2026-08-08 便DXでロック対応と同時に画面から切り出した）。
+ *
+ * 選んだ食事の行だけを消す。鍵の掛かっている食事は消さない（2026-08-08 便DX・
+ * 「自動でまとめて動かす操作は鍵の中に入らない」という一貫規則）。手で1行ずつ消すのは自由。
+ * 対象は渡した期間の全日（過去日を含む）＝従来どおりの範囲を変えない。
+ */
+export function planClearMealSlots(
+  entries: Pick<MealPlanEntry, 'id' | 'date' | 'slot'>[],
+  slots: MealSlot[],
+  lockedKeys: ReadonlySet<string> = EMPTY_LOCK_KEYS,
+): ClearMealSlotsPlan {
+  const targets = new Set(slots)
+  const entryIdsToRemove: number[] = []
+  let lockedEntryCount = 0
+  const lockedSlotKeys = new Set<string>()
+  for (const e of entries) {
+    if (!targets.has(e.slot)) continue
+    const key = `${e.date}|${e.slot}`
+    if (lockedKeys.has(key)) {
+      lockedEntryCount++
+      lockedSlotKeys.add(key)
+      continue
+    }
+    if (e.id != null) entryIdsToRemove.push(e.id)
+  }
+  return {
+    entryIdsToRemove,
+    targetCount: entryIdsToRemove.length,
+    lockedEntryCount,
+    lockedSlotCount: lockedSlotKeys.size,
   }
 }
 
