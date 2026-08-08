@@ -33,6 +33,10 @@ export interface StoredTimer {
   muted: boolean
   /** 自分で時間を決めて始めたタイマー（2026-08-03 実機FB②）。古い保存には無いので任意 */
   isCustom?: boolean
+  /** 並行調理ナビから始めたタイマー（2026-08-08 便ED）。戻り先をナビの手順にするために持つ */
+  fromNavi?: boolean
+  /** ナビのレシピ色の添字（0,1,2）。常駐バーの左端の色に使う */
+  naviColorIndex?: number
 }
 
 /** localStorage のキー */
@@ -77,6 +81,12 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
       muted: t.muted === true,
       // 印が無い古い保存は「手順のタイマー」として読み戻す（従来どおりの見た目に戻る）
       isCustom: t.isCustom === true,
+      // ナビ由来の印と色（古い保存には無い＝従来どおりレシピ詳細へ戻る・色は付かない）
+      fromNavi: t.fromNavi === true,
+      naviColorIndex:
+        typeof t.naviColorIndex === 'number' && Number.isFinite(t.naviColorIndex)
+          ? t.naviColorIndex
+          : undefined,
     })
   }
   return restored

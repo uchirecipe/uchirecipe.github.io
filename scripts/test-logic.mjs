@@ -132,7 +132,9 @@ import {
   buildCookPlan,
   isHandsOnStep,
   stepCategory,
+  cutOrderRank,
 } from '../src/logic/cookNavi.ts'
+import { parseCookNaviSession } from '../src/logic/cookNaviSession.ts'
 import {
   stepIngredientAmounts,
   recipeIngredientList,
@@ -4199,6 +4201,52 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   ])
   eq('ナビ流れ: 長い待ちが控えている品の下ごしらえを先に始める', span.items[0].recipeTitle, '長い')
   eq('ナビ流れ: 2番目には30分の待ちを仕掛ける', span.items[1].kind, 'wait')
+}
+
+// ---------- cutOrderRank / buildCookTimeline(並行調理ナビ: 切る順番は野菜→肉。
+// 2026-08-08 便ED・オーナー指示「切る順番を野菜→肉、肉は最後に」＝まな板の交差汚染を避ける定石) ----------
+{
+  eq('ナビ切る順: 「玉ねぎを切る」は先に切る側', cutOrderRank({ text: '玉ねぎを薄切りにする' }), 0)
+  eq('ナビ切る順: 「鶏もも肉を切る」は最後に切る側', cutOrderRank({ text: '鶏もも肉を一口大に切る' }), 1)
+  eq('ナビ切る順: 「豚バラ肉を切る」は最後に切る側', cutOrderRank({ text: '豚バラ薄切り肉を食べやすく切る' }), 1)
+  eq('ナビ切る順: 「鮭の切り身」は最後に切る側', cutOrderRank({ text: '鮭の切り身を半分に切る' }), 1)
+  // 判断が付かない語は野菜あつかい（余計に並べ替えない）
+  eq('ナビ切る順: 「材料を切る」は先に切る側(判断が付かないものは動かさない)', cutOrderRank({ text: '材料を切る' }), 0)
+
+  // 2品の「切る」が同時に着手できるとき、野菜の方が先に来る
+  const cutOrder = buildCookTimeline([
+    { id: 1, title: '肉料理', steps: [{ text: '鶏もも肉を一口大に切る' }, { text: 'フライパンで焼く' }] },
+    { id: 2, title: 'サラダ', steps: [{ text: 'レタスとトマトを切る' }, { text: 'ドレッシングと和える' }] },
+  ])
+  const cutTexts = cutOrder.items.map((it) => it.text)
+  eq(
+    'ナビ切る順: 野菜を切る工程が肉を切る工程より先に来る',
+    cutTexts.indexOf('レタスとトマトを切る') < cutTexts.indexOf('鶏もも肉を一口大に切る'),
+    true,
+  )
+}
+
+// ---------- parseCookNaviSession(並行調理ナビ: 作りかけの段取りを覚える。
+// 2026-08-08 便ED・オーナー実機フィードバック①「画面移動するたびに段取りを作るところからやり直し」) ----------
+{
+  eq(
+    'ナビ状態保持: 保存した内容をそのまま読み戻せる',
+    JSON.stringify(parseCookNaviSession('{"selectedIds":[3,7],"showTimeline":true,"trialActive":false}')),
+    JSON.stringify({ selectedIds: [3, 7], showTimeline: true, trialActive: false }),
+  )
+  eq('ナビ状態保持: 空の保存は覚えていない扱い', parseCookNaviSession(null), undefined)
+  eq('ナビ状態保持: 壊れた保存は覚えていない扱い', parseCookNaviSession('{壊れ'), undefined)
+  eq('ナビ状態保持: 選んだ品が無ければ覚えていない扱い', parseCookNaviSession('{"selectedIds":[]}'), undefined)
+  eq(
+    'ナビ状態保持: 数字でないIDは捨てる',
+    JSON.stringify(parseCookNaviSession('{"selectedIds":[1,"x",null,2]}')?.selectedIds),
+    JSON.stringify([1, 2]),
+  )
+  eq(
+    'ナビ状態保持: お試し中かどうかも覚える(戻るたびに回数を失わないため)',
+    parseCookNaviSession('{"selectedIds":[1],"trialActive":true}')?.trialActive,
+    true,
+  )
 }
 
 // ---------- stepIngredientAmounts / recipeIngredientList(並行調理ナビ: 段取り中に分量が見える。

@@ -33,6 +33,12 @@ export interface NaviIngredientAmount {
   name: string
   /** 分量＋単位（人数換算済み。例:「200g」「大さじ1」「適量」）。分量が空なら空文字 */
   amount: string
+  /**
+   * 合わせ調味料のグループ番号（1〜4。無ければ undefined）。
+   * 2026-08-08 便ED・オーナー実機フィードバック「合わせ調味料のまとめて計量表示がナビに無い」。
+   * レシピ詳細の材料欄と同じ色の線で示し、先にまとめて計量してよい材料を見分けられるようにする。
+   */
+  seasoningGroup?: number
 }
 
 /**
@@ -82,7 +88,11 @@ export function formatNaviIngredient(
     baseServings > 0 && targetServings > 0
       ? scaleAmount(ingredient.amount ?? '', baseServings, targetServings, ingredient.unit)
       : (ingredient.amount ?? '')
-  return { name: ingredient.name, amount: formatAmountUnit(scaled, ingredient.unit) }
+  return {
+    name: ingredient.name,
+    amount: formatAmountUnit(scaled, ingredient.unit),
+    seasoningGroup: ingredient.seasoningGroup,
+  }
 }
 
 /**

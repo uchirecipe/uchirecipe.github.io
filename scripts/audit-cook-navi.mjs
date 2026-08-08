@@ -24,6 +24,7 @@ import {
   resolveStepMinutes,
   resolveWaitMinutes,
   buildCookPlan,
+  cutOrderRank,
   isHandsOnStep,
   stepCategory,
   stepStageRank,
@@ -318,7 +319,16 @@ function simulateTimeline(recipes, opt) {
         const waitMinutes = kind === 'wait' ? (opt.waitMinutes(s) ?? 0) : 0
         const activeMinutes =
           kind === 'active' ? (s.minutes != null && s.minutes > 0 ? s.minutes : DEFAULT_ACTIVE_MINUTES) : 0
-        return { i, kind, waitMinutes, activeMinutes, category: stepCategory(s), stageRank: stepStageRank(s), text: s.text }
+        return {
+          i,
+          kind,
+          waitMinutes,
+          activeMinutes,
+          category: stepCategory(s),
+          stageRank: stepStageRank(s),
+          cutRank: cutOrderRank(s),
+          text: s.text,
+        }
       })
       return { colorIndex, steps, ptr: 0, readyAt: 0, title: r.title }
     })
@@ -348,15 +358,20 @@ function simulateTimeline(recipes, opt) {
       chosen = waits[0]
     } else {
       const sameCat = (j) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
-      chosen = ready
-        .slice()
-        .sort(
-          (a, b) =>
-            remainingSpan(b) - remainingSpan(a) ||
-            a.steps[a.ptr].stageRank - b.steps[b.ptr].stageRank ||
-            sameCat(a) - sameCat(b) ||
-            a.colorIndex - b.colorIndex,
-        )[0]
+      chosen = ready.slice().sort((a, b) => {
+        const stepA = a.steps[a.ptr]
+        const stepB = b.steps[b.ptr]
+        // 切る工程どうしは、まな板の順序（野菜→肉・魚）を先に見る（アプリ本体と同じ規則）
+        if (stepA.category === 'cut' && stepB.category === 'cut' && stepA.cutRank !== stepB.cutRank) {
+          return stepA.cutRank - stepB.cutRank
+        }
+        return (
+          remainingSpan(b) - remainingSpan(a) ||
+          stepA.stageRank - stepB.stageRank ||
+          sameCat(a) - sameCat(b) ||
+          a.colorIndex - b.colorIndex
+        )
+      })[0]
     }
     const step = chosen.steps[chosen.ptr]
     const startMin = cookAt

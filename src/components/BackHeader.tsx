@@ -17,6 +17,11 @@ type Props = {
    * （例: レシピ詳細の戻るボタンは常に一覧へ、というオーナー要望。2026-07-10）
    */
   alwaysFallback?: boolean
+  /**
+   * 戻る直前に行う後片付け（任意・2026-08-08 便ED）。
+   * 並行調理ナビが「戻るまでは作りかけの段取りを残す」ために使う。
+   */
+  onBack?: () => void
 }
 
 /**
@@ -26,10 +31,18 @@ type Props = {
  * alwaysFallback が true の画面だけは、履歴の有無に関わらず常に fallback へ移動する。
  * sticky表示なので、常に画面上部で「今どのレシピを見ているか」が分かる。
  */
-export default function BackHeader({ fallback, title, onTitleClick, right, alwaysFallback }: Props) {
+export default function BackHeader({
+  fallback,
+  title,
+  onTitleClick,
+  right,
+  alwaysFallback,
+  onBack,
+}: Props) {
   const navigate = useNavigate()
 
   const goBack = () => {
+    onBack?.()
     if (alwaysFallback) {
       navigate(fallback)
       return

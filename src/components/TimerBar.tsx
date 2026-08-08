@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { X, BellRing, Bell, BellOff } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useTimers } from './TimerProvider'
+import { useTimers, type ActiveTimer } from './TimerProvider'
+import { hasCookNaviTimeline } from '../logic/cookNaviSession'
+import { naviRecipeColor } from '../logic/naviColors'
 import { formatRemaining } from '../logic/time'
 import { sortTimersForDisplay } from '../logic/timerOrder'
 import StepBadge from './StepBadge'
@@ -42,13 +44,21 @@ export default function TimerBar() {
    * ナビから離脱していた）。ナビにその手順が無い（別の組み合わせで再構築した・タイムライン
    * を畳んだ等）ときは従来どおり詳細へフォールバックする。
    */
-  const goToStep = (recipeId: number, stepNumber: number) => {
+  const goToStep = (timer: ActiveTimer) => {
+    const { recipeId, stepNumber } = timer
     // `navi-step-...` の id は CookNaviPage の naviStepDomId が付与する。形式を変えるときは両方を揃える
     if (
       location.pathname === '/cook-navi' &&
       document.getElementById(`navi-step-${recipeId}-${stepNumber}`)
     ) {
       navigate(`/cook-navi?focusStep=${recipeId}-${stepNumber}`, { replace: true })
+      return
+    }
+    // ナビから始めたタイマーは、別の画面にいてもナビの該当手順へ戻す（2026-08-08 便ED・
+    // オーナー実機フィードバック②「他画面からタイマーをタップするとレシピ詳細に飛び、
+    // しかもナビが消えて最初からになる」）。作りかけの段取りが残っているときだけ通す
+    if (timer.fromNavi && hasCookNaviTimeline()) {
+      navigate(`/cook-navi?focusStep=${recipeId}-${stepNumber}`)
       return
     }
     navigate(`/recipes/${recipeId}?step=${stepNumber}`)
@@ -89,16 +99,22 @@ export default function TimerBar() {
               key={timer.id}
               type="button"
               onClick={() =>
-                timer.done ? goToStep(timer.recipeId, timer.stepNumber) : setAdjustingId(timer.id)
+                timer.done ? goToStep(timer) : setAdjustingId(timer.id)
               }
               aria-label={timer.done ? undefined : adjustAriaLabel}
               // 終わった行は薄い赤みの面で塗る（2026-08-03 オーナー実機フィードバック⑧）。
               // 枠線と文字色だけだと、動作中の行と面の色が同じで一目では見分けにくかった
-              style={
-                timer.done
+              /* 左端にナビのレシピ色（2026-08-08 便ED・オーナー実機フィードバック⑧
+                 「どのレシピのタイマーか一目で分かるように」）。ナビ以外から始めた
+                 タイマーには色が無いので従来どおりの見た目のまま */
+              style={{
+                ...(timer.done
                   ? { background: 'color-mix(in oklab, var(--warning) 12%, var(--surface))' }
-                  : undefined
-              }
+                  : {}),
+                ...(timer.naviColorIndex != null
+                  ? { borderLeftWidth: 6, borderLeftColor: naviRecipeColor(timer.naviColorIndex) }
+                  : {}),
+              }}
               className={`flex w-full items-center gap-2 rounded-md border px-[var(--space-md)] py-2 text-left shadow-md transition-transform ${
                 timer.done
                   ? 'border-warning text-warning'
@@ -196,9 +212,8 @@ export default function TimerBar() {
         onGoToStep={
           adjustingTimer
             ? () => {
-                const { recipeId, stepNumber } = adjustingTimer
                 setAdjustingId(null)
-                goToStep(recipeId, stepNumber)
+                goToStep(adjustingTimer)
               }
             : undefined
         }

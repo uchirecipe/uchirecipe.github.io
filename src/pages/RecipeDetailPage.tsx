@@ -132,7 +132,6 @@ export default function RecipeDetailPage() {
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     setHighlightStepIndex(index)
-    const highlightTimeout = setTimeout(() => setHighlightStepIndex(null), 2000)
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -141,9 +140,20 @@ export default function RecipeDetailPage() {
       },
       { replace: true },
     )
-    return () => clearTimeout(highlightTimeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, recipe])
+
+  /**
+   * ハイライトを2秒で消す（2026-08-08 便ED・オーナー実機フィードバック③
+   * 「タイマーを止めて消しても、調理手順の色が変わったまま戻らない」の修正）。
+   * 上の副作用の中で setTimeout を張ると、その場で ?step= を消した結果として副作用が
+   * 再実行され、**前回の後片付け（clearTimeout）が先に走って**色が消えなくなっていた。
+   */
+  useEffect(() => {
+    if (highlightStepIndex == null) return
+    const timeout = setTimeout(() => setHighlightStepIndex(null), 2000)
+    return () => clearTimeout(timeout)
+  }, [highlightStepIndex])
 
   // 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
   const keepScreenOn = settings?.keepScreenOn ?? false

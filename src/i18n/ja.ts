@@ -1028,6 +1028,16 @@ export const ja = {
     stepNumberLabel: '手順{n}',
     openRecipe: 'レシピを開く',
     startTimer: 'タイマーを始める',
+    // 段取りに組んだ品をまとめて記録する(2026-08-08 便ED・オーナー実機フィードバック⑨)。
+    // 確認文は規約F: 何が記録され・何が変わり・何が残るかを件数つきで書く
+    markAllCooked: 'まとめて作った！',
+    markAllCookedConfirm:
+      '{titles}の{n}件に、今日の日付で作った記録をつけます。\n記録した{n}件は今日の献立から外れます（レシピと段取りはそのまま残ります）。\n\n',
+    markAllCookedConfirmPantry: '設定により、使った食材の在庫も1段階ずつ下がります。\n\n',
+    markAllCookedConfirmAsk: '記録をつけますか？',
+    markAllCookedToast: '{n}件の作った記録をつけました',
+    markAllCookedUndone: '{n}件の作った記録を取り消して、今日の献立に戻しました',
+    markAllCookedUndoNothing: '取り消せる記録が見つかりませんでした（記録はそのままです）',
   },
   shopping: {
     // 食材タブの2タブ分割(2026-07-16 UI総点検B-9: 買い物メモが最上部を占有しヘビーユーザーの

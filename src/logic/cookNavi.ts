@@ -396,6 +396,26 @@ export function stepStageRank(step: Step): number {
   return CATEGORY_STAGE[stepCategory(step)]
 }
 
+/**
+ * 生の肉・魚を指す語（2026-08-08 便ED・オーナー指示「切る順番を野菜→肉に。肉は最後」）。
+ * まな板と包丁を洗わずに続けても差し支えない順に並べるための、台所の定石
+ * （生の肉・魚を先に切ると、そのあと生で食べる野菜に菌が移りうる）。
+ *
+ * 見分けは手順文の語だけで行う簡単な規則にする。**当てはまらないものは野菜あつかい**＝
+ * 判断が付かないときは従来どおりの順番のままにする（余計に入れ替えない）。
+ * 「たら」「いか」など、ほかの言葉の一部になりやすい語はあえて入れない（誤検出のほうが害が大きい）。
+ */
+const RAW_MEAT_PATTERN =
+  /肉|鶏|豚|ささみ|ベーコン|ハム|ソーセージ|ウインナー|切り身|刺身|鮭|さば|ぶり|えび|ホタテ|貝柱|魚/
+
+/**
+ * 切る工程どうしを比べるときの順番（0＝野菜など先に切るもの／1＝生の肉・魚＝最後に切るもの）。
+ * 切る工程以外には影響しない（呼び出し側が category === 'cut' のときだけ使う）。
+ */
+export function cutOrderRank(step: Step): number {
+  return RAW_MEAT_PATTERN.test(step.text) ? 1 : 0
+}
+
 /** レシピの色分け用パレット添字（0,1,2）。CookNaviPage 側で CSS 変数のチップ色に対応づける */
 export interface TimelineRecipe {
   id: number
@@ -455,6 +475,8 @@ interface Job {
     activeMinutes: number
     category: StepCategory
     stageRank: number
+    /** 切る工程の中での順番（0=野菜など / 1=生の肉・魚。切る工程どうしのときだけ使う） */
+    cutRank: number
   }[]
   /** 次に着手する手順の添字 */
   ptr: number
@@ -497,6 +519,7 @@ function buildJobs(recipes: Recipe[]): Job[] {
           activeMinutes,
           category: stepCategory(s),
           stageRank: stepStageRank(s),
+          cutRank: cutOrderRank(s),
         }
       }),
     }))
@@ -572,17 +595,23 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       )
       chosen = waits[0]
     } else {
-      // 手作業のみ。残り時間→段階→同じ種類の作業→選択順、の順に見て決める
+      // 手作業のみ。残り時間→段階→同じ種類の作業→選択順、の順に見て決める。
+      // ただし**切る工程どうし**のときだけは、まな板の順序（野菜→肉・魚）を先に見る
+      // （2026-08-08 便ED・オーナー指示。生の肉を先に切ると、そのあとの野菜に菌が移りうる）
       const sameCat = (j: Job) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
-      const acts = ready
-        .slice()
-        .sort(
-          (a, b) =>
-            remainingSpan(b) - remainingSpan(a) ||
-            a.steps[a.ptr].stageRank - b.steps[b.ptr].stageRank ||
-            sameCat(a) - sameCat(b) ||
-            a.colorIndex - b.colorIndex,
+      const acts = ready.slice().sort((a, b) => {
+        const stepA = a.steps[a.ptr]
+        const stepB = b.steps[b.ptr]
+        if (stepA.category === 'cut' && stepB.category === 'cut' && stepA.cutRank !== stepB.cutRank) {
+          return stepA.cutRank - stepB.cutRank
+        }
+        return (
+          remainingSpan(b) - remainingSpan(a) ||
+          stepA.stageRank - stepB.stageRank ||
+          sameCat(a) - sameCat(b) ||
+          a.colorIndex - b.colorIndex
         )
+      })
       chosen = acts[0]
     }
 
