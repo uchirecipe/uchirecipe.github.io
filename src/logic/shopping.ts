@@ -8,7 +8,9 @@ import {
   resolveCalcAmount,
 } from './amount'
 import { categorizePantryName, normalizeAisleOrder } from './pantryGroups'
-import type { Ingredient, PantryGroupKey, ShoppingItemSource } from '../db/types'
+import { shiftDate } from './mealPlan'
+import { ja } from '../i18n/ja'
+import type { Ingredient, MealSlot, PantryGroupKey, ShoppingItemSource } from '../db/types'
 
 /**
  * 買い物メモを売り場順に自動整列する（2026-07-24 実機FB #11）。
@@ -240,6 +242,112 @@ export function parseServingsParam(raw: string): Map<number, number> {
     map.set(id, (map.get(id) ?? 0) + servings)
   }
   return map
+}
+
+/* ============================================================
+   買い物リストの範囲えらび（2026-08-08 便EA・オーナー要望）
+
+   オーナー原文: 「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
+   １週間分まとめて買い物とは限らない」
+
+   規則:
+   - 既定は「絞っていない」＝ null。表示中の週ぜんぶ・表示している食事ぜんぶで、
+     従来と1gも変わらない分量を出す（選ばない人の手数を増やさない）。
+   - 絞ったときだけ、選んだ日付と食事に入っている献立で集計する。
+   - 献立のロック（mealPlanLocks）とは無関係。買い物は献立を読むだけで書き換えないので鍵は見ない。
+   ============================================================ */
+
+/** 買い物リストに入れる範囲。どちらも null/undefined ＝「絞っていない」 */
+export interface ShoppingRange {
+  /** 選んだ日付（YYYY-MM-DD）。null＝表示中の週ぜんぶ */
+  dates?: readonly string[] | null
+  /** 選んだ食事。null＝表示している食事ぜんぶ */
+  slots?: readonly MealSlot[] | null
+}
+
+/**
+ * 買い物の集計に入れる献立の枠だけを残す。
+ * 表示していない食事（設定「表示する食事」で外したもの）は、絞る前から対象外なので常に落とす。
+ */
+export function filterShoppingEntries<T extends { date: string; slot: MealSlot }>(
+  entries: readonly T[],
+  visibleSlots: readonly MealSlot[],
+  range?: ShoppingRange,
+): T[] {
+  const dates = range?.dates ? new Set(range.dates) : null
+  const slots = range?.slots ? new Set(range.slots) : null
+  return entries.filter(
+    (e) =>
+      visibleSlots.includes(e.slot) &&
+      (!dates || dates.has(e.date)) &&
+      (!slots || slots.has(e.slot)),
+  )
+}
+
+/**
+ * 「今日の献立」（今日つくるリスト）の分も買い物に足すか。
+ *
+ * 今日の献立には食事（朝食/昼食/夕食）の情報が無い。食事で絞ったときにこれを丸ごと足すと、
+ * 選んだ範囲より多く買わせることになるので足さない。日付で絞ったときは、今日を選んで
+ * いれば足す。絞っていなければ従来どおり必ず足す。
+ */
+export function shoppingRangeIncludesTodayList(today: string, range?: ShoppingRange): boolean {
+  if (range?.slots) return false
+  if (range?.dates) return range.dates.includes(today)
+  return true
+}
+
+/** 範囲を絞っているか（選んだ日付・食事が、絞る前の全部と同じなら絞っていない扱い） */
+export function isShoppingRangeNarrowed(
+  range: ShoppingRange | undefined,
+  allDates: readonly string[],
+  visibleSlots: readonly MealSlot[],
+): boolean {
+  const narrowed = (picked: readonly string[] | null | undefined, all: readonly string[]) =>
+    picked != null && !all.every((v) => picked.includes(v))
+  return narrowed(range?.dates, allDates) || narrowed(range?.slots, visibleSlots)
+}
+
+/** 「8/8」の形（先頭の0を付けない。既存の日付表示と同じ見た目） */
+function monthDayLabel(date: string): string {
+  const [, m, d] = date.split('-')
+  return `${Number(m)}/${Number(d)}`
+}
+
+/**
+ * 買い物リストの範囲の日付部分を短く言い表す。
+ * 連続していれば「8/8〜8/14」、飛んでいれば「8/8・8/10・8/12」。
+ */
+export function formatShoppingRangeDates(dates: readonly string[]): string {
+  const sorted = [...new Set(dates)].sort()
+  if (sorted.length === 0) return ''
+  if (sorted.length === 1) return monthDayLabel(sorted[0])
+  const contiguous = sorted.every((d, i) => i === 0 || shiftDate(sorted[i - 1], 1) === d)
+  return contiguous
+    ? `${monthDayLabel(sorted[0])}〜${monthDayLabel(sorted[sorted.length - 1])}`
+    : sorted.map(monthDayLabel).join('・')
+}
+
+/**
+ * 買い物メモの下書きに添える「どの範囲から作ったか」の1行（2026-08-08 便EA）。
+ * 献立から作ったときだけ渡す（レシピを手で選んで作った下書きには付けない）。
+ * 対象の日付が1日も無いときは空文字＝行を出さない。
+ */
+export function formatShoppingRangeLabel(input: {
+  /** 実際に集計した日付 */
+  dates: readonly string[]
+  /** 実際に集計した食事 */
+  slots: readonly MealSlot[]
+  /** 「今日の献立」の分も入れたか */
+  includesTodayList: boolean
+}): string {
+  const dateText = formatShoppingRangeDates(input.dates)
+  if (!dateText) return ''
+  const slotText = input.slots.map((slot) => ja.mealPlan.slot[slot]).join('・')
+  const base = ja.shopping.fromMealPlanRange
+    .replace('{dates}', dateText)
+    .replace('{slots}', slotText)
+  return input.includesTodayList ? base + ja.shopping.fromMealPlanRangeToday : base
 }
 
 /**

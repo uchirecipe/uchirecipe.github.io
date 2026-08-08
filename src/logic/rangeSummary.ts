@@ -11,11 +11,14 @@
  * ここから確定した2つの規則:
  *  規則1（1人分の期間合計）: 平均を出さない。料理1品につき1人分（perServing）を1回だけ足す。
  *    2人分作っても4人分作っても「1人が食べた分」は1食なので、作った人数では重み付けしない。
- *  規則2（過去=実績・今日以降=予定）: 1日は必ずどちらか片方の基準だけで数える。
- *    過去日（date < today）は「作った記録」だけ、今日以降（date >= today）は「登録した献立」だけ。
- *    今日を予定側に入れるのは、月カレンダーが以前から「過去日は予定を出さない・今日と未来日は
- *    予定を出す」（isPastDateが境界）で動いており、表示と集計の境界を揃えるため。
- *    同じ日を実績と予定の両方で数えない＝二重計上しない、が最優先。
+ *  規則2（過去=実績・未来=予定・今日=両方）: 過去日（date < today）は「作った記録」だけ、
+ *    未来日（date > today）は「登録した献立」だけ。
+ *    **今日だけは「作った記録があるものは記録・まだのものは登録した献立」で数える**
+ *    （2026-08-08 便EA・オーナー指摘「今日の『作った記録』が集計に入っていない」。
+ *    従来は今日を丸ごと予定側に入れており、今日すでに作ったものが記録として数えられず、
+ *    基準行も「8/7〜8/7は作った記録、8/8〜8/9は登録した献立」とその通りに出ていた）。
+ *    同じ料理を実績と予定の両方で数えない＝二重計上しない、が最優先
+ *    （今日の予定は、記録1件につき1枠を先着で取り下げる。logic/mealPlan.ts cookedPlanEntryIds と同じ数え方）。
  *
  * 2026-08-03 便DK（オーナー確定「3人家族なら予算や買い物メモは3人分で計算した数値が必要。
  * 栄養は1人当たりのみで十分」）で規則3が加わった:
@@ -55,6 +58,12 @@ export interface RangeCookedDish {
   recipe: RangeRecipeLike
   /** 記録時の人数（任意）。無い古い記録はレシピの登録人数で代替する */
   log?: { servings?: number }
+  /**
+   * どのレシピの記録か（任意・2026-08-08 便EA）。
+   * 「今日」は記録と予定が同居しうるので、同じ料理を二重に数えないための照合キーに使う。
+   * 渡さなければ照合しない＝今日の予定はそのまま予定として数える（従来と同じ）。
+   */
+  recipeId?: number
 }
 
 /** 期間内の「登録した献立」1枠1品（日付＋レシピ） */
@@ -70,6 +79,45 @@ export interface RangePlannedDish {
    * 1人分の食費・栄養はこの値では変わらない。
    */
   servings?: number
+  /**
+   * どのレシピの予定か（任意・2026-08-08 便EA）。
+   * 今日の枠が「もう作った」ときに、記録側と二重に数えないための照合キー。
+   */
+  recipeId?: number
+}
+
+/**
+ * 基準行（「どの日をどちらで数えたか」）に出す3つの部分（2026-08-08 便EA）。
+ * 今日は記録と献立が同居しうるので、過去・未来と分けて持つ。
+ */
+export interface RangeBasisParts {
+  /** 作った記録だけで数える過去の範囲（今日を含まない）。無ければ null */
+  past: { start: string; end: string } | null
+  /** 登録した献立だけで数える未来の範囲（今日を含まない）。無ければ null */
+  future: { start: string; end: string } | null
+  /** 期間に今日が入っているか（今日は「作った分は記録・まだの分は献立」で数える） */
+  includesToday: boolean
+}
+
+/** 基準行の材料を作る。start<=end に正規化済みの値を渡すこと */
+export function rangeBasisParts(start: string, end: string, today: string): RangeBasisParts {
+  const pastEnd = end < today ? end : shiftDay(today, -1)
+  const futureStart = start > today ? start : shiftDay(today, 1)
+  return {
+    past: start <= pastEnd ? { start, end: pastEnd } : null,
+    future: futureStart <= end ? { start: futureStart, end } : null,
+    includesToday: start <= today && today <= end,
+  }
+}
+
+/** YYYY-MM-DD を日数ぶんずらす（月またぎ・うるう年もDateに任せる） */
+function shiftDay(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00`)
+  d.setDate(d.getDate() + days)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 /** 期間を「実績で数える日」と「予定で数える日」に分けた結果 */
@@ -81,27 +129,25 @@ export interface RangeBasisSplit {
 }
 
 /**
- * 選んだ期間を「過去（実績で数える）」と「今日以降（予定で数える）」に切り分ける（規則2）。
+ * 選んだ期間を「作った記録で数える範囲」と「登録した献立で数える範囲」に切り分ける（規則2）。
  * YYYY-MM-DD同士の辞書式比較がそのまま日付比較になる前提（isPastDateと同じ）。
  * start<=end に正規化済みの値を渡すこと（呼び出し側の normalizeDateRange 済み）。
+ *
+ * 2026-08-08 便EA（オーナー指摘「今日の『作った記録』が集計に入っていない」）:
+ * 従来は「今日の前日まで＝記録／今日から先＝予定」で切っていたため、**今日すでに作ったものが
+ * 記録として数えられず、予定側で数えられていた**（基準行も「8/7〜8/7は作った記録、8/8〜8/9は
+ * 登録した献立」と、その通りに出ていた）。今日は両方の範囲に入れ、
+ * 「作った記録があるものは記録・まだのものは予定」で数える（二重計上は splitRangeDishes で防ぐ）。
  */
 export function splitRangeByToday(start: string, end: string, today: string): RangeBasisSplit {
-  // 期間全体が過去（終了日が今日より前）: すべて実績
-  if (end < today) return { actual: { start, end }, plan: null }
-  // 期間全体が今日以降（開始日が今日以降）: すべて予定
-  if (start >= today) return { actual: null, plan: { start, end } }
-  // またぐ期間（当月など）: 今日の前日までが実績・今日から終了日までが予定
-  return { actual: { start, end: prevDay(today) }, plan: { start: today, end } }
-}
-
-/** YYYY-MM-DD の前日。splitRangeByToday の表示用の境界（月またぎ・うるう年もDateに任せる） */
-function prevDay(date: string): string {
-  const d = new Date(`${date}T00:00:00`)
-  d.setDate(d.getDate() - 1)
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  // 記録で数える範囲は「開始日〜min(終了日, 今日)」＝今日を含む
+  const actualEnd = end < today ? end : today
+  // 予定で数える範囲は「max(開始日, 今日)〜終了日」＝今日を含む
+  const planStart = start > today ? start : today
+  return {
+    actual: start <= actualEnd ? { start, end: actualEnd } : null,
+    plan: planStart <= end ? { start: planStart, end } : null,
+  }
 }
 
 /** 実績・予定それぞれの集計結果 */
@@ -147,6 +193,11 @@ export interface RangeIntakeSummary {
   cookedDayCount: number
   /** cookedHouseholdYen を cookedDayCount で割った1日あたりの金額（円・記録が1日も無ければ0） */
   cookedPerDayYen: number
+  /**
+   * 基準行に出す材料（2026-08-08 便EA）。actual.range / plan.range は今日を両方に含むので、
+   * 画面の文言はこちら（過去・未来・今日を分けたもの）から組み立てる。
+   */
+  basis: RangeBasisParts
 }
 
 /**
@@ -165,13 +216,46 @@ function splitRangeDishes(input: {
   const split = splitRangeByToday(start, end, today)
   const actual = split.actual
   const plan = split.plan
+  // 過去日と今日: 作った記録を数える（過去の予定ベース計算はオーナー指示で廃止）
+  const actualDishes =
+    actual == null ? [] : cooked.filter((d) => d.date >= actual.start && d.date <= actual.end)
+  // 今日と未来日: 登録した献立を数える。ただし今日は、もう作った品を記録側で数えているので落とす
+  const planDishes =
+    plan == null ? [] : planned.filter((d) => d.date >= plan.start && d.date <= plan.end)
   return {
-    // 過去分: 作った記録だけを数える（過去の予定ベース計算はオーナー指示で廃止）
-    actualDishes:
-      actual == null ? [] : cooked.filter((d) => d.date >= actual.start && d.date <= actual.end),
-    // 今日以降: 登録した献立だけを数える
-    planDishes: plan == null ? [] : planned.filter((d) => d.date >= plan.start && d.date <= plan.end),
+    actualDishes,
+    planDishes: dropPlannedAlreadyCooked(planDishes, actualDishes, today),
   }
+}
+
+/**
+ * 今日ぶんの二重計上を防ぐ（2026-08-08 便EA・オーナー指摘）。
+ *
+ * 今日は「作った記録があるものは記録・まだのものは予定」で数える。同じ料理を両方で数えないよう、
+ * 今日の作った記録の件数だけ、今日の予定を先着で取り下げる
+ * （数え方は logic/mealPlan.ts cookedPlanEntryIds と同じ＝記録1件につき予定1枠を消費するので、
+ * 同じ料理を2枠に予定して1回だけ作った日は、片方だけが記録側に移り、残りは予定のまま残る）。
+ *
+ * recipeId を渡していない呼び出し（照合キーが無い）では何も落とさない＝従来どおりの数え方になる。
+ */
+function dropPlannedAlreadyCooked(
+  planDishes: RangePlannedDish[],
+  actualDishes: RangeCookedDish[],
+  today: string,
+): RangePlannedDish[] {
+  const remaining = new Map<number, number>()
+  for (const dish of actualDishes) {
+    if (dish.date !== today || dish.recipeId == null) continue
+    remaining.set(dish.recipeId, (remaining.get(dish.recipeId) ?? 0) + 1)
+  }
+  if (remaining.size === 0) return planDishes
+  return planDishes.filter((dish) => {
+    if (dish.date !== today || dish.recipeId == null) return true
+    const left = remaining.get(dish.recipeId) ?? 0
+    if (left <= 0) return true
+    remaining.set(dish.recipeId, left - 1)
+    return false
+  })
 }
 
 /**
@@ -244,6 +328,7 @@ export function summarizeRangeIntake(input: {
     planMealCount: planCost.count,
     cookedDayCount,
     cookedPerDayYen: cookedDayCount > 0 ? Math.round(actualCost.total / cookedDayCount) : 0,
+    basis: rangeBasisParts(start, end, today),
   }
 }
 
@@ -288,11 +373,22 @@ export function dayIntakeMap(input: {
 
   const map = new Map<string, DayIntake>()
   for (const date of dates) {
-    const basis: 'actual' | 'plan' = date < today ? 'actual' : 'plan'
-    const dishes =
-      basis === 'actual'
+    // 2026-08-08 便EA: 今日は「作った記録があるものは記録・まだのものは登録した献立」で数える
+    // （期間の集計＝summarizeRangeIntake と同じ規則2。カレンダーと期間カードが同じ数字になる）
+    const todayCooked = date === today ? (cookedByDate.get(date) ?? []) : []
+    const dishes: RangeCookedDish[] =
+      date < today
         ? (cookedByDate.get(date) ?? [])
-        : (plannedByDate.get(date) ?? []).map((d) => ({ date: d.date, recipe: d.recipe }))
+        : date > today
+          ? (plannedByDate.get(date) ?? []).map((d) => ({ date: d.date, recipe: d.recipe }))
+          : [
+              ...todayCooked,
+              ...dropPlannedAlreadyCooked(plannedByDate.get(date) ?? [], todayCooked, today).map(
+                (d) => ({ date: d.date, recipe: d.recipe }),
+              ),
+            ]
+    // 今日は記録と献立が混ざりうる。記録が1件でもあれば「作った記録」の色・読み上げにする
+    const basis: 'actual' | 'plan' = date < today || todayCooked.length > 0 ? 'actual' : 'plan'
     if (dishes.length === 0) continue
     const cost = sumCookedRecipesCost(dishes, priceIndex)
     const nutrition = sumPersonalNutrition(dishes.map((d) => d.recipe))

@@ -3500,7 +3500,7 @@ try {
   }
 
   // --- WEEKUI-DT: 2026-08-07 便DT(オーナー実機確認)の10件。
-  //  DT-1  日タブの「作った！」ボタンをカードの右下へ(押し間違いを減らす配置)
+  //  DT-1  日タブの「作った！」ボタンの位置(2026-08-08 便EAで「料理名の横」へ変更)
   //  DT-2  週タブの記録カード→レシピ詳細→戻る で、同じ週・同じスクロール位置へ戻り、
   //        その後「レシピ」タブを押すと(詳細ではなく)レシピ一覧が開く
   //  DT-3  日付の切り替え欄は「すべて折りたたむ」の上(7日分カードの直前)
@@ -3524,8 +3524,11 @@ try {
       await dtPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await dtPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // ---------- DT-1: 日タブの「作った！」は行の右端に寄る ----------
-      // 「おまかせで提案」で今日の献立に品を入れてから、行の中でボタンが右寄せか見る
+      // ---------- DT-1→EA-1: 日タブの「作った！」は料理名の横(同じ行) ----------
+      // 2026-08-08 便EA(オーナー指示「作ったボタンをレシピ名横に」): 便DT-1で作った
+      // 「ボタンだけの行」をやめ、料理名と同じ行の右へ置いた(左半分の空白が実機で目立っていた)。
+      // 検査するのは①料理名と同じ行に並んでいる ②当たり判定44px以上
+      // ③✕(外す)と12px以上離れている(押し間違い対策) の3点
       await dtPage.getByRole('button', { name: /おまかせで提案/ }).first().click()
       await dtPage.waitForTimeout(1500)
       const dtCookedBtn = await dtPage.evaluate(() => {
@@ -3534,21 +3537,44 @@ try {
         )
         const li = btn?.closest('li')
         if (!btn || !li) return null
-        const wrap = btn.parentElement
-        const liRect = li.getBoundingClientRect()
+        const title = li.querySelector('a[href*="/recipes/"]:not(:first-child)')
         const btnRect = btn.getBoundingClientRect()
+        const titleRect = title?.getBoundingClientRect()
+        // ✕(外す)は同じ行にあるときだけ距離を測る(「今週の献立の予定」の行には出ない)
+        const removeBtn = [...li.querySelectorAll('button')].find(
+          (b) => b.getAttribute('aria-label') === 'この献立から外す',
+        )
+        const removeRect = removeBtn?.getBoundingClientRect()
         return {
-          wrapCls: wrap?.className ?? '',
-          // 行の右端との差(px)。右寄せなら数px以内に収まる
-          rightGap: Math.round(liRect.right - btnRect.right),
-          leftGap: Math.round(btnRect.left - liRect.left),
+          height: Math.round(btnRect.height),
+          // 料理名と同じ行か(縦の中心が近く、ボタンが名前より右にある)
+          sameRow:
+            !!titleRect &&
+            Math.abs(btnRect.top + btnRect.height / 2 - (titleRect.top + titleRect.height / 2)) < 12,
+          rightOfTitle: !!titleRect && btnRect.left >= titleRect.right,
+          // 「作った！」の下に専用行が残っていないこと(親が横並びのflex行)
+          parentCls: btn.parentElement?.className ?? '',
+          removeGap: removeRect ? Math.round(removeRect.left - btnRect.right) : null,
         }
       })
       check(
-        'WEEKUI-DT(便DT-1) 日タブの「作った！」はカードの右下に寄っている',
-        !!dtCookedBtn &&
-          dtCookedBtn.wrapCls.includes('justify-end') &&
-          dtCookedBtn.rightGap < dtCookedBtn.leftGap,
+        'WEEKUI-DT(便EA-1) 日タブの「作った！」は料理名の横(同じ行)にある',
+        !!dtCookedBtn && dtCookedBtn.sameRow && dtCookedBtn.rightOfTitle,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便EA-1) 「作った！」の当たり判定は44px以上',
+        !!dtCookedBtn && dtCookedBtn.height >= 44,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便EA-1) 「作った！」と✕(外す)は12px以上離れている',
+        !!dtCookedBtn && dtCookedBtn.removeGap !== null && dtCookedBtn.removeGap >= 12,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便EA-1) 「作った！」だけの行(justify-end)は残っていない',
+        !!dtCookedBtn && !dtCookedBtn.parentCls.includes('justify-end'),
         `btn=${JSON.stringify(dtCookedBtn)}`,
       )
 
@@ -3971,6 +3997,85 @@ try {
         'WEEKLOCK(LOCK-3) もう一度押すとすべて解除される(時間帯ごとの鍵も残さない)',
         lkAllReleased && (await lkLockAll.textContent())?.trim() === 'すべてロック',
         `released=${lkAllReleased}`,
+      )
+
+      // ---------- 便EA: ロックは「手での削除・変更」も止める(オーナー指示) ----------
+      // 便DXの鍵は自動操作だけを止めており、×(削除)・料理名(差し替え)・食数・サイコロは
+      // 押せたままだった。鍵を掛けたら全部止まり、外せば元どおり操作できることを固定する
+      await lkPage.locator(`[data-testid="day-lock"][data-date="${lkDate}"]`).click()
+      await lkPage.waitForTimeout(700)
+      const lkControls = () =>
+        lkPage.evaluate((date) => {
+          const section = document.querySelector(`section[data-date="${date}"]`)
+          const block = section?.querySelector('[data-testid="slot-block"]')
+          if (!block) return null
+          const buttons = [...block.querySelectorAll('button')]
+          const remove = buttons.find((b) => b.getAttribute('aria-label') === 'この割り当てを外す')
+          const name = buttons.find((b) => b.className.includes('flex-1'))
+          const servings = buttons.find((b) =>
+            (b.getAttribute('aria-label') ?? '').includes('この行の食数を変える'),
+          )
+          const dice = buttons.find(
+            (b) => b.getAttribute('aria-label') === 'この行にレシピを自動提案する',
+          )
+          return {
+            removeDisabled: remove ? remove.disabled : null,
+            nameDisabled: name ? name.disabled : null,
+            servingsDisabled: servings ? servings.disabled : null,
+            diceCount: dice ? 1 : 0,
+            note: block.querySelector('[data-testid="slot-lock-note"]')?.textContent ?? '',
+            addRow: [...block.querySelectorAll('button')].some(
+              (b) => b.textContent?.trim() === '＋料理を追加',
+            ),
+          }
+        }, lkDate)
+      const lkLockedCtl = await lkControls()
+      check(
+        'WEEKLOCK(便EA) ロック中は ×(削除)・料理名(差し替え)・食数 が押せない',
+        !!lkLockedCtl &&
+          lkLockedCtl.removeDisabled === true &&
+          lkLockedCtl.nameDisabled === true &&
+          lkLockedCtl.servingsDisabled === true,
+        `ctl=${JSON.stringify(lkLockedCtl)}`,
+      )
+      check(
+        'WEEKLOCK(便EA) ロック中はサイコロと「＋料理を追加」を出さない',
+        !!lkLockedCtl && lkLockedCtl.diceCount === 0 && lkLockedCtl.addRow === false,
+        `ctl=${JSON.stringify(lkLockedCtl)}`,
+      )
+      check(
+        'WEEKLOCK(便EA) ロック中の枠に「削除も変更もできない」1文が出る',
+        !!lkLockedCtl && lkLockedCtl.note === '鍵を外すまで、削除も変更もできません',
+        `note=${lkLockedCtl?.note}`,
+      )
+      // 実際に消えないこと(DBの献立が1品も変わらない)
+      const lkPlanBeforeManual = await lkPlanOf(lkDate)
+      await lkPage.evaluate((date) => {
+        const section = document.querySelector(`section[data-date="${date}"]`)
+        const block = section?.querySelector('[data-testid="slot-block"]')
+        const remove = [...(block?.querySelectorAll('button') ?? [])].find(
+          (b) => b.getAttribute('aria-label') === 'この割り当てを外す',
+        )
+        remove?.click()
+      }, lkDate)
+      await lkPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK(便EA) ロック中は×を押しても献立が消えない',
+        JSON.stringify(await lkPlanOf(lkDate)) === JSON.stringify(lkPlanBeforeManual),
+        `before=${JSON.stringify(lkPlanBeforeManual)}`,
+      )
+      // 鍵を外せば元どおり操作できる
+      await lkPage.locator(`[data-testid="day-lock"][data-date="${lkDate}"]`).click()
+      await lkPage.waitForTimeout(700)
+      const lkUnlockedCtl = await lkControls()
+      check(
+        'WEEKLOCK(便EA) 鍵を外すと ×・料理名・食数 が元どおり押せる',
+        !!lkUnlockedCtl &&
+          lkUnlockedCtl.removeDisabled === false &&
+          lkUnlockedCtl.nameDisabled === false &&
+          lkUnlockedCtl.servingsDisabled === false &&
+          lkUnlockedCtl.note === '',
+        `ctl=${JSON.stringify(lkUnlockedCtl)}`,
       )
     } finally {
       await lkBrowser.close()
@@ -7554,10 +7659,12 @@ try {
       )
 
       // ===== C: 混在(当月。1日に記録・末日に予定) =====
-      // 実行日が1日だと当月に過去日が無く混在にならないため、2日以降のときだけ検証する
+      // 実行日が1日だと当月に過去日が無く、末日だと未来日が無いので、その間の日だけ検証する
+      // (2026-08-08 便EA: 今日は記録・献立の両方で数えるようになったため、過去/未来の
+      //  どちらかが空だと基準行が「◯/◯〜◯/◯は作った記録、…」の形にならない)
       await rcPage.getByRole('button', { name: '今月へ戻る' }).click()
       await rcPage.waitForTimeout(400)
-      if (rcTodayDay >= 2) {
+      if (rcTodayDay >= 2 && rcTodayDay < rcCurLastDay) {
         await rcDay(`${rcCurPrefix}-01`).click()
         await rcPage.waitForTimeout(200)
         await rcDay(`${rcCurPrefix}-${String(rcCurLastDay).padStart(2, '0')}`).click()
@@ -7569,6 +7676,12 @@ try {
             rcMixedText,
           ),
           `本文=${rcMixedText.match(/.{0,40}計算しています/)?.[0]}`,
+        )
+        check(
+          'MEALPLAN-07(便EA) 混在期間には「今日は、作った記録があるものは記録…」の1文も出る',
+          rcMixedText.includes(
+            '今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています',
+          ),
         )
         check(
           'MEALPLAN-07(便CA③) 混在期間の内訳は実績1品と予定1品の両方が出る',
@@ -7591,7 +7704,7 @@ try {
           `表示=${rcMixedPersonal} 期待=${Math.round(rcPersonalOne) * 2}`,
         )
       } else {
-        check('MEALPLAN-07(便CA③) 混在期間の検証は当月に過去日がある日だけ実施(今日は1日なので省略)', true)
+        check('MEALPLAN-07(便CA③) 混在期間の検証は当月に過去日と未来日がある日だけ実施(今日は月初/月末なので省略)', true)
       }
 
       // ===== D: モード解除で日モーダルが復活する =====
@@ -7645,14 +7758,14 @@ try {
         `aria=${rcNutriAria}`,
       )
       check(
-        'MEALPLAN-07(便CA②) 栄養モードのセルは日付＋その日の1人分の数字だけ(単位はセルに入らないので凡例へ)',
-        rcNutriCell === `3${rcNutriKcal}` && rcNutriKcal !== '',
-        `セル=${rcNutriCell} 期待=3${rcNutriKcal}`,
+        'MEALPLAN-07(便CA②→便EA) 栄養モードのセルは 日付＋数字＋単位(kcal)',
+        rcNutriCell === `3${rcNutriKcal}kcal` && rcNutriKcal !== '',
+        `セル=${rcNutriCell} 期待=3${rcNutriKcal}kcal`,
       )
       check(
-        'MEALPLAN-07(便CA②) 栄養モードには単位と基準の凡例を添える',
+        'MEALPLAN-07(便EA) 栄養モードの凡例は「何の数字か」を先に言う(エネルギー(kcal))',
         ((await rcPage.textContent('body')) ?? '').includes(
-          '数字はその日に1人が食べる分のエネルギー（kcal）の概算です',
+          '数字はエネルギー（kcal）の概算です',
         ),
       )
       check(
@@ -7670,10 +7783,8 @@ try {
         `セル=${rcCostCell} 期待=${Math.round(rcPersonalOne).toLocaleString()}円`,
       )
       check(
-        'MEALPLAN-07(便CA②) 食費モードには単位と基準の凡例を添える',
-        ((await rcPage.textContent('body')) ?? '').includes(
-          '数字はその日に1人が食べる分の食費の概算です',
-        ),
+        'MEALPLAN-07(便EA) 食費モードの凡例も「何の数字か」を先に言う(食費(円))',
+        ((await rcPage.textContent('body')) ?? '').includes('数字は食費（円）の概算です'),
       )
 
       // 選択は設定に記憶され、再読み込みしても食費モードのまま
@@ -7691,10 +7802,203 @@ try {
       await rcPage.waitForTimeout(400)
       check(
         'MEALPLAN-07(便CA②) 写真モードへ戻すと従来の献立プレビューに復帰する',
-        !((await rcPage.textContent('body')) ?? '').includes('数字はその日に1人が食べる分'),
+        !((await rcPage.textContent('body')) ?? '').includes('の概算です。その日に1人が食べる分で'),
       )
     } finally {
       await rcBrowser.close()
+    }
+  }
+
+  // --- RANGE-EA: 2026-08-08 便EA(オーナー指示)の3件。
+  //  EA-2a 期間の食費と栄養: 選んだ期間の文字を大きくする(今どこを見ているかが主役)
+  //  EA-2b 開始日・終了日を手入力で変えられ、月をまたぐ期間も計算する
+  //  EA-3  今日の「作った記録」が集計に入る(今日は作った分は記録・まだの分は献立。二重計上ゼロ) ---
+  currentCheck = 'RANGE-EA'
+  {
+    const eaBrowser = await chromium.launch()
+    const eaContext = await eaBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const eaPage = await eaContext.newPage()
+    eaPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@RANGE-EA] ${err.message}`)
+    })
+    try {
+      await eaPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eaPage.waitForTimeout(2000) // 初回シード完了待ち
+
+      const eaNow = new Date()
+      const eaDay = (offset) => {
+        const d = new Date(eaNow.getFullYear(), eaNow.getMonth(), eaNow.getDate() + offset)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      }
+      const eaToday = eaDay(0)
+      const eaLastMonth = eaDay(-40) // 必ず前月以前になる日(月またぎの検証用)
+
+      // 検証用に2品を掴む(今日の予定に主菜=A・副菜=Bを入れ、Aだけ「作った記録」を付ける)
+      const eaIds = await eaPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readonly')
+              const g = tx.objectStore('recipes').getAll()
+              g.onsuccess = () => resolve(g.result.slice(0, 2).map((r) => r.id))
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check('RANGE-EA 前提: 検証用のレシピが2品ある', eaIds.length === 2, `ids=${JSON.stringify(eaIds)}`)
+
+      // 献立: 今日の夕食に主菜(A)と副菜(B)。前月の日にも1品(月またぎの集計に入るか)
+      await eaPage.evaluate(
+        ({ ids, today, lastMonth }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('mealPlans', 'readwrite')
+              const store = tx.objectStore('mealPlans')
+              store.add({ date: today, slot: 'dinner', recipeId: ids[0], role: 'main' })
+              store.add({ date: today, slot: 'dinner', recipeId: ids[1], role: 'side' })
+              store.add({ date: lastMonth, slot: 'dinner', recipeId: ids[0], role: 'main' })
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { ids: eaIds, today: eaToday, lastMonth: eaLastMonth },
+      )
+      // 作った記録: 今日にA、前月の日にA(前月は「作った記録」で数える日)
+      await eaPage.evaluate(
+        ({ id, dates }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.get(id)
+              g.onsuccess = () => {
+                const r = g.result
+                r.cookedLogs = [...dates.map((date) => ({ date })), ...(r.cookedLogs ?? [])]
+                store.put(r)
+              }
+              tx.oncomplete = () => resolve(undefined)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { id: eaIds[0], dates: [eaToday, eaLastMonth] },
+      )
+      // Pro解錠(月タブと栄養の注記を見るため。他ブロックと同じIndexedDB直書き)
+      await eaPage.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('settings', 'readwrite')
+          const store = tx.objectStore('settings')
+          const getReq = store.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            const putReq = store.put({
+              ...current,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+            putReq.onsuccess = () => resolve(undefined)
+            putReq.onerror = () => reject(putReq.error)
+          }
+          getReq.onerror = () => reject(getReq.error)
+        })
+        idb.close()
+      })
+
+      await eaPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await eaPage.reload({ waitUntil: 'networkidle' })
+      await eaPage.waitForTimeout(1200)
+      await eaPage.getByRole('button', { name: '月', exact: true }).click()
+      await eaPage.waitForTimeout(600)
+
+      // ---------- EA-1: 栄養モードのセルに単位(kcal)が出る ----------
+      await eaPage.getByRole('button', { name: '栄養', exact: true }).click()
+      await eaPage.waitForTimeout(500)
+      const eaCellText = (await eaPage.locator(`button[data-date="${eaToday}"]`).textContent()) ?? ''
+      check(
+        'RANGE-EA(便EA-1) 栄養モードのセルは数字の下に単位(kcal)が出る',
+        eaCellText.includes('kcal'),
+        `セル=${eaCellText}`,
+      )
+      check(
+        'RANGE-EA(便EA-1) 凡例が「何の数字か」を先に言う(エネルギー(kcal))',
+        ((await eaPage.textContent('body')) ?? '').includes('数字はエネルギー（kcal）の概算です'),
+      )
+      await eaPage.getByRole('button', { name: '写真', exact: true }).click()
+      await eaPage.waitForTimeout(400)
+
+      // ---------- EA-2b: 開始日・終了日の手入力 ----------
+      await eaPage.getByRole('button', { name: '期間の食費と栄養', exact: true }).click()
+      await eaPage.waitForTimeout(400)
+      const eaStartInput = eaPage.locator('[data-testid="range-date-start"]')
+      const eaEndInput = eaPage.locator('[data-testid="range-date-end"]')
+      check(
+        'RANGE-EA(便EA-2b) 期間モードに開始日・終了日の日付欄が出る',
+        (await eaStartInput.count()) === 1 && (await eaEndInput.count()) === 1,
+      )
+      // まず「今日だけ」の期間で、今日の記録と予定の数え方を見る
+      await eaStartInput.fill(eaToday)
+      await eaPage.waitForTimeout(200)
+      await eaEndInput.fill(eaToday)
+      await eaPage.waitForTimeout(600)
+      const eaCard = eaPage.locator('[data-testid="range-result-card"]')
+      check('RANGE-EA(便EA-2b) 日付欄だけで期間の結果カードが出る', await eaCard.isVisible())
+      const eaTodayCardText = (await eaCard.textContent()) ?? ''
+      check(
+        'RANGE-EA(便EA-3) 今日の「作った記録」1品と、まだ作っていない献立1品を分けて数える',
+        eaTodayCardText.includes(
+          '作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です',
+        ),
+        `カード=${eaTodayCardText.match(/.{0,20}1食分ずつ足して算出した数値です/)?.[0]}`,
+      )
+      check(
+        'RANGE-EA(便EA-3) 基準行が「今日は、作った記録があるものは記録…」と言う',
+        eaTodayCardText.includes(
+          '今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています',
+        ),
+      )
+
+      // ---------- EA-2a: 選んだ期間の文字が大きい ----------
+      const eaPeriod = eaPage.locator('[data-testid="range-selected-period"]')
+      const eaPeriodSize = await eaPeriod.evaluate((el) =>
+        Number.parseFloat(getComputedStyle(el).fontSize),
+      )
+      const eaTitleSize = await eaCard
+        .locator('h2')
+        .first()
+        .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
+      check(
+        'RANGE-EA(便EA-2a) 選んだ期間の文字が、カードの見出しより大きい(16px以上)',
+        eaPeriodSize >= 16 && eaPeriodSize > eaTitleSize,
+        `期間=${eaPeriodSize}px 見出し=${eaTitleSize}px`,
+      )
+
+      // ---------- EA-2b: 月をまたぐ期間も計算する ----------
+      await eaStartInput.fill(eaLastMonth)
+      await eaPage.waitForTimeout(800)
+      const eaCrossText = (await eaCard.textContent()) ?? ''
+      check(
+        'RANGE-EA(便EA-2b) 月をまたぐ期間でも、表示中の月の外の「作った記録」を数える(記録2品)',
+        eaCrossText.includes('作った記録2品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
+        `カード=${eaCrossText.match(/.{0,26}1食分ずつ足して算出した数値です/)?.[0]}`,
+      )
+      check(
+        'RANGE-EA(便EA-2b) 月をまたぐ期間でも結果カードが空にならない',
+        !eaCrossText.includes('この期間には、作った記録も登録した献立もありません'),
+      )
+    } finally {
+      await eaBrowser.close()
     }
   }
 
@@ -8087,6 +8391,162 @@ try {
       )
     } finally {
       await svBrowser.close()
+    }
+  }
+
+  // --- SHOPRANGE-EA: 買い物リストの範囲えらび(2026-08-08 便EA・オーナー要望
+  // 「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
+  // １週間分まとめて買い物とは限らない」)。
+  // 再発防止の要点: ①開かなければ従来どおり(ボタン名・下書きの中身が変わらない)
+  // ②日付/食事を絞ると、その範囲の献立だけで下書きができる
+  // ③買い物メモ側に「どの範囲から作ったか」が出る ---
+  currentCheck = 'SHOPRANGE-EA'
+  {
+    const srBrowser = await chromium.launch()
+    const srContext = await srBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const srPage = await srContext.newPage()
+    srPage.on('dialog', (dialog) => dialog.accept())
+    srPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@SHOPRANGE-EA] ${err.message}`)
+    })
+    try {
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(2000) // 初回シード完了待ち
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      // 既定の「表示する食事」は夕食だけなので、朝食・昼食も出して3食で検証する
+      // (範囲えらびの食事チップは「表示している食事」だけを出す仕様のため)
+      const srSlotFilter = srPage.getByRole('group', { name: '表示する食事' })
+      for (const name of ['朝食', '昼食']) {
+        const btn = srSlotFilter.getByRole('button', { name, exact: true })
+        if ((await btn.getAttribute('aria-pressed')) !== 'true') await btn.click()
+        await srPage.waitForTimeout(300)
+      }
+      // 「次の週」へ移す＝7日とも未来日になり、実行日によって選べる日数が変わらない
+      // (当週は今日より前の日が対象外なので、日曜に走らせると選べる日が1日しか無い)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      // 週ぜんぶに献立を入れる(絞る前/絞った後を比べる材料を作る)
+      await srPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await srPage.waitForTimeout(3000)
+
+      // ---------- ①既定: 開かなければ従来どおり ----------
+      check(
+        'SHOPRANGE-EA(既定) 範囲えらびは閉じていて、要約は「この週ぜんぶ」',
+        (await srPage.getByTestId('shop-range-toggle').getAttribute('aria-expanded')) === 'false' &&
+          ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
+            'この週ぜんぶ',
+          ),
+      )
+      check(
+        'SHOPRANGE-EA(既定) ボタン名は従来どおり「この週の買い物リストを作る」',
+        await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).isVisible(),
+      )
+      const srCountDraft = () => srPage.locator('textarea').count()
+      await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).click()
+      await srPage.waitForTimeout(1500)
+      const srAll = await srCountDraft()
+      check('SHOPRANGE-EA(既定) 週ぜんぶから下書きができる', srAll > 0, `rows=${srAll}`)
+      // 絞っていないときは範囲の1行にも「この週ぜんぶ」に当たる日付範囲が出る
+      const srAllRange = (await srPage.getByTestId('candidate-range').textContent()) ?? ''
+      check(
+        'SHOPRANGE-EA(既定) 下書きに「どの範囲から作ったか」が出る',
+        srAllRange.includes('から作りました') && /\d+\/\d+/.test(srAllRange),
+        `range=${srAllRange}`,
+      )
+
+      // ---------- ②日付と食事で絞る ----------
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(1200)
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      await srPage.getByTestId('shop-range-toggle').click()
+      await srPage.waitForTimeout(300)
+      const srDateChips = srPage.getByTestId('shop-range-date')
+      const srDateCount = await srDateChips.count()
+      check(
+        'SHOPRANGE-EA(絞る) 日付のボタンは、今日以降の日だけ出る',
+        srDateCount > 0 && srDateCount <= 7,
+        `dates=${srDateCount}`,
+      )
+      check(
+        'SHOPRANGE-EA(絞る) 開いた直後はすべての日付が選ばれている(既定=全部)',
+        (await srPage.locator('[data-testid="shop-range-date"][aria-pressed="true"]').count()) ===
+          srDateCount,
+      )
+      // 先頭の1日だけ残す
+      for (let i = 1; i < srDateCount; i++) await srDateChips.nth(i).click()
+      await srPage.waitForTimeout(300)
+      check(
+        'SHOPRANGE-EA(絞る) 絞るとボタン名が「選んだ範囲の買い物リストを作る」に変わる',
+        await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).isVisible(),
+      )
+      const srKeptDate = await srDateChips.nth(0).getAttribute('data-date')
+      await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).click()
+      await srPage.waitForTimeout(1500)
+      const srOneDay = await srCountDraft()
+      check(
+        'SHOPRANGE-EA(絞る) 1日だけ選ぶと、下書きは週ぜんぶより少なくなる',
+        srOneDay > 0 && srOneDay < srAll,
+        `oneDay=${srOneDay} all=${srAll}`,
+      )
+      const srRangeText = (await srPage.getByTestId('candidate-range').textContent()) ?? ''
+      const srExpectedMd = `${Number(srKeptDate.slice(5, 7))}/${Number(srKeptDate.slice(8, 10))}`
+      check(
+        'SHOPRANGE-EA(絞る) 買い物メモ側に、選んだ日付が範囲として出る',
+        srRangeText.includes(srExpectedMd) && srRangeText.includes('から作りました'),
+        `range=${srRangeText} expected=${srExpectedMd}`,
+      )
+
+      // ---------- ③食事で絞る + 「この週ぜんぶに戻す」 ----------
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(1200)
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      await srPage.getByTestId('shop-range-toggle').click()
+      await srPage.waitForTimeout(300)
+      const srSlotChips = srPage.getByTestId('shop-range-slot')
+      const srSlotCount = await srSlotChips.count()
+      for (let i = 0; i < srSlotCount - 1; i++) await srSlotChips.nth(i).click()
+      await srPage.waitForTimeout(300)
+      check(
+        'SHOPRANGE-EA(絞る) 食事を絞ると要約にその食事だけが出る',
+        ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes('夕食'),
+        `summary=${await srPage.getByTestId('shop-range-summary').textContent()}`,
+      )
+      await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).click()
+      await srPage.waitForTimeout(1500)
+      const srDinnerOnly = await srCountDraft()
+      check(
+        'SHOPRANGE-EA(絞る) 夕食だけに絞ると、下書きは週ぜんぶより少なくなる',
+        srDinnerOnly > 0 && srDinnerOnly < srAll,
+        `dinner=${srDinnerOnly} all=${srAll}`,
+      )
+      await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await srPage.waitForTimeout(1200)
+      await srPage.getByRole('button', { name: '週', exact: true }).click()
+      await srPage.waitForTimeout(500)
+      await srPage.getByRole('button', { name: '次の週' }).click()
+      await srPage.waitForTimeout(700)
+      await srPage.getByTestId('shop-range-toggle').click()
+      await srPage.waitForTimeout(300)
+      await srPage.getByTestId('shop-range-slot').nth(0).click()
+      await srPage.waitForTimeout(200)
+      await srPage.getByRole('button', { name: 'この週ぜんぶに戻す' }).click()
+      await srPage.waitForTimeout(300)
+      check(
+        'SHOPRANGE-EA(絞る) 「この週ぜんぶに戻す」で既定へ戻る',
+        ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
+          'この週ぜんぶ',
+        ) && (await srPage.getByRole('button', { name: 'この週の買い物リストを作る' }).isVisible()),
+      )
+    } finally {
+      await srBrowser.close()
     }
   }
 
@@ -8950,9 +9410,9 @@ try {
         (await duPage.locator('[data-testid="month-hide-recipe-photo"]').count()) === 0,
       )
       check(
-        'MEALPLAN-DU(⑨) 食費モードの説明は「その日に1人が食べる分」と数え方まで言い切る',
+        'MEALPLAN-DU(⑨→便EA) 食費モードの説明は「何の数字か」と数え方(今日の扱いも)まで言い切る',
         ((await duPage.textContent('body')) ?? '').includes(
-          '数字はその日に1人が食べる分の食費の概算です。過ぎた日は作った記録、今日から先は登録した献立で計算しています',
+          '数字は食費（円）の概算です。その日に1人が食べる分で、過ぎた日は作った記録、今日から先は登録した献立、今日は作った分は記録・まだの分は献立で計算しています',
         ),
       )
       await duPage.getByRole('button', { name: '写真', exact: true }).click()
