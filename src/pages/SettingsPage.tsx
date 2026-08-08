@@ -2217,10 +2217,18 @@ export default function SettingsPage() {
                       <li key={feature.label}>
                         <p className="font-bold">・{feature.label}</p>
                         <p className="text-sm text-ink-muted">{feature.hint}</p>
+                        {/* 2026-08-09 便EN(オーナー実機「左に文字が集中していて読みにくい」):
+                            機能名・説明・入口が全部左端から始まっていて、どこで1項目が終わるのかが
+                            読み取れなかった。入口のリンクだけ右端に寄せて、項目の区切りを作る */}
                         {feature.to && feature.linkLabel && (
-                          <Link to={feature.to} className="text-sm font-bold text-accent-ink underline">
-                            {feature.linkLabel}
-                          </Link>
+                          <p className="mt-0.5 text-right">
+                            <Link
+                              to={feature.to}
+                              className="text-sm font-bold text-accent-ink underline"
+                            >
+                              {feature.linkLabel}
+                            </Link>
+                          </p>
                         )}
                       </li>
                     ))}
