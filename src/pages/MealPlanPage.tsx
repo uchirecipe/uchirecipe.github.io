@@ -133,7 +133,6 @@ import {
   clearCookNaviSession,
   hasCookNaviTimeline,
   loadCookNaviSession,
-  saveCookNaviSession,
   reconcileSelectedIds,
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
@@ -2754,11 +2753,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         .replaceAll('{title}', recipe.title)
         .replaceAll('{n}', String(remaining.length)) + ja.mealPlan.todayCookedNaviConfirmAsk
     if (!window.confirm(confirmText)) return false
-    if (remaining.length >= COOK_NAVI_MIN_RECIPES) {
-      saveCookNaviSession({ ...session, selectedIds: remaining })
-    } else {
-      clearCookNaviSession()
-    }
+    // 段取りが続くとき（2品以上残る）は、覚えている選択には手を触れない。
+    // 組み直しと「何を外したか」の知らせは、並行調理ナビの画面が1か所で受け持つ
+    // （どの入口から記録しても同じように直る形にしておく）。
+    // 残りが2品未満で段取りが成り立たなくなるときだけ、押せない入口を残さないようここで畳む
+    if (remaining.length < COOK_NAVI_MIN_RECIPES) clearCookNaviSession()
     return true
   }
 

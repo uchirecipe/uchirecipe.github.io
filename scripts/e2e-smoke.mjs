@@ -15290,7 +15290,11 @@ try {
       await ehPage.waitForTimeout(800)
 
       // ④ 手順に埋もれた「湯を沸かす」が前の工程として分離される
-      const ehCards = await ehPage.$$eval('ol > li', (lis) => lis.map((li) => li.textContent || ''))
+      // 本文はBudouXの折返し用ゼロ幅スペース(U+200B)を含むので、突き合わせの前に取り除く
+      // （EG-01のメモ検査と同じ作法。ここを忘れると本文の照合が必ず外れる）
+      const ehCards = await ehPage.$$eval('ol > li', (lis) =>
+        lis.map((li) => (li.textContent || '').replace(/\u200B/g, '').replace(/\s+/g, '')),
+      )
       check(
         'EH-01 手順に書かれた湯沸かしが、前の待ち工程として切り出される',
         ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('約5分の待ち時間')),
@@ -15299,6 +15303,7 @@ try {
       check(
         'EH-01 切り出したあとの手順は、ゆでる作業だけになる',
         ehCards.some((t) => t.includes('にんじんを4分茹でて冷水にとる。') && !t.includes('湯を沸かし、')),
+        `cards=${JSON.stringify(ehCards.map((t) => t.slice(0, 40)))}`,
       )
 
       // ⑤ 手作業の手順カードに目安時間が出る（書かれた時間と、ナビの見積りを書き分ける）
@@ -15331,17 +15336,32 @@ try {
           .count()) === 0,
       )
 
-      // ② 4分のゆで待ちに、4分を超える手作業を詰め込まない
+      // ② 4分のゆで待ちに詰め込みすぎない（オーナー実機報告「無理。不可能」の再現）。
+      // ゆで上がり(=同じ品の次の手順)までに差し込まれた手作業の**目安時間の合計**が、
+      // 待ち時間の4分を超えていないことを見る（工程数ではなく時間で見るのが指摘の趣旨）
       const ehPlan = await ehPage.$$eval('ol > li', (lis) =>
-        lis.map((li) => (li.textContent || '').replace(/\s+/g, ' ')),
+        lis.map((li) => ({
+          text: (li.textContent || '').replace(/\u200B/g, '').replace(/\s+/g, ''),
+          // 手作業カードの右下に出る目安時間（待ちカードには無いので0）
+          minutes:
+            Number(
+              (li.querySelector('[data-testid="navi-active-minutes"]')?.textContent || '').replace(
+                /[^0-9]/g,
+                '',
+              ),
+            ) || 0,
+        })),
       )
-      const boilAt = ehPlan.findIndex((t) => t.includes('にんじんを4分茹でて'))
-      const backAt = ehPlan.findIndex((t) => t.includes('ごま油と塩で和える'))
-      const insertedBetween = ehPlan.slice(boilAt + 1, backAt)
+      const boilAt = ehPlan.findIndex((x) => x.text.includes('にんじんを4分茹でて'))
+      const backAt = ehPlan.findIndex((x, i) => i > boilAt && x.text.includes('ごま油と塩で和える'))
+      const insertedBetween = boilAt >= 0 && backAt > boilAt ? ehPlan.slice(boilAt + 1, backAt) : []
+      const insertedMinutes = insertedBetween.reduce((a, x) => a + x.minutes, 0)
       check(
-        'EH-01 4分のゆで待ちのあいだに詰め込む手作業は1工程まで',
-        boilAt >= 0 && backAt > boilAt && insertedBetween.length <= 1,
-        `間に入った工程=${JSON.stringify(insertedBetween.map((t) => t.slice(0, 30)))}`,
+        'EH-01 4分のゆで待ちに差し込む手作業の合計は4分を超えない(物理的に不可能な段取りにしない)',
+        boilAt >= 0 && backAt > boilAt && insertedMinutes <= 4,
+        `ゆで=${boilAt + 1}番目 戻り=${backAt + 1}番目 合計${insertedMinutes}分 間に入った工程=${JSON.stringify(
+          insertedBetween.map((x) => `${x.text.slice(0, 24)}(${x.minutes}分)`),
+        )}`,
       )
 
       // 合わせ調味料の線は、そのレシピの色（レシピ詳細のグループ色を持ち込まない）
@@ -15370,19 +15390,31 @@ try {
         JSON.stringify(ehSeasoningColors),
       )
 
-      // ⑥ ナビから始めたタイマーの番号は段取りの通し番号
-      const ehTimerCard = ehPage.locator('ol > li', { hasText: '鍋で15分煮る。' }).first()
-      const ehTimerOrder = await ehTimerCard.locator('span.rounded-full').first().textContent()
-      await ehTimerCard.getByRole('button', { name: /タイマーを始める/ }).click()
-      await ehPage.waitForTimeout(500)
-      const ehBarNumber = await ehPage.locator('div.fixed button span.rounded-full').first().textContent()
-      check(
-        'EH-01 常駐タイマーの番号が、ナビの段取りの通し番号になる',
-        ehBarNumber === ehTimerOrder,
-        `段取りの番号=${ehTimerOrder} タイマーの番号=${ehBarNumber}`,
-      )
-      await ehPage.locator('div.fixed [aria-label="タイマーを閉じる"]').first().click()
-      await ehPage.waitForTimeout(300)
+      // ⑥ ナビから始めたタイマーの番号は段取りの通し番号。
+      // 「タイマーを始める」は、待ち分数が本文に書かれていない待ちカードにだけ出る
+      // （本文に「15分」と書いてある手順には出ない＝そこを押そうとすると必ず待ちぼうけになる）。
+      // 切り出した「湯を沸かす」がその条件を満たすので、そのカードで見る
+      const ehTimerCard = ehPage.locator('ol > li', { hasText: '湯を沸かす' }).first()
+      const ehTimerButton = ehTimerCard.getByRole('button', { name: /タイマーを始める/ })
+      if ((await ehTimerButton.count()) === 0) {
+        check('EH-01 常駐タイマーの番号が、ナビの段取りの通し番号になる', false, 'タイマー開始ボタンが見つからない')
+      } else {
+        const ehTimerOrder = await ehTimerCard.locator('span.rounded-full').first().textContent()
+        await ehTimerButton.click()
+        await ehPage.waitForTimeout(600)
+        const ehBarNumber = await ehPage
+          .locator('div.fixed button span.rounded-full')
+          .first()
+          .textContent()
+        check(
+          'EH-01 常駐タイマーの番号が、ナビの段取りの通し番号になる',
+          ehBarNumber === ehTimerOrder,
+          `段取りの番号=${ehTimerOrder} タイマーの番号=${ehBarNumber}`,
+        )
+        const ehTimerClose = ehPage.locator('div.fixed [aria-label="タイマーを閉じる"]').first()
+        if ((await ehTimerClose.count()) > 0) await ehTimerClose.click()
+        await ehPage.waitForTimeout(300)
+      }
 
       // ① 献立タブから1品だけ「作った！」したときの挙動
       await ehPage.goto(`${BASE}/#/meal-plan`)
@@ -15392,11 +15424,15 @@ try {
         (await ehPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 1,
       )
       ehConfirmText = ''
-      await ehPage
+      const ehCookedButton = ehPage
         .locator('li', { hasText: 'EH煮物' })
         .first()
         .getByRole('button', { name: '作った！' })
-        .click()
+      if ((await ehCookedButton.count()) === 0) {
+        check('EH-01 今日の献立にEH煮物の「作った！」がある', false, '行が見つからない')
+      } else {
+        await ehCookedButton.click()
+      }
       await ehPage.waitForTimeout(1200)
       check(
         'EH-01 段取りに組んだ品を1品だけ記録するときは、段取りがどう変わるかを先に伝える',
@@ -15406,7 +15442,7 @@ try {
       )
       await ehPage.goto(`${BASE}/#/cook-navi`)
       await ehPage.waitForTimeout(1200)
-      const ehBody = await ehPage.textContent('body')
+      const ehBody = ((await ehPage.textContent('body')) ?? '').replace(/\u200B/g, '')
       check(
         'EH-01 記録した品は段取りから外れ、残りの2品で組み直される',
         ehBody.includes('組み合わせる2品') && !ehBody.includes('大根を切る'),
