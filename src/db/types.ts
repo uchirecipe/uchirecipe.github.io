@@ -382,6 +382,18 @@ export interface MealTemplate {
  * レシピから作る「候補」はDBに保存せず画面上だけで検討し、
  * ユーザーが確定した項目だけがここに保存される（自動任せにしない設計）。
  */
+/**
+ * 買い物メモの1行が「どのレシピから、どれだけ来たか」の1件分
+ * （2026-08-08 オーナー実機フィードバック②「どのレシピから登録したのか確認できるように」）。
+ * amount は買い物メモに入れた時点の食数で計算済みの分量（そのレシピが出した分だけ）。
+ * 分量が空・未設定のときは、表示側でそのレシピの材料欄から読み直す。
+ */
+export interface ShoppingItemSource {
+  recipeId: number
+  /** そのレシピが出した分量（例:「200g」）。空なら表示側がレシピの材料欄から読む */
+  amount?: string
+}
+
 export interface ShoppingItem {
   id?: number
   name: string
@@ -391,6 +403,19 @@ export interface ShoppingItem {
   order: number
   /** どのレシピから来たか（複数レシピで材料が重複した場合の合算元） */
   fromRecipeIds?: number[]
+  /**
+   * どのレシピから、どれだけ来たか（任意・2026-08-08 オーナー実機フィードバック②）。
+   * fromRecipeIds はレシピの並びしか持っておらず、「そのレシピでの分量」が出せなかったため、
+   * 買い物メモに入れる時点の計算結果をレシピごとに残す。
+   * 未設定（この項目より前に作った既存の行）は fromRecipeIds から読み、分量はレシピの材料欄で補う。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  fromRecipes?: ShoppingItemSource[]
+  /**
+   * 手で足した分が含まれるか（任意・2026-08-08 オーナー実機フィードバック②）。
+   * レシピ由来の行に手入力で足したときも立てる。出所の小窓で「自分で追加」を正直に出すために使う。
+   */
+  manualAdded?: boolean
 }
 
 /** テーマ設定: 端末に合わせる / ライト固定 / ダーク固定 / ブラウン固定 / グリーン固定 */
@@ -643,7 +668,25 @@ export interface Settings {
    * 任意項目なのでスキーマ変更・マイグレーション不要。
    */
   shoppingAisleOrder?: PantryGroupKey[]
+  /**
+   * タイマー終了音の音量（任意・2026-08-08 オーナー実機フィードバック③
+   * 「タイマー音量や長さは、設定から調整や確認できるようにしたい」）。
+   * 未設定（既存ユーザー含む）は 'normal' ＝これまで鳴っていた音そのまま。
+   * 実際の値は logic/timerSound.ts が持つ（任意項目なのでマイグレーション不要）。
+   */
+  timerSoundVolume?: TimerSoundVolume
+  /**
+   * タイマー終了音の鳴る長さ（任意・2026-08-08 オーナー実機フィードバック③）。
+   * 未設定（既存ユーザー含む）は 'short' ＝これまでどおりの3回（約1秒）。
+   */
+  timerSoundLength?: TimerSoundLength
 }
+
+/** タイマー終了音の音量（3段階。既定は 'normal' ＝従来の音量） */
+export type TimerSoundVolume = 'low' | 'normal' | 'high'
+
+/** タイマー終了音の鳴る長さ（3段階。既定は 'short' ＝従来の長さ） */
+export type TimerSoundLength = 'short' | 'medium' | 'long'
 
 /** レシピ一覧の表示形式 */
 export type RecipeListLayout = 'grid' | 'list'

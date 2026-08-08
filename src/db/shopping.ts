@@ -3,7 +3,7 @@ import { db } from './db'
 import { markPantryHaveOrCreate } from './pantry'
 import { toPantryKey } from '../logic/kana'
 import { combineAmountTexts } from '../logic/shopping'
-import type { ShoppingItem } from './types'
+import type { ShoppingItem, ShoppingItemSource } from './types'
 
 export async function listShoppingItems(): Promise<ShoppingItem[]> {
   return db.shoppingItems.orderBy('order').toArray()
@@ -34,19 +34,49 @@ async function nextOrder(): Promise<number> {
 async function mergeIntoExisting(
   name: string,
   amount: string | undefined,
-  recipeIds?: number[],
+  sources?: ShoppingItemSource[],
+  manual?: boolean,
 ): Promise<boolean> {
   const key = toPantryKey(name)
   if (!key) return false
   const all = await db.shoppingItems.toArray()
   const target = all.find((item) => !item.isChecked && toPantryKey(item.name) === key)
   if (!target?.id) return false
-  const mergedRecipeIds = [...new Set([...(target.fromRecipeIds ?? []), ...(recipeIds ?? [])])]
+  const mergedSources = mergeSources(target, sources)
   await db.shoppingItems.update(target.id, {
     amount: combineAmountTexts([target.amount, amount]) || undefined,
-    fromRecipeIds: mergedRecipeIds.length > 0 ? mergedRecipeIds : undefined,
+    fromRecipeIds: mergedSources.length > 0 ? mergedSources.map((s) => s.recipeId) : undefined,
+    fromRecipes: mergedSources.length > 0 ? mergedSources : undefined,
+    manualAdded: manual || target.manualAdded === true ? true : undefined,
   })
   return true
+}
+
+/**
+ * 合算するときにレシピごとの内訳もまとめる（2026-08-08 オーナー実機フィードバック②）。
+ * 同じレシピが両方にあれば分量を足す（買い物メモの合計と同じ規則＝combineAmountTexts）。
+ * 既存の行が fromRecipes を持たない古い形でも、fromRecipeIds から内訳の器だけ作って引き継ぐ
+ * （分量は表示側がレシピの材料欄から読む）。
+ */
+function mergeSources(
+  target: ShoppingItem,
+  incoming: ShoppingItemSource[] | undefined,
+): ShoppingItemSource[] {
+  const base: ShoppingItemSource[] =
+    target.fromRecipes && target.fromRecipes.length > 0
+      ? target.fromRecipes
+      : (target.fromRecipeIds ?? []).map((recipeId) => ({ recipeId }))
+  const merged = new Map<number, ShoppingItemSource>()
+  for (const source of [...base, ...(incoming ?? [])]) {
+    const found = merged.get(source.recipeId)
+    if (!found) {
+      merged.set(source.recipeId, { ...source })
+      continue
+    }
+    const amount = combineAmountTexts([found.amount, source.amount])
+    merged.set(source.recipeId, { recipeId: source.recipeId, amount: amount || undefined })
+  }
+  return [...merged.values()]
 }
 
 /** 手動で1件追加する（同じ食材が未チェックで残っていれば分量を合算する） */
@@ -54,33 +84,38 @@ export async function addShoppingItem(name: string, amount?: string): Promise<vo
   const trimmed = name.trim()
   if (!trimmed) return
   await db.transaction('rw', db.shoppingItems, async () => {
-    if (await mergeIntoExisting(trimmed, amount?.trim() || undefined)) return
+    // 手で足した分は、レシピ由来の行に合算したときも印を引き継ぐ(出所の小窓で正直に出すため)
+    if (await mergeIntoExisting(trimmed, amount?.trim() || undefined, undefined, true)) return
     const order = await nextOrder()
     await db.shoppingItems.add({
       name: trimmed,
       amount: amount?.trim() || undefined,
       isChecked: false,
       order,
+      manualAdded: true,
     })
   })
 }
 
 /** レシピから作った候補のうち、確定された項目をまとめて買い物メモに追加する */
 export async function addConfirmedItems(
-  items: { name: string; amount: string; recipeIds: number[] }[],
+  items: { name: string; amount: string; recipeIds: number[]; sources?: ShoppingItemSource[] }[],
 ): Promise<void> {
   if (items.length === 0) return
   await db.transaction('rw', db.shoppingItems, async () => {
     let order = await nextOrder()
     for (const item of items) {
+      // 出所の内訳。古い下書き(localStorage)にはsourcesが無いのでレシピIDだけで補う
+      const sources = item.sources ?? item.recipeIds.map((recipeId) => ({ recipeId }))
       // 既にメモにある食材は分量を合算して1行にまとめる(C14)
-      if (await mergeIntoExisting(item.name, item.amount || undefined, item.recipeIds)) continue
+      if (await mergeIntoExisting(item.name, item.amount || undefined, sources)) continue
       await db.shoppingItems.add({
         name: item.name,
         amount: item.amount || undefined,
         isChecked: false,
         order: order++,
         fromRecipeIds: item.recipeIds,
+        fromRecipes: sources.length > 0 ? sources : undefined,
       })
     }
   })

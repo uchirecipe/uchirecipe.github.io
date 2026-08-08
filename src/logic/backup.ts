@@ -483,9 +483,18 @@ export function remapBackupRecipeRefs<
   return {
     mealPlans: file.mealPlans?.map((row) => ({ ...row, recipeId: ref(row.recipeId) })),
     todayList: file.todayList?.map((row) => ({ ...row, recipeId: ref(row.recipeId) })),
-    shoppingItems: file.shoppingItems?.map((row) =>
-      row.fromRecipeIds ? { ...row, fromRecipeIds: row.fromRecipeIds.map(ref) } : row,
-    ),
+    // 買い物メモは、出所のレシピID(fromRecipeIds)と、レシピごとの内訳(fromRecipes・
+    // 2026-08-08 オーナー実機フィードバック②)の両方を付け替える。片方だけ直すと
+    // 出所の小窓が実在しないレシピを指す
+    shoppingItems: file.shoppingItems?.map((row) => {
+      if (!row.fromRecipeIds && !row.fromRecipes) return row
+      const next = { ...row }
+      if (row.fromRecipeIds) next.fromRecipeIds = row.fromRecipeIds.map(ref)
+      if (row.fromRecipes) {
+        next.fromRecipes = row.fromRecipes.map((s) => ({ ...s, recipeId: ref(s.recipeId) }))
+      }
+      return next
+    }),
     mealTemplates: file.mealTemplates?.map((template) => ({
       ...template,
       items: template.items.map((item) => ({ ...item, recipeId: ref(item.recipeId) })),
