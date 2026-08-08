@@ -12566,6 +12566,24 @@ eq(
   }
 }
 
+// ---------- 便EI-4: 写真1枚あたりの容量表記を1つに揃える ----------
+// 「150〜300KB」と「100〜300KB」が混在していた(2026-08-09 便EI)。実測は使い方ページ§12の表
+// (scripts/measure-storage.mjs でIndexedDBの増分を実測。レシピの写真 約170KB・
+// 「作った記録」の写真 約160KB)で、docs/20 §4 の記録写真の実測も150〜300KB。
+// 圧縮設定はレシピ写真=長辺1200px/JPEG0.85(logic/image.ts)、記録写真=長辺1280px/JPEG0.80
+// (CookedLogModal.tsx)で、どちらも同じ水準に落ちる。以後は全箇所を同じ範囲で書く。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const PHOTO_SIZE_TEXT = '150〜300KB'
+  const targets = ['src/i18n/ja.ts', 'public/about/index.html', 'public/about/manual.html']
+  for (const rel of targets) {
+    const src = readFileSync(path.join(appRoot, rel), 'utf-8')
+    // 「◯〜◯KB」の形で書かれた範囲表記だけを拾う(「約170KB」等の単一値は対象外)
+    const ranges = [...new Set(src.match(/\d+〜\d+KB/g) ?? [])]
+    eq(`EI-4 ${rel} の写真容量の範囲表記が1種類に揃っている`, ranges, ranges.length ? [PHOTO_SIZE_TEXT] : [])
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
