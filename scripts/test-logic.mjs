@@ -119,7 +119,18 @@ import {
   isRestorableStarter,
 } from '../src/logic/recipeDelete.ts'
 import { NUTRITION_DATA } from '../src/logic/nutritionData.ts'
-import { hasLaterHandsOnStep, classifyStep, resolveStepMinutes, buildCookTimeline } from '../src/logic/cookNavi.ts'
+import {
+  hasLaterHandsOnStep,
+  classifyStep,
+  resolveStepMinutes,
+  buildCookTimeline,
+  isHandsOnStep,
+  stepCategory,
+} from '../src/logic/cookNavi.ts'
+import {
+  stepIngredientAmounts,
+  recipeIngredientList,
+} from '../src/logic/naviIngredients.ts'
 import {
   resolveDuplicateTitleAction,
   buildUpdatedSetRecipe,
@@ -3832,6 +3843,228 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   const yakuStep = timeline.items.find((it) => it.text === 'フライパンで5分焼く')
   eq('ナビ組立: 「焼く」は手作業系として計上される', yakuStep?.kind, 'active')
   eq('ナビ組立: 「焼く」は待ち扱いにならない(waitMinutes=0)', yakuStep?.waitMinutes, 0)
+}
+
+// ---------- isHandsOnStep / classifyStep(並行調理ナビ: 目を離せない工程は短くても待ちにしない。
+// 2026-08-08 便EB・オーナー実機報告「肉巻きおにぎりの『焦げやすいので』の手順が待ちに分類され、
+// 2分しかないのに他レシピの作業が挟まる」) ----------
+{
+  // 報告された実データそのもの(src/sets/pack07.ts 肉巻きおにぎり 手順5)
+  const nikumaki = {
+    text: 'しょうゆ・みりん・砂糖を加え、たれを絡めながら照りが出るまで煮からめる。',
+    minutes: 2,
+    memo: '焦げやすいので、フライパンをゆすりながらたれをからめること。',
+  }
+  eq('ナビ付きっきり: 肉巻きおにぎりの「煮からめる」は手作業系', classifyStep(nikumaki), 'active')
+  eq('ナビ付きっきり: 肉巻きおにぎりの「煮からめる」を目を離せない工程と判定', isHandsOnStep(nikumaki), true)
+  // 根拠が本文にある場合/memoにある場合のどちらでも拾う
+  eq(
+    'ナビ付きっきり: 本文の「煮からめる」だけでも手作業系',
+    classifyStep({ text: 'たれを加えて煮からめる。', minutes: 3 }),
+    'active',
+  )
+  eq(
+    'ナビ付きっきり: 注意書きの「焦げやすいので」だけでも手作業系',
+    classifyStep({ text: 'グリルで3分焼く。', minutes: 3, memo: 'みそだれは焦げやすいので様子を見ること。' }),
+    'active',
+  )
+  eq(
+    'ナビ付きっきり: 「絶えず混ぜながら」は手作業系',
+    classifyStep({ text: '弱めの中火で2分ほど煮る。', minutes: 2, memo: '絶えず混ぜながら煮ること。' }),
+    'active',
+  )
+  eq('ナビ付きっきり: 「煮詰める」は手作業系', classifyStep({ text: 'とろみが出るまで煮詰める。', minutes: 2 }), 'active')
+  eq('ナビ付きっきり: 「炒り煮にする」は手作業系', classifyStep({ text: 'しょうゆを加えて炒り煮にする。', minutes: 4 }), 'active')
+  eq('ナビ付きっきり: 「目を離さない」は手作業系', classifyStep({ text: '弱火で5分温める。', minutes: 5, memo: '目を離さないこと。' }), 'active')
+
+  // 本物の待ちを潰さない(条件つきの注意は付きっきりにしない)。ここを緩めると機能価値が落ちる
+  eq(
+    'ナビ付きっきり: 「焦げないように水を足す」条件つき注意は待ちのまま',
+    classifyStep({
+      text: '落としぶたをして弱めの中火で15分ほど煮る。',
+      minutes: 15,
+      memo: '途中で煮汁がなくなりそうなら少量の水を足すこと（焦げつき防止）。',
+    }),
+    'wait',
+  )
+  eq(
+    'ナビ付きっきり: 「焦げつきそうなら」も待ちのまま(ラタトゥイユ相当)',
+    classifyStep({ text: 'ふたをして弱めの中火で煮る。', minutes: 12, memo: '焦げつきそうなら水を大さじ1ずつ足すこと。' }),
+    'wait',
+  )
+  eq(
+    'ナビ付きっきり: 「時々上下を返しながら」浸す工程は待ちのまま',
+    classifyStep({ text: '食パンを卵液に浸し、時々上下を返しながらしっかり吸わせる。', minutes: 10 }),
+    'wait',
+  )
+
+  // 待ち動詞より後ろに炒め・揚げが来る手順＝実体は炒め工程(旧実装はフライパンから目を離させていた)
+  eq(
+    'ナビ付きっきり: 「なじむまで炒める」は手作業系(卯の花)',
+    classifyStep({ text: '生おからを加え、全体に油がなじむまで炒める。', minutes: 2 }),
+    'active',
+  )
+  eq(
+    'ナビ付きっきり: 「漬け汁ごと入れて炒める」は手作業系(えび)',
+    classifyStep({ text: 'えびを漬け汁ごと入れて炒める。器に盛る。', minutes: 3 }),
+    'active',
+  )
+  eq(
+    'ナビ付きっきり: 「炒め、…15分煮る」は待ちのまま(最後の動作が煮る)',
+    classifyStep({ text: '鍋で鶏肉と野菜を炒め、水を加えて中火で15分煮る。', minutes: 15 }),
+    'wait',
+  )
+  // 「チン」の誤爆(チンゲン菜・キッチンペーパー)を待ち動詞にしない
+  eq(
+    'ナビ分類: 「チンゲン菜を1分炒め」は手作業系(「チン」の誤爆を直す)',
+    classifyStep({ text: 'チンゲン菜の茎を加えて強めの中火で1分炒める。', minutes: 1 }),
+    'active',
+  )
+  eq(
+    'ナビ分類: 「レンジで2分加熱」は従来どおり待ち系',
+    classifyStep({ text: 'レンジで2分加熱する。', minutes: 2 }),
+    'wait',
+  )
+  eq(
+    'ナビ分類: 「重しをのせて10分水切りする」は待ち系(放置してよい)',
+    classifyStep({ text: '木綿豆腐はキッチンペーパーに包み、重しをのせて水切りする。', minutes: 10 }),
+    'wait',
+  )
+}
+
+// ---------- stepCategory / buildCookTimeline(並行調理ナビ: 3品全体の流れを整える。
+// 2026-08-08 便EB・オーナー要望「野菜を切る工程はまとめたい」「準備→加熱→仕上げの流れ」) ----------
+{
+  eq('ナビ流れ: 「玉ねぎをみじん切りにする」は切る', stepCategory({ text: '玉ねぎをみじん切りにする。' }), 'cut')
+  eq('ナビ流れ: 「フライパンで焼く」は加熱', stepCategory({ text: 'フライパンで焼く。' }), 'heat')
+  eq('ナビ流れ: 「器に盛る」は仕上げ', stepCategory({ text: '器に盛る。' }), 'finish')
+  eq('ナビ流れ: 「ドレッシングと和える」は下ごしらえ', stepCategory({ text: 'ドレッシングと和える。' }), 'season')
+  // 複数の動作が並ぶ手順は「最後に来る動作」がその手順の主役
+  eq('ナビ流れ: 「切った野菜を炒める」は加熱(最後の動作)', stepCategory({ text: '切った野菜を炒める。' }), 'heat')
+  eq('ナビ流れ: 「焼いた肉を切って器に盛る」は仕上げ', stepCategory({ text: '焼いた肉を切って器に盛る。' }), 'finish')
+
+  // 待ちが無い2品でも、レシピ1品を丸ごと終えてから次に移る組み方にしない
+  // (旧実装は残りの待ちが同点だとレシピの選択順で決めていたため、A全部→B全部になっていた)
+  const flow = buildCookTimeline([
+    { id: 1, title: 'A', steps: [{ text: '野菜を切る' }, { text: 'フライパンで焼く' }, { text: '器に盛る' }] },
+    { id: 2, title: 'B', steps: [{ text: 'きゅうりを切る' }, { text: 'ドレッシングと和える' }] },
+  ])
+  const texts = flow.items.map((it) => it.text)
+  eq(
+    'ナビ流れ: 「切る」工程が続けて並ぶ(バラけない)',
+    texts.indexOf('きゅうりを切る') - texts.indexOf('野菜を切る'),
+    1,
+  )
+  eq('ナビ流れ: 盛り付けは最後にまわる', texts[texts.length - 1], '器に盛る')
+  // 加熱は、着手できる「切る」工程を片付けてから（段階の大枠が崩れない）。
+  // 「ドレッシングと和える」より後になるとは限らない＝残り時間の長い品を先に進める基準が優先される
+  eq(
+    'ナビ流れ: 加熱は2品ぶんの「切る」を片付けたあと',
+    texts.indexOf('フライパンで焼く') > texts.indexOf('きゅうりを切る'),
+    true,
+  )
+
+  // 残り時間が長い品を先に進める(流れを整えるために全体の所要時間を延ばさない)
+  const span = buildCookTimeline([
+    { id: 1, title: '短い', steps: [{ text: 'レタスを切る' }, { text: '器に盛る' }] },
+    { id: 2, title: '長い', steps: [{ text: '玉ねぎを切る' }, { text: '弱火で30分煮る', minutes: 30 }, { text: '器に盛る' }] },
+  ])
+  eq('ナビ流れ: 長い待ちが控えている品の下ごしらえを先に始める', span.items[0].recipeTitle, '長い')
+  eq('ナビ流れ: 2番目には30分の待ちを仕掛ける', span.items[1].kind, 'wait')
+}
+
+// ---------- stepIngredientAmounts / recipeIngredientList(並行調理ナビ: 段取り中に分量が見える。
+// 2026-08-08 便EB・オーナー実機報告「ナビを選択すると、分量が消えるので計量できない」) ----------
+{
+  // 肉巻きおにぎり(src/sets/pack07.ts)の実データ
+  const nikumakiIngredients = [
+    { name: '豚バラ薄切り肉', amount: '200', unit: 'g' },
+    { name: 'ご飯', amount: '2', unit: '杯分' },
+    { name: '片栗粉', amount: '1', unit: '大さじ' },
+    { name: 'しょうゆ', amount: '2', unit: '大さじ' },
+    { name: 'みりん', amount: '2', unit: '大さじ' },
+    { name: '砂糖', amount: '1', unit: '大さじ' },
+    { name: 'サラダ油', amount: '適量', unit: '' },
+  ]
+  const label = (list) => list.map((x) => `${x.name} ${x.amount}`.trim())
+  eq(
+    'ナビ材料: 手順に出てくる材料だけを分量つきで拾う',
+    label(
+      stepIngredientAmounts('豚バラ肉をご飯に巻きつけ、片栗粉を薄くまぶす。', nikumakiIngredients, 2, 2),
+    ),
+    ['豚バラ薄切り肉 200g', 'ご飯 2杯分', '片栗粉 大さじ1'],
+  )
+  eq(
+    'ナビ材料: 出てこない材料は返さない',
+    label(stepIngredientAmounts('転がしながら全体に焼き色をつける。', nikumakiIngredients, 2, 2)),
+    [],
+  )
+  eq(
+    'ナビ材料: 人数を倍にすると分量も倍になる(詳細画面と同じ換算)',
+    label(stepIngredientAmounts('豚バラ肉を巻きつける。', nikumakiIngredients, 2, 4)),
+    ['豚バラ薄切り肉 400g'],
+  )
+  eq(
+    'ナビ材料: 「適量」はそのまま出す',
+    label(stepIngredientAmounts('フライパンにサラダ油を中火で熱する。', nikumakiIngredients, 2, 2)),
+    ['サラダ油 適量'],
+  )
+
+  // 誤検出は出さない方に倒す(嘘の分量を出さない)
+  const water = [
+    { name: '水', amount: '300', unit: 'ml' },
+    { name: '塩', amount: '少々', unit: '' },
+  ]
+  eq('ナビ材料: 「水を入れる」は水を拾う', label(stepIngredientAmounts('鍋に水を入れる。', water, 2, 2)), ['水 300ml'])
+  eq('ナビ材料: 「水気を絞る」の水は拾わない', label(stepIngredientAmounts('水気をしっかり絞る。', water, 2, 2)), [])
+  eq('ナビ材料: 「流水で洗う」の水は拾わない', label(stepIngredientAmounts('根元を流水でよく洗う。', water, 2, 2)), [])
+  eq('ナビ材料: 「冷水にとる」の水は拾わない', label(stepIngredientAmounts('ざるにあげて冷水にとる。', water, 2, 2)), [])
+  eq('ナビ材料: 「塩ゆで」の塩は拾わない', label(stepIngredientAmounts('塩ゆでする。', water, 2, 2)), [])
+  eq('ナビ材料: 「塩をふる」の塩は拾う', label(stepIngredientAmounts('塩をふる。', water, 2, 2)), ['塩 少々'])
+  // 同じ表記に材料欄の2行が当たるときは、どちらの分量か決められないので出さない
+  const katakuriko = [
+    { name: '片栗粉(肉だね用)', amount: '1', unit: '大さじ' },
+    { name: '片栗粉(あん用)', amount: '2', unit: '小さじ' },
+  ]
+  eq(
+    'ナビ材料: 同名の材料が2行あるときは出さない(嘘の分量を出さない)',
+    label(stepIngredientAmounts('片栗粉を加えて混ぜる。', katakuriko, 2, 2)),
+    [],
+  )
+  // 「卵液」の卵など、既存の除外規則(ingredientSpans)はそのまま効く
+  eq(
+    'ナビ材料: 「卵液」の卵は拾わない(既存の除外規則を流用)',
+    label(stepIngredientAmounts('卵液を流し入れる。', [{ name: '卵', amount: '2', unit: '個' }], 2, 2)),
+    [],
+  )
+
+  // ③レシピごとの材料一覧(あらかじめ計量したい人向け。人数換算込みで全材料を返す)
+  eq(
+    'ナビ材料一覧: 全材料を材料欄の並びのまま分量つきで返す',
+    label(recipeIngredientList(nikumakiIngredients, 2, 2)),
+    [
+      '豚バラ薄切り肉 200g',
+      'ご飯 2杯分',
+      '片栗粉 大さじ1',
+      'しょうゆ 大さじ2',
+      'みりん 大さじ2',
+      '砂糖 大さじ1',
+      'サラダ油 適量',
+    ],
+  )
+  eq(
+    'ナビ材料一覧: 4人分にすると分量が倍になる',
+    label(recipeIngredientList(nikumakiIngredients, 2, 4)),
+    [
+      '豚バラ薄切り肉 400g',
+      'ご飯 4杯分',
+      '片栗粉 大さじ2',
+      'しょうゆ 大さじ4',
+      'みりん 大さじ4',
+      '砂糖 大さじ2',
+      'サラダ油 適量',
+    ],
+  )
 }
 
 // ---------- resolveDuplicateTitleAction(配布セット再取込: kintoreテーマ改名で旧名称バッジが

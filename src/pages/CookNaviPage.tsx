@@ -9,7 +9,9 @@ import {
   Timer as TimerIcon,
   Check,
   ChevronRight,
+  ChevronDown,
   Info,
+  ListChecks,
 } from 'lucide-react'
 import BackHeader from '../components/BackHeader'
 import StepBadge from '../components/StepBadge'
@@ -29,6 +31,12 @@ import { useTimers } from '../components/TimerProvider'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
 import { buildCookTimeline, hasLaterHandsOnStep, type TimelineItem } from '../logic/cookNavi'
+import {
+  recipeIngredientList,
+  stepIngredientAmounts,
+  type NaviIngredientAmount,
+} from '../logic/naviIngredients'
+import { effectiveMealServings } from '../logic/servings'
 import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
@@ -57,14 +65,28 @@ function naviStepDomId(recipeId: number, stepNumber: number): string {
   return `navi-step-${recipeId}-${stepNumber}`
 }
 
+/** レシピの色の丸印（どのレシピの材料かを一目で分かるようにする） */
+function RecipeDot({ colorIndex }: { colorIndex: number }) {
+  return (
+    <span
+      className="inline-block h-2 w-2 shrink-0 rounded-full"
+      style={{ backgroundColor: RECIPE_COLORS[colorIndex % RECIPE_COLORS.length] }}
+      aria-hidden
+    />
+  )
+}
+
 /** タイムラインの1手順カード */
 function TimelineCard({
   item,
+  ingredients,
   showFillHint,
   highlighted,
   onStartTimer,
 }: {
   item: TimelineItem
+  /** この手順の文に出てくる材料と分量（2026-08-08 便EB。無ければ空配列＝何も出さない） */
+  ingredients: NaviIngredientAmount[]
   /** 待ちブロックに「この間に、次の手作業を進められます」を出すか（後続に手作業があるときだけ） */
   showFillHint: boolean
   /** 常駐タイマーバーの完了タップから飛んできた直後の一時ハイライト対象か */
@@ -103,6 +125,30 @@ function TimelineCard({
       </p>
       {item.memo && <p className="mt-1 text-sm text-ink-muted">{item.memo}</p>}
 
+      {/* この手順で使う材料と分量（2026-08-08 便EB）。
+          3品を並行で作ると材料欄が混ざるため、同じ材料を別のレシピに使ってしまう事故を
+          その場で防ぐ。どのレシピの材料かは色の丸印＋料理名で示す */}
+      {ingredients.length > 0 && (
+        <div
+          data-testid="navi-step-ingredients"
+          className="mt-[var(--space-sm)] rounded-sm border-l-2 pl-2"
+          style={{ borderLeftColor: RECIPE_COLORS[item.colorIndex % RECIPE_COLORS.length] }}
+        >
+          <p className="flex items-center gap-1 text-xs text-ink-muted">
+            <RecipeDot colorIndex={item.colorIndex} />
+            {ja.cookNavi.stepIngredientsLabel.replace('{title}', item.recipeTitle)}
+          </p>
+          <p className="ja-phrase mt-0.5 text-sm">
+            {ingredients.map((ing, i) => (
+              <span key={`${ing.name}-${i}`} className="mr-3 inline-block whitespace-nowrap">
+                {ing.name}
+                {ing.amount && <span className="ml-1 font-bold">{ing.amount}</span>}
+              </span>
+            ))}
+          </p>
+        </div>
+      )}
+
       {isWait && (
         <div
           className="mt-[var(--space-sm)] rounded-sm p-[var(--space-sm)]"
@@ -130,6 +176,105 @@ function TimelineCard({
         </div>
       )}
     </li>
+  )
+}
+
+/** 材料一覧に出す1品分 */
+interface NaviRecipeIngredients {
+  recipeId: number
+  title: string
+  colorIndex: number
+  servings: number
+  items: NaviIngredientAmount[]
+}
+
+/**
+ * ③レシピごとの材料一覧（2026-08-08 便EB・オーナー指摘「あらかじめ計量したい人、
+ * 使用する材料を把握したい人に不親切。レシピごとに一覧表示は必要」）。
+ * 段取りを作った直後（調理を始める前）から開けるよう、タイムラインの先頭に置く。
+ * 面積を取らないよう既定は閉じておき、開くとレシピごとに折りたためる形にする。
+ */
+function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
+  const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState<number[]>([])
+  const toggleRecipe = (id: number) =>
+    setCollapsed((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+
+  return (
+    <div className="mt-[var(--space-sm)]">
+      <button
+        type="button"
+        data-testid="navi-ingredients-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm"
+      >
+        <ListChecks size={18} aria-hidden />
+        {open ? ja.cookNavi.ingredientsClose : ja.cookNavi.ingredientsOpen}
+        <ChevronDown
+          size={16}
+          aria-hidden
+          className={open ? 'rotate-180 transition-transform' : 'transition-transform'}
+        />
+      </button>
+      {open && (
+        <div
+          data-testid="navi-ingredients-panel"
+          className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+        >
+          <p className="text-sm font-bold text-ink-muted">
+            {ja.cookNavi.ingredientsPanelTitle.replace('{n}', String(recipes.length))}
+          </p>
+          <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
+            {recipes.map((recipe) => {
+              const isOpen = !collapsed.includes(recipe.recipeId)
+              return (
+                <li
+                  key={recipe.recipeId}
+                  className="rounded-sm border-l-4 border-edge pl-2"
+                  style={{
+                    borderLeftColor: RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length],
+                  }}
+                >
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() => toggleRecipe(recipe.recipeId)}
+                    className="flex w-full items-center gap-2 py-1 text-left"
+                  >
+                    <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
+                    <span className="shrink-0 text-xs text-ink-muted">
+                      {ja.cookNavi.ingredientsServings.replace('{n}', String(recipe.servings))}
+                    </span>
+                    <ChevronDown
+                      size={16}
+                      aria-hidden
+                      className={isOpen ? 'shrink-0 rotate-180' : 'shrink-0'}
+                    />
+                  </button>
+                  {isOpen &&
+                    (recipe.items.length === 0 ? (
+                      <p className="pb-1 text-sm text-ink-muted">{ja.cookNavi.ingredientsEmpty}</p>
+                    ) : (
+                      <ul className="pb-1">
+                        {recipe.items.map((ing, i) => (
+                          <li
+                            key={`${ing.name}-${i}`}
+                            className="flex items-baseline justify-between gap-2 py-0.5 text-sm"
+                          >
+                            <span className="ja-phrase min-w-0">{ing.name}</span>
+                            <span className="shrink-0 font-bold">{ing.amount}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ))}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -268,6 +413,57 @@ export default function CookNaviPage() {
     [showTimeline, selectedRecipes],
   )
 
+  /**
+   * 各レシピを何人分として扱うか（2026-08-08 便EB）。分量は「作る量」なので、
+   * 買い物メモ・概算食費と同じ優先順（枠の食数＞設定「ふだん作る人数」＞レシピの登録人数）で
+   * そろえる（logic/servings.ts effectiveMealServings）。画面ごとに違う分量を出さないため。
+   */
+  const servingsByRecipeId = useMemo(() => {
+    const map = new Map<number, number>()
+    selectedRecipes.forEach((recipe) => {
+      const entry = todayPlanEntries?.find((e) => e.recipeId === recipe.id)
+      map.set(
+        recipe.id!,
+        effectiveMealServings(entry?.servings, settings?.householdServings, recipe.servings),
+      )
+    })
+    return map
+  }, [selectedRecipes, todayPlanEntries, settings?.householdServings])
+
+  /** ③レシピごとの材料一覧（段取りを作った直後から開ける） */
+  const ingredientsByRecipe = useMemo<NaviRecipeIngredients[]>(() => {
+    if (!timeline) return []
+    return timeline.recipes.map((r) => {
+      const recipe = recipeById.get(r.id)
+      const target = servingsByRecipeId.get(r.id) ?? recipe?.servings ?? 1
+      return {
+        recipeId: r.id,
+        title: r.title,
+        colorIndex: r.colorIndex,
+        servings: target,
+        items: recipe
+          ? recipeIngredientList(recipe.ingredients, recipe.servings, target)
+          : [],
+      }
+    })
+  }, [timeline, recipeById, servingsByRecipeId])
+
+  /** ②手順ごとの材料と分量（手順の文に出てくるものだけ） */
+  const stepIngredientsByKey = useMemo(() => {
+    const map = new Map<string, NaviIngredientAmount[]>()
+    if (!timeline) return map
+    timeline.items.forEach((item) => {
+      const recipe = recipeById.get(item.recipeId)
+      if (!recipe) return
+      const target = servingsByRecipeId.get(item.recipeId) ?? recipe.servings
+      map.set(
+        `${item.recipeId}-${item.stepIndex}`,
+        stepIngredientAmounts(item.text, recipe.ingredients, recipe.servings, target),
+      )
+    })
+    return map
+  }, [timeline, recipeById, servingsByRecipeId])
+
   const startStepTimer = (item: TimelineItem, seconds: number) => {
     if (seconds <= 0) return
     startTimer({
@@ -336,7 +532,7 @@ export default function CookNaviPage() {
             )}
             <p className="mt-[var(--space-sm)] text-sm text-ink-muted">{ja.cookNavi.intro}</p>
 
-            {/* 叩き台であることの控えめな注記（過信させない） */}
+            {/* 使い方の注記（2026-08-08 便EB: 言い訳めいた言い回しを削り、短く言い切る1文にした） */}
             <div className="mt-[var(--space-sm)] flex items-start gap-2 rounded-md border border-edge bg-surface p-[var(--space-sm)]">
               <Info size={16} className="mt-0.5 shrink-0 text-ink-muted" aria-hidden />
               <p className="text-xs text-ink-muted">{ja.cookNavi.disclaimer}</p>
@@ -441,11 +637,15 @@ export default function CookNaviPage() {
                       <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.orderNote}</p>
                     </div>
 
+                    {/* 材料一覧の入口。調理を始める前に先に計量したい人がここから開く */}
+                    <IngredientsPanel recipes={ingredientsByRecipe} />
+
                     <ol className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
                       {timeline.items.map((item, index) => (
                         <TimelineCard
                           key={`${item.recipeId}-${item.stepIndex}`}
                           item={item}
+                          ingredients={stepIngredientsByKey.get(`${item.recipeId}-${item.stepIndex}`) ?? []}
                           showFillHint={hasLaterHandsOnStep(timeline.items, index)}
                           highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
                           onStartTimer={startStepTimer}
