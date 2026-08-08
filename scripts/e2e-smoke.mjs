@@ -61,6 +61,8 @@
 //         NUT-02(栄養価の概算: Pro解錠済みで8項目の実パネルが出る(2026-07-13 第2弾で
 //         食物繊維・鉄・カルシウム+ビタミン注記を追加)・人数を変えても1人分の値は不変。
 //         M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED有効化) /
+//         NUTTRIAL-01(栄養8項目のお試し・2026-08-08 便DZ: 未解錠でも1品だけ「1回だけ表示」で
+//         8項目が出る・使い切ると入口が「ご利用済みです」に変わり、別のレシピではロック表示に戻る) /
 //         STEP0-01(手順0件のレシピ・2026-07バグ修正: 手順欄を空のまま保存(steps:[])しても、
 //         詳細画面に「調理中モードで見る」ボタンが表示されない=空配列で調理中モードを開いて
 //         クラッシュすることがないこと) /
@@ -1725,7 +1727,14 @@ try {
     check('ABOUT-01 バージョン表示がある', /バージョン \S+/.test(aboutText))
     check(
       'ABOUT-01 データ件数表示(レシピ◯件・作った記録◯件)がある',
-      /レシピ \d+件・作った記録 \d+件/.test(aboutText),
+      /レシピ \d+件（自分で登録 \d+\/\d+品）・作った記録 \d+件/.test(aboutText),
+    )
+    // 2026-08-08 便DZ: 未解錠のときは、レシピ一覧と同じ「自分で登録 ◯/30品」をここにも出す
+    // (オーナー要望「利用者がどう確認できるか」。総件数には基本レシピが入るので別の数として並べる)
+    check(
+      'ABOUT-01(便DZ) 未解錠のデータ件数に「自分で登録 ◯/30品」が出る',
+      /自分で登録 \d+\/30品/.test(aboutText),
+      `件数表示=${aboutText.match(/レシピ \d+件[^・]*・作った記録 \d+件/)?.[0]}`,
     )
   }
   // --- MOVEGUIDE-01(2026-07-17設定ゼロベース裁定#5): 機種変更・引っ越しガイド(折りたたみ)。
@@ -10360,7 +10369,7 @@ try {
       lpHtml.includes(ACCURACY_TAIL) && lpHtml.indexOf(ACCURACY_TAIL) < lpHtml.indexOf(STRIPE_PAY_URL),
     )
     check('LAUNCH-01 紹介ページの価格は総額(税込)のみ', lpHtml.includes('800円（税込）'))
-    check('LAUNCH-01 紹介ページに50品上限の案内がある', lpHtml.includes('無料で登録できるレシピは50品までです'))
+    check('LAUNCH-01 紹介ページに30品上限の案内がある', lpHtml.includes('無料で登録できるレシピは30品までです'))
 
     // 使い方ページ: 購入の3歩(購入→コード表示→設定で入力)が書いてある
     const manualHtml = await (await page.request.get(`${BASE}/about/manual.html`)).text()
@@ -10374,6 +10383,45 @@ try {
     check('LAUNCH-01 使い方ページのフッターから特商法表記へ辿れる', manualHtml.includes('/about/tokushoho.html'))
     // 紹介ページ側のアンカー(#buy)が実在する＝使い方からのリンクが空振りしない
     check('LAUNCH-01 紹介ページに#buyのアンカーがある', /id="buy"/.test(lpHtml))
+    // 買う前のお試し(2026-08-08 便DZで栄養8項目の1回だけ表示を追加)。
+    // 使い方ページの「買う前にお試しいただけます」に3つとも書いてあること
+    check(
+      'LAUNCH-01 使い方ページのお試しの節に3つ(ナビ3回・月間1回・栄養8項目1回)が書いてある',
+      manualHtml.includes('買う前にお試しいただけます') &&
+        manualHtml.includes('<strong>並行調理ナビ</strong>: <strong>3回まで</strong>') &&
+        manualHtml.includes('<strong>月間の献立</strong>: <strong>1回だけ</strong>') &&
+        manualHtml.includes('<strong>栄養価の8項目表示</strong>: <strong>1回だけ</strong>'),
+    )
+
+    // --- LAUNCH-01(2026-08-08 便DZ): 上限を30に変えたので、対外文言のどこにも
+    // 旧上限の表記が残っていないことを機械で証明する。1か所でも残ると
+    // 「言っていたことと違う」になるため、静的ページ・お知らせに加えて、
+    // 画面の文言が入っているJS(ビルド成果物)まで含めて検査する。
+    // 「150件」等の巻き込みを避けるため、直前が数字でない場合だけを拾う ---
+    const OLD_LIMIT_RE = /(?<!\d)50\s*(品|件)/
+    const outwardTargets = ['/about/', '/about/manual.html', '/about/unlock.html', '/news.json']
+    for (const path of outwardTargets) {
+      const res = await page.request.get(`${BASE}${path}`)
+      const text = await res.text()
+      check(
+        `LAUNCH-01(便DZ) ${path} に旧上限の表記が残っていない`,
+        res.status() === 200 && !OLD_LIMIT_RE.test(text),
+        `残存=${text.match(OLD_LIMIT_RE)?.[0] ?? 'なし'}`,
+      )
+    }
+    // アプリ本体(UI文言はja.tsとしてJSに入る)。index.htmlが読み込むmodule scriptを全部見る
+    const appHtml = await (await page.request.get(`${BASE}/`)).text()
+    const scriptPaths = [...appHtml.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1])
+    check('LAUNCH-01(便DZ) アプリのJSを検査対象として取得できた', scriptPaths.length > 0, `件数=${scriptPaths.length}`)
+    for (const src of scriptPaths) {
+      const res = await page.request.get(src.startsWith('http') ? src : `${BASE}${src}`)
+      const text = await res.text()
+      check(
+        `LAUNCH-01(便DZ) アプリのJS(${src.split('/').pop()})に旧上限の表記が残っていない`,
+        !OLD_LIMIT_RE.test(text),
+        `残存=${text.match(OLD_LIMIT_RE)?.[0] ?? 'なし'}`,
+      )
+    }
   }
 
   // --- LAUNCH-02: アプリ内の発売状態(2026-08-02 便DD)。設定の「Pro」に購入導線が出ること・
@@ -10433,69 +10481,163 @@ try {
         return res.ok ? await res.json() : []
       })
       // 2026-08-04 便DV-10(オーナー指摘): 押し売りに見えないよう題も文面も短くし、
-      // 解錠済みには出さない印(hideWhenPro)を付けた
+      // 解錠済みには出さない印(hideWhenPro)を付けた。
+      // 2026-08-08 便DZ: 上限を30に変えたお知らせが最新になった(ホームは最新1件だけを出す)
+      const releaseNews = Array.isArray(news)
+        ? news.find((n) => n.id === '2026-08-02-pro-release')
+        : undefined
       check(
-        'LAUNCH-02 お知らせの最新がPro版の公開の告知',
-        Array.isArray(news) && news[0]?.title === 'Pro版を公開しました',
+        'LAUNCH-02(便DZ) お知らせの最新が上限30への変更の告知',
+        Array.isArray(news) && news[0]?.title === '無料で登録できるレシピは30品までになりました',
         `latest=${JSON.stringify(news[0]?.title)}`,
       )
       check(
-        'LAUNCH-02 発売告知は設定のPro節へ誘導する',
-        news[0]?.link === '#/settings?section=pro',
-        `link=${news[0]?.link}`,
+        'LAUNCH-02(便DZ) 上限変更の告知に、登録済みのレシピが残ることが書いてある(規約F)',
+        (news[0]?.body ?? '').includes('見る・編集する・削除する・バックアップから戻すことができます'),
       )
       check(
-        'LAUNCH-02 発売告知は解錠済みには出さない印が付いている',
+        'LAUNCH-02(便DZ) 上限変更の告知は解錠済みには出さない印が付いている',
         news[0]?.hideWhenPro === true,
         `hideWhenPro=${news[0]?.hideWhenPro}`,
       )
-
-      // --- 50件到達の実挙動: 上限ちょうどの自作レシピを流し込んでから新規追加を試す。
-      // 同梱の基本レシピ(isStarter)は上限に数えないので、ここで入れた50件だけで到達する ---
-      await l2Page.evaluate(
-        (n) =>
-          new Promise((resolve, reject) => {
-            const req = indexedDB.open('uchi-recipe')
-            req.onsuccess = () => {
-              const idb = req.result
-              const tx = idb.transaction(['recipes'], 'readwrite')
-              const store = tx.objectStore('recipes')
-              for (let i = 0; i < n; i += 1) {
-                store.add({
-                  title: `上限確認用レシピ${i + 1}`,
-                  servings: 2,
-                  effortLevel: 'easy',
-                  tags: [],
-                  ingredients: [{ name: 'にんじん', amount: '1', unit: '本' }],
-                  steps: [{ text: '切る' }],
-                  isFavorite: false,
-                  cookedLogs: [],
-                  searchWords: [],
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                })
-              }
-              tx.oncomplete = () => {
-                idb.close()
-                resolve(undefined)
-              }
-              tx.onerror = () => reject(tx.error)
-            }
-            req.onerror = () => reject(req.error)
-          }),
-        50,
+      check(
+        'LAUNCH-02 発売の告知も残っていて設定のPro節へ誘導する',
+        releaseNews?.link === '#/settings?section=pro',
+        `link=${releaseNews?.link}`,
       )
-      // 生IndexedDBへの書き込みはDexieのliveQueryに伝わらないので、ハッシュ移動でなく再読込で入り直す
-      await l2Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      check(
+        'LAUNCH-02 発売告知は解錠済みには出さない印が付いている',
+        releaseNews?.hideWhenPro === true,
+        `hideWhenPro=${releaseNews?.hideWhenPro}`,
+      )
+
+      // --- 30件の線引きの実挙動(2026-08-08 便DZ: 上限50→30・予告は節目だけ)。
+      // 同梱の基本レシピ(isStarter)は上限に数えないので、ここで入れた自作レシピだけで到達する。
+      // 節目の案内は「登録し終えた件数がちょうど20/27/30のとき」だけ出るので、
+      // 生IndexedDBで直前まで積み、最後の1品を実際のフォームから保存して確かめる ---
+      const seedOwnRecipes = (count, offset) =>
+        l2Page.evaluate(
+          ({ count, offset }) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const tx = idb.transaction(['recipes'], 'readwrite')
+                const store = tx.objectStore('recipes')
+                for (let i = 0; i < count; i += 1) {
+                  store.add({
+                    title: `上限確認用レシピ${offset + i + 1}`,
+                    servings: 2,
+                    effortLevel: 'easy',
+                    tags: [],
+                    ingredients: [{ name: 'にんじん', amount: '1', unit: '本' }],
+                    steps: [{ text: '切る' }],
+                    isFavorite: false,
+                    cookedLogs: [],
+                    searchWords: [],
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                  })
+                }
+                tx.oncomplete = () => {
+                  idb.close()
+                  resolve(undefined)
+                }
+                tx.onerror = () => reject(tx.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          { count, offset },
+        )
+      // フォームから1品保存する(生IndexedDBへの書き込みはliveQueryに伝わらないので毎回再読込で入る)
+      const saveRecipeFromForm = async (title) => {
+        await l2Page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+        await l2Page.reload({ waitUntil: 'networkidle' })
+        await l2Page.waitForTimeout(1600)
+        await l2Page.getByPlaceholder('例: 肉じゃが').fill(title)
+        await l2Page.getByRole('button', { name: '保存する' }).first().click()
+        await l2Page.waitForTimeout(900)
+      }
+      const openRecipeList = async () => {
+        await l2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await l2Page.waitForTimeout(1200)
+        return (await l2Page.textContent('body')) ?? ''
+      }
+
+      // 19件まで積む: この時点では節目ではないので案内は出ない。件数表記は常時出る
+      await seedOwnRecipes(19, 0)
+      await l2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await l2Page.reload({ waitUntil: 'networkidle' })
       await l2Page.waitForTimeout(1600)
-      await l2Page.getByPlaceholder('例: 肉じゃが').fill('51品目のレシピ')
-      await l2Page.getByRole('button', { name: '保存する' }).first().click()
-      await l2Page.waitForTimeout(800)
+      check(
+        'LAUNCH-02(便DZ) レシピ一覧の件数の横に「自分で登録 ◯/30品」が出る',
+        ((await l2Page.locator('[data-testid="free-limit-count"]').textContent()) ?? '').includes(
+          '自分で登録 19/30品',
+        ),
+        `件数表記=${await l2Page.locator('[data-testid="free-limit-count"]').textContent()}`,
+      )
+      check(
+        'LAUNCH-02(便DZ) 19件では節目の案内を出さない',
+        (await l2Page.locator('[data-testid="free-limit-notice"]').count()) === 0,
+      )
+
+      // 20件目を登録し終えた瞬間だけ予告を出す(あと10件)
+      await saveRecipeFromForm('20品目のレシピ')
+      let listText = await openRecipeList()
+      check(
+        'LAUNCH-02(便DZ) 20件目の登録完了で「あと10件登録できます」の予告が出る',
+        (await l2Page.locator('[data-testid="free-limit-notice"]').count()) > 0 &&
+          listText.includes('あと10件登録できます'),
+      )
+      check(
+        'LAUNCH-02(便DZ) 予告と同時に件数表記も20/30品になる',
+        ((await l2Page.locator('[data-testid="free-limit-count"]').textContent()) ?? '').includes(
+          '自分で登録 20/30品',
+        ),
+      )
+      // 閉じたら再表示しない(一覧を開くたびに出さない)
+      await l2Page.locator('[data-testid="free-limit-notice"] button').click()
+      await l2Page.waitForTimeout(500)
+      listText = await openRecipeList()
+      check(
+        'LAUNCH-02(便DZ) 予告は閉じたら再表示しない',
+        (await l2Page.locator('[data-testid="free-limit-notice"]').count()) === 0,
+      )
+
+      // 21件目(節目の次)では出さない=登録のたびに同じ案内が出ない
+      await saveRecipeFromForm('21品目のレシピ')
+      listText = await openRecipeList()
+      check(
+        'LAUNCH-02(便DZ) 21件目では予告を出さない(節目のときだけ)',
+        (await l2Page.locator('[data-testid="free-limit-notice"]').count()) === 0 &&
+          !/あと\d+件登録できます/.test(listText),
+      )
+
+      // 29件まで積んでから30件目を登録=上限到達の案内(予告ではない)
+      await seedOwnRecipes(8, 100)
+      await saveRecipeFromForm('30品目のレシピ')
+      listText = await openRecipeList()
+      check(
+        'LAUNCH-02(便DZ) 30件目の登録完了で上限到達の案内が出る',
+        listText.includes('無料で登録できるレシピ30品に達しました'),
+      )
+      check(
+        'LAUNCH-02(便DZ) 上限到達の案内に「残るもの」(閲覧・編集・削除・復元)が書いてある(規約F)',
+        listText.includes('見る・編集する・削除する・バックアップから戻すことができます'),
+      )
+      check(
+        'LAUNCH-02(便DZ) 上限到達の案内から購入導線に進める(規約H)',
+        (await l2Page
+          .locator('[data-testid="free-limit-notice"] a[href*="section=pro"]')
+          .count()) > 0,
+      )
+
+      // 31品目はブロックされる(上限で止めるのは新規追加だけ)
+      await saveRecipeFromForm('31品目のレシピ')
       const blockedText = (await l2Page.textContent('body')) ?? ''
       check(
-        'LAUNCH-02 50件に達したら新規追加はブロックされる',
-        blockedText.includes('無料で登録できるレシピは50品までです'),
+        'LAUNCH-02 30件に達したら新規追加はブロックされる',
+        blockedText.includes('無料で登録できるレシピは30品までです'),
       )
       check(
         'LAUNCH-02 ブロックの案内に「残るもの」(閲覧・編集・削除・復元)が書いてある(規約F)',
@@ -10506,15 +10648,8 @@ try {
         (await l2Page.locator('[data-testid="free-limit-pro-cta"]').count()) > 0,
       )
       // 既存レシピが閲覧できることまで確認する(上限で止めるのは新規追加だけ)
-      await l2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await l2Page.waitForTimeout(1200)
-      const listText = (await l2Page.textContent('body')) ?? ''
+      listText = await openRecipeList()
       check('LAUNCH-02 上限到達後も既存レシピは一覧に出る', /上限確認用レシピ\d+/.test(listText))
-      // 予告バナー(40〜49件)は50件では出ない=ブロック域に入っている
-      check(
-        'LAUNCH-02 50件では「あと◯件」の予告バナーを出さない(ブロック域)',
-        !/あと\d+件登録できます/.test(listText),
-      )
       await l2Page.getByText(/^上限確認用レシピ\d+$/).first().click()
       await l2Page.waitForTimeout(800)
       const detailText = (await l2Page.textContent('body')) ?? ''
@@ -10524,6 +10659,78 @@ try {
       )
     } finally {
       await l2Browser.close()
+    }
+  }
+
+  // --- NUTTRIAL-01: 栄養8項目のお試し表示(1回だけ・2026-08-08 便DZ・オーナー決定)。
+  // 未解錠のまま、好きなレシピ1品で8項目のフル表示を1回だけ見られる。
+  // 使い切ったら入口を出さず「ご利用済みです」に差し替わり、別のレシピではロック表示に戻る
+  // ことまで確認する(Proの表示ゲート自体は変えていない=見本は1回だけ)。
+  // お試しを消費するので、他のチェックの状態に影響しない専用のbrowser/contextで完結させる ---
+  currentCheck = 'NUTTRIAL-01'
+  {
+    const ntBrowser = await chromium.launch()
+    const ntContext = await ntBrowser.newContext()
+    const ntPage = await ntContext.newPage()
+    ntPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NUTTRIAL-01] ${err.message}`)
+    })
+    try {
+      const openNutrition = async (title) => {
+        await ntPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await ntPage.waitForTimeout(1600)
+        await ntPage.getByText(title, { exact: true }).first().click()
+        await ntPage.waitForTimeout(700)
+        await ntPage.getByRole('button', { name: '栄養価の概算を詳しく見る' }).click()
+        await ntPage.waitForTimeout(300)
+        return (await ntPage.textContent('body')) ?? ''
+      }
+
+      await ntPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ntPage.waitForTimeout(2400) // 初回シード(109品)の完了待ち
+      let nutText = await openNutrition('肉じゃが')
+      check(
+        'NUTTRIAL-01 未解錠のPro案内に「1回だけ表示」の入口が出る',
+        (await ntPage.locator('[data-testid="nutrition-trial-button"]').count()) > 0,
+      )
+      check(
+        'NUTTRIAL-01 お試し前は8項目(たんぱく質の数値)が出ていない',
+        !/たんぱく質\s*[\d,]/.test(nutText),
+      )
+
+      await ntPage.locator('[data-testid="nutrition-trial-button"]').click()
+      await ntPage.waitForTimeout(500)
+      nutText = (await ntPage.textContent('body')) ?? ''
+      check(
+        'NUTTRIAL-01 押すと8項目(たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量)の数値が出る',
+        ['たんぱく質', '脂質', '炭水化物', '食物繊維', '鉄', 'カルシウム', '塩分相当量'].every((k) =>
+          new RegExp(`${k}\\s*[\\d,]`).test(nutText),
+        ),
+      )
+      check(
+        'NUTTRIAL-01 お試しで表示中であることが画面に出る',
+        (await ntPage.locator('[data-testid="nutrition-trial-active"]').count()) > 0 &&
+          nutText.includes('いまお試しで表示しています'),
+      )
+
+      // 別のレシピではロック表示に戻る(開けるのは1品だけ)＝Proの表示ゲートは変えていない
+      nutText = await openNutrition('カレーライス')
+      check(
+        'NUTTRIAL-01 別のレシピではロック表示に戻る(8項目は出ない)',
+        !/たんぱく質\s*[\d,]/.test(nutText) && nutText.includes('栄養価8項目の概算'),
+      )
+      check(
+        'NUTTRIAL-01 使い切ったら入口を出さず「ご利用済みです」に差し替わる',
+        (await ntPage.locator('[data-testid="nutrition-trial-button"]').count()) === 0 &&
+          nutText.includes('お試しの表示（1回だけ）はご利用済みです'),
+      )
+      check(
+        'NUTTRIAL-01 使い切ったあともPro版への導線は残る',
+        nutText.includes('Pro版について見る'),
+      )
+    } finally {
+      await ntBrowser.close()
     }
   }
 

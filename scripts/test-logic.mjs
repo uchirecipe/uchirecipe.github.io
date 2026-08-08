@@ -39,12 +39,11 @@ import {
 } from '../src/logic/pro.ts'
 import {
   isAtFreeLimit,
-  isNearFreeLimit,
-  isInWarningRange,
+  freeLimitNoticeFor,
   freeLimitRemaining,
   countFreeLimitRecipes,
   FREE_LIMIT,
-  FREE_LIMIT_WARNING_THRESHOLD,
+  FREE_LIMIT_NOTICE_COUNTS,
 } from '../src/logic/freeLimit.ts'
 import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
 import { isNewsSuppressed, isNewsVisibleFor } from '../src/logic/news.ts'
@@ -213,12 +212,15 @@ import {
   COOK_NAVI_TRIAL_LIMIT,
   MONTH_TRIAL_LIMIT,
   MONTH_TRIAL_MIN_COOKED,
+  NUTRITION_TRIAL_LIMIT,
   canUseCookNaviTrial,
   canUseMonthTrial,
+  canUseNutritionTrial,
   consumeCookNaviTrial,
   cookNaviTrialRemaining,
   isCookNaviTrialExhausted,
   isMonthTrialReady,
+  isNutritionTrialExhausted,
 } from '../src/logic/proTrial.ts'
 import {
   buildMonthDemoData,
@@ -5054,26 +5056,35 @@ eq(
 // 発売と同一リリースでフラグをONにした(docs/08 §2)。ONで変わるのは「新規追加のブロック」と
 // 「予告バナー」だけで、既存レシピの閲覧・編集・削除・バックアップ復元は絶対に制限しない
 // (それらはisAtFreeLimitを一切呼ばない=RecipeFormPageの新規保存パスだけが呼ぶ)
-eq('フラグON: 50件に達したら新規追加はブロックする', isAtFreeLimit(50, false), true)
-eq('フラグON: 49件まではブロックしない', isAtFreeLimit(49, false), false)
-eq('Pro解錠済みは50件でもブロックしない', isAtFreeLimit(50, true), false)
+// 2026-08-08 便DZ(オーナー決定): 宣伝開始前に上限を50→30へ変更。アンケート・LP・説明書・
+// お知らせと同じ数字であることが前提なので、上限の値そのものをテストで固定する
+eq('上限は30件', FREE_LIMIT, 30)
+eq('フラグON: 30件に達したら新規追加はブロックする', isAtFreeLimit(30, false), true)
+eq('フラグON: 29件まではブロックしない', isAtFreeLimit(29, false), false)
+eq('Pro解錠済みは30件でもブロックしない', isAtFreeLimit(30, true), false)
 eq('Pro解錠済みは1000件でもブロックしない', isAtFreeLimit(1000, true), false)
-eq('フラグON: 45件は予告バナーを出す', isNearFreeLimit(45, false), true)
-eq('フラグON: 39件はまだ予告バナーを出さない', isNearFreeLimit(39, false), false)
-eq('フラグON: 50件は予告でなくブロック(予告バナーは出さない)', isNearFreeLimit(50, false), false)
-// 予告閾値を45→40へ引き下げ(2026-07-23 便BJ・docs/55 CEO提案:「40件あたりから静かにあと◯件を
-// 表示する。突然壁に当てるのが一番心証が悪い」)
-eq('予告閾値は40件', FREE_LIMIT_WARNING_THRESHOLD, 40)
-eq('上限は50件', FREE_LIMIT, 50)
-eq('39件はまだ予告域でない', isInWarningRange(39), false)
-eq('40件から予告域に入る(最初のバナー)', isInWarningRange(40), true)
-eq('49件も予告域', isInWarningRange(49), true)
-eq('50件は予告でなくブロック域(予告域からは外れる)', isInWarningRange(50), false)
-eq('「あと◯件」: 40件時点はあと10件', freeLimitRemaining(40), 10)
-eq('「あと◯件」: 49件時点はあと1件', freeLimitRemaining(49), 1)
-eq('「あと◯件」: 50件以上でも負にならない', freeLimitRemaining(51), 0)
-eq('フラグON: 予告域の入口(40件)でバナーが出る', isNearFreeLimit(40, false), true)
-eq('Pro解錠済みは予告しない', isNearFreeLimit(45, true), false)
+eq('「あと◯件」: 20件時点はあと10件', freeLimitRemaining(20), 10)
+eq('「あと◯件」: 27件時点はあと3件', freeLimitRemaining(27), 3)
+eq('「あと◯件」: 30件以上でも負にならない', freeLimitRemaining(31), 0)
+
+// 節目の案内(2026-08-08 オーナー指示「２０件目、２７件目、３０件目の登録完了時といった感じで」)。
+// 旧仕様の「40件以上なら常時表示」をやめ、登録し終えた件数がちょうど節目のときだけ出す。
+// 登録のたびに同じ案内が出ないこと(21件・26件で出ない)が、この変更のいちばんの目的
+eq('節目は20件目と27件目', FREE_LIMIT_NOTICE_COUNTS.join(','), '20,27')
+eq('19件目では案内を出さない', freeLimitNoticeFor(19, false), undefined)
+eq('20件目で予告を出す', freeLimitNoticeFor(20, false), 'near')
+eq('21件目では出さない(節目の次の登録では繰り返さない)', freeLimitNoticeFor(21, false), undefined)
+eq('26件目では出さない', freeLimitNoticeFor(26, false), undefined)
+eq('27件目で予告を出す', freeLimitNoticeFor(27, false), 'near')
+eq('28件目では出さない', freeLimitNoticeFor(28, false), undefined)
+eq('29件目では出さない', freeLimitNoticeFor(29, false), undefined)
+eq('30件目は予告でなく上限到達の案内', freeLimitNoticeFor(30, false), 'reached')
+eq('上限を超えた件数(復元等)では案内を出さない', freeLimitNoticeFor(31, false), undefined)
+eq('Pro解錠済みには節目でも出さない(20件目)', freeLimitNoticeFor(20, true), undefined)
+eq('Pro解錠済みには上限到達の案内も出さない', freeLimitNoticeFor(30, true), undefined)
+eq('予約が無い(未設定)なら何も出さない', freeLimitNoticeFor(undefined, false), undefined)
+eq('閉じたあとの0では何も出さない', freeLimitNoticeFor(0, false), undefined)
+eq('壊れた値(NaN)でも何も出さない', freeLimitNoticeFor(NaN, false), undefined)
 // 上限のカウント対象はisStarter=falseだけ(同梱の基本レシピは何品あっても上限に効かない)。
 // 発売でフラグをONにしたため、この不変条件が破れると初回起動直後の人がいきなりブロックされる
 eq(
@@ -10161,6 +10172,15 @@ eq(
   eq('月間お試し: 記録5件で出す', isMonthTrialReady(5), true)
   eq('月間お試し: 記録が多ければもちろん出す', isMonthTrialReady(40), true)
   eq('月間お試し: 未定義は0件として扱う(落ちない)', isMonthTrialReady(undefined), false)
+
+  // 栄養8項目のお試し(2026-08-08 便DZ・オーナー決定)。月間献立と同じ「1回だけ」の作法。
+  // 使い切ったあとは入口を出さず「ご利用済みです」に差し替える(表示側の判定はこの関数で決める)
+  eq('DZ-TRIAL 栄養8項目のお試しは1回', NUTRITION_TRIAL_LIMIT, 1)
+  eq('DZ-TRIAL 未設定ならまだ使える', canUseNutritionTrial(undefined), true)
+  eq('DZ-TRIAL falseでもまだ使える', canUseNutritionTrial(false), true)
+  eq('DZ-TRIAL 1回使ったら使えない', canUseNutritionTrial(true), false)
+  eq('DZ-TRIAL 未設定は「ご利用済み」にしない', isNutritionTrialExhausted(undefined), false)
+  eq('DZ-TRIAL 1回使ったら「ご利用済み」', isNutritionTrialExhausted(true), true)
 }
 
 // ---------- 月間画面のサンプルデモの見本データ(2026-08-02 便DC) ----------
