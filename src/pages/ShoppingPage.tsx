@@ -29,7 +29,6 @@ import {
 } from '../db/shopping'
 import {
   buildShoppingCandidates,
-  sortShoppingByAisle,
   groupShoppingByAisle,
   resolveShoppingSources,
   parseRecipeIdsParam,
@@ -368,16 +367,15 @@ export default function ShoppingPage() {
   // DBの保存順(order)は書き換えない。並び順は設定「買い物メモの売り場順」で入れ替えられる
   // (2026-08-02 便CT/C15)。未設定なら従来どおりの既定順
   const aisleOrder = settings?.shoppingAisleOrder
-  const memoItems = useMemo(
-    () => sortShoppingByAisle(shoppingItems ?? [], aisleOrder),
-    [shoppingItems, aisleOrder],
-  )
-  // 売り場ごとのブロック表示(2026-08-08 オーナー実機フィードバック①)。並びは memoItems と同じで、
-  // 見出しつきの塊に切り直すだけ。中身が0件の売り場は出さない
+  // 売り場ごとのブロック表示(2026-08-08 オーナー実機フィードバック①)。
+  // 中身が0件の売り場は出さない
   const memoGroups = useMemo(
     () => groupShoppingByAisle(shoppingItems ?? [], aisleOrder),
     [shoppingItems, aisleOrder],
   )
+  // まとめてチェック・買い物完了など「メモ全体」を見る処理用の平らな並び。
+  // ブロックを順につないだもの＝画面に見えている並びそのもの(従来の sortShoppingByAisle と同じ)
+  const memoItems = useMemo(() => memoGroups.flatMap((group) => group.items), [memoGroups])
   // まとめてチェック/解除(2026-07-23 #6)
   const allChecked = memoItems.length > 0 && memoItems.every((i) => i.isChecked)
 

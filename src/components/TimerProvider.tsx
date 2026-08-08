@@ -124,6 +124,22 @@ export interface TimerChimeOptions {
 }
 
 /**
+ * タイマーを持たない場所（設定の試聴ボタン）から鳴らすときに使い回す AudioContext。
+ * ブラウザは同時に持てる AudioContext の数を制限しており（Chromeは6個程度）、押すたびに
+ * 作ると数回で作れなくなって無音になる。設定で音量を聴き比べるのは押し比べる操作なので、
+ * 1本だけ作って使い回す。作れない環境では undefined のまま＝静かに何もしない。
+ */
+let sharedAudio: AudioContext | undefined
+function getSharedAudio(): AudioContext | undefined {
+  try {
+    sharedAudio ??= new AudioContext()
+  } catch {
+    return undefined
+  }
+  return sharedAudio
+}
+
+/**
  * 終了の合図: ピピピと鳴らす（音が出せない環境では静かに無視）。
  * 2026-08-08 オーナー実機フィードバック③: 音量と鳴る長さを設定から変えられるようにしたので、
  * 回数とピークの音量を logic/timerSound.ts の対応表から引く。未設定なら従来と同じ音
@@ -131,7 +147,8 @@ export interface TimerChimeOptions {
  */
 export function playTimerChime(ctx: AudioContext | undefined, options?: TimerChimeOptions) {
   try {
-    const audio = ctx ?? new AudioContext()
+    const audio = ctx ?? getSharedAudio()
+    if (!audio) return
     void audio.resume().catch(() => {
       /* 無視（ユーザー操作なしのresumeはブラウザによって拒否されることがある） */
     })
