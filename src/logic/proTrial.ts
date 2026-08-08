@@ -12,6 +12,11 @@
  *     7日間トライアルにすると「空のカレンダー」というもっとも貧しい状態を見せてしまうため。
  *     同じ理由で、「作った記録」が MONTH_TRIAL_MIN_COOKED 件たまるまでは入口を出さない
  *     （2026-08-02 オーナー指摘。記録0件で1回きりのお試しを使い切る事故を防ぐ）。
+ *  3. 栄養8項目 … 好きなレシピ1つで、栄養8項目のフル表示を1回だけ見られる
+ *     （2026-08-08 便DZ・オーナー決定）。月間献立と同じく「見本ではなく本物を1回」の作法で、
+ *     数字が並んだ状態を実際に確かめてから買うか決められるようにする。
+ *     Proの表示ゲート（logic/nutrition.ts の isNutritionUnlocked）は変えず、
+ *     この1回だけレシピ詳細の画面の中で開ける。
  *
  * この層は数だけを扱う純関数に閉じる（保存はdb/settings.ts・表示はページ側）。
  */
@@ -21,6 +26,9 @@ export const COOK_NAVI_TRIAL_LIMIT = 3
 
 /** 月間献立のお試し表示の回数（1回だけ） */
 export const MONTH_TRIAL_LIMIT = 1
+
+/** 栄養8項目のお試し表示の回数（1回だけ・2026-08-08 便DZ） */
+export const NUTRITION_TRIAL_LIMIT = 1
 
 /**
  * 月間献立のお試しを出し始める「作った記録」の件数（2026-08-02 オーナー指摘）。
@@ -73,4 +81,17 @@ export function isCookNaviTrialExhausted(used: number | undefined): boolean {
 /** 月間献立のお試し表示をまだ使えるか（未設定＝まだ使っていない） */
 export function canUseMonthTrial(used: boolean | undefined): boolean {
   return used !== true
+}
+
+/**
+ * 栄養8項目のお試し表示をまだ使えるか（未設定＝まだ使っていない・2026-08-08 便DZ）。
+ * 月間献立と同じ「1回だけ」の作法なので、判定も同じ形にそろえる。
+ */
+export function canUseNutritionTrial(used: boolean | undefined): boolean {
+  return used !== true
+}
+
+/** 栄養8項目のお試しを使い切ったか（「ご利用済みです」を出す判定） */
+export function isNutritionTrialExhausted(used: boolean | undefined): boolean {
+  return !canUseNutritionTrial(used)
 }
