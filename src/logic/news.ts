@@ -4,6 +4,20 @@ export interface NewsItem {
   title: string
   body: string
   link?: string
+  /**
+   * Pro版を解錠済みの人には出さないお知らせか（2026-08-04 便DV-10・オーナー指摘）。
+   * 「Pro版の販売を開始しました」は、買った人にとってはもう用の無い案内なのに出続けていた。
+   * 販売・解錠に関わるお知らせだけこの印を付ける（機能追加のお知らせは全員に出す）。
+   */
+  hideWhenPro?: boolean
+}
+
+/**
+ * このお知らせを表示してよいか（2026-08-04 便DV-10）。
+ * hideWhenPro の印が付いたお知らせは、Pro版を解錠済みの人には出さない。
+ */
+export function isNewsVisibleFor(item: NewsItem, isPro: boolean): boolean {
+  return !(item.hideWhenPro === true && isPro)
 }
 
 /** 初回起動からお知らせバナーを出さない期間（初見ユーザーのファーストビューを塞がないため） */

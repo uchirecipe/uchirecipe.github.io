@@ -34,6 +34,19 @@ const VIEW = { width: 390, height: 844 }
 const failures = []
 const wait = (page, ms) => page.waitForTimeout(ms)
 
+/**
+ * ONLY=recipe-cards-photo のように指定すると、その名前のカットだけを撮り直す
+ * (2026-08-04 便DV-11。使い方ページ側 scripts/shots-manual.mjs と同じ流儀)。
+ * 1枚だけ差し替えたいときに、ほかのカットを今の画面に巻き込んで撮り直さないための切り分け。
+ */
+const ONLY = new Set(
+  (process.env.ONLY ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+const want = (name) => ONLY.size === 0 || ONLY.has(name)
+
 async function save(png, name) {
   const meta = await sharp(png).metadata()
   const webp = await sharp(png).webp({ quality: 78, effort: 6 }).toBuffer()
@@ -125,6 +138,7 @@ try {
   await wait(page, 2800)
 
   // ======== 献立(週)・無料の見え方 ========
+  if (want('plan-week-free') || want('cost-week-free')) {
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1500)
   await page.getByRole('button', { name: '週', exact: true }).click()
@@ -160,8 +174,10 @@ try {
     await costRow.click()
     await wait(page, 400)
   }
+  }
 
   // ======== URLから取り込む(見出しから欄まで) ========
+  if (want('url-import')) {
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await wait(page, 800)
   await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
@@ -190,8 +206,10 @@ try {
   } else {
     failures.push('url-import(トグルが無い)')
   }
+  }
 
   // ======== 保存容量のめやす(実測) ========
+  if (ONLY.size === 0) {
   // 紹介ページの「データ」セクションに書く数値の裏取り。
   // 収録レシピ(写真なし)のJSONサイズを実データから測る
   const measured = await page.evaluate(async () => {
@@ -218,6 +236,87 @@ try {
     }
   })
   console.log('レシピ1件あたりのデータ量(写真なし・実測):', JSON.stringify(measured))
+  }
+
+  // ======== 紹介ページのいちばん上のレシピカード(2026-08-04 便DV-11・オーナー指示) ========
+  // 「写真つきレシピカードも2枚入れる」。使い方ページ§3「収録レシピ」が使っている
+  // public/about/img/manual/recipe-cards.webp は、写真を混ぜると「収録レシピにも写真が
+  // 付いてくる」と読めるため写真なしのまま据え置く(2026-08-02 オーナー指示)。
+  // 紹介ページ用に別のファイル(lp/recipe-cards-photo.webp)を撮る。
+  //
+  // 写真は public/demo/*.webp(フリー素材サイト「ぱくたそ」の写真を240px角に切り出した
+  // リポジトリ同梱の10枚。出所と規約の確認は scripts/build-demo-photos.mjs の冒頭)を
+  // 同一オリジンから読み込んで使う。料理名と中身が一致する2枚だけを選ぶ
+  // (代用素材の肉じゃが・鮭は、紹介ページの一番上には出さない)。
+  //
+  // ほかのカットに写真が混ざらないよう、まっさらな別コンテキスト(別IndexedDB)で撮る。
+  if (want('recipe-cards-photo')) {
+  const heroContext = await browser.newContext({
+    viewport: VIEW,
+    deviceScaleFactor: 2,
+    colorScheme: 'light',
+    locale: 'ja-JP',
+  })
+  heroContext.setDefaultTimeout(15000)
+  const heroPage = await heroContext.newPage()
+  heroPage.on('dialog', (d) => d.accept())
+  await heroPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+  await wait(heroPage, 2800)
+
+  // 一覧の既定の並び(更新順)の先頭4件を「写真あり→なし→写真あり→なし」に組む。
+  // 2列のグリッドなので、1枚の絵の中に写真つきとアイコンの両方が2枚ずつ写る
+  const HERO_CARDS = [
+    { title: '鶏の唐揚げ', photo: '/demo/karaage.webp' },
+    { title: '豚の生姜焼き' },
+    { title: 'カレーライス', photo: '/demo/curry.webp' },
+    { title: 'ほうれん草のおひたし' },
+  ]
+  const heroSeeded = await heroPage.evaluate(async (cards) => {
+    const openDb = () =>
+      new Promise((res, rej) => {
+        const req = indexedDB.open('uchi-recipe')
+        req.onsuccess = () => res(req.result)
+        req.onerror = () => rej(req.error)
+      })
+    const P = (req) =>
+      new Promise((res, rej) => {
+        req.onsuccess = () => res(req.result)
+        req.onerror = () => rej(req.error)
+      })
+    const db = await openDb()
+    const store = () => db.transaction('recipes', 'readwrite').objectStore('recipes')
+    const recipes = await P(store().getAll())
+    const applied = []
+    // 先頭に来る順に新しいupdatedAtを振る(既定の並び=更新順の降順)
+    let stamp = Date.now() + cards.length
+    for (const card of cards) {
+      const target = recipes.find((r) => r.title === card.title)
+      if (!target) continue
+      const next = { ...target, updatedAt: stamp-- }
+      if (card.photo) next.photo = await (await fetch(card.photo)).blob()
+      await P(store().put(next))
+      applied.push(card.title)
+    }
+    db.close()
+    return applied
+  }, HERO_CARDS)
+  if (heroSeeded.length !== HERO_CARDS.length) {
+    failures.push(`recipe-cards-photo(レシピが見つからない: ${heroSeeded.join(',')})`)
+  } else {
+    await heroPage.reload({ waitUntil: 'networkidle' })
+    await wait(heroPage, 2000)
+    await heroPage.evaluate(() => window.scrollTo(0, 0))
+    await wait(heroPage, 500)
+    const heroCard = heroPage.locator('main a[href*="/recipes/"]:not([href$="/new"])')
+    const firstTitles = await heroCard
+      .locator('h3, p.font-bold')
+      .allTextContents()
+      .catch(() => [])
+    console.log('  先頭カード:', firstTitles.slice(0, 4).join(' / '))
+    await cropRange(heroPage, 'recipe-cards-photo', heroCard.first(), heroCard.nth(3), { top: 12 })
+  }
+  await heroContext.close()
+  }
 } finally {
   await browser.close()
 }

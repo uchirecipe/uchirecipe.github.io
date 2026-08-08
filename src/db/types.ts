@@ -425,7 +425,7 @@ export interface Settings {
   id?: number
   /** NG食材（アレルギー・苦手）。ここに載る食材を含むレシピに警告を出す */
   ngIngredients: string[]
-  /** 料理中に画面を暗くしない（レシピ詳細を開いている間） */
+  /** 料理中に画面を暗くしない（レシピ詳細と調理中モードを開いている間） */
   keepScreenOn: boolean
   theme: ThemeSetting
   /** 基本レシピの初回投入が済んでいるか */
@@ -650,7 +650,10 @@ export interface SetExclusion {
 export const defaultSettings: Settings = {
   id: 1,
   ngIngredients: [],
-  keepScreenOn: false,
+  // 「料理中」の3つの設定は初期値をすべてON(2026-08-04 便DV-6・オーナー指示)。
+  // 料理中に画面が消えないことがこのアプリの前提の使い方で、対応していないブラウザでは
+  // 設定画面に「お使いのブラウザは対応していません」が出る(ONのままでも害はない)
+  keepScreenOn: true,
   theme: 'auto',
   starterSeeded: false,
   pantryPresetSeeded: false,

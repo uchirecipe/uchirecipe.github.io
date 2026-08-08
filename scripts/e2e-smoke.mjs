@@ -28,8 +28,8 @@
 //         代表品が同梱される・設定にテーマUIが一切存在しない・旧?set=付きURLは無害に設定へ着地する。
 //         旧「?set=テーマ取り込み」検証はテーマ廃止に伴い「全品同梱・テーマUI不存在」の検証へ置き換え) /
 //         SETTINGS-TAB-01(設定画面の1本スクロール化2026-07-17オーナー採用決定。旧: 上部タブ4分割。
-//         パーソナライズ/レシピ/バックアップ/Pro/アプリについての5節が1画面に同時に存在・上部の目次チップのタップで該当節へ
-//         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA・「全般」→「パーソナライズ」は2026-08-03 便DH) /
+//         個人設定/レシピ/バックアップ/Pro/アプリについての5節が1画面に同時に存在・上部の目次チップのタップで該当節へ
+//         スクロール・?set=/?section=直リンクが該当節へ自動スクロール。「基本」→「全般」は2026-07-13 UIペルソナQA・「全般」→「パーソナライズ」は2026-08-03 便DH・「パーソナライズ」→「個人設定」は2026-08-04 便DV) /
 //         TOAST-01(設定操作結果メッセージのトースト化。数秒で自動的に消えること。
 //         自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) /
 //         STARTER-RELOAD-01(「基本レシピを入れ直す」でユーザーデータ(お気に入り)が保持されること。
@@ -83,7 +83,7 @@
 //         2群に分けてそれぞれ折りたたむ・既定は選択中だけ開く/「今日なに作る？」は今週の献立に今日の予定が
 //         あれば出さない(設定「常に表示」で上書き可)/「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が
 //         「条件をしぼる」の中にあり既定は主菜だけON/設定でいったん隠したパーツは既定の位置へ復帰) /
-//         MEALPLAN-HOUSE(2026-08-03 便DK: 設定「ふだん作る人数」。未設定なら従来どおり登録人数分・
+//         MEALPLAN-HOUSE(2026-08-03 便DK: 設定「食数の設定」(旧「ふだん作る人数」)。未設定なら従来どおり登録人数分・
 //         4人分に設定すると献立の行/概算食費/買い物メモの分量/レシピ詳細の人数がすべてその人数分になり、
 //         レシピ詳細には元の登録人数が「登録: 2人分」で併記される。枠ごとに決めた食数はこの設定より優先し、
 //         「既定に戻す」は戻り先の人数を名乗る。栄養の「1人分」は人数を変えても動かない) /
@@ -304,7 +304,7 @@
 //         トゥームストーンを残さず「基本レシピを入れ直す」で戻る(記録は戻らない)) /
 //         AISLE-01(買い物メモの売り場順カスタム・2026-08-02 便CT/C15: 既定は従来の並び・設定の
 //         上下移動で入れ替えると買い物メモの整列に即反映されリロードしても維持される・
-//         「既定の順番に戻す」で戻る・買い物メモの控えめな入口から設定へ辿れる) /
+//         「初期設定に戻す」で戻る・買い物メモの控えめな入口から設定へ辿れる) /
 //         DEMO-01(月間画面のサンプルデモ・2026-08-02 便DC: 記録0件でロック案内に「サンプルで見る」が
 //         常時出る(1回だけのお試しとは独立)・押すと見本の1か月分が入った本物の月タブが開き、
 //         写真つきのセル・写真/栄養/食費の切り替え・日の窓が触れる・献立を書き換える操作は出ない・
@@ -1537,8 +1537,8 @@ try {
   }
 
   // --- SETTINGS-TAB-01: 設定画面の1本スクロール化(2026-07-17オーナー採用決定。旧: 上部タブ4分割2026-07-12〜)。
-  // パーソナライズ→レシピ→バックアップ→Pro→アプリについての5節が1画面に同時に存在し(=どれも隠れない)、
-  // 上部の目次チップ(パーソナライズ/レシピ/バックアップ/Pro/アプリ)のタップで該当節へスクロールすること・
+  // 個人設定→レシピ→バックアップ→Pro→アプリについての5節が1画面に同時に存在し(=どれも隠れない)、
+  // 上部の目次チップ(個人設定/レシピ/バックアップ/Pro/アプリ)のタップで該当節へスクロールすること・
   // ?section=/?set=直リンクが該当節へ自動スクロールすることを確認する。旧「他タブは隠れている」検証は
   // 「全節が同時に存在する」検証へ、旧aria-pressed検証はスクロール位置検証へ置き換えた。
   // 2026-08-02 オーナー指示: 旧「全般」節の中にあった「その他」(＝アプリについて)を
@@ -1549,7 +1549,7 @@ try {
   {
     const body = await page.textContent('body')
     check(
-      'SETTINGS-TAB-01 1本スクロール: パーソナライズ(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
+      'SETTINGS-TAB-01 1本スクロール: 個人設定(NG食材)/レシピ(セット読み込み)/バックアップ(書き出し)/Pro(Pro版)の4節が同時に存在する',
       body.includes('NG食材（アレルギー・苦手）') &&
         body.includes('レシピセットを読み込む') &&
         body.includes('ファイルに書き出す') &&
@@ -1557,8 +1557,8 @@ try {
     )
   }
   check(
-    'SETTINGS-TAB-01(便DH) 目次チップ(パーソナライズ/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
-    (await page.getByRole('button', { name: 'パーソナライズ', exact: true }).count()) === 1 &&
+    'SETTINGS-TAB-01(便DH) 目次チップ(個人設定/レシピ/バックアップ/Pro/アプリ)が5つとも存在する',
+    (await page.getByRole('button', { name: '個人設定', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'レシピ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'バックアップ', exact: true }).count()) === 1 &&
       (await page.getByRole('button', { name: 'Pro', exact: true }).count()) === 1 &&
@@ -1647,7 +1647,7 @@ try {
       ),
     )
     check(
-      'SETTINGS-TAB-01(2026-08-02) 節の並びは パーソナライズ→レシピ→バックアップ→Pro→アプリについて',
+      'SETTINGS-TAB-01(2026-08-02) 節の並びは 個人設定→レシピ→バックアップ→Pro→アプリについて',
       order.every((v) => v !== null) && order.every((v, i) => i === 0 || v > order[i - 1]),
       JSON.stringify(order),
     )
@@ -1659,7 +1659,7 @@ try {
       return Array.from(basic.querySelectorAll('p')).some((el) => el.textContent?.trim() === 'その他')
     })
     check(
-      'SETTINGS-TAB-01(2026-08-02) パーソナライズ節に「その他」の小見出しが残っていない',
+      'SETTINGS-TAB-01(2026-08-02) 個人設定節に「その他」の小見出しが残っていない',
       otherHeadingLeft === false,
       `otherHeadingLeft=${otherHeadingLeft}`,
     )
@@ -1846,7 +1846,7 @@ try {
     )
   }
   check(
-    'SETTINGS-TAB-01 1本スクロールなので?section=proでもパーソナライズ節(NG食材)は同じページに存在する',
+    'SETTINGS-TAB-01 1本スクロールなので?section=proでも個人設定節(NG食材)は同じページに存在する',
     (await page.textContent('body')).includes('NG食材（アレルギー・苦手）'),
   )
 
@@ -1854,7 +1854,7 @@ try {
   // (2026-07-12オーナー実機フィードバック。以前はページ最上部固定でスクロールしないと見えなかった。
   // 自動非表示は2026-07-13 UIペルソナQAで4.5秒→6秒に延長) ---
   currentCheck = 'TOAST-01'
-  await page.getByRole('button', { name: 'パーソナライズ', exact: true }).click()
+  await page.getByRole('button', { name: '個人設定', exact: true }).click()
   await page.waitForTimeout(200)
   await page.getByPlaceholder('例: えび').fill('E2Eトースト確認食材')
   await page.getByRole('button', { name: '追加', exact: true }).click()
@@ -4869,7 +4869,7 @@ try {
   )
 
   // 設定から「食材と価格」を開き、初期値30件の投入と目安の注意書きを確認する。
-  // 「食材と価格を編集する」リンクはパーソナライズ節のNG食材の直下にある
+  // 「食材と価格を編集する」リンクは個人設定節にある
   // (2026-07-13 UI改善で「レシピ」タブから移動)ため、タブ切り替え不要でそのまま開ける
   await page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
@@ -4881,7 +4881,11 @@ try {
     'PRICE-01 初期値が投入されている(玉ねぎ・鶏もも肉を含む)',
     priceListBefore.includes('玉ねぎ') && priceListBefore.includes('鶏もも肉'),
   )
-  check('PRICE-01 目安価格の注意書きが表示される', priceListBefore.includes('価格は目安です'))
+  // 2026-08-04 便DV-9: 「目安です」から「何を基準にした価格か」を書く形に変えた
+  check(
+    'PRICE-01 はじめから入っている価格の根拠が表示される',
+    priceListBefore.includes('一般的なスーパーで売られている標準的な商品の価格を基準に設定しています'),
+  )
 
   // --- INLINE-01: 一覧の行内編集(2026-07-12 UX改修)。玉ねぎの行を名前で特定し、
   // 編集ボタン・別窓を経由せず、価格欄に直接入力してEnter(=blur)で即保存できることを確認する。
@@ -7854,7 +7858,7 @@ try {
     }
   }
 
-  // --- MEALPLAN-HOUSE: 設定「ふだん作る人数」(2026-08-03 便DK・オーナー確定
+  // --- MEALPLAN-HOUSE: 設定「食数の設定」(2026-08-03 便DK・オーナー確定
   // 「3人家族なら予算や買い物メモは3人分で計算した数値が必要。栄養は1人当たりのみで十分」)。
   // 設定→献立→買い物→食費を一続きに通し、同じ献立が
   //   ①未設定なら従来どおり(登録人数分) ②設定するとその人数分の分量・金額になる
@@ -7895,7 +7899,7 @@ try {
       const hhNum = (v) => Number((v ?? '').replace(/[^0-9]/g, ''))
       const hhBase = hhNum(await hhChip())
       check(
-        'MEALPLAN-HOUSE 前提: ふだん作る人数が未設定なら行はレシピの登録人数分(2人分)',
+        'MEALPLAN-HOUSE 前提: 食数の設定が未設定なら行はレシピの登録人数分(2人分)',
         hhBase === 2,
         `chip=${await hhChip()}`,
       )
@@ -7954,19 +7958,19 @@ try {
         JSON.stringify(hhDetailBefore),
       )
 
-      // --- 設定「ふだん作る人数」を4人分にする ---
+      // --- 設定「食数の設定」を4人分にする ---
       await hhPage.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
       await hhPage.waitForTimeout(900)
-      const hhSelect = hhPage.getByLabel('ふだん作る人数')
+      const hhSelect = hhPage.getByLabel('食数の設定')
       check(
-        'MEALPLAN-HOUSE 設定のパーソナライズ節に「ふだん作る人数」がある(既定は設定しない)',
+        'MEALPLAN-HOUSE 設定の個人設定節に「食数の設定」がある(既定は設定しない)',
         (await hhSelect.count()) === 1 && (await hhSelect.inputValue()) === '',
         `count=${await hhSelect.count()} value=${await hhSelect.inputValue()}`,
       )
       check(
-        'MEALPLAN-HOUSE 説明は「最初からこの人数分として扱う」ことだけを書く',
+        'MEALPLAN-HOUSE 説明は効く先(買い物の分量・食費)と効かない先(栄養の1人分)を両方書く',
         ((await hhPage.textContent('body')) ?? '').includes(
-          '献立に入れた料理を、最初からこの人数分として扱います',
+          'レシピの表示や、献立の買い物の分量・食費を計算するときの基準として扱います。栄養の「1人分」の表示は変わりません',
         ),
       )
       await hhSelect.selectOption('4')
@@ -7978,7 +7982,7 @@ try {
       await hhPage.getByRole('button', { name: '週', exact: true }).click()
       await hhPage.waitForTimeout(500)
       check(
-        'MEALPLAN-HOUSE 食数を決めていない行は「ふだん作る人数」で表示される(4人分)',
+        'MEALPLAN-HOUSE 食数を決めていない行は「食数の設定」で表示される(4人分)',
         hhNum(await hhChip()) === 4,
         `chip=${await hhChip()}`,
       )
@@ -8000,16 +8004,16 @@ try {
         return dec ? Number(dec[0]) : 0
       }
       check(
-        'MEALPLAN-HOUSE 買い物メモの分量も「ふだん作る人数」ぶん(2倍)になる',
+        'MEALPLAN-HOUSE 買い物メモの分量も「食数の設定」ぶん(2倍)になる',
         hhAmountsAfter.length === hhAmountsBefore.length &&
           hhAmountsBefore.every((v, i) => hhAmountNum(hhAmountsAfter[i]) === hhAmountNum(v) * 2),
         `before=${JSON.stringify(hhAmountsBefore)} after=${JSON.stringify(hhAmountsAfter)}`,
       )
 
-      // レシピ詳細も「ふだん作る人数」で開き、元の登録人数は併記で残る
+      // レシピ詳細も「食数の設定」で開き、元の登録人数は併記で残る
       const hhDetailAfter = await hhOpenDetail()
       check(
-        'MEALPLAN-HOUSE レシピ詳細は「ふだん作る人数」(4人分)で開く',
+        'MEALPLAN-HOUSE レシピ詳細は「食数の設定」(4人分)で開く',
         hhDetailAfter.servings === 4,
         JSON.stringify(hhDetailAfter),
       )
@@ -8035,7 +8039,7 @@ try {
         `before=${hhKcalBefore} after=${hhKcalAfter}`,
       )
 
-      // 枠ごとに決めた食数は「ふだん作る人数」より強い。戻すボタンは既定(=4人分)を名乗る
+      // 枠ごとに決めた食数は「食数の設定」より強い。戻すボタンは既定(=4人分)を名乗る
       await hhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await hhPage.waitForTimeout(1000)
       await hhPage.getByRole('button', { name: '週', exact: true }).click()
@@ -8043,14 +8047,14 @@ try {
       await hhPage.getByRole('button', { name: /この行の食数を変える/ }).first().click()
       await hhPage.waitForTimeout(400)
       check(
-        'MEALPLAN-HOUSE 食数の窓に設定「ふだん作る人数」の値が出る',
-        ((await hhPage.textContent('body')) ?? '').includes('設定「ふだん作る人数」は4人分です'),
+        'MEALPLAN-HOUSE 食数の窓に設定の「食数の設定」の値が出る',
+        ((await hhPage.textContent('body')) ?? '').includes('設定の「食数の設定」は4人分です'),
       )
       await hhPage.getByRole('button', { name: '食数を増やす' }).click()
       await hhPage.getByRole('button', { name: '決定' }).click()
       await hhPage.waitForTimeout(700)
       check(
-        'MEALPLAN-HOUSE 枠ごとに決めた食数は「ふだん作る人数」より優先される(5人分)',
+        'MEALPLAN-HOUSE 枠ごとに決めた食数は「食数の設定」より優先される(5人分)',
         hhNum(await hhChip()) === 5,
         `chip=${await hhChip()}`,
       )
@@ -8063,7 +8067,7 @@ try {
       await hhPage.getByRole('button', { name: '既定の4人分に戻す' }).click()
       await hhPage.waitForTimeout(700)
       check(
-        'MEALPLAN-HOUSE 「既定に戻す」でふだん作る人数(4人分)に戻る',
+        'MEALPLAN-HOUSE 「既定に戻す」で食数の設定(4人分)に戻る',
         hhNum(await hhChip()) === 4,
         `chip=${await hhChip()}`,
       )
@@ -9446,6 +9450,39 @@ try {
               .getByRole('button', { name: '副菜', exact: true })
               .getAttribute('aria-pressed')) === 'false',
         )
+
+        // 2026-08-04 便DV-1 再発防止(オーナー実機報告「全ボタンを選択すると候補が減る」)。
+        // 種別を足すたびに「候補◯品」が増える(減らない)・全選択と未選択が同じ品数になること
+        const candidateCount = async () => {
+          const text = (await dhPage.textContent('body')) ?? ''
+          const m = text.match(/候補(\d+)品/)
+          return m ? Number(m[1]) : -1
+        }
+        const tapType = async (name) => {
+          await dhPage.getByRole('button', { name, exact: true }).click()
+          await dhPage.waitForTimeout(350)
+        }
+        const cMainOnly = await candidateCount()
+        await tapType('副菜')
+        const cMainSide = await candidateCount()
+        await tapType('汁物')
+        await tapType('その他')
+        const cAll = await candidateCount()
+        check(
+          'HOME-DH-01(便DV) 種別を足すと候補は減らない(主菜のみ→+副菜→全選択)',
+          cMainOnly > 0 && cMainSide >= cMainOnly && cAll >= cMainSide,
+          `主菜のみ=${cMainOnly} +副菜=${cMainSide} 全選択=${cAll}`,
+        )
+        // 全部OFF(=種別で絞らない)にすると、全選択とまったく同じ品数になる
+        for (const name of ['主菜', '副菜', '汁物', 'その他']) await tapType(name)
+        const cNone = await candidateCount()
+        check(
+          'HOME-DH-01(便DV) 未選択(絞らない)と全選択の候補数が一致する',
+          cNone === cAll,
+          `未選択=${cNone} 全選択=${cAll}`,
+        )
+        // 既定(主菜だけON)へ戻してから次のケースへ進む
+        await tapType('主菜')
       }
 
       // (2) 今日の夕食に予定を入れる → 2群が並び、既定は「レシピ一覧から選択中」だけ開く
@@ -10032,15 +10069,22 @@ try {
         const res = await fetch('/news.json')
         return res.ok ? await res.json() : []
       })
+      // 2026-08-04 便DV-10(オーナー指摘): 押し売りに見えないよう題も文面も短くし、
+      // 解錠済みには出さない印(hideWhenPro)を付けた
       check(
-        'LAUNCH-02 お知らせの最新がPro版の発売告知',
-        Array.isArray(news) && news[0]?.title === 'Pro版の販売を開始しました',
+        'LAUNCH-02 お知らせの最新がPro版の公開の告知',
+        Array.isArray(news) && news[0]?.title === 'Pro版を公開しました',
         `latest=${JSON.stringify(news[0]?.title)}`,
       )
       check(
         'LAUNCH-02 発売告知は設定のPro節へ誘導する',
         news[0]?.link === '#/settings?section=pro',
         `link=${news[0]?.link}`,
+      )
+      check(
+        'LAUNCH-02 発売告知は解錠済みには出さない印が付いている',
+        news[0]?.hideWhenPro === true,
+        `hideWhenPro=${news[0]?.hideWhenPro}`,
       )
 
       // --- 50件到達の実挙動: 上限ちょうどの自作レシピを流し込んでから新規追加を試す。
@@ -16032,7 +16076,7 @@ try {
 
   // --- AISLE-01: 買い物メモの売り場順カスタム(2026-08-02 便CT/C15・オーナー承認)。
   // 既定は従来どおり(野菜・きのこ→肉・魚介→…)で、設定「買い物メモの売り場順」で並びを
-  // 入れ替えると買い物メモの整列に即反映され、リロードしても維持され、「既定の順番に戻す」で
+  // 入れ替えると買い物メモの整列に即反映され、リロードしても維持され、「初期設定に戻す」で
   // 元に戻ること。買い物メモ側の控えめな入口から設定の該当欄へ辿れることも確認する。 ---
   currentCheck = 'AISLE-01'
   {
@@ -16079,8 +16123,8 @@ try {
         await aiPage.locator('#aisle-section').isVisible(),
       )
       check(
-        'AISLE-01 未変更なら既定の順番であることを示す',
-        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは既定の順番です'),
+        'AISLE-01 未変更なら初期設定の順番であることを示す',
+        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは初期設定の順番です'),
       )
 
       // 「調味料」を4回上へ動かして先頭にする
@@ -16102,9 +16146,17 @@ try {
         aiOrderLabels[0] === '調味料',
         JSON.stringify(aiOrderLabels),
       )
+      // 2026-08-04 便DV-3: 「初期設定に戻す」は並びを変えていないうちも常に出る。
+      // 並びを変えたら「いまは初期設定の順番です」の方が消える
       check(
-        'AISLE-01 並びを変えると「既定の順番に戻す」が出る',
-        await aiPage.locator('#aisle-section').getByRole('button', { name: '既定の順番に戻す' }).isVisible(),
+        'AISLE-01 並びを変えると「いまは初期設定の順番です」が消える(ボタンは常時ある)',
+        (await aiPage
+          .locator('#aisle-section')
+          .getByRole('button', { name: '初期設定に戻す' })
+          .isVisible()) &&
+          !((await aiPage.locator('#aisle-section').textContent()) ?? '').includes(
+            'いまは初期設定の順番です',
+          ),
       )
 
       await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
@@ -16127,14 +16179,14 @@ try {
         JSON.stringify(await memoNames()),
       )
 
-      // 「既定の順番に戻す」で従来の並びへ戻る
+      // 「初期設定に戻す」で従来の並びへ戻る
       await aiPage.goto(`${BASE}/#/settings?section=aisle`, { waitUntil: 'networkidle' })
       await aiPage.waitForTimeout(1000)
-      await aiPage.locator('#aisle-section').getByRole('button', { name: '既定の順番に戻す' }).click()
+      await aiPage.locator('#aisle-section').getByRole('button', { name: '初期設定に戻す' }).click()
       await aiPage.waitForTimeout(600)
       check(
-        'AISLE-01 既定に戻すと案内が「いまは既定の順番です」に変わる',
-        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは既定の順番です'),
+        'AISLE-01 初期設定に戻すと案内が「いまは初期設定の順番です」に変わる',
+        ((await aiPage.locator('#aisle-section').textContent()) ?? '').includes('いまは初期設定の順番です'),
       )
       await aiPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await aiPage.waitForTimeout(1200)
