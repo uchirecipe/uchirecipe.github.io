@@ -12817,11 +12817,17 @@ eq(
   // 「e.key === 'Enter'」で始まる分岐が isImeConfirmKey で守られていることをソースで機械検査する。
   // 対象はテキスト入力欄のEnterだけで、ボタン相当要素のEnter/Space(role=button)は対象外
   const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  // 2026-08-09 便EK: 献立タブ(日付メモ・献立テンプレートの名前)と、単位の自由入力欄
+  // (UnitQuantityFields=レシピ登録・食材と価格の両方が使う)も同じ穴だったので対象に足す。
+  // IngredientPricesPage は当て先が数字の欄だけだが、同じ blurOnEnter を持つので一緒に見る
   const imeGuardTargets = [
     'src/components/ChipInput.tsx',
     'src/components/PantryBoard.tsx',
+    'src/components/UnitQuantityFields.tsx',
     'src/pages/SettingsPage.tsx',
     'src/pages/RecipeFormPage.tsx',
+    'src/pages/MealPlanPage.tsx',
+    'src/pages/IngredientPricesPage.tsx',
   ]
   for (const rel of imeGuardTargets) {
     const src = readFileSync(path.join(appRoot, rel), 'utf-8')
@@ -12848,6 +12854,49 @@ eq(
     // 「◯〜◯KB」の形で書かれた範囲表記だけを拾う(「約170KB」等の単一値は対象外)
     const ranges = [...new Set(src.match(/\d+〜\d+KB/g) ?? [])]
     eq(`EI-4 ${rel} の写真容量の範囲表記が1種類に揃っている`, ranges, ranges.length ? [PHOTO_SIZE_TEXT] : [])
+  }
+}
+
+// ---------- 便EK-1: 週タブの文言に「今週」を使わない ----------
+// 週タブは「前の週」「次の週」で当週以外も開けるので、開いている週を指す文言に「今週」と
+// 書くと、当週以外を見ているときに画面と食い違う（便EJが総入れ替えの確認文で直した defect と同型）。
+// 開いている週を指す言い方は「表示している週」にそろえる。
+// 「今週へ戻る」(週移動ボタン)・「今週の献立の予定」(日タブ＝今日の話)のように、
+// 本当に当週を指している文言はここに入れない＝機械的な一括置換をしないための一覧でもある。
+{
+  const weekScopeTexts = {
+    weekCostTitle: ja.mealPlan.weekCostTitle,
+    fillWeekHint: ja.mealPlan.fillWeekHint,
+    fillModeFillEmptyHint: ja.mealPlan.fillModeFillEmptyHint,
+    fillModeReplaceAllHint: ja.mealPlan.fillModeReplaceAllHint,
+    fillModeReplaceAllConfirm: ja.mealPlan.fillModeReplaceAllConfirm,
+    fillModeReplaceAllDone: ja.mealPlan.fillModeReplaceAllDone,
+    clearWeekSlotTitle: ja.mealPlan.clearWeekSlotTitle,
+    clearWeekSlotTitleNone: ja.mealPlan.clearWeekSlotTitleNone,
+    clearWeekSlotConfirm: ja.mealPlan.clearWeekSlotConfirm,
+    clearWeekSlotConfirmAll: ja.mealPlan.clearWeekSlotConfirmAll,
+    clearWeekSlotDone: ja.mealPlan.clearWeekSlotDone,
+    templateSave: ja.mealPlan.templateSave,
+    templateSaveDescription: ja.mealPlan.templateSaveDescription,
+    templateApplyNone: ja.mealPlan.templateApplyNone,
+    goToShopping: ja.mealPlan.goToShopping,
+    lockAllDone: ja.mealPlan.lockAllDone,
+    lockAllReleaseDone: ja.mealPlan.lockAllReleaseDone,
+    nutritionWeekTitle: ja.nutritionBalance.weekTitle,
+  }
+  for (const [key, text] of Object.entries(weekScopeTexts)) {
+    eq(`EK-1 ${key} が開いている週を「今週」と呼んでいない`, text.includes('今週'), false)
+  }
+  // 週タブの見出しは削除済み(便EK)。当週以外を開くと嘘になる文言を、未使用のまま残さない
+  eq('EK-1 使われていない週タブ見出し(weekTitle)を残していない', 'weekTitle' in ja.mealPlan, false)
+  // 使い方ページ・LPは、アプリの見出しと同じ名前で書く（画面を見ながら読めるようにする）
+  {
+    const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    for (const rel of ['public/about/manual.html', 'public/about/index.html']) {
+      const src = readFileSync(path.join(appRoot, rel), 'utf-8')
+      eq(`EK-1 ${rel} が概算食費の見出しをアプリと同じ名前で書いている`, src.includes(ja.mealPlan.weekCostTitle), true)
+      eq(`EK-1 ${rel} に古い見出し「今週の概算食費」が残っていない`, src.includes('今週の概算食費'), false)
+    }
   }
 }
 

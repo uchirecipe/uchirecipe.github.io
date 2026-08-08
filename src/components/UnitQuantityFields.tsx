@@ -3,10 +3,15 @@ import { KNOWN_UNITS, OTHER_UNIT, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
 import { normalizeAmountInput } from '../logic/amount'
 import { ja } from '../i18n/ja'
+import { isImeConfirmKey } from '../logic/imeKey'
 
-/** blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる) */
+/**
+ * blurで保存 or Enterキーでも即保存できるようにする(Enterはネイティブのblurを誘発させる)。
+ * 単位の自由入力欄は日本語で打つ欄なので、変換を確定しただけのEnterでは閉じない
+ * (2026-08-09 便EK。判定は logic/imeKey.ts に集約してある)
+ */
 const blurOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
-  if (e.key === 'Enter') e.currentTarget.blur()
+  if (e.key === 'Enter' && !isImeConfirmKey(e)) e.currentTarget.blur()
 }
 
 interface UnitQuantityFieldsProps {

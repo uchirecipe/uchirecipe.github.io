@@ -137,6 +137,9 @@ import {
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
 import { hasNgIngredient } from '../logic/ng'
+// 日本語入力の変換確定Enterの判定(2026-08-09 便EI → 便EKで献立タブの2欄にも適用)。
+// Enterで何かを確定する入力欄は、必ずこの判定で変換確定のEnterを除外する
+import { isImeConfirmKey } from '../logic/imeKey'
 import {
   buildPriceIndex,
   estimateRecipeCost,
@@ -527,8 +530,9 @@ function DayNoteEditor({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
-          // Enterでも確定できるようにする（フォーム送信は無いのでblurで保存経路にそろえる）
-          if (e.key === 'Enter') e.currentTarget.blur()
+          // Enterでも確定できるようにする（フォーム送信は無いのでblurで保存経路にそろえる）。
+          // 日本語入力の変換を確定しただけのEnterでは閉じない（2026-08-09 便EK・便EIと同じ判定）
+          if (e.key === 'Enter' && !isImeConfirmKey(e)) e.currentTarget.blur()
         }}
         placeholder={ja.mealPlan.dayNotePlaceholder}
         aria-label={ja.mealPlan.dayNoteAria
@@ -6753,7 +6757,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 maxLength={TEMPLATE_NAME_MAX_LENGTH}
                 onChange={(e) => setTemplateName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') void submitTemplateSave()
+                  // 変換確定のEnterでは保存しない（2026-08-09 便EK・便EIと同じ判定）。
+                  // テンプレート名は日本語で打つ欄なので、変換の途中で保存されると
+                  // 打ちかけの名前がそのまま保存されてしまう
+                  if (e.key === 'Enter' && !isImeConfirmKey(e)) void submitTemplateSave()
                 }}
                 placeholder={ja.mealPlan.templateNamePlaceholder}
                 className="mt-1 w-full rounded-sm border border-edge bg-app px-2 py-2 text-base font-normal text-ink placeholder:text-ink-muted/60"

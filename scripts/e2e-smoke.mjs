@@ -3467,7 +3467,7 @@ try {
         )
         if (!wrap) return null
         const costSec = [...wrap.querySelectorAll('section')].find((s) =>
-          (s.textContent ?? '').includes('今週の概算食費'),
+          (s.textContent ?? '').includes('表示している週の概算食費'),
         )
         const sheetSec = [...wrap.querySelectorAll('section')].find((s) =>
           (s.textContent ?? '').includes('献立表'),
@@ -5616,7 +5616,7 @@ try {
       const mpEmptyText = await mpPage.textContent('body')
       check(
         'MEALPLAN-01(Fix3) 未割当時は概算食費セクションが無い',
-        !mpEmptyText.includes('今週の概算食費'),
+        !mpEmptyText.includes('表示している週の概算食費'),
       )
 
       // Fix1: 週移動の中央チップ。まず当週表示中はaria-labelが無いことを確認
@@ -5655,9 +5655,9 @@ try {
       const mpAssignedText = await mpPage.textContent('body')
       // 2026-07-24 便BH-3・タスク4: 概算食費は小さな折りたたみ(既定閉)になった。見出し(トグル)は
       // 割り当て後に出るが、金額・リンクは展開して初めて出る
-      check('MEALPLAN-01(Fix3) 割り当てると概算食費セクションが出る', mpAssignedText.includes('今週の概算食費'))
+      check('MEALPLAN-01(Fix3) 割り当てると概算食費セクションが出る', mpAssignedText.includes('表示している週の概算食費'))
       // タスク4: 折りたたみを展開してから金額・食数・リンクを確認する
-      await mpPage.getByRole('button', { name: '今週の概算食費' }).click()
+      await mpPage.getByRole('button', { name: '表示している週の概算食費' }).click()
       await mpPage.waitForTimeout(300)
       const mpCostText = await mpPage.textContent('body')
       const costMatch = mpCostText.match(/約([\d,]+)円/)
@@ -6054,7 +6054,7 @@ try {
         await nbPage.locator('[data-testid="include-rice"]').first().isChecked(),
       )
       // 食費にも同じ選択が効き、何を足した金額なのかを必ず書く
-      await nbPage.getByRole('button', { name: '今週の概算食費' }).click()
+      await nbPage.getByRole('button', { name: '表示している週の概算食費' }).click()
       await nbPage.waitForTimeout(400)
       check(
         'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯ぶんを含めた金額です」を添える',
@@ -8783,7 +8783,7 @@ try {
       )
       // 未設定のときの概算食費(合計金額)と注記を控える
       const hhOpenCost = async () => {
-        await hhPage.getByRole('button', { name: '今週の概算食費' }).click()
+        await hhPage.getByRole('button', { name: '表示している週の概算食費' }).click()
         await hhPage.waitForTimeout(400)
         const text = (await hhPage.textContent('body')) ?? ''
         return {

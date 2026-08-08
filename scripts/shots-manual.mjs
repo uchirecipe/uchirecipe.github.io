@@ -551,8 +551,8 @@ try {
   if (await weekDayCard.count()) {
     await crop(page, 'plan-week-day', weekDayCard, { top: 40, maxHeight: 500 })
   }
-  // 今週の概算食費
-  const costRow = page.getByRole('button', { name: /今週の概算食費/ }).first()
+  // 表示している週の概算食費
+  const costRow = page.getByRole('button', { name: /表示している週の概算食費/ }).first()
   if (await costRow.count()) {
     await costRow.click()
     await wait(page, 900)
