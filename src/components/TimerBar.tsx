@@ -35,9 +35,15 @@ export default function TimerBar() {
   // コピーだけ並べ替える(key={timer.id} なので並べ替えでタイマーの状態は壊れない)
   const sortedTimers = sortTimersForDisplay(timers)
 
-  /** そのレシピ内での手順番号（分けた工程は「3-1」）。古い保存には無いので stepNumber で補う */
-  const recipeStepBadge = (timer: ActiveTimer): string | undefined =>
-    timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined)
+  /**
+   * そのレシピ内での手順番号（分けた工程は「3-1」）。
+   * 出すのは**段取りの通し番号を出しているタイマーだけ**＝ナビ由来のもの。
+   * ナビ以外のタイマーは1つめのバッジがすでにレシピ内の手順番号なので、同じ数字を2つ並べない
+   */
+  const recipeStepBadge = (timer: ActiveTimer): string | undefined => {
+    if (timer.naviOrder == null) return undefined
+    return timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined)
+  }
 
   /**
    * 完了タイマーのタップで該当レシピの該当手順へ。

@@ -16060,16 +16060,26 @@ try {
         'EG-01 行内の「手順◯」の表記は消えている(読み上げ用の隠し文字だけ)',
         (await egPage.locator('ol > li p > span.text-ink-muted', { hasText: /^手順\d+$/ }).count()) === 0,
       )
-      // ③ 湯を沸かすの差し込み
+      // ③ 湯を沸かすの差し込み。2026-08-09 便ES（オーナー指示D-3/D-4）:
+      //    「ナビが追加」の札はやめて手順番号を「◯-1」「◯-2」に、分数（約5分）は表示しない
       check(
         'EG-01 ゆでる工程の前に「湯を沸かす」が入る',
-        (await egPage.locator('[data-testid="navi-added-step"]').count()) === 1 &&
-          egCards.some((t) => t.includes('湯を沸かす') && t.includes('ナビが追加')),
+        (await egPage.locator('[data-testid="navi-added-step"]').count()) === 0 &&
+          egCards.some((t) => t.includes('湯を沸かす')),
         `cards=${JSON.stringify(egCards.map((t) => t.slice(0, 40)))}`,
       )
       check(
-        'EG-01 足した工程は待ち5分として出る',
-        egCards.some((t) => t.includes('湯を沸かす') && t.includes('約5分の待ち時間')),
+        'EG-01 足した工程の分数は表示しない（計算には使う）',
+        egCards.some((t) => t.includes('湯を沸かす') && t.includes('湯が沸くまでの待ち時間')) &&
+          !egCards.some((t) => t.includes('湯を沸かす') && t.includes('約5分の待ち時間')),
+      )
+      check(
+        'EG-01 分けた2つの工程は「◯-1」「◯-2」の番号で分割が分かる',
+        (
+          await egPage.$$eval('[data-testid="navi-recipe-step-number"]', (els) =>
+            els.map((el) => el.textContent || ''),
+          )
+        ).filter((t) => /-\d$/.test(t)).length === 2,
       )
       // ⑥ メモの箇条書きが行ごとに分かれる（1本の棒読みにならない）
       const memoCard = egPage.locator('ol > li', { hasText: 'にんじんをゆでる' }).first()
@@ -16232,7 +16242,7 @@ try {
       )
       check(
         'EH-01 手順に書かれた湯沸かしが、前の待ち工程として切り出される',
-        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('約5分の待ち時間')),
+        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('湯が沸くまでの待ち時間')),
         `cards=${JSON.stringify(ehCards.map((t) => t.slice(0, 40)))}`,
       )
       check(
@@ -16253,8 +16263,8 @@ try {
         ) === '目安3分',
       )
       check(
-        'EH-01 分数の無い手作業は「ナビの見積り◯分」と書き分ける',
-        /^ナビの見積り\d+分$/.test(
+        'EH-01 分数の無い手作業は「この手順の見積り◯分」と書き分ける',
+        /^この手順の見積り\d+分$/.test(
           (await ehPage
             .locator('ol > li', { hasText: '鶏肉と玉ねぎを切る。' })
             .first()
@@ -19939,7 +19949,7 @@ try {
       await elPage.getByRole('button', { name: '段取りを作る' }).click()
       await elPage.waitForTimeout(700)
       check(
-        'EL-01 段取りの一覧に「調理をはじめる」の入口がある',
+        'EL-01 段取りの一覧に「調理中モードで見る」の入口がある',
         (await elPage.locator('[data-testid="cook-session-start"]').count()) === 1,
       )
       await elPage.locator('[data-testid="cook-session-start"]').click()
@@ -20018,10 +20028,11 @@ try {
         `${beforePeek}→${await counter()}`,
       )
       check(
-        'EL-03 見るだけであることを画面に書く',
-        ((await elPage.textContent('[data-testid="cook-session-peek"]')) ?? '').includes(
-          '確認するだけです。調理中の手順は変わりません',
-        ),
+        // 2026-08-09 便ES（オーナー指示E-6/E-10）: 行ごとに繰り返さず、見出しの横に1回だけ出す
+        'EL-03 見るだけであることを見出しの横に1回だけ書く',
+        ((await elPage.textContent('[data-testid="cook-session-others-hint"]')) ?? '').includes(
+          'タップすると全文が出ます（調理中の手順は変わりません）',
+        ) && (await elPage.locator('[data-testid="cook-session-others-hint"]').count()) === 1,
       )
       await elPage.locator('[data-testid="cook-session-other-row"]').first().click()
       await elPage.waitForTimeout(300)

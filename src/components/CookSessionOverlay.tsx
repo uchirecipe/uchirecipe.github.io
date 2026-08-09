@@ -80,6 +80,10 @@ function TimerChip({
   // ナビが足した工程（湯を沸かす）は stepNumber を持たないが、段取りの番号は持つ。
   // 番号があるものを「自由な時間のタイマー」の時計バッジにしない（2026-08-09 便ES）
   const isCustom = timer.isCustom === true || (timer.stepNumber <= 0 && timer.naviOrder == null)
+  const recipeStepBadge =
+    timer.naviOrder == null
+      ? undefined
+      : (timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined))
   return (
     <div
       style={
@@ -98,9 +102,9 @@ function TimerChip({
         className="flex min-w-0 items-center gap-1"
       >
         <StepBadge number={isCustom ? 'custom' : (timer.naviOrder ?? timer.stepNumber)} size={24} />
-        {!isCustom && timer.naviStepLabel && (
+        {!isCustom && recipeStepBadge && (
           <StepBadge
-            number={timer.naviStepLabel}
+            number={recipeStepBadge}
             size={20}
             color={timer.naviColorIndex != null ? naviRecipeColor(timer.naviColorIndex) : undefined}
           />
@@ -315,10 +319,15 @@ export default function CookSessionOverlay({
    * その品の行に付ける。どのタイマーがどの料理のものか、目を動かさずに分かるようにする。
    */
   const sortedTimers = sortTimersForDisplay(timers)
-  const currentTimers = sortedTimers.filter((t) => t.recipeId === item.recipeId)
+  const planRecipeIds = new Set(recipes.map((r) => r.id))
   const timersByRecipeId = new Map<number, typeof sortedTimers>()
+  // 段取りに入っていない品のタイマー（並行調理ナビの画面で自分で始めたタイマーなど）は、
+  // 置き場所になる行が下部に無いので画面上部に出す
+  const currentTimers = sortedTimers.filter(
+    (t) => t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId),
+  )
   for (const t of sortedTimers) {
-    if (t.recipeId === item.recipeId) continue
+    if (t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId)) continue
     const list = timersByRecipeId.get(t.recipeId) ?? []
     list.push(t)
     timersByRecipeId.set(t.recipeId, list)

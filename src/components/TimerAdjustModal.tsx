@@ -71,9 +71,14 @@ export default function TimerAdjustModal({
         ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
         : null
 
-  /** そのレシピ内での手順番号（分けた工程は「3-1」）。古い保存には無いので stepNumber で補う */
+  /**
+   * そのレシピ内での手順番号（分けた工程は「3-1」）。
+   * 段取りの通し番号を出しているとき（ナビ由来）だけ並べる＝同じ数字を2つ並べない
+   */
   const recipeStepBadge =
-    timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined)
+    naviOrder == null
+      ? undefined
+      : (timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined))
 
   const remaining = Math.max(0, Math.ceil((timer.endsAt - now) / 1000))
   // 窓を開いたままタイマーが終わった場合(2026-07-28 機能④診断C10)。
