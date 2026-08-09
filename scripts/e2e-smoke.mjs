@@ -20008,12 +20008,14 @@ try {
       check('EL-02 別の品の手順に移る', movedTitle !== startTitle, `${startTitle}→${movedTitle}`)
       check(
         'EL-02 いま開いている品は下部から消える',
-        !rows2.some((t) => t.startsWith(movedTitle)),
+        // 行頭にはナビとレシピの2種類の番号が付く(便ES)。先頭一致だと必ず外れて
+        // 「何も無いから合格」の素通りになるので、含むかどうかで見る
+        !rows2.some((t) => t.includes(movedTitle)),
         JSON.stringify(rows2),
       )
       check(
         'EL-02 直前まで開いていた品が下部に出る（済んだ手順ではなく次の手順）',
-        rows2.some((t) => t.startsWith(startTitle)) &&
+        rows2.some((t) => t.includes(startTitle)) &&
           !rows2.some((t) => t.includes('大根は一口大に切る')),
         JSON.stringify(rows2),
       )
