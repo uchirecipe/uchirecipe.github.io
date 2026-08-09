@@ -44,8 +44,42 @@ export interface PriceDefaultItem {
  * (影響範囲が「価格マスタの数値」のみで実害が小さいことと、既存のトップアップ機構の
  * 設計思想[ユーザーが編集した値を勝手に上書きしない]と、価格改定のたびに既存行を
  * 強制上書きする挙動が両立しないため。必要になった場合は別途設計判断が要る)。
+ *
+ * 【2026-08-10 便EY・版6】上の「別途設計判断」がここで必要になった。「1パック」「1袋」という
+ * 単位は按分の受け皿にならず、レシピが「6個」「2枚」と書いていてもパック1つ分の金額が
+ * まるごと1行に乗る(いちご6個=400円・生しいたけ2枚=100円)。単位を直しただけでは既存ユーザーの
+ * マスタ行は古い単位のままなので、PRICE_DEFAULT_UNIT_FIXES(下記)を使った
+ * 「単位だけを直す1回限りの移行」をdb/prices.tsに追加した。対象は
+ * 「投入時の目安のまま(isDefault=true)で、価格も単位も旧既定と一致する行」だけで、
+ * ユーザーが1円でも書き換えた行・単位を変えた行・消した行には一切触れない。
  */
-export const PRICE_DEFAULTS_VERSION = 5
+export const PRICE_DEFAULTS_VERSION = 6
+
+/** 単位だけを直す移行の1件分（旧単位に一致する既定行だけを新単位へ書き換える） */
+export interface PriceDefaultUnitFix {
+  name: string
+  /** この価格のままの行だけが対象（価格を書き換えた行＝ユーザーの値には触れない） */
+  pricePerUnit: number
+  fromUnit: string
+  toUnit: string
+}
+
+/**
+ * 2026-08-10 便EY「1パック丸ごと計上」の是正で単位だけを書き換えた項目（出典はdocs/49の
+ * 2026-08-10節）。価格(円)は1件も変えていない＝「いくらか」ではなく「その金額が何に対する
+ * 値段か」の書き方だけを直したので、既存ユーザーのマスタを更新しても金額の目安は動かず、
+ * レシピ側の按分だけが正しくなる。
+ * この配列はPRICE_DEFAULTS_VERSIONを上げたときに1回だけ適用される（db/prices.ts）。
+ */
+export const PRICE_DEFAULT_UNIT_FIXES: PriceDefaultUnitFix[] = [
+  { name: 'いちご', pricePerUnit: 400, fromUnit: '1パック', toUnit: '280g' },
+  { name: 'しいたけ', pricePerUnit: 150, fromUnit: '1パック', toUnit: '6枚' },
+  { name: '生しいたけ', pricePerUnit: 100, fromUnit: '1パック', toUnit: '6枚' },
+  { name: 'オクラ', pricePerUnit: 130, fromUnit: '1袋', toUnit: '10本' },
+  { name: '小ねぎ', pricePerUnit: 80, fromUnit: '1袋', toUnit: '100g' },
+  { name: '粉寒天', pricePerUnit: 50, fromUnit: '1袋', toUnit: '4g' },
+  { name: 'ブルーベリー', pricePerUnit: 300, fromUnit: '1パック', toUnit: '100g' },
+]
 
 export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   // 野菜
@@ -101,7 +135,9 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   // 野菜・きのこ・薬味
   { name: 'ごぼう', pricePerUnit: 150, unit: '1本' },
   { name: 'こんにゃく', pricePerUnit: 60, unit: '1枚' },
-  { name: 'しいたけ', pricePerUnit: 150, unit: '1パック' },
+  // 2026-08-10 便EY: 「1パック」は栄養側の目安量に無く按分できないため、1パックの中身の
+  // 実数量(6枚前後)へ。価格は据え置き(出典・計算はdocs/49の2026-08-10節)
+  { name: 'しいたけ', pricePerUnit: 150, unit: '6枚' },
   { name: 'にら', pricePerUnit: 100, unit: '1束' },
   // 2026-07-28 便BY/COST-01: 単位を「1個」→「1玉」へ。栄養側の目安量(nutritionData.tsの
   // にんにく unitGrams: 玉=45g・かけ=6g)が「個」を持たないため、レシピの「1かけ」から
@@ -113,7 +149,9 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'れんこん', pricePerUnit: 200, unit: '1節' },
   { name: '赤唐辛子', pricePerUnit: 10, unit: '1本' },
   { name: 'しょうが', pricePerUnit: 20, unit: '1かけ' },
-  { name: '小ねぎ', pricePerUnit: 80, unit: '1袋' },
+  // 2026-08-10 便EY: 同上。1袋の実勢内容量(100g前後)へ。栄養側の目安量(小ねぎ 1本=5g)で
+  // レシピの「2本」からグラムに寄せて按分できる。価格は据え置き
+  { name: '小ねぎ', pricePerUnit: 80, unit: '100g' },
   { name: 'パセリ', pricePerUnit: 50, unit: '1束' },
   // 「三つ葉」(旧80円/1束)は下の「みつば」(100円/1束・docs/49の実売中央値)へ名寄せ統合した
   // (2026-07-23 便BH-1)。表記ゆれは logic/ingredientReadings.ts の「三つ葉→みつば」で吸収するので、
@@ -176,7 +214,9 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '乾燥芽ひじき', pricePerUnit: 25, unit: '10g' },
   { name: '塩昆布', pricePerUnit: 30, unit: '10g' },
   { name: 'きな粉', pricePerUnit: 15, unit: '大さじ1' },
-  { name: '粉寒天', pricePerUnit: 50, unit: '1袋' },
+  // 2026-08-10 便EY: 分包の規格(1本=4g)をそのまま単位にした。中身と同梱レシピの分量が元から
+  // 一致していたため金額は変わらないが、4g以外を書いたときも按分が通るようになる
+  { name: '粉寒天', pricePerUnit: 50, unit: '4g' },
 
   // 調味料・香辛料・油
   // 2026-07-21 調味料既定価格改定(docs/49・オーナー指摘「酒・塩・醤油の原価が高く感じる」への
@@ -253,7 +293,8 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '生だら', pricePerUnit: 120, unit: '1切れ' },
   { name: 'レタス', pricePerUnit: 150, unit: '1個' },
   { name: 'ゴーヤ', pricePerUnit: 130, unit: '1本' },
-  { name: 'オクラ', pricePerUnit: 130, unit: '1袋' },
+  // 2026-08-10 便EY: 1袋の実勢内容量(10本前後)へ。レシピの「8本」で按分104円になる
+  { name: 'オクラ', pricePerUnit: 130, unit: '10本' },
   { name: '長芋', pricePerUnit: 80, unit: '100g' },
   // 「三つ葉」と「みつば」の名寄せ統合先(2026-07-23 便BH-1)。値はdocs/49の実売中央値=100円/1束。
   // ingredientReadings.ts の「三つ葉→みつば」で旧表記「三つ葉」もこの1件に価格解決する。
@@ -261,7 +302,9 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '万能ねぎ', pricePerUnit: 100, unit: '1束' },
   { name: 'まいたけ', pricePerUnit: 130, unit: '1パック' },
   { name: 'エリンギ', pricePerUnit: 100, unit: '1パック' },
-  { name: '生しいたけ', pricePerUnit: 100, unit: '1パック' },
+  // 2026-08-10 便EY: 上の「しいたけ」と同じ規格(1パック6枚前後)。同じ食材の別表記だが
+  // 目安価格が別々に置かれている(150円/100円)ため、単位だけを揃えて金額は据え置いた
+  { name: '生しいたけ', pricePerUnit: 100, unit: '6枚' },
   { name: 'しらたき', pricePerUnit: 80, unit: '1袋' },
   { name: '昆布', pricePerUnit: 400, unit: '100g' },
   { name: '梅干し', pricePerUnit: 30, unit: '1個' },
@@ -271,8 +314,15 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'そうめん', pricePerUnit: 50, unit: '1束' },
   { name: 'グラノーラ', pricePerUnit: 500, unit: '1袋' },
   { name: 'こしあん', pricePerUnit: 450, unit: '300g' },
-  { name: 'いちご', pricePerUnit: 400, unit: '1パック' },
-  { name: 'ブルーベリー', pricePerUnit: 300, unit: '1パック' },
+  // 2026-08-10 便EY: 1パックの実勢内容量(標準250〜300g・代表値280g)へ。栄養側の目安量
+  // (いちご 1個=15g)でレシピの「6個」=90gに寄せて按分できる。価格は据え置き。
+  // 粒数ではなく重量を単位にしたのは、いちごが重量で売られていて出典も重量が一次だから
+  // (粒数はサイズで12〜50粒と幅が大きく、アプリ側の1個=15gと組み合わせると内容量が
+  // 出典の250〜300gから外れてしまう)
+  { name: 'いちご', pricePerUnit: 400, unit: '280g' },
+  // 2026-08-10 便EY: 1パックの実勢内容量(100g前後)へ。同梱レシピでは「適量(お好みで)」でしか
+  // 使っておらず金額は変わらないが、自分で登録したレシピがグラムで書いたときに按分が通る
+  { name: 'ブルーベリー', pricePerUnit: 300, unit: '100g' },
   { name: 'キウイ', pricePerUnit: 100, unit: '1個' },
   { name: 'はちみつ', pricePerUnit: 40, unit: '大さじ1' },
   { name: 'オイスターソース', pricePerUnit: 30, unit: '大さじ1' },
