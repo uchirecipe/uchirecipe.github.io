@@ -3607,8 +3607,12 @@ try {
         `header=${JSON.stringify(dtFillInHeader)}`,
       )
       // 畳んでも押せる位置に残る
-      await dtPage.getByRole('button', { name: '献立を提案を閉じる' }).click()
-      await dtPage.waitForTimeout(300)
+      // 2026-08-09 便EN(オーナー指示): 「献立を提案」も既定で畳んだ状態になったので、
+      // ここで閉じる操作は不要（開いていない状態から始まる）
+      check(
+        'WEEKUI-DT(便EN) 「献立を提案」は既定で畳んである',
+        (await dtPage.getByRole('button', { name: '献立を提案を開く' }).count()) === 1,
+      )
       check(
         'WEEKUI-DT(便DT-5) グループを畳んでも「まとめて献立を入力」は見えたまま',
         await dtFillBtn.isVisible(),
@@ -3997,6 +4001,13 @@ try {
         lkFreePlan.length > 0,
         `date=${lkFreeDate} / plan=${JSON.stringify(lkFreePlan)}`,
       )
+      // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
+      // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
+      const lkOpenAuto = lkPage.getByRole('button', { name: '献立を提案を開く' })
+      if ((await lkOpenAuto.count()) > 0) {
+        await lkOpenAuto.first().click()
+        await lkPage.waitForTimeout(400)
+      }
       // 「レシピを総入れ替え」に切り替えて実行する(確認文は自動承認)
       const lkReplaceBtn = lkPage.getByRole('button', { name: 'レシピを総入れ替え', exact: true })
       await lkReplaceBtn.click()
@@ -6146,6 +6157,10 @@ try {
       await mpPage.waitForTimeout(300)
 
       // Fix5: aria-pressed(見た目は変更しない)
+      // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
+      // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
+      await mpPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await mpPage.waitForTimeout(300)
       // 2026-07-16 UI総点検A-3: 提案条件6ボタンは既定折りたたみになったため、まず開く
       const suggestConditionsToggleBtn = mpPage.getByRole('button', { name: '提案の条件', exact: false })
       check(
@@ -6437,6 +6452,21 @@ try {
       // 日カードを展開してめやすの説明文・注記・出典・鍵付き導線を確認する
       await dayToggles.first().click()
       await nbPage.waitForTimeout(400)
+      // 2026-08-09 便EN(オーナー指示「注意説明が長い」): 但し書きと出典は中で畳んだので、
+      // 中身を読む前に「注記と出典」を開く（畳んだままでも出る行は先に見張る）
+      const nbDayFoldedText = await nbPage.textContent('body')
+      check(
+        'NUTRI-DAY-01(便EN) 但し書きと出典は畳んである(開くまで出典は出ない)',
+        !nbDayFoldedText.includes('出典: 日本食品標準成分表（八訂）増補2023年（文部科学省）'),
+      )
+      check(
+        'NUTRI-DAY-01(便EN) 畳んだままでも「合計に何が入っていないか」の1行は出す',
+        nbDayFoldedText.includes(
+          'ここに出ているのは、献立に登録したレシピだけの合計です（ごはん・飲みもの・おやつ・外食は入っていません）。',
+        ),
+      )
+      await nbPage.getByRole('button', { name: '注記と出典' }).first().click()
+      await nbPage.waitForTimeout(300)
       const nbDayOpenText = await nbPage.textContent('body')
       check(
         'NUTRI-DAY-01(便CW-7) 展開すると1日のめやすが説明文1行で出る(無料は野菜だけ)',
@@ -6544,8 +6574,8 @@ try {
       // 量(150g)・成分値・金額はマスタ参照なので、ここでは「増えること」と「残ること」を見る
       const riceCheckbox = nbPage.locator('[data-testid="include-rice"]').first()
       check(
-        'NUTRI-DAY-01(便CW-10) 「ごはん1杯（150g）を含めて計算する」が展開部に出る(既定OFF)',
-        nbWeekOpenText.includes('ごはん1杯（150g）を含めて計算する') &&
+        'NUTRI-DAY-01(便CW-10/便EN) 「1食につきごはん1杯（150g）を足して計算する」が展開部に出る(既定OFF)',
+        nbWeekOpenText.includes('1食につきごはん1杯（150g）を足して計算する') &&
           (await riceCheckbox.isChecked()) === false,
       )
       check(
@@ -6644,6 +6674,9 @@ try {
         .first()
         .click()
       await npPage.waitForTimeout(400)
+      // 2026-08-09 便EN: 但し書きと出典は折りたたみの中（めやすの出典もここ）
+      await npPage.getByRole('button', { name: '注記と出典' }).first().click()
+      await npPage.waitForTimeout(300)
       const npOpenText = await npPage.textContent('body')
       check('NUTRI-PRO-01 Pro解錠済みでたんぱく質が出る', npOpenText.includes('たんぱく質'))
       check(
@@ -6691,8 +6724,8 @@ try {
       )
       // 便CW-10: 「ごはんを含めて計算する」は無料機能だがPro画面にも同じ場所に出る(既定OFF)
       check(
-        'NUTRI-PRO-01(便CW-10) 「ごはん1杯（150g）を含めて計算する」が既定OFFで出る',
-        npOpenText.includes('ごはん1杯（150g）を含めて計算する') &&
+        'NUTRI-PRO-01(便CW-10/便EN) 「1食につきごはん1杯（150g）を足して計算する」が既定OFFで出る',
+        npOpenText.includes('1食につきごはん1杯（150g）を足して計算する') &&
           (await npPage.locator('[data-testid="include-rice"]').first().isChecked()) === false,
       )
     } finally {
@@ -6918,6 +6951,10 @@ try {
         (await fillWeekBtn.locator('svg').count()) > 0,
       )
 
+      // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
+      // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
+      await mp3Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await mp3Page.waitForTimeout(300)
       // ジャンルチップ・高たんぱく優先は「提案の条件」トグルの中(2026-07-16 UI総点検A-3で既定折りたたみ化)。まず開く
       await mp3Page.getByRole('button', { name: '提案の条件', exact: false }).click()
       await mp3Page.waitForTimeout(200)
@@ -7168,6 +7205,10 @@ try {
             }),
         )
 
+      // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
+      // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
+      await mp4Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await mp4Page.waitForTimeout(300)
       // 便DT-8: 入れかたを「レシピを総入れ替え」に倒す(既定は非破壊の「まだ決まっていない枠だけ埋める」)
       await mp4Page.getByRole('button', { name: 'レシピを総入れ替え', exact: true }).click()
       await mp4Page.waitForTimeout(200)
@@ -8926,6 +8967,10 @@ try {
       await cwPage.getByRole('button', { name: '週', exact: true }).click()
       await cwPage.waitForTimeout(400)
 
+      // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
+      // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
+      await cwPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await cwPage.waitForTimeout(300)
       // 便DT-7: スイッチをONにしてから「まとめて献立を入力」で実行(confirmは自動承認・メッセージを捕捉)
       const cwCopyToggle = cwPage.getByRole('button', { name: '先週の献立をコピー', exact: true })
       await cwCopyToggle.click()
@@ -17739,7 +17784,7 @@ try {
       const p1LockedText = (await p1Locked.textContent()) ?? ''
       check(
         'PURPOSE-01 鍵付き行に何ができるかが書かれている',
-        p1LockedText.includes('目的から組む') && p1LockedText.includes('たんぱく質多め'),
+        p1LockedText.includes('栄養から組む') && p1LockedText.includes('たんぱく質多め'),
         `text=${p1LockedText}`,
       )
       check(
@@ -17747,6 +17792,10 @@ try {
         (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
       )
       // 折りたたみを開いても、未解錠なら3択は出ない（鍵付き行だけ）
+      // 2026-08-09 便EN: 「献立を提案」グループが既定で畳んであるので先に開く
+      // （鍵付き行はそのグループの外に出したので、上の常設チェックは畳んだままで通る）
+      await p1Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await p1Page.waitForTimeout(300)
       await p1Page.getByRole('button', { name: /^提案の条件/ }).click()
       await p1Page.waitForTimeout(300)
       check(
@@ -17809,6 +17858,9 @@ try {
         'PURPOSE-02 解錠済みなら鍵付き行は出さない',
         (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) === 0,
       )
+      // 2026-08-09 便EN: 「献立を提案」グループが既定で畳んであるので先に開く
+      await p2Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await p2Page.waitForTimeout(300)
       await p2Page.getByRole('button', { name: /^提案の条件/ }).click()
       await p2Page.waitForTimeout(300)
       const p2Picker = p2Page.locator('[data-testid="purpose-picker"]')
@@ -17858,6 +17910,9 @@ try {
       await p2Page.waitForTimeout(800)
       await p2Page.getByRole('button', { name: '週', exact: true }).click()
       await p2Page.waitForTimeout(400)
+      // 折りたたみの状態は覚えないので、読み込み直したらまた畳んである（2026-08-09 便EN）
+      await p2Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await p2Page.waitForTimeout(300)
       check(
         'PURPOSE-02 選んだ目的は再読み込み後も残る',
         ((await p2Page.getByRole('button', { name: /^提案の条件/ }).textContent()) ?? '').includes(
@@ -19633,6 +19688,328 @@ try {
       await eiBrowser.close()
     }
   }
+
+  // ============================================================================
+  // 便EN（2026-08-09 オーナー実機）: 週タブの「選択と実行」の描き分け・条件の説明の出し方・
+  // 鍵の見分け・週まとめの大きさ・記録写真の回転
+  // ============================================================================
+
+  // --- EN-01: 週タブ。①3グループとも既定で畳む ②畳んだままでも実行ボタンとPro行は見える
+  //  ③選ぶチップと実行ボタンは見た目が違う（塗りつぶしは実行ボタンだけ・チップにはチェック印）
+  //  ④条件の説明は、その条件を選んでいるあいだだけ出る
+  //  ⑤「高たんぱく優先」は無料でも出る（Pro機能ではない＝出ていて正しい）
+  //  ⑥鍵は掛けると塗りつぶしになる ⑦週まとめの栄養は日カードより大きい ---
+  currentCheck = 'EN-01'
+  {
+    const enBrowser = await chromium.launch()
+    const enContext = await enBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const enPage = await enContext.newPage()
+    enPage.on('pageerror', (err) => errors.push(`[pageerror@EN-01] ${err.message}`))
+    enPage.on('dialog', (d) => void d.accept())
+    try {
+      await enPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await enPage.waitForTimeout(1800)
+      await enPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await enPage.getByRole('button', { name: '週', exact: true }).click()
+      await enPage.waitForTimeout(600)
+
+      check(
+        'EN-01(項目10) 週タブの3グループは既定で全部畳んである',
+        (await enPage.getByRole('button', { name: '表示のしかたを開く' }).count()) === 1 &&
+          (await enPage.getByRole('button', { name: '献立を提案を開く' }).count()) === 1 &&
+          (await enPage.getByRole('button', { name: '献立テンプレートを開く' }).count()) === 1,
+      )
+      check(
+        'EN-01(項目10) 畳んだままでも「まとめて献立を入力」は押せる位置にある',
+        await enPage.getByRole('button', { name: 'まとめて献立を入力' }).isVisible(),
+      )
+      check(
+        'EN-01(項目10) 畳んだままでも「栄養から組む（Pro）」の入口が消えない(docs/62 決定②)',
+        await enPage.locator('[data-testid="purpose-locked-row"]').isVisible(),
+      )
+      check(
+        'EN-01(項目5) Proの入口の呼称が「栄養から組む」になっている（「目的」を使わない）',
+        ((await enPage.locator('[data-testid="purpose-locked-row"]').textContent()) ?? '').includes(
+          '栄養から組む',
+        ),
+      )
+
+      await enPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await enPage.waitForTimeout(300)
+      await enPage.getByRole('button', { name: /^提案の条件/ }).click()
+      await enPage.waitForTimeout(300)
+
+      const enQuickHint = '調理時間が15分以内のレシピを優先します'
+      const enProteinHint = 'レシピに「高たんぱく」タグが付いた料理を優先します'
+      const enBody = async () => (await enPage.textContent('body')) ?? ''
+      check(
+        'EN-01(項目3) 「調理時間15分以内を優先」を選んでいないうちは説明を出さない',
+        !(await enBody()).includes(enQuickHint),
+      )
+      check(
+        'EN-01(項目2) 「高たんぱく優先」も選んでいないうちは説明を出さない',
+        !(await enBody()).includes(enProteinHint),
+      )
+      const enProteinBtn = enPage.getByRole('button', { name: '高たんぱく優先', exact: true })
+      check('EN-01(項目2) 未解錠でも「高たんぱく優先」は使える(無料機能)', await enProteinBtn.isVisible())
+
+      await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
+      await enPage.waitForTimeout(250)
+      check(
+        'EN-01(項目3) 選んだときだけ「調理時間15分以内を優先」の説明が出る',
+        (await enBody()).includes(enQuickHint),
+      )
+      await enProteinBtn.click()
+      await enPage.waitForTimeout(250)
+      check(
+        'EN-01(項目2) 「高たんぱく優先」の説明は、見ているのがタグであることを書く',
+        (await enBody()).includes(enProteinHint),
+      )
+
+      const enLook = await enPage.evaluate(() => {
+        const byText = (t) =>
+          [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === t)
+        const fill = byText('まとめて献立を入力')
+        const chip = byText('調理時間15分以内を優先')
+        if (!fill || !chip) return null
+        const cs = (el) => {
+          const s = getComputedStyle(el)
+          return { bg: s.backgroundColor, color: s.color, radius: s.borderTopLeftRadius }
+        }
+        return {
+          fill: cs(fill),
+          chip: cs(chip),
+          chipHasCheck: chip.querySelectorAll('svg').length > 0,
+        }
+      })
+      check(
+        'EN-01(項目1) 選んでいるチップは実行ボタンと同じ塗りにしない（面の色が違う）',
+        !!enLook && enLook.fill.bg !== enLook.chip.bg,
+        `look=${JSON.stringify(enLook)}`,
+      )
+      check(
+        'EN-01(項目1) 選んでいるチップは実行ボタンと文字色も形も違う',
+        !!enLook &&
+          enLook.fill.color !== enLook.chip.color &&
+          enLook.fill.radius !== enLook.chip.radius,
+        `look=${JSON.stringify(enLook)}`,
+      )
+      check(
+        'EN-01(項目1) 選んでいるチップにはチェック印が付く（色だけに頼らない）',
+        !!enLook && enLook.chipHasCheck,
+      )
+      await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
+      await enProteinBtn.click()
+      await enPage.waitForTimeout(250)
+
+      await enPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await enPage.waitForTimeout(2500)
+
+      const enLockBg = () =>
+        enPage.evaluate(() => {
+          const el = document.querySelector('[data-testid="day-lock"]')
+          return el ? getComputedStyle(el).backgroundColor : 'none'
+        })
+      const enLockBefore = await enLockBg()
+      await enPage.locator('[data-testid="day-lock"]').first().click()
+      await enPage.waitForTimeout(800)
+      const enLockAfter = await enLockBg()
+      check(
+        'EN-01(項目6) 鍵が外れているあいだは面を塗らない',
+        enLockBefore === 'rgba(0, 0, 0, 0)' || enLockBefore === 'transparent',
+        `before=${enLockBefore}`,
+      )
+      check(
+        'EN-01(項目6) 鍵を掛けると塗りつぶしになる（外れているときと面の色が違う）',
+        enLockAfter !== enLockBefore &&
+          enLockAfter !== 'rgba(0, 0, 0, 0)' &&
+          enLockAfter !== 'transparent',
+        `before=${enLockBefore} after=${enLockAfter}`,
+      )
+      await enPage.locator('[data-testid="day-lock"]').first().click()
+      await enPage.waitForTimeout(700)
+
+      const enPanel = await enPage.evaluate(() => {
+        const btns = [...document.querySelectorAll('button[aria-label]')]
+        const week = btns.find(
+          (b) => b.getAttribute('aria-label') === 'この週の栄養の概算を詳しく見る',
+        )
+        const day = btns.find((b) => (b.getAttribute('aria-label') ?? '').startsWith('この日（'))
+        if (!week || !day) return null
+        const maxFont = (el) =>
+          Math.max(
+            ...[el, ...el.querySelectorAll('*')].map((n) =>
+              parseFloat(getComputedStyle(n).fontSize),
+            ),
+          )
+        return {
+          weekFont: maxFont(week),
+          dayFont: maxFont(day),
+          weekHeight: Math.round(week.getBoundingClientRect().height),
+          dayHeight: Math.round(day.getBoundingClientRect().height),
+        }
+      })
+      check(
+        'EN-01(項目9) 週まとめの栄養は日ごとの栄養より文字が大きい',
+        !!enPanel && enPanel.weekFont > enPanel.dayFont,
+        `panel=${JSON.stringify(enPanel)}`,
+      )
+      check(
+        'EN-01(項目9) 週まとめの栄養は日ごとの栄養より縦幅が大きい',
+        !!enPanel && enPanel.weekHeight > enPanel.dayHeight,
+        `panel=${JSON.stringify(enPanel)}`,
+      )
+    } finally {
+      await enBrowser.close()
+    }
+  }
+
+  // --- EN-02: 記録した写真の回転（2026-08-09 オーナー要望「記録した写真を回転させることは可能?」）。
+  // 記録窓で写真を付けて右に90度ずつ回すと縦横が入れ替わり、4回で元の向きに戻る。
+  // 保存済みの記録も編集フォームから回して保存し直せる。 ---
+  currentCheck = 'EN-02'
+  {
+    const { deflateSync } = await import('node:zlib')
+    // 横長(400x200)のPNGをその場で作る。回すと 200x400 になるので向きが数字で分かる
+    const enCrcTable = (() => {
+      const t = new Int32Array(256)
+      for (let n = 0; n < 256; n++) {
+        let c = n
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+        t[n] = c
+      }
+      return t
+    })()
+    const enCrc32 = (buf) => {
+      let c = 0xffffffff
+      for (const b of buf) c = enCrcTable[(c ^ b) & 0xff] ^ (c >>> 8)
+      return (c ^ 0xffffffff) >>> 0
+    }
+    const enPngChunk = (type, data) => {
+      const len = Buffer.alloc(4)
+      len.writeUInt32BE(data.length)
+      const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+      const crc = Buffer.alloc(4)
+      crc.writeUInt32BE(enCrc32(body))
+      return Buffer.concat([len, body, crc])
+    }
+    const enMakePng = (width, height) => {
+      const raw = Buffer.alloc((width * 3 + 1) * height)
+      let p = 0
+      for (let y = 0; y < height; y++) {
+        raw[p++] = 0
+        for (let x = 0; x < width; x++) {
+          const left = x < width / 2
+          raw[p++] = left ? 220 : 40
+          raw[p++] = left ? 90 : 120
+          raw[p++] = left ? 30 : 200
+        }
+      }
+      const ihdr = Buffer.alloc(13)
+      ihdr.writeUInt32BE(width, 0)
+      ihdr.writeUInt32BE(height, 4)
+      ihdr[8] = 8
+      ihdr[9] = 2
+      return Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        enPngChunk('IHDR', ihdr),
+        enPngChunk('IDAT', deflateSync(raw)),
+        enPngChunk('IEND', Buffer.alloc(0)),
+      ])
+    }
+
+    const roBrowser = await chromium.launch()
+    const roContext = await roBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const roPage = await roContext.newPage()
+    roPage.on('pageerror', (err) => errors.push(`[pageerror@EN-02] ${err.message}`))
+    try {
+      await roPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await roPage.waitForTimeout(1800)
+      await roPage
+        .locator('a[href*="#/recipes/"]')
+        .filter({ hasText: 'カレーライス' })
+        .first()
+        .click()
+      await roPage.waitForTimeout(1200)
+      await roPage.getByRole('button', { name: '作った！', exact: true }).first().click()
+      await roPage.waitForTimeout(700)
+      await roPage
+        .locator('div[role="dialog"] input[type="file"]')
+        .last()
+        .setInputFiles({
+          name: 'e2e-rotate.png',
+          mimeType: 'image/png',
+          buffer: enMakePng(400, 200),
+        })
+      await roPage.waitForTimeout(1300)
+      const roSize = () =>
+        roPage.evaluate(() => {
+          const img = document.querySelector('div[role="dialog"] img')
+          return img ? `${img.naturalWidth}x${img.naturalHeight}` : 'none'
+        })
+      const roBefore = await roSize()
+      check('EN-02 記録窓に付けた写真は横長のまま取り込まれる', roBefore === '400x200', `size=${roBefore}`)
+      const roRotate = roPage.getByRole('button', { name: '写真を右に90度回す' })
+      check('EN-02 記録窓に「写真を右に90度回す」がある', await roRotate.isVisible())
+      await roRotate.click()
+      await roPage.waitForTimeout(1300)
+      const roOnce = await roSize()
+      check(
+        'EN-02 1回押すと縦横が入れ替わる（横長→縦長）',
+        roOnce === '200x400',
+        `before=${roBefore} after=${roOnce}`,
+      )
+      for (let i = 0; i < 3; i++) {
+        await roRotate.click()
+        await roPage.waitForTimeout(1100)
+      }
+      const roBack = await roSize()
+      check(
+        'EN-02 4回押すと元の向きに戻る（オーナー確認事項）',
+        roBack === roBefore,
+        `before=${roBefore} after4=${roBack}`,
+      )
+
+      // 保存済みの記録でも同じ操作ができる（編集フォームから回して保存し直す）
+      await roPage.getByRole('button', { name: '記録する', exact: true }).click()
+      await roPage.waitForTimeout(1800)
+      // 記録一覧のサムネイル（タップで原寸表示になるボタンの中の画像）で向きを見る
+      const roLogSize = () =>
+        roPage.evaluate(() => {
+          const img = document.querySelector('button[aria-label="写真を拡大表示"] img')
+          return img ? `${img.naturalWidth}x${img.naturalHeight}` : 'none'
+        })
+      const roLogBefore = await roLogSize()
+      check(
+        'EN-02 記録した写真が一覧のサムネイルに出る（保存直後は横長）',
+        roLogBefore === '400x200',
+        `size=${roLogBefore}`,
+      )
+      await roPage.getByRole('button', { name: 'この記録を編集' }).first().click()
+      await roPage.waitForTimeout(700)
+      const roEditRotate = roPage.getByRole('button', { name: '写真を右に90度回す' })
+      check('EN-02 保存済みの記録の編集にも回転ボタンがある', await roEditRotate.isVisible())
+      await roEditRotate.click()
+      await roPage.waitForTimeout(1300)
+      check(
+        'EN-02 回しただけでは残らないことを画面で伝える（規約H）',
+        ((await roPage.textContent('body')) ?? '').includes(
+          '回した向きは「保存する」を押すと残ります',
+        ),
+      )
+      await roPage.getByRole('button', { name: '保存する', exact: true }).first().click()
+      await roPage.waitForTimeout(1800)
+      const roLogAfter = await roLogSize()
+      check(
+        'EN-02 保存すると回した向きが記録に残る（縦横が入れ替わる）',
+        roLogAfter === '200x400',
+        `before=${roLogBefore} after=${roLogAfter}`,
+      )
+    } finally {
+      await roBrowser.close()
+    }
+  }
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
