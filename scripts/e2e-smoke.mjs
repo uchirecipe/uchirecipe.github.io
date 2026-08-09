@@ -20494,6 +20494,247 @@ try {
     }
   }
 
+  // ================================================================================
+  // --- 便EP(2026-08-09 オーナー実機): 紹介ページ・ホーム画面追加ページ・使い方ページの手直し ---
+  // ================================================================================
+
+  // --- INSTALLASK-EP: 「無料で使ってみる」を押した先の小さな確認(紹介ページ)。
+  // ホーム画面への追加を通らずにブラウザで使い始める人が大多数になると、iPhone・iPadでは
+  // あとからレシピを移す手間が発生する。押した先で一度だけ「追加方法を見る／このまま開く」を
+  // 尋ね、選んだら以後は出さない。選ばずに閉じたときは覚えない(次に押せばまた出る) ---
+  {
+    currentCheck = 'INSTALLASK-EP'
+    const askBrowser = await chromium.launch()
+    try {
+      // (a) 初回は確認が出る。押しただけではうちレシピへ進まない
+      const askCtx = await askBrowser.newContext()
+      const askPage = await askCtx.newPage()
+      await askPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      check(
+        'INSTALLASK-EP(a) 読み込んだ直後は確認を出さない',
+        await askPage.locator('#install-ask').isHidden(),
+      )
+      check(
+        'INSTALLASK-EP(a) スクリプトが動かなくてもボタンはうちレシピを指している',
+        (await askPage.locator('a.cta[data-ask="install"]').getAttribute('href')) === '/',
+      )
+      await askPage.getByRole('link', { name: '無料で使ってみる' }).click()
+      await askPage.waitForTimeout(400)
+      check(
+        'INSTALLASK-EP(a) 「無料で使ってみる」を押すと確認が出て、まだ移動しない',
+        (await askPage.locator('#install-ask').isVisible()) && askPage.url().includes('/about/'),
+        askPage.url(),
+      )
+      const askText = (await askPage.locator('#install-ask').textContent()) ?? ''
+      check(
+        'INSTALLASK-EP(a) 確認に、先に追加すると移す手間がかからないことと2択が書いてある',
+        askText.includes('おすすめ') &&
+          askText.includes('別々に保存されます') &&
+          askText.includes('移す手間がかかりません') &&
+          askText.includes('追加方法を見る') &&
+          askText.includes('このまま開く'),
+        askText.replace(/\s+/g, ' ').slice(0, 160),
+      )
+
+      // (b) Escで閉じたときは「選んでいない」扱い(次に押せばまた出る)
+      await askPage.keyboard.press('Escape')
+      await askPage.waitForTimeout(300)
+      check('INSTALLASK-EP(b) Escで閉じられる', await askPage.locator('#install-ask').isHidden())
+      await askPage.getByRole('link', { name: '無料で使ってみる' }).click()
+      await askPage.waitForTimeout(400)
+      check(
+        'INSTALLASK-EP(b) 選ばずに閉じたときは覚えないので、次に押せばまた出る',
+        await askPage.locator('#install-ask').isVisible(),
+      )
+
+      // (c) 「追加方法を見る」→ 追加手順のページへ。以後は確認を出さない
+      await askPage.getByRole('link', { name: '追加方法を見る' }).click()
+      await askPage.waitForLoadState('networkidle')
+      check(
+        'INSTALLASK-EP(c) 「追加方法を見る」で追加手順のページへ進む',
+        askPage.url().includes('/about/install.html'),
+        askPage.url(),
+      )
+      await askPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      await askPage.getByRole('link', { name: '無料で使ってみる' }).click()
+      await askPage.waitForLoadState('networkidle')
+      check(
+        'INSTALLASK-EP(c) 一度選んだあとは確認を出さず、そのままうちレシピが開く',
+        new URL(askPage.url()).pathname === '/',
+        askPage.url(),
+      )
+      await askCtx.close()
+
+      // (d) 「このまま開く」→ うちレシピへ。以後は確認を出さない
+      const stayCtx = await askBrowser.newContext()
+      const stayPage = await stayCtx.newPage()
+      await stayPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      await stayPage.getByRole('link', { name: '無料で使ってみる' }).click()
+      await stayPage.waitForTimeout(400)
+      await stayPage.getByRole('link', { name: 'このまま開く' }).click()
+      await stayPage.waitForLoadState('networkidle')
+      check(
+        'INSTALLASK-EP(d) 「このまま開く」でうちレシピが開く',
+        new URL(stayPage.url()).pathname === '/',
+        stayPage.url(),
+      )
+      await stayPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      await stayPage.getByRole('link', { name: '無料で使ってみる' }).click()
+      await stayPage.waitForLoadState('networkidle')
+      check(
+        'INSTALLASK-EP(d) 「このまま開く」を選んだあとも、二度目は確認を出さない',
+        new URL(stayPage.url()).pathname === '/',
+        stayPage.url(),
+      )
+      await stayCtx.close()
+    } finally {
+      await askBrowser.close()
+    }
+  }
+
+  // --- LPTEXT-EP: 紹介ページの文言(オーナー実機の指摘4件) ---
+  {
+    currentCheck = 'LPTEXT-EP'
+    await page.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+    const lpEp = await (await page.request.get(`${BASE}/about/`)).text()
+    check(
+      'LPTEXT-EP 30品の注記の主文から「基本レシピは数えません」が抜けている',
+      !/無料で登録できるレシピは30品までです<\/strong>\s*最初から入っている/.test(lpEp),
+    )
+    check(
+      'LPTEXT-EP 「基本レシピは30品に数えない」は注記の末尾に※として置いてある',
+      ((await page.locator('.note .aster').first().textContent()) ?? '').trim() ===
+        '※最初から入っている基本レシピは、この30品に数えません。',
+      (await page.locator('.note .aster').first().textContent()) ?? '(なし)',
+    )
+    check(
+      'LPTEXT-EP 「30品を超えて登録するときは、Pro版をご利用ください」を出さない',
+      !lpEp.includes('30品を超えて登録するときは'),
+    )
+    check(
+      'LPTEXT-EP 「こんなとき、ありませんか」の3つが吹き出しの形になっている',
+      await page.evaluate(() => {
+        const items = Array.from(document.querySelectorAll('.pains li'))
+        if (items.length !== 3) return false
+        // しっぽは疑似要素の三角(上辺の色が付いていれば描かれている)
+        return items.every((li) => {
+          const tail = getComputedStyle(li, '::after').borderTopColor
+          return tail && tail !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(tail)
+        })
+      }),
+    )
+    check(
+      'LPTEXT-EP 3つの悩みに限定した書き方をしていない',
+      !lpEp.includes('この3つをまとめて引き受けます') &&
+        lpEp.includes('このような困りごとの解消に役立ちます'),
+    )
+  }
+
+  // --- INSTALLTEXT-EP: ホーム画面追加ページの文言(オーナー実機の指摘) ---
+  {
+    currentCheck = 'INSTALLTEXT-EP'
+    const insEp = await (await page.request.get(`${BASE}/about/install.html`)).text()
+    check(
+      'INSTALLTEXT-EP ホーム画面への追加が「おすすめ」だと言い切っている',
+      insEp.includes('ホーム画面に追加してお使いいただくのがおすすめです'),
+    )
+    check(
+      'INSTALLTEXT-EP アプリとして使えることが書いてある',
+      insEp.includes('Webアプリ') && insEp.includes('ほかのアプリと同じようにご利用いただけます'),
+    )
+    check(
+      'INSTALLTEXT-EP 「追加しなくてもブラウザのまま」は※の注記に下げてある',
+      insEp.includes('※ホーム画面に追加しなくても、ブラウザのままご利用いただけます'),
+    )
+    check(
+      'INSTALLTEXT-EP 「図は説明のために描いたものです」を出さない',
+      !insEp.includes('図は説明のために描いたものです') &&
+        insEp.includes('実際の画面は、端末とブラウザの版によって少し違います'),
+    )
+    check(
+      'INSTALLTEXT-EP iPhone・iPadのChromeでも追加できることが書いてある',
+      insEp.includes('iPhone・iPadのChromeでも、同じ共有ボタン'),
+    )
+    check(
+      'INSTALLTEXT-EP ボタンの下の「うちレシピの画面を開いてから追加します」を出さない',
+      !insEp.includes('うちレシピの画面を開いてから追加します'),
+    )
+    check(
+      'INSTALLTEXT-EP パソコンで追加したあとの姿(オレンジ色の帯とアイコン)が図と説明にある',
+      insEp.includes('パソコンではうちレシピだけの窓で開きます') &&
+        insEp.includes('オレンジ色の帯に鍋のマークのアイコン'),
+    )
+  }
+
+  // --- NOINSTALLFREE-EP: 「インストール不要」の掃引。
+  // Android・パソコンでは「インストール」を押してもらう案内をしているので、
+  // 「インストールは不要／いりません」は嘘になる(2026-08-09 オーナー指摘)。
+  // アプリストアからのダウンロードが不要である旨の言い方に統一する ---
+  {
+    currentCheck = 'NOINSTALLFREE-EP'
+    const LIE = /インストール[^。<]{0,12}(不要|いりません|要りません)/
+    for (const p of [
+      '/about/',
+      '/about/install.html',
+      '/about/manual.html',
+      '/about/terms.html',
+      '/about/tokushoho.html',
+      '/about/column/',
+    ]) {
+      const res = await page.request.get(`${BASE}${p}`)
+      const html = await res.text()
+      check(
+        `NOINSTALLFREE-EP ${p} に「インストール不要」の言い方が残っていない`,
+        res.status() === 200 && !LIE.test(html),
+        `残存=${html.match(LIE)?.[0] ?? 'なし'}`,
+      )
+    }
+    const lpTop = await (await page.request.get(`${BASE}/about/`)).text()
+    check(
+      'NOINSTALLFREE-EP 紹介ページの上部はアプリストアからのダウンロードが不要である旨になっている',
+      lpTop.includes('ブラウザで開くだけ。アプリストアからのダウンロードも会員登録もいりません'),
+    )
+  }
+
+  // --- SHOTSIZE-EP: 図の実寸と、HTMLに書いた width/height が食い違っていない。
+  // 図を描き直すと寸法が変わる。属性の書き換えを忘れると、読み込み中に文字が飛ぶ ---
+  {
+    currentCheck = 'SHOTSIZE-EP'
+    for (const [pagePath, selector] of [
+      ['/about/install.html', 'figure.shot img'],
+      ['/about/manual.html', 'figure.shot img[src$="register-detail.webp"]'],
+    ]) {
+      await page.goto(`${BASE}${pagePath}`, { waitUntil: 'networkidle' })
+      const gaps = await page.evaluate(async (sel) => {
+        const imgs = Array.from(document.querySelectorAll(sel))
+        await Promise.all(
+          imgs.map((i) => (i.complete ? null : new Promise((r) => i.addEventListener('load', r, { once: true })))),
+        )
+        return imgs
+          .filter((i) => i.naturalWidth !== Number(i.getAttribute('width')) || i.naturalHeight !== Number(i.getAttribute('height')))
+          .map((i) => `${i.getAttribute('src')} 実寸${i.naturalWidth}x${i.naturalHeight} 記述${i.getAttribute('width')}x${i.getAttribute('height')}`)
+      }, selector)
+      check(`SHOTSIZE-EP ${pagePath} の図の寸法が合っている`, gaps.length === 0, gaps.join(' / '))
+    }
+  }
+
+  // --- SHOTMARK-EP: 説明図の「押す場所を囲む枠」が一覧のふちで切られない作りのままか。
+  // 囲みは要素の外側に描く(outline + ぼかし)ので、入れ物に overflow:hidden があると
+  // 左右や下が切られて囲みが閉じていない絵になる(2026-08-09 オーナー実機報告で発覚) ---
+  {
+    currentCheck = 'SHOTMARK-EP'
+    const shotsSrc = readFileSync(path.join(appRoot, 'scripts/shots-install.mjs'), 'utf-8')
+    for (const cls of ['.sheet-list', '.and-menu']) {
+      const rule = shotsSrc.match(new RegExp(`\\${cls}\\{[^}]*\\}`, 's'))
+      check(
+        `SHOTMARK-EP ${cls} に overflow:hidden を戻していない`,
+        rule !== null && !rule[0].includes('overflow:hidden'),
+        rule?.[0] ?? '(規則が見つからない)',
+      )
+    }
+  }
+
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

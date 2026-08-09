@@ -115,7 +115,10 @@ body{background:#fffdf8}
 .sheet-head img{width:32px;height:32px;border-radius:7px;flex:none}
 .sheet-head .t{font-size:12.5px;font-weight:bold}
 .sheet-head .u{font-size:11px;color:#8b8b8f}
-.sheet-list{background:#fff;border-radius:11px;overflow:hidden}
+/* overflow:hidden は付けない(2026-08-09 便EP)。付けると、押す場所を囲む枠(.mark)の
+   左右が一覧のふちで切られ、囲みが閉じていない絵になる。中の行は自前の背景を持たないので
+   角丸からはみ出すものはない */
+.sheet-list{background:#fff;border-radius:11px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;font-size:13px;border-bottom:1px solid #eeedea;color:#43362a}
 .row:last-child{border-bottom:0}
 .row .ic{color:#43362a}
@@ -125,9 +128,11 @@ body{background:#fffdf8}
 .and-bar{background:#f1f1f4;padding:8px 14px 8px 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e0e0e4}
 .and-addr{flex:1;background:#fff;border-radius:999px;padding:7px 12px;font-size:12.5px;color:#43362a;display:flex;align-items:center;gap:8px}
 .and-bar .ic{color:#4a4a4f}
+/* overflow:hidden は付けない(.sheet-listと同じ理由)。right は、いちばん下の項目を囲む枠と
+   そのぼかしが図の右端で切られないよう 8px→12px に広げた(2026-08-09 便EP) */
 .and-menu{
-  position:absolute;right:8px;top:44px;width:190px;background:#fff;border:1px solid #e2e0dc;
-  border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.16);overflow:hidden
+  position:absolute;right:12px;top:44px;width:190px;background:#fff;border:1px solid #e2e0dc;
+  border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.16)
 }
 .and-menu .row{font-size:12.5px;padding:10px 12px}
 
@@ -139,6 +144,18 @@ body{background:#fffdf8}
 .pc-tools .ic{color:#4a4a4f}
 .pc-addr{flex:1;background:#f1f0ee;border-radius:999px;padding:5px 10px;font-size:11.5px;display:flex;align-items:center;gap:8px}
 .pc-addr .url{flex:1}
+
+/* 追加したあとの姿(スマートフォン/パソコン)の小見出し */
+.after-label{padding:10px 12px 5px;font-size:11.5px;font-weight:bold;color:#7c6a56}
+.after-label:first-child{padding-top:2px}
+
+/* パソコンで追加したあとの窓(2026-08-09 便EP・オーナー実機報告)。
+   上の帯はマニフェストの theme_color(#d9480f)で塗られ、左端にうちレシピのアイコンが出る */
+.pcwin{margin:0 12px;border:1px solid #eadfcd;border-radius:10px;overflow:hidden}
+.pcwin-bar{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#d9480f;color:#fffdf8}
+.pcwin-bar img{width:20px;height:20px;border-radius:5px;flex:none}
+.pcwin-bar .t{flex:1;font-size:12px;font-weight:bold}
+.pcwin-bar .ic{color:#fffdf8}
 
 /* ホーム画面 */
 .home{background:linear-gradient(160deg,#c9d3de,#e0d4c2);padding:16px 14px 18px}
@@ -162,8 +179,10 @@ const appPaper = (rows = 2) =>
     .join('')}</div>`
 
 const FIGURES = {
-  // 追加したあとの姿(ホーム画面にアイコンが増える)
+  // 追加したあとの姿。スマートフォンはホーム画面にアイコンが増え、
+  // パソコンはうちレシピだけの窓で開く(2026-08-09 便EP: オレンジ色の帯とアイコンを足した)
   'home-icon': `
+    <div class="after-label">スマートフォン</div>
     <div class="home">
       <div class="apps">
         <div class="app"><div class="sq"></div><div class="nm ph"></div></div>
@@ -171,7 +190,20 @@ const FIGURES = {
         <div class="app"><div class="sq"></div><div class="nm ph"></div></div>
         <div class="app"><div class="sq"></div><div class="nm ph"></div></div>
       </div>
-    </div>`,
+    </div>
+    <div class="after-label">パソコン</div>
+    <div class="pcwin">
+      <div class="pcwin-bar">
+        <img src="${APP_ICON}" alt="">
+        <span class="t">うちレシピ</span>
+        ${dots(16)}
+      </div>
+      <div class="paper" style="padding:10px 10px 12px">
+        <div class="card"><div class="thumb"></div><div class="lines"><div class="ln w70"></div><div class="ln w40"></div></div></div>
+        <div class="card"><div class="thumb"></div><div class="lines"><div class="ln w85"></div><div class="ln w50"></div></div></div>
+      </div>
+    </div>
+    <div style="height:12px"></div>`,
 
   // iPhone: 共有ボタンの位置
   'ios-share': `
