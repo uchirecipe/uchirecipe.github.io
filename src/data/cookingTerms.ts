@@ -77,7 +77,14 @@ export const COOKING_TERMS: CookingTerm[] = [
 
   // --- 下ごしらえ ---
   { term: '油抜き', reading: 'あぶらぬき', description: '表面の余分な油を熱湯で洗い流すこと' },
-  { term: '下茹で', reading: 'したゆで', description: '軽く茹でて水分やアクを抜くこと' },
+  // 表記の基準（2026-08-09 便ES）: 「茹」は常用漢字表に無いので見出しはひらがな。
+  // ユーザーが自分のレシピに「下茹で」と書くことはあるので、別表記として拾い続ける
+  {
+    term: '下ゆで',
+    reading: 'したゆで',
+    description: '軽くゆでて水分やアクを抜くこと',
+    aliases: ['下茹で'],
+  },
   {
     term: '湯むき',
     reading: 'ゆむき',

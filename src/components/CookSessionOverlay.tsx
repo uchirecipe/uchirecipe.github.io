@@ -77,7 +77,9 @@ function TimerChip({
   onToggleMute: () => void
   onDismiss: () => void
 }) {
-  const isCustom = timer.isCustom === true || timer.stepNumber <= 0
+  // ナビが足した工程（湯を沸かす）は stepNumber を持たないが、段取りの番号は持つ。
+  // 番号があるものを「自由な時間のタイマー」の時計バッジにしない（2026-08-09 便ES）
+  const isCustom = timer.isCustom === true || (timer.stepNumber <= 0 && timer.naviOrder == null)
   return (
     <div
       style={

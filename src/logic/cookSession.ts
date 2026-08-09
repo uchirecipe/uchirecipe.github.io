@@ -199,6 +199,16 @@ function collapseAtPhraseBoundary(
     headLength = next
     headEnd++
   }
+  if (headEnd === 0) {
+    // 先頭の文節が既定の割り当てより長い（「塩こしょうとしょうゆで」など）。
+    // ここで諦めると文字数で切ることになり、語の途中で切れてしまう。
+    // 末尾の1文節が残る範囲なら、先頭の文節をまるごと入れる
+    const first = [...segments[0]].length
+    const last = [...segments[segments.length - 1]].length
+    if (first + 1 + last > maxChars) return undefined
+    headEnd = 1
+    headLength = first
+  }
   // 文頭を文節で切ると割り当てが余ることが多いので、余りは文末側に回す
   // （文末には動詞が来やすい＝残せるほど「何をする手順か」が分かる）
   const tailBudget = Math.max(1, maxChars - 1 - headLength)
