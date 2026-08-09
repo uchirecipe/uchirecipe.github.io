@@ -4746,7 +4746,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           既定で閉じている折りたたみの中に入れると、結局その入口は誰にも見えない）。
           押し売りはしない＝1行の控えめな鍵付き行にとどめる（規約H） */}
       {isPro ? (
-        suggestConditionsOpen && (
+        <Collapse open={suggestConditionsOpen}>
           <div className="mt-[var(--space-md)]" data-testid="purpose-picker">
             <p className="flex items-center gap-1 text-sm font-bold text-ink-muted">
               {ja.mealPlan.purposeLabel}
@@ -4795,7 +4795,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             ))}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
           </div>
-        )
+        </Collapse>
       ) : (
         showLockedRow && renderPurposeLockedRow()
       )}

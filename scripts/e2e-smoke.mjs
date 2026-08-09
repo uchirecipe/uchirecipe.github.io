@@ -20069,7 +20069,11 @@ try {
         return {
           fill: cs(fill),
           chip: cs(chip),
-          chipHasCheck: chip.querySelectorAll('svg').length > 0,
+          // 2026-08-09 便EO: 押しても寸法が変わらないよう、選んでいないときも同じ場所を
+          // 空けている。よって「svgがある」だけでは不十分で、見えているかまで見る
+          chipHasCheck: [...chip.querySelectorAll('svg')].some(
+            (el) => getComputedStyle(el).visibility !== 'hidden',
+          ),
         }
       })
       check(
@@ -20089,7 +20093,6 @@ try {
         !!enLook && enLook.chipHasCheck,
       )
       await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
-      await enProteinBtn.click()
       await enPage.waitForTimeout(250)
 
       await enPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
@@ -20485,6 +20488,205 @@ try {
       )
     } finally {
       await reBrowser.close()
+    }
+  }
+
+  // ============================================================================
+  // 便EO（2026-08-09 オーナー実機）: 折りたたみの開閉アニメーション・押下前後で
+  // ボタンの寸法が変わらないこと・伸びた部分が画面内に入ること
+  // ============================================================================
+
+  // --- EO-01: 折りたたみは高さのアニメーションで開閉し、動きを減らす設定では出さない ---
+  currentCheck = 'EO-01'
+  {
+    const eoBrowser = await chromium.launch()
+    try {
+      const eoCtx = await eoBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const eoPage = await eoCtx.newPage()
+      eoPage.on('pageerror', (err) => errors.push(`[pageerror@EO-01] ${err.message}`))
+      await eoPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eoPage.waitForTimeout(1800)
+
+      // 折りたたみの中身の高さを測る（Collapseは grid の中に min-h-0 の箱を1つ持つ）
+      const panelHeight = () =>
+        eoPage.evaluate(() => {
+          const g = [...document.querySelectorAll('div.grid')].find((d) =>
+            d.querySelector(':scope > div.min-h-0'),
+          )
+          return g ? Math.round(g.getBoundingClientRect().height) : -1
+        })
+
+      const eoFilter = eoPage.getByRole('button', { name: '絞り込み' })
+      check('EO-01 開く前は折りたたみの中身がDOMに無い', (await panelHeight()) === -1)
+
+      await eoFilter.click()
+      await eoPage.waitForTimeout(60)
+      const midway = await panelHeight()
+      await eoPage.waitForTimeout(600)
+      const opened = await panelHeight()
+      check(
+        'EO-01 開くときは高さが途中の値を通る（一瞬で開かない＝アニメーションしている）',
+        midway > 0 && opened > 0 && midway < opened,
+        `途中=${midway} / 開き切り=${opened}`,
+      )
+
+      await eoFilter.click()
+      await eoPage.waitForTimeout(60)
+      const closing = await panelHeight()
+      check(
+        'EO-01 閉じるときも高さが途中の値を通る',
+        closing > 0 && closing < opened,
+        `途中=${closing} / 開き切り=${opened}`,
+      )
+      await eoPage.waitForTimeout(600)
+      check('EO-01 閉じ切ると中身はDOMから消える', (await panelHeight()) === -1)
+
+      // 動きを減らす設定では、押した直後にもう開き切っている
+      const eoRmCtx = await eoBrowser.newContext({
+        viewport: { width: 390, height: 844 },
+        reducedMotion: 'reduce',
+      })
+      const eoRmPage = await eoRmCtx.newPage()
+      eoRmPage.on('pageerror', (err) => errors.push(`[pageerror@EO-01rm] ${err.message}`))
+      await eoRmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eoRmPage.waitForTimeout(1800)
+      const rmHeight = () =>
+        eoRmPage.evaluate(() => {
+          const g = [...document.querySelectorAll('div.grid')].find((d) =>
+            d.querySelector(':scope > div.min-h-0'),
+          )
+          return g ? Math.round(g.getBoundingClientRect().height) : -1
+        })
+      await eoRmPage.getByRole('button', { name: '絞り込み' }).click()
+      await eoRmPage.waitForTimeout(60)
+      const rmFirst = await rmHeight()
+      await eoRmPage.waitForTimeout(600)
+      const rmSettled = await rmHeight()
+      check(
+        'EO-01 動きを減らす設定ではアニメーションを出さず即座に開く',
+        rmFirst > 0 && rmFirst === rmSettled,
+        `直後=${rmFirst} / 落ち着いた後=${rmSettled}`,
+      )
+    } finally {
+      await eoBrowser.close()
+    }
+  }
+
+  // --- EO-02: 押下前後でボタンの寸法が変わらない（チップのチェック印・文言の入れ替え） ---
+  currentCheck = 'EO-02'
+  {
+    const eoBrowser = await chromium.launch()
+    try {
+      const eoCtx = await eoBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const eoPage = await eoCtx.newPage()
+      eoPage.on('pageerror', (err) => errors.push(`[pageerror@EO-02] ${err.message}`))
+      eoPage.on('dialog', (d) => void d.accept())
+      await eoPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eoPage.waitForTimeout(1800)
+      await eoPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await eoPage.getByRole('button', { name: '週', exact: true }).click()
+      await eoPage.waitForTimeout(700)
+
+      const sizeOf = async (loc) => {
+        const b = await loc.boundingBox()
+        return b ? { w: Math.round(b.width * 100) / 100, h: Math.round(b.height * 100) / 100 } : null
+      }
+      /** 押す前後で自分の寸法が1pxも変わらないことを確かめる */
+      const noResize = async (label, loc) => {
+        await loc.scrollIntoViewIfNeeded()
+        await eoPage.waitForTimeout(200)
+        const before = await sizeOf(loc)
+        await loc.click()
+        await eoPage.waitForTimeout(450)
+        const after = await sizeOf(loc)
+        check(
+          `EO-02 ${label}は押しても寸法が変わらない`,
+          !!before && !!after && before.w === after.w && before.h === after.h,
+          `前=${JSON.stringify(before)} 後=${JSON.stringify(after)}`,
+        )
+      }
+
+      // 「すべてロック」「すべて折りたたむ」＝押すと文言が入れ替わるボタン
+      await noResize('週タブ「すべてロック」', eoPage.locator('[data-testid="lock-all"]'))
+      await noResize('週タブ「すべてロック」(戻す)', eoPage.locator('[data-testid="lock-all"]'))
+      const eoCollapseAll = eoPage.getByRole('button', { name: /^すべて(折りたたむ|開く)$/ })
+      await noResize('週タブ「すべて折りたたむ」', eoCollapseAll)
+      await noResize('週タブ「すべて開く」', eoCollapseAll)
+
+      // 提案の条件チップ＝選ぶとチェック印が付くボタン
+      await eoPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await eoPage.waitForTimeout(400)
+      await eoPage.getByRole('button', { name: /^提案の条件/ }).click()
+      await eoPage.waitForTimeout(500)
+      const eoQuick = eoPage.getByRole('button', { name: '調理時間15分以内を優先', exact: true })
+      await noResize('提案の条件チップ', eoQuick)
+      await noResize('提案の条件チップ(外す)', eoQuick)
+      const eoWashoku = eoPage.getByRole('button', { name: '和食', exact: true })
+      await noResize('ジャンルチップ', eoWashoku)
+
+      // 現在値のサマリーが付くトグルも、開閉で幅が変わらない
+      const eoCondToggle = eoPage.getByRole('button', { name: /^提案の条件/ })
+      await noResize('「提案の条件」トグル(閉じる)', eoCondToggle)
+      await noResize('「提案の条件」トグル(開く)', eoCondToggle)
+    } finally {
+      await eoBrowser.close()
+    }
+  }
+
+  // --- EO-03: 押して伸びた部分が画面の外に見切れない（作った記録の行内編集） ---
+  currentCheck = 'EO-03'
+  {
+    const eoBrowser = await chromium.launch()
+    try {
+      const eoCtx = await eoBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const eoPage = await eoCtx.newPage()
+      eoPage.on('pageerror', (err) => errors.push(`[pageerror@EO-03] ${err.message}`))
+      eoPage.on('dialog', (d) => void d.accept())
+      await eoPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eoPage.waitForTimeout(1800)
+      await eoPage.getByText('肉じゃが', { exact: true }).first().click()
+      await eoPage.waitForTimeout(900)
+
+      // 作った記録を1件つくる
+      const eoCooked = eoPage.getByRole('button', { name: /作った/ }).first()
+      await eoCooked.click()
+      await eoPage.waitForTimeout(700)
+      const eoSave = eoPage.getByRole('button', { name: /^記録する/ }).first()
+      if (await eoSave.count()) {
+        await eoSave.click()
+        await eoPage.waitForTimeout(900)
+      }
+
+      const eoEdit = eoPage.getByRole('button', { name: '編集' }).first()
+      check('EO-03 作った記録に「編集」がある', await eoEdit.isVisible())
+      // 「編集」を画面のいちばん下に置いてから押す＝直したかった見切れの再現条件
+      await eoEdit.scrollIntoViewIfNeeded()
+      await eoPage.evaluate(() => {
+        const b = [...document.querySelectorAll('button')].find((x) => x.textContent?.trim() === '編集')
+        if (b) {
+          const r = b.getBoundingClientRect()
+          window.scrollBy({ top: r.bottom - (window.innerHeight - 90), behavior: 'instant' })
+        }
+      })
+      await eoPage.waitForTimeout(300)
+      await eoEdit.click()
+      await eoPage.waitForTimeout(1000)
+      const eoFits = await eoPage.evaluate(() => {
+        const input = document.querySelector('input[type="date"]')
+        const panel = input ? input.parentElement : null
+        const nav = document.querySelector('[data-app-bottom-bar]')
+        if (!panel) return null
+        const r = panel.getBoundingClientRect()
+        const navTop = nav ? nav.getBoundingClientRect().top : window.innerHeight
+        return { top: r.top, bottom: r.bottom, navTop }
+      })
+      check(
+        'EO-03 編集欄を開くと、下のタブナビに隠れない位置まで画面が動く',
+        !!eoFits && eoFits.top >= 0 && eoFits.bottom <= eoFits.navTop + 1,
+        eoFits ? `上端=${Math.round(eoFits.top)} 下端=${Math.round(eoFits.bottom)} タブ上端=${Math.round(eoFits.navTop)}` : 'panel not found',
+      )
+    } finally {
+      await eoBrowser.close()
     }
   }
 
