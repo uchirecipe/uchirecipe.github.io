@@ -52,8 +52,14 @@ export interface PriceDefaultItem {
  * 「単位だけを直す1回限りの移行」をdb/prices.tsに追加した。対象は
  * 「投入時の目安のまま(isDefault=true)で、価格も単位も旧既定と一致する行」だけで、
  * ユーザーが1円でも書き換えた行・単位を変えた行・消した行には一切触れない。
+ *
+ * 【2026-08-10 便FA・版7】同じ「生のしいたけ」に対して「しいたけ 150円」と「生しいたけ 100円」の
+ * 2項目が並んでいた（同じ食材なのに値段が違う）。オーナー裁定「生と乾燥を別項目として持ち、
+ * 名前で区別する」に沿って、生の側を「生しいたけ」1項目（100円）に寄せ、「乾燥しいたけ」を
+ * 別項目として足した。既存ユーザーの重複行は PRICE_DEFAULT_MERGES(下記)を使った
+ * 「名寄せの1回限りの移行」で1行に畳む（対象は目安のままの行だけ）。
  */
-export const PRICE_DEFAULTS_VERSION = 6
+export const PRICE_DEFAULTS_VERSION = 7
 
 /** 単位だけを直す移行の1件分（旧単位に一致する既定行だけを新単位へ書き換える） */
 export interface PriceDefaultUnitFix {
@@ -73,12 +79,53 @@ export interface PriceDefaultUnitFix {
  */
 export const PRICE_DEFAULT_UNIT_FIXES: PriceDefaultUnitFix[] = [
   { name: 'いちご', pricePerUnit: 400, fromUnit: '1パック', toUnit: '280g' },
+  // 2026-08-10 便FAで「しいたけ」は「生しいたけ」へ名寄せしたため、この1件は版7以降は空振りする
+  // （読み仮名辞書で両者が同じキーになり、下の「生しいたけ」の指定に吸収される。
+  //  版7の移行では PRICE_DEFAULT_MERGES が先に走って「しいたけ」の行そのものを畳むので、
+  //  版5の端末から版7へ上がる場合もこの行を通らずに正しい姿になる）。
+  // 便EYが何をしたかの記録として残す＝この配列から消さない
   { name: 'しいたけ', pricePerUnit: 150, fromUnit: '1パック', toUnit: '6枚' },
   { name: '生しいたけ', pricePerUnit: 100, fromUnit: '1パック', toUnit: '6枚' },
   { name: 'オクラ', pricePerUnit: 130, fromUnit: '1袋', toUnit: '10本' },
   { name: '小ねぎ', pricePerUnit: 80, fromUnit: '1袋', toUnit: '100g' },
   { name: '粉寒天', pricePerUnit: 50, fromUnit: '1袋', toUnit: '4g' },
   { name: 'ブルーベリー', pricePerUnit: 300, fromUnit: '1パック', toUnit: '100g' },
+]
+
+/** 2つに分かれていた同じ食材を1行に畳む移行の1件分（2026-08-10 便FA） */
+export interface PriceDefaultMerge {
+  /** 畳まれる側の項目名（この名前の行だけが対象。名前は完全一致で見る＝下の注記参照） */
+  fromName: string
+  /** 畳まれる側の旧既定の価格（この価格のままの行だけが対象） */
+  fromPricePerUnit: number
+  /** 畳まれる側の旧既定の単位（この単位のままの行だけが対象。版によって違うぶんは複数件並べる） */
+  fromUnit: string
+  /** 統合先の項目名（PRICE_DEFAULTS に在る名前） */
+  toName: string
+}
+
+/**
+ * 名寄せの1回限りの移行（2026-08-10 便FA）。
+ *
+ * 「しいたけ 150円」と「生しいたけ 100円」は同じ生のしいたけで、目安価格だけが違っていた。
+ * PRICE_DEFAULTS からは「しいたけ」を落として「生しいたけ 100円」1本にしたが、
+ * 既存ユーザーのマスタには「しいたけ」の行が残るため、この移行で1行に畳む。
+ *
+ * 畳む条件は unitFixesToApply と同じ「まだ何も手を加えていないと言い切れる行」だけ:
+ * 価格・単位が旧既定のままで isDefault=true の行に限る。自分で価格を入れた行・単位を変えた行は
+ * 1件も触らない（規約F。何が変わって何が残るかを説明できる線引きにする）。
+ *
+ * fromUnit を版ごとに2件並べているのは、版5の端末（単位が「1パック」のまま）と
+ * 版6の端末（便EYで「6枚」に直った後）のどちらから上がってきても畳めるようにするため。
+ *
+ * 【名前は完全一致で見る】unitFixesToApply が使う「かな表記ゆれ込みの正規化」は、
+ * 読み仮名辞書で「生しいたけ」も「しいたけ」も同じキーになるため、畳む側と統合先を区別できない。
+ * ここだけは括弧と前後の空白を落とした素の名前で突き合わせる（対象は投入時の目安行なので、
+ * 名前は投入したときの文字列そのままである）。
+ */
+export const PRICE_DEFAULT_MERGES: PriceDefaultMerge[] = [
+  { fromName: 'しいたけ', fromPricePerUnit: 150, fromUnit: '6枚', toName: '生しいたけ' },
+  { fromName: 'しいたけ', fromPricePerUnit: 150, fromUnit: '1パック', toName: '生しいたけ' },
 ]
 
 export const PRICE_DEFAULTS: PriceDefaultItem[] = [
@@ -137,7 +184,11 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'こんにゃく', pricePerUnit: 60, unit: '1枚' },
   // 2026-08-10 便EY: 「1パック」は栄養側の目安量に無く按分できないため、1パックの中身の
   // 実数量(6枚前後)へ。価格は据え置き(出典・計算はdocs/49の2026-08-10節)
-  { name: 'しいたけ', pricePerUnit: 150, unit: '6枚' },
+  // 2026-08-10 便FA: 旧「しいたけ 150円」と旧「生しいたけ 100円」は同じ生のしいたけだったので
+  // 「生しいたけ 100円」1項目に名寄せした(オーナー指定「どちらかなら生しいたけ」)。
+  // 素の「しいたけ」と書いたレシピも読み仮名辞書の名寄せでこの1件に解決する。
+  // 乾燥のほうは下の乾物の並びに「乾燥しいたけ」として別項目で持つ(価格帯が全く違うため)
+  { name: '生しいたけ', pricePerUnit: 100, unit: '6枚' },
   { name: 'にら', pricePerUnit: 100, unit: '1束' },
   // 2026-07-28 便BY/COST-01: 単位を「1個」→「1玉」へ。栄養側の目安量(nutritionData.tsの
   // にんにく unitGrams: 玉=45g・かけ=6g)が「個」を持たないため、レシピの「1かけ」から
@@ -213,6 +264,12 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'カットわかめ', pricePerUnit: 15, unit: '10g' },
   { name: '乾燥芽ひじき', pricePerUnit: 25, unit: '10g' },
   { name: '塩昆布', pricePerUnit: 30, unit: '10g' },
+  // 2026-08-10 便FA: 生と乾燥を名前で区別する（オーナー裁定）にあたって足した乾燥の側。
+  // 生しいたけ(100円/6枚)とは価格帯が全く違うので同じ値は使えない。スーパーの実売調査
+  // （出典・計算はdocs/49の2026-08-10節「乾燥しいたけ」）で最も一般的な販売規格が30gで、
+  // その実売が398円・415円だったため400円/30gに置く。栄養側の目安量(干ししいたけ 1枚=3g)で
+  // レシピの「2枚」からグラムに寄せて按分できる（2枚=6g=80円）
+  { name: '乾燥しいたけ', pricePerUnit: 400, unit: '30g' },
   { name: 'きな粉', pricePerUnit: 15, unit: '大さじ1' },
   // 2026-08-10 便EY: 分包の規格(1本=4g)をそのまま単位にした。中身と同梱レシピの分量が元から
   // 一致していたため金額は変わらないが、4g以外を書いたときも按分が通るようになる
@@ -302,9 +359,8 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: '万能ねぎ', pricePerUnit: 100, unit: '1束' },
   { name: 'まいたけ', pricePerUnit: 130, unit: '1パック' },
   { name: 'エリンギ', pricePerUnit: 100, unit: '1パック' },
-  // 2026-08-10 便EY: 上の「しいたけ」と同じ規格(1パック6枚前後)。同じ食材の別表記だが
-  // 目安価格が別々に置かれている(150円/100円)ため、単位だけを揃えて金額は据え置いた
-  { name: '生しいたけ', pricePerUnit: 100, unit: '6枚' },
+  // 2026-08-10 便FA: ここにあった2件目の「生しいたけ」は上の野菜・きのこの並びへ1本化した
+  // （便EYの時点では「しいたけ 150円」と「生しいたけ 100円」が同じ食材のまま並んでいた）
   { name: 'しらたき', pricePerUnit: 80, unit: '1袋' },
   { name: '昆布', pricePerUnit: 400, unit: '100g' },
   { name: '梅干し', pricePerUnit: 30, unit: '1個' },

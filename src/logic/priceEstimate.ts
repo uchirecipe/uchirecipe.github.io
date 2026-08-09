@@ -57,6 +57,13 @@ export interface PriceIndexEntry {
 /**
  * PriceEntry配列から照合用の索引を作る。
  * 照合キー(かな正規化後)が長いものを先に並べる（前方一致で複数ヒットしたとき、より具体的な名前を優先するため）。
+ *
+ * 2026-08-10 便FA: 照合キーが**同じ**行が2つ並んだときは、ユーザーが値を入れた行(isDefault=false)を
+ * 先にする。名寄せした食材（「しいたけ」と「生しいたけ」、「三つ葉」と「みつば」、「人参」と
+ * 「にんじん」）は、既存端末に旧名の行が残っていると同じ照合キーの行が2つできる。並び順まかせだと
+ * 投入時の目安価格のほうが当たり、ユーザーが自分で入れた値段が使われないことがあった。
+ * 「自分で入れた値段が優先される」を索引の作り方として固定する
+ * （PRICE_DEFAULTS には同じ照合キーの項目が無いので、新規インストールの挙動は1円も変わらない）。
  */
 export function buildPriceIndex(
   entries: { id?: number; name: string; pricePerUnit: number; unit: string; isDefault?: boolean }[],
@@ -74,7 +81,11 @@ export function buildPriceIndex(
       }
     })
     .filter((e) => e.normalizedName && e.pricePerUnit > 0)
-    .sort((a, b) => b.matchKey.length - a.matchKey.length)
+    .sort(
+      (a, b) =>
+        b.matchKey.length - a.matchKey.length ||
+        Number(a.isDefault) - Number(b.isDefault),
+    )
 }
 
 /**
