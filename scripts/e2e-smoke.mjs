@@ -22283,11 +22283,21 @@ try {
       // 「食材と価格」の単位表記も新しい内容量になっていること
       await eyPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
       await eyPage.waitForTimeout(900)
-      const eyIchigoRow = await eyPage.locator('li', { hasText: 'いちご' }).first().textContent()
+      // 単位は「数量欄＋単位の選択」に分かれて表示される(PRICEUNIT-01と同じ読み方をする。
+      // 行のテキストを見ると選択肢の一覧まで拾ってしまうため、入力値で確かめる)
+      const eyIchigoRow = eyPage.locator('li', { hasText: 'いちご' }).first()
+      const eyIchigoQty = await eyIchigoRow.getByLabel('いちごの数量').inputValue()
+      const eyIchigoUnit = await eyIchigoRow.getByLabel('いちごの単位').inputValue()
       check(
         'EY-01 「食材と価格」のいちごの単位が280g(1パックの標準内容量)になっている',
-        (eyIchigoRow ?? '').includes('280') && !(eyIchigoRow ?? '').includes('パック'),
-        String(eyIchigoRow),
+        eyIchigoQty === '280' && eyIchigoUnit === 'g',
+        `数量=${eyIchigoQty} 単位=${eyIchigoUnit}`,
+      )
+      const eyIchigoPrice = await eyIchigoRow.getByLabel('いちごの価格（円）').inputValue()
+      check(
+        'EY-01 いちごの価格は400円のまま(単位の書き方だけを直したので金額は動かない)',
+        eyIchigoPrice === '400',
+        String(eyIchigoPrice),
       )
     } finally {
       await eyBrowser.close()
