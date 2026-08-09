@@ -369,7 +369,11 @@ const CATEGORY_PATTERNS: { category: StepCategory; patterns: RegExp[] }[] = [
   },
   {
     category: 'season',
-    patterns: [/混ぜ|まぜ|和え|あえ|こね|練る|練り|溶く|溶き|下味|もみ込|もみこ|まぶ|合わせ|漬け|漬ける|にぎる|包む|巻く|形を整え|成形/],
+    // 「合わせ」は**加熱の動詞にくっついた形（炒め合わせる・煮合わせる）を除く**
+    // （2026-08-09 便ES・オーナー報告D-5「玉ねぎをしんなりするまで炒め、ご飯をほぐしながら
+    //   炒め合わせる」の目安が3分。位置ルールで「合わせ」が「炒め」より後ろに来るため、
+    //   炒め工程まるごとが「混ぜる（3分）」に化けていた）
+    patterns: [/混ぜ|まぜ|和え|あえ|こね|練る|練り|溶く|溶き|下味|もみ込|もみこ|まぶ|(?<!炒め|煮|焼き|揚げ|いため)合わせ|漬け|漬ける|にぎる|包む|巻く|形を整え|成形/],
   },
   {
     category: 'heat',
@@ -381,18 +385,26 @@ const CATEGORY_PATTERNS: { category: StepCategory; patterns: RegExp[] }[] = [
   },
 ]
 
-/** 手順の作業の種類を、本文の中で最後に出てきた見分け語から決める */
-export function stepCategory(step: Step): StepCategory {
-  let best: StepCategory = 'other'
+/**
+ * 手順の作業の種類を、本文の中で最後に出てきた見分け語から決める。
+ * どの見分け語にも当たらなければ undefined（＝その断片には動作が書かれていない）。
+ */
+function matchedCategory(text: string): StepCategory | undefined {
+  let best: StepCategory | undefined
   let bestAt = -1
   for (const { category, patterns } of CATEGORY_PATTERNS) {
-    const at = lastIndexOfPatterns(step.text, patterns)
+    const at = lastIndexOfPatterns(text, patterns)
     if (at > bestAt) {
       bestAt = at
       best = category
     }
   }
   return best
+}
+
+/** 手順の作業の種類を、本文の中で最後に出てきた見分け語から決める（当たらなければ 'other'） */
+export function stepCategory(step: Step): StepCategory {
+  return matchedCategory(step.text) ?? 'other'
 }
 
 /**
@@ -432,8 +444,9 @@ export function stepStageRank(step: Step): number {
  *      （およそ60字ごとに1工程分＝DEFAULT_ACTIVE_MINUTES を足す。長い1手順は作業量も多い）
  */
 const ACTIVE_MINUTES_BY_CATEGORY: Record<StepCategory, number> = {
-  // 切る: 数種類の野菜を刻む想定
-  cut: 4,
+  // 切る: 1つの動作（1文・1節）ぶん。数種類を切る手順は、節・文ごとに動作を数えて足す
+  // （2026-08-09 便ES で 4→3。複数動作の足し上げを入れたので、1動作の目安をそろえ直した）
+  cut: 3,
   // 洗う・水気を取る・筋を取る等の下処理
   wash: 3,
   // 混ぜる・和える・下味をもみ込む・成形
@@ -442,6 +455,8 @@ const ACTIVE_MINUTES_BY_CATEGORY: Record<StepCategory, number> = {
   heat: 5,
   // 器に盛る・散らす・添える
   finish: 2,
+  // 見分け語に当たらなかった手順。動作のまとまり（stepActionGroups）は見分け語に当たった
+  // 断片しか作らないので、ここが使われるのは stepCategory を直接呼ぶ並べ替え側だけ
   other: 4,
 }
 
@@ -455,8 +470,81 @@ const QUICK_HEAT_MINUTES = 2
 
 /** 手順文が何字ごとに「1工程ぶん」の作業量を持つとみなすか */
 const ACTIVE_BULK_CHARS = 60
-/** 長い手順への足し上げの上限（＋4分×4＝最大16分まで） */
-const ACTIVE_BULK_MAX = 5
+/** 見積りの上限（分）。どれだけ長い1手順でもここで頭打ちにする */
+const ACTIVE_MINUTES_CAP = 20
+
+/**
+ * 2つめ以降の動作に足す分数（2026-08-09 便ES・オーナー報告D-5
+ * 「1手順に複数動作があるときの見積りが短すぎる。『玉ねぎをしんなりするまで炒め＋ご飯を
+ *   ほぐしながら炒め合わせる』で目安3分は足りない」）。
+ *
+ * 従来は**手順の中で最後に出てきた動作1つだけ**でその手順の所要時間を決めていた。
+ * 「切り、炒め、味をととのえて器に盛る」のように3つの動作が入った手順でも、
+ * 最後の「盛る」だけを見て2分と見積っていた（同梱109品では手作業手順の53%が複数動作）。
+ *
+ * 満額（その動作を単独でやったときの目安）を足さず**1分ずつ**にとどめるのは、
+ * 続けてやる動作は段取りが重なるため（炒めながら味をつける・切ったそばからボウルに入れる）。
+ * 同梱109品で測ると、満額に近い足し方（種類ごとに1〜2分）では並行の短縮率が
+ * 32.6%→32.4%に落ちた（＝待ち時間に入る作業が減って段取りが痩せる）。1分ずつなら
+ * 短縮率を保ったまま、複数動作の手順だけを実態に近づけられる。
+ */
+const EXTRA_ACTION_MINUTES = 1
+
+/** 文の区切り（句点・改行）。文をまたぐ動作は、同じ種類でもまとめない */
+const SENTENCE_SPLIT_PATTERN = /[。．\n]/
+/** 文の中で動作ごとに切るときの区切り（読点） */
+const CLAUSE_SPLIT_PATTERN = /[、，,]/
+
+/** 1手順の中の「動作のまとまり」 */
+export interface StepActionGroup {
+  category: StepCategory
+  text: string
+}
+
+/**
+ * 手順文を「動作のまとまり」に分ける（2026-08-09 便ES）。
+ *
+ * 読点・句点で区切り、**動作の語が入っている断片だけ**をまとまりとして数える。
+ * 材料の列挙（「しょうゆ、ごま油、酢を混ぜる」の「しょうゆ」「ごま油」）は動作が無いので
+ * 数えない＝読点の数で見積りが膨らまないようにするための歯止め。
+ * 同じ種類が続く断片は1つにまとめる（「切り、薄切りにする」は切る作業1つ）。
+ */
+export function stepActionGroups(text: string): StepActionGroup[] {
+  const groups: StepActionGroup[] = []
+  for (const sentence of text.split(SENTENCE_SPLIT_PATTERN)) {
+    // 同じ種類をまとめるのは1つの文の中だけ（文が変われば別の作業と数える）。
+    // 1段落まるごとが1手順になった取り込みレシピ（診断 docs/68 3-3）で、
+    // 「炒めます。…炒め、…」を1つの動作に潰してしまわないための区切り
+    let sentenceStart = groups.length
+    for (const raw of sentence.split(CLAUSE_SPLIT_PATTERN)) {
+      const fragment = raw.trim()
+      if (!fragment) continue
+      const category = matchedCategory(fragment)
+      const last = groups[groups.length - 1]
+      if (category === undefined) {
+        // 動作の書かれていない断片（「ボウルに」「お好みで」）は、直前のまとまりの一部として扱う
+        if (last) last.text += fragment
+        continue
+      }
+      if (last && groups.length > sentenceStart && last.category === category) {
+        last.text += fragment
+        continue
+      }
+      groups.push({ category, text: fragment })
+    }
+    sentenceStart = groups.length
+  }
+  return groups
+}
+
+/** その動作のまとまり1つぶんの目安（分） */
+function groupBaseMinutes(group: StepActionGroup): number {
+  // 「油を熱する」「火にかける」だけの加熱は、手を動かす時間そのものは短い
+  if (group.category === 'heat' && !SUSTAINED_COOK_PATTERN.test(group.text)) {
+    return QUICK_HEAT_MINUTES
+  }
+  return ACTIVE_MINUTES_BY_CATEGORY[group.category]
+}
 
 export interface ActiveMinutesEstimate {
   minutes: number
@@ -467,22 +555,31 @@ export interface ActiveMinutesEstimate {
 export function estimateActiveMinutes(step: Step): ActiveMinutesEstimate {
   if (step.minutes != null && step.minutes > 0) return { minutes: step.minutes, estimated: false }
   const text = step.text ?? ''
-  const bulk = Math.max(1, Math.min(ACTIVE_BULK_MAX, Math.ceil(text.length / ACTIVE_BULK_CHARS)))
   const fromText = resolveStepMinutes(step)
-  // 短い手順に「3分炒める」と書いてあれば、それがその手順の所要時間そのもの
-  if (fromText != null && bulk === 1) return { minutes: fromText, estimated: false }
-  const category = stepCategory(step)
-  // 作業の種類ごとの目安は「1つの動作を書いた短い手順」に当てはまるもの。
-  // 1手順に何段落も書かれているレシピは、最後の動作だけでは作業量が読めないので基本の4分に戻す
-  const base =
-    bulk > 1
-      ? DEFAULT_ACTIVE_MINUTES
-      : category === 'heat' && !SUSTAINED_COOK_PATTERN.test(text)
-        ? QUICK_HEAT_MINUTES
-        : ACTIVE_MINUTES_BY_CATEGORY[category]
-  const guess = base + (bulk - 1) * DEFAULT_ACTIVE_MINUTES
-  // 長い手順は、本文に書かれた時間（その一部の作業の時間）より短くならないようにする
-  return { minutes: Math.max(guess, fromText ?? 0), estimated: true }
+  const groups = stepActionGroups(text)
+  // 動作が1つだけの短い手順に「3分炒める」と書いてあれば、それがその手順の所要時間そのもの
+  if (fromText != null && groups.length <= 1 && text.length <= ACTIVE_BULK_CHARS) {
+    return { minutes: fromText, estimated: false }
+  }
+  if (groups.length === 0) {
+    // 動作の語が1つも見つからない手順（取り込みレシピの説明文など）は、文の長さだけで見る
+    const bulk = Math.max(1, Math.ceil(text.length / ACTIVE_BULK_CHARS))
+    const guess = Math.min(ACTIVE_MINUTES_CAP, bulk * DEFAULT_ACTIVE_MINUTES)
+    return { minutes: Math.max(guess, fromText ?? 0), estimated: true }
+  }
+  // いちばん重い動作を満額、残りの動作は1分ずつ足す
+  const bases = groups.map(groupBaseMinutes)
+  const mainIndex = bases.indexOf(Math.max(...bases))
+  const byAction = bases.reduce(
+    (sum, base, i) => sum + (i === mainIndex ? base : EXTRA_ACTION_MINUTES),
+    0,
+  )
+  const guess = byAction
+  // 本文に書かれた時間（その一部の作業の時間）より短くならないようにする
+  return {
+    minutes: Math.min(ACTIVE_MINUTES_CAP, Math.max(guess, fromText ?? 0)),
+    estimated: true,
+  }
 }
 
 /**
@@ -656,6 +753,14 @@ export interface PlanStep {
   stepNumber: number
   /** ナビが段取りに足した工程か（レシピには書かれていない） */
   addedByNavi: boolean
+  /**
+   * レシピの1手順を段取りの上で2つに分けたとき、元がレシピの何番目の手順か
+   * （2026-08-09 便ES・オーナー指示D-4「手順番号を③-1、③-2のようにして分割が分かる形に」）。
+   * 湯沸かしを切り出した／前に差し込んだ場合の2つの工程に付く。分けていない手順では undefined。
+   */
+  splitOf?: number
+  /** 分けた2つのうち何番目か（1 または 2） */
+  splitPart?: 1 | 2
 }
 
 /**
@@ -725,11 +830,15 @@ export function buildPlanSteps(steps: readonly Step[]): PlanStep[] {
   if (boilAt === -1) return plain
   // 前の手順ですでに湯を沸かしていれば何もしない
   if (masked.slice(0, boilAt).some((t) => BOIL_WATER_MENTION.test(t))) return plain
+  // 分けた2つには「③-1」「③-2」の番号を付ける（2026-08-09 便ES）。
+  // stepIndex（カーソル・タイマー・手順カードのidに使う識別子）は従来のまま変えない
   const addedAt = (text: string): PlanStep => ({
     step: { text, minutes: BOIL_WATER_MINUTES },
     stepIndex: -1,
     stepNumber: 0,
     addedByNavi: true,
+    splitOf: boilAt + 1,
+    splitPart: 1,
   })
   if (BOIL_WATER_MENTION.test(masked[boilAt])) {
     // 同じ手順の中に湯沸かしが書かれている＝そこだけを前の工程として切り出す
@@ -738,10 +847,32 @@ export function buildPlanSteps(steps: readonly Step[]): PlanStep[] {
     const rest: PlanStep = {
       ...plain[boilAt],
       step: { ...steps[boilAt], text: split.rest },
+      splitOf: boilAt + 1,
+      splitPart: 2,
     }
     return [...plain.slice(0, boilAt), addedAt(split.boilWater), rest, ...plain.slice(boilAt + 1)]
   }
-  return [...plain.slice(0, boilAt), addedAt(ja.cookNavi.addedBoilWaterStep), ...plain.slice(boilAt)]
+  const boiled: PlanStep = { ...plain[boilAt], splitOf: boilAt + 1, splitPart: 2 }
+  return [
+    ...plain.slice(0, boilAt),
+    addedAt(ja.cookNavi.addedBoilWaterStep),
+    boiled,
+    ...plain.slice(boilAt + 1),
+  ]
+}
+
+/**
+ * 画面に出す「そのレシピ内での手順番号」（2026-08-09 便ES・オーナー指示D-4）。
+ * レシピの1手順を段取りの上で2つに分けた工程は「3-1」「3-2」。
+ * 番号を持たない工程（分けていないナビ追加の工程）は undefined。
+ */
+export function recipeStepLabel(item: {
+  stepNumber: number
+  splitOf?: number
+  splitPart?: 1 | 2
+}): string | undefined {
+  if (item.splitOf != null && item.splitPart != null) return `${item.splitOf}-${item.splitPart}`
+  return item.stepNumber > 0 ? String(item.stepNumber) : undefined
 }
 
 /** レシピの色分け用パレット添字（0,1,2）。CookNaviPage 側で CSS 変数のチップ色に対応づける */
@@ -765,6 +896,10 @@ export interface TimelineItem {
   stepIndex: number
   /** ナビが段取りに足した工程か（レシピの手順には無い。2026-08-08 便EG） */
   addedByNavi: boolean
+  /** レシピの1手順を段取りの上で2つに分けたときの、元の手順番号（2026-08-09 便ES） */
+  splitOf?: number
+  /** 分けた2つのうち何番目か（1 または 2） */
+  splitPart?: 1 | 2
   text: string
   memo?: string
   minutes?: number
@@ -807,6 +942,8 @@ interface Job {
     stepIndex: number
     stepNumber: number
     addedByNavi: boolean
+    splitOf?: number
+    splitPart?: 1 | 2
     text: string
     memo?: string
     minutes?: number
@@ -849,7 +986,7 @@ function buildJobs(recipes: Recipe[]): Job[] {
       ptr: 0,
       readyAt: 0,
       attendUntil: 0,
-      steps: buildPlanSteps(r.steps).map(({ step: s, stepIndex, stepNumber, addedByNavi }) => {
+      steps: buildPlanSteps(r.steps).map(({ step: s, stepIndex, stepNumber, addedByNavi, splitOf, splitPart }) => {
         const kind = classifyStep(s)
         // 待ちの分数は明示 minutes ＞本文の時間表記＞調理法ごとの既定分数の順で解決する
         // （classifyStep が wait を返した時点で resolveWaitMinutes は必ず値を持つ）。手作業系の
@@ -863,13 +1000,15 @@ function buildJobs(recipes: Recipe[]): Job[] {
           stepIndex,
           stepNumber,
           addedByNavi,
+          splitOf,
+          splitPart,
           text: s.text,
           memo: s.memo,
           minutes: s.minutes,
           kind,
           waitMinutes,
           // 手順に時間が書かれておらず、調理法から当てた分数で待ちにした手順
-          // （ナビが足した工程は「ナビが追加」の印だけを出す＝印は1つにする）
+          // （ナビが足した工程は分割の番号「◯-1」で示すので、ここでは印を出さない）
           waitEstimated: kind === 'wait' && !addedByNavi && resolveStepMinutes(s) == null,
           activeMinutes: kind === 'active' ? active.minutes : 0,
           activeEstimated: kind === 'active' && active.estimated,
@@ -1103,6 +1242,13 @@ export interface CookPlan extends CookTimeline {
   parallelMinutes: number
   /** 1品ずつ作るのに比べて何%縮むか */
   gainPercent: number
+  /**
+   * このうち「台所を離れられる待ち」の合計（分。2026-08-09 便ES・オーナー指摘B）。
+   * 漬ける・冷やす・寝かせる・もどす など、数分の遅れが料理に影響しない待ち（waitUrgency の
+   * relaxed）だけを数える。レシピ欄の「調理時間」はこの時間を含めないので、
+   * ナビの合計がレシピの合計より長く出る理由の大半がここにある。
+   */
+  awayMinutes: number
 }
 
 /**
@@ -1177,15 +1323,35 @@ export function buildCookPlan(recipes: Recipe[]): CookPlan {
   const gainPercent =
     sequentialMinutes > 0 ? ((sequentialMinutes - parallelMinutes) / sequentialMinutes) * 100 : 0
   if (gainPercent >= MIN_GAIN_PERCENT) {
-    return { ...parallel, mode: 'parallel', sequentialMinutes, parallelMinutes, gainPercent }
+    return {
+      ...parallel,
+      mode: 'parallel',
+      sequentialMinutes,
+      parallelMinutes,
+      gainPercent,
+      awayMinutes: awayWaitMinutes(parallel.items),
+    }
   }
+  const sequential = buildSequentialTimeline(valid)
   return {
-    ...buildSequentialTimeline(valid),
+    ...sequential,
     mode: 'sequential',
     sequentialMinutes,
     parallelMinutes,
     gainPercent,
+    awayMinutes: awayWaitMinutes(sequential.items),
   }
+}
+
+/**
+ * 段取りの中で「台所を離れられる待ち」の合計（分）。
+ * 判定は waitUrgency の relaxed（漬ける・冷やす・寝かせる・もどす等）だけ。
+ * ゆでる・煮るのように鍋の前に戻らないといけない待ちは数えない。
+ */
+function awayWaitMinutes(items: readonly TimelineItem[]): number {
+  return items
+    .filter((item) => item.kind === 'wait' && waitUrgency({ text: item.text }) === 'relaxed')
+    .reduce((sum, item) => sum + item.waitMinutes, 0)
 }
 
 /**
@@ -1220,6 +1386,8 @@ function makeItem(
     activeMinutes: step.activeMinutes,
     activeEstimated: step.activeEstimated,
     addedByNavi: step.addedByNavi,
+    splitOf: step.splitOf,
+    splitPart: step.splitPart,
     startMin,
     endMin,
   }

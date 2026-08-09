@@ -3,6 +3,7 @@ import { X, BellRing, Bell, BellOff, CornerUpLeft } from 'lucide-react'
 import type { ActiveTimer } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
 import StepBadge from './StepBadge'
+import { naviRecipeColor } from '../logic/naviColors'
 import { ja } from '../i18n/ja'
 
 type Props = {
@@ -26,6 +27,12 @@ type Props = {
    * そのレシピ内の手順番号のままにする。
    */
   useNaviOrder?: boolean
+  /**
+   * レシピ名をタップしたときの移動先（2026-08-09 便ES・オーナー指示E-14
+   * 「タイマーのバー→調整画面→レシピ名タップ→該当手順へ移動（タイマー全般）」）。
+   * 未指定ならレシピ名はただの見出しのまま（飛び先が無い場面）。
+   */
+  onLabelClick?: () => void
 }
 
 /**
@@ -43,6 +50,7 @@ export default function TimerAdjustModal({
   onGoToStep,
   onToggleMute,
   useNaviOrder,
+  onLabelClick,
 }: Props) {
   useEffect(() => {
     if (!timer) return
@@ -62,6 +70,15 @@ export default function TimerAdjustModal({
       : timer.stepNumber > 0
         ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
         : null
+
+  /**
+   * そのレシピ内での手順番号（分けた工程は「3-1」）。
+   * 段取りの通し番号を出しているとき（ナビ由来）だけ並べる＝同じ数字を2つ並べない
+   */
+  const recipeStepBadge =
+    naviOrder == null
+      ? undefined
+      : (timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined))
 
   const remaining = Math.max(0, Math.ceil((timer.endsAt - now) / 1000))
   // 窓を開いたままタイマーが終わった場合(2026-07-28 機能④診断C10)。
@@ -84,7 +101,23 @@ export default function TimerAdjustModal({
         className="w-full max-w-sm min-w-0 rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-center justify-between gap-2">
-          <h3 className="font-bold">{ja.timer.adjustDialogTitle}</h3>
+          <h3 className="flex min-w-0 items-center gap-1 font-bold">
+            {ja.timer.adjustDialogTitle}
+            {/* 消音は記号だけにして見出しの横へ（2026-08-09 便ES・オーナー指示E-15）。
+                下段の大きなボタンだと「+1分」「停止」と同じ重みに見えて、
+                窓の主な操作が3つあるように読めていた */}
+            {onToggleMute && !finished && (
+              <button
+                type="button"
+                data-testid="timer-adjust-mute"
+                onClick={onToggleMute}
+                aria-label={timer.muted ? ja.timer.unmute : ja.timer.mute}
+                className="shrink-0 rounded-full p-1.5 text-ink-muted"
+              >
+                {timer.muted ? <BellOff size={20} aria-hidden /> : <Bell size={20} aria-hidden />}
+              </button>
+            )}
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -94,7 +127,7 @@ export default function TimerAdjustModal({
             <X size={20} aria-hidden />
           </button>
         </div>
-        <div className="mt-[var(--space-sm)] flex items-center justify-center gap-2">
+        <div className="mt-[var(--space-sm)] flex items-center justify-center gap-1.5">
           <StepBadge
             number={
               timer.isCustom
@@ -103,7 +136,28 @@ export default function TimerAdjustModal({
             }
             size={32}
           />
-          <span className="min-w-0 truncate font-bold">{timer.label}</span>
+          {/* 段取りの通し番号だけでなく、そのレシピ内の手順番号もレシピの色で並べる
+              （2026-08-09 便ES・オーナー指示E-13） */}
+          {!timer.isCustom && recipeStepBadge && (
+            <StepBadge
+              number={recipeStepBadge}
+              size={26}
+              color={timer.naviColorIndex != null ? naviRecipeColor(timer.naviColorIndex) : undefined}
+            />
+          )}
+          {/* レシピ名をタップするとその手順へ移動する（同・オーナー指示E-14） */}
+          {onLabelClick ? (
+            <button
+              type="button"
+              data-testid="timer-adjust-label"
+              onClick={onLabelClick}
+              className="min-w-0 truncate font-bold text-accent-ink underline"
+            >
+              {timer.label}
+            </button>
+          ) : (
+            <span className="min-w-0 truncate font-bold">{timer.label}</span>
+          )}
           {/* 手順のタイマーは、どの手順の時間かを名前の横に添える(2026-08-03 実機FB②)。
               時計バッジの「自分で時間を決めたタイマー」には手順表記を付けない */}
           {!timer.isCustom && stepText && (
@@ -142,20 +196,6 @@ export default function TimerAdjustModal({
           <p className="mt-[var(--space-sm)] text-center text-sm text-ink-muted">
             {ja.timer.adjustFinishedHint}
           </p>
-        )}
-        {/* このタイマーだけ消音する切り替え(2026-08-03 オーナー実機フィードバック④)。
-            常駐バーの行にある切り替えと同じ働きで、全画面の調理中モードからも触れるようにここに置く。
-            終わったタイマーには効く音がもう無いので出さない */}
-        {onToggleMute && !finished && (
-          <button
-            type="button"
-            onClick={onToggleMute}
-            aria-label={timer.muted ? ja.timer.unmute : ja.timer.mute}
-            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
-          >
-            {timer.muted ? <BellOff size={20} aria-hidden /> : <Bell size={20} aria-hidden />}
-            {timer.muted ? ja.timer.unmute : ja.timer.mute}
-          </button>
         )}
         {/* このタイマーを始めた手順へ戻る(2026-08-03 オーナー実機フィードバック③) */}
         {onGoToStep && (

@@ -36,6 +36,16 @@ export default function TimerBar() {
   const sortedTimers = sortTimersForDisplay(timers)
 
   /**
+   * そのレシピ内での手順番号（分けた工程は「3-1」）。
+   * 出すのは**段取りの通し番号を出しているタイマーだけ**＝ナビ由来のもの。
+   * ナビ以外のタイマーは1つめのバッジがすでにレシピ内の手順番号なので、同じ数字を2つ並べない
+   */
+  const recipeStepBadge = (timer: ActiveTimer): string | undefined => {
+    if (timer.naviOrder == null) return undefined
+    return timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined)
+  }
+
+  /**
    * 完了タイマーのタップで該当レシピの該当手順へ。
    * 通常は単品レシピ詳細（?step=）へ飛んで詳細画面側でスクロール＆一時ハイライトする。
    * ただし並行調理ナビ実行中は、常駐バーは元々レシピ詳細向けの設計なので詳細へ離脱させず、
@@ -136,6 +146,18 @@ export default function TimerBar() {
                 }
                 size={28}
               />
+              {/* そのレシピ内の手順番号も、レシピの色で並べて出す（2026-08-09 便ES・
+                  オーナー指示E-12「タイマーのバーの番号がナビの番号のみ・色も違う
+                  →両方の番号＋レシピ色」）。段取りの番号だけでは、どの品のどの手順か分からなかった */}
+              {!timer.isCustom && recipeStepBadge(timer) && (
+                <StepBadge
+                  number={recipeStepBadge(timer)!}
+                  size={22}
+                  color={
+                    timer.naviColorIndex != null ? naviRecipeColor(timer.naviColorIndex) : undefined
+                  }
+                />
+              )}
               {timer.done && <BellRing size={18} className="shrink-0 animate-pulse" aria-hidden />}
               <span className="min-w-0 flex-1 truncate text-sm font-bold">{timer.label}</span>
               <span className="text-lg font-bold tabular-nums">
@@ -223,6 +245,15 @@ export default function TimerBar() {
         /* 動作中タイマーからレシピの手順へ戻る導線(2026-08-03 実機FB③の復活)。
            終わった行は従来どおり行タップで直接その手順へ飛ぶ */
         onGoToStep={
+          adjustingTimer
+            ? () => {
+                setAdjustingId(null)
+                goToStep(adjustingTimer)
+              }
+            : undefined
+        }
+        /* レシピ名のタップでも同じ手順へ移動する（2026-08-09 便ES・オーナー指示E-14） */
+        onLabelClick={
           adjustingTimer
             ? () => {
                 setAdjustingId(null)

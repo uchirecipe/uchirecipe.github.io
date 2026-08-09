@@ -6392,7 +6392,7 @@ try {
       check(
         'MEALPLAN-01(便EK・規約F) 確認文が残る食事とその件数を名指しする',
         mpDialogs.some((m) =>
-          m.includes(`ほかの食事（昼食）の予定${mpBeforeClear.lunch}品と、作った記録は残ります`),
+          m.includes(`他の食事（昼食）の予定${mpBeforeClear.lunch}品と、作った記録は残ります`),
         ),
         `dialogs=${JSON.stringify(mpDialogs)}`,
       )
@@ -10361,7 +10361,7 @@ try {
         'MEALPLAN-DU(⑧・規約F) キャンセルの確認文が「取り消すもの」と「戻るもの」を両方件数つきで書く',
         duDialog.includes('取り消すもの: 追加した1品') &&
           duDialog.includes('戻るもの: この画面を開いたときの献立0品') &&
-          duDialog.includes('作った記録と写真、ほかの日の献立は変わりません'),
+          duDialog.includes('作った記録と写真、他の日の献立は変わりません'),
         `確認文=${duDialog}`,
       )
       const duAfterCancel = await duPage.evaluate(
@@ -15823,7 +15823,9 @@ try {
         (await nav7Page.textContent('body')).includes('2件の作った記録を取り消して、今日の献立に戻しました'),
       )
 
-      // 「戻る」を押すと作りかけの段取りは終わる
+      // 「戻る」は画面を移るだけ＝段取りは残る(2026-08-09 便ES・オーナー実機報告
+      // 「段取りを作る→戻る→今日の献立画面（再開ボタンが出ない）→並行調理ナビ→段取りが消えている」)。
+      // 段取りを終える操作は「レシピを選び直す」と「まとめて作った！」の2つだけ
       currentCheck = 'NAVI-07'
       await nav7Page.goto(`${BASE}/#/cook-navi`)
       await nav7Page.reload({ waitUntil: 'networkidle' })
@@ -15831,15 +15833,147 @@ try {
       await nav7Page.getByRole('button', { name: '段取りを作る' }).click()
       await nav7Page.waitForTimeout(600)
       await nav7Page.getByRole('button', { name: '戻る' }).first().click()
-      await nav7Page.waitForTimeout(600)
+      await nav7Page.waitForTimeout(800)
+      check(
+        'NAVI-07 「戻る」で献立タブに戻ったとき、再開の入口が出ている',
+        (await nav7Page.locator('[data-testid="navi-resume"]').count()) === 1,
+        `url=${nav7Page.url()}`,
+      )
       await nav7Page.goto(`${BASE}/#/cook-navi`)
       await nav7Page.waitForTimeout(900)
       check(
-        'NAVI-07 「戻る」を押したあとは段取りが残らない',
-        !(await nav7Page.textContent('body')).includes('組み合わせる2品'),
+        'NAVI-07 「戻る」を押しても段取りは残る',
+        (await nav7Page.textContent('body')).includes('組み合わせる2品'),
+      )
+      // 「レシピを選び直す」を押すと段取りは終わる(＝再開の入口も消える)
+      await nav7Page.getByRole('button', { name: 'レシピを選び直す' }).click()
+      await nav7Page.waitForTimeout(600)
+      await nav7Page.goto(`${BASE}/#/meal-plan`)
+      await nav7Page.waitForTimeout(900)
+      check(
+        'NAVI-07 「レシピを選び直す」を押すと再開の入口は消える',
+        (await nav7Page.locator('[data-testid="navi-resume"]').count()) === 0,
       )
     } finally {
       await nav7Browser.close()
+    }
+  }
+
+  // --- ES-01: 段取りが消える重大バグの再発防止(2026-08-09 便ES・オーナー実機報告)。
+  //     「調理中モード→×で閉じる→他の画面→献立タブ→ナビ再開」「段取りを作ったあと画面を
+  //     離れて再開」「実行中のタイマーが終了」の3経路で、段取りが消えず単品レシピにも飛ばないこと。
+  //     再現の肝は**今日の献立が「今週の献立の予定」だけで組まれている**状態。今日の献立リスト・
+  //     今週の予定・レシピ本体は別々に読み込まれ、予定の読み込みだけが遅れる一瞬に
+  //     「今日の献立が空になった」と読み違えて選択を全部捨てていた ---
+  currentCheck = 'ES-01'
+  {
+    const esBrowser = await chromium.launch()
+    const esContext = await esBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const esPage = await esContext.newPage()
+    esPage.on('dialog', (dialog) => void dialog.accept())
+    esPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@ES-01] ${err.message}`)
+    })
+    const esSession = () =>
+      esPage.evaluate(() => sessionStorage.getItem('uchi-recipe-cook-navi-session'))
+    try {
+      await esPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await esPage.waitForTimeout(1800)
+      await esPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('ES予定煮物', [
+          { text: '材料を切る' }, { text: '鍋に入れて2秒煮る', minutes: 10 }, { text: '盛り付ける' },
+        ])))
+        const idB = await P(store('recipes').add(mk('ES予定サラダ', [
+          { text: '野菜を切る' }, { text: 'ドレッシングと和える' },
+        ])))
+        // 今日の献立は「今週の献立の予定」だけで組む(todayList には1件も入れない)
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        await P(store('mealPlans').add({ date: today, slot: 'dinner', recipeId: idA, role: 'main' }))
+        await P(store('mealPlans').add({ date: today, slot: 'dinner', recipeId: idB, role: 'side' }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await esPage.goto(`${BASE}/#/cook-navi`)
+      await esPage.reload({ waitUntil: 'networkidle' })
+      await esPage.waitForTimeout(1400)
+      await esPage.getByRole('button', { name: '段取りを作る' }).click()
+      await esPage.waitForTimeout(700)
+      check(
+        'ES-01 今週の献立の予定だけでも段取りが作れる',
+        (await esPage.textContent('body')).includes('組み合わせる2品'),
+      )
+
+      // 経路①: 調理中モードを開いて×で閉じる→別の画面→献立タブ→再開
+      await esPage.locator('[data-testid="cook-session-start"]').click()
+      await esPage.waitForTimeout(600)
+      check('ES-01 調理中モードが開く', (await esPage.locator('[data-testid="cook-session"]').count()) === 1)
+      await esPage.locator('[data-testid="cook-session-close"]').click()
+      await esPage.waitForTimeout(700)
+      await esPage.locator('a[href="#/recipes"]').first().click()
+      await esPage.waitForTimeout(700)
+      await esPage.locator('a[href="#/meal-plan"]').first().click()
+      await esPage.waitForTimeout(1100)
+      check(
+        'ES-01 調理中モードを×で閉じたあとも、献立タブに再開の入口が出る',
+        (await esPage.locator('[data-testid="navi-resume"]').count()) === 1,
+      )
+      await esPage.locator('[data-testid="navi-resume"]').click()
+      await esPage.waitForTimeout(1200)
+      const esAfterSession = await esPage.textContent('body')
+      check('ES-01 再開したナビに段取りが残っている', esAfterSession.includes('組み合わせる2品'))
+      check(
+        'ES-01 「今日の献立にない品を…外しました」が出ない(選択を捨てていない)',
+        (await esPage.locator('[data-testid="navi-selection-dropped"]').count()) === 0,
+      )
+
+      // 経路②: 画面を離れて再開(読み込みの競争が毎回起きる冷えた状態を3回繰り返す)
+      for (let i = 0; i < 3; i++) {
+        await esPage.reload({ waitUntil: 'domcontentloaded' })
+        await esPage.waitForTimeout(1300)
+      }
+      check(
+        'ES-01 画面を離れて再開しても段取りが消えない(3回繰り返しても同じ)',
+        (await esPage.textContent('body')).includes('組み合わせる2品') &&
+          (await esPage.locator('[data-testid="navi-selection-dropped"]').count()) === 0,
+        `session=${await esSession()}`,
+      )
+
+      // 経路③: 実行中のタイマーが終了→常駐バーの完了タイマーを押す→ナビの段取りへ戻る
+      currentCheck = 'ES-02'
+      await esPage.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await esPage.waitForTimeout(300)
+      await esPage.goto(`${BASE}/#/shopping`)
+      await esPage.waitForTimeout(500)
+      await esPage.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
+      await esPage.locator('div.fixed button.border-warning').first().click()
+      await esPage.waitForTimeout(1200)
+      check(
+        'ES-02 タイマー終了後のタップは段取りへ戻る(単品レシピの手順へ飛ばない)',
+        esPage.url().includes('/cook-navi') && !/#\/recipes\/\d+/.test(esPage.url()),
+        `url=${esPage.url()}`,
+      )
+      check(
+        'ES-02 戻った先に段取りが残っている',
+        (await esPage.textContent('body')).includes('組み合わせる2品'),
+      )
+    } finally {
+      await esBrowser.close()
     }
   }
 
@@ -15915,27 +16049,41 @@ try {
           (await egServeCard.locator('[data-testid="navi-recipe-step-number"]').textContent()) === '3',
       )
       check(
-        'EG-01 ナビが足した工程には手順番号を付けない',
-        (await egPage
-          .locator('ol > li', { hasText: '湯を沸かす' })
-          .first()
-          .locator('[data-testid="navi-recipe-step-number"]')
-          .count()) === 0,
+        // 2026-08-09 便ES（オーナー指示D-4）: 「ナビが追加」の札の代わりに、元の手順を
+        // 2つに分けたことが分かる番号（◯-1 / ◯-2）を付ける
+        'EG-01 ナビが足した工程は「◯-1」の番号で、元の手順の1つめだと分かる',
+        /^\d+-1$/.test(
+          (await egPage
+            .locator('ol > li', { hasText: '湯を沸かす' })
+            .first()
+            .locator('[data-testid="navi-recipe-step-number"]')
+            .textContent()) ?? '',
+        ),
       )
       check(
         'EG-01 行内の「手順◯」の表記は消えている(読み上げ用の隠し文字だけ)',
         (await egPage.locator('ol > li p > span.text-ink-muted', { hasText: /^手順\d+$/ }).count()) === 0,
       )
-      // ③ 湯を沸かすの差し込み
+      // ③ 湯を沸かすの差し込み。2026-08-09 便ES（オーナー指示D-3/D-4）:
+      //    「ナビが追加」の札はやめて手順番号を「◯-1」「◯-2」に、分数（約5分）は表示しない
       check(
         'EG-01 ゆでる工程の前に「湯を沸かす」が入る',
-        (await egPage.locator('[data-testid="navi-added-step"]').count()) === 1 &&
-          egCards.some((t) => t.includes('湯を沸かす') && t.includes('ナビが追加')),
+        (await egPage.locator('[data-testid="navi-added-step"]').count()) === 0 &&
+          egCards.some((t) => t.includes('湯を沸かす')),
         `cards=${JSON.stringify(egCards.map((t) => t.slice(0, 40)))}`,
       )
       check(
-        'EG-01 足した工程は待ち5分として出る',
-        egCards.some((t) => t.includes('湯を沸かす') && t.includes('約5分の待ち時間')),
+        'EG-01 足した工程の分数は表示しない（計算には使う）',
+        egCards.some((t) => t.includes('湯を沸かす') && t.includes('湯が沸くまでの待ち時間')) &&
+          !egCards.some((t) => t.includes('湯を沸かす') && t.includes('約5分の待ち時間')),
+      )
+      check(
+        'EG-01 分けた2つの工程は「◯-1」「◯-2」の番号で分割が分かる',
+        (
+          await egPage.$$eval('[data-testid="navi-recipe-step-number"]', (els) =>
+            els.map((el) => el.textContent || ''),
+          )
+        ).filter((t) => /-\d$/.test(t)).length === 2,
       )
       // ⑥ メモの箇条書きが行ごとに分かれる（1本の棒読みにならない）
       const memoCard = egPage.locator('ol > li', { hasText: 'にんじんをゆでる' }).first()
@@ -16098,7 +16246,7 @@ try {
       )
       check(
         'EH-01 手順に書かれた湯沸かしが、前の待ち工程として切り出される',
-        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('約5分の待ち時間')),
+        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('湯が沸くまでの待ち時間')),
         `cards=${JSON.stringify(ehCards.map((t) => t.slice(0, 40)))}`,
       )
       check(
@@ -16119,8 +16267,8 @@ try {
         ) === '目安3分',
       )
       check(
-        'EH-01 分数の無い手作業は「ナビの見積り◯分」と書き分ける',
-        /^ナビの見積り\d+分$/.test(
+        'EH-01 分数の無い手作業は「この手順の見積り◯分」と書き分ける',
+        /^この手順の見積り\d+分$/.test(
           (await ehPage
             .locator('ol > li', { hasText: '鶏肉と玉ねぎを切る。' })
             .first()
@@ -16953,7 +17101,7 @@ try {
       check(
         'WORD-CI1-01/C20 絞り込みで0件のとき「＋から登録」ではなく条件を外す案内が出る',
         emptyText.includes('条件に合うレシピが見つかりません') &&
-          emptyText.includes('条件を外すと、ほかのレシピが出てきます') &&
+          emptyText.includes('条件を外すと、他のレシピが出てきます') &&
           !emptyText.includes('右下の「＋」ボタンから自分のレシピを登録できます'),
         emptyText.slice(0, 400),
       )
@@ -17220,7 +17368,7 @@ try {
       check(
         'LOG-CI2-01/C02 削除の確認文に、消える記録の日付と残る記録の件数が入る(規約F)',
         /\d{4}\/\d{2}\/\d{2}の作った記録を削除します/.test(delLogMessage) &&
-          delLogMessage.includes(`ほかの作った記録${beforeDelete - 1}件は残ります`),
+          delLogMessage.includes(`他の作った記録${beforeDelete - 1}件は残ります`),
         delLogMessage,
       )
       check(
@@ -18098,7 +18246,8 @@ try {
           (await t1Start.count()) === 0 &&
             ((await t1Page.textContent('body')) ?? '').includes('組み合わせるレシピを選ぶ'),
         )
-        // 「戻る」でこの1回のお試しを終える（次に開くと残り回数の案内に戻る）
+        // 「戻る」でこの1回のお試しを終える（次に開くと残り回数の案内に戻る）。
+        // 2026-08-09 便ES: 段取り（選んだ品）は戻るでは消さない＝お試しだけが終わる
         await t1Page.getByRole('button', { name: '戻る' }).first().click()
         await t1Page.waitForTimeout(500)
       }
@@ -18871,7 +19020,7 @@ try {
       check('BULKDEL-01 確認文に献立の予定の件数が入る', /献立の予定2件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に今日の献立の件数が入る', /今日の献立1件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
-      check('BULKDEL-01 確認文に残るものが件数つきで入る', /ほかのレシピ\d+品・買い物メモ・食材の在庫は残ります/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に残るものが件数つきで入る', /他のレシピ\d+品・買い物メモ・食材の在庫は残ります/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check(
         'BULKDEL-01 基本レシピは入れ直しで戻せることを区別して書く',
         /基本レシピ2品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(bdDialogMsg) &&
@@ -19805,7 +19954,7 @@ try {
       await elPage.getByRole('button', { name: '段取りを作る' }).click()
       await elPage.waitForTimeout(700)
       check(
-        'EL-01 段取りの一覧に「調理をはじめる」の入口がある',
+        'EL-01 段取りの一覧に「調理中モードで見る」の入口がある',
         (await elPage.locator('[data-testid="cook-session-start"]').count()) === 1,
       )
       await elPage.locator('[data-testid="cook-session-start"]').click()
@@ -19884,10 +20033,11 @@ try {
         `${beforePeek}→${await counter()}`,
       )
       check(
-        'EL-03 見るだけであることを画面に書く',
-        ((await elPage.textContent('[data-testid="cook-session-peek"]')) ?? '').includes(
-          '確認するだけです。調理中の手順は変わりません',
-        ),
+        // 2026-08-09 便ES（オーナー指示E-6/E-10）: 行ごとに繰り返さず、見出しの横に1回だけ出す
+        'EL-03 見るだけであることを見出しの横に1回だけ書く',
+        ((await elPage.textContent('[data-testid="cook-session-others-hint"]')) ?? '').includes(
+          'タップすると全文が出ます（調理中の手順は変わりません）',
+        ) && (await elPage.locator('[data-testid="cook-session-others-hint"]').count()) === 1,
       )
       await elPage.locator('[data-testid="cook-session-other-row"]').first().click()
       await elPage.waitForTimeout(300)
@@ -20636,7 +20786,7 @@ try {
     )
     check(
       'INSTALLTEXT-EP アプリとして使えることが書いてある',
-      insEp.includes('Webアプリ') && insEp.includes('ほかのアプリと同じようにご利用いただけます'),
+      insEp.includes('Webアプリ') && insEp.includes('他のアプリと同じようにご利用いただけます'),
     )
     check(
       'INSTALLTEXT-EP 「追加しなくてもブラウザのまま」は※の注記に下げてある',

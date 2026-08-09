@@ -104,12 +104,22 @@ export function reconcileSelectedIds(
  * ＝2026-08-09 に実発した重大バグと同じ壊れ方になる。
  *
  * 調理を終える（カーソルを捨てる）と、次に整合を取るときに従来どおり落ちる。
+ *
+ * **`availableIds` が undefined のときは何も落とさない**（2026-08-09 便ES・オーナー実機報告
+ * 「画面を離れて戻ると段取りが消える／『今日の献立にない品を、組み合わせから外しました。』が出る」
+ * の根本原因）。今日の献立の候補は「今日の献立リスト」「今週の献立の予定」「レシピ本体」の
+ * 3つの読み込みが揃って初めて決まる。1つでも読み込み中なら候補は**まだ分からない**のであって、
+ * 「候補ゼロ」ではない。読み込み中を候補ゼロと読むと、画面を開いた一瞬で選択を全部落とし、
+ * 段取りも覚え書きも消える（docs/69「レシピ未読込を候補ゼロと誤読しない」）。
  */
 export function reconcileSelectedIdsForSession(
   selectedIds: readonly number[],
-  availableIds: readonly number[],
+  availableIds: readonly number[] | undefined,
   cookingInProgress: boolean,
 ): number[] {
+  // 候補がまだ読めていない（undefined）＝「候補ゼロ」ではない。ここを取り違えると、
+  // 画面を開き直したその一瞬に選択を全部捨ててしまう（2026-08-09 便ES・下の解説）
+  if (availableIds === undefined) return [...selectedIds]
   if (cookingInProgress) return [...selectedIds]
   return reconcileSelectedIds(selectedIds, availableIds)
 }
@@ -135,6 +145,20 @@ export function saveCookNaviSession(session: CookNaviSession): void {
   } catch {
     /* 保存できない環境では覚えないだけ（従来どおり毎回組み直しになる） */
   }
+}
+
+/**
+ * お試し（未解錠で3回まで）の1回ぶんを終える（2026-08-09 便ES）。**段取りは残す**。
+ *
+ * 便ED では「戻る」で覚え書きごと消していたので、お試しの1回もそこで終わっていた。
+ * 便ES で「戻る」は画面を移るだけに変えた（段取りが消えるとオーナー報告の不具合になる）ため、
+ * お試しの区切りだけをここで付ける。次に並行調理ナビを開くと残り回数の案内に戻り、
+ * もう一度お試しを始めれば、覚えていた段取りの続きから使える。
+ */
+export function endCookNaviTrial(): void {
+  const session = loadCookNaviSession()
+  if (!session?.trialActive) return
+  saveCookNaviSession({ ...session, trialActive: false })
 }
 
 export function clearCookNaviSession(): void {

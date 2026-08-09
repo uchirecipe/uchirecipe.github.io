@@ -4578,7 +4578,23 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     estimated: false,
   })
   eq('ナビ所要: 盛り付けは2分（一律4分をやめた）', estimateActiveMinutes(t('器に盛る')).minutes, 2)
-  eq('ナビ所要: 切る工程は4分', estimateActiveMinutes(t('玉ねぎをみじん切りにする')).minutes, 4)
+  // 2026-08-09 便ES: 1動作＝3分にそろえ直した（複数動作の手順は節・文ごとに数えて足す）
+  eq('ナビ所要: 切る工程は3分', estimateActiveMinutes(t('玉ねぎをみじん切りにする')).minutes, 3)
+  eq(
+    'ナビ所要: 1手順に複数の動作があれば足し上げる（炒め＋炒め合わせる）',
+    estimateActiveMinutes(t('玉ねぎをしんなりするまで炒め、ご飯をほぐしながら炒め合わせる')).minutes,
+    5,
+  )
+  eq(
+    'ナビ所要: 3つの動作が並ぶ手順は、いちばん重い動作＋1分ずつ',
+    estimateActiveMinutes(t('玉ねぎとにんじんを切り、フライパンで炒め、塩こしょうで味をととのえて器に盛る')).minutes,
+    7,
+  )
+  eq(
+    'ナビ所要: 材料の列挙（動作の無い読点）では増えない',
+    estimateActiveMinutes(t('しょうゆ、みりん、酒、砂糖をボウルで混ぜる')).minutes,
+    3,
+  )
   eq('ナビ所要: 炒める工程は5分', estimateActiveMinutes(t('ひき肉を炒める')).minutes, 5)
   eq('ナビ所要: 「鍋に水を入れて火にかける」は準備動作で2分', estimateActiveMinutes(t('鍋に水とだしの素を入れて火にかける。')).minutes, 2)
   eq('ナビ所要: 見積りには印が付く', estimateActiveMinutes(t('器に盛る')).estimated, true)
@@ -4586,7 +4602,8 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   const paragraph = t(
     'なすを乱切りにして水に5分さらし、水気をふきます。フライパンにサラダ油を熱してなすを入れ、しんなりするまで3分炒めます。豚ひき肉を加えてほぐしながら炒め、色が変わったらしょうゆとみりんを加えて全体にからめます。汁気がなくなったら火を止めて器に盛ります。',
   )
-  eq('ナビ所要: 1段落まるごとの手順を4分と数えない（長さぶん上乗せする）', estimateActiveMinutes(paragraph).minutes, 12)
+  // 2026-08-09 便ES: 文字数ではなく「文・節ごとの動作の数」で数える形に変えた
+  eq('ナビ所要: 1段落まるごとの手順を4分と数えない（動作の数だけ上乗せする）', estimateActiveMinutes(paragraph).minutes, 8)
 
   // ---- 待ちの「手を戻す締め切り」の厳しさ ----
   eq('ナビ締め切り: ゆでるは時間どおり（超過を許さない）', waitUrgency(t('にんじんを2分茹でる')), 'onTime')
@@ -11770,7 +11787,7 @@ eq(
   eq('CT-DEL 確認文に献立の予定の件数が入る', /献立の予定4件/.test(text), true)
   eq('CT-DEL 確認文に今日の献立の件数が入る', /今日の献立2件/.test(text), true)
   eq('CT-DEL 確認文に元に戻せないことが入る', text.includes('元に戻せません'), true)
-  eq('CT-DEL 確認文に残るレシピの品数が入る', /ほかのレシピ106品/.test(text), true)
+  eq('CT-DEL 確認文に残るレシピの品数が入る', /他のレシピ106品/.test(text), true)
   eq('CT-DEL 確認文に残るものが入る', /買い物メモ・食材の在庫は残ります/.test(text), true)
   eq('CT-DEL 「よろしいですか？」だけで終わらせない', text.includes('よろしいですか'), false)
   // 基本レシピだけは入れ直しで戻せる(ただし記録は戻らない)ことを区別して書く。
@@ -11802,7 +11819,7 @@ eq(
     todayEntries: 0,
   })
   eq('CT-DEL 全件削除なら残りは0品', allGone.remaining, 0)
-  eq('CT-DEL 残り0品でも残るものを書く', /ほかのレシピ0品/.test(buildBulkDeleteConfirmText(allGone)), true)
+  eq('CT-DEL 残り0品でも残るものを書く', /他のレシピ0品/.test(buildBulkDeleteConfirmText(allGone)), true)
   // 記録の配列が無いレシピ(cookedLogs未設定)でも落ちない
   eq(
     'CT-DEL cookedLogs未設定でも数えられる',
@@ -13330,9 +13347,16 @@ eq(
   // 畳んだ1行の書式（2026-08-09 オーナー決定「文頭…文末」）
   eq('EL-FOLD 上限内はそのまま', collapseStepText('玉ねぎをみじん切りにする。', 20), '玉ねぎをみじん切りにする。')
   eq(
-    'EL-FOLD 長い手順は文頭と文末を残して中央を省く',
+    // 2026-08-09 便ES（オーナー指示E-8）: 語の途中で切らず、文節の切れ目でだけ切る。
+    // 「オリーブオイル」の途中で切れる代わりに文頭が短くなり、余りは文末側に回す
+    'EL-FOLD 長い手順は文節の切れ目で文頭と文末を残して中央を省く',
     collapseStepText('ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。', 20),
-    'ボウルにオリーブオイル…マリネ液を作る。',
+    'ボウルに…よく混ぜ、マリネ液を作る。',
+  )
+  eq(
+    'EL-FOLD 文節の切れ目で切る（「みじん切りに」の途中で切らない）',
+    collapseStepText('玉ねぎをみじん切りにしてから、フライパンでしんなりするまで炒める。', 20),
+    '玉ねぎをみじん切りに…炒める。',
   )
   eq('EL-FOLD 省略しても上限の文字数を超えない', [...collapseStepText('あ'.repeat(80), 20)].length, 20)
   eq('EL-FOLD 前後の空白は落とす', collapseStepText('  器に盛る。  ', 20), '器に盛る。')
@@ -13364,6 +13388,29 @@ eq(
     'EL-ONEWAY 調理中でなければ従来の整合と同じ結果になる',
     reconcileSelectedIdsForSession([3, 1, 2], [1, 2, 3], false),
     reconcileSelectedIds([3, 1, 2], [1, 2, 3]),
+  )
+}
+
+// ---------- 便ES: 候補が「読み込み中」のうちは選択を1品も落とさない ----------
+// 2026-08-09 オーナー実機報告の重大バグ「段取りが消える／『今日の献立にない品を、
+// 組み合わせから外しました。』が出る」の再発防止。今日の献立の候補は
+// 「今日の献立リスト」「今週の献立の予定」「レシピ本体」の3つが揃って初めて決まる。
+// 1本でも読み込み中なら候補は"まだ分からない"のであって"ゼロ"ではない。
+{
+  eq(
+    'ES-LOADING 候補が未読込(undefined)なら選択をそのまま残す',
+    reconcileSelectedIdsForSession([1, 2, 3], undefined, false),
+    [1, 2, 3],
+  )
+  eq(
+    'ES-LOADING 候補が未読込なら調理中でも選択をそのまま残す',
+    reconcileSelectedIdsForSession([1, 2, 3], undefined, true),
+    [1, 2, 3],
+  )
+  eq(
+    'ES-LOADING 空配列(＝読み終えて候補ゼロ)は従来どおり落とす',
+    reconcileSelectedIdsForSession([1, 2, 3], [], false),
+    [],
   )
 }
 

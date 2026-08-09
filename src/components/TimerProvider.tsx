@@ -65,6 +65,13 @@ export interface ActiveTimer {
    * 戻り先を決めるのに使うので、そのまま持ち続ける。
    */
   naviOrder?: number
+  /**
+   * そのレシピ内での手順番号の表示（2026-08-09 便ES・オーナー指示E-12
+   * 「タイマーのバーの番号がナビの番号のみ・色も違う→両方の番号＋レシピ色」）。
+   * レシピの1手順を段取りの上で2つに分けた工程では「3-1」のような形になるので、
+   * 数字ではなく文字列で持つ。
+   */
+  naviStepLabel?: string
 }
 
 export interface StartTimerOptions {
@@ -83,6 +90,8 @@ export interface StartTimerOptions {
   naviColorIndex?: number
   /** ナビの段取りでの通し番号（常駐バーの番号バッジに出す） */
   naviOrder?: number
+  /** そのレシピ内での手順番号の表示（「3」「3-1」）。常駐バーに段取りの番号と並べて出す */
+  naviStepLabel?: string
 }
 
 interface TimerContextValue {
@@ -351,6 +360,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       fromNavi: options.fromNavi === true,
       naviColorIndex: options.naviColorIndex,
       naviOrder: options.naviOrder,
+      naviStepLabel: options.naviStepLabel,
     }
     setNow(Date.now())
     setTimers((prev) => [...prev, timer])
