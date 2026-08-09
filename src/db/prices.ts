@@ -2,8 +2,12 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
 import { defaultSettings } from './types'
 import type { PriceEntry } from './types'
-import { PRICE_DEFAULTS, PRICE_DEFAULTS_VERSION } from '../data/priceDefaults'
-import type { PriceDefaultItem } from '../data/priceDefaults'
+import {
+  PRICE_DEFAULTS,
+  PRICE_DEFAULTS_VERSION,
+  PRICE_DEFAULT_UNIT_FIXES,
+} from '../data/priceDefaults'
+import type { PriceDefaultItem, PriceDefaultUnitFix } from '../data/priceDefaults'
 import { toHiragana } from '../logic/kana'
 import { normalizeIngredientNameForPrice } from '../logic/priceEstimate'
 
@@ -30,6 +34,53 @@ export function missingDefaults(
 ): PriceDefaultItem[] {
   const existingNames = new Set(existing.map((e) => normalizeForDuplicateCheck(e.name)))
   return defaults.filter((d) => !existingNames.has(normalizeForDuplicateCheck(d.name)))
+}
+
+/** unitFixesToApplyが返す「この行のこの単位を書き換える」1件分 */
+export interface PriceUnitFixPlan {
+  id: number
+  name: string
+  fromUnit: string
+  toUnit: string
+}
+
+/**
+ * 「単位だけを直す」1回限りの移行で、実際に書き換える行を決める純粋関数
+ * （2026-08-10 便EY。ユニットテストしやすいようexportする）。
+ *
+ * 背景: マスタの単位が「1パック」「1袋」だと、レシピが「6個」「2枚」と書いていても
+ * 按分の受け皿にならず、パック1つ分の金額がまるごと1行に乗っていた（いちご6個=400円）。
+ * PRICE_DEFAULTS側の単位を直しても、トップアップ移行（missingDefaults）は
+ * 「名前がまだ無い項目の追加」専用なので、既に行を持っている既存ユーザーには反映されない。
+ *
+ * 書き換える条件は、そのユーザーがまだ何も手を加えていないと言い切れる行だけに絞る:
+ *  ① isDefault === true（投入時の目安のまま。ユーザーが上書きしたら必ずfalseになる）
+ *  ② 価格が旧既定と同じ（1円でも変えていたら対象外）
+ *  ③ 単位が旧既定の文字列と同じ（単位を自分で変えていたら対象外）
+ * これに当てはまらない行——自分で価格を入れた行、単位を変えた行、消した行、自分で追加した
+ * 同名の行——は1件も触らない（規約F。何が変わって何が残るかを明示するための線引き）。
+ *
+ * 名前の一致判定は missingDefaults と同じ normalizeForDuplicateCheck（かな表記ゆれ込み）。
+ */
+export function unitFixesToApply(
+  existing: Pick<
+    PriceEntry,
+    'id' | 'name' | 'pricePerUnit' | 'unit' | 'isDefault' | 'defaultPricePerUnit' | 'defaultUnit'
+  >[],
+  fixes: PriceDefaultUnitFix[],
+): PriceUnitFixPlan[] {
+  const byName = new Map(fixes.map((f) => [normalizeForDuplicateCheck(f.name), f]))
+  const plans: PriceUnitFixPlan[] = []
+  for (const entry of existing) {
+    if (entry.id == null) continue
+    const fix = byName.get(normalizeForDuplicateCheck(entry.name))
+    if (!fix) continue
+    if (entry.isDefault !== true) continue
+    if (entry.pricePerUnit !== fix.pricePerUnit) continue
+    if (entry.unit !== fix.fromUnit) continue
+    plans.push({ id: entry.id, name: entry.name, fromUnit: fix.fromUnit, toUnit: fix.toUnit })
+  }
+  return plans
 }
 
 /**
@@ -92,6 +143,18 @@ export async function seedPriceDefaultsIfNeeded(): Promise<void> {
     // ユーザーが過去に消した既定はそのバージョン内では再追加しない
     if ((settings.priceDefaultsVersion ?? 0) < PRICE_DEFAULTS_VERSION) {
       const existing = await db.prices.toArray()
+      // 単位だけを直す移行（2026-08-10 便EY）。追加より先に走らせて、旧単位のまま残っている
+      // 目安行を新単位へ揃える（価格は変えない）。ユーザーが手を入れた行は unitFixesToApply が
+      // 対象から外すので触らない。defaultUnitも一緒に更新するので、この行の
+      // 「デフォルトに戻す」は新しい単位に戻る（isDefaultはtrueのまま＝バッジ表示も変わらない）
+      for (const plan of unitFixesToApply(existing, PRICE_DEFAULT_UNIT_FIXES)) {
+        await db.prices.update(plan.id, {
+          unit: plan.toUnit,
+          defaultUnit: plan.toUnit,
+          isDefault: true,
+          updatedAt: Date.now(),
+        })
+      }
       const missing = missingDefaults(existing, PRICE_DEFAULTS)
       if (missing.length > 0) {
         const now = Date.now()

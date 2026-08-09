@@ -8583,6 +8583,79 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   eq('missingDefaults 既存に全項目があれば空配列', missingDefaults(defaults, defaults), [])
 }
 
+// ---------- unitFixesToApply: 「単位だけを直す」1回限りの移行(2026-08-10 便EY) ----------
+// 背景: マスタの単位が「1パック」「1袋」だと按分の受け皿にならず、レシピが「6個」「2枚」と
+// 書いていてもパック1つ分の金額が1行にまるごと乗っていた。PRICE_DEFAULTSの単位を直しても
+// 既存ユーザーの行は古い単位のままなので、既定のままの行だけを新単位へ揃える移行を足した。
+// ユーザーが手を入れた行(価格を変えた・単位を変えた・自分で追加した)は1件も触らないこと。
+{
+  const { unitFixesToApply } = await import('../src/db/prices.ts')
+  const { PRICE_DEFAULT_UNIT_FIXES } = await import('../src/data/priceDefaults.ts')
+  const fixes = [{ name: 'いちご', pricePerUnit: 400, fromUnit: '1パック', toUnit: '280g' }]
+  const untouched = {
+    id: 1, name: 'いちご', pricePerUnit: 400, unit: '1パック',
+    isDefault: true, defaultPricePerUnit: 400, defaultUnit: '1パック',
+  }
+  eq(
+    'unitFixesToApply 目安のままの行(isDefault=true・価格も単位も旧既定)は新単位へ',
+    unitFixesToApply([untouched], fixes),
+    [{ id: 1, name: 'いちご', fromUnit: '1パック', toUnit: '280g' }],
+  )
+  eq(
+    'unitFixesToApply 自分で価格を書き換えた行(isDefault=false)は対象外＝上書きしない',
+    unitFixesToApply([{ ...untouched, pricePerUnit: 600, isDefault: false }], fixes),
+    [],
+  )
+  eq(
+    'unitFixesToApply 価格だけ旧既定と違う行も対象外(isDefaultの取りこぼし対策の二重チェック)',
+    unitFixesToApply([{ ...untouched, pricePerUnit: 600 }], fixes),
+    [],
+  )
+  eq(
+    'unitFixesToApply 自分で単位を変えた行は対象外',
+    unitFixesToApply([{ ...untouched, unit: '1箱', isDefault: false }], fixes),
+    [],
+  )
+  eq(
+    'unitFixesToApply 既に新単位になっている行(新規インストール)は何もしない',
+    unitFixesToApply([{ ...untouched, unit: '280g', defaultUnit: '280g' }], fixes),
+    [],
+  )
+  eq(
+    'unitFixesToApply 対象外の食材(玉ねぎ)には触れない',
+    unitFixesToApply(
+      [{ id: 2, name: '玉ねぎ', pricePerUnit: 50, unit: '1個', isDefault: true, defaultPricePerUnit: 50, defaultUnit: '1個' }],
+      fixes,
+    ),
+    [],
+  )
+  eq(
+    'unitFixesToApply 消した食材(行が無い)は勝手に復活させない',
+    unitFixesToApply([], fixes),
+    [],
+  )
+  // かな表記ゆれ(カタカナ「イチゴ」で持っている行)も同じ1件として扱う
+  eq(
+    'unitFixesToApply かな表記ゆれ(イチゴ)の行も対象になる',
+    unitFixesToApply([{ ...untouched, name: 'イチゴ' }], fixes).length,
+    1,
+  )
+  // 実データ側: 今回の対象7件が漏れなく載っていること(価格は据え置き=旧既定と同じ値)
+  eq(
+    'PRICE_DEFAULT_UNIT_FIXES 対象は7件',
+    PRICE_DEFAULT_UNIT_FIXES.map((f) => f.name),
+    ['いちご', 'しいたけ', '生しいたけ', 'オクラ', '小ねぎ', '粉寒天', 'ブルーベリー'],
+  )
+  {
+    const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
+    for (const fix of PRICE_DEFAULT_UNIT_FIXES) {
+      const current = byName.get(fix.name)
+      eq(`PRICE_DEFAULT_UNIT_FIXES ${fix.name}のtoUnitが現行のPRICE_DEFAULTSと一致`, current?.unit, fix.toUnit)
+      eq(`PRICE_DEFAULT_UNIT_FIXES ${fix.name}の価格は据え置き(移行で金額を動かさない)`, current?.pricePerUnit, fix.pricePerUnit)
+    }
+  }
+}
+
 // ---------- toSpeechText: 調理中モード読み上げの用語辞書reading適用(docs/20 §2・2026-07-12) ----------
 {
   const { toSpeechText } = await import('../src/logic/toSpeechText.ts')
