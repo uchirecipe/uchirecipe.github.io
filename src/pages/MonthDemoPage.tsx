@@ -54,6 +54,9 @@ export default function MonthDemoPage() {
     <>
       <div
         data-testid="month-demo-banner"
+        // data-app-top-bar: 上端に貼り付く帯だと revealExpanded に知らせる。無いと、
+        // 折りたたみを開いたときにこの帯の裏へ中身が潜る(2026-08-10 便ETの申し送り②)
+        data-app-top-bar
         className="sticky top-0 z-40 border-b border-edge bg-accent px-[var(--space-md)] py-2 text-on-accent"
       >
         <div className="mx-auto flex w-full max-w-md items-center gap-2">
