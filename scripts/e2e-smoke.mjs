@@ -22225,6 +22225,194 @@ try {
     }
   }
 
+  // --- EY-01: 「1パック丸ごと計上」の是正が画面の金額に出ていること(2026-08-10 便EY) ---
+  // マスタの単位が「1パック」「1袋」だと、レシピが「2枚」「8本」と書いていても按分できず
+  // パック1つ分の金額が1行に乗っていた。単位を1パックの実内容量(出典はdocs/49の2026-08-10節)へ
+  // 直したので、該当食材を使うレシピの1食あたりが下がる。数字そのものをここで固定する
+  // (下がりすぎ・戻りの両方に気づけるようにするため、「約◯円」の文字列で見る)
+  currentCheck = 'EY-01'
+  {
+    const eyBrowser = await chromium.launch()
+    try {
+      const eyCtx = await eyBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const eyPage = await eyCtx.newPage()
+      eyPage.on('pageerror', (err) => errors.push(`[pageerror@EY-01] ${err.message}`))
+      await eyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eyPage.waitForTimeout(2000) // 初回シード(レシピ109品＋価格マスタ)の完了待ち
+
+      // 生しいたけ2枚を使うレシピ。修正前は1パック満額100円が乗り1食あたり212円だった
+      const eyOpen = async (title) => {
+        await eyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await eyPage.waitForTimeout(600)
+        await eyPage.getByPlaceholder('料理名・材料・タグで検索').fill(title)
+        await eyPage.waitForTimeout(700)
+        await eyPage.getByText(title, { exact: true }).first().click()
+        await eyPage.waitForTimeout(800)
+        return (await eyPage.textContent('body')) ?? ''
+      }
+      const eyChawanmushi = await eyOpen('冷やし茶碗蒸し')
+      check(
+        'EY-01 冷やし茶碗蒸しの1食あたりが生しいたけの按分後の金額になる(修正前212円→179円)',
+        eyChawanmushi.includes('2人分で作るときの1食あたり 約179円'),
+        eyChawanmushi.includes('約212円') ? '修正前の212円のまま' : '',
+      )
+      // 原価ビューで材料行そのものの金額も見る(1食あたり=全量33円÷2人分)
+      await eyPage.getByRole('button', { name: '原価を見る' }).click()
+      await eyPage.waitForTimeout(500)
+      const eyRow = await eyPage.locator('li', { hasText: '生しいたけ' }).first().textContent()
+      check(
+        'EY-01 材料行「生しいたけ」の1食あたり原価が約17円(修正前は1パック満額100円÷2人分の50円)',
+        (eyRow ?? '').includes('約17円'),
+        String(eyRow),
+      )
+
+      // オクラ8本(1袋10本前後のうち8本)
+      const eyOkra = await eyOpen('オクラと長芋の梅肉あえ')
+      check(
+        'EY-01 オクラと長芋の梅肉あえの1食あたり(修正前165円→152円)',
+        eyOkra.includes('2人分で作るときの1食あたり 約152円'),
+        eyOkra.includes('約165円') ? '修正前の165円のまま' : '',
+      )
+      // いちご6個(1パック280gのうち90g)
+      const eyBark = await eyOpen('フルーツヨーグルトバーク')
+      check(
+        'EY-01 フルーツヨーグルトバークの1食あたり(修正前395円→327円)',
+        eyBark.includes('4人分で作るときの1食あたり 約327円'),
+        eyBark.includes('約395円') ? '修正前の395円のまま' : '',
+      )
+      // 「食材と価格」の単位表記も新しい内容量になっていること
+      await eyPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await eyPage.waitForTimeout(900)
+      const eyIchigoRow = await eyPage.locator('li', { hasText: 'いちご' }).first().textContent()
+      check(
+        'EY-01 「食材と価格」のいちごの単位が280g(1パックの標準内容量)になっている',
+        (eyIchigoRow ?? '').includes('280') && !(eyIchigoRow ?? '').includes('パック'),
+        String(eyIchigoRow),
+      )
+    } finally {
+      await eyBrowser.close()
+    }
+  }
+
+  // --- EY-02: 単位を直す移行が「自分で編集した価格」を上書きしないこと(2026-08-10 便EY) ---
+  // 既存端末のマスタ行は古い単位のまま残るため、PRICE_DEFAULTS_VERSIONを上げたときに
+  // 単位だけを揃える移行を入れた。対象は「目安のまま(isDefault=true)で価格も単位も旧既定と
+  // 同じ行」だけ。ここでは旧バージョンの端末を作り直して、直る行と残る行の両方を確認する
+  currentCheck = 'EY-02'
+  {
+    const ey2Browser = await chromium.launch()
+    try {
+      const ey2Ctx = await ey2Browser.newContext({ viewport: { width: 390, height: 844 } })
+      const ey2Page = await ey2Ctx.newPage()
+      ey2Page.on('pageerror', (err) => errors.push(`[pageerror@EY-02] ${err.message}`))
+      await ey2Page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await ey2Page.waitForTimeout(2000)
+
+      // 版5の端末を再現する: いちご=目安のまま旧単位「1パック」/ しいたけ=自分で999円に編集済み
+      // (単位も旧「1パック」のまま)。settings.priceDefaultsVersionを5へ戻して移行を未実行にする
+      await ey2Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction(['prices', 'settings'], 'readwrite')
+          const prices = tx.objectStore('prices')
+          const all = prices.getAll()
+          all.onsuccess = () => {
+            for (const row of all.result) {
+              if (row.name === 'いちご') {
+                prices.put({
+                  ...row,
+                  pricePerUnit: 400,
+                  unit: '1パック',
+                  isDefault: true,
+                  defaultPricePerUnit: 400,
+                  defaultUnit: '1パック',
+                })
+              }
+              if (row.name === 'しいたけ') {
+                prices.put({
+                  ...row,
+                  pricePerUnit: 999,
+                  unit: '1パック',
+                  isDefault: false,
+                  defaultPricePerUnit: 150,
+                  defaultUnit: '1パック',
+                })
+              }
+            }
+            const settings = tx.objectStore('settings')
+            const getReq = settings.get(1)
+            getReq.onsuccess = () => {
+              const current = getReq.result || { id: 1 }
+              settings.put({ ...current, id: 1, priceDefaultsVersion: 5 })
+            }
+          }
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      })
+      // 再読み込みで seedPriceDefaultsIfNeeded が走り、版5→6の移行が1回だけ実行される
+      await ey2Page.reload({ waitUntil: 'networkidle' })
+      await ey2Page.waitForTimeout(2000)
+      const ey2Rows = await ey2Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const rows = await new Promise((resolve, reject) => {
+          const tx = idb.transaction('prices', 'readonly')
+          const all = tx.objectStore('prices').getAll()
+          all.onsuccess = () => resolve(all.result)
+          all.onerror = () => reject(all.error)
+        })
+        idb.close()
+        const pick = (name) => {
+          const r = rows.find((x) => x.name === name)
+          return r
+            ? { unit: r.unit, price: r.pricePerUnit, isDefault: r.isDefault, defaultUnit: r.defaultUnit }
+            : null
+        }
+        return { ichigo: pick('いちご'), shiitake: pick('しいたけ') }
+      })
+      check(
+        'EY-02 目安のままの行(いちご)は単位だけが新しい内容量に揃う',
+        ey2Rows.ichigo?.unit === '280g' && ey2Rows.ichigo?.isDefault === true,
+        JSON.stringify(ey2Rows.ichigo),
+      )
+      check(
+        'EY-02 単位を直しても価格の数字は動かさない(いちごは400円のまま)',
+        ey2Rows.ichigo?.price === 400,
+        JSON.stringify(ey2Rows.ichigo),
+      )
+      check(
+        'EY-02 「デフォルトに戻す」の戻り先も新しい単位になる',
+        ey2Rows.ichigo?.defaultUnit === '280g',
+        JSON.stringify(ey2Rows.ichigo),
+      )
+      check(
+        'EY-02 自分で編集した価格(しいたけ999円)は移行後もそのまま残る',
+        ey2Rows.shiitake?.price === 999 && ey2Rows.shiitake?.isDefault === false,
+        JSON.stringify(ey2Rows.shiitake),
+      )
+      check(
+        'EY-02 自分で編集した行は単位も勝手に書き換えない(しいたけは1パックのまま)',
+        ey2Rows.shiitake?.unit === '1パック',
+        JSON.stringify(ey2Rows.shiitake),
+      )
+      // 画面でも「自分の価格」が残っていること(999円が入力欄に出る)
+      const ey2ShiitakeRow = ey2Page.locator('li', { hasText: 'しいたけ' }).first()
+      const ey2Value = await ey2ShiitakeRow.getByLabel('しいたけの価格（円）').inputValue()
+      check('EY-02 画面上も自分で入れた999円が残っている', ey2Value === '999', String(ey2Value))
+    } finally {
+      await ey2Browser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
