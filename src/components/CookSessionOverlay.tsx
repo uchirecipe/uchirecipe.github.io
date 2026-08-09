@@ -40,6 +40,7 @@ import {
   nextStepsByRecipe,
   type CookCursor,
 } from '../logic/cookSession'
+import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
 
 /**
@@ -101,6 +102,8 @@ export default function CookSessionOverlay({
   onFinish,
   onStartTimer,
 }: Props) {
+  // 段取りの実行中は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
+  useAppBusyWhileMounted()
   const { timers, now, dismissTimer, adjustTimer, toggleMute, flashingId } = useTimers()
   const { speaking, speak, stopSpeech } = useSpeech()
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()

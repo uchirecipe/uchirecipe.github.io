@@ -14,7 +14,9 @@ import SettingsPage from './pages/SettingsPage'
 import IngredientPricesPage from './pages/IngredientPricesPage'
 import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
+import AppUpdateBanner from './components/AppUpdateBanner'
 import { TimerProvider } from './components/TimerProvider'
+import { startAppUpdateWatch } from './logic/appUpdate'
 import { useSettings, recordFirstLaunchIfNeeded, resolveVisibleMealSlotsIfNeeded } from './db/settings'
 import { seedStartersIfNeeded, topUpFlattenedStartersIfNeeded } from './db/starters'
 import { seedPantryPresetIfNeeded } from './db/pantry'
@@ -65,6 +67,13 @@ function App() {
     })()
   }, [])
 
+  // Service Workerを登録し、新しいバージョンが入ったら画面下の帯で知らせる(2026-08-09 便ER)。
+  // 登録そのものは以前からvite-plugin-pwaが自動で差し込むスクリプトが行っていた。
+  // アプリ側で受け取るようにしたのは、勝手に画面を読み込み直させないため(src/logic/appUpdate.ts)
+  useEffect(() => {
+    startAppUpdateWatch()
+  }, [])
+
   return (
     <TimerProvider>
       {/* HashRouterのルーティングは #以降で完結するため、公開パス(ルート/)の
@@ -92,6 +101,8 @@ function App() {
           </Routes>
         </main>
         <TimerBar />
+        {/* 新しいバージョンのお知らせ(2026-08-09 便ER)。押したときだけ画面を読み込み直す */}
+        <AppUpdateBanner />
         <TabBar />
       </HashRouter>
     </TimerProvider>
