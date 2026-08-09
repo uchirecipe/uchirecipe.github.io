@@ -16,6 +16,7 @@ import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
 import { useSettings, updateSettings } from '../db/settings'
 import { canUseNutritionTrial } from '../logic/proTrial'
+import Collapse from './Collapse'
 import { ja } from '../i18n/ja'
 
 /**
@@ -133,7 +134,7 @@ export default function NutritionTeaser({
           <ChevronIcon size={20} className="shrink-0 text-ink-muted" aria-hidden />
         </button>
 
-        {expanded && (
+        <Collapse open={expanded}>
           <div className="border-t border-edge p-[var(--space-md)] pt-[var(--space-sm)]">
             {unlocked ? (
               <UnlockedBody
@@ -154,7 +155,7 @@ export default function NutritionTeaser({
               />
             )}
           </div>
-        )}
+        </Collapse>
       </div>
     </section>
   )

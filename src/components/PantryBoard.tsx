@@ -23,6 +23,7 @@ import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
 import { splitValues } from '../logic/textSplit'
 import { isImeConfirmKey } from '../logic/imeKey'
 import { ja } from '../i18n/ja'
+import Collapse from './Collapse'
 import Toast from './Toast'
 
 /** 整理モードの「まとめて状態設定」3ボタンの並び順(ある→少ない→ない) */
@@ -180,7 +181,9 @@ export default function PantryBoard() {
             {ja.common.usageHint}
             {showDescription ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
           </button>
-          {showDescription && <p className="mt-1 text-sm text-ink-muted">{ja.pantry.description}</p>}
+          <Collapse open={showDescription}>
+            <p className="mt-1 text-sm text-ink-muted">{ja.pantry.description}</p>
+          </Collapse>
         </>
       )}
       {organizing && <p className="mt-1 text-sm text-ink-muted">{ja.pantry.organizeSelect}</p>}

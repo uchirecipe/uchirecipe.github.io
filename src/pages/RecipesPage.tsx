@@ -70,6 +70,7 @@ import {
   FREE_LIMIT_ENABLED,
 } from '../logic/freeLimit'
 import { splitValues } from '../logic/textSplit'
+import Collapse from '../components/Collapse'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
 import Toast from '../components/Toast'
@@ -886,7 +887,7 @@ export default function RecipesPage() {
       </div>
 
       {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
-      {sortPanelOpen && (
+      <Collapse open={sortPanelOpen}>
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
           {/* 昇順/降順(2026-08-02 便DFで件数表記の横からこのパネル内へ移動 → 2026-08-03
               オーナー指示でパネルの一番上へ。従来はパネル末尾(栄養価の区分より下)にあり、
@@ -970,10 +971,10 @@ export default function RecipesPage() {
             {ja.search.apply}
           </button>
         </div>
-      )}
+      </Collapse>
 
       {/* 絞り込みパネル(2026-07-16 便T-3: 「条件をクリア」を欄の上方に移動) */}
-      {filterPanelOpen && (
+      <Collapse open={filterPanelOpen}>
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
           {anyConditionActive && (
             <button
@@ -1122,7 +1123,7 @@ export default function RecipesPage() {
             {ja.search.apply}
           </button>
         </div>
-      )}
+      </Collapse>
 
       {/* 件数: 絞り込み無しでも総件数を常に表示する(2026-07-13 UI改善)。絞り込み中は
           既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる(件数が変わるのは絞り込みのみ・

@@ -39,6 +39,7 @@ export default function TabBar() {
 
   return (
     <nav
+      data-app-bottom-bar
       className="fixed inset-x-0 bottom-0 border-t border-edge bg-surface shadow-md"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
