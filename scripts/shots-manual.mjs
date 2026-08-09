@@ -479,6 +479,17 @@ try {
   // 「くわしく」タブの項目
   await page.getByText('くわしく', { exact: true }).first().click()
   await wait(page, 700)
+  // 「ひとこと説明」は空のままだと、例文のプレースホルダーが欄の幅で途中まで
+  // (「…ソースをかけた見た」)しか写らず、誤字のように読めてしまう(2026-08-09 オーナー実機報告)。
+  // 撮影用に、欄に収まる長さの文を実際に入れて撮る。入力すると「くわしく」タブに●が付くので、
+  // 本文の「入力した項目があるとタブに●が付きます」も図で確かめられる
+  const intro = page.getByPlaceholder(/ソースをかけた/).first()
+  if (await intro.count()) {
+    await intro.fill('酢でさっぱり、やわらかく煮ます')
+    // 入力直後のままだと欄に青い枠(フォーカスの印)が残るので外してから撮る
+    await intro.blur()
+    await wait(page, 300)
+  }
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 300)
   await cropRange(
