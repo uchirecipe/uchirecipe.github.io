@@ -8379,13 +8379,92 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       { yen: 8, rawYen: 8, source: 'user' },
     )
   }
+  // (7-b) 「1パック丸ごと」を使った分に直した項目(2026-08-10 便EY・docs/49 2026-08-10節)。
+  //       マスタの単位が「1パック」「1袋」だと、レシピが個数・枚数・本数で書いていても
+  //       次元も単位名も噛み合わず、グラム換算にも持ち込めない(パック/袋は栄養側の目安量に無い)
+  //       ため、1行にパック1つ分の金額がそのまま乗っていた。単位を「1パックの中身」の実数量
+  //       (出典つき)へ書き換えて按分できるようにしたぶんの回帰固定。価格(円)は据え置き。
+  {
+    const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
+    eq('PRICE_DEFAULTS いちごの単位は「280g」(1パック250〜300g・代表値280g)', byName.get('いちご')?.unit, '280g')
+    eq('PRICE_DEFAULTS しいたけの単位は「6枚」(1パック6個前後)', byName.get('しいたけ')?.unit, '6枚')
+    eq('PRICE_DEFAULTS 生しいたけの単位は「6枚」(1パック6個前後)', byName.get('生しいたけ')?.unit, '6枚')
+    eq('PRICE_DEFAULTS オクラの単位は「10本」(1袋10本前後・100g前後)', byName.get('オクラ')?.unit, '10本')
+    eq('PRICE_DEFAULTS 小ねぎの単位は「100g」(1袋100g前後)', byName.get('小ねぎ')?.unit, '100g')
+    eq('PRICE_DEFAULTS 粉寒天の単位は「4g」(分包1本=4g)', byName.get('粉寒天')?.unit, '4g')
+    eq('PRICE_DEFAULTS ブルーベリーの単位は「100g」(1パック100g前後)', byName.get('ブルーベリー')?.unit, '100g')
+    // 価格(円)は1件も変えていない=「いくらか」ではなく「その金額が何に対する値段か」だけを直した
+    eq('単位だけの修正でいちごの価格は据え置き', byName.get('いちご')?.pricePerUnit, 400)
+    eq('単位だけの修正でしいたけの価格は据え置き', byName.get('しいたけ')?.pricePerUnit, 150)
+    eq('単位だけの修正で生しいたけの価格は据え置き', byName.get('生しいたけ')?.pricePerUnit, 100)
+    eq('単位だけの修正でオクラの価格は据え置き', byName.get('オクラ')?.pricePerUnit, 130)
+    eq('単位だけの修正で小ねぎの価格は据え置き', byName.get('小ねぎ')?.pricePerUnit, 80)
+
+    const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+    eq(
+      'パック按分: いちご6個(=90g)は280g400円のマスタから129円(従来は1パック満額400円)',
+      estimateIngredientYen({ name: 'いちご', amount: '6', unit: '個' }, idx)?.yen,
+      129,
+    )
+    eq(
+      'パック按分: しいたけ4枚は6枚150円のマスタから100円(従来は1パック満額150円)',
+      estimateIngredientYen({ name: 'しいたけ', amount: '4', unit: '枚' }, idx)?.yen,
+      100,
+    )
+    eq(
+      'パック按分: 生しいたけ2枚は6枚100円のマスタから33円(従来は1パック満額100円)',
+      estimateIngredientYen({ name: '生しいたけ', amount: '2', unit: '枚' }, idx)?.yen,
+      33,
+    )
+    eq(
+      'パック按分: 生しいたけ5枚は83円(従来は1パック満額100円)',
+      estimateIngredientYen({ name: '生しいたけ', amount: '5', unit: '枚' }, idx)?.yen,
+      83,
+    )
+    eq(
+      'パック按分: オクラ8本は10本130円のマスタから104円(従来は1袋満額130円)',
+      estimateIngredientYen({ name: 'オクラ', amount: '8', unit: '本' }, idx)?.yen,
+      104,
+    )
+    eq(
+      'パック按分: 小ねぎ2本(=10g)は100g80円のマスタから8円(従来は1袋満額80円)',
+      estimateIngredientYen({ name: '小ねぎ', amount: '2', unit: '本' }, idx)?.yen,
+      8,
+    )
+    // 粉寒天は「1袋=4g」で中身と分量が元から一致していたため金額は変わらない(単位表記だけを
+    // 換算できる形にして、4g以外の分量を書いたときも按分が通るようにした)
+    eq(
+      'パック按分: 粉寒天4gは4g50円のマスタから50円(金額は従来と同じ)',
+      estimateIngredientYen({ name: '粉寒天', amount: '4', unit: 'g' }, idx)?.yen,
+      50,
+    )
+    eq(
+      'パック按分: 粉寒天2gは25円(従来は1袋満額50円で分量に追従しなかった)',
+      estimateIngredientYen({ name: '粉寒天', amount: '2', unit: 'g' }, idx)?.yen,
+      25,
+    )
+    // レタスは元から按分できていた(マスタ「1個」=栄養側300g・4枚=120g)。今回の対象ではない証明
+    eq(
+      'レタス4枚は従来どおり60円(マスタ1個150円からグラム換算で按分済み。今回の修正対象外)',
+      estimateIngredientYen({ name: 'レタス', amount: '4', unit: '枚' }, idx)?.yen,
+      60,
+    )
+    // 「適量」「少々」の薬味は従来どおり満額のまま(docs/49 §7の既決事項。今回変えていない)
+    eq(
+      '単位修正後も小ねぎ「適量(お好みで)」は従来どおり満額80円(薬味の既決方針は不変)',
+      estimateIngredientYen({ name: '小ねぎ', amount: '適量(お好みで)', unit: '' }, idx)?.yen,
+      80,
+    )
+  }
   // (8) 同梱109品の合計原価のピン留め(この数字が動いたら按分の前提が変わったということ)
   {
     const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
     let grand = 0
     for (const def of starterDefs) grand += estimateRecipeCost(def.ingredients, idx).total
     // 2026-07-29 副菜6品追加で36,780→38,622円(+1,842円=6品ぶん。既存103品の値は不変)
-    eq('同梱109品の概算食費の合計(便BY修正後。修正前は48,377円/103品時点は36,780円)', grand, 38622)
+    // 2026-08-10 便EY「1パック丸ごと計上」の修正で38,622→38,047円(-575円)。
+    // 下がったのは7品・7材料行(いちご6個/しいたけ4枚/生しいたけ5枚・2枚/オクラ8本/小ねぎ2本×2)
+    eq('同梱109品の概算食費の合計(便EY修正後。便BY修正前は48,377円/103品時点は36,780円)', grand, 38047)
     const soup = starterDefs.find((d) => d.title.includes('中華風卵スープ'))
     eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 85)
     const steamed = starterDefs.find((d) => d.title.includes('レンジ蒸し鶏'))
