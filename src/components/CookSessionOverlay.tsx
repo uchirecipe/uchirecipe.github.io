@@ -13,6 +13,8 @@ import {
   Bell,
   BellOff,
   BellRing,
+  Pause,
+  Play,
   Timer as TimerIcon,
 } from 'lucide-react'
 import Collapse from './Collapse'
@@ -23,9 +25,9 @@ import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
-import { sortTimersForDisplay } from '../logic/timerOrder'
+import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import { formatRemaining, findTimeTokens, isMinutesShownInText } from '../logic/time'
-import { resolveVoiceTimerSeconds } from '../logic/voiceCommand'
+import { pickVoiceStopTarget, resolveVoiceTimerSeconds } from '../logic/voiceCommand'
 import { naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { recipeStepLabel, type TimelineItem, type TimelineRecipe } from '../logic/cookNavi'
@@ -69,6 +71,7 @@ function TimerChip({
   flashing,
   onOpen,
   onToggleMute,
+  onResume,
   onDismiss,
 }: {
   timer: ActiveTimer
@@ -76,8 +79,11 @@ function TimerChip({
   flashing: boolean
   onOpen: () => void
   onToggleMute: () => void
+  /** 一時停止中のタイマーを動かし直す（2026-08-10 便EZ。声の「ストップ」の戻り道） */
+  onResume: () => void
   onDismiss: () => void
 }) {
+  const paused = timer.pausedRemainingMs != null
   // ナビが足した工程（湯を沸かす）は stepNumber を持たないが、段取りの番号は持つ。
   // 番号があるものを「自由な時間のタイマー」の時計バッジにしない（2026-08-09 便ES）
   const isCustom = timer.isCustom === true || (timer.stepNumber <= 0 && timer.naviOrder == null)
@@ -111,14 +117,27 @@ function TimerChip({
           />
         )}
         {timer.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
+        {/* 止まっていることが数字だけでは分からないので、時間の手前に印を出す（便EZ） */}
+        {paused && <Pause size={14} className="shrink-0" aria-hidden />}
         <span className="max-w-[7rem] truncate text-xs font-bold">{timer.label}</span>
         <span className="whitespace-nowrap text-base font-bold tabular-nums">
-          {timer.done
-            ? timer.doneLabel
-            : formatRemaining(Math.max(0, Math.ceil((timer.endsAt - now) / 1000)))}
+          {timer.done ? timer.doneLabel : formatRemaining(timerRemainingSeconds(timer, now))}
         </span>
       </button>
-      {!timer.done && (
+      {/* 一時停止中は消音の代わりに「再開」を出す（止まっているタイマーはもう鳴らないので、
+          この場所で要るのは音の入り切りではなく動かし直すこと。2026-08-10 便EZ） */}
+      {!timer.done && paused && (
+        <button
+          type="button"
+          data-testid="timer-chip-resume"
+          onClick={onResume}
+          aria-label={ja.timer.resumeAria.replace('{label}', timer.label)}
+          className="shrink-0 rounded-full p-1.5 text-accent-ink"
+        >
+          <Play size={16} aria-hidden />
+        </button>
+      )}
+      {!timer.done && !paused && (
         <button
           type="button"
           onClick={onToggleMute}
@@ -189,7 +208,8 @@ export default function CookSessionOverlay({
 }: Props) {
   // 段取りの実行中は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
   useAppBusyWhileMounted()
-  const { timers, now, dismissTimer, adjustTimer, toggleMute, flashingId } = useTimers()
+  const { timers, now, dismissTimer, adjustTimer, toggleMute, flashingId, pauseTimer, resumeTimer } =
+    useTimers()
   const { speaking, speak, stopSpeech } = useSpeech()
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
@@ -277,7 +297,7 @@ export default function CookSessionOverlay({
 
   /**
    * 声で受けるのは調理中モードと同じ5語だけ（次へ／戻って／もう一回／ストップ／タイマー）。
-   * どれも間違って言われても戻せる操作にする。記録・タイマーの停止や削除・調理を終える、は
+   * どれも間違って言われても戻せる操作にする。記録・タイマーの削除・調理を終える、は
    * 聞き間違いで実行されると取り返しがつかないので**タップだけ**にしてある（docs/69）。
    */
   const { listening, toggleListening, micDenied, dismissMicDenied, voiceMessage, micSupported } =
@@ -287,7 +307,18 @@ export default function CookSessionOverlay({
       onRepeat: () => {
         if (item) speak(item.text)
       },
-      onStop: () => stopSpeech(),
+      /**
+       * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
+       * （2026-08-10 便EZ）。どれを止めるかは logic/voiceCommand.ts の
+       * pickVoiceStopTarget が決める（いま大きく出している品→次に鳴る1本の順）。
+       */
+      onStop: () => {
+        stopSpeech()
+        const target = pickVoiceStopTarget(timers, item?.recipeId)
+        if (!target) return
+        pauseTimer(target.id)
+        return ja.focus.micTimerPaused.replace('{label}', target.label)
+      },
       onTimer: (transcript) => {
         if (!item) return false
         const seconds = resolveVoiceTimerSeconds(
@@ -464,6 +495,7 @@ export default function CookSessionOverlay({
               flashing={flashingId === t.id}
               onOpen={() => setAdjustingId(t.id)}
               onToggleMute={() => toggleMute(t.id)}
+              onResume={() => resumeTimer(t.id)}
               onDismiss={() => dismissTimer(t.id)}
             />
           ))}
@@ -662,6 +694,7 @@ export default function CookSessionOverlay({
                         flashing={flashingId === t.id}
                         onOpen={() => setAdjustingId(t.id)}
                         onToggleMute={() => toggleMute(t.id)}
+                        onResume={() => resumeTimer(t.id)}
                         onDismiss={() => dismissTimer(t.id)}
                       />
                     ))}
@@ -686,7 +719,10 @@ export default function CookSessionOverlay({
         </div>
       )}
 
-      {/* 前へ / 次へ（最後の手順では「調理を終える」） */}
+      {/* 前へ / 次へ（最後の手順では「完成！」。2026-08-10 便EZ・オーナー指示
+          「調理中モード『調理を終える』→『完成！』単品の時と揃える」。
+          1品の調理中モード（FocusMode）の最終手順と同じ ja.focus.complete を共用する＝
+          片方だけ言い方が変わることが構造的に起きない） */}
       <div className="flex gap-2 px-[var(--space-md)] pb-[calc(var(--space-sm)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]">
         <button
           type="button"
@@ -705,7 +741,7 @@ export default function CookSessionOverlay({
             className="flex flex-1 items-center justify-center gap-1 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
           >
             <Check size={22} aria-hidden />
-            {ja.cookNavi.sessionFinish}
+            {ja.focus.complete}
           </button>
         ) : (
           <button
@@ -736,6 +772,15 @@ export default function CookSessionOverlay({
         }}
         onClose={() => setAdjustingId(null)}
         onToggleMute={adjustingTimer ? () => toggleMute(adjustingTimer.id) : undefined}
+        /* 一時停止／再開（2026-08-10 便EZ。声の「ストップ」で止めたタイマーを戻す道） */
+        onTogglePause={
+          adjustingTimer
+            ? () =>
+                adjustingTimer.pausedRemainingMs != null
+                  ? resumeTimer(adjustingTimer.id)
+                  : pauseTimer(adjustingTimer.id)
+            : undefined
+        }
         useNaviOrder
       />
     </div>

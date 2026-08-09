@@ -53,6 +53,7 @@ import {
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
 import CookSessionOverlay from '../components/CookSessionOverlay'
+import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
 import { findCursorIndex, startCursor, type CookCursor } from '../logic/cookSession'
 import {
@@ -856,8 +857,37 @@ export default function CookNaviPage() {
     setSessionLostNotice(false)
     setCurrent(startCursor(timeline.items))
   }
+  /**
+   * 「まとめて作った！」のボタン（2026-08-10 便EZ・オーナー指示
+   * 「完成後、画面の戻り位置は並行ナビ下部『まとめて作った！』までスクロール」）。
+   * 最後の手順まで進んで全画面を閉じたあと、次にやること＝記録の入口を画面に入れる。
+   */
+  const markAllCookedRef = useRef<HTMLButtonElement | null>(null)
+  /** 「完成！」で閉じたときだけスクロールする（途中でやめた✕・端末の戻るでは動かさない） */
+  const completedRef = useRef(false)
+
   /** 調理を終える（調理中の位置だけを消す。選んだ品・段取り・作った記録には触らない） */
   const finishSession = () => setCurrent(undefined)
+  /** 最後の手順の「完成！」（同・戻り位置を「まとめて作った！」に合わせる） */
+  const completeSession = () => {
+    completedRef.current = true
+    setCurrent(undefined)
+  }
+  /**
+   * 全画面を閉じたあとの戻り位置（同）。
+   * CookSessionOverlay は閉じるときに積んだ履歴を1つ戻す（端末の戻る対策）ので、
+   * その後始末が終わってから測る。位置合わせは logic/revealExpanded.ts に任せる＝
+   * 上部に貼り付く帯（便ET）と下部に固定される帯（タブナビ・タイマー）の裏に隠れない。
+   */
+  useEffect(() => {
+    if (current !== undefined || !completedRef.current) return
+    completedRef.current = false
+    const timer = setTimeout(() => {
+      const el = markAllCookedRef.current
+      if (el) revealExpanded(el)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [current])
   /**
    * 段取りの途中でやめるとき（規約F: 何が消えて何が残るかを両方書く）。
    * 最後の手順まで進んだあとの「調理を終える」は確認しない（そこで失うものが無いため）。
@@ -1249,6 +1279,7 @@ export default function CookNaviPage() {
                         押すと作りかけの段取りも終わる（＝選び直しの状態に戻る） */}
                     <button
                       type="button"
+                      ref={markAllCookedRef}
                       data-testid="navi-mark-all-cooked"
                       onClick={() => void markAllCooked()}
                       className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
@@ -1283,7 +1314,7 @@ export default function CookNaviPage() {
           ingredientNamesByRecipeId={ingredientNamesByRecipeId}
           onMove={setCurrent}
           onExit={exitSession}
-          onFinish={finishSession}
+          onFinish={completeSession}
           onStartTimer={startStepTimer}
         />
       )}

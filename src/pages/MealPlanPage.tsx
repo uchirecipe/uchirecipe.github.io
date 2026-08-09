@@ -4579,26 +4579,46 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </button>
         )}
       </div>
-      {/* 作った！済みで薄くなっている枠から、その記録の中身を開く1行(2026-08-09 便EQ・オーナー実機
-          「作った！して表示が薄くなっているレシピをタップ→記録を見たい」)。
-          枠そのものの押下は「レシピを選び直す」のまま残す＝間違えて記録した枠を直せる状態を
-          失わせない(2026-08-03 便DP-5の司令部裁定)。開く小窓は他の3か所と同じもの */}
-      {cookedLogRow && (
-        <button
-          type="button"
-          onClick={() =>
-            setLogDetail({
-              recipe: cookedLogRow.recipe,
-              log: cookedLogRow.log,
-              logIndex: cookedLogRow.logIndex,
-            })
-          }
-          aria-label={ja.cookedDetail.openAria.replace('{title}', cookedLogRow.recipe.title)}
-          className="mt-0.5 ml-12 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
-        >
-          {ja.cookedDetail.openFromPlan}
-          <ChevronRight size={14} aria-hidden />
-        </button>
+      {/* 枠に入っているレシピの詳細へ行く1行（2026-08-10 便EZ・オーナー実機
+          「献立カードで選択中のレシピからレシピ詳細に移る手段がない」）。
+          この枠の押下は「レシピを選び直す」に割り当ててあり(便DP-5の司令部裁定。間違えて
+          記録した枠を直せなくなる方が害が大きい)、週・月のカードにはレシピ詳細への入口が
+          1つも無かった＝材料や手順を見たいときに一覧から探し直すしかなかった。
+          押す場所を奪わずに、記録の入口（下の「作った記録を見る」）と同じ作りで下に添える */}
+      {recipe?.id != null && (
+        <div className="mt-0.5 ml-12 flex flex-wrap items-center gap-x-3">
+          <Link
+            to={`/recipes/${recipe.id}`}
+            state={logDetailLinkState}
+            onClick={rememberLogDetailReturn}
+            data-testid="slot-open-recipe"
+            aria-label={ja.mealPlan.openRecipeAria.replace('{title}', recipe.title)}
+            className="inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+          >
+            {ja.mealPlan.openRecipe}
+            <ChevronRight size={14} aria-hidden />
+          </Link>
+          {/* 作った！済みで薄くなっている枠から、その記録の中身を開く1行(2026-08-09 便EQ・オーナー実機
+              「作った！して表示が薄くなっているレシピをタップ→記録を見たい」)。
+              開く小窓は他の3か所と同じもの */}
+          {cookedLogRow && (
+            <button
+              type="button"
+              onClick={() =>
+                setLogDetail({
+                  recipe: cookedLogRow.recipe,
+                  log: cookedLogRow.log,
+                  logIndex: cookedLogRow.logIndex,
+                })
+              }
+              aria-label={ja.cookedDetail.openAria.replace('{title}', cookedLogRow.recipe.title)}
+              className="inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+            >
+              {ja.cookedDetail.openFromPlan}
+              <ChevronRight size={14} aria-hidden />
+            </button>
+          )}
+        </div>
       )}
       </div>
     )

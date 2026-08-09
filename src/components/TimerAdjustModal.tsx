@@ -1,7 +1,9 @@
 import { useEffect } from 'react'
-import { X, BellRing, Bell, BellOff, CornerUpLeft } from 'lucide-react'
+import { X, BellRing, Bell, BellOff, CornerUpLeft, Pause, Play } from 'lucide-react'
 import type { ActiveTimer } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
+import { timerRemainingSeconds } from '../logic/timerOrder'
+import { naviStepText } from '../logic/naviStepText'
 import StepBadge from './StepBadge'
 import { naviRecipeColor } from '../logic/naviColors'
 import { ja } from '../i18n/ja'
@@ -33,6 +35,12 @@ type Props = {
    * 未指定ならレシピ名はただの見出しのまま（飛び先が無い場面）。
    */
   onLabelClick?: () => void
+  /**
+   * 一時停止／再開の切り替え（2026-08-10 便EZ）。
+   * 声の「ストップ」で止めたタイマーを、声を使わずに動かし直せる場所でもある。
+   * 未指定なら切り替えを出さない。
+   */
+  onTogglePause?: () => void
 }
 
 /**
@@ -51,6 +59,7 @@ export default function TimerAdjustModal({
   onToggleMute,
   useNaviOrder,
   onLabelClick,
+  onTogglePause,
 }: Props) {
   useEffect(() => {
     if (!timer) return
@@ -64,12 +73,6 @@ export default function TimerAdjustModal({
   if (!timer) return null
   /** 画面に出す番号（ナビの通し番号を使う場面ではそちらを優先する） */
   const naviOrder = useNaviOrder ? timer.naviOrder : undefined
-  const stepText =
-    naviOrder != null
-      ? ja.timer.naviStepLabel.replace('{n}', String(naviOrder))
-      : timer.stepNumber > 0
-        ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
-        : null
 
   /**
    * そのレシピ内での手順番号（分けた工程は「3-1」）。
@@ -80,7 +83,22 @@ export default function TimerAdjustModal({
       ? undefined
       : (timer.naviStepLabel ?? (timer.stepNumber > 0 ? String(timer.stepNumber) : undefined))
 
-  const remaining = Math.max(0, Math.ceil((timer.endsAt - now) / 1000))
+  /**
+   * 名前の横に添える手順の呼び方。
+   * 2026-08-10 便EZ（オーナー指示「『段取りの7番目』は削除」）: ナビ由来のタイマーは、
+   * すぐ左にある2つのバッジと同じ「⑦3-1」の並びで呼ぶ。以前は同じ場所で
+   * 「段取りの7番目」と別の数え方を名乗っていて、バッジと読み比べる必要があった
+   */
+  const stepText =
+    naviOrder != null
+      ? ja.timer.stepLabel.replace('{n}', naviStepText(naviOrder, recipeStepBadge))
+      : timer.stepNumber > 0
+        ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
+        : null
+
+  const remaining = timerRemainingSeconds(timer, now)
+  /** 一時停止中（2026-08-10 便EZ）。時計が止まっているので、残り時間はその場に固定される */
+  const paused = timer.pausedRemainingMs != null
   // 窓を開いたままタイマーが終わった場合(2026-07-28 機能④診断C10)。
   // adjustTimer は完了済みには効かない(TimerProvider側の既定)ため、以前は「+1分」「−30秒」を
   // 押しても00:00のまま何も起きない死にボタンになり、窓の中からは終わったことも分からなかった。
@@ -170,8 +188,16 @@ export default function TimerAdjustModal({
             {timer.doneLabel}
           </p>
         ) : (
-          <p className="mt-1 text-center text-4xl font-bold tabular-nums">
+          <p
+            data-testid="timer-adjust-remaining"
+            className={`mt-1 flex items-center justify-center gap-2 text-center text-4xl font-bold tabular-nums ${
+              paused ? 'text-ink-muted' : ''
+            }`}
+          >
+            {/* 止まっていることが数字だけでは分からないので、記号と語で言い切る（便EZ） */}
+            {paused && <Pause size={26} className="shrink-0" aria-hidden />}
             {formatRemaining(remaining)}
+            {paused && <span className="text-sm font-bold">{ja.timer.pausedMark}</span>}
           </p>
         )}
         <div className="mt-[var(--space-md)] flex gap-2">
@@ -197,6 +223,23 @@ export default function TimerAdjustModal({
             {ja.timer.adjustFinishedHint}
           </p>
         )}
+        {/* 一時停止／再開（2026-08-10 便EZ）。声の「ストップ」で止めたタイマーを、
+            声を使わずに動かし直せる場所。終わったタイマーには止める先が無いので出さない */}
+        {onTogglePause && !finished && (
+          <button
+            type="button"
+            data-testid="timer-adjust-pause"
+            onClick={onTogglePause}
+            aria-label={(paused ? ja.timer.resumeAria : ja.timer.pauseAria).replace(
+              '{label}',
+              timer.label,
+            )}
+            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
+          >
+            {paused ? <Play size={20} aria-hidden /> : <Pause size={20} aria-hidden />}
+            {paused ? ja.timer.resume : ja.timer.pause}
+          </button>
+        )}
         {/* このタイマーを始めた手順へ戻る(2026-08-03 オーナー実機フィードバック③) */}
         {onGoToStep && (
           <button
@@ -205,8 +248,10 @@ export default function TimerAdjustModal({
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
           >
             <CornerUpLeft size={20} aria-hidden />
+            {/* 2026-08-10 便EZ（オーナー指示）: 「段取りの7番目を開く」→「手順⑦3-1を開く」。
+                すぐ上のバッジ（段取りの通し番号＋レシピ内の手順番号）と同じ並びで呼ぶ */}
             {naviOrder != null
-              ? ja.timer.naviGoToStep.replace('{n}', String(naviOrder))
+              ? ja.timer.goToStep.replace('{n}', naviStepText(naviOrder, recipeStepBadge))
               : timer.stepNumber > 0
                 ? ja.timer.goToStep.replace('{n}', String(timer.stepNumber))
                 : ja.timer.goToRecipe}

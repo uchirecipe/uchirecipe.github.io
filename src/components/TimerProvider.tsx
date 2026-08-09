@@ -11,6 +11,7 @@ import {
 import { useSettings, updateSettings } from '../db/settings'
 import { useWakeLock } from './useWakeLock'
 import { parseStoredTimers, TIMERS_STORAGE_KEY } from '../logic/timerOrder'
+import { naviStepText } from '../logic/naviStepText'
 import {
   TIMER_BEEP_INTERVAL_SECONDS,
   timerSoundBeepCount,
@@ -72,6 +73,14 @@ export interface ActiveTimer {
    * 数字ではなく文字列で持つ。
    */
   naviStepLabel?: string
+  /**
+   * 一時停止中の残り（ミリ秒。2026-08-10 便EZ・オーナー実機
+   * 「タイマー音声操作→『ストップ』は聞き取れていてもタイマーとまらない」）。
+   * 値が入っている間は時計を進めず、終了の合図も出さない。`endsAt` は止めた時点の
+   * 終了予定時刻のまま据え置く（保存の後始末「終了から1時間より古い分は捨てる」を
+   * そのまま働かせるため）。再開すると「今から残りぶん」で数え直す。
+   */
+  pausedRemainingMs?: number
 }
 
 export interface StartTimerOptions {
@@ -112,6 +121,14 @@ interface TimerContextValue {
    * （0になったら通常どおり次のtickで完了フローに乗る）
    */
   adjustTimer: (id: number, deltaSeconds: number) => void
+  /**
+   * タイマーを一時停止する（2026-08-10 便EZ）。残り時間を覚えて時計を止めるだけで、
+   * タイマーは消えない＝**取り消せる操作**なので、声の「ストップ」からも呼べる。
+   * 終わったタイマー・すでに止めてあるタイマーには効かない。
+   */
+  pauseTimer: (id: number) => void
+  /** 一時停止したタイマーを、覚えていた残りから動かし直す（同） */
+  resumeTimer: (id: number) => void
 }
 
 const TimerContext = createContext<TimerContextValue | null>(null)
@@ -264,13 +281,18 @@ function announceFinished(
   alertFinished(timer, audio, soundOn, chime)
   // ブラウザ通知（許可済みのときだけ）。表示上のlabelはレシピ名のみだが、
   // 通知本文はtruncateされないので手順番号も含めた完全な説明にする。
-  // stepNumber<=0（手順に紐付かない自由な時間のタイマー）は手順表記を付けない
+  // stepNumber<=0（手順に紐付かない自由な時間のタイマー）は手順表記を付けない。
+  // 並行調理ナビから始めたタイマーは、画面のバッジと同じ「⑦3-1」の呼び方にそろえる
+  // （2026-08-10 便EZ・オーナー指示。通知だけ別の番号を名乗ると照合できない）
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
-      const fullLabel =
-        timer.stepNumber > 0
-          ? `${timer.label}・${ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))}`
-          : timer.label
+      const stepText =
+        timer.naviOrder != null
+          ? ja.timer.stepLabel.replace('{n}', naviStepText(timer.naviOrder, timer.naviStepLabel))
+          : timer.stepNumber > 0
+            ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
+            : null
+      const fullLabel = stepText ? `${timer.label}・${stepText}` : timer.label
       new Notification(ja.timer.notificationTitle, {
         body: ja.timer.notificationBody.replace('{label}', fullLabel),
       })
@@ -375,10 +397,40 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     setTimers((prev) =>
       prev.map((t) => {
         if (t.id !== id || t.done) return t
+        // 一時停止中は、覚えている残りのほうを増減する（時計は止めたまま。2026-08-10 便EZ）
+        if (t.pausedRemainingMs != null) {
+          const remaining = Math.max(0, t.pausedRemainingMs + deltaSeconds * 1000)
+          return { ...t, pausedRemainingMs: remaining, endsAt: Date.now() + remaining }
+        }
         // 残りが0を下回らないようにする（即完了扱いにはせず、0になったら次のtickで
         // 通常の完了フロー＝音・通知に自然に乗る）
         const newEndsAt = Math.max(Date.now(), t.endsAt + deltaSeconds * 1000)
         return { ...t, endsAt: newEndsAt }
+      }),
+    )
+    setNow(Date.now())
+  }, [])
+
+  /**
+   * 一時停止（2026-08-10 便EZ）。残りを覚えて時計を止める。
+   * `endsAt` は据え置く＝止めた時点の「本来の終了予定時刻」を保つ（保存の後始末で使う）。
+   */
+  const pauseTimer = useCallback((id: number) => {
+    setTimers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id || t.done || t.pausedRemainingMs != null) return t
+        return { ...t, pausedRemainingMs: Math.max(0, t.endsAt - Date.now()) }
+      }),
+    )
+    setNow(Date.now())
+  }, [])
+
+  /** 再開。覚えていた残りを、いまから数え直す */
+  const resumeTimer = useCallback((id: number) => {
+    setTimers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id || t.pausedRemainingMs == null) return t
+        return { ...t, endsAt: Date.now() + t.pausedRemainingMs, pausedRemainingMs: undefined }
       }),
     )
     setNow(Date.now())
@@ -396,7 +448,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     saveTimers(timers)
   }, [timers])
 
-  const hasRunning = timers.some((t) => !t.done)
+  // 一時停止中のタイマーは時計も画面の点灯も要らない（2026-08-10 便EZ）
+  const hasRunning = timers.some((t) => !t.done && t.pausedRemainingMs == null)
 
   // 動作中だけ時計を進める
   useEffect(() => {
@@ -411,7 +464,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
 
   // 終了したタイマーに合図を出す
   useEffect(() => {
-    const finished = timers.filter((t) => !t.done && t.endsAt <= now)
+    // 一時停止中は終了の合図を出さない（止めたまま予定時刻を過ぎても鳴らない。便EZ）
+    const finished = timers.filter((t) => !t.done && t.pausedRemainingMs == null && t.endsAt <= now)
     if (finished.length === 0) return
     const hidden = typeof document !== 'undefined' && document.hidden
     finished.forEach((t) => {
@@ -421,7 +475,7 @@ export function TimerProvider({ children }: { children: ReactNode }) {
       if (hidden) pendingAlertRef.current.add(t.id)
     })
     setTimers((prev) =>
-      prev.map((t) => (t.endsAt <= now ? { ...t, done: true } : t)),
+      prev.map((t) => (t.pausedRemainingMs == null && t.endsAt <= now ? { ...t, done: true } : t)),
     )
   }, [now, timers, soundOn, soundVolume, soundLength])
 
@@ -461,6 +515,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
         dismissTimer,
         toggleMute,
         adjustTimer,
+        pauseTimer,
+        resumeTimer,
       }}
     >
       {children}

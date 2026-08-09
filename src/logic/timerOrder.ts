@@ -6,6 +6,8 @@ import { ja } from '../i18n/ja'
 export interface TimerOrderFields {
   done: boolean
   endsAt: number
+  /** 一時停止中の残り（ミリ秒）。2026-08-10 便EZ。値が入っている間は時計が止まっている */
+  pausedRemainingMs?: number
 }
 
 /**
@@ -14,9 +16,30 @@ export interface TimerOrderFields {
  * 以前は起動順のままだったため、先に鳴るタイマーが最下段に来ることがあり、
  * 複数同時進行のときに毎回3つの数字を読み比べる必要があった。
  * 元の配列は書き換えず、新しい配列を返す（TimerProvider の状態は並べ替えない）。
+ *
+ * 2026-08-10 便EZ: 一時停止中のものは動いているものより後ろに置く。止まっている以上
+ * もう鳴らないので、「次に鳴る順」に読みたい列の途中に混ざると読み違えるため。
  */
 export function sortTimersForDisplay<T extends TimerOrderFields>(timers: readonly T[]): T[] {
-  return [...timers].sort((a, b) => Number(b.done) - Number(a.done) || a.endsAt - b.endsAt)
+  return [...timers].sort(
+    (a, b) =>
+      Number(b.done) - Number(a.done) ||
+      Number(a.pausedRemainingMs != null) - Number(b.pausedRemainingMs != null) ||
+      a.endsAt - b.endsAt,
+  )
+}
+
+/**
+ * 画面に出す残り秒数（2026-08-10 便EZ）。
+ * 一時停止中は時計を止めるので、`endsAt` からの引き算ではなく止めた時点の残りを返す。
+ * 動作中は従来どおり終了予定時刻までの差。0未満にはしない（終わった行は「終わり」を出すため）。
+ */
+export function timerRemainingSeconds(
+  timer: { endsAt: number; pausedRemainingMs?: number },
+  now: number,
+): number {
+  const ms = timer.pausedRemainingMs ?? timer.endsAt - now
+  return Math.max(0, Math.ceil(ms / 1000))
 }
 
 /** 端末内に保存するタイマー1本分の形（TimerProvider の ActiveTimer と同じ） */
@@ -41,6 +64,12 @@ export interface StoredTimer {
   naviOrder?: number
   /** そのレシピ内での手順番号の表示（「3」「3-1」。2026-08-09 便ES）。段取りの番号と並べて出す */
   naviStepLabel?: string
+  /**
+   * 一時停止中の残り（ミリ秒。2026-08-10 便EZ）。
+   * 声の「ストップ」で止められる。`endsAt` は止めた時点の終了予定時刻のまま据え置くので、
+   * 「終了から1時間より古いものは捨てる」の判定はそのまま働く（止めたまま放置した分は消える）。
+   */
+  pausedRemainingMs?: number
 }
 
 /** localStorage のキー */
@@ -72,6 +101,13 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
     if (typeof t.id !== 'number' || typeof t.endsAt !== 'number') continue
     if (!Number.isFinite(t.id) || !Number.isFinite(t.endsAt)) continue
     if (t.endsAt <= now - RESTORE_GRACE_MS) continue
+    // 一時停止中の残り（2026-08-10 便EZ）。0以下・数値でないものは「止まっていない」に倒す
+    const pausedRemainingMs =
+      typeof t.pausedRemainingMs === 'number' &&
+      Number.isFinite(t.pausedRemainingMs) &&
+      t.pausedRemainingMs > 0
+        ? t.pausedRemainingMs
+        : undefined
     restored.push({
       id: t.id,
       key: typeof t.key === 'string' ? t.key : `restored-${t.id}`,
@@ -79,10 +115,14 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
       doneLabel: typeof t.doneLabel === 'string' ? t.doneLabel : ja.timer.done,
       recipeId: typeof t.recipeId === 'number' ? t.recipeId : 0,
       stepNumber: typeof t.stepNumber === 'number' ? t.stepNumber : 0,
-      endsAt: t.endsAt,
+      // 一時停止中は時計が止まっているので、読み戻した時点から残りぶんを数え直す。
+      // 据え置いた endsAt をそのまま使うと、止めていた間の経過ぶんだけ勝手に進んでしまう
+      endsAt: pausedRemainingMs != null ? now + pausedRemainingMs : t.endsAt,
       totalSeconds: typeof t.totalSeconds === 'number' ? t.totalSeconds : 0,
-      done: t.endsAt <= now,
+      // 止まっているタイマーは、いくら時間が経っていても「終わり」にはしない
+      done: pausedRemainingMs != null ? false : t.endsAt <= now,
       muted: t.muted === true,
+      pausedRemainingMs,
       // 印が無い古い保存は「手順のタイマー」として読み戻す（従来どおりの見た目に戻る）
       isCustom: t.isCustom === true,
       // ナビ由来の印と色（古い保存には無い＝従来どおりレシピ詳細へ戻る・色は付かない）

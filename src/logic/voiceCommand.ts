@@ -23,9 +23,50 @@ export function matchVoiceCommand(transcript: string): VoiceCommand | undefined 
   // 音声認識は同じ発話を「もう一回」「もう1回」「もういっかい」のどれでも返しうるので、
   // 数字は半角・全角・漢数字を、読みはかなも受け付ける
   if (/もう[1１一]?[回度]|もういっかい|もういちど/.test(transcript)) return 'repeat'
-  if (/ストップ|とめて|止めて/.test(transcript)) return 'stop'
+  // 2026-08-10 便EZ（オーナー実機「『ストップ』は聞き取れていてもタイマーとまらない」）:
+  // ここは元から 'stop' を返せていた＝聞き取りは合っていた。効かなかったのは画面側で
+  // 'stop' を読み上げの停止にしか繋いでいなかったため。かなで返る端末（「すとっぷ」）と、
+  // 「タイマーストップ」のようにタイマーの語と一緒に言う形も受ける
+  // （タイマーの語より先に判定するので、「タイマーストップ」は新規起動にならない）
+  if (/ストップ|すとっぷ|とめて|止めて|停止/.test(transcript)) return 'stop'
   if (/タイマー/.test(transcript)) return 'timer'
   return undefined
+}
+
+/** 「ストップ」でどのタイマーを止めるかを決めるのに要る最小限の形（ActiveTimer はこれを満たす） */
+export interface VoiceStopTimer {
+  done: boolean
+  endsAt: number
+  recipeId: number
+  /** 一時停止中の残り（ミリ秒）。値が入っていれば既に止まっている */
+  pausedRemainingMs?: number
+}
+
+/**
+ * 声の「ストップ」で一時停止するタイマーを1本選ぶ（2026-08-10 便EZ）。
+ *
+ * **複数のタイマーが動いているとき、どれを止めるのかを決めておく**（推測で実装しない）。
+ *   1. 動いているタイマーだけが対象。終わったもの・すでに止めてあるものは選ばない
+ *      （終わった行を片付けるのは削除＝取り消せないので、声では受けない。docs/69「音声の規律」）
+ *   2. **いま画面に大きく出している料理**のタイマーを最優先で選ぶ。声で操作できるのは
+ *      調理中モードと並行調理ナビの調理中画面だけで、どちらも「いま見ている1手順」が必ずある。
+ *      話し手が見ているものと止まるものを一致させるのが、台所でいちばん外れにくい
+ *   3. その料理のものが無ければ、**残りがいちばん短い**もの＝次に鳴る1本を選ぶ。
+ *      手が離せずに「ストップ」と言う相手は、たいてい今まさに鳴りかけているタイマーになる
+ *   4. 同じ料理の中に複数あるときも、残りがいちばん短いものを選ぶ
+ *
+ * 選び違えても**一時停止**なので、言い直すか画面の「再開」で元に戻せる（可逆・非破壊）。
+ */
+export function pickVoiceStopTarget<T extends VoiceStopTimer>(
+  timers: readonly T[],
+  currentRecipeId?: number,
+): T | undefined {
+  const running = timers.filter((t) => !t.done && t.pausedRemainingMs == null)
+  if (running.length === 0) return undefined
+  const soonest = (list: readonly T[]) =>
+    list.reduce((best, t) => (t.endsAt < best.endsAt ? t : best))
+  const mine = currentRecipeId == null ? [] : running.filter((t) => t.recipeId === currentRecipeId)
+  return soonest(mine.length > 0 ? mine : running)
 }
 
 /**

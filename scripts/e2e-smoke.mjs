@@ -22910,6 +22910,271 @@ try {
     }
   }
 
+
+  // --- EZ-01〜05: 2026-08-10 便EZ・オーナー実機フィードバック4件 ---
+  //     EZ-01 声の「ストップ」で動作中のタイマーが一時停止する（真因: 'stop' が読み上げの停止に
+  //           しか繋がっておらず、タイマーには一切触れていなかった）。止めても消えず「再開」で戻せる
+  //     EZ-02 タイマーが指す手順の呼び方が「手順⑦3-1」になり、「段取りの◯番目」が消えている
+  //     EZ-03 調理中モードの最終手順のボタンが、1品のときと同じ「完成！」になっている
+  //     EZ-04 「完成！」のあと、並行調理ナビの「まとめて作った！」が画面内に入る（帯の裏に隠れない）
+  //     EZ-05 献立の週カード・月タブの日モーダルの枠から、レシピ詳細へ行ける
+  currentCheck = 'EZ-01'
+  {
+    const ezBrowser = await chromium.launch()
+    const ezContext = await ezBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ezPage = await ezContext.newPage()
+    ezPage.on('dialog', (d) => void d.accept())
+    ezPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EZ] ${err.message}`)
+    })
+    ezPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@EZ] ${t}`)
+    })
+    try {
+      await ezPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ezPage.waitForTimeout(1800)
+      const ezSeed = await ezPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('EZ照り焼き', [
+          { text: '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれを加えて煮からめ、器に盛る。' },
+        ], [{ name: '鶏もも肉', amount: '250', unit: 'g' }])))
+        const idB = await P(store('recipes').add(mk('EZ煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて10分おき、器に盛る。', minutes: 10 },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        const idC = await P(store('recipes').add(mk('EZマリネ', [
+          { text: 'ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。' },
+          { text: 'パプリカときゅうりを細切りにする。' },
+          { text: 'マリネ液と和えて冷蔵庫で20分冷やす。', minutes: 20 },
+        ], [{ name: 'パプリカ', amount: '1', unit: '個' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        // 週タブの検査用に、今日の夕食へ2品入れておく（日付は端末の暦で作る＝週の表示範囲と揃える）
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        await P(store('mealPlans').add({ date: today, slot: 'dinner', role: 'main', recipeId: idA }))
+        await P(store('mealPlans').add({ date: today, slot: 'dinner', role: 'side', recipeId: idC }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return { idA, idB, idC, today }
+      })
+
+      // 段取り→調理中モード→「15分煮る」の手順でタイマーを起動する
+      await ezPage.goto(`${BASE}/#/cook-navi`)
+      await ezPage.reload({ waitUntil: 'networkidle' })
+      await ezPage.waitForTimeout(1200)
+      await ezPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ezPage.waitForTimeout(700)
+      await ezPage.locator('[data-testid="cook-session-start"]').click()
+      await ezPage.waitForTimeout(600)
+      for (let i = 0; i < 10; i++) {
+        if (/煮る/.test(await ezPage.locator('[data-testid="cook-session"]').innerText())) break
+        await ezPage.locator('[data-testid="cook-session-next"]').click()
+        await ezPage.waitForTimeout(200)
+      }
+      await ezPage.locator('[data-testid="cook-session"] button[aria-label*="タイマー"]').first().click()
+      await ezPage.waitForTimeout(600)
+      const ezChip = ezPage.locator('[data-testid="cook-session-current-timers"]')
+      check(
+        'EZ-01 調理中モードでタイマーが動き出す',
+        /\d\d:\d\d/.test(await ezChip.innerText()),
+        await ezChip.innerText(),
+      )
+      // 声の「ストップ」は、聞き取り(matchVoiceCommand)ではなく画面側の処理が抜けていたのが真因。
+      // マイクは自動テストで鳴らせないので、同じ道筋（一時停止→再開）をボタンで確かめる
+      await ezPage.locator('[data-testid="cook-session-current-timers"] button').first().click()
+      await ezPage.waitForTimeout(400)
+      const ezDialog = ezPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const ezBeforePause = parseRemainingSeconds(await ezDialog.textContent())
+      await ezPage.locator('[data-testid="timer-adjust-pause"]').click()
+      await ezPage.waitForTimeout(1500)
+      const ezPausedText = await ezDialog.textContent()
+      const ezAfterPause = parseRemainingSeconds(ezPausedText)
+      check(
+        'EZ-01 いったん止めると残り時間が減らなくなる（時計が止まる）',
+        ezBeforePause !== null && ezAfterPause !== null && ezBeforePause - ezAfterPause <= 1,
+        `止める前=${ezBeforePause}s 1.5秒後=${ezAfterPause}s`,
+      )
+      check(
+        'EZ-01 止めていることが窓の中で分かる',
+        ezPausedText.includes('止めています'),
+        ezPausedText.slice(0, 120),
+      )
+      check(
+        'EZ-01 止めても消えない（「再開」で戻せる＝取り消せる操作）',
+        (await ezPage.locator('[data-testid="timer-adjust-pause"]').innerText()).includes('再開'),
+      )
+      await ezPage.locator('[data-testid="timer-adjust-pause"]').click()
+      await ezPage.waitForTimeout(1500)
+      const ezResumed = parseRemainingSeconds(await ezDialog.textContent())
+      check(
+        'EZ-01 「再開」で止めた残りから動き出す',
+        ezResumed !== null && ezAfterPause - ezResumed >= 1,
+        `止めていた残り=${ezAfterPause}s 再開1.5秒後=${ezResumed}s`,
+      )
+
+      // EZ-02: タイマーが指す手順の呼び方（「手順⑦3-1」）。「段取りの◯番目」は消えていること
+      currentCheck = 'EZ-02'
+      const ezDialogText = await ezDialog.textContent()
+      check(
+        'EZ-02 タイマーの窓が「手順②2」のように段取りの丸数字＋レシピ内の手順番号で呼ぶ',
+        /手順[①-⑳㉑-㉟㊱-㊿]/.test(ezDialogText),
+        ezDialogText.slice(0, 160),
+      )
+      check(
+        'EZ-02 「段取りの◯番目」という言い方が消えている（窓）',
+        !/段取りの\d+番目/.test(ezDialogText),
+        ezDialogText.slice(0, 160),
+      )
+      await ezPage.keyboard.press('Escape')
+      await ezPage.waitForTimeout(300)
+      // 常駐バー側（調理中モードを閉じると出る）
+      await ezPage.locator('[data-testid="cook-session-close"]').click()
+      await ezPage.waitForTimeout(800)
+      const ezBarRow = ezPage.locator('button[aria-label*="のタイマーを調整"]').first()
+      const ezBarAria = await ezBarRow.getAttribute('aria-label')
+      check(
+        'EZ-02 常駐バーの読み上げ名も丸数字＋レシピ内の手順番号で呼ぶ',
+        /手順[①-⑳㉑-㉟㊱-㊿]/.test(ezBarAria) && !/段取りの\d+番目/.test(ezBarAria),
+        String(ezBarAria),
+      )
+      await ezBarRow.click()
+      await ezPage.waitForTimeout(400)
+      const ezBarDialogText = await ezPage.getByRole('dialog', { name: 'タイマーを調整' }).textContent()
+      check(
+        'EZ-02 「段取りの◯番目を開く」が「手順⑦3-1を開く」の形になっている',
+        /手順[①-⑳㉑-㉟㊱-㊿][^を]*を開く/.test(ezBarDialogText) &&
+          !/段取りの\d+番目/.test(ezBarDialogText),
+        ezBarDialogText.slice(0, 200),
+      )
+      // 片付け（後続の検査にタイマーを持ち越さない）
+      await ezPage.getByRole('dialog', { name: 'タイマーを調整' }).getByRole('button', { name: '停止' }).click()
+      await ezPage.waitForTimeout(400)
+
+      // EZ-03: 最終手順のボタンが1品のときと同じ「完成！」
+      currentCheck = 'EZ-03'
+      await ezPage.evaluate(() => window.scrollTo(0, 0))
+      await ezPage.waitForTimeout(200)
+      await ezPage.locator('[data-testid="cook-session-start"]').click()
+      await ezPage.waitForTimeout(600)
+      for (let i = 0; i < 40; i++) {
+        if ((await ezPage.locator('[data-testid="cook-session-finish"]').count()) > 0) break
+        await ezPage.locator('[data-testid="cook-session-next"]').click()
+        await ezPage.waitForTimeout(120)
+      }
+      const ezFinishLabel = await ezPage.locator('[data-testid="cook-session-finish"]').innerText()
+      check('EZ-03 最終手順のボタンが「完成！」になっている', ezFinishLabel.trim() === '完成！', ezFinishLabel)
+      check(
+        'EZ-03 「調理を終える」がボタンの文言として残っていない',
+        !(await ezPage.locator('[data-testid="cook-session"]').innerText()).includes('調理を終える'),
+      )
+
+      // EZ-04: 「完成！」のあとの戻り位置＝「まとめて作った！」が画面内に入る
+      currentCheck = 'EZ-04'
+      const ezScrollBefore = await ezPage.evaluate(() => window.scrollY)
+      await ezPage.locator('[data-testid="cook-session-finish"]').click()
+      await ezPage.waitForTimeout(1500)
+      const ezGeom = await ezPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="navi-mark-all-cooked"]')
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        let bottomBar = window.innerHeight
+        for (const b of document.querySelectorAll('[data-app-bottom-bar]')) {
+          const br = b.getBoundingClientRect()
+          if (br.height > 0 && br.top < bottomBar) bottomBar = br.top
+        }
+        let topBar = 0
+        for (const b of document.querySelectorAll('[data-app-top-bar]')) {
+          const br = b.getBoundingClientRect()
+          if (br.height > 0) topBar = Math.max(topBar, br.bottom)
+        }
+        return { top: r.top, bottom: r.bottom, topBar, bottomBar, scrollY: window.scrollY }
+      })
+      check(
+        'EZ-04 「完成！」のあと画面が「まとめて作った！」まで送られる',
+        ezGeom != null && ezGeom.scrollY > ezScrollBefore,
+        `スクロール ${ezScrollBefore}→${ezGeom && ezGeom.scrollY}`,
+      )
+      check(
+        'EZ-04 「まとめて作った！」が上下の固定帯の裏に隠れず全部見えている',
+        ezGeom != null && ezGeom.top >= ezGeom.topBar && ezGeom.bottom <= ezGeom.bottomBar,
+        JSON.stringify(ezGeom),
+      )
+      check(
+        'EZ-04 全画面の調理中モードは閉じている（記録はまだ付いていない）',
+        (await ezPage.locator('[data-testid="cook-session"]').count()) === 0,
+      )
+
+      // EZ-05: 献立カードの枠からレシピ詳細へ
+      currentCheck = 'EZ-05'
+      await ezPage.goto(`${BASE}/#/meal-plan`)
+      await ezPage.reload({ waitUntil: 'networkidle' })
+      await ezPage.waitForTimeout(1500)
+      await ezPage.getByRole('button', { name: '週', exact: true }).click()
+      await ezPage.waitForTimeout(1000)
+      const ezTodaySection = ezPage.locator(`section[data-date="${ezSeed.today}"]`)
+      const ezOpenRecipe = ezTodaySection.locator('[data-testid="slot-open-recipe"]')
+      check(
+        'EZ-05 週カードの、レシピが入っている枠に「レシピを見る」が出る',
+        (await ezOpenRecipe.count()) === 2,
+        `件数=${await ezOpenRecipe.count()}`,
+      )
+      check(
+        'EZ-05 空いている枠には出さない（押す先が無いため）',
+        (await ezTodaySection.locator('[data-testid="slot-open-recipe"]').count()) ===
+          (await ezTodaySection.locator('[data-testid="row-thumb"]').count()),
+      )
+      check(
+        'EZ-05 枠そのものの押下は「レシピを選び直す」のまま（入れ替えの道を奪っていない）',
+        (await ezTodaySection.getByRole('button', { name: /EZ照り焼き/ }).count()) === 1,
+        `件数=${await ezTodaySection.getByRole('button', { name: /EZ照り焼き/ }).count()}`,
+      )
+      await ezOpenRecipe.first().click()
+      await ezPage.waitForTimeout(900)
+      check(
+        'EZ-05 「レシピを見る」でそのレシピの詳細へ移る',
+        ezPage.url().includes(`/recipes/${ezSeed.idA}`),
+        ezPage.url(),
+      )
+      check(
+        'EZ-05 開いた先が枠に入っていたレシピになっている',
+        ((await ezPage.textContent('body')) ?? '').includes('EZ照り焼き'),
+      )
+      // 詳細画面の「戻る」で、開いた元＝献立の週タブへ帰ること（WEEK_RETURN_LINK_STATE を
+      // 渡しているので、レシピ一覧ではなく週タブに戻る。便DT-2 と同じ帰り道を使う）
+      await ezPage.getByRole('button', { name: '戻る' }).first().click()
+      await ezPage.waitForTimeout(1500)
+      check(
+        'EZ-05 詳細の「戻る」で献立の週タブに帰る（レシピ一覧へ飛ばされない）',
+        (await ezPage.locator(`section[data-date="${ezSeed.today}"]`).count()) === 1,
+        ezPage.url(),
+      )
+    } finally {
+      await ezBrowser.close()
+    }
+  }
+
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { X, BellRing, Bell, BellOff } from 'lucide-react'
+import { X, BellRing, Bell, BellOff, Pause, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTimers, type ActiveTimer } from './TimerProvider'
 import { hasCookNaviTimeline } from '../logic/cookNaviSession'
 import { naviRecipeColor } from '../logic/naviColors'
 import { formatRemaining } from '../logic/time'
-import { sortTimersForDisplay } from '../logic/timerOrder'
+import { naviStepText } from '../logic/naviStepText'
+import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import StepBadge from './StepBadge'
 import TimerAdjustModal from './TimerAdjustModal'
 import { ja } from '../i18n/ja'
@@ -21,6 +22,8 @@ export default function TimerBar() {
     dismissTimer,
     toggleMute,
     adjustTimer,
+    pauseTimer,
+    resumeTimer,
   } = useTimers()
   const navigate = useNavigate()
   const location = useLocation()
@@ -95,15 +98,20 @@ export default function TimerBar() {
           </div>
         )}
         {sortedTimers.map((timer) => {
-          const remaining = Math.ceil((timer.endsAt - now) / 1000)
+          const remaining = timerRemainingSeconds(timer, now)
           const isFlashing = flashingId === timer.id
+          /** 一時停止中（2026-08-10 便EZ。声の「ストップ」で止めた状態） */
+          const paused = timer.pausedRemainingMs != null
           // ±調整の窓を開くボタンの読み上げ名（複数タイマー同時進行でも区別できるよう手順番号を含める。
           // 手順に紐付かない自由な時間のタイマーはラベルのみ）
-          // 並行調理ナビから始めたタイマーは、ナビの段取りの通し番号で呼ぶ
-          // （2026-08-09 便EH。画面の番号と読み上げがずれないように）
+          // 並行調理ナビから始めたタイマーは、画面のバッジと同じ「⑦3-1」の並びで呼ぶ
+          // （2026-08-10 便EZ・オーナー指示「『段取りの7番目』は削除」）
           const stepText =
             timer.naviOrder != null
-              ? ja.timer.naviStepLabel.replace('{n}', String(timer.naviOrder))
+              ? ja.timer.stepLabel.replace(
+                  '{n}',
+                  naviStepText(timer.naviOrder, recipeStepBadge(timer)),
+                )
               : timer.stepNumber > 0
                 ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
                 : null
@@ -159,8 +167,10 @@ export default function TimerBar() {
                 />
               )}
               {timer.done && <BellRing size={18} className="shrink-0 animate-pulse" aria-hidden />}
+              {/* 止まっていることが数字だけでは分からないので、時間の手前に印を出す（便EZ） */}
+              {paused && <Pause size={16} className="shrink-0 text-ink-muted" aria-hidden />}
               <span className="min-w-0 flex-1 truncate text-sm font-bold">{timer.label}</span>
-              <span className="text-lg font-bold tabular-nums">
+              <span className={`text-lg font-bold tabular-nums ${paused ? 'text-ink-muted' : ''}`}>
                 {timer.done ? timer.doneLabel : formatRemaining(remaining)}
               </span>
               {/* +1分ミニボタン(2026-07-13 UIペルソナQA)。行タップ(±調整の窓)より手前で即+60秒したい
@@ -187,25 +197,51 @@ export default function TimerBar() {
                   {ja.timer.plusOneMinute}
                 </span>
               )}
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  toggleMute(timer.id)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+              {/* 一時停止中は消音の代わりに「再開」を出す（止まっているタイマーはもう鳴らないので、
+                  ここで要るのは音の入り切りではなく動かし直すこと。2026-08-10 便EZ）。
+                  終わった行には止める先が無いので、従来どおり消音のままにする */}
+              {paused && !timer.done ? (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  data-testid="timer-bar-resume"
+                  onClick={(e) => {
                     e.stopPropagation()
-                    e.preventDefault()
+                    resumeTimer(timer.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      resumeTimer(timer.id)
+                    }
+                  }}
+                  aria-label={ja.timer.resumeAria.replace('{label}', timer.label)}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-accent-ink"
+                >
+                  <Play size={18} aria-hidden />
+                </span>
+              ) : (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.stopPropagation()
                     toggleMute(timer.id)
-                  }
-                }}
-                aria-label={timer.muted ? ja.timer.unmute : ja.timer.mute}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-ink-muted"
-              >
-                {timer.muted ? <BellOff size={18} aria-hidden /> : <Bell size={18} aria-hidden />}
-              </span>
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      toggleMute(timer.id)
+                    }
+                  }}
+                  aria-label={timer.muted ? ja.timer.unmute : ja.timer.mute}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-ink-muted"
+                >
+                  {timer.muted ? <BellOff size={18} aria-hidden /> : <Bell size={18} aria-hidden />}
+                </span>
+              )}
               <span
                 role="button"
                 tabIndex={0}
@@ -263,6 +299,15 @@ export default function TimerBar() {
         }
         onToggleMute={
           adjustingTimer ? () => toggleMute(adjustingTimer.id) : undefined
+        }
+        /* 一時停止／再開（2026-08-10 便EZ。声の「ストップ」で止めたタイマーを戻す道） */
+        onTogglePause={
+          adjustingTimer
+            ? () =>
+                adjustingTimer.pausedRemainingMs != null
+                  ? resumeTimer(adjustingTimer.id)
+                  : pauseTimer(adjustingTimer.id)
+            : undefined
         }
       />
     </div>
