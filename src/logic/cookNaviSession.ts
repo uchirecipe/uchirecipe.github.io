@@ -147,6 +147,20 @@ export function saveCookNaviSession(session: CookNaviSession): void {
   }
 }
 
+/**
+ * お試し（未解錠で3回まで）の1回ぶんを終える（2026-08-09 便ES）。**段取りは残す**。
+ *
+ * 便ED では「戻る」で覚え書きごと消していたので、お試しの1回もそこで終わっていた。
+ * 便ES で「戻る」は画面を移るだけに変えた（段取りが消えるとオーナー報告の不具合になる）ため、
+ * お試しの区切りだけをここで付ける。次に並行調理ナビを開くと残り回数の案内に戻り、
+ * もう一度お試しを始めれば、覚えていた段取りの続きから使える。
+ */
+export function endCookNaviTrial(): void {
+  const session = loadCookNaviSession()
+  if (!session?.trialActive) return
+  saveCookNaviSession({ ...session, trialActive: false })
+}
+
 export function clearCookNaviSession(): void {
   try {
     sessionStorage.removeItem(COOK_NAVI_SESSION_KEY)

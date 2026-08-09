@@ -44,6 +44,7 @@ import {
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
 import {
   clearCookNaviSession,
+  endCookNaviTrial,
   loadCookNaviSession,
   saveCookNaviSession,
   saveCookNaviScroll,
@@ -946,6 +947,12 @@ export default function CookNaviPage() {
       <BackHeader
         fallback="/meal-plan"
         title={ja.cookNavi.title}
+        /* お試しの1回ぶんはここで終える（段取りは残す。2026-08-09 便ES）。
+           次に開くと残り回数の案内に戻り、お試しを始め直せば段取りの続きから使える */
+        onBack={() => {
+          setTrialActive(false)
+          endCookNaviTrial()
+        }}
         right={
           /* 自分で時間を決めるタイマーを、画面の名前の横に常駐させる
              （2026-08-09 便ES・オーナー指示D-2。レシピ詳細の料理名横と同じ置き方にそろえる。
@@ -1181,7 +1188,12 @@ export default function CookNaviPage() {
                       type="button"
                       data-testid="cook-session-start"
                       onClick={startSession}
-                      className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
+                      /* 塗りではなく白地＋オレンジの枠にする（2026-08-09 便ES・オーナー指摘C
+                         「並行調理ナビ自体がこのボタンを押すことが必須のように見える。実際は
+                         縦長スクロールで読むこともできる」）。塗りボタンは画面の中でいちばん強く、
+                         下の段取りへ進む前に必ず押す関門に見えていた。献立タブの「並行調理を再開」で
+                         オーナーが選んだのと同じ見せ方にそろえる */
+                      className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border-2 border-accent bg-surface py-4 text-lg font-bold text-accent-ink shadow-sm"
                     >
                       <ChefHat size={20} aria-hidden />
                       {ja.cookNavi.sessionStart}

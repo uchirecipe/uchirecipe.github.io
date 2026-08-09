@@ -16049,12 +16049,16 @@ try {
           (await egServeCard.locator('[data-testid="navi-recipe-step-number"]').textContent()) === '3',
       )
       check(
-        'EG-01 ナビが足した工程には手順番号を付けない',
-        (await egPage
-          .locator('ol > li', { hasText: '湯を沸かす' })
-          .first()
-          .locator('[data-testid="navi-recipe-step-number"]')
-          .count()) === 0,
+        // 2026-08-09 便ES（オーナー指示D-4）: 「ナビが追加」の札の代わりに、元の手順を
+        // 2つに分けたことが分かる番号（◯-1 / ◯-2）を付ける
+        'EG-01 ナビが足した工程は「◯-1」の番号で、元の手順の1つめだと分かる',
+        /^\d+-1$/.test(
+          (await egPage
+            .locator('ol > li', { hasText: '湯を沸かす' })
+            .first()
+            .locator('[data-testid="navi-recipe-step-number"]')
+            .textContent()) ?? '',
+        ),
       )
       check(
         'EG-01 行内の「手順◯」の表記は消えている(読み上げ用の隠し文字だけ)',
@@ -18242,7 +18246,8 @@ try {
           (await t1Start.count()) === 0 &&
             ((await t1Page.textContent('body')) ?? '').includes('組み合わせるレシピを選ぶ'),
         )
-        // 「戻る」でこの1回のお試しを終える（次に開くと残り回数の案内に戻る）
+        // 「戻る」でこの1回のお試しを終える（次に開くと残り回数の案内に戻る）。
+        // 2026-08-09 便ES: 段取り（選んだ品）は戻るでは消さない＝お試しだけが終わる
         await t1Page.getByRole('button', { name: '戻る' }).first().click()
         await t1Page.waitForTimeout(500)
       }
