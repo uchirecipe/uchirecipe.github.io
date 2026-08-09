@@ -20662,99 +20662,10 @@ try {
   // --- 便EP(2026-08-09 オーナー実機): 紹介ページ・ホーム画面追加ページ・使い方ページの手直し ---
   // ================================================================================
 
-  // --- INSTALLASK-EP: 「無料で使ってみる」を押した先の小さな確認(紹介ページ)。
-  // ホーム画面への追加を通らずにブラウザで使い始める人が大多数になると、iPhone・iPadでは
-  // あとからレシピを移す手間が発生する。押した先で一度だけ「追加方法を見る／このまま開く」を
-  // 尋ね、選んだら以後は出さない。選ばずに閉じたときは覚えない(次に押せばまた出る) ---
-  {
-    currentCheck = 'INSTALLASK-EP'
-    const askBrowser = await chromium.launch()
-    try {
-      // (a) 初回は確認が出る。押しただけではうちレシピへ進まない
-      const askCtx = await askBrowser.newContext()
-      const askPage = await askCtx.newPage()
-      await askPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
-      check(
-        'INSTALLASK-EP(a) 読み込んだ直後は確認を出さない',
-        await askPage.locator('#install-ask').isHidden(),
-      )
-      check(
-        'INSTALLASK-EP(a) スクリプトが動かなくてもボタンはうちレシピを指している',
-        (await askPage.locator('a.cta[data-ask="install"]').getAttribute('href')) === '/',
-      )
-      await askPage.getByRole('link', { name: '無料で使ってみる' }).click()
-      await askPage.waitForTimeout(400)
-      check(
-        'INSTALLASK-EP(a) 「無料で使ってみる」を押すと確認が出て、まだ移動しない',
-        (await askPage.locator('#install-ask').isVisible()) && askPage.url().includes('/about/'),
-        askPage.url(),
-      )
-      const askText = (await askPage.locator('#install-ask').textContent()) ?? ''
-      check(
-        'INSTALLASK-EP(a) 確認に、先に追加すると移す手間がかからないことと2択が書いてある',
-        askText.includes('おすすめ') &&
-          askText.includes('別々に保存されます') &&
-          askText.includes('移す手間がかかりません') &&
-          askText.includes('追加方法を見る') &&
-          askText.includes('このまま開く'),
-        askText.replace(/\s+/g, ' ').slice(0, 160),
-      )
-
-      // (b) Escで閉じたときは「選んでいない」扱い(次に押せばまた出る)
-      await askPage.keyboard.press('Escape')
-      await askPage.waitForTimeout(300)
-      check('INSTALLASK-EP(b) Escで閉じられる', await askPage.locator('#install-ask').isHidden())
-      await askPage.getByRole('link', { name: '無料で使ってみる' }).click()
-      await askPage.waitForTimeout(400)
-      check(
-        'INSTALLASK-EP(b) 選ばずに閉じたときは覚えないので、次に押せばまた出る',
-        await askPage.locator('#install-ask').isVisible(),
-      )
-
-      // (c) 「追加方法を見る」→ 追加手順のページへ。以後は確認を出さない
-      await askPage.getByRole('link', { name: '追加方法を見る' }).click()
-      await askPage.waitForLoadState('networkidle')
-      check(
-        'INSTALLASK-EP(c) 「追加方法を見る」で追加手順のページへ進む',
-        askPage.url().includes('/about/install.html'),
-        askPage.url(),
-      )
-      await askPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
-      await askPage.getByRole('link', { name: '無料で使ってみる' }).click()
-      await askPage.waitForLoadState('networkidle')
-      check(
-        'INSTALLASK-EP(c) 一度選んだあとは確認を出さず、そのままうちレシピが開く',
-        new URL(askPage.url()).pathname === '/',
-        askPage.url(),
-      )
-      await askCtx.close()
-
-      // (d) 「このまま開く」→ うちレシピへ。以後は確認を出さない
-      const stayCtx = await askBrowser.newContext()
-      const stayPage = await stayCtx.newPage()
-      await stayPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
-      await stayPage.getByRole('link', { name: '無料で使ってみる' }).click()
-      await stayPage.waitForTimeout(400)
-      await stayPage.getByRole('link', { name: 'このまま開く' }).click()
-      await stayPage.waitForLoadState('networkidle')
-      check(
-        'INSTALLASK-EP(d) 「このまま開く」でうちレシピが開く',
-        new URL(stayPage.url()).pathname === '/',
-        stayPage.url(),
-      )
-      await stayPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
-      await stayPage.getByRole('link', { name: '無料で使ってみる' }).click()
-      await stayPage.waitForLoadState('networkidle')
-      check(
-        'INSTALLASK-EP(d) 「このまま開く」を選んだあとも、二度目は確認を出さない',
-        new URL(stayPage.url()).pathname === '/',
-        stayPage.url(),
-      )
-      await stayCtx.close()
-    } finally {
-      await askBrowser.close()
-    }
-  }
+  // --- INSTALLASK-EP(撤去): 「無料で使ってみる」を押した先で「追加方法を見る／このまま開く」を
+  // 尋ねていた小窓は 2026-08-10 便EX で撤去した(オーナー裁定「方式はいいが画面がだめ。
+  // うちレシピのホーム画面に移動した直後にお知らせを出したい」)。代わりの案内はアプリ側に置く。
+  // 撤去できていることの検査は末尾の NOASK-EX にある ---
 
   // --- LPTEXT-EP: 紹介ページの文言(オーナー実機の指摘4件) ---
   {
@@ -20775,17 +20686,13 @@ try {
       'LPTEXT-EP 「30品を超えて登録するときは、Pro版をご利用ください」を出さない',
       !lpEp.includes('30品を超えて登録するときは'),
     )
+    // 2026-08-10 便EX: 見出しは「こんなこと、ありませんか」・項目は4つ・しっぽは三角から
+    // 丸い粒に変わった。形の検査は末尾の BUBBLE-EX に移したので、ここでは吹き出しが
+    // 消えていないことだけを見る
     check(
-      'LPTEXT-EP 「こんなとき、ありませんか」の3つが吹き出しの形になっている',
-      await page.evaluate(() => {
-        const items = Array.from(document.querySelectorAll('.pains li'))
-        if (items.length !== 3) return false
-        // しっぽは疑似要素の三角(上辺の色が付いていれば描かれている)
-        return items.every((li) => {
-          const tail = getComputedStyle(li, '::after').borderTopColor
-          return tail && tail !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(tail)
-        })
-      }),
+      'LPTEXT-EP 「こんなこと、ありませんか」が吹き出しの形で並んでいる',
+      (await page.locator('.pains li').count()) >= 3,
+      `個数=${await page.locator('.pains li').count()}`,
     )
     check(
       'LPTEXT-EP 3つの悩みに限定した書き方をしていない',
@@ -22145,11 +22052,13 @@ try {
       const etsNow = new Date()
       const etsPad = (n) => String(n).padStart(2, '0')
       const etsToday = `${etsNow.getFullYear()}-${etsPad(etsNow.getMonth() + 1)}-${etsPad(etsNow.getDate())}`
+      // 直前に window.scrollTo(0, 1200) しているうえ、ここは「#より後ろ」だけが変わる移動なので
+      // ページは読み込み直されない＝日付へ飛ぶ処理が走らず、スクロール位置1200が残る。
+      // 今日が月曜だと目的の日が週の1枚目に来るため、残った1200のせいで必ず隠れ判定になる
+      // （曜日を前提にしたテストの4件目。2026-08-10 便EXで実測: ハッシュだけの移動→y=1200・
+      //   secTop=-684で赤、読み込み直すとy=452・secTop=64で緑。アプリ側は正常）。
+      // 日付指定で開いた「素の状態」を見たいので、必ず読み込み直してから測る
       await etsPage.goto(`${BASE}/#/meal-plan?focus=week&date=${etsToday}`, { waitUntil: 'networkidle' })
-      // この自動スクロールは画面を開いた最初の1回だけ動く(MealPlanPageのinitialFocusRef)。
-      // 上のsticky検査でスクロール済みの同じ画面のURLだけ書き換えても発火しないので、
-      // 実際の入り方(ホーム等から画面が開き直される)と同じになるよう読み込み直す。
-      // ※2026-08-09は日曜=今日が週の最終日で、前のスクロール位置がたまたま近く偽陽性だった
       await etsPage.reload({ waitUntil: 'networkidle' })
       await etsPage.waitForTimeout(2500)
       const etsJump = await etsPage.evaluate((d) => {
@@ -22604,6 +22513,202 @@ try {
       }
     } finally {
       await ewBrowser.close()
+    }
+  }
+
+  // ================================================================================
+  // --- 便EX(2026-08-10 オーナー指示): 紹介ページのコピー改訂・悩みの吹き出しの作り直し・
+  //     ページ上の割り込み2択の撤去 ---
+  // ================================================================================
+
+  // --- NOASK-EX: 「無料で使ってみる」は何も尋ねずにうちレシピを開く。
+  // 押した先で「追加方法を見る／このまま開く」を尋ねていた小窓(2026-08-09 便EP)は撤去した。
+  // 撤去し忘れ・部分的な取り残し(CSSだけ残る/スクリプトだけ残る)を機械で見張る ---
+  currentCheck = 'NOASK-EX'
+  {
+    const noAskBrowser = await chromium.launch()
+    try {
+      const noAskCtx = await noAskBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const noAskPage = await noAskCtx.newPage()
+      noAskPage.on('pageerror', (err) => errors.push(`[pageerror@NOASK-EX] ${err.message}`))
+      await noAskPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      const lpEx = await (await noAskPage.request.get(`${BASE}/about/`)).text()
+      check(
+        'NOASK-EX 割り込みの小窓がHTMLに残っていない',
+        !lpEx.includes('install-ask') &&
+          !lpEx.includes('data-ask') &&
+          !lpEx.includes('installAsk') &&
+          !lpEx.includes('ask__card'),
+      )
+      check(
+        'NOASK-EX 2択の文言が残っていない',
+        !lpEx.includes('追加方法を見る') && !lpEx.includes('このまま開く'),
+      )
+      check(
+        'NOASK-EX ボタンはうちレシピを指すただのリンク',
+        (await noAskPage.locator('a.cta').first().getAttribute('href')) === '/' &&
+          (await noAskPage.locator('a.cta').first().getAttribute('data-ask')) === null,
+      )
+      await noAskPage.getByRole('link', { name: '無料で使ってみる' }).click()
+      await noAskPage.waitForLoadState('networkidle')
+      check(
+        'NOASK-EX 押すと何も尋ねずにうちレシピが開く',
+        new URL(noAskPage.url()).pathname === '/',
+        noAskPage.url(),
+      )
+      // 撤去しても「ホーム画面への追加方法」への導線自体は紹介ページに残す(SMK-19cと対)
+      check(
+        'NOASK-EX ホーム画面への追加方法へのリンクは残っている',
+        lpEx.includes('/about/install.html'),
+      )
+    } finally {
+      await noAskBrowser.close()
+    }
+  }
+
+  // --- LPTEXT-EX: 紹介ページのコピー(2026-08-10 オーナー指示) ---
+  currentCheck = 'LPTEXT-EX'
+  {
+    await page.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+    const h1Ex = ((await page.locator('h1').textContent()) ?? '').replace(/\s+/g, '')
+    check(
+      'LPTEXT-EX 見出しが「レシピを集めて登録。もう献立に迷わない」',
+      h1Ex === 'レシピを集めて登録。もう献立に迷わない',
+      h1Ex,
+    )
+    const leadEx = ((await page.locator('.lead').textContent()) ?? '').replace(/\s+/g, '')
+    check(
+      'LPTEXT-EX リード文の1文目に「スマホを触らずに調理できる形」が入っている',
+      leadEx.includes('スマホを触らずに調理できる形に整えます'),
+      leadEx,
+    )
+    check(
+      'LPTEXT-EX リード文で「レシピ」を繰り返していない',
+      (leadEx.match(/レシピ/g) ?? []).length === 1,
+      `回数=${(leadEx.match(/レシピ/g) ?? []).length}`,
+    )
+    const painsH2 = ((await page.locator('.pains').locator('xpath=../h2').textContent()) ?? '').trim()
+    check('LPTEXT-EX 見出しが「こんなこと、ありませんか」', painsH2 === 'こんなこと、ありませんか', painsH2)
+    check(
+      'LPTEXT-EX 「まず、集めて登録する」が「好きなレシピを登録する」になっている',
+      ((await page.locator('.eyebrow').first().textContent()) ?? '').trim() === '好きなレシピを登録する',
+      (await page.locator('.eyebrow').first().textContent()) ?? '(なし)',
+    )
+  }
+
+  // --- BUBBLE-EX: 悩みの吹き出し(2026-08-10 オーナー指示)。
+  // ①4つある ②文の区切りは句読点ではなく改行 ③しっぽは三角ではなく丸い粒2つ
+  // ④角が大きく丸い ⑤等間隔・同じ大きさに並べていない(大きさ・傾き・左右の位置が散っている)
+  // ⑥390pxで横にはみ出さない ⑦文字が地に対して読める濃さ(ライト/ダークとも) ---
+  currentCheck = 'BUBBLE-EX'
+  {
+    const bubBrowser = await chromium.launch()
+    try {
+      for (const scheme of ['light', 'dark']) {
+        const bubCtx = await bubBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: scheme,
+        })
+        const bubPage = await bubCtx.newPage()
+        bubPage.on('pageerror', (err) => errors.push(`[pageerror@BUBBLE-EX] ${err.message}`))
+        await bubPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+        const bub = await bubPage.evaluate(() => {
+          const srgb = (v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          const lum = (c) => {
+            const [r, g, b] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map((n) => srgb(Number(n) / 255))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+          }
+          const ratio = (a, b) => {
+            const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
+            return (x + 0.05) / (y + 0.05)
+          }
+          const items = Array.from(document.querySelectorAll('.pains li'))
+          const sec = document.querySelector('.pains').closest('.sec')
+          const secBox = sec.getBoundingClientRect()
+          return {
+            count: items.length,
+            docW: document.documentElement.scrollWidth,
+            winW: window.innerWidth,
+            secLeft: secBox.left,
+            secRight: secBox.right,
+            items: items.map((li) => {
+              const b = li.querySelector('b')
+              const cs = getComputedStyle(li)
+              const before = getComputedStyle(li, '::before')
+              const after = getComputedStyle(li, '::after')
+              const r = li.getBoundingClientRect()
+              return {
+                html: b.innerHTML,
+                text: b.textContent,
+                left: Math.round(r.left),
+                right: Math.round(r.right),
+                width: Math.round(r.width),
+                font: parseFloat(getComputedStyle(b).fontSize),
+                transform: cs.transform,
+                radius: parseFloat(cs.borderTopLeftRadius),
+                // しっぽ: 三角(border-width で描く)ではなく丸い粒(border-radius:50% + 地色)
+                tailRound:
+                  before.borderRadius.includes('50%') &&
+                  after.borderRadius.includes('50%') &&
+                  parseFloat(before.width) > 8 &&
+                  parseFloat(after.width) > 4 &&
+                  parseFloat(after.width) < parseFloat(before.width),
+                tailNotTriangle:
+                  before.width !== '0px' && before.height !== '0px' && after.width !== '0px',
+                contrast: ratio(getComputedStyle(b).color, cs.backgroundColor),
+              }
+            }),
+          }
+        })
+        check(`BUBBLE-EX(${scheme}) 吹き出しが4つある`, bub.count === 4, `個数=${bub.count}`)
+        check(
+          `BUBBLE-EX(${scheme}) 句読点を使わず改行で区切っている`,
+          bub.items.every((i) => !/[、。]/.test(i.text)) &&
+            bub.items.filter((i) => i.html.includes('<br>')).length >= 3,
+          bub.items.map((i) => i.text).join(' | '),
+        )
+        check(
+          `BUBBLE-EX(${scheme}) しっぽが三角ではなく丸い粒2つ`,
+          bub.items.every((i) => i.tailRound && i.tailNotTriangle),
+        )
+        check(
+          `BUBBLE-EX(${scheme}) 角が大きく丸い(半径24px以上)`,
+          bub.items.every((i) => i.radius >= 24),
+          bub.items.map((i) => i.radius).join(','),
+        )
+        check(
+          `BUBBLE-EX(${scheme}) 同じ大きさで機械的に並べていない(文字の大きさと幅が散っている)`,
+          new Set(bub.items.map((i) => i.font)).size >= 3 &&
+            new Set(bub.items.map((i) => i.width)).size >= 3,
+          `文字=${bub.items.map((i) => i.font).join(',')} 幅=${bub.items.map((i) => i.width).join(',')}`,
+        )
+        check(
+          `BUBBLE-EX(${scheme}) 1つずつ傾きが違う(整列していない)`,
+          bub.items.every((i) => i.transform !== 'none') &&
+            new Set(bub.items.map((i) => i.transform)).size === 4,
+        )
+        check(
+          `BUBBLE-EX(${scheme}) 左右の位置が散っている(左端がそろっていない)`,
+          new Set(bub.items.map((i) => i.left)).size >= 3,
+          bub.items.map((i) => i.left).join(','),
+        )
+        check(
+          `BUBBLE-EX(${scheme}) 390pxで横にはみ出さない`,
+          bub.docW <= bub.winW &&
+            bub.items.every((i) => i.left >= bub.secLeft - 1 && i.right <= bub.secRight + 1),
+          `scrollW=${bub.docW} 枠=${Math.round(bub.secLeft)}〜${Math.round(bub.secRight)} 各=${bub.items
+            .map((i) => `${i.left}-${i.right}`)
+            .join(' ')}`,
+        )
+        check(
+          `BUBBLE-EX(${scheme}) 吹き出しの中の文字が地に対してAA(4.5:1)以上`,
+          bub.items.every((i) => i.contrast >= 4.5),
+          bub.items.map((i) => i.contrast.toFixed(2)).join(','),
+        )
+        await bubCtx.close()
+      }
+    } finally {
+      await bubBrowser.close()
     }
   }
 

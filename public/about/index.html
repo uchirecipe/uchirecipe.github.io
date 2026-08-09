@@ -236,53 +236,95 @@
   }
   .more--sm { font-size: 13px; margin-top: 6px; }
 
-  /* ===== 痛み(3つ) =====
-     2026-08-09 便EP(オーナー指示): 読んでいる人の心の声に見えるよう、各項目を吹き出しの形にする。
-     しっぽは三角形を2枚重ねて作る(外側=枠線の色・内側=中の地色)。しっぽのぶん、
-     項目どうしの縦の間隔と最後の余白を広げてある */
+  /* ===== 悩みの吹き出し(4つ) =====
+     2026-08-10 便EX(オーナー指示): 三角のしっぽは「声に出したセリフ」に見えるので、
+     頭の中で考えている絵にする。
+       ・しっぽ = 大小2つの丸い粒(::before / ::after)。三角は使わない
+       ・角は大きく丸め、四隅の半径を少しずつ変えて手描きの輪郭に近づける
+       ・等間隔・同じ大きさで並べると図表に見えるため、大きさ・傾き・左右の位置を
+         1つずつずらして「絵として置いた」形にする(下の nth-child の指定)
+     旧: 2026-08-09 便EP の三角しっぽ・3列グリッド */
   .pains {
-    display: grid;
-    gap: 22px 12px;
-    grid-template-columns: 1fr;
-    margin: 0 0 24px;
+    /* 下の余白は、いちばん下の吹き出しのしっぽ(最大33px下に出る)より広く取る */
+    margin: 2px 0 44px;
     padding: 0;
     list-style: none;
   }
-  @media (min-width: 620px) {
-    .pains { grid-template-columns: repeat(3, 1fr); }
-  }
   .pains li {
     position: relative;
+    width: fit-content;
+    max-width: 100%;
     background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 12px 14px;
+    /* 輪郭は本文の枠より太い2px。絵として置いたものだと分かる太さにする */
+    border: 2px solid var(--border);
+    padding: 11px 18px 12px;
+    border-radius: 30px 34px 28px 32px / 32px 28px 34px 30px;
   }
+  /* しっぽ: 吹き出しから離れた丸い粒を2つ。下へ行くほど小さくする */
   .pains li::before,
   .pains li::after {
     content: "";
     position: absolute;
-    left: 24px;
-    width: 0;
-    height: 0;
-    border-style: solid;
-    border-color: transparent;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 50%;
   }
   .pains li::before {
-    bottom: -12px;
-    border-width: 12px 10px 0 0;
-    border-top-color: var(--border);
+    width: 15px;
+    height: 15px;
+    bottom: -11px;
   }
   .pains li::after {
-    bottom: -10px;
-    border-width: 10px 8px 0 0;
-    border-top-color: var(--bg);
+    width: 9px;
+    height: 9px;
+    bottom: -24px;
   }
-  /* 2026-08-02 オーナー指示: 各項目は見出しの1行だけにした(補足文は置かない) */
   .pains b {
     display: block;
     font-size: 15px;
+    line-height: 1.6;
     color: var(--accent-ink);
+  }
+
+  /* 1つずつ、大きさ・傾き・左右の位置・しっぽの向きを変える(整列させない) */
+  .pains li:nth-child(1) {
+    margin: 0 0 32px 4px;
+    transform: rotate(-2.8deg);
+  }
+  .pains li:nth-child(1) b { font-size: 16.5px; }
+  .pains li:nth-child(1)::before { left: 26px; }
+  .pains li:nth-child(1)::after { left: 14px; }
+
+  .pains li:nth-child(2) {
+    margin: 0 8px 36px auto;
+    transform: rotate(2.2deg);
+  }
+  .pains li:nth-child(2) b { font-size: 15px; }
+  .pains li:nth-child(2)::before { right: 28px; }
+  .pains li:nth-child(2)::after { right: 16px; }
+
+  .pains li:nth-child(3) {
+    margin: 0 0 32px 24px;
+    transform: rotate(-1.8deg);
+  }
+  .pains li:nth-child(3) b { font-size: 15.5px; }
+  .pains li:nth-child(3)::before { left: 30px; }
+  .pains li:nth-child(3)::after { left: 18px; }
+
+  .pains li:nth-child(4) {
+    margin: 0 28px 0 auto;
+    transform: rotate(3deg);
+  }
+  .pains li:nth-child(4) b { font-size: 14.5px; }
+  .pains li:nth-child(4)::before { right: 24px; }
+  .pains li:nth-child(4)::after { right: 12px; }
+
+  /* 横に余裕がある画面では散らし幅を広げ、縦は少し詰めて絵としてまとまるようにする */
+  @media (min-width: 620px) {
+    .pains li:nth-child(1) { margin-left: 12px; }
+    .pains li:nth-child(2) { margin-top: -30px; margin-right: 44px; }
+    .pains li:nth-child(3) { margin-top: -26px; margin-left: 74px; }
+    .pains li:nth-child(4) { margin-top: -30px; margin-right: 104px; }
   }
 
   /* ===== 網羅グリッド(献立まわりだけ大きい1枠) ===== */
@@ -458,70 +500,8 @@
     border-radius: 8px;
   }
 
-  /* ===== ページ上部のボタン(data-ask="install")を押したときの小さな確認(2026-08-09 便EP) =====
-     ホーム画面への追加を通らずにブラウザで使い始める人が大多数になると、
-     iPhone・iPadでは後からレシピを移す手間が発生する。押した先で一度だけ選び方を尋ねる。
-     一番下まで読ませないと開けない作りにはしない(選ばずに閉じてもアプリは開ける)。
-     ※このコメントにボタンの名前をそのまま書かないこと: 静的ページの文言は機械で
-       前後関係を見張っており(e2eのSMK-19c)、先に同じ語が出ると誤検知する */
-  .ask {
-    position: fixed;
-    inset: 0;
-    z-index: 80;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    background: rgba(33, 26, 19, 0.5);
-  }
-  .ask[hidden] { display: none; }
-  .ask__card {
-    width: 100%;
-    max-width: 380px;
-    max-height: 100%;
-    overflow-y: auto;
-    background: var(--surface);
-    --accent-ink: var(--accent-ink-surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 18px 18px 16px;
-    box-shadow: 0 10px 30px rgba(33, 26, 19, 0.3);
-  }
-  .ask__card h2 {
-    margin: 0 0 8px;
-    font-size: 17px;
-    line-height: 1.5;
-  }
-  .ask__card p {
-    margin: 0 0 8px;
-    font-size: 14px;
-    line-height: 1.75;
-  }
-  .ask__card p:last-of-type { margin-bottom: 14px; }
-  .ask__go,
-  .ask__stay {
-    display: block;
-    width: 100%;
-    font-family: inherit;
-    font-size: 16px;
-    font-weight: bold;
-    text-align: center;
-    text-decoration: none;
-    padding: 13px;
-    border-radius: 12px;
-    cursor: pointer;
-  }
-  .ask__go {
-    background: var(--accent);
-    color: var(--bg);
-    border: 1px solid var(--accent);
-    margin-bottom: 8px;
-  }
-  .ask__stay {
-    background: var(--surface);
-    color: var(--accent-ink);
-    border: 1px solid var(--border);
-  }
+  /* 2026-08-10 便EX: ページ上部のボタンを押した先で行き先を尋ねる小窓(2026-08-09 便EP)は
+     撤去した。ボタンはそのままうちレシピを開く。追加のお知らせはアプリ側で出す */
 </style>
 </head>
 <body>
@@ -536,8 +516,8 @@
        アプリストアからのダウンロードが要らない旨に改めた -->
   <p class="top-label">ブラウザで開くだけ。アプリストアからのダウンロードも会員登録もいりません</p>
 
-  <h1>レシピを集めて登録。<br>できることが増える。</h1>
-  <p class="lead">ネットで見つけたレシピはURLを貼るだけ。家で作ってきた味は、手入力やまとめて入力で。<br>うちレシピに登録すると、調理中の大きな手順表示・カロリーと材料費の概算・献立と買い物メモまで、そのレシピで使えるようになります。</p>
+  <h1>レシピを集めて登録。<br>もう献立に迷わない</h1>
+  <p class="lead">登録したレシピを、スマホを触らずに調理できる形に整えます。<br>献立の提案、カロリーや材料費の概算、買い物メモの作成まで。</p>
   <ul class="three-zero">
     <li>広告なし</li>
     <li>会員登録なし</li>
@@ -549,18 +529,19 @@
     <figcaption>集めたレシピは、写真があってもなくても同じ形で並びます</figcaption>
   </figure>
 
-  <!-- data-ask="install": 押した先で「先に追加するか、このまま開くか」を一度だけ尋ねる
-       (対になる中身は </main> の後ろ・動きはページ末尾のスクリプト) -->
-  <a class="cta" href="/" data-ask="install">無料で使ってみる</a>
+  <a class="cta" href="/">無料で使ってみる</a>
   <p class="cta-note cta-note--tight">最初から基本のレシピが100品以上入っています</p>
   <p class="cta-link"><a href="/about/install.html">ホーム画面への追加方法</a></p>
 
   <section class="sec">
-    <h2>こんなとき、ありませんか</h2>
+    <h2>こんなこと、ありませんか</h2>
+    <!-- 2026-08-10 便EX(オーナー指示): 声に出したセリフではなく「頭の中で考えていること」に
+         見せる。文の区切りは句読点ではなく改行で作る -->
     <ul class="pains">
-      <li><b>前につくったあのレシピ、どこにやったっけ</b></li>
-      <li><b>今日のごはん、何カロリー？いくらかかった？</b></li>
-      <li><b>手が濡れていて、スマホにさわれない</b></li>
+      <li><b>今日の夕ご飯<br>何にしよう？<br>毎日考えるの疲れた</b></li>
+      <li><b>前につくったあのレシピ<br>どこにやったっけ</b></li>
+      <li><b>手が濡れていて<br>スマホにさわれない</b></li>
+      <li><b>最近カロリーが気になる</b></li>
     </ul>
     <!-- 2026-08-09 便EP(オーナー指示): 「この3つ」と数を切ると、できることが3つだけという
          先入観を与えてしまう。解消できる範囲を絞らない書き方にする -->
@@ -568,7 +549,7 @@
   </section>
 
   <section class="sec">
-    <p class="eyebrow">まず、集めて登録する</p>
+    <p class="eyebrow">好きなレシピを登録する</p>
     <h2>URLを貼る。文章を貼る。手で書く。</h2>
     <p>レシピのページのURLを貼り付けると、料理名・材料・手順・写真が自動で入ります。レシピのページなら多くのサイトで取り込めます（取り込めるかどうかはページごとに自動で判定します）。</p>
 
@@ -867,97 +848,6 @@
   </footer>
 </main>
 
-<!-- 「無料で使ってみる」を押したときの小さな確認(2026-08-09 便EP)。
-     既定は隠してあり、一度選ぶと以後は出さない(選んだことを端末の中に覚える) -->
-<div class="ask" id="install-ask" hidden role="dialog" aria-modal="true" aria-labelledby="install-ask-title">
-  <div class="ask__card">
-    <h2 id="install-ask-title">先にホーム画面へ追加しておくのがおすすめです</h2>
-    <p>アイコンから開けるようになり、アプリと同じようにお使いいただけます。</p>
-    <p>iPhone・iPadでは、ブラウザで登録したレシピと、ホーム画面のアイコンから開いたときのレシピが別々に保存されます。追加してから使い始めると、あとでレシピを移す手間がかかりません。</p>
-    <a class="ask__go" href="/about/install.html" data-ask-choice="install">追加方法を見る</a>
-    <a class="ask__stay" href="/" data-ask-choice="open">このまま開く</a>
-  </div>
-</div>
-
-<script>
-  // 「無料で使ってみる」を押したときの小さな確認(2026-08-09 便EP)。
-  // ・一度どちらかを選んだら、以後この端末では出さない(localStorage)
-  // ・すでにホーム画面のアイコンから開いているときは尋ねない
-  // ・Escか背景を押したときは「選んでいない」扱いで閉じるだけ(次に押せばまた出る)
-  // ・スクリプトが動かない環境ではリンクがそのまま働き、うちレシピが開く
-  ;(function () {
-    var KEY = 'uchirecipe.about.installAsk'
-    var dialog = document.getElementById('install-ask')
-    var trigger = document.querySelector('[data-ask="install"]')
-    if (!dialog || !trigger) return
-
-    function answered() {
-      try {
-        return localStorage.getItem(KEY) !== null
-      } catch (e) {
-        // localStorageが使えない設定のときは、確認を出さずに素通りさせる
-        return true
-      }
-    }
-    function remember(choice) {
-      try {
-        localStorage.setItem(KEY, choice)
-      } catch (e) {
-        /* 覚えられなくても動作は変えない */
-      }
-    }
-    function standalone() {
-      return (
-        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
-        window.navigator.standalone === true
-      )
-    }
-
-    var lastFocused = null
-    function close() {
-      dialog.hidden = true
-      document.removeEventListener('keydown', onKeydown)
-      if (lastFocused) lastFocused.focus()
-    }
-    function onKeydown(e) {
-      if (e.key === 'Escape') {
-        close()
-        return
-      }
-      if (e.key !== 'Tab') return
-      // 開いている間は、確認の中だけをキーボードで行き来できるようにする
-      var items = dialog.querySelectorAll('a[href]')
-      if (!items.length) return
-      var first = items[0]
-      var last = items[items.length - 1]
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-
-    trigger.addEventListener('click', function (e) {
-      if (answered() || standalone()) return
-      e.preventDefault()
-      lastFocused = trigger
-      dialog.hidden = false
-      dialog.querySelector('.ask__go').focus()
-      document.addEventListener('keydown', onKeydown)
-    })
-
-    dialog.addEventListener('click', function (e) {
-      var choice = e.target.closest ? e.target.closest('[data-ask-choice]') : null
-      if (choice) {
-        remember(choice.getAttribute('data-ask-choice'))
-        return
-      }
-      if (e.target === dialog) close()
-    })
-  })()
-</script>
 <!-- Cloudflare Web Analytics -->
 <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "9386f480590d44cdae47f8526841e1ab"}'></script>
 <!-- End Cloudflare Web Analytics -->
