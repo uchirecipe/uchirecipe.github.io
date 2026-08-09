@@ -719,7 +719,10 @@ export default function CookSessionOverlay({
         </div>
       )}
 
-      {/* 前へ / 次へ（最後の手順では「調理を終える」） */}
+      {/* 前へ / 次へ（最後の手順では「完成！」。2026-08-10 便EZ・オーナー指示
+          「調理中モード『調理を終える』→『完成！』単品の時と揃える」。
+          1品の調理中モード（FocusMode）の最終手順と同じ ja.focus.complete を共用する＝
+          片方だけ言い方が変わることが構造的に起きない） */}
       <div className="flex gap-2 px-[var(--space-md)] pb-[calc(var(--space-sm)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]">
         <button
           type="button"
@@ -738,7 +741,7 @@ export default function CookSessionOverlay({
             className="flex flex-1 items-center justify-center gap-1 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
           >
             <Check size={22} aria-hidden />
-            {ja.cookNavi.sessionFinish}
+            {ja.focus.complete}
           </button>
         ) : (
           <button
