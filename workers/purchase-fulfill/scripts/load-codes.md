@@ -312,11 +312,116 @@ npx wrangler deploy
 「コードの準備中です」と出て、レスポンスに `"alert":"out-of-stock"` が入る。**在庫を足したうえで、
 購入者のメールアドレス宛に手動でコードを送ること**(画面ではそう案内している)。
 
-## 在庫が減ってきたら
+## 在庫が減ってきたら(2回目以降のコード追加)
 
-現状、コードの追加投入(2回目以降のバッチ生成)の手順は未整備(`generate-pro-codes.mjs` は
-実行するたびに100件を丸ごと新規生成し直す作りで、そのまま使うと既存の販売済みコードの整合性に
-関わる)。残りが少なくなってきたら追加投入は別途相談すること。
+在庫は `curl https://uchirecipe-purchase-fulfill.hapillust.workers.dev/stock` でいつでも見られる。
+**残りが20件を切ったら**この手順で足す(在庫0で購入されると、決済後の画面が「コードの準備中です」に
+なり、手作業でのお詫び対応が必要になる)。
+
+> **`scripts/generate-pro-codes.mjs` を補充に使ってはいけない。**
+> あれは初回の100件を作るスクリプトで、実行するたびに台帳とハッシュ一覧を**丸ごと作り直す**。
+> 補充に使うと、それまでに販売したコードのハッシュが `src/logic/proCodes.ts` から消え、
+> **購入済みのお客様のコードが解錠に使えなくなる**。補充は下の `add-pro-codes.mjs` を使う。
+
+### 手順の全体像(この順番を守る)
+
+1. コードを追加で発行する(台帳に追記・ハッシュ一覧を作り直す)
+2. **アプリを本番(main)へ出す** ← 先にこれ
+3. そのあとで KVのプールに追加分を足す
+
+**2と3を逆にしない。** アプリより先にKVへ入れると、アプリがまだ知らないコードがお客様に渡り、
+入力しても「コードが正しくありません」となる。逆の順(2→3)なら、KVに入るまで在庫が増えないだけで
+実害は出ない。
+
+### ① コードを追加で発行する
+
+まず何が起きるかだけ見る(ファイルは書き換わらない)。
+
+```bash
+export PATH="$HOME/.local/node/bin:$PATH"
+cd ~/Documents/Claude/Projects/料理アプリ/app
+npx tsx scripts/add-pro-codes.mjs --count=100 --dry-run
+```
+
+「既存◯件・今回◯件・合計◯件(既存の◯件はすべて残る)」が出る。数が想定どおりなら本番実行する。
+
+```bash
+npx tsx scripts/add-pro-codes.mjs --count=100
+```
+
+書き換わるのは次の3つ。
+
+| ファイル | 何が起きるか | コミット |
+| --- | --- | --- |
+| `private/pro-codes-master.txt` | 末尾に「追加バッチ ◯◯◯◯-◯◯-◯◯」の節が足される(既存行は1行も消えない) | **絶対にしない** |
+| `src/logic/proCodes.ts` | 台帳の全コード + 今回ぶんのハッシュに作り直される | **する**(②で使う) |
+| `private/pro-codes-add-<日付>.json` | 今回足したぶんだけのJSON配列 | **絶対にしない** |
+
+このスクリプトは、いま `proCodes.ts` に載っているハッシュが1つでも欠ける計算になったら
+**書き込む前に中止する**(台帳から行が消えていた等の事故を止めるため)。中止が出たら、
+原本 `private/pro-codes-master.txt` から行が消えていないか確認する。
+
+### ② アプリを本番へ出す(先にこちら)
+
+```bash
+export PATH="$HOME/.local/node/bin:$PATH"
+cd ~/Documents/Claude/Projects/料理アプリ/app
+npx tsc -b && npm run build && npm test
+git add src/logic/proCodes.ts
+git commit -m "Pro解錠コードを100件追加"
+git push origin dev
+```
+
+そのうえで `dev` を `main` にマージして `main` を push する(このpushが本番デプロイ)。
+デプロイが終わってから③へ進む。
+
+> `git status` に `private/` の中身が出てこないことを確認する(`private/` は `app/` の外なので
+> 通常は出てこない)。もし出てきたら**コミットせずに開発チャットへ報告**すること。
+
+### ③ KVのプールに追加分を足す
+
+**いま入っているプールを消して入れ直すのではなく、後ろに足す。**
+台帳の「済」は手で書き足す運用なので、売れたのに印を付け忘れているコードがある場合、
+台帳から作り直すと**すでに渡したコードがプールに戻り、別の人にも同じコードが配られる**。
+
+```bash
+export PATH="$HOME/.local/node/bin:$PATH"
+cd ~/Documents/Claude/Projects/料理アプリ/app/workers/purchase-fulfill
+
+# ③-1 いま本番KVに入っているプールを手元に取り出す(--remote 必須)
+npx wrangler kv key get pool --namespace-id <①でコピーしたid> --remote > ../../../private/pool-now.json
+
+# ③-2 いまのプール + 追加分 を1つのファイルにまとめる(重複と「済」の混入を検査する)
+cd ~/Documents/Claude/Projects/料理アプリ/app
+npx tsx workers/purchase-fulfill/scripts/merge-pool-json.mjs \
+  ../private/pool-now.json ../private/pro-codes-add-<日付>.json
+
+# ③-3 まとめたファイルを本番KVへ書き戻す(--remote 必須)
+cd ~/Documents/Claude/Projects/料理アプリ/app/workers/purchase-fulfill
+npx wrangler kv key put pool --path ../../../private/pro-codes-pool.json --namespace-id <①のid> --remote
+```
+
+`<日付>` は①で作られたファイル名(`pro-codes-add-2026-08-09.json` のような形)に置き換える。
+
+> **`--remote` を忘れない。** wrangler v4 の `kv key` は既定で**手元の疑似ストア**を読み書きする。
+> 付け忘れると「入れたのに本番は空のまま」になる(発売初日に実発生)。
+
+### ④ 足せたことを確かめる
+
+```bash
+curl https://uchirecipe-purchase-fulfill.hapillust.workers.dev/stock
+```
+
+表示された在庫が「もとの残り + 今回足した件数」になっていれば完了。
+念のため、追加したコードのうち1つを自分の端末の設定画面に入れて解錠できるかも見ておく
+(解錠できなければ②のデプロイがまだ反映されていない。数分待ってから再読み込みする)。
+確認に使ったコードは台帳のその行に「テスト」と書き足し、KVのプールからも外しておく。
+
+### 補充のときに使わないもの
+
+`workers/purchase-fulfill/scripts/build-pool-json.mjs` は**初回投入(⑥-1)専用**。
+台帳の未販売行からプールを作り直すため、補充で使うと上に書いた「渡したコードが戻る」事故になる。
+補充では `merge-pool-json.mjs` を使う。
 
 ## よくあるトラブル
 

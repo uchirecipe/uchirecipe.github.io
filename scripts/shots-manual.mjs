@@ -36,6 +36,17 @@
 //      misoshiru https://www.pakutaso.com/20210348077post-33918.html
 //      hoikoro   https://www.pakutaso.com/20250645167post-54631.html
 //  - 見つからないときは写真なしで撮影を続ける(警告を出す)。
+//
+//  - 2026-08-09 便EU: `.manual-photos/` はリポジトリの外(各自の手元)にあるフォルダなので、
+//    worktreeで撮り直すときは**まず用意されていない**。そのまま全カットを撮ると、写真つきの
+//    カットが写真なしの絵に置き換わる(警告は出るが見落としやすい)。
+//    同じ「ぱくたそ」の原本が `.demo-photos/`(public/demo/*.webp の元。build-demo-photos.mjs参照)
+//    にあり、curry・hamburg・mabo の3枚はそちらと**同じ写真**なので流用できる:
+//      MANUAL_PHOTO_DIR=<app>/.demo-photos npx tsx scripts/shots-manual.mjs
+//    ただし misoshiru・hoikoro は .demo-photos に無い。この2枚が要るのは
+//    logs(味噌汁のサムネイル)と plan-month-photo(カレンダーに敷く写真)なので、
+//    **その2カットを撮り直すときだけ .manual-photos に5枚そろえること**。
+//    そろっていない状態でこの2カットを撮ると、いま入っている絵より写真が減る。
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -562,7 +573,18 @@ try {
     name: /^この日（.+）の栄養の概算を詳しく見る$/,
   })
   const richDayToggles = dayToggles.filter({ hasText: /野菜約\d{3}g/ })
-  const dayToggle = (await richDayToggles.count()) ? richDayToggles.first() : dayToggles.first()
+  // 「今日」以外の日を選ぶ(2026-08-09 便EU)。今日の栄養には
+  // 「今日は、作った記録があるものは記録、まだのものは登録した献立で計算しています」の
+  // 1行が足され、開いたときの高さが日によって変わる。図の下が1行ぶん切れるのを避ける
+  const candidates = (await richDayToggles.count()) ? richDayToggles : dayToggles
+  let dayIndex = 0
+  if (await candidates.count()) {
+    const notToday = await candidates.evaluateAll((els) =>
+      els.findIndex((el) => !(el.closest('section')?.textContent ?? '').includes('今日')),
+    )
+    if (notToday >= 0) dayIndex = notToday
+  }
+  const dayToggle = candidates.nth(dayIndex)
   if (await dayToggle.count()) {
     // クリックすると読み上げ名が変わるので実体を掴んでから操作する
     const toggleEl = await dayToggle.elementHandle()
@@ -573,8 +595,10 @@ try {
     await toggleEl.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 60))
     await wait(page, 400)
     // 2026-08-02 便CW-7で並置UI→説明文1行になったので、8項目・「ごはんを含めて計算する」・
-    // 「1日分のめやすは〜」の1行までが入る高さに広げる(説明している範囲を途中で切らない)
-    await cropRect(page, 'plan-week-nutrition-open', { x: 0, y: 50, width: VIEW.width, height: 466 })
+    // 「1日分のめやすは〜」の1行までが入る高さに広げる(説明している範囲を途中で切らない)。
+    // 2026-08-09 便EU: チェックの見出しが「1食につきごはん1杯（150g）を足して計算する」に
+    // なって2行に折り返したぶん、466pxでは「1日分のめやすは〜」が途中で切れていた
+    await cropRect(page, 'plan-week-nutrition-open', { x: 0, y: 50, width: VIEW.width, height: 508 })
     await toggleEl.click()
     await wait(page, 600)
   }
@@ -778,7 +802,11 @@ try {
   }
 
   // ======== 並行調理ナビ ========
-  // 今日の献立を2品以上にしてから開く
+  // 今日の献立を「肉じゃが」「ほうれん草のおひたし」の2品だけにしてから開く。
+  // 2026-08-09 便EU: 以前は「2品に満たなければ足す」だったが、この時点では上の週タブで
+  // 献立を入れているため今日の枠が別の料理で埋まっていることがあり、撮るたびに段取りの
+  // 中身が変わっていた(同 便ESで今週の献立の予定も候補に入るようになったため)。
+  // 説明書の図は毎回同じ絵にしたいので、今日の献立を作り直して固定する。
   await page.evaluate(async () => {
     const openDb = () =>
       new Promise((resolve, reject) => {
@@ -793,29 +821,67 @@ try {
       })
     const db = await openDb()
     const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
-    const today = await P(store('todayList').getAll())
+    await P(store('todayList').clear())
     const recipes = await P(store('recipes').getAll())
-    const wanted = ['肉じゃが', 'ほうれん草のおひたし', '豆腐とわかめの味噌汁']
+    const wanted = ['肉じゃが', 'ほうれん草のおひたし']
     let addedAt = Date.now()
-    const has = new Set(today.map((t) => t.recipeId))
     for (const title of wanted) {
-      if (has.size >= 2) break
       const r = recipes.find((x) => x.title === title || x.title.startsWith(title))
-      if (!r || has.has(r.id)) continue
+      if (!r) continue
       await P(store('todayList').add({ recipeId: r.id, addedAt: addedAt++ }))
-      has.add(r.id)
     }
     db.close()
   })
   await page.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
   await page.reload({ waitUntil: 'networkidle' })
   await wait(page, 1800)
+  // 組み合わせるレシピを「肉じゃが」「ほうれん草のおひたし」の2品に固定する(2026-08-09 便EU)。
+  // 今日の献立だけでなく今週の献立の予定も候補に並び、既定で選ばれた状態で出る
+  // (2026-08-09 便ES)ため、今日の献立を作り直すだけでは段取りの中身が固定できなかった。
+  // 外す操作を先に済ませてから入れる(選べるのは3品までで、先に入れると弾かれるため)。
+  const NAVI_PICKS = ['肉じゃが', 'ほうれん草のおひたし']
+  const pickButtons = page.locator('main button[aria-pressed]')
+  for (const onlyTurnOff of [true, false]) {
+    const count = await pickButtons.count()
+    for (let i = 0; i < count; i++) {
+      const btn = pickButtons.nth(i)
+      const label = ((await btn.textContent()) ?? '').trim()
+      const shouldBeOn = NAVI_PICKS.some((t) => label.startsWith(t))
+      const isOn = (await btn.getAttribute('aria-pressed')) === 'true'
+      if (isOn === shouldBeOn) continue
+      if (onlyTurnOff !== isOn) continue
+      await btn.click()
+      await wait(page, 200)
+    }
+  }
   const makePlan = page.getByRole('button', { name: '段取りを作る' })
   if (await makePlan.count()) {
     await makePlan.click()
     await wait(page, 1600)
   }
-  const waitStep = page.getByText(/約.+の待ち時間/).first()
+  // どの待ちの帯を撮るか(2026-08-09 便EU)。
+  // 使い方ページ§9の本文が触れているのは「タイマーを始める」と「手順ごとに出る材料と分量」の
+  // 2つなので、その両方が1枚に収まる帯を選ぶ。手順の本文に分数が書かれている待ち
+  // (「中火で15分煮る」など)は本文の「15分」自体がタイマーのボタンになり帯にはボタンが
+  // 出ないため、先頭の帯を無条件に撮ると本文と食い違う絵になっていた。
+  // 待ちの帯は「約◯分の待ち時間」と「湯が沸くまでの待ち時間」の2種類がある
+  // (ナビが足した湯沸かしは分数を出さない。2026-08-09 便ES)ので、両方を候補に入れる。
+  const WAIT_BAND = /(約.+|湯が沸くまで)の待ち時間/
+  const waitCards = page.locator('main li').filter({ hasText: WAIT_BAND })
+  let waitIndex = 0
+  if (await waitCards.count()) {
+    const picked = await waitCards.evaluateAll((cards) => {
+      const hasStartTimer = (el) =>
+        [...el.querySelectorAll('button')].some((b) => (b.textContent ?? '').includes('タイマーを始める'))
+      const nextHasIngredients = (el) =>
+        !!el.nextElementSibling?.querySelector('[data-testid="navi-step-ingredients"]')
+      const byBoth = cards.findIndex((el) => hasStartTimer(el) && nextHasIngredients(el))
+      if (byBoth >= 0) return byBoth
+      return cards.findIndex((el) => hasStartTimer(el))
+    })
+    if (picked >= 0) waitIndex = picked
+  }
+  const waitStep = waitCards.nth(waitIndex).getByText(WAIT_BAND).first()
   if (await waitStep.count()) {
     await waitStep.scrollIntoViewIfNeeded()
     await wait(page, 300)
