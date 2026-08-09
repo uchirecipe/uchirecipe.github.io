@@ -23160,10 +23160,12 @@ try {
         'EZ-05 開いた先が枠に入っていたレシピになっている',
         ((await ezPage.textContent('body')) ?? '').includes('EZ照り焼き'),
       )
-      await ezPage.goBack()
-      await ezPage.waitForTimeout(1000)
+      // 詳細画面の「戻る」で、開いた元＝献立の週タブへ帰ること（WEEK_RETURN_LINK_STATE を
+      // 渡しているので、レシピ一覧ではなく週タブに戻る。便DT-2 と同じ帰り道を使う）
+      await ezPage.getByRole('button', { name: '戻る' }).first().click()
+      await ezPage.waitForTimeout(1500)
       check(
-        'EZ-05 戻ると献立の週タブに帰る（別のタブへ飛ばされない）',
+        'EZ-05 詳細の「戻る」で献立の週タブに帰る（レシピ一覧へ飛ばされない）',
         (await ezPage.locator(`section[data-date="${ezSeed.today}"]`).count()) === 1,
         ezPage.url(),
       )
