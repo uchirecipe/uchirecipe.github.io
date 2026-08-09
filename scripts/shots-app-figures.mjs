@@ -39,9 +39,9 @@ const APP_ICON = `data:image/svg+xml;base64,${fs
 
 const CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#fffdf8}
+body{background:transparent}
 #fig{
-  position:relative;width:340px;overflow:hidden;background:#fffdf8;
+  position:relative;width:340px;overflow:hidden;background:transparent;
   font-family:-apple-system,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif;
   color:#43362a;line-height:1.5;-webkit-font-smoothing:antialiased;
 }
@@ -133,7 +133,7 @@ try {
     await page.setContent(wrap(inner), { waitUntil: 'load' })
     await page.evaluate(() => document.fonts.ready)
     await page.waitForTimeout(120)
-    await save(await page.locator('#fig').screenshot(), name)
+    await save(await page.locator('#fig').screenshot({ omitBackground: true }), name)
   }
 } finally {
   await browser.close()

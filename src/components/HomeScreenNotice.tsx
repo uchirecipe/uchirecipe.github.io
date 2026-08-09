@@ -58,13 +58,14 @@ export default function HomeScreenNotice({ onClose }: { onClose: () => void }) {
         <p className="mt-1 text-sm text-ink-muted">{ja.homeScreenNotice.body}</p>
 
         {/* 図は scripts/shots-app-figures.mjs で描いている（自作・幅340CSSpxの2倍で書き出し）。
-            地色を持つ絵なので、どのテーマでも枠線を付けて面との境目が分かるようにする */}
+            背景を透かしてあるので、スマートフォンの形の外はカード面がそのまま見える
+            ＝ライトでもダークでも、明るい板が貼り付いたようには見えない */}
         <img
           src="/img/home-screen-icon.webp"
           width={680}
           height={434}
           alt={ja.homeScreenNotice.figureAlt}
-          className="mx-auto mt-[var(--space-sm)] block w-full max-w-[340px] rounded-sm border border-edge"
+          className="mx-auto mt-[var(--space-sm)] block w-full max-w-[340px]"
         />
 
         <a

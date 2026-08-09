@@ -356,6 +356,7 @@ import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceC
 import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { isStandaloneDisplay } from '../src/logic/standalone.ts'
+import { shouldShowHomeScreenNotice } from '../src/logic/homeScreenNotice.ts'
 import { isImeConfirmKey } from '../src/logic/imeKey.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -13506,6 +13507,103 @@ eq(
       true,
     )
   }
+}
+
+// ---------- HOMENOTICE: ホーム画面への追加の初回お知らせ(2026-08-10 便EW) ----------
+{
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const base = { touchPrimary: true, launchedFromHomeScreen: false, seen: false }
+  eq('HOMENOTICE 3条件をすべて満たすと出す', shouldShowHomeScreenNotice(base), true)
+  eq(
+    'HOMENOTICE パソコン(指で操作しない)には出さない',
+    shouldShowHomeScreenNotice({ ...base, touchPrimary: false }),
+    false,
+  )
+  eq(
+    'HOMENOTICE すでにホーム画面のアイコンから開いているときは出さない',
+    shouldShowHomeScreenNotice({ ...base, launchedFromHomeScreen: true }),
+    false,
+  )
+  eq(
+    'HOMENOTICE 一度見たら出さない',
+    shouldShowHomeScreenNotice({ ...base, seen: true }),
+    false,
+  )
+  eq(
+    'HOMENOTICE 見ていてもパソコンでも、条件が2つ欠ければ当然出さない',
+    shouldShowHomeScreenNotice({ touchPrimary: false, launchedFromHomeScreen: true, seen: true }),
+    false,
+  )
+
+  // 端末の判定にユーザーエージェント文字列を使わない(UAは別の端末を名乗ることがある)。
+  // 入力装置の性質3つ((pointer:coarse)・(hover:none)・maxTouchPoints)だけで決める
+  const noticeSrc = readFileSync(path.join(scriptDir, '../src/logic/homeScreenNotice.ts'), 'utf-8')
+  eq(
+    'HOMENOTICE 端末の判定にuserAgentを使っていない',
+    /navigator\.userAgent|userAgentData/.test(noticeSrc),
+    false,
+  )
+  for (const signal of ['(pointer: coarse)', '(hover: none)', 'maxTouchPoints']) {
+    eq(`HOMENOTICE 判定材料に ${signal} を見ている`, noticeSrc.includes(signal), true)
+  }
+
+  // 見た記録は端末内(localStorage)だけ。設定(Dexie)に置くとバックアップの中身に混ざる
+  eq('HOMENOTICE 見た記録はlocalStorageに置く', noticeSrc.includes('localStorage'), true)
+  const backupSrc = readFileSync(path.join(scriptDir, '../src/logic/backup.ts'), 'utf-8')
+  const typesSrc = readFileSync(path.join(scriptDir, '../src/db/types.ts'), 'utf-8')
+  eq(
+    'HOMENOTICE 見た記録がバックアップ・設定の器に入り込んでいない',
+    /homeScreenNotice/i.test(backupSrc) || /homeScreenNotice/i.test(typesSrc),
+    false,
+  )
+
+  // お知らせの文言(規約H・オーナー確認用にここで固定する)
+  eq(
+    'HOMENOTICE 見出しは「インストール」「アプリとして」と言わない',
+    /インストール|アプリとして/.test(ja.homeScreenNotice.title),
+    false,
+  )
+  eq(
+    'HOMENOTICE 「必須」「推奨」「おすすめ」等の押す言葉を使っていない',
+    /必須|推奨|おすすめ|してください[^。]*$/.test(
+      `${ja.homeScreenNotice.title}${ja.homeScreenNotice.body}${ja.homeScreenNotice.dismissButton}`,
+    ),
+    false,
+  )
+  eq(
+    'HOMENOTICE 本文はアプリストアからのダウンロードではないと伝える(「インストール不要」とは言わない)',
+    ja.homeScreenNotice.body.includes('アプリストアからのダウンロードはありません') &&
+      !/インストール[^。]{0,12}(不要|いりません)/.test(ja.homeScreenNotice.body),
+    true,
+  )
+  eq(
+    'HOMENOTICE あとから見る場所を、設定のリンク名そのままで案内している',
+    ja.homeScreenNotice.laterNote.includes(ja.settings.installPageLink),
+    true,
+  )
+  eq(
+    'HOMENOTICE 案内文が「ここ」「これ」で場所を示していない',
+    /(^|[^そあど])ここ|これ(から)?を?(見|開)/.test(ja.homeScreenNotice.laterNote),
+    false,
+  )
+
+  // 窓の作り: エラー・警告に見える色を使わない(条件反射で閉じたくなる画面にしない)
+  const noticeUi = readFileSync(
+    path.join(scriptDir, '../src/components/HomeScreenNotice.tsx'),
+    'utf-8',
+  )
+  eq(
+    'HOMENOTICE 警告色・全面の黒地を使っていない',
+    /warning|bg-black|text-red|AlertTriangle/.test(noticeUi),
+    false,
+  )
+  eq(
+    'HOMENOTICE ✕・カード外のタップ・端末の戻る・「このまま使う」のどれで閉じても見た記録を残す',
+    noticeUi.includes('markHomeScreenNoticeSeen()') &&
+      noticeUi.includes('useOverlayDismiss(true, close)') &&
+      noticeUi.split('onClick={close}').length - 1 >= 3,
+    true,
+  )
 }
 
 // ---------- 結果 ----------
