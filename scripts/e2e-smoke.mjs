@@ -3805,6 +3805,22 @@ try {
       await dtPage.waitForTimeout(1200)
       await dtPage.getByRole('button', { name: '週', exact: true }).click()
       await dtPage.waitForTimeout(900)
+      // 週タブは月曜始まりなので、今日が月曜だと「昨日」=日曜は前の週に入り、仕込んだ記録カードが出ない
+      // (EQ-01と同じ日付依存。2026-08-10 実発)。仕込んだ日のカードが出る週まで送ってから掴む
+      const dtSeed = new Date()
+      dtSeed.setDate(dtSeed.getDate() - 1)
+      const dtSeedDate = `${dtSeed.getFullYear()}-${String(dtSeed.getMonth() + 1).padStart(2, '0')}-${String(dtSeed.getDate()).padStart(2, '0')}`
+      for (let i = 0; i < 4; i++) {
+        if ((await dtPage.locator(`section[data-date="${dtSeedDate}"]`).count()) > 0) break
+        const shown = await dtPage.locator('section[data-date]').first().getAttribute('data-date')
+        await dtPage.locator(`button[aria-label="${shown && dtSeedDate < shown ? '前の週' : '次の週'}"]`).click()
+        await dtPage.waitForTimeout(600)
+      }
+      check(
+        'WEEKUI-DT 記録を仕込んだ日(昨日)を含む週を表示できる',
+        (await dtPage.locator(`section[data-date="${dtSeedDate}"]`).count()) > 0,
+        `昨日=${dtSeedDate}`,
+      )
       // 記録カードが見えるところまでスクロールしてから開く(戻ったときの復元位置の比較用)
       const dtLogLink = dtPage.locator('a[href*="#/recipes/"]').filter({ hasText: 'カレーライス' }).first()
       await dtLogLink.scrollIntoViewIfNeeded()
