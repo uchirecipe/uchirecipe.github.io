@@ -10,6 +10,7 @@ import {
 } from '../src/logic/amount.ts'
 import { leadingRangeAmount } from '../src/logic/amount.ts'
 import { isHttpUrl } from '../src/logic/url.ts'
+import { normalizeQuarterTurns, rotatedSize } from '../src/logic/image.ts'
 import {
   parseRecipeText,
   splitQuantity,
@@ -243,6 +244,8 @@ import {
   reviewPurposeDays,
   riceServingGrams,
   riceServingRecipes,
+  riceSlotKeysOf,
+  riceServingsByDate,
   slotBalances,
   sumBalance,
   summarizeWeekBalance,
@@ -11033,6 +11036,70 @@ eq(
     30,
   )
 
+  // (3d) 何杯足すかの数え方(2026-08-09 便EN)。オーナー質問「昼食と夕食がおかずのみになって
+  // いても1杯のみの追加で計算している?」への回答＝**1日1杯ではなく食事の数だけ**をここで固定する。
+  // 一品もの(丼・麺・カレー・鍋)が主菜の食事だけを外す規則も同時に見張る
+  const riceDay = '2026-08-09'
+  const riceCount = (slots) => riceServingsByDate(riceSlotKeysOf(slots)).get(riceDay) ?? 0
+  eq(
+    'EN-RICE 昼食と夕食がおかずだけの日は2杯(1杯ではない)',
+    riceCount([
+      { date: riceDay, slot: 'lunch', oneDishMain: false },
+      { date: riceDay, slot: 'dinner', oneDishMain: false },
+    ]),
+    2,
+  )
+  eq(
+    'EN-RICE 朝・昼・夕の3食に献立があれば3杯',
+    riceCount([
+      { date: riceDay, slot: 'breakfast', oneDishMain: false },
+      { date: riceDay, slot: 'lunch', oneDishMain: false },
+      { date: riceDay, slot: 'dinner', oneDishMain: false },
+    ]),
+    3,
+  )
+  eq(
+    'EN-RICE 夕食だけの日は1杯',
+    riceCount([{ date: riceDay, slot: 'dinner', oneDishMain: false }]),
+    1,
+  )
+  eq(
+    'EN-RICE 一品もの(丼・麺・カレー・鍋)が主菜の食事には足さない',
+    riceCount([
+      { date: riceDay, slot: 'lunch', oneDishMain: true },
+      { date: riceDay, slot: 'dinner', oneDishMain: false },
+    ]),
+    1,
+  )
+  eq(
+    'EN-RICE 全部の食事が一品ものなら0杯',
+    riceCount([
+      { date: riceDay, slot: 'lunch', oneDishMain: true },
+      { date: riceDay, slot: 'dinner', oneDishMain: true },
+    ]),
+    0,
+  )
+  eq('EN-RICE 献立が無い日は数えない', riceServingsByDate(riceSlotKeysOf([])).size, 0)
+  eq(
+    'EN-RICE 同じ食事に主菜と副菜が並んでも1食は1杯(食事ごとに1回だけ数える)',
+    riceCount([
+      { date: riceDay, slot: 'dinner', oneDishMain: false },
+      { date: riceDay, slot: 'dinner', oneDishMain: false },
+    ]),
+    1,
+  )
+  eq(
+    'EN-RICE 日付ごとに数える(別の日の食事は混ざらない)',
+    riceServingsByDate(
+      riceSlotKeysOf([
+        { date: riceDay, slot: 'dinner', oneDishMain: false },
+        { date: '2026-08-10', slot: 'lunch', oneDishMain: false },
+        { date: '2026-08-10', slot: 'dinner', oneDishMain: false },
+      ]),
+    ).get('2026-08-10'),
+    2,
+  )
+
   // (4) 計算対象外が混ざる日の作法(docs/60 §5)。1品でもあれば「めやすとの並置」を出さない
   const unknownOnly = one('クヌルプ', '100', 'g') // 1品も計算できない
   const partial = {
@@ -12848,27 +12915,41 @@ eq(
   )
 }
 
-// ---------- 便EA: 申し送り2件(Pro機能一覧・目的の効き先)の文言整合 ----------
+// ---------- 便EA: 申し送り2件(Pro機能一覧・「栄養から組む」の効き先)の文言整合 ----------
 // 便DWが見つけたアプリ側の食い違い。文言そのものは規約Hで書き直しうるので、
 // 「どの機能名が挙がっているか」だけを機械検査して再発を止める。
+// 2026-08-09 便EN: オーナー指示で呼称を「目的から組む」→「栄養から組む」に変えたので、
+// 検査する語も入れ替える(内部キー protein 等は変えていない)。
 {
   // ①Pro機能は5つ(登録数の上限なし・栄養価の8項目表示と並び替え・月間の献立・並行調理ナビ・
-  //   目的から組む)。設定のPro案内3か所すべてに「目的から組む」が入っていること
-  eq('EA-DW1 設定のPro案内(枠内)に「目的から組む」がある', ja.settings.proLead.includes('目的から組む'), true)
+  //   栄養から組む)。設定のPro案内3か所すべてに「栄養から組む」が入っていること
+  eq('EA-DW1 設定のPro案内(枠内)に「栄養から組む」がある', ja.settings.proLead.includes('栄養から組む'), true)
   eq(
-    'EA-DW1 設定の「Pro版でできることを見る」に「目的から組む」がある',
-    ja.settings.proDescription.includes('目的から組む'),
+    'EA-DW1 設定の「Pro版でできることを見る」に「栄養から組む」がある',
+    ja.settings.proDescription.includes('栄養から組む'),
     true,
   )
   eq(
-    'EA-DW1 解錠後の「使えるようになった機能」に「目的から組む」がある',
-    ja.settings.proActivatedFeatures.some((f) => f.label.includes('目的から組む')),
+    'EA-DW1 解錠後の「使えるようになった機能」に「栄養から組む」がある',
+    ja.settings.proActivatedFeatures.some((f) => f.label.includes('栄養から組む')),
     true,
   )
-  // ②目的が効く経路は3つ。月タブの「未定の日をまとめて提案」も executeFill→drawPair を通る
-  for (const entry of ['まとめて献立を入力', 'おまかせで提案', '未定の日をまとめて提案']) {
-    eq(`EA-DW2 目的の説明が「${entry}」を挙げている`, ja.mealPlan.purposeHint.includes(entry), true)
+  // ②効き先は週タブだけではない(月タブの「未定の日をまとめて提案」も executeFill→drawPair を通る)。
+  //   2026-08-09 便EN(オーナー実機「ユーザーにとって関係ないのでは？…だから何？という感想しか
+  //   なかった」): 画面の1行説明でボタン名を3つ並べるのはやめ、設定のPro機能一覧の側で
+  //   「週」と「月」の両方を案内する形にした。検査もそちらへ移す
+  {
+    const feature = ja.settings.proActivatedFeatures.find((f) => f.label.includes('栄養から組む'))
+    eq('EA-DW2 Pro機能一覧の案内が「週」と「月」の両方を挙げている', !!feature && feature.hint.includes('週') && feature.hint.includes('月'), true)
   }
+  //   画面の1行説明は短く保つ(ボタン名の列挙・内部の引き直しの説明を戻さない)
+  eq(
+    'EA-DW2 「栄養から組む」の1行説明にボタン名を並べない(規約H・余計な一言の禁止)',
+    !ja.mealPlan.purposeHint.includes('おまかせで提案') &&
+      !ja.mealPlan.purposeHint.includes('引き直') &&
+      ja.mealPlan.purposeHint.length <= 60,
+    true,
+  )
 }
 
 // ---------- 便EI-1: ホーム画面から起動しているかの判定(設定の追加案内の出し分け) ----------
@@ -13180,6 +13261,21 @@ eq(
     parseCookNaviSession(JSON.stringify({ selectedIds: [1, 2], showTimeline: true, trialActive: true })),
     { selectedIds: [1, 2], showTimeline: true, trialActive: true },
   )
+}
+
+// ---------- 便EN: 記録写真の回転(2026-08-09 オーナー要望「記録した写真を回転させることは可能?」) ----------
+// 「4回押すと元の向きに戻る」ことと、90度・270度で縦横が入れ替わることを固定する。
+// 実際の描画(canvas)はブラウザ側なのでここでは扱わず、向きと大きさの計算だけを見張る。
+{
+  eq('EN-ROT 1回押すと90度(1/4回転)', normalizeQuarterTurns(1), 1)
+  eq('EN-ROT 4回押すと元の向きに戻る', normalizeQuarterTurns(4), 0)
+  eq('EN-ROT 5回押すと1回押したのと同じ', normalizeQuarterTurns(5), 1)
+  eq('EN-ROT 8回押しても元の向き', normalizeQuarterTurns(8), 0)
+  eq('EN-ROT 左に1回(-1)は右に3回と同じ', normalizeQuarterTurns(-1), 3)
+  eq('EN-ROT 90度は縦横が入れ替わる', rotatedSize(1280, 960, 1), { width: 960, height: 1280 })
+  eq('EN-ROT 270度も縦横が入れ替わる', rotatedSize(1280, 960, 3), { width: 960, height: 1280 })
+  eq('EN-ROT 180度は縦横そのまま', rotatedSize(1280, 960, 2), { width: 1280, height: 960 })
+  eq('EN-ROT 4回で元の大きさに戻る', rotatedSize(1280, 960, 4), { width: 1280, height: 960 })
 }
 
 // ---------- 結果 ----------

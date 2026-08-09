@@ -14,6 +14,7 @@ import {
   Share2,
   Image as ImageIcon,
   Camera,
+  RotateCw,
   Maximize2,
   CalendarPlus,
   JapaneseYen,
@@ -72,7 +73,7 @@ import { buildIngredientNames } from '../logic/ingredientSpans'
 import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../logic/dashiLink'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
-import { resizePhoto } from '../logic/image'
+import { resizePhoto, rotatePhoto } from '../logic/image'
 import type { MealSlot } from '../db/types'
 import { ja } from '../i18n/ja'
 
@@ -244,6 +245,10 @@ export default function RecipeDetailPage() {
   // (新規作成時=CookedLogModalと同じ保存形式・resizePhotoで圧縮)
   const [editingLogPhoto, setEditingLogPhoto] = useState<Blob>()
   const [editingLogPhotoError, setEditingLogPhotoError] = useState('')
+  // 写真の回転(2026-08-09 便EN)。回した回数ではなく「保存前に回したか」だけを持つ
+  // ＝保存を押さずに閉じると元の向きのままであることを、その場で伝えるために使う
+  const [editingLogPhotoRotated, setEditingLogPhotoRotated] = useState(false)
+  const [editingLogPhotoRotating, setEditingLogPhotoRotating] = useState(false)
   const editingLogPhotoUrl = usePhotoUrl(editingLogPhoto)
   const editLogCameraInputRef = useRef<HTMLInputElement>(null)
   const editLogAlbumInputRef = useRef<HTMLInputElement>(null)
@@ -402,6 +407,7 @@ export default function RecipeDetailPage() {
     setEditingLogNote(note ?? '')
     setEditingLogPhoto(photo)
     setEditingLogPhotoError('')
+    setEditingLogPhotoRotated(false)
     // 人数が未記録の古い記録は、レシピの登録人数を初期値にする(便CI/C05)
     setEditingLogServings(logServingsValue ?? recipe?.servings ?? 1)
   }
@@ -432,8 +438,29 @@ export default function RecipeDetailPage() {
     try {
       setEditingLogPhoto(await resizePhoto(file, LOG_PHOTO_MAX_EDGE, LOG_PHOTO_QUALITY))
       setEditingLogPhotoError('')
+      setEditingLogPhotoRotated(false)
     } catch {
       setEditingLogPhotoError(ja.form.photoError)
+    }
+  }
+
+  /**
+   * 記録の写真を時計回りに90度回す（2026-08-09 便EN・オーナー要望）。
+   * 保存済みの写真もこの編集フォームから回して保存し直せる。4回押せば元の向きに戻る。
+   * 書き戻すのは saveEditingLog（photoは常にeditingLogPhotoを書き込む）なので、
+   * 回しただけで閉じたときは元の写真のまま＝取り返しのつかない変更にはならない。
+   */
+  const rotateEditingLogPhoto = async () => {
+    if (!editingLogPhoto || editingLogPhotoRotating) return
+    setEditingLogPhotoRotating(true)
+    try {
+      setEditingLogPhoto(await rotatePhoto(editingLogPhoto, 1, LOG_PHOTO_QUALITY))
+      setEditingLogPhotoError('')
+      setEditingLogPhotoRotated(true)
+    } catch {
+      setEditingLogPhotoError(ja.form.photoError)
+    } finally {
+      setEditingLogPhotoRotating(false)
     }
   }
 
@@ -476,6 +503,7 @@ export default function RecipeDetailPage() {
     setEditingLogIndex(null)
     setEditingLogPhoto(undefined)
     setEditingLogPhotoError('')
+    setEditingLogPhotoRotated(false)
   }
 
   // シェアの選択式(2026-07-16 裁定3)のグレーアウト判定。モーダルを開いた時点の値で確定する
@@ -1227,13 +1255,36 @@ export default function RecipeDetailPage() {
                             </button>
                           </div>
                           {editingLogPhoto && (
-                            <button
-                              type="button"
-                              onClick={() => setEditingLogPhoto(undefined)}
-                              className="mt-1 text-sm text-warning underline"
-                            >
-                              {ja.detail.cookedLogPhotoRemove}
-                            </button>
+                            <>
+                              {/* 写真の回転(2026-08-09 便EN・オーナー要望)。押すたびに
+                                  時計回りに90度＝4回で元の向きに戻る */}
+                              <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+                                <button
+                                  type="button"
+                                  onClick={() => void rotateEditingLogPhoto()}
+                                  disabled={editingLogPhotoRotating}
+                                  className="inline-flex items-center gap-1 text-sm font-bold text-accent-ink disabled:opacity-40"
+                                >
+                                  <RotateCw size={16} aria-hidden />
+                                  {editingLogPhotoRotating
+                                    ? ja.detail.cookedLogPhotoRotating
+                                    : ja.detail.cookedLogPhotoRotate}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingLogPhoto(undefined)}
+                                  className="text-sm text-warning underline"
+                                >
+                                  {ja.detail.cookedLogPhotoRemove}
+                                </button>
+                              </div>
+                              {/* 回しただけでは残らないので、保存を押す必要をその場で伝える */}
+                              {editingLogPhotoRotated && (
+                                <p className="mt-1 text-sm text-ink-muted">
+                                  {ja.detail.cookedLogPhotoRotateUnsaved}
+                                </p>
+                              )}
+                            </>
                           )}
                           {editingLogPhotoError && (
                             <p className="mt-1 text-sm text-warning">{editingLogPhotoError}</p>
