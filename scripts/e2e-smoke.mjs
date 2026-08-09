@@ -21644,6 +21644,353 @@ try {
     }
   }
 
+  // --- ET-00: 横スクロールが出ない（2026-08-09 便ET・本番不具合の再発防止） ---
+  // 共通の折りたたみ(components/Collapse.tsx)の外側gridに列指定が無く、暗黙の1列が
+  // auto扱い＝最小幅が中身のmin-contentになっていた。折り返せない中身（献立の週タブの
+  // 料理名カード・「＋料理を追加」）があると列が親より広くなり、390px幅でページごと
+  // 横スクロールした（実測 document.scrollWidth 512〜529 / clientWidth 390）。
+  // 再現には「長い料理名」が要る（肉じゃがのような短い名前では出ない）ので、
+  // 献立にわざと長い名前の品を入れてから測る。
+  currentCheck = 'ET-00'
+  {
+    const etoBrowser = await chromium.launch()
+    try {
+      const etoCtx = await etoBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const etoPage = await etoCtx.newPage()
+      etoPage.on('pageerror', (err) => errors.push(`[pageerror@ET-00] ${err.message}`))
+      const etoWidth = () =>
+        etoPage.evaluate(() => ({
+          sw: document.documentElement.scrollWidth,
+          cw: document.documentElement.clientWidth,
+        }))
+      /** 折りたたみ(Collapse)の内側が外側より広くなっていないか＝はみ出しの発生源そのもの */
+      const etoCollapseOver = () =>
+        etoPage.evaluate(() => {
+          const over = []
+          for (const outer of document.querySelectorAll('div[style*="grid-template-rows"]')) {
+            const inner = outer.firstElementChild
+            if (!inner) continue
+            const or = outer.getBoundingClientRect()
+            const ir = inner.getBoundingClientRect()
+            if (ir.width > or.width + 0.5)
+              over.push({ outerW: Math.round(or.width), innerW: Math.round(ir.width) })
+          }
+          return over
+        })
+
+      await etoPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await etoPage.waitForTimeout(2000)
+      const etoNow = new Date()
+      const etoPad = (n) => String(n).padStart(2, '0')
+      const etoToday = `${etoNow.getFullYear()}-${etoPad(etoNow.getMonth() + 1)}-${etoPad(etoNow.getDate())}`
+      await etoPage.getByRole('button', { name: '週', exact: true }).click()
+      await etoPage.waitForTimeout(1200)
+      const etoEmpty = await etoWidth()
+      check(
+        'ET-00 献立の週タブ(献立なし)で横スクロールが出ない',
+        etoEmpty.sw === etoEmpty.cw,
+        JSON.stringify(etoEmpty),
+      )
+
+      // 今日の枠に長い名前の品を2つ入れる（主菜→副菜の順に「レシピを選ぶ」が繰り上がる）
+      const etoLongTitles = ['レンジ蒸し鶏（自家製サラダチキン）', 'ブロッコリーとにんじんのハーブマリネ']
+      for (const title of etoLongTitles) {
+        const etoSection = etoPage.locator(`section[data-date="${etoToday}"]`)
+        const etoPick = etoSection.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first()
+        await etoPick.scrollIntoViewIfNeeded()
+        await etoPick.click()
+        await etoPage.waitForTimeout(700)
+        await etoPage.getByPlaceholder('レシピ名で絞り込み').fill(title)
+        await etoPage.waitForTimeout(500)
+        await etoPage
+          .locator('[data-testid="recipe-picker"]')
+          .getByText(title, { exact: true })
+          .first()
+          .click()
+        await etoPage.waitForTimeout(1200)
+      }
+      const etoFilled = await etoWidth()
+      const etoOver = await etoCollapseOver()
+      check(
+        'ET-00 献立の週タブ(長い名前の献立あり)で横スクロールが出ない',
+        etoFilled.sw === etoFilled.cw,
+        JSON.stringify(etoFilled),
+      )
+      check(
+        'ET-00 折りたたみの内側が外側より広がっていない(はみ出しの発生源)',
+        etoOver.length === 0,
+        JSON.stringify(etoOver),
+      )
+
+      // 週タブ以外の主要画面（献立が入った状態のまま）も同じ物差しで見る
+      for (const [etoName, etoTab] of [
+        ['月', '月'],
+        ['日', '日'],
+      ]) {
+        await etoPage.getByRole('button', { name: etoTab, exact: true }).click()
+        await etoPage.waitForTimeout(1000)
+        const etoW = await etoWidth()
+        check(`ET-00 献立の${etoName}タブで横スクロールが出ない`, etoW.sw === etoW.cw, JSON.stringify(etoW))
+      }
+      for (const [etoName, etoUrl] of [
+        ['ホーム', '#/'],
+        ['レシピ一覧', '#/recipes'],
+        ['買い物', '#/shopping'],
+        ['設定', '#/settings'],
+        ['作った記録', '#/history'],
+      ]) {
+        await etoPage.goto(`${BASE}/${etoUrl}`, { waitUntil: 'networkidle' })
+        await etoPage.waitForTimeout(1100)
+        const etoW = await etoWidth()
+        check(`ET-00 ${etoName}で横スクロールが出ない`, etoW.sw === etoW.cw, JSON.stringify(etoW))
+      }
+      // 折りたたみは「開いた状態」でこそはみ出すので、開けるものを開いてからもう一度測る
+      await etoPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await etoPage.waitForTimeout(1200)
+      for (let i = 0; i < 6; i++) {
+        const etoToggle = etoPage.locator('button[aria-expanded="false"]').first()
+        if ((await etoToggle.count()) === 0) break
+        try {
+          await etoToggle.scrollIntoViewIfNeeded({ timeout: 1500 })
+          await etoToggle.click({ timeout: 1500 })
+        } catch {
+          break
+        }
+        await etoPage.waitForTimeout(450)
+      }
+      const etoOpened = await etoWidth()
+      check(
+        'ET-00 設定の折りたたみを開いた状態でも横スクロールが出ない',
+        etoOpened.sw === etoOpened.cw,
+        JSON.stringify(etoOpened),
+      )
+    } finally {
+      await etoBrowser.close()
+    }
+  }
+
+  // --- ET-01: レシピ一覧のカードの高さが料理名の長さで変わらない（2026-08-09 便ET） ---
+  // オーナー実機「レシピカードの大きさがレシピ名の長さによって変わる→カードをレシピ名2行の
+  // サイズで統一し、はみ出る分は省略する」。料理名の枠を常に2行ぶんの高さにし(min-h)、
+  // 3行目以降は省略(line-clamp-2)、グリッドの行は全カード同じ高さに揃える(grid-auto-rows:1fr)。
+  currentCheck = 'ET-01'
+  {
+    const etcBrowser = await chromium.launch()
+    try {
+      const etcCtx = await etcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const etcPage = await etcCtx.newPage()
+      etcPage.on('pageerror', (err) => errors.push(`[pageerror@ET-01] ${err.message}`))
+      /** 一覧のカード1枚ずつの高さ・料理名の枠の高さ・省略されているか */
+      const etcCards = () =>
+        etcPage.evaluate(() => {
+          const cards = [...document.querySelectorAll('a[href^="#/recipes/"]')].filter(
+            (a) => a.getAttribute('href') !== '#/recipes/new',
+          )
+          const rows = cards.map((a) => {
+            const p = a.querySelector('p')
+            return {
+              title: (p?.textContent ?? '').trim(),
+              h: Math.round(a.getBoundingClientRect().height * 100) / 100,
+              titleH: p ? Math.round(p.getBoundingClientRect().height * 100) / 100 : null,
+              clamp: p ? getComputedStyle(p).webkitLineClamp : null,
+              // 2行に収まらず「…」で省かれているか（中身の高さ > 見えている高さ）
+              clipped: p ? p.scrollHeight > p.clientHeight + 1 : null,
+            }
+          })
+          return {
+            count: rows.length,
+            heights: [...new Set(rows.map((r) => r.h))].sort((a, b) => a - b),
+            titleHeights: [...new Set(rows.map((r) => r.titleH))].sort((a, b) => a - b),
+            rows,
+          }
+        })
+
+      await etcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await etcPage.waitForTimeout(2200)
+      const etcSeeded = await etcCards()
+      check(
+        'ET-01 一覧のカードがすべて同じ高さになっている',
+        etcSeeded.count > 50 && etcSeeded.heights.length === 1,
+        `枚数${etcSeeded.count} 高さ${JSON.stringify(etcSeeded.heights)}`,
+      )
+      check(
+        'ET-01 料理名の枠は1行の名前でも2行ぶんで、全カード同じ高さ',
+        etcSeeded.titleHeights.length === 1,
+        JSON.stringify(etcSeeded.titleHeights),
+      )
+      // 1行に収まる短い名前と、2行になる長い名前が同じ高さであることを名指しで確かめる
+      const etcShort = etcSeeded.rows.find((r) => r.title === '水ようかん')
+      const etcTwoLine = etcSeeded.rows.find((r) => r.title === '鶏むね肉のレモンペッパー炒め')
+      check(
+        'ET-01 1行の名前(水ようかん)と2行の名前(鶏むね肉のレモンペッパー炒め)のカードが同じ高さ',
+        !!etcShort && !!etcTwoLine && etcShort.h === etcTwoLine.h,
+        JSON.stringify({ short: etcShort?.h, twoLine: etcTwoLine?.h }),
+      )
+      check(
+        'ET-01 料理名は2行までで打ち切る設定になっている',
+        etcSeeded.rows.every((r) => r.clamp === '2'),
+        JSON.stringify([...new Set(etcSeeded.rows.map((r) => r.clamp))]),
+      )
+
+      // 2行に収まらない長い名前を1品登録し、カードが伸びずに名前だけ省略されることを見る
+      const etcLongTitle = 'ぶりの照り焼きとほうれん草のごま和えと具だくさん味噌汁のこんだて'
+      await etcPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await etcPage.waitForTimeout(600)
+      await etcPage.getByPlaceholder('例: 肉じゃが').fill(etcLongTitle)
+      await etcPage.getByPlaceholder('例: じゃがいも').first().fill('ぶり')
+      await etcPage.getByPlaceholder('例: じゃがいもを一口大に切る').first().fill('ぶりを焼く')
+      await etcPage.getByRole('button', { name: '保存する' }).click()
+      await etcPage.waitForTimeout(1200)
+      await etcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await etcPage.waitForTimeout(1800)
+      const etcAfter = await etcCards()
+      const etcLong = etcAfter.rows.find((r) => etcLongTitle.startsWith(r.title.replace(/…$/, '')))
+      check(
+        'ET-01 長い料理名を1品足してもカードの高さは全枚数そろったまま',
+        etcAfter.count === etcSeeded.count + 1 && etcAfter.heights.length === 1,
+        `枚数${etcAfter.count} 高さ${JSON.stringify(etcAfter.heights)}`,
+      )
+      check(
+        'ET-01 2行に収まらない料理名は省略される(カードを押し広げない)',
+        !!etcLong && etcLong.clipped === true && etcLong.h === etcSeeded.heights[0],
+        JSON.stringify(etcLong ?? null),
+      )
+    } finally {
+      await etcBrowser.close()
+    }
+  }
+
+  // --- ET-02: 検索まど・献立の日/週/月が画面上部に固定される（2026-08-09 便ET） ---
+  // オーナー実機「レシピ一覧の検索まど、献立タブの日週月ボタンは上に固定したい」。
+  // 下部のタブナビと重ならないこと、固定した帯の裏に要素が潜り込まないことまで見る。
+  currentCheck = 'ET-02'
+  {
+    const etsBrowser = await chromium.launch()
+    try {
+      const etsCtx = await etsBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const etsPage = await etsCtx.newPage()
+      etsPage.on('pageerror', (err) => errors.push(`[pageerror@ET-02] ${err.message}`))
+      /** 上部固定の帯と下部タブナビの位置関係 */
+      const etsBar = (selector) =>
+        etsPage.evaluate((sel) => {
+          const bar = document.querySelector(sel)
+          const nav = document.querySelector('[data-app-bottom-bar]')
+          if (!bar) return null
+          const r = bar.getBoundingClientRect()
+          const nr = nav?.getBoundingClientRect()
+          return {
+            y: Math.round(window.scrollY),
+            top: Math.round(r.top * 100) / 100,
+            bottom: Math.round(r.bottom * 100) / 100,
+            h: Math.round(r.height * 100) / 100,
+            navTop: nr ? Math.round(nr.top) : null,
+            overlapsNav: nr ? r.bottom > nr.top : null,
+          }
+        }, selector)
+
+      // ---------- レシピ一覧の検索まど ----------
+      await etsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await etsPage.waitForTimeout(2200)
+      const etsTop = await etsBar('.recipes-searchbar')
+      check('ET-02 レシピ一覧の検索まどの帯がある', !!etsTop, JSON.stringify(etsTop))
+      await etsPage.evaluate(() => window.scrollTo(0, 1500))
+      await etsPage.waitForTimeout(700)
+      const etsStuck = await etsBar('.recipes-searchbar')
+      const etsInput = await etsPage.evaluate(() => {
+        const i = document.querySelector('input[type="search"]')
+        if (!i) return null
+        const r = i.getBoundingClientRect()
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), inView: r.top >= 0 && r.bottom <= window.innerHeight }
+      })
+      check(
+        'ET-02 下へスクロールしても検索まどが画面上部に残る',
+        !!etsStuck && etsStuck.top <= 1 && etsStuck.y > 1000 && !!etsInput?.inView,
+        JSON.stringify({ bar: etsStuck, input: etsInput }),
+      )
+      check(
+        'ET-02 検索まどの帯が下部のタブナビと重ならない',
+        !!etsStuck && etsStuck.overlapsNav === false,
+        JSON.stringify(etsStuck),
+      )
+      // 画面の一番上から絞り込みパネルを開いたとき、パネルの頭が帯の裏に潜らない
+      // （便EOの「伸びた部分を画面内に入れる」処理が、貼り付く帯の高さを見込んでいるか）
+      await etsPage.evaluate(() => window.scrollTo(0, 0))
+      await etsPage.waitForTimeout(500)
+      await etsPage.locator('button[aria-label="絞り込み"]').click()
+      await etsPage.waitForTimeout(1400)
+      const etsPanel = await etsPage.evaluate(() => {
+        const bar = document.querySelector('.recipes-searchbar').getBoundingClientRect()
+        const head = [...document.querySelectorAll('p')].find(
+          (p) => p.textContent?.trim() === '表示するレシピ',
+        )
+        const hr = head?.getBoundingClientRect()
+        return {
+          barBottom: Math.round(bar.bottom),
+          headTop: hr ? Math.round(hr.top) : null,
+          hidden: hr ? hr.top < bar.bottom : null,
+        }
+      })
+      check(
+        'ET-02 絞り込みパネルを開いてもパネルの頭が固定した帯の裏に隠れない',
+        etsPanel.hidden === false,
+        JSON.stringify(etsPanel),
+      )
+
+      // ---------- 献立の日/週/月 ----------
+      await etsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await etsPage.waitForTimeout(2000)
+      await etsPage.getByRole('button', { name: '週', exact: true }).click()
+      await etsPage.waitForTimeout(1300)
+      await etsPage.evaluate(() => window.scrollTo(0, 1200))
+      await etsPage.waitForTimeout(700)
+      const etsTabs = await etsBar('.meal-plan-tabbar')
+      const etsButtons = await etsPage.evaluate(() =>
+        ['日', '週', '月'].map((name) => {
+          const b = [...document.querySelectorAll('.meal-plan-tabbar button')].find(
+            (x) => x.textContent?.trim() === name,
+          )
+          const r = b?.getBoundingClientRect()
+          return { name, inView: r ? r.top >= 0 && r.bottom <= window.innerHeight : false }
+        }),
+      )
+      check(
+        'ET-02 下へスクロールしても献立の日/週/月が画面上部に残る',
+        !!etsTabs && etsTabs.top <= 1 && etsButtons.every((b) => b.inView),
+        JSON.stringify({ bar: etsTabs, buttons: etsButtons }),
+      )
+      check(
+        'ET-02 日/週/月の帯が下部のタブナビと重ならない',
+        !!etsTabs && etsTabs.overlapsNav === false,
+        JSON.stringify(etsTabs),
+      )
+      // 日付を指定して週タブを開くと、その日の枠へ自動でスクロールする。
+      // 固定した帯の裏に日付の見出しが潜り込まないこと（section側の scroll-mt）
+      const etsNow = new Date()
+      const etsPad = (n) => String(n).padStart(2, '0')
+      const etsToday = `${etsNow.getFullYear()}-${etsPad(etsNow.getMonth() + 1)}-${etsPad(etsNow.getDate())}`
+      await etsPage.goto(`${BASE}/#/meal-plan?focus=week&date=${etsToday}`, { waitUntil: 'networkidle' })
+      await etsPage.waitForTimeout(2500)
+      const etsJump = await etsPage.evaluate((d) => {
+        const bar = document.querySelector('.meal-plan-tabbar')?.getBoundingClientRect()
+        const sec = document.querySelector(`section[data-date="${d}"]`)?.getBoundingClientRect()
+        if (!bar || !sec) return null
+        return {
+          barBottom: Math.round(bar.bottom),
+          secTop: Math.round(sec.top),
+          hidden: sec.top < bar.bottom - 1,
+          y: Math.round(window.scrollY),
+        }
+      }, etsToday)
+      check(
+        'ET-02 日付を指定して開いた週タブで、その日の枠が固定した帯の裏に隠れない',
+        !!etsJump && etsJump.hidden === false,
+        JSON.stringify(etsJump),
+      )
+    } finally {
+      await etsBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
