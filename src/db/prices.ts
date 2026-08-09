@@ -146,7 +146,8 @@ export async function seedPriceDefaultsIfNeeded(): Promise<void> {
       // 単位だけを直す移行（2026-08-10 便EY）。追加より先に走らせて、旧単位のまま残っている
       // 目安行を新単位へ揃える（価格は変えない）。ユーザーが手を入れた行は unitFixesToApply が
       // 対象から外すので触らない。defaultUnitも一緒に更新するので、この行の
-      // 「デフォルトに戻す」は新しい単位に戻る（isDefaultはtrueのまま＝バッジ表示も変わらない）
+      // 「デフォルトに戻す」の戻り先も新しい単位になる（isDefaultはtrueのままなので、
+      // 一覧では今までどおり「デフォルトに戻す」が出ない＝未編集の見え方が変わらない）
       for (const plan of unitFixesToApply(existing, PRICE_DEFAULT_UNIT_FIXES)) {
         await db.prices.update(plan.id, {
           unit: plan.toUnit,
