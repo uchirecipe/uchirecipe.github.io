@@ -20128,7 +20128,7 @@ try {
       const enPanel = await enPage.evaluate(() => {
         const btns = [...document.querySelectorAll('button[aria-label]')]
         const week = btns.find(
-          (b) => b.getAttribute('aria-label') === 'この週の栄養の概算を詳しく見る',
+          (b) => b.getAttribute('aria-label') === '表示している週の栄養の概算を詳しく見る',
         )
         const day = btns.find((b) => (b.getAttribute('aria-label') ?? '').startsWith('この日（'))
         if (!week || !day) return null
