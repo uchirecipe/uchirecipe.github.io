@@ -447,14 +447,21 @@ export default function CookNaviPage() {
   const today = useMemo(() => todayString(), [])
   const todayPlanEntries = useMealPlanRange(today, today)
   const todayRecipes = useMemo(() => {
-    // レシピ本体の読み込みが終わるまでは「候補が決まっていない」（undefined）とする。
-    // ここを空配列で返すと、下の選択の整合が「今日の献立が空になった」と読み違える（2026-08-09 便EH）
-    if (!todayList || !recipes) return undefined
+    // 3つの読み込みが**すべて**終わるまでは「候補が決まっていない」（undefined）とする。
+    // ここを空配列で返すと、下の選択の整合が「今日の献立が空になった」と読み違える（2026-08-09 便EH）。
+    //
+    // 2026-08-09 便ES（オーナー実機報告の重大バグ「段取りが消える」の根本原因）:
+    // 便EHでは今日の献立リスト（todayList）とレシピ本体（recipes）だけを待っていて、
+    // **今週の献立の予定（todayPlanEntries）を待っていなかった**。予定は別の読み込みなので、
+    // 画面を開いた直後に「リストとレシピは読めたが、予定はまだ」という一瞬が必ずできる。
+    // 今日の献立が「今週の献立の予定」だけで組まれている人は、この一瞬に候補がゼロと読まれ、
+    // 選択が全部落ち、覚え書きごと消えていた（＝段取りが消え、再開ボタンも出なくなる）。
+    if (!todayList || !recipes || !todayPlanEntries) return undefined
     const planIds: number[] = []
     // MEAL_SLOTS は朝食→昼食→夕食の順で定義されている
     MEAL_SLOTS.forEach((slot) =>
       todayPlanEntries
-        ?.filter((e) => e.slot === slot)
+        .filter((e) => e.slot === slot)
         .forEach((e) => {
           if (!planIds.includes(e.recipeId)) planIds.push(e.recipeId)
         }),
@@ -540,18 +547,8 @@ export default function CookNaviPage() {
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
   const [highlightKey, setHighlightKey] = useState<string | null>(null)
-  /** ?focusStep= の着地。段取りがまだ描かれていないうちは何もせず、描かれてからやり直す */
-  const applyFocusStep = () => {
-    const focus = searchParams.get('focusStep')
-    if (!focus) return
-    const el = document.getElementById(`navi-step-${focus}`)
-    // 別の画面から戻ってきた直後は、レシピの読み込みが終わるまで段取りが描かれていない。
-    // ここで諦めて focusStep を消してしまうと二度とハイライトできないので、
-    // パラメータを残したまま何もしない（段取りが描けたらこの処理が呼び直される）
-    // ＝2026-08-08 便ED・オーナー実機フィードバック②の着地が効かない不具合の修正
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    setHighlightKey(focus)
+  /** ?focusStep= を消す（着地できたときだけ。同じ手順に何度でも飛べるようにする） */
+  const clearFocusStep = () => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -560,6 +557,35 @@ export default function CookNaviPage() {
       },
       { replace: true },
     )
+  }
+
+  /** ?focusStep= の着地。段取りがまだ描かれていないうちは何もせず、描かれてからやり直す */
+  const applyFocusStep = () => {
+    const focus = searchParams.get('focusStep')
+    if (!focus) return
+    // 調理中の画面を開いている間は、背景の一覧をスクロールしても見えない。
+    // その手順そのものへカーソルを移す（2026-08-09 便ES・オーナー指示
+    // 「タイマーのバー→調整画面→レシピ名タップ→該当手順へ移動」と同じ着地にそろえる）
+    if (current && timeline) {
+      const [focusRecipeId, focusStepNumber] = focus.split('-').map(Number)
+      const target = timeline.items.find(
+        (item) => item.recipeId === focusRecipeId && item.stepNumber === focusStepNumber,
+      )
+      if (target) {
+        setCurrent({ recipeId: target.recipeId, stepIndex: target.stepIndex })
+        clearFocusStep()
+        return
+      }
+    }
+    const el = document.getElementById(`navi-step-${focus}`)
+    // 別の画面から戻ってきた直後は、レシピの読み込みが終わるまで段取りが描かれていない。
+    // ここで諦めて focusStep を消してしまうと二度とハイライトできないので、
+    // パラメータを残したまま何もしない（段取りが描けたらこの処理が呼び直される）
+    // ＝2026-08-08 便ED・オーナー実機フィードバック②の着地が効かない不具合の修正
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightKey(focus)
+    clearFocusStep()
   }
 
   /**
@@ -598,6 +624,8 @@ export default function CookNaviPage() {
    * 予定の取り消し、どの経路で候補から消えても同じように直る）。
    */
   useEffect(() => {
+    // 候補がまだ読めていない間は突き合わせない（2026-08-09 便ES。
+    // reconcileSelectedIdsForSession 側でも undefined は何も落とさないようにしてある）
     if (!todayRecipes) return
     // 調理中（全画面のセッションを開いている間）は、記録を段取りへ逆流させない
     // ＝作りかけの段取りが目の前で組み替わらない（2026-08-09 便EL・docs/69「記録は一方通行」）
@@ -704,7 +732,7 @@ export default function CookNaviPage() {
   useEffect(() => {
     applyFocusStep()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, timeline, todayRecipes])
+  }, [searchParams, timeline, todayRecipes, current])
 
   /**
    * 各レシピを何人分として扱うか（2026-08-08 便EB）。分量は「作る量」なので、
@@ -874,13 +902,12 @@ export default function CookNaviPage() {
 
   return (
     <div className={`mx-auto w-full max-w-md ${timers.length > 0 ? 'pb-48' : 'pb-[var(--space-lg)]'}`}>
-      {/* 「戻る」で作りかけの段取りを終える（オーナー実機フィードバック①。
-          戻る・まとめて作った！以外では消さない＝他のタブへ行って戻れば続きから使える） */}
-      <BackHeader
-        fallback="/meal-plan"
-        title={ja.cookNavi.title}
-        onBack={() => clearCookNaviSession()}
-      />
+      {/* 「戻る」は画面を移るだけ。作りかけの段取りは残す（2026-08-09 便ES・オーナー実機報告
+          「段取りを作る→戻る→今日の献立画面（再開ボタンが出ない）→並行調理ナビ→段取りが消えている」）。
+          便ED では戻るで段取りを終わらせていたが、戻るは台所で最も押す移動の操作で、
+          押すたびに段取りが消えるとナビを組み直すことになる。段取りを終える操作は
+          「レシピを選び直す」と「まとめて作った！」の2つに集約した */}
+      <BackHeader fallback="/meal-plan" title={ja.cookNavi.title} />
       <div className="px-[var(--space-md)]">
         <h1 className="flex items-center gap-2 text-2xl font-bold">
           <Route size={24} className="text-accent-ink" aria-hidden />

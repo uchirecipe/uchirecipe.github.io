@@ -15823,7 +15823,9 @@ try {
         (await nav7Page.textContent('body')).includes('2件の作った記録を取り消して、今日の献立に戻しました'),
       )
 
-      // 「戻る」を押すと作りかけの段取りは終わる
+      // 「戻る」は画面を移るだけ＝段取りは残る(2026-08-09 便ES・オーナー実機報告
+      // 「段取りを作る→戻る→今日の献立画面（再開ボタンが出ない）→並行調理ナビ→段取りが消えている」)。
+      // 段取りを終える操作は「レシピを選び直す」と「まとめて作った！」の2つだけ
       currentCheck = 'NAVI-07'
       await nav7Page.goto(`${BASE}/#/cook-navi`)
       await nav7Page.reload({ waitUntil: 'networkidle' })
@@ -15831,15 +15833,147 @@ try {
       await nav7Page.getByRole('button', { name: '段取りを作る' }).click()
       await nav7Page.waitForTimeout(600)
       await nav7Page.getByRole('button', { name: '戻る' }).first().click()
-      await nav7Page.waitForTimeout(600)
+      await nav7Page.waitForTimeout(800)
+      check(
+        'NAVI-07 「戻る」で献立タブに戻ったとき、再開の入口が出ている',
+        (await nav7Page.locator('[data-testid="navi-resume"]').count()) === 1,
+        `url=${nav7Page.url()}`,
+      )
       await nav7Page.goto(`${BASE}/#/cook-navi`)
       await nav7Page.waitForTimeout(900)
       check(
-        'NAVI-07 「戻る」を押したあとは段取りが残らない',
-        !(await nav7Page.textContent('body')).includes('組み合わせる2品'),
+        'NAVI-07 「戻る」を押しても段取りは残る',
+        (await nav7Page.textContent('body')).includes('組み合わせる2品'),
+      )
+      // 「レシピを選び直す」を押すと段取りは終わる(＝再開の入口も消える)
+      await nav7Page.getByRole('button', { name: 'レシピを選び直す' }).click()
+      await nav7Page.waitForTimeout(600)
+      await nav7Page.goto(`${BASE}/#/meal-plan`)
+      await nav7Page.waitForTimeout(900)
+      check(
+        'NAVI-07 「レシピを選び直す」を押すと再開の入口は消える',
+        (await nav7Page.locator('[data-testid="navi-resume"]').count()) === 0,
       )
     } finally {
       await nav7Browser.close()
+    }
+  }
+
+  // --- ES-01: 段取りが消える重大バグの再発防止(2026-08-09 便ES・オーナー実機報告)。
+  //     「調理中モード→×で閉じる→他の画面→献立タブ→ナビ再開」「段取りを作ったあと画面を
+  //     離れて再開」「実行中のタイマーが終了」の3経路で、段取りが消えず単品レシピにも飛ばないこと。
+  //     再現の肝は**今日の献立が「今週の献立の予定」だけで組まれている**状態。今日の献立リスト・
+  //     今週の予定・レシピ本体は別々に読み込まれ、予定の読み込みだけが遅れる一瞬に
+  //     「今日の献立が空になった」と読み違えて選択を全部捨てていた ---
+  currentCheck = 'ES-01'
+  {
+    const esBrowser = await chromium.launch()
+    const esContext = await esBrowser.newContext({ viewport: { width: 390, height: 820 } })
+    const esPage = await esContext.newPage()
+    esPage.on('dialog', (dialog) => void dialog.accept())
+    esPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@ES-01] ${err.message}`)
+    })
+    const esSession = () =>
+      esPage.evaluate(() => sessionStorage.getItem('uchi-recipe-cook-navi-session'))
+    try {
+      await esPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await esPage.waitForTimeout(1800)
+      await esPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('ES予定煮物', [
+          { text: '材料を切る' }, { text: '鍋に入れて2秒煮る', minutes: 10 }, { text: '盛り付ける' },
+        ])))
+        const idB = await P(store('recipes').add(mk('ES予定サラダ', [
+          { text: '野菜を切る' }, { text: 'ドレッシングと和える' },
+        ])))
+        // 今日の献立は「今週の献立の予定」だけで組む(todayList には1件も入れない)
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        await P(store('mealPlans').add({ date: today, slot: 'dinner', recipeId: idA, role: 'main' }))
+        await P(store('mealPlans').add({ date: today, slot: 'dinner', recipeId: idB, role: 'side' }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await esPage.goto(`${BASE}/#/cook-navi`)
+      await esPage.reload({ waitUntil: 'networkidle' })
+      await esPage.waitForTimeout(1400)
+      await esPage.getByRole('button', { name: '段取りを作る' }).click()
+      await esPage.waitForTimeout(700)
+      check(
+        'ES-01 今週の献立の予定だけでも段取りが作れる',
+        (await esPage.textContent('body')).includes('組み合わせる2品'),
+      )
+
+      // 経路①: 調理中モードを開いて×で閉じる→別の画面→献立タブ→再開
+      await esPage.locator('[data-testid="cook-session-start"]').click()
+      await esPage.waitForTimeout(600)
+      check('ES-01 調理中モードが開く', (await esPage.locator('[data-testid="cook-session"]').count()) === 1)
+      await esPage.locator('[data-testid="cook-session-close"]').click()
+      await esPage.waitForTimeout(700)
+      await esPage.locator('a[href="#/recipes"]').first().click()
+      await esPage.waitForTimeout(700)
+      await esPage.locator('a[href="#/meal-plan"]').first().click()
+      await esPage.waitForTimeout(1100)
+      check(
+        'ES-01 調理中モードを×で閉じたあとも、献立タブに再開の入口が出る',
+        (await esPage.locator('[data-testid="navi-resume"]').count()) === 1,
+      )
+      await esPage.locator('[data-testid="navi-resume"]').click()
+      await esPage.waitForTimeout(1200)
+      const esAfterSession = await esPage.textContent('body')
+      check('ES-01 再開したナビに段取りが残っている', esAfterSession.includes('組み合わせる2品'))
+      check(
+        'ES-01 「今日の献立にない品を…外しました」が出ない(選択を捨てていない)',
+        (await esPage.locator('[data-testid="navi-selection-dropped"]').count()) === 0,
+      )
+
+      // 経路②: 画面を離れて再開(読み込みの競争が毎回起きる冷えた状態を3回繰り返す)
+      for (let i = 0; i < 3; i++) {
+        await esPage.reload({ waitUntil: 'domcontentloaded' })
+        await esPage.waitForTimeout(1300)
+      }
+      check(
+        'ES-01 画面を離れて再開しても段取りが消えない(3回繰り返しても同じ)',
+        (await esPage.textContent('body')).includes('組み合わせる2品') &&
+          (await esPage.locator('[data-testid="navi-selection-dropped"]').count()) === 0,
+        `session=${await esSession()}`,
+      )
+
+      // 経路③: 実行中のタイマーが終了→常駐バーの完了タイマーを押す→ナビの段取りへ戻る
+      currentCheck = 'ES-02'
+      await esPage.getByRole('button', { name: /2秒 タイマー開始/ }).first().click()
+      await esPage.waitForTimeout(300)
+      await esPage.goto(`${BASE}/#/shopping`)
+      await esPage.waitForTimeout(500)
+      await esPage.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
+      await esPage.locator('div.fixed button.border-warning').first().click()
+      await esPage.waitForTimeout(1200)
+      check(
+        'ES-02 タイマー終了後のタップは段取りへ戻る(単品レシピの手順へ飛ばない)',
+        esPage.url().includes('/cook-navi') && !/#\/recipes\/\d+/.test(esPage.url()),
+        `url=${esPage.url()}`,
+      )
+      check(
+        'ES-02 戻った先に段取りが残っている',
+        (await esPage.textContent('body')).includes('組み合わせる2品'),
+      )
+    } finally {
+      await esBrowser.close()
     }
   }
 
