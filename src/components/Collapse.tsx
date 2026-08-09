@@ -115,7 +115,16 @@ export default function Collapse({ open, children, className, id, reveal = true 
   const clip = settled ? '' : 'overflow-hidden'
   return (
     <div
-      className={`grid transition-[grid-template-rows] ease-out motion-reduce:transition-none ${clip}`}
+      // grid-cols-[minmax(0,1fr)]: 列を「親の幅ちょうど・それ以上には広がらない」と明示する
+      // （2026-08-09 便ET・本番不具合の修正）。列を書かないと暗黙の1列は auto 扱いになり、
+      // 最小幅が中身の min-content になる＝折り返せない中身（献立の週タブの料理名カードや
+      // 「＋料理を追加」）があると親より広い列ができ、ページごと横スクロールした
+      // （390px幅で document.scrollWidth が 512〜529px。料理名・×・栄養行の右端が画面外へ）。
+      // 折りたたみに入れる前は普通のブロックだったので幅は親いっぱいで頭打ちだった。
+      // minmax(0,1fr) はその「ブロックと同じ幅の決まり方」をグリッドで言い直したもの。
+      // 中身側に min-w-0 を足す直し方もあるが、幅の決まり方は列の性質なので、
+      // 列を宣言しているこの要素で決める（27か所ある呼び出し側が中身の作りを気にせずに済む）。
+      className={`grid grid-cols-[minmax(0,1fr)] transition-[grid-template-rows] ease-out motion-reduce:transition-none ${clip}`}
       style={{
         gridTemplateRows: expanded ? '1fr' : '0fr',
         transitionDuration: `${open ? OPEN_MS : CLOSE_MS}ms`,
