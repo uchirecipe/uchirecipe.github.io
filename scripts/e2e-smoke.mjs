@@ -21991,6 +21991,63 @@ try {
     }
   }
 
+  // --- ET-03: 設定「機種変更するときは」の案内リンクが「複数の端末で使う方法」ページを指す ---
+  // 2026-08-09 便ET。行き先は便EVが新設した /about/multi-device.html。
+  // 従来は使い方ページの節(/about/manual.html#backup)を指していたが、端末別の保存先・
+  // 受け渡し・2台目・クラウドの注意が1ページにまとまった新ページのほうが手順として具体的。
+  // ページ本体は便EVの担当(このブランチには入っていない)なので、ここで見るのは
+  // 「アプリ側が正しい行き先を指していて、その行き先が200で返る」ことの2点。
+  currentCheck = 'ET-03'
+  {
+    const etmBrowser = await chromium.launch()
+    try {
+      const etmCtx = await etmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const etmPage = await etmCtx.newPage()
+      etmPage.on('pageerror', (err) => errors.push(`[pageerror@ET-03] ${err.message}`))
+      await etmPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await etmPage.waitForTimeout(1500)
+      await etmPage.getByRole('button', { name: '機種変更するときは' }).click()
+      await etmPage.waitForTimeout(900)
+      const etmLink = etmPage.locator('[data-testid="move-guide-transfer-link"]')
+      const etmHref = (await etmLink.count()) > 0 ? await etmLink.getAttribute('href') : null
+      const etmLabel = (await etmLink.count()) > 0 ? (await etmLink.textContent())?.trim() : null
+      check(
+        'ET-03 「機種変更するときは」の案内リンクが /about/multi-device.html を指す',
+        etmHref === '/about/multi-device.html',
+        String(etmHref),
+      )
+      check(
+        'ET-03 リンクの文言が行き先のページ名になっている',
+        etmLabel === '「複数の端末で使う方法」のページを見る',
+        String(etmLabel),
+      )
+      // アプリ内の /about/ 配下へのリンクは別窓にしない作法(iOSのホーム画面追加アプリは
+      // Safariとストレージが別)。ここもその作法どおりであること
+      check(
+        'ET-03 リンクは別窓(target=_blank)にしていない',
+        (await etmLink.getAttribute('target')) === null,
+        String(await etmLink.getAttribute('target')),
+      )
+      const etmRes = await etmPage.request.get(`${BASE}/about/multi-device.html`)
+      const etmBody = etmRes.ok() ? await etmRes.text() : ''
+      check('ET-03 リンク先のページが200で返る', etmRes.status() === 200, `status=${etmRes.status()}`)
+      check(
+        'ET-03 リンク先がアプリ本体のシェルにすり替わっていない(静的ページが返っている)',
+        etmBody.includes('複数の端末で使う方法') && !etmBody.includes('<div id="root"></div>'),
+        etmBody.slice(0, 80),
+      )
+      // 案内文とリンクの言い先が食い違っていないこと(片方だけ「使い方ページ」に取り残さない)
+      const etmText = (await etmPage.textContent('body')) ?? ''
+      check(
+        'ET-03 案内文も同じページ名を指している',
+        etmText.includes('「複数の端末で使う方法」のページに載せています'),
+        etmText.includes('使い方ページに載せています') ? '案内文が旧「使い方ページ」のまま' : '',
+      )
+    } finally {
+      await etmBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
