@@ -7031,7 +7031,7 @@ try {
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
       await mp3Page.getByRole('button', { name: '献立を提案を開く' }).click()
       await mp3Page.waitForTimeout(300)
-      // ジャンルチップ・高たんぱく優先は「提案の条件」トグルの中(2026-07-16 UI総点検A-3で既定折りたたみ化)。まず開く
+      // ジャンルチップは「提案の条件」トグルの中(2026-07-16 UI総点検A-3で既定折りたたみ化)。まず開く
       await mp3Page.getByRole('button', { name: '提案の条件', exact: false }).click()
       await mp3Page.waitForTimeout(200)
 
@@ -7052,11 +7052,10 @@ try {
       await anyGenreBtn.click() // 以降の提案テストに影響しないよう「指定なし」に戻す
       await mp3Page.waitForTimeout(200)
 
-      // 「高たんぱく優先」トグルが表示される
-      const highProteinBtn = mp3Page.getByRole('button', { name: '高たんぱく優先', exact: true })
+      // 「高たんぱく優先」トグルは削除済み(2026-08-09 便EO・オーナー指示)
       check(
-        'MEALPLAN-03 「高たんぱく優先」トグルは既定でaria-pressed=false',
-        (await highProteinBtn.getAttribute('aria-pressed')) === 'false',
+        'MEALPLAN-03 「高たんぱく優先」トグルは提案の条件に無い(便EOで削除)',
+        (await mp3Page.getByRole('button', { name: '高たんぱく優先', exact: true }).count()) === 0,
       )
 
       // 先頭の日(月曜)・夕食の主菜行(先頭の「未定」)に「肉じゃが」をピッカーで割り当てる
@@ -19993,7 +19992,7 @@ try {
   // --- EN-01: 週タブ。①3グループとも既定で畳む ②畳んだままでも実行ボタンとPro行は見える
   //  ③選ぶチップと実行ボタンは見た目が違う（塗りつぶしは実行ボタンだけ・チップにはチェック印）
   //  ④条件の説明は、その条件を選んでいるあいだだけ出る
-  //  ⑤「高たんぱく優先」は無料でも出る（Pro機能ではない＝出ていて正しい）
+  //  ⑤「高たんぱく優先」の絞り込みは削除済み（2026-08-09 便EO・オーナー指示）
   //  ⑥鍵は掛けると塗りつぶしになる ⑦週まとめの栄養は日カードより大きい ---
   currentCheck = 'EN-01'
   {
@@ -20042,24 +20041,19 @@ try {
         'EN-01(項目3) 「調理時間15分以内を優先」を選んでいないうちは説明を出さない',
         !(await enBody()).includes(enQuickHint),
       )
+      // 2026-08-09 便EO(オーナー指示): 「高たんぱく優先」の絞り込みごと削除した。
+      // 説明もチップも画面から消えていることを確かめる(項目2の後継)
       check(
-        'EN-01(項目2) 「高たんぱく優先」も選んでいないうちは説明を出さない',
-        !(await enBody()).includes(enProteinHint),
+        'EN-01(項目2→便EO) 「高たんぱく優先」のチップも説明も出さない(削除済み)',
+        (await enPage.getByRole('button', { name: '高たんぱく優先', exact: true }).count()) === 0 &&
+          !(await enBody()).includes(enProteinHint),
       )
-      const enProteinBtn = enPage.getByRole('button', { name: '高たんぱく優先', exact: true })
-      check('EN-01(項目2) 未解錠でも「高たんぱく優先」は使える(無料機能)', await enProteinBtn.isVisible())
 
       await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
       await enPage.waitForTimeout(250)
       check(
         'EN-01(項目3) 選んだときだけ「調理時間15分以内を優先」の説明が出る',
         (await enBody()).includes(enQuickHint),
-      )
-      await enProteinBtn.click()
-      await enPage.waitForTimeout(250)
-      check(
-        'EN-01(項目2) 「高たんぱく優先」の説明は、見ているのがタグであることを書く',
-        (await enBody()).includes(enProteinHint),
       )
 
       const enLook = await enPage.evaluate(() => {

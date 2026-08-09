@@ -2305,9 +2305,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }, [isDemo, todayEntries, todayList, todayPlanAllRecipeIds])
 
   const [quickOnly, setQuickOnly] = useState(false)
-  // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
+  // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)
+  // 2026-08-09 便EO(オーナー指示): 「高たんぱく優先」の絞り込みは削除した
   const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
-  const [preferHighProtein, setPreferHighProtein] = useState(false)
   /**
    * 目的モード（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
    * 時短・ジャンルと違って設定に保存するのは、この指定が「1か月続ける」ためのものだから
@@ -2692,7 +2692,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       usedRecipeIds: [],
       slot,
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
       role: 'main',
     }).length
@@ -2702,7 +2701,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     settings?.ngIngredients,
     visibleSlots,
     genreFilter,
-    preferHighProtein,
     yesterdayRecipeIds,
   ])
 
@@ -2720,7 +2718,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       usedRecipeIds: excludeIds,
       slot,
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
     })
     const ids = [main?.id, side?.id].filter((x): x is number => x != null)
@@ -2926,7 +2923,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       usedRecipeIds,
       slot,
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
     }
     // 枠が丸ごと空のときのペア提案は主菜・副菜の行から押したときだけ（2026-08-02 便DE-4）。
@@ -3039,7 +3035,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
     }
 
@@ -3788,7 +3783,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 「先週の献立をコピー」のスイッチ（2026-08-07 便DT-7・オーナー指示）。
    * 独立したボタンをやめ、ONのまま「まとめて献立を入力」を押すとコピーが走る形にした。
-   * ONのあいだ、提案の条件（時短・ジャンル・高たんぱく・目的）と入れかたは意味を持たないので、
+   * ONのあいだ、提案の条件（時短・ジャンル・目的）と入れかたは意味を持たないので、
    * 画面でも無効化して「効きません」を見た目で示す（効かない操作を押せる状態で置かない）。
    */
   const [copyLastWeekMode, setCopyLastWeekMode] = useState(false)
@@ -4619,7 +4614,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const activeConditionSummaries: (string | undefined)[] = [
     quickOnly ? ja.mealPlan.quickOnlySummary : undefined,
     genreFilter,
-    preferHighProtein ? ja.mealPlan.preferHighProteinToggle : undefined,
     // 目的は「まとめて献立」の結果を最も大きく変える条件なので、畳んだラベルにも必ず出す
     planPurpose ? purposeLabelOf(planPurpose) : undefined,
   ]
@@ -4651,7 +4645,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   )
 
   /**
-   * 自動提案の条件（時短優先・ジャンル・高たんぱく優先）の折りたたみ。
+   * 自動提案の条件（時短優先・ジャンル）の折りたたみ。
    * 2026-07-30 便CH/C11: 週タブの中にしか無かったが、この3つの条件は月タブの
    * 「未定の日をまとめて提案」にも100%効いている（executeFillが同じ値を読む）。
    * 月から条件が見えず変えられないため、「なぜ月が全部中華になったのか」が画面から分からなかった。
@@ -4721,27 +4715,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {genre}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => setPreferHighProtein((v) => !v)}
-            aria-pressed={preferHighProtein}
-            className={chipClass(preferHighProtein)}
-            style={chipStyle(preferHighProtein)}
-          >
-            <ChipCheck on={preferHighProtein} />
-            {ja.mealPlan.preferHighProteinToggle}
-          </button>
         </div>
         {/* 条件の説明は、その条件を選んでいるあいだだけ出す（2026-08-09 便EN・オーナー実機
             「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
             優先されているように読めた）。
-            ・調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること
-            ・高たんぱく: 見ているのはレシピに付いた「高たんぱく」タグで、栄養価の計算値ではないこと
-              （すぐ下にPro版の「栄養から組む」の「たんぱく質多め」が並ぶため） */}
+            調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること */}
         {quickOnly && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>}
-        {preferHighProtein && (
-          <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.preferHighProteinHint}</p>
-        )}
         </>
       )}
 
@@ -6040,7 +6019,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         {!isPro && renderPurposeLockedRow()}
         {weekGroupOpen.auto && (
           <>
-            {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
+            {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)。
                 既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
                 畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
