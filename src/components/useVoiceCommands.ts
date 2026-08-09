@@ -15,8 +15,10 @@ import { ja } from '../i18n/ja'
  * ここが持つのは、ブラウザの音声認識・読み上げの扱いと、マイクの許可まわりの案内だけ。
  *
  * **音声で受けるのは、間違っても戻せる操作だけ**（次へ／戻って／もう一回／ストップ／タイマー）。
- * 記録・タイマーの停止や削除・セッションの終了は、聞き間違いで実行されると取り返しがつかない
+ * 記録・タイマーの削除・セッションの終了は、聞き間違いで実行されると取り返しがつかない
  * ので受けない（docs/69「音声の規律」）。
+ * 2026-08-10 便EZ: 「ストップ」はタイマーの**一時停止**まで受ける。止めても消えず、
+ * 画面の「再開」で元の残り時間から動かし直せる＝可逆なので、この規律の内側に収まる。
  */
 
 export const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -84,8 +86,14 @@ export interface VoiceCommandActions {
   onPrev: () => void
   /** 「もう一回」＝いま出ている手順を読み上げ直す */
   onRepeat: () => void
-  /** 「ストップ」＝読み上げを止める */
-  onStop: () => void
+  /**
+   * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
+   * （2026-08-10 便EZ・オーナー実機「『ストップ』は聞き取れていてもタイマーとまらない」）。
+   * どれを止めたかを短い文で返すと、その場の手応えとしてそれを出す（返さなければ従来の
+   * 「聞き取りました」のまま）。**止めるのは一時停止まで**＝タイマーを消す・記録する等の
+   * 取り消せない操作は声では受けない（docs/69「音声の規律」）。
+   */
+  onStop: () => string | void
   /**
    * 「タイマー」。何秒ではかるかは画面側が決める
    * （logic/voiceCommand.ts の resolveVoiceTimerSeconds を使う）。
@@ -205,8 +213,11 @@ export function useVoiceCommands(actions: VoiceCommandActions): VoiceCommandCont
         feedback()
         current.onRepeat()
       } else if (command === 'stop') {
-        feedback()
-        current.onStop()
+        // 止めたタイマーの名前が返ってきたら、それをその場に出す（2026-08-10 便EZ）。
+        // 「聞き取りました」だけだと、複数動いているときにどれが止まったのか分からない
+        const paused = current.onStop()
+        if (paused) showVoiceMessage(paused, 4000)
+        else feedback()
       } else if (command === 'timer') {
         // 「3分タイマー」のように分数の指定があればそれを使い、
         // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す

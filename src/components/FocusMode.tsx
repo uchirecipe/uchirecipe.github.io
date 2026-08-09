@@ -14,16 +14,18 @@ import {
   BellOff,
   Timer as TimerIcon,
   BellRing,
+  Pause,
+  Play,
 } from 'lucide-react'
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
 import { useSettings, updateSettings } from '../db/settings'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/time'
-import { sortTimersForDisplay } from '../logic/timerOrder'
+import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
-import { resolveVoiceTimerSeconds } from '../logic/voiceCommand'
+import { pickVoiceStopTarget, resolveVoiceTimerSeconds } from '../logic/voiceCommand'
 import {
   micSupported,
   speechSupported,
@@ -74,6 +76,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
     flashingId,
     showFirstTimeNotice,
     dismissFirstTimeNotice,
+    pauseTimer,
+    resumeTimer,
   } = useTimers()
   const settings = useSettings()
   const navigate = useNavigate()
@@ -260,7 +264,20 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         const currentStep = recipe.steps[indexRef.current]
         if (currentStep) speak(currentStep.text)
       },
-      onStop: () => stopSpeech(),
+      /**
+       * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
+       * （2026-08-10 便EZ・オーナー実機「『ストップ』は聞き取れていてもタイマーとまらない」）。
+       * それまでは読み上げしか止まらず、タイマーは声から一切触れなかった。
+       * どれを止めるかは logic/voiceCommand.ts の pickVoiceStopTarget が決める
+       * （この料理のタイマー→次に鳴る1本の順）。止めても消えないので言い直しがきく
+       */
+      onStop: () => {
+        stopSpeech()
+        const target = pickVoiceStopTarget(timers, recipeId)
+        if (!target) return
+        pauseTimer(target.id)
+        return ja.focus.micTimerPaused.replace('{label}', target.label)
+      },
       onTimer: (transcript) => {
         const currentIndex = indexRef.current
         const currentStep = recipe.steps[currentIndex]
@@ -442,13 +459,28 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
                     以前は色が変わるだけの静止ピルで、音を聞き逃すと画面上の手掛かりが実質無かった */}
                 {t.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
                 <span className="max-w-[7rem] truncate text-xs font-bold">{t.label}</span>
+                {/* 止まっていることが数字だけでは分からないので、時間の手前に印を出す(便EZ) */}
+                {t.pausedRemainingMs != null && <Pause size={14} className="shrink-0" aria-hidden />}
                 <span className="whitespace-nowrap text-base font-bold tabular-nums">
-                  {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
+                  {t.done ? t.doneLabel : formatRemaining(timerRemainingSeconds(t, now))}
                 </span>
               </button>
+              {/* 一時停止中は消音の代わりに「再開」を出す(2026-08-10 便EZ)。止まっているタイマーは
+                  もう鳴らないので、ここで要るのは音の入り切りではなく動かし直すこと */}
+              {!t.done && t.pausedRemainingMs != null && (
+                <button
+                  type="button"
+                  data-testid="focus-timer-resume"
+                  onClick={() => resumeTimer(t.id)}
+                  aria-label={ja.timer.resumeAria.replace('{label}', t.label)}
+                  className="shrink-0 rounded-full p-1.5 text-accent-ink"
+                >
+                  <Play size={16} aria-hidden />
+                </button>
+              )}
               {/* このタイマーだけ消音する(2026-08-03 実機FB④)。常駐バーの行と同じ位置・同じ働き。
                   終わったタイマーには効く音がもう無いので出さない */}
-              {!t.done && (
+              {!t.done && t.pausedRemainingMs == null && (
                 <button
                   type="button"
                   onClick={() => toggleMute(t.id)}
@@ -633,6 +665,15 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           setAdjustingId(null)
         }}
         onClose={() => setAdjustingId(null)}
+        /* 一時停止／再開(2026-08-10 便EZ。声の「ストップ」で止めたタイマーを戻す道) */
+        onTogglePause={
+          adjustingTimer
+            ? () =>
+                adjustingTimer.pausedRemainingMs != null
+                  ? resumeTimer(adjustingTimer.id)
+                  : pauseTimer(adjustingTimer.id)
+            : undefined
+        }
         /* このタイマーを始めた手順へ戻る(2026-08-03 実機FB③)。
            この料理の分は調理中モードの中で手順を送るだけ。別の料理の分は、その料理の
            レシピ詳細の該当手順を開いて調理中モードを閉じる(navigateが履歴を1つ積むので、

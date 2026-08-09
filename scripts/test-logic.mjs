@@ -352,7 +352,11 @@ import {
   replaceConfirmTargets,
   needsReplaceConfirm,
 } from '../src/logic/replaceConfirm.ts'
-import { matchVoiceCommand, resolveVoiceTimerSeconds } from '../src/logic/voiceCommand.ts'
+import {
+  matchVoiceCommand,
+  pickVoiceStopTarget,
+  resolveVoiceTimerSeconds,
+} from '../src/logic/voiceCommand.ts'
 import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { isStandaloneDisplay } from '../src/logic/standalone.ts'
@@ -10615,6 +10619,87 @@ eq(
     parseStoredTimers(customStored.replace('"isCustom":true', '"isCustom":"はい"'), now)[0].isCustom,
     false,
   )
+
+  // 2026-08-10 便EZ①: 声の「ストップ」でタイマーを一時停止できるようにしたぶんの回帰。
+  // 止まっている間は時計を進めない／読み戻しても「終わり」に化けない／並びの後ろに回る
+  const { timerRemainingSeconds } = await import('../src/logic/timerOrder.ts')
+  eq(
+    '便EZ① 動作中の残りは終了予定時刻から数える',
+    timerRemainingSeconds({ endsAt: now + 90_000 }, now),
+    90,
+  )
+  eq(
+    '便EZ① 一時停止中は止めた時点の残りを出す(時計が進まない)',
+    [
+      timerRemainingSeconds({ endsAt: now + 90_000, pausedRemainingMs: 90_000 }, now),
+      timerRemainingSeconds({ endsAt: now + 90_000, pausedRemainingMs: 90_000 }, now + 60_000),
+    ],
+    [90, 90],
+  )
+  eq('便EZ① 残りが負になっても0で止める', timerRemainingSeconds({ endsAt: now - 5_000 }, now), 0)
+  eq(
+    '便EZ① 一時停止中のものは動作中より後ろに並ぶ(次に鳴る順を読み違えない)',
+    sortTimersForDisplay([
+      { id: 1, done: false, endsAt: 1_000, pausedRemainingMs: 1_000 },
+      { id: 2, done: false, endsAt: 9_000 },
+      { id: 3, done: true, endsAt: 20_000 },
+    ]).map((t) => t.id),
+    [3, 2, 1],
+  )
+  const pausedStored = JSON.stringify([
+    {
+      id: 9,
+      key: '1-2-900',
+      label: '肉じゃが',
+      doneLabel: '煮込み終わり',
+      recipeId: 1,
+      stepNumber: 3,
+      endsAt: now + 300_000,
+      totalSeconds: 900,
+      done: false,
+      muted: false,
+      pausedRemainingMs: 300_000,
+    },
+  ])
+  eq(
+    '便EZ① 一時停止したまま読み込み直しても、止まったまま残りが保たれる',
+    (() => {
+      const t = parseStoredTimers(pausedStored, now + 3_600_000 - 1)[0]
+      return [t.pausedRemainingMs, t.done, t.endsAt - (now + 3_600_000 - 1)]
+    })(),
+    [300_000, false, 300_000],
+  )
+  eq(
+    '便EZ① 止めたまま放置して終了予定から1時間過ぎた分は復元しない(翌日に残らない)',
+    parseStoredTimers(pausedStored, now + 300_000 + RESTORE_GRACE_MS + 1).length,
+    0,
+  )
+  eq(
+    '便EZ① 一時停止の印が壊れている古い保存は、従来どおり動作中として読み戻す',
+    (() => {
+      const t = parseStoredTimers(pausedStored.replace('"pausedRemainingMs":300000', '"pausedRemainingMs":"はい"'), now)[0]
+      return [t.pausedRemainingMs, t.done]
+    })(),
+    [undefined, false],
+  )
+}
+
+// ---------- 便EZ②: タイマーが指す手順の呼び方(丸数字＋レシピ内の手順番号) ----------
+// オーナー実機「タイマー『段取りの〜を開く』→『手順⑦3-1を開く』、『段取りの7番目』は削除」。
+// 画面のバッジは「段取りの通し番号(大きい丸)＋レシピ内の手順番号(小さい丸・料理の色)」の2つで、
+// 文字の側だけが「段取りの7番目」と別の呼び方をしていた
+{
+  const { circledNumber, naviStepText } = await import('../src/logic/naviStepText.ts')
+  eq('便EZ② 1〜20は①〜⑳', [circledNumber(1), circledNumber(7), circledNumber(20)], ['①', '⑦', '⑳'])
+  eq('便EZ② 21〜35は㉑〜㉟', [circledNumber(21), circledNumber(35)], ['㉑', '㉟'])
+  eq('便EZ② 36〜50は㊱〜㊿', [circledNumber(36), circledNumber(50)], ['㊱', '㊿'])
+  eq(
+    '便EZ② 丸数字の無い範囲はそのままの数字に落とす(表示が消えない)',
+    [circledNumber(0), circledNumber(51), circledNumber(1.5)],
+    ['0', '51', '1.5'],
+  )
+  eq('便EZ② 段取り7番目・レシピ内3-1は「⑦3-1」', naviStepText(7, '3-1'), '⑦3-1')
+  eq('便EZ② レシピ内の手順番号が無い工程(湯を沸かす)は丸数字だけ', naviStepText(7), '⑦')
 }
 
 // ---------- cookedWithinDays: 「最近作った」判定(2026-07-29 便CI/C08) ----------
@@ -11108,6 +11193,51 @@ eq(
     resolveVoiceTimerSeconds('タイマー', undefined, undefined),
     undefined,
   )
+
+  // 2026-08-10 便EZ①: オーナー実機「タイマー音声操作→『ストップ』は聞き取れていても
+  // タイマーとまらない。他はOK」。**聞き取り(matchVoiceCommand)は元から正しく 'stop' を
+  // 返していた**＝真因は画面側で 'stop' を読み上げの停止にしか繋いでいなかったこと。
+  // 語形と、複数動いているときにどれを止めるかの決め方を、ここで固定する
+  eq('便EZ① 「ストップ」は聞き取れている(判定は元から正しい)', matchVoiceCommand('ストップ'), 'stop')
+  eq('便EZ① かなで返る端末の「すとっぷ」も受ける', matchVoiceCommand('すとっぷ'), 'stop')
+  eq('便EZ① 「タイマーストップ」はタイマーの新規起動にしない', matchVoiceCommand('タイマーストップ'), 'stop')
+  eq('便EZ① 「タイマー止めて」も止める側に倒す', matchVoiceCommand('タイマー止めて'), 'stop')
+  eq('便EZ① 「停止」も受ける', matchVoiceCommand('停止'), 'stop')
+  eq('便EZ① 「3分タイマー」は従来どおり新規起動のまま', matchVoiceCommand('3分タイマー'), 'timer')
+
+  const stopTimers = [
+    // 肉じゃが(recipeId:1)の2本。残りは 5分 と 1分
+    { id: 1, done: false, endsAt: 300_000, recipeId: 1 },
+    { id: 2, done: false, endsAt: 60_000, recipeId: 1 },
+    // 味噌汁(recipeId:2)。残り30秒＝全体でいちばん先に鳴る
+    { id: 3, done: false, endsAt: 30_000, recipeId: 2 },
+  ]
+  eq(
+    '便EZ① いま画面に出している料理のタイマーを優先して止める',
+    pickVoiceStopTarget(stopTimers, 1)?.id,
+    2,
+  )
+  eq(
+    '便EZ① その料理のタイマーが無ければ、次に鳴る1本を止める',
+    pickVoiceStopTarget(stopTimers, 3)?.id,
+    3,
+  )
+  eq(
+    '便EZ① どの料理を見ているか分からないときも、次に鳴る1本を止める',
+    pickVoiceStopTarget(stopTimers)?.id,
+    3,
+  )
+  eq(
+    '便EZ① 終わったタイマーは声では触らない(片付け=削除は取り消せないため)',
+    pickVoiceStopTarget([{ id: 4, done: true, endsAt: 10, recipeId: 1 }], 1),
+    undefined,
+  )
+  eq(
+    '便EZ① すでに止めてあるタイマーは選ばない(「ストップ」で再開しない)',
+    pickVoiceStopTarget([{ id: 5, done: false, endsAt: 10, recipeId: 1, pausedRemainingMs: 10 }], 1),
+    undefined,
+  )
+  eq('便EZ① 1本も動いていなければ何も止めない', pickVoiceStopTarget([], 1), undefined)
   eq('便DS⑤ 「0分タイマー」は時間として使わず次の候補へ譲る', resolveVoiceTimerSeconds('0分タイマー', 5, undefined), 300)
   eq(
     '便DS⑤ 手順の分数が0でも「決められない」に落ちる(0秒タイマーを作らない)',
