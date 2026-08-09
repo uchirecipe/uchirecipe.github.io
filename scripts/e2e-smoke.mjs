@@ -6392,7 +6392,7 @@ try {
       check(
         'MEALPLAN-01(便EK・規約F) 確認文が残る食事とその件数を名指しする',
         mpDialogs.some((m) =>
-          m.includes(`ほかの食事（昼食）の予定${mpBeforeClear.lunch}品と、作った記録は残ります`),
+          m.includes(`他の食事（昼食）の予定${mpBeforeClear.lunch}品と、作った記録は残ります`),
         ),
         `dialogs=${JSON.stringify(mpDialogs)}`,
       )
@@ -10361,7 +10361,7 @@ try {
         'MEALPLAN-DU(⑧・規約F) キャンセルの確認文が「取り消すもの」と「戻るもの」を両方件数つきで書く',
         duDialog.includes('取り消すもの: 追加した1品') &&
           duDialog.includes('戻るもの: この画面を開いたときの献立0品') &&
-          duDialog.includes('作った記録と写真、ほかの日の献立は変わりません'),
+          duDialog.includes('作った記録と写真、他の日の献立は変わりません'),
         `確認文=${duDialog}`,
       )
       const duAfterCancel = await duPage.evaluate(
@@ -17097,7 +17097,7 @@ try {
       check(
         'WORD-CI1-01/C20 絞り込みで0件のとき「＋から登録」ではなく条件を外す案内が出る',
         emptyText.includes('条件に合うレシピが見つかりません') &&
-          emptyText.includes('条件を外すと、ほかのレシピが出てきます') &&
+          emptyText.includes('条件を外すと、他のレシピが出てきます') &&
           !emptyText.includes('右下の「＋」ボタンから自分のレシピを登録できます'),
         emptyText.slice(0, 400),
       )
@@ -17364,7 +17364,7 @@ try {
       check(
         'LOG-CI2-01/C02 削除の確認文に、消える記録の日付と残る記録の件数が入る(規約F)',
         /\d{4}\/\d{2}\/\d{2}の作った記録を削除します/.test(delLogMessage) &&
-          delLogMessage.includes(`ほかの作った記録${beforeDelete - 1}件は残ります`),
+          delLogMessage.includes(`他の作った記録${beforeDelete - 1}件は残ります`),
         delLogMessage,
       )
       check(
@@ -19015,7 +19015,7 @@ try {
       check('BULKDEL-01 確認文に献立の予定の件数が入る', /献立の予定2件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に今日の献立の件数が入る', /今日の献立1件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
-      check('BULKDEL-01 確認文に残るものが件数つきで入る', /ほかのレシピ\d+品・買い物メモ・食材の在庫は残ります/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に残るものが件数つきで入る', /他のレシピ\d+品・買い物メモ・食材の在庫は残ります/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check(
         'BULKDEL-01 基本レシピは入れ直しで戻せることを区別して書く',
         /基本レシピ2品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(bdDialogMsg) &&
@@ -20781,7 +20781,7 @@ try {
     )
     check(
       'INSTALLTEXT-EP アプリとして使えることが書いてある',
-      insEp.includes('Webアプリ') && insEp.includes('ほかのアプリと同じようにご利用いただけます'),
+      insEp.includes('Webアプリ') && insEp.includes('他のアプリと同じようにご利用いただけます'),
     )
     check(
       'INSTALLTEXT-EP 「追加しなくてもブラウザのまま」は※の注記に下げてある',

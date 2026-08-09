@@ -1008,7 +1008,7 @@ function buildJobs(recipes: Recipe[]): Job[] {
           kind,
           waitMinutes,
           // 手順に時間が書かれておらず、調理法から当てた分数で待ちにした手順
-          // （ナビが足した工程は「ナビが追加」の印だけを出す＝印は1つにする）
+          // （ナビが足した工程は分割の番号「◯-1」で示すので、ここでは印を出さない）
           waitEstimated: kind === 'wait' && !addedByNavi && resolveStepMinutes(s) == null,
           activeMinutes: kind === 'active' ? active.minutes : 0,
           activeEstimated: kind === 'active' && active.estimated,

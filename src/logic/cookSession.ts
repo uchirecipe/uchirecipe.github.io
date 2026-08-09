@@ -58,7 +58,7 @@ export function findCursorIndex(
   )
 }
 
-/** 「調理をはじめる」＝段取りの先頭。手順が1つも無ければ undefined */
+/** 「調理中モードで見る」＝段取りの先頭。手順が1つも無ければ undefined */
 export function startCursor(items: readonly CursorTarget[]): CookCursor | undefined {
   return items.length > 0 ? toCursor(items[0]) : undefined
 }
@@ -168,9 +168,10 @@ export function collapseStepText(text: string, maxChars: number, headChars?: num
   const chars = [...trimmed]
   if (maxChars <= 1 || chars.length <= maxChars) return chars.join('')
   const headBudget = headChars ?? Math.ceil((maxChars - 1) * 0.55)
-  const tailBudget = Math.max(1, maxChars - 1 - headBudget)
   const byPhrase = collapseAtPhraseBoundary(trimmed, headBudget, maxChars)
   if (byPhrase) return byPhrase
+  // 文節1つが枠に入りきらないとき（長い1語・記号ばかりの手順）だけ、従来どおり文字数で切る
+  const tailBudget = Math.max(1, maxChars - 1 - headBudget)
   return `${chars.slice(0, headBudget).join('')}…${chars.slice(chars.length - tailBudget).join('')}`
 }
 

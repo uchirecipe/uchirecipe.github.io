@@ -11787,7 +11787,7 @@ eq(
   eq('CT-DEL 確認文に献立の予定の件数が入る', /献立の予定4件/.test(text), true)
   eq('CT-DEL 確認文に今日の献立の件数が入る', /今日の献立2件/.test(text), true)
   eq('CT-DEL 確認文に元に戻せないことが入る', text.includes('元に戻せません'), true)
-  eq('CT-DEL 確認文に残るレシピの品数が入る', /ほかのレシピ106品/.test(text), true)
+  eq('CT-DEL 確認文に残るレシピの品数が入る', /他のレシピ106品/.test(text), true)
   eq('CT-DEL 確認文に残るものが入る', /買い物メモ・食材の在庫は残ります/.test(text), true)
   eq('CT-DEL 「よろしいですか？」だけで終わらせない', text.includes('よろしいですか'), false)
   // 基本レシピだけは入れ直しで戻せる(ただし記録は戻らない)ことを区別して書く。
@@ -11819,7 +11819,7 @@ eq(
     todayEntries: 0,
   })
   eq('CT-DEL 全件削除なら残りは0品', allGone.remaining, 0)
-  eq('CT-DEL 残り0品でも残るものを書く', /ほかのレシピ0品/.test(buildBulkDeleteConfirmText(allGone)), true)
+  eq('CT-DEL 残り0品でも残るものを書く', /他のレシピ0品/.test(buildBulkDeleteConfirmText(allGone)), true)
   // 記録の配列が無いレシピ(cookedLogs未設定)でも落ちない
   eq(
     'CT-DEL cookedLogs未設定でも数えられる',
