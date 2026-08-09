@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>複数の端末で使う方法｜うちレシピ</title>
+<meta name="description" content="レシピ帳アプリ「うちレシピ」のデータは端末の中だけに保存されます。書き出したファイルを使って、機種変更でまるごと移す手順、2台目の端末で同じレシピ帳を開く手順、Googleドライブなどのクラウドに置くときの注意点、定期的に書き出す目安を説明します。">
+<meta property="og:title" content="複数の端末で使う方法｜うちレシピ">
+<meta property="og:description" content="機種変更・2台目の端末・定期的な備え。書き出したファイル1つの運び方と、クラウドに置くときの注意点を説明します。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://uchirecipe.com/about/multi-device.html">
+<meta property="og:image" content="https://uchirecipe.com/ogp.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://uchirecipe.com/about/multi-device.html">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+  :root {
+    --bg: #faf5ec;
+    --text: #43362a;
+    /* 塗り用のアクセント(ボタン地・CTA・注記の左罫)。2026-08-02 オーナー確定で
+       #d9480f → #cc3f01。旧色はこの地に生成りの文字を載せると3.96:1でAAに届かず、
+       新色は4.52:1で満たす(色みの差はごくわずか) */
+    --accent: #cc3f01;
+    /* 文字として使うアクセント(2026-07-30 オーナー承認・docs/色調整見本.html
+       → 2026-08-02 面別トークンに拡張・docs/色調整見本2_ブラウングリーン.html)。
+       塗りのオレンジは面の上で明るすぎて通常サイズの文字がAAに届かないため文字用を分けている。
+       アプリ本体(app/src/index.css)と同じく「載る面」で値を持つ構造に揃える:
+         --accent-ink-page    ページ背景(--bg #faf5ec)の上   #b8380a → 5.36:1
+         --accent-ink-surface カード面(--surface #fffdf8)の上 #b8380a → 5.73:1
+       この静的ページはライト/ダークの2テーマだけなので両方とも同じ値になる
+       (面で色が分かれるのはアプリのブラウンテーマだけ)。
+       使う側は --accent-ink 1つだけを見ればよく、カード面を塗るルール
+       (background: var(--surface))の中でカード面用の値に差し替えている */
+    --accent-ink-page: #b8380a;
+    --accent-ink-surface: #b8380a;
+    --accent-ink: var(--accent-ink-page);
+    --surface: #fffdf8;
+    /* 補足テキスト(2026-07-30)。旧#8c7b69は3.75:1/4.01:1でAA未達だった。
+       本文#43362aとの明度差を保ちつつAAを満たす値: ページ背景上4.77:1 / カード面上5.10:1 */
+    --text-muted: #7c6a56;
+    --border: #e9dfd0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #211a13;
+      --text: #f1e8db;
+      --accent: #ff8a4c;
+      /* ダークは現行で7.36:1あり基準を満たしているため文字用も同色=見た目不変。
+         2026-08-02の面別化でもページ背景の上・カード面の上とも同値＝ダークは一切変えない */
+      --accent-ink-page: #ff8a4c;
+      --accent-ink-surface: #ff8a4c;
+      --surface: #2c241b;
+      --text-muted: #a89680;
+      --border: #3d3327;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif;
+    line-height: 1.8;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 24px 20px 48px;
+  }
+  header.page {
+    text-align: center;
+    padding: 8px 0 4px;
+  }
+  header.page img { width: 56px; height: 56px; }
+  header.page p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: bold;
+  }
+  h1 {
+    font-size: 22px;
+    line-height: 1.6;
+    margin: 22px 0 10px;
+    text-align: center;
+  }
+  h2 {
+    font-size: 18px;
+    line-height: 1.6;
+    margin: 40px 0 12px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border);
+    scroll-margin-top: 12px;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 24px 0 6px;
+  }
+  p { font-size: 15px; margin: 0 0 14px; }
+  p.lead { font-size: 15px; margin: 0 0 10px; }
+  p.muted, .muted { color: var(--text-muted); font-size: 13.5px; }
+  ul.plain {
+    margin: 0 0 14px;
+    padding-left: 1.3em;
+  }
+  ul.plain li { font-size: 14px; margin-bottom: 6px; }
+  ul.plain li:last-child { margin-bottom: 0; }
+  a { color: var(--accent-ink); }
+  code {
+    font-size: 13.5px;
+    /* URLは途中で折り返さず、入りきらないときだけ次の行へ丸ごと移す */
+    white-space: nowrap;
+    background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 5px;
+  }
+
+  /* ===== 端末ごとの飛び先 ===== */
+  nav.jump {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 18px 0 4px;
+  }
+  nav.jump a {
+    display: block;
+    background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13.5px;
+    font-weight: bold;
+    text-decoration: none;
+  }
+
+  /* ===== 手順(番号は丸い印で出す) ===== */
+  ol.steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 0;
+    padding: 0;
+  }
+  ol.steps > li {
+    position: relative;
+    counter-increment: step;
+    padding-left: 36px;
+    margin-bottom: 16px;
+    font-size: 15px;
+  }
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 4px;
+    width: 25px;
+    height: 25px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 25px;
+    text-align: center;
+  }
+  ol.steps > li:last-child { margin-bottom: 0; }
+  ol.steps + p { margin-top: 16px; }
+
+  /* ===== 説明図 =====
+     ブラウザのUIを模した図(scripts/shots-install.mjs で描画)。幅340CSSpxの2倍で書き出している */
+  figure.shot { margin: 10px 0 4px; }
+  figure.shot img {
+    display: block;
+    width: 100%;
+    max-width: var(--w, 340px);
+    height: auto;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(67, 54, 42, 0.12);
+    background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
+  }
+  figure.shot figcaption {
+    margin: 6px 0 0;
+    max-width: 340px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-muted);
+  }
+
+  .note {
+    background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 16px 0;
+  }
+  .note strong { display: block; margin-bottom: 4px; font-size: 14.5px; }
+  .note p { font-size: 14px; margin: 0 0 8px; }
+  .note p:last-child { margin-bottom: 0; }
+  .note ul.plain { margin-bottom: 0; }
+
+  .cta {
+    display: block;
+    text-align: center;
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: bold;
+    font-size: 18px;
+    text-decoration: none;
+    padding: 15px;
+    border-radius: 14px;
+    margin: 26px 0 6px;
+    box-shadow: 0 4px 14px rgba(67, 54, 42, 0.12);
+  }
+  .cta-note {
+    margin: 0;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+  .back {
+    display: block;
+    text-align: center;
+    margin-top: 28px;
+    color: var(--accent-ink);
+    font-weight: bold;
+    text-decoration: none;
+  }
+  footer {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  footer a { color: var(--text-muted); text-decoration: underline; }
+  footer span.sep { margin: 0 8px; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus {
+    left: 8px;
+    top: 8px;
+    z-index: 60;
+    background: var(--surface);
+    --accent-ink: var(--accent-ink-surface);
+    padding: 8px 12px;
+    border-radius: 8px;
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">本文へ移動</a>
+<main id="main">
+  <header class="page">
+    <img src="/icon.svg" alt="" aria-hidden="true">
+    <p>うちレシピ</p>
+  </header>
+
+  <h1>複数の端末で使う方法</h1>
+  <p class="lead">うちレシピに登録したレシピ・記録・写真は、開いている端末の中だけに保存されます。端末どうしが自動で同期する仕組みはありません。</p>
+  <p class="lead">別の端末で同じレシピ帳を開くには、設定の「バックアップ」で書き出したファイルを、その端末へ移して読み込みます。このページでは、その運び方と気をつけることを説明します。</p>
+
+  <nav class="jump" aria-label="このページの内容">
+    <a href="#move">機種変更</a>
+    <a href="#second">2台目の端末</a>
+    <a href="#cloud">クラウドの注意</a>
+    <a href="#routine">定期的に書き出す</a>
+  </nav>
+
+  <h2 id="basics">データは端末ごとに分かれています</h2>
+  <p>レシピ・作った記録・写真・献立・買い物メモ・食材の在庫と価格・アプリの設定は、すべてお使いの端末の中に保存されます。開発者のサーバーには送られません。別の端末でうちレシピを開いても、そこに出るのはその端末のデータだけです。</p>
+  <p>会員登録もログインもないため、レシピ帳を預けている場所がどこにもありません。端末を替えるときと2台目で使うときは、ファイルを自分で運ぶことになります。</p>
+
+  <div class="note">
+    <strong>iPhone・iPadは、ブラウザとホーム画面のアプリでデータが分かれます</strong>
+    <p>同じ端末でも、ブラウザで開いたうちレシピと、ホーム画面のアイコンから開いたうちレシピでは、保存されるデータが別々になります。どちらで使うかを先に決めてから、レシピを登録してください。</p>
+    <p>すでにブラウザで登録したあとでも、このページと同じやり方で移せます。ブラウザの画面で書き出し、ホーム画面のアイコンから開いて「今のデータに追加」で読み込みます。</p>
+    <p class="muted"><a href="/about/install.html">ホーム画面への追加方法</a></p>
+  </div>
+
+  <h2 id="move">機種変更: 今の端末から新しい端末へ移す</h2>
+  <ol class="steps">
+    <li>
+      今の端末で、設定の「バックアップ」を開き、「バックアップを取る」の「ファイルに書き出す」を押します。「作った記録」の写真も移すときは、「「作った記録」の写真もバックアップに含める」をONにしてから押してください（このチェックは書き出すたびにOFFに戻ります）。
+      <figure class="shot" style="--w:390px">
+        <img src="/about/img/manual/backup-export.webp" width="780" height="376" loading="eager" decoding="async" alt="設定のバックアップ画面。「「作った記録」の写真もバックアップに含める」のチェック（OFF）と説明文の下に、「ファイルに書き出す」のボタンがある">
+        <figcaption>書き出しは1ファイルです。ファイル名は <code>uchi-recipe-backup-日付.json</code> になります</figcaption>
+      </figure>
+    </li>
+    <li>書き出したファイルを新しい端末へ移します。AirDrop・メールへの添付・Googleドライブなどのクラウドのうち、いつもお使いの方法でかまいません。</li>
+    <li>
+      新しい端末でうちレシピを開き、設定の「バックアップ」を開いて、「バックアップを読み込む」の「データを上書き」を押してそのファイルを選びます。
+      <figure class="shot" style="--w:390px">
+        <img src="/about/img/manual/backup-import.webp" width="780" height="444" loading="lazy" decoding="async" alt="バックアップの読み込みの2つのボタン。「今のデータに追加」と、赤い枠の「データを上書き」が並び、それぞれの下に説明が付いている">
+        <figcaption>読み込みは2種類あります。まるごと移すときは「データを上書き」です</figcaption>
+      </figure>
+    </li>
+    <li>設定の「Pro」を開いて、Pro版が使える状態になっているか確かめます。解錠コードはファイルに入っているので、入れ直す必要はありません。</li>
+  </ol>
+
+  <div class="note">
+    <strong>新しい端末で先にレシピを登録していたときは</strong>
+    <p>「データを上書き」は、新しい端末に入っているレシピ・作った記録・食材の価格を消して、ファイルの内容だけにします。設定（NG食材・テーマ・週の食費予算など）もファイルの内容になります。消える件数は、押したときに画面に出ます。</p>
+    <p>残るのはPro版の解錠コードです。上書きする前のデータはアプリの中に控えが取られ、設定の画面を開いている間は「元に戻す」で戻せます（別の画面へ移ると戻せなくなります）。</p>
+    <p>新しい端末で登録したレシピを消したくないときは、「今のデータに追加」を選んでください。今のデータを1件も消さずに、ファイルの中の「まだ無いもの」だけを足します。</p>
+  </div>
+
+  <div class="note">
+    <strong>今の端末を手放すのは、移し終わってから</strong>
+    <p>新しい端末でレシピと「作った記録」が見えることを確かめてから、今の端末の初期化・下取りに出してください。</p>
+  </div>
+
+  <h2 id="second">2台目の端末でも同じレシピ帳を開く</h2>
+  <p>スマートフォンとパソコン、家族それぞれの端末など、2台以上で同じレシピ帳を見たいときも、やることは機種変更と同じです。書き出したファイルを、どちらの端末からも取り出せる場所に置いておきます。</p>
+  <p>Googleドライブ・iCloud Drive・OneDriveなどのクラウドに置いておくと、そのつどファイルを送らずに済みます。</p>
+
+  <h3>レシピを書く端末を1台決める</h3>
+  <p>うちレシピには、2台の変更を突き合わせて1つにまとめる仕組みがありません。レシピを登録・編集する端末を1台に決めておくと、どちらのファイルが新しいか迷わずに済みます。</p>
+  <ul class="plain">
+    <li><strong>書く側の端末</strong>: レシピを足したり直したりしたら、設定の「バックアップ」から書き出して、クラウドの同じ場所に置き直します</li>
+    <li><strong>読む側の端末</strong>: そのファイルを「データを上書き」で読み込みます。読む側で登録したレシピは消えるので、登録は書く側で行ってください</li>
+  </ul>
+
+  <h3>2回目からは、同じファイルに上書きできます</h3>
+  <p>パソコンのChrome・Edgeなど、書き出すときに保存先を選べる端末では、一度クラウドのフォルダを選んでおくと、次から「前回の場所に上書き」のボタンが出ます。押すと、前回と同じファイルにそのまま上書きされます。ボタンの下には上書き先のファイル名も出ます。</p>
+  <p class="muted">iPhone・iPadでは保存先を選べません。書き出したファイルは「ファイル」アプリの「ダウンロード」に入るので、そこからクラウドのフォルダへ移してお使いください。</p>
+
+  <h2 id="cloud">クラウドを使うときに気をつけること</h2>
+  <p>クラウドに置いても、うちレシピがそのファイルを自動で読み書きすることはありません。書き出しと読み込みは、そのつどご自身の操作になります。ファイルを新しくしただけでは、もう1台のレシピは変わりません。</p>
+
+  <h3>古いファイルを「データを上書き」で読み込むと</h3>
+  <ul class="plain">
+    <li><strong>消えるもの</strong>: その端末に入っているレシピ・作った記録・食材の価格。設定（NG食材・テーマ・週の食費予算など）もファイルの内容に変わります。件数は押したときに画面に出ます</li>
+    <li><strong>残るもの</strong>: Pro版の解錠コード。上書きする前のデータの控えも取られ、設定の画面を開いている間は「元に戻す」で戻せます（別の画面へ移ると戻せなくなります）</li>
+  </ul>
+  <p>クラウドのファイルがいつのものか分からなくなったときは、上書きの前に、その端末で一度書き出しておくと元の状態に戻せます。</p>
+
+  <h3>2台の両方で登録したときは</h3>
+  <p>2台それぞれで別のレシピを登録したあと、片方のファイルを「データを上書き」で読み込むと、もう片方で登録したぶんは残りません。両方のレシピを残したいときは「今のデータに追加」を使います。</p>
+  <p>ただし「今のデータに追加」で足されるのは、今のデータに無いものだけです。<strong>同じ料理名のレシピは今の内容のままで、もう1台で書き換えた材料や手順は入ってきません</strong>（そのレシピに足されるのは「作った記録」・お気に入り・写真です）。書き換えたレシピも移したいときは「データを上書き」を使うことになります。</p>
+  <p class="muted">読み込みが終わると「新しく足したレシピは◯品です（◯品は同じ料理が既にあったので、内容はそのままにしました）」のように、何が入って何が入らなかったかが画面に出ます。</p>
+
+  <div class="note">
+    <strong>ファイルは自分だけが取り出せる場所に置いてください</strong>
+    <p>バックアップファイルにはPro版の解錠コードが含まれます。クラウドに置くときは、リンクを知っている人が開ける共有設定にしないでください。</p>
+  </div>
+
+  <h2 id="routine">定期的に書き出しておく</h2>
+  <p>ここまでと同じ書き出しが、そのまま故障・紛失への備えになります。端末が使えなくなったときや、ブラウザの設定でサイトのデータを消したときに戻せるのは、書き出しておいたファイルからだけです。</p>
+  <ul class="plain">
+    <li><strong>目安は月に1回</strong>です。自分で登録したレシピがあり、30日以上書き出していないときは、ホーム画面に「しばらくバックアップしていません」というお知らせが出ます</li>
+    <li>設定の画面の上には「最終バックアップ: ◯日前」が出ています。「書き出しへ」を押すと、書き出しのカードまで移動します</li>
+    <li>置き場所は、その端末の中だけにしないでください。クラウド・パソコン・別の端末など、その端末が使えなくなっても取り出せる場所に1つ置いておきます</li>
+    <li>「作った記録」の写真も残すときは、書き出す前にチェックをONにします。OFFのままだと記録の写真はファイルに入らず、別の端末では戻せません</li>
+  </ul>
+  <p class="muted">レシピをまとめて削除する前にも、一度書き出しておくと、そのファイルから戻せます。</p>
+
+  <h2 id="part">一部のレシピだけを渡す</h2>
+  <p>レシピ帳ぜんぶではなく、選んだレシピだけをファイルにすることもできます。「レシピ」タブの「選択」からレシピを選び、「選択したレシピ◯品を書き出す」を押します。受け取った側は「今のデータに追加」で読み込みます。</p>
+  <p class="muted">このファイルの名前は <code>uchi-recipe-recipes-日付.json</code> です。端末ぜんぶを持ち出すバックアップ（<code>uchi-recipe-backup-日付.json</code>）とは中身の範囲が違うので、名前で見分けられます。献立・買い物メモ・食材の在庫と価格・アプリの設定は入りません。</p>
+  <p>1品だけなら、レシピ詳細の「シェア」から「テキストでシェア」で送る方法もあります。受け取った人がうちレシピの「テキスト貼り付けで自動入力」に貼ると、レシピとして取り込めます。</p>
+
+  <p class="muted">書き出しと読み込みの画面の詳しい説明は、<a href="/about/manual.html#backup">使い方ページの「バックアップと機種変更」</a>に載せています。</p>
+
+  <a class="cta" href="/">うちレシピを開く</a>
+  <p class="cta-note">書き出しは、設定の「バックアップ」から行います</p>
+
+  <a class="back" href="/about/">← うちレシピについて に戻る</a>
+
+  <footer>
+    <a href="/about/">うちレシピについて</a>
+    <span class="sep">|</span>
+    <a href="/about/manual.html">使い方</a>
+    <span class="sep">|</span>
+    <a href="/about/install.html">ホーム画面に追加する方法</a>
+    <span class="sep">|</span>
+    <a href="/about/terms.html">利用規約・プライバシーポリシー</a>
+  </footer>
+</main>
+<!-- Cloudflare Web Analytics -->
+<script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "9386f480590d44cdae47f8526841e1ab"}'></script>
+<!-- End Cloudflare Web Analytics -->
+</body>
+</html>
