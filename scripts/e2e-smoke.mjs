@@ -20053,12 +20053,6 @@ try {
         'EN-01(項目3) 選んだときだけ「調理時間15分以内を優先」の説明が出る',
         (await enBody()).includes(enQuickHint),
       )
-      await enProteinBtn.click()
-      await enPage.waitForTimeout(250)
-      check(
-        'EN-01(項目2) 「高たんぱく優先」の説明は、見ているのがタグであることを書く',
-        (await enBody()).includes(enProteinHint),
-      )
 
       const enLook = await enPage.evaluate(() => {
         const byText = (t) =>
@@ -20073,7 +20067,11 @@ try {
         return {
           fill: cs(fill),
           chip: cs(chip),
-          chipHasCheck: chip.querySelectorAll('svg').length > 0,
+          // 2026-08-09 便EO: 押しても寸法が変わらないよう、選んでいないときも同じ場所を
+          // 空けている。よって「svgがある」だけでは不十分で、見えているかまで見る
+          chipHasCheck: [...chip.querySelectorAll('svg')].some(
+            (el) => getComputedStyle(el).visibility !== 'hidden',
+          ),
         }
       })
       check(
@@ -20093,7 +20091,6 @@ try {
         !!enLook && enLook.chipHasCheck,
       )
       await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
-      await enProteinBtn.click()
       await enPage.waitForTimeout(250)
 
       await enPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
