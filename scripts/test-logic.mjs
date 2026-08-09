@@ -8388,7 +8388,6 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   {
     const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
     eq('PRICE_DEFAULTS いちごの単位は「280g」(1パック250〜300g・代表値280g)', byName.get('いちご')?.unit, '280g')
-    eq('PRICE_DEFAULTS しいたけの単位は「6枚」(1パック6個前後)', byName.get('しいたけ')?.unit, '6枚')
     eq('PRICE_DEFAULTS 生しいたけの単位は「6枚」(1パック6個前後)', byName.get('生しいたけ')?.unit, '6枚')
     eq('PRICE_DEFAULTS オクラの単位は「10本」(1袋10本前後・100g前後)', byName.get('オクラ')?.unit, '10本')
     eq('PRICE_DEFAULTS 小ねぎの単位は「100g」(1袋100g前後)', byName.get('小ねぎ')?.unit, '100g')
@@ -8396,7 +8395,6 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq('PRICE_DEFAULTS ブルーベリーの単位は「100g」(1パック100g前後)', byName.get('ブルーベリー')?.unit, '100g')
     // 価格(円)は1件も変えていない=「いくらか」ではなく「その金額が何に対する値段か」だけを直した
     eq('単位だけの修正でいちごの価格は据え置き', byName.get('いちご')?.pricePerUnit, 400)
-    eq('単位だけの修正でしいたけの価格は据え置き', byName.get('しいたけ')?.pricePerUnit, 150)
     eq('単位だけの修正で生しいたけの価格は据え置き', byName.get('生しいたけ')?.pricePerUnit, 100)
     eq('単位だけの修正でオクラの価格は据え置き', byName.get('オクラ')?.pricePerUnit, 130)
     eq('単位だけの修正で小ねぎの価格は据え置き', byName.get('小ねぎ')?.pricePerUnit, 80)
@@ -8406,11 +8404,6 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       'パック按分: いちご6個(=90g)は280g400円のマスタから129円(従来は1パック満額400円)',
       estimateIngredientYen({ name: 'いちご', amount: '6', unit: '個' }, idx)?.yen,
       129,
-    )
-    eq(
-      'パック按分: しいたけ4枚は6枚150円のマスタから100円(従来は1パック満額150円)',
-      estimateIngredientYen({ name: 'しいたけ', amount: '4', unit: '枚' }, idx)?.yen,
-      100,
     )
     eq(
       'パック按分: 生しいたけ2枚は6枚100円のマスタから33円(従来は1パック満額100円)',
@@ -8465,7 +8458,15 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     // 2026-07-29 副菜6品追加で36,780→38,622円(+1,842円=6品ぶん。既存103品の値は不変)
     // 2026-08-10 便EY「1パック丸ごと計上」の修正で38,622→38,047円(-575円)。
     // 下がったのは7品・7材料行(いちご6個/しいたけ4枚/生しいたけ5枚・2枚/オクラ8本/小ねぎ2本×2)
-    eq('同梱109品の概算食費の合計(便EY修正後。便BY修正前は48,377円/103品時点は36,780円)', grand, 38047)
+    // 2026-08-10 便FA「しいたけ」の名寄せで38,047→38,014円(-33円)。動いたのは寄せ鍋1品だけで、
+    // 「しいたけ4枚」が旧150円/6枚のマスタ(100円)ではなく生しいたけ100円/6枚(67円)で計算される
+    eq('同梱109品の概算食費の合計(便FA名寄せ後。便EY前は38,622円/便BY修正前は48,377円)', grand, 38014)
+    const nabe = starterDefs.find((d) => d.title === '寄せ鍋')
+    eq(
+      '寄せ鍋 1食あたり(便EY後226円→便FAのしいたけ名寄せで217円)',
+      Math.round(estimateRecipeCost(nabe.ingredients, idx).total / nabe.servings),
+      217,
+    )
     const soup = starterDefs.find((d) => d.title.includes('中華風卵スープ'))
     eq('中華風卵スープ 1食あたり(修正前682円・ごま油「少々」に1Lボトル満額が乗っていた)', Math.round(estimateRecipeCost(soup.ingredients, idx).total / soup.servings), 85)
     const steamed = starterDefs.find((d) => d.title.includes('レンジ蒸し鶏'))
@@ -8650,10 +8651,217 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   {
     const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
     for (const fix of PRICE_DEFAULT_UNIT_FIXES) {
+      // 「しいたけ」は2026-08-10 便FAで「生しいたけ」へ名寄せしたためPRICE_DEFAULTSには無い
+      // (畳む側の行は版7の PRICE_DEFAULT_MERGES が先に処理する)。記録として配列には残す
+      if (fix.name === 'しいたけ') continue
       const current = byName.get(fix.name)
       eq(`PRICE_DEFAULT_UNIT_FIXES ${fix.name}のtoUnitが現行のPRICE_DEFAULTSと一致`, current?.unit, fix.toUnit)
       eq(`PRICE_DEFAULT_UNIT_FIXES ${fix.name}の価格は据え置き(移行で金額を動かさない)`, current?.pricePerUnit, fix.pricePerUnit)
     }
+  }
+}
+
+// ---------- 便FA: しいたけの名寄せ(生／乾燥を名前で区別する。2026-08-10 オーナー裁定) ----------
+// 価格マスタに「しいたけ 150円/6枚」と「生しいたけ 100円/6枚」が別項目で並び、同じ食材なのに
+// 値段が違っていた。生の側を「生しいたけ 100円」1本へ寄せ(オーナー指定「どちらかなら生しいたけ」)、
+// 乾燥は価格帯が全く違うため「乾燥しいたけ 400円/30g」を別項目として持つ。
+{
+  const { PRICE_DEFAULTS, PRICE_DEFAULTS_VERSION, PRICE_DEFAULT_MERGES } = await import(
+    '../src/data/priceDefaults.ts'
+  )
+  const { nameMergesToApply } = await import('../src/db/prices.ts')
+  const { buildPriceIndex, estimateIngredientYen, matchPriceEntry } = await import(
+    '../src/logic/priceEstimate.ts'
+  )
+  const { toHiragana } = await import('../src/logic/kana.ts')
+
+  const names = PRICE_DEFAULTS.map((d) => d.name)
+  eq('FA マスタに素の「しいたけ」項目はもう無い(生しいたけへ名寄せ済み)', names.includes('しいたけ'), false)
+  eq('FA マスタの生の項目名は「生しいたけ」', names.includes('生しいたけ'), true)
+  eq('FA マスタの乾燥の項目名は「乾燥しいたけ」', names.includes('乾燥しいたけ'), true)
+  const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
+  eq('FA 生しいたけは100円/6枚(オーナー指定「どちらかなら生しいたけ」に価格を寄せる)', {
+    yen: byName.get('生しいたけ')?.pricePerUnit,
+    unit: byName.get('生しいたけ')?.unit,
+  }, { yen: 100, unit: '6枚' })
+  eq('FA 乾燥しいたけは400円/30g(スーパー実売の30g規格。docs/49 2026-08-10節)', {
+    yen: byName.get('乾燥しいたけ')?.pricePerUnit,
+    unit: byName.get('乾燥しいたけ')?.unit,
+  }, { yen: 400, unit: '30g' })
+  eq('FA 名寄せの移行を配るため版番号を7に上げている', PRICE_DEFAULTS_VERSION, 7)
+
+  // 名寄せ: 表記が違っても同じ1件に解決する / 生と乾燥は別々の1件に解決する
+  {
+    const idx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+    for (const written of ['しいたけ', '椎茸', 'シイタケ', '生しいたけ', '生椎茸']) {
+      eq(
+        `FA 材料名「${written}」は生しいたけ1件に価格解決する`,
+        matchPriceEntry(written, idx)?.normalizedName,
+        '生しいたけ',
+      )
+    }
+    for (const written of ['乾燥しいたけ', '干ししいたけ', '干し椎茸', '乾しいたけ', 'ほししいたけ']) {
+      eq(
+        `FA 材料名「${written}」は乾燥しいたけ1件に価格解決する(生の値段が当たらない)`,
+        matchPriceEntry(written, idx)?.normalizedName,
+        '乾燥しいたけ',
+      )
+    }
+    eq(
+      'FA 素の「しいたけ4枚」は生しいたけ100円/6枚から67円(名寄せ前は150円/6枚で100円)',
+      estimateIngredientYen({ name: 'しいたけ', amount: '4', unit: '枚' }, idx)?.yen,
+      67,
+    )
+    eq(
+      'FA 生しいたけ2枚は33円のまま(便EYの按分は変えていない)',
+      estimateIngredientYen({ name: '生しいたけ', amount: '2', unit: '枚' }, idx)?.yen,
+      33,
+    )
+    eq(
+      'FA 乾燥しいたけ2枚(=6g)は400円/30gから80円(栄養側の1枚=3gでグラムに寄せて按分)',
+      estimateIngredientYen({ name: '乾燥しいたけ', amount: '2', unit: '枚' }, idx)?.yen,
+      80,
+    )
+    eq(
+      'FA 干ししいたけ4枚(=12g)も同じ160円(表記ゆれでも同じ値段になる)',
+      estimateIngredientYen({ name: '干ししいたけ', amount: '4', unit: '枚' }, idx)?.yen,
+      160,
+    )
+    // 生と乾燥が同じ照合キーに潰れていないことを直接確かめる(潰れると値段が取り違う)
+    eq('FA 生と乾燥の照合キーは別物', toHiragana('生しいたけ') === toHiragana('乾燥しいたけ'), false)
+    // 「しいたけ（生）／しいたけ（乾燥）」案を採らなかった理由の回帰: 括弧書きは照合の前に
+    // 落とされるため、この命名だと2項目が同じキーになり、どちらの値段が当たるか決まらない
+    const parenIdx = buildPriceIndex([
+      { name: 'しいたけ（生）', pricePerUnit: 100, unit: '6枚' },
+      { name: 'しいたけ（乾燥）', pricePerUnit: 400, unit: '30g' },
+    ])
+    eq(
+      'FA 括弧で分ける命名は照合キーが同じになる(この案を採らなかった根拠)',
+      parenIdx[0].matchKey === parenIdx[1].matchKey,
+      true,
+    )
+  }
+
+  // 既存端末の重複行を1行に畳む移行(規約F: 何が変わって何が残るか)
+  {
+    const merges = PRICE_DEFAULT_MERGES
+    const v6Old = {
+      id: 1,
+      name: 'しいたけ',
+      pricePerUnit: 150,
+      unit: '6枚',
+      isDefault: true,
+    }
+    const v6New = {
+      id: 2,
+      name: '生しいたけ',
+      pricePerUnit: 100,
+      unit: '6枚',
+      isDefault: true,
+    }
+    eq(
+      'nameMergesToApply 版6の端末: 目安のままの「しいたけ」を消して「生しいたけ」に寄せる',
+      nameMergesToApply([v6Old, v6New], merges, PRICE_DEFAULTS),
+      [{ kind: 'delete', id: 1, name: 'しいたけ', toName: '生しいたけ' }],
+    )
+    eq(
+      'nameMergesToApply 版5の端末(単位が1パックのまま)も同じように畳める',
+      nameMergesToApply(
+        [
+          { ...v6Old, unit: '1パック' },
+          { ...v6New, unit: '1パック' },
+        ],
+        merges,
+        PRICE_DEFAULTS,
+      ),
+      [{ kind: 'delete', id: 1, name: 'しいたけ', toName: '生しいたけ' }],
+    )
+    eq(
+      'nameMergesToApply 自分で価格を入れた行(isDefault=false)は消さない',
+      nameMergesToApply([{ ...v6Old, pricePerUnit: 999, isDefault: false }, v6New], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'nameMergesToApply 価格だけ旧既定と違う行も対象外(isDefaultの取りこぼし対策の二重チェック)',
+      nameMergesToApply([{ ...v6Old, pricePerUnit: 999 }, v6New], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'nameMergesToApply 自分で単位を変えた行は対象外',
+      nameMergesToApply([{ ...v6Old, unit: '1kg' }, v6New], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'nameMergesToApply 統合先を自分で消していたら、畳む側を「生しいたけ」に書き換える(行を失わせない)',
+      nameMergesToApply([v6Old], merges, PRICE_DEFAULTS),
+      [{ kind: 'rename', id: 1, name: 'しいたけ', toName: '生しいたけ', pricePerUnit: 100, unit: '6枚' }],
+    )
+    eq(
+      'nameMergesToApply 新規インストール(生しいたけだけ)は何もしない',
+      nameMergesToApply([v6New], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'nameMergesToApply 「しいたけ」を自分で消していたら何もしない(勝手に復活させない)',
+      nameMergesToApply([], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'nameMergesToApply 統合先が自分の価格でも、畳む側(目安のまま)だけを消す＝自分の値は残る',
+      nameMergesToApply([v6Old, { ...v6New, pricePerUnit: 120, isDefault: false }], merges, PRICE_DEFAULTS),
+      [{ kind: 'delete', id: 1, name: 'しいたけ', toName: '生しいたけ' }],
+    )
+    eq(
+      'nameMergesToApply 関係ない食材(玉ねぎ)には触れない',
+      nameMergesToApply(
+        [{ id: 9, name: '玉ねぎ', pricePerUnit: 50, unit: '1個', isDefault: true }],
+        merges,
+        PRICE_DEFAULTS,
+      ),
+      [],
+    )
+    // 畳む側と統合先はどちらも同じ読み仮名キーになる。ここを normalizeForDuplicateCheck で
+    // 判定すると「生しいたけ」の行まで畳む側と誤認するので、素の名前で見ていることを固定する
+    eq(
+      'nameMergesToApply 統合先「生しいたけ」の行そのものは絶対に畳まない',
+      nameMergesToApply(
+        [{ ...v6New, pricePerUnit: 150, unit: '6枚' }],
+        merges,
+        PRICE_DEFAULTS,
+      ),
+      [],
+    )
+  }
+
+  // 名寄せしても栄養側は生／乾燥を取り違えない(成分が10倍違うので致命的)
+  {
+    const { matchNutritionFood } = await import('../src/logic/nutrition.ts')
+    eq('FA 栄養: 「しいたけ」は生しいたけの食品', matchNutritionFood('しいたけ')?.label, 'しいたけ')
+    eq('FA 栄養: 「生しいたけ」も生しいたけの食品', matchNutritionFood('生しいたけ')?.label, 'しいたけ')
+    eq('FA 栄養: 「乾燥しいたけ」は干ししいたけの食品(名寄せ前は生に当たっていた)', matchNutritionFood('乾燥しいたけ')?.label, '干ししいたけ')
+    eq('FA 栄養: 「干ししいたけ」も干ししいたけの食品', matchNutritionFood('干ししいたけ')?.label, '干ししいたけ')
+  }
+
+  // 検索: 名寄せ後も「しいたけ」で引ける(searchWordsは読み仮名の形で入る)
+  {
+    const { buildSearchWords } = await import('../src/logic/kana.ts')
+    const words = buildSearchWords('きのこ炒め', [{ name: '生しいたけ', amount: '3', unit: '枚' }], [])
+    eq(
+      'FA 検索: 材料「生しいたけ」のレシピは「しいたけ」でも引ける',
+      words.some((w) => w.includes(toHiragana('しいたけ'))),
+      true,
+    )
+    eq(
+      'FA 検索: カテゴリ語「きのこ」も従来どおり付く',
+      words.some((w) => w.includes(toHiragana('きのこ'))),
+      true,
+    )
+    const dried = buildSearchWords('煮物', [{ name: '乾燥しいたけ', amount: '4', unit: '枚' }], [])
+    eq(
+      'FA 検索: 「乾燥しいたけ」のレシピもカテゴリ語「きのこ」で引ける',
+      dried.some((w) => w.includes(toHiragana('きのこ'))),
+      true,
+    )
   }
 }
 

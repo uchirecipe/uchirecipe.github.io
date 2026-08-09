@@ -5,9 +5,14 @@ import type { PriceEntry } from './types'
 import {
   PRICE_DEFAULTS,
   PRICE_DEFAULTS_VERSION,
+  PRICE_DEFAULT_MERGES,
   PRICE_DEFAULT_UNIT_FIXES,
 } from '../data/priceDefaults'
-import type { PriceDefaultItem, PriceDefaultUnitFix } from '../data/priceDefaults'
+import type {
+  PriceDefaultItem,
+  PriceDefaultMerge,
+  PriceDefaultUnitFix,
+} from '../data/priceDefaults'
 import { toHiragana } from '../logic/kana'
 import { normalizeIngredientNameForPrice } from '../logic/priceEstimate'
 
@@ -83,6 +88,83 @@ export function unitFixesToApply(
   return plans
 }
 
+/** nameMergesToApplyが返す「この行をこうする」1件分（2026-08-10 便FA） */
+export type PriceNameMergePlan =
+  /** 統合先の行が既にあるので、畳まれる側の行を消す */
+  | { kind: 'delete'; id: number; name: string; toName: string }
+  /** 統合先の行が無いので、畳まれる側の行を統合先の名前・目安価格・単位に書き換える */
+  | {
+      kind: 'rename'
+      id: number
+      name: string
+      toName: string
+      pricePerUnit: number
+      unit: string
+    }
+
+/**
+ * 「2つに分かれていた同じ食材を1行に畳む」1回限りの移行で、実際に手を入れる行を決める純粋関数
+ * （2026-08-10 便FA。ユニットテストしやすいようexportする）。
+ *
+ * 背景: 「しいたけ 150円」と「生しいたけ 100円」が同じ生のしいたけに対する別項目として並び、
+ * 同じ食材なのに値段が違っていた。PRICE_DEFAULTS からは畳まれる側を落としたが、既に行を持って
+ * いる既存ユーザーには反映されない（トップアップ移行は「名前がまだ無い項目の追加」専用）。
+ *
+ * 手を入れる条件は unitFixesToApply と同じで、そのユーザーがまだ何も触っていない行だけに絞る:
+ *  ① isDefault === true（投入時の目安のまま）
+ *  ② 価格が旧既定と同じ ③ 単位が旧既定と同じ
+ * 自分で価格を入れた行・単位を変えた行・消した行・自分で追加した行は1件も触らない（規約F）。
+ *
+ * 統合先の行が既にあれば畳まれる側を消し（価格の情報は統合先に残る）、統合先が無ければ
+ * （ユーザーが統合先だけを消していた場合）畳まれる側を統合先の名前・目安価格・単位へ
+ * 書き換える＝その食材の行を1つも持たない状態にはしない。
+ *
+ * 名前の突き合わせは normalizeIngredientNameForPrice（括弧書きと前後の空白だけを落とす）で行う。
+ * unitFixesToApply が使う normalizeForDuplicateCheck は読み仮名辞書まで通すため、
+ * この移行の主役である「しいたけ」と「生しいたけ」が同じキーに潰れて区別できない。
+ */
+export function nameMergesToApply(
+  existing: Pick<PriceEntry, 'id' | 'name' | 'pricePerUnit' | 'unit' | 'isDefault'>[],
+  merges: PriceDefaultMerge[],
+  defaults: PriceDefaultItem[],
+): PriceNameMergePlan[] {
+  const defaultByName = new Map(
+    defaults.map((d) => [normalizeIngredientNameForPrice(d.name), d]),
+  )
+  const plans: PriceNameMergePlan[] = []
+  // 統合先の行がこの端末に在るか（畳んだ結果として増える分も数える）
+  const presentNames = new Set(existing.map((e) => normalizeIngredientNameForPrice(e.name)))
+  const removedIds = new Set<number>()
+  for (const merge of merges) {
+    const fromKey = normalizeIngredientNameForPrice(merge.fromName)
+    const toKey = normalizeIngredientNameForPrice(merge.toName)
+    for (const entry of existing) {
+      if (entry.id == null || removedIds.has(entry.id)) continue
+      if (normalizeIngredientNameForPrice(entry.name) !== fromKey) continue
+      if (entry.isDefault !== true) continue
+      if (entry.pricePerUnit !== merge.fromPricePerUnit) continue
+      if (entry.unit !== merge.fromUnit) continue
+      if (presentNames.has(toKey)) {
+        plans.push({ kind: 'delete', id: entry.id, name: entry.name, toName: merge.toName })
+      } else {
+        const target = defaultByName.get(toKey)
+        if (!target) continue // 統合先がPRICE_DEFAULTSに無い＝設定ミス。何もしない（安全側）
+        plans.push({
+          kind: 'rename',
+          id: entry.id,
+          name: entry.name,
+          toName: target.name,
+          pricePerUnit: target.pricePerUnit,
+          unit: target.unit,
+        })
+        presentNames.add(toKey)
+      }
+      removedIds.add(entry.id)
+    }
+  }
+  return plans
+}
+
 /**
  * 初回起動時だけ、頻出食材の目安価格（PRICE_DEFAULTS）を食材価格マスタに投入する。
  * 既に投入済み、またはマスタに何か登録済みなら何もしない（pantry.tsのプリセット投入と同じ方式）。
@@ -142,6 +224,28 @@ export async function seedPriceDefaultsIfNeeded(): Promise<void> {
     // 名前がまだ無いPRICE_DEFAULTSの項目だけを追加する。バージョンが上がった時だけ実行するため、
     // ユーザーが過去に消した既定はそのバージョン内では再追加しない
     if ((settings.priceDefaultsVersion ?? 0) < PRICE_DEFAULTS_VERSION) {
+      // 名寄せの移行（2026-08-10 便FA）。同じ食材が2行に分かれていたものを1行に畳む。
+      // 単位の修正・追加より先に走らせる（畳んだ後の姿に対して残りの移行を掛けるため）。
+      // 対象は目安のままの行だけで、ユーザーが手を入れた行には触らない（nameMergesToApply）
+      for (const plan of nameMergesToApply(
+        await db.prices.toArray(),
+        PRICE_DEFAULT_MERGES,
+        PRICE_DEFAULTS,
+      )) {
+        if (plan.kind === 'delete') {
+          await db.prices.delete(plan.id)
+        } else {
+          await db.prices.update(plan.id, {
+            name: plan.toName,
+            pricePerUnit: plan.pricePerUnit,
+            unit: plan.unit,
+            defaultPricePerUnit: plan.pricePerUnit,
+            defaultUnit: plan.unit,
+            isDefault: true,
+            updatedAt: Date.now(),
+          })
+        }
+      }
       const existing = await db.prices.toArray()
       // 単位だけを直す移行（2026-08-10 便EY）。追加より先に走らせて、旧単位のまま残っている
       // 目安行を新単位へ揃える（価格は変えない）。ユーザーが手を入れた行は unitFixesToApply が
