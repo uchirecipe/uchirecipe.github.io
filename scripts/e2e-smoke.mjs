@@ -22230,6 +22230,383 @@ try {
     }
   }
 
+  // --- EW-01: ホーム画面への追加を案内する「初回のお知らせ」(2026-08-10 便EW)。
+  // 紹介ページ側の割り込み(data-ask="install")をやめ、アプリのホーム画面に着いた直後に
+  // 1回だけ出す案内に作り直した。見るのは次の7点:
+  //  (a) 指で操作する端末(390px・タッチあり)の初回で出る・中身がそろっている
+  //  (b) 閉じたら、同じ端末で開き直しても二度と出ない(✕でも「このまま使う」でも)
+  //  (c) すでにホーム画面のアイコンから開いているときは出ない(iOS・Android/パソコンの両方の見分け方)
+  //  (d) パソコン(マウス・1280px)では出ない
+  //  (e) 「追加する方法を見る」の行き先が200で返り、押すとそのページへ着く
+  //  (f) ライト/ダークの両方で文字が読める(コントラスト比4.5:1以上)
+  //  (g) お知らせに書いた「あとから見る場所」(設定の「ホーム画面への追加方法」)が本当に辿れる
+  currentCheck = 'EW-01'
+  {
+    const ewBrowser = await chromium.launch()
+    // 相対輝度からコントラスト比を出す(WCAG 2.x)。MULTIDEV-01と同じ計算
+    const ewContrast = (fg, bg) => {
+      const lum = (css) => {
+        const [r, g, b] = css.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)
+        const ch = (v) => {
+          const s = v / 255
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+        }
+        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+      }
+      const a = lum(fg)
+      const b = lum(bg)
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+    // 指で操作する端末のブラウザ。hasTouch を付けると (pointer: coarse) / (hover: none) /
+    // navigator.maxTouchPoints>0 の3つが揃う＝アプリ側が見ている判定材料と同じ状態になる
+    const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+    const ewOpen = async (ctx) => {
+      const p = await ctx.newPage()
+      p.on('pageerror', (err) => errors.push(`[pageerror@EW-01] ${err.message}`))
+      await p.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(1800)
+      return p
+    }
+    const ewVisible = (p) => p.locator('[data-testid="home-screen-notice"]').isVisible()
+
+    let ewNote = ''
+    try {
+      // (a) 初回に出る
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        const page1 = await ewOpen(ctx)
+        check('EW-01(a) スマホ幅の初回でお知らせが出る', await ewVisible(page1))
+        const info = await page1.evaluate(() => {
+          const box = document.querySelector('[data-testid="home-screen-notice"]')
+          if (!box) return null
+          const img = box.querySelector('img')
+          const guide = box.querySelector('[data-testid="home-screen-notice-guide"]')
+          return {
+            role: box.getAttribute('role'),
+            title: box.querySelector('h2')?.textContent?.trim() ?? '',
+            body: box.querySelectorAll('p')[0]?.textContent?.trim() ?? '',
+            note: [...box.querySelectorAll('p')].pop()?.textContent?.trim() ?? '',
+            imgSrc: img?.getAttribute('src') ?? '',
+            imgOk: !!img && img.complete && img.naturalWidth > 0,
+            imgSizeMatches:
+              !!img &&
+              img.naturalWidth === Number(img.getAttribute('width')) &&
+              img.naturalHeight === Number(img.getAttribute('height')),
+            imgAlt: img?.getAttribute('alt') ?? '',
+            guideHref: guide?.getAttribute('href') ?? '',
+            guideTarget: guide?.getAttribute('target'),
+            guideLabel: guide?.textContent?.trim() ?? '',
+            dismissLabel:
+              box.querySelector('[data-testid="home-screen-notice-dismiss"]')?.textContent?.trim() ?? '',
+            hasClose: !!box.querySelector('[data-testid="home-screen-notice-close"]'),
+          }
+        })
+        ewNote = info?.note ?? ''
+        check('EW-01(a) 重ね窓として名乗っている(role=dialog)', info?.role === 'dialog', String(info?.role))
+        check(
+          'EW-01(a) 見出しがホーム画面にアイコンを追加できる話になっている',
+          info?.title === 'ホーム画面にアイコンを追加できます',
+          String(info?.title),
+        )
+        check(
+          'EW-01(a) 本文がアプリストアからのダウンロードではないと伝える',
+          info?.body === '次からはアイコンをタップして開けます。アプリストアからのダウンロードはありません。',
+          String(info?.body),
+        )
+        check(
+          'EW-01(a) スマートフォンのホーム画面の図が実際に表示されている',
+          info?.imgSrc === '/img/home-screen-icon.webp' && info?.imgOk === true,
+          JSON.stringify({ src: info?.imgSrc, ok: info?.imgOk }),
+        )
+        check(
+          'EW-01(a) 図の実寸とHTMLに書いた寸法が一致している(読み込み中に文字が飛ばない)',
+          info?.imgSizeMatches === true,
+        )
+        check(
+          'EW-01(a) 図に、目の見えない方にも伝わる説明が付いている',
+          (info?.imgAlt ?? '').includes('ホーム画面') && (info?.imgAlt ?? '').includes('うちレシピ'),
+          String(info?.imgAlt),
+        )
+        check(
+          'EW-01(a) ボタンは「追加する方法を見る」と「このまま使う」の2つ＋✕がある',
+          info?.guideLabel === '追加する方法を見る' &&
+            info?.dismissLabel === 'このまま使う' &&
+            info?.hasClose === true,
+          JSON.stringify({ guide: info?.guideLabel, dismiss: info?.dismissLabel, close: info?.hasClose }),
+        )
+        check(
+          'EW-01(a) あとから見る場所を書いた一言がある',
+          ewNote === 'あとから追加するときは、設定の「ホーム画面への追加方法」を開いてください。',
+          ewNote,
+        )
+        check(
+          'EW-01(a) 手順ページへのリンクは別窓(target=_blank)にしていない',
+          info?.guideHref === '/about/install.html' && info?.guideTarget === null,
+          JSON.stringify({ href: info?.guideHref, target: info?.guideTarget }),
+        )
+        // (b-1) 「このまま使う」で閉じたら、開き直しても出ない
+        await page1.locator('[data-testid="home-screen-notice-dismiss"]').click()
+        await page1.waitForTimeout(400)
+        check('EW-01(b) 「このまま使う」で閉じられる', (await ewVisible(page1)) === false)
+        await page1.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page1.waitForTimeout(1500)
+        check('EW-01(b) 閉じたあとに開き直しても出ない', (await ewVisible(page1)) === false)
+        // 見た記録は端末内(localStorage)だけ＝サーバーにも設定(バックアップ対象)にも入れない
+        const ewSeen = await page1.evaluate(() => ({
+          local: localStorage.getItem('uchirecipe:homeScreenNoticeSeen'),
+          session: sessionStorage.getItem('uchirecipe:homeScreenNoticeSeen'),
+        }))
+        check(
+          'EW-01(b) 見た記録はlocalStorageに残る(端末内のみ)',
+          ewSeen.local === '1' && ewSeen.session === null,
+          JSON.stringify(ewSeen),
+        )
+        await ctx.close()
+      }
+
+      // (b-2) ✕で閉じた場合も「見た」扱いになる
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        const page2 = await ewOpen(ctx)
+        check('EW-01(b) 別の端末(まっさらな状態)ではまた出る', await ewVisible(page2))
+        await page2.locator('[data-testid="home-screen-notice-close"]').click()
+        await page2.waitForTimeout(400)
+        await page2.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page2.waitForTimeout(1500)
+        check('EW-01(b) ✕で閉じたあとも開き直して出ない', (await ewVisible(page2)) === false)
+        await ctx.close()
+      }
+
+      // (c) すでにホーム画面のアイコンから開いているときは出ない。
+      // 判定材料は logic/standalone.ts の2つ。iOSは navigator.standalone、
+      // Android・パソコンは matchMedia('(display-mode: standalone)') なので、両方を試す
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        await ctx.addInitScript(() => {
+          Object.defineProperty(navigator, 'standalone', { value: true, configurable: true })
+        })
+        const page3 = await ewOpen(ctx)
+        check(
+          'EW-01(c) iOSのアイコン起動(navigator.standalone)では出ない',
+          (await ewVisible(page3)) === false,
+        )
+        await ctx.close()
+      }
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        await ctx.addInitScript(() => {
+          const orig = window.matchMedia.bind(window)
+          window.matchMedia = (q) =>
+            String(q).includes('display-mode: standalone')
+              ? {
+                  matches: true,
+                  media: String(q),
+                  onchange: null,
+                  addEventListener() {},
+                  removeEventListener() {},
+                  addListener() {},
+                  removeListener() {},
+                  dispatchEvent: () => false,
+                }
+              : orig(q)
+        })
+        const page4 = await ewOpen(ctx)
+        check(
+          'EW-01(c) display-mode: standalone のアイコン起動では出ない',
+          (await ewVisible(page4)) === false,
+        )
+        await ctx.close()
+      }
+
+      // (d) パソコンでは出ない。マウス操作の広い画面＝(pointer: fine)/(hover: hover)
+      {
+        const ctx = await ewBrowser.newContext({ viewport: { width: 1280, height: 800 } })
+        const page5 = await ewOpen(ctx)
+        const ewPc = await page5.evaluate(() => ({
+          coarse: matchMedia('(pointer: coarse)').matches,
+          hoverNone: matchMedia('(hover: none)').matches,
+          touch: navigator.maxTouchPoints,
+        }))
+        check(
+          'EW-01(d) パソコン幅(マウス操作)では出ない',
+          (await ewVisible(page5)) === false,
+          JSON.stringify(ewPc),
+        )
+        check(
+          'EW-01(d) パソコンの判定材料が「指で操作しない」になっている',
+          ewPc.coarse === false && ewPc.hoverNone === false && ewPc.touch === 0,
+          JSON.stringify(ewPc),
+        )
+        await ctx.close()
+      }
+
+      // (e) リンク先が生きていて、押すとそのページに着く
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        const page6 = await ewOpen(ctx)
+        const ewRes = await page6.request.get(`${BASE}/about/install.html`)
+        const ewBody = ewRes.ok() ? await ewRes.text() : ''
+        check('EW-01(e) 「追加する方法を見る」の行き先が200で返る', ewRes.status() === 200, `status=${ewRes.status()}`)
+        check(
+          'EW-01(e) 行き先がアプリ本体のシェルにすり替わっていない',
+          ewBody.includes('ホーム画面に追加する方法') && !ewBody.includes('<div id="root"></div>'),
+          ewBody.slice(0, 80),
+        )
+        await page6.locator('[data-testid="home-screen-notice-guide"]').click()
+        await page6.waitForLoadState('networkidle')
+        await page6.waitForTimeout(600)
+        check(
+          'EW-01(e) 押すと手順ページへ移る',
+          page6.url().includes('/about/install.html'),
+          page6.url(),
+        )
+        // 手順ページへ移った人にも、戻ってきたときに同じお知らせを出さない。
+        // ブラウザの「戻る」で帰る道と、開き直す道の両方を見る
+        await page6.goBack({ waitUntil: 'networkidle' })
+        await page6.waitForTimeout(1500)
+        check(
+          'EW-01(e) 手順ページからブラウザの戻るで帰ってきても出ない',
+          (await ewVisible(page6)) === false,
+          page6.url(),
+        )
+        await page6.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page6.waitForTimeout(1500)
+        check('EW-01(e) 手順ページを見たあとに開き直しても出ない', (await ewVisible(page6)) === false)
+        await ctx.close()
+      }
+
+      // (b-3) Escape(パソコンのキーボード・端末の戻るに相当する閉じ方)でも閉じられて、
+      // 「見た」扱いになる。重ね窓の共通フック(useOverlayDismiss)に載っていることの確認
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        const page9 = await ewOpen(ctx)
+        await page9.keyboard.press('Escape')
+        await page9.waitForTimeout(500)
+        check('EW-01(b) Escapeでも閉じられる', (await ewVisible(page9)) === false)
+        await page9.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page9.waitForTimeout(1500)
+        check('EW-01(b) Escapeで閉じたあとも開き直して出ない', (await ewVisible(page9)) === false)
+        await ctx.close()
+      }
+
+      // (f) ライト/ダークの両方で読める
+      for (const scheme of ['light', 'dark']) {
+        const ctx = await ewBrowser.newContext({ ...phone, colorScheme: scheme })
+        const page7 = await ewOpen(ctx)
+        check(`EW-01(f) ${scheme}: お知らせが出る`, await ewVisible(page7))
+        const ewColors = await page7.evaluate(() => {
+          const box = document.querySelector('[data-testid="home-screen-notice"]')
+          const cs = (el) => (el ? getComputedStyle(el) : null)
+          const pick = (el) => {
+            const s = cs(el)
+            return s ? { color: s.color, bg: s.backgroundColor, size: parseFloat(s.fontSize) } : null
+          }
+          const ps = [...box.querySelectorAll('p')]
+          return {
+            card: cs(box).backgroundColor,
+            title: pick(box.querySelector('h2')),
+            body: pick(ps[0]),
+            note: pick(ps[ps.length - 1]),
+            guide: pick(box.querySelector('[data-testid="home-screen-notice-guide"]')),
+            dismiss: pick(box.querySelector('[data-testid="home-screen-notice-dismiss"]')),
+          }
+        })
+        for (const [name, part, bg] of [
+          ['見出し', ewColors.title, ewColors.card],
+          ['本文', ewColors.body, ewColors.card],
+          ['あとから見る場所の一言', ewColors.note, ewColors.card],
+          ['「追加する方法を見る」', ewColors.guide, ewColors.guide?.bg],
+          ['「このまま使う」', ewColors.dismiss, ewColors.dismiss?.bg],
+        ]) {
+          const ratio = ewContrast(part.color, bg)
+          check(
+            `EW-01(f) ${scheme}: ${name}のコントラストが4.5:1以上`,
+            ratio >= 4.5,
+            `比=${ratio.toFixed(2)} 文字=${part.color} 地=${bg}`,
+          )
+        }
+        // カードが画面からはみ出していないこと(小さい画面でボタンに届かないのを防ぐ)
+        const ewFits = await page7.evaluate(() => {
+          const r = document.querySelector('[data-testid="home-screen-notice"]').getBoundingClientRect()
+          return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: window.innerHeight, w: window.innerWidth, right: Math.round(r.right) }
+        })
+        check(
+          `EW-01(f) ${scheme}: お知らせが画面に収まっている`,
+          ewFits.top >= 0 && ewFits.bottom <= ewFits.h && ewFits.right <= ewFits.w,
+          JSON.stringify(ewFits),
+        )
+        await ctx.close()
+      }
+
+      // (g) お知らせに書いた「あとから見る場所」が本当に辿れる。
+      // 戻り道は設定の「うちレシピについて」にあるリンク(2026-08-09 便EIで設置)。
+      // 反射的に閉じた人が同じ情報へ辿り直せることが、この案内を1回きりにできる前提
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        const page8 = await ewOpen(ctx)
+        await page8.locator('[data-testid="home-screen-notice-dismiss"]').click()
+        await page8.waitForTimeout(400)
+        await page8.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+        await page8.waitForTimeout(1800)
+        const ewLink = page8.locator('[data-testid="settings-install-link"]')
+        const ewLabel = (await ewLink.count()) > 0 ? (await ewLink.textContent())?.trim() : null
+        const ewHref = (await ewLink.count()) > 0 ? await ewLink.getAttribute('href') : null
+        check(
+          'EW-01(g) お知らせが案内した名前のリンクが設定にある',
+          ewLabel === 'ホーム画面への追加方法' && ewNote.includes(ewLabel ?? ' '),
+          JSON.stringify({ label: ewLabel, note: ewNote }),
+        )
+        check(
+          'EW-01(g) そのリンクが手順ページを指している',
+          ewHref === '/about/install.html',
+          String(ewHref),
+        )
+        await ewLink.scrollIntoViewIfNeeded()
+        await ewLink.click()
+        await page8.waitForLoadState('networkidle')
+        await page8.waitForTimeout(600)
+        check(
+          'EW-01(g) 設定のリンクから手順ページへ実際に着く',
+          page8.url().includes('/about/install.html'),
+          page8.url(),
+        )
+        await ctx.close()
+      }
+
+      // --- EW-02: 説明ページ(install.html)の文言2件(2026-08-10 便EW・オーナー指示) ---
+      currentCheck = 'EW-02'
+      {
+        const ewIns = await (await page.request.get(`${BASE}/about/install.html`)).text()
+        check(
+          'EW-02 見出しが「手順の最初にうちレシピ（ホーム画面）を開いてください」になっている',
+          ewIns.includes('手順の最初にうちレシピ（ホーム画面）を開いてください') &&
+            !ewIns.includes('<strong>先にうちレシピを開いてください</strong>'),
+        )
+        check(
+          'EW-02 その中の説明が、追加したときに開いていたページが開くことを言っている',
+          ewIns.includes('アイコンからは、追加したときに開いていたページが開きます'),
+        )
+        check(
+          'EW-02 ページの初めに、アプリストアからのダウンロードではないと書いてある',
+          ewIns.includes('アプリストアからのダウンロードはありません。うちレシピを開きやすくするための手順です。'),
+        )
+        check(
+          'EW-02 その一言は、iPhone・Androidの手順より前(ページの初めの方)にある',
+          ewIns.indexOf('アプリストアからのダウンロードはありません') > 0 &&
+            ewIns.indexOf('アプリストアからのダウンロードはありません') < ewIns.indexOf('id="iphone"'),
+        )
+        // Android・パソコンの手順では「インストール」を押してもらうので、
+        // 「インストールは不要」とは書かない(2026-08-09 オーナー指摘と同じ線)
+        check(
+          'EW-02 「インストール不要」の言い方を足していない',
+          !/インストール[^。<]{0,12}(不要|いりません|要りません)/.test(ewIns),
+        )
+      }
+    } finally {
+      await ewBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
