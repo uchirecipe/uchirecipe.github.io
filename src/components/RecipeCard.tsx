@@ -260,7 +260,10 @@ export default function RecipeCard({
   return (
     <Link
       to={`/recipes/${recipe.id}`}
-      className="relative block overflow-hidden rounded-md bg-surface shadow-sm border border-edge"
+      // h-full: 一覧のグリッドは行の高さを全カードで揃えている(RecipesPage の grid-auto-rows:1fr)。
+      // カード自身が行いっぱいに伸びないと、中身の短いカードだけ枠が途中で切れて見える
+      // (2026-08-09 オーナー実機「レシピカードの大きさがレシピ名の長さによって変わる」)
+      className="relative block h-full overflow-hidden rounded-md bg-surface shadow-sm border border-edge"
     >
       <div className="relative aspect-square w-full overflow-hidden">
         {showPhoto ? (
@@ -327,7 +330,13 @@ export default function RecipeCard({
       )}
       <div className="p-[var(--space-sm)]">
         <div className="flex items-start justify-between gap-1">
-          <p className="line-clamp-2 font-bold leading-snug">{recipe.title}</p>
+          {/* 料理名の枠は常に2行ぶんの高さを取る(2026-08-09 オーナー実機
+              「レシピカードの大きさがレシピ名の長さによって変わる→カードをレシピ名2行のサイズで
+              統一し、はみ出る分は省略する」)。line-clamp-2 で3行目以降は「…」で省き、
+              min-h で1行の名前でも高さが縮まないようにする。
+              2.75em = leading-snug(1.375) × 2行。px直書きにしないのは、端末の文字サイズ設定で
+              1行の高さが変わっても2行ぶんであり続けるため */}
+          <p className="line-clamp-2 min-h-[2.75em] font-bold leading-snug">{recipe.title}</p>
           <span className="mt-0.5 shrink-0">
             <FavoriteToggle recipe={recipe} />
           </span>

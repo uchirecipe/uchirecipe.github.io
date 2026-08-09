@@ -841,8 +841,22 @@ export default function RecipesPage() {
       )}
 
       {/* 検索バー＋並び替え/絞り込みボタン(2026-07-16 便T-1: 従来は絞り込みボタン1つに両方の
-          パネルが入っていたが、別ボタンに分離した。列表示切替は件数表記の横へ移動(下記参照)) */}
-      <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
+          パネルが入っていたが、別ボタンに分離した。列表示切替は件数表記の横へ移動(下記参照))。
+
+          2026-08-09 便ET(オーナー実機「レシピ一覧の検索まど…は上に固定したい」):
+          スクロールしても画面上部に残す(sticky)。作りは設定画面の目次チップ・食材タブの
+          タブバーと同じ(sticky top-0 + bg-page/95 + backdrop-blur + 横いっぱいに広げる
+          -mx/px)。recipes-searchbar クラスは index.css で iPad のマルチタスク操作ボタン
+          よけの上余白を足すためのもの。
+          data-app-top-bar: 「押したら伸びた部分を画面内に入れる」共通処理(logic/revealExpanded)に
+          この帯の高さを知らせる目印。付けないと、並び替え/絞り込みパネルを開いたときに
+          パネルの頭がこの帯の下に潜り込む。
+          z-20: 選択モードでカードに重ねる選択ボタン(z-10)より上に置き、帯が透けないようにする */}
+      <div
+        data-app-top-bar
+        className="recipes-searchbar sticky top-0 z-20 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
+      >
+      <div className="flex gap-[var(--space-sm)]">
         <div className="relative min-w-0 flex-1">
           <Search
             size={18}
@@ -884,6 +898,7 @@ export default function RecipesPage() {
         >
           <SlidersHorizontal size={22} aria-hidden />
         </button>
+      </div>
       </div>
 
       {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
@@ -1257,12 +1272,18 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替) */}
+      {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替)。
+          グリッドの [grid-auto-rows:1fr] は全カードの高さを揃えるためのもの
+          (2026-08-09 オーナー実機「レシピカードの大きさがレシピ名の長さによって変わる」)。
+          料理名の枠は RecipeCard 側で2行ぶんに固定してあるので通常はこれだけで揃うが、
+          調理時間・手間・季節のバッジが2行に折り返す名前の長い組み合わせでも、
+          行の高さが一番高いカードに揃うので「1枚だけ背が違う」状態にならない
+          (バッジを隠して揃えるのではなく、揃えた高さの中に全部を出す) */}
       <div
         className={
           recipeListLayout === 'list'
             ? 'mt-[var(--space-md)] flex flex-col gap-[var(--space-sm)]'
-            : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]'
+            : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)] [grid-auto-rows:1fr]'
         }
       >
         {results?.map(({ recipe, usedCount, wantedCount }) => {

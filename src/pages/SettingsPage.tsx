@@ -2098,8 +2098,15 @@ export default function SettingsPage() {
                 <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
                   {ja.settings.moveGuideTransferNote}
                 </p>
+                {/* 行き先は「複数の端末で使う方法」のページ(2026-08-09 便EV新設・便ETで差し替え)。
+                    使い方ページの節より手順が具体的で、端末別の保存先・受け渡し・2台目・クラウドの
+                    注意までが1ページにまとまっている。
+                    別窓(target="_blank")にしないのは、この画面の /about/ 配下へのリンク
+                    (紹介ページ・ホーム画面への追加・利用規約)と同じ作法に揃えるため
+                    (iOSのホーム画面追加アプリはSafariとストレージが別) */}
                 <a
-                  href="/about/manual.html#backup"
+                  href="/about/multi-device.html"
+                  data-testid="move-guide-transfer-link"
                   className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
                 >
                   {ja.settings.moveGuideTransferLink}
