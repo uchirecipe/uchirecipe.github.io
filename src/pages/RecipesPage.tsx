@@ -1257,12 +1257,18 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替) */}
+      {/* カードのグリッド／リスト(2026-07-13 UI改善: 表示形式トグルで切替)。
+          グリッドの [grid-auto-rows:1fr] は全カードの高さを揃えるためのもの
+          (2026-08-09 オーナー実機「レシピカードの大きさがレシピ名の長さによって変わる」)。
+          料理名の枠は RecipeCard 側で2行ぶんに固定してあるので通常はこれだけで揃うが、
+          調理時間・手間・季節のバッジが2行に折り返す名前の長い組み合わせでも、
+          行の高さが一番高いカードに揃うので「1枚だけ背が違う」状態にならない
+          (バッジを隠して揃えるのではなく、揃えた高さの中に全部を出す) */}
       <div
         className={
           recipeListLayout === 'list'
             ? 'mt-[var(--space-md)] flex flex-col gap-[var(--space-sm)]'
-            : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)]'
+            : 'mt-[var(--space-md)] grid grid-cols-2 gap-[var(--space-sm)] [grid-auto-rows:1fr]'
         }
       >
         {results?.map(({ recipe, usedCount, wantedCount }) => {
