@@ -32,7 +32,7 @@ function CookedPhotoViewer({ photo, onClose }: { photo: Blob; onClose: () => voi
         role="dialog"
         aria-label={ja.detail.cookedPhotoView}
         onClick={(e) => e.stopPropagation()}
-        className="relative max-h-[85vh] max-w-full rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-md"
+        className="relative max-h-[85vh] w-full max-w-full rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-md"
       >
         <button
           type="button"
@@ -42,10 +42,12 @@ function CookedPhotoViewer({ photo, onClose }: { photo: Blob; onClose: () => voi
         >
           <X size={18} aria-hidden />
         </button>
+        {/* 画面の幅いっぱいまで使い、縦は画面に収まる範囲で切り取らずに全体を出す
+            （小窓のサムネイルは横長に切り取っているので、縦長の写真ほど差が大きい） */}
         <img
           src={url}
           alt=""
-          className="max-h-[80vh] max-w-full rounded-sm object-contain"
+          className="max-h-[80vh] w-full rounded-sm object-contain"
         />
       </div>
     </div>
@@ -144,14 +146,14 @@ export default function CookedLogDetailModal({ target, onClose, linkState, onNav
             </DetailRow>
             <DetailRow label={ja.cookedDetail.photo}>
               {log.photo && photoUrl ? (
-                // 押すと原寸で開く。虫めがねの印を写真の上に重ねて「押せる」ことを見せる
+                // 押すと大きく開く。虫めがねの印を写真の上に重ねて「押せる」ことを見せる
                 <button
                   type="button"
                   onClick={() => setZoomOpen(true)}
                   aria-label={ja.detail.cookedPhotoView}
                   className="relative block w-full overflow-hidden rounded-md shadow-sm"
                 >
-                  <img src={photoUrl} alt="" className="aspect-video w-full object-cover" />
+                  <img src={photoUrl} alt="" className="h-40 w-full object-cover" />
                   <span className="absolute bottom-1 right-1 rounded-full border border-edge bg-surface p-1.5 text-ink-muted">
                     <Maximize2 size={16} aria-hidden />
                   </span>
