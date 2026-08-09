@@ -52,6 +52,7 @@ import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '..
 import type { PhotoReplacePlan } from '../logic/replaceConfirm'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
 import { RecipeIcon } from '../components/RecipeCard'
@@ -1886,9 +1887,16 @@ function RecipeFormInner() {
               }`}
             >
               <ListChecks size={14} aria-hidden />
-              {ingredientOrganizing
-                ? ja.form.ingredientOrganizeDone
-                : ja.form.ingredientOrganizeToggle}
+              {/* 「選んで削除」⇔「完了」で幅が42px縮み、右端そろえの行なのでボタンごと動いて
+                  いた（2026-08-09 便EO）。長い方の幅で固定して押しても動かさない */}
+              <SwapLabel
+                current={
+                  ingredientOrganizing
+                    ? ja.form.ingredientOrganizeDone
+                    : ja.form.ingredientOrganizeToggle
+                }
+                labels={[ja.form.ingredientOrganizeToggle, ja.form.ingredientOrganizeDone]}
+              />
             </button>
           )}
         </div>

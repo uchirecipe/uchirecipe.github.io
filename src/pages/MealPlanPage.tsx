@@ -185,6 +185,7 @@ import { pickDayCoverPhoto, setDayCoverChoice } from '../logic/monthCover'
 import { diffDayEdit, type DayEditDiff } from '../logic/dayEdit'
 import type { MonthDemoData } from '../logic/monthDemo'
 import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -245,9 +246,18 @@ const chipClass = (on: boolean): string =>
 /** 選択中のチップの地色。アクセント色から作る＝色を直書きしない（コーディング規約） */
 const chipStyle = (on: boolean): { background: string } | undefined =>
   on ? { background: 'color-mix(in oklab, var(--accent) 14%, var(--bg))' } : undefined
-/** 選択中のチップの先頭に置くチェック印（色だけでなく形でも選択が分かるようにする） */
-const ChipCheck = ({ on }: { on: boolean }) =>
-  on ? <Check size={14} className="shrink-0" aria-hidden /> : null
+/**
+ * 選択中のチップの先頭に置くチェック印（色だけでなく形でも選択が分かるようにする）。
+ *
+ * 2026-08-09 便EO（オーナー実機「ボタンも押下後にサイズが変わって場所がズレるので、
+ * 誤操作や見失いの元になってる。基本的にサイズと位置は変えないで」）:
+ * 選んだときだけ印を差し込むと、チップの幅が18px（印14px＋間隔4px）伸びて、
+ * 右隣のチップが全部ずれる（行があふれれば折り返して縦にも動く）。
+ * **選んでいないときも同じ大きさの場所を空けておく**＝押しても1pxも動かない。
+ */
+const ChipCheck = ({ on }: { on: boolean }) => (
+  <Check size={14} className={`shrink-0 ${on ? '' : 'invisible'}`} aria-hidden />
+)
 
 /**
  * 「栄養から組む」（2026-08-02 便CP-2 → 2026-08-07 便DT-9で8軸へ。旧称「目的」）の表示ラベル。
@@ -931,7 +941,8 @@ function IntakeDisclosureButton({
       aria-expanded={open}
       className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
     >
-      {open ? closeLabel : openLabel}
+      {/* 「内訳を見る」⇔「内訳を閉じる」で文字数が変わってもボタンの幅は動かさない（便EO） */}
+      <SwapLabel current={open ? closeLabel : openLabel} labels={[openLabel, closeLabel]} />
       {open ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
     </button>
   )
@@ -4672,7 +4683,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
       >
         {ja.mealPlan.suggestConditionsToggle}
-        {!suggestConditionsOpen && conditionsSummary ? `: ${conditionsSummary}` : ''}
+        {/* 現在値は開いていても出したままにする（2026-08-09 便EO・オーナー実機
+            「ボタンも押下後にサイズが変わって場所がズレる」）。畳んだときだけ足していたため、
+            押すたびにボタンの右端が100px以上動き、シェブロンに置いた指が空振りしていた */}
+        {conditionsSummary ? `: ${conditionsSummary}` : ''}
         {suggestConditionsOpen ? (
           <ChevronUp size={16} aria-hidden />
         ) : (
@@ -5152,9 +5166,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setMonthAnchor(today)}
                 aria-label={isAtCurrentMonth ? undefined : ja.mealPlan.thisMonth}
-                className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+                className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted tabular-nums shadow-sm"
               >
-                {!isAtCurrentMonth && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
+                {/* 今月に戻ると印が消えて幅が18px縮み、左右の送りボタンの見え方がぶれる。
+                    場所は空けたままにして押しても動かさない（便EO） */}
+                <RotateCcw
+                  size={14}
+                  className={`text-accent-ink ${isAtCurrentMonth ? 'invisible' : ''}`}
+                  aria-hidden
+                />
                 {monthAnchor.slice(0, 4)}/{monthAnchor.slice(5, 7)}
               </button>
               <button
@@ -5257,7 +5277,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 開始日・終了日の手入力(2026-08-08 便EA・オーナー指示)。
                 カレンダーのタップと同じ値を書き換える。月をまたぐ期間もここから組める
                 (集計はrangeCookedDishes/rangePlannedDishesが選んだ期間そのものを読む) */}
-            {costMode && (
+            <Collapse open={costMode}>
               <div className="mt-[var(--space-sm)] rounded-md border border-edge p-[var(--space-sm)]">
                 <p className="text-xs text-ink-muted">{ja.mealPlan.rangeDateInputNote}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -5283,7 +5303,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </label>
                 </div>
               </div>
-            )}
+            </Collapse>
 
             <div className="mt-[var(--space-sm)] grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
               {ja.mealPlan.dow.map((d) => (
@@ -6150,9 +6170,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           aria-label={
             isAtCurrentWeek ? undefined : rollingWeek ? ja.mealPlan.thisWeekRolling : ja.mealPlan.thisWeek
           }
-          className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+          className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted tabular-nums shadow-sm"
         >
-          {!isAtCurrentWeek && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
+          {/* 今週に戻ると印が消えて幅が18px縮むので、場所は空けたままにする（便EO） */}
+          <RotateCcw
+            size={14}
+            className={`text-accent-ink ${isAtCurrentWeek ? 'invisible' : ''}`}
+            aria-hidden
+          />
           {dates[0].replaceAll('-', '/')} 〜 {dates[6].replaceAll('-', '/')}
         </button>
         <button
@@ -6184,14 +6209,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           }`}
         >
           {allDaysLocked ? <Lock size={14} aria-hidden /> : <LockOpen size={14} aria-hidden />}
-          {allDaysLocked ? ja.mealPlan.lockAllReleaseButton : ja.mealPlan.lockAllButton}
+          {/* 押すと文言が入れ替わるが、幅は長い方で固定して1pxも動かさない（便EO） */}
+          <SwapLabel
+            current={allDaysLocked ? ja.mealPlan.lockAllReleaseButton : ja.mealPlan.lockAllButton}
+            labels={[ja.mealPlan.lockAllButton, ja.mealPlan.lockAllReleaseButton]}
+          />
         </button>
         <button
           type="button"
           onClick={() => setCollapsedDates(allDaysCollapsed ? [] : [...dates])}
           className="rounded-sm border border-edge bg-surface px-3 py-1.5 text-xs font-bold text-accent-ink shadow-sm"
         >
-          {allDaysCollapsed ? ja.mealPlan.weekDayExpandAll : ja.mealPlan.weekDayCollapseAll}
+          <SwapLabel
+            current={allDaysCollapsed ? ja.mealPlan.weekDayExpandAll : ja.mealPlan.weekDayCollapseAll}
+            labels={[ja.mealPlan.weekDayCollapseAll, ja.mealPlan.weekDayExpandAll]}
+          />
         </button>
       </div>
       <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
@@ -6928,7 +6960,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         }`}
                       >
                         {label}
-                        <span className="ml-0.5 text-[10px] font-normal">{count}</span>
+                        {/* 数字は等幅で出す＝テンプレートを選び直して件数が入れ替わっても
+                            7つのボタンの幅が動かない（2026-08-09 便EO） */}
+                        <span className="ml-0.5 text-[10px] font-normal tabular-nums">{count}</span>
                       </button>
                     )
                   })}

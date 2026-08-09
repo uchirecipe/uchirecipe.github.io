@@ -24,6 +24,7 @@ import {
   Smartphone,
 } from 'lucide-react'
 import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteArchivedCookedLogs } from '../db/recipes'
 import { usePriceEntries } from '../db/prices'
@@ -366,7 +367,12 @@ function UnlockCodeDisplay({ code }: { code: string }) {
         className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge px-2 py-1 text-xs font-bold text-accent-ink shadow-sm"
       >
         {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-        {copied ? ja.settings.unlockCodeCopied : ja.settings.unlockCodeCopy}
+        {/* 押すと「コピーしました」に変わって48px伸び、左隣のコード表示を押しつぶしていた
+            （2026-08-09 便EO）。長い方の幅で固定する */}
+        <SwapLabel
+          current={copied ? ja.settings.unlockCodeCopied : ja.settings.unlockCodeCopy}
+          labels={[ja.settings.unlockCodeCopy, ja.settings.unlockCodeCopied]}
+        />
       </button>
     </div>
   )

@@ -501,7 +501,10 @@ export default function HomePage() {
                 className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
               >
                 {ja.home.conditionsToggle}
-                {!conditionsOpen && condition !== 'any' ? `: ${conditionLabel(condition)}` : ''}
+                {/* 現在値は開いていても出したままにする（2026-08-09 便EO・オーナー実機
+                    「押下後にサイズが変わって場所がズレる」）。畳んだときだけ足すと、
+                    押すたびにボタンの幅が変わってシェブロンの位置が動いていた */}
+                {condition !== 'any' ? `: ${conditionLabel(condition)}` : ''}
                 {conditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
               </button>
               <Collapse open={conditionsOpen}>

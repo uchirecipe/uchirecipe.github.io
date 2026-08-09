@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import BackHeader from '../components/BackHeader'
 import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
 import { MemoText } from '../components/MemoText'
@@ -305,7 +306,12 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
         className="flex w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm"
       >
         <ListChecks size={18} aria-hidden />
-        {open ? ja.cookNavi.ingredientsClose : ja.cookNavi.ingredientsOpen}
+        {/* ボタン自体は全幅なので寸法は変わらないが、文字数が変わると左右のアイコンが
+            7pxずつ動く。長い方の幅で固定して押しても動かさない（2026-08-09 便EO） */}
+        <SwapLabel
+          current={open ? ja.cookNavi.ingredientsClose : ja.cookNavi.ingredientsOpen}
+          labels={[ja.cookNavi.ingredientsOpen, ja.cookNavi.ingredientsClose]}
+        />
         <ChevronDown
           size={16}
           aria-hidden
