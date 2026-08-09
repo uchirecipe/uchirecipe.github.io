@@ -98,7 +98,9 @@ export default function RecipeDetailPage() {
   // 現在は別の場所に戻る」): 並行調理ナビ('cookNavi')も同じ仕組みの例外に足した。
   // 段取りの下にあるレシピ名を開いて戻ると、レシピ一覧に飛ばされて段取りを開き直していた
   // (スクロール位置の復元はCookNaviPage側が持つ)
-  const BACK_TO_ORIGIN_FROM = ['home', 'todayList', 'mealPlanWeek', 'cookNavi']
+  // 2026-08-09 便EQ: 'mealPlan' を追加。作った記録の小窓からレシピ詳細・記録の編集へ来たとき、
+  // 献立の日タブ・月タブへも同じ仕組みで帰せるようにした（週は従来の 'mealPlanWeek' のまま）
+  const BACK_TO_ORIGIN_FROM = ['home', 'todayList', 'mealPlan', 'mealPlanWeek', 'cookNavi']
   const backFallback =
     backState?.from && BACK_TO_ORIGIN_FROM.includes(backState.from) && backState.fromPath
       ? backState.fromPath
@@ -342,6 +344,48 @@ export default function RecipeDetailPage() {
     [shareOpen, recipe],
   )
 
+  /** 過去の記録の編集フォームを開く（下の記録一覧の鉛筆ボタンと、?editLog= からの遷移で使う） */
+  const openEditLog = (
+    index: number,
+    date: string,
+    note: string | undefined,
+    photo: Blob | undefined,
+    logServingsValue: number | undefined,
+  ) => {
+    setEditingLogIndex(index)
+    setEditingLogDate(date)
+    setEditingLogNote(note ?? '')
+    setEditingLogPhoto(photo)
+    setEditingLogPhotoError('')
+    setEditingLogPhotoRotated(false)
+    // 人数が未記録の古い記録は、レシピの登録人数を初期値にする(便CI/C05)
+    setEditingLogServings(logServingsValue ?? recipe?.servings ?? 1)
+  }
+
+  /**
+   * 「作った記録」の小窓の「この記録を編集する」から来たとき（?editLog=何番目）、
+   * その記録の編集フォームを開いた状態でこの画面を出す（2026-08-09 便EQ）。
+   * 記録を直す入力欄はこの画面のものが唯一で、小窓の側には作らない（同じ欄を2つ持たない）。
+   * 使い終わったクエリはURLから消す＝再読み込みや「戻る」で勝手に開き直さない。
+   * フックは早期returnより前に置く（レンダーのたびに同じ順で呼ぶ必要があるため）。
+   */
+  useEffect(() => {
+    const editLogParam = searchParams.get('editLog')
+    if (editLogParam == null || !recipe) return
+    const index = Number(editLogParam)
+    const log = Number.isInteger(index) && index >= 0 ? recipe.cookedLogs[index] : undefined
+    if (log) openEditLog(index, log.date, log.note, log.photo, log.servings)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('editLog')
+        return next
+      },
+      { replace: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, recipe])
+
   if (recipe === undefined) {
     // 読み込み中(undefined)は何も出さない。id が存在しない場合は下の分岐へ
     return null
@@ -395,23 +439,6 @@ export default function RecipeDetailPage() {
     setLogPhoto(undefined)
     // 2026-07-16 UI総点検A-4: 窓が閉じるだけの無言完了だったのでトーストで明示
     setMessage(ja.detail.cookedRecordedToast)
-  }
-
-  const openEditLog = (
-    index: number,
-    date: string,
-    note: string | undefined,
-    photo: Blob | undefined,
-    logServingsValue: number | undefined,
-  ) => {
-    setEditingLogIndex(index)
-    setEditingLogDate(date)
-    setEditingLogNote(note ?? '')
-    setEditingLogPhoto(photo)
-    setEditingLogPhotoError('')
-    setEditingLogPhotoRotated(false)
-    // 人数が未記録の古い記録は、レシピの登録人数を初期値にする(便CI/C05)
-    setEditingLogServings(logServingsValue ?? recipe?.servings ?? 1)
   }
 
   /**
@@ -1160,8 +1187,11 @@ export default function RecipeDetailPage() {
                 </Link>
               )}
             </div>
+            {/* 出すのは直近5件まで（残りは一覧へ）。ただし「作った記録の一覧」の小窓から
+                6件目より古い記録の編集に来たとき(?editLog=・2026-08-09 便EQ)は、
+                その記録までを描かないと開いた編集フォームが画面に無いことになるため伸ばす */}
             <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-              {recipe.cookedLogs.slice(0, 5).map((log, index) => {
+              {recipe.cookedLogs.slice(0, Math.max(5, (editingLogIndex ?? -1) + 1)).map((log, index) => {
                 const logPhoto = log.photo
                 return (
                   <li key={index} className="px-[var(--space-md)] py-2">

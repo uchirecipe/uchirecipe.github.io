@@ -262,7 +262,12 @@ import {
   WEEK_RETURN_KEY,
   WEEK_RETURN_PARAM,
   LAST_RECIPES_PATH_KEY,
+  DAY_RETURN_KEY,
+  HOME_RETURN_KEY,
+  MONTH_RETURN_KEY,
+  parseViewReturn,
   parseWeekReturn,
+  serializeViewReturn,
   serializeWeekReturn,
 } from '../src/logic/navMemory.ts'
 import {
@@ -2780,6 +2785,45 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('DT2-NAV 日付が無ければnull', parseWeekReturn('{"scrollY":10}'), null)
   eq('DT2-NAV スクロール位置が数値でなければnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":"10"}'), null)
   eq('DT2-NAV NaNはnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":null}'), null)
+}
+
+// ---------- navMemory: ホーム/月タブ/日タブの居場所(2026-08-09 便EQ) ----------
+// 「作った記録の一覧」へ行って戻ったとき、離れる直前の場所（月タブなら見ていた月も）へ帰す。
+// 週タブと同じく、壊れた値を読んだときは「復元しない」に倒す＝変な場所へ飛ばさない。
+{
+  eq('EQ-NAV 覚えるキーは固定(別便が別名で書かない)', [HOME_RETURN_KEY, MONTH_RETURN_KEY, DAY_RETURN_KEY], [
+    'home:return',
+    'mealPlan:monthReturn',
+    'mealPlan:dayReturn',
+  ])
+  eq(
+    'EQ-NAV 覚えた形をそのまま読み戻せる(月タブは見ていた月も一緒に覚える)',
+    parseViewReturn(serializeViewReturn({ anchor: '2026-06-01', scrollY: 820 })),
+    { anchor: '2026-06-01', scrollY: 820 },
+  )
+  eq(
+    'EQ-NAV 目印が要らない画面(ホーム・日タブ)は空文字で覚える',
+    parseViewReturn(serializeViewReturn({ anchor: '', scrollY: 40 })),
+    { anchor: '', scrollY: 40 },
+  )
+  eq(
+    'EQ-NAV スクロール位置は整数に丸めて覚える',
+    parseViewReturn(serializeViewReturn({ anchor: '', scrollY: 12.7 })).scrollY,
+    13,
+  )
+  eq(
+    'EQ-NAV 負のスクロール位置は0に丸める',
+    parseViewReturn(serializeViewReturn({ anchor: '', scrollY: -50 })).scrollY,
+    0,
+  )
+  eq('EQ-NAV 覚えが無ければnull(復元しない)', parseViewReturn(null), null)
+  eq('EQ-NAV 空文字はnull', parseViewReturn(''), null)
+  eq('EQ-NAV JSONでなければnull', parseViewReturn('{壊れた'), null)
+  eq('EQ-NAV 物体でなければnull', parseViewReturn('123'), null)
+  eq('EQ-NAV 目印が文字列でなければnull', parseViewReturn('{"anchor":3,"scrollY":10}'), null)
+  eq('EQ-NAV 目印が無ければnull', parseViewReturn('{"scrollY":10}'), null)
+  eq('EQ-NAV スクロール位置が数値でなければnull', parseViewReturn('{"anchor":"","scrollY":"10"}'), null)
+  eq('EQ-NAV NaNはnull', parseViewReturn('{"anchor":"","scrollY":null}'), null)
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------

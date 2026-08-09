@@ -98,3 +98,48 @@ export function parseWeekReturn(raw: string | null | undefined): WeekReturnPoint
   if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
   return { weekStart, scrollY: Math.round(scrollY) }
 }
+
+// ---------- ③「作った記録の一覧」へ行く前の居場所 ----------
+
+/**
+ * 一覧へ移る直前の居場所（2026-08-09 便EQ・オーナー指示「戻るのも該当場所のスクロール位置まで」）。
+ *
+ * `anchor` は画面ごとの目印で、献立の月タブなら「見ていた月の日付」を入れる。
+ * ホームや献立の日タブのように目印が要らない画面は空文字を入れる。
+ * 週タブだけは以前から専用の WeekReturnPoint を使っており、そのままにしてある
+ * （週は「見ていた週の起点」を日付の形で検査する必要があるため）。
+ */
+export interface ViewReturnPoint {
+  anchor: string
+  scrollY: number
+}
+
+/** ホームが居場所を覚えるキー */
+export const HOME_RETURN_KEY = 'home:return'
+/** 献立の月タブが居場所を覚えるキー */
+export const MONTH_RETURN_KEY = 'mealPlan:monthReturn'
+/** 献立の日タブが居場所を覚えるキー */
+export const DAY_RETURN_KEY = 'mealPlan:dayReturn'
+
+export function serializeViewReturn(point: ViewReturnPoint): string {
+  return JSON.stringify({ anchor: point.anchor, scrollY: Math.max(0, Math.round(point.scrollY)) })
+}
+
+/**
+ * 覚えた居場所を読み出す。壊れた値・別の形の値は null にして無視する
+ * （復元できないときは「何もしない」＝その画面を普通に開くのが正しい振る舞い）。
+ */
+export function parseViewReturn(raw: string | null | undefined): ViewReturnPoint | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const { anchor, scrollY } = parsed as { anchor?: unknown; scrollY?: unknown }
+  if (typeof anchor !== 'string') return null
+  if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
+  return { anchor, scrollY: Math.round(scrollY) }
+}

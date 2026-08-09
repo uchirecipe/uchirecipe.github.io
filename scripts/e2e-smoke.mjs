@@ -21161,6 +21161,337 @@ try {
     }
   }
 
+  // --- EQ-01: 2026-08-09 便EQ(オーナー実機)「作った記録」を見るための導線と表示。
+  //  ①ホームの「最近作ったもの」の料理名を押すと、記録の中身(日付・何人分・ひとことメモ・写真)の
+  //    小窓が開く(レシピ詳細へ飛ばない)。写真は押すと拡大表示になる
+  //  ②「作った記録の一覧」の行を押しても同じ小窓が開く
+  //  ③献立の作った！済みの枠と、週タブの過去日の記録カードには「作った記録を見る」が出て、
+  //    そこからも同じ小窓が開く(枠を押したときの「レシピを選び直す」は残す)
+  //  ④一覧への入口は日・週・月の3タブとホームで同じ「作った記録の一覧」という名前になっている
+  //  ⑤小窓の「この記録を編集する」でレシピ詳細の編集フォームが開いた状態になる
+  //  ⑥ホーム→一覧→戻る で、離れる前とほぼ同じスクロール位置に復元される ---
+  currentCheck = 'EQ-01'
+  {
+    const eqBrowser = await chromium.launch()
+    const eqContext = await eqBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const eqPage = await eqContext.newPage()
+    eqPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@EQ-01] ${text}`)
+    })
+    eqPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@EQ-01] ${err.message}`)
+    })
+    try {
+      const eqPad = (n) => String(n).padStart(2, '0')
+      const eqNow = new Date()
+      const eqToday = `${eqNow.getFullYear()}-${eqPad(eqNow.getMonth() + 1)}-${eqPad(eqNow.getDate())}`
+      const eqYd = new Date()
+      eqYd.setDate(eqYd.getDate() - 1)
+      const eqYesterday = `${eqYd.getFullYear()}-${eqPad(eqYd.getMonth() + 1)}-${eqPad(eqYd.getDate())}`
+
+      await eqPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 肉じゃがに写真つきの記録を2件(今日・昨日)仕込む。月タブを見るためPro解錠も入れる
+      // (実コードは台帳原本のため、NUT-02等と同じくsettings.proCodeの直書きで状態だけ再現)
+      await eqPage.evaluate(
+        async ([today, yesterday]) => {
+          const makePhoto = async (text) => {
+            const c = document.createElement('canvas')
+            c.width = 320
+            c.height = 180
+            const g = c.getContext('2d')
+            g.fillStyle = '#b4632a'
+            g.fillRect(0, 0, c.width, c.height)
+            g.fillStyle = '#fff'
+            g.font = 'bold 28px sans-serif'
+            g.fillText(text, 20, 100)
+            return await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.8))
+          }
+          const photoA = await makePhoto('today')
+          const photoB = await makePhoto('yesterday')
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+          await new Promise((res, rej) => {
+            const tx = idb.transaction(['recipes', 'settings'], 'readwrite')
+            const store = tx.objectStore('recipes')
+            const g = store.getAll()
+            g.onsuccess = () => {
+              const r = g.result.find((x) => x.title === '肉じゃが')
+              if (!r) {
+                rej(new Error('肉じゃがが見つからない'))
+                return
+              }
+              r.cookedLogs = [
+                { date: today, note: '甘めに仕上げたら好評だった', servings: 4, photo: photoA },
+                { date: yesterday, note: 'じゃがいもは大きめに切った', servings: 3, photo: photoB },
+              ]
+              store.put(r)
+              const s = tx.objectStore('settings')
+              const gs = s.get(1)
+              gs.onsuccess = () => {
+                s.put({
+                  ...(gs.result || { id: 1 }),
+                  id: 1,
+                  proCode: 'UR-E2E-TEST-ONLY',
+                  proActivatedAt: Date.now(),
+                })
+              }
+            }
+            tx.oncomplete = () => res(undefined)
+            tx.onerror = () => rej(tx.error)
+          })
+          idb.close()
+        },
+        [eqToday, eqYesterday],
+      )
+
+      // ---------- ① ホームの「最近作ったもの」 ----------
+      await eqPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await eqPage.reload({ waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(1500)
+      const eqHomeOpen = eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first()
+      check('EQ-01(①) ホームの「最近作ったもの」の行が記録を開くボタンになっている', (await eqHomeOpen.count()) === 1)
+      await eqHomeOpen.click()
+      await eqPage.waitForTimeout(700)
+      check(
+        'EQ-01(①) 押してもレシピ詳細へは移らない(その場で小窓が開く)',
+        !/#\/recipes\/\d+/.test(eqPage.url()),
+        `url=${eqPage.url()}`,
+      )
+      const eqDialog = eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' })
+      const eqDialogText = (await eqDialog.textContent()) ?? ''
+      check(
+        'EQ-01(①) 小窓に入力した情報が全部出る(日付・何人分・ひとことメモ・写真)',
+        eqDialogText.includes(eqToday.replaceAll('-', '/')) &&
+          eqDialogText.includes('何人分作ったか') &&
+          eqDialogText.includes('4人分') &&
+          eqDialogText.includes('ひとことメモ') &&
+          eqDialogText.includes('甘めに仕上げたら好評だった') &&
+          eqDialogText.includes('写真'),
+        eqDialogText.slice(0, 200),
+      )
+      check(
+        'EQ-01(①) 小窓からレシピ詳細と記録の編集へ行ける',
+        (await eqDialog.getByRole('link', { name: 'この記録を編集する' }).count()) === 1 &&
+          (await eqDialog.getByRole('link', { name: 'レシピを見る' }).count()) === 1,
+      )
+      // 写真の拡大
+      await eqDialog.getByRole('button', { name: '写真を拡大表示' }).click()
+      await eqPage.waitForTimeout(600)
+      const eqZoom = eqPage.locator('div[role="dialog"][aria-label="写真を拡大表示"]')
+      check('EQ-01(①) 写真を押すと拡大表示の窓が開く', (await eqZoom.count()) === 1)
+      const eqZoomBigger = await eqPage.evaluate(() => {
+        const zoom = document.querySelector('div[role="dialog"][aria-label="写真を拡大表示"] img')
+        const thumb = [...document.querySelectorAll('button[aria-label="写真を拡大表示"] img')][0]
+        if (!zoom || !thumb) return null
+        return { zoom: zoom.getBoundingClientRect().height, thumb: thumb.getBoundingClientRect().height }
+      })
+      check(
+        'EQ-01(①) 拡大表示は小窓のサムネイルより大きい',
+        !!eqZoomBigger && eqZoomBigger.zoom > eqZoomBigger.thumb,
+        eqZoomBigger ? `拡大=${Math.round(eqZoomBigger.zoom)} サムネ=${Math.round(eqZoomBigger.thumb)}` : 'not found',
+      )
+      // Escapeで拡大だけが閉じ、下の小窓は開いたまま(重ね窓は1枚ずつ閉じる)
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+      check(
+        'EQ-01(①) Escapeで拡大表示だけが閉じ、記録の小窓は開いたまま',
+        (await eqZoom.count()) === 0 && (await eqDialog.count()) === 1,
+      )
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+      check('EQ-01(①) もう一度Escapeで記録の小窓も閉じる', (await eqDialog.count()) === 0)
+
+      // ---------- ④ 入口の名前がそろっている ----------
+      check(
+        'EQ-01(④) ホームの入口が「作った記録の一覧」という名前になっている',
+        (await eqPage.getByRole('link', { name: '作った記録の一覧' }).count()) >= 1,
+      )
+
+      // ---------- ⑥ ホーム→一覧→戻る のスクロール位置復元 ----------
+      const eqHomeLink = eqPage.getByRole('link', { name: '作った記録の一覧' }).first()
+      await eqHomeLink.scrollIntoViewIfNeeded()
+      await eqPage.waitForTimeout(400)
+      const eqScrollBefore = await eqPage.evaluate(() => Math.round(window.scrollY))
+      await eqHomeLink.click()
+      await eqPage.waitForTimeout(900)
+      check(
+        'EQ-01(④) 一覧の見出しも「作った記録の一覧」になっている',
+        ((await eqPage.textContent('body')) ?? '').includes('作った記録の一覧'),
+      )
+
+      // ---------- ② 一覧の行から同じ小窓が開く ----------
+      const eqListOpen = eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first()
+      check('EQ-01(②) 一覧の行が記録を開くボタンになっている', (await eqListOpen.count()) >= 1)
+      await eqListOpen.click()
+      await eqPage.waitForTimeout(700)
+      check(
+        'EQ-01(②) 一覧からも同じ小窓が開く',
+        (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 1,
+      )
+
+      // ---------- ⑤ 「この記録を編集する」でレシピ詳細の編集フォームが開く ----------
+      await eqPage
+        .getByRole('dialog', { name: '肉じゃがの作った記録' })
+        .getByRole('link', { name: 'この記録を編集する' })
+        .click()
+      await eqPage.waitForTimeout(1200)
+      check(
+        'EQ-01(⑤) レシピ詳細へ移る',
+        /#\/recipes\/\d+/.test(eqPage.url()),
+        `url=${eqPage.url()}`,
+      )
+      check(
+        'EQ-01(⑤) 使い終わった ?editLog= はURLから消える',
+        !eqPage.url().includes('editLog'),
+        `url=${eqPage.url()}`,
+      )
+      check(
+        'EQ-01(⑤) その記録の編集フォームが開いた状態になる(日付欄と「保存する」が出る)',
+        (await eqPage.locator('input[type="date"]').count()) >= 1 &&
+          (await eqPage.getByRole('button', { name: '保存する' }).count()) >= 1,
+      )
+
+      // ---------- ⑥ ホームへ戻ったときのスクロール位置 ----------
+      await eqPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(900)
+      await eqPage.getByRole('link', { name: '作った記録の一覧' }).first().scrollIntoViewIfNeeded()
+      await eqPage.waitForTimeout(400)
+      const eqScrollBefore2 = await eqPage.evaluate(() => Math.round(window.scrollY))
+      await eqPage.getByRole('link', { name: '作った記録の一覧' }).first().click()
+      await eqPage.waitForTimeout(900)
+      await eqPage.getByRole('button', { name: '戻る' }).first().click()
+      await eqPage.waitForTimeout(1500)
+      const eqScrollAfter = await eqPage.evaluate(() => Math.round(window.scrollY))
+      check(
+        'EQ-01(⑥) 一覧から戻るとホームは離れる前とほぼ同じスクロール位置になる(誤差40px以内)',
+        Math.abs(eqScrollAfter - eqScrollBefore2) <= 40,
+        `before=${eqScrollBefore2}(初回=${eqScrollBefore}) / after=${eqScrollAfter}`,
+      )
+      check(
+        'EQ-01(⑥) 復元に使ったクエリ(restore)はURLから消える',
+        !eqPage.url().includes('restore='),
+        `url=${eqPage.url()}`,
+      )
+
+      // ---------- ③ 献立: 週タブの過去日カード と 作った！済みの枠 ----------
+      await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(1000)
+      check(
+        'EQ-01(④) 献立の日タブにも「作った記録の一覧」の入口がある',
+        (await eqPage.getByRole('link', { name: '作った記録の一覧' }).count()) >= 1,
+      )
+      await eqPage.getByRole('button', { name: '週', exact: true }).click()
+      await eqPage.waitForTimeout(900)
+      if (!((await eqPage.textContent('body')) ?? '').includes(eqYesterday.replaceAll('-', '/'))) {
+        await eqPage.locator('button[aria-label="前の週"]').click()
+        await eqPage.waitForTimeout(600)
+      }
+      // 週タブの過去日カードは従来どおりレシピ詳細へのリンクのまま(便DT-2の動線を壊さない)
+      check(
+        'EQ-01(③) 週タブの過去日カードはレシピ詳細へのリンクのまま残っている',
+        (await eqPage.locator('a[href*="#/recipes/"]').filter({ hasText: '肉じゃが' }).count()) >= 1,
+      )
+      const eqWeekOpen = eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first()
+      check('EQ-01(③) 週タブの過去日カードに「作った記録を見る」が足されている', (await eqWeekOpen.count()) >= 1)
+      await eqWeekOpen.scrollIntoViewIfNeeded()
+      await eqWeekOpen.click()
+      await eqPage.waitForTimeout(700)
+      check(
+        'EQ-01(③) 週タブからも同じ小窓が開く',
+        (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 1,
+      )
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+
+      // 今日の夕食の主菜に肉じゃがを入れる → 今日の記録があるので枠が「作った！済み」になる。
+      // 上で「前の週」へ動いていることがあるので、今週へ開き直してから操作する
+      await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(900)
+      await eqPage.getByRole('button', { name: '週', exact: true }).click()
+      await eqPage.waitForTimeout(900)
+      const eqTodaySection = eqPage.locator(`section[data-date="${eqToday}"]`)
+      await eqTodaySection.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
+      await eqPage.waitForTimeout(600)
+      await eqPage.getByPlaceholder('レシピ名で絞り込み').fill('肉じゃが')
+      await eqPage.waitForTimeout(500)
+      await eqPage
+        .locator('[data-testid="recipe-picker"]')
+        .getByText('肉じゃが', { exact: true })
+        .first()
+        .click()
+      await eqPage.waitForTimeout(1000)
+      const eqPlanOpen = eqTodaySection
+        .getByRole('button', { name: '肉じゃがの作った記録を見る' })
+        .first()
+      check('EQ-01(③) 作った！済みの枠の下に「作った記録を見る」が出る', (await eqPlanOpen.count()) === 1)
+      // 枠そのものは従来どおり「押すとレシピを選び直せる」まま(便DP-5の裁定を壊さない)
+      const eqRowStillEditable = await eqPage.evaluate((d) => {
+        const sec = document.querySelector(`section[data-date="${d}"]`)
+        const b = [...(sec?.querySelectorAll('button') ?? [])].find((x) =>
+          x.textContent?.includes('肉じゃが'),
+        )
+        return b ? !b.disabled : null
+      }, eqToday)
+      check('EQ-01(③) 作った！済みの枠は押して選び直せるまま', eqRowStillEditable === true)
+      await eqPlanOpen.click()
+      await eqPage.waitForTimeout(700)
+      check(
+        'EQ-01(③) 献立の枠からも同じ小窓が開く',
+        (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 1,
+      )
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+
+      // ---------- ③ 月タブの日の窓 ----------
+      await eqPage.getByRole('button', { name: '月', exact: true }).click()
+      await eqPage.waitForTimeout(900)
+      check(
+        'EQ-01(④) 月タブの入口も「作った記録の一覧」',
+        (await eqPage.getByRole('link', { name: '作った記録の一覧' }).count()) >= 1,
+      )
+      await eqPage.locator(`button[data-date="${eqToday}"]`).first().click()
+      await eqPage.waitForTimeout(700)
+      const eqMonthOpen = eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first()
+      check('EQ-01(③) 月タブの日の窓の記録カードが記録を開くボタンになっている', (await eqMonthOpen.count()) >= 1)
+      await eqMonthOpen.click()
+      await eqPage.waitForTimeout(700)
+      check(
+        'EQ-01(③) 月タブの日の窓からも同じ小窓が開く',
+        (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 1,
+      )
+      // 重ね窓: 戻る/Escapeで上の1枚(小窓)だけが閉じ、日の窓は開いたまま
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(600)
+      check(
+        'EQ-01(③) 小窓を閉じても下の日の窓は開いたまま(1回で1枚だけ閉じる)',
+        (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 0 &&
+          (await eqPage.locator('[role="dialog"]').count()) >= 1,
+      )
+
+      // ---------- 記録が無いレシピでは小窓の入口が出ない(誤って空の窓を開かせない) ----------
+      await eqPage.keyboard.press('Escape')
+      await eqPage.waitForTimeout(500)
+      await eqPage.goto(`${BASE}/#/history`, { waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(900)
+      check(
+        'EQ-01(②) 一覧には仕込んだ2件だけが出る',
+        ((await eqPage.textContent('body')) ?? '').includes('全2件'),
+        ((await eqPage.textContent('body')) ?? '').slice(0, 120),
+      )
+    } finally {
+      await eqBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
