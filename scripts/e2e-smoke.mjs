@@ -20361,7 +20361,8 @@ try {
       // 検索で対象を絞ってから「選択」→「全選択」。絞った結果の枚数がそのまま書き出す品数になる
       await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
       await rePage.waitForTimeout(700)
-      const reCardSel = 'main a[href^="#/recipes/"]'
+      // 右下の新規登録ボタン(#/recipes/new)も同じ入れ子に居るので数から外す
+      const reCardSel = 'main a[href^="#/recipes/"]:not([href$="/new"])'
       const rePicked = await rePage.locator(reCardSel).count()
       check('RECIPEEXPORT-EM 前提: 検索で対象を絞れている', rePicked > 0 && rePicked < 10, `件数=${rePicked}`)
       const rePickedTitles = await rePage.locator(reCardSel).locator('h3, p.font-bold').allTextContents()
@@ -20443,11 +20444,16 @@ try {
         `件数=${reTotalAfterExport}`,
       )
 
-      // (d) 消してから、既存の読み込み経路(「今のデータに追加」)で戻す
+      // (d) 消してから、既存の読み込み経路(「今のデータに追加」)で戻す。
+      // 絞り込みを戻しても選択は残る(見えている品は落とさない)ので、「全選択」は
+      // 押せない状態になっている。押せるときだけ押す
       await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
       await rePage.waitForTimeout(700)
-      await rePage.getByRole('button', { name: '全選択', exact: true }).click()
-      await rePage.waitForTimeout(300)
+      const reSelectAll = rePage.getByRole('button', { name: '全選択', exact: true })
+      if (await reSelectAll.isEnabled()) {
+        await reSelectAll.click()
+        await rePage.waitForTimeout(300)
+      }
       await rePage.getByRole('button', { name: `選択したレシピ${rePicked}品を削除` }).click()
       await rePage.waitForTimeout(1200)
       check(
