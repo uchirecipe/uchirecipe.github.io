@@ -33,6 +33,8 @@ import { makePantryMatcher } from '../logic/pantry'
 import type { CookedLog, DishType, HomeWidgetKey, MealSlot, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
 import Collapse from '../components/Collapse'
+import HomeScreenNotice from '../components/HomeScreenNotice'
+import { shouldShowHomeScreenNoticeNow } from '../logic/homeScreenNotice'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import CookedLogDetailModal, {
@@ -449,6 +451,15 @@ export default function HomePage() {
   // 押した記録の中身を出す小窓(2026-08-09 便EQ)。null なら閉じている
   const [logDetail, setLogDetail] = useState<CookedLogDetailTarget | null>(null)
 
+  /**
+   * ホーム画面への追加を案内する初回のお知らせ(2026-08-10 便EW)。
+   * 出す条件（指で操作する端末のブラウザ・アイコン起動でない・この端末で未表示）は
+   * logic/homeScreenNotice.ts が持つ。ここでは画面に着いた時点で1度だけ判定する
+   * ＝この画面を開いている間に判定が揺れて出たり消えたりしない。
+   * 見た記録はlocalStorage(端末内のみ)で、閉じ方によらず窓側で残す
+   */
+  const [showHomeScreenNotice, setShowHomeScreenNotice] = useState(shouldShowHomeScreenNoticeNow)
+
   const widgetSections: Record<HomeWidgetKey, ReactNode> = {
     // 選択中も今日の予定も0品なら非表示(2026-07-16 便S。直近実装の「1行に薄く」表示を置き換え。
     // 読み込み中も同様に何も出さない)
@@ -842,6 +853,12 @@ export default function HomePage() {
           linkState={{ from: 'home', fromPath: '/' }}
           onNavigate={() => setLogDetail(null)}
         />
+      )}
+
+      {/* ホーム画面への追加の案内(2026-08-10 便EW)。紹介ページ側の割り込みを廃し、
+          ホーム画面に着いた直後の1回だけここで出す */}
+      {showHomeScreenNotice && (
+        <HomeScreenNotice onClose={() => setShowHomeScreenNotice(false)} />
       )}
     </div>
   )
