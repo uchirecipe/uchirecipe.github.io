@@ -35,7 +35,12 @@ import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { isMinutesShownInText } from '../logic/time'
-import { buildCookPlan, hasLaterHandsOnStep, type TimelineItem } from '../logic/cookNavi'
+import {
+  buildCookPlan,
+  hasLaterHandsOnStep,
+  recipeStepLabel,
+  type TimelineItem,
+} from '../logic/cookNavi'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
 import {
   clearCookNaviSession,
@@ -47,6 +52,7 @@ import {
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
 import CookSessionOverlay from '../components/CookSessionOverlay'
+import CustomTimerModal from '../components/CustomTimerModal'
 import { findCursorIndex, startCursor, type CookCursor } from '../logic/cookSession'
 import {
   recipeIngredientList,
@@ -74,15 +80,21 @@ const MAX_SELECT = 3
  * 丸数字の中の数字が潰れて読めなかった。オーナー案どおり**番号だけを分けて**、
  * 全体の通し番号と同じ丸バッジを**そのレシピの色**で、一回り小さく描く。
  */
-function RecipeStepNumber({ stepNumber, colorIndex }: { stepNumber: number; colorIndex: number }) {
+function RecipeStepNumber({ item, colorIndex }: { item: TimelineItem; colorIndex: number }) {
+  const label = recipeStepLabel(item)
+  if (!label) return null
   return (
     <>
       <span className="sr-only">
-        {ja.cookNavi.stepNumberLabel.replace('{n}', String(stepNumber))}
+        {item.splitOf != null && item.splitPart != null
+          ? ja.cookNavi.splitStepNumberLabel
+              .replace('{n}', String(item.splitOf))
+              .replace('{part}', String(item.splitPart))
+          : ja.cookNavi.stepNumberLabel.replace('{n}', label)}
       </span>
       <span aria-hidden data-testid="navi-recipe-step-number">
         <StepBadge
-          number={stepNumber}
+          number={label}
           size={24}
           color={RECIPE_COLORS[colorIndex % RECIPE_COLORS.length]}
         />
@@ -147,11 +159,9 @@ function TimelineCard({
     >
       <div className="flex items-center gap-2">
         <StepBadge number={item.order} size={28} />
-        {/* そのレシピ内の手順番号は、レシピ色の丸バッジで料理名の手前に置く
-            （2026-08-09 便EH）。ナビが足した工程には番号を付けない */}
-        {item.stepNumber > 0 && (
-          <RecipeStepNumber stepNumber={item.stepNumber} colorIndex={item.colorIndex} />
-        )}
+        {/* そのレシピ内の手順番号は、レシピ色の丸バッジで料理名の手前に置く（2026-08-09 便EH）。
+            レシピの1手順を2つに分けた工程は「3-1」「3-2」で分割が分かる（同 便ES） */}
+        <RecipeStepNumber item={item} colorIndex={item.colorIndex} />
         <RecipePill title={item.recipeTitle} colorIndex={item.colorIndex} />
         <span
           className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-bold ${
@@ -163,16 +173,9 @@ function TimelineCard({
         </span>
       </div>
 
+      {/* 2026-08-09 便ES: 「ナビが追加」の札はやめ、手順番号を「3-1」「3-2」にして
+          レシピの1手順を分けたことが番号で分かる形にした（オーナー指示D-4） */}
       <p className="ja-phrase mt-[var(--space-sm)] leading-relaxed">
-        {/* レシピには無く、ナビが段取りに足した工程であることの印（2026-08-08 便EG） */}
-        {item.addedByNavi && (
-          <span
-            data-testid="navi-added-step"
-            className="mr-1 rounded-sm border border-edge px-1 py-0.5 text-xs font-bold text-ink-muted"
-          >
-            {ja.cookNavi.addedByNaviTag}
-          </span>
-        )}
         {/* 手順本文の材料名に控えめな下線（レシピ詳細と同じ・2026-08-08 便ED） */}
         <TimeText
           text={item.text}
@@ -217,7 +220,11 @@ function TimelineCard({
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 font-bold text-accent-ink">
               <Hourglass size={16} aria-hidden />
-              {ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
+              {/* ナビが足した湯沸かしは分数を出さない（2026-08-09 便ES・オーナー指示D-3。
+                  計算には約5分を使うが、コンロと湯量で大きく変わるので言い切らない） */}
+              {item.addedByNavi
+                ? ja.cookNavi.waitBlockBoil
+                : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
             </span>
             {showWaitTimerButton && (
               <button
@@ -513,6 +520,33 @@ export default function CookNaviPage() {
   const [current, setCurrent] = useState<CookCursor | undefined>(
     () => restoredSession.current?.current,
   )
+  /**
+   * 自分で時間を決めるタイマー（2026-08-09 便ES・オーナー指示D-2）。
+   * レシピ詳細と同じ作法で、前回使った秒数を覚えて開く。
+   */
+  const [customTimerOpen, setCustomTimerOpen] = useState(false)
+  const [customSeconds, setCustomSeconds] = useState(180)
+  const openCustomTimer = () => {
+    setCustomSeconds(
+      settings?.lastCustomTimerSeconds ??
+        (settings?.lastCustomTimerMinutes != null ? settings.lastCustomTimerMinutes * 60 : 180),
+    )
+    setCustomTimerOpen(true)
+  }
+  const startCustomTimer = () => {
+    void updateSettings({ lastCustomTimerSeconds: customSeconds })
+    startTimer({
+      key: `custom-navi-${customSeconds}`,
+      label: ja.timer.customLabel,
+      seconds: customSeconds,
+      // 段取りの品ではないので、どのレシピにも紐付けない（戻り先を持たせない）
+      recipeId: 0,
+      stepNumber: 0,
+      isCustom: true,
+    })
+    setCustomTimerOpen(false)
+  }
+
   // 記録したあとのトースト（「元に戻す」つき）
   const [toast, setToast] = useState('')
   const [undoCooked, setUndoCooked] = useState<{ recipeId: number }[] | null>(null)
@@ -858,6 +892,8 @@ export default function CookNaviPage() {
       // 常駐バーの番号は段取りの通し番号にする（2026-08-09 便EH・オーナー実機報告
       // 「タイマーの番号が元のレシピの手順番号のまま」）
       naviOrder: item.order,
+      // レシピ内の手順番号も渡す（段取りの番号と両方を出す。2026-08-09 便ES・オーナー指示E-12）
+      naviStepLabel: recipeStepLabel(item),
     })
   }
 
@@ -907,7 +943,24 @@ export default function CookNaviPage() {
           便ED では戻るで段取りを終わらせていたが、戻るは台所で最も押す移動の操作で、
           押すたびに段取りが消えるとナビを組み直すことになる。段取りを終える操作は
           「レシピを選び直す」と「まとめて作った！」の2つに集約した */}
-      <BackHeader fallback="/meal-plan" title={ja.cookNavi.title} />
+      <BackHeader
+        fallback="/meal-plan"
+        title={ja.cookNavi.title}
+        right={
+          /* 自分で時間を決めるタイマーを、画面の名前の横に常駐させる
+             （2026-08-09 便ES・オーナー指示D-2。レシピ詳細の料理名横と同じ置き方にそろえる。
+             ナビの手順に無い「湯を沸かす」「つけおき」等をその場ではかれるようにするため） */
+          <button
+            type="button"
+            data-testid="navi-custom-timer"
+            onClick={openCustomTimer}
+            aria-label={ja.timer.customOpenAria}
+            className="rounded-full p-3 text-accent-ink"
+          >
+            <TimerIcon size={22} aria-hidden />
+          </button>
+        }
+      />
       <div className="px-[var(--space-md)]">
         <h1 className="flex items-center gap-2 text-2xl font-bold">
           <Route size={24} className="text-accent-ink" aria-hidden />
@@ -1071,6 +1124,28 @@ export default function CookNaviPage() {
                       <p className="mt-[var(--space-md)] text-2xl font-bold text-accent-ink">
                         {ja.cookNavi.totalEstimate.replace('{n}', String(timeline.totalMinutes))}
                       </p>
+                      {/* 同じ物差しでの比べ方（2026-08-09 便ES・オーナー指摘B）。
+                          レシピ欄の「調理時間」とは数え方が違うので、ナビ自身が数えた
+                          「1品ずつ作った場合」と並べて、何分縮んだのかを読めるようにする */}
+                      {timeline.sequentialMinutes > timeline.totalMinutes && (
+                        <p data-testid="navi-total-compare" className="ja-phrase mt-1 text-sm">
+                          {ja.cookNavi.totalCompare
+                            .replace('{s}', String(timeline.sequentialMinutes))
+                            .replace('{p}', String(timeline.totalMinutes))}
+                          <span className="ml-1 font-bold text-accent-ink">
+                            {ja.cookNavi.totalGain.replace(
+                              '{n}',
+                              String(timeline.sequentialMinutes - timeline.totalMinutes),
+                            )}
+                          </span>
+                        </p>
+                      )}
+                      {/* 漬ける・冷やすなど台所を離れられる待ちが入っているときだけ添える */}
+                      {timeline.awayMinutes > 0 && (
+                        <p data-testid="navi-total-away" className="ja-phrase mt-1 text-xs text-ink-muted">
+                          {ja.cookNavi.totalAwayNote.replace('{n}', String(timeline.awayMinutes))}
+                        </p>
+                      )}
                       <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.totalNote}</p>
                       <p className="mt-1 text-xs text-ink-muted">
                         {isSequential ? ja.cookNavi.sequentialOrderNote : ja.cookNavi.orderNote}
@@ -1200,6 +1275,13 @@ export default function CookNaviPage() {
           onStartTimer={startStepTimer}
         />
       )}
+      <CustomTimerModal
+        open={customTimerOpen}
+        totalSeconds={customSeconds}
+        onSecondsChange={setCustomSeconds}
+        onStart={startCustomTimer}
+        onClose={() => setCustomTimerOpen(false)}
+      />
       <Toast
         message={toast}
         onClose={() => {

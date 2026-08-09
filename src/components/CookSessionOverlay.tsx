@@ -21,14 +21,14 @@ import ComposedStepText from './ComposedStepText'
 import { MemoText } from './MemoText'
 import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
-import { useTimers } from './TimerProvider'
+import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
 import { sortTimersForDisplay } from '../logic/timerOrder'
 import { formatRemaining, findTimeTokens, isMinutesShownInText } from '../logic/time'
 import { resolveVoiceTimerSeconds } from '../logic/voiceCommand'
 import { naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
-import type { TimelineItem, TimelineRecipe } from '../logic/cookNavi'
+import { recipeStepLabel, type TimelineItem, type TimelineRecipe } from '../logic/cookNavi'
 import type { NaviIngredientAmount } from '../logic/naviIngredients'
 import {
   advanceCursor,
@@ -54,6 +54,84 @@ import { ja } from '../i18n/ja'
  * 何も推定しないので誤表示が起きない＝2026-08-09 オーナー決定の採用理由）。
  */
 const FOLDED_MAX_CHARS = 19
+
+/**
+ * 動作中タイマーの1つぶん（2026-08-09 便ES）。画面上部（大きく表示中の品）と
+ * 「他の品の次の手順」の行の両方から同じ見た目で使う。
+ *
+ * 番号は**段取りの通し番号とレシピ内の手順番号の両方**を出し、レシピ内の番号はその料理の色で
+ * 描く（オーナー指示E-12。段取りの番号だけだと、どの品のどの手順か分からなかった）。
+ */
+function TimerChip({
+  timer,
+  now,
+  flashing,
+  onOpen,
+  onToggleMute,
+  onDismiss,
+}: {
+  timer: ActiveTimer
+  now: number
+  flashing: boolean
+  onOpen: () => void
+  onToggleMute: () => void
+  onDismiss: () => void
+}) {
+  const isCustom = timer.isCustom === true || timer.stepNumber <= 0
+  return (
+    <div
+      style={
+        timer.done
+          ? { background: 'color-mix(in oklab, var(--warning) 14%, var(--surface))' }
+          : undefined
+      }
+      className={`inline-flex max-w-full items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1 ${
+        timer.done ? 'border-warning text-warning' : 'border-accent text-accent-ink'
+      } ${flashing ? 'animate-pulse ring-2 ring-accent' : ''}`}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={ja.timer.adjustOpenAria.replace('{label}', timer.label)}
+        className="flex min-w-0 items-center gap-1"
+      >
+        <StepBadge number={isCustom ? 'custom' : (timer.naviOrder ?? timer.stepNumber)} size={24} />
+        {!isCustom && timer.naviStepLabel && (
+          <StepBadge
+            number={timer.naviStepLabel}
+            size={20}
+            color={timer.naviColorIndex != null ? naviRecipeColor(timer.naviColorIndex) : undefined}
+          />
+        )}
+        {timer.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
+        <span className="max-w-[7rem] truncate text-xs font-bold">{timer.label}</span>
+        <span className="whitespace-nowrap text-base font-bold tabular-nums">
+          {timer.done
+            ? timer.doneLabel
+            : formatRemaining(Math.max(0, Math.ceil((timer.endsAt - now) / 1000)))}
+        </span>
+      </button>
+      {!timer.done && (
+        <button
+          type="button"
+          onClick={onToggleMute}
+          aria-label={timer.muted ? ja.timer.unmute : ja.timer.mute}
+          className="shrink-0 rounded-full p-1.5 text-ink-muted"
+        >
+          {timer.muted ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label={ja.timer.dismiss}
+        className="shrink-0 rounded-full p-1.5"
+      >
+        <X size={16} aria-hidden />
+      </button>
+    </div>
+  )
+}
 
 type Props = {
   /** 組み直した段取り（保存しない導出値） */
@@ -223,15 +301,36 @@ export default function CookSessionOverlay({
   // その品がこの手順で出来上がるか（段取りの一覧の「完成」と同じ判定＝以降にその品の手順が無い）
   const isRecipeLast = !items.slice(index + 1).some((x) => x.recipeId === item.recipeId)
   const color = naviRecipeColor(item.colorIndex)
+  const currentStepLabel = recipeStepLabel(item)
   const ingredients = stepIngredients.get(`${item.recipeId}-${item.stepIndex}`) ?? []
   const ingredientNames = ingredientNamesByRecipeId.get(item.recipeId) ?? []
   const showWaitTimerButton =
     isWait && item.minutes != null && item.minutes > 0 && !isMinutesShownInText(item.text, item.minutes)
-  // この料理のタイマーを先に、そのあと終わったもの→残りが少ない順（調理中モードと同じ並び）
-  const shownTimers = sortTimersForDisplay(timers).sort(
-    (a, b) => Number(b.recipeId === item.recipeId) - Number(a.recipeId === item.recipeId),
-  )
+  /**
+   * タイマーの置き場所（2026-08-09 便ES・オーナー指示E-11
+   * 「大きく表示中のタイマーは画面上、他のタイマーは『他の品の〜』に直接表示」）。
+   * いま大きく出している品のタイマーだけを画面上部に置き、他の品のタイマーは
+   * その品の行に付ける。どのタイマーがどの料理のものか、目を動かさずに分かるようにする。
+   */
+  const sortedTimers = sortTimersForDisplay(timers)
+  const currentTimers = sortedTimers.filter((t) => t.recipeId === item.recipeId)
+  const timersByRecipeId = new Map<number, typeof sortedTimers>()
+  for (const t of sortedTimers) {
+    if (t.recipeId === item.recipeId) continue
+    const list = timersByRecipeId.get(t.recipeId) ?? []
+    list.push(t)
+    timersByRecipeId.set(t.recipeId, list)
+  }
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
+  /** 調整の窓の「レシピ名タップで該当手順へ」（オーナー指示E-14）。段取りに無い手順には飛ばさない */
+  const goToTimerStep = (timer: (typeof timers)[number]) => {
+    const target = items.find(
+      (x) => x.recipeId === timer.recipeId && (recipeStepLabel(x) ?? '') === (timer.naviStepLabel ?? ''),
+    )
+    if (!target) return
+    setAdjustingId(null)
+    move({ recipeId: target.recipeId, stepIndex: target.stepIndex })
+  }
 
   const onTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     touchStartX.current = e.touches[0].clientX
@@ -338,62 +437,24 @@ export default function CookSessionOverlay({
       )}
 
       {/* 動作中のタイマー。この画面が常駐タイマーバーを覆い隠すので、ここにも出す
-          （調理中モードと同じ理由）。番号は段取りの通し番号、左の色はその料理の色 */}
-      {shownTimers.length > 0 && (
-        <div className="flex max-h-[22vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1">
-          {shownTimers.map((t) => {
-            const isCustom = t.isCustom === true || t.stepNumber <= 0
-            const badgeNumber = isCustom ? 'custom' : (t.naviOrder ?? t.stepNumber)
-            return (
-              <div
-                key={t.id}
-                style={
-                  t.done
-                    ? { background: 'color-mix(in oklab, var(--warning) 14%, var(--surface))' }
-                    : undefined
-                }
-                className={`inline-flex max-w-full items-center gap-1.5 rounded-full border py-1 pl-1.5 pr-1 ${
-                  t.done ? 'border-warning text-warning' : 'border-accent text-accent-ink'
-                } ${flashingId === t.id ? 'animate-pulse ring-2 ring-accent' : ''}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setAdjustingId(t.id)}
-                  aria-label={ja.timer.adjustOpenAria.replace('{label}', t.label)}
-                  className="flex min-w-0 items-center gap-1.5"
-                >
-                  <StepBadge
-                    number={badgeNumber}
-                    size={24}
-                    color={t.naviColorIndex != null ? naviRecipeColor(t.naviColorIndex) : undefined}
-                  />
-                  {t.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
-                  <span className="max-w-[7rem] truncate text-xs font-bold">{t.label}</span>
-                  <span className="whitespace-nowrap text-base font-bold tabular-nums">
-                    {t.done ? t.doneLabel : formatRemaining(Math.max(0, Math.ceil((t.endsAt - now) / 1000)))}
-                  </span>
-                </button>
-                {!t.done && (
-                  <button
-                    type="button"
-                    onClick={() => toggleMute(t.id)}
-                    aria-label={t.muted ? ja.timer.unmute : ja.timer.mute}
-                    className="shrink-0 rounded-full p-1.5 text-ink-muted"
-                  >
-                    {t.muted ? <BellOff size={16} aria-hidden /> : <Bell size={16} aria-hidden />}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => dismissTimer(t.id)}
-                  aria-label={ja.timer.dismiss}
-                  className="shrink-0 rounded-full p-1.5"
-                >
-                  <X size={16} aria-hidden />
-                </button>
-              </div>
-            )
-          })}
+          （調理中モードと同じ理由）。**ここに出すのは大きく表示中の品のタイマーだけ**で、
+          他の品のタイマーは下の「他の品の次の手順」の行に付ける（2026-08-09 便ES・E-11） */}
+      {currentTimers.length > 0 && (
+        <div
+          data-testid="cook-session-current-timers"
+          className="flex max-h-[22vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1"
+        >
+          {currentTimers.map((t) => (
+            <TimerChip
+              key={t.id}
+              timer={t}
+              now={now}
+              flashing={flashingId === t.id}
+              onOpen={() => setAdjustingId(t.id)}
+              onToggleMute={() => toggleMute(t.id)}
+              onDismiss={() => dismissTimer(t.id)}
+            />
+          ))}
         </div>
       )}
 
@@ -405,14 +466,19 @@ export default function CookSessionOverlay({
       >
         <div className="flex items-center gap-2">
           <StepBadge number={item.order} size={44} />
-          {/* そのレシピ内の手順番号はレシピ色の丸バッジ（段取りの一覧と同じ見分け方） */}
-          {item.stepNumber > 0 && (
+          {/* そのレシピ内の手順番号はレシピ色のバッジ（段取りの一覧と同じ見分け方）。
+              レシピの1手順を2つに分けた工程は「3-1」「3-2」（2026-08-09 便ES・E-4） */}
+          {currentStepLabel && (
             <>
               <span className="sr-only">
-                {ja.cookNavi.stepNumberLabel.replace('{n}', String(item.stepNumber))}
+                {item.splitOf != null && item.splitPart != null
+                  ? ja.cookNavi.splitStepNumberLabel
+                      .replace('{n}', String(item.splitOf))
+                      .replace('{part}', String(item.splitPart))
+                  : ja.cookNavi.stepNumberLabel.replace('{n}', currentStepLabel)}
               </span>
               <span aria-hidden>
-                <StepBadge number={item.stepNumber} size={30} color={color} />
+                <StepBadge number={currentStepLabel} size={30} color={color} />
               </span>
             </>
           )}
@@ -427,14 +493,6 @@ export default function CookSessionOverlay({
         </div>
 
         <p className="ja-phrase w-full text-2xl font-bold leading-relaxed">
-          {item.addedByNavi && (
-            <span
-              data-testid="navi-added-step"
-              className="mr-1 rounded-sm border border-edge px-1 py-0.5 align-middle text-xs font-bold text-ink-muted"
-            >
-              {ja.cookNavi.addedByNaviTag}
-            </span>
-          )}
           <ComposedStepText
             text={item.text}
             ingredientNames={ingredientNames}
@@ -452,7 +510,10 @@ export default function CookSessionOverlay({
             <div className="flex flex-wrap items-center justify-center gap-2">
               <span className="inline-flex items-center gap-1 font-bold text-accent-ink">
                 <Hourglass size={16} aria-hidden />
-                {ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
+                {/* ナビが足した湯沸かしは分数を出さない（2026-08-09 便ES・オーナー指示D-3） */}
+                {item.addedByNavi
+                  ? ja.cookNavi.waitBlockBoil
+                  : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
               </span>
               {showWaitTimerButton && (
                 <button
@@ -523,19 +584,32 @@ export default function CookSessionOverlay({
         )}
       </div>
 
-      {/* 下部: ほかの品の次の手順を1行ずつ。タップすると全文が出る（カーソルは動かない） */}
+      {/* 下部: 他の品の次の手順を1行ずつ。タップすると全文が出る（カーソルは動かない）。
+          2026-08-09 便ES: 行ごとに出していた「確認するだけです〜」は見出しの横に1回だけにし（E-6/E-10）、
+          番号は段取りの通し番号とレシピ内の番号の両方（E-7）、本文は画面幅いっぱいの別行で
+          文節の切れ目から畳む（E-8）、色の線はレシピ名の横から全文まで1本で通す（E-9） */}
       {others.length > 0 && (
         <div
           data-testid="cook-session-others"
           className="border-t border-edge bg-surface px-[var(--space-md)] py-1"
         >
-          <p className="text-[10px] font-bold text-ink-muted">{ja.cookNavi.sessionOthersTitle}</p>
+          <p className="flex flex-wrap items-baseline gap-x-2 text-[10px] text-ink-muted">
+            <span className="font-bold">{ja.cookNavi.sessionOthersTitle}</span>
+            <span data-testid="cook-session-others-hint">{ja.cookNavi.sessionOthersHint}</span>
+          </p>
           {others.map(({ recipeId, item: next }) => {
             const recipe = recipeById.get(recipeId)
             const otherColor = naviRecipeColor(recipe?.colorIndex ?? 0)
             const open = peekRecipeId === recipeId
+            const otherTimers = timersByRecipeId.get(recipeId) ?? []
+            const nextLabel = next ? recipeStepLabel(next) : undefined
             return (
-              <div key={recipeId}>
+              // 色の線はこの枠に1本だけ引く＝レシピ名の横から、開いた全文の下端まで続く
+              <div
+                key={recipeId}
+                className="border-l-4 pl-1.5"
+                style={{ borderLeftColor: otherColor }}
+              >
                 <button
                   type="button"
                   data-testid="cook-session-other-row"
@@ -546,34 +620,51 @@ export default function CookSessionOverlay({
                     '{title}',
                     recipe?.title ?? '',
                   )}
-                  className="flex w-full items-center gap-1.5 border-l-4 py-1 pl-1.5 text-left"
-                  style={{ borderLeftColor: otherColor }}
+                  className="w-full py-1 text-left"
                 >
-                  <span className="max-w-[6em] shrink truncate text-xs font-bold">
-                    {recipe?.title}
+                  <span className="flex items-center gap-1">
+                    {next && <StepBadge number={next.order} size={20} />}
+                    {nextLabel && <StepBadge number={nextLabel} size={18} color={otherColor} />}
+                    <span className="min-w-0 flex-1 truncate text-xs font-bold">
+                      {recipe?.title}
+                    </span>
                   </span>
-                  {next ? (
-                    <span className="min-w-0 flex-1 truncate text-sm">
-                      {collapseStepText(next.text, FOLDED_MAX_CHARS)}
-                    </span>
-                  ) : (
-                    <span className="min-w-0 flex-1 truncate text-sm text-ink-muted">
-                      {ja.cookNavi.sessionRecipeFinished}
-                    </span>
-                  )}
+                  {/* 本文は画面の横幅いっぱいを使う（レシピ名と同じ行に詰め込まない） */}
+                  <span className="ja-phrase mt-0.5 block w-full text-sm">
+                    {next
+                      ? collapseStepText(next.text, FOLDED_MAX_CHARS)
+                      : ja.cookNavi.sessionRecipeFinished}
+                  </span>
                 </button>
+                {/* その品のタイマーはこの行に直接出す（画面上部には出さない。E-11） */}
+                {otherTimers.length > 0 && (
+                  <div
+                    data-testid="cook-session-other-timers"
+                    className="flex flex-wrap items-center gap-1 pb-1"
+                  >
+                    {otherTimers.map((t) => (
+                      <TimerChip
+                        key={t.id}
+                        timer={t}
+                        now={now}
+                        flashing={flashingId === t.id}
+                        onOpen={() => setAdjustingId(t.id)}
+                        onToggleMute={() => toggleMute(t.id)}
+                        onDismiss={() => dismissTimer(t.id)}
+                      />
+                    ))}
+                  </div>
+                )}
                 <Collapse open={Boolean(open && next)}>
                   {next && (
                     <div
                       data-testid="cook-session-peek"
-                      className="mb-1 ml-1.5 max-h-[28vh] overflow-y-auto rounded-sm border-l-4 bg-app px-2 py-1.5"
-                      style={{ borderLeftColor: otherColor }}
+                      className="mb-1 max-h-[28vh] overflow-y-auto rounded-sm bg-app px-2 py-1.5"
                     >
                       <p className="ja-phrase text-sm leading-relaxed">{next.text}</p>
                       {next.memo && (
                         <MemoText text={next.memo} className="mt-1 text-xs text-ink-muted" />
                       )}
-                      <p className="mt-1 text-[10px] text-ink-muted">{ja.cookNavi.sessionPeekNote}</p>
                     </div>
                   )}
                 </Collapse>
@@ -618,10 +709,12 @@ export default function CookSessionOverlay({
       </div>
 
       <TermPopover state={termPopoverState} onClose={closeTermPopover} />
-      {/* タイマーの調整。この画面から別のレシピの画面へは飛ばさないので「手順へ戻る」は出さない */}
+      {/* タイマーの調整。この画面では別の画面へ飛ばさず、段取りの中でその手順へカーソルを移す
+          （2026-08-09 便ES・オーナー指示E-14「レシピ名タップ→該当手順へ移動」） */}
       <TimerAdjustModal
         timer={adjustingTimer}
         now={now}
+        onLabelClick={adjustingTimer ? () => goToTimerStep(adjustingTimer) : undefined}
         onAdjust={(delta) => {
           if (adjustingId !== null) adjustTimer(adjustingId, delta)
         }}

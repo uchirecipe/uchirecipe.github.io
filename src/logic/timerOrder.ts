@@ -39,6 +39,8 @@ export interface StoredTimer {
   naviColorIndex?: number
   /** ナビの段取りでの通し番号（2026-08-09 便EH）。常駐バーの番号バッジに出す */
   naviOrder?: number
+  /** そのレシピ内での手順番号の表示（「3」「3-1」。2026-08-09 便ES）。段取りの番号と並べて出す */
+  naviStepLabel?: string
 }
 
 /** localStorage のキー */
@@ -93,6 +95,11 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
       naviOrder:
         typeof t.naviOrder === 'number' && Number.isFinite(t.naviOrder) && t.naviOrder > 0
           ? t.naviOrder
+          : undefined,
+      // レシピ内の手順番号の表示。古い保存には無いので、そのときは stepNumber から作り直す
+      naviStepLabel:
+        typeof t.naviStepLabel === 'string' && t.naviStepLabel !== ''
+          ? t.naviStepLabel
           : undefined,
     })
   }

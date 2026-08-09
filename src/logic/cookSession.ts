@@ -16,6 +16,8 @@
  * 遷移表は `scripts/test-logic.mjs` に固定してある（docs/10 3章＝直す前にテストを足す）。
  */
 
+import { normalizedSegments } from './jaWrap'
+
 /** いま開いている手順の識別子。段取りの中の位置ではなく「どのレシピの何番目の手順か」で持つ */
 export interface CookCursor {
   recipeId: number
@@ -162,9 +164,54 @@ export function nextStepsByRecipe<T extends CursorTarget>(
  * @param headChars 文頭に残す文字数。既定は上限の約55%（残りが文末側）
  */
 export function collapseStepText(text: string, maxChars: number, headChars?: number): string {
-  const chars = [...text.trim()]
+  const trimmed = text.trim()
+  const chars = [...trimmed]
   if (maxChars <= 1 || chars.length <= maxChars) return chars.join('')
-  const head = headChars ?? Math.ceil((maxChars - 1) * 0.55)
-  const tail = Math.max(1, maxChars - 1 - head)
-  return `${chars.slice(0, head).join('')}…${chars.slice(chars.length - tail).join('')}`
+  const headBudget = headChars ?? Math.ceil((maxChars - 1) * 0.55)
+  const tailBudget = Math.max(1, maxChars - 1 - headBudget)
+  const byPhrase = collapseAtPhraseBoundary(trimmed, headBudget, maxChars)
+  if (byPhrase) return byPhrase
+  return `${chars.slice(0, headBudget).join('')}…${chars.slice(chars.length - tailBudget).join('')}`
+}
+
+/**
+ * 文節の切れ目で畳む（2026-08-09 便ES・オーナー指示E-8
+ * 「省略を文節で区切る。『じん切りにする。』のような切れ方をなくす」）。
+ *
+ * 文字数だけで切ると「玉ねぎをみ…じん切りにする。」のように語の途中で切れ、
+ * 何をする手順なのかが読み取れなくなっていた。折り返しと同じ文節分割
+ * （logic/jaWrap.ts の normalizedSegments＝BudouX＋うちレシピの結合ルール）を使い、
+ * **文節の切れ目でだけ**切る。文節1つが枠に入りきらないとき（長い1語など）は
+ * undefined を返し、呼び出し側が従来どおり文字数で切る。
+ */
+function collapseAtPhraseBoundary(
+  text: string,
+  headBudget: number,
+  maxChars: number,
+): string | undefined {
+  const segments = normalizedSegments(text)
+  if (segments.length < 2) return undefined
+  let headEnd = 0
+  let headLength = 0
+  while (headEnd < segments.length) {
+    const next = headLength + [...segments[headEnd]].length
+    if (next > headBudget) break
+    headLength = next
+    headEnd++
+  }
+  // 文頭を文節で切ると割り当てが余ることが多いので、余りは文末側に回す
+  // （文末には動詞が来やすい＝残せるほど「何をする手順か」が分かる）
+  const tailBudget = Math.max(1, maxChars - 1 - headLength)
+  let tailStart = segments.length
+  let tailLength = 0
+  while (tailStart > headEnd) {
+    const next = tailLength + [...segments[tailStart - 1]].length
+    if (next > tailBudget) break
+    tailLength = next
+    tailStart--
+  }
+  if (headEnd === 0 || tailStart === segments.length) return undefined
+  // 全部入るなら省略しない（呼び出し側の文字数判定と食い違わないための保険）
+  if (headEnd >= tailStart) return text
+  return `${segments.slice(0, headEnd).join('')}…${segments.slice(tailStart).join('')}`
 }
