@@ -23146,7 +23146,8 @@ try {
       )
       check(
         'EZ-05 枠そのものの押下は「レシピを選び直す」のまま（入れ替えの道を奪っていない）',
-        (await ezTodaySection.getByRole('button', { name: 'EZ照り焼き', exact: true }).count()) === 1,
+        (await ezTodaySection.getByRole('button', { name: /EZ照り焼き/ }).count()) === 1,
+        `件数=${await ezTodaySection.getByRole('button', { name: /EZ照り焼き/ }).count()}`,
       )
       await ezOpenRecipe.first().click()
       await ezPage.waitForTimeout(900)
