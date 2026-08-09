@@ -21644,6 +21644,156 @@ try {
     }
   }
 
+
+  // --- MULTIDEV-01: 2026-08-09 便EV「複数の端末で使う方法」(/about/multi-device.html)。
+  // 端末内保存のアプリで機種変更・2台目・クラウド運用をどう回すかを手順にした静的ページ。
+  //  (a) ページが200で開き、SWが動くpreviewでもアプリ本体(SPAシェル)にすり替わらない
+  //  (b) 必要な節(機種変更・2台目・クラウドの注意・定期的な書き出し)がそろっている
+  //  (c) ページ内のリンク・画像がすべて生きている(リンク切れ無し)
+  //  (d) ライト/ダークの両方で本文が読める(本文と背景のコントラスト比4.5:1以上)
+  //  (e) 390px幅で横にはみ出さない
+  //  (f) 紹介ページ・使い方ページ・ホーム画面追加ページからの導線があり、sitemapに載っている ---
+  currentCheck = 'MULTIDEV-01'
+  {
+    const mdBrowser = await chromium.launch()
+    try {
+      // 相対輝度からコントラスト比を出す(WCAG 2.x)。rgb()文字列をそのまま受ける
+      const evContrast = (fg, bg) => {
+        const lum = (css) => {
+          const [r, g, b] = css.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)
+          const ch = (v) => {
+            const s = v / 255
+            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+          }
+          return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+        }
+        const a = lum(fg)
+        const b = lum(bg)
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+      }
+
+      for (const scheme of ['light', 'dark']) {
+        const evContext = await mdBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: scheme,
+        })
+        const evPage = await evContext.newPage()
+        evPage.on('pageerror', (err) => {
+          if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+          errors.push(`[pageerror@MULTIDEV-01] ${err.message}`)
+        })
+        const evRes = await evPage.goto(`${BASE}/about/multi-device.html`, { waitUntil: 'networkidle' })
+        check(`MULTIDEV-01(a) ${scheme}: ページが200で開く`, evRes.status() === 200, `status=${evRes?.status()}`)
+        const evInfo = await evPage.evaluate(() => {
+          const style = (sel) => {
+            const el = document.querySelector(sel)
+            if (!el) return null
+            const cs = getComputedStyle(el)
+            return { color: cs.color, size: parseFloat(cs.fontSize) }
+          }
+          return {
+            title: document.title,
+            h1: document.querySelector('h1')?.textContent?.trim() ?? '',
+            heads: [...document.querySelectorAll('h2,h3')].map((h) => h.textContent.trim()),
+            // アプリ本体(SPAシェル)にすり替わっていたらルート要素が出る
+            appRoot: !!document.querySelector('#root'),
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+            overflow: [...document.querySelectorAll('main *')].filter(
+              (el) => el.getBoundingClientRect().right > window.innerWidth + 1,
+            ).length,
+            pageBg: getComputedStyle(document.body).backgroundColor,
+            surfaceBg: getComputedStyle(document.querySelector('.note')).backgroundColor,
+            body: style('main p'),
+            muted: style('p.muted'),
+            noteLink: style('.note a'),
+          }
+        })
+        check(`MULTIDEV-01(a) ${scheme}: 静的ページのままでアプリ本体にすり替わらない`, evInfo.appRoot === false)
+        check(
+          `MULTIDEV-01(a) ${scheme}: 見出しがページのものになっている`,
+          evInfo.h1 === '複数の端末で使う方法' && evInfo.title.includes('複数の端末で使う方法'),
+          `h1=${evInfo.h1} / title=${evInfo.title}`,
+        )
+        if (scheme === 'light') {
+          for (const kw of ['機種変更', '2台目の端末', 'クラウドを使うときに気をつけること', '定期的に書き出しておく']) {
+            check(`MULTIDEV-01(b) ${kw} の節がある`, evInfo.heads.some((h) => h.includes(kw)), evInfo.heads.join(' / '))
+          }
+          // 規約F: 「消えるもの」と「残るもの」を両方書いているか
+          const evText = await evPage.textContent('main')
+          check('MULTIDEV-01(b) 上書きで消えるものと残るものを両方書いている', evText.includes('消えるもの') && evText.includes('残るもの'))
+          check(
+            'MULTIDEV-01(b) iPhone・iPadでブラウザとホーム画面のデータが分かれることに触れている',
+            evText.includes('ホーム画面のアイコンから開いたうちレシピでは、保存されるデータが別々になります'),
+          )
+        }
+        check(
+          `MULTIDEV-01(d) ${scheme}: 本文と背景のコントラストが4.5:1以上`,
+          evContrast(evInfo.body.color, evInfo.pageBg) >= 4.5,
+          `比=${evContrast(evInfo.body.color, evInfo.pageBg).toFixed(2)}`,
+        )
+        check(
+          `MULTIDEV-01(d) ${scheme}: 補足文と背景のコントラストが4.5:1以上`,
+          evContrast(evInfo.muted.color, evInfo.pageBg) >= 4.5,
+          `比=${evContrast(evInfo.muted.color, evInfo.pageBg).toFixed(2)}`,
+        )
+        check(
+          `MULTIDEV-01(d) ${scheme}: カード面のリンクと面のコントラストが4.5:1以上`,
+          evContrast(evInfo.noteLink.color, evInfo.surfaceBg) >= 4.5,
+          `比=${evContrast(evInfo.noteLink.color, evInfo.surfaceBg).toFixed(2)}`,
+        )
+        check(
+          `MULTIDEV-01(e) ${scheme}: 390px幅で横にはみ出さない`,
+          evInfo.scrollWidth <= evInfo.innerWidth && evInfo.overflow === 0,
+          `scrollWidth=${evInfo.scrollWidth} / はみ出し要素=${evInfo.overflow}`,
+        )
+        if (scheme === 'light') {
+          // (c) リンク・画像の生存確認(リンク切れ無し)
+          const evUrls = await evPage.evaluate(() =>
+            [
+              ...[...document.querySelectorAll('a[href^="/"]')].map((a) => a.getAttribute('href')),
+              ...[...document.querySelectorAll('img')].map((i) => i.getAttribute('src')),
+            ].filter((v, i, arr) => arr.indexOf(v) === i),
+          )
+          check('MULTIDEV-01(c) ページ内リンクと画像が5件以上ある', evUrls.length >= 5, `件数=${evUrls.length}`)
+          for (const url of evUrls) {
+            const r = await evPage.request.get(`${BASE}${url}`)
+            check(`MULTIDEV-01(c) リンク/画像 ${url}`, r.status() === 200, `status=${r.status()}`)
+          }
+          // ページ内アンカー(飛び先のチップ)の行き先が実在するか
+          const evAnchors = await evPage.evaluate(() =>
+            [...document.querySelectorAll('nav.jump a')].map((a) => ({
+              href: a.getAttribute('href'),
+              exists: !!document.querySelector(a.getAttribute('href')),
+            })),
+          )
+          check('MULTIDEV-01(c) 飛び先チップが4つあり、行き先がすべて実在する', evAnchors.length === 4 && evAnchors.every((a) => a.exists), JSON.stringify(evAnchors))
+        }
+        await evContext.close()
+      }
+
+      // (f) 導線: 紹介ページ・使い方ページ・ホーム画面追加ページ・sitemap
+      const evLp = await (await page.request.get(`${BASE}/about/`)).text()
+      check('MULTIDEV-01(f) 紹介ページの「バックアップと、クラウドの使い方」から辿れる', evLp.includes('/about/multi-device.html'))
+      check(
+        'MULTIDEV-01(f) 紹介ページのよくある質問(複数の端末)からも辿れる',
+        evLp.indexOf('/about/multi-device.html', evLp.indexOf('複数の端末で同じデータを使えますか')) > -1,
+      )
+      const evManual = await (await page.request.get(`${BASE}/about/manual.html`)).text()
+      check(
+        'MULTIDEV-01(f) 使い方ページの「バックアップと機種変更」の冒頭から辿れる',
+        evManual.indexOf('/about/multi-device.html') > evManual.indexOf('12</span>バックアップと機種変更') &&
+          evManual.indexOf('/about/multi-device.html') - evManual.indexOf('12</span>バックアップと機種変更') < 400,
+      )
+      const evInstall = await (await page.request.get(`${BASE}/about/install.html`)).text()
+      check('MULTIDEV-01(f) ホーム画面追加ページからも辿れる', evInstall.includes('/about/multi-device.html'))
+      const evSitemap = await (await page.request.get(`${BASE}/sitemap.xml`)).text()
+      check('MULTIDEV-01(f) sitemapに載っている', evSitemap.includes('https://uchirecipe.com/about/multi-device.html'))
+    } finally {
+      await mdBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
