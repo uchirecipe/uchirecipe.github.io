@@ -20038,6 +20038,7 @@ try {
       const enBody = async () => (await enPage.textContent('body')) ?? ''
       check(
         'EN-01(項目3) 「調理時間15分以内を優先」を選んでいないうちは説明を出さない',
+        !(await enBody()).includes(enQuickHint),
       )
       // 2026-08-09 便EO(オーナー指示): 「高たんぱく優先」の絞り込みごと削除した。
       // 説明もチップも画面から消えていることを確かめる(項目2の後継)
@@ -20753,11 +20754,17 @@ try {
       const eoFilter = eoPage.getByRole('button', { name: '絞り込み' })
       check('EO-01 開く前は折りたたみの中身がDOMに無い', (await panelHeight()) === -1)
 
+      // 高さは20msごとに拾う(1回だけだと、機械の速さで「まだ0」「もう開き切り」に当たって
+      // 偽の赤になる。2026-08-09 司令部: 実際に取りこぼしたのでサンプリングに変更)
       await eoFilter.click()
-      await eoPage.waitForTimeout(60)
-      const midway = await panelHeight()
+      const samples = []
+      for (let i = 0; i < 20; i++) {
+        samples.push(await panelHeight())
+        await eoPage.waitForTimeout(20)
+      }
       await eoPage.waitForTimeout(600)
       const opened = await panelHeight()
+      const midway = Math.max(...samples.filter((h) => h > 0 && h < opened), 0)
       check(
         'EO-01 開くときは高さが途中の値を通る（一瞬で開かない＝アニメーションしている）',
         midway > 0 && opened > 0 && midway < opened,
