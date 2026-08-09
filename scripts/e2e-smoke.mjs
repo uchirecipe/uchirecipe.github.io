@@ -22146,6 +22146,11 @@ try {
       const etsPad = (n) => String(n).padStart(2, '0')
       const etsToday = `${etsNow.getFullYear()}-${etsPad(etsNow.getMonth() + 1)}-${etsPad(etsNow.getDate())}`
       await etsPage.goto(`${BASE}/#/meal-plan?focus=week&date=${etsToday}`, { waitUntil: 'networkidle' })
+      // この自動スクロールは画面を開いた最初の1回だけ動く(MealPlanPageのinitialFocusRef)。
+      // 上のsticky検査でスクロール済みの同じ画面のURLだけ書き換えても発火しないので、
+      // 実際の入り方(ホーム等から画面が開き直される)と同じになるよう読み込み直す。
+      // ※2026-08-09は日曜=今日が週の最終日で、前のスクロール位置がたまたま近く偽陽性だった
+      await etsPage.reload({ waitUntil: 'networkidle' })
       await etsPage.waitForTimeout(2500)
       const etsJump = await etsPage.evaluate((d) => {
         const bar = document.querySelector('.meal-plan-tabbar')?.getBoundingClientRect()
