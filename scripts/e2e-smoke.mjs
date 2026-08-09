@@ -22052,7 +22052,14 @@ try {
       const etsNow = new Date()
       const etsPad = (n) => String(n).padStart(2, '0')
       const etsToday = `${etsNow.getFullYear()}-${etsPad(etsNow.getMonth() + 1)}-${etsPad(etsNow.getDate())}`
+      // 直前に window.scrollTo(0, 1200) しているうえ、ここは「#より後ろ」だけが変わる移動なので
+      // ページは読み込み直されない＝日付へ飛ぶ処理が走らず、スクロール位置1200が残る。
+      // 今日が月曜だと目的の日が週の1枚目に来るため、残った1200のせいで必ず隠れ判定になる
+      // （曜日を前提にしたテストの4件目。2026-08-10 便EXで実測: ハッシュだけの移動→y=1200・
+      //   secTop=-684で赤、読み込み直すとy=452・secTop=64で緑。アプリ側は正常）。
+      // 日付指定で開いた「素の状態」を見たいので、必ず読み込み直してから測る
       await etsPage.goto(`${BASE}/#/meal-plan?focus=week&date=${etsToday}`, { waitUntil: 'networkidle' })
+      await etsPage.reload({ waitUntil: 'networkidle' })
       await etsPage.waitForTimeout(2500)
       const etsJump = await etsPage.evaluate((d) => {
         const bar = document.querySelector('.meal-plan-tabbar')?.getBoundingClientRect()
