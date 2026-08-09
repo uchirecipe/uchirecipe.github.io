@@ -25,7 +25,15 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      // 新しいバージョンを公開したら、開いているアプリを自動で更新する
+      // 新しいバージョンを公開したら、開いているアプリを自動で更新する。
+      // 'autoUpdate' は新しいService Workerが待たずに有効になる方式(skipWaiting + clientsClaim)で、
+      // 次にアプリを開き直したときには必ず新しい版になる。
+      // 2026-08-09 便ER: これは維持したまま、src/logic/appUpdate.ts が virtual:pwa-register の
+      // registerSW() で登録を引き受けるようにした(仮想モジュールをアプリ側でimportすると、
+      // この設定が自動で差し込む registerSW.js は出力されなくなる)。
+      // 目的は2つ。(a)新しい版が入ったことを画面下の帯で知らせ、ワンタップで即座に反映できるようにする
+      // (b)registerSWが既定で行う「有効になった瞬間の自動リロード」を onNeedReload で止め、
+      // 調理中・段取り実行中・入力中に画面が作り直されて作業が飛ぶことを防ぐ
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'icon-maskable.svg', 'apple-touch-icon.png'],
       manifest: {

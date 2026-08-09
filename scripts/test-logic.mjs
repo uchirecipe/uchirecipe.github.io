@@ -13375,6 +13375,48 @@ eq(
   eq('EN-ROT 4回で元の大きさに戻る', rotatedSize(1280, 960, 4), { width: 1280, height: 960 })
 }
 
+// ---------- 便ER: アプリの更新(2026-08-09) ----------
+// 更新の仕組みは「Service Workerの入れ替わりを見て、画面を読み込み直す」だけで、
+// レシピ・価格・設定・解錠コード(IndexedDB)には触れない。appRefreshと同じく、
+// 触れないことをソースの静的検査で固定する(触れる実装に変わったらここで落ちる)。
+// また、勝手に画面が作り直されないことの要は onNeedReload を渡していることなので、
+// これが外されたら気づけるようにしておく(外すとregisterSWが即座にreloadを呼ぶ)。
+{
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const appUpdateSrc = readFileSync(path.join(scriptDir, '../src/logic/appUpdate.ts'), 'utf-8')
+  eq(
+    'ER-UPDATE appUpdateはdexie/db配下をimportせず、indexedDBのプロパティアクセスもしない',
+    /from ['"]dexie['"]|from ['"]\.\.\/db|indexeddb\.\w/i.test(appUpdateSrc),
+    false,
+  )
+  eq(
+    'ER-UPDATE registerSWにonNeedReloadを渡している(既定の自動リロードを止める要)',
+    appUpdateSrc.includes('onNeedReload'),
+    true,
+  )
+  // 帯を出さない場面の判定は、この2つの入口だけで決まる(調理中・段取り中・入力中)
+  const bannerSrc = readFileSync(
+    path.join(scriptDir, '../src/components/AppUpdateBanner.tsx'),
+    'utf-8',
+  )
+  eq(
+    'ER-UPDATE 帯は「中断されると困る作業」とタイマーの両方を見て出し分ける',
+    bannerSrc.includes('isAppBusy') && bannerSrc.includes('timers.length'),
+    true,
+  )
+  for (const [label, file] of [
+    ['調理中モード', '../src/components/FocusMode.tsx'],
+    ['並行調理ナビの段取り実行中', '../src/components/CookSessionOverlay.tsx'],
+    ['レシピを書く画面', '../src/pages/RecipeFormPage.tsx'],
+  ]) {
+    eq(
+      `ER-UPDATE ${label}は「中断されると困る作業」として数える`,
+      readFileSync(path.join(scriptDir, file), 'utf-8').includes('useAppBusyWhileMounted()'),
+      true,
+    )
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

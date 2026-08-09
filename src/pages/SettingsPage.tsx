@@ -15,6 +15,7 @@ import {
   Info,
   Coins,
   RefreshCw,
+  ArrowDownToLine,
   TriangleAlert,
   HardDriveDownload,
   Copy,
@@ -50,6 +51,7 @@ import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
 import { restoreHomeWidget } from '../logic/homeWidgets'
 import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
+import { applyAppUpdate, checkForAppUpdate } from '../logic/appUpdate'
 import {
   supportsSaveFilePicker,
   saveWithPicker,
@@ -246,6 +248,9 @@ const sectionDeepLinks: Record<string, string> = {
   // aboutは2026-08-02: 「アプリについて」を全般節の途中からページ最後の独立した節へ移した際に追加。
   // 既存の?section=値(pro/backup/recipe/themes/budget/aisle)の行き先は変えていない
   about: 'section-about',
+  // updateは2026-08-09 便ER: 新設した「アプリの更新」カードへ名前で飛べる値(?section=update)。
+  // 画面下の更新のお知らせを閉じたあとでも、設定から最新にできる場所へ辿り着けるようにする
+  update: 'app-update-section',
 }
 
 // 各節の見出し(パーソナライズ/レシピ/バックアップ/Pro)の共通スタイル。節の区切りとして本文カードより一回り
@@ -452,6 +457,9 @@ export default function SettingsPage() {
   const [moveGuideOpen, setMoveGuideOpen] = useState(false)
   // Pro版の機能説明の折りたたみ（2026-08-09 便EO: <details>から共通の折りたたみへ）
   const [proFeaturesOpen, setProFeaturesOpen] = useState(false)
+  // 「最新の状態にする」を押してから結果が出るまで（2026-08-09 便ER）。
+  // 通信を伴うので、押しっぱなしに見えないようボタンの文字を「確認中…」に替えて二重押しも止める
+  const [appUpdateChecking, setAppUpdateChecking] = useState(false)
 
   /**
    * 「料理中」の設定が実際に働くか（2026-08-04 便DV-7・オーナー指示）。
@@ -2104,7 +2112,54 @@ export default function SettingsPage() {
             </Collapse>
           </section>
 
-          {/* ③困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設。
+          {/* ③アプリの更新(2026-08-09 便ER): 新しいバージョンが出ていないか確かめ、あればその場で
+              最新にする。次の「困ったとき」の修復とは別物なので、隣り合わせに置いて、
+              それぞれの説明でもう一方のカード名・ボタン名を出す(どちらを押せばよいか迷わせない)。
+              画面下の更新のお知らせを閉じたあとの受け皿でもある(?section=update で直接ここへ来られる) */}
+          <section id="app-update-section" className={`${sectionCls} scroll-mt-24`}>
+            <h2 className="font-bold">{ja.settings.appUpdateTitle}</h2>
+            <ul className="mt-1 space-y-1 text-sm text-ink-muted">
+              <li>{ja.settings.appUpdateWhenToUse}</li>
+              <li>{ja.settings.appUpdateWhatHappens}</li>
+              <li>{ja.settings.appUpdateWhatRemains}</li>
+            </ul>
+            <button
+              type="button"
+              data-testid="app-update-check"
+              disabled={appUpdateChecking}
+              onClick={() => {
+                setAppUpdateChecking(true)
+                void checkForAppUpdate().then((result) => {
+                  if (result === 'found') {
+                    // 新しいバージョンはすでに入っている。何が起きるか読ませてから読み込み直す
+                    setMessage(ja.settings.appUpdateResultFound)
+                    window.setTimeout(() => applyAppUpdate(), 1200)
+                    return
+                  }
+                  setAppUpdateChecking(false)
+                  setMessage(
+                    result === 'latest'
+                      ? ja.settings.appUpdateResultLatest
+                      : result === 'offline'
+                        ? ja.settings.appUpdateResultOffline
+                        : result === 'unavailable'
+                          ? ja.settings.appUpdateResultUnavailable
+                          : ja.settings.appUpdateResultFailed,
+                  )
+                })
+              }}
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
+            >
+              <ArrowDownToLine size={18} aria-hidden />
+              {appUpdateChecking ? ja.settings.appUpdateChecking : ja.settings.appUpdateButton}
+            </button>
+            <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+              {ja.settings.appUpdateAutoNote}
+            </p>
+            <p className="mt-0.5 text-xs text-ink-muted">{ja.settings.appUpdateVsRefreshNote}</p>
+          </section>
+
+          {/* ④困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設。
               2026-07-17修正4でボタン文言・説明文を全面改訂)。
               レシピ・価格・購入コード等のIndexedDBデータには一切触れない(src/logic/appRefresh.ts参照) */}
           <section className={sectionCls}>
@@ -2114,6 +2169,10 @@ export default function SettingsPage() {
               <li>{ja.settings.refreshAppWhatIsCleared}</li>
               <li>{ja.settings.refreshAppWhatRemains}</li>
             </ul>
+            {/* 「アプリの更新」との使い分け(2026-08-09 便ER) */}
+            <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+              {ja.settings.refreshAppVsUpdateNote}
+            </p>
             <button
               type="button"
               onClick={() => {

@@ -20931,6 +20931,236 @@ try {
     }
   }
 
+  // --- APPUPDATE-01: アプリの更新のワンタップ導線(2026-08-09 便ER) ---
+  // 検証したいこと:
+  //   ①新しいバージョンが入ると画面下に更新の帯が出る
+  //   ②調理中モードの間は帯を出さない(作業を壊さない)。閉じると出る
+  //   ③帯は閉じられ、そのセッションでは出し直さない
+  //   ④閉じたあとも設定の「アプリの更新」→「最新の状態にする」で反映できる(画面が読み込み直される)
+  //   ⑤新しいバージョンが無いときは「すでに最新のバージョンです」と伝える
+  //   ⑥古いキャッシュが積み上がらない(cleanupOutdatedCaches + プリキャッシュの掃除)
+  //
+  // やり方: 本物のService Workerの入れ替わりを再現する必要があるため、BASE(vite preview)ではなく
+  // dist/ をコピーした一時ディレクトリを自前の静的サーバーで配り、途中で配信中の sw.js の末尾に
+  // 印を足して「新しいバージョンを公開した」状態を作る。sw.js のバイト列が変わればブラウザは
+  // 更新として扱うので、インストール→有効化→画面の制御引き継ぎまで実物どおりに走る。
+  // 専用ポート・専用ブラウザで動かすので、他のチェックにもオーナーのdevサーバーにも触れない。
+  currentCheck = 'APPUPDATE-01'
+  {
+    const fsMod = await import('node:fs')
+    const osMod = await import('node:os')
+    const httpMod = await import('node:http')
+
+    const distDir = path.join(appRoot, 'dist')
+    if (!fsMod.existsSync(path.join(distDir, 'sw.js'))) {
+      ng(
+        'APPUPDATE-01 前提: dist/sw.js がある',
+        'npm run build を済ませてから実行してください（previewの配信元がdist）',
+      )
+    } else {
+      const serveDir = fsMod.mkdtempSync(path.join(osMod.tmpdir(), 'uchi-e2e-appupdate-'))
+      fsMod.cpSync(distDir, serveDir, { recursive: true })
+      const swPath = path.join(serveDir, 'sw.js')
+      const swOriginal = fsMod.readFileSync(swPath, 'utf-8')
+      let publishedVersion = 0
+      // 「新しいバージョンを公開する」= 配信中の sw.js を別のバイト列にする
+      const publishNewVersion = () => {
+        publishedVersion += 1
+        fsMod.writeFileSync(swPath, `${swOriginal}\n// e2e new version ${publishedVersion}\n`)
+      }
+
+      const MIME_BY_EXT = {
+        '.html': 'text/html; charset=utf-8',
+        '.js': 'text/javascript; charset=utf-8',
+        '.mjs': 'text/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.webmanifest': 'application/manifest+json; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.jpg': 'image/jpeg',
+        '.ico': 'image/x-icon',
+        '.woff2': 'font/woff2',
+        '.txt': 'text/plain; charset=utf-8',
+      }
+      const server = httpMod.createServer((req, res) => {
+        let filePath
+        try {
+          const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0])
+          filePath = path.join(serveDir, urlPath)
+          if (urlPath.endsWith('/')) filePath = path.join(filePath, 'index.html')
+          if (!filePath.startsWith(serveDir)) {
+            res.writeHead(403).end()
+            return
+          }
+          if (!fsMod.existsSync(filePath) || fsMod.statSync(filePath).isDirectory()) {
+            // このテストで開くのはハッシュルーティングのアプリ本体だけなので、
+            // 見つからないURLはindex.htmlを返す(vite previewと同じ振る舞い)
+            filePath = path.join(serveDir, 'index.html')
+          }
+          const body = fsMod.readFileSync(filePath)
+          res.writeHead(200, {
+            'Content-Type': MIME_BY_EXT[path.extname(filePath)] ?? 'application/octet-stream',
+            // 更新の検知を確実にするため、ブラウザのHTTPキャッシュは使わせない
+            'Cache-Control': 'no-store',
+          })
+          res.end(body)
+        } catch {
+          res.writeHead(500).end()
+        }
+      })
+      const updatePort = await pickFreePort('E2E_APPUPDATE_PORT')
+      await new Promise((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(updatePort, '127.0.0.1', resolve)
+      })
+      const updateBase = `http://localhost:${updatePort}`
+
+      const upBrowser = await chromium.launch()
+      try {
+        const upCtx = await upBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const upPage = await upCtx.newPage()
+        upPage.on('console', (msg) => {
+          if (msg.type() !== 'error') return
+          const text = msg.text()
+          if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+          errors.push(`[console@APPUPDATE-01] ${text}`)
+        })
+        upPage.on('pageerror', (err) => errors.push(`[pageerror@APPUPDATE-01] ${err.message}`))
+        upPage.on('dialog', (d) => void d.accept())
+
+        // 初回訪問: Service Workerが入り、画面の制御を引き継ぐまで待つ
+        await upPage.goto(`${updateBase}/`, { waitUntil: 'networkidle' })
+        await upPage.waitForFunction(() => !!navigator.serviceWorker.controller, null, {
+          timeout: 30000,
+        })
+        // 「すでにService Workerに制御されている状態で開いた」= ふだんの利用と同じ状態にする
+        await upPage.reload({ waitUntil: 'networkidle' })
+        await upPage.waitForTimeout(2000)
+        const upBanner = upPage.locator('[data-testid="app-update-banner"]')
+        check('APPUPDATE-01 更新が無いときは帯を出さない', (await upBanner.count()) === 0)
+
+        // ②調理中モードを開いている間は出さない
+        await upPage.goto(`${updateBase}/#/recipes`, { waitUntil: 'networkidle' })
+        await upPage.waitForTimeout(1500)
+        await upPage.getByText('肉じゃが', { exact: true }).first().click()
+        await upPage.waitForTimeout(900)
+        await upPage.getByText('調理中モードで見る').click()
+        await upPage.waitForTimeout(700)
+        check(
+          'APPUPDATE-01 前提: 調理中モードが開いている',
+          (await upPage.textContent('body')).includes('手順 1/'),
+        )
+        publishNewVersion()
+        await upPage.evaluate(async () => {
+          const registration = await navigator.serviceWorker.getRegistration()
+          await registration?.update()
+        })
+        // インストール→有効化→制御の引き継ぎまで待つ
+        await upPage.waitForTimeout(4000)
+        check(
+          'APPUPDATE-01 調理中モードの間は更新の帯を出さない(作業を壊さない)',
+          (await upBanner.count()) === 0,
+        )
+
+        // 調理中モードを閉じると帯が出る
+        await upPage.getByRole('button', { name: '閉じる' }).first().click()
+        await upPage.waitForTimeout(800)
+        check('APPUPDATE-01 調理中モードを閉じると更新の帯が出る', await upBanner.isVisible())
+        const upBannerText = await upBanner.textContent()
+        check(
+          'APPUPDATE-01 帯に「新しいバージョンがあります」と「更新する」が出る',
+          upBannerText.includes('新しいバージョンがあります') && upBannerText.includes('更新する'),
+        )
+        check(
+          'APPUPDATE-01 帯に、あとから設定でも更新できることが書いてある',
+          upBannerText.includes('設定の「アプリの更新」'),
+        )
+
+        // ③閉じられる・そのセッションでは出し直さない
+        await upPage.locator('[data-testid="app-update-banner-dismiss"]').click()
+        await upPage.waitForTimeout(500)
+        check('APPUPDATE-01 帯は閉じられる', (await upBanner.count()) === 0)
+        await upPage.goto(`${updateBase}/#/settings`, { waitUntil: 'networkidle' })
+        await upPage.waitForTimeout(1500)
+        check(
+          'APPUPDATE-01 閉じたあとは画面を移動しても帯を出し直さない',
+          (await upBanner.count()) === 0,
+        )
+
+        // ④設定の「アプリの更新」から反映できる（帯を閉じたあとの受け皿）
+        const upCheckButton = upPage.locator('[data-testid="app-update-check"]')
+        check('APPUPDATE-01 設定に「最新の状態にする」がある', await upCheckButton.isVisible())
+        check(
+          'APPUPDATE-01 設定に「困ったとき」との使い分けが書いてある',
+          (await upPage.textContent('body')).includes(
+            '表示の乱れが直らないときは「困ったとき」の「アプリの表示を修復する」をお使いください',
+          ) &&
+            (await upPage.textContent('body')).includes(
+              '新しいバージョンにしたいだけなら、「アプリの更新」の「最新の状態にする」で足ります',
+            ),
+        )
+        await upCheckButton.scrollIntoViewIfNeeded()
+        await upPage.waitForTimeout(200)
+        await upCheckButton.click()
+        await upPage.waitForTimeout(500)
+        check(
+          'APPUPDATE-01 更新がある状態で押すと「新しいバージョンにしました」と伝える',
+          (await upPage.textContent('body')).includes('新しいバージョンにしました'),
+        )
+        // 知らせを読ませてから画面を読み込み直す
+        await upPage.waitForTimeout(3000)
+        const upReloaded = await upPage.evaluate(
+          () => performance.getEntriesByType('navigation')[0]?.type,
+        )
+        check(
+          'APPUPDATE-01 「最新の状態にする」を押すと画面が読み込み直される',
+          upReloaded === 'reload',
+          `navigation type=${upReloaded}`,
+        )
+
+        // ⑤更新が無いときは「すでに最新」と伝える
+        await upPage.goto(`${updateBase}/#/settings`, { waitUntil: 'networkidle' })
+        await upPage.waitForFunction(() => !!navigator.serviceWorker.controller, null, {
+          timeout: 30000,
+        })
+        await upPage.waitForTimeout(2000)
+        const upCheckButton2 = upPage.locator('[data-testid="app-update-check"]')
+        await upCheckButton2.scrollIntoViewIfNeeded()
+        await upPage.waitForTimeout(200)
+        await upCheckButton2.click()
+        await upPage.waitForTimeout(3000)
+        check(
+          'APPUPDATE-01 更新が無い状態で押すと「すでに最新のバージョンです」と伝える',
+          (await upPage.textContent('body')).includes('すでに最新のバージョンです'),
+        )
+        check(
+          'APPUPDATE-01 「すでに最新」のときは画面を読み込み直さない',
+          (await upBanner.count()) === 0,
+        )
+
+        // ⑥古いキャッシュが積み上がっていない(Workboxの自動削除が効いている)
+        const upCacheState = await upPage.evaluate(async () => {
+          const keys = await caches.keys()
+          const counts = {}
+          for (const key of keys) counts[key] = (await (await caches.open(key)).keys()).length
+          return { keys, counts }
+        })
+        check(
+          'APPUPDATE-01 更新を挟んでもキャッシュは1つだけ(古い世代が残らない)',
+          upCacheState.keys.length === 1,
+          `caches=${upCacheState.keys.join(' / ')}`,
+        )
+      } finally {
+        await upBrowser.close()
+        server.closeAllConnections?.()
+        await new Promise((resolve) => server.close(resolve))
+        fsMod.rmSync(serveDir, { recursive: true, force: true })
+      }
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

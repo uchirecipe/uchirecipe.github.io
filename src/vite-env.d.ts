@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 /**
  * アプリバージョン(package.jsonのversion)。vite.config.tsのdefineでビルド時に文字列として

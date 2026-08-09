@@ -57,6 +57,7 @@ import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
 import { RecipeIcon } from '../components/RecipeCard'
 import { starterDefs } from '../db/starters'
+import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
 
 /* フォーム内部で扱う行の形（入力中は数値も文字列で持つ）。
@@ -369,6 +370,8 @@ export default function RecipeFormPage() {
 }
 
 function RecipeFormInner() {
+  // レシピを書いている間は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
+  useAppBusyWhileMounted()
   const params = useParams()
   const navigate = useNavigate()
   const editId = params.id ? Number(params.id) : undefined

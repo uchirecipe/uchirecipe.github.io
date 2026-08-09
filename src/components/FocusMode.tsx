@@ -36,6 +36,7 @@ import ComposedStepText from './ComposedStepText'
 import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import CustomTimerModal from './CustomTimerModal'
+import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
 
 // 自由な時間のタイマー(ja.timer.customLabel「タイマー」)の既定値(秒)。2026-07-12秒刻み対応で分単位のstateを廃止し秒単位に統一
@@ -61,6 +62,8 @@ type Props = {
  * 「画面を暗くしない」設定は詳細画面(呼び出し元)側のWake Lockがそのまま効く。
  */
 export default function FocusMode({ recipe, recipeId, initialStep, onClose, onComplete }: Props) {
+  // 調理中は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
+  useAppBusyWhileMounted()
   const {
     startTimer,
     timers,
