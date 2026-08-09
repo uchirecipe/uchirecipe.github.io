@@ -66,6 +66,7 @@ import FocusMode from '../components/FocusMode'
 import NutritionTeaser from '../components/NutritionTeaser'
 import PriceEditModal, { type PriceEditTarget } from '../components/PriceEditModal'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
+import { useRevealOnOpen } from '../components/useRevealOnOpen'
 import StepBadge from '../components/StepBadge'
 import ComposedStepText from '../components/ComposedStepText'
 import { collectUniqueTerms } from '../logic/termSplit'
@@ -236,6 +237,7 @@ export default function RecipeDetailPage() {
 
   // 過去の記録を後から編集する
   const [editingLogIndex, setEditingLogIndex] = useState<number | null>(null)
+  const logEditRef = useRevealOnOpen<HTMLDivElement>(editingLogIndex !== null)
   const [editingLogDate, setEditingLogDate] = useState('')
   const [editingLogNote, setEditingLogNote] = useState('')
   // 記録した人数(2026-07-29 便CI/C05)。編集フォームにも欄が無く、間違った人数を直せなかった
@@ -1164,7 +1166,10 @@ export default function RecipeDetailPage() {
                 return (
                   <li key={index} className="px-[var(--space-md)] py-2">
                     {editingLogIndex === index ? (
-                      <div className="space-y-2">
+                      // 押した行が画面の外へ見切れないよう、開いてから位置を合わせる
+                      // （2026-08-09 便EO・オーナー実機「編集ボタンを押しても編集画面が
+                      //   画面外に見切れてしまう」）
+                      <div ref={logEditRef} className="space-y-2">
                         <input
                           type="date"
                           value={editingLogDate}

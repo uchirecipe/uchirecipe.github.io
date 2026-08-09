@@ -13,6 +13,8 @@ import {
   CheckCheck,
   HelpCircle,
 } from 'lucide-react'
+import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import { listRecipes } from '../db/recipes'
 import { updateSettings, useSettings } from '../db/settings'
 import { usePantryItems } from '../db/pantry'
@@ -521,7 +523,10 @@ export default function ShoppingPage() {
 
       {/* タブ切り替え: 食材の在庫／買い物メモ(2026-07-16 UI総点検B-9)。SettingsPageのタブバーと
           同じパターン(sticky+backdrop-blur)。タブ状態はページローカルで保存しない */}
-      <div className="pantry-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur">
+      <div
+        data-app-top-bar
+        className="pantry-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
+      >
         <div className="grid grid-cols-2 gap-1">
           <button
             type="button"
@@ -590,7 +595,12 @@ export default function ShoppingPage() {
                   className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
                 >
                   <CheckCheck size={16} aria-hidden />
-                  {allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}
+                  {/* 「全部チェック」⇔「チェックを外す」で幅が変わり、左隣のリンクが
+                      切れていた（2026-08-09 便EO）。長い方の幅で固定する */}
+                  <SwapLabel
+                    current={allChecked ? ja.shopping.uncheckAll : ja.shopping.checkAll}
+                    labels={[ja.shopping.checkAll, ja.shopping.uncheckAll]}
+                  />
                 </button>
               </div>
               {/* チェックした食材を下にまとめるスイッチ(2026-08-08 オーナー実機フィードバック)。
@@ -716,9 +726,9 @@ export default function ShoppingPage() {
               {ja.common.usageHint}
               {showCandidateDescription ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
             </button>
-            {showCandidateDescription && (
+            <Collapse open={showCandidateDescription}>
               <p className="mt-1 text-sm text-ink-muted">{ja.shopping.candidateDescription}</p>
-            )}
+            </Collapse>
             {/* どの範囲の献立から作ったか(2026-08-08 便EA)。献立の週タブで日付・食事を選べる
                 ようにしたので、下書きを見たときに範囲が分かるようにする。
                 レシピを手で選んで作った下書きには出ない */}

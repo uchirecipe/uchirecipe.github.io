@@ -1930,7 +1930,7 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     )
   }
 
-  // ---- role指定・ジャンル優先・高たんぱく優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
+  // ---- role指定・ジャンル優先・ペア提案(2026-07-13献立の主菜+副菜構成) ----
 
   // role:'side'は副菜系タグ(汁物/サラダ。「副菜」専用タグは無いため代用。おやつは含めない=
   // 2026-07-13 Fable裁定)の品を優先する
@@ -2032,19 +2032,23 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     suggestForSlot([mkRecipe(1, { tags: ['洋食'] })], opts({ genre: '和食' }))?.id,
     1,
   )
-  // 高たんぱく優先: 「高たんぱく」タグ品を優先し、無ければ他も許可する
+  // 高たんぱく優先の削除(2026-08-09 便EO・オーナー指示)の再発防止。
+  // 「高たんぱく」タグはレシピ側に残しているが、提案の絞り込みには一切効かせない。
+  // 候補の一覧(suggestCandidates)にタグ有り・タグ無しの両方が残ることで確かめる
+  // (優先が復活すると、タグ無しの品が候補から落ちて1品だけになる)
   {
     const recipes = [mkRecipe(1, { tags: [] }), mkRecipe(2, { tags: ['高たんぱく'] })]
-    const picks = Array.from({ length: 10 }, () =>
-      suggestForSlot(recipes, opts({ preferHighProtein: true }))?.id,
+    eq(
+      '高たんぱく: タグの有無で提案の候補を絞り込まない(削除済み)',
+      suggestCandidates(recipes, opts()).map((r) => r.id).sort().join(','),
+      '1,2',
     )
-    eq('高たんぱく優先: タグ品を優先する', picks.every((id) => id === 2), true)
+    eq(
+      '高たんぱく: 廃止した preferHighProtein を渡しても候補は変わらない',
+      suggestCandidates(recipes, opts({ preferHighProtein: true })).map((r) => r.id).sort().join(','),
+      '1,2',
+    )
   }
-  eq(
-    '高たんぱく優先: 該当が無ければ他も提案する(0件にしない)',
-    suggestForSlot([mkRecipe(1, { tags: [] })], opts({ preferHighProtein: true }))?.id,
-    1,
-  )
 
   // suggestPairForSlot: 主菜+副菜をペアで返し、ジャンル未指定なら主菜と同じジャンルの副菜を優先する
   {

@@ -184,6 +184,8 @@ import { canUseMonthTrial, isMonthTrialReady, MONTH_TRIAL_MIN_COOKED } from '../
 import { pickDayCoverPhoto, setDayCoverChoice } from '../logic/monthCover'
 import { diffDayEdit, type DayEditDiff } from '../logic/dayEdit'
 import type { MonthDemoData } from '../logic/monthDemo'
+import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -244,9 +246,18 @@ const chipClass = (on: boolean): string =>
 /** 選択中のチップの地色。アクセント色から作る＝色を直書きしない（コーディング規約） */
 const chipStyle = (on: boolean): { background: string } | undefined =>
   on ? { background: 'color-mix(in oklab, var(--accent) 14%, var(--bg))' } : undefined
-/** 選択中のチップの先頭に置くチェック印（色だけでなく形でも選択が分かるようにする） */
-const ChipCheck = ({ on }: { on: boolean }) =>
-  on ? <Check size={14} className="shrink-0" aria-hidden /> : null
+/**
+ * 選択中のチップの先頭に置くチェック印（色だけでなく形でも選択が分かるようにする）。
+ *
+ * 2026-08-09 便EO（オーナー実機「ボタンも押下後にサイズが変わって場所がズレるので、
+ * 誤操作や見失いの元になってる。基本的にサイズと位置は変えないで」）:
+ * 選んだときだけ印を差し込むと、チップの幅が18px（印14px＋間隔4px）伸びて、
+ * 右隣のチップが全部ずれる（行があふれれば折り返して縦にも動く）。
+ * **選んでいないときも同じ大きさの場所を空けておく**＝押しても1pxも動かない。
+ */
+const ChipCheck = ({ on }: { on: boolean }) => (
+  <Check size={14} className={`shrink-0 ${on ? '' : 'invisible'}`} aria-hidden />
+)
 
 /**
  * 「栄養から組む」（2026-08-02 便CP-2 → 2026-08-07 便DT-9で8軸へ。旧称「目的」）の表示ラベル。
@@ -930,7 +941,8 @@ function IntakeDisclosureButton({
       aria-expanded={open}
       className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-app px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
     >
-      {open ? closeLabel : openLabel}
+      {/* 「内訳を見る」⇔「内訳を閉じる」で文字数が変わってもボタンの幅は動かさない（便EO） */}
+      <SwapLabel current={open ? closeLabel : openLabel} labels={[openLabel, closeLabel]} />
       {open ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
     </button>
   )
@@ -2305,9 +2317,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }, [isDemo, todayEntries, todayList, todayPlanAllRecipeIds])
 
   const [quickOnly, setQuickOnly] = useState(false)
-  // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)・高たんぱく優先
+  // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)
+  // 2026-08-09 便EO(オーナー指示): 「高たんぱく優先」の絞り込みは削除した
   const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
-  const [preferHighProtein, setPreferHighProtein] = useState(false)
   /**
    * 目的モード（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
    * 時短・ジャンルと違って設定に保存するのは、この指定が「1か月続ける」ためのものだから
@@ -2692,7 +2704,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       usedRecipeIds: [],
       slot,
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
       role: 'main',
     }).length
@@ -2702,7 +2713,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     settings?.ngIngredients,
     visibleSlots,
     genreFilter,
-    preferHighProtein,
     yesterdayRecipeIds,
   ])
 
@@ -2720,7 +2730,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       usedRecipeIds: excludeIds,
       slot,
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
     })
     const ids = [main?.id, side?.id].filter((x): x is number => x != null)
@@ -2926,7 +2935,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       usedRecipeIds,
       slot,
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
     }
     // 枠が丸ごと空のときのペア提案は主菜・副菜の行から押したときだけ（2026-08-02 便DE-4）。
@@ -3039,7 +3047,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
       genre: genreFilter,
-      preferHighProtein,
       yesterdayRecipeIds,
     }
 
@@ -3640,7 +3647,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           <ChevronDown size={18} className="shrink-0 text-accent-ink" aria-hidden />
         )}
       </button>
-      {planSheetOpen && (
+      <Collapse open={planSheetOpen}>
         <div className="px-[var(--space-md)] pb-[var(--space-md)]">
           <p className="text-xs text-ink-muted">{ja.mealPlan.planSheetHint}</p>
           {sheet.isEmpty ? (
@@ -3696,7 +3703,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </>
           )}
         </div>
-      )}
+      </Collapse>
     </section>
   )
 
@@ -3788,7 +3795,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 「先週の献立をコピー」のスイッチ（2026-08-07 便DT-7・オーナー指示）。
    * 独立したボタンをやめ、ONのまま「まとめて献立を入力」を押すとコピーが走る形にした。
-   * ONのあいだ、提案の条件（時短・ジャンル・高たんぱく・目的）と入れかたは意味を持たないので、
+   * ONのあいだ、提案の条件（時短・ジャンル・目的）と入れかたは意味を持たないので、
    * 画面でも無効化して「効きません」を見た目で示す（効かない操作を押せる状態で置かない）。
    */
   const [copyLastWeekMode, setCopyLastWeekMode] = useState(false)
@@ -4230,7 +4237,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           )}
         </span>
       </button>
-      {shopRangeOpen && (
+      <Collapse open={shopRangeOpen}>
         <div className="px-[var(--space-sm)] pb-[var(--space-sm)]">
           <p className="text-xs text-ink-muted">{ja.mealPlan.shopRangeNote}</p>
           <p className="mt-[var(--space-sm)] text-xs font-bold text-ink-muted">
@@ -4307,7 +4314,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </button>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   )
 
@@ -4619,7 +4626,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const activeConditionSummaries: (string | undefined)[] = [
     quickOnly ? ja.mealPlan.quickOnlySummary : undefined,
     genreFilter,
-    preferHighProtein ? ja.mealPlan.preferHighProteinToggle : undefined,
     // 目的は「まとめて献立」の結果を最も大きく変える条件なので、畳んだラベルにも必ず出す
     planPurpose ? purposeLabelOf(planPurpose) : undefined,
   ]
@@ -4651,7 +4657,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   )
 
   /**
-   * 自動提案の条件（時短優先・ジャンル・高たんぱく優先）の折りたたみ。
+   * 自動提案の条件（時短優先・ジャンル）の折りたたみ。
    * 2026-07-30 便CH/C11: 週タブの中にしか無かったが、この3つの条件は月タブの
    * 「未定の日をまとめて提案」にも100%効いている（executeFillが同じ値を読む）。
    * 月から条件が見えず変えられないため、「なぜ月が全部中華になったのか」が画面から分からなかった。
@@ -4677,7 +4683,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
       >
         {ja.mealPlan.suggestConditionsToggle}
-        {!suggestConditionsOpen && conditionsSummary ? `: ${conditionsSummary}` : ''}
+        {/* 現在値は開いていても出したままにする（2026-08-09 便EO・オーナー実機
+            「ボタンも押下後にサイズが変わって場所がズレる」）。畳んだときだけ足していたため、
+            押すたびにボタンの右端が100px以上動き、シェブロンに置いた指が空振りしていた */}
+        {conditionsSummary ? `: ${conditionsSummary}` : ''}
         {suggestConditionsOpen ? (
           <ChevronUp size={16} aria-hidden />
         ) : (
@@ -4685,7 +4694,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         )}
       </button>
 
-      {suggestConditionsOpen && (
+      <Collapse open={suggestConditionsOpen}>
         <>
         <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
           <button
@@ -4721,29 +4730,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {genre}
             </button>
           ))}
-          <button
-            type="button"
-            onClick={() => setPreferHighProtein((v) => !v)}
-            aria-pressed={preferHighProtein}
-            className={chipClass(preferHighProtein)}
-            style={chipStyle(preferHighProtein)}
-          >
-            <ChipCheck on={preferHighProtein} />
-            {ja.mealPlan.preferHighProteinToggle}
-          </button>
         </div>
         {/* 条件の説明は、その条件を選んでいるあいだだけ出す（2026-08-09 便EN・オーナー実機
             「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
             優先されているように読めた）。
-            ・調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること
-            ・高たんぱく: 見ているのはレシピに付いた「高たんぱく」タグで、栄養価の計算値ではないこと
-              （すぐ下にPro版の「栄養から組む」の「たんぱく質多め」が並ぶため） */}
+            調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること */}
         {quickOnly && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>}
-        {preferHighProtein && (
-          <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.preferHighProteinHint}</p>
-        )}
         </>
-      )}
+      </Collapse>
 
       {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
           解錠済み: 3択で選ぶ（他の条件と同じく折りたたみの中）。
@@ -4752,7 +4746,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           既定で閉じている折りたたみの中に入れると、結局その入口は誰にも見えない）。
           押し売りはしない＝1行の控えめな鍵付き行にとどめる（規約H） */}
       {isPro ? (
-        suggestConditionsOpen && (
+        <Collapse open={suggestConditionsOpen}>
           <div className="mt-[var(--space-md)]" data-testid="purpose-picker">
             <p className="flex items-center gap-1 text-sm font-bold text-ink-muted">
               {ja.mealPlan.purposeLabel}
@@ -4801,7 +4795,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             ))}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
           </div>
-        )
+        </Collapse>
       ) : (
         showLockedRow && renderPurposeLockedRow()
       )}
@@ -5172,9 +5166,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setMonthAnchor(today)}
                 aria-label={isAtCurrentMonth ? undefined : ja.mealPlan.thisMonth}
-                className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+                className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted tabular-nums shadow-sm"
               >
-                {!isAtCurrentMonth && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
+                {/* 今月に戻ると印が消えて幅が18px縮み、左右の送りボタンの見え方がぶれる。
+                    場所は空けたままにして押しても動かさない（便EO） */}
+                <RotateCcw
+                  size={14}
+                  className={`text-accent-ink ${isAtCurrentMonth ? 'invisible' : ''}`}
+                  aria-hidden
+                />
                 {monthAnchor.slice(0, 4)}/{monthAnchor.slice(5, 7)}
               </button>
               <button
@@ -5277,7 +5277,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 開始日・終了日の手入力(2026-08-08 便EA・オーナー指示)。
                 カレンダーのタップと同じ値を書き換える。月をまたぐ期間もここから組める
                 (集計はrangeCookedDishes/rangePlannedDishesが選んだ期間そのものを読む) */}
-            {costMode && (
+            <Collapse open={costMode}>
               <div className="mt-[var(--space-sm)] rounded-md border border-edge p-[var(--space-sm)]">
                 <p className="text-xs text-ink-muted">{ja.mealPlan.rangeDateInputNote}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -5303,7 +5303,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </label>
                 </div>
               </div>
-            )}
+            </Collapse>
 
             <div className="mt-[var(--space-sm)] grid grid-cols-7 gap-1 text-center text-xs font-bold text-ink-muted">
               {ja.mealPlan.dow.map((d) => (
@@ -5464,12 +5464,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       openLabel={ja.mealPlan.intakeCostDetailsOpen}
                       closeLabel={ja.mealPlan.intakeCostDetailsClose}
                     />
-                    {rangeSummaryOpen && (
+                    <Collapse open={rangeSummaryOpen}>
                       <IntakeCostDetails
                         summary={rangeSummary}
                         pricelessCount={rangePricelessCount}
                       />
-                    )}
+                    </Collapse>
 
                     {/* 栄養(食費のあと・月タブと同じ並び)。8項目の数値は畳まずに出し、
                         長い但し書きと出典だけを折りたたみへ回す(規約H)。
@@ -5491,11 +5491,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           openLabel={ja.mealPlan.intakeNutritionNotesOpen}
                           closeLabel={ja.mealPlan.intakeNutritionNotesClose}
                         />
-                        {rangeNutritionNotesOpen && (
+                        <Collapse open={rangeNutritionNotesOpen}>
                           <div className="mt-[var(--space-sm)]">
                             <NutritionSourceNotes />
                           </div>
-                        )}
+                        </Collapse>
                       </>
                     )}
                   </>
@@ -5563,8 +5563,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     }))}
                   />
                 ))}
-              {monthCostCardOpen &&
-                (monthSummaryDishCount === 0 ? (
+              <Collapse open={monthCostCardOpen}>
+                {monthSummaryDishCount === 0 ? (
                 // 2026-08-08 便EA: 今日の作った記録も合計に入るようになったので、
                 // 「今日の記録だけがある月」は0品にならない＝ここは本当に何も無い月だけになった
                 // （従来はその場合に monthSummaryTodayOnly を出していた）
@@ -5655,14 +5655,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     openLabel={ja.mealPlan.intakeCostDetailsOpen}
                     closeLabel={ja.mealPlan.intakeCostDetailsClose}
                   />
-                  {monthSummaryOpen && (
+                  <Collapse open={monthSummaryOpen}>
                     <IntakeCostDetails
                       summary={monthSummary}
                       pricelessCount={monthPricelessCount}
                     />
-                  )}
+                  </Collapse>
                 </>
-                ))}
+                )}
+              </Collapse>
             </section>
 
             {/* 月の栄養(2026-08-03 便DQで食費と分離)。8項目の数値はカードを開けば畳まずに出し、
@@ -5693,7 +5694,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       }))}
                     />
                   )}
-                  {monthNutritionCardOpen && (
+                  <Collapse open={monthNutritionCardOpen}>
                   <>
                   {monthSummary.nutrition.dishCount > 0 && (
                     <div className="mt-[var(--space-sm)]">
@@ -5753,13 +5754,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     openLabel={ja.mealPlan.intakeNutritionNotesOpen}
                     closeLabel={ja.mealPlan.intakeNutritionNotesClose}
                   />
-                  {monthNutritionNotesOpen && (
+                  <Collapse open={monthNutritionNotesOpen}>
                     <div className="mt-[var(--space-sm)]">
                       <NutritionSourceNotes />
                     </div>
-                  )}
+                  </Collapse>
                   </>
-                  )}
+                  </Collapse>
                 </section>
               )}
 
@@ -5942,7 +5943,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           ja.mealPlan.weekGroupDisplayTitle,
           renderSlotFilter(),
         )}
-        {weekGroupOpen.display && (
+        <Collapse open={weekGroupOpen.display}>
           <>
             {/* 週の表示起点の切替(2026-07-24 便BH-3・タスク3): 従来の週区切り⇄今日を先頭に7日間。
                 既定は週区切り・選択は記憶する */}
@@ -6011,7 +6012,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               </button>
             </div>
           </>
-        )}
+        </Collapse>
       </section>
 
       {/* グループ2: 献立を提案(条件＋実行ボタン)。押すと献立が増える操作をここに集める。
@@ -6038,9 +6039,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             （2026-08-09 便EN。グループを既定で畳んだので、中に置くと入口が画面から消える。
             docs/62 決定②「売り場を変える」＝無料の献立画面に入口を残す） */}
         {!isPro && renderPurposeLockedRow()}
-        {weekGroupOpen.auto && (
+        <Collapse open={weekGroupOpen.auto}>
           <>
-            {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)・高たんぱく優先。
+            {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)。
                 既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
                 畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
@@ -6112,14 +6113,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 (2026-07-29 便CD/MP-15) */}
             <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
           </>
-        )}
+        </Collapse>
       </section>
 
       {/* グループ3: 献立テンプレート(2026-07-29 便CB-2・docs/59 A-1＋B-2)。
           保存＝表示中の週を曜日ごと覚える／適用＝空いているところにだけ入れる(非破壊) */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('template', ja.mealPlan.weekGroupTemplateTitle)}
-        {weekGroupOpen.template && (
+        <Collapse open={weekGroupOpen.template}>
           <>
             <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
               <button
@@ -6149,7 +6150,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {ja.mealPlan.templateManageLink}
             </Link>
           </>
-        )}
+        </Collapse>
       </section>
 
       {/* 週の移動。2026-08-07 便DT-3(オーナー指示)で、画面のいちばん上から
@@ -6169,9 +6170,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           aria-label={
             isAtCurrentWeek ? undefined : rollingWeek ? ja.mealPlan.thisWeekRolling : ja.mealPlan.thisWeek
           }
-          className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+          className="flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted tabular-nums shadow-sm"
         >
-          {!isAtCurrentWeek && <RotateCcw size={14} className="text-accent-ink" aria-hidden />}
+          {/* 今週に戻ると印が消えて幅が18px縮むので、場所は空けたままにする（便EO） */}
+          <RotateCcw
+            size={14}
+            className={`text-accent-ink ${isAtCurrentWeek ? 'invisible' : ''}`}
+            aria-hidden
+          />
           {dates[0].replaceAll('-', '/')} 〜 {dates[6].replaceAll('-', '/')}
         </button>
         <button
@@ -6203,14 +6209,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           }`}
         >
           {allDaysLocked ? <Lock size={14} aria-hidden /> : <LockOpen size={14} aria-hidden />}
-          {allDaysLocked ? ja.mealPlan.lockAllReleaseButton : ja.mealPlan.lockAllButton}
+          {/* 押すと文言が入れ替わるが、幅は長い方で固定して1pxも動かさない（便EO） */}
+          <SwapLabel
+            current={allDaysLocked ? ja.mealPlan.lockAllReleaseButton : ja.mealPlan.lockAllButton}
+            labels={[ja.mealPlan.lockAllButton, ja.mealPlan.lockAllReleaseButton]}
+          />
         </button>
         <button
           type="button"
           onClick={() => setCollapsedDates(allDaysCollapsed ? [] : [...dates])}
           className="rounded-sm border border-edge bg-surface px-3 py-1.5 text-xs font-bold text-accent-ink shadow-sm"
         >
-          {allDaysCollapsed ? ja.mealPlan.weekDayExpandAll : ja.mealPlan.weekDayCollapseAll}
+          <SwapLabel
+            current={allDaysCollapsed ? ja.mealPlan.weekDayExpandAll : ja.mealPlan.weekDayCollapseAll}
+            labels={[ja.mealPlan.weekDayCollapseAll, ja.mealPlan.weekDayExpandAll]}
+          />
         </button>
       </div>
       <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
@@ -6283,7 +6296,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
               </button>
             </h2>
-            {!dayCollapsed && (
+            <Collapse open={!dayCollapsed}>
             <>
             {/* 今日・未来日は編集可能な予定グリッド。過去日は予定を表示から消し、下の「作った記録」
                 だけを日記のように見せる(便BS・タスク2。mealPlansデータは非破壊で残す) */}
@@ -6360,7 +6373,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               />
             </div>
             </>
-            )}
+            </Collapse>
           </section>
           )
         })}
@@ -6411,7 +6424,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               <ChevronDown size={18} className="shrink-0 text-accent-ink" aria-hidden />
             )}
           </button>
-          {weekCostOpen && (
+          <Collapse open={weekCostOpen}>
             <div className="px-[var(--space-md)] pb-[var(--space-md)]">
               <p className="text-2xl font-bold text-accent-ink">
                 約{weekCost.toLocaleString()}円
@@ -6475,7 +6488,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </div>
               )}
             </div>
-          )}
+          </Collapse>
         </section>
       )}
 
@@ -6567,7 +6580,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               </button>
             </div>
           </div>
-          {pickerControlsOpen && (
+          <Collapse open={pickerControlsOpen}>
             <div className="mt-[var(--space-sm)] max-h-[40vh] overflow-y-auto px-[var(--space-md)]">
               <div className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
                 <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
@@ -6636,7 +6649,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </div>
               </div>
             </div>
-          )}
+          </Collapse>
           <div className="mt-[var(--space-sm)] flex-1 overflow-y-auto px-[var(--space-md)]">
             {filteredRecipes.length === 0 ? (
               <p className="mt-[var(--space-md)] text-center text-ink-muted">
@@ -6947,7 +6960,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         }`}
                       >
                         {label}
-                        <span className="ml-0.5 text-[10px] font-normal">{count}</span>
+                        {/* 数字は等幅で出す＝テンプレートを選び直して件数が入れ替わっても
+                            7つのボタンの幅が動かない（2026-08-09 便EO） */}
+                        <span className="ml-0.5 text-[10px] font-normal tabular-nums">{count}</span>
                       </button>
                     )
                   })}

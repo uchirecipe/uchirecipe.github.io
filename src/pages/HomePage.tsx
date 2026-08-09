@@ -32,6 +32,7 @@ import { todayString } from '../logic/date'
 import { makePantryMatcher } from '../logic/pantry'
 import type { CookedLog, DishType, HomeWidgetKey, MealSlot, Recipe } from '../db/types'
 import { defaultHomeWidgets } from '../db/types'
+import Collapse from '../components/Collapse'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { settingsLinkWithBack } from '../logic/backLink'
@@ -419,13 +420,13 @@ export default function HomePage() {
                   <ChevronDown size={16} className="shrink-0" aria-hidden />
                 )}
               </button>
-              {pickedOpen && (
+              <Collapse open={pickedOpen}>
                 <ul className="divide-y divide-edge rounded-md border border-edge bg-app">
                   {pickedRecipes.map((recipe) => (
                     <HomeTodayListItem key={recipe.id} recipe={recipe} />
                   ))}
                 </ul>
-              )}
+              </Collapse>
             </div>
           )}
 
@@ -447,8 +448,8 @@ export default function HomePage() {
                   <ChevronDown size={16} className="shrink-0" aria-hidden />
                 )}
               </button>
-              {plannedOpen &&
-                plannedGroups.map(({ slot, recipes: slotRecipes }) => (
+              <Collapse open={plannedOpen}>
+                {plannedGroups.map(({ slot, recipes: slotRecipes }) => (
                   <div key={slot} className="mt-1">
                     <button
                       type="button"
@@ -467,6 +468,7 @@ export default function HomePage() {
                     </ul>
                   </div>
                 ))}
+              </Collapse>
             </div>
           )}
         </section>
@@ -499,11 +501,13 @@ export default function HomePage() {
                 className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
               >
                 {ja.home.conditionsToggle}
-                {!conditionsOpen && condition !== 'any' ? `: ${conditionLabel(condition)}` : ''}
+                {/* 現在値は開いていても出したままにする（2026-08-09 便EO・オーナー実機
+                    「押下後にサイズが変わって場所がズレる」）。畳んだときだけ足すと、
+                    押すたびにボタンの幅が変わってシェブロンの位置が動いていた */}
+                {condition !== 'any' ? `: ${conditionLabel(condition)}` : ''}
                 {conditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
               </button>
-              {conditionsOpen && (
-                <>
+              <Collapse open={conditionsOpen}>
                   <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
                     {conditions.map((option) => (
                       <button
@@ -566,8 +570,7 @@ export default function HomePage() {
                       ))}
                     </div>
                   </div>
-                </>
-              )}
+              </Collapse>
             </div>
 
             {/* 「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6)。
@@ -685,6 +688,7 @@ export default function HomePage() {
           従来のまま変更していない */}
       {showBackupReminder && !backupReminderDismissed && (
         <div
+          data-app-top-bar
           className="fixed inset-x-0 z-10"
           style={{ top: 'calc(var(--space-sm) + env(safe-area-inset-top))' }}
         >

@@ -15,6 +15,7 @@ import {
   type BalanceSum,
   type SlotBalance,
 } from '../logic/nutritionBalance'
+import Collapse from './Collapse'
 import { ProNutrientTeaser } from './NutritionTeaser'
 import { ja } from '../i18n/ja'
 
@@ -178,7 +179,7 @@ export default function NutritionBalancePanel({
         <ChevronIcon size={isWeek ? 20 : 16} className="shrink-0 text-ink-muted" aria-hidden />
       </button>
 
-      {expanded && (
+      <Collapse open={expanded}>
         <div className="space-y-[var(--space-sm)] border-t border-edge p-[var(--space-sm)]">
           {canShowNumbers && (
             <NutrientRows totals={per} vegetableG={vegetableG} unlocked={unlocked} />
@@ -261,7 +262,7 @@ export default function NutritionBalancePanel({
               {ja.nutritionBalance.notesToggle}
               {notesOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
             </button>
-            {notesOpen && (
+            <Collapse open={notesOpen}>
               <div className="mt-[var(--space-sm)] space-y-0.5 text-xs text-ink-muted">
                 <p>{ja.nutritionBalance.registeredOnlyMealNote}</p>
                 {/* 除外した材料の分は合計に入っていない＝この数字は下限側であることの明示
@@ -284,10 +285,10 @@ export default function NutritionBalancePanel({
                 </p>
                 <p>{ja.nutritionBalance.guideScopeNote}</p>
               </div>
-            )}
+            </Collapse>
           </div>
         </div>
-      )}
+      </Collapse>
     </div>
   )
 }

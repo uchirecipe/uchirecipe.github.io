@@ -23,6 +23,8 @@ import {
   Volume2,
   Smartphone,
 } from 'lucide-react'
+import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteArchivedCookedLogs } from '../db/recipes'
 import { usePriceEntries } from '../db/prices'
@@ -365,7 +367,12 @@ function UnlockCodeDisplay({ code }: { code: string }) {
         className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge px-2 py-1 text-xs font-bold text-accent-ink shadow-sm"
       >
         {copied ? <Check size={12} aria-hidden /> : <Copy size={12} aria-hidden />}
-        {copied ? ja.settings.unlockCodeCopied : ja.settings.unlockCodeCopy}
+        {/* 押すと「コピーしました」に変わって48px伸び、左隣のコード表示を押しつぶしていた
+            （2026-08-09 便EO）。長い方の幅で固定する */}
+        <SwapLabel
+          current={copied ? ja.settings.unlockCodeCopied : ja.settings.unlockCodeCopy}
+          labels={[ja.settings.unlockCodeCopy, ja.settings.unlockCodeCopied]}
+        />
       </button>
     </div>
   )
@@ -443,6 +450,8 @@ export default function SettingsPage() {
   const [replaceUndoAvailable, setReplaceUndoAvailable] = useState(false)
   // バックアップタブ「機種変更するときは」の折りたたみ開閉(2026-07-17設定ゼロベース裁定#5)
   const [moveGuideOpen, setMoveGuideOpen] = useState(false)
+  // Pro版の機能説明の折りたたみ（2026-08-09 便EO: <details>から共通の折りたたみへ）
+  const [proFeaturesOpen, setProFeaturesOpen] = useState(false)
 
   /**
    * 「料理中」の設定が実際に働くか（2026-08-04 便DV-7・オーナー指示）。
@@ -1044,7 +1053,10 @@ export default function SettingsPage() {
           ハイライトする。スクロールしても上部に固定(sticky)。settings-tabbarクラスはindex.cssで
           is-ipad(マルチタスクボタン対策)の上余白をback-header同様に追加している。
           タップ領域は44px相当(py-[13px]・2026-07-16 UI総点検A-5から踏襲) */}
-      <div className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur">
+      <div
+        data-app-top-bar
+        className="settings-tabbar sticky top-0 z-10 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
+      >
         {/* 元のページへの帰り道(2026-08-02 オーナー指示・便DF)。Pro版の説明などから
             設定の該当欄へ飛んできたときだけ出す。目次チップと同じ固定領域に置くので、
             節へ自動スクロールした後でも画面から消えない */}
@@ -2067,7 +2079,7 @@ export default function SettingsPage() {
                 aria-hidden
               />
             </button>
-            {moveGuideOpen && (
+            <Collapse open={moveGuideOpen}>
               <div className="mt-[var(--space-md)]">
                 <ol className="space-y-1 text-sm text-ink-muted">
                   <li>{ja.settings.moveGuideStep1}</li>
@@ -2089,7 +2101,7 @@ export default function SettingsPage() {
                   {ja.settings.moveGuideNote}
                 </p>
               </div>
-            )}
+            </Collapse>
           </section>
 
           {/* ③困ったとき: SWとキャッシュだけ消してリロードする安全な機能(2026-07-16新設。
@@ -2333,12 +2345,27 @@ export default function SettingsPage() {
               説明は折りたたみ・サンプルの入口は文字リンクへ格下げする */}
           {!settings.proCode && (
             <div className="mt-[var(--space-sm)] px-[var(--space-md)]">
-              <details data-testid="pro-features-details">
-                <summary className="cursor-pointer text-sm text-ink-muted">
+              {/* 2026-08-09 便EO: <details>から他画面と同じ折りたたみ（ボタン＋Collapse）へ。
+                  アプリ内で唯一ここだけがブラウザ標準の<details>で、開閉の動きも
+                  シェブロンの向きも他とそろっていなかった */}
+              <div data-testid="pro-features-details">
+                <button
+                  type="button"
+                  onClick={() => setProFeaturesOpen((v) => !v)}
+                  aria-expanded={proFeaturesOpen}
+                  className="inline-flex items-center gap-1 text-sm text-ink-muted"
+                >
                   {ja.settings.proFeaturesToggle}
-                </summary>
-                <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
-              </details>
+                  {proFeaturesOpen ? (
+                    <ChevronUp size={14} aria-hidden />
+                  ) : (
+                    <ChevronDown size={14} aria-hidden />
+                  )}
+                </button>
+                <Collapse open={proFeaturesOpen}>
+                  <p className="mt-1 text-sm text-ink-muted">{ja.settings.proDescription}</p>
+                </Collapse>
+              </div>
               <p className="mt-[var(--space-sm)]">
                 <Link
                   to="/month-demo?back=%2Fsettings%3Fsection%3Dpro"

@@ -152,9 +152,6 @@ export function sortMealSlots(slots: MealSlot[]): MealSlot[] {
 export const MEAL_GENRES = ['和食', '洋食', '中華'] as const
 export type MealGenre = (typeof MEAL_GENRES)[number]
 
-/** 「高たんぱく優先」トグルが参照するタグ（sets/kintore.ts等で実際に使われている） */
-const HIGH_PROTEIN_TAG = '高たんぱく'
-
 function toDateString(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -289,8 +286,6 @@ export interface SuggestOptions {
    * 無ければ他ジャンルも許可する（絞り込みすぎて提案0件にしないため）
    */
   genre?: MealGenre
-  /** 「高たんぱく」タグの品を優先するか（任意・無ければ他も許可） */
-  preferHighProtein?: boolean
   /**
    * この役割で優先したいdishType（任意・2026-07-23 便BH-2）。副菜スロットを純粋な副菜
    * （dishType:'side'）に寄せるために使う。一致0件なら緩和する（汁物しか無い日は汁物を
@@ -574,7 +569,7 @@ export function isOneDish(recipe: Pick<Recipe, 'title' | 'tags'>): boolean {
  * まず「季節が合わない（all以外で不一致）」のレシピを除外し、「NG除外」「時短」で
  * 絞り込んだ後、「向いている時間帯」が一致するものを優先（未設定のレシピは制限なし
  * として扱う）。続けて「主菜/副菜の役割」「ジャンル」「役割のdishType純化(副菜=side)」
- * 「たんぱく源の分散」「高たんぱく優先」の順で優先度を絞り込み（いずれも該当が無ければ
+ * 「たんぱく源の分散」の順で優先度を絞り込み（いずれも該当が無ければ
  * 絞り込み前に戻す＝0件にはしない）、
  * 続けて「昨日の週プランに入っていたレシピを除外」（2026-07-16 便W-⑤b・こちらも
  * 除外して尽きれば解除）、その中で「最近作ってない」「週内で重複しない」の順にも絞り込む。
@@ -677,18 +672,11 @@ export function suggestCandidates(recipes: Recipe[], options: SuggestOptions): R
     if (matched.length > 0) proteinSourcePool = matched
   }
 
-  // 高たんぱく優先
-  let proteinPool = proteinSourcePool
-  if (options.preferHighProtein) {
-    const matched = proteinSourcePool.filter((r) => r.tags.includes(HIGH_PROTEIN_TAG))
-    if (matched.length > 0) proteinPool = matched
-  }
-
   // 「昨日の週プランに入っていたレシピ」を除外（2026-07-16 便W-⑤b。直近の繰り返し防止。
   // 除外して候補が尽きる場合はexcludeYesterdayPlanRecipes内部で自動的に解除される）
   const yesterdayFiltered = options.yesterdayRecipeIds
-    ? excludeYesterdayPlanRecipes(proteinPool, options.yesterdayRecipeIds)
-    : proteinPool
+    ? excludeYesterdayPlanRecipes(proteinSourcePool, options.yesterdayRecipeIds)
+    : proteinSourcePool
 
   const notUsedThisWeek = yesterdayFiltered.filter((r) => !options.usedRecipeIds.includes(r.id!))
   const freshAndUnused = notUsedThisWeek.filter((r) => !cookedWithinDays(r, 14))

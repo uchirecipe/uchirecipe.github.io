@@ -15,6 +15,8 @@ import {
   ChefHat,
 } from 'lucide-react'
 import BackHeader from '../components/BackHeader'
+import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import StepBadge from '../components/StepBadge'
 import TimeText from '../components/TimeText'
 import { MemoText } from '../components/MemoText'
@@ -304,14 +306,19 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
         className="flex w-full items-center justify-center gap-2 rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm"
       >
         <ListChecks size={18} aria-hidden />
-        {open ? ja.cookNavi.ingredientsClose : ja.cookNavi.ingredientsOpen}
+        {/* ボタン自体は全幅なので寸法は変わらないが、文字数が変わると左右のアイコンが
+            7pxずつ動く。長い方の幅で固定して押しても動かさない（2026-08-09 便EO） */}
+        <SwapLabel
+          current={open ? ja.cookNavi.ingredientsClose : ja.cookNavi.ingredientsOpen}
+          labels={[ja.cookNavi.ingredientsOpen, ja.cookNavi.ingredientsClose]}
+        />
         <ChevronDown
           size={16}
           aria-hidden
           className={open ? 'rotate-180 transition-transform' : 'transition-transform'}
         />
       </button>
-      {open && (
+      <Collapse open={open}>
         <div
           data-testid="navi-ingredients-panel"
           className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
@@ -346,8 +353,8 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                       className={isOpen ? 'shrink-0 rotate-180' : 'shrink-0'}
                     />
                   </button>
-                  {isOpen &&
-                    (recipe.items.length === 0 ? (
+                  <Collapse open={isOpen}>
+                    {recipe.items.length === 0 ? (
                       <p className="pb-1 text-sm text-ink-muted">{ja.cookNavi.ingredientsEmpty}</p>
                     ) : (
                       <>
@@ -384,13 +391,14 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                           </p>
                         )}
                       </>
-                    ))}
+                    )}
+                  </Collapse>
                 </li>
               )
             })}
           </ul>
         </div>
-      )}
+      </Collapse>
     </div>
   )
 }

@@ -51,6 +51,8 @@ import { MAX_SERVINGS, MIN_SERVINGS, clampServings, isServingsInRange } from '..
 import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '../logic/replaceConfirm'
 import type { PhotoReplacePlan } from '../logic/replaceConfirm'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import Collapse from '../components/Collapse'
+import SwapLabel from '../components/SwapLabel'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
 import { RecipeIcon } from '../components/RecipeCard'
@@ -1629,7 +1631,7 @@ function RecipeFormInner() {
             <Globe size={20} aria-hidden />
             {ja.urlImport.open}
           </button>
-          {urlImportOpen && (
+          <Collapse open={urlImportOpen}>
             <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
               <p className="text-sm text-ink-muted">{ja.urlImport.description}</p>
               <input
@@ -1695,7 +1697,7 @@ function RecipeFormInner() {
                 </button>
               </div>
             </div>
-          )}
+          </Collapse>
         </>
       )}
 
@@ -1709,7 +1711,7 @@ function RecipeFormInner() {
         <ClipboardPaste size={20} aria-hidden />
         {ja.paste.open}
       </button>
-      {pasteOpen && (
+      <Collapse open={pasteOpen}>
         <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
           <p className="text-sm text-ink-muted">{ja.paste.description}</p>
           <textarea
@@ -1750,7 +1752,7 @@ function RecipeFormInner() {
             </button>
           </div>
         </div>
-      )}
+      </Collapse>
 
       {/* かんたん / くわしく タブ(2026-07-16 Fable裁定docs/26・案A承認)。DOMは両タブとも常時
           マウントし、非表示は`hidden`属性の切替だけで行う(state消失リスクゼロ)。表示のグルーピング
@@ -1885,9 +1887,16 @@ function RecipeFormInner() {
               }`}
             >
               <ListChecks size={14} aria-hidden />
-              {ingredientOrganizing
-                ? ja.form.ingredientOrganizeDone
-                : ja.form.ingredientOrganizeToggle}
+              {/* 「選んで削除」⇔「完了」で幅が42px縮み、右端そろえの行なのでボタンごと動いて
+                  いた（2026-08-09 便EO）。長い方の幅で固定して押しても動かさない */}
+              <SwapLabel
+                current={
+                  ingredientOrganizing
+                    ? ja.form.ingredientOrganizeDone
+                    : ja.form.ingredientOrganizeToggle
+                }
+                labels={[ja.form.ingredientOrganizeToggle, ja.form.ingredientOrganizeDone]}
+              />
             </button>
           )}
         </div>
@@ -2333,7 +2342,7 @@ function RecipeFormInner() {
         )}
 
         {/* アイコングリッド(折りたたみ配下。旧・独立「アイコン」セクションをここへ移設) */}
-        {iconPickerOpen && (
+        <Collapse open={iconPickerOpen}>
           <div className="mt-2">
             <p className="text-sm text-ink-muted">{ja.form.iconDescription}</p>
             <div className="mt-2 grid grid-cols-4 gap-2">
@@ -2382,7 +2391,7 @@ function RecipeFormInner() {
               })}
             </div>
           </div>
-        )}
+        </Collapse>
       </div>
       </div>
 

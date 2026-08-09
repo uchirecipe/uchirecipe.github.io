@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Camera, Image as ImageIcon, Minus, Plus, RotateCw } from 'lucide-react'
+import SwapLabel from './SwapLabel'
 import { ja } from '../i18n/ja'
 import { resizePhoto, rotatePhoto } from '../logic/image'
 import { usePhotoUrl } from './usePhotoUrl'
@@ -241,7 +242,14 @@ export default function CookedLogModal({
                 className="inline-flex items-center gap-1 text-sm font-bold text-accent-ink disabled:opacity-40"
               >
                 <RotateCw size={16} aria-hidden />
-                {rotating ? ja.detail.cookedLogPhotoRotating : ja.detail.cookedLogPhotoRotate}
+                {/* 回している間だけ文言が短くなり、右隣の削除ボタンが飛び込んできていた
+                    （2026-08-09 便EO）。長い方の幅で固定する */}
+                <SwapLabel
+                  current={
+                    rotating ? ja.detail.cookedLogPhotoRotating : ja.detail.cookedLogPhotoRotate
+                  }
+                  labels={[ja.detail.cookedLogPhotoRotate, ja.detail.cookedLogPhotoRotating]}
+                />
               </button>
               <button
                 type="button"

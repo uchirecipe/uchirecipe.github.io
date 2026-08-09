@@ -15,6 +15,7 @@ import {
   BellRing,
   Timer as TimerIcon,
 } from 'lucide-react'
+import Collapse from './Collapse'
 import StepBadge from './StepBadge'
 import ComposedStepText from './ComposedStepText'
 import { MemoText } from './MemoText'
@@ -558,17 +559,21 @@ export default function CookSessionOverlay({
                     </span>
                   )}
                 </button>
-                {open && next && (
-                  <div
-                    data-testid="cook-session-peek"
-                    className="mb-1 ml-1.5 max-h-[28vh] overflow-y-auto rounded-sm border-l-4 bg-app px-2 py-1.5"
-                    style={{ borderLeftColor: otherColor }}
-                  >
-                    <p className="ja-phrase text-sm leading-relaxed">{next.text}</p>
-                    {next.memo && <MemoText text={next.memo} className="mt-1 text-xs text-ink-muted" />}
-                    <p className="mt-1 text-[10px] text-ink-muted">{ja.cookNavi.sessionPeekNote}</p>
-                  </div>
-                )}
+                <Collapse open={Boolean(open && next)}>
+                  {next && (
+                    <div
+                      data-testid="cook-session-peek"
+                      className="mb-1 ml-1.5 max-h-[28vh] overflow-y-auto rounded-sm border-l-4 bg-app px-2 py-1.5"
+                      style={{ borderLeftColor: otherColor }}
+                    >
+                      <p className="ja-phrase text-sm leading-relaxed">{next.text}</p>
+                      {next.memo && (
+                        <MemoText text={next.memo} className="mt-1 text-xs text-ink-muted" />
+                      )}
+                      <p className="mt-1 text-[10px] text-ink-muted">{ja.cookNavi.sessionPeekNote}</p>
+                    </div>
+                  )}
+                </Collapse>
               </div>
             )
           })}

@@ -66,6 +66,7 @@ export default function TimerBar() {
 
   return (
     <div
+      data-app-bottom-bar
       className="fixed inset-x-0 z-10"
       style={{ bottom: 'calc(72px + env(safe-area-inset-bottom))' }}
     >
