@@ -36,6 +36,17 @@
 //      misoshiru https://www.pakutaso.com/20210348077post-33918.html
 //      hoikoro   https://www.pakutaso.com/20250645167post-54631.html
 //  - 見つからないときは写真なしで撮影を続ける(警告を出す)。
+//
+//  - 2026-08-09 便EU: `.manual-photos/` はリポジトリの外(各自の手元)にあるフォルダなので、
+//    worktreeで撮り直すときは**まず用意されていない**。そのまま全カットを撮ると、写真つきの
+//    カットが写真なしの絵に置き換わる(警告は出るが見落としやすい)。
+//    同じ「ぱくたそ」の原本が `.demo-photos/`(public/demo/*.webp の元。build-demo-photos.mjs参照)
+//    にあり、curry・hamburg・mabo の3枚はそちらと**同じ写真**なので流用できる:
+//      MANUAL_PHOTO_DIR=<app>/.demo-photos npx tsx scripts/shots-manual.mjs
+//    ただし misoshiru・hoikoro は .demo-photos に無い。この2枚が要るのは
+//    logs(味噌汁のサムネイル)と plan-month-photo(カレンダーに敷く写真)なので、
+//    **その2カットを撮り直すときだけ .manual-photos に5枚そろえること**。
+//    そろっていない状態でこの2カットを撮ると、いま入っている絵より写真が減る。
 
 import fs from 'node:fs'
 import path from 'node:path'
