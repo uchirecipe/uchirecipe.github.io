@@ -25,13 +25,35 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** 画面上部に貼り付いている帯の下端（＝ここから下が「見えている範囲」） */
-function topBarInset(): number {
+/**
+ * 画面上部に貼り付いている帯の下端（＝ここから下が「見えている範囲」）。
+ *
+ * 2026-08-09 便ET: 貼り付く帯（position: sticky）は、いま画面の途中にあっても
+ * **下へスクロールすれば必ず上端に来る**。「今この瞬間に上端にあるか」だけで数えていると、
+ * 画面の一番上から折りたたみを開いたときに「帯はまだ下、だから邪魔者なし」と判断して
+ * スクロールし、動き終わったあとに貼り付いた帯が開いた中身の頭を隠してしまう。
+ * そこで、伸びた領域より上にある sticky の帯は、貼り付いたときの高さ（top＋帯の高さ）を
+ * 先に見込んでおく。
+ *
+ * @param target 伸びた領域。これより下にある帯は（スクロールしても上には来ないので）数えない
+ */
+function topBarInset(target?: HTMLElement): number {
   let inset = 0
+  const targetTop = target ? target.getBoundingClientRect().top : Number.POSITIVE_INFINITY
   for (const bar of document.querySelectorAll<HTMLElement>('[data-app-top-bar]')) {
     const r = bar.getBoundingClientRect()
+    if (r.height <= 0) continue
+    const style = getComputedStyle(bar)
+    if (style.position === 'sticky') {
+      const stuckTop = Number.parseFloat(style.top)
+      // 貼り付き先が数値で決まっていて、かつ帯が伸びた領域より上にある（＝下へ動けば頭を隠す）
+      if (Number.isFinite(stuckTop) && r.top < targetTop) {
+        inset = Math.max(inset, stuckTop + r.height)
+        continue
+      }
+    }
     // 今まさに画面の上に貼り付いている帯だけを数える（流れて下にある間は邪魔をしない）
-    if (r.height > 0 && r.top <= 2) inset = Math.max(inset, r.bottom)
+    if (r.top <= 2) inset = Math.max(inset, r.bottom)
   }
   return Math.max(0, inset)
 }
@@ -82,7 +104,7 @@ export function revealExpanded(el: HTMLElement, instant = prefersReducedMotion()
     viewTop = cr.top + EDGE_GAP
     viewBottom = cr.bottom - EDGE_GAP
   } else {
-    viewTop = topBarInset() + EDGE_GAP
+    viewTop = topBarInset(el) + EDGE_GAP
     viewBottom = window.innerHeight - bottomBarInset() - EDGE_GAP
   }
   const viewHeight = viewBottom - viewTop

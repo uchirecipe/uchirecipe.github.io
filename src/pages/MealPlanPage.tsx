@@ -5035,9 +5035,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {/* 日／週／月の3タブ(便U-1)。サンプルデモは月の画面だけを見せるので出さない。
           2026-08-03 便DJ(オーナー指示): 3つを画面の幅いっぱいに広げる(flex-1で等分)。
-          左に小さく寄っていて、タブの切替だと気づきにくく指も当てにくかった */}
+          左に小さく寄っていて、タブの切替だと気づきにくく指も当てにくかった。
+
+          2026-08-09 便ET(オーナー実機「献立タブの日週月ボタンは上に固定したい」):
+          スクロールしても画面上部に残す(sticky)。作りは設定画面の目次チップ・食材タブの
+          タブバー・レシピ一覧の検索まどと同じ。meal-plan-tabbar クラスは index.css で
+          iPad のマルチタスク操作ボタンよけの上余白を足すためのもの。
+          data-app-top-bar は「押したら伸びた部分を画面内に入れる」共通処理
+          (logic/revealExpanded)にこの帯の高さを知らせる目印。
+          z-20: 献立の枠に重なる要素より上、重ね窓(z-[60]以上)より下に置く */}
       {!isDemo && (
-      <div className="mt-[var(--space-md)] flex gap-[var(--space-sm)]">
+      <div
+        data-app-top-bar
+        className="meal-plan-tabbar sticky top-0 z-20 -mx-[var(--space-md)] mt-[var(--space-sm)] flex gap-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
+      >
         <button
           type="button"
           onClick={() => setViewMode('day')}
@@ -6392,7 +6403,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             ref={date === today ? todaySectionRef : undefined}
             // 2026-08-03 便DP-8(オーナー指示): 今日のカードの囲み線を太くして、ほかの曜日との
             // 区別を強める(食事ごとの地色=SLOT_TONEによる時間帯の区分はそのまま維持)
-            className={`scroll-mt-[var(--space-md)] rounded-md p-[var(--space-md)] shadow-sm ${
+            // scroll-mt-16(64px): 日付を指定して開いたとき・「まとめて献立」の直後に、この枠へ
+            // 自動でスクロールする(scrollIntoView)。上部固定の日/週/月タブ(実測54px)の裏に
+            // 日付の見出しが潜り込まないよう、その分＋わずかな余白を空ける(2026-08-09 便ET)
+            className={`scroll-mt-16 rounded-md p-[var(--space-md)] shadow-sm ${
               date === today
                 ? 'border-2 border-accent bg-surface'
                 : 'border border-edge bg-surface'

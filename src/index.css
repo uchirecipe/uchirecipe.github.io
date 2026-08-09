@@ -458,9 +458,13 @@
    注意: @layerの外に置くこと(レイヤー内だとTailwindのpy-2ユーティリティに負ける)。
    設定画面のタブバー(.settings-tabbar)、食材タブのタブバー(.pantry-tabbar。2026-07-16
    UI総点検B-9で追加)も同じくsticky top-0で画面最上部に張り付くため、同じ対策を適用する
-   (2026-07-13 UI改善) */
+   (2026-07-13 UI改善)。
+   2026-08-09 便ET: レシピ一覧の検索まど(.recipes-searchbar)と献立の日/週/月タブ
+   (.meal-plan-tabbar)も上部固定にしたので、同じ列に加える */
 :root.is-ipad .back-header,
 :root.is-ipad .settings-tabbar,
-:root.is-ipad .pantry-tabbar {
+:root.is-ipad .pantry-tabbar,
+:root.is-ipad .recipes-searchbar,
+:root.is-ipad .meal-plan-tabbar {
   padding-top: calc(0.5rem + 22px);
 }
