@@ -21543,10 +21543,20 @@ try {
       )
       await eqPage.getByRole('button', { name: '週', exact: true }).click()
       await eqPage.waitForTimeout(900)
-      if (!((await eqPage.textContent('body')) ?? '').includes(eqYesterday.replaceAll('-', '/'))) {
-        await eqPage.locator('button[aria-label="前の週"]').click()
-        await eqPage.waitForTimeout(600)
+      // 週タブは月曜始まりで、表示中の週は sessionStorage に覚えられる(便DT-2「戻ったら同じ場所へ返す」)。
+      // つまり画面を開き直しても今週には戻らない。目的の日のカードが出るまで週を送る形にする
+      // (今日が月曜だと「昨日」=日曜が前の週に入り、旧実装は前の週へ移ったまま帰れず必ず落ちた。2026-08-10 実発)
+      const eqShowWeekWith = async (date) => {
+        for (let i = 0; i < 4; i++) {
+          if ((await eqPage.locator(`section[data-date="${date}"]`).count()) > 0) return true
+          const shown = await eqPage.locator('section[data-date]').first().getAttribute('data-date')
+          const dir = shown && date < shown ? '前の週' : '次の週'
+          await eqPage.locator(`button[aria-label="${dir}"]`).click()
+          await eqPage.waitForTimeout(600)
+        }
+        return (await eqPage.locator(`section[data-date="${date}"]`).count()) > 0
       }
+      check('EQ-01(③) 昨日を含む週を表示できる', await eqShowWeekWith(eqYesterday), `昨日=${eqYesterday}`)
       // 週タブの過去日カードは従来どおりレシピ詳細へのリンクのまま(便DT-2の動線を壊さない)
       check(
         'EQ-01(③) 週タブの過去日カードはレシピ詳細へのリンクのまま残っている',
@@ -21570,6 +21580,7 @@ try {
       await eqPage.waitForTimeout(900)
       await eqPage.getByRole('button', { name: '週', exact: true }).click()
       await eqPage.waitForTimeout(900)
+      check('EQ-01(③) 今日を含む週へ帰れる', await eqShowWeekWith(eqToday), `今日=${eqToday}`)
       const eqTodaySection = eqPage.locator(`section[data-date="${eqToday}"]`)
       await eqTodaySection.getByRole('button', { name: 'レシピを選ぶ', exact: true }).first().click()
       await eqPage.waitForTimeout(600)
