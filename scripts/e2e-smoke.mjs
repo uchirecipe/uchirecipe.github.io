@@ -22455,10 +22455,32 @@ try {
           page6.url().includes('/about/install.html'),
           page6.url(),
         )
-        // 手順ページへ移った人にも、戻ってきたときに同じお知らせを出さない
+        // 手順ページへ移った人にも、戻ってきたときに同じお知らせを出さない。
+        // ブラウザの「戻る」で帰る道と、開き直す道の両方を見る
+        await page6.goBack({ waitUntil: 'networkidle' })
+        await page6.waitForTimeout(1500)
+        check(
+          'EW-01(e) 手順ページからブラウザの戻るで帰ってきても出ない',
+          (await ewVisible(page6)) === false,
+          page6.url(),
+        )
         await page6.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
         await page6.waitForTimeout(1500)
-        check('EW-01(e) 手順ページを見て戻ってきても出ない', (await ewVisible(page6)) === false)
+        check('EW-01(e) 手順ページを見たあとに開き直しても出ない', (await ewVisible(page6)) === false)
+        await ctx.close()
+      }
+
+      // (b-3) Escape(パソコンのキーボード・端末の戻るに相当する閉じ方)でも閉じられて、
+      // 「見た」扱いになる。重ね窓の共通フック(useOverlayDismiss)に載っていることの確認
+      {
+        const ctx = await ewBrowser.newContext(phone)
+        const page9 = await ewOpen(ctx)
+        await page9.keyboard.press('Escape')
+        await page9.waitForTimeout(500)
+        check('EW-01(b) Escapeでも閉じられる', (await ewVisible(page9)) === false)
+        await page9.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page9.waitForTimeout(1500)
+        check('EW-01(b) Escapeで閉じたあとも開き直して出ない', (await ewVisible(page9)) === false)
         await ctx.close()
       }
 
