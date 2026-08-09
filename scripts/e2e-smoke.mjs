@@ -22572,8 +22572,9 @@ try {
     await page.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
     const h1Ex = ((await page.locator('h1').textContent()) ?? '').replace(/\s+/g, '')
     check(
-      'LPTEXT-EX 見出しが「レシピを集めて登録。もう献立に迷わない」',
-      h1Ex === 'レシピを集めて登録。もう献立に迷わない',
+      // 2026-08-10 便FA(オーナー指示): 文末にも句点を足した
+      'LPTEXT-EX 見出しが「レシピを集めて登録。もう献立に迷わない。」',
+      h1Ex === 'レシピを集めて登録。もう献立に迷わない。',
       h1Ex,
     )
     const leadEx = ((await page.locator('.lead').textContent()) ?? '').replace(/\s+/g, '')
