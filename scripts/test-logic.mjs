@@ -8833,6 +8833,31 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     )
   }
 
+  // 名寄せで同じ照合キーの行が2つ残る端末（自分で「しいたけ」を編集していた場合）では、
+  // 自分で入れた値段のほうを使う。移行は編集済みの行を消さないので、この優先順位が要る
+  {
+    const mixed = buildPriceIndex([
+      { id: 1, name: '生しいたけ', pricePerUnit: 100, unit: '6枚', isDefault: true },
+      { id: 2, name: 'しいたけ', pricePerUnit: 240, unit: '6枚', isDefault: false },
+    ])
+    eq(
+      'FA 同じ照合キーの行が2つあるときは自分で入れた値段が勝つ',
+      estimateIngredientYen({ name: 'しいたけ', amount: '6', unit: '枚' }, mixed),
+      { yen: 240, rawYen: 240, source: 'user' },
+    )
+    eq(
+      'FA 並び順が逆でも結果は同じ(索引の作り方で決めている)',
+      estimateIngredientYen(
+        { name: '生しいたけ', amount: '6', unit: '枚' },
+        buildPriceIndex([
+          { id: 2, name: 'しいたけ', pricePerUnit: 240, unit: '6枚', isDefault: false },
+          { id: 1, name: '生しいたけ', pricePerUnit: 100, unit: '6枚', isDefault: true },
+        ]),
+      ),
+      { yen: 240, rawYen: 240, source: 'user' },
+    )
+  }
+
   // 名寄せしても栄養側は生／乾燥を取り違えない(成分が10倍違うので致命的)
   {
     const { matchNutritionFood } = await import('../src/logic/nutrition.ts')

@@ -22830,17 +22830,19 @@ try {
                   defaultUnit: '1パック',
                 })
               }
-              if (row.name === 'しいたけ') {
-                prices.put({
-                  ...row,
-                  pricePerUnit: 999,
-                  unit: '1パック',
-                  isDefault: false,
-                  defaultPricePerUnit: 150,
-                  defaultUnit: '1パック',
-                })
-              }
             }
+            // 2026-08-10 便FA: 「しいたけ」は「生しいたけ」へ名寄せしたので、新規インストールの
+            // マスタにこの行は無い。版5の端末を再現するため、自分で999円に編集済みの行として作る
+            // （名寄せの移行も単位の移行も、この行には触らないのが正しい姿）
+            prices.put({
+              name: 'しいたけ',
+              pricePerUnit: 999,
+              unit: '1パック',
+              isDefault: false,
+              defaultPricePerUnit: 150,
+              defaultUnit: '1パック',
+              updatedAt: Date.now(),
+            })
             const settings = tx.objectStore('settings')
             const getReq = settings.get(1)
             getReq.onsuccess = () => {
@@ -22902,12 +22904,294 @@ try {
         ey2Rows.shiitake?.unit === '1パック',
         JSON.stringify(ey2Rows.shiitake),
       )
-      // 画面でも「自分の価格」が残っていること(999円が入力欄に出る)
-      const ey2ShiitakeRow = ey2Page.locator('li', { hasText: 'しいたけ' }).first()
-      const ey2Value = await ey2ShiitakeRow.getByLabel('しいたけの価格（円）').inputValue()
+      // 画面でも「自分の価格」が残っていること(999円が入力欄に出る)。
+      // 2026-08-10 便FA: 一覧には「生しいたけ」「乾燥しいたけ」も並ぶので、行ではなく
+      // ラベル完全一致で「しいたけ」の行の入力欄を掴む（部分一致だと別の行を拾う）
+      const ey2Value = await ey2Page
+        .getByLabel('しいたけの価格（円）', { exact: true })
+        .inputValue()
       check('EY-02 画面上も自分で入れた999円が残っている', ey2Value === '999', String(ey2Value))
     } finally {
       await ey2Browser.close()
+    }
+  }
+
+  // --- FA-1: しいたけの名寄せ(2026-08-10 オーナー裁定「生と乾燥を別項目として名前で区別する」) ---
+  // 価格マスタに「しいたけ 150円/6枚」と「生しいたけ 100円/6枚」が同じ食材のまま並び、
+  // 同じものなのに値段が違っていた。生の側は「生しいたけ 100円」1本へ寄せ(オーナー指定
+  // 「どちらかなら生しいたけ」)、乾燥は価格帯が全く違うので「乾燥しいたけ 400円/30g」を別項目で持つ。
+  // 素の「しいたけ」と書いたレシピ(同梱の寄せ鍋)も同じ1件に価格解決することまで見る
+  currentCheck = 'FA-1'
+  {
+    const faBrowser = await chromium.launch()
+    try {
+      const faCtx = await faBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const faPage = await faCtx.newPage()
+      faPage.on('pageerror', (err) => errors.push(`[pageerror@FA-1] ${err.message}`))
+      await faPage.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await faPage.waitForTimeout(2000) // 初回シード(レシピ109品＋価格マスタ)の完了待ち
+
+      // 「食材と価格」: 生と乾燥が別の行で並び、素の「しいたけ」だけの行はもう無い
+      check(
+        'FA-1 「食材と価格」に素の「しいたけ」の行が無い(生しいたけへ名寄せ済み)',
+        (await faPage.getByLabel('しいたけの価格（円）', { exact: true }).count()) === 0,
+      )
+      const faFreshYen = await faPage.getByLabel('生しいたけの価格（円）', { exact: true }).inputValue()
+      const faFreshQty = await faPage.getByLabel('生しいたけの数量', { exact: true }).inputValue()
+      const faFreshUnit = await faPage.getByLabel('生しいたけの単位', { exact: true }).inputValue()
+      check(
+        'FA-1 「生しいたけ」は100円/6枚(オーナー指定どおり生しいたけ側の値段に寄せた)',
+        faFreshYen === '100' && faFreshQty === '6' && faFreshUnit === '枚',
+        `${faFreshYen}円 / ${faFreshQty}${faFreshUnit}`,
+      )
+      const faDryYen = await faPage.getByLabel('乾燥しいたけの価格（円）', { exact: true }).inputValue()
+      const faDryQty = await faPage.getByLabel('乾燥しいたけの数量', { exact: true }).inputValue()
+      const faDryUnit = await faPage.getByLabel('乾燥しいたけの単位', { exact: true }).inputValue()
+      check(
+        'FA-1 「乾燥しいたけ」が別項目として並ぶ(400円/30g・生とは価格帯が違う)',
+        faDryYen === '400' && faDryQty === '30' && faDryUnit === 'g',
+        `${faDryYen}円 / ${faDryQty}${faDryUnit}`,
+      )
+
+      // 素の「しいたけ4枚」と書いてある寄せ鍋が、生しいたけの単価で按分される
+      await faPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await faPage.waitForTimeout(600)
+      await faPage.getByPlaceholder('料理名・材料・タグで検索').fill('しいたけ')
+      await faPage.waitForTimeout(800)
+      const faSearchBody = (await faPage.textContent('body')) ?? ''
+      check(
+        'FA-1 「しいたけ」で検索すると素の表記の寄せ鍋も生しいたけ表記のレシピも出る(名寄せで検索が壊れていない)',
+        faSearchBody.includes('寄せ鍋') && faSearchBody.includes('チンゲン菜としいたけのにんにく炒め'),
+        faSearchBody.includes('寄せ鍋') ? '炒めが出ない' : '寄せ鍋が出ない',
+      )
+      await faPage.getByText('寄せ鍋', { exact: true }).first().click()
+      await faPage.waitForTimeout(800)
+      const faNabe = (await faPage.textContent('body')) ?? ''
+      check(
+        'FA-1 寄せ鍋の1食あたりが生しいたけの単価での按分になる(名寄せ前226円→217円)',
+        faNabe.includes('4人分で作るときの1食あたり 約217円'),
+        faNabe.includes('約226円') ? '名寄せ前の226円のまま' : '',
+      )
+      await faPage.getByRole('button', { name: '原価を見る' }).click()
+      await faPage.waitForTimeout(500)
+      const faNabeRow = await faPage.locator('li', { hasText: 'しいたけ' }).first().textContent()
+      check(
+        'FA-1 材料行「しいたけ」の1食あたり原価が約17円(旧150円/6枚なら約25円)',
+        (faNabeRow ?? '').includes('約17円'),
+        String(faNabeRow),
+      )
+    } finally {
+      await faBrowser.close()
+    }
+  }
+
+  // --- FA-1b: 既存端末の重複行を1行に畳む移行(版7)。規約F: 何が消えて何が残るか ---
+  // 版6の端末には「しいたけ 150円/6枚」と「生しいたけ 100円/6枚」の2行が残っている。
+  // 目安のままの「しいたけ」だけを消し、「生しいたけ」は1円も動かさない
+  currentCheck = 'FA-1b'
+  {
+    const fa2Browser = await chromium.launch()
+    try {
+      const fa2Ctx = await fa2Browser.newContext({ viewport: { width: 390, height: 844 } })
+      const fa2Page = await fa2Ctx.newPage()
+      fa2Page.on('pageerror', (err) => errors.push(`[pageerror@FA-1b] ${err.message}`))
+      await fa2Page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+      await fa2Page.waitForTimeout(2000)
+
+      // 版6の端末を再現する: 目安のままの「しいたけ 150円/6枚」を足して版番号を6へ戻す
+      await fa2Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction(['prices', 'settings'], 'readwrite')
+          tx.objectStore('prices').put({
+            name: 'しいたけ',
+            pricePerUnit: 150,
+            unit: '6枚',
+            isDefault: true,
+            defaultPricePerUnit: 150,
+            defaultUnit: '6枚',
+            updatedAt: Date.now(),
+          })
+          const settings = tx.objectStore('settings')
+          const getReq = settings.get(1)
+          getReq.onsuccess = () => {
+            const current = getReq.result || { id: 1 }
+            settings.put({ ...current, id: 1, priceDefaultsVersion: 6 })
+          }
+          tx.oncomplete = () => resolve(undefined)
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+      })
+      await fa2Page.reload({ waitUntil: 'networkidle' })
+      await fa2Page.waitForTimeout(2000)
+      const fa2Rows = await fa2Page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const rows = await new Promise((resolve, reject) => {
+          const tx = idb.transaction('prices', 'readonly')
+          const all = tx.objectStore('prices').getAll()
+          all.onsuccess = () => resolve(all.result)
+          all.onerror = () => reject(all.error)
+        })
+        idb.close()
+        const pick = (name) => {
+          const r = rows.find((x) => x.name === name)
+          return r ? { unit: r.unit, price: r.pricePerUnit, isDefault: r.isDefault } : null
+        }
+        return {
+          plain: pick('しいたけ'),
+          fresh: pick('生しいたけ'),
+          dry: pick('乾燥しいたけ'),
+          shiitakeRows: rows.filter((r) => String(r.name).includes('しいたけ')).map((r) => r.name),
+        }
+      })
+      check(
+        'FA-1b 目安のままの重複行「しいたけ」は移行で1行に畳まれる(消える)',
+        fa2Rows.plain === null,
+        JSON.stringify(fa2Rows.plain),
+      )
+      check(
+        'FA-1b 残る「生しいたけ」は100円/6枚のまま(移行で金額を動かさない)',
+        fa2Rows.fresh?.price === 100 && fa2Rows.fresh?.unit === '6枚',
+        JSON.stringify(fa2Rows.fresh),
+      )
+      check(
+        'FA-1b 新項目「乾燥しいたけ」が既存端末にも追加される',
+        fa2Rows.dry?.price === 400 && fa2Rows.dry?.unit === '30g',
+        JSON.stringify(fa2Rows.dry),
+      )
+      check(
+        'FA-1b しいたけ系の行は「生しいたけ」「乾燥しいたけ」の2行だけになる',
+        fa2Rows.shiitakeRows.length === 2,
+        fa2Rows.shiitakeRows.join('/'),
+      )
+    } finally {
+      await fa2Browser.close()
+    }
+  }
+
+  // --- FA-2: 紹介ページの見出しの句点(2026-08-10 オーナー指示) ---
+  // 文末に「。」を足しても、スマホ(390px)でもパソコン(1280px)でも2行のままで
+  // 横スクロールが出ないこと(折り返しが崩れていないこと)を実測する
+  currentCheck = 'FA-2'
+  {
+    const fa3Browser = await chromium.launch()
+    try {
+      for (const [w, h] of [[390, 844], [1280, 900]]) {
+        const fa3Ctx = await fa3Browser.newContext({ viewport: { width: w, height: h } })
+        const fa3Page = await fa3Ctx.newPage()
+        fa3Page.on('pageerror', (err) => errors.push(`[pageerror@FA-2] ${err.message}`))
+        await fa3Page.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+        const fa3 = await fa3Page.evaluate(() => {
+          const h1 = document.querySelector('h1')
+          const rect = h1.getBoundingClientRect()
+          const lineHeight = parseFloat(getComputedStyle(h1).lineHeight)
+          return {
+            text: (h1.textContent ?? '').replace(/\s+/g, ''),
+            lines: Math.round(rect.height / lineHeight),
+            overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          }
+        })
+        check(
+          `FA-2(${w}px) 見出しの文末に句点がある`,
+          fa3.text === 'レシピを集めて登録。もう献立に迷わない。',
+          fa3.text,
+        )
+        check(`FA-2(${w}px) 見出しは2行のまま(折り返しが増えていない)`, fa3.lines === 2, `行数=${fa3.lines}`)
+        check(`FA-2(${w}px) 横スクロールが出ていない`, fa3.overflowX === false)
+        await fa3Ctx.close()
+      }
+    } finally {
+      await fa3Browser.close()
+    }
+  }
+
+  // --- FA-3: 書き出したレシピの扱い(2026-08-10 オーナー承認・docs/65 A-2) ---
+  // ①利用規約に「書き出したファイルの取り扱いは書き出した本人の責任」の1文がある
+  // ②「選択したレシピ◯品を書き出す」の確認文に軽い一言が出る(重い警告にしない・解錠コードの話はしない)
+  currentCheck = 'FA-3'
+  {
+    const fa4Browser = await chromium.launch()
+    try {
+      const fa4Ctx = await fa4Browser.newContext({ viewport: { width: 390, height: 844 } })
+      const fa4Page = await fa4Ctx.newPage()
+      fa4Page.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@FA-3] ${err.message}`)
+      })
+      await fa4Page.goto(`${BASE}/about/terms.html`, { waitUntil: 'networkidle' })
+      const fa4Terms = (await fa4Page.textContent('body')) ?? ''
+      check(
+        'FA-3 利用規約に書き出したファイルの取り扱いについての1文がある',
+        fa4Terms.includes(
+          'レシピを書き出したファイルには収録レシピや取り込んだレシピの内容がそのまま入るため、ファイルの保管・配布・公開は書き出したご本人の責任で行ってください。',
+        ),
+      )
+      check(
+        'FA-3 追記した1文は「著作権」の節に置いてある(免責事項とは分ける)',
+        fa4Terms.indexOf('著作権') < fa4Terms.indexOf('書き出したご本人の責任') &&
+          fa4Terms.indexOf('書き出したご本人の責任') < fa4Terms.indexOf('規約の変更'),
+      )
+
+      // 書き出しの確認文(ダイアログ)。押しても書き出さずに閉じる＝ファイルは作らない
+      let fa4Dialog = ''
+      fa4Page.on('dialog', (dialog) => {
+        fa4Dialog = dialog.message()
+        void dialog.dismiss()
+      })
+      await fa4Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fa4Page.waitForTimeout(1800)
+      await fa4Page.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await fa4Page.waitForTimeout(700)
+      const fa4Picked = await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()
+      check('FA-3 前提: 検索で対象を絞れている', fa4Picked > 0 && fa4Picked < 10, `件数=${fa4Picked}`)
+      await fa4Page.getByRole('button', { name: '選択', exact: true }).click()
+      await fa4Page.waitForTimeout(400)
+      await fa4Page.getByRole('button', { name: '全選択', exact: true }).click()
+      await fa4Page.waitForTimeout(400)
+      await fa4Page
+        .getByRole('button', { name: `選択したレシピ${fa4Picked}品を書き出す` })
+        .click()
+      await fa4Page.waitForTimeout(600)
+      check(
+        'FA-3 書き出しの確認文に人へ渡すときの一言が出る',
+        fa4Dialog.includes(
+          'ほかのサイトや本から登録したレシピもそのまま入るので、人に渡す・公開するときは中身をご確認ください。',
+        ),
+        fa4Dialog,
+      )
+      check(
+        'FA-3 一言は1行だけ(重い警告にしない。確認文は5行)',
+        fa4Dialog.split('\n').length === 5,
+        `行数=${fa4Dialog.split('\n').length}`,
+      )
+      check(
+        'FA-3 選択レシピの書き出しでは解錠コードの話をしない(このファイルには入らない)',
+        !fa4Dialog.includes('解錠コード'),
+        fa4Dialog,
+      )
+      check(
+        'FA-3 閉じれば何も書き出されない(端末のレシピも減らない)',
+        (await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()) === fa4Picked,
+      )
+      // 全体のバックアップは言うべきことが違う: 解錠コードが入るので渡さないと言い切る
+      await fa4Page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await fa4Page.waitForTimeout(900)
+      const fa4Settings = (await fa4Page.textContent('body')) ?? ''
+      check(
+        'FA-3 全体のバックアップは「他の人に渡さないでください」のまま(解錠コードが入るため)',
+        fa4Settings.includes('バックアップファイルにはPro版の解錠コードが含まれます。他の人に渡さないでください'),
+      )
+    } finally {
+      await fa4Browser.close()
     }
   }
 
