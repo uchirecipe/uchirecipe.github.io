@@ -4,6 +4,9 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import type { CookedLog, Recipe } from '../db/types'
 import BackHeader from '../components/BackHeader'
+import CookedLogDetailModal, {
+  type CookedLogDetailTarget,
+} from '../components/CookedLogDetailModal'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { ja } from '../i18n/ja'
@@ -19,15 +22,28 @@ const PAGE_SIZE = 30
  * usePhotoUrl はループ内で直接呼べないため行コンポーネントに分離し、
  * 画像は loading="lazy" にして画面外の分をデコードさせない（記録は件数無制限のため）。
  */
-function HistoryRow({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
+function HistoryRow({
+  recipe,
+  log,
+  onOpen,
+}: {
+  recipe: Recipe
+  log: CookedLog
+  onOpen: () => void
+}) {
   const logPhotoUrl = usePhotoUrl(log.photo)
   const recipePhotoUrl = usePhotoUrl(recipe.photo)
   const photoUrl = logPhotoUrl ?? recipePhotoUrl
   return (
     <li>
-      <Link
-        to={`/recipes/${recipe.id}`}
-        className="flex items-center gap-[var(--space-sm)] px-[var(--space-md)] py-3"
+      {/* 2026-08-09 便EQ（オーナー実機）: 行を押すとレシピ詳細へ移っていたが、一覧から見たいのは
+          記録そのものだったので、押すと記録の中身の小窓が開くようにした
+          （写真の拡大・ひとことメモ・何人分もここで読める。レシピ詳細へは小窓の中から行ける） */}
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
+        className="flex w-full items-center gap-[var(--space-sm)] px-[var(--space-md)] py-3 text-left"
       >
         <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm">
           {photoUrl ? (
@@ -49,7 +65,7 @@ function HistoryRow({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
             </span>
           )}
         </span>
-      </Link>
+      </button>
     </li>
   )
 }
@@ -64,9 +80,17 @@ function HistoryRow({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
  * 履歴を1つ戻るだけでは献立タブのタブ状態（日/週/月）までは戻らないため、
  * 開いた場所を持ち回って、そのタブを指定して戻す。
  */
+/**
+ * 2026-08-09 便EQ（オーナー「戻るのも該当場所のスクロール位置まで」）: 帰り道に `restore=1` を
+ * 付けて、呼び出し元の画面が覚えておいた縦スクロール位置（＋月・週なら見ていた月・週）まで
+ * 戻せるようにした。覚えは呼び出し元がリンクを押した時点で sessionStorage に書く。
+ * 覚えが無いときは何も復元せず、そのタブを普通に開くだけになる。
+ */
 function backTargetOf(back: string | null): string | null {
-  if (back === 'week') return '/meal-plan?focus=week'
-  if (back === 'month') return '/meal-plan?focus=month'
+  if (back === 'week') return '/meal-plan?focus=week&restore=1'
+  if (back === 'month') return '/meal-plan?focus=month&restore=1'
+  if (back === 'day') return '/meal-plan?focus=today&restore=1'
+  if (back === 'home') return '/?restore=1'
   return null
 }
 
@@ -80,12 +104,15 @@ export default function HistoryPage() {
   const filterRecipe = hasFilter ? recipes?.find((r) => r.id === filterRecipeId) : undefined
 
   const [shownCount, setShownCount] = useState(PAGE_SIZE)
+  // 押した記録の中身を出す小窓(2026-08-09 便EQ)。null なら閉じている
+  const [logDetail, setLogDetail] = useState<CookedLogDetailTarget | null>(null)
 
   const entries = useMemo(() => {
     if (!recipes) return undefined
     const target = hasFilter ? recipes.filter((r) => r.id === filterRecipeId) : recipes
+    // logIndex（recipe.cookedLogs の何番目か）も持ち回る＝小窓から記録の編集へ渡すため(便EQ)
     return target
-      .flatMap((recipe) => recipe.cookedLogs.map((log) => ({ recipe, log })))
+      .flatMap((recipe) => recipe.cookedLogs.map((log, logIndex) => ({ recipe, log, logIndex })))
       .sort((a, b) => b.log.date.localeCompare(a.log.date))
   }, [recipes, hasFilter, filterRecipeId])
 
@@ -143,8 +170,13 @@ export default function HistoryPage() {
                 {ja.history.monthFormat.replace('{y}', y).replace('{m}', String(Number(m)))}
               </h2>
               <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-                {monthEntries.map(({ recipe, log }, index) => (
-                  <HistoryRow key={`${recipe.id}-${log.date}-${index}`} recipe={recipe} log={log} />
+                {monthEntries.map(({ recipe, log, logIndex }, index) => (
+                  <HistoryRow
+                    key={`${recipe.id}-${log.date}-${index}`}
+                    recipe={recipe}
+                    log={log}
+                    onOpen={() => setLogDetail({ recipe, log, logIndex })}
+                  />
                 ))}
               </ul>
             </section>
@@ -160,6 +192,11 @@ export default function HistoryPage() {
           </button>
         )}
       </div>
+
+      {/* 行を押したときに開く記録の小窓(2026-08-09 便EQ)。写真の拡大もここから */}
+      {logDetail && (
+        <CookedLogDetailModal target={logDetail} onClose={() => setLogDetail(null)} />
+      )}
     </div>
   )
 }

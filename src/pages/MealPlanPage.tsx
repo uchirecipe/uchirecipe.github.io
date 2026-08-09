@@ -203,15 +203,22 @@ import type {
 } from '../db/types'
 import { LESS_MEAL_PURPOSES, MEAL_ROLES, MORE_MEAL_PURPOSES } from '../db/types'
 import {
+  DAY_RETURN_KEY,
+  MONTH_RETURN_KEY,
   WEEK_RETURN_KEY,
   WEEK_RETURN_PARAM,
   forgetRecipesTabPath,
+  parseViewReturn,
   parseWeekReturn,
   readSessionItem,
   removeSessionItem,
+  serializeViewReturn,
   serializeWeekReturn,
   writeSessionItem,
 } from '../logic/navMemory'
+import CookedLogDetailModal, {
+  type CookedLogDetailTarget,
+} from '../components/CookedLogDetailModal'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -425,6 +432,8 @@ function CookedLogCard({
   onNavigate,
   linkState,
   readOnly = false,
+  onOpenDetail,
+  detailAs = 'card',
 }: {
   recipe: Recipe
   log: CookedLog
@@ -439,6 +448,17 @@ function CookedLogCard({
    * 端末に無いレシピを指すため、押せる見た目にすると行き止まりになる
    */
   readOnly?: boolean
+  /**
+   * 「作った記録」の中身の小窓を開く（2026-08-09 便EQ・オーナー実機
+   * 「献立名をタップで整理された記録（記録、日付、食数など、入力した情報全て）を見られるように」）。
+   */
+  onOpenDetail?: () => void
+  /**
+   * 小窓の開き方。
+   *  'card'  … カードそのものを押すと小窓が開く（月タブの日の窓）
+   *  'below' … カードはレシピ詳細へのリンクのまま、すぐ下に小窓を開く1行を足す（週タブの過去日）
+   */
+  detailAs?: 'card' | 'below'
 }) {
   const logPhotoUrl = usePhotoUrl(log.photo)
   const recipePhotoUrl = usePhotoUrl(recipe.photo)
@@ -459,14 +479,33 @@ function CookedLogCard({
     </>
   )
   const cls = 'flex items-center gap-2 rounded-sm border border-edge bg-app/60 px-2 py-1.5 opacity-80'
+  const openDetailAria = ja.cookedDetail.openAria.replace('{title}', recipe.title)
   return (
     <li>
       {readOnly ? (
         <div className={cls}>{inner}</div>
+      ) : onOpenDetail && detailAs === 'card' ? (
+        // 2026-08-09 便EQ: 料理名を押すと、その記録の中身（日付・何人分・メモ・写真）が開く
+        <button type="button" onClick={onOpenDetail} aria-label={openDetailAria} className={`w-full text-left ${cls}`}>
+          {inner}
+        </button>
       ) : (
         <Link to={`/recipes/${recipe.id}`} state={linkState} onClick={onNavigate} className={cls}>
           {inner}
         </Link>
+      )}
+      {/* カードの押下にレシピ詳細という別の役割があるところ（週タブの過去日）では、
+          記録の中身への入口を1行足す（2026-08-09 便EQ） */}
+      {!readOnly && onOpenDetail && detailAs === 'below' && (
+        <button
+          type="button"
+          onClick={onOpenDetail}
+          aria-label={openDetailAria}
+          className="mt-0.5 ml-10 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+        >
+          {ja.cookedDetail.openFromPlan}
+          <ChevronRight size={14} aria-hidden />
+        </button>
       )}
     </li>
   )
@@ -1602,17 +1641,33 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 全レシピのcookedLogsを1回の走査でMap化する(記録件数が多い場合に日付ごとのfilterを
   // 繰り返さないための仕様指定のuseMemoインデックス)。hideStarters設定に関わらず全レシピを
   // 対象にする(「実際に作った」履歴のため。HistoryPage・ホームの最近作ったものと同じ方針)
+  // logIndex（recipe.cookedLogs の何番目か）も持たせる＝記録の小窓から編集へ渡すため(便EQ)
   const cookedLogsByDate = useMemo(() => {
-    const map = new Map<string, { recipe: Recipe; log: CookedLog }[]>()
+    const map = new Map<string, { recipe: Recipe; log: CookedLog; logIndex: number }[]>()
     recipes?.forEach((recipe) => {
-      recipe.cookedLogs.forEach((log) => {
+      recipe.cookedLogs.forEach((log, logIndex) => {
         const list = map.get(log.date)
-        if (list) list.push({ recipe, log })
-        else map.set(log.date, [{ recipe, log }])
+        if (list) list.push({ recipe, log, logIndex })
+        else map.set(log.date, [{ recipe, log, logIndex }])
       })
     })
     return map
   }, [recipes])
+  /**
+   * 押した記録の中身を出す小窓(2026-08-09 便EQ)。null なら閉じている。
+   * 週タブの過去日カード・月タブの日の窓・献立の枠(作った！済み)の3か所から同じ小窓を開く。
+   */
+  const [logDetail, setLogDetail] = useState<CookedLogDetailTarget | null>(null)
+  /**
+   * 献立の枠（作った！済みで薄くなっている行）に対応する記録を探す(便EQ)。
+   * 枠と記録は「同じ日に同じレシピ」で結び付いている（cookedPlanEntryIdSet と同じ考え方）ので、
+   * その日の記録のうち同じレシピの先頭1件を返す。同じ日に同じ料理を2回作った場合は
+   * 1件目を開く（枠ごとの取り違えより、開けないことの方が困るため）。
+   */
+  const cookedLogForEntry = (date: string, recipeId: number | undefined) =>
+    recipeId == null
+      ? undefined
+      : cookedLogsByDate.get(date)?.find(({ recipe }) => recipe.id === recipeId)
   // 「作った見た目」対応付け(2026-07-24 便BH-3・タスク2): 各エントリのうち、その日の
   // 「作った記録」に対応する枠のidを集合で持つ(cookedPlanEntryIdsで日ごとに先着消費。
   // 同名複数の枠は記録件数の分だけ・非破壊=表示のみ)。日タブで「作った!」を押して記録が付くと、
@@ -2169,6 +2224,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 日付カードへ送る pendingScrollDate と違い、離れる直前の位置をそのまま復元する。
    */
   const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
+  /**
+   * その復元をどのタブでやるか（2026-08-09 便EQ）。
+   * 週タブ専用だった仕組みを、月タブ・日タブ（作った記録の一覧からの戻り）にも広げた。
+   */
+  const [pendingScrollMode, setPendingScrollMode] = useState<MealPlanViewMode>('week')
   useEffect(() => {
     if (initialFocusRef.current) return
     initialFocusRef.current = true
@@ -2181,7 +2241,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     //  month … 月タブへ(「作った記録」の一覧から月タブへ戻るときに使う)
     if (focus === 'today') {
       setViewMode('day')
-      window.scrollTo(0, 0)
+      // 2026-08-09 便EQ: 作った記録の一覧から帰ってきたときだけ、離れる直前の縦位置へ戻す。
+      // それ以外（ホームなどからの通常の「今日へ」）は従来どおり先頭から見せる
+      const dayPoint =
+        searchParams.get(WEEK_RETURN_PARAM) === '1'
+          ? parseViewReturn(readSessionItem(DAY_RETURN_KEY))
+          : null
+      removeSessionItem(DAY_RETURN_KEY)
+      if (dayPoint) {
+        setPendingScrollMode('day')
+        setPendingScrollY(dayPoint.scrollY)
+      } else {
+        window.scrollTo(0, 0)
+      }
     } else if (focus === 'week') {
       const date = searchParams.get('date')
       if (date) {
@@ -2210,7 +2282,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       setViewMode('week')
     } else if (focus === 'month') {
       setViewMode('month')
-      window.scrollTo(0, 0)
+      // 2026-08-09 便EQ: 作った記録の一覧から帰ってきたときは、見ていた月と縦位置を復元する
+      const monthPoint =
+        searchParams.get(WEEK_RETURN_PARAM) === '1'
+          ? parseViewReturn(readSessionItem(MONTH_RETURN_KEY))
+          : null
+      removeSessionItem(MONTH_RETURN_KEY)
+      if (monthPoint) {
+        if (monthPoint.anchor) setMonthAnchor(monthPoint.anchor)
+        setPendingScrollMode('month')
+        setPendingScrollY(monthPoint.scrollY)
+      } else {
+        window.scrollTo(0, 0)
+      }
     }
     setSearchParams(
       (prev) => {
@@ -2236,7 +2320,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * （データが少ない週では永遠に足りないため）。
    */
   useEffect(() => {
-    if (pendingScrollY == null || viewMode !== 'week') return
+    if (pendingScrollY == null || viewMode !== pendingScrollMode) return
     const RESTORE_MAX_FRAMES = 60
     let frames = 0
     let raf = 0
@@ -2252,7 +2336,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [pendingScrollY, viewMode])
+  }, [pendingScrollY, viewMode, pendingScrollMode])
 
   // 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）
   useEffect(() => {
@@ -3767,6 +3851,38 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
+   * 「作った記録の一覧」へ移る直前に、月タブ・日タブの居場所を覚える（2026-08-09 便EQ・
+   * オーナー「戻るのも該当場所のスクロール位置まで」）。一覧の「戻る」は `restore=1` 付きで
+   * 帰ってくるので、上の初期化処理が同じ月・同じ縦位置まで戻す。
+   */
+  const rememberMonthReturn = () => {
+    writeSessionItem(
+      MONTH_RETURN_KEY,
+      serializeViewReturn({ anchor: monthAnchor, scrollY: window.scrollY }),
+    )
+  }
+  const rememberDayReturn = () => {
+    writeSessionItem(DAY_RETURN_KEY, serializeViewReturn({ anchor: '', scrollY: window.scrollY }))
+  }
+
+  /**
+   * 記録の小窓からレシピ詳細・記録の編集へ移るときの帰り道（2026-08-09 便EQ）。
+   * いま開いているタブ（日/週/月）と、そのタブでの居場所へ帰す。
+   */
+  const logDetailLinkState =
+    viewMode === 'week'
+      ? WEEK_RETURN_LINK_STATE
+      : {
+          from: 'mealPlan',
+          fromPath: `/meal-plan?focus=${viewMode === 'month' ? 'month' : 'today'}&${WEEK_RETURN_PARAM}=1`,
+        }
+  const rememberLogDetailReturn = () => {
+    if (viewMode === 'week') rememberWeekReturn()
+    else if (viewMode === 'month') rememberMonthReturn()
+    else rememberDayReturn()
+  }
+
+  /**
    * 週タブの操作3グループの開閉（2026-08-03 便DJ・オーナー指示）。
    * 画面を離れると既定に戻る（設定には残さない）。
    *
@@ -4347,8 +4463,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       householdServings,
       recipe?.servings,
     )
+    // 作った！済みの枠に対応する記録(2026-08-09 便EQ)。あれば行の下に記録への入口を出す
+    const cookedLogRow = isCooked ? cookedLogForEntry(date, recipe?.id) : undefined
     return (
-      <div key={key} className="flex items-center gap-2">
+      <div key={key}>
+      <div className="flex items-center gap-2">
         {/* 役割ラベルの列。入っている行では、その下に食数(何人分作るか)のボタンを重ねて置く
             (2026-08-03 便DJ・オーナー指示)。横に足すと料理名の幅を削ってしまうため縦に積む */}
         <div className="w-10 shrink-0">
@@ -4459,6 +4578,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             <X size={18} aria-hidden />
           </button>
         )}
+      </div>
+      {/* 作った！済みで薄くなっている枠から、その記録の中身を開く1行(2026-08-09 便EQ・オーナー実機
+          「作った！して表示が薄くなっているレシピをタップ→記録を見たい」)。
+          枠そのものの押下は「レシピを選び直す」のまま残す＝間違えて記録した枠を直せる状態を
+          失わせない(2026-08-03 便DP-5の司令部裁定)。開く小窓は他の3か所と同じもの */}
+      {cookedLogRow && (
+        <button
+          type="button"
+          onClick={() =>
+            setLogDetail({
+              recipe: cookedLogRow.recipe,
+              log: cookedLogRow.log,
+              logIndex: cookedLogRow.logIndex,
+            })
+          }
+          aria-label={ja.cookedDetail.openAria.replace('{title}', cookedLogRow.recipe.title)}
+          className="mt-0.5 ml-12 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+        >
+          {ja.cookedDetail.openFromPlan}
+          <ChevronRight size={14} aria-hidden />
+        </button>
+      )}
       </div>
     )
   }
@@ -5137,6 +5278,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           {/* 2026-08-03 便DH(オーナー指示): 日タブの「表示する食事」は削除した。
               日タブは今日の予定を朝食・昼食・夕食すべて並べるようになり、絞る意味が無くなったため
               (設定そのもの=visibleMealSlots は週タブに残り、自動取り込みの対象もそちらで決まる) */}
+          {/* 作った記録の一覧への入口(2026-08-09 便EQ・オーナー「記録一覧への正規の行き方がわからない」)。
+              週・月にはあったが、献立を開くと最初に出るこの日タブには無かった。
+              3タブとホームで同じ文言にそろえ、どこからでも同じ名前で辿れるようにする */}
+          <Link
+            to="/history?back=day"
+            onClick={rememberDayReturn}
+            className="mt-[var(--space-md)] flex items-center justify-center gap-0.5 text-center text-sm font-bold text-accent-ink underline"
+          >
+            {ja.mealPlan.historyLink}
+            <ChevronRight size={16} aria-hidden />
+          </Link>
         </>
       )}
 
@@ -5802,13 +5954,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {renderPlanSheetSection(monthPlanSheet)}
 
             {/* 「作った記録」の一覧への入口(2026-08-02 便DE-11・オーナー指示)。
-                週タブにしか無かったので月からも開けるようにし、戻るはこの月タブへ返す(?back=month) */}
+                週タブにしか無かったので月からも開けるようにし、戻るはこの月タブへ返す(?back=month)。
+                2026-08-09 便EQ: 離れる直前の月と縦位置も覚えて、戻ったら同じ場所へ返す */}
             {!isDemo && (
               <Link
                 to="/history?back=month"
-                className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
+                onClick={rememberMonthReturn}
+                className="mt-[var(--space-md)] flex items-center justify-center gap-0.5 text-center text-sm font-bold text-accent-ink underline"
               >
                 {ja.mealPlan.historyLink}
+                <ChevronRight size={16} aria-hidden />
               </Link>
             )}
           </div>
@@ -6317,7 +6472,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     {ja.mealPlan.pastCookedTitle}
                   </p>
                   <ul className="mt-1 space-y-1">
-                    {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log }, i) => (
+                    {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log, logIndex }, i) => (
                       <CookedLogCard
                         key={`${recipe.id}-${i}`}
                         recipe={recipe}
@@ -6326,6 +6481,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         // 週タブへ帰し、離れる直前の週とスクロール位置を復元する
                         linkState={WEEK_RETURN_LINK_STATE}
                         onNavigate={rememberWeekReturn}
+                        // 2026-08-09 便EQ: カードはレシピ詳細のまま、記録の中身への入口を下に足す
+                        onOpenDetail={() => setLogDetail({ recipe, log, logIndex })}
+                        detailAs="below"
                       />
                     ))}
                   </ul>
@@ -6520,12 +6678,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {/* 2026-08-02 便DE-11(オーナー指示): ここから開いた「作った記録」の戻るは、
           呼び出し元の週タブへ返す(?back=week)。従来はブラウザの戻りで献立タブに戻るだけで、
-          タブの状態は既定の「日」に落ちていた */}
+          タブの状態は既定の「日」に落ちていた。
+          2026-08-09 便EQ: 離れる直前の週と縦位置も覚えて、戻ったら同じ場所へ返す */}
       <Link
         to="/history?back=week"
-        className="mt-[var(--space-md)] block text-center text-sm font-bold text-accent-ink underline"
+        onClick={rememberWeekReturn}
+        className="mt-[var(--space-md)] flex items-center justify-center gap-0.5 text-center text-sm font-bold text-accent-ink underline"
       >
         {ja.mealPlan.historyLink}
+        <ChevronRight size={16} aria-hidden />
       </Link>
 
       </>
@@ -7078,13 +7239,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   {ja.mealPlan.pastCookedTitle}
                 </p>
                 <ul className="mt-1 space-y-1">
-                  {dayModalLogs.map(({ recipe, log }, i) => (
+                  {dayModalLogs.map(({ recipe, log, logIndex }, i) => (
                     <CookedLogCard
                       key={`${recipe.id}-${i}`}
                       recipe={recipe}
                       log={log}
                       readOnly={isDemo}
                       onNavigate={() => setDayModalDate(null)}
+                      // 2026-08-09 便EQ(オーナー実機「月献立の作った記録から献立名をタップで
+                      // 整理された記録を見たい」): 料理名を押すと記録の中身の小窓が開く
+                      onOpenDetail={() => setLogDetail({ recipe, log, logIndex })}
                     />
                   ))}
                 </ul>
@@ -7211,6 +7375,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 「作った記録」の中身の小窓(2026-08-09 便EQ)。週タブの過去日カード・月タブの日の窓・
+          献立の作った！済みの枠、どこから開いても同じ窓が出る。日の窓の上に重なるので、
+          Escapeと端末の「戻る」は上の1枚(この窓)だけを閉じる(useOverlayDismissが面倒を見る) */}
+      {logDetail && (
+        <CookedLogDetailModal
+          target={logDetail}
+          onClose={() => setLogDetail(null)}
+          // 小窓からレシピ詳細・記録の編集へ移ったときも、詳細の「戻る」は
+          // いま開いているタブの同じ場所へ帰す(便DT-2の仕組みを日・月にも広げた)
+          linkState={logDetailLinkState}
+          onNavigate={() => {
+            rememberLogDetailReturn()
+            setLogDetail(null)
+            setDayModalDate(null)
+          }}
+        />
       )}
     </div>
   )

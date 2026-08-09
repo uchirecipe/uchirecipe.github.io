@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Clock,
   Dices,
@@ -35,7 +35,19 @@ import { defaultHomeWidgets } from '../db/types'
 import Collapse from '../components/Collapse'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import CookedLogDetailModal, {
+  type CookedLogDetailTarget,
+} from '../components/CookedLogDetailModal'
+import { useScrollRestore } from '../components/useScrollRestore'
 import { settingsLinkWithBack } from '../logic/backLink'
+import {
+  HOME_RETURN_KEY,
+  parseViewReturn,
+  readSessionItem,
+  removeSessionItem,
+  serializeViewReturn,
+  writeSessionItem,
+} from '../logic/navMemory'
 import { ja } from '../i18n/ja'
 
 // バックアップ浮遊バナーの「×で閉じたらセッション中は再表示しない」用キー(2026-07-16 便S)。
@@ -150,20 +162,32 @@ function HomeTodayListItem({ recipe }: { recipe: Recipe }) {
 
 /**
  * 「最近作ったもの」の1件（2026-07-16 便W-②③）。
- * ②詳細から戻ったらホームへ戻す(state.from/fromPath)。
  * ③サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバック。
  * usePhotoUrlはループ内で直接呼べないため専用コンポーネントに分離
+ *
+ * 2026-08-09 便EQ（オーナー実機）: 料理名を押すとレシピ詳細へ移っていたが、見たいのは
+ * その日の記録そのものだったため、押すと「作った記録」の小窓が開くようにした
+ * （小窓の中からレシピ詳細と記録の編集へ行ける）。
  */
-function HistoryCard({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
+function HistoryCard({
+  recipe,
+  log,
+  onOpen,
+}: {
+  recipe: Recipe
+  log: CookedLog
+  onOpen: () => void
+}) {
   const logPhotoUrl = usePhotoUrl(log.photo)
   const recipePhotoUrl = usePhotoUrl(recipe.photo)
   const photoUrl = logPhotoUrl ?? recipePhotoUrl
   return (
     <li>
-      <Link
-        to={`/recipes/${recipe.id}`}
-        state={{ from: 'home', fromPath: '/' }}
-        className="flex items-center gap-[var(--space-sm)] px-[var(--space-md)] py-3"
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
+        className="flex w-full items-center gap-[var(--space-sm)] px-[var(--space-md)] py-3 text-left"
       >
         <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm">
           {photoUrl ? (
@@ -174,7 +198,7 @@ function HistoryCard({ recipe, log }: { recipe: Recipe; log: CookedLog }) {
         </div>
         <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
         <span className="shrink-0 text-sm text-ink-muted">{log.date.replaceAll('-', '/')}</span>
-      </Link>
+      </button>
     </li>
   )
 }
@@ -190,6 +214,37 @@ export default function HomePage() {
   const location = useLocation()
   const allRecipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
+
+  /**
+   * 「作った記録の一覧」へ移る直前に、ホームの縦スクロール位置を覚える（2026-08-09 便EQ）。
+   * 一覧の「戻る」は `/?restore=1` へ帰ってくるので、下の復元処理が同じ場所まで戻す。
+   * 覚えるのは sessionStorage だけ＝端末に残るユーザーデータには何も書かない。
+   */
+  const rememberHomeReturn = () => {
+    writeSessionItem(HOME_RETURN_KEY, serializeViewReturn({ anchor: '', scrollY: window.scrollY }))
+  }
+
+  // 一覧から帰ってきたときだけ、覚えた縦位置まで戻す(便EQ)。復元に使ったクエリはURLから消す
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
+  const restoreCheckedRef = useRef(false)
+  useEffect(() => {
+    if (restoreCheckedRef.current) return
+    restoreCheckedRef.current = true
+    if (searchParams.get('restore') !== '1') return
+    const point = parseViewReturn(readSessionItem(HOME_RETURN_KEY))
+    removeSessionItem(HOME_RETURN_KEY)
+    if (point) setPendingScrollY(point.scrollY)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('restore')
+        return next
+      },
+      { replace: true },
+    )
+  }, [searchParams, setSearchParams])
+  useScrollRestore(pendingScrollY, true, () => setPendingScrollY(null))
 
   const [condition, setCondition] = useState<SuggestCondition>('any')
   // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
@@ -381,14 +436,18 @@ export default function HomePage() {
     setSeed(Math.random())
   }
 
-  // 最近作ったもの: 全レシピの「作った記録」を新しい順に5件
+  // 最近作ったもの: 全レシピの「作った記録」を新しい順に5件。
+  // logIndex（recipe.cookedLogs の何番目か）も持ち回る＝小窓から記録の編集へ渡すため(便EQ)
   const history = useMemo(() => {
     if (!recipes) return []
     return recipes
-      .flatMap((recipe) => recipe.cookedLogs.map((log) => ({ recipe, log })))
+      .flatMap((recipe) => recipe.cookedLogs.map((log, logIndex) => ({ recipe, log, logIndex })))
       .sort((a, b) => b.log.date.localeCompare(a.log.date))
       .slice(0, 5)
   }, [recipes])
+
+  // 押した記録の中身を出す小窓(2026-08-09 便EQ)。null なら閉じている
+  const [logDetail, setLogDetail] = useState<CookedLogDetailTarget | null>(null)
 
   const widgetSections: Record<HomeWidgetKey, ReactNode> = {
     // 選択中も今日の予定も0品なら非表示(2026-07-16 便S。直近実装の「1行に薄く」表示を置き換え。
@@ -663,13 +722,24 @@ export default function HomePage() {
               <History size={20} className="text-accent-ink" aria-hidden />
               {ja.home.historyTitle}
             </h2>
-            <Link to="/history" className="text-sm font-bold text-accent-ink underline">
+            {/* 一覧へ移る直前にホームの縦位置を覚え、一覧の「戻る」で同じ場所へ帰す(便EQ) */}
+            <Link
+              to="/history?back=home"
+              onClick={rememberHomeReturn}
+              className="flex shrink-0 items-center gap-0.5 text-sm font-bold text-accent-ink underline"
+            >
               {ja.home.historyMore}
+              <ChevronRight size={16} aria-hidden />
             </Link>
           </div>
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-            {history.map(({ recipe, log }, index) => (
-              <HistoryCard key={index} recipe={recipe} log={log} />
+            {history.map(({ recipe, log, logIndex }, index) => (
+              <HistoryCard
+                key={index}
+                recipe={recipe}
+                log={log}
+                onOpen={() => setLogDetail({ recipe, log, logIndex })}
+              />
             ))}
           </ul>
         </section>
@@ -762,6 +832,17 @@ export default function HomePage() {
           <div key={key}>{widgetSections[key]}</div>
         ))}
       </div>
+
+      {/* 「最近作ったもの」の料理名を押したときに開く記録の小窓(2026-08-09 便EQ)。
+          レシピ詳細へ移るときは、戻ってきたらホームへ帰す出所を持たせる(便W-②と同じ仕組み) */}
+      {logDetail && (
+        <CookedLogDetailModal
+          target={logDetail}
+          onClose={() => setLogDetail(null)}
+          linkState={{ from: 'home', fromPath: '/' }}
+          onNavigate={() => setLogDetail(null)}
+        />
+      )}
     </div>
   )
 }
