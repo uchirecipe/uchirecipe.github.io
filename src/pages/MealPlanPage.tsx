@@ -2202,6 +2202,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }, [pickedRecipes, plannedGroups])
 
   /**
+   * 「作った！」で記録する食数（2026-08-10 便FF・オーナー指示
+   * 「作った！押下時に設定されている食数を記録したい。設定がなければ個人設定に
+   * 登録されている食数を自動で反映して」）。
+   *
+   * 優先順位は買い物メモ・概算食費と同じ（logic/servings.ts effectiveMealServings）:
+   * ①今日の予定の枠に決めた食数 ②設定「食数の設定」の人数 ③レシピの登録人数分。
+   * 「レシピ一覧から選択中」の品には枠が無いので②③で決まる。
+   * 同じ料理が複数の食事に入っているときは、先に見つけた枠の食数を使う。
+   */
+  const dayCookedServings = useMemo(() => {
+    const entryServings = new Map<number, number>()
+    todayEntries?.forEach((e) => {
+      if (e.servings != null && !entryServings.has(e.recipeId))
+        entryServings.set(e.recipeId, e.servings)
+    })
+    const map = new Map<number, number>()
+    dayRecipeIds.forEach((id) => {
+      map.set(
+        id,
+        effectiveMealServings(
+          entryServings.get(id),
+          householdServings,
+          recipeById.get(id)?.servings,
+        ),
+      )
+    })
+    return map
+  }, [dayRecipeIds, todayEntries, householdServings, recipeById])
+
+  /**
    * 並行調理ナビに作りかけの段取りが残っているか（2026-08-08 便EG・オーナー実機報告
    * 「タブ移動しても並行調理が維持されているが、再開したい時に迷う」）。
    * 端末内の一時的な覚え書き（sessionStorage）なので、この画面を開くたびに読み直す。
@@ -3046,7 +3076,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (!confirmCookedAgainstNavi(recipe)) return
     const undoItem = undoItemOf(recipeId)
     void (async () => {
-      await markTodayListCooked(recipeId)
+      await markTodayListCooked(recipeId, dayCookedServings.get(recipeId))
       // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
       setMessage(ja.mealPlan.todayCookedToast)
       setUndoCooked({ items: [undoItem], message: ja.mealPlan.todayCookedToast })
@@ -3071,7 +3101,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       ja.mealPlan.todayMarkAllCookedConfirmAsk
     if (!window.confirm(confirmText)) return
     const recorded = dayRecipeIds.map(undoItemOf)
-    await markAllTodayListCooked(recorded.map((item) => item.recipeId))
+    await markAllTodayListCooked(
+      recorded.map((item) => item.recipeId),
+      dayCookedServings,
+    )
     // 予告どおり、作りかけの段取りもここで終える（再開ボタンだけが残る状態にしない）
     if (naviInProgress) clearCookNaviSession()
     const toast = ja.mealPlan.todayMarkAllCookedToast.replace('{n}', String(recorded.length))

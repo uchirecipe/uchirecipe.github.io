@@ -4,6 +4,46 @@ import { addCookedLog } from './recipes'
 import { lowerPantryLevelsForCooked } from './pantry'
 import { todayString } from '../logic/date'
 import { staleTodayListFromPlanIds } from '../logic/mealPlan'
+import { isOneTapCookedLog } from '../logic/cooked'
+import { effectiveMealServings } from '../logic/servings'
+
+/**
+ * ボタン1回の「作った！」で記録する食数を決める（2026-08-10 便FF・オーナー指示
+ * 「作った！では基本的に、作った！押下時に設定されている食数を記録したい。
+ * 設定がなければ個人設定に登録されている食数を自動で反映して」）。
+ *
+ * 優先順位は買い物メモ・概算食費とまったく同じ（logic/servings.ts effectiveMealServings）:
+ *   ①その枠に決めた食数 ②設定「食数の設定」の人数 ③レシピに登録されている人数分。
+ * 呼び出し側が①を解決済みの値として渡せるので、渡された分はそのまま使い、
+ * 渡されなかった品だけここで②③に倒す（画面ごとに違う人数が記録されないよう、
+ * 解決の規則はこの1か所とeffectiveMealServingsに閉じ込める）。
+ *
+ * 既にある記録は一切書き換えない（この関数は新しく足す記録の値だけを決める）。
+ */
+async function resolveCookedServings(
+  recipeIds: number[],
+  resolved?: ReadonlyMap<number, number>,
+): Promise<Map<number, number>> {
+  const map = new Map<number, number>()
+  const missing = recipeIds.filter((id) => {
+    const value = resolved?.get(id)
+    if (value != null && value > 0) {
+      map.set(id, value)
+      return false
+    }
+    return true
+  })
+  if (missing.length === 0) return map
+  const settings = await db.settings.get(1)
+  for (const recipeId of missing) {
+    const recipe = await db.recipes.get(recipeId)
+    map.set(
+      recipeId,
+      effectiveMealServings(undefined, settings?.householdServings, recipe?.servings),
+    )
+  }
+  return map
+}
 
 /**
  * 献立ページの「作った」「全て作った！」でも、レシピ詳細の「作った！」と同じように
@@ -61,11 +101,19 @@ export async function removeFromTodayList(recipeId: number): Promise<void> {
  * db.transaction('rw', db.recipes, ...)を開くが、Dexieのトランザクションは対象テーブルが
  * 外側の集合の部分集合なら外側を再利用する(reentrant)ため、この呼び出しも含めて単一の
  * 物理トランザクションになる。addCookedLogの他の呼び出し元(markAllTodayListCooked等)は
- * 従来どおり単独のトランザクションのまま動作し、挙動は変わらない
+ * 従来どおり単独のトランザクションのまま動作し、挙動は変わらない。
+ *
+ * 2026-08-10 便FF: 何人分作ったかも一緒に記録する（resolveCookedServings 参照）。
+ * servings には「その枠に決めた食数」を解決済みの値で渡す。渡さなければ
+ * 設定「食数の設定」→レシピの登録人数分の順に自動で決まる。
  */
-export async function markTodayListCooked(recipeId: number): Promise<void> {
+export async function markTodayListCooked(recipeId: number, servings?: number): Promise<void> {
+  const servingsById = await resolveCookedServings(
+    [recipeId],
+    servings != null ? new Map([[recipeId, servings]]) : undefined,
+  )
   await db.transaction('rw', db.recipes, db.todayList, async () => {
-    await addCookedLog(recipeId, { date: todayString() })
+    await addCookedLog(recipeId, { date: todayString(), servings: servingsById.get(recipeId) })
     await removeFromTodayList(recipeId)
   })
   await reflectPantryForCooked([recipeId]) // 在庫反映(便CC/C3。設定ONのときだけ)
@@ -78,7 +126,9 @@ export async function markTodayListCooked(recipeId: number): Promise<void> {
  * 1品につき1件消し、その品を今日の献立へ戻す。トーストの「元に戻す」からだけ呼ぶ
  * （誤タップの直後を想定した経路）。実際に取り消せた品数を返す。
  *
- * 消す対象は「今日の日付で、メモ・写真・人数のどれも付いていない記録」の先頭1件に限る。
+ * 消す対象は「今日の日付で、メモも写真も付いていない記録」の先頭1件に限る
+ * （2026-08-10 便FF: ボタン1回の記録にも食数が入るようになったので、判定から人数を外した。
+ * logic/cooked.ts isOneTapCookedLog に判定を集約）。
  * 記録フォーム（レシピ詳細の「作った！」）で書いたメモ・写真つきの記録は、同じ日でも
  * この操作では消さない＝押し間違いの取り消しが、手で書いた記録を巻き込まないようにする。
  * 対象が1件も見つからなければ0を返し、何も変えない（呼び出し側はその旨を伝える）。
@@ -102,10 +152,7 @@ export async function undoTodayListCooked(
     for (const { recipeId, fromPlan } of items) {
       const recipe = await db.recipes.get(recipeId)
       if (!recipe) continue
-      const index = recipe.cookedLogs.findIndex(
-        (log) =>
-          log.date === date && log.note == null && log.photo == null && log.servings == null,
-      )
+      const index = recipe.cookedLogs.findIndex((log) => isOneTapCookedLog(log, date))
       if (index < 0) continue
       await db.recipes.update(recipeId, {
         cookedLogs: recipe.cookedLogs.filter((_, i) => i !== index),
@@ -128,13 +175,20 @@ export async function undoTodayListCooked(
  * 途中で失敗すると「一部だけ記録されてリストは残る/消える」不整合が起き得た）。
  * addCookedLogは内部でdb.transaction('rw', db.recipes, ...)を開くが、Dexieのトランザクションは
  * 対象テーブルが外側の集合の部分集合なら外側を再利用する(reentrant)ため、単一の物理
- * トランザクションになる(markTodayListCookedと同じ方式)
+ * トランザクションになる(markTodayListCookedと同じ方式)。
+ *
+ * 2026-08-10 便FF: 1品ずつの「作った！」と同じく、何人分作ったかも記録する。
+ * servingsByRecipeId には枠に決めた食数を解決済みで渡す（渡さない品は自動で決める）。
  */
-export async function markAllTodayListCooked(recipeIds: number[]): Promise<void> {
+export async function markAllTodayListCooked(
+  recipeIds: number[],
+  servingsByRecipeId?: ReadonlyMap<number, number>,
+): Promise<void> {
   const date = todayString()
+  const servingsById = await resolveCookedServings(recipeIds, servingsByRecipeId)
   await db.transaction('rw', db.recipes, db.todayList, async () => {
     for (const recipeId of recipeIds) {
-      await addCookedLog(recipeId, { date })
+      await addCookedLog(recipeId, { date, servings: servingsById.get(recipeId) })
     }
     await db.todayList.clear()
   })
@@ -153,29 +207,32 @@ export async function markAllTodayListCooked(recipeIds: number[]): Promise<void>
  * 2026-08-09 便EH（オーナー実機報告「まとめて作った！すると、その品が再度記録され、記録が2つになる」）:
  * **今日すでに同じ品の記録が付いているときは、記録を足さない**。
  *
- * 対象から外すのは「今日の日付で、メモ・写真・人数のどれも付いていない記録」がある品だけ
+ * 対象から外すのは「今日の日付で、メモも写真も付いていない記録」がある品だけ
  * ＝この関数が付ける記録とまったく同じものが既にある品。レシピ詳細の「作った！」で
  * メモや写真を添えて記録した品は別物なので、ここでは判断材料にしない
- * （undoTodayListCooked が取り消す対象の決め方と同じ規則）。
+ * （undoTodayListCooked が取り消す対象の決め方と同じ規則＝logic/cooked.ts isOneTapCookedLog。
+ * 2026-08-10 便FF で、この判定から人数を外した。ボタン1回の記録にも食数が入るようになり、
+ * 人数の有無で見分けると二重記録の歯止めが効かなくなるため）。
  * 同じ料理を1日に2回作ったときに記録を残せなくなる心配はある。ただしその場合は
  * レシピ詳細の記録フォーム（人数・メモつき）から付けられるので、
  * **黙って二重に付くことの害の方が大きい**と判断した。
  *
  * 実際に記録した品のIDを返す（呼び出し側はその件数をそのまま画面に出す）。
  */
-export async function markRecipesCooked(recipeIds: number[]): Promise<number[]> {
+export async function markRecipesCooked(
+  recipeIds: number[],
+  servingsByRecipeId?: ReadonlyMap<number, number>,
+): Promise<number[]> {
   if (recipeIds.length === 0) return []
   const date = todayString()
+  const servingsById = await resolveCookedServings(recipeIds, servingsByRecipeId)
   const recorded = await db.transaction('rw', db.recipes, db.todayList, async () => {
     const done: number[] = []
     for (const recipeId of recipeIds) {
       const recipe = await db.recipes.get(recipeId)
-      const alreadyLogged = recipe?.cookedLogs.some(
-        (log) =>
-          log.date === date && log.note == null && log.photo == null && log.servings == null,
-      )
+      const alreadyLogged = recipe?.cookedLogs.some((log) => isOneTapCookedLog(log, date))
       if (!alreadyLogged) {
-        await addCookedLog(recipeId, { date })
+        await addCookedLog(recipeId, { date, servings: servingsById.get(recipeId) })
         done.push(recipeId)
       }
       await db.todayList.where('recipeId').equals(recipeId).delete()
