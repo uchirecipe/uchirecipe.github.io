@@ -250,6 +250,11 @@
      ここだけ密度が低い」。散らし方(大きさ・傾き・左右の位置)は変えずに、上下の間隔だけ
      およそ半分に詰めた。しっぽの粒は吹き出しの左右どちらかに寄せてあり、隣の吹き出しとは
      横位置がずれているので、縦に詰めても粒と文字は重ならない。
+     2026-08-10 便FG(オーナー指示「もっと詰めるか、大きくして重ねて。まだスカスカ」):
+     両方を行った。①文字を1つずつ2〜2.5px大きくして吹き出し自体を大きくする
+     ②上下の間隔を負にして重ねる(390pxで約-10px・パソコンで約-50px)。
+     重なる部分は縁と余白だけで、文字どうしは重ならない(隣り合う吹き出しは左右にずれている)。
+     しっぽの粒も、下の吹き出しと横位置が重ならない場所に置いてある。
      旧: 2026-08-09 便EP の三角しっぽ・3列グリッド */
   .pains {
     /* 下の余白は、いちばん下の吹き出しのしっぽ(24px下に出る)より広く取る */
@@ -297,76 +302,106 @@
 
   /* 1つずつ、大きさ・傾き・左右の位置・しっぽの向きを変える(整列させない) */
   .pains li:nth-child(1) {
-    margin: 0 0 16px 4px;
+    margin: 0 0 -10px 4px;
     transform: rotate(-2.8deg);
   }
-  .pains li:nth-child(1) b { font-size: 16.5px; }
+  .pains li:nth-child(1) b { font-size: 19px; }
   .pains li:nth-child(1)::before { left: 26px; }
   .pains li:nth-child(1)::after { left: 14px; }
 
   .pains li:nth-child(2) {
-    margin: 0 8px 18px auto;
+    margin: 0 6px -10px auto;
     transform: rotate(2.2deg);
   }
-  .pains li:nth-child(2) b { font-size: 15px; }
+  .pains li:nth-child(2) b { font-size: 17px; }
   .pains li:nth-child(2)::before { right: 28px; }
   .pains li:nth-child(2)::after { right: 16px; }
 
   .pains li:nth-child(3) {
-    margin: 0 0 16px 24px;
+    margin: 0 0 -10px 20px;
     transform: rotate(-1.8deg);
   }
-  .pains li:nth-child(3) b { font-size: 15.5px; }
+  .pains li:nth-child(3) b { font-size: 18px; }
   .pains li:nth-child(3)::before { left: 30px; }
   .pains li:nth-child(3)::after { left: 18px; }
 
   .pains li:nth-child(4) {
-    margin: 0 28px 0 auto;
+    margin: 0 24px 0 auto;
     transform: rotate(3deg);
   }
-  .pains li:nth-child(4) b { font-size: 14.5px; }
+  .pains li:nth-child(4) b { font-size: 17px; }
   .pains li:nth-child(4)::before { right: 24px; }
   .pains li:nth-child(4)::after { right: 12px; }
 
-  /* 横に余裕がある画面では散らし幅を広げ、縦はさらに詰めて絵としてまとまるようにする。
-     隣り合う吹き出しは左右にずれているので、縦に重ねても文字どうしは重ならない */
+  /* 横に余裕がある画面では散らし幅を広げ、縦はさらに重ねて1つの絵にまとめる。
+     隣り合う吹き出し(1と2・2と3・3と4)は左右に完全にずれているので、深く重ねても
+     文字どうしは重ならない。一方、1と3・2と4は左右が重なるので、
+     3番目だけ下げ幅を浅くして、1番目の文字に3番目の枠がかからないようにしている */
   @media (min-width: 620px) {
     .pains li:nth-child(1) { margin-left: 12px; }
-    .pains li:nth-child(2) { margin-top: -40px; margin-right: 44px; }
-    .pains li:nth-child(3) { margin-top: -36px; margin-left: 74px; }
-    .pains li:nth-child(4) { margin-top: -40px; margin-right: 104px; }
+    .pains li:nth-child(2) { margin-top: -56px; margin-right: 40px; }
+    .pains li:nth-child(3) { margin-top: -26px; margin-left: 70px; }
+    .pains li:nth-child(4) { margin-top: -56px; margin-right: 96px; }
   }
 
-  /* ===== 網羅グリッド(献立まわりだけ大きい1枠) ===== */
-  .grid {
+  /* ===== その他の「できること」=====
+     2026-08-10 便FG(オーナー指示): 説明を付けずに並べるだけの一覧。
+     行間を詰め、横に余裕がある画面では2列にしてコンパクトに置く。
+     旧: 1件ずつ説明とリンクを付けた8枠のグリッド */
+  ul.plain-list {
     display: grid;
-    gap: 12px;
     grid-template-columns: 1fr;
-    margin-top: 14px;
+    gap: 2px 18px;
+    margin: 0 0 4px;
+    padding: 0;
+    list-style: none;
   }
   @media (min-width: 560px) {
-    .grid { grid-template-columns: 1fr 1fr; }
+    ul.plain-list { grid-template-columns: 1fr 1fr; }
   }
-  .grid > div {
+  ul.plain-list li {
+    position: relative;
+    padding-left: 1.1em;
+    font-size: 14.5px;
+    line-height: 1.75;
+  }
+  ul.plain-list li::before {
+    content: "・";
+    position: absolute;
+    left: 0;
+    color: var(--accent-ink);
+  }
+
+  /* 基本レシピの紹介(節のいちばん下・オーナー指定の並び) */
+  .starters {
+    margin-top: 16px;
+    padding: 14px;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 14px;
   }
-  .grid h3 {
+  .starters h3 {
     margin: 0 0 4px;
     font-size: 15px;
-    color: var(--accent-ink);
   }
-  .grid p {
+  .starters p {
     margin: 0;
     font-size: 14px;
   }
-  .grid .tiny {
+  .starters .tiny {
     display: block;
     margin-top: 6px;
     font-size: 12.5px;
+    line-height: 1.7;
     color: var(--text-muted);
+  }
+
+  /* 無料で登録できる件数(2026-08-10 便FG オーナー指示)。
+     「好きなレシピを登録する」の節のいちばん下に1文だけ置く。
+     購入ボタンよりずっと手前で必ず目に入る位置に残すための1行 */
+  .free-limit {
+    margin: 12px 0 0;
+    font-weight: bold;
   }
 
   /* ===== 無料とPro版 ===== */
@@ -597,6 +632,9 @@
     </ul>
     <p class="muted">ページによっては取り込めないことがあります。そのときは文章の貼り付けか手入力でご登録ください。</p>
     <a class="more" href="/about/manual.html#register">レシピの登録をくわしく →</a>
+    <!-- 2026-08-10 便FG(オーナー指示): 無料で登録できる件数は、この節のいちばん下に1文だけ置く。
+         Pro版の節にあった同じ内容の注記(枠つき4行)は重複なので外した -->
+    <p class="free-limit">無料で登録できるレシピは30品までです。</p>
   </section>
 
   <!-- 2026-08-10 便FE(オーナー指示): 「登録したレシピでできること」を3つ→4つに。
@@ -612,7 +650,8 @@
       <figcaption>週の献立。1日ぶんのカードが7日並びます</figcaption>
     </figure>
 
-    <h3>献立から、買い物メモが自動でできます</h3>
+    <!-- 2026-08-10 便FG(オーナー指示): 「自動でできます」→「自動で作れます」 -->
+    <h3>献立から、買い物メモが自動で作れます</h3>
     <p>入れた料理の材料が集まり、スーパーの<strong>売り場順</strong>に並びます。</p>
     <p>在庫で「ある」にした食材は下書きに出ないので、二度買いを避けられます。</p>
 
@@ -628,6 +667,11 @@
       <img src="/about/img/lp/cost-week-free.webp" width="780" height="336" loading="lazy" decoding="async" alt="献立の「週」タブの「表示している週の概算食費」を開いたところ。1週間ぶんの概算金額と食数、計算のもとにした期間が出ている">
       <figcaption>表示している週の概算食費。過ぎた日は含みません</figcaption>
     </figure>
+
+    <!-- 2026-08-10 便FG(オーナー指示): 「他にも、できることたくさん」に混ざっていた
+         1週間の献立表は、レシピではなく献立でできることなのでこの節へ移した -->
+    <h3>1週間の献立表を印刷・画像で保存</h3>
+    <p>1週間の献立を1枚の表にできます。印刷して冷蔵庫に貼っておく使い方もできます。</p>
 
     <div><a class="more" href="/about/manual.html#mealplan">献立の立て方をくわしく →</a></div>
     <div><a class="more more--sm" href="/about/manual.html#shopping">買い物メモをくわしく →</a></div>
@@ -684,91 +728,41 @@
     <p class="muted" style="margin-top: 6px;"><a href="/about/foods.html">使っている食品データと目安価格の一覧</a></p>
   </section>
 
+  <!-- 2026-08-10 便FG(オーナー指示): この節は「その他」に当たるので作り直した。
+       ①よく使うものから順に置く ②「レシピでできること」に当たらない
+         「1週間の献立表」は献立の節へ移した ③機能の名前ではなく「できること」の言い方にする
+       ④代表3つだけ短い説明を付け、残りは説明を付けずに並べる
+       ⑤「くわしく」のリンクは節に1つだけ ⑥基本レシピの紹介はいちばん下に置く
+       旧: 1件ずつ説明とリンクを付けた8枠のグリッド(便EP) -->
   <section class="sec">
-    <p class="eyebrow">登録したレシピで、できること 4</p>
     <h2>他にも、できることたくさん</h2>
     <p>全部を使う必要はありません。必要なものだけお使いください。</p>
 
-    <div class="grid">
-      <div>
-        <h3>基本のレシピ100品以上</h3>
-        <p>肉じゃが・鶏の唐揚げ・回鍋肉などの定番から、お弁当のおかず・作り置きまで。書き下ろした100品以上が最初から入っていて、<strong>全部無料</strong>です。</p>
-        <span class="tiny">必要なければ、設定で一覧に出さないようにもできます。</span>
-        <a class="more more--sm" href="/about/manual.html#starters">くわしく →</a>
-      </div>
+    <ul class="feature-list">
+      <li><strong>登録したレシピをすぐ探せる</strong>: 料理名・材料・タグで探せます。「たまねぎ」のようにかなで書いても見つかります</li>
+      <li><strong>作った日と覚え書きを残せる</strong>: 人数・ひとことメモ・写真も一緒に残るので、前に作ったときのことを見返せます</li>
+      <li><strong>食べられない食材に印を出せる</strong>: 「豚」を登録しておくと、豚バラ肉を使うレシピにも印が出ます</li>
+    </ul>
 
-      <div>
-        <h3>食材の在庫</h3>
-        <p>よく使う食材を「ある・少ない・ない」の3段階で持っておけます。買い物メモや、在庫からのレシピ探しに使えます。</p>
-        <a class="more more--sm" href="/about/manual.html#pantry">くわしく →</a>
-      </div>
+    <ul class="plain-list">
+      <li>お気に入りを付けて絞り込む</li>
+      <li>更新順・在庫との一致順で並べ替える</li>
+      <li>レシピを画像やテキストにして家族に送る</li>
+      <li>食材の在庫にあるもので作れるレシピを探す</li>
+      <li>電波のないところでレシピと買い物メモを開く</li>
+    </ul>
+    <a class="more" href="/about/manual.html">そのほかの使い方をくわしく →</a>
 
-      <div>
-        <h3>NG食材の警告</h3>
-        <p>食べられない食材を登録しておくと、その食材を使うレシピに印が出ます。「豚」を登録すれば「豚バラ肉」を使うレシピも拾います。</p>
-        <a class="more more--sm" href="/about/manual.html#search">くわしく →</a>
-      </div>
-
-      <div>
-        <h3>作った記録</h3>
-        <p>作った日・人数・ひとことメモ・写真を残せます。あとから「前はどうしたか」を見返せます。</p>
-        <a class="more more--sm" href="/about/manual.html#logs">くわしく →</a>
-      </div>
-
-      <div>
-        <h3>検索・タグ・並べ替え</h3>
-        <p>料理名・材料・タグで探せます。「たまねぎ」のようにかなで書いても見つかります。更新順・在庫との一致順などで並べ替えもできます。</p>
-        <a class="more more--sm" href="/about/manual.html#search">くわしく →</a>
-      </div>
-
-      <div>
-        <h3>お気に入り・共有</h3>
-        <p>お気に入りの印を付けて絞り込めます。レシピは画像カードやテキストにして、家族や友人に送れます。</p>
-        <a class="more more--sm" href="/about/manual.html#search">くわしく →</a>
-      </div>
-
-      <div>
-        <h3>献立表の印刷・画像保存</h3>
-        <p>1週間の献立を1枚の表にして、印刷したり画像で保存したりできます。冷蔵庫に貼っておく使い方もできます。</p>
-        <a class="more more--sm" href="/about/manual.html#mealplan">くわしく →</a>
-      </div>
-
-      <div>
-        <h3>オフラインでも開ける</h3>
-        <p>一度開いたあとなら、電波のない台所や買い物先でも、レシピと買い物メモを開けます。</p>
-        <a class="more more--sm" href="/about/manual.html#start">くわしく →</a>
-      </div>
+    <div class="starters">
+      <h3>基本のレシピ100品以上</h3>
+      <p>肉じゃが・鶏の唐揚げ・回鍋肉などの定番から、お弁当のおかず・作り置きまで。書き下ろした100品以上が最初から入っていて、<strong>全部無料</strong>です。</p>
+      <span class="tiny">※最初から入っている基本レシピは、無料で登録できる30品には数えません。必要なければ、設定で一覧に出さないようにもできます。</span>
     </div>
   </section>
 
-  <section class="sec">
-    <h2>データは、あなたの端末の中に。</h2>
-    <p>登録したレシピ・記録・写真は、<strong>お使いの端末の中だけに保存されます</strong>。開発者のサーバーには送られません。</p>
-    <p>会員登録もログインもないので、メールアドレスを預ける必要もありません。</p>
-
-    <h3>どれくらいの容量を使うか</h3>
-    <ul class="feature-list">
-      <li><strong>文字だけのレシピ</strong>: 1件あたりおよそ2KBです（最初から入っている100品以上を全部合わせても250KB程度）</li>
-      <li><strong>写真</strong>: 1枚あたりおよそ150〜300KBです。保存するときに自動で縮小しています（長い辺を1200px前後まで）</li>
-    </ul>
-    <p class="muted">写真を100枚残すと、およそ15〜30MBになります。文字だけならたくさん登録しても大きくなりません。</p>
-
-    <h3>バックアップと、クラウドの使い方</h3>
-    <p>設定の「バックアップ」から、<strong>レシピ帳ぜんぶを1つのファイルに書き出せます</strong>。新しい端末でそのファイルを読み込めば、そのまま続きを使えます。</p>
-    <figure class="shot" style="--w: 390px;">
-      <img src="/about/img/manual/backup-export.webp" width="780" height="376" loading="lazy" decoding="async" alt="設定のバックアップ画面。「「作った記録」の写真もバックアップに含める」のチェックと説明文の下に、「ファイルに書き出す」のボタンがある">
-      <figcaption>書き出しは1ファイル。写真を含めるかどうかも選べます</figcaption>
-    </figure>
-    <p>書き出したファイルは、Googleドライブなどのクラウドに置いておくこともできます。別の端末で同じファイルを読み込めば、同じレシピ帳を開けます。</p>
-    <p>写真を含めて書き出したファイルを預けておけば、端末の中の古い写真を減らしたあとでも、そのファイルから戻せます。</p>
-    <p class="muted">端末どうしが自動で同期する仕組みはありません。書き出しと読み込みは、そのつどご自身の操作で行います。</p>
-    <!-- 2026-08-09 便EV: 機種変更・2台目・クラウドに置くときの注意を手順としてまとめた
-         専用ページ(/about/multi-device.html)への導線。ここに手順を重ねて置くと片方だけ
-         古くなるため、紹介ページからはリンクだけを出す(install.htmlと同じ扱い) -->
-    <a class="more" href="/about/multi-device.html">複数の端末で使う方法（機種変更・2台目） →</a>
-    <a class="more" href="/about/manual.html#backup">バックアップと機種変更をくわしく →</a>
-  </section>
-
+  <!-- 2026-08-10 便FG(オーナー指示「Pro版の場所が下すぎる。無料機能のすぐ下に移動」):
+       無料でできることの4節の直後にPro版を置く。以前は「データは、あなたの端末の中に。」の
+       あとに置いていた -->
   <section class="sec">
     <h2>Pro版なら、もっと便利に</h2>
     <h3>できるようになること<span class="pro-tag">Pro版</span></h3>
@@ -780,15 +774,10 @@
       <li><strong>レシピの登録数の上限なし</strong>: 無料の30品の上限がなくなり、何品でも登録できます</li>
     </ul>
 
-    <!-- 2026-08-10 便FE(オーナー指示): 30品の上限は「好きなレシピを登録」の節から外した。
-         買う前に必ず読む場所に残すため、Pro版の節のここへ移す(文面は便EPのまま・
-         長い1文だけ2文に分けた)。※の1行は便EPでオーナーが位置まで決めたので動かさない -->
-    <div class="note">
-      <strong>無料で登録できるレシピは30品までです</strong>
-      <p>いまの登録数は、レシピ一覧の件数の横に「自分で登録 ◯/30品」と出ます。</p>
-      <p>上限に達すると新しいレシピは保存できません。登録済みのレシピは、今までどおり見る・編集する・削除する・バックアップから戻すことができます。</p>
-      <span class="aster">※最初から入っている基本レシピは、この30品に数えません。</span>
-    </div>
+    <!-- 2026-08-10 便FG(オーナー指示): 無料30品の枠つき注記はここから外した。
+         上限の案内は「好きなレシピを登録する」の節のいちばん下の1文に置き、
+         基本レシピを数えない旨は基本レシピの紹介に付けた。
+         この節は上の「無料の30品の上限がなくなり〜」だけで伝わるため重複を削っている -->
 
     <div class="shots">
       <figure class="shot" style="--w: 390px;">
@@ -822,6 +811,37 @@
       <span style="margin-top: 10px;">お支払いのあと、購入完了の画面に解錠コードが出ます。うちレシピの設定にある「Pro」→「購入と解錠」にそのコードを入れると、Pro版の機能が使えるようになります。</span>
     </div>
     <a class="more" href="/about/manual.html#pro">無料で使える範囲とPro版をくわしく →</a>
+  </section>
+
+  <section class="sec">
+    <h2>データは、あなたの端末の中に。</h2>
+    <p>登録したレシピ・記録・写真は、<strong>お使いの端末の中だけに保存されます</strong>。開発者のサーバーには送られません。</p>
+    <p>会員登録もログインもないので、メールアドレスを預ける必要もありません。</p>
+
+    <h3>どれくらいの容量を使うか</h3>
+    <ul class="feature-list">
+      <li><strong>文字だけのレシピ</strong>: 1件あたりおよそ2KBです（最初から入っている100品以上を全部合わせても250KB程度）</li>
+      <li><strong>写真</strong>: 1枚あたりおよそ150〜300KBです。保存するときに自動で縮小しています（長い辺を1200px前後まで）</li>
+    </ul>
+    <p class="muted">写真を100枚残すと、およそ15〜30MBになります。文字だけならたくさん登録しても大きくなりません。</p>
+
+    <!-- 2026-08-10 便FG(オーナー指示): ①小見出しは「バックアップでレシピを保存」
+         (「クラウドの使い方」だと、こちらがクラウドを用意しているように誤解される)
+         ②クラウドの話は2文→1文にまとめ、太字の強調だけにする
+         ③写真の話はこの節から削除(リンク先の「複数の端末で使う方法」に手順がある) -->
+    <h3>バックアップでレシピを保存</h3>
+    <p>設定の「バックアップ」から、<strong>レシピ帳を1つのファイルに書き出せます</strong>。新しい端末でバックアップファイルを読み込めば、そのまま続きを使えます。</p>
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/manual/backup-export.webp" width="780" height="376" loading="lazy" decoding="async" alt="設定のバックアップ画面。「「作った記録」の写真もバックアップに含める」のチェックと説明文の下に、「ファイルに書き出す」のボタンがある">
+      <figcaption>書き出しは1つのファイルにまとまります</figcaption>
+    </figure>
+    <p>書き出したバックアップファイルを<strong>Googleドライブなどのクラウドに置いておくと、別の端末から同じレシピ帳を読み込んで開けます</strong>。</p>
+    <p class="muted">端末どうしが自動で同期する仕組みはありません。書き出しと読み込みは、その都度ご自身の操作で行います。</p>
+    <!-- 2026-08-09 便EV: 機種変更・2台目・クラウドに置くときの注意を手順としてまとめた
+         専用ページ(/about/multi-device.html)への導線。ここに手順を重ねて置くと片方だけ
+         古くなるため、紹介ページからはリンクだけを出す(install.htmlと同じ扱い) -->
+    <a class="more" href="/about/multi-device.html">複数の端末で使う方法（機種変更・2台目） →</a>
+    <a class="more" href="/about/manual.html#backup">バックアップと機種変更をくわしく →</a>
   </section>
 
   <section class="sec">
