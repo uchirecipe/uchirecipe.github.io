@@ -14145,6 +14145,92 @@ eq(
   )
 }
 
+// ---------- 便FD(2026-08-10 オーナー実機フィードバック)の再発防止 ----------
+{
+  // (1) その日の合計に足したごはんの杯数（DayBalance.riceServings）。
+  //     オーナー「合計何杯分のご飯が計算に入るか入れて」に対して画面へ出す数字なので、
+  //     **合計の中身と必ず一致すること**をここで固定する（数え直しの実装に戻さないための見張り）。
+  const fdRice = (date) => ({ date, recipe: RICE_SERVING_RECIPE, matchKey: 'rice' })
+  const fdDish = (date, key) => ({
+    date,
+    recipe: { servings: 1, ingredients: [{ name: '鶏もも肉', amount: '100', unit: 'g' }] },
+    matchKey: key,
+  })
+  const fdKcalOfRice = Math.round(sumBalance(riceServingRecipes(1)).nutrition.total.kcal)
+
+  // 先の日（登録した献立で数える）: 2食ぶんのごはん＝2杯
+  const fdPlanDay = dayBalanceMap({
+    dates: ['2026-08-20'],
+    today: '2026-08-10',
+    cooked: [],
+    planned: [fdRice('2026-08-20'), fdRice('2026-08-20')],
+  }).get('2026-08-20')
+  eq('FD-RICE 先の日は献立ぶんの杯数を返す', fdPlanDay.riceServings, 2)
+  eq(
+    'FD-RICE 出す杯数と合計の中身が一致する（合計のエネルギー＝1杯ぶん×杯数）',
+    Math.round(fdPlanDay.balance.nutrition.total.kcal),
+    fdKcalOfRice * 2,
+  )
+
+  // 過ぎた日（作った記録で数える）
+  const fdActualDay = dayBalanceMap({
+    dates: ['2026-08-01'],
+    today: '2026-08-10',
+    cooked: [fdRice('2026-08-01')],
+    planned: [fdRice('2026-08-01'), fdRice('2026-08-01')],
+  }).get('2026-08-01')
+  eq('FD-RICE 過ぎた日は記録ぶんだけ数える（献立ぶんは足さない）', fdActualDay.riceServings, 1)
+
+  // 今日（記録と献立が同居する日）: 二重計上を落としたあとの杯数になる
+  const fdTodayDay = dayBalanceMap({
+    dates: ['2026-08-10'],
+    today: '2026-08-10',
+    cooked: [fdRice('2026-08-10')],
+    planned: [fdRice('2026-08-10'), fdRice('2026-08-10')],
+  }).get('2026-08-10')
+  eq('FD-RICE 今日は二重計上を落としたあとの杯数（記録1＋残った献立1＝2）', fdTodayDay.riceServings, 2)
+  eq(
+    'FD-RICE 今日も出す杯数と合計の中身が一致する',
+    Math.round(fdTodayDay.balance.nutrition.total.kcal),
+    fdKcalOfRice * 2,
+  )
+
+  // ごはんを含めない日（チェックOFF）は0杯＝注釈そのものを出さない
+  const fdNoRice = dayBalanceMap({
+    dates: ['2026-08-20'],
+    today: '2026-08-10',
+    cooked: [],
+    planned: [fdDish('2026-08-20', 'r:1')],
+  }).get('2026-08-20')
+  eq('FD-RICE ごはんを足していない日は0杯', fdNoRice.riceServings, 0)
+
+  // 週まとめは日ごとの杯数の合計
+  eq(
+    'FD-RICE 週まとめの杯数は日ごとの合計',
+    summarizeWeekBalance([fdPlanDay, fdActualDay, fdTodayDay]).riceServings,
+    5,
+  )
+
+  // (2) 「レシピを見る」から同じ画面へ帰るための覚え書き（月タブは日の窓も開き直す）
+  eq(
+    'FD-NAV 開いていた日の窓の日付も覚えて読み戻せる',
+    parseViewReturn(
+      serializeViewReturn({ anchor: '2026-08-01', scrollY: 320, openDate: '2026-08-10' }),
+    ),
+    { anchor: '2026-08-01', scrollY: 320, openDate: '2026-08-10' },
+  )
+  eq(
+    'FD-NAV 窓を開いていなければ覚えない（以前の版と同じ形のまま）',
+    parseViewReturn(serializeViewReturn({ anchor: '2026-08-01', scrollY: 320 })),
+    { anchor: '2026-08-01', scrollY: 320 },
+  )
+  eq(
+    'FD-NAV 日付の形でない目印は捨てる（窓は開き直さない）',
+    parseViewReturn('{"anchor":"","scrollY":10,"openDate":"きのう"}'),
+    { anchor: '', scrollY: 10 },
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
