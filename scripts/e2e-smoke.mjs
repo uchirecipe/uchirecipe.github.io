@@ -26602,6 +26602,54 @@ try {
           longSession.includes('今回の調理では仕上がらないため、全体の目安時間に含めていません。'),
         `本文=${longSession.slice(0, 200).replace(/\n/g, ' / ')}`,
       )
+      // FL-05 長い待ちで終わる品に「完成」を出さない（司令部裁定）
+      check(
+        'FL-05 調理中モードの長い待ちの手順に「完成」を出さない',
+        reachedLong &&
+          (await flPage.locator('[data-testid="cook-session-recipe-done"]').count()) === 0 &&
+          (await flPage.locator('[data-testid="cook-session-recipe-long-rest-done"]').count()) === 1 &&
+          ((await flPage.textContent('[data-testid="cook-session-recipe-long-rest-done"]')) ?? '') ===
+            'あとは待つだけ',
+      )
+      // 最後の手順まで送ると、作り終えた品の行に印が出る（味玉＝長い待ちで終わる品）
+      for (let i = 0; i < 14; i++) {
+        if ((await flPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await flPage.locator('[data-testid="cook-session-next"]').click()
+        await flPage.waitForTimeout(250)
+      }
+      const otherRows = await flPage.locator('[data-testid="cook-session-other-row"]').allInnerTexts()
+      check(
+        'FL-05 「他の品の次の手順」でも、長い待ちで終わる品は「完成」と言わない',
+        otherRows.some((t) => noZw(t).includes('FL味玉') && noZw(t).includes('あとは待つだけ')) &&
+          !otherRows.some((t) => noZw(t).includes('FL味玉') && noZw(t).includes('完成')),
+        JSON.stringify(otherRows.map((t) => noZw(t).replace(/\n/g, ' / '))),
+      )
+      check(
+        'FL-05 長い待ちで終わらない品は今までどおり「完成」',
+        otherRows.some((t) => noZw(t).includes('FLキャベツ丼') && noZw(t).includes('完成')),
+        JSON.stringify(otherRows.map((t) => noZw(t).replace(/\n/g, ' / '))),
+      )
+      // 段取りの一覧に戻って、同じ言い分けになっていることを見る
+      await flPage.locator('[data-testid="cook-session-close"]').click()
+      await flPage.waitForTimeout(700)
+      const doneBadges = await flPage.locator('[data-testid="navi-recipe-done"]').allInnerTexts()
+      const longDoneBadges = await flPage
+        .locator('[data-testid="navi-recipe-long-rest-done"]')
+        .allInnerTexts()
+      check(
+        'FL-05 段取りの一覧でも、長い待ちで終わる品だけ「あとは待つだけ」になる',
+        longDoneBadges.length === 1 &&
+          longDoneBadges[0] === 'あとは待つだけ' &&
+          doneBadges.length === 2 &&
+          doneBadges.every((t) => t === '完成'),
+        `完成=${JSON.stringify(doneBadges)} / 長い待ち=${JSON.stringify(longDoneBadges)}`,
+      )
+      const longCard2 = flPage.locator('ol > li', { hasText: '半日〜一晩漬ける' })
+      check(
+        'FL-05 長い待ちのカードに「完成」の文字が残っていない',
+        !noZw(await longCard2.first().innerText()).includes('完成'),
+        noZw(await longCard2.first().innerText()).replace(/\n/g, ' / '),
+      )
     } finally {
       await flBrowser.close()
     }

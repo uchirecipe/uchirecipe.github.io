@@ -288,18 +288,20 @@ function TimelineCard({
       )}
 
       {/* その品がここで出来上がる（2026-08-08 便EG・オーナー指示
-          「最後の手順は右下に色付きで完成と出して」）。色はそのレシピの色 */}
+          「最後の手順は右下に色付きで完成と出して」）。色はそのレシピの色。
+          ただし最後の手順が長い待ちの品は「完成」と言わない（2026-08-11 便FL・司令部裁定）。
+          同じカードの「今回の調理では仕上がらない」と食い違うため、手順がここで終わることだけを示す */}
       {isRecipeLast && (
         <p className="mt-[var(--space-sm)] text-right">
           <span
-            data-testid="navi-recipe-done"
+            data-testid={item.longRest ? 'navi-recipe-long-rest-done' : 'navi-recipe-done'}
             className="inline-block rounded-full px-3 py-0.5 text-sm font-bold"
             style={{
               backgroundColor: RECIPE_COLORS[item.colorIndex % RECIPE_COLORS.length],
               color: 'var(--chip-ink)',
             }}
           >
-            {ja.cookNavi.recipeDone}
+            {item.longRest ? ja.cookNavi.recipeDoneLongRest : ja.cookNavi.recipeDone}
           </span>
         </p>
       )}

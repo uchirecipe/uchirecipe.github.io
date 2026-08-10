@@ -140,6 +140,7 @@ import {
   buildPlanSteps,
   isSoakWait,
   isLongRestStep,
+  endsWithLongRest,
   recipeServeTemp,
   estimateActiveMinutes,
   waitUrgency,
@@ -4863,6 +4864,38 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('ナビ湯沸かし分離: 湯沸かしの工程に手作業の文が混ざらない', spinachPlan[0].step.text, '鍋にたっぷりの湯を沸かす')
   eq('ナビ湯沸かし分離: 巻き込まれていた手作業は次の工程に残る', spinachPlan[1].step.text, 'ほうれん草は根元の土を流水でよく洗い落とす。根元から入れて1分ほどゆでる。')
   eq('ナビ湯沸かし分離: 巻き込まれていた手作業は手作業のまま', classifyStep(spinachPlan[1].step), 'active')
+
+  // ---- (4) 長い待ちで終わる品に「完成」を出さない（2026-08-11 便FL・司令部裁定） ----
+  // 「今回の調理では仕上がらない」と「完成」が同じカードに並ぶと、画面が自分で矛盾を言う
+  const longRestItems = longRestPlan.items.map((it) => ({ recipeId: it.recipeId, longRest: it.longRest }))
+  eq('ナビ完成の印: 最後の手順が長い待ちの品は「完成」にしない', endsWithLongRest(longRestItems, 1), true)
+  const normalPlan = buildCookTimeline([
+    recipe(2, '煮もの', [t('大根を切る。'), t('鍋に入れて15分煮る。', 15), t('火を止めて器に盛る。')]),
+  ])
+  eq(
+    'ナビ完成の印: 普通の最後の手順は今までどおり「完成」',
+    endsWithLongRest(normalPlan.items.map((it) => ({ recipeId: it.recipeId, longRest: it.longRest })), 2),
+    false,
+  )
+  // 長い待ちが**途中**にある品は、最後まで進めれば本当に出来上がるので「完成」のまま
+  const midRestPlan = buildCookTimeline([
+    recipe(3, 'ヨーグルトバーク', [
+      t('ボウルにヨーグルトとはちみつを入れてよく混ぜる。'),
+      t('ラップをかけずに冷凍庫で3時間以上、しっかり凍るまで冷やし固める。'),
+      t('凍ったらオーブンシートごと取り出し、手やナイフで食べやすい大きさに割る。'),
+    ]),
+  ])
+  eq(
+    'ナビ完成の印: 長い待ちが途中にある品は「完成」のまま',
+    endsWithLongRest(midRestPlan.items.map((it) => ({ recipeId: it.recipeId, longRest: it.longRest })), 3),
+    false,
+  )
+  eq(
+    'ナビ完成の印: その途中の手順は長い待ちとして数える（時間は0）',
+    midRestPlan.items.filter((it) => it.longRest).map((it) => it.waitMinutes),
+    [0],
+  )
+  eq('ナビ完成の印: 段取りに無い品には印を出さない', endsWithLongRest(longRestItems, 999), false)
 }
 
 // ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。

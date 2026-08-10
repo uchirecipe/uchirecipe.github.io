@@ -36,6 +36,7 @@ import { circledNumber } from '../logic/naviStepText'
 import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import {
+  endsWithLongRest,
   hasLaterHandsOnStep,
   recipeStepLabel,
   type TimelineItem,
@@ -388,7 +389,12 @@ export default function CookSessionOverlay({
           return ja.cookNavi.sessionColorCurrent.replace('{title}', title)
         }
         if (target.kind === 'done') {
-          return ja.cookNavi.sessionColorDone.replace('{title}', title)
+          // 段取りが長い待ちで終わる品は「完成しています」と言わない
+          // （2026-08-11 便FL・司令部裁定。画面の「あとは待つだけ」と声を食い違わせない）
+          const done = endsWithLongRest(items, target.recipeId)
+            ? ja.cookNavi.sessionColorLongRest
+            : ja.cookNavi.sessionColorDone
+          return done.replace('{title}', title)
         }
         // 前の手順を読みながら次に移らない（move と同じ作法）
         stopSpeech()
@@ -754,15 +760,16 @@ export default function CookSessionOverlay({
           </p>
         )}
 
-        {/* その品がここで出来上がる（段取りの一覧と同じ印） */}
+        {/* その品がここで出来上がる（段取りの一覧と同じ印）。
+            最後の手順が長い待ちの品は「完成」と言わない（2026-08-11 便FL・司令部裁定） */}
         {isRecipeLast && (
           <p className="w-full text-right">
             <span
-              data-testid="cook-session-recipe-done"
+              data-testid={item.longRest ? 'cook-session-recipe-long-rest-done' : 'cook-session-recipe-done'}
               className="inline-block rounded-full px-3 py-0.5 text-sm font-bold"
               style={{ backgroundColor: color, color: 'var(--chip-ink)' }}
             >
-              {ja.cookNavi.recipeDone}
+              {item.longRest ? ja.cookNavi.recipeDoneLongRest : ja.cookNavi.recipeDone}
             </span>
           </p>
         )}
@@ -838,7 +845,11 @@ export default function CookSessionOverlay({
                         className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
                         style={{ backgroundColor: otherColor, color: 'var(--chip-ink)' }}
                       >
-                        {ja.cookNavi.recipeDone}
+                        {/* 段取りが長い待ちで終わる品は「完成」と言わない
+                            （2026-08-11 便FL・司令部裁定。手順カードと同じ言い分けにする） */}
+                        {endsWithLongRest(items, recipeId)
+                          ? ja.cookNavi.recipeDoneLongRest
+                          : ja.cookNavi.recipeDone}
                       </span>
                     )}
                   </span>
