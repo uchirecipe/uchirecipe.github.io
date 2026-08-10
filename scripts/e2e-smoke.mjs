@@ -24885,6 +24885,13 @@ try {
     const fiRecipe = () => fiPage.locator('[data-testid="cook-session-recipe"]').innerText()
     const fiHint = () =>
       fiPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first().innerText()
+    /** 「声で操作」をONにする（すでにONなら何もしない＝押すとOFFになってしまう） */
+    const fiListen = async () => {
+      const start = fiPage.locator('button[aria-label="声で操作する"]')
+      if ((await start.count()) === 0) return
+      await start.click()
+      await fiPage.waitForTimeout(300)
+    }
     const fiSay = async (word) => {
       const emitted = await fiPage.evaluate((t) => window.__fiEmitVoice(t), word)
       await fiPage.waitForTimeout(450)
@@ -25010,8 +25017,7 @@ try {
       // --- FI-03: 色を言うと、その品の手順が開く（引き寄せ） ---
       currentCheck = 'FI-03'
       await fiToFirst()
-      await fiPage.locator('button[aria-label="声で操作する"]').click()
-      await fiPage.waitForTimeout(300)
+      await fiListen()
       const fiFirstRecipe = await fiRecipe()
       // いま開いていない品の色を1つ選ぶ（並びは段取り次第なので画面から取る）
       const fiTargetWord = (await fiPage.locator('[data-testid="cook-session-color-word"]').allInnerTexts())[0].trim()
@@ -25125,6 +25131,50 @@ try {
       check(
         'FI-07 タップで開くのは全文だけ',
         (await fiPage.locator('[data-testid="cook-session-peek"]').count()) === 1,
+      )
+
+      // --- FI-08: 読み込み直しても並べ替えが残る（2026-08-10 司令部裁定で保存対象にした）。
+      // 保存していなかったときは、読み込み直すと並びだけ元へ戻り、カーソルより前の品が
+      // 「1度も作っていないのに完成」と出た。その症状そのものを検査にする ---
+      currentCheck = 'FI-08'
+      await fiToFirst()
+      await fiListen()
+      const fiReloadWord = (await fiPage.locator('[data-testid="cook-session-color-word"]').allInnerTexts())[0].trim()
+      await fiSay(fiReloadWord)
+      const fiBeforeReload = `${await fiCounter()}/${await fiRecipe()}`
+      check(
+        'FI-08 前提: 色で引き寄せた状態にできた',
+        /^段取り 1\//.test(await fiCounter()),
+        fiBeforeReload,
+      )
+      await fiPage.reload({ waitUntil: 'networkidle' })
+      await fiPage.waitForTimeout(1800)
+      check(
+        'FI-08 読み込み直しても調理中モードは開いたまま',
+        (await fiPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+      check(
+        'FI-08 読み込み直しても、引き寄せた手順が開いたまま（並びが元に戻らない）',
+        `${await fiCounter()}/${await fiRecipe()}` === fiBeforeReload,
+        `前=${fiBeforeReload} 後=${await fiCounter()}/${await fiRecipe()}`,
+      )
+      check(
+        'FI-08 読み込み直しても「作っていない品が完成」と出ない',
+        !(await fiPage.locator('[data-testid="cook-session-others"]').innerText()).includes('完成'),
+        await fiPage.locator('[data-testid="cook-session-others"]').innerText(),
+      )
+      const fiPlanReloaded = await fiWalkPlan()
+      check(
+        'FI-08 読み込み直しても手順は9つのまま（1つも消えない）',
+        fiPlanReloaded.length === fiPlanBefore.length,
+        `前=${fiPlanBefore.length} 後=${fiPlanReloaded.length}`,
+      )
+      check(
+        'FI-08 読み込み直しても品ごとの手順の数は3つずつ',
+        ['FI照り焼き', 'FI煮物', 'FIマリネ'].every(
+          (t) => fiPlanReloaded.filter((x) => x === t).length === 3,
+        ),
+        fiPlanReloaded.join(','),
       )
     } finally {
       await fiBrowser.close()

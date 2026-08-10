@@ -549,9 +549,11 @@ export default function CookNaviPage() {
    * **保存しない**（docs/69「段取り・進捗・済みセットは保存しない」）。持つのは
    * 「どの手順を、どの手順の直前へ動かしたか」の並びだけで、段取りは今までどおり毎回
    * 組み直し、そこへこの並びを当て直す（logic/cookSession.ts の applyStepPulls）。
-   * 保存しないので、読み込み直すと組み直したままの順番に戻る。
+   * 覚え書き（cookNaviSession）には、この「指示」だけを `current` と同じ扱いで保存する
+   * （2026-08-10 司令部裁定）。保存しないと読み込み直したときに並びだけ元へ戻り、
+   * カーソルより前の品が「作っていないのに完成」と出る。
    */
-  const [pulls, setPulls] = useState<StepPull[]>([])
+  const [pulls, setPulls] = useState<StepPull[]>(() => restoredSession.current?.pulls ?? [])
   /**
    * 自分で時間を決めるタイマー（2026-08-09 便ES・オーナー指示D-2）。
    * レシピ詳細と同じ作法で、前回使った秒数を覚えて開く。
@@ -593,16 +595,25 @@ export default function CookNaviPage() {
    */
   const [sessionLostNotice, setSessionLostNotice] = useState(false)
 
-  // 選択・表示状態が変わるたびに覚え直す（保存するのは選択・表示中かどうか・調理中の手順だけ。
-  // 段取りそのもの・進み具合・済んだ手順の一覧は保存せず、開くたびに組み直して導く）。
+  // 選択・表示状態が変わるたびに覚え直す（保存するのは選択・表示中かどうか・調理中の手順と、
+  // 色で並べ替えた指示だけ。段取りそのもの・進み具合・済んだ手順の一覧は保存せず、
+  // 開くたびに組み直して導く）。
   // 1品も選んでいない状態は覚えない＝選択を全部外したら、次に開いたときは今日の献立から選び直す
   useEffect(() => {
     if (selectedIds.length === 0) {
       clearCookNaviSession()
       return
     }
-    saveCookNaviSession({ selectedIds, showTimeline, trialActive, current, sessionOpen })
-  }, [selectedIds, showTimeline, trialActive, current, sessionOpen])
+    saveCookNaviSession({
+      selectedIds,
+      showTimeline,
+      trialActive,
+      current,
+      sessionOpen,
+      // 並べ替えが1つも無いときは項目そのものを書かない（覚え書きの中身を増やさない）
+      ...(pulls.length > 0 ? { pulls } : {}),
+    })
+  }, [selectedIds, showTimeline, trialActive, current, sessionOpen, pulls])
 
   // 常駐タイマーバーの「完了タイマー」タップからの着地（?focusStep=レシピID-手順番号）。
   // ナビ実行中はタップで単品レシピ詳細へ離脱させず、ナビ内の該当手順カードへスクロール＆

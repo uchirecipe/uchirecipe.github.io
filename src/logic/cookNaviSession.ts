@@ -3,9 +3,10 @@
  * フィードバック「並行調理ナビは、戻るかまとめて作った！ボタン押下するまで献立タブに
  * 残ったままにしたい。画面移動するたびに段取りを作るところからやり直しになって面倒」）。
  *
- * 覚えるのは「どの品を選んだか」「段取りを表示中か」「お試しで使っている最中か」の3つだけで、
- * 段取りそのもの（タイムライン）は保存しない。レシピを直したら次に開いたときに組み直したいので、
- * 選択だけ覚えて計算はそのつどやり直す。
+ * 覚えるのは「どの品を選んだか」「段取りを表示中か」「お試しで使っている最中か」と、
+ * 調理中の位置・色で並べ替えた指示だけで、段取りそのもの（タイムライン）は保存しない。
+ * レシピを直したら次に開いたときに組み直したいので、**ユーザーが出した指示だけを覚えて
+ * 計算はそのつどやり直す**（2026-08-10 便FI で並べ替えの指示を足したときも、この線は動かしていない）。
  *
  * 保存先は sessionStorage（レシピ登録フォームの下書きと同じ置き場）。
  * 消えるのは次の3つのときだけ:
@@ -15,7 +16,7 @@
  * 他のタブへ移動しても、レシピを見に行っても残る。
  */
 
-import type { CookCursor } from './cookSession'
+import type { CookCursor, StepPull } from './cookSession'
 
 export const COOK_NAVI_SESSION_KEY = 'uchi-recipe-cook-navi-session'
 
@@ -55,6 +56,22 @@ export interface CookNaviSession {
    * 調理の途中で全画面を失わないようにするため。
    */
   sessionOpen?: boolean
+  /**
+   * 色で引き寄せた手順の並び（2026-08-10 便FI・docs/69 第3段）。
+   * 「青」「緑」「ピンク」と言われたときに、その品の手順をいまの位置へ動かした記録で、
+   * 1件ぶんは「どの手順を、どの手順の直前へ動かしたか」だけ。
+   *
+   * **これは導出できるものではなく、ユーザーが出した指示**なので `current` と同じ性質として
+   * ここに置く（docs/69 の不変条件が禁じているのは、段取り・進み具合・済んだ手順の一覧という
+   * **導出できるものを二重に持つこと**）。段取りは今までどおり毎回組み直し、そこへこの指示を
+   * 当て直す（logic/cookSession.ts の applyStepPulls）ので、導出の一本道は変わらない。
+   *
+   * 保存しないと、読み込み直したときに並びだけが元へ戻り、カーソルより前の品が
+   * 「作っていないのに完成」と出る（便FIで実機確認した症状）。
+   *
+   * 当て直せない1件（レシピを直して手順が消えた等）は黙って捨てる＝推測で近い場所に当てない。
+   */
+  pulls?: StepPull[]
 }
 
 /** 保存された値がカーソルの形をしているか（stepIndex はナビが足した工程で負になる） */
@@ -64,6 +81,25 @@ function parseCursor(value: unknown): CookCursor | undefined {
   if (typeof recipeId !== 'number' || !Number.isFinite(recipeId)) return undefined
   if (typeof stepIndex !== 'number' || !Number.isFinite(stepIndex)) return undefined
   return { recipeId, stepIndex }
+}
+
+/**
+ * 保存された引き寄せの並びを読む（2026-08-10 便FI）。
+ * 形が違う1件だけを捨て、残りは**保存された順のまま**返す（順番を変えると当て直した結果が変わる）。
+ * この項目が無い古い覚え書きは空＝並べ替え無しとして読む。
+ */
+function parseStepPulls(value: unknown): StepPull[] {
+  if (!Array.isArray(value)) return []
+  const pulls: StepPull[] = []
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const { before, target } = entry as Partial<StepPull>
+    const parsedBefore = parseCursor(before)
+    const parsedTarget = parseCursor(target)
+    if (!parsedBefore || !parsedTarget) continue
+    pulls.push({ before: parsedBefore, target: parsedTarget })
+  }
+  return pulls
 }
 
 /** 保存された文字列を読む（形が違う・壊れているときは undefined＝覚えていない扱い） */
@@ -80,6 +116,8 @@ export function parseCookNaviSession(raw: string | null): CookNaviSession | unde
     // 段取りを表示していない状態で調理中の手順だけが残ることはない（不整合は捨てる）
     const showTimeline = data.showTimeline === true
     const keepCursor = showTimeline && current != null
+    // 並べ替えも調理中の位置と同じで、段取りを表示していない状態だけが残ることはない
+    const pulls = keepCursor ? parseStepPulls(data.pulls) : []
     return {
       selectedIds,
       showTimeline,
@@ -87,6 +125,7 @@ export function parseCookNaviSession(raw: string | null): CookNaviSession | unde
       ...(keepCursor ? { current } : {}),
       // 開閉はカーソルがあるときだけ意味を持つ。覚えていなければ「開いていた」に倒す（上の解説）
       ...(keepCursor ? { sessionOpen: data.sessionOpen !== false } : {}),
+      ...(pulls.length > 0 ? { pulls } : {}),
     }
   } catch {
     return undefined

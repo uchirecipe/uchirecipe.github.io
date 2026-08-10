@@ -14778,6 +14778,80 @@ eq(
     startCursor(fiSaidGreen.list),
     { recipeId: 20, stepIndex: -1 },
   )
+  // --- ⑧ 覚え書き（2026-08-10 司令部裁定「引き寄せを保存する」）。
+  // 保存するのは**ユーザーが出した指示**だけで、段取りは今までどおり毎回組み直す。
+  // 保存しないと、読み込み直したときに並びだけ元へ戻り、作っていない品が「完成」と出る。
+  const fiSaved = (session) => parseCookNaviSession(JSON.stringify(session))
+  const fiBase = { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: fiAt(0) }
+  eq(
+    'FI-SAVE 引き寄せの指示を保存して読み戻せる',
+    fiSaved({ ...fiBase, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
+    [{ before: fiAt(0), target: fiAt(1) }],
+  )
+  eq(
+    'FI-SAVE 読み戻した指示を当て直すと、同じ並びになる（往復して壊れない）',
+    fiKey(applyStepPulls(fiPlan, fiSaved({ ...fiBase, pulls: [{ before: fiAt(0), target: fiAt(1) }] }).pulls)),
+    fiKey(fiSaidGreen.list),
+  )
+  eq(
+    'FI-SAVE 保存された順は変えない（順番が変わると当て直した結果が変わる）',
+    fiSaved({
+      ...fiBase,
+      pulls: [
+        { before: fiAt(0), target: fiAt(4) },
+        { before: fiAt(4), target: fiAt(1) },
+      ],
+    })?.pulls,
+    [
+      { before: fiAt(0), target: fiAt(4) },
+      { before: fiAt(4), target: fiAt(1) },
+    ],
+  )
+  eq(
+    'FI-SAVE 形の壊れた1件だけを捨てて、残りは当て直す（推測で近い場所に当てない）',
+    fiSaved({
+      ...fiBase,
+      pulls: [
+        { before: fiAt(0), target: null },
+        { target: fiAt(1) },
+        'こわれ',
+        { before: fiAt(0), target: fiAt(4) },
+      ],
+    })?.pulls,
+    [{ before: fiAt(0), target: fiAt(4) }],
+  )
+  // 後方互換: この項目が無い（便FIより前の）覚え書きも今までどおり読める
+  eq(
+    'FI-SAVE 引き寄せを知らない古い覚え書きも読める（並べ替え無しとして扱う）',
+    fiSaved(fiBase)?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 古い覚え書きの選択・表示・調理中の手順は今までどおり読める',
+    { ...fiSaved(fiBase), pulls: undefined },
+    { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: fiAt(0), sessionOpen: true, pulls: undefined },
+  )
+  eq(
+    'FI-SAVE 引き寄せが1件も無ければ項目そのものを持たない（覚え書きを太らせない）',
+    fiSaved({ ...fiBase, pulls: [] })?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 段取りを表示していない覚え書きの並べ替えは読まない（調理中の手順と同じ扱い）',
+    fiSaved({ selectedIds: [10, 20], showTimeline: false, trialActive: false, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 調理中の手順を覚えていない覚え書きの並べ替えも読まない',
+    fiSaved({ selectedIds: [10, 20], showTimeline: true, trialActive: false, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 並べ替えが配列でない壊れた覚え書きでも、他の項目は読める',
+    fiSaved({ ...fiBase, pulls: 'こわれ' })?.current,
+    fiAt(0),
+  )
+
   eq(
     'FI-BACK 引き寄せたあとも「次へ→戻って」で元の手順に帰る',
     fiSaidGreen.list.every((_, i) => {
