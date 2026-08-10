@@ -31,6 +31,7 @@ import {
   buildCookTimeline,
   buildPlanSteps,
   isSoakWait,
+  isLongRestStep,
   serveTempRank,
   estimateActiveMinutes,
   waitOverrunAllowance,
@@ -338,7 +339,10 @@ function simulateTimeline(recipes, opt) {
       const steps = buildPlanSteps(opt.splitSteps ? splitLongSteps(r.steps) : r.steps).map(
         ({ step: s }, i) => {
           const kind = opt.classify(s)
-          const waitMinutes = kind === 'wait' ? (opt.waitMinutes(s) ?? 0) : 0
+          // 「半日〜一晩漬ける」のように今回の調理では終わらない待ちは時間の計算から外す
+          // （2026-08-11 便FL。アプリ本体と同じ規則。打ち手の比較にも同じ土俵で効かせる）
+          const longRest = kind === 'wait' && isLongRestStep(s)
+          const waitMinutes = kind === 'wait' && !longRest ? (opt.waitMinutes(s) ?? 0) : 0
           const activeMinutes = kind === 'active' ? estimateActiveMinutes(s).minutes : 0
           return {
             i,
@@ -350,7 +354,12 @@ function simulateTimeline(recipes, opt) {
             cutRank: cutOrderRank(s),
             soakWait: kind === 'wait' && isSoakWait(s),
             // 手を戻す締め切り（2026-08-09 便EH。アプリ本体と同じ規則）
-            attendWithin: kind === 'wait' ? waitMinutes + waitOverrunAllowance(s, waitMinutes) : 0,
+            attendWithin:
+              kind !== 'wait'
+                ? 0
+                : longRest
+                  ? Number.POSITIVE_INFINITY
+                  : waitMinutes + waitOverrunAllowance(s, waitMinutes),
             text: s.text,
           }
         },
