@@ -8665,10 +8665,12 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   }
 }
 
-// ---------- 便FA: しいたけの名寄せ(生／乾燥を名前で区別する。2026-08-10 オーナー裁定) ----------
+// ---------- 便FA: しいたけの名寄せ(生／干しを名前で区別する。2026-08-10 オーナー裁定) ----------
 // 価格マスタに「しいたけ 150円/6枚」と「生しいたけ 100円/6枚」が別項目で並び、同じ食材なのに
 // 値段が違っていた。生の側を「生しいたけ 100円」1本へ寄せ(オーナー指定「どちらかなら生しいたけ」)、
-// 乾燥は価格帯が全く違うため「乾燥しいたけ 400円/30g」を別項目として持つ。
+// 乾燥は価格帯が全く違うため別項目として持つ。
+// 2026-08-10 便FB: その乾燥側の項目名を「乾燥しいたけ」→「干ししいたけ 400円/30g」に統一した
+// (オーナー指示。一般的な表記で、成分表・公開ページの食品名とも揃う)。値段と単位は変えていない。
 {
   const { PRICE_DEFAULTS, PRICE_DEFAULTS_VERSION, PRICE_DEFAULT_MERGES } = await import(
     '../src/data/priceDefaults.ts'
@@ -8682,17 +8684,18 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
   const names = PRICE_DEFAULTS.map((d) => d.name)
   eq('FA マスタに素の「しいたけ」項目はもう無い(生しいたけへ名寄せ済み)', names.includes('しいたけ'), false)
   eq('FA マスタの生の項目名は「生しいたけ」', names.includes('生しいたけ'), true)
-  eq('FA マスタの乾燥の項目名は「乾燥しいたけ」', names.includes('乾燥しいたけ'), true)
+  eq('FB マスタの乾燥の項目名は「干ししいたけ」(便FBで「乾燥しいたけ」から統一)', names.includes('干ししいたけ'), true)
+  eq('FB マスタに旧名「乾燥しいたけ」の項目はもう無い', names.includes('乾燥しいたけ'), false)
   const byName = new Map(PRICE_DEFAULTS.map((d) => [d.name, d]))
   eq('FA 生しいたけは100円/6枚(オーナー指定「どちらかなら生しいたけ」に価格を寄せる)', {
     yen: byName.get('生しいたけ')?.pricePerUnit,
     unit: byName.get('生しいたけ')?.unit,
   }, { yen: 100, unit: '6枚' })
-  eq('FA 乾燥しいたけは400円/30g(スーパー実売の30g規格。docs/49 2026-08-10節)', {
-    yen: byName.get('乾燥しいたけ')?.pricePerUnit,
-    unit: byName.get('乾燥しいたけ')?.unit,
+  eq('FB 干ししいたけは400円/30gのまま(呼び名だけ変え、価格・単位・出典は動かさない)', {
+    yen: byName.get('干ししいたけ')?.pricePerUnit,
+    unit: byName.get('干ししいたけ')?.unit,
   }, { yen: 400, unit: '30g' })
-  eq('FA 名寄せの移行を配るため版番号を7に上げている', PRICE_DEFAULTS_VERSION, 7)
+  eq('FB 呼び名の統一と移行を配るため版番号を8に上げている', PRICE_DEFAULTS_VERSION, 8)
 
   // 名寄せ: 表記が違っても同じ1件に解決する / 生と乾燥は別々の1件に解決する
   {
@@ -8704,11 +8707,21 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         '生しいたけ',
       )
     }
-    for (const written of ['乾燥しいたけ', '干ししいたけ', '干し椎茸', '乾しいたけ', 'ほししいたけ']) {
+    // 便FBで採用した別名の一覧。旧名「乾燥しいたけ」を含め、どの書き方でも同じ1件に当たること
+    for (const written of [
+      '干ししいたけ',
+      '乾燥しいたけ',
+      '干し椎茸',
+      '乾しいたけ',
+      'ほししいたけ',
+      '乾燥椎茸',
+      'ほし椎茸',
+      'ホシシイタケ',
+    ]) {
       eq(
-        `FA 材料名「${written}」は乾燥しいたけ1件に価格解決する(生の値段が当たらない)`,
+        `FB 材料名「${written}」は干ししいたけ1件に価格解決する(生の値段が当たらない)`,
         matchPriceEntry(written, idx)?.normalizedName,
-        '乾燥しいたけ',
+        '干ししいたけ',
       )
     }
     eq(
@@ -8722,17 +8735,36 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       33,
     )
     eq(
-      'FA 乾燥しいたけ2枚(=6g)は400円/30gから80円(栄養側の1枚=3gでグラムに寄せて按分)',
-      estimateIngredientYen({ name: '乾燥しいたけ', amount: '2', unit: '枚' }, idx)?.yen,
+      'FB 干ししいたけ2枚(=6g)は400円/30gから80円(栄養側の1枚=3gでグラムに寄せて按分)',
+      estimateIngredientYen({ name: '干ししいたけ', amount: '2', unit: '枚' }, idx)?.yen,
       80,
     )
     eq(
-      'FA 干ししいたけ4枚(=12g)も同じ160円(表記ゆれでも同じ値段になる)',
-      estimateIngredientYen({ name: '干ししいたけ', amount: '4', unit: '枚' }, idx)?.yen,
+      'FB 旧名「乾燥しいたけ」4枚(=12g)も同じ160円(呼び名を変えても値段は変わらない)',
+      estimateIngredientYen({ name: '乾燥しいたけ', amount: '4', unit: '枚' }, idx)?.yen,
       160,
     )
-    // 生と乾燥が同じ照合キーに潰れていないことを直接確かめる(潰れると値段が取り違う)
-    eq('FA 生と乾燥の照合キーは別物', toHiragana('生しいたけ') === toHiragana('乾燥しいたけ'), false)
+    eq(
+      'FB 「干し椎茸」4枚も同じ160円(表記ゆれでも同じ値段になる)',
+      estimateIngredientYen({ name: '干し椎茸', amount: '4', unit: '枚' }, idx)?.yen,
+      160,
+    )
+    // 生と干しが同じ照合キーに潰れていないことを直接確かめる(潰れると値段が取り違う)
+    eq('FA 生と干しの照合キーは別物', toHiragana('生しいたけ') === toHiragana('干ししいたけ'), false)
+    eq('FB 旧名「乾燥しいたけ」も生の照合キーには落ちない', toHiragana('生しいたけ') === toHiragana('乾燥しいたけ'), false)
+    // 別名は全部同じ照合キーに収束する(価格・栄養・検索がこのキーで揃う)
+    eq(
+      'FB 採用した別名はすべて同じ照合キー「ほししいたけ」になる',
+      [...new Set(
+        ['干ししいたけ', '乾燥しいたけ', '干し椎茸', '乾しいたけ', 'ほししいたけ', '乾燥椎茸', 'ほし椎茸'].map(
+          (n) => toHiragana(n),
+        ),
+      )],
+      ['ほししいたけ'],
+    )
+    // 表示名と五十音順の並び位置を揃えたことの固定(便FB)。読み仮名が「かんそう〜」のままだと
+    // 「食材と価格」で「干ししいたけ」が「か」の位置に出て、名前を見て探せない
+    eq('FB 読み仮名は表示名と揃える(「か」ではなく「ほ」の位置に並ぶ)', toHiragana('干ししいたけ').startsWith('ほ'), true)
     // 「しいたけ（生）／しいたけ（乾燥）」案を採らなかった理由の回帰: 括弧書きは照合の前に
     // 落とされるため、この命名だと2項目が同じキーになり、どちらの値段が当たるか決まらない
     const parenIdx = buildPriceIndex([
@@ -8835,6 +8867,123 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       ),
       [],
     )
+
+    // ---- 便FB: 版7の端末（「乾燥しいたけ 400円/30g」を受け取り済み）からの移行 ----
+    // 版7は本番に約30分だけ出ていたので、この行を持つ端末が実在する。
+    // 「干ししいたけ」の行はまだ無いので kind は rename になる＝行が増えも減りもしない
+    const v7Dry = {
+      id: 3,
+      name: '乾燥しいたけ',
+      pricePerUnit: 400,
+      unit: '30g',
+      isDefault: true,
+    }
+    eq(
+      'FB nameMergesToApply 版7の端末: 目安のままの「乾燥しいたけ」は「干ししいたけ」に畳まれる',
+      nameMergesToApply([v6New, v7Dry], merges, PRICE_DEFAULTS),
+      [
+        {
+          kind: 'rename',
+          id: 3,
+          name: '乾燥しいたけ',
+          toName: '干ししいたけ',
+          pricePerUnit: 400,
+          unit: '30g',
+        },
+      ],
+    )
+    eq(
+      'FB nameMergesToApply 版7の端末: 畳んでも価格・単位は1円も動かない(400円/30gのまま)',
+      nameMergesToApply([v7Dry], merges, PRICE_DEFAULTS).map((p) => ({
+        yen: p.pricePerUnit,
+        unit: p.unit,
+      })),
+      [{ yen: 400, unit: '30g' }],
+    )
+    eq(
+      'FB nameMergesToApply 自分で価格を入れた「乾燥しいたけ」の行は触らない(自分の値が残る)',
+      nameMergesToApply([{ ...v7Dry, pricePerUnit: 250, isDefault: false }], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'FB nameMergesToApply 価格だけ旧既定と違う行も対象外(isDefaultの取りこぼし対策の二重チェック)',
+      nameMergesToApply([{ ...v7Dry, pricePerUnit: 250 }], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'FB nameMergesToApply 自分で単位を変えた「乾燥しいたけ」の行も対象外',
+      nameMergesToApply([{ ...v7Dry, unit: '100g' }], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'FB nameMergesToApply 版5・版6の端末は「乾燥しいたけ」の行を持たない＝空振りする',
+      nameMergesToApply([v6New], merges, PRICE_DEFAULTS),
+      [],
+    )
+    eq(
+      'FB nameMergesToApply 「干ししいたけ」を既に持つ端末では旧名の目安行を消す(二重に増やさない)',
+      nameMergesToApply(
+        [{ id: 4, name: '干ししいたけ', pricePerUnit: 400, unit: '30g', isDefault: true }, v7Dry],
+        merges,
+        PRICE_DEFAULTS,
+      ),
+      [{ kind: 'delete', id: 3, name: '乾燥しいたけ', toName: '干ししいたけ' }],
+    )
+    eq(
+      'FB nameMergesToApply 統合先「干ししいたけ」の行そのものは絶対に畳まない',
+      nameMergesToApply(
+        [{ id: 4, name: '干ししいたけ', pricePerUnit: 400, unit: '30g', isDefault: true }],
+        merges,
+        PRICE_DEFAULTS,
+      ),
+      [],
+    )
+    // 版5・版6・版7のどこから上がっても最後は同じ姿になること（移行→トップアップの順で確かめる）
+    {
+      const { missingDefaults } = await import('../src/db/prices.ts')
+      const shiitakeNames = (rows) => {
+        const plans = nameMergesToApply(rows, merges, PRICE_DEFAULTS)
+        const removed = new Set(plans.filter((p) => p.kind === 'delete').map((p) => p.id))
+        const renamed = new Map(plans.filter((p) => p.kind === 'rename').map((p) => [p.id, p.toName]))
+        const after = rows
+          .filter((r) => !removed.has(r.id))
+          .map((r) => ({ ...r, name: renamed.get(r.id) ?? r.name }))
+        const added = missingDefaults(after, PRICE_DEFAULTS)
+        return [...after.map((r) => r.name), ...added.map((d) => d.name)]
+          .filter((n) => n.includes('しいたけ'))
+          .sort()
+      }
+      const goal = ['干ししいたけ', '生しいたけ']
+      eq(
+        'FB 版5の端末(しいたけ150円/1パック＋生しいたけ100円/1パック)からでも同じ2行になる',
+        shiitakeNames([
+          { ...v6Old, unit: '1パック' },
+          { ...v6New, unit: '1パック' },
+        ]),
+        goal,
+      )
+      eq(
+        'FB 版6の端末(しいたけ150円/6枚＋生しいたけ100円/6枚)からでも同じ2行になる',
+        shiitakeNames([v6Old, v6New]),
+        goal,
+      )
+      eq(
+        'FB 版7の端末(生しいたけ＋乾燥しいたけ)からでも同じ2行になる',
+        shiitakeNames([v6New, v7Dry]),
+        goal,
+      )
+      eq(
+        'FB 新規インストール相当(行が無い)でも同じ2行になる',
+        shiitakeNames([]),
+        goal,
+      )
+      // 自分で値段を入れた行は残す＝その端末だけ旧名の行が1行多く残る（規約F: 何が残るか）
+      eq(
+        'FB 自分で編集した「乾燥しいたけ」がある端末は、その行が残ったうえで干ししいたけが増える',
+        shiitakeNames([v6New, { ...v7Dry, pricePerUnit: 250, isDefault: false }]),
+        ['乾燥しいたけ', '生しいたけ'],
+      )
+    }
   }
 
   // 名寄せで同じ照合キーの行が2つ残る端末（自分で「しいたけ」を編集していた場合）では、
@@ -8869,6 +9018,19 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     eq('FA 栄養: 「生しいたけ」も生しいたけの食品', matchNutritionFood('生しいたけ')?.label, 'しいたけ')
     eq('FA 栄養: 「乾燥しいたけ」は干ししいたけの食品(名寄せ前は生に当たっていた)', matchNutritionFood('乾燥しいたけ')?.label, '干ししいたけ')
     eq('FA 栄養: 「干ししいたけ」も干ししいたけの食品', matchNutritionFood('干ししいたけ')?.label, '干ししいたけ')
+    // 便FB: 価格マスタの項目名と成分表の食品名が同じ文字列になったこと。
+    // ここが食い違っていたため、公開ページ public/about/foods.html だけが「干ししいたけ」で
+    // 出ていて、アプリの「食材と価格」は「乾燥しいたけ」という状態になっていた
+    eq(
+      'FB 価格マスタの項目名と栄養データの食品名が一致する(公開ページとの食い違いの解消)',
+      matchNutritionFood('干ししいたけ')?.label,
+      PRICE_DEFAULTS.find((d) => d.name === '干ししいたけ')?.name,
+    )
+    eq(
+      'FB 成分表側の別名にも旧名「乾燥しいたけ」が入っている(公開ページの別名欄に出る)',
+      matchNutritionFood('干ししいたけ')?.aliases.includes('乾燥しいたけ'),
+      true,
+    )
   }
 
   // 検索: 名寄せ後も「しいたけ」で引ける(searchWordsは読み仮名の形で入る)
