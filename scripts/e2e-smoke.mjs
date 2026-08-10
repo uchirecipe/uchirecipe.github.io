@@ -26334,14 +26334,16 @@ try {
       await flPage.getByRole('button', { name: '段取りを作る' }).click()
       await flPage.waitForTimeout(800)
 
-      const flBody = () => flPage.textContent('body')
+      // 手順本文は文節の切れ目にゼロ幅スペースが入る(ja-phrase)。突き合わせる前に必ず取り除く
+      const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
+      const sessionText = async () => noZw(await flPage.textContent('[data-testid="cook-session"]'))
       const longCard = flPage.locator('ol > li', { hasText: '半日〜一晩漬ける' })
       check(
         'FL-01 「半日〜一晩漬ける」の手順は段取りに残る(黙って消さない)',
         (await longCard.count()) === 1,
         `件数=${await longCard.count()}`,
       )
-      const longText = (await longCard.first().innerText()).replace(/​/g, '')
+      const longText = noZw(await longCard.first().innerText())
       check(
         'FL-01 「約20分の待ち時間」と数えない',
         !longText.includes('約20分の待ち時間') && longText.includes('長い待ち時間'),
@@ -26365,7 +26367,7 @@ try {
 
       // FL-04 括弧内の任意の記述を主たる動作にしない(「切る」が待ち2分にならない)
       const cabbageCard = flPage.locator('ol > li', { hasText: 'キャベツをせん切りにする' })
-      const cabbageText = (await cabbageCard.first().innerText()).replace(/​/g, '')
+      const cabbageText = noZw(await cabbageCard.first().innerText())
       check(
         'FL-04 括弧内の「レンジで加熱すると時短」を待ちにしない(手を動かす工程のまま)',
         !cabbageText.includes('待ち時間') && cabbageText.includes('手を動かす'),
@@ -26375,7 +26377,7 @@ try {
       // FL-02 段取りの一覧での並び(本文→注意書き→材料→待ちブロック)
       const listOrder = await flPage.evaluate(() => {
         const li = Array.from(document.querySelectorAll('ol > li')).find((el) =>
-          (el.textContent ?? '').includes('鍋に大根とだしを入れて中火で15分煮る'),
+          (el.textContent ?? '').replace(/\u200B/g, '').includes('鍋に大根とだしを入れて中火で15分煮る'),
         )
         if (!li) return null
         const y = (sel) => {
@@ -26404,8 +26406,8 @@ try {
       await flPage.waitForTimeout(600)
       let reached = false
       for (let i = 0; i < 14; i++) {
-        const t = (await flPage.textContent('[data-testid="cook-session"]')) ?? ''
-        if (t.includes('鍋に大根とだしを入れて中火で15分煮る')) { reached = true; break }
+        if ((await sessionText()).includes('鍋に大根とだしを入れて中火で15分煮る')) { reached = true; break }
+        if ((await flPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
         await flPage.locator('[data-testid="cook-session-next"]').click()
         await flPage.waitForTimeout(250)
       }
@@ -26443,12 +26445,12 @@ try {
       // 長い待ちの手順まで進めて、調理中モードでも同じ扱いになることを見る
       let reachedLong = false
       for (let i = 0; i < 14; i++) {
-        const t = (await flPage.textContent('[data-testid="cook-session"]')) ?? ''
-        if (t.includes('半日〜一晩漬ける')) { reachedLong = true; break }
+        if ((await sessionText()).includes('半日〜一晩漬ける')) { reachedLong = true; break }
+        if ((await flPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
         await flPage.locator('[data-testid="cook-session-next"]').click()
         await flPage.waitForTimeout(250)
       }
-      const longSession = ((await flPage.textContent('[data-testid="cook-session"]')) ?? '').replace(/​/g, '')
+      const longSession = await sessionText()
       check(
         'FL-01 調理中モードでも「約20分の待ち時間」と出さず、外していることを書く',
         reachedLong &&
@@ -26457,7 +26459,6 @@ try {
           longSession.includes('今回の調理では仕上がらないため、全体の目安時間に含めていません。'),
         `本文=${longSession.slice(0, 200).replace(/\n/g, ' / ')}`,
       )
-      void (await flBody())
     } finally {
       await flBrowser.close()
     }
