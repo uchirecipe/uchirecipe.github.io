@@ -7605,6 +7605,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             setLogDetail(null)
             setDayModalDate(null)
           }}
+          // 記録をこの窓の中で直したときの一言（2026-08-10 便FD）
+          onMessage={setMessage}
         />
       )}
     </div>

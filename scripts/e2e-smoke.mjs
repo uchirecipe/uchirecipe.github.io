@@ -4218,8 +4218,10 @@ try {
         `ctl=${JSON.stringify(lkLockedCtl)}`,
       )
       check(
-        'WEEKLOCK(便EA) ロック中の枠に「削除も変更もできない」1文が出る',
-        !!lkLockedCtl && lkLockedCtl.note === '鍵を外すまで、削除も変更もできません',
+        'WEEKLOCK(便EA→便FD) ロック中の枠に「ロック中」の1行が出る',
+        // 2026-08-10 便FD で期待値を更新（オーナー実機「文章が窮屈に感じる。
+        // 「ロック中」のみで通じる」）。何ができなくなるかは鍵を掛けたときの案内が言う
+        !!lkLockedCtl && lkLockedCtl.note === 'ロック中',
         `note=${lkLockedCtl?.note}`,
       )
       // 実際に消えないこと(DBの献立が1品も変わらない)。
@@ -21343,19 +21345,22 @@ try {
       )
       const eqDialog = eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' })
       const eqDialogText = (await eqDialog.textContent()) ?? ''
+      // 2026-08-10 便FD で小窓をコンパクトにしたので期待値を更新:
+      // 食数は料理名の横の括弧書き（「肉じゃが（4人分）」）になり、「何人分作ったか」の行は無くなった
       check(
-        'EQ-01(①) 小窓に入力した情報が全部出る(日付・何人分・ひとことメモ・写真)',
+        'EQ-01(①) 小窓に入力した情報が全部出る(日付・食数・ひとことメモ・写真)',
         eqDialogText.includes(eqToday.replaceAll('-', '/')) &&
-          eqDialogText.includes('何人分作ったか') &&
-          eqDialogText.includes('4人分') &&
+          eqDialogText.includes('（4人分）') &&
           eqDialogText.includes('ひとことメモ') &&
           eqDialogText.includes('甘めに仕上げたら好評だった') &&
           eqDialogText.includes('写真'),
         eqDialogText.slice(0, 200),
       )
+      // 2026-08-10 便FD: 「この記録を編集する」はレシピ詳細へのリンクをやめ、
+      // その場で編集欄を開くボタンになった（「レシピを見る」はリンクのまま）
       check(
-        'EQ-01(①) 小窓からレシピ詳細と記録の編集へ行ける',
-        (await eqDialog.getByRole('link', { name: 'この記録を編集する' }).count()) === 1 &&
+        'EQ-01(①) 小窓からレシピ詳細へ行ける／記録はその場で直せる',
+        (await eqDialog.getByRole('button', { name: 'この記録を編集する' }).count()) === 1 &&
           (await eqDialog.getByRole('link', { name: 'レシピを見る' }).count()) === 1,
       )
       // 写真の拡大
@@ -21413,27 +21418,28 @@ try {
         (await eqPage.getByRole('dialog', { name: '肉じゃがの作った記録' }).count()) === 1,
       )
 
-      // ---------- ⑤ 「この記録を編集する」でレシピ詳細の編集フォームが開く ----------
+      // ---------- ⑤ 「この記録を編集する」でその場に編集欄が開く ----------
+      // 2026-08-10 便FD で期待値を更新（旧: レシピ詳細へ移って編集フォームが開く）。
+      // オーナー実機「カレンダーなどから編集するを選択すると、問答無用でレシピ詳細画面に
+      // 飛ばされる。カレンダーなどの元の画面で編集が完結できるようにして」
       await eqPage
         .getByRole('dialog', { name: '肉じゃがの作った記録' })
-        .getByRole('link', { name: 'この記録を編集する' })
+        .getByRole('button', { name: 'この記録を編集する' })
         .click()
-      await eqPage.waitForTimeout(1200)
+      await eqPage.waitForTimeout(800)
       check(
-        'EQ-01(⑤) レシピ詳細へ移る',
-        /#\/recipes\/\d+/.test(eqPage.url()),
+        'EQ-01(⑤) レシピ詳細へは移らない(元の画面のまま)',
+        !/#\/recipes\/\d+/.test(eqPage.url()),
         `url=${eqPage.url()}`,
       )
       check(
-        'EQ-01(⑤) 使い終わった ?editLog= はURLから消える',
-        !eqPage.url().includes('editLog'),
-        `url=${eqPage.url()}`,
-      )
-      check(
-        'EQ-01(⑤) その記録の編集フォームが開いた状態になる(日付欄と「保存する」が出る)',
-        (await eqPage.locator('input[type="date"]').count()) >= 1 &&
+        'EQ-01(⑤) 小窓の中に編集欄が開く(日付欄と「保存する」が出る)',
+        (await eqPage.locator('[data-testid="cooked-log-editor"]').count()) === 1 &&
+          (await eqPage.locator('[data-testid="cooked-log-editor"] input[type="date"]').count()) === 1 &&
           (await eqPage.getByRole('button', { name: '保存する' }).count()) >= 1,
       )
+      await eqPage.getByRole('button', { name: 'やめる' }).click()
+      await eqPage.waitForTimeout(500)
 
       // ---------- ⑥ ホームへ戻ったときのスクロール位置 ----------
       await eqPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })

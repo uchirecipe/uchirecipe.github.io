@@ -1,9 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronRight, Maximize2, Pencil, X } from 'lucide-react'
 import type { CookedLog, Recipe } from '../db/types'
+import { db } from '../db/db'
 import { usePhotoUrl } from './usePhotoUrl'
 import { useOverlayDismiss } from './useOverlayDismiss'
+import CookedLogEditor from './CookedLogEditor'
 import { ja } from '../i18n/ja'
 
 /** 小窓に出す記録1件。logIndex は recipe.cookedLogs の添字（記録の編集を開くのに使う） */
@@ -54,7 +57,11 @@ function CookedPhotoViewer({ photo, onClose }: { photo: Blob; onClose: () => voi
   )
 }
 
-/** 「項目名／中身」の1行。入れていない欄も出す＝何を入れて何を入れていないかが読める */
+/**
+ * 「項目名／中身」の1行。
+ * 2026-08-10 便FD（オーナー実機「コンパクトに」）: 空の欄は行ごと出さないので、
+ * ここへ来るのは中身がある欄だけになった。
+ */
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
@@ -62,10 +69,6 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
       <dd className="mt-0.5">{children}</dd>
     </div>
   )
-}
-
-function BlankValue() {
-  return <span className="text-ink-muted">{ja.cookedDetail.blank}</span>
 }
 
 type Props = {
@@ -76,26 +79,49 @@ type Props = {
    * （RecipeDetailPage の backFallback が読む）。
    */
   linkState?: { from: string; fromPath: string }
-  /** レシピ詳細・記録の編集へ移る直前の後片付け（居場所を覚える・下の窓を閉じる等） */
+  /** レシピ詳細へ移る直前の後片付け（居場所を覚える・下の窓を閉じる等） */
   onNavigate?: () => void
+  /** 記録を直した・消したときの一言（呼び出し側のトーストに出す） */
+  onMessage?: (text: string) => void
 }
 
 /**
  * 「作った記録」1件の中身をその場で開く小窓（2026-08-09 便EQ・オーナー実機）。
  *
- * オーナーの指摘は2つ。①料理名を押しても記録ではなくレシピ詳細が開く
- * ②写真を大きく見られる場所がレシピ詳細の中にしかない。
- * そこで、記録が並ぶ4か所（ホームの「最近作ったもの」・献立の作った！済みの枠・
+ * 記録が並ぶ4か所（ホームの「最近作ったもの」・献立の作った！済みの枠・
  * 月タブの日の窓・作った記録の一覧）から同じこの小窓を開き、記録したときに入れた内容を
- * まとめて読めるようにした。一覧の画面へ移動はしない（オーナー「記録一覧にいくわけではない」）。
+ * まとめて読めるようにしてある。一覧の画面へ移動はしない。
  *
- * 記録の編集はレシピ詳細が持っている編集フォームへ渡す（同じ入力欄を2つ作らない）。
+ * 2026-08-10 便FD（オーナー実機）で2つ直した:
+ *  ①コンパクトに。食数は料理名の横へ（「きんぴらごぼう（3人分）」）、
+ *    入れていない欄（ひとことメモ・写真）は行ごと省く。
+ *  ②「この記録を編集する」でレシピ詳細へ飛ばさず、**この窓の中で直して終われる**ようにした
+ *    （オーナー「カレンダーなどの元の画面で編集が完結できるようにして」）。
+ *    入力欄はレシピ詳細と同じ共通部品（CookedLogEditor）＝同じ欄を2つ持たない。
  */
-export default function CookedLogDetailModal({ target, onClose, linkState, onNavigate }: Props) {
-  const { recipe, log, logIndex } = target
+export default function CookedLogDetailModal({
+  target,
+  onClose,
+  linkState,
+  onNavigate,
+  onMessage,
+}: Props) {
+  const { recipe } = target
   const [zoomOpen, setZoomOpen] = useState(false)
-  const photoUrl = usePhotoUrl(log.photo)
+  const [editing, setEditing] = useState(false)
+  /** 直したあとは並び順が変わりうるので、いま見ている記録の位置は窓側で持ち直す */
+  const [logIndex, setLogIndex] = useState(target.logIndex)
   useOverlayDismiss(true, onClose)
+
+  // 直した内容をその場で出し直すため、記録は端末から読み直す（開いたときの写しを見続けない）。
+  // まだ届いていない・レシピが消えた等で読めないときは、開いたときの写しをそのまま使う
+  const liveRecipe = useLiveQuery(
+    async () => (recipe.id != null ? ((await db.recipes.get(recipe.id)) ?? null) : null),
+    [recipe.id],
+  )
+  const log = liveRecipe?.cookedLogs[logIndex] ?? target.log
+  const logCount = liveRecipe?.cookedLogs.length ?? 1
+  const photoUrl = usePhotoUrl(log.photo)
 
   // 端末に無いレシピ（月間サンプルデモの見本）は移動先が無いので操作を出さない
   const recipePath = recipe.id != null ? `/recipes/${recipe.id}` : null
@@ -116,7 +142,18 @@ export default function CookedLogDetailModal({ target, onClose, linkState, onNav
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-xs font-bold text-ink-muted">{ja.cookedDetail.label}</p>
-              <h3 className="text-lg font-bold">{recipe.title}</h3>
+              {/* 食数は料理名の横に添える（2026-08-10 便FD・オーナー実機
+                  「「きんぴらごぼう　（3食分）」のように食数は簡略」）。
+                  単位は記録に付いている「◯人分」のまま＝アプリの他の場所と同じ言い方にする */}
+              <h3 data-testid="cooked-detail-title" className="text-lg font-bold">
+                {recipe.title}
+                {log.servings != null && (
+                  <span className="ml-1 text-base">
+                    （{ja.detail.cookedServingsValue.replace('{n}', String(log.servings))}）
+                  </span>
+                )}
+              </h3>
+              <p className="mt-0.5 text-sm text-ink-muted">{log.date.replaceAll('-', '/')}</p>
             </div>
             <button
               type="button"
@@ -128,64 +165,84 @@ export default function CookedLogDetailModal({ target, onClose, linkState, onNav
             </button>
           </div>
 
-          <dl className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
-            <DetailRow label={ja.cookedDetail.date}>
-              <span className="font-bold">{log.date.replaceAll('-', '/')}</span>
-            </DetailRow>
-            <DetailRow label={ja.cookedDetail.servings}>
-              {log.servings != null ? (
-                <span className="font-bold">
-                  {ja.detail.cookedServingsValue.replace('{n}', String(log.servings))}
-                </span>
-              ) : (
-                <BlankValue />
-              )}
-            </DetailRow>
-            <DetailRow label={ja.cookedDetail.note}>
-              {log.note ? <p className="break-words">{log.note}</p> : <BlankValue />}
-            </DetailRow>
-            <DetailRow label={ja.cookedDetail.photo}>
-              {log.photo && photoUrl ? (
-                // 押すと大きく開く。虫めがねの印を写真の上に重ねて「押せる」ことを見せる
-                <button
-                  type="button"
-                  onClick={() => setZoomOpen(true)}
-                  aria-label={ja.detail.cookedPhotoView}
-                  className="relative block w-full overflow-hidden rounded-md shadow-sm"
-                >
-                  <img src={photoUrl} alt="" className="h-40 w-full object-cover" />
-                  <span className="absolute bottom-1 right-1 rounded-full border border-edge bg-surface p-1.5 text-ink-muted">
-                    <Maximize2 size={16} aria-hidden />
-                  </span>
-                </button>
-              ) : (
-                <BlankValue />
-              )}
-            </DetailRow>
-          </dl>
-
-          {recipePath && (
-            <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
-              {/* 記録を直す先はレシピ詳細の編集フォーム（?editLog= で開く記録を指定する） */}
-              <Link
-                to={`${recipePath}?editLog=${logIndex}`}
-                state={linkState}
-                onClick={onNavigate}
-                className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-app py-3 font-bold text-accent-ink shadow-sm"
-              >
-                <Pencil size={18} aria-hidden />
-                {ja.cookedDetail.edit}
-              </Link>
-              <Link
-                to={recipePath}
-                state={linkState}
-                onClick={onNavigate}
-                className="flex w-full items-center justify-center gap-1 rounded-md border border-edge bg-app py-3 font-bold text-accent-ink shadow-sm"
-              >
-                {ja.cookedDetail.openRecipe}
-                <ChevronRight size={18} aria-hidden />
-              </Link>
+          {editing && recipe.id != null ? (
+            <div className="mt-[var(--space-md)]">
+              <CookedLogEditor
+                recipeId={recipe.id}
+                logIndex={logIndex}
+                log={log}
+                fallbackServings={recipe.servings}
+                totalLogCount={logCount}
+                onSaved={(newIndex) => {
+                  setLogIndex(newIndex)
+                  setEditing(false)
+                  onMessage?.(ja.cookedDetail.savedToast)
+                }}
+                onCancel={() => setEditing(false)}
+                onDeleted={() => {
+                  setEditing(false)
+                  onClose()
+                  onMessage?.(ja.detail.cookedLogDeletedToast)
+                }}
+              />
             </div>
+          ) : (
+            <>
+              {/* 入れていない欄は出さない（2026-08-10 便FD「コンパクトに」）。
+                  入れ忘れに気づいたら「この記録を編集する」で足せる＝欄が消えても行き止まりにならない */}
+              {(log.note || (log.photo && photoUrl)) && (
+                <dl className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
+                  {log.note && (
+                    <DetailRow label={ja.cookedDetail.note}>
+                      <p className="break-words">{log.note}</p>
+                    </DetailRow>
+                  )}
+                  {log.photo && photoUrl && (
+                    <DetailRow label={ja.cookedDetail.photo}>
+                      {/* 押すと大きく開く。虫めがねの印を写真の上に重ねて「押せる」ことを見せる */}
+                      <button
+                        type="button"
+                        onClick={() => setZoomOpen(true)}
+                        aria-label={ja.detail.cookedPhotoView}
+                        className="relative block w-full overflow-hidden rounded-md shadow-sm"
+                      >
+                        <img src={photoUrl} alt="" className="h-40 w-full object-cover" />
+                        <span className="absolute bottom-1 right-1 rounded-full border border-edge bg-surface p-1.5 text-ink-muted">
+                          <Maximize2 size={16} aria-hidden />
+                        </span>
+                      </button>
+                    </DetailRow>
+                  )}
+                </dl>
+              )}
+
+              <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
+                {/* 直す場所はこの窓の中（2026-08-10 便FD）。カレンダーから開いても
+                    レシピ詳細へ移らずに終われる */}
+                {recipe.id != null && (
+                  <button
+                    type="button"
+                    data-testid="cooked-detail-edit"
+                    onClick={() => setEditing(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-app py-3 font-bold text-accent-ink shadow-sm"
+                  >
+                    <Pencil size={18} aria-hidden />
+                    {ja.cookedDetail.edit}
+                  </button>
+                )}
+                {recipePath && (
+                  <Link
+                    to={recipePath}
+                    state={linkState}
+                    onClick={onNavigate}
+                    className="flex w-full items-center justify-center gap-1 rounded-md border border-edge bg-app py-3 font-bold text-accent-ink shadow-sm"
+                  >
+                    {ja.cookedDetail.openRecipe}
+                    <ChevronRight size={18} aria-hidden />
+                  </Link>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

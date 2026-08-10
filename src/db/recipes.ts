@@ -237,20 +237,29 @@ export async function addCookedLog(id: number, log: CookedLog): Promise<void> {
   })
 }
 
-/** 「作った！」記録を後から編集する（日付・ひとことメモ・人数・写真の修正） */
+/**
+ * 「作った！」記録を後から編集する（日付・ひとことメモ・人数・写真の修正）。
+ *
+ * 戻り値は**並べ直したあとの添字**（2026-08-10 便FD）。日付を直すと並び順が変わるので、
+ * 編集した記録を出したままにする画面（記録の小窓）は、この添字で同じ記録を指し直す。
+ * 対象が見つからなかったときは null。
+ */
 export async function updateCookedLog(
   id: number,
   index: number,
   patch: Partial<CookedLog>,
-): Promise<void> {
-  await db.transaction('rw', db.recipes, async () => {
+): Promise<number | null> {
+  return await db.transaction('rw', db.recipes, async () => {
     const recipe = await db.recipes.get(id)
-    if (!recipe || !recipe.cookedLogs[index]) return
+    if (!recipe || !recipe.cookedLogs[index]) return null
+    const edited = { ...recipe.cookedLogs[index], ...patch }
     // 日付を直したときも並びが崩れたままにならないよう、書き戻す前に必ず日付順に整える
     const cookedLogs = sortLogsByDateDesc(
-      recipe.cookedLogs.map((log, i) => (i === index ? { ...log, ...patch } : log)),
+      recipe.cookedLogs.map((log, i) => (i === index ? edited : log)),
     )
     await db.recipes.update(id, { cookedLogs })
+    // 並べ替えは同じ物体を並べ替えるだけなので、同一性で新しい位置が引ける
+    return cookedLogs.indexOf(edited)
   })
 }
 
