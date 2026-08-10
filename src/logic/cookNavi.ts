@@ -1476,6 +1476,27 @@ export function hasLaterHandsOnStep(items: readonly { kind: StepKind }[], index:
   return items.some((item, i) => i > index && item.kind === 'active')
 }
 
+/**
+ * その品の段取りが「今回の調理では終わらない長い待ち」で終わるか（2026-08-11 便FL・司令部裁定）。
+ *
+ * 「完成」の印は**料理ができた合図**として読まれる。最後の手順が「冷蔵庫で半日〜一晩漬ける」の
+ * ときにこれを出すと、同じカードの中で「今回の調理では仕上がらない」と「完成」が並び、
+ * 画面が自分で矛盾を言う。そこだけ別の言い方に差し替えるための判定。
+ *
+ * **最後の手順が長い待ちのときだけ**に限る。長い待ちが途中にある品
+ * （フルーツヨーグルトバーク＝冷凍3時間→凍ったら割る）は、最後の手順まで進めば本当に
+ * 出来上がるので「完成」のままでよい。
+ */
+export function endsWithLongRest(
+  items: readonly { recipeId: number; longRest: boolean }[],
+  recipeId: number,
+): boolean {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].recipeId === recipeId) return items[i].longRest
+  }
+  return false
+}
+
 function makeItem(
   order: number,
   job: Job,
