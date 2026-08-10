@@ -35,7 +35,12 @@ import {
 import { circledNumber } from '../logic/naviStepText'
 import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
-import { recipeStepLabel, type TimelineItem, type TimelineRecipe } from '../logic/cookNavi'
+import {
+  hasLaterHandsOnStep,
+  recipeStepLabel,
+  type TimelineItem,
+  type TimelineRecipe,
+} from '../logic/cookNavi'
 import type { NaviIngredientAmount } from '../logic/naviIngredients'
 import {
   advanceCursor,
@@ -195,6 +200,11 @@ type Props = {
   onFinish: () => void
   /** タイマーを始める（段取りの通し番号・レシピの色つきで常駐バーに出す） */
   onStartTimer: (item: TimelineItem, seconds: number) => void
+  /**
+   * 1品ずつ順に作る段取りか（2026-08-11 便FL）。並行の余地が無いときは待ち時間に
+   * 別の品を差し込まないので、「この間に、次の手作業を進められます」を出さない
+   */
+  sequential: boolean
 }
 
 /**
@@ -223,6 +233,7 @@ export default function CookSessionOverlay({
   onExit,
   onFinish,
   onStartTimer,
+  sequential,
 }: Props) {
   // 段取りの実行中は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
   useAppBusyWhileMounted()
@@ -408,7 +419,17 @@ export default function CookSessionOverlay({
   const ingredients = stepIngredients.get(`${item.recipeId}-${item.stepIndex}`) ?? []
   const ingredientNames = ingredientNamesByRecipeId.get(item.recipeId) ?? []
   const showWaitTimerButton =
-    isWait && item.minutes != null && item.minutes > 0 && !isMinutesShownInText(item.text, item.minutes)
+    isWait &&
+    !item.longRest &&
+    item.minutes != null &&
+    item.minutes > 0 &&
+    !isMinutesShownInText(item.text, item.minutes)
+  /**
+   * 「この間に、次の手作業を進められます」を出すか（2026-08-11 便FL。段取りの一覧と同じ条件）。
+   * 後ろに手作業が残っている待ちのときだけ＝1品ずつ作る段取りや、今回の調理では終わらない
+   * 長い待ちには出さない
+   */
+  const showFillHint = isWait && !sequential && !item.longRest && hasLaterHandsOnStep(items, index)
   /**
    * タイマーの置き場所（2026-08-09 便ES・オーナー指示E-11
    * 「大きく表示中のタイマーは画面上、他のタイマーは『他の品の〜』に直接表示」）。
@@ -629,7 +650,7 @@ export default function CookSessionOverlay({
           </span>
         </div>
 
-        <p className="ja-phrase w-full text-2xl font-bold leading-relaxed">
+        <p data-testid="cook-session-step-text" className="ja-phrase w-full text-2xl font-bold leading-relaxed">
           <ComposedStepText
             text={item.text}
             ingredientNames={ingredientNames}
@@ -638,38 +659,16 @@ export default function CookSessionOverlay({
           />
         </p>
 
-        {/* 待ち工程の分数とタイマー（段取りの一覧の待ちブロックと同じ内容） */}
-        {isWait && (
-          <div
-            className="w-full rounded-sm p-[var(--space-sm)]"
-            style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
-          >
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <span className="inline-flex items-center gap-1 font-bold text-accent-ink">
-                <Hourglass size={16} aria-hidden />
-                {/* ナビが足した湯沸かしは分数を出さない（2026-08-09 便ES・オーナー指示D-3） */}
-                {item.addedByNavi
-                  ? ja.cookNavi.waitBlockBoil
-                  : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
-              </span>
-              {showWaitTimerButton && (
-                <button
-                  type="button"
-                  onClick={() => onStartTimer(item, item.waitMinutes * 60)}
-                  className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
-                >
-                  <TimerIcon size={16} aria-hidden />
-                  {ja.cookNavi.startTimer}
-                </button>
-              )}
-            </div>
-            {item.waitEstimated && (
-              <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitEstimatedNote}</p>
-            )}
+        {/* 2026-08-11 便FL: 手順カードの並びを段取りの一覧にそろえた
+            （本文 → 注意書き → 材料 → 待ちブロック）。ここだけ待ちブロックが注意書きより
+            上にあり、同じ手順が2つの画面で違う順に見えていた。注意書きは本文の但し書き
+            （「焦げやすいので」等）なので本文の直後に読ませ、タイマーは手を動かし終えてから
+            押すものなので最後に置く */}
+        {item.memo && (
+          <div data-testid="cook-session-memo" className="w-full">
+            <MemoText text={item.memo} className="w-full text-ink-muted" />
           </div>
         )}
-
-        {item.memo && <MemoText text={item.memo} className="w-full text-ink-muted" />}
 
         {/* この手順で使う材料と分量（3品ぶんの材料が混ざるのを防ぐ。色はその料理の色） */}
         {ingredients.length > 0 && (
@@ -694,6 +693,54 @@ export default function CookSessionOverlay({
                 </span>
               ))}
             </p>
+          </div>
+        )}
+
+        {/* 待ち工程の分数とタイマー（段取りの一覧の待ちブロックと同じ内容） */}
+        {isWait && (
+          <div
+            data-testid="cook-session-wait-block"
+            className="w-full rounded-sm p-[var(--space-sm)]"
+            style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
+          >
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="inline-flex items-center gap-1 font-bold text-accent-ink">
+                <Hourglass size={16} aria-hidden />
+                {/* ナビが足した湯沸かしは分数を出さない（2026-08-09 便ES・オーナー指示D-3）。
+                    今回の調理では終わらない待ちも分数を出さない（2026-08-11 便FL） */}
+                {item.addedByNavi
+                  ? ja.cookNavi.waitBlockBoil
+                  : item.longRest
+                    ? ja.cookNavi.waitBlockLongRest
+                    : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
+              </span>
+              {showWaitTimerButton && (
+                <button
+                  type="button"
+                  onClick={() => onStartTimer(item, item.waitMinutes * 60)}
+                  className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
+                >
+                  <TimerIcon size={16} aria-hidden />
+                  {ja.cookNavi.startTimer}
+                </button>
+              )}
+            </div>
+            {/* 段取りの一覧にだけ出ていた「この間に、次の手作業を進められます」を
+                調理中の画面にも出す（2026-08-11 便FL）。待ちを仕掛けたあと「次へ」で
+                別の品に移ってよいことは、手を動かしている最中こそ要る案内 */}
+            {showFillHint && (
+              <p data-testid="cook-session-fill-hint" className="mt-1 text-xs text-ink-muted">
+                {ja.cookNavi.waitFillHint}
+              </p>
+            )}
+            {item.waitEstimated && (
+              <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitEstimatedNote}</p>
+            )}
+            {item.longRest && (
+              <p data-testid="cook-session-long-rest" className="mt-1 text-xs text-ink-muted">
+                {ja.cookNavi.longRestNote}
+              </p>
+            )}
           </div>
         )}
 

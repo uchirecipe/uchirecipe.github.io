@@ -26267,6 +26267,202 @@ try {
     }
   }
 
+  // --- FL-01〜04: 段取りの時間の数え方と、2つの画面の並びの食い違い(2026-08-11 便FL) ---
+  //     FL-01 「冷蔵庫で半日〜一晩漬ける」を「約20分の待ち時間」と数えない(長い待ちとして
+  //           全体の目安から外し、外していることを画面に書く)
+  //     FL-02 同じ手順の並びが段取りの一覧と調理中モードで同じ(本文→注意書き→材料→待ちブロック)
+  //     FL-03 調理中モードにも「この間に、次の手作業を進められます」が出る
+  //     FL-04 括弧内の任意の記述(「レンジで加熱すると時短」)を手順の主たる動作にしない
+  currentCheck = 'FL-01'
+  {
+    const flBrowser = await chromium.launch()
+    const flContext = await flBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const flPage = await flContext.newPage()
+    flPage.on('dialog', (d) => void d.accept())
+    flPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FL] ${err.message}`)
+    })
+    flPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FL] ${t}`)
+    })
+    try {
+      await flPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await flPage.waitForTimeout(1800)
+      await flPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('FL味玉', [
+          { text: '卵を沸騰したお湯で10分ゆでる。', minutes: 10 },
+          { text: 'ゆで上がったらすぐ冷水にとり、粗熱が取れたら殻をむく。' },
+          { text: '保存袋にめんつゆと水、殻をむいた卵を入れて空気を抜き、冷蔵庫で半日〜一晩漬ける。', memo: '漬け時間が長いほど中まで味がしみる。' },
+        ], [{ name: '卵', amount: '4', unit: '個' }])))
+        const idB = await P(store('recipes').add(mk('FL煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15, memo: '落としぶたをすると味がしみやすい。' },
+          { text: '火を止めて器に盛る。' },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        const idC = await P(store('recipes').add(mk('FLキャベツ丼', [
+          { text: 'キャベツをせん切りにする（レンジ600Wで1分半ほど加熱すると時短になる）。' },
+          { text: '油を切ったツナとキャベツをボウルであえる。' },
+          { text: 'ご飯にのせて白ごまを振る。' },
+        ], [{ name: 'キャベツ', amount: '2', unit: '枚' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+
+      await flPage.goto(`${BASE}/#/cook-navi`)
+      await flPage.reload({ waitUntil: 'networkidle' })
+      await flPage.waitForTimeout(1200)
+      await flPage.getByRole('button', { name: '段取りを作る' }).click()
+      await flPage.waitForTimeout(800)
+
+      const flBody = () => flPage.textContent('body')
+      const longCard = flPage.locator('ol > li', { hasText: '半日〜一晩漬ける' })
+      check(
+        'FL-01 「半日〜一晩漬ける」の手順は段取りに残る(黙って消さない)',
+        (await longCard.count()) === 1,
+        `件数=${await longCard.count()}`,
+      )
+      const longText = (await longCard.first().innerText()).replace(/​/g, '')
+      check(
+        'FL-01 「約20分の待ち時間」と数えない',
+        !longText.includes('約20分の待ち時間') && longText.includes('長い待ち時間'),
+        `カード=${longText.replace(/\n/g, ' / ')}`,
+      )
+      check(
+        'FL-01 段取りから外していることを画面に書く',
+        longText.includes('今回の調理では仕上がらないため、全体の目安時間に含めていません。'),
+        `カード=${longText.replace(/\n/g, ' / ')}`,
+      )
+      check(
+        'FL-01 長い待ちには「この間に、次の手作業を進められます」を出さない',
+        !longText.includes('この間に、次の手作業を進められます'),
+        `カード=${longText.replace(/\n/g, ' / ')}`,
+      )
+      check(
+        'FL-01 「手順に時間の記載がないため、この分数は目安です」も出さない(分数自体を出さないため)',
+        !longText.includes('手順に時間の記載がないため'),
+        `カード=${longText.replace(/\n/g, ' / ')}`,
+      )
+
+      // FL-04 括弧内の任意の記述を主たる動作にしない(「切る」が待ち2分にならない)
+      const cabbageCard = flPage.locator('ol > li', { hasText: 'キャベツをせん切りにする' })
+      const cabbageText = (await cabbageCard.first().innerText()).replace(/​/g, '')
+      check(
+        'FL-04 括弧内の「レンジで加熱すると時短」を待ちにしない(手を動かす工程のまま)',
+        !cabbageText.includes('待ち時間') && cabbageText.includes('手を動かす'),
+        `カード=${cabbageText.replace(/\n/g, ' / ')}`,
+      )
+
+      // FL-02 段取りの一覧での並び(本文→注意書き→材料→待ちブロック)
+      const listOrder = await flPage.evaluate(() => {
+        const li = Array.from(document.querySelectorAll('ol > li')).find((el) =>
+          (el.textContent ?? '').includes('鍋に大根とだしを入れて中火で15分煮る'),
+        )
+        if (!li) return null
+        const y = (sel) => {
+          const el = li.querySelector(sel)
+          return el ? Math.round(el.getBoundingClientRect().top) : null
+        }
+        return {
+          text: y('[data-testid="navi-step-text"]'),
+          memo: y('[data-testid="navi-step-memo"]'),
+          ingredients: y('[data-testid="navi-step-ingredients"]'),
+          wait: y('[data-testid="navi-wait-block"]'),
+        }
+      })
+      check(
+        'FL-02 段取りの一覧の並びは 本文→注意書き→材料→待ちブロック',
+        listOrder != null &&
+          listOrder.text != null &&
+          listOrder.text < listOrder.memo &&
+          listOrder.memo < listOrder.ingredients &&
+          listOrder.ingredients < listOrder.wait,
+        JSON.stringify(listOrder),
+      )
+
+      // 調理中モードへ。同じ手順まで「次へ」で進む
+      await flPage.locator('[data-testid="cook-session-start"]').click()
+      await flPage.waitForTimeout(600)
+      let reached = false
+      for (let i = 0; i < 14; i++) {
+        const t = (await flPage.textContent('[data-testid="cook-session"]')) ?? ''
+        if (t.includes('鍋に大根とだしを入れて中火で15分煮る')) { reached = true; break }
+        await flPage.locator('[data-testid="cook-session-next"]').click()
+        await flPage.waitForTimeout(250)
+      }
+      check('FL-02 調理中モードで同じ手順まで進める', reached)
+      const sessionOrder = await flPage.evaluate(() => {
+        const root = document.querySelector('[data-testid="cook-session"]')
+        if (!root) return null
+        const y = (sel) => {
+          const el = root.querySelector(sel)
+          return el ? Math.round(el.getBoundingClientRect().top) : null
+        }
+        return {
+          text: y('[data-testid="cook-session-step-text"]'),
+          memo: y('[data-testid="cook-session-memo"]'),
+          ingredients: y('[data-testid="cook-session-ingredients"]'),
+          wait: y('[data-testid="cook-session-wait-block"]'),
+        }
+      })
+      check(
+        'FL-02 調理中モードの並びも 本文→注意書き→材料→待ちブロック(2画面で同じ)',
+        sessionOrder != null &&
+          sessionOrder.text != null &&
+          sessionOrder.text < sessionOrder.memo &&
+          sessionOrder.memo < sessionOrder.ingredients &&
+          sessionOrder.ingredients < sessionOrder.wait,
+        JSON.stringify(sessionOrder),
+      )
+      check(
+        'FL-03 調理中モードの待ち工程に「この間に、次の手作業を進められます」が出る',
+        (await flPage.locator('[data-testid="cook-session-fill-hint"]').count()) === 1 &&
+          ((await flPage.textContent('[data-testid="cook-session-fill-hint"]')) ?? '').includes(
+            'この間に、次の手作業を進められます',
+          ),
+      )
+      // 長い待ちの手順まで進めて、調理中モードでも同じ扱いになることを見る
+      let reachedLong = false
+      for (let i = 0; i < 14; i++) {
+        const t = (await flPage.textContent('[data-testid="cook-session"]')) ?? ''
+        if (t.includes('半日〜一晩漬ける')) { reachedLong = true; break }
+        await flPage.locator('[data-testid="cook-session-next"]').click()
+        await flPage.waitForTimeout(250)
+      }
+      const longSession = ((await flPage.textContent('[data-testid="cook-session"]')) ?? '').replace(/​/g, '')
+      check(
+        'FL-01 調理中モードでも「約20分の待ち時間」と出さず、外していることを書く',
+        reachedLong &&
+          !longSession.includes('約20分の待ち時間') &&
+          longSession.includes('長い待ち時間') &&
+          longSession.includes('今回の調理では仕上がらないため、全体の目安時間に含めていません。'),
+        `本文=${longSession.slice(0, 200).replace(/\n/g, ' / ')}`,
+      )
+      void (await flBody())
+    } finally {
+      await flBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
