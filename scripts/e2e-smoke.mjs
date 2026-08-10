@@ -23688,20 +23688,6 @@ try {
           errors.push(`[pageerror@FE-LP] ${err.message}`)
         })
         await fePage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
-        // 図は遅延読み込み。実寸を見るために一度いちばん下まで送ってから戻す
-        await fePage.evaluate(async () => {
-          for (let y = 0; y < document.body.scrollHeight; y += 800) {
-            window.scrollTo(0, y)
-            await new Promise((r) => setTimeout(r, 30))
-          }
-          window.scrollTo(0, 0)
-          await Promise.all(
-            [...document.querySelectorAll('figure.shot img')].map((i) =>
-              i.complete ? null : new Promise((r) => i.addEventListener('load', r, { once: true })),
-            ),
-          )
-        })
-        await fePage.waitForTimeout(300)
 
         const fe = await fePage.evaluate(() => {
           const srgb = (v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
@@ -23766,15 +23752,6 @@ try {
               surface,
             ),
             contrastH3: ratio(bodyText(regSec.querySelector('h3')).color, surface),
-            // 図の実寸と width/height 属性のずれ
-            shotGaps: [...document.querySelectorAll('figure.shot img')]
-              .filter(
-                (i) =>
-                  i.naturalWidth &&
-                  (i.naturalWidth !== Number(i.getAttribute('width')) ||
-                    i.naturalHeight !== Number(i.getAttribute('height'))),
-              )
-              .map((i) => `${i.getAttribute('src')} 実寸${i.naturalWidth}x${i.naturalHeight}`),
           }
         })
 
@@ -23817,7 +23794,40 @@ try {
             fe.limitInProSec && fe.limitBeforeBuy,
             `Pro版の節=${fe.limitInProSec} ボタンより前=${fe.limitBeforeBuy}`,
           )
-          check('FE-LP 紹介ページの図の寸法が実寸と合っている', fe.shotGaps.length === 0, fe.shotGaps.join(' / '))
+          // 図の実寸と width/height 属性のずれ(読み込み中に文字が飛ぶ原因)。
+          // 遅延読み込みの完了を待つと、画面外の図がいつまでも読み込まれず止まるので、
+          // 別の Image で読み直し、1枚ごとに5秒で打ち切る(待ち続けない)
+          const feShots = await fePage.evaluate(
+            async () =>
+              await Promise.all(
+                [...document.querySelectorAll('figure.shot img')].map(
+                  (el) =>
+                    new Promise((res) => {
+                      const probe = new Image()
+                      const done = () =>
+                        res({
+                          src: el.getAttribute('src'),
+                          w: probe.naturalWidth,
+                          h: probe.naturalHeight,
+                          attrW: Number(el.getAttribute('width')),
+                          attrH: Number(el.getAttribute('height')),
+                        })
+                      probe.onload = done
+                      probe.onerror = done
+                      setTimeout(done, 5000)
+                      probe.src = el.src
+                    }),
+                ),
+              ),
+          )
+          const feShotNg = feShots.filter((s) => !s.w || s.w !== s.attrW || s.h !== s.attrH)
+          check(
+            'FE-LP 紹介ページの図の寸法が実寸と合っている',
+            feShots.length >= 10 && feShotNg.length === 0,
+            `検査${feShots.length}枚 / ずれ=${feShotNg
+              .map((s) => `${s.src} 実寸${s.w}x${s.h} 記述${s.attrW}x${s.attrH}`)
+              .join(' , ') || 'なし'}`,
+          )
         }
 
         check(
