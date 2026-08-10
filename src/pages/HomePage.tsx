@@ -541,6 +541,22 @@ export default function HomePage() {
               </Collapse>
             </div>
           )}
+
+          {/* 献立の画面への行き先(2026-08-10 便FF・オーナー指示「今日の献立の下に、
+              献立ページへ移動リンクをつけたい。ボタンだと無駄に目立ってしまう」)。
+              「最近作ったもの」の「作った記録の一覧」と同じ、下線つきの文字リンクで出す
+              ＝ウィジェットの中で行き先を示す形をそろえる。日の献立を見に行くので
+              「日」の表示で開く(?focus=today。献立の画面が既定で開くのと同じ表示) */}
+          <div className="mt-[var(--space-sm)] flex justify-end">
+            <Link
+              to="/meal-plan?focus=today"
+              data-testid="home-mealplan-link"
+              className="inline-flex items-center gap-0.5 text-sm font-bold text-accent-ink underline"
+            >
+              {ja.home.mealPlanMore}
+              <ChevronRight size={16} aria-hidden />
+            </Link>
+          </div>
         </section>
       ) : null,
     // 今週の献立に今日の予定があるときは非表示(2026-08-03 便DH・オーナー指示)。

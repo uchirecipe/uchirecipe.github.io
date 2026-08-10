@@ -147,6 +147,62 @@ const nutrientSortOptions: { value: RecipeSortOption; label: string }[] = NUTRIE
 const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
   FREE_NUTRIENT_SORT_OPTIONS.map((value) => ({ value, label: nutrientSortLabels[value] }))
 
+/**
+ * 並び替え／絞り込みパネルの箱（2026-08-10 便FF）。
+ *
+ * 一覧の上に重ねて出すので、
+ *  - pointer-events-auto: 親の入れ物で切ったタップをパネルの中だけ戻す
+ *  - bg-surface: 下の一覧が透けないよう不透明にする（重ねる以上、透けると読めない）
+ *  - overflow-y-auto: 画面からはみ出す長さのときはパネルの中だけをスクロールさせる
+ *    （高さは下の usePanelMaxHeight が実測して入れる。calc の値は測り終わるまでの控え）
+ *  - overscroll-contain: パネルの端まで送っても、後ろの一覧が動かないようにする
+ *    ＝開いている間にスクロール位置が変わらない
+ */
+const PANEL_CLS =
+  'pointer-events-auto mt-[var(--space-sm)] max-h-[calc(100dvh-14rem)] overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md'
+
+/** パネルと画面の縁（貼り付く検索バー・下のタブナビ）のあいだに残す余白（px） */
+const PANEL_EDGE_GAP = 8
+/** これ以上は縮めない高さ（px）。極端に低い画面でもパネルが潰れて読めなくならないように */
+const PANEL_MIN_HEIGHT = 240
+
+/**
+ * 重ねて出すパネルの高さの上限を実測する（2026-08-10 便FF）。
+ *
+ * パネルの上端は検索バーの下端。検索バーは画面上部に貼り付くので、上端の位置は
+ * 「一覧のどこを見ているか」で変わる（先頭では見出しのぶん下、スクロール中は画面の上）。
+ * さらにレシピの登録件数の案内が出ている日は検索バーがもう一段下がる。
+ * そのため固定値では決められず、開いている間だけ実際の位置を測って上限を入れる。
+ * 下はタブナビ・タイマーの浮遊バー（`data-app-bottom-bar`）の手前で止める。
+ */
+function usePanelMaxHeight(open: boolean, barRef: React.RefObject<HTMLDivElement | null>) {
+  const [maxHeight, setMaxHeight] = useState<number>()
+  useEffect(() => {
+    if (!open) return
+    const update = () => {
+      const bar = barRef.current
+      if (!bar) return
+      const top = bar.getBoundingClientRect().bottom + PANEL_EDGE_GAP
+      let bottomInset = 0
+      for (const el of document.querySelectorAll<HTMLElement>('[data-app-bottom-bar]')) {
+        const r = el.getBoundingClientRect()
+        if (r.height > 0 && r.top < window.innerHeight)
+          bottomInset = Math.max(bottomInset, window.innerHeight - r.top)
+      }
+      const bottom = window.innerHeight - bottomInset - PANEL_EDGE_GAP
+      setMaxHeight(Math.max(PANEL_MIN_HEIGHT, Math.round(bottom - top)))
+    }
+    update()
+    window.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [open, barRef])
+  return maxHeight
+}
+
 const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
     active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
@@ -288,6 +344,10 @@ export default function RecipesPage() {
     setSortPanelOpen((open) => !open)
     setFilterPanelOpen(false)
   }
+  // 一覧の上に重ねて出すパネルの高さの上限(2026-08-10 便FF)。貼り付く検索バーの下端と
+  // 下の固定バーの位置から実測する
+  const topBarRef = useRef<HTMLDivElement>(null)
+  const panelMaxHeight = usePanelMaxHeight(sortPanelOpen || filterPanelOpen, topBarRef)
 
   // 検索中の内容をURLにも反映しておく。こうすると、タイマー等で別レシピに
   // 移動した後に「戻る」で帰ってきたとき、検索していた内容がそのまま復元される
@@ -889,6 +949,7 @@ export default function RecipesPage() {
           パネルの頭がこの帯の下に潜り込む。
           z-20: 選択モードでカードに重ねる選択ボタン(z-10)より上に置き、帯が透けないようにする */}
       <div
+        ref={topBarRef}
         data-app-top-bar
         className="recipes-searchbar sticky top-0 z-20 -mx-[var(--space-md)] mt-[var(--space-sm)] bg-page/95 px-[var(--space-md)] py-2 backdrop-blur"
       >
@@ -935,11 +996,29 @@ export default function RecipesPage() {
           <SlidersHorizontal size={22} aria-hidden />
         </button>
       </div>
-      </div>
 
+      {/* 並び替え／絞り込みのパネルを、一覧の上に重ねて出す入れ物(2026-08-10 便FF・
+          オーナー「並べ替えと絞り込みは、スクロール途中で開いても上に戻されないようにして。
+          一覧の上に重ねて出現させる感じ？」)。
+
+          直した挙動: パネルはこれまで検索バーの**下に流れる中身**として置いていた。
+          検索バーは画面上部に貼り付く(sticky)ので、一覧を下までスクロールしていると
+          パネル本体は画面のはるか上にある。そこで開くと「伸びた部分を画面内へ入れる」共通処理
+          (logic/revealExpanded・便EO)が働き、ページごと先頭付近まで戻っていた。
+
+          直し方: パネルを貼り付く帯の中に入れ、absolute で帯の真下に重ねる。
+          一覧の高さは1pxも変わらないので、開いても閉じてもスクロール位置は動かない。
+          revealExpanded は使わない(reveal={false})＝便EO・便ETの位置合わせと干渉しない。
+          pointer-events-none/auto: 閉じているときも開いているときも、パネルの外側の余白で
+          一覧のタップを奪わないようにする */}
+      <div className="pointer-events-none absolute inset-x-0 top-full px-[var(--space-md)]">
       {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
-      <Collapse open={sortPanelOpen}>
-        <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+      <Collapse open={sortPanelOpen} reveal={false}>
+        <div
+          data-testid="recipes-sort-panel"
+          className={PANEL_CLS}
+          style={panelMaxHeight != null ? { maxHeight: panelMaxHeight } : undefined}
+        >
           {/* 昇順/降順(2026-08-02 便DFで件数表記の横からこのパネル内へ移動 → 2026-08-03
               オーナー指示でパネルの一番上へ。従来はパネル末尾(栄養価の区分より下)にあり、
               スクロールしないと見えなかった) */}
@@ -1025,8 +1104,12 @@ export default function RecipesPage() {
       </Collapse>
 
       {/* 絞り込みパネル(2026-07-16 便T-3: 「条件をクリア」を欄の上方に移動) */}
-      <Collapse open={filterPanelOpen}>
-        <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+      <Collapse open={filterPanelOpen} reveal={false}>
+        <div
+          data-testid="recipes-filter-panel"
+          className={PANEL_CLS}
+          style={panelMaxHeight != null ? { maxHeight: panelMaxHeight } : undefined}
+        >
           {anyConditionActive && (
             <button
               type="button"
@@ -1195,6 +1278,8 @@ export default function RecipesPage() {
           </button>
         </div>
       </Collapse>
+      </div>
+      </div>
 
       {/* 件数: 絞り込み無しでも総件数を常に表示する(2026-07-13 UI改善)。絞り込み中は
           既存の結果件数表示を維持しつつ「◯件 / 全◯件」の形にまとめる(件数が変わるのは絞り込みのみ・
