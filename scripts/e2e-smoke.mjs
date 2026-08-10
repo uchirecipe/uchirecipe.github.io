@@ -2408,9 +2408,10 @@ try {
         )
         check(
           // 2026-07-28 便CA → 2026-08-03 便DR: 月タブのボタン名を変えたため、案内文の期待値も更新
+          // 2026-08-10 便FJ: ユーザー向け文言から「タブ」を掃引したので「献立の画面」に更新
           'DISC-01 解錠後の案内に期間の集計(期間の食費と栄養)への行き方が書かれている',
           proSectionText.includes('期間の食費と栄養') &&
-            proSectionText.includes('献立タブ →「月」→「期間の食費と栄養」'),
+            proSectionText.includes('献立の画面 →「月」→「期間の食費と栄養」'),
         )
         const discLinks = await nutPage.evaluate(() => {
           const hrefs = Array.from(document.querySelectorAll('#pro-section a')).map((a) =>
@@ -18697,7 +18698,8 @@ try {
       const homeText = await hsPage.textContent('body')
       check(
         'HOMESEARCH-01 ホームに「レシピを探す」の導線がある',
-        homeText.includes('レシピを探す') && homeText.includes('レシピタブで、料理名・材料・タグ・使いたい食材から探せます'),
+        // 2026-08-10 便FJ: ユーザー向け文言から「タブ」を掃引したので「レシピ一覧で、」に更新
+        homeText.includes('レシピを探す') && homeText.includes('レシピ一覧で、料理名・材料・タグ・使いたい食材から探せます'),
       )
       check(
         'HOMESEARCH-01 ホームから食材の検索欄(旧「この食材で探す」)が無くなっている',
@@ -20790,12 +20792,17 @@ try {
   }
 
   // --- SHOTSIZE-EP: 図の実寸と、HTMLに書いた width/height が食い違っていない。
-  // 図を描き直すと寸法が変わる。属性の書き換えを忘れると、読み込み中に文字が飛ぶ ---
+  // 図を描き直すと寸法が変わる。属性の書き換えを忘れると、読み込み中に文字が飛ぶ。
+  // 2026-08-10 便FJ: 対象を「説明書の1枚だけ」から、図を載せている静的ページ全部に広げた。
+  // 撮り直しで背が変わったカット(タイマー窓・調理中モードの上部・週の日カード等)の
+  // width/height が置き去りになっていたため ---
   {
     currentCheck = 'SHOTSIZE-EP'
     for (const [pagePath, selector] of [
       ['/about/install.html', 'figure.shot img'],
-      ['/about/manual.html', 'figure.shot img[src$="register-detail.webp"]'],
+      ['/about/manual.html', 'figure.shot img'],
+      ['/about/', 'figure.shot img'],
+      ['/about/multi-device.html', 'figure.shot img'],
     ]) {
       await page.goto(`${BASE}${pagePath}`, { waitUntil: 'networkidle' })
       const gaps = await page.evaluate(async (sel) => {
@@ -20808,6 +20815,93 @@ try {
           .map((i) => `${i.getAttribute('src')} 実寸${i.naturalWidth}x${i.naturalHeight} 記述${i.getAttribute('width')}x${i.getAttribute('height')}`)
       }, selector)
       check(`SHOTSIZE-EP ${pagePath} の図の寸法が合っている`, gaps.length === 0, gaps.join(' / '))
+    }
+  }
+
+  // --- NOTABWORD-EP: ユーザーの目に触れる文言に「タブ」を出さない
+  // (2026-08-10 オーナー指示「「タブ」は内部表現なのでさけたい」)。
+  // 画面の呼び方は、アプリが同じ画面に付けている名前(レシピ一覧／献立／食材)と、
+  // 献立の中の「日」「週」「月」の画面にそろえる。
+  //
+  // 見る先:
+  //  - src/i18n/ja.ts の文字列リテラル(UI文言はすべてここに集約する規約なので、
+  //    ここが空ならアプリ内の文言に「タブ」は出ない)
+  //  - 静的ページ(紹介・使い方・複数の端末で使う方法・規約など)の本文
+  // 見ない先: コードとHTMLのコメント(内部の説明なのでそのまま残してよい)。
+  //
+  // 除外(端末のブラウザのタブそのものを説明している2か所。ブラウザの実物の名前なので、
+  // 言い換えると画面と食い違う):
+  //  - 「新しいタブ」= Chromeのメニューに実際に並ぶ項目名(ホーム画面への追加方法の図の説明)
+  //  - 「アドレスバーやタブが出ない」= 追加したあとに全画面で開くことの説明 ---
+  {
+    currentCheck = 'NOTABWORD-EP'
+    const jaSrc = readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8')
+    const literals = []
+    let buf = null
+    let quote = ''
+    for (let i = 0; i < jaSrc.length; i++) {
+      const c = jaSrc[i]
+      if (quote) {
+        if (c === '\\') {
+          buf += jaSrc[i + 1] ?? ''
+          i++
+          continue
+        }
+        if (c === quote) {
+          literals.push(buf)
+          buf = null
+          quote = ''
+          continue
+        }
+        buf += c
+        continue
+      }
+      if (c === '/' && jaSrc[i + 1] === '/') {
+        const e = jaSrc.indexOf('\n', i)
+        if (e < 0) break
+        i = e
+        continue
+      }
+      if (c === '/' && jaSrc[i + 1] === '*') {
+        const e = jaSrc.indexOf('*/', i + 2)
+        i = e < 0 ? jaSrc.length : e + 1
+        continue
+      }
+      if (c === "'" || c === '"' || c === '`') {
+        quote = c
+        buf = ''
+        continue
+      }
+    }
+    const jaHits = literals.filter((s) => s.includes('タブ'))
+    check(
+      'NOTABWORD-EP ja.ts のUI文言に「タブ」が残っていない',
+      literals.length > 500 && jaHits.length === 0,
+      jaHits.join(' / ') || `文字列${literals.length}件`,
+    )
+
+    const BROWSER_TAB_OK = ['「新しいタブ」', 'アドレスバーやタブが出ない']
+    for (const p of [
+      '/news.json', // アプリ内のお知らせ(本文もユーザーの目に触れる)
+      '/about/',
+      '/about/manual.html',
+      '/about/install.html',
+      '/about/multi-device.html',
+      '/about/foods.html',
+      '/about/unlock.html',
+      '/about/terms.html',
+      '/about/tokushoho.html',
+      '/about/column/',
+    ]) {
+      const res = await page.request.get(`${BASE}${p}`)
+      let html = (await res.text()).replace(/<!--[\s\S]*?-->/g, '')
+      for (const okPhrase of BROWSER_TAB_OK) html = html.split(okPhrase).join('')
+      const hit = html.match(/.{0,16}タブ.{0,10}/)
+      check(
+        `NOTABWORD-EP ${p} の本文に「タブ」が残っていない`,
+        res.status() === 200 && !hit,
+        hit?.[0] ?? '',
+      )
     }
   }
 
