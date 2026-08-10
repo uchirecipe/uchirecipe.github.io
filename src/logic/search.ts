@@ -2,13 +2,24 @@ import { toHiragana } from './kana'
 import { makePantryMatcher } from './pantry'
 import { hasNgIngredient } from './ng'
 import { splitValues } from './textSplit'
-import type { EffortLevel, Recipe } from '../db/types'
+import { recipeDishType } from './mealPlan'
+import type { DishType, EffortLevel, Recipe } from '../db/types'
 
 /** 調理時間の絞り込み: すべて / 〜10分 / 〜30分 / 30分超 */
 export type TimeFilter = 'all' | 'under10' | 'under30' | 'over30'
 export type EffortFilter = 'all' | EffortLevel
 /** タグ絞り込み: 'all' またはタグ文字列そのもの（例: '作り置き'） */
 export type TagFilter = 'all' | string
+/**
+ * 料理の種別（主菜・副菜・汁物・その他）の絞り込み（2026-08-10 便FF・オーナー要望
+ * 「主菜副菜などでも絞り込みしたい」）。
+ *
+ * 主菜/副菜は**タグではなくレシピの項目**（Recipe.dishType。レシピ登録の「料理の種別」）で、
+ * 未設定のレシピは料理名・材料からの推定に倒す。判定は献立の自動提案・ホームの
+ * 「今日なに作る？」と同じ logic/mealPlan.ts recipeDishType に一本化する
+ * ＝同じ料理が画面によって主菜だったり副菜だったりしないようにするため。
+ */
+export type DishTypeFilter = 'all' | DishType
 
 export interface SearchOptions {
   /** 料理名・材料名・タグのテキスト検索 */
@@ -18,6 +29,11 @@ export interface SearchOptions {
   time: TimeFilter
   effort: EffortFilter
   tag: TagFilter
+  /**
+   * 料理の種別で絞る（任意・2026-08-10 便FF）。未指定＝絞らない。
+   * 任意項目にしてあるので、この絞り込みを使わない呼び出し側（献立のレシピ選択ピッカー等）は据え置きでよい
+   */
+  dishType?: DishTypeFilter
   favoriteOnly: boolean
   /** NG食材を含むレシピを結果から隠す */
   excludeNg: boolean
@@ -40,6 +56,7 @@ export const defaultSearchOptions: Omit<SearchOptions, 'ngIngredients'> = {
   time: 'all',
   effort: 'all',
   tag: 'all',
+  dishType: 'all',
   favoriteOnly: false,
   excludeNg: false,
   quickOnly: false,
@@ -55,18 +72,28 @@ export interface SearchResult {
 
 const tagCollator = new Intl.Collator('ja')
 
+/** タグ1つと、そのタグが付いているレシピの件数 */
+export interface TagUsage {
+  tag: string
+  /** そのタグが付いているレシピの件数 */
+  count: number
+}
+
 /**
- * 「よく使うタグ」チップの候補（2026-08-03 オーナー指示）。
- * 従来は「作り置き」「お弁当」をコードに直書きした固定2択で、レシピを増やしても
- * 中身が変わらなかった。実際に付いているタグを数え、そのタグが付いたレシピの件数が
- * 多い順に limit 件返す。
- * 同数のときはタグ名の五十音順にして、開くたびに並びが入れ替わらないようにする。
+ * タグ絞り込みチップの候補と件数（2026-08-03 オーナー指示 → 2026-08-10 便FFで件数も返す）。
+ *
+ * 数える対象は**渡されたレシピ集合そのもの**＝いま一覧に出ているレシピ。
+ * 「基本レシピを表示しない」をONにしていれば自分で登録したレシピだけが数えられ、
+ * OFFなら同梱の基本レシピも含めて数える（＝画面に出ている一覧と件数が必ず一致する）。
+ *
+ * 並びは「そのタグが付いているレシピの多い順」。同数のときはタグ名の五十音順にして、
+ * 開くたびに並びが入れ替わらないようにする。
  * タグは自由入力なので、絞り込み側の判定（recipe.tags.includes）と食い違わないよう
  * 表記をまとめず、保存されている文字列そのままで数える（trimもしない。チップの文字列が
  * 保存値と1文字でも違うと、押しても何も絞り込めないチップになる）。
  * 中身が空白だけのタグは数えない。同じレシピ内の重複タグは1件と数える。
  */
-export function topTagsByUsage(recipes: { tags: string[] }[], limit: number): string[] {
+export function tagUsageCounts(recipes: { tags: string[] }[], limit: number): TagUsage[] {
   if (limit <= 0) return []
   const counts = new Map<string, number>()
   for (const recipe of recipes) {
@@ -80,7 +107,12 @@ export function topTagsByUsage(recipes: { tags: string[] }[], limit: number): st
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || tagCollator.compare(a[0], b[0]))
     .slice(0, limit)
-    .map(([tag]) => tag)
+    .map(([tag, count]) => ({ tag, count }))
+}
+
+/** 件数を捨ててタグ名だけを返す版（献立のレシピ選択ピッカーが使う） */
+export function topTagsByUsage(recipes: { tags: string[] }[], limit: number): string[] {
+  return tagUsageCounts(recipes, limit).map((t) => t.tag)
 }
 
 /** 入力文字列を検索語の配列に分ける（空白・カンマ・読点区切り→ひらがな化） */
@@ -127,6 +159,11 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
     if (!matchesTime(recipe, options.time)) continue
     if (options.effort !== 'all' && recipe.effortLevel !== options.effort) continue
     if (options.tag !== 'all' && !recipe.tags.includes(options.tag)) continue
+    // 料理の種別（2026-08-10 便FF）。未設定のレシピも recipeDishType が必ず4区分のどれかに
+    // 割り当てるので、4つを合わせると一覧の全レシピをちょうど覆う（取りこぼしが出ない）
+    if (options.dishType != null && options.dishType !== 'all') {
+      if (recipeDishType(recipe) !== options.dishType) continue
+    }
     if (options.favoriteOnly && !recipe.isFavorite) continue
     if (options.excludeNg && hasNgIngredient(recipe, options.ngIngredients)) continue
     if (options.quickOnly && (recipe.quickSteps?.length ?? 0) === 0) continue

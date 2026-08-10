@@ -298,7 +298,7 @@ import {
   normalizeIngredientChipLabel,
   pickDisplayIngredientChips,
 } from '../src/logic/mainIngredients.ts'
-import { searchRecipes, topTagsByUsage } from '../src/logic/search.ts'
+import { searchRecipes, topTagsByUsage, tagUsageCounts } from '../src/logic/search.ts'
 import { buildShareText } from '../src/logic/share.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
 import { pickIconKey } from '../src/logic/icon.ts'
@@ -14505,6 +14505,87 @@ eq(
     'FD-NAV 日付の形でない目印は捨てる（窓は開き直さない）',
     parseViewReturn('{"anchor":"","scrollY":10,"openDate":"きのう"}'),
     { anchor: '', scrollY: 10 },
+  )
+}
+
+// ---------- 便FF-2/3/4: レシピタブの絞り込みの作り直し(2026-08-10 オーナー指示) ----------
+{
+  // (1) タグのチップに出す件数。並びの規則(件数の多い順・同数は五十音順)を数字で示す
+  const withTags = (tags) => ({ tags })
+  const ffTagRecipes = [
+    withTags(['和食', '作り置き']),
+    withTags(['和食']),
+    withTags(['和食', 'お弁当']),
+    withTags(['作り置き']),
+    withTags([]),
+  ]
+  eq('FF-TAG チップは件数つきで多い順に返る', tagUsageCounts(ffTagRecipes, 3), [
+    { tag: '和食', count: 3 },
+    { tag: '作り置き', count: 2 },
+    { tag: 'お弁当', count: 1 },
+  ])
+  eq('FF-TAG limitで打ち切る', tagUsageCounts(ffTagRecipes, 1), [{ tag: '和食', count: 3 }])
+  eq('FF-TAG タグが無ければ空', tagUsageCounts([withTags([])], 6), [])
+  eq(
+    'FF-TAG 名前だけを返す従来の関数と並びが一致する(献立のレシピ選択が使う)',
+    topTagsByUsage(ffTagRecipes, 3),
+    tagUsageCounts(ffTagRecipes, 3).map((t) => t.tag),
+  )
+
+  // (2) 料理の種別での絞り込み。主菜/副菜はタグではなくレシピの項目(dishType)で、
+  //     未設定のレシピは推定に倒す(=4区分で全レシピをちょうど覆う)
+  const ffBase = {
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    tag: 'all',
+    dishType: 'all',
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  }
+  const ffDish = (id, title, dishType, ingredients = []) => ({
+    id,
+    title,
+    tags: [],
+    searchWords: [],
+    ingredients: ingredients.map((name) => ({ name })),
+    cookedLogs: [],
+    dishType,
+  })
+  const ffRecipes = [
+    ffDish(1, '鶏の照り焼き', 'main'),
+    ffDish(2, 'ほうれん草のおひたし', 'side'),
+    ffDish(3, 'わかめのみそ汁', 'soup'),
+    ffDish(4, '大学芋', 'dessert'),
+    // dishType 未設定＝推定に倒す(材料の豚肉から主菜)
+    ffDish(5, '肉じゃが', undefined, ['豚肉', 'じゃがいも']),
+  ]
+  const ffIds = (dishType) =>
+    searchRecipes(ffRecipes, { ...ffBase, dishType }).map((r) => r.recipe.id)
+  eq('FF-DISH すべては絞らない', ffIds('all'), [1, 2, 3, 4, 5])
+  eq('FF-DISH 主菜(未設定は推定で主菜に入る)', ffIds('main'), [1, 5])
+  eq('FF-DISH 副菜', ffIds('side'), [2])
+  eq('FF-DISH 汁物', ffIds('soup'), [3])
+  eq('FF-DISH その他', ffIds('dessert'), [4])
+  eq(
+    'FF-DISH 4区分を合わせると全件になる(取りこぼしが出ない)',
+    [...ffIds('main'), ...ffIds('side'), ...ffIds('soup'), ...ffIds('dessert')].sort(),
+    [1, 2, 3, 4, 5],
+  )
+  eq(
+    'FF-DISH 項目を渡さない呼び出し側は従来どおり絞らない(献立のレシピ選択・テンプレ画面)',
+    searchRecipes(ffRecipes, { ...ffBase, dishType: undefined }).map((r) => r.recipe.id),
+    [1, 2, 3, 4, 5],
+  )
+  eq(
+    'FF-DISH 他の絞り込みと重ねられる',
+    searchRecipes(ffRecipes, { ...ffBase, dishType: 'main', query: '照り焼き' }).map(
+      (r) => r.recipe.id,
+    ),
+    [1],
   )
 }
 

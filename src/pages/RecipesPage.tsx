@@ -43,11 +43,13 @@ import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
-  topTagsByUsage,
+  tagUsageCounts,
+  type DishTypeFilter,
   type EffortFilter,
   type TagFilter,
   type TimeFilter,
 } from '../logic/search'
+import { DISH_TYPE_OPTIONS } from '../logic/homeSuggest'
 import {
   sortResults,
   defaultSortDirection,
@@ -101,11 +103,24 @@ const effortOptions: { value: EffortFilter; label: string }[] = [
 ]
 
 /**
- * 「よく使うタグ」チップに出す最大件数（「すべて」は別枠）。
- * スマホ縦画面（390px）で2行に収まる範囲。同梱の基本レシピ109品では
- * 和食・作り置き・定番・洋食・中華・高たんぱく・お弁当・冷凍ストックまでが入る（2026-08-03）
+ * 料理の種別の絞り込み（2026-08-10 便FF・オーナー要望「主菜副菜などでも絞り込みしたい」）。
+ * 区分と並びはレシピ登録の「料理の種別」・ホームの「今日なに作る？」と同じ4つを使う
+ * （logic/homeSuggest.ts DISH_TYPE_OPTIONS）。4区分は互いに重ならず、合わせると全レシピを覆う
  */
-const TAG_CHIP_LIMIT = 8
+const dishTypeOptions: { value: DishTypeFilter; label: string }[] = [
+  { value: 'all', label: ja.search.dishTypeAll },
+  ...DISH_TYPE_OPTIONS.map((value) => ({
+    value: value as DishTypeFilter,
+    label: ja.dishType[value],
+  })),
+]
+
+/**
+ * タグのチップに出す最大件数（「すべて」は別枠）。
+ * 2026-08-10 便FF: チップに件数を併記した分だけ1つが横に広がるので8→6に減らし、
+ * スマホ縦画面（390px）で2行に収まる範囲を保つ
+ */
+const TAG_CHIP_LIMIT = 6
 
 const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   { value: 'updated', label: ja.search.sortUpdated },
@@ -211,6 +226,8 @@ type SavedListState = {
   time: TimeFilter
   effort: EffortFilter
   tag: TagFilter
+  /** 料理の種別で絞る（2026-08-10 便FF。旧セッションの保存値には無いので任意項目） */
+  dishType?: DishTypeFilter
   favoriteOnly: boolean
   excludeNg: boolean
   quickOnly: boolean
@@ -303,6 +320,8 @@ export default function RecipesPage() {
   const [time, setTime] = useState<TimeFilter>(saved?.time ?? 'all')
   const [effort, setEffort] = useState<EffortFilter>(saved?.effort ?? 'all')
   const [tag, setTag] = useState<TagFilter>(saved?.tag ?? 'all')
+  // 料理の種別(主菜・副菜・汁物・その他)で絞る(2026-08-10 便FF)
+  const [dishType, setDishType] = useState<DishTypeFilter>(saved?.dishType ?? 'all')
   const [favoriteOnly, setFavoriteOnly] = useState(saved?.favoriteOnly ?? false)
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
@@ -370,17 +389,27 @@ export default function RecipesPage() {
   }
 
   /**
-   * 「よく使うタグ」チップ(2026-08-03 オーナー指示)。
-   * 従来はコードに直書きした「作り置き／お弁当」の固定2択で、レシピを増やしても中身が
-   * 変わらなかった。いま一覧に出るレシピのタグを数え、使用件数の多い順に出す。
+   * タグのチップ(2026-08-03 オーナー指示 → 2026-08-10 便FFで件数を併記)。
+   *
+   * いま一覧に出ているレシピのタグを数え、そのタグが付いているレシピの多い順に出す。
+   * チップに件数を出すのは、並びの規則を画面から読めるようにするため
+   * (オーナー「現状は勝手にこちらできめた『よく使いようなタグ』をとにかく並べただけ」)。
+   * 数える対象は一覧と同じ集合なので、「自分で登録したレシピのみ」をONにすれば
+   * 自分のタグだけが数え直される。
    * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
    */
   const tagOptions = useMemo(() => {
-    const tags = topTagsByUsage(visibleRecipes ?? [], TAG_CHIP_LIMIT)
-    if (tag !== 'all' && !tags.includes(tag)) tags.push(tag)
+    const usages = tagUsageCounts(visibleRecipes ?? [], TAG_CHIP_LIMIT)
+    if (tag !== 'all' && !usages.some((u) => u.tag === tag)) {
+      const count = (visibleRecipes ?? []).filter((r) => r.tags.includes(tag)).length
+      usages.push({ tag, count })
+    }
     return [
       { value: 'all' as TagFilter, label: ja.search.tagAll },
-      ...tags.map((value) => ({ value: value as TagFilter, label: value })),
+      ...usages.map(({ tag: value, count }) => ({
+        value: value as TagFilter,
+        label: ja.search.tagChip.replace('{name}', value).replace('{n}', String(count)),
+      })),
     ]
   }, [visibleRecipes, tag])
 
@@ -392,6 +421,7 @@ export default function RecipesPage() {
       time,
       effort,
       tag,
+      dishType,
       favoriteOnly,
       excludeNg,
       quickOnly,
@@ -407,6 +437,7 @@ export default function RecipesPage() {
     time,
     effort,
     tag,
+    dishType,
     favoriteOnly,
     excludeNg,
     quickOnly,
@@ -426,6 +457,7 @@ export default function RecipesPage() {
     time !== 'all' ||
     effort !== 'all' ||
     tag !== 'all' ||
+    dishType !== 'all' ||
     favoriteOnly ||
     excludeNg ||
     quickOnly ||
@@ -449,6 +481,7 @@ export default function RecipesPage() {
         time,
         effort,
         tag,
+        dishType,
         favoriteOnly,
         excludeNg,
         quickOnly,
@@ -462,6 +495,7 @@ export default function RecipesPage() {
       time,
       effort,
       tag,
+      dishType,
       favoriteOnly,
       excludeNg,
       quickOnly,
@@ -512,6 +546,7 @@ export default function RecipesPage() {
       time,
       effort,
       tag,
+      dishType,
       favoriteOnly,
       excludeNg,
       quickOnly,
@@ -734,6 +769,7 @@ export default function RecipesPage() {
     setTime('all')
     setEffort('all')
     setTag('all')
+    setDishType('all')
     setFavoriteOnly(false)
     setExcludeNg(false)
     setQuickOnly(false)
@@ -1001,11 +1037,12 @@ export default function RecipesPage() {
             </button>
           )}
 
-          {/* 表示するレシピ(2026-08-03 オーナー指示で新設・最上段へ移動)。
-              「お気に入り」など毎回使う条件がパネルの一番下にあって見えていなかったため、
-              『どのレシピを出すか』のON/OFFをここに集めて先頭に置く。
-              「在庫の食材で絞る」も同じ性質(出すレシピを絞るトグル)なので、
-              見出しと中身が食い違っていた「よく使うタグ」の行からここへ移した */}
+          {/* --- 区分①「どのレシピから探すか」 ---
+              2026-08-03 オーナー指示でパネルの最上段に置いた区分(「お気に入り」など毎回使う
+              条件が一番下にあって見えていなかったため)。位置はそのまま。
+              2026-08-10 便FF(オーナー「在庫の食材、NG食材隠しのタグ、登録したレシピのみ、が
+              同列で並んでいるのもわかりにくくしている」): 性質の違う「在庫の食材で絞る」を
+              区分③「食材で絞り込む」へ移し、ここは『一覧に出すレシピの母集団を決める』3つだけにした */}
           <p
             className={`text-sm font-bold text-ink-muted ${anyConditionActive ? 'mt-[var(--space-md)]' : ''}`}
           >
@@ -1020,18 +1057,6 @@ export default function RecipesPage() {
             >
               {ja.search.favoriteOnly}
             </button>
-            {/* 在庫の食材で絞る(2026-07-24 便BN・司令部追加)。在庫(ある/少ない)が1件以上あるときだけ出す */}
-            {pantryNames.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setPantryOnly((v) => !v)}
-                aria-pressed={pantryOnly}
-                className={`inline-flex items-center gap-1 ${chipCls(pantryOnly)}`}
-              >
-                <Refrigerator size={16} aria-hidden />
-                {ja.search.pantryFilter}
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setExcludeNg((v) => !v)}
@@ -1050,8 +1075,21 @@ export default function RecipesPage() {
             </button>
           </div>
 
-          {/* よく使うタグ(2026-07-24 便BN・タスク3: 絞り込みパネルの上部へ移動)。
-              2026-08-03 オーナー指示で、直書きの固定2択から使用頻度の集計(topTagsByUsage)に変更。
+          {/* --- 区分②「料理の種別」(2026-08-10 便FF・オーナー要望
+              「主菜副菜などでも絞り込みしたい（タグ）」) ---
+              主菜/副菜はタグではなくレシピの項目(dishType)なので、タグのチップに混ぜず
+              専用の区分にする。区分名と選択肢はレシピ登録の「料理の種別」と同じ4つ。
+              調理時間・手間レベルと同じ☑付きの単一選択リストで出す(同じ「1つだけ選ぶ」操作を
+              画面の中で別々の見た目にしない) */}
+          <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+            {ja.search.dishTypeTitle}
+          </p>
+          <CheckList options={dishTypeOptions} value={dishType} onSelect={setDishType} />
+
+          {/* --- 区分③「タグ」(2026-07-24 便BN・タスク3で絞り込みパネルの上部へ移動 →
+              2026-08-03 使用件数の集計に変更 → 2026-08-10 便FFで件数を併記・見出しを改称) ---
+              チップに「和食 48」のようにレシピの件数を出し、並びの規則(件数の多い順)が
+              画面から読めるようにする。
               タグが1つも付いていないときは「すべて」だけの空の欄になるので、区分ごと出さない */}
           {tagOptions.length > 1 && (
             <>
@@ -1063,6 +1101,7 @@ export default function RecipesPage() {
                   <button
                     key={option.value}
                     type="button"
+                    data-testid="recipes-tag-chip"
                     onClick={() => setTag(option.value)}
                     aria-pressed={tag === option.value}
                     className={chipCls(tag === option.value)}
@@ -1074,9 +1113,28 @@ export default function RecipesPage() {
             </>
           )}
 
-          {/* 使いたい食材 */}
+          {/* --- 区分④「食材で絞り込む」 ---
+              2026-08-10 便FF: 「在庫の食材で絞る」を区分①からここへ移した。
+              どちらも食材で一覧を絞る操作で、「食材の在庫から入れる」とも隣り合う */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.ingredientTitle}
+          </p>
+          {/* 在庫の食材で絞る(2026-07-24 便BN・司令部追加)。在庫(ある/少ない)が1件以上あるときだけ出す */}
+          {pantryNames.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+              <button
+                type="button"
+                onClick={() => setPantryOnly((v) => !v)}
+                aria-pressed={pantryOnly}
+                className={`inline-flex items-center gap-1 ${chipCls(pantryOnly)}`}
+              >
+                <Refrigerator size={16} aria-hidden />
+                {ja.search.pantryFilter}
+              </button>
+            </div>
+          )}
+          <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+            {ja.search.ingredientSubTitle}
           </p>
           <div className="mt-1">
             <ChipInput
@@ -1103,7 +1161,7 @@ export default function RecipesPage() {
             )}
           </div>
 
-          {/* 調理時間(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) */}
+          {/* --- 区分⑤「調理時間」(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) --- */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.timeTitle}
           </p>
@@ -1121,13 +1179,11 @@ export default function RecipesPage() {
             </button>
           </div>
 
-          {/* 手間レベル(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) */}
+          {/* --- 区分⑥「手間レベル」(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) --- */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.effortTitle}
           </p>
           <CheckList options={effortOptions} value={effort} onSelect={setEffort} />
-          {/* お気に入り・NG食材・自分で登録したレシピのみは、2026-08-03 オーナー指示で
-              このパネルの先頭「表示するレシピ」へ移動した */}
 
           {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
           <button
