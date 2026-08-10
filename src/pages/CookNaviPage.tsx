@@ -55,7 +55,13 @@ import {
 import CookSessionOverlay from '../components/CookSessionOverlay'
 import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
-import { findCursorIndex, resumeCursor, type CookCursor } from '../logic/cookSession'
+import {
+  applyStepPulls,
+  findCursorIndex,
+  resumeCursor,
+  type CookCursor,
+  type StepPull,
+} from '../logic/cookSession'
 import { naviStepText } from '../logic/naviStepText'
 import {
   recipeIngredientList,
@@ -537,6 +543,16 @@ export default function CookNaviPage() {
     () => restoredSession.current?.sessionOpen ?? false,
   )
   /**
+   * 色で引き寄せた手順（2026-08-10 便FI・docs/69 第3段）。
+   * 「青」「緑」「ピンク」と言われたら、その品の次の手順を**いまの位置へ引き寄せる**。
+   *
+   * **保存しない**（docs/69「段取り・進捗・済みセットは保存しない」）。持つのは
+   * 「どの手順を、どの手順の直前へ動かしたか」の並びだけで、段取りは今までどおり毎回
+   * 組み直し、そこへこの並びを当て直す（logic/cookSession.ts の applyStepPulls）。
+   * 保存しないので、読み込み直すと組み直したままの順番に戻る。
+   */
+  const [pulls, setPulls] = useState<StepPull[]>([])
+  /**
    * 自分で時間を決めるタイマー（2026-08-09 便ES・オーナー指示D-2）。
    * レシピ詳細と同じ作法で、前回使った秒数を覚えて開く。
    */
@@ -633,7 +649,7 @@ export default function CookNaviPage() {
     // 調理を終えている（カーソルが無い）ときは、従来どおり一覧の該当カードへ送る
     if (current && timeline) {
       const [focusRecipeId, focusStepNumber] = focus.split('-').map(Number)
-      const target = timeline.items.find(
+      const target = planItems.find(
         (item) => item.recipeId === focusRecipeId && item.stepNumber === focusStepNumber,
       )
       if (target) {
@@ -756,6 +772,22 @@ export default function CookNaviPage() {
   const isSequential = timeline?.mode === 'sequential'
 
   /**
+   * 画面に出す段取り（2026-08-10 便FI）。組み直した段取りに、色で引き寄せた並べ替えを
+   * 当て直したもの。**引き寄せが1つも無ければ組み直したそのまま**（＝今までと同じ）。
+   *
+   * 通し番号は前から振り直す。引き寄せたあとも「段取り 2/9」と画面の丸数字②がそろうように
+   * するため（番号だけ元の位置のまま残すと、同じ手順に2つの番号がある状態になる）。
+   * 段取りの一覧と調理中モードの両方でこの並びを使う＝1つの段取りを2通りに見せない。
+   */
+  const planItems = useMemo(() => {
+    const base = timeline?.items ?? []
+    if (pulls.length === 0) return base
+    return applyStepPulls(base, pulls).map((item, index) =>
+      item.order === index + 1 ? item : { ...item, order: index + 1 },
+    )
+  }, [timeline, pulls])
+
+  /**
    * 調理中の手順の復元（2026-08-09 便EL・docs/69）。再読み込みや他タブからの復帰では、
    * 段取りは保存していないので毎回組み直す。**覚えていた手順がその段取りに見つからなければ、
    * 推測せずカーソルを捨てて一覧に戻す**（近い手順を当てにいくと、違う手順を大きく出したまま
@@ -765,25 +797,27 @@ export default function CookNaviPage() {
     if (!current || !recipes) return
     // 自分で畳んだ・選び直したときは下の後片付けに任せる（知らせは出さない）
     if (!showTimeline) return
-    if (timeline && findCursorIndex(timeline.items, current) !== -1) return
+    if (timeline && findCursorIndex(planItems, current) !== -1) return
     setCurrent(undefined)
     setSessionLostNotice(true)
-  }, [current, recipes, timeline, showTimeline])
+  }, [current, recipes, timeline, planItems, showTimeline])
 
   /** 段取りを畳んだ・選び直した・記録した、のいずれでも調理中の位置は残さない */
   useEffect(() => {
     if (!showTimeline && current) setCurrent(undefined)
-  }, [showTimeline, current])
+    // 色で引き寄せた並べ替えも、その段取りだけのものなので一緒に捨てる（2026-08-10 便FI）
+    if (!showTimeline && pulls.length > 0) setPulls([])
+  }, [showTimeline, current, pulls])
 
   /** 調理中の位置が段取りの何番目か（-1＝覚えていない・段取りに無い） */
-  const currentIndex = timeline ? findCursorIndex(timeline.items, current) : -1
+  const currentIndex = timeline ? findCursorIndex(planItems, current) : -1
   /**
    * 全画面を閉じたあとに残っている「続きの手順」（2026-08-10 便FC）。
    * これがあるときは入口のボタンを「続きから見る」に変え、どの手順から始まるかを添える
    * ＝押した先が段取りの途中でも驚かない。先頭にいるだけのときは普通の入口のままにする。
    */
   const resumeItem =
-    !sessionOpen && currentIndex > 0 ? (timeline?.items[currentIndex] ?? undefined) : undefined
+    !sessionOpen && currentIndex > 0 ? (planItems[currentIndex] ?? undefined) : undefined
 
   /**
    * その品の最後の手順（＝そこで完成する手順）の位置。段取りの並びで最後に出てくるものを採る
@@ -791,9 +825,9 @@ export default function CookNaviPage() {
    */
   const lastIndexByRecipeId = useMemo(() => {
     const map = new Map<number, number>()
-    timeline?.items.forEach((item, index) => map.set(item.recipeId, index))
+    planItems.forEach((item, index) => map.set(item.recipeId, index))
     return map
-  }, [timeline])
+  }, [planItems])
 
   /**
    * レシピ詳細から戻ってきたときに、見ていた位置へ帰す（2026-08-08 便EG・実機フィードバック⑧）。
@@ -869,7 +903,7 @@ export default function CookNaviPage() {
   const stepIngredientsByKey = useMemo(() => {
     const map = new Map<string, NaviIngredientAmount[]>()
     if (!timeline) return map
-    timeline.items.forEach((item) => {
+    planItems.forEach((item) => {
       const recipe = recipeById.get(item.recipeId)
       if (!recipe) return
       const target = servingsByRecipeId.get(item.recipeId) ?? recipe.servings
@@ -879,7 +913,7 @@ export default function CookNaviPage() {
       )
     })
     return map
-  }, [timeline, recipeById, servingsByRecipeId])
+  }, [timeline, planItems, recipeById, servingsByRecipeId])
 
   /**
    * 「段取りを作る」（2026-08-09 便EH）。すでに段取りが出ているときは状態が変わらず、
@@ -890,6 +924,8 @@ export default function CookNaviPage() {
   const buildTimeline = () => {
     setDroppedNotice('')
     setSessionLostNotice(false)
+    // 組み直すときは、色で引き寄せた並べ替えも白紙に戻す（2026-08-10 便FI）
+    setPulls([])
     if (showTimeline) {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
@@ -908,7 +944,7 @@ export default function CookNaviPage() {
     setSessionLostNotice(false)
     // 覚えている手順がまだ段取りにあれば**その続きから**、無ければ先頭から
     // （2026-08-10 便FC。どちらを開くかの判断は logic/cookSession.ts の resumeCursor）
-    setCurrent(resumeCursor(timeline.items, current))
+    setCurrent(resumeCursor(planItems, current))
     setSessionOpen(true)
   }
   /**
@@ -928,6 +964,19 @@ export default function CookNaviPage() {
    */
   const closeSession = () => setSessionOpen(false)
   /**
+   * 色で手順を引き寄せる（2026-08-10 便FI・docs/69 第3段。オーナー要望
+   * 「並行調理ナビ調理中モードの、色で手順入れ替えはいつ実装しますか？」）。
+   *
+   * 言われた品の手順を**いま開いている手順の直前へ**移し、そこへカーソルを送る。
+   * 開いていた手順は1つ後ろに下がるだけで残るので、**手順が消えることがない**
+   *（カーソルだけ先へ飛ばすと、間の手順が「済んだ手順」に化けて、作っていない品が
+   * 「完成」と出てしまう。実機で確認した上でこの形にした）。
+   */
+  const pullStep = (pull: StepPull) => {
+    setPulls((prev) => [...prev, pull])
+    setCurrent(pull.target)
+  }
+  /**
    * 最後の手順の「完成！」（2026-08-10 便EZ・戻り位置を「まとめて作った！」に合わせる）。
    * ここは調理が終わった合図なので、覚えていた手順も消す＝次は先頭から始まる
    */
@@ -935,6 +984,7 @@ export default function CookNaviPage() {
     completedRef.current = true
     setCurrent(undefined)
     setSessionOpen(false)
+    setPulls([])
   }
   /**
    * 全画面を閉じたあとの戻り位置（同）。
@@ -995,6 +1045,7 @@ export default function CookNaviPage() {
     setShowTimeline(false)
     setCurrent(undefined)
     setSessionOpen(false)
+    setPulls([])
     setDroppedNotice('')
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
     setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
@@ -1295,7 +1346,7 @@ export default function CookNaviPage() {
                     )}
 
                     <ol className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
-                      {timeline.items.map((item, index) => (
+                      {planItems.map((item, index) => (
                         <TimelineCard
                           key={`${item.recipeId}-${item.stepIndex}`}
                           item={item}
@@ -1303,7 +1354,7 @@ export default function CookNaviPage() {
                           ingredientNames={ingredientNamesByRecipeId.get(item.recipeId) ?? []}
                           /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
                              （次の手順は同じ品の続きで、待ち終わってからやる作業のため） */
-                          showFillHint={!isSequential && hasLaterHandsOnStep(timeline.items, index)}
+                          showFillHint={!isSequential && hasLaterHandsOnStep(planItems, index)}
                           isRecipeLast={lastIndexByRecipeId.get(item.recipeId) === index}
                           highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
                           onStartTimer={startStepTimer}
@@ -1360,12 +1411,13 @@ export default function CookNaviPage() {
           （＝作りかけの段取りが調理中に消えない） */}
       {canUseNavi && sessionOpen && current && timeline && (
         <CookSessionOverlay
-          items={timeline.items}
+          items={planItems}
           recipes={timeline.recipes}
           cursor={current}
           stepIngredients={stepIngredientsByKey}
           ingredientNamesByRecipeId={ingredientNamesByRecipeId}
           onMove={setCurrent}
+          onPullStep={pullStep}
           onExit={closeSession}
           onFinish={completeSession}
           onStartTimer={startStepTimer}

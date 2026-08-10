@@ -167,6 +167,49 @@ export function nextStepsByRecipe<T extends CursorTarget>(
     }))
 }
 
+/**
+ * 「色で引き寄せた」1回ぶん（2026-08-10 便FI・docs/69 第3段
+ * 「色で実行を引き寄せる＝並べ替え」）。
+ *
+ * **カーソルを先へ飛ばすのではなく、言われた品の手順をいまの位置へ引き寄せる**。
+ * 飛ばす形にすると、間にある他の品の手順が「カーソルより前＝済んだ手順」に化けてしまい、
+ * 作っていない品が「完成」と出る（実機で確認済み。docs/69 の状態の持ち方では、
+ * 済み＝カーソルより前、という決め方しかできないため構造的にそうなる）。
+ * 引き寄せる形なら**手順は1つも消えず**、間の手順はそのまま後ろに残る。
+ *
+ * 引き寄せは保存しない。段取りは毎回組み直すので、この記録も
+ * 「どの手順を、どの手順の直前へ動かしたか」だけを持ち、組み直した段取りに毎回当て直す
+ * （手順が消えていたらその1件を飛ばす）。
+ */
+export interface StepPull {
+  /** この手順の直前に差し込む（＝色を言ったときに開いていた手順） */
+  before: CursorTarget
+  /** 引き寄せる手順（＝言われた色の品の、次の手順） */
+  target: CursorTarget
+}
+
+/**
+ * 引き寄せを段取りに当てる（純関数）。順番に当てるので、何回言い直しても同じ結果になる。
+ * 当てられない1件（手順が段取りから消えた・すでにその位置にある）は黙って飛ばす。
+ */
+export function applyStepPulls<T extends CursorTarget>(
+  items: readonly T[],
+  pulls: readonly StepPull[],
+): readonly T[] {
+  if (pulls.length === 0) return items
+  const list = [...items]
+  for (const pull of pulls) {
+    const targetIndex = findCursorIndex(list, pull.target)
+    const beforeIndex = findCursorIndex(list, pull.before)
+    if (targetIndex === -1 || beforeIndex === -1 || targetIndex === beforeIndex) continue
+    const [moved] = list.splice(targetIndex, 1)
+    // 取り除いたぶん、差し込み先が1つ手前にずれることがある
+    const insertAt = targetIndex < beforeIndex ? beforeIndex - 1 : beforeIndex
+    list.splice(insertAt, 0, moved)
+  }
+  return list
+}
+
 /** 色を言われたときに、その色の品をどう扱うか */
 export type CookColorMove =
   /** その品の次の手順へカーソルを動かす */
@@ -188,8 +231,9 @@ export type CookColorMove =
  * 画面に見えていない手順へ飛ばすと、なぜそこが開いたのか台所で説明がつかない。
  * 「見えている行が開く」だけなら、言う前に行き先を目で確かめられる。
  *
- * 動くのはカーソルだけ＝**記録もタイマーの削除もセッションの終了も起きない**
- * （docs/69「音声で受けるのは、間違っても戻れる操作だけ」）。言い直せば別の品へ移れる。
+ * 移り方は**引き寄せ**（`StepPull`）＝その手順をいまの位置へ持ってくる。開いていた手順は
+ * 1つ後ろに下がるだけで消えない。手順が消えず、記録もタイマーの削除もセッションの終了も
+ * 起きない（docs/69「音声で受けるのは、間違っても戻れる操作だけ」）。言い直せば別の品へ移れる。
  *
  * 行き先が無いときも「何も起きない」で終わらせず、理由（いま開いている／完成している／
  * その色の品が無い）を返す。呼び出し側はそれを短い文にしてその場に出す。

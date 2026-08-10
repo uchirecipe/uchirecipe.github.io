@@ -48,6 +48,7 @@ import {
   resolveColorMove,
   startCursor,
   type CookCursor,
+  type StepPull,
 } from '../logic/cookSession'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
@@ -180,6 +181,11 @@ type Props = {
   /** カーソルを動かす（呼び出し側が覚え書きに書く） */
   onMove: (next: CookCursor) => void
   /**
+   * 色で手順を引き寄せる（2026-08-10 便FI・docs/69 第3段）。
+   * 言われた品の手順をいまの位置へ移し、カーソルもそこへ送る（呼び出し側がまとめて行う）。
+   */
+  onPullStep: (pull: StepPull) => void
+  /**
    * この画面を閉じる（2026-08-10 便FC）。**調理中の手順は消さない**＝呼び出し側は
    * 全画面をしまうだけで、次に開いたときは同じ手順から始まる（オーナー実機
    * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
@@ -213,6 +219,7 @@ export default function CookSessionOverlay({
   stepIngredients,
   ingredientNamesByRecipeId,
   onMove,
+  onPullStep,
   onExit,
   onFinish,
   onStartTimer,
@@ -355,7 +362,8 @@ export default function CookSessionOverlay({
        * 色（「青」「緑」「ピンク」）＝その色の品の手順に移る（2026-08-10 便FI・docs/69 第3段）。
        *
        * 行き先は**下部にその色で出ている行の手順**（logic/cookSession.ts の resolveColorMove が
-       * 決める＝下部の行と同じ導出）。動くのはカーソルだけで、記録もタイマーの削除も
+       * 決める＝下部の行と同じ導出）。移り方は**引き寄せ**＝その手順をいまの位置へ持ってきて、
+       * 開いていた手順は1つ後ろに下がる（手順が1つも消えない）。記録もタイマーの削除も
        * 終了も起きない。別の色を言えば移り直せる。
        * 行き先が無いときは理由を返す＝黙って何も起きない状態を作らない。
        */
@@ -371,7 +379,9 @@ export default function CookSessionOverlay({
         if (target.kind === 'done') {
           return ja.cookNavi.sessionColorDone.replace('{title}', title)
         }
-        move(target.cursor)
+        // 前の手順を読みながら次に移らない（move と同じ作法）
+        stopSpeech()
+        onPullStep({ before: cursor, target: target.cursor })
         return ja.cookNavi.sessionColorMoved.replace('{title}', title)
       },
       onTimer: (transcript) => {
