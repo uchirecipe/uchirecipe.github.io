@@ -154,6 +154,12 @@ import {
   reconcileSelectedIdsForSession,
 } from '../src/logic/cookNaviSession.ts'
 import {
+  assignRecipeNotes,
+  classifyRecipeNote,
+  recipeNoteStepKey,
+  splitRecipeNoteLines,
+} from '../src/logic/naviRecipeNotes.ts'
+import {
   advanceCursor,
   applyStepPulls,
   backCursor,
@@ -15104,6 +15110,172 @@ eq(
     'FF-ONETAP 別の日の記録は対象外',
     isOneTapCookedLog({ date: '2026-08-09', servings: 4 }, today),
     false,
+  )
+}
+
+// ---------- 2026-08-11 便FM・レシピ本体のメモが並行調理ナビに1行も出ていなかった ----------
+// 再発防止: レシピ詳細では出ている recipe.memo が、段取り(CookNaviPage)にも
+// 調理中モード(CookSessionOverlay)にも描かれていなかった(両画面が出していたのは
+// 手順ごとの item.memo だけ)。同梱109品のうち94品が本体のメモを持ち、その多くが
+// 交差汚染・火通し・保存の行で、複数の品を同時に進める並行調理でこそ要るもの。
+{
+  /** レシピ定義から、割り当ての入力になる手順の並びを作る(ナビ追加工程なしの素の並び) */
+  const noteSteps = (recipeId, def) =>
+    def.steps.map((s, i) => ({ recipeId, stepIndex: i, addedByNavi: false, text: s.text }))
+  const byTitle = (title) => starterDefs.find((d) => d.title === title)
+  const notesAt = (map, recipeId, stepIndex) =>
+    (map.get(recipeNoteStepKey({ recipeId, stepIndex })) ?? []).map((n) => n.text)
+
+  // ---- (1) 行の種類の見分け ----
+  eq(
+    'FM 交差汚染の行は raw(保存の語と同居していても洗う話を優先する)',
+    classifyRecipeNote(
+      '生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。冷蔵庫で1〜2日ほどで食べ切ること。',
+    ),
+    'raw',
+  )
+  eq(
+    'FM 火通しの行は heat',
+    classifyRecipeNote('卵は半熟で仕上げるので、お子様・高齢者・妊娠中の方や体調に不安があるときは、完全に火を通すこと。'),
+    'heat',
+  )
+  eq('FM 保存の行は keep', classifyRecipeNote('・冷蔵で2〜3日を目安に食べ切ること。'), 'keep')
+  eq('FM どれでもない行は other', classifyRecipeNote('・お好みのきのこで作ってよい(しいたけ・マッシュルームなど)。'), 'other')
+
+  // ---- (2) 親子丼(オーナー報告の実データ)。洗う行は鶏肉を切る手順、半熟の行は卵の手順 ----
+  const oyako = byTitle('親子丼')
+  eq('FM 親子丼が同梱カタログにある', oyako != null, true)
+  const oyakoSteps = noteSteps(1, oyako)
+  const oyakoNotes = assignRecipeNotes(oyakoSteps, new Map([[1, oyako]]))
+  eq(
+    'FM 交差汚染の行は「鶏肉は一口大」の手順(手順1)に出る',
+    notesAt(oyakoNotes, 1, 0),
+    ['・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'],
+  )
+  eq(
+    'FM 火通しの行は卵を入れる手順(手順3)に出る',
+    notesAt(oyakoNotes, 1, 2),
+    ['・卵は半熟で仕上げるので、お子様・高齢者・妊娠中の方や体調に不安があるときは、完全に火を通すこと。'],
+  )
+  eq('FM 関係のない手順には出さない(手順2)', notesAt(oyakoNotes, 1, 1), [])
+  eq('FM 関係のない手順には出さない(手順4)', notesAt(oyakoNotes, 1, 3), [])
+
+  // ---- (3) 段取りの並び替え(色で引き寄せ)や他の品との混在で割り当てが動かない ----
+  const hourensou = byTitle('ほうれん草のおひたし')
+  const mixed = [...noteSteps(2, hourensou), ...oyakoSteps]
+  const mixedNotes = assignRecipeNotes(mixed, new Map([[1, oyako], [2, hourensou]]))
+  eq(
+    'FM 他の品と混ざった段取りでも同じ手順に付く',
+    notesAt(mixedNotes, 1, 0),
+    ['・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'],
+  )
+  eq(
+    'FM 保存の行はその品の最後の手順に出る',
+    notesAt(mixedNotes, 2, hourensou.steps.length - 1).length,
+    2,
+  )
+  eq(
+    'FM 並びを逆にしても割り当ては変わらない(色で引き寄せても動かない)',
+    notesAt(assignRecipeNotes([...mixed].reverse(), new Map([[1, oyako], [2, hourensou]])), 1, 0),
+    ['・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'],
+  )
+
+  // ---- (4) ユーザーが自分で登録したレシピでも壊れない ----
+  const ownSteps = [
+    { recipeId: 9, stepIndex: 0, addedByNavi: false, text: '野菜を切る。' },
+    { recipeId: 9, stepIndex: 1, addedByNavi: false, text: '炒めて盛る。' },
+  ]
+  eq(
+    'FM メモが無いレシピには何も出さない',
+    assignRecipeNotes(ownSteps, new Map([[9, { ingredients: [] }]])).size,
+    0,
+  )
+  eq(
+    'FM メモが空文字のレシピにも何も出さない',
+    assignRecipeNotes(ownSteps, new Map([[9, { memo: '\n  \n', ingredients: [] }]])).size,
+    0,
+  )
+  eq(
+    'FM 安全の語が無い自作メモは、その品の最初の手順に出す',
+    notesAt(
+      assignRecipeNotes(ownSteps, new Map([[9, { memo: '母から教わった味。', ingredients: [] }]])),
+      9,
+      0,
+    ),
+    ['母から教わった味。'],
+  )
+  eq(
+    'FM 段取りに無いレシピのメモは出さない',
+    assignRecipeNotes(ownSteps, new Map([[8, { memo: '冷蔵で2日。', ingredients: [] }]])).size,
+    0,
+  )
+
+  // ---- (5) ナビが段取りに足した工程(湯を沸かす)には付けない ----
+  const withAdded = [
+    { recipeId: 3, stepIndex: -1, addedByNavi: true, text: '湯を沸かす' },
+    { recipeId: 3, stepIndex: 0, addedByNavi: false, text: '鶏肉を一口大に切る。' },
+    { recipeId: 3, stepIndex: 1, addedByNavi: false, text: '10分ゆでて器に盛る。' },
+  ]
+  const addedNotes = assignRecipeNotes(
+    withAdded,
+    new Map([
+      [
+        3,
+        {
+          memo: '生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。',
+          ingredients: [{ name: '鶏もも肉' }],
+        },
+      ],
+    ]),
+  )
+  eq('FM ナビが足した工程には割り当てない', addedNotes.has('3--1'), false)
+  eq('FM 鶏肉を切る手順に割り当てる', notesAt(addedNotes, 3, 0).length, 1)
+
+  // ---- (6) 同梱109品の全数検査。1行も落とさず、同じ行を2か所に出さない ----
+  let checkedRecipes = 0
+  let lostLines = 0
+  let duplicatedLines = 0
+  let outOfRange = 0
+  for (const def of starterDefs) {
+    const lines = splitRecipeNoteLines(def.memo)
+    if (lines.length === 0) continue
+    checkedRecipes++
+    const steps = noteSteps(7, def)
+    const map = assignRecipeNotes(steps, new Map([[7, def]]))
+    const placed = []
+    for (const [key, notes] of map) {
+      if (!steps.some((s) => recipeNoteStepKey(s) === key)) outOfRange++
+      for (const note of notes) placed.push(note.text)
+    }
+    for (const line of lines) {
+      const count = placed.filter((t) => t === line).length
+      if (count === 0) lostLines++
+      if (count > 1) duplicatedLines++
+    }
+    if (placed.length !== lines.length) duplicatedLines++
+  }
+  eq('FM 本体のメモを持つ同梱レシピは94品', checkedRecipes, 94)
+  eq('FM 1行も落とさない', lostLines, 0)
+  eq('FM 同じ行を2か所に出さない', duplicatedLines, 0)
+  eq('FM 割り当て先はその品の手順だけ', outOfRange, 0)
+
+  // ---- (7) 交差汚染の行が「生の肉を触る手順」に付く(材料名と綴りが違う書き方でも) ----
+  const curry = byTitle('カレーライス')
+  const curryNotes = assignRecipeNotes(noteSteps(4, curry), new Map([[4, curry]]))
+  const curryIndex = curry.steps.findIndex((_, i) =>
+    notesAt(curryNotes, 4, i).some((t) => t.includes('洗うこと')),
+  )
+  eq(
+    'FM 「生の肉」(材料名は豚こま切れ肉)でも、肉を扱う手順に付く',
+    curry.steps[curryIndex].text.includes('肉'),
+    true,
+  )
+  const tara = byTitle('たらの香味レンジ蒸し')
+  const taraNotes = assignRecipeNotes(noteSteps(5, tara), new Map([[5, tara]]))
+  eq(
+    'FM 「生の魚」(材料名は生だら)でも、たらを扱う最初の手順に付く',
+    notesAt(taraNotes, 5, 0).length,
+    1,
   )
 }
 

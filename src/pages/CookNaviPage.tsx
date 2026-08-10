@@ -68,6 +68,13 @@ import {
   stepIngredientAmounts,
   type NaviIngredientAmount,
 } from '../logic/naviIngredients'
+import {
+  assignRecipeNotes,
+  recipeNoteStepKey,
+  type RecipeNote,
+  type RecipeNoteSource,
+} from '../logic/naviRecipeNotes'
+import NaviRecipeNotes from '../components/NaviRecipeNotes'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { markRecipesCooked, undoTodayListCooked } from '../db/todayList'
@@ -137,6 +144,7 @@ function TimelineCard({
   item,
   ingredients,
   ingredientNames,
+  recipeNotes,
   showFillHint,
   isRecipeLast,
   highlighted,
@@ -145,6 +153,8 @@ function TimelineCard({
   item: TimelineItem
   /** この手順の文に出てくる材料と分量（2026-08-08 便EB。無ければ空配列＝何も出さない） */
   ingredients: NaviIngredientAmount[]
+  /** この手順に割り当てたレシピ本体のメモ（2026-08-11 便FM。無ければ空配列＝何も出さない） */
+  recipeNotes: readonly RecipeNote[]
   /** 手順本文の材料名に下線を引くための名前一覧（レシピ詳細と同じ流儀。2026-08-08 便ED） */
   ingredientNames: readonly string[]
   /** 待ちブロックに「この間に、次の手作業を進められます」を出すか（後続に手作業があるときだけ） */
@@ -205,6 +215,16 @@ function TimelineCard({
           <MemoText text={item.memo} className="mt-1 text-sm text-ink-muted" />
         </div>
       )}
+
+      {/* レシピ本体のメモ（2026-08-11 便FM）。レシピ詳細では出ていたのに、段取りにも
+          調理中モードにも1行も出ていなかった。全手順に出すと邪魔なので、行ごとに
+          効く手順1つだけに出す（logic/naviRecipeNotes.ts が割り当てる）。
+          手順の但し書き（上の item.memo）の直後に置き、どちらも本文を読んだ流れで読める形にする */}
+      <NaviRecipeNotes
+        notes={recipeNotes}
+        testId="navi-recipe-memo"
+        className="mt-[var(--space-sm)]"
+      />
 
       {/* この手順で使う材料と分量（2026-08-08 便EB）。
           3品を並行で作ると材料欄が混ざるため、同じ材料を別のレシピに使ってしまう事故を
@@ -928,6 +948,23 @@ export default function CookNaviPage() {
     return map
   }, [selectedRecipes])
 
+  /**
+   * レシピ本体のメモを、段取りの中の「効く手順」へ1行ずつ割り当てたもの（2026-08-11 便FM）。
+   * キーは手順ごとの材料と同じ `${recipeId}-${stepIndex}`。
+   *
+   * 割り当ての決め方は logic/naviRecipeNotes.ts（純関数）にあり、段取りの並び順には
+   * 依存しない＝色で手順を引き寄せても、同じ行が同じ手順に付いたまま動く。
+   */
+  const recipeNotesByStep = useMemo(() => {
+    if (!timeline) return new Map<string, RecipeNote[]>()
+    const sources = new Map<number, RecipeNoteSource>()
+    selectedRecipes.forEach((recipe) => {
+      if (recipe.id == null) return
+      sources.set(recipe.id, { memo: recipe.memo, ingredients: recipe.ingredients })
+    })
+    return assignRecipeNotes(planItems, sources)
+  }, [timeline, planItems, selectedRecipes])
+
   /** ②手順ごとの材料と分量（手順の文に出てくるものだけ） */
   const stepIngredientsByKey = useMemo(() => {
     const map = new Map<string, NaviIngredientAmount[]>()
@@ -1386,6 +1423,7 @@ export default function CookNaviPage() {
                           item={item}
                           ingredients={stepIngredientsByKey.get(`${item.recipeId}-${item.stepIndex}`) ?? []}
                           ingredientNames={ingredientNamesByRecipeId.get(item.recipeId) ?? []}
+                          recipeNotes={recipeNotesByStep.get(recipeNoteStepKey(item)) ?? []}
                           /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
                              （次の手順は同じ品の続きで、待ち終わってからやる作業のため） */
                           showFillHint={!isSequential && hasLaterHandsOnStep(planItems, index)}
@@ -1450,6 +1488,7 @@ export default function CookNaviPage() {
           cursor={current}
           stepIngredients={stepIngredientsByKey}
           ingredientNamesByRecipeId={ingredientNamesByRecipeId}
+          recipeNotes={recipeNotesByStep}
           onMove={setCurrent}
           onPullStep={pullStep}
           onExit={closeSession}
