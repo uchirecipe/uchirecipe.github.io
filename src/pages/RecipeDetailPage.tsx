@@ -12,9 +12,6 @@ import {
   TriangleAlert,
   Timer as TimerIcon,
   Share2,
-  Image as ImageIcon,
-  Camera,
-  RotateCw,
   Maximize2,
   CalendarPlus,
   JapaneseYen,
@@ -22,7 +19,7 @@ import {
   X,
 } from 'lucide-react'
 import { db } from '../db/db'
-import { addCookedLog, deleteCookedLog, toggleFavorite, updateCookedLog } from '../db/recipes'
+import { addCookedLog, toggleFavorite } from '../db/recipes'
 import { lowerPantryLevelsForCooked } from '../db/pantry'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
@@ -58,7 +55,8 @@ import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
-import CookedLogModal, { LOG_PHOTO_MAX_EDGE, LOG_PHOTO_QUALITY } from '../components/CookedLogModal'
+import CookedLogModal from '../components/CookedLogModal'
+import CookedLogEditor from '../components/CookedLogEditor'
 import TodaySlotModal from '../components/TodaySlotModal'
 import ShareModal, { type ShareSelection } from '../components/ShareModal'
 import CustomTimerModal from '../components/CustomTimerModal'
@@ -74,7 +72,6 @@ import { buildIngredientNames } from '../logic/ingredientSpans'
 import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../logic/dashiLink'
 import TermPopover, { useTermPopover } from '../components/TermPopover'
 import { todayString } from '../logic/date'
-import { resizePhoto, rotatePhoto } from '../logic/image'
 import type { MealSlot } from '../db/types'
 import { ja } from '../i18n/ja'
 
@@ -237,25 +234,10 @@ export default function RecipeDetailPage() {
   const [logPhoto, setLogPhoto] = useState<Blob>()
   const [logServings, setLogServings] = useState<number>()
 
-  // 過去の記録を後から編集する
+  // 過去の記録を後から編集する（入力欄そのものは共通部品 CookedLogEditor が持つ。
+  // ここが覚えるのは「どの記録の欄を開いているか」だけ。2026-08-10 便FD）
   const [editingLogIndex, setEditingLogIndex] = useState<number | null>(null)
   const logEditRef = useRevealOnOpen<HTMLDivElement>(editingLogIndex !== null)
-  const [editingLogDate, setEditingLogDate] = useState('')
-  const [editingLogNote, setEditingLogNote] = useState('')
-  // 記録した人数(2026-07-29 便CI/C05)。編集フォームにも欄が無く、間違った人数を直せなかった
-  const [editingLogServings, setEditingLogServings] = useState<number>()
-  // 編集中の記録の写真(2026-07-16 便W-①: 追加・差し替え・削除に対応。既存写真で初期化し、
-  // 新規選択で差し替え・undefinedにすれば削除。保存時は常にこの値をphotoとして書き戻す
-  // (新規作成時=CookedLogModalと同じ保存形式・resizePhotoで圧縮)
-  const [editingLogPhoto, setEditingLogPhoto] = useState<Blob>()
-  const [editingLogPhotoError, setEditingLogPhotoError] = useState('')
-  // 写真の回転(2026-08-09 便EN)。回した回数ではなく「保存前に回したか」だけを持つ
-  // ＝保存を押さずに閉じると元の向きのままであることを、その場で伝えるために使う
-  const [editingLogPhotoRotated, setEditingLogPhotoRotated] = useState(false)
-  const [editingLogPhotoRotating, setEditingLogPhotoRotating] = useState(false)
-  const editingLogPhotoUrl = usePhotoUrl(editingLogPhoto)
-  const editLogCameraInputRef = useRef<HTMLInputElement>(null)
-  const editLogAlbumInputRef = useRef<HTMLInputElement>(null)
 
   // 記録一覧のサムネイル用object URL。usePhotoUrlは1件用のフックのため、複数件のBlobを
   // ループで扱うこの一覧だけは自前でURLを作って後始末する(Reactのフックはループ内で呼べないため)
@@ -345,21 +327,8 @@ export default function RecipeDetailPage() {
   )
 
   /** 過去の記録の編集フォームを開く（下の記録一覧の鉛筆ボタンと、?editLog= からの遷移で使う） */
-  const openEditLog = (
-    index: number,
-    date: string,
-    note: string | undefined,
-    photo: Blob | undefined,
-    logServingsValue: number | undefined,
-  ) => {
+  const openEditLog = (index: number) => {
     setEditingLogIndex(index)
-    setEditingLogDate(date)
-    setEditingLogNote(note ?? '')
-    setEditingLogPhoto(photo)
-    setEditingLogPhotoError('')
-    setEditingLogPhotoRotated(false)
-    // 人数が未記録の古い記録は、レシピの登録人数を初期値にする(便CI/C05)
-    setEditingLogServings(logServingsValue ?? recipe?.servings ?? 1)
   }
 
   /**
@@ -374,7 +343,7 @@ export default function RecipeDetailPage() {
     if (editLogParam == null || !recipe) return
     const index = Number(editLogParam)
     const log = Number.isInteger(index) && index >= 0 ? recipe.cookedLogs[index] : undefined
-    if (log) openEditLog(index, log.date, log.note, log.photo, log.servings)
+    if (log) openEditLog(index)
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
@@ -441,58 +410,6 @@ export default function RecipeDetailPage() {
     setMessage(ja.detail.cookedRecordedToast)
   }
 
-  /**
-   * 作った記録を1件だけ削除する(2026-07-29 便CI/C02)。
-   * 元に戻せない操作なので、規約Fに沿って「何が消えるか」「何が残るか」を件数つきで確認する。
-   */
-  const removeCookedLog = async (index: number) => {
-    const log = recipe?.cookedLogs[index]
-    if (!log) return
-    const message = ja.detail.cookedLogDeleteConfirm
-      .replace('{date}', log.date.replaceAll('-', '/'))
-      .replace('{p}', log.photo ? ja.detail.cookedLogDeleteConfirmPhoto : '')
-      .replace('{n}', String(recipe.cookedLogs.length - 1))
-    if (!window.confirm(message)) return
-    await deleteCookedLog(id, index)
-    setEditingLogIndex(null)
-    setEditingLogPhoto(undefined)
-    setEditingLogPhotoError('')
-    setMessage(ja.detail.cookedLogDeletedToast)
-  }
-
-  // 記録編集中の写真選択(新規追加・差し替え共通)。保存形式は新規記録時と同一
-  // (長辺1280px・JPEG品質0.8に圧縮。CookedLogModalのonPhotoSelectedと同じロジック)
-  const onEditingLogPhotoSelected = async (file: File | undefined) => {
-    if (!file) return
-    try {
-      setEditingLogPhoto(await resizePhoto(file, LOG_PHOTO_MAX_EDGE, LOG_PHOTO_QUALITY))
-      setEditingLogPhotoError('')
-      setEditingLogPhotoRotated(false)
-    } catch {
-      setEditingLogPhotoError(ja.form.photoError)
-    }
-  }
-
-  /**
-   * 記録の写真を時計回りに90度回す（2026-08-09 便EN・オーナー要望）。
-   * 保存済みの写真もこの編集フォームから回して保存し直せる。4回押せば元の向きに戻る。
-   * 書き戻すのは saveEditingLog（photoは常にeditingLogPhotoを書き込む）なので、
-   * 回しただけで閉じたときは元の写真のまま＝取り返しのつかない変更にはならない。
-   */
-  const rotateEditingLogPhoto = async () => {
-    if (!editingLogPhoto || editingLogPhotoRotating) return
-    setEditingLogPhotoRotating(true)
-    try {
-      setEditingLogPhoto(await rotatePhoto(editingLogPhoto, 1, LOG_PHOTO_QUALITY))
-      setEditingLogPhotoError('')
-      setEditingLogPhotoRotated(true)
-    } catch {
-      setEditingLogPhotoError(ja.form.photoError)
-    } finally {
-      setEditingLogPhotoRotating(false)
-    }
-  }
-
   // 自由な時間のタイマー（入口A: BackHeaderのタイマーアイコン）。詳細画面はFocusModeと違い
   // 「今見ている手順」の概念が無いため、どの手順にも紐付かないタイマーとして起動する。
   // 秒刻み対応(2026-07-12): 新フィールドlastCustomTimerSecondsを優先し、無ければ旧フィールド
@@ -516,23 +433,6 @@ export default function RecipeDetailPage() {
       isCustom: true,
     })
     setCustomTimerOpen(false)
-  }
-
-  const saveEditingLog = async () => {
-    if (editingLogIndex === null || !editingLogDate) return
-    await updateCookedLog(id, editingLogIndex, {
-      date: editingLogDate,
-      note: editingLogNote.trim() || undefined,
-      // 常にeditingLogPhotoを書き戻す(未変更ならもとの写真、選び直せば新しい写真、
-      // 削除ならundefined。新規時と同じ保存形式)
-      photo: editingLogPhoto,
-      // 何人分作ったかも直せるようにする(2026-07-29 便CI/C05)
-      servings: editingLogServings,
-    })
-    setEditingLogIndex(null)
-    setEditingLogPhoto(undefined)
-    setEditingLogPhotoError('')
-    setEditingLogPhotoRotated(false)
   }
 
   // シェアの選択式(2026-07-16 裁定3)のグレーアウト判定。モーダルを開いた時点の値で確定する
@@ -1199,162 +1099,22 @@ export default function RecipeDetailPage() {
                       // 押した行が画面の外へ見切れないよう、開いてから位置を合わせる
                       // （2026-08-09 便EO・オーナー実機「編集ボタンを押しても編集画面が
                       //   画面外に見切れてしまう」）
-                      <div ref={logEditRef} className="space-y-2">
-                        <input
-                          type="date"
-                          value={editingLogDate}
-                          onChange={(e) => setEditingLogDate(e.target.value)}
-                          className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink"
+                      // 入力欄そのものは共通部品（2026-08-10 便FD で切り出し）。
+                      // 記録の小窓（カレンダーなど）からも同じ欄を開く＝同じ欄を2つ書かない
+                      <div ref={logEditRef}>
+                        <CookedLogEditor
+                          recipeId={id}
+                          logIndex={index}
+                          log={log}
+                          fallbackServings={recipe.servings}
+                          totalLogCount={recipe.cookedLogs.length}
+                          onSaved={() => setEditingLogIndex(null)}
+                          onCancel={() => setEditingLogIndex(null)}
+                          onDeleted={() => {
+                            setEditingLogIndex(null)
+                            setMessage(ja.detail.cookedLogDeletedToast)
+                          }}
                         />
-                        {/* 何人分作ったか(2026-07-29 便CI/C05)。人数の入力漏れ・持ち越しを
-                            後から直せる唯一の場所なので、記録窓と同じステッパーを置く */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-ink-muted">{ja.detail.cookedServings}</span>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setEditingLogServings(Math.max(1, (editingLogServings ?? 1) - 1))
-                            }
-                            aria-label={ja.detail.servingsDown}
-                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent-ink shadow-sm"
-                          >
-                            <Minus size={16} aria-hidden />
-                          </button>
-                          <span className="min-w-12 text-center font-bold">
-                            {editingLogServings ?? 1}
-                            {ja.detail.servingsUnit}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setEditingLogServings((editingLogServings ?? 1) + 1)}
-                            aria-label={ja.detail.servingsUp}
-                            className="flex h-9 w-9 items-center justify-center rounded-sm border border-edge bg-app text-accent-ink shadow-sm"
-                          >
-                            <Plus size={16} aria-hidden />
-                          </button>
-                        </div>
-                        <input
-                          type="text"
-                          value={editingLogNote}
-                          onChange={(e) => setEditingLogNote(e.target.value)}
-                          placeholder={ja.detail.cookedLogNotePlaceholder}
-                          className="block w-full rounded-sm border border-edge bg-app px-3 py-2 text-sm text-ink placeholder:text-ink-muted/60"
-                        />
-                        {/* 記録編集中の写真: 追加・差し替え・削除に対応(2026-07-16 便W-①。
-                            新規作成時のCookedLogModalと同じ操作・保存形式) */}
-                        <div>
-                          {editingLogPhotoUrl && (
-                            <img
-                              src={editingLogPhotoUrl}
-                              alt=""
-                              className="h-16 w-16 shrink-0 rounded-sm object-cover shadow-sm"
-                            />
-                          )}
-                          <div className="mt-2 flex gap-2">
-                            <input
-                              ref={editLogCameraInputRef}
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              className="hidden"
-                              onChange={(e) => {
-                                void onEditingLogPhotoSelected(e.target.files?.[0])
-                                e.target.value = ''
-                              }}
-                            />
-                            <input
-                              ref={editLogAlbumInputRef}
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                void onEditingLogPhotoSelected(e.target.files?.[0])
-                                e.target.value = ''
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => editLogCameraInputRef.current?.click()}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold shadow-sm"
-                            >
-                              <Camera size={16} className="text-accent-ink" aria-hidden />
-                              {ja.form.photoTake}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => editLogAlbumInputRef.current?.click()}
-                              className="flex flex-1 items-center justify-center gap-1 rounded-sm border border-edge bg-app py-2 text-sm font-bold shadow-sm"
-                            >
-                              <ImageIcon size={16} className="text-accent-ink" aria-hidden />
-                              {ja.form.photoPick}
-                            </button>
-                          </div>
-                          {editingLogPhoto && (
-                            <>
-                              {/* 写真の回転(2026-08-09 便EN・オーナー要望)。押すたびに
-                                  時計回りに90度＝4回で元の向きに戻る */}
-                              <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
-                                <button
-                                  type="button"
-                                  onClick={() => void rotateEditingLogPhoto()}
-                                  disabled={editingLogPhotoRotating}
-                                  className="inline-flex items-center gap-1 text-sm font-bold text-accent-ink disabled:opacity-40"
-                                >
-                                  <RotateCw size={16} aria-hidden />
-                                  {editingLogPhotoRotating
-                                    ? ja.detail.cookedLogPhotoRotating
-                                    : ja.detail.cookedLogPhotoRotate}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingLogPhoto(undefined)}
-                                  className="text-sm text-warning underline"
-                                >
-                                  {ja.detail.cookedLogPhotoRemove}
-                                </button>
-                              </div>
-                              {/* 回しただけでは残らないので、保存を押す必要をその場で伝える */}
-                              {editingLogPhotoRotated && (
-                                <p className="mt-1 text-sm text-ink-muted">
-                                  {ja.detail.cookedLogPhotoRotateUnsaved}
-                                </p>
-                              )}
-                            </>
-                          )}
-                          {editingLogPhotoError && (
-                            <p className="mt-1 text-sm text-warning">{editingLogPhotoError}</p>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void saveEditingLog()}
-                            className="flex-1 rounded-sm bg-accent py-2 text-sm font-bold text-on-accent shadow-sm"
-                          >
-                            {ja.detail.cookedLogSave}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingLogIndex(null)
-                              setEditingLogPhoto(undefined)
-                              setEditingLogPhotoError('')
-                            }}
-                            className="rounded-sm border border-edge px-3 py-2 text-sm text-ink-muted"
-                          >
-                            {ja.detail.cookedLogCancel}
-                          </button>
-                        </div>
-                        {/* 記録そのものの削除(2026-07-29 便CI/C02)。写真だけ消せて記録本体は
-                            消せなかったため、誤タップ・重複記録の唯一の始末が「レシピごと削除」に
-                            なっていた。確認文は規約F(何が消えて何が残るかを件数つきで) */}
-                        <button
-                          type="button"
-                          onClick={() => void removeCookedLog(index)}
-                          className="text-sm text-warning underline"
-                        >
-                          {ja.detail.cookedLogDelete}
-                        </button>
                       </div>
                     ) : (
                       <div className="flex items-start justify-between gap-2">
@@ -1393,7 +1153,7 @@ export default function RecipeDetailPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            openEditLog(index, log.date, log.note, log.photo, log.servings)
+                            openEditLog(index)
                           }
                           aria-label={ja.detail.cookedLogEdit}
                           className="shrink-0 rounded-full p-2 text-ink-muted"

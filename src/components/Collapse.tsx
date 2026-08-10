@@ -57,6 +57,20 @@ export default function Collapse({ open, children, className, id, reveal = true 
   const innerRef = useRef<HTMLDivElement>(null)
   /** 初回描画では動かさない（画面を開いた瞬間に勝手にスクロールしないため） */
   const firstRender = useRef(true)
+  /**
+   * この「開いている状態」について、もう位置合わせを済ませたか（2026-08-10 便FD）。
+   *
+   * 直したバグ: 開いた状態で**現れた**折りたたみ（週タブの7日分のカードなど）も
+   * 位置合わせを走らせていた。`firstRender` は高さのアニメーション側の効果にしか無く、
+   * 下の位置合わせの効果は初回描画でも素通りしていたため、週タブに切り替えた瞬間・
+   * 週を移動した瞬間に7か所が同時に「自分を画面へ入れて」と要求し、最後の1つ（7日目）に
+   * 引っぱられてページが最下部近くまで飛んでいた（オーナー実機「下へスクロールする」）。
+   *
+   * 最初の値は `open`＝**開いた状態で現れたものは済み扱い**にして動かさない。
+   * いったん閉じてから開き直したときだけ、その1回に限って位置を合わせる
+   * （components/useRevealOnOpen.ts と同じ「false→trueのときだけ」の規則）。
+   */
+  const revealDone = useRef(open)
 
   useEffect(() => {
     if (firstRender.current) {
@@ -105,7 +119,16 @@ export default function Collapse({ open, children, className, id, reveal = true 
   }, [open, expanded, settled])
 
   useEffect(() => {
-    if (!open || !settled || !reveal) return
+    if (!open) {
+      // 閉じたら「次に開いたときに1回だけ動かす」へ戻す
+      revealDone.current = false
+      return
+    }
+    if (!settled || revealDone.current) return
+    // 位置合わせをしない指定（reveal=false）でも「この開閉は処理済み」にする＝
+    // あとから reveal が true に変わっても、開いたときを過ぎてから動き出さない
+    revealDone.current = true
+    if (!reveal) return
     const el = innerRef.current
     if (el) revealExpanded(el)
   }, [open, settled, reveal])
