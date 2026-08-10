@@ -20805,14 +20805,28 @@ try {
       ['/about/multi-device.html', 'figure.shot img'],
     ]) {
       await page.goto(`${BASE}${pagePath}`, { waitUntil: 'networkidle' })
+      // 画面に出ている img そのものの naturalWidth は見ない(2026-08-10 便FJ)。
+      // 図は loading="lazy" なので、画面の外にあるうちは読み込みが始まらず naturalWidth が0のまま。
+      // load を待つと永久に返ってこない(実際にe2eが止まった)。別に Image() を作って
+      // 実寸だけを取り、失敗しても必ず返るようにする(1枚10秒で打ち切り)
       const gaps = await page.evaluate(async (sel) => {
         const imgs = Array.from(document.querySelectorAll(sel))
-        await Promise.all(
-          imgs.map((i) => (i.complete ? null : new Promise((r) => i.addEventListener('load', r, { once: true })))),
-        )
-        return imgs
-          .filter((i) => i.naturalWidth !== Number(i.getAttribute('width')) || i.naturalHeight !== Number(i.getAttribute('height')))
-          .map((i) => `${i.getAttribute('src')} 実寸${i.naturalWidth}x${i.naturalHeight} 記述${i.getAttribute('width')}x${i.getAttribute('height')}`)
+        const out = []
+        for (const el of imgs) {
+          const src = el.getAttribute('src')
+          const size = await new Promise((resolve) => {
+            const probe = new Image()
+            const done = () => resolve({ w: probe.naturalWidth, h: probe.naturalHeight })
+            probe.onload = done
+            probe.onerror = () => resolve({ w: 0, h: 0 })
+            setTimeout(() => resolve({ w: -1, h: -1 }), 10000)
+            probe.src = src
+          })
+          const w = Number(el.getAttribute('width'))
+          const h = Number(el.getAttribute('height'))
+          if (size.w !== w || size.h !== h) out.push(`${src} 実寸${size.w}x${size.h} 記述${w}x${h}`)
+        }
+        return out
       }, selector)
       check(`SHOTSIZE-EP ${pagePath} の図の寸法が合っている`, gaps.length === 0, gaps.join(' / '))
     }
