@@ -711,11 +711,17 @@ export default function CookSessionOverlay({
                   data-testid="cook-session-other-row"
                   disabled={!next}
                   onClick={() => setPeekRecipeId(open ? null : recipeId)}
-                  aria-expanded={open}
-                  aria-label={(open ? ja.cookNavi.sessionPeekCloseAria : ja.cookNavi.sessionPeekOpenAria).replace(
-                    '{title}',
-                    recipe?.title ?? '',
-                  )}
+                  {...(next
+                    ? {
+                        'aria-expanded': open,
+                        'aria-label': (open
+                          ? ja.cookNavi.sessionPeekCloseAria
+                          : ja.cookNavi.sessionPeekOpenAria
+                        ).replace('{title}', recipe?.title ?? ''),
+                      }
+                    : // 作り終えた品には開く全文が無い。「全文を開く」と名乗らせず、
+                      // 読み上げても見たままの「料理名＋完成」になるようにする（2026-08-10 便FC）
+                      {})}
                   className={`w-full text-left ${next ? 'py-1' : 'py-0.5'}`}
                 >
                   <span className="flex items-center gap-1">
