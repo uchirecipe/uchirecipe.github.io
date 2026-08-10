@@ -20688,11 +20688,15 @@ try {
       'LPTEXT-EP 30品の注記の主文から「基本レシピは数えません」が抜けている',
       !/無料で登録できるレシピは30品までです<\/strong>\s*最初から入っている/.test(lpEp),
     )
+    // 2026-08-10 便FG(オーナー指示): この※は「基本レシピの紹介のほうに注釈として付ける」に
+    // 変わったので、Pro版の注記の中ではなく基本レシピの紹介(.starters)の末尾で見る。
+    // 30品という数字を別の節から参照する形になったため、文面も自己完結する言い方に直した
     check(
-      'LPTEXT-EP 「基本レシピは30品に数えない」は注記の末尾に※として置いてある',
-      ((await page.locator('.note .aster').first().textContent()) ?? '').trim() ===
-        '※最初から入っている基本レシピは、この30品に数えません。',
-      (await page.locator('.note .aster').first().textContent()) ?? '(なし)',
+      'LPTEXT-EP 「基本レシピは30品に数えない」は基本レシピの紹介の末尾に※として置いてある',
+      ((await page.locator('.starters .tiny').first().textContent()) ?? '')
+        .trim()
+        .startsWith('※最初から入っている基本レシピは、無料で登録できる30品には数えません。'),
+      (await page.locator('.starters .tiny').first().textContent()) ?? '(なし)',
     )
     check(
       'LPTEXT-EP 「30品を超えて登録するときは、Pro版をご利用ください」を出さない',
@@ -21853,7 +21857,8 @@ try {
 
       // (f) 導線: 紹介ページ・使い方ページ・ホーム画面追加ページ・sitemap
       const evLp = await (await page.request.get(`${BASE}/about/`)).text()
-      check('MULTIDEV-01(f) 紹介ページの「バックアップと、クラウドの使い方」から辿れる', evLp.includes('/about/multi-device.html'))
+      // 2026-08-10 便FG: 小見出しは「バックアップでレシピを保存」に変わった(導線はそのまま)
+      check('MULTIDEV-01(f) 紹介ページの「バックアップでレシピを保存」から辿れる', evLp.includes('/about/multi-device.html'))
       check(
         'MULTIDEV-01(f) 紹介ページのよくある質問(複数の端末)からも辿れる',
         evLp.indexOf('/about/multi-device.html', evLp.indexOf('複数の端末で同じデータを使えますか')) > -1,
@@ -24764,9 +24769,9 @@ try {
           const painsLis = [...document.querySelectorAll('.pains li')]
           const painsBoxes = painsLis.map((li) => li.getBoundingClientRect())
           const proSec = secOf(document.querySelector('.price'))
-          const limitNote = [...document.querySelectorAll('.note')].find((n) =>
-            n.textContent.includes('無料で登録できるレシピは30品までです'),
-          )
+          // 2026-08-10 便FG(オーナー指示): 無料30品の案内は、Pro版の節の枠つき注記から
+          // 「好きなレシピを登録する」の節のいちばん下の1文(.free-limit)へ移した
+          const limitNote = document.querySelector('.free-limit')
           // 節の中の要素を、出てくる順に「種類:文字」で並べたもの
           const outline = (sec) =>
             [...sec.querySelectorAll('h2, h3, a.more')].map(
@@ -24789,7 +24794,12 @@ try {
             painsAlign: painsLis.map((li) => getComputedStyle(li.querySelector('b')).textAlign),
             painsGaps: painsBoxes.slice(1).map((b, i) => Math.round(b.top - painsBoxes[i].bottom)),
             painsUlH: Math.round(document.querySelector('.pains').getBoundingClientRect().height),
-            limitInProSec: !!limitNote && secOf(limitNote) === proSec,
+            limitText: (limitNote?.textContent ?? '').trim(),
+            limitInRegSec: !!limitNote && secOf(limitNote) === regSec,
+            limitIsLastOfSec: !!limitNote && regSec.lastElementChild === limitNote,
+            limitBeforeProSec:
+              !!limitNote &&
+              (limitNote.compareDocumentPosition(proSec) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
             limitBeforeBuy:
               !!limitNote &&
               (limitNote.compareDocumentPosition(document.querySelector('a.buy')) &
@@ -24830,24 +24840,25 @@ try {
             fe.regOutline.join(' / '),
           )
           check(
-            'FE-LP 登録節から30品の注記が外れている',
+            'FE-LP 登録節に枠つきの注記(.note)は置かない',
             fe.regHasLimitNote === false,
           )
+          // 2026-08-10 便FG: 「他にも」は"その他"に当たる節なので番号つきの見出しラベルを外した。
+          // 番号つきの「登録したレシピで、できること」は3つ
           check(
-            'FE-LP 「できること」が4つあり、オーナー指定の並びになっている',
+            'FE-LP 「できること」が3つあり、オーナー指定の並びになっている',
             JSON.stringify(fe.can) ===
               JSON.stringify([
                 { eyebrow: '登録したレシピで、できること 1', h2: '献立を提案' },
                 { eyebrow: '登録したレシピで、できること 2', h2: '調理中モードで、料理に集中' },
                 { eyebrow: '登録したレシピで、できること 3', h2: '自動計算で、栄養と材料費を把握' },
-                { eyebrow: '登録したレシピで、できること 4', h2: '他にも、できることたくさん' },
               ]),
             JSON.stringify(fe.can),
           )
           check(
-            'FE-LP 無料30品の記載はPro版の節にあり、購入ボタンより前に出る',
-            fe.limitInProSec && fe.limitBeforeBuy,
-            `Pro版の節=${fe.limitInProSec} ボタンより前=${fe.limitBeforeBuy}`,
+            'FE-LP 無料30品の記載は登録節にあり、購入ボタンより前に出る',
+            fe.limitInRegSec && fe.limitBeforeBuy,
+            `登録節=${fe.limitInRegSec} ボタンより前=${fe.limitBeforeBuy}`,
           )
           // 図の実寸と width/height 属性のずれ(読み込み中に文字が飛ぶ原因)。
           // 遅延読み込みの完了を待つと、画面外の図がいつまでも読み込まれず止まるので、
@@ -24890,11 +24901,12 @@ try {
           fe.painsAlign.length === 4 && fe.painsAlign.every((a) => a === 'center'),
           fe.painsAlign.join(','),
         )
-        // 便EX時点は 24/29/24px。オーナー指摘(密度が低い)を受けておよそ半分に詰めた。
-        // 詰めすぎ(重なって読めない)にも気づけるよう下限も見る
+        // 便EX時点は 24/29/24px → 便FEで 8/11/8px → 便FG(オーナー「まだスカスカ」)で
+        // 吹き出し自体を大きくしたうえで重ねたので、隙間は負(＝重なっている)になる。
+        // 重ねすぎ(文字が隠れる)にも気づけるよう下限も見る
         check(
-          `FE-LP(${scheme}) 390pxの吹き出しの間隔が詰まっている(0〜16px)`,
-          fe.painsGaps.length === 3 && fe.painsGaps.every((g) => g >= 0 && g <= 16),
+          `FE-LP(${scheme}) 390pxの吹き出しが重なるまで詰まっている(-28〜0px)`,
+          fe.painsGaps.length === 3 && fe.painsGaps.every((g) => g >= -28 && g <= 0),
           `隙間=${fe.painsGaps.join(',')} 全体の高さ=${fe.painsUlH}`,
         )
         check(`FE-LP(${scheme}) 390pxで横にはみ出さない`, fe.docW <= fe.winW, `scrollW=${fe.docW}`)
@@ -24956,6 +24968,273 @@ try {
       'FE-LP 紹介ページのよくある質問にも残っている',
       feHtml.indexOf('変換サーバー（Cloudflare Workers）') >
         feHtml.indexOf('データはどこに保存されますか'),
+    )
+  }
+
+  // ================================================================================
+  // --- 便FG(2026-08-10 オーナー指示): 紹介ページの再構成と文言10件 ---
+  //  ①吹き出しを大きくして重ねる(390pxは重なり・パソコンはさらに深く重なる。文字は隠さない)
+  //  ②「献立から、買い物メモが自動で作れます」
+  //  ③「他にも、できることたくさん」は"その他"の節として作り直し
+  //     (代表3件だけ説明つき・残りは説明なしの羅列・くわしくは1つ・基本レシピは最下部)
+  //  ④データの節の文言(レシピ帳/バックアップファイル/小見出しと1文/写真の削除/その都度)
+  //  ⑤Pro版の節が、無料でできることの節の直後にある
+  //  ⑥無料30品の1文が登録節の最下部にあり、購入ボタンより前で読める
+  // ================================================================================
+  currentCheck = 'FG-LP'
+  {
+    const fgHtml = await (await page.request.get(`${BASE}/about/`)).text()
+
+    // --- ② 買い物メモの小見出し ---
+    check(
+      'FG-LP 「献立から、買い物メモが自動で作れます」になっている',
+      fgHtml.includes('<h3>献立から、買い物メモが自動で作れます</h3>') &&
+        !fgHtml.includes('買い物メモが自動でできます'),
+    )
+
+    // --- ④ データの節の文言5件 ---
+    check(
+      'FG-LP データの節は「レシピ帳を1つのファイルに書き出せます」(「ぜんぶ」を書かない)',
+      fgHtml.includes('<strong>レシピ帳を1つのファイルに書き出せます</strong>') &&
+        !fgHtml.includes('レシピ帳ぜんぶを'),
+    )
+    check(
+      'FG-LP データの節は「新しい端末でバックアップファイルを読み込めば」',
+      fgHtml.includes('新しい端末でバックアップファイルを読み込めば') &&
+        !fgHtml.includes('新しい端末でそのファイルを読み込めば'),
+    )
+    check(
+      'FG-LP 小見出しが「バックアップでレシピを保存」(クラウドを用意していると読ませない)',
+      fgHtml.includes('<h3>バックアップでレシピを保存</h3>') &&
+        !fgHtml.includes('バックアップと、クラウドの使い方'),
+    )
+    check(
+      'FG-LP クラウドの説明は太字で強調した1文だけ',
+      fgHtml.includes(
+        '<p>書き出したバックアップファイルを<strong>Googleドライブなどのクラウドに置いておくと、別の端末から同じレシピ帳を読み込んで開けます</strong>。</p>',
+      ),
+    )
+    check(
+      'FG-LP データの節のバックアップの説明から写真の話が消えている(リンク先にある)',
+      !fgHtml.includes('写真を含めて書き出したファイルを預けておけば') &&
+        !fgHtml.includes('写真を含めるかどうかも選べます'),
+    )
+    check(
+      'FG-LP 「そのつど」が「その都度」になっている',
+      fgHtml.includes('その都度ご自身の操作で行います') && !fgHtml.includes('そのつど'),
+    )
+
+    const fgBrowser = await chromium.launch()
+    try {
+      for (const scheme of ['light', 'dark']) {
+        const fgCtx = await fgBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: scheme,
+        })
+        const fgPage = await fgCtx.newPage()
+        fgPage.on('pageerror', (err) => {
+          if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+          errors.push(`[pageerror@FG-LP] ${err.message}`)
+        })
+        await fgPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+
+        const fg = await fgPage.evaluate(() => {
+          const srgb = (v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          const lum = (c) => {
+            const [r, g, b] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map((n) => srgb(Number(n) / 255))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+          }
+          const ratio = (a, b) => {
+            const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
+            return (x + 0.05) / (y + 0.05)
+          }
+          const secs = [...document.querySelectorAll('section.sec')]
+          const h2s = secs.map((s) => s.querySelector('h2')?.textContent.trim() ?? '')
+          const otherSec = secs.find((s) => s.querySelector('.plain-list'))
+          const regSec = secs.find((s) => s.querySelector('.free-limit'))
+          const planSec = secs.find((s) => (s.querySelector('h2')?.textContent ?? '') === '献立を提案')
+          const limit = document.querySelector('.free-limit')
+          const surface = getComputedStyle(otherSec).backgroundColor
+          const bubbles = [...document.querySelectorAll('.pains li')].map((li) =>
+            li.getBoundingClientRect(),
+          )
+          return {
+            h2s,
+            // ⑤ Pro版は「他にも、できることたくさん」の直後
+            proAfterFree: h2s[h2s.indexOf('他にも、できることたくさん') + 1] === 'Pro版なら、もっと便利に',
+            // ③ その他の節の中身
+            otherHasEyebrow: !!otherSec.querySelector('.eyebrow'),
+            otherLead: otherSec.querySelector('p')?.textContent.trim() ?? '',
+            otherFeatureCount: otherSec.querySelectorAll('ul.feature-list > li').length,
+            otherFeatureHeads: [...otherSec.querySelectorAll('ul.feature-list > li strong')].map(
+              (b) => b.textContent.trim(),
+            ),
+            otherPlainItems: [...otherSec.querySelectorAll('ul.plain-list > li')].map((li) =>
+              li.textContent.trim(),
+            ),
+            otherMoreCount: otherSec.querySelectorAll('a.more').length,
+            otherStartersIsLast: otherSec.lastElementChild?.classList.contains('starters') === true,
+            otherStartersTiny: otherSec.querySelector('.starters .tiny')?.textContent.trim() ?? '',
+            otherSecH: Math.round(otherSec.getBoundingClientRect().height),
+            // 献立表は献立の節へ移した
+            planHasSheet: (planSec.textContent ?? '').includes('1週間の献立表を印刷・画像で保存'),
+            otherHasSheet: (otherSec.textContent ?? '').includes('献立表'),
+            // ⑥ 30品の1文
+            limitText: limit?.textContent.trim() ?? '',
+            limitIsLastOfRegSec: !!limit && regSec.lastElementChild === limit,
+            limitCount: [...document.querySelectorAll('body *')].filter(
+              (el) =>
+                el.children.length === 0 &&
+                el.textContent.includes('無料で登録できるレシピは30品まで'),
+            ).length,
+            // ① 吹き出し
+            painsGaps: bubbles.slice(1).map((b, i) => Math.round(b.top - bubbles[i].bottom)),
+            painsFonts: [...document.querySelectorAll('.pains li b')].map((b) =>
+              parseFloat(getComputedStyle(b).fontSize),
+            ),
+            painsUlH: Math.round(document.querySelector('.pains').getBoundingClientRect().height),
+            // 重ねても文字が隠れないこと: 上下に重なる組は、左右にずれているか浅い重なりだけ
+            painsBadOverlap: bubbles
+              .flatMap((a, i) =>
+                bubbles.slice(i + 1).map((b, j) => {
+                  const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+                  const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+                  return ox > 0 && oy > 28 ? `${i + 1}と${i + 2 + j}(横${Math.round(ox)} 縦${Math.round(oy)})` : ''
+                }),
+              )
+              .filter(Boolean),
+            docW: document.documentElement.scrollWidth,
+            winW: document.documentElement.clientWidth,
+            // 新しく足した文字のコントラスト
+            contrastPlain: ratio(
+              getComputedStyle(otherSec.querySelector('.plain-list li')).color,
+              surface,
+            ),
+            contrastLimit: ratio(getComputedStyle(limit).color, surface),
+            contrastTiny: ratio(
+              getComputedStyle(otherSec.querySelector('.starters .tiny')).color,
+              getComputedStyle(otherSec.querySelector('.starters')).backgroundColor,
+            ),
+          }
+        })
+
+        if (scheme === 'light') {
+          check(
+            'FG-LP Pro版の節が、無料でできることの節の直後にある',
+            fg.proAfterFree,
+            fg.h2s.join(' / '),
+          )
+          check(
+            'FG-LP 「他にも」は"その他"の節なので番号つきの見出しラベルを付けない',
+            fg.otherHasEyebrow === false,
+          )
+          check(
+            'FG-LP 代表は3件だけ短い説明つき',
+            fg.otherFeatureCount === 3 &&
+              JSON.stringify(fg.otherFeatureHeads) ===
+                JSON.stringify([
+                  '登録したレシピをすぐ探せる',
+                  '作った日とひとことメモを残せる',
+                  '食べられない食材に印を出せる',
+                ]),
+            JSON.stringify(fg.otherFeatureHeads),
+          )
+          check(
+            'FG-LP 残りは説明を付けずに「できること」を並べてある(5件)',
+            fg.otherPlainItems.length === 5 &&
+              fg.otherPlainItems.every((t) => t.length <= 24 && !t.includes(':')),
+            fg.otherPlainItems.join(' / '),
+          )
+          check(
+            'FG-LP 「くわしく」のリンクは節に1つだけ',
+            fg.otherMoreCount === 1,
+            `件数=${fg.otherMoreCount}`,
+          )
+          check(
+            'FG-LP 基本レシピの紹介が節のいちばん下にある',
+            fg.otherStartersIsLast,
+          )
+          check(
+            'FG-LP 基本レシピの紹介に「30品に数えない」の注釈が付いている',
+            fg.otherStartersTiny.startsWith(
+              '※最初から入っている基本レシピは、無料で登録できる30品には数えません。',
+            ),
+            fg.otherStartersTiny,
+          )
+          check(
+            'FG-LP 「レシピでできること」でない献立表は、献立の節へ移してある',
+            fg.planHasSheet && fg.otherHasSheet === false,
+            `献立の節=${fg.planHasSheet} その他の節に残存=${fg.otherHasSheet}`,
+          )
+          check(
+            'FG-LP 無料30品の1文が登録節のいちばん下にあり、ページで1箇所だけ',
+            fg.limitText === '無料で登録できるレシピは30品までです。' &&
+              fg.limitIsLastOfRegSec &&
+              fg.limitCount === 1,
+            `文=${fg.limitText} 最下部=${fg.limitIsLastOfRegSec} 箇所=${fg.limitCount}`,
+          )
+          check(
+            'FG-LP 吹き出しの文字が便FEより大きい(いちばん大きいものが19px以上)',
+            Math.max(...fg.painsFonts) >= 19 && Math.min(...fg.painsFonts) >= 17,
+            fg.painsFonts.join(','),
+          )
+        }
+        check(
+          `FG-LP(${scheme}) 390pxの吹き出しが重なっている(隙間が負)`,
+          fg.painsGaps.every((g) => g < 0),
+          `隙間=${fg.painsGaps.join(',')} 全体の高さ=${fg.painsUlH}`,
+        )
+        check(
+          `FG-LP(${scheme}) 重ねても文字が隠れない(左右が重なる組の縦の重なりは浅い)`,
+          fg.painsBadOverlap.length === 0,
+          fg.painsBadOverlap.join(' , '),
+        )
+        check(`FG-LP(${scheme}) 390pxで横にはみ出さない`, fg.docW <= fg.winW, `scrollW=${fg.docW}`)
+        check(
+          `FG-LP(${scheme}) 足した文字(羅列・30品の1文・基本レシピの注釈)がAA(4.5:1)以上`,
+          fg.contrastPlain >= 4.5 && fg.contrastLimit >= 4.5 && fg.contrastTiny >= 4.5,
+          `羅列=${fg.contrastPlain.toFixed(2)} 30品=${fg.contrastLimit.toFixed(2)} 注釈=${fg.contrastTiny.toFixed(2)}`,
+        )
+        await fgCtx.close()
+      }
+
+      // パソコン幅: さらに深く重ねる。左右が重なる組(1と3・2と4)だけは文字が隠れない浅さに保つ
+      const fgPcCtx = await fgBrowser.newContext({ viewport: { width: 1280, height: 900 } })
+      const fgPcPage = await fgPcCtx.newPage()
+      await fgPcPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      const fgPc = await fgPcPage.evaluate(() => {
+        const boxes = [...document.querySelectorAll('.pains li')].map((li) => li.getBoundingClientRect())
+        return {
+          ulH: Math.round(document.querySelector('.pains').getBoundingClientRect().height),
+          gaps: boxes.slice(1).map((b, i) => Math.round(b.top - boxes[i].bottom)),
+          bad: boxes
+            .flatMap((a, i) =>
+              boxes.slice(i + 1).map((b, j) => {
+                const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+                const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+                return ox > 0 && oy > 16 ? `${i + 1}と${i + 2 + j}(横${Math.round(ox)} 縦${Math.round(oy)})` : ''
+              }),
+            )
+            .filter(Boolean),
+        }
+      })
+      check(
+        'FG-LP(PC) 吹き出しが便FEより深く重なっている(全体の高さ220px以下)',
+        fgPc.ulH <= 220 && fgPc.gaps.every((g) => g < 0),
+        `高さ=${fgPc.ulH} 隙間=${fgPc.gaps.join(',')}`,
+      )
+      check('FG-LP(PC) 重ねても文字が隠れない', fgPc.bad.length === 0, fgPc.bad.join(' , '))
+      await fgPcCtx.close()
+    } finally {
+      await fgBrowser.close()
+    }
+
+    // --- 「そのほかの使い方をくわしく」の飛び先が実在する ---
+    const fgMore = await page.request.get(`${BASE}/about/manual.html`)
+    check(
+      'FG-LP 「そのほかの使い方をくわしく」の飛び先(/about/manual.html)が実在する',
+      fgMore.status() === 200 && fgHtml.includes('>そのほかの使い方をくわしく →</a>'),
+      `status=${fgMore.status()}`,
     )
   }
 
