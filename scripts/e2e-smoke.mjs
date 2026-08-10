@@ -16628,9 +16628,11 @@ try {
   // --- LISTPANEL-01: レシピ一覧の並び替え/絞り込みパネルの再構成(2026-08-03 オーナー指示・便DI)。
   //   ③ 並び替えパネルの「並び順」(昇順/降順)がパネルの一番上に来ていること
   //   ⑦ 並べ替えに「最近作った順」があること
-  //   ⑤ 絞り込みパネルの先頭が「表示するレシピ」(お気に入り等の頻用条件)で、
-  //      「よく使うタグ」「調理時間」「手間レベル」より上にあること
-  //   ④ 「よく使うタグ」が直書きの固定2択ではなく、実際の使用頻度で並んでいること
+  //   ⑤ 絞り込みパネルの先頭が「どのレシピから探すか」(お気に入り等の頻用条件)で、
+  //      「タグ」「調理時間」「手間レベル」より上にあること
+  //      (見出しは2026-08-10 便FFで「表示するレシピ」から改称)
+  //   ④ 「タグ」が直書きの固定2択ではなく、実際の使用頻度で並んでいること
+  //      (2026-08-10 便FFで見出しを「よく使うタグ」から改称し、チップに件数を併記)
   //   ⑥ 「自分で登録したレシピのみ」だけがONのときも「条件をクリア」が出て、押すと戻ること ---
   currentCheck = 'LISTPANEL-01'
   {
@@ -16699,17 +16701,17 @@ try {
       // ---------- ⑤ 絞り込みパネルの区分見出しと並び ----------
       await lpPage.locator('button[aria-label="絞り込み"]').click()
       await lpPage.waitForTimeout(300)
-      const shownTop = await topOf('表示するレシピ')
-      const tagTop = await topOf('よく使うタグ')
+      const shownTop = await topOf('どのレシピから探すか')
+      const tagTop = await topOf('タグ')
       const timeTop = await topOf('調理時間')
       const effortTop = await topOf('手間レベル')
       const favTop = await topOf('お気に入り')
       check(
-        'LISTPANEL-01(⑤) 「表示するレシピ」の区分見出しがある',
+        'LISTPANEL-01(⑤) 「どのレシピから探すか」の区分見出しがある',
         shownTop != null,
       )
       check(
-        'LISTPANEL-01(⑤) 「表示するレシピ」がよく使うタグ・調理時間・手間レベルより上にある',
+        'LISTPANEL-01(⑤) 「どのレシピから探すか」がタグ・調理時間・手間レベルより上にある',
         shownTop != null &&
           tagTop != null &&
           timeTop != null &&
@@ -16717,7 +16719,7 @@ try {
           shownTop < tagTop &&
           tagTop < timeTop &&
           timeTop < effortTop,
-        `表示するレシピ=${shownTop} よく使うタグ=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
+        `どのレシピから探すか=${shownTop} タグ=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
       )
       check(
         'LISTPANEL-01(⑤) 「お気に入り」が手間レベルより上に来た(旧: パネル末尾で見えなかった)',
@@ -16725,34 +16727,31 @@ try {
         `お気に入り=${favTop} 手間レベル=${effortTop}`,
       )
 
-      // ---------- ④ よく使うタグが使用頻度ベース ----------
-      // 「よく使うタグ」見出しの次のチップ行のラベルを読む
-      const tagChips = await lpPage.evaluate(() => {
-        const heading = Array.from(document.querySelectorAll('p')).find(
-          (n) => n.textContent?.trim() === 'よく使うタグ',
-        )
-        const row = heading?.nextElementSibling
-        if (!row) return []
-        return Array.from(row.querySelectorAll('button')).map((b) => b.textContent?.trim() ?? '')
-      })
+      // ---------- ④ タグが使用頻度ベース(2026-08-10 便FFで件数を併記) ----------
+      const tagChips = await lpPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="recipes-tag-chip"]')).map(
+          (b) => b.textContent?.trim() ?? '',
+        ),
+      )
       check(
-        'LISTPANEL-01(④) よく使うタグが直書きの2択(作り置き・お弁当)ではなくなっている',
+        'LISTPANEL-01(④) タグが直書きの2択(作り置き・お弁当)ではなくなっている',
         tagChips.length > 3,
         `チップ=${JSON.stringify(tagChips)}`,
       )
       check(
-        'LISTPANEL-01(④) 使用件数の多い順に並ぶ(基本レシピ109品: 和食66→作り置き44→定番28)',
-        JSON.stringify(tagChips.slice(0, 4)) === JSON.stringify(['すべて', '和食', '作り置き', '定番']),
+        'LISTPANEL-01(④) 件数つきで多い順に並ぶ(基本レシピ109品: 和食66→作り置き44→定番28)',
+        JSON.stringify(tagChips.slice(0, 4)) ===
+          JSON.stringify(['すべて', '和食 66', '作り置き 44', '定番 28']),
         `チップ=${JSON.stringify(tagChips)}`,
       )
       check(
-        'LISTPANEL-01(④) 上位8件までに収まる(「すべて」を除く)',
-        tagChips.length <= 9,
+        'LISTPANEL-01(④) 上位6件までに収まる(「すべて」を除く。件数を併記した分だけ8→6に減らした)',
+        tagChips.length <= 7,
         `チップ=${JSON.stringify(tagChips)}`,
       )
       // 実際に絞り込みとして効く(チップの文字列と絞り込みの判定が食い違っていない)
       const beforeTagCount = await lpPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
-      await lpPage.getByRole('button', { name: '和食', exact: true }).click()
+      await lpPage.getByRole('button', { name: '和食 66', exact: true }).click()
       await lpPage.waitForTimeout(400)
       const afterTagCount = await lpPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
       check(
@@ -16760,7 +16759,8 @@ try {
         afterTagCount > 0 && afterTagCount < beforeTagCount,
         `全件=${beforeTagCount} 和食=${afterTagCount}`,
       )
-      await lpPage.getByRole('button', { name: 'すべて', exact: true }).first().click()
+      // タグの「すべて」に戻す(「料理の種別」等にも同名のボタンがあるので、タグの行から選ぶ)
+      await lpPage.locator('[data-testid="recipes-tag-chip"]').first().click()
       await lpPage.waitForTimeout(300)
 
       // ---------- ⑥ 「自分で登録したレシピのみ」だけでも条件をクリアが出る ----------
@@ -16772,12 +16772,12 @@ try {
       await lpPage.getByRole('button', { name: '自分で登録したレシピのみ', exact: true }).click()
       await lpPage.waitForTimeout(400)
       // 自作レシピ0件だと一覧が0件になり、空状態側にも「条件をクリア」が出る。
-      // 見たいのは絞り込みパネルの中(=「表示するレシピ」の見出しより上)に出ているかどうか
+      // 見たいのは絞り込みパネルの中(=「どのレシピから探すか」の見出しより上)に出ているかどうか
       check(
         'LISTPANEL-01(⑥) 「自分で登録したレシピのみ」だけでも絞り込みパネルに「条件をクリア」が出る',
         await lpPage.evaluate(() => {
           const heading = Array.from(document.querySelectorAll('p')).find(
-            (n) => n.textContent?.trim() === '表示するレシピ',
+            (n) => n.textContent?.trim() === 'どのレシピから探すか',
           )
           const clears = Array.from(document.querySelectorAll('button')).filter(
             (b) => b.textContent?.trim() === '条件をクリア',
@@ -22023,7 +22023,7 @@ try {
       const etsPanel = await etsPage.evaluate(() => {
         const bar = document.querySelector('.recipes-searchbar').getBoundingClientRect()
         const head = [...document.querySelectorAll('p')].find(
-          (p) => p.textContent?.trim() === '表示するレシピ',
+          (p) => p.textContent?.trim() === 'どのレシピから探すか',
         )
         const hr = head?.getBoundingClientRect()
         return {
@@ -24830,6 +24830,524 @@ try {
       feHtml.indexOf('変換サーバー（Cloudflare Workers）') >
         feHtml.indexOf('データはどこに保存されますか'),
     )
+  }
+
+
+  // ============================================================================
+  // 便FF(2026-08-10 オーナー実機フィードバック)。6件それぞれに検査を持つ。
+  //  FF-COOK  : 「作った！」で食数を記録する（枠の食数＞設定「食数の設定」＞レシピの登録人数分）
+  //  FF-FILTER: 絞り込みの区分分け・タグの件数併記・料理の種別での絞り込み（既存の絞り込みも全部残る）
+  //  FF-PANEL : 並べ替え／絞り込みをスクロール途中で開いても位置が動かない（scrollYの実測）
+  //  FF-HOME  : ホームの「今日の献立」の下から献立の画面へ行ける
+  // ============================================================================
+
+  // --- FF-COOK: 「作った！」押下時の食数を記録に残す（オーナー「作った！では基本的に、
+  // 作った！押下時に設定されている食数を記録したい。設定がなければ個人設定に登録されている
+  // 食数を自動で反映して」）。枠に決めた食数が最優先で、決めていない品は設定の人数になることを、
+  // IndexedDBの記録を直接読んで確かめる ---
+  currentCheck = 'FF-COOK'
+  {
+    const fcBrowser = await chromium.launch()
+    const fcContext = await fcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fcPage = await fcContext.newPage()
+    fcPage.on('dialog', (dialog) => dialog.accept())
+    fcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FF-COOK] ${err.message}`)
+    })
+    /** 指定した料理の「作った記録」を新しい順で読む */
+    const fcLogs = (title) =>
+      fcPage.evaluate(async (t) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const all = await new Promise((resolve, reject) => {
+          const getAll = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+          getAll.onsuccess = () => resolve(getAll.result)
+          getAll.onerror = () => reject(getAll.error)
+        })
+        idb.close()
+        const hit = all.find((r) => r.title === t)
+        return (hit?.cookedLogs ?? []).map((l) => ({ date: l.date, servings: l.servings ?? null }))
+      }, title)
+    /** レシピ詳細から「今日の献立に追加」して、食事を選ぶ／決めない */
+    const fcAddToToday = async (title, slot) => {
+      await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(900)
+      await fcPage.getByText(title, { exact: true }).first().click()
+      await fcPage.waitForTimeout(800)
+      await fcPage.getByRole('button', { name: '今日の献立に追加' }).first().click()
+      await fcPage.waitForTimeout(500)
+      await fcPage.getByRole('button', { name: slot, exact: true }).click()
+      await fcPage.waitForTimeout(700)
+    }
+    try {
+      await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(2000) // 初回シード完了待ち
+
+      // 設定「食数の設定」を4人分にする（＝枠に食数を決めていない品の既定）
+      await fcPage.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(900)
+      await fcPage.getByLabel('食数の設定').selectOption('4')
+      await fcPage.waitForTimeout(600)
+
+      // ① 枠に食数を決めた品: 肉じゃがを今日の夕食に入れ、週の画面で食数を6人分にする
+      await fcAddToToday('肉じゃが', '夕食')
+      await fcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1500)
+      await fcPage.getByRole('button', { name: '週', exact: true }).click()
+      await fcPage.waitForTimeout(900)
+      const fcServingsBtn = fcPage.getByRole('button', { name: 'この行の食数を変える（いま4人分）' })
+      check(
+        'FF-COOK 前提: 食数を決めていない枠は設定「食数の設定」の4人分で出る',
+        (await fcServingsBtn.count()) >= 1,
+        `count=${await fcServingsBtn.count()}`,
+      )
+      await fcServingsBtn.first().click()
+      await fcPage.waitForTimeout(500)
+      await fcPage.getByRole('button', { name: '食数を増やす' }).click()
+      await fcPage.getByRole('button', { name: '食数を増やす' }).click()
+      await fcPage.waitForTimeout(300)
+      await fcPage.getByRole('button', { name: '決定', exact: true }).click()
+      await fcPage.waitForTimeout(800)
+      check(
+        'FF-COOK 前提: 枠の食数を6人分に変えられた',
+        (await fcPage.getByRole('button', { name: 'この行の食数を変える（いま6人分）' }).count()) >= 1,
+      )
+
+      // ② 枠を決めない品: ほうれん草のおひたしを「決めない」で今日の献立へ
+      await fcAddToToday('ほうれん草のおひたし', '決めない')
+
+      // 日の画面で1品ずつ「作った！」を押す
+      await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1800)
+      const fcCookedBtns = fcPage.getByRole('button', { name: '作った！', exact: true })
+      check(
+        'FF-COOK 前提: 日の画面に2品ぶんの「作った！」が並ぶ',
+        (await fcCookedBtns.count()) === 2,
+        `count=${await fcCookedBtns.count()}`,
+      )
+      await fcCookedBtns.first().click()
+      await fcPage.waitForTimeout(1000)
+      await fcPage
+        .getByRole('button', { name: '作った！', exact: true })
+        .first()
+        .click()
+      await fcPage.waitForTimeout(1200)
+
+      const fcNikuLogs = await fcLogs('肉じゃが')
+      const fcOhitashiLogs = await fcLogs('ほうれん草のおひたし')
+      check(
+        'FF-COOK 枠に決めた食数(6人分)がそのまま記録に残る',
+        fcNikuLogs.length === 1 && fcNikuLogs[0].servings === 6,
+        JSON.stringify(fcNikuLogs),
+      )
+      check(
+        'FF-COOK 枠に食数が無い品は設定「食数の設定」の人数(4人分)が自動で入る',
+        fcOhitashiLogs.length === 1 && fcOhitashiLogs[0].servings === 4,
+        JSON.stringify(fcOhitashiLogs),
+      )
+      // 記録側の項目名は「◯人分」(便FDで確定。献立の「食数」と混同しない)
+      await fcPage.goto(`${BASE}/#/history`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1200)
+      const fcHistoryText = (await fcPage.textContent('body')) ?? ''
+      check(
+        'FF-COOK 「作った記録」の一覧に「6人分」「4人分」が出る',
+        fcHistoryText.includes('6人分') && fcHistoryText.includes('4人分'),
+      )
+
+      // 食数が入っても「元に戻す」で取り消せる(便EHの二重記録・取り消し不能の再発防止)。
+      // 日の画面へ戻ってもう1品作り、トーストの「元に戻す」で記録が消えることを見る
+      await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(900)
+      await fcAddToToday('豚汁', '決めない')
+      await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1600)
+      await fcPage.getByRole('button', { name: '作った！', exact: true }).first().click()
+      await fcPage.waitForTimeout(900)
+      check(
+        'FF-COOK 前提: 食数つきで記録が付く',
+        (await fcLogs('豚汁')).length === 1,
+        JSON.stringify(await fcLogs('豚汁')),
+      )
+      await fcPage.getByRole('button', { name: '元に戻す' }).first().click()
+      await fcPage.waitForTimeout(1200)
+      check(
+        'FF-COOK 食数が入った記録もトーストの「元に戻す」で取り消せる',
+        (await fcLogs('豚汁')).length === 0,
+        JSON.stringify(await fcLogs('豚汁')),
+      )
+    } finally {
+      await fcBrowser.close()
+    }
+  }
+
+  // --- FF-FILTER: 絞り込みパネルの作り直し（オーナー「タグを羅列するなら、規則性が欲しい」
+  // 「在庫の食材、NG食材隠しのタグ、登録したレシピのみ、が同列で並んでいるのもわかりにくくしている」
+  // 「主菜副菜などでも絞り込みしたい」）。区分の見出しと並び・既存の絞り込みが1つも消えていないこと・
+  // タグの件数併記・料理の種別での絞り込みを見る ---
+  currentCheck = 'FF-FILTER'
+  {
+    const ffBrowser = await chromium.launch()
+    const ffContext = await ffBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ffPage = await ffContext.newPage()
+    ffPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FF-FILTER] ${err.message}`)
+    })
+    const ffCards = () => ffPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+    /** 見出し(p)の縦位置。パネルの中は縦に並ぶので、区分の並び順の判定に使う */
+    const ffHeadTop = (text) =>
+      ffPage.evaluate((t) => {
+        const el = Array.from(document.querySelectorAll('p')).find(
+          (n) => n.textContent?.trim() === t,
+        )
+        return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : null
+      }, text)
+    /** 見出しの直後の区分の中にあるボタンを押す(同名のボタンが他の区分にもあるため) */
+    const ffClickIn = (heading, label) =>
+      ffPage.evaluate(
+        ([h, t]) => {
+          const head = Array.from(document.querySelectorAll('p')).find(
+            (n) => n.textContent?.trim() === h,
+          )
+          const btn = Array.from(head?.nextElementSibling?.querySelectorAll('button') ?? []).find(
+            (b) => b.textContent?.trim() === t,
+          )
+          btn?.click()
+          return !!btn
+        },
+        [heading, label],
+      )
+    try {
+      // 「在庫の食材で絞る」チップを出すため、先に食材の在庫を1品「ある」にしておく
+      await ffPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ffPage.waitForTimeout(2000)
+      await ffPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await ffPage.waitForTimeout(700)
+      await ffPage.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await ffPage.waitForTimeout(400)
+      await ffPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ffPage.waitForTimeout(1200)
+      const ffTotal = await ffCards()
+      await ffPage.locator('button[aria-label="絞り込み"]').click()
+      await ffPage.waitForTimeout(700)
+
+      // ---------- 区分の見出しと並び ----------
+      const ffOrder = {
+        どのレシピから探すか: await ffHeadTop('どのレシピから探すか'),
+        料理の種別: await ffHeadTop('料理の種別'),
+        タグ: await ffHeadTop('タグ'),
+        食材で絞り込む: await ffHeadTop('食材で絞り込む'),
+        調理時間: await ffHeadTop('調理時間'),
+        手間レベル: await ffHeadTop('手間レベル'),
+      }
+      const ffTops = Object.values(ffOrder)
+      check(
+        'FF-FILTER 絞り込みが6つの区分に分かれ、それぞれに見出しが付いている',
+        ffTops.every((v) => v != null),
+        JSON.stringify(ffOrder),
+      )
+      check(
+        'FF-FILTER 区分の並びが「どのレシピから探すか→料理の種別→タグ→食材で絞り込む→調理時間→手間レベル」',
+        ffTops.every((v, i) => i === 0 || (v != null && ffTops[i - 1] != null && ffTops[i - 1] < v)),
+        JSON.stringify(ffOrder),
+      )
+
+      // ---------- 既存の絞り込みが1つも消えていない ----------
+      const ffBody = (await ffPage.textContent('body')) ?? ''
+      const ffKept = [
+        'お気に入り',
+        'NG食材を含むレシピを隠す',
+        '自分で登録したレシピのみ',
+        '在庫の食材で絞る',
+        '使いたい食材',
+        '食材の在庫から入れる',
+        '時短レシピのみに絞る',
+        '〜10分',
+        '超簡単',
+      ]
+      const ffMissing = ffKept.filter((t) => !ffBody.includes(t))
+      check(
+        'FF-FILTER 作り直しても既存の絞り込みが1つも消えていない',
+        ffMissing.length === 0,
+        `見つからない=${JSON.stringify(ffMissing)}`,
+      )
+
+      // ---------- 「在庫の食材で絞る」が食材の区分に移り、母集団の区分から外れた ----------
+      const ffPantryChipTop = await ffPage.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find(
+          (b) => b.textContent?.trim() === '在庫の食材で絞る',
+        )
+        return btn ? Math.round(btn.getBoundingClientRect().top + window.scrollY) : null
+      })
+      check(
+        'FF-FILTER 「在庫の食材で絞る」が「食材で絞り込む」の中にある(お気に入り等と同列ではない)',
+        ffPantryChipTop != null &&
+          ffOrder['食材で絞り込む'] != null &&
+          ffOrder['調理時間'] != null &&
+          ffPantryChipTop > ffOrder['食材で絞り込む'] &&
+          ffPantryChipTop < ffOrder['調理時間'],
+        `在庫の食材で絞る=${ffPantryChipTop} 食材で絞り込む=${ffOrder['食材で絞り込む']} 調理時間=${ffOrder['調理時間']}`,
+      )
+
+      // ---------- タグは件数つきで多い順 ----------
+      const ffTagChips = await ffPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="recipes-tag-chip"]')).map(
+          (b) => b.textContent?.trim() ?? '',
+        ),
+      )
+      const ffTagCounts = ffTagChips.slice(1).map((t) => Number(t.replace(/[^0-9]/g, '')))
+      check(
+        'FF-FILTER タグのチップに件数が付いている(並びの規則が画面から読める)',
+        ffTagCounts.length >= 3 && ffTagCounts.every((n) => Number.isFinite(n) && n > 0),
+        `チップ=${JSON.stringify(ffTagChips)}`,
+      )
+      check(
+        'FF-FILTER タグは件数の多い順に並ぶ',
+        ffTagCounts.every((n, i) => i === 0 || ffTagCounts[i - 1] >= n),
+        `チップ=${JSON.stringify(ffTagChips)}`,
+      )
+
+      // ---------- 料理の種別で絞り込める ----------
+      const ffByType = {}
+      for (const label of ['主菜', '副菜', '汁物', 'その他']) {
+        check(`FF-FILTER 「料理の種別」に「${label}」がある`, await ffClickIn('料理の種別', label))
+        await ffPage.waitForTimeout(400)
+        ffByType[label] = await ffCards()
+      }
+      check(
+        'FF-FILTER 主菜・副菜で件数がそれぞれ絞られる(0件でも全件でもない)',
+        ffByType['主菜'] > 0 &&
+          ffByType['主菜'] < ffTotal &&
+          ffByType['副菜'] > 0 &&
+          ffByType['副菜'] < ffTotal,
+        `全件=${ffTotal} ${JSON.stringify(ffByType)}`,
+      )
+      check(
+        'FF-FILTER 4区分を合わせるとちょうど全件になる(どの料理も必ずどれか1つに入る)',
+        Object.values(ffByType).reduce((a, b) => a + b, 0) === ffTotal,
+        `全件=${ffTotal} ${JSON.stringify(ffByType)}`,
+      )
+      // 「すべて」に戻せる＝絞り込みを外す手段がある
+      await ffClickIn('料理の種別', 'すべて')
+      await ffPage.waitForTimeout(400)
+      check('FF-FILTER 「すべて」に戻すと全件に戻る', (await ffCards()) === ffTotal)
+    } finally {
+      await ffBrowser.close()
+    }
+  }
+
+  // --- FF-PANEL: 並べ替え／絞り込みを一覧の上に重ねて出す（オーナー「スクロール途中で開いても
+  // 上に戻されないようにして。一覧の上に重ねて出現させる感じ？」）。
+  // スクロール位置(window.scrollY)を開閉の前後で実測し、1pxも動かないことを見張る。
+  // あわせて、貼り付く帯の裏に潜らない・下のタブナビと重ならない・画面からはみ出す長さのときは
+  // パネルの中だけがスクロールすることも確かめる（便EO/便ETの位置合わせと干渉していない） ---
+  currentCheck = 'FF-PANEL'
+  {
+    const fpBrowser = await chromium.launch()
+    const fpContext = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fpPage = await fpContext.newPage()
+    fpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FF-PANEL] ${err.message}`)
+    })
+    const fpY = () => fpPage.evaluate(() => Math.round(window.scrollY))
+    const fpGeom = (testid) =>
+      fpPage.evaluate((id) => {
+        const panel = document.querySelector(`[data-testid="${id}"]`)
+        const bar = document.querySelector('.recipes-searchbar')
+        if (!panel || !bar) return null
+        const p = panel.getBoundingClientRect()
+        const b = bar.getBoundingClientRect()
+        let navTop = window.innerHeight
+        for (const el of document.querySelectorAll('[data-app-bottom-bar]')) {
+          const r = el.getBoundingClientRect()
+          if (r.height > 0) navTop = Math.min(navTop, r.top)
+        }
+        return {
+          panelTop: Math.round(p.top),
+          panelBottom: Math.round(p.bottom),
+          barBottom: Math.round(b.bottom),
+          navTop: Math.round(navTop),
+          scrollsInside: panel.scrollHeight > panel.clientHeight + 1,
+        }
+      }, testid)
+    try {
+      await fpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(2000)
+
+      // 一覧の途中まで送ってから開く
+      await fpPage.evaluate(() => window.scrollTo(0, 1200))
+      await fpPage.waitForTimeout(500)
+      const fpBefore = await fpY()
+      await fpPage.locator('button[aria-label="絞り込み"]').click()
+      await fpPage.waitForTimeout(1200) // 開くアニメ(220ms)+位置合わせが走るなら十分な時間
+      const fpAfterOpenFilter = await fpY()
+      check(
+        'FF-PANEL スクロール途中で絞り込みを開いても位置が動かない',
+        fpBefore > 1000 && fpAfterOpenFilter === fpBefore,
+        `開く前=${fpBefore} 開いた後=${fpAfterOpenFilter}`,
+      )
+      const fpFilterGeom = await fpGeom('recipes-filter-panel')
+      check(
+        'FF-PANEL 絞り込みパネルが貼り付く検索まどの裏に潜らない',
+        fpFilterGeom != null && fpFilterGeom.panelTop >= fpFilterGeom.barBottom,
+        JSON.stringify(fpFilterGeom),
+      )
+      check(
+        'FF-PANEL 絞り込みパネルが下のタブナビと重ならない',
+        fpFilterGeom != null && fpFilterGeom.panelBottom <= fpFilterGeom.navTop,
+        JSON.stringify(fpFilterGeom),
+      )
+      check(
+        'FF-PANEL 画面に収まらない長さはパネルの中だけがスクロールする',
+        fpFilterGeom != null && fpFilterGeom.scrollsInside === true,
+        JSON.stringify(fpFilterGeom),
+      )
+      // パネルの中を下までスクロールしても、後ろの一覧は動かない
+      await fpPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="recipes-filter-panel"]')
+        el.scrollTo(0, el.scrollHeight)
+      })
+      await fpPage.waitForTimeout(500)
+      check(
+        'FF-PANEL パネルの中を下まで送っても後ろの一覧は動かない',
+        (await fpY()) === fpBefore,
+        `開く前=${fpBefore} 送った後=${await fpY()}`,
+      )
+      await fpPage.locator('button[aria-label="絞り込み"]').click()
+      await fpPage.waitForTimeout(900)
+      check(
+        'FF-PANEL 絞り込みを閉じても位置が動かない',
+        (await fpY()) === fpBefore,
+        `開く前=${fpBefore} 閉じた後=${await fpY()}`,
+      )
+
+      // 並べ替えも同じ
+      await fpPage.locator('button[aria-label="並び替え"]').click()
+      await fpPage.waitForTimeout(1200)
+      const fpAfterOpenSort = await fpY()
+      check(
+        'FF-PANEL スクロール途中で並べ替えを開いても位置が動かない',
+        fpAfterOpenSort === fpBefore,
+        `開く前=${fpBefore} 開いた後=${fpAfterOpenSort}`,
+      )
+      const fpSortGeom = await fpGeom('recipes-sort-panel')
+      check(
+        'FF-PANEL 並べ替えパネルも帯の裏に潜らず、タブナビとも重ならない',
+        fpSortGeom != null &&
+          fpSortGeom.panelTop >= fpSortGeom.barBottom &&
+          fpSortGeom.panelBottom <= fpSortGeom.navTop,
+        JSON.stringify(fpSortGeom),
+      )
+      await fpPage.locator('button[aria-label="並び替え"]').click()
+      await fpPage.waitForTimeout(900)
+      check(
+        'FF-PANEL 並べ替えを閉じても位置が動かない',
+        (await fpY()) === fpBefore,
+        `開く前=${fpBefore} 閉じた後=${await fpY()}`,
+      )
+
+      // 一覧の先頭で開いたときも、帯の裏に潜らず・タブナビと重ならない
+      await fpPage.evaluate(() => window.scrollTo(0, 0))
+      await fpPage.waitForTimeout(400)
+      await fpPage.locator('button[aria-label="絞り込み"]').click()
+      await fpPage.waitForTimeout(1200)
+      const fpTopGeom = await fpGeom('recipes-filter-panel')
+      check(
+        'FF-PANEL 一覧の先頭で開いてもパネルが帯とタブナビの間に収まる',
+        fpTopGeom != null &&
+          fpTopGeom.panelTop >= fpTopGeom.barBottom &&
+          fpTopGeom.panelBottom <= fpTopGeom.navTop,
+        JSON.stringify(fpTopGeom),
+      )
+      check('FF-PANEL 一覧の先頭で開いてもページは動かない', (await fpY()) === 0, `y=${await fpY()}`)
+    } finally {
+      await fpBrowser.close()
+    }
+  }
+
+  // --- FF-HOME: ホームの「今日の献立」の下に、献立の画面への行き先を置く（オーナー
+  // 「今日の献立の下に、献立ページへ移動リンクをつけたい。ボタンだと無駄に目立ってしまう」）。
+  // ボタンではなくリンクであること・「タブ」という語を使っていないこと・押すと献立の画面へ行くこと ---
+  currentCheck = 'FF-HOME'
+  {
+    const fhBrowser = await chromium.launch()
+    const fhContext = await fhBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fhPage = await fhContext.newPage()
+    fhPage.on('dialog', (dialog) => dialog.accept())
+    fhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FF-HOME] ${err.message}`)
+    })
+    try {
+      await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fhPage.waitForTimeout(2000)
+      // 今日の献立が空のうちはウィジェットごと出ない＝行き先も出ない
+      await fhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await fhPage.waitForTimeout(1500)
+      check(
+        'FF-HOME 今日の献立が空のうちは行き先も出ない(ウィジェットごと出ないため)',
+        (await fhPage.locator('[data-testid="home-mealplan-link"]').count()) === 0,
+      )
+      // 1品入れるとウィジェットが出て、その下に行き先が付く
+      await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fhPage.waitForTimeout(900)
+      await fhPage.getByText('肉じゃが', { exact: true }).first().click()
+      await fhPage.waitForTimeout(800)
+      await fhPage.getByRole('button', { name: '今日の献立に追加' }).first().click()
+      await fhPage.waitForTimeout(500)
+      await fhPage.getByRole('button', { name: '決めない', exact: true }).click()
+      await fhPage.waitForTimeout(700)
+      await fhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await fhPage.waitForTimeout(1800)
+      const fhLink = fhPage.locator('[data-testid="home-mealplan-link"]')
+      check('FF-HOME 「今日の献立」の下に献立の画面への行き先がある', (await fhLink.count()) === 1)
+      const fhInfo = await fhPage.evaluate(() => {
+        const link = document.querySelector('[data-testid="home-mealplan-link"]')
+        const title = Array.from(document.querySelectorAll('h2')).find((h) =>
+          h.textContent?.includes('今日の献立'),
+        )
+        if (!link || !title) return null
+        return {
+          tag: link.tagName,
+          text: link.textContent?.trim() ?? '',
+          underline: getComputedStyle(link).textDecorationLine.includes('underline'),
+          // 目立つ塗りのボタン(bg-accent)ではないこと
+          filled: link.className.includes('bg-accent'),
+          belowTitle:
+            link.getBoundingClientRect().top > title.getBoundingClientRect().bottom,
+        }
+      })
+      check(
+        'FF-HOME 行き先はボタンではなく下線つきの文字リンク(塗りつぶしのボタンにしない)',
+        fhInfo != null && fhInfo.tag === 'A' && fhInfo.underline === true && fhInfo.filled === false,
+        JSON.stringify(fhInfo),
+      )
+      check(
+        'FF-HOME 行き先は「今日の献立」の見出しより下にある',
+        fhInfo != null && fhInfo.belowTitle === true,
+        JSON.stringify(fhInfo),
+      )
+      check(
+        'FF-HOME 文言は「献立を開く」(「タブ」という内部の言い方は使わない)',
+        fhInfo != null && fhInfo.text === '献立を開く' && !fhInfo.text.includes('タブ'),
+        JSON.stringify(fhInfo),
+      )
+      await fhLink.click()
+      await fhPage.waitForTimeout(1500)
+      check(
+        'FF-HOME 押すと献立の画面(日の表示)へ移動する',
+        (await fhPage.evaluate(() => location.hash)).startsWith('#/meal-plan') &&
+          ((await fhPage.textContent('body')) ?? '').includes('今日の献立'),
+        `hash=${await fhPage.evaluate(() => location.hash)}`,
+      )
+    } finally {
+      await fhBrowser.close()
+    }
   }
 
 } catch (err) {
