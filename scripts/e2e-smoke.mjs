@@ -21604,7 +21604,15 @@ try {
   //  (c) ページ内のリンク・画像がすべて生きている(リンク切れ無し)
   //  (d) ライト/ダークの両方で本文が読める(本文と背景のコントラスト比4.5:1以上)
   //  (e) 390px幅で横にはみ出さない
-  //  (f) 紹介ページ・使い方ページ・ホーム画面追加ページからの導線があり、sitemapに載っている ---
+  //  (f) 紹介ページ・使い方ページ・ホーム画面追加ページからの導線があり、sitemapに載っている
+  //  (g) 2026-08-10 便FH「長文ばかりで読みづらい」の対応後の作り(読みやすさ)を固定する:
+  //      ・g-1 読み飛ばしても要旨が拾えるよう、本文のかたまりが長文に戻っていない
+  //        (段落・箇条書き1件あたり100字未満。折りたたみの中だけ例外＝畳んだ但し書き)
+  //      ・g-2 「消えるもの/残るもの」は見くらべの表(table.cmp)で両方書く
+  //      ・g-3 読まずに事故る6項目は**折りたたみの中に入れない**(details配下に無いこと)。
+  //        規約F両記・iPhoneのブラウザ/ホーム画面の分離・クラウドは同期でない・
+  //        「今のデータに追加」で書き換えが入らない・解錠コードの共有設定・定期書き出しの目安と置き場所
+  //      ・g-4 細かい但し書きは折りたたみに入れて既定で閉じている ---
   currentCheck = 'MULTIDEV-01'
   {
     const mdBrowser = await chromium.launch()
@@ -21668,7 +21676,13 @@ try {
           `h1=${evInfo.h1} / title=${evInfo.title}`,
         )
         if (scheme === 'light') {
-          for (const kw of ['機種変更', '2台目の端末', 'クラウドを使うときに気をつけること', '定期的に書き出しておく']) {
+          for (const kw of [
+            '機種変更',
+            '読み込みは「追加」と「上書き」の2種類',
+            '2台目の端末',
+            'クラウドを使うときに気をつけること',
+            '定期的に書き出しておく',
+          ]) {
             check(`MULTIDEV-01(b) ${kw} の節がある`, evInfo.heads.some((h) => h.includes(kw)), evInfo.heads.join(' / '))
           }
           // 規約F: 「消えるもの」と「残るもの」を両方書いているか
@@ -21677,6 +21691,118 @@ try {
           check(
             'MULTIDEV-01(b) iPhone・iPadでブラウザとホーム画面のデータが分かれることに触れている',
             evText.includes('ホーム画面のアイコンから開いたうちレシピでは、保存されるデータが別々になります'),
+          )
+
+          // (g-2) 「追加」と「上書き」の違いを見くらべの表で出す(2026-08-10 便FH)。
+          // 以前は同じ内容を機種変更の注意カードとクラウドの箇条書きの2箇所に長文で書いていた
+          const evTable = await evPage.evaluate(() => {
+            const t = document.querySelector('table.cmp')
+            if (!t) return null
+            return {
+              cols: [...t.querySelectorAll('thead th')].map((th) => th.textContent.trim()),
+              rows: [...t.querySelectorAll('tbody tr')].map((tr) => [...tr.children].map((c) => c.textContent.trim())),
+            }
+          })
+          check('MULTIDEV-01(g-2) 「追加」と「上書き」の見くらべの表がある', evTable !== null)
+          if (evTable) {
+            const evRow = (name) => evTable.rows.find((r) => r[0] === name)
+            check(
+              'MULTIDEV-01(g-2) 表の列が「今のデータに追加」「データを上書き」',
+              evTable.cols.includes('今のデータに追加') && evTable.cols.includes('データを上書き'),
+              JSON.stringify(evTable.cols),
+            )
+            check(
+              'MULTIDEV-01(g-2) 表に「消えるもの」「残るもの」の行がある',
+              !!evRow('消えるもの') && !!evRow('残るもの'),
+              JSON.stringify(evTable.rows.map((r) => r[0])),
+            )
+            check(
+              'MULTIDEV-01(g-2) 上書きで消えるのはレシピ・作った記録・食材の価格',
+              evRow('消えるもの')?.[2] === '読み込む端末のレシピ・作った記録・食材の価格',
+              evRow('消えるもの')?.[2],
+            )
+            check(
+              'MULTIDEV-01(g-2) 上書きでもPro版の解錠コードは残る',
+              evRow('残るもの')?.[2]?.includes('Pro版の解錠コード'),
+              evRow('残るもの')?.[2],
+            )
+            check(
+              'MULTIDEV-01(g-2) 「今のデータに追加」は1件も消えない',
+              evRow('消えるもの')?.[1]?.includes('1件も消えません'),
+              evRow('消えるもの')?.[1],
+            )
+            check(
+              'MULTIDEV-01(g-2) 「今のデータに追加」では同じ料理名のレシピが今の内容のまま',
+              evRow('同じ料理名のレシピ')?.[1] === '今の内容のまま',
+              evRow('同じ料理名のレシピ')?.[1],
+            )
+          }
+
+          // (g-3) 読まずに事故る項目が折りたたみ(details)の中に隠れていないこと。
+          // 短くする改修のたびに「畳んで短く見せる」誘惑が働く箇所なので機械で止める
+          const evMustShow = [
+            ['規約F・消えるもの', '消えるもの'],
+            ['規約F・残るもの', '残るもの'],
+            ['上書き前の控えと「元に戻す」', '設定の画面を開いている間は「元に戻す」で戻せます'],
+            ['iPhone・iPadでブラウザとホーム画面のデータが分かれる', 'ホーム画面のアイコンから開いたうちレシピでは、保存されるデータが別々になります'],
+            ['クラウドに置いても同期ではない', 'クラウドに置いても、同期にはなりません'],
+            ['クラウドのファイルを自動で読み書きしない', '自動で読み書きすることはありません'],
+            ['「今のデータに追加」では同じ料理名のレシピが変わらない', '同じ料理名のレシピは今の内容のまま'],
+            ['「今のデータに追加」では書き換えた材料・手順が入らない', '書き換えた材料や手順は入りません'],
+            ['バックアップファイルに解錠コードが含まれる', 'バックアップファイルにはPro版の解錠コードが含まれます'],
+            ['クラウドの共有設定の注意', 'リンクを知っている人が開ける共有設定にしないでください'],
+            ['定期的な書き出しの目安', '目安は月に1回'],
+            ['置き場所を端末の中だけにしない', '置き場所は、使っている端末の中だけにしない'],
+          ]
+          const evPlacement = await evPage.evaluate((phrases) => {
+            const norm = (s) => s.replace(/\s+/g, '')
+            const els = [...document.querySelectorAll('main *')]
+            return phrases.map(([label, text]) => {
+              const needle = norm(text)
+              const hits = els.filter((el) => norm(el.textContent).includes(needle))
+              return {
+                label,
+                found: hits.length > 0,
+                outside: hits.some((el) => !el.closest('details')),
+              }
+            })
+          }, evMustShow)
+          for (const ph of evPlacement) {
+            check(`MULTIDEV-01(g-3) ${ph.label} がページにある`, ph.found)
+            check(`MULTIDEV-01(g-3) ${ph.label} が折りたたみの中に畳まれていない`, ph.outside)
+          }
+
+          // (g-1) 長文に戻っていないか。折りたたみの中(畳んである但し書き)は対象外
+          const evLong = await evPage.evaluate(() => {
+            const blocks = [...document.querySelectorAll('main p, main li, main figcaption')].filter(
+              (el) => !el.closest('details') && !el.querySelector('p, ul, ol, figure'),
+            )
+            const lens = blocks
+              .map((el) => ({
+                len: [...el.textContent.replace(/\s+/g, ' ').trim()].length,
+                text: el.textContent.trim().slice(0, 30),
+              }))
+              .sort((a, b) => b.len - a.len)
+            return { max: lens[0], over100: lens.filter((l) => l.len >= 100).length, count: lens.length }
+          })
+          check(
+            'MULTIDEV-01(g-1) 本文のかたまりが100字以上の長文になっていない',
+            evLong.over100 === 0,
+            `最長=${evLong.max?.len}字「${evLong.max?.text}」/ 100字以上=${evLong.over100}件 / 対象=${evLong.count}件`,
+          )
+
+          // (g-4) 細かい但し書きは折りたたみへ。既定では閉じている
+          const evDetails = await evPage.evaluate(() =>
+            [...document.querySelectorAll('details')].map((d) => ({
+              open: d.open,
+              summary: d.querySelector('summary')?.textContent?.trim() ?? '',
+            })),
+          )
+          check('MULTIDEV-01(g-4) 細かい但し書きを折りたたみに入れている', evDetails.length >= 2, `件数=${evDetails.length}`)
+          check(
+            'MULTIDEV-01(g-4) 折りたたみは既定で閉じていて見出しが付いている',
+            evDetails.length > 0 && evDetails.every((d) => d.open === false && d.summary.length > 0),
+            JSON.stringify(evDetails),
           )
         }
         check(
@@ -21719,7 +21845,8 @@ try {
               exists: !!document.querySelector(a.getAttribute('href')),
             })),
           )
-          check('MULTIDEV-01(c) 飛び先チップが4つあり、行き先がすべて実在する', evAnchors.length === 4 && evAnchors.every((a) => a.exists), JSON.stringify(evAnchors))
+          // 2026-08-10 便FH: 「読み込みは「追加」と「上書き」の2種類」の節を足したのでチップは5つ
+          check('MULTIDEV-01(c) 飛び先チップが5つあり、行き先がすべて実在する', evAnchors.length === 5 && evAnchors.every((a) => a.exists), JSON.stringify(evAnchors))
         }
         await evContext.close()
       }
