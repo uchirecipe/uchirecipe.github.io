@@ -1201,6 +1201,24 @@ export function recipeDishType(r: Recipe): DishType {
   return r.dishType ?? guessDishType(r)
 }
 
+/**
+ * レシピを献立の行の役割（主菜/副菜/汁物/その他）に置き換える（2026-08-11 便FP）。
+ *
+ * 直したバグ: レシピ詳細の「今日の献立に追加」で朝食/昼食/夕食を選んで入れた品が、
+ * 料理の種別にかかわらず**すべて主菜の行**になっていた（週タブで「ほうれん草のおひたし」も
+ * 「豆腐とわかめの味噌汁」も主菜と表示された）。役割を呼び出し側で 'main' に決め打ちしていた
+ * のが原因で、レシピ側の「料理の種別」を見ていなかった。
+ *
+ * 種別（DishType）と役割（MealRole）は区分名も並びも同じにしてあり、違うのは
+ * 種別の「その他（おやつ・ご飯のお供など）」が dessert という名前を持つ1点だけなので、
+ * ここで役割側の 'other' に読み替える。
+ * 未設定のレシピは recipeDishType と同じく登録時の初期値提案（dishTypeGuess）に倒す。
+ */
+export function mealRoleForRecipe(r: Recipe): MealRole {
+  const dishType = recipeDishType(r)
+  return dishType === 'dessert' ? 'other' : dishType
+}
+
 /** planRoleAssign の結果（呼び出し側はこれを見て DB 操作を1つだけ行う） */
 export type RoleAssignPlan =
   | { kind: 'duplicate' }
