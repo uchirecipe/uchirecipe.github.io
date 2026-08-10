@@ -43,6 +43,8 @@ import {
   type TimelineRecipe,
 } from '../logic/cookNavi'
 import type { NaviIngredientAmount } from '../logic/naviIngredients'
+import { recipeNoteStepKey, type RecipeNote } from '../logic/naviRecipeNotes'
+import NaviRecipeNotes from './NaviRecipeNotes'
 import {
   advanceCursor,
   backCursor,
@@ -184,6 +186,11 @@ type Props = {
   stepIngredients: Map<string, NaviIngredientAmount[]>
   /** 手順本文の材料名に下線を引くための名前一覧（レシピごと） */
   ingredientNamesByRecipeId: Map<number, string[]>
+  /**
+   * レシピ本体のメモを手順ごとに割り当てたもの（2026-08-11 便FM）。
+   * キーは手順ごとの材料と同じ `${recipeId}-${stepIndex}`。無い手順には何も出さない
+   */
+  recipeNotes: Map<string, RecipeNote[]>
   /** カーソルを動かす（呼び出し側が覚え書きに書く） */
   onMove: (next: CookCursor) => void
   /**
@@ -229,6 +236,7 @@ export default function CookSessionOverlay({
   cursor,
   stepIngredients,
   ingredientNamesByRecipeId,
+  recipeNotes,
   onMove,
   onPullStep,
   onExit,
@@ -424,6 +432,8 @@ export default function CookSessionOverlay({
   const currentStepLabel = recipeStepLabel(item)
   const ingredients = stepIngredients.get(`${item.recipeId}-${item.stepIndex}`) ?? []
   const ingredientNames = ingredientNamesByRecipeId.get(item.recipeId) ?? []
+  /** この手順に割り当てたレシピ本体のメモ（2026-08-11 便FM） */
+  const currentRecipeNotes = recipeNotes.get(recipeNoteStepKey(item)) ?? []
   const showWaitTimerButton =
     isWait &&
     !item.longRest &&
@@ -676,6 +686,15 @@ export default function CookSessionOverlay({
           </div>
         )}
 
+        {/* レシピ本体のメモ（2026-08-11 便FM）。段取りの一覧と同じ位置（本文→手順の注意書き→
+            ここ→材料→待ちブロック）に置く。いまやる1手順を大きく出す設計を崩さないよう、
+            出すのは**この手順に割り当てた行だけ**で、長いときはこの枠の中だけを送る */}
+        <NaviRecipeNotes
+          notes={currentRecipeNotes}
+          testId="cook-session-recipe-memo"
+          className="max-h-[24vh] w-full overflow-y-auto"
+        />
+
         {/* この手順で使う材料と分量（3品ぶんの材料が混ざるのを防ぐ。色はその料理の色） */}
         {ingredients.length > 0 && (
           <div
@@ -871,6 +890,14 @@ export default function CookSessionOverlay({
                       {next.memo && (
                         <MemoText text={next.memo} className="mt-1 text-xs text-ink-muted" />
                       )}
+                      {/* その手順に割り当てたレシピ本体のメモ（2026-08-11 便FM）。
+                          「次に何をするか」を先に確かめる場所なので、その手順で読む行も
+                          ここで読めるようにする（開いた人だけが見る＝面積は増やさない） */}
+                      <NaviRecipeNotes
+                        notes={recipeNotes.get(recipeNoteStepKey(next)) ?? []}
+                        testId="cook-session-peek-recipe-memo"
+                        className="mt-1"
+                      />
                     </div>
                   )}
                 </Collapse>

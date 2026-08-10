@@ -26655,6 +26655,184 @@ try {
     }
   }
 
+  // --- FM-00〜09: レシピ本体のメモが並行調理ナビに1行も出ていなかった(2026-08-11 便FM) ---
+  //     レシピ詳細では出ている recipe.memo が、段取りの一覧にも調理中モードにも描かれておらず、
+  //     同梱109品中94品が持つ交差汚染・火通し・保存の注記が並行調理でだけ消えていた。
+  //     全手順に出すと読み飛ばされるので、行の中身で寄せ先を決めて1手順に1回だけ出す。
+  currentCheck = 'FM-01'
+  {
+    const fmBrowser = await chromium.launch()
+    const fmContext = await fmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fmPage = await fmContext.newPage()
+    fmPage.on('dialog', (d) => void d.accept())
+    fmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FM] ${err.message}`)
+    })
+    fmPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FM] ${t}`)
+    })
+    try {
+      // 同梱の基本レシピ(親子丼・ほうれん草のおひたし)を今日の献立に入れる。
+      // 3品目は**メモを持たない自作レシピ**＝ユーザー登録のレシピで壊れないことも同時に見る
+      await fmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fmPage.waitForTimeout(2000)
+      const seeded = await fmPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const all = await P(store('recipes').getAll())
+        const found = []
+        let addedAt = Date.now()
+        for (const title of ['親子丼', 'ほうれん草のおひたし']) {
+          const recipe = all.find((r) => r.title === title)
+          if (!recipe) continue
+          found.push(title)
+          await P(store('todayList').add({ recipeId: recipe.id, addedAt: addedAt++ }))
+        }
+        const ownId = await P(store('recipes').add({
+          title: 'FMメモ無し副菜', servings: 2, effortLevel: 'normal', tags: [], isFavorite: false,
+          cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+          ingredients: [{ name: 'キャベツ', amount: '2', unit: '枚' }],
+          steps: [{ text: 'キャベツをせん切りにする。' }, { text: '塩昆布とごま油であえる。' }],
+        }))
+        await P(store('todayList').add({ recipeId: ownId, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return found
+      })
+      check('FM-00 同梱の親子丼・ほうれん草のおひたしを今日の献立に入れられた', seeded.length === 2, JSON.stringify(seeded))
+
+      await fmPage.goto(`${BASE}/#/cook-navi`)
+      await fmPage.reload({ waitUntil: 'networkidle' })
+      await fmPage.waitForTimeout(1200)
+      await fmPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fmPage.waitForTimeout(800)
+
+      const noZw = (t) => (t ?? '').replace(/​/g, '')
+      // オーナー報告の実文（親子丼の本体メモ）。この1文が画面に出ることが今回の合格条件
+      const WASH = '生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'
+      const HEAT = '卵は半熟で仕上げるので、お子様・高齢者・妊娠中の方や体調に不安があるときは、完全に火を通すこと。'
+      const KEEP = '清潔な保存容器に入れて早めに冷蔵庫へ入れ、冷蔵庫で2日ほどで食べ切ること。'
+
+      // 突き合わせは innerText ではなく textContent で行う。メモの1文は画面上で
+      // 文節の切れ目から折り返されるため、innerText には「、」の位置に改行が入り、
+      // 原文どおりの1文としては一致しない（見えている文字は同じ）
+      const cardTexts = (
+        await fmPage.locator('ol > li').evaluateAll((els) => els.map((el) => el.textContent))
+      ).map(noZw)
+      check(
+        'FM-01 段取りの一覧にレシピ本体の注意書きが出る（親子丼の「生の鶏肉に…洗うこと。」）',
+        cardTexts.some((t) => t.includes(WASH)),
+        `カード数=${cardTexts.length}`,
+      )
+      check(
+        'FM-02 その行が出るのは生の鶏肉を扱う手順1枚だけ（全手順には出さない）',
+        cardTexts.filter((t) => t.includes(WASH)).length === 1 &&
+          cardTexts.find((t) => t.includes(WASH))?.includes('鶏肉は一口大'),
+        cardTexts.find((t) => t.includes(WASH))?.replace(/\n/g, ' / '),
+      )
+      check(
+        'FM-03 火通しの行は卵を入れる手順に出る',
+        cardTexts.filter((t) => t.includes(HEAT)).length === 1 &&
+          cardTexts.find((t) => t.includes(HEAT))?.includes('溶き卵'),
+        cardTexts.find((t) => t.includes(HEAT))?.replace(/\n/g, ' / '),
+      )
+      check(
+        'FM-04 保存の行はその品の最後の手順（完成の印が出る手順）に出る',
+        cardTexts.filter((t) => t.includes(KEEP)).length === 1 &&
+          cardTexts.find((t) => t.includes(KEEP))?.includes('完成'),
+        cardTexts.find((t) => t.includes(KEEP))?.replace(/\n/g, ' / '),
+      )
+      check(
+        'FM-05 本体のメモが無い自作レシピの手順には「レシピのメモ」の枠を出さない',
+        cardTexts
+          .filter((t) => t.includes('キャベツをせん切りにする') || t.includes('塩昆布とごま油であえる'))
+          .every((t) => !t.includes('レシピのメモ')),
+        JSON.stringify(
+          cardTexts.filter((t) => t.includes('塩昆布とごま油であえる')).map((t) => t.replace(/\n/g, ' / ')),
+        ),
+      )
+
+      // 調理中モードでも同じ行が同じ手順に出る（2画面で1つの割り当てを共有している）
+      await fmPage.locator('[data-testid="cook-session-start"]').click()
+      await fmPage.waitForTimeout(600)
+      // いま大きく出している手順だけを見る（画面下部の「他の品の次の手順」にも
+      // 手順本文が出るので、画面全体の文字で位置を判定すると先頭で止まってしまう）
+      const currentStep = async () =>
+        noZw(await fmPage.textContent('[data-testid="cook-session-step-text"]'))
+      const sessionNote = async () =>
+        (await fmPage.locator('[data-testid="cook-session-recipe-memo"]').count()) === 0
+          ? ''
+          : noZw(await fmPage.textContent('[data-testid="cook-session-recipe-memo"]'))
+      check(
+        'FM-06 調理中モードの先頭（湯を沸かす）にはレシピ本体のメモを出さない',
+        (await sessionNote()) === '',
+        `手順=${await currentStep()}`,
+      )
+      // 「他の品の次の手順」を開いたときも、その手順に付いた行が読める。
+      // 先頭の位置では親子丼の次の手順が「鶏肉は一口大…」＝洗う行が付いた手順なので、
+      // まだそこへ進んでいなくても、のぞいた時点で読めることを見る
+      let peeked = ''
+      const otherRows = fmPage.locator('[data-testid="cook-session-other-row"]')
+      for (let j = 0; j < (await otherRows.count()); j++) {
+        await otherRows.nth(j).click()
+        await fmPage.waitForTimeout(350)
+        if ((await fmPage.locator('[data-testid="cook-session-peek-recipe-memo"]').count()) > 0) {
+          peeked = noZw(await fmPage.textContent('[data-testid="cook-session-peek-recipe-memo"]'))
+          await otherRows.nth(j).click()
+          await fmPage.waitForTimeout(200)
+          break
+        }
+        await otherRows.nth(j).click()
+        await fmPage.waitForTimeout(150)
+      }
+      check(
+        'FM-07 他の品の次の手順を開くと、その手順のレシピ本体のメモも読める',
+        peeked.includes(WASH),
+        `のぞき見=${peeked}`,
+      )
+      let reachedWash = false
+      for (let i = 0; i < 16; i++) {
+        if ((await currentStep()).includes('鶏肉は一口大')) { reachedWash = true; break }
+        if ((await fmPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await fmPage.locator('[data-testid="cook-session-next"]').click()
+        await fmPage.waitForTimeout(250)
+      }
+      const washNote = await sessionNote()
+      check(
+        'FM-08 調理中モードでも「生の鶏肉に…洗うこと。」が出る（生の鶏肉を扱う手順で）',
+        reachedWash && washNote.includes(WASH),
+        `手順=${await currentStep()} / メモ=${washNote}`,
+      )
+      let reachedHeat = false
+      for (let i = 0; i < 16; i++) {
+        if ((await currentStep()).includes('溶き卵')) { reachedHeat = true; break }
+        if ((await fmPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await fmPage.locator('[data-testid="cook-session-next"]').click()
+        await fmPage.waitForTimeout(250)
+      }
+      const heatNote = await sessionNote()
+      check(
+        'FM-09 調理中モードで火通しの行は卵を入れる手順に出る（洗う行はもう出ていない）',
+        reachedHeat && heatNote.includes(HEAT) && !heatNote.includes(WASH),
+        `手順=${await currentStep()} / メモ=${heatNote}`,
+      )
+    } finally {
+      await fmBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
