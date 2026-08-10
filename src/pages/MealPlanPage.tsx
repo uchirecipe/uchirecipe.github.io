@@ -6550,6 +6550,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     balance={dayBalance.balance}
                     includeRice={includeRice}
                     onToggleIncludeRice={(next) => void updateSettings({ includeRice: next })}
+                    // その日の合計に実際に積んだごはんの杯数(2026-08-10 便FD)。
+                    // 数え直さず dayBalanceMap が数えた実数を渡す＝数字と合計が必ず一致する
+                    riceServings={dayBalance.riceServings}
                     slotBreakdown={weekSlotBalanceByDate.get(date)}
                   />
                 </div>
@@ -6593,6 +6596,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             balance={weekBalance.balance}
             includeRice={includeRice}
             onToggleIncludeRice={(next) => void updateSettings({ includeRice: next })}
+            riceServings={weekBalance.riceServings}
           />
         </div>
       )}

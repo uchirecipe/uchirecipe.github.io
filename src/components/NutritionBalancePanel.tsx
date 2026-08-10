@@ -48,6 +48,7 @@ export default function NutritionBalancePanel({
   balance,
   includeRice,
   onToggleIncludeRice,
+  riceServings = 0,
   slotBreakdown,
 }: {
   /** 'day' = 週タブの各日カード / 'week' = 週まとめ */
@@ -68,6 +69,12 @@ export default function NutritionBalancePanel({
   includeRice: boolean
   /** 同チェックの切り替え（設定に保存する。押した瞬間から日・週・食費の数字に効く） */
   onToggleIncludeRice: (next: boolean) => void
+  /**
+   * いま出している合計に足したごはんの杯数（2026-08-10 便FD・オーナー実機）。
+   * 呼び出し側が合計を作ったときの実数をそのまま渡す＝ここでは数え直さない。
+   * 0（＝チェックがOFF、または足す食事が1つも無い）のときは行を出さない。
+   */
+  riceServings?: number
   /**
    * 食事ごとの小計（2026-08-02 便CW-6。Pro解錠時だけ展開部に出す）。
    * 2つ以上の食事に献立があるときだけ渡す＝1食だけの日は1日の合計と同じ数字になるので出さない。
@@ -249,6 +256,16 @@ export default function NutritionBalancePanel({
                 ? ja.nutritionBalance.registeredOnlyNoteWithRice
                 : ja.nutritionBalance.registeredOnlyNote}
             </p>
+            {/* 何杯ぶん足したか（2026-08-10 便FD・オーナー実機）。「1食につき1杯」の規則だけでは
+                その日に何杯入るのかが読めないので、実際に合計へ積んだ杯数をそのまま出す */}
+            {includeRice && riceServings > 0 && (
+              <p data-testid="rice-added-note" className="font-bold">
+                {(isWeek
+                  ? ja.nutritionBalance.riceAddedNoteWeek
+                  : ja.nutritionBalance.riceAddedNoteDay
+                ).replace('{n}', String(riceServings))}
+              </p>
+            )}
           </div>
           {/* 但し書きと出典（2026-08-09 便EN・オーナー実機「注意説明が長い」）。
               月タブの栄養カードと同じ文言・同じ作法で畳む */}

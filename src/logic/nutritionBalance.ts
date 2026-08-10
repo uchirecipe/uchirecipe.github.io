@@ -346,6 +346,16 @@ export interface DayBalance {
    * 0でない日は、食事ごとの小計を出すと1日の合計と足し算が合わない（呼び出し側で出さない）。
    */
   slotUnknownDishCount: number
+  /**
+   * その日の合計に足したごはんの杯数（2026-08-10 便FD・オーナー実機
+   * 「この日の献立栄養で、合計何杯分のご飯が計算に入るか入れて」）。
+   *
+   * 数え直しはしない。**合計に実際に積んだ品のうち、ごはんの擬似レシピ
+   * （RICE_SERVING_RECIPE）そのものが何個あったか**を数える＝画面に出す杯数と
+   * 合計の中身が食い違いようがない。「ごはんを含めて計算する」がOFFの日は0。
+   * 今日のように記録と献立が同居する日も、二重計上を落とした後の品で数える。
+   */
+  riceServings: number
 }
 
 /**
@@ -450,6 +460,9 @@ export function dayBalanceMap(input: {
       balance,
       comparable: canCompareDay(balance.nutrition),
       slotUnknownDishCount,
+      // 合計に積んだ品そのものから数える（riceServingRecipes が返すのは
+      // RICE_SERVING_RECIPE の参照なので、同一性で数えれば取りこぼしも数え間違いも起きない）
+      riceServings: dishes.filter((d) => d.recipe === RICE_SERVING_RECIPE).length,
     })
   }
   return result
@@ -508,6 +521,8 @@ export interface WeekBalance {
   countedDays: number
   /** めやすとの並置を出してよいか（canCompareRange） */
   comparable: boolean
+  /** 期間の合計に足したごはんの杯数（日ごとの杯数の合計。2026-08-10 便FD） */
+  riceServings: number
 }
 
 // ---------- 目的モード（docs/62 決定②）: 目的の軸と、その軸での比べ方 ----------
@@ -657,14 +672,17 @@ export function summarizeWeekBalance(days: Iterable<DayBalance>): WeekBalance {
   let nutrition = emptyPersonalNutritionSum()
   let vegetableG = 0
   let countedDays = 0
+  let riceServings = 0
   for (const day of days) {
     nutrition = addPersonalNutritionSum(nutrition, day.balance.nutrition)
     vegetableG += day.balance.vegetableG
     countedDays++
+    riceServings += day.riceServings
   }
   return {
     balance: { nutrition, vegetableG },
     countedDays,
     comparable: canCompareRange(nutrition),
+    riceServings,
   }
 }
