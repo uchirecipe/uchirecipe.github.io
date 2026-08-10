@@ -160,7 +160,7 @@ const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
  *    ＝開いている間にスクロール位置が変わらない
  */
 const PANEL_CLS =
-  'pointer-events-auto mt-[var(--space-sm)] max-h-[calc(100dvh-14rem)] overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md'
+  'pointer-events-auto mt-[var(--space-sm)] max-h-[calc(100dvh-14rem)] overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface px-[var(--space-md)] pb-[var(--space-md)] shadow-md'
 
 /** パネルと画面の縁（貼り付く検索バー・下のタブナビ）のあいだに残す余白（px） */
 const PANEL_EDGE_GAP = 8
@@ -1017,7 +1017,9 @@ export default function RecipesPage() {
       <Collapse open={sortPanelOpen} reveal={false}>
         <div
           data-testid="recipes-sort-panel"
-          className={PANEL_CLS}
+          // 絞り込みパネルは上端に貼り付く行(件数)が上余白を持つので、PANEL_CLS には上余白を
+          // 入れていない。並べ替えパネルにはその行が無いのでここで足す
+          className={`${PANEL_CLS} pt-[var(--space-md)]`}
           style={panelMaxHeight != null ? { maxHeight: panelMaxHeight } : undefined}
         >
           {/* 昇順/降順(2026-08-02 便DFで件数表記の横からこのパネル内へ移動 → 2026-08-03
@@ -1111,15 +1113,33 @@ export default function RecipesPage() {
           className={PANEL_CLS}
           style={panelMaxHeight != null ? { maxHeight: panelMaxHeight } : undefined}
         >
-          {anyConditionActive && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="text-sm font-bold text-accent-ink underline"
-            >
-              {ja.search.clear}
-            </button>
-          )}
+          {/* パネルの上端に貼り付く行(2026-08-10 便FF)。一覧の上に重ねて出すようになり、
+              一覧の上に常設している件数の行がパネルに隠れるため、いま何件になっているかを
+              パネルの中でも見られるようにする。条件を変えるたびに動く数字なので、
+              パネルを下まで送っても見えるよう上端に貼り付ける。
+              「条件をクリア」は2026-07-16 便T-3で欄の上方へ置いたものを、この行にまとめた */}
+          <div className="sticky top-0 z-10 -mx-4 flex items-center justify-between gap-2 bg-surface px-4 pb-2 pt-4">
+            {anyConditionActive ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="text-sm font-bold text-accent-ink underline"
+              >
+                {ja.search.clear}
+              </button>
+            ) : (
+              <span />
+            )}
+            {results && totalCount !== undefined && (
+              <span data-testid="filter-panel-count" className="shrink-0 text-sm text-ink-muted">
+                {filterActive
+                  ? ja.search.resultCountWithTotal
+                      .replace('{n}', String(results.length))
+                      .replace('{t}', String(totalCount))
+                  : ja.search.totalCount.replace('{n}', String(totalCount))}
+              </span>
+            )}
+          </div>
 
           {/* --- 区分①「どのレシピから探すか」 ---
               2026-08-03 オーナー指示でパネルの最上段に置いた区分(「お気に入り」など毎回使う
@@ -1127,11 +1147,7 @@ export default function RecipesPage() {
               2026-08-10 便FF(オーナー「在庫の食材、NG食材隠しのタグ、登録したレシピのみ、が
               同列で並んでいるのもわかりにくくしている」): 性質の違う「在庫の食材で絞る」を
               区分③「食材で絞り込む」へ移し、ここは『一覧に出すレシピの母集団を決める』3つだけにした */}
-          <p
-            className={`text-sm font-bold text-ink-muted ${anyConditionActive ? 'mt-[var(--space-md)]' : ''}`}
-          >
-            {ja.search.shownRecipesTitle}
-          </p>
+          <p className="text-sm font-bold text-ink-muted">{ja.search.shownRecipesTitle}</p>
           <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
             <button
               type="button"

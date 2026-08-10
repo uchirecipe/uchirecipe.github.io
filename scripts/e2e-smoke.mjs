@@ -2603,7 +2603,11 @@ try {
         'NUTSORT-02 たんぱく質順でも一覧が表示される(console/pageerror監視でエラー0を担保)',
         proteinTitles.length > 0,
       )
-      // 便T-7: 一覧(リスト)表示に切り替えても並び替え中の栄養価の値(行の右下)が出る
+      // 便T-7: 一覧(リスト)表示に切り替えても並び替え中の栄養価の値(行の右下)が出る。
+      // 2026-08-10 便FF: 並べ替えパネルは一覧の上に重ねて出るようになり、開いている間は
+      // 件数の行(表示形式の切替もここにある)がパネルの下に隠れる。先にパネルを閉じてから押す
+      await nutPage.getByRole('button', { name: '決定' }).click()
+      await nutPage.waitForTimeout(400)
       await nutPage.locator('button[aria-label="リスト表示に切り替え"]').click()
       await nutPage.waitForTimeout(400)
       check(
@@ -25136,6 +25140,16 @@ try {
       await ffPage.waitForTimeout(400)
       check('FF-FILTER 「すべて」に戻すと全件に戻る', (await ffCards()) === ffTotal)
 
+      // 一覧の上に重ねて出すぶん、一覧の上の件数の行はパネルに隠れる。
+      // 代わりにパネルの中に件数を出し、条件を変えるたびに更新されることを見る
+      const ffPanelCount = () =>
+        ffPage.locator('[data-testid="filter-panel-count"]').first().innerText()
+      check(
+        'FF-FILTER パネルの中に件数が出る(隠れた件数の行の代わり)',
+        (await ffPanelCount()) === `全${ffTotal}件`,
+        `件数=${await ffPanelCount()}`,
+      )
+
       // チップの件数は、実際に押したときの結果件数と一致する（数字が飾りになっていない）
       const ffTopTag = ffTagChips[1]
       await ffPage.locator('[data-testid="recipes-tag-chip"]').nth(1).click()
@@ -25144,6 +25158,11 @@ try {
         'FF-FILTER チップの件数は押したときの結果件数と一致する',
         (await ffCards()) === Number(ffTopTag.replace(/[^0-9]/g, '')),
         `チップ=${ffTopTag} 結果=${await ffCards()}`,
+      )
+      check(
+        'FF-FILTER パネルの中の件数も絞り込みに追従する',
+        (await ffPanelCount()) === `${await ffCards()}件 / 全${ffTotal}件`,
+        `件数=${await ffPanelCount()}`,
       )
       await ffPage.locator('[data-testid="recipes-tag-chip"]').first().click()
       await ffPage.waitForTimeout(400)
