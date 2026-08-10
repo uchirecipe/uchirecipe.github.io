@@ -317,6 +317,12 @@
 //         SETBACK-01(設定へ飛ばされたあとの帰り道・2026-08-02 便DF: Pro案内から?back=付きで飛び、
 //         設定の目次チップの上に「◯◯に戻る」が出る・節へスクロールした後も見えている・
 //         押すと元のページ(レシピ一覧/レシピ詳細)へ帰る・タブから直接開いた設定には出さない) /
+//         FP-01〜04(実際にアプリを操作した利用者テストの報告・2026-08-11 便FP:
+//         献立の「＋ 今日の献立を選ぶ」からレシピ一覧が選択モードで開き、案内と件数入りの決定ボタンが出て
+//         3品をまとめて今日の献立に入れられる(レシピ詳細を1度も開かない)・一覧の「選択」で
+//         何ができるかが選ぶ前から読める・食事の振り分け窓は3つの食事が同じ見た目で
+//         「食事を決めずに今日の献立に追加」が何をするか名前と説明で分かる・
+//         「今日の献立に追加」で入れた品が週タブで料理の種別どおりの行(副菜・汁物)に入る) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -2951,7 +2957,7 @@ try {
       await obPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
       // 2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開く。従来どおりの直接追加(枠なし)は「決めない」
-      await obPage.getByRole('button', { name: '決めない' }).click()
+      await obPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
 
       // 2) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
@@ -3060,7 +3066,7 @@ try {
       await taPage.waitForTimeout(500)
       await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
-      await taPage.getByRole('button', { name: '決めない' }).click()
+      await taPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(500)
@@ -3068,7 +3074,7 @@ try {
       await taPage.waitForTimeout(500)
       await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
-      await taPage.getByRole('button', { name: '決めない' }).click()
+      await taPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
 
       await taPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -3183,7 +3189,7 @@ try {
       await tuPage.waitForTimeout(500)
       await tuPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await tuPage.waitForTimeout(300)
-      await tuPage.getByRole('button', { name: '決めない' }).click()
+      await tuPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await tuPage.waitForTimeout(300)
 
       await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -3356,7 +3362,7 @@ try {
       await tsPage.waitForTimeout(500)
       await tsPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await tsPage.waitForTimeout(300)
-      await tsPage.getByRole('button', { name: '決めない' }).click()
+      await tsPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await tsPage.waitForTimeout(300)
       await tsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tsPage.waitForTimeout(900)
@@ -7960,7 +7966,7 @@ try {
       const swCurryId = Number(swPage.url().match(/#\/recipes\/(\d+)/)?.[1])
       await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await swPage.waitForTimeout(300)
-      await swPage.getByRole('button', { name: '決めない' }).click()
+      await swPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await swPage.waitForTimeout(500)
       check(
         'SLOTWIN-01(決めない) todayListへ直接追加される',
@@ -25804,7 +25810,7 @@ try {
       )
 
       // ② 枠を決めない品: ほうれん草のおひたしを「決めない」で今日の献立へ
-      await fcAddToToday('ほうれん草のおひたし', '決めない')
+      await fcAddToToday('ほうれん草のおひたし', '食事を決めずに今日の献立に追加')
 
       // 日の画面で1品ずつ「作った！」を押す
       await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
@@ -25848,7 +25854,7 @@ try {
       // 日の画面へ戻ってもう1品作り、トーストの「元に戻す」で記録が消えることを見る
       await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(900)
-      await fcAddToToday('豚汁', '決めない')
+      await fcAddToToday('豚汁', '食事を決めずに今日の献立に追加')
       await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(1600)
       await fcPage.getByRole('button', { name: '作った！', exact: true }).first().click()
@@ -26228,7 +26234,7 @@ try {
       await fhPage.waitForTimeout(800)
       await fhPage.getByRole('button', { name: '今日の献立に追加' }).first().click()
       await fhPage.waitForTimeout(500)
-      await fhPage.getByRole('button', { name: '決めない', exact: true }).click()
+      await fhPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await fhPage.waitForTimeout(700)
       await fhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
       await fhPage.waitForTimeout(1800)
@@ -27151,6 +27157,369 @@ try {
       }
     } finally {
       await fnBrowser.close()
+    }
+  }
+
+
+  // --- FP-01〜04: 実際にアプリを操作した利用者テストの報告(2026-08-11 便FP) ---
+  //     FP-01 献立の「＋ 今日の献立を選ぶ」からレシピ一覧が選択モードで開き、3品をまとめて
+  //           今日の献立へ入れられる(レシピ詳細を1度も開かずに済む)
+  //     FP-02 一覧の「選択」で何ができるかが、1品も選ばないうちから読める
+  //           (今日の献立に入れる・書き出す・削除する)
+  //     FP-03 食事の振り分け窓: 3つの食事は同じ見た目(どれも選択済みに見えない)・
+  //           旧「決めない」は何が起きるかが名前と説明で分かる
+  //     FP-04 「今日の献立に追加」で入れた品が、週タブで料理の種別どおりの行に入る
+  //           (おひたし=副菜・味噌汁=汁物。以前は全部主菜だった)
+  currentCheck = 'FP-01'
+  {
+    const fpBrowser = await chromium.launch()
+    const watchPage = (p, tag) => {
+      p.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@${tag}] ${err.message}`)
+      })
+      p.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@${tag}] ${t}`)
+      })
+    }
+    /** 今日の日付(端末側の暦で算出。e2eに曜日・月替わりの前提を置かない) */
+    const todayIso = (p) =>
+      p.evaluate(() => {
+        const d = new Date()
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      })
+    /** 今日の献立の予定を、レシピ名つきで読む(mealPlans × recipes をIndexedDB直読み) */
+    const readTodayPlan = (p, date) =>
+      p.evaluate(async (iso) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const plans = await P(db.transaction('mealPlans').objectStore('mealPlans').getAll())
+        const recipes = await P(db.transaction('recipes').objectStore('recipes').getAll())
+        const todayList = await P(db.transaction('todayList').objectStore('todayList').getAll())
+        const titleOf = (id) => recipes.find((r) => r.id === id)?.title ?? `?${id}`
+        db.close()
+        return {
+          plan: plans
+            .filter((e) => e.date === iso)
+            .map((e) => ({ slot: e.slot, role: e.role ?? 'main', title: titleOf(e.recipeId) })),
+          today: todayList.map((t) => titleOf(t.recipeId)),
+        }
+      }, date)
+
+    try {
+      // ===== FP-01: 献立の「今日の献立を選ぶ」→ まとめて3品(実操作) =====
+      {
+        const ctx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watchPage(p, 'FP-01')
+        p.on('dialog', (d) => void d.accept())
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2200) // 初回シード待ち
+
+        await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(900)
+        check(
+          'FP-01 前提: 今日の献立は空で「今日の献立を選ぶ」が出ている',
+          ((await p.textContent('body')) ?? '').includes('まだ今日つくるものが決まっていません') &&
+            (await p.getByRole('button', { name: '今日の献立を選ぶ' }).count()) === 1,
+        )
+        await p.getByRole('button', { name: '今日の献立を選ぶ' }).click()
+        await p.waitForTimeout(1200)
+
+        // 報告②: 飛び先が「ただのレシピ一覧」で、選んでいる最中だと分かる表示も決定ボタンも無かった
+        const banner = p.getByTestId('select-for-today-banner')
+        check(
+          'FP-01 飛び先で「今日の献立に入れるレシピを選んでいます」が出る',
+          (await banner.count()) === 1 &&
+            ((await banner.innerText()) ?? '').includes('今日の献立に入れるレシピを選んでいます'),
+        )
+        const decide = p.getByTestId('add-selected-to-today')
+        check(
+          'FP-01 決定ボタンが最初から見えていて、1品も選ばないうちは押せない',
+          (await decide.count()) === 1 && (await decide.isDisabled()),
+        )
+        check(
+          'FP-01 献立に入れに来た選択モードでは、削除・書き出しのボタンを出さない',
+          (await p.getByRole('button', { name: /選択したレシピ.*を削除/ }).count()) === 0 &&
+            (await p.getByRole('button', { name: /選択したレシピ.*を書き出す/ }).count()) === 0,
+        )
+
+        // 3品をタップして選ぶ(レシピ詳細は1度も開かない)
+        const TITLES = ['肉じゃが', 'ほうれん草のおひたし', '豆腐とわかめの味噌汁']
+        for (const t of TITLES) {
+          await p.getByRole('button', { name: t, exact: true }).first().click()
+          await p.waitForTimeout(200)
+        }
+        check(
+          'FP-01 選んだ品数が決定ボタンに出る(件数表示)',
+          ((await decide.innerText()) ?? '').includes('選択したレシピ3品を今日の献立に入れる'),
+          await decide.innerText(),
+        )
+
+        await decide.click()
+        await p.waitForTimeout(500)
+        check(
+          'FP-01 食事の振り分けは品ごとではなく1回だけ聞く',
+          ((await p.textContent('body')) ?? '').includes('選んだ3品をどの食事に入れますか？'),
+        )
+        await p.getByRole('button', { name: '夕食', exact: true }).click()
+        await p.waitForTimeout(1600)
+
+        // 入れ終わったら献立へ戻り、何品どこへ入ったかを知らせる
+        check('FP-01 入れ終わったら献立の画面へ戻る', p.url().includes('#/meal-plan'), p.url())
+        const afterBody = (await p.textContent('body')) ?? ''
+        check(
+          'FP-01 「今日の夕食に3品を入れました」と知らせる',
+          afterBody.includes('今日の夕食に3品を入れました'),
+        )
+        check(
+          'FP-01 今日の献立に3品とも並んでいる',
+          TITLES.every((t) => afterBody.includes(t)) &&
+            !afterBody.includes('まだ今日つくるものが決まっていません'),
+        )
+        check('FP-01 2品以上あるので並行調理ナビの入口も出る', afterBody.includes('並行調理ナビ'))
+
+        // FP-04: 週の予定の行は、料理の種別どおりの役割で入る
+        const iso = await todayIso(p)
+        const state = await readTodayPlan(p, iso)
+        const roleOf = (title) => state.plan.find((e) => e.title === title)?.role
+        check(
+          'FP-04 まとめて入れても、行の役割はレシピの種別どおり(主菜/副菜/汁物)',
+          roleOf('肉じゃが') === 'main' &&
+            roleOf('ほうれん草のおひたし') === 'side' &&
+            roleOf('豆腐とわかめの味噌汁') === 'soup',
+          JSON.stringify(state.plan),
+        )
+        check(
+          'FP-01 同じ食事(夕食)に3行そろって入る',
+          state.plan.filter((e) => e.slot === 'dinner').length === 3,
+          JSON.stringify(state.plan),
+        )
+
+        // 週タブの画面でも、副菜・汁物の行として出ている(報告④の見え方そのもの)
+        await p.getByRole('button', { name: '週', exact: true }).first().click()
+        await p.waitForTimeout(1200)
+        const domRole = async (title) => {
+          const row = p.locator('[data-testid="plan-row"]').filter({ hasText: title }).first()
+          return (await row.count()) === 0 ? null : await row.getAttribute('data-role')
+        }
+        check(
+          'FP-04 週の画面でも、おひたしは副菜の行・味噌汁は汁物の行(主菜にしない)',
+          (await domRole('ほうれん草のおひたし')) === 'side' &&
+            (await domRole('豆腐とわかめの味噌汁')) === 'soup' &&
+            (await domRole('肉じゃが')) === 'main',
+          `おひたし=${await domRole('ほうれん草のおひたし')} / 味噌汁=${await domRole('豆腐とわかめの味噌汁')}`,
+        )
+
+        // 1品でも入っていると空状態のボタンは消えるので、日タブに足す入口が残っていること
+        await p.getByRole('button', { name: '日', exact: true }).first().click()
+        await p.waitForTimeout(900)
+        check(
+          'FP-01 献立に品が入っている状態でも、まとめて足す入口が残る',
+          (await p.getByTestId('today-add-more').count()) === 1,
+        )
+        await p.getByTestId('today-add-more').click()
+        await p.waitForTimeout(1100)
+        check(
+          'FP-01 その入口も選択モードのレシピ一覧へ行く',
+          (await p.getByTestId('select-for-today-banner').count()) === 1,
+        )
+        await ctx.close()
+      }
+
+      // ===== FP-02: 一覧の「選択」で何ができるかが読める + まとめて献立へ入る =====
+      currentCheck = 'FP-02'
+      {
+        const ctx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watchPage(p, 'FP-02')
+        p.on('dialog', (d) => void d.accept())
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2200)
+
+        await p.getByRole('button', { name: '選択', exact: true }).click()
+        await p.waitForTimeout(500)
+        // 報告①: 選ぶ機能があるのに、使い道が書き出しと削除しかないと思わなかった
+        const hint = p.getByTestId('select-actions-hint')
+        check(
+          'FP-02 1品も選ばないうちに、選択でできる3つが名前で出ている',
+          (await hint.count()) === 1 &&
+            ((await hint.innerText()) ?? '').includes(
+              '選んだレシピは、今日の献立に入れる・書き出す・削除するができます',
+            ),
+          await hint.innerText().catch(() => ''),
+        )
+
+        await p.getByRole('button', { name: '肉じゃが', exact: true }).first().click()
+        await p.waitForTimeout(200)
+        await p.getByRole('button', { name: 'ほうれん草のおひたし', exact: true }).first().click()
+        await p.waitForTimeout(400)
+        check(
+          'FP-02 選ぶと3つの操作が実際に並ぶ(献立・書き出し・削除)',
+          (await p.getByTestId('add-selected-to-today').count()) === 1 &&
+            (await p.getByRole('button', { name: '選択したレシピ2品を書き出す' }).count()) === 1 &&
+            (await p.getByRole('button', { name: '選択したレシピ2品を削除' }).count()) === 1,
+        )
+
+        await p.getByTestId('add-selected-to-today').click()
+        await p.waitForTimeout(500)
+        // 食事を決めない方でもまとめて入る(今週の予定には入れない)
+        await p.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
+        await p.waitForTimeout(1200)
+        check(
+          'FP-02 一覧から入れたときは一覧に留まり、結果をその場で知らせる',
+          p.url().includes('#/recipes') &&
+            ((await p.textContent('body')) ?? '').includes('今日の献立に2品を入れました'),
+        )
+        const iso2 = await todayIso(p)
+        const state2 = await readTodayPlan(p, iso2)
+        check(
+          'FP-02 食事を決めない方は今日の献立にだけ入り、今週の予定には入らない',
+          state2.today.includes('肉じゃが') &&
+            state2.today.includes('ほうれん草のおひたし') &&
+            state2.plan.length === 0,
+          JSON.stringify(state2),
+        )
+
+        // 入れたあとも選択モードは続く(書き出し・削除と同じ作法。続けて選び直せる)
+        check(
+          'FP-02 入れたあとも選択モードのまま続けられる(選択だけ解除される)',
+          (await p.getByRole('button', { name: '完了', exact: true }).count()) === 1 &&
+            (await p.getByTestId('add-selected-to-today').count()) === 0,
+        )
+        // すでに入っている品を選び直しても、黙って二重に増やさない
+        await p.getByRole('button', { name: '肉じゃが', exact: true }).first().click()
+        await p.waitForTimeout(300)
+        await p.getByTestId('add-selected-to-today').click()
+        await p.waitForTimeout(400)
+        await p.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
+        await p.waitForTimeout(1000)
+        check(
+          'FP-02 すでに入っている品は増やさず、その旨を伝える',
+          ((await p.textContent('body')) ?? '').includes(
+            '選んだ1品は、すでに今日の献立に入っています',
+          ),
+        )
+        const state3 = await readTodayPlan(p, iso2)
+        check(
+          'FP-02 今日の献立の件数は増えていない',
+          state3.today.filter((t) => t === '肉じゃが').length === 1,
+          JSON.stringify(state3.today),
+        )
+        await ctx.close()
+      }
+
+      // ===== FP-03: 食事の振り分け窓（報告③） =====
+      currentCheck = 'FP-03'
+      {
+        const ctx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watchPage(p, 'FP-03')
+        p.on('dialog', (d) => void d.accept())
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2200)
+        await p.getByText('ほうれん草のおひたし', { exact: true }).first().click()
+        await p.waitForTimeout(800)
+        await p.getByRole('button', { name: '今日の献立に追加' }).click()
+        await p.waitForTimeout(500)
+
+        // 「夕食だけが塗られている」＝もう選ばれているのか推奨なのか読めない、という報告への対応。
+        // 3つのボタンの見た目(class)がそろっていることで「まだ何も選ばれていない」と言い切る
+        const slotClasses = await p
+          .locator('[data-testid="today-slot-button"]')
+          .evaluateAll((els) => els.map((el) => el.className))
+        check(
+          'FP-03 朝食・昼食・夕食は同じ見た目(どれも選択済みに見えない)',
+          slotClasses.length === 3 && new Set(slotClasses).size === 1,
+          JSON.stringify(slotClasses),
+        )
+        check(
+          'FP-03 アクセント色で塗られた食事ボタンが1つも無い',
+          slotClasses.every((c) => !c.includes('bg-accent')),
+          JSON.stringify(slotClasses),
+        )
+
+        const dialogText = (await p.getByRole('dialog').innerText()) ?? ''
+        check(
+          'FP-03 「決めない」ではなく、何が起きるかを名前で言う',
+          !dialogText.includes('決めない') &&
+            dialogText.includes('食事を決めずに今日の献立に追加'),
+          dialogText,
+        )
+        check(
+          'FP-03 3つの食事との違い(今週の予定に入るかどうか)が書いてある',
+          dialogText.includes('今週の予定には入れず、今日の献立にだけ入ります'),
+          dialogText,
+        )
+
+        await p.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
+        await p.waitForTimeout(900)
+        check(
+          'FP-03 押したら結果を知らせる(無言で閉じない)',
+          ((await p.textContent('body')) ?? '').includes('今日の献立に追加しました'),
+        )
+        const iso3 = await todayIso(p)
+        const state4 = await readTodayPlan(p, iso3)
+        check(
+          'FP-03 押すと今日の献立には入り、今週の予定には入らない',
+          state4.today.includes('ほうれん草のおひたし') && state4.plan.length === 0,
+          JSON.stringify(state4),
+        )
+        await ctx.close()
+      }
+
+      // ===== FP-04: 1品ずつの経路でも、行の役割はレシピの種別どおり =====
+      currentCheck = 'FP-04'
+      {
+        const ctx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watchPage(p, 'FP-04')
+        p.on('dialog', (d) => void d.accept())
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2200)
+        // 報告と同じ顔ぶれ: 主菜・副菜(おひたし)・汁物(味噌汁)を1品ずつ夕食へ入れる
+        for (const title of ['肉じゃが', 'ほうれん草のおひたし', '豆腐とわかめの味噌汁']) {
+          await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await p.waitForTimeout(600)
+          await p.getByText(title, { exact: true }).first().click()
+          await p.waitForTimeout(700)
+          await p.getByRole('button', { name: '今日の献立に追加' }).click()
+          await p.waitForTimeout(300)
+          await p.getByRole('button', { name: '夕食', exact: true }).click()
+          await p.waitForTimeout(700)
+        }
+        const iso4 = await todayIso(p)
+        const state5 = await readTodayPlan(p, iso4)
+        const roleOf = (title) => state5.plan.find((e) => e.title === title)?.role
+        check(
+          'FP-04 1品ずつ入れても、おひたしは副菜・味噌汁は汁物(全部主菜にならない)',
+          roleOf('肉じゃが') === 'main' &&
+            roleOf('ほうれん草のおひたし') === 'side' &&
+            roleOf('豆腐とわかめの味噌汁') === 'soup',
+          JSON.stringify(state5.plan),
+        )
+        check(
+          'FP-04 主菜の行が2つ以上に増えていない(役割の取り違えで枠が埋まらない)',
+          state5.plan.filter((e) => e.role === 'main').length === 1,
+          JSON.stringify(state5.plan),
+        )
+        await ctx.close()
+      }
+    } finally {
+      await fpBrowser.close()
     }
   }
 
