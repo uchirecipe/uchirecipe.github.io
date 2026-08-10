@@ -10,6 +10,8 @@
  * 分岐の優先順位は従来のif-elseの順番をそのまま保つ（「次へ」→「戻って」→読み上げ→
  * ストップ→タイマー）。
  */
+import { NAVI_COLOR_SPEECH } from './naviColors'
+
 export type VoiceCommand = 'next' | 'prev' | 'repeat' | 'stop' | 'resume' | 'timer'
 
 /**
@@ -47,6 +49,27 @@ export function matchVoiceCommand(transcript: string): VoiceCommand | undefined 
   if (/もう[1１一]?[回度]|もういっかい|もういちど/.test(transcript)) return 'repeat'
   if (/タイマー/.test(transcript)) return 'timer'
   return undefined
+}
+
+/**
+ * 色の言葉（「青」「緑」「ピンク」）を、レシピ色の添字（0/1/2）に変える
+ * （2026-08-10 便FI・docs/69 第3段「色で実行を引き寄せる」）。
+ *
+ * **`matchVoiceCommand` には入れない**。色は判定順のいちばん最後＝上のコマンドが1つも
+ * 当たらなかったときにだけ試す（呼び出し側 useVoiceCommands がその順で呼ぶ）。
+ * 「タイマーストップ」のような複合の言い方が先に決まってから色を見る形にしておくと、
+ * 語を足したときに順番が崩れない。
+ *
+ * **当てるのは「発話まるごとが色の名前と一致したとき」だけ**。部分一致にすると
+ * 「青ねぎを切る」「緑黄色野菜を加える」「ピンクペッパーをふる」で手順が飛んでしまう
+ * （台所では、なぜ画面が変わったのか分からない事故になる）。
+ * 端末が付ける句読点だけは落としてから比べる。
+ */
+export function matchVoiceColor(transcript: string): number | undefined {
+  const word = transcript.replace(/[\s。、．，.!！?？]/g, '')
+  if (!word) return undefined
+  const index = NAVI_COLOR_SPEECH.findIndex((forms) => forms.includes(word))
+  return index === -1 ? undefined : index
 }
 
 /** 「ストップ」でどのタイマーを止めるかを決めるのに要る最小限の形（ActiveTimer はこれを満たす） */
