@@ -153,6 +153,7 @@ import {
 } from '../src/logic/cookNaviSession.ts'
 import {
   advanceCursor,
+  applyStepPulls,
   backCursor,
   collapseStepText,
   cursorEquals,
@@ -160,6 +161,7 @@ import {
   isCursorAtFirst,
   isCursorAtLast,
   nextStepsByRecipe,
+  resolveColorMove,
   resolveCursor,
   resumeCursor,
   startCursor,
@@ -354,11 +356,18 @@ import {
   needsReplaceConfirm,
 } from '../src/logic/replaceConfirm.ts'
 import {
+  matchVoiceColor,
   matchVoiceCommand,
   pickVoiceResumeTarget,
   pickVoiceStopTarget,
   resolveVoiceTimerSeconds,
 } from '../src/logic/voiceCommand.ts'
+import {
+  NAVI_COLOR_SPEECH,
+  NAVI_COLOR_WORDS,
+  NAVI_RECIPE_COLORS,
+  naviColorWord,
+} from '../src/logic/naviColors.ts'
 import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { isStandaloneDisplay } from '../src/logic/standalone.ts'
@@ -14505,6 +14514,353 @@ eq(
     'FD-NAV 日付の形でない目印は捨てる（窓は開き直さない）',
     parseViewReturn('{"anchor":"","scrollY":10,"openDate":"きのう"}'),
     { anchor: '', scrollY: 10 },
+  )
+}
+
+// ---------- 便FI: 色を言うとその品の手順に移る（docs/69 第3段） ----------
+// オーナー要望「並行調理ナビ調理中モードの、色で手順入れ替えはいつ実装しますか？」。
+// docs/69 では第3段（色で実行を引き寄せる）を「実機の要望が出るまでやらない」と保留にしていた。
+// 実装にあたっての危ないところは2つで、どちらもここで固定する。
+//   ①語彙 … 原文の「赤・青・緑」ではなく**画面の実物と同じ 青・緑・ピンク**を使う
+//            （画面と語彙が食い違うと「赤と言ったのに青が動く」事故になる）
+//   ②誤爆 … 「青ねぎを切る」「緑黄色野菜を加える」で手順が飛ばないこと。
+//            そのため色は**判定順のいちばん最後**・**発話まるごとの一致**に限る
+{
+  // --- ① 画面に出す色名と、声で受ける語が同じところから来ている（ばらけない） ---
+  eq('FI-COLOR 色の数と色名の数がそろっている', NAVI_COLOR_WORDS.length, NAVI_RECIPE_COLORS.length)
+  eq('FI-COLOR 1品目は青', naviColorWord(0), '青')
+  eq('FI-COLOR 2品目は緑', naviColorWord(1), '緑')
+  eq('FI-COLOR 3品目はピンク（原文の「赤」ではなく画面の実物に合わせる）', naviColorWord(2), 'ピンク')
+  eq('FI-COLOR 声の語形も色ごとに1組ずつある', NAVI_COLOR_SPEECH.length, NAVI_COLOR_WORDS.length)
+  eq(
+    'FI-COLOR 画面に出す色名は、そのまま言っても通る',
+    NAVI_COLOR_WORDS.map((word, i) => NAVI_COLOR_SPEECH[i].includes(word)),
+    [true, true, true],
+  )
+  eq('FI-COLOR 「赤」は語彙に入れない（画面に赤の品が無いため）', matchVoiceColor('赤'), undefined)
+  eq('FI-COLOR 「あか」も入れない', matchVoiceColor('あか'), undefined)
+
+  // --- ② 語形（端末が漢字・かな・カナのどれで返しても同じ品に当たる） ---
+  eq('FI-VOICE 「青」', matchVoiceColor('青'), 0)
+  eq('FI-VOICE 「あお」', matchVoiceColor('あお'), 0)
+  eq('FI-VOICE 「アオ」', matchVoiceColor('アオ'), 0)
+  eq('FI-VOICE 「青色」', matchVoiceColor('青色'), 0)
+  eq('FI-VOICE 「緑」', matchVoiceColor('緑'), 1)
+  eq('FI-VOICE 「みどり」', matchVoiceColor('みどり'), 1)
+  eq('FI-VOICE 「ミドリ」', matchVoiceColor('ミドリ'), 1)
+  eq('FI-VOICE 「緑色」', matchVoiceColor('緑色'), 1)
+  eq('FI-VOICE 「ピンク」', matchVoiceColor('ピンク'), 2)
+  eq('FI-VOICE 「ぴんく」', matchVoiceColor('ぴんく'), 2)
+  eq('FI-VOICE 「ピンク色」', matchVoiceColor('ピンク色'), 2)
+  eq('FI-VOICE 端末が付ける句点は落として比べる', matchVoiceColor('青。'), 0)
+  eq('FI-VOICE 前後の空白も落として比べる', matchVoiceColor(' 緑 '), 1)
+  eq('FI-VOICE 何も聞き取れていないときは当てない', matchVoiceColor(''), undefined)
+
+  // --- ③ 誤爆させない（ここが第3段を保留にしていた理由。全体一致だけに限る） ---
+  eq('FI-MISS 「青ねぎ」で手順を飛ばさない', matchVoiceColor('青ねぎ'), undefined)
+  eq('FI-MISS 「青ねぎを切る」でも飛ばさない', matchVoiceColor('青ねぎを切る'), undefined)
+  eq('FI-MISS 「青ねぎを散らす」でも飛ばさない', matchVoiceColor('青ねぎを散らす'), undefined)
+  eq('FI-MISS 「青のり」でも飛ばさない', matchVoiceColor('青のり'), undefined)
+  eq('FI-MISS 「緑黄色野菜」で飛ばさない', matchVoiceColor('緑黄色野菜'), undefined)
+  eq('FI-MISS 「緑黄色野菜を加える」でも飛ばさない', matchVoiceColor('緑黄色野菜を加える'), undefined)
+  eq('FI-MISS 「みどり色の野菜」でも飛ばさない', matchVoiceColor('みどり色の野菜'), undefined)
+  eq('FI-MISS 「ピンクペッパーをふる」で飛ばさない', matchVoiceColor('ピンクペッパーをふる'), undefined)
+  eq('FI-MISS 「ピンクサーモン」でも飛ばさない', matchVoiceColor('ピンクサーモン'), undefined)
+  eq('FI-MISS 手順の読み上げのような長い発話では動かない', matchVoiceColor('青ねぎと緑の野菜を切る'), undefined)
+
+  // --- ④ 判定順（色はいちばん最後）。色の語をコマンド側に混ぜない ---
+  eq('FI-ORDER 「青」はコマンドとしては当たらない（色は別で最後に見る）', matchVoiceCommand('青'), undefined)
+  eq('FI-ORDER 「みどり」も同じ（「もどって」と取り違えない）', matchVoiceCommand('みどり'), undefined)
+  eq('FI-ORDER 「ピンク」も同じ', matchVoiceCommand('ピンク'), undefined)
+  eq('FI-ORDER 「次へ」を含む発話はコマンドが先に決まる', matchVoiceCommand('ピンクの次へ'), 'next')
+  eq('FI-ORDER 「戻って」を含む発話も同じ', matchVoiceCommand('青に戻って'), 'prev')
+  eq('FI-ORDER 「3分タイマー」は従来どおりタイマーのまま', matchVoiceCommand('3分タイマー'), 'timer')
+
+  // --- ⑤ 行き先（下部にその色で出ている行と同じ手順に移る） ---
+  const fiPlan = [
+    { recipeId: 10, stepIndex: 0 }, //  0 青
+    { recipeId: 20, stepIndex: -1 }, // 1 緑（ナビが足した湯沸かし）
+    { recipeId: 20, stepIndex: 0 }, //  2 緑
+    { recipeId: 10, stepIndex: 1 }, //  3 青
+    { recipeId: 30, stepIndex: 0 }, //  4 ピンク
+    { recipeId: 10, stepIndex: 2 }, //  5 青
+  ]
+  const fiRecipes = [
+    { id: 10, title: 'FI肉じゃが', colorIndex: 0 },
+    { id: 20, title: 'FIみそ汁', colorIndex: 1 },
+    { id: 30, title: 'FIマリネ', colorIndex: 2 },
+  ]
+  const fiIds = fiRecipes.map((r) => r.id)
+  const fiAt = (i) => ({ recipeId: fiPlan[i].recipeId, stepIndex: fiPlan[i].stepIndex })
+
+  eq('FI-MOVE 青の手順から「緑」でその品の次の手順へ', resolveColorMove(fiPlan, fiAt(0), 1, fiRecipes), {
+    kind: 'move',
+    recipeId: 20,
+    cursor: { recipeId: 20, stepIndex: -1 },
+  })
+  eq('FI-MOVE 「ピンク」でも同じように移れる', resolveColorMove(fiPlan, fiAt(0), 2, fiRecipes), {
+    kind: 'move',
+    recipeId: 30,
+    cursor: { recipeId: 30, stepIndex: 0 },
+  })
+  eq(
+    'FI-MOVE 進んだ先からは、その先にある手順に移る（後戻りはしない）',
+    resolveColorMove(fiPlan, fiAt(2), 0, fiRecipes),
+    { kind: 'move', recipeId: 10, cursor: { recipeId: 10, stepIndex: 1 } },
+  )
+  eq(
+    'FI-MOVE いま大きく出している品の色は、動かさずに状態を返す',
+    resolveColorMove(fiPlan, fiAt(0), 0, fiRecipes),
+    { kind: 'current', recipeId: 10 },
+  )
+  eq(
+    'FI-MOVE ナビが足した工程を開いていても、同じ品の色なら動かない',
+    resolveColorMove(fiPlan, fiAt(1), 1, fiRecipes),
+    { kind: 'current', recipeId: 20 },
+  )
+  eq(
+    'FI-MOVE 残りの手順が無い品（下部に「完成」と出ている品）は、動かさずに完成を返す',
+    resolveColorMove(fiPlan, fiAt(5), 1, fiRecipes),
+    { kind: 'done', recipeId: 20 },
+  )
+  eq(
+    'FI-MOVE 段取りに無い色（2品で組んでいるのに3色目）は、その旨を返す',
+    resolveColorMove(fiPlan, fiAt(0), 2, fiRecipes.slice(0, 2)),
+    { kind: 'none' },
+  )
+  eq(
+    'FI-MOVE カーソルが段取りに無いときは行き先を決めない',
+    resolveColorMove(fiPlan, { recipeId: 99, stepIndex: 0 }, 1, fiRecipes),
+    { kind: 'none' },
+  )
+  eq(
+    'FI-MOVE 覚えていない状態からも行き先を決めない',
+    resolveColorMove(fiPlan, undefined, 1, fiRecipes),
+    { kind: 'none' },
+  )
+  // **黙って何も起きない**を作らない。どの言い方でも必ず種類が返る（画面はこれを文言にする）
+  eq(
+    'FI-MOVE どの位置・どの色でも必ず結果の種類が返る（無反応にならない）',
+    fiPlan.every((_, i) =>
+      [0, 1, 2].every((color) =>
+        ['move', 'current', 'done', 'none'].includes(
+          resolveColorMove(fiPlan, fiAt(i), color, fiRecipes).kind,
+        ),
+      ),
+    ),
+    true,
+  )
+  // 行き先は「下部にその色で出ている行」と必ず同じ＝言う前に目で確かめられる
+  eq(
+    'FI-MOVE 行き先は、下部にその色で出ている行の手順と必ず一致する',
+    fiPlan.every((_, i) => {
+      const rows = nextStepsByRecipe(fiPlan, fiAt(i), fiIds)
+      return fiRecipes.every((recipe) => {
+        const result = resolveColorMove(fiPlan, fiAt(i), recipe.colorIndex, fiRecipes)
+        const row = rows.find((r) => r.recipeId === recipe.id)
+        if (!row) return result.kind === 'current' // 下部に出ないのは、いま開いている品だけ
+        if (!row.item) return result.kind === 'done'
+        return (
+          result.kind === 'move' &&
+          result.cursor.recipeId === row.item.recipeId &&
+          result.cursor.stepIndex === row.item.stepIndex
+        )
+      })
+    }),
+    true,
+  )
+
+  // --- ⑥ 引き寄せ（並べ替え）。**カーソルだけ先へ飛ばすと手順が消えるので、そうしない** ---
+  // 飛ばす形（カーソルを目的の手順へ動かすだけ）だと、間にある他の品の手順が
+  // 「カーソルより前＝済んだ手順」に化ける。実機で確認すると、1度も作っていない品が
+  // 「完成」と表示された。引き寄せる形なら手順は1つも消えない。
+  const fiKey = (list) => list.map((x) => `${x.recipeId}:${x.stepIndex}`)
+  /** 色を言ったときに実際に起きること（並べ替え＋カーソル移動）をまとめて再現する */
+  const fiSay = (list, cursor, colorIndex) => {
+    const result = resolveColorMove(list, cursor, colorIndex, fiRecipes)
+    if (result.kind !== 'move') return { list, cursor, result }
+    return {
+      list: applyStepPulls(list, [{ before: cursor, target: result.cursor }]),
+      cursor: result.cursor,
+      result,
+    }
+  }
+
+  const fiSaidGreen = fiSay(fiPlan, fiAt(0), 1)
+  eq(
+    'FI-PULL 言われた品の手順が、いま開いていた手順の直前に来る',
+    fiKey(fiSaidGreen.list),
+    ['20:-1', '10:0', '20:0', '10:1', '30:0', '10:2'],
+  )
+  eq('FI-PULL 手順の数は変わらない（1つも消えない）', fiSaidGreen.list.length, fiPlan.length)
+  eq(
+    'FI-PULL 開いていた手順は1つ後ろに残る＝「次へ」で戻れる',
+    advanceCursor(fiSaidGreen.list, fiSaidGreen.cursor),
+    fiAt(0),
+  )
+  eq(
+    'FI-PULL 引き寄せた手順より前に、まだやっていない手順を作らない（先頭に来る）',
+    findCursorIndex(fiSaidGreen.list, fiSaidGreen.cursor),
+    0,
+  )
+  // 遠くの品を引き寄せても、間の手順は「済んだこと」にならない
+  const fiSaidPink = fiSay(fiPlan, fiAt(0), 2)
+  eq(
+    'FI-PULL 離れた手順を引き寄せても、間の手順は後ろに残る',
+    fiKey(fiSaidPink.list),
+    ['30:0', '10:0', '20:-1', '20:0', '10:1', '10:2'],
+  )
+  eq(
+    'FI-PULL 引き寄せたあとも、その品の残りは「完成」扱いにならない',
+    nextStepsByRecipe(fiSaidPink.list, fiSaidPink.cursor, fiIds).every((row) => row.item != null),
+    true,
+  )
+  // 各品の中の順番は絶対に入れ替わらない（先に切ってから煮る、が崩れない）
+  const fiInOrder = (list) =>
+    fiIds.every((id) => {
+      const steps = list.filter((x) => x.recipeId === id).map((x) => x.stepIndex)
+      return steps.every((v, i) => i === 0 || steps[i - 1] < v)
+    })
+  eq('FI-PULL その品の中の手順の順番は変わらない', fiInOrder(fiSaidGreen.list), true)
+  eq('FI-PULL 離れた品を引き寄せても同じ', fiInOrder(fiSaidPink.list), true)
+  // 続けて言い直しても壊れない
+  const fiTwice = fiSay(fiSaidGreen.list, fiSaidGreen.cursor, 2)
+  eq('FI-PULL 続けて別の色を言っても手順は減らない', fiTwice.list.length, fiPlan.length)
+  eq('FI-PULL 続けて言い直しても品の中の順番は保たれる', fiInOrder(fiTwice.list), true)
+  eq(
+    'FI-PULL 続けて言い直すと、いちばん新しく言った品が先頭に来る',
+    fiKey(fiTwice.list)[0],
+    '30:0',
+  )
+  eq(
+    'FI-PULL 直前に引き寄せた手順は、そのすぐ後ろに残る',
+    advanceCursor(fiTwice.list, fiTwice.cursor),
+    fiAt(1),
+  )
+  // 並べ替えは保存しないので、組み直した段取りに毎回当て直す。当てられない1件は飛ばす
+  eq(
+    'FI-PULL 引き寄せが1つも無ければ、組み直した段取りをそのまま使う',
+    applyStepPulls(fiPlan, []),
+    fiPlan,
+  )
+  eq(
+    'FI-PULL 手順が消えていた引き寄せは飛ばす（段取りは壊さない）',
+    fiKey(applyStepPulls(fiPlan, [{ before: fiAt(0), target: { recipeId: 40, stepIndex: 0 } }])),
+    fiKey(fiPlan),
+  )
+  eq(
+    'FI-PULL 差し込み先が消えていた引き寄せも飛ばす',
+    fiKey(applyStepPulls(fiPlan, [{ before: { recipeId: 40, stepIndex: 0 }, target: fiAt(4) }])),
+    fiKey(fiPlan),
+  )
+  eq(
+    'FI-PULL 同じ引き寄せを2回当てても結果は変わらない（毎回当て直しても同じ画面）',
+    fiKey(applyStepPulls(fiPlan, [
+      { before: fiAt(0), target: fiAt(1) },
+      { before: fiAt(0), target: fiAt(1) },
+    ])),
+    fiKey(fiSaidGreen.list),
+  )
+
+  // --- ⑦ 可逆（docs/69「音声は可逆操作のみ」） ---
+  eq(
+    'FI-BACK 別の色を言えば移り直せる（言い間違えても言い直しで済む）',
+    fiSay(fiSaidGreen.list, fiSaidGreen.cursor, 2).result,
+    { kind: 'move', recipeId: 30, cursor: { recipeId: 30, stepIndex: 0 } },
+  )
+  eq(
+    'FI-BACK 同じ色をもう一度言っても二重には動かない',
+    fiSay(fiSaidGreen.list, fiSaidGreen.cursor, 1).result,
+    { kind: 'current', recipeId: 20 },
+  )
+  eq(
+    'FI-BACK 「手順①へ」で必ず段取りの先頭に戻れる（色で並べ替えたあとも）',
+    startCursor(fiSaidGreen.list),
+    { recipeId: 20, stepIndex: -1 },
+  )
+  // --- ⑧ 覚え書き（2026-08-10 司令部裁定「引き寄せを保存する」）。
+  // 保存するのは**ユーザーが出した指示**だけで、段取りは今までどおり毎回組み直す。
+  // 保存しないと、読み込み直したときに並びだけ元へ戻り、作っていない品が「完成」と出る。
+  const fiSaved = (session) => parseCookNaviSession(JSON.stringify(session))
+  const fiBase = { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: fiAt(0) }
+  eq(
+    'FI-SAVE 引き寄せの指示を保存して読み戻せる',
+    fiSaved({ ...fiBase, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
+    [{ before: fiAt(0), target: fiAt(1) }],
+  )
+  eq(
+    'FI-SAVE 読み戻した指示を当て直すと、同じ並びになる（往復して壊れない）',
+    fiKey(applyStepPulls(fiPlan, fiSaved({ ...fiBase, pulls: [{ before: fiAt(0), target: fiAt(1) }] }).pulls)),
+    fiKey(fiSaidGreen.list),
+  )
+  eq(
+    'FI-SAVE 保存された順は変えない（順番が変わると当て直した結果が変わる）',
+    fiSaved({
+      ...fiBase,
+      pulls: [
+        { before: fiAt(0), target: fiAt(4) },
+        { before: fiAt(4), target: fiAt(1) },
+      ],
+    })?.pulls,
+    [
+      { before: fiAt(0), target: fiAt(4) },
+      { before: fiAt(4), target: fiAt(1) },
+    ],
+  )
+  eq(
+    'FI-SAVE 形の壊れた1件だけを捨てて、残りは当て直す（推測で近い場所に当てない）',
+    fiSaved({
+      ...fiBase,
+      pulls: [
+        { before: fiAt(0), target: null },
+        { target: fiAt(1) },
+        'こわれ',
+        { before: fiAt(0), target: fiAt(4) },
+      ],
+    })?.pulls,
+    [{ before: fiAt(0), target: fiAt(4) }],
+  )
+  // 後方互換: この項目が無い（便FIより前の）覚え書きも今までどおり読める
+  eq(
+    'FI-SAVE 引き寄せを知らない古い覚え書きも読める（並べ替え無しとして扱う）',
+    fiSaved(fiBase)?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 古い覚え書きの選択・表示・調理中の手順は今までどおり読める',
+    { ...fiSaved(fiBase), pulls: undefined },
+    { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: fiAt(0), sessionOpen: true, pulls: undefined },
+  )
+  eq(
+    'FI-SAVE 引き寄せが1件も無ければ項目そのものを持たない（覚え書きを太らせない）',
+    fiSaved({ ...fiBase, pulls: [] })?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 段取りを表示していない覚え書きの並べ替えは読まない（調理中の手順と同じ扱い）',
+    fiSaved({ selectedIds: [10, 20], showTimeline: false, trialActive: false, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 調理中の手順を覚えていない覚え書きの並べ替えも読まない',
+    fiSaved({ selectedIds: [10, 20], showTimeline: true, trialActive: false, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
+    undefined,
+  )
+  eq(
+    'FI-SAVE 並べ替えが配列でない壊れた覚え書きでも、他の項目は読める',
+    fiSaved({ ...fiBase, pulls: 'こわれ' })?.current,
+    fiAt(0),
+  )
+
+  eq(
+    'FI-BACK 引き寄せたあとも「次へ→戻って」で元の手順に帰る',
+    fiSaidGreen.list.every((_, i) => {
+      if (i >= fiSaidGreen.list.length - 1) return true
+      const at = { recipeId: fiSaidGreen.list[i].recipeId, stepIndex: fiSaidGreen.list[i].stepIndex }
+      return JSON.stringify(backCursor(fiSaidGreen.list, advanceCursor(fiSaidGreen.list, at))) ===
+        JSON.stringify(at)
+    }),
+    true,
   )
 }
 

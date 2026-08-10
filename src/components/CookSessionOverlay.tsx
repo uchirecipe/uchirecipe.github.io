@@ -33,7 +33,7 @@ import {
   resolveVoiceTimerSeconds,
 } from '../logic/voiceCommand'
 import { circledNumber } from '../logic/naviStepText'
-import { naviRecipeColor } from '../logic/naviColors'
+import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { recipeStepLabel, type TimelineItem, type TimelineRecipe } from '../logic/cookNavi'
 import type { NaviIngredientAmount } from '../logic/naviIngredients'
@@ -45,8 +45,10 @@ import {
   isCursorAtFirst,
   isCursorAtLast,
   nextStepsByRecipe,
+  resolveColorMove,
   startCursor,
   type CookCursor,
+  type StepPull,
 } from '../logic/cookSession'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
@@ -179,6 +181,11 @@ type Props = {
   /** カーソルを動かす（呼び出し側が覚え書きに書く） */
   onMove: (next: CookCursor) => void
   /**
+   * 色で手順を引き寄せる（2026-08-10 便FI・docs/69 第3段）。
+   * 言われた品の手順をいまの位置へ移し、カーソルもそこへ送る（呼び出し側がまとめて行う）。
+   */
+  onPullStep: (pull: StepPull) => void
+  /**
    * この画面を閉じる（2026-08-10 便FC）。**調理中の手順は消さない**＝呼び出し側は
    * 全画面をしまうだけで、次に開いたときは同じ手順から始まる（オーナー実機
    * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
@@ -212,6 +219,7 @@ export default function CookSessionOverlay({
   stepIngredients,
   ingredientNamesByRecipeId,
   onMove,
+  onPullStep,
   onExit,
   onFinish,
   onStartTimer,
@@ -225,8 +233,10 @@ export default function CookSessionOverlay({
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
   /**
    * 下部の行をタップして中身を確認している品（保存しない一時的な表示状態）。
-   * **カーソルは動かさない**＝見るだけ。ここで位置まで動かすと、オーナーが懸念した
-   * 「手順飛ばし」「戻り先の誤り」が起きうるので、第1段では確認だけに絞る（docs/69）。
+   * **カーソルは動かさない**＝見るだけ（EL-03）。
+   * 2026-08-10 便FI で「色を言うとその品の手順に移る」を入れたが、**タップの意味は変えない**。
+   * 同じ行に「見る」と「移る」の2つの意味を持たせると、台所で押し間違えたときに
+   * どちらが起きたのか分からなくなる。移るのは声だけ、見るのは指だけで分ける。
    */
   const [peekRecipeId, setPeekRecipeId] = useState<number | null>(null)
   const touchStartX = useRef<number | null>(null)
@@ -312,8 +322,9 @@ export default function CookSessionOverlay({
   }
 
   /**
-   * 声で受けるのは1品の調理中モードと同じ言葉だけ
-   *（次へ／戻って／読み上げ／ストップ／再開／タイマー）。
+   * 声で受けるのは1品の調理中モードと同じ言葉
+   *（次へ／戻って／読み上げ／ストップ／再開／タイマー）に、
+   * この画面だけの**色**（青・緑・ピンク＝その色の品の手順に移る）を足したもの。
    * どれも間違って言われても戻せる操作にする。記録・タイマーの削除・調理を終える、は
    * 聞き間違いで実行されると取り返しがつかないので**タップだけ**にしてある（docs/69）。
    */
@@ -346,6 +357,32 @@ export default function CookSessionOverlay({
         if (!target) return
         resumeTimer(target.id)
         return ja.focus.micTimerResumed.replace('{label}', target.label)
+      },
+      /**
+       * 色（「青」「緑」「ピンク」）＝その色の品の手順に移る（2026-08-10 便FI・docs/69 第3段）。
+       *
+       * 行き先は**下部にその色で出ている行の手順**（logic/cookSession.ts の resolveColorMove が
+       * 決める＝下部の行と同じ導出）。移り方は**引き寄せ**＝その手順をいまの位置へ持ってきて、
+       * 開いていた手順は1つ後ろに下がる（手順が1つも消えない）。記録もタイマーの削除も
+       * 終了も起きない。別の色を言えば移り直せる。
+       * 行き先が無いときは理由を返す＝黙って何も起きない状態を作らない。
+       */
+      onColor: (colorIndex) => {
+        const target = resolveColorMove(items, cursor, colorIndex, recipes)
+        if (target.kind === 'none') {
+          return ja.cookNavi.sessionColorMissing.replace('{color}', naviColorWord(colorIndex))
+        }
+        const title = recipeById.get(target.recipeId)?.title ?? ''
+        if (target.kind === 'current') {
+          return ja.cookNavi.sessionColorCurrent.replace('{title}', title)
+        }
+        if (target.kind === 'done') {
+          return ja.cookNavi.sessionColorDone.replace('{title}', title)
+        }
+        // 前の手順を読みながら次に移らない（move と同じ作法）
+        stopSpeech()
+        onPullStep({ before: cursor, target: target.cursor })
+        return ja.cookNavi.sessionColorMoved.replace('{title}', title)
       },
       onTimer: (transcript) => {
         if (!item) return false
@@ -500,7 +537,11 @@ export default function CookSessionOverlay({
 
       {micSupported && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
+          {/* 1品の調理中モードと同じ案内に、この画面だけの「色」を足す（2026-08-10 便FI）。
+              ja.focus.micHint 自体は FocusMode と共用しているので書き換えない
+              ＝色の無い1品の画面に、色の言い方が出てしまうことが構造的に起きない */}
           {ja.focus.micHint}
+          {ja.cookNavi.sessionMicColorHint}
           {voiceMessage ? (
             <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
               {voiceMessage}
@@ -725,6 +766,16 @@ export default function CookSessionOverlay({
                   className={`w-full text-left ${next ? 'py-1' : 'py-0.5'}`}
                 >
                   <span className="flex items-center gap-1">
+                    {/* 声で言う色の名前（2026-08-10 便FI）。色の帯だけでは何と言えばよいか
+                        決められず、ピンクを「赤」と言ってしまう。**この印は押しても移らない**
+                        ＝行のタップは今までどおり全文を開くだけ（EL-03）で、移るのは声だけ */}
+                    <span
+                      data-testid="cook-session-color-word"
+                      className="shrink-0 rounded-full px-1.5 py-px text-[10px] font-bold"
+                      style={{ backgroundColor: otherColor, color: 'var(--chip-ink)' }}
+                    >
+                      {naviColorWord(recipe?.colorIndex ?? 0)}
+                    </span>
                     {next && <StepBadge number={next.order} size={20} />}
                     {nextLabel && <StepBadge number={nextLabel} size={18} color={otherColor} />}
                     <span className="min-w-0 flex-1 truncate text-xs font-bold">

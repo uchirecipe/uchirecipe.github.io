@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { matchVoiceCommand } from '../logic/voiceCommand'
+import { matchVoiceColor, matchVoiceCommand } from '../logic/voiceCommand'
 import { toSpeechText } from '../logic/toSpeechText'
 import { ja } from '../i18n/ja'
 
@@ -22,6 +22,10 @@ import { ja } from '../i18n/ja'
  * 2026-08-10 便FC: その戻り道を声にも通した（「再開」）。止める／動かすのどちらも
  * 言い直しで元に戻せるので、規律の内側のまま。読み上げの語は画面のボタン名と同じ
  * 「読み上げ」を主にした（「もう一回」も引き続き受ける）。
+ * 2026-08-10 便FI: 並行調理ナビの調理中画面だけ、色（「青」「緑」「ピンク」）で
+ * その品の手順に移れるようにした（docs/69 第3段）。動くのは段取りの並びとカーソルだけで、
+ * 手順は1つも消えず、記録・タイマーの削除・終了も起きない＝別の色を言えば移り直せるので、
+ * これも規律の内側。
  */
 
 export const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -111,6 +115,19 @@ export interface VoiceCommandActions {
    * 時間を決められなかったときは false を返す＝言い方の案内をその場に出す。
    */
   onTimer: (transcript: string) => boolean
+  /**
+   * 色（「青」「緑」「ピンク」）＝その色の品の手順に移る（2026-08-10 便FI・docs/69 第3段。
+   * オーナー要望「並行調理ナビ調理中モードの、色で手順入れ替えはいつ実装しますか？」）。
+   *
+   * **並行調理ナビの調理中画面だけが渡す**。1品の調理中モード（FocusMode）には色が無いので
+   * 渡さず、渡されていないときは色の言葉をそもそも見にいかない
+   * （＝1品の画面で「青ねぎ」と読み上げても何も起きない状態を保つ）。
+   *
+   * 行き先が無かったとき（いま開いている品・完成した品・その色の品が無い）に短い文を返すと、
+   * その場の手応えとしてそれを出す。**手順は1つも消えない**（その手順をいまの位置へ
+   * 引き寄せるだけ）ので、言い直せば戻せる。
+   */
+  onColor?: (colorIndex: number) => string | void
 }
 
 export interface VoiceCommandControls {
@@ -129,7 +146,8 @@ export interface VoiceCommandControls {
 }
 
 /**
- * 音声コマンドの聞き取り。「次へ」「戻って」「読み上げ」「ストップ」「再開」「タイマー」だけを受ける。
+ * 音声コマンドの聞き取り。「次へ」「戻って」「読み上げ」「ストップ」「再開」「タイマー」と、
+ * 色を受け取る画面でだけ色（「青」「緑」「ピンク」）を受ける。
  *
  * 呼び出し側の処理（actions）は ref 経由で常に最新を見る。
  * 認識オブジェクトを張り直すのは「聞き取りの入り切り」のときだけにして、
@@ -245,6 +263,18 @@ export function useVoiceCommands(actions: VoiceCommandActions): VoiceCommandCont
           // 時間の書かれていない手順では何分にすればよいか決められず、聞き取れていても
           // 無反応になっていた(2026-08-03 実機FB⑤)。言い方を同じ場所に出す
           showVoiceMessage(ja.focus.micTimerHint, 5000)
+        }
+      } else if (current.onColor) {
+        // 色（「青」「緑」「ピンク」）は**判定順のいちばん最後**（2026-08-10 便FI）。
+        // 上のコマンドが1つも当たらなかったときにだけ見る。しかも当てるのは
+        // 発話まるごとが色の名前と一致したときだけなので、「青ねぎを切る」では動かない
+        const colorIndex = matchVoiceColor(transcript)
+        if (colorIndex != null) {
+          // 移れたときは聞き取りの手応えではなく、どの品に移ったかを名前で出す
+          //（色の言葉だけでは、どの料理が開いたのか読み上げても分からない）
+          const message = current.onColor(colorIndex)
+          if (message) showVoiceMessage(message, 4000)
+          else feedback()
         }
       }
     }
