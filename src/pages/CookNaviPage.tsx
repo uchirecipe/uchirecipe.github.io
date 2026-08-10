@@ -884,6 +884,8 @@ export default function CookNaviPage() {
    * 段取りが描き上がってからでないと高さが足りずスクロールできないので、timeline を依存に入れる。
    */
   const scrollRestoredRef = useRef(false)
+  /** レシピ詳細から帰ってきた（見ていた位置を復元した）か。復元したときは下の呼び出しを譲る */
+  const scrollRestoredFromDetailRef = useRef(false)
   useEffect(() => {
     if (scrollRestoredRef.current || !timeline) return
     const y = takeCookNaviScroll()
@@ -892,9 +894,33 @@ export default function CookNaviPage() {
       return
     }
     scrollRestoredRef.current = true
+    scrollRestoredFromDetailRef.current = true
     // 描画直後は本文の高さが確定していないことがあるので、1フレーム置いてから戻す
     requestAnimationFrame(() => window.scrollTo({ top: y }))
   }, [timeline])
+
+  /**
+   * 調理の途中でこの画面に来たときは、続きの入口を画面に入れる（2026-08-11 便FO・利用者テスト
+   * 「献立画面の『並行調理ナビを再開』を押しても、調理中モードには戻らず、段取りページの
+   * 一番上に戻るだけ。そこから下までスクロールして『調理中モードの続きから見る』を押す必要がある」）。
+   *
+   * 全画面を勝手に開き直しはしない（✕で閉じたのは本人の操作なので、開くかどうかは本人が決める）。
+   * 押す先を画面に入れるところまでをこちらで行う＝押すのは1回で済む。
+   * レシピ詳細から帰ってきたときは、見ていた位置の復元が優先（そちらも本人の居場所なので奪わない）。
+   */
+  const resumeRevealedRef = useRef(false)
+  const sessionStartRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (resumeRevealedRef.current || !timeline || !resumeItem) return
+    if (!scrollRestoredRef.current) return
+    resumeRevealedRef.current = true
+    if (scrollRestoredFromDetailRef.current) return
+    const timer = setTimeout(() => {
+      const el = sessionStartRef.current
+      if (el) revealExpanded(el)
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [timeline, resumeItem])
 
   // ?focusStep= の着地は、段取りの手順カードが描かれてから行う（2026-08-08 便ED）。
   // 常駐タイマーから別の画面 → ナビ、と飛んできたときは、この画面が組み上がるより先に
@@ -988,6 +1014,14 @@ export default function CookNaviPage() {
    * 表示中なら段取りの先頭まで送る。
    */
   const timelineRef = useRef<HTMLElement | null>(null)
+  /**
+   * 「段取りを作る」を押して**これから**段取りが描かれる（2026-08-11 便FO・利用者テスト
+   * 「押しても画面がほぼ変わらない。押した直後の画面は上のボタンのまま。結果は画面のずっと下に
+   * できている。押せていないのかと思ってもう一度押しそうになった」）。
+   * 表示中に押したときはその場で送っていたのに、**初めて作ったときだけ送っていなかった**。
+   * 段取りは描き上がってからでないと高さが無いので、描けた時点で送る。
+   */
+  const pendingBuildScrollRef = useRef(false)
   const buildTimeline = () => {
     setDroppedNotice('')
     setSessionLostNotice(false)
@@ -997,8 +1031,14 @@ export default function CookNaviPage() {
       timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
+    pendingBuildScrollRef.current = true
     setShowTimeline(true)
   }
+  useEffect(() => {
+    if (!pendingBuildScrollRef.current || !timeline) return
+    pendingBuildScrollRef.current = false
+    timelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [timeline])
 
   /**
    * 調理中セッション（2026-08-09 便EL・docs/69 第1段）。
@@ -1424,6 +1464,7 @@ export default function CookNaviPage() {
                         押すと全画面に切り替わり、いまやる手順だけを大きく出す */}
                     <button
                       type="button"
+                      ref={sessionStartRef}
                       data-testid="cook-session-start"
                       onClick={startSession}
                       /* 塗りではなく白地＋オレンジの枠にする（2026-08-09 便ES・オーナー指摘C
