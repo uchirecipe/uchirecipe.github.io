@@ -25,7 +25,11 @@ import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/
 import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
-import { pickVoiceStopTarget, resolveVoiceTimerSeconds } from '../logic/voiceCommand'
+import {
+  pickVoiceResumeTarget,
+  pickVoiceStopTarget,
+  resolveVoiceTimerSeconds,
+} from '../logic/voiceCommand'
 import {
   micSupported,
   speechSupported,
@@ -242,7 +246,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       stepNumber,
     })
 
-  // 音声コマンド:「次へ」「戻って」「もう一回」「◯分タイマー」「ストップ」。
+  // 音声コマンド:「次へ」「戻って」「読み上げ」「◯分タイマー」「ストップ」「再開」。
   // 聞き取りの仕組みは components/useVoiceCommands.ts（並行調理ナビの調理中セッションと共用）
   const { listening, toggleListening, micDenied, dismissMicDenied, voiceMessage } =
     useVoiceCommands({
@@ -277,6 +281,18 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         if (!target) return
         pauseTimer(target.id)
         return ja.focus.micTimerPaused.replace('{label}', target.label)
+      },
+      /**
+       * 「再開」＝一時停止しているタイマーを1本だけ動かし直す（2026-08-10 便FC・
+       * オーナー実機「一時停止の後に音声操作で再開できない」）。止める声だけがあって
+       * 動かす声が無かったので、手が汚れていると画面に触るしかなかった。
+       * どれを動かすかは logic/voiceCommand.ts の pickVoiceResumeTarget が決める
+       */
+      onResume: () => {
+        const target = pickVoiceResumeTarget(timers, recipeId)
+        if (!target) return
+        resumeTimer(target.id)
+        return ja.focus.micTimerResumed.replace('{label}', target.label)
       },
       onTimer: (transcript) => {
         const currentIndex = indexRef.current

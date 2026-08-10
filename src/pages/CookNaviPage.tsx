@@ -55,7 +55,8 @@ import {
 import CookSessionOverlay from '../components/CookSessionOverlay'
 import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
-import { findCursorIndex, startCursor, type CookCursor } from '../logic/cookSession'
+import { findCursorIndex, resumeCursor, type CookCursor } from '../logic/cookSession'
+import { naviStepText } from '../logic/naviStepText'
 import {
   recipeIngredientList,
   stepIngredientAmounts,
@@ -523,6 +524,19 @@ export default function CookNaviPage() {
     () => restoredSession.current?.current,
   )
   /**
+   * 全画面の調理中モードを開いているか（2026-08-10 便FC・オーナー実機
+   * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
+   *
+   * 便ELでは「カーソルが入っている＝開いている」と決め、✕で閉じるときにカーソルを
+   * 捨てていたので、開き直すと必ず段取りの先頭からになっていた。
+   * **閉じてもカーソルは残す**ようにしたため、位置（current）と開閉（ここ）は別のことになる。
+   * docs/69 の「書ける状態は1つだけ」は調理の**位置**についての決まりなので、
+   * 位置を2か所に持たないこの分け方なら破らない（開閉は showTimeline と同類の見せ方の状態）。
+   */
+  const [sessionOpen, setSessionOpen] = useState(
+    () => restoredSession.current?.sessionOpen ?? false,
+  )
+  /**
    * 自分で時間を決めるタイマー（2026-08-09 便ES・オーナー指示D-2）。
    * レシピ詳細と同じ作法で、前回使った秒数を覚えて開く。
    */
@@ -571,8 +585,8 @@ export default function CookNaviPage() {
       clearCookNaviSession()
       return
     }
-    saveCookNaviSession({ selectedIds, showTimeline, trialActive, current })
-  }, [selectedIds, showTimeline, trialActive, current])
+    saveCookNaviSession({ selectedIds, showTimeline, trialActive, current, sessionOpen })
+  }, [selectedIds, showTimeline, trialActive, current, sessionOpen])
 
   // 常駐タイマーバーの「完了タイマー」タップからの着地（?focusStep=レシピID-手順番号）。
   // ナビ実行中はタップで単品レシピ詳細へ離脱させず、ナビ内の該当手順カードへスクロール＆
@@ -583,6 +597,12 @@ export default function CookNaviPage() {
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
   const [highlightKey, setHighlightKey] = useState<string | null>(null)
+  /**
+   * すでに着地させた ?focusStep=（2026-08-10 便FC）。
+   * URLの後片付けが何かの拍子に効かなくても、**同じ指定で二度カーソルを引き戻さない**ための札。
+   * これが無いと、下の不具合（次へを押しても同じ手順に戻される）が再発しうる。
+   */
+  const handledFocusRef = useRef<string | null>(null)
   /** ?focusStep= を消す（着地できたときだけ。同じ手順に何度でも飛べるようにする） */
   const clearFocusStep = () => {
     setSearchParams(
@@ -598,18 +618,41 @@ export default function CookNaviPage() {
   /** ?focusStep= の着地。段取りがまだ描かれていないうちは何もせず、描かれてからやり直す */
   const applyFocusStep = () => {
     const focus = searchParams.get('focusStep')
-    if (!focus) return
-    // 調理中の画面を開いている間は、背景の一覧をスクロールしても見えない。
-    // その手順そのものへカーソルを移す（2026-08-09 便ES・オーナー指示
-    // 「タイマーのバー→調整画面→レシピ名タップ→該当手順へ移動」と同じ着地にそろえる）
+    // 指定が消えたら札も戻す＝同じタイマーをもう一度押せば、また同じ手順へ飛べる
+    if (!focus) {
+      handledFocusRef.current = null
+      return
+    }
+    if (handledFocusRef.current === focus) return
+    // 調理中の手順を覚えている（＝調理の途中）なら、その手順そのものへカーソルを移し、
+    // 全画面の調理中モードを開いて着地する（2026-08-09 便ES・オーナー指示
+    // 「タイマーのバー→調整画面→レシピ名タップ→該当手順へ移動」と同じ着地）。
+    // 2026-08-10 便FC・オーナー実機「調理中モードでスタートしたタイマーからの戻り先が
+    // 調理中モードの手順にしたい」: 閉じている間もカーソルは残るようになったので、
+    // タイマーから帰ってきたときは**段取りの一覧ではなく調理中モードへ**戻す。
+    // 調理を終えている（カーソルが無い）ときは、従来どおり一覧の該当カードへ送る
     if (current && timeline) {
       const [focusRecipeId, focusStepNumber] = focus.split('-').map(Number)
       const target = timeline.items.find(
         (item) => item.recipeId === focusRecipeId && item.stepNumber === focusStepNumber,
       )
       if (target) {
+        handledFocusRef.current = focus
         setCurrent({ recipeId: target.recipeId, stepIndex: target.stepIndex })
-        clearFocusStep()
+        setSessionOpen(true)
+        /**
+         * **URLの後片付けは1拍おいてから**（2026-08-10 便FC。ここを直接呼ぶと動かない）。
+         *
+         * 全画面の調理中モードは、開くときに端末の「戻る」対策として履歴を1つ積む
+         * （CookSessionOverlay の `history.pushState`）。これは画面遷移の仕組み
+         * （React Router）を通さない生の履歴操作なので、**全画面を開く更新と同じ処理の中で
+         * URLを書き換えると、書き換えの間に履歴が1つ積まれ、画面遷移の仕組み側だけが
+         * 古いURL（?focusStep= が付いたまま）を握り続ける**。
+         * するとカーソルが動くたびにこの処理が呼び直され、そのつど同じ手順へ引き戻される
+         * ＝実機では「次へを押しても手順が進まない」。
+         * 全画面が開き切った（履歴を積み終えた）あとに片付ければ、この食い違いは起きない。
+         */
+        setTimeout(clearFocusStep, 0)
         return
       }
     }
@@ -620,6 +663,7 @@ export default function CookNaviPage() {
     // ＝2026-08-08 便ED・オーナー実機フィードバック②の着地が効かない不具合の修正
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    handledFocusRef.current = focus
     setHighlightKey(focus)
     clearFocusStep()
   }
@@ -731,8 +775,15 @@ export default function CookNaviPage() {
     if (!showTimeline && current) setCurrent(undefined)
   }, [showTimeline, current])
 
-  /** 調理中の位置が段取りの何番目か（途中でやめるときの確認文に出す件数に使う） */
+  /** 調理中の位置が段取りの何番目か（-1＝覚えていない・段取りに無い） */
   const currentIndex = timeline ? findCursorIndex(timeline.items, current) : -1
+  /**
+   * 全画面を閉じたあとに残っている「続きの手順」（2026-08-10 便FC）。
+   * これがあるときは入口のボタンを「続きから見る」に変え、どの手順から始まるかを添える
+   * ＝押した先が段取りの途中でも驚かない。先頭にいるだけのときは普通の入口のままにする。
+   */
+  const resumeItem =
+    !sessionOpen && currentIndex > 0 ? (timeline?.items[currentIndex] ?? undefined) : undefined
 
   /**
    * その品の最後の手順（＝そこで完成する手順）の位置。段取りの並びで最後に出てくるものを採る
@@ -855,7 +906,10 @@ export default function CookNaviPage() {
   const startSession = () => {
     if (!timeline) return
     setSessionLostNotice(false)
-    setCurrent(startCursor(timeline.items))
+    // 覚えている手順がまだ段取りにあれば**その続きから**、無ければ先頭から
+    // （2026-08-10 便FC。どちらを開くかの判断は logic/cookSession.ts の resumeCursor）
+    setCurrent(resumeCursor(timeline.items, current))
+    setSessionOpen(true)
   }
   /**
    * 「まとめて作った！」のボタン（2026-08-10 便EZ・オーナー指示
@@ -866,12 +920,21 @@ export default function CookNaviPage() {
   /** 「完成！」で閉じたときだけスクロールする（途中でやめた✕・端末の戻るでは動かさない） */
   const completedRef = useRef(false)
 
-  /** 調理を終える（調理中の位置だけを消す。選んだ品・段取り・作った記録には触らない） */
-  const finishSession = () => setCurrent(undefined)
-  /** 最後の手順の「完成！」（同・戻り位置を「まとめて作った！」に合わせる） */
+  /**
+   * 全画面の調理中モードを閉じる（2026-08-10 便FC・オーナー実機
+   * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
+   * **調理中の手順は消さない**ので、失うものが無い＝確認は出さない。
+   * 選んだ品・段取り・作った記録にも触らない。
+   */
+  const closeSession = () => setSessionOpen(false)
+  /**
+   * 最後の手順の「完成！」（2026-08-10 便EZ・戻り位置を「まとめて作った！」に合わせる）。
+   * ここは調理が終わった合図なので、覚えていた手順も消す＝次は先頭から始まる
+   */
   const completeSession = () => {
     completedRef.current = true
     setCurrent(undefined)
+    setSessionOpen(false)
   }
   /**
    * 全画面を閉じたあとの戻り位置（同）。
@@ -888,25 +951,6 @@ export default function CookNaviPage() {
     }, 250)
     return () => clearTimeout(timer)
   }, [current])
-  /**
-   * 段取りの途中でやめるとき（規約F: 何が消えて何が残るかを両方書く）。
-   * 最後の手順まで進んだあとの「調理を終える」は確認しない（そこで失うものが無いため）。
-   */
-  const exitSession = () => {
-    if (!timeline) {
-      finishSession()
-      return
-    }
-    const ok = window.confirm(
-      ja.cookNavi.sessionFinishConfirm
-        .replace('{n}', String(currentIndex + 1))
-        .replace('{t}', String(timeline.items.length))
-        .replace('{m}', String(timeline.recipes.length)),
-    )
-    if (!ok) return
-    finishSession()
-  }
-
   const startStepTimer = (item: TimelineItem, seconds: number) => {
     if (seconds <= 0) return
     startTimer({
@@ -950,6 +994,7 @@ export default function CookNaviPage() {
     setSelectedIds([])
     setShowTimeline(false)
     setCurrent(undefined)
+    setSessionOpen(false)
     setDroppedNotice('')
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
     setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
@@ -1226,10 +1271,18 @@ export default function CookNaviPage() {
                       className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md border-2 border-accent bg-surface py-4 text-lg font-bold text-accent-ink shadow-sm"
                     >
                       <ChefHat size={20} aria-hidden />
-                      {ja.cookNavi.sessionStart}
+                      {resumeItem ? ja.cookNavi.sessionResume : ja.cookNavi.sessionStart}
                     </button>
-                    <p className="ja-phrase mt-1 text-center text-xs text-ink-muted">
-                      {ja.cookNavi.sessionStartHint}
+                    <p
+                      data-testid="cook-session-start-hint"
+                      className="ja-phrase mt-1 text-center text-xs text-ink-muted"
+                    >
+                      {resumeItem
+                        ? ja.cookNavi.sessionResumeHint.replace(
+                            '{n}',
+                            naviStepText(resumeItem.order, recipeStepLabel(resumeItem)),
+                          )
+                        : ja.cookNavi.sessionStartHint}
                     </p>
                     {/* 覚えていた調理中の手順が、組み直した段取りに見つからなかったとき */}
                     {sessionLostNotice && (
@@ -1305,7 +1358,7 @@ export default function CookNaviPage() {
       {/* 調理中の画面（2026-08-09 便EL）。カーソルが入っている間だけ全画面で重なる。
           今日の献立の中身が変わっても閉じないよう、画面の分岐の外側に置く
           （＝作りかけの段取りが調理中に消えない） */}
-      {canUseNavi && current && timeline && (
+      {canUseNavi && sessionOpen && current && timeline && (
         <CookSessionOverlay
           items={timeline.items}
           recipes={timeline.recipes}
@@ -1313,7 +1366,7 @@ export default function CookNaviPage() {
           stepIngredients={stepIngredientsByKey}
           ingredientNamesByRecipeId={ingredientNamesByRecipeId}
           onMove={setCurrent}
-          onExit={exitSession}
+          onExit={closeSession}
           onFinish={completeSession}
           onStartTimer={startStepTimer}
         />

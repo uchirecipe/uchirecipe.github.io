@@ -38,6 +38,23 @@ export interface CookNaviSession {
    * 段取りの一覧表示に戻す（logic/cookSession.ts の resolveCursor）。
    */
   current?: CookCursor
+  /**
+   * 全画面の調理中モードを**いま開いているか**（2026-08-10 便FC・オーナー実機
+   * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
+   *
+   * 便ELでは「カーソルが入っている＝開いている」と決めて閉じるときにカーソルを捨てていたため、
+   * 開き直すと必ず①からになっていた。**捨てるのをやめる**と、位置と開閉が別のことになる。
+   *
+   * docs/69 の不変条件「書ける状態は1つだけ」は**調理の位置**についての決まりで、
+   * ここはそれを破らない: 位置は今までどおり `current` の1か所だけに書き、
+   * この値は `showTimeline` と同じ**画面の見せ方**の覚え書き（位置を持たない）。
+   * `current` が無いときは意味を持たない＝保存も復元もしない、で二重管理を避ける。
+   *
+   * 覚えていないとき（この項目が無い古い覚え書き）は**開いていた扱い**にする。
+   * 便ELまでは「カーソルがある＝開いている」だったので、その状態のまま更新した人が
+   * 調理の途中で全画面を失わないようにするため。
+   */
+  sessionOpen?: boolean
 }
 
 /** 保存された値がカーソルの形をしているか（stepIndex はナビが足した工程で負になる） */
@@ -62,11 +79,14 @@ export function parseCookNaviSession(raw: string | null): CookNaviSession | unde
     const current = parseCursor(data.current)
     // 段取りを表示していない状態で調理中の手順だけが残ることはない（不整合は捨てる）
     const showTimeline = data.showTimeline === true
+    const keepCursor = showTimeline && current != null
     return {
       selectedIds,
       showTimeline,
       trialActive: data.trialActive === true,
-      ...(showTimeline && current ? { current } : {}),
+      ...(keepCursor ? { current } : {}),
+      // 開閉はカーソルがあるときだけ意味を持つ。覚えていなければ「開いていた」に倒す（上の解説）
+      ...(keepCursor ? { sessionOpen: data.sessionOpen !== false } : {}),
     }
   } catch {
     return undefined

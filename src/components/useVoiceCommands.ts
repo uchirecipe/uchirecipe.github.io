@@ -14,11 +14,14 @@ import { ja } from '../i18n/ja'
  * 判定そのものは logic/voiceCommand.ts の純関数（単体テストで語形を固定済み）。
  * ここが持つのは、ブラウザの音声認識・読み上げの扱いと、マイクの許可まわりの案内だけ。
  *
- * **音声で受けるのは、間違っても戻せる操作だけ**（次へ／戻って／もう一回／ストップ／タイマー）。
+ * **音声で受けるのは、間違っても戻せる操作だけ**（次へ／戻って／読み上げ／ストップ／再開／タイマー）。
  * 記録・タイマーの削除・セッションの終了は、聞き間違いで実行されると取り返しがつかない
  * ので受けない（docs/69「音声の規律」）。
  * 2026-08-10 便EZ: 「ストップ」はタイマーの**一時停止**まで受ける。止めても消えず、
  * 画面の「再開」で元の残り時間から動かし直せる＝可逆なので、この規律の内側に収まる。
+ * 2026-08-10 便FC: その戻り道を声にも通した（「再開」）。止める／動かすのどちらも
+ * 言い直しで元に戻せるので、規律の内側のまま。読み上げの語は画面のボタン名と同じ
+ * 「読み上げ」を主にした（「もう一回」も引き続き受ける）。
  */
 
 export const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -84,7 +87,7 @@ export interface VoiceCommandActions {
   onNext: () => void
   /** 「戻って」 */
   onPrev: () => void
-  /** 「もう一回」＝いま出ている手順を読み上げ直す */
+  /** 「読み上げ」＝いま出ている手順を初めから読み上げる（「もう一回」でも同じ） */
   onRepeat: () => void
   /**
    * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
@@ -94,6 +97,14 @@ export interface VoiceCommandActions {
    * 取り消せない操作は声では受けない（docs/69「音声の規律」）。
    */
   onStop: () => string | void
+  /**
+   * 「再開」＝一時停止しているタイマーを1本だけ動かし直す（2026-08-10 便FC・オーナー実機
+   * 「一時停止の後に音声操作で再開できない」）。どれを動かしたかを短い文で返すと、
+   * その場の手応えとしてそれを出す。止めてあるタイマーが1本も無ければ何も返さない
+   *（画面側は「一時停止中のタイマーはありません」を出す）。
+   * **再開は取り消せる操作**（もう一度「ストップ」と言えば止まる）なので声で受けてよい。
+   */
+  onResume: () => string | void
   /**
    * 「タイマー」。何秒ではかるかは画面側が決める
    * （logic/voiceCommand.ts の resolveVoiceTimerSeconds を使う）。
@@ -118,7 +129,7 @@ export interface VoiceCommandControls {
 }
 
 /**
- * 音声コマンドの聞き取り。「次へ」「戻って」「もう一回」「ストップ」「タイマー」の5語だけを受ける。
+ * 音声コマンドの聞き取り。「次へ」「戻って」「読み上げ」「ストップ」「再開」「タイマー」だけを受ける。
  *
  * 呼び出し側の処理（actions）は ref 経由で常に最新を見る。
  * 認識オブジェクトを張り直すのは「聞き取りの入り切り」のときだけにして、
@@ -218,6 +229,13 @@ export function useVoiceCommands(actions: VoiceCommandActions): VoiceCommandCont
         const paused = current.onStop()
         if (paused) showVoiceMessage(paused, 4000)
         else feedback()
+      } else if (command === 'resume') {
+        // 止めたタイマーを動かし直す（2026-08-10 便FC）。止めるときと同じで、
+        // どれが動き出したかを名前で出す。止めてあるものが無いときは、
+        // 黙って終わらずに状態を返す（「聞こえていないのか効かないのか」を作らない）
+        const resumed = current.onResume()
+        if (resumed) showVoiceMessage(resumed, 4000)
+        else showVoiceMessage(ja.focus.micNoPausedTimer, 4000)
       } else if (command === 'timer') {
         // 「3分タイマー」のように分数の指定があればそれを使い、
         // 「タイマー」とだけ言った場合は手順に設定された分数→本文中の最初の時間表記の順で探す

@@ -27,7 +27,12 @@ import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
 import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import { formatRemaining, findTimeTokens, isMinutesShownInText } from '../logic/time'
-import { pickVoiceStopTarget, resolveVoiceTimerSeconds } from '../logic/voiceCommand'
+import {
+  pickVoiceResumeTarget,
+  pickVoiceStopTarget,
+  resolveVoiceTimerSeconds,
+} from '../logic/voiceCommand'
+import { circledNumber } from '../logic/naviStepText'
 import { naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { recipeStepLabel, type TimelineItem, type TimelineRecipe } from '../logic/cookNavi'
@@ -40,6 +45,7 @@ import {
   isCursorAtFirst,
   isCursorAtLast,
   nextStepsByRecipe,
+  startCursor,
   type CookCursor,
 } from '../logic/cookSession'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
@@ -172,7 +178,11 @@ type Props = {
   ingredientNamesByRecipeId: Map<number, string[]>
   /** カーソルを動かす（呼び出し側が覚え書きに書く） */
   onMove: (next: CookCursor) => void
-  /** 段取りの途中でやめる（呼び出し側が確認を出してから調理中の位置を消す） */
+  /**
+   * この画面を閉じる（2026-08-10 便FC）。**調理中の手順は消さない**＝呼び出し側は
+   * 全画面をしまうだけで、次に開いたときは同じ手順から始まる（オーナー実機
+   * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
+   */
   onExit: () => void
   /** 最後の手順まで進んで終える（確認なしで調理中の位置を消す） */
   onFinish: () => void
@@ -244,6 +254,12 @@ export default function CookSessionOverlay({
   }
   const goNext = () => move(advanceCursor(items, cursor))
   const goPrev = () => move(backCursor(items, cursor))
+  /**
+   * 段取りの最初の手順へ（2026-08-10 便FC・オーナー実機「左上に、①に戻るボタンを設置したい」）。
+   * 途中から開き直したとき・作り直したいときに、次へ／前へを何回も押さずに先頭へ帰れる。
+   * カーソルを動かすだけなので、押し間違えても「次へ」で戻れる（可逆）。
+   */
+  const goFirst = () => move(startCursor(items))
 
   // 開いている間は背景（段取りの一覧）をスクロールさせない（調理中モードと同じ）
   useEffect(() => {
@@ -296,7 +312,8 @@ export default function CookSessionOverlay({
   }
 
   /**
-   * 声で受けるのは調理中モードと同じ5語だけ（次へ／戻って／もう一回／ストップ／タイマー）。
+   * 声で受けるのは1品の調理中モードと同じ言葉だけ
+   *（次へ／戻って／読み上げ／ストップ／再開／タイマー）。
    * どれも間違って言われても戻せる操作にする。記録・タイマーの削除・調理を終える、は
    * 聞き間違いで実行されると取り返しがつかないので**タップだけ**にしてある（docs/69）。
    */
@@ -318,6 +335,17 @@ export default function CookSessionOverlay({
         if (!target) return
         pauseTimer(target.id)
         return ja.focus.micTimerPaused.replace('{label}', target.label)
+      },
+      /**
+       * 「再開」＝一時停止しているタイマーを1本だけ動かし直す（2026-08-10 便FC・
+       * オーナー実機「一時停止の後に音声操作で再開できない」）。
+       * どれを動かすかは pickVoiceResumeTarget（止めるときの裏返し）が決める
+       */
+      onResume: () => {
+        const target = pickVoiceResumeTarget(timers, item?.recipeId)
+        if (!target) return
+        resumeTimer(target.id)
+        return ja.focus.micTimerResumed.replace('{label}', target.label)
       },
       onTimer: (transcript) => {
         if (!item) return false
@@ -365,15 +393,26 @@ export default function CookSessionOverlay({
     timersByRecipeId.set(t.recipeId, list)
   }
   const adjustingTimer = timers.find((t) => t.id === adjustingId) ?? null
-  /** 調整の窓の「レシピ名タップで該当手順へ」（オーナー指示E-14）。段取りに無い手順には飛ばさない */
-  const goToTimerStep = (timer: (typeof timers)[number]) => {
-    const target = items.find(
+  /**
+   * そのタイマーを始めた手順（段取りの中の1つ）。見つからないタイマー
+   * （自分で時間を決めたタイマー・別の組み合わせで始めたもの）には飛び先が無い
+   */
+  const timerStep = (timer: ActiveTimer) =>
+    items.find(
       (x) => x.recipeId === timer.recipeId && (recipeStepLabel(x) ?? '') === (timer.naviStepLabel ?? ''),
     )
+  /** 調整の窓の「レシピ名タップで該当手順へ」（オーナー指示E-14）。段取りに無い手順には飛ばさない */
+  const goToTimerStep = (timer: ActiveTimer) => {
+    const target = timerStep(timer)
     if (!target) return
     setAdjustingId(null)
     move({ recipeId: target.recipeId, stepIndex: target.stepIndex })
   }
+  /**
+   * このタイマーの手順へ移動できるか（2026-08-10 便FC）。飛び先が無いタイマーで
+   * レシピ名に下線を引く・「手順◯を開く」を出すと、押しても何も起きない見せかけになる
+   */
+  const adjustingTimerStep = adjustingTimer ? timerStep(adjustingTimer) : undefined
 
   const onTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     touchStartX.current = e.touches[0].clientX
@@ -389,16 +428,29 @@ export default function CookSessionOverlay({
 
   return (
     <div data-testid="cook-session" className="fixed inset-0 z-50 flex flex-col bg-app">
-      {/* 上部: 閉じる / どの品の何手順目か / 読み上げ・声の操作 */}
-      <div className="flex items-center justify-between px-[var(--space-md)] py-[var(--space-sm)]">
+      {/* 上部: 閉じる / 最初の手順へ / どの品の何手順目か / 読み上げ・声の操作 */}
+      <div className="flex items-center justify-between px-[var(--space-sm)] py-[var(--space-sm)]">
         <button
           type="button"
           onClick={onExit}
-          aria-label={ja.cookNavi.sessionFinish}
+          aria-label={ja.cookNavi.sessionClose}
           data-testid="cook-session-close"
-          className="rounded-full p-3 text-ink-muted"
+          className="rounded-full p-2 text-ink-muted"
         >
           <X size={24} aria-hidden />
+        </button>
+        {/* 段取りの最初の手順へ（2026-08-10 便FC・オーナー実機「左上に、①に戻るボタン」）。
+            呼び方は画面の大きいバッジと同じ丸数字にそろえる＝「手順①へ」（便EZで統一した
+            「手順⑦3-1」の書き方と同じ流儀）。「戻る」の語を使わないのは、下の「前へ」や
+            端末の戻る操作と読み分けられなくなるため。先頭にいる間は押せない */}
+        <button
+          type="button"
+          data-testid="cook-session-to-first"
+          onClick={goFirst}
+          disabled={atFirst}
+          className="shrink-0 rounded-md border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink shadow-sm disabled:opacity-30"
+        >
+          {ja.cookNavi.sessionToFirst.replace('{n}', circledNumber(items[0]?.order ?? 1))}
         </button>
         <div className="min-w-0 flex-1 px-1 text-center">
           <p className="truncate">
@@ -659,12 +711,18 @@ export default function CookSessionOverlay({
                   data-testid="cook-session-other-row"
                   disabled={!next}
                   onClick={() => setPeekRecipeId(open ? null : recipeId)}
-                  aria-expanded={open}
-                  aria-label={(open ? ja.cookNavi.sessionPeekCloseAria : ja.cookNavi.sessionPeekOpenAria).replace(
-                    '{title}',
-                    recipe?.title ?? '',
-                  )}
-                  className="w-full py-1 text-left"
+                  {...(next
+                    ? {
+                        'aria-expanded': open,
+                        'aria-label': (open
+                          ? ja.cookNavi.sessionPeekCloseAria
+                          : ja.cookNavi.sessionPeekOpenAria
+                        ).replace('{title}', recipe?.title ?? ''),
+                      }
+                    : // 作り終えた品には開く全文が無い。「全文を開く」と名乗らせず、
+                      // 読み上げても見たままの「料理名＋完成」になるようにする（2026-08-10 便FC）
+                      {})}
+                  className={`w-full text-left ${next ? 'py-1' : 'py-0.5'}`}
                 >
                   <span className="flex items-center gap-1">
                     {next && <StepBadge number={next.order} size={20} />}
@@ -672,15 +730,46 @@ export default function CookSessionOverlay({
                     <span className="min-w-0 flex-1 truncate text-xs font-bold">
                       {recipe?.title}
                     </span>
+                    {/* 作り終えた品は、料理名の横に「完成」を置いた1行だけにする
+                        （2026-08-10 便FC・オーナー実機「他の品の次の手順『作り終えました』→
+                        レシピ名横に『完成』で、１列にする。終わった場所はコンパクトに」）。
+                        印は段取りの一覧・調理中の手順と同じ「完成」で、料理の色で塗る */}
+                    {!next && (
+                      <span
+                        data-testid="cook-session-other-done"
+                        className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                        style={{ backgroundColor: otherColor, color: 'var(--chip-ink)' }}
+                      >
+                        {ja.cookNavi.recipeDone}
+                      </span>
+                    )}
                   </span>
-                  {/* 本文は画面の横幅いっぱいを使う（レシピ名と同じ行に詰め込まない） */}
-                  <span className="ja-phrase mt-0.5 block w-full text-sm">
-                    {next
-                      ? collapseStepText(next.text, FOLDED_MAX_CHARS)
-                      : ja.cookNavi.sessionRecipeFinished}
-                  </span>
+                  {/* 本文は画面の横幅いっぱいを使う（レシピ名と同じ行に詰め込まない）。
+                      作り終えた品には本文の行を作らない＝終わった場所は1行だけになる */}
+                  {next && (
+                    <span className="ja-phrase mt-0.5 block w-full text-sm">
+                      {collapseStepText(next.text, FOLDED_MAX_CHARS)}
+                    </span>
+                  )}
                 </button>
-                {/* その品のタイマーはこの行に直接出す（画面上部には出さない。E-11） */}
+                <Collapse open={Boolean(open && next)}>
+                  {next && (
+                    <div
+                      data-testid="cook-session-peek"
+                      className="mb-1 max-h-[28vh] overflow-y-auto rounded-sm bg-app px-2 py-1.5"
+                    >
+                      <p className="ja-phrase text-sm leading-relaxed">{next.text}</p>
+                      {next.memo && (
+                        <MemoText text={next.memo} className="mt-1 text-xs text-ink-muted" />
+                      )}
+                    </div>
+                  )}
+                </Collapse>
+                {/* その品のタイマーはこの行に直接出す（画面上部には出さない。E-11）。
+                    2026-08-10 便FC・オーナー実機「タイマーは、他の品の次の手順を開いたら
+                    手順の下に来るようにして」: 全文（Collapse）より**後ろ**に置く。
+                    畳んでいる間の見え方は変わらない（閉じた折りたたみは高さを持たないため、
+                    今までどおり1行の手順のすぐ下に並ぶ） */}
                 {otherTimers.length > 0 && (
                   <div
                     data-testid="cook-session-other-timers"
@@ -700,19 +789,6 @@ export default function CookSessionOverlay({
                     ))}
                   </div>
                 )}
-                <Collapse open={Boolean(open && next)}>
-                  {next && (
-                    <div
-                      data-testid="cook-session-peek"
-                      className="mb-1 max-h-[28vh] overflow-y-auto rounded-sm bg-app px-2 py-1.5"
-                    >
-                      <p className="ja-phrase text-sm leading-relaxed">{next.text}</p>
-                      {next.memo && (
-                        <MemoText text={next.memo} className="mt-1 text-xs text-ink-muted" />
-                      )}
-                    </div>
-                  )}
-                </Collapse>
               </div>
             )
           })}
@@ -762,7 +838,16 @@ export default function CookSessionOverlay({
       <TimerAdjustModal
         timer={adjustingTimer}
         now={now}
-        onLabelClick={adjustingTimer ? () => goToTimerStep(adjustingTimer) : undefined}
+        onLabelClick={
+          adjustingTimer && adjustingTimerStep ? () => goToTimerStep(adjustingTimer) : undefined
+        }
+        /* 「手順⑦3-1を開く」（2026-08-10 便FC・オーナー実機「調理中モードでスタートした
+           タイマーからの戻り先が調理中モードの手順にしたい」）。この画面では別の画面へ飛ばさず、
+           段取りの中でその手順へカーソルを移す＝常駐バーから開いた窓と同じ言い方・同じ着地にする。
+           以前はレシピ名のタップにしか道が無く、押せる場所が見た目から分からなかった */
+        onGoToStep={
+          adjustingTimer && adjustingTimerStep ? () => goToTimerStep(adjustingTimer) : undefined
+        }
         onAdjust={(delta) => {
           if (adjustingId !== null) adjustTimer(adjustingId, delta)
         }}

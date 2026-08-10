@@ -10,25 +10,41 @@
  * 分岐の優先順位は従来のif-elseの順番をそのまま保つ（「次へ」→「戻って」→読み上げ→
  * ストップ→タイマー）。
  */
-export type VoiceCommand = 'next' | 'prev' | 'repeat' | 'stop' | 'timer'
+export type VoiceCommand = 'next' | 'prev' | 'repeat' | 'stop' | 'resume' | 'timer'
 
 /**
  * 聞き取れた文字列（空白は呼び出し側で除去済み）からコマンドを判定する。
  * どれにも当てはまらなければ undefined（画面側は手応えも出さない＝従来どおり）。
+ *
+ * 判定の順番（前から順に当てる）:
+ *   次へ → 戻って → 再開 → ストップ → 読み上げ → タイマー
+ * 「タイマー」を最後にするのは、「タイマーストップ」「タイマー再開」を新規起動にしないため。
+ * 2026-08-10 便FC: **ストップを読み上げより先**にした。読み上げの語を「読み上げ」に変えた
+ * （下記）ことで、「読み上げストップ」と続けて言われる形が生まれるため。
  */
 export function matchVoiceCommand(transcript: string): VoiceCommand | undefined {
   if (/次|つぎ/.test(transcript)) return 'next'
   if (/戻|もど|前へ|まえ/.test(transcript)) return 'prev'
-  // 「1」だけを見ていたため「もう一回」(漢数字)「もういっかい」が漏れていた(便CK/④-1)。
-  // 音声認識は同じ発話を「もう一回」「もう1回」「もういっかい」のどれでも返しうるので、
-  // 数字は半角・全角・漢数字を、読みはかなも受け付ける
-  if (/もう[1１一]?[回度]|もういっかい|もういちど/.test(transcript)) return 'repeat'
+  // 2026-08-10 便FC（オーナー実機「一時停止の後に音声操作で再開できない」）:
+  // 止める声（ストップ）はあるのに、動かし直す声が無かった。
+  // **主に受ける言い方は「再開」**＝画面のボタンと同じ語にそろえる（案内文どおりの語が
+  // 判定から漏れていた便CK/④-1と同型の事故を防ぐ）。オーナー案の「スタート」も受ける。
+  // かなで返る端末（「さいかい」「すたーと」）も同じ扱い
+  if (/再開|さいかい|スタート|すたーと/.test(transcript)) return 'resume'
   // 2026-08-10 便EZ（オーナー実機「『ストップ』は聞き取れていてもタイマーとまらない」）:
   // ここは元から 'stop' を返せていた＝聞き取りは合っていた。効かなかったのは画面側で
   // 'stop' を読み上げの停止にしか繋いでいなかったため。かなで返る端末（「すとっぷ」）と、
-  // 「タイマーストップ」のようにタイマーの語と一緒に言う形も受ける
-  // （タイマーの語より先に判定するので、「タイマーストップ」は新規起動にならない）
+  // 「タイマーストップ」のようにタイマーの語と一緒に言う形も受ける。
+  // 「一時停止」（2026-08-10 便FCで画面のボタンをこの語に変えた）もここに当たる
   if (/ストップ|すとっぷ|とめて|止めて|停止/.test(transcript)) return 'stop'
+  // 「1」だけを見ていたため「もう一回」(漢数字)「もういっかい」が漏れていた(便CK/④-1)。
+  // 音声認識は同じ発話を「もう一回」「もう1回」「もういっかい」のどれでも返しうるので、
+  // 数字は半角・全角・漢数字を、読みはかなも受け付ける。
+  // 2026-08-10 便FC（オーナー実機「『もう一度』で読み上げは、1回目からになるので
+  // 『読み上げ』に変更」）: **主に受ける言い方は「読み上げ」**＝画面のボタン名と同じ語。
+  // 「もう一回」系は今までどおり受ける（言い慣れた人が黙らされないため）
+  if (/読み上げ|よみあげ/.test(transcript)) return 'repeat'
+  if (/もう[1１一]?[回度]|もういっかい|もういちど/.test(transcript)) return 'repeat'
   if (/タイマー/.test(transcript)) return 'timer'
   return undefined
 }
@@ -67,6 +83,32 @@ export function pickVoiceStopTarget<T extends VoiceStopTimer>(
     list.reduce((best, t) => (t.endsAt < best.endsAt ? t : best))
   const mine = currentRecipeId == null ? [] : running.filter((t) => t.recipeId === currentRecipeId)
   return soonest(mine.length > 0 ? mine : running)
+}
+
+/**
+ * 声の「再開」で動かし直すタイマーを1本選ぶ（2026-08-10 便FC）。
+ *
+ * 選び方は `pickVoiceStopTarget` の裏返しにそろえる。
+ *   1. **一時停止中のタイマーだけ**が対象（動いているもの・終わったものは選ばない）
+ *   2. いま画面に大きく出している料理のものを最優先
+ *   3. 無ければ**残りがいちばん短い**もの＝動かせばいちばん先に鳴る1本
+ *
+ * 残りの比べ方だけは止めるときと違う。一時停止中は時計が止まっていて `endsAt` が
+ * 過去のまま固まっているので、**残りは `pausedRemainingMs` で比べる**（`endsAt` で比べると
+ * 止めた順に選んでしまい、「次に鳴るはずだった1本」から外れる）。
+ *
+ * 選び違えても、もう一度「ストップ」と言えば止め直せる（可逆・非破壊。docs/69「音声の規律」）。
+ */
+export function pickVoiceResumeTarget<T extends VoiceStopTimer>(
+  timers: readonly T[],
+  currentRecipeId?: number,
+): T | undefined {
+  const paused = timers.filter((t) => !t.done && t.pausedRemainingMs != null)
+  if (paused.length === 0) return undefined
+  const shortest = (list: readonly T[]) =>
+    list.reduce((best, t) => ((t.pausedRemainingMs ?? 0) < (best.pausedRemainingMs ?? 0) ? t : best))
+  const mine = currentRecipeId == null ? [] : paused.filter((t) => t.recipeId === currentRecipeId)
+  return shortest(mine.length > 0 ? mine : paused)
 }
 
 /**
