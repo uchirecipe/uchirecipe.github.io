@@ -22905,7 +22905,7 @@ try {
         JSON.stringify(ey2Rows.shiitake),
       )
       // 画面でも「自分の価格」が残っていること(999円が入力欄に出る)。
-      // 2026-08-10 便FA: 一覧には「生しいたけ」「乾燥しいたけ」も並ぶので、行ではなく
+      // 2026-08-10 便FA: 一覧には「生しいたけ」「干ししいたけ」も並ぶので、行ではなく
       // ラベル完全一致で「しいたけ」の行の入力欄を掴む（部分一致だと別の行を拾う）
       const ey2Value = await ey2Page
         .getByLabel('しいたけの価格（円）', { exact: true })
@@ -23184,7 +23184,8 @@ try {
   // --- FA-1: しいたけの名寄せ(2026-08-10 オーナー裁定「生と乾燥を別項目として名前で区別する」) ---
   // 価格マスタに「しいたけ 150円/6枚」と「生しいたけ 100円/6枚」が同じ食材のまま並び、
   // 同じものなのに値段が違っていた。生の側は「生しいたけ 100円」1本へ寄せ(オーナー指定
-  // 「どちらかなら生しいたけ」)、乾燥は価格帯が全く違うので「乾燥しいたけ 400円/30g」を別項目で持つ。
+  // 「どちらかなら生しいたけ」)、乾燥は価格帯が全く違うので別項目で持つ。
+  // 2026-08-10 便FB: その乾燥側の項目名を「干ししいたけ 400円/30g」に統一した(オーナー指示)。
   // 素の「しいたけ」と書いたレシピ(同梱の寄せ鍋)も同じ1件に価格解決することまで見る
   currentCheck = 'FA-1'
   {
@@ -23209,13 +23210,17 @@ try {
         faFreshYen === '100' && faFreshQty === '6' && faFreshUnit === '枚',
         `${faFreshYen}円 / ${faFreshQty}${faFreshUnit}`,
       )
-      const faDryYen = await faPage.getByLabel('乾燥しいたけの価格（円）', { exact: true }).inputValue()
-      const faDryQty = await faPage.getByLabel('乾燥しいたけの数量', { exact: true }).inputValue()
-      const faDryUnit = await faPage.getByLabel('乾燥しいたけの単位', { exact: true }).inputValue()
+      const faDryYen = await faPage.getByLabel('干ししいたけの価格（円）', { exact: true }).inputValue()
+      const faDryQty = await faPage.getByLabel('干ししいたけの数量', { exact: true }).inputValue()
+      const faDryUnit = await faPage.getByLabel('干ししいたけの単位', { exact: true }).inputValue()
       check(
-        'FA-1 「乾燥しいたけ」が別項目として並ぶ(400円/30g・生とは価格帯が違う)',
+        'FA-1 「干ししいたけ」が別項目として並ぶ(400円/30g・生とは価格帯が違う)',
         faDryYen === '400' && faDryQty === '30' && faDryUnit === 'g',
         `${faDryYen}円 / ${faDryQty}${faDryUnit}`,
+      )
+      check(
+        'FB-1 旧名「乾燥しいたけ」の行は「食材と価格」に並ばない(呼び名を統一した)',
+        (await faPage.getByLabel('乾燥しいたけの価格（円）', { exact: true }).count()) === 0,
       )
 
       // 素の「しいたけ4枚」と書いてある寄せ鍋が、生しいたけの単価で按分される
@@ -23314,7 +23319,8 @@ try {
         return {
           plain: pick('しいたけ'),
           fresh: pick('生しいたけ'),
-          dry: pick('乾燥しいたけ'),
+          dry: pick('干ししいたけ'),
+          oldDry: pick('乾燥しいたけ'),
           shiitakeRows: rows.filter((r) => String(r.name).includes('しいたけ')).map((r) => r.name),
         }
       })
@@ -23329,12 +23335,17 @@ try {
         JSON.stringify(fa2Rows.fresh),
       )
       check(
-        'FA-1b 新項目「乾燥しいたけ」が既存端末にも追加される',
+        'FA-1b 新項目「干ししいたけ」が既存端末にも追加される',
         fa2Rows.dry?.price === 400 && fa2Rows.dry?.unit === '30g',
         JSON.stringify(fa2Rows.dry),
       )
       check(
-        'FA-1b しいたけ系の行は「生しいたけ」「乾燥しいたけ」の2行だけになる',
+        'FB-1b 版6の端末に旧名「乾燥しいたけ」の行はできない(統一後の名前で1行だけ入る)',
+        fa2Rows.oldDry === null,
+        JSON.stringify(fa2Rows.oldDry),
+      )
+      check(
+        'FA-1b しいたけ系の行は「生しいたけ」「干ししいたけ」の2行だけになる',
         fa2Rows.shiitakeRows.length === 2,
         fa2Rows.shiitakeRows.join('/'),
       )
@@ -23457,6 +23468,189 @@ try {
       )
     } finally {
       await fa4Browser.close()
+    }
+  }
+
+  // --- FB-1c: 版7の端末からの移行(2026-08-10 便FB。呼び名を「干ししいたけ」に統一) ---
+  // 版7(「乾燥しいたけ 400円/30g」を含む)は本番に約30分だけ出ていたので、その行を受け取った
+  // 端末が実在する。目安のままの行は「干ししいたけ」に畳み、自分で値段を入れた行は1件も触らない
+  currentCheck = 'FB-1c'
+  {
+    const fbBrowser = await chromium.launch()
+    try {
+      // 版7の端末を作り直す共通処理: 「干ししいたけ」を消して「乾燥しいたけ」を置き、版番号を7へ戻す
+      const makeV7Device = async (page, dryRow) => {
+        await page.goto(`${BASE}/#/prices`, { waitUntil: 'networkidle' })
+        await page.waitForTimeout(2000) // 初回シード(レシピ109品＋価格マスタ)の完了待ち
+        await page.evaluate(async (row) => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
+          const all = await new Promise((resolve, reject) => {
+            const tx = idb.transaction('prices', 'readonly')
+            const get = tx.objectStore('prices').getAll()
+            get.onsuccess = () => resolve(get.result)
+            get.onerror = () => reject(get.error)
+          })
+          const hoshi = all.find((r) => r.name === '干ししいたけ')
+          await new Promise((resolve, reject) => {
+            const tx = idb.transaction(['prices', 'settings'], 'readwrite')
+            const prices = tx.objectStore('prices')
+            if (hoshi) prices.delete(hoshi.id)
+            prices.put({ ...row, updatedAt: Date.now() })
+            const settings = tx.objectStore('settings')
+            const getReq = settings.get(1)
+            getReq.onsuccess = () => {
+              const current = getReq.result || { id: 1 }
+              settings.put({ ...current, id: 1, priceDefaultsVersion: 7 })
+            }
+            tx.oncomplete = () => resolve(undefined)
+            tx.onerror = () => reject(tx.error)
+          })
+          idb.close()
+        }, dryRow)
+        await page.reload({ waitUntil: 'networkidle' })
+        await page.waitForTimeout(2000)
+        return page.evaluate(async () => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
+          const rows = await new Promise((resolve, reject) => {
+            const tx = idb.transaction('prices', 'readonly')
+            const all = tx.objectStore('prices').getAll()
+            all.onsuccess = () => resolve(all.result)
+            all.onerror = () => reject(all.error)
+          })
+          idb.close()
+          const pick = (name) => {
+            const r = rows.find((x) => x.name === name)
+            return r ? { unit: r.unit, price: r.pricePerUnit, isDefault: r.isDefault } : null
+          }
+          return {
+            hoshi: pick('干ししいたけ'),
+            oldDry: pick('乾燥しいたけ'),
+            fresh: pick('生しいたけ'),
+            shiitakeRows: rows.filter((r) => String(r.name).includes('しいたけ')).map((r) => r.name),
+          }
+        })
+      }
+
+      // ① 目安のままの行 → 「干ししいたけ」に畳まれる(価格・単位は動かさない)
+      const fbCtx = await fbBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const fbPage = await fbCtx.newPage()
+      fbPage.on('pageerror', (err) => errors.push(`[pageerror@FB-1c] ${err.message}`))
+      const fbPlain = await makeV7Device(fbPage, {
+        name: '乾燥しいたけ',
+        pricePerUnit: 400,
+        unit: '30g',
+        isDefault: true,
+        defaultPricePerUnit: 400,
+        defaultUnit: '30g',
+      })
+      check(
+        'FB-1c 版7の端末: 目安のままの「乾燥しいたけ」の行は消える',
+        fbPlain.oldDry === null,
+        JSON.stringify(fbPlain.oldDry),
+      )
+      check(
+        'FB-1c 版7の端末: 代わりに「干ししいたけ」が400円/30gで残る(金額は1円も動かさない)',
+        fbPlain.hoshi?.price === 400 && fbPlain.hoshi?.unit === '30g' && fbPlain.hoshi?.isDefault === true,
+        JSON.stringify(fbPlain.hoshi),
+      )
+      check(
+        'FB-1c 版7の端末: しいたけ系は「生しいたけ」「干ししいたけ」の2行だけ(行は増えも減りもしない)',
+        fbPlain.shiitakeRows.length === 2 && fbPlain.hoshi !== null && fbPlain.fresh !== null,
+        fbPlain.shiitakeRows.join('/'),
+      )
+      const fbHoshiYen = await fbPage.getByLabel('干ししいたけの価格（円）', { exact: true }).inputValue()
+      check('FB-1c 版7の端末: 画面にも「干ししいたけ 400円」で出る', fbHoshiYen === '400', String(fbHoshiYen))
+
+      // ② 自分で価格を入れた行 → 1件も触らない(その端末では旧名のまま自分の値段が残る)
+      const fbCtx2 = await fbBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const fbPage2 = await fbCtx2.newPage()
+      fbPage2.on('pageerror', (err) => errors.push(`[pageerror@FB-1c] ${err.message}`))
+      const fbEdited = await makeV7Device(fbPage2, {
+        name: '乾燥しいたけ',
+        pricePerUnit: 250,
+        unit: '30g',
+        isDefault: false,
+        defaultPricePerUnit: 400,
+        defaultUnit: '30g',
+      })
+      check(
+        'FB-1c 自分で入れた価格の行は移行で消さない(乾燥しいたけ250円がそのまま残る)',
+        fbEdited.oldDry?.price === 250 && fbEdited.oldDry?.isDefault === false,
+        JSON.stringify(fbEdited.oldDry),
+      )
+      check(
+        'FB-1c 自分の行がある端末では「干ししいたけ」を重ねて増やさない(同じ食材が2行にならない)',
+        fbEdited.hoshi === null && fbEdited.shiitakeRows.length === 2,
+        fbEdited.shiitakeRows.join('/'),
+      )
+      const fbEditedYen = await fbPage2.getByLabel('乾燥しいたけの価格（円）', { exact: true }).inputValue()
+      check('FB-1c 画面上も自分で入れた250円が残っている', fbEditedYen === '250', String(fbEditedYen))
+    } finally {
+      await fbBrowser.close()
+    }
+  }
+
+  // --- FB-2: 食品と目安価格の一覧(公開ページ)の呼び名と別名(2026-08-10 便FB) ---
+  // 成分表側は元から「干ししいたけ」で、価格マスタの「乾燥しいたけ」と名前が食い違っていた。
+  // 統一後は同じ名前で並び、旧名は別名欄に出る(アプリが受け付ける書き方とページの記載が揃う)
+  currentCheck = 'FB-2'
+  {
+    const fb2Browser = await chromium.launch()
+    try {
+      const fb2Ctx = await fb2Browser.newContext({ viewport: { width: 390, height: 844 } })
+      const fb2Page = await fb2Ctx.newPage()
+      fb2Page.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@FB-2] ${err.message}`)
+      })
+      await fb2Page.goto(`${BASE}/about/foods.html`, { waitUntil: 'networkidle' })
+      const fb2 = await fb2Page.evaluate(() => {
+        const rows = [...document.querySelectorAll('tr')]
+        const target = rows.find((tr) => tr.querySelector('.nm')?.childNodes[0]?.textContent?.trim() === '干ししいたけ')
+        const aliasSection = document.querySelector('#alias')
+        return {
+          found: !!target,
+          alias: target?.querySelector('.al')?.textContent?.trim() ?? '',
+          price: target?.querySelector('.p')?.textContent?.trim() ?? '',
+          names: rows.map((tr) => tr.querySelector('.nm')?.childNodes[0]?.textContent?.trim() ?? ''),
+          aliasSectionText: aliasSection?.textContent ?? '',
+        }
+      })
+      check('FB-2 一覧に「干ししいたけ」の行がある', fb2.found)
+      check(
+        'FB-2 別名欄に旧名「乾燥しいたけ」が載っている',
+        fb2.alias.includes('乾燥しいたけ'),
+        fb2.alias,
+      )
+      check(
+        'FB-2 別名欄は成分表の呼び方も残す(乾しいたけ・干し椎茸)',
+        fb2.alias.includes('乾しいたけ') && fb2.alias.includes('干し椎茸'),
+        fb2.alias,
+      )
+      check(
+        'FB-2 目安価格は400円/30gのまま(呼び名だけを変えた)',
+        fb2.price.replace(/\s/g, '') === '400円/30g',
+        fb2.price,
+      )
+      check(
+        'FB-2 食品名として「乾燥しいたけ」の行は無い(価格マスタとページで名前が揃った)',
+        !fb2.names.includes('乾燥しいたけ'),
+        fb2.names.filter((n) => n.includes('しいたけ')).join('/'),
+      )
+      check(
+        'FB-2 「別の名前でも登録している目安価格」にしいたけは出ない(価格マスタの名前で完全一致する)',
+        !fb2.aliasSectionText.includes('しいたけ'),
+      )
+    } finally {
+      await fb2Browser.close()
     }
   }
 

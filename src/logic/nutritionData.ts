@@ -53,7 +53,7 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-07-28",
+  "generatedAt": "2026-08-10",
   "dbVersion": 6,
   "foods": [
     {
@@ -1122,7 +1122,8 @@ export const NUTRITION_DATA: NutritionData = {
       "aliases": [
         "干ししいたけ",
         "乾しいたけ",
-        "干し椎茸"
+        "干し椎茸",
+        "乾燥しいたけ"
       ],
       "per100g": {
         "kcal": 258,
