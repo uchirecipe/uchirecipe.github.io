@@ -24429,10 +24429,20 @@ try {
         Math.abs(fdExpanded.y - fdCollapsed.y) <= 2,
         `${fdCollapsed.y}→${fdExpanded.y}`,
       )
+      // 2026-08-11 便FJ: 旧版は「今日のカードが画面内(top<844)に残っている」を見ていたが、
+      // これは**今日が週の何日目か**に依存する条件だった。この一連の操作は縦位置0から始めるので、
+      // 今日のカードの位置＝(その週で今日より前の曜日のカードの高さの合計)になる。
+      // 月曜なら画面内、火曜でちょうど画面の下端(実測844px)、水曜以降は画面外になる
+      //  ＝ 便FDを作った2026-08-10(月)だけ通り、翌日から必ず落ちるテストだった
+      //   (app/CLAUDE.md「e2eに曜日・月替わりの前提を置かない」。同型の作り込みは4回目)。
+      // 直したいのは「畳む→開くで今日の居場所が変わってしまうこと」なので、
+      // 往復の前後で今日のカードが同じ位置に戻ることを見る（曜日に依存しない）。
       check(
-        'FD-07 「すべて開く」のあとも今日のカードが画面内に残っている（今日をスルーしない）',
-        fdExpanded.todayTop != null && fdExpanded.todayTop >= 0 && fdExpanded.todayTop < 844,
-        JSON.stringify(fdExpanded),
+        'FD-07 「すべて開く」のあとも今日のカードが元の位置に戻っている（今日をスルーしない）',
+        fdExpanded.todayTop != null &&
+          fdBeforeCollapse.todayTop != null &&
+          Math.abs(fdExpanded.todayTop - fdBeforeCollapse.todayTop) <= 2,
+        `${JSON.stringify(fdBeforeCollapse)} → ${JSON.stringify(fdExpanded)}`,
       )
 
       // ---------- FD-10 「すべてロック」「すべて解除」で画面が動かない ----------
