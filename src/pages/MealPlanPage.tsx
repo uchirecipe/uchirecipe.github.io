@@ -2318,15 +2318,30 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * その時点で scrollTo しても指定の位置まで下がれない。ページの高さが足りるまで
    * 数フレーム待ってから1回だけ動かし、諦める上限（RESTORE_MAX_FRAMES）も置く
    * （データが少ない週では永遠に足りないため）。
+   *
+   * 2026-08-10 便FD: 「届く高さになった瞬間」に動かしていたため、そのあとページが縮むと
+   * 覚えた位置より手前に着地していた（設定が届くまでは表示しない食事帯まで描いていて、
+   * 実測で 6243px → 4037px まで縮み、1800px へ戻したはずが 1106px になっていた）。
+   * **高さが数フレーム変わらなくなってから**動かす。
    */
   useEffect(() => {
     if (pendingScrollY == null || viewMode !== pendingScrollMode) return
     const RESTORE_MAX_FRAMES = 60
+    /** 高さが変わらなかったフレームがこれだけ続いたら「描き終わった」とみなす */
+    const RESTORE_STABLE_FRAMES = 3
     let frames = 0
+    let lastHeight = -1
+    let stable = 0
     let raf = 0
     const tick = () => {
-      const reachable = document.documentElement.scrollHeight - window.innerHeight
-      if (reachable >= pendingScrollY || frames >= RESTORE_MAX_FRAMES) {
+      const height = document.documentElement.scrollHeight
+      stable = height === lastHeight ? stable + 1 : 0
+      lastHeight = height
+      const reachable = height - window.innerHeight
+      if (
+        (reachable >= pendingScrollY && stable >= RESTORE_STABLE_FRAMES) ||
+        frames >= RESTORE_MAX_FRAMES
+      ) {
         window.scrollTo(0, Math.min(pendingScrollY, Math.max(0, reachable)))
         setPendingScrollY(null)
         return
@@ -2338,19 +2353,66 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return () => cancelAnimationFrame(raf)
   }, [pendingScrollY, viewMode, pendingScrollMode])
 
-  // 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）
+  /**
+   * 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）。
+   *
+   * 2026-08-10 便FD: 献立・レシピ・記録は liveQuery で後から届くので、1回きりの scrollIntoView
+   * だと、上に並ぶカードが伸びたぶんだけ目当ての日が下へ押し出される
+   * （オーナー実機「スクロール先が今日じゃない」）。位置が落ち着くまで数フレーム追いかけ、
+   * 上限（ANCHOR_MAX_FRAMES）で諦める。なめらかスクロールはやめて一気に合わせる＝
+   * 長い距離を流れる途中で目当ての日を通り過ぎて見えるのを避ける。
+   * 寄せる先のカードが表示中の週に無いときは、週タブの先頭から見せる。
+   */
   useEffect(() => {
     if (pendingScrollDate == null || viewMode !== 'week') return
-    const frame = requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        document
-          .querySelector(`section[data-date="${pendingScrollDate}"]`)
-          ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const ANCHOR_MAX_FRAMES = 40
+    let frames = 0
+    /** 動かす必要が無かったフレームの連続回数（伸び終わったかの判断に使う） */
+    let stable = 0
+    let raf = 0
+    const tick = () => {
+      const el = document.querySelector<HTMLElement>(
+        `section[data-date="${pendingScrollDate}"]`,
+      )
+      if (!el) {
+        window.scrollTo(0, 0)
         setPendingScrollDate(null)
-      }),
-    )
-    return () => cancelAnimationFrame(frame)
+        return
+      }
+      const before = Math.round(window.scrollY)
+      // scroll-mt-16 が、上部に貼り付く日/週/月タブのぶんの余白を空ける
+      el.scrollIntoView({ block: 'start' })
+      stable = Math.round(window.scrollY) === before ? stable + 1 : 0
+      frames++
+      if (stable >= 3 || frames >= ANCHOR_MAX_FRAMES) {
+        setPendingScrollDate(null)
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
   }, [pendingScrollDate, viewMode])
+
+  /**
+   * 週タブに入ったら今日のカードから見せる（2026-08-10 便FD・オーナー実機
+   * 「週タブに移動してくるたびに下にスクロールするのは鬱陶しい。しかもスクロール先が今日じゃない」）。
+   *
+   * どの経路で「今日へ寄せる」かの整理:
+   *  ・日タブ／月タブから週タブのボタンを押した … 今日へ寄せる（ここ）
+   *  ・献立タブを ?focus=week だけで開いた       … 今日へ寄せる（ここ。下の初期化がタブを切り替える）
+   *  ・?focus=week&date=YYYY-MM-DD で開いた      … その日へ寄せる（初期化が pendingScrollDate を入れる）
+   *  ・レシピ詳細・記録一覧の「戻る」(restore=1) … 離れる直前の週と縦位置を復元（便DT-2/EQの仕組みを維持）
+   * 後ろ2つは初期化が pendingScrollDate / pendingScrollY を入れるので、ここでは何もしない。
+   */
+  const lastViewModeRef = useRef(viewMode)
+  useEffect(() => {
+    const prev = lastViewModeRef.current
+    lastViewModeRef.current = viewMode
+    if (viewMode !== 'week' || prev === 'week') return
+    if (pendingScrollDate != null || pendingScrollY != null) return
+    setPendingScrollDate(today)
+  }, [viewMode, pendingScrollDate, pendingScrollY, today])
 
   // 自動取り込み(便U-3・設計確定): 日タブを開いたとき、今日の日付の週プラン登録
   // (表示中の食事帯のみ)を今日の献立へ自動取り込みする。既存の手動取り込みボタンと同じ
@@ -6485,7 +6547,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
               </button>
             </h2>
-            <Collapse open={!dayCollapsed}>
+            {/* 2026-08-10 便FD(オーナー実機「『全て開く』すると、下へスクロールする。
+                今日の日づけすらスルーされる」): 曜日カードは開いても画面を動かさない。
+                「すべて開く」は7日分を一度に開くので、「伸びた部分を画面へ入れる」(便EO)を
+                そのまま働かせると7か所が同時に要求し、最後の7日目に引っぱられて
+                ページが下まで飛ぶ。押した日付の見出しはその場に残るので、
+                1日だけ開いたときも見失わない */}
+            <Collapse open={!dayCollapsed} reveal={false}>
             <>
             {/* 今日・未来日は編集可能な予定グリッド。過去日は予定を表示から消し、下の「作った記録」
                 だけを日記のように見せる(便BS・タスク2。mealPlansデータは非破壊で残す) */}
