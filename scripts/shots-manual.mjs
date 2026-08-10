@@ -400,7 +400,9 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 500)
   const starterCard = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
-  await cropRange(page, 'recipe-cards', starterCard.first(), starterCard.nth(3), { top: 12 })
+  // 2026-08-10 便FJ: 検索まどの帯が画面上部に貼り付く(2026-08-09 便ET)ようになったため、
+  // カードの上端を12pxに寄せると1枚目の上が帯の下に隠れる。帯の高さ(66px)より下に置く
+  await cropRange(page, 'recipe-cards', starterCard.first(), starterCard.nth(3), { top: 80 })
 
   const seeded = await seedDirect(page, photos)
   console.log('seed:', seeded.applied.length, '品に記録 /', seeded.photoIds.length, '品に写真')
@@ -618,7 +620,9 @@ try {
     ? filledWeekDayCards.first()
     : weekDayCards.first()
   if (await weekDayCard.count()) {
-    await crop(page, 'plan-week-day', weekDayCard, { top: 40, maxHeight: 500 })
+    // 2026-08-10 便FJ: 「日」「週」「月」の帯が画面上部に貼り付く(2026-08-09 便ET)ので、
+    // カードの上端は帯の高さ(54px)より下に置く(40pxのままだとカードの上に帯の切れ端が写る)
+    await crop(page, 'plan-week-day', weekDayCard, { top: 64, maxHeight: 500 })
   }
   // 表示している週の概算食費
   const costRow = page.getByRole('button', { name: /表示している週の概算食費/ }).first()
@@ -645,8 +649,10 @@ try {
   // カレンダーの最終行までを1枚に収める(画面を開いたときに最初に見える範囲そのもの)
   const monthCellModeLabel = page.getByText('カレンダーに出す情報', { exact: true }).first()
   const lastCell = page.locator('button[data-date]').last()
+  // 2026-08-10 便FJ: 「日」「週」「月」の帯が上部に貼り付く(2026-08-09 便ET)ようになり、
+  // 上端16pxでは「カレンダーに出す情報」と写真・栄養・食費のボタンが帯の下に隠れていた
   await cropRange(page, 'plan-month', monthCellModeLabel, lastCell, {
-    top: 16,
+    top: 64,
     padTop: 10,
     padBottom: 10,
     fullWidth: true,
@@ -772,7 +778,10 @@ try {
     await wait(page, 600)
     timerBtn = focusLayer.getByRole('button', { name: /タイマー開始/ })
   }
-  await cropRect(page, 'cookmode-voice', { x: 0, y: 0, width: VIEW.width, height: 134 })
+  // 2026-08-10 便FJ: 声で操作の案内に「読み上げ」「一時停止」「再開」が加わって4行になり
+  // (2026-08-10 便FC)、134pxでは最後の行が画面のふちに貼り付いていた。
+  // タイマーのマーク(y=132〜176)まで入る高さにして、案内文の下に余白を作る
+  await cropRect(page, 'cookmode-voice', { x: 0, y: 0, width: VIEW.width, height: 184 })
   await cropRect(page, 'cookmode', { x: 0, y: 240, width: VIEW.width, height: 440 })
   if (await timerBtn.count()) {
     await timerBtn.first().click()
@@ -788,9 +797,12 @@ try {
     // 2026-08-08 便DW: 調整の窓に「このタイマーを消音」「手順◯を開く」が増えた
     // (2026-08-03 実機FB③④)ので、maxHeight 290 では下が切れる。窓が丸ごと入る高さにする
     // (トリミング基準=説明しているパネルを縦に丸ごと収める)
-    await crop(page, 'timer', timerDialog, { top: 40, maxHeight: 560 })
+    // 2026-08-10 便FJ: 窓に「一時停止」が増えて背が高くなり(2026-08-10 便FC)、上に8pxの
+    // 余白を取ると、窓の後ろにある「残り時間はアプリを閉じても続きます…」の案内が
+    // 1行だけ途中で切れて写り込む。窓の上端ちょうどから切り出す
+    await crop(page, 'timer', timerDialog, { top: 40, padTop: 0, maxHeight: 560 })
   }
-  const stopTimer = timerDialog.getByRole('button', { name: '停止' })
+  const stopTimer = timerDialog.getByRole('button', { name: 'タイマーを消す' })
   if (await stopTimer.count()) {
     await stopTimer.first().click()
     await wait(page, 700)
