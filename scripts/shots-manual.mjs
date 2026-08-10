@@ -82,6 +82,7 @@ const SHOT_NAMES = [
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
   'detail-photo', 'nutrition-open', 'share', 'logs',
   'cookmode-voice', 'cookmode', 'timer', 'cooknavi',
+  'cooknavi-session', 'cooknavi-session-others',
   'backup-export', 'backup-import', 'nutrition-row', 'plan-week-nutrition-row',
 ]
 
@@ -835,7 +836,10 @@ try {
     const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
     await P(store('todayList').clear())
     const recipes = await P(store('recipes').getAll())
-    const wanted = ['肉じゃが', 'ほうれん草のおひたし']
+    // 2026-08-11 便FK: 3品目(豚汁)を足す。段取りの図(cooknavi)は今までどおり2品で撮り、
+    // そのあとで3品目を入れ直して調理中モードの2カットを撮る
+    // (色の目印は「他の品」の行に出るので、2品だと1本しか写らない)
+    const wanted = ['肉じゃが', 'ほうれん草のおひたし', '豚汁']
     let addedAt = Date.now()
     for (const title of wanted) {
       const r = recipes.find((x) => x.title === title || x.title.startsWith(title))
@@ -904,6 +908,81 @@ try {
     await cropRect(page, 'cooknavi', { x: 0, y: 108, width: VIEW.width, height: 320 })
   } else {
     await cropRect(page, 'cooknavi', { x: 0, y: 60, width: VIEW.width, height: 300 })
+  }
+
+  // ======== 並行調理ナビの調理中モード(2026-08-11 便FK) ========
+  // 使い方ページ§9に足した3つの節(段取りを調理中モードで見る／他の品の次の手順／
+  // 色を言って別の品の手順に移る)の図。上の cooknavi は2品で固定してあるので、
+  // ここで3品目を足してから撮る = 上のカットの絵は変えない。
+  const naviRepick = page.getByRole('button', { name: 'レシピを選び直す' })
+  if (await naviRepick.count()) {
+    await naviRepick.click()
+    await wait(page, 800)
+    // 3品目(豚汁)を入れる。段取りに3品あると「他の品の次の手順」が2行になり、
+    // 色の名前(青・緑・ピンク)が2つ写る
+    const thirdPick = page.locator('main button[aria-pressed]').filter({ hasText: '豚汁' }).first()
+    if ((await thirdPick.count()) && (await thirdPick.getAttribute('aria-pressed')) !== 'true') {
+      await thirdPick.click()
+      await wait(page, 300)
+    }
+    const makePlan3 = page.getByRole('button', { name: '段取りを作る' })
+    if (await makePlan3.count()) {
+      await makePlan3.click()
+      await wait(page, 1600)
+    }
+  }
+  const sessionStart = page.locator('[data-testid="cook-session-start"]')
+  if (await sessionStart.count()) {
+    await sessionStart.click()
+    await wait(page, 900)
+    // 「他の品の次の手順」に**完成した品と、まだ手順の残っている品が並ぶ**ところまで進める。
+    // 1枚で「色の名前」「作り終えた品の1行(完成)」の両方が写る位置(説明している範囲と一致させる)。
+    // 左上の「手順①へ」も、先頭にいる間は押せない見た目なので、進めてから撮る
+    let reached = false
+    for (let i = 0; i < 30; i++) {
+      const done = await page.locator('[data-testid="cook-session-other-done"]').count()
+      const rows = await page.locator('[data-testid="cook-session-other-row"]').count()
+      if (done >= 1 && rows >= 2) {
+        reached = true
+        break
+      }
+      const next = page.locator('[data-testid="cook-session-next"]')
+      if ((await next.count()) === 0) break
+      await next.click()
+      await wait(page, 220)
+    }
+    if (!reached) {
+      console.warn('  ⚠ 調理中モードで「完成」と残りの手順が並ぶ位置に届きませんでした（図の説明と食い違わないか確認すること）')
+    }
+    // 上部: ✕ / 手順①へ / 料理名 / 段取り◯/◯ / 声で操作・読み上げ / 声で使える言葉の案内。
+    // 案内文の行数は語が増えると変わるので、案内文の下端を測ってから切る
+    const sessionHint = page.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first()
+    if (await sessionHint.count()) {
+      const hintRect = await rectOf(sessionHint)
+      await cropRect(page, 'cooknavi-session', {
+        x: 0,
+        y: 0,
+        width: VIEW.width,
+        height: Math.round(hintRect.y + hintRect.h + 10),
+      })
+    }
+    // 下部: 他の品の次の手順(色の名前・完成の印)。枠が丸ごと入る高さで切る
+    const othersPanel = page.locator('[data-testid="cook-session-others"]')
+    if (await othersPanel.count()) {
+      const othersRect = await rectOf(othersPanel)
+      const othersY = Math.max(0, Math.round(othersRect.y - 6))
+      await cropRect(page, 'cooknavi-session-others', {
+        x: 0,
+        y: othersY,
+        width: VIEW.width,
+        height: Math.min(VIEW.height - othersY, Math.round(othersRect.h + 12)),
+      })
+    }
+    const sessionClose = page.locator('[data-testid="cook-session-close"]')
+    if (await sessionClose.count()) {
+      await sessionClose.click()
+      await wait(page, 500)
+    }
   }
 
   // ======== バックアップ ========

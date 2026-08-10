@@ -26267,6 +26267,149 @@ try {
     }
   }
 
+  // ============================================================================
+  // 便FK(2026-08-11): 調理中モード(並行調理ナビの段取り)の説明が使い方ページにあること。
+  //
+  // 2026-08-10に入れた4つ(色で手順を切り替える・「手順①へ」・他の品の「完成」・
+  // タイマーの一時停止／再開)のうち、はじめの3つは説明書に記述そのものが無かった。
+  // ここでは**画面の文言(src/i18n/ja.ts と src/logic/naviColors.ts の値)を読んで、
+  // 同じ文字列が説明書に載っているか**を見る。ページ側に文字列を直書きして照合すると、
+  // アプリの文言を変えたときに説明書だけが取り残されても誰も気づけない。
+  // ============================================================================
+  currentCheck = 'FK-MANUAL'
+  {
+    const fkJaSrc = readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8')
+    /** ja.ts の1階層目(cookNavi・focus など)の中身だけを切り出す(同じキー名の取り違え防止) */
+    const fkSection = (name) => {
+      const start = fkJaSrc.indexOf(`\n  ${name}: {`)
+      if (start < 0) return ''
+      const end = fkJaSrc.indexOf('\n  },', start)
+      return end < 0 ? fkJaSrc.slice(start) : fkJaSrc.slice(start, end)
+    }
+    const fkCookNavi = fkSection('cookNavi')
+    const fkFocus = fkSection('focus')
+    /** `key: '値',` の値を取り出す(1行のシングルクォート文字列だけを見る) */
+    const fkValue = (src, key) => {
+      const m = src.match(new RegExp(`^\\s*${key}:\\s*'((?:[^'\\\\]|\\\\.)*)'`, 'm'))
+      return m ? m[1] : undefined
+    }
+    const fkColorsSrc = readFileSync(path.join(appRoot, 'src/logic/naviColors.ts'), 'utf-8')
+    const fkColorWords = (
+      fkColorsSrc.match(/NAVI_COLOR_WORDS\s*=\s*\[([^\]]*)\]/)?.[1] ?? ''
+    )
+      .split(',')
+      .map((s) => s.trim().replace(/^'|'$/g, ''))
+      .filter(Boolean)
+
+    const fkManual = await (await page.request.get(`${BASE}/about/manual.html`)).text()
+    check(
+      'FK-MANUAL 使い方ページを取得できた',
+      fkManual.includes('うちレシピの使い方'),
+      `長さ=${fkManual.length}`,
+    )
+    check(
+      'FK-MANUAL 前提: 画面の文言を ja.ts / naviColors.ts から読めた',
+      fkColorWords.length === 3 && fkValue(fkCookNavi, 'sessionToFirst') !== undefined,
+      `色=${fkColorWords.join('/')} 手順へ=${fkValue(fkCookNavi, 'sessionToFirst')}`,
+    )
+
+    // --- 画面にそのまま出る文言(そのまま載っていること) ---
+    for (const [label, text] of [
+      ['調理中モードの入口', fkValue(fkCookNavi, 'sessionStart')],
+      ['閉じたあとの入口', fkValue(fkCookNavi, 'sessionResume')],
+      ['他の品の次の手順の見出し', fkValue(fkCookNavi, 'sessionOthersTitle')],
+      ['他の品の行をタップしたときの案内', fkValue(fkCookNavi, 'sessionOthersHint')],
+      ['最後の手順のボタン', fkValue(fkFocus, 'complete')],
+    ]) {
+      check(
+        `FK-MANUAL 説明書に「${text}」がある（${label}）`,
+        typeof text === 'string' && text.length > 0 && fkManual.includes(text),
+        String(text),
+      )
+    }
+
+    // --- 差し込み({n}など)のある文言は、埋めた形で載っていること ---
+    const fkToFirst = (fkValue(fkCookNavi, 'sessionToFirst') ?? '').replace('{n}', '①')
+    check(
+      `FK-MANUAL 説明書に左上のボタン「${fkToFirst}」がある（便FC）`,
+      fkToFirst.length > 1 && fkManual.includes(fkToFirst),
+      fkToFirst,
+    )
+    const fkCounter = (fkValue(fkCookNavi, 'sessionCounter') ?? '')
+      .replace('{n}', '◯')
+      .replace('{t}', '◯')
+    check(
+      `FK-MANUAL 説明書に段取りの位置の表示「${fkCounter}」がある`,
+      fkCounter.length > 1 && fkManual.includes(fkCounter),
+      fkCounter,
+    )
+
+    // --- 他の品の「完成」(便FC)。「完成」だけだと他の説明にも当たるので、
+    //     説明書の文（作り終えた品の行）とセットで見る ---
+    const fkDone = fkValue(fkCookNavi, 'recipeDone') ?? ''
+    check(
+      `FK-MANUAL 説明書に作り終えた品の印「${fkDone}」の説明がある（便FC）`,
+      fkDone.length > 0 &&
+        fkManual.includes(`料理名の横に<strong>「${fkDone}」</strong>が付いた1行`),
+      fkDone,
+    )
+
+    // --- 色で手順を切り替える(便FI) ---
+    for (const word of fkColorWords) {
+      check(
+        `FK-MANUAL 説明書に色の名前「${word}」が載っている（便FI）`,
+        fkManual.includes(`「${word}」`),
+        word,
+      )
+    }
+    check(
+      'FK-MANUAL 説明書でも「赤」で案内しない（実装の色は青・緑・ピンク）',
+      !/「赤」/.test(fkManual),
+    )
+    check(
+      'FK-MANUAL 説明書に「手順は飛ばされません」と書いてある（引き寄せの誤解を防ぐ）',
+      fkManual.includes('手順は飛ばされません'),
+    )
+    check(
+      'FK-MANUAL 説明書に、開いていた手順が1つ後ろに下がる（消えない）ことが書いてある',
+      fkManual.includes('開いていた手順は1つ後ろに下がり'),
+    )
+    // 行き先が無いときの短い文（3種類とも、画面の言い方のまま載っていること）
+    for (const [key, filled] of [
+      ['sessionColorCurrent', ['{title}', '◯◯']],
+      ['sessionColorDone', ['{title}', '◯◯']],
+      ['sessionColorMissing', ['{color}', '◯◯']],
+    ]) {
+      const text = (fkValue(fkCookNavi, key) ?? '').replace(filled[0], filled[1])
+      check(
+        `FK-MANUAL 説明書に移れないときの案内「${text}」がある`,
+        text.length > 2 && fkManual.includes(text),
+        text,
+      )
+    }
+    check(
+      'FK-MANUAL 説明書に、色は発話まるごとが一致したときだけ働くことが書いてある',
+      fkManual.includes('青ねぎ'),
+    )
+
+    // --- 1品の調理中モード(§8)から、色の説明へ辿れる ---
+    check(
+      'FK-MANUAL §8の声の案内から色の節（#cooknavi-color）へ辿れる',
+      fkManual.includes('href="#cooknavi-color"') && fkManual.includes('id="cooknavi-color"'),
+    )
+    // --- タイマーの一時停止／再開は便FCで既に載っている（消えていないこと） ---
+    check(
+      'FK-MANUAL 声の「ストップ」「再開」の説明が残っている（便FC）',
+      fkManual.includes('動いているタイマーを1本、一時停止します') &&
+        fkManual.includes('一時停止したタイマーを動かし直します'),
+    )
+    check(
+      'FK-MANUAL 「タイマーを消す」は指で押す操作として書いてある（声では受けない）',
+      fkManual.includes('タイマーを消す操作は、声では受け付けません') &&
+        fkManual.includes('タイマーそのものを片付けるときは「タイマーを消す」'),
+    )
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
