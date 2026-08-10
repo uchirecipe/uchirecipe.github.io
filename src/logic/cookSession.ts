@@ -78,6 +78,25 @@ export function resolveCursor(
 }
 
 /**
+ * 「調理中モードで見る」を押したときに開く手順（2026-08-10 便FC・オーナー実機
+ * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
+ *
+ * 覚えている手順が組み直した段取りにまだあれば**そこから再開**し、無ければ先頭から始める。
+ * 位置の決め方を画面に書かず、ここ（純関数）に置くのは他の遷移と同じ理由
+ * （台所で位置がずれる不具合は、遷移表を単体テストで固定してあれば起こせない）。
+ *
+ * 覚えていた手順が段取りから消えているとき、ここでは黙って先頭に落とす。
+ * 「見つからなかったこと」を画面に知らせるのは呼び出し側（CookNaviPage）の役目で、
+ * そちらは `resolveCursor` の undefined を見て一覧に戻す（docs/69「復元」）。
+ */
+export function resumeCursor(
+  items: readonly CursorTarget[],
+  cursor: CookCursor | undefined,
+): CookCursor | undefined {
+  return resolveCursor(items, cursor) ?? startCursor(items)
+}
+
+/**
  * 次の手順へ。動かせない（段取りに無い・すでに最後）ときは undefined を返す
  * ＝呼び出し側はカーソルを変えない。
  */

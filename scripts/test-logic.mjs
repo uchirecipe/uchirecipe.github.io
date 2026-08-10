@@ -161,6 +161,7 @@ import {
   isCursorAtLast,
   nextStepsByRecipe,
   resolveCursor,
+  resumeCursor,
   startCursor,
 } from '../src/logic/cookSession.ts'
 import {
@@ -354,6 +355,7 @@ import {
 } from '../src/logic/replaceConfirm.ts'
 import {
   matchVoiceCommand,
+  pickVoiceResumeTarget,
   pickVoiceStopTarget,
   resolveVoiceTimerSeconds,
 } from '../src/logic/voiceCommand.ts'
@@ -11471,6 +11473,64 @@ eq(
     undefined,
   )
   eq('便EZ① 1本も動いていなければ何も止めない', pickVoiceStopTarget([], 1), undefined)
+
+  // 2026-08-10 便FC: オーナー実機フィードバック3件（タイマー）
+  //   ・「いったん止める」→「一時停止」（画面の文言。声でもこの語で止められること）
+  //   ・「一時停止の後に音声操作で再開できない」→ 声に「再開」を足す
+  //   ・「『もう一度』で読み上げは、1回目からになるので『読み上げ』に変更」
+  // 画面のボタン名と声の語がずれると「案内どおり言っても黙る」（便CK/④-1と同型）ので、
+  // **画面に出ている語をそのまま言えば効く**ことをここで固定する
+  eq('便FC① 画面の「一時停止」をそのまま言っても止まる', matchVoiceCommand('一時停止'), 'stop')
+  eq('便FC② 画面の「再開」をそのまま言うと動かし直す', matchVoiceCommand('再開'), 'resume')
+  eq('便FC② かなで返る端末の「さいかい」も受ける', matchVoiceCommand('さいかい'), 'resume')
+  eq('便FC② オーナー案の「スタート」も受ける', matchVoiceCommand('スタート'), 'resume')
+  eq('便FC② かなの「すたーと」も受ける', matchVoiceCommand('すたーと'), 'resume')
+  eq('便FC② 「タイマー再開」はタイマーの新規起動にしない', matchVoiceCommand('タイマー再開'), 'resume')
+  eq('便FC③ 画面の「読み上げ」で読み上げ直す', matchVoiceCommand('読み上げ'), 'repeat')
+  eq('便FC③ かなの「よみあげ」も受ける', matchVoiceCommand('よみあげ'), 'repeat')
+  eq('便FC③ 言い慣れた「もう一回」も今までどおり受ける', matchVoiceCommand('もう一回'), 'repeat')
+  // 「読み上げ」を語に足したので、「読み上げストップ」と続けて言われる形が生まれた。
+  // 止める側を先に判定する（読み上げ直してから止まる、が起きない）
+  eq('便FC③ 「読み上げストップ」は止める側に倒す', matchVoiceCommand('読み上げストップ'), 'stop')
+  eq('便FC③ 「読み上げ止めて」も止める側', matchVoiceCommand('読み上げ止めて'), 'stop')
+  eq('便FC 「3分タイマー」は従来どおり新規起動のまま', matchVoiceCommand('3分タイマー'), 'timer')
+
+  // 「再開」でどれを動かすか。止めるとき(pickVoiceStopTarget)の裏返しにそろえる。
+  // **残りは pausedRemainingMs で比べる**（止まっている間 endsAt は過去のまま固まるので、
+  // endsAt で比べると「止めた順」になり、次に鳴るはずだった1本から外れる）
+  const resumeTimers = [
+    // 肉じゃが(recipeId:1)の2本。止めた時点の残りは 5分 と 1分
+    { id: 1, done: false, endsAt: 1, recipeId: 1, pausedRemainingMs: 300_000 },
+    { id: 2, done: false, endsAt: 2, recipeId: 1, pausedRemainingMs: 60_000 },
+    // 味噌汁(recipeId:2)。残り30秒＝全体でいちばん先に鳴るはずだった1本
+    { id: 3, done: false, endsAt: 3, recipeId: 2, pausedRemainingMs: 30_000 },
+  ]
+  eq(
+    '便FC② いま画面に出している料理の止めたタイマーを優先して動かす',
+    pickVoiceResumeTarget(resumeTimers, 1)?.id,
+    2,
+  )
+  eq(
+    '便FC② その料理のものが無ければ、動かせばいちばん先に鳴る1本',
+    pickVoiceResumeTarget(resumeTimers, 3)?.id,
+    3,
+  )
+  eq(
+    '便FC② どの料理を見ているか分からないときも、いちばん先に鳴る1本',
+    pickVoiceResumeTarget(resumeTimers)?.id,
+    3,
+  )
+  eq(
+    '便FC② 動いているタイマーは「再開」で触らない（止まっているものだけ）',
+    pickVoiceResumeTarget([{ id: 4, done: false, endsAt: 10, recipeId: 1 }], 1),
+    undefined,
+  )
+  eq(
+    '便FC② 終わったタイマーは動かさない（片付け＝削除は声で受けない）',
+    pickVoiceResumeTarget([{ id: 5, done: true, endsAt: 10, recipeId: 1, pausedRemainingMs: 10 }], 1),
+    undefined,
+  )
+  eq('便FC② 1本も止めていなければ何も動かさない', pickVoiceResumeTarget([], 1), undefined)
   eq('便DS⑤ 「0分タイマー」は時間として使わず次の候補へ譲る', resolveVoiceTimerSeconds('0分タイマー', 5, undefined), 300)
   eq(
     '便DS⑤ 手順の分数が0でも「決められない」に落ちる(0秒タイマーを作らない)',
@@ -13855,6 +13915,19 @@ eq(
   eq('EL-CUR 復元の失敗（レシピが段取りから外れた）', resolveCursor(plan, { recipeId: 40, stepIndex: 0 }), undefined)
   eq('EL-CUR 覚えていない状態からの復元', resolveCursor(plan, undefined), undefined)
 
+  // 開き直し（2026-08-10 便FC・オーナー実機「一回閉じて再度開くと①に戻ってしまう。
+  // 前回閉じた時の手順から再開したい」）。閉じてもカーソルを捨てなくなったので、
+  // 「覚えていればそこから・無ければ先頭から」をここで固定する
+  eq('FC-CUR 覚えていた手順が段取りにあれば、そこから再開する', resumeCursor(plan, at(3)), at(3))
+  eq('FC-CUR ナビが足した工程からでも再開できる', resumeCursor(plan, at(1)), at(1))
+  eq('FC-CUR 覚えていなければ先頭から', resumeCursor(plan, undefined), at(0))
+  eq(
+    'FC-CUR 覚えていた手順が段取りから消えていたら先頭から（近い手順を当てにいかない）',
+    resumeCursor(plan, { recipeId: 10, stepIndex: 9 }),
+    at(0),
+  )
+  eq('FC-CUR 段取りが空なら開けない', resumeCursor([], at(0)), undefined)
+
   // 各品の次の手順＝カーソルの投影（済みセットを持たない）
   eq(
     'EL-NEXT 先頭にいるとき、他2品の次の手順',
@@ -13957,11 +14030,53 @@ eq(
 // ---------- 便EL: 調理中の手順の覚え書き（sessionStorage の読み取り） ----------
 {
   eq(
+    // 2026-08-10 便FC: 開いているかどうか(sessionOpen)も一緒に覚えるようになった。
+    // この項目が無い覚え書き（便ELまでの形）は「開いていた」と読む＝更新をまたいでも
+    // 調理の途中で全画面を失わない
     'EL-SESSION 調理中の手順を覚えられる',
     parseCookNaviSession(
       JSON.stringify({ selectedIds: [1, 2], showTimeline: true, trialActive: false, current: { recipeId: 2, stepIndex: 0 } }),
     ),
-    { selectedIds: [1, 2], showTimeline: true, trialActive: false, current: { recipeId: 2, stepIndex: 0 } },
+    {
+      selectedIds: [1, 2],
+      showTimeline: true,
+      trialActive: false,
+      current: { recipeId: 2, stepIndex: 0 },
+      sessionOpen: true,
+    },
+  )
+  eq(
+    'FC-SESSION 閉じたことも覚える（開き直すまで全画面は出さない）',
+    parseCookNaviSession(
+      JSON.stringify({
+        selectedIds: [1, 2],
+        showTimeline: true,
+        trialActive: false,
+        current: { recipeId: 2, stepIndex: 0 },
+        sessionOpen: false,
+      }),
+    )?.sessionOpen,
+    false,
+  )
+  eq(
+    'FC-SESSION 閉じていても調理中の手順は残る（開き直すと続きから）',
+    parseCookNaviSession(
+      JSON.stringify({
+        selectedIds: [1, 2],
+        showTimeline: true,
+        trialActive: false,
+        current: { recipeId: 2, stepIndex: 3 },
+        sessionOpen: false,
+      }),
+    )?.current,
+    { recipeId: 2, stepIndex: 3 },
+  )
+  eq(
+    'FC-SESSION 手順を覚えていないときは開閉も持たない（意味を持たないので保存しない）',
+    parseCookNaviSession(
+      JSON.stringify({ selectedIds: [1, 2], showTimeline: true, sessionOpen: true }),
+    )?.sessionOpen,
+    undefined,
   )
   eq(
     'EL-SESSION ナビが足した工程（添字-1）も覚えられる',
