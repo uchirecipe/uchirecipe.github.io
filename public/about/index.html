@@ -235,6 +235,8 @@
     border-bottom: 1px solid currentColor;
   }
   .more--sm { font-size: 13px; margin-top: 6px; }
+  /* 見出しの折り返しを語の途中で起こさせない(かたまりごとに改行させる) */
+  .nb { display: inline-block; }
 
   /* ===== 悩みの吹き出し(4つ) =====
      2026-08-10 便EX(オーナー指示): 三角のしっぽは「声に出したセリフ」に見えるので、
@@ -243,10 +245,14 @@
        ・角は大きく丸め、四隅の半径を少しずつ変えて手描きの輪郭に近づける
        ・等間隔・同じ大きさで並べると図表に見えるため、大きさ・傾き・左右の位置を
          1つずつずらして「絵として置いた」形にする(下の nth-child の指定)
+     2026-08-10 便FE(オーナー指示): 「それぞれが離れていて、ページ全体を通しても
+     ここだけ密度が低い」。散らし方(大きさ・傾き・左右の位置)は変えずに、上下の間隔だけ
+     およそ半分に詰めた。しっぽの粒は吹き出しの左右どちらかに寄せてあり、隣の吹き出しとは
+     横位置がずれているので、縦に詰めても粒と文字は重ならない。
      旧: 2026-08-09 便EP の三角しっぽ・3列グリッド */
   .pains {
-    /* 下の余白は、いちばん下の吹き出しのしっぽ(最大33px下に出る)より広く取る */
-    margin: 2px 0 44px;
+    /* 下の余白は、いちばん下の吹き出しのしっぽ(24px下に出る)より広く取る */
+    margin: 2px 0 32px;
     padding: 0;
     list-style: none;
   }
@@ -283,12 +289,14 @@
     display: block;
     font-size: 15px;
     line-height: 1.6;
+    /* 2026-08-10 便FE(オーナー指示): 吹き出しの中の文は中央揃え */
+    text-align: center;
     color: var(--accent-ink);
   }
 
   /* 1つずつ、大きさ・傾き・左右の位置・しっぽの向きを変える(整列させない) */
   .pains li:nth-child(1) {
-    margin: 0 0 32px 4px;
+    margin: 0 0 16px 4px;
     transform: rotate(-2.8deg);
   }
   .pains li:nth-child(1) b { font-size: 16.5px; }
@@ -296,7 +304,7 @@
   .pains li:nth-child(1)::after { left: 14px; }
 
   .pains li:nth-child(2) {
-    margin: 0 8px 36px auto;
+    margin: 0 8px 18px auto;
     transform: rotate(2.2deg);
   }
   .pains li:nth-child(2) b { font-size: 15px; }
@@ -304,7 +312,7 @@
   .pains li:nth-child(2)::after { right: 16px; }
 
   .pains li:nth-child(3) {
-    margin: 0 0 32px 24px;
+    margin: 0 0 16px 24px;
     transform: rotate(-1.8deg);
   }
   .pains li:nth-child(3) b { font-size: 15.5px; }
@@ -319,12 +327,13 @@
   .pains li:nth-child(4)::before { right: 24px; }
   .pains li:nth-child(4)::after { right: 12px; }
 
-  /* 横に余裕がある画面では散らし幅を広げ、縦は少し詰めて絵としてまとまるようにする */
+  /* 横に余裕がある画面では散らし幅を広げ、縦はさらに詰めて絵としてまとまるようにする。
+     隣り合う吹き出しは左右にずれているので、縦に重ねても文字どうしは重ならない */
   @media (min-width: 620px) {
     .pains li:nth-child(1) { margin-left: 12px; }
-    .pains li:nth-child(2) { margin-top: -30px; margin-right: 44px; }
-    .pains li:nth-child(3) { margin-top: -26px; margin-left: 74px; }
-    .pains li:nth-child(4) { margin-top: -30px; margin-right: 104px; }
+    .pains li:nth-child(2) { margin-top: -40px; margin-right: 44px; }
+    .pains li:nth-child(3) { margin-top: -36px; margin-left: 74px; }
+    .pains li:nth-child(4) { margin-top: -40px; margin-right: 104px; }
   }
 
   /* ===== 網羅グリッド(献立まわりだけ大きい1枠) ===== */
@@ -336,7 +345,6 @@
   }
   @media (min-width: 560px) {
     .grid { grid-template-columns: 1fr 1fr; }
-    .grid .wide { grid-column: 1 / -1; }
   }
   .grid > div {
     background: var(--bg);
@@ -349,12 +357,10 @@
     font-size: 15px;
     color: var(--accent-ink);
   }
-  .grid .wide h3 { font-size: 17px; }
   .grid p {
     margin: 0;
     font-size: 14px;
   }
-  .grid .wide p { font-size: 15px; }
   .grid .tiny {
     display: block;
     margin-top: 6px;
@@ -546,53 +552,90 @@
       <li><b>最近カロリーが気になる</b></li>
     </ul>
     <!-- 2026-08-09 便EP(オーナー指示): 「この3つ」と数を切ると、できることが3つだけという
-         先入観を与えてしまう。解消できる範囲を絞らない書き方にする -->
-    <p class="muted">うちレシピにまとめて登録しておくと、このような困りごとの解消に役立ちます。</p>
+         先入観を与えてしまう。解消できる範囲を絞らない書き方にする。
+         2026-08-10 便FE(オーナー指示): 「まとめて登録しておくと〜解消に役立ちます」は
+         意味が分かりにくい。言い切る形に変え、薄い補足文字(muted)ではなく本文の大きさで置く -->
+    <p>うちレシピなら、このような困りごとを解決できます。</p>
   </section>
 
+  <!-- 2026-08-10 便FE(オーナー指示): この節の目玉はURL取り込み。
+       ①見出しから「手で書く」を外す(手書きのスクリーンショットを読み取ると誤解されるため)
+       ②URL → 文章の貼り付け → 手入力(短く) → 登録したあとに自動で行われること、の順に置く
+       ③30品の上限はこの節から外し、買う前に必ず読むPro版の節へ移した
+       ④「URLを読み取り用サーバーに送る」注記はこの節では省略(プライバシーポリシーの
+         「URLからの取り込み機能について」と、このページのよくある質問に同じ内容がある) -->
   <section class="sec">
     <p class="eyebrow">好きなレシピを登録する</p>
-    <h2>URLを貼る。文章を貼る。手で書く。</h2>
-    <p>レシピのページのURLを貼り付けると、料理名・材料・手順・写真が自動で入ります。レシピのページなら多くのサイトで取り込めます（取り込めるかどうかはページごとに自動で判定します）。</p>
+    <h2><span class="nb">URLを貼るだけで、</span><span class="nb">レシピが登録できる</span></h2>
+    <p>登録のしかたは<strong>3つ</strong>あります。</p>
 
-    <!-- 2026-08-09 便EP(オーナー実機): 基本レシピを数えない旨は主文から外して文末の※へ移した。
-         「Pro版をご利用ください」の一文は、直前の「無料で登録できるレシピは30品までです」で
-         有料版があることは伝わるため削除(オーナー指示) -->
-    <p class="note">
-      <strong>無料で登録できるレシピは30品までです</strong>
-      いまの登録数は、レシピ一覧の件数の横に「自分で登録 ◯/30品」と出ます。上限に達すると新しいレシピを保存できなくなりますが、登録済みのレシピは今までどおり見る・編集する・削除する・バックアップから戻すことができます。
-      <span class="aster">※最初から入っている基本レシピは、この30品に数えません。</span>
-    </p>
+    <h3>1. URLから取り込む</h3>
+    <p>レシピページのURLを貼ると、<strong>料理名・材料・手順・写真が自動で入ります</strong>。レシピのページなら多くのサイトで取り込めます。</p>
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/lp/url-import.webp" width="780" height="442" loading="lazy" decoding="async" alt="レシピ登録画面の「URLから取り込む」。説明文の下に、https:// と書かれた入力欄がある">
+      <figcaption>URLを貼るだけ。対応しているサイトなら写真も一緒に取り込めます</figcaption>
+    </figure>
 
-    <div class="shots">
-      <figure class="shot" style="--w: 390px;">
-        <img src="/about/img/lp/url-import.webp" width="780" height="442" loading="lazy" decoding="async" alt="レシピ登録画面の「URLから取り込む」。説明文の下に、https:// と書かれた入力欄がある">
-        <figcaption>URLを貼るだけ。対応しているサイトなら写真も一緒に取り込めます</figcaption>
-      </figure>
-      <figure class="shot" style="--w: 390px;">
-        <img src="/about/img/manual/paste.webp" width="780" height="748" loading="lazy" decoding="async" alt="テキスト貼り付けの欄。貼り付けた文章の下に「材料4件・手順3件を読み取りました。内容を確認して修正してください」と出ている">
-        <figcaption>文章を貼れば、材料と手順に自動で振り分けます</figcaption>
-      </figure>
-    </div>
+    <h3>2. 文章を貼り付ける</h3>
+    <p>材料と作り方がまとまった文章を貼ると、<strong>材料と手順に自動で振り分けます</strong>。URLで取り込めなかったページも、文章を貼れば登録できます。</p>
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/manual/paste.webp" width="780" height="844" loading="lazy" decoding="async" alt="テキスト貼り付けの欄。貼り付けた文章の下に「材料4件・手順3件を読み取りました。内容を確認して修正してください」と出ている">
+      <figcaption>文章を貼れば、材料と手順に自動で振り分けます</figcaption>
+    </figure>
 
+    <h3>3. 手入力する</h3>
+    <p>家で作ってきた味も、1行ずつ書いて残せます。写真はカメラやアルバムから付けられます。</p>
+
+    <h3>登録すると、あとは自動</h3>
     <ul class="feature-list">
-      <li><strong>文章の貼り付け</strong>: 材料と作り方がまとまった文章を貼ると、材料と手順に振り分けます</li>
-      <li><strong>手入力・まとめて入力</strong>: 家で作ってきた味も残せます。「豚こま 200g」のように1行ずつ足していけます</li>
-      <li><strong>写真</strong>: 撮った写真を付けられます。写真がないレシピは料理の種類のアイコンで並びます</li>
+      <li><strong>栄養と材料費</strong>: 材料から、1食あたりのカロリー・野菜量・材料費を計算します</li>
+      <li><strong>主菜・副菜の判定</strong>: 料理名から料理の種別を選び、献立の提案に使います</li>
+      <li><strong>手順の時間はタイマーに</strong>: 手順の中の「15分」が、調理中モードのタイマーになります</li>
       <li><strong>人数分の計算</strong>: 2人分のレシピを5人分にすると、材料の分量も一緒に変わります</li>
+      <li><strong>写真がなければアイコン</strong>: 料理の種類のアイコンが付いて、一覧に同じ形で並びます</li>
     </ul>
-    <a class="more" href="/about/manual.html#register">登録のしかたをくわしく →</a>
+    <p class="muted">ページによっては取り込めないことがあります。そのときは文章の貼り付けか手入力でご登録ください。</p>
+    <a class="more" href="/about/manual.html#register">レシピの登録をくわしく →</a>
+  </section>
 
-    <p class="note">
-      <strong>「URLから取り込む」を使うときだけ、貼り付けたURLを読み取り用のサーバーに送ります</strong>
-      送るのはURLだけです。レシピの中身・写真は端末の外に出ません。
-    </p>
+  <!-- 2026-08-10 便FE(オーナー指示): 「登録したレシピでできること」を3つ→4つに。
+       献立の提案は初期からのメイン機能なので、いちばん上に独立した節として立てる
+       (以前は「他に機能がたくさん」の節の中の大きい1枠だった) -->
+  <section class="sec">
+    <p class="eyebrow">登録したレシピで、できること 1</p>
+    <h2>献立を提案</h2>
+    <p><strong>「日」「週」の献立を組めます。</strong>決まっていない日は、まとめて提案させることもできます。</p>
+
+    <figure class="shot" style="--w: 370px;">
+      <img src="/about/img/lp/plan-week-free.webp" width="740" height="804" loading="lazy" decoding="async" alt="献立の「週」タブの1日ぶんのカード。日付と「今日」の印、色のついた夕食の囲みの中に主菜と副菜の行と「＋料理を追加」、その日の献立のカロリーと野菜量、この日のメモの欄が並んでいる">
+      <figcaption>週の献立。1日ぶんのカードが7日並びます</figcaption>
+    </figure>
+
+    <h3>買い物メモは、献立から自動で</h3>
+    <p>献立に入れた料理の材料は、<strong>買い物メモに集まります</strong>。スーパーの売り場順に並ぶので、そのまま買い物に使えます。</p>
+    <p>在庫で「ある」にした食材は下書きに出ないので、二度買いを避けられます。</p>
+
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/manual/shopping.webp" width="780" height="1080" loading="lazy" decoding="async" alt="買い物メモの画面。「肉・魚介 3件」「調味料 8件」のように売り場ごとの見出しで区切られ、その下に食材名と分量が並んでいる">
+      <figcaption>買い物メモは売り場順。買いながらチェックできます</figcaption>
+    </figure>
+
+    <h3>週の概算食費</h3>
+    <p>献立に入れた料理から、<strong>その週の食費のめやすが出ます</strong>。過ぎた日は含みません。</p>
+
+    <figure class="shot" style="--w: 390px;">
+      <img src="/about/img/lp/cost-week-free.webp" width="780" height="336" loading="lazy" decoding="async" alt="献立の「週」タブの「表示している週の概算食費」を開いたところ。1週間ぶんの概算金額と食数、計算のもとにした期間が出ている">
+      <figcaption>表示している週の概算食費。過ぎた日は含みません</figcaption>
+    </figure>
+
+    <div><a class="more" href="/about/manual.html#mealplan">献立の立て方をくわしく →</a></div>
+    <div><a class="more more--sm" href="/about/manual.html#shopping">買い物メモをくわしく →</a></div>
   </section>
 
   <section class="sec">
-    <p class="eyebrow">登録したレシピで、できること 1</p>
-    <h2>調理中に、見やすい。</h2>
-    <p>登録したレシピは、調理中モードで開けます。手順が1つずつ大きな文字で出るので、少し離れたところからでも読めます。</p>
+    <p class="eyebrow">登録したレシピで、できること 2</p>
+    <h2>調理中モードで、料理に集中</h2>
+    <p>登録したレシピは、調理中モードで開けます。<strong>手順が1つずつ大きな文字で出る</strong>ので、少し離れたところからでも読めます。</p>
 
     <div class="shots">
       <figure class="shot" style="--w: 390px;">
@@ -600,14 +643,14 @@
         <figcaption>手順は1つずつ。文中の「15分」はタイマーのボタンです</figcaption>
       </figure>
       <figure class="shot" style="--w: 390px;">
-        <img src="/about/img/manual/timer.webp" width="780" height="844" loading="lazy" decoding="async" alt="「タイマーを調整」の窓。料理名と手順の番号、残り時間14:57が大きく出て、「−30秒」「+1分」「このタイマーを消音」「手順3を開く」「停止」のボタンが並んでいる">
+        <img src="/about/img/manual/timer.webp" width="780" height="720" loading="lazy" decoding="async" alt="「タイマーを調整」の窓。料理名と手順の番号、残り時間14:57が大きく出て、「−30秒」「+1分」「このタイマーを消音」「手順3を開く」「停止」のボタンが並んでいる">
         <figcaption>タイマーは複数同時に動かせます</figcaption>
       </figure>
     </div>
 
     <ul class="feature-list">
       <li><strong>手順の拡大表示</strong>: 1画面に1手順。いま何番目かが分かります</li>
-      <li><strong>タイマー</strong>: 手順の中の「15分」を押すとタイマーが始まります。「タイマー」と声で言っても始められます。煮ている間に別のタイマーも足せます</li>
+      <li><strong>タイマー</strong>: 手順の中の「15分」を押すと始まります。煮ている間に別のタイマーも足せます</li>
       <li><strong>声で操作・読み上げ</strong>: 「次へ」で次の手順へ、「タイマー」で時間をはかります。手順を読み上げることもできます</li>
       <li><strong>画面が暗くならない</strong>: レシピ詳細と調理中モードを開いている間は、画面の自動消灯を止めます</li>
     </ul>
@@ -616,9 +659,9 @@
   </section>
 
   <section class="sec">
-    <p class="eyebrow">登録したレシピで、できること 2</p>
-    <h2>栄養と材料費が自動計算でまるわかり</h2>
-    <p>材料を入れておくと、1食あたりのカロリーと材料費が概算で出ます。作る前に、だいたいの数字が分かります。</p>
+    <p class="eyebrow">登録したレシピで、できること 3</p>
+    <h2>自動計算で、栄養と材料費を把握</h2>
+    <p>材料を入れておくと、<strong>1食あたりのカロリーと材料費が概算で出ます</strong>。作る前に、だいたいの数字が分かります。</p>
 
     <figure class="shot" style="--w: 390px;">
       <img src="/about/img/manual/detail-photo.webp" width="780" height="676" loading="lazy" decoding="async" alt="レシピ詳細画面の上部。料理の写真の下に料理名「カレーライス」・調理時間・手間レベル・全体の金額「約715円」・「4人分レシピの1食あたり 約179円」が並んでいる">
@@ -641,35 +684,14 @@
   </section>
 
   <section class="sec">
-    <p class="eyebrow">登録したレシピで、できること 3</p>
-    <h2>献立の提案、買い物メモ、記録をつける。他に機能がたくさん</h2>
-    <p>全部を使う必要はありません。必要な機能だけお使いいただけます。</p>
+    <p class="eyebrow">登録したレシピで、できること 4</p>
+    <h2>他にも、できることたくさん</h2>
+    <p>全部を使う必要はありません。必要なものだけお使いください。</p>
 
     <div class="grid">
-      <div class="wide">
-        <h3>献立を立てると、買い物メモまでつながります</h3>
-        <p>「日」「週」の献立を組めます。決まっていない日は、まとめて提案させることもできます。献立に入れた料理の材料は買い物メモに集まり、スーパーの売り場順に並びます。在庫で「ある」にした食材は下書きに出ないので、二度買いを避けられます。週の概算食費も出ます。</p>
-        <div class="shots" style="margin-top: 10px;">
-          <figure class="shot" style="--w: 370px;">
-            <img src="/about/img/lp/plan-week-free.webp" width="740" height="804" loading="lazy" decoding="async" alt="献立の「週」タブの1日ぶんのカード。日付と「今日」の印、色のついた夕食の囲みの中に主菜と副菜の行と「＋料理を追加」、その日の献立のカロリーと野菜量、この日のメモの欄が並んでいる">
-            <figcaption>週の献立。1日ぶんのカードが7日並びます</figcaption>
-          </figure>
-          <figure class="shot" style="--w: 390px;">
-            <img src="/about/img/manual/shopping.webp" width="780" height="1080" loading="lazy" decoding="async" alt="買い物メモの画面。「肉・魚介 3件」「調味料 8件」のように売り場ごとの見出しで区切られ、その下に食材名と分量が並んでいる">
-            <figcaption>買い物メモは売り場順。買いながらチェックできます</figcaption>
-          </figure>
-        </div>
-        <figure class="shot" style="--w: 390px;">
-          <img src="/about/img/lp/cost-week-free.webp" width="780" height="336" loading="lazy" decoding="async" alt="献立の「週」タブの「表示している週の概算食費」を開いたところ。1週間ぶんの概算金額と食数、計算のもとにした期間が出ている">
-          <figcaption>表示している週の概算食費。過ぎた日は含みません</figcaption>
-        </figure>
-        <a class="more" href="/about/manual.html#mealplan">献立の立て方をくわしく →</a>
-        <span class="tiny"><a class="more more--sm" href="/about/manual.html#shopping">買い物メモをくわしく →</a></span>
-      </div>
-
       <div>
         <h3>基本のレシピ100品以上</h3>
-        <p>肉じゃが・鶏の唐揚げ・回鍋肉などの定番から、お弁当のおかずや作り置きまで、うちレシピのために書き下ろした100品以上が最初から入っています。全部無料で使えます。</p>
+        <p>肉じゃが・鶏の唐揚げ・回鍋肉などの定番から、お弁当のおかず・作り置きまで。書き下ろした100品以上が最初から入っていて、<strong>全部無料</strong>です。</p>
         <span class="tiny">必要なければ、設定で一覧に出さないようにもできます。</span>
         <a class="more more--sm" href="/about/manual.html#starters">くわしく →</a>
       </div>
@@ -720,7 +742,8 @@
 
   <section class="sec">
     <h2>データは、あなたの端末の中に。</h2>
-    <p>登録したレシピ・記録・写真は、お使いの端末の中だけに保存されます。開発者のサーバーには送られません。会員登録もログインもないので、メールアドレスを預ける必要もありません。</p>
+    <p>登録したレシピ・記録・写真は、<strong>お使いの端末の中だけに保存されます</strong>。開発者のサーバーには送られません。</p>
+    <p>会員登録もログインもないので、メールアドレスを預ける必要もありません。</p>
 
     <h3>どれくらいの容量を使うか</h3>
     <ul class="feature-list">
@@ -730,12 +753,13 @@
     <p class="muted">写真を100枚残すと、およそ15〜30MBになります。文字だけならたくさん登録しても大きくなりません。</p>
 
     <h3>バックアップと、クラウドの使い方</h3>
-    <p>設定の「バックアップ」から、レシピ帳ぜんぶを1つのファイルに書き出せます。新しい端末でそのファイルを読み込めば、そのまま続きを使えます。</p>
+    <p>設定の「バックアップ」から、<strong>レシピ帳ぜんぶを1つのファイルに書き出せます</strong>。新しい端末でそのファイルを読み込めば、そのまま続きを使えます。</p>
     <figure class="shot" style="--w: 390px;">
       <img src="/about/img/manual/backup-export.webp" width="780" height="376" loading="lazy" decoding="async" alt="設定のバックアップ画面。「「作った記録」の写真もバックアップに含める」のチェックと説明文の下に、「ファイルに書き出す」のボタンがある">
       <figcaption>書き出しは1ファイル。写真を含めるかどうかも選べます</figcaption>
     </figure>
-    <p>書き出したファイルは、Googleドライブなどのクラウドに置いておくこともできます。別の端末で同じファイルを読み込めば、同じレシピ帳を開けます。写真を含めて書き出したファイルを預けておけば、端末の中の古い写真を減らしたあとでも、そのファイルから戻せます。</p>
+    <p>書き出したファイルは、Googleドライブなどのクラウドに置いておくこともできます。別の端末で同じファイルを読み込めば、同じレシピ帳を開けます。</p>
+    <p>写真を含めて書き出したファイルを預けておけば、端末の中の古い写真を減らしたあとでも、そのファイルから戻せます。</p>
     <p class="muted">端末どうしが自動で同期する仕組みはありません。書き出しと読み込みは、そのつどご自身の操作で行います。</p>
     <!-- 2026-08-09 便EV: 機種変更・2台目・クラウドに置くときの注意を手順としてまとめた
          専用ページ(/about/multi-device.html)への導線。ここに手順を重ねて置くと片方だけ
@@ -755,6 +779,15 @@
       <li><strong>レシピの登録数の上限なし</strong>: 無料の30品の上限がなくなり、何品でも登録できます</li>
     </ul>
 
+    <!-- 2026-08-10 便FE(オーナー指示): 30品の上限は「好きなレシピを登録」の節から外した。
+         買う前に必ず読む場所に残すため、Pro版の節のここへ移す(文面は便EPのまま・
+         長い1文だけ2文に分けた)。※の1行は便EPでオーナーが位置まで決めたので動かさない -->
+    <p class="note">
+      <strong>無料で登録できるレシピは30品までです</strong>
+      いまの登録数は、レシピ一覧の件数の横に「自分で登録 ◯/30品」と出ます。上限に達すると新しいレシピは保存できませんが、登録済みのレシピは今までどおり見る・編集する・削除する・バックアップから戻すことができます。
+      <span class="aster">※最初から入っている基本レシピは、この30品に数えません。</span>
+    </p>
+
     <div class="shots">
       <figure class="shot" style="--w: 390px;">
         <img src="/about/img/manual/nutrition-open.webp" width="780" height="940" loading="lazy" decoding="async" alt="レシピ詳細の栄養価を開いた画面。エネルギー・たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量・野菜が、1人分と全量の2列で並んでいる">
@@ -766,10 +799,15 @@
       </figure>
     </div>
 
-    <p class="note">
+    <!-- 2026-08-10 便FE: 4文が続いて読みにくかったので、機能ごとの箇条書きに分けた(内容は同じ) -->
+    <div class="note">
       <strong>Pro版を無料で試せます（回数制限あり）</strong>
-      月間の献立は、見本の1か月分を入れた画面を何度でも開けます（<a href="/#/month-demo">サンプルの月の画面を開く</a>）。自分の記録が入った本物の画面も1回だけ表示できます。並行調理ナビは3回まで使えます。栄養価の8項目表示は、お好きなレシピ1品で1回だけ表示できます。
-    </p>
+      <ul class="feature-list" style="margin-bottom: 0;">
+        <li><strong>月間の献立</strong>: 見本の1か月分を入れた画面を何度でも開けます（<a href="/#/month-demo">サンプルの月の画面を開く</a>）。自分の記録が入った本物の画面も1回だけ表示できます</li>
+        <li><strong>並行調理ナビ</strong>: 3回まで使えます</li>
+        <li><strong>栄養価の8項目表示</strong>: お好きなレシピ1品で1回だけ表示できます</li>
+      </ul>
+    </div>
 
     <!-- id="buy": 使い方ページ(manual.html §13「Pro版の買い方」)から、価格と購入ボタンの
          かたまりへ直接来るための目印。精度開示は同じ枠の中でボタンの上にある。
@@ -815,7 +853,8 @@
     </details>
     <details>
       <summary>複数の端末で同じデータを使えますか？</summary>
-      <p>端末どうしが自動で同期する仕組みはありません。設定の「バックアップ」からファイルを書き出し、もう一方の端末で読み込んでお使いください。書き出したファイルをGoogleドライブなどのクラウドに置いておくと、受け渡しがしやすくなります。手順と注意点は<a href="/about/multi-device.html">複数の端末で使う方法</a>にまとめています。</p>
+      <p>端末どうしが自動で同期する仕組みはありません。設定の「バックアップ」からファイルを書き出し、もう一方の端末で読み込んでお使いください。</p>
+      <p>書き出したファイルをGoogleドライブなどのクラウドに置いておくと、受け渡しがしやすくなります。手順と注意点は<a href="/about/multi-device.html">複数の端末で使う方法</a>にまとめています。</p>
     </details>
     <details>
       <summary>インターネットに繋がっていなくても使えますか？</summary>
@@ -823,7 +862,8 @@
     </details>
     <details>
       <summary>栄養や材料費の数字は正確ですか？</summary>
-      <p>どちらも概算です。栄養は文部科学省「日本食品標準成分表」の数値をもとに、材料費は食材の価格をもとに計算しています。実際の食材・産地・分量によって変わりますので、概算としてお使いください。食材の価格は、自分の買っている値段に書き換えられます。</p>
+      <p>どちらも概算です。栄養は文部科学省「日本食品標準成分表」の数値をもとに、材料費は食材の価格をもとに計算しています。</p>
+      <p>実際の食材・産地・分量によって変わりますので、概算としてお使いください。食材の価格は、自分の買っている値段に書き換えられます。</p>
     </details>
   </section>
 
