@@ -974,6 +974,20 @@ export interface TimelineRecipe {
   id: number
   title: string
   colorIndex: number
+  /**
+   * その品を1品だけで作ったときの目安（分。2026-08-11 便FN・利用者テストの指摘
+   * 「レシピ一覧の所要時間の合計35分に対して、段取りは『1品ずつ作ると約41分』。
+   *   別の3品では一覧の合計95分に対して80分。多く出たり少なく出たりする」）。
+   *
+   * ナビの分数はレシピ欄の「調理時間」とは別の数え方（手順ごとの見積りを積み上げ、
+   * 手順に時間の書かれていない工程は調理法から当てる）なので、両者は一致しない。
+   * 品ごとの内訳を出しておけば、合計がどこから来た数字かを画面の上で確かめられる。
+   * この値の合計が CookPlan.sequentialMinutes（「1品ずつ作ると約◯分」）になる。
+   *
+   * 任意項目にしてあるのは、単体の buildCookTimeline は自分自身を1品ずつ呼び直せない
+   * （無限に入れ子になる）ため。値を入れるのは buildCookPlan だけ。
+   */
+  soloMinutes?: number
 }
 
 /** 1本にまとめたタイムラインの1手順 */
@@ -1431,13 +1445,20 @@ function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
 export function buildCookPlan(recipes: Recipe[]): CookPlan {
   const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
   const parallel = buildCookTimeline(valid)
-  const sequentialMinutes = valid.reduce((sum, r) => sum + buildCookTimeline([r]).totalMinutes, 0)
+  // 品ごとに「1品だけで作ったときの目安」を出し、その合計を「1品ずつ作ると約◯分」にする。
+  // 内訳を画面へ渡せるように控えておく（2026-08-11 便FN）
+  const soloMinutes = new Map<number, number>()
+  for (const r of valid) soloMinutes.set(r.id!, buildCookTimeline([r]).totalMinutes)
+  const sequentialMinutes = Array.from(soloMinutes.values()).reduce((sum, m) => sum + m, 0)
   const parallelMinutes = parallel.totalMinutes
+  const withSolo = (timeline: CookTimeline): TimelineRecipe[] =>
+    timeline.recipes.map((r) => ({ ...r, soloMinutes: soloMinutes.get(r.id) }))
   const gainPercent =
     sequentialMinutes > 0 ? ((sequentialMinutes - parallelMinutes) / sequentialMinutes) * 100 : 0
   if (gainPercent >= MIN_GAIN_PERCENT) {
     return {
       ...parallel,
+      recipes: withSolo(parallel),
       mode: 'parallel',
       sequentialMinutes,
       parallelMinutes,
@@ -1448,6 +1469,7 @@ export function buildCookPlan(recipes: Recipe[]): CookPlan {
   const sequential = buildSequentialTimeline(valid)
   return {
     ...sequential,
+    recipes: withSolo(sequential),
     mode: 'sequential',
     sequentialMinutes,
     parallelMinutes,

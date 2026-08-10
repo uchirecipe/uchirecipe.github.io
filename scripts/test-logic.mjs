@@ -5025,6 +5025,38 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     par.totalMinutes < par.sequentialMinutes,
     true,
   )
+
+  // --- 便FN(2026-08-11 利用者テスト): 2つの分数の食い違いを画面で確かめられるようにする ---
+  // 指摘「レシピ一覧の所要時間の合計35分に対して段取りは『1品ずつ作ると約41分』。別の3品では
+  // 一覧の合計95分に対して80分。多く出たり少なく出たりするので、どちらを信じてよいか分からない」。
+  // ナビの分数はレシピ欄の「調理時間」と数え方が違う（一致させられない）ので、代わりに
+  // 品ごとの内訳を出して「合計＝この積み上げ」が読めるようにした
+  eq(
+    'FN-SOLO 品ごとに「1品だけなら約◯分」を持つ',
+    par.recipes.every((r) => typeof r.soloMinutes === 'number' && r.soloMinutes > 0),
+    true,
+  )
+  eq(
+    'FN-SOLO 品ごとの目安の合計が「1品ずつ作ると約◯分」と一致する',
+    par.recipes.reduce((sum, r) => sum + r.soloMinutes, 0),
+    par.sequentialMinutes,
+  )
+  eq(
+    'FN-SOLO 1品ずつ作る段取りのときも内訳を持つ',
+    flat.recipes.reduce((sum, r) => sum + r.soloMinutes, 0),
+    flat.sequentialMinutes,
+  )
+  // レシピ欄の「調理時間」(cookMinutes)には一切影響されない＝ナビは自分の数え方だけで数える。
+  // ここが混ざると「どちらの数字なのか」がその場その場で変わり、指摘そのものが再発する
+  const withCookMinutes = buildCookPlan([
+    { id: 1, title: '煮物', cookMinutes: 999, steps: [{ text: '材料を切る' }, { text: '鍋で15分煮る' }, { text: '盛る' }] },
+    { id: 2, title: 'サラダ', cookMinutes: 1, steps: [{ text: '野菜を切る' }, { text: 'ドレッシングと和える' }] },
+  ])
+  eq(
+    'FN-SOLO レシピ欄の「調理時間」はナビの分数に混ぜない',
+    withCookMinutes.recipes.map((r) => r.soloMinutes),
+    par.recipes.map((r) => r.soloMinutes),
+  )
 }
 
 // ---------- stepCategory / buildCookTimeline(並行調理ナビ: 3品全体の流れを整える。

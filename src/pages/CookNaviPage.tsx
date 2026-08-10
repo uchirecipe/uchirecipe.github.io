@@ -1286,9 +1286,24 @@ export default function CookNaviPage() {
                       <p className="text-sm font-bold text-ink-muted">
                         {ja.cookNavi.legendTitle.replace('{n}', String(timeline.recipes.length))}
                       </p>
-                      <div className="mt-[var(--space-sm)] flex flex-wrap gap-2">
+                      {/* 品ごとの目安を料理名の横に置く（2026-08-11 便FN）。
+                          下の「1品ずつ作ると約◯分」は、この数字の足し算 */}
+                      <div className="mt-[var(--space-sm)] flex flex-wrap gap-x-2 gap-y-1">
                         {timeline.recipes.map((r) => (
-                          <RecipePill key={r.id} title={r.title} colorIndex={r.colorIndex} />
+                          <span key={r.id} className="inline-flex max-w-full items-center gap-1">
+                            <RecipePill title={r.title} colorIndex={r.colorIndex} />
+                            {r.soloMinutes != null && r.soloMinutes > 0 && (
+                              <span
+                                data-testid="navi-legend-minutes"
+                                className="shrink-0 text-xs text-ink-muted"
+                              >
+                                {ja.cookNavi.legendRecipeMinutes.replace(
+                                  '{n}',
+                                  String(r.soloMinutes),
+                                )}
+                              </span>
+                            )}
+                          </span>
                         ))}
                       </div>
                       <p className="mt-[var(--space-md)] text-2xl font-bold text-accent-ink">
@@ -1317,6 +1332,16 @@ export default function CookNaviPage() {
                         </p>
                       )}
                       <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.totalNote}</p>
+                      {/* レシピの一覧に出ている「調理時間」と数え方が違うことを画面に書く
+                          （2026-08-11 便FN・利用者テスト「多く出たり少なく出たりするので、
+                          どちらを信じてよいか分からない」）。数え方の違いは黙っていると
+                          「どちらかが間違っている」に見える */}
+                      <p
+                        data-testid="navi-total-count-note"
+                        className="ja-phrase mt-1 text-xs text-ink-muted"
+                      >
+                        {ja.cookNavi.totalCountNote}
+                      </p>
                       <p className="mt-1 text-xs text-ink-muted">
                         {isSequential ? ja.cookNavi.sequentialOrderNote : ja.cookNavi.orderNote}
                       </p>
