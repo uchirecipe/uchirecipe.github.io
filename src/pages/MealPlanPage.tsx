@@ -2530,6 +2530,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const [message, setMessage] = useState('')
   /**
+   * 他の画面から「結果を伝えたうえで献立へ戻す」ときのトースト（2026-08-11 便FP）。
+   * レシピ一覧でまとめて今日の献立に入れて戻ってきたときに、何品どこへ入ったかを出す。
+   * 一度出したら履歴から消す＝ブラウザの戻る/進むで同じ知らせが再び出ないようにする
+   */
+  useEffect(() => {
+    const handedOver = (location.state as { toast?: string } | null)?.toast
+    if (!handedOver) return
+    setMessage(handedOver)
+    navigate(location.pathname + location.search, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
+  /**
    * 鍵の掛かった食事への手での操作を止める（2026-08-08 便EA・オーナー指示
    * 「ロックしたら、手動削除もできなくして」）。
    * 画面側でもボタンを押せない見た目にするが、実処理の入口でも必ず通す
@@ -4661,7 +4673,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 作った！済みの枠に対応する記録(2026-08-09 便EQ)。あれば行の下に記録への入口を出す
     const cookedLogRow = isCooked ? cookedLogForEntry(date, recipe?.id) : undefined
     return (
-      <div key={key}>
+      // data-role: 検査用（この行がどの役割の行か）。2026-08-11 便FP で「今日の献立に追加」から
+      // 入れた品が全部主菜の行になっていた不具合を直したので、その再発を機械で見張る
+      <div key={key} data-testid="plan-row" data-role={role}>
       <div className="flex items-center gap-2">
         {/* 役割ラベルの列。入っている行では、その下に食数(何人分作るか)のボタンを重ねて置く
             (2026-08-03 便DJ・オーナー指示)。横に足すと料理名の幅を削ってしまうため縦に積む */}
@@ -5423,6 +5437,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     ))}
                   </div>
                 )}
+                {/* もう1品足す入口(2026-08-11 便FP)。「今日の献立を選ぶ」は空のときにしか
+                    出ないため、1品でも入った時点で、献立の画面からまとめて足す道が消えていた。
+                    飛び先は空のときと同じ＝選択モードのレシピ一覧 */}
+                <button
+                  type="button"
+                  data-testid="today-add-more"
+                  onClick={() => navigate('/recipes?select=today')}
+                  className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+                >
+                  <Plus size={18} aria-hidden />
+                  {ja.mealPlan.todayAddMoreButton}
+                </button>
                 {/* 「おまかせで提案」の直後だけ出す振り直し(2026-07-24 便BN・タスク2)。
                     前回のおまかせ分を入れ替えて別の主菜+副菜を提案し直す */}
                 {lastSuggestedIds.length > 0 && (
@@ -5473,14 +5499,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             ) : (
               // 空状態の案内+ボタン(2026-07-24 便BH-3・タスク1: 何をすべきか分かるように。
               // 便BN・タスク1: 「今日の献立を選ぶ」はレシピ一覧タブへ移動する(一覧の「今日の献立に
-              // 追加」で足す動線・オーナー指定))
+              // 追加」で足す動線・オーナー指定))。
+              // 2026-08-11 便FP(利用者テスト②「ただのレシピ一覧に飛んで止まった」):
+              // 飛び先を ?select=today にして、レシピ一覧を**選択モードで**開く。向こうの画面には
+              // 「今日の献立に入れるレシピを選んでいます」と、選んだ品数入りの決定ボタンが出る
               <div className="mt-[var(--space-sm)]">
                 <p className="text-sm text-ink-muted">{ja.mealPlan.todayEmpty}</p>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.todayEmptyGuide}</p>
                 <div className="mt-[var(--space-sm)] flex flex-col gap-[var(--space-sm)]">
                   <button
                     type="button"
-                    onClick={() => navigate('/recipes')}
+                    onClick={() => navigate('/recipes?select=today')}
                     className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
                   >
                     <Plus size={18} aria-hidden />

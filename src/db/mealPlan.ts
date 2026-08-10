@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
-import { planRoleAssign, todaySlotAddPlan } from '../logic/mealPlan'
+import { addToTodayList } from './todayList'
+import { mealRoleForRecipe, planRoleAssign, todaySlotAddPlan } from '../logic/mealPlan'
 import type { MealPlanEntry, MealPurpose, MealRole, MealSlot } from './types'
 
 export async function listMealPlanRange(startDate: string, endDate: string) {
@@ -119,6 +120,58 @@ export async function removeMealEntry(entryId: number): Promise<void> {
 export async function removeMealEntries(entryIds: number[]): Promise<void> {
   if (entryIds.length === 0) return
   await db.mealPlans.bulkDelete(entryIds)
+}
+
+/**
+ * 選んだレシピを**まとめて**今日の献立へ入れる（2026-08-11 便FP・利用者テスト①②）。
+ *
+ * 直した問題: 3品を今日の献立に入れるのに、〈一覧→レシピを開く→今日の献立に追加→食事を選ぶ→
+ * 戻る〉を3周する以外の手段が無かった。レシピ一覧の「選択」も書き出しと削除にしか使えなかった。
+ *
+ * 1品ずつの経路（RecipeDetailPage の「今日の献立に追加」）とまったく同じ判断を使う
+ * ＝どちらの入口から入れても結果が変わらないようにする:
+ *  - 予定の行の役割は、レシピの「料理の種別」から決める（mealRoleForRecipe）
+ *  - その食事に同じ品が既にある扱いは todaySlotAddPlan（今日すでに作った品は行を増やさず戻す）
+ *  - slot を渡さない＝「食事を決めずに今日の献立に追加」と同じで、今週の予定には入れない
+ *
+ * @returns added=入れた品数 / already=すでに入っていて何も増やさなかった品数
+ */
+export async function addRecipesToToday(
+  date: string,
+  recipeIds: number[],
+  slot?: MealSlot,
+): Promise<{ added: number; already: number }> {
+  let added = 0
+  let already = 0
+  for (const recipeId of recipeIds) {
+    const recipe = await db.recipes.get(recipeId)
+    if (!recipe) continue
+    if (slot) {
+      const cookedToday = (recipe.cookedLogs ?? []).some((log) => log.date === date)
+      const result = await addMealEntryIfAbsent(
+        date,
+        slot,
+        recipeId,
+        mealRoleForRecipe(recipe),
+        cookedToday,
+      )
+      if (result === 'duplicate') {
+        already++
+        continue
+      }
+      await addToTodayList(recipeId)
+      added++
+      continue
+    }
+    const existing = await db.todayList.where('recipeId').equals(recipeId).first()
+    if (existing) {
+      already++
+      continue
+    }
+    await addToTodayList(recipeId)
+    added++
+  }
+  return { added, already }
 }
 
 /**
