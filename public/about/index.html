@@ -212,7 +212,8 @@
     font-size: 14.5px;
     margin: 12px 0 0;
   }
-  .note strong { display: block; margin-bottom: 4px; }
+  /* 注記の見出し(直下のstrongだけ)。中の箇条書きの見出し語まで改行させない */
+  .note > strong { display: block; margin-bottom: 4px; }
   .note p { font-size: 14.5px; }
   .note p:last-child { margin-bottom: 0; }
   /* 注記の中の「※」の一行(本文より小さく・薄く出して、主文と読み分けられるようにする) */
@@ -611,8 +612,8 @@
       <figcaption>週の献立。1日ぶんのカードが7日並びます</figcaption>
     </figure>
 
-    <h3>買い物メモは、献立から自動で</h3>
-    <p>献立に入れた料理の材料は、<strong>買い物メモに集まります</strong>。スーパーの売り場順に並ぶので、そのまま買い物に使えます。</p>
+    <h3>献立から、買い物メモが自動でできます</h3>
+    <p>入れた料理の材料が集まり、スーパーの<strong>売り場順</strong>に並びます。</p>
     <p>在庫で「ある」にした食材は下書きに出ないので、二度買いを避けられます。</p>
 
     <figure class="shot" style="--w: 390px;">
@@ -621,7 +622,7 @@
     </figure>
 
     <h3>週の概算食費</h3>
-    <p>献立に入れた料理から、<strong>その週の食費のめやすが出ます</strong>。過ぎた日は含みません。</p>
+    <p>献立に入れた料理から、<strong>その週の食費のめやすが出ます</strong>。</p>
 
     <figure class="shot" style="--w: 390px;">
       <img src="/about/img/lp/cost-week-free.webp" width="780" height="336" loading="lazy" decoding="async" alt="献立の「週」タブの「表示している週の概算食費」を開いたところ。1週間ぶんの概算金額と食数、計算のもとにした期間が出ている">
