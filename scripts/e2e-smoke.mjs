@@ -20706,10 +20706,12 @@ try {
       (await page.locator('.pains li').count()) >= 3,
       `個数=${await page.locator('.pains li').count()}`,
     )
+    // 2026-08-10 便FE(オーナー指示): 「まとめて登録しておくと〜解消に役立ちます」は意味が
+    // 分かりにくいので言い切る形にした。「3つに限定しない」という便EPの趣旨はそのまま
     check(
       'LPTEXT-EP 3つの悩みに限定した書き方をしていない',
       !lpEp.includes('この3つをまとめて引き受けます') &&
-        lpEp.includes('このような困りごとの解消に役立ちます'),
+        lpEp.includes('うちレシピなら、このような困りごとを解決できます。'),
     )
   }
 
@@ -24580,6 +24582,254 @@ try {
     } finally {
       await fdBrowser.close()
     }
+  }
+
+  // ================================================================================
+  // --- 便FE(2026-08-10 オーナー指示): 紹介ページの密度・文章量・登録節の構成 ---
+  // ①吹き出しの中の文が中央揃えで、上下の間隔が詰まっている(散らし方は便EXのまま)
+  // ②「好きなレシピを登録」節が URL → 文章 → 手入力 →「登録すると、あとは自動」の順
+  // ③見出しから「手で書く」が消えている(手書きのスクショ読み取りと誤解されるため)
+  // ④「登録したレシピで、できること」が4つ(献立の提案を1番目に立てた)
+  // ⑤無料30品の記載が紹介ページのどこかに残っていて、購入ボタンより前にある
+  // ⑥390pxで横はみ出しゼロ・ライト/ダークとも本文がAA(4.5:1)以上
+  // ================================================================================
+  currentCheck = 'FE-LP'
+  {
+    const feHtml = await (await page.request.get(`${BASE}/about/`)).text()
+
+    // --- (a) 登録節の構成 ---
+    check(
+      'FE-LP 登録節の見出しから「手で書く」が消えている',
+      !feHtml.includes('URLを貼る。文章を貼る。手で書く。') && !/<h2[^>]*>[^<]*手で書く/.test(feHtml),
+    )
+
+    const feBrowser = await chromium.launch()
+    try {
+      for (const scheme of ['light', 'dark']) {
+        const feCtx = await feBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: scheme,
+        })
+        const fePage = await feCtx.newPage()
+        fePage.on('pageerror', (err) => {
+          if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+          errors.push(`[pageerror@FE-LP] ${err.message}`)
+        })
+        await fePage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+
+        const fe = await fePage.evaluate(() => {
+          const srgb = (v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+          const lum = (c) => {
+            const [r, g, b] = c.match(/\d+(\.\d+)?/g).slice(0, 3).map((n) => srgb(Number(n) / 255))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+          }
+          const ratio = (a, b) => {
+            const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
+            return (x + 0.05) / (y + 0.05)
+          }
+          const secOf = (el) => el.closest('section.sec')
+          const regSec = [...document.querySelectorAll('section.sec')].find(
+            (s) => s.querySelector('.eyebrow')?.textContent?.trim() === '好きなレシピを登録する',
+          )
+          const canSecs = [...document.querySelectorAll('section.sec')].filter((s) =>
+            (s.querySelector('.eyebrow')?.textContent ?? '').startsWith('登録したレシピで、できること'),
+          )
+          const painsLis = [...document.querySelectorAll('.pains li')]
+          const painsBoxes = painsLis.map((li) => li.getBoundingClientRect())
+          const proSec = secOf(document.querySelector('.price'))
+          const limitNote = [...document.querySelectorAll('.note')].find((n) =>
+            n.textContent.includes('無料で登録できるレシピは30品までです'),
+          )
+          // 節の中の要素を、出てくる順に「種類:文字」で並べたもの
+          const outline = (sec) =>
+            [...sec.querySelectorAll('h2, h3, a.more')].map(
+              (el) => `${el.tagName.toLowerCase()}:${el.textContent.trim()}`,
+            )
+          const bodyText = (el) => {
+            const cs = getComputedStyle(el)
+            return { color: cs.color, size: parseFloat(cs.fontSize) }
+          }
+          const surface = getComputedStyle(regSec).backgroundColor
+          return {
+            regOutline: outline(regSec),
+            regH2: regSec.querySelector('h2').textContent.trim(),
+            regMoreHref: regSec.querySelector('a.more')?.getAttribute('href') ?? '',
+            regHasLimitNote: !!regSec.querySelector('.note'),
+            can: canSecs.map((s) => ({
+              eyebrow: s.querySelector('.eyebrow').textContent.trim(),
+              h2: s.querySelector('h2').textContent.trim(),
+            })),
+            painsAlign: painsLis.map((li) => getComputedStyle(li.querySelector('b')).textAlign),
+            painsGaps: painsBoxes.slice(1).map((b, i) => Math.round(b.top - painsBoxes[i].bottom)),
+            painsUlH: Math.round(document.querySelector('.pains').getBoundingClientRect().height),
+            limitInProSec: !!limitNote && secOf(limitNote) === proSec,
+            limitBeforeBuy:
+              !!limitNote &&
+              (limitNote.compareDocumentPosition(document.querySelector('a.buy')) &
+                Node.DOCUMENT_POSITION_FOLLOWING) !==
+                0,
+            docW: document.documentElement.scrollWidth,
+            winW: document.documentElement.clientWidth,
+            // 本文・補足・見出しのコントラスト(カード面の上)
+            contrastBody: ratio(
+              bodyText(regSec.querySelector('p:not(.eyebrow):not(.muted)')).color,
+              surface,
+            ),
+            contrastMuted: ratio(
+              bodyText(document.querySelector('.sec p.muted')).color,
+              surface,
+            ),
+            contrastH3: ratio(bodyText(regSec.querySelector('h3')).color, surface),
+          }
+        })
+
+        if (scheme === 'light') {
+          check(
+            'FE-LP 登録節の見出しが「URLを貼るだけで、レシピが登録できる」',
+            fe.regH2 === 'URLを貼るだけで、レシピが登録できる',
+            fe.regH2,
+          )
+          check(
+            'FE-LP 登録節は URL → 文章 → 手入力 → 自動 の順で、末尾が詳しくリンク',
+            JSON.stringify(fe.regOutline) ===
+              JSON.stringify([
+                'h2:URLを貼るだけで、レシピが登録できる',
+                'h3:1. URLから取り込む',
+                'h3:2. 文章を貼り付ける',
+                'h3:3. 手入力する',
+                'h3:登録すると、あとは自動',
+                'a:レシピの登録をくわしく →',
+              ]),
+            fe.regOutline.join(' / '),
+          )
+          check(
+            'FE-LP 登録節から30品の注記が外れている',
+            fe.regHasLimitNote === false,
+          )
+          check(
+            'FE-LP 「できること」が4つあり、オーナー指定の並びになっている',
+            JSON.stringify(fe.can) ===
+              JSON.stringify([
+                { eyebrow: '登録したレシピで、できること 1', h2: '献立を提案' },
+                { eyebrow: '登録したレシピで、できること 2', h2: '調理中モードで、料理に集中' },
+                { eyebrow: '登録したレシピで、できること 3', h2: '自動計算で、栄養と材料費を把握' },
+                { eyebrow: '登録したレシピで、できること 4', h2: '他にも、できることたくさん' },
+              ]),
+            JSON.stringify(fe.can),
+          )
+          check(
+            'FE-LP 無料30品の記載はPro版の節にあり、購入ボタンより前に出る',
+            fe.limitInProSec && fe.limitBeforeBuy,
+            `Pro版の節=${fe.limitInProSec} ボタンより前=${fe.limitBeforeBuy}`,
+          )
+          // 図の実寸と width/height 属性のずれ(読み込み中に文字が飛ぶ原因)。
+          // 遅延読み込みの完了を待つと、画面外の図がいつまでも読み込まれず止まるので、
+          // 別の Image で読み直し、1枚ごとに5秒で打ち切る(待ち続けない)
+          const feShots = await fePage.evaluate(
+            async () =>
+              await Promise.all(
+                [...document.querySelectorAll('figure.shot img')].map(
+                  (el) =>
+                    new Promise((res) => {
+                      const probe = new Image()
+                      const done = () =>
+                        res({
+                          src: el.getAttribute('src'),
+                          w: probe.naturalWidth,
+                          h: probe.naturalHeight,
+                          attrW: Number(el.getAttribute('width')),
+                          attrH: Number(el.getAttribute('height')),
+                        })
+                      probe.onload = done
+                      probe.onerror = done
+                      setTimeout(done, 5000)
+                      probe.src = el.src
+                    }),
+                ),
+              ),
+          )
+          const feShotNg = feShots.filter((s) => !s.w || s.w !== s.attrW || s.h !== s.attrH)
+          check(
+            'FE-LP 紹介ページの図の寸法が実寸と合っている',
+            feShots.length >= 10 && feShotNg.length === 0,
+            `検査${feShots.length}枚 / ずれ=${feShotNg
+              .map((s) => `${s.src} 実寸${s.w}x${s.h} 記述${s.attrW}x${s.attrH}`)
+              .join(' , ') || 'なし'}`,
+          )
+        }
+
+        check(
+          `FE-LP(${scheme}) 吹き出しの中の文が中央揃え`,
+          fe.painsAlign.length === 4 && fe.painsAlign.every((a) => a === 'center'),
+          fe.painsAlign.join(','),
+        )
+        // 便EX時点は 24/29/24px。オーナー指摘(密度が低い)を受けておよそ半分に詰めた。
+        // 詰めすぎ(重なって読めない)にも気づけるよう下限も見る
+        check(
+          `FE-LP(${scheme}) 390pxの吹き出しの間隔が詰まっている(0〜16px)`,
+          fe.painsGaps.length === 3 && fe.painsGaps.every((g) => g >= 0 && g <= 16),
+          `隙間=${fe.painsGaps.join(',')} 全体の高さ=${fe.painsUlH}`,
+        )
+        check(`FE-LP(${scheme}) 390pxで横にはみ出さない`, fe.docW <= fe.winW, `scrollW=${fe.docW}`)
+        check(
+          `FE-LP(${scheme}) 本文・補足・小見出しがAA(4.5:1)以上`,
+          fe.contrastBody >= 4.5 && fe.contrastMuted >= 4.5 && fe.contrastH3 >= 4.5,
+          `本文=${fe.contrastBody.toFixed(2)} 補足=${fe.contrastMuted.toFixed(2)} 小見出し=${fe.contrastH3.toFixed(2)}`,
+        )
+        await feCtx.close()
+      }
+
+      // PC幅では吹き出しをさらに重ねて1つの絵に見せる(隙間は0以下)
+      const fePcCtx = await feBrowser.newContext({ viewport: { width: 1280, height: 900 } })
+      const fePcPage = await fePcCtx.newPage()
+      await fePcPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+      const fePc = await fePcPage.evaluate(() => {
+        const boxes = [...document.querySelectorAll('.pains li')].map((li) => li.getBoundingClientRect())
+        return {
+          gaps: boxes.slice(1).map((b, i) => Math.round(b.top - boxes[i].bottom)),
+          // 隣り合う吹き出しは左右にずれている(縦に重ねても文字が重ならない条件)
+          sideBySide: boxes.slice(1).every((b, i) => b.left > boxes[i].right || b.right < boxes[i].left),
+          overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        }
+      })
+      check(
+        'FE-LP(PC) 吹き出しが縦に重なるまで詰まっている',
+        fePc.gaps.length === 3 && fePc.gaps.every((g) => g <= 0),
+        `隙間=${fePc.gaps.join(',')}`,
+      )
+      check('FE-LP(PC) 縦に重ねても隣どうしは左右にずれている(文字が重ならない)', fePc.sideBySide)
+      check('FE-LP(PC) 横スクロールが出ていない', fePc.overflow === false)
+      await fePcCtx.close()
+    } finally {
+      await feBrowser.close()
+    }
+
+    // --- (b) 「くわしく」の飛び先が実在する ---
+    const feMoreRes = await page.request.get(`${BASE}/about/manual.html`)
+    const feManual = await feMoreRes.text()
+    check(
+      'FE-LP 「レシピの登録をくわしく」の飛び先(/about/manual.html#register)が実在する',
+      feMoreRes.status() === 200 &&
+        feHtml.includes('href="/about/manual.html#register"') &&
+        feManual.includes('id="register"'),
+      `status=${feMoreRes.status()}`,
+    )
+    // 読み取り用サーバーの注記は登録節では省いた。省いてよい根拠(プライバシーポリシーと
+    // 使い方ページに同じ説明がある・紹介ページのよくある質問にも残っている)を機械で見張る
+    const feTerms = await (await page.request.get(`${BASE}/about/terms.html`)).text()
+    check(
+      'FE-LP URL取り込みが外部サーバーを経由する説明が、プライバシーポリシーにある',
+      feTerms.includes('変換サーバー（Cloudflare Workers）に送信します'),
+    )
+    check(
+      'FE-LP 同じ説明が使い方ページにもある',
+      feManual.includes('読み取り用の変換サーバーへ送ります'),
+    )
+    check(
+      'FE-LP 紹介ページのよくある質問にも残っている',
+      feHtml.indexOf('変換サーバー（Cloudflare Workers）') >
+        feHtml.indexOf('データはどこに保存されますか'),
+    )
   }
 
 } catch (err) {
