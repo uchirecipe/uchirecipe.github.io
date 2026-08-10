@@ -112,6 +112,15 @@ export function parseWeekReturn(raw: string | null | undefined): WeekReturnPoint
 export interface ViewReturnPoint {
   anchor: string
   scrollY: number
+  /**
+   * 離れたときに開いていた小窓の目印（任意・2026-08-10 便FD・オーナー実機
+   * 「レシピを見るから戻るボタンで同じ画面に戻って来たい」）。
+   *
+   * 献立の月タブは「日の窓」を開いた中にレシピ詳細への入口があるので、月と縦位置だけを
+   * 戻しても窓が閉じたカレンダーに着地していた。ここに日付（YYYY-MM-DD）を入れておくと、
+   * 戻ったときに同じ日の窓を開き直せる。窓を開いていなければ入れない。
+   */
+  openDate?: string
 }
 
 /** ホームが居場所を覚えるキー */
@@ -122,7 +131,12 @@ export const MONTH_RETURN_KEY = 'mealPlan:monthReturn'
 export const DAY_RETURN_KEY = 'mealPlan:dayReturn'
 
 export function serializeViewReturn(point: ViewReturnPoint): string {
-  return JSON.stringify({ anchor: point.anchor, scrollY: Math.max(0, Math.round(point.scrollY)) })
+  return JSON.stringify({
+    anchor: point.anchor,
+    scrollY: Math.max(0, Math.round(point.scrollY)),
+    // 開いていた窓が無いときは書かない＝以前の版と同じ形のまま
+    ...(point.openDate ? { openDate: point.openDate } : {}),
+  })
 }
 
 /**
@@ -138,8 +152,15 @@ export function parseViewReturn(raw: string | null | undefined): ViewReturnPoint
     return null
   }
   if (typeof parsed !== 'object' || parsed === null) return null
-  const { anchor, scrollY } = parsed as { anchor?: unknown; scrollY?: unknown }
+  const { anchor, scrollY, openDate } = parsed as {
+    anchor?: unknown
+    scrollY?: unknown
+    openDate?: unknown
+  }
   if (typeof anchor !== 'string') return null
   if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
-  return { anchor, scrollY: Math.round(scrollY) }
+  // 開いていた窓の目印は任意。形が違えば「窓は開いていなかった」として扱う（復元をあきらめる）
+  const validOpenDate =
+    typeof openDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(openDate) ? openDate : undefined
+  return { anchor, scrollY: Math.round(scrollY), ...(validOpenDate ? { openDate: validOpenDate } : {}) }
 }

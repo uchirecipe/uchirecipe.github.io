@@ -2229,6 +2229,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 週タブ専用だった仕組みを、月タブ・日タブ（作った記録の一覧からの戻り）にも広げた。
    */
   const [pendingScrollMode, setPendingScrollMode] = useState<MealPlanViewMode>('week')
+  /**
+   * 月タブへ戻ってきたときに開き直す「日の窓」の日付（2026-08-10 便FD）。
+   * 開き直すのは月の献立が届いてから（窓は開いた時点の中身を控えて「キャンセル」に使うので、
+   * 空のまま開くと控えも空になり、キャンセルでその日の献立が消えてしまう）。
+   */
+  const [pendingDayModal, setPendingDayModal] = useState<string | null>(null)
   useEffect(() => {
     if (initialFocusRef.current) return
     initialFocusRef.current = true
@@ -2292,6 +2298,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         if (monthPoint.anchor) setMonthAnchor(monthPoint.anchor)
         setPendingScrollMode('month')
         setPendingScrollY(monthPoint.scrollY)
+        // 2026-08-10 便FD: 離れる前に日の窓を開いていたなら、その窓ごと戻す
+        // （開き直すのは月の献立が届いてから。下の pendingDayModal の効果が待つ）
+        if (monthPoint.openDate) setPendingDayModal(monthPoint.openDate)
       } else {
         window.scrollTo(0, 0)
       }
@@ -2583,6 +2592,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     })
     setDayModalDate(date)
   }
+  /**
+   * レシピ詳細から月タブへ戻ってきたときに、開いていた日の窓を開き直す（2026-08-10 便FD）。
+   * 月の献立（monthEntries）が届くまで待つ＝窓が控える「開いたときの中身」が空にならない。
+   */
+  useEffect(() => {
+    if (pendingDayModal == null || viewMode !== 'month' || monthEntries == null) return
+    openDayModal(pendingDayModal)
+    setPendingDayModal(null)
+    // openDayModal は毎描画で作り直される関数なので依存に入れない（入れると開いた直後に開き直す）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingDayModal, viewMode, monthEntries])
   /** 窓を開いてから何が変わったか（変わっていなければ dirty=false ＝ 下は「閉じる」1つだけ） */
   const dayModalDiff = useMemo(() => {
     if (!dayModalDate || dayModalSnapshot?.date !== dayModalDate) return null
@@ -2755,15 +2775,40 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (pickerTarget?.entryId == null) return undefined
     return allPlanEntries.find((e) => e.id === pickerTarget.entryId)?.recipeId
   }, [pickerTarget, allPlanEntries])
-  // 表示用リスト: 現在割り当て済みのレシピが絞り込み結果に含まれるときだけ先頭に固定する。
-  // 検索で絞り込まれて対象外になった場合は並べ替えない(＝バッジも出ない)
+  /**
+   * 選び直す前に入っていたレシピ（2026-08-10 便FD・オーナー実機
+   * 「レシピ名タップ→レシピ一覧表示→同じ場所を再度タップ→レシピが変更される、といった流れで
+   *   誤操作になる。レシピは一つ前の設定に戻せるようにしたい」）。
+   *
+   * 枠のid → 直前に入っていたレシピID。この画面を開いているあいだだけ覚える一時的な控えで、
+   * 端末に残すデータ（IndexedDB）には何も書かない。同じ枠を何度選び直しても、覚えているのは
+   * つねに「1つ前」だけ（オーナーの要望どおり）。
+   */
+  const [previousRecipeByEntry, setPreviousRecipeByEntry] = useState<Record<number, number>>({})
+  /**
+   * いま開いている枠の「前回選択」（一覧の上のほうに並べてすぐ選び直せるようにする）。
+   * いま入っているレシピと同じになったら出さない（同じ料理が2行並ぶだけになるため）。
+   */
+  const previousPickerRecipeId = useMemo(() => {
+    if (pickerTarget?.entryId == null) return undefined
+    const previous = previousRecipeByEntry[pickerTarget.entryId]
+    return previous != null && previous !== currentPickerRecipeId ? previous : undefined
+  }, [pickerTarget, previousRecipeByEntry, currentPickerRecipeId])
+  // 表示用リスト: 現在割り当て済みのレシピ→前回選択していたレシピ の順に先頭へ固定する。
+  // 固定するのは絞り込み結果に残っているものだけ＝検索で対象外になったものは並べ替えない
+  // （バッジも出ない）
   const displayedRecipes = useMemo(() => {
-    if (currentPickerRecipeId == null) return filteredRecipes
-    const idx = filteredRecipes.findIndex((r) => r.id === currentPickerRecipeId)
-    if (idx <= 0) return filteredRecipes
-    const current = filteredRecipes[idx]
-    return [current, ...filteredRecipes.slice(0, idx), ...filteredRecipes.slice(idx + 1)]
-  }, [filteredRecipes, currentPickerRecipeId])
+    const pinnedIds = [currentPickerRecipeId, previousPickerRecipeId].filter(
+      (id): id is number => id != null,
+    )
+    if (pinnedIds.length === 0) return filteredRecipes
+    const pinned = pinnedIds
+      .map((id) => filteredRecipes.find((r) => r.id === id))
+      .filter((r): r is Recipe => r != null)
+    if (pinned.length === 0) return filteredRecipes
+    const pinnedSet = new Set(pinned.map((r) => r.id))
+    return [...pinned, ...filteredRecipes.filter((r) => !pinnedSet.has(r.id))]
+  }, [filteredRecipes, currentPickerRecipeId, previousPickerRecipeId])
 
   const closePicker = () => {
     setPickerTarget(null)
@@ -2786,12 +2831,50 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (!pickerTarget) return
     const { date, slot, role, entryId, extraLocalId } = pickerTarget
     if (entryId != null) {
+      // 2026-08-10 便FD: 入れ替えたときは、何が何に変わったかをその場で知らせ、
+      // 1回で元へ戻せるようにする（誤って選び直したことに気づけない、への対応）
+      const before = allPlanEntries.find((e) => e.id === entryId)?.recipeId
       await updateMealEntryRecipe(entryId, recipeId)
+      const beforeTitle = before != null ? recipeById.get(before)?.title : undefined
+      const afterTitle = recipeById.get(recipeId)?.title
+      if (before != null && before !== recipeId && beforeTitle && afterTitle) {
+        setPreviousRecipeByEntry((prev) => ({ ...prev, [entryId]: before }))
+        const toast = ja.mealPlan.pickReplacedToast
+          .replace('{before}', beforeTitle)
+          .replace('{after}', afterTitle)
+        setMessage(toast)
+        setUndoPick({ entryId, recipeId: before, title: beforeTitle, message: toast })
+      }
     } else {
       await addMealEntry(date, slot, recipeId, role)
       if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
     }
     setPickerTarget(null)
+  }
+
+  /**
+   * 「元に戻す」で1つ前のレシピへ戻すための控え（2026-08-10 便FD）。
+   * 「作った！」の取り消し（undoCooked）と同じ作法で、出したトーストの文言まで一緒に持つ
+   * ＝別の操作でトーストが差し替わったら、この取り消しも一緒に消える。
+   */
+  const [undoPick, setUndoPick] = useState<{
+    entryId: number
+    recipeId: number
+    title: string
+    message: string
+  } | null>(null)
+  const undoPickActive = undoPick != null && undoPick.message === message
+  const runUndoPick = async () => {
+    if (!undoPick) return
+    await updateMealEntryRecipe(undoPick.entryId, undoPick.recipeId)
+    // 戻した時点で「1つ前」はもう無い（いま入っているものがそれ）ので控えを捨てる
+    setPreviousRecipeByEntry((prev) => {
+      const next = { ...prev }
+      delete next[undoPick.entryId]
+      return next
+    })
+    setUndoPick(null)
+    setMessage(ja.mealPlan.pickUndoneToast.replace('{title}', undoPick.title))
   }
 
   /**
@@ -3920,7 +4003,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const rememberMonthReturn = () => {
     writeSessionItem(
       MONTH_RETURN_KEY,
-      serializeViewReturn({ anchor: monthAnchor, scrollY: window.scrollY }),
+      serializeViewReturn({
+        anchor: monthAnchor,
+        scrollY: window.scrollY,
+        // 2026-08-10 便FD: 月タブの「レシピを見る」は日の窓の中にあるので、
+        // どの日の窓を開いていたかも覚える＝戻ったときに同じ窓へ帰れる
+        openDate: dayModalDate ?? undefined,
+      }),
     )
   }
   const rememberDayReturn = () => {
@@ -5170,15 +5259,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </div>
       )}
 
-      {/* 「作った」の直後だけ「元に戻す」を添える(2026-08-02 便DE-3。買い物メモ・食材価格と同じ形) */}
+      {/* 「作った」の直後だけ「元に戻す」を添える(2026-08-02 便DE-3。買い物メモ・食材価格と同じ形)。
+          2026-08-10 便FD: レシピを選び直した直後にも同じ「元に戻す」を添える */}
       <Toast
         message={message}
         onClose={() => {
           setMessage('')
           setUndoCooked(null)
+          setUndoPick(null)
         }}
-        actionLabel={undoCookedActive ? ja.common.undo : undefined}
-        onAction={undoCookedActive ? () => void runUndoCooked() : undefined}
+        actionLabel={undoCookedActive || undoPickActive ? ja.common.undo : undefined}
+        onAction={
+          undoCookedActive
+            ? () => void runUndoCooked()
+            : undoPickActive
+              ? () => void runUndoPick()
+              : undefined
+        }
       />
 
       {viewMode === 'day' && (
@@ -6926,10 +7023,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               <ul className="divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
                 {displayedRecipes.map((recipe) => {
                   const isSelected = recipe.id === currentPickerRecipeId
+                  // 2026-08-10 便FD: 選び直す前に入っていた料理を「選択中」の次に並べる
+                  const isPrevious = !isSelected && recipe.id === previousPickerRecipeId
                   return (
                   <li key={recipe.id} className={isSelected ? 'bg-accent/10' : undefined}>
                     <button
                       type="button"
+                      data-testid={isPrevious ? 'picker-previous' : undefined}
                       onClick={() => void pickRecipe(recipe.id!)}
                       className="flex w-full items-center gap-2 px-[var(--space-md)] py-3 text-left"
                     >
@@ -6944,6 +7044,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       {isSelected && (
                         <span className="shrink-0 rounded-sm border border-accent px-1.5 py-0.5 text-xs font-bold text-accent-ink">
                           {ja.mealPlan.pickCurrentBadge}
+                        </span>
+                      )}
+                      {/* 「選択中」と同じ形の印にして、色だけ落とす＝いま入っているものと
+                          1つ前に入っていたものを一目で区別できるようにする（2026-08-10 便FD） */}
+                      {isPrevious && (
+                        <span className="shrink-0 rounded-sm border border-edge px-1.5 py-0.5 text-xs font-bold text-ink-muted">
+                          {ja.mealPlan.pickPreviousBadge}
                         </span>
                       )}
                       <span className="flex shrink-0 items-center gap-2 text-xs text-ink-muted">
