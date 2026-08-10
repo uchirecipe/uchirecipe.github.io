@@ -453,12 +453,23 @@ export default function CookSessionOverlay({
   const sortedTimers = sortTimersForDisplay(timers)
   const planRecipeIds = new Set(recipes.map((r) => r.id))
   const timersByRecipeId = new Map<number, typeof sortedTimers>()
+  /**
+   * 鳴り終わったタイマー（2026-08-11 便FO・利用者テスト「鳴り終わったタイマーが、画面の
+   * 一番下に小さく『終わり』と出るだけ。コンロの前で手を動かしているときに、あの位置の
+   * あの大きさでは気づけない」）。
+   *
+   * **どの品のものでも必ず画面の上に、同じ大きさ・同じ場所で出す**。動作中のタイマーの
+   * 置き場所（大きく出している品は上・他の品はその行）は変えていないが、終わったものだけは
+   * 手順を進めても場所が動かない＝探し直さなくてよい。
+   */
+  const finishedTimers = sortedTimers.filter((t) => t.done)
   // 段取りに入っていない品のタイマー（並行調理ナビの画面で自分で始めたタイマーなど）は、
   // 置き場所になる行が下部に無いので画面上部に出す
   const currentTimers = sortedTimers.filter(
-    (t) => t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId),
+    (t) => !t.done && (t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId)),
   )
   for (const t of sortedTimers) {
+    if (t.done) continue
     if (t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId)) continue
     const list = timersByRecipeId.get(t.recipeId) ?? []
     list.push(t)
@@ -604,6 +615,54 @@ export default function CookSessionOverlay({
           >
             <X size={16} aria-hidden />
           </button>
+        </div>
+      )}
+
+      {/* 鳴り終わったタイマー（2026-08-11 便FO）。品を問わず、手順を進めても動かない場所に
+          全幅で出す。中身を押すと調整の窓（消音・手順を開く・消す）が開き、右の大きな
+          ボタンでその場で消せる＝小さな✕を狙わなくてよい */}
+      {finishedTimers.length > 0 && (
+        <div
+          data-testid="cook-session-finished-timers"
+          className="mx-[var(--space-md)] mb-1 max-h-[26vh] space-y-1 overflow-y-auto"
+        >
+          {finishedTimers.map((t) => (
+            <div
+              key={t.id}
+              style={{ background: 'color-mix(in oklab, var(--warning) 16%, var(--surface))' }}
+              className="flex items-center gap-2 rounded-md border-2 border-warning px-2 py-2 shadow-md"
+            >
+              <button
+                type="button"
+                onClick={() => setAdjustingId(t.id)}
+                aria-label={ja.timer.adjustOpenAria.replace('{label}', t.label)}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <BellRing size={28} className="shrink-0 animate-pulse text-warning" aria-hidden />
+                {/* どの手順のタイマーだったかを、常駐バー・調整の窓と同じ番号の並びで出す */}
+                <StepBadge
+                  number={
+                    t.isCustom || (t.stepNumber <= 0 && t.naviOrder == null)
+                      ? 'custom'
+                      : (t.naviOrder ?? t.stepNumber)
+                  }
+                  size={26}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-warning">{t.label}</span>
+                  <span className="block text-xl font-bold text-warning">{t.doneLabel}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                data-testid="cook-session-finished-dismiss"
+                onClick={() => dismissTimer(t.id)}
+                className="shrink-0 rounded-md border border-warning bg-surface px-3 py-3 text-sm font-bold text-warning shadow-sm"
+              >
+                {ja.timer.dismiss}
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

@@ -1045,13 +1045,23 @@ export default function CookNaviPage() {
   }
   /**
    * 最後の手順の「完成！」（2026-08-10 便EZ・戻り位置を「まとめて作った！」に合わせる）。
-   * ここは調理が終わった合図なので、覚えていた手順も消す＝次は先頭から始まる
+   * ここは調理が終わった合図なので、覚えていた手順も消す＝次は先頭から始まる。
+   *
+   * 2026-08-11 便FO・利用者テスト「14/14まで進めて押したが『作りました』も出ず、段取りの
+   * ページに戻っただけ。別に『まとめて作った！』を押す必要があると気づくまで分からなかった」:
+   * **押したその場で作った記録の確認を出す**。1品の調理中モードが「完成！→記録フォーム」
+   * （RecipeDetailPage）なので、並行でも同じ流れにそろえる。
+   * 記録するかどうかは確認で選ぶ＝docs/69「最後まで進んだら自動記録、をしない」は守る。
+   * 記録しないを選んだときは、従来どおり全画面を閉じて「まとめて作った！」まで画面を送る。
    */
   const completeSession = () => {
-    completedRef.current = true
-    setCurrent(undefined)
-    setSessionOpen(false)
-    setPulls([])
+    void (async () => {
+      if (await markAllCooked({ fromFinish: true })) return
+      completedRef.current = true
+      setCurrent(undefined)
+      setSessionOpen(false)
+      setPulls([])
+    })()
   }
   /**
    * 全画面を閉じたあとの戻り位置（同）。
@@ -1095,16 +1105,18 @@ export default function CookNaviPage() {
    * 記録したあとは件数つきのトーストと「元に戻す」を出す（日タブの「全て作った！」と同じ作法）。
    * 記録したら作りかけの段取りは役目を終えるので、覚えていた選択を消して選び直しの状態に戻す。
    */
-  const markAllCooked = async () => {
+  const markAllCooked = async (options?: { fromFinish?: boolean }) => {
     const targets = selectedRecipes.filter((r) => r.id != null)
-    if (targets.length === 0) return
+    if (targets.length === 0) return false
     const confirmText =
+      // 最後の手順の「完成！」から来たときは、なぜ確認が出たのかを先に1行で書く（2026-08-11 便FO）
+      (options?.fromFinish ? ja.cookNavi.sessionFinishLead : '') +
       ja.cookNavi.markAllCookedConfirm
         .replaceAll('{n}', String(targets.length))
         .replace('{titles}', targets.map((r) => r.title).join('・')) +
       (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
       ja.cookNavi.markAllCookedConfirmAsk
-    if (!window.confirm(confirmText)) return
+    if (!window.confirm(confirmText)) return false
     // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
     // 何人分作ったかも記録する（2026-08-10 便FF）。段取りの分量に使っている食数
     // （枠の食数＞設定「食数の設定」＞レシピの登録人数分）をそのまま記録に残す
@@ -1121,6 +1133,7 @@ export default function CookNaviPage() {
     setDroppedNotice('')
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
     setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
+    return true
   }
 
   /** トーストの「元に戻す」（記録を取り消して今日の献立に戻す。日タブと同じ関数を使う） */
@@ -1486,6 +1499,7 @@ export default function CookNaviPage() {
                       ref={markAllCookedRef}
                       data-testid="navi-mark-all-cooked"
                       onClick={() => void markAllCooked()}
+                      /* 「完成！」で記録しなかった人がここへ送られてくる（2026-08-11 便FO） */
                       className="mt-[var(--space-md)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
                     >
                       <ChefHat size={20} aria-hidden />

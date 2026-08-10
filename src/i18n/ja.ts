@@ -1269,6 +1269,10 @@ export const ja = {
       '{titles}の{n}件に、今日の日付で作った記録をつけます。\n記録した{n}件は今日の献立から外れます（レシピと段取りはそのまま残ります）。\n\n',
     markAllCookedConfirmPantry: '設定により、使った食材の在庫も1段階ずつ下がります。\n\n',
     markAllCookedConfirmAsk: '記録をつけますか？',
+    // 調理中モードの最後の手順「完成！」から確認を出したときの1行目(2026-08-11 便FO・
+    // 利用者テスト「14/14まで進めて押したが『作りました』も出ず、段取りのページに戻っただけ」)。
+    // なぜ確認が出たのかを先に書く。続きは markAllCookedConfirm と同じ文（記録の中身は1か所で持つ）
+    sessionFinishLead: '段取りの最後の手順まで進みました。\n',
     markAllCookedToast: '{n}件の作った記録をつけました',
     markAllCookedUndone: '{n}件の作った記録を取り消して、今日の献立に戻しました',
     markAllCookedUndoNothing: '取り消せる記録が見つかりませんでした（記録はそのままです）',
