@@ -181,7 +181,9 @@ try {
     .filter({ hasNotText: 'レシピを選ぶ' })
     .filter({ hasText: /野菜約\d{3}g/ })
     .first()
-  await crop(page, 'plan-week-free', weekDayCard, { top: 40, padX: 6, maxHeight: 470 })
+  // 2026-08-10 便FJ: 「日」「週」「月」の帯が画面上部に貼り付く(2026-08-09 便ET)ので、
+  // カードの上端は帯の高さ(54px)より下に置く(40pxのままだとカードの上に帯の切れ端が写る)
+  await crop(page, 'plan-week-free', weekDayCard, { top: 64, padX: 6, maxHeight: 470 })
 
   // 表示している週の概算食費(開いた状態)
   const costRow = page.getByRole('button', { name: /表示している週の概算食費/ }).first()
@@ -336,7 +338,9 @@ try {
       .allTextContents()
       .catch(() => [])
     console.log('  先頭カード:', firstTitles.slice(0, 4).join(' / '))
-    await cropRange(heroPage, 'recipe-cards-photo', heroCard.first(), heroCard.nth(3), { top: 12 })
+    // 2026-08-10 便FJ: 検索まどの帯が画面上部に貼り付く(2026-08-09 便ET)ようになったため、
+    // カードの上端を12pxに寄せると1枚目の上が帯の下に隠れる。帯の高さ(66px)より下に置く
+    await cropRange(heroPage, 'recipe-cards-photo', heroCard.first(), heroCard.nth(3), { top: 80 })
   }
   await heroContext.close()
   }
