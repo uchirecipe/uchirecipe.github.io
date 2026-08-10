@@ -4967,13 +4967,14 @@ try {
   await page.mouse.click(5, 5)
   await page.waitForTimeout(300)
   check('TIMER-ADJ-01 背景タップで窓が閉じる', !(await adjustDialog.isVisible().catch(() => false)))
-  // 「停止」でタイマーごと消えることも確認する(後続のTIMER-CUSTOM-01に影響を残さないための後片付けも兼ねる)
+  // 「タイマーを消す」でタイマーごと消えることも確認する(後続のTIMER-CUSTOM-01に影響を
+  // 残さないための後片付けも兼ねる。文言は2026-08-10 便FCで「停止」から言い換えた)
   await adjustOpenBtn.click()
   await page.waitForTimeout(300)
-  await adjustDialog.getByRole('button', { name: '停止' }).click()
+  await adjustDialog.getByRole('button', { name: 'タイマーを消す' }).click()
   await page.waitForTimeout(300)
   check(
-    'TIMER-ADJ-01 「停止」でタイマーが常駐バーから消える',
+    'TIMER-ADJ-01 「タイマーを消す」でタイマーが常駐バーから消える',
     !(await adjustOpenBtn.isVisible().catch(() => false)),
   )
 
@@ -5050,14 +5051,14 @@ try {
     atFloorText,
   )
   // 2026-07-28 機能④診断C10: 0まで減って終わったあとの±は「押しても何も起きない死にボタン」に
-  // していた。押せないと見て分かる状態にし、理由の一言を出す(「停止」は引き続き押せる)
+  // していた。押せないと見て分かる状態にし、理由の一言を出す(「タイマーを消す」は引き続き押せる)
   const floorButtons = await customAdjustDialog.evaluate((dlg) => {
     const btns = Array.from(dlg.querySelectorAll('button'))
     const find = (t) => btns.find((b) => b.textContent.trim() === t)
     return {
       minus: find('−30秒')?.disabled,
       plus: find('+1分')?.disabled,
-      stop: find('停止')?.disabled,
+      stop: find('タイマーを消す')?.disabled,
       hasReason: dlg.textContent.includes('終わったタイマーの時間は変えられません'),
     }
   })
@@ -5067,11 +5068,11 @@ try {
     JSON.stringify(floorButtons),
   )
   check(
-    'TIMER-CUSTOM-01 終わったあとも「停止」は押せて、変えられない理由が出る',
+    'TIMER-CUSTOM-01 終わったあとも「タイマーを消す」は押せて、変えられない理由が出る',
     floorButtons.stop === false && floorButtons.hasReason,
     JSON.stringify(floorButtons),
   )
-  await customAdjustDialog.getByRole('button', { name: '停止' }).click()
+  await customAdjustDialog.getByRole('button', { name: 'タイマーを消す' }).click()
   await page.waitForTimeout(300)
 
   // --- TIMER-KEEP-01 / TIMER-ORDER-01 / FOCUS-TIMER-01 / TIMER-ADJ-02:
@@ -5233,7 +5234,7 @@ try {
         return {
           plus: find('+1分')?.disabled,
           minus: find('−30秒')?.disabled,
-          stop: find('停止')?.disabled,
+          stop: find('タイマーを消す')?.disabled,
           text: dlg.textContent,
         }
       })
@@ -5247,7 +5248,7 @@ try {
         zeroState != null && zeroState.text.includes('終わったタイマーの時間は変えられません'),
       )
       check(
-        'TIMER-ADJ-02 「停止」は引き続き押せる(この窓から片付けられる)',
+        'TIMER-ADJ-02 「タイマーを消す」は引き続き押せる(この窓から片付けられる)',
         zeroState != null && zeroState.stop === false,
       )
     } finally {
@@ -5383,7 +5384,7 @@ try {
         (await otherDialog.isVisible()) && (await otherDialog.textContent()).includes('肉じゃが'),
         await otherDialog.textContent().catch(() => 'なし'),
       )
-      await otherDialog.getByRole('button', { name: '停止' }).click()
+      await otherDialog.getByRole('button', { name: 'タイマーを消す' }).click()
       await fkPage.waitForTimeout(400)
       check(
         'FOCUS-OTHER-01 調理中モードから出ずに別の料理のタイマーを停止できる',
@@ -16376,7 +16377,7 @@ try {
           ehBarNumber === ehTimerOrder,
           `段取りの番号=${ehTimerOrder} タイマーの番号=${ehBarNumber}`,
         )
-        const ehTimerClose = ehPage.locator('div.fixed [aria-label="タイマーを閉じる"]').first()
+        const ehTimerClose = ehPage.locator('div.fixed [aria-label="タイマーを消す"]').first()
         if ((await ehTimerClose.count()) > 0) await ehTimerClose.click()
         await ehPage.waitForTimeout(300)
       }
@@ -20108,15 +20109,24 @@ try {
           (await rowTexts()).some((t) => t.includes('ELマリネ')),
         JSON.stringify(await rowTexts()),
       )
-      // 調理を終えると、従来どおり候補から落ちる（一方通行なのは「調理中だけ」）
+      // 2026-08-10 便FC でここの意味が変わった: ✕は「閉じるだけ」で調理中の手順は残るので、
+      // 閉じても**まだ調理中**＝記録は段取りへ逆流しない（一方通行が続く）。
+      // 調理が終わる（カーソルを捨てる）のは「完成！」「まとめて作った！」「レシピを選び直す」。
+      // 落ちることの確認は、その「終わり」を通してから行う
       await elPage.locator('[data-testid="cook-session-close"]').click()
       await elPage.waitForTimeout(900)
       check(
-        'EL-04 調理を終えると全画面が閉じる',
+        'EL-04 ✕で全画面が閉じる',
         (await elPage.locator('[data-testid="cook-session"]').count()) === 0,
       )
       check(
-        'EL-04 終えたあとは記録が付いた品が組み合わせから落ちる',
+        'EL-04 閉じただけでは段取りは組み替わらない（記録は一方通行のまま）',
+        (await elPage.locator('[data-testid="navi-selection-dropped"]').count()) === 0,
+      )
+      await elPage.getByRole('button', { name: 'レシピを選び直す' }).click()
+      await elPage.waitForTimeout(900)
+      check(
+        'EL-04 調理を終えたあとは記録が付いた品が組み合わせから落ちる',
         (await elPage.locator('[data-testid="navi-selection-dropped"]').count()) === 1,
         (await elPage.textContent('body')).includes('今日の献立にない品') ? '文言あり' : '文言なし',
       )
@@ -23074,7 +23084,10 @@ try {
         ezBarDialogText.slice(0, 200),
       )
       // 片付け（後続の検査にタイマーを持ち越さない）
-      await ezPage.getByRole('dialog', { name: 'タイマーを調整' }).getByRole('button', { name: '停止' }).click()
+      await ezPage
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: 'タイマーを消す' })
+        .click()
       await ezPage.waitForTimeout(400)
 
       // EZ-03: 最終手順のボタンが1品のときと同じ「完成！」
@@ -23457,6 +23470,335 @@ try {
       )
     } finally {
       await fa4Browser.close()
+    }
+  }
+
+  // ============================================================================
+  // 便FC（2026-08-10 オーナー実機フィードバック8件）:
+  //   タイマー3件 …… ①「いったん止める」→「一時停止」（並ぶ「停止」は「タイマーを消す」へ）
+  //                   ②一時停止のあと声で再開できない ③「もう一度」→「読み上げ」
+  //   調理中モード5件 … ④閉じて開き直すと①に戻る→続きから ⑤タイマーからの戻り先を調理中モードへ
+  //                   ⑥左上に「手順①へ」 ⑦他の品の「作り終えました」→料理名の横に「完成」で1行
+  //                   ⑧他の品の次の手順を開いたら、タイマーは手順の下
+  // ============================================================================
+  currentCheck = 'FC-01'
+  {
+    const fcBrowser = await chromium.launch()
+    const fcContext = await fcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fcPage = await fcContext.newPage()
+    fcPage.on('dialog', (d) => void d.accept())
+    fcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FC] ${err.message}`)
+    })
+    fcPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FC] ${t}`)
+    })
+    const fcCounter = () => fcPage.locator('[data-testid="cook-session-counter"]').innerText()
+    const fcRecipe = () => fcPage.locator('[data-testid="cook-session-recipe"]').innerText()
+    const fcOpenSession = async () => {
+      await fcPage.locator('[data-testid="cook-session-start"]').click()
+      await fcPage.waitForTimeout(600)
+    }
+    const fcNext = async (n = 1) => {
+      for (let i = 0; i < n; i++) {
+        await fcPage.locator('[data-testid="cook-session-next"]').click()
+        await fcPage.waitForTimeout(250)
+      }
+    }
+    try {
+      await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1800)
+      await fcPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('FC照り焼き', [
+          { text: '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれを加えて煮からめ、器に盛る。' },
+        ], [{ name: '鶏もも肉', amount: '250', unit: 'g' }])))
+        const idB = await P(store('recipes').add(mk('FC煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて10分おき、器に盛る。', minutes: 10 },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        const idC = await P(store('recipes').add(mk('FCマリネ', [
+          { text: 'ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。' },
+          { text: 'パプリカときゅうりを細切りにする。' },
+          { text: 'マリネ液と和えて冷蔵庫で20分冷やす。', minutes: 20 },
+        ], [{ name: 'パプリカ', amount: '1', unit: '個' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await fcPage.goto(`${BASE}/#/cook-navi`)
+      await fcPage.reload({ waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1200)
+      await fcPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fcPage.waitForTimeout(700)
+      await fcOpenSession()
+
+      // --- FC-06: 左上の「手順①へ」（オーナー実機「左上に、①に戻るボタンを設置したい」） ---
+      currentCheck = 'FC-06'
+      const fcToFirst = fcPage.locator('[data-testid="cook-session-to-first"]')
+      check(
+        'FC-06 左上に「手順①へ」がある（画面のバッジと同じ丸数字で呼ぶ）',
+        (await fcToFirst.innerText()).trim() === '手順①へ',
+        await fcToFirst.innerText(),
+      )
+      check(
+        'FC-06 「戻る」の語を使わない（すぐ下の「前へ」・端末の戻ると読み分けられなくなるため）',
+        !(await fcToFirst.innerText()).includes('戻'),
+        await fcToFirst.innerText(),
+      )
+      const fcToFirstBox = await fcToFirst.boundingBox()
+      const fcCloseBox = await fcPage.locator('[data-testid="cook-session-close"]').boundingBox()
+      check(
+        'FC-06 置き場所は左上（✕のとなり・画面の左半分）',
+        fcToFirstBox != null && fcCloseBox != null &&
+          fcToFirstBox.x > fcCloseBox.x && fcToFirstBox.x < 195 && fcToFirstBox.y < 120,
+        JSON.stringify({ toFirst: fcToFirstBox, close: fcCloseBox }),
+      )
+      check('FC-06 先頭の手順では押せない', await fcToFirst.isDisabled())
+      await fcNext(3)
+      const fcMoved = await fcCounter()
+      check('FC-06 前提: 3つ進んでいる', /^段取り 4\//.test(fcMoved), fcMoved)
+      check('FC-06 先頭から離れると押せるようになる', !(await fcToFirst.isDisabled()))
+      await fcToFirst.click()
+      await fcPage.waitForTimeout(400)
+      check(
+        'FC-06 押すと段取りの最初の手順に戻る',
+        /^段取り 1\//.test(await fcCounter()),
+        await fcCounter(),
+      )
+
+      // --- FC-02/03: 声の案内（画面に出ている語を言えば効く。判定の語形は単体テストで固定） ---
+      currentCheck = 'FC-03'
+      const fcHint = fcPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first()
+      if ((await fcHint.count()) > 0) {
+        const fcHintText = await fcHint.innerText()
+        check(
+          'FC-03 読み上げの声の案内が「読み上げ」になっている（「もう一回」で案内しない）',
+          fcHintText.includes('「読み上げ」でいまの手順を読み上げ') && !fcHintText.includes('もう一回'),
+          fcHintText,
+        )
+        check(
+          'FC-02 止めたタイマーを動かし直す声（「再開」）が案内に載っている',
+          fcHintText.includes('「再開」で止めたタイマーを動かし直す'),
+          fcHintText,
+        )
+        check(
+          'FC-01 案内も画面のボタンと同じ「一時停止」で言う',
+          fcHintText.includes('一時停止') && !fcHintText.includes('いったん止める'),
+          fcHintText,
+        )
+      } else {
+        check('FC-03 声の案内が画面に出ている', false, 'micHintが見つからない')
+      }
+
+      // --- FC-04: 閉じて開き直すと、前回閉じた手順から始まる ---
+      currentCheck = 'FC-04'
+      await fcNext(4)
+      const fcResumeAt = await fcCounter()
+      const fcResumeRecipe = await fcRecipe()
+      await fcPage.locator('[data-testid="cook-session-close"]').click()
+      await fcPage.waitForTimeout(700)
+      check(
+        'FC-04 ✕で全画面が閉じる（確認は出ない＝消えるものが無い）',
+        (await fcPage.locator('[data-testid="cook-session"]').count()) === 0,
+      )
+      check(
+        'FC-04 入口のボタンが「続きから」に変わる',
+        (await fcPage.locator('[data-testid="cook-session-start"]').innerText()).includes(
+          '調理中モードの続きから見る',
+        ),
+        await fcPage.locator('[data-testid="cook-session-start"]').innerText(),
+      )
+      const fcResumeHint = await fcPage.locator('[data-testid="cook-session-start-hint"]').innerText()
+      check(
+        'FC-04 どの手順から始まるかを、画面のバッジと同じ丸数字で添える',
+        /前に開いていた手順[①-⑳㉑-㉟㊱-㊿]/.test(fcResumeHint),
+        fcResumeHint,
+      )
+      // 読み込み直しても「閉じている」ままで、勝手に全画面が開かない
+      await fcPage.reload({ waitUntil: 'networkidle' })
+      await fcPage.waitForTimeout(1500)
+      check(
+        'FC-04 読み込み直しても閉じたまま（覚えているのは手順だけ）',
+        (await fcPage.locator('[data-testid="cook-session"]').count()) === 0,
+      )
+      await fcOpenSession()
+      check(
+        'FC-04 開き直すと前回閉じた手順から始まる（①に戻らない）',
+        (await fcCounter()) === fcResumeAt && (await fcRecipe()) === fcResumeRecipe,
+        `閉じたとき=${fcResumeAt}/${fcResumeRecipe} 開き直し=${await fcCounter()}/${await fcRecipe()}`,
+      )
+
+      // --- FC-01: タイマーの窓の文言（「一時停止」と、消す操作の読み分け） ---
+      currentCheck = 'FC-01'
+      // 「15分煮る」の手順まで送って、本文の時間をタップしてタイマーを始める
+      await fcToFirst.click()
+      await fcPage.waitForTimeout(400)
+      for (let i = 0; i < 12; i++) {
+        if (/煮る/.test(await fcPage.locator('[data-testid="cook-session"]').innerText())) break
+        await fcNext(1)
+      }
+      const fcTimerAt = await fcCounter()
+      const fcTimerRecipe = await fcRecipe()
+      await fcPage.locator('[data-testid="cook-session"] button[aria-label*="タイマー開始"]').first().click()
+      await fcPage.waitForTimeout(600)
+      check(
+        'FC-01 前提: 調理中モードでタイマーが動き出す',
+        /\d\d:\d\d/.test(await fcPage.locator('[data-testid="cook-session-current-timers"]').innerText()),
+        await fcPage.locator('[data-testid="cook-session-current-timers"]').innerText(),
+      )
+      await fcPage.locator('[data-testid="cook-session-current-timers"] button').first().click()
+      await fcPage.waitForTimeout(400)
+      const fcDialog = fcPage.getByRole('dialog', { name: 'タイマーを調整' })
+      const fcButtons = await fcDialog.evaluate((dlg) =>
+        Array.from(dlg.querySelectorAll('button')).map((b) => b.textContent.trim()),
+      )
+      check(
+        'FC-01 「いったん止める」→「一時停止」になっている',
+        fcButtons.includes('一時停止') && !fcButtons.some((t) => t.includes('いったん止める')),
+        JSON.stringify(fcButtons),
+      )
+      check(
+        'FC-01 並んでいる消す操作は「停止」ではなく「タイマーを消す」（読み分けが崩れない）',
+        fcButtons.includes('タイマーを消す') && !fcButtons.includes('停止'),
+        JSON.stringify(fcButtons),
+      )
+      // 一時停止→再開がこの窓の中で完結する（声の「再開」と同じ道筋）
+      await fcPage.locator('[data-testid="timer-adjust-pause"]').click()
+      await fcPage.waitForTimeout(400)
+      check(
+        'FC-01 一時停止すると、その場で「再開」に切り替わる（声の「再開」の受け皿）',
+        (await fcPage.locator('[data-testid="timer-adjust-pause"]').innerText()).includes('再開'),
+      )
+      await fcPage.locator('[data-testid="timer-adjust-pause"]').click()
+      await fcPage.waitForTimeout(400)
+
+      // --- FC-05: 調理中モードで始めたタイマーからの戻り先＝調理中モードのその手順 ---
+      currentCheck = 'FC-05'
+      check(
+        'FC-05 調理中モードのタイマーの窓から、その手順へ戻る道がある',
+        (await fcDialog.getByRole('button', { name: /^手順.*を開く$/ }).count()) === 1,
+        await fcDialog.textContent(),
+      )
+      await fcPage.keyboard.press('Escape')
+      await fcPage.waitForTimeout(300)
+      await fcNext(1)
+      await fcPage.locator('[data-testid="cook-session-close"]').click()
+      await fcPage.waitForTimeout(700)
+      check(
+        'FC-05 前提: 調理中モードを閉じると常駐タイマーバーが見える',
+        (await fcPage.locator('button[aria-label*="のタイマーを調整"]').count()) > 0,
+      )
+      await fcPage.locator('button[aria-label*="のタイマーを調整"]').first().click()
+      await fcPage.waitForTimeout(400)
+      await fcPage
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: /^手順.*を開く$/ })
+        .click()
+      await fcPage.waitForTimeout(900)
+      check(
+        'FC-05 タイマーから戻ると、段取りの一覧ではなく調理中モードが開く',
+        (await fcPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+      check(
+        'FC-05 戻り先はそのタイマーを始めた手順',
+        (await fcCounter()) === fcTimerAt && (await fcRecipe()) === fcTimerRecipe,
+        `タイマーの手順=${fcTimerAt}/${fcTimerRecipe} 戻り先=${await fcCounter()}/${await fcRecipe()}`,
+      )
+
+      // 戻ったあとに手順を動かせること（2026-08-10 便FCで実際に踏んだ不具合の再発防止）。
+      // 全画面を開くのと同じ処理の中で ?focusStep= を消すと、画面遷移の仕組みだけが古いURLを
+      // 握り続け、カーソルが動くたびに同じ手順へ引き戻されて「次へが効かない」状態になった
+      const fcAfterReturn = await fcCounter()
+      await fcNext(1)
+      check(
+        'FC-05 タイマーから戻ったあとも「次へ」で手順が進む（同じ手順に引き戻されない）',
+        (await fcCounter()) !== fcAfterReturn,
+        `戻り先=${fcAfterReturn} 次へ=${await fcCounter()}`,
+      )
+      await fcPage.getByRole('button', { name: '前へ' }).click()
+      await fcPage.waitForTimeout(300)
+
+      // --- FC-08: 他の品の次の手順を開いたら、その品のタイマーは手順の下に来る ---
+      currentCheck = 'FC-08'
+      for (let i = 0; i < 12 && (await fcRecipe()) === fcTimerRecipe; i++) await fcNext(1)
+      check(
+        'FC-08 前提: 別の品の手順に移り、タイマーは「他の品の次の手順」の行に付く',
+        (await fcPage.locator('[data-testid="cook-session-other-timers"]').count()) === 1,
+        await fcPage.locator('[data-testid="cook-session-others"]').innerText(),
+      )
+      const fcTimerRow = fcPage
+        .locator('[data-testid="cook-session-others"] > div')
+        .filter({ has: fcPage.locator('[data-testid="cook-session-other-timers"]') })
+      await fcTimerRow.locator('[data-testid="cook-session-other-row"]').click()
+      await fcPage.waitForTimeout(700)
+      const fcPeekBox = await fcPage.locator('[data-testid="cook-session-peek"]').boundingBox()
+      const fcRowTimerBox = await fcPage.locator('[data-testid="cook-session-other-timers"]').boundingBox()
+      check(
+        'FC-08 開いた手順の全文より下にタイマーが来る',
+        fcPeekBox != null && fcRowTimerBox != null && fcRowTimerBox.y >= fcPeekBox.y + fcPeekBox.height - 2,
+        JSON.stringify({ peek: fcPeekBox, timer: fcRowTimerBox }),
+      )
+      await fcTimerRow.locator('[data-testid="cook-session-other-row"]').click()
+      await fcPage.waitForTimeout(500)
+
+      // --- FC-07: 作り終えた品は、料理名の横に「完成」で1行（コンパクト） ---
+      currentCheck = 'FC-07'
+      for (let i = 0; i < 40; i++) {
+        if ((await fcPage.locator('[data-testid="cook-session-finish"]').count()) > 0) break
+        await fcNext(1)
+      }
+      const fcOthersText = await fcPage.locator('[data-testid="cook-session-others"]').innerText()
+      check(
+        'FC-07 作り終えた品は「完成」で示す（「作り終えました」の文は出さない）',
+        (await fcPage.locator('[data-testid="cook-session-other-done"]').count()) === 2 &&
+          !fcOthersText.includes('作り終えました'),
+        fcOthersText,
+      )
+      const fcDoneGeom = await fcPage.evaluate(() => {
+        const row = document.querySelector('[data-testid="cook-session-other-row"]')
+        const chip = document.querySelector('[data-testid="cook-session-other-done"]')
+        if (!row || !chip) return null
+        const title = row.querySelector('span > span.truncate')
+        const r = row.getBoundingClientRect()
+        const c = chip.getBoundingClientRect()
+        const t = title ? title.getBoundingClientRect() : null
+        return { rowHeight: r.height, chipMid: c.top + c.height / 2, titleMid: t ? t.top + t.height / 2 : null }
+      })
+      check(
+        'FC-07 料理名と「完成」が同じ行に並ぶ（1列になる）',
+        fcDoneGeom != null && fcDoneGeom.titleMid != null &&
+          Math.abs(fcDoneGeom.chipMid - fcDoneGeom.titleMid) < 6,
+        JSON.stringify(fcDoneGeom),
+      )
+      check(
+        'FC-07 終わった品の行はコンパクト（2行ぶんの高さを取らない）',
+        fcDoneGeom != null && fcDoneGeom.rowHeight <= 34,
+        JSON.stringify(fcDoneGeom),
+      )
+    } finally {
+      await fcBrowser.close()
     }
   }
 

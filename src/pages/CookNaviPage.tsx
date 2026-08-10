@@ -597,6 +597,12 @@ export default function CookNaviPage() {
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
   const [highlightKey, setHighlightKey] = useState<string | null>(null)
+  /**
+   * すでに着地させた ?focusStep=（2026-08-10 便FC）。
+   * URLの後片付けが何かの拍子に効かなくても、**同じ指定で二度カーソルを引き戻さない**ための札。
+   * これが無いと、下の不具合（次へを押しても同じ手順に戻される）が再発しうる。
+   */
+  const handledFocusRef = useRef<string | null>(null)
   /** ?focusStep= を消す（着地できたときだけ。同じ手順に何度でも飛べるようにする） */
   const clearFocusStep = () => {
     setSearchParams(
@@ -612,7 +618,12 @@ export default function CookNaviPage() {
   /** ?focusStep= の着地。段取りがまだ描かれていないうちは何もせず、描かれてからやり直す */
   const applyFocusStep = () => {
     const focus = searchParams.get('focusStep')
-    if (!focus) return
+    // 指定が消えたら札も戻す＝同じタイマーをもう一度押せば、また同じ手順へ飛べる
+    if (!focus) {
+      handledFocusRef.current = null
+      return
+    }
+    if (handledFocusRef.current === focus) return
     // 調理中の手順を覚えている（＝調理の途中）なら、その手順そのものへカーソルを移し、
     // 全画面の調理中モードを開いて着地する（2026-08-09 便ES・オーナー指示
     // 「タイマーのバー→調整画面→レシピ名タップ→該当手順へ移動」と同じ着地）。
@@ -626,9 +637,22 @@ export default function CookNaviPage() {
         (item) => item.recipeId === focusRecipeId && item.stepNumber === focusStepNumber,
       )
       if (target) {
+        handledFocusRef.current = focus
         setCurrent({ recipeId: target.recipeId, stepIndex: target.stepIndex })
         setSessionOpen(true)
-        clearFocusStep()
+        /**
+         * **URLの後片付けは1拍おいてから**（2026-08-10 便FC。ここを直接呼ぶと動かない）。
+         *
+         * 全画面の調理中モードは、開くときに端末の「戻る」対策として履歴を1つ積む
+         * （CookSessionOverlay の `history.pushState`）。これは画面遷移の仕組み
+         * （React Router）を通さない生の履歴操作なので、**全画面を開く更新と同じ処理の中で
+         * URLを書き換えると、書き換えの間に履歴が1つ積まれ、画面遷移の仕組み側だけが
+         * 古いURL（?focusStep= が付いたまま）を握り続ける**。
+         * するとカーソルが動くたびにこの処理が呼び直され、そのつど同じ手順へ引き戻される
+         * ＝実機では「次へを押しても手順が進まない」。
+         * 全画面が開き切った（履歴を積み終えた）あとに片付ければ、この食い違いは起きない。
+         */
+        setTimeout(clearFocusStep, 0)
         return
       }
     }
@@ -639,6 +663,7 @@ export default function CookNaviPage() {
     // ＝2026-08-08 便ED・オーナー実機フィードバック②の着地が効かない不具合の修正
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    handledFocusRef.current = focus
     setHighlightKey(focus)
     clearFocusStep()
   }
