@@ -24832,6 +24832,305 @@ try {
     )
   }
 
+
+  // ============================================================================
+  // 便FI（2026-08-10 オーナー要望「並行調理ナビ調理中モードの、色で手順入れ替えはいつ
+  // 実装しますか？」・docs/69 第3段）: 調理中モードで色を言うと、その品の手順に移る。
+  //   ・語彙は画面の実物と同じ **青・緑・ピンク**（原文の「赤」は使わない）
+  //   ・移り方は**引き寄せ**＝その手順をいまの位置へ持ってくる。カーソルだけ先へ飛ばすと、
+  //     間の手順が「済んだ手順」に化けて、作っていない品が「完成」と出る（実機で確認済み）
+  //   ・「青ねぎを散らす」では動かない（発話まるごとの一致だけを見る）
+  //   ・記録・タイマーの削除は起きない（docs/69「音声の規律」）
+  // ============================================================================
+  currentCheck = 'FI-01'
+  {
+    const fiBrowser = await chromium.launch()
+    const fiContext = await fiBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    // 声で操作の実機挙動は自動では再現できないため、SpeechRecognition を偽装して
+    // onresult に文字列を注入する（FOCUSVOICE-01 と同じ手口）
+    await fiContext.addInitScript(() => {
+      class FakeRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+        }
+        start() {
+          window.__fiRecognition = this
+        }
+        stop() {}
+        abort() {}
+      }
+      window.SpeechRecognition = FakeRecognition
+      window.__fiEmitVoice = (text) => {
+        const r = window.__fiRecognition
+        if (!r || typeof r.onresult !== 'function') return false
+        r.onresult({ results: [[{ transcript: text }]] })
+        return true
+      }
+    })
+    const fiPage = await fiContext.newPage()
+    fiPage.on('dialog', (d) => void d.accept())
+    fiPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FI] ${err.message}`)
+    })
+    fiPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FI] ${t}`)
+    })
+    const fiCounter = () => fiPage.locator('[data-testid="cook-session-counter"]').innerText()
+    const fiRecipe = () => fiPage.locator('[data-testid="cook-session-recipe"]').innerText()
+    const fiHint = () =>
+      fiPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first().innerText()
+    const fiSay = async (word) => {
+      const emitted = await fiPage.evaluate((t) => window.__fiEmitVoice(t), word)
+      await fiPage.waitForTimeout(450)
+      return emitted
+    }
+    /** 段取りの先頭へ（先頭にいるときは押せないので、そのときは何もしない） */
+    const fiToFirst = async () => {
+      const button = fiPage.locator('[data-testid="cook-session-to-first"]')
+      if (await button.isDisabled()) return
+      await button.click()
+      await fiPage.waitForTimeout(350)
+    }
+    /** 段取りを最初から最後までなぞって「どの品の手順が何番目に並んでいるか」を集める */
+    const fiWalkPlan = async () => {
+      await fiToFirst()
+      const seen = []
+      for (let i = 0; i < 20; i++) {
+        seen.push(await fiRecipe())
+        const next = fiPage.locator('[data-testid="cook-session-next"]')
+        if ((await next.count()) === 0) break
+        await next.click()
+        await fiPage.waitForTimeout(180)
+      }
+      return seen
+    }
+    /** 作った記録の件数（色で移っただけで記録が付いていないことの確認） */
+    const fiCookedLogCount = () =>
+      fiPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        db.close()
+        return all
+          .filter((r) => String(r.title).startsWith('FI'))
+          .reduce((n, r) => n + (r.cookedLogs?.length ?? 0), 0)
+      })
+    try {
+      await fiPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fiPage.waitForTimeout(1800)
+      await fiPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('FI照り焼き', [
+          { text: '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれを加えて煮からめ、器に盛る。' },
+        ], [{ name: '鶏もも肉', amount: '250', unit: 'g' }])))
+        const idB = await P(store('recipes').add(mk('FI煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて10分おき、器に盛る。', minutes: 10 },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        const idC = await P(store('recipes').add(mk('FIマリネ', [
+          { text: 'ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。' },
+          { text: 'パプリカときゅうりを細切りにする。' },
+          { text: 'マリネ液と和えて冷蔵庫で20分冷やす。', minutes: 20 },
+        ], [{ name: 'パプリカ', amount: '1', unit: '個' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await fiPage.goto(`${BASE}/#/cook-navi`)
+      await fiPage.reload({ waitUntil: 'networkidle' })
+      await fiPage.waitForTimeout(1200)
+      await fiPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fiPage.waitForTimeout(700)
+      await fiPage.locator('[data-testid="cook-session-start"]').click()
+      await fiPage.waitForTimeout(700)
+      check(
+        'FI-01 前提: 調理中モードが開く',
+        (await fiPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+      const fiPlanBefore = await fiWalkPlan()
+      check('FI-01 前提: 3品9手順の段取りになっている', fiPlanBefore.length === 9, fiPlanBefore.join(','))
+
+      // --- FI-01: 下部の行に、声で言う色の名前が出ている（色の帯だけでは何と言えばよいか決まらない） ---
+      const fiWords = await fiPage.locator('[data-testid="cook-session-color-word"]').allInnerTexts()
+      check(
+        'FI-01 他の品の行に色の名前（青・緑・ピンクのいずれか）が出ている',
+        fiWords.length === 2 && fiWords.every((w) => ['青', '緑', 'ピンク'].includes(w.trim())),
+        fiWords.join('/'),
+      )
+      check(
+        'FI-01 画面に「赤」は出さない（実装の色は青・緑・ピンク。原文の赤と食い違わせない）',
+        !fiWords.some((w) => w.includes('赤')),
+        fiWords.join('/'),
+      )
+
+      // --- FI-02: 案内文に色の言い方が載っている ---
+      currentCheck = 'FI-02'
+      const fiHintText = await fiHint()
+      check(
+        'FI-02 案内に「色を言うとその色の品の手順に移る」が載っている',
+        fiHintText.includes('「青」「緑」など色を言うとその色の品の手順に移る'),
+        fiHintText,
+      )
+      check(
+        'FI-02 案内でも「赤」で案内しない',
+        !fiHintText.includes('「赤」'),
+        fiHintText,
+      )
+
+      // --- FI-03: 色を言うと、その品の手順が開く（引き寄せ） ---
+      currentCheck = 'FI-03'
+      await fiToFirst()
+      await fiPage.locator('button[aria-label="声で操作する"]').click()
+      await fiPage.waitForTimeout(300)
+      const fiFirstRecipe = await fiRecipe()
+      // いま開いていない品の色を1つ選ぶ（並びは段取り次第なので画面から取る）
+      const fiTargetWord = (await fiPage.locator('[data-testid="cook-session-color-word"]').allInnerTexts())[0].trim()
+      const fiTargetTitle = (
+        await fiPage.locator('[data-testid="cook-session-other-row"]').first().innerText()
+      )
+        .split('\n')
+        .map((s) => s.trim())
+        .find((s) => s.startsWith('FI'))
+      check('FI-03 前提: 声で操作をONにできた', (await fiHint()).includes('聞いています'), await fiHint())
+      const fiEmitted = await fiSay(fiTargetWord)
+      check(
+        `FI-03 「${fiTargetWord}」でその色の品の手順が開く`,
+        fiEmitted && (await fiRecipe()) === fiTargetTitle,
+        `言った=${fiTargetWord} 期待=${fiTargetTitle} 実際=${await fiRecipe()}`,
+      )
+      check(
+        'FI-03 引き寄せなので、その手順が段取りの先頭に来る（手順を飛ばさない）',
+        /^段取り 1\//.test(await fiCounter()),
+        await fiCounter(),
+      )
+      check(
+        'FI-03 手応えに、どの品に移ったかが名前で出る',
+        (await fiHint()).includes(`${fiTargetTitle}の手順に移りました`),
+        await fiHint(),
+      )
+      check(
+        'FI-03 開いていた品は「完成」にならない（作っていない品を完成と出さない）',
+        !(await fiPage.locator('[data-testid="cook-session-others"]').innerText()).includes('完成'),
+        await fiPage.locator('[data-testid="cook-session-others"]').innerText(),
+      )
+      check(
+        'FI-03 開いていた手順は、すぐ次に残っている（「次へ」で戻れる）',
+        (await fiPage.locator('[data-testid="cook-session-other-row"]').first().innerText()).includes(
+          fiFirstRecipe,
+        ),
+        await fiPage.locator('[data-testid="cook-session-other-row"]').first().innerText(),
+      )
+
+      // --- FI-04: 別の色を言えば移り直せる（可逆）。手順は1つも消えない ---
+      currentCheck = 'FI-04'
+      const fiOtherWord = ['青', '緑', 'ピンク'].filter((w) => w !== fiTargetWord)
+      let fiSwitched = ''
+      for (const word of fiOtherWord) {
+        const before = await fiRecipe()
+        await fiSay(word)
+        const after = await fiRecipe()
+        if (after !== before) {
+          fiSwitched = word
+          break
+        }
+      }
+      check('FI-04 別の色を言うと、その品の手順に移り直せる', fiSwitched !== '', `試した=${fiOtherWord.join('/')}`)
+      const fiPlanAfter = await fiWalkPlan()
+      check(
+        'FI-04 色で移っても手順は1つも消えない（9手順のまま）',
+        fiPlanAfter.length === fiPlanBefore.length,
+        `前=${fiPlanBefore.length} 後=${fiPlanAfter.length}`,
+      )
+      check(
+        'FI-04 品ごとの手順の数も変わらない',
+        ['FI照り焼き', 'FI煮物', 'FIマリネ'].every(
+          (t) => fiPlanAfter.filter((x) => x === t).length === 3,
+        ),
+        fiPlanAfter.join(','),
+      )
+
+      // --- FI-05: 「青ねぎ」等では誤爆しない（発話まるごとの一致だけを見る） ---
+      currentCheck = 'FI-05'
+      await fiToFirst()
+      for (const phrase of ['青ねぎを散らす', '緑黄色野菜を加える', 'ピンクペッパーをふる']) {
+        const beforeRecipe = await fiRecipe()
+        const beforeCounter = await fiCounter()
+        await fiSay(phrase)
+        check(
+          `FI-05 「${phrase}」では手順が動かない`,
+          (await fiRecipe()) === beforeRecipe && (await fiCounter()) === beforeCounter,
+          `前=${beforeCounter}/${beforeRecipe} 後=${await fiCounter()}/${await fiRecipe()}`,
+        )
+      }
+
+      // --- FI-06: 記録・タイマーの削除は起きない（docs/69「音声の規律」） ---
+      currentCheck = 'FI-06'
+      await fiSay('3分タイマー')
+      const fiTimerCount = () =>
+        fiPage.locator('[data-testid="cook-session"] button[aria-label*="のタイマーを調整"]').count()
+      const fiTimersBefore = await fiTimerCount()
+      check('FI-06 前提: タイマーを1本動かせた', fiTimersBefore >= 1, `本数=${fiTimersBefore}`)
+      for (const word of ['青', '緑', 'ピンク']) await fiSay(word)
+      check(
+        'FI-06 色を言ってもタイマーは消えない',
+        (await fiTimerCount()) === fiTimersBefore,
+        `前=${fiTimersBefore} 後=${await fiTimerCount()}`,
+      )
+      check('FI-06 色を言っても作った記録は付かない', (await fiCookedLogCount()) === 0, `記録=${await fiCookedLogCount()}`)
+      check(
+        'FI-06 色を言っても調理中モードは閉じない',
+        (await fiPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+
+      // --- FI-07: 下部の行のタップは今までどおり「見るだけ」（EL-03 の非退行） ---
+      currentCheck = 'FI-07'
+      const fiTapBefore = `${await fiCounter()}/${await fiRecipe()}`
+      await fiPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await fiPage.waitForTimeout(350)
+      check(
+        'FI-07 行をタップしても調理中の手順は変わらない（色の目印を押しても移らない）',
+        `${await fiCounter()}/${await fiRecipe()}` === fiTapBefore,
+        `前=${fiTapBefore} 後=${await fiCounter()}/${await fiRecipe()}`,
+      )
+      check(
+        'FI-07 タップで開くのは全文だけ',
+        (await fiPage.locator('[data-testid="cook-session-peek"]').count()) === 1,
+      )
+    } finally {
+      await fiBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
