@@ -477,6 +477,11 @@ export default function CookNaviPage() {
    * 従来は①（今日の献立）しか候補に出せず、週タブで組んだ予定のうち「表示する食事」から
    * 外した帯の品はナビに渡せなかった。どちらから選んでも段取りを組めるようにする。
    * 今日すでに作った品は候補から外す（日タブと同じ＝作った後は予定でなく記録）。
+   *
+   * 2026-08-11 便FN: 「作った品を外す」を効かせるのは②（今日の予定）だけにした。
+   * ①（今日の献立に自分で入れた品）は、作り終えたあとに入れ直した品がここに入るので、
+   * 作った記録があることを理由に落とすと**その日はもう段取りを組めない**（利用者テスト報告）。
+   * 日タブに並んでいるものと同じ中身にする、という元の約束はこの形でも守られる。
    */
   const today = useMemo(() => todayString(), [])
   const todayPlanEntries = useMealPlanRange(today, today)
@@ -500,14 +505,14 @@ export default function CookNaviPage() {
           if (!planIds.includes(e.recipeId)) planIds.push(e.recipeId)
         }),
     )
-    const pickedIds = todayListPickedIds(
-      todayList.map((item) => item.recipeId),
-      planIds,
-    )
-    return [...pickedIds, ...planIds]
+    const plannedShownIds = planIds.filter((id) => {
+      const recipe = recipeById.get(id)
+      return recipe != null && !recipe.cookedLogs.some((log) => log.date === today)
+    })
+    const pickedIds = todayListPickedIds(todayList, plannedShownIds, planIds)
+    return [...pickedIds, ...plannedShownIds]
       .map((id) => recipeById.get(id))
       .filter((r): r is Recipe => r !== undefined)
-      .filter((r) => !r.cookedLogs.some((log) => log.date === today))
   }, [todayList, recipes, todayPlanEntries, recipeById, today])
 
   /**

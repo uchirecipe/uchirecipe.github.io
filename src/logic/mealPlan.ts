@@ -1113,12 +1113,58 @@ export function planClearMealSlots(
  * そのまま①として返す。旧関数は「食い違いの警告」を出すためのもので、週プランを使って
  * いない人に警告を出さないよう0件時は空にしていた。いまは警告ではなく**内訳の見出し**
  * なので、週プランが空でも「レシピ一覧から選択中」として並べる必要がある。
+ *
+ * ---
+ * 2026-08-11 便FN（利用者テストのバグ修正「『全て作った！』のあと、その日の献立に同じレシピを
+ * 戻せない」）。引き算の相手を「今日の予定ぜんぶ」から「**②にいま出ている予定**」へ変えた。
+ *
+ * 直したバグ: ②は今日すでに作った品を出さない（作った後は予定でなく記録）。一方この関数は
+ * 今日の予定に載っているレシピIDを無条件で引いていたため、「全て作った！」で今日の献立が
+ * 空になったあとに同じ品を入れ直しても、①からも②からも消えたまま画面に出てこなかった。
+ * ②に出ていない予定は引かない＝作り終えた品を自分で入れ直せば①に並ぶ。
+ *
+ * 予定の写し（fromPlan・自動取り込みで入った品）は、その予定が残っているかぎり①に出さない。
+ * 写しは自分で選んだ品ではないので、②から消えた（＝作った）のを機に①へ回すと、
+ * 記録したはずの品が「レシピ一覧から選択中」として並び直してしまう（便DP-4で直した退行）。
  */
 export function todayListPickedIds(
-  todayListIds: number[],
-  todayPlanRecipeIds: number[],
+  todayListItems: readonly { recipeId: number; fromPlan?: boolean }[],
+  /** ②「今週の献立の予定」としていま画面に出ているレシピID */
+  plannedShownRecipeIds: readonly number[],
+  /** 今日の予定に載っている全レシピID（省略時は②と同じ＝予定を隠さない画面向け） */
+  todayPlanRecipeIds: readonly number[] = plannedShownRecipeIds,
 ): number[] {
-  return todayListIds.filter((id) => !todayPlanRecipeIds.includes(id))
+  return todayListItems
+    .filter((item) => !plannedShownRecipeIds.includes(item.recipeId))
+    .filter((item) => !(item.fromPlan === true && todayPlanRecipeIds.includes(item.recipeId)))
+    .map((item) => item.recipeId)
+}
+
+/** todaySlotAddPlan の結果（呼び出し側はこれを見て操作とお知らせを決める） */
+export type TodaySlotAddPlan = 'add' | 'restore' | 'duplicate'
+
+/**
+ * レシピ詳細の「今日の献立に追加」で朝食/昼食/夕食を選んだときに何をするかを決める純関数
+ * （2026-08-11 便FN・利用者テストのバグ修正）。
+ *
+ * 直したバグ: 「全て作った！」で今日の献立を空にしたあと、同じレシピを同じ食事へ入れ直そうと
+ * すると「今日の夕食にすでに入っています」とだけ出て、日タブは空のまま何も起きなかった。
+ * 週の予定の行は記録をつけても残る（記録として「作った」の見た目で残す仕様）ため、
+ * 「同じ日×同じ食事にその行があるか」だけで重複と判定すると、**作り終えた行が同じ品の
+ * 入れ直しを永久に拒む**。日タブから消えている品なのに追加を断る＝画面が自分で矛盾を言う。
+ *
+ *   add       … その食事にまだ無い。予定の行を足し、今日の献立にも入れる
+ *   restore   … 行はあるが今日すでに作った品。**行は増やさず**今日の献立にだけ戻す
+ *                （同じ品が予定に2行並ぶと、週タブでどちらも「作った」に見えてしまう）
+ *   duplicate … 行があり、まだ作っていない＝ほんとうに二重。何もしない
+ */
+export function todaySlotAddPlan(
+  sameSlotRecipeIds: readonly number[],
+  recipeId: number,
+  cookedToday: boolean,
+): TodaySlotAddPlan {
+  if (!sameSlotRecipeIds.includes(recipeId)) return 'add'
+  return cookedToday ? 'restore' : 'duplicate'
 }
 
 /**

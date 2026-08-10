@@ -318,13 +318,11 @@ export default function HomePage() {
     [todayPlanEntries],
   )
   const pickedRecipes = useMemo(() => {
-    if (!todayListRecipes) return []
-    const pickedIds = todayListPickedIds(
-      todayListRecipes.map((r) => r.id!),
-      todayPlanRecipeIds,
-    )
+    if (!todayListRecipes || !todayList) return []
+    // ホームの②は今日の予定をそのまま全部出すので、②に出ている分＝今日の予定ぜんぶ
+    const pickedIds = todayListPickedIds(todayList, todayPlanRecipeIds)
     return todayListRecipes.filter((r) => pickedIds.includes(r.id!))
-  }, [todayListRecipes, todayPlanRecipeIds])
+  }, [todayList, todayListRecipes, todayPlanRecipeIds])
   /**
    * 今日の予定を朝食→昼食→夕食の順にまとめる。
    * 「表示する食事」の設定では絞らない（2026-07-30 便CH/C7と同じ切り分け＝設定は

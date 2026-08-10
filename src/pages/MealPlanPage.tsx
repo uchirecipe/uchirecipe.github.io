@@ -2154,24 +2154,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 日タブの縦一列の内訳（2026-08-03 便DH・オーナー指示。便DEの左右2列を差し替え）。
    *
-   *   pickedRecipes … ①「レシピ一覧から選択中」＝今日の献立のうち今日の週プランに無い分。
+   *   pickedRecipes … ①「レシピ一覧から選択中」＝今日の献立のうち②に出ていない分。
    *                    食事(朝昼夜)には分けない（レシピ詳細から直接「作った」を押すのと同じ扱い）
    *   plannedGroups … ②「今週の献立の予定」＝今日の週プランを朝食→昼食→夕食の順に
    *
    * ②は「表示する食事」の設定では絞らない（登録済みの予定を設定で隠さない＝便CH/C7の切り分け）。
    * そのため①の判定にも**全ての食事帯**の今日の予定を使う（表示帯だけで引くと、隠した帯の
    * 予定が①と②の両方に出て二重になる）。
+   *
+   * 2026-08-11 便FN: ①が引くのは「今日の予定ぜんぶ」ではなく「②にいま出ている分」。
+   * ②は今日すでに作った品を出さないので、作り終えた予定の行が①を塞ぐと、
+   * 「全て作った！」のあとに同じ品を入れ直しても画面のどこにも出なくなる（利用者テスト報告）。
    */
   const todayPlanAllRecipeIds = useMemo(
     () => Array.from(new Set((todayEntries ?? []).map((e) => e.recipeId))),
     [todayEntries],
   )
-  const pickedRecipes = useMemo(() => {
-    const todayListIds = todayList?.map((item) => item.recipeId) ?? []
-    return todayListPickedIds(todayListIds, todayPlanAllRecipeIds)
-      .map((id) => recipeById.get(id))
-      .filter((r): r is Recipe => r !== undefined)
-  }, [todayList, todayPlanAllRecipeIds, recipeById])
   const plannedGroups = useMemo(() => {
     const bySlot = new Map<MealSlot, Recipe[]>()
     todayEntries?.forEach((e) => {
@@ -2190,6 +2188,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       (g) => g.recipes.length > 0,
     )
   }, [todayEntries, recipeById, today])
+  /**
+   * ②にいま出ている予定のレシピID（2026-08-11 便FN）。
+   * ①の引き算はこれを相手にする＝②が出していない予定（今日すでに作った品）は①を塞がない。
+   */
+  const plannedShownRecipeIds = useMemo(
+    () => plannedGroups.flatMap((g) => g.recipes.map((r) => r.id!)),
+    [plannedGroups],
+  )
+  const pickedRecipes = useMemo(() => {
+    return todayListPickedIds(todayList ?? [], plannedShownRecipeIds, todayPlanAllRecipeIds)
+      .map((id) => recipeById.get(id))
+      .filter((r): r is Recipe => r !== undefined)
+  }, [todayList, plannedShownRecipeIds, todayPlanAllRecipeIds, recipeById])
   /** 日タブに並んでいる全レシピID（①→②の順・重複なし）。まとめて記録・並行調理ナビへ渡す */
   const dayRecipeIds = useMemo(() => {
     const ids = pickedRecipes.map((r) => r.id!)

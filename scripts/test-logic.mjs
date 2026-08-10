@@ -74,6 +74,7 @@ import {
   mealOccasionCount,
   planRoleAssign,
   todayListPickedIds,
+  todaySlotAddPlan,
   staleTodayListFromPlanIds,
   recipeDishType,
 } from '../src/logic/mealPlan.ts'
@@ -12922,14 +12923,55 @@ eq(
     ...over,
   })
 
-  // todayListPickedIds: 「レシピ一覧から選択中」＝今日の献立から今日の週プランぶんを引いた残り
-  eq('DH-PICK 週プランに無い品だけが残る', todayListPickedIds([1, 2, 3], [2]), [1, 3])
-  eq('DH-PICK 並び順は今日の献立の登録順のまま', todayListPickedIds([3, 1, 2], [2]), [3, 1])
-  eq('DH-PICK 全部が予定なら空', todayListPickedIds([1, 2], [1, 2]), [])
+  // todayListPickedIds: 「レシピ一覧から選択中」＝今日の献立から②に出ている予定ぶんを引いた残り
+  const tl = (...ids) => ids.map((recipeId) => ({ recipeId }))
+  eq('DH-PICK 週プランに無い品だけが残る', todayListPickedIds(tl(1, 2, 3), [2]), [1, 3])
+  eq('DH-PICK 並び順は今日の献立の登録順のまま', todayListPickedIds(tl(3, 1, 2), [2]), [3, 1])
+  eq('DH-PICK 全部が予定なら空', todayListPickedIds(tl(1, 2), [1, 2]), [])
   // 再発防止(旧todayPlanMismatch): 週プランが空のときに空配列を返してはいけない。
   // 旧関数は「食い違い警告を出さない」ために0件時は空を返していたが、便DHでは同じ結果を
   // 「レシピ一覧から選択中」の見出しの中身として使うため、週プランが空なら全部がこちらに入る
-  eq('DH-PICK 週プランが空でも今日の献立はそのまま選択中に入る', todayListPickedIds([1, 2], []), [1, 2])
+  eq('DH-PICK 週プランが空でも今日の献立はそのまま選択中に入る', todayListPickedIds(tl(1, 2), []), [1, 2])
+
+  // --- 便FN(2026-08-11 利用者テスト): 「全て作った！」のあと同じレシピを今日の献立に戻せない ---
+  // ②「今週の献立の予定」は今日すでに作った品を出さない。①がその予定を引き算し続けると、
+  // 入れ直した品が①からも②からも消える＝日タブが空のまま何をしても出てこなくなる
+  eq(
+    'FN-PICK ②に出ていない予定（作り終えた品）は①を塞がない',
+    // 今日の予定は 1,2,3。全部作ったので②は0件。自分で1を入れ直した
+    todayListPickedIds(tl(1), [], [1, 2, 3]),
+    [1],
+  )
+  eq(
+    'FN-PICK ②に出ている予定は今までどおり①に出さない（二重に並べない）',
+    todayListPickedIds(tl(1, 2), [1], [1, 2, 3]),
+    [2],
+  )
+  eq(
+    'FN-PICK 予定の写し(fromPlan)は、予定が残っているかぎり①へ回さない（便DP-4の退行防止）',
+    // 自動取り込みで入った写し。作り終えて②から消えても「レシピ一覧から選択中」にはしない
+    todayListPickedIds([{ recipeId: 1, fromPlan: true }], [], [1]),
+    [],
+  )
+  eq(
+    'FN-PICK 予定が消えた写しは従来どおり①に残る（片付けは staleTodayListFromPlanIds の仕事）',
+    todayListPickedIds([{ recipeId: 9, fromPlan: true }], [], [1]),
+    [9],
+  )
+
+  // todaySlotAddPlan: レシピ詳細の「今日の献立に追加」→ 朝食/昼食/夕食
+  eq('FN-SLOT その食事にまだ無ければ予定に足す', todaySlotAddPlan([2, 3], 1, false), 'add')
+  eq('FN-SLOT 作っていない同じ品が既にあれば二重（何もしない）', todaySlotAddPlan([1, 2], 1, false), 'duplicate')
+  eq(
+    'FN-SLOT 今日すでに作った品なら、行は増やさず今日の献立へ戻す',
+    todaySlotAddPlan([1, 2], 1, true),
+    'restore',
+  )
+  eq(
+    'FN-SLOT 作った品でも、その食事に行が無ければ普通に足す',
+    todaySlotAddPlan([2], 1, true),
+    'add',
+  )
 
   // staleTodayListFromPlanIds: 「週の予定を削除したあと、今日の献立に『レシピ一覧から選択中』
   // として残る」バグの再発防止(2026-08-03 便DP-4)。日タブの自動取り込み(便U-3)で入った写しは
