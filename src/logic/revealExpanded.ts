@@ -16,6 +16,8 @@
  *  - 動きを減らす設定（prefers-reduced-motion）のときは、なめらかスクロールをやめて一瞬で移動する
  */
 
+import { measureBottomBarInset } from './bottomBarInset'
+
 /** 伸びた部分と画面の縁のあいだに残す余白（px）。ぴったり付けると見切れて見えるため */
 const EDGE_GAP = 8
 
@@ -58,16 +60,9 @@ function topBarInset(target?: HTMLElement): number {
   return Math.max(0, inset)
 }
 
-/** 画面下部に固定されている帯の高さの合計（タブナビ・タイマーの浮遊バー） */
-function bottomBarInset(): number {
-  const vh = window.innerHeight
-  let inset = 0
-  for (const bar of document.querySelectorAll<HTMLElement>('[data-app-bottom-bar]')) {
-    const r = bar.getBoundingClientRect()
-    if (r.height > 0 && r.top < vh) inset = Math.max(inset, vh - r.top)
-  }
-  return Math.max(0, inset)
-}
+// 画面下部に固定されている帯（タブナビ・タイマーの浮遊バー）の高さの測り方は
+// logic/bottomBarInset.ts に集約した（2026-08-11 便FN。ページの下余白も同じ値を使うので、
+// 数え方が2か所に分かれていると「スクロールは避けたのに余白は足りない」がまた起きる）
 
 /** 自分を実際にスクロールさせている親（窓の中など）。無ければ null＝ページ全体 */
 function scrollParentOf(el: HTMLElement): HTMLElement | null {
@@ -105,7 +100,7 @@ export function revealExpanded(el: HTMLElement, instant = prefersReducedMotion()
     viewBottom = cr.bottom - EDGE_GAP
   } else {
     viewTop = topBarInset(el) + EDGE_GAP
-    viewBottom = window.innerHeight - bottomBarInset() - EDGE_GAP
+    viewBottom = window.innerHeight - measureBottomBarInset() - EDGE_GAP
   }
   const viewHeight = viewBottom - viewTop
   if (viewHeight <= 0) return

@@ -101,6 +101,11 @@
   --space-md: 16px;
   --space-lg: 24px;
 
+  /* 画面下に固定される帯（タブナビ・タイマー・お知らせ）が使っている高さ（2026-08-11 便FN）。
+     実際の値は logic/bottomBarInset.ts が測って毎回書き込む。ここに置くのは測る前の既定値で、
+     タブナビ1本ぶん（72px＋端末の下端の安全余白）。ページの下余白はこの変数を読む */
+  --app-bottom-inset: calc(72px + env(safe-area-inset-bottom));
+
   /* 影（2段階） */
   --shadow-sm: 0 1px 3px rgb(67 54 42 / 0.08);
   --shadow-md: 0 4px 14px rgb(67 54 42 / 0.12);

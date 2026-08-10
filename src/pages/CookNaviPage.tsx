@@ -450,7 +450,7 @@ export default function CookNaviPage() {
   const canUseNavi = isProUnlocked || trialActive
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
-  const { startTimer, timers } = useTimers()
+  const { startTimer } = useTimers()
   /**
    * 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
    * （2026-08-08 便ED。レシピ詳細・調理中モードと同じ扱い。ナビも手を動かしながら見る画面で、
@@ -1099,7 +1099,9 @@ export default function CookNaviPage() {
   }
 
   return (
-    <div className={`mx-auto w-full max-w-md ${timers.length > 0 ? 'pb-48' : 'pb-[var(--space-lg)]'}`}>
+    // 下余白はページ全体を包む main が実測ぶん空ける（2026-08-11 便FN）。
+    // タイマーの本数で当て推量の pb-48 を出し分けるのはやめた
+    <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       {/* 「戻る」は画面を移るだけ。作りかけの段取りは残す（2026-08-09 便ES・オーナー実機報告
           「段取りを作る→戻る→今日の献立画面（再開ボタンが出ない）→並行調理ナビ→段取りが消えている」）。
           便ED では戻るで段取りを終わらせていたが、戻るは台所で最も押す移動の操作で、

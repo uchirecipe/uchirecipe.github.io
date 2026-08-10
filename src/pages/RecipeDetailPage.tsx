@@ -113,7 +113,7 @@ export default function RecipeDetailPage() {
   )
   const photoUrl = usePhotoUrl(recipe?.photo)
   const settings = useSettings()
-  const { startTimer, timers } = useTimers()
+  const { startTimer } = useTimers()
   const todayList = useTodayList()
   const isInTodayList = todayList?.some((item) => item.recipeId === id) ?? false
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
@@ -526,7 +526,8 @@ export default function RecipeDetailPage() {
     : recipe
 
   return (
-    <div className={`mx-auto w-full max-w-md ${timers.length > 0 ? 'pb-48' : 'pb-[var(--space-lg)]'}`}>
+    // 下余白はページ全体を包む main が実測ぶん空ける（2026-08-11 便FN）
+    <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       <BackHeader
         fallback={backFallback}
         alwaysFallback

@@ -17,6 +17,7 @@ import TimerBar from './components/TimerBar'
 import AppUpdateBanner from './components/AppUpdateBanner'
 import { TimerProvider } from './components/TimerProvider'
 import { startAppUpdateWatch } from './logic/appUpdate'
+import { watchBottomBarInset } from './logic/bottomBarInset'
 import { useSettings, recordFirstLaunchIfNeeded, resolveVisibleMealSlotsIfNeeded } from './db/settings'
 import { seedStartersIfNeeded, topUpFlattenedStartersIfNeeded } from './db/starters'
 import { seedPantryPresetIfNeeded } from './db/pantry'
@@ -74,14 +75,20 @@ function App() {
     startAppUpdateWatch()
   }, [])
 
+  // 画面下に固定される帯（タブナビ・タイマー・お知らせ）の高さを測り続け、
+  // ページの下余白がそれに追随するようにする（2026-08-11 便FN・logic/bottomBarInset.ts）。
+  // タイマーの本数・お知らせの有無で帯の高さは変わるので、固定値では隠れる日が出る
+  useEffect(() => watchBottomBarInset(), [])
+
   return (
     <TimerProvider>
       {/* HashRouterのルーティングは #以降で完結するため、公開パス(ルート/)の
           影響を受けない。basenameを付けると #/ がどのルートにも一致せず白画面になる */}
       <HashRouter>
         <ThemeSync />
-        {/* pb-24: 下部の固定タブナビに中身が隠れないよう余白を確保 */}
-        <main className="min-h-dvh pb-24">
+        {/* 下部に固定される帯（タブナビ・タイマー・お知らせ）に中身が隠れないよう、
+            実測した高さ（--app-bottom-inset）ぶんの余白を空ける。既定値は index.css */}
+        <main className="min-h-dvh pb-[calc(var(--app-bottom-inset)+var(--space-lg))]">
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/recipes" element={<RecipesPage />} />

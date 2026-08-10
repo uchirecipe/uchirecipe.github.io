@@ -74,6 +74,8 @@ export default function AppUpdateBanner() {
   return (
     <div
       data-testid="app-update-banner"
+      /* 下部に固定される帯の印（2026-08-11 便FN）。ページの下余白がこの帯のぶんも空ける */
+      data-app-bottom-bar
       className="fixed inset-x-0 z-[60] flex justify-center px-[var(--space-md)]"
       style={{ bottom: 'calc(80px + env(safe-area-inset-bottom))' }}
       role="status"
