@@ -19911,7 +19911,8 @@ try {
   //     EL-02 次へ／前へでカーソルが1つずつ動き、下部の投影も一緒に動く（手順飛ばしが起きない）
   //     EL-03 下部の行をタップしても現在手順は変わらない（全文が出るだけ）
   //     EL-04 **調理中に1品へ「作った記録」が付いても段取りが変わらない**（記録は一方通行）。
-  //           終えたあとは従来どおり候補から落ちる
+  //           終えたあとは、今日の献立から外れた品が従来どおり候補から落ちる
+  //           （2026-08-11 便FN: 落ちる理由を「記録が付いた」から「今日の献立に無い」へそろえた）
   //     EL-05 覚えていた手順が段取りに見つからないときは、推測せず一覧に戻して理由を出す
   //     EL-06 この画面から単品レシピ詳細へ離脱する導線が無い
   currentCheck = 'EL-01'
@@ -20083,6 +20084,12 @@ try {
       await elPage.locator('[data-testid="cook-session-next"]').click()
       await elPage.waitForTimeout(400)
       const beforeCooked = await counter()
+      // 「作った」を付ける経路（献立の作った！／全て作った！／ナビのまとめて作った！／
+      // レシピ詳細の記録フォーム）は、**どれも記録と同時にその品を今日の献立から外す**。
+      // 2026-08-11 便FN でその2つは意味が分かれた: 記録が付いているだけでは候補から落とさず、
+      // 落ちる理由は「今日の献立に無いこと」になった（作り終えた品を自分で入れ直したら、
+      // その日のうちにもう一度段取りを組める＝利用者テストで見つかったバグの修正）。
+      // ここも実際の経路と同じ状態を作る＝記録を足し、同時に今日の献立から外す
       await elPage.evaluate(async (recipeId) => {
         const openDb = () =>
           new Promise((resolve, reject) => {
@@ -20098,6 +20105,10 @@ try {
         const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
         recipe.cookedLogs = [...(recipe.cookedLogs ?? []), { date: today }]
         await P(store.put(recipe))
+        const list = db.transaction('todayList', 'readwrite').objectStore('todayList')
+        for (const item of await P(list.getAll())) {
+          if (item.recipeId === recipeId) await P(list.delete(item.id))
+        }
         db.close()
       }, ids.idC)
       await elPage.reload({ waitUntil: 'networkidle' })
@@ -20134,7 +20145,7 @@ try {
       await elPage.getByRole('button', { name: 'レシピを選び直す' }).click()
       await elPage.waitForTimeout(900)
       check(
-        'EL-04 調理を終えたあとは記録が付いた品が組み合わせから落ちる',
+        'EL-04 調理を終えたあとは今日の献立から外れた品が組み合わせから落ちる',
         (await elPage.locator('[data-testid="navi-selection-dropped"]').count()) === 1,
         (await elPage.textContent('body')).includes('今日の献立にない品') ? '文言あり' : '文言なし',
       )
