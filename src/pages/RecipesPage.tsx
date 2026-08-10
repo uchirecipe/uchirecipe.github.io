@@ -1497,13 +1497,16 @@ export default function RecipesPage() {
         })}
       </div>
 
-      {/* 新規登録ボタン（親指が届く右下に固定、タブナビの上）。
-          選択モード中は「消す」作業の最中なので出さない(誤タップで登録画面に飛ばない) */}
+      {/* 新規登録ボタン（親指が届く右下に固定、下部の帯の上）。
+          選択モード中は「消す」作業の最中なので出さない(誤タップで登録画面に飛ばない)。
+          高さは実測した帯のぶんに追随させる（2026-08-11 便FN。固定の bottom-24 では
+          タイマーの帯が2本出た時点で裏に隠れて押せなかった） */}
       {!selecting && (
         <Link
           to="/recipes/new"
           aria-label={ja.recipes.addRecipe}
-          className="fixed bottom-24 right-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-on-accent shadow-md"
+          style={{ bottom: 'calc(var(--app-bottom-inset) + var(--space-sm))' }}
+          className="fixed right-4 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-on-accent shadow-md"
         >
           <Plus size={30} aria-hidden />
         </Link>

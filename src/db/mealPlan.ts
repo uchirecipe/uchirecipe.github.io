@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from './db'
-import { planRoleAssign } from '../logic/mealPlan'
+import { planRoleAssign, todaySlotAddPlan } from '../logic/mealPlan'
 import type { MealPlanEntry, MealPurpose, MealRole, MealSlot } from './types'
 
 export async function listMealPlanRange(startDate: string, endDate: string) {
@@ -47,16 +47,26 @@ export async function addMealEntry(
  * 呼び出し側は 'duplicate' のときトーストで案内する）。
  * 重複チェック(where)と追加(add)を1トランザクションで原子化する
  * （todayList.tsのaddToTodayListと同じ作法。同時タップの割り込み重複を防ぐ）
+ *
+ * 2026-08-11 便FN: その品を今日すでに作ったかどうかも受け取り、作り終えた行は
+ * 「重複」と数えない（'restore' を返す＝行は増やさず、呼び出し側が今日の献立へ戻す）。
+ * 判断そのものは純関数 logic/mealPlan.ts todaySlotAddPlan に置いてテストで固定してある。
  */
 export async function addMealEntryIfAbsent(
   date: string,
   slot: MealSlot,
   recipeId: number,
   role: MealRole,
-): Promise<'added' | 'duplicate'> {
+  cookedToday = false,
+): Promise<'added' | 'restore' | 'duplicate'> {
   return db.transaction('rw', db.mealPlans, async () => {
     const sameSlot = await db.mealPlans.where('[date+slot]').equals([date, slot]).toArray()
-    if (sameSlot.some((e) => e.recipeId === recipeId)) return 'duplicate'
+    const plan = todaySlotAddPlan(
+      sameSlot.map((e) => e.recipeId),
+      recipeId,
+      cookedToday,
+    )
+    if (plan !== 'add') return plan
     await db.mealPlans.add({ date, slot, recipeId, role })
     return 'added'
   })

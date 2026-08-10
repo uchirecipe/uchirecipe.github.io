@@ -34,11 +34,11 @@ import {
 import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import { deriveDoneLabel } from '../logic/timerLabel'
-import { isMinutesShownInText } from '../logic/time'
 import {
   buildCookPlan,
   hasLaterHandsOnStep,
   recipeStepLabel,
+  showsWaitTimerButton,
   type TimelineItem,
 } from '../logic/cookNavi'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
@@ -166,14 +166,10 @@ function TimelineCard({
   onStartTimer: (item: TimelineItem, seconds: number) => void
 }) {
   const isWait = item.kind === 'wait'
-  // 今回の調理では終わらない待ち（「冷蔵庫で半日〜一晩漬ける」）にはタイマーも
-  // 「この間に次の手作業を」も出さない（2026-08-11 便FL）。分数を持たない待ちなので
-  const showWaitTimerButton =
-    isWait &&
-    !item.longRest &&
-    item.minutes != null &&
-    item.minutes > 0 &&
-    !isMinutesShownInText(item.text, item.minutes)
+  // 待ちブロックが分数を名乗っていればタイマーのボタンを必ず出す（2026-08-11 便FN。
+  // 判定は logic/cookNavi.ts showsWaitTimerButton）。今回の調理では終わらない待ち
+  // （「冷蔵庫で半日〜一晩漬ける」）だけは分数を持たないので出さない（同 便FL）
+  const showWaitTimerButton = showsWaitTimerButton(item)
   return (
     <li
       id={naviStepDomId(item.recipeId, item.stepNumber)}
@@ -474,7 +470,7 @@ export default function CookNaviPage() {
   const canUseNavi = isProUnlocked || trialActive
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
-  const { startTimer, timers } = useTimers()
+  const { startTimer } = useTimers()
   /**
    * 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
    * （2026-08-08 便ED。レシピ詳細・調理中モードと同じ扱い。ナビも手を動かしながら見る画面で、
@@ -497,6 +493,11 @@ export default function CookNaviPage() {
    * 従来は①（今日の献立）しか候補に出せず、週タブで組んだ予定のうち「表示する食事」から
    * 外した帯の品はナビに渡せなかった。どちらから選んでも段取りを組めるようにする。
    * 今日すでに作った品は候補から外す（日タブと同じ＝作った後は予定でなく記録）。
+   *
+   * 2026-08-11 便FN: 「作った品を外す」を効かせるのは②（今日の予定）だけにした。
+   * ①（今日の献立に自分で入れた品）は、作り終えたあとに入れ直した品がここに入るので、
+   * 作った記録があることを理由に落とすと**その日はもう段取りを組めない**（利用者テスト報告）。
+   * 日タブに並んでいるものと同じ中身にする、という元の約束はこの形でも守られる。
    */
   const today = useMemo(() => todayString(), [])
   const todayPlanEntries = useMealPlanRange(today, today)
@@ -520,14 +521,14 @@ export default function CookNaviPage() {
           if (!planIds.includes(e.recipeId)) planIds.push(e.recipeId)
         }),
     )
-    const pickedIds = todayListPickedIds(
-      todayList.map((item) => item.recipeId),
-      planIds,
-    )
-    return [...pickedIds, ...planIds]
+    const plannedShownIds = planIds.filter((id) => {
+      const recipe = recipeById.get(id)
+      return recipe != null && !recipe.cookedLogs.some((log) => log.date === today)
+    })
+    const pickedIds = todayListPickedIds(todayList, plannedShownIds, planIds)
+    return [...pickedIds, ...plannedShownIds]
       .map((id) => recipeById.get(id))
       .filter((r): r is Recipe => r !== undefined)
-      .filter((r) => !r.cookedLogs.some((log) => log.date === today))
   }, [todayList, recipes, todayPlanEntries, recipeById, today])
 
   /**
@@ -1135,7 +1136,9 @@ export default function CookNaviPage() {
   }
 
   return (
-    <div className={`mx-auto w-full max-w-md ${timers.length > 0 ? 'pb-48' : 'pb-[var(--space-lg)]'}`}>
+    // 下余白はページ全体を包む main が実測ぶん空ける（2026-08-11 便FN）。
+    // タイマーの本数で当て推量の pb-48 を出し分けるのはやめた
+    <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       {/* 「戻る」は画面を移るだけ。作りかけの段取りは残す（2026-08-09 便ES・オーナー実機報告
           「段取りを作る→戻る→今日の献立画面（再開ボタンが出ない）→並行調理ナビ→段取りが消えている」）。
           便ED では戻るで段取りを終わらせていたが、戻るは台所で最も押す移動の操作で、
@@ -1320,9 +1323,24 @@ export default function CookNaviPage() {
                       <p className="text-sm font-bold text-ink-muted">
                         {ja.cookNavi.legendTitle.replace('{n}', String(timeline.recipes.length))}
                       </p>
-                      <div className="mt-[var(--space-sm)] flex flex-wrap gap-2">
+                      {/* 品ごとの目安を料理名の横に置く（2026-08-11 便FN）。
+                          下の「1品ずつ作ると約◯分」は、この数字の足し算 */}
+                      <div className="mt-[var(--space-sm)] flex flex-wrap gap-x-2 gap-y-1">
                         {timeline.recipes.map((r) => (
-                          <RecipePill key={r.id} title={r.title} colorIndex={r.colorIndex} />
+                          <span key={r.id} className="inline-flex max-w-full items-center gap-1">
+                            <RecipePill title={r.title} colorIndex={r.colorIndex} />
+                            {r.soloMinutes != null && r.soloMinutes > 0 && (
+                              <span
+                                data-testid="navi-legend-minutes"
+                                className="shrink-0 text-xs text-ink-muted"
+                              >
+                                {ja.cookNavi.legendRecipeMinutes.replace(
+                                  '{n}',
+                                  String(r.soloMinutes),
+                                )}
+                              </span>
+                            )}
+                          </span>
                         ))}
                       </div>
                       <p className="mt-[var(--space-md)] text-2xl font-bold text-accent-ink">
@@ -1351,6 +1369,16 @@ export default function CookNaviPage() {
                         </p>
                       )}
                       <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.totalNote}</p>
+                      {/* レシピの一覧に出ている「調理時間」と数え方が違うことを画面に書く
+                          （2026-08-11 便FN・利用者テスト「多く出たり少なく出たりするので、
+                          どちらを信じてよいか分からない」）。数え方の違いは黙っていると
+                          「どちらかが間違っている」に見える */}
+                      <p
+                        data-testid="navi-total-count-note"
+                        className="ja-phrase mt-1 text-xs text-ink-muted"
+                      >
+                        {ja.cookNavi.totalCountNote}
+                      </p>
                       <p className="mt-1 text-xs text-ink-muted">
                         {isSequential ? ja.cookNavi.sequentialOrderNote : ja.cookNavi.orderNote}
                       </p>

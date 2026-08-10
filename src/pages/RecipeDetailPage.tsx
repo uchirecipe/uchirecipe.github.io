@@ -113,7 +113,7 @@ export default function RecipeDetailPage() {
   )
   const photoUrl = usePhotoUrl(recipe?.photo)
   const settings = useSettings()
-  const { startTimer, timers } = useTimers()
+  const { startTimer } = useTimers()
   const todayList = useTodayList()
   const isInTodayList = todayList?.some((item) => item.recipeId === id) ?? false
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
@@ -207,16 +207,27 @@ export default function RecipeDetailPage() {
    * 取り込み済みだと当日中は再実行されない。ここはユーザーの明示操作なので、経路任せに
    * せずaddToTodayList(冪等)を直接呼んで「両方に反映」という仕様の結果を必ず保証する。
    * 同枠に同レシピが既にある場合は何も追加せずトーストで案内(仕様)
+   *
+   * 2026-08-11 便FN（利用者テストのバグ修正）: 今日すでに作った品は「すでに入っています」で
+   * 断らない。週の予定の行は記録をつけても残るため、断ると**その日はもうその料理を
+   * 献立に戻せなくなる**（日タブは空なのに追加を拒む）。行は増やさず今日の献立にだけ戻し、
+   * 記録が残ることを添えて知らせる（判断は logic/mealPlan.ts todaySlotAddPlan）。
    */
   const pickTodaySlot = async (slot: MealSlot) => {
-    const result = await addMealEntryIfAbsent(todayString(), slot, id, 'main')
+    const cookedToday = recipe?.cookedLogs.some((log) => log.date === todayString()) ?? false
+    const result = await addMealEntryIfAbsent(todayString(), slot, id, 'main', cookedToday)
     setSlotModalOpen(false)
     if (result === 'duplicate') {
       setMessage(ja.detail.todaySlotDuplicateToast.replace('{slot}', ja.mealPlan.slot[slot]))
       return
     }
     await addToTodayList(id)
-    setMessage(ja.detail.todaySlotAddedToast.replace('{slot}', ja.mealPlan.slot[slot]))
+    setMessage(
+      (result === 'restore'
+        ? ja.detail.todaySlotRestoredToast
+        : ja.detail.todaySlotAddedToast
+      ).replace('{slot}', ja.mealPlan.slot[slot]),
+    )
   }
 
   /** 窓で「決めない」を選んだ: 従来どおり今日の献立へ直接追加(枠なし) */
@@ -515,7 +526,8 @@ export default function RecipeDetailPage() {
     : recipe
 
   return (
-    <div className={`mx-auto w-full max-w-md ${timers.length > 0 ? 'pb-48' : 'pb-[var(--space-lg)]'}`}>
+    // 下余白はページ全体を包む main が実測ぶん空ける（2026-08-11 便FN）
+    <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       <BackHeader
         fallback={backFallback}
         alwaysFallback

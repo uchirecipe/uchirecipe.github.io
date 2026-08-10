@@ -974,6 +974,20 @@ export interface TimelineRecipe {
   id: number
   title: string
   colorIndex: number
+  /**
+   * その品を1品だけで作ったときの目安（分。2026-08-11 便FN・利用者テストの指摘
+   * 「レシピ一覧の所要時間の合計35分に対して、段取りは『1品ずつ作ると約41分』。
+   *   別の3品では一覧の合計95分に対して80分。多く出たり少なく出たりする」）。
+   *
+   * ナビの分数はレシピ欄の「調理時間」とは別の数え方（手順ごとの見積りを積み上げ、
+   * 手順に時間の書かれていない工程は調理法から当てる）なので、両者は一致しない。
+   * 品ごとの内訳を出しておけば、合計がどこから来た数字かを画面の上で確かめられる。
+   * この値の合計が CookPlan.sequentialMinutes（「1品ずつ作ると約◯分」）になる。
+   *
+   * 任意項目にしてあるのは、単体の buildCookTimeline は自分自身を1品ずつ呼び直せない
+   * （無限に入れ子になる）ため。値を入れるのは buildCookPlan だけ。
+   */
+  soloMinutes?: number
 }
 
 /** 1本にまとめたタイムラインの1手順 */
@@ -1431,13 +1445,20 @@ function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
 export function buildCookPlan(recipes: Recipe[]): CookPlan {
   const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
   const parallel = buildCookTimeline(valid)
-  const sequentialMinutes = valid.reduce((sum, r) => sum + buildCookTimeline([r]).totalMinutes, 0)
+  // 品ごとに「1品だけで作ったときの目安」を出し、その合計を「1品ずつ作ると約◯分」にする。
+  // 内訳を画面へ渡せるように控えておく（2026-08-11 便FN）
+  const soloMinutes = new Map<number, number>()
+  for (const r of valid) soloMinutes.set(r.id!, buildCookTimeline([r]).totalMinutes)
+  const sequentialMinutes = Array.from(soloMinutes.values()).reduce((sum, m) => sum + m, 0)
   const parallelMinutes = parallel.totalMinutes
+  const withSolo = (timeline: CookTimeline): TimelineRecipe[] =>
+    timeline.recipes.map((r) => ({ ...r, soloMinutes: soloMinutes.get(r.id) }))
   const gainPercent =
     sequentialMinutes > 0 ? ((sequentialMinutes - parallelMinutes) / sequentialMinutes) * 100 : 0
   if (gainPercent >= MIN_GAIN_PERCENT) {
     return {
       ...parallel,
+      recipes: withSolo(parallel),
       mode: 'parallel',
       sequentialMinutes,
       parallelMinutes,
@@ -1448,6 +1469,7 @@ export function buildCookPlan(recipes: Recipe[]): CookPlan {
   const sequential = buildSequentialTimeline(valid)
   return {
     ...sequential,
+    recipes: withSolo(sequential),
     mode: 'sequential',
     sequentialMinutes,
     parallelMinutes,
@@ -1474,6 +1496,35 @@ function awayWaitMinutes(items: readonly TimelineItem[]): number {
  */
 export function hasLaterHandsOnStep(items: readonly { kind: StepKind }[], index: number): boolean {
   return items.some((item, i) => i > index && item.kind === 'active')
+}
+
+/**
+ * 待ちのブロックに「タイマーを始める」ボタンを出すか（2026-08-11 便FN・利用者テストのバグ修正）。
+ *
+ * 報告された不具合: 同じ見た目の待ちブロックなのに、ボタンが出る手順と出ない手順があった
+ * （段取りA＝手順1にはあり、手順9「豆腐とわかめを入れて2分温める」には無い。
+ * 段取りB＝待ち5つのうちボタンは1つだけ）。ボタンの無い手順では、タイマーを動かす唯一の
+ * 手段が本文中の小さな「15分」の文字（実測69×43px）になり、濡れた手では押せない。
+ *
+ * 真因は次の2つの条件で、どちらも**ブロックが名乗っている分数とは別のもの**を見ていた:
+ *   1. `minutes != null` … 手順に分数が書かれていない待ち（調理法から当てた分数）を外していた。
+ *      ブロックは「約8分の待ち時間」と名乗っているのに、ボタンだけが消える
+ *   2. `!isMinutesShownInText(...)` … 本文に同じ分数が書いてあれば本文タップで足りる、
+ *      という前提。台所では本文中の小さな文字を狙って押すのは現実的でない
+ *
+ * そこで**ブロックが分数を名乗っているかどうか**だけで決める＝「約◯分の待ち時間」と書いた
+ * ブロックには必ずボタンがある。分数を出さない長い待ち（半日〜一晩）にだけ出さない
+ * （何分のタイマーか決められないため。理由はブロック内の一文が伝える）。
+ * ナビが足した湯沸かしは分数を表に出さないが、沸くまでの待ちにタイマーは要るので出す
+ * （従来からボタンが出ていた側で、見え方は変わらない）。
+ *
+ * 本文中の時間表記のタップは今までどおり残る＝同じ長さなら押した先も同じタイマー
+ * （TimerProvider の key が `レシピ-手順-秒数` なので二重には立たない）。
+ */
+export function showsWaitTimerButton(
+  item: Pick<TimelineItem, 'kind' | 'longRest' | 'waitMinutes'>,
+): boolean {
+  return item.kind === 'wait' && !item.longRest && item.waitMinutes > 0
 }
 
 /**
