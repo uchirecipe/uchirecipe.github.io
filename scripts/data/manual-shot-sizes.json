@@ -122,5 +122,13 @@
   "plan-week-nutrition-row": {
     "w": 780,
     "h": 136
+  },
+  "cooknavi-session": {
+    "w": 780,
+    "h": 296
+  },
+  "cooknavi-session-others": {
+    "w": 780,
+    "h": 224
   }
 }
