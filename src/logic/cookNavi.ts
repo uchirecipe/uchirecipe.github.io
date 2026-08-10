@@ -138,6 +138,62 @@ function maskNonWaitNouns(text: string): string {
 }
 
 /**
+ * 括弧の中の「やってもやらなくてよい」記述（2026-08-11 便FL・実画面から）。
+ *
+ * 起きていた不具合: `ツナキャベツ丼` 手順1「キャベツをせん切りにする（レンジ600Wで1分半ほど
+ * 加熱すると時短になる）。」が **待ち2分**と判定されていた。必ずやる動作は「切る」で、
+ * レンジは括弧の中の任意（注意書きにも「生のままでもよい」とある）。括弧の中の語で
+ * 待ち動詞・分数・作業の種類が決まると、やらないかもしれない作業がその手順の主役になる。
+ *
+ * **伏せるのは「任意」と読める合図が入っている括弧だけ**にする。
+ * 「(なければオーブンを200度に予熱して10分ほど焼く)」「(両面焼きグリルの場合は…)」のような
+ * 言い換え・道具違いの但し書きは、どちらを選んでも加熱すること自体は変わらないので伏せない
+ * （伏せると同梱109品で本物の待ちを5件失うことを実測で確認した）。
+ */
+const OPTIONAL_PAREN_PATTERN =
+  /[（(][^）)]*(?:時短|お好み|好みで|好みなら|でもよい|でも良い|してもよい|しなくても|なくても|省略|代用|あれば)[^）)]*[）)]/g
+
+/**
+ * 手順の「必ずやる部分」の本文。括弧内の任意の記述を同じ長さの伏せ字に置き換える
+ * （位置ルールで文字位置を使うので長さを変えない）。
+ *
+ * 付きっきり判定（isHandsOnStep）にはあえて使わない。括弧の中に「焦げやすいので」のような
+ * 目を離せない合図が書かれていることがあり、そこを伏せると安全側の判定材料が減るため。
+ */
+export function stepMainText(text: string): string {
+  return text.replace(OPTIONAL_PAREN_PATTERN, (m) => '＊'.repeat(m.length))
+}
+
+/**
+ * その日のうちには終わらない「長い待ち」の言い回し（2026-08-11 便FL・実画面から）。
+ *
+ * 起きていた不具合: `漬けるだけ味玉` 手順3「冷蔵庫で半日〜一晩漬ける」が、時間の書かれていない
+ * 漬け込みの既定分数（20分）を当てられて **待ち20分**になり、全体の見積り37分に入っていた。
+ * 「手順に時間の記載がないため、この分数は目安です」と断ってはいるが、半日を20分と数えるのは
+ * 目安の範囲を超えている。
+ *
+ * こうした工程は**手順としては段取りに残したまま、時間の計算からだけ外す**
+ * （黙って消すと「なぜ出てこないのか」になる）。画面には長い待ちであることと、
+ * 今回の調理では仕上がらないことを添えて出す。
+ */
+const LONG_REST_PATTERN =
+  /半日|一晩|ひと晩|ひとばん|[1１]晩|一昼夜|数時間|翌日|翌朝|一日|[1１]日|数日|一週間|[1１]週間/
+
+/**
+ * 数字で書かれた待ちのうち、これ以上は今回の調理に収まらないとみなす分数。
+ * 3時間（180分）。同梱109品では `フルーツヨーグルトバーク` の「冷凍庫で3時間以上冷やし固める」
+ * だけが当たる（診断 docs/68 で見積りの最悪例＝見積195分/実際10分 として挙がっていた手順）。
+ */
+const LONG_REST_MINUTES = 180
+
+/** その手順が「今回の調理では終わらない長い待ち」か */
+export function isLongRestStep(step: Step): boolean {
+  if (LONG_REST_PATTERN.test(stepMainText(step.text))) return true
+  const minutes = resolveStepMinutes(step)
+  return minutes != null && minutes >= LONG_REST_MINUTES
+}
+
+/**
  * 手を動かし続ける調理動詞（炒める・揚げる）。**待ち動詞より後ろに出てきたとき**だけ
  * 付きっきり扱いにする（2026-08-08 便EB）。
  *
@@ -275,7 +331,9 @@ export function isHandsOnStep(step: Step): boolean {
  */
 export function resolveStepMinutes(step: Step): number | undefined {
   if (step.minutes != null && step.minutes > 0) return step.minutes
-  const tokens = findTimeTokens(step.text)
+  // 括弧の中の任意の記述に書かれた時間は、その手順の時間として数えない
+  // （2026-08-11 便FL。「せん切りにする（レンジ600Wで1分半…）」の1分半はやらないかもしれない作業）
+  const tokens = findTimeTokens(stepMainText(step.text))
   if (tokens.length === 0) return undefined
   const maxSeconds = Math.max(...tokens.map((t) => t.seconds))
   if (maxSeconds < 60) return undefined
@@ -300,11 +358,12 @@ export function resolveStepMinutes(step: Step): number | undefined {
 export function resolveWaitMinutes(step: Step): number | undefined {
   const explicit = resolveStepMinutes(step)
   if (explicit != null) return explicit
+  const main = stepMainText(step.text)
   // 本文に時間が書いてあって1分未満だった＝短いと分かっている。既定分数で上書きしない
-  if (findTimeTokens(step.text).length > 0) return undefined
-  if (SHORT_CUE_PATTERN.test(step.text)) return undefined
-  if (TE_OKU_PATTERN.test(step.text)) return undefined
-  const text = maskNonWaitNouns(step.text)
+  if (findTimeTokens(main).length > 0) return undefined
+  if (SHORT_CUE_PATTERN.test(main)) return undefined
+  if (TE_OKU_PATTERN.test(main)) return undefined
+  const text = maskNonWaitNouns(main)
   const hit = DEFAULT_WAIT_MINUTES.find((v) => v.pattern.test(text))
   if (!hit) return undefined
   if (hit.skipForNoodles && NOODLE_PATTERN.test(text)) return undefined
@@ -330,7 +389,8 @@ export function classifyStep(step: Step): StepKind {
   // 目を離せない工程は、待ち動詞・待ち分数に関係なく手作業系（2026-08-08 便EB）。
   // 短い待ちほど「2分しかないのに他の作業を挟まれる」実害が大きいので最優先で判定する
   if (isHandsOnStep(step)) return 'active'
-  const text = maskNonWaitNouns(step.text)
+  // 括弧の中の任意の記述は、その手順の主たる動作にしない（2026-08-11 便FL）
+  const text = maskNonWaitNouns(stepMainText(step.text))
   const waitAt = lastEndOfPatterns(text, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
   if (waitAt === -1) return 'active'
   const hasExplicitMinutes = step.minutes != null && step.minutes > 0
@@ -404,7 +464,7 @@ function matchedCategory(text: string): StepCategory | undefined {
 
 /** 手順の作業の種類を、本文の中で最後に出てきた見分け語から決める（当たらなければ 'other'） */
 export function stepCategory(step: Step): StepCategory {
-  return matchedCategory(step.text) ?? 'other'
+  return matchedCategory(stepMainText(step.text)) ?? 'other'
 }
 
 /**
@@ -554,7 +614,8 @@ export interface ActiveMinutesEstimate {
 
 export function estimateActiveMinutes(step: Step): ActiveMinutesEstimate {
   if (step.minutes != null && step.minutes > 0) return { minutes: step.minutes, estimated: false }
-  const text = step.text ?? ''
+  // 括弧の中の任意の記述は、その手順の作業量にも数えない（2026-08-11 便FL）
+  const text = stepMainText(step.text ?? '')
   const fromText = resolveStepMinutes(step)
   const groups = stepActionGroups(text)
   // 動作が1つだけの短い手順に「3分炒める」と書いてあれば、それがその手順の所要時間そのもの
@@ -783,20 +844,53 @@ const BOIL_WATER_PLAIN_FORM: [RegExp, string][] = [
   [/沸騰させて$/, '沸騰させる'],
   [/沸騰させ$/, '沸騰させる'],
 ]
+/** 湯沸かしの手前を切る区切り（句点・改行・読点）。後ろにあるものから順に試す */
+const BOIL_HEAD_BOUNDARY = /[。．\n、，,]/g
+/** 湯沸かしの工程として読める最小限の材料（この語が残らないところまでは切り詰めない） */
+const BOIL_HEAD_CUE = /湯|水|鍋/
+
+/**
+ * 湯沸かしの言い回しの**手前**を、どこから読み始めれば湯沸かしだけの文になるかを探す
+ * （2026-08-11 便FL・実画面から）。
+ *
+ * 起きていた不具合: `ほうれん草のおひたし` 手順1「ほうれん草は根元の土を流水でよく洗い落とす。
+ * 鍋にたっぷりの湯を沸かし、根元から入れて1分ほどゆでる。」で、**手順の先頭から**「沸かし」までを
+ * 湯沸かしの工程として切り出していたため、手作業の「洗い落とす」が丸ごと待ち5分に化けていた。
+ *
+ * 区切り（句点・読点）を後ろから順に試し、**湯・水・鍋の語が残る一番後ろの区切り**を採る。
+ * 「鍋に水を入れて沸かし、」のように区切りの無い書き方は手順の先頭から（従来どおり）。
+ */
+function boilHeadStart(text: string, clauseEnd: number): number {
+  let start = 0
+  BOIL_HEAD_BOUNDARY.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = BOIL_HEAD_BOUNDARY.exec(text)) !== null) {
+    const at = m.index + m[0].length
+    if (at >= clauseEnd) break
+    if (BOIL_HEAD_CUE.test(text.slice(at, clauseEnd))) start = at
+  }
+  return start
+}
 
 export function splitBoilWaterClause(
   text: string,
 ): { boilWater: string; rest: string } | undefined {
   const m = BOIL_WATER_CLAUSE.exec(text)
   if (!m) return undefined
-  const head = text.slice(0, m.index + m[1].length).trim()
-  const rest = text.slice(m.index + m[0].length).trim()
-  if (!head || !rest) return undefined
-  // 切り出したあとの手順にゆでる作業が残っていること（作業そのものを消してしまわない）
-  const maskedRest = maskNonWaitNouns(rest).replace(BOILED_ALREADY_PATTERN, (x) =>
+  const clauseEnd = m.index + m[1].length
+  // 湯沸かしの手前にある文・節（＝別の手作業）は待ちに巻き込まず、後ろの工程に残す
+  const headStart = boilHeadStart(text, clauseEnd)
+  const before = text.slice(0, headStart)
+  const head = text.slice(headStart, clauseEnd).trim()
+  const after = text.slice(m.index + m[0].length)
+  const rest = (before + after).trim()
+  if (!head || !after.trim()) return undefined
+  // 切り出したあとの手順にゆでる作業が残っていること（作業そのものを消してしまわない）。
+  // 見るのは湯沸かしより後ろだけ＝前に戻した手作業の文で判定しない
+  const maskedAfter = maskNonWaitNouns(after).replace(BOILED_ALREADY_PATTERN, (x) =>
     '＊'.repeat(x.length),
   )
-  if (!BOIL_STEP_PATTERN.test(maskedRest)) return undefined
+  if (!BOIL_STEP_PATTERN.test(maskedAfter)) return undefined
   let boilWater = head
   for (const [pattern, replacement] of BOIL_WATER_PLAIN_FORM) {
     if (pattern.test(boilWater)) {
@@ -904,13 +998,19 @@ export interface TimelineItem {
   memo?: string
   minutes?: number
   kind: StepKind
-  /** 待ち系のときの待ち分数（手作業系は0） */
+  /** 待ち系のときの待ち分数（手作業系は0。長い待ちも0＝時間の計算に入れない） */
   waitMinutes: number
   /**
    * 待ち分数が「手順に書かれていない」ため調理法から当てた既定値かどうか（2026-08-08 便ED）。
    * 画面では目安であることを添えて出す（書いてある分数と同じ顔で出さない）。
    */
   waitEstimated: boolean
+  /**
+   * 「半日〜一晩漬ける」のように、今回の調理では終わらない長い待ちか（2026-08-11 便FL）。
+   * 手順は段取りに残したまま、時間の計算からだけ外す。画面では分数を出さず、
+   * 今回の調理では仕上がらないことを添えて出す。
+   */
+  longRest: boolean
   /**
    * 手作業のときの目安の所要時間（分）。待ち系は0（2026-08-09 便EH・オーナー指示
    * 「炒めたりする工程でも単品レシピの手順では目安時間が書いてあるのに並行ではない。
@@ -950,6 +1050,8 @@ interface Job {
     kind: StepKind
     waitMinutes: number
     waitEstimated: boolean
+    /** 今回の調理では終わらない長い待ちか（2026-08-11 便FL） */
+    longRest: boolean
     activeMinutes: number
     activeEstimated: boolean
     category: StepCategory
@@ -992,7 +1094,10 @@ function buildJobs(recipes: Recipe[]): Job[] {
         // （classifyStep が wait を返した時点で resolveWaitMinutes は必ず値を持つ）。手作業系の
         // 順序計算は従来どおり明示 minutes か DEFAULT_ACTIVE_MINUTES を使う（推定は待ちの認識
         // だけに使い、手作業の所要時間は変えない＝順序への影響を待ち認識の改善だけに限定する）
-        const waitMinutes = kind === 'wait' ? (resolveWaitMinutes(s) ?? 0) : 0
+        // 「半日〜一晩漬ける」のように今回の調理では終わらない待ちは、手順として段取りに残しつつ
+        // 時間の計算からは外す（2026-08-11 便FL）。分数を数えると全体の見積りがその分だけ嘘になる
+        const longRest = kind === 'wait' && isLongRestStep(s)
+        const waitMinutes = kind === 'wait' && !longRest ? (resolveWaitMinutes(s) ?? 0) : 0
         // 手作業の所要時間は、作業の種類と手順文の長さから見積る（2026-08-09 便EH）。
         // 従来の一律4分では、待ち時間に入る工程数の計算がそのままずれていた
         const active = estimateActiveMinutes(s)
@@ -1007,9 +1112,12 @@ function buildJobs(recipes: Recipe[]): Job[] {
           minutes: s.minutes,
           kind,
           waitMinutes,
+          longRest,
           // 手順に時間が書かれておらず、調理法から当てた分数で待ちにした手順
-          // （ナビが足した工程は分割の番号「◯-1」で示すので、ここでは印を出さない）
-          waitEstimated: kind === 'wait' && !addedByNavi && resolveStepMinutes(s) == null,
+          // （ナビが足した工程は分割の番号「◯-1」で示すので、ここでは印を出さない。
+          //   長い待ちは分数そのものを出さないので、分数への断りも出さない）
+          waitEstimated:
+            kind === 'wait' && !longRest && !addedByNavi && resolveStepMinutes(s) == null,
           activeMinutes: kind === 'active' ? active.minutes : 0,
           activeEstimated: kind === 'active' && active.estimated,
           category: stepCategory(s),
@@ -1017,7 +1125,12 @@ function buildJobs(recipes: Recipe[]): Job[] {
           cutRank: cutOrderRank(s),
           soakWait: kind === 'wait' && isSoakWait(s),
           attendWithin:
-            kind === 'wait' ? waitMinutes + waitOverrunAllowance(s, waitMinutes) : 0,
+            kind !== 'wait'
+              ? 0
+              : // 長い待ちは手を戻す締め切りを持たない（何分後に戻るという話ではない）
+                longRest
+                ? Number.POSITIVE_INFINITY
+                : waitMinutes + waitOverrunAllowance(s, waitMinutes),
         }
       }),
     }))
@@ -1383,6 +1496,7 @@ function makeItem(
     kind: step.kind,
     waitMinutes: step.waitMinutes,
     waitEstimated: step.waitEstimated,
+    longRest: step.longRest,
     activeMinutes: step.activeMinutes,
     activeEstimated: step.activeEstimated,
     addedByNavi: step.addedByNavi,

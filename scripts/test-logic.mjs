@@ -139,6 +139,7 @@ import {
   cutOrderRank,
   buildPlanSteps,
   isSoakWait,
+  isLongRestStep,
   recipeServeTemp,
   estimateActiveMinutes,
   waitUrgency,
@@ -4779,6 +4780,89 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     separatedPlan.items.filter((it) => it.kind === 'wait').map((it) => it.waitMinutes),
     [5, 2],
   )
+}
+
+// ---------- 2026-08-11 便FL・実画面から見つかった段取りの実害3件 ----------
+// (1)「半日〜一晩」が約20分の待ちとして見積りに入る
+// (2)括弧内の任意の記述（レンジ加熱の時短）を、その手順の主たる動作（切る）と取り違える
+// (3)湯沸かしを切り出すときに、同じ手順の前半にある手作業まで待ちに巻き込む
+{
+  const recipe = (id, title, steps) => ({ id, title, steps })
+  const t = (text, minutes) => (minutes == null ? { text } : { text, minutes })
+
+  // ---- (1) 半日・一晩・数時間のように、その日の調理では終わらない待ち ----
+  const ajitama = t('保存袋にめんつゆと水、殻をむいた卵を入れて空気を抜き、冷蔵庫で半日〜一晩漬ける。')
+  eq('ナビ長い待ち: 「半日〜一晩漬ける」は待ちのまま（手順自体は消さない）', classifyStep(ajitama), 'wait')
+  eq('ナビ長い待ち: 「半日〜一晩」を長い待ちと見分ける', isLongRestStep(ajitama), true)
+  eq('ナビ長い待ち: 「一晩寝かせる」も長い待ち', isLongRestStep(t('ふたをして冷蔵庫で一晩寝かせる。')), true)
+  eq('ナビ長い待ち: 「数時間おく」も長い待ち', isLongRestStep(t('冷蔵庫で数時間おいて味をなじませる。')), true)
+  eq('ナビ長い待ち: 「3時間以上冷やし固める」も長い待ち', isLongRestStep(t('冷凍庫で3時間以上、しっかり凍るまで冷やし固める。')), true)
+  eq('ナビ長い待ち: 「20分煮る」は長い待ちではない', isLongRestStep(t('落としぶたをして20分煮る。')), false)
+  eq('ナビ長い待ち: 「30分漬ける」は長い待ちではない', isLongRestStep(t('冷蔵庫で30分漬ける。')), false)
+  const longRestPlan = buildCookTimeline([
+    recipe(1, '味玉', [
+      t('卵を沸騰したお湯で10分ゆでる。', 10),
+      t('冷水にとり、粗熱が取れたら殻をむく。'),
+      ajitama,
+    ]),
+  ])
+  const longRestItem = longRestPlan.items[longRestPlan.items.length - 1]
+  eq('ナビ長い待ち: 段取りには残す（黙って消さない）', longRestItem.text, ajitama.text)
+  eq('ナビ長い待ち: 長い待ちの印を立てる', longRestItem.longRest, true)
+  eq('ナビ長い待ち: 待ち分数を段取りに数えない（約20分と言わない）', longRestItem.waitMinutes, 0)
+  eq(
+    'ナビ長い待ち: 全体の目安時間に含めない',
+    longRestPlan.totalMinutes,
+    buildCookTimeline([recipe(1, '味玉', [t('卵を沸騰したお湯で10分ゆでる。', 10), t('冷水にとり、粗熱が取れたら殻をむく。')])]).totalMinutes,
+  )
+  eq('ナビ長い待ち: 「目安です」の断りは出さない（分数自体を出さないため）', longRestItem.waitEstimated, false)
+
+  // ---- (2) 括弧内の「やってもやらなくてよい」記述を主たる動作と取り違えない ----
+  const tunaCabbage = t('キャベツをせん切りにする（レンジ600Wで1分半ほど加熱すると時短になる）。')
+  eq('ナビ任意括弧: 括弧内の時短レンジは待ちにしない（主たる動作は「切る」）', classifyStep(tunaCabbage), 'active')
+  eq('ナビ任意括弧: 作業の種類も「切る」になる', stepCategory(tunaCabbage), 'cut')
+  eq('ナビ任意括弧: 所要時間も切る工程の目安になる', estimateActiveMinutes(tunaCabbage).minutes, 3)
+  eq(
+    'ナビ任意括弧: 「好みで」の括弧も主たる動作と取り違えない',
+    classifyStep(t('きゅうりを薄切りにする（好みで塩もみして10分おいてもよい）。')),
+    'active',
+  )
+  // 任意の合図が無い括弧（言い換え・道具が無いときの代わり）は今までどおり読む＝本物の待ちを潰さない
+  eq(
+    'ナビ任意括弧: 「なければ〜」の言い換えは伏せない（トースター/オーブンの待ちを残す）',
+    classifyStep(t('トースター(なければオーブンを200度に予熱して10分ほど焼く)でチーズがこんがり焼き色づくまで焼き、そのまま食卓に出す(取り分ける場合は器に盛る)。', 7)),
+    'wait',
+  )
+  eq(
+    'ナビ任意括弧: 「〜の場合は」の但し書きも伏せない（グリルの待ちを残す）',
+    classifyStep(t('鮭を裏返し、中まで火が通るまで焼いて器に盛る（両面焼きグリルの場合は裏返さずそのまま両面を焼く）。', 4)),
+    'wait',
+  )
+
+  // ---- (3) 湯沸かしの切り出しで、同じ手順にある手作業を待ちに巻き込まない ----
+  eq(
+    'ナビ湯沸かし分離: 前の文の手作業（洗う）は湯沸かしに巻き込まない',
+    splitBoilWaterClause('ほうれん草は根元の土を流水でよく洗い落とす。鍋にたっぷりの湯を沸かし、根元から入れて1分ほどゆでる。'),
+    {
+      boilWater: '鍋にたっぷりの湯を沸かす',
+      rest: 'ほうれん草は根元の土を流水でよく洗い落とす。根元から入れて1分ほどゆでる。',
+    },
+  )
+  eq(
+    'ナビ湯沸かし分離: 同じ文の前半にある手作業も巻き込まない',
+    splitBoilWaterClause('ほうれん草を洗い、鍋にたっぷりの湯を沸かし、根元から入れてゆでる。'),
+    {
+      boilWater: '鍋にたっぷりの湯を沸かす',
+      rest: 'ほうれん草を洗い、根元から入れてゆでる。',
+    },
+  )
+  const spinachPlan = buildPlanSteps([
+    t('ほうれん草は根元の土を流水でよく洗い落とす。鍋にたっぷりの湯を沸かし、根元から入れて1分ほどゆでる。'),
+    t('冷水にとって水気を絞り、4cm長さに切る。'),
+  ])
+  eq('ナビ湯沸かし分離: 湯沸かしの工程に手作業の文が混ざらない', spinachPlan[0].step.text, '鍋にたっぷりの湯を沸かす')
+  eq('ナビ湯沸かし分離: 巻き込まれていた手作業は次の工程に残る', spinachPlan[1].step.text, 'ほうれん草は根元の土を流水でよく洗い落とす。根元から入れて1分ほどゆでる。')
+  eq('ナビ湯沸かし分離: 巻き込まれていた手作業は手作業のまま', classifyStep(spinachPlan[1].step), 'active')
 }
 
 // ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。

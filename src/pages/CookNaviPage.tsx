@@ -156,8 +156,14 @@ function TimelineCard({
   onStartTimer: (item: TimelineItem, seconds: number) => void
 }) {
   const isWait = item.kind === 'wait'
+  // 今回の調理では終わらない待ち（「冷蔵庫で半日〜一晩漬ける」）にはタイマーも
+  // 「この間に次の手作業を」も出さない（2026-08-11 便FL）。分数を持たない待ちなので
   const showWaitTimerButton =
-    isWait && item.minutes != null && item.minutes > 0 && !isMinutesShownInText(item.text, item.minutes)
+    isWait &&
+    !item.longRest &&
+    item.minutes != null &&
+    item.minutes > 0 &&
+    !isMinutesShownInText(item.text, item.minutes)
   return (
     <li
       id={naviStepDomId(item.recipeId, item.stepNumber)}
@@ -184,7 +190,7 @@ function TimelineCard({
 
       {/* 2026-08-09 便ES: 「ナビが追加」の札はやめ、手順番号を「3-1」「3-2」にして
           レシピの1手順を分けたことが番号で分かる形にした（オーナー指示D-4） */}
-      <p className="ja-phrase mt-[var(--space-sm)] leading-relaxed">
+      <p data-testid="navi-step-text" className="ja-phrase mt-[var(--space-sm)] leading-relaxed">
         {/* 手順本文の材料名に控えめな下線（レシピ詳細と同じ・2026-08-08 便ED） */}
         <TimeText
           text={item.text}
@@ -223,6 +229,7 @@ function TimelineCard({
 
       {isWait && (
         <div
+          data-testid="navi-wait-block"
           className="mt-[var(--space-sm)] rounded-sm p-[var(--space-sm)]"
           style={{ background: 'color-mix(in oklab, var(--accent) 8%, var(--bg))' }}
         >
@@ -233,7 +240,9 @@ function TimelineCard({
                   計算には約5分を使うが、コンロと湯量で大きく変わるので言い切らない） */}
               {item.addedByNavi
                 ? ja.cookNavi.waitBlockBoil
-                : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
+                : item.longRest
+                  ? ja.cookNavi.waitBlockLongRest
+                  : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
             </span>
             {showWaitTimerButton && (
               <button
@@ -246,8 +255,15 @@ function TimelineCard({
               </button>
             )}
           </div>
-          {showFillHint && (
+          {showFillHint && !item.longRest && (
             <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitFillHint}</p>
+          )}
+          {/* 今回の調理では終わらない待ちは、段取りに残したまま時間の計算から外していることを
+              その場で書く（2026-08-11 便FL。黙って外すと「なぜ出てこないのか」になる） */}
+          {item.longRest && (
+            <p data-testid="navi-long-rest" className="mt-1 text-xs text-ink-muted">
+              {ja.cookNavi.longRestNote}
+            </p>
           )}
           {/* 手順に時間が書かれていない待ち工程（調理法から当てた分数）はその旨を添える。
               書いてある分数と同じ顔で出さない（2026-08-08 便ED・docs/68 打ち手#1） */}
@@ -1437,6 +1453,7 @@ export default function CookNaviPage() {
           onExit={closeSession}
           onFinish={completeSession}
           onStartTimer={startStepTimer}
+          sequential={isSequential}
         />
       )}
       <CustomTimerModal
