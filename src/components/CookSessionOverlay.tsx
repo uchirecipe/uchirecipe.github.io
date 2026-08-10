@@ -26,7 +26,7 @@ import TimerAdjustModal from './TimerAdjustModal'
 import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
 import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
-import { formatRemaining, findTimeTokens, isMinutesShownInText } from '../logic/time'
+import { formatRemaining, findTimeTokens } from '../logic/time'
 import {
   pickVoiceResumeTarget,
   pickVoiceStopTarget,
@@ -39,6 +39,7 @@ import {
   endsWithLongRest,
   hasLaterHandsOnStep,
   recipeStepLabel,
+  showsWaitTimerButton,
   type TimelineItem,
   type TimelineRecipe,
 } from '../logic/cookNavi'
@@ -424,12 +425,9 @@ export default function CookSessionOverlay({
   const currentStepLabel = recipeStepLabel(item)
   const ingredients = stepIngredients.get(`${item.recipeId}-${item.stepIndex}`) ?? []
   const ingredientNames = ingredientNamesByRecipeId.get(item.recipeId) ?? []
-  const showWaitTimerButton =
-    isWait &&
-    !item.longRest &&
-    item.minutes != null &&
-    item.minutes > 0 &&
-    !isMinutesShownInText(item.text, item.minutes)
+  // 段取りの一覧と同じ判定（2026-08-11 便FN・logic/cookNavi.ts showsWaitTimerButton）。
+  // 「約◯分の待ち時間」と名乗ったブロックには必ずタイマーのボタンを出す
+  const showWaitTimerButton = showsWaitTimerButton(item)
   /**
    * 「この間に、次の手作業を進められます」を出すか（2026-08-11 便FL。段取りの一覧と同じ条件）。
    * 後ろに手作業が残っている待ちのときだけ＝1品ずつ作る段取りや、今回の調理では終わらない

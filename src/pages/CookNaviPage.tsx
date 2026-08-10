@@ -34,11 +34,11 @@ import {
 import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import { deriveDoneLabel } from '../logic/timerLabel'
-import { isMinutesShownInText } from '../logic/time'
 import {
   buildCookPlan,
   hasLaterHandsOnStep,
   recipeStepLabel,
+  showsWaitTimerButton,
   type TimelineItem,
 } from '../logic/cookNavi'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
@@ -156,14 +156,10 @@ function TimelineCard({
   onStartTimer: (item: TimelineItem, seconds: number) => void
 }) {
   const isWait = item.kind === 'wait'
-  // 今回の調理では終わらない待ち（「冷蔵庫で半日〜一晩漬ける」）にはタイマーも
-  // 「この間に次の手作業を」も出さない（2026-08-11 便FL）。分数を持たない待ちなので
-  const showWaitTimerButton =
-    isWait &&
-    !item.longRest &&
-    item.minutes != null &&
-    item.minutes > 0 &&
-    !isMinutesShownInText(item.text, item.minutes)
+  // 待ちブロックが分数を名乗っていればタイマーのボタンを必ず出す（2026-08-11 便FN。
+  // 判定は logic/cookNavi.ts showsWaitTimerButton）。今回の調理では終わらない待ち
+  // （「冷蔵庫で半日〜一晩漬ける」）だけは分数を持たないので出さない（同 便FL）
+  const showWaitTimerButton = showsWaitTimerButton(item)
   return (
     <li
       id={naviStepDomId(item.recipeId, item.stepNumber)}

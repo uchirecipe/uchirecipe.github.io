@@ -142,6 +142,7 @@ import {
   isSoakWait,
   isLongRestStep,
   endsWithLongRest,
+  showsWaitTimerButton,
   recipeServeTemp,
   estimateActiveMinutes,
   waitUrgency,
@@ -4897,6 +4898,59 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     [0],
   )
   eq('ナビ完成の印: 段取りに無い品には印を出さない', endsWithLongRest(longRestItems, 999), false)
+
+  // ---- (5) 待ちブロックの「タイマーを始める」が出たり出なかったりする（2026-08-11 便FN・利用者テスト） ----
+  // 実測: 段取りAは手順1にボタンあり・手順9「豆腐とわかめを入れて2分温める」は同じ見た目でボタン無し。
+  // 段取りBは待ち5つのうちボタンは1つだけ。ボタンが無いと本文中の小さな「15分」を押すしかない
+  eq(
+    'FN-WAITBTN 手順に分数が書かれた待ちにはボタンを出す',
+    showsWaitTimerButton({ kind: 'wait', longRest: false, waitMinutes: 15 }),
+    true,
+  )
+  eq(
+    'FN-WAITBTN 本文に同じ分数が書いてあってもボタンを消さない（本文の小さな文字は押せない）',
+    showsWaitTimerButton({ kind: 'wait', longRest: false, waitMinutes: 2 }),
+    true,
+  )
+  eq(
+    'FN-WAITBTN 分数が書かれていない待ち（調理法から当てた分数）にもボタンを出す',
+    showsWaitTimerButton({ kind: 'wait', longRest: false, waitMinutes: 8 }),
+    true,
+  )
+  eq(
+    'FN-WAITBTN 長い待ち（半日〜一晩）は分数を持たないので出さない',
+    showsWaitTimerButton({ kind: 'wait', longRest: true, waitMinutes: 0 }),
+    false,
+  )
+  eq(
+    'FN-WAITBTN 手作業の手順には出さない',
+    showsWaitTimerButton({ kind: 'active', longRest: false, waitMinutes: 0 }),
+    false,
+  )
+  // 実データでの確認: 味噌汁の「豆腐とわかめを入れて2分温める」と、時間の書かれていない
+  // 「ふたをして弱火で煮る」の両方にボタンが出る（同じ待ちブロックなら同じ操作ができる）
+  const waitBtnPlan = buildCookTimeline([
+    recipe(11, 'FN味噌汁', [
+      t('鍋にだしを入れて火にかける。'),
+      t('豆腐とわかめを入れて2分温める。', 2),
+      t('火を止めてみそを溶き入れる。'),
+    ]),
+    recipe(12, 'FN煮物', [
+      t('大根を切る。'),
+      t('鍋に入れ、ふたをして弱火で煮る。'),
+      t('器に盛る。'),
+    ]),
+  ])
+  eq(
+    'FN-WAITBTN 実データ: 待ちと判定された手順は全部ボタンが出る',
+    waitBtnPlan.items.filter((it) => it.kind === 'wait').map((it) => showsWaitTimerButton(it)),
+    waitBtnPlan.items.filter((it) => it.kind === 'wait').map(() => true),
+  )
+  eq(
+    'FN-WAITBTN 実データ: 待ちの手順が2つ以上ある（判定の前提が崩れていないこと）',
+    waitBtnPlan.items.filter((it) => it.kind === 'wait').length >= 2,
+    true,
+  )
 }
 
 // ---------- stepMinutesFromText(取り込み時に手順の「分」の欄を本文から埋める。
