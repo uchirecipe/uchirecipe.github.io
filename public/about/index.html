@@ -216,14 +216,8 @@
   .note > strong { display: block; margin-bottom: 4px; }
   .note p { font-size: 14.5px; }
   .note p:last-child { margin-bottom: 0; }
-  /* 注記の中の「※」の一行(本文より小さく・薄く出して、主文と読み分けられるようにする) */
-  .note .aster {
-    display: block;
-    margin-top: 8px;
-    font-size: 13px;
-    line-height: 1.7;
-    color: var(--text-muted);
-  }
+  /* 2026-08-10 便FG: 注記の中の「※」の一行(.note .aster)は、30品の枠つき注記と一緒に
+     使わなくなったので削除した。基本レシピの※は .starters .tiny で出している */
 
   /* 使い方ページの該当箇所への導線 */
   .more {
@@ -764,8 +758,8 @@
   </section>
 
   <!-- 2026-08-10 便FG(オーナー指示「Pro版の場所が下すぎる。無料機能のすぐ下に移動」):
-       無料でできることの4節の直後にPro版を置く。以前は「データは、あなたの端末の中に。」の
-       あとに置いていた -->
+       無料でできることの節の最後(「他にも、できることたくさん」)の直後にPro版を置く。
+       以前は「データは、あなたの端末の中に。」のあとに置いていた -->
   <section class="sec">
     <h2>Pro版なら、もっと便利に</h2>
     <h3>できるようになること<span class="pro-tag">Pro版</span></h3>
