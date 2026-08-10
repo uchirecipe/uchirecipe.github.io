@@ -26655,6 +26655,316 @@ try {
     }
   }
 
+  // --- FN-01〜04: 実際にアプリを操作した利用者テストで見つかったバグ(2026-08-11 便FN) ---
+  //     FN-01 「全て作った！」のあと、同じレシピを今日の献立に戻せる(報告の再現手順そのまま)
+  //     FN-02 同じ「待ち」の枠なら、どの手順でも「タイマーを始める」で操作できる
+  //     FN-03 タイマーの帯が何本出ても、下のボタン・リンクが帯に隠れない(390px実測)
+  //     FN-04 段取りの分数の内訳と、レシピの「調理時間」と数え方が違うことが画面に出る
+  currentCheck = 'FN-01'
+  {
+    const fnBrowser = await chromium.launch()
+    // 手順本文は文節の切れ目にゼロ幅スペースが入る(ja-phrase)。突き合わせる前に取り除く
+    const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
+    const watchPage = (p, tag) => {
+      p.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@${tag}] ${err.message}`)
+      })
+      p.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@${tag}] ${t}`)
+      })
+    }
+    try {
+      // ===== FN-01: 「全て作った！」→ 同じレシピを今日の夕食へ戻せる（実操作） =====
+      {
+        const ctx = await fnBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watchPage(p, 'FN-01')
+        let confirmText = ''
+        p.on('dialog', (d) => {
+          confirmText = d.message()
+          return d.accept()
+        })
+        const TITLES = ['肉じゃが', 'カレーライス', '豆腐とわかめの味噌汁']
+        /** レシピ一覧から1品開いて「今日の献立に追加」→「夕食」を押す（利用者の操作そのまま） */
+        const addToDinner = async (title) => {
+          await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await p.waitForTimeout(500)
+          await p.getByText(title, { exact: true }).first().click()
+          await p.waitForTimeout(600)
+          await p.getByRole('button', { name: '今日の献立に追加' }).click()
+          await p.waitForTimeout(300)
+          await p.getByRole('button', { name: '夕食', exact: true }).click()
+          await p.waitForTimeout(500)
+          return (await p.textContent('body')) ?? ''
+        }
+
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1800) // 初回シード待ち
+        for (const title of TITLES) await addToDinner(title)
+
+        await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(800)
+        const beforeBody = (await p.textContent('body')) ?? ''
+        check(
+          'FN-01 前提: 今日の献立(日)に3品が並ぶ',
+          TITLES.every((t) => beforeBody.includes(t)),
+        )
+
+        await p.getByRole('button', { name: '全て作った！' }).click()
+        await p.waitForTimeout(900)
+        check(
+          'FN-01 確認文に「週の献立に残る」ことが書いてある(規約F)',
+          confirmText.includes('今週の献立に入れた分は「作った」の表示で残ります'),
+          `confirm=${JSON.stringify(confirmText)}`,
+        )
+        const afterAll = (await p.textContent('body')) ?? ''
+        check(
+          'FN-01 前提: 「3件の作った記録をつけました」が出て今日の献立が空になる',
+          afterAll.includes('3件の作った記録をつけました') &&
+            afterAll.includes('まだ今日つくるものが決まっていません'),
+        )
+
+        // ここが報告のバグ: 空なのに「今日の夕食にすでに入っています」と断られ、何も追加されなかった
+        const restoredToasts = []
+        for (const title of TITLES) restoredToasts.push(await addToDinner(title))
+        check(
+          'FN-01 作った品を同じ夕食へ入れ直すと「すでに入っています」で断られない',
+          restoredToasts.every((t) => !t.includes('今日の夕食にすでに入っています')),
+        )
+        check(
+          'FN-01 入れ直したことと、記録が残ることを知らせる',
+          restoredToasts.every((t) =>
+            t.includes('今日の夕食に戻しました（作った記録はそのまま残ります）'),
+          ),
+        )
+
+        await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(900)
+        const restoredBody = (await p.textContent('body')) ?? ''
+        check(
+          'FN-01 今日の献立(日)に3品とも戻っている',
+          TITLES.every((t) => restoredBody.includes(t)) &&
+            !restoredBody.includes('まだ今日つくるものが決まっていません'),
+        )
+        check('FN-01 並行調理ナビの入口も戻る(2品以上あるため)', restoredBody.includes('並行調理ナビ'))
+
+        // 予定の行は増えていない（週タブで同じ品が2行に並ばない）＋作った記録は消えていない
+        const state = await p.evaluate(async () => {
+          const openDb = () =>
+            new Promise((resolve, reject) => {
+              const r = indexedDB.open('uchi-recipe')
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+          const db = await openDb()
+          const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+          const plans = await P(db.transaction('mealPlans').objectStore('mealPlans').getAll())
+          const recipes = await P(db.transaction('recipes').objectStore('recipes').getAll())
+          const today = new Date()
+          const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+          const titles = ['肉じゃが', 'カレーライス', '豆腐とわかめの味噌汁']
+          const ids = recipes.filter((r) => titles.includes(r.title)).map((r) => r.id)
+          db.close()
+          return {
+            dinnerRows: plans.filter((e) => e.date === iso && e.slot === 'dinner' && ids.includes(e.recipeId)).length,
+            cookedCount: recipes
+              .filter((r) => ids.includes(r.id))
+              .filter((r) => (r.cookedLogs ?? []).some((l) => l.date === iso)).length,
+          }
+        })
+        check(
+          'FN-01 入れ直しで予定の行は増えない(同じ品が2行にならない)',
+          state.dinnerRows === 3,
+          `dinnerRows=${state.dinnerRows}`,
+        )
+        check('FN-01 作った記録は消えない(3品とも今日の記録が残る)', state.cookedCount === 3, `cooked=${state.cookedCount}`)
+        await ctx.close()
+      }
+
+      // ===== FN-02〜04: 並行調理ナビ（待ちのタイマー・帯の下余白・分数の内訳） =====
+      {
+        const ctx = await fnBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watchPage(p, 'FN-02')
+        p.on('dialog', (d) => void d.accept())
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1800)
+        // 報告と同じ顔ぶれ: 本文に分数が書かれた待ち／時間の書かれていない待ち／分数つきの待ち
+        await p.evaluate(async () => {
+          const openDb = () =>
+            new Promise((resolve, reject) => {
+              const r = indexedDB.open('uchi-recipe')
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+          const db = await openDb()
+          const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+          const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+          const mk = (title, steps, ingredients = []) => ({
+            title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps, cookMinutes: 10,
+            isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+          })
+          const ids = []
+          ids.push(await P(store('recipes').add(mk('FN生姜焼き', [
+            { text: '豚肉に下味をつけてそのまま10分おく。', minutes: 10 },
+            { text: 'フライパンで両面を焼き、たれをからめる。' },
+          ], [{ name: '豚肉', amount: '200', unit: 'g' }]))))
+          ids.push(await P(store('recipes').add(mk('FNおひたし', [
+            { text: 'ほうれん草はざく切りにする。' },
+            { text: '鍋にふたをして弱火で煮る。' },
+            { text: '水気を絞ってしょうゆで和える。' },
+          ], [{ name: 'ほうれん草', amount: '1', unit: '束' }]))))
+          ids.push(await P(store('recipes').add(mk('FN味噌汁', [
+            { text: '鍋にだしを入れて火にかける。' },
+            { text: '豆腐とわかめを入れて2分温める。', minutes: 2 },
+            { text: 'みそを溶き入れる。' },
+          ], [{ name: '豆腐', amount: '1/2', unit: '丁' }]))))
+          let addedAt = Date.now()
+          for (const id of ids) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+          const cur = (await P(store('settings').get(1))) || { id: 1 }
+          await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+          db.close()
+        })
+        await p.goto(`${BASE}/#/cook-navi`)
+        await p.reload({ waitUntil: 'networkidle' })
+        await p.waitForTimeout(1200)
+        await p.getByRole('button', { name: '段取りを作る' }).click()
+        await p.waitForTimeout(900)
+
+        // FN-02: 待ちの枠の数だけ「タイマーを始める」がある（出たり出なかったりしない）
+        const waitBlocks = await p.locator('[data-testid="navi-wait-block"]').count()
+        const timerButtons = await p
+          .locator('[data-testid="navi-wait-block"]')
+          .getByRole('button', { name: 'タイマーを始める' })
+          .count()
+        check(
+          'FN-02 待ちの枠が3つ以上ある(判定の前提)',
+          waitBlocks >= 3,
+          `waitBlocks=${waitBlocks}`,
+        )
+        check(
+          'FN-02 待ちの枠の数と「タイマーを始める」の数が一致する',
+          waitBlocks === timerButtons,
+          `枠=${waitBlocks} / ボタン=${timerButtons}`,
+        )
+        // 本文に分数が書かれた待ち(「2分温める」)にもボタンがある＝本文の小さな文字に頼らせない
+        const inTextWait = p.locator('[data-testid="navi-wait-block"]').filter({ hasText: '約2分の待ち時間' })
+        check(
+          'FN-02 本文に分数が書かれた待ち(「2分温める」)にもボタンがある',
+          (await inTextWait.getByRole('button', { name: 'タイマーを始める' }).count()) === 1,
+        )
+        // 手順に時間が書かれていない待ち(調理法から当てた分数)にもボタンがある
+        const estimatedWait = p
+          .locator('[data-testid="navi-wait-block"]')
+          .filter({ has: p.locator('[data-testid="navi-wait-estimated"]') })
+        check(
+          'FN-02 時間の書かれていない待ちにもボタンがある(目安であることは添えたまま)',
+          (await estimatedWait.count()) >= 1 &&
+            (await estimatedWait.getByRole('button', { name: 'タイマーを始める' }).count()) ===
+              (await estimatedWait.count()),
+        )
+
+        // FN-04: 品ごとの内訳と、数え方の違いの一文
+        const legendMinutes = await p.locator('[data-testid="navi-legend-minutes"]').allInnerTexts()
+        check(
+          'FN-04 組み合わせる品それぞれに「1品だけなら約◯分」が出る',
+          legendMinutes.length === 3 && legendMinutes.every((t) => /^1品だけなら約\d+分$/.test(t.trim())),
+          JSON.stringify(legendMinutes),
+        )
+        const compareText = noZw((await p.locator('[data-testid="navi-total-compare"]').innerText().catch(() => '')) || '')
+        const soloSum = legendMinutes.reduce((sum, t) => sum + Number(/約(\d+)分/.exec(t)?.[1] ?? 0), 0)
+        check(
+          'FN-04 内訳の合計が「1品ずつ作ると約◯分」と一致する(画面の上で足し算が合う)',
+          compareText === '' || compareText.includes(`1品ずつ作ると約${soloSum}分`),
+          `内訳合計=${soloSum} / ${compareText}`,
+        )
+        const countNote = noZw(await p.locator('[data-testid="navi-total-count-note"]').innerText())
+        check(
+          'FN-04 レシピの「調理時間」と数え方が違うことが画面に書いてある',
+          countNote.includes('手順ごとの時間を数えて合計した目安') &&
+            countNote.includes('「調理時間」とは数え方が違う') &&
+            countNote.includes('一覧の合計とは一致しません'),
+          countNote,
+        )
+
+        // FN-03: タイマーを2本動かして献立の画面へ。帯の下に隠れる操作要素がゼロであること
+        const startButtons = p
+          .locator('[data-testid="navi-wait-block"]')
+          .getByRole('button', { name: 'タイマーを始める' })
+        await startButtons.nth(0).click()
+        await p.waitForTimeout(300)
+        await startButtons.nth(1).click()
+        await p.waitForTimeout(600)
+        await p.goto(`${BASE}/#/meal-plan`)
+        await p.waitForTimeout(1200)
+        const bottom = await p.evaluate(() => {
+          window.scrollTo(0, document.body.scrollHeight)
+          const vh = window.innerHeight
+          const bars = [...document.querySelectorAll('[data-app-bottom-bar]')].filter((b) => {
+            const r = b.getBoundingClientRect()
+            return r.height > 0 && r.top < vh
+          })
+          let barTop = vh
+          for (const b of bars) barTop = Math.min(barTop, b.getBoundingClientRect().top)
+          const hidden = []
+          for (const el of document.querySelectorAll('main a, main button, main [role="button"]')) {
+            const r = el.getBoundingClientRect()
+            if (r.height <= 0 || r.width <= 0) continue
+            if (r.top >= barTop) hidden.push((el.textContent || '').trim().slice(0, 24))
+          }
+          return {
+            barCount: bars.length,
+            inset: Math.round(vh - barTop),
+            cssVar: getComputedStyle(document.documentElement).getPropertyValue('--app-bottom-inset').trim(),
+            hidden,
+          }
+        })
+        check(
+          'FN-03 前提: タイマーの帯とタブナビの2本が出ている',
+          bottom.barCount === 2,
+          JSON.stringify(bottom),
+        )
+        check(
+          'FN-03 ページの下余白が、実際に出ている帯の高さに追随する',
+          bottom.cssVar === `${bottom.inset}px`,
+          `css=${bottom.cssVar} / 実測=${bottom.inset}px`,
+        )
+        check(
+          'FN-03 帯に完全に隠れて押せない操作要素がゼロ(390px実測)',
+          bottom.hidden.length === 0,
+          JSON.stringify(bottom.hidden),
+        )
+        // 帯が1本増えても余白がついてくる（お知らせの帯が同時に出た場合）
+        const grown = await p.evaluate(async () => {
+          const before = getComputedStyle(document.documentElement).getPropertyValue('--app-bottom-inset').trim()
+          const el = document.createElement('div')
+          el.setAttribute('data-app-bottom-bar', '')
+          el.style.cssText = `position:fixed;left:0;right:0;bottom:${before};height:80px;`
+          document.body.appendChild(el)
+          await new Promise((r) => setTimeout(r, 500))
+          const after = getComputedStyle(document.documentElement).getPropertyValue('--app-bottom-inset').trim()
+          el.remove()
+          await new Promise((r) => setTimeout(r, 500))
+          const back = getComputedStyle(document.documentElement).getPropertyValue('--app-bottom-inset').trim()
+          return { before, after, back }
+        })
+        check(
+          'FN-03 帯が増えれば余白も増え、消えれば元に戻る',
+          Number.parseInt(grown.after, 10) === Number.parseInt(grown.before, 10) + 80 &&
+            grown.back === grown.before,
+          JSON.stringify(grown),
+        )
+        await ctx.close()
+      }
+    } finally {
+      await fnBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
