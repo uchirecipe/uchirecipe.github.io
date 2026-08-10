@@ -318,7 +318,7 @@ import {
   normalizeIngredients,
   normalizeInstructions,
 } from '../workers/recipe-import/src/normalize.ts'
-import { cookedWithinDays } from '../src/logic/cooked.ts'
+import { cookedWithinDays, isOneTapCookedLog } from '../src/logic/cooked.ts'
 import {
   ARCHIVE_KIND,
   ArchiveFileError,
@@ -14505,6 +14505,51 @@ eq(
     'FD-NAV 日付の形でない目印は捨てる（窓は開き直さない）',
     parseViewReturn('{"anchor":"","scrollY":10,"openDate":"きのう"}'),
     { anchor: '', scrollY: 10 },
+  )
+}
+
+// ---------- 便FF-1: 「作った！」で食数を記録する(2026-08-10 オーナー指示) ----------
+{
+  // 記録する食数の決まり方＝買い物メモ・概算食費とまったく同じ優先順位。
+  // ①枠に決めた食数 ②設定「食数の設定」の人数 ③レシピの登録人数分
+  eq('FF-COOKSV 枠に決めた食数が最優先', effectiveMealServings(3, 4, 2), 3)
+  eq('FF-COOKSV 枠に無ければ設定の人数', effectiveMealServings(undefined, 4, 2), 4)
+  eq(
+    'FF-COOKSV どちらも無ければレシピの登録人数分',
+    effectiveMealServings(undefined, undefined, 2),
+    2,
+  )
+  eq('FF-COOKSV 全部無ければ1人分', effectiveMealServings(undefined, undefined, undefined), 1)
+  eq('FF-COOKSV 範囲外の食数は1〜20に収める', effectiveMealServings(99, undefined, 2), 20)
+
+  // ボタン1回の記録の見分け方。**食数を判定材料にしない**のが要点で、
+  // 入れてしまうと便FF以降の記録が「元に戻す」で取り消せず、
+  // 同じ日に何度でも二重に付く(便EHで直したバグの再発)。
+  const today = '2026-08-10'
+  eq(
+    'FF-ONETAP 食数だけ入った記録はボタン1回の記録として扱う',
+    isOneTapCookedLog({ date: today, servings: 4 }, today),
+    true,
+  )
+  eq(
+    'FF-ONETAP 食数も無い古い記録も従来どおり対象',
+    isOneTapCookedLog({ date: today }, today),
+    true,
+  )
+  eq(
+    'FF-ONETAP メモを書いた記録は対象外(手で書いた記録を巻き込まない)',
+    isOneTapCookedLog({ date: today, servings: 4, note: '子どもが完食' }, today),
+    false,
+  )
+  eq(
+    'FF-ONETAP 写真を付けた記録は対象外',
+    isOneTapCookedLog({ date: today, servings: 4, photo: {} }, today),
+    false,
+  )
+  eq(
+    'FF-ONETAP 別の日の記録は対象外',
+    isOneTapCookedLog({ date: '2026-08-09', servings: 4 }, today),
+    false,
   )
 }
 

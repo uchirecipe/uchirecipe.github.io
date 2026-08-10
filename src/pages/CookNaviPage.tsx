@@ -989,7 +989,12 @@ export default function CookNaviPage() {
       ja.cookNavi.markAllCookedConfirmAsk
     if (!window.confirm(confirmText)) return
     // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
-    const recordedIds = await markRecipesCooked(targets.map((r) => r.id!))
+    // 何人分作ったかも記録する（2026-08-10 便FF）。段取りの分量に使っている食数
+    // （枠の食数＞設定「食数の設定」＞レシピの登録人数分）をそのまま記録に残す
+    const recordedIds = await markRecipesCooked(
+      targets.map((r) => r.id!),
+      servingsByRecipeId,
+    )
     clearCookNaviSession()
     setSelectedIds([])
     setShowTimeline(false)
