@@ -23466,6 +23466,587 @@ try {
     }
   }
 
+
+  // --- FD: 2026-08-10 オーナー実機フィードバック10件（献立カード4・作った記録の小窓2・週献立4） ---
+  //  FD-01 ロック中の枠の1行が「ロック中」だけになる（何ができなくなるかは鍵を掛けた案内が言う）
+  //  FD-02 その日/その週の栄養に「ごはん◯杯分を足しています」が出て、数が「1食につき1杯」と一致する
+  //  FD-03 週カード・月の日の窓の「レシピを見る」から戻ると、同じ画面・同じ場所に帰る
+  //  FD-04 レシピを選び直すと「元に戻す」が出て、次に開く一覧に「前回選択」が並ぶ
+  //  FD-05 作った記録の小窓がコンパクト（食数は料理名の横／未入力の欄は行ごと出さない）
+  //  FD-06 小窓の「この記録を編集する」がその場で開き、レシピ詳細へ飛ばされない
+  //  FD-07〜10 週タブが勝手に下へスクロールしない（scrollYの実測。今日へ寄ることも実測）
+  currentCheck = 'FD'
+  {
+    const fdBrowser = await chromium.launch()
+    try {
+      const fdCtx = await fdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const fdPage = await fdCtx.newPage()
+      fdPage.on('dialog', (d) => void d.accept())
+      fdPage.on('pageerror', (err) => errors.push(`[pageerror@FD] ${err.message}`))
+      fdPage.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@FD] ${t}`)
+      })
+      await fdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fdPage.waitForTimeout(2000)
+
+      const fdSeed = await fdPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, logs = []) => ({
+          title,
+          servings: 2,
+          effortLevel: 'normal',
+          tags: [],
+          ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }],
+          steps: [{ text: '切る。' }, { text: '焼く。', minutes: 5 }],
+          isFavorite: false,
+          cookedLogs: logs,
+          searchWords: [],
+          isStarter: false,
+          updatedAt: Date.now(),
+        })
+        const iso = (dt) =>
+          `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+        const now = new Date()
+        const today = iso(now)
+        const yesterday = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
+        const idMain = await P(store('recipes').add(mk('FD照り焼き')))
+        const idSide = await P(store('recipes').add(mk('FDおひたし')))
+        const idOther = await P(store('recipes').add(mk('FD切り干し大根')))
+        // 一品もの（主食が重なるのでごはんを足さない食事）を作るための1品
+        const idCurry = await P(store('recipes').add(mk('FD夏野菜カレー')))
+        // メモ付きの記録と、メモも写真も無い記録（小窓のコンパクト表示の検査に使う）
+        const idLogged = await P(
+          store('recipes').add(
+            mk('FDきんぴらごぼう', [{ date: yesterday, servings: 3, note: '甘めがよかった' }]),
+          ),
+        )
+        const idLoggedBare = await P(
+          store('recipes').add(mk('FD肉じゃが', [{ date: yesterday, servings: 4 }])),
+        )
+        // 前後2週間ぶんの夕食を埋める（どの曜日に走らせても週タブが縦に長くなる）
+        for (let off = -14; off <= 14; off++) {
+          const date = iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + off))
+          await P(store('mealPlans').add({ date, slot: 'dinner', role: 'main', recipeId: idMain }))
+          await P(store('mealPlans').add({ date, slot: 'dinner', role: 'side', recipeId: idSide }))
+        }
+        // 今日は朝食にも1品（＝料理が入っている食事が2つ→ごはん2杯）、
+        // 昼食は一品もの（＝足さない）。杯数の数え方をこの1日で確かめる
+        await P(store('mealPlans').add({ date: today, slot: 'breakfast', role: 'main', recipeId: idOther }))
+        await P(store('mealPlans').add({ date: today, slot: 'lunch', role: 'main', recipeId: idCurry }))
+        await P(store('mealPlans').add({ date: yesterday, slot: 'dinner', role: 'other', recipeId: idLogged }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(
+          store('settings').put({
+            ...cur,
+            id: 1,
+            proCode: 'UR-E2E-TEST-ONLY',
+            proActivatedAt: Date.now(),
+            // ごはんを含めて計算する（既定OFFなので、この検査のためにONにしておく）
+            includeRice: true,
+          }),
+        )
+        db.close()
+        return { idMain, idSide, idOther, idLogged, idLoggedBare, today, yesterday }
+      })
+
+      /** Playwrightのclick()は要素を画面内へ入れてから押す＝スクロールの実測が汚れるので、その場で押す */
+      const fdClickText = (text) =>
+        fdPage.evaluate((t) => {
+          const b = [...document.querySelectorAll('button')].find(
+            (x) => (x.textContent ?? '').trim() === t,
+          )
+          if (b) b.click()
+          return !!b
+        }, text)
+      const fdClickSel = (sel) =>
+        fdPage.evaluate((s) => {
+          const b = document.querySelector(s)
+          if (b) b.click()
+          return !!b
+        }, sel)
+      const fdGeom = () =>
+        fdPage.evaluate((today) => {
+          const el = document.querySelector(`section[data-date="${today}"]`)
+          let topBar = 0
+          for (const b of document.querySelectorAll('[data-app-top-bar]')) {
+            const r = b.getBoundingClientRect()
+            if (r.height > 0 && r.top <= 2) topBar = Math.max(topBar, r.bottom)
+          }
+          return {
+            y: Math.round(window.scrollY),
+            docH: Math.round(document.documentElement.scrollHeight),
+            todayTop: el ? Math.round(el.getBoundingClientRect().top) : null,
+            topBar: Math.round(topBar),
+          }
+        }, fdSeed.today)
+
+      // ---------- FD-09 週タブに入ったら今日のカードへ寄る ----------
+      currentCheck = 'FD-09'
+      await fdPage.goto(`${BASE}/#/meal-plan`)
+      await fdPage.reload({ waitUntil: 'networkidle' })
+      await fdPage.waitForTimeout(2000)
+      await fdPage.getByRole('button', { name: '週', exact: true }).click()
+      await fdPage.waitForTimeout(2500)
+      const fdEnter = await fdGeom()
+      check(
+        'FD-09 週タブに入ると今日のカードが上部の固定タブのすぐ下に来る（下へ飛ばない）',
+        fdEnter.todayTop != null &&
+          fdEnter.todayTop >= fdEnter.topBar - 1 &&
+          fdEnter.todayTop <= fdEnter.topBar + 40,
+        JSON.stringify(fdEnter),
+      )
+      // いったん下まで送ってから 日タブ→週タブ に入り直しても、行き先は今日のまま
+      await fdPage.evaluate(() => window.scrollTo(0, 2500))
+      await fdPage.waitForTimeout(500)
+      await fdPage.getByRole('button', { name: '日', exact: true }).click()
+      await fdPage.waitForTimeout(800)
+      await fdPage.getByRole('button', { name: '週', exact: true }).click()
+      await fdPage.waitForTimeout(2500)
+      const fdReenter = await fdGeom()
+      check(
+        'FD-09 週タブに入り直しても、行き先は今日のカード（前に見ていた縦位置に取り残されない）',
+        fdReenter.todayTop != null &&
+          fdReenter.todayTop >= fdReenter.topBar - 1 &&
+          fdReenter.todayTop <= fdReenter.topBar + 40,
+        JSON.stringify(fdReenter),
+      )
+
+      // ---------- FD-07 「すべて折りたたむ」「すべて開く」で画面が動かない ----------
+      currentCheck = 'FD-07'
+      await fdPage.evaluate(() => window.scrollTo(0, 0))
+      await fdPage.waitForTimeout(500)
+      const fdBeforeCollapse = await fdGeom()
+      check('FD-07 前提: 折りたたむ前は7日分が開いていてページが長い', fdBeforeCollapse.docH > 2000, JSON.stringify(fdBeforeCollapse))
+      check('FD-07 前提: 「すべて折りたたむ」が押せる', await fdClickText('すべて折りたたむ'))
+      await fdPage.waitForTimeout(1200)
+      const fdCollapsed = await fdGeom()
+      check(
+        'FD-07 「すべて折りたたむ」で画面は動かない（縦位置そのまま）',
+        Math.abs(fdCollapsed.y - fdBeforeCollapse.y) <= 2,
+        `${fdBeforeCollapse.y}→${fdCollapsed.y}`,
+      )
+      check('FD-07 前提: 「すべて開く」が押せる', await fdClickText('すべて開く'))
+      await fdPage.waitForTimeout(2000)
+      const fdExpanded = await fdGeom()
+      check(
+        'FD-07 「すべて開く」で下へスクロールしない（実測: 旧版は0→2636px飛んでいた）',
+        Math.abs(fdExpanded.y - fdCollapsed.y) <= 2,
+        `${fdCollapsed.y}→${fdExpanded.y}`,
+      )
+      check(
+        'FD-07 「すべて開く」のあとも今日のカードが画面内に残っている（今日をスルーしない）',
+        fdExpanded.todayTop != null && fdExpanded.todayTop >= 0 && fdExpanded.todayTop < 844,
+        JSON.stringify(fdExpanded),
+      )
+
+      // ---------- FD-10 「すべてロック」「すべて解除」で画面が動かない ----------
+      currentCheck = 'FD-10'
+      await fdPage.evaluate(() => window.scrollTo(0, 600))
+      await fdPage.waitForTimeout(500)
+      const fdBeforeLock = await fdGeom()
+      check('FD-10 前提: 「すべてロック」が押せる', await fdClickSel('[data-testid="lock-all"]'))
+      await fdPage.waitForTimeout(1500)
+      const fdLocked = await fdGeom()
+      check(
+        'FD-10 「すべてロック」で画面が動かない',
+        Math.abs(fdLocked.y - fdBeforeLock.y) <= 2,
+        `${fdBeforeLock.y}→${fdLocked.y}`,
+      )
+      check('FD-10 前提: 「すべて解除」が押せる', await fdClickSel('[data-testid="lock-all"]'))
+      await fdPage.waitForTimeout(1500)
+      const fdUnlocked = await fdGeom()
+      check(
+        'FD-10 「すべて解除」で画面が動かない',
+        Math.abs(fdUnlocked.y - fdLocked.y) <= 2,
+        `${fdLocked.y}→${fdUnlocked.y}`,
+      )
+
+      // ---------- FD-08 週を切り替えても画面が動かない ----------
+      currentCheck = 'FD-08'
+      await fdPage.evaluate(() => window.scrollTo(0, 500))
+      await fdPage.waitForTimeout(500)
+      const fdBeforeWeek = await fdGeom()
+      check('FD-08 前提: 「次の週」が押せる', await fdClickSel('button[aria-label="次の週"]'))
+      await fdPage.waitForTimeout(1800)
+      const fdNextWeek = await fdGeom()
+      check(
+        'FD-08 「次の週」で下へスクロールしない（実測: 旧版は0→2228px飛んでいた）',
+        Math.abs(fdNextWeek.y - fdBeforeWeek.y) <= 2,
+        `${fdBeforeWeek.y}→${fdNextWeek.y}`,
+      )
+      check('FD-08 前提: 「前の週」が押せる', await fdClickSel('button[aria-label="前の週"]'))
+      await fdPage.waitForTimeout(1800)
+      const fdPrevWeek = await fdGeom()
+      check(
+        'FD-08 「前の週」でも下へスクロールしない',
+        Math.abs(fdPrevWeek.y - fdNextWeek.y) <= 2,
+        `${fdNextWeek.y}→${fdPrevWeek.y}`,
+      )
+
+      // ---------- FD-01 ロック中の1行 ----------
+      currentCheck = 'FD-01'
+      await fdPage.evaluate(() => window.scrollTo(0, 0))
+      await fdPage.waitForTimeout(400)
+      await fdClickSel('[data-testid="lock-all"]')
+      await fdPage.waitForTimeout(1200)
+      const fdLockNote = await fdPage.evaluate(
+        () => document.querySelector('[data-testid="slot-lock-note"]')?.textContent ?? '',
+      )
+      check(
+        'FD-01 ロック中の枠に出る1行は「ロック中」だけ（窮屈な説明文をやめた）',
+        fdLockNote === 'ロック中',
+        `note=${fdLockNote}`,
+      )
+      const fdLockToast = await fdPage.evaluate(
+        () => document.querySelector('[role="status"]')?.textContent ?? '',
+      )
+      check(
+        'FD-01 鍵を掛けたときの案内では「削除も変更もできません」を言い続ける（規約F）',
+        fdLockToast.includes('鍵を外すまで、この献立は削除も変更もできません'),
+        fdLockToast,
+      )
+      await fdClickSel('[data-testid="lock-all"]')
+      await fdPage.waitForTimeout(1200)
+
+      // ---------- FD-02 ごはんの杯数の注釈 ----------
+      currentCheck = 'FD-02'
+      const fdDateLabel = fdSeed.today.replaceAll('-', '/')
+      await fdPage
+        .getByRole('button', { name: `この日（${fdDateLabel}）の栄養の概算を詳しく見る` })
+        .click()
+      await fdPage.waitForTimeout(1200)
+      const fdRiceNote = await fdPage.evaluate((today) => {
+        const section = document.querySelector(`section[data-date="${today}"]`)
+        return section?.querySelector('[data-testid="rice-added-note"]')?.textContent ?? ''
+      }, fdSeed.today)
+      check(
+        'FD-02 その日の栄養に「ごはん◯杯分を足しています」が出る',
+        fdRiceNote === 'この日の合計に、ごはん2杯分を足しています。',
+        `note=${fdRiceNote}`,
+      )
+      // 数え方の一致: 料理が入っている食事は朝食・昼食・夕食の3つだが、昼食は一品もの（カレー）
+      // なので足さない＝2杯。「1食につきごはん1杯」の仕組みと同じ数になっている
+      const fdRiceBasis = await fdPage.evaluate((today) => {
+        const section = document.querySelector(`section[data-date="${today}"]`)
+        const text = section?.textContent ?? ''
+        return {
+          slots: [...(section?.querySelectorAll('[data-testid="slot-block"]') ?? [])].length,
+          hasRule: text.includes('1食につきごはん1杯'),
+        }
+      }, fdSeed.today)
+      check(
+        'FD-02 杯数は「料理が入っている食事の数」と同じ（一品ものの食事には足さない）',
+        fdRiceNote.includes('2杯分') && fdRiceBasis.hasRule,
+        JSON.stringify(fdRiceBasis),
+      )
+
+      // ---------- FD-04 レシピの選び直しを元に戻せる ----------
+      currentCheck = 'FD-04'
+      const fdTodaySection = fdPage.locator(`section[data-date="${fdSeed.today}"]`)
+      await fdTodaySection.getByRole('button', { name: /FD照り焼き/ }).first().click()
+      await fdPage.waitForTimeout(800)
+      check(
+        'FD-04 前提: レシピを選ぶ一覧が開く',
+        (await fdPage.locator('[data-testid="recipe-picker"]').count()) === 1,
+      )
+      await fdPage
+        .locator('[data-testid="recipe-picker"]')
+        .getByText('FD切り干し大根', { exact: true })
+        .first()
+        .click()
+      await fdPage.waitForTimeout(1200)
+      const fdPickToast = await fdPage.evaluate(
+        () => document.querySelector('[role="status"]')?.textContent ?? '',
+      )
+      check(
+        'FD-04 入れ替えると「「A」を「B」に変えました」と出る（黙って変わらない）',
+        fdPickToast.includes('「FD照り焼き」を「FD切り干し大根」に変えました'),
+        fdPickToast,
+      )
+      check(
+        'FD-04 そのトーストから1回で元に戻せる',
+        (await fdPage.getByRole('button', { name: '元に戻す' }).count()) === 1,
+      )
+      // 一覧を開き直すと「選択中」の次に「前回選択」が並ぶ
+      await fdTodaySection.getByRole('button', { name: /FD切り干し大根/ }).first().click()
+      await fdPage.waitForTimeout(800)
+      const fdPickerRows = await fdPage.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="recipe-picker"] li button')]
+          .slice(0, 2)
+          .map((b) => (b.textContent ?? '').replace(/\s+/g, ' ').trim()),
+      )
+      check(
+        'FD-04 一覧の1番目が「選択中」・2番目が「前回選択」で並ぶ',
+        fdPickerRows.length === 2 &&
+          fdPickerRows[0].includes('FD切り干し大根') &&
+          fdPickerRows[0].includes('選択中') &&
+          fdPickerRows[1].includes('FD照り焼き') &&
+          fdPickerRows[1].includes('前回選択'),
+        JSON.stringify(fdPickerRows),
+      )
+      check(
+        'FD-04 「前回選択」を押せば1つ前のレシピに戻せる',
+        (await fdPage.locator('[data-testid="picker-previous"]').count()) === 1,
+      )
+      await fdPage.locator('[data-testid="picker-previous"]').click()
+      await fdPage.waitForTimeout(1200)
+      check(
+        'FD-04 押すと枠が1つ前のレシピに戻る',
+        (await fdTodaySection.getByRole('button', { name: /FD照り焼き/ }).count()) === 1,
+        (await fdTodaySection.innerText()).slice(0, 120),
+      )
+      // トーストの「元に戻す」でも戻せる（誤操作の直後に気づける道）
+      await fdTodaySection.getByRole('button', { name: /FD照り焼き/ }).first().click()
+      await fdPage.waitForTimeout(700)
+      await fdPage
+        .locator('[data-testid="recipe-picker"]')
+        .getByText('FD切り干し大根', { exact: true })
+        .first()
+        .click()
+      await fdPage.waitForTimeout(1000)
+      await fdPage.getByRole('button', { name: '元に戻す' }).click()
+      await fdPage.waitForTimeout(1200)
+      check(
+        'FD-04 トーストの「元に戻す」でも1つ前のレシピに戻る',
+        (await fdTodaySection.getByRole('button', { name: /FD照り焼き/ }).count()) === 1 &&
+          ((await fdPage.evaluate(() => document.querySelector('[role="status"]')?.textContent ?? '')).includes(
+            '「FD照り焼き」に戻しました',
+          )),
+        (await fdTodaySection.innerText()).slice(0, 120),
+      )
+
+      // ---------- FD-03 「レシピを見る」から同じ画面へ帰る（週タブ） ----------
+      currentCheck = 'FD-03'
+      // 押すためのスクロールで位置が動かないよう、先に画面の真ん中あたりへ送ってから押す
+      await fdPage.evaluate(() => {
+        const link = document.querySelectorAll('[data-testid="slot-open-recipe"]')[3]
+        if (link) {
+          window.scrollTo(0, Math.max(0, Math.round(window.scrollY + link.getBoundingClientRect().top - 300)))
+        }
+      })
+      await fdPage.waitForTimeout(900)
+      const fdBeforeOpen = await fdPage.evaluate(() => {
+        const link = [...document.querySelectorAll('[data-testid="slot-open-recipe"]')].find((a) => {
+          const r = a.getBoundingClientRect()
+          return r.top > 90 && r.bottom < window.innerHeight - 90
+        })
+        if (!link) return null
+        const y = Math.round(window.scrollY)
+        link.click()
+        return { y }
+      })
+      await fdPage.waitForTimeout(1500)
+      check(
+        'FD-03 前提: 週カードの「レシピを見る」でレシピ詳細へ移る',
+        fdBeforeOpen != null && /#\/recipes\/\d+/.test(fdPage.url()),
+        `${JSON.stringify(fdBeforeOpen)} url=${fdPage.url()}`,
+      )
+      await fdPage.getByRole('button', { name: '戻る' }).first().click()
+      await fdPage.waitForTimeout(2500)
+      const fdBack = await fdGeom()
+      check(
+        'FD-03 「戻る」で献立の週タブの同じ縦位置に帰る（誤差20px以内）',
+        fdBeforeOpen != null && Math.abs(fdBack.y - fdBeforeOpen.y) <= 20,
+        `${fdBeforeOpen && fdBeforeOpen.y}→${fdBack.y}`,
+      )
+
+      // ---------- FD-03 「レシピを見る」から同じ画面へ帰る（月タブの日の窓） ----------
+      await fdPage.getByRole('button', { name: '月', exact: true }).click()
+      await fdPage.waitForTimeout(1500)
+      await fdPage.locator(`[data-date="${fdSeed.today}"]`).first().click()
+      await fdPage.waitForTimeout(1000)
+      check(
+        'FD-03 前提: 月タブの日の窓が開き、中に「レシピを見る」がある',
+        (await fdPage.locator('[data-testid="slot-open-recipe"]').count()) >= 1,
+      )
+      await fdPage.locator('[data-testid="slot-open-recipe"]').first().click()
+      await fdPage.waitForTimeout(1500)
+      check(
+        'FD-03 前提: 月タブからもレシピ詳細へ移る',
+        /#\/recipes\/\d+/.test(fdPage.url()),
+        fdPage.url(),
+      )
+      await fdPage.getByRole('button', { name: '戻る' }).first().click()
+      await fdPage.waitForTimeout(2500)
+      const fdMonthBack = await fdPage.evaluate((today) => {
+        const dialogs = [...document.querySelectorAll('[role="dialog"]')]
+        return {
+          count: dialogs.length,
+          text: dialogs.map((d) => (d.textContent ?? '').slice(0, 30)).join(' / '),
+          hasDay: dialogs.some((d) => (d.getAttribute('aria-label') ?? '').length >= 0) && today != null,
+        }
+      }, fdSeed.today)
+      check(
+        'FD-03 月タブは「日の窓」ごと開き直す（窓が閉じたカレンダーに着地しない）',
+        fdMonthBack.count >= 1 && fdMonthBack.text.includes('の献立'),
+        JSON.stringify(fdMonthBack),
+      )
+
+      // ---------- FD-05 記録の小窓がコンパクト ----------
+      currentCheck = 'FD-05'
+      await fdPage.goto(`${BASE}/#/history`)
+      await fdPage.reload({ waitUntil: 'networkidle' })
+      await fdPage.waitForTimeout(1800)
+      await fdPage.getByRole('button', { name: 'FDきんぴらごぼうの作った記録を見る' }).first().click()
+      await fdPage.waitForTimeout(800)
+      const fdLogDialog = fdPage.getByRole('dialog', { name: 'FDきんぴらごぼうの作った記録' })
+      const fdLogTitle = await fdLogDialog.locator('[data-testid="cooked-detail-title"]').innerText()
+      check(
+        'FD-05 食数は料理名の横に短く出る（「FDきんぴらごぼう（3人分）」）',
+        fdLogTitle.replace(/\s+/g, '') === 'FDきんぴらごぼう（3人分）',
+        fdLogTitle,
+      )
+      const fdLogText = await fdLogDialog.innerText()
+      check(
+        'FD-05 入れた欄（ひとことメモ）は出て、「何人分作ったか」の行は無くなっている',
+        fdLogText.includes('ひとことメモ') &&
+          fdLogText.includes('甘めがよかった') &&
+          !fdLogText.includes('何人分作ったか'),
+        fdLogText.replace(/\n/g, ' | '),
+      )
+      await fdPage.keyboard.press('Escape')
+      await fdPage.waitForTimeout(600)
+      await fdPage.getByRole('button', { name: 'FD肉じゃがの作った記録を見る' }).first().click()
+      await fdPage.waitForTimeout(800)
+      const fdBareText = await fdPage.getByRole('dialog', { name: 'FD肉じゃがの作った記録' }).innerText()
+      check(
+        'FD-05 未入力の欄（ひとことメモ・写真）は行ごと出さない',
+        !fdBareText.includes('ひとことメモ') && !fdBareText.includes('未入力'),
+        fdBareText.replace(/\n/g, ' | '),
+      )
+
+      // ---------- FD-06 小窓の中で編集が完結する ----------
+      currentCheck = 'FD-06'
+      await fdPage.getByRole('button', { name: 'この記録を編集する' }).click()
+      await fdPage.waitForTimeout(800)
+      check(
+        'FD-06 「この記録を編集する」でレシピ詳細へ飛ばされない（元の画面のまま）',
+        fdPage.url().includes('#/history') && !/#\/recipes\/\d+/.test(fdPage.url()),
+        fdPage.url(),
+      )
+      check(
+        'FD-06 小窓の中に編集欄が開く',
+        (await fdPage.locator('[data-testid="cooked-log-editor"]').count()) === 1,
+      )
+      await fdPage.locator('[data-testid="cooked-log-editor"] input[type="text"]').fill('小窓で直した')
+      await fdPage.getByRole('button', { name: '人数を増やす' }).click()
+      await fdPage.getByRole('button', { name: '保存する' }).click()
+      await fdPage.waitForTimeout(1500)
+      const fdSaved = await fdPage.evaluate(async (id) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const rec = await P(db.transaction('recipes').objectStore('recipes').get(id))
+        db.close()
+        return rec.cookedLogs
+      }, fdSeed.idLoggedBare)
+      check(
+        'FD-06 その場の保存が端末の記録に入る（メモと人数）',
+        fdSaved.length === 1 && fdSaved[0].note === '小窓で直した' && fdSaved[0].servings === 5,
+        JSON.stringify(fdSaved),
+      )
+      const fdAfterSave = await fdPage.getByRole('dialog', { name: 'FD肉じゃがの作った記録' }).innerText()
+      check(
+        'FD-06 保存すると小窓の表示もその場で新しくなる（画面を移らない）',
+        fdAfterSave.includes('小窓で直した') && fdAfterSave.includes('（5人分）'),
+        fdAfterSave.replace(/\n/g, ' | '),
+      )
+      // カレンダー（月タブの日の窓）からも同じように直せる
+      await fdPage.keyboard.press('Escape')
+      await fdPage.waitForTimeout(500)
+      await fdPage.goto(`${BASE}/#/meal-plan`)
+      await fdPage.reload({ waitUntil: 'networkidle' })
+      await fdPage.waitForTimeout(2000)
+      await fdPage.getByRole('button', { name: '月', exact: true }).click()
+      await fdPage.waitForTimeout(1500)
+      await fdPage.locator(`[data-date="${fdSeed.yesterday}"]`).first().click()
+      await fdPage.waitForTimeout(1000)
+      await fdPage.getByRole('button', { name: 'FDきんぴらごぼうの作った記録を見る' }).first().click()
+      await fdPage.waitForTimeout(800)
+      await fdPage.getByRole('button', { name: 'この記録を編集する' }).click()
+      await fdPage.waitForTimeout(700)
+      check(
+        'FD-06 カレンダーから開いても、その場に編集欄が開く（レシピ詳細へ飛ばされない）',
+        fdPage.url().includes('#/meal-plan') &&
+          (await fdPage.locator('[data-testid="cooked-log-editor"]').count()) === 1,
+        fdPage.url(),
+      )
+      await fdPage.locator('[data-testid="cooked-log-editor"] input[type="text"]').fill('カレンダーで直した')
+      await fdPage.getByRole('button', { name: '保存する' }).click()
+      await fdPage.waitForTimeout(1500)
+      const fdSavedFromMonth = await fdPage.evaluate(async (id) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const rec = await P(db.transaction('recipes').objectStore('recipes').get(id))
+        db.close()
+        return rec.cookedLogs
+      }, fdSeed.idLogged)
+      check(
+        'FD-06 カレンダーからの保存も端末の記録に入り、献立の枠は消えない（記録だけを直す）',
+        fdSavedFromMonth.length === 1 && fdSavedFromMonth[0].note === 'カレンダーで直した',
+        JSON.stringify(fdSavedFromMonth),
+      )
+      const fdMonthPlanKept = await fdPage.evaluate(async (date) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const all = await P(db.transaction('mealPlans').objectStore('mealPlans').getAll())
+        db.close()
+        return all.filter((e) => e.date === date).length
+      }, fdSeed.yesterday)
+      check(
+        'FD-06 記録を直しても、その日の献立の枠は1件も減っていない',
+        fdMonthPlanKept === 3,
+        `件数=${fdMonthPlanKept}`,
+      )
+    } finally {
+      await fdBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
