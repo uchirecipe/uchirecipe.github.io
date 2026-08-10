@@ -25135,6 +25135,33 @@ try {
       await ffClickIn('料理の種別', 'すべて')
       await ffPage.waitForTimeout(400)
       check('FF-FILTER 「すべて」に戻すと全件に戻る', (await ffCards()) === ffTotal)
+
+      // チップの件数は、実際に押したときの結果件数と一致する（数字が飾りになっていない）
+      const ffTopTag = ffTagChips[1]
+      await ffPage.locator('[data-testid="recipes-tag-chip"]').nth(1).click()
+      await ffPage.waitForTimeout(500)
+      check(
+        'FF-FILTER チップの件数は押したときの結果件数と一致する',
+        (await ffCards()) === Number(ffTopTag.replace(/[^0-9]/g, '')),
+        `チップ=${ffTopTag} 結果=${await ffCards()}`,
+      )
+      await ffPage.locator('[data-testid="recipes-tag-chip"]').first().click()
+      await ffPage.waitForTimeout(400)
+
+      // 数える対象は「いま一覧に出ているレシピ」。「自分で登録したレシピのみ」をONにすると
+      // 自分のレシピだけで数え直され、該当が1つも無いときはタグの区分ごと出さない
+      await ffPage.getByRole('button', { name: '自分で登録したレシピのみ', exact: true }).click()
+      await ffPage.waitForTimeout(700)
+      check(
+        'FF-FILTER 「自分で登録したレシピのみ」ONだと自分のタグで数え直す(0件なら区分ごと出さない)',
+        (await ffPage.locator('[data-testid="recipes-tag-chip"]').count()) === 0,
+      )
+      await ffPage.getByRole('button', { name: '条件をクリア' }).first().click()
+      await ffPage.waitForTimeout(700)
+      check(
+        'FF-FILTER 条件をクリアするとタグの区分が戻る',
+        (await ffPage.locator('[data-testid="recipes-tag-chip"]').count()) === ffTagChips.length,
+      )
     } finally {
       await ffBrowser.close()
     }

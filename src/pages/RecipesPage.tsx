@@ -5,6 +5,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
@@ -175,7 +176,7 @@ const PANEL_MIN_HEIGHT = 240
  * そのため固定値では決められず、開いている間だけ実際の位置を測って上限を入れる。
  * 下はタブナビ・タイマーの浮遊バー（`data-app-bottom-bar`）の手前で止める。
  */
-function usePanelMaxHeight(open: boolean, barRef: React.RefObject<HTMLDivElement | null>) {
+function usePanelMaxHeight(open: boolean, barRef: RefObject<HTMLDivElement | null>) {
   const [maxHeight, setMaxHeight] = useState<number>()
   useEffect(() => {
     if (!open) return
