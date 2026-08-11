@@ -2951,7 +2951,7 @@ try {
       await obPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
       // 2026-07-17 便Z-1: ボタン押下でスロット振り分け窓が開く。従来どおりの直接追加(枠なし)は「決めない」
-      await obPage.getByRole('button', { name: '決めない' }).click()
+      await obPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await obPage.waitForTimeout(300)
 
       // 2) 同じレシピを週間献立にも登録する(IndexedDB直接書き込み。理由は上のコメント参照)
@@ -3060,7 +3060,7 @@ try {
       await taPage.waitForTimeout(500)
       await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
-      await taPage.getByRole('button', { name: '決めない' }).click()
+      await taPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await taPage.waitForTimeout(500)
@@ -3068,7 +3068,7 @@ try {
       await taPage.waitForTimeout(500)
       await taPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
-      await taPage.getByRole('button', { name: '決めない' }).click()
+      await taPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await taPage.waitForTimeout(300)
 
       await taPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -3183,7 +3183,7 @@ try {
       await tuPage.waitForTimeout(500)
       await tuPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await tuPage.waitForTimeout(300)
-      await tuPage.getByRole('button', { name: '決めない' }).click()
+      await tuPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await tuPage.waitForTimeout(300)
 
       await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
@@ -3356,7 +3356,7 @@ try {
       await tsPage.waitForTimeout(500)
       await tsPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await tsPage.waitForTimeout(300)
-      await tsPage.getByRole('button', { name: '決めない' }).click()
+      await tsPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await tsPage.waitForTimeout(300)
       await tsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tsPage.waitForTimeout(900)
@@ -7960,7 +7960,7 @@ try {
       const swCurryId = Number(swPage.url().match(/#\/recipes\/(\d+)/)?.[1])
       await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
       await swPage.waitForTimeout(300)
-      await swPage.getByRole('button', { name: '決めない' }).click()
+      await swPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await swPage.waitForTimeout(500)
       check(
         'SLOTWIN-01(決めない) todayListへ直接追加される',
@@ -25804,7 +25804,7 @@ try {
       )
 
       // ② 枠を決めない品: ほうれん草のおひたしを「決めない」で今日の献立へ
-      await fcAddToToday('ほうれん草のおひたし', '決めない')
+      await fcAddToToday('ほうれん草のおひたし', '食事を決めずに今日の献立に追加')
 
       // 日の画面で1品ずつ「作った！」を押す
       await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
@@ -25848,7 +25848,7 @@ try {
       // 日の画面へ戻ってもう1品作り、トーストの「元に戻す」で記録が消えることを見る
       await fcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(900)
-      await fcAddToToday('豚汁', '決めない')
+      await fcAddToToday('豚汁', '食事を決めずに今日の献立に追加')
       await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(1600)
       await fcPage.getByRole('button', { name: '作った！', exact: true }).first().click()
@@ -26228,7 +26228,7 @@ try {
       await fhPage.waitForTimeout(800)
       await fhPage.getByRole('button', { name: '今日の献立に追加' }).first().click()
       await fhPage.waitForTimeout(500)
-      await fhPage.getByRole('button', { name: '決めない', exact: true }).click()
+      await fhPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
       await fhPage.waitForTimeout(700)
       await fhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
       await fhPage.waitForTimeout(1800)

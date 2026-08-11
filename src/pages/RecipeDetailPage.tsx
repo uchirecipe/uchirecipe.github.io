@@ -24,6 +24,7 @@ import { lowerPantryLevelsForCooked } from '../db/pantry'
 import { useSettings, updateSettings } from '../db/settings'
 import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
 import { addMealEntryIfAbsent } from '../db/mealPlan'
+import { mealRoleForRecipe } from '../logic/mealPlan'
 import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
@@ -212,10 +213,21 @@ export default function RecipeDetailPage() {
    * 断らない。週の予定の行は記録をつけても残るため、断ると**その日はもうその料理を
    * 献立に戻せなくなる**（日タブは空なのに追加を拒む）。行は増やさず今日の献立にだけ戻し、
    * 記録が残ることを添えて知らせる（判断は logic/mealPlan.ts todaySlotAddPlan）。
+   *
+   * 2026-08-11 便FP（利用者テスト④「おひたしも味噌汁も主菜になっていた」）: 予定の行の役割を
+   * 'main' で決め打ちしていたのをやめ、レシピの「料理の種別」から決める
+   * （logic/mealPlan.ts mealRoleForRecipe）。
    */
   const pickTodaySlot = async (slot: MealSlot) => {
-    const cookedToday = recipe?.cookedLogs.some((log) => log.date === todayString()) ?? false
-    const result = await addMealEntryIfAbsent(todayString(), slot, id, 'main', cookedToday)
+    if (!recipe) return
+    const cookedToday = recipe.cookedLogs.some((log) => log.date === todayString())
+    const result = await addMealEntryIfAbsent(
+      todayString(),
+      slot,
+      id,
+      mealRoleForRecipe(recipe),
+      cookedToday,
+    )
     setSlotModalOpen(false)
     if (result === 'duplicate') {
       setMessage(ja.detail.todaySlotDuplicateToast.replace('{slot}', ja.mealPlan.slot[slot]))
@@ -230,10 +242,15 @@ export default function RecipeDetailPage() {
     )
   }
 
-  /** 窓で「決めない」を選んだ: 従来どおり今日の献立へ直接追加(枠なし) */
+  /**
+   * 窓で「食事を決めずに今日の献立に追加」を選んだ: 今日の献立へ直接追加（今週の予定には入れない）。
+   * 2026-08-11 便FP: 押しても何も言わずに窓が閉じるだけだったので、朝食/昼食/夕食を選んだときと
+   * 同じように結果を知らせる（利用者テスト③「押すと献立に入るのか入らないのか読み取れなかった」）
+   */
   const pickTodayUndecided = async () => {
     await addToTodayList(id)
     setSlotModalOpen(false)
+    setMessage(ja.detail.todaySlotUndecidedAddedToast)
   }
 
   // 「作った！」記録の入力欄(2026-07-12: 窓表示化。中央固定のモーダルなので、

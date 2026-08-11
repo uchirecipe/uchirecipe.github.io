@@ -7,7 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -23,6 +23,7 @@ import {
   Lock,
   ListChecks,
   CheckCircle2,
+  CalendarPlus,
   Download,
   X,
 } from 'lucide-react'
@@ -38,7 +39,10 @@ import {
   selectedRecipesFileName,
 } from '../logic/fileSave'
 import { useSettings, updateSettings } from '../db/settings'
-import type { RecipeListLayout } from '../db/types'
+import { addRecipesToToday } from '../db/mealPlan'
+import { todayString } from '../logic/date'
+import TodaySlotModal from '../components/TodaySlotModal'
+import type { MealSlot, RecipeListLayout } from '../db/types'
 import { usePantryItems } from '../db/pantry'
 import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
@@ -312,14 +316,19 @@ export default function RecipesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
+  const navigate = useNavigate()
   // ホームの「レシピを探す」ショートカットからの遷移(2026-08-02 オーナー実機FB)。
   // ?focus=search = 検索欄にフォーカスした状態で開く / ?pantry=1 = 「在庫の食材で絞る」をONで開く。
   // どちらも「明示的な新規検索」なので、?q=・?ing= と同じくsessionStorageの保存状態は復元しない
   // (前回の検索語が残ったまま検索欄にフォーカスすると、何を打てばいいのか分からなくなるため)。
   // 初回マウント時のURLだけを見る(下のURL同期でパラメータを消すので、以後は再発火しない)
+  // ?select=today = 献立の「＋ 今日の献立を選ぶ」から来た(2026-08-11 便FP)。選択モードで開き、
+  // 何を選んでいる最中なのかを画面に出す。絞り込み・検索の保存状態はそのまま復元する
+  // (前に見ていた条件のまま選び始めたいので、ここでは条件を消さない)
   const [entry] = useState(() => ({
     focusSearch: searchParams.get('focus') === 'search',
     pantry: searchParams.get('pantry') === '1',
+    selectForToday: searchParams.get('select') === 'today',
   }))
   const [saved] = useState(() =>
     entry.focusSearch || entry.pantry ? null : readSavedListState(),
@@ -364,6 +373,7 @@ export default function RecipesPage() {
         // 検索欄へフォーカスが飛んだり在庫の絞り込みが復活したりする
         next.delete('focus')
         next.delete('pantry')
+        next.delete('select')
         return next
       },
       { replace: true },
@@ -649,11 +659,18 @@ export default function RecipesPage() {
   // 見出し横のボタンで入る／抜ける・全選択／選択解除・「選択した◯品を削除」を選択操作のすぐ下に置く。
   // 入口は「選択」ボタンとカードの長押しの2つ(長押しは在庫チップには無いが、一覧は
   // 「消したい1品を見つけた流れでそのまま片づけ始める」動きが自然なため足した)
-  const [selecting, setSelecting] = useState(false)
+  const [selecting, setSelecting] = useState(entry.selectForToday)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  // 献立の「＋ 今日の献立を選ぶ」から来た選択モードか(2026-08-11 便FP)。
+  // trueの間は「今日の献立に入れるレシピを選んでいます」と決定ボタンを出し、
+  // 書き出し・削除は出さない(入れに来た操作の隣に、消す操作を並べない)
+  const [selectingForToday, setSelectingForToday] = useState(entry.selectForToday)
+  // まとめて入れるときの食事の振り分け窓(1品ずつのときと同じ部品・同じ選択肢)
+  const [bulkSlotModalOpen, setBulkSlotModalOpen] = useState(false)
+  const [addingToToday, setAddingToToday] = useState(false)
 
   const visibleIds = useMemo(
     () => (results ?? []).map((r) => r.recipe.id).filter((id): id is number => id != null),
@@ -676,12 +693,15 @@ export default function RecipesPage() {
     if (selecting && recipes && recipes.length === 0) {
       setSelecting(false)
       setSelectedIds([])
+      setSelectingForToday(false)
     }
   }, [selecting, recipes])
 
   const toggleSelecting = () => {
     setSelecting((v) => !v)
     setSelectedIds([])
+    // 見出し横のボタンで入り直した選択モードは、献立からの「今日の献立に入れる用」ではない
+    setSelectingForToday(false)
   }
   const toggleSelected = (id: number) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
@@ -807,6 +827,45 @@ export default function RecipesPage() {
       setMessage(ja.recipes.exportSelectedError)
     } finally {
       setExporting(false)
+    }
+  }
+
+  /**
+   * 選んだレシピをまとめて今日の献立に入れる（2026-08-11 便FP・利用者テスト①②）。
+   * 食事（朝食/昼食/夕食）は品ごとではなく1回だけ選ぶ＝3品入れるのに窓が3回出たりしない。
+   * 中身の判断は1品ずつの経路と同じ（db/mealPlan.ts addRecipesToToday）。
+   *
+   * 献立の「＋ 今日の献立を選ぶ」から来ていたときは、入れ終わったら献立へ戻る
+   * （押した本人が見たいのは「入った献立」なので、行き止まりにしない）。
+   * 一覧の「選択」から自分で入れたときは一覧に留まり、結果をトーストで知らせる。
+   */
+  const addSelectedToToday = async (slot?: MealSlot) => {
+    if (selectedIds.length === 0 || addingToToday) return
+    setBulkSlotModalOpen(false)
+    setAddingToToday(true)
+    try {
+      const { added, already } = await addRecipesToToday(todayString(), selectedIds, slot)
+      const toast =
+        added === 0
+          ? ja.recipes.addSelectedToTodayAllAlreadyToast.replace('{m}', String(already))
+          : (slot
+              ? ja.recipes.addSelectedToTodayDoneToast
+                  .replace('{slot}', ja.mealPlan.slot[slot])
+                  .replace('{n}', String(added))
+              : ja.recipes.addSelectedToTodayDoneUndecidedToast.replace('{n}', String(added))) +
+            (already > 0
+              ? ja.recipes.addSelectedToTodayAlreadySuffix.replace('{m}', String(already))
+              : '')
+      setSelectedIds([])
+      if (selectingForToday) {
+        setSelecting(false)
+        setSelectingForToday(false)
+        navigate('/meal-plan', { state: { toast } })
+        return
+      }
+      setMessage(toast)
+    } finally {
+      setAddingToToday(false)
     }
   }
 
@@ -1380,12 +1439,32 @@ export default function RecipesPage() {
         </div>
       )}
 
+      {/* 献立の「＋ 今日の献立を選ぶ」から来たときは、何を選んでいる最中なのかを言う
+          (2026-08-11 便FP・利用者テスト②「ただのレシピ一覧に飛んで止まった」)。
+          前回の絞り込みが残っていて0件のときも、この案内だけは出す
+          (何をしに来た画面なのか分からないまま行き止まりにしないため) */}
+      {selecting && selectingForToday && (
+        <div
+          data-testid="select-for-today-banner"
+          className="mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-3 py-2"
+        >
+          <p className="text-sm font-bold text-accent-ink">{ja.recipes.selectForTodayTitle}</p>
+          <p className="mt-0.5 text-xs text-ink-muted">{ja.recipes.selectForTodayHint}</p>
+        </div>
+      )}
+
       {/* 選択モードの操作パネル(2026-08-02 便CT)。食材の在庫の整理モードと同じ並びで、
-          案内文→全選択/選択解除→「選択したレシピ◯品を削除」をカードのすぐ上に置く
+          案内文→全選択/選択解除→操作のボタンをカードのすぐ上に置く
           (下までスクロールしなくても全選択・削除に手が届くように) */}
       {selecting && results && results.length > 0 && (
         <div className="mt-[var(--space-sm)] flex flex-col gap-2">
           <p className="text-sm text-ink-muted">{ja.recipes.selectHint}</p>
+          {/* 選択モードで何ができるかを、1品も選んでいないうちから出す(利用者テスト①) */}
+          {!selectingForToday && (
+            <p data-testid="select-actions-hint" className="text-xs text-ink-muted">
+              {ja.recipes.selectActionsHint}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -1404,9 +1483,26 @@ export default function RecipesPage() {
               {ja.recipes.clearSelection}
             </button>
           </div>
+          {/* まとめて今日の献立に入れる(2026-08-11 便FP)。献立から来たときは1品も選んで
+              いなくても押せない見た目で出し続け、決定ボタンが無いまま迷子にならないようにする */}
+          {(selectingForToday || selectedIds.length > 0) && (
+            <button
+              type="button"
+              data-testid="add-selected-to-today"
+              onClick={() => setBulkSlotModalOpen(true)}
+              disabled={selectedIds.length === 0 || addingToToday}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-40"
+            >
+              <CalendarPlus size={16} aria-hidden />
+              {selectedIds.length === 0
+                ? ja.recipes.addSelectedToTodayEmpty
+                : ja.recipes.addSelectedToToday.replace('{r}', String(selectedIds.length))}
+            </button>
+          )}
           {/* 書き出しは消す作業の前に置く(取り出してから片づける流れ。押し間違いで
-              削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM) */}
-          {selectedIds.length > 0 && (
+              削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM)。
+              献立に入れに来た選択モードでは、書き出し・削除は出さない(2026-08-11 便FP) */}
+          {!selectingForToday && selectedIds.length > 0 && (
             <button
               type="button"
               onClick={() => void exportSelected()}
@@ -1417,7 +1513,7 @@ export default function RecipesPage() {
               {ja.recipes.exportSelected.replace('{r}', String(selectedIds.length))}
             </button>
           )}
-          {selectedIds.length > 0 && (
+          {!selectingForToday && selectedIds.length > 0 && (
             <button
               type="button"
               onClick={() => void deleteSelected()}
@@ -1511,6 +1607,19 @@ export default function RecipesPage() {
           <Plus size={30} aria-hidden />
         </Link>
       )}
+
+      {/* まとめて入れるときの食事の振り分け窓。1品ずつのとき(レシピ詳細)と同じ部品・
+          同じ選択肢を使い、見出しだけ品数の入るものに差し替える(2026-08-11 便FP) */}
+      <TodaySlotModal
+        open={bulkSlotModalOpen}
+        title={ja.recipes.addSelectedToTodayDialogTitle.replace(
+          '{n}',
+          String(selectedIds.length),
+        )}
+        onPickSlot={(slot) => void addSelectedToToday(slot)}
+        onPickUndecided={() => void addSelectedToToday()}
+        onClose={() => setBulkSlotModalOpen(false)}
+      />
 
       <Toast message={message} onClose={() => setMessage('')} />
     </div>

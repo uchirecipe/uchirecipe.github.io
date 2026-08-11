@@ -77,6 +77,7 @@ import {
   todaySlotAddPlan,
   staleTodayListFromPlanIds,
   recipeDishType,
+  mealRoleForRecipe,
 } from '../src/logic/mealPlan.ts'
 import { restoreHomeWidget } from '../src/logic/homeWidgets.ts'
 import { suggestionCandidates, DISH_TYPE_OPTIONS } from '../src/logic/homeSuggest.ts'
@@ -269,6 +270,7 @@ import {
 import {
   LESS_MEAL_PURPOSES,
   MEAL_PURPOSES,
+  MEAL_ROLES,
   MORE_MEAL_PURPOSES,
 } from '../src/db/types.ts'
 import {
@@ -13117,6 +13119,27 @@ eq(
   eq(
     'DH-TYPE 判定結果は必ず4区分のどれか1つ',
     ['main', 'side', 'soup', 'dessert'].includes(recipeDishType(mk(5, { title: '謎の料理' }))),
+    true,
+  )
+
+  // mealRoleForRecipe: 「今日の献立に追加」で入れた品が、週タブで全部『主菜』になっていた
+  // バグの再発防止(2026-08-11 便FP・利用者テスト④「おひたしも味噌汁も主菜になっていた」)
+  eq('FP-ROLE 汁物のレシピは汁物の行', mealRoleForRecipe(mk(1, { dishType: 'soup' })), 'soup')
+  eq('FP-ROLE 副菜のレシピは副菜の行', mealRoleForRecipe(mk(2, { dishType: 'side' })), 'side')
+  eq('FP-ROLE 主菜のレシピは主菜の行', mealRoleForRecipe(mk(3, { dishType: 'main' })), 'main')
+  eq(
+    'FP-ROLE 種別の「その他(dessert)」は献立の「その他」の行に読み替える',
+    mealRoleForRecipe(mk(4, { dishType: 'dessert' })),
+    'other',
+  )
+  eq(
+    'FP-ROLE 種別が未設定なら登録時と同じ推定に倒す(みそ汁→汁物)',
+    mealRoleForRecipe(mk(5, { title: 'わかめのみそ汁' })),
+    'soup',
+  )
+  eq(
+    'FP-ROLE 役割は必ず献立の4区分のどれか1つ(dessertは残らない)',
+    MEAL_ROLES.includes(mealRoleForRecipe(mk(6, { title: '謎の料理' }))),
     true,
   )
 
