@@ -698,7 +698,12 @@ export default function CookSessionOverlay({
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold text-warning">{t.label}</span>
-                  <span className="block text-xl font-bold text-warning">{t.doneLabel}</span>
+                  <span
+                    data-testid="cook-session-finished-label"
+                    className="block text-xl font-bold text-warning"
+                  >
+                    {t.doneLabel}
+                  </span>
                 </span>
               </button>
               <button

@@ -23202,7 +23202,10 @@ try {
     const ezBrowser = await chromium.launch()
     const ezContext = await ezBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const ezPage = await ezContext.newPage()
-    ezPage.on('dialog', (d) => void d.accept())
+    // 2026-08-11 便FO: 「完成！」がその場で作った記録の確認を出すようになったため、
+    // 確認に「はい」と答えるか「やめる」と答えるかを場面ごとに切り替えられるようにする
+    let ezDialogAnswer = 'accept'
+    ezPage.on('dialog', (d) => void (ezDialogAnswer === 'accept' ? d.accept() : d.dismiss()))
     ezPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@EZ] ${err.message}`)
@@ -23372,10 +23375,15 @@ try {
       )
 
       // EZ-04: 「完成！」のあとの戻り位置＝「まとめて作った！」が画面内に入る
+      //   2026-08-11 便FO: 「完成！」はまず作った記録の確認を出す。**記録しないほうを選んだとき**の
+      //   戻り位置がここで見ている挙動（オーナー指示「完成後、画面の戻り位置は並行ナビ下部
+      //   『まとめて作った！』までスクロール」）なので、確認では「やめる」を選んで確かめる
       currentCheck = 'EZ-04'
       const ezScrollBefore = await ezPage.evaluate(() => window.scrollY)
+      ezDialogAnswer = 'dismiss'
       await ezPage.locator('[data-testid="cook-session-finish"]').click()
       await ezPage.waitForTimeout(1500)
+      ezDialogAnswer = 'accept'
       const ezGeom = await ezPage.evaluate(() => {
         const el = document.querySelector('[data-testid="navi-mark-all-cooked"]')
         if (!el) return null
@@ -24011,12 +24019,14 @@ try {
       await fcPage.waitForTimeout(700)
       await fcOpenSession()
 
-      // --- FC-06: 左上の「手順①へ」（オーナー実機「左上に、①に戻るボタンを設置したい」） ---
+      // --- FC-06: 左上の「最初の手順へ」（オーナー実機「左上に、①に戻るボタンを設置したい」） ---
+      //     2026-08-11 便FO で呼び方だけ「手順①へ」から改めた（利用者テスト「押すまで意味不明。
+      //     丸囲みの①はこのアプリの他のどこにも出てこない」）。置き場所と働きは便FCのまま
       currentCheck = 'FC-06'
       const fcToFirst = fcPage.locator('[data-testid="cook-session-to-first"]')
       check(
-        'FC-06 左上に「手順①へ」がある（画面のバッジと同じ丸数字で呼ぶ）',
-        (await fcToFirst.innerText()).trim() === '手順①へ',
+        'FC-06 左上に「最初の手順へ」がある（押す前に何が起きるか読める）',
+        (await fcToFirst.innerText()).trim() === '最初の手順へ',
         await fcToFirst.innerText(),
       )
       check(
@@ -25539,7 +25549,10 @@ try {
       )
 
       // --- FI-02: 案内文に色の言い方が載っている ---
+      //     2026-08-11 便FO: 案内は「声で操作」をONにしている間だけ出す（利用者テスト
+      //     「声を使わないのに、画面の上5行がずっと声の説明で埋まっている」）ので、先にONにする
       currentCheck = 'FI-02'
+      await fiListen()
       const fiHintText = await fiHint()
       check(
         'FI-02 案内に「色を言うとその色の品の手順に移る」が載っている',
@@ -27151,6 +27164,585 @@ try {
       }
     } finally {
       await fnBrowser.close()
+    }
+  }
+
+
+  // ============================================================================
+  // 便FO（2026-08-11 利用者テスト・実際にアプリを最後まで操作した人の指摘）:
+  // 並行調理ナビ／調理中モード／タイマーの使い勝手
+  // ============================================================================
+  //   FO-01 献立タブの並行調理ナビの行は、押す前にPro版の機能だと分かる
+  //   FO-02 「段取りを作る」を初めて押したときも、できた段取りまで画面が送られる
+  //   FO-03 声の操作の案内は、声を使っている間だけ出す（切っている間は場所を取らない）
+  //   FO-04 調理中モードの料理名が途中で切れない（読み上げ用の文字と画面の文字が一致する）
+  //   FO-05 左上は「最初の手順へ」。押した直後だけ「元の手順に戻す」が出て1回で帰れる
+  //   FO-06 他の品の行を開いた中の「この手順に移る」で指でも移れる（行のタップは全文を開くだけ）
+  //   FO-07 鳴り終わったタイマーは品を問わず画面の上に大きく出て、手順を進めても場所が動かない
+  //   FO-08 常駐タイマーの帯はタップしても画面が変わらない（移動は窓の「手順◯を開く」から）
+  //   FO-09 「完成！」で、その場に作った記録の確認が出て記録できる
+  //   FO-10 中断して献立から戻ったとき、続きの入口が画面の中に入っている
+  currentCheck = 'FO-01'
+  {
+    const foBrowser = await chromium.launch()
+    const foContext = await foBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    // 声の操作のボタンが出る環境にする（実際の聞き取りは使わない＝案内の出し分けだけを見る）
+    await foContext.addInitScript(`
+      (() => {
+        class FakeRecognition {
+          constructor() { window.__recognition = this }
+          start() {} stop() {} abort() {}
+        }
+        window.SpeechRecognition = FakeRecognition
+        window.webkitSpeechRecognition = FakeRecognition
+      })()
+    `)
+    const foPage = await foContext.newPage()
+    /** 確認の窓に「はい」と答えるか「やめる」と答えるか（FO-09で切り替える） */
+    let foDialogAnswer = 'accept'
+    let foDialogMessage = ''
+    foPage.on('dialog', (d) => {
+      foDialogMessage = d.message()
+      void (foDialogAnswer === 'accept' ? d.accept() : d.dismiss())
+    })
+    foPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FO] ${err.message}`)
+    })
+    foPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FO] ${t}`)
+    })
+    const foCounter = () => foPage.locator('[data-testid="cook-session-counter"]').innerText()
+    const foRecipe = () => foPage.locator('[data-testid="cook-session-recipe"]').innerText()
+    const foSessionText = () => foPage.locator('[data-testid="cook-session"]').innerText()
+    const foNext = async (n = 1) => {
+      for (let i = 0; i < n; i++) {
+        await foPage.locator('[data-testid="cook-session-next"]').click()
+        await foPage.waitForTimeout(200)
+      }
+    }
+    /** 段取りの最後の手順（「完成！」が出るところ）まで進む */
+    const foToLast = async () => {
+      for (let i = 0; i < 40; i++) {
+        if ((await foPage.locator('[data-testid="cook-session-finish"]').count()) > 0) return
+        await foPage.locator('[data-testid="cook-session-next"]').click()
+        await foPage.waitForTimeout(120)
+      }
+    }
+    try {
+      await foPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1800)
+      const foIds = await foPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('FO照り焼き', [
+          { text: '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれを加えて煮からめ、器に盛る。' },
+        ], [{ name: '鶏もも肉', amount: '250', unit: 'g' }])))
+        // 料理名が途中で切れないことを見るための長い名前（実機の指摘は11文字で切れていた）
+        const idB = await P(store('recipes').add(mk('FOほうれん草のおひたし（ごま風味）', [
+          { text: 'ほうれん草は根元を切り落として洗う。' },
+          { text: '鍋にたっぷりの湯を沸かし、ほうれん草を2分ゆでる。', minutes: 2 },
+          { text: '水気をしぼって食べやすく切り、だしとしょうゆで和える。' },
+        ], [{ name: 'ほうれん草', amount: '1', unit: '束' }])))
+        const idC = await P(store('recipes').add(mk('FO煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて10分おき、味をしみ込ませてから器に盛る。', minutes: 10 },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return { idA, idB, idC }
+      })
+
+      // --- FO-01: 献立タブの行は、押す前にPro版の機能だと分かる ---
+      //   利用者テスト「『並行調理ナビ』にPro/鍵の印がない。献立の一覧に普通の行として
+      //   並んでいるので押した。押した先で初めて『Pro版の機能です』と言われた」
+      await foPage.goto(`${BASE}/#/meal-plan`)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1800)
+      const foEntry = await foPage.evaluate(() =>
+        [...document.querySelectorAll('a')]
+          .filter((a) => a.getAttribute('href')?.includes('/cook-navi'))
+          .map((a) => a.textContent.replace(/\s+/g, ' ').trim()),
+      )
+      check(
+        'FO-01 献立タブの並行調理ナビの行に、押す前にPro版の機能だと書いてある',
+        foEntry.some((t) => t.includes('並行調理ナビ') && t.includes('Pro版の機能')),
+        JSON.stringify(foEntry),
+      )
+
+      // --- FO-02: 「段取りを作る」を初めて押したときも、できた段取りまで画面が送られる ---
+      //   利用者テスト「押しても画面がほぼ変わらない。押した直後の画面は上のボタンのまま。
+      //   結果は画面のずっと下にできている。押せていないのかと思ってもう一度押しそうになった」
+      currentCheck = 'FO-02'
+      await foPage.goto(`${BASE}/#/cook-navi`)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1400)
+      const foScrollBeforeBuild = await foPage.evaluate(() => window.scrollY)
+      await foPage.getByRole('button', { name: '段取りを作る' }).click()
+      await foPage.waitForTimeout(1600)
+      const foAfterBuild = await foPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="cook-session-start"]')
+        return { scrollY: Math.round(window.scrollY), hasTimeline: el != null }
+      })
+      check(
+        'FO-02 前提: 段取りができている',
+        foAfterBuild.hasTimeline,
+        JSON.stringify(foAfterBuild),
+      )
+      check(
+        'FO-02 初めて「段取りを作る」を押したときも、できた段取りまで画面が送られる',
+        foAfterBuild.scrollY > foScrollBeforeBuild,
+        `スクロール ${foScrollBeforeBuild}→${foAfterBuild.scrollY}`,
+      )
+
+      // --- FO-03: 声の操作の案内は、声を使っている間だけ出す ---
+      //   利用者テスト「声を使わないのに、画面の上5行がずっと声の説明で埋まっている。
+      //   マイクは切ってあるのに消えない」
+      currentCheck = 'FO-03'
+      await foPage.locator('[data-testid="cook-session-start"]').click()
+      await foPage.waitForTimeout(700)
+      check(
+        'FO-03 前提: 全画面の調理中モードが開き、「声で操作」のボタンがある',
+        (await foPage.locator('[data-testid="cook-session"]').count()) === 1 &&
+          (await foPage.locator('button[aria-label="声で操作する"]').count()) === 1,
+      )
+      check(
+        'FO-03 声を切っている間は、言葉の一覧を画面に出さない',
+        !(await foSessionText()).includes('声で操作:'),
+        (await foSessionText()).slice(0, 120),
+      )
+      await foPage.locator('button[aria-label="声で操作する"]').click()
+      await foPage.waitForTimeout(500)
+      check(
+        'FO-03 「声で操作」を押すと言葉の一覧が出る（使う人だけが読む）',
+        (await foSessionText()).includes('声で操作:') &&
+          (await foSessionText()).includes('色を言うとその色の品の手順に移る'),
+      )
+      await foPage.locator('button[aria-label="声の操作をやめる"]').click()
+      await foPage.waitForTimeout(500)
+      check(
+        'FO-03 もう一度押して切ると、案内もまた消える',
+        !(await foSessionText()).includes('声で操作:'),
+      )
+
+      // --- FO-04: 料理名が途中で切れない ---
+      //   利用者テスト「調理中モードの料理名の帯が途中で切れる（『ほうれん草のおひ…』11文字で
+      //   切れる）。読み上げ用のテキストには全部入っている」
+      currentCheck = 'FO-04'
+      for (let i = 0; i < 12; i++) {
+        if ((await foRecipe()).includes('ごま風味')) break
+        await foNext(1)
+      }
+      const foTitleGeom = await foPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="cook-session-recipe"]')
+        if (!el) return null
+        return {
+          text: el.textContent,
+          // 文字が枠に収まらず切り落とされていないか（切っていると scrollWidth のほうが大きい）
+          clipped: el.scrollWidth > el.clientWidth + 1,
+        }
+      })
+      check(
+        'FO-04 前提: 長い名前の品の手順を開いている',
+        foTitleGeom != null && foTitleGeom.text.includes('ごま風味'),
+        JSON.stringify(foTitleGeom),
+      )
+      check(
+        'FO-04 料理名が最後まで画面に出る（…で切らない）',
+        foTitleGeom != null &&
+          foTitleGeom.text === 'FOほうれん草のおひたし（ごま風味）' &&
+          !foTitleGeom.clipped,
+        JSON.stringify(foTitleGeom),
+      )
+
+      // --- FO-05: 「最初の手順へ」と、その取り消し ---
+      //   利用者テスト「『手順①へ』は押すまで意味不明。丸囲みの①はこのアプリの他のどこにも
+      //   出てこない。閉じる✕のすぐ隣にあるので、押し間違えたら今いる場所を失う
+      //  （戻る手段は『次へ』を8回）」
+      currentCheck = 'FO-05'
+      const foToFirst = foPage.locator('[data-testid="cook-session-to-first"]')
+      check(
+        'FO-05 左上のボタンが「最初の手順へ」（丸囲み数字を使わない）',
+        (await foToFirst.innerText()).trim() === '最初の手順へ' &&
+          !(await foToFirst.innerText()).includes('①'),
+        await foToFirst.innerText(),
+      )
+      const foBeforeFirst = await foCounter()
+      check(
+        'FO-05 前提: 段取りの途中にいる',
+        !/^段取り 1\//.test(foBeforeFirst),
+        foBeforeFirst,
+      )
+      check(
+        'FO-05 押す前は取り消しのボタンを出さない',
+        (await foPage.locator('[data-testid="cook-session-undo-first"]').count()) === 0,
+      )
+      await foToFirst.click()
+      await foPage.waitForTimeout(400)
+      check(
+        'FO-05 押すと段取りの最初の手順へ移る',
+        /^段取り 1\//.test(await foCounter()),
+        await foCounter(),
+      )
+      check(
+        'FO-05 押した直後だけ「元の手順に戻す」が出る',
+        (await foPage.locator('[data-testid="cook-session-undo-first"]').innerText()).includes(
+          '元の手順に戻す',
+        ),
+      )
+      await foPage.locator('[data-testid="cook-session-undo-first"]').click()
+      await foPage.waitForTimeout(400)
+      check(
+        'FO-05 1回押すだけで元いた手順に帰れる（「次へ」を何回も押さない）',
+        (await foCounter()) === foBeforeFirst,
+        `${foBeforeFirst}→${await foCounter()}`,
+      )
+      check(
+        'FO-05 帰ったあとは取り消しのボタンを残さない',
+        (await foPage.locator('[data-testid="cook-session-undo-first"]').count()) === 0,
+      )
+      await foToFirst.click()
+      await foPage.waitForTimeout(400)
+      await foNext(1)
+      check(
+        'FO-05 別の移動をしたら取り消しのボタンは消える（どこへ戻すのかが曖昧にならない）',
+        (await foPage.locator('[data-testid="cook-session-undo-first"]').count()) === 0,
+      )
+
+      // --- FO-06: 指でも他の品へ移れる（行のタップの意味は変えない） ---
+      //   利用者テスト「他の品への切り替えが、画面からはできない。下の行を押したら全文が
+      //   開くだけ。色で飛べるのは声だけで、画面には同じ手段がない」
+      //   2026-08-11 オーナー承認済みの設計（行のタップは見るだけ）は維持し、
+      //   移る操作は「開いた中」に置く＝1つの行に2つの意味を持たせない
+      currentCheck = 'FO-06'
+      const foBeforePeek = await foCounter()
+      await foPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await foPage.waitForTimeout(400)
+      check(
+        'FO-06 行のタップは今までどおり全文が出るだけ（調理中の手順は動かない）',
+        (await foPage.locator('[data-testid="cook-session-peek"]').count()) === 1 &&
+          (await foCounter()) === foBeforePeek,
+        `${foBeforePeek}→${await foCounter()}`,
+      )
+      const foMoveTarget = (
+        await foPage.locator('[data-testid="cook-session-other-row"]').first().innerText()
+      )
+        .split('\n')
+        .map((s) => s.trim())
+        .find((s) => s.startsWith('FO'))
+      check(
+        'FO-06 開いた中に「この手順に移る」がある',
+        (await foPage.locator('[data-testid="cook-session-peek-move"]').first().innerText()).includes(
+          'この手順に移る',
+        ),
+      )
+      await foPage.locator('[data-testid="cook-session-peek-move"]').first().click()
+      await foPage.waitForTimeout(600)
+      check(
+        'FO-06 押すとその品の手順が開く（声で色を言ったときと同じ引き寄せ）',
+        (await foRecipe()) === foMoveTarget,
+        `期待=${foMoveTarget} 実際=${await foRecipe()}`,
+      )
+      check(
+        'FO-06 引き寄せなので手順を飛ばさない（開いていた手順は次に残る）',
+        (await foPage.locator('[data-testid="cook-session-other-row"]').first().innerText()).length > 0 &&
+          !(await foPage.locator('[data-testid="cook-session-others"]').innerText()).includes('完成'),
+        await foPage.locator('[data-testid="cook-session-others"]').innerText(),
+      )
+      const foMovedLogs = await foPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        return all.filter((r) => r.title.startsWith('FO')).reduce((n, r) => n + r.cookedLogs.length, 0)
+      })
+      check('FO-06 移っただけでは作った記録は付かない', foMovedLogs === 0, `記録=${foMovedLogs}件`)
+
+      // --- FO-07: 鳴り終わったタイマーは画面の上に大きく出て、場所が動かない ---
+      //   利用者テスト「鳴り終わったタイマーが、画面の一番下に小さく『終わり』と出るだけ。
+      //   コンロの前で手を動かしているときに、あの位置のあの大きさでは気づけない」
+      currentCheck = 'FO-07'
+      await foPage.evaluate((ids) => {
+        const now = Date.now()
+        localStorage.setItem(
+          'uchirecipe:activeTimers',
+          JSON.stringify([
+            // いま大きく出している品ではない品のタイマーを終わらせる（以前は下部の行に紛れていた）
+            { id: 971, key: 'fo-done', label: 'FO煮物', doneLabel: '煮込み終わり', recipeId: ids.idC, stepNumber: 2, endsAt: now - 5000, totalSeconds: 900, done: true, muted: false, fromNavi: true, naviColorIndex: 2, naviOrder: 5, naviStepLabel: '2' },
+          ]),
+        )
+      }, foIds)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1800)
+      const foBanner = foPage.locator('[data-testid="cook-session-finished-timers"]')
+      check(
+        'FO-07 鳴り終わったタイマーが調理中モードの画面に出る',
+        (await foBanner.count()) === 1 &&
+          (await foBanner.innerText()).includes('煮込み終わり'),
+        (await foBanner.count()) === 1 ? await foBanner.innerText() : 'なし',
+      )
+      const foDoneLook = await foPage.evaluate(() => {
+        const banner = document.querySelector('[data-testid="cook-session-finished-timers"]')
+        const label = document.querySelector('[data-testid="cook-session-finished-label"]')
+        const others = document.querySelector('[data-testid="cook-session-others"]')
+        if (!banner || !label) return null
+        const b = banner.getBoundingClientRect()
+        return {
+          top: Math.round(b.top),
+          width: Math.round(b.width),
+          fontSize: Math.round(Number.parseFloat(getComputedStyle(label).fontSize)),
+          insideOthers: others ? others.contains(banner) : false,
+          viewport: window.innerHeight,
+        }
+      })
+      check(
+        'FO-07 画面の上（下部の「他の品の次の手順」の中ではない）に出る',
+        foDoneLook != null && foDoneLook.insideOthers === false && foDoneLook.top < 240,
+        JSON.stringify(foDoneLook),
+      )
+      check(
+        'FO-07 終了の文言が大きい（小さな印で終わらせない）',
+        foDoneLook != null && foDoneLook.fontSize >= 18,
+        JSON.stringify(foDoneLook),
+      )
+      const foBannerTops = []
+      for (let i = 0; i < 3; i++) {
+        const box = await foBanner.boundingBox()
+        foBannerTops.push(box ? Math.round(box.y) : -1)
+        await foNext(1)
+      }
+      check(
+        'FO-07 手順を進めても、終わったタイマーの置き場所が変わらない（毎回探さない）',
+        foBannerTops.every((y) => y >= 0 && y < 240),
+        JSON.stringify(foBannerTops),
+      )
+      check(
+        'FO-07 消す操作が大きなボタンで押せる（小さな✕だけにしない）',
+        (await foPage.locator('[data-testid="cook-session-finished-dismiss"]').innerText()).includes(
+          'タイマーを消す',
+        ),
+      )
+      const foDismissBox = await foPage
+        .locator('[data-testid="cook-session-finished-dismiss"]')
+        .boundingBox()
+      check(
+        'FO-07 その消すボタンが指で押せる大きさ（高さ40px以上）',
+        foDismissBox != null && foDismissBox.height >= 40,
+        JSON.stringify(foDismissBox),
+      )
+      await foPage.locator('[data-testid="cook-session-finished-dismiss"]').click()
+      await foPage.waitForTimeout(500)
+      check(
+        'FO-07 押すとその場で消える（居座らない）',
+        (await foBanner.count()) === 0,
+      )
+
+      // --- FO-08: 常駐タイマーの帯はタップしても画面が変わらない ---
+      //   利用者テスト「タイマーの帯そのものが大きなボタンで、押すと別の画面に飛ぶ。
+      //   帯を消そうとして触ったら、並行調理ナビの画面に飛ばされた」
+      currentCheck = 'FO-08'
+      await foPage.goto(`${BASE}/#/meal-plan`)
+      await foPage.evaluate((ids) => {
+        const now = Date.now()
+        localStorage.setItem(
+          'uchirecipe:activeTimers',
+          JSON.stringify([
+            { id: 972, key: 'fo-bar', label: 'FO煮物', doneLabel: '煮込み終わり', recipeId: ids.idC, stepNumber: 2, endsAt: now - 4000, totalSeconds: 900, done: true, muted: false, fromNavi: true, naviColorIndex: 2, naviOrder: 5, naviStepLabel: '2' },
+          ]),
+        )
+      }, foIds)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1800)
+      const foUrlBefore = foPage.url()
+      await foPage.locator('[data-app-bottom-bar] button').first().click()
+      await foPage.waitForTimeout(700)
+      check(
+        'FO-08 終わったタイマーの帯を触っても画面が変わらない',
+        foPage.url() === foUrlBefore,
+        `${foUrlBefore} → ${foPage.url()}`,
+      )
+      const foAdjust = foPage.getByRole('dialog', { name: 'タイマーを調整' })
+      check('FO-08 代わりにタイマーの窓が開く', (await foAdjust.count()) === 1)
+      const foGoToStep = foAdjust.getByRole('button', { name: /手順.*を開く/ })
+      check(
+        'FO-08 窓の中には手順へ移る道が残っている（名前を読んで押せる）',
+        (await foGoToStep.count()) === 1,
+        (await foGoToStep.count()) === 1 ? await foGoToStep.innerText() : 'なし',
+      )
+      check(
+        'FO-08 窓の中に大きな「タイマーを消す」がある（小さな✕を狙わなくてよい）',
+        (await foAdjust.getByRole('button', { name: 'タイマーを消す' }).count()) === 1,
+      )
+      await foGoToStep.click()
+      await foPage.waitForTimeout(1200)
+      check(
+        'FO-08 窓のボタンからは今までどおりその手順へ移る',
+        foPage.url() !== foUrlBefore,
+        foPage.url(),
+      )
+      await foPage.evaluate(() => localStorage.removeItem('uchirecipe:activeTimers'))
+
+      // --- FO-09: 「完成！」でその場に作った記録の確認が出る ---
+      //   利用者テスト「最後の『完成！』を押しても、記録はつかない。14/14まで進めて押したが
+      //  『作りました』も出ず、段取りのページに戻っただけ。別に『まとめて作った！』を押す
+      //   必要があると気づくまで分からなかった」
+      currentCheck = 'FO-09'
+      await foPage.goto(`${BASE}/#/cook-navi`)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1600)
+      if ((await foPage.locator('[data-testid="cook-session-start"]').count()) === 0) {
+        await foPage.getByRole('button', { name: '段取りを作る' }).click()
+        await foPage.waitForTimeout(1200)
+      }
+      if ((await foPage.locator('[data-testid="cook-session"]').count()) === 0) {
+        await foPage.locator('[data-testid="cook-session-start"]').click()
+        await foPage.waitForTimeout(700)
+      }
+      await foToLast()
+      check(
+        'FO-09 前提: 段取りの最後の手順で「完成！」が出ている',
+        (await foPage.locator('[data-testid="cook-session-finish"]').innerText()).trim() === '完成！',
+      )
+      // ①まず「やめる」を選んだとき: 記録は付かず、段取りは残る（従来の戻り位置＝EZ-04が担保）
+      foDialogAnswer = 'dismiss'
+      foDialogMessage = ''
+      await foPage.locator('[data-testid="cook-session-finish"]').click()
+      await foPage.waitForTimeout(1500)
+      check(
+        'FO-09 「完成！」を押すと、その場で作った記録の確認が出る',
+        foDialogMessage.includes('作った記録をつけます') && foDialogMessage.includes('記録をつけますか？'),
+        foDialogMessage.slice(0, 160),
+      )
+      check(
+        'FO-09 確認文に、記録する品名と件数が入っている（規約F）',
+        foDialogMessage.includes('FO照り焼き') &&
+          foDialogMessage.includes('FO煮物') &&
+          foDialogMessage.includes('3件'),
+        foDialogMessage.slice(0, 200),
+      )
+      check(
+        'FO-09 確認文に、何が残るかも書いてある（規約F）',
+        foDialogMessage.includes('レシピと段取りはそのまま残ります'),
+        foDialogMessage.slice(0, 200),
+      )
+      check(
+        'FO-09 「やめる」を選ぶと記録は付かず、段取りのページに戻る',
+        (await foPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 1 &&
+          (await foPage.locator('[data-testid="cook-session"]').count()) === 0,
+      )
+      // ②「はい」を選んだとき: その場で記録が付く（もう一度「まとめて作った！」を探さない）
+      await foPage.locator('[data-testid="cook-session-start"]').click()
+      await foPage.waitForTimeout(700)
+      await foToLast()
+      foDialogAnswer = 'accept'
+      await foPage.locator('[data-testid="cook-session-finish"]').click()
+      await foPage.waitForTimeout(1800)
+      const foLogs = await foPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        return all
+          .filter((r) => r.title.startsWith('FO'))
+          .map((r) => ({ title: r.title, logs: r.cookedLogs.length }))
+      })
+      check(
+        'FO-09 「はい」を選ぶと、段取りに組んだ3品に作った記録が付く',
+        foLogs.length === 3 && foLogs.every((r) => r.logs === 1),
+        JSON.stringify(foLogs),
+      )
+      check(
+        'FO-09 記録できたことを画面で知らせる',
+        ((await foPage.textContent('body')) ?? '').includes('作った記録をつけました'),
+      )
+
+      // --- FO-10: 中断して献立から戻ったとき、続きの入口が画面の中に入っている ---
+      //   利用者テスト「献立画面の『並行調理ナビを再開』を押しても、調理中モードには戻らず、
+      //   段取りページの一番上に戻るだけ。そこから下までスクロールして『調理中モードの
+      //   続きから見る』を押す必要がある」
+      currentCheck = 'FO-10'
+      await foPage.getByRole('button', { name: '段取りを作る' }).click()
+      await foPage.waitForTimeout(1400)
+      await foPage.locator('[data-testid="cook-session-start"]').click()
+      await foPage.waitForTimeout(700)
+      await foNext(4)
+      const foPaused = await foCounter()
+      await foPage.locator('[data-testid="cook-session-close"]').click()
+      await foPage.waitForTimeout(700)
+      await foPage.goto(`${BASE}/#/meal-plan`)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1600)
+      check(
+        'FO-10 前提: 献立タブに「並行調理ナビを再開」が出ている',
+        (await foPage.locator('[data-testid="navi-resume"]').count()) === 1,
+      )
+      await foPage.locator('[data-testid="navi-resume"]').click()
+      await foPage.waitForTimeout(2200)
+      const foResumeGeom = await foPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="cook-session-start"]')
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        let bottomBar = window.innerHeight
+        for (const b of document.querySelectorAll('[data-app-bottom-bar]')) {
+          const br = b.getBoundingClientRect()
+          if (br.height > 0 && br.top < bottomBar) bottomBar = br.top
+        }
+        return {
+          top: Math.round(r.top),
+          bottom: Math.round(r.bottom),
+          bottomBar: Math.round(bottomBar),
+          text: el.textContent.replace(/\s+/g, ' ').trim(),
+        }
+      })
+      check(
+        'FO-10 再開すると「調理中モードの続きから見る」が画面の中に入っている',
+        foResumeGeom != null &&
+          foResumeGeom.text.includes('続きから見る') &&
+          foResumeGeom.top >= 0 &&
+          foResumeGeom.bottom <= foResumeGeom.bottomBar,
+        JSON.stringify(foResumeGeom),
+      )
+      await foPage.locator('[data-testid="cook-session-start"]').click()
+      await foPage.waitForTimeout(800)
+      check(
+        'FO-10 その1回で、中断した手順の続きから開く',
+        (await foCounter()) === foPaused,
+        `中断=${foPaused} 再開=${await foCounter()}`,
+      )
+    } finally {
+      await foBrowser.close()
     }
   }
 
