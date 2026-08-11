@@ -954,16 +954,19 @@ try {
     if (!reached) {
       console.warn('  ⚠ 調理中モードで「完成」と残りの手順が並ぶ位置に届きませんでした（図の説明と食い違わないか確認すること）')
     }
-    // 上部: ✕ / 手順①へ / 料理名 / 段取り◯/◯ / 声で操作・読み上げ / 声で使える言葉の案内。
-    // 案内文の行数は語が増えると変わるので、案内文の下端を測ってから切る
-    const sessionHint = page.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first()
-    if (await sessionHint.count()) {
-      const hintRect = await rectOf(sessionHint)
+    // 上部: ✕ / 最初の手順へ / 料理名 / 段取り◯/◯ / 声で操作・読み上げ。
+    // 2026-08-11 便FO: 声で使える言葉の案内は「声で操作」をONにしている間だけ出るようにしたので、
+    // この図は**既定の状態（声を使っていないとき）**を写す。言葉の一覧は本文の§8に書いてある
+    const sessionHeaderHeight = await page.evaluate(() => {
+      const header = document.querySelector('[data-testid="cook-session"] > div')
+      return header ? Math.round(header.getBoundingClientRect().bottom) : 0
+    })
+    if (sessionHeaderHeight > 0) {
       await cropRect(page, 'cooknavi-session', {
         x: 0,
         y: 0,
         width: VIEW.width,
-        height: Math.round(hintRect.y + hintRect.h + 10),
+        height: sessionHeaderHeight + 10,
       })
     }
     // 下部: 他の品の次の手順(色の名前・完成の印)。枠が丸ごと入る高さで切る

@@ -23980,6 +23980,22 @@ try {
   {
     const fcBrowser = await chromium.launch()
     const fcContext = await fcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    // 2026-08-11 便FO: 声の案内は「声で操作」をONにしている間だけ出すようにしたので、
+    // FC-01〜03の案内文を読むために聞き取りを偽装して確実にONにできるようにする（FIと同じ手口）
+    await fcContext.addInitScript(() => {
+      class FakeRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+        }
+        start() {}
+        stop() {}
+        abort() {}
+      }
+      window.SpeechRecognition = FakeRecognition
+      window.webkitSpeechRecognition = FakeRecognition
+    })
     const fcPage = await fcContext.newPage()
     fcPage.on('dialog', (d) => void d.accept())
     fcPage.on('pageerror', (err) => {
@@ -24086,7 +24102,14 @@ try {
       )
 
       // --- FC-02/03: 声の案内（画面に出ている語を言えば効く。判定の語形は単体テストで固定） ---
+      //     2026-08-11 便FO: 案内は「声で操作」をONにしている間だけ出す（利用者テスト
+      //     「声を使わないのに、画面の上5行がずっと声の説明で埋まっている」）ので、先にONにする
       currentCheck = 'FC-03'
+      const fcMicStart = fcPage.locator('button[aria-label="声で操作する"]')
+      if ((await fcMicStart.count()) > 0) {
+        await fcMicStart.click()
+        await fcPage.waitForTimeout(400)
+      }
       const fcHint = fcPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first()
       if ((await fcHint.count()) > 0) {
         const fcHintText = await fcHint.innerText()
