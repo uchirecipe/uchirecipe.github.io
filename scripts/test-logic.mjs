@@ -15275,10 +15275,13 @@ eq(
   eq('FM 親子丼が同梱カタログにある', oyako != null, true)
   const oyakoSteps = noteSteps(1, oyako)
   const oyakoNotes = assignRecipeNotes(oyakoSteps, new Map([[1, oyako]]))
+  // 手順1には交差汚染の行と、2026-08-11 便FQで足したご飯の用意の行(other)が並ぶ
+  const OYAKO_RICE = '・ご飯を炊く時間は調理時間に含んでいない。卵をとじたら熱いうちに盛り付けるので、2杯分を先に炊いておくこと。'
+  const OYAKO_WASH = '・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'
   eq(
     'FM 交差汚染の行は「鶏肉は一口大」の手順(手順1)に出る',
     notesAt(oyakoNotes, 1, 0),
-    ['・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'],
+    [OYAKO_RICE, OYAKO_WASH],
   )
   eq(
     'FM 火通しの行は卵を入れる手順(手順3)に出る',
@@ -15295,7 +15298,7 @@ eq(
   eq(
     'FM 他の品と混ざった段取りでも同じ手順に付く',
     notesAt(mixedNotes, 1, 0),
-    ['・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'],
+    [OYAKO_RICE, OYAKO_WASH],
   )
   eq(
     'FM 保存の行はその品の最後の手順に出る',
@@ -15305,7 +15308,7 @@ eq(
   eq(
     'FM 並びを逆にしても割り当ては変わらない(色で引き寄せても動かない)',
     notesAt(assignRecipeNotes([...mixed].reverse(), new Map([[1, oyako], [2, hourensou]])), 1, 0),
-    ['・生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'],
+    [OYAKO_RICE, OYAKO_WASH],
   )
 
   // ---- (4) ユーザーが自分で登録したレシピでも壊れない ----
@@ -15382,7 +15385,8 @@ eq(
     }
     if (placed.length !== lines.length) duplicatedLines++
   }
-  eq('FM 本体のメモを持つ同梱レシピは94品', checkedRecipes, 94)
+  // 96品＝便FM時点の94品＋便FQでメモを新設した2品(ツナキャベツ丼・牛丼)
+  eq('FM 本体のメモを持つ同梱レシピは96品', checkedRecipes, 96)
   eq('FM 1行も落とさない', lostLines, 0)
   eq('FM 同じ行を2か所に出さない', duplicatedLines, 0)
   eq('FM 割り当て先はその品の手順だけ', outOfRange, 0)
@@ -15404,6 +15408,70 @@ eq(
     'FM 「生の魚」(材料名は生だら)でも、たらを扱う最初の手順に付く',
     notesAt(taraNotes, 5, 0).length,
     1,
+  )
+}
+
+// ---------- 2026-08-11 便FQ・ご飯を材料に持つのに、用意する手順が無い品の注意書き ----------
+// 発見: テキストペルソナ3体が独立に「ご飯を炊く工程が段取りに無い」と指摘。調べると
+// 9品が「ご飯を材料に持つのに、炊く・温める手順が無い」状態で、段取りの所要時間にも
+// 入らないため「約21分」で作れるつもりが炊飯を忘れると成立しない。
+// オーナー裁定=A案(手順は増やさず、レシピの注意書きに1行足す)。手順数も分数も変えない。
+{
+  const noteSteps = (recipeId, def) =>
+    def.steps.map((s, i) => ({ recipeId, stepIndex: i, addedByNavi: false, text: s.text }))
+  const notesAt = (map, recipeId, stepIndex) =>
+    (map.get(recipeNoteStepKey({ recipeId, stepIndex })) ?? []).map((n) => n.text)
+  /** ご飯を炊く時間が調理時間に入っていないことを断る行の見分け方 */
+  const isRiceNote = (line) => /ご飯を炊く時間は調理時間に含んでいない。/.test(line)
+
+  // 対象9品(材料にご飯があり、炊く・温める手順が無い品)
+  const RICE_DISHES = [
+    'カレーライス', 'ツナキャベツ丼', '親子丼', 'チャーハン', '牛丼',
+    '鶏そぼろ丼', 'オムライス', '肉巻きおにぎり', '冷や汁',
+  ]
+  for (const title of RICE_DISHES) {
+    const def = starterDefs.find((d) => d.title === title)
+    eq(`FQ ${title}が同梱カタログにある`, def != null, true)
+    if (!def) continue
+    const lines = splitRecipeNoteLines(def.memo)
+    const riceLines = lines.filter(isRiceNote)
+    eq(`FQ ${title}の注意書きにご飯の用意の行が1行だけある`, riceLines.length, 1)
+    // 注意書きなので、手順の本文・分数・手順数は一切変えない(A案の条件)
+    eq(
+      `FQ ${title}の手順にご飯を炊く工程は足していない`,
+      def.steps.some((s) => /炊/.test(s.text)),
+      false,
+    )
+    // 「炊く時間」を書くだけで機種依存の分数は書かない(炊飯器の時間は機種で違う)
+    eq(
+      `FQ ${title}のご飯の行に炊飯の分数を書かない`,
+      /\d+\s*分/.test(riceLines[0] ?? ''),
+      false,
+    )
+    // 段取り・調理中モードでは「その品の最初の手順」に出る(作り始めに読める位置)
+    const map = assignRecipeNotes(noteSteps(11, def), new Map([[11, def]]))
+    eq(`FQ ${title}のご飯の行は段取りの最初の手順に出る`, notesAt(map, 11, 0).some(isRiceNote), true)
+    eq(
+      `FQ ${title}のご飯の行は最初の手順以外には出ない`,
+      def.steps.slice(1).some((_, i) => notesAt(map, 11, i + 1).some(isRiceNote)),
+      false,
+    )
+  }
+  // 品ごとに書き分ける(同じ一文を9品に貼らない)。ご飯の状態・量が品によって違うため
+  const riceTexts = RICE_DISHES.map((title) => {
+    const def = starterDefs.find((d) => d.title === title)
+    return splitRecipeNoteLines(def?.memo).find(isRiceNote) ?? ''
+  })
+  eq('FQ 9品のご飯の行はすべて別の文言', new Set(riceTexts).size, 9)
+  // 掃引の固定: ご飯を材料に持つ品は10品で、炊く手順があるのは五目炊き込みご飯だけ
+  const riceIngredientDishes = starterDefs.filter((d) =>
+    d.ingredients.some((i) => /^(ご飯|米)/.test(i.name)),
+  )
+  eq('FQ ご飯・米を材料に持つ同梱レシピは10品', riceIngredientDishes.length, 10)
+  eq(
+    'FQ そのうち炊く手順を持つのは五目炊き込みご飯だけ',
+    riceIngredientDishes.filter((d) => d.steps.some((s) => /炊/.test(s.text))).map((d) => d.title),
+    ['五目炊き込みご飯'],
   )
 }
 

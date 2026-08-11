@@ -27154,6 +27154,134 @@ try {
     }
   }
 
+  // --- FQ-01〜04: ご飯を材料に持つのに用意する手順が無い9品の注意書き(2026-08-11 便FQ) ---
+  //     テキストペルソナ3体が独立に「ご飯を炊く工程が段取りに無い」と指摘した件。
+  //     オーナー裁定=A案(手順は増やさず、レシピの注意書きに1行足す)。足した1行が
+  //     **レシピ詳細と段取りの両方**に出ることを、9品それぞれについて見る。
+  currentCheck = 'FQ-01'
+  {
+    const fqBrowser = await chromium.launch()
+    // 手順本文・メモは文節の切れ目にゼロ幅スペースが入る(ja-phrase)。突き合わせる前に取り除く
+    const noZw = (t) => (t ?? '').replace(/​/g, '')
+    // 9品と、それぞれに足した注意書きの原文（1文字でも変わったらここで落ちる）
+    const FQ_NOTES = [
+      ['カレーライス', '・ご飯を炊く時間は調理時間に含んでいない。ルーが仕上がったらすぐかけられるよう、4杯分を先に炊いておくこと。'],
+      ['ツナキャベツ丼', 'ご飯を炊く時間は調理時間に含んでいない。あえた具をのせて仕上げるので、2杯分を先に用意しておくこと。'],
+      ['親子丼', '・ご飯を炊く時間は調理時間に含んでいない。卵をとじたら熱いうちに盛り付けるので、2杯分を先に炊いておくこと。'],
+      ['チャーハン', '・ご飯を炊く時間は調理時間に含んでいない。炒め始めるまでに2杯分を用意しておくこと。'],
+      ['牛丼', 'ご飯を炊く時間は調理時間に含んでいない。煮汁ごとご飯にのせて仕上げるので、2杯分を先に炊いておくこと。'],
+      ['鶏そぼろ丼', '・ご飯を炊く時間は調理時間に含んでいない。そぼろと炒り卵をのせるので、2杯分を先に炊いておくこと。'],
+      ['オムライス', '・ご飯を炊く時間は調理時間に含んでいない。ほぐしながら炒めるので、温かいご飯2杯分を先に用意しておくこと。'],
+      ['肉巻きおにぎり', '・ご飯を炊く時間は調理時間に含んでいない。にぎるところから始まるので、2杯分を先に炊いておくこと。'],
+      ['冷や汁', '・ご飯を炊く時間は調理時間に含んでいない。ご飯は温かいままでも冷めたものでもよいので、2杯分を先に炊いておくこと。'],
+    ]
+    try {
+      const fqContext = await fqBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const fqPage = await fqContext.newPage()
+      fqPage.on('dialog', (d) => void d.accept())
+      fqPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@FQ] ${err.message}`)
+      })
+      fqPage.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@FQ] ${t}`)
+      })
+
+      await fqPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fqPage.waitForTimeout(2000)
+      // 同梱レシピのidを引き、並行調理ナビを使えるようにしておく
+      const ids = await fqPage.evaluate(async (titles) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const all = await P(store('recipes').getAll())
+        const map = {}
+        for (const t of titles) {
+          const r = all.find((x) => x.title === t)
+          if (r) map[t] = r.id
+        }
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return map
+      }, FQ_NOTES.map(([t]) => t))
+      check(
+        'FQ-01 対象9品が同梱レシピとして見つかる',
+        FQ_NOTES.every(([t]) => typeof ids[t] === 'number'),
+        JSON.stringify(ids),
+      )
+
+      // ---- レシピ詳細の「メモ」に、その品の注意書きが原文で出る ----
+      const detailMissing = []
+      for (const [title, note] of FQ_NOTES) {
+        if (typeof ids[title] !== 'number') { detailMissing.push(`${title}(id無し)`); continue }
+        await fqPage.goto(`${BASE}/#/recipes/${ids[title]}`)
+        await fqPage.waitForTimeout(600)
+        const body = noZw(await fqPage.textContent('main'))
+        if (!body.includes(note)) detailMissing.push(title)
+      }
+      check('FQ-02 9品それぞれのレシピ詳細に、足した注意書きが出る', detailMissing.length === 0, JSON.stringify(detailMissing))
+
+      // ---- 段取り（並行調理ナビ）にも同じ行が出る。ナビは最大3品なので3品ずつ組む ----
+      const naviMissing = []
+      const naviWrongStep = []
+      for (let b = 0; b < FQ_NOTES.length; b += 3) {
+        const batch = FQ_NOTES.slice(b, b + 3)
+        await fqPage.evaluate(async (recipeIds) => {
+          const openDb = () =>
+            new Promise((resolve, reject) => {
+              const r = indexedDB.open('uchi-recipe')
+              r.onsuccess = () => resolve(r.result)
+              r.onerror = () => reject(r.error)
+            })
+          const db = await openDb()
+          const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+          const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+          await P(store('todayList').clear())
+          let addedAt = Date.now()
+          for (const id of recipeIds) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+          db.close()
+        }, batch.map(([t]) => ids[t]))
+        // 作りかけの段取り(選んだ品・表示中か)は sessionStorage に覚えられている。組を替えるときは
+        // 「戻る」を押したのと同じ状態にしてから開く。覚えていた選択が今日の献立と食い違うと
+        // 選択が空に整えられ、「段取りを作る」が押せないまま（disabled）になる
+        await fqPage.goto(`${BASE}/#/recipes`)
+        await fqPage.waitForTimeout(400)
+        await fqPage.evaluate(() => sessionStorage.clear())
+        await fqPage.goto(`${BASE}/#/cook-navi`)
+        await fqPage.reload({ waitUntil: 'networkidle' })
+        await fqPage.waitForTimeout(1200)
+        await fqPage.getByRole('button', { name: '段取りを作る' }).click()
+        await fqPage.waitForTimeout(900)
+        const cards = (
+          await fqPage.locator('ol > li').evaluateAll((els) => els.map((el) => el.textContent))
+        ).map(noZw)
+        for (const [title, note] of batch) {
+          const hits = cards.filter((t) => t.includes(note))
+          if (hits.length !== 1) { naviMissing.push(`${title}(${hits.length}枚)`); continue }
+          // 「作り始めに読める位置」＝その品の最初の手順に出る。
+          // 段取りは品をまたいで並ぶので、同じ品の手順カードの中で最初のものかを見る
+          const own = cards.filter((t) => t.includes(title))
+          if (own.length > 0 && !own[0].includes(note)) naviWrongStep.push(title)
+        }
+      }
+      check('FQ-03 9品それぞれの注意書きが、段取りのカード1枚だけに出る', naviMissing.length === 0, JSON.stringify(naviMissing))
+      check('FQ-04 その1枚は、その品の最初の手順（作り始めに読める位置）', naviWrongStep.length === 0, JSON.stringify(naviWrongStep))
+      await fqContext.close()
+    } finally {
+      await fqBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
