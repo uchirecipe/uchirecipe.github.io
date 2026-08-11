@@ -1439,9 +1439,6 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 選択モードの操作パネル(2026-08-02 便CT)。食材の在庫の整理モードと同じ並びで、
-          案内文→全選択/選択解除→「選択したレシピ◯品を削除」をカードのすぐ上に置く
-          (下までスクロールしなくても全選択・削除に手が届くように) */}
       {/* 献立の「＋ 今日の献立を選ぶ」から来たときは、何を選んでいる最中なのかを言う
           (2026-08-11 便FP・利用者テスト②「ただのレシピ一覧に飛んで止まった」)。
           前回の絞り込みが残っていて0件のときも、この案内だけは出す
@@ -1456,6 +1453,9 @@ export default function RecipesPage() {
         </div>
       )}
 
+      {/* 選択モードの操作パネル(2026-08-02 便CT)。食材の在庫の整理モードと同じ並びで、
+          案内文→全選択/選択解除→操作のボタンをカードのすぐ上に置く
+          (下までスクロールしなくても全選択・削除に手が届くように) */}
       {selecting && results && results.length > 0 && (
         <div className="mt-[var(--space-sm)] flex flex-col gap-2">
           <p className="text-sm text-ink-muted">{ja.recipes.selectHint}</p>
