@@ -15436,9 +15436,22 @@ try {
       await naviPage.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
       await naviPage.waitForTimeout(400)
 
-      // NAVI-01(本題): 完了タイマーのタップ→ナビに留まり、該当手順カードがハイライトされる
+      // NAVI-01(本題): 完了タイマー→ナビに留まり、該当手順カードがハイライトされる。
+      // 2026-08-11 便FO: 帯そのもののタップは画面を変えず調整の窓を開くだけになったので、
+      // 移動は窓の「手順◯を開く」から行う（着地先の決め方は便BIのまま変えていない）
       const urlBeforeDoneTap = naviPage.url()
       await naviPage.locator('div.fixed button.border-warning').first().click()
+      await naviPage.waitForTimeout(400)
+      check(
+        'NAVI-01 完了タイマーの帯はタップしても画面が変わらない(調整の窓が開く)',
+        (await naviPage.getByRole('dialog', { name: 'タイマーを調整' }).count()) === 1 &&
+          naviPage.url() === urlBeforeDoneTap,
+        `before=${urlBeforeDoneTap} after=${naviPage.url()}`,
+      )
+      await naviPage
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: /を開く/ })
+        .click()
       await naviPage.waitForTimeout(700)
       check(
         'NAVI-01 完了タイマーのタップでナビから離脱しない(単品詳細へ飛ばない)',
@@ -15457,6 +15470,11 @@ try {
       await naviPage.getByRole('button', { name: 'レシピを選び直す' }).click()
       await naviPage.waitForTimeout(400)
       await naviPage.locator('div.fixed button.border-warning').first().click()
+      await naviPage.waitForTimeout(400)
+      await naviPage
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: /を開く/ })
+        .click()
       await naviPage.waitForTimeout(700)
       check(
         'NAVI-03 タイムラインが畳まれ該当カードが無いときは単品レシピ詳細へフォールバックする',
@@ -15776,6 +15794,12 @@ try {
       await nav7Page.waitForTimeout(500)
       await nav7Page.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
       await nav7Page.locator('div.fixed button.border-warning').first().click()
+      await nav7Page.waitForTimeout(400)
+      // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
+      await nav7Page
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: /を開く/ })
+        .click()
       await nav7Page.waitForTimeout(900)
       check(
         'NAVI-08 別の画面から完了タイマーを押すとナビへ戻る(レシピ詳細へ飛ばない)',
@@ -15986,6 +16010,12 @@ try {
       await esPage.waitForTimeout(500)
       await esPage.waitForSelector('div.fixed button.border-warning', { timeout: 8000 })
       await esPage.locator('div.fixed button.border-warning').first().click()
+      await esPage.waitForTimeout(400)
+      // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
+      await esPage
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: /を開く/ })
+        .click()
       await esPage.waitForTimeout(1200)
       check(
         'ES-02 タイマー終了後のタップは段取りへ戻る(単品レシピの手順へ飛ばない)',
