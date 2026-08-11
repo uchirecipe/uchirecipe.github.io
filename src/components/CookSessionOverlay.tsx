@@ -423,6 +423,9 @@ export default function CookSessionOverlay({
         }
         // 前の手順を読みながら次に移らない（move と同じ作法）
         stopSpeech()
+        // 声で移ったときも「元の手順に戻す」は役目を終える（2026-08-11 便FO。
+        // 残しておくと、色で移ったあとに「最初の手順へ」を押す前の位置へ帰る札が居座る）
+        setUndoFirst(null)
         onPullStep({ before: cursor, target: target.cursor })
         return ja.cookNavi.sessionColorMoved.replace('{title}', title)
       },
