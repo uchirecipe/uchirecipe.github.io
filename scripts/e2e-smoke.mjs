@@ -27387,6 +27387,8 @@ try {
           !(await foToFirst.innerText()).includes('①'),
         await foToFirst.innerText(),
       )
+      // 先頭にいると「最初の手順へ」が押せない（段取りの並びは組み方次第なので、その場合だけ1つ進める）
+      if (/^段取り 1\//.test(await foCounter())) await foNext(1)
       const foBeforeFirst = await foCounter()
       check(
         'FO-05 前提: 段取りの途中にいる',
@@ -27693,6 +27695,22 @@ try {
       //   段取りページの一番上に戻るだけ。そこから下までスクロールして『調理中モードの
       //   続きから見る』を押す必要がある」
       currentCheck = 'FO-10'
+      // 記録した3品は今日の献立から外れている（確認文どおり）ので、もう一度入れ直してから組む。
+      // 作った記録が付いていても、自分で今日の献立に入れ直せば候補に戻る（2026-08-11 便FNの直し）
+      await foPage.evaluate(async (ids) => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = db.transaction('todayList', 'readwrite').objectStore('todayList')
+        let addedAt = Date.now()
+        for (const id of [ids.idA, ids.idB, ids.idC]) await P(store.add({ recipeId: id, addedAt: addedAt++ }))
+        db.close()
+      }, foIds)
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1600)
       await foPage.getByRole('button', { name: '段取りを作る' }).click()
       await foPage.waitForTimeout(1400)
       await foPage.locator('[data-testid="cook-session-start"]').click()
