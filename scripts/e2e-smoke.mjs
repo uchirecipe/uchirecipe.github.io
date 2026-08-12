@@ -30060,6 +30060,10 @@ try {
           memo: (card.querySelector('[data-testid="navi-recipe-memo"]')?.textContent ?? '').trim(),
         })),
       )
+      // 文節で折り返すためにゼロ幅スペース(U+200B)が差し込まれるので、照合の前に外す。
+      // 外さないと「含む」が常に偽になり、逆向きの判定（含まないこと）は素通り合格になる
+      // （2026-08-09 EH-01 と同型。2026-08-13 便FXの検査で再発）
+      const fxStrip = (t) => (t ?? '').replaceAll('\u200b', '')
       const fxSoak = fxToastCards.find((c) => c.text.includes('卵液に浸し'))
       const fxServe = fxToastCards.find((c) => c.text.includes('メープルシロップ'))
       check(
@@ -30069,12 +30073,12 @@ try {
       )
       check(
         'FX-12 「浸けている間は必ず冷蔵庫に入れておくこと。」は、浸す手順に出る',
-        (fxSoak?.memo ?? '').includes('浸けている間は必ず冷蔵庫に入れておくこと。'),
+        fxStrip(fxSoak?.memo).includes('浸けている間は必ず冷蔵庫に入れておくこと。'),
         fxSoak?.memo,
       )
       check(
         'FX-12 最後の手順には出ない（以前はここに出ていた）',
-        !(fxServe?.memo ?? '').includes('浸けている間は必ず冷蔵庫に入れておくこと。'),
+        !fxStrip(fxServe?.memo).includes('浸けている間は必ず冷蔵庫に入れておくこと。'),
         fxServe?.memo,
       )
     } finally {
