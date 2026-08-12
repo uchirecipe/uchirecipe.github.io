@@ -28914,6 +28914,8 @@ try {
       await p.waitForTimeout(2000)
       return p
     }
+    // 知らせの文は文節の切れ目にゼロ幅スペースが入るので、突き合わせる前に取り除く
+    const ftNoZw = (t) => (t ?? '').replace(/\u200B/g, '')
     const ftPage = await ftContext.newPage()
     ftWatch(ftPage, 'FT')
     try {
@@ -28962,7 +28964,9 @@ try {
       await ftPage.waitForTimeout(800)
 
       // 何がどこまで残るのかを、閉じる前に読める場所に書いてある（規約F）
-      const ftKeepNote = (await ftPage.locator('[data-testid="navi-restore-keep-note"]').innerText()).trim()
+      const ftKeepNote = ftNoZw(
+        await ftPage.locator('[data-testid="navi-restore-keep-note"]').innerText(),
+      ).trim()
       check(
         'FT-01 段取りの説明に「何が残って何が残らないか」が書いてある',
         ftKeepNote.includes('開き直しても') && ftKeepNote.includes('日付が変わると残しません'),
@@ -29148,7 +29152,9 @@ try {
         'FT-05 昨日以前の段取りは復活しない（古い段取りが今日の画面に出てこない）',
         (await ftPage7.locator('[data-testid="navi-step-text"]').count()) === 0,
       )
-      const ftExpired = (await ftPage7.locator('[data-testid="navi-restore-expired"]').innerText().catch(() => '')).trim()
+      const ftExpired = ftNoZw(
+        await ftPage7.locator('[data-testid="navi-restore-expired"]').innerText().catch(() => ''),
+      ).trim()
       check(
         'FT-05 捨てたことを黙らない（理由と、何が残っているかを画面に書く）',
         ftExpired.includes('日付が変わったため') && ftExpired.includes('レシピと作った記録はそのままです'),

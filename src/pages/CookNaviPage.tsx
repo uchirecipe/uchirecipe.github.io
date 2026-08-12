@@ -84,6 +84,7 @@ import {
 } from '../logic/naviRecipeNotes'
 import NaviRecipeNotes from '../components/NaviRecipeNotes'
 import { buildIngredientNames } from '../logic/ingredientSpans'
+import { renderJaUnits } from '../components/jaUnits'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import { markRecipesCooked, undoTodayListCooked } from '../db/todayList'
 import Toast from '../components/Toast'
@@ -599,7 +600,10 @@ export default function CookNaviPage() {
    * 「戻るかまとめて作った！ボタン押下するまで献立タブに残ったままにしたい。
    * 画面移動するたびに段取りを作るところからやり直しになって面倒」）。
    * 選んだ品と表示中かどうかを端末内に覚え、他のタブへ行って戻っても続きから使える。
-   * 消えるのは「戻る」を押したときと「まとめて作った！」で記録したときだけ。
+   *
+   * 2026-08-12 便FT: **アプリを開き直しても、その日のうちは続きから使える**
+   * （置き場と寿命は logic/cookNaviSession.ts の冒頭）。終わるのは
+   * 「レシピを選び直す」「まとめて作った！」「完成！」と、日付が変わったときだけ。
    */
   const [selectedIds, setSelectedIds] = useState<number[]>(restoredSession?.selectedIds ?? [])
   const [showTimeline, setShowTimeline] = useState(restoredSession?.showTimeline ?? false)
@@ -1380,11 +1384,16 @@ export default function CookNaviPage() {
                 data-testid="navi-restore-expired"
                 className="ja-phrase mt-[var(--space-sm)] rounded-sm border border-accent bg-surface px-3 py-2 text-sm text-accent-ink"
               >
-                {expiredReason === 'version'
-                  ? ja.cookNavi.restoreExpiredByVersion
-                  : expiredHadCursor
-                    ? ja.cookNavi.restoreExpiredByDateCooking
-                    : ja.cookNavi.restoreExpiredByDate}
+                {/* 文節の切れ目で折り返す（renderJaUnits がゼロ幅スペースを挿す）。
+                    素のまま置くと ja-phrase の緊急折返しが働き、行頭に「。」が
+                    ひとつだけ落ちる（実DOM 390px で確認） */}
+                {renderJaUnits(
+                  expiredReason === 'version'
+                    ? ja.cookNavi.restoreExpiredByVersion
+                    : expiredHadCursor
+                      ? ja.cookNavi.restoreExpiredByDateCooking
+                      : ja.cookNavi.restoreExpiredByDate,
+                )}
               </p>
             )}
 
@@ -1550,7 +1559,7 @@ export default function CookNaviPage() {
                         data-testid="navi-restore-keep-note"
                         className="ja-phrase mt-1 text-xs text-ink-muted"
                       >
-                        {ja.cookNavi.restoreKeepNote}
+                        {renderJaUnits(ja.cookNavi.restoreKeepNote)}
                       </p>
                     </div>
 
