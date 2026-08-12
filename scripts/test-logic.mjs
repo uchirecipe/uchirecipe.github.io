@@ -154,11 +154,14 @@ import {
 } from '../src/logic/cookNavi.ts'
 import {
   parseCookNaviSession,
+  restoreCookNaviSession,
+  serializeCookNaviSession,
   reconcileSelectedIds,
   reconcileSelectedIdsForSession,
   resolveCookNaviSelection,
   pickDefaultSelectedIds,
   COOK_NAVI_MAX_RECIPES,
+  COOK_NAVI_SESSION_VERSION,
 } from '../src/logic/cookNaviSession.ts'
 import {
   assignRecipeNotes,
@@ -14682,9 +14685,6 @@ eq(
 // ---------- 便EL: 調理中の手順の覚え書き（sessionStorage の読み取り） ----------
 {
   eq(
-    // 2026-08-10 便FC: 開いているかどうか(sessionOpen)も一緒に覚えるようになった。
-    // この項目が無い覚え書き（便ELまでの形）は「開いていた」と読む＝更新をまたいでも
-    // 調理の途中で全画面を失わない
     'EL-SESSION 調理中の手順を覚えられる',
     parseCookNaviSession(
       JSON.stringify({ selectedIds: [1, 2], showTimeline: true, trialActive: false, current: { recipeId: 2, stepIndex: 0 } }),
@@ -14694,21 +14694,23 @@ eq(
       showTimeline: true,
       trialActive: false,
       current: { recipeId: 2, stepIndex: 0 },
-      sessionOpen: true,
     },
   )
   eq(
-    'FC-SESSION 閉じたことも覚える（開き直すまで全画面は出さない）',
+    // 2026-08-12 便FT: 全画面を開いていたかどうかは覚え書きに入れない（別の置き場に移した）。
+    // 「どこまで進んだか」は端末に残し、「全画面を開いていたか」はアプリを閉じるまで
+    // ＝アプリを開き直したときは、必ず段取りの一覧に着地して「続きから見る」で本人が開く
+    'FC-SESSION 全画面の開閉は覚え書きに混ぜない（位置だけを覚える）',
     parseCookNaviSession(
       JSON.stringify({
         selectedIds: [1, 2],
         showTimeline: true,
         trialActive: false,
         current: { recipeId: 2, stepIndex: 0 },
-        sessionOpen: false,
+        sessionOpen: true,
       }),
-    )?.sessionOpen,
-    false,
+    ).sessionOpen,
+    undefined,
   )
   eq(
     'FC-SESSION 閉じていても調理中の手順は残る（開き直すと続きから）',
@@ -14718,17 +14720,9 @@ eq(
         showTimeline: true,
         trialActive: false,
         current: { recipeId: 2, stepIndex: 3 },
-        sessionOpen: false,
       }),
     )?.current,
     { recipeId: 2, stepIndex: 3 },
-  )
-  eq(
-    'FC-SESSION 手順を覚えていないときは開閉も持たない（意味を持たないので保存しない）',
-    parseCookNaviSession(
-      JSON.stringify({ selectedIds: [1, 2], showTimeline: true, sessionOpen: true }),
-    )?.sessionOpen,
-    undefined,
   )
   eq(
     'EL-SESSION ナビが足した工程（添字-1）も覚えられる',
@@ -15310,7 +15304,7 @@ eq(
   eq(
     'FI-SAVE 古い覚え書きの選択・表示・調理中の手順は今までどおり読める',
     { ...fiSaved(fiBase), pulls: undefined },
-    { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: fiAt(0), sessionOpen: true, pulls: undefined },
+    { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: fiAt(0), pulls: undefined },
   )
   eq(
     'FI-SAVE 引き寄せが1件も無ければ項目そのものを持たない（覚え書きを太らせない）',
@@ -15796,6 +15790,178 @@ eq(
     }
   }
   eq('FR-NOTE 材料の選び方の行はすべて最初の手順に出る', [pickLines, pickAtFirst], [1, 1])
+}
+
+// ---------- 便FT: 段取りと途中の位置を、アプリを開き直しても残す
+// (2026-08-12 利用者テスト「アプリを開き直すと、段取りも途中の位置も消える。
+//  タイマーの残り時間は開き直しても続いているのに、段取りだけ消えるのはちぐはぐ」)
+//
+// この機能でいちばん怖いのは「消えること」ではなく**間違ったものが残ること**なので、
+// 残す実装より先に**捨てる条件**をここで固定する。
+//   ①覚え書きの形の版が違う ②覚えた日が今日でない ③日付・版が読めない ④形が壊れている
+//   ⑤選んだ品が1品も無い ⑥段取りを出していないのに位置だけある
+// さらに、読み戻した選択は今日の献立と突き合わせ(resolveCookNaviSelection)、
+// 読み戻した位置は組み直した段取りに無ければ捨てる(resolveCursor)＝どちらも迂回しない。
+// ----------
+{
+  const ftToday = '2026-08-12'
+  const ftCursor = { recipeId: 20, stepIndex: 1 }
+  const ftSession = {
+    selectedIds: [10, 20, 30],
+    showTimeline: true,
+    trialActive: false,
+    current: ftCursor,
+  }
+  const ftSaved = (session = ftSession, date = ftToday) =>
+    serializeCookNaviSession(session, date)
+
+  // --- 残す側 ---
+  eq(
+    'FT-KEEP-01 同じ日に覚えた段取りの元と調理中の位置は、そのまま読み戻せる',
+    restoreCookNaviSession(ftSaved(), ftToday),
+    { kind: 'ok', session: { selectedIds: [10, 20, 30], showTimeline: true, trialActive: false, current: ftCursor } },
+  )
+  eq(
+    'FT-KEEP-02 保存には覚え書きの版と、覚えた日が入る（この2つで捨てる判断をする）',
+    (() => {
+      const saved = JSON.parse(ftSaved())
+      return [saved.v, saved.date]
+    })(),
+    [COOK_NAVI_SESSION_VERSION, ftToday],
+  )
+  eq(
+    'FT-KEEP-03 色で引き寄せた指示も、同じ日なら残る（並びだけ元に戻らない）',
+    restoreCookNaviSession(
+      ftSaved({ ...ftSession, pulls: [{ before: ftCursor, target: { recipeId: 30, stepIndex: 0 } }] }),
+      ftToday,
+    ).session.pulls,
+    [{ before: ftCursor, target: { recipeId: 30, stepIndex: 0 } }],
+  )
+  eq(
+    'FT-KEEP-04 お試しで使っている最中かどうかも残る（開き直すたびに1回失わない）',
+    restoreCookNaviSession(ftSaved({ ...ftSession, trialActive: true }), ftToday).session.trialActive,
+    true,
+  )
+
+  // --- 捨てる側 ---
+  const ftExpired = restoreCookNaviSession(ftSaved(ftSession, '2026-08-11'), ftToday)
+  eq('FT-DROP-01 覚えた日が今日でなければ捨てる（昨日の段取りが今日出てこない）', ftExpired.kind, 'expired')
+  eq('FT-DROP-01 捨てた理由は「日付が変わった」', ftExpired.reason, 'date')
+  eq('FT-DROP-01 捨てたときは中身を一切返さない（部分的に残さない）', ftExpired.session, undefined)
+  eq(
+    'FT-DROP-02 捨てたときも「段取りを出していたか」は返す（黙って消さないための知らせに使う）',
+    [ftExpired.hadTimeline, ftExpired.hadCursor],
+    [true, true],
+  )
+  eq(
+    'FT-DROP-03 段取りを出していなかった覚え書きは、捨てても知らせない（失うものが無い）',
+    (() => {
+      const r = restoreCookNaviSession(
+        ftSaved({ selectedIds: [10, 20], showTimeline: false, trialActive: false }, '2026-08-11'),
+        ftToday,
+      )
+      return [r.kind, r.hadTimeline, r.hadCursor]
+    })(),
+    ['expired', false, false],
+  )
+  eq(
+    'FT-DROP-04 覚え書きの形の版が違えば捨てる（古い形の位置を今の段取りに当てない）',
+    (() => {
+      const r = restoreCookNaviSession(
+        JSON.stringify({ ...JSON.parse(ftSaved()), v: COOK_NAVI_SESSION_VERSION + 1 }),
+        ftToday,
+      )
+      return [r.kind, r.reason]
+    })(),
+    ['expired', 'version'],
+  )
+  eq(
+    'FT-DROP-05 版が入っていない保存は、うちの覚え書きではない扱いで捨てる',
+    restoreCookNaviSession(JSON.stringify({ selectedIds: [10, 20], showTimeline: true, date: ftToday }), ftToday).kind,
+    'none',
+  )
+  eq(
+    'FT-DROP-06 日付が入っていない保存は捨てる（いつのものか確かめられない）',
+    restoreCookNaviSession(
+      JSON.stringify({ v: COOK_NAVI_SESSION_VERSION, selectedIds: [10, 20], showTimeline: true }),
+      ftToday,
+    ).kind,
+    'none',
+  )
+  eq('FT-DROP-07 何も覚えていない・壊れた保存は捨てる', [
+    restoreCookNaviSession(null, ftToday).kind,
+    restoreCookNaviSession('{こわれ', ftToday).kind,
+  ], ['none', 'none'])
+  eq(
+    'FT-DROP-08 時計が先に進んだ（明日の日付の）覚え書きも、今日と違えば捨てる',
+    restoreCookNaviSession(ftSaved(ftSession, '2026-08-13'), ftToday).kind,
+    'expired',
+  )
+  eq(
+    'FT-DROP-09 選んだ品が1品も無い覚え書きは残さない',
+    restoreCookNaviSession(ftSaved({ selectedIds: [], showTimeline: true, trialActive: false }), ftToday).kind,
+    'none',
+  )
+  eq(
+    'FT-DROP-10 段取りを出していないのに位置だけある不整合は、位置と引き寄せを捨てる',
+    (() => {
+      const r = restoreCookNaviSession(
+        ftSaved({
+          selectedIds: [10, 20],
+          showTimeline: false,
+          trialActive: false,
+          current: ftCursor,
+          pulls: [{ before: ftCursor, target: { recipeId: 30, stepIndex: 0 } }],
+        }),
+        ftToday,
+      )
+      return [r.kind, r.session.current, r.session.pulls]
+    })(),
+    ['ok', undefined, undefined],
+  )
+
+  // --- 読み戻したあと（既存の整合を迂回しない） ---
+  eq(
+    'FT-MIX-01 読み戻した選択は、そのまま使わず今日の献立と突き合わせる',
+    resolveCookNaviSelection(
+      restoreCookNaviSession(ftSaved(), ftToday).session.selectedIds,
+      [20, 30],
+      false,
+    ),
+    [20, 30],
+  )
+  eq(
+    'FT-MIX-02 読み戻した選択が今日の献立に1品も無ければ、今日の献立から選び直す',
+    resolveCookNaviSelection(
+      restoreCookNaviSession(ftSaved(), ftToday).session.selectedIds,
+      [40, 50, 60, 70],
+      false,
+    ),
+    [40, 50, 60],
+  )
+  eq(
+    'FT-MIX-03 読み戻した位置が組み直した段取りに無ければ、推測せず捨てる（一覧に戻す）',
+    resolveCursor(
+      [
+        { recipeId: 10, stepIndex: 0 },
+        { recipeId: 30, stepIndex: 0 },
+      ],
+      restoreCookNaviSession(ftSaved(), ftToday).session.current,
+    ),
+    undefined,
+  )
+  eq(
+    'FT-MIX-04 読み戻した位置が段取りにあれば、その手順のまま続く',
+    resolveCursor(
+      [
+        { recipeId: 10, stepIndex: 0 },
+        { recipeId: 20, stepIndex: 1 },
+        { recipeId: 30, stepIndex: 0 },
+      ],
+      restoreCookNaviSession(ftSaved(), ftToday).session.current,
+    ),
+    ftCursor,
+  )
 }
 
 // ---------- 結果 ----------

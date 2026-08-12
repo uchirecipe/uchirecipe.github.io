@@ -8,17 +8,57 @@
  * レシピを直したら次に開いたときに組み直したいので、**ユーザーが出した指示だけを覚えて
  * 計算はそのつどやり直す**（2026-08-10 便FI で並べ替えの指示を足したときも、この線は動かしていない）。
  *
- * 保存先は sessionStorage（レシピ登録フォームの下書きと同じ置き場）。
- * 消えるのは次の3つのときだけ:
- *   - ナビの「戻る」を押したとき
+ * ## 保存先と寿命（2026-08-12 便FT・利用者テスト「アプリを開き直すと、段取りも途中の位置も
+ * 消える。タイマーの残り時間は開き直しても続いているのに、段取りだけ消えるのはちぐはぐ」）
+ *
+ * 便EDからここまでは sessionStorage（タブを閉じると消える置き場）だったため、料理中に
+ * アプリが切り替わる・落ちるだけで段取りが失われていた。**localStorage（端末に残る置き場）へ移す**。
+ *
+ * ただしこの機能で怖いのは「消えること」より**間違ったものが残ること**なので、
+ * 残す前に**捨てる条件**を決める。読み戻さないのは次の場合:
+ *   1. 覚え書きの形の版（COOK_NAVI_SESSION_VERSION）が今のアプリと違う
+ *      ＝古い形の位置を今の段取りに当てて、別の手順を開いてしまうのを防ぐ
+ *   2. **覚えた日が今日でない**（昨日の段取りが today の献立の上に復活しない）
+ *   3. 版・日付が読めない、JSONが壊れている、選んだ品が1品も無い
+ *   4. 段取りを出していない（showTimeline が false）のに位置だけある不整合 → 位置と並べ替えを捨てる
+ * さらに読み戻したあとも、選択は今日の献立と突き合わせ（resolveCookNaviSelection）、
+ * 位置は組み直した段取りに無ければ捨てる（cookSession.ts の resolveCursor）＝どちらも迂回しない。
+ *
+ * 日付は「最後に操作した日」を入れる（保存のたびに入れ直す）。日をまたいで使い続けている間は
+ * 覚え書きもその日のものとして残り、いったんアプリを閉じて翌日に開くと捨てられる。
+ *
+ * 覚え書きが消えるのは次のとき:
+ *   - ナビで「レシピを選び直す」を押したとき（選択が空になる）
  *   - 「まとめて作った！」で記録したとき
- *   - タブ（アプリのウィンドウ）を閉じたとき
- * 他のタブへ移動しても、レシピを見に行っても残る。
+ *   - 日付が変わったあとにアプリを開いたとき（そのことは画面で知らせる）
+ * **バックアップ（logic/backup.ts）には入れない**。作りかけの段取りはその日限りの覚え書きで、
+ * 別の端末や別の日に持ち込むものではないため（2026-08-10 便FI でも同じ線を引いている）。
  */
 
+import { todayString } from './date'
 import type { CookCursor, StepPull } from './cookSession'
 
 export const COOK_NAVI_SESSION_KEY = 'uchi-recipe-cook-navi-session'
+
+/**
+ * 覚え書きの形の版（2026-08-12 便FT）。端末に残るようになったぶん、**アプリを更新したあとに
+ * 古い形の覚え書きを読んでしまう**ことがありうる。位置（current）や引き寄せ（pulls）の
+ * 意味づけを変えるときはこの数字を1つ上げる＝古い覚え書きは読まずに捨てる。
+ */
+export const COOK_NAVI_SESSION_VERSION = 1
+
+/**
+ * 全画面の調理中モードを**いま開いているか**（2026-08-10 便FC・オーナー実機
+ * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
+ *
+ * 2026-08-12 便FT: ここだけは **sessionStorage のまま**（タブを閉じると消える）にする。
+ * 段取りと調理中の位置は端末に残すが、**アプリを開き直したときは必ず段取りの一覧に着地**し、
+ * 「調理中モードの続きから見る」を本人が押して全画面に入る形にそろえるため。
+ * 台所で位置を機械に当てさせない（docs/69「復元できなければ推測せずタイムラインへ」）のと
+ * 同じ考えで、開き直した直後にいきなり大きな手順を出さず、段取り全体を見てから入れるようにする。
+ * 読み込み直し（同じタブ）では今までどおり開いたまま続く。
+ */
+export const COOK_NAVI_OPEN_KEY = 'uchi-recipe-cook-navi-open'
 
 export interface CookNaviSession {
   /** 選んでいるレシピID（選んだ順＝色の順） */
@@ -39,23 +79,6 @@ export interface CookNaviSession {
    * 段取りの一覧表示に戻す（logic/cookSession.ts の resolveCursor）。
    */
   current?: CookCursor
-  /**
-   * 全画面の調理中モードを**いま開いているか**（2026-08-10 便FC・オーナー実機
-   * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
-   *
-   * 便ELでは「カーソルが入っている＝開いている」と決めて閉じるときにカーソルを捨てていたため、
-   * 開き直すと必ず①からになっていた。**捨てるのをやめる**と、位置と開閉が別のことになる。
-   *
-   * docs/69 の不変条件「書ける状態は1つだけ」は**調理の位置**についての決まりで、
-   * ここはそれを破らない: 位置は今までどおり `current` の1か所だけに書き、
-   * この値は `showTimeline` と同じ**画面の見せ方**の覚え書き（位置を持たない）。
-   * `current` が無いときは意味を持たない＝保存も復元もしない、で二重管理を避ける。
-   *
-   * 覚えていないとき（この項目が無い古い覚え書き）は**開いていた扱い**にする。
-   * 便ELまでは「カーソルがある＝開いている」だったので、その状態のまま更新した人が
-   * 調理の途中で全画面を失わないようにするため。
-   */
-  sessionOpen?: boolean
   /**
    * 色で引き寄せた手順の並び（2026-08-10 便FI・docs/69 第3段）。
    * 「青」「緑」「ピンク」と言われたときに、その品の手順をいまの位置へ動かした記録で、
@@ -102,34 +125,90 @@ function parseStepPulls(value: unknown): StepPull[] {
   return pulls
 }
 
-/** 保存された文字列を読む（形が違う・壊れているときは undefined＝覚えていない扱い） */
+/**
+ * 保存された文字列を**形として**読む（形が違う・壊れているときは undefined＝覚えていない扱い）。
+ * 版と日付で捨てるかどうかを決めるのは `restoreCookNaviSession` の役目で、画面はそちらを使う。
+ * ここは「どこまでを読み取り、どこを不整合として落とすか」の規則を単体テストで固定するための入口。
+ */
 export function parseCookNaviSession(raw: string | null): CookNaviSession | undefined {
   if (!raw) return undefined
   try {
     const data = JSON.parse(raw) as Partial<CookNaviSession> | null
-    if (!data || !Array.isArray(data.selectedIds)) return undefined
-    const selectedIds = data.selectedIds.filter(
-      (id): id is number => typeof id === 'number' && Number.isFinite(id),
-    )
-    if (selectedIds.length === 0) return undefined
-    const current = parseCursor(data.current)
-    // 段取りを表示していない状態で調理中の手順だけが残ることはない（不整合は捨てる）
-    const showTimeline = data.showTimeline === true
-    const keepCursor = showTimeline && current != null
-    // 並べ替えも調理中の位置と同じで、段取りを表示していない状態だけが残ることはない
-    const pulls = keepCursor ? parseStepPulls(data.pulls) : []
-    return {
-      selectedIds,
-      showTimeline,
-      trialActive: data.trialActive === true,
-      ...(keepCursor ? { current } : {}),
-      // 開閉はカーソルがあるときだけ意味を持つ。覚えていなければ「開いていた」に倒す（上の解説）
-      ...(keepCursor ? { sessionOpen: data.sessionOpen !== false } : {}),
-      ...(pulls.length > 0 ? { pulls } : {}),
-    }
+    return readCookNaviSession(data)
   } catch {
     return undefined
   }
+}
+
+/** 読み込んだJSONを覚え書きの形に整える（版・日付の判断は restoreCookNaviSession が先に済ませる） */
+function readCookNaviSession(data: Partial<CookNaviSession> | null): CookNaviSession | undefined {
+  if (!data || !Array.isArray(data.selectedIds)) return undefined
+  const selectedIds = data.selectedIds.filter(
+    (id): id is number => typeof id === 'number' && Number.isFinite(id),
+  )
+  if (selectedIds.length === 0) return undefined
+  const current = parseCursor(data.current)
+  // 段取りを表示していない状態で調理中の手順だけが残ることはない（不整合は捨てる）
+  const showTimeline = data.showTimeline === true
+  const keepCursor = showTimeline && current != null
+  // 並べ替えも調理中の位置と同じで、段取りを表示していない状態だけが残ることはない
+  const pulls = keepCursor ? parseStepPulls(data.pulls) : []
+  return {
+    selectedIds,
+    showTimeline,
+    trialActive: data.trialActive === true,
+    ...(keepCursor ? { current } : {}),
+    ...(pulls.length > 0 ? { pulls } : {}),
+  }
+}
+
+/**
+ * 覚え書きを読み戻した結果（2026-08-12 便FT）。
+ * 「読めなかった」と「捨てた」を分けて返すのは、**捨てたことを黙らない**ため
+ * （黙って消すと 2026-08-09 の「段取りが毎回消える」と同じ見え方になる）。
+ */
+export type CookNaviRestore =
+  /** 覚え書きが無い・うちの形ではない・中身が空（知らせることは何もない） */
+  | { kind: 'none' }
+  /**
+   * 覚えていたが捨てた。`reason` は捨てた理由、`hadTimeline` / `hadCursor` は
+   * 「利用者が失ったものがあるか」＝知らせを出すかどうかと、その言い方の判断に使う。
+   */
+  | { kind: 'expired'; reason: 'date' | 'version'; hadTimeline: boolean; hadCursor: boolean }
+  | { kind: 'ok'; session: CookNaviSession }
+
+/** 覚え書きに書き出す形（版と、最後に操作した日を添える） */
+export function serializeCookNaviSession(session: CookNaviSession, today: string): string {
+  return JSON.stringify({ v: COOK_NAVI_SESSION_VERSION, date: today, ...session })
+}
+
+/**
+ * 保存された覚え書きを、**捨てる条件にかけてから**読み戻す（2026-08-12 便FT）。
+ * 判断はこの純関数1か所に集め、画面側は結果を受け取るだけにする。
+ */
+export function restoreCookNaviSession(raw: string | null, today: string): CookNaviRestore {
+  if (!raw) return { kind: 'none' }
+  let data: (Partial<CookNaviSession> & { v?: unknown; date?: unknown }) | null
+  try {
+    data = JSON.parse(raw) as typeof data
+  } catch {
+    return { kind: 'none' }
+  }
+  if (!data || typeof data !== 'object') return { kind: 'none' }
+  // 版も日付も無いものは、うちが書いた覚え書きではない扱いで黙って捨てる
+  if (typeof data.v !== 'number' || typeof data.date !== 'string') return { kind: 'none' }
+  // 中身の形が読めるかを先に見る（何を失うのかを知らせに書けるようにするため）
+  const session = readCookNaviSession(data)
+  const hadTimeline = session?.showTimeline === true
+  const hadCursor = hadTimeline && session?.current != null
+  if (data.v !== COOK_NAVI_SESSION_VERSION) {
+    return { kind: 'expired', reason: 'version', hadTimeline, hadCursor }
+  }
+  if (data.date !== today) {
+    return { kind: 'expired', reason: 'date', hadTimeline, hadCursor }
+  }
+  if (!session) return { kind: 'none' }
+  return { kind: 'ok', session }
 }
 
 /**
@@ -156,6 +235,11 @@ export function reconcileSelectedIds(
 /**
  * 調理中（全画面のセッションを開いている間）は、**記録を段取りへ逆流させない**
  * （2026-08-09 便EL・docs/69「記録は一方通行」）。
+ *
+ * **`cookingInProgress` は「全画面をいま開いているか」**（2026-08-12 便FT で言葉どおりに戻した）。
+ * 「調理中の位置を覚えているか」で判断すると、位置を端末に残すようになった今、
+ * 一度でも調理中モードを開いた日は整合が一日中働かない＝今日の献立から消えた品が
+ * 段取りに残り続ける。全画面を閉じて段取りの一覧に戻った時点で、組み直した姿を見せる。
  *
  * 実行中の段取りの母集合は `selectedIds` だけと決める。調理の最中に献立タブや別の端末操作で
  * 1品に「作った！」が付くと、その品は候補一覧（今日の献立から今日作った品を除いたもの）から
@@ -231,23 +315,51 @@ export function resolveCookNaviSelection(
   return pickDefaultSelectedIds(availableIds)
 }
 
-export function loadCookNaviSession(): CookNaviSession | undefined {
+/**
+ * 端末に残した覚え書きを、捨てる条件にかけて読み戻す（2026-08-12 便FT）。
+ * 画面はこの結果を見て、続きを出すか・捨てたことを知らせるかを決める。
+ */
+export function loadCookNaviRestore(): CookNaviRestore {
   try {
-    return parseCookNaviSession(sessionStorage.getItem(COOK_NAVI_SESSION_KEY))
+    return restoreCookNaviSession(localStorage.getItem(COOK_NAVI_SESSION_KEY), todayString())
   } catch {
-    return undefined
+    return { kind: 'none' }
   }
+}
+
+/** 続きとして使える覚え書きだけを返す（捨てた理由が要らない読み手はこちら） */
+export function loadCookNaviSession(): CookNaviSession | undefined {
+  const restored = loadCookNaviRestore()
+  return restored.kind === 'ok' ? restored.session : undefined
 }
 
 export function saveCookNaviSession(session: CookNaviSession): void {
   try {
     if (session.selectedIds.length === 0) {
-      sessionStorage.removeItem(COOK_NAVI_SESSION_KEY)
+      localStorage.removeItem(COOK_NAVI_SESSION_KEY)
       return
     }
-    sessionStorage.setItem(COOK_NAVI_SESSION_KEY, JSON.stringify(session))
+    localStorage.setItem(COOK_NAVI_SESSION_KEY, serializeCookNaviSession(session, todayString()))
   } catch {
     /* 保存できない環境では覚えないだけ（従来どおり毎回組み直しになる） */
+  }
+}
+
+/** 全画面の調理中モードを開いているか（タブを閉じるまでの覚え書き。上の解説を参照） */
+export function loadCookNaviSessionOpen(): boolean {
+  try {
+    return sessionStorage.getItem(COOK_NAVI_OPEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function saveCookNaviSessionOpen(open: boolean): void {
+  try {
+    if (open) sessionStorage.setItem(COOK_NAVI_OPEN_KEY, '1')
+    else sessionStorage.removeItem(COOK_NAVI_OPEN_KEY)
+  } catch {
+    /* 覚えられない環境では、読み込み直したときに段取りの一覧から入り直すだけ */
   }
 }
 
@@ -267,10 +379,12 @@ export function endCookNaviTrial(): void {
 
 export function clearCookNaviSession(): void {
   try {
-    sessionStorage.removeItem(COOK_NAVI_SESSION_KEY)
+    localStorage.removeItem(COOK_NAVI_SESSION_KEY)
   } catch {
     /* 何もしない */
   }
+  // 位置が無くなれば全画面も意味を持たない（開いた印だけが残らないようにする）
+  saveCookNaviSessionOpen(false)
 }
 
 /** 段取りの続きが残っているか（常駐タイマーの戻り先をナビにするかの判断に使う） */
