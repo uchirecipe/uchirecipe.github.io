@@ -29364,7 +29364,7 @@ try {
       check(
         'FW-03(疑問①) バックアップとの違いを、入るものと戻せるかで言い分けている',
         fwVs.includes('バックアップファイル') && fwVs.includes('アーカイブファイル') &&
-          fwVs.includes('アプリに読み込んで元に戻せます') && fwVs.includes('アプリには戻せません'),
+          fwVs.includes('アプリに読み込んで元に戻せます') && fwVs.includes('「アーカイブを見る」で中身は読めますが、アプリには戻せません'),
         fwVs.slice(0, 120),
       )
       check(
@@ -29559,7 +29559,7 @@ try {
       await fpPage.waitForTimeout(1200)
       check(
         'FW-04 「全て作った！」の確認文が、どの設定で在庫が減るのかを名前で言う',
-        fpDialogs.some((m) => m.includes('設定「「作った！」で在庫を減らす」がONのため') && m.includes('「ある→少ない→ない」の順に1つ下がります')),
+        fpDialogs.some((m) => m.includes('「作った！」で在庫を減らす設定がONのため') && m.includes('「ある→少ない→ない」の順に1つ下がります')),
         fpDialogs.join(' | ').slice(0, 200),
       )
       check(
