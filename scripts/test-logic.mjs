@@ -5186,6 +5186,101 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
+// ---------- buildCookTimeline / buildCookPlan(並行調理ナビ: 画面に出ている数字どうしを合わせる。
+// 2026-08-12 便FU-1・利用者テスト(4回中4回再現)) ----------
+//
+// 指摘（原文）: 「鶏むね肉のみそマヨ焼き 1品だけなら約37分」なのに、同じ画面の手順表示は
+// 待ち10分＋3分＋2分＋待ち15分＋4分＝34分。他2品は一致するのに鶏だけ+3分ずれる。
+//
+// 真因: 待ちを仕掛けた品には「遅くともこの時刻までに手を戻す」締め切り（attendUntil＝
+// 待ち終了＋煮込みの猶予2割）が立つ。差し込む手作業がその締め切りを越えないかを見る判定で、
+// **その締め切りを立てた本人の手順まで弾いていた**。鍋に戻る作業そのものを鍋の締め切りで
+// 止めていたことになり、締め切りの時刻まで何もしない空白が段取りに入る。
+// 空白は手順のどこにも出ないので、手順の分数を足した値とヘッダーの合計が食い違う。
+//
+// 正しいのは手順の側（34分）。空白は料理の都合ではなく計算の産物なので、空白を作らない。
+{
+  const s = (text, minutes) => (minutes == null ? { text } : { text, minutes })
+  /** その手順カードに出る分数（待ちは待ち分数・手作業は目安時間。長い待ちは出さない＝0） */
+  const shownMinutes = (it) => (it.kind === 'wait' ? it.waitMinutes : it.activeMinutes)
+  const sumShown = (items) => items.reduce((sum, it) => sum + shownMinutes(it), 0)
+
+  const misoMayo = {
+    id: 1,
+    title: '鶏むね肉のみそマヨ焼き',
+    servings: 2,
+    ingredients: [],
+    steps: [
+      s('鶏むね肉に☆をもみ込んで10分おく。', 10),
+      s('玉ねぎを薄切りにする。', 3),
+      s('天板にアルミホイルを敷く。', 2),
+      s('魚焼きグリルの弱火で12〜15分焼く。', 15),
+      s('器に盛り、細ねぎを散らす。', 4),
+    ],
+  }
+  const misoMayoTimeline = buildCookTimeline([misoMayo])
+  eq(
+    'FU-1 手順に出る分数の並びは指摘のとおり（10・3・2・15・4）',
+    misoMayoTimeline.items.map(shownMinutes),
+    [10, 3, 2, 15, 4],
+  )
+  eq(
+    'FU-1 ヘッダーの合計は、画面に出ている各手順の分数の足し算と一致する',
+    misoMayoTimeline.totalMinutes,
+    sumShown(misoMayoTimeline.items),
+  )
+  eq('FU-1 みそマヨ焼きの合計は34分（+3分の空白が入らない）', misoMayoTimeline.totalMinutes, 34)
+
+  // 締め切りのある待ち（ゆで・煮込み）を持つ品を何通りか通しても、空白が入らないことを見張る。
+  // 1品だけの段取りには「他にやることが無いので待つ」以外の空白は起こりえない
+  const soloShapes = [
+    [s('鍋にたっぷりの湯を沸かし、にんじんを4分ゆでる。'), s('ざるにあげて水気をきる。'), s('ごま油とめんつゆで和え、器に盛る。')],
+    [s('大根は一口大に切る。'), s('鍋に大根とだしを入れて中火で15分煮る。', 15), s('火を止めて10分おき、器に盛る。', 10)],
+    [s('豚肉に下味をもみ込んで20分漬ける。', 20), s('フライパンで両面を3分ずつ焼く。'), s('たれを煮からめ、器に盛る。')],
+    [s('じゃがいもを600Wのレンジで5分加熱する。', 5), s('熱いうちにつぶす。'), s('マヨネーズと和えて器に盛る。')],
+  ]
+  soloShapes.forEach((steps, i) => {
+    const t = buildCookTimeline([{ id: 1, title: `型${i + 1}`, servings: 2, ingredients: [], steps }])
+    eq(
+      `FU-1 1品だけの段取りに空白の分数が入らない（型${i + 1}）`,
+      t.totalMinutes,
+      sumShown(t.items),
+    )
+  })
+
+  // 3品を並行に組んでも、品ごとの「1品だけなら約◯分」は、その品の手順に出ている分数の合計と一致する
+  // （画面の照らし合わせは、ヘッダーの数字と手順の数字を機械で突き合わせる形で固定する）
+  const plan = buildCookPlan([
+    misoMayo,
+    {
+      id: 2,
+      title: '豆腐とわかめのみそ汁',
+      servings: 2,
+      ingredients: [],
+      steps: [s('鍋にだし汁を入れて火にかける。', 2), s('豆腐とわかめを加えて2分煮る。', 2), s('みそを溶き入れ、火を止める。', 4)],
+    },
+    {
+      id: 3,
+      title: 'ほうれん草のごま和え',
+      servings: 2,
+      ingredients: [],
+      steps: [s('ほうれん草を洗う。', 3), s('鍋にたっぷりの湯を沸かし、1分ゆでる。', 3), s('水気を絞って4cm長さに切る。', 3), s('すりごまと砂糖で和える。', 3)],
+    },
+  ])
+  plan.recipes.forEach((r) => {
+    eq(
+      `FU-1 「1品だけなら約◯分」＝その品の手順に出ている分数の合計（${r.title}）`,
+      r.soloMinutes,
+      sumShown(plan.items.filter((it) => it.recipeId === r.id)),
+    )
+  })
+  eq(
+    'FU-1 「1品ずつ作ると約◯分」は品ごとの目安の足し算のまま',
+    plan.sequentialMinutes,
+    plan.recipes.reduce((sum, r) => sum + r.soloMinutes, 0),
+  )
+}
+
 // ---------- stepCategory / buildCookTimeline(並行調理ナビ: 3品全体の流れを整える。
 // 2026-08-08 便EB・オーナー要望「野菜を切る工程はまとめたい」「準備→加熱→仕上げの流れ」) ----------
 {
