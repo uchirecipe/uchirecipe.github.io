@@ -48,8 +48,10 @@ import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
 import {
   clearCookNaviSession,
   endCookNaviTrial,
-  loadCookNaviSession,
+  loadCookNaviRestore,
+  loadCookNaviSessionOpen,
   saveCookNaviSession,
+  saveCookNaviSessionOpen,
   saveCookNaviScroll,
   takeCookNaviScroll,
   reconcileSelectedIdsForSession,
@@ -496,6 +498,14 @@ export default function CookNaviPage() {
   const settings = useSettings()
   const isProUnlocked = !!settings?.proCode
   /**
+   * 端末に残していた覚え書きを、**捨てる条件にかけてから**受け取る（2026-08-12 便FT・
+   * 利用者テスト「アプリを開き直すと、段取りも途中の位置も消える」）。
+   * 読むのは画面を開いた1回だけ（logic/cookNaviSession.ts の loadCookNaviRestore が
+   * 版・日付・形を見て、続きとして使えるものだけを返す）。
+   */
+  const [restored] = useState(loadCookNaviRestore)
+  const restoredSession = restored.kind === 'ok' ? restored.session : undefined
+  /**
    * 恒常のお試し（2026-08-02 便CP-2・docs/62 決定③）。未解錠でも期限なしで3回まで、
    * 本物のナビをそのまま使える。1回目は操作を覚えて終わることが多く、価値が分かるのは
    * 2〜3回目なので回数制にしている（時限だと試す前に失効する）。
@@ -505,7 +515,7 @@ export default function CookNaviPage() {
    * これが無いと、他のタブへ行って戻るたびにお試しの回数を1回ずつ失う。
    */
   const trialRemaining = cookNaviTrialRemaining(settings?.cookNaviTrialCount)
-  const [trialActive, setTrialActive] = useState(() => loadCookNaviSession()?.trialActive ?? false)
+  const [trialActive, setTrialActive] = useState(restoredSession?.trialActive ?? false)
   const canUseNavi = isProUnlocked || trialActive
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
@@ -591,22 +601,24 @@ export default function CookNaviPage() {
    * 選んだ品と表示中かどうかを端末内に覚え、他のタブへ行って戻っても続きから使える。
    * 消えるのは「戻る」を押したときと「まとめて作った！」で記録したときだけ。
    */
-  const restoredSession = useRef(loadCookNaviSession())
-  const [selectedIds, setSelectedIds] = useState<number[]>(
-    () => restoredSession.current?.selectedIds ?? [],
+  const [selectedIds, setSelectedIds] = useState<number[]>(restoredSession?.selectedIds ?? [])
+  const [showTimeline, setShowTimeline] = useState(restoredSession?.showTimeline ?? false)
+  const initializedRef = useRef(restoredSession != null)
+  /**
+   * 覚えていた段取りを捨てたことの知らせ（2026-08-12 便FT・規約F）。
+   * 黙って消すと 2026-08-09 の「段取りが毎回消える」と同じ見え方になるので、
+   * **段取りを出していた覚え書きを捨てたときだけ**、理由を画面に1行出す。
+   * 選んだ品しか覚えていなかったとき（段取り前）は失うものが無いので知らせない。
+   */
+  const [expiredReason, setExpiredReason] = useState<'date' | 'version' | null>(
+    restored.kind === 'expired' && restored.hadTimeline ? restored.reason : null,
   )
-  const [showTimeline, setShowTimeline] = useState(
-    () => restoredSession.current?.showTimeline ?? false,
-  )
-  const initializedRef = useRef(restoredSession.current != null)
+  /** 捨てた覚え書きが調理の途中だったか（知らせの言い方を分ける） */
+  const expiredHadCursor = restored.kind === 'expired' && restored.hadCursor
   /**
    * 調理中の手順（2026-08-09 便EL・docs/69 第1段）。**書ける調理の状態はこの1つだけ**。
-   * これが入っていれば全画面の調理中セッションを開いている、という決め方にして、
-   * 「開いているかどうか」を別のフラグで二重に持たない（片方だけ更新される瞬間を作らない）。
    */
-  const [current, setCurrent] = useState<CookCursor | undefined>(
-    () => restoredSession.current?.current,
-  )
+  const [current, setCurrent] = useState<CookCursor | undefined>(restoredSession?.current)
   /**
    * 全画面の調理中モードを開いているか（2026-08-10 便FC・オーナー実機
    * 「一回閉じて再度開くと①に戻ってしまう。前回閉じた時の手順から再開したい」）。
@@ -616,9 +628,13 @@ export default function CookNaviPage() {
    * **閉じてもカーソルは残す**ようにしたため、位置（current）と開閉（ここ）は別のことになる。
    * docs/69 の「書ける状態は1つだけ」は調理の**位置**についての決まりなので、
    * 位置を2か所に持たないこの分け方なら破らない（開閉は showTimeline と同類の見せ方の状態）。
+   *
+   * 2026-08-12 便FT: 位置は端末に残す（アプリを開き直しても続く）が、**開閉はタブを閉じるまで**。
+   * 読み込み直し（同じタブ）では開いたまま続き、アプリを開き直したときは段取りの一覧に着地して
+   * 「調理中モードの続きから見る」を本人が押す＝開き直した直後にいきなり大きな手順を出さない。
    */
   const [sessionOpen, setSessionOpen] = useState(
-    () => restoredSession.current?.sessionOpen ?? false,
+    () => loadCookNaviSessionOpen() && restoredSession?.current != null,
   )
   /**
    * 色で引き寄せた手順（2026-08-10 便FI・docs/69 第3段）。
@@ -631,7 +647,7 @@ export default function CookNaviPage() {
    * （2026-08-10 司令部裁定）。保存しないと読み込み直したときに並びだけ元へ戻り、
    * カーソルより前の品が「作っていないのに完成」と出る。
    */
-  const [pulls, setPulls] = useState<StepPull[]>(() => restoredSession.current?.pulls ?? [])
+  const [pulls, setPulls] = useState<StepPull[]>(restoredSession?.pulls ?? [])
   /**
    * 自分で時間を決めるタイマー（2026-08-09 便ES・オーナー指示D-2）。
    * レシピ詳細と同じ作法で、前回使った秒数を覚えて開く。
@@ -687,11 +703,19 @@ export default function CookNaviPage() {
       showTimeline,
       trialActive,
       current,
-      sessionOpen,
       // 並べ替えが1つも無いときは項目そのものを書かない（覚え書きの中身を増やさない）
       ...(pulls.length > 0 ? { pulls } : {}),
     })
-  }, [selectedIds, showTimeline, trialActive, current, sessionOpen, pulls])
+  }, [selectedIds, showTimeline, trialActive, current, pulls])
+
+  /**
+   * 全画面を開いているかどうかだけは別に覚える（2026-08-12 便FT）。
+   * 置き場もタブを閉じると消える側（sessionStorage）で、**アプリを開き直すと閉じた状態に戻る**。
+   * 位置（current）が無いときは意味を持たないので印も残さない。
+   */
+  useEffect(() => {
+    saveCookNaviSessionOpen(sessionOpen && current != null)
+  }, [sessionOpen, current])
 
   // 常駐タイマーバーの「完了タイマー」タップからの着地（?focusStep=レシピID-手順番号）。
   // ナビ実行中はタップで単品レシピ詳細へ離脱させず、ナビ内の該当手順カードへスクロール＆
@@ -846,6 +870,7 @@ export default function CookNaviPage() {
 
   const toggleSelect = (id: number) => {
     setDroppedNotice('')
+    setExpiredReason(null)
     setShowTimeline(false)
     setSelectedIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
@@ -1076,6 +1101,7 @@ export default function CookNaviPage() {
   const pendingBuildScrollRef = useRef(false)
   const buildTimeline = () => {
     setDroppedNotice('')
+    setExpiredReason(null)
     setSessionLostNotice(false)
     // 組み直すときは、色で引き寄せた並べ替えも白紙に戻す（2026-08-10 便FI）
     setPulls([])
@@ -1332,6 +1358,21 @@ export default function CookNaviPage() {
               <p className="text-xs text-ink-muted">{ja.cookNavi.disclaimer}</p>
             </div>
 
+            {/* 覚えていた段取りを捨てたことの知らせ（2026-08-12 便FT・規約F）。
+                今日の献立が空でも読めるよう、候補の有無で分かれる前に置く */}
+            {expiredReason && (
+              <p
+                data-testid="navi-restore-expired"
+                className="ja-phrase mt-[var(--space-sm)] rounded-sm border border-accent bg-surface px-3 py-2 text-sm text-accent-ink"
+              >
+                {expiredReason === 'version'
+                  ? ja.cookNavi.restoreExpiredByVersion
+                  : expiredHadCursor
+                    ? ja.cookNavi.restoreExpiredByDateCooking
+                    : ja.cookNavi.restoreExpiredByDate}
+              </p>
+            )}
+
             {todayRecipes === undefined ? null : todayRecipes.length === 0 ? (
               <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] text-center shadow-sm">
                 <p className="text-sm text-ink-muted">{ja.cookNavi.emptyToday}</p>
@@ -1486,6 +1527,15 @@ export default function CookNaviPage() {
                       </p>
                       <p className="mt-1 text-xs text-ink-muted">
                         {isSequential ? ja.cookNavi.sequentialOrderNote : ja.cookNavi.orderNote}
+                      </p>
+                      {/* どこまでが残るのかを、閉じる前に読める場所に置く（2026-08-12 便FT・
+                          利用者テスト「料理中に画面が落ちる/切り替わるのは普通にあるので不安です」）。
+                          残る条件と捨てる条件を同じ1行に並べる（規約F） */}
+                      <p
+                        data-testid="navi-restore-keep-note"
+                        className="ja-phrase mt-1 text-xs text-ink-muted"
+                      >
+                        {ja.cookNavi.restoreKeepNote}
                       </p>
                     </div>
 
