@@ -29237,8 +29237,10 @@ try {
         await P(store().put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
         idb.close()
       })
+      // 生のIndexedDBへ書いた変更はDexieの購読に伝わらないので、必ず読み込み直してから見る
       await fwPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
-      await fwPage.waitForTimeout(1200)
+      await fwPage.reload({ waitUntil: 'networkidle' })
+      await fwPage.waitForTimeout(1500)
 
       const fwGroups = await fwPage.evaluate(() =>
         Array.from(document.querySelectorAll('[data-testid="pro-feature-group"]')).map((el) => ({
@@ -29549,7 +29551,8 @@ try {
         idb.close()
       })
       await fpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await fpPage.waitForTimeout(1500)
+      await fpPage.reload({ waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(1800)
       check(
         'FW-04 設定がONのときは、1品ずつの「作った！」の前にも在庫が減ることが書いてある（小窓は出さない）',
         (await fpPage.locator('[data-testid="day-pantry-cooked-hint"]').count()) === 1,
@@ -29626,7 +29629,8 @@ try {
       // ①段取りを作っていない（候補として選んだだけ）→ 小窓は出さない
       await fnPutSession(false)
       await fnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await fnPage.waitForTimeout(1500)
+      await fnPage.reload({ waitUntil: 'networkidle' })
+      await fnPage.waitForTimeout(1800)
       check(
         'FW-05 段取りを作っていないときは、日の説明に段取りの話を出さない',
         (await fnPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 0,
