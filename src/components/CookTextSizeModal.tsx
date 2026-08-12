@@ -1,5 +1,5 @@
+import { useEffect } from 'react'
 import { X } from 'lucide-react'
-import { useOverlayDismiss } from './useOverlayDismiss'
 import { COOK_FONT_SCALES, cookFontSize } from '../logic/cookFontScale'
 import { ja } from '../i18n/ja'
 
@@ -32,7 +32,18 @@ export default function CookTextSizeModal({
   onChange: (next: number) => void
   onClose: () => void
 }) {
-  useOverlayDismiss(open, onClose)
+  /**
+   * Escape で閉じる。**履歴は積まない**（全画面の調理中モードが自前で積んだ履歴と
+   * ぶつかり、窓を閉じただけで調理中モードごと閉じてしまうため。CookFinishModal と同じ理由）
+   */
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
   if (!open) return null
   return (
     <div

@@ -1,5 +1,5 @@
+import { useEffect } from 'react'
 import { Check, ChevronLeft, X } from 'lucide-react'
-import { useOverlayDismiss } from './useOverlayDismiss'
 import { ja } from '../i18n/ja'
 
 /**
@@ -36,8 +36,22 @@ export default function CookFinishModal({
   /** 記録をつけずに全画面を閉じる */
   onClose: () => void
 }) {
-  // Escape・端末の「戻る」は「調理を続ける」と同じ扱い（何も起きない側に倒す）
-  useOverlayDismiss(open, onBack)
+  /**
+   * Escape は「調理を続ける」と同じ扱い（何も起きない側に倒す）。
+   * **履歴は積まない**（useOverlayDismiss を使わない）: この窓は全画面の調理中モードの上に
+   * 重なるが、全画面は自前で履歴を1つ積んでいて、その戻り先で全画面を閉じる作りになっている。
+   * ここでも積むと、窓を閉じたときの history.back() を全画面側が「戻る操作」と受け取り、
+   * 「調理を続ける」で調理中モードごと閉じてしまう。自由な時間のタイマーの窓
+   *（CustomTimerModal）と同じ扱いにそろえる
+   */
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onBack()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onBack])
   if (!open) return null
   return (
     <div
