@@ -36,7 +36,7 @@ import { useWakeLock } from '../components/useWakeLock'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import {
   buildCookPlan,
-  hasLaterHandsOnStep,
+  hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
   type TimelineItem,
@@ -1524,8 +1524,10 @@ export default function CookNaviPage() {
                           ingredientNames={ingredientNamesByRecipeId.get(item.recipeId) ?? []}
                           recipeNotes={recipeNotesByStep.get(recipeNoteStepKey(item)) ?? []}
                           /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
-                             （次の手順は同じ品の続きで、待ち終わってからやる作業のため） */
-                          showFillHint={!isSequential && hasLaterHandsOnStep(planItems, index)}
+                             （次の手順は同じ品の続きで、待ち終わってからやる作業のため）。
+                             並行の段取りでも、その待ちの中に入る手作業が無ければ出さない
+                             （2026-08-12 便FS-2・logic/cookNavi.ts hasFillableWorkDuringWait） */
+                          showFillHint={!isSequential && hasFillableWorkDuringWait(planItems, index)}
                           isRecipeLast={lastIndexByRecipeId.get(item.recipeId) === index}
                           highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
                           onStartTimer={startStepTimer}

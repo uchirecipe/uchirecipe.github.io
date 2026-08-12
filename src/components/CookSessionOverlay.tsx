@@ -36,7 +36,7 @@ import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import {
   endsWithLongRest,
-  hasLaterHandsOnStep,
+  hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
   type TimelineItem,
@@ -459,10 +459,12 @@ export default function CookSessionOverlay({
   const showWaitTimerButton = showsWaitTimerButton(item)
   /**
    * 「この間に、次の手作業を進められます」を出すか（2026-08-11 便FL。段取りの一覧と同じ条件）。
-   * 後ろに手作業が残っている待ちのときだけ＝1品ずつ作る段取りや、今回の調理では終わらない
-   * 長い待ちには出さない
+   * その待ちの中に入る手作業があるときだけ＝1品ずつ作る段取りや、今回の調理では終わらない
+   * 長い待ち、同じ品の続きしか残っていない待ちには出さない
+   * （2026-08-12 便FS-2・logic/cookNavi.ts hasFillableWorkDuringWait）
    */
-  const showFillHint = isWait && !sequential && !item.longRest && hasLaterHandsOnStep(items, index)
+  const showFillHint =
+    isWait && !sequential && !item.longRest && hasFillableWorkDuringWait(items, index)
   /**
    * タイマーの置き場所（2026-08-09 便ES・オーナー指示E-11
    * 「大きく表示中のタイマーは画面上、他のタイマーは『他の品の〜』に直接表示」）。
