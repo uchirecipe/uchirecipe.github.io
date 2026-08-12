@@ -15571,6 +15571,99 @@ eq(
   )
 }
 
+// ---------- 2026-08-12 便FR・材料の選び方の行が、段取りの最後に寄っていた ----------
+// 利用者テスト「チャーハンの『ご飯は炊きたてか冷蔵保存のものを使い、常温に長く置いたご飯は
+// 使わないこと。』が段取りの最後（完成の手順）に出る」。「冷蔵」「常温」に反応して保存の行と
+// 判定されていたが、中身は**どのご飯を使うか**＝作り始める前の話なので最初の手順に出す。
+{
+  const noteSteps = (recipeId, def) =>
+    def.steps.map((s, i) => ({ recipeId, stepIndex: i, addedByNavi: false, text: s.text }))
+  const notesAt = (map, recipeId, stepIndex) =>
+    (map.get(recipeNoteStepKey({ recipeId, stepIndex })) ?? []).map((n) => n.text)
+  const CHAHAN_PICK = '・ご飯は炊きたてか冷蔵保存のものを使い、常温に長く置いたご飯は使わないこと。'
+
+  // ---- (1) 行の見分け ----
+  eq('FR-NOTE 材料の選び方の行は pick(保存の語が入っていても保存にしない)', classifyRecipeNote(CHAHAN_PICK), 'pick')
+  eq('FR-NOTE 「使わない」だけでも材料の選び方と読む', classifyRecipeNote('しなびた野菜は使わないこと。'), 'pick')
+  eq('FR-NOTE 「〜のものを使う」も材料の選び方', classifyRecipeNote('豆腐は木綿のものを使うとよい。'), 'pick')
+  // 保存・交差汚染の行を横取りしない（同梱レシピに実在する言い回しで固定する）
+  eq(
+    'FR-NOTE 「使い切る」は材料の選び方ではない(保存のまま)',
+    classifyRecipeNote('冷蔵庫で保存する場合は2〜3日を目安に使い切ること。'),
+    'keep',
+  )
+  eq(
+    'FR-NOTE 「使い捨て手袋」は材料の選び方ではない(交差汚染のまま)',
+    classifyRecipeNote('・手に傷があるときは、使い捨て手袋であえると安心。'),
+    'raw',
+  )
+  eq(
+    'FR-NOTE 「◯◯を使い〜のため」の保存の行は保存のまま',
+    classifyRecipeNote(
+      '・生野菜や豆腐を使い冷たいまま食べる汁物のため、食べる直前まで冷蔵庫でよく冷やしておき、作った日のうちに食べ切ること。',
+    ),
+    'keep',
+  )
+  eq(
+    'FR-NOTE 「◯◯を使っているので」の保存の行も保存のまま',
+    classifyRecipeNote(
+      '・冷蔵庫で1〜2日を目安に食べ切ること。牛乳を使っているので、粗熱が取れたら小分けにして早めに冷蔵庫へ入れること。',
+    ),
+    'keep',
+  )
+
+  // ---- (2) チャーハンの実データ。最初の手順に出て、最後の手順には出ない ----
+  const chahan = starterDefs.find((d) => d.title === 'チャーハン')
+  eq('FR-NOTE チャーハンが同梱カタログにある', chahan != null, true)
+  const chahanNotes = assignRecipeNotes(noteSteps(12, chahan), new Map([[12, chahan]]))
+  eq(
+    'FR-NOTE ご飯の選び方の行は最初の手順に出る',
+    notesAt(chahanNotes, 12, 0).includes(CHAHAN_PICK),
+    true,
+  )
+  eq(
+    'FR-NOTE 完成の手順には出ない(以前はここに出ていた)',
+    notesAt(chahanNotes, 12, chahan.steps.length - 1).includes(CHAHAN_PICK),
+    false,
+  )
+  // 便FQで足した「ご飯を炊く時間は…」と並び、メモに書かれた順のまま出る
+  eq('FR-NOTE 最初の手順にはメモの順で2行が並ぶ', notesAt(chahanNotes, 12, 0), [
+    '・ご飯を炊く時間は調理時間に含んでいない。炒め始めるまでに2杯分を用意しておくこと。',
+    CHAHAN_PICK,
+  ])
+
+  // ---- (3) 全数の掃引。動いたのはこの1行だけであることを内訳で固定する ----
+  const counts = { raw: 0, pick: 0, keep: 0, heat: 0, other: 0 }
+  let totalLines = 0
+  for (const def of starterDefs) {
+    for (const line of splitRecipeNoteLines(def.memo)) {
+      counts[classifyRecipeNote(line)]++
+      totalLines++
+    }
+  }
+  eq('FR-NOTE 同梱109品の本体メモは169行', totalLines, 169)
+  eq('FR-NOTE 行の種類の内訳(pickは1行だけ＝チャーハン)', counts, {
+    raw: 51,
+    pick: 1,
+    keep: 95,
+    heat: 8,
+    other: 14,
+  })
+  // 材料の選び方と判定された行は、必ずその品の最初の手順に出る
+  let pickLines = 0
+  let pickAtFirst = 0
+  for (const def of starterDefs) {
+    const lines = splitRecipeNoteLines(def.memo).filter((l) => classifyRecipeNote(l) === 'pick')
+    if (lines.length === 0) continue
+    const map = assignRecipeNotes(noteSteps(13, def), new Map([[13, def]]))
+    for (const line of lines) {
+      pickLines++
+      if (notesAt(map, 13, 0).includes(line)) pickAtFirst++
+    }
+  }
+  eq('FR-NOTE 材料の選び方の行はすべて最初の手順に出る', [pickLines, pickAtFirst], [1, 1])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
