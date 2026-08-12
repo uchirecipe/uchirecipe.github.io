@@ -9662,6 +9662,29 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     toSpeechText('玉ねぎはくし形切りにする。'),
     '玉ねぎはくしがたぎりにする。',
   )
+
+  // ---------- 2026-08-12 便FX・単位の読み（オーナー実機「『cm』をシーエムと読むくらいに酷い」）
+  // 単位は data/unitReadings.ts で読みに置き換える（用語タップ辞書には入れない＝
+  // 手順本文の「200g」がタップ対象にならない）。表示テキストは1文字も変えない。
+  eq('FX-05 cmはセンチと読む', toSpeechText('4cm長さに切る。'), '4センチ長さに切る。')
+  eq('FX-05 mmはミリと読む', toSpeechText('5mm幅の薄切りにする。'), '5ミリ幅の薄切りにする。')
+  eq('FX-05 gはグラムと読む', toSpeechText('鶏むね肉300gを使う。'), '鶏むね肉300グラムを使う。')
+  eq('FX-05 kgはキロと読む(gより先に当てる)', toSpeechText('野菜が1kg程度まで。'), '野菜が1キロ程度まで。')
+  eq('FX-05 mlはミリリットルと読む', toSpeechText('水200mlを注ぐ。'), '水200ミリリットルを注ぐ。')
+  eq('FX-05 Lはリットルと読む', toSpeechText('湯1Lに塩を入れる。'), '湯1リットルに塩を入れる。')
+  eq('FX-05 ccはシーシーと読む', toSpeechText('だし200ccを加える。'), 'だし200シーシーを加える。')
+  eq('FX-05 ℃は度と読む', toSpeechText('180℃に予熱する。'), '180度に予熱する。')
+  eq('FX-05 %はパーセントと読む', toSpeechText('塩分2%で漬ける。'), '塩分2パーセントで漬ける。')
+  eq('FX-05 大さじ・小さじはひらがなで読む', toSpeechText('大さじ2と小さじ1を混ぜる。'), 'おおさじ2とこさじ1を混ぜる。')
+  eq('FX-05 分数は「◯分の◯」と読む', toSpeechText('卵液の1/3を流す。'), '卵液の3分の1を流す。')
+  eq(
+    'FX-05 単位も辞書語も入っている文は両方効く',
+    toSpeechText('小口切りにして5cm幅に切る。'),
+    'こぐちぎりにして5センチ幅に切る。',
+  )
+  // 数字が前に無い英字は触らない（英単語の中の l・g を壊さない）
+  eq('FX-05 数字の前に無い英字は読み替えない', toSpeechText('Lサイズの卵を使う。'), 'Lサイズの卵を使う。')
+  eq('FX-05 英単語の中は読み替えない', toSpeechText('1グラタン皿に入れる。'), '1グラタン皿に入れる。')
 }
 
 // ---------- 材料名の下線マッチ(docs/20 §7・手順本文中の材料名に控えめな下線・2026-07-12) ----------
@@ -16007,7 +16030,7 @@ eq(
   ])
 
   // ---- (3) 全数の掃引。動いたのはこの1行だけであることを内訳で固定する ----
-  const counts = { raw: 0, pick: 0, keep: 0, heat: 0, other: 0 }
+  const counts = { raw: 0, pick: 0, during: 0, keep: 0, heat: 0, other: 0 }
   let totalLines = 0
   for (const def of starterDefs) {
     for (const line of splitRecipeNoteLines(def.memo)) {
@@ -16016,10 +16039,13 @@ eq(
     }
   }
   eq('FR-NOTE 同梱109品の本体メモは169行', totalLines, 169)
+  // 2026-08-12 便FX: during(調理の途中の話)を足したので、keepが1行だけそちらへ移る
+  // (フレンチトーストの「浸けている間は必ず冷蔵庫に入れておくこと。」)
   eq('FR-NOTE 行の種類の内訳(pickは1行だけ＝チャーハン)', counts, {
     raw: 51,
     pick: 1,
-    keep: 95,
+    during: 1,
+    keep: 94,
     heat: 8,
     other: 14,
   })
@@ -16036,6 +16062,66 @@ eq(
     }
   }
   eq('FR-NOTE 材料の選び方の行はすべて最初の手順に出る', [pickLines, pickAtFirst], [1, 1])
+}
+
+// ---------- 2026-08-12 便FX・調理の途中の話が、段取りの最後に寄っていた ----------
+// オーナー実機「フレンチトーストの『浸けている間は必ず冷蔵庫に入れておくこと。』が最後の手順に
+// 出る（本当に効くのは手順3＝卵液に浸す）」。「冷蔵」に反応して保存の行と読まれていた。
+// 「〜ている間は」＝その作業をしている最中の話なので、保存より先に見分けてその手順に出す。
+{
+  const noteSteps = (recipeId, def) =>
+    def.steps.map((s, i) => ({ recipeId, stepIndex: i, addedByNavi: false, text: s.text }))
+  const notesAt = (map, recipeId, stepIndex) =>
+    (map.get(recipeNoteStepKey({ recipeId, stepIndex })) ?? []).map((n) => n.text)
+  const FT_DURING = '浸けている間は必ず冷蔵庫に入れておくこと。'
+
+  // ---- (1) 行の見分け ----
+  eq('FX-NOTE 「〜ている間は」の行は during(冷蔵の語があっても保存にしない)', classifyRecipeNote(FT_DURING), 'during')
+  eq('FX-NOTE 「煮ている間は」も during', classifyRecipeNote('煮ている間は火から離れないこと。'), 'during')
+  eq('FX-NOTE 「寝かせておく間は」も during', classifyRecipeNote('寝かせておく間は冷蔵庫に入れること。'), 'during')
+  // 「時間は」を巻き込まない（同梱9品の「ご飯を炊く時間は調理時間に含んでいない」を動かさない）
+  eq(
+    'FX-NOTE 「炊く時間は」は during ではない(作り始めに読む行のまま)',
+    classifyRecipeNote('・ご飯を炊く時間は調理時間に含んでいない。炒め始めるまでに2杯分を用意しておくこと。'),
+    'other',
+  )
+  eq(
+    'FX-NOTE ふつうの保存の行は保存のまま',
+    classifyRecipeNote('・冷蔵で2〜3日を目安に食べ切ること。'),
+    'keep',
+  )
+
+  // ---- (2) フレンチトーストの実データ。浸す手順に出て、最後の手順には出ない ----
+  const frenchToast = starterDefs.find((d) => d.title === 'フレンチトースト')
+  eq('FX-NOTE フレンチトーストが同梱カタログにある', frenchToast != null, true)
+  const ftNotes = assignRecipeNotes(noteSteps(21, frenchToast), new Map([[21, frenchToast]]))
+  const ftSoakIndex = frenchToast.steps.findIndex((s) => s.text.includes('卵液に浸し'))
+  eq('FX-NOTE 卵液に浸す手順は3番目', ftSoakIndex, 2)
+  eq('FX-NOTE 浸している手順に出る', notesAt(ftNotes, 21, ftSoakIndex).includes(FT_DURING), true)
+  eq(
+    'FX-NOTE 完成の手順には出ない(以前はここに出ていた)',
+    notesAt(ftNotes, 21, frenchToast.steps.length - 1).includes(FT_DURING),
+    false,
+  )
+
+  // ---- (3) 全数の掃引。169行のうち寄せ先が動いたのはこの1行だけ ----
+  let movedLines = 0
+  for (const def of starterDefs) {
+    const lines = splitRecipeNoteLines(def.memo)
+    if (lines.length === 0) continue
+    const map = assignRecipeNotes(noteSteps(22, def), new Map([[22, def]]))
+    for (const line of lines) {
+      if (classifyRecipeNote(line) !== 'during') continue
+      movedLines++
+      // during と判定された行は、その動作が書かれた手順に出る（見つからなければ最初の手順）
+      eq(
+        `FX-NOTE during の行が浸す手順に出る(${def.title})`,
+        notesAt(map, 22, ftSoakIndex).includes(line),
+        true,
+      )
+    }
+  }
+  eq('FX-NOTE 同梱109品で during と読む行は1行だけ', movedLines, 1)
 }
 
 // ---------- 便FT: 段取りと途中の位置を、アプリを開き直しても残す
@@ -16208,6 +16294,34 @@ eq(
     ),
     ftCursor,
   )
+}
+
+// ---------- 2026-08-12 便FX・調理中モードの手順の文字の大きさ ----------
+// オーナー実機「調理中モードの文字の大きさは、ユーザーが自由に変更できない？
+// 小さい画面だと表示できなくなるから無理か」。手順の枠は縦にスクロールするので、
+// 大きくしても読めなくならない。設定に入っている値は必ず選べる4段のどれかに寄せる。
+{
+  const { COOK_FONT_SCALES, DEFAULT_COOK_FONT_SCALE, resolveCookFontScale, cookFontSize } =
+    await import('../src/logic/cookFontScale.ts')
+  eq('FX-09 選べるのは4段', [...COOK_FONT_SCALES], [0.85, 1, 1.25, 1.5])
+  eq('FX-09 既定はふつう(1倍)', DEFAULT_COOK_FONT_SCALE, 1)
+  eq('FX-09 未設定は既定に寄せる', resolveCookFontScale(undefined), 1)
+  eq('FX-09 一覧に無い値は既定に寄せる', resolveCookFontScale(3), 1)
+  eq('FX-09 壊れた値も既定に寄せる', [resolveCookFontScale(Number.NaN), resolveCookFontScale(-1)], [1, 1])
+  eq('FX-09 選べる値はそのまま返す', COOK_FONT_SCALES.map(resolveCookFontScale), [0.85, 1, 1.25, 1.5])
+  // 手順本文は 1.5rem（text-2xl）が標準。倍率をかけた値をCSSに渡す
+  eq('FX-09 手順本文の大きさ(標準1.5rem)', COOK_FONT_SCALES.map((s) => cookFontSize(1.5, s)), [
+    '1.275rem',
+    '1.5rem',
+    '1.875rem',
+    '2.25rem',
+  ])
+  eq('FX-09 枠の基準の大きさ(標準1rem)', COOK_FONT_SCALES.map((s) => cookFontSize(1, s)), [
+    '0.85rem',
+    '1rem',
+    '1.25rem',
+    '1.5rem',
+  ])
 }
 
 // ---------- 結果 ----------

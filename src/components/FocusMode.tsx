@@ -16,6 +16,7 @@ import {
   BellRing,
   Pause,
   Play,
+  ALargeSmall,
 } from 'lucide-react'
 import type { Recipe } from '../db/types'
 import { useTimers } from './TimerProvider'
@@ -42,6 +43,10 @@ import ComposedStepText from './ComposedStepText'
 import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import CustomTimerModal from './CustomTimerModal'
+import VoiceHint from './VoiceHint'
+import SpeechReadingHint from './SpeechReadingHint'
+import CookTextSizeModal from './CookTextSizeModal'
+import { cookFontSize, resolveCookFontScale } from '../logic/cookFontScale'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
 
@@ -84,6 +89,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
     resumeTimer,
   } = useTimers()
   const settings = useSettings()
+  /** 手順の文字の大きさ（2026-08-12 便FX。設定は調理中モード2画面で共用） */
+  const fontScale = resolveCookFontScale(settings?.cookStepFontScale)
   const navigate = useNavigate()
   const [index, setIndex] = useState(initialStep)
   /**
@@ -170,6 +177,10 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   }, [startTimer])
   // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる
   const autoReadRef = useRef(false)
+  /** 読み上げを使ったか（2026-08-12 便FX。使った人にだけ、読み方の直し方を1回案内する） */
+  const [speechUsed, setSpeechUsed] = useState(false)
+  /** 手順の文字の大きさ（2026-08-12 便FX。並行調理ナビの調理中モードと同じ設定を使う） */
+  const [textSizeOpen, setTextSizeOpen] = useState(false)
 
   // 開いている間は背景(レシピ詳細)をスクロールさせない(2026-07-28 機能④診断)。
   // 手順を読むための縦スワイプが背後のページに抜けてしまい、閉じたときに
@@ -233,6 +244,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       return
     }
     autoReadRef.current = true
+    setSpeechUsed(true)
     speak(step.text)
   }
 
@@ -266,7 +278,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       },
       onRepeat: () => {
         const currentStep = recipe.steps[indexRef.current]
-        if (currentStep) speak(currentStep.text)
+        if (!currentStep) return
+        setSpeechUsed(true)
+        speak(currentStep.text)
       },
       /**
        * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
@@ -388,12 +402,25 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             {speaking ? <VolumeX size={24} aria-hidden /> : <Volume2 size={24} aria-hidden />}
             <span className="text-[10px] font-bold leading-none">{ja.focus.readLabel}</span>
           </button>
+          {/* 手順の文字の大きさ（2026-08-12 便FX）。並行調理ナビの調理中モードと同じ窓・同じ設定 */}
+          <button
+            type="button"
+            data-testid="cook-text-size-open"
+            onClick={() => setTextSizeOpen(true)}
+            aria-label={ja.focus.textSizeTitle}
+            className="flex flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-accent-ink"
+          >
+            <ALargeSmall size={24} aria-hidden />
+            <span className="text-[10px] font-bold leading-none">{ja.focus.textSizeLabel}</span>
+          </button>
         </div>
       </div>
 
       {micSupported && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
-          {ja.focus.micHint}
+          {/* 声で使える言葉の案内（2026-08-12 便FX で3つにまとめ、読み上げだけを目立たせた）。
+              並行調理ナビの調理中モードと同じ部品を使う＝片方だけ言い方が変わらない */}
+          <VoiceHint />
           {/* 聞いている最中・聞き取れた言葉・マイクが使えなかったことの手応え(機能④診断C14) */}
           {voiceMessage ? (
             <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
@@ -404,6 +431,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           )}
         </p>
       )}
+
+      {/* 読み方が合わないときの直し方（2026-08-12 便FX）。読み上げを使ったあと1回だけ出す */}
+      <SpeechReadingHint used={speechUsed} />
 
       {/* マイクがブラウザで断られている案内(2026-08-03 実機FB①)。
           「声で操作」を押しても何も起きないように見える状態の原因と直し方をその場に出す */}
@@ -558,11 +588,17 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         // safe center は「あふれた時だけ flex-start 相当に落ちる」ので、収まる短い手順の
         // 見え方は上のpt<pb裁定を含めて1pxも変わらない
         className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[calc(var(--space-lg)+var(--space-sm))] pt-[var(--space-sm)] text-center"
+        /* 文字の大きさ（2026-08-12 便FX）は、この枠の中で大きさを指定していない文字に効く
+           ＝手順本文（下で明示）・メモ。番号のバッジ・ボタンは各自の大きさを持つので動かない */
+        style={{ fontSize: cookFontSize(1, fontScale) }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
         <StepBadge number={stepNumber} size={56} />
-        <p className="ja-phrase w-full text-2xl font-bold leading-relaxed">
+        <p
+          className="ja-phrase w-full font-bold leading-relaxed"
+          style={{ fontSize: cookFontSize(1.5, fontScale) }}
+        >
           <ComposedStepText
             text={step.text}
             ingredientNames={ingredientNames}
@@ -669,6 +705,12 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           </button>
         )}
       </div>
+      <CookTextSizeModal
+        open={textSizeOpen}
+        scale={fontScale}
+        onChange={(next) => void updateSettings({ cookStepFontScale: next })}
+        onClose={() => setTextSizeOpen(false)}
+      />
       <TermPopover state={termPopoverState} onClose={closeTermPopover} />
       <TimerAdjustModal
         timer={adjustingTimer}

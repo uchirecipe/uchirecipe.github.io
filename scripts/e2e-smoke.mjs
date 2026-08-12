@@ -1485,7 +1485,7 @@ try {
       check(
         'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている',
         focusBody.includes('「次へ」「戻って」で手順の移動') &&
-          focusBody.includes('「タイマー」で時間をはかる'),
+          focusBody.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
       )
       const iconLabels = await fsPage.evaluate(() =>
         Array.from(document.querySelector('.fixed.inset-0.z-50').querySelectorAll('button span'))
@@ -15833,6 +15833,13 @@ try {
           confirmText.includes('記録をつけますか？'),
         confirmText.slice(0, 200),
       )
+      // 2026-08-12 便FX・オーナー指摘「まとめて作った！ので注意書きが出るなら、後から
+      // 記録一覧から個別に編集できることをひとこと添えて」
+      check(
+        'FX-06 「まとめて作った！」の確認にも、あとから1件ずつ編集できることが書いてある',
+        confirmText.includes('「作った記録の一覧」で1件ずつ編集できます'),
+        confirmText.slice(0, 300),
+      )
       const afterCooked = await nav7Page.textContent('body')
       check('NAVI-09 件数つきのトーストが出る', afterCooked.includes('2件の作った記録をつけました'))
       const cookedCount = await nav7Page.evaluate(async () => {
@@ -23406,13 +23413,15 @@ try {
       // EZ-04: 「完成！」のあとの戻り位置＝「まとめて作った！」が画面内に入る
       //   2026-08-11 便FO: 「完成！」はまず作った記録の確認を出す。**記録しないほうを選んだとき**の
       //   戻り位置がここで見ている挙動（オーナー指示「完成後、画面の戻り位置は並行ナビ下部
-      //   『まとめて作った！』までスクロール」）なので、確認では「やめる」を選んで確かめる
+      //   『まとめて作った！』までスクロール」）なので、確認では記録しないほうを選んで確かめる。
+      //   2026-08-12 便FX: 確認はブラウザの窓から画面の中の窓（3つの行き先）に変わったので、
+      //   「記録をつけずに閉じる」を押す
       currentCheck = 'EZ-04'
       const ezScrollBefore = await ezPage.evaluate(() => window.scrollY)
-      ezDialogAnswer = 'dismiss'
       await ezPage.locator('[data-testid="cook-session-finish"]').click()
+      await ezPage.waitForTimeout(600)
+      await ezPage.locator('[data-testid="cook-finish-close"]').click()
       await ezPage.waitForTimeout(1500)
-      ezDialogAnswer = 'accept'
       const ezGeom = await ezPage.evaluate(() => {
         const el = document.querySelector('[data-testid="navi-mark-all-cooked"]')
         if (!el) return null
@@ -24119,12 +24128,18 @@ try {
         )
         check(
           'FC-02 止めたタイマーを動かし直す声（「再開」）が案内に載っている',
-          fcHintText.includes('「再開」で止めたタイマーを動かし直す'),
+          fcHintText.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
           fcHintText,
         )
+        // 2026-08-12 便FX（オーナー指摘「タイマー説明はまとめて、タイマー操作、のみでも
+        // 最悪伝わるので、ストップで停止、のような個別説明はいらない」）:
+        // タイマーの言葉は3つを1つにまとめ、1語ずつの説明は出さない
         check(
-          'FC-01 案内も画面のボタンと同じ「一時停止」で言う',
-          fcHintText.includes('一時停止') && !fcHintText.includes('いったん止める'),
+          'FX-02 タイマーの説明を1語ずつ並べない（言葉としては受け続ける）',
+          !fcHintText.includes('で時間をはかる') &&
+            !fcHintText.includes('で読み上げとタイマーを一時停止') &&
+            !fcHintText.includes('で止めたタイマーを動かし直す') &&
+            !fcHintText.includes('いったん止める'),
           fcHintText,
         )
       } else {
@@ -25607,8 +25622,8 @@ try {
       await fiListen()
       const fiHintText = await fiHint()
       check(
-        'FI-02 案内に「色を言うとその色の品の手順に移る」が載っている',
-        fiHintText.includes('「青」「緑」など色を言うとその色の品の手順に移る'),
+        'FI-02 案内に「色を言うとその色の品の手順を先にする」が載っている',
+        fiHintText.includes('「青」「緑」「ピンク」と言うとその色の品の手順を先にする'),
         fiHintText,
       )
       check(
@@ -25644,7 +25659,7 @@ try {
       )
       check(
         'FI-03 手応えに、どの品に移ったかが名前で出る',
-        (await fiHint()).includes(`${fiTargetTitle}の手順に移りました`),
+        (await fiHint()).includes(`${fiTargetTitle}の手順を先にしました`),
         await fiHint(),
       )
       check(
@@ -27388,7 +27403,7 @@ try {
       check(
         'FO-03 「声で操作」を押すと言葉の一覧が出る（使う人だけが読む）',
         (await foSessionText()).includes('声で操作:') &&
-          (await foSessionText()).includes('色を言うとその色の品の手順に移る'),
+          (await foSessionText()).includes('「青」「緑」「ピンク」と言うとその色の品の手順を先にする'),
       )
       await foPage.locator('button[aria-label="声の操作をやめる"]').click()
       await foPage.waitForTimeout(500)
@@ -27505,9 +27520,9 @@ try {
         .map((s) => s.trim())
         .find((s) => s.startsWith('FO'))
       check(
-        'FO-06 開いた中に「この手順に移る」がある',
+        'FO-06 開いた中に「この手順を先にする」がある',
         (await foPage.locator('[data-testid="cook-session-peek-move"]').first().innerText()).includes(
-          'この手順に移る',
+          'この手順を先にする',
         ),
       )
       await foPage.locator('[data-testid="cook-session-peek-move"]').first().click()
@@ -27683,39 +27698,87 @@ try {
         'FO-09 前提: 段取りの最後の手順で「完成！」が出ている',
         (await foPage.locator('[data-testid="cook-session-finish"]').innerText()).trim() === '完成！',
       )
-      // ①まず「やめる」を選んだとき: 記録は付かず、段取りは残る（従来の戻り位置＝EZ-04が担保）
-      foDialogAnswer = 'dismiss'
-      foDialogMessage = ''
+      // ①まず「完成！」を押したときに出る窓の中身（2026-08-12 便FX でブラウザの確認から
+      //    画面の中の窓に変わり、行き先が3つになった）
       await foPage.locator('[data-testid="cook-session-finish"]').click()
-      await foPage.waitForTimeout(1500)
+      await foPage.waitForTimeout(800)
+      const foFinishBody = await foPage.locator('[data-testid="cook-finish-modal"]').innerText()
       check(
         'FO-09 「完成！」を押すと、その場で作った記録の確認が出る',
-        foDialogMessage.includes('作った記録をつけます') && foDialogMessage.includes('記録をつけますか？'),
-        foDialogMessage.slice(0, 160),
+        foFinishBody.includes('作った記録をつけます') && foFinishBody.includes('記録をつける'),
+        foFinishBody.slice(0, 200),
       )
       check(
         'FO-09 確認文に、記録する品名と件数が入っている（規約F）',
-        foDialogMessage.includes('FO照り焼き') &&
-          foDialogMessage.includes('FO煮物') &&
-          foDialogMessage.includes('3件'),
-        foDialogMessage.slice(0, 200),
+        foFinishBody.includes('FO照り焼き') &&
+          foFinishBody.includes('FO煮物') &&
+          foFinishBody.includes('3件'),
+        foFinishBody.slice(0, 240),
       )
       check(
         'FO-09 確認文に、何が残るかも書いてある（規約F）',
-        foDialogMessage.includes('レシピと段取りはそのまま残ります'),
-        foDialogMessage.slice(0, 200),
+        foFinishBody.includes('レシピと段取りはそのまま残ります'),
+        foFinishBody.slice(0, 240),
       )
+      // FX-06: まとめて付けた記録も、あとから1件ずつ直せることを添える
       check(
-        'FO-09 「やめる」を選ぶと記録は付かず、段取りのページに戻る',
+        'FX-06 記録の確認に「あとから1件ずつ編集できる」が書いてある',
+        foFinishBody.includes('「作った記録の一覧」で1件ずつ編集できます'),
+        foFinishBody.slice(0, 300),
+      )
+      // FX-07: 3つ目の行き先＝手順の画面へ帰る（押しても記録は付かず、全画面も閉じない）
+      const foFinishCounterBefore = await foCounter()
+      check(
+        'FX-07 窓に3つの行き先がある（記録をつける／調理を続ける／記録をつけずに閉じる）',
+        (await foPage.locator('[data-testid="cook-finish-record"]').count()) === 1 &&
+          (await foPage.locator('[data-testid="cook-finish-back"]').count()) === 1 &&
+          (await foPage.locator('[data-testid="cook-finish-close"]').count()) === 1,
+        foFinishBody,
+      )
+      await foPage.locator('[data-testid="cook-finish-back"]').click()
+      await foPage.waitForTimeout(700)
+      check(
+        'FX-07 「調理を続ける」で、完成！を押す直前の手順の画面に戻る',
+        (await foPage.locator('[data-testid="cook-session"]').count()) === 1 &&
+          (await foPage.locator('[data-testid="cook-finish-modal"]').count()) === 0 &&
+          (await foCounter()) === foFinishCounterBefore,
+        `${foFinishCounterBefore}→${await foCounter()}`,
+      )
+      const foBackLogs = await foPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        return all.filter((r) => r.title.startsWith('FO')).map((r) => r.cookedLogs.length)
+      })
+      check(
+        'FX-07 「調理を続ける」では記録は付かない',
+        foBackLogs.every((n) => n === 0),
+        JSON.stringify(foBackLogs),
+      )
+      // 「記録をつけずに閉じる」を選ぶと、記録は付かず段取りのページに戻る（従来の「やめる」）
+      await foPage.locator('[data-testid="cook-session-finish"]').click()
+      await foPage.waitForTimeout(600)
+      await foPage.locator('[data-testid="cook-finish-close"]').click()
+      await foPage.waitForTimeout(1500)
+      check(
+        'FO-09 「記録をつけずに閉じる」を選ぶと記録は付かず、段取りのページに戻る',
         (await foPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 1 &&
           (await foPage.locator('[data-testid="cook-session"]').count()) === 0,
       )
-      // ②「はい」を選んだとき: その場で記録が付く（もう一度「まとめて作った！」を探さない）
+      // ②「記録をつける」を選んだとき: その場で記録が付く（もう一度「まとめて作った！」を探さない）
       await foPage.locator('[data-testid="cook-session-start"]').click()
       await foPage.waitForTimeout(700)
       await foToLast()
-      foDialogAnswer = 'accept'
       await foPage.locator('[data-testid="cook-session-finish"]').click()
+      await foPage.waitForTimeout(600)
+      await foPage.locator('[data-testid="cook-finish-record"]').click()
       await foPage.waitForTimeout(1800)
       const foLogs = await foPage.evaluate(async () => {
         const db = await new Promise((res, rej) => {
@@ -29549,6 +29612,470 @@ try {
       )
     } finally {
       await fuBrowser.close()
+    }
+  }
+
+  // ============================================================================
+  // FX-01〜12: オーナーの書き溜め（調理ナビ・調理中モード）10件＋司令部裁定2件（2026-08-12 便FX）
+  //
+  //   FX-01 合わせ調味料の説明は、材料一覧の中で1回だけ（品ごとに繰り返さない）
+  //   FX-02 声の案内は3つにまとまり、「読み上げ」だけが目立つ
+  //   FX-03 色の案内が「青」「緑」「ピンク」の3つとも書いてある
+  //   FX-04 他の品の行の色の囲みは、文字数が違っても同じ幅
+  //   FX-05 読み上げを使ったあと、読み方の直し方を1回だけ案内する
+  //   FX-07 「完成！」の窓から、手順の画面に帰れる（FO-09 の中で確認）
+  //   FX-08 段取りを消す（消したあとは開き直しても戻らない）
+  //   FX-09 手順の文字の大きさを変えられる（変えた大きさは開き直しても続く）
+  //   FX-10 他の品の行の中のボタンが「この手順を先にする」
+  //   FX-11 湯沸かしの待ちに、全体の目安への数え方が添えてある
+  //   FX-12 「浸けている間は」の注意が、浸す手順に出る（同梱のフレンチトーストで確認）
+  // ============================================================================
+  currentCheck = 'FX-01'
+  {
+    const fxBrowser = await chromium.launch()
+    const fxContext = await fxBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    // 声で操作は自動で再現できないので、FI と同じ手口で SpeechRecognition を偽装する
+    await fxContext.addInitScript(() => {
+      class FakeRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+        }
+        start() {
+          window.__fxRecognition = this
+        }
+        stop() {}
+        abort() {}
+      }
+      window.SpeechRecognition = FakeRecognition
+    })
+    const fxPage = await fxContext.newPage()
+    let fxDialogMessage = ''
+    let fxDialogAnswer = 'accept'
+    fxPage.on('dialog', (d) => {
+      fxDialogMessage = d.message()
+      void (fxDialogAnswer === 'accept' ? d.accept() : d.dismiss())
+    })
+    fxPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FX] ${err.message}`)
+    })
+    fxPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FX] ${t}`)
+    })
+    const fxHint = () =>
+      fxPage.locator('[data-testid="cook-session"] p', { hasText: '声で操作' }).first().innerText()
+    try {
+      await fxPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fxPage.waitForTimeout(1800)
+      // 3品: ①ゆで工程だけあって湯沸かしが書かれていない（ナビが「湯を沸かす」を足す）
+      //      ②③合わせ調味料の組を持つ品を2つ（説明が1回だけになることを見るため）
+      await fxPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('FXパスタ', [
+          { text: 'たまねぎを5cm幅に切る。', minutes: 3 },
+          { text: 'スパゲッティを8分ゆでる。', minutes: 8 },
+          { text: '☆を加えて炒め合わせ、器に盛る。', minutes: 4 },
+        ], [
+          { name: 'たまねぎ', amount: '1', unit: '個' },
+          { name: 'しょうゆ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+          { name: 'みりん', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+        ])))
+        const idB = await P(store('recipes').add(mk('FX煮物', [
+          { text: '大根は一口大に切る。', minutes: 4 },
+          { text: '鍋に大根と★を入れて中火で15分煮る。', minutes: 15 },
+          { text: '器に盛る。', minutes: 2 },
+        ], [
+          { name: '大根', amount: '1/3', unit: '本' },
+          { name: 'みそ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+          { name: '砂糖', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+        ])))
+        const idC = await P(store('recipes').add(mk('FXサラダ', [
+          { text: 'きゅうりを薄切りにする。', minutes: 3 },
+          { text: 'ボウルで和えて器に盛る。', minutes: 3 },
+        ], [{ name: 'きゅうり', amount: '1', unit: '本' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await fxPage.goto(`${BASE}/#/cook-navi`)
+      await fxPage.reload({ waitUntil: 'networkidle' })
+      await fxPage.waitForTimeout(1400)
+      await fxPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fxPage.waitForTimeout(1000)
+
+      // --- FX-11: 湯沸かしの待ちに、全体の目安への数え方が添えてある（司令部裁定A案） ---
+      currentCheck = 'FX-11'
+      const fxBoilBlock = await fxPage
+        .locator('[data-testid="navi-wait-block"]', { hasText: '湯が沸くまでの待ち時間' })
+        .first()
+        .innerText()
+        .catch(() => '')
+      check(
+        'FX-11 前提: ナビが「湯を沸かす」を足した待ちが段取りに出ている',
+        fxBoilBlock.includes('湯が沸くまでの待ち時間'),
+        fxBoilBlock,
+      )
+      check(
+        'FX-11 待ちブロックに「全体の目安には約5分として数えています」が添えてある',
+        fxBoilBlock.includes('全体の目安には約5分として数えています'),
+        fxBoilBlock,
+      )
+      check(
+        'FX-11 沸くまでの時間は言い切らない（火力と湯の量で変わると書く）',
+        fxBoilBlock.includes('火力と湯の量で変わります'),
+        fxBoilBlock,
+      )
+      check(
+        'FX-11 見出しは「湯が沸くまでの待ち時間」のまま（分数を出さない）',
+        !fxBoilBlock.includes('約5分の待ち時間'),
+        fxBoilBlock,
+      )
+      check(
+        'FX-11 湯沸かし以外の待ちには、この行を出さない',
+        (await fxPage.locator('[data-testid="navi-boil-note"]').count()) === 1,
+        String(await fxPage.locator('[data-testid="navi-boil-note"]').count()),
+      )
+
+      // --- FX-01: 合わせ調味料の説明は材料一覧の中で1回だけ ---
+      currentCheck = 'FX-01'
+      await fxPage.locator('[data-testid="navi-ingredients-toggle"]').click()
+      await fxPage.waitForTimeout(600)
+      const fxHints = await fxPage.locator('[data-testid="navi-seasoning-group-hint"]').allInnerTexts()
+      check(
+        'FX-01 合わせ調味料を持つ品が2つあっても、説明は1か所だけ',
+        fxHints.length === 1,
+        `${fxHints.length}か所: ${fxHints.join(' / ')}`,
+      )
+      check(
+        'FX-01 説明の文言（「左に同じ線が付いた材料は」を言い換えた）',
+        fxHints[0] === '左の線が同じ材料どうしは、合わせ調味料です。先にまとめて計量できます',
+        fxHints[0],
+      )
+      // 説明は材料一覧の見出しの下＝線が出てくる前に読める位置にある
+      const fxHintOrder = await fxPage.evaluate(() => {
+        const panel = document.querySelector('[data-testid="navi-ingredients-panel"]')
+        const hint = panel?.querySelector('[data-testid="navi-seasoning-group-hint"]')
+        const firstRow = panel?.querySelector('li')
+        if (!hint || !firstRow) return null
+        return hint.getBoundingClientRect().top < firstRow.getBoundingClientRect().top
+      })
+      check('FX-01 説明は材料の行より上にある', fxHintOrder === true, String(fxHintOrder))
+
+      // --- 調理中モードへ ---
+      currentCheck = 'FX-04'
+      await fxPage.locator('[data-testid="cook-session-start"]').click()
+      await fxPage.waitForTimeout(800)
+      check(
+        'FX 前提: 調理中モードが開く',
+        (await fxPage.locator('[data-testid="cook-session"]').count()) === 1,
+      )
+
+      // --- FX-04: 色の囲みは、文字数が違っても同じ幅 ---
+      const fxColorBoxes = await fxPage.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="cook-session-color-word"]')].map((el) => ({
+          word: el.textContent.trim(),
+          width: Math.round(el.getBoundingClientRect().width * 100) / 100,
+        })),
+      )
+      check(
+        'FX-04 前提: 文字数の違う色の囲みが2つ以上出ている',
+        fxColorBoxes.length >= 2 &&
+          new Set(fxColorBoxes.map((b) => b.word.length)).size >= 2,
+        JSON.stringify(fxColorBoxes),
+      )
+      check(
+        'FX-04 色の囲みの幅がすべて同じ（実測）',
+        new Set(fxColorBoxes.map((b) => b.width)).size === 1,
+        JSON.stringify(fxColorBoxes),
+      )
+
+      // --- FX-02 / FX-03: 声の案内 ---
+      currentCheck = 'FX-02'
+      const fxMicStart = fxPage.locator('button[aria-label="声で操作する"]')
+      if ((await fxMicStart.count()) > 0) {
+        await fxMicStart.click()
+        await fxPage.waitForTimeout(400)
+      }
+      const fxHintText = await fxHint()
+      check(
+        'FX-02 声の案内は3つ（手順の移動／読み上げ／タイマー操作）',
+        fxHintText.includes('声で操作:「次へ」「戻って」で手順の移動') &&
+          fxHintText.includes('「読み上げ」でいまの手順を読み上げ') &&
+          fxHintText.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
+        fxHintText,
+      )
+      check(
+        'FX-02 タイマーの個別説明は出さない',
+        !fxHintText.includes('で時間をはかる') && !fxHintText.includes('で読み上げとタイマーを一時停止'),
+        fxHintText,
+      )
+      const fxReadEmphasis = await fxPage.evaluate(() => {
+        const el = document.querySelector('[data-testid="voice-hint-read"]')
+        if (!el) return null
+        const own = getComputedStyle(el)
+        const parent = getComputedStyle(el.parentElement)
+        return {
+          text: el.textContent.trim(),
+          weight: own.fontWeight,
+          parentWeight: parent.fontWeight,
+          color: own.color,
+          parentColor: parent.color,
+        }
+      })
+      check(
+        'FX-02 「読み上げ」の部分だけが太字で、まわりと違う色になっている',
+        fxReadEmphasis != null &&
+          Number(fxReadEmphasis.weight) >= 700 &&
+          Number(fxReadEmphasis.weight) > Number(fxReadEmphasis.parentWeight) &&
+          fxReadEmphasis.color !== fxReadEmphasis.parentColor,
+        JSON.stringify(fxReadEmphasis),
+      )
+      currentCheck = 'FX-03'
+      check(
+        'FX-03 色の案内は「青」「緑」「ピンク」の3つとも書いてある',
+        fxHintText.includes('「青」「緑」「ピンク」と言うと'),
+        fxHintText,
+      )
+      check(
+        'FX-03 「など色を言うと」で済ませない・「赤」も出さない',
+        !fxHintText.includes('など色を言うと') && !fxHintText.includes('「赤」'),
+        fxHintText,
+      )
+
+      // --- FX-10: 他の品の行を開いた中のボタン ---
+      currentCheck = 'FX-10'
+      await fxPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await fxPage.waitForTimeout(500)
+      const fxPeekMove = await fxPage.locator('[data-testid="cook-session-peek-move"]').first().innerText()
+      check(
+        'FX-10 ボタンの文言が「この手順を先にする」',
+        fxPeekMove.includes('この手順を先にする') && !fxPeekMove.includes('この手順に移る'),
+        fxPeekMove,
+      )
+      await fxPage.locator('[data-testid="cook-session-other-row"]').first().click()
+      await fxPage.waitForTimeout(400)
+
+      // --- FX-09: 手順の文字の大きさ ---
+      currentCheck = 'FX-09'
+      const fxStepFontSize = () =>
+        fxPage.evaluate(() =>
+          getComputedStyle(document.querySelector('[data-testid="cook-session-step-text"]')).fontSize,
+        )
+      const fxFontBefore = await fxStepFontSize()
+      await fxPage.locator('[data-testid="cook-text-size-open"]').click()
+      await fxPage.waitForTimeout(500)
+      check(
+        'FX-09 文字の大きさの窓が開き、4段から選べる',
+        (await fxPage.locator('[data-testid="cook-text-size-option"]').count()) === 4,
+        String(await fxPage.locator('[data-testid="cook-text-size-option"]').count()),
+      )
+      await fxPage.locator('[data-testid="cook-text-size-option"]').nth(3).click()
+      await fxPage.waitForTimeout(500)
+      const fxFontLarge = await fxStepFontSize()
+      check(
+        'FX-09 「特大」を選ぶと手順の本文が大きくなる（24px→36px）',
+        fxFontBefore === '24px' && fxFontLarge === '36px',
+        `${fxFontBefore}→${fxFontLarge}`,
+      )
+      // 大きくしても、手順の枠は縦に送れる＝画面に入りきらなくならない
+      const fxScrollable = await fxPage.evaluate(() => {
+        const p = document.querySelector('[data-testid="cook-session-step-text"]')
+        let el = p.parentElement
+        while (el && getComputedStyle(el).overflowY !== 'auto') el = el.parentElement
+        if (!el) return null
+        return { canScroll: el.scrollHeight > el.clientHeight ? true : 'fits' }
+      })
+      check('FX-09 手順の枠は縦に送れる作りのまま', fxScrollable != null, JSON.stringify(fxScrollable))
+      await fxPage.locator('[data-testid="cook-text-size-modal"] button[aria-label="閉じる"]').click()
+      await fxPage.waitForTimeout(400)
+      await fxPage.reload({ waitUntil: 'networkidle' })
+      await fxPage.waitForTimeout(1600)
+      if ((await fxPage.locator('[data-testid="cook-session"]').count()) === 0) {
+        await fxPage.locator('[data-testid="cook-session-start"]').click()
+        await fxPage.waitForTimeout(700)
+      }
+      check(
+        'FX-09 選んだ大きさは、開き直しても続く',
+        (await fxStepFontSize()) === '36px',
+        await fxStepFontSize(),
+      )
+      // 標準に戻しておく（あとの検査を素の大きさで見るため）
+      await fxPage.locator('[data-testid="cook-text-size-open"]').click()
+      await fxPage.waitForTimeout(400)
+      await fxPage.locator('[data-testid="cook-text-size-option"]').nth(1).click()
+      await fxPage.waitForTimeout(400)
+      await fxPage.locator('[data-testid="cook-text-size-modal"] button[aria-label="閉じる"]').click()
+      await fxPage.waitForTimeout(400)
+      check('FX-09 「ふつう」に戻せる', (await fxStepFontSize()) === '24px', await fxStepFontSize())
+
+      // --- FX-05: 読み上げを使ったあと、読み方の直し方を1回だけ案内する ---
+      currentCheck = 'FX-05'
+      check(
+        'FX-05 読み上げを使う前は、読み方の案内を出さない',
+        (await fxPage.locator('[data-testid="speech-reading-hint"]').count()) === 0,
+      )
+      await fxPage.locator('button[aria-label="読み上げ"]').first().click()
+      await fxPage.waitForTimeout(600)
+      const fxReadingHint = await fxPage
+        .locator('[data-testid="speech-reading-hint"]')
+        .innerText()
+        .catch(() => '')
+      check(
+        'FX-05 読み上げを使うと、読み方の直し方を案内する',
+        fxReadingHint.includes('読み方が合わないときは') &&
+          fxReadingHint.includes('端末の設定で声を切り替える') &&
+          fxReadingHint.includes('iPhone') &&
+          fxReadingHint.includes('Android'),
+        fxReadingHint,
+      )
+      await fxPage.locator('[data-testid="speech-reading-hint-close"]').click()
+      await fxPage.waitForTimeout(600)
+      await fxPage.reload({ waitUntil: 'networkidle' })
+      await fxPage.waitForTimeout(1600)
+      if ((await fxPage.locator('[data-testid="cook-session"]').count()) === 0) {
+        await fxPage.locator('[data-testid="cook-session-start"]').click()
+        await fxPage.waitForTimeout(700)
+      }
+      await fxPage.locator('button[aria-label="読み上げ"]').first().click()
+      await fxPage.waitForTimeout(600)
+      check(
+        'FX-05 一度閉じたら、次に読み上げを使っても出さない（しつこくしない）',
+        (await fxPage.locator('[data-testid="speech-reading-hint"]').count()) === 0,
+      )
+
+      // --- FX-08: 段取りを消す ---
+      currentCheck = 'FX-08'
+      await fxPage.locator('[data-testid="cook-session-close"]').click()
+      await fxPage.waitForTimeout(800)
+      check(
+        'FX-08 段取りの下に「段取りを消す」がある',
+        (await fxPage.locator('[data-testid="navi-discard-timeline"]').innerText()) === '段取りを消す',
+        await fxPage.locator('[data-testid="navi-discard-timeline"]').innerText(),
+      )
+      fxDialogAnswer = 'dismiss'
+      fxDialogMessage = ''
+      await fxPage.locator('[data-testid="navi-discard-timeline"]').click()
+      await fxPage.waitForTimeout(900)
+      check(
+        'FX-08 確認文に、消えるものと残るものの両方が書いてある（規約F）',
+        fxDialogMessage.includes('選んでいた3品の組み合わせを消します') &&
+          fxDialogMessage.includes('調理中だった手順も消えます') &&
+          fxDialogMessage.includes('レシピ・今日の献立・作った記録・動いているタイマーはそのまま残ります'),
+        fxDialogMessage,
+      )
+      check(
+        'FX-08 確認でやめれば、段取りはそのまま残る',
+        (await fxPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 1,
+      )
+      fxDialogAnswer = 'accept'
+      await fxPage.locator('[data-testid="navi-discard-timeline"]').click()
+      await fxPage.waitForTimeout(1200)
+      check(
+        'FX-08 消すと段取りが無くなり、選び直しの状態に戻る',
+        (await fxPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 0 &&
+          ((await fxPage.textContent('body')) ?? '').includes('0品を選択中'),
+        await fxPage.locator('[data-testid="navi-mark-all-cooked"]').count(),
+      )
+      check(
+        'FX-08 消したことを画面で知らせる',
+        ((await fxPage.textContent('body')) ?? '').includes('段取りを消しました'),
+      )
+      const fxCookedAfterDiscard = await fxPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const all = await new Promise((res, rej) => {
+          const q = db.transaction('recipes').objectStore('recipes').getAll()
+          q.onsuccess = () => res(q.result)
+          q.onerror = () => rej(q.error)
+        })
+        db.close()
+        return all
+          .filter((r) => String(r.title).startsWith('FX'))
+          .reduce((n, r) => n + (r.cookedLogs?.length ?? 0), 0)
+      })
+      check('FX-08 消しても作った記録は付かない（消すだけ）', fxCookedAfterDiscard === 0, String(fxCookedAfterDiscard))
+      await fxPage.reload({ waitUntil: 'networkidle' })
+      await fxPage.waitForTimeout(1600)
+      check(
+        'FX-08 開き直しても、消した段取りは戻らない',
+        (await fxPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 0,
+      )
+
+      // --- FX-12: 「浸けている間は」の注意が、浸す手順に出る（同梱のフレンチトースト） ---
+      currentCheck = 'FX-12'
+      const fxStarterOk = await fxPage.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const all = await P(db.transaction('recipes').objectStore('recipes').getAll())
+        const toast = all.find((r) => r.title === 'フレンチトースト')
+        const other = all.find((r) => r.title === 'ほうれん草のおひたし')
+        if (!toast || !other) return false
+        // 今日の献立をこの2品だけにする
+        const list = db.transaction('todayList', 'readwrite').objectStore('todayList')
+        await P(list.clear())
+        let addedAt = Date.now()
+        for (const r of [toast, other]) await P(
+          db.transaction('todayList', 'readwrite').objectStore('todayList').add({ recipeId: r.id, addedAt: addedAt++ }),
+        )
+        db.close()
+        return true
+      })
+      check('FX-12 前提: 同梱のフレンチトーストとおひたしを今日の献立に入れられた', fxStarterOk === true)
+      await fxPage.reload({ waitUntil: 'networkidle' })
+      await fxPage.waitForTimeout(1800)
+      await fxPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fxPage.waitForTimeout(1200)
+      const fxToastCards = await fxPage.evaluate(() =>
+        [...document.querySelectorAll('[id^="navi-step-"]')].map((card) => ({
+          text: (card.querySelector('[data-testid="navi-step-text"]')?.textContent ?? '').trim(),
+          memo: (card.querySelector('[data-testid="navi-recipe-memo"]')?.textContent ?? '').trim(),
+        })),
+      )
+      const fxSoak = fxToastCards.find((c) => c.text.includes('卵液に浸し'))
+      const fxServe = fxToastCards.find((c) => c.text.includes('メープルシロップ'))
+      check(
+        'FX-12 前提: フレンチトーストの「卵液に浸す」手順と最後の手順が段取りに出ている',
+        fxSoak != null && fxServe != null,
+        JSON.stringify(fxToastCards.map((c) => c.text.slice(0, 20))),
+      )
+      check(
+        'FX-12 「浸けている間は必ず冷蔵庫に入れておくこと。」は、浸す手順に出る',
+        (fxSoak?.memo ?? '').includes('浸けている間は必ず冷蔵庫に入れておくこと。'),
+        fxSoak?.memo,
+      )
+      check(
+        'FX-12 最後の手順には出ない（以前はここに出ていた）',
+        !(fxServe?.memo ?? '').includes('浸けている間は必ず冷蔵庫に入れておくこと。'),
+        fxServe?.memo,
+      )
+    } finally {
+      await fxBrowser.close()
     }
   }
 

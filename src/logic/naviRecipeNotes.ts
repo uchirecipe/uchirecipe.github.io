@@ -33,6 +33,8 @@ export type RecipeNoteKind =
   | 'raw'
   /** 材料の選び方（どの状態のものを使う／どれは使わない） */
   | 'pick'
+  /** 調理の途中の話（「浸けている間は」＝その作業をしているあいだの扱い） */
+  | 'during'
   /** 火通し（半熟・中まで火を通す） */
   | 'heat'
   /** 保存・作り置き・お弁当・温め直し */
@@ -83,6 +85,24 @@ const HANDLING_PATTERN = /生の|まな板|包丁|手|ボウル|箸|トレー|�
  * 「使い切る」「使い捨て」は材料の選択ではない（食べ切る話・道具の話）ので外す。
  */
 const PICK_PATTERN = /使わない|使わず|(?:もの|物)を使(?!い切|いき|い捨)/
+/**
+ * 調理の途中の話＝「〜ている間は」「〜ておく間は」（2026-08-12 便FX・司令部裁定）。
+ *
+ * 直した不具合: フレンチトーストの「浸けている間は必ず冷蔵庫に入れておくこと。」が、
+ * 段取りの**最後の手順**（器に盛る）に出ていた。「冷蔵」の語があるため保存の行と読まれて
+ * いたが、中身は**卵液に浸している最中の置き場所**で、効くのは手順3（卵液に浸す）。
+ * 作り終えてから読んでも手遅れになる行なので、保存より先に見分ける。
+ *
+ * 語形は「〜ている間」「〜ておく間」だけに絞る。「ご飯を炊く**時間は**調理時間に…」のような
+ * 「時間は」を巻き込むと、作り始めに読む行（other）が別の手順へ動いてしまうため
+ * （同梱109品で確認。この形の行が9品ある）。
+ */
+const DURING_PATTERN = /(?:て|で)いる間|(?:て|で)おく間/
+/**
+ * 「〜ている間」の直前にある動作（「浸けている間」→「浸け」）。
+ * その動作をしている手順を探す手がかりに使う。
+ */
+const DURING_ACTION_PATTERN = /([ぁ-んァ-ヶー一-龥]{1,8}?)(?:て|で)(?:いる|おく)間/
 /** 保存・作り置き・お弁当・温め直し＝作り終えてからの話 */
 const KEEP_PATTERN =
   /冷蔵|冷凍|保存|日持ち|食べ切|食べき|作り置き|温め直|再加熱|弁当|粗熱|常温|解凍|冷まし|冷やし固め|当日中|その日のうち/
@@ -116,13 +136,32 @@ export function splitRecipeNoteLines(memo: string | undefined): string[] {
  * 作り始める前に読むべき行が完成の手順へ寄っていた）。交差汚染より後に置くのは、
  * 両方に当てはまる行なら「その生の食材を最初に扱う手順」のほうが置き場所として細かいため
  * （その品の最初の手順が、生の食材を触らない工程のことがある）。
+ *
+ * 2026-08-12 便FX: **調理の途中の話（「〜ている間は」）を保存より先に**見分ける
+ * （同じ理由。「浸けている間は必ず冷蔵庫に入れておくこと。」が保存の行と判定され、
+ * 浸している最中に読むべき行が完成の手順へ寄っていた）。
  */
 export function classifyRecipeNote(line: string): RecipeNoteKind {
   if (WASH_PATTERN.test(line) && HANDLING_PATTERN.test(line)) return 'raw'
   if (PICK_PATTERN.test(line)) return 'pick'
+  if (DURING_PATTERN.test(line)) return 'during'
   if (KEEP_PATTERN.test(line)) return 'keep'
   if (HEAT_PATTERN.test(line)) return 'heat'
   return 'other'
+}
+
+/**
+ * 「〜ている間」の動作をしている手順を探す（見つからなければ -1）。
+ * 「浸けている間」→ 送りがなを落とした「浸」で手順本文を探す＝レシピが「浸し」「浸け」の
+ * どちらで書かれていても同じ手順に当たる。**最初に**その動作が出てくる手順を採る
+ * （その作業が始まる場所で読めるようにするため）。
+ */
+function findDuringStepIndex(line: string, steps: readonly RecipeNoteStep[]): number {
+  const action = DURING_ACTION_PATTERN.exec(line)?.[1]
+  if (!action) return -1
+  // 送りがな（末尾のひらがな）を落とした部分。全部ひらがなの動作はそのまま使う
+  const core = action.replace(/[ぁ-ん]+$/, '') || action
+  return steps.findIndex((step) => step.text.includes(core))
 }
 
 /**
@@ -179,7 +218,13 @@ export function assignRecipeNotes(
       }
 
       let index = -1
-      if (kind === 'keep') {
+      if (kind === 'during') {
+        // 「浸けている間は」＝その作業をしている手順に出す（2026-08-12 便FX）。
+        // 動作が手順本文に見つからないときは、作り始めに読めるよう最初の手順へ落とす
+        // （完成の手順に置くと、読んだときには手遅れになる行だから）
+        index = findDuringStepIndex(line, steps)
+        if (index === -1) index = 0
+      } else if (kind === 'keep') {
         // 保存・お弁当・温め直しは、その品ができあがってからの話
         index = steps.length - 1
       } else if (kind === 'other' || kind === 'pick') {

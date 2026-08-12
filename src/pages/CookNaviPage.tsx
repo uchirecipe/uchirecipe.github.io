@@ -63,6 +63,7 @@ import {
 import CookSessionOverlay from '../components/CookSessionOverlay'
 import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
+import CookFinishModal from '../components/CookFinishModal'
 import {
   applyStepPulls,
   findCursorIndex,
@@ -330,6 +331,14 @@ function TimelineCard({
           {showFillHint && !item.longRest && (
             <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitFillHint}</p>
           )}
+          {/* ナビが足した湯沸かしは分数を出さないので、全体の目安に何分で入っているかを
+              ここに書く（2026-08-12 便FX・司令部裁定A案）。見出しの「湯が沸くまでの待ち時間」は
+              そのままで、数え方だけを添える＝手順の分を足しても合計に届かない理由が読める */}
+          {item.addedByNavi && (
+            <p data-testid="navi-boil-note" className="ja-phrase mt-1 text-xs text-ink-muted">
+              {ja.cookNavi.waitBlockBoilNote}
+            </p>
+          )}
           {/* 今回の調理では終わらない待ちは、段取りに残したまま時間の計算から外していることを
               その場で書く（2026-08-11 便FL。黙って外すと「なぜ出てこないのか」になる） */}
           {item.longRest && (
@@ -432,6 +441,18 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
           <p className="text-sm font-bold text-ink-muted">
             {ja.cookNavi.ingredientsPanelTitle.replace('{n}', String(recipes.length))}
           </p>
+          {/* 合わせ調味料の線の説明は、材料一覧の中で1回だけ出す（2026-08-12 便FX・オーナー指摘
+              「材料の『左に同じ線が〜』は、全体で１箇所に書いてあれば十分」）。
+              以前は品ごとに繰り返していたので、3品を開くと同じ文が3回並んでいた。
+              線が出てくる前に読める位置（見出しの直下）に置き、組を持つ品が1つでもあれば出す */}
+          {recipes.some((recipe) => recipe.items.some((ing) => ing.seasoningGroup)) && (
+            <p
+              data-testid="navi-seasoning-group-hint"
+              className="ja-phrase mt-0.5 text-xs text-ink-muted"
+            >
+              {ja.cookNavi.seasoningGroupHint}
+            </p>
+          )}
           <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
             {recipes.map((recipe) => {
               const isOpen = !collapsed.includes(recipe.recipeId)
@@ -464,40 +485,30 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                     {recipe.items.length === 0 ? (
                       <p className="pb-1 text-sm text-ink-muted">{ja.cookNavi.ingredientsEmpty}</p>
                     ) : (
-                      <>
-                        <ul className="pb-1">
-                          {recipe.items.map((ing, i) => (
-                            <li
-                              key={`${ing.name}-${i}`}
-                              className="flex items-baseline justify-between gap-2 py-0.5 pl-2 text-sm"
-                              /* 合わせ調味料（先にまとめて計量してよい材料）の線。
-                                 色は**そのレシピの色**にそろえる（2026-08-09 便EH・オーナー実機報告
-                                 「なんでこっちに青で描いてるの？って混乱する」）。同じレシピに
-                                 2組以上あるときだけ線の引き方で分ける */
-                              style={
-                                ing.seasoningGroup
-                                  ? {
-                                      borderLeft: `4px ${seasoningGroupLineStyle(ing.seasoningGroup)} ${
-                                        RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length]
-                                      }`,
-                                    }
-                                  : { borderLeft: '4px solid transparent' }
-                              }
-                            >
-                              <span className="ja-phrase min-w-0">{ing.name}</span>
-                              <span className="shrink-0 font-bold">{ing.amount}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        {recipe.items.some((ing) => ing.seasoningGroup) && (
-                          <p
-                            data-testid="navi-seasoning-group-hint"
-                            className="pb-1 text-xs text-ink-muted"
+                      <ul className="pb-1">
+                        {recipe.items.map((ing, i) => (
+                          <li
+                            key={`${ing.name}-${i}`}
+                            className="flex items-baseline justify-between gap-2 py-0.5 pl-2 text-sm"
+                            /* 合わせ調味料（先にまとめて計量してよい材料）の線。
+                               色は**そのレシピの色**にそろえる（2026-08-09 便EH・オーナー実機報告
+                               「なんでこっちに青で描いてるの？って混乱する」）。同じレシピに
+                               2組以上あるときだけ線の引き方で分ける */
+                            style={
+                              ing.seasoningGroup
+                                ? {
+                                    borderLeft: `4px ${seasoningGroupLineStyle(ing.seasoningGroup)} ${
+                                      RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length]
+                                    }`,
+                                  }
+                                : { borderLeft: '4px solid transparent' }
+                            }
                           >
-                            {ja.cookNavi.seasoningGroupHint}
-                          </p>
-                        )}
-                      </>
+                            <span className="ja-phrase min-w-0">{ing.name}</span>
+                            <span className="shrink-0 font-bold">{ing.amount}</span>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </Collapse>
                 </li>
@@ -1174,6 +1185,30 @@ export default function CookNaviPage() {
   const markAllCookedRef = useRef<HTMLButtonElement | null>(null)
   /** 「完成！」で閉じたときだけスクロールする（途中でやめた✕・端末の戻るでは動かさない） */
   const completedRef = useRef(false)
+  /**
+   * 「完成！」の窓を開いているか（2026-08-12 便FX）。
+   * ブラウザの確認（OK／キャンセル）では行き先を2つしか作れず、
+   * 「手順の画面に帰る」を選べなかったため、画面の中の窓にした。
+   */
+  const [finishAsking, setFinishAsking] = useState(false)
+  /**
+   * 記録の中身の説明（規約F: 何件に記録が付き、何が変わり、何が残るか）。
+   * 「まとめて作った！」ボタンの確認と「完成！」の窓で**同じ文字列**を使う
+   * ＝記録の説明を2か所に書かない。
+   */
+  const cookedConfirmText =
+    ja.cookNavi.markAllCookedConfirm
+      .replaceAll('{n}', String(selectedRecipes.filter((r) => r.id != null).length))
+      .replace(
+        '{titles}',
+        selectedRecipes
+          .filter((r) => r.id != null)
+          .map((r) => r.title)
+          .join('・'),
+      ) +
+    (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
+    // まとめて付けた記録も、あとから1件ずつ直せる（2026-08-12 便FX・オーナー指摘）
+    ja.cookNavi.markAllCookedConfirmEdit
 
   /**
    * 全画面の調理中モードを閉じる（2026-08-10 便FC・オーナー実機
@@ -1206,14 +1241,17 @@ export default function CookNaviPage() {
    * 記録するかどうかは確認で選ぶ＝docs/69「最後まで進んだら自動記録、をしない」は守る。
    * 記録しないを選んだときは、従来どおり全画面を閉じて「まとめて作った！」まで画面を送る。
    */
-  const completeSession = () => {
-    void (async () => {
-      if (await markAllCooked({ fromFinish: true })) return
-      completedRef.current = true
-      setCurrent(undefined)
-      setSessionOpen(false)
-      setPulls([])
-    })()
+  const completeSession = () => setFinishAsking(true)
+  /**
+   * 「完成！」の窓で「記録をつけずに閉じる」を選んだとき（2026-08-12 便FX）。
+   * 便EZ の戻り位置（画面を「まとめて作った！」まで送る）はここに残す。
+   */
+  const closeSessionWithoutRecord = () => {
+    setFinishAsking(false)
+    completedRef.current = true
+    setCurrent(undefined)
+    setSessionOpen(false)
+    setPulls([])
   }
   /**
    * 全画面を閉じたあとの戻り位置（同）。
@@ -1257,18 +1295,12 @@ export default function CookNaviPage() {
    * 記録したあとは件数つきのトーストと「元に戻す」を出す（日タブの「全て作った！」と同じ作法）。
    * 記録したら作りかけの段取りは役目を終えるので、覚えていた選択を消して選び直しの状態に戻す。
    */
-  const markAllCooked = async (options?: { fromFinish?: boolean }) => {
+  const markAllCooked = async (options?: { confirmed?: boolean }) => {
     const targets = selectedRecipes.filter((r) => r.id != null)
     if (targets.length === 0) return false
-    const confirmText =
-      // 最後の手順の「完成！」から来たときは、なぜ確認が出たのかを先に1行で書く（2026-08-11 便FO）
-      (options?.fromFinish ? ja.cookNavi.sessionFinishLead : '') +
-      ja.cookNavi.markAllCookedConfirm
-        .replaceAll('{n}', String(targets.length))
-        .replace('{titles}', targets.map((r) => r.title).join('・')) +
-      (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
-      ja.cookNavi.markAllCookedConfirmAsk
-    if (!window.confirm(confirmText)) return false
+    // 「完成！」の窓（CookFinishModal）から来たときは、同じ中身をもう一度聞かない
+    if (!options?.confirmed && !window.confirm(cookedConfirmText + ja.cookNavi.markAllCookedConfirmAsk))
+      return false
     // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
     // 何人分作ったかも記録する（2026-08-10 便FF）。段取りの分量に使っている食数
     // （枠の食数＞設定「食数の設定」＞レシピの登録人数分）をそのまま記録に残す
@@ -1286,6 +1318,35 @@ export default function CookNaviPage() {
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
     setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
     return true
+  }
+
+  /**
+   * 段取りを消す（2026-08-12 便FX・オーナー指摘「段取りを作った後に作った！を押すか
+   * 選んだレシピを取り消す以外につくった段取りを削除する方法がない」）。
+   *
+   * 便FT で「アプリを開き直しても今日のうちは残る」ようにしたので、**自分の手で終わらせる道**を
+   * 画面に置く。押すと組み合わせ・段取り・調理中の手順・色で先にした並びを全部捨て、
+   * 端末に残していた覚え書きも消す＝次に開いたときは今日の献立から選び直すところから始まる。
+   * 作った記録・レシピ・今日の献立・動いているタイマーには触らない。
+   */
+  const discardTimeline = () => {
+    const confirmText = ja.cookNavi.discardTimelineConfirm.replace(
+      '{n}',
+      String(selectedRecipes.length),
+    )
+    if (!window.confirm(confirmText)) return
+    clearCookNaviSession()
+    setSelectedIds([])
+    setShowTimeline(false)
+    setCurrent(undefined)
+    setSessionOpen(false)
+    setPulls([])
+    setFinishAsking(false)
+    setDroppedNotice('')
+    setExpiredReason(null)
+    setSessionLostNotice(false)
+    setUndoCooked(null)
+    setToast(ja.cookNavi.discardedTimelineToast)
   }
 
   /** トーストの「元に戻す」（記録を取り消して今日の献立に戻す。日タブと同じ関数を使う） */
@@ -1711,6 +1772,20 @@ export default function CookNaviPage() {
                     >
                       {ja.cookNavi.rebuild}
                     </button>
+
+                    {/* 段取りを消す（2026-08-12 便FX・オーナー指摘「作った！を押すか
+                        選んだレシピを取り消す以外につくった段取りを削除する方法がない」）。
+                        「レシピを選び直す」は組み合わせを残したまま組み直す操作なので、
+                        白紙に戻す道を別に置く。押し間違えると作りかけが消えるので、
+                        いちばん下・控えめな見た目にして確認を出す（規約F） */}
+                    <button
+                      type="button"
+                      data-testid="navi-discard-timeline"
+                      onClick={discardTimeline}
+                      className="mt-[var(--space-sm)] w-full rounded-md border border-edge bg-surface py-3 text-sm font-bold text-ink-muted shadow-sm"
+                    >
+                      {ja.cookNavi.discardTimeline}
+                    </button>
                   </section>
                 )}
               </>
@@ -1737,6 +1812,18 @@ export default function CookNaviPage() {
           sequential={isSequential}
         />
       )}
+      {/* 「完成！」の窓（2026-08-12 便FX）。記録をつける／調理を続ける／記録をつけずに閉じる
+          の3つから選ぶ。全画面（z-50）より上に重ねる */}
+      <CookFinishModal
+        open={finishAsking}
+        body={cookedConfirmText}
+        onRecord={() => {
+          setFinishAsking(false)
+          void markAllCooked({ confirmed: true })
+        }}
+        onBack={() => setFinishAsking(false)}
+        onClose={closeSessionWithoutRecord}
+      />
       <CustomTimerModal
         open={customTimerOpen}
         totalSeconds={customSeconds}
