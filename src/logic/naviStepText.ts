@@ -26,10 +26,20 @@ export function circledNumber(n: number): string {
 }
 
 /**
- * タイマーが指す手順の呼び方（「⑦3-1」）。
+ * タイマーが指す手順の呼び方（「⑦（3-1）」）。
  * レシピ内の手順番号が分からないタイマー（ナビが足した「湯を沸かす」など）は丸数字だけ。
  * 段取りの通し番号を持たないタイマー（レシピ詳細から始めたもの）はここを通さない。
+ *
+ * 2つの番号のあいだに括弧を入れる（2026-08-12 便FU-4・利用者テスト
+ * 「『前に開いていた手順⑫5から始まります。』⑫と5がくっついていて読めません。
+ * タイマー調整のラベルも『手順③2のタイマーを調整』」）。
+ * 便EZで画面のバッジと同じ並び（段取りの通し番号＋レシピ内の手順番号）にそろえたが、
+ * バッジは2つの丸に分かれているのに対し、文字は続けて書くと1つの数字に見える。
+ * 区切りに括弧を使うのは、レシピ内の手順番号が「3-1」（1手順を段取りの上で2つに分けた工程）に
+ * なることがあり、中黒や別のつなぎ記号では番号の一部と紛れるため。
  */
 export function naviStepText(naviOrder: number, recipeStepLabel?: string): string {
-  return recipeStepLabel ? `${circledNumber(naviOrder)}${recipeStepLabel}` : circledNumber(naviOrder)
+  return recipeStepLabel
+    ? `${circledNumber(naviOrder)}（${recipeStepLabel}）`
+    : circledNumber(naviOrder)
 }

@@ -127,6 +127,49 @@ function narrowByUsage(rows: readonly Ingredient[], stepText: string): readonly 
 }
 
 /**
+ * 合わせ調味料の組を指す印としてレシピでよく使われる記号（2026-08-12 便FU-2）。
+ * 「☆を全部混ぜ合わせておく。」の☆がこれ。英字（A・B）は本文の別の意味と紛れるので入れない
+ * （「※」「＊」も注釈の印として使われるため入れない＝印を取り違えて別の組を出さないため）。
+ */
+const SEASONING_MARK_PATTERN = /[☆★◎○●◇◆■□▲△▼▽]/
+
+/**
+ * その手順が指している合わせ調味料の組（2026-08-12 便FU-2・利用者テスト）。
+ *
+ * 指摘（原文）:「段取りの手順『その間に☆を全部混ぜ合わせておく。』には材料が1つも出ません。
+ * （中略）☆が何を指すのかは画面のどこにもない」
+ *
+ * 手順文には印（☆）しか書かれず、材料名の側に印が残っていないことがある
+ * （貼り付け取り込みは行頭の記号を材料名から落とすため）。そこで2段階で見る:
+ *   1. **材料名の先頭に印が残っている組**があれば、その印が手順文にあるかで決める
+ *      （組が2つ以上あっても、☆と◎を取り違えない）
+ *   2. 印が材料名に残っていないときは、**そのレシピの組が1つだけのときに限り**その組とする
+ *      （指す先が1つしかない＝推測にならない）。組が2つ以上あるときは決められないので出さない
+ */
+function seasoningGroupsMarkedIn(
+  stepText: string,
+  ingredients: readonly Ingredient[],
+): number[] {
+  if (!SEASONING_MARK_PATTERN.test(stepText)) return []
+  /** 組ごとの「材料名の先頭に共通して付いている印」（ばらけていれば空文字＝印なし） */
+  const markByGroup = new Map<number, string>()
+  for (const ing of ingredients) {
+    const group = ing.seasoningGroup
+    if (group == null) continue
+    const head = (ing.name ?? '').trim().charAt(0)
+    const mark = SEASONING_MARK_PATTERN.test(head) ? head : ''
+    if (!markByGroup.has(group)) markByGroup.set(group, mark)
+    else if (markByGroup.get(group) !== mark) markByGroup.set(group, '')
+  }
+  if (markByGroup.size === 0) return []
+  const byMark = [...markByGroup]
+    .filter(([, mark]) => mark !== '' && stepText.includes(mark))
+    .map(([group]) => group)
+  if (byMark.length > 0) return byMark.sort((a, b) => a - b)
+  return markByGroup.size === 1 ? [...markByGroup.keys()] : []
+}
+
+/**
  * ②手順の文に出てくる材料だけを、分量つきで拾う。
  *
  * 手順本文に出てこない材料は返さない。返す順は手順文に出てきた順
@@ -136,6 +179,13 @@ function narrowByUsage(rows: readonly Ingredient[], stepText: string): readonly 
  * 1つの表記に材料欄の複数行が当たるときは、まず手順文に書かれた用途で絞り、
  * それでも決まらなければ当たった行を材料欄の並び順で全部返す
  * （名前には括弧の注記が残るので、どちらの分量かは読んで見分けられる）。
+ *
+ * **合わせ調味料は組ごと出す**（2026-08-12 便FU-2・利用者テスト
+ * 「合わせ調味料は、材料の丸ボタンで色分けしておくと、調理中モードでまとめて表示されます、と
+ * 書いてあるので言われた通り色付けしたのに、段取りにも調理中モードにも出ない」）。
+ * 組は「先にまとめて計量してよい」という意味なので、**1つでも当たったら組ごと全部**出す。
+ * 1つだけ出すと、たまたま本文に名前が書いてあった調味料だけが出て、同じボウルに入れる
+ * 残りが画面から消える（指摘の「しょうゆ 大さじ1しか出ない」がこれ）。
  */
 export function stepIngredientAmounts(
   stepText: string,
@@ -149,13 +199,22 @@ export function stepIngredientAmounts(
   const matches = findIngredientMatches(stepText, names)
 
   const picked: Ingredient[] = []
+  const add = (ing: Ingredient) => {
+    if (!picked.includes(ing)) picked.push(ing)
+  }
+  /** その組の材料を、材料欄の並びのまま全部入れる（当たった1つを先頭に繰り上げない） */
+  const addGroup = (group: number) => {
+    for (const ing of ingredients) if (ing.seasoningGroup === group) add(ing)
+  }
   for (const match of matches) {
     const rows = nameToIngredients.get(match.text)
     if (!rows) continue
     for (const ing of rows.length > 1 ? narrowByUsage(rows, stepText) : rows) {
-      if (!picked.includes(ing)) picked.push(ing)
+      if (ing.seasoningGroup != null) addGroup(ing.seasoningGroup)
+      else add(ing)
     }
   }
+  for (const group of seasoningGroupsMarkedIn(stepText, ingredients)) addGroup(group)
   return picked.map((ing) => formatNaviIngredient(ing, baseServings, targetServings))
 }
 

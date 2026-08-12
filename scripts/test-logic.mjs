@@ -689,6 +689,39 @@ eq('全角の調理時間行', parseRecipeText('調理時間：２０分\n材料
   eq('準備時間は読み飛ばして調理時間を採用', r.cookMinutes, 20)
   eq('準備時間行が材料に混入しない', r.ingredients.map((i) => i.name), ['ねぎ'])
 }
+// --- 便FU-3(2026-08-12 利用者テスト): 貼り付けで登録すると「調理時間」が空のまま ---
+// 指摘（原文）:「手順ごとの分（10分・15分）は自動で入れてくれたのに、レシピ一覧でも詳細でも
+// 私の3品には時間バッジが出ません。URLから取り込んだときは『人数分・調理時間も読み込んだ内容に
+// 合わせました』と出たので、貼り付けだけ扱いが違います」
+//
+// 調べた結果、扱いが違うのは「どこから調理時間を得るか」だった。URL取り込みは
+// ページの構造化データ(totalTime)から受け取る。貼り付けは本文に書かれた行を写すしかなく、
+// その行の読み取りが「N分」の形だけに限られていた。時間・範囲・「の目安」を写せるようにする。
+{
+  const withLine = (line) => parseRecipeText(`テスト\n${line}\n材料\n・ねぎ…1本\n作り方\n1. 煮る`)
+  eq('FU-3 「調理時間 1時間」を写す', withLine('調理時間 1時間').cookMinutes, 60)
+  eq('FU-3 「調理時間 1時間30分」を写す', withLine('調理時間 1時間30分').cookMinutes, 90)
+  eq('FU-3 「調理時間 1時間半」を写す', withLine('調理時間 1時間半').cookMinutes, 90)
+  eq('FU-3 範囲は長いほうを写す（20〜30分→30）', withLine('調理時間 20〜30分').cookMinutes, 30)
+  eq('FU-3 半角チルダの範囲も写す', withLine('調理時間 20~30分').cookMinutes, 30)
+  eq('FU-3 「調理時間の目安 25分」も写す', withLine('調理時間の目安 25分').cookMinutes, 25)
+  eq('FU-3 「所要時間：約1時間15分」も写す', withLine('所要時間：約1時間15分').cookMinutes, 75)
+  // 時間の行は材料・手順に混ざらない（読み飛ばしはこれまでどおり）
+  eq('FU-3 時間の行は手順に入らない', withLine('調理時間 1時間30分').steps, ['煮る'])
+  eq('FU-3 時間の行は材料に入らない', withLine('調理時間 20〜30分').ingredients.map((i) => i.name), ['ねぎ'])
+  // 準備時間は今までどおり採らない（読み飛ばすだけ）
+  eq('FU-3 「準備時間 1時間」は調理時間にしない', withLine('準備時間 1時間').cookMinutes, undefined)
+  // 時間の話でない行を巻き込まない（メタ行だと誤認して本文を落とさない）
+  const notTime = parseRecipeText('テスト\n材料\n・ねぎ…1本\n作り方\n1. 調理時間はお好みで加減する')
+  eq('FU-3 「調理時間はお好みで加減する」は手順のまま', notTime.steps, ['調理時間はお好みで加減する'])
+  eq('FU-3 「調理時間はお好みで」からは調理時間を取らない', notTime.cookMinutes, undefined)
+  // ラベルだけの行＋次の行に値、の2行形式でも時間・範囲を写す
+  eq(
+    'FU-3 ラベルと値が2行に分かれていても写す（1時間20分）',
+    parseRecipeText('テスト\n調理時間\n1時間20分\n材料\n・ねぎ…1本\n作り方\n1. 煮る').cookMinutes,
+    80,
+  )
+}
 
 // ---------- 貼り付け解析: 材料内の小見出し行を材料にしない(2026-07-09ペルソナ第2波) ----------
 {
@@ -5186,6 +5219,101 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
+// ---------- buildCookTimeline / buildCookPlan(並行調理ナビ: 画面に出ている数字どうしを合わせる。
+// 2026-08-12 便FU-1・利用者テスト(4回中4回再現)) ----------
+//
+// 指摘（原文）: 「鶏むね肉のみそマヨ焼き 1品だけなら約37分」なのに、同じ画面の手順表示は
+// 待ち10分＋3分＋2分＋待ち15分＋4分＝34分。他2品は一致するのに鶏だけ+3分ずれる。
+//
+// 真因: 待ちを仕掛けた品には「遅くともこの時刻までに手を戻す」締め切り（attendUntil＝
+// 待ち終了＋煮込みの猶予2割）が立つ。差し込む手作業がその締め切りを越えないかを見る判定で、
+// **その締め切りを立てた本人の手順まで弾いていた**。鍋に戻る作業そのものを鍋の締め切りで
+// 止めていたことになり、締め切りの時刻まで何もしない空白が段取りに入る。
+// 空白は手順のどこにも出ないので、手順の分数を足した値とヘッダーの合計が食い違う。
+//
+// 正しいのは手順の側（34分）。空白は料理の都合ではなく計算の産物なので、空白を作らない。
+{
+  const s = (text, minutes) => (minutes == null ? { text } : { text, minutes })
+  /** その手順カードに出る分数（待ちは待ち分数・手作業は目安時間。長い待ちは出さない＝0） */
+  const shownMinutes = (it) => (it.kind === 'wait' ? it.waitMinutes : it.activeMinutes)
+  const sumShown = (items) => items.reduce((sum, it) => sum + shownMinutes(it), 0)
+
+  const misoMayo = {
+    id: 1,
+    title: '鶏むね肉のみそマヨ焼き',
+    servings: 2,
+    ingredients: [],
+    steps: [
+      s('鶏むね肉に☆をもみ込んで10分おく。', 10),
+      s('玉ねぎを薄切りにする。', 3),
+      s('天板にアルミホイルを敷く。', 2),
+      s('魚焼きグリルの弱火で12〜15分焼く。', 15),
+      s('器に盛り、細ねぎを散らす。', 4),
+    ],
+  }
+  const misoMayoTimeline = buildCookTimeline([misoMayo])
+  eq(
+    'FU-1 手順に出る分数の並びは指摘のとおり（10・3・2・15・4）',
+    misoMayoTimeline.items.map(shownMinutes),
+    [10, 3, 2, 15, 4],
+  )
+  eq(
+    'FU-1 ヘッダーの合計は、画面に出ている各手順の分数の足し算と一致する',
+    misoMayoTimeline.totalMinutes,
+    sumShown(misoMayoTimeline.items),
+  )
+  eq('FU-1 みそマヨ焼きの合計は34分（+3分の空白が入らない）', misoMayoTimeline.totalMinutes, 34)
+
+  // 締め切りのある待ち（ゆで・煮込み）を持つ品を何通りか通しても、空白が入らないことを見張る。
+  // 1品だけの段取りには「他にやることが無いので待つ」以外の空白は起こりえない
+  const soloShapes = [
+    [s('鍋にたっぷりの湯を沸かし、にんじんを4分ゆでる。'), s('ざるにあげて水気をきる。'), s('ごま油とめんつゆで和え、器に盛る。')],
+    [s('大根は一口大に切る。'), s('鍋に大根とだしを入れて中火で15分煮る。', 15), s('火を止めて10分おき、器に盛る。', 10)],
+    [s('豚肉に下味をもみ込んで20分漬ける。', 20), s('フライパンで両面を3分ずつ焼く。'), s('たれを煮からめ、器に盛る。')],
+    [s('じゃがいもを600Wのレンジで5分加熱する。', 5), s('熱いうちにつぶす。'), s('マヨネーズと和えて器に盛る。')],
+  ]
+  soloShapes.forEach((steps, i) => {
+    const t = buildCookTimeline([{ id: 1, title: `型${i + 1}`, servings: 2, ingredients: [], steps }])
+    eq(
+      `FU-1 1品だけの段取りに空白の分数が入らない（型${i + 1}）`,
+      t.totalMinutes,
+      sumShown(t.items),
+    )
+  })
+
+  // 3品を並行に組んでも、品ごとの「1品だけなら約◯分」は、その品の手順に出ている分数の合計と一致する
+  // （画面の照らし合わせは、ヘッダーの数字と手順の数字を機械で突き合わせる形で固定する）
+  const plan = buildCookPlan([
+    misoMayo,
+    {
+      id: 2,
+      title: '豆腐とわかめのみそ汁',
+      servings: 2,
+      ingredients: [],
+      steps: [s('鍋にだし汁を入れて火にかける。', 2), s('豆腐とわかめを加えて2分煮る。', 2), s('みそを溶き入れ、火を止める。', 4)],
+    },
+    {
+      id: 3,
+      title: 'ほうれん草のごま和え',
+      servings: 2,
+      ingredients: [],
+      steps: [s('ほうれん草を洗う。', 3), s('鍋にたっぷりの湯を沸かし、1分ゆでる。', 3), s('水気を絞って4cm長さに切る。', 3), s('すりごまと砂糖で和える。', 3)],
+    },
+  ])
+  plan.recipes.forEach((r) => {
+    eq(
+      `FU-1 「1品だけなら約◯分」＝その品の手順に出ている分数の合計（${r.title}）`,
+      r.soloMinutes,
+      sumShown(plan.items.filter((it) => it.recipeId === r.id)),
+    )
+  })
+  eq(
+    'FU-1 「1品ずつ作ると約◯分」は品ごとの目安の足し算のまま',
+    plan.sequentialMinutes,
+    plan.recipes.reduce((sum, r) => sum + r.soloMinutes, 0),
+  )
+}
+
 // ---------- stepCategory / buildCookTimeline(並行調理ナビ: 3品全体の流れを整える。
 // 2026-08-08 便EB・オーナー要望「野菜を切る工程はまとめたい」「準備→加熱→仕上げの流れ」) ----------
 {
@@ -5425,6 +5553,87 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       '砂糖 大さじ2',
       'サラダ油 適量',
     ],
+  )
+
+  // --- 便FU-2(2026-08-12 利用者テスト): 合わせ調味料が段取り・調理中モードに出ない ---
+  // 指摘（原文）:「☆の4つ・◎の4つを手で色付けしました（計8タップ）。ところが段取りの手順
+  // 「その間に☆を全部混ぜ合わせておく。」には材料が1つも出ません。◎の手順も「しょうゆ 大さじ1」
+  // しか出ず、すりごま・砂糖・だしの素は出ません」
+  //
+  // 画面の案内が「色分けしておくと調理中モードでまとめて表示されます」と約束しているので、
+  // ①組の材料が1つでも当たったらその組を全部出す ②手順文の組の印（☆等）でも組を出す
+  const misoMayoIngredients = [
+    { name: '鶏むね肉', amount: '300', unit: 'g' },
+    { name: 'みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+    { name: 'マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+    { name: '砂糖', amount: '1', unit: '小さじ', seasoningGroup: 1 },
+    { name: '酒', amount: '1', unit: '小さじ', seasoningGroup: 1 },
+  ]
+  eq(
+    'FU-2 組の材料が1つでも当たったら、その組を全部出す',
+    label(stepIngredientAmounts('みそを混ぜ合わせる。', misoMayoIngredients, 2, 2)),
+    ['みそ 大さじ1', 'マヨネーズ 大さじ2', '砂糖 小さじ1', '酒 小さじ1'],
+  )
+  eq(
+    'FU-2 組の材料は材料欄の並び順で出す（当たった1つが先頭に来ない）',
+    label(stepIngredientAmounts('酒をふる。', misoMayoIngredients, 2, 2)),
+    ['みそ 大さじ1', 'マヨネーズ 大さじ2', '砂糖 小さじ1', '酒 小さじ1'],
+  )
+  eq(
+    'FU-2 組に入っていない材料は今までどおり手順に出てくるものだけ',
+    label(stepIngredientAmounts('鶏むね肉はそぎ切りにする。', misoMayoIngredients, 2, 2)),
+    ['鶏むね肉 300g'],
+  )
+  eq(
+    'FU-2 組がその手順に出てこなければ何も出さない（関係ない手順に持ち込まない）',
+    label(stepIngredientAmounts('天板にアルミホイルを敷く。', misoMayoIngredients, 2, 2)),
+    [],
+  )
+  // 組が1つだけのレシピでは、手順文の印（☆）が指す先はその組しかない＝推測にならない
+  eq(
+    'FU-2 「☆を全部混ぜ合わせておく」でも、組が1つだけならその組を出す',
+    label(stepIngredientAmounts('その間に☆を全部混ぜ合わせておく。', misoMayoIngredients, 2, 2)),
+    ['みそ 大さじ1', 'マヨネーズ 大さじ2', '砂糖 小さじ1', '酒 小さじ1'],
+  )
+  // 材料名の先頭に印が残っているレシピは、組が複数あっても印で見分けられる
+  const markedIngredients = [
+    { name: '鶏むね肉', amount: '300', unit: 'g' },
+    { name: '☆みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+    { name: '☆マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+    { name: '◎しょうゆ', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+    { name: '◎すりごま', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+  ]
+  eq(
+    'FU-2 材料名に印が残っていれば、組が2つでも印で見分けて出す（☆）',
+    label(stepIngredientAmounts('その間に☆を全部混ぜ合わせておく。', markedIngredients, 2, 2)),
+    ['☆みそ 大さじ1', '☆マヨネーズ 大さじ2'],
+  )
+  eq(
+    'FU-2 材料名に印が残っていれば、組が2つでも印で見分けて出す（◎）',
+    label(stepIngredientAmounts('◎を混ぜて回しかける。', markedIngredients, 2, 2)),
+    ['◎しょうゆ 大さじ1', '◎すりごま 大さじ1'],
+  )
+  // 印が材料名に無く、組が2つ以上あるときは、どの組かを機械が決められない＝出さない（嘘を出さない）
+  const twoGroups = [
+    { name: 'みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+    { name: 'マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+    { name: 'しょうゆ', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+    { name: 'すりごま', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+  ]
+  eq(
+    'FU-2 印の指す先が決められないときは出さない（当てずっぽうの組を出さない）',
+    label(stepIngredientAmounts('☆を全部混ぜ合わせておく。', twoGroups, 2, 2)),
+    [],
+  )
+  eq(
+    'FU-2 印が無い手順では、組が1つでも勝手に出さない',
+    label(stepIngredientAmounts('全体をよく混ぜる。', misoMayoIngredients, 2, 2)),
+    [],
+  )
+  eq(
+    'FU-2 出した材料には組の番号が付いている（画面の線の引き分けに使う）',
+    stepIngredientAmounts('みそを混ぜ合わせる。', misoMayoIngredients, 2, 2).map((x) => x.seasoningGroup),
+    [1, 1, 1, 1],
   )
 }
 
@@ -10899,6 +11108,32 @@ eq(
   }
 }
 
+// ---------- findTimeTokens: 時間の範囲表記(2026-08-12 便FU-5・利用者テスト) ----------
+// 指摘（原文）:「『魚焼きグリルの弱火で12〜 ⏱15分 焼く。』— 範囲の『12〜』だけが取り残されて、
+// 時間チップと分断表示になります。『1〜 ⏱2分 煮る』も同様」
+{
+  const { findTimeTokens } = await import('../src/logic/time.ts')
+  const shown = (text) => findTimeTokens(text).map((t) => t.text)
+  const secs = (text) => findTimeTokens(text).map((t) => t.seconds)
+
+  eq('FU-5 「12〜15分」は1つのまとまりにする', shown('魚焼きグリルの弱火で12〜15分焼く。'), ['12〜15分'])
+  eq('FU-5 「1〜2分」も1つ', shown('弱火で1〜2分煮る。'), ['1〜2分'])
+  eq('FU-5 半角チルダ・ハイフンの範囲も1つ', [shown('3~4分ゆでる。'), shown('8-10分焼く。')], [['3~4分'], ['8-10分']])
+  eq('FU-5 全角数字の範囲も1つ（半角に直して出す）', shown('１２〜１５分焼く。'), ['12〜15分'])
+  eq('FU-5 単位が2回書かれる形（12分〜15分）も1つ', shown('12分〜15分煮る。'), ['12分〜15分'])
+  // はかる長さは変えない（範囲の長いほう＝これまでと同じ。段取りの待ち時間の計算に影響させない）
+  eq('FU-5 はかる長さは範囲の長いほうのまま', [secs('12〜15分焼く。'), secs('1〜2分煮る。')], [[900], [120]])
+  eq('FU-5 単位が2回の形でも長いほう', secs('12分〜15分煮る。'), [900])
+  // 範囲でないものを巻き込まない
+  eq('FU-5 範囲でない時間はそのまま', shown('中火で15分煮る。'), ['15分'])
+  eq('FU-5 2つの別々の時間は別々のまま', shown('5分炒めてから、10分煮る。'), ['5分', '10分'])
+  eq('FU-5 「1時間半」はこれまでどおり1つ', [shown('1時間半おく。'), secs('1時間半おく。')], [['1時間半'], [5400]])
+  eq('FU-5 「5分10秒」は範囲ではないのでまとめない', shown('5分10秒はかる。'), ['5分', '10秒'])
+  eq('FU-5 数字が直前にあっても区切りが無ければ取り込まない', shown('600Wで3分加熱する。'), ['3分'])
+  eq('FU-5 「3〜4人分」は時間ではないので拾わない', shown('3〜4人分の目安。'), [])
+  eq('FU-5 「180-200℃で15分」の温度は巻き込まない', shown('180-200℃で15分焼く。'), ['15分'])
+}
+
 // ---------- lineCompose 改行第5弾(便BA): タイマー箱結合ルールの新エンジン適応(オーナー実機第2波9件) ----------
 // 生テキスト→ComposedStepText.buildAtoms(用語/タイマー分解 + 要件2スリム化 + 要件9〜接着)を再現して
 // composeLines へ通す。1文字=1幅の偽測定・幅16〜19字相当。hangingPunct は WebKit(true)/Chromium(false)。
@@ -11435,8 +11670,19 @@ eq(
     [circledNumber(0), circledNumber(51), circledNumber(1.5)],
     ['0', '51', '1.5'],
   )
-  eq('便EZ② 段取り7番目・レシピ内3-1は「⑦3-1」', naviStepText(7, '3-1'), '⑦3-1')
+  eq('便EZ② 段取り7番目・レシピ内3-1は「⑦（3-1）」', naviStepText(7, '3-1'), '⑦（3-1）')
   eq('便EZ② レシピ内の手順番号が無い工程(湯を沸かす)は丸数字だけ', naviStepText(7), '⑦')
+  // --- 便FU-4(2026-08-12 利用者テスト): 丸数字と数字がくっついて読めない ---
+  // 指摘（原文）:「『前に開いていた手順⑫5から始まります。』⑫と5がくっついていて読めません。
+  // タイマー調整のラベルも『手順③2のタイマーを調整』」
+  eq('FU-4 丸数字とレシピ内の手順番号を続けて書かない', naviStepText(12, '5'), '⑫（5）')
+  eq('FU-4 レシピ内番号が「3-1」の工程も同じ形', naviStepText(7, '3-1'), '⑦（3-1）')
+  eq('FU-4 2桁のレシピ内番号でも区切りが入る', naviStepText(3, '12'), '③（12）')
+  eq(
+    'FU-4 くっついた形（⑫5・③2）はもう作らない',
+    [naviStepText(12, '5'), naviStepText(3, '2')].some((s) => /[①-⑳㉑-㉟㊱-㊿]\d/.test(s)),
+    false,
+  )
 }
 
 // ---------- cookedWithinDays: 「最近作った」判定(2026-07-29 便CI/C08) ----------

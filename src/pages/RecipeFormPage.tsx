@@ -1015,6 +1015,28 @@ function RecipeFormInner() {
       return
     }
     if (parsed.title && !title.trim()) setTitle(parsed.title)
+    // 材料・手順以外にも黙って置き換わる項目(人数分・調理時間)を、URL取り込みと同じように
+    // 結果メッセージへ書き添える(2026-08-12 便FU-3)。実際に値が変わったものだけを並べる
+    const pasteAlsoApplied: string[] = []
+    const nextPasteServings = parsed.servings ? clampServings(parsed.servings) : undefined
+    if (nextPasteServings !== undefined && nextPasteServings !== servings) {
+      pasteAlsoApplied.push(ja.paste.alsoAppliedServings)
+    }
+    if (parsed.cookMinutes && String(parsed.cookMinutes) !== cookMinutes.trim()) {
+      pasteAlsoApplied.push(ja.paste.alsoAppliedCookMinutes)
+    }
+    const pasteAlsoAppliedNote =
+      pasteAlsoApplied.length > 0
+        ? ja.paste.alsoApplied.replace('{items}', pasteAlsoApplied.join(ja.paste.alsoAppliedSeparator))
+        : ''
+    /**
+     * 貼り付けた文章に調理時間が書かれておらず、欄も空のまま終わるとき。
+     * URL取り込みはページの構造化データから調理時間を受け取れるが、貼り付けは本文に
+     * 書かれた行を写すしかない。書かれていない時間を機械が見積って入れることはしないので、
+     * 欄が空のままである事実だけを伝える(黙っていると「取り込みが効いていない」に見える)
+     */
+    const pasteCookMinutesNote =
+      !parsed.cookMinutes && cookMinutes.trim() === '' ? ja.paste.cookMinutesNotWritten : ''
     // 貼り付けた「50人分」も範囲に収める(便CK/①-1。手では21人分以上を作れないのに素通りしていた)
     if (parsed.servings) setServings(clampServings(parsed.servings))
     // 「調理時間: 20分」のようなメタ情報行から拾った分数はフォームの調理時間欄へ
@@ -1035,7 +1057,7 @@ function RecipeFormInner() {
     const pastedStepRows = toImportedStepRows(parsed.steps)
     const filledMinutes = pastedStepRows.filter((row) => row.minutesAuto).length
     const stepMinutesNote =
-      filledMinutes > 0 ? `。${ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes))}` : ''
+      filledMinutes > 0 ? ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes)) : ''
     if (pastedStepRows.length > 0) {
       setSteps(pastedStepRows)
     }
@@ -1072,10 +1094,16 @@ function RecipeFormInner() {
       showPasteMessage(ja.paste.resultNoSteps.replace('{i}', String(parsed.ingredients.length)), 'warn')
       return
     }
+    // 添える一文はどれも句点で終わる（i18n側で終端まで書いてある）。
+    // 件数の一文だけ句点を持たないので、添える文がある場合に1つだけ足す
+    // （2026-08-12 便FU-3。文ごとに句点を足していて「入れました。。調理時間も…」になっていた）
+    const pasteNotes = [pasteAlsoAppliedNote, stepMinutesNote, pasteCookMinutesNote]
+      .filter((note) => note !== '')
+      .join('')
     showPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
-        .replace('{s}', String(parsed.steps.length)) + stepMinutesNote,
+        .replace('{s}', String(parsed.steps.length)) + (pasteNotes ? `。${pasteNotes}` : ''),
       'info',
     )
   }

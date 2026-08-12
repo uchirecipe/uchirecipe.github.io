@@ -2208,7 +2208,9 @@ export default function SettingsPage() {
           {replaceUndoAvailable && (
             <div
               className="fixed inset-x-0 z-[70] flex justify-center px-[var(--space-md)]"
-              style={{ bottom: 'calc(160px + env(safe-area-inset-bottom))' }}
+              /* 下部に固定される帯の実測した高さ＋トースト1本ぶんの上に出す（2026-08-12 便FU-6。
+                 旧: 固定の160px。タイマーが動いていると帯の裏に隠れて押せなかった） */
+              style={{ bottom: 'calc(var(--app-bottom-inset) + var(--space-md) + 72px)' }}
               role="status"
             >
               <div className="flex w-full max-w-sm items-start gap-2 rounded-md border border-accent bg-surface px-4 py-3 shadow-md motion-safe:animate-toast-in">

@@ -1178,7 +1178,7 @@ export default function CookSessionOverlay({
         onLabelClick={
           adjustingTimer && adjustingTimerStep ? () => goToTimerStep(adjustingTimer) : undefined
         }
-        /* 「手順⑦3-1を開く」（2026-08-10 便FC・オーナー実機「調理中モードでスタートした
+        /* 「手順⑦（3-1）を開く」（2026-08-10 便FC・オーナー実機「調理中モードでスタートした
            タイマーからの戻り先が調理中モードの手順にしたい」）。この画面では別の画面へ飛ばさず、
            段取りの中でその手順へカーソルを移す＝常駐バーから開いた窓と同じ言い方・同じ着地にする。
            以前はレシピ名のタップにしか道が無く、押せる場所が見た目から分からなかった */

@@ -1247,8 +1247,24 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       (min, j) => (j.attendUntil > cookAt ? Math.min(min, j.attendUntil) : min),
       Number.POSITIVE_INFINITY,
     )
-    /** その手作業を今から始めても、締め切りまでに手が空くか */
-    const fitsBeforeDeadline = (j: Job) => cookAt + j.steps[j.ptr].activeMinutes <= attendDeadline
+    /**
+     * その手作業を今から始めても、締め切りまでに手が空くか。
+     *
+     * 見るのは**ほかの品**の締め切りだけ（2026-08-12 便FU-1・利用者テスト
+     * 「表示されている各手順の分を足しても、そのレシピの合計と合わない。鶏だけ+3分ずれる」）。
+     * 締め切り（attendUntil）は「その鍋に遅くともいつまでに手を戻すか」を表すので、
+     * **その鍋に戻る作業そのもの**＝同じ品の次の手順を、この判定で弾いてはいけない。
+     * 弾くと締め切りの時刻まで何もしない空白が段取りに入り（煮込みの猶予＝待ちの2割ぶん）、
+     * その空白は手順のどこにも出ないため、手順の分数を足した値とヘッダーの合計が食い違う。
+     * 空白は料理の都合ではなく計算の産物なので、はじめから作らない。
+     */
+    const fitsBeforeDeadline = (j: Job) => {
+      const othersDeadline = jobs.reduce(
+        (min, k) => (k !== j && k.attendUntil > cookAt ? Math.min(min, k.attendUntil) : min),
+        Number.POSITIVE_INFINITY,
+      )
+      return cookAt + j.steps[j.ptr].activeMinutes <= othersDeadline
+    }
 
     // 手作業の選び方（上のコメントの1〜7）。切る工程どうしだけは、まな板の順序（野菜→肉・魚）を先に見る
     const attendDue = (j: Job) => (j.attendUntil > 0 && j.readyAt <= cookAt ? 0 : 1)
