@@ -22,7 +22,7 @@ import { useTimers } from './TimerProvider'
 import { useSettings, updateSettings } from '../db/settings'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/time'
-import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
+import { sortTimersForDisplay, stepTimerKey, timerRemainingSeconds } from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import {
@@ -238,7 +238,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
 
   const startStepTimer = (seconds: number) =>
     startTimer({
-      key: `${recipeId}-${index}-${seconds}`,
+      key: stepTimerKey(recipeId, index, seconds),
       label: recipe.title,
       doneLabel: deriveDoneLabel(step.text),
       seconds,
@@ -308,7 +308,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         )
         if (!seconds) return false
         startTimerRef.current({
-          key: `${recipeId}-${currentIndex}-${seconds}`,
+          key: stepTimerKey(recipeId, currentIndex, seconds),
           label: recipe.title,
           doneLabel: deriveDoneLabel(currentStep.text),
           seconds,

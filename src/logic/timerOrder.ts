@@ -42,6 +42,32 @@ export function timerRemainingSeconds(
   return Math.max(0, Math.ceil(ms / 1000))
 }
 
+/**
+ * 手順のタイマーの重複防止キー（レシピ・手順・長さが同じなら同じキー＝二重に立たない）。
+ * レシピ詳細・調理中モード・並行調理ナビが同じ形で作るので、1か所に集約してある。
+ */
+export function stepTimerKey(recipeId: number, stepIndex: number, seconds: number): string {
+  return `${recipeId}-${stepIndex}-${seconds}`
+}
+
+/**
+ * その手順のタイマーが**いま動いているか**を返す（2026-08-12 便FS-5・利用者テスト
+ * 「タイマーが動いていても、手順の中のボタンが『タイマーを始める』のまま。
+ * もう一度押しても何も起きない」）。
+ *
+ * 長さはキーの末尾に入る（同じ手順でも本文の時間表記から始めると別の長さになりうる）ので、
+ * **レシピと手順まで**を突き合わせる。鳴り終わったタイマーは含めない
+ * ＝終わったあとは「タイマーを始める」に戻り、もう一度はかり直せる。
+ */
+export function findRunningStepTimer<T extends { key: string; done: boolean }>(
+  timers: readonly T[],
+  recipeId: number,
+  stepIndex: number,
+): T | undefined {
+  const prefix = `${recipeId}-${stepIndex}-`
+  return timers.find((t) => !t.done && t.key.startsWith(prefix))
+}
+
 /** 端末内に保存するタイマー1本分の形（TimerProvider の ActiveTimer と同じ） */
 export interface StoredTimer {
   id: number

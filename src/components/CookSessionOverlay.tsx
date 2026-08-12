@@ -25,7 +25,7 @@ import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
-import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
+import { findRunningStepTimer, sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import { formatRemaining, findTimeTokens } from '../logic/time'
 import {
   pickVoiceResumeTarget,
@@ -458,6 +458,12 @@ export default function CookSessionOverlay({
   // 「約◯分の待ち時間」と名乗ったブロックには必ずタイマーのボタンを出す
   const showWaitTimerButton = showsWaitTimerButton(item)
   /**
+   * この手順ではかっているタイマー（2026-08-12 便FS-5・利用者テスト「タイマーが動いていても
+   * 手順の中のボタンが『タイマーを始める』のまま。もう一度押しても何も起きない」）。
+   * 動いている間はボタンを出さず、残り時間に置き換える
+   */
+  const waitTimer = findRunningStepTimer(timers, item.recipeId, item.stepIndex)
+  /**
    * 「この間に、次の手作業を進められます」を出すか（2026-08-11 便FL。段取りの一覧と同じ条件）。
    * その待ちの中に入る手作業があるときだけ＝1品ずつ作る段取りや、今回の調理では終わらない
    * 長い待ち、同じ品の続きしか残っていない待ちには出さない
@@ -815,7 +821,9 @@ export default function CookSessionOverlay({
         {ingredients.length > 0 && (
           <div
             data-testid="cook-session-ingredients"
-            className="w-full rounded-sm border-l-2 pl-2 text-left"
+            /* 角を丸めない（2026-08-12 便FS-3。左だけの線に角丸を付けると弧になり、
+               材料名の手前に閉じ括弧のない「(」が見えていた） */
+            className="w-full border-l-2 pl-2 text-left"
             style={{ borderLeftColor: color }}
           >
             <p className="ja-phrase">
@@ -855,16 +863,36 @@ export default function CookSessionOverlay({
                     ? ja.cookNavi.waitBlockLongRest
                     : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
               </span>
-              {showWaitTimerButton && (
-                <button
-                  type="button"
-                  onClick={() => onStartTimer(item, item.waitMinutes * 60)}
-                  className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
-                >
-                  <TimerIcon size={16} aria-hidden />
-                  {ja.cookNavi.startTimer}
-                </button>
-              )}
+              {/* タイマーが動いている間は残り時間に置き換える（2026-08-12 便FS-5。
+                  段取りの一覧と同じ作り＝押しても何も起きないボタンを残さない） */}
+              {showWaitTimerButton &&
+                (waitTimer ? (
+                  <span
+                    data-testid="cook-session-wait-timer-running"
+                    className="inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink"
+                  >
+                    {waitTimer.pausedRemainingMs != null ? (
+                      <Pause size={16} aria-hidden />
+                    ) : (
+                      <TimerIcon size={16} aria-hidden />
+                    )}
+                    <span className="tabular-nums">
+                      {(waitTimer.pausedRemainingMs != null
+                        ? ja.cookNavi.waitTimerPaused
+                        : ja.cookNavi.waitTimerRunning
+                      ).replace('{time}', formatRemaining(timerRemainingSeconds(waitTimer, now)))}
+                    </span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onStartTimer(item, item.waitMinutes * 60)}
+                    className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
+                  >
+                    <TimerIcon size={16} aria-hidden />
+                    {ja.cookNavi.startTimer}
+                  </button>
+                ))}
             </div>
             {/* 段取りの一覧にだけ出ていた「この間に、次の手作業を進められます」を
                 調理中の画面にも出す（2026-08-11 便FL）。待ちを仕掛けたあと「次へ」で

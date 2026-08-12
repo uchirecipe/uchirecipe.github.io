@@ -47,6 +47,7 @@ import {
   hasMaterialGap,
 } from '../logic/nutrition'
 import { deriveDoneLabel } from '../logic/timerLabel'
+import { stepTimerKey } from '../logic/timerOrder'
 import { isHttpUrl } from '../logic/url'
 import { isMinutesShownInText } from '../logic/time'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -1005,7 +1006,7 @@ export default function RecipeDetailPage() {
                         onOpenTerm={openTerm}
                         onStartTimer={(_tokenText, seconds) =>
                           startTimer({
-                            key: `${id}-${index}-${seconds}`,
+                            key: stepTimerKey(id, index, seconds),
                             label: recipe.title,
                             doneLabel: deriveDoneLabel(step.text),
                             seconds,
@@ -1030,7 +1031,7 @@ export default function RecipeDetailPage() {
                         type="button"
                         onClick={() =>
                           startTimer({
-                            key: `${id}-${index}-${(step.minutes ?? 0) * 60}`,
+                            key: stepTimerKey(id, index, (step.minutes ?? 0) * 60),
                             label: recipe.title,
                             doneLabel: deriveDoneLabel(step.text),
                             seconds: (step.minutes ?? 0) * 60,

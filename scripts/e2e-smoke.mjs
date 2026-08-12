@@ -770,7 +770,7 @@ try {
   currentCheck = 'FOCUS-MEMO-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('回鍋肉')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('回鍋肉')
   await page.waitForTimeout(300)
   await page.getByText('回鍋肉(ホイコーロー)', { exact: true }).first().click()
   await page.waitForTimeout(500)
@@ -1320,7 +1320,7 @@ try {
       currentCheck = 'UI-390-02'
       await w390Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await w390Page.waitForTimeout(800)
-      await w390Page.getByPlaceholder('料理名・材料・タグで検索').fill('冷やしトマト')
+      await w390Page.getByPlaceholder('料理名・材料・タグ').fill('冷やしトマト')
       await w390Page.waitForTimeout(600)
       await w390Page.getByText('冷やしトマトの浅漬け', { exact: true }).first().click()
       await w390Page.waitForTimeout(800)
@@ -1360,7 +1360,7 @@ try {
       const fsPage = await fsContext.newPage()
       await fsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fsPage.waitForTimeout(1200)
-      await fsPage.getByPlaceholder('料理名・材料・タグで検索').fill('冷やし茶碗蒸し')
+      await fsPage.getByPlaceholder('料理名・材料・タグ').fill('冷やし茶碗蒸し')
       await fsPage.waitForTimeout(600)
       await fsPage.getByText('冷やし茶碗蒸し', { exact: true }).first().click()
       await fsPage.waitForTimeout(800)
@@ -5100,7 +5100,7 @@ try {
       const openNikujaga = async () => {
         await tkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await tkPage.waitForTimeout(1200)
-        await tkPage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+        await tkPage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
         await tkPage.waitForTimeout(500)
         await tkPage.getByText('肉じゃが', { exact: true }).first().click()
         await tkPage.waitForTimeout(700)
@@ -5280,7 +5280,7 @@ try {
       const fkOpen = async (name) => {
         await fkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await fkPage.waitForTimeout(1200)
-        await fkPage.getByPlaceholder('料理名・材料・タグで検索').fill(name)
+        await fkPage.getByPlaceholder('料理名・材料・タグ').fill(name)
         await fkPage.waitForTimeout(500)
         await fkPage.getByText(name, { exact: true }).first().click()
         await fkPage.waitForTimeout(700)
@@ -5413,7 +5413,7 @@ try {
       const fnPage = await fnContext.newPage()
       await fnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fnPage.waitForTimeout(1200)
-      await fnPage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await fnPage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await fnPage.waitForTimeout(500)
       await fnPage.getByText('肉じゃが', { exact: true }).first().click()
       await fnPage.waitForTimeout(700)
@@ -5494,7 +5494,7 @@ try {
       const openFocus = async (p, name) => {
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1400)
-        await p.getByPlaceholder('料理名・材料・タグで検索').fill(name)
+        await p.getByPlaceholder('料理名・材料・タグ').fill(name)
         await p.waitForTimeout(500)
         await p.getByText(name, { exact: true }).first().click()
         await p.waitForTimeout(700)
@@ -5722,7 +5722,7 @@ try {
         const p = await ctx.newPage()
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1400)
-        await p.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+        await p.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
         await p.waitForTimeout(500)
         await p.getByText('肉じゃが', { exact: true }).first().click()
         await p.waitForTimeout(700)
@@ -20582,7 +20582,7 @@ try {
       await rePage.waitForTimeout(1200)
 
       // 検索で対象を絞ってから「選択」→「全選択」。絞った結果の枚数がそのまま書き出す品数になる
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await rePage.waitForTimeout(700)
       // 右下の新規登録ボタン(#/recipes/new)も同じ入れ子に居るので数から外す
       const reCardSel = 'main a[href^="#/recipes/"]:not([href$="/new"])'
@@ -20658,7 +20658,7 @@ try {
       check('RECIPEEXPORT-EM(c) 書き出し完了の知らせが出る', ((await rePage.textContent('body')) ?? '').includes('書き出しました'))
 
       // (c) 端末のレシピは減らない
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('')
       await rePage.waitForTimeout(600)
       const reTotalAfterExport = await rePage.locator(reCardSel).count()
       check(
@@ -20670,7 +20670,7 @@ try {
       // (d) 消してから、既存の読み込み経路(「今のデータに追加」)で戻す。
       // 絞り込みを戻しても選択は残る(見えている品は落とさない)ので、「全選択」は
       // 押せない状態になっている。押せるときだけ押す
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await rePage.waitForTimeout(700)
       const reSelectAll = rePage.getByRole('button', { name: '全選択', exact: true })
       if (await reSelectAll.isEnabled()) {
@@ -20705,7 +20705,7 @@ try {
       )
       await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rePage.waitForTimeout(1200)
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await rePage.waitForTimeout(700)
       check(
         'RECIPEEXPORT-EM(d) 書き出したファイルから消したレシピが戻る',
@@ -23035,7 +23035,7 @@ try {
       const eyOpen = async (title) => {
         await eyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await eyPage.waitForTimeout(600)
-        await eyPage.getByPlaceholder('料理名・材料・タグで検索').fill(title)
+        await eyPage.getByPlaceholder('料理名・材料・タグ').fill(title)
         await eyPage.waitForTimeout(700)
         await eyPage.getByText(title, { exact: true }).first().click()
         await eyPage.waitForTimeout(800)
@@ -23540,7 +23540,7 @@ try {
       // 素の「しいたけ4枚」と書いてある寄せ鍋が、生しいたけの単価で按分される
       await faPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await faPage.waitForTimeout(600)
-      await faPage.getByPlaceholder('料理名・材料・タグで検索').fill('しいたけ')
+      await faPage.getByPlaceholder('料理名・材料・タグ').fill('しいたけ')
       await faPage.waitForTimeout(800)
       const faSearchBody = (await faPage.textContent('body')) ?? ''
       check(
@@ -23739,7 +23739,7 @@ try {
       })
       await fa4Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fa4Page.waitForTimeout(1800)
-      await fa4Page.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await fa4Page.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await fa4Page.waitForTimeout(700)
       const fa4Picked = await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()
       check('FA-3 前提: 検索で対象を絞れている', fa4Picked > 0 && fa4Picked < 10, `件数=${fa4Picked}`)

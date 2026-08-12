@@ -4141,6 +4141,32 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('ナビ: 段取りに無い添字なら出さない', hasFillableWorkDuringWait(items, 99), false)
 }
 
+// ---------- findRunningStepTimer(手順のタイマーが動いているか・2026-08-12 便FS-5) ----------
+{
+  const { stepTimerKey, findRunningStepTimer } = await import('../src/logic/timerOrder.ts')
+  const t = (key, over) => ({ key, done: false, ...over })
+  const timers = [
+    t(stepTimerKey(7, 2, 120)), // レシピ7の手順3（stepIndex=2）で2分
+    t(stepTimerKey(9, 0, 300)),
+    t(stepTimerKey(7, 20, 60)), // 手順21。「7-2-」で拾ってはいけない
+  ]
+  eq('FS-TIMER その手順で動いていれば見つかる', findRunningStepTimer(timers, 7, 2)?.key, '7-2-120')
+  eq('FS-TIMER 手順が違えば見つからない', findRunningStepTimer(timers, 7, 1), undefined)
+  eq('FS-TIMER 手順番号の桁違いを取り違えない(7-2 と 7-20)', findRunningStepTimer(timers, 7, 20)?.key, '7-20-60')
+  eq('FS-TIMER レシピが違えば見つからない', findRunningStepTimer(timers, 8, 2), undefined)
+  eq(
+    'FS-TIMER 鳴り終わったタイマーは動作中に数えない(「タイマーを始める」に戻す)',
+    findRunningStepTimer([t(stepTimerKey(7, 2, 120), { done: true })], 7, 2),
+    undefined,
+  )
+  eq(
+    'FS-TIMER 一時停止中も動作中として扱う(「始める」に戻すと二重に立つ)',
+    findRunningStepTimer([t(stepTimerKey(7, 2, 120), { pausedRemainingMs: 5000 })], 7, 2)?.key,
+    '7-2-120',
+  )
+  eq('FS-TIMER 自分で決めた時間のタイマーは手順に紐付けない', findRunningStepTimer([t('custom-navi-180')], 0, 0), undefined)
+}
+
 // ---------- classifyStep(並行調理ナビ: フライパンの「焼く」は目を離せないので手作業系のまま。
 // 素の/焼/を待ち系から外し、蒸し焼き・グリル・オーブン・レンジだけ待ち系にする。2026-07-14 Fable/Codexレビュー) ----------
 {
