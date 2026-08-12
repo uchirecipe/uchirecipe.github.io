@@ -32,7 +32,6 @@ import {
   pickVoiceStopTarget,
   resolveVoiceTimerSeconds,
 } from '../logic/voiceCommand'
-import { circledNumber } from '../logic/naviStepText'
 import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import {
@@ -260,6 +259,13 @@ export default function CookSessionOverlay({
    * どちらが起きたのか分からなくなる。移るのは声だけ、見るのは指だけで分ける。
    */
   const [peekRecipeId, setPeekRecipeId] = useState<number | null>(null)
+  /**
+   * 「最初の手順へ」を押す直前にいた手順（2026-08-11 便FO・利用者テスト
+   * 「閉じる✕のすぐ隣にあるので、押し間違えたら今いる場所を失う（戻る手段は『次へ』を8回）」）。
+   * 押したあとだけ「元の手順に戻す」を出して、1回で元の場所へ帰れるようにする。
+   * 保存しない一時的な表示状態で、他の移動（次へ・前へ・色）をしたら消える。
+   */
+  const [undoFirst, setUndoFirst] = useState<CookCursor | null>(null)
   const touchStartX = useRef<number | null>(null)
   // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる（調理中モードと同じ）
   const autoReadRef = useRef(false)
@@ -281,6 +287,8 @@ export default function CookSessionOverlay({
   const move = (next: CookCursor | undefined) => {
     if (!next) return
     stopSpeech()
+    // 別の移動をした時点で「元の手順に戻す」は役目を終える（どこへ戻すのかが曖昧になるため）
+    setUndoFirst(null)
     onMove(next)
   }
   const goNext = () => move(advanceCursor(items, cursor))
@@ -288,9 +296,17 @@ export default function CookSessionOverlay({
   /**
    * 段取りの最初の手順へ（2026-08-10 便FC・オーナー実機「左上に、①に戻るボタンを設置したい」）。
    * 途中から開き直したとき・作り直したいときに、次へ／前へを何回も押さずに先頭へ帰れる。
-   * カーソルを動かすだけなので、押し間違えても「次へ」で戻れる（可逆）。
+   *
+   * 2026-08-11 便FO: 押した直後だけ「元の手順に戻す」を出す。閉じる✕の隣にある小さなボタンで、
+   * 押し間違えると段取りの途中から先頭へ飛ばされ、帰り道が「次へ」の連打しかなかった。
    */
-  const goFirst = () => move(startCursor(items))
+  const goFirst = () => {
+    const first = startCursor(items)
+    if (!first || atFirst) return
+    const from: CookCursor = { recipeId: cursor.recipeId, stepIndex: cursor.stepIndex }
+    move(first)
+    setUndoFirst(from)
+  }
 
   // 開いている間は背景（段取りの一覧）をスクロールさせない（調理中モードと同じ）
   useEffect(() => {
@@ -407,6 +423,9 @@ export default function CookSessionOverlay({
         }
         // 前の手順を読みながら次に移らない（move と同じ作法）
         stopSpeech()
+        // 声で移ったときも「元の手順に戻す」は役目を終える（2026-08-11 便FO。
+        // 残しておくと、色で移ったあとに「最初の手順へ」を押す前の位置へ帰る札が居座る）
+        setUndoFirst(null)
         onPullStep({ before: cursor, target: target.cursor })
         return ja.cookNavi.sessionColorMoved.replace('{title}', title)
       },
@@ -453,12 +472,23 @@ export default function CookSessionOverlay({
   const sortedTimers = sortTimersForDisplay(timers)
   const planRecipeIds = new Set(recipes.map((r) => r.id))
   const timersByRecipeId = new Map<number, typeof sortedTimers>()
+  /**
+   * 鳴り終わったタイマー（2026-08-11 便FO・利用者テスト「鳴り終わったタイマーが、画面の
+   * 一番下に小さく『終わり』と出るだけ。コンロの前で手を動かしているときに、あの位置の
+   * あの大きさでは気づけない」）。
+   *
+   * **どの品のものでも必ず画面の上に、同じ大きさ・同じ場所で出す**。動作中のタイマーの
+   * 置き場所（大きく出している品は上・他の品はその行）は変えていないが、終わったものだけは
+   * 手順を進めても場所が動かない＝探し直さなくてよい。
+   */
+  const finishedTimers = sortedTimers.filter((t) => t.done)
   // 段取りに入っていない品のタイマー（並行調理ナビの画面で自分で始めたタイマーなど）は、
   // 置き場所になる行が下部に無いので画面上部に出す
   const currentTimers = sortedTimers.filter(
-    (t) => t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId),
+    (t) => !t.done && (t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId)),
   )
   for (const t of sortedTimers) {
+    if (t.done) continue
     if (t.recipeId === item.recipeId || !planRecipeIds.has(t.recipeId)) continue
     const list = timersByRecipeId.get(t.recipeId) ?? []
     list.push(t)
@@ -512,9 +542,13 @@ export default function CookSessionOverlay({
           <X size={24} aria-hidden />
         </button>
         {/* 段取りの最初の手順へ（2026-08-10 便FC・オーナー実機「左上に、①に戻るボタン」）。
-            呼び方は画面の大きいバッジと同じ丸数字にそろえる＝「手順①へ」（便EZで統一した
-            「手順⑦3-1」の書き方と同じ流儀）。「戻る」の語を使わないのは、下の「前へ」や
-            端末の戻る操作と読み分けられなくなるため。先頭にいる間は押せない */}
+            置き場所は指示どおり左上のまま。呼び方は「手順①へ」から改めた（2026-08-11 便FO・
+            利用者テスト「押すまで意味不明。丸囲みの①はこのアプリの他のどこにも出てこない」）。
+            丸囲み数字は他の場所（タイマーの窓・「続きから見る」の案内）でも使うが、
+            どれも「どの手順を指すか」を言う場面で、すぐ隣に同じ番号のバッジが並んでいる。
+            このボタンだけは行き先が段取りの先頭で、押す前に照らし合わせる先が画面に無い。
+            「戻る」の語を使わないのは、下の「前へ」や端末の戻る操作と読み分けられなくなるため。
+            先頭にいる間は押せない */}
         <button
           type="button"
           data-testid="cook-session-to-first"
@@ -522,13 +556,17 @@ export default function CookSessionOverlay({
           disabled={atFirst}
           className="shrink-0 rounded-md border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink shadow-sm disabled:opacity-30"
         >
-          {ja.cookNavi.sessionToFirst.replace('{n}', circledNumber(items[0]?.order ?? 1))}
+          {ja.cookNavi.sessionToFirst}
         </button>
         <div className="min-w-0 flex-1 px-1 text-center">
-          <p className="truncate">
+          {/* 料理名は折り返して全部出す（2026-08-11 便FO・利用者テスト
+              「調理中モードの料理名の帯が途中で切れる（『ほうれん草のおひ…』11文字で切れる）。
+              読み上げ用のテキストには全部入っている」）。1行に収めるために切っていたが、
+              いま何を作っているかは調理中モードで最初に読む情報なので、行数のほうを譲る */}
+          <p>
             <span
               data-testid="cook-session-recipe"
-              className="inline-block max-w-full truncate rounded-full px-2 py-0.5 text-sm font-bold"
+              className="ja-phrase inline-block max-w-full rounded-full px-2 py-0.5 text-sm font-bold leading-snug"
               style={{ backgroundColor: color, color: 'var(--chip-ink)' }}
             >
               {item.recipeTitle}
@@ -570,13 +608,38 @@ export default function CookSessionOverlay({
         </div>
       </div>
 
-      {micSupported && (
+      {/* 「最初の手順へ」の取り消し（2026-08-11 便FO）。押した直後だけ出て、
+          他の移動をすると消える。閉じる✕の隣に置かず、行を分けて誤爆から離す */}
+      {undoFirst && findCursorIndex(items, undoFirst) !== -1 && (
+        <div className="px-[var(--space-md)] pb-1 text-center">
+          <button
+            type="button"
+            data-testid="cook-session-undo-first"
+            onClick={() => move(undoFirst)}
+            className="inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <ChevronLeft size={16} aria-hidden />
+            {ja.cookNavi.sessionUndoToFirst}
+          </button>
+        </div>
+      )}
+
+      {/* 声の操作の案内は、声を使っている間だけ出す（2026-08-11 便FO・利用者テスト
+          「声を使わないのに、画面の上5行がずっと声の説明で埋まっている。マイクは切ってあるのに
+          消えない。一度読めば十分な文章に、狭いスマホ画面の上1/6を毎回使われている」）。
+          言葉の一覧は「声で操作」を押してから要るもので、押していない間は場所だけを取っていた。
+          手応え（聞き取った言葉・移った品）は、切ったあとも読めるように残す */}
+      {micSupported && (listening || voiceMessage) && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
           {/* 1品の調理中モードと同じ案内に、この画面だけの「色」を足す（2026-08-10 便FI）。
               ja.focus.micHint 自体は FocusMode と共用しているので書き換えない
               ＝色の無い1品の画面に、色の言い方が出てしまうことが構造的に起きない */}
-          {ja.focus.micHint}
-          {ja.cookNavi.sessionMicColorHint}
+          {listening && (
+            <>
+              {ja.focus.micHint}
+              {ja.cookNavi.sessionMicColorHint}
+            </>
+          )}
           {voiceMessage ? (
             <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
               {voiceMessage}
@@ -604,6 +667,59 @@ export default function CookSessionOverlay({
           >
             <X size={16} aria-hidden />
           </button>
+        </div>
+      )}
+
+      {/* 鳴り終わったタイマー（2026-08-11 便FO）。品を問わず、手順を進めても動かない場所に
+          全幅で出す。中身を押すと調整の窓（消音・手順を開く・消す）が開き、右の大きな
+          ボタンでその場で消せる＝小さな✕を狙わなくてよい */}
+      {finishedTimers.length > 0 && (
+        <div
+          data-testid="cook-session-finished-timers"
+          className="mx-[var(--space-md)] mb-1 max-h-[26vh] space-y-1 overflow-y-auto"
+        >
+          {finishedTimers.map((t) => (
+            <div
+              key={t.id}
+              style={{ background: 'color-mix(in oklab, var(--warning) 16%, var(--surface))' }}
+              className="flex items-center gap-2 rounded-md border-2 border-warning px-2 py-2 shadow-md"
+            >
+              <button
+                type="button"
+                onClick={() => setAdjustingId(t.id)}
+                aria-label={ja.timer.adjustOpenAria.replace('{label}', t.label)}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <BellRing size={28} className="shrink-0 animate-pulse text-warning" aria-hidden />
+                {/* どの手順のタイマーだったかを、常駐バー・調整の窓と同じ番号の並びで出す */}
+                <StepBadge
+                  number={
+                    t.isCustom || (t.stepNumber <= 0 && t.naviOrder == null)
+                      ? 'custom'
+                      : (t.naviOrder ?? t.stepNumber)
+                  }
+                  size={26}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-warning">{t.label}</span>
+                  <span
+                    data-testid="cook-session-finished-label"
+                    className="block text-xl font-bold text-warning"
+                  >
+                    {t.doneLabel}
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                data-testid="cook-session-finished-dismiss"
+                onClick={() => dismissTimer(t.id)}
+                className="shrink-0 rounded-md border border-warning bg-surface px-3 py-3 text-sm font-bold text-warning shadow-sm"
+              >
+                {ja.timer.dismiss}
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -896,6 +1012,31 @@ export default function CookSessionOverlay({
                         testId="cook-session-peek-recipe-memo"
                         className="mt-1"
                       />
+                      {/* 指でも別の品へ移れるようにする（2026-08-11 便FO・利用者テスト
+                          「他の品への切り替えが、画面からはできない。色で飛べるのは声だけで、
+                          画面には同じ手段がない。手が濡れていて声も使いたくない私には、
+                          次へを連打する以外の選択肢がなかった」）。
+                          **行そのものの意味は変えない**（タップ＝全文を開くだけ。2026-08-11
+                          オーナー承認済みの設計）。移る操作は、開いて中身を確かめた人だけが
+                          押せるこの中に置く＝1つの行に2つの意味を持たせない。
+                          動きは声で色を言ったときと同じ引き寄せ（onPullStep）で、手順は
+                          1つも消えず、別の品へ言い直すのと同じように移り直せる */}
+                      <button
+                        type="button"
+                        data-testid="cook-session-peek-move"
+                        onClick={() => {
+                          stopSpeech()
+                          setUndoFirst(null)
+                          onPullStep({
+                            before: cursor,
+                            target: { recipeId: next.recipeId, stepIndex: next.stepIndex },
+                          })
+                        }}
+                        className="mt-1 flex w-full items-center justify-center gap-1 rounded-md border border-accent bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm"
+                      >
+                        <ChevronRight size={16} aria-hidden />
+                        {ja.cookNavi.sessionPeekMove}
+                      </button>
                     </div>
                   )}
                 </Collapse>
