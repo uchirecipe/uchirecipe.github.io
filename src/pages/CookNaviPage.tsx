@@ -1550,6 +1550,18 @@ export default function CookNaviPage() {
                       </p>
                     )}
 
+                    {/* 色で移った手順を組み込むと、段取りの通し番号が前から振り直される
+                        （2026-08-12 便FS-8・利用者テスト「番号が入れ替わるのに説明が
+                        どこにもない」）。並びが変わっている間だけ、その理由をここに置く */}
+                    {pulls.length > 0 && (
+                      <p
+                        data-testid="navi-pull-renumbered"
+                        className="ja-phrase mt-[var(--space-sm)] text-xs text-ink-muted"
+                      >
+                        {ja.cookNavi.pullRenumberedNote}
+                      </p>
+                    )}
+
                     <ol className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
                       {planItems.map((item, index) => (
                         <TimelineCard

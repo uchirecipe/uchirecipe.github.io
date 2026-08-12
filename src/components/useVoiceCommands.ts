@@ -264,17 +264,24 @@ export function useVoiceCommands(actions: VoiceCommandActions): VoiceCommandCont
           // 無反応になっていた(2026-08-03 実機FB⑤)。言い方を同じ場所に出す
           showVoiceMessage(ja.focus.micTimerHint, 5000)
         }
-      } else if (current.onColor) {
+      } else {
         // 色（「青」「緑」「ピンク」）は**判定順のいちばん最後**（2026-08-10 便FI）。
         // 上のコマンドが1つも当たらなかったときにだけ見る。しかも当てるのは
         // 発話まるごとが色の名前と一致したときだけなので、「青ねぎを切る」では動かない
-        const colorIndex = matchVoiceColor(transcript)
-        if (colorIndex != null) {
+        const colorIndex = current.onColor ? matchVoiceColor(transcript) : undefined
+        if (colorIndex != null && current.onColor) {
           // 移れたときは聞き取りの手応えではなく、どの品に移ったかを名前で出す
           //（色の言葉だけでは、どの料理が開いたのか読み上げても分からない）
           const message = current.onColor(colorIndex)
           if (message) showVoiceMessage(message, 4000)
           else feedback()
+        } else {
+          // どの言葉にも当たらなかったとき（2026-08-12 便FS-7・利用者テスト
+          // 「『進んで』『ちょっと待って』『うーん』と言っても表示は『聞いています…』のまま。
+          // マイクが拾ってないのか、その言葉が対応外なのか分からない」）。
+          // 聞き取れた言葉をそのまま返せば、マイクは届いていて言い方だけが違うと分かる。
+          // 使える言葉の一覧は、聞いている間はこの1行のすぐ前に出ている
+          showVoiceMessage(ja.focus.micUnknown.replace('{text}', transcript.slice(0, 12)), 4000)
         }
       }
     }
