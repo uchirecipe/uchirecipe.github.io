@@ -125,7 +125,11 @@ function parseStepPulls(value: unknown): StepPull[] {
   return pulls
 }
 
-/** 保存された文字列を読む（形が違う・壊れているときは undefined＝覚えていない扱い） */
+/**
+ * 保存された文字列を**形として**読む（形が違う・壊れているときは undefined＝覚えていない扱い）。
+ * 版と日付で捨てるかどうかを決めるのは `restoreCookNaviSession` の役目で、画面はそちらを使う。
+ * ここは「どこまでを読み取り、どこを不整合として落とすか」の規則を単体テストで固定するための入口。
+ */
 export function parseCookNaviSession(raw: string | null): CookNaviSession | undefined {
   if (!raw) return undefined
   try {
@@ -231,6 +235,11 @@ export function reconcileSelectedIds(
 /**
  * 調理中（全画面のセッションを開いている間）は、**記録を段取りへ逆流させない**
  * （2026-08-09 便EL・docs/69「記録は一方通行」）。
+ *
+ * **`cookingInProgress` は「全画面をいま開いているか」**（2026-08-12 便FT で言葉どおりに戻した）。
+ * 「調理中の位置を覚えているか」で判断すると、位置を端末に残すようになった今、
+ * 一度でも調理中モードを開いた日は整合が一日中働かない＝今日の献立から消えた品が
+ * 段取りに残り続ける。全画面を閉じて段取りの一覧に戻った時点で、組み直した姿を見せる。
  *
  * 実行中の段取りの母集合は `selectedIds` だけと決める。調理の最中に献立タブや別の端末操作で
  * 1品に「作った！」が付くと、その品は候補一覧（今日の献立から今日作った品を除いたもの）から

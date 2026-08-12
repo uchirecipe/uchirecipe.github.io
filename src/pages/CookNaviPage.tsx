@@ -844,9 +844,24 @@ export default function CookNaviPage() {
     // resolveCookNaviSelection 側でも undefined は何も落とさないようにしてある）
     if (!todayRecipes) return
     const availableIds = todayRecipes.map((r) => r.id!)
-    // 調理中（全画面のセッションを開いている間）は、記録を段取りへ逆流させない
-    // ＝作りかけの段取りが目の前で組み替わらない（2026-08-09 便EL・docs/69「記録は一方通行」）
-    const cooking = current != null
+    /**
+     * 調理中（全画面のセッションを**開いている間**）は、記録を段取りへ逆流させない
+     * ＝作りかけの段取りが目の前で組み替わらない（2026-08-09 便EL・docs/69「記録は一方通行」）。
+     *
+     * 2026-08-12 便FT: 判断を「調理中の位置を覚えているか」から
+     * **「全画面をいま開いているか」**に戻した。便ELの決まりは文面どおり
+     * 「全画面のセッションを開いている間」で、便FCで位置を閉じても残すようにしたときに、
+     * 位置が残っている＝調理中、と読める形になっていた。段取りと位置を端末に残す（この便）と、
+     * その読み方では**一度でも調理中モードを開いたら、その日いっぱい整合が働かない**。
+     * それでは「今日の献立から消えた品が、開き直しても段取りに残り続ける」＝
+     * 司令部が最優先に挙げた「間違ったものが残る」に当たる。
+     *
+     * 全画面を閉じているときに整合が働いても、位置（recipeId＋手順の添字）は組み直した段取りに
+     * そのまま残るので、**残った品を調理している人の位置は失われない**。位置を失うのは、
+     * 外れた品そのものの手順を開いていたときだけで、その品はもう今日の献立に無い
+     * ＝一覧に戻すのが正しい（docs/69「復元できなければ推測せずタイムラインへ」）。
+     */
+    const cooking = sessionOpen && current != null
     // 今日の献立に残っている品（段取りを組み直せるかはこちらで判断する）
     const kept = reconcileSelectedIdsForSession(selectedIds, availableIds, cooking)
     const next = resolveCookNaviSelection(selectedIds, availableIds, cooking)
@@ -866,7 +881,7 @@ export default function CookNaviPage() {
           ? ja.cookNavi.selectionDroppedReselected.replace('{n}', String(next.length))
           : ja.cookNavi.selectionDropped,
     )
-  }, [todayRecipes, selectedIds, showTimeline, current])
+  }, [todayRecipes, selectedIds, showTimeline, current, sessionOpen])
 
   const toggleSelect = (id: number) => {
     setDroppedNotice('')

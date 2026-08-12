@@ -15923,8 +15923,9 @@ try {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@ES-01] ${err.message}`)
     })
+    // 2026-08-12 便FT: 作りかけの段取りの覚え書きは localStorage（端末に残る側）へ移した
     const esSession = () =>
-      esPage.evaluate(() => sessionStorage.getItem('uchi-recipe-cook-navi-session'))
+      esPage.evaluate(() => localStorage.getItem('uchi-recipe-cook-navi-session'))
     try {
       await esPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await esPage.waitForTimeout(1800)
@@ -20158,10 +20159,11 @@ try {
           (await rowTexts()).some((t) => t.includes('ELマリネ')),
         JSON.stringify(await rowTexts()),
       )
-      // 2026-08-10 便FC でここの意味が変わった: ✕は「閉じるだけ」で調理中の手順は残るので、
-      // 閉じても**まだ調理中**＝記録は段取りへ逆流しない（一方通行が続く）。
-      // 調理が終わる（カーソルを捨てる）のは「完成！」「まとめて作った！」「レシピを選び直す」。
-      // 落ちることの確認は、その「終わり」を通してから行う
+      // 一方通行が効く範囲は「全画面を開いている間」（2026-08-12 便FT で便ELの文面どおりに戻した）。
+      // 便FCで位置を閉じても残すようにしたとき、ここは「位置が残っている＝まだ調理中」と
+      // 読める形になっていたが、段取りと位置を端末に残すようになると
+      // **一度でも調理中モードを開いたらその日いっぱい整合が働かない**ことになる。
+      // ✕で閉じた時点で段取りの一覧に戻る＝そこは組み直した姿を見せる場所なので、そこで整える
       await elPage.locator('[data-testid="cook-session-close"]').click()
       await elPage.waitForTimeout(900)
       check(
@@ -20169,25 +20171,22 @@ try {
         (await elPage.locator('[data-testid="cook-session"]').count()) === 0,
       )
       check(
-        'EL-04 閉じただけでは段取りは組み替わらない（記録は一方通行のまま）',
-        (await elPage.locator('[data-testid="navi-selection-dropped"]').count()) === 0,
-      )
-      await elPage.getByRole('button', { name: 'レシピを選び直す' }).click()
-      await elPage.waitForTimeout(900)
-      check(
-        'EL-04 調理を終えたあとは今日の献立から外れた品が組み合わせから落ちる',
+        'EL-04 閉じて一覧に戻ると、今日の献立から外れた品が組み合わせから落ちる',
         (await elPage.locator('[data-testid="navi-selection-dropped"]').count()) === 1,
         (await elPage.textContent('body')).includes('今日の献立にない品') ? '文言あり' : '文言なし',
       )
+      await elPage.getByRole('button', { name: 'レシピを選び直す' }).click()
+      await elPage.waitForTimeout(900)
 
       // EL-05: 覚えていた手順が段取りに無いときは推測せず一覧に戻す
       currentCheck = 'EL-05'
       await elPage.getByRole('button', { name: '段取りを作る' }).click()
       await elPage.waitForTimeout(700)
+      // 2026-08-12 便FT: 覚え書きの置き場が localStorage（端末に残る側）に移った
       await elPage.evaluate(() => {
         const key = 'uchi-recipe-cook-navi-session'
-        const raw = JSON.parse(sessionStorage.getItem(key))
-        sessionStorage.setItem(
+        const raw = JSON.parse(localStorage.getItem(key))
+        localStorage.setItem(
           key,
           JSON.stringify({ ...raw, showTimeline: true, current: { recipeId: raw.selectedIds[0], stepIndex: 98 } }),
         )
@@ -27914,12 +27913,15 @@ try {
           for (const id of recipeIds) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
           db.close()
         }, batch.map(([t]) => ids[t]))
-        // 作りかけの段取り(選んだ品・表示中か)は sessionStorage に覚えられている。組を替えるときは
-        // 「戻る」を押したのと同じ状態にしてから開く。覚えていた選択が今日の献立と食い違うと
-        // 選択が空に整えられ、「段取りを作る」が押せないまま（disabled）になる
+        // 作りかけの段取り(選んだ品・表示中か)は端末に覚えられている(2026-08-12 便FT で
+        // localStorage へ移した)。組を替えるときは覚え書きを消してから開く。覚えていた選択が
+        // 今日の献立と食い違うと選択が空に整えられ、「段取りを作る」が押せないまま（disabled）になる
         await fqPage.goto(`${BASE}/#/recipes`)
         await fqPage.waitForTimeout(400)
-        await fqPage.evaluate(() => sessionStorage.clear())
+        await fqPage.evaluate(() => {
+          sessionStorage.clear()
+          localStorage.removeItem('uchi-recipe-cook-navi-session')
+        })
         await fqPage.goto(`${BASE}/#/cook-navi`)
         await fqPage.reload({ waitUntil: 'networkidle' })
         await fqPage.waitForTimeout(1200)
@@ -28868,6 +28870,313 @@ try {
       }
     } finally {
       await fsBrowser2.close()
+    }
+  }
+
+  // ============================================================================
+  // 便FT（2026-08-12 利用者テスト・実操作2体目）:
+  //   「アプリを開き直すと、段取りも途中の位置も消える。タイマーの残り時間は開き直しても
+  //     続いているのに、段取りだけ消えるのはちぐはぐに感じました」
+  //
+  // ここで見張るのは「残ること」と「間違ったものが残らないこと」の両方。
+  //   FT-01 段取りを作る → アプリを開き直す（新しいタブ＝別のセッション）→ 段取りと位置が残る
+  //   FT-02 同じタブの読み込み直しでも残る（従来どおり全画面も開いたまま続く）
+  //   FT-03 開き直したあとは全画面ではなく段取りの一覧に着地し、「続きから見る」で戻れる
+  //   FT-04 献立タブの「並行調理ナビを再開」も、開き直したあとに出る
+  //   FT-05 覚え書きの日付が今日でなければ残さない・勝手に復活しない・捨てたことを知らせる
+  //   FT-06 覚えていた品が今日の献立から消えていたら、既存の整合が働く（勝手な段取りを出さない）
+  //   FT-07 動いているタイマーと、組み直した段取りの手順の対応が壊れない
+  // ============================================================================
+  currentCheck = 'FT-01'
+  {
+    const ftBrowser = await chromium.launch()
+    // localStorage は同じ context の中で共有され、sessionStorage はタブごとに分かれる
+    // ＝「新しいタブで開く」が実機の「アプリを開き直す」に当たる
+    const ftContext = await ftBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ftWatch = (p, tag) => {
+      p.on('dialog', (d) => void d.accept())
+      p.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@${tag}] ${err.message}`)
+      })
+      p.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@${tag}] ${t}`)
+      })
+    }
+    /** 「アプリを開き直す」＝同じ端末（同じ context）で新しいタブを開く */
+    const ftReopen = async (hash = '/cook-navi') => {
+      const p = await ftContext.newPage()
+      ftWatch(p, 'FT')
+      await p.goto(`${BASE}/#${hash}`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(2000)
+      return p
+    }
+    const ftPage = await ftContext.newPage()
+    ftWatch(ftPage, 'FT')
+    try {
+      await ftPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(1800)
+      const ftIds = await ftPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk('FT照り焼き', [
+          { text: '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれを加えて煮からめ、器に盛る。' },
+        ], [{ name: '鶏もも肉', amount: '250', unit: 'g' }])))
+        const idB = await P(store('recipes').add(mk('FT煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に大根とだしを入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて10分おき、器に盛る。', minutes: 10 },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        const idC = await P(store('recipes').add(mk('FTマリネ', [
+          { text: 'ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。' },
+          { text: 'パプリカときゅうりを細切りにする。' },
+          { text: 'マリネ液と和えて冷蔵庫で20分冷やす。', minutes: 20 },
+        ], [{ name: 'パプリカ', amount: '1', unit: '個' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return [idA, idB, idC]
+      })
+      await ftPage.goto(`${BASE}/#/cook-navi`)
+      await ftPage.reload({ waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(1200)
+      await ftPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ftPage.waitForTimeout(800)
+
+      // 何がどこまで残るのかを、閉じる前に読める場所に書いてある（規約F）
+      const ftKeepNote = (await ftPage.locator('[data-testid="navi-restore-keep-note"]').innerText()).trim()
+      check(
+        'FT-01 段取りの説明に「何が残って何が残らないか」が書いてある',
+        ftKeepNote.includes('開き直しても') && ftKeepNote.includes('日付が変わると残しません'),
+        ftKeepNote,
+      )
+
+      // 調理中モードで3つ進めておく（＝段取りと「途中の位置」の両方がある状態）
+      await ftPage.locator('[data-testid="cook-session-start"]').click()
+      await ftPage.waitForTimeout(600)
+      for (let i = 0; i < 3; i++) {
+        await ftPage.locator('[data-testid="cook-session-next"]').click()
+        await ftPage.waitForTimeout(250)
+      }
+      const ftCounterBefore = await ftPage.locator('[data-testid="cook-session-counter"]').innerText()
+      check('FT-01 前提: 調理中モードで3つ進んでいる', /^段取り 4\//.test(ftCounterBefore), ftCounterBefore)
+
+      // 覚え書きは端末に残る側（localStorage）にあり、覚えているのは「利用者が出した指示」だけ
+      const ftStored = await ftPage.evaluate(() => ({
+        local: localStorage.getItem('uchi-recipe-cook-navi-session'),
+        session: sessionStorage.getItem('uchi-recipe-cook-navi-session'),
+      }))
+      const ftRecord = JSON.parse(ftStored.local ?? 'null')
+      check('FT-01 覚え書きは端末に残る置き場にある（タブを閉じても消えない）', ftRecord != null, ftStored.local)
+      check(
+        'FT-01 覚えているのは選んだ品・段取りを出しているか・調理中の位置だけ（段取りは保存しない）',
+        ftRecord != null &&
+          Object.keys(ftRecord).sort().join(',') === 'current,date,selectedIds,showTimeline,trialActive,v',
+        Object.keys(ftRecord ?? {}).sort().join(','),
+      )
+      check(
+        'FT-01 覚え書きには捨てる判断に使う「版」と「覚えた日」が入っている',
+        ftRecord?.v === 1 && /^\d{4}-\d{2}-\d{2}$/.test(ftRecord?.date ?? ''),
+        `v=${ftRecord?.v} date=${ftRecord?.date}`,
+      )
+
+      // --- FT-02: 同じタブの読み込み直し（従来どおり全画面は開いたまま続く） ---
+      currentCheck = 'FT-02'
+      await ftPage.reload({ waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(1800)
+      check(
+        'FT-02 読み込み直しても調理中モードは開いたまま、同じ手順で続く',
+        (await ftPage.locator('[data-testid="cook-session-counter"]').count()) === 1 &&
+          (await ftPage.locator('[data-testid="cook-session-counter"]').innerText()) === ftCounterBefore,
+        `${await ftPage.locator('[data-testid="cook-session-counter"]').innerText().catch(() => '(全画面が閉じた)')} / 期待=${ftCounterBefore}`,
+      )
+
+      // --- FT-01/03: アプリを開き直す（新しいタブ） ---
+      currentCheck = 'FT-01'
+      const ftPage2 = await ftReopen()
+      const ftCards = await ftPage2.locator('[data-testid="navi-step-text"]').count()
+      check('FT-01 アプリを開き直しても段取りが残っている（作り直しにならない）', ftCards === 9, `${ftCards}枚`)
+      currentCheck = 'FT-03'
+      check(
+        'FT-03 開き直した直後は全画面ではなく段取りの一覧に着地する（大きな手順をいきなり出さない）',
+        (await ftPage2.locator('[data-testid="cook-session-counter"]').count()) === 0,
+      )
+      check(
+        'FT-03 入口のボタンが「続きから見る」になっている',
+        (await ftPage2.locator('[data-testid="cook-session-start"]').innerText()).trim() ===
+          '調理中モードの続きから見る',
+      )
+      const ftHint = await ftPage2.locator('[data-testid="cook-session-start-hint"]').innerText()
+      check(
+        'FT-03 どの手順から始まるかを、画面のバッジと同じ丸数字で添えている',
+        ftHint.includes('④'),
+        ftHint,
+      )
+      await ftPage2.locator('[data-testid="cook-session-start"]').click()
+      await ftPage2.waitForTimeout(800)
+      check(
+        'FT-03 押すと、閉じる前と同じ手順から調理中モードが開く（①に戻らない）',
+        (await ftPage2.locator('[data-testid="cook-session-counter"]').innerText()) === ftCounterBefore,
+        `${await ftPage2.locator('[data-testid="cook-session-counter"]').innerText()} / 期待=${ftCounterBefore}`,
+      )
+      await ftPage2.locator('[data-testid="cook-session-close"]').click()
+      await ftPage2.waitForTimeout(500)
+
+      // --- FT-04: 献立タブの「並行調理ナビを再開」 ---
+      currentCheck = 'FT-04'
+      const ftPage3 = await ftReopen('/meal-plan')
+      check(
+        'FT-04 アプリを開き直しても、献立タブに「並行調理ナビを再開」が出る',
+        (await ftPage3.locator('[data-testid="navi-resume"]').count()) === 1,
+      )
+
+      // --- FT-07: タイマーとの対応（開き直しても同じ手順に付いたまま） ---
+      currentCheck = 'FT-07'
+      await ftPage3.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+      await ftPage3.waitForTimeout(1500)
+      await ftPage3.getByRole('button', { name: 'タイマーを始める' }).first().click()
+      await ftPage3.waitForTimeout(800)
+      const ftTimerBefore = await ftPage3.locator('[data-testid="navi-wait-timer-running"]').first().innerText()
+      check(
+        'FT-07 前提: 段取りの手順からタイマーが動き出す',
+        /タイマー動作中 残り\d+:\d\d/.test(ftTimerBefore),
+        ftTimerBefore,
+      )
+      const ftTimerStep = await ftPage3.evaluate(() => {
+        const rows = JSON.parse(localStorage.getItem('uchirecipe:activeTimers') ?? '[]')
+        return rows.map((t) => t.key).join(',')
+      })
+      const ftPage4 = await ftReopen()
+      const ftTimerAfter = await ftPage4
+        .locator('[data-testid="navi-wait-timer-running"]')
+        .first()
+        .innerText()
+        .catch(() => '(見つからない)')
+      check(
+        'FT-07 開き直して組み直した段取りでも、動いているタイマーは同じ手順に付いたまま',
+        /タイマー動作中 残り\d+:\d\d/.test(ftTimerAfter),
+        `${ftTimerAfter} / タイマーのひも付け=${ftTimerStep}`,
+      )
+      check(
+        'FT-07 タイマーの残り時間は開き直しても続いている（段取りだけ消える、が起きない）',
+        ftTimerAfter !== ftTimerBefore,
+        `開き直す前=${ftTimerBefore} / 後=${ftTimerAfter}`,
+      )
+
+      // --- FT-06: 覚えていた品が今日の献立から消えている ---
+      currentCheck = 'FT-06'
+      await ftPage4.evaluate(async (dropIds) => {
+        const openDb = () => new Promise((resolve, reject) => { const r = indexedDB.open('uchi-recipe'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const all = await P(db.transaction('todayList', 'readonly').objectStore('todayList').getAll())
+        const st = db.transaction('todayList', 'readwrite').objectStore('todayList')
+        for (const row of all) if (dropIds.includes(row.recipeId)) await P(st.delete(row.id))
+        db.close()
+      }, [ftIds[2]])
+      const ftPage5 = await ftReopen()
+      const ftDropped = await ftPage5.locator('[data-testid="navi-selection-dropped"]').innerText().catch(() => '')
+      check(
+        'FT-06 今日の献立から消えた品は組み合わせから外し、そのことを画面に書く（黙って中身を変えない）',
+        ftDropped.includes('今日の献立にない品'),
+        ftDropped || '(知らせが出ていない)',
+      )
+      const ftCards2 = await ftPage5.locator('[data-testid="navi-step-text"]').count()
+      check(
+        'FT-06 段取りは残った2品で組み直す（消えた品の手順が残らない）',
+        ftCards2 === 6 && !(await ftPage5.textContent('body')).includes('FTマリネ'),
+        `${ftCards2}枚`,
+      )
+      // もう1品外すと段取りが成り立たない＝勝手に組んだ段取りを出さない
+      await ftPage5.evaluate(async (dropIds) => {
+        const openDb = () => new Promise((resolve, reject) => { const r = indexedDB.open('uchi-recipe'); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const all = await P(db.transaction('todayList', 'readonly').objectStore('todayList').getAll())
+        const st = db.transaction('todayList', 'readwrite').objectStore('todayList')
+        for (const row of all) if (dropIds.includes(row.recipeId)) await P(st.delete(row.id))
+        db.close()
+      }, [ftIds[1]])
+      const ftPage6 = await ftReopen()
+      check(
+        'FT-06 2品を割ったら段取りは出さない（残り1品で勝手に組み直さない）',
+        (await ftPage6.locator('[data-testid="navi-step-text"]').count()) === 0,
+      )
+
+      // --- FT-05: 覚え書きの日付が今日でない ---
+      currentCheck = 'FT-05'
+      // 段取りと調理中の位置がある覚え書きを、日付だけ過去にして置き直す
+      await ftPage6.evaluate((recipeIds) => {
+        localStorage.setItem(
+          'uchi-recipe-cook-navi-session',
+          JSON.stringify({
+            v: 1,
+            date: '2000-01-01',
+            selectedIds: recipeIds,
+            showTimeline: true,
+            trialActive: false,
+            current: { recipeId: recipeIds[0], stepIndex: 1 },
+          }),
+        )
+      }, ftIds)
+      const ftPage7 = await ftReopen('/meal-plan')
+      check(
+        'FT-05 昨日以前の段取りでは、献立タブの「並行調理ナビを再開」を出さない',
+        (await ftPage7.locator('[data-testid="navi-resume"]').count()) === 0,
+      )
+      await ftPage7.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+      await ftPage7.waitForTimeout(1800)
+      check(
+        'FT-05 昨日以前の段取りは復活しない（古い段取りが今日の画面に出てこない）',
+        (await ftPage7.locator('[data-testid="navi-step-text"]').count()) === 0,
+      )
+      const ftExpired = (await ftPage7.locator('[data-testid="navi-restore-expired"]').innerText().catch(() => '')).trim()
+      check(
+        'FT-05 捨てたことを黙らない（理由と、何が残っているかを画面に書く）',
+        ftExpired.includes('日付が変わったため') && ftExpired.includes('レシピと作った記録はそのままです'),
+        ftExpired || '(知らせが出ていない)',
+      )
+      // 知らせたあとは、その覚え書きを引きずらない
+      const ftAfterExpired = JSON.parse(
+        (await ftPage7.evaluate(() => localStorage.getItem('uchi-recipe-cook-navi-session'))) ?? 'null',
+      )
+      check(
+        'FT-05 古い覚え書きは残さず、今日の覚え書きに置き換わる',
+        ftAfterExpired == null || (ftAfterExpired.date !== '2000-01-01' && ftAfterExpired.showTimeline === false),
+        JSON.stringify(ftAfterExpired),
+      )
+      // 段取りを作る前（選んだだけ）の覚え書きは、失うものが無いので知らせない
+      await ftPage7.evaluate((recipeIds) => {
+        localStorage.setItem(
+          'uchi-recipe-cook-navi-session',
+          JSON.stringify({ v: 1, date: '2000-01-01', selectedIds: recipeIds, showTimeline: false, trialActive: false }),
+        )
+      }, ftIds)
+      const ftPage8 = await ftReopen()
+      check(
+        'FT-05 段取りを作る前の覚え書きを捨てたときは知らせない（余計な知らせを出さない）',
+        (await ftPage8.locator('[data-testid="navi-restore-expired"]').count()) === 0,
+      )
+    } finally {
+      await ftBrowser.close()
     }
   }
 
