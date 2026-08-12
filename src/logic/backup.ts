@@ -1061,7 +1061,7 @@ export function buildUpdatedSetRecipe(
     sourceUrl: incoming.sourceUrl,
     keywords: incoming.keywords,
     sourceSetName: setName,
-    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords),
+    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords, incoming.steps),
     updatedAt: now,
   }
 }
@@ -1121,7 +1121,7 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
         isStarter: true,
         sourceSetId: file.setId,
         sourceSetName: file.setName,
-        searchWords: buildSearchWords(rest.title, rest.ingredients, rest.tags, rest.keywords),
+        searchWords: buildSearchWords(rest.title, rest.ingredients, rest.tags, rest.keywords, rest.steps),
         createdAt: now,
         updatedAt: now,
       }

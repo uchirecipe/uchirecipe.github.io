@@ -1800,6 +1800,51 @@ eq(
     ['', '  '],
   )
   eq('空文字・空白だけのkeywordsは検索語を増やさない', emptyKeyword.length, baseline.length)
+
+  // --- 便FS-6(2026-08-12 利用者テスト): 「電子レンジ」で検索すると0件、「レンジ」なら4件。
+  // 手順に「電子レンジ(600W)」と書いてあるのに引けなかった ---
+  const hits = (words, query) => words.some((w) => w.includes(toHiragana(query)))
+  const renji = buildSearchWords(
+    '蒸しなすの香味だれ',
+    [{ name: 'なす', amount: '3', unit: '本' }],
+    [],
+    undefined,
+    [{ text: 'なすはラップで包み、電子レンジ(600W)で5分加熱する。' }],
+  )
+  eq('FS-SEARCH 手順の「電子レンジ」で引ける', hits(renji, '電子レンジ'), true)
+  eq('FS-SEARCH 「レンジ」でも引ける（従来の引き方を狭めない）', hits(renji, 'レンジ'), true)
+  // 手順本文をまるごと入れない＝台所のどこにでもある道具や、手順の常套句では引かない
+  eq('FS-SEARCH 手順の「ラップ」では引かない（手順本文は検索対象にしない）', hits(renji, 'ラップ'), false)
+  eq('FS-SEARCH 手順の「加熱」では引かない', hits(renji, '加熱'), false)
+  const nabe = buildSearchWords(
+    '肉じゃが',
+    [{ name: 'じゃがいも', amount: '3', unit: '個' }],
+    [],
+    undefined,
+    [{ text: '鍋に油を熱し、フライパンは使わず中火で炒める。' }],
+  )
+  eq('FS-SEARCH 「フライパン」は器具の一覧に入れない（全体の4割に当たるため）', hits(nabe, 'ふらいぱん'), false)
+  // メモは対象外（「温め直しは電子レンジで」はレンジ料理を意味しない）
+  const memoOnly = buildSearchWords(
+    'ポテトサラダ',
+    [{ name: 'じゃがいも', amount: '3', unit: '個' }],
+    [],
+    undefined,
+    [{ text: 'じゃがいもをゆでてつぶす。', memo: '温め直すときは電子レンジで' }],
+  )
+  eq('FS-SEARCH ひとことメモの器具では引かない', hits(memoOnly, '電子レンジ'), false)
+  eq(
+    'FS-SEARCH 手順を渡さない呼び出しはこれまでと同じ結果',
+    buildSearchWords('肉じゃが', [{ name: 'じゃがいも', amount: '3', unit: '個' }], []).length,
+    baseline.length,
+  )
+  eq(
+    'FS-SEARCH 手順に器具が出てこなければ検索語は増えない',
+    buildSearchWords('肉じゃが', [{ name: 'じゃがいも', amount: '3', unit: '個' }], [], undefined, [
+      { text: '鍋で煮る。' },
+    ]).length,
+    baseline.length,
+  )
 }
 
 // ---------- toTagKey(タグ候補のかな検索。2026-07-28 便BW・QA S3) ----------
