@@ -155,6 +155,9 @@ import {
   parseCookNaviSession,
   reconcileSelectedIds,
   reconcileSelectedIdsForSession,
+  resolveCookNaviSelection,
+  pickDefaultSelectedIds,
+  COOK_NAVI_MAX_RECIPES,
 } from '../src/logic/cookNaviSession.ts'
 import {
   assignRecipeNotes,
@@ -14469,6 +14472,76 @@ eq(
     'ES-LOADING 空配列(＝読み終えて候補ゼロ)は従来どおり落とす',
     reconcileSelectedIdsForSession([1, 2, 3], [], false),
     [],
+  )
+}
+
+// ---------- 便FR: 覚えていた選択が1品も残らなかったら、初めて開いたときと同じ状態にする ----------
+// 2026-08-12 利用者テストの実操作再現「今日の献立に3品入れて段取りを作り、3品とも別の品に
+// 入れ替えてナビへ戻ると『0品を選択中』で『段取りを作る』が押せない。もう一度どこかへ行って
+// 戻ると3品が選ばれて押せる」＝同じ画面が来るたびに違う状態で開いていた。
+// 真因: 覚えていた選択があると初回の自動選択を止める札が立ち、覚えていた選択が整合で全部
+// 落ちた後も札が立ったままだった（次に開くと覚え書きが消えていて初回扱いになる＝結果が揺れる）。
+{
+  eq('FR-RESELECT 選べる品数の上限は3品', COOK_NAVI_MAX_RECIPES, 3)
+  eq('FR-RESELECT 初期選択は今日の献立の先頭3品', pickDefaultSelectedIds([7, 8, 9, 10]), [7, 8, 9])
+  eq('FR-RESELECT 今日の献立が1品なら1品だけ', pickDefaultSelectedIds([7]), [7])
+  eq('FR-RESELECT 今日の献立が空なら0品', pickDefaultSelectedIds([]), [])
+
+  eq(
+    'FR-RESELECT 1品でも残っていれば、その選択をそのまま使う',
+    resolveCookNaviSelection([1, 2, 3], [3, 8, 9], false),
+    [3],
+  )
+  eq(
+    'FR-RESELECT 残る品の順番（＝色の順）も変えない',
+    resolveCookNaviSelection([3, 1, 2], [1, 2, 3], false),
+    [3, 1, 2],
+  )
+  eq(
+    'FR-RESELECT 覚えていた選択が全部落ちたら、今日の献立の先頭3品を選ぶ（本題）',
+    resolveCookNaviSelection([1, 2, 3], [7, 8, 9, 10], false),
+    [7, 8, 9],
+  )
+  eq(
+    'FR-RESELECT 全部落ちて今日の献立が1品なら1品を選ぶ',
+    resolveCookNaviSelection([1, 2, 3], [7], false),
+    [7],
+  )
+  eq(
+    'FR-RESELECT 全部落ちて今日の献立も空なら0品のまま',
+    resolveCookNaviSelection([1, 2, 3], [], false),
+    [],
+  )
+  eq(
+    'FR-RESELECT 自分で全部外した状態は勝手に選び直さない',
+    resolveCookNaviSelection([], [7, 8, 9], false),
+    [],
+  )
+  eq(
+    'FR-RESELECT 候補が未読込(undefined)のときは選択に触らない',
+    resolveCookNaviSelection([1, 2, 3], undefined, false),
+    [1, 2, 3],
+  )
+  eq(
+    'FR-RESELECT 候補が未読込で1品も選んでいなければ0品のまま',
+    resolveCookNaviSelection([], undefined, false),
+    [],
+  )
+  eq(
+    'FR-RESELECT 調理中は1品も落とさない＝選び直しも起きない（docs/69 記録は一方通行）',
+    resolveCookNaviSelection([1, 2, 3], [7, 8, 9], true),
+    [1, 2, 3],
+  )
+  eq(
+    'FR-RESELECT 一部だけ落ちたときは残りだけ（足して3品にしない）',
+    resolveCookNaviSelection([1, 2, 3], [1, 8, 9], false),
+    [1],
+  )
+  // 落ちた品が無ければ結果は入力そのまま＝画面側は「変わっていない」と判断できる
+  eq(
+    'FR-RESELECT 何も落ちなければ入力のまま',
+    resolveCookNaviSelection([1, 2], [1, 2, 3], false),
+    [1, 2],
   )
 }
 

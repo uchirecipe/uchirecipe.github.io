@@ -186,6 +186,51 @@ export function reconcileSelectedIdsForSession(
 /** 段取りを組める品数（これ未満になったら段取りは出せない） */
 export const COOK_NAVI_MIN_RECIPES = 2
 
+/** 一度に組み合わせられる品数の上限 */
+export const COOK_NAVI_MAX_RECIPES = 3
+
+/**
+ * 何も選んでいないところから、あらかじめ選んでおく品（今日の献立の先頭から上限まで）。
+ * 画面を初めて開いたときと、覚えていた選択が1品も残らなかったときの両方でこれを使う
+ * ＝「初めて開いた状態」の作り方を1か所に持つ。
+ */
+export function pickDefaultSelectedIds(availableIds: readonly number[]): number[] {
+  return availableIds.slice(0, COOK_NAVI_MAX_RECIPES)
+}
+
+/**
+ * 画面を開いたときに、結局どの品を選んだ状態にするかを決める（2026-08-12 便FR・
+ * 利用者テスト「今日の献立を3品とも入れ替えてナビへ戻ると『0品を選択中』で
+ * 『段取りを作る』が押せない。もう一度どこかへ行って戻ると3品が選ばれて押せる」）。
+ *
+ * 起きていたこと: 覚えていた選択があると「初回の自動選択はしない」という札が立つ。
+ * ところが**覚えていた選択が整合で1品残らず落ちた後も札は立ったまま**なので、
+ * その1回の表示だけ自動選択が抑止されて0品で開いていた。次に開き直すと覚え書きが
+ * 消えている（1品も選んでいない状態は保存しない）ため初回扱いになり自動選択が効く
+ * ＝**同じ画面が来るたびに違う状態で開く**。
+ *
+ * 決め方はこの1か所にまとめる:
+ *   - 1品でも残っていれば、その選択（並び＝色の順も）をそのまま使う
+ *   - 覚えていた選択が1品も残らなかったら、初めて開いたときと同じく今日の献立の先頭から選ぶ
+ *   - もともと1品も選んでいない（自分で全部外した）ときは選び直さない
+ *   - 候補がまだ読めていない（undefined）ときは何もしない（docs/69「読み込み中を候補ゼロと読まない」）
+ *   - 調理中は `reconcileSelectedIdsForSession` が1品も落とさないので、ここへは来ない
+ *     （docs/69「記録は一方通行」＝作りかけの段取りは目の前で組み替わらない）
+ */
+export function resolveCookNaviSelection(
+  selectedIds: readonly number[],
+  availableIds: readonly number[] | undefined,
+  cookingInProgress: boolean,
+): number[] {
+  const kept = reconcileSelectedIdsForSession(selectedIds, availableIds, cookingInProgress)
+  if (kept.length > 0) return kept
+  // 候補が未読込＝「候補ゼロ」ではない。ここで選び直すと、開いた一瞬の見た目が毎回変わる
+  if (availableIds === undefined) return kept
+  // 自分で全部外した状態を、勝手に選び直さない
+  if (selectedIds.length === 0) return kept
+  return pickDefaultSelectedIds(availableIds)
+}
+
 export function loadCookNaviSession(): CookNaviSession | undefined {
   try {
     return parseCookNaviSession(sessionStorage.getItem(COOK_NAVI_SESSION_KEY))

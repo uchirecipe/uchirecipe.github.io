@@ -28307,6 +28307,164 @@ try {
     }
   }
 
+  // --- FR-01〜02: 今日の献立を入れ替えてナビへ戻ると「段取りを作る」が押せなくなる ---
+  //     (2026-08-12 便FR・利用者テストの実操作。検査用の細工なしで、画面のボタンだけで再現する)
+  //     報告された手順: ①レシピ詳細の「今日の献立に追加」で3品入れる ②ナビで段取りを作る
+  //     ③気が変わって3品とも別の品に入れ替える ④ナビへ戻る
+  //     症状: 「0品を選択中」で「段取りを作る」が押せない。もう一度どこかへ行って戻ると
+  //           今度は3品が選ばれて押せる＝同じ画面が来るたびに違う状態で開く。
+  //     真因: 覚えていた選択があると初回の自動選択を止める札が立つが、覚えていた選択が
+  //           整合で1品も残らず落ちた後も札は立ったままだった。次に開くと覚え書きが消えて
+  //           いる(1品も選んでいない状態は保存しない)ため初回扱いになり自動選択が効く。
+  //     FR-02 は直しの副作用の確認: 自分で選択を全部外した状態は勝手に選び直さない。
+  currentCheck = 'FR-01'
+  {
+    const frBrowser = await chromium.launch()
+    try {
+      const ctx = await frBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const p = await ctx.newPage()
+      p.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@FR] ${err.message}`)
+      })
+      p.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@FR] ${t}`)
+      })
+      /** レシピ詳細を開いて「今日の献立に追加」(食事は決めない) */
+      const addToToday = async (title) => {
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(500)
+        await p.getByText(title, { exact: true }).first().click()
+        await p.waitForTimeout(700)
+        await p.getByRole('button', { name: '今日の献立に追加', exact: true }).click()
+        await p.waitForTimeout(400)
+        await p.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
+        await p.waitForTimeout(500)
+      }
+      /** レシピ詳細の「今日の献立に追加済み」をもう一度押して外す */
+      const removeFromToday = async (title) => {
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(500)
+        await p.getByText(title, { exact: true }).first().click()
+        await p.waitForTimeout(700)
+        await p.getByRole('button', { name: /今日の献立に追加済み/ }).click()
+        await p.waitForTimeout(600)
+      }
+      /** ナビを開いて「何品を選択中か」「段取りを作るが押せるか」を読む */
+      const openNavi = async () => {
+        await p.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(1500)
+        const build = p.getByRole('button', { name: '段取りを作る' })
+        const notice = p.getByTestId('navi-selection-dropped')
+        return {
+          count: Number(((await p.textContent('body')) ?? '').match(/(\d+)品を選択中/)?.[1] ?? -1),
+          canBuild: (await build.count()) > 0 ? !(await build.isDisabled()) : false,
+          notice: (await notice.count()) > 0 ? await notice.innerText() : '',
+          selected: await p.locator('button[aria-pressed="true"]').allInnerTexts(),
+        }
+      }
+
+      await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(2500) // 初回シード待ち
+      // ナビはPro機能。解錠だけは前準備として直接書き込む(再現手順そのものには関係しない)
+      await p.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const cur = (await P(db.transaction('settings').objectStore('settings').get(1))) || { id: 1 }
+        await P(
+          db
+            .transaction('settings', 'readwrite')
+            .objectStore('settings')
+            .put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+        )
+        db.close()
+      })
+
+      const FIRST = ['肉じゃが', 'ほうれん草のおひたし', '豆腐とわかめの味噌汁']
+      const SECOND = ['カレーライス', 'ポテトサラダ', 'きんぴらごぼう']
+
+      // ① 3品入れる → ② ナビで段取りを作る
+      for (const t of FIRST) await addToToday(t)
+      const before = await openNavi()
+      check('FR-01 前提: 3品入れてナビを開くと3品が選ばれている', before.count === 3, JSON.stringify(before))
+      await p.getByRole('button', { name: '段取りを作る' }).click()
+      await p.waitForTimeout(900)
+      check(
+        'FR-01 前提: 段取りが出る',
+        ((await p.textContent('body')) ?? '').includes('組み合わせる3品'),
+      )
+
+      // ③ 気が変わって3品とも入れ替える(「今日の献立に追加済み」で外し、別の3品を追加)
+      for (const t of FIRST) await removeFromToday(t)
+      for (const t of SECOND) await addToToday(t)
+
+      // ④ ナビへ戻る(画面移動だけ)
+      const first = await openNavi()
+      check(
+        'FR-01 入れ替えて戻っても0品にならない(今の献立から3品が選ばれる)',
+        first.count === 3,
+        JSON.stringify(first),
+      )
+      check('FR-01 「段取りを作る」がそのまま押せる', first.canBuild, JSON.stringify(first))
+      check(
+        'FR-01 選ばれているのは入れ替えた後の3品',
+        SECOND.every((t) => first.selected.some((s) => s.includes(t))),
+        JSON.stringify(first.selected),
+      )
+      check(
+        'FR-01 前の品を外したことを黙って済ませない(その場に1行出す)',
+        first.notice.includes('選び直しました'),
+        first.notice,
+      )
+      // 段取りは組み直さない＝利用者が選んでいない品で勝手に手順を並べない
+      check(
+        'FR-01 段取りは自動では組み直さない(「段取りを作る」を押すまで出ない)',
+        !((await p.textContent('body')) ?? '').includes('組み合わせる3品'),
+      )
+
+      // もう一度どこかへ行って戻る＝同じ画面が同じ状態で開く(開くたびに結果が変わらない)
+      await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(800)
+      const second = await openNavi()
+      check(
+        'FR-01 もう一度出入りしても同じ状態で開く(3品・押せる)',
+        second.count === 3 && second.canBuild,
+        JSON.stringify(second),
+      )
+
+      // FR-02: 自分で選択を全部外したら、その画面にいる間は勝手に選び直さない
+      currentCheck = 'FR-02'
+      for (const t of SECOND) {
+        await p.getByRole('button', { name: new RegExp(t) }).first().click()
+        await p.waitForTimeout(250)
+      }
+      const cleared = await p.textContent('body')
+      check(
+        'FR-02 手で全部外したら0品のまま(勝手に選び直さない)',
+        (cleared ?? '').includes('0品を選択中'),
+        (cleared ?? '').match(/\d+品を選択中/)?.[0] ?? '',
+      )
+      check(
+        'FR-02 0品では「段取りを作る」は押せない',
+        await p.getByRole('button', { name: '段取りを作る' }).isDisabled(),
+      )
+      await ctx.close()
+    } finally {
+      await frBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

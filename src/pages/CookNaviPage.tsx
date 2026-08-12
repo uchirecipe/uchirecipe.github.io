@@ -50,7 +50,10 @@ import {
   saveCookNaviScroll,
   takeCookNaviScroll,
   reconcileSelectedIdsForSession,
+  pickDefaultSelectedIds,
+  resolveCookNaviSelection,
   COOK_NAVI_MIN_RECIPES,
+  COOK_NAVI_MAX_RECIPES,
 } from '../logic/cookNaviSession'
 import CookSessionOverlay from '../components/CookSessionOverlay'
 import { revealExpanded } from '../logic/revealExpanded'
@@ -86,7 +89,8 @@ import { ja } from '../i18n/ja'
 
 /** レシピの色分け（最大3品）。常駐タイマーと同じ定義を使う（logic/naviColors.ts） */
 const RECIPE_COLORS = NAVI_RECIPE_COLORS
-const MAX_SELECT = 3
+/** 一度に組み合わせられる品数の上限（選び直しの規則と同じ値を使う） */
+const MAX_SELECT = COOK_NAVI_MAX_RECIPES
 
 /**
  * そのレシピ内の手順番号（2026-08-09 便EH・オーナー実機報告
@@ -749,12 +753,14 @@ export default function CookNaviPage() {
     return () => clearTimeout(timeout)
   }, [highlightKey])
 
-  // 初回に今日の献立から先頭2〜3品をあらかじめ選んでおく（すぐ試せるように）
+  // 初回に今日の献立から先頭2〜3品をあらかじめ選んでおく（すぐ試せるように）。
+  // 選び方は logic/cookNaviSession.ts の pickDefaultSelectedIds に置き、
+  // 下の「覚えていた選択が1品も残らなかったとき」と同じ規則を使う
   useEffect(() => {
     if (initializedRef.current) return
     if (!todayRecipes || todayRecipes.length === 0) return
     initializedRef.current = true
-    setSelectedIds(todayRecipes.slice(0, MAX_SELECT).map((r) => r.id!))
+    setSelectedIds(pickDefaultSelectedIds(todayRecipes.map((r) => r.id!)))
   }, [todayRecipes])
 
   /**
@@ -768,27 +774,38 @@ export default function CookNaviPage() {
    *   - 「まとめて作った！」でその品にもう一度記録が付く（記録が2件になる）
    * が同時に起きていた。**選択の整合はここ1か所で取る**（作った記録・今日の献立からの削除・
    * 予定の取り消し、どの経路で候補から消えても同じように直る）。
+   *
+   * 2026-08-12 便FR: 覚えていた選択が**1品も残らなかった**ときは、初めて開いたときと同じく
+   * 今日の献立から選び直す（`resolveCookNaviSelection`）。以前はここで0品にするだけで、
+   * 初回の自動選択を止める札（initializedRef）は立ったままだったため、その1回だけ0品で開き、
+   * 次に開き直すと3品が選ばれる＝同じ画面が来るたびに違う状態になっていた。
    */
   useEffect(() => {
     // 候補がまだ読めていない間は突き合わせない（2026-08-09 便ES。
-    // reconcileSelectedIdsForSession 側でも undefined は何も落とさないようにしてある）
+    // resolveCookNaviSelection 側でも undefined は何も落とさないようにしてある）
     if (!todayRecipes) return
+    const availableIds = todayRecipes.map((r) => r.id!)
     // 調理中（全画面のセッションを開いている間）は、記録を段取りへ逆流させない
     // ＝作りかけの段取りが目の前で組み替わらない（2026-08-09 便EL・docs/69「記録は一方通行」）
-    const next = reconcileSelectedIdsForSession(
-      selectedIds,
-      todayRecipes.map((r) => r.id!),
-      current != null,
-    )
-    if (next.length === selectedIds.length) return
+    const cooking = current != null
+    // 今日の献立に残っている品（段取りを組み直せるかはこちらで判断する）
+    const kept = reconcileSelectedIdsForSession(selectedIds, availableIds, cooking)
+    const next = resolveCookNaviSelection(selectedIds, availableIds, cooking)
+    // 中身で比べる（品数が同じまま入れ替わることがある＝選び直したとき）
+    const unchanged =
+      next.length === selectedIds.length && next.every((id, i) => id === selectedIds[i])
+    if (unchanged) return
     setSelectedIds(next)
-    // 段取りを表示中だったなら、残りで組み直せるかどうかで知らせ方を変える
-    const canRebuild = showTimeline && next.length >= COOK_NAVI_MIN_RECIPES
+    // 段取りを表示中だったなら、**残った品**で組み直せるかどうかで知らせ方を変える。
+    // 選び直した品はユーザーがまだ選んでいないので、その品で勝手に段取りを組まない
+    const canRebuild = showTimeline && kept.length >= COOK_NAVI_MIN_RECIPES
     if (showTimeline && !canRebuild) setShowTimeline(false)
     setDroppedNotice(
       canRebuild
-        ? ja.cookNavi.selectionDroppedRebuilt.replace('{n}', String(next.length))
-        : ja.cookNavi.selectionDropped,
+        ? ja.cookNavi.selectionDroppedRebuilt.replace('{n}', String(kept.length))
+        : kept.length === 0 && next.length > 0
+          ? ja.cookNavi.selectionDroppedReselected.replace('{n}', String(next.length))
+          : ja.cookNavi.selectionDropped,
     )
   }, [todayRecipes, selectedIds, showTimeline, current])
 
