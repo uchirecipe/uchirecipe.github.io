@@ -1802,7 +1802,10 @@ export default function SettingsPage() {
               />
               <span>
                 {ja.settings.backupIncludeCookedPhotos}
-                <span className="mt-0.5 block text-xs text-ink-muted">
+                <span
+                  data-testid="backup-photos-note"
+                  className="mt-0.5 block text-xs text-ink-muted"
+                >
                   {ja.settings.backupIncludeCookedPhotosNote}
                 </span>
               </span>
@@ -1838,6 +1841,19 @@ export default function SettingsPage() {
                 </p>
               </>
             )}
+            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW・オーナー指示
+                「詳しくは説明リンクつけとけばいい」)。行き先は「バックアップと機種変更」の節で、
+                保存先・容量の目安・読み込みの2種類・機種変更の手順までまとまっている。
+                別窓にしないのは、この画面の /about/ 配下へのリンクと同じ作法に揃えるため */}
+            <p className="mt-[var(--space-md)]">
+              <a
+                href="/about/manual.html#backup"
+                data-testid="backup-detail-link"
+                className="text-sm font-bold text-accent-ink underline"
+              >
+                {ja.settings.backupDetailLink}
+              </a>
+            </p>
           </section>
 
           {/* ②バックアップを読み込む: 「今のデータに追加」「データを上書き」を並べて配置し、
@@ -1867,7 +1883,8 @@ export default function SettingsPage() {
                   <Upload size={18} className="shrink-0" aria-hidden />
                   <span>{ja.settings.backupImportMerge}</span>
                 </button>
-                <p className="mt-1 text-xs text-ink-muted">{ja.settings.backupImportMergeNote}</p>
+                {/* 2026-08-12 便FW・オーナー指示で、このボタンの下の説明文は削除した
+                    （同じ内容は押したあとの確認文で件数つきに出る） */}
               </div>
               <div className="flex flex-col">
                 <button
@@ -1911,6 +1928,31 @@ export default function SettingsPage() {
           <section id="archive-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.archiveTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.archiveDescription}</p>
+
+            {/* 2026-08-12 便FW: オーナーの4つの疑問のうち①バックアップとの違い・③別のファイルか、を
+                表で答える。文章を続けず表にするのは規約H（長文は分割・表で構成する） */}
+            <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app px-3 py-2">
+              <p className="text-sm font-bold">{ja.settings.archiveVsBackupTitle}</p>
+              <dl data-testid="archive-vs-backup" className="mt-1 space-y-1 text-sm">
+                {ja.settings.archiveVsBackupRows.map((row) => (
+                  <div key={row.name}>
+                    <dt className="font-bold text-accent-ink">{row.name}</dt>
+                    <dd className="text-ink-muted">{row.body}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveVsBackupNote}</p>
+            </div>
+
+            {/* 疑問②「範囲を選んだあとどこを押すのか」。押す順にボタン名で並べる */}
+            <div className="mt-[var(--space-md)]">
+              <p className="text-sm font-bold">{ja.settings.archiveStepsTitle}</p>
+              <ol data-testid="archive-steps" className="mt-1 space-y-0.5 text-sm text-ink-muted">
+                {ja.settings.archiveSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+            </div>
 
             {/* 「◯ヶ月より前」の選択(既定1ヶ月)。切り替えたら書き出し済みの状態は消す
                 (別の範囲で書き出したファイルに対する削除ボタンが残ると取り違えるため) */}
@@ -2039,8 +2081,20 @@ export default function SettingsPage() {
               </p>
             )}
 
+            {/* 疑問④「アーカイブはどこに保存されているのか」と、端末が軽くなる条件
+                (2026-08-12 便FW)。書き出しのボタンのすぐ下＝押した直後に読む位置に置く */}
+            <p
+              data-testid="archive-where-saved"
+              className="mt-[var(--space-md)] text-xs text-ink-muted"
+            >
+              {ja.settings.archiveWhereSaved}
+            </p>
+            <p data-testid="archive-space-note" className="mt-1 text-xs text-ink-muted">
+              {ja.settings.archiveSpaceNote}
+            </p>
+
             {/* 通常のバックアップとの関係(端末から消した記録はバックアップに入らない) */}
-            <p className="mt-[var(--space-md)] flex items-start gap-1 text-xs text-ink-muted">
+            <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
               <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
               {ja.settings.archiveBackupNote}
             </p>
@@ -2065,6 +2119,17 @@ export default function SettingsPage() {
               {ja.settings.archiveViewButton}
             </button>
             <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveViewNote}</p>
+
+            {/* 詳しい説明は使い方ページに任せる(2026-08-12 便FW) */}
+            <p className="mt-[var(--space-md)]">
+              <a
+                href="/about/manual.html#archive"
+                data-testid="archive-detail-link"
+                className="text-sm font-bold text-accent-ink underline"
+              >
+                {ja.settings.archiveDetailLink}
+              </a>
+            </p>
           </section>
 
           {/* 機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。折りたたみ式で、
@@ -2291,28 +2356,47 @@ export default function SettingsPage() {
                 <div className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
                   <p className="text-sm font-bold">{ja.settings.proActivatedFeaturesTitle}</p>
                   {/* 機能名だけでなく「どこを開けば見られるか」と、その画面への入口を添える
-                      (2026-07-28 便BY/DISC-01。8項目表・期間の集計は数手先にあり到達しにくかった) */}
-                  <ul className="mt-1 space-y-2 text-sm">
-                    {ja.settings.proActivatedFeatures.map((feature) => (
-                      <li key={feature.label}>
-                        <p className="font-bold">・{feature.label}</p>
-                        <p className="text-sm text-ink-muted">{feature.hint}</p>
+                      (2026-07-28 便BY/DISC-01。8項目表・期間の集計は数手先にあり到達しにくかった)。
+                      2026-08-12 便FW: 機能1件ごとに入口リンクを付けていて同じリンクが6本並んで
+                      いたので、開く画面ごとの束にまとめ、入口リンクは束の最後に1本だけ置く */}
+                  <div className="mt-[var(--space-sm)] space-y-[var(--space-md)]">
+                    {ja.settings.proActivatedFeatureGroups.map((group) => (
+                      <div key={group.title} data-testid="pro-feature-group">
+                        <p className="text-sm font-bold text-accent-ink">{group.title}</p>
+                        <ul className="mt-1 space-y-2 text-sm">
+                          {group.features.map((feature) => (
+                            <li key={feature.label}>
+                              <p className="font-bold">・{feature.label}</p>
+                              <p className="text-sm text-ink-muted">{feature.hint}</p>
+                            </li>
+                          ))}
+                        </ul>
                         {/* 2026-08-09 便EN(オーナー実機「左に文字が集中していて読みにくい」):
-                            機能名・説明・入口が全部左端から始まっていて、どこで1項目が終わるのかが
-                            読み取れなかった。入口のリンクだけ右端に寄せて、項目の区切りを作る */}
-                        {feature.to && feature.linkLabel && (
-                          <p className="mt-0.5 text-right">
-                            <Link
-                              to={feature.to}
-                              className="text-sm font-bold text-accent-ink underline"
-                            >
-                              {feature.linkLabel}
-                            </Link>
-                          </p>
-                        )}
-                      </li>
+                            入口のリンクだけ右端に寄せて、束の切れ目を作る */}
+                        <p className="mt-1 text-right">
+                          <Link
+                            to={group.to}
+                            className="text-sm font-bold text-accent-ink underline"
+                          >
+                            {group.linkLabel}
+                          </Link>
+                        </p>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
+                  {/* 機能紹介の一番下に、詳しい説明への入口を1本置く(2026-08-12 便FW・オーナー指示)。
+                      行き先は使い方ページの「無料で使える範囲とPro版」 */}
+                  <p className="mt-[var(--space-md)] border-t border-edge pt-[var(--space-sm)]">
+                    <a
+                      href="/about/manual.html#pro"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-testid="pro-detail-link-activated"
+                      className="text-sm font-bold text-accent-ink underline"
+                    >
+                      {ja.settings.proDetailLinkActivated}
+                    </a>
+                  </p>
                 </div>
               </>
             ) : (

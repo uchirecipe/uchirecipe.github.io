@@ -14474,9 +14474,11 @@ eq(
     ja.settings.proDescription.includes('栄養から組む'),
     true,
   )
+  // 2026-08-12 便FW: 機能一覧を「開く画面ごとの束」に組み替えたので、束の中を平らにして見る
+  const proActivatedFeatures = ja.settings.proActivatedFeatureGroups.flatMap((g) => g.features)
   eq(
     'EA-DW1 解錠後の「使えるようになった機能」に「栄養から組む」がある',
-    ja.settings.proActivatedFeatures.some((f) => f.label.includes('栄養から組む')),
+    proActivatedFeatures.some((f) => f.label.includes('栄養から組む')),
     true,
   )
   // ②効き先は週タブだけではない(月タブの「未定の日をまとめて提案」も executeFill→drawPair を通る)。
@@ -14484,7 +14486,7 @@ eq(
   //   なかった」): 画面の1行説明でボタン名を3つ並べるのはやめ、設定のPro機能一覧の側で
   //   「週」と「月」の両方を案内する形にした。検査もそちらへ移す
   {
-    const feature = ja.settings.proActivatedFeatures.find((f) => f.label.includes('栄養から組む'))
+    const feature = proActivatedFeatures.find((f) => f.label.includes('栄養から組む'))
     eq('EA-DW2 Pro機能一覧の案内が「週」と「月」の両方を挙げている', !!feature && feature.hint.includes('週') && feature.hint.includes('月'), true)
   }
   //   画面の1行説明は短く保つ(ボタン名の列挙・内部の引き直しの説明を戻さない)
