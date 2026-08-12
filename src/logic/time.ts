@@ -24,6 +24,54 @@ function normalizeDigits(text: string): string {
 const TIME_RE =
   /(\d+(?:\.\d+)?)\s*時間\s*(半)?\s*(?:(\d+(?:\.\d+)?)\s*分)?|(\d+(?:\.\d+)?)\s*分\s*(半)?|(\d+(?:\.\d+)?)\s*秒/g
 
+/**
+ * 幅のある書き方（「12〜15分」）の区切り。全角/半角の波ダッシュ・長音・ハイフンを見る。
+ * 「12分〜15分」のように単位が2回書かれる形にも同じ区切りを使う。
+ */
+const RANGE_SEPARATOR = '[〜～~ー－‐–—―\\-]'
+/** 時間表記の**手前**に取り残された範囲の始まり（「…12〜」+「15分」） */
+const RANGE_PREFIX_RE = new RegExp(`(?:\\d+(?:\\.\\d+)?)\\s*${RANGE_SEPARATOR}\\s*$`)
+/** 2つの時間表記のあいだが区切りだけ（「12分」+「〜」+「15分」） */
+const RANGE_JOIN_RE = new RegExp(`^\\s*${RANGE_SEPARATOR}\\s*$`)
+
+/**
+ * 「12〜15分」を1つのまとまりとして扱う（2026-08-12 便FU-5・利用者テスト
+ * 「『魚焼きグリルの弱火で12〜 ⏱15分 焼く。』— 範囲の『12〜』だけが取り残されて、
+ * 時間チップと分断表示になります。『1〜 ⏱2分 煮る』も同様」）。
+ *
+ * もともとの走査は「15分」「2分」だけを時間表記として拾うので、範囲の前半（「12〜」）が
+ * 地の文に残り、チップの手前に意味の切れた数字が浮いていた。前半を取り込んで1つの表記にする。
+ *
+ * **はかる長さは変えない**（範囲の長いほう＝これまでと同じ）。段取りの待ち時間の計算は
+ * 表記の中でいちばん長い時間を採る規則（cookNavi.resolveStepMinutes）なので、
+ * ここで採る秒数を変えると段取りまで動いてしまう。直すのは分断された見え方だけにする。
+ */
+function mergeRangeTokens(text: string, tokens: TimeToken[]): TimeToken[] {
+  const merged: TimeToken[] = []
+  for (const token of tokens) {
+    const prev = merged[merged.length - 1]
+    const prevEnd = prev ? prev.start + prev.text.length : 0
+    const between = text.slice(prevEnd, token.start)
+    if (prev && between !== '' && RANGE_JOIN_RE.test(between)) {
+      prev.text = text.slice(prev.start, token.start + token.text.length)
+      prev.seconds = Math.max(prev.seconds, token.seconds)
+      continue
+    }
+    const head = RANGE_PREFIX_RE.exec(between)
+    if (head) {
+      const start = token.start - head[0].length
+      merged.push({
+        text: text.slice(start, token.start + token.text.length),
+        start,
+        seconds: token.seconds,
+      })
+      continue
+    }
+    merged.push({ ...token })
+  }
+  return merged
+}
+
 export function findTimeTokens(text: string): TimeToken[] {
   const normalized = normalizeDigits(text)
   const tokens: TimeToken[] = []
@@ -44,7 +92,7 @@ export function findTimeTokens(text: string): TimeToken[] {
       tokens.push({ text: match[0], start: match.index, seconds })
     }
   }
-  return tokens
+  return mergeRangeTokens(normalized, tokens)
 }
 
 /**
