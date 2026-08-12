@@ -29186,6 +29186,498 @@ try {
     }
   }
 
+  // ============================================================================
+  // FW（2026-08-12 便FW・オーナー実機フィードバック）
+  //   FW-01 設定のPro節: 「使えるようになった機能」を開く画面ごとの束にまとめ、入口リンクは
+  //         束ごとに1本だけ。機能紹介の一番下にPro版の詳しい説明へのリンクを置く
+  //   FW-02 バックアップの説明を短く（長文が戻っていないことも見張る）・「今のデータに追加」の
+  //         説明文は出さない・詳しい説明はリンク先に任せる
+  //   FW-03 古い記録の書き出し: オーナーの4つの疑問（①バックアップと何が違うのか
+  //         ②範囲を選んだあとどこを押すのか ③アーカイブとバックアップファイルは違うのか
+  //         ④どこに保存されているのか）すべてに画面の上で答える
+  //   FW-04 食材の在庫の「「作った！」で在庫を減らす」スイッチ。レシピ詳細のスイッチと連動し、
+  //         献立の「全て作った！」にも効く（毎回の小窓は増やさない）
+  //   FW-05 段取りを作っていないとき（候補として選んだだけ）は、日の「作った！」で
+  //         段取りの小窓を出さない
+  // ============================================================================
+  currentCheck = 'FW-01'
+  {
+    const fwBrowser = await chromium.launch()
+    const fwCtx = await fwBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fwPage = await fwCtx.newPage()
+    fwPage.on('dialog', (d) => void d.accept())
+    fwPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FW] ${err.message}`)
+    })
+    /** 節の中の段落を1つずつ取り出す（規約H: 長い文が戻っていないかを機械で見張るため） */
+    const fwParagraphs = (sel) =>
+      fwPage.evaluate((s) => {
+        const root = document.querySelector(s)
+        if (!root) return null
+        return Array.from(root.querySelectorAll('p, li, dd, [data-testid="backup-photos-note"]'))
+          .map((el) => (el.textContent ?? '').replace(/\u200B/g, '').trim())
+          .filter(Boolean)
+      }, sel)
+    /** 1かたまりの文字数の上限（今の最長は約86字。100字を超えたら長文へ逆戻りしている） */
+    const FW_PARAGRAPH_MAX = 100
+    try {
+      await fwPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fwPage.waitForTimeout(1800)
+      // 「使えるようになった機能」は解錠中だけ出るので、Pro解錠済みの状態を作る
+      await fwPage.evaluate(async () => {
+        const idb = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = () => idb.transaction('settings', 'readwrite').objectStore('settings')
+        const cur = (await P(store().get(1))) || { id: 1 }
+        await P(store().put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        idb.close()
+      })
+      await fwPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
+      await fwPage.waitForTimeout(1200)
+
+      const fwGroups = await fwPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="pro-feature-group"]')).map((el) => ({
+          title: (el.querySelector('p')?.textContent ?? '').replace(/\u200B/g, '').trim(),
+          linkCount: el.querySelectorAll('a').length,
+          linkLabel: (el.querySelector('a')?.textContent ?? '').trim(),
+          linkHref: el.querySelector('a')?.getAttribute('href') ?? '',
+          featureCount: el.querySelectorAll('li').length,
+        })),
+      )
+      check(
+        'FW-01 「使えるようになった機能」が開く画面ごとの2つの束になっている',
+        fwGroups.length === 2,
+        JSON.stringify(fwGroups.map((g) => g.title)),
+      )
+      check(
+        'FW-01 束の見出しが「レシピに増えた機能」「献立に増えた機能」',
+        fwGroups[0]?.title === 'レシピに増えた機能' && fwGroups[1]?.title === '献立に増えた機能',
+        JSON.stringify(fwGroups.map((g) => g.title)),
+      )
+      check(
+        'FW-01 入口のリンクは束ごとに1本だけ（同じリンクが並ばない）',
+        fwGroups.every((g) => g.linkCount === 1),
+        JSON.stringify(fwGroups.map((g) => g.linkCount)),
+      )
+      check(
+        'FW-01 束のリンクは「レシピ一覧を開く」→レシピ一覧、「献立を開く」→献立',
+        fwGroups[0]?.linkLabel === 'レシピ一覧を開く' && fwGroups[0]?.linkHref === '#/recipes' &&
+          fwGroups[1]?.linkLabel === '献立を開く' && fwGroups[1]?.linkHref === '#/meal-plan',
+        JSON.stringify(fwGroups.map((g) => `${g.linkLabel}=${g.linkHref}`)),
+      )
+      check(
+        'FW-01 束の中に機能がすべて残っている（まとめ直しで機能を落としていない）',
+        (fwGroups[0]?.featureCount ?? 0) === 3 && (fwGroups[1]?.featureCount ?? 0) === 4,
+        JSON.stringify(fwGroups.map((g) => g.featureCount)),
+      )
+      const fwProText = (
+        (await fwPage.locator('#section-pro').innerText().catch(() => '')) ?? ''
+      ).replace(/\u200B/g, '')
+      check(
+        'FW-01 同じ入口リンクが繰り返し並んでいない（「レシピ一覧を開く」「献立を開く」は各1回）',
+        (fwProText.match(/レシピ一覧を開く/g) ?? []).length === 1 &&
+          (fwProText.match(/献立を開く/g) ?? []).length === 1,
+        `レシピ一覧を開く=${(fwProText.match(/レシピ一覧を開く/g) ?? []).length} 献立を開く=${(fwProText.match(/献立を開く/g) ?? []).length}`,
+      )
+      check(
+        'FW-01 束の見出しに「タブ」という内部の言い方を使っていない',
+        !fwProText.includes('タブ'),
+      )
+      // 機能紹介の一番下のリンク（オーナー指示「pro版の詳しい説明はこちら、みたいな感じで」）
+      const fwProLink = fwPage.locator('[data-testid="pro-detail-link-activated"]')
+      const fwProHref = (await fwProLink.count()) > 0 ? await fwProLink.getAttribute('href') : null
+      check(
+        'FW-01 機能紹介の一番下にPro版の詳しい説明へのリンクがある',
+        fwProHref === '/about/manual.html#pro',
+        String(fwProHref),
+      )
+      check(
+        'FW-01 リンクの文言が行き先の中身を言っている',
+        ((await fwProLink.textContent().catch(() => '')) ?? '').trim() === 'Pro版の詳しい説明を見る',
+      )
+      const fwProRes = await fwPage.request.get(`${BASE}/about/manual.html`)
+      const fwProBody = fwProRes.ok() ? await fwProRes.text() : ''
+      check(
+        'FW-01 リンク先の見出し（id="pro"）が実在する',
+        fwProRes.status() === 200 && fwProBody.includes('id="pro"') && fwProBody.includes('無料で使える範囲とPro版'),
+        `status=${fwProRes.status()}`,
+      )
+
+      // --- FW-02: バックアップの説明 ---
+      currentCheck = 'FW-02'
+      await fwPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await fwPage.waitForTimeout(1200)
+      const fwBackupText = ((await fwPage.textContent('body')) ?? '').replace(/\u200B/g, '')
+      check(
+        'FW-02 バックアップの説明が「何が入るファイルか」を1文で言っている',
+        fwBackupText.includes('レシピ・作った記録・設定を1つのファイルに保存します'),
+      )
+      check(
+        'FW-02 「今のデータに追加」のボタンは残っている',
+        (await fwPage.getByRole('button', { name: '今のデータに追加' }).count()) === 1,
+      )
+      check(
+        'FW-02 「今のデータに追加」の下の説明文は出さない（オーナー指示で削除）',
+        !fwBackupText.includes('「まだ無いもの」だけを足します'),
+      )
+      check(
+        'FW-02 短くしても事実は落としていない: 解錠コードが含まれる注意は残っている（規約F）',
+        fwBackupText.includes('バックアップファイルにはPro版の解錠コードが含まれます'),
+      )
+      check(
+        'FW-02 短くしても事実は落としていない: 写真は既定で入らないことが残っている',
+        fwBackupText.includes('OFFのままだと写真は入らず、別の端末では戻せません'),
+      )
+      const fwBackupParas = await fwParagraphs('#backup-section')
+      const fwBackupLong = (fwBackupParas ?? []).filter((t) => t.length > FW_PARAGRAPH_MAX)
+      check(
+        `FW-02 長文が戻っていない（1かたまり${FW_PARAGRAPH_MAX}字以内）`,
+        fwBackupParas !== null && fwBackupLong.length === 0,
+        fwBackupLong.map((t) => `${t.length}字: ${t.slice(0, 30)}…`).join(' / '),
+      )
+      const fwBackupLink = fwPage.locator('[data-testid="backup-detail-link"]')
+      const fwBackupHref = (await fwBackupLink.count()) > 0 ? await fwBackupLink.getAttribute('href') : null
+      check(
+        'FW-02 詳しい説明のリンクが使い方ページの「バックアップと機種変更」を指す',
+        fwBackupHref === '/about/manual.html#backup',
+        String(fwBackupHref),
+      )
+      check(
+        'FW-02 リンク先の見出し（id="backup"）が実在する',
+        fwProBody.includes('id="backup"') && fwProBody.includes('バックアップと機種変更'),
+      )
+
+      // --- FW-03: 古い記録の書き出し（4つの疑問すべてに画面で答える） ---
+      currentCheck = 'FW-03'
+      const fwArchiveText = (
+        (await fwPage.locator('#archive-section').innerText().catch(() => '')) ?? ''
+      ).replace(/\u200B/g, '')
+      // 疑問①「バックアップと何が違うのか」・疑問③「別のファイルなのか」
+      const fwVs = (
+        (await fwPage.locator('[data-testid="archive-vs-backup"]').innerText().catch(() => '')) ?? ''
+      ).replace(/\u200B/g, '')
+      check(
+        'FW-03(疑問①) バックアップとの違いを、入るものと戻せるかで言い分けている',
+        fwVs.includes('バックアップファイル') && fwVs.includes('アーカイブファイル') &&
+          fwVs.includes('アプリに読み込んで元に戻せます') && fwVs.includes('アプリには戻せません'),
+        fwVs.slice(0, 120),
+      )
+      check(
+        'FW-03(疑問③) 2つが別のファイルであることと、名前の見分け方が書いてある',
+        fwArchiveText.includes('2つは別のファイルです') &&
+          fwArchiveText.includes('uchi-recipe-records-') &&
+          fwArchiveText.includes('uchi-recipe-backup-'),
+      )
+      // 疑問②「範囲を選んだあとどこを押すのか」
+      const fwSteps = await fwPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="archive-steps"] li')).map((el) =>
+          (el.textContent ?? '').replace(/\u200B/g, '').trim(),
+        ),
+      )
+      check(
+        'FW-03(疑問②) 押す順に手順が3つ並んでいる',
+        fwSteps.length === 3,
+        JSON.stringify(fwSteps),
+      )
+      check(
+        'FW-03(疑問②) 範囲を選んだあとに押すボタンの名前が書いてある',
+        (fwSteps[0] ?? '').includes('「書き出す範囲」を選ぶ') &&
+          (fwSteps[1] ?? '').includes('「古い記録をファイルに書き出す」を押して') &&
+          (fwSteps[2] ?? '').includes('「書き出した記録を端末から消す」を押す'),
+        JSON.stringify(fwSteps),
+      )
+      check(
+        'FW-03(疑問②) 削除のボタンが最初は出ていない理由（②を済ませると出る）も書いてある',
+        (fwSteps[2] ?? '').includes('②を済ませると出るボタンです'),
+        fwSteps[2] ?? '',
+      )
+      // 疑問④「どこに保存されているのか」
+      const fwWhere = (
+        (await fwPage.locator('[data-testid="archive-where-saved"]').innerText().catch(() => '')) ?? ''
+      ).replace(/\u200B/g, '')
+      check(
+        'FW-03(疑問④) ファイルがアプリの中ではなく、選んだ場所／ダウンロードに入ることが書いてある',
+        fwWhere.includes('アプリの中ではなく') && fwWhere.includes('選んだ場所') &&
+          fwWhere.includes('ダウンロード'),
+        fwWhere,
+      )
+      // 「書き出したあとに端末から消すと、その分の空き容量が戻ります」の書き直し
+      check(
+        'FW-03 日本語のおかしかった旧文（空き容量が戻ります）を出していない',
+        !fwArchiveText.includes('空き容量が戻ります'),
+      )
+      const fwSpace = (
+        (await fwPage.locator('[data-testid="archive-space-note"]').innerText().catch(() => '')) ?? ''
+      ).replace(/\u200B/g, '')
+      check(
+        'FW-03 端末が軽くなる条件を「端末の外へ移してから消す」と書いている',
+        fwSpace.includes('端末の外へ移し') && fwSpace.includes('端末の記録を消したとき'),
+        fwSpace,
+      )
+      const fwArchiveParas = await fwParagraphs('#archive-section')
+      const fwArchiveLong = (fwArchiveParas ?? []).filter((t) => t.length > FW_PARAGRAPH_MAX)
+      check(
+        `FW-03 長文が戻っていない（1かたまり${FW_PARAGRAPH_MAX}字以内）`,
+        fwArchiveParas !== null && fwArchiveLong.length === 0,
+        fwArchiveLong.map((t) => `${t.length}字: ${t.slice(0, 30)}…`).join(' / '),
+      )
+      const fwArchiveLink = fwPage.locator('[data-testid="archive-detail-link"]')
+      const fwArchiveHref =
+        (await fwArchiveLink.count()) > 0 ? await fwArchiveLink.getAttribute('href') : null
+      check(
+        'FW-03 詳しい説明のリンクが使い方ページの「古い記録の書き出し」を指す',
+        fwArchiveHref === '/about/manual.html#archive',
+        String(fwArchiveHref),
+      )
+      check(
+        'FW-03 リンク先の見出し（id="archive"）が実在する',
+        fwProBody.includes('id="archive"') && fwProBody.includes('古い記録の書き出し（端末を軽くする）'),
+      )
+    } finally {
+      await fwBrowser.close()
+    }
+  }
+
+  // --- FW-04: 食材の在庫の「「作った！」で在庫を減らす」スイッチ ---
+  // オーナー指摘「まとめて作った！・レシピ詳細以外から作った！した時に、食材の在庫から減らすか
+  // 聞かれない。何度も質問の小窓が出るのも大変なので、食材の在庫に…スイッチでもつくる？
+  // レシピ詳細の作った！のONOFFとも連動させたほうがいいかな？」
+  currentCheck = 'FW-04'
+  {
+    const fpBrowser = await chromium.launch()
+    const fpCtx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fpPage = await fpCtx.newPage()
+    const fpDialogs = []
+    fpPage.on('dialog', (d) => { fpDialogs.push(d.message()); void d.accept() })
+    fpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FW-04] ${err.message}`)
+    })
+    const fpRead = (storeName, key) =>
+      fpPage.evaluate(async ([name, k]) => {
+        const idb = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const st = idb.transaction(name, 'readonly').objectStore(name)
+        const out = k === undefined ? await P(st.getAll()) : await P(st.get(k))
+        idb.close()
+        return out
+      }, [storeName, key])
+    try {
+      await fpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(1800)
+      await fpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(600)
+      const fpSwitch = fpPage.locator('[data-testid="pantry-cooked-reflect-switch"]')
+      check(
+        'FW-04 食材の在庫に「「作った！」で在庫を減らす」のスイッチがある',
+        (await fpSwitch.count()) === 1,
+      )
+      check(
+        'FW-04 既定はOFF（勝手に在庫を動かさない）',
+        (await fpSwitch.getAttribute('aria-checked')) === 'false',
+      )
+      const fpBoardText = ((await fpPage.textContent('body')) ?? '').replace(/\u200B/g, '')
+      check(
+        'FW-04 何がどう減るのかがスイッチのそばに書いてある（規約F）',
+        fpBoardText.includes('「ある→少ない→ない」の順に1つ下がります') &&
+          fpBoardText.includes('調味料と、在庫に登録していない食材は変わりません'),
+      )
+      check(
+        'FW-04 どの「作った！」にも効くこと・レシピ詳細のスイッチと同じ設定であることが書いてある',
+        fpBoardText.includes('レシピ・献立・並行調理ナビのどの「作った！」でも同じように下がります') &&
+          fpBoardText.includes('レシピ詳細の「作った！」に出るスイッチと同じ設定です'),
+      )
+      // ONにすると設定に記憶される
+      await fpSwitch.click()
+      await fpPage.waitForTimeout(400)
+      check(
+        'FW-04 ONにすると設定(cookedReflectPantry)に記憶される',
+        (await fpRead('settings', 1))?.cookedReflectPantry === true,
+      )
+      // レシピ詳細の「作った！」のスイッチと連動している（同じ設定を見ている）
+      await fpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(600)
+      await fpPage.getByText('肉じゃが', { exact: true }).first().click()
+      await fpPage.waitForTimeout(600)
+      await fpPage.getByRole('button', { name: '作った！' }).first().click()
+      await fpPage.waitForTimeout(400)
+      const fpDetailSwitch = fpPage.getByRole('switch', { name: '使った食材の在庫を減らす' })
+      check(
+        'FW-04 在庫でONにすると、レシピ詳細の「作った！」のスイッチもONになっている（連動）',
+        (await fpDetailSwitch.getAttribute('aria-checked')) === 'true',
+      )
+      // 逆向きにも連動する（レシピ詳細で切ると在庫の画面も切れる）
+      await fpDetailSwitch.click()
+      await fpPage.waitForTimeout(400)
+      await fpPage.getByRole('button', { name: 'やめる' }).first().click()
+      await fpPage.waitForTimeout(300)
+      await fpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(600)
+      check(
+        'FW-04 レシピ詳細でOFFにすると、在庫のスイッチもOFFになっている（連動は両方向）',
+        (await fpPage.locator('[data-testid="pantry-cooked-reflect-switch"]').getAttribute('aria-checked')) === 'false',
+      )
+      // もう一度ONにして、「レシピ詳細以外の作った！」でも在庫が下がることを確かめる
+      await fpPage.locator('[data-testid="pantry-cooked-reflect-switch"]').click()
+      await fpPage.waitForTimeout(400)
+      await fpPage.getByRole('button', { name: '玉ねぎ' }).first().click()
+      await fpPage.waitForTimeout(300)
+      check(
+        'FW-04 前提: 玉ねぎを「ある」にできた',
+        ((await fpRead('pantryItems')) ?? []).find((p) => p.name === '玉ねぎ')?.level === 'have',
+      )
+      // 今日の献立に肉じゃがを入れて、献立の「全て作った！」で記録する
+      await fpPage.evaluate(async () => {
+        const idb = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const recipes = await P(idb.transaction('recipes', 'readonly').objectStore('recipes').getAll())
+        const target = recipes.find((r) => r.title === '肉じゃが')
+        await P(idb.transaction('todayList', 'readwrite').objectStore('todayList').add({ recipeId: target.id, addedAt: Date.now() }))
+        idb.close()
+      })
+      await fpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await fpPage.waitForTimeout(1500)
+      check(
+        'FW-04 設定がONのときは、1品ずつの「作った！」の前にも在庫が減ることが書いてある（小窓は出さない）',
+        (await fpPage.locator('[data-testid="day-pantry-cooked-hint"]').count()) === 1,
+      )
+      fpDialogs.length = 0
+      await fpPage.getByRole('button', { name: '全て作った！' }).first().click()
+      await fpPage.waitForTimeout(1200)
+      check(
+        'FW-04 「全て作った！」の確認文が、どの設定で在庫が減るのかを名前で言う',
+        fpDialogs.some((m) => m.includes('設定「「作った！」で在庫を減らす」がONのため') && m.includes('「ある→少ない→ない」の順に1つ下がります')),
+        fpDialogs.join(' | ').slice(0, 200),
+      )
+      check(
+        'FW-04 レシピ詳細以外の「作った！」でも在庫が1段階下がる（ある→少ない）',
+        ((await fpRead('pantryItems')) ?? []).find((p) => p.name === '玉ねぎ')?.level === 'low',
+        JSON.stringify(((await fpRead('pantryItems')) ?? []).find((p) => p.name === '玉ねぎ')),
+      )
+    } finally {
+      await fpBrowser.close()
+    }
+  }
+
+  // --- FW-05: 段取りを作っていないときは、日の「作った！」で段取りの小窓を出さない ---
+  // オーナー指摘「日・今日の献立から作った！したとき、並行調理ナビの段取り（候補）からも外れる旨の
+  // 説明はいらない（調理ナビで段取りが作成されていない場合）」
+  currentCheck = 'FW-05'
+  {
+    const fnBrowser = await chromium.launch()
+    const fnCtx = await fnBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fnPage = await fnCtx.newPage()
+    const fnDialogs = []
+    fnPage.on('dialog', (d) => { fnDialogs.push(d.message()); void d.accept() })
+    fnPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FW-05] ${err.message}`)
+    })
+    try {
+      await fnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fnPage.waitForTimeout(1800)
+      // 今日の献立に3品入れる（並行調理ナビで選べる状態を作る）
+      const fnIds = await fnPage.evaluate(async () => {
+        const idb = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const recipes = await P(idb.transaction('recipes', 'readonly').objectStore('recipes').getAll())
+        const ids = recipes.slice(0, 3).map((r) => r.id)
+        let addedAt = Date.now()
+        for (const id of ids) {
+          await P(idb.transaction('todayList', 'readwrite').objectStore('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        }
+        idb.close()
+        return ids
+      })
+      /** 覚え書きを置き直す（showTimeline=段取りを作ったかどうか） */
+      const fnPutSession = (showTimeline) =>
+        fnPage.evaluate(([ids, show]) => {
+          const d = new Date()
+          const pad = (n) => String(n).padStart(2, '0')
+          localStorage.setItem(
+            'uchi-recipe-cook-navi-session',
+            JSON.stringify({
+              v: 1,
+              date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+              selectedIds: ids,
+              showTimeline: show,
+              trialActive: false,
+            }),
+          )
+        }, [fnIds, showTimeline])
+
+      // ①段取りを作っていない（候補として選んだだけ）→ 小窓は出さない
+      await fnPutSession(false)
+      await fnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await fnPage.waitForTimeout(1500)
+      check(
+        'FW-05 段取りを作っていないときは、日の説明に段取りの話を出さない',
+        (await fnPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 0,
+      )
+      fnDialogs.length = 0
+      await fnPage.getByRole('button', { name: '作った！', exact: true }).first().click()
+      await fnPage.waitForTimeout(1200)
+      check(
+        'FW-05 段取りを作っていないときは、「作った！」で段取りの小窓を出さない',
+        !fnDialogs.some((m) => m.includes('段取り')),
+        fnDialogs.join(' | ').slice(0, 200),
+      )
+      const fnAfter = await fnPage.evaluate(async () => {
+        const idb = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const list = await P(idb.transaction('todayList', 'readonly').objectStore('todayList').getAll())
+        idb.close()
+        return list.length
+      })
+      check(
+        'FW-05 小窓を出さなくても記録は付き、今日の献立から外れる（黙って何も起きないのではない）',
+        fnAfter === 2,
+        `今日の献立=${fnAfter}品`,
+      )
+
+      // ②段取りを作ってある → 従来どおり、外れることを先に伝える
+      await fnPutSession(true)
+      await fnPage.reload({ waitUntil: 'networkidle' })
+      await fnPage.waitForTimeout(1500)
+      check(
+        'FW-05 段取りを作ってあるときは、日の説明に段取りの話が出る',
+        (await fnPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 1,
+      )
+      fnDialogs.length = 0
+      await fnPage.getByRole('button', { name: '作った！', exact: true }).first().click()
+      await fnPage.waitForTimeout(1200)
+      check(
+        'FW-05 段取りを作ってあるときは、従来どおり段取りから外れることを先に伝える',
+        fnDialogs.some((m) => m.includes('段取り')),
+        fnDialogs.join(' | ').slice(0, 200),
+      )
+    } finally {
+      await fnBrowser.close()
+    }
+  }
+
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {

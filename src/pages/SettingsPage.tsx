@@ -1802,7 +1802,10 @@ export default function SettingsPage() {
               />
               <span>
                 {ja.settings.backupIncludeCookedPhotos}
-                <span className="mt-0.5 block text-xs text-ink-muted">
+                <span
+                  data-testid="backup-photos-note"
+                  className="mt-0.5 block text-xs text-ink-muted"
+                >
                   {ja.settings.backupIncludeCookedPhotosNote}
                 </span>
               </span>
