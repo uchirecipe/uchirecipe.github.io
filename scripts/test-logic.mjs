@@ -5521,6 +5521,87 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       'サラダ油 適量',
     ],
   )
+
+  // --- 便FU-2(2026-08-12 利用者テスト): 合わせ調味料が段取り・調理中モードに出ない ---
+  // 指摘（原文）:「☆の4つ・◎の4つを手で色付けしました（計8タップ）。ところが段取りの手順
+  // 「その間に☆を全部混ぜ合わせておく。」には材料が1つも出ません。◎の手順も「しょうゆ 大さじ1」
+  // しか出ず、すりごま・砂糖・だしの素は出ません」
+  //
+  // 画面の案内が「色分けしておくと調理中モードでまとめて表示されます」と約束しているので、
+  // ①組の材料が1つでも当たったらその組を全部出す ②手順文の組の印（☆等）でも組を出す
+  const misoMayoIngredients = [
+    { name: '鶏むね肉', amount: '300', unit: 'g' },
+    { name: 'みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+    { name: 'マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+    { name: '砂糖', amount: '1', unit: '小さじ', seasoningGroup: 1 },
+    { name: '酒', amount: '1', unit: '小さじ', seasoningGroup: 1 },
+  ]
+  eq(
+    'FU-2 組の材料が1つでも当たったら、その組を全部出す',
+    label(stepIngredientAmounts('みそを混ぜ合わせる。', misoMayoIngredients, 2, 2)),
+    ['みそ 大さじ1', 'マヨネーズ 大さじ2', '砂糖 小さじ1', '酒 小さじ1'],
+  )
+  eq(
+    'FU-2 組の材料は材料欄の並び順で出す（当たった1つが先頭に来ない）',
+    label(stepIngredientAmounts('酒をふる。', misoMayoIngredients, 2, 2)),
+    ['みそ 大さじ1', 'マヨネーズ 大さじ2', '砂糖 小さじ1', '酒 小さじ1'],
+  )
+  eq(
+    'FU-2 組に入っていない材料は今までどおり手順に出てくるものだけ',
+    label(stepIngredientAmounts('鶏むね肉はそぎ切りにする。', misoMayoIngredients, 2, 2)),
+    ['鶏むね肉 300g'],
+  )
+  eq(
+    'FU-2 組がその手順に出てこなければ何も出さない（関係ない手順に持ち込まない）',
+    label(stepIngredientAmounts('天板にアルミホイルを敷く。', misoMayoIngredients, 2, 2)),
+    [],
+  )
+  // 組が1つだけのレシピでは、手順文の印（☆）が指す先はその組しかない＝推測にならない
+  eq(
+    'FU-2 「☆を全部混ぜ合わせておく」でも、組が1つだけならその組を出す',
+    label(stepIngredientAmounts('その間に☆を全部混ぜ合わせておく。', misoMayoIngredients, 2, 2)),
+    ['みそ 大さじ1', 'マヨネーズ 大さじ2', '砂糖 小さじ1', '酒 小さじ1'],
+  )
+  // 材料名の先頭に印が残っているレシピは、組が複数あっても印で見分けられる
+  const markedIngredients = [
+    { name: '鶏むね肉', amount: '300', unit: 'g' },
+    { name: '☆みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+    { name: '☆マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+    { name: '◎しょうゆ', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+    { name: '◎すりごま', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+  ]
+  eq(
+    'FU-2 材料名に印が残っていれば、組が2つでも印で見分けて出す（☆）',
+    label(stepIngredientAmounts('その間に☆を全部混ぜ合わせておく。', markedIngredients, 2, 2)),
+    ['☆みそ 大さじ1', '☆マヨネーズ 大さじ2'],
+  )
+  eq(
+    'FU-2 材料名に印が残っていれば、組が2つでも印で見分けて出す（◎）',
+    label(stepIngredientAmounts('◎を混ぜて回しかける。', markedIngredients, 2, 2)),
+    ['◎しょうゆ 大さじ1', '◎すりごま 大さじ1'],
+  )
+  // 印が材料名に無く、組が2つ以上あるときは、どの組かを機械が決められない＝出さない（嘘を出さない）
+  const twoGroups = [
+    { name: 'みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+    { name: 'マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+    { name: 'しょうゆ', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+    { name: 'すりごま', amount: '1', unit: '大さじ', seasoningGroup: 2 },
+  ]
+  eq(
+    'FU-2 印の指す先が決められないときは出さない（当てずっぽうの組を出さない）',
+    label(stepIngredientAmounts('☆を全部混ぜ合わせておく。', twoGroups, 2, 2)),
+    [],
+  )
+  eq(
+    'FU-2 印が無い手順では、組が1つでも勝手に出さない',
+    label(stepIngredientAmounts('全体をよく混ぜる。', misoMayoIngredients, 2, 2)),
+    [],
+  )
+  eq(
+    'FU-2 出した材料には組の番号が付いている（画面の線の引き分けに使う）',
+    stepIngredientAmounts('みそを混ぜ合わせる。', misoMayoIngredients, 2, 2).map((x) => x.seasoningGroup),
+    [1, 1, 1, 1],
+  )
 }
 
 // ---------- resolveDuplicateTitleAction(配布セット再取込: kintoreテーマ改名で旧名称バッジが

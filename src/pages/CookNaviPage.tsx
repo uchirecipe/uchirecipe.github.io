@@ -253,7 +253,22 @@ function TimelineCard({
         >
           <p className="ja-phrase text-sm">
             {ingredients.map((ing, i) => (
-              <span key={`${ing.name}-${i}`} className="mr-3 inline-block whitespace-nowrap">
+              <span
+                key={`${ing.name}-${i}`}
+                className="mr-3 inline-block whitespace-nowrap"
+                /* 合わせ調味料は下線で組を示す（2026-08-12 便FU-2）。調理中モードの手順カード
+                   （CookSessionOverlay）と同じ引き方にそろえる＝同じ手順が2つの画面で
+                   違う顔にならないようにする */
+                style={
+                  ing.seasoningGroup
+                    ? {
+                        borderBottom: `2px ${seasoningGroupLineStyle(ing.seasoningGroup)} ${
+                          RECIPE_COLORS[item.colorIndex % RECIPE_COLORS.length]
+                        }`,
+                      }
+                    : undefined
+                }
+              >
                 {ing.name}
                 {ing.amount && <span className="ml-1 font-bold">{ing.amount}</span>}
               </span>
