@@ -3090,6 +3090,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const confirmCookedAgainstNavi = (recipe: Recipe): boolean => {
     const session = loadCookNaviSession()
     if (!session?.selectedIds.includes(recipe.id!)) return true
+    // 2026-08-12 便FW（オーナー指摘「日・今日の献立から作った！したとき、並行調理ナビの
+    // 段取り（候補）からも外れる旨の説明はいらない（調理ナビで段取りが作成されていない場合）」）:
+    // 「段取りを作る」を押していない＝候補として選んであるだけの状態では、記録しても失われる
+    // 段取りが無い。何も起きないことを知らせる小窓は出さない。
+    // 選択のほうは並行調理ナビの画面が今日の献立と突き合わせて直す（resolveCookNaviSelection）
+    if (!session.showTimeline) return true
     const remaining = reconcileSelectedIds(
       session.selectedIds,
       session.selectedIds.filter((id) => id !== recipe.id),
@@ -5389,6 +5395,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   {naviInProgress && (
                     <span data-testid="day-navi-cooked-hint" className="block">
                       {ja.mealPlan.todayMarkCookedNaviHint}
+                    </span>
+                  )}
+                  {/* 在庫を減らす設定がONのときだけ、押す前に読める場所に書く
+                      （1品ずつの「作った！」で確認の小窓は出さない・2026-08-12 便FW・規約F） */}
+                  {settings?.cookedReflectPantry && (
+                    <span data-testid="day-pantry-cooked-hint" className="block">
+                      {ja.mealPlan.todayMarkCookedPantryHint}
                     </span>
                   )}
                 </p>

@@ -18,6 +18,7 @@ import {
   setPantryItemNote,
   PANTRY_NOTE_MAX_LENGTH,
 } from '../db/pantry'
+import { useSettings, updateSettings } from '../db/settings'
 import type { PantryGroupKey, PantryLevel } from '../db/types'
 import { PANTRY_GROUP_ORDER, groupPantryItems } from '../logic/pantryGroups'
 import { splitValues } from '../logic/textSplit'
@@ -50,6 +51,10 @@ function levelClass(level: PantryLevel): string {
  */
 export default function PantryBoard() {
   const items = usePantryItems()
+  // 「作った！」で在庫を減らす設定(2026-08-12 便FW)。レシピ詳細の記録の窓にあるスイッチと
+  // 同じ settings.cookedReflectPantry を読み書きする＝どちらで切り替えても連動する
+  const settings = useSettings()
+  const reflectPantry = settings?.cookedReflectPantry ?? false
   const [text, setText] = useState('')
   const [organizing, setOrganizing] = useState(false)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
@@ -398,6 +403,40 @@ export default function PantryBoard() {
           <Plus size={18} aria-hidden />
           {ja.pantry.add}
         </button>
+      </div>
+
+      {/* 「作った！」で在庫を減らす設定(2026-08-12 便FW・オーナー指示)。
+          レシピ詳細の記録の窓の中にしか切り替える場所が無く、献立や並行調理ナビから
+          「作った！」を押す人には、在庫が減る／減らないを決める手段が画面に無かった。
+          設定は cookedReflectPantry の1つだけなので、どちらで切り替えても連動する。
+          毎回の小窓は増やさず、押す前に読める説明をスイッチに添える(規約F) */}
+      <div className="mt-[var(--space-md)] rounded-md border border-edge bg-app p-[var(--space-sm)]">
+        <div className="flex items-center justify-between gap-3">
+          <span className="min-w-0 font-bold">{ja.pantry.cookedReflectTitle}</span>
+          <button
+            type="button"
+            role="switch"
+            data-testid="pantry-cooked-reflect-switch"
+            aria-checked={reflectPantry}
+            aria-label={ja.pantry.cookedReflectTitle}
+            onClick={() => {
+              const next = !reflectPantry
+              void updateSettings({ cookedReflectPantry: next })
+              setMessage(next ? ja.pantry.cookedReflectOnToast : ja.pantry.cookedReflectOffToast)
+            }}
+            className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+              reflectPantry ? 'bg-accent' : 'bg-edge'
+            }`}
+          >
+            <span
+              className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                reflectPantry ? 'left-7' : 'left-1'
+              }`}
+            />
+          </button>
+        </div>
+        <p className="mt-1 text-sm text-ink-muted">{ja.pantry.cookedReflectHint}</p>
+        <p className="mt-1 text-xs text-ink-muted">{ja.pantry.cookedReflectScope}</p>
       </div>
 
       {/* 在庫欄の下部の一言(2026-07-23 #12→07-24訂正。「ざっくり3段階」という機能の性質だけを伝える。規約H: 自己卑下的な表現(おまけ等)をUI文言に使わない) */}
