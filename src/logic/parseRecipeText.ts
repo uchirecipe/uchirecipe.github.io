@@ -57,8 +57,30 @@ const SERVINGS_ONLY_LINE =
 // 「調理時間: 20分」「調理時間 20分」「所要時間: 15分」のような単独のメタ情報行。
 // 行全体がこの形のときだけ一致させる(「調理時間20分を目安に煮る」のような手順の文は対象外)
 // M5: 区切りに「/」「／」も追加(「調理時間 ／20分」)
-const COOK_TIME_LINE =
-  /^[【\[（(◆■□●○☆★♪#＊*※\s]*(調理時間|所要時間|目安時間|合計時間|準備時間)[】\])）]*\s*[:：/／]?\s*約?\s*(\d{1,3})\s*分\s*(?:程度|ほど|くらい)?\s*$/
+//
+// 2026-08-12 便FU-3: 「1時間」「1時間30分」「1時間半」「20〜30分」「調理時間の目安」を写せるようにした。
+// 利用者テスト「貼り付けで登録すると調理時間が空のまま(URL取込では入る)」の調査で、
+// URL取り込みはページの構造化データから調理時間を受け取るのに対し、貼り付けは本文の行を
+// 写すしかなく、その読み取りが「N分」の形だけに限られていたことが分かったため。
+// **本文に書いてある事実の転記だけ**を広げる(書かれていない時間を機械が見積って入れることはしない)。
+/** 「20分」「1時間30分」「20〜30分」など、時間そのものの書き方 */
+const COOK_TIME_VALUE_SOURCE =
+  '約?\\s*(?:(\\d{1,2})\\s*時間\\s*(半)?\\s*(?:(\\d{1,3})\\s*分)?|(?:\\d{1,3}\\s*[〜~～‐－—–-]\\s*)?(\\d{1,3})\\s*分)\\s*(?:程度|ほど|くらい)?'
+const COOK_TIME_LINE = new RegExp(
+  '^[【\\[（(◆■□●○☆★♪#＊*※\\s]*(調理時間|所要時間|目安時間|合計時間|準備時間)(?:の目安)?[】\\])）]*\\s*[:：/／]?\\s*' +
+    COOK_TIME_VALUE_SOURCE +
+    '\\s*$',
+)
+
+/**
+ * COOK_TIME_LINE に一致した行から分数を取り出す。
+ * 範囲(「20〜30分」)は**長いほう**を採る＝手順の分数を本文から写すときの規則
+ * (importStepMinutes: 複数あるときはいちばん長いもの)とそろえる。
+ */
+function cookMinutesFromTimeLine(m: RegExpMatchArray): number | undefined {
+  if (m[2]) return Number.parseInt(m[2], 10) * 60 + (m[3] ? 30 : 0) + (m[4] ? Number.parseInt(m[4], 10) : 0)
+  return m[5] ? Number.parseInt(m[5], 10) : undefined
+}
 
 // F1: 「1 鶏むね肉を切る」のような区切り記号なし(数字＋空白のみ)の番号手順。
 // STEP_NUMBER は区切り記号(．.、:：等)を必須にしているため拾えず、ここで別パターンとして扱う。
@@ -767,8 +789,9 @@ const META_VALUE_LINE = /^約?[\d.]+\s*(?:kcal|kJ|g|mg|円|%)$/i
 
 // 時間ラベルは捨てず併合する(調理時間/所要時間/目安時間/合計時間/準備時間 単独行+次行「約?N分」)
 const TIME_LABEL_WORDS = ['調理時間', '所要時間', '目安時間', '合計時間', '準備時間']
-const TIME_LABEL_ONLY_LINE = new RegExp(`^(?:${TIME_LABEL_WORDS.join('|')})$`)
-const TIME_VALUE_LINE = /^約?\d{1,3}分$/
+const TIME_LABEL_ONLY_LINE = new RegExp(`^(?:${TIME_LABEL_WORDS.join('|')})(?:の目安)?$`)
+// 値だけの行(「20分」「1時間30分」「20〜30分」)。COOK_TIME_LINE と同じ書き方を受ける(便FU-3)
+const TIME_VALUE_LINE = new RegExp(`^${COOK_TIME_VALUE_SOURCE}$`)
 
 // REWRITE: 捨てず書き換える行
 const ONE_POINT_ADVICE_LINE = /^(?:料理上手のワンポイント|ワンポイント(?:アドバイス)?|アドバイス)$/
@@ -928,7 +951,7 @@ export function parseRecipeText(text: string): ParsedRecipe {
     const timeLine = normalize(line).replace(BULLET, '').match(COOK_TIME_LINE)
     if (timeLine) {
       if (result.cookMinutes === undefined && timeLine[1] !== '準備時間') {
-        result.cookMinutes = Number.parseInt(timeLine[2], 10)
+        result.cookMinutes = cookMinutesFromTimeLine(timeLine)
       }
       continue
     }

@@ -2391,6 +2391,16 @@ export const ja = {
     replaceItemIngredients: '材料{n}件',
     replaceItemSteps: '手順{n}件',
     replaceItemSeparator: '・',
+    // 材料・手順以外に置き換わった項目の報告(2026-08-12 便FU-3・利用者テスト
+    // 「URLから取り込んだときは『人数分・調理時間も読み込んだ内容に合わせました』と出たので、
+    // 貼り付けだけ扱いが違います」)。実際に値が変わったものだけを並べる(URL取り込みと同じ流儀)
+    alsoApplied: '{items}も貼り付けた内容に合わせました。',
+    alsoAppliedServings: '人数分',
+    alsoAppliedCookMinutes: '調理時間',
+    alsoAppliedSeparator: '・',
+    // 貼り付けた文章に調理時間が書かれていなかったとき。書かれていない時間を機械が
+    // 見積って入れることはしないので、欄が空のままであることを事実として伝える
+    cookMinutesNotWritten: '調理時間は貼り付けた文章に書かれていなかったので、調理時間の欄は空のままです。',
   },
   urlImport: {
     open: 'URLから取り込む',
