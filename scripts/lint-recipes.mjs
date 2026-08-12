@@ -375,6 +375,28 @@ for (const { source, recipe } of entries) {
   }
 }
 
+// --- 18. だし汁を材料に持つのに、手軽な作り方の案内が無い(2026-08-11 便FQ) ---
+// 「材料にあるのに用意する手順・説明が無い」の掃引で見つかった。だし汁を使う18件のうち
+// 17件は材料memoに「和風だしの素なら〜」の目安が付いていて、ひじきの煮物1件だけが空だった。
+// だし汁は買ってくるものではなく作るもの＝初心者は何を用意すればよいか分からないまま止まる
+// (判例3「やり方は本文にある」で安心しない)。名前が「水またはだし汁」のように水で代えられる
+// と書いてあるものは、そのままでも作れるので対象外。
+const DASHI_HOWTO_RE = /だしの素|顆粒|白だし|めんつゆ|かつお|昆布|パック/
+for (const { source, recipe } of entries) {
+  for (const ing of recipe.ingredients) {
+    if (!/だし汁/.test(ing.name)) continue
+    if (/水または|またはだし汁/.test(ing.name)) continue
+    if (DASHI_HOWTO_RE.test(ing.memo ?? '')) continue
+    add(
+      '中',
+      'だし汁の作り方案内の欠落',
+      source,
+      recipe.title,
+      `材料「${ing.name}」に作り方の目安memoが無い(他の品と同じ「和風だしの素なら水100mlにつき小さじ1/2が目安」等を添えること)`,
+    )
+  }
+}
+
 // --- 出力 ---
 const bySeverity = { 高: [], 中: [], 低: [] }
 for (const f of findings) bySeverity[f.severity].push(f)
