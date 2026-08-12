@@ -16,6 +16,7 @@ import {
   Pause,
   Play,
   Timer as TimerIcon,
+  ALargeSmall,
 } from 'lucide-react'
 import Collapse from './Collapse'
 import StepBadge from './StepBadge'
@@ -47,6 +48,9 @@ import { recipeNoteStepKey, type RecipeNote } from '../logic/naviRecipeNotes'
 import NaviRecipeNotes from './NaviRecipeNotes'
 import VoiceHint from './VoiceHint'
 import SpeechReadingHint from './SpeechReadingHint'
+import CookTextSizeModal from './CookTextSizeModal'
+import { cookFontSize, resolveCookFontScale } from '../logic/cookFontScale'
+import { useSettings, updateSettings } from '../db/settings'
 import {
   advanceCursor,
   backCursor,
@@ -294,6 +298,14 @@ export default function CookSessionOverlay({
   const autoReadRef = useRef(false)
   /** 読み上げを使ったか（2026-08-12 便FX。使った人にだけ、読み方の直し方を1回案内する） */
   const [speechUsed, setSpeechUsed] = useState(false)
+  /**
+   * 手順の文字の大きさ（2026-08-12 便FX・オーナー実機
+   * 「調理中モードの文字の大きさは、ユーザーが自由に変更できない？」）。
+   * 端末に残す設定を1品の調理中モードと共用する＝画面ごとに違う大きさにならない
+   */
+  const settings = useSettings()
+  const fontScale = resolveCookFontScale(settings?.cookStepFontScale)
+  const [textSizeOpen, setTextSizeOpen] = useState(false)
 
   const index = findCursorIndex(items, cursor)
   const item = index === -1 ? undefined : items[index]
@@ -620,7 +632,7 @@ export default function CookSessionOverlay({
               type="button"
               onClick={toggleListening}
               aria-label={listening ? ja.focus.micStop : ja.focus.micStart}
-              className={`flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 ${
+              className={`flex flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 ${
                 listening ? 'text-accent-ink' : 'text-ink-muted'
               }`}
             >
@@ -636,10 +648,22 @@ export default function CookSessionOverlay({
             type="button"
             onClick={toggleSpeak}
             aria-label={speaking ? ja.focus.stop : ja.focus.read}
-            className="flex flex-col items-center gap-0.5 rounded-md px-2 py-1.5 text-accent-ink"
+            className="flex flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-accent-ink"
           >
             {speaking ? <VolumeX size={24} aria-hidden /> : <Volume2 size={24} aria-hidden />}
             <span className="text-[10px] font-bold leading-none">{ja.focus.readLabel}</span>
+          </button>
+          {/* 手順の文字の大きさ（2026-08-12 便FX）。押す場所の大きさは変わらないので、
+              読みながらいつでも変えられる */}
+          <button
+            type="button"
+            data-testid="cook-text-size-open"
+            onClick={() => setTextSizeOpen(true)}
+            aria-label={ja.focus.textSizeTitle}
+            className="flex flex-col items-center gap-0.5 rounded-md px-1.5 py-1.5 text-accent-ink"
+          >
+            <ALargeSmall size={24} aria-hidden />
+            <span className="text-[10px] font-bold leading-none">{ja.focus.textSizeLabel}</span>
           </button>
         </div>
       </div>
@@ -792,8 +816,12 @@ export default function CookSessionOverlay({
       )}
 
       {/* いまやる手順（1枚）。左右スワイプでも前後に動かせる */}
+      {/* 文字の大きさ（2026-08-12 便FX）は、この枠の中で**大きさを指定していない文字**に効く
+          ＝手順本文（下で明示）・その手順の注意書き・その手順で使う材料。
+          番号のバッジ・待ちブロックの但し書き・ボタンは各自の大きさを持つので動かない */}
       <div
         className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[var(--space-md)] pt-[var(--space-sm)] text-center"
+        style={{ fontSize: cookFontSize(1, fontScale) }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -825,7 +853,11 @@ export default function CookSessionOverlay({
           </span>
         </div>
 
-        <p data-testid="cook-session-step-text" className="ja-phrase w-full text-2xl font-bold leading-relaxed">
+        <p
+          data-testid="cook-session-step-text"
+          className="ja-phrase w-full font-bold leading-relaxed"
+          style={{ fontSize: cookFontSize(1.5, fontScale) }}
+        >
           <ComposedStepText
             text={item.text}
             ingredientNames={ingredientNames}
@@ -1187,6 +1219,12 @@ export default function CookSessionOverlay({
         )}
       </div>
 
+      <CookTextSizeModal
+        open={textSizeOpen}
+        scale={fontScale}
+        onChange={(next) => void updateSettings({ cookStepFontScale: next })}
+        onClose={() => setTextSizeOpen(false)}
+      />
       <TermPopover state={termPopoverState} onClose={closeTermPopover} />
       {/* タイマーの調整。この画面では別の画面へ飛ばさず、段取りの中でその手順へカーソルを移す
           （2026-08-09 便ES・オーナー指示E-14「レシピ名タップ→該当手順へ移動」） */}

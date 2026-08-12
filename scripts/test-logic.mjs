@@ -16296,6 +16296,34 @@ eq(
   )
 }
 
+// ---------- 2026-08-12 便FX・調理中モードの手順の文字の大きさ ----------
+// オーナー実機「調理中モードの文字の大きさは、ユーザーが自由に変更できない？
+// 小さい画面だと表示できなくなるから無理か」。手順の枠は縦にスクロールするので、
+// 大きくしても読めなくならない。設定に入っている値は必ず選べる4段のどれかに寄せる。
+{
+  const { COOK_FONT_SCALES, DEFAULT_COOK_FONT_SCALE, resolveCookFontScale, cookFontSize } =
+    await import('../src/logic/cookFontScale.ts')
+  eq('FX-09 選べるのは4段', [...COOK_FONT_SCALES], [0.85, 1, 1.25, 1.5])
+  eq('FX-09 既定はふつう(1倍)', DEFAULT_COOK_FONT_SCALE, 1)
+  eq('FX-09 未設定は既定に寄せる', resolveCookFontScale(undefined), 1)
+  eq('FX-09 一覧に無い値は既定に寄せる', resolveCookFontScale(3), 1)
+  eq('FX-09 壊れた値も既定に寄せる', [resolveCookFontScale(Number.NaN), resolveCookFontScale(-1)], [1, 1])
+  eq('FX-09 選べる値はそのまま返す', COOK_FONT_SCALES.map(resolveCookFontScale), [0.85, 1, 1.25, 1.5])
+  // 手順本文は 1.5rem（text-2xl）が標準。倍率をかけた値をCSSに渡す
+  eq('FX-09 手順本文の大きさ(標準1.5rem)', COOK_FONT_SCALES.map((s) => cookFontSize(1.5, s)), [
+    '1.275rem',
+    '1.5rem',
+    '1.875rem',
+    '2.25rem',
+  ])
+  eq('FX-09 枠の基準の大きさ(標準1rem)', COOK_FONT_SCALES.map((s) => cookFontSize(1, s)), [
+    '0.85rem',
+    '1rem',
+    '1.25rem',
+    '1.5rem',
+  ])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

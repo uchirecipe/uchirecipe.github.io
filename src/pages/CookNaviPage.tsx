@@ -63,6 +63,7 @@ import {
 import CookSessionOverlay from '../components/CookSessionOverlay'
 import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
+import CookFinishModal from '../components/CookFinishModal'
 import {
   applyStepPulls,
   findCursorIndex,
@@ -1184,6 +1185,30 @@ export default function CookNaviPage() {
   const markAllCookedRef = useRef<HTMLButtonElement | null>(null)
   /** 「完成！」で閉じたときだけスクロールする（途中でやめた✕・端末の戻るでは動かさない） */
   const completedRef = useRef(false)
+  /**
+   * 「完成！」の窓を開いているか（2026-08-12 便FX）。
+   * ブラウザの確認（OK／キャンセル）では行き先を2つしか作れず、
+   * 「手順の画面に帰る」を選べなかったため、画面の中の窓にした。
+   */
+  const [finishAsking, setFinishAsking] = useState(false)
+  /**
+   * 記録の中身の説明（規約F: 何件に記録が付き、何が変わり、何が残るか）。
+   * 「まとめて作った！」ボタンの確認と「完成！」の窓で**同じ文字列**を使う
+   * ＝記録の説明を2か所に書かない。
+   */
+  const cookedConfirmText =
+    ja.cookNavi.markAllCookedConfirm
+      .replaceAll('{n}', String(selectedRecipes.filter((r) => r.id != null).length))
+      .replace(
+        '{titles}',
+        selectedRecipes
+          .filter((r) => r.id != null)
+          .map((r) => r.title)
+          .join('・'),
+      ) +
+    (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
+    // まとめて付けた記録も、あとから1件ずつ直せる（2026-08-12 便FX・オーナー指摘）
+    ja.cookNavi.markAllCookedConfirmEdit
 
   /**
    * 全画面の調理中モードを閉じる（2026-08-10 便FC・オーナー実機
@@ -1216,14 +1241,17 @@ export default function CookNaviPage() {
    * 記録するかどうかは確認で選ぶ＝docs/69「最後まで進んだら自動記録、をしない」は守る。
    * 記録しないを選んだときは、従来どおり全画面を閉じて「まとめて作った！」まで画面を送る。
    */
-  const completeSession = () => {
-    void (async () => {
-      if (await markAllCooked({ fromFinish: true })) return
-      completedRef.current = true
-      setCurrent(undefined)
-      setSessionOpen(false)
-      setPulls([])
-    })()
+  const completeSession = () => setFinishAsking(true)
+  /**
+   * 「完成！」の窓で「記録をつけずに閉じる」を選んだとき（2026-08-12 便FX）。
+   * 便EZ の戻り位置（画面を「まとめて作った！」まで送る）はここに残す。
+   */
+  const closeSessionWithoutRecord = () => {
+    setFinishAsking(false)
+    completedRef.current = true
+    setCurrent(undefined)
+    setSessionOpen(false)
+    setPulls([])
   }
   /**
    * 全画面を閉じたあとの戻り位置（同）。
@@ -1267,18 +1295,12 @@ export default function CookNaviPage() {
    * 記録したあとは件数つきのトーストと「元に戻す」を出す（日タブの「全て作った！」と同じ作法）。
    * 記録したら作りかけの段取りは役目を終えるので、覚えていた選択を消して選び直しの状態に戻す。
    */
-  const markAllCooked = async (options?: { fromFinish?: boolean }) => {
+  const markAllCooked = async (options?: { confirmed?: boolean }) => {
     const targets = selectedRecipes.filter((r) => r.id != null)
     if (targets.length === 0) return false
-    const confirmText =
-      // 最後の手順の「完成！」から来たときは、なぜ確認が出たのかを先に1行で書く（2026-08-11 便FO）
-      (options?.fromFinish ? ja.cookNavi.sessionFinishLead : '') +
-      ja.cookNavi.markAllCookedConfirm
-        .replaceAll('{n}', String(targets.length))
-        .replace('{titles}', targets.map((r) => r.title).join('・')) +
-      (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
-      ja.cookNavi.markAllCookedConfirmAsk
-    if (!window.confirm(confirmText)) return false
+    // 「完成！」の窓（CookFinishModal）から来たときは、同じ中身をもう一度聞かない
+    if (!options?.confirmed && !window.confirm(cookedConfirmText + ja.cookNavi.markAllCookedConfirmAsk))
+      return false
     // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
     // 何人分作ったかも記録する（2026-08-10 便FF）。段取りの分量に使っている食数
     // （枠の食数＞設定「食数の設定」＞レシピの登録人数分）をそのまま記録に残す
@@ -1296,6 +1318,35 @@ export default function CookNaviPage() {
     setUndoCooked(recordedIds.map((recipeId) => ({ recipeId })))
     setToast(ja.cookNavi.markAllCookedToast.replace('{n}', String(recordedIds.length)))
     return true
+  }
+
+  /**
+   * 段取りを消す（2026-08-12 便FX・オーナー指摘「段取りを作った後に作った！を押すか
+   * 選んだレシピを取り消す以外につくった段取りを削除する方法がない」）。
+   *
+   * 便FT で「アプリを開き直しても今日のうちは残る」ようにしたので、**自分の手で終わらせる道**を
+   * 画面に置く。押すと組み合わせ・段取り・調理中の手順・色で先にした並びを全部捨て、
+   * 端末に残していた覚え書きも消す＝次に開いたときは今日の献立から選び直すところから始まる。
+   * 作った記録・レシピ・今日の献立・動いているタイマーには触らない。
+   */
+  const discardTimeline = () => {
+    const confirmText = ja.cookNavi.discardTimelineConfirm.replace(
+      '{n}',
+      String(selectedRecipes.length),
+    )
+    if (!window.confirm(confirmText)) return
+    clearCookNaviSession()
+    setSelectedIds([])
+    setShowTimeline(false)
+    setCurrent(undefined)
+    setSessionOpen(false)
+    setPulls([])
+    setFinishAsking(false)
+    setDroppedNotice('')
+    setExpiredReason(null)
+    setSessionLostNotice(false)
+    setUndoCooked(null)
+    setToast(ja.cookNavi.discardedTimelineToast)
   }
 
   /** トーストの「元に戻す」（記録を取り消して今日の献立に戻す。日タブと同じ関数を使う） */
@@ -1721,6 +1772,20 @@ export default function CookNaviPage() {
                     >
                       {ja.cookNavi.rebuild}
                     </button>
+
+                    {/* 段取りを消す（2026-08-12 便FX・オーナー指摘「作った！を押すか
+                        選んだレシピを取り消す以外につくった段取りを削除する方法がない」）。
+                        「レシピを選び直す」は組み合わせを残したまま組み直す操作なので、
+                        白紙に戻す道を別に置く。押し間違えると作りかけが消えるので、
+                        いちばん下・控えめな見た目にして確認を出す（規約F） */}
+                    <button
+                      type="button"
+                      data-testid="navi-discard-timeline"
+                      onClick={discardTimeline}
+                      className="mt-[var(--space-sm)] w-full rounded-md border border-edge bg-surface py-3 text-sm font-bold text-ink-muted shadow-sm"
+                    >
+                      {ja.cookNavi.discardTimeline}
+                    </button>
                   </section>
                 )}
               </>
@@ -1747,6 +1812,18 @@ export default function CookNaviPage() {
           sequential={isSequential}
         />
       )}
+      {/* 「完成！」の窓（2026-08-12 便FX）。記録をつける／調理を続ける／記録をつけずに閉じる
+          の3つから選ぶ。全画面（z-50）より上に重ねる */}
+      <CookFinishModal
+        open={finishAsking}
+        body={cookedConfirmText}
+        onRecord={() => {
+          setFinishAsking(false)
+          void markAllCooked({ confirmed: true })
+        }}
+        onBack={() => setFinishAsking(false)}
+        onClose={closeSessionWithoutRecord}
+      />
       <CustomTimerModal
         open={customTimerOpen}
         totalSeconds={customSeconds}
