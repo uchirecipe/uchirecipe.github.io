@@ -1027,7 +1027,7 @@ function RecipeFormInner() {
     }
     const pasteAlsoAppliedNote =
       pasteAlsoApplied.length > 0
-        ? `。${ja.paste.alsoApplied.replace('{items}', pasteAlsoApplied.join(ja.paste.alsoAppliedSeparator))}`
+        ? ja.paste.alsoApplied.replace('{items}', pasteAlsoApplied.join(ja.paste.alsoAppliedSeparator))
         : ''
     /**
      * 貼り付けた文章に調理時間が書かれておらず、欄も空のまま終わるとき。
@@ -1057,7 +1057,7 @@ function RecipeFormInner() {
     const pastedStepRows = toImportedStepRows(parsed.steps)
     const filledMinutes = pastedStepRows.filter((row) => row.minutesAuto).length
     const stepMinutesNote =
-      filledMinutes > 0 ? `。${ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes))}` : ''
+      filledMinutes > 0 ? ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes)) : ''
     if (pastedStepRows.length > 0) {
       setSteps(pastedStepRows)
     }
@@ -1094,15 +1094,16 @@ function RecipeFormInner() {
       showPasteMessage(ja.paste.resultNoSteps.replace('{i}', String(parsed.ingredients.length)), 'warn')
       return
     }
+    // 添える一文はどれも句点で終わる（i18n側で終端まで書いてある）。
+    // 件数の一文だけ句点を持たないので、添える文がある場合に1つだけ足す
+    // （2026-08-12 便FU-3。文ごとに句点を足していて「入れました。。調理時間も…」になっていた）
+    const pasteNotes = [pasteAlsoAppliedNote, stepMinutesNote, pasteCookMinutesNote]
+      .filter((note) => note !== '')
+      .join('')
     showPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
-        .replace('{s}', String(parsed.steps.length)) +
-        stepMinutesNote +
-        pasteAlsoAppliedNote +
-        (pasteCookMinutesNote
-          ? `${stepMinutesNote || pasteAlsoAppliedNote ? '' : '。'}${pasteCookMinutesNote}`
-          : ''),
+        .replace('{s}', String(parsed.steps.length)) + (pasteNotes ? `。${pasteNotes}` : ''),
       'info',
     )
   }

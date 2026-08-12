@@ -43,7 +43,11 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
   return (
     <div
       className="fixed inset-x-0 z-[70] flex justify-center px-[var(--space-md)]"
-      style={{ bottom: 'calc(88px + env(safe-area-inset-bottom))' }}
+      /* 下部に固定される帯（タブナビ・タイマー・お知らせ）の実測した高さの上に出す
+         （2026-08-12 便FU-6。旧: 固定の88px。タイマーが1本でも動いていると帯の裏に潜り込み、
+         「作った！」の直後に出る「元に戻す」が読めないまま消えていた）。
+         この帯自身には data-app-bottom-bar を付けない＝自分の高さを測って自分を押し上げないため */
+      style={{ bottom: 'calc(var(--app-bottom-inset) + var(--space-md))' }}
       role="status"
       aria-live="polite"
     >

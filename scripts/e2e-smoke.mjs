@@ -29186,6 +29186,372 @@ try {
     }
   }
 
+  // ============================================================================
+  // FU-01〜06: 「自分で登録したレシピだけ」で試した実操作テストで出た6件（2026-08-12 便FU）
+  //
+  //   FU-01 画面に出ている各手順の分の合計＝ヘッダーの「1品だけなら約◯分」（機械で突き合わせる）
+  //   FU-02 合わせ調味料が、段取りにも調理中モードにも組ごと出る
+  //   FU-03 貼り付け取り込みでも調理時間が入り、入らないときは理由を書く
+  //   FU-04 段取りの丸数字とレシピ内の手順番号がくっついていない（「⑫5」を作らない）
+  //   FU-05 「12〜15分」が1つの時間チップになり、「12〜」だけが取り残されない
+  //   FU-06 走っているタイマーの帯の裏に、レシピ詳細の中身が隠れたままにならない
+  // ============================================================================
+  currentCheck = 'FU-01'
+  {
+    const fuBrowser = await chromium.launch()
+    const fuContext = await fuBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const fuPage = await fuContext.newPage()
+    fuPage.on('dialog', (d) => void d.accept())
+    fuPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FU] ${err.message}`)
+    })
+    fuPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@FU] ${t}`)
+    })
+    try {
+      await fuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await fuPage.waitForTimeout(1800)
+      // 利用者テストと同じ形の3品（分数つきの手順・合わせ調味料・範囲の時間表記）
+      const fuIds = await fuPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        // 「1手順に複数動作」も「湯を沸かす」も入れない＝画面に分数が出ない工程を作らない
+        // （ナビが足す「湯を沸かす」だけは分数を出さない決まりなので、この検査から外しておく）
+        const idA = await P(store('recipes').add(mk(
+          'FUみそマヨ焼き',
+          [
+            { text: '鶏むね肉に☆をもみ込んで10分おく。', minutes: 10 },
+            { text: '玉ねぎを薄切りにする。', minutes: 3 },
+            { text: '天板にアルミホイルを敷く。', minutes: 2 },
+            { text: '魚焼きグリルの弱火で12〜15分焼く。', minutes: 15 },
+            { text: '器に盛り、細ねぎを散らす。', minutes: 4 },
+          ],
+          [
+            { name: '鶏むね肉', amount: '300', unit: 'g' },
+            { name: 'みそ', amount: '1', unit: '大さじ', seasoningGroup: 1 },
+            { name: 'マヨネーズ', amount: '2', unit: '大さじ', seasoningGroup: 1 },
+            { name: '砂糖', amount: '1', unit: '小さじ', seasoningGroup: 1 },
+            { name: '酒', amount: '1', unit: '小さじ', seasoningGroup: 1 },
+            { name: '細ねぎ', amount: '2', unit: '本' },
+          ],
+        )))
+        const idB = await P(store('recipes').add(mk(
+          'FUみそ汁',
+          [
+            { text: '鍋にだし汁を入れて火にかける。', minutes: 2 },
+            { text: '豆腐とわかめを加えて2分煮る。', minutes: 2 },
+            { text: 'みそを溶き入れ、火を止める。', minutes: 4 },
+          ],
+          [{ name: 'だし汁', amount: '400', unit: 'ml' }, { name: '木綿豆腐', amount: '1/2', unit: '丁' }],
+        )))
+        const idC = await P(store('recipes').add(mk(
+          'FUごま和え',
+          [
+            { text: 'ほうれん草を洗う。', minutes: 3 },
+            { text: '水気を絞って4cm長さに切る。', minutes: 3 },
+            { text: 'すりごまと砂糖で和える。', minutes: 3 },
+            { text: '器に盛る。', minutes: 3 },
+          ],
+          [{ name: 'ほうれん草', amount: '1', unit: '束' }, { name: 'すりごま', amount: '2', unit: '大さじ' }],
+        )))
+        let addedAt = Date.now()
+        for (const id of [idA, idB, idC]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+        return [idA, idB, idC]
+      })
+      await fuPage.goto(`${BASE}/#/cook-navi`)
+      await fuPage.reload({ waitUntil: 'networkidle' })
+      await fuPage.waitForTimeout(1200)
+      await fuPage.getByRole('button', { name: '段取りを作る' }).click()
+      await fuPage.waitForTimeout(900)
+
+      // --- FU-01: 画面に出ている各手順の分を足すと、ヘッダーの「1品だけなら約◯分」と一致する ---
+      const fuMinutes = await fuPage.evaluate(() => {
+        /** 手順カードに実際に出ている分数（待ちブロックの「約◯分の待ち時間」／手作業の「目安◯分」） */
+        const shown = (card) => {
+          const wait = card.querySelector('[data-testid="navi-wait-block"]')
+          if (wait) {
+            const m = (wait.textContent ?? '').match(/約\s*(\d+)\s*分の待ち時間/)
+            return m ? Number(m[1]) : 0
+          }
+          const active = card.querySelector('[data-testid="navi-active-minutes"]')
+          const m = (active?.textContent ?? '').match(/(\d+)\s*分/)
+          return m ? Number(m[1]) : 0
+        }
+        const perRecipe = {}
+        for (const card of document.querySelectorAll('[id^="navi-step-"]')) {
+          const id = card.id.match(/^navi-step-(\d+)-/)?.[1]
+          if (!id) continue
+          perRecipe[id] = (perRecipe[id] ?? 0) + shown(card)
+        }
+        const legend = [...document.querySelectorAll('[data-testid="navi-legend-minutes"]')].map((el) => ({
+          title: (el.parentElement?.textContent ?? '').replace(el.textContent ?? '', '').trim(),
+          // 「1品だけなら約34分」。先頭の「1品」を拾わないよう「約◯分」で取る
+          minutes: Number((el.textContent ?? '').match(/約\s*(\d+)\s*分/)?.[1] ?? 0),
+        }))
+        const compare = document.querySelector('[data-testid="navi-total-compare"]')?.textContent ?? ''
+        return { perRecipe, legend, sequential: Number(compare.replace(/\u200B/g, '').match(/1品ずつ作ると約(\d+)分/)?.[1] ?? 0) }
+      })
+      const fuTitles = { [fuIds[0]]: 'FUみそマヨ焼き', [fuIds[1]]: 'FUみそ汁', [fuIds[2]]: 'FUごま和え' }
+      const fuMismatch = fuIds
+        .map((id) => {
+          const legend = fuMinutes.legend.find((l) => l.title === fuTitles[id])
+          return { title: fuTitles[id], shown: fuMinutes.perRecipe[String(id)] ?? 0, legend: legend?.minutes ?? -1 }
+        })
+        .filter((r) => r.shown !== r.legend)
+      check(
+        'FU-01 画面に出ている各手順の分の合計＝ヘッダーの「1品だけなら約◯分」（3品とも）',
+        fuMinutes.legend.length === 3 && fuMismatch.length === 0,
+        JSON.stringify({ 不一致: fuMismatch, 画面: fuMinutes.perRecipe, 見出し: fuMinutes.legend }),
+      )
+      check(
+        'FU-01 「1品ずつ作ると約◯分」は品ごとの目安の足し算になっている',
+        fuMinutes.sequential > 0 &&
+          fuMinutes.sequential === fuMinutes.legend.reduce((sum, l) => sum + l.minutes, 0),
+        JSON.stringify({ 合計: fuMinutes.sequential, 内訳: fuMinutes.legend.map((l) => l.minutes) }),
+      )
+      check(
+        'FU-01 みそマヨ焼き（待ち10・3・2・待ち15・4）の目安は34分（空白の3分が乗らない）',
+        (fuMinutes.legend.find((l) => l.title === 'FUみそマヨ焼き')?.minutes ?? 0) === 34,
+        JSON.stringify(fuMinutes.legend),
+      )
+
+      // --- FU-02: 合わせ調味料が段取りに組ごと出る ---
+      currentCheck = 'FU-02'
+      const fuSeasoning = await fuPage.evaluate((recipeId) => {
+        const out = {}
+        for (const card of document.querySelectorAll(`[id^="navi-step-${recipeId}-"]`)) {
+          const text = card.querySelector('[data-testid="navi-step-text"]')?.textContent?.trim() ?? ''
+          const ings = card.querySelector('[data-testid="navi-step-ingredients"]')?.textContent?.trim() ?? ''
+          out[text] = ings
+        }
+        return out
+      }, fuIds[0])
+      const fuMixStep = Object.entries(fuSeasoning).find(([text]) => text.includes('☆'))
+      check(
+        'FU-02 「☆をもみ込む」手順に、組の材料が全部出る（1つだけ出して残りを消さない）',
+        !!fuMixStep &&
+          ['みそ', 'マヨネーズ', '砂糖', '酒'].every((name) => fuMixStep[1].includes(name)),
+        JSON.stringify(fuSeasoning),
+      )
+      check(
+        'FU-02 合わせ調味料と関係ない手順には持ち込まない',
+        Object.entries(fuSeasoning).some(([text, ings]) => text.includes('アルミホイル') && ings === ''),
+        JSON.stringify(fuSeasoning),
+      )
+
+      // --- FU-05: 「12〜15分」が1つの時間チップになる（段取りの手順本文） ---
+      currentCheck = 'FU-05'
+      const fuGrill = await fuPage.evaluate((recipeId) => {
+        for (const card of document.querySelectorAll(`[id^="navi-step-${recipeId}-"]`)) {
+          const p = card.querySelector('[data-testid="navi-step-text"]')
+          if (!p || !(p.textContent ?? '').includes('魚焼きグリル')) continue
+          const chips = [...p.querySelectorAll('button')].map((b) => (b.textContent ?? '').trim())
+          const outside = (p.textContent ?? '').replace(/\u200B/g, '')
+          return { chips, text: outside }
+        }
+        return null
+      }, fuIds[0])
+      check(
+        'FU-05 段取りの「12〜15分」が1つの時間チップになっている',
+        !!fuGrill && fuGrill.chips.includes('12〜15分'),
+        JSON.stringify(fuGrill),
+      )
+      check(
+        'FU-05 範囲の前半（12〜）だけがチップの外に取り残されていない',
+        !!fuGrill && !/12〜(?!15分)/.test(fuGrill.text.replace('12〜15分', '')),
+        JSON.stringify(fuGrill),
+      )
+
+      // --- FU-02(調理中モード): 大きく出す1手順にも組ごと出る ---
+      currentCheck = 'FU-02'
+      await fuPage.locator('[data-testid="cook-session-start"]').click()
+      await fuPage.waitForTimeout(700)
+      let fuSessionIngredients = ''
+      for (let i = 0; i < 12; i++) {
+        const text = await fuPage.locator('[data-testid="cook-session-step-text"], [data-testid="cook-session"]').first().innerText()
+        if (text.includes('☆')) {
+          fuSessionIngredients = await fuPage
+            .locator('[data-testid="cook-session-ingredients"]')
+            .innerText()
+            .catch(() => '')
+          break
+        }
+        await fuPage.locator('[data-testid="cook-session-next"]').click()
+        await fuPage.waitForTimeout(250)
+      }
+      check(
+        'FU-02 調理中モードの「☆をもみ込む」手順にも組の材料が全部出る',
+        ['みそ', 'マヨネーズ', '砂糖', '酒'].every((name) => fuSessionIngredients.includes(name)),
+        fuSessionIngredients,
+      )
+      await fuPage.locator('[data-testid="cook-session-close"]').click()
+      await fuPage.waitForTimeout(600)
+
+      // --- FU-04: 段取りの丸数字とレシピ内の手順番号がくっついていない ---
+      currentCheck = 'FU-04'
+      const fuWaitTimer = fuPage.getByRole('button', { name: 'タイマーを始める' }).first()
+      await fuWaitTimer.click()
+      await fuPage.waitForTimeout(800)
+      const fuBarRow = fuPage.locator('button[aria-label*="のタイマーを調整"]').first()
+      const fuBarAria = (await fuBarRow.getAttribute('aria-label')) ?? ''
+      check(
+        'FU-04 常駐バーの読み上げ名で、丸数字と手順番号がくっついていない',
+        /手順[①-⑳㉑-㉟㊱-㊿]/.test(fuBarAria) && !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuBarAria),
+        fuBarAria,
+      )
+      await fuBarRow.click()
+      await fuPage.waitForTimeout(500)
+      const fuDialogText = await fuPage.getByRole('dialog', { name: 'タイマーを調整' }).textContent()
+      check(
+        'FU-04 タイマーを調整する窓でも、丸数字と手順番号がくっついていない',
+        !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuDialogText ?? ''),
+        (fuDialogText ?? '').slice(0, 160),
+      )
+      await fuPage
+        .getByRole('dialog', { name: 'タイマーを調整' })
+        .getByRole('button', { name: 'タイマーを消す' })
+        .click()
+      await fuPage.waitForTimeout(600)
+
+      // --- FU-06: レシピ詳細の中身が、走っているタイマーの帯の裏に隠れたままにならない ---
+      currentCheck = 'FU-06'
+      await fuPage.goto(`${BASE}/#/recipes/${fuIds[0]}`)
+      await fuPage.reload({ waitUntil: 'networkidle' })
+      await fuPage.waitForTimeout(1200)
+      const fuChips = fuPage.locator('button[aria-label*="タイマー開始"]:visible')
+      await fuChips.nth(0).click()
+      await fuPage.waitForTimeout(600)
+      await fuChips.nth(1).click()
+      await fuPage.waitForTimeout(900)
+      const fuInset = await fuPage.evaluate(() => {
+        const bars = [...document.querySelectorAll('[data-app-bottom-bar]')]
+        const barTop = Math.min(...bars.map((b) => b.getBoundingClientRect().top))
+        const doc = document.scrollingElement
+        const maxScroll = doc.scrollHeight - doc.clientHeight
+        const before = doc.scrollTop
+        // 画面の中身（材料の行を含む）が1つ残らず「帯より上」へ持ち上げられるか。
+        // 下余白が帯の高さに追随していれば足りる＝便FNの仕組みがこの画面でも効いていること
+        const rows = [...document.querySelectorAll('main *')].filter(
+          (el) => el.children.length === 0 && (el.textContent ?? '').trim() !== '',
+        )
+        const unreachable = []
+        for (const row of rows) {
+          const rect = row.getBoundingClientRect()
+          if (rect.height === 0) continue
+          if (doc.scrollTop + rect.bottom - barTop > maxScroll + 1) unreachable.push(row.textContent.trim())
+        }
+        doc.scrollTo(0, before)
+        return {
+          bars: bars.length,
+          barTop: Math.round(barTop),
+          mainPaddingBottom: getComputedStyle(document.querySelector('main')).paddingBottom,
+          insetVar: getComputedStyle(document.documentElement).getPropertyValue('--app-bottom-inset').trim(),
+          unreachable: unreachable.slice(0, 5),
+        }
+      })
+      check(
+        'FU-06 タイマー2本ぶんの帯の高さが、レシピ詳細の下余白に追随している',
+        fuInset.bars >= 2 &&
+          Number.parseInt(fuInset.mainPaddingBottom, 10) >= 844 - fuInset.barTop,
+        JSON.stringify(fuInset),
+      )
+      check(
+        'FU-06 帯の裏から出せない中身が1つも無い（材料の行を含む）',
+        fuInset.unreachable.length === 0,
+        JSON.stringify(fuInset),
+      )
+      // 「作った！」の直後に出る知らせも帯の上に出す（旧: 固定88pxで帯の裏に潜り込んでいた）
+      await fuPage.evaluate(() => document.scrollingElement.scrollTo(0, document.scrollingElement.scrollHeight))
+      await fuPage.waitForTimeout(400)
+      const fuCooked = fuPage.getByRole('button', { name: '作った！', exact: true }).first()
+      if (await fuCooked.count()) {
+        await fuCooked.click()
+        await fuPage.waitForTimeout(1200)
+        const fuSave = fuPage.getByRole('button', { name: '記録する' }).first()
+        if (await fuSave.count()) {
+          await fuSave.click()
+          await fuPage.waitForTimeout(1200)
+        }
+      }
+      const fuToast = await fuPage.evaluate(() => {
+        const el = document.querySelector('[role="status"]')
+        if (!el) return null
+        const barTop = Math.min(
+          ...[...document.querySelectorAll('[data-app-bottom-bar]')].map((b) => b.getBoundingClientRect().top),
+        )
+        return { bottom: Math.round(el.getBoundingClientRect().bottom), barTop: Math.round(barTop) }
+      })
+      check(
+        'FU-06 走っているタイマーの帯の上に知らせを出す（帯の裏に隠さない）',
+        !!fuToast && fuToast.bottom <= fuToast.barTop,
+        JSON.stringify(fuToast),
+      )
+
+      // --- FU-03: 貼り付け取り込みの調理時間 ---
+      currentCheck = 'FU-03'
+      await fuPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await fuPage.waitForTimeout(700)
+      await fuPage.getByText('テキスト貼り付けで自動入力').click()
+      await fuPage.waitForTimeout(300)
+      await fuPage.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+        'FU貼り付け時間つき\n2人分\n調理時間 1時間30分\n\n材料\n・にんじん　1本\n・しょうゆ　大さじ2\n\n作り方\n1. にんじんを切る\n2. 20分煮る',
+      )
+      await fuPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await fuPage.waitForTimeout(600)
+      const fuCookMinutes = await fuPage.getByLabel('調理時間（分）').inputValue()
+      const fuPasteBody = await fuPage.textContent('body')
+      check(
+        'FU-03 貼り付けの「調理時間 1時間30分」が調理時間の欄に入る（90分）',
+        fuCookMinutes === '90',
+        `調理時間欄=${fuCookMinutes}`,
+      )
+      check(
+        'FU-03 何を置き換えたかを結果に書く（URL取り込みと同じ）',
+        fuPasteBody.includes('も貼り付けた内容に合わせました'),
+        fuPasteBody.slice(fuPasteBody.indexOf('読み取りました'), fuPasteBody.indexOf('読み取りました') + 200),
+      )
+      // 調理時間が書かれていない文章では、欄が空のままである理由を書く。
+      // 直前の貼り付けで入った90分が欄に残っていると「空のまま」にならないので、
+      // 登録画面を開き直して（＝欄が空の状態から）確かめる
+      await fuPage.goto(`${BASE}/#/recipes/new`)
+      await fuPage.reload({ waitUntil: 'networkidle' })
+      await fuPage.waitForTimeout(900)
+      await fuPage.getByText('テキスト貼り付けで自動入力').click()
+      await fuPage.waitForTimeout(300)
+      await fuPage.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+        'FU貼り付け時間なし\n2人分\n\n材料\n・にんじん　1本\n\n作り方\n1. にんじんを切る\n2. 10分煮る',
+      )
+      await fuPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await fuPage.waitForTimeout(600)
+      const fuPasteBody2 = await fuPage.textContent('body')
+      check(
+        'FU-03 調理時間が書かれていないときは、欄が空のままである理由を書く',
+        fuPasteBody2.includes('調理時間は貼り付けた文章に書かれていなかったので、調理時間の欄は空のままです'),
+        fuPasteBody2.slice(fuPasteBody2.indexOf('読み取りました'), fuPasteBody2.indexOf('読み取りました') + 240),
+      )
+    } finally {
+      await fuBrowser.close()
+    }
+  }
+
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
 } finally {
