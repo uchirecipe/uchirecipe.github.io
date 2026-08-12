@@ -1485,7 +1485,7 @@ try {
       check(
         'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている',
         focusBody.includes('「次へ」「戻って」で手順の移動') &&
-          focusBody.includes('「タイマー」で時間をはかる'),
+          focusBody.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
       )
       const iconLabels = await fsPage.evaluate(() =>
         Array.from(document.querySelector('.fixed.inset-0.z-50').querySelectorAll('button span'))
@@ -24119,12 +24119,18 @@ try {
         )
         check(
           'FC-02 止めたタイマーを動かし直す声（「再開」）が案内に載っている',
-          fcHintText.includes('「再開」で止めたタイマーを動かし直す'),
+          fcHintText.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
           fcHintText,
         )
+        // 2026-08-12 便FX（オーナー指摘「タイマー説明はまとめて、タイマー操作、のみでも
+        // 最悪伝わるので、ストップで停止、のような個別説明はいらない」）:
+        // タイマーの言葉は3つを1つにまとめ、1語ずつの説明は出さない
         check(
-          'FC-01 案内も画面のボタンと同じ「一時停止」で言う',
-          fcHintText.includes('一時停止') && !fcHintText.includes('いったん止める'),
+          'FX-02 タイマーの説明を1語ずつ並べない（言葉としては受け続ける）',
+          !fcHintText.includes('で時間をはかる') &&
+            !fcHintText.includes('で読み上げとタイマーを一時停止') &&
+            !fcHintText.includes('で止めたタイマーを動かし直す') &&
+            !fcHintText.includes('いったん止める'),
           fcHintText,
         )
       } else {
@@ -25607,8 +25613,8 @@ try {
       await fiListen()
       const fiHintText = await fiHint()
       check(
-        'FI-02 案内に「色を言うとその色の品の手順に移る」が載っている',
-        fiHintText.includes('「青」「緑」など色を言うとその色の品の手順に移る'),
+        'FI-02 案内に「色を言うとその色の品の手順を先にする」が載っている',
+        fiHintText.includes('「青」「緑」「ピンク」と言うとその色の品の手順を先にする'),
         fiHintText,
       )
       check(
@@ -25644,7 +25650,7 @@ try {
       )
       check(
         'FI-03 手応えに、どの品に移ったかが名前で出る',
-        (await fiHint()).includes(`${fiTargetTitle}の手順に移りました`),
+        (await fiHint()).includes(`${fiTargetTitle}の手順を先にしました`),
         await fiHint(),
       )
       check(
@@ -27505,9 +27511,9 @@ try {
         .map((s) => s.trim())
         .find((s) => s.startsWith('FO'))
       check(
-        'FO-06 開いた中に「この手順に移る」がある',
+        'FO-06 開いた中に「この手順を先にする」がある',
         (await foPage.locator('[data-testid="cook-session-peek-move"]').first().innerText()).includes(
-          'この手順に移る',
+          'この手順を先にする',
         ),
       )
       await foPage.locator('[data-testid="cook-session-peek-move"]').first().click()

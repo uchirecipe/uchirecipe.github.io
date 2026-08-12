@@ -330,6 +330,14 @@ function TimelineCard({
           {showFillHint && !item.longRest && (
             <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitFillHint}</p>
           )}
+          {/* ナビが足した湯沸かしは分数を出さないので、全体の目安に何分で入っているかを
+              ここに書く（2026-08-12 便FX・司令部裁定A案）。見出しの「湯が沸くまでの待ち時間」は
+              そのままで、数え方だけを添える＝手順の分を足しても合計に届かない理由が読める */}
+          {item.addedByNavi && (
+            <p data-testid="navi-boil-note" className="ja-phrase mt-1 text-xs text-ink-muted">
+              {ja.cookNavi.waitBlockBoilNote}
+            </p>
+          )}
           {/* 今回の調理では終わらない待ちは、段取りに残したまま時間の計算から外していることを
               その場で書く（2026-08-11 便FL。黙って外すと「なぜ出てこないのか」になる） */}
           {item.longRest && (
@@ -432,6 +440,18 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
           <p className="text-sm font-bold text-ink-muted">
             {ja.cookNavi.ingredientsPanelTitle.replace('{n}', String(recipes.length))}
           </p>
+          {/* 合わせ調味料の線の説明は、材料一覧の中で1回だけ出す（2026-08-12 便FX・オーナー指摘
+              「材料の『左に同じ線が〜』は、全体で１箇所に書いてあれば十分」）。
+              以前は品ごとに繰り返していたので、3品を開くと同じ文が3回並んでいた。
+              線が出てくる前に読める位置（見出しの直下）に置き、組を持つ品が1つでもあれば出す */}
+          {recipes.some((recipe) => recipe.items.some((ing) => ing.seasoningGroup)) && (
+            <p
+              data-testid="navi-seasoning-group-hint"
+              className="ja-phrase mt-0.5 text-xs text-ink-muted"
+            >
+              {ja.cookNavi.seasoningGroupHint}
+            </p>
+          )}
           <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
             {recipes.map((recipe) => {
               const isOpen = !collapsed.includes(recipe.recipeId)
@@ -464,40 +484,30 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
                     {recipe.items.length === 0 ? (
                       <p className="pb-1 text-sm text-ink-muted">{ja.cookNavi.ingredientsEmpty}</p>
                     ) : (
-                      <>
-                        <ul className="pb-1">
-                          {recipe.items.map((ing, i) => (
-                            <li
-                              key={`${ing.name}-${i}`}
-                              className="flex items-baseline justify-between gap-2 py-0.5 pl-2 text-sm"
-                              /* 合わせ調味料（先にまとめて計量してよい材料）の線。
-                                 色は**そのレシピの色**にそろえる（2026-08-09 便EH・オーナー実機報告
-                                 「なんでこっちに青で描いてるの？って混乱する」）。同じレシピに
-                                 2組以上あるときだけ線の引き方で分ける */
-                              style={
-                                ing.seasoningGroup
-                                  ? {
-                                      borderLeft: `4px ${seasoningGroupLineStyle(ing.seasoningGroup)} ${
-                                        RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length]
-                                      }`,
-                                    }
-                                  : { borderLeft: '4px solid transparent' }
-                              }
-                            >
-                              <span className="ja-phrase min-w-0">{ing.name}</span>
-                              <span className="shrink-0 font-bold">{ing.amount}</span>
-                            </li>
-                          ))}
-                        </ul>
-                        {recipe.items.some((ing) => ing.seasoningGroup) && (
-                          <p
-                            data-testid="navi-seasoning-group-hint"
-                            className="pb-1 text-xs text-ink-muted"
+                      <ul className="pb-1">
+                        {recipe.items.map((ing, i) => (
+                          <li
+                            key={`${ing.name}-${i}`}
+                            className="flex items-baseline justify-between gap-2 py-0.5 pl-2 text-sm"
+                            /* 合わせ調味料（先にまとめて計量してよい材料）の線。
+                               色は**そのレシピの色**にそろえる（2026-08-09 便EH・オーナー実機報告
+                               「なんでこっちに青で描いてるの？って混乱する」）。同じレシピに
+                               2組以上あるときだけ線の引き方で分ける */
+                            style={
+                              ing.seasoningGroup
+                                ? {
+                                    borderLeft: `4px ${seasoningGroupLineStyle(ing.seasoningGroup)} ${
+                                      RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length]
+                                    }`,
+                                  }
+                                : { borderLeft: '4px solid transparent' }
+                            }
                           >
-                            {ja.cookNavi.seasoningGroupHint}
-                          </p>
-                        )}
-                      </>
+                            <span className="ja-phrase min-w-0">{ing.name}</span>
+                            <span className="shrink-0 font-bold">{ing.amount}</span>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </Collapse>
                 </li>

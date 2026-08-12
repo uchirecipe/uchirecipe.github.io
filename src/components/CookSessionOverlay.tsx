@@ -45,6 +45,8 @@ import {
 import type { NaviIngredientAmount } from '../logic/naviIngredients'
 import { recipeNoteStepKey, type RecipeNote } from '../logic/naviRecipeNotes'
 import NaviRecipeNotes from './NaviRecipeNotes'
+import VoiceHint from './VoiceHint'
+import SpeechReadingHint from './SpeechReadingHint'
 import {
   advanceCursor,
   backCursor,
@@ -258,7 +260,7 @@ export default function CookSessionOverlay({
    *
    * 移した手順は**いまの位置に入る**ので、段取りの通し番号は前から振り直される（便FI の設計）。
    * 番号が動くこと自体は設計どおりなので、動いた理由をその場に短く出す。
-   * 声で移っても、下の行の「この手順に移る」で移っても同じ1行が出る（同じことが起きるため）。
+   * 声で移っても、下の行の「この手順を先にする」で移っても同じ1行が出る（同じことが起きるため）。
    */
   const [pullNoticed, setPullNoticed] = useState(false)
   const pullNoticeTimeout = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -290,6 +292,8 @@ export default function CookSessionOverlay({
   const touchStartX = useRef<number | null>(null)
   // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる（調理中モードと同じ）
   const autoReadRef = useRef(false)
+  /** 読み上げを使ったか（2026-08-12 便FX。使った人にだけ、読み方の直し方を1回案内する） */
+  const [speechUsed, setSpeechUsed] = useState(false)
 
   const index = findCursorIndex(items, cursor)
   const item = index === -1 ? undefined : items[index]
@@ -376,6 +380,7 @@ export default function CookSessionOverlay({
       return
     }
     autoReadRef.current = true
+    setSpeechUsed(true)
     speak(item.text)
   }
 
@@ -391,7 +396,9 @@ export default function CookSessionOverlay({
       onNext: goNext,
       onPrev: goPrev,
       onRepeat: () => {
-        if (item) speak(item.text)
+        if (!item) return
+        setSpeechUsed(true)
+        speak(item.text)
       },
       /**
        * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
@@ -672,14 +679,9 @@ export default function CookSessionOverlay({
       {micSupported && (listening || voiceMessage) && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
           {/* 1品の調理中モードと同じ案内に、この画面だけの「色」を足す（2026-08-10 便FI）。
-              ja.focus.micHint 自体は FocusMode と共用しているので書き換えない
+              案内そのものは VoiceHint（FocusMode と共用）が描き、色の言い方だけをここで渡す
               ＝色の無い1品の画面に、色の言い方が出てしまうことが構造的に起きない */}
-          {listening && (
-            <>
-              {ja.focus.micHint}
-              {ja.cookNavi.sessionMicColorHint}
-            </>
-          )}
+          {listening && <VoiceHint trailing={ja.cookNavi.sessionMicColorHint} />}
           {voiceMessage ? (
             <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
               {voiceMessage}
@@ -689,6 +691,9 @@ export default function CookSessionOverlay({
           )}
         </p>
       )}
+
+      {/* 読み方が合わないときの直し方（2026-08-12 便FX）。読み上げを使ったあと1回だけ出す */}
+      <SpeechReadingHint used={speechUsed} />
 
       {/* マイクがブラウザで断られている案内（調理中モードと同じ内容） */}
       {micDenied && (
@@ -934,6 +939,13 @@ export default function CookSessionOverlay({
                 {ja.cookNavi.waitFillHint}
               </p>
             )}
+            {/* 段取りの一覧と同じ1行（2026-08-12 便FX・司令部裁定A案）。
+                湯沸かしだけは分数を出さないので、全体の目安に何分で入っているかを添える */}
+            {item.addedByNavi && (
+              <p data-testid="cook-session-boil-note" className="ja-phrase mt-1 text-xs text-ink-muted">
+                {ja.cookNavi.waitBlockBoilNote}
+              </p>
+            )}
             {item.waitEstimated && (
               <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitEstimatedNote}</p>
             )}
@@ -1018,9 +1030,15 @@ export default function CookSessionOverlay({
                     {/* 声で言う色の名前（2026-08-10 便FI）。色の帯だけでは何と言えばよいか
                         決められず、ピンクを「赤」と言ってしまう。**この印は押しても移らない**
                         ＝行のタップは今までどおり全文を開くだけ（EL-03）で、移るのは声だけ */}
+                    {/* 2026-08-12 便FX・オーナー指摘「他の品の次の手順の、色の文字数が違うけど、
+                        囲みの大きさは揃えて」: 「青」1文字と「ピンク」3文字で囲みの幅が
+                        21px と 42px に分かれ、下に並ぶ行の頭がそろっていなかった。
+                        いちばん長い「ピンク」の幅（3文字＝3em ＋ 左右の余白 0.75rem）を
+                        下限にして、どの色でも同じ大きさの囲みにする（em なので文字の
+                        大きさを変えても崩れない） */}
                     <span
                       data-testid="cook-session-color-word"
-                      className="shrink-0 rounded-full px-1.5 py-px text-[10px] font-bold"
+                      className="min-w-[calc(3em+0.75rem)] shrink-0 rounded-full px-1.5 py-px text-center text-[10px] font-bold"
                       style={{ backgroundColor: otherColor, color: 'var(--chip-ink)' }}
                     >
                       {naviColorWord(recipe?.colorIndex ?? 0)}

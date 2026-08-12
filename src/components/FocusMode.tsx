@@ -42,6 +42,8 @@ import ComposedStepText from './ComposedStepText'
 import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import CustomTimerModal from './CustomTimerModal'
+import VoiceHint from './VoiceHint'
+import SpeechReadingHint from './SpeechReadingHint'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
 import { ja } from '../i18n/ja'
 
@@ -170,6 +172,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
   }, [startTimer])
   // 一度でも読み上げを使ったら、以降は手順が切り替わるたびに自動で読み上げる
   const autoReadRef = useRef(false)
+  /** 読み上げを使ったか（2026-08-12 便FX。使った人にだけ、読み方の直し方を1回案内する） */
+  const [speechUsed, setSpeechUsed] = useState(false)
 
   // 開いている間は背景(レシピ詳細)をスクロールさせない(2026-07-28 機能④診断)。
   // 手順を読むための縦スワイプが背後のページに抜けてしまい、閉じたときに
@@ -233,6 +237,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       return
     }
     autoReadRef.current = true
+    setSpeechUsed(true)
     speak(step.text)
   }
 
@@ -266,7 +271,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
       },
       onRepeat: () => {
         const currentStep = recipe.steps[indexRef.current]
-        if (currentStep) speak(currentStep.text)
+        if (!currentStep) return
+        setSpeechUsed(true)
+        speak(currentStep.text)
       },
       /**
        * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
@@ -393,7 +400,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
 
       {micSupported && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
-          {ja.focus.micHint}
+          {/* 声で使える言葉の案内（2026-08-12 便FX で3つにまとめ、読み上げだけを目立たせた）。
+              並行調理ナビの調理中モードと同じ部品を使う＝片方だけ言い方が変わらない */}
+          <VoiceHint />
           {/* 聞いている最中・聞き取れた言葉・マイクが使えなかったことの手応え(機能④診断C14) */}
           {voiceMessage ? (
             <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
@@ -404,6 +413,9 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           )}
         </p>
       )}
+
+      {/* 読み方が合わないときの直し方（2026-08-12 便FX）。読み上げを使ったあと1回だけ出す */}
+      <SpeechReadingHint used={speechUsed} />
 
       {/* マイクがブラウザで断られている案内(2026-08-03 実機FB①)。
           「声で操作」を押しても何も起きないように見える状態の原因と直し方をその場に出す */}

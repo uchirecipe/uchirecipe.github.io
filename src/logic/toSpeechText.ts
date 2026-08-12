@@ -6,6 +6,7 @@
 // 照合し、一度マッチした範囲は重ねない)をそのまま流用する。用語タップ表示と発話置換で
 // 「どこが辞書語か」の判定がズレないようにするため。
 import { findTermMatches } from './termSplit'
+import { applyUnitReadings } from '../data/unitReadings'
 
 /**
  * 辞書語をreadingに置換した発話用文字列を返す。
@@ -20,7 +21,7 @@ import { findTermMatches } from './termSplit'
  */
 export function toSpeechText(text: string): string {
   const matches = findTermMatches(text)
-  if (matches.length === 0) return text
+  if (matches.length === 0) return applyUnitReadings(text)
 
   let result = ''
   let cursor = 0
@@ -33,5 +34,7 @@ export function toSpeechText(text: string): string {
     cursor = match.end
   }
   result += text.slice(cursor)
-  return result
+  // 単位・分数の読み（2026-08-12 便FX。data/unitReadings.ts）。
+  // 用語の置き換えが済んだ文字列に対して当てる＝辞書語の中の英字を壊さない
+  return applyUnitReadings(result)
 }
