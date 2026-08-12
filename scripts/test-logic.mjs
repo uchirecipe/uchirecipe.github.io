@@ -75,6 +75,7 @@ import {
   planRoleAssign,
   todayListPickedIds,
   todaySlotAddPlan,
+  showsCookedPlanRowToday,
   staleTodayListFromPlanIds,
   recipeDishType,
   mealRoleForRecipe,
@@ -131,7 +132,7 @@ import {
 } from '../src/logic/recipeDelete.ts'
 import { NUTRITION_DATA } from '../src/logic/nutritionData.ts'
 import {
-  hasLaterHandsOnStep,
+  hasFillableWorkDuringWait,
   classifyStep,
   resolveStepMinutes,
   buildCookTimeline,
@@ -1799,6 +1800,51 @@ eq(
     ['', '  '],
   )
   eq('空文字・空白だけのkeywordsは検索語を増やさない', emptyKeyword.length, baseline.length)
+
+  // --- 便FS-6(2026-08-12 利用者テスト): 「電子レンジ」で検索すると0件、「レンジ」なら4件。
+  // 手順に「電子レンジ(600W)」と書いてあるのに引けなかった ---
+  const hits = (words, query) => words.some((w) => w.includes(toHiragana(query)))
+  const renji = buildSearchWords(
+    '蒸しなすの香味だれ',
+    [{ name: 'なす', amount: '3', unit: '本' }],
+    [],
+    undefined,
+    [{ text: 'なすはラップで包み、電子レンジ(600W)で5分加熱する。' }],
+  )
+  eq('FS-SEARCH 手順の「電子レンジ」で引ける', hits(renji, '電子レンジ'), true)
+  eq('FS-SEARCH 「レンジ」でも引ける（従来の引き方を狭めない）', hits(renji, 'レンジ'), true)
+  // 手順本文をまるごと入れない＝台所のどこにでもある道具や、手順の常套句では引かない
+  eq('FS-SEARCH 手順の「ラップ」では引かない（手順本文は検索対象にしない）', hits(renji, 'ラップ'), false)
+  eq('FS-SEARCH 手順の「加熱」では引かない', hits(renji, '加熱'), false)
+  const nabe = buildSearchWords(
+    '肉じゃが',
+    [{ name: 'じゃがいも', amount: '3', unit: '個' }],
+    [],
+    undefined,
+    [{ text: '鍋に油を熱し、フライパンは使わず中火で炒める。' }],
+  )
+  eq('FS-SEARCH 「フライパン」は器具の一覧に入れない（全体の4割に当たるため）', hits(nabe, 'ふらいぱん'), false)
+  // メモは対象外（「温め直しは電子レンジで」はレンジ料理を意味しない）
+  const memoOnly = buildSearchWords(
+    'ポテトサラダ',
+    [{ name: 'じゃがいも', amount: '3', unit: '個' }],
+    [],
+    undefined,
+    [{ text: 'じゃがいもをゆでてつぶす。', memo: '温め直すときは電子レンジで' }],
+  )
+  eq('FS-SEARCH ひとことメモの器具では引かない', hits(memoOnly, '電子レンジ'), false)
+  eq(
+    'FS-SEARCH 手順を渡さない呼び出しはこれまでと同じ結果',
+    buildSearchWords('肉じゃが', [{ name: 'じゃがいも', amount: '3', unit: '個' }], []).length,
+    baseline.length,
+  )
+  eq(
+    'FS-SEARCH 手順に器具が出てこなければ検索語は増えない',
+    buildSearchWords('肉じゃが', [{ name: 'じゃがいも', amount: '3', unit: '個' }], [], undefined, [
+      { text: '鍋で煮る。' },
+    ]).length,
+    baseline.length,
+  )
 }
 
 // ---------- toTagKey(タグ候補のかな検索。2026-07-28 便BW・QA S3) ----------
@@ -4086,17 +4132,84 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('在庫グループ: 「にんにく」は肉・魚介にしない', categorizePantryName('にんにく') !== 'meatFish', true)
 }
 
-// ---------- hasLaterHandsOnStep(並行調理ナビ: 最後の待ち工程に「この間に〜」を出さない・2026-07-09ペルソナ第2波) ----------
+// ---------- hasFillableWorkDuringWait(並行調理ナビ: 待ちの「この間に、次の手作業を進められます」を
+// 出す条件。最後の待ちに出さない=2026-07-09ペルソナ第2波 / 同じ品の続きの手順に出さない=2026-08-12 便FS-2) ----------
 {
+  // 段取りの時刻つき（待ちを仕掛けても料理人の時計は進まないので、
+  // 待ちの中に入る手作業は待ちが明ける前に始まる）
   const items = [
-    { kind: 'active' },
-    { kind: 'wait' }, // 後ろに手作業がある待ち → ヒントを出す
-    { kind: 'active' },
-    { kind: 'wait' }, // 最後の待ち(後続の手作業なし) → ヒントを出さない
+    { kind: 'active', startMin: 0, endMin: 4 },
+    { kind: 'wait', startMin: 4, endMin: 19 }, // 15分の待ち。中に別の品の手作業が入る
+    { kind: 'active', startMin: 4, endMin: 8 },
+    { kind: 'wait', startMin: 8, endMin: 23 }, // 最後の待ち(後続の手作業なし)
   ]
-  eq('ナビ: 後続に手作業がある待ちはヒントあり', hasLaterHandsOnStep(items, 1), true)
-  eq('ナビ: 最後の待ちはヒントなし', hasLaterHandsOnStep(items, 3), false)
-  eq('ナビ: 後続が待ちだけでもヒントなし', hasLaterHandsOnStep([{ kind: 'active' }, { kind: 'wait' }, { kind: 'wait' }], 1), false)
+  eq('ナビ: 待ちの中に入る手作業があればヒントあり', hasFillableWorkDuringWait(items, 1), true)
+  eq('ナビ: 最後の待ちはヒントなし', hasFillableWorkDuringWait(items, 3), false)
+  eq(
+    'ナビ: 後続が待ちだけでもヒントなし',
+    hasFillableWorkDuringWait(
+      [
+        { kind: 'active', startMin: 0, endMin: 4 },
+        { kind: 'wait', startMin: 4, endMin: 9 },
+        { kind: 'wait', startMin: 4, endMin: 14 },
+      ],
+      1,
+    ),
+    false,
+  )
+  // 便FS-2(2026-08-12 利用者テスト): 「鍋にだし汁…2分ほど煮る」の待ちに
+  // 「この間に、次の手作業を進められます」と出るが、次は「火を弱め、みそを溶き入れる」＝
+  // 同じ鍋の続き。同じ品の続きは待ちが明けてからしか始まらない（段取りの時刻がそう置く）ので、
+  // 「待ちが明ける前に始まる手作業があるか」で判定すれば構造的に出なくなる
+  eq(
+    'ナビ: 次の手作業が待ちの明けたあと（同じ品の続き）ならヒントなし',
+    hasFillableWorkDuringWait(
+      [
+        { kind: 'wait', startMin: 10, endMin: 12 }, // 味噌汁: 2分煮る
+        { kind: 'active', startMin: 12, endMin: 14 }, // 味噌汁: 火を弱めてみそを溶く
+      ],
+      0,
+    ),
+    false,
+  )
+  eq(
+    'ナビ: 同じ品の続きの後ろに、待ちの中へ入る別の品の手作業があればヒントあり',
+    hasFillableWorkDuringWait(
+      [
+        { kind: 'wait', startMin: 10, endMin: 25 },
+        { kind: 'active', startMin: 10, endMin: 14 },
+      ],
+      0,
+    ),
+    true,
+  )
+  eq('ナビ: 段取りに無い添字なら出さない', hasFillableWorkDuringWait(items, 99), false)
+}
+
+// ---------- findRunningStepTimer(手順のタイマーが動いているか・2026-08-12 便FS-5) ----------
+{
+  const { stepTimerKey, findRunningStepTimer } = await import('../src/logic/timerOrder.ts')
+  const t = (key, over) => ({ key, done: false, ...over })
+  const timers = [
+    t(stepTimerKey(7, 2, 120)), // レシピ7の手順3（stepIndex=2）で2分
+    t(stepTimerKey(9, 0, 300)),
+    t(stepTimerKey(7, 20, 60)), // 手順21。「7-2-」で拾ってはいけない
+  ]
+  eq('FS-TIMER その手順で動いていれば見つかる', findRunningStepTimer(timers, 7, 2)?.key, '7-2-120')
+  eq('FS-TIMER 手順が違えば見つからない', findRunningStepTimer(timers, 7, 1), undefined)
+  eq('FS-TIMER 手順番号の桁違いを取り違えない(7-2 と 7-20)', findRunningStepTimer(timers, 7, 20)?.key, '7-20-60')
+  eq('FS-TIMER レシピが違えば見つからない', findRunningStepTimer(timers, 8, 2), undefined)
+  eq(
+    'FS-TIMER 鳴り終わったタイマーは動作中に数えない(「タイマーを始める」に戻す)',
+    findRunningStepTimer([t(stepTimerKey(7, 2, 120), { done: true })], 7, 2),
+    undefined,
+  )
+  eq(
+    'FS-TIMER 一時停止中も動作中として扱う(「始める」に戻すと二重に立つ)',
+    findRunningStepTimer([t(stepTimerKey(7, 2, 120), { pausedRemainingMs: 5000 })], 7, 2)?.key,
+    '7-2-120',
+  )
+  eq('FS-TIMER 自分で決めた時間のタイマーは手順に紐付けない', findRunningStepTimer([t('custom-navi-180')], 0, 0), undefined)
 }
 
 // ---------- classifyStep(並行調理ナビ: フライパンの「焼く」は目を離せないので手作業系のまま。
@@ -13054,6 +13167,27 @@ eq(
     'FN-PICK 予定が消えた写しは従来どおり①に残る（片付けは staleTodayListFromPlanIds の仕事）',
     todayListPickedIds([{ recipeId: 9, fromPlan: true }], [], [1]),
     [9],
+  )
+
+  // --- 便FS-1(2026-08-12 利用者テスト): 「今日の夕食に戻しました」と言われた品が、
+  // 「今週の献立の予定/夕食」ではなく「レシピ一覧から選択中」に並び、
+  // 「朝食に入れる／昼食に入れる／夕食に入れる」が未選択のまま付いていた ---
+  eq('FS-PLAN 作っていない予定の行は今までどおり出す', showsCookedPlanRowToday(false, false), true)
+  eq(
+    'FS-PLAN 作って今日の献立から外れた品は出さない（作った後は予定でなく記録）',
+    showsCookedPlanRowToday(true, false),
+    false,
+  )
+  eq(
+    'FS-PLAN 作ったあと今日の献立へ戻した品は、予定の行としてその食事に出す',
+    showsCookedPlanRowToday(true, true),
+    true,
+  )
+  eq(
+    'FS-PICK 予定の行として出た品は「レシピ一覧から選択中」に重ねない',
+    // 戻した品(1)は②に出るので、①の引き算の相手にも入る＝食事を選び直す行が出ない
+    todayListPickedIds(tl(1), [1], [1, 2, 3]),
+    [],
   )
 
   // todaySlotAddPlan: レシピ詳細の「今日の献立に追加」→ 朝食/昼食/夕食

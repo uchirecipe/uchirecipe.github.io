@@ -195,6 +195,50 @@ export function titleKanaKey(title: string): string {
 }
 
 /**
+ * 手順本文から拾って検索語に入れる調理器具（2026-08-12 便FS-6・利用者テスト
+ * 「『電子レンジ』で検索すると0件（『レンジ』なら4件）。手順には『電子レンジ(600W)』と
+ * 書いてあるので、手順の中は検索対象外みたい」）。
+ *
+ * **手順本文をまるごと検索対象にはしない**。同梱109品で実測したところ、
+ * 「中火」65件・「しょうゆ」54件・「切る」49件・「水」73件のように、
+ * 手順に必ず出てくる語が全体の半分以上に当たるようになり、検索が絞り込みの役に立たなくなる
+ * （語を数えた実測: 手順に出る語3073種のうち2992種で結果が変わり、84種が全体の20%超に当たる）。
+ *
+ * 代わりに、**その器具を持っていないと作れない**＝作るかどうかの判断に直結する器具だけを
+ * 検索語に足す。同梱109品での件数は 電子レンジ14・グリル4・オーブン2・魚焼きグリル2・
+ * トースター1・炊飯器1 で、いずれも一覧を埋め尽くさない。
+ *
+ * 鍋・フライパン・ボウルのような「どの台所にもある道具」は入れない（各40%前後に当たるうえ、
+ * 持っているかどうかで料理を選ぶ語ではない）。
+ */
+export const APPLIANCE_SEARCH_WORDS: readonly string[] = [
+  '電子レンジ',
+  'オーブントースター',
+  'オーブン',
+  'トースター',
+  '炊飯器',
+  '魚焼きグリル',
+  'グリル',
+  'ホットプレート',
+  '圧力鍋',
+  '蒸し器',
+  'せいろ',
+  'ミキサー',
+  'フードプロセッサー',
+  'ハンドブレンダー',
+]
+
+/**
+ * 手順本文に出てくる調理器具の名前を返す（2026-08-12 便FS-6）。
+ * 見るのは**手順の本文だけ**で、ひとことメモは見ない。メモは「温め直しは電子レンジで」の
+ * ような後日の扱いを書く場所で、その料理がレンジ料理であることを意味しないため。
+ */
+export function applianceSearchWords(steps: readonly { text: string }[]): string[] {
+  const body = steps.map((s) => s.text ?? '').join('\n')
+  return APPLIANCE_SEARCH_WORDS.filter((word) => body.includes(word))
+}
+
+/**
  * 料理名・材料名・タグ・検索キーワードから検索用キーワード一覧を作る（保存時に呼ぶ）。
  *
  * 調味料的な材料（大さじ/小さじ/単位なし/「少々」等。isSeasoningLikeと同じ基準）は
@@ -211,16 +255,27 @@ export function titleKanaKey(title: string): string {
  * タグは漢字でしか引けなかった（読み辞書はタグ候補の入力補助にしか配線されていなかった）。
  * 置き換えではなく**足す**のがポイントで、こうすると漢字表記での検索（「和食」「鍋」）も
  * そのまま効き続ける＝既存の検索結果を1件も減らさずに、かなでも引けるようになる。
+ *
+ * 2026-08-12 便FS-6: 手順本文に出てくる**調理器具**（電子レンジ・オーブン・炊飯器など）も
+ * 足す（APPLIANCE_SEARCH_WORDS）。手順本文をまるごと検索対象にはしない理由は同定数の説明を参照。
+ * 第5引数も省略可能なので、手順を渡さない呼び出し元はこれまでと同じ結果になる。
  */
 export function buildSearchWords(
   title: string,
   ingredients: ReadonlyArray<{ name: string; amount: string; unit: string }>,
   tags: readonly string[],
   keywords?: readonly string[],
+  steps?: readonly { text: string }[],
 ): string[] {
   const words = new Set<string>()
   const mainNames = ingredients.filter((ing) => !isSeasoningLike(ing)).map((ing) => ing.name)
-  for (const raw of [title, ...mainNames, ...tags, ...(keywords ?? [])]) {
+  for (const raw of [
+    title,
+    ...mainNames,
+    ...tags,
+    ...(keywords ?? []),
+    ...applianceSearchWords(steps ?? []),
+  ]) {
     const trimmed = raw.trim()
     if (!trimmed) continue
     words.add(toHiragana(trimmed))
@@ -247,7 +302,7 @@ export function buildSearchWords(
  * db/recipes.ts の rebuildSearchWordsIfNeeded が settings.searchIndexVersion と比較し、
  * 食い違っていれば起動時に全レシピのsearchWordsを再構築する。
  */
-export const SEARCH_INDEX_VERSION = 2 // v2: タグ・料理名の読みも検索語に入れる(2026-07-29 便CI/C09・C12)
+export const SEARCH_INDEX_VERSION = 3 // v3: 手順本文の調理器具も検索語に入れる(2026-08-12 便FS-6)
 
 /**
  * settingsに保存済みのバージョンが古く、全レシピのsearchWordsを再構築すべきかを判定する

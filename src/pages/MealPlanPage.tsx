@@ -86,6 +86,7 @@ import {
   suggestPairForSlot,
   planWeekFill,
   todayListPickedIds,
+  showsCookedPlanRowToday,
   normalizeDateRange,
   rangeDayCount,
   isOneDish,
@@ -2165,20 +2166,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 2026-08-11 便FN: ①が引くのは「今日の予定ぜんぶ」ではなく「②にいま出ている分」。
    * ②は今日すでに作った品を出さないので、作り終えた予定の行が①を塞ぐと、
    * 「全て作った！」のあとに同じ品を入れ直しても画面のどこにも出なくなる（利用者テスト報告）。
+   *
+   * 2026-08-12 便FS-1: 作り終えた品を同じ食事へ入れ直したときは、②のその食事の行として戻す
+   * （判定は logic/mealPlan.ts showsCookedPlanRowToday）。①へ回していたため、
+   * 「今日の夕食に戻しました」と言われた直後に「夕食に入れる」を選び直す行が出ていた。
    */
   const todayPlanAllRecipeIds = useMemo(
     () => Array.from(new Set((todayEntries ?? []).map((e) => e.recipeId))),
     [todayEntries],
+  )
+  const todayListRecipeIds = useMemo(
+    () => new Set((todayList ?? []).map((item) => item.recipeId)),
+    [todayList],
   )
   const plannedGroups = useMemo(() => {
     const bySlot = new Map<MealSlot, Recipe[]>()
     todayEntries?.forEach((e) => {
       const recipe = recipeById.get(e.recipeId)
       if (!recipe) return
-      // 今日すでに作った品は出さない（オーナー「作った後は予定でなく記録」）。①の品は
-      // 「作った」で今日の献立から外れて消えるので、②も同じ見え方に揃える。
-      // トーストの「元に戻す」で記録を消せば、この行もそのまま戻る
-      if (recipe.cookedLogs.some((log) => log.date === today)) return
+      // 今日すでに作って、今日の献立からも外れた品は出さない
+      //（オーナー「作った後は予定でなく記録」）。①の品は「作った」で今日の献立から
+      // 外れて消えるので、②も同じ見え方に揃える。トーストの「元に戻す」で記録を消しても、
+      // 作った品を同じ食事へ入れ直しても、この行はそのまま戻る
+      if (
+        !showsCookedPlanRowToday(
+          recipe.cookedLogs.some((log) => log.date === today),
+          todayListRecipeIds.has(recipe.id!),
+        )
+      )
+        return
       const list = bySlot.get(e.slot)
       if (list) {
         if (!list.some((r) => r.id === recipe.id)) list.push(recipe)
@@ -2187,7 +2203,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return MEAL_SLOTS.map((slot) => ({ slot, recipes: bySlot.get(slot) ?? [] })).filter(
       (g) => g.recipes.length > 0,
     )
-  }, [todayEntries, recipeById, today])
+  }, [todayEntries, recipeById, today, todayListRecipeIds])
   /**
    * ②にいま出ている予定のレシピID（2026-08-11 便FN）。
    * ①の引き算はこれを相手にする＝②が出していない予定（今日すでに作った品）は①を塞がない。

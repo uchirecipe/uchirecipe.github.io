@@ -47,6 +47,7 @@ import {
   hasMaterialGap,
 } from '../logic/nutrition'
 import { deriveDoneLabel } from '../logic/timerLabel'
+import { stepTimerKey } from '../logic/timerOrder'
 import { isHttpUrl } from '../logic/url'
 import { isMinutesShownInText } from '../logic/time'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -211,8 +212,11 @@ export default function RecipeDetailPage() {
    *
    * 2026-08-11 便FN（利用者テストのバグ修正）: 今日すでに作った品は「すでに入っています」で
    * 断らない。週の予定の行は記録をつけても残るため、断ると**その日はもうその料理を
-   * 献立に戻せなくなる**（日タブは空なのに追加を拒む）。行は増やさず今日の献立にだけ戻し、
+   * 献立に戻せなくなる**（日タブは空なのに追加を拒む）。行は増やさず今日の献立に戻し、
    * 記録が残ることを添えて知らせる（判断は logic/mealPlan.ts todaySlotAddPlan）。
+   * 2026-08-12 便FS-1: 戻した品は、日タブでも選んだ食事の行として出る
+   *（logic/mealPlan.ts showsCookedPlanRowToday）。「今日の夕食に戻しました」と言いながら
+   * 食事の決まっていない行に並べていたのを、言葉どおりの場所に直した。
    *
    * 2026-08-11 便FP（利用者テスト④「おひたしも味噌汁も主菜になっていた」）: 予定の行の役割を
    * 'main' で決め打ちしていたのをやめ、レシピの「料理の種別」から決める
@@ -1002,7 +1006,7 @@ export default function RecipeDetailPage() {
                         onOpenTerm={openTerm}
                         onStartTimer={(_tokenText, seconds) =>
                           startTimer({
-                            key: `${id}-${index}-${seconds}`,
+                            key: stepTimerKey(id, index, seconds),
                             label: recipe.title,
                             doneLabel: deriveDoneLabel(step.text),
                             seconds,
@@ -1027,7 +1031,7 @@ export default function RecipeDetailPage() {
                         type="button"
                         onClick={() =>
                           startTimer({
-                            key: `${id}-${index}-${(step.minutes ?? 0) * 60}`,
+                            key: stepTimerKey(id, index, (step.minutes ?? 0) * 60),
                             label: recipe.title,
                             doneLabel: deriveDoneLabel(step.text),
                             seconds: (step.minutes ?? 0) * 60,

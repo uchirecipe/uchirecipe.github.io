@@ -438,12 +438,12 @@ try {
   const recipeCard = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
 
   // 検索(かな表記ゆれ): 検索欄 + ヒット件数
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('たまねぎ')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('たまねぎ')
   await wait(page, 900)
-  await cropRange(page, 'search', page.getByPlaceholder('料理名・材料・タグで検索'), recipeCard.first(), {
+  await cropRange(page, 'search', page.getByPlaceholder('料理名・材料・タグ'), recipeCard.first(), {
     top: 64,
   })
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('')
   await wait(page, 500)
 
   // ======== 登録画面 ========
@@ -715,7 +715,7 @@ try {
   // ======== レシピ詳細(写真つき) ========
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await wait(page, 1200)
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('カレーライス')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('カレーライス')
   await wait(page, 800)
   await page.locator('main a[href*="/recipes/"]:not([href$="/new"])').first().click()
   await wait(page, 1400)
@@ -766,7 +766,7 @@ try {
   // ======== 調理中モード ========
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await wait(page, 1200)
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
   await wait(page, 800)
   await page.locator('main a[href*="/recipes/"]:not([href$="/new"])').first().click()
   await wait(page, 1200)
@@ -1030,7 +1030,7 @@ try {
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.reload({ waitUntil: 'networkidle' })
   await wait(page, 1800)
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('カレーライス')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('カレーライス')
   await wait(page, 900)
   await page.locator('main a[href*="/recipes/"]:not([href$="/new"])').first().click()
   await wait(page, 1500)

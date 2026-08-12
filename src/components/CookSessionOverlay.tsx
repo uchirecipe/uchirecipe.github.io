@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type TouchEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type TouchEvent } from 'react'
 import {
   X,
   ChevronLeft,
@@ -25,7 +25,7 @@ import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
-import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
+import { findRunningStepTimer, sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import { formatRemaining, findTimeTokens } from '../logic/time'
 import {
   pickVoiceResumeTarget,
@@ -36,7 +36,7 @@ import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import {
   endsWithLongRest,
-  hasLaterHandsOnStep,
+  hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
   type TimelineItem,
@@ -252,6 +252,27 @@ export default function CookSessionOverlay({
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
   /**
+   * 手順を移した直後に出す1行（2026-08-12 便FS-8・利用者テスト「段取り1/10で『青』と言うと
+   * ささみ①の画面になるのにカウンタは1/10のまま、丸数字も『1』。一覧では ささみ① は②番だった
+   * ので、覚えた番号と合わなくなる。順番が組み直されているようだが、説明はどこにもない」）。
+   *
+   * 移した手順は**いまの位置に入る**ので、段取りの通し番号は前から振り直される（便FI の設計）。
+   * 番号が動くこと自体は設計どおりなので、動いた理由をその場に短く出す。
+   * 声で移っても、下の行の「この手順に移る」で移っても同じ1行が出る（同じことが起きるため）。
+   */
+  const [pullNoticed, setPullNoticed] = useState(false)
+  const pullNoticeTimeout = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(pullNoticeTimeout.current), [])
+  const pullStep = useCallback(
+    (pull: StepPull) => {
+      onPullStep(pull)
+      setPullNoticed(true)
+      clearTimeout(pullNoticeTimeout.current)
+      pullNoticeTimeout.current = setTimeout(() => setPullNoticed(false), 8000)
+    },
+    [onPullStep],
+  )
+  /**
    * 下部の行をタップして中身を確認している品（保存しない一時的な表示状態）。
    * **カーソルは動かさない**＝見るだけ（EL-03）。
    * 2026-08-10 便FI で「色を言うとその品の手順に移る」を入れたが、**タップの意味は変えない**。
@@ -426,7 +447,7 @@ export default function CookSessionOverlay({
         // 声で移ったときも「元の手順に戻す」は役目を終える（2026-08-11 便FO。
         // 残しておくと、色で移ったあとに「最初の手順へ」を押す前の位置へ帰る札が居座る）
         setUndoFirst(null)
-        onPullStep({ before: cursor, target: target.cursor })
+        pullStep({ before: cursor, target: target.cursor })
         return ja.cookNavi.sessionColorMoved.replace('{title}', title)
       },
       onTimer: (transcript) => {
@@ -458,11 +479,19 @@ export default function CookSessionOverlay({
   // 「約◯分の待ち時間」と名乗ったブロックには必ずタイマーのボタンを出す
   const showWaitTimerButton = showsWaitTimerButton(item)
   /**
-   * 「この間に、次の手作業を進められます」を出すか（2026-08-11 便FL。段取りの一覧と同じ条件）。
-   * 後ろに手作業が残っている待ちのときだけ＝1品ずつ作る段取りや、今回の調理では終わらない
-   * 長い待ちには出さない
+   * この手順ではかっているタイマー（2026-08-12 便FS-5・利用者テスト「タイマーが動いていても
+   * 手順の中のボタンが『タイマーを始める』のまま。もう一度押しても何も起きない」）。
+   * 動いている間はボタンを出さず、残り時間に置き換える
    */
-  const showFillHint = isWait && !sequential && !item.longRest && hasLaterHandsOnStep(items, index)
+  const waitTimer = findRunningStepTimer(timers, item.recipeId, item.stepIndex)
+  /**
+   * 「この間に、次の手作業を進められます」を出すか（2026-08-11 便FL。段取りの一覧と同じ条件）。
+   * その待ちの中に入る手作業があるときだけ＝1品ずつ作る段取りや、今回の調理では終わらない
+   * 長い待ち、同じ品の続きしか残っていない待ちには出さない
+   * （2026-08-12 便FS-2・logic/cookNavi.ts hasFillableWorkDuringWait）
+   */
+  const showFillHint =
+    isWait && !sequential && !item.longRest && hasFillableWorkDuringWait(items, index)
   /**
    * タイマーの置き場所（2026-08-09 便ES・オーナー指示E-11
    * 「大きく表示中のタイマーは画面上、他のタイマーは『他の品の〜』に直接表示」）。
@@ -607,6 +636,17 @@ export default function CookSessionOverlay({
           </button>
         </div>
       </div>
+
+      {/* 手順を移した直後の1行（2026-08-12 便FS-8）。段取りの番号が振り直されたことを、
+          カウンタのすぐ下に置く（番号を読み比べる場所と同じ場所に理由を置く） */}
+      {pullNoticed && (
+        <p
+          data-testid="cook-session-pull-notice"
+          className="ja-phrase px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted"
+        >
+          {ja.cookNavi.pullRenumberedNote}
+        </p>
+      )}
 
       {/* 「最初の手順へ」の取り消し（2026-08-11 便FO）。押した直後だけ出て、
           他の移動をすると消える。閉じる✕の隣に置かず、行を分けて誤爆から離す */}
@@ -813,7 +853,9 @@ export default function CookSessionOverlay({
         {ingredients.length > 0 && (
           <div
             data-testid="cook-session-ingredients"
-            className="w-full rounded-sm border-l-2 pl-2 text-left"
+            /* 角を丸めない（2026-08-12 便FS-3。左だけの線に角丸を付けると弧になり、
+               材料名の手前に閉じ括弧のない「(」が見えていた） */
+            className="w-full border-l-2 pl-2 text-left"
             style={{ borderLeftColor: color }}
           >
             <p className="ja-phrase">
@@ -853,16 +895,36 @@ export default function CookSessionOverlay({
                     ? ja.cookNavi.waitBlockLongRest
                     : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
               </span>
-              {showWaitTimerButton && (
-                <button
-                  type="button"
-                  onClick={() => onStartTimer(item, item.waitMinutes * 60)}
-                  className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
-                >
-                  <TimerIcon size={16} aria-hidden />
-                  {ja.cookNavi.startTimer}
-                </button>
-              )}
+              {/* タイマーが動いている間は残り時間に置き換える（2026-08-12 便FS-5。
+                  段取りの一覧と同じ作り＝押しても何も起きないボタンを残さない） */}
+              {showWaitTimerButton &&
+                (waitTimer ? (
+                  <span
+                    data-testid="cook-session-wait-timer-running"
+                    className="inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink"
+                  >
+                    {waitTimer.pausedRemainingMs != null ? (
+                      <Pause size={16} aria-hidden />
+                    ) : (
+                      <TimerIcon size={16} aria-hidden />
+                    )}
+                    <span className="tabular-nums">
+                      {(waitTimer.pausedRemainingMs != null
+                        ? ja.cookNavi.waitTimerPaused
+                        : ja.cookNavi.waitTimerRunning
+                      ).replace('{time}', formatRemaining(timerRemainingSeconds(waitTimer, now)))}
+                    </span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onStartTimer(item, item.waitMinutes * 60)}
+                    className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
+                  >
+                    <TimerIcon size={16} aria-hidden />
+                    {ja.cookNavi.startTimer}
+                  </button>
+                ))}
             </div>
             {/* 段取りの一覧にだけ出ていた「この間に、次の手作業を進められます」を
                 調理中の画面にも出す（2026-08-11 便FL）。待ちを仕掛けたあと「次へ」で
@@ -1027,7 +1089,7 @@ export default function CookSessionOverlay({
                         onClick={() => {
                           stopSpeech()
                           setUndoFirst(null)
-                          onPullStep({
+                          pullStep({
                             before: cursor,
                             target: { recipeId: next.recipeId, stepIndex: next.stepIndex },
                           })

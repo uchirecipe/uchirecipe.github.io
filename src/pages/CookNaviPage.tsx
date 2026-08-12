@@ -7,6 +7,7 @@ import {
   Hourglass,
   Hand,
   Timer as TimerIcon,
+  Pause,
   Check,
   ChevronRight,
   ChevronDown,
@@ -34,9 +35,11 @@ import {
 import { useTimers } from '../components/TimerProvider'
 import { useWakeLock } from '../components/useWakeLock'
 import { deriveDoneLabel } from '../logic/timerLabel'
+import { findRunningStepTimer, stepTimerKey, timerRemainingSeconds } from '../logic/timerOrder'
+import { formatRemaining } from '../logic/time'
 import {
   buildCookPlan,
-  hasLaterHandsOnStep,
+  hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
   type TimelineItem,
@@ -152,6 +155,8 @@ function TimelineCard({
   showFillHint,
   isRecipeLast,
   highlighted,
+  runningTimer,
+  now,
   onStartTimer,
 }: {
   item: TimelineItem
@@ -167,6 +172,10 @@ function TimelineCard({
   isRecipeLast: boolean
   /** 常駐タイマーバーの完了タップから飛んできた直後の一時ハイライト対象か */
   highlighted: boolean
+  /** この手順ではかっているタイマー（2026-08-12 便FS-5。無ければ「タイマーを始める」を出す） */
+  runningTimer: { endsAt: number; pausedRemainingMs?: number } | undefined
+  /** 残り時間の計算に使う現在時刻（TimerProvider が約0.3秒ごとに進める） */
+  now: number
   onStartTimer: (item: TimelineItem, seconds: number) => void
 }) {
   const isWait = item.kind === 'wait'
@@ -233,7 +242,10 @@ function TimelineCard({
       {ingredients.length > 0 && (
         <div
           data-testid="navi-step-ingredients"
-          className="mt-[var(--space-sm)] rounded-sm border-l-2 pl-2"
+          /* 角を丸めない（2026-08-12 便FS-3・利用者テスト「材料の左に、閉じていない『(』だけが
+             見える」）。左だけに線を引いた枠に角丸を付けると、上下の角が弧になり、
+             材料名の手前に閉じ括弧のない「(」が置かれているように見えていた */
+          className="mt-[var(--space-sm)] border-l-2 pl-2"
           style={{ borderLeftColor: RECIPE_COLORS[item.colorIndex % RECIPE_COLORS.length] }}
         >
           <p className="ja-phrase text-sm">
@@ -264,16 +276,38 @@ function TimelineCard({
                   ? ja.cookNavi.waitBlockLongRest
                   : ja.cookNavi.waitBlockTitle.replace('{n}', String(item.waitMinutes))}
             </span>
-            {showWaitTimerButton && (
-              <button
-                type="button"
-                onClick={() => onStartTimer(item, item.waitMinutes * 60)}
-                className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <TimerIcon size={16} aria-hidden />
-                {ja.cookNavi.startTimer}
-              </button>
-            )}
+            {/* タイマーが動いている間はボタンを残さず、残り時間に置き換える（2026-08-12 便FS-5・
+                利用者テスト「タイマーが動いていても『タイマーを始める』のまま。もう一度押しても
+                何も起きない」）。同じ手順・同じ長さのタイマーは二重に立たない作りなので、
+                押しても何も起きないボタンが残っていた */}
+            {showWaitTimerButton &&
+              (runningTimer ? (
+                <span
+                  data-testid="navi-wait-timer-running"
+                  className="inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink"
+                >
+                  {runningTimer.pausedRemainingMs != null ? (
+                    <Pause size={16} aria-hidden />
+                  ) : (
+                    <TimerIcon size={16} aria-hidden />
+                  )}
+                  <span className="tabular-nums">
+                    {(runningTimer.pausedRemainingMs != null
+                      ? ja.cookNavi.waitTimerPaused
+                      : ja.cookNavi.waitTimerRunning
+                    ).replace('{time}', formatRemaining(timerRemainingSeconds(runningTimer, now)))}
+                  </span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onStartTimer(item, item.waitMinutes * 60)}
+                  className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
+                >
+                  <TimerIcon size={16} aria-hidden />
+                  {ja.cookNavi.startTimer}
+                </button>
+              ))}
           </div>
           {showFillHint && !item.longRest && (
             <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitFillHint}</p>
@@ -386,7 +420,8 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
               return (
                 <li
                   key={recipe.recipeId}
-                  className="rounded-sm border-l-4 border-edge pl-2"
+                  /* 角を丸めない（同 便FS-3。左だけの線＋角丸は「(」に見える） */
+                  className="border-l-4 border-edge pl-2"
                   style={{
                     borderLeftColor: RECIPE_COLORS[recipe.colorIndex % RECIPE_COLORS.length],
                   }}
@@ -474,7 +509,7 @@ export default function CookNaviPage() {
   const canUseNavi = isProUnlocked || trialActive
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
-  const { startTimer } = useTimers()
+  const { startTimer, timers, now } = useTimers()
   /**
    * 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
    * （2026-08-08 便ED。レシピ詳細・調理中モードと同じ扱い。ナビも手を動かしながら見る画面で、
@@ -1138,7 +1173,7 @@ export default function CookNaviPage() {
   const startStepTimer = (item: TimelineItem, seconds: number) => {
     if (seconds <= 0) return
     startTimer({
-      key: `${item.recipeId}-${item.stepIndex}-${seconds}`,
+      key: stepTimerKey(item.recipeId, item.stepIndex, seconds),
       label: item.recipeTitle,
       doneLabel: deriveDoneLabel(item.text),
       seconds,
@@ -1515,6 +1550,18 @@ export default function CookNaviPage() {
                       </p>
                     )}
 
+                    {/* 色で移った手順を組み込むと、段取りの通し番号が前から振り直される
+                        （2026-08-12 便FS-8・利用者テスト「番号が入れ替わるのに説明が
+                        どこにもない」）。並びが変わっている間だけ、その理由をここに置く */}
+                    {pulls.length > 0 && (
+                      <p
+                        data-testid="navi-pull-renumbered"
+                        className="ja-phrase mt-[var(--space-sm)] text-xs text-ink-muted"
+                      >
+                        {ja.cookNavi.pullRenumberedNote}
+                      </p>
+                    )}
+
                     <ol className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
                       {planItems.map((item, index) => (
                         <TimelineCard
@@ -1524,10 +1571,14 @@ export default function CookNaviPage() {
                           ingredientNames={ingredientNamesByRecipeId.get(item.recipeId) ?? []}
                           recipeNotes={recipeNotesByStep.get(recipeNoteStepKey(item)) ?? []}
                           /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
-                             （次の手順は同じ品の続きで、待ち終わってからやる作業のため） */
-                          showFillHint={!isSequential && hasLaterHandsOnStep(planItems, index)}
+                             （次の手順は同じ品の続きで、待ち終わってからやる作業のため）。
+                             並行の段取りでも、その待ちの中に入る手作業が無ければ出さない
+                             （2026-08-12 便FS-2・logic/cookNavi.ts hasFillableWorkDuringWait） */
+                          showFillHint={!isSequential && hasFillableWorkDuringWait(planItems, index)}
                           isRecipeLast={lastIndexByRecipeId.get(item.recipeId) === index}
                           highlighted={highlightKey === `${item.recipeId}-${item.stepNumber}`}
+                          runningTimer={findRunningStepTimer(timers, item.recipeId, item.stepIndex)}
+                          now={now}
                           onStartTimer={startStepTimer}
                         />
                       ))}

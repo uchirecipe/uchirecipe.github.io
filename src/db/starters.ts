@@ -2177,7 +2177,7 @@ function toRecipe(def: StarterDef): Recipe {
     isFavorite: false,
     cookedLogs: [],
     isStarter: true,
-    searchWords: buildSearchWords(def.title, def.ingredients, def.tags),
+    searchWords: buildSearchWords(def.title, def.ingredients, def.tags, undefined, def.steps),
     createdAt: now,
     updatedAt: now,
   }
@@ -2316,7 +2316,7 @@ export function buildUpdatedStarterRecipe(
     sourceUrl: incoming.sourceUrl,
     keywords: incoming.keywords,
     dishType: incoming.dishType,
-    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords),
+    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords, incoming.steps),
     updatedAt: now,
   }
 }

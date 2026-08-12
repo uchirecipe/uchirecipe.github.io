@@ -770,7 +770,7 @@ try {
   currentCheck = 'FOCUS-MEMO-01'
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  await page.getByPlaceholder('料理名・材料・タグで検索').fill('回鍋肉')
+  await page.getByPlaceholder('料理名・材料・タグ').fill('回鍋肉')
   await page.waitForTimeout(300)
   await page.getByText('回鍋肉(ホイコーロー)', { exact: true }).first().click()
   await page.waitForTimeout(500)
@@ -1320,7 +1320,7 @@ try {
       currentCheck = 'UI-390-02'
       await w390Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await w390Page.waitForTimeout(800)
-      await w390Page.getByPlaceholder('料理名・材料・タグで検索').fill('冷やしトマト')
+      await w390Page.getByPlaceholder('料理名・材料・タグ').fill('冷やしトマト')
       await w390Page.waitForTimeout(600)
       await w390Page.getByText('冷やしトマトの浅漬け', { exact: true }).first().click()
       await w390Page.waitForTimeout(800)
@@ -1360,7 +1360,7 @@ try {
       const fsPage = await fsContext.newPage()
       await fsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fsPage.waitForTimeout(1200)
-      await fsPage.getByPlaceholder('料理名・材料・タグで検索').fill('冷やし茶碗蒸し')
+      await fsPage.getByPlaceholder('料理名・材料・タグ').fill('冷やし茶碗蒸し')
       await fsPage.waitForTimeout(600)
       await fsPage.getByText('冷やし茶碗蒸し', { exact: true }).first().click()
       await fsPage.waitForTimeout(800)
@@ -5100,7 +5100,7 @@ try {
       const openNikujaga = async () => {
         await tkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await tkPage.waitForTimeout(1200)
-        await tkPage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+        await tkPage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
         await tkPage.waitForTimeout(500)
         await tkPage.getByText('肉じゃが', { exact: true }).first().click()
         await tkPage.waitForTimeout(700)
@@ -5280,7 +5280,7 @@ try {
       const fkOpen = async (name) => {
         await fkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await fkPage.waitForTimeout(1200)
-        await fkPage.getByPlaceholder('料理名・材料・タグで検索').fill(name)
+        await fkPage.getByPlaceholder('料理名・材料・タグ').fill(name)
         await fkPage.waitForTimeout(500)
         await fkPage.getByText(name, { exact: true }).first().click()
         await fkPage.waitForTimeout(700)
@@ -5413,7 +5413,7 @@ try {
       const fnPage = await fnContext.newPage()
       await fnPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fnPage.waitForTimeout(1200)
-      await fnPage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await fnPage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await fnPage.waitForTimeout(500)
       await fnPage.getByText('肉じゃが', { exact: true }).first().click()
       await fnPage.waitForTimeout(700)
@@ -5494,7 +5494,7 @@ try {
       const openFocus = async (p, name) => {
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1400)
-        await p.getByPlaceholder('料理名・材料・タグで検索').fill(name)
+        await p.getByPlaceholder('料理名・材料・タグ').fill(name)
         await p.waitForTimeout(500)
         await p.getByText(name, { exact: true }).first().click()
         await p.waitForTimeout(700)
@@ -5722,7 +5722,7 @@ try {
         const p = await ctx.newPage()
         await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(1400)
-        await p.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+        await p.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
         await p.waitForTimeout(500)
         await p.getByText('肉じゃが', { exact: true }).first().click()
         await p.waitForTimeout(700)
@@ -20582,7 +20582,7 @@ try {
       await rePage.waitForTimeout(1200)
 
       // 検索で対象を絞ってから「選択」→「全選択」。絞った結果の枚数がそのまま書き出す品数になる
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await rePage.waitForTimeout(700)
       // 右下の新規登録ボタン(#/recipes/new)も同じ入れ子に居るので数から外す
       const reCardSel = 'main a[href^="#/recipes/"]:not([href$="/new"])'
@@ -20658,7 +20658,7 @@ try {
       check('RECIPEEXPORT-EM(c) 書き出し完了の知らせが出る', ((await rePage.textContent('body')) ?? '').includes('書き出しました'))
 
       // (c) 端末のレシピは減らない
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('')
       await rePage.waitForTimeout(600)
       const reTotalAfterExport = await rePage.locator(reCardSel).count()
       check(
@@ -20670,7 +20670,7 @@ try {
       // (d) 消してから、既存の読み込み経路(「今のデータに追加」)で戻す。
       // 絞り込みを戻しても選択は残る(見えている品は落とさない)ので、「全選択」は
       // 押せない状態になっている。押せるときだけ押す
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await rePage.waitForTimeout(700)
       const reSelectAll = rePage.getByRole('button', { name: '全選択', exact: true })
       if (await reSelectAll.isEnabled()) {
@@ -20705,7 +20705,7 @@ try {
       )
       await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await rePage.waitForTimeout(1200)
-      await rePage.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await rePage.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await rePage.waitForTimeout(700)
       check(
         'RECIPEEXPORT-EM(d) 書き出したファイルから消したレシピが戻る',
@@ -23035,7 +23035,7 @@ try {
       const eyOpen = async (title) => {
         await eyPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await eyPage.waitForTimeout(600)
-        await eyPage.getByPlaceholder('料理名・材料・タグで検索').fill(title)
+        await eyPage.getByPlaceholder('料理名・材料・タグ').fill(title)
         await eyPage.waitForTimeout(700)
         await eyPage.getByText(title, { exact: true }).first().click()
         await eyPage.waitForTimeout(800)
@@ -23540,7 +23540,7 @@ try {
       // 素の「しいたけ4枚」と書いてある寄せ鍋が、生しいたけの単価で按分される
       await faPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await faPage.waitForTimeout(600)
-      await faPage.getByPlaceholder('料理名・材料・タグで検索').fill('しいたけ')
+      await faPage.getByPlaceholder('料理名・材料・タグ').fill('しいたけ')
       await faPage.waitForTimeout(800)
       const faSearchBody = (await faPage.textContent('body')) ?? ''
       check(
@@ -23739,7 +23739,7 @@ try {
       })
       await fa4Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await fa4Page.waitForTimeout(1800)
-      await fa4Page.getByPlaceholder('料理名・材料・タグで検索').fill('肉じゃが')
+      await fa4Page.getByPlaceholder('料理名・材料・タグ').fill('肉じゃが')
       await fa4Page.waitForTimeout(700)
       const fa4Picked = await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()
       check('FA-3 前提: 検索で対象を絞れている', fa4Picked > 0 && fa4Picked < 10, `件数=${fa4Picked}`)
@@ -26796,7 +26796,7 @@ try {
       await fmPage.getByRole('button', { name: '段取りを作る' }).click()
       await fmPage.waitForTimeout(800)
 
-      const noZw = (t) => (t ?? '').replace(/​/g, '')
+      const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
       // オーナー報告の実文（親子丼の本体メモ）。この1文が画面に出ることが今回の合格条件
       const WASH = '生の鶏肉にふれたまな板・包丁・手は、ほかの食材にさわる前に洗うこと。'
       const HEAT = '卵は半熟で仕上げるので、お子様・高齢者・妊娠中の方や体調に不安があるときは、完全に火を通すこと。'
@@ -27825,7 +27825,7 @@ try {
   {
     const fqBrowser = await chromium.launch()
     // 手順本文・メモは文節の切れ目にゼロ幅スペースが入る(ja-phrase)。突き合わせる前に取り除く
-    const noZw = (t) => (t ?? '').replace(/​/g, '')
+    const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
     // 9品と、それぞれに足した注意書きの原文（1文字でも変わったらここで落ちる）
     const FQ_NOTES = [
       ['カレーライス', '・ご飯を炊く時間は調理時間に含んでいない。ルーが仕上がったらすぐかけられるよう、4杯分を先に炊いておくこと。'],
@@ -28462,6 +28462,412 @@ try {
       await ctx.close()
     } finally {
       await frBrowser.close()
+    }
+  }
+
+
+  // --- FS-01〜08: 実際にアプリを操作した利用者テスト(コンロ1口)の報告8件(2026-08-12 便FS) ---
+  //     FS-01 「今日の夕食に戻しました」と言われた品が、夕食の行として日タブに戻る
+  //     FS-02 待ちの「この間に、次の手作業を進められます」を同じ品の続きには出さない
+  //     FS-03 材料の左に、閉じていない「(」が見えない
+  //     FS-04 検索窓のプレースホルダが幅390pxで切れない
+  //     FS-05 タイマーが動いている間は「タイマーを始める」を残さず、残り時間に置き換える
+  //     FS-06 「電子レンジ」で引ける(手順本文まるごとは検索対象にしない)
+  //     FS-07 対応外の言葉だったことが画面に出る
+  //     FS-08 手順を移すと段取りの番号が付け直されることが画面に書いてある
+  currentCheck = 'FS-01'
+  {
+    const fsBrowser2 = await chromium.launch()
+    const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
+    const watch = (p, tag) => {
+      p.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@${tag}] ${err.message}`)
+      })
+      p.on('console', (msg) => {
+        if (msg.type() !== 'error') return
+        const t = msg.text()
+        if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+        errors.push(`[console@${tag}] ${t}`)
+      })
+    }
+    /** ナビ(Pro機能)の解錠だけ前準備として直接書き込む */
+    const unlockPro = (p) =>
+      p.evaluate(async () => {
+        const db = await new Promise((res, rej) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => res(r.result)
+          r.onerror = () => rej(r.error)
+        })
+        const P = (req) =>
+          new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+        const cur = (await P(db.transaction('settings').objectStore('settings').get(1))) || { id: 1 }
+        await P(
+          db
+            .transaction('settings', 'readwrite')
+            .objectStore('settings')
+            .put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }),
+        )
+        db.close()
+      })
+
+    try {
+      // ===== FS-01: 「今日の夕食に戻しました」と言われた品が夕食の行として戻る =====
+      {
+        const ctx = await fsBrowser2.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watch(p, 'FS-01')
+        p.on('dialog', (d) => void d.accept())
+        /** レシピ詳細を開いて「今日の献立に追加」→「夕食」（報告の操作そのまま） */
+        const addToDinner = async (title) => {
+          await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await p.waitForTimeout(500)
+          await p.getByText(title, { exact: true }).first().click()
+          await p.waitForTimeout(700)
+          await p.getByRole('button', { name: '今日の献立に追加', exact: true }).click()
+          await p.waitForTimeout(300)
+          await p.getByRole('button', { name: '夕食', exact: true }).click()
+          await p.waitForTimeout(500)
+          return (await p.textContent('body')) ?? ''
+        }
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2000) // 初回シード待ち
+        await addToDinner('肉じゃが')
+
+        // ② 献立の日タブでその品の「作った！」を押す
+        await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(900)
+        const plannedBefore = noZw(await p.locator('[data-testid="day-planned"]').innerText())
+        check(
+          'FS-01 前提: 作る前は「今週の献立の予定／夕食」に並ぶ',
+          plannedBefore.includes('夕食') && plannedBefore.includes('肉じゃが'),
+          plannedBefore,
+        )
+        await p.getByRole('button', { name: '作った！', exact: true }).first().click()
+        await p.waitForTimeout(900)
+        check(
+          'FS-01 前提: 作ったら日タブから消える（作った後は予定でなく記録）',
+          (await p.locator('[data-testid="day-planned"]').count()) === 0 &&
+            (await p.locator('[data-testid="day-picked"]').count()) === 0,
+        )
+
+        // ③ もう一度、同じレシピを「今日の献立に追加」→「夕食」
+        const toast = await addToDinner('肉じゃが')
+        check(
+          'FS-01 入れ直したことと、記録が残ることを知らせる',
+          toast.includes('今日の夕食に戻しました（作った記録はそのまま残ります）'),
+        )
+        await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(900)
+        const plannedAfter = noZw(
+          (await p.locator('[data-testid="day-planned"]').count()) > 0
+            ? await p.locator('[data-testid="day-planned"]').innerText()
+            : '',
+        )
+        check(
+          'FS-01 言われたとおり「今週の献立の予定／夕食」の行として戻る',
+          plannedAfter.includes('夕食') && plannedAfter.includes('肉じゃが'),
+          plannedAfter,
+        )
+        const pickedCount = await p.locator('[data-testid="day-picked"]').count()
+        check(
+          'FS-01 食事の決まっていない「レシピ一覧から選択中」には入らない',
+          pickedCount === 0,
+          `選択中の枠=${pickedCount}`,
+        )
+        check(
+          'FS-01 「夕食に入れる」を選び直す行が出ない（夕食と言われた直後に夕食を選ばせない）',
+          !((await p.textContent('body')) ?? '').includes('夕食に入れる'),
+        )
+        const rows = await p.evaluate(async () => {
+          const db = await new Promise((res, rej) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => res(r.result)
+            r.onerror = () => rej(r.error)
+          })
+          const P = (req) =>
+            new Promise((res, rej) => {
+              req.onsuccess = () => res(req.result)
+              req.onerror = () => rej(req.error)
+            })
+          const plans = await P(db.transaction('mealPlans').objectStore('mealPlans').getAll())
+          const recipes = await P(db.transaction('recipes').objectStore('recipes').getAll())
+          const t = new Date()
+          const iso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+          const id = recipes.find((r) => r.title === '肉じゃが')?.id
+          const cooked = (recipes.find((r) => r.id === id)?.cookedLogs ?? []).filter(
+            (l) => l.date === iso,
+          ).length
+          db.close()
+          return {
+            dinner: plans.filter((e) => e.date === iso && e.slot === 'dinner' && e.recipeId === id)
+              .length,
+            cooked,
+          }
+        })
+        check('FS-01 週の予定の行は増えない（週タブで同じ品が2行にならない）', rows.dinner === 1, `行=${rows.dinner}`)
+        check('FS-01 作った記録は消えない', rows.cooked === 1, `記録=${rows.cooked}`)
+        await ctx.close()
+      }
+
+      // ===== FS-02/03/05/08: 並行調理ナビ（報告と同じ3品の段取り） =====
+      {
+        currentCheck = 'FS-02'
+        const ctx = await fsBrowser2.newContext({ viewport: { width: 390, height: 844 } })
+        // 声の操作のボタンが出る環境にして、対応外の言葉の知らせ（FS-07）も同じ画面で確かめる
+        await ctx.addInitScript(() => {
+          class FakeRecognition {
+            start() {
+              window.__fakeRecognition = this
+            }
+            stop() {}
+            abort() {}
+          }
+          window.SpeechRecognition = FakeRecognition
+          window.webkitSpeechRecognition = FakeRecognition
+          window.__emitVoice = (text) => {
+            const r = window.__fakeRecognition
+            if (!r || typeof r.onresult !== 'function') return false
+            r.onresult({ results: [[{ transcript: text }]] })
+            return true
+          }
+        })
+        const p = await ctx.newPage()
+        watch(p, 'FS-02')
+        p.on('dialog', (d) => void d.accept())
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2000)
+        await unlockPro(p)
+        // 報告と同じ顔ぶれ（味噌汁の「2分温める」の次が同じ鍋の続きになる組み合わせ）
+        await p.evaluate(async () => {
+          const db = await new Promise((res, rej) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => res(r.result)
+            r.onerror = () => rej(r.error)
+          })
+          const P = (req) =>
+            new Promise((res, rej) => {
+              req.onsuccess = () => res(req.result)
+              req.onerror = () => rej(req.error)
+            })
+          const recipes = await P(db.transaction('recipes').objectStore('recipes').getAll())
+          const store = db.transaction('todayList', 'readwrite').objectStore('todayList')
+          let addedAt = Date.now()
+          for (const title of ['肉じゃが', 'カレーライス', '豆腐とわかめの味噌汁']) {
+            const id = recipes.find((r) => r.title === title)?.id
+            if (id != null) await P(store.add({ recipeId: id, addedAt: addedAt++ }))
+          }
+          db.close()
+        })
+        await p.goto(`${BASE}/#/cook-navi`)
+        await p.reload({ waitUntil: 'networkidle' })
+        await p.waitForTimeout(1500)
+        await p.getByRole('button', { name: '段取りを作る' }).click()
+        await p.waitForTimeout(900)
+
+        const waitBlocks = await p.$$eval('[data-testid="navi-wait-block"]', (els) =>
+          els.map((el) => ({
+            card: (el.closest('li')?.innerText ?? '').replace(/\u200B/g, ''),
+            block: (el.innerText ?? '').replace(/\u200B/g, ''),
+          })),
+        )
+        const HINT = 'この間に、次の手作業を進められます'
+        const soup = waitBlocks.find((w) => w.card.includes('2分温める'))
+        const nikujaga = waitBlocks.find((w) => w.card.includes('15分煮る'))
+        check('FS-02 前提: 味噌汁の「2分温める」の待ちが段取りに出る', soup !== undefined)
+        check(
+          'FS-02 次が同じ鍋の続きの待ちには「この間に〜」を出さない',
+          soup !== undefined && !soup.block.includes(HINT),
+          soup?.block,
+        )
+        check(
+          'FS-02 待ちの中に別の品の手作業が入る待ちには今までどおり出す',
+          nikujaga !== undefined && nikujaga.block.includes(HINT),
+          nikujaga?.block,
+        )
+
+        // FS-03: 材料の枠は角を丸めない（左だけの線＋角丸が「(」に見えていた）
+        currentCheck = 'FS-03'
+        const ingBox = await p.$eval('[data-testid="navi-step-ingredients"]', (el) => {
+          const cs = getComputedStyle(el)
+          return {
+            radius: [cs.borderTopLeftRadius, cs.borderBottomLeftRadius].join('/'),
+            leftWidth: cs.borderLeftWidth,
+          }
+        })
+        check(
+          'FS-03 段取りの材料の枠に角丸が付いていない（左の線が弧にならない）',
+          ingBox.radius === '0px/0px' && ingBox.leftWidth === '2px',
+          JSON.stringify(ingBox),
+        )
+
+        // FS-05: タイマーが動いている間は「タイマーを始める」を残さない
+        currentCheck = 'FS-05'
+        // カードは id（navi-step-レシピ-手順）で掴む。「タイマーを始める」で絞り込むと、
+        // 押した後にその条件から外れて**別のカード**を指してしまう
+        const timerCardId = await p.$$eval('[data-testid="navi-wait-block"]', (els) => {
+          const li = els.map((el) => el.closest('li')).find((el) => el?.innerText.includes('タイマーを始める'))
+          return li?.id ?? ''
+        })
+        check('FS-05 前提: 待ちのブロックに「タイマーを始める」がある', timerCardId !== '', timerCardId)
+        const timerCard = p.locator(`#${timerCardId}`)
+        await timerCard.getByRole('button', { name: 'タイマーを始める' }).click()
+        await p.waitForTimeout(900)
+        const cardAfter = noZw(await timerCard.innerText())
+        check(
+          'FS-05 動いていることと残り時間が、始めたその場に出る',
+          /タイマー動作中 残り\d+:\d\d/.test(cardAfter),
+          cardAfter,
+        )
+        check(
+          'FS-05 押しても何も起きない「タイマーを始める」が残らない',
+          !cardAfter.includes('タイマーを始める'),
+          cardAfter,
+        )
+        // 同じブロックの残り時間の表示は1つだけ（二重に立てていない）
+        check(
+          'FS-05 待ちのブロックの残り時間は1つだけ',
+          (await timerCard.locator('[data-testid="navi-wait-timer-running"]').count()) === 1,
+        )
+
+        // FS-08: 手順を移すと段取りの番号が付け直されることが画面に書いてある
+        currentCheck = 'FS-08'
+        await p.locator('[data-testid="cook-session-start"]').click()
+        await p.waitForTimeout(700)
+        const counterBefore = await p.locator('[data-testid="cook-session-counter"]').innerText()
+        check('FS-08 前提: 調理中モードは段取りの先頭から始まる', /^段取り 1\//.test(counterBefore), counterBefore)
+        check(
+          'FS-08 前提: 移る前は番号の付け直しの説明を出さない',
+          (await p.locator('[data-testid="cook-session-pull-notice"]').count()) === 0,
+        )
+        await p.locator('[data-testid="cook-session-other-row"]').first().click()
+        await p.waitForTimeout(400)
+        await p.locator('[data-testid="cook-session-peek-move"]').first().click()
+        await p.waitForTimeout(600)
+        const notice = noZw(
+          (await p.locator('[data-testid="cook-session-pull-notice"]').count()) > 0
+            ? await p.locator('[data-testid="cook-session-pull-notice"]').innerText()
+            : '',
+        )
+        check(
+          'FS-08 移った直後に、番号を付け直したことをその場に出す',
+          notice === '移した手順を今の位置に入れたので、段取りの番号を付け直しています',
+          notice,
+        )
+        // 一覧に戻っても、並びが変わっている間は同じ説明が読める
+        await p.locator('[data-testid="cook-session-close"]').click()
+        await p.waitForTimeout(600)
+        const listNote = noZw(
+          (await p.locator('[data-testid="navi-pull-renumbered"]').count()) > 0
+            ? await p.locator('[data-testid="navi-pull-renumbered"]').innerText()
+            : '',
+        )
+        check(
+          'FS-08 段取りの一覧でも、並びが変わっている間は理由が読める',
+          listNote === '移した手順を今の位置に入れたので、段取りの番号を付け直しています',
+          listNote,
+        )
+
+        // FS-07: 対応外の言葉だったことが分かる（調理中モードの声の操作）
+        currentCheck = 'FS-07'
+        await p.locator('[data-testid="cook-session-start"]').click()
+        await p.waitForTimeout(700)
+        await p.locator('button[aria-label="声で操作する"]').click()
+        await p.waitForTimeout(500)
+        check(
+          'FS-07 前提: 「声で操作」ONで聞いている状態になる',
+          ((await p.textContent('body')) ?? '').includes('聞いています…'),
+        )
+        for (const phrase of ['進んで', 'ちょっと待って', 'うーん']) {
+          const emitted = await p.evaluate((text) => window.__emitVoice(text), phrase)
+          await p.waitForTimeout(400)
+          const body = noZw(await p.textContent('body'))
+          check(
+            `FS-07 「${phrase}」は対応外の言葉だと分かる（黙って「聞いています…」のままにしない）`,
+            emitted && body.includes(`「${phrase}」は声で使える言葉ではありません`),
+            `注入=${emitted}`,
+          )
+          await p.waitForTimeout(3800)
+        }
+        // 使える言葉は今までどおり効く（判定の作り替えで壊していないこと）
+        const before = await p.locator('[data-testid="cook-session-counter"]').innerText()
+        await p.evaluate(() => window.__emitVoice('次へ'))
+        await p.waitForTimeout(600)
+        const after = await p.locator('[data-testid="cook-session-counter"]').innerText()
+        check('FS-07 「次へ」は今までどおり手順が進む', before !== after, `${before}→${after}`)
+        // 材料の枠（調理中モード側）も角丸なし
+        const ingBox2 = await p.$eval('[data-testid="cook-session-ingredients"]', (el) => {
+          const cs = getComputedStyle(el)
+          return [cs.borderTopLeftRadius, cs.borderBottomLeftRadius].join('/')
+        })
+        check('FS-03 調理中モードの材料の枠にも角丸が付いていない', ingBox2 === '0px/0px', ingBox2)
+        await ctx.close()
+      }
+
+      // ===== FS-04/06: レシピ一覧の検索まど =====
+      {
+        currentCheck = 'FS-04'
+        const ctx = await fsBrowser2.newContext({ viewport: { width: 390, height: 844 } })
+        const p = await ctx.newPage()
+        watch(p, 'FS-04')
+        await p.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await p.waitForTimeout(2000)
+        const fit = await p.$eval('input[type="search"]', (el) => {
+          const cs = getComputedStyle(el)
+          const ctx2d = document.createElement('canvas').getContext('2d')
+          ctx2d.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+          return {
+            text: el.placeholder,
+            width: ctx2d.measureText(el.placeholder).width,
+            avail: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+          }
+        })
+        check(
+          'FS-04 検索窓のプレースホルダが幅390pxの入力欄に収まる（途中で切れない）',
+          fit.width <= fit.avail,
+          `「${fit.text}」=${Math.round(fit.width)}px / 入る幅=${Math.round(fit.avail)}px`,
+        )
+
+        currentCheck = 'FS-06'
+        const countOf = async (query) => {
+          await p.getByPlaceholder('料理名・材料・タグ').fill(query)
+          await p.waitForTimeout(700)
+          const body = noZw(await p.textContent('body'))
+          return Number(body.match(/(\d+)件 \/ 全\d+件/)?.[1] ?? -1)
+        }
+        const renji = await countOf('電子レンジ')
+        check(
+          'FS-06 「電子レンジ」で0件にならない（手順に書かれた器具で引ける）',
+          renji >= 10,
+          `${renji}件`,
+        )
+        const renji2 = await countOf('レンジ')
+        check('FS-06 「レンジ」でも同じ品が引ける', renji2 === renji, `電子レンジ=${renji} / レンジ=${renji2}`)
+        const shownTitles = noZw(await p.textContent('body'))
+        check(
+          'FS-06 手順にだけ器具が出てくる品も並ぶ',
+          shownTitles.includes('蒸しなすの香味だれ'),
+        )
+        // 手順本文をまるごと検索対象にはしない（一覧が埋まる語で増えていないこと）
+        for (const [word, limit] of [
+          ['フライパン', 1],
+          ['中火', 1],
+          ['ラップ', 1],
+        ]) {
+          const n = await countOf(word)
+          check(
+            `FS-06 「${word}」では増やさない（手順本文をまるごと検索対象にしない）`,
+            n < limit,
+            `${n}件`,
+          )
+        }
+        await ctx.close()
+      }
+    } finally {
+      await fsBrowser2.close()
     }
   }
 

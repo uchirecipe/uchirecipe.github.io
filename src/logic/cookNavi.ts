@@ -1490,12 +1490,31 @@ function awayWaitMinutes(items: readonly TimelineItem[]): number {
 }
 
 /**
- * タイムライン上で index の手順より後に「手作業系」の手順が残っているか。
- * 待ち手順の「この間に、次の手作業を進められます」ヒントは、実際に後続の手作業が
- * あるときだけ表示する（最後の待ち工程にまで出るのを防ぐ。2026-07-09ペルソナ第2波）
+ * その待ちの**中に**進められる手作業が、段取りの上に本当にあるか。
+ * 待ちのブロックの「この間に、次の手作業を進められます」はこれが真のときだけ出す。
+ *
+ * 2026-07-09（ペルソナ第2波）: 最後の待ち工程にまで出ていたので「後ろに手作業が残っているか」
+ * にした（旧 hasLaterHandsOnStep）。
+ *
+ * 2026-08-12 便FS-2（利用者テスト）: 「鍋にだし汁…2分ほど煮る」の待ちにこの一文が出るのに、
+ * 次の手順は「火を弱め、みそを溶き入れる」＝**同じ鍋の続き**だった。2分の間にできる作業ではない。
+ * 「後ろに手作業があるか」では、待ちが明けてからしか始められない続きの手順まで数えてしまう。
+ *
+ * 段取りは、待ちを仕掛けても料理人の時計を進めない（待ちは裏で進む）ので、
+ * **待ちが明ける前に始まる手作業＝その待ちの中に入る作業**になる。同じ品の続きは、
+ * その品が空くのを待ってからしか置かれない（readyAt）ため、必ず待ちの終わり以降に始まる。
+ * つまり「開始が待ちの終わりより前の手作業があるか」だけを見れば、
+ * 同じ品の続きは構造的に数えられない（品の異同を別途見比べる必要がない）。
  */
-export function hasLaterHandsOnStep(items: readonly { kind: StepKind }[], index: number): boolean {
-  return items.some((item, i) => i > index && item.kind === 'active')
+export function hasFillableWorkDuringWait(
+  items: readonly { kind: StepKind; startMin: number; endMin: number }[],
+  index: number,
+): boolean {
+  const wait = items[index]
+  if (!wait) return false
+  return items.some(
+    (item, i) => i > index && item.kind === 'active' && item.startMin < wait.endMin,
+  )
 }
 
 /**
