@@ -1792,7 +1792,8 @@ export const ja = {
     backupRestoreDescription: '書き出したファイルを選んで読み込みます。',
     backupImportReplace: 'データを上書き',
     // 置き換えボタン直下に出す短い注意キャプション(2026-07-16 データ消失事故の再発防止。
-    // 追加側のbackupImportMergeNoteと対になる、置き換え側の警告表示)
+    // 置き換え側の警告表示。2026-08-12 便FWで追加側のキャプションは削除したので、
+    // 短い注意が付くのは「データを上書き」の側だけになった)
     importReplaceCaption: '今のデータを消して選んだファイルの内容だけにします',
     backupImportMerge: '今のデータに追加',
     // 置き換え確認文(2026-07-17設定ゼロベース裁定#6a・app/CLAUDE.md規約F)。ファイル選択を開く前

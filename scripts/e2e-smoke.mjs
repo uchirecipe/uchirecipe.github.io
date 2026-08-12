@@ -13276,8 +13276,10 @@ try {
         `表示=${arCount}`,
       )
       check(
+        // 2026-08-12 便FW: 「書き出す手順」の説明にボタン名を書いたので、本文の文字で
+        // 有無を測ると必ず引っかかる。見たいのは「ボタンが出ているか」なのでボタンで数える
         'ARCHIVE-01 書き出す前は「書き出した記録を端末から消す」が出ない(2段階)',
-        !(await arPage.textContent('body')).includes('書き出した記録を端末から消す'),
+        (await arPage.getByRole('button', { name: '書き出した記録を端末から消す' }).count()) === 0,
       )
 
       // 書き出し(保存先を選べない環境=自動ダウンロード経路)
@@ -13353,9 +13355,10 @@ try {
       check('ARCHIVE-01 レシピ本体は残る', arAfterDelete.title === arSetup.title)
       const arAfterText = await arPage.textContent('body')
       check(
+        // 便FWと同じ理由でボタンの数で見る（説明文にはボタン名が書いてある）
         'ARCHIVE-01 削除後は対象0件になり書き出しボタンが消える',
         arAfterText.includes('より前の記録はありません') &&
-          !arAfterText.includes('古い記録をファイルに書き出す'),
+          (await arPage.getByRole('button', { name: '古い記録をファイルに書き出す' }).count()) === 0,
       )
 
       // アーカイブを見る: 書き出したファイルを選ぶと中身が読める(端末には保存しない)
