@@ -277,6 +277,24 @@ const sectionDeepLinks: Record<string, string> = {
 const nodeHeadingCls = 'text-lg font-bold'
 
 /**
+ * 節・欄まで自動スクロールする（目次チップ・?section=直リンク・バックアップバナーの共通処理）。
+ *
+ * 上に固定されている帯（目次チップ。?back=付きで来たときは「◯◯に戻る」も同じ帯に入る）の分だけ
+ * 手前で止める。CSSの scroll-mt-24（96px）は帯が1段のときの高さで、戻るボタンが増えると
+ * 足りず、着いた先の見出しが帯の下に10pxほど隠れていた（2026-08-13 便GE。
+ * 「食数の設定」へ案内した初回のお知らせから飛ぶと、その欄の名前が欠けて見えた）。
+ * 帯の実際の高さを測ってから止めるので、帯が1段でも2段でも同じ見え方になる。
+ */
+function scrollToSettingsSection(id: string): void {
+  const el = document.getElementById(id)
+  if (!el) return
+  const bar = document.querySelector('[data-app-top-bar]')
+  const barHeight = bar ? bar.getBoundingClientRect().height : 0
+  const top = el.getBoundingClientRect().top + window.scrollY - barHeight - 8
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+}
+
+/**
  * importRecipeSetの結果メッセージを組み立てる。更新（内容が変わっていた再取込）が
  * 1件以上あるときだけ「{a}件追加・{u}件更新しました」系にし、無いときは従来文言のまま
  * （u=0のときまで新文言を出すと冗長なため・2026-07-12）。
@@ -565,7 +583,7 @@ export default function SettingsPage() {
     if (!settings) return
     scrolledToSectionRef.current = true
     requestAnimationFrame(() => {
-      document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      scrollToSettingsSection(elementId)
     })
   }, [searchParams, settings])
 
@@ -577,13 +595,13 @@ export default function SettingsPage() {
    * 単純にbackup-sectionへスクロールする
    */
   const goToBackupExport = () => {
-    document.getElementById('backup-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    scrollToSettingsSection('backup-section')
   }
 
   /** 目次チップのタップ: 該当節の見出しへスクロールし、チップのハイライトを即時に切り替える */
   const scrollToSection = (id: string) => {
     setActiveSection(id)
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    scrollToSettingsSection(id)
   }
 
   // 目次チップの現在地ハイライト(1本スクロール化)。スクロールに応じて表示中の節を追従表示する。

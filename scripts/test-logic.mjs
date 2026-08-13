@@ -399,6 +399,11 @@ import { ja } from '../src/i18n/ja.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { isStandaloneDisplay } from '../src/logic/standalone.ts'
 import { shouldShowHomeScreenNotice } from '../src/logic/homeScreenNotice.ts'
+import {
+  shouldShowFirstSetupNotice,
+  hasChosenFirstSetup,
+  FIRST_SETUP_NOTICE_SEEN_KEY,
+} from '../src/logic/firstSetupNotice.ts'
 import { isImeConfirmKey } from '../src/logic/imeKey.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -15513,8 +15518,22 @@ eq(
     eq(`HOMENOTICE 判定材料に ${signal} を見ている`, noticeSrc.includes(signal), true)
   }
 
-  // 見た記録は端末内(localStorage)だけ。設定(Dexie)に置くとバックアップの中身に混ざる
-  eq('HOMENOTICE 見た記録はlocalStorageに置く', noticeSrc.includes('localStorage'), true)
+  // 見た記録は端末内(localStorage)だけ。設定(Dexie)に置くとバックアップの中身に混ざる。
+  // 読み書き自体は logic/noticeSeen.ts に集約した(2026-08-13 便GE)ので、そちらで見る
+  const seenSrc = readFileSync(path.join(scriptDir, '../src/logic/noticeSeen.ts'), 'utf-8')
+  eq('HOMENOTICE 見た記録はlocalStorageに置く', seenSrc.includes('window.localStorage'), true)
+  eq(
+    'HOMENOTICE 見た記録の読み書きは共通の1か所に寄せてある',
+    noticeSrc.includes("from './noticeSeen'") &&
+      noticeSrc.includes('hasSeenNotice(HOME_SCREEN_NOTICE_SEEN_KEY)') &&
+      noticeSrc.includes('markNoticeSeen(HOME_SCREEN_NOTICE_SEEN_KEY)'),
+    true,
+  )
+  eq(
+    'HOMENOTICE 記録を読めない端末は「見た」扱い(毎回出る窓にしない)',
+    /catch\s*\{\s*return true/.test(seenSrc),
+    true,
+  )
   const backupSrc = readFileSync(path.join(scriptDir, '../src/logic/backup.ts'), 'utf-8')
   const typesSrc = readFileSync(path.join(scriptDir, '../src/db/types.ts'), 'utf-8')
   eq(
@@ -15553,23 +15572,233 @@ eq(
     false,
   )
 
-  // 窓の作り: エラー・警告に見える色を使わない(条件反射で閉じたくなる画面にしない)
+  // 窓の作り: エラー・警告に見える色を使わない(条件反射で閉じたくなる画面にしない)。
+  // 窓そのもの(カード・✕・閉じ方の3通り)は共通の NoticeDialog.tsx に移した(2026-08-13 便GE)
   const noticeUi = readFileSync(
     path.join(scriptDir, '../src/components/HomeScreenNotice.tsx'),
     'utf-8',
   )
+  const dialogUi = readFileSync(path.join(scriptDir, '../src/components/NoticeDialog.tsx'), 'utf-8')
   eq(
     'HOMENOTICE 警告色・全面の黒地を使っていない',
-    /warning|bg-black|text-red|AlertTriangle/.test(noticeUi),
+    /warning|bg-black|text-red|AlertTriangle/.test(noticeUi + dialogUi),
     false,
+  )
+  eq(
+    'HOMENOTICE 窓は✕・カード外のタップ・端末の戻る(Escape)の3通りで閉じられる',
+    dialogUi.includes('useOverlayDismiss(true, onClose)') &&
+      dialogUi.split('onClick={onClose}').length - 1 >= 2,
+    true,
   )
   eq(
     'HOMENOTICE ✕・カード外のタップ・端末の戻る・「このまま使う」のどれで閉じても見た記録を残す',
     noticeUi.includes('markHomeScreenNoticeSeen()') &&
-      noticeUi.includes('useOverlayDismiss(true, close)') &&
-      noticeUi.split('onClick={close}').length - 1 >= 3,
+      noticeUi.includes('onClose={close}') &&
+      noticeUi.includes('onClick={close}'),
     true,
   )
+}
+
+// ---------- FIRSTSETUP: 「食数の設定」「台所の器具」の初回の案内(2026-08-13 便GE・docs/65 A-4) ----------
+{
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const base = {
+    settingsLoaded: true,
+    recipeShown: true,
+    openedForTask: false,
+    seen: false,
+    settingsChosen: false,
+  }
+  eq('FIRSTSETUP 条件をすべて満たすと出す', shouldShowFirstSetupNotice(base), true)
+  eq(
+    'FIRSTSETUP 設定の読み込みが済むまでは出さない',
+    shouldShowFirstSetupNotice({ ...base, settingsLoaded: false }),
+    false,
+  )
+  eq(
+    'FIRSTSETUP レシピが表示されていない画面(読み込み中・見つからない)には出さない',
+    shouldShowFirstSetupNotice({ ...base, recipeShown: false }),
+    false,
+  )
+  eq(
+    'FIRSTSETUP 用事があって開いた画面(タイマーの手順・記録の編集)には割り込まない',
+    shouldShowFirstSetupNotice({ ...base, openedForTask: true }),
+    false,
+  )
+  eq('FIRSTSETUP 一度見たら出さない', shouldShowFirstSetupNotice({ ...base, seen: true }), false)
+  eq(
+    'FIRSTSETUP すでに設定を自分で決めている人には出さない',
+    shouldShowFirstSetupNotice({ ...base, settingsChosen: true }),
+    false,
+  )
+
+  // 「自分で決めている」の見分け(5項目のどれか1つでも決めていれば出さない)
+  eq('FIRSTSETUP まっさらな設定は「まだ決めていない」', hasChosenFirstSetup({}), false)
+  eq('FIRSTSETUP 設定が読めていないときも「まだ決めていない」', hasChosenFirstSetup(undefined), false)
+  for (const [label, patch] of [
+    ['食数の設定', { householdServings: 2 }],
+    ['コンロの口数', { kitchenBurners: 1 }],
+    ['電子レンジ(持っていない)', { kitchenNoMicrowave: true }],
+    ['魚焼きグリル(持っていない)', { kitchenNoGrill: true }],
+    ['トースター(持っていない)', { kitchenNoToaster: true }],
+  ]) {
+    eq(`FIRSTSETUP ${label}を決めていたら出さない`, hasChosenFirstSetup(patch), true)
+  }
+  // 既定と同じ値に戻した場合も「自分で決めた」＝案内は出さない(触った人には用のない窓)
+  eq(
+    'FIRSTSETUP 既定と同じ値(2口)を選び直した人も「決めた」扱い',
+    hasChosenFirstSetup({ kitchenBurners: 2 }),
+    true,
+  )
+  eq(
+    'FIRSTSETUP 「持っている」に戻した(false)人も「決めた」扱い',
+    hasChosenFirstSetup({ kitchenNoToaster: false }),
+    true,
+  )
+
+  // 見た記録は端末内(localStorage)だけ。設定(Dexie)＝バックアップの中身には入れない
+  const fsSrc = readFileSync(path.join(scriptDir, '../src/logic/firstSetupNotice.ts'), 'utf-8')
+  eq(
+    'FIRSTSETUP 見た記録は端末内(localStorage)の共通の仕組みに載せる',
+    fsSrc.includes("from './noticeSeen'") &&
+      fsSrc.includes('hasSeenNotice(FIRST_SETUP_NOTICE_SEEN_KEY)') &&
+      fsSrc.includes('markNoticeSeen(FIRST_SETUP_NOTICE_SEEN_KEY)'),
+    true,
+  )
+  eq('FIRSTSETUP 保存キーが他の案内と重なっていない', FIRST_SETUP_NOTICE_SEEN_KEY, 'uchirecipe:firstSetupNoticeSeen')
+  const fsBackupSrc = readFileSync(path.join(scriptDir, '../src/logic/backup.ts'), 'utf-8')
+  const fsTypesSrc = readFileSync(path.join(scriptDir, '../src/db/types.ts'), 'utf-8')
+  eq(
+    'FIRSTSETUP 見た記録がバックアップ・設定の器に入り込んでいない',
+    /firstSetupNotice/i.test(fsBackupSrc) || /firstSetupNotice/i.test(fsTypesSrc),
+    false,
+  )
+
+  /**
+   * 文言(規約H)。オーナー指示「ここに情報詰めすぎると、読まずに消されるので、
+   * 必要最低限の文字数で、的確な場所に案内を出したい」に対して、便GEで上限を決めた。
+   * 上限を超えたらここで落ちる＝あとから一言足していく形での肥大化を止める
+   */
+  const n = (s) => [...s].length
+  const fsText = ja.firstSetupNotice
+  eq(`FIRSTSETUP 見出しは20字以内(実測${n(fsText.title)}字)`, n(fsText.title) <= 20, true)
+  eq(`FIRSTSETUP 本文は45字以内(実測${n(fsText.body)}字)`, n(fsText.body) <= 45, true)
+  eq(
+    `FIRSTSETUP ボタンは各12字以内(実測${n(fsText.settingsButton)}字/${n(fsText.dismissButton)}字)`,
+    n(fsText.settingsButton) <= 12 && n(fsText.dismissButton) <= 12,
+    true,
+  )
+  eq(
+    `FIRSTSETUP あとから変える場所の一言は40字以内(実測${n(fsText.laterNote)}字)`,
+    n(fsText.laterNote) <= 40,
+    true,
+  )
+  const fsTotal =
+    n(fsText.title) +
+    n(fsText.body) +
+    n(fsText.settingsButton) +
+    n(fsText.dismissButton) +
+    n(fsText.laterNote)
+  eq(`FIRSTSETUP 窓の文字は合計120字以内(実測${fsTotal}字)`, fsTotal <= 120, true)
+
+  eq(
+    'FIRSTSETUP 「必須」「推奨」「おすすめ」等の押す言葉を使っていない',
+    /必須|推奨|おすすめ|ぜひ|しましょう/.test(
+      `${fsText.title}${fsText.body}${fsText.settingsButton}${fsText.dismissButton}${fsText.laterNote}`,
+    ),
+    false,
+  )
+  eq(
+    'FIRSTSETUP 本文は2つの設定がどこに効くかを言っている',
+    fsText.body.includes('分量') && fsText.body.includes('段取り'),
+    true,
+  )
+  eq(
+    'FIRSTSETUP あとから変える場所を、設定の欄の名前そのままで案内している',
+    fsText.laterNote.includes(ja.settings.householdServingsTitle) &&
+      fsText.laterNote.includes(ja.settings.kitchenTitle) &&
+      fsText.laterNote.includes(ja.settings.tabBasic),
+    true,
+  )
+  eq(
+    'FIRSTSETUP 案内文が「ここ」「これ」で場所を示していない',
+    /(^|[^そあど])ここ|これ(から)?を?(見|開)/.test(`${fsText.body}${fsText.laterNote}`),
+    false,
+  )
+  eq(
+    'FIRSTSETUP 「タブ」という言い方をしていない(設定は1本スクロール)',
+    /タブ/.test(`${fsText.title}${fsText.body}${fsText.laterNote}`),
+    false,
+  )
+
+  // 窓の作り(ホーム画面追加の案内と同じ NoticeDialog に載せる)と、設定への行き先
+  const fsUi = readFileSync(path.join(scriptDir, '../src/components/FirstSetupNotice.tsx'), 'utf-8')
+  eq(
+    'FIRSTSETUP 警告色・全面の黒地を使っていない',
+    /warning|bg-black|text-red|AlertTriangle/.test(fsUi),
+    false,
+  )
+  eq(
+    'FIRSTSETUP ✕・カード外のタップ・端末の戻る・「このまま使う」のどれで閉じても見た記録を残す',
+    fsUi.includes('markFirstSetupNoticeSeen()') &&
+      fsUi.includes('onClose={close}') &&
+      fsUi.includes('onClick={close}'),
+    true,
+  )
+  eq(
+    'FIRSTSETUP 設定へのリンクを押した時点でも見た記録を残す(見た人に次回また出さない)',
+    fsUi.includes('onClick={markFirstSetupNoticeSeen}'),
+    true,
+  )
+  eq(
+    'FIRSTSETUP 設定への行き先は「食数の設定」の欄(?section=household)',
+    fsUi.includes("'/settings?section=household'"),
+    true,
+  )
+  eq(
+    'FIRSTSETUP 設定から今読んでいたレシピへ帰れる(?back=を載せている)',
+    fsUi.includes('settingsLinkWithBack('),
+    true,
+  )
+  // 1回のタップで両方の欄が視界に入ること＝設定画面で「食数の設定」の次が「台所の器具」であること。
+  // 間に別の欄が挟まると、案内した2つのうち片方までしか届かない
+  const fsSettingsSrc = readFileSync(path.join(scriptDir, '../src/pages/SettingsPage.tsx'), 'utf-8')
+  eq(
+    'FIRSTSETUP 設定の直リンク(?section=household)の着地点がある',
+    /household:\s*'household-section'/.test(fsSettingsSrc) &&
+      fsSettingsSrc.includes('id="household-section"'),
+    true,
+  )
+  const fsHouseholdAt = fsSettingsSrc.indexOf('id="household-section"')
+  const fsKitchenAt = fsSettingsSrc.indexOf('id="kitchen-section"')
+  eq(
+    'FIRSTSETUP 「食数の設定」のすぐ次が「台所の器具」になっている',
+    fsHouseholdAt > 0 &&
+      fsKitchenAt > fsHouseholdAt &&
+      !/id="(?!kitchen-section)[a-z-]+-section"/.test(
+        fsSettingsSrc.slice(fsHouseholdAt + 1, fsKitchenAt),
+      ),
+    true,
+  )
+  // 出す場所はレシピ詳細だけ(ホーム等へ広げない)。docs/65 A-4の決定
+  const fsDetailSrc = readFileSync(path.join(scriptDir, '../src/pages/RecipeDetailPage.tsx'), 'utf-8')
+  eq('FIRSTSETUP レシピ詳細から呼んでいる', fsDetailSrc.includes('<FirstSetupNotice'), true)
+  eq(
+    'FIRSTSETUP 用事の有無は最初の描画時のクエリで見る(?step=・?editLog=は使い終わると消えるため)',
+    fsDetailSrc.includes(
+      "useRef(searchParams.has('step') || searchParams.has('editLog'))",
+    ),
+    true,
+  )
+  for (const page of ['HomePage.tsx', 'RecipesPage.tsx', 'MealPlanPage.tsx', 'CookNaviPage.tsx']) {
+    eq(
+      `FIRSTSETUP ${page} には出していない`,
+      readFileSync(path.join(scriptDir, `../src/pages/${page}`), 'utf-8').includes(
+        'FirstSetupNotice',
+      ),
+      false,
+    )
+  }
 }
 
 // ---------- 便FD(2026-08-10 オーナー実機フィードバック)の再発防止 ----------

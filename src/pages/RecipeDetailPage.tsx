@@ -64,6 +64,12 @@ import ShareModal, { type ShareSelection } from '../components/ShareModal'
 import CustomTimerModal from '../components/CustomTimerModal'
 import FocusMode from '../components/FocusMode'
 import NutritionTeaser from '../components/NutritionTeaser'
+import FirstSetupNotice from '../components/FirstSetupNotice'
+import {
+  hasChosenFirstSetup,
+  hasSeenFirstSetupNotice,
+  shouldShowFirstSetupNotice,
+} from '../logic/firstSetupNotice'
 import PriceEditModal, { type PriceEditTarget } from '../components/PriceEditModal'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import { useRevealOnOpen } from '../components/useRevealOnOpen'
@@ -386,6 +392,37 @@ export default function RecipeDetailPage() {
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, recipe])
+
+  /**
+   * 「食数の設定」「台所の器具」の初回の案内（2026-08-13 便GE・docs/65 A-4）。
+   * 出す条件（この端末で未表示・2つの設定をどれも自分で決めていない・レシピが表示されている・
+   * 用事があって開いた画面ではない）は logic/firstSetupNotice.ts が持つ。
+   *
+   * 判定は**この画面に着いてから1度だけ**行う（decidedRef）。設定が読み込まれた時点で決め、
+   * 以降は開いている間ずっと同じ＝読み込みの途中や設定の変更で出たり消えたりしない。
+   * 用事の有無は最初の描画時のクエリで見る（?step= と ?editLog= は、使い終わると
+   * すぐURLから消える作りなので、消えたあとに読むと「用事なし」に見えてしまう）。
+   */
+  const [showFirstSetupNotice, setShowFirstSetupNotice] = useState(false)
+  const firstSetupDecidedRef = useRef(false)
+  const openedForTaskRef = useRef(searchParams.has('step') || searchParams.has('editLog'))
+  useEffect(() => {
+    if (firstSetupDecidedRef.current) return
+    // レシピか設定がまだ無いうちは判定しない。読み込み中(undefined)と見つからない(null)を
+    // まとめて待つ＝初回起動で基本レシピの投入が終わる前にレシピ詳細のURLを直接開いても、
+    // 「見つからない」を見て「出さない」と決めてしまわない（投入後に出る）
+    if (!settings || recipe == null) return
+    firstSetupDecidedRef.current = true
+    setShowFirstSetupNotice(
+      shouldShowFirstSetupNotice({
+        settingsLoaded: true,
+        recipeShown: true,
+        openedForTask: openedForTaskRef.current,
+        seen: hasSeenFirstSetupNotice(),
+        settingsChosen: hasChosenFirstSetup(settings),
+      }),
+    )
+  }, [settings, recipe])
 
   if (recipe === undefined) {
     // 読み込み中(undefined)は何も出さない。id が存在しない場合は下の分岐へ
@@ -1352,6 +1389,12 @@ export default function RecipeDetailPage() {
             />
           </div>
         </div>
+      )}
+
+      {/* 「食数の設定」「台所の器具」の初回の案内（2026-08-13 便GE）。
+          レシピ詳細を初めて開いたときに1回だけ出す（判定は上の副作用） */}
+      {showFirstSetupNotice && (
+        <FirstSetupNotice onClose={() => setShowFirstSetupNotice(false)} />
       )}
     </div>
   )
