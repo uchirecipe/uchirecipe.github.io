@@ -48,6 +48,7 @@ import {
 import { hasNgIngredient } from '../logic/ng'
 import { countFreeLimitRecipes, FREE_LIMIT, FREE_LIMIT_ENABLED } from '../logic/freeLimit'
 import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
+import { clampBurners, DEFAULT_KITCHEN, MIN_BURNERS, MAX_BURNERS } from '../logic/cookAppliance'
 import { restoreHomeWidget } from '../logic/homeWidgets'
 import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
@@ -170,6 +171,21 @@ const householdServingsOptions = Array.from(
   (_, i) => MIN_SERVINGS + i,
 )
 
+// 台所の器具（2026-08-13 便GC・docs/72 第3段）。コンロの口数は1〜4口（logic/cookAppliance.ts）
+const burnerOptions = Array.from(
+  { length: MAX_BURNERS - MIN_BURNERS + 1 },
+  (_, i) => MIN_BURNERS + i,
+)
+/** 持っている／持っていないを切り替える3器具。保存する値は「持っていない」側だけ持つ */
+const kitchenApplianceRows: {
+  key: 'kitchenNoMicrowave' | 'kitchenNoGrill' | 'kitchenNoToaster'
+  label: string
+}[] = [
+  { key: 'kitchenNoMicrowave', label: ja.settings.kitchenMicrowave },
+  { key: 'kitchenNoGrill', label: ja.settings.kitchenGrill },
+  { key: 'kitchenNoToaster', label: ja.settings.kitchenToaster },
+]
+
 // パーソナライズ節の小見出し(2026-07-16 UI総点検B-2: 9カードフラット並列を4グループに整理)。
 // 既存のセクション見出しパターン(RecipesPageの絞り込みパネル等)に合わせ、小さめの text-sm font-bold
 const groupHeadingCls = 'mt-[var(--space-lg)] text-sm font-bold text-ink-muted'
@@ -242,6 +258,9 @@ const sectionDeepLinks: Record<string, string> = {
   // householdは2026-08-03 便DK: 設定「ふだん作る人数」へ名前で飛べる値(?section=household)。
   // 献立の食数・買い物メモの分量・概算食費の既定がどこで決まっているかを案内するときの行き先
   household: 'household-section',
+  // kitchenは2026-08-13 便GC: 設定「台所の器具」へ名前で飛べる値(?section=kitchen)。
+  // 並行調理ナビの段取りから、組んだ前提を変えに行ける行き先
+  kitchen: 'kitchen-section',
   // aisleは2026-08-02 便CT/C15: 買い物メモの「売り場順を変える」の遷移先。
   // 並びの由来と変え方が、買い物メモの画面から辿れるようにする
   aisle: 'aisle-section',
@@ -1296,6 +1315,73 @@ export default function SettingsPage() {
                 </option>
               ))}
             </select>
+          </section>
+
+          {/* 台所の器具（2026-08-13 便GC・docs/72 第3段）。実操作テスト2体目（コンロ1口）の
+              一番の不満「器具の設定が一つもない。うちは1口なので、この段取りはそもそも成立しません」
+              への対応。効く先は並行調理ナビの段取りだけ。
+              持っていない器具の工程はコンロ1口として数える（logic/cookAppliance.ts）。
+              id は直リンク(?section=kitchen)の着地点 */}
+          <section id="kitchen-section" className={`${sectionCls} scroll-mt-24`}>
+            <h2 className="font-bold">{ja.settings.kitchenTitle}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.kitchenDescription}</p>
+            <label
+              htmlFor="kitchen-burners"
+              className="mt-[var(--space-sm)] block text-sm font-bold"
+            >
+              {ja.settings.kitchenBurnersLabel}
+            </label>
+            <select
+              id="kitchen-burners"
+              data-testid="kitchen-burners"
+              value={clampBurners(settings.kitchenBurners ?? DEFAULT_KITCHEN.burners)}
+              onChange={(e) => {
+                void updateSettings({ kitchenBurners: clampBurners(Number(e.target.value)) })
+              }}
+              className="mt-1 w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink"
+            >
+              {burnerOptions.map((n) => (
+                <option key={n} value={n}>
+                  {ja.settings.kitchenBurnersOption.replace('{n}', String(n))}
+                </option>
+              ))}
+            </select>
+            <p className="mt-[var(--space-md)] text-sm font-bold">
+              {ja.settings.kitchenApplianceLabel}
+            </p>
+            <ul className="mt-1">
+              {kitchenApplianceRows.map(({ key, label }) => {
+                const has = !settings[key]
+                return (
+                  <li key={key} className="py-1">
+                    <label className="flex items-center justify-between gap-3">
+                      <span className="min-w-0">{label}</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={has}
+                        aria-label={label}
+                        data-testid={`kitchen-${key}`}
+                        onClick={() => void updateSettings({ [key]: has })}
+                        className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                          has ? 'bg-accent' : 'bg-edge'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                            has ? 'left-7' : 'left-1'
+                          }`}
+                        />
+                      </button>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
+              {ja.settings.kitchenMissingNote}
+            </p>
+            <p className="mt-1 text-sm text-ink-muted">{ja.settings.kitchenChangeNote}</p>
           </section>
 
           {/* NG食材。見出し行に件数を常時表示する(2026-07-17設定ゼロベース裁定#2。

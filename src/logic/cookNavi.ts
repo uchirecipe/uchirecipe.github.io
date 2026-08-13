@@ -1,6 +1,14 @@
 import type { Recipe, Step } from '../db/types'
 import { findTimeTokens } from './time'
 import { ja } from '../i18n/ja'
+import {
+  ApplianceSchedule,
+  DEFAULT_KITCHEN,
+  MAX_BURNERS,
+  stepApplianceFor,
+  type ApplianceKey,
+  type KitchenEquipment,
+} from './cookAppliance'
 
 /**
  * 並行調理ナビ（Pro）の中核ロジック。
@@ -1205,6 +1213,14 @@ interface Job {
      * この手順だけは、直前の待ちが明けるのを待たずに着手してよい。
      */
     parallelCue: boolean
+    /** その工程が使う器具（2026-08-13 便GC・docs/72 第3段）。使わない工程は null */
+    applianceKey: ApplianceKey | null
+    /**
+     * その工程が器具を**ふさぐ**か。
+     * 待ちのうち漬ける・冷ます・寝かせる（waitUrgency の relaxed）はふさがない
+     * （docs/72 §3「占有する待ち＝煮る・焼く／占有しない待ち＝漬ける・冷ます・寝かせる」）。
+     */
+    occupies: boolean
   }[]
   /** 次に着手する手順の添字 */
   ptr: number
@@ -1223,7 +1239,7 @@ interface Job {
   attendUntil: number
 }
 
-function buildJobs(recipes: Recipe[]): Job[] {
+function buildJobs(recipes: Recipe[], kitchen: KitchenEquipment): Job[] {
   const jobs = recipes
     .filter((r) => r.id != null && r.steps.length > 0)
     .map((r, colorIndex) => ({
@@ -1248,6 +1264,13 @@ function buildJobs(recipes: Recipe[]): Job[] {
         // 手作業の所要時間は、作業の種類と手順文の長さから見積る（2026-08-09 便EH）。
         // 従来の一律4分では、待ち時間に入る工程数の計算がそのままずれていた
         const active = estimateActiveMinutes(s)
+        // どの器具をふさぐか（2026-08-13 便GC）。持っていない器具の工程はコンロ1口として数える
+        const applianceKey = stepApplianceFor(s.text, kitchen)
+        const occupies =
+          applianceKey != null &&
+          (kind === 'wait'
+            ? !longRest && waitMinutes > 0 && waitUrgency(s) !== 'relaxed'
+            : active.minutes > 0)
         return {
           stepIndex,
           stepNumber,
@@ -1279,6 +1302,8 @@ function buildJobs(recipes: Recipe[]): Job[] {
                 ? Number.POSITIVE_INFINITY
                 : waitMinutes + waitOverrunAllowance(s, waitMinutes),
           parallelCue: false,
+          applianceKey,
+          occupies,
         }
       }),
     }))
@@ -1346,6 +1371,29 @@ function hasIgnitionAhead(job: Job): boolean {
 }
 
 /**
+ * 前倒ししてまで先に着火する放置調理の長さ（分。2026-08-13 便GC・docs/72 第3段 B）。
+ *
+ * 着火とみなす下限（IGNITION_WAIT_MINUTES＝8分）より長くしてある。実測すると、
+ * **8〜12分の放置調理まで前倒しすると、その品だけが早く仕上がって完成の開き（N1）が広がる**
+ * （野生＋ホールドアウト344通りで、30%超の割合が 25.0%→25.9% に悪化した）。
+ * 15分以上の放置調理は、始めるのが遅れたぶんだけ段取り全体がそのまま伸びるので、
+ * 前倒しの得が開きの損を上回る（同梱109品の平均短縮率 33.0%→33.2%）。
+ */
+const IGNITION_PULL_MINUTES = 15
+
+/**
+ * **あと1手で着火できる**品か（2026-08-13 便GC・docs/72 第3段 B）。
+ * いま進めようとしている手順の次が、長い放置調理（15分以上）そのもののとき。
+ * 口数に余裕があるときだけ、この品を先に進めて**火を重ねる**ために使う。
+ */
+function ignitesNext(job: Job): Job['steps'][number] | undefined {
+  const next = job.steps[job.ptr + 1]
+  if (!next) return undefined
+  if (next.kind !== 'wait' || next.waitMinutes < IGNITION_PULL_MINUTES) return undefined
+  return next
+}
+
+/**
  * 選んだレシピ（2〜3品想定）の手順を、1本の段取りタイムラインにまとめる。
  *
  * 貪欲法（料理人＝1人という前提の単純なシミュレーション）:
@@ -1399,10 +1447,23 @@ function hasIgnitionAhead(job: Job): boolean {
  * 全体の目安は伸びない（元から手が空いていた時間に置き直すだけ）。
  * 冷やす品には掛けない＝オーナー指示「冷たい方がいいものは先に仕上げて冷蔵庫で冷やしたい」のまま。
  */
-export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
-  const jobs = buildJobs(recipes)
+export function buildCookTimeline(
+  recipes: Recipe[],
+  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
+): CookTimeline {
+  const jobs = buildJobs(recipes, kitchen)
   const items: TimelineItem[] = []
+  const schedule = new ApplianceSchedule(kitchen)
   let cookAt = 0
+
+  /** その工程が器具をふさぐ長さ（分） */
+  const useSpan = (step: Job['steps'][number]) =>
+    step.kind === 'wait' ? step.waitMinutes : step.activeMinutes
+  /** その工程を `at` から始めても、器具の台数を超えないか（2026-08-13 便GC・docs/72 第3段 A） */
+  const fitsAppliance = (step: Job['steps'][number], at: number) =>
+    !step.occupies || step.applianceKey == null
+      ? true
+      : schedule.canUse(step.applianceKey, at, at + useSpan(step))
 
   const hasRemaining = () => jobs.some((j) => j.ptr < j.steps.length)
   /** 直前に出した手作業の種類（同じ種類の作業を続けてまとめるために覚えておく） */
@@ -1427,6 +1488,24 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       cookAt = Math.min(...active.map((j) => j.readyAt))
       ready = active.filter((j) => j.readyAt <= cookAt)
     }
+
+    // 【器具の制約】設定した台数を超えて同時に使う工程は、いまは始められない
+    // （2026-08-13 便GC・docs/72 第3段 A。R2「うちは1口なので、この段取りはそもそも成立しません」）
+    const usable = ready.filter((j) => fitsAppliance(j.steps[j.ptr], cookAt))
+    if (usable.length === 0) {
+      // 全部が器具の空き待ち＝いちばん早く空く時刻（または次に待ちが明ける時刻）まで進める
+      let nextAt = Number.POSITIVE_INFINITY
+      for (const j of ready) {
+        const key = j.steps[j.ptr].applianceKey
+        const freeAt = key == null ? undefined : schedule.nextFreeAt(key, cookAt)
+        if (freeAt != null && freeAt > cookAt) nextAt = Math.min(nextAt, freeAt)
+      }
+      for (const j of active) if (j.readyAt > cookAt) nextAt = Math.min(nextAt, j.readyAt)
+      // 時刻を必ず前へ進める（取りこぼしがあっても計算が止まらないように）
+      cookAt = Number.isFinite(nextAt) && nextAt > cookAt ? nextAt : cookAt + DEFAULT_ACTIVE_MINUTES
+      continue
+    }
+    ready = usable
 
     /**
      * 「この時刻までに手を戻さないといけない」いちばん早い締め切り（2026-08-09 便EH）。
@@ -1490,6 +1569,25 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     // 利用者が「その間に」と書いた手順は、その待ちが動いているうちに片付ける
     const cueDue = (j: Job) => (j.steps[j.ptr].parallelCue && j.waitDoneAt > cookAt ? 0 : 1)
     const ignitionRank = (j: Job) => (hasIgnitionAhead(j) ? 0 : 1)
+    /**
+     * 【口数に余裕があるときは、もっと火を重ねる】（2026-08-13 便GC・docs/72 第3段 B）。
+     *
+     * **あと1手で長い放置調理に入れる品**で、**その器具にいま空きがある**なら、その一手を先に出す。
+     * ＝火を1つ増やせるときは増やす。空きが無いとき（1口で鍋がふさがっているとき）は
+     * 従来の並べ方のまま＝急いで着火の準備をしても口が空いていないので意味がない。
+     *
+     * 対象は**器具をふさぐ待ち**だけ。冷蔵庫で寝かせる・漬け込むのように器具を取らない待ちは
+     * 従来の並べ方に任せる（急いでも誰の邪魔にもならないので、切る流れを断つ理由がない）。
+     */
+    const ignitionNow = (j: Job) => {
+      const next = ignitesNext(j)
+      if (!next || next.applianceKey == null || !next.occupies) return 1
+      if (!schedule.hasSpare(next.applianceKey, cookAt)) return 1
+      // 前倒しするのは**いま着手できる中でいちばん時間の掛かる品**だけにする。
+      // どの品でも前倒しすると、短い品まで先に仕上がって完成の開きが広がる（実測で確認）
+      const longest = Math.max(...ready.map(remainingSpan))
+      return remainingSpan(j) >= longest ? 0 : 1
+    }
     const cutRun = (j: Job) =>
       lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1
     const sameCat = (j: Job) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
@@ -1503,6 +1601,7 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
         return (
           attendDue(a) - attendDue(b) ||
           cueDue(a) - cueDue(b) ||
+          ignitionNow(a) - ignitionNow(b) ||
           cutRun(a) - cutRun(b) ||
           ignitionRank(a) - ignitionRank(b) ||
           finishBias(a) - finishBias(b) ||
@@ -1620,6 +1719,11 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       )
       const landing = Math.min(Number.isFinite(nextAt) ? nextAt : othersEnd, othersEnd)
       if (Number.isFinite(landing)) startMin = Math.max(cookAt, landing - step.activeMinutes)
+      // 後ろへずらした先で器具が空いていなければ、ずらさない（器具の制約が先。2026-08-13 便GC）
+      if (!fitsAppliance(step, startMin)) startMin = cookAt
+    }
+    if (step.occupies && step.applianceKey != null) {
+      schedule.occupy(step.applianceKey, startMin, startMin + useSpan(step))
     }
     // 前に仕掛けた待ちの後始末はここで済む（締め切りの管理から外す）。
     // ただし「その間に」で待ちの中に置いた手順は、その鍋に戻る作業ではないので締め切りを残す
@@ -1674,6 +1778,15 @@ export interface CookPlan extends CookTimeline {
    * ナビの合計がレシピの合計より長く出る理由の大半がここにある。
    */
   awayMinutes: number
+  /**
+   * 1品ずつ作る順番になった理由が**器具の台数**か（2026-08-13 便GC）。
+   *
+   * 正直表示の文面は「手が空く待ち時間が見つかりませんでした」だったが、器具の制約を入れた後は
+   * **待ちはあるのに口が空いていない**ために並行できない場合が出る。その2つを同じ文で言うと嘘になる
+   * （序列「安全>正直>短縮効果」）。台数に余裕のある台所で組み直したときに段取りが短くなるなら、
+   * 縮まなかった理由は待ちの不足ではなく台数。
+   */
+  limitedByEquipment: boolean
 }
 
 /**
@@ -1703,7 +1816,10 @@ function endsWithHeat(recipe: Pick<Recipe, 'steps'>): boolean {
  * 冷やす品は冷蔵庫に入れる時間が取れ、温かい品は冷めるのを最小限にできる
  * （2026-08-08 便EG。従来の「加熱で終わる品を最後」に、冷やす品を先へ回す並びを足した）。
  */
-function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
+function buildSequentialTimeline(
+  recipes: Recipe[],
+  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
+): CookTimeline {
   const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
   const ordered = valid
     .map((recipe, index) => ({ recipe, index }))
@@ -1712,7 +1828,7 @@ function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
   const items: TimelineItem[] = []
   let offset = 0
   for (const { recipe, index } of ordered) {
-    const single = buildCookTimeline([recipe])
+    const single = buildCookTimeline([recipe], kitchen)
     for (const item of single.items) {
       items.push({
         ...item,
@@ -1740,13 +1856,16 @@ function buildSequentialTimeline(recipes: Recipe[]): CookTimeline {
  * 短縮率が MIN_GAIN_PERCENT 未満のときは並行に組まず、1品ずつ作る順番をそのまま出して、
  * 待ち時間が見つからなかったことを画面に書く。
  */
-export function buildCookPlan(recipes: Recipe[]): CookPlan {
+export function buildCookPlan(
+  recipes: Recipe[],
+  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
+): CookPlan {
   const valid = recipes.filter((r) => r.id != null && r.steps.length > 0)
-  const parallel = buildCookTimeline(valid)
+  const parallel = buildCookTimeline(valid, kitchen)
   // 品ごとに「1品だけで作ったときの目安」を出し、その合計を「1品ずつ作ると約◯分」にする。
   // 内訳を画面へ渡せるように控えておく（2026-08-11 便FN）
   const soloMinutes = new Map<number, number>()
-  for (const r of valid) soloMinutes.set(r.id!, buildCookTimeline([r]).totalMinutes)
+  for (const r of valid) soloMinutes.set(r.id!, buildCookTimeline([r], kitchen).totalMinutes)
   const sequentialMinutes = Array.from(soloMinutes.values()).reduce((sum, m) => sum + m, 0)
   const parallelMinutes = parallel.totalMinutes
   const withSolo = (timeline: CookTimeline): TimelineRecipe[] =>
@@ -1762,9 +1881,10 @@ export function buildCookPlan(recipes: Recipe[]): CookPlan {
       parallelMinutes,
       gainPercent,
       awayMinutes: awayWaitMinutes(parallel.items),
+      limitedByEquipment: false,
     }
   }
-  const sequential = buildSequentialTimeline(valid)
+  const sequential = buildSequentialTimeline(valid, kitchen)
   return {
     ...sequential,
     recipes: withSolo(sequential),
@@ -1773,7 +1893,36 @@ export function buildCookPlan(recipes: Recipe[]): CookPlan {
     parallelMinutes,
     gainPercent,
     awayMinutes: awayWaitMinutes(sequential.items),
+    limitedByEquipment: isLimitedByEquipment(valid, kitchen, parallelMinutes),
   }
+}
+
+/** 台数にいちばん余裕のある台所（正直表示の理由を見分けるためだけに使う） */
+const ROOMY_KITCHEN: KitchenEquipment = {
+  burners: MAX_BURNERS,
+  microwave: true,
+  grill: true,
+  toaster: true,
+}
+
+/**
+ * 縮まなかった理由が器具の台数か（2026-08-13 便GC）。
+ * 台数に余裕のある台所で組み直して段取りが短くなるなら、足りなかったのは待ちではなく口。
+ */
+function isLimitedByEquipment(
+  recipes: Recipe[],
+  kitchen: KitchenEquipment,
+  parallelMinutes: number,
+): boolean {
+  if (
+    kitchen.burners >= ROOMY_KITCHEN.burners &&
+    kitchen.microwave &&
+    kitchen.grill &&
+    kitchen.toaster
+  ) {
+    return false
+  }
+  return buildCookTimeline(recipes, ROOMY_KITCHEN).totalMinutes < parallelMinutes
 }
 
 /**

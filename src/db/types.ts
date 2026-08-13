@@ -526,6 +526,31 @@ export interface Settings {
    * 任意項目なのでスキーマ変更・マイグレーション不要。
    */
   householdServings?: number
+  /**
+   * コンロ（IHを含む）の口数（任意・2026-08-13 便GC・docs/72 第3段）。
+   *
+   * きっかけは実操作テスト2体目（コンロ1口の家）の一番の不満
+   * 「設定を全部見ましたが、コンロ・IH・レンジといった器具の設定は一つもありません。
+   * 　うちは1口なので、この段取りはそもそも成立しません」（docs/71 R2）。
+   *
+   * 効く先は**並行調理ナビの段取りだけ**。設定した口数を超えて同時に火を使う順番を出さなくなり、
+   * 口数に余裕があるときは長い放置調理を前倒しして重ねる。
+   * 範囲は logic/cookAppliance.ts の MIN_BURNERS〜MAX_BURNERS（1〜4）。
+   * 未設定（既存ユーザー含む）は2口（DEFAULT_KITCHEN）扱い。
+   * 任意項目なのでスキーマ変更・マイグレーション不要。
+   */
+  kitchenBurners?: number
+  /**
+   * 電子レンジを持っていない（任意・2026-08-13 便GC）。
+   * 未設定/false＝持っている（既定）。持っていない器具の工程は、フライパンや鍋でやることになるので
+   * **コンロを1口使うもの**として数える（logic/cookAppliance.ts stepApplianceFor）。
+   * 「持っていない」だけを持つ形にしてあるので、未設定の端末は従来どおりの段取りになる。
+   */
+  kitchenNoMicrowave?: boolean
+  /** 魚焼きグリルを持っていない（任意・2026-08-13 便GC。扱いは kitchenNoMicrowave と同じ） */
+  kitchenNoGrill?: boolean
+  /** トースターを持っていない（任意・2026-08-13 便GC。扱いは kitchenNoMicrowave と同じ） */
+  kitchenNoToaster?: boolean
   /** 献立タブに表示する食事帯（任意・未指定は朝昼夜すべて表示） */
   visibleMealSlots?: MealSlot[]
   /**

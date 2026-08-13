@@ -92,6 +92,7 @@ import Toast from '../components/Toast'
 import { effectiveMealServings } from '../logic/servings'
 import type { Recipe } from '../db/types'
 import { settingsLinkWithBack } from '../logic/backLink'
+import { kitchenFromSettings } from '../logic/cookAppliance'
 import { ja } from '../i18n/ja'
 
 /** レシピの色分け（最大3品）。常駐タイマーと同じ定義を使う（logic/naviColors.ts） */
@@ -932,15 +933,36 @@ export default function CookNaviPage() {
     [selectedIds, recipeById],
   )
 
+  /** 設定した台所の器具（2026-08-13 便GC）。未設定の端末は既定（コンロ2口・3器具あり） */
+  const kitchen = useMemo(() => kitchenFromSettings(settings), [settings])
+
   /**
    * 段取り。並行の余地が無い（1品ずつ作るのとほとんど変わらない）ときは、
-   * 並行に組まず1品ずつ作る順番を出して、待ち時間が見つからなかったことを画面に書く
-   * （2026-08-08 便ED・docs/68 打ち手#4）。
+   * 並行に組まず1品ずつ作る順番を出して、その理由を画面に書く
+   * （2026-08-08 便ED・docs/68 打ち手#4。理由は「待ちが見つからない」と
+   * 「口が足りない」の2通り＝2026-08-13 便GC）。
    */
   const timeline = useMemo(
-    () => (showTimeline && selectedRecipes.length >= 2 ? buildCookPlan(selectedRecipes) : null),
-    [showTimeline, selectedRecipes],
+    () =>
+      showTimeline && selectedRecipes.length >= 2
+        ? buildCookPlan(selectedRecipes, kitchen)
+        : null,
+    [showTimeline, selectedRecipes, kitchen],
   )
+  /** 「コンロ2口で組んだ段取りです。」（持っていない器具があればその並びも出す） */
+  const kitchenNote = useMemo(() => {
+    const missing = [
+      kitchen.microwave ? null : ja.settings.kitchenMicrowave,
+      kitchen.grill ? null : ja.settings.kitchenGrill,
+      kitchen.toaster ? null : ja.settings.kitchenToaster,
+    ].filter((x) => x !== null)
+    const burners = String(kitchen.burners)
+    return missing.length === 0
+      ? ja.cookNavi.kitchenNote.replace('{n}', burners)
+      : ja.cookNavi.kitchenNoteMissing
+          .replace('{n}', burners)
+          .replace('{list}', missing.join('・'))
+  }, [kitchen])
   const isSequential = timeline?.mode === 'sequential'
 
   /**
@@ -1453,6 +1475,25 @@ export default function CookNaviPage() {
               <p className="text-xs text-ink-muted">{ja.cookNavi.disclaimer}</p>
             </div>
 
+            {/* 台所の器具（2026-08-13 便GC・docs/72 第3段）。
+                段取りは設定した口数・器具の中で組む。**設定を変えると段取りが変わる**ことが
+                画面から分かるように、組んだ前提と設定への行き先を段取りの入口に出す（規約H） */}
+            <p
+              data-testid="navi-kitchen-note"
+              className="mt-[var(--space-sm)] text-xs text-ink-muted"
+            >
+              {kitchenNote}{' '}
+              <Link
+                to={settingsLinkWithBack(
+                  '/settings?section=kitchen',
+                  location.pathname + location.search,
+                )}
+                className="font-bold text-accent-ink underline"
+              >
+                {ja.cookNavi.kitchenLink}
+              </Link>
+            </p>
+
             {/* 覚えていた段取りを捨てたことの知らせ（2026-08-12 便FT・規約F）。
                 今日の献立が空でも読めるよう、候補の有無で分かれる前に置く */}
             {expiredReason && (
@@ -1647,13 +1688,18 @@ export default function CookNaviPage() {
                         className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
                       >
                         <p className="ja-phrase font-bold">
-                          {ja.cookNavi.noParallelNote.replace(
-                            '{n}',
-                            String(timeline.recipes.length),
-                          )}
+                          {(timeline.limitedByEquipment
+                            ? ja.cookNavi.noParallelByEquipmentNote.replace(
+                                '{b}',
+                                String(kitchen.burners),
+                              )
+                            : ja.cookNavi.noParallelNote
+                          ).replace('{n}', String(timeline.recipes.length))}
                         </p>
                         <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
-                          {ja.cookNavi.noParallelHint}
+                          {timeline.limitedByEquipment
+                            ? ja.cookNavi.noParallelByEquipmentHint
+                            : ja.cookNavi.noParallelHint}
                         </p>
                       </div>
                     )}
