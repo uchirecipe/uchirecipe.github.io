@@ -408,13 +408,15 @@ export default function RecipeDetailPage() {
   const openedForTaskRef = useRef(searchParams.has('step') || searchParams.has('editLog'))
   useEffect(() => {
     if (firstSetupDecidedRef.current) return
-    // 読み込み中は判定しない（settings=undefined / recipe=undefined）
-    if (!settings || recipe === undefined) return
+    // レシピか設定がまだ無いうちは判定しない。読み込み中(undefined)と見つからない(null)を
+    // まとめて待つ＝初回起動で基本レシピの投入が終わる前にレシピ詳細のURLを直接開いても、
+    // 「見つからない」を見て「出さない」と決めてしまわない（投入後に出る）
+    if (!settings || recipe == null) return
     firstSetupDecidedRef.current = true
     setShowFirstSetupNotice(
       shouldShowFirstSetupNotice({
         settingsLoaded: true,
-        recipeShown: recipe !== null,
+        recipeShown: true,
         openedForTask: openedForTaskRef.current,
         seen: hasSeenFirstSetupNotice(),
         settingsChosen: hasChosenFirstSetup(settings),
