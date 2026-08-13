@@ -633,6 +633,62 @@ export function splitMixedStep(step: Step): { active: Step; wait: Step } | undef
 }
 
 /**
+ * 同じ同居でも**待ちが先・手作業が後ろ**の手順（2026-08-13 便GD）。
+ *
+ * docs/68 3-3 が「構造的な限界」として記録していた形:
+ *   「切り干し大根はたっぷりの水につけてもどし、水気を絞ってざく切りにする」
+ *   → **15分の放置と手作業が1手順に同居していて、どちらに倒しても正しくならない**
+ * いまは位置ルール（最後に来る動作が主役）で手作業3分になり、15分の放置が丸ごと落ちている
+ * （docs/68 の「見逃し」一覧に載っている2件がこの形。ホールドアウトのひじきも同じ）。
+ *
+ * **危険側（S1）を増やさないための歯止め**:
+ *   - 待ちの部分が**1つの節に収まっている**こと（読点・句点をまたがない）。
+ *     「ごぼうはささがき、にんじんは細切りにし、ごぼうは水に5分さらして水気をきります」は
+ *     節を3つまたぐので分けない＝2026-08-09 便EMで**危険側1件として潰した形**を戻さない。
+ *     節1つなら、待ちに巻き込まれる手作業もその中の一手だけで済む
+ *   - 分けた前半が待ち・後半が手作業と読めること（分けて判定が変わるなら分けない）
+ *   - 分数欄が空の手順だけ（`splitMixedStep` と同じ理由）
+ */
+/** 切れ目の候補: 待ちの動詞に続く「て／で」の直後（「水につけてもどし｜、」も読点で拾う） */
+const WAIT_FIRST_SPLIT_CONJUNCTION = new RegExp(
+  `(?:${[...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS].map((r) => r.source).join('|')})[てで]`,
+  'g',
+)
+
+export function splitWaitFirstStep(step: Step): { wait: Step; active: Step } | undefined {
+  const text = step.text ?? ''
+  if (classifyStep(step) !== 'active') return undefined
+  if (step.minutes != null && step.minutes > 0) return undefined
+  const masked = maskNonWaitNouns(stepMainText(text)).replace(PAREN_CONTENT_PATTERN, (m) =>
+    '＊'.repeat(m.length),
+  )
+  const waitEnd = lastEndOfPatterns(masked, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
+  if (waitEnd <= 0) return undefined
+  // 待ちの語より後ろで、いちばん近い切れ目
+  let cut: number | undefined
+  for (const re of [MIXED_SPLIT_PUNCTUATION, WAIT_FIRST_SPLIT_CONJUNCTION]) {
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(masked)) !== null) {
+      const at = m.index + m[0].length
+      if (at >= waitEnd && (cut == null || at < cut)) cut = at
+      if (m.index === re.lastIndex) re.lastIndex++
+    }
+  }
+  if (cut == null) return undefined
+  // 待ちの部分が節をまたいでいたら分けない（前半に別の手作業が埋まっている）
+  if (new RegExp(MIXED_SPLIT_PUNCTUATION.source).test(masked.slice(0, cut - 1))) return undefined
+  const head = text.slice(0, cut).trim()
+  const tail = text.slice(cut).trim()
+  if (!head || !tail) return undefined
+  const wait: Step = { text: head, memo: step.memo }
+  const active: Step = { text: tail, memo: step.memo }
+  if (classifyStep(wait) !== 'wait') return undefined
+  if (classifyStep(active) !== 'active') return undefined
+  return { wait, active }
+}
+
+/**
  * 手作業系で minutes が書かれていない工程に当てる、いちばん基本の所要時間（分）。
  * 作業の種類ごとの見積り（ACTIVE_MINUTES_BY_CATEGORY）が使えないときの土台になる。
  */
@@ -1310,18 +1366,31 @@ function splitMixedPlanSteps(plan: PlanStep[]): PlanStep[] {
       continue
     }
     const split = splitMixedStep(item.step)
-    if (!split) {
-      out.push(item)
+    if (split) {
+      out.push({ ...item, step: split.active, splitOf: item.stepNumber, splitPart: 1, leadIn: true })
+      out.push({
+        ...item,
+        step: split.wait,
+        stepIndex: -(item.stepIndex + 2),
+        splitOf: item.stepNumber,
+        splitPart: 2,
+      })
       continue
     }
-    out.push({ ...item, step: split.active, splitOf: item.stepNumber, splitPart: 1, leadIn: true })
-    out.push({
-      ...item,
-      step: split.wait,
-      stepIndex: -(item.stepIndex + 2),
-      splitOf: item.stepNumber,
-      splitPart: 2,
-    })
+    // 待ちが先・手作業が後ろの同居（「水につけてもどし、水気を絞ってざく切りにする」）
+    const waitFirst = splitWaitFirstStep(item.step)
+    if (waitFirst) {
+      out.push({ ...item, step: waitFirst.wait, splitOf: item.stepNumber, splitPart: 1 })
+      out.push({
+        ...item,
+        step: waitFirst.active,
+        stepIndex: -(item.stepIndex + 2),
+        splitOf: item.stepNumber,
+        splitPart: 2,
+      })
+      continue
+    }
+    out.push(item)
   }
   return out
 }

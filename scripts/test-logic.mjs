@@ -150,6 +150,10 @@ import {
   waitUrgency,
   waitOverrunAllowance,
   splitBoilWaterClause,
+  splitMixedStep,
+  splitWaitFirstStep,
+  resolveWaitMinutes,
+  recipeStepLabel,
   hasParallelCue,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
@@ -5019,6 +5023,146 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       heats[0].endMin <= heats[1].startMin || heats[1].endMin <= heats[0].startMin,
       true,
     )
+  }
+}
+
+// ---------- 手作業と待ちの同居（2026-08-13 便GD・docs/72 対象2）
+//
+// 直した不具合（docs/71 R3）:
+//   (1)「皮を取り、フォークで刺し、そぎ切りにする。10分おく」→ **待ち10分だけ**が段取りに乗り、
+//       包丁仕事の4〜5分が0分。しかもタイマーを先に押すと漬け時間が5分しか残らない
+//   (2)「鍋に水とだしの素を入れて中火にかける」→ **手作業2分だけ**で、沸くまでの4〜5分が0分。
+//       「実際にはここで3分立ち尽くします」
+//   (3) 待ちが先・手作業が後ろの同居（docs/68 3-3「どちらに倒しても正しくならない」）
+// ----------
+{
+  const recipe = (id, title, steps, extra) => ({
+    id,
+    title,
+    steps: steps.map((s) => (typeof s === 'string' ? { text: s } : s)),
+    ...extra,
+  })
+  const t = (text, minutes) => (minutes == null ? { text } : { text, minutes })
+
+  // ---- (1) 手作業が先・待ちが後ろ ----
+  const r3Step = t('鶏むね肉は皮を取り、フォークで数か所刺してからそぎ切りにする。塩こしょうと酒をふって10分ほどおく。')
+  eq('ナビ同居: R3の「そぎ切りにする。10分おく」を2つに分ける', splitMixedStep(r3Step), {
+    active: { text: '鶏むね肉は皮を取り、フォークで数か所刺してからそぎ切りにする。', memo: undefined },
+    wait: { text: '塩こしょうと酒をふって10分ほどおく。', minutes: undefined, memo: undefined },
+  })
+  eq(
+    'ナビ同居: 読点の無い「水を入れて煮る」も動詞＋てで切る',
+    (() => {
+      const s = splitMixedStep(t('水を入れて煮る'))
+      return [s.active.text, s.wait.text]
+    })(),
+    ['水を入れて', '煮る'],
+  )
+  {
+    const plan = buildCookTimeline([recipe(1, '主菜', [r3Step])])
+    const act = plan.items[0]
+    const wait = plan.items[1]
+    eq('ナビ同居: 手を動かす時間が0分でなくなる', act.activeMinutes > 0, true)
+    eq('ナビ同居: 待ちの分数は変わらない', wait.waitMinutes, 10)
+    // R3の実害そのもの: タイマーは待ちの工程にしか出ないので、手作業の前には押せない
+    eq('ナビ同居: タイマーは待ちの工程だけに出る', [showsWaitTimerButton(act), showsWaitTimerButton(wait)], [false, true])
+    eq('ナビ同居: 待ちは手作業が終わってから始まる', wait.startMin, act.endMin)
+    eq('ナビ同居: 番号は「1-1」「1-2」', [recipeStepLabel(act), recipeStepLabel(wait)], ['1-1', '1-2'])
+    // カーソル・タイマー・手順カードのidに使う識別子は必ず別（同じだと「次へ」が戻る）
+    eq('ナビ同居: 2つの工程は別の識別子を持つ', act.stepIndex !== wait.stepIndex, true)
+  }
+  // 分けない側（迷ったら分けない）
+  eq('ナビ同居: 分数欄が埋まっている手順は分けない', splitMixedStep(t('水を入れて煮る', 10)), undefined)
+  eq('ナビ同居: 前半に手を動かす動詞が無ければ分けない', splitMixedStep(t('弱火で20分煮る。')), undefined)
+  eq('ナビ同居: もともと手作業の手順は分けない', splitMixedStep(t('大根と調味料を加え、煮立ったら浮いてきたアクを取ります。')), undefined)
+  eq(
+    'ナビ同居: 括弧の中の但し書きは切る位置の根拠にしない（「器に盛る」を待ちにしない）',
+    splitMixedStep(t('鮭を裏返し、中まで火が通るまで焼いて器に盛る（両面焼きグリルの場合は裏返さずそのまま両面を焼く）。')),
+    undefined,
+  )
+  // 分けても待ちは1分も減らさない（減る書き方なら分けない、という歯止めの確認）
+  for (const text of ['ポリ袋に入れてもみ込み、15分おきます。', 'ふたをずらしてのせ、弱めの中火で20分煮ます。', '水を入れて煮る']) {
+    const s = splitMixedStep(t(text))
+    eq(
+      `ナビ同居: 分けても待ちは減らない（${text.slice(0, 12)}）`,
+      resolveWaitMinutes(s.wait) >= resolveWaitMinutes(t(text)),
+      true,
+    )
+  }
+
+  // ---- (2) 本文に書かれていない「沸くまでの待ち」 ----
+  {
+    const soup = buildPlanSteps([
+      t('鍋に水とだしの素を入れて中火にかける。'),
+      t('豆腐をさいの目に切る。'),
+      t('沸いたら豆腐と乾燥わかめを入れる。'),
+      t('みそを溶いて火を止める。'),
+    ])
+    eq('ナビ沸くまで: 工程が1つ増える', soup.length, 5)
+    eq('ナビ沸くまで: 「火にかける」の直後に待ちが入る', [soup[1].step.text, soup[1].step.minutes, soup[1].addedByNavi], [
+      ja.cookNavi.addedBoilWaitStep,
+      BOIL_WATER_MINUTES,
+      true,
+    ])
+    eq('ナビ沸くまで: 番号は「1-1」「1-2」', [recipeStepLabel(soup[0]), recipeStepLabel(soup[1])], ['1-1', '1-2'])
+    const plan = buildCookTimeline([recipe(1, 'みそ汁', ['鍋に水とだしの素を入れて中火にかける。', '豆腐をさいの目に切る。', '沸いたら豆腐と乾燥わかめを入れる。', 'みそを溶いて火を止める。'], { dishType: 'soup' })])
+    const boil = plan.items.find((it) => it.text === ja.cookNavi.addedBoilWaitStep)
+    const cut = plan.items.find((it) => it.text === '豆腐をさいの目に切る。')
+    eq('ナビ沸くまで: 待ちとして段取りに乗る', [boil.kind, boil.waitMinutes], ['wait', BOIL_WATER_MINUTES])
+    eq('ナビ沸くまで: 沸くのを待つ間に次の手順を進められる', cut.startMin < boil.endMin, true)
+  }
+  eq(
+    'ナビ沸くまで: 後ろに「沸いたら」が無ければ足さない',
+    buildPlanSteps([t('フライパンを中火にかける。'), t('肉を入れて焼き色をつける。')]).length,
+    2,
+  )
+  eq(
+    'ナビ沸くまで: 同じ手順の中で作業が続く書き方には足さない',
+    buildPlanSteps([t('鍋にだし汁を入れて火にかけ、煮立ったら豆腐を加えます。')]).filter((p) => p.addedByNavi).length,
+    0,
+  )
+  eq(
+    'ナビ沸くまで: 湯沸かしを足した品には足さない（鍋を二度沸かさない）',
+    buildPlanSteps([t('鍋に水を入れて中火にかける。'), t('沸いたらそうめんをゆでる。')]).filter((p) => p.addedByNavi)
+      .length,
+    1,
+  )
+
+  // ---- (3) 待ちが先・手作業が後ろの同居 ----
+  eq(
+    'ナビ同居: 「水につけてもどし、水気を絞ってざく切りにする」は待ちと手作業に分ける',
+    (() => {
+      const s = splitWaitFirstStep(t('切り干し大根はたっぷりの水につけてもどし、水気を絞ってざく切りにする'))
+      return [s.wait.text, s.active.text]
+    })(),
+    ['切り干し大根はたっぷりの水につけてもどし、', '水気を絞ってざく切りにする'],
+  )
+  // 2026-08-09 便EMで危険側1件として潰した形を戻さない（待ちの前に別の作業が2つ埋まっている）
+  eq(
+    'ナビ同居: 待ちが節をまたぐ手順は分けない（「ささがき、細切りにし、水に5分さらして水気をきる」）',
+    splitWaitFirstStep(t('ごぼうはささがき、にんじんは細切りにし、ごぼうは水に5分さらして水気をきります。')),
+    undefined,
+  )
+  eq(
+    'ナビ同居: 「煮立ったらアクを取る」は分けない（待ちではなく合図）',
+    splitWaitFirstStep(t('大根と調味料をすべて加え、煮立ったら浮いてきたアクを取ります。')),
+    undefined,
+  )
+
+  // ---- (4) 段取りの比較が一周しない（R3で34→50分に伸びた再発防止） ----
+  // 「切る工程どうしだけ最優先」を比較の途中に置くと、3品以上で並べ替えの結果が一周し、
+  // 着火（長い放置調理）を控えた品が後ろへ落ちる
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '主菜', ['鶏むね肉をそぎ切りにする。', '塩をふって10分ほどおく。', '魚焼きグリルで15分焼く。', 'パセリをふる。']),
+      recipe(2, '副菜', ['ほうれん草を切る。', '電子レンジで3分加熱する。', 'ごまと和える。']),
+      recipe(3, '汁物', ['鍋にだしを入れて15分煮る。', 'みそを溶く。'], { dishType: 'soup' }),
+    ])
+    const grill = plan.items.find((it) => it.text === '魚焼きグリルで15分焼く。')
+    eq('ナビ着火: 長い放置調理が段取りの前半で始まる', grill.startMin * 2 <= plan.totalMinutes, true)
+    // まな板の順序（野菜→肉・魚）は保つ
+    const cuts = plan.items.filter((it) => /切りにする。|を切る。/.test(it.text)).map((it) => it.recipeTitle)
+    eq('ナビ切る順: 野菜を先に、肉・魚を後に切る', cuts, ['副菜', '主菜'])
   }
 }
 
