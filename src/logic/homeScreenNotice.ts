@@ -26,10 +26,12 @@
  * 見た記録は localStorage（端末内のみ・サーバーには送らない）。設定(Dexieのsettings)に
  * 置かないのは、設定がバックアップの中身に含まれるため。案内を見たかどうかは端末ごとの
  * 事情で、書き出したファイルに混ぜるものではない（別の端末に復元したら、その端末では
- * まだ案内を見ていない＝出るのが正しい）。
+ * まだ案内を見ていない＝出るのが正しい）。読み書きそのものは logic/noticeSeen.ts に移し、
+ * 初回だけ出すお知らせ全体で同じ作法を共有する（2026-08-13 便GE）。
  */
 
 import { isLaunchedFromHomeScreen } from './standalone'
+import { hasSeenNotice, markNoticeSeen } from './noticeSeen'
 
 /** 見た記録の保存キー（localStorage・端末内のみ） */
 export const HOME_SCREEN_NOTICE_SEEN_KEY = 'uchirecipe:homeScreenNoticeSeen'
@@ -60,20 +62,12 @@ export function readTouchPrimary(): boolean {
 
 /** この端末でお知らせを見たことがあるか（localStorageが使えない環境では「見た」扱いにして出さない） */
 export function hasSeenHomeScreenNotice(): boolean {
-  try {
-    return window.localStorage.getItem(HOME_SCREEN_NOTICE_SEEN_KEY) === '1'
-  } catch {
-    return true
-  }
+  return hasSeenNotice(HOME_SCREEN_NOTICE_SEEN_KEY)
 }
 
 /** 見た記録を残す（閉じ方によらず、一度出したら次からは出さない） */
 export function markHomeScreenNoticeSeen(): void {
-  try {
-    window.localStorage.setItem(HOME_SCREEN_NOTICE_SEEN_KEY, '1')
-  } catch {
-    // プライベートブラウズ等で書けなくても、案内が出るだけなので黙って諦める
-  }
+  markNoticeSeen(HOME_SCREEN_NOTICE_SEEN_KEY)
 }
 
 /** 実行環境を見て、初回のお知らせを出すか決める（画面側の入口） */
