@@ -64,19 +64,22 @@ export default function TimerBar() {
    */
   const goToStep = (timer: ActiveTimer) => {
     const { recipeId, stepNumber } = timer
-    // `navi-step-...` の id は CookNaviPage の naviStepDomId が付与する。形式を変えるときは両方を揃える
+    // `navi-step-...` の id は CookNaviPage の naviStepDomId が付与する。形式を変えるときは両方を揃える。
+    // 2026-08-13 便GD: 1つの手順を2つに分ける形が増えたので、手順番号ではなく
+    // **そのレシピ内の手順の呼び名**（「3」「3-1」「3-2」）で指す
+    const stepKey = timer.naviStepLabel ?? String(stepNumber)
     if (
       location.pathname === '/cook-navi' &&
-      document.getElementById(`navi-step-${recipeId}-${stepNumber}`)
+      document.getElementById(`navi-step-${recipeId}-${stepKey}`)
     ) {
-      navigate(`/cook-navi?focusStep=${recipeId}-${stepNumber}`, { replace: true })
+      navigate(`/cook-navi?focusStep=${recipeId}-${stepKey}`, { replace: true })
       return
     }
     // ナビから始めたタイマーは、別の画面にいてもナビの該当手順へ戻す（2026-08-08 便ED・
     // オーナー実機フィードバック②「他画面からタイマーをタップするとレシピ詳細に飛び、
     // しかもナビが消えて最初からになる」）。作りかけの段取りが残っているときだけ通す
     if (timer.fromNavi && hasCookNaviTimeline()) {
-      navigate(`/cook-navi?focusStep=${recipeId}-${stepNumber}`)
+      navigate(`/cook-navi?focusStep=${recipeId}-${stepKey}`)
       return
     }
     navigate(`/recipes/${recipeId}?step=${stepNumber}`)
