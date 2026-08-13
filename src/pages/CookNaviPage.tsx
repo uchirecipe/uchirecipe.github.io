@@ -1475,7 +1475,7 @@ export default function CookNaviPage() {
 
             {/* 台所の器具（2026-08-13 便GC・docs/72 第3段）。
                 段取りは設定した口数・器具の中で組む。**設定を変えると段取りが変わる**ことが
-                画面から分かるように、組んだ前提と設定への行き先をここに出す（規約H） */}
+                画面から分かるように、組んだ前提と設定への行き先を段取りの入口に出す（規約H） */}
             <p
               data-testid="navi-kitchen-note"
               className="mt-[var(--space-sm)] text-xs text-ink-muted"
@@ -1486,7 +1486,7 @@ export default function CookNaviPage() {
                   '/settings?section=kitchen',
                   location.pathname + location.search,
                 )}
-                className="underline"
+                className="font-bold text-accent-ink underline"
               >
                 {ja.cookNavi.kitchenLink}
               </Link>

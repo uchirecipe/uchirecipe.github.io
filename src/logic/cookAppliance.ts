@@ -117,7 +117,7 @@ function maskApplianceNouns(text: string): string {
 /** トースター（オーブントースターを含む）。「トーストする」もこの器具 */
 const TOASTER_PATTERN = /トースター|トースト/
 /** 電子レンジ。ワット数の表記（600W）もレンジの合図 */
-const MICROWAVE_PATTERN = /電子レンジ|レンジ|チンす|チンし|チンし|[0-9０-９]\s*[WＷ]/
+const MICROWAVE_PATTERN = /電子レンジ|レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/
 /** 魚焼きグリル */
 const GRILL_PATTERN = /グリル/
 /**

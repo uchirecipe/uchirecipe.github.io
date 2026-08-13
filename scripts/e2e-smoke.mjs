@@ -9625,6 +9625,65 @@ try {
     }
   }
 
+  // --- NAVI-KITCHEN: 設定「台所の器具」(2026-08-13 便GC・docs/72 第3段。実操作テスト2体目
+  // 「設定を全部見ましたが、コンロ・IH・レンジといった器具の設定は一つもありません。うちは1口
+  // なので、この段取りはそもそも成立しません」)。
+  // 見るのは3つだけ: ①既定が2口で3器具とも「持っている」 ②選んだ値が読み込み直しても残る
+  // ③持っていない器具の扱いが画面に書いてある(設定した結果が読めないと、設定した意味がない)。 ---
+  currentCheck = 'NAVI-KITCHEN'
+  {
+    const kcBrowser = await chromium.launch()
+    const kcContext = await kcBrowser.newContext()
+    const kcPage = await kcContext.newPage()
+    kcPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@NAVI-KITCHEN] ${text}`)
+    })
+    kcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NAVI-KITCHEN] ${err.message}`)
+    })
+    try {
+      await kcPage.goto(`${BASE}/#/settings?section=kitchen`, { waitUntil: 'networkidle' })
+      await kcPage.waitForTimeout(2000) // 初回シード完了待ち
+      const kcBurners = kcPage.getByTestId('kitchen-burners')
+      check(
+        'NAVI-KITCHEN 設定に「台所の器具」があり、コンロの既定は2口',
+        (await kcBurners.count()) === 1 && (await kcBurners.inputValue()) === '2',
+        `count=${await kcBurners.count()} value=${await kcBurners.inputValue()}`,
+      )
+      check(
+        'NAVI-KITCHEN レンジ・グリル・トースターの既定は「持っている」',
+        (await kcPage.getByTestId('kitchen-kitchenNoMicrowave').getAttribute('aria-checked')) === 'true' &&
+          (await kcPage.getByTestId('kitchen-kitchenNoGrill').getAttribute('aria-checked')) === 'true' &&
+          (await kcPage.getByTestId('kitchen-kitchenNoToaster').getAttribute('aria-checked')) === 'true',
+      )
+      check(
+        'NAVI-KITCHEN 持っていない器具の扱いと、変えると段取りが組み直されることが書いてある',
+        ((await kcPage.textContent('body')) ?? '').includes(
+          '持っていない器具の工程は、フライパンや鍋で作るものとして、コンロを1口使うと数えます。',
+        ) &&
+          ((await kcPage.textContent('body')) ?? '').includes(
+            '変えると、並行調理ナビの段取りが組み直されます。',
+          ),
+      )
+      await kcBurners.selectOption('1')
+      await kcPage.getByTestId('kitchen-kitchenNoGrill').click()
+      await kcPage.waitForTimeout(700)
+      await kcPage.reload({ waitUntil: 'networkidle' })
+      await kcPage.waitForTimeout(1500)
+      check(
+        'NAVI-KITCHEN 選んだ口数と「持っていない」は読み込み直しても残る',
+        (await kcPage.getByTestId('kitchen-burners').inputValue()) === '1' &&
+          (await kcPage.getByTestId('kitchen-kitchenNoGrill').getAttribute('aria-checked')) === 'false',
+      )
+    } finally {
+      await kcBrowser.close()
+    }
+  }
+
   // --- MEALPLAN-A2: 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。レシピに紐付かない1行メモを
   // 週タブの日カードで書き、月タブのセルに「メモあり」の印が出て、日モーダルからも同じメモを
   // 読み書きできること、空にすると消えること(データも消えること)を確認する。
