@@ -1372,13 +1372,17 @@ function addImpliedBoilWait(plan: PlanStep[]): PlanStep[] {
     splitPart: 2,
   }
   // 沸くのを待つ間、利用者が書いた次の手順は進めてよい（その待ちは利用者が書いたものではなく、
-  // ナビが差し込んだもの＝次の手順がそれを待って書かれているはずがない）
+  // ナビが差し込んだもの＝次の手順がそれを待って書かれているはずがない）。
+  // ただし**その次の手順自体が「沸いたら」で始まる**ときは別＝沸くのを待つ工程そのものなので、
+  // 待ちの中に置いてはいけない（「沸騰したら卵を入れる」を沸く前にやらせない）
   const after = plan[at + 1]
+  const afterWaitsForBoil =
+    after != null && BOIL_ARRIVAL_PATTERN.test(maskNonWaitNouns(stepMainText(after.step.text ?? '')))
   return [
     ...plan.slice(0, at),
     { ...plan[at], splitOf: plan[at].stepNumber, splitPart: 1 },
     waiting,
-    ...(after ? [{ ...after, afterAddedWait: true }] : []),
+    ...(after ? [{ ...after, afterAddedWait: !afterWaitsForBoil }] : []),
     ...plan.slice(at + 2),
   ]
 }

@@ -5110,6 +5110,18 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     const cut = plan.items.find((it) => it.text === '豆腐をさいの目に切る。')
     eq('ナビ沸くまで: 待ちとして段取りに乗る', [boil.kind, boil.waitMinutes], ['wait', BOIL_WATER_MINUTES])
     eq('ナビ沸くまで: 沸くのを待つ間に次の手順を進められる', cut.startMin < boil.endMin, true)
+    // 「沸いたら〜」の手順は沸くのを待つ工程そのもの。待ちの中に置かない
+    const after = plan.items.find((it) => it.text === '沸いたら豆腐と乾燥わかめを入れる。')
+    eq('ナビ沸くまで: 「沸いたら」の手順は沸いてから', after.startMin >= boil.endMin, true)
+  }
+  {
+    // 「火にかける」の次の手順がいきなり「沸騰したら」のとき、それを待ちの中に置かない
+    const plan = buildCookTimeline([
+      recipe(1, 'ゆで卵', ['鍋に水を入れて中火にかける。', '沸騰したら卵をそっと入れる。', '冷水にとって殻をむく。']),
+    ])
+    const boil = plan.items.find((it) => it.text === ja.cookNavi.addedBoilWaitStep)
+    const next = plan.items.find((it) => it.text === '沸騰したら卵をそっと入れる。')
+    eq('ナビ沸くまで: 次の手順が「沸騰したら」ならその中に置かない', next.startMin >= boil.endMin, true)
   }
   eq(
     'ナビ沸くまで: 後ろに「沸いたら」が無ければ足さない',
