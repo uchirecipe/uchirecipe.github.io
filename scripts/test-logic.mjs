@@ -150,6 +150,7 @@ import {
   waitUrgency,
   waitOverrunAllowance,
   splitBoilWaterClause,
+  hasParallelCue,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import {
@@ -4715,6 +4716,108 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     classifyStep({ text: 'ゆで上がったらすぐ冷水にとり、粗熱が取れたら殻をむく。' }),
     'active',
   )
+}
+
+// ---------- 並べ方（2026-08-13 便GB・docs/72 第2段）
+//
+// 直した不具合3つ。いずれも docs/71 R3（利用者が自分で登録した3品での実操作）で出たもの。
+//   (1)「その間に」が読まれない … 利用者が本文に書いた並行の指示が、直前の待ちの**あと**に
+//       置かれていた（レシピ内の手順を厳密に順番どおり実行するため、構造上その待ちの中に置けない）
+//   (2)「最後に仕上げる」と「最後に着火する」が分かれていない … 冷たい品の仕上げを先にする規則が、
+//       温かい品の**着火（長い放置調理の開始）**より上に立ち、グリルの着火が後ろへ送られていた
+//   (3) 仕上げが早すぎる … 汁物が完成してから20分以上放置される段取りが出ていた
+// ----------
+{
+  const recipe = (id, title, steps, extra) => ({
+    id,
+    title,
+    steps: steps.map((text) => ({ text })),
+    ...extra,
+  })
+  const finishOf = (timeline, title) =>
+    timeline.items.reduce((at, it) => (it.recipeTitle === title ? it.endMin : at), 0)
+
+  // ---- (1) 「その間に」を直前の待ちの中に置く ----
+  eq('ナビ並行指示: 「その間に」は並行の合図', hasParallelCue('その間に☆を全部混ぜ合わせておく。'), true)
+  eq('ナビ並行指示: 「炊いている間に」も並行の合図', hasParallelCue('炊いている間に大根を短冊切りにする。'), true)
+  eq('ナビ並行指示: 「漬けている間に」も並行の合図', hasParallelCue('漬けている間にキャベツをせん切りにする。'), true)
+  // 「〜ながら」は1つの動作の中の同時（ほぐしながら炒める）が大半なので合図にしない
+  eq('ナビ並行指示: 「ほぐしながら炒める」は合図にしない', hasParallelCue('ひき肉をほぐしながら炒めます。'), false)
+  eq('ナビ並行指示: ふつうの手順は合図にしない', hasParallelCue('鍋で15分煮る。'), false)
+
+  {
+    const t = buildCookTimeline([
+      recipe(1, '煮もの', ['鍋に材料とだし汁を入れて15分煮る。', 'その間に小ねぎを小口切りにする。', '器に盛る。']),
+    ])
+    const wait = t.items.find((it) => it.kind === 'wait')
+    const cue = t.items.find((it) => it.text.startsWith('その間に'))
+    const after = t.items.find((it) => it.text === '器に盛る。')
+    eq('ナビ並行指示: 「その間に」の手順は待ちが明ける前に始まる', cue.startMin < wait.endMin, true)
+    eq('ナビ並行指示: その次の手順は待ちが明けてから', after.startMin >= wait.endMin, true)
+    // 合図の無い手順は従来どおり待ちの外（レシピ内の順序を守る）
+    const plain = buildCookTimeline([
+      recipe(2, '煮もの', ['鍋に材料とだし汁を入れて15分煮る。', '小ねぎを小口切りにする。', '器に盛る。']),
+    ])
+    const plainWait = plain.items.find((it) => it.kind === 'wait')
+    const plainNext = plain.items.find((it) => it.text === '小ねぎを小口切りにする。')
+    eq('ナビ並行指示: 合図が無ければ従来どおり待ちの外', plainNext.startMin >= plainWait.endMin, true)
+  }
+  {
+    // 直前が待ちでない手順に合図が付いていても、順序は動かさない（合図だけで前へ飛ばさない）
+    const t = buildCookTimeline([recipe(1, 'テスト', ['野菜を切る。', 'その間にたれを混ぜる。'])])
+    eq('ナビ並行指示: 直前が待ちでなければ順序は変わらない', t.items[0].text, '野菜を切る。')
+    eq('ナビ並行指示: 直前が待ちでなければ重ならない', t.items[1].startMin >= t.items[0].endMin, true)
+  }
+
+  // ---- (2) 「最後に着火する」を「最後に仕上げる」から切り離す ----
+  {
+    // 冷たい品の仕上げ（1手順で完結＝いきなり最後の手順）と、
+    // 温かい品の「着火の1つ手前」の手順がぶつかる場面。着火を先にする
+    const t = buildCookTimeline([
+      recipe(1, '鶏のグリル焼き', ['アルミホイルに鶏肉を並べ、みそだれを塗る。', '魚焼きグリルで15分焼く。', '乾燥パセリをふる。']),
+      recipe(2, 'トマトサラダ', ['切ったトマトをドレッシングで和える。']),
+    ])
+    eq('ナビ着火: 冷たい品の仕上げより、長い放置調理の着火の準備が先', t.items[0].recipeTitle, '鶏のグリル焼き')
+    const grill = t.items.find((it) => it.kind === 'wait')
+    eq('ナビ着火: グリルは段取りの前半で着火する', grill.startMin * 2 <= t.totalMinutes, true)
+  }
+  {
+    // 着火の予定が無いときは従来どおり＝冷たい品を先に仕上げる（2026-08-08 便EGのオーナー指示）
+    const t = buildCookTimeline([
+      recipe(1, '野菜炒め', ['野菜を切る。', 'フライパンで炒める。', '器に盛る。']),
+      recipe(2, 'トマトサラダ', ['トマトを切る。', 'ドレッシングで和える。']),
+    ])
+    eq('ナビ着火: 長い放置調理が無ければ冷たい品を先に仕上げる', finishOf(t, 'トマトサラダ') < finishOf(t, '野菜炒め'), true)
+  }
+
+  // ---- (3) 温かい品・汁物の仕上げを、ほかの品の完成に合わせて後ろへ寄せる ----
+  eq(
+    'ナビ温度: 汁物は温かい品として扱う（冷めたら作り直せない）',
+    recipeServeTemp(recipe(1, '豆腐とわかめのみそ汁', ['鍋に水とだしの素を入れて中火にかける。', 'みそを溶いて火を止める。'], { dishType: 'soup' })),
+    'hot',
+  )
+  eq(
+    'ナビ温度: 冷たい汁物（冷や汁）は冷たい品のまま',
+    recipeServeTemp(recipe(1, '冷や汁', ['だしを作る。', '粗熱を取り、冷蔵庫でよく冷やす。'], { dishType: 'soup' })),
+    'cold',
+  )
+  {
+    const t = buildCookTimeline([
+      recipe(1, '鶏のグリル焼き', ['アルミホイルに鶏肉を並べ、みそだれを塗る。', '魚焼きグリルで15分焼く。', '乾燥パセリをふる。']),
+      recipe(2, '豆腐とわかめのみそ汁', ['鍋に水とだしの素を入れて中火にかける。', '豆腐をさいの目に切る。', '沸いたら豆腐とわかめを入れる。', 'みそを溶いて火を止める。'], { dishType: 'soup' }),
+    ])
+    const idle = finishOf(t, '鶏のグリル焼き') - finishOf(t, '豆腐とわかめのみそ汁')
+    eq('ナビ仕上げ: 汁物が主菜より10分以上早く仕上がらない', idle <= 10, true)
+    // 遅らせても全体は伸びない（伸ばして揃えるのでは意味がない）
+    eq('ナビ仕上げ: 遅らせても全体の目安は伸びない', t.totalMinutes <= 30, true)
+  }
+  {
+    // 1品だけのときは遅らせない（比べる相手がいない＝ただの空白になる）
+    const t = buildCookTimeline([
+      recipe(1, '野菜炒め', ['野菜を切る。', 'フライパンで炒める。', '器に盛る。']),
+    ])
+    eq('ナビ仕上げ: 1品だけなら空白を作らない', t.items[t.items.length - 1].startMin, t.items[t.items.length - 2].endMin)
+  }
 }
 
 // ---------- 2026-08-08 便EG・オーナー実機フィードバック（3品を実際に作って見つかった段取りの不備）
