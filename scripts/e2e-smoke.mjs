@@ -432,6 +432,54 @@ const parseRemainingSeconds = (text) => {
     : Number(m[1]) * 60 + Number(m[2])
 }
 
+/**
+ * レシピ詳細の初回の案内(2026-08-13 便GE「食数の設定」「台所の器具」)を、
+ * **既定では「見た」状態**にしてからページを開く。
+ *
+ * この案内はレシピ詳細に重なる窓なので、そのままだとレシピ詳細を開く他の検証が
+ * ことごとく窓に阻まれる(押したい要素が窓の下になる)。他の検証が見たいのは
+ * 「案内を見たあとの、ふだんの画面」なので、ここでまとめて既定を寄せる。
+ * 案内そのものの検証(GE-01)だけが、この既定を外して初回の状態から確かめる。
+ *
+ * 仕込む場所は「新しく作ったブラウザの入れ物(context)」で、addInitScriptは
+ * ページのスクリプトより先に走るため、アプリが読む前に記録が入る。
+ * launch()を包む形にしてあるので、検証ごとに増える入れ物を数え漏らさない。
+ */
+const FIRST_SETUP_NOTICE_SEEN_KEY = 'uchirecipe:firstSetupNoticeSeen'
+const markNoticesSeenByDefault = (browserType) => {
+  const origLaunch = browserType.launch.bind(browserType)
+  browserType.launch = async (...launchArgs) => {
+    const launched = await origLaunch(...launchArgs)
+    const origNewContext = launched.newContext.bind(launched)
+    launched.newContext = async (...contextArgs) => {
+      const ctx = await origNewContext(...contextArgs)
+      await ctx.addInitScript((key) => {
+        try {
+          localStorage.setItem(key, '1')
+        } catch {
+          // ストレージを使えない設定の入れ物では何もしない(案内が出るだけ)
+        }
+      }, FIRST_SETUP_NOTICE_SEEN_KEY)
+      return ctx
+    }
+    return launched
+  }
+}
+markNoticesSeenByDefault(chromium)
+markNoticesSeenByDefault(webkit)
+/** GE-01専用: 初回の状態(案内をまだ見ていない)から始める入れ物を作る */
+const newContextWithFirstSetupNotice = async (browserInstance, options) => {
+  const ctx = await browserInstance.newContext(options)
+  await ctx.addInitScript((key) => {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // 何もしない
+    }
+  }, FIRST_SETUP_NOTICE_SEEN_KEY)
+  return ctx
+}
+
 const browser = await chromium.launch()
 const context = await browser.newContext() // 毎回まっさらなストレージ(初回シードから検証)
 const page = await context.newPage()
@@ -22890,6 +22938,375 @@ try {
       }
     } finally {
       await ewBrowser.close()
+    }
+  }
+
+  // --- GE-01: 「食数の設定」「台所の器具」の初回の案内(2026-08-13 便GE・docs/65 A-4)。
+  // レシピ詳細を初めて開いたときに1回だけ出す。見るのは次の8点:
+  //  (a) 初回のレシピ詳細で出る・中身がそろっている・文字数が上限内
+  //  (b) 閉じたら二度と出ない(「このまま使う」・✕・カード外のタップ・Escapeの4通り)
+  //  (c) すでに設定を自分で決めている人には出ない(食数の設定/コンロの口数のどちらでも)
+  //  (d) パソコンにも出る(ホーム画面追加の案内と違う点。人数も口数はどの端末でも同じく効く)
+  //  (e) 「個人設定を開く」が「食数の設定」へ着き、その下に「台所の器具」が続く・レシピへ帰れる
+  //  (f) ライト/ダークの両方で文字が読める(コントラスト比4.5:1以上)
+  //  (g) 390pxで画面から出ない
+  //  (h) 用事があって開いた画面(タイマーの手順・記録の編集)と、レシピ詳細以外の画面には出ない
+  currentCheck = 'GE-01'
+  {
+    const geBrowser = await chromium.launch()
+    // 相対輝度からコントラスト比を出す(WCAG 2.x)。EW-01と同じ計算
+    const geContrast = (fg, bg) => {
+      const lum = (css) => {
+        const [r, g, b] = css.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number)
+        const ch = (v) => {
+          const s = v / 255
+          return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+        }
+        return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+      }
+      const a = lum(fg)
+      const b = lum(bg)
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+    const gePhone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
+    // 初回の状態(案内をまだ見ていない)から始める入れ物。基本レシピの投入を待ってから詳細を開く
+    const geOpen = async (ctx, path = '/#/recipes/1') => {
+      const p = await ctx.newPage()
+      p.on('pageerror', (err) => errors.push(`[pageerror@GE-01] ${err.message}`))
+      await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(2500)
+      return p
+    }
+    const geVisible = (p) => p.locator('[data-testid="first-setup-notice"]').isVisible()
+    // 閉じたあと、別のレシピを開いても出ないこと(「この画面だけ出ない」で終わらせない)
+    const geGoneAfterReopen = async (p) => {
+      await p.goto(`${BASE}/#/recipes/2`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(1500)
+      return (await p.locator('[data-testid="first-setup-notice"]').count()) === 0
+    }
+
+    try {
+      // (a) 初回に出る・中身がそろっている
+      {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p1 = await geOpen(ctx)
+        check('GE-01(a) レシピ詳細を初めて開くと案内が出る', await geVisible(p1))
+        const info = await p1.evaluate(() => {
+          const box = document.querySelector('[data-testid="first-setup-notice"]')
+          if (!box) return null
+          const link = box.querySelector('[data-testid="first-setup-notice-settings"]')
+          const ps = [...box.querySelectorAll('p')]
+          return {
+            role: box.getAttribute('role'),
+            title: box.querySelector('h2')?.textContent?.trim() ?? '',
+            body: ps[0]?.textContent?.trim() ?? '',
+            note: ps[ps.length - 1]?.textContent?.trim() ?? '',
+            linkHref: link?.getAttribute('href') ?? '',
+            linkLabel: link?.textContent?.trim() ?? '',
+            dismissLabel:
+              box.querySelector('[data-testid="first-setup-notice-dismiss"]')?.textContent?.trim() ??
+              '',
+            hasClose: !!box.querySelector('[data-testid="first-setup-notice-close"]'),
+          }
+        })
+        check('GE-01(a) 重ね窓として名乗っている(role=dialog)', info?.role === 'dialog', String(info?.role))
+        check(
+          'GE-01(a) 見出しが人数と台所の器具を設定できる話になっている',
+          info?.title === '作る人数と台所の器具を設定できます',
+          String(info?.title),
+        )
+        check(
+          'GE-01(a) 本文が2つの設定の効く先(材料の分量・段取り)を言っている',
+          info?.body === '人数は材料の分量に、台所の器具は並行調理ナビの段取りに使います。',
+          String(info?.body),
+        )
+        check(
+          'GE-01(a) ボタンは「個人設定を開く」と「このまま使う」の2つ＋✕がある',
+          info?.linkLabel === '個人設定を開く' &&
+            info?.dismissLabel === 'このまま使う' &&
+            info?.hasClose === true,
+          JSON.stringify({ link: info?.linkLabel, dismiss: info?.dismissLabel, close: info?.hasClose }),
+        )
+        check(
+          'GE-01(a) 閉じてもあとから変えられる場所を、設定の欄の名前のまま書いてある',
+          info?.note === 'あとからでも、個人設定の「食数の設定」「台所の器具」で変えられます。',
+          String(info?.note),
+        )
+        // 文字数の上限(便GEで決定。オーナー「情報詰めすぎると読まずに消される」)
+        const geLen = (s) => [...s].length
+        const geTotal =
+          geLen(info?.title ?? '') +
+          geLen(info?.body ?? '') +
+          geLen(info?.linkLabel ?? '') +
+          geLen(info?.dismissLabel ?? '') +
+          geLen(info?.note ?? '')
+        check(
+          'GE-01(a) 画面に出ている文字が上限内(見出し20/本文45/ボタン各12/一言40/合計120)',
+          geLen(info?.title ?? '') <= 20 &&
+            geLen(info?.body ?? '') <= 45 &&
+            geLen(info?.linkLabel ?? '') <= 12 &&
+            geLen(info?.dismissLabel ?? '') <= 12 &&
+            geLen(info?.note ?? '') <= 40 &&
+            geTotal <= 120,
+          `合計${geTotal}字`,
+        )
+        check(
+          'GE-01(a) 設定へのリンクが「食数の設定」の欄を指し、レシピへの帰り道も持っている',
+          (info?.linkHref ?? '').includes('section=household') &&
+            (info?.linkHref ?? '').includes('back=%2Frecipes%2F1'),
+          String(info?.linkHref),
+        )
+
+        // (g) 390pxで画面から出ない
+        const geFits = await p1.evaluate(() => {
+          const r = document
+            .querySelector('[data-testid="first-setup-notice"]')
+            .getBoundingClientRect()
+          return {
+            top: Math.round(r.top),
+            bottom: Math.round(r.bottom),
+            right: Math.round(r.right),
+            h: window.innerHeight,
+            w: window.innerWidth,
+          }
+        })
+        check(
+          'GE-01(g) 390px幅で案内が画面に収まっている',
+          geFits.top >= 0 && geFits.bottom <= geFits.h && geFits.right <= geFits.w,
+          JSON.stringify(geFits),
+        )
+
+        // (b-1) 「このまま使う」で閉じたら、別のレシピを開いても出ない
+        await p1.locator('[data-testid="first-setup-notice-dismiss"]').click()
+        await p1.waitForTimeout(400)
+        check('GE-01(b) 「このまま使う」で閉じられる', (await geVisible(p1)) === false)
+        check('GE-01(b) 閉じたあとは別のレシピを開いても出ない', await geGoneAfterReopen(p1))
+        const geSeen = await p1.evaluate((key) => ({
+          local: localStorage.getItem(key),
+          session: sessionStorage.getItem(key),
+        }), FIRST_SETUP_NOTICE_SEEN_KEY)
+        check(
+          'GE-01(b) 見た記録はlocalStorageに残る(端末内のみ)',
+          geSeen.local === '1' && geSeen.session === null,
+          JSON.stringify(geSeen),
+        )
+        await ctx.close()
+      }
+
+      // (b-2) ✕・カード外のタップ・Escapeでも「見た」扱いになる
+      for (const [how, close] of [
+        ['✕', async (p) => p.locator('[data-testid="first-setup-notice-close"]').click()],
+        ['カード外のタップ', async (p) => p.mouse.click(195, 40)],
+        ['Escape', async (p) => p.keyboard.press('Escape')],
+      ]) {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p2 = await geOpen(ctx)
+        check(`GE-01(b) ${how}: まっさらな端末では案内が出る`, await geVisible(p2))
+        await close(p2)
+        await p2.waitForTimeout(500)
+        check(`GE-01(b) ${how}で閉じられる`, (await geVisible(p2)) === false)
+        check(`GE-01(b) ${how}で閉じたあとも出ない`, await geGoneAfterReopen(p2))
+        await ctx.close()
+      }
+
+      // (c) すでに設定を自分で決めている人には出ない(この案内は2つの設定を知らない人にだけ意味がある)
+      for (const [label, setUp] of [
+        [
+          '食数の設定',
+          async (p) => {
+            await p.goto(`${BASE}/#/settings?section=household`, { waitUntil: 'networkidle' })
+            await p.waitForTimeout(1200)
+            await p.getByLabel('食数の設定').selectOption('4')
+          },
+        ],
+        [
+          'コンロの口数',
+          async (p) => {
+            await p.goto(`${BASE}/#/settings?section=kitchen`, { waitUntil: 'networkidle' })
+            await p.waitForTimeout(1200)
+            await p.locator('[data-testid="kitchen-burners"]').selectOption('1')
+          },
+        ],
+        [
+          '持っている器具',
+          async (p) => {
+            await p.goto(`${BASE}/#/settings?section=kitchen`, { waitUntil: 'networkidle' })
+            await p.waitForTimeout(1200)
+            await p.locator('[data-testid="kitchen-kitchenNoToaster"]').click()
+          },
+        ],
+      ]) {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p3 = await ctx.newPage()
+        p3.on('pageerror', (err) => errors.push(`[pageerror@GE-01] ${err.message}`))
+        await p3.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+        await p3.waitForTimeout(2000)
+        await setUp(p3)
+        await p3.waitForTimeout(700)
+        await p3.goto(`${BASE}/#/recipes/1`, { waitUntil: 'networkidle' })
+        await p3.waitForTimeout(2000)
+        check(
+          `GE-01(c) 「${label}」を自分で決めている人には出ない`,
+          (await p3.locator('[data-testid="first-setup-notice"]').count()) === 0,
+        )
+        await ctx.close()
+      }
+
+      // (d) パソコン(マウス・1280px)にも出る。ホーム画面追加の案内と違い、人数も口数も
+      // どの端末で開いても同じように効くので、端末の種類で出し分ける理由がない
+      {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, {
+          viewport: { width: 1280, height: 800 },
+        })
+        const p4 = await geOpen(ctx)
+        check('GE-01(d) パソコン幅(マウス操作)でも案内が出る', await geVisible(p4))
+        await ctx.close()
+      }
+
+      // (e) 「個人設定を開く」の着地点。案内した2つの欄が続けて見えること＝
+      // 1回のタップで両方が視界に入る(上の固定帯に見出しが隠れていないことも見る)
+      {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p5 = await geOpen(ctx)
+        await p5.locator('[data-testid="first-setup-notice-settings"]').click()
+        await p5.waitForTimeout(2000)
+        check(
+          'GE-01(e) 押すと設定の「食数の設定」へ移る',
+          p5.url().includes('/settings') && p5.url().includes('section=household'),
+          p5.url(),
+        )
+        const geLanding = await p5.evaluate(() => {
+          const bar = document.querySelector('[data-app-top-bar]')?.getBoundingClientRect()
+          const pick = (id) => {
+            const h = document.querySelector(`#${id} h2`)
+            if (!h) return null
+            const r = h.getBoundingClientRect()
+            return { text: h.textContent?.trim() ?? '', top: Math.round(r.top), bottom: Math.round(r.bottom) }
+          }
+          return {
+            barBottom: Math.round(bar?.bottom ?? 0),
+            household: pick('household-section'),
+            kitchen: pick('kitchen-section'),
+            h: window.innerHeight,
+          }
+        })
+        check(
+          'GE-01(e) 「食数の設定」の見出しが上の固定帯に隠れていない',
+          geLanding.household?.text === '食数の設定' &&
+            geLanding.household.top >= geLanding.barBottom,
+          JSON.stringify(geLanding),
+        )
+        check(
+          'GE-01(e) その下に「台所の器具」が続けて見える(1回のタップで両方が視界に入る)',
+          geLanding.kitchen?.text === '台所の器具' &&
+            geLanding.kitchen.top > geLanding.household.top &&
+            geLanding.kitchen.bottom <= geLanding.h,
+          JSON.stringify(geLanding),
+        )
+        // 読んでいたレシピへ帰れる(?back=)
+        await p5.locator('[data-testid="settings-back"]').click()
+        await p5.waitForTimeout(1200)
+        check(
+          'GE-01(e) 設定から読んでいたレシピへ帰れる',
+          p5.url().includes('/recipes/1'),
+          p5.url(),
+        )
+        check(
+          'GE-01(e) 設定を見に行った人には、帰ってきても案内を出さない',
+          (await p5.locator('[data-testid="first-setup-notice"]').count()) === 0,
+        )
+        await ctx.close()
+      }
+
+      // (f) ライト/ダークの両方で読める
+      for (const scheme of ['light', 'dark']) {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, {
+          ...gePhone,
+          colorScheme: scheme,
+        })
+        const p6 = await geOpen(ctx)
+        check(`GE-01(f) ${scheme}: 案内が出る`, await geVisible(p6))
+        const geColors = await p6.evaluate(() => {
+          const box = document.querySelector('[data-testid="first-setup-notice"]')
+          const pick = (el) => {
+            if (!el) return null
+            const s = getComputedStyle(el)
+            return { color: s.color, bg: s.backgroundColor }
+          }
+          const ps = [...box.querySelectorAll('p')]
+          return {
+            card: getComputedStyle(box).backgroundColor,
+            title: pick(box.querySelector('h2')),
+            body: pick(ps[0]),
+            note: pick(ps[ps.length - 1]),
+            link: pick(box.querySelector('[data-testid="first-setup-notice-settings"]')),
+            dismiss: pick(box.querySelector('[data-testid="first-setup-notice-dismiss"]')),
+          }
+        })
+        for (const [name, part, bg] of [
+          ['見出し', geColors.title, geColors.card],
+          ['本文', geColors.body, geColors.card],
+          ['あとから変える場所の一言', geColors.note, geColors.card],
+          ['「個人設定を開く」', geColors.link, geColors.link?.bg],
+          ['「このまま使う」', geColors.dismiss, geColors.dismiss?.bg],
+        ]) {
+          const ratio = geContrast(part.color, bg)
+          check(
+            `GE-01(f) ${scheme}: ${name}のコントラストが4.5:1以上`,
+            ratio >= 4.5,
+            `比=${ratio.toFixed(2)} 文字=${part.color} 地=${bg}`,
+          )
+        }
+        await ctx.close()
+      }
+
+      // (h) 用事があって開いた画面には割り込まない・レシピ詳細以外には出さない
+      {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p7 = await geOpen(ctx, '/#/recipes/1?step=2')
+        check(
+          'GE-01(h) タイマーから手順を開いたとき(?step=)には出ない',
+          (await p7.locator('[data-testid="first-setup-notice"]').count()) === 0,
+        )
+        await ctx.close()
+      }
+      {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p8 = await geOpen(ctx, '/#/recipes/1?editLog=0')
+        check(
+          'GE-01(h) 記録の編集を開いたとき(?editLog=)には出ない',
+          (await p8.locator('[data-testid="first-setup-notice"]').count()) === 0,
+        )
+        await ctx.close()
+      }
+      {
+        const ctx = await newContextWithFirstSetupNotice(geBrowser, gePhone)
+        const p9 = await ctx.newPage()
+        p9.on('pageerror', (err) => errors.push(`[pageerror@GE-01] ${err.message}`))
+        for (const [label, path] of [
+          ['ホーム', '/#/'],
+          ['レシピ一覧', '/#/recipes'],
+          ['献立', '/#/meal-plan'],
+          ['設定', '/#/settings'],
+        ]) {
+          await p9.goto(`${BASE}${path}`, { waitUntil: 'networkidle' })
+          await p9.waitForTimeout(1500)
+          check(
+            `GE-01(h) ${label}には出ない(出す場所はレシピ詳細だけ)`,
+            (await p9.locator('[data-testid="first-setup-notice"]').count()) === 0,
+          )
+        }
+        // 最後にレシピ詳細を開けば出る＝上の4画面で「見た」扱いにしていないことの裏取り
+        await p9.goto(`${BASE}/#/recipes/1`, { waitUntil: 'networkidle' })
+        await p9.waitForTimeout(2000)
+        check(
+          'GE-01(h) 他の画面を見て回ったあとでも、レシピ詳細を開けば出る',
+          await p9.locator('[data-testid="first-setup-notice"]').isVisible(),
+        )
+        await ctx.close()
+      }
+    } finally {
+      await geBrowser.close()
     }
   }
 
