@@ -933,13 +933,15 @@ export default function CookNaviPage() {
     [selectedIds, recipeById],
   )
 
-  /**
-   * 段取り。並行の余地が無い（1品ずつ作るのとほとんど変わらない）ときは、
-   * 並行に組まず1品ずつ作る順番を出して、待ち時間が見つからなかったことを画面に書く
-   * （2026-08-08 便ED・docs/68 打ち手#4）。
-   */
   /** 設定した台所の器具（2026-08-13 便GC）。未設定の端末は既定（コンロ2口・3器具あり） */
   const kitchen = useMemo(() => kitchenFromSettings(settings), [settings])
+
+  /**
+   * 段取り。並行の余地が無い（1品ずつ作るのとほとんど変わらない）ときは、
+   * 並行に組まず1品ずつ作る順番を出して、その理由を画面に書く
+   * （2026-08-08 便ED・docs/68 打ち手#4。理由は「待ちが見つからない」と
+   * 「口が足りない」の2通り＝2026-08-13 便GC）。
+   */
   const timeline = useMemo(
     () =>
       showTimeline && selectedRecipes.length >= 2
