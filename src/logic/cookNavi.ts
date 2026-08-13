@@ -1317,6 +1317,15 @@ function remainingSpan(job: Job): number {
   return total
 }
 
+/** その品に残っている「手を動かす時間」の合計（分。2026-08-13 便GB） */
+function remainingActive(job: Job): number {
+  let total = 0
+  for (let i = job.ptr; i < job.steps.length; i++) {
+    if (job.steps[i].kind !== 'wait') total += job.steps[i].activeMinutes
+  }
+  return total
+}
+
 /**
  * 「着火」とみなす待ちの長さ（分。2026-08-13 便GB・docs/72 第2段 対象1）。
  *
@@ -1550,9 +1559,38 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     } else if (waits.length > 0) {
       chosen = waits[0]
     } else if (fittingActives.length > 0) {
-      // 残っているのは「後ろへ寄せたい仕上げ」だけ。ここで手を空けて待たせるのではなく、
-      // **次に手が必要になる時刻に着地するよう**開始をずらす（2026-08-13 便GB）
+      // 残っているのは「後ろへ寄せたい仕上げ」だけ（2026-08-13 便GB）。
+      // ここで済ませると、ほかの品ができるずっと前に仕上がって冷める。
+      //   ①まだ先送りできる（次に手が必要になる時刻まで送っても、ほかの品の完成に間に合う）
+      //     → 何もせず時刻だけ進めて、その間にほかの品の手順を進める
+      //   ②もう先送りできない → ほかの品の完成に着地するよう開始をずらして仕上げる
       chosen = pickActive(fittingActives)
+      const held = chosen.steps[chosen.ptr]
+      const othersEnd = jobs.reduce(
+        (max, k) =>
+          k !== chosen && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max,
+        -1,
+      )
+      // ほかの品に残っている「手を動かす時間」の合計。先送りしてよいかの判断に使う
+      const othersActive = jobs.reduce(
+        (sum, k) => (k !== chosen && k.ptr < k.steps.length ? sum + remainingActive(k) : sum),
+        0,
+      )
+      const nextAt = active.reduce(
+        (next, j) => (j !== chosen && j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
+        attendDeadline,
+      )
+      // **先送りしてよいのは、送った先にもまだ手の空く時間が残っているときだけ**。
+      // ここを見ないと、ほかの品の手順で埋まったあとに仕上げがはみ出し、全体が伸びる
+      // （＝縮めるための機能が縮まなくなる。同梱109品の平均短縮率で実測して入れた歯止め）
+      if (
+        Number.isFinite(nextAt) &&
+        nextAt > cookAt &&
+        othersEnd - nextAt >= othersActive + held.activeMinutes
+      ) {
+        cookAt = nextAt
+        continue
+      }
       holdFinish = true
     } else {
       // 締め切りまでに終わる手作業が1つも無い＝ここは手を空けて待つ（詰め込まない）。
@@ -1569,13 +1607,19 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     const step = chosen.steps[chosen.ptr]
     let startMin = cookAt
     if (holdFinish) {
-      // 次に手が必要になる時刻（ほかの品の待ちが明ける時刻・手を戻す締め切りのうち早い方）に
-      // 仕上げが終わるよう、開始を後ろへずらす。全体の目安は伸びない（元から空いていた時間）
+      // ほかの品の完成見込みに合わせて着地させる（そこまで待てないときは、次に手が必要になる
+      // 時刻に合わせる）。全体の目安は伸びない＝元から手が空いていた時間に置き直すだけ
+      const othersEnd = jobs.reduce(
+        (max, k) =>
+          k !== chosen && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max,
+        -1,
+      )
       const nextAt = active.reduce(
         (next, j) => (j !== chosen && j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
         attendDeadline,
       )
-      if (Number.isFinite(nextAt)) startMin = Math.max(cookAt, nextAt - step.activeMinutes)
+      const landing = Math.min(Number.isFinite(nextAt) ? nextAt : othersEnd, othersEnd)
+      if (Number.isFinite(landing)) startMin = Math.max(cookAt, landing - step.activeMinutes)
     }
     // 前に仕掛けた待ちの後始末はここで済む（締め切りの管理から外す）。
     // ただし「その間に」で待ちの中に置いた手順は、その鍋に戻る作業ではないので締め切りを残す
