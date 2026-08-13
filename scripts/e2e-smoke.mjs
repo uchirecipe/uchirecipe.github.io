@@ -16198,7 +16198,7 @@ try {
       )
       check(
         'EG-01 足した工程の分数は表示しない（計算には使う）',
-        egCards.some((t) => t.includes('湯を沸かす') && t.includes('湯が沸くまでの待ち時間')) &&
+        egCards.some((t) => t.includes('湯を沸かす') && t.includes('沸くまでの待ち時間')) &&
           !egCards.some((t) => t.includes('湯を沸かす') && t.includes('約5分の待ち時間')),
       )
       check(
@@ -16370,7 +16370,7 @@ try {
       )
       check(
         'EH-01 手順に書かれた湯沸かしが、前の待ち工程として切り出される',
-        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('湯が沸くまでの待ち時間')),
+        ehCards.some((t) => t.includes('鍋にたっぷりの湯を沸かす') && t.includes('沸くまでの待ち時間')),
         `cards=${JSON.stringify(ehCards.map((t) => t.slice(0, 40)))}`,
       )
       check(
@@ -29793,13 +29793,13 @@ try {
       // --- FX-11: 湯沸かしの待ちに、全体の目安への数え方が添えてある（司令部裁定A案） ---
       currentCheck = 'FX-11'
       const fxBoilBlock = await fxPage
-        .locator('[data-testid="navi-wait-block"]', { hasText: '湯が沸くまでの待ち時間' })
+        .locator('[data-testid="navi-wait-block"]', { hasText: '沸くまでの待ち時間' })
         .first()
         .innerText()
         .catch(() => '')
       check(
         'FX-11 前提: ナビが「湯を沸かす」を足した待ちが段取りに出ている',
-        fxBoilBlock.includes('湯が沸くまでの待ち時間'),
+        fxBoilBlock.includes('沸くまでの待ち時間'),
         fxBoilBlock,
       )
       check(
@@ -29808,12 +29808,12 @@ try {
         fxBoilBlock,
       )
       check(
-        'FX-11 沸くまでの時間は言い切らない（火力と湯の量で変わると書く）',
-        fxBoilBlock.includes('火力と湯の量で変わります'),
+        'FX-11 沸くまでの時間は言い切らない（火力と量で変わると書く）',
+        fxBoilBlock.includes('火力と量で変わります'),
         fxBoilBlock,
       )
       check(
-        'FX-11 見出しは「湯が沸くまでの待ち時間」のまま（分数を出さない）',
+        'FX-11 見出しは「沸くまでの待ち時間」のまま（分数を出さない）',
         !fxBoilBlock.includes('約5分の待ち時間'),
         fxBoilBlock,
       )

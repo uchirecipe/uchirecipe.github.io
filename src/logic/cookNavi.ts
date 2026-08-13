@@ -576,6 +576,16 @@ const MIXED_SPLIT_PUNCTUATION = /[。．\n、，,]/g
 /** 切れ目の候補②: 手作業の動詞に続く「て／で」の直後（「水を入れて｜煮る」） */
 const MIXED_SPLIT_CONJUNCTION = new RegExp(`(?:${ACTION_VERB_PATTERN.source})[てで]`, 'g')
 
+/**
+ * 切る位置は**できるだけ後ろ**（＝手を動かす部分をできるだけ残す）。
+ *
+ * 「鶏肉を加え、袋の上から手でよくもみ込んで下味をなじませ、冷蔵庫で30分ほど置く。」で、
+ * 待ちの合図をいちばん**前**（なじませ）で取ると「鶏肉を加え、」だけが手作業になり、
+ * もみ込む作業が待ちの中へ消える。いちばん**後ろ**（置く）で取れば
+ * 「鶏肉を加え、…下味をなじませ、」までが手作業として残る。
+ * 後ろで取ると前半が待ちになってしまう手順（「だし汁と調味料を加えてひと煮立ちさせ、…煮る」）
+ * だけ、前の合図まで戻ってもう一度試す。
+ */
 function mixedSplitPoint(text: string, waitAt: number): number | undefined {
   let best: number | undefined
   for (const re of [MIXED_SPLIT_PUNCTUATION, MIXED_SPLIT_CONJUNCTION]) {
@@ -613,23 +623,29 @@ export function splitMixedStep(step: Step): { active: Step; wait: Step } | undef
   const masked = maskNonWaitNouns(stepMainText(text)).replace(PAREN_CONTENT_PATTERN, (m) =>
     '＊'.repeat(m.length),
   )
-  const waitAt = firstIndexOfPatterns(masked, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
-  if (waitAt <= 0) return undefined
-  const cut = mixedSplitPoint(masked, waitAt)
-  if (cut == null) return undefined
-  const head = text.slice(0, cut).trim()
-  const tail = text.slice(cut).trim()
-  if (!head || !tail) return undefined
-  if (!ACTION_VERB_PATTERN.test(maskNonWaitNouns(stepMainText(head)))) return undefined
-  // 注意書きは両方に付ける。片方に寄せると、火の通り具合のような**安全に関わる一文**が
-  // 手作業側・待ち側のどちらかから消える（規約D-④の doneness メモは待ちの側で読みたい）
-  const active: Step = { text: head, memo: step.memo }
-  // 手順に書かれた分数は待ちのもの（「10分おく」の10分）。前半には持たせない
-  const wait: Step = { text: tail, minutes: step.minutes, memo: step.memo }
-  if (classifyStep(active) !== 'active') return undefined
-  if (classifyStep(wait) !== 'wait') return undefined
-  if ((resolveWaitMinutes(wait) ?? 0) < (resolveWaitMinutes(step) ?? 0)) return undefined
-  return { active, wait }
+  const waitPositions = [
+    lastIndexOfPatterns(masked, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS]),
+    firstIndexOfPatterns(masked, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS]),
+  ]
+  for (const waitAt of waitPositions) {
+    if (waitAt <= 0) continue
+    const cut = mixedSplitPoint(masked, waitAt)
+    if (cut == null) continue
+    const head = text.slice(0, cut).trim()
+    const tail = text.slice(cut).trim()
+    if (!head || !tail) continue
+    if (!ACTION_VERB_PATTERN.test(maskNonWaitNouns(stepMainText(head)))) continue
+    // 注意書きは両方に付ける。片方に寄せると、火の通り具合のような**安全に関わる一文**が
+    // 手作業側・待ち側のどちらかから消える（規約D-④の doneness メモは待ちの側で読みたい）
+    const active: Step = { text: head, memo: step.memo }
+    // 手順に書かれた分数は待ちのもの（「10分おく」の10分）。前半には持たせない
+    const wait: Step = { text: tail, minutes: step.minutes, memo: step.memo }
+    if (classifyStep(active) !== 'active') continue
+    if (classifyStep(wait) !== 'wait') continue
+    if ((resolveWaitMinutes(wait) ?? 0) < (resolveWaitMinutes(step) ?? 0)) continue
+    return { active, wait }
+  }
+  return undefined
 }
 
 /**
@@ -648,20 +664,33 @@ export function splitMixedStep(step: Step): { active: Step; wait: Step } | undef
  *     節1つなら、待ちに巻き込まれる手作業もその中の一手だけで済む
  *   - 分けた前半が待ち・後半が手作業と読めること（分けて判定が変わるなら分けない）
  *   - 分数欄が空の手順だけ（`splitMixedStep` と同じ理由）
+ *   - **前半に時間が書いてあるか、乾物をもどす型の言い回しであること**。
+ *     これが無いと、手順の一部を切り出したせいで**元の手順には無かった待ちが生まれる**。
+ *     実測した2件（同梱109品の目視）:
+ *       「茹で上がったらすぐにざるにあげ、｜流水でもみ洗いして…」→ 前半が**ゆで8分の待ち**に化ける
+ *       「冷やした茶碗蒸しに冷たいだしあんをかけ、｜…散らす」→ 「茶碗**蒸**し」で蒸し8分に化ける
+ *     どちらも段取りに存在しない待ちで、待っている間に別の料理へ移らせる＝危険側の誤り。
  */
 /** 切れ目の候補: 待ちの動詞に続く「て／で」の直後（「水につけてもどし｜、」も読点で拾う） */
 const WAIT_FIRST_SPLIT_CONJUNCTION = new RegExp(
   `(?:${[...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS].map((r) => r.source).join('|')})[てで]`,
   'g',
 )
+/**
+ * 前半を待ちとして切り出してよい言い回し（時間が書かれていないときの許可リスト）。
+ * 乾物・切り干し・高野豆腐を水やぬるま湯でもどす型に限る（docs/68 3-3 が
+ * 「構造的な限界」として記録していた形そのもの）。**汎用の許可は置かない。**
+ */
+const WAIT_FIRST_SOAK_PATTERN = /もどす|もどし|戻す|戻し|ひたし|浸し|水につけ|水に浸/
 
 export function splitWaitFirstStep(step: Step): { wait: Step; active: Step } | undefined {
   const text = step.text ?? ''
   if (classifyStep(step) !== 'active') return undefined
   if (step.minutes != null && step.minutes > 0) return undefined
-  const masked = maskNonWaitNouns(stepMainText(text)).replace(PAREN_CONTENT_PATTERN, (m) =>
-    '＊'.repeat(m.length),
-  )
+  const masked = maskNonWaitNouns(stepMainText(text))
+    .replace(PAREN_CONTENT_PATTERN, (m) => '＊'.repeat(m.length))
+    // 「茹で上がったら」はすでにゆで終わったものを指す言い方。待ちの合図にしない
+    .replace(BOILED_ALREADY_PATTERN, (m) => '＊'.repeat(m.length))
   const waitEnd = lastEndOfPatterns(masked, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
   if (waitEnd <= 0) return undefined
   // 待ちの語より後ろで、いちばん近い切れ目
@@ -681,6 +710,11 @@ export function splitWaitFirstStep(step: Step): { wait: Step; active: Step } | u
   const head = text.slice(0, cut).trim()
   const tail = text.slice(cut).trim()
   if (!head || !tail) return undefined
+  // 前半に時間が書いてあるか、乾物をもどす型の言い回しであること（無い待ちを作らない）
+  const headMain = stepMainText(head)
+  if (findTimeTokens(headMain).length === 0 && !WAIT_FIRST_SOAK_PATTERN.test(headMain)) {
+    return undefined
+  }
   const wait: Step = { text: head, memo: step.memo }
   const active: Step = { text: tail, memo: step.memo }
   if (classifyStep(wait) !== 'wait') return undefined
