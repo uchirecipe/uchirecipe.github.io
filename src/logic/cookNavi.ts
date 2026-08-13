@@ -56,6 +56,7 @@ export const WAIT_VERB_PATTERNS: RegExp[] = [
   /さらす|さらし/, // 水にさらす
   /温め|あたため/, // 温める
   /オーブン/, // オーブン
+  /トースター/, // トースター（庫内に入れたら手が離れる。2026-08-13 便GA）
   // 電子レンジ。「チン」は単独だと「チンゲン菜」「チンジャオロース」に誤爆するため
   // （実測: 「チンゲン菜の茎を1分炒め」が待ち系に化けていた）、動詞になる形だけを拾う
   /レンジ|電子レンジ|チンす|チンし/,
@@ -222,6 +223,78 @@ const HANDS_ON_COOK_PATTERN = /炒め|炒る|揚げ/
 const ACTION_VERB_PATTERN =
   /炒め|炒る|揚げ|焼く|焼き|焼い|取る|取り|取っ|加え|入れ|混ぜ|溶き|溶い|溶か|絞る|絞り|絞っ|切る|切り|切っ|盛る|盛り|盛っ|かける|かけて|ふる|ふり|返す|返し|のせ|散ら|和え|あえ|つぶ|こね|まぶ|止め|ぬぐ|添え|よそ|包む|巻く|にぎ|ほぐ|むく|むき|洗う|洗い|洗っ|締め|(?:水気|水け|湯|油|汁気|汁け)をき[るりっ]/
 
+/**
+ * 手を離してよい加熱器具（2026-08-13 便GA・docs/72 第1段）。
+ *
+ * 直した不具合（docs/71 R3）: 「魚焼きグリルで15分焼く」が**手作業15分**と判定され、
+ * 15分ずっと手がふさがる前提で段取りを組んでいた。原因は位置ルール（ACTION_VERB_PATTERN）が
+ * 末尾の「焼く」を手を動かす動作として拾うこと。**手順に分数が書かれていないときだけ**起きるので、
+ * 分数欄の埋まっている同梱109品では1件も現れず、利用者が登録したレシピでだけ起きていた。
+ *
+ * 直し方は「焼く」を待ち動詞にすることではない（フライパンの焼きから目を離させる＝事故になる）。
+ * **その手順に放置してよい器具が書かれているとき、その後ろの「焼く」はその器具の加熱そのもの**
+ * であって手を動かす動作ではない、と読む。器具の語が無い「フライパンで3分焼く」は従来のまま。
+ *
+ * 載せるのは「入れて扉・スイッチを閉じたら火加減を見なくてよい」器具だけ
+ * （docs/72 §3 が数える4器具のうち、コンロを除いた3つ＋電子レンジ）。
+ * 鍋・フライパン・中華鍋は載せない＝コンロの加熱は従来どおり手作業側に倒す。
+ */
+const UNATTENDED_APPLIANCE_PATTERN = /グリル|オーブン|トースター|レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/g
+/** 上の器具が受け持つ加熱の動詞。器具の語より後ろに出たときだけ、手作業の動作から外す */
+const APPLIANCE_HEAT_VERB_PATTERN = /焼く|焼き|焼い|焼け/g
+
+/**
+ * 放置してよい器具の加熱動詞を、位置ルールの対象から外す（同じ長さの伏せ字。位置をずらさない）。
+ * 効かせる範囲は**器具の語が出てきた文の中だけ**（次の文の「フライパンで焼き色をつける」まで
+ * 巻き込まない）。
+ */
+function maskApplianceHeatVerbs(text: string): string {
+  return maskAfterCue(text, UNATTENDED_APPLIANCE_PATTERN, APPLIANCE_HEAT_VERB_PATTERN)
+}
+
+/**
+ * 合図の語（cue）が出てきた位置から、その文の終わりまでの間にある target を伏せ字にする。
+ * 伏せ字は**同じ長さ**にして文字位置をずらさない（位置ルールが文字位置で判断するため）。
+ */
+function maskAfterCue(text: string, cue: RegExp, target: RegExp): string {
+  cue.lastIndex = 0
+  let result = text
+  let m: RegExpExecArray | null
+  while ((m = cue.exec(text)) !== null) {
+    const start = m.index
+    const dot = result.slice(start).search(SENTENCE_SPLIT_PATTERN)
+    const end = dot === -1 ? result.length : start + dot
+    result =
+      result.slice(0, start) +
+      result.slice(start, end).replace(target, (x) => '＊'.repeat(x.length)) +
+      result.slice(end)
+    if (m.index === cue.lastIndex) cue.lastIndex++
+  }
+  return result
+}
+
+/**
+ * 「待ちの最中に一度だけ手を入れる」合図（2026-08-13 便GA・docs/72 第1段）。
+ *
+ * 直した不具合: 「弱火で25分煮込み、ときどき混ぜながら水分をとばします」（25分の煮込み）と
+ * 「そこから60分ゆっくり煮ていきます。途中で上下を返すと色むらがなくなります」（60分の煮込み）が、
+ * どちらも手作業と判定されていた。前者は「混ぜながら」を付きっきりの合図として拾ったため、
+ * 後者は位置ルールが末尾の「返す」を主役と読んだため。
+ *
+ * 「ときどき」「途中で」が付く動作は、その加熱を**終わらせる**動作ではなく、
+ * 待っている間に一度手を入れるだけの動作なので、どちらの判定にも数えない。
+ * 数えないのは下の OCCASIONAL_ACTION_PATTERN の語だけ＝**炒める・揚げる・焼く・切る・盛る**は
+ * 「ときどき」が付いても従来どおり手作業として数える（鍋の前を離れる誤りを増やさないため）。
+ * 「絶えず」「混ぜ続ける」「煮詰める」「焦げやすい」も従来どおり付きっきりのまま。
+ */
+const OCCASIONAL_CUE_PATTERN = /途中で|途中に|ときどき|時々|たまに|時折/g
+/** 待ちの最中の一手として扱う動作（かき混ぜる・上下を返す・アクを取る） */
+const OCCASIONAL_ACTION_PATTERN = /(?:かき)?混ぜ|まぜ|返す|返し|返っ|裏返|アクを取|あくを取/g
+
+function maskOccasionalActions(text: string): string {
+  return maskAfterCue(text, OCCASIONAL_CUE_PATTERN, OCCASIONAL_ACTION_PATTERN)
+}
+
 /** 短時間の合図。既定分数を当てない（「熱湯でさっとゆでる」を8分の待ちにしない） */
 const SHORT_CUE_PATTERN = /さっと|ざっと|軽く|手早く|素早く/
 
@@ -260,6 +333,9 @@ const DEFAULT_WAIT_MINUTES: { pattern: RegExp; minutes: number; skipForNoodles?:
   { pattern: /漬|浸/, minutes: 20 },
   { pattern: /もどす|もどし|戻す|戻し/, minutes: 15 },
   { pattern: /オーブン|グリル/, minutes: 15 },
+  // トースターはオーブン・グリルより短い（食パン・グラタンの焼き色付けが中心）。
+  // 待ち分数を長く見積もるほど、その中に他の品の作業を詰め込むので、短い側に置く（2026-08-13 便GA）
+  { pattern: /トースター/, minutes: 5 },
   { pattern: /冷蔵庫/, minutes: 30 },
   // 「煮立てる」は沸かすのと同じで、煮込みほど長くない（同梱109品の目視。10分は長すぎた）
   { pattern: /煮立て/, minutes: 5 },
@@ -310,7 +386,9 @@ function lastIndexOfPatterns(text: string, patterns: readonly RegExp[]): number 
  * オーナー報告の肉巻きおにぎりは、目を離せない根拠（「焦げやすいので」）が memo 側にあった。
  */
 export function isHandsOnStep(step: Step): boolean {
-  const haystack = `${step.text}\n${step.memo ?? ''}`
+  // 「ときどき混ぜながら」は待ちの最中の一手であって付きっきりの合図ではない（2026-08-13 便GA）。
+  // 「絶えず混ぜながら」「混ぜ続ける」「煮詰める」「焦げやすい」は伏せないので従来どおり付きっきり
+  const haystack = maskOccasionalActions(`${step.text}\n${step.memo ?? ''}`)
   if (HANDS_ON_PATTERNS.some((re) => re.test(haystack))) return true
   // 炒め・揚げは「待ち動詞より後ろにあるとき」だけ付きっきり（本文のみで判断する。
   // memo の「炒めたときに水っぽくならない」等の言及で本物の待ちを潰さないため）
@@ -394,7 +472,13 @@ export function classifyStep(step: Step): StepKind {
   const waitAt = lastEndOfPatterns(text, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS])
   if (waitAt === -1) return 'active'
   const hasExplicitMinutes = step.minutes != null && step.minutes > 0
-  if (!hasExplicitMinutes && lastIndexOfPatterns(text, [ACTION_VERB_PATTERN]) >= waitAt) return 'active'
+  // 位置ルールは残す（外すと「煮立ったらアクを取る」「粗熱が取れたら殻をむく」が待ちに化ける）。
+  // ただし**放置してよい器具の加熱そのものの動詞**と**待ちの最中の一手**は、手を動かす動作に
+  // 数えない（2026-08-13 便GA・docs/72 第1段）。伏せ字は同じ長さなので waitAt の位置はずれない
+  const forPosition = maskOccasionalActions(maskApplianceHeatVerbs(text))
+  if (!hasExplicitMinutes && lastIndexOfPatterns(forPosition, [ACTION_VERB_PATTERN]) >= waitAt) {
+    return 'active'
+  }
   const minutes = resolveWaitMinutes(step)
   return minutes != null && minutes >= MIN_PARALLEL_WAIT_MINUTES ? 'wait' : 'active'
 }

@@ -49,6 +49,9 @@ import { buildIngredientNames, findIngredientMatches } from '../src/logic/ingred
 import { parseRecipeText } from '../src/logic/parseRecipeText.ts'
 import { buildImportedIngredientRows, filterImportedSteps } from '../src/logic/urlImportRows.ts'
 import { starterDefs } from '../src/db/starters.ts'
+// 汁物かどうかの判定（N2。2026-08-13 便GA）。取り込み・手入力のレシピは料理の種別が付かないので、
+// アプリが登録時に初期値を提案するのと同じ関数で補う（＝実機と同じ見分け方で測る）
+import { guessDishType } from '../src/logic/dishTypeGuess.ts'
 import { urlSamples, pasteSamples, manualSamples } from './data/navi-wild-recipes.mjs'
 import {
   urlSamples as holdoutUrlSamples,
@@ -73,7 +76,7 @@ const DUMP = process.argv.includes('--dump')
 
 let nextId = 1
 /** 計測に必要なところだけ持つレシピ（Recipe と同じ形。buildCookTimeline は id/title/steps を見る） */
-function makeRecipe({ title, servings, cookMinutes, ingredients, steps, truth, realWaits, realMinutes, group }) {
+function makeRecipe({ title, servings, cookMinutes, ingredients, steps, truth, realWaits, realMinutes, group, dishType }) {
   return {
     id: nextId++,
     title,
@@ -81,6 +84,8 @@ function makeRecipe({ title, servings, cookMinutes, ingredients, steps, truth, r
     cookMinutes,
     effortLevel: 'normal',
     tags: [],
+    // 同梱109品は確定済みの値、それ以外は登録時と同じ推定（2026-08-13 便GA・N2で使う）
+    dishType: dishType ?? guessDishType({ title, tags: [], ingredients: ingredients ?? [] }),
     ingredients,
     steps,
     isFavorite: false,
@@ -104,6 +109,7 @@ const starterRecipes = starterDefs.map((d) =>
     ingredients: d.ingredients,
     steps: d.steps,
     realMinutes: d.cookMinutes,
+    dishType: d.dishType,
     group: '同梱109品',
   }),
 )
@@ -1177,7 +1183,19 @@ if (DUMP) {
 //  ここより上の出力（既存7項目）は1文字も変えていない。
 // ================================================================================
 
-const N_LINE = { n1: 30, n2: 10, n3: 1, n4: 90, n5: 0, n6: 80 }
+/**
+ * 6項目の合格ライン。
+ *
+ * **n1over / n2 / n3 の3本は 2026-08-13 便GA で引き直した**（docs/72 §2 で決めた線が、
+ * 狙った症状を1件も捉えられていないことが便FZの実測で分かったため。**すべて厳しくする方向**で、
+ * 緩めた線は1本も無い）。理由はそれぞれの項目の直前に書いてある。
+ *   n1     … 開きの割合の中央値。**参考値**として残す（合否には使わない）
+ *   n1over … 開きが30%を超えた組み合わせの割合。**これがN1の合否**（20%以下）
+ *   n2     … 温かい品**と汁物**の放置の最大値（分）
+ *   n3     … 放置してよい調理なのに手作業と判定された8分以上の工程の件数
+ *   n3rank … 最長待ちの着火順位の中央値。**参考値**として残す（合否には使わない）
+ */
+const N_LINE = { n1: 30, n1over: 20, n2: 10, n3: 0, n3rank: 1, n4: 90, n5: 0, n6: 80 }
 const verdict = (ok) => (ok ? '合格' : '**不合格**')
 /** 同じ実例が別の組み合わせから何度も出てくるので、代表1件にまとめる */
 function dedupe(list, keyOf) {
@@ -1350,6 +1368,23 @@ function isStrandedLongCook(item) {
   return item.kind === 'active' && item.activeMinutes >= 8 && UNATTENDED_COOK.test(maskForMeasure(item.text))
 }
 
+/**
+ * 【N2の対象】温かいうちに出したい品（2026-08-13 便GA・線の引き直し）。
+ *
+ * 便FZまでは `recipeServeTemp(r) === 'hot'` だけを対象にしていた。ところが**R3のみそ汁は
+ * 'neutral' 判定で対象から外れる**（最後の手順が「みそを溶いて火を止める」＝火を使う語が
+ * 「止める」しか無く、加熱で終わる品と読めない）。汁物が冷める問題を測るための項目なのに、
+ * 発端になった汁物そのものを取りこぼしていた。
+ *
+ * そこで**料理の種別が汁物（dishType === 'soup'）の品は、温度の判定に関係なく常に対象**にする。
+ * 汁物は冷めたら作り直せず、放置が一番はっきり体験に出る種別のため。
+ * 種別が付いていないレシピ（取り込み・手入力）は、アプリが登録時に初期値を提案するのと同じ
+ * `guessDishType` で補う＝実機と同じ見分け方で測る。
+ */
+function isN2Target(recipe) {
+  return recipeServeTemp(recipe) === 'hot' || recipe.dishType === 'soup'
+}
+
 // ---------------------------------------------------------------- 1組み合わせの分析
 
 function analyzePlan(trio) {
@@ -1368,10 +1403,10 @@ function analyzePlan(trio) {
   // --- N1 完成の揃い
   const spread = last - Math.min(...finishes)
 
-  // --- N2 温かい品の放置（「できたてが温かい」と判定した品が、最後の品より何分早く終わるか）
+  // --- N2 温かい品の放置（対象の品が、最後の品より何分早く終わるか）
   let hotIdle = null
   for (const r of trio) {
-    if (recipeServeTemp(r) !== 'hot') continue
+    if (!isN2Target(r)) continue
     const f = finish.get(r.id)
     if (f == null) continue
     hotIdle = Math.max(hotIdle ?? 0, last - f)
@@ -1510,9 +1545,14 @@ say('    「半日漬ける」のような今回の調理で終わらない待�
 say()
 
 // ---------------------------------------------------------------- N1
-say('■ N1. 完成の揃い（品ごとの完成時刻の開き。線＝全体の所要時間の30%以内・中央値）')
+say('■ N1. 完成の揃い（品ごとの完成時刻の開き。**線＝開きが30%を超える組み合わせが20%以下**）')
 say()
-say('| 組み合わせ | 通り数 | 開きの中央値(分) | 全体の中央値(分) | **開きの割合の中央値** | 30%超の割合 | 判定 |')
+say('  ※線の引き直し（2026-08-13 便GA）: 便FZまでは「開きの割合の**中央値**が30%以内」を線に')
+say('     していたが、**中央値25.4%で合格しながら41.6%の組み合わせが30%を超えていた**（R3の再現は')
+say('     60%）。中央値は半分の組み合わせが線を割っていても合格になる。**30%を超えた組み合わせの')
+say('     割合そのものを線にする**（20%以下）。中央値は参考値として残す。')
+say()
+say('| 組み合わせ | 通り数 | 開きの中央値(分) | 全体の中央値(分) | 開きの割合の中央値（参考） | **30%超の割合** | 判定 |')
 say('|---|---|---|---|---|---|---|')
 for (const s of nSets) {
   const rows = nAnalyses.get(s.key)
@@ -1521,13 +1561,14 @@ for (const s of nSets) {
   const over = pct(ratios.filter((x) => x > N_LINE.n1).length, rows.length)
   say(
     `| ${s.key} | ${rows.length} | ${f1(median(rows.map((a) => a.spread)))} | ${f1(median(rows.map((a) => a.total)))} | ` +
-      `**${f1(med)}%** | ${f1(over)}% | ${s.wild ? verdict(med <= N_LINE.n1) : '（参考）'} |`,
+      `${f1(med)}% | **${f1(over)}%** | ${s.wild ? verdict(over <= N_LINE.n1over) : '（参考）'} |`,
   )
 }
 {
   const ratios = wildRows.map((a) => pct(a.spread, a.total))
   const med = median(ratios)
-  say(`| **野生＋ホールドアウト 合計** | ${wildRows.length} | ${f1(median(wildRows.map((a) => a.spread)))} | ${f1(median(wildRows.map((a) => a.total)))} | **${f1(med)}%** | ${f1(pct(ratios.filter((x) => x > N_LINE.n1).length, wildRows.length))}% | ${verdict(med <= N_LINE.n1)} |`)
+  const over = pct(ratios.filter((x) => x > N_LINE.n1).length, wildRows.length)
+  say(`| **野生＋ホールドアウト 合計** | ${wildRows.length} | ${f1(median(wildRows.map((a) => a.spread)))} | ${f1(median(wildRows.map((a) => a.total)))} | ${f1(med)}% | **${f1(over)}%** | ${verdict(over <= N_LINE.n1over)} |`)
   say()
   const worst = dedupe(
     wildRows.slice().sort((a, b) => pct(b.spread, b.total) - pct(a.spread, a.total)),
@@ -1543,9 +1584,15 @@ for (const s of nSets) {
 say()
 
 // ---------------------------------------------------------------- N2
-say('■ N2. 温かい品の放置（「できたてが温かい」品が最後の品より何分早く終わるか。線＝最大10分以内）')
+say('■ N2. 温かい品と汁物の放置（対象の品が最後の品より何分早く終わるか。線＝最大10分以内）')
 say()
-say('| 組み合わせ | 温かい品を含む通り | 放置の中央値(分) | **放置の最大値(分)** | 10分超の割合 | 判定 |')
+say('  ※対象の引き直し（2026-08-13 便GA）: 便FZまでは「できたてが温かい」判定（recipeServeTemp）の')
+say('     品だけを見ていたが、**R3のみそ汁はこの判定が neutral で対象外**になっていた（最後の手順が')
+say('     「みそを溶いて火を止める」で、加熱で終わる品と読めないため）。汁物が冷める問題を測る項目が')
+say('     発端の汁物を取りこぼしていたので、**料理の種別が汁物（dishType===\'soup\'）の品は温度の')
+say('     判定に関係なく常に対象**に加えた（対象が増える＝厳しくなる方向）。')
+say()
+say('| 組み合わせ | 対象を含む通り | 放置の中央値(分) | **放置の最大値(分)** | 10分超の割合 | 判定 |')
 say('|---|---|---|---|---|---|')
 for (const s of nSets) {
   const rows = nAnalyses.get(s.key).filter((a) => a.hotIdle != null)
@@ -1568,71 +1615,79 @@ for (const s of nSets) {
   const worst = dedupe(rows.slice().sort((a, b) => b.hotIdle - a.hotIdle), (a) => nameOf(a)).slice(0, 3)
   say('  いちばん悪い3例:')
   for (const a of worst) {
-    const hot = a.trio.filter((r) => recipeServeTemp(r) === 'hot')
-    const detail = hot.map((r) => `${r.title}(温)=${a.finish.get(r.id)}分`).join(' / ')
+    const hot = a.trio.filter((r) => isN2Target(r))
+    const detail = hot
+      .map((r) => `${r.title}(${recipeServeTemp(r) === 'hot' ? '温' : '汁'})=${a.finish.get(r.id)}分`)
+      .join(' / ')
     say(`    - ${nameOf(a)}`)
     say(`      全体${a.total}分・最後の品の完成${a.last}分 / ${detail} → 放置${a.hotIdle}分`)
   }
 }
 say()
-say('  ※N2は「できたてが温かい」の判定（recipeServeTemp）に丸ごと依存する。その内訳:')
+say('  ※N2の対象の内訳（温かい判定＋汁物）:')
 say()
-say('| レシピ群 | 品数 | 温かい(hot) | 冷たい(cold) | どちらでもない(neutral) |')
-say('|---|---|---|---|---|')
+say('| レシピ群 | 品数 | 温かい(hot) | 冷たい(cold) | どちらでもない(neutral) | うち汁物 | **N2の対象** |')
+say('|---|---|---|---|---|---|---|')
 for (const g of [...groups, ...holdoutGroups, { key: '並行指示の標本', recipes: cueRecipes }]) {
   const t = (k) => g.recipes.filter((r) => recipeServeTemp(r) === k).length
-  say(`| ${g.key} | ${g.recipes.length} | ${t('hot')} | ${t('cold')} | ${t('neutral')} |`)
+  const soup = g.recipes.filter((r) => r.dishType === 'soup').length
+  const target = g.recipes.filter((r) => isN2Target(r)).length
+  say(`| ${g.key} | ${g.recipes.length} | ${t('hot')} | ${t('cold')} | ${t('neutral')} | ${soup} | **${target}** |`)
 }
 say()
 
 // ---------------------------------------------------------------- N3
-say('■ N3. 最長待ちの着火順（その品の準備が終わってから何番目に着火したか。線＝1番目）')
+say('■ N3. 放置調理の取りこぼし（放置してよい調理なのに手作業と判定された8分以上の工程。線＝0件）')
 say()
-say('| 組み合わせ | 対象の品数 | **順位の中央値** | 1番目の割合 | 3番目以降の割合 | 判定 |')
-say('|---|---|---|---|---|---|')
-for (const s of nSets) {
-  const ig = nAnalyses.get(s.key).flatMap((a) => a.ignitions)
+say('  ※線の引き直し（2026-08-13 便GA）: 便FZまでのN3は「最長**待ち**の着火順」だったが、')
+say('     **待ちと判定されなかった加熱はそもそも対象に入らない**。R3の「魚焼きグリルで15分焼く」は')
+say('     手作業15分と判定されていたため、順位1.0番目で合格しながら症状を1件も捉えられていなかった。')
+say('     便FZが補助として足したこの指標を**正式な項目に格上げし、線＝0件**とする。')
+say('     従来の着火順は下に参考として残す。')
+say()
+say('| レシピ群 | 品数 | **該当する工程** | 判定 | 例 |')
+say('|---|---|---|---|---|')
+let n3Stranded = 0
+for (const g of [...groups, ...holdoutGroups, { key: '並行指示の標本', recipes: cueRecipes }]) {
+  const hits = []
+  for (const r of g.recipes) {
+    for (const it of buildCookTimeline([r]).items) if (isStrandedLongCook(it)) hits.push(`${r.title}: ${it.text.slice(0, 30)}（手作業${it.activeMinutes}分）`)
+  }
+  // 合否は野生＋ホールドアウト＋並行指示の標本で見る（同梱109品は参考。docs/72 §5）
+  const judged = g.key !== '同梱109品'
+  if (judged) n3Stranded += hits.length
+  say(`| ${g.key} | ${g.recipes.length} | **${hits.length}** | ${judged ? verdict(hits.length === N_LINE.n3) : '（参考）'} | ${hits[0] ?? '—'} |`)
+}
+say(`| **判定対象の合計（同梱109品を除く）** | — | **${n3Stranded}** | ${verdict(n3Stranded === N_LINE.n3)} | — |`)
+say()
+say('  ※参考1（旧N3）: 最長**待ち**の着火順（その品の準備が終わってから何番目に着火したか）。')
+say()
+say('| 組み合わせ | 対象の品数 | 順位の中央値 | 1番目の割合 | 3番目以降の割合 |')
+say('|---|---|---|---|---|')
+for (const s of [...nSets, { key: '**野生＋ホールドアウト 合計**', rows: wildRows }]) {
+  const ig = (s.rows ?? nAnalyses.get(s.key)).flatMap((a) => a.ignitions)
   const ranks = ig.map((x) => x.rank)
-  const med = median(ranks)
   say(
-    `| ${s.key} | ${ig.length} | **${f1(med)}** | ${f1(pct(ranks.filter((r) => r === 1).length, ranks.length))}% | ` +
-      `${f1(pct(ranks.filter((r) => r >= 3).length, ranks.length))}% | ${s.wild ? verdict(med <= N_LINE.n3) : '（参考）'} |`,
+    `| ${s.key} | ${ig.length} | ${f1(median(ranks))} | ${f1(pct(ranks.filter((r) => r === 1).length, ranks.length))}% | ` +
+      `${f1(pct(ranks.filter((r) => r >= 3).length, ranks.length))}% |`,
   )
 }
+say()
 {
   const ig = wildRows.flatMap((a) => a.ignitions)
-  const ranks = ig.map((x) => x.rank)
-  const med = median(ranks)
-  say(`| **野生＋ホールドアウト 合計** | ${ig.length} | **${f1(med)}** | ${f1(pct(ranks.filter((r) => r === 1).length, ranks.length))}% | ${f1(pct(ranks.filter((r) => r >= 3).length, ranks.length))}% | ${verdict(med <= N_LINE.n3)} |`)
-  say()
   const worst = dedupe(
     ig.slice().sort((a, b) => b.rank - a.rank || b.waitMinutes - a.waitMinutes),
     (x) => x.title + x.text,
   ).slice(0, 3)
-  say('  いちばん悪い3例:')
+  say('  着火順のいちばん悪い3例:')
   for (const x of worst) {
     say(`    - ${x.title}: 最長の待ち${x.waitMinutes}分が、準備の終わった${x.readyAt}分から${x.rank}番目・${x.startMin}分地点で着火`)
     say(`      ${x.text.slice(0, 54)}`)
   }
 }
 say()
-say('  ※補助: N3は「待ちと判定された工程」しか見られない。**放置してよい調理なのに手作業と')
-say('     判定された8分以上の工程**（グリル・オーブン・トースター・煮る等）は、そもそもN3の')
-say('     対象にならないまま料理人を縛る。その件数:')
-say()
-say('| レシピ群 | 品数 | 該当する工程 | 例 |')
-say('|---|---|---|---|')
-for (const g of [...groups, ...holdoutGroups, { key: '並行指示の標本', recipes: cueRecipes }]) {
-  const hits = []
-  for (const r of g.recipes) {
-    for (const it of buildCookTimeline([r]).items) if (isStrandedLongCook(it)) hits.push(`${r.title}: ${it.text.slice(0, 30)}（手作業${it.activeMinutes}分）`)
-  }
-  say(`| ${g.key} | ${g.recipes.length} | ${hits.length} | ${hits[0] ?? '—'} |`)
-}
-say()
-say('  ※補助2: 判定に左右されない形で「長い加熱を先に始めているか」を見る。')
+say('  ※参考2: 判定に左右されない形で「長い加熱を先に始めているか」を見る。')
 say('     **その品でいちばん長い工程（待ち・手作業を問わない）が、何分地点で始まったか**。')
-say('     R3の「グリル15分が最後に回る」は、グリルが待ちと判定されないため上のN3では見えない。')
 say()
 say('| 組み合わせ | 対象の品数 | 着火時刻の中央値 | **全体に対する位置（中央値）** | 後半(50%超)で始まる割合 |')
 say('|---|---|---|---|---|')
@@ -1832,10 +1887,12 @@ say('|---|---|---|---|---|')
 {
   const ratios = wildRows.map((a) => pct(a.spread, a.total))
   const n1 = median(ratios)
+  const n1over = pct(ratios.filter((x) => x > N_LINE.n1).length, wildRows.length)
   const hot = wildRows.filter((a) => a.hotIdle != null).map((a) => a.hotIdle)
   const n2 = Math.max(...hot)
   const ranks = wildRows.flatMap((a) => a.ignitions).map((x) => x.rank)
-  const n3 = median(ranks)
+  const n3rank = median(ranks)
+  const n3 = n3Stranded
   const n4 = pct(n4Total.both, n4Total.mixed)
   const n5 = wildRows.filter((a) => a.concurrency.stove > 1).length
   // N6だけは専用標本で測る（既存の標本に「その間に」が1件も無いため。上のN6の表を参照）
@@ -1844,9 +1901,9 @@ say('|---|---|---|---|---|')
     .flatMap((a) => a.cues)
     .filter((c) => c.cue === 'meanwhile' && c.hasWait)
   const n6 = pct(cues.filter((c) => c.inside).length, cues.length)
-  say(`| N1 完成の揃い | 完成時刻の開き÷全体（中央値） | 30%以内 | **${f1(n1)}%** | ${verdict(n1 <= N_LINE.n1)} |`)
-  say(`| N2 温かい品の放置 | 最後の品より何分早く終わるか（最大） | 10分以内 | **${n2}分** | ${verdict(n2 <= N_LINE.n2)} |`)
-  say(`| N3 最長待ちの着火順 | 準備の後の何番目か（中央値） | 1番目 | **${f1(n3)}番目** | ${verdict(n3 <= N_LINE.n3)} |`)
+  say(`| N1 完成の揃い | **開きが30%を超えた組み合わせの割合** | 20%以下 | **${f1(n1over)}%**（開きの割合の中央値は${f1(n1)}%） | ${verdict(n1over <= N_LINE.n1over)} |`)
+  say(`| N2 温かい品と汁物の放置 | 最後の品より何分早く終わるか（最大） | 10分以内 | **${n2}分** | ${verdict(n2 <= N_LINE.n2)} |`)
+  say(`| N3 放置調理の取りこぼし | **手作業と判定された8分以上の放置調理** | 0件 | **${n3}件**（最長待ちの着火順は中央値${f1(n3rank)}番目） | ${verdict(n3 === N_LINE.n3)} |`)
   say(`| N4 混在手順の両方計上 | 両方の時間が計上された割合 | 90%以上 | **${f1(n4)}%** | ${verdict(n4 >= N_LINE.n4)} |`)
   say(`| N5 器具の重なり | コンロ1口で重なる段取りの件数 | 0件 | **${n5}件 / ${wildRows.length}通り** | ${verdict(n5 === N_LINE.n5)} |`)
   say(`| N6 利用者の並行指示 | 直前の待ちの中に置けた割合 | 80%以上 | **${f1(n6)}%**（並行指示の標本${cues.length}件） | ${verdict(n6 >= N_LINE.n6)} |`)
@@ -1870,15 +1927,20 @@ say()
     say(`    ${String(it.order).padStart(2)}. ${String(it.startMin).padStart(2)}〜${String(it.endMin).padStart(2)}分 [${it.recipeTitle}] (${kind}) ${it.text.slice(0, 46)}`)
   }
   say()
-  for (const r of r3) say(`    完成時刻 ${r.title}: ${a.finish.get(r.id)}分（できたての温度の判定＝${recipeServeTemp(r)}）`)
+  for (const r of r3) {
+    say(
+      `    完成時刻 ${r.title}: ${a.finish.get(r.id)}分（温度の判定＝${recipeServeTemp(r)}／種別＝${r.dishType}／N2の対象＝${isN2Target(r) ? 'はい' : 'いいえ'}）`,
+    )
+  }
   say()
   say(`    N1 開き ${a.spread}分 ÷ 全体 ${a.total}分 ＝ ${f1(pct(a.spread, a.total))}%（R3実測 27分÷44分＝61.4%）`)
-  say(`    N2 温かい品の放置 ${a.hotIdle ?? '—'}分`)
+  say(`    N2 温かい品と汁物の放置 ${a.hotIdle ?? '—'}分`)
   for (const x of a.ignitions) say(`    N3 ${x.title}: 最長待ち${x.waitMinutes}分が準備後${x.rank}番目・${x.startMin}分地点で着火`)
   for (const x of a.longestStarts) {
     say(`    N3補助 ${x.title}: 最長工程${x.minutes}分（${x.kind === 'wait' ? '待ち' : '手作業'}）が${x.startMin}分地点＝全体の${f1(pct(x.startMin, x.total))}%地点で着火`)
   }
   say(`    N5 同時に使う口数の最大 コンロ${a.concurrency.stove}・レンジ${a.concurrency.microwave}・グリル${a.concurrency.grill}`)
+  say(`    R3本人の手組み（28〜30分・全部同時着地）との差: 全体 ${a.total - 30}分ぶん長い・開き ${a.spread}分`)
   for (const c of a.cues) {
     say(`    N6 「${c.text.slice(0, 24)}」 → ${c.startMin}分地点に配置・直前の待ちは${c.hasWait ? `${c.waitEnd}分で明ける` : '見つからない'} → ${c.inside ? '待ちの中' : '**待ちの外**'}`)
   }
