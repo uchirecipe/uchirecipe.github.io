@@ -46,6 +46,9 @@ import {
   hasParallelCue,
 } from '../src/logic/cookNavi.ts'
 import { findTimeTokens } from '../src/logic/time.ts'
+// 2026-08-13 便GC（器具の占有）。**器具の見分けそのものは下で別に書いた独立版を使う**
+// （本体の見分けで本体を検査すると答え合わせにならないため）。ここで使うのは台数の型だけ
+import { DEFAULT_KITCHEN, applianceCapacity } from '../src/logic/cookAppliance.ts'
 import { stepIngredientAmounts } from '../src/logic/naviIngredients.ts'
 import { buildIngredientNames, findIngredientMatches } from '../src/logic/ingredientSpans.ts'
 import { parseRecipeText } from '../src/logic/parseRecipeText.ts'
@@ -1324,11 +1327,16 @@ function finishTimes(timeline) {
 
 /**
  * 測定用の名詞マスク（`cookNavi.ts` の NON_WAIT_NOUN_PATTERN の写し。同じ長さの伏せ字にする）。
- * 後半は**器具の見分けのために足した分**（この便で追加）。「油揚げは短冊切りにする」が
+ * 後半は**器具の見分けのために足した分**（便FZで追加）。「油揚げは短冊切りにする」が
  * 「揚げ」に当たってコンロ使用に化けていた（実測で見つけて塞いだ）。
+ *
+ * 2026-08-13 便GC: 「蒸し大豆」を足した。**測る側の取りこぼし**で、
+ * 「ボウルにツナ・蒸し大豆…を入れてあえて器に盛る」がコンロ使用と数えられ、
+ * 同梱109品でN5が3件残っていた（本体の見分けは正しく器具なしと読んでいた）。
+ * 線は動かしていない＝測り違いを直しただけ。
  */
 const MEASURE_NON_WAIT_NOUN =
-  /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|漬物|漬け物|オーブンシート|オーブンペーパー|しょうゆ|つゆ|煮干し|蒸し器|蒸しパン|ゆで卵|ゆでうどん|ゆで麺|お浸し|油揚げ|厚揚げ|薄揚げ|揚げ玉|さつま揚げ|焼きのり|焼き海苔|焼き豆腐|焼きそば麺|めんつゆ|煮汁|煮物|煮もの|蒸し鶏|蒸しタオル/g
+  /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|漬物|漬け物|オーブンシート|オーブンペーパー|しょうゆ|つゆ|煮干し|蒸し器|蒸しパン|ゆで卵|ゆでうどん|ゆで麺|お浸し|油揚げ|厚揚げ|薄揚げ|揚げ玉|さつま揚げ|焼きのり|焼き海苔|焼き豆腐|焼きそば麺|めんつゆ|煮汁|煮物|煮もの|蒸し鶏|蒸しタオル|蒸し大豆|蒸し野菜|蒸しえび|蒸しエビ|蒸しどり/g
 /** 「〜ておく」＝先に済ませる言い方であって放置時間ではない（アプリ本体と同じ扱い） */
 const MEASURE_TE_OKU = /[てで](?:お|置)[くきい]/g
 /** 判定に使う本文（括弧の中の任意の記述・待ちでない名詞・「〜ておく」を伏せる） */
@@ -1380,9 +1388,11 @@ function stepAppliance(text) {
  * アプリ本体の `waitUrgency`（onTime=ゆでる・レンジ／simmer=煮る・グリル／relaxed=漬ける・冷ます）
  * とそのまま対応するので、**relaxed の待ちだけ占有しない**とみなす。
  */
-function applianceUse(item) {
-  const key = stepAppliance(item.text)
-  if (!key) return undefined
+function applianceUse(item, kitchen = DEFAULT_KITCHEN) {
+  const found = stepAppliance(item.text)
+  if (!found) return undefined
+  // 持っていない器具の工程は、フライパン・鍋でやることになる＝コンロが1口ふさがる（本体と同じ扱い）
+  const key = applianceCapacity(kitchen, found) === 0 ? 'stove' : found
   if (item.kind === 'wait') {
     if (item.waitMinutes <= 0) return undefined
     if (waitUrgency({ text: item.text, minutes: item.minutes }) === 'relaxed') return undefined
@@ -1479,8 +1489,8 @@ function isN2Target(recipe) {
 
 // ---------------------------------------------------------------- 1組み合わせの分析
 
-function analyzePlan(trio) {
-  const timeline = buildCookTimeline(trio)
+function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
+  const timeline = buildCookTimeline(trio, kitchen)
   const items = timeline.items
   const finish = finishTimes(timeline)
   const byRecipe = new Map()
@@ -1555,7 +1565,7 @@ function analyzePlan(trio) {
   }
 
   // --- N5 器具の重なり
-  const uses = items.map(applianceUse).filter(Boolean)
+  const uses = items.map((it) => applianceUse(it, kitchen)).filter(Boolean)
   const concurrency = {}
   for (const key of Object.keys(APPLIANCE_LABEL)) {
     concurrency[key] = maxConcurrent(uses.filter((u) => u.key === key))
@@ -1615,7 +1625,27 @@ const nSets = [
   { key: 'ホールドアウト混合（全84通り）', triples: allTriples(holdoutAll), wild: true },
   { key: '並行指示の標本（全20通り）', triples: allTriples(cueRecipes), wild: false, cue: true },
 ]
-const nAnalyses = new Map(nSets.map((s) => [s.key, s.triples.map(analyzePlan)]))
+/**
+ * 検査する台所の設定（2026-08-13 便GC・docs/72 第3段）。
+ * **段取りはその設定で組み直して測る**（既定の段取りを別の設定に当てはめて数え直すのではない）。
+ */
+const KITCHENS = [
+  { key: 'コンロ1口', kitchen: { burners: 1, microwave: true, grill: true, toaster: true } },
+  { key: 'コンロ2口（既定）', kitchen: DEFAULT_KITCHEN },
+  { key: 'コンロ3口', kitchen: { burners: 3, microwave: true, grill: true, toaster: true } },
+  {
+    key: 'コンロ2口・レンジ/グリル/トースター無し',
+    kitchen: { burners: 2, microwave: false, grill: false, toaster: false },
+  },
+]
+/** 台所の設定ごとの分析結果。鍵は「設定名 → 標本名」 */
+const nAnalysesByKitchen = new Map(
+  KITCHENS.map((k) => [
+    k.key,
+    new Map(nSets.map((s) => [s.key, s.triples.map((t) => analyzePlan(t, k.kitchen))])),
+  ]),
+)
+const nAnalyses = nAnalysesByKitchen.get('コンロ2口（既定）')
 /** 合否は「野生レシピ＋ホールドアウト」で見る（同梱109品は比較のために出すだけ） */
 const wildKeys = nSets.filter((s) => s.wild).map((s) => s.key)
 const wildRows = wildKeys.flatMap((k) => nAnalyses.get(k))
@@ -1866,30 +1896,44 @@ say()
 // ---------------------------------------------------------------- N5
 say('■ N5. 器具の重なり（設定した数を超えて同時に使う段取りを出した件数。線＝0件・1口が最重要）')
 say()
-say('  ※器具の占有はまだ実装されていない。**いまの出力を、器具の設定に当てはめて数え直した**もの。')
+say('  ※**その設定で段取りを組み直して**測る（別の設定で組んだ段取りを当てはめて数え直すのではない）。')
 say(`  ※数える器具は docs/72 §3 の4つ（コンロ・電子レンジ・魚焼きグリル・トースター）。`)
+say('  ※見分けはこのスクリプトが独自に持つ判定を使う（本体の見分けで本体を検査すると答え合わせに')
+say('     ならないため）。持っていない器具の工程はコンロ1口として数える＝本体と同じ扱い。')
 say()
-say('| 組み合わせ | 通り数 | **コンロ1口で重なる** | コンロ2口 | コンロ3口 | レンジ | グリル | トースター | 判定(1口) |')
+say('| 組み合わせ | 通り数 | **1口で組んで1口を超える** | 2口で組んで2口超 | 3口で組んで3口超 | レンジ | グリル | トースター | 判定(1口) |')
 say('|---|---|---|---|---|---|---|---|---|')
-for (const s of [...nSets, { key: '**野生＋ホールドアウト 合計**', rows: wildRows, wild: true }]) {
-  const rows = s.rows ?? nAnalyses.get(s.key)
-  const over = (key, cap) => rows.filter((a) => a.concurrency[key] > cap).length
-  const c1 = over('stove', 1)
+for (const s of nSets) {
+  const rowsAt = (kitchenKey) => nAnalysesByKitchen.get(kitchenKey).get(s.key)
+  const over = (kitchenKey, key, cap) => rowsAt(kitchenKey).filter((a) => a.concurrency[key] > cap).length
+  const n = rowsAt('コンロ2口（既定）').length
+  const c1 = over('コンロ1口', 'stove', 1)
   say(
-    `| ${s.key} | ${rows.length} | **${c1}件（${f1(pct(c1, rows.length))}%）** | ${over('stove', 2)}件 | ${over('stove', 3)}件 | ` +
-      `${over('microwave', 1)}件 | ${over('grill', 1)}件 | ${over('toaster', 1)}件 | ${s.wild ? verdict(c1 === N_LINE.n5) : '（参考）'} |`,
+    `| ${s.key} | ${n} | **${c1}件（${f1(pct(c1, n))}%）** | ${over('コンロ2口（既定）', 'stove', 2)}件 | ${over('コンロ3口', 'stove', 3)}件 | ` +
+      `${over('コンロ2口（既定）', 'microwave', 1)}件 | ${over('コンロ2口（既定）', 'grill', 1)}件 | ${over('コンロ2口（既定）', 'toaster', 1)}件 | ${s.wild ? verdict(c1 === N_LINE.n5) : '（参考）'} |`,
+  )
+}
+{
+  const wildAt = (kitchenKey) => wildKeys.flatMap((k) => nAnalysesByKitchen.get(kitchenKey).get(k))
+  const over = (kitchenKey, key, cap) => wildAt(kitchenKey).filter((a) => a.concurrency[key] > cap).length
+  const n = wildAt('コンロ2口（既定）').length
+  const c1 = over('コンロ1口', 'stove', 1)
+  say(
+    `| **野生＋ホールドアウト 合計** | ${n} | **${c1}件（${f1(pct(c1, n))}%）** | ${over('コンロ2口（既定）', 'stove', 2)}件 | ${over('コンロ3口', 'stove', 3)}件 | ` +
+      `${over('コンロ2口（既定）', 'microwave', 1)}件 | ${over('コンロ2口（既定）', 'grill', 1)}件 | ${over('コンロ2口（既定）', 'toaster', 1)}件 | ${verdict(c1 === N_LINE.n5)} |`,
   )
 }
 say()
 {
-  const worst = wildRows
+  const worst = wildKeys
+    .flatMap((k) => nAnalysesByKitchen.get('コンロ1口').get(k))
     .filter((a) => a.concurrency.stove > 1)
     .sort((a, b) => b.concurrency.stove - a.concurrency.stove)
     .slice(0, 3)
   say('  いちばん悪い3例（コンロ1口の家では成立しない段取り）:')
   for (const a of worst) {
     const uses = a.timeline.items
-      .map((it) => ({ it, use: applianceUse(it) }))
+      .map((it) => ({ it, use: applianceUse(it, { burners: 1, microwave: true, grill: true, toaster: true }) }))
       .filter((x) => x.use && x.use.key === 'stove' && x.use.end > x.use.start)
     // いちばん重なっている時刻を探して、そこで同時に火にかかっているものだけを出す
     let peakAt = 0
@@ -1986,7 +2030,9 @@ say('|---|---|---|---|---|')
   const n3rank = median(ranks)
   const n3 = n3Stranded
   const n4 = pct(n4Total.both, n4Total.mixed)
-  const n5 = wildRows.filter((a) => a.concurrency.stove > 1).length
+  const n5 = wildKeys
+    .flatMap((k) => nAnalysesByKitchen.get('コンロ1口').get(k))
+    .filter((a) => a.concurrency.stove > 1).length
   // N6だけは専用標本で測る（既存の標本に「その間に」が1件も無いため。上のN6の表を参照）
   const cues = nAnalyses
     .get('並行指示の標本（全20通り）')
