@@ -1370,14 +1370,25 @@ function hasIgnitionAhead(job: Job): boolean {
 }
 
 /**
+ * 前倒ししてまで先に着火する放置調理の長さ（分。2026-08-13 便GC・docs/72 第3段 B）。
+ *
+ * 着火とみなす下限（IGNITION_WAIT_MINUTES＝8分）より長くしてある。実測すると、
+ * **8〜12分の放置調理まで前倒しすると、その品だけが早く仕上がって完成の開き（N1）が広がる**
+ * （野生＋ホールドアウト344通りで、30%超の割合が 25.0%→25.9% に悪化した）。
+ * 15分以上の放置調理は、始めるのが遅れたぶんだけ段取り全体がそのまま伸びるので、
+ * 前倒しの得が開きの損を上回る（同梱109品の平均短縮率 33.0%→33.2%）。
+ */
+const IGNITION_PULL_MINUTES = 15
+
+/**
  * **あと1手で着火できる**品か（2026-08-13 便GC・docs/72 第3段 B）。
- * いま進めようとしている手順の次が、長い放置調理（8分以上）そのもののとき。
+ * いま進めようとしている手順の次が、長い放置調理（15分以上）そのもののとき。
  * 口数に余裕があるときだけ、この品を先に進めて**火を重ねる**ために使う。
  */
 function ignitesNext(job: Job): Job['steps'][number] | undefined {
   const next = job.steps[job.ptr + 1]
   if (!next) return undefined
-  if (next.kind !== 'wait' || next.waitMinutes < IGNITION_WAIT_MINUTES) return undefined
+  if (next.kind !== 'wait' || next.waitMinutes < IGNITION_PULL_MINUTES) return undefined
   return next
 }
 
