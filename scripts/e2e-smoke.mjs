@@ -22026,10 +22026,16 @@ try {
         evLp.indexOf('/about/multi-device.html', evLp.indexOf('複数の端末で同じデータを使えますか')) > -1,
       )
       const evManual = await (await page.request.get(`${BASE}/about/manual.html`)).text()
+      // 2026-08-13 便FY: 「複数の端末で使う方法」への案内は§11(共有)にも増えたので、
+      // ページ内の**最初の**出現ではなく、§12の見出しより後ろの出現を見る。
+      // 見出しの直後にあること(400字以内)という判定の意図はそのまま
+      const evManualHead = evManual.indexOf('12</span>バックアップと機種変更')
+      const evManualLink =
+        evManualHead > -1 ? evManual.indexOf('/about/multi-device.html', evManualHead) : -1
       check(
         'MULTIDEV-01(f) 使い方ページの「バックアップと機種変更」の冒頭から辿れる',
-        evManual.indexOf('/about/multi-device.html') > evManual.indexOf('12</span>バックアップと機種変更') &&
-          evManual.indexOf('/about/multi-device.html') - evManual.indexOf('12</span>バックアップと機種変更') < 400,
+        evManualHead > -1 && evManualLink > -1 && evManualLink - evManualHead < 400,
+        `見出し=${evManualHead} リンク=${evManualLink}`,
       )
       const evInstall = await (await page.request.get(`${BASE}/about/install.html`)).text()
       check('MULTIDEV-01(f) ホーム画面追加ページからも辿れる', evInstall.includes('/about/multi-device.html'))

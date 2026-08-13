@@ -78,7 +78,7 @@ const manifest = {}
 const SHOT_NAMES = [
   'recipe-cards', 'home-suggest', 'home-search', 'nav-tabs', 'search',
   'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
-  'plan-day-buttons', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
+  'plan-day-buttons', 'select-for-today', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
   'detail-photo', 'nutrition-open', 'share', 'logs',
   'cookmode-voice', 'cookmode', 'timer', 'cooknavi',
@@ -557,7 +557,37 @@ try {
     }
   }
 
+  // 「今日の献立を選ぶ」からレシピ一覧が選択モードで開くところ(2026-08-13 便FY)。
+  // 使い方ページ§4の本文が「レシピ一覧が選択モードで開きます」と書いているのに図が無く、
+  // どんな画面に変わるのかが読めなかった。帯(何を選んでいる最中か)・選び方の案内・
+  // 件数入りの決定ボタン・選んだカードの印が1枚に入る範囲を切る。
+  // 決定ボタンは押さない = 今日の献立の中身を変えずに撮る(あとの「週」「月」の図に影響させない)
+  const pickForToday = page.getByRole('button', { name: '今日の献立を選ぶ' })
+  if (await pickForToday.count()) {
+    await pickForToday.first().click()
+    await wait(page, 1800)
+    const selectBanner = page.locator('[data-testid="select-for-today-banner"]')
+    // カード全面を覆う選択ボタンを2枚押す。並び順は撮るたびに変わりうるので、
+    // 料理名で指定せず先頭から2枚を選ぶ。押すのはDOMのclick(貼り付く検索まどの帯が
+    // 1枚目の当たり判定を横取りするため、座標を使う操作は避ける)
+    const cardButtons = page.locator('main a[href*="/recipes/"]:not([href$="/new"])')
+    const overlays = page.locator('main button.absolute.inset-0[aria-pressed]')
+    for (const i of [0, 1]) {
+      if ((await overlays.count()) > i) {
+        await overlays.nth(i).evaluate((el) => el.click())
+        await wait(page, 300)
+      }
+    }
+    const addToToday = page.locator('[data-testid="add-selected-to-today"]')
+    if ((await selectBanner.count()) && (await addToToday.count())) {
+      // 検索まどの帯が画面上部に貼り付く(2026-08-09 便ET)ので、帯の高さ(66px)より下に置く
+      await cropRange(page, 'select-for-today', selectBanner, cardButtons.first(), { top: 72 })
+    }
+  }
+
   // 「週」タブ: まとめて献立を立てる → 1日ぶんのカード + 栄養行
+  await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+  await wait(page, 1500)
   await page.getByRole('button', { name: '週', exact: true }).click()
   await wait(page, 600)
   // 2026-08-08 便DW: 「今日から7日間」は折りたたみグループ「表示のしかた」の中にあり、

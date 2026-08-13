@@ -37,7 +37,7 @@
   },
   "paste": {
     "w": 780,
-    "h": 844
+    "h": 924
   },
   "url-import": {
     "w": 780,
@@ -109,11 +109,11 @@
   },
   "backup-export": {
     "w": 780,
-    "h": 376
+    "h": 344
   },
   "backup-import": {
     "w": 780,
-    "h": 444
+    "h": 348
   },
   "nutrition-row": {
     "w": 780,
@@ -130,5 +130,9 @@
   "cooknavi-session-others": {
     "w": 780,
     "h": 224
+  },
+  "select-for-today": {
+    "w": 780,
+    "h": 990
   }
 }
