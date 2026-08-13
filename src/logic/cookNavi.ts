@@ -4,6 +4,7 @@ import { ja } from '../i18n/ja'
 import {
   ApplianceSchedule,
   DEFAULT_KITCHEN,
+  MAX_BURNERS,
   stepApplianceFor,
   type ApplianceKey,
   type KitchenEquipment,
@@ -1777,6 +1778,15 @@ export interface CookPlan extends CookTimeline {
    * ナビの合計がレシピの合計より長く出る理由の大半がここにある。
    */
   awayMinutes: number
+  /**
+   * 1品ずつ作る順番になった理由が**器具の台数**か（2026-08-13 便GC）。
+   *
+   * 正直表示の文面は「手が空く待ち時間が見つかりませんでした」だったが、器具の制約を入れた後は
+   * **待ちはあるのに口が空いていない**ために並行できない場合が出る。その2つを同じ文で言うと嘘になる
+   * （序列「安全>正直>短縮効果」）。台数に余裕のある台所で組み直したときに段取りが短くなるなら、
+   * 縮まなかった理由は待ちの不足ではなく台数。
+   */
+  limitedByEquipment: boolean
 }
 
 /**
@@ -1871,6 +1881,7 @@ export function buildCookPlan(
       parallelMinutes,
       gainPercent,
       awayMinutes: awayWaitMinutes(parallel.items),
+      limitedByEquipment: false,
     }
   }
   const sequential = buildSequentialTimeline(valid, kitchen)
@@ -1882,7 +1893,36 @@ export function buildCookPlan(
     parallelMinutes,
     gainPercent,
     awayMinutes: awayWaitMinutes(sequential.items),
+    limitedByEquipment: isLimitedByEquipment(valid, kitchen, parallelMinutes),
   }
+}
+
+/** 台数にいちばん余裕のある台所（正直表示の理由を見分けるためだけに使う） */
+const ROOMY_KITCHEN: KitchenEquipment = {
+  burners: MAX_BURNERS,
+  microwave: true,
+  grill: true,
+  toaster: true,
+}
+
+/**
+ * 縮まなかった理由が器具の台数か（2026-08-13 便GC）。
+ * 台数に余裕のある台所で組み直して段取りが短くなるなら、足りなかったのは待ちではなく口。
+ */
+function isLimitedByEquipment(
+  recipes: Recipe[],
+  kitchen: KitchenEquipment,
+  parallelMinutes: number,
+): boolean {
+  if (
+    kitchen.burners >= ROOMY_KITCHEN.burners &&
+    kitchen.microwave &&
+    kitchen.grill &&
+    kitchen.toaster
+  ) {
+    return false
+  }
+  return buildCookTimeline(recipes, ROOMY_KITCHEN).totalMinutes < parallelMinutes
 }
 
 /**

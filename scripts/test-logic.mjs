@@ -4948,6 +4948,30 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     buildCookTimeline([nimono(), itamemono()], kitchen(2)).totalMinutes,
   )
 
+  // ---- (4b) 縮まなかった理由を書き分ける（正直表示。序列「安全>正直>短縮効果」） ----
+  {
+    // どちらもコンロを使う2品。1口では並行の余地が無く、2口なら10分のゆでの中に焼きが入る
+    const pair = () => [
+      recipe(1, 'ゆで卵', ['鍋に湯を沸かし、卵を10分ゆでる。', '冷水にとって殻をむく。']),
+      recipe(2, '照り焼き', ['フライパンで鶏もも肉を焼く。', 'たれをからめる。']),
+    ]
+    const one = buildCookPlan(pair(), kitchen(1))
+    const many = buildCookPlan(pair(), kitchen(2))
+    eq('ナビ器具: 1口では並行の余地が無く、1品ずつ作る順番を出す', one.mode, 'sequential')
+    eq('ナビ器具: その理由は「待ちが無い」ではなく「口が足りない」と書き分ける', one.limitedByEquipment, true)
+    eq('ナビ器具: 口に余裕があるときは並行の段取りになる', many.mode, 'parallel')
+    eq('ナビ器具: 並行できたときは器具のせいにしない', many.limitedByEquipment, false)
+    // 待ちがそもそも無い品は、口数に関係なく従来どおり「待ち時間が見つからない」側
+    const noWait = buildCookPlan(
+      [
+        recipe(1, 'あえもの', ['きゅうりを薄切りにする。', '調味料と和える。']),
+        recipe(2, 'サラダ', ['レタスをちぎる。', 'ドレッシングをかける。']),
+      ],
+      kitchen(1),
+    )
+    eq('ナビ器具: 待ちが無いだけのときは器具のせいにしない', noWait.limitedByEquipment, false)
+  }
+
   // ---- (5) 占有しない待ち（漬ける・冷ます・寝かせる）は口をふさがない ----
   {
     const soak = buildCookTimeline(

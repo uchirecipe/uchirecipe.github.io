@@ -1686,13 +1686,18 @@ export default function CookNaviPage() {
                         className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
                       >
                         <p className="ja-phrase font-bold">
-                          {ja.cookNavi.noParallelNote.replace(
-                            '{n}',
-                            String(timeline.recipes.length),
-                          )}
+                          {(timeline.limitedByEquipment
+                            ? ja.cookNavi.noParallelByEquipmentNote.replace(
+                                '{b}',
+                                String(kitchen.burners),
+                              )
+                            : ja.cookNavi.noParallelNote
+                          ).replace('{n}', String(timeline.recipes.length))}
                         </p>
                         <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
-                          {ja.cookNavi.noParallelHint}
+                          {timeline.limitedByEquipment
+                            ? ja.cookNavi.noParallelByEquipmentHint
+                            : ja.cookNavi.noParallelHint}
                         </p>
                       </div>
                     )}
