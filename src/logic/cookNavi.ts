@@ -239,7 +239,7 @@ const ACTION_VERB_PATTERN =
  * （docs/72 §3 が数える4器具のうち、コンロを除いた3つ＋電子レンジ）。
  * 鍋・フライパン・中華鍋は載せない＝コンロの加熱は従来どおり手作業側に倒す。
  */
-const UNATTENDED_APPLIANCE_PATTERN = /グリル|オーブン|トースター|レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/
+const UNATTENDED_APPLIANCE_PATTERN = /グリル|オーブン|トースター|レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/g
 /** 上の器具が受け持つ加熱の動詞。器具の語より後ろに出たときだけ、手作業の動作から外す */
 const APPLIANCE_HEAT_VERB_PATTERN = /焼く|焼き|焼い|焼け/g
 
@@ -249,16 +249,28 @@ const APPLIANCE_HEAT_VERB_PATTERN = /焼く|焼き|焼い|焼け/g
  * 巻き込まない）。
  */
 function maskApplianceHeatVerbs(text: string): string {
-  const at = text.search(UNATTENDED_APPLIANCE_PATTERN)
-  if (at === -1) return text
-  const rest = text.slice(at)
-  const dot = rest.search(SENTENCE_SPLIT_PATTERN)
-  const end = dot === -1 ? text.length : at + dot
-  return (
-    text.slice(0, at) +
-    text.slice(at, end).replace(APPLIANCE_HEAT_VERB_PATTERN, (m) => '＊'.repeat(m.length)) +
-    text.slice(end)
-  )
+  return maskAfterCue(text, UNATTENDED_APPLIANCE_PATTERN, APPLIANCE_HEAT_VERB_PATTERN)
+}
+
+/**
+ * 合図の語（cue）が出てきた位置から、その文の終わりまでの間にある target を伏せ字にする。
+ * 伏せ字は**同じ長さ**にして文字位置をずらさない（位置ルールが文字位置で判断するため）。
+ */
+function maskAfterCue(text: string, cue: RegExp, target: RegExp): string {
+  cue.lastIndex = 0
+  let result = text
+  let m: RegExpExecArray | null
+  while ((m = cue.exec(text)) !== null) {
+    const start = m.index
+    const dot = result.slice(start).search(SENTENCE_SPLIT_PATTERN)
+    const end = dot === -1 ? result.length : start + dot
+    result =
+      result.slice(0, start) +
+      result.slice(start, end).replace(target, (x) => '＊'.repeat(x.length)) +
+      result.slice(end)
+    if (m.index === cue.lastIndex) cue.lastIndex++
+  }
+  return result
 }
 
 /**
@@ -280,19 +292,7 @@ const OCCASIONAL_CUE_PATTERN = /途中で|途中に|ときどき|時々|たま�
 const OCCASIONAL_ACTION_PATTERN = /(?:かき)?混ぜ|まぜ|返す|返し|返っ|裏返|アクを取|あくを取/g
 
 function maskOccasionalActions(text: string): string {
-  OCCASIONAL_CUE_PATTERN.lastIndex = 0
-  let result = text
-  let m: RegExpExecArray | null
-  while ((m = OCCASIONAL_CUE_PATTERN.exec(text)) !== null) {
-    const start = m.index
-    const dot = result.slice(start).search(SENTENCE_SPLIT_PATTERN)
-    const end = dot === -1 ? result.length : start + dot
-    result =
-      result.slice(0, start) +
-      result.slice(start, end).replace(OCCASIONAL_ACTION_PATTERN, (x) => '＊'.repeat(x.length)) +
-      result.slice(end)
-  }
-  return result
+  return maskAfterCue(text, OCCASIONAL_CUE_PATTERN, OCCASIONAL_ACTION_PATTERN)
 }
 
 /** 短時間の合図。既定分数を当てない（「熱湯でさっとゆでる」を8分の待ちにしない） */
