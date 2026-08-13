@@ -42,6 +42,8 @@ import {
   recipeServeTemp,
   waitUrgency,
   stepMainText,
+  // 2026-08-13 便GB（並べ方の作り直し）で足した並べ替えの部品
+  hasParallelCue,
 } from '../src/logic/cookNavi.ts'
 import { findTimeTokens } from '../src/logic/time.ts'
 import { stepIngredientAmounts } from '../src/logic/naviIngredients.ts'
@@ -383,14 +385,24 @@ function simulateTimeline(recipes, opt) {
                   ? Number.POSITIVE_INFINITY
                   : waitMinutes + waitOverrunAllowance(s, waitMinutes),
             text: s.text,
+            // 利用者の「その間に」（2026-08-13 便GB。直前が待ちのときだけ有効）
+            parallelCue: false,
           }
         },
       )
+      for (let i = 1; i < steps.length; i++) {
+        steps[i].parallelCue =
+          steps[i].kind === 'active' &&
+          steps[i - 1].kind === 'wait' &&
+          steps[i - 1].waitMinutes > 0 &&
+          hasParallelCue(steps[i].text)
+      }
       return {
         colorIndex,
         steps,
         ptr: 0,
         readyAt: 0,
+        waitDoneAt: 0,
         attendUntil: 0,
         title: r.title,
         serveRank: serveTempRank(r),
@@ -402,6 +414,19 @@ function simulateTimeline(recipes, opt) {
     for (let i = j.ptr; i < j.steps.length; i++)
       t += j.steps[i].kind === 'wait' ? j.steps[i].waitMinutes : j.steps[i].activeMinutes
     return t
+  }
+  const remainingActive = (j) => {
+    let t = 0
+    for (let i = j.ptr; i < j.steps.length; i++)
+      if (j.steps[i].kind !== 'wait') t += j.steps[i].activeMinutes
+    return t
+  }
+  /** 「着火」とみなす待ちの長さ（アプリ本体の IGNITION_WAIT_MINUTES と同じ値） */
+  const IGNITION_WAIT = 8
+  const hasIgnitionAhead = (j) => {
+    for (let i = j.ptr; i < j.steps.length; i++)
+      if (j.steps[i].kind === 'wait' && j.steps[i].waitMinutes >= IGNITION_WAIT) return true
+    return false
   }
 
   let cookAt = 0
@@ -420,11 +445,36 @@ function simulateTimeline(recipes, opt) {
       (min, j) => (j.attendUntil > cookAt ? Math.min(min, j.attendUntil) : min),
       Number.POSITIVE_INFINITY,
     )
-    const attendDue = (j) => (j.attendUntil > 0 && j.readyAt <= cookAt ? 0 : 1)
+    // 手作業の締め切り判定は**ほかの品の締め切りだけ**を見る（アプリ本体と同じ。2026-08-12 便FU-1）。
+    // 「その間に」で自分の鍋の待ちの中に置く手順だけは自分の締め切りも見る（2026-08-13 便GB）
+    const fitsBeforeDeadline = (j) => {
+      const othersDeadline = jobs.reduce(
+        (min, k) => (k !== j && k.attendUntil > cookAt ? Math.min(min, k.attendUntil) : min),
+        Number.POSITIVE_INFINITY,
+      )
+      const ownDeadline =
+        j.steps[j.ptr].parallelCue && j.attendUntil > cookAt ? j.attendUntil : Number.POSITIVE_INFINITY
+      return cookAt + j.steps[j.ptr].activeMinutes <= Math.min(othersDeadline, ownDeadline)
+    }
+    const projectedEnd = (j) => Math.max(j.readyAt, cookAt) + remainingSpan(j)
+    const attendDue = (j) => (j.attendUntil > 0 && j.waitDoneAt <= cookAt ? 0 : 1)
+    const cueDue = (j) => (j.steps[j.ptr].parallelCue && j.waitDoneAt > cookAt ? 0 : 1)
+    const ignitionRank = (j) => (hasIgnitionAhead(j) ? 0 : 1)
     const cutRun = (j) => (lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1)
     const sameCat = (j) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
     // 完成の順番（冷やす品は先に・熱々の品は最後に仕上げる）。その品の最後の手順にだけ効かせる
     const finishBias = (j) => (j.ptr === j.steps.length - 1 ? j.serveRank : 1)
+    // 温かい品の仕上げは、ほかの品の完成に合わせて後ろへ寄せる（2026-08-13 便GB）
+    const holdsFinish = (j) => {
+      if (j.serveRank < 2) return false
+      if (j.ptr !== j.steps.length - 1) return false
+      if (j.steps[j.ptr].kind !== 'active') return false
+      const othersEnd = jobs.reduce(
+        (max, k) => (k !== j && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max),
+        -1,
+      )
+      return othersEnd > cookAt + j.steps[j.ptr].activeMinutes
+    }
     const pickActive = (cands) =>
       cands.slice().sort((a, b) => {
         const stepA = a.steps[a.ptr]
@@ -435,8 +485,10 @@ function simulateTimeline(recipes, opt) {
         }
         return (
           attendDue(a) - attendDue(b) ||
-          finishBias(a) - finishBias(b) ||
+          cueDue(a) - cueDue(b) ||
           cutRun(a) - cutRun(b) ||
+          ignitionRank(a) - ignitionRank(b) ||
+          finishBias(a) - finishBias(b) ||
           remainingSpan(b) - remainingSpan(a) ||
           stepA.stageRank - stepB.stageRank ||
           sameCat(a) - sameCat(b) ||
@@ -446,9 +498,10 @@ function simulateTimeline(recipes, opt) {
     const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
     waits.sort((a, b) => b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex)
     const fittingActives = ready.filter(
-      (j) => j.steps[j.ptr].kind === 'active' && cookAt + j.steps[j.ptr].activeMinutes <= attendDeadline,
+      (j) => j.steps[j.ptr].kind === 'active' && fitsBeforeDeadline(j),
     )
-    const shortestActive = fittingActives.reduce(
+    const eagerActives = fittingActives.filter((j) => !holdsFinish(j))
+    const shortestActive = eagerActives.reduce(
       (min, j) => Math.min(min, j.steps[j.ptr].activeMinutes),
       Number.POSITIVE_INFINITY,
     )
@@ -456,39 +509,78 @@ function simulateTimeline(recipes, opt) {
     const waitWouldIdle =
       waits.length > 0 &&
       dueWaits.length === 0 &&
-      fittingActives.length > 0 &&
+      eagerActives.length > 0 &&
       waits[0].steps[waits[0].ptr].attendWithin < shortestActive
     // 漬け込み・寝かせの前に、いま着手できる切る工程を先に片付ける（アプリ本体と同じ規則）
-    const readyCuts = fittingActives.filter((j) => j.steps[j.ptr].category === 'cut')
+    const readyCuts = eagerActives.filter((j) => j.steps[j.ptr].category === 'cut')
     const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
     let chosen
+    let holdFinish = false
     if (dueWaits.length > 0) {
       chosen = dueWaits[0]
     } else if (waits.length > 0 && !(soakOnly && readyCuts.length > 0) && !waitWouldIdle) {
       chosen = waits[0]
     } else if (soakOnly && readyCuts.length > 0) {
       chosen = pickActive(readyCuts)
-    } else if (fittingActives.length > 0) {
-      chosen = pickActive(fittingActives)
+    } else if (eagerActives.length > 0) {
+      chosen = pickActive(eagerActives)
     } else if (waits.length > 0) {
       chosen = waits[0]
+    } else if (fittingActives.length > 0) {
+      chosen = pickActive(fittingActives)
+      const held = chosen.steps[chosen.ptr]
+      const othersEnd = jobs.reduce(
+        (max, k) => (k !== chosen && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max),
+        -1,
+      )
+      const othersActive = jobs.reduce(
+        (sum, k) => (k !== chosen && k.ptr < k.steps.length ? sum + remainingActive(k) : sum),
+        0,
+      )
+      const nextAt = active.reduce(
+        (next, j) => (j !== chosen && j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
+        attendDeadline,
+      )
+      if (
+        Number.isFinite(nextAt) &&
+        nextAt > cookAt &&
+        othersEnd - nextAt >= othersActive + held.activeMinutes
+      ) {
+        cookAt = nextAt
+        continue
+      }
+      holdFinish = true
     } else {
       cookAt = active.reduce((next, j) => (j.readyAt > cookAt ? Math.min(next, j.readyAt) : next), attendDeadline)
       continue
     }
     const step = chosen.steps[chosen.ptr]
-    const startMin = cookAt
-    chosen.attendUntil = 0
+    let startMin = cookAt
+    if (holdFinish) {
+      const othersEnd = jobs.reduce(
+        (max, k) => (k !== chosen && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max),
+        -1,
+      )
+      const nextAt = active.reduce(
+        (next, j) => (j !== chosen && j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
+        attendDeadline,
+      )
+      const landing = Math.min(Number.isFinite(nextAt) ? nextAt : othersEnd, othersEnd)
+      if (Number.isFinite(landing)) startMin = Math.max(cookAt, landing - step.activeMinutes)
+    }
+    const keepsPot = step.kind === 'active' && step.parallelCue && chosen.waitDoneAt > startMin
+    if (!keepsPot) chosen.attendUntil = 0
     let endMin
     if (step.kind === 'wait') {
       endMin = startMin + step.waitMinutes
-      chosen.readyAt = endMin
+      chosen.waitDoneAt = endMin
+      chosen.readyAt = chosen.steps[chosen.ptr + 1]?.parallelCue ? startMin : endMin
       const attendUntil = startMin + step.attendWithin
       chosen.attendUntil = Number.isFinite(attendUntil) ? attendUntil : 0
     } else {
       endMin = startMin + step.activeMinutes
       cookAt = endMin
-      chosen.readyAt = endMin
+      chosen.readyAt = Math.max(endMin, chosen.waitDoneAt)
       lastActiveCategory = step.category
     }
     total = Math.max(total, endMin)

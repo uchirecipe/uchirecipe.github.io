@@ -295,6 +295,35 @@ function maskOccasionalActions(text: string): string {
   return maskAfterCue(text, OCCASIONAL_CUE_PATTERN, OCCASIONAL_ACTION_PATTERN)
 }
 
+/**
+ * 利用者が本文に書いた「並行の指示」（2026-08-13 便GB・docs/72 第2段 対象3）。
+ *
+ * 直した不具合（docs/71 R3）: 手順②「**その間に**☆を全部混ぜ合わせておく」は、手順①の
+ * 10分の漬け込みの**中でやれ**と利用者自身が書いた指示なのに、段取りでは9番目・約16分地点
+ * （①の待ちがとっくに明けたあと）に置かれていた。R3の言葉では
+ * 「私の文章に書いてある並行の指示が、並行調理ナビに一切拾われないのは皮肉です」。
+ *
+ * 原因は段取りの作りそのもの。**レシピ内の手順は前の手順が終わるまで着手しない**（readyAt）ので、
+ * 「その待ちの次の手順」は構造上その待ちの中に置けない。そこで**この合図が付いた手順だけ**を
+ * 例外にし、直前の待ちを**仕掛けた時点で**着手できるようにする。
+ *
+ * 例外の範囲をここまで絞る理由（限界として記録する）:
+ *   - 合図があるのは**直前の手順が待ちのときだけ**。合図だけで手順を前へ飛ばさない
+ *   - 対象は**手作業の手順だけ**。待ちの手順を重ねると器具の取り合いになる（docs/72 第3段）
+ *   - その手順の次からは従来どおり、待ちが明けるまで着手しない
+ *
+ * 「〜しながら」は合図にしない。実際の本文では「ほぐしながら炒める」「混ぜながら煮る」のように
+ * **1つの動作の中の同時**がほとんどで、並行の指示ではない（本体では「混ぜながら」を
+ * `HANDS_ON_PATTERNS` の**目を離さない合図**として使っている）。
+ */
+const PARALLEL_CUE_PATTERN =
+  /その間|そのあいだ|している間|しているあいだ|待つ間|待っている間|寝かせている間|焼いている間|煮ている間|漬けている間|ゆでている間|茹でている間|冷ましている間|炊いている間/
+
+/** その手順文が「直前の待ちの中でやれ」という利用者の指示を含むか */
+export function hasParallelCue(text: string): boolean {
+  return PARALLEL_CUE_PATTERN.test(stepMainText(text ?? ''))
+}
+
 /** 短時間の合図。既定分数を当てない（「熱湯でさっとゆでる」を8分の待ちにしない） */
 const SHORT_CUE_PATTERN = /さっと|ざっと|軽く|手早く|素早く/
 
@@ -846,11 +875,19 @@ const COLD_TITLE_PATTERN =
  */
 const HEAT_FINISH_PATTERN = /焼く|焼き|焼い|炒め|炒る|揚げ|煮|蒸|茹で|ゆで|炊|温め|熱し|加熱|レンジ|グリル|オーブン|沸か/
 
-export function recipeServeTemp(recipe: Pick<Recipe, 'title' | 'steps'>): ServeTemp {
+export function recipeServeTemp(
+  recipe: Pick<Recipe, 'title' | 'steps' | 'dishType'>,
+): ServeTemp {
   const steps = recipe.steps ?? []
   if (steps.length === 0) return 'neutral'
   if (steps.some((s) => CHILL_STEP_PATTERN.test(s.text))) return 'cold'
   if (COLD_TITLE_PATTERN.test(recipe.title ?? '')) return 'cold'
+  // 汁物は「できたてが温かい品」として扱う（2026-08-13 便GB・docs/71 R3
+  // 「平日の夕食で汁物が冷めきるのは、段取りとして失格です」）。
+  // 最後の手順が「みそを溶いて火を止める」のように火を使う語を持たない書き方だと、
+  // 下の加熱の判定では neutral になり、仕上げの順番がどちらにも寄らなかった。
+  // 冷たい汁物（冷や汁・冷製スープ）は上の2つで先に cold と読むので、ここには落ちてこない
+  if (recipe.dishType === 'soup') return 'hot'
   if (endsWithHeat(recipe)) return 'hot'
   return HEAT_FINISH_PATTERN.test(maskNonWaitNouns(steps[steps.length - 1].text)) ? 'hot' : 'neutral'
 }
@@ -858,7 +895,7 @@ export function recipeServeTemp(recipe: Pick<Recipe, 'title' | 'steps'>): ServeT
 const SERVE_RANK: Record<ServeTemp, number> = { cold: 0, neutral: 1, hot: 2 }
 
 /** 完成の順番に使う数字（小さいほど先に仕上げたい） */
-export function serveTempRank(recipe: Pick<Recipe, 'title' | 'steps'>): number {
+export function serveTempRank(recipe: Pick<Recipe, 'title' | 'steps' | 'dishType'>): number {
   return SERVE_RANK[recipeServeTemp(recipe)]
 }
 
@@ -1163,11 +1200,22 @@ interface Job {
      * ゆでる=待ち時間ちょうど／煮込み=待ち時間+2割／漬け込み・冷やす=上限なし
      */
     attendWithin: number
+    /**
+     * 利用者が本文に「その間に」と書いた手順で、**直前の手順が待ち**のもの（2026-08-13 便GB）。
+     * この手順だけは、直前の待ちが明けるのを待たずに着手してよい。
+     */
+    parallelCue: boolean
   }[]
   /** 次に着手する手順の添字 */
   ptr: number
   /** 次の手順を始められるようになる時刻（前の手順の終了 or 待ちの完了） */
   readyAt: number
+  /**
+   * 直前に仕掛けた待ちが明ける時刻（2026-08-13 便GB）。
+   * ふつうは readyAt と同じだが、「その間に」の手順を待ちの中に置いたときだけ readyAt が
+   * 先に進む（＝手は空く）ので、待ちそのものの終わりを別に覚えておく。
+   */
+  waitDoneAt: number
   /**
    * 「この時刻までに手を戻さないといけない」待ちを仕掛けている状態（0＝無し。2026-08-09 便EH）。
    * ゆで上がり・煮上がりの時刻。ここを過ぎて別の作業を続ける段取りは物理的に成立しない。
@@ -1176,7 +1224,7 @@ interface Job {
 }
 
 function buildJobs(recipes: Recipe[]): Job[] {
-  return recipes
+  const jobs = recipes
     .filter((r) => r.id != null && r.steps.length > 0)
     .map((r, colorIndex) => ({
       recipeId: r.id!,
@@ -1185,6 +1233,7 @@ function buildJobs(recipes: Recipe[]): Job[] {
       serveRank: serveTempRank(r),
       ptr: 0,
       readyAt: 0,
+      waitDoneAt: 0,
       attendUntil: 0,
       steps: buildPlanSteps(r.steps).map(({ step: s, stepIndex, stepNumber, addedByNavi, splitOf, splitPart }) => {
         const kind = classifyStep(s)
@@ -1229,9 +1278,24 @@ function buildJobs(recipes: Recipe[]): Job[] {
                 longRest
                 ? Number.POSITIVE_INFINITY
                 : waitMinutes + waitOverrunAllowance(s, waitMinutes),
+          parallelCue: false,
         }
       }),
     }))
+  // 「その間に」の合図は、**直前の手順が待ちのときだけ**有効にする（2026-08-13 便GB）。
+  // 合図だけで手順を前へ飛ばさない＝利用者が指している待ちが実際にあるときに限る
+  for (const job of jobs) {
+    for (let i = 1; i < job.steps.length; i++) {
+      const prev = job.steps[i - 1]
+      const step = job.steps[i]
+      step.parallelCue =
+        step.kind === 'active' &&
+        prev.kind === 'wait' &&
+        prev.waitMinutes > 0 &&
+        hasParallelCue(step.text)
+    }
+  }
+  return jobs
 }
 
 /**
@@ -1251,6 +1315,34 @@ function remainingSpan(job: Job): number {
     total += job.steps[i].kind === 'wait' ? job.steps[i].waitMinutes : job.steps[i].activeMinutes
   }
   return total
+}
+
+/** その品に残っている「手を動かす時間」の合計（分。2026-08-13 便GB） */
+function remainingActive(job: Job): number {
+  let total = 0
+  for (let i = job.ptr; i < job.steps.length; i++) {
+    if (job.steps[i].kind !== 'wait') total += job.steps[i].activeMinutes
+  }
+  return total
+}
+
+/**
+ * 「着火」とみなす待ちの長さ（分。2026-08-13 便GB・docs/72 第2段 対象1）。
+ *
+ * これ以上の放置調理は、始めるのが遅れたぶんだけ全体がそのまま伸びる＝**その品の残りの
+ * 手作業より先に仕掛けたい**。8分は N3（放置調理の取りこぼし）の物差しと同じ値にそろえてある。
+ * これ未満の待ち（レンジ3分・2分温める）は、順番を入れ替えても全体はほとんど変わらないので
+ * 従来の並べ方に任せる。
+ */
+const IGNITION_WAIT_MINUTES = 8
+
+/** その品に、これから仕掛ける長い放置調理（着火）が残っているか */
+function hasIgnitionAhead(job: Job): boolean {
+  for (let i = job.ptr; i < job.steps.length; i++) {
+    const step = job.steps[i]
+    if (step.kind === 'wait' && step.waitMinutes >= IGNITION_WAIT_MINUTES) return true
+  }
+  return false
 }
 
 /**
@@ -1281,17 +1373,31 @@ function remainingSpan(job: Job): number {
  * 上から順に見て、決まらなければ次の基準に進む:
  *   1. **明けた待ちの後始末**（attendDue・2026-08-09 便EH）。ゆで上がった品をざるに上げる、
  *      煮上がった鍋の火を止める、が最優先
- *   2. **完成の順番**（finishBias・2026-08-08 便EG）。その品の最後の手順のときだけ効く。
- *      冷やす品は先に仕上げて冷蔵庫へ、熱々の品は最後に仕上げる。温度が読めない品は据え置き
+ *   2. **利用者が書いた並行の指示**（cueDue・2026-08-13 便GB）。「その間に」と書かれた手順は、
+ *      その待ちが動いているうちに片付ける（利用者が指した窓を外さない）
  *   3. **切る工程を続ける**（cutRun・2026-08-09 便EH・オーナー実機報告
  *      「切る手順がまだ後回しになっている。全部レシピ分カットの流れが自然」）。
- *      直前が“切る”なら、別レシピの“切る”をレシピをまたいで続けて片付ける
- *   4. **残り時間が長いレシピを先に**（remainingSpan）。長く掛かる品を後回しにすると
+ *      直前が“切る”なら、別レシピの“切る”をレシピをまたいで続けて片付ける。
+ *      **2026-08-13 便GBで4・5より上に移した**。切る流れを切って着火を数分早めても得は小さく、
+ *      まな板の上を行き来する段取りのほうが実際には損になるため
+ *   4. **着火の準備を待たせない**（ignitionRank・2026-08-13 便GB・docs/72 第2段）。
+ *      長い放置調理（8分以上）がこれから残っている品の手順を先に進める。
+ *      **これが「最後に仕上げる」と「最後に着火する」を分ける本体**。
+ *      提供タイミング（次の5）は仕上げの順番であって、着火まで後ろへ送る理由にはならない
+ *   5. **完成の順番**（finishBias・2026-08-08 便EG）。その品の最後の手順のときだけ効く。
+ *      冷やす品は先に仕上げて冷蔵庫へ、熱々の品は最後に仕上げる。温度が読めない品は据え置き
+ *   6. **残り時間が長いレシピを先に**（remainingSpan）。長く掛かる品を後回しにすると
  *      全体が伸びるため。待ちを早く仕掛けることにもなる
- *   5. **段階の大枠**（下ごしらえ→加熱→仕上げ）。同じくらい急ぐ品どうしなら、
+ *   7. **段階の大枠**（下ごしらえ→加熱→仕上げ）。同じくらい急ぐ品どうしなら、
  *      切る・洗う・下味などの準備を先に、盛り付けは最後にまわす
- *   6. **直前と同じ種類の作業を続ける**（切る以外）
- *   7. レシピの選択順（ここまで同点なら並びを安定させるだけ）
+ *   8. **直前と同じ種類の作業を続ける**（切る以外）
+ *   9. レシピの選択順（ここまで同点なら並びを安定させるだけ）
+ *
+ * **仕上げの手順は、ほかの品の完成に合わせて後ろへ寄せる**（holdsFinish・2026-08-13 便GB）。
+ * 温かい品（汁物を含む）の最後の手順は、ほかの品がまだ終わらないうちに済ませても
+ * 冷めるだけなので、**次に手が必要になる時刻に着地するようずらす**。
+ * 全体の目安は伸びない（元から手が空いていた時間に置き直すだけ）。
+ * 冷やす品には掛けない＝オーナー指示「冷たい方がいいものは先に仕上げて冷蔵庫で冷やしたい」のまま。
  */
 export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
   const jobs = buildJobs(recipes)
@@ -1347,11 +1453,43 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
         (min, k) => (k !== j && k.attendUntil > cookAt ? Math.min(min, k.attendUntil) : min),
         Number.POSITIVE_INFINITY,
       )
-      return cookAt + j.steps[j.ptr].activeMinutes <= othersDeadline
+      // 「その間に」で自分の鍋の待ちの中に置く手順だけは、**自分の締め切りも見る**
+      // （2026-08-13 便GB）。12分の煮込みの中に20分の作業を入れたら鍋が焦げる。
+      // 利用者が指した窓に収まらない指示は、従来どおり待ちが明けてから置く
+      const ownDeadline =
+        j.steps[j.ptr].parallelCue && j.attendUntil > cookAt
+          ? j.attendUntil
+          : Number.POSITIVE_INFINITY
+      return cookAt + j.steps[j.ptr].activeMinutes <= Math.min(othersDeadline, ownDeadline)
     }
 
-    // 手作業の選び方（上のコメントの1〜7）。切る工程どうしだけは、まな板の順序（野菜→肉・魚）を先に見る
-    const attendDue = (j: Job) => (j.attendUntil > 0 && j.readyAt <= cookAt ? 0 : 1)
+    /**
+     * その品を今から1品だけで作り切ったときの完成見込み（分）。
+     * 仕上げをどこまで後ろへ寄せてよいかの目安に使う（2026-08-13 便GB）。
+     */
+    const projectedEnd = (j: Job) => Math.max(j.readyAt, cookAt) + remainingSpan(j)
+    /**
+     * その品の**仕上げの手順**を、ほかの品の完成に合わせて後ろへ寄せてよいか（2026-08-13 便GB）。
+     * 温かい品（汁物を含む）の最後の手順で、ほかの品がまだ終わらないときだけ。
+     * 冷やす品には掛けない（先に仕上げて冷蔵庫へ＝2026-08-08 便EGのオーナー指示）。
+     */
+    const holdsFinish = (j: Job) => {
+      if (j.serveRank < SERVE_RANK.hot) return false
+      if (j.ptr !== j.steps.length - 1) return false
+      const step = j.steps[j.ptr]
+      if (step.kind !== 'active') return false
+      const othersEnd = jobs.reduce(
+        (max, k) => (k !== j && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max),
+        -1,
+      )
+      return othersEnd > cookAt + step.activeMinutes
+    }
+
+    // 手作業の選び方（上のコメントの1〜9）。切る工程どうしだけは、まな板の順序（野菜→肉・魚）を先に見る
+    const attendDue = (j: Job) => (j.attendUntil > 0 && j.waitDoneAt <= cookAt ? 0 : 1)
+    // 利用者が「その間に」と書いた手順は、その待ちが動いているうちに片付ける
+    const cueDue = (j: Job) => (j.steps[j.ptr].parallelCue && j.waitDoneAt > cookAt ? 0 : 1)
+    const ignitionRank = (j: Job) => (hasIgnitionAhead(j) ? 0 : 1)
     const cutRun = (j: Job) =>
       lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1
     const sameCat = (j: Job) => (j.steps[j.ptr].category === lastActiveCategory ? 0 : 1)
@@ -1364,8 +1502,10 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
         }
         return (
           attendDue(a) - attendDue(b) ||
-          finishBias(a) - finishBias(b) ||
+          cueDue(a) - cueDue(b) ||
           cutRun(a) - cutRun(b) ||
+          ignitionRank(a) - ignitionRank(b) ||
+          finishBias(a) - finishBias(b) ||
           remainingSpan(b) - remainingSpan(a) ||
           stepA.stageRank - stepB.stageRank ||
           sameCat(a) - sameCat(b) ||
@@ -1383,7 +1523,9 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     const fittingActives = ready.filter(
       (j) => j.steps[j.ptr].kind === 'active' && fitsBeforeDeadline(j),
     )
-    const shortestActive = fittingActives.reduce(
+    // いま進めたい手作業（＝後ろへ寄せる仕上げを除いたもの）
+    const eagerActives = fittingActives.filter((j) => !holdsFinish(j))
+    const shortestActive = eagerActives.reduce(
       (min, j) => Math.min(min, j.steps[j.ptr].activeMinutes),
       Number.POSITIVE_INFINITY,
     )
@@ -1394,14 +1536,16 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     const waitWouldIdle =
       waits.length > 0 &&
       dueWaits.length === 0 &&
-      fittingActives.length > 0 &&
+      eagerActives.length > 0 &&
       waits[0].steps[waits[0].ptr].attendWithin < shortestActive
     let chosen: Job
+    /** その手順を「次に手が必要になる時刻」に着地させる（仕上げを後ろへ寄せるときだけ） */
+    let holdFinish = false
     // 漬け込み・寝かせを仕掛ける前に、いま着手できる「切る」工程を先に片付ける
     // （2026-08-08 便EG・オーナー実機報告。生の肉・魚を漬けたあとで野菜を切りたくない）。
     // 対象は「いま着手できる待ちが全部、漬け込み・寝かせのとき」だけ＝煮る・ゆでるのような
     // ふつうの待ちは今までどおり最優先で仕掛ける
-    const readyCuts = fittingActives.filter((j) => j.steps[j.ptr].category === 'cut')
+    const readyCuts = eagerActives.filter((j) => j.steps[j.ptr].category === 'cut')
     const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
     if (dueWaits.length > 0) {
       chosen = dueWaits[0]
@@ -1409,11 +1553,45 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
       chosen = waits[0]
     } else if (soakOnly && readyCuts.length > 0) {
       chosen = pickActive(readyCuts)
-    } else if (fittingActives.length > 0) {
-      // 手作業のみ。上のコメント1〜7の順に見て決める
-      chosen = pickActive(fittingActives)
+    } else if (eagerActives.length > 0) {
+      // 手作業のみ。上のコメント1〜9の順に見て決める
+      chosen = pickActive(eagerActives)
     } else if (waits.length > 0) {
       chosen = waits[0]
+    } else if (fittingActives.length > 0) {
+      // 残っているのは「後ろへ寄せたい仕上げ」だけ（2026-08-13 便GB）。
+      // ここで済ませると、ほかの品ができるずっと前に仕上がって冷める。
+      //   ①まだ先送りできる（次に手が必要になる時刻まで送っても、ほかの品の完成に間に合う）
+      //     → 何もせず時刻だけ進めて、その間にほかの品の手順を進める
+      //   ②もう先送りできない → ほかの品の完成に着地するよう開始をずらして仕上げる
+      chosen = pickActive(fittingActives)
+      const held = chosen.steps[chosen.ptr]
+      const othersEnd = jobs.reduce(
+        (max, k) =>
+          k !== chosen && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max,
+        -1,
+      )
+      // ほかの品に残っている「手を動かす時間」の合計。先送りしてよいかの判断に使う
+      const othersActive = jobs.reduce(
+        (sum, k) => (k !== chosen && k.ptr < k.steps.length ? sum + remainingActive(k) : sum),
+        0,
+      )
+      const nextAt = active.reduce(
+        (next, j) => (j !== chosen && j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
+        attendDeadline,
+      )
+      // **先送りしてよいのは、送った先にもまだ手の空く時間が残っているときだけ**。
+      // ここを見ないと、ほかの品の手順で埋まったあとに仕上げがはみ出し、全体が伸びる
+      // （＝縮めるための機能が縮まなくなる。同梱109品の平均短縮率で実測して入れた歯止め）
+      if (
+        Number.isFinite(nextAt) &&
+        nextAt > cookAt &&
+        othersEnd - nextAt >= othersActive + held.activeMinutes
+      ) {
+        cookAt = nextAt
+        continue
+      }
+      holdFinish = true
     } else {
       // 締め切りまでに終わる手作業が1つも無い＝ここは手を空けて待つ（詰め込まない）。
       // 進める先は「次に何かが起きる時刻」＝手を戻す締め切りと、裏の待ちが明ける時刻の早い方
@@ -1427,12 +1605,31 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     }
 
     const step = chosen.steps[chosen.ptr]
-    const startMin = cookAt
-    // 前に仕掛けた待ちの後始末はここで済む（締め切りの管理から外す）
-    chosen.attendUntil = 0
+    let startMin = cookAt
+    if (holdFinish) {
+      // ほかの品の完成見込みに合わせて着地させる（そこまで待てないときは、次に手が必要になる
+      // 時刻に合わせる）。全体の目安は伸びない＝元から手が空いていた時間に置き直すだけ
+      const othersEnd = jobs.reduce(
+        (max, k) =>
+          k !== chosen && k.ptr < k.steps.length ? Math.max(max, projectedEnd(k)) : max,
+        -1,
+      )
+      const nextAt = active.reduce(
+        (next, j) => (j !== chosen && j.readyAt > cookAt ? Math.min(next, j.readyAt) : next),
+        attendDeadline,
+      )
+      const landing = Math.min(Number.isFinite(nextAt) ? nextAt : othersEnd, othersEnd)
+      if (Number.isFinite(landing)) startMin = Math.max(cookAt, landing - step.activeMinutes)
+    }
+    // 前に仕掛けた待ちの後始末はここで済む（締め切りの管理から外す）。
+    // ただし「その間に」で待ちの中に置いた手順は、その鍋に戻る作業ではないので締め切りを残す
+    const keepsPot = step.kind === 'active' && step.parallelCue && chosen.waitDoneAt > startMin
+    if (!keepsPot) chosen.attendUntil = 0
     if (step.kind === 'wait') {
       const endMin = startMin + step.waitMinutes
-      chosen.readyAt = endMin
+      chosen.waitDoneAt = endMin
+      // 次の手順が利用者の「その間に」なら、この待ちを仕掛けた時点で手が空く（2026-08-13 便GB）
+      chosen.readyAt = chosen.steps[chosen.ptr + 1]?.parallelCue ? startMin : endMin
       // 「遅くともこの時刻までに手を戻す」締め切り。上限なしの待ち（漬け込み等）は 0＝管理しない
       const attendUntil = startMin + step.attendWithin
       chosen.attendUntil = Number.isFinite(attendUntil) ? attendUntil : 0
@@ -1441,7 +1638,8 @@ export function buildCookTimeline(recipes: Recipe[]): CookTimeline {
     } else {
       const endMin = startMin + step.activeMinutes
       cookAt = endMin
-      chosen.readyAt = endMin
+      // 「その間に」を待ちの中でやった直後は、まだその待ちが明けていない
+      chosen.readyAt = Math.max(endMin, chosen.waitDoneAt)
       lastActiveCategory = step.category
       items.push(makeItem(items.length + 1, chosen, step, startMin, endMin))
     }
