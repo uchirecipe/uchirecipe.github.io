@@ -1570,7 +1570,11 @@ export function buildCookTimeline(
     const ignitionNow = (j: Job) => {
       const next = ignitesNext(j)
       if (!next || next.applianceKey == null || !next.occupies) return 1
-      return schedule.hasSpare(next.applianceKey, cookAt) ? 0 : 1
+      if (!schedule.hasSpare(next.applianceKey, cookAt)) return 1
+      // 前倒しするのは**いま着手できる中でいちばん時間の掛かる品**だけにする。
+      // どの品でも前倒しすると、短い品まで先に仕上がって完成の開きが広がる（実測で確認）
+      const longest = Math.max(...ready.map(remainingSpan))
+      return remainingSpan(j) >= longest ? 0 : 1
     }
     const cutRun = (j: Job) =>
       lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1

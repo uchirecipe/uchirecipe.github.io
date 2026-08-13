@@ -1400,6 +1400,22 @@ function applianceUse(item, kitchen = DEFAULT_KITCHEN) {
   return { key, start: item.startMin, end: item.endMin }
 }
 
+/**
+ * 2つ以上の器具を**同時に使っている時間**の合計（分）。docs/72 第3段Bの「もっと重ねる」を
+ * 短縮率とは別の角度から見るための数字（口数を増やしたときに、実際に火が重なっているか）。
+ */
+function overlapMinutes(intervals) {
+  const points = [...new Set(intervals.flatMap((iv) => [iv.start, iv.end]))].sort((a, b) => a - b)
+  let total = 0
+  for (let i = 0; i < points.length - 1; i++) {
+    const from = points[i]
+    const to = points[i + 1]
+    const busy = intervals.filter((iv) => iv.start <= from && iv.end >= to && iv.end > iv.start).length
+    if (busy >= 2) total += to - from
+  }
+  return total
+}
+
 /** 区間の最大同時使用数（端が接するだけ＝前の工程が終わった瞬間に次が始まる、は重なりとしない） */
 function maxConcurrent(intervals) {
   const events = []
@@ -1503,7 +1519,17 @@ function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
   const last = Math.max(...finishes)
 
   // --- N1 完成の揃い
-  const spread = last - Math.min(...finishes)
+  // **冷たい品は対象から外す**（2026-08-13 司令部の裁定・便GCで実装）。
+  // いちばん悪い例が「煮豚100分／ポテトサラダ24分」型で、**ポテトサラダを先に仕上げて
+  // 冷蔵庫に入れるのはオーナー指示どおりの正しい動き**（2026-08-08 便EG「冷たい方がいいものは
+  // 先に仕上げて冷蔵庫で冷やしたい」）なのに、開きが大きいという理由で不合格に数えていた。
+  // **線（30%超が20%以下）は動かさない。測る対象を正しくするだけ。**
+  const warmFinishes = trio
+    .filter((r) => recipeServeTemp(r) !== 'cold')
+    .map((r) => finish.get(r.id))
+    .filter((f) => f != null)
+  const spread =
+    warmFinishes.length >= 2 ? Math.max(...warmFinishes) - Math.min(...warmFinishes) : 0
 
   // --- N2 温かい品の放置（対象の品が、最後の品より何分早く終わるか）
   let hotIdle = null
@@ -1566,6 +1592,7 @@ function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
 
   // --- N5 器具の重なり
   const uses = items.map((it) => applianceUse(it, kitchen)).filter(Boolean)
+  const overlap = overlapMinutes(uses)
   const concurrency = {}
   for (const key of Object.keys(APPLIANCE_LABEL)) {
     concurrency[key] = maxConcurrent(uses.filter((u) => u.key === key))
@@ -1600,7 +1627,7 @@ function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
     }
   }
 
-  return { trio, timeline, total, finish, spread, hotIdle, ignitions, longestStarts, concurrency, cues, last }
+  return { trio, timeline, total, finish, spread, hotIdle, ignitions, longestStarts, concurrency, overlap, cues, last }
 }
 
 // ---------------------------------------------------------------- 標本（野生＋ホールドアウト）
@@ -1668,6 +1695,12 @@ say()
 
 // ---------------------------------------------------------------- N1
 say('■ N1. 完成の揃い（品ごとの完成時刻の開き。**線＝開きが30%を超える組み合わせが20%以下**）')
+say()
+say('  ※対象の引き直し（2026-08-13 便GC・司令部の裁定）: **冷たい品を対象から外した**。')
+say('     いちばん悪い例が「煮豚100分／ポテトサラダ24分」型で、ポテトサラダを先に仕上げて')
+say('     冷蔵庫に入れるのは2026-08-08 便EGのオーナー指示どおりの正しい動きなのに、')
+say('     開きが大きいという理由で不合格に数えていた。**線は動かさず、測る対象だけを正した**。')
+say('     ＝温かい品（と汁物）どうしの完成が揃っているかだけを見る。対象が1品以下なら開き0分。')
 say()
 say('  ※線の引き直し（2026-08-13 便GA）: 便FZまでは「開きの割合の**中央値**が30%以内」を線に')
 say('     していたが、**中央値25.4%で合格しながら41.6%の組み合わせが30%を超えていた**（R3の再現は')
@@ -2046,6 +2079,98 @@ say('|---|---|---|---|---|')
   say(`| N5 器具の重なり | コンロ1口で重なる段取りの件数 | 0件 | **${n5}件 / ${wildRows.length}通り** | ${verdict(n5 === N_LINE.n5)} |`)
   say(`| N6 利用者の並行指示 | 直前の待ちの中に置けた割合 | 80%以上 | **${f1(n6)}%**（並行指示の標本${cues.length}件） | ${verdict(n6 >= N_LINE.n6)} |`)
 }
+say()
+
+// ------------------------------------------------- 器具の設定ごとの13項目（2026-08-13 便GC）
+say('=========================================================')
+say(' 【器具の設定ごと】13項目（既存7＋新規6）')
+say('=========================================================')
+say()
+say('  docs/72 第3段（器具の占有）で、段取りは**台所の設定に合わせて組み直される**ようになった。')
+say('  合否は**既定の設定（コンロ2口・レンジ/グリル/トースターあり）**で判定する（＝設定を触って')
+say('  いない人が実際に見る段取り）。ほかの設定は、口数を変えると何がどれだけ変わるかを見るための参考。')
+say()
+say('  S1（危険側誤判定）とE4（一致率）は**手順の分類だけ**で決まり、器具の設定では1件も動かない')
+say('  （分類のコードに触れていないため）。この表には短縮率・正直表示・6項目だけを載せる。')
+say()
+
+/** その設定で3品の段取りを組み、短縮率まわりをまとめる */
+function summarizeAt(triples, kitchen) {
+  const solo = new Map()
+  const soloOf = (r) => {
+    const k = `${r.id}`
+    if (!solo.has(k)) solo.set(k, buildCookTimeline([r], kitchen).totalMinutes)
+    return solo.get(k)
+  }
+  const rows = triples.map((trio) => {
+    const plan = buildCookPlan(trio, kitchen)
+    const seq = trio.reduce((a, r) => a + soloOf(r), 0)
+    const par = buildCookTimeline(trio, kitchen).totalMinutes
+    return { gain: pct(seq - par, seq), honest: plan.mode === 'sequential', seq, par }
+  })
+  const gains = rows.map((r) => r.gain)
+  return {
+    n: rows.length,
+    avgGain: gains.reduce((a, b) => a + b, 0) / rows.length,
+    zeroRate: pct(gains.filter((g) => g < 0.5).length, rows.length),
+    honestRate: pct(rows.filter((r) => r.honest).length, rows.length),
+    // 「黙った短縮ゼロ」＝ほとんど縮まないのに正直表示が出ない件数（S2。線＝0件）
+    silentZero: rows.filter((r) => r.gain < 5 && !r.honest).length,
+    avgPar: rows.reduce((a, r) => a + r.par, 0) / rows.length,
+  }
+}
+
+const wildMixTriples = comboSets[4].triples
+const holdoutTriples = allTriples(holdoutAll)
+const cueTriples = allTriples(cueRecipes)
+say('| 項目 | 線 | ' + KITCHENS.map((k) => k.key).join(' | ') + ' |')
+say('|---|---|' + KITCHENS.map(() => '---').join('|') + '|')
+const kitchenStats = KITCHENS.map((k) => {
+  const at = (t) => summarizeAt(t, k.kitchen)
+  const rowsOf = (key) => nAnalysesByKitchen.get(k.key).get(key)
+  const wild = wildKeys.flatMap((key) => rowsOf(key))
+  const ratios = wild.map((a) => pct(a.spread, a.total))
+  const hot = wild.filter((a) => a.hotIdle != null).map((a) => a.hotIdle)
+  const cues = rowsOf('並行指示の標本（全20通り）')
+    .flatMap((a) => a.cues)
+    .filter((c) => c.cue === 'meanwhile' && c.hasWait)
+  return {
+    key: k.key,
+    starter: at(comboSets[0].triples),
+    mix: at(wildMixTriples),
+    a: at(comboSets[1].triples),
+    b: at(comboSets[2].triples),
+    c: at(comboSets[3].triples),
+    holdout: at(holdoutTriples),
+    n1over: pct(ratios.filter((x) => x > N_LINE.n1).length, wild.length),
+    n2: Math.max(...hot),
+    n5: wild.filter((a) => a.concurrency.stove > applianceCapacity(k.kitchen, 'stove')).length,
+    overlap: rowsOf('野生の混合A+B+C（無作為200通り）').reduce((sum, a) => sum + a.overlap, 0) /
+      rowsOf('野生の混合A+B+C（無作為200通り）').length,
+    n6: pct(cues.filter((c) => c.inside).length, cues.length),
+  }
+})
+const row = (label, line, get) => say(`| ${label} | ${line} | ` + kitchenStats.map((k) => get(k)).join(' | ') + ' |')
+row('S2 黙った短縮ゼロ（混合）', '0件', (k) => `${k.mix.silentZero}件`)
+row('E1 混合の平均短縮率', '25%以上', (k) => `**${f1(k.mix.avgGain)}%**`)
+row('E2 A: URL取込', '20%以上', (k) => `${f1(k.a.avgGain)}%`)
+row('E2 B: 貼り付け取込', '20%以上', (k) => `${f1(k.b.avgGain)}%`)
+row('E2 C: 手入力', '20%以上', (k) => `${f1(k.c.avgGain)}%`)
+row('E3 正直表示の発生率（混合）', '10%以下', (k) => `${f1(k.mix.honestRate)}%`)
+row('E5 同梱109品の平均短縮率', '32.6%以上', (k) => `**${f1(k.starter.avgGain)}%**`)
+row('（参考）ホールドアウトの平均短縮率', '—', (k) => `${f1(k.holdout.avgGain)}%`)
+row('（参考）混合のナビ所要（分）', '—', (k) => f1(k.mix.avgPar))
+row('（参考）**2つ以上の器具を同時に使う時間**（混合・平均分）', '—', (k) => `**${f1(k.overlap)}分**`)
+row('N1 開きが30%超の割合', '20%以下', (k) => `${f1(k.n1over)}%`)
+row('N2 温かい品と汁物の放置（最大・分）', '10分以内', (k) => `${k.n2}分`)
+row('N3 放置調理の取りこぼし', '0件', () => `${n3Stranded}件`)
+row('N4 混在手順の両方計上', '90%以上', () => `${f1(pct(n4Total.both, n4Total.mixed))}%`)
+row('N5 器具の重なり', '0件', (k) => `**${k.n5}件 / ${wildKeys.flatMap((key) => nAnalysesByKitchen.get(k.key).get(key)).length}通り**`)
+row('N6 利用者の並行指示', '80%以上', (k) => `${f1(k.n6)}%`)
+say()
+say('  ※N3・N4は手順の見分け方だけで決まる項目なので、器具の設定では動かない（同じ値が並ぶ）。')
+say('  ※「持っていない器具」の工程は**コンロ1口**として数える＝レンジ・グリル・トースターを')
+say('     持っていない家では、その工程をフライパンや鍋でやることになるため（本体・監査とも同じ扱い）。')
 say()
 
 // ---------------------------------------------------------------- R3の答え合わせ
