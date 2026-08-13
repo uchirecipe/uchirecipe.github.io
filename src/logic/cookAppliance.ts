@@ -143,6 +143,11 @@ const STOVE_HEAT_PATTERN =
 /** 鍋・フライパンの語（コンロの上に載る器） */
 const VESSEL_PATTERN = /フライパン|中華鍋|片手鍋|両手鍋|雪平|行平|圧力鍋|土鍋|小鍋|鍋|やかん|ケトル/
 /**
+ * 器具の名前が付いているが、実際はコンロにのせて使う道具。上の伏せ字で消えるので**伏せる前の本文**で見る
+ * （グリルパンは魚焼きグリルではなく、コンロにのせる焼き板）。
+ */
+const STOVE_TOOL_PATTERN = /グリルパン|グリル鍋/
+/**
  * 火から下りている合図。鍋・フライパンの語があっても、これがあれば占有と読まない。
  * （「鍋に移して冷ます」「フライパンから取り出す」「火を止めて器に盛る」）
  */
@@ -160,7 +165,8 @@ export function stepAppliance(text: string): ApplianceKey | null {
   if (MICROWAVE_PATTERN.test(t) || OVEN_PATTERN.test(t)) return 'microwave'
   if (GRILL_PATTERN.test(t)) return 'grill'
   if (STOVE_HEAT_PATTERN.test(t)) return 'stove'
-  if (VESSEL_PATTERN.test(t) && !OFF_HEAT_PATTERN.test(t)) return 'stove'
+  const onStove = VESSEL_PATTERN.test(t) || STOVE_TOOL_PATTERN.test(text ?? '')
+  if (onStove && !OFF_HEAT_PATTERN.test(t)) return 'stove'
   return null
 }
 

@@ -154,6 +154,13 @@ import {
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import {
+  stepAppliance,
+  stepApplianceFor,
+  kitchenFromSettings,
+  clampBurners,
+  DEFAULT_KITCHEN,
+} from '../src/logic/cookAppliance.ts'
+import {
   parseCookNaviSession,
   restoreCookNaviSession,
   serializeCookNaviSession,
@@ -4830,6 +4837,147 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
       'ナビ仕上げ: 煮物の仕上げは手の空いた時間の終わりに着地する',
       t.items.find((it) => it.text === '器に盛る。').endMin,
       33,
+    )
+  }
+}
+
+// ---------- 器具の占有（2026-08-13 便GC・docs/72 第3段）
+//
+// 直した不具合（docs/71 R2・コンロ1口の家）:
+//   「回鍋肉＋味噌汁で段取りを作ったら…⑤鍋で2分煮る（待ち）→⑥フライパンで豚肉を炒める→⑦また鍋
+//   →⑧またフライパン。うちは1口なので、この段取りはそもそも成立しません。警告もヒントも一切なし。」
+// 段取りが「料理人1人」しか見ておらず、**器具が何台あるか**を見ていなかった。
+// ----------
+{
+  const recipe = (id, title, steps) => ({ id, title, steps: steps.map((text) => ({ text })) })
+  const kitchen = (burners, extra) => ({
+    burners,
+    microwave: true,
+    grill: true,
+    toaster: true,
+    ...extra,
+  })
+
+  // ---- (1) 器具の見分け ----
+  eq('器具: 魚焼きグリル', stepAppliance('魚焼きグリルで15分焼く。'), 'grill')
+  eq('器具: トースター', stepAppliance('トースターでこんがり焼き色がつくまで焼く。'), 'toaster')
+  eq('器具: 電子レンジ', stepAppliance('耐熱ボウルに入れてラップをかけ、電子レンジで3分加熱する。'), 'microwave')
+  eq('器具: ワット数の表記もレンジ', stepAppliance('ふんわりラップをかけて600Wで2分加熱する。'), 'microwave')
+  eq('器具: オーブンはレンジと同じ1台として数える（家庭で多いのはオーブンレンジ）', stepAppliance('200度のオーブンで20分焼く。'), 'microwave')
+  eq('器具: 火の言い回しがあればコンロ', stepAppliance('フライパンで豚肉を炒める。'), 'stove')
+  eq('器具: 火の語が無くても鍋があればコンロ（安全側）', stepAppliance('鍋にだし汁を入れる。'), 'stove')
+  eq('器具: 火から下りていればコンロと数えない', stepAppliance('鍋の中身をボウルに移して冷ます。'), null)
+  eq('器具: 火を止める手順も、その時点までは火の上にある', stepAppliance('全体がまとまったら火を止める。'), 'stove')
+  eq('器具: 器具を使わない手順', stepAppliance('ボウルに調味料を混ぜ合わせる。'), null)
+  // 材料名の取り違え（見分けを間違えると、使っていない口を使っていることにしてしまう）
+  eq('器具: 「油揚げ」は揚げ物ではない', stepAppliance('油揚げは短冊切りにする。'), null)
+  eq('器具: 「蒸し大豆」は蒸す工程ではない', stepAppliance('ボウルにツナと蒸し大豆を入れてあえる。'), null)
+  eq('器具: 「フレンチトースト」はトースターではない', stepAppliance('フレンチトーストの卵液を作る。'), null)
+  eq('器具: 「グリルパン」はコンロで使う道具', stepAppliance('グリルパンに油をひく。'), 'stove')
+  eq('器具: 「炒りごま」は炒る工程ではない', stepAppliance('すり鉢に炒りごまを入れる。'), null)
+
+  // ---- (2) 持っていない器具はコンロ1口として数える ----
+  eq(
+    '器具: グリルを持っていない家では、グリルの工程はコンロを使う',
+    stepApplianceFor('魚焼きグリルで15分焼く。', kitchen(2, { grill: false })),
+    'stove',
+  )
+  eq(
+    '器具: 持っていれば従来どおりグリル',
+    stepApplianceFor('魚焼きグリルで15分焼く。', kitchen(2)),
+    'grill',
+  )
+
+  // ---- (3) 設定の読み取り（未設定の端末は従来どおり） ----
+  eq('器具: 既定は2口', DEFAULT_KITCHEN.burners, 2)
+  eq('器具: 設定が空なら既定', kitchenFromSettings(undefined), DEFAULT_KITCHEN)
+  eq('器具: 未設定の項目は「持っている」', kitchenFromSettings({}), DEFAULT_KITCHEN)
+  eq(
+    '器具: 「持っていない」だけを保存する形',
+    kitchenFromSettings({ kitchenBurners: 1, kitchenNoGrill: true }),
+    { burners: 1, microwave: true, grill: false, toaster: true },
+  )
+  eq('器具: 口数は1〜4に収める', [clampBurners(0), clampBurners(9)], [1, 4])
+
+  // ---- (4) R2の実例。1口では同時に火にかけない ----
+  // R2の訴えの形（鍋の煮込みが動いている最中に、フライパンの炒めものを差し込む段取り）
+  const nimono = () =>
+    recipe(1, '煮もの', ['大根を切る。', '鍋に大根とだし汁を入れて10分煮る。', '器に盛る。'])
+  const itamemono = () =>
+    recipe(2, '炒めもの', ['キャベツをざく切りにする。', 'フライパンで豚バラ肉を炒める。', '器に盛る。'])
+  /** その段取りで、同時に何口のコンロを使っているかの最大 */
+  const maxStove = (timeline) => {
+    const uses = timeline.items
+      .map((it) => ({
+        key: stepAppliance(it.text),
+        start: it.startMin,
+        end: it.endMin,
+        span: it.kind === 'wait' ? it.waitMinutes : it.activeMinutes,
+        relaxed: it.kind === 'wait' && waitUrgency({ text: it.text }) === 'relaxed',
+      }))
+      .filter((u) => u.key === 'stove' && u.span > 0 && !u.relaxed && u.end > u.start)
+    const events = uses.flatMap((u) => [[u.start, 1], [u.end, -1]])
+    events.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+    let now = 0
+    let max = 0
+    for (const [, d] of events) {
+      now += d
+      if (now > max) max = now
+    }
+    return max
+  }
+  eq(
+    'ナビ器具: コンロ1口の家に、同時に2つ火にかける段取りを出さない',
+    maxStove(buildCookTimeline([nimono(), itamemono()], kitchen(1))),
+    1,
+  )
+  eq(
+    'ナビ器具: 2口あれば重ねてよい（口数に余裕があるほど同時に進める）',
+    maxStove(buildCookTimeline([nimono(), itamemono()], kitchen(2))),
+    2,
+  )
+  eq(
+    'ナビ器具: 1口のほうが段取りは長くなる（無理な順番を出さないぶん）',
+    buildCookTimeline([nimono(), itamemono()], kitchen(1)).totalMinutes >
+      buildCookTimeline([nimono(), itamemono()], kitchen(2)).totalMinutes,
+    true,
+  )
+  eq(
+    'ナビ器具: 設定を省くと既定（2口）で組む＝従来どおり',
+    buildCookTimeline([nimono(), itamemono()]).totalMinutes,
+    buildCookTimeline([nimono(), itamemono()], kitchen(2)).totalMinutes,
+  )
+
+  // ---- (5) 占有しない待ち（漬ける・冷ます・寝かせる）は口をふさがない ----
+  {
+    const soak = buildCookTimeline(
+      [
+        recipe(1, 'マリネ', ['鶏肉をマリネ液に漬けて冷蔵庫で30分おく。', '器に盛る。']),
+        recipe(2, 'みそ汁', ['鍋にだし汁を入れて火にかける。', '豆腐を入れて2分煮る。']),
+      ],
+      kitchen(1),
+    )
+    eq(
+      'ナビ器具: 冷蔵庫で漬ける待ちの間も、1口の家でコンロを使える',
+      soak.items.some((it) => /火にかける/.test(it.text) && it.startMin < 30),
+      true,
+    )
+  }
+
+  // ---- (6) レンジ・グリル・トースターは同時に1つまで ----
+  {
+    const twoMicrowave = buildCookTimeline(
+      [
+        recipe(1, '副菜A', ['耐熱皿に並べ、電子レンジで5分加熱する。', '和える。']),
+        recipe(2, '副菜B', ['耐熱皿に並べ、電子レンジで5分加熱する。', '和える。']),
+      ],
+      kitchen(3),
+    )
+    const heats = twoMicrowave.items.filter((it) => /電子レンジ/.test(it.text))
+    eq(
+      'ナビ器具: 電子レンジは口数に関係なく同時に1つまで',
+      heats[0].endMin <= heats[1].startMin || heats[1].endMin <= heats[0].startMin,
+      true,
     )
   }
 }

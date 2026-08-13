@@ -1182,6 +1182,11 @@ export const ja = {
     // 「この通りに進めなくても大丈夫です」)を削り、短く言い切る1文にする。
     // 数値の不確実性の注意喚起(totalNote の「実際の火加減で前後します」)は別枠で残す
     disclaimer: '火加減や進み具合に合わせて、順番は前後してかまいません。',
+    // 台所の器具（2026-08-13 便GC・docs/72 第3段）。設定を変えると段取りが変わることが
+    // 画面から分かるように、組んだ前提と設定への行き先を段取りの先頭に出す（規約H）
+    kitchenNote: 'コンロ{n}口で組んだ段取りです。',
+    kitchenNoteMissing: 'コンロ{n}口・{list}なしで組んだ段取りです。',
+    kitchenLink: '台所の器具を変える',
     selectTitle: '組み合わせるレシピを選ぶ',
     selectHint: '今日の献立から2〜3品まで選べます',
     selectedCount: '{n}品を選択中',
@@ -1728,6 +1733,21 @@ export const ja = {
       'レシピの表示や、献立の買い物の分量・食費を計算するときの基準として扱います。栄養の「1人分」の表示は変わりません',
     householdServingsNone: '設定しない',
     householdServingsOption: '{n}人分',
+    // 台所の器具（2026-08-13 便GC・docs/72 第3段）。並行調理ナビの段取りだけに効く設定。
+    // 文言は「読んで何に効くか分かるか」だけで書く（規約H）。効く先（段取り）と、
+    // 持っていない器具の扱い（コンロ1口として数える）を書かないと、設定した結果が読めない
+    kitchenTitle: '台所の器具',
+    kitchenDescription:
+      '並行調理ナビが段取りを組むときの前提です。設定した台数を超えて同時に使う順番は出しません。',
+    kitchenBurnersLabel: 'コンロ・IHの口数',
+    kitchenBurnersOption: '{n}口',
+    kitchenApplianceLabel: '持っている器具',
+    kitchenMicrowave: '電子レンジ',
+    kitchenGrill: '魚焼きグリル',
+    kitchenToaster: 'トースター',
+    kitchenMissingNote:
+      '持っていない器具の工程は、フライパンや鍋で作るものとして、コンロを1口使うと数えます。',
+    kitchenChangeNote: '変えると、並行調理ナビの段取りが組み直されます。',
     weeklyBudgetTitle: '週の食費予算（円・任意）',
     weeklyBudgetDescription: '献立プランナーで、その週の概算食費と比較して表示します',
     weeklyBudgetPlaceholder: '例: 5000',
