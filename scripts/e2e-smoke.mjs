@@ -27187,8 +27187,11 @@ try {
           ((await flPage.textContent('[data-testid="cook-session-recipe-long-rest-done"]')) ?? '') ===
             'あとは待つだけ',
       )
-      // 最後の手順まで送ると、作り終えた品の行に印が出る（味玉＝長い待ちで終わる品）
-      for (let i = 0; i < 14; i++) {
+      // 最後の手順まで送ると、作り終えた品の行に印が出る（味玉＝長い待ちで終わる品）。
+      // 上限は「進めなくなるまで」の保険であって手順数の見込みではない。
+      // 14固定にしていたため、便GD（1手順を手作業と待ちに分ける）で段取りが伸びた瞬間に
+      // 最後まで届かなくなり、味玉の行が出ないまま判定が落ちていた（2026-08-13）
+      for (let i = 0; i < 60; i++) {
         if ((await flPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
         await flPage.locator('[data-testid="cook-session-next"]').click()
         await flPage.waitForTimeout(250)
