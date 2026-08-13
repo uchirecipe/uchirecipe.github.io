@@ -146,9 +146,17 @@ function RecipePill({ title, colorIndex }: { title: string; colorIndex: number }
 /**
  * タイムライン上の手順カードのDOM id（常駐タイマーバーの完了タップからの着地点に使う）。
  * この形式は TimerBar.tsx の goToStep も参照するので、変えるときは両方を揃えること。
+ *
+ * 2026-08-13 便GD: 手順番号ではなく**そのレシピ内の手順の呼び名**（「3」「3-1」「3-2」）で作る。
+ * 1つの手順を2つに分ける形が増えた（湯沸かしの切り出しに加えて、手作業と待ちの分離・
+ * 沸くまでの待ちの差し込み）ため、手順番号だけだと同じ id のカードが2枚並び、
+ * タイマーからの着地が必ず手前のカードに落ちてしまう。
  */
-function naviStepDomId(recipeId: number, stepNumber: number): string {
-  return `navi-step-${recipeId}-${stepNumber}`
+function naviStepKey(item: { stepNumber: number; splitOf?: number; splitPart?: 1 | 2 }): string {
+  return recipeStepLabel(item) ?? String(item.stepNumber)
+}
+function naviStepDomId(recipeId: number, stepKey: string): string {
+  return `navi-step-${recipeId}-${stepKey}`
 }
 
 /** タイムラインの1手順カード */
@@ -190,7 +198,7 @@ function TimelineCard({
   const showWaitTimerButton = showsWaitTimerButton(item)
   return (
     <li
-      id={naviStepDomId(item.recipeId, item.stepNumber)}
+      id={naviStepDomId(item.recipeId, naviStepKey(item))}
       className={`rounded-md border bg-surface p-[var(--space-md)] shadow-sm transition-shadow ${
         highlighted ? 'border-accent ring-2 ring-accent' : 'border-edge'
       }`}
@@ -792,9 +800,13 @@ export default function CookNaviPage() {
     // タイマーから帰ってきたときは**段取りの一覧ではなく調理中モードへ**戻す。
     // 調理を終えている（カーソルが無い）ときは、従来どおり一覧の該当カードへ送る
     if (current && timeline) {
-      const [focusRecipeId, focusStepNumber] = focus.split('-').map(Number)
+      // 「レシピID-手順の呼び名」。呼び名は「3」「3-1」のように「-」を含むことがあるので、
+      // 先頭の「-」だけで切る（2026-08-13 便GD）
+      const sep = focus.indexOf('-')
+      const focusRecipeId = Number(focus.slice(0, sep))
+      const focusStepKey = focus.slice(sep + 1)
       const target = planItems.find(
-        (item) => item.recipeId === focusRecipeId && item.stepNumber === focusStepNumber,
+        (item) => item.recipeId === focusRecipeId && naviStepKey(item) === focusStepKey,
       )
       if (target) {
         handledFocusRef.current = focus
