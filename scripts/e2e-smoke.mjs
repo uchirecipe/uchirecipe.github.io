@@ -27197,11 +27197,28 @@ try {
         await flPage.waitForTimeout(250)
       }
       const otherRows = await flPage.locator('[data-testid="cook-session-other-row"]').allInnerTexts()
+      // 味玉が「他の品」に並ぶか、いま開いている品そのものかは段取りの並びで変わる
+      // （便GDで1手順を手作業と待ちに分けたら、最後に開く品が味玉になった）。
+      // 見たいのは置き場所ではなく「長い待ちで終わる品に『完成』と言わないこと」なので、
+      // どちらに出ていても同じ判定になる形にする（2026-08-13）
+      const flCurrentTitle = noZw(
+        (await flPage.textContent('[data-testid="cook-session-recipe"]')) ?? '',
+      )
+      const flMitamaRow = otherRows.map(noZw).find((t) => t.includes('FL味玉'))
+      const flMitamaLongRest =
+        flMitamaRow != null
+          ? flMitamaRow.includes('あとは待つだけ') && !flMitamaRow.includes('完成')
+          : flCurrentTitle.includes('FL味玉') &&
+            (await flPage.locator('[data-testid="cook-session-recipe-long-rest-done"]').count()) ===
+              1 &&
+            (await flPage.locator('[data-testid="cook-session-recipe-done"]').count()) === 0
       check(
         'FL-05 「他の品の次の手順」でも、長い待ちで終わる品は「完成」と言わない',
-        otherRows.some((t) => noZw(t).includes('FL味玉') && noZw(t).includes('あとは待つだけ')) &&
-          !otherRows.some((t) => noZw(t).includes('FL味玉') && noZw(t).includes('完成')),
-        JSON.stringify(otherRows.map((t) => noZw(t).replace(/\n/g, ' / '))),
+        flMitamaLongRest,
+        JSON.stringify({
+          いま開いている品: flCurrentTitle,
+          他の品: otherRows.map((t) => noZw(t).replace(/\n/g, ' / ')),
+        }),
       )
       check(
         'FL-05 長い待ちで終わらない品は今までどおり「完成」',
