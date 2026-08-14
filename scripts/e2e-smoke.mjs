@@ -28220,10 +28220,24 @@ try {
           foFinishBody.includes('3件'),
         foFinishBody.slice(0, 240),
       )
+      // GF-A（2026-08-14 便GF・利用者テスト「ダイアログに『レシピと段取りはそのまま残ります』と
+      // 書かれているのに、記録をつけると段取りが消える。リロードしても戻らない。
+      // 説明文がその場で嘘になっているのが一番まずい」）。
+      // 記録で段取りを終える動きはオーナーの整理どおりなので、案内文を動きに合わせた。
+      // ここでは**確認文の中身**を見て、下の GF-A で**そのとおりに消えるか**を見る（両方そろって合格）
       check(
         'FO-09 確認文に、何が残るかも書いてある（規約F）',
-        foFinishBody.includes('レシピと段取りはそのまま残ります'),
+        foFinishBody.includes('残ります') &&
+          foFinishBody.includes('レシピ') &&
+          foFinishBody.includes('作った記録'),
         foFinishBody.slice(0, 240),
+      )
+      check(
+        'GF-A 確認文に「段取りも消える」と書いてある（残ると書いていない）',
+        foFinishBody.includes('段取り') &&
+          foFinishBody.includes('消えます') &&
+          !/段取り[^。]*残ります/.test(foFinishBody),
+        foFinishBody.slice(0, 300),
       )
       // FX-06: まとめて付けた記録も、あとから1件ずつ直せることを添える
       check(
@@ -28308,6 +28322,32 @@ try {
       check(
         'FO-09 記録できたことを画面で知らせる',
         ((await foPage.textContent('body')) ?? '').includes('作った記録をつけました'),
+      )
+      // --- GF-A: 記録をつけたあとの並行調理ナビが、確認文で言ったとおりになっている ---
+      //   利用者テスト「並行調理ナビが『今日の献立にレシピがありません』になり、段取りが消える。
+      //   リロードしても戻らない」。段取りが終わること自体は確認文どおりでよい。
+      //   直したのは①確認文が「段取りは残る」と嘘をついていたこと ②作り終えた状態を
+      //  「レシピがありません」と言っていたこと。**どこに出ていても同じ判定**になるよう本文で見る
+      currentCheck = 'GF-A'
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1600)
+      const gfaBody = ((await foPage.textContent('body')) ?? '').replaceAll('​', '')
+      check(
+        'GF-A 記録したあとは段取りが残らない（確認文どおり）',
+        (await foPage.locator('[data-testid="cook-session-start"]').count()) === 0 &&
+          (await foPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 0,
+        gfaBody.slice(0, 200),
+      )
+      check(
+        'GF-A 作り終えた状態を「今日の献立にレシピがありません」と言わない',
+        !gfaBody.includes('今日の献立にレシピがありません'),
+        gfaBody.slice(0, 300),
+      )
+      check(
+        'GF-A 作り終えたことと、次にできることを画面に書く',
+        gfaBody.includes('作った記録が付いています') &&
+          gfaBody.includes('「今日の献立に追加」'),
+        gfaBody.slice(0, 300),
       )
 
       // --- FO-10: 中断して献立から戻ったとき、続きの入口が画面の中に入っている ---

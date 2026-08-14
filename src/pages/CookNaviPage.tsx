@@ -617,6 +617,23 @@ export default function CookNaviPage() {
   }, [todayList, recipes, todayPlanEntries, recipeById, today])
 
   /**
+   * 今日すでに作った記録が付いている品数（2026-08-14 便GF・利用者テスト
+   * 「まとめて作った！のあと、並行調理ナビが『今日の献立にレシピがありません』になる」）。
+   *
+   * 記録を付けた品は今日の献立から外れる（db/todayList.ts の markRecipesCooked が
+   * 今日の献立から消し、週の予定は「今日作った品」を候補から外す）ので、3品を記録すると
+   * 候補が空になる。そこで従来の案内をそのまま出すと、献立を1品も作っていない人と
+   * 同じ文面になり、画面が事実と違うことを言う。**候補が空の理由を言い分ける**ために数える。
+   *
+   * 数えるのは「今日の日付の記録が付いているレシピ」＝記録を付けた時点で今日の献立から
+   * 消えてしまう品も残らず数えられる（今日の献立の側には手がかりが残らないため）。
+   */
+  const todayCookedCount = useMemo(() => {
+    if (!recipes) return 0
+    return recipes.filter((r) => r.cookedLogs.some((log) => log.date === today)).length
+  }, [recipes, today])
+
+  /**
    * お試しを開始する（2026-08-02 便CP-2）。
    * **段取りを組める献立が無いとき（今日の献立が2品未満）は回数を減らさない**:
    * 画面は本物のナビをそのまま開くが、この状態では「今日の献立にレシピがありません」の案内しか
@@ -1528,7 +1545,13 @@ export default function CookNaviPage() {
 
             {todayRecipes === undefined ? null : todayRecipes.length === 0 ? (
               <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] text-center shadow-sm">
-                <p className="text-sm text-ink-muted">{ja.cookNavi.emptyToday}</p>
+                {/* 「今日の献立が空」と「今日の献立を全部作り終えた」を言い分ける（2026-08-14 便GF）。
+                    まとめて記録した直後は後者なので、「レシピがありません」は事実と違う */}
+                <p data-testid="navi-empty-today" className="ja-phrase text-sm text-ink-muted">
+                  {todayCookedCount > 0
+                    ? ja.cookNavi.emptyTodayCooked.replace('{n}', String(todayCookedCount))
+                    : ja.cookNavi.emptyToday}
+                </p>
                 <Link
                   to="/meal-plan"
                   className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"

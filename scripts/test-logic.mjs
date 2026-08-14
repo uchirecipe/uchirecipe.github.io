@@ -17153,6 +17153,76 @@ eq(
   ])
 }
 
+
+// ---------- GF-A 「まとめて作った！」の案内文と、実際に起きることを一致させる ----------
+// 2026-08-14 便GF・利用者テスト（原文）:
+//   「ダイアログに『記録した3件は今日の献立から外れます（レシピと段取りはそのまま残ります）』と
+//     書かれている／『記録をつける』を押す／並行調理ナビが『今日の献立にレシピがありません』に
+//     なり、段取りが消える。リロードしても戻らない」
+//   「実害: 作り終えて記録をつけた直後に『あれ、パセリの前に何やったっけ』と振り返れない。
+//     説明文がその場で嘘になっているのが一番まずい」
+// 記録したら段取りを終える動き自体はオーナーの整理どおり（2026-08-13）なので、直すのは案内文。
+// **動き（消える）と案内文（消えると書いてある）を1つのテストで突き合わせる**＝
+// 片方だけ直しても緑にならない形にする。
+{
+  const store = new Map()
+  const shim = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  }
+  const originalLocal = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const originalSession = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  Object.defineProperty(globalThis, 'localStorage', { value: shim, configurable: true, writable: true })
+  Object.defineProperty(globalThis, 'sessionStorage', { value: shim, configurable: true, writable: true })
+  const { saveCookNaviSession, loadCookNaviSession, clearCookNaviSession } = await import(
+    '../src/logic/cookNaviSession.ts'
+  )
+  saveCookNaviSession({
+    selectedIds: [1, 2, 3],
+    showTimeline: true,
+    trialActive: false,
+    current: { recipeId: 1, stepIndex: 0 },
+  })
+  eq('GF-A 前提: 段取りは端末に残っている', loadCookNaviSession()?.showTimeline, true)
+  // 「まとめて作った！」が呼ぶ後始末（CookNaviPage の markAllCooked）
+  clearCookNaviSession()
+  eq('GF-A 記録をつけたあと、段取りは残らない', loadCookNaviSession(), undefined)
+  const confirmText = ja.cookNavi.markAllCookedConfirm
+  eq(
+    'GF-A 案内文に、段取りが消えることが書いてある',
+    confirmText.includes('段取り') && confirmText.includes('消えます'),
+    true,
+  )
+  neq(
+    'GF-A 案内文が「段取りは残る」と言っていない（利用者が読んだ嘘の一文）',
+    /段取り[^。]*残ります/.test(confirmText),
+    true,
+  )
+  eq(
+    'GF-A 案内文に、何が残るかも書いてある（規約F）',
+    confirmText.includes('レシピ・作った記録') && confirmText.includes('残ります'),
+    true,
+  )
+  // 記録した直後の並行調理ナビは「今日の献立が空」ではなく「今日の献立を作り終えた」状態。
+  // 「レシピがありません」と出ると、そこでも画面が事実と違うことを言うことになる
+  eq(
+    'GF-A 作り終えたときの案内は、献立が空のときの文言をそのまま使わない',
+    ja.cookNavi.emptyTodayCooked.includes('今日の献立にレシピがありません'),
+    false,
+  )
+  eq(
+    'GF-A 作り終えたときの案内は、件数と次にできることを書く',
+    ja.cookNavi.emptyTodayCooked.includes('{n}品') &&
+      ja.cookNavi.emptyTodayCooked.includes('「今日の献立に追加」'),
+    true,
+  )
+  if (originalLocal) Object.defineProperty(globalThis, 'localStorage', originalLocal)
+  else delete globalThis.localStorage
+  if (originalSession) Object.defineProperty(globalThis, 'sessionStorage', originalSession)
+  else delete globalThis.sessionStorage
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
