@@ -18357,8 +18357,11 @@ Aみりん 大さじ1
   {
     eq(
       'GL-1 目安の分数の印は、何の数字かと何でないかを両方言い切る',
-      ja.cookNavi.estimateStaleNote.includes('自動で組んだ並びで計算した数字です') &&
-        ja.cookNavi.estimateStaleNote.includes('手で並べ替えたあとの時間ではありません'),
+      // 言い回しそのものを固定しない（2026-08-15。「手で並べ替えたあと」は声・タップでも
+      // 同じ印が出るため「並びを変えたあと」に直した。文言が育つたびに落ちるテストにしない）。
+      // 見るのは①その数字が何なのかを言っているか ②何ではないかを打ち消しで言っているか の2つ
+      ja.cookNavi.estimateStaleNote.includes('自動で組んだ並び') &&
+        /ではありません|ではない/.test(ja.cookNavi.estimateStaleNote),
       true,
     )
     eq(
