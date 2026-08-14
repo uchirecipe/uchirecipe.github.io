@@ -1161,6 +1161,14 @@ export type HeatShift = 'on' | 'off' | 'keep'
 const HEAT_OFF_PATTERN =
   /火を止め|火をとめ|火を消|火からおろ|火から下ろ|火から外|火からはず|器に盛|皿に盛|椀に|お椀に|盛り付け|盛りつけ|盛って|取り出|とり出|ざるにあげ|ざるに上げ|ざるにとり|ざるに移|ザルにあげ|ザルに上げ|ザルにとり|ザルに移|湯を切|湯をき|湯切り|油をき|油を切|水気をき|水気を切|水けをき|水けを切|水気をしぼ|水気を絞|水けをしぼ|水けを絞|つぶ|水にとる|水に取る|水にさら|流水|洗う|洗い|洗っ|冷水|冷ま|粗熱|こね|捏ね|成形|形を作|形を整え|できあがり|出来上がり/
 
+/**
+ * 手でタネを扱う工程（上の HEAT_OFF_PATTERN のうち 2026-08-15 便GMが足したぶん）。
+ * **この工程に入るまでの空きも、火にかけたままの放置には数えない**＝火は前の加熱が済んだ時点で
+ * 止まっている（ボウルの中の作業なので、中身はとっくに鍋から出ている）。
+ * 監査 `audit-cook-navi.mjs` の MEASURE_OFF_HEAT_BY_HAND と同じ役割・同じ語。
+ */
+const OFF_HEAT_BY_HAND_PATTERN = /こね|捏ね|成形|形を作|形を整え|形にする/
+
 /** 火にかかっている合図（位置くらべに使う。器具の見分けそのものは cookAppliance が持つ） */
 const HEAT_ON_PATTERN =
   /火にかけ|火に掛け|火をつけ|火を入れ|点火|強火|中火|弱火|とろ火|煮|茹|ゆで|沸か|沸騰|煮立|炒め|炒る|揚げ|蒸|焼く|焼き|焼い|熱し|熱する|加熱|温め/
@@ -1984,6 +1992,213 @@ function ignitesNext(job: Job): Job['steps'][number] | undefined {
 }
 
 /**
+ * 【別の鍋に移る前に、火を止める／弱火にする】2026-08-15 便GO・docs/72 第7段。
+ *
+ * 利用者（料理歴20年・自分で登録したレシピで実操作）の原文:
+ *   「#7で豆腐とわかめを入れて煮始め、火を止めるのは#12。間に#8・#9・#10（グリル15分の待ち）が
+ *     挟まるので、豆腐とわかめが10分前後ぐつぐつ煮え続けます。レシピには『1〜2分煮る』と
+ *     書いてあるのに。豆腐は崩れるしわかめは溶けます。
+ *     **#7の後に「火を止める」も「弱火にする」も出てきません。**」
+ *
+ * 便GMが該当108件を全部書き出した結果、**残り89件はすべて「鍋が2つ同時に手を待っている」場面**で、
+ * 手は1組しかないため片方は必ず待たされることが分かった（手が空いていたのに戻り遅れた例は0件）。
+ * 並べ替えでは移動するだけで消えず、着火を見合わせれば短縮率と引き換えになる。
+ * **実際の台所では、別の鍋に移る前に火を弱めるか止める。** それを段取りの一手として出す。
+ *
+ * ## レシピ本文は書き換えない（規約D）
+ * 「湯を沸かす」「火にかけたまま、沸くのを待つ」と同じ作法で、**段取りの上にだけ**工程を足す
+ * （`addedByNavi`）。レシピのデータには一切書き込まない。
+ *
+ * ## 「止める」と「弱くする」の分け方
+ * **火を止めてよいのは、その鍋の加熱がもう仕事を終えているときだけ。**
+ *   - 足す位置は必ず**加熱に関わる工程が終わった瞬間**（`leftAt`）なので、
+ *     「煮汁が少なくなるまで煮る」の**最中**に止めることは構造上起こらない
+ *     （待ちの途中には足さない＝レシピが指定した加熱時間は必ず最後まで通る）
+ *   - そのうえで、**その品の残りの工程に火を必要とするものが1つでもあれば「弱火にする」**。
+ *     止めると鍋を温め直すことになり、「沸いた湯に卵を入れる」「続けて煮る」がその場で
+ *     成立しなくなる（段取りの見積りも狂う）
+ *   - 残りに火を使う工程が1つも無ければ、その鍋の火はもう仕事を終えている＝**「火を止める」**
+ *     （「器に盛る」「つぶす」「冷水にとる」「ご飯にかける」で終わる品）
+ *
+ * 「火を必要とする工程」は `heatShift === 'on'` だけでは足りない（`needsFire`）。
+ * 「煮汁がほとんどなくなったら火を止め、そのまま冷ます」「弱火にしてみそを溶き入れ、
+ * 煮立つ直前で火を止めます」は**工程全体としては火が下りる（'off'）が、その工程の間は火の上にいる**。
+ * ここで先に止めると、煮詰める・溶かすというレシピの意図がその場で消える
+ * （＝まさに「加熱の途中で止めたら料理が変わる」型）。**工程の終わりに火が下りる書き方
+ * （`heatOffAtEnd`）は、火を必要とする側に数える。**
+ * 迷う型は**弱火**に倒す＝加熱を途中で断ち切らない側（料理を壊さない側）。
+ *
+ * ## 出しすぎない
+ * 足すのは**猶予を本当に超える場面だけ**（待ちの猶予は `waitOverrunAllowance`、
+ * 待ちでない工程は `HEAT_HOLD_ALLOWANCE`＝3分。監査 N7 と同じ数え方）。
+ * 1つの火のあいだに同じ一手は繰り返さない。
+ *
+ * ## 時間
+ * この一手は0分（コンロのつまみを回すだけ）。段取りの長さは1分も動かないので、
+ * 短縮率（E1・E2・E5'）には影響しない。
+ *
+ * **口の予約は返さない**（火を止めた鍋の口を空きとして数え直すと、段取りそのものが組み替わり、
+ * ほかの項目の値が動く）。ここでやるのは「一手を足すこと」だけに絞る。
+ */
+export type HeatBreakKind = 'off' | 'low'
+
+/**
+ * ナビが足す「火を止める／弱火にする」工程の識別子（レシピ内で重ならない負の値）。
+ * 湯沸かしは -1、混在手順を分けた後半は -(元の添字+2) を使うので、そこから離した値にする。
+ */
+const HEAT_BREAK_STEP_INDEX_BASE = -1000
+
+/**
+ * その工程のあと、鍋が火にかかったまま次の一手を待てる時間（分）。
+ * 待ちはもともとの超過許容（煮込みなら待ちの2割・上限5分）と3分の大きいほうを使う
+ * ＝**既存の締め切りを緩めも縮めもしない**（監査 N7 の `heatAllowanceOf` と同じ）。
+ */
+function heatBreakAllowance(item: TimelineItem): number {
+  if (item.kind !== 'wait') return HEAT_HOLD_ALLOWANCE
+  const over = waitOverrunAllowance({ text: item.text, minutes: item.minutes }, item.waitMinutes)
+  return Number.isFinite(over) ? Math.max(HEAT_HOLD_ALLOWANCE, over) : Number.POSITIVE_INFINITY
+}
+
+/**
+ * 足した一手を置く位置。
+ *
+ * **その時刻にもう始まっている工程の後ろ・その時刻から始まる工程の前**に置く
+ * （＝手が空いた瞬間に「別の鍋に移る前に」やる一手として読める）。
+ * 待ちが明けた時刻が別の品の作業の途中に当たる場合だけ、その作業の後ろに並ぶ
+ * （つまみを回すだけの一手なので、手を止めて寄る形になる）。
+ */
+function heatBreakPosition(items: readonly TimelineItem[], at: number, before: number): number {
+  let pos = 0
+  for (let j = 0; j < items.length; j++) if (items[j].startMin < at) pos = j + 1
+  return Math.min(pos, before)
+}
+
+function makeHeatBreakItem(
+  ref: TimelineItem,
+  kind: HeatBreakKind,
+  at: number,
+  seq: number,
+): TimelineItem {
+  const text = kind === 'off' ? ja.cookNavi.addedHeatOffStep : ja.cookNavi.addedHeatLowStep
+  return {
+    // 通し番号は差し込んだあとに振り直す
+    order: 0,
+    recipeId: ref.recipeId,
+    recipeTitle: ref.recipeTitle,
+    colorIndex: ref.colorIndex,
+    stepNumber: 0,
+    stepIndex: HEAT_BREAK_STEP_INDEX_BASE - seq,
+    addedByNavi: true,
+    // **どの品の火かを本文に書く**（複数の鍋が動いているので、取り違えると別の料理が止まる）。
+    // レシピの手順は「いま向き合っている鍋」の話だが、この一手だけは**別の鍋に手を伸ばす**指示
+    text: text.replace('{title}', ref.recipeTitle),
+    kind: 'active',
+    waitMinutes: 0,
+    waitEstimated: false,
+    longRest: false,
+    // つまみを回すだけ＝0分。段取りの長さを1分も動かさない
+    activeMinutes: 0,
+    activeEstimated: false,
+    startMin: at,
+    endMin: at,
+  }
+}
+
+/**
+ * 組み上がった段取りに「火を止める／弱火にする」を差し込む（上の説明を参照）。
+ * 純関数。渡した配列は書き換えない。
+ */
+export function insertHeatBreakSteps(
+  items: readonly TimelineItem[],
+  kitchen: KitchenEquipment = DEFAULT_KITCHEN,
+): TimelineItem[] {
+  const steps = items.map((it) => ({ text: it.text, minutes: it.minutes, memo: it.memo }))
+  const shifts = steps.map((step) => stepHeatShift(step, kitchen))
+  /** その工程は火を必要とするか（工程の終わりに火が下りる書き方も、その間は火の上） */
+  const needsFire = steps.map((step, i) => shifts[i] === 'on' || heatOffAtEnd(step))
+  /**
+   * 手でタネを扱う工程（こねる・形を作る）。**そこへ入るまでの空きは放置ではない**ので、
+   * 火の一手も足さない（2026-08-15 便GM。ボウルの中の作業＝中身は鍋から出ている）。
+   * 監査 N7 が数えない場面と、足す場面をそろえる。
+   */
+  const offByHand = steps.map((step) =>
+    OFF_HEAT_BY_HAND_PATTERN.test(maskNonWaitNouns(stepMainText(step.text))),
+  )
+  const byRecipe = new Map<number, number[]>()
+  items.forEach((it, i) => {
+    const list = byRecipe.get(it.recipeId)
+    if (list) list.push(i)
+    else byRecipe.set(it.recipeId, [i])
+  })
+
+  const inserts: { pos: number; item: TimelineItem }[] = []
+  for (const [, idxs] of byRecipe) {
+    /** 遅くともこの時刻までにその鍋へ手を戻す（null＝火にかかっていない） */
+    let dueAt: number | null = null
+    /** その鍋から手が離れた時刻（＝足す一手を置く時刻） */
+    let leftAt = 0
+    /** いまの火のあいだにもう足した一手（同じ一手を繰り返さない） */
+    let lastBreak: HeatBreakKind | null = null
+    let added = 0
+    for (let k = 0; k < idxs.length; k++) {
+      const i = idxs[k]
+      const item = items[i]
+      if (dueAt != null && item.startMin > dueAt && !offByHand[i]) {
+        // 火にかけたまま、次にその品へ手が戻るのが猶予を過ぎる場面
+        const needsHeatAgain = idxs.slice(k).some((j) => needsFire[j])
+        const kind: HeatBreakKind = needsHeatAgain ? 'low' : 'off'
+        if (kind !== lastBreak) {
+          inserts.push({
+            pos: heatBreakPosition(items, leftAt, i),
+            item: makeHeatBreakItem(item, kind, leftAt, added++),
+          })
+          if (kind === 'off') {
+            // 火が下りた＝この鍋の締め切りは無くなる
+            dueAt = null
+            lastBreak = null
+          } else {
+            // 弱火のまま＝火は続くので、締め切りはそこから数え直す
+            dueAt = leftAt + HEAT_HOLD_ALLOWANCE
+            lastBreak = kind
+          }
+        }
+      }
+      const shift = shifts[i]
+      if (shift === 'off') {
+        dueAt = null
+        lastBreak = null
+      } else if (shift === 'on') {
+        const allowance = heatBreakAllowance(item)
+        dueAt = Number.isFinite(allowance) ? item.endMin + allowance : null
+        leftAt = item.endMin
+        lastBreak = null
+      } else if (dueAt != null) {
+        // 火にかかったまま別の一手を挟んだ（「その間に」等）。鍋の締め切りは早まらない
+        const due = item.endMin + HEAT_HOLD_ALLOWANCE
+        if (due > dueAt) {
+          dueAt = due
+          leftAt = item.endMin
+        }
+      }
+    }
+  }
+  if (inserts.length === 0) return items.slice()
+
+  const byPos = new Map<number, TimelineItem[]>()
+  for (const { pos, item } of inserts) {
+    const list = byPos.get(pos)
+    if (list) list.push(item)
+    else byPos.set(pos, [item])
+  }
+  const out: TimelineItem[] = []
+  for (let j = 0; j <= items.length; j++) {
+    for (const extra of (byPos.get(j) ?? []).sort((a, b) => a.startMin - b.startMin)) out.push(extra)
+    if (j < items.length) out.push(items[j])
+  }
+  return out.map((item, i) => (item.order === i + 1 ? item : { ...item, order: i + 1 }))
+}
+
+/**
  * 選んだレシピ（2〜3品想定）の手順を、1本の段取りタイムラインにまとめる。
  *
  * 貪欲法（料理人＝1人という前提の単純なシミュレーション）:
@@ -2542,14 +2757,18 @@ export function buildCookTimeline(
     }
   }
 
-  const totalMinutes = items.reduce((max, it) => Math.max(max, it.endMin), 0)
+  // 【別の鍋に移る前に、火を止める／弱火にする】2026-08-15 便GO。
+  // 組み上がった段取りを読み直して、火にかけたまま手が戻らない場面に一手を足す
+  // （0分なので totalMinutes は動かない。詳しくは insertHeatBreakSteps）
+  const planned = insertHeatBreakSteps(items, kitchen)
+  const totalMinutes = planned.reduce((max, it) => Math.max(max, it.endMin), 0)
   const recipes2: TimelineRecipe[] = jobs.map((j) => ({
     id: j.recipeId,
     title: j.title,
     colorIndex: j.colorIndex,
   }))
 
-  return { items, totalMinutes, recipes: recipes2 }
+  return { items: planned, totalMinutes, recipes: recipes2 }
 }
 
 /** 段取りの出し方（2026-08-08 便ED） */

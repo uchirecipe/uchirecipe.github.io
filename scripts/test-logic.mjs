@@ -156,6 +156,7 @@ import {
   recipeStepLabel,
   hasParallelCue,
   stepHeatShift,
+  heatOffAtEnd,
   waitTimerSeconds,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
@@ -5552,6 +5553,169 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     )
     // 火を下ろせる工程を見分けたぶん段取りは短くなる。伸びていないことの歯止め（上限は保険）
     eq('ナビ火の番: 火の見分けを直しても段取りは伸びない', trio.totalMinutes <= 47, true)
+  }
+}
+
+// ---------- 別の鍋に移る前に、火を止める／弱火にする（2026-08-15 便GO・docs/72 第7段）
+//
+// 利用者（料理歴20年）の原文:
+//   「#7で豆腐とわかめを入れて煮始め、火を止めるのは#12。…豆腐とわかめが10分前後ぐつぐつ
+//     煮え続けます。**#7の後に「火を止める」も「弱火にする」も出てきません。**」
+//
+// 便GMの調べで、残っていた放置89件は**すべて「鍋が2つ同時に手を待っている」場面**と分かった。
+// 手は1組なので片方は必ず待たされる＝並べ替えでは消えない。実際の台所では、別の鍋に移る前に
+// 火を弱めるか止める。それを段取りの一手として出す（レシピ本文は書き換えない＝規約D）。
+//
+// ここで測るのは**利用者が確かめたいこと**:
+//   ①その鍋の火をどうするかが段取りに出てくるか ②どの品の火かが読めるか
+//   ③加熱が残っている品に「止める」と言わないか ④要らない場面で出てこないか
+//   ⑤足したぶん段取りが伸びないか ⑥レシピ本文が変わらないか
+// ----------
+{
+  const recipe = (id, title, steps, extra) => ({
+    id,
+    title,
+    steps: steps.map((text) => ({ text })),
+    ...extra,
+  })
+  // BudouXのゼロ幅スペースを外してから読む（禁じ手②。照合は語の有無で見て、完全一致では見ない）
+  const plain = (text) => (text ?? '').replaceAll('​', '')
+  /** ナビが足した「火の一手」 */
+  const heatBreaks = (timeline, title) =>
+    timeline.items.filter(
+      (it) => it.recipeTitle === title && it.addedByNavi && /火を止め|弱火/.test(plain(it.text)),
+    )
+  const allHeatBreaks = (timeline) =>
+    timeline.items.filter((it) => it.addedByNavi && /火を止め|弱火/.test(plain(it.text)))
+  /** その品の「レシピに書いてある手順」だけ（ナビが足した工程を除く） */
+  const ownSteps = (timeline, title) =>
+    timeline.items.filter((it) => it.recipeTitle === title && !it.addedByNavi)
+  /** その工程は火を必要とするか（工程の終わりに火が下りる書き方も、その間は火の上） */
+  const needsFire = (item) =>
+    stepHeatShift({ text: plain(item.text), minutes: item.minutes }, DEFAULT_KITCHEN) === 'on' ||
+    heatOffAtEnd({ text: plain(item.text), minutes: item.minutes })
+
+  /**
+   * どの段取りでも守られていないといけないこと（組み合わせを変えても同じ形で見る）。
+   *   ・「火を止める」と言うのは、その品の残りに火が要る工程が1つも無いときだけ
+   *     （加熱の途中で止めたら料理が変わる）
+   *   ・足すのは猶予（3分）を超える空きの場面だけ（出しすぎない）
+   *   ・足した一手は時間を取らない＝全体の目安が伸びない
+   */
+  const checkRules = (label, timeline) => {
+    const breaks = allHeatBreaks(timeline)
+    const unsafeStop = breaks.filter((it) => {
+      if (!/火を止め/.test(plain(it.text))) return false
+      return ownSteps(timeline, it.recipeTitle).some(
+        (x) => x.startMin >= it.startMin && needsFire(x),
+      )
+    })
+    eq(`ナビ火の一手(${label}): 加熱が残っている品には止めると言わない`, unsafeStop.length, 0)
+    const tooEager = breaks.filter((it) => {
+      const list = ownSteps(timeline, it.recipeTitle)
+      const prev = list.filter((x) => x.endMin <= it.startMin).pop()
+      const next = list.find((x) => x.startMin >= it.startMin)
+      return prev == null || next == null || next.startMin - prev.endMin <= 3
+    })
+    eq(`ナビ火の一手(${label}): 猶予に収まる空きには足さない`, tooEager.length, 0)
+    eq(
+      `ナビ火の一手(${label}): 足した一手は時間を取らない`,
+      breaks.every((it) => it.activeMinutes === 0 && it.endMin === it.startMin),
+      true,
+    )
+    const lastOwn = timeline.items
+      .filter((it) => !it.addedByNavi)
+      .reduce((max, it) => Math.max(max, it.endMin), 0)
+    eq(`ナビ火の一手(${label}): 足しても全体の目安は伸びない`, timeline.totalMinutes, lastOwn)
+  }
+
+  // ---- (1) 鍋が2つ同時に手を待つ場面。火をどうするかが段取りに出る ----
+  {
+    const soup = recipe(1, 'みそ汁', ['水を沸かす', '具を入れる', 'みそを溶く'], { dishType: 'soup' })
+    const egg = recipe(2, 'ゆで卵', [
+      '鍋に水を入れて沸かす',
+      '卵を入れる',
+      '好みのかたさになるまでゆでる',
+      '冷水につけて殻をむく',
+    ])
+    const stirFry = recipe(3, '野菜炒め', ['材料を切る', '肉を炒める', '野菜を入れて炒める', '塩こしょうで味をつける', '皿に盛る'])
+    const plan = buildCookTimeline([soup, egg, stirFry])
+    checkRules('3品', plan)
+
+    const soupBreaks = heatBreaks(plan, 'みそ汁')
+    eq('ナビ火の一手: 鍋が2つ手を待つ場面で、火をどうするかが段取りに出る', soupBreaks.length >= 1, true)
+    const stop = soupBreaks[0]
+    const own = ownSteps(plan, 'みそ汁')
+    if (stop) {
+      // ②どの品の火かが読める（複数の鍋が動く場面で出る一手なので、取り違えると別の料理が止まる）
+      eq('ナビ火の一手: どの品の火かが本文で分かる', plain(stop.text).includes('みそ汁'), true)
+      // ③残りが「みそを溶く」だけ＝火の仕事は終わっている → 止めてよい
+      eq('ナビ火の一手: 加熱が残っていない品では止める', /火を止め/.test(plain(stop.text)), true)
+      // 置く時刻は「その鍋から手が離れた瞬間」＝直前の工程の終わりで、次に戻る前
+      const before = own.filter((it) => it.endMin <= stop.startMin).pop()
+      const after = own.find((it) => it.startMin >= stop.startMin)
+      eq('ナビ火の一手: 手が離れた瞬間に置く', stop.startMin, before?.endMin)
+      eq('ナビ火の一手: 次にその品へ戻る前に置く', stop.startMin <= after?.startMin, true)
+    }
+    // ゆで上がった鍋も同じ（卵を入れっぱなしのゆで湯を放置しない）
+    const eggBreaks = heatBreaks(plan, 'ゆで卵')
+    eq('ナビ火の一手: ゆで上がった鍋にも火の一手が出る', eggBreaks.length >= 1, true)
+    // ⑥レシピ本文は1文字も変わらない（規約D）
+    eq('ナビ火の一手: レシピの手順は書き換えない', soup.steps.map((s) => s.text), ['水を沸かす', '具を入れる', 'みそを溶く'])
+    eq(
+      'ナビ火の一手: 段取りに載る本文もレシピのまま',
+      own.every((it) => soup.steps.some((s) => s.text === plain(it.text))),
+      true,
+    )
+  }
+
+  // ---- (2) 1品だけの段取りには出てこない（鍋を放置する場面がそもそも無い） ----
+  {
+    const solo = buildCookTimeline([
+      recipe(1, 'みそ汁', ['水を沸かす', '具を入れる', 'みそを溶く'], { dishType: 'soup' }),
+    ])
+    eq('ナビ火の一手: 1品だけなら足さない', allHeatBreaks(solo).length, 0)
+  }
+
+  // ---- (3) 加熱の途中では止めない（「煮汁が少なくなるまで煮る」型） ----
+  // 工程全体としては火が下りる書き方（「煮汁がほとんどなくなったら火を止め、そのまま冷ます」）でも、
+  // その工程の**間は火の上**にいる。先に止めると煮詰まらないまま冷ますことになる
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '切り干し大根の煮もの', [
+        '鍋にごま油を熱し、切り干し大根とにんじんを炒める',
+        'だし汁と調味料を加えてひと煮立ちさせ、落としぶたをして10分煮る',
+        '煮汁がほとんどなくなったら火を止め、そのまま冷ます',
+      ]),
+      recipe(2, '豚肉と大根の煮もの', [
+        '大根は半月切りにし、豚バラ肉は食べやすい長さに切る',
+        '鍋に油を熱し、豚バラ肉を色が変わるまで炒める',
+        '大根と水、調味料を加え、煮立ったらアクを取る',
+        'ふたをずらしてのせ、弱めの中火で20分煮ます。',
+        '大根がやわらかくなったら火を止め、そのまま10分おいて味を含ませます。',
+      ]),
+      recipe(3, 'ハンバーグ', ['玉ねぎをみじん切りにして炒める', 'ひき肉とまぜてこねる', '形を作る', '焼く', 'ソースをかける']),
+    ])
+    checkRules('煮もの3品', plan)
+    const breaks = heatBreaks(plan, '切り干し大根の煮もの')
+    eq('ナビ火の一手: 煮詰める工程の手前でも火の一手は出る', breaks.length >= 1, true)
+    eq(
+      'ナビ火の一手: 煮詰める工程が残っているうちは止めない',
+      breaks.every((it) => !/火を止め/.test(plain(it.text))),
+      true,
+    )
+  }
+
+  // ---- (4) 手でこねる工程の手前には足さない（2026-08-15 便GMの見分けを殺していないこと） ----
+  // 「玉ねぎを炒める → ひき肉とまぜてこねる」は、ボウルの中の作業に移った時点で火が下りている。
+  // ここに火の一手を出すと、要らない工程で段取りが読みにくくなる
+  {
+    const plan = buildCookTimeline([
+      recipe(1, 'ゆで卵', ['鍋に水を入れて沸かす', '卵を入れる', '好みのかたさになるまでゆでる', '冷水につけて殻をむく']),
+      recipe(2, 'ハンバーグ', ['玉ねぎをみじん切りにして炒める', 'ひき肉とまぜてこねる', '形を作る', '焼く', 'ソースをかける']),
+    ])
+    checkRules('こねる2品', plan)
+    eq('ナビ火の一手: 手でこねる工程の手前には足さない', heatBreaks(plan, 'ハンバーグ').length, 0)
   }
 }
 
