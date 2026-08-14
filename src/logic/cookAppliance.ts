@@ -199,23 +199,52 @@ export interface ApplianceUse {
  */
 export class ApplianceSchedule {
   private uses: ApplianceUse[] = []
+  /**
+   * 【火にかけた鍋は、止めるまで口をふさぎ続ける】2026-08-14 便GI・docs/68 の合格ライン引き直し。
+   *
+   * 終わりの時刻が決まっていない占有。品ごとに1つだけ持つ（＝1品につき鍋1つと数える）。
+   * 便GCまでは**その工程の長さだけ**口をふさぐ数え方だったので、「中火にかける（2分）」の
+   * 2分が過ぎればコンロが空くことになり、**火にかけっぱなしの鍋の上にもう1つ鍋を置く段取り**が
+   * 出ていた（コンロ1口の家で、理論下限を下回る＝成立しない段取りが41通り）。
+   */
+  private holds = new Map<number, { key: ApplianceKey; start: number }>()
   private kitchen: KitchenEquipment
 
   constructor(kitchen: KitchenEquipment) {
     this.kitchen = kitchen
   }
 
-  /** [start, end) の間ずっと空きがあるか */
-  canUse(key: ApplianceKey, start: number, end: number): boolean {
+  /**
+   * 終わりの決まっていない占有の開始時刻（`owner` 自身のぶんは数えない）。
+   * 自分がすでに火にかけている鍋の続きは、**同じ鍋の続き**なので新しい口を要らない。
+   */
+  private holdStarts(key: ApplianceKey, owner?: number): number[] {
+    const out: number[] = []
+    for (const [id, hold] of this.holds) {
+      if (hold.key !== key || (owner != null && id === owner)) continue
+      out.push(hold.start)
+    }
+    return out
+  }
+
+  /** [start, end) の間ずっと空きがあるか（火にかけっぱなしの鍋はその先ずっとふさいでいる） */
+  canUse(key: ApplianceKey, start: number, end: number, owner?: number): boolean {
     const capacity = applianceCapacity(this.kitchen, key)
     if (capacity <= 0) return false
     if (end <= start) return true
     const overlapping = this.uses.filter((u) => u.key === key && u.start < end && u.end > start)
-    if (overlapping.length === 0) return true
+    const held = this.holdStarts(key, owner).filter((s) => s < end)
+    if (overlapping.length === 0 && held.length === 0) return true
     // 区間の切れ目ごとに同時使用数を数える（切れ目以外で最大にはならない）
-    const points = [start, ...overlapping.map((u) => u.start).filter((x) => x > start && x < end)]
+    const points = [
+      start,
+      ...overlapping.map((u) => u.start).filter((x) => x > start && x < end),
+      ...held.filter((x) => x > start && x < end),
+    ]
     for (const at of points) {
-      const busy = overlapping.filter((u) => u.start <= at && u.end > at).length
+      const busy =
+        overlapping.filter((u) => u.start <= at && u.end > at).length +
+        held.filter((s) => s <= at).length
       if (busy + 1 > capacity) return false
     }
     return true
@@ -228,8 +257,32 @@ export class ApplianceSchedule {
   }
 
   /**
+   * 火をつけたまま次の手順へ進む＝**火を止めるまでその口をふさぎ続ける**（2026-08-14 便GI）。
+   * すでに同じ器具をふさいでいる品なら、早いほうの開始時刻を残す（同じ鍋の続き）。
+   */
+  hold(key: ApplianceKey, owner: number, start: number): void {
+    const current = this.holds.get(owner)
+    if (current && current.key === key) {
+      if (start < current.start) this.holds.set(owner, { key, start })
+      return
+    }
+    if (current) this.release(owner, start)
+    this.holds.set(owner, { key, start })
+  }
+
+  /** 火を止めた（またはその品が終わった）＝ここで口が空く */
+  release(owner: number, at: number): void {
+    const current = this.holds.get(owner)
+    if (!current) return
+    this.holds.delete(owner)
+    if (at > current.start) this.uses.push({ key: current.key, start: current.start, end: at })
+  }
+
+  /**
    * その器具が `from` 以降でいちばん早く空く時刻（空くことが無ければ undefined）。
    * 手が空いたまま時計だけを進めるときの行き先に使う。
+   * **火にかけっぱなしの鍋は空く時刻が決まっていない**ので、ここには出てこない
+   * （空くのは、その品に手を戻して火を止めたとき）。
    */
   nextFreeAt(key: ApplianceKey, from: number): number | undefined {
     const ends = this.uses.filter((u) => u.key === key && u.end > from).map((u) => u.end)
@@ -237,15 +290,17 @@ export class ApplianceSchedule {
   }
 
   /** いま（at 時点で）その器具に空いている台数（2026-08-14 便GG） */
-  spare(key: ApplianceKey, at: number): number {
+  spare(key: ApplianceKey, at: number, owner?: number): number {
     const capacity = applianceCapacity(this.kitchen, key)
     if (capacity <= 0) return 0
-    const busy = this.uses.filter((u) => u.key === key && u.start <= at && u.end > at).length
+    const busy =
+      this.uses.filter((u) => u.key === key && u.start <= at && u.end > at).length +
+      this.holdStarts(key, owner).filter((s) => s <= at).length
     return Math.max(0, capacity - busy)
   }
 
   /** いま（at 時点で）その器具に空きがあるか。B（口数に余裕があるとき）の判定に使う */
-  hasSpare(key: ApplianceKey, at: number): boolean {
-    return this.spare(key, at) > 0
+  hasSpare(key: ApplianceKey, at: number, owner?: number): boolean {
+    return this.spare(key, at, owner) > 0
   }
 }

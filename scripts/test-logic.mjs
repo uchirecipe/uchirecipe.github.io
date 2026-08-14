@@ -5016,6 +5016,58 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     eq('ナビ器具: 待ちが無いだけのときは器具のせいにしない', noWait.limitedByEquipment, false)
   }
 
+  // ---- (4c) 火にかけた鍋は、火を止めるまで口をふさぎ続ける（2026-08-14 便GI） ----
+  // 直した不具合（docs/68 の合格ライン引き直しで見つけた）:
+  //   口をふさぐ長さを**その工程の長さ**だけで数えていたため、「中火で15分煮る」が終われば
+  //   口が空くことになり、**まだ火にかかっている鍋の上にもう1つ鍋を置く段取り**が出ていた。
+  //   コンロ1口の家で、手も口も足りていないのに「できる」と言っている段取り（＝理論下限を
+  //   下回る段取り）が9通り。下はその実例（カレーの鍋が29分の時点でまだ火の上にあるのに、
+  //   親子丼を火にかけていた）。
+  {
+    const curry = () => ({
+      id: 1,
+      title: 'カレー',
+      steps: [
+        { text: '野菜は食べやすい大きさに切る。玉ねぎは薄切りにすると溶けて甘みが出る。' },
+        { text: '厚手の鍋で肉と玉ねぎを炒め、残りの野菜も加えて油をなじませる。' },
+        { text: '水を注ぎ、あくを取りながら中火で15分煮る。', minutes: 15 },
+        { text: 'いったん火を止めてルーを溶かし、弱火でとろみが付くまで5分煮る。', minutes: 5 },
+        { text: 'ご飯にかけて完成。' },
+      ],
+    })
+    const oyako = () => ({
+      id: 2,
+      title: '親子丼',
+      steps: [
+        { text: '鶏肉は一口大、玉ねぎは薄切りにする。' },
+        { text: '小さめのフライパンにめんつゆと水を入れ、鶏肉と玉ねぎを中火で7分煮る。', minutes: 7 },
+        { text: '溶き卵を2回に分けて回し入れ、ふたをして半熟で火を止める。' },
+        { text: 'ご飯にのせ、お好みで三つ葉や刻みのりを散らす。' },
+      ],
+    })
+    /** カレーの鍋が火から下りる時刻（この品は最後まで火を止める言葉が出てこない＝終わりまで火の上） */
+    const potOffAt = (t) => Math.max(...t.items.filter((it) => it.recipeId === 1).map((it) => it.endMin))
+    /** 親子丼を火にかける時刻 */
+    const igniteAt = (t) => t.items.find((it) => it.recipeId === 2 && it.text.includes('7分煮る'))?.startMin
+    const one = buildCookTimeline([curry(), oyako()], kitchen(1))
+    eq(
+      'ナビ器具: 1口の家では、火にかけた鍋が火から下りるまで別の品を火にかけない',
+      igniteAt(one) >= potOffAt(one),
+      true,
+    )
+    const two = buildCookTimeline([curry(), oyako()], kitchen(2))
+    eq(
+      'ナビ器具: 2口あれば、鍋を火にかけたままもう1品を火にかけてよい（縮める力を落とさない）',
+      igniteAt(two) < potOffAt(two),
+      true,
+    )
+    eq(
+      'ナビ器具: 口をふさぎ続けるぶん、1口の段取りは2口より長くなる',
+      one.totalMinutes > two.totalMinutes,
+      true,
+    )
+  }
+
   // ---- (5) 占有しない待ち（漬ける・冷ます・寝かせる）は口をふさがない ----
   {
     const soak = buildCookTimeline(

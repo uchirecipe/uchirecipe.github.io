@@ -2354,7 +2354,10 @@ function soloOf(r, kitchen) {
       if (!use || use.key === 'stove') continue
       occupancy[use.key] += use.end - use.start
     }
-    // コンロ＝火がついてから火を下ろす合図が出るまで（その間ずっと1口ふさがる）
+    // コンロ＝火がついてから火を下ろす合図が出るまで（その間ずっと1口ふさがる）。
+    // 火が下りる工程が**コンロの前でやる一手**（「みそを溶いて火を止める」）ならその工程の終わりまで、
+    // そうでないもの（冷ます・寝かせる／レンジやグリルへ移る）は**その手前**で火が下りていると数える。
+    // ＝鍋を火から下ろして置いておくぶんは口をふさがない側に倒す（床を低く見積もる側）。
     let onFrom = null
     let lastEnd = 0
     for (const it of tl.items) {
@@ -2363,7 +2366,8 @@ function soloOf(r, kitchen) {
       if (tr === 'on') {
         if (onFrom == null) onFrom = it.startMin
       } else if (tr === 'off' && onFrom != null) {
-        occupancy.stove += Math.max(0, it.endMin - onFrom)
+        const atStove = stepAppliance(it.text) === 'stove'
+        occupancy.stove += Math.max(0, (atStove ? it.endMin : it.startMin) - onFrom)
         onFrom = null
       }
     }
@@ -2412,6 +2416,7 @@ function reachOf(trio, kitchen = DEFAULT_KITCHEN) {
   const total = buildCookTimeline(trio, kitchen).totalMinutes
   return {
     ...f,
+    trio,
     total,
     reach: f.floor <= 0 ? 0 : pct(total - f.floor, f.floor),
     reachGC: f.floorGC <= 0 ? 0 : pct(total - f.floorGC, f.floorGC),
@@ -2485,6 +2490,18 @@ for (const s of e5Sets) {
   )
 }
 say()
+{
+  say('  到達率のいちばん悪い3例（＝理論下限からいちばん離れた段取り）:')
+  const worst = [...e5Rows.get('同梱109品（無作為500通り）'), ...e5Rows.get('野生の混合A+B+C（無作為200通り）')]
+    .slice()
+    .sort((a, b) => b.reach - a.reach)
+    .slice(0, 3)
+  for (const r of worst) {
+    say(`    - ${r.trio.map((x) => x.title).join(' / ')}`)
+    say(`      ナビ${r.total}分 / 理論下限${f1(r.floor)}分（${r.driver}が決めた）→ **${f1(r.reach)}%増し**`)
+  }
+}
+say()
 say('  ※理論下限を決めているのはどれか（床の内訳）:')
 say()
 say('| 組み合わせ | 手作業の合計が決めた | 最長1品が決めた | **器具の占有が決めた** | 便GC互換の下限(①②のみ)との差(分) |')
@@ -2502,11 +2519,27 @@ say('     **正直**の問題（序列「安全>正直>短縮効果」）。器�
 say()
 say('| 台所の設定 | ' + e5Sets.map((s) => s.key.replace(/（.*/, '')).join(' | ') + ' | 判定 |')
 say('|---|' + e5Sets.map(() => '---').join('|') + '|---|')
+const impossibleSamples = []
 for (const k of KITCHENS) {
-  const counts = e5Sets.map((s) => s.triples.filter((t) => reachOf(t, k.kitchen).impossible).length)
+  const counts = e5Sets.map((s) => {
+    const bad = s.triples.filter((t) => reachOf(t, k.kitchen).impossible)
+    for (const t of bad.slice(0, 2)) impossibleSamples.push({ label: k.key, kitchen: k.kitchen, trio: t })
+    return bad.length
+  })
   say(`| ${k.key} | ${counts.map((c) => `**${c}件**`).join(' | ')} | ${verdict(counts.reduce((a, b) => a + b, 0) === 0)} |`)
 }
 say()
+if (impossibleSamples.length > 0) {
+  say('  下回った組み合わせの実例（先頭3件）:')
+  for (const { label, kitchen, trio } of impossibleSamples.slice(0, 3)) {
+    const r = reachOf(trio, kitchen)
+    say(`    - [${label}] ${trio.map((x) => x.title).join(' / ')}`)
+    say(
+      `      ナビ${r.total}分 < 理論下限${f1(r.floor)}分（手作業${r.hands}分 / 最長1品${r.longest}分 / 器具${f1(r.load)}分＝${r.loadKey ?? '—'}）`,
+    )
+  }
+  say()
+}
 say('  ※旧E5（同梱109品の平均短縮率32.6%以上）は**参考値として残す**（消さない・前後の比較に使う）。')
 say('     上の「器具の設定ごと」の表に出している値がそれ。')
 say()
