@@ -155,6 +155,7 @@ import {
   resolveWaitMinutes,
   recipeStepLabel,
   hasParallelCue,
+  stepHeatShift,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import {
@@ -4863,10 +4864,23 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     // これまで0分だった「マリネ液に入れる」の1分が段取りに乗るので 38→39 分になる
     // （後ろへ寄せたことで伸びたのではない。ここで見たいのは寄せても伸びないこと）
     eq('ナビ仕上げ: 後ろへ寄せても全体の目安は39分のまま（伸ばして揃えない）', t.totalMinutes, 39)
+    // 着地は34分のままだが、**そこへ持っていくやり方が変わった**（2026-08-14 便GG）。
+    //   旧: 3分に着火して23分に煮上がり、器に盛るのを34分まで待たせる＝鍋は11分火の上
+    //   新: 着火そのものを12分に回し、32分に煮上がってすぐ火を止める＝火にかけたままにしない
+    // 利用者の手順「だしを張って火にかけるのはグリルに入れてから」と同じ形。
     eq(
       'ナビ仕上げ: 煮物の仕上げは手の空いた時間の終わりに着地する',
       t.items.find((it) => it.text === '器に盛る。').endMin,
       34,
+    )
+    eq(
+      'ナビ仕上げ: そこへは「着火を後ろへ回して」持っていく（火にかけたまま待たせない）',
+      (() => {
+        const simmer = t.items.find((it) => it.text === '鍋で20分煮る。')
+        const serve = t.items.find((it) => it.text === '器に盛る。')
+        return [simmer.startMin > 3, serve.startMin - simmer.endMin <= 3]
+      })(),
+      [true, true],
     )
   }
 }
@@ -5185,6 +5199,132 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     // まな板の順序（野菜→肉・魚）は保つ
     const cuts = plan.items.filter((it) => /切りにする。|を切る。/.test(it.text)).map((it) => it.recipeTitle)
     eq('ナビ切る順: 野菜を先に、肉・魚を後に切る', cuts, ['副菜', '主菜'])
+  }
+}
+
+// ---------- 火にかけたまま放置しない（2026-08-14 便GG・docs/72 第5段）
+//
+// 直した不具合（利用者・料理歴20年の原文。docs/72 第5段）:
+//   「#7で豆腐とわかめを入れて煮始め、火を止めるのは#12。間に#8・#9・#10（グリル15分の待ち）が
+//     挟まるので、豆腐とわかめが10分前後ぐつぐつ煮え続けます。レシピには『1〜2分煮る』と
+//     書いてあるのに。豆腐は崩れるしわかめは溶けます。#7の後に『火を止める』も『弱火にする』も
+//     出てきません。」
+//
+// 真因: 「遅くともこの時刻までに手を戻す」締め切り（2026-08-09 便EH）は**待ちの工程からしか
+// 生まれず、その品の次の手順を出した瞬間に消えていた**。鍋を火にかけたまま次の手順に進む
+// 「沸いたら豆腐とわかめを入れる」のような工程は待ちではないので締め切りを持てず、
+// さらに「温かい品の仕上げを後ろへ寄せる」（2026-08-13 便GB）が締め切りを見ずに
+// 最後の「みそを溶いて火を止める」を18分後ろへ送っていた。
+// ----------
+{
+  const recipe = (id, title, steps, extra) => ({
+    id,
+    title,
+    steps: steps.map((text) => ({ text })),
+    ...extra,
+  })
+  /** その品が火にかかったまま、次の工程まで何分空いたかの最大（測り方は audit-cook-navi.mjs のN7と同じ） */
+  const heatIdle = (timeline, title) => {
+    const list = timeline.items.filter((it) => it.recipeTitle === title)
+    const off = /火を止め|火をとめ|火を消|火からおろ|火から下ろ|器に盛|皿に盛|椀に|取り出|ざるにあげ|ざるに上げ|湯を切|水にとる|冷ま|粗熱/
+    let onHeat = false
+    let since = 0
+    let worst = 0
+    for (const it of list) {
+      if (onHeat) worst = Math.max(worst, it.startMin - since)
+      if (off.test(it.text)) onHeat = false
+      else if (stepAppliance(it.text) === 'stove') {
+        onHeat = true
+        since = it.endMin
+      } else if (onHeat) since = Math.max(since, it.endMin)
+    }
+    return worst
+  }
+
+  // ---- (1) 利用者の3品そのもの。豆腐を入れてから火を止めるまでが空かない ----
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '鶏むね肉のみそマヨ焼き', [
+        '鶏むね肉は皮を取り、フォークで数か所刺してからそぎ切りにする。塩こしょうと酒をふって10分ほどおく。',
+        'その間に☆を全部混ぜ合わせておく。',
+        'アルミホイルに①を並べ、②を上から塗る。',
+        '魚焼きグリルで15分焼く。',
+        '焼けたら乾燥パセリをふる。',
+      ]),
+      recipe(2, 'ほうれん草とにんじんのごま和え', [
+        'ほうれん草は3〜4cmの長さに切り、にんじんは細切りにする。',
+        '耐熱ボウルに入れてラップをかけ、電子レンジで3分加熱する。',
+        '水気をしぼって◎を加えて和える。',
+      ]),
+      recipe(3, '豆腐とわかめのみそ汁', [
+        '鍋に水とだしの素を入れて中火にかける。',
+        '豆腐をさいの目に切る。',
+        '沸いたら豆腐と乾燥わかめを入れる。',
+        'みそを溶いて火を止める。',
+      ], { dishType: 'soup' }),
+    ])
+    const add = plan.items.find((it) => it.text === '沸いたら豆腐と乾燥わかめを入れる。')
+    const stop = plan.items.find((it) => it.text === 'みそを溶いて火を止める。')
+    // 利用者の手組みは「豆腐を入れて味噌を溶くのは焼き上がりの3分前」＝3分。猶予も3分に合わせる
+    eq('ナビ火の番: 豆腐を入れてから火を止めるまで3分以内', stop.startMin - add.endMin <= 3, true)
+    eq('ナビ火の番: 3品どれも火にかけたまま放置しない', [
+      heatIdle(plan, '鶏むね肉のみそマヨ焼き') <= 3,
+      heatIdle(plan, 'ほうれん草とにんじんのごま和え') <= 3,
+      heatIdle(plan, '豆腐とわかめのみそ汁') <= 3,
+    ], [true, true, true])
+  }
+
+  // ---- (2) 「温かい品の仕上げを後ろへ寄せる」が、火にかけたままの品には効かない ----
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '鶏のグリル焼き', ['アルミホイルに鶏肉を並べ、みそだれを塗る。', '魚焼きグリルで15分焼く。', '乾燥パセリをふる。']),
+      recipe(2, '豆腐とわかめのみそ汁', ['鍋に水とだしの素を入れて中火にかける。', '沸いたら豆腐とわかめを入れる。', 'みそを溶いて火を止める。'], { dishType: 'soup' }),
+    ])
+    eq('ナビ火の番: 火にかけたままの汁物の仕上げを後ろへ寄せない', heatIdle(plan, '豆腐とわかめのみそ汁') <= 3, true)
+  }
+  // 火から下りている品では、従来どおり仕上げを後ろへ寄せる（便GBの機能を殺していないこと）
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '煮物', ['大根を切る。', '鍋で20分煮る。', '火を止めて器に盛る。']),
+      recipe(2, 'ゼリー', ['ゼラチンを溶かす。', '冷蔵庫で30分冷やし固める。', '器に盛る。']),
+    ])
+    const nimono = plan.items.filter((it) => it.recipeTitle === '煮物')
+    eq('ナビ火の番: 火から下りている品は従来どおり（煮上がりの直後に火を止める）', nimono[nimono.length - 1].startMin - nimono[nimono.length - 2].endMin <= 3, true)
+  }
+
+  // ---- (3) 火の見分け（引き継ぎの規則） ----
+  {
+    const plan = buildCookTimeline([recipe(1, '汁物', ['鍋に水を入れて中火にかける。', '沸いたら具を入れる。', 'みそを溶いて火を止める。', '器に盛る。'], { dishType: 'soup' })])
+    eq('ナビ火の番: 火を止めた後は締め切りを持たない', plan.items[plan.items.length - 1].text, '器に盛る。')
+    eq('ナビ火の番: 1品だけでも段取りは成立する', plan.totalMinutes > 0, true)
+  }
+  // 火を下ろす語と火にかける語が同居したら、あとに来たほうが主役（位置ルール）
+  eq(
+    'ナビ火の番: 「水気を絞って鍋に戻し、5分煮る」は火にかける',
+    stepHeatShift({ text: '水気を絞って鍋に戻し、5分煮る。' }, { burners: 2, microwave: true, grill: true, toaster: true }),
+    'on',
+  )
+  eq(
+    'ナビ火の番: 「煮汁がなくなったら火を止め、そのまま冷ます」は火から下りる',
+    stepHeatShift({ text: '煮汁がなくなったら火を止め、そのまま冷ます。' }, { burners: 2, microwave: true, grill: true, toaster: true }),
+    'off',
+  )
+  eq(
+    'ナビ火の番: 火に触れない手順は直前の状態を引き継ぐ',
+    stepHeatShift({ text: '沸いたら豆腐と乾燥わかめを入れる。' }, { burners: 2, microwave: true, grill: true, toaster: true }),
+    'keep',
+  )
+
+  // ---- (4) 最後の1口を、火にかけたままの鍋より先に取らせない ----
+  // 実測（ホールドアウト標本）: 豚汁の炒めのあと、ほかの品の蒸し焼き15分に2口目を取られ、
+  // フライパンが火にかかったまま15分中断していた
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '豚汁', ['野菜を切る。', '鍋にごま油を熱し、豚肉を炒める。', '野菜を加えて炒め合わせる。', 'だし汁を入れて12分煮る。', 'みそを溶いて火を止める。'], { dishType: 'soup' }),
+      recipe(2, 'ホイル焼き', ['アルミホイルに包む。', 'フライパンに水を張り、ふたをして中火で15分蒸し焼きにする。', '器にのせる。']),
+      recipe(3, 'ゆで鶏', ['鶏肉に塩をすり込んで20分おく。', '鍋に湯を沸かして鶏肉を入れ、火を止める。', 'ふたをして40分おく。', '鍋から取り出して薄切りにする。']),
+    ])
+    eq('ナビ火の番: 3品でも豚汁のフライパンを火にかけたまま中断しない', heatIdle(plan, '豚汁') <= 3, true)
   }
 }
 

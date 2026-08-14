@@ -236,11 +236,16 @@ export class ApplianceSchedule {
     return ends.length === 0 ? undefined : Math.min(...ends)
   }
 
+  /** いま（at 時点で）その器具に空いている台数（2026-08-14 便GG） */
+  spare(key: ApplianceKey, at: number): number {
+    const capacity = applianceCapacity(this.kitchen, key)
+    if (capacity <= 0) return 0
+    const busy = this.uses.filter((u) => u.key === key && u.start <= at && u.end > at).length
+    return Math.max(0, capacity - busy)
+  }
+
   /** いま（at 時点で）その器具に空きがあるか。B（口数に余裕があるとき）の判定に使う */
   hasSpare(key: ApplianceKey, at: number): boolean {
-    const capacity = applianceCapacity(this.kitchen, key)
-    if (capacity <= 0) return false
-    const busy = this.uses.filter((u) => u.key === key && u.start <= at && u.end > at).length
-    return busy < capacity
+    return this.spare(key, at) > 0
   }
 }

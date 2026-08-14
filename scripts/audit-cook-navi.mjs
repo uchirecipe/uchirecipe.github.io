@@ -1268,7 +1268,7 @@ if (DUMP) {
 }
 
 // ================================================================================
-//  【新規】段取りの質を測る6項目 N1〜N6（docs/72 §2・2026-08-13 便FZ）
+//  【新規】段取りの質を測る8項目 N1〜N8（docs/72 §2・2026-08-13 便FZ／N7・N8は 2026-08-14 便GG）
 //
 //  docs/71 のR3（自分で登録したレシピだけで試した1体）で、**短縮率30.4%を満たしたまま
 //  汁物が27分冷める段取り**が合格になっていた。原因は「測っていない軸があったこと」。
@@ -1290,7 +1290,7 @@ if (DUMP) {
  *   n3     … 放置してよい調理なのに手作業と判定された8分以上の工程の件数
  *   n3rank … 最長待ちの着火順位の中央値。**参考値**として残す（合否には使わない）
  */
-const N_LINE = { n1: 30, n1over: 20, n2: 10, n3: 0, n3rank: 1, n4: 90, n5: 0, n6: 80 }
+const N_LINE = { n1: 30, n1over: 20, n2: 10, n3: 0, n3rank: 1, n4: 90, n5: 0, n6: 80, n7: 0 }
 const verdict = (ok) => (ok ? '合格' : '**不合格**')
 /** 同じ実例が別の組み合わせから何度も出てくるので、代表1件にまとめる */
 function dedupe(list, keyOf) {
@@ -1503,6 +1503,96 @@ function isN2Target(recipe) {
   return recipeServeTemp(recipe) === 'hot' || recipe.dishType === 'soup'
 }
 
+/**
+ * 【N7 火にかけたままの放置】2026-08-14 便GG（docs/72 第5段）。
+ *
+ * きっかけ（利用者・料理歴20年の原文）:
+ *   「#7で豆腐とわかめを入れて煮始め、火を止めるのは#12。間に#8・#9・#10（グリル15分の待ち）が
+ *     挟まるので、豆腐とわかめが10分前後ぐつぐつ煮え続けます。レシピには『1〜2分煮る』と
+ *     書いてあるのに。豆腐は崩れるしわかめは溶けます。」
+ *
+ * **N1〜N6では1件も捉えられない**。N2は「完成が早すぎる」を見るが、この段取りではみそ汁の完成が
+ * 主菜と揃っている（放置4分＝合格）。**揃えるために火にかけたまま止めていた**のがこの症状で、
+ * N2は完成時刻しか見ないので、その間に鍋が煮え続けていることを知らない。
+ *
+ * 測り方: 品ごとに「いま火にかかっているか」を段取りの順に追い、**火にかかったまま次の手順に
+ * 手が戻るまでの時間**が猶予を超えた件数を数える。
+ *   - 火がつく   … その工程が加熱器具（コンロ・グリル・レンジ・トースター）を使う
+ *                  （漬ける・冷ますの待ち＝relaxed は火にかかっていないので対象外）
+ *   - 火が消える … 火を止める・火からおろす・器に盛る・取り出す・ざるにあげる・冷ます 等の語
+ *   - どちらでもない工程では**状態を引き継ぐ**。これが肝心で、「沸いたら豆腐とわかめを入れる」は
+ *     火の語を持たないが鍋は火にかかったままなので、次の「火を止める」までが放置になる
+ *     （＝アプリ本体が締め切りを持てていなかったのと同じ穴を、測る側で塞ぐ）
+ */
+const MEASURE_HEAT_OFF =
+  /火を止め|火をとめ|火を消|火からおろ|火から下ろ|火から外|火からはず|器に盛|皿に盛|椀に|お椀に|盛り付け|盛りつけ|盛って|取り出|とり出|ざるにあげ|ざるに上げ|ざるにとり|ざるに移|ザルにあげ|ザルに上げ|ザルにとり|ザルに移|湯を切|湯をき|湯切り|油をき|油を切|水気をき|水気を切|水けをき|水けを切|水気をしぼ|水気を絞|水けをしぼ|水けを絞|つぶ|水にとる|水に取る|水にさら|流水|洗う|洗い|洗っ|冷水|冷ま|粗熱|できあがり|出来上がり/
+/** 火にかかっている合図（火を下ろす語との位置くらべに使う） */
+const MEASURE_HEAT_ON =
+  /火にかけ|火に掛け|火をつけ|火を入れ|点火|強火|中火|弱火|とろ火|煮|茹|ゆで|沸か|沸騰|煮立|炒め|炒る|揚げ|蒸|焼く|焼き|焼い|熱し|熱する|加熱|温め/
+/** patterns のどれかが最後に現れる位置（無ければ -1） */
+function lastIdxOf(text, patterns) {
+  let last = -1
+  for (const re of patterns) {
+    const g = new RegExp(re.source, 'g')
+    let m
+    while ((m = g.exec(text)) !== null) {
+      if (m.index > last) last = m.index
+      if (m.index === g.lastIndex) g.lastIndex++
+    }
+  }
+  return last
+}
+/**
+ * 火にかけたまま次の手順まで空けてよい時間（分）。
+ *
+ * 3分の根拠は利用者自身の手順そのもの＝「豆腐を入れて味噌を溶くのは焼き上がりの3分前」。
+ * レシピ本文の「1〜2分煮る」に1分の余裕を足した幅で、**短い煮込みを最後まで通せる**。
+ * 煮込み・焼き物はもともと幅で書かれるので、本体の超過許容（待ちの2割・上限5分）が
+ * これより大きいときはそちらを使う（＝猶予は3〜5分）。**relaxed（漬ける・冷ます）は火の上に無い**。
+ */
+const HEAT_IDLE_ALLOWANCE = 3
+function heatAllowanceOf(item) {
+  if (item.kind !== 'wait') return HEAT_IDLE_ALLOWANCE
+  const over = waitOverrunAllowance({ text: item.text, minutes: item.minutes }, item.waitMinutes)
+  return Number.isFinite(over) ? Math.max(HEAT_IDLE_ALLOWANCE, over) : Number.POSITIVE_INFINITY
+}
+/**
+ * 【N8 仕上げの鮮度（参考値）】和える・混ぜる・盛る・かける等、**食卓に出す直前にやりたい一手**。
+ * R4の指摘「私は絞ったほうれん草だけ用意しておいて、和えるのは食べる直前にします。早く和えると
+ * 水が出て味が薄まる」を数字で見るためだけの項目で、**線は引かない**
+ * （冷たい品を先に仕上げるのは2026-08-08 便EGのオーナー指示であり、線にすると指示と衝突する）。
+ */
+const MEASURE_FINISH_ACTION = /和え|あえ|混ぜ|盛る|盛り|盛っ|かける|かけて|添え|ふる|ふり|ふっ|散ら|よそ/
+/**
+ * その工程のあと、その品は火にかかっているか（'on' 火がつく／'off' 火が消える／'keep' 変わらない）。
+ *
+ * **数えるのはコンロ（IH含む）だけ**にした（司令部の案から範囲を狭めた・理由は下記）。
+ * 司令部の案は「**加熱を伴う待ち**が終わってから次の手順まで」だったが、実測しながら精査すると
+ * 電子レンジ・魚焼きグリル・トースターは**待ちが明けた時点で加熱が止まる**（タイマーで切れる／
+ * 扉を開けて取り出す。レシピにも「3分加熱」と時間が書いてあるので、利用者は止める合図を持っている）。
+ * そこに置きっぱなしになるのは「冷める」問題＝**N2が測っている軸**で、料理が失敗する軸ではない。
+ * 対してコンロは、**火を止める合図が段取りに出てこない限り加熱が続く**。利用者の原文
+ * 「豆腐は崩れるしわかめは溶けます」「#7の後に『火を止める』も『弱火にする』も出てきません」は
+ * まさにこれで、N7はこの1軸だけを見る。**混ぜると線（0件）が届かない数字になり、
+ * 症状の切れ味も鈍る**（レンジ待ちの1分の遅れと、鍋の18分の煮すぎが同じ1件になる）。
+ */
+function heatTransition(item) {
+  const t = maskForMeasure(item.text)
+  // 火を下ろす語と火にかける語が両方あるときは、**あとに来たほうが主役**
+  // （「水気を絞って鍋に戻し、5分煮る」は火にかける）
+  const offAt = lastIdxOf(t, [MEASURE_HEAT_OFF])
+  if (offAt >= 0 && offAt > lastIdxOf(t, [MEASURE_HEAT_ON])) return 'off'
+  const key = stepAppliance(item.text)
+  if (key == null) return 'keep'
+  // コンロ以外の器具（レンジ・グリル・トースター）は、その工程が終われば加熱も終わる
+  if (key !== 'stove') return 'off'
+  if (item.kind === 'wait') {
+    if (item.waitMinutes <= 0) return 'keep'
+    if (waitUrgency({ text: item.text, minutes: item.minutes }) === 'relaxed') return 'off'
+  }
+  return 'on'
+}
+
 // ---------------------------------------------------------------- 1組み合わせの分析
 
 function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
@@ -1627,7 +1717,66 @@ function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
     }
   }
 
-  return { trio, timeline, total, finish, spread, hotIdle, ignitions, longestStarts, concurrency, overlap, cues, last }
+  // --- N7 火にかけたままの放置（2026-08-14 便GG）
+  // 品ごとに火の状態を段取りの順に追い、「この時刻までに手を戻さないといけない」時刻（dueAt）を
+  // 持ち回る。次の工程の**開始**がそれを過ぎていたら、その差が放置の超過。
+  const heatIdles = []
+  for (const [, list] of byRecipe) {
+    let dueAt = null
+    let since = null
+    for (const it of list) {
+      if (dueAt != null && it.startMin > dueAt) {
+        heatIdles.push({
+          title: it.recipeTitle,
+          fromText: since.text,
+          fromEnd: since.endMin,
+          fromKind: since.kind,
+          nextText: it.text,
+          nextStart: it.startMin,
+          dueAt,
+          excess: it.startMin - dueAt,
+          idle: it.startMin - since.endMin,
+        })
+      }
+      const tr = heatTransition(it)
+      if (tr === 'off') {
+        dueAt = null
+        since = null
+      } else if (tr === 'on') {
+        const due = it.endMin + heatAllowanceOf(it)
+        dueAt = Number.isFinite(due) ? due : null
+        since = it
+      } else if (dueAt != null) {
+        // 火にかかったまま別の一手を挟んだ（「その間に」等）。鍋の締め切りは早まらない
+        const due = it.endMin + HEAT_IDLE_ALLOWANCE
+        if (due > dueAt) {
+          dueAt = due
+          since = it
+        }
+      }
+    }
+  }
+
+  // --- N8 仕上げの鮮度（参考値・2026-08-14 便GG）
+  // 「和える」「盛る」等の仕上げの工程が、**食卓に出る時刻（最後の品の完成）**より何分前に
+  // 済んでしまっているか。R4の指摘「早く和えると水が出て味が薄まる」を数字で見るための参考。
+  let staleFinish = null
+  let staleWhich = null
+  for (const [, list] of byRecipe) {
+    const lastItem = list.reduce((a, b) => (b.endMin > a.endMin ? b : a), list[0])
+    if (!lastItem || lastItem.kind !== 'active') continue
+    if (!MEASURE_FINISH_ACTION.test(maskForMeasure(lastItem.text))) continue
+    const early = last - lastItem.endMin
+    if (staleFinish == null || early > staleFinish) {
+      staleFinish = early
+      staleWhich = lastItem
+    }
+  }
+
+  return {
+    trio, timeline, total, finish, spread, hotIdle, ignitions, longestStarts,
+    concurrency, overlap, cues, last, heatIdles, staleFinish, staleWhich,
+  }
 }
 
 // ---------------------------------------------------------------- 標本（野生＋ホールドアウト）
@@ -1680,7 +1829,7 @@ const wildRows = wildKeys.flatMap((k) => nAnalyses.get(k))
 const nameOf = (a) => a.trio.map((r) => r.title).join(' / ')
 
 say('=========================================================')
-say(' 【新規】段取りの質を測る6項目 N1〜N6（docs/72 §2・便FZ）')
+say(' 【新規】段取りの質を測る8項目 N1〜N8（docs/72 §2・便FZ／N7・N8は便GG）')
 say('=========================================================')
 say()
 say('  ここから下は 2026-08-13 便FZ で追加した計測。**アプリの挙動は1行も変えていない**。')
@@ -2048,8 +2197,89 @@ say()
 }
 say()
 
+// ---------------------------------------------------------------- N7
+say('■ N7. 火にかけたままの放置（火にかかったまま次の手順まで空いた時間。線＝**超過0件**）')
+say()
+say('  2026-08-14 便GG（docs/72 第5段）で追加。利用者（料理歴20年）の原文:')
+say('    「#7で豆腐とわかめを入れて煮始め、火を止めるのは#12。間に#8・#9・#10（グリル15分の待ち）が')
+say('      挟まるので、豆腐とわかめが10分前後ぐつぐつ煮え続けます。レシピには『1〜2分煮る』と')
+say('      書いてあるのに。豆腐は崩れるしわかめは溶けます。」')
+say()
+say('  **定義**: 品ごとに火の状態を段取りの順に追い、火にかかったまま**次の工程が始まるまで**の時間が')
+say('  猶予を超えた件数。火がつく＝コンロを使う工程／火が消える＝火を止める・器に盛る・取り出す・')
+say('  ざるにあげる・冷ます等／どちらでもない工程は**状態を引き継ぐ**（「沸いたら豆腐とわかめを入れる」は')
+say('  火の語を持たないが鍋は火にかかったまま）。漬ける・冷ますの待ち（relaxed）は火の上に無い。')
+say('  **数えるのはコンロだけ**（司令部の案から範囲を狭めた）。レンジ・グリル・トースターは待ちが明けた')
+say('  時点でタイマーが切れ、レシピにも時間が書いてあるので利用者は止める合図を持っている。そこに')
+say('  置きっぱなしになるのは「冷める」問題＝**N2が測っている軸**。コンロだけが、段取りに「火を止める」が')
+say('  出てこない限り加熱が続く（利用者の原文「#7の後に『火を止める』も『弱火にする』も出てきません」）。')
+say(`  **猶予**: ${HEAT_IDLE_ALLOWANCE}分（煮込み・焼き物は待ちの2割・最大5分がこれを超えるならそちら）。`)
+say('  3分の根拠は利用者自身の手順「豆腐を入れて味噌を溶くのは焼き上がりの3分前」。')
+say('  ＝レシピ本文「1〜2分煮る」の直後に15分空く段取りは**超過12分**で不合格になる。')
+say()
+say('| 組み合わせ | 通り数 | **超過した通り** | 超過の延べ件数 | 超過の最大(分) | 判定 |')
+say('|---|---|---|---|---|---|')
+for (const s of [...nSets, { key: '**野生＋ホールドアウト 合計**', rows: wildRows, wild: true }]) {
+  const rows = s.rows ?? nAnalyses.get(s.key)
+  const bad = rows.filter((a) => a.heatIdles.length > 0)
+  const all = rows.flatMap((a) => a.heatIdles)
+  const max = all.length === 0 ? 0 : Math.max(...all.map((x) => x.excess))
+  say(
+    `| ${s.key} | ${rows.length} | **${bad.length}件（${f1(pct(bad.length, rows.length))}%）** | ${all.length}件 | ${max} | ` +
+      `${s.wild ? verdict(all.length === N_LINE.n7) : '（参考）'} |`,
+  )
+}
+say()
+{
+  const worst = dedupe(
+    wildRows.flatMap((a) => a.heatIdles.map((x) => ({ ...x, trio: nameOf(a) }))).sort((a, b) => b.excess - a.excess),
+    (x) => x.title + x.fromText + x.nextText,
+  ).slice(0, 5)
+  say('  いちばん悪い5例（火にかけたまま何分空いたか）:')
+  if (worst.length === 0) say('    （なし）')
+  for (const x of worst) {
+    say(`    - ${x.title}: 「${x.fromText.slice(0, 34)}」が${x.fromEnd}分に終わり、`)
+    say(`      次の「${x.nextText.slice(0, 34)}」は${x.nextStart}分（${x.idle}分の放置・猶予${x.dueAt - x.fromEnd}分を${x.excess}分超過）`)
+    say(`      組み合わせ: ${x.trio}`)
+  }
+  say()
+  {
+    // 何が原因で戻れなかったのかの内訳（打ち手を決めるのに要る）
+    const all = wildRows.flatMap((a) => a.heatIdles)
+    const buckets = new Map()
+    for (const x of all) {
+      const k = x.excess <= 2 ? '超過1〜2分' : x.excess <= 5 ? '超過3〜5分' : x.excess <= 10 ? '超過6〜10分' : '超過11分以上'
+      buckets.set(k, (buckets.get(k) ?? 0) + 1)
+    }
+    say('  超過の大きさの内訳: ' + [...buckets].map(([k, v]) => `${k} ${v}件`).join(' / '))
+  }
+}
+say()
+
+// ---------------------------------------------------------------- N8（参考値）
+say('■ N8. 仕上げの鮮度（参考値・線は引かない）')
+say()
+say('  R4の指摘: 「#11でごま和えが完成（21分時点）。私は絞ったほうれん草だけ用意しておいて、')
+say('  和えるのは食べる直前にします。早く和えると水が出て味が薄まる。」')
+say('  和える・混ぜる・盛る・かける等で終わる品の**最後の一手**が、食卓に出る時刻（最後の品の完成）より')
+say('  何分早く済んでしまっているかを見る。**線は引かない**＝冷たい品を先に仕上げるのは')
+say('  2026-08-08 便EGのオーナー指示であり、線にすると指示と衝突するため（数字だけ残す）。')
+say()
+say('| 組み合わせ | 対象を含む通り | 早すぎの中央値(分) | 早すぎの最大(分) |')
+say('|---|---|---|---|')
+for (const s of [...nSets, { key: '**野生＋ホールドアウト 合計**', rows: wildRows }]) {
+  const rows = (s.rows ?? nAnalyses.get(s.key)).filter((a) => a.staleFinish != null)
+  if (rows.length === 0) {
+    say(`| ${s.key} | 0 | — | — |`)
+    continue
+  }
+  const v = rows.map((a) => a.staleFinish)
+  say(`| ${s.key} | ${rows.length} | ${f1(median(v))} | ${Math.max(...v)} |`)
+}
+say()
+
 // ---------------------------------------------------------------- まとめ
-say('■ N. 6項目のまとめ（野生レシピ＋ホールドアウト。同梱109品は判定に使わない）')
+say('■ N. 8項目のまとめ（野生レシピ＋ホールドアウト。同梱109品は判定に使わない）')
 say()
 say('| 記号 | 見るもの | 線 | **現状値** | 判定 |')
 say('|---|---|---|---|---|')
@@ -2078,12 +2308,18 @@ say('|---|---|---|---|---|')
   say(`| N4 混在手順の両方計上 | 両方の時間が計上された割合 | 90%以上 | **${f1(n4)}%** | ${verdict(n4 >= N_LINE.n4)} |`)
   say(`| N5 器具の重なり | コンロ1口で重なる段取りの件数 | 0件 | **${n5}件 / ${wildRows.length}通り** | ${verdict(n5 === N_LINE.n5)} |`)
   say(`| N6 利用者の並行指示 | 直前の待ちの中に置けた割合 | 80%以上 | **${f1(n6)}%**（並行指示の標本${cues.length}件） | ${verdict(n6 >= N_LINE.n6)} |`)
+  const n7rows = wildRows.filter((a) => a.heatIdles.length > 0)
+  const n7 = wildRows.reduce((sum, a) => sum + a.heatIdles.length, 0)
+  const n7max = n7 === 0 ? 0 : Math.max(...wildRows.flatMap((a) => a.heatIdles).map((x) => x.excess))
+  say(`| N7 火にかけたままの放置 | 猶予（${HEAT_IDLE_ALLOWANCE}〜5分）を超えた件数 | 0件 | **${n7}件**（${n7rows.length}通り / ${wildRows.length}通り・最大超過${n7max}分） | ${verdict(n7 === N_LINE.n7)} |`)
+  const stale = wildRows.filter((a) => a.staleFinish != null).map((a) => a.staleFinish)
+  say(`| N8 仕上げの鮮度 | 仕上げの一手が食卓より何分早いか | （線なし） | 中央値${f1(median(stale))}分・最大${Math.max(...stale)}分 | （参考） |`)
 }
 say()
 
 // ------------------------------------------------- 器具の設定ごとの13項目（2026-08-13 便GC）
 say('=========================================================')
-say(' 【器具の設定ごと】13項目（既存7＋新規6）')
+say(' 【器具の設定ごと】14項目（既存7＋新規7）')
 say('=========================================================')
 say()
 say('  docs/72 第3段（器具の占有）で、段取りは**台所の設定に合わせて組み直される**ようになった。')
@@ -2148,6 +2384,7 @@ const kitchenStats = KITCHENS.map((k) => {
     overlap: rowsOf('野生の混合A+B+C（無作為200通り）').reduce((sum, a) => sum + a.overlap, 0) /
       rowsOf('野生の混合A+B+C（無作為200通り）').length,
     n6: pct(cues.filter((c) => c.inside).length, cues.length),
+    n7: wild.reduce((sum, a) => sum + a.heatIdles.length, 0),
   }
 })
 const row = (label, line, get) => say(`| ${label} | ${line} | ` + kitchenStats.map((k) => get(k)).join(' | ') + ' |')
@@ -2167,6 +2404,7 @@ row('N3 放置調理の取りこぼし', '0件', () => `${n3Stranded}件`)
 row('N4 混在手順の両方計上', '90%以上', () => `${f1(pct(n4Total.both, n4Total.mixed))}%`)
 row('N5 器具の重なり', '0件', (k) => `**${k.n5}件 / ${wildKeys.flatMap((key) => nAnalysesByKitchen.get(k.key).get(key)).length}通り**`)
 row('N6 利用者の並行指示', '80%以上', (k) => `${f1(k.n6)}%`)
+row('N7 火にかけたままの放置', '0件', (k) => `**${k.n7}件**`)
 say()
 say('  ※N3・N4は手順の見分け方だけで決まる項目なので、器具の設定では動かない（同じ値が並ぶ）。')
 say('  ※「持っていない器具」の工程は**コンロ1口**として数える＝レンジ・グリル・トースターを')
@@ -2203,6 +2441,12 @@ say()
     say(`    N3補助 ${x.title}: 最長工程${x.minutes}分（${x.kind === 'wait' ? '待ち' : '手作業'}）が${x.startMin}分地点＝全体の${f1(pct(x.startMin, x.total))}%地点で着火`)
   }
   say(`    N5 同時に使う口数の最大 コンロ${a.concurrency.stove}・レンジ${a.concurrency.microwave}・グリル${a.concurrency.grill}`)
+  say(`    N7 火にかけたままの放置 ${a.heatIdles.length}件`)
+  for (const x of a.heatIdles) {
+    say(`       - ${x.title}: 「${x.fromText.slice(0, 30)}」が${x.fromEnd}分に終わり、次の「${x.nextText.slice(0, 24)}」は${x.nextStart}分`)
+    say(`         ＝${x.idle}分そのまま火にかかっている（猶予${x.dueAt - x.fromEnd}分を${x.excess}分超過）`)
+  }
+  say(`    N8 仕上げの鮮度（参考）${a.staleFinish == null ? '該当なし' : `${a.staleWhich.recipeTitle}「${a.staleWhich.text.slice(0, 22)}」が食卓の${a.staleFinish}分前に完了`}`)
   say(`    R3本人の手組み（28〜30分・全部同時着地）との差: 全体 ${a.total - 30}分ぶん長い・開き ${a.spread}分`)
   for (const c of a.cues) {
     say(`    N6 「${c.text.slice(0, 24)}」 → ${c.startMin}分地点に配置・直前の待ちは${c.hasWait ? `${c.waitEnd}分で明ける` : '見つからない'} → ${c.inside ? '待ちの中' : '**待ちの外**'}`)
