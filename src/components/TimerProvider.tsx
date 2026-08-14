@@ -11,7 +11,7 @@ import {
 import { useSettings, updateSettings } from '../db/settings'
 import { useWakeLock } from './useWakeLock'
 import { parseStoredTimers, TIMERS_STORAGE_KEY } from '../logic/timerOrder'
-import { naviStepText } from '../logic/naviStepText'
+import { naviStepSpeechText } from '../logic/naviStepText'
 import {
   TIMER_BEEP_INTERVAL_SECONDS,
   timerSoundBeepCount,
@@ -286,9 +286,10 @@ function announceFinished(
   // （2026-08-10 便EZ・オーナー指示。通知だけ別の番号を名乗ると照合できない）
   try {
     if ('Notification' in window && Notification.permission === 'granted') {
+      // 通知も耳で読まれる場面があるので、2つの番号を呼び分ける（2026-08-14 便GL）
       const stepText =
         timer.naviOrder != null
-          ? ja.timer.stepLabel.replace('{n}', naviStepText(timer.naviOrder, timer.naviStepLabel))
+          ? naviStepSpeechText(timer.naviOrder, timer.naviStepLabel)
           : timer.stepNumber > 0
             ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
             : null

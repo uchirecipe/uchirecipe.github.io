@@ -42,6 +42,7 @@ import { deriveDoneLabel } from '../logic/timerLabel'
 import { findRunningStepTimer, stepTimerKey, timerRemainingSeconds } from '../logic/timerOrder'
 import { formatRemaining } from '../logic/time'
 import {
+  BOIL_WATER_MINUTES,
   buildCookPlan,
   hasFillableWorkDuringWait,
   recipeStepLabel,
@@ -403,7 +404,7 @@ function TimelineCard({
               そのままで、数え方だけを添える＝手順の分を足しても合計に届かない理由が読める */}
           {item.addedByNavi && (
             <p data-testid="navi-boil-note" className="ja-phrase mt-1 text-xs text-ink-muted">
-              {ja.cookNavi.waitBlockBoilNote}
+              {ja.cookNavi.waitBlockBoilNote.replaceAll('{n}', String(BOIL_WATER_MINUTES))}
             </p>
           )}
           {/* 今回の調理では終わらない待ちは、段取りに残したまま時間の計算から外していることを
@@ -644,7 +645,7 @@ export default function CookNaviPage() {
   const canUseNavi = isProUnlocked || trialActive
   const recipes = useLiveQuery(listRecipes, [])
   const todayList = useTodayList()
-  const { startTimer, timers, now } = useTimers()
+  const { startTimer, timers, now, dismissTimer } = useTimers()
   /**
    * 「画面を暗くしない」設定がオンなら、この画面を開いている間だけ画面の自動消灯を防ぐ
    * （2026-08-08 便ED。レシピ詳細・調理中モードと同じ扱い。ナビも手を動かしながら見る画面で、
@@ -1408,7 +1409,7 @@ export default function CookNaviPage() {
    * 「まとめて作った！」ボタンの確認と「完成！」の窓で**同じ文字列**を使う
    * ＝記録の説明を2か所に書かない。
    */
-  const cookedConfirmText =
+  const cookedConfirmBody = (keepTimers: boolean) =>
     ja.cookNavi.markAllCookedConfirm
       .replaceAll('{n}', String(selectedRecipes.filter((r) => r.id != null).length))
       .replace(
@@ -1417,7 +1418,10 @@ export default function CookNaviPage() {
           .filter((r) => r.id != null)
           .map((r) => r.title)
           .join('・'),
-      ) +
+      )
+      // 動いているタイマーの扱い（2026-08-14 便GL）。「まとめて作った！」は今までどおり残すので
+      // そう書き、「完成！」の窓は窓の中で消すかどうかを聞くのでここには書かない
+      .replace('{timers}', keepTimers ? ja.cookNavi.markAllCookedConfirmTimersKept : '') +
     (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
     // まとめて付けた記録も、あとから1件ずつ直せる（2026-08-12 便FX・オーナー指摘）
     ja.cookNavi.markAllCookedConfirmEdit
@@ -1458,12 +1462,27 @@ export default function CookNaviPage() {
    * 「完成！」の窓で「記録をつけずに閉じる」を選んだとき（2026-08-12 便FX）。
    * 便EZ の戻り位置（画面を「まとめて作った！」まで送る）はここに残す。
    */
-  const closeSessionWithoutRecord = () => {
+  const closeSessionWithoutRecord = (stopTimers: boolean) => {
     setFinishAsking(false)
+    if (stopTimers) stopRunningTimers()
     completedRef.current = true
     setCurrent(undefined)
     setSessionOpen(false)
     setPulls([])
+  }
+  /**
+   * まだ動いているタイマー（2026-08-14 便GL・利用者テスト
+   * 「『動いているタイマーはそのまま残ります』とは書いてあるけど、片づけ中に鳴ります。
+   * 終了時に『止めますか』が欲しい」）。
+   * 「完成！」の窓で消すかどうかを選べるようにする＝**聞かずに消すことはしない**（規約F）。
+   * 鳴り終わったタイマーは窓に大きな「タイマーを消す」が出ているので、ここでは数えない
+   */
+  const runningTimers = useMemo(
+    () => timers.filter((t) => !t.done).map((t) => ({ id: t.id, label: t.label })),
+    [timers],
+  )
+  const stopRunningTimers = () => {
+    for (const t of runningTimers) dismissTimer(t.id)
   }
   /**
    * 全画面を閉じたあとの戻り位置（同）。
@@ -1511,7 +1530,10 @@ export default function CookNaviPage() {
     const targets = selectedRecipes.filter((r) => r.id != null)
     if (targets.length === 0) return false
     // 「完成！」の窓（CookFinishModal）から来たときは、同じ中身をもう一度聞かない
-    if (!options?.confirmed && !window.confirm(cookedConfirmText + ja.cookNavi.markAllCookedConfirmAsk))
+    if (
+      !options?.confirmed &&
+      !window.confirm(cookedConfirmBody(true) + ja.cookNavi.markAllCookedConfirmAsk)
+    )
       return false
     // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
     // 何人分作ったかも記録する（2026-08-10 便FF）。段取りの分量に使っている食数
@@ -2220,9 +2242,11 @@ export default function CookNaviPage() {
           の3つから選ぶ。全画面（z-50）より上に重ねる */}
       <CookFinishModal
         open={finishAsking}
-        body={cookedConfirmText}
-        onRecord={() => {
+        body={cookedConfirmBody(false)}
+        runningTimers={runningTimers}
+        onRecord={(stopTimers) => {
           setFinishAsking(false)
+          if (stopTimers) stopRunningTimers()
           void markAllCooked({ confirmed: true })
         }}
         onBack={() => setFinishAsking(false)}

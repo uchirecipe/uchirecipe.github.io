@@ -31675,9 +31675,10 @@ try {
           { text: '魚焼きグリルで15分焼く。', minutes: 15 },
           { text: '焼けたら乾燥パセリをふる。', minutes: 1 },
         ])))
+        // 1品だけ「沸騰したお湯で」＝ナビが湯沸かしの待ちを足す形にする（GL-07 で使う）
         const b = await P(store('recipes').add(mk('GLごま和え', [
           { text: 'ほうれん草とにんじんを切る。', minutes: 4 },
-          { text: '電子レンジで3分加熱する。', minutes: 3 },
+          { text: 'たっぷりのお湯でほうれん草を1分ゆでる。', minutes: 1 },
           { text: 'すりごまと醤油で和える。', minutes: 2 },
         ])))
         const c = await P(store('recipes').add(mk('GLみそ汁', [
@@ -31835,6 +31836,208 @@ try {
         'GL-02 「自動の並びに戻す」を選ぶと、自動で組んだ並びに戻る',
         (await glOrder()).join('|') === glAuto.join('|'),
         (await glOrder()).slice(0, 3).join(' / '),
+      )
+
+      // --- GL-07: 「沸くまでの待ち時間」は、押す前に何分ではかるかが読める ---
+      //   「押すと5分固定で始まるが、事前に分数がどこにも書いていない（押すまで分からない）」
+      //   ※沸くまでの時間そのものは言い切らない（オーナー指示D-3）ので、タイマーの分数を書く
+      currentCheck = 'GL-07'
+      const glBoilNote = noZw(
+        await glPage.locator('[data-testid="navi-boil-note"]').first().innerText(),
+      )
+      check(
+        'GL-07 押す前に、タイマーが何分ではかるかが書いてある',
+        glBoilNote.includes('タイマーは5分ではかります'),
+        glBoilNote,
+      )
+      check(
+        'GL-07 沸くまでの時間そのものは言い切らない（火力と量で変わる）',
+        glBoilNote.includes('実際に沸くまでの時間は、火力と量で変わります'),
+        glBoilNote,
+      )
+      check(
+        'GL-07 その一文は「タイマーを始める」より下に無い＝押す前に目に入る位置にある',
+        await glPage.evaluate(() => {
+          const note = document.querySelector('[data-testid="navi-boil-note"]')
+          if (!note) return false
+          const card = note.closest('li') ?? note.parentElement
+          const btn = [...(card?.querySelectorAll('button') ?? [])].find((b) =>
+            (b.textContent ?? '').includes('タイマーを始める'),
+          )
+          if (!btn) return false
+          // 同じ待ちのブロックの中にあり、ボタンとの縦の隔たりが1行ぶん以内
+          return note.getBoundingClientRect().top - btn.getBoundingClientRect().bottom < 24
+        }),
+      )
+
+      // --- GL-04〜06・08: 調理中モードのタイマーまわり ---
+      currentCheck = 'GL-05'
+      await glPage.locator('[data-testid="cook-session-start"]').click()
+      await glPage.waitForTimeout(1000)
+      /** いまの手順に「タイマーを始める」が出ているか */
+      const glHasTimerButton = async () =>
+        (await glPage
+          .locator('[data-testid="cook-session-wait-block"]')
+          .getByRole('button', { name: 'タイマーを始める' })
+          .count()) > 0
+      // 待ちのタイマーが出る手順まで進む（何手順目かは段取り次第なので決め打ちにしない）
+      let glSteps = 0
+      while (!(await glHasTimerButton()) && glSteps < 20) {
+        if ((await glPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await glPage.locator('[data-testid="cook-session-next"]').click()
+        await glPage.waitForTimeout(400)
+        glSteps++
+      }
+      check('GL 前提: タイマーを出す待ちの手順まで進める', await glHasTimerButton())
+      const glTimerRecipe = await glPage.locator('[data-testid="cook-session-recipe"]').innerText()
+      // **押さずに**次へ
+      await glPage.locator('[data-testid="cook-session-next"]').click()
+      await glPage.waitForTimeout(600)
+      const glNotice = noZw(
+        await glPage.locator('[data-testid="cook-session-timer-notice"]').innerText(),
+      )
+      check(
+        'GL-05 タイマーを押さずに次へ進めると、その場で伝える（止めはしない）',
+        glNotice.includes('タイマーを始めていません') && glNotice.includes(noZw(glTimerRecipe)),
+        glNotice,
+      )
+      check(
+        'GL-05 伝えても進む手は止めない（次の手順が開いている）',
+        (await glPage.locator('[data-testid="cook-session-step-text"]').count()) === 1 &&
+          (await glPage.locator('[data-testid="cook-finish-modal"]').count()) === 0,
+      )
+      check(
+        'GL-05 その場で始める道が1つ添えてある（戻って押し直さなくてよい）',
+        (await glPage.locator('[data-testid="cook-session-timer-notice-start"]').count()) === 1,
+      )
+      await glPage.locator('[data-testid="cook-session-timer-notice-start"]').click()
+      await glPage.waitForTimeout(700)
+      check(
+        'GL-05 「いまから始める」で始まり、一言は役目を終えて消える',
+        (await glPage.locator('[data-testid="cook-session-timer-notice"]').count()) === 0,
+      )
+
+      // --- GL-08: タイマーの読み上げ名（2つの番号を別の名前で呼ぶ） ---
+      currentCheck = 'GL-08'
+      const glAria = await glPage.evaluate(() =>
+        [...document.querySelectorAll('[aria-label]')]
+          .map((el) => el.getAttribute('aria-label') ?? '')
+          .filter((t) => t.includes('のタイマーを調整') && t.includes('段取り')),
+      )
+      check(
+        'GL-08 読み上げ名は、段取りの番号とレシピの手順番号を別の名前で呼ぶ',
+        glAria.length > 0 && glAria.every((t) => /段取り\d+/.test(t) && t.includes('手順')),
+        glAria.join(' | ') || '(段取りを含む読み上げ名が無い)',
+      )
+      check(
+        'GL-08 1つの「手順」に2つの番号がぶら下がる形（手順⑨（1-2））は読み上げ名に残っていない',
+        glAria.every((t) => !/手順[①-⑳㉑-㉟㊱-㊿]/.test(t)),
+        glAria.join(' | '),
+      )
+
+      // --- GL-04: 動いているタイマーが「他の品の次の手順」に混ざって見えない ---
+      currentCheck = 'GL-04'
+      // 始めたタイマーの品が下部の行に回るまで進める（別の品の手順を開いた状態にする）
+      let glHops = 0
+      while (
+        (await glPage.locator('[data-testid="cook-session-other-timers"]').count()) === 0 &&
+        glHops < 8
+      ) {
+        if ((await glPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await glPage.locator('[data-testid="cook-session-next"]').click()
+        await glPage.waitForTimeout(400)
+        glHops++
+      }
+      check(
+        'GL 前提: 他の品の行にタイマーが付いた状態を作れる',
+        (await glPage.locator('[data-testid="cook-session-other-timers"]').count()) > 0,
+      )
+      check(
+        'GL-04 行に付くタイマーには「動いているタイマー」の見出しが付く（手順の行と読み分かれる）',
+        noZw(
+          await glPage.locator('[data-testid="cook-session-other-timers-title"]').first().innerText(),
+        ) === '動いているタイマー',
+      )
+      check(
+        'GL-04 タイマーは、その品の行の中にある（品と品のあいだに挟まらない）',
+        await glPage.evaluate(() => {
+          const box = document.querySelector('[data-testid="cook-session-other-timers"]')
+          const row = box?.parentElement
+          // 行の枠（色の線を引いている箱）の中に、その品の手順の行と一緒に入っている
+          return Boolean(row && row.querySelector('[data-testid="cook-session-other-row"]'))
+        }),
+      )
+      check(
+        'GL-04 手順の行のような並び（料理名の繰り返し）にしない',
+        await glPage.evaluate(() => {
+          const box = document.querySelector('[data-testid="cook-session-other-timers"]')
+          const row = box?.parentElement
+          const title = row?.querySelector('[data-testid="cook-session-other-row"]')
+          const name = (title?.textContent ?? '').replace(/\s+/g, '')
+          const chips = (box?.textContent ?? '').replace(/\s+/g, '')
+          // 行の見出しに出ている料理名が、タイマーの中で繰り返されていない
+          const dish = name.match(/GL[^\d]{1,12}/)?.[0] ?? ''
+          return dish.length > 2 && !chips.replace('動いているタイマー', '').includes(dish)
+        }),
+      )
+
+      // --- GL-06: 終わるときに、動いているタイマーをどうするか聞く ---
+      currentCheck = 'GL-06'
+      let glGuard = 0
+      while (
+        (await glPage.locator('[data-testid="cook-session-finish"]').count()) === 0 &&
+        glGuard < 20
+      ) {
+        await glPage.locator('[data-testid="cook-session-next"]').click()
+        await glPage.waitForTimeout(300)
+        glGuard++
+      }
+      check('GL 前提: 最後の手順まで進める', (await glPage.locator('[data-testid="cook-session-finish"]').count()) === 1)
+      await glPage.locator('[data-testid="cook-session-finish"]').click()
+      await glPage.waitForTimeout(800)
+      check(
+        'GL-06 「完成！」の窓で、動いているタイマーのことを聞く',
+        (await glPage.locator('[data-testid="cook-finish-timers"]').count()) === 1,
+      )
+      const glFinishTimers = noZw(
+        await glPage.locator('[data-testid="cook-finish-timers"]').innerText(),
+      )
+      check(
+        'GL-06 何本あるか・どの料理のものかを書いてある',
+        /動いているタイマー\d+件/.test(glFinishTimers) && glFinishTimers.includes('GL'),
+        glFinishTimers,
+      )
+      check(
+        'GL-06 既定は消さない（押し間違いで残り時間を失わない）',
+        (await glPage.locator('[data-testid="cook-finish-timers-stop"]').getAttribute('aria-checked')) ===
+          'false',
+      )
+      check(
+        'GL-06 消さない側の結果が書いてある（規約F）',
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()).includes(
+          '片づけの間も鳴ります',
+        ),
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()),
+      )
+      await glPage.locator('[data-testid="cook-finish-timers-stop"]').click()
+      await glPage.waitForTimeout(400)
+      check(
+        'GL-06 消す側を選ぶと、消したときの結果に書き替わる（規約F）',
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()).includes(
+          '残り時間はなくなります',
+        ),
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()),
+      )
+      // 記録はつけずに終える（作った記録に触らずタイマーの扱いだけを見る）
+      await glPage.locator('[data-testid="cook-finish-close"]').click()
+      await glPage.waitForTimeout(1000)
+      check(
+        'GL-06 選んだとおり、動いていたタイマーは消えている',
+        (await glPage.evaluate(() =>
+          [...document.querySelectorAll('[aria-label]')]
+            .map((el) => el.getAttribute('aria-label') ?? '')
+            .filter((t) => t.includes('のタイマーを調整')).length,
+        )) === 0,
       )
     } finally {
       await glBrowser.close()
