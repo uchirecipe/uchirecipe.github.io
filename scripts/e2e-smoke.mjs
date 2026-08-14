@@ -23942,9 +23942,14 @@ try {
       await ezPage.waitForTimeout(800)
       const ezBarRow = ezPage.locator('button[aria-label*="のタイマーを調整"]').first()
       const ezBarAria = await ezBarRow.getAttribute('aria-label')
+      // 2026-08-14 便GL: **読み上げ名だけ**は2つの番号をそれぞれの名前で呼ぶ形に変えた
+      // （利用者テスト「タイマーの読み上げ名『手順⑨（1-2）』が、同じ『手順』で2つの番号を
+      // 指していて紛らわしい」）。画面の文字は便EZ のまま（下の窓の検査がそれを見ている）
       check(
-        'EZ-02 常駐バーの読み上げ名も丸数字＋レシピ内の手順番号で呼ぶ',
-        /手順[①-⑳㉑-㉟㊱-㊿]/.test(ezBarAria) && !/段取りの\d+番目/.test(ezBarAria),
+        'EZ-02 常駐バーの読み上げ名は、段取りの番号とレシピの手順番号を別の名前で呼ぶ',
+        /段取り\d+/.test(ezBarAria) &&
+          ezBarAria.includes('手順') &&
+          !/段取りの\d+番目/.test(ezBarAria),
         String(ezBarAria),
       )
       await ezBarRow.click()
@@ -30186,9 +30191,14 @@ try {
       await fuPage.waitForTimeout(800)
       const fuBarRow = fuPage.locator('button[aria-label*="のタイマーを調整"]').first()
       const fuBarAria = (await fuBarRow.getAttribute('aria-label')) ?? ''
+      // 2026-08-14 便GL: 読み上げ名は「段取り9・手順1の2つめ」の形になった（丸数字は使わない。
+      // 読み上げソフトによって「まる9」「9」と読みが割れるため）。くっついて読めないことは同じ
       check(
-        'FU-04 常駐バーの読み上げ名で、丸数字と手順番号がくっついていない',
-        /手順[①-⑳㉑-㉟㊱-㊿]/.test(fuBarAria) && !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuBarAria),
+        'FU-04 常駐バーの読み上げ名で、2つの番号がくっついていない',
+        /段取り\d+・手順/.test(fuBarAria) &&
+          !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuBarAria) &&
+          !/手順[①-⑳㉑-㉟㊱-㊿]/.test(fuBarAria) &&
+          !/手順\d+[（(]/.test(fuBarAria),
         fuBarAria,
       )
       await fuBarRow.click()
@@ -30445,9 +30455,16 @@ try {
         fxBoilBlock.includes('沸くまでの待ち時間'),
         fxBoilBlock,
       )
+      // 2026-08-14 便GL: 数え方の一文に「タイマーが何分ではかるか」を足した（利用者テスト
+      // 「押すと5分固定で始まるが、事前に分数がどこにも書いていない」）。数え方の説明は残す
       check(
-        'FX-11 待ちブロックに「全体の目安には約5分として数えています」が添えてある',
-        fxBoilBlock.includes('全体の目安には約5分として数えています'),
+        'FX-11 待ちブロックに、全体の目安への数え方が添えてある',
+        fxBoilBlock.includes('全体の目安に数えているのも同じ5分です'),
+        fxBoilBlock,
+      )
+      check(
+        'FX-11 押す前に、タイマーが何分ではかるかも読める',
+        fxBoilBlock.includes('タイマーは5分ではかります'),
         fxBoilBlock,
       )
       check(
