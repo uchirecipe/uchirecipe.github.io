@@ -6,6 +6,8 @@
  *
  * 実行: npx tsx scripts/audit-cook-navi.mjs            … 数値のサマリだけ
  *       npx tsx scripts/audit-cook-navi.mjs --dump     … 生成された段取りの全文も出す
+ *       N7_DUMP=n7.json npx tsx scripts/audit-cook-navi.mjs
+ *                                                     … N7（火にかけたままの放置）の超過を1件ずつJSONに
  *
  * 測るもの:
  *   1. 待ち工程の検出率（手順のうち何%が「待ち」と判定されたか）
@@ -78,6 +80,8 @@ import {
 } from './data/navi-parallel-recipes.mjs'
 
 const DUMP = process.argv.includes('--dump')
+/** N7（火にかけたままの放置）の超過を1件ずつ書き出す先。環境変数で指定したときだけ動く */
+const N7_DUMP = process.env.N7_DUMP ?? null
 
 // ---------------------------------------------------------------- 標本づくり
 
@@ -1584,6 +1588,27 @@ function heatAllowanceOf(item) {
  */
 const MEASURE_FINISH_ACTION = /和え|あえ|混ぜ|盛る|盛り|盛っ|かける|かけて|添え|ふる|ふり|ふっ|散ら|よそ/
 /**
+ * 【手でこねる・形を作る工程は、火の上ではできない】2026-08-15 便GM。
+ *
+ * 便GGの「どちらでもない工程では状態を引き継ぐ（keep）」は、「沸いたら豆腐とわかめを入れる」を
+ * 捕まえるための肝だが、**中身が鍋から出ている品まで火にかけたままと読んでしまう**。
+ * 実例（ハンバーグ・野生標本C）:
+ *   1 玉ねぎをみじん切りにして炒める → 2 ひき肉とまぜてこねる → 3 形を作る → 4 焼く
+ * 本文に「火を止める」が無いため、1で付いた火が2・3・4までずっと続いていると読み、
+ * 1→2・2→3・3→4 の空きをすべて放置に数えていた（108件中9件）。
+ * 実際には、**ひき肉を手でこねる工程はボウルの中の作業**で、炒めた玉ねぎはとっくに鍋から出ている。
+ * 火を点けたままボウルで肉をこねる台所は無い＝**この工程が来る時点で火は下りている**。
+ * したがって、
+ *   ①この工程は「火が消える」（次の「焼く」で改めて火がつく）
+ *   ②**この工程に入るまでの空きも数えない**（火は前の加熱が済んだ時点で止まっている）
+ * ②が要るのは、放置の判定が「その工程が始まった時刻」で行われるため（①だけでは1→2が残る）。
+ *
+ * 語は**手でタネを扱う工程だけ**に絞る。「丸める」「混ぜる」は鍋の中でもやるので入れない
+ * （「煮汁を混ぜながら煮る」を火から下ろすと読むと、N7が本来の症状を取りこぼす）。
+ */
+const MEASURE_OFF_HEAT_BY_HAND = /こね|捏ね|成形|形を作|形を整え|形にする/
+
+/**
  * その工程のあと、その品は火にかかっているか（'on' 火がつく／'off' 火が消える／'keep' 変わらない）。
  *
  * **数えるのはコンロ（IH含む）だけ**にした（司令部の案から範囲を狭めた・理由は下記）。
@@ -1599,8 +1624,8 @@ const MEASURE_FINISH_ACTION = /和え|あえ|混ぜ|盛る|盛り|盛っ|かけ�
 function heatTransition(item) {
   const t = maskForMeasure(item.text)
   // 火を下ろす語と火にかける語が両方あるときは、**あとに来たほうが主役**
-  // （「水気を絞って鍋に戻し、5分煮る」は火にかける）
-  const offAt = lastIdxOf(t, [MEASURE_HEAT_OFF])
+  // （「水気を絞って鍋に戻し、5分煮る」は火にかける。「こねてから焼く」も火にかける）
+  const offAt = lastIdxOf(t, [MEASURE_HEAT_OFF, MEASURE_OFF_HEAT_BY_HAND])
   if (offAt >= 0 && offAt > lastIdxOf(t, [MEASURE_HEAT_ON])) return 'off'
   const key = stepAppliance(item.text)
   if (key == null) return 'keep'
@@ -1741,12 +1766,45 @@ function analyzePlan(trio, kitchen = DEFAULT_KITCHEN) {
   // 品ごとに火の状態を段取りの順に追い、「この時刻までに手を戻さないといけない」時刻（dueAt）を
   // 持ち回る。次の工程の**開始**がそれを過ぎていたら、その差が放置の超過。
   const heatIdles = []
+  /**
+   * 【原因調べ用】その工程を始める時点で、その品の鍋が火にかかったまま手を待っていたか。
+   * 放置の空きに何が挟まっていたのかを見分けるためだけに使う（N7_DUMP を付けたときだけ計算）。
+   */
+  const potPending = new Map()
+  if (N7_DUMP) {
+    for (const [, list] of byRecipe) {
+      let d = null
+      for (const it of list) {
+        potPending.set(it, d != null)
+        const tr = heatTransition(it)
+        if (tr === 'off') d = null
+        else if (tr === 'on' || d != null) d = it.endMin
+      }
+    }
+  }
   for (const [, list] of byRecipe) {
     let dueAt = null
     let since = null
     for (const it of list) {
-      if (dueAt != null && it.startMin > dueAt) {
+      // 手でタネを扱う工程（こねる・形を作る）は、その手前で火が下りている＝空きを数えない
+      // （2026-08-15 便GM。上の MEASURE_OFF_HEAT_BY_HAND の説明を参照）
+      const offByHand = MEASURE_OFF_HEAT_BY_HAND.test(maskForMeasure(it.text))
+      if (dueAt != null && it.startMin > dueAt && !offByHand) {
         heatIdles.push({
+          // 空いた時間に何が挟まっていたか（原因調べ用。N7_DUMP を付けたときだけ）
+          gap: N7_DUMP
+            ? items
+                .filter(
+                  (o) =>
+                    o.recipeId !== it.recipeId &&
+                    o.startMin < it.startMin &&
+                    o.endMin > since.endMin,
+                )
+                .map(
+                  (o) =>
+                    `${o.recipeTitle}|${o.kind}|${potPending.get(o) ? '鍋が待っていた' : '鍋は火の上にない'}|${o.startMin}-${o.endMin}|${o.text.slice(0, 26)}`,
+                )
+            : undefined,
           title: it.recipeTitle,
           fromText: since.text,
           fromEnd: since.endMin,
@@ -2235,6 +2293,9 @@ say('  置きっぱなしになるのは「冷める」問題＝**N2が測って
 say('  出てこない限り加熱が続く（利用者の原文「#7の後に『火を止める』も『弱火にする』も出てきません」）。')
 say(`  **猶予**: ${HEAT_IDLE_ALLOWANCE}分（煮込み・焼き物は待ちの2割・最大5分がこれを超えるならそちら）。`)
 say('  3分の根拠は利用者自身の手順「豆腐を入れて味噌を溶くのは焼き上がりの3分前」。')
+say('  **数えないもの**（2026-08-15 便GM）: 手でタネを扱う工程（こねる・形を作る）に入るまでの空き。')
+say('  ボウルの中の作業なので中身は鍋から出ており、火を点けたままにはならない（実例: ハンバーグの')
+say('  「玉ねぎを炒める→ひき肉とまぜてこねる→形を作る→焼く」。本文に「火を止める」が無いだけ）。')
 say('  ＝レシピ本文「1〜2分煮る」の直後に15分空く段取りは**超過12分**で不合格になる。')
 say()
 say('| 組み合わせ | 通り数 | **超過した通り** | 超過の延べ件数 | 超過の最大(分) | 判定 |')
@@ -2272,6 +2333,15 @@ say()
       buckets.set(k, (buckets.get(k) ?? 0) + 1)
     }
     say('  超過の大きさの内訳: ' + [...buckets].map(([k, v]) => `${k} ${v}件`).join(' / '))
+  }
+  // 超過した全件の書き出し（2026-08-15 便GM）。`N7_DUMP=<書き出し先> npx tsx scripts/audit-cook-navi.mjs`
+  // で、1件ごとに「直前の工程／次の工程／空いた分数／その空きに挟まった他の品の工程」をJSONで残す。
+  // 便GMはこれで108件を型に分けた（＝全件が「もう1つの鍋に戻る一手」1つに挟まれた形だった）。
+  // 付けなければ何も書き出さず、表示される数値にも一切影響しない。
+  if (N7_DUMP) {
+    const fs = await import('node:fs')
+    const all = wildRows.flatMap((a) => a.heatIdles.map((x) => ({ ...x, trio: nameOf(a) })))
+    fs.writeFileSync(N7_DUMP, JSON.stringify(all, null, 1))
   }
 }
 say()
