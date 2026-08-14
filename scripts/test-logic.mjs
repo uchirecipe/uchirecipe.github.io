@@ -155,6 +155,7 @@ import {
   resolveWaitMinutes,
   recipeStepLabel,
   hasParallelCue,
+  stepHeatShift,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import {
@@ -5291,6 +5292,34 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     const plan = buildCookTimeline([recipe(1, '汁物', ['鍋に水を入れて中火にかける。', '沸いたら具を入れる。', 'みそを溶いて火を止める。', '器に盛る。'], { dishType: 'soup' })])
     eq('ナビ火の番: 火を止めた後は締め切りを持たない', plan.items[plan.items.length - 1].text, '器に盛る。')
     eq('ナビ火の番: 1品だけでも段取りは成立する', plan.totalMinutes > 0, true)
+  }
+  // 火を下ろす語と火にかける語が同居したら、あとに来たほうが主役（位置ルール）
+  eq(
+    'ナビ火の番: 「水気を絞って鍋に戻し、5分煮る」は火にかける',
+    stepHeatShift({ text: '水気を絞って鍋に戻し、5分煮る。' }, { burners: 2, microwave: true, grill: true, toaster: true }),
+    'on',
+  )
+  eq(
+    'ナビ火の番: 「煮汁がなくなったら火を止め、そのまま冷ます」は火から下りる',
+    stepHeatShift({ text: '煮汁がなくなったら火を止め、そのまま冷ます。' }, { burners: 2, microwave: true, grill: true, toaster: true }),
+    'off',
+  )
+  eq(
+    'ナビ火の番: 火に触れない手順は直前の状態を引き継ぐ',
+    stepHeatShift({ text: '沸いたら豆腐と乾燥わかめを入れる。' }, { burners: 2, microwave: true, grill: true, toaster: true }),
+    'keep',
+  )
+
+  // ---- (4) 最後の1口を、火にかけたままの鍋より先に取らせない ----
+  // 実測（ホールドアウト標本）: 豚汁の炒めのあと、ほかの品の蒸し焼き15分に2口目を取られ、
+  // フライパンが火にかかったまま15分中断していた
+  {
+    const plan = buildCookTimeline([
+      recipe(1, '豚汁', ['野菜を切る。', '鍋にごま油を熱し、豚肉を炒める。', '野菜を加えて炒め合わせる。', 'だし汁を入れて12分煮る。', 'みそを溶いて火を止める。'], { dishType: 'soup' }),
+      recipe(2, 'ホイル焼き', ['アルミホイルに包む。', 'フライパンに水を張り、ふたをして中火で15分蒸し焼きにする。', '器にのせる。']),
+      recipe(3, 'ゆで鶏', ['鶏肉に塩をすり込んで20分おく。', '鍋に湯を沸かして鶏肉を入れ、火を止める。', 'ふたをして40分おく。', '鍋から取り出して薄切りにする。']),
+    ])
+    eq('ナビ火の番: 3品でも豚汁のフライパンを火にかけたまま中断しない', heatIdle(plan, '豚汁') <= 3, true)
   }
 }
 

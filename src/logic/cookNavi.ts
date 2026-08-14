@@ -1069,7 +1069,7 @@ export type HeatShift = 'on' | 'off' | 'keep'
  * こちらは「その手順のあと火が残るか」）ので、別に持つ。
  */
 const HEAT_OFF_PATTERN =
-  /火を止め|火をとめ|火を消|火からおろ|火から下ろ|火から外|火からはず|器に盛|皿に盛|椀に|お椀に|盛り付け|盛りつけ|盛って|取り出|とり出|ざるにあげ|ざるに上げ|ざるにとり|ざるに移|ザルにあげ|ザルに上げ|ザルにとり|ザルに移|湯を切|湯をき|湯切り|油をき|油を切|水気をき|水気を切|水けをき|水けを切|水気をしぼ|水気を絞|水けをしぼ|水けを絞|つぶ|水にとる|水に取る|水にさら|冷ま|粗熱|できあがり|出来上がり/
+  /火を止め|火をとめ|火を消|火からおろ|火から下ろ|火から外|火からはず|器に盛|皿に盛|椀に|お椀に|盛り付け|盛りつけ|盛って|取り出|とり出|ざるにあげ|ざるに上げ|ざるにとり|ざるに移|ザルにあげ|ザルに上げ|ザルにとり|ザルに移|湯を切|湯をき|湯切り|油をき|油を切|水気をき|水気を切|水けをき|水けを切|水気をしぼ|水気を絞|水けをしぼ|水けを絞|つぶ|水にとる|水に取る|水にさら|流水|洗う|洗い|洗っ|冷水|冷ま|粗熱|できあがり|出来上がり/
 
 /** 火にかかっている合図（位置くらべに使う。器具の見分けそのものは cookAppliance が持つ） */
 const HEAT_ON_PATTERN =
@@ -2112,6 +2112,11 @@ export function buildCookTimeline(
       const longest = Math.max(...ready.map(remainingSpan))
       return remainingSpan(j) >= longest ? 0 : 1
     }
+    /**
+     * **鍋が火にかかったまま、次の一手を待っている品**（2026-08-14 便GG）。
+     * 裏の待ちがまだ動いているうちは急がない（waitDoneAt）。明けていれば、いま戻らないと煮すぎになる。
+     */
+    const potWaiting = (j: Job) => j.onHeat && j.waitDoneAt <= cookAt
     const cutRun = (j: Job) =>
       lastActiveCategory === 'cut' && j.steps[j.ptr].category === 'cut' ? 0 : 1
     /**
@@ -2171,10 +2176,18 @@ export function buildCookTimeline(
     }
 
     const waits = ready.filter((j) => j.steps[j.ptr].kind === 'wait')
-    // 待ちが長いものから仕掛ける（同着はレシピの選択順で安定させる）
+    // **火にかけたままの鍋の続きを先に仕掛ける**（2026-08-14 便GG）。
+    // 「湯を沸かす→ゆでる」「水と調味料を入れて→煮る」のように、火にかけた鍋にそのまま続く待ちは、
+    // ほかの品の新しい待ちより先に。あとにすると、その間に別の品がコンロを取ってしまい、
+    // 火にかけた鍋が「口が空くまで」放置される
+    // （実測: 湯が沸いてからゆで始めるまで8分・煮汁を入れてから煮始めるまで14分）。
+    // 待ちは仕掛けても手をふさがないので、この入れ替えで段取りは1分も伸びない。
+    // 次に待ちが長いものから（同着はレシピの選択順で安定させる）
     waits.sort(
       (a, b) =>
-        b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes || a.colorIndex - b.colorIndex,
+        Number(!potWaiting(a)) - Number(!potWaiting(b)) ||
+        b.steps[b.ptr].waitMinutes - a.steps[a.ptr].waitMinutes ||
+        a.colorIndex - b.colorIndex,
     )
     // 待ちの締め切りに間に合う手作業だけを差し込みの候補にする。
     // **ただし自分の鍋が待っている品は、ほかの鍋の締め切りで弾かない**（2026-08-14 便GG）。
@@ -2214,8 +2227,26 @@ export function buildCookTimeline(
     // ふつうの待ちは今までどおり最優先で仕掛ける
     const readyCuts = eagerActives.filter((j) => j.steps[j.ptr].category === 'cut')
     const soakOnly = waits.length > 0 && waits.every((j) => j.steps[j.ptr].soakWait)
+    // 火にかけたままの鍋に戻る一手は、**最後の1口を取られる前に**片付ける（2026-08-14 便GG）。
+    // 待ちは仕掛けた瞬間に器具をふさぐので、先に仕掛けられると戻る口が無くなる
+    // （実測: 豚汁の炒めのあと、ほかの品の蒸し焼き15分に2口目を取られ、15分戻れなかった）。
+    // **口に余裕があるうちは従来どおり待ちを先に仕掛ける**＝縮める力を落とさない
+    const potWaitingActives = fittingActives.filter(
+      (j) =>
+        potWaiting(j) &&
+        j.attendUntil > 0 &&
+        j.steps[j.ptr].kind === 'active' &&
+        j.steps[j.ptr].applianceKey === 'stove',
+    )
+    const stoveWaitsQueued = eagerWaits.filter(
+      (j) => j.steps[j.ptr].occupies && j.steps[j.ptr].applianceKey === 'stove',
+    ).length
+    const lastBurnerTaken =
+      stoveWaitsQueued > 0 && schedule.spare('stove', cookAt) <= stoveWaitsQueued
     if (dueWaits.length > 0) {
       chosen = dueWaits[0]
+    } else if (potWaitingActives.length > 0 && lastBurnerTaken) {
+      chosen = pickActive(potWaitingActives)
     } else if (eagerWaits.length > 0 && !(soakOnly && readyCuts.length > 0) && !waitWouldIdle) {
       chosen = eagerWaits[0]
     } else if (soakOnly && readyCuts.length > 0) {
@@ -2311,8 +2342,16 @@ export function buildCookTimeline(
       )
       const landing = Math.min(Number.isFinite(nextAt) ? nextAt : othersEnd, othersEnd)
       // 着火ごと後ろへ回すときは、**一連の工程の終わり**がほかの品の完成に着地するよう逆算する
-      // （最後の1手だけを送っていた 2026-08-13 便GB との違い。docs/72 第5段）
-      if (Number.isFinite(landing)) startMin = Math.max(cookAt, landing - heldSpan(chosen))
+      // （最後の1手だけを送っていた 2026-08-13 便GB との違い。docs/72 第5段）。
+      // 逆算には igniteAt（ほかの品に残っている手作業も引いた時刻）を使う。「次に手が必要になる
+      // 時刻」に合わせて置くと、**同じく後ろへ回したもう1品の場所が無くなって**全体が伸びる
+      // （実測: 豚汁／しっとりゆで鶏／肉じゃがで 78→101分になっていた）
+      if (Number.isFinite(landing)) {
+        startMin = Math.max(
+          cookAt,
+          startsHeatRun(chosen) ? igniteAt(chosen) : landing - heldSpan(chosen),
+        )
+      }
       // 後ろへずらした先で器具が空いていなければ、ずらさない（器具の制約が先。2026-08-13 便GC）
       if (!fitsAppliance(step, startMin)) startMin = cookAt
     }

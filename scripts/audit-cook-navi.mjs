@@ -1525,7 +1525,7 @@ function isN2Target(recipe) {
  *     （＝アプリ本体が締め切りを持てていなかったのと同じ穴を、測る側で塞ぐ）
  */
 const MEASURE_HEAT_OFF =
-  /火を止め|火をとめ|火を消|火からおろ|火から下ろ|火から外|火からはず|器に盛|皿に盛|椀に|お椀に|盛り付け|盛りつけ|盛って|取り出|とり出|ざるにあげ|ざるに上げ|ざるにとり|ざるに移|ザルにあげ|ザルに上げ|ザルにとり|ザルに移|湯を切|湯をき|湯切り|油をき|油を切|水気をき|水気を切|水けをき|水けを切|水気をしぼ|水気を絞|水けをしぼ|水けを絞|つぶ|水にとる|水に取る|水にさら|冷ま|粗熱|できあがり|出来上がり/
+  /火を止め|火をとめ|火を消|火からおろ|火から下ろ|火から外|火からはず|器に盛|皿に盛|椀に|お椀に|盛り付け|盛りつけ|盛って|取り出|とり出|ざるにあげ|ざるに上げ|ざるにとり|ざるに移|ザルにあげ|ザルに上げ|ザルにとり|ザルに移|湯を切|湯をき|湯切り|油をき|油を切|水気をき|水気を切|水けをき|水けを切|水気をしぼ|水気を絞|水けをしぼ|水けを絞|つぶ|水にとる|水に取る|水にさら|流水|洗う|洗い|洗っ|冷水|冷ま|粗熱|できあがり|出来上がり/
 /** 火にかかっている合図（火を下ろす語との位置くらべに使う） */
 const MEASURE_HEAT_ON =
   /火にかけ|火に掛け|火をつけ|火を入れ|点火|強火|中火|弱火|とろ火|煮|茹|ゆで|沸か|沸騰|煮立|炒め|炒る|揚げ|蒸|焼く|焼き|焼い|熱し|熱する|加熱|温め/
@@ -2232,7 +2232,7 @@ for (const s of [...nSets, { key: '**野生＋ホールドアウト 合計**', r
 say()
 {
   const worst = dedupe(
-    wildRows.flatMap((a) => a.heatIdles).sort((a, b) => b.excess - a.excess),
+    wildRows.flatMap((a) => a.heatIdles.map((x) => ({ ...x, trio: nameOf(a) }))).sort((a, b) => b.excess - a.excess),
     (x) => x.title + x.fromText + x.nextText,
   ).slice(0, 5)
   say('  いちばん悪い5例（火にかけたまま何分空いたか）:')
@@ -2240,6 +2240,18 @@ say()
   for (const x of worst) {
     say(`    - ${x.title}: 「${x.fromText.slice(0, 34)}」が${x.fromEnd}分に終わり、`)
     say(`      次の「${x.nextText.slice(0, 34)}」は${x.nextStart}分（${x.idle}分の放置・猶予${x.dueAt - x.fromEnd}分を${x.excess}分超過）`)
+    say(`      組み合わせ: ${x.trio}`)
+  }
+  say()
+  {
+    // 何が原因で戻れなかったのかの内訳（打ち手を決めるのに要る）
+    const all = wildRows.flatMap((a) => a.heatIdles)
+    const buckets = new Map()
+    for (const x of all) {
+      const k = x.excess <= 2 ? '超過1〜2分' : x.excess <= 5 ? '超過3〜5分' : x.excess <= 10 ? '超過6〜10分' : '超過11分以上'
+      buckets.set(k, (buckets.get(k) ?? 0) + 1)
+    }
+    say('  超過の大きさの内訳: ' + [...buckets].map(([k, v]) => `${k} ${v}件`).join(' / '))
   }
 }
 say()
