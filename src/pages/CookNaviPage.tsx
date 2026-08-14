@@ -69,6 +69,7 @@ import CookSessionOverlay from '../components/CookSessionOverlay'
 import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
 import CookFinishModal from '../components/CookFinishModal'
+import ConfirmDialog from '../components/ConfirmDialog'
 import {
   applyStepPulls,
   findCursorIndex,
@@ -1128,17 +1129,23 @@ export default function CookNaviPage() {
     if (!pull) return
     setPulls((prev) => [...prev, pull])
   }
-  /** 直前の1回だけ取り消す（規約F。押しすぎたときに1つずつ戻れる） */
+  /**
+   * 直前の1回だけ取り消す（規約F。押しすぎたときに1つずつ戻れる）。
+   * **何回でも押せる**（押すたびに1回ぶんずつ戻る）。2026-08-14 便GL・利用者テスト
+   * 「5回動かしたあとに押したら1回戻っただけ。『戻す』を連打しても2回目以降が押せない
+   * （更新されたあと消える）」＝動き自体は正しく、押し続けられなかったのは**ボタンが動くから**。
+   * 実測（390px）では、印のまとめの行が消えた拍子にボタンが68px上へ跳ねていた。
+   * 下の欄で**ボタンを先頭に置き**、増減する説明をその後ろに回して押す場所を固定する。
+   */
   const undoLastPull = () => setPulls((prev) => prev.slice(0, -1))
   /**
    * 自動で組んだ並びに戻す（同）。手で動かしたぶんを全部捨てるので、
    * 何が消えて何が残るかを件数つきで確認する（規約F）。
+   * 2026-08-14 便GL: ブラウザの素の確認をやめ、便FXの「完成！」と同じ画面の中の窓で聞く。
    */
+  const [reorderResetAsking, setReorderResetAsking] = useState(false)
   const resetPulls = () => {
-    const confirmText = ja.cookNavi.reorderUndoAllConfirm
-      .replace('{n}', String(pulls.length))
-      .replace('{m}', String(selectedRecipes.length))
-    if (!window.confirm(confirmText)) return
+    setReorderResetAsking(false)
     setPulls([])
   }
   /**
@@ -1152,6 +1159,17 @@ export default function CookNaviPage() {
     [timeline, pulls.length, planItems, kitchen],
   )
   const issuesByStep = useMemo(() => reorderIssuesByStep(issues), [issues])
+  /**
+   * 目安の分数が「自動で組んだ並びのもの」になっているか（2026-08-14 便GL・利用者テスト
+   * 「ごま和えを#12に下げたのに、上のカードはずっと『約17分後』のまま。（中略）
+   * 数字が載っているカードには何の印もない。上へスクロールしたら私は17分後だと信じます」）。
+   *
+   * **計算し直さない**（便GJ の申し送りどおり）。段取りの時刻は本体のエンジンが待ちの重なりと
+   * 器具の空きを見て決めているもので、画面側で並べ替えた順に数え直すと同じ計算を作り直すことになり、
+   * 数字が本体とずれる。代わりに**数字のほうを灰色にして、同じ枠の中に印を出す**
+   * （利用者の提案「数字を消すか、グレーにするか」のうち、消さない側を採った理由は報告に記載）。
+   */
+  const estimateStale = pulls.length > 0
 
   /**
    * 調理中の手順の復元（2026-08-09 便EL・docs/69）。再読み込みや他タブからの復帰では、
@@ -1808,23 +1826,49 @@ export default function CookNaviPage() {
                           </span>
                         ))}
                       </div>
-                      <p className="mt-[var(--space-md)] text-2xl font-bold text-accent-ink">
+                      {/* 手で並べ替えたあとは、この分数だけ灰色にする（2026-08-14 便GL）。
+                          自動で組んだ並びで計算した数字のままなので、色でも「いまの並びの
+                          答えではない」と分かるようにする。印の文はこの枠の下に置く */}
+                      <p
+                        data-testid="navi-total-estimate"
+                        className={`mt-[var(--space-md)] text-2xl font-bold ${
+                          estimateStale ? 'text-ink-muted' : 'text-accent-ink'
+                        }`}
+                      >
                         {ja.cookNavi.totalEstimate.replace('{n}', String(timeline.totalMinutes))}
                       </p>
                       {/* 同じ物差しでの比べ方（2026-08-09 便ES・オーナー指摘B）。
                           レシピ欄の「調理時間」とは数え方が違うので、ナビ自身が数えた
                           「1品ずつ作った場合」と並べて、何分縮んだのかを読めるようにする */}
                       {timeline.sequentialMinutes > timeline.totalMinutes && (
-                        <p data-testid="navi-total-compare" className="ja-phrase mt-1 text-sm">
+                        <p
+                          data-testid="navi-total-compare"
+                          className={`ja-phrase mt-1 text-sm ${estimateStale ? 'text-ink-muted' : ''}`}
+                        >
                           {ja.cookNavi.totalCompare
                             .replace('{s}', String(timeline.sequentialMinutes))
                             .replace('{p}', String(timeline.totalMinutes))}
-                          <span className="ml-1 font-bold text-accent-ink">
+                          <span
+                            className={`ml-1 font-bold ${
+                              estimateStale ? 'text-ink-muted' : 'text-accent-ink'
+                            }`}
+                          >
                             {ja.cookNavi.totalGain.replace(
                               '{n}',
                               String(timeline.sequentialMinutes - timeline.totalMinutes),
                             )}
                           </span>
+                        </p>
+                      )}
+                      {/* 数字と同じ枠の中に印を置く（2026-08-14 便GL・利用者テスト
+                          「数字が載っているカードには何の印もない。上へスクロールしたら
+                          私は17分後だと信じます」）。便GJ は手順リストの直前に書いていた */}
+                      {estimateStale && (
+                        <p
+                          data-testid="navi-total-estimate-stale"
+                          className="ja-phrase mt-1 text-xs font-bold text-warning"
+                        >
+                          {ja.cookNavi.estimateStaleNote}
                         </p>
                       )}
                       {/* 漬ける・冷やすなど台所を離れられる待ちが入っているときだけ添える */}
@@ -1880,9 +1924,12 @@ export default function CookNaviPage() {
                                 className="flex items-center justify-between gap-2"
                               >
                                 <RecipePill title={recipe.title} colorIndex={recipe.colorIndex} />
+                                {/* 手で並べ替えたあとは灰色にする（2026-08-14 便GL） */}
                                 <span
                                   data-testid="navi-finish-minutes"
-                                  className="shrink-0 font-bold"
+                                  className={`shrink-0 font-bold ${
+                                    estimateStale ? 'text-ink-muted' : ''
+                                  }`}
                                 >
                                   {ja.cookNavi.finishItem.replace('{n}', String(finish.minutes))}
                                 </span>
@@ -1896,7 +1943,9 @@ export default function CookNaviPage() {
                           <p
                             data-testid="navi-finish-spread"
                             className={`ja-phrase mt-[var(--space-sm)] text-sm ${
-                              finishGapWide ? 'font-bold text-accent-ink' : 'text-ink-muted'
+                              finishGapWide && !estimateStale
+                                ? 'font-bold text-accent-ink'
+                                : 'text-ink-muted'
                             }`}
                           >
                             {renderJaUnits(
@@ -1911,6 +1960,14 @@ export default function CookNaviPage() {
                                     )
                                   : ''),
                             )}
+                          </p>
+                        )}
+                        {estimateStale && (
+                          <p
+                            data-testid="navi-finish-estimate-stale"
+                            className="ja-phrase mt-[var(--space-sm)] text-xs font-bold text-warning"
+                          >
+                            {ja.cookNavi.estimateStaleNote}
                           </p>
                         )}
                       </div>
@@ -2003,17 +2060,37 @@ export default function CookNaviPage() {
                         data-testid="navi-reorder-state"
                         className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
                       >
+                        {/* 戻す手立てを**この欄の先頭**に置く（2026-08-14 便GL）。
+                            便GJ では説明・印のまとめの下に置いていたので、1回戻して印が消えた
+                            拍子にボタンが上へ跳ね（実測390pxで68px）、続けて押せなかった。
+                            増える・減るものを全部この下に回すと、押す場所は動かない */}
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            data-testid="navi-reorder-undo"
+                            onClick={undoLastPull}
+                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface px-2 py-3 text-sm font-bold text-accent-ink shadow-sm"
+                          >
+                            <Undo2 size={16} className="shrink-0" aria-hidden />
+                            <span className="ja-phrase">
+                              {ja.cookNavi.reorderUndoOne.replace('{n}', String(pulls.length))}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="navi-reorder-reset"
+                            onClick={() => setReorderResetAsking(true)}
+                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface px-2 py-3 text-sm font-bold text-accent-ink shadow-sm"
+                          >
+                            <RotateCcw size={16} className="shrink-0" aria-hidden />
+                            <span className="ja-phrase">{ja.cookNavi.reorderUndoAll}</span>
+                          </button>
+                        </div>
                         <p
                           data-testid="navi-pull-renumbered"
-                          className="ja-phrase text-xs text-ink-muted"
+                          className="ja-phrase mt-[var(--space-sm)] text-xs text-ink-muted"
                         >
                           {ja.cookNavi.pullRenumberedNote}
-                        </p>
-                        <p
-                          data-testid="navi-reorder-estimate-note"
-                          className="ja-phrase mt-1 text-xs text-ink-muted"
-                        >
-                          {renderJaUnits(ja.cookNavi.reorderEstimateNote)}
                         </p>
                         {issues.length > 0 && (
                           <p
@@ -2031,26 +2108,6 @@ export default function CookNaviPage() {
                             </span>
                           </p>
                         )}
-                        <div className="mt-[var(--space-sm)] flex gap-2">
-                          <button
-                            type="button"
-                            data-testid="navi-reorder-undo"
-                            onClick={undoLastPull}
-                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm"
-                          >
-                            <Undo2 size={16} aria-hidden />
-                            {ja.cookNavi.reorderUndoOne}
-                          </button>
-                          <button
-                            type="button"
-                            data-testid="navi-reorder-reset"
-                            onClick={resetPulls}
-                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm"
-                          >
-                            <RotateCcw size={16} aria-hidden />
-                            {ja.cookNavi.reorderUndoAll}
-                          </button>
-                        </div>
                       </div>
                     )}
 
@@ -2170,6 +2227,20 @@ export default function CookNaviPage() {
         }}
         onBack={() => setFinishAsking(false)}
         onClose={closeSessionWithoutRecord}
+      />
+      {/* 「自動の並びに戻す」の確認（2026-08-14 便GL）。ブラウザの素の確認をやめ、
+          便FXの「完成！」と同じ画面の中の窓にそろえた。中身は規約F のまま */}
+      <ConfirmDialog
+        open={reorderResetAsking}
+        title={ja.cookNavi.reorderUndoAllTitle}
+        body={ja.cookNavi.reorderUndoAllConfirm
+          .replace('{n}', String(pulls.length))
+          .replace('{m}', String(selectedRecipes.length))}
+        confirmLabel={ja.cookNavi.reorderUndoAll}
+        cancelLabel={ja.cookNavi.reorderUndoAllCancel}
+        testId="navi-reorder-reset-modal"
+        onConfirm={resetPulls}
+        onCancel={() => setReorderResetAsking(false)}
       />
       <CustomTimerModal
         open={customTimerOpen}
