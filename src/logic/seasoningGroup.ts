@@ -45,11 +45,6 @@ export function seasoningLetterMark(text: string): string | undefined {
   return half
 }
 
-/** その文字が合わせ調味料の組の印になりうるか（記号または英字A〜D） */
-export function isSeasoningMarkChar(ch: string): boolean {
-  return SEASONING_MARK_PATTERN.test(ch) || /^[A-DＡ-Ｄ]$/.test(ch)
-}
-
 /** 登録フォームでのタップ操作用: なし→1→2→…→上限→なし、の順に切り替える */
 export function nextSeasoningGroup(current: number | undefined): number | undefined {
   if (current === undefined) return 1
