@@ -2317,6 +2317,245 @@ say('|---|---|---|---|---|')
 }
 say()
 
+// ================================================================================
+//  【新規】E5' 到達率（2026-08-14 便GI・docs/68 の合格ラインの引き直し）
+//
+//  旧E5「同梱109品の平均短縮率32.6%以上」は、**火にかけた鍋の口がすぐ空く前提**で
+//  組まれていた頃の段取り（＝物理的に成立しない段取り）を基準にした値で、同じ物差しで
+//  前後を比べられない。オーナー裁定（2026-08-14）「必要ならラインの見直しをしてください」に
+//  基づき、**人が手で組んだ段取りにどれだけ近いか**で測り直す。旧E5は参考値として残す。
+// ================================================================================
+
+/**
+ * 【理論下限】この3品を、どんなに上手に並べても切れない床（分）。次の3つのいちばん大きいもの。
+ *   ① 手作業の合計 ………… 手は1組しかないので、手を動かす時間は必ず直列に積み上がる
+ *   ② 最長1品の単独所要 …… 1品の中の順序は動かせないので、いちばん長い1品より短くはならない
+ *   ③ 器具の占有 ÷ 台数 …… コンロ2口なら「火にかかっている合計時間」の半分より短くならない
+ *
+ * **③が今回の引き直しの核心**。旧E5（短縮率）も便GCが出した理論下限（①②だけ）も、
+ * 火にかけた鍋がすぐ口を空ける前提で引かれていた。③を入れると「鍋が口をふさぐぶん、
+ * どうしても長くなる」が**床の側**に入るので、物理を守った段取りが数字で罰されない。
+ *
+ * ①②③はすべて**その品を単独で作ったときの段取り**から計算する（3品を並べた結果を見ない）
+ * ＝段取りの側で数字を作れない。③のコンロは「火がついてから火を下ろす合図が出るまで」を
+ * 1台ぶんの占有として数える（見分けはN7と同じ `heatTransition`。レンジ・グリル・トースターは
+ * タイマーで切れるのでその工程の長さだけ）。**迷ったら床を低く見積もる側**に倒してある
+ * （床が低いほど到達率は悪く出る＝甘い数字にならない）。
+ */
+const soloCache = new Map()
+function soloOf(r, kitchen) {
+  const key = `${r.id}@${kitchen.burners}${kitchen.microwave ? 'm' : ''}${kitchen.grill ? 'g' : ''}${kitchen.toaster ? 't' : ''}`
+  if (!soloCache.has(key)) {
+    const tl = buildCookTimeline([r], kitchen)
+    const occupancy = { stove: 0, microwave: 0, grill: 0, toaster: 0 }
+    // コンロ以外＝その工程の長さ（扉を閉じてタイマーが切れれば空く）
+    for (const it of tl.items) {
+      const use = applianceUse(it, kitchen)
+      if (!use || use.key === 'stove') continue
+      occupancy[use.key] += use.end - use.start
+    }
+    // コンロ＝火がついてから火を下ろす合図が出るまで（その間ずっと1口ふさがる）。
+    // 火が下りる工程が**コンロの前でやる一手**（「みそを溶いて火を止める」）ならその工程の終わりまで、
+    // そうでないもの（冷ます・寝かせる／レンジやグリルへ移る）は**その手前**で火が下りていると数える。
+    // ＝鍋を火から下ろして置いておくぶんは口をふさがない側に倒す（床を低く見積もる側）。
+    let onFrom = null
+    let lastEnd = 0
+    for (const it of tl.items) {
+      lastEnd = Math.max(lastEnd, it.endMin)
+      const tr = heatTransition(it)
+      if (tr === 'on') {
+        if (onFrom == null) onFrom = it.startMin
+      } else if (tr === 'off' && onFrom != null) {
+        const atStove = stepAppliance(it.text) === 'stove'
+        occupancy.stove += Math.max(0, (atStove ? it.endMin : it.startMin) - onFrom)
+        onFrom = null
+      }
+    }
+    if (onFrom != null) occupancy.stove += Math.max(0, lastEnd - onFrom)
+    soloCache.set(key, {
+      total: tl.totalMinutes,
+      active: tl.items.reduce((sum, it) => sum + it.activeMinutes, 0),
+      occupancy,
+    })
+  }
+  return soloCache.get(key)
+}
+
+/** 3品の理論下限（分）と、その内訳 */
+function floorOf(trio, kitchen = DEFAULT_KITCHEN) {
+  const solos = trio.map((r) => soloOf(r, kitchen))
+  const hands = solos.reduce((sum, s) => sum + s.active, 0)
+  const longest = Math.max(...solos.map((s) => s.total))
+  let load = 0
+  let loadKey = null
+  for (const key of Object.keys(APPLIANCE_LABEL)) {
+    const capacity = applianceCapacity(kitchen, key)
+    if (capacity <= 0) continue
+    const need = solos.reduce((sum, s) => sum + s.occupancy[key], 0) / capacity
+    if (need > load) {
+      load = need
+      loadKey = key
+    }
+  }
+  const floor = Math.max(hands, longest, load)
+  return {
+    floor,
+    hands,
+    longest,
+    load,
+    loadKey,
+    // 便GC互換（①②だけ）の下限。引き直しで床がどれだけ動いたかを見るために並べて出す
+    floorGC: Math.max(hands, longest),
+    driver: floor === load && load > longest && load > hands ? '器具' : floor === longest ? '最長1品' : '手作業',
+  }
+}
+
+/** その3品の到達率（理論下限に対して何%増しか） */
+function reachOf(trio, kitchen = DEFAULT_KITCHEN) {
+  const f = floorOf(trio, kitchen)
+  const total = buildCookTimeline(trio, kitchen).totalMinutes
+  return {
+    ...f,
+    trio,
+    total,
+    reach: f.floor <= 0 ? 0 : pct(total - f.floor, f.floor),
+    reachGC: f.floorGC <= 0 ? 0 : pct(total - f.floorGC, f.floorGC),
+    impossible: total < f.floor,
+  }
+}
+
+/**
+ * 【E5'の線】到達率の**中央値10%以下**。
+ *
+ * 根拠（人の実測から取る。こちらの都合で動かせないようにするため）:
+ *   - `docs/71` R3／2026-08-14 R4 の3品（鶏むね肉のみそマヨ焼き／ごま和え／みそ汁）を
+ *     **人が手で組むと約30分・完成の開き0分**。その組み方（R3原文「私ならこうします」）は
+ *     「鶏を切って漬ける→その10分で副菜→鶏をグリルへ→焼いている間に汁物と和え物」＝
+ *     **いちばん長い1品の鎖を0分から始めて、ほかの品を全部その隙間に畳み込む**形。
+ *     同じ物差し（アプリの手順ごとの見積り）で並べ直すと36分＝**理論下限そのもの＝到達率0.0%**。
+ *   - 人には見積り誤差が無い。機械は**分数の書かれていない手順を一律4分**と仮定して並べるので
+ *     （DEFAULT_ACTIVE_MINUTES）、どれだけ正しく並べても**1手順ぶんの粒度**は残る。
+ *     いちばん理論下限の短い標本群（C: 手入力・下限41分前後）でも 4分 ÷ 41分 ＝ 9.8%。
+ *   - よって **線＝人の到達率（0%）＋1手順ぶんの粒度（約10%）＝ 中央値10%以下**。
+ *
+ * 判定は**同梱109品・野生の混合・ホールドアウトの3つとも**で行う
+ * （旧E5は同梱109品だけを見ていた。「同梱だけで判断しない」＝docs/72 §5 の反省）。
+ */
+const E5_REACH_LINE = 10
+
+say('=========================================================')
+say(" 【新規】E5' 到達率（合格ラインの引き直し・2026-08-14 便GI）")
+say('=========================================================')
+say()
+say('  **なぜ引き直したか**: 旧E5「同梱109品の平均短縮率32.6%以上」は、**火にかけた鍋の口が')
+say('  すぐ空く前提**で組まれていた頃の段取りを基準にした値。いまの段取りは物理を守るように')
+say('  なった（便GA〜GG）ので、**同じ物差しで前後を比べられない**。')
+say('  代わりに「**人が手で組んだ段取りにどれだけ近いか**」で測る。')
+say()
+say('  **理論下限**＝この3品をどんなに上手に並べても切れない床。次の3つのいちばん大きいもの:')
+say('    ① 手作業の合計（手は1組しかない）')
+say('    ② 最長1品の単独所要（1品の中の順序は動かせない）')
+say('    ③ 器具の占有の合計 ÷ 台数（コンロ2口なら、火にかかっている合計時間の半分）')
+say('  ③が引き直しの核心。**旧E5も便GCの理論下限（①②だけ）も、鍋がすぐ口を空ける前提**だった。')
+say('  ③を床に入れると「鍋が口をふさぐぶん長くなる」が物理として床に入り、**正しい段取りが')
+say('  数字で罰されない**。①②③とも**単独で作ったときの段取り**から計算する（並べた結果を見ない）。')
+say()
+say(`  **到達率**＝（ナビの所要時間 − 理論下限）÷ 理論下限。**線＝中央値 ${E5_REACH_LINE}%以下**。`)
+say('  線の根拠: 人（R4・料理歴20年）の手組みは理論下限そのもの（**到達率0.0%**）。人には見積り')
+say('  誤差が無いが、機械は分数の書かれていない手順を一律4分と仮定して並べるので、正しく並べても')
+say('  **1手順ぶんの粒度**が残る（いちばん下限の短い標本群でも 4分÷41分＝9.8%）。')
+say('  ＝**人の到達率0% ＋ 1手順ぶん ＝ 10%**。')
+say()
+say('| 組み合わせ | 通り数 | 理論下限の中央値(分) | ナビの中央値(分) | **到達率の中央値** | 平均 | 悪いほう1割 | 最大 | 判定 |')
+say('|---|---|---|---|---|---|---|---|---|')
+const e5Sets = [
+  { key: '同梱109品（無作為500通り）', triples: comboSets[0].triples, judged: true },
+  { key: 'A: URL取込（全20通り）', triples: comboSets[1].triples, judged: false },
+  { key: 'B: 貼り付け取込（全20通り）', triples: comboSets[2].triples, judged: false },
+  { key: 'C: 手入力（全20通り）', triples: comboSets[3].triples, judged: false },
+  { key: '野生の混合A+B+C（無作為200通り）', triples: comboSets[4].triples, judged: true },
+  { key: 'ホールドアウト混合（全84通り）', triples: allTriples(holdoutAll), judged: true },
+]
+const e5Rows = new Map()
+for (const s of e5Sets) {
+  const rows = s.triples.map((t) => reachOf(t))
+  e5Rows.set(s.key, rows)
+  const reaches = rows.map((r) => r.reach).sort((a, b) => a - b)
+  const p90 = reaches[Math.min(reaches.length - 1, Math.floor(reaches.length * 0.9))]
+  const med = median(reaches)
+  say(
+    `| ${s.key} | ${rows.length} | ${f1(median(rows.map((r) => r.floor)))} | ${f1(median(rows.map((r) => r.total)))} | ` +
+      `**${f1(med)}%** | ${f1(reaches.reduce((a, b) => a + b, 0) / reaches.length)}% | ${f1(p90)}% | ${f1(Math.max(...reaches))}% | ` +
+      `${s.judged ? verdict(med <= E5_REACH_LINE) : '（参考）'} |`,
+  )
+}
+say()
+{
+  say('  到達率のいちばん悪い3例（＝理論下限からいちばん離れた段取り）:')
+  const worst = [...e5Rows.get('同梱109品（無作為500通り）'), ...e5Rows.get('野生の混合A+B+C（無作為200通り）')]
+    .slice()
+    .sort((a, b) => b.reach - a.reach)
+    .slice(0, 3)
+  for (const r of worst) {
+    say(`    - ${r.trio.map((x) => x.title).join(' / ')}`)
+    say(`      ナビ${r.total}分 / 理論下限${f1(r.floor)}分（${r.driver}が決めた）→ **${f1(r.reach)}%増し**`)
+  }
+}
+say()
+say('  ※理論下限を決めているのはどれか（床の内訳）:')
+say()
+say('| 組み合わせ | 手作業の合計が決めた | 最長1品が決めた | **器具の占有が決めた** | 便GC互換の下限(①②のみ)との差(分) |')
+say('|---|---|---|---|---|')
+for (const s of e5Sets) {
+  const rows = e5Rows.get(s.key)
+  const by = (k) => f1(pct(rows.filter((r) => r.driver === k).length, rows.length)) + '%'
+  const diff = rows.reduce((sum, r) => sum + (r.floor - r.floorGC), 0) / rows.length
+  say(`| ${s.key} | ${by('手作業')} | ${by('最長1品')} | **${by('器具')}** | +${f1(diff)}分 |`)
+}
+say()
+say('  ※**理論下限を下回った組み合わせ＝物理的に成立しない段取り**（E5\'-b・線＝0件）。')
+say('     手も器具も足りていないのに「できる」と言っている段取りなので、短縮効果ではなく')
+say('     **正直**の問題（序列「安全>正直>短縮効果」）。器具の設定ごとに数える。')
+say()
+say('| 台所の設定 | ' + e5Sets.map((s) => s.key.replace(/（.*/, '')).join(' | ') + ' | 判定 |')
+say('|---|' + e5Sets.map(() => '---').join('|') + '|---|')
+const impossibleSamples = []
+for (const k of KITCHENS) {
+  const counts = e5Sets.map((s) => {
+    const bad = s.triples.filter((t) => reachOf(t, k.kitchen).impossible)
+    for (const t of bad.slice(0, 2)) impossibleSamples.push({ label: k.key, kitchen: k.kitchen, trio: t })
+    return bad.length
+  })
+  say(`| ${k.key} | ${counts.map((c) => `**${c}件**`).join(' | ')} | ${verdict(counts.reduce((a, b) => a + b, 0) === 0)} |`)
+}
+say()
+if (impossibleSamples.length > 0) {
+  say('  下回った組み合わせの実例（先頭3件）:')
+  for (const { label, kitchen, trio } of impossibleSamples.slice(0, 3)) {
+    const r = reachOf(trio, kitchen)
+    say(`    - [${label}] ${trio.map((x) => x.title).join(' / ')}`)
+    say(
+      `      ナビ${r.total}分 < 理論下限${f1(r.floor)}分（手作業${r.hands}分 / 最長1品${r.longest}分 / 器具${f1(r.load)}分＝${r.loadKey ?? '—'}）`,
+    )
+  }
+  say()
+}
+say('  ※旧E5（同梱109品の平均短縮率32.6%以上）は**参考値として残す**（消さない・前後の比較に使う）。')
+say('     上の「器具の設定ごと」の表に出している値がそれ。')
+say()
+{
+  const r3 = [...buildPasteRecipes(r3PasteSamples, 'R3再現'), ...buildManualRecipes(r3ManualSamples, 'R3再現')]
+  const r = reachOf(r3)
+  say('  ※R4/R3の3品（人の手組み＝約30分・完成の開き0分）での到達率:')
+  say(
+    `     理論下限 ${r.floor}分（手作業の合計${r.hands}分 / 最長1品${r.longest}分 / 器具${f1(r.load)}分＝${r.loadKey ?? '—'}）`,
+  )
+  say(`     ナビ ${r.total}分 → **到達率 ${f1(r.reach)}%**`)
+  say('     人の手組みは「鶏を切って漬ける→その10分で副菜→鶏をグリルへ→焼いている間に汁物と和え物」')
+  say(`     ＝最長1品（鶏 ${r.longest}分）の鎖を0分から始め、ほかの品をその隙間に畳み込む形＝**到達率0.0%**。`)
+}
+say()
+
 // ------------------------------------------------- 器具の設定ごとの13項目（2026-08-13 便GC）
 say('=========================================================')
 say(' 【器具の設定ごと】14項目（既存7＋新規7）')

@@ -1101,6 +1101,25 @@ export function stepHeatShift(step: Step, kitchen: KitchenEquipment): HeatShift 
 }
 
 /**
+ * 【火が下りるのは、その工程の手前か終わりか】2026-08-14 便GI。
+ *
+ * 同じ「火から下りる工程」でも、鍋がコンロを離れる時点は2つある。
+ *   終わり … 「豆腐を加え、弱火で5分ほど煮て味をなじませたら器に盛る」
+ *             ＝その工程の**間ずっと火にかかっている**。5分ぶん口はふさがったまま
+ *   手前 … 「火を止めてそのまま10分おき、味をしみ込ませる」「器に盛る」
+ *             ＝火は工程の頭で下りている。**置いておくだけの時間まで口をふさがない**
+ *
+ * 見分けは位置くらべ（この画面のほかの規則と同じ）。**火にかける語が、火を下ろす語より前**にあれば、
+ * その工程の間は火の上にいる＝終わりに下りる。
+ */
+function heatOffAtEnd(step: Step): boolean {
+  const text = maskNonWaitNouns(stepMainText(step.text))
+  const off = lastEndOfPatterns(text, [HEAT_OFF_PATTERN])
+  const on = lastEndOfPatterns(text, [HEAT_ON_PATTERN])
+  return on >= 0 && on < off
+}
+
+/**
  * 火にかけたまま、次の手順まで空けてよい時間（分）。
  *
  * 3分の根拠は利用者自身の手順そのもの＝「豆腐を入れて味噌を溶くのは焼き上がりの3分前」。
@@ -1927,11 +1946,20 @@ export function buildCookTimeline(
   /** その工程が器具をふさぐ長さ（分） */
   const useSpan = (step: Job['steps'][number]) =>
     step.kind === 'wait' ? step.waitMinutes : step.activeMinutes
-  /** その工程を `at` から始めても、器具の台数を超えないか（2026-08-13 便GC・docs/72 第3段 A） */
-  const fitsAppliance = (step: Job['steps'][number], at: number) =>
-    !step.occupies || step.applianceKey == null
+  /**
+   * その工程を `at` から始めても、器具の台数を超えないか（2026-08-13 便GC・docs/72 第3段 A）。
+   * **その品が火にかけたままの鍋は、自分の口としては数えない**（同じ鍋の続きだから。2026-08-14 便GI）
+   */
+  const fitsAppliance = (job: Job, at: number) => {
+    const step = job.steps[job.ptr]
+    return !step.occupies || step.applianceKey == null
       ? true
-      : schedule.canUse(step.applianceKey, at, at + useSpan(step))
+      : schedule.canUse(step.applianceKey, at, at + useSpan(step), job.recipeId)
+  }
+  /** その工程のあと、その品の鍋がコンロに残るか（＝火を止めるまで口をふさぎ続ける） */
+  const staysOnHeat = (job: Job, step: Job['steps'][number]) =>
+    step.applianceKey === 'stove' &&
+    (step.heatShift === 'on' || (step.heatShift === 'keep' && job.onHeat))
 
   const hasRemaining = () => jobs.some((j) => j.ptr < j.steps.length)
   /** 直前に出した手作業の種類（同じ種類の作業を続けてまとめるために覚えておく） */
@@ -1965,7 +1993,7 @@ export function buildCookTimeline(
 
     // 【器具の制約】設定した台数を超えて同時に使う工程は、いまは始められない
     // （2026-08-13 便GC・docs/72 第3段 A。R2「うちは1口なので、この段取りはそもそも成立しません」）
-    const usable = ready.filter((j) => fitsAppliance(j.steps[j.ptr], cookAt))
+    const usable = ready.filter((j) => fitsAppliance(j, cookAt))
     if (usable.length === 0) {
       // 全部が器具の空き待ち＝いちばん早く空く時刻（または次に待ちが明ける時刻）まで進める
       let nextAt = Number.POSITIVE_INFINITY
@@ -2106,7 +2134,7 @@ export function buildCookTimeline(
     const ignitionNow = (j: Job) => {
       const next = ignitesNext(j)
       if (!next || next.applianceKey == null || !next.occupies) return 1
-      if (!schedule.hasSpare(next.applianceKey, cookAt)) return 1
+      if (!schedule.hasSpare(next.applianceKey, cookAt, j.recipeId)) return 1
       // 前倒しするのは**いま着手できる中でいちばん時間の掛かる品**だけにする。
       // どの品でも前倒しすると、短い品まで先に仕上がって完成の開きが広がる（実測で確認）
       const longest = Math.max(...ready.map(remainingSpan))
@@ -2326,7 +2354,7 @@ export function buildCookTimeline(
     if (igniteFrom > cookAt) {
       // 着火を後ろへ回す（2026-08-14 便GG）。器具が空いていなければずらさない
       startMin = igniteFrom
-      if (!fitsAppliance(step, startMin)) startMin = cookAt
+      if (!fitsAppliance(chosen, startMin)) startMin = cookAt
     }
     if (holdFinish) {
       // ほかの品の完成見込みに合わせて着地させる（そこまで待てないときは、次に手が必要になる
@@ -2353,9 +2381,17 @@ export function buildCookTimeline(
         )
       }
       // 後ろへずらした先で器具が空いていなければ、ずらさない（器具の制約が先。2026-08-13 便GC）
-      if (!fitsAppliance(step, startMin)) startMin = cookAt
+      if (!fitsAppliance(chosen, startMin)) startMin = cookAt
     }
-    if (step.occupies && step.applianceKey != null) {
+    // 【火にかけた鍋は、止めるまで口をふさぎ続ける】（2026-08-14 便GI）。
+    // 火が残る工程は「終わりの決まっていない占有」にし、火を止めた時点で口を返す。
+    // 火の残らない工程（レンジ・グリル・湯を切る等）は従来どおりその工程の長さだけふさぐ
+    const holdsBurner = staysOnHeat(chosen, step)
+    // すでに火にかけている鍋の続きは、同じ1口を使う（二重に数えない）
+    const samePot = chosen.onHeat && step.applianceKey === 'stove'
+    if (holdsBurner) {
+      schedule.hold('stove', chosen.recipeId, startMin)
+    } else if (step.occupies && step.applianceKey != null && !samePot) {
       schedule.occupy(step.applianceKey, startMin, startMin + useSpan(step))
     }
     // 前に仕掛けた待ちの後始末はここで済む（締め切りの管理から外す）。
@@ -2365,6 +2401,11 @@ export function buildCookTimeline(
     // 火にかかっているかを引き継ぐ（2026-08-14 便GG）。'keep' の工程では変えない
     if (step.heatShift === 'on') chosen.onHeat = true
     else if (step.heatShift === 'off') chosen.onHeat = false
+    // 火が消えたら口を返す（2026-08-14 便GI）。返す時刻は火が下りる時点
+    // （「弱火で5分煮て器に盛る」はその工程の終わり／「火を止めてそのまま10分おく」はその手前）
+    if (!chosen.onHeat) {
+      schedule.release(chosen.recipeId, startMin + (heatOffAtEnd(step) ? useSpan(step) : 0))
+    }
     if (step.kind === 'wait') {
       const endMin = startMin + step.waitMinutes
       chosen.waitDoneAt = endMin
@@ -2391,6 +2432,11 @@ export function buildCookTimeline(
       items.push(makeItem(items.length + 1, chosen, step, startMin, endMin))
     }
     chosen.ptr++
+    // その品を最後まで出し終えたら、火にかけたままでも口を返す（食卓に出す＝火から下りる）
+    if (chosen.ptr >= chosen.steps.length) {
+      chosen.onHeat = false
+      schedule.release(chosen.recipeId, startMin + useSpan(step))
+    }
   }
 
   const totalMinutes = items.reduce((max, it) => Math.max(max, it.endMin), 0)
