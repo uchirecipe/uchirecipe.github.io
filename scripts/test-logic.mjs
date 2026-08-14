@@ -18218,6 +18218,7 @@ Aみりん 大さじ1
     typeof ja.cookNavi.finishSpreadCold === 'string' && ja.cookNavi.finishSpreadCold.includes('{first}'),
     true,
   )
+}
 
 // ---------- 便GL: 手順を進めたときのタイマーの一言 / 読み上げ名 ----------
 {
