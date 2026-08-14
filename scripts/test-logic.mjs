@@ -183,6 +183,13 @@ import {
   splitRecipeNoteLines,
 } from '../src/logic/naviRecipeNotes.ts'
 import {
+  moveStepDownPull,
+  moveStepUpPull,
+  reorderIssues,
+  reorderIssuesByStep,
+  reorderStepKey,
+} from '../src/logic/cookReorder.ts'
+import {
   advanceCursor,
   applyStepPulls,
   backCursor,
@@ -16722,10 +16729,14 @@ eq(
     fiSaved({ selectedIds: [10, 20], showTimeline: false, trialActive: false, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
     undefined,
   )
+  // 2026-08-14 便GJ で線を1本だけ動かした。段取りの一覧から手で並べ替えられるようになり、
+  // **調理中モードを開かずに並べ替える**のが普通の使い方になったため、
+  // 並べ替えは「調理中の位置があるか」ではなく「段取りが出ているか」で読む。
+  // 便FI の時点では並べ替えの手立てが調理中モードの中にしか無かったので、どちらでも同じだった
   eq(
-    'FI-SAVE 調理中の手順を覚えていない覚え書きの並べ替えも読まない',
+    'GJ-SAVE 調理中の手順を覚えていなくても、段取りが出ていれば並べ替えは読む',
     fiSaved({ selectedIds: [10, 20], showTimeline: true, trialActive: false, pulls: [{ before: fiAt(0), target: fiAt(1) }] })?.pulls,
-    undefined,
+    [{ before: fiAt(0), target: fiAt(1) }],
   )
   eq(
     'FI-SAVE 並べ替えが配列でない壊れた覚え書きでも、他の項目は読める',
@@ -16743,6 +16754,169 @@ eq(
     }),
     true,
   )
+}
+
+// ---------- 便GJ: 段取りを手で並べ替える(2026-08-14・docs/71 R3/R4) ----------
+// R3「段取りを手で並べ替える手段がない。上下ボタンもドラッグもなし。出てきた順番が
+//     気に入らなくても直せません。」
+// R4「順番の入れ替えも…できません。前後させると番号が合わなくなり、調理中モードは元の順で
+//     進みます。」
+//
+// 動かす指示は**色で先にしたときと同じ `pulls` 1件**で表す（覚え書きの項目を増やさない＝
+// docs/69「書ける状態は cookNaviSession ＋ current ＋ pulls だけ」）。
+{
+  const gjPlan = [
+    { recipeId: 10, stepIndex: 0 }, // 0
+    { recipeId: 20, stepIndex: 0 }, // 1
+    { recipeId: 10, stepIndex: 1 }, // 2
+    { recipeId: 30, stepIndex: 0 }, // 3
+  ]
+  const gjKey = (list) => list.map((x) => `${x.recipeId}:${x.stepIndex}`)
+  const gjMove = (list, index, dir) => {
+    const pull = dir === 'up' ? moveStepUpPull(list, index) : moveStepDownPull(list, index)
+    return pull ? applyStepPulls(list, [pull]) : list
+  }
+
+  // --- ① 1つずつ動かせる ---
+  eq('GJ-MOVE 手順を1つ上へ動かせる', gjKey(gjMove(gjPlan, 2, 'up')), [
+    '10:0',
+    '10:1',
+    '20:0',
+    '30:0',
+  ])
+  eq('GJ-MOVE 手順を1つ下へ動かせる', gjKey(gjMove(gjPlan, 1, 'down')), [
+    '10:0',
+    '10:1',
+    '20:0',
+    '30:0',
+  ])
+  eq('GJ-MOVE いちばん上の手順は上へ動かせない', moveStepUpPull(gjPlan, 0), undefined)
+  eq(
+    'GJ-MOVE いちばん下の手順は下へ動かせない',
+    moveStepDownPull(gjPlan, gjPlan.length - 1),
+    undefined,
+  )
+  eq('GJ-MOVE 段取りの外を指しても指示を作らない', moveStepUpPull(gjPlan, 99), undefined)
+  eq('GJ-MOVE 手順の数は動かしても変わらない（1つも消えない）', gjMove(gjPlan, 3, 'up').length, 4)
+  // 上下は同じ動きの裏表＝押しすぎても同じ数だけ押し返せば戻る（規約F「元に戻せる」）
+  eq(
+    'GJ-MOVE 上へと下へは同じ動きの裏表（i を上へ ＝ i-1 を下へ）',
+    gjKey(gjMove(gjPlan, 2, 'up')),
+    gjKey(gjMove(gjPlan, 1, 'down')),
+  )
+  eq(
+    'GJ-MOVE 上へ→下へで元の並びに戻る',
+    gjKey(gjMove(gjMove(gjPlan, 2, 'up'), 1, 'down')),
+    gjKey(gjPlan),
+  )
+  eq(
+    'GJ-MOVE いちばん下の手順を上へ動かしても壊れない',
+    gjKey(gjMove(gjPlan, 3, 'up')),
+    ['10:0', '20:0', '30:0', '10:1'],
+  )
+  // 覚えるのは指示だけ＝読み込み直して当て直しても同じ並びになる
+  // 指示は**その場に出ている並び**から作る（画面と同じ）。並べて当て直すと同じ結果になる
+  {
+    const first = moveStepUpPull(gjPlan, 2)
+    const afterFirst = applyStepPulls(gjPlan, [first])
+    const second = moveStepDownPull(afterFirst, 0)
+    eq(
+      'GJ-SAVE 覚えた指示を組み直した段取りへ当て直すと、同じ並びになる',
+      gjKey(applyStepPulls(gjPlan, [first, second])),
+      gjKey(applyStepPulls(afterFirst, [second])),
+    )
+    eq(
+      'GJ-SAVE 2回動かした結果（読み込み直しても同じ並びに戻る）',
+      gjKey(applyStepPulls(gjPlan, [first, second])),
+      ['10:1', '10:0', '20:0', '30:0'],
+    )
+  }
+  eq(
+    'GJ-SAVE 手順が消えていた指示は飛ばす（推測で近い場所に当てない）',
+    gjKey(applyStepPulls(gjPlan, [{ before: { recipeId: 99, stepIndex: 0 }, target: gjPlan[1] }])),
+    gjKey(gjPlan),
+  )
+
+  // --- ② 動かした結果が「うちの台所では無理」になったとき ---
+  // 止めない。**印を出すだけ**（司令部の判断）。自動で組んだ並びを同じやり方で数えた結果を
+  // 引き算するので、並びを変えていなければ印は1つも出ない。
+  const gjRecipe = (id, title, steps) => ({
+    id,
+    title,
+    steps: steps.map((s) => (typeof s === 'string' ? { text: s } : s)),
+  })
+  const gjKitchen = (burners) => ({ burners, microwave: true, grill: true, toaster: true })
+  const gjRecipes = [
+    gjRecipe(1, 'GJ煮物', ['大根を一口大に切る。', '鍋に大根とだしを入れて中火で12分煮る。', '器に盛る。']),
+    gjRecipe(2, 'GJ炒めもの', ['にんじんを細切りにする。', 'フライパンで豚肉を炒める。', '器に盛る。']),
+  ]
+  const gjBase = buildCookPlan(gjRecipes, gjKitchen(2))
+  eq(
+    'GJ-WARN 並びを変えていなければ印は1つも出ない（自動の段取りの見え方は変わらない）',
+    reorderIssues(gjBase.items, gjBase.items, gjKitchen(2)).length,
+    0,
+  )
+  eq(
+    'GJ-WARN コンロ1口でも、自動で組んだ並びには印を出さない',
+    reorderIssues(
+      buildCookPlan(gjRecipes, gjKitchen(1)).items,
+      buildCookPlan(gjRecipes, gjKitchen(1)).items,
+      gjKitchen(1),
+    ).length,
+    0,
+  )
+  // その品の中の順番を逆にすると、必ず印が出る（見積りではなく確かめられる事実）
+  const gjSameRecipeIndexes = gjBase.items
+    .map((item, index) => ({ item, index }))
+    .filter((x) => x.item.recipeId === 1)
+  const gjSwapped = applyStepPulls(gjBase.items, [
+    { before: gjSameRecipeIndexes[0].item, target: gjSameRecipeIndexes[1].item },
+  ])
+  const gjSwapIssues = reorderIssues(gjBase.items, gjSwapped, gjKitchen(2))
+  eq(
+    'GJ-WARN その品の手順をレシピの順より前に出すと印が出る',
+    gjSwapIssues.some((i) => i.kind === 'recipeOrder'),
+    true,
+  )
+  eq(
+    'GJ-WARN 印が付くのは、前に出したその手順',
+    gjSwapIssues.find((i) => i.kind === 'recipeOrder')?.stepIndex,
+    gjSameRecipeIndexes[1].item.stepIndex,
+  )
+  eq(
+    'GJ-WARN 動かしても手順は1つも消えない（印を出すだけで段取りは壊さない）',
+    gjSwapped.length,
+    gjBase.items.length,
+  )
+  // コンロ1口の家で、煮込みの待ちの中へ別の品の炒めものを入れると口が足りない
+  {
+    const one = buildCookPlan(gjRecipes, gjKitchen(1))
+    const simmer = one.items.findIndex((x) => x.recipeId === 1 && x.kind === 'wait')
+    const fry = one.items.findIndex((x) => x.recipeId === 2 && /炒め/.test(x.text))
+    if (simmer >= 0 && fry > simmer) {
+      const moved = applyStepPulls(one.items, [
+        { before: one.items[simmer + 1], target: one.items[fry] },
+      ])
+      const issues = reorderIssues(one.items, moved, gjKitchen(1))
+      eq(
+        'GJ-WARN 1口の家で、煮込みの待ちの中へ別の品の炒めものを入れると印が出る',
+        issues.some((i) => i.kind === 'appliance' && i.appliance === 'stove'),
+        true,
+      )
+      eq(
+        'GJ-WARN 同じ並びを2口で見ると、その印は出ない（設定した台数で判断している）',
+        reorderIssues(one.items, moved, gjKitchen(2)).some((i) => i.kind === 'appliance'),
+        false,
+      )
+    }
+  }
+  // 印は手順ごとにまとめて引ける（画面はこの表を引くだけ）
+  eq(
+    'GJ-WARN 印は手順ごとにまとめて引ける',
+    reorderIssuesByStep(gjSwapIssues).get(reorderStepKey(gjSameRecipeIndexes[1].item))?.length >= 1,
+    true,
+  )
+  eq('GJ-WARN 印が無い段取りの表は空', reorderIssuesByStep([]).size, 0)
 }
 
 // ---------- 便FF-2/3/4: レシピタブの絞り込みの作り直し(2026-08-10 オーナー指示) ----------

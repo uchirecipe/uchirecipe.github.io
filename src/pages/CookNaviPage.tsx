@@ -457,7 +457,7 @@ function TimelineCard({
             onClick={onMoveUp}
             disabled={!canMoveUp}
             aria-label={ja.cookNavi.reorderUpAria.replace('{n}', String(item.order))}
-            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-2.5 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
+            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-3 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
           >
             <ChevronUp size={18} aria-hidden />
             {ja.cookNavi.reorderUp}
@@ -468,7 +468,7 @@ function TimelineCard({
             onClick={onMoveDown}
             disabled={!canMoveDown}
             aria-label={ja.cookNavi.reorderDownAria.replace('{n}', String(item.order))}
-            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-2.5 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
+            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-3 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
           >
             <ChevronDown size={18} aria-hidden />
             {ja.cookNavi.reorderDown}
