@@ -46,6 +46,7 @@ import {
   hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
+  waitTimerSeconds,
   type TimelineItem,
 } from '../logic/cookNavi'
 import { finishSpread, isFinishSpreadWide, recipeFinishTimes } from '../logic/cookFinish'
@@ -239,6 +240,9 @@ function TimelineCard({
   // 判定は logic/cookNavi.ts showsWaitTimerButton）。今回の調理では終わらない待ち
   // （「冷蔵庫で半日〜一晩漬ける」）だけは分数を持たないので出さない（同 便FL）
   const showWaitTimerButton = showsWaitTimerButton(item)
+  // 幅で書かれた待ち（「12〜15分焼く」）は短いほうで鳴らす（2026-08-14 便GK・logic/cookNavi.ts）
+  const timerSeconds = waitTimerSeconds(item)
+  const timerIsShorter = showWaitTimerButton && timerSeconds < item.waitMinutes * 60
   return (
     <li
       id={naviStepDomId(item.recipeId, naviStepKey(item))}
@@ -386,7 +390,7 @@ function TimelineCard({
               ) : (
                 <button
                   type="button"
-                  onClick={() => onStartTimer(item, item.waitMinutes * 60)}
+                  onClick={() => onStartTimer(item, timerSeconds)}
                   className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
                 >
                   <TimerIcon size={16} aria-hidden />
@@ -394,6 +398,12 @@ function TimelineCard({
                 </button>
               ))}
           </div>
+          {/* 幅で書かれた待ちは、鳴る長さがブロックの分数と違うので先に書く（2026-08-14 便GK） */}
+          {timerIsShorter && (
+            <p data-testid="navi-wait-timer-range" className="mt-1 text-xs text-ink-muted">
+              {ja.cookNavi.waitTimerRangeNote.replace('{n}', String(Math.round(timerSeconds / 60)))}
+            </p>
+          )}
           {showFillHint && !item.longRest && (
             <p className="mt-1 text-xs text-ink-muted">{ja.cookNavi.waitFillHint}</p>
           )}
@@ -1808,6 +1818,22 @@ export default function CookNaviPage() {
                           </span>
                         ))}
                       </div>
+                      {/* 手順の分数を足した数と食い違う品があるときだけ、その理由を1行置く
+                          （2026-08-14 便GK・実操作テスト3回目「鶏だけ3分合わない」）。
+                          差の正体は、待ちの中に置いた手順ぶんの重なり */}
+                      {timeline.recipes.some(
+                        (r) =>
+                          r.stepSumMinutes != null &&
+                          r.soloMinutes != null &&
+                          r.stepSumMinutes > r.soloMinutes,
+                      ) && (
+                        <p
+                          data-testid="navi-legend-overlap-note"
+                          className="ja-phrase mt-1 text-xs text-ink-muted"
+                        >
+                          {ja.cookNavi.legendOverlapNote}
+                        </p>
+                      )}
                       <p className="mt-[var(--space-md)] text-2xl font-bold text-accent-ink">
                         {ja.cookNavi.totalEstimate.replace('{n}', String(timeline.totalMinutes))}
                       </p>
@@ -1890,13 +1916,17 @@ export default function CookNaviPage() {
                             )
                           })}
                         </ul>
-                        {/* 開きは冷たくして出す品を除いて数える（先に仕上げて冷やすのは正しい動き）。
-                            大きいときは色を変えて、続けて何が起きるかを1行足す */}
+                        {/* 開きは全部の品で数える（2026-08-14 便GK。冷たい品を黙って外すと
+                            「4分は言うのに17分は何も言わない」になる）。先にできる品が
+                            冷たい品なら放置ではなくそう組んでいるので、警告ではなく理由を書く。
+                            温かい品どうしで開きが大きいときは色を変えて、続けて何が起きるかを1行足す */}
                         {finishGap.minutes > 0 && finishGap.first && finishGap.last && (
                           <p
                             data-testid="navi-finish-spread"
                             className={`ja-phrase mt-[var(--space-sm)] text-sm ${
-                              finishGapWide ? 'font-bold text-accent-ink' : 'text-ink-muted'
+                              finishGapWide && !finishGap.first.cold
+                                ? 'font-bold text-accent-ink'
+                                : 'text-ink-muted'
                             }`}
                           >
                             {renderJaUnits(
@@ -1904,12 +1934,17 @@ export default function CookNaviPage() {
                                 .replace('{first}', finishTitleOf(finishGap.first.recipeId))
                                 .replace('{last}', finishTitleOf(finishGap.last.recipeId))
                                 .replace('{n}', String(finishGap.minutes)) +
-                                (finishGapWide
-                                  ? ja.cookNavi.finishSpreadWide.replace(
+                                (finishGap.first.cold
+                                  ? ja.cookNavi.finishSpreadCold.replace(
                                       '{first}',
                                       finishTitleOf(finishGap.first.recipeId),
                                     )
-                                  : ''),
+                                  : finishGapWide
+                                    ? ja.cookNavi.finishSpreadWide.replace(
+                                        '{first}',
+                                        finishTitleOf(finishGap.first.recipeId),
+                                      )
+                                    : ''),
                             )}
                           </p>
                         )}
