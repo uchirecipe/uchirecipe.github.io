@@ -17380,8 +17380,7 @@ Aみりん 大さじ1
 // 数え方は docs/72 の N1（完成の揃い）と同じにそろえる＝**その品の最後の工程が終わる時刻**、
 // 開きは**冷たくして出す品を除いた**最大−最小、線は全体の目安の30%。
 {
-  const { recipeFinishTimes, finishSpread, isFinishSpreadWide, FINISH_SPREAD_WIDE_RATIO } =
-    await import('../src/logic/cookFinish.ts')
+  const { recipeFinishTimes, finishSpread } = await import('../src/logic/cookFinish.ts')
   const trio = [
     {
       id: 1,

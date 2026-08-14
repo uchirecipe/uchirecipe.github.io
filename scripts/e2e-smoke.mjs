@@ -1007,25 +1007,54 @@ try {
       gfGroups.length === 4 && new Set(gfGroups.map((l) => l.slice(0, 12))).size === 2,
       JSON.stringify(gfGroups),
     )
-    const gfFormText = ((await page.textContent('body')) ?? '').replaceAll('​', '')
+    // 印は材料メモの欄（入力欄）に残る。入力欄の中身は本文には出ないので値を読む
+    const gfMemos = await page.evaluate(() =>
+      [...document.querySelectorAll('input')]
+        .map((el) => el.value)
+        .filter((v) => v.trim() !== ''),
+    )
     check(
       'GF-B 印が材料名から外れ、材料のメモに残る（☆がどれかを画面で追える）',
-      gfFormText.includes('☆') && gfFormText.includes('◎'),
-      gfFormText.slice(0, 200),
+      gfMemos.includes('☆') && gfMemos.includes('◎'),
+      JSON.stringify(gfMemos),
     )
+    const gfFormText = ((await page.textContent('body')) ?? '').replaceAll('​', '')
     check(
       'GF-B 自動で色分けしたことを画面で知らせる（黙って色を付けない）',
       gfFormText.includes('2組にまとめ、色分けしました'),
       (await page.locator('[data-testid="import-seasoning-guide"]').innerText()) ?? '',
     )
-    // 保存して、調理中モードの手順「☆を全部混ぜ合わせておく」に☆の組が出ることまで見る
+    // 保存したあとの中身を見る（画面の並びに依存しない形で確かめる）
     await page.getByRole('button', { name: '保存する' }).click()
     await page.waitForTimeout(900)
-    const gfDetail = ((await page.textContent('body')) ?? '').replaceAll('​', '')
+    const gfSaved = await page.evaluate(async () => {
+      const db = await new Promise((res, rej) => {
+        const r = indexedDB.open('uchi-recipe')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const all = await new Promise((res, rej) => {
+        const q = db.transaction('recipes').objectStore('recipes').getAll()
+        q.onsuccess = () => res(q.result)
+        q.onerror = () => rej(q.error)
+      })
+      const recipe = all.find((r) => r.title === 'GF記号テスト')
+      return recipe
+        ? recipe.ingredients.map((i) => [i.name, i.seasoningGroup ?? null, i.memo ?? ''])
+        : null
+    })
     check(
-      'GF-B 保存後の材料名に記号が混ざらない（栄養・原価の名前照合を壊さない）',
-      gfDetail.includes('みそ') && !gfDetail.includes('☆みそ'),
-      gfDetail.slice(0, 200),
+      'GF-B 保存した材料名に記号が混ざらない（栄養・原価の名前照合を壊さない）',
+      gfSaved != null && gfSaved.every(([name]) => !/[☆◎]/.test(name)),
+      JSON.stringify(gfSaved),
+    )
+    check(
+      'GF-B 保存した材料に、印から作った組と印そのものが残っている',
+      gfSaved != null &&
+        gfSaved.filter(([, group]) => group != null).length === 4 &&
+        new Set(gfSaved.map(([, group]) => group).filter((g) => g != null)).size === 2 &&
+        gfSaved.filter(([, , memo]) => memo === '☆' || memo === '◎').length === 4,
+      JSON.stringify(gfSaved),
     )
     // 後続の検査に影響しないよう、確認用のレシピはここで片付ける（確認ダイアログは自動承諾）
     await page.locator('a[href*="/edit"]').first().click()
