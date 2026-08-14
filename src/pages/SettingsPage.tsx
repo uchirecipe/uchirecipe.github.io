@@ -29,7 +29,12 @@ import SwapLabel from '../components/SwapLabel'
 import { useSettings, updateSettings } from '../db/settings'
 import { listRecipes, deleteArchivedCookedLogs } from '../db/recipes'
 import { usePriceEntries } from '../db/prices'
-import { reloadStarterRecipes, starterCount } from '../db/starters'
+import {
+  reloadStarterRecipes,
+  starterCount,
+  previewStarterReload,
+  buildStarterReloadConfirmText,
+} from '../db/starters'
 import {
   exportBackup,
   downloadBackup,
@@ -39,12 +44,15 @@ import {
   importRecipeSet,
   RecipeSetFetchError,
   countReplaceImpact,
+  buildReplaceConfirmText,
+  buildUndoReplaceConfirmText,
   savePreImportSnapshot,
   restorePreImportSnapshot,
   daysSinceBackup,
-  type ReplaceImpactCounts,
   type MergeImportDetail,
 } from '../logic/backup'
+// 上書き・元に戻すの確認文に「段取りも消える」を足すため、覚え書きの有無をここで見る（2026-08-15 便GP）
+import { loadCookNaviSession } from '../logic/cookNaviSession'
 import { hasNgIngredient } from '../logic/ng'
 import { countFreeLimitRecipes, FREE_LIMIT, FREE_LIMIT_ENABLED } from '../logic/freeLimit'
 import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
@@ -362,15 +370,12 @@ function buildMergeResultLines(detail: MergeImportDetail): string[] {
 }
 
 /**
- * 「データを上書き」の確認文を件数入りで組み立てる
- * （2026-07-17設定ゼロベース裁定#6a）。ファイル選択を開く前(pickImportFile)・
- * ファイル選択後の最終確認(onImportFile)の両方で同じ文言を使い整合させる
+ * 上書き・元に戻すの確認文に入れる「並行調理ナビで選んでいる品数」（2026-08-15 便GP）。
+ * 覚え書きが無ければ0＝確認文に段取りの行は出ない。文の組み立て自体は logic/backup.ts
+ * （buildReplaceConfirmText / buildUndoReplaceConfirmText）にある
  */
-function buildReplaceConfirmText(impact: ReplaceImpactCounts): string {
-  return ja.settings.backupImportReplaceConfirm
-    .replace('{r}', String(impact.recipes))
-    .replace('{c}', String(impact.cookedLogs))
-    .replace('{p}', String(impact.prices))
+function cookNaviSelectedCount(): number {
+  return loadCookNaviSession()?.selectedIds.length ?? 0
 }
 
 /**
@@ -741,7 +746,9 @@ export default function SettingsPage() {
    */
   const pickImportFile = (mode: 'replace' | 'merge') => {
     if (importBusy) return // 読み込み中の二重操作を防ぐ(ボタンのdisabledと二重の歯止め・便CJ/C15)
-    if (mode === 'replace' && !window.confirm(buildReplaceConfirmText(dataCounts))) return
+    if (mode === 'replace') {
+      if (!window.confirm(buildReplaceConfirmText(dataCounts, cookNaviSelectedCount()))) return
+    }
     importModeRef.current = mode
     importFileRef.current?.click()
   }
@@ -750,7 +757,9 @@ export default function SettingsPage() {
     if (!file) return
     const mode = importModeRef.current
     const confirmText =
-      mode === 'replace' ? buildReplaceConfirmText(dataCounts) : ja.settings.backupImportMergeConfirm
+      mode === 'replace'
+        ? buildReplaceConfirmText(dataCounts, cookNaviSelectedCount())
+        : ja.settings.backupImportMergeConfirm
     if (!window.confirm(confirmText)) return
     // 前回の結果を消してから始める(古い結果が新しい操作の結果に見えないように)。
     // 読み込み中は「追加」「置き換え」を押せなくする(二重操作防止・便CJ/C15)
@@ -792,9 +801,12 @@ export default function SettingsPage() {
 
   /**
    * 三重の網の(c): 置き換え直後に1回だけ出す「元に戻す」(2026-07-17設定ゼロベース裁定#6c)。
-   * savePreImportSnapshotで退避したデータへ復元する
+   * savePreImportSnapshotで退避したデータへ復元する。
+   * 2026-08-15 便GP: 確認なしで今のデータを控えで置き換えていたため、上書きしたあとに直した内容が
+   * 黙って消えていた(規約F)。事故から戻すためのボタンなので、確認文は短いまま消える・残るを両方書く
    */
   const handleUndoReplace = async () => {
+    if (!window.confirm(buildUndoReplaceConfirmText(dataCounts, cookNaviSelectedCount()))) return
     const restored = await restorePreImportSnapshot()
     setReplaceUndoAvailable(false)
     // 置き換えの結果表示は戻したあとは事実と違うので消す（便CJ/C11）
@@ -971,8 +983,15 @@ export default function SettingsPage() {
     }
   }
 
+  /**
+   * 「基本レシピを入れ直す」（2026-08-15 便GP・規約F）。
+   * 押す前に予行(previewStarterReload)して、消える品数・その品に付いた作った記録と写真の件数を
+   * 数えてから確認文にする。旧確認文は「上書きされます。よろしいですか？」で、実際には
+   * 料理名を変えた品が記録・写真ごと削除されることが伝わっていなかった
+   */
   const reloadStarters = async () => {
-    if (!window.confirm(ja.settings.starterReloadConfirm)) return
+    const impact = await previewStarterReload()
+    if (!window.confirm(buildStarterReloadConfirmText(impact))) return
     await reloadStarterRecipes()
     setMessage(ja.settings.starterReloadDone)
   }

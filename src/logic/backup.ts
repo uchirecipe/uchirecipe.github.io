@@ -17,6 +17,7 @@ import {
 } from '../db/types'
 import { buildSearchWords } from './kana'
 import { backupFileName } from './fileSave'
+import { clearCookNaviSession } from './cookNaviSession'
 import { ja } from '../i18n/ja'
 
 /**
@@ -305,6 +306,55 @@ export function countReplaceImpact(
     cookedLogs: recipes.reduce((sum, r) => sum + r.cookedLogs.length, 0),
     prices: priceCount,
   }
+}
+
+/**
+ * 確認文の{navi}に、並行調理ナビの段取りの1行を差し込む（純ロジック・DB非依存。2026-08-15 便GP）。
+ * 覚え書きが残っていない（selectedCount=0）ときは何も足さない＝消えないものを「消えます」と
+ * 書かない（docs/69「捨てたときは失うものがある場合だけ知らせる」）
+ */
+function fillCookNaviNote(text: string, cookNaviSelectedCount: number): string {
+  return text.replace(
+    '{navi}',
+    cookNaviSelectedCount > 0
+      ? `\n${ja.settings.replaceCookNaviNote.replace('{n}', String(cookNaviSelectedCount))}`
+      : '',
+  )
+}
+
+/**
+ * 「データを上書き」の確認文（純ロジック・DB非依存。2026-07-17設定ゼロベース裁定#6a →
+ * 2026-08-15 便GPで消えるものを数え直し、段取りの1行を足せるようにした）。
+ * ファイル選択を開く前(pickImportFile)・ファイル選択後の最終確認(onImportFile)の両方で
+ * 同じ文言を使い整合させる。cookNaviSelectedCount=並行調理ナビで選んでいる品数（0なら段取りの行は出ない）
+ */
+export function buildReplaceConfirmText(
+  impact: ReplaceImpactCounts,
+  cookNaviSelectedCount = 0,
+): string {
+  return fillCookNaviNote(
+    ja.settings.backupImportReplaceConfirm
+      .replace('{r}', String(impact.recipes))
+      .replace('{c}', String(impact.cookedLogs))
+      .replace('{p}', String(impact.prices)),
+    cookNaviSelectedCount,
+  )
+}
+
+/**
+ * 「元に戻す」（上書き前の控えへ戻す）の確認文（純ロジック・DB非依存。2026-08-15 便GP・規約F）。
+ * 事故から戻すためのボタンなので、消えるもの・残るものを1行ずつの短さにする
+ */
+export function buildUndoReplaceConfirmText(
+  impact: ReplaceImpactCounts,
+  cookNaviSelectedCount = 0,
+): string {
+  return fillCookNaviNote(
+    ja.settings.replaceUndoConfirm
+      .replace('{r}', String(impact.recipes))
+      .replace('{c}', String(impact.cookedLogs)),
+    cookNaviSelectedCount,
+  )
 }
 
 /** Pro・追加レシピパックの解錠コード関連フィールドだけを抜き出した型（merge復元専用） */
@@ -720,6 +770,14 @@ export async function importBackup(
         }
       },
     )
+    // 端末だけに残る「作りかけの段取り」の覚え書き（localStorage・COOK_NAVI_SESSION_KEY）を捨てる
+    // （2026-08-15 便GP）。ここまでで置き換えたのはDexieのテーブルだけなので、捨てないと
+    // **復元前に選んでいた品の段取りが同じ日のうちは残る**。中身は入れ替わっているため、
+    // 覚えているレシピIDが**同じ番号の別の料理**を指しうる＝「1度も作っていない品が完成と出る」型
+    // （docs/69「『消えない』より『間違ったものが残らない』を優先」。この型は2回踏んでいる）。
+    // 段取りはその日限りの覚え書きでバックアップにも入れない設計なので、復元せず捨てるだけにする。
+    // 「元に戻す」(restorePreImportSnapshot)も同じ置き換え経路を通るので、そちらでも捨てられる
+    clearCookNaviSession()
     return { added: recipes.length, updated: 0, skipped: 0, excluded: 0 }
   }
 

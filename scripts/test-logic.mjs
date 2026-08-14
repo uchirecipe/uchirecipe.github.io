@@ -174,7 +174,11 @@ import {
   reconcileSelectedIdsForSession,
   resolveCookNaviSelection,
   pickDefaultSelectedIds,
+  saveCookNaviSession,
+  loadCookNaviSession,
+  clearCookNaviSession,
   COOK_NAVI_MAX_RECIPES,
+  COOK_NAVI_SESSION_KEY,
   COOK_NAVI_SESSION_VERSION,
 } from '../src/logic/cookNaviSession.ts'
 import {
@@ -230,6 +234,8 @@ import {
   mergeRecipeUserData,
   remapBackupRecipeRefs,
   buildSelectedRecipesExportConfirmText,
+  buildReplaceConfirmText,
+  buildUndoReplaceConfirmText,
 } from '../src/logic/backup.ts'
 import {
   supportsSaveFilePicker,
@@ -350,6 +356,9 @@ import {
   starterDefs,
   buildUpdatedStarterRecipe,
   planStarterReload,
+  planStarterReloadFor,
+  countStarterReloadImpact,
+  buildStarterReloadConfirmText,
   planFlattenedStarterTopUp,
 } from '../src/db/starters.ts'
 import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../src/logic/dashiLink.ts'
@@ -6977,6 +6986,128 @@ eq(
       ['ゼロから新規の品'],
     )
   }
+
+  // (6) 「基本レシピを入れ直す」の確認文(2026-08-15 便GP・規約F)。
+  // 旧文は「自分で編集した基本レシピは上書きされます。よろしいですか？」で、実際には
+  // **料理名を変えた品が作った記録・写真ごと削除される**ことを伝えていなかった(説明が事実と違う)。
+  // planStarterReloadは純関数なので、押す前に予行して件数で言い切れる
+  {
+    const baseDef = starterDefs[0]
+    const asRecipe = (def, id, extra = {}) => ({
+      ...def,
+      id,
+      isStarter: true,
+      sourceSetId: undefined,
+      isFavorite: false,
+      cookedLogs: [],
+      searchWords: [],
+      createdAt: 1,
+      updatedAt: 1,
+      ...extra,
+    })
+    // 料理名を自分で変えた基本レシピ(作った記録2件・レシピ写真1枚・記録の写真1枚つき)
+    const renamed = asRecipe(baseDef, 2, {
+      title: `${baseDef.title}（うちの味）`,
+      photo: 'FAKE_PHOTO_BLOB',
+      isFavorite: true,
+      cookedLogs: [{ date: '2026-08-01' }, { date: '2026-08-02', photo: 'FAKE_PHOTO_BLOB' }],
+    })
+    const kept = asRecipe(baseDef, 1)
+    const own = {
+      id: 3,
+      title: '自分で登録した品',
+      isStarter: false,
+      sourceSetId: undefined,
+      isFavorite: false,
+      cookedLogs: [],
+      searchWords: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const { plan, existingStarters } = planStarterReloadFor([kept, renamed, own], [], 9000)
+    const impact = countStarterReloadImpact(existingStarters, plan)
+    eq('STARTER-RELOAD 料理名を変えた基本レシピは消える(上書きではない)', impact.removed, 1)
+    eq('STARTER-RELOAD 消える品に付いた作った記録も数える', impact.removedCookedLogs, 2)
+    eq('STARTER-RELOAD 消える品に付いた写真も数える(レシピ写真＋記録の写真)', impact.removedPhotos, 2)
+    eq('STARTER-RELOAD 料理名が一致する品は残る側で数える', impact.kept, 1)
+    eq('STARTER-RELOAD 自分で登録したレシピは入れ直しの対象にしない', existingStarters.length, 2)
+    eq(
+      'STARTER-RELOAD 端末に無い基本レシピは追加される(自分で消した品も含む)',
+      impact.added,
+      starterDefs.length - 1,
+    )
+
+    const text = buildStarterReloadConfirmText(impact)
+    eq(
+      'STARTER-RELOAD 確認文は消える品数を件数で言う',
+      text.includes(ja.settings.starterReloadConfirmRemoved.replace('{d}', String(impact.removed))),
+      true,
+    )
+    eq(
+      'STARTER-RELOAD 確認文は消える記録・写真の件数も言う',
+      text.includes(
+        ja.settings.starterReloadConfirmRemovedData.replace(
+          '{items}',
+          [
+            ja.settings.starterReloadConfirmRemovedLogs.replace('{c}', String(impact.removedCookedLogs)),
+            ja.settings.starterReloadConfirmRemovedPhotos.replace('{p}', String(impact.removedPhotos)),
+          ].join('・'),
+        ),
+      ),
+      true,
+    )
+    // 0のものを並べない(「写真0枚も消えます」＝消えないものを数える文にしない)
+    {
+      const noPhoto = buildStarterReloadConfirmText({ ...impact, removedPhotos: 0 })
+      eq('STARTER-RELOAD 写真が付いていない品なら写真の件数は書かない', /写真\d+枚/.test(noPhoto), false)
+      eq(
+        'STARTER-RELOAD 写真が付いていなくても作った記録の件数は書く',
+        noPhoto.includes(
+          ja.settings.starterReloadConfirmRemovedLogs.replace('{c}', String(impact.removedCookedLogs)),
+        ),
+        true,
+      )
+      const noUserData = buildStarterReloadConfirmText({
+        ...impact,
+        removedCookedLogs: 0,
+        removedPhotos: 0,
+      })
+      eq(
+        'STARTER-RELOAD 記録も写真も無ければ、その1行ごと出さない',
+        /も消えます/.test(noUserData),
+        false,
+      )
+    }
+    eq('STARTER-RELOAD 確認文は何が残るかも書く(規約F)', text.includes(ja.settings.starterReloadConfirmStays), true)
+    eq('STARTER-RELOAD 確認文が「よろしいですか？」だけで終わらない(規約F)', /よろしいですか/.test(text), false)
+    eq('STARTER-RELOAD 消える品を「上書き」と言い換えていない', /上書き/.test(text), false)
+
+    // 消える品が0件のときに削除の話を書くと、消えないのに不安にさせる。件数で出し分ける
+    const noneImpact = countStarterReloadImpact([kept], planStarterReloadFor([kept], [], 9000).plan)
+    const noneText = buildStarterReloadConfirmText(noneImpact)
+    eq('STARTER-RELOAD 料理名を変えていなければ消える品は0件', noneImpact.removed, 0)
+    eq('STARTER-RELOAD 消える品が0件のときは削除の話を書かない', /削除|消え/.test(noneText), false)
+    eq(
+      'STARTER-RELOAD 消える品が0件でも、書き替えが元に戻ることは書く',
+      noneText.includes(ja.settings.starterReloadConfirm.replace('{k}', String(noneImpact.kept))),
+      true,
+    )
+    eq('STARTER-RELOAD 消える品が0件でも、何が残るかは書く', noneText.includes(ja.settings.starterReloadConfirmStays), true)
+    eq('STARTER-RELOAD 件数の差し込み跡が残っていない', /\{[a-z]\}/.test(`${text}${noneText}`), false)
+
+    // 画面の配線: 押す前に予行してから確認文を出す(ja.settings.starterReloadConfirmを直に出さない)
+    const settingsSrc = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/pages/SettingsPage.tsx'),
+      'utf-8',
+    )
+    eq(
+      'STARTER-RELOAD 画面は押す前に予行して件数入りの確認文を出す',
+      /previewStarterReload\(\)[\s\S]{0,200}window\.confirm\(buildStarterReloadConfirmText\(/.test(
+        settingsSrc,
+      ),
+      true,
+    )
+  }
 }
 
 // ---------- planFlattenedStarterTopUp(既存ユーザーへの差分投入。テーマ全廃2026-07-23) ----------
@@ -7787,6 +7918,129 @@ eq(
       5,
     ),
     { recipes: 3, cookedLogs: 3, prices: 5 },
+  )
+}
+
+// ---------- BK-SWAP: 「データを上書き」「元に戻す」の確認文と、置き換えで捨てる覚え書き
+// (2026-08-15 便GP・規約F)。(a)上書きの確認文が消えるものを数え落としていた
+// (レシピ・作った記録・価格しか書いていないのに、在庫・買い物メモ・献立なども入れ替わる)
+// (b)「元に戻す」に確認文が無かった (c)置き換えがDexieしか入れ替えず、並行調理ナビの段取りの
+// 覚え書き(localStorage)が同じ日のうち残る＝**同じ番号の別の料理**を指しうる ----------
+{
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const backupSrc = readFileSync(path.join(scriptDir, '../src/logic/backup.ts'), 'utf-8')
+  const settingsSrc = readFileSync(path.join(scriptDir, '../src/pages/SettingsPage.tsx'), 'utf-8')
+  const impact = countReplaceImpact([{ cookedLogs: [{ date: '2026-08-01' }] }, { cookedLogs: [] }], 4)
+  const replaceText = buildReplaceConfirmText(impact)
+
+  // (1) 置き換えで中身が入れ替わるテーブルは、1つ残らず確認文の言葉になっている。
+  // テーブルを足したのに確認文を直し忘れたら、ここが「言葉が決まっていない」で落ちる
+  const replaceBranch = backupSrc.slice(
+    backupSrc.indexOf("if (mode === 'replace') {"),
+    backupSrc.indexOf('// merge: 今のデータは1件も消さず'),
+  )
+  const clearedTables = [...new Set([...replaceBranch.matchAll(/db\.(\w+)\.clear\(\)/g)].map((m) => m[1]))]
+  const wordForTable = {
+    recipes: 'レシピ',
+    setExclusions: '削除したレシピ',
+    pantryItems: '在庫',
+    shoppingItems: '買い物メモ',
+    mealPlans: '週の献立',
+    todayList: '今日の献立',
+    prices: '価格',
+    dayNotes: '日付メモ',
+    mealTemplates: '献立テンプレート',
+    mealPlanLocks: '献立のロック',
+  }
+  eq('BK-SWAP 置き換えの分岐を読めている(空振りしていない)', clearedTables.length > 0, true)
+  eq(
+    'BK-SWAP 置き換えで空にするテーブルは、すべて確認文の言葉が決まっている',
+    clearedTables.filter((t) => !(t in wordForTable)),
+    [],
+  )
+  for (const table of clearedTables) {
+    eq(
+      `BK-SWAP 上書きの確認文が${table}の入れ替えに触れている`,
+      replaceText.includes(wordForTable[table] ?? '＿言葉が未定＿'),
+      true,
+    )
+  }
+  eq('BK-SWAP 上書きの確認文は設定もファイルの内容になると書く', /設定/.test(replaceText), true)
+  eq('BK-SWAP 上書きの確認文は何が残るかも書く(規約F)', /解錠コード[^。]*残り/.test(replaceText), true)
+  eq('BK-SWAP 上書きの確認文が「よろしいですか？」だけで終わらない(規約F)', /よろしいですか/.test(replaceText), false)
+  eq('BK-SWAP 件数の差し込み跡が残っていない', /\{[a-z]+\}/.test(replaceText), false)
+
+  // (2) 段取りの1行は、覚え書きが残っているときだけ出す
+  // (docs/69「捨てたときは失うものがある場合だけ知らせる」)
+  eq(
+    'BK-SWAP 段取りが残っていれば、その品数つきで消えると書く',
+    buildReplaceConfirmText(impact, 3).includes(ja.settings.replaceCookNaviNote.replace('{n}', '3')),
+    true,
+  )
+  eq('BK-SWAP 段取りが無いときは段取りの話を書かない', /段取り/.test(replaceText), false)
+
+  // (3) 置き換えのあとに、前の段取りの覚え書きが残らない。
+  // localStorageはNodeに無いので、読み書きだけを差し替えて確かめる
+  {
+    const local = new Map()
+    const session = new Map()
+    const fake = (store) => ({
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    })
+    globalThis.localStorage = fake(local)
+    globalThis.sessionStorage = fake(session)
+    saveCookNaviSession({
+      selectedIds: [11, 12],
+      showTimeline: true,
+      trialActive: false,
+      current: { recipeId: 11, stepIndex: 0 },
+    })
+    eq('BK-SWAP 前提: 段取りの覚え書きが端末に残っている', loadCookNaviSession()?.selectedIds, [11, 12])
+    clearCookNaviSession()
+    eq('BK-SWAP 覚え書きを捨てると読み戻せない', loadCookNaviSession(), undefined)
+    eq('BK-SWAP 覚え書きの置き場所も空になる', local.has(COOK_NAVI_SESSION_KEY), false)
+    delete globalThis.localStorage
+    delete globalThis.sessionStorage
+  }
+  // 置き換え復元(importBackupのreplace)がその後始末を通ること。
+  // 実行にはDexieが要るので、ここは配線で見る(この1行が抜けると古い段取りが復活する)
+  eq('BK-SWAP 置き換え復元は段取りの覚え書きを捨てる', /clearCookNaviSession\(\)/.test(replaceBranch), true)
+  eq(
+    'BK-SWAP 「元に戻す」も同じ置き換え経路を通る(段取りの後始末も同じ)',
+    /restorePreImportSnapshot[\s\S]{0,400}importBackup\(backup, 'replace'\)/.test(backupSrc),
+    true,
+  )
+
+  // (4) 「元に戻す」の確認文。事故から戻すためのボタンなので短いまま、消える・残るを両方書く
+  const undoText = buildUndoReplaceConfirmText(impact)
+  eq(
+    'BK-UNDO 確認文はいまのレシピ・作った記録の件数を差し込む',
+    undoText,
+    ja.settings.replaceUndoConfirm
+      .replace('{r}', String(impact.recipes))
+      .replace('{c}', String(impact.cookedLogs))
+      .replace('{navi}', ''),
+  )
+  eq('BK-UNDO 確認文は何が消えるかを書く(規約F)', /消え/.test(undoText), true)
+  eq('BK-UNDO 確認文は何が残るかを書く(規約F)', /残り/.test(undoText), true)
+  eq('BK-UNDO 確認文が「よろしいですか？」だけで終わらない(規約F)', /よろしいですか/.test(undoText), false)
+  eq(
+    `BK-UNDO 事故から戻すボタンなので長くしない(実測${[...undoText].length}字・上限は保険)`,
+    [...undoText].length <= 200,
+    true,
+  )
+
+  // (5) 画面の配線: 確認してから控えで置き換える(以前は確認なしで置き換えていた)
+  const undoHandler = settingsSrc.slice(
+    settingsSrc.indexOf('const handleUndoReplace'),
+    settingsSrc.indexOf('setMessage(restored'),
+  )
+  eq(
+    'BK-UNDO 画面は確認してから控えで置き換える',
+    /window\.confirm\(buildUndoReplaceConfirmText\([\s\S]*restorePreImportSnapshot\(\)/.test(undoHandler),
+    true,
   )
 }
 

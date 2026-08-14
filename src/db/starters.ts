@@ -1,6 +1,9 @@
 import { db } from './db'
 import { defaultSettings, type Recipe, type RecipeInput } from './types'
 import { buildSearchWords } from '../logic/kana'
+// 「基本レシピを入れ直す」の確認文をここで組み立てる（2026-08-15 便GP）。件数の出し分けが
+// 画面側に散らないよう、文言はja、組み立てはこのファイル（logic/backup.tsと同じ作法）
+import { ja } from '../i18n/ja'
 // 旧「配布テーマ（第◯弾）」の原稿。2026-07-23のテーマ全廃(オーナー確定)で、これらは
 // もう ?set= 配布用ではなく「同梱の基本レシピ」として初回シードに合流する（下の starterDefs 参照）。
 // 原稿ファイル自体は執筆・レビューの正本として残し、ここから recipes 配列だけを読み込む
@@ -2375,6 +2378,106 @@ export function planStarterReload(
   return { toAdd, toUpdate, toDeleteIds }
 }
 
+/**
+ * 端末の全レシピ・削除済みの記録から入れ直しの内容を決める（純ロジック・DB非依存）。
+ * 実行（reloadStarterRecipes）と、押す前の予行（previewStarterReload）が**同じ選び方**を
+ * するための1か所。ここが分かれると「確認文で言った件数」と「実際に消える件数」がずれる。
+ */
+export function planStarterReloadFor(
+  allRecipes: Recipe[],
+  exclusionTitles: Iterable<string>,
+  now: number = Date.now(),
+): { plan: StarterReloadPlan; existingStarters: Recipe[] } {
+  // 更新・削除の対象は「平らな基本レシピ」(isStarter・sourceSetIdなし)のみ。
+  // ?set=で取り込んだ品(sourceSetIdあり)は対象外だが、二重投入を防ぐため allTitles には含める
+  const existingStarters = allRecipes.filter((r) => r.isStarter === true && r.sourceSetId == null)
+  const allTitles = new Set(allRecipes.map((r) => r.title.trim()))
+  const excluded = new Set([...exclusionTitles].map((t) => t.trim()))
+  const plan = planStarterReload(existingStarters, starterDefs, now, allTitles, excluded)
+  return { plan, existingStarters }
+}
+
+/**
+ * 入れ直しで何がどれだけ動くか（純ロジック・DB非依存。2026-08-15 便GP）。
+ * 確認文に件数を入れるために使う（app/CLAUDE.md 規約F: 何が消えるか・何が残るかを件数つきで）。
+ */
+export interface StarterReloadImpact {
+  /** 削除される品数（アプリの基本レシピに同じ料理名が無い＝料理名を変えた品・配布が終わった品） */
+  removed: number
+  /** 削除される品に付いている「作った記録」の件数 */
+  removedCookedLogs: number
+  /** 削除される品に付いている写真の枚数（レシピの写真＋作った記録の写真） */
+  removedPhotos: number
+  /** 料理名が一致して残る品数（内容だけが最初の状態に戻る） */
+  kept: number
+  /** 端末に無いので追加される品数 */
+  added: number
+}
+
+export function countStarterReloadImpact(
+  existingStarters: Recipe[],
+  plan: StarterReloadPlan,
+): StarterReloadImpact {
+  const removedIds = new Set(plan.toDeleteIds)
+  const removedRecipes = existingStarters.filter((r) => r.id != null && removedIds.has(r.id))
+  return {
+    removed: removedRecipes.length,
+    removedCookedLogs: removedRecipes.reduce((sum, r) => sum + (r.cookedLogs?.length ?? 0), 0),
+    removedPhotos: removedRecipes.reduce(
+      (sum, r) =>
+        sum + (r.photo ? 1 : 0) + (r.cookedLogs ?? []).filter((log) => !!log.photo).length,
+      0,
+    ),
+    kept: existingStarters.length - removedRecipes.length,
+    added: plan.toAdd.length,
+  }
+}
+
+/**
+ * 「基本レシピを入れ直す」の確認文を組み立てる（純ロジック・DB非依存。2026-08-15 便GP・規約F）。
+ * 消える品があるときだけ削除の話を書く（0件のときに書くと、消えないのに不安にさせる）。
+ * 削除される品にお気に入り・作った記録・写真が付いていない場合は、その1行も出さない。
+ */
+export function buildStarterReloadConfirmText(impact: StarterReloadImpact): string {
+  const t = ja.settings
+  const lines: string[] = []
+  if (impact.removed > 0) {
+    lines.push(t.starterReloadConfirmRemoved.replace('{d}', String(impact.removed)))
+    // 0のものは並べない（「写真0枚も消えます」＝消えないものを数える文にしない）
+    const removedItems = [
+      impact.removedCookedLogs > 0 &&
+        t.starterReloadConfirmRemovedLogs.replace('{c}', String(impact.removedCookedLogs)),
+      impact.removedPhotos > 0 &&
+        t.starterReloadConfirmRemovedPhotos.replace('{p}', String(impact.removedPhotos)),
+    ].filter((item): item is string => !!item)
+    if (removedItems.length > 0) {
+      lines.push(t.starterReloadConfirmRemovedData.replace('{items}', removedItems.join('・')))
+    }
+    lines.push(t.starterReloadConfirmKept.replace('{k}', String(impact.kept)))
+  } else {
+    lines.push(t.starterReloadConfirm.replace('{k}', String(impact.kept)))
+  }
+  if (impact.added > 0) lines.push(t.starterReloadConfirmAdded.replace('{a}', String(impact.added)))
+  lines.push(t.starterReloadConfirmStays)
+  return `${lines.join('\n')}\n\n${t.starterReloadConfirmAsk}`
+}
+
+/**
+ * 押す前の予行（2026-08-15 便GP）。planStarterReloadは純関数なので、実行せずに
+ * 「何品が消えるか」を数えられる。確認文の件数はここから作る
+ */
+export async function previewStarterReload(): Promise<StarterReloadImpact> {
+  const [allRecipes, exclusions] = await Promise.all([
+    db.recipes.toArray(),
+    db.setExclusions.toArray(),
+  ])
+  const { plan, existingStarters } = planStarterReloadFor(
+    allRecipes,
+    exclusions.map((e) => e.title),
+  )
+  return countStarterReloadImpact(existingStarters, plan)
+}
+
 export interface StarterReloadResult {
   /** 新規に追加した件数 */
   added: number
@@ -2395,12 +2498,9 @@ export async function reloadStarterRecipes(): Promise<StarterReloadResult> {
   let updated = 0
   await db.transaction('rw', db.recipes, db.setExclusions, async () => {
     const allRecipes = await db.recipes.toArray()
-    // 更新・削除の対象は「平らな基本レシピ」(isStarter・sourceSetIdなし)のみ。
-    // ?set=で取り込んだ品(sourceSetIdあり)は対象外だが、二重投入を防ぐため allTitles には含める
-    const existingStarters = allRecipes.filter((r) => r.isStarter === true && r.sourceSetId == null)
-    const allTitles = new Set(allRecipes.map((r) => r.title.trim()))
-    const excludedTitles = new Set((await db.setExclusions.toArray()).map((e) => e.title.trim()))
-    const plan = planStarterReload(existingStarters, starterDefs, Date.now(), allTitles, excludedTitles)
+    const exclusionTitles = (await db.setExclusions.toArray()).map((e) => e.title)
+    // 押す前の予行(previewStarterReload)と同じ選び方を使う＝確認文の件数と実際の増減がずれない
+    const { plan } = planStarterReloadFor(allRecipes, exclusionTitles)
     if (plan.toDeleteIds.length) await db.recipes.bulkDelete(plan.toDeleteIds)
     if (plan.toUpdate.length) await db.recipes.bulkPut(plan.toUpdate)
     if (plan.toAdd.length) await db.recipes.bulkAdd(plan.toAdd.map(toRecipe))
