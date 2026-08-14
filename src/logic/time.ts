@@ -9,8 +9,16 @@ export interface TimeToken {
   text: string
   /** 文中での開始位置 */
   start: number
-  /** タイマーにする秒数 */
+  /**
+   * タイマーにする秒数。**幅のある書き方（「12〜15分」）では短いほう**（2026-08-14 便GK）。
+   * 理由は下の `mergeRangeTokens` に書いた。
+   */
   seconds: number
+  /**
+   * その表記が指しうる**いちばん長い**秒数（幅が無ければ `seconds` と同じ）。
+   * 段取りの見積り（cookNavi.resolveStepMinutes）と、取り込み時の分数欄への転記はこちらを使う。
+   */
+  maxSeconds: number
 }
 
 /** 全角数字を半角に直す（文字数が変わらないので位置ズレしない） */
@@ -42,9 +50,17 @@ const RANGE_JOIN_RE = new RegExp(`^\\s*${RANGE_SEPARATOR}\\s*$`)
  * もともとの走査は「15分」「2分」だけを時間表記として拾うので、範囲の前半（「12〜」）が
  * 地の文に残り、チップの手前に意味の切れた数字が浮いていた。前半を取り込んで1つの表記にする。
  *
- * **はかる長さは変えない**（範囲の長いほう＝これまでと同じ）。段取りの待ち時間の計算は
- * 表記の中でいちばん長い時間を採る規則（cookNavi.resolveStepMinutes）なので、
- * ここで採る秒数を変えると段取りまで動いてしまう。直すのは分断された見え方だけにする。
+ * **タイマーにする長さは範囲の短いほう**（2026-08-14 便GK・実操作テスト3回目の原文
+ * 「本文は『12〜15分焼く』。ボタンのラベルは『12〜15分 タイマー開始』なのに、表示と実際の待ちは
+ *   約15分。チーズがのっているものを最初から15分放置に設定するのは危ない。12分で一度見るほうが
+ *   正しい。焦げるかどうかを見るタイミングを潰しています」）。
+ * レシピが幅で書いているのは「12分で一度見て、足りなければ15分まで」という意味なので、
+ * 上限で鳴らすタイマーは**見るタイミングそのものを消す**。序列「安全 > 正直 > 短縮効果」に従い、
+ * 鳴らすのは短いほうにする。
+ *
+ * **段取りの見積りは長いほうのまま**（`maxSeconds`）。待ちを短く見積もると、その待ちの中へ
+ * 差し込む手作業が増えて詰め込みすぎになる（＝待ちが明けても手が戻らない段取りになる）。
+ * 鳴らす長さと見積る長さを分けて持つことで、どちらも安全側に倒せる。
  */
 function mergeRangeTokens(text: string, tokens: TimeToken[]): TimeToken[] {
   const merged: TimeToken[] = []
@@ -54,7 +70,8 @@ function mergeRangeTokens(text: string, tokens: TimeToken[]): TimeToken[] {
     const between = text.slice(prevEnd, token.start)
     if (prev && between !== '' && RANGE_JOIN_RE.test(between)) {
       prev.text = text.slice(prev.start, token.start + token.text.length)
-      prev.seconds = Math.max(prev.seconds, token.seconds)
+      prev.seconds = Math.min(prev.seconds, token.seconds)
+      prev.maxSeconds = Math.max(prev.maxSeconds, token.seconds)
       continue
     }
     const head = RANGE_PREFIX_RE.exec(between)
@@ -63,13 +80,29 @@ function mergeRangeTokens(text: string, tokens: TimeToken[]): TimeToken[] {
       merged.push({
         text: text.slice(start, token.start + token.text.length),
         start,
-        seconds: token.seconds,
+        seconds: rangeLowerSeconds(head[0], token),
+        maxSeconds: token.seconds,
       })
       continue
     }
     merged.push({ ...token })
   }
   return merged
+}
+
+/**
+ * 「12〜」＋「15分」の形で、前半（単位が省かれている側）の秒数を出す。
+ * 単位は後半の表記のものを使う（「12〜15分」なら分）。読み取れなければ後半と同じ長さにする
+ * （＝これまでと同じ挙動。**短く見積もる方向にだけ動かす**）。
+ */
+function rangeLowerSeconds(headText: string, token: TimeToken): number {
+  const head = /(\d+(?:\.\d+)?)/.exec(headText)
+  const tail = /(\d+(?:\.\d+)?)/.exec(token.text)
+  if (!head || !tail) return token.seconds
+  const from = Number.parseFloat(head[1])
+  const to = Number.parseFloat(tail[1])
+  if (!(from > 0) || !(to > 0) || from >= to) return token.seconds
+  return Math.round((token.seconds * from) / to)
 }
 
 export function findTimeTokens(text: string): TimeToken[] {
@@ -89,7 +122,7 @@ export function findTimeTokens(text: string): TimeToken[] {
     }
     seconds = Math.round(seconds)
     if (seconds > 0 && match.index !== undefined) {
-      tokens.push({ text: match[0], start: match.index, seconds })
+      tokens.push({ text: match[0], start: match.index, seconds, maxSeconds: seconds })
     }
   }
   return mergeRangeTokens(normalized, tokens)
@@ -102,7 +135,10 @@ export function findTimeTokens(text: string): TimeToken[] {
  */
 export function isMinutesShownInText(text: string, minutes: number): boolean {
   const seconds = minutes * 60
-  return findTimeTokens(text).some((token) => token.seconds === seconds)
+  // 幅のある書き方（「12〜15分」）は、どちらの端と一致しても「本文に書かれている」と読む
+  return findTimeTokens(text).some(
+    (token) => token.seconds === seconds || token.maxSeconds === seconds,
+  )
 }
 
 /** 残り秒数を "08:24" や "1:05:00" の形にする */
