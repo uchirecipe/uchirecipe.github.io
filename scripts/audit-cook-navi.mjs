@@ -52,6 +52,8 @@ import { DEFAULT_KITCHEN, applianceCapacity } from '../src/logic/cookAppliance.t
 import { stepIngredientAmounts } from '../src/logic/naviIngredients.ts'
 import { buildIngredientNames, findIngredientMatches } from '../src/logic/ingredientSpans.ts'
 import { parseRecipeText } from '../src/logic/parseRecipeText.ts'
+// 取り込んだ手順の本文に書かれた時間を分数欄へ写す（実機の登録経路。2026-08-08 便ED 打ち手#2）
+import { stepMinutesFromText } from '../src/logic/importStepMinutes.ts'
 import { buildImportedIngredientRows, filterImportedSteps } from '../src/logic/urlImportRows.ts'
 import { starterDefs } from '../src/db/starters.ts'
 // 汁物かどうかの判定（N2。2026-08-13 便GA）。取り込み・手入力のレシピは料理の種別が付かないので、
@@ -119,11 +121,28 @@ const starterRecipes = starterDefs.map((d) =>
   }),
 )
 
-/** A: URL取り込み。Worker応答→フォーム行→保存レシピ、と実装と同じ順で通す（minutes/memoは付かない） */
-const buildUrlRecipes = (samples, group) =>
-  samples.map((s) => {
+/**
+ * 取り込んだ手順を、**アプリと同じ形**の Step にする（2026-08-14 便GK）。
+ *
+ * `src/pages/RecipeFormPage.tsx` の `toImportedStepRows` が、2026-08-08 便ED の打ち手#2 で
+ * **本文に書いてある時間を分数欄へ写す**ようになっている（`logic/importStepMinutes.ts`）。
+ * この監査はその転記を通しておらず、**分数欄が必ず空**のレシピを「取り込んだレシピ」として
+ * 測り続けていた。そのため、分数欄の有無で挙動が変わる手当て（混在手順の分割など）は
+ * 監査では効いて見えるのに実機では1件も効かない、という食い違いが起きる
+ * （実操作テスト3回目で実際に起きた。docs/71 の追記）。
+ * 測る素材を実機にそろえる。
+ */
+const toImportedSteps = (texts) =>
+  texts.map((text) => {
+    const minutes = stepMinutesFromText(text)
+    return minutes != null ? { text, minutes } : { text }
+  })
+
+/** A: URL取り込み。Worker応答→フォーム行→保存レシピ、と実装と同じ順で通す */
+const buildUrlRecipes = (samples, group) => {
+  return samples.map((s) => {
     const rows = buildImportedIngredientRows(s.ingredients.map((i) => ({ name: i.name, amount: i.amount })))
-    const steps = filterImportedSteps(s.steps).map((text) => ({ text }))
+    const steps = toImportedSteps(filterImportedSteps(s.steps))
     return makeRecipe({
       title: s.title,
       servings: s.servings,
@@ -136,8 +155,9 @@ const buildUrlRecipes = (samples, group) =>
       group,
     })
   })
+}
 
-/** B: 貼り付け取り込み。生テキストを parseRecipeText に通した結果をそのまま使う */
+/** B: 貼り付け取り込み。生テキストを parseRecipeText に通し、本文の時間を分数欄へ写す（実機と同じ） */
 const buildPasteRecipes = (samples, group) =>
   samples.map((s) => {
     const parsed = parseRecipeText(s.raw)
@@ -146,7 +166,7 @@ const buildPasteRecipes = (samples, group) =>
       servings: parsed.servings ?? 2,
       cookMinutes: parsed.cookMinutes,
       ingredients: parsed.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit, memo: i.memo })),
-      steps: parsed.steps.map((text) => ({ text })),
+      steps: toImportedSteps(parsed.steps),
       truth: s.truth,
       realWaits: s.realWaits,
       realMinutes: s.realMinutes,
