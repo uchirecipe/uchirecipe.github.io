@@ -978,6 +978,63 @@ try {
   await page.waitForTimeout(500)
   check('SMK-03 削除が一覧に反映', !(await page.textContent('body')).includes('E2Eスモーク試験用レシピ'))
 
+  // --- GF-B: 貼り付けの☆・◎を見て、合わせ調味料の組を自動で作る ---
+  //   利用者テスト「貼り付け後の材料名は『みそ』『すりごま』になるのに、色分け（合わせ調味料
+  //   グループ）は自動では付かない。一方、手順は『その間に☆を全部混ぜ合わせておく。』のまま。
+  //   結果、『☆ってどれ？』が画面のどこを見ても分からない」
+  //   「9行の材料を1つずつ探して4回タップする手間は『面倒だから登録したくない』層には重い」
+  {
+    currentCheck = 'GF-B'
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(500)
+    await page.getByText('テキスト貼り付けで自動入力').click()
+    await page.waitForTimeout(300)
+    await page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+      'GF記号テスト\n\n材料（2人分）\n☆みそ　大さじ2\n☆マヨネーズ　大さじ1\n◎すりごま　大さじ2\n◎しょうゆ　小さじ1\nにんじん　1本\n\n作り方\n1. その間に☆を全部混ぜ合わせておく。\n2. ボウルで◎を混ぜ、にんじんを和える。',
+    )
+    await page.getByRole('button', { name: '自動で振り分ける' }).click()
+    await page.waitForTimeout(500)
+    // 組の色は材料行の丸ボタンに出る。aria-label に組番号が入るので、**どの行にあっても**
+    // 同じ判定になる形で数える（並びを決め打ちしない）
+    const gfGroupLabels = await page.evaluate(() =>
+      [...document.querySelectorAll('button[aria-label^="合わせ調味料グループ"]')].map(
+        (el) => el.getAttribute('aria-label') ?? '',
+      ),
+    )
+    const gfGroups = gfGroupLabels.filter((l) => /^合わせ調味料グループ[0-9]/.test(l))
+    check(
+      'GF-B ☆と◎が、それぞれ別の組として自動で色分けされる',
+      gfGroups.length === 4 && new Set(gfGroups.map((l) => l.slice(0, 12))).size === 2,
+      JSON.stringify(gfGroups),
+    )
+    const gfFormText = ((await page.textContent('body')) ?? '').replaceAll('​', '')
+    check(
+      'GF-B 印が材料名から外れ、材料のメモに残る（☆がどれかを画面で追える）',
+      gfFormText.includes('☆') && gfFormText.includes('◎'),
+      gfFormText.slice(0, 200),
+    )
+    check(
+      'GF-B 自動で色分けしたことを画面で知らせる（黙って色を付けない）',
+      gfFormText.includes('2組にまとめ、色分けしました'),
+      (await page.locator('[data-testid="import-seasoning-guide"]').innerText()) ?? '',
+    )
+    // 保存して、調理中モードの手順「☆を全部混ぜ合わせておく」に☆の組が出ることまで見る
+    await page.getByRole('button', { name: '保存する' }).click()
+    await page.waitForTimeout(900)
+    const gfDetail = ((await page.textContent('body')) ?? '').replaceAll('​', '')
+    check(
+      'GF-B 保存後の材料名に記号が混ざらない（栄養・原価の名前照合を壊さない）',
+      gfDetail.includes('みそ') && !gfDetail.includes('☆みそ'),
+      gfDetail.slice(0, 200),
+    )
+    // 後続の検査に影響しないよう、確認用のレシピはここで片付ける（確認ダイアログは自動承諾）
+    await page.locator('a[href*="/edit"]').first().click()
+    await page.waitForTimeout(500)
+    await page.getByRole('button', { name: 'このレシピを削除' }).click()
+    await page.waitForTimeout(800)
+  }
+
+
   // --- KW-01: 検索キーワード欄(keywords・2026-07-12バッチ)。一覧や詳細には表示されず、
   // 検索語に入力したときだけヒットすることを確認する ---
   currentCheck = 'KW-01'

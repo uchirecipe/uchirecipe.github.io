@@ -31,6 +31,7 @@ import type { Ingredient } from '../db/types'
 import { buildIngredientNames, findIngredientMatches } from './ingredientSpans'
 import { normalizeIngredientChipLabel } from './mainIngredients'
 import { formatAmountUnit, scaleAmount } from './amount'
+import { SEASONING_MARK_PATTERN, seasoningLetterMark } from './seasoningGroup'
 
 /** ナビに出す材料1行分（表示用に組み立て済み） */
 export interface NaviIngredientAmount {
@@ -127,11 +128,41 @@ function narrowByUsage(rows: readonly Ingredient[], stepText: string): readonly 
 }
 
 /**
- * 合わせ調味料の組を指す印としてレシピでよく使われる記号（2026-08-12 便FU-2）。
- * 「☆を全部混ぜ合わせておく。」の☆がこれ。英字（A・B）は本文の別の意味と紛れるので入れない
- * （「※」「＊」も注釈の印として使われるため入れない＝印を取り違えて別の組を出さないため）。
+ * その材料の行に付いている合わせ調味料の印（2026-08-14 便GF）。
+ *
+ * 見るのは**名前の先頭**と**メモの先頭**の2か所。取り込み（貼り付け・URL）は、名前に記号が
+ * 残ると栄養・原価の名前照合が外れるため印を名前から外し、材料メモの先頭へ移す。
+ * 名前しか見ないと、その取り込みで作ったレシピは手順文の☆と結び付かない
+ * （利用者テスト「☆ってどれ？が画面のどこを見ても分からない」の後半）。
  */
-const SEASONING_MARK_PATTERN = /[☆★◎○●◇◆■□▲△▼▽]/
+function seasoningMarkOf(ingredient: Ingredient): string {
+  const nameHead = (ingredient.name ?? '').trim().charAt(0)
+  if (SEASONING_MARK_PATTERN.test(nameHead)) return nameHead
+  const memo = (ingredient.memo ?? '').trim()
+  const memoHead = memo.charAt(0)
+  if (SEASONING_MARK_PATTERN.test(memoHead)) return memoHead
+  return seasoningLetterMark(memo) ?? seasoningLetterMark(ingredient.name ?? '') ?? ''
+}
+
+/**
+ * 手順文がその印を指しているか。
+ * 記号（☆・◎）はそのまま含まれるかどうかで見る。英字（A〜D）は本文の別の意味と紛れるので、
+ * **前後が英数字でないとき**だけ印とみなす（「A5ランク」「AB」は印ではない）。
+ * 全角で書かれた英字（Ａ）も同じ印として読む。
+ */
+function stepMentionsMark(stepText: string, mark: string): boolean {
+  if (SEASONING_MARK_PATTERN.test(mark)) return stepText.includes(mark)
+  const wide = String.fromCharCode(mark.charCodeAt(0) + 0xfee0)
+  const isAlnum = (ch: string) => ch !== '' && /[0-9０-９A-Za-zＡ-Ｚａ-ｚ]/.test(ch)
+  for (const letter of [mark, wide]) {
+    let from = stepText.indexOf(letter)
+    while (from !== -1) {
+      if (!isAlnum(stepText.charAt(from - 1)) && !isAlnum(stepText.charAt(from + 1))) return true
+      from = stepText.indexOf(letter, from + 1)
+    }
+  }
+  return false
+}
 
 /**
  * その手順が指している合わせ調味料の組（2026-08-12 便FU-2・利用者テスト）。
@@ -140,32 +171,32 @@ const SEASONING_MARK_PATTERN = /[☆★◎○●◇◆■□▲△▼▽]/
  * （中略）☆が何を指すのかは画面のどこにもない」
  *
  * 手順文には印（☆）しか書かれず、材料名の側に印が残っていないことがある
- * （貼り付け取り込みは行頭の記号を材料名から落とすため）。そこで2段階で見る:
- *   1. **材料名の先頭に印が残っている組**があれば、その印が手順文にあるかで決める
+ * （取り込みは行頭の記号を材料名から落とし、材料メモへ移すため）。そこで2段階で見る:
+ *   1. **その組に共通して付いている印**があれば、その印が手順文にあるかで決める
  *      （組が2つ以上あっても、☆と◎を取り違えない）
- *   2. 印が材料名に残っていないときは、**そのレシピの組が1つだけのときに限り**その組とする
+ *   2. 印がどこにも残っていないときは、**そのレシピの組が1つだけのときに限り**その組とする
  *      （指す先が1つしかない＝推測にならない）。組が2つ以上あるときは決められないので出さない
  */
 function seasoningGroupsMarkedIn(
   stepText: string,
   ingredients: readonly Ingredient[],
 ): number[] {
-  if (!SEASONING_MARK_PATTERN.test(stepText)) return []
-  /** 組ごとの「材料名の先頭に共通して付いている印」（ばらけていれば空文字＝印なし） */
+  /** 組ごとの「その組に共通して付いている印」（ばらけていれば空文字＝印なし） */
   const markByGroup = new Map<number, string>()
   for (const ing of ingredients) {
     const group = ing.seasoningGroup
     if (group == null) continue
-    const head = (ing.name ?? '').trim().charAt(0)
-    const mark = SEASONING_MARK_PATTERN.test(head) ? head : ''
+    const mark = seasoningMarkOf(ing)
     if (!markByGroup.has(group)) markByGroup.set(group, mark)
     else if (markByGroup.get(group) !== mark) markByGroup.set(group, '')
   }
   if (markByGroup.size === 0) return []
   const byMark = [...markByGroup]
-    .filter(([, mark]) => mark !== '' && stepText.includes(mark))
+    .filter(([, mark]) => mark !== '' && stepMentionsMark(stepText, mark))
     .map(([group]) => group)
   if (byMark.length > 0) return byMark.sort((a, b) => a - b)
+  // 印で決められないときの逃げ道は、記号が本文にあるときだけ（英字は本文の別の意味と紛れる）
+  if (!SEASONING_MARK_PATTERN.test(stepText)) return []
   return markByGroup.size === 1 ? [...markByGroup.keys()] : []
 }
 

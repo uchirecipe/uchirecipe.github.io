@@ -308,10 +308,14 @@ const iconBtnCls =
  * ページからは色分けを自動継承するが、無印のページでは手動で付けてもらう必要がある。
  * 色分けの設定先は同じ画面の材料行（丸ボタン）なのでリンクは置かない。
  */
-function ImportSeasoningGuide() {
+function ImportSeasoningGuide({ groupCount }: { groupCount: number }) {
   return (
     <div className="mt-[var(--space-sm)]">
-      <p className="text-sm text-ink-muted">{ja.form.importSeasoningGuide}</p>
+      <p data-testid="import-seasoning-guide" className="ja-phrase text-sm text-ink-muted">
+        {groupCount > 0
+          ? ja.form.importSeasoningGrouped.replace('{n}', String(groupCount))
+          : ja.form.importSeasoningGuide}
+      </p>
     </div>
   )
 }
@@ -469,6 +473,13 @@ function RecipeFormInner() {
   const [pasteText, setPasteText] = useState('')
   const [pasteMessage, setPasteMessage] = useState('')
   const [pasteMessageTone, setPasteMessageTone] = useState<'info' | 'warn'>('info')
+  /**
+   * 取り込みで自動的に作った合わせ調味料の組の数（2026-08-14 便GF）。
+   * 「☆みそ／☆マヨネーズ」のように同じ印が付いた材料を組にできたときだけ 1 以上になる。
+   * 案内文を「自分で色分けしてください」から「色分けしました」に切り替えるために持つ
+   * （黙って色を付けると、なぜ色が付いたのかが画面から読めない）。
+   */
+  const [importedSeasoningGroups, setImportedSeasoningGroups] = useState(0)
 
   /** 取り込み時に分量が読み取れず、まだ空のままの行か(便BX/C09の控えめな印の表示条件) */
   const isImportedAmountless = (row: IngredientRow): boolean =>
@@ -926,6 +937,10 @@ function RecipeFormInner() {
       if (nextServings !== undefined) setServings(nextServings)
       if (result.cookMinutes) setCookMinutes(String(result.cookMinutes))
       if (importedRows.length > 0) setIngredients(importedRows)
+      // 自動で作った（または取り込み元から引き継いだ）合わせ調味料の組の数（2026-08-14 便GF）
+      setImportedSeasoningGroups(
+        new Set(importedRows.map((row) => row.group).filter((g) => g != null)).size,
+      )
       // 分量が読み取れなかった行に印を付ける(便BX/C09)。取り込むたびに入れ替える
       setAmountlessImportedNames(
         importedRows.filter((row) => !row.amount.trim() && !row.unit.trim()).map((row) => row.name),
@@ -1047,12 +1062,20 @@ function RecipeFormInner() {
           name: row.name,
           amount: row.amount,
           unit: row.unit,
-          // 「1枚（250g）」の括弧書きは材料メモ欄へ
+          // 「1枚（250g）」の括弧書きは材料メモ欄へ。
+          // 行頭に付いていた合わせ調味料の印（「☆みそ」の☆）もメモの先頭に入る
+          // （2026-08-14 便GF。名前には戻さない＝栄養・原価の名前照合を壊さないため）
           memo: row.memo ?? '',
-          group: undefined,
+          // 同じ印が付いた材料は同じ組にする（2026-08-14 便GF・利用者テスト
+          // 「貼り付け時に☆・◎を見て自動でグループ化してほしい」）
+          group: row.group,
         })),
       )
     }
+    // 自動で作った組の数（案内文を「色分けしました」に切り替えるために数える）
+    setImportedSeasoningGroups(
+      new Set(parsed.ingredients.map((row) => row.group).filter((g) => g != null)).size,
+    )
     // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2。URL取り込みと同じ扱い）
     const pastedStepRows = toImportedStepRows(parsed.steps)
     const filledMinutes = pastedStepRows.filter((row) => row.minutesAuto).length
@@ -1149,7 +1172,9 @@ function RecipeFormInner() {
       name: parsed.name,
       amount: parsed.amount,
       unit: parsed.unit,
-      memo: parsed.memo ?? '',
+      // 「☆みそ 大さじ2」の☆は名前から外れるので、メモの先頭に残す（2026-08-14 便GF。
+      // 黙って捨てると、手順文の「☆を混ぜる」が何を指すのか画面から消える）
+      memo: [parsed.mark, parsed.memo].filter(Boolean).join(' '),
       group: undefined,
     }
     setIngredients((rows) => {
@@ -1704,7 +1729,9 @@ function RecipeFormInner() {
               {/* 取り込めたときだけ出す価格の案内(2026-08-02 オーナー指示・便DF)。
                   取り込んだレシピには調味料まで材料に並ぶが、「食材と価格」に価格が無い食材は
                   概算食費に入らない。結果メッセージ(info=成功時のみ)の下に1行＋登録先への近道を置く */}
-              {urlImportMessage && urlImportMessageTone === 'info' && <ImportSeasoningGuide />}
+              {urlImportMessage && urlImportMessageTone === 'info' && (
+                <ImportSeasoningGuide groupCount={importedSeasoningGroups} />
+              )}
               <div className="mt-[var(--space-sm)] flex gap-2">
                 <button
                   type="button"
@@ -1765,7 +1792,9 @@ function RecipeFormInner() {
             </p>
           )}
           {/* 貼り付け経路にも同じ案内を出す(2026-08-02 オーナー指示・便DF。URL取り込みと同じ扱い) */}
-          {pasteMessage && pasteMessageTone === 'info' && <ImportSeasoningGuide />}
+          {pasteMessage && pasteMessageTone === 'info' && (
+            <ImportSeasoningGuide groupCount={importedSeasoningGroups} />
+          )}
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"

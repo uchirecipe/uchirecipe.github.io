@@ -11,12 +11,28 @@
  * 結果はフォームに流し込まれ、ユーザーが確認・修正してから保存する。
  */
 
+import {
+  MAX_SEASONING_GROUP,
+  SEASONING_MARK_CHARS,
+  seasoningLetterMark,
+} from './seasoningGroup'
+
 export interface ParsedIngredient {
   name: string
   amount: string
   unit: string
   /** 単位の後ろの括弧書き(「1枚（250g）」の「250g」)。フォームの材料メモ欄へ */
   memo?: string
+  /**
+   * 材料名の先頭に付いていた合わせ調味料の印(「☆みそ」の☆・「Aみりん」のA。2026-08-14 便GF)。
+   * 名前からは外す(栄養・原価の名前照合を壊さないため)が、**組の情報として残す**。
+   */
+  mark?: string
+  /**
+   * 合わせ調味料のグループ番号(1〜MAX_SEASONING_GROUP)。同じ印が付いた材料が2件以上
+   * あるときだけ入る(assignSeasoningGroupsByMark)。フォームの材料行の group へ渡す。
+   */
+  group?: number
 }
 
 export interface ParsedRecipe {
@@ -46,6 +62,106 @@ const STEP_HEADER = /^[【\[（(◆■□●○☆★♪#＊*\s]*(作り方|つ�
 const MEMO_HEADER =
   /^[【\[（(◆■□●○☆★♪#＊*※!！\s]*(?:コツ・ポイント|コツ|ポイント|メモ)[】\])）]*\s*(?:[:：]\s*(.*))?$/
 const BULLET = /^[・･\-–—*●○◎▪•‣＊※◇☆★]+\s*/
+/**
+ * 行頭の「ただの飾り」(中黒・ハイフン・注釈の印)。組の印にはならないので先に落とす
+ * (2026-08-14 便GF)。BULLET から合わせ調味料の印(SEASONING_MARK_CHARS)を除いたもの。
+ */
+const PLAIN_BULLET = /^[・･\-–—*▪•‣＊※]+[ 　\t]*/
+/** 行頭に付いた合わせ調味料の印(「☆みそ」の☆) */
+const SEASONING_MARK_HEAD = new RegExp(`^[${SEASONING_MARK_CHARS}][ 　\t]*`)
+
+/**
+ * 材料1行から、先頭の合わせ調味料の印(☆・◎・A等)を切り離す(2026-08-14 便GF・利用者テスト)。
+ *
+ * 指摘(原文):「貼り付け後の材料名: 『☆みそ』→『みそ』、『◎すりごま』→『すりごま』。
+ * 色分け（合わせ調味料グループ）も自動では付かない。一方、手順は『その間に☆を全部混ぜ
+ * 合わせておく。』『ボウルで◎を混ぜ、』のまま。結果、『☆ってどれ？』が画面のどこを見ても
+ * 分からない。（中略）**貼り付け時に☆・◎を見て自動でグループ化してほしい。**」
+ *
+ * 印は名前から外す(いままでどおり。名前に記号が残ると栄養・原価の名前照合が外れる)が、
+ * **どの印だったかを返す**ようにして、組の情報として拾えるようにする。
+ * 「Aみりん」のような英字の印は BULLET が落とさないので名前に残っていた
+ * (＝記号ごとに扱いが違う)。ここで同じ扱いにそろえる。
+ */
+export function splitIngredientMark(rawLine: string): { mark?: string; body: string } {
+  const withoutBullet = rawLine.trim().replace(PLAIN_BULLET, '')
+  const symbol = withoutBullet.match(SEASONING_MARK_HEAD)
+  if (symbol) {
+    return { mark: symbol[0].trim(), body: withoutBullet.slice(symbol[0].length).replace(BULLET, '').trim() }
+  }
+  // 英字（Aみりん・A.米粉）はここでは外さない。語の一部（「B級〜」）と見分けが付かないので、
+  // **同じ英字が2件以上並んでいる（＝組として使われている）と分かってから**外す
+  // （assignSeasoningGroupsByMark）
+  return { body: withoutBullet.replace(BULLET, '').trim() }
+}
+
+/**
+ * 材料名の先頭に付いた英字の組の印（「Aみりん」「A.米粉」の A）。
+ * 一致した先頭部分（英字＋区切り＋空白）も返し、組にしないときは名前を元のまま残せるようにする。
+ */
+const LETTER_MARK_HEAD = /^([A-DＡ-Ｄ])[.．・:：、,，)）]?[ 　\t]*(?=\S)/
+function letterMarkOf(name: string): { mark: string; prefix: string } | undefined {
+  const matched = name.match(LETTER_MARK_HEAD)
+  if (!matched) return undefined
+  const rest = name.slice(matched[0].length)
+  // 「A5ランク」「AB」のように英数字が続く形は組の印ではない
+  if (/^[0-9０-９A-Za-zＡ-Ｚａ-ｚ]/.test(rest)) return undefined
+  const letter = seasoningLetterMark(matched[1] + rest.charAt(0))
+  return letter ? { mark: letter, prefix: matched[0] } : undefined
+}
+
+/**
+ * 材料の並びを見て、印(☆・◎・A等)から合わせ調味料の組を決める(2026-08-14 便GF)。
+ *
+ * どこまでを組とみなすか(この規則は報告書にも書く):
+ *   - 印の一覧は `SEASONING_MARK_CHARS`(☆★◎○●◇◆■□▲△▼▽)と英字A〜D。
+ *     **並行調理ナビが手順文から読む印と同じ一覧**にそろえる(logic/seasoningGroup.ts)。
+ *   - **同じ印が2件以上**あるときだけ組にする。1件だけの印は「まとめて計量する組」にならない。
+ *   - **全部の材料に同じ印が付いているときは組にしない**。それは組ではなく行頭の飾り
+ *     (「☆にんじん ☆豚肉 ☆しょうゆ」)で、全部を1組にすると肉と野菜まで
+ *     「先にまとめて計量できます」と言うことになる。
+ *   - 組は**出てきた順**に1・2・…と振り、色の数(MAX_SEASONING_GROUP＝4)を超えた印は
+ *     組にしない(色が一周して別の組と見分けが付かなくなるため)。
+ *   - 記号の印は、組にならなくても**材料メモの先頭に残す**(名前からはもともと外れるので、
+ *     残さないと書いてあった事実が消える)。全部に付いた飾りだけは残さない。
+ *   - **英字の印だけは、組になったときにしか名前から外さない**。「B級〜」のように英字が
+ *     語の一部であることがあり、1件だけの英字を印と決めつけると材料名を壊すため。
+ *     組として使われている証拠(同じ英字が2件以上)があるときだけ外して組にする。
+ */
+export function assignSeasoningGroupsByMark(
+  ingredients: readonly ParsedIngredient[],
+): ParsedIngredient[] {
+  /** 行ごとの印（記号は解析時に名前から外れている／英字はまだ名前に付いたまま） */
+  const found = ingredients.map((ing) =>
+    ing.mark ? { mark: ing.mark, prefix: '' } : letterMarkOf(ing.name),
+  )
+  const counts = new Map<string, number>()
+  for (const one of found) {
+    if (one) counts.set(one.mark, (counts.get(one.mark) ?? 0) + 1)
+  }
+  /** 全部の材料に付いている印＝行頭の飾りなので、印として扱わない */
+  const decorative = new Set(
+    [...counts].filter(([, n]) => n === ingredients.length).map(([mark]) => mark),
+  )
+  const groupByMark = new Map<string, number>()
+  for (const one of found) {
+    if (!one || decorative.has(one.mark) || groupByMark.has(one.mark)) continue
+    if ((counts.get(one.mark) ?? 0) < 2) continue
+    if (groupByMark.size >= MAX_SEASONING_GROUP) continue
+    groupByMark.set(one.mark, groupByMark.size + 1)
+  }
+  return ingredients.map((ing, i) => {
+    const { mark: _mark, ...base } = ing
+    const one = found[i]
+    if (!one || decorative.has(one.mark)) return base
+    const group = groupByMark.get(one.mark)
+    // 英字は組になったときだけ名前から外す（語の一部を壊さないための歯止め）
+    if (one.prefix !== '' && group == null) return base
+    const memo = [one.mark, ing.memo].filter(Boolean).join(' ')
+    const name = one.prefix === '' ? ing.name : ing.name.slice(one.prefix.length)
+    return { ...base, name, memo, ...(group != null ? { group } : {}) }
+  })
+}
 const STEP_NUMBER = /^[（(]?\d{1,2}[）)．.、:：]\s*|^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*|^(step|STEP|Step)\s*\d+[．.:：)）]?\s*/
 // M4: 「2.を3cm…」「（1）のフライパン…」のように番号直後が格助詞で始まる行は、
 // 前の手順への参照であって新しい番号手順ではない。番号を剥がさず行全体を手順として扱うためのガード
@@ -272,9 +388,19 @@ export function autoSplitAmountUnit(
   return split
 }
 
-/** 1行を材料として解釈してみる。材料らしくなければ undefined */
+/**
+ * 1行を材料として解釈してみる。材料らしくなければ undefined。
+ * 行頭の合わせ調味料の印(☆・◎・A等)は名前から外し、`mark` として返す(2026-08-14 便GF)。
+ */
 function parseIngredientLine(rawLine: string): ParsedIngredient | undefined {
-  const line = rawLine.replace(BULLET, '').trim()
+  const { mark, body } = splitIngredientMark(rawLine)
+  const parsed = parseIngredientBody(body)
+  if (!parsed) return undefined
+  return mark ? { ...parsed, mark } : parsed
+}
+
+/** 印と飾りを落とした後の1行を材料として解釈する */
+function parseIngredientBody(line: string): ParsedIngredient | undefined {
   if (!line || line.length > 40) return undefined
 
   // 区切り文字あり: 「にんじん…1本」「豚肉：200g」「じゃがいも  3個」
@@ -336,24 +462,27 @@ function parseIngredientLine(rawLine: string): ParsedIngredient | undefined {
  */
 const COMPACT_AMOUNT_WORD = /(少し|少々|適量|適宜|ひとつまみ|ちょっと|お好みで?)$/
 function parseCompactIngredientChunk(chunk: string): ParsedIngredient | undefined {
-  const parsed = parseIngredientLine(chunk)
+  const { mark, body } = splitIngredientMark(chunk)
+  const withMark = (ing: ParsedIngredient): ParsedIngredient => (mark ? { ...ing, mark } : ing)
+  const parsed = parseIngredientBody(body)
   if (parsed && /\d|適量|少々|適宜|お好み|ひとつまみ|少し|ちょっと/.test(parsed.amount + parsed.unit)) {
-    return parsed
+    return withMark(parsed)
   }
-  const normalized = normalize(chunk.replace(BULLET, '').trim())
+  const normalized = normalize(body)
   // 「大根1/3」のように単位のない数量が名前にくっついている形
   const withNumber = normalized.match(/^(\D{1,12}?)(\d+(?:\.\d+)?(?:\/\d+)?)$/)
-  if (withNumber) return { name: withNumber[1].trim(), amount: withNumber[2], unit: '' }
+  if (withNumber) return withMark({ name: withNumber[1].trim(), amount: withNumber[2], unit: '' })
   // 「しょうが少し」のように曖昧な分量語が名前にくっついている形
   const withWord = normalized.match(COMPACT_AMOUNT_WORD)
   if (withWord && withWord.index !== undefined && withWord.index > 0) {
-    return { name: normalized.slice(0, withWord.index).trim(), amount: withWord[1], unit: '' }
+    return withMark({ name: normalized.slice(0, withWord.index).trim(), amount: withWord[1], unit: '' })
   }
   return undefined
 }
 
 export function parseMultiIngredientLine(rawLine: string): ParsedIngredient[] | undefined {
-  const line = rawLine.replace(BULLET, '').trim()
+  // 行頭の印は、塊ごとに印が無いときの既定として使う（「☆みそ大さじ2 マヨ大さじ1」）
+  const { mark: lineMark, body: line } = splitIngredientMark(rawLine)
   if (!line || line.length > 40) return undefined
   const chunks = line.split(/[ 　]+/).filter(Boolean)
   if (chunks.length < 2 || chunks.length > 6) return undefined
@@ -361,7 +490,7 @@ export function parseMultiIngredientLine(rawLine: string): ParsedIngredient[] | 
   for (const chunk of chunks) {
     const one = parseCompactIngredientChunk(chunk)
     if (!one || !one.name) return undefined
-    parsed.push(one)
+    parsed.push(one.mark || !lineMark ? one : { ...one, mark: lineMark })
   }
   return parsed
 }
@@ -1031,7 +1160,8 @@ export function parseRecipeText(text: string): ParsedRecipe {
       continue
     }
     if (mode === 'ingredients') {
-      const name = line.replace(BULLET, '').trim()
+      // 分量なしの行でも、行頭の合わせ調味料の印は名前から外して覚えておく（2026-08-14 便GF）
+      const { mark: nameMark, body: name } = splitIngredientMark(line)
       // 「※タレ」「【タレ】」「(合わせ調味料)」のような小見出し・装飾行は取り込まない。
       // C-03(2026-07-28 便BW)で手順文の判定に「。で終わる行」を足したため、材料欄の注記
       // (「＊あれば干しあみえびがおすすめ。」)が手順に化けないよう、小見出し判定を先に見る
@@ -1044,7 +1174,7 @@ export function parseRecipeText(text: string): ParsedRecipe {
       }
       // 材料欄の中の分量なし行（例: 「〈タレ〉しょうゆ」）は名前だけの材料として拾う
       if (name.length <= 25) {
-        result.ingredients.push({ name, amount: '', unit: '' })
+        result.ingredients.push({ name, amount: '', unit: '', ...(nameMark ? { mark: nameMark } : {}) })
         continue
       }
     }
@@ -1070,6 +1200,10 @@ export function parseRecipeText(text: string): ParsedRecipe {
   }
 
   if (memoLines.length > 0) result.memo = memoLines.join('\n')
+  // 行頭の印（☆・◎・A等）から合わせ調味料の組を決める（2026-08-14 便GF）。
+  // 全部の行を見てからでないと「2件以上ある印か」「全部に付いた飾りか」が分からないので、
+  // 1行ずつではなく最後にまとめて判断する
+  result.ingredients = assignSeasoningGroupsByMark(result.ingredients)
   return result
 }
 
