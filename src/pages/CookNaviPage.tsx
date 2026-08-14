@@ -11,9 +11,13 @@ import {
   Check,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Info,
   ListChecks,
   ChefHat,
+  AlertTriangle,
+  Undo2,
+  RotateCcw,
 } from 'lucide-react'
 import BackHeader from '../components/BackHeader'
 import Collapse from '../components/Collapse'
@@ -72,6 +76,14 @@ import {
   type CookCursor,
   type StepPull,
 } from '../logic/cookSession'
+import {
+  moveStepDownPull,
+  moveStepUpPull,
+  reorderIssues,
+  reorderIssuesByStep,
+  reorderStepKey,
+  type ReorderIssue,
+} from '../logic/cookReorder'
 import { naviStepText } from '../logic/naviStepText'
 import {
   recipeIngredientList,
@@ -160,6 +172,25 @@ function naviStepDomId(recipeId: number, stepKey: string): string {
   return `navi-step-${recipeId}-${stepKey}`
 }
 
+/**
+ * 手で動かした結果の印を、読める文に直す（2026-08-14 便GJ）。
+ * 器具は名前で言う（「器具が足りません」だと、どれを空ければよいのか分からない）。
+ */
+function reorderIssueText(issue: ReorderIssue): string {
+  if (issue.kind === 'recipeOrder') return ja.cookNavi.reorderIssueRecipeOrder
+  if (issue.kind === 'unattended') return ja.cookNavi.reorderIssueUnattended
+  switch (issue.appliance) {
+    case 'microwave':
+      return ja.cookNavi.reorderIssueMicrowave
+    case 'grill':
+      return ja.cookNavi.reorderIssueGrill
+    case 'toaster':
+      return ja.cookNavi.reorderIssueToaster
+    default:
+      return ja.cookNavi.reorderIssueStove
+  }
+}
+
 /** タイムラインの1手順カード */
 function TimelineCard({
   item,
@@ -172,6 +203,11 @@ function TimelineCard({
   runningTimer,
   now,
   onStartTimer,
+  issues,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
 }: {
   item: TimelineItem
   /** この手順の文に出てくる材料と分量（2026-08-08 便EB。無ければ空配列＝何も出さない） */
@@ -191,6 +227,12 @@ function TimelineCard({
   /** 残り時間の計算に使う現在時刻（TimerProvider が約0.3秒ごとに進める） */
   now: number
   onStartTimer: (item: TimelineItem, seconds: number) => void
+  /** 手で動かしたことで無理が出た印（2026-08-14 便GJ。無ければ空配列＝何も出さない） */
+  issues: readonly ReorderIssue[]
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
 }) {
   const isWait = item.kind === 'wait'
   // 待ちブロックが分数を名乗っていればタイマーのボタンを必ず出す（2026-08-11 便FN。
@@ -220,6 +262,20 @@ function TimelineCard({
           {isWait ? ja.cookNavi.kindWait : ja.cookNavi.kindActive}
         </span>
       </div>
+
+      {/* 手で動かしたことで無理が出た手順の印（2026-08-14 便GJ）。**押させない・書き換えるは
+          しない**＝理由をその場に書くだけで、進めるかどうかは本人が決める（docs/71 R2〜R4 の
+          利用者は「自分のほうが正しい」と考えて順番を直しにくるため、止めると要望を潰す）。
+          本文より先に読める位置（手順の頭）に置く */}
+      {issues.length > 0 && (
+        <p
+          data-testid="navi-step-issue"
+          className="ja-phrase mt-[var(--space-sm)] flex items-start gap-1 rounded-sm border border-warning px-2 py-1 text-xs font-bold text-warning"
+        >
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+          <span>{issues.map((issue) => reorderIssueText(issue)).join('')}</span>
+        </p>
+      )}
 
       {/* 2026-08-09 便ES: 「ナビが追加」の札はやめ、手順番号を「3-1」「3-2」にして
           レシピの1手順を分けたことが番号で分かる形にした（オーナー指示D-4） */}
@@ -366,18 +422,6 @@ function TimelineCard({
         </div>
       )}
 
-      {/* 手作業の目安時間（2026-08-09 便EH・オーナー指示「手順カードの右下（完成ある場合は上）に
-          目安時間入れて」）。レシピに書かれた時間と、ナビが当てた見積りは書き分ける。
-          待ち系は上の待ちブロックに分数が出るので重ねて出さない */}
-      {!isWait && item.activeMinutes > 0 && (
-        <p data-testid="navi-active-minutes" className="mt-[var(--space-sm)] text-right text-xs text-ink-muted">
-          {(item.activeEstimated ? ja.cookNavi.activeMinutesEstimated : ja.cookNavi.activeMinutes).replace(
-            '{n}',
-            String(item.activeMinutes),
-          )}
-        </p>
-      )}
-
       {/* その品がここで出来上がる（2026-08-08 便EG・オーナー指示
           「最後の手順は右下に色付きで完成と出して」）。色はそのレシピの色。
           ただし最後の手順が長い待ちの品は「完成」と言わない（2026-08-11 便FL・司令部裁定）。
@@ -396,6 +440,49 @@ function TimelineCard({
           </span>
         </p>
       )}
+
+      {/* 手で順番を変える（2026-08-14 便GJ・docs/71 R3「段取りを手で並べ替える手段がない。
+          上下ボタンもドラッグもなし」／R4「順番の入れ替えも…できません」）。
+          ドラッグではなく2つのボタンにしたのは、**濡れた手で長押しと移動を続ける操作が要らない**
+          ためと、押すたびに1つずつ動く＝押しすぎても同じ数だけ押し返せば戻るため。
+          手作業の目安時間はこの行の右側に置く（行を増やさない。2026-08-09 便EH の置き場と同じ右下）。
+
+          手順カードの右下（完成ある場合は上）に目安時間、というオーナー指示の位置は動かさない。
+          レシピに書かれた時間と、ナビが当てた見積りは今までどおり書き分ける */}
+      <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            data-testid="navi-step-up"
+            onClick={onMoveUp}
+            disabled={!canMoveUp}
+            aria-label={ja.cookNavi.reorderUpAria.replace('{n}', String(item.order))}
+            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-2.5 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
+          >
+            <ChevronUp size={18} aria-hidden />
+            {ja.cookNavi.reorderUp}
+          </button>
+          <button
+            type="button"
+            data-testid="navi-step-down"
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            aria-label={ja.cookNavi.reorderDownAria.replace('{n}', String(item.order))}
+            className="inline-flex min-w-[4.5rem] items-center justify-center gap-1 rounded-md border border-edge bg-surface px-3 py-2.5 text-sm font-bold text-accent-ink shadow-sm disabled:opacity-30"
+          >
+            <ChevronDown size={18} aria-hidden />
+            {ja.cookNavi.reorderDown}
+          </button>
+        </div>
+        {!isWait && item.activeMinutes > 0 && (
+          <span data-testid="navi-active-minutes" className="text-right text-xs text-ink-muted">
+            {(item.activeEstimated
+              ? ja.cookNavi.activeMinutesEstimated
+              : ja.cookNavi.activeMinutes
+            ).replace('{n}', String(item.activeMinutes))}
+          </span>
+        )}
+      </div>
     </li>
   )
 }
@@ -1028,6 +1115,43 @@ export default function CookNaviPage() {
       item.order === index + 1 ? item : { ...item, order: index + 1 },
     )
   }, [timeline, pulls])
+
+  /**
+   * 手で順番を変える（2026-08-14 便GJ・docs/71 R3/R4）。
+   * **色で先にしたときと同じ `pulls` に1件足すだけ**にして、覚え書きの項目を増やさない
+   * （docs/69「書ける状態は cookNaviSession ＋ current ＋ pulls だけ」）。
+   * 段取りは今までどおり毎回組み直し、そこへこの指示を当て直す。
+   */
+  const moveStep = (index: number, direction: 'up' | 'down') => {
+    const pull =
+      direction === 'up' ? moveStepUpPull(planItems, index) : moveStepDownPull(planItems, index)
+    if (!pull) return
+    setPulls((prev) => [...prev, pull])
+  }
+  /** 直前の1回だけ取り消す（規約F。押しすぎたときに1つずつ戻れる） */
+  const undoLastPull = () => setPulls((prev) => prev.slice(0, -1))
+  /**
+   * 自動で組んだ並びに戻す（同）。手で動かしたぶんを全部捨てるので、
+   * 何が消えて何が残るかを件数つきで確認する（規約F）。
+   */
+  const resetPulls = () => {
+    const confirmText = ja.cookNavi.reorderUndoAllConfirm
+      .replace('{n}', String(pulls.length))
+      .replace('{m}', String(selectedRecipes.length))
+    if (!window.confirm(confirmText)) return
+    setPulls([])
+  }
+  /**
+   * 手で動かしたことで**新しく**出てきた無理（2026-08-14 便GJ）。
+   * 自動で組んだ並びには器具の重なりも火にかけたままの放置も無い（監査で0件）ので、
+   * 同じ数え方で引き算して、**動かしたせいで出たぶんだけ**を印にする（logic/cookReorder.ts）。
+   * 並びを変えていないときは数え直さない＝自動の段取りの見え方は1文字も変わらない。
+   */
+  const issues = useMemo(
+    () => (timeline && pulls.length > 0 ? reorderIssues(timeline.items, planItems, kitchen) : []),
+    [timeline, pulls.length, planItems, kitchen],
+  )
+  const issuesByStep = useMemo(() => reorderIssuesByStep(issues), [issues])
 
   /**
    * 調理中の手順の復元（2026-08-09 便EL・docs/69）。再読み込みや他タブからの復帰では、
@@ -1858,16 +1982,76 @@ export default function CookNaviPage() {
                       </p>
                     )}
 
+                    {/* 手で順番を変えられることを、動かす手立ての手前に書く（2026-08-14 便GJ・
+                        docs/71 R4「『順番は前後してかまいません』と書いてありますが、前後させると
+                        番号が合わなくなり、調理中モードは元の順で進みます」）。
+                        調理中モードにも同じ順番で反映されることまで書く＝R4が確かめられなかった点 */}
+                    <p
+                      data-testid="navi-reorder-hint"
+                      className="ja-phrase mt-[var(--space-md)] text-xs text-ink-muted"
+                    >
+                      {renderJaUnits(ja.cookNavi.reorderHint)}
+                    </p>
+
                     {/* 色で移った手順を組み込むと、段取りの通し番号が前から振り直される
                         （2026-08-12 便FS-8・利用者テスト「番号が入れ替わるのに説明が
-                        どこにもない」）。並びが変わっている間だけ、その理由をここに置く */}
+                        どこにもない」）。並びが変わっている間だけ、その理由をここに置く。
+                        2026-08-14 便GJ: 手で動かしたときも同じことが起きるので同じ場所に集め、
+                        「戻す手立て」と「目安の分数が何の数字か」も並べて置く（規約F） */}
                     {pulls.length > 0 && (
-                      <p
-                        data-testid="navi-pull-renumbered"
-                        className="ja-phrase mt-[var(--space-sm)] text-xs text-ink-muted"
+                      <div
+                        data-testid="navi-reorder-state"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
                       >
-                        {ja.cookNavi.pullRenumberedNote}
-                      </p>
+                        <p
+                          data-testid="navi-pull-renumbered"
+                          className="ja-phrase text-xs text-ink-muted"
+                        >
+                          {ja.cookNavi.pullRenumberedNote}
+                        </p>
+                        <p
+                          data-testid="navi-reorder-estimate-note"
+                          className="ja-phrase mt-1 text-xs text-ink-muted"
+                        >
+                          {renderJaUnits(ja.cookNavi.reorderEstimateNote)}
+                        </p>
+                        {issues.length > 0 && (
+                          <p
+                            data-testid="navi-reorder-issue-note"
+                            className="ja-phrase mt-[var(--space-sm)] flex items-start gap-1 text-sm font-bold text-warning"
+                          >
+                            <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden />
+                            <span>
+                              {renderJaUnits(
+                                ja.cookNavi.reorderIssueNote.replace(
+                                  '{n}',
+                                  String(issuesByStep.size),
+                                ),
+                              )}
+                            </span>
+                          </p>
+                        )}
+                        <div className="mt-[var(--space-sm)] flex gap-2">
+                          <button
+                            type="button"
+                            data-testid="navi-reorder-undo"
+                            onClick={undoLastPull}
+                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm"
+                          >
+                            <Undo2 size={16} aria-hidden />
+                            {ja.cookNavi.reorderUndoOne}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="navi-reorder-reset"
+                            onClick={resetPulls}
+                            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 text-sm font-bold text-accent-ink shadow-sm"
+                          >
+                            <RotateCcw size={16} aria-hidden />
+                            {ja.cookNavi.reorderUndoAll}
+                          </button>
+                        </div>
+                      </div>
                     )}
 
                     <ol className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
@@ -1875,6 +2059,11 @@ export default function CookNaviPage() {
                         <TimelineCard
                           key={`${item.recipeId}-${item.stepIndex}`}
                           item={item}
+                          issues={issuesByStep.get(reorderStepKey(item)) ?? []}
+                          canMoveUp={index > 0}
+                          canMoveDown={index < planItems.length - 1}
+                          onMoveUp={() => moveStep(index, 'up')}
+                          onMoveDown={() => moveStep(index, 'down')}
                           ingredients={stepIngredientsByKey.get(`${item.recipeId}-${item.stepIndex}`) ?? []}
                           ingredientNames={ingredientNamesByRecipeId.get(item.recipeId) ?? []}
                           recipeNotes={recipeNotesByStep.get(recipeNoteStepKey(item)) ?? []}

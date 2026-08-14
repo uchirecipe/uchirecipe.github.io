@@ -1112,7 +1112,7 @@ export function stepHeatShift(step: Step, kitchen: KitchenEquipment): HeatShift 
  * 見分けは位置くらべ（この画面のほかの規則と同じ）。**火にかける語が、火を下ろす語より前**にあれば、
  * その工程の間は火の上にいる＝終わりに下りる。
  */
-function heatOffAtEnd(step: Step): boolean {
+export function heatOffAtEnd(step: Step): boolean {
   const text = maskNonWaitNouns(stepMainText(step.text))
   const off = lastEndOfPatterns(text, [HEAT_OFF_PATTERN])
   const on = lastEndOfPatterns(text, [HEAT_ON_PATTERN])
@@ -1128,7 +1128,7 @@ function heatOffAtEnd(step: Step): boolean {
  * そのままにして、**この猶予は「待ちではない工程で火にかけたままになったとき」にだけ**与える
  * （既存の締め切りを緩める方向に働かせない）。
  */
-const HEAT_HOLD_ALLOWANCE = 3
+export const HEAT_HOLD_ALLOWANCE = 3
 
 /**
  * 生の肉・魚を指す語（2026-08-08 便ED・オーナー指示「切る順番を野菜→肉に。肉は最後」）。
