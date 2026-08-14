@@ -208,11 +208,14 @@ import {
   MONTH_RETURN_KEY,
   WEEK_RETURN_KEY,
   WEEK_RETURN_PARAM,
+  type ReturnAnchor,
   forgetRecipesTabPath,
   parseViewReturn,
   parseWeekReturn,
+  pickReturnAnchor,
   readSessionItem,
   removeSessionItem,
+  scrollTargetForAnchor,
   serializeViewReturn,
   serializeWeekReturn,
   writeSessionItem,
@@ -2282,6 +2285,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [pendingScrollY, setPendingScrollY] = useState<number | null>(null)
   /**
+   * その復元で目印にする曜日カード（2026-08-14 便GH）。
+   * 縦位置だけでは、離れている間にページの高さが変わったときに別の場所へ着地する。
+   * 目印があるときは「このカードを画面の同じ高さに戻す」を優先する（logic/navMemory.ts）。
+   */
+  const [pendingScrollAnchor, setPendingScrollAnchor] = useState<ReturnAnchor | null>(null)
+  /**
    * その復元をどのタブでやるか（2026-08-09 便EQ）。
    * 週タブ専用だった仕組みを、月タブ・日タブ（作った記録の一覧からの戻り）にも広げた。
    */
@@ -2336,6 +2345,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         if (point) {
           setWeekStart(point.weekStart)
           setPendingScrollY(point.scrollY)
+          setPendingScrollAnchor(point.anchor ?? null)
           // 「今日を先頭に7日間」表示の初期化(weekModeInitRef)が、あとから設定を読み終えた
           // タイミングで週を今日へ寄せ直してしまうと、復元した週が消える。復元したときは
           // その初期化を済み扱いにする＝覚えていた週をそのまま見せる
@@ -2389,6 +2399,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 覚えた位置より手前に着地していた（設定が届くまでは表示しない食事帯まで描いていて、
    * 実測で 6243px → 4037px まで縮み、1800px へ戻したはずが 1106px になっていた）。
    * **高さが数フレーム変わらなくなってから**動かす。
+   *
+   * 2026-08-14 便GH: それでも「離れている間にページの高さが変わる」場合は直せていなかった。
+   * 「この日の栄養の概算を詳しく見る」で開いた明細は画面を離れると閉じた状態に戻るため、
+   * 帰ってきたページは実測695px短く、同じ縦位置には**別のカード**が来ていた
+   * （見ていたカードは画面外へ644px上がっていた）。覚えた目印のカードがあるときは、
+   * 縦位置ではなく**そのカードを画面の同じ高さに戻す**（logic/navMemory.ts）。
    */
   useEffect(() => {
     if (pendingScrollY == null || viewMode !== pendingScrollMode) return
@@ -2404,12 +2420,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       stable = height === lastHeight ? stable + 1 : 0
       lastHeight = height
       const reachable = height - window.innerHeight
-      if (
-        (reachable >= pendingScrollY && stable >= RESTORE_STABLE_FRAMES) ||
-        frames >= RESTORE_MAX_FRAMES
-      ) {
-        window.scrollTo(0, Math.min(pendingScrollY, Math.max(0, reachable)))
+      const anchorEl = pendingScrollAnchor
+        ? document.querySelector<HTMLElement>(`section[data-date="${pendingScrollAnchor.date}"]`)
+        : null
+      // 目印のカードが描けていれば「高さが足りるか」は問わない（縮んだ側にも合わせるため）
+      const ready =
+        stable >= RESTORE_STABLE_FRAMES && (anchorEl != null || reachable >= pendingScrollY)
+      if (ready || frames >= RESTORE_MAX_FRAMES) {
+        const target =
+          anchorEl && pendingScrollAnchor
+            ? scrollTargetForAnchor(
+                window.scrollY,
+                anchorEl.getBoundingClientRect().top,
+                pendingScrollAnchor,
+              )
+            : pendingScrollY
+        window.scrollTo(0, Math.min(target, Math.max(0, reachable)))
         setPendingScrollY(null)
+        setPendingScrollAnchor(null)
         return
       }
       frames++
@@ -2417,7 +2445,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [pendingScrollY, viewMode, pendingScrollMode])
+  }, [pendingScrollY, viewMode, pendingScrollMode, pendingScrollAnchor])
 
   /**
    * 指定された日のカードまでスクロールする（週タブに切り替わり、7日分が描かれたあとに1回だけ）。
@@ -4067,9 +4095,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 覚えるのは sessionStorage だけ＝端末に残るユーザーデータには何も書かない。
    */
   const rememberWeekReturn = () => {
+    // 2026-08-14 便GH: 縦位置に加えて「上端が見えているいちばん上の曜日カード」も覚える。
+    // 選び方の理由は logic/navMemory.ts の pickReturnAnchor に書いてある
+    const cards = [...document.querySelectorAll<HTMLElement>('section[data-date]')].map((el) => ({
+      date: el.dataset.date ?? '',
+      top: el.getBoundingClientRect().top,
+    }))
+    let visibleTop = 0
+    for (const bar of document.querySelectorAll<HTMLElement>('[data-app-top-bar]')) {
+      const rect = bar.getBoundingClientRect()
+      if (rect.height > 0 && rect.top <= 2) visibleTop = Math.max(visibleTop, rect.bottom)
+    }
     writeSessionItem(
       WEEK_RETURN_KEY,
-      serializeWeekReturn({ weekStart: dates[0], scrollY: window.scrollY }),
+      serializeWeekReturn({
+        weekStart: dates[0],
+        scrollY: window.scrollY,
+        anchor: pickReturnAnchor(cards, visibleTop) ?? undefined,
+      }),
     )
   }
 
