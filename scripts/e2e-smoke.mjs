@@ -652,7 +652,7 @@ try {
   check('SMK-05 g系は整数のまま', detailText.includes('300g'), '牛こま300g(200g×1.5)が見つからない')
 
   // --- 合わせ調味料の色ライン(共通説明文の表示) ---
-  check('合わせ調味料ヒント表示', detailText.includes('先にまとめて計量してOK'))
+  check('合わせ調味料ヒント表示', detailText.includes('合わせ調味料です'))
 
   // --- NUT-01: 栄養価の概算(未解錠・無料)。肉じゃがの詳細を開いたまま検証する
   // (M6-1 2026-07-12オーナー指示でNUTRITION_ENABLED=trueに前倒し有効化。
