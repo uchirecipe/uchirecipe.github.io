@@ -31851,13 +31851,13 @@ try {
       check(
         'GL-01 並べ替えたあとは「全体の目安」と同じ枠の中に印が出る',
         noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()) ===
-          '自動で組んだ並びで計算した数字です。手で並べ替えたあとの時間ではありません。',
+          '自動で組んだ並びで計算した数字です。並びを変えたあとの時間ではありません。',
         noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()),
       )
       check(
         'GL-01 「できあがりの目安」の枠の中にも同じ印が出る（品ごとの分数と同じ場所）',
         noZw(await glPage.locator('[data-testid="navi-finish-estimate-stale"]').innerText()) ===
-          '自動で組んだ並びで計算した数字です。手で並べ替えたあとの時間ではありません。',
+          '自動で組んだ並びで計算した数字です。並びを変えたあとの時間ではありません。',
         noZw(await glPage.locator('[data-testid="navi-finish-estimate-stale"]').innerText()),
       )
       const glTotalColorAfter = await glMinutesColor('[data-testid="navi-total-estimate"]')
