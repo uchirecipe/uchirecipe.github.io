@@ -539,7 +539,11 @@ export default function CookSessionOverlay({
   const color = naviRecipeColor(item.colorIndex)
   const currentStepLabel = recipeStepLabel(item)
   const ingredients = stepIngredients.get(`${item.recipeId}-${item.stepIndex}`) ?? []
-  const ingredientNames = ingredientNamesByRecipeId.get(item.recipeId) ?? []
+  // ナビが足した工程には材料の下線を引かない（2026-08-15 便GO。段取りの一覧と同じ扱い
+  // ＝分量を出さない工程で下線だけが引かれる状態を作らない）
+  const ingredientNames = item.addedByNavi
+    ? []
+    : (ingredientNamesByRecipeId.get(item.recipeId) ?? [])
   /** この手順に割り当てたレシピ本体のメモ（2026-08-11 便FM） */
   const currentRecipeNotes = recipeNotes.get(recipeNoteStepKey(item)) ?? []
   // 段取りの一覧と同じ判定（2026-08-11 便FN・logic/cookNavi.ts showsWaitTimerButton）。

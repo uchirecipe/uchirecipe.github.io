@@ -168,8 +168,15 @@ function RecipePill({ title, colorIndex }: { title: string; colorIndex: number }
  * 沸くまでの待ちの差し込み）ため、手順番号だけだと同じ id のカードが2枚並び、
  * タイマーからの着地が必ず手前のカードに落ちてしまう。
  */
-function naviStepKey(item: { stepNumber: number; splitOf?: number; splitPart?: 1 | 2 }): string {
-  return recipeStepLabel(item) ?? String(item.stepNumber)
+function naviStepKey(item: {
+  stepNumber: number
+  stepIndex: number
+  splitOf?: number
+  splitPart?: 1 | 2
+}): string {
+  // 2026-08-15 便GO: 番号を持たない工程（ナビが足した「火を止める／弱火にする」）は
+  // 1つの品に2つ出ることがあるので、識別子で分ける＝同じ id のカードを2枚作らない
+  return recipeStepLabel(item) ?? `s${item.stepIndex}`
 }
 function naviStepDomId(recipeId: number, stepKey: string): string {
   return `navi-step-${recipeId}-${stepKey}`
@@ -1344,6 +1351,10 @@ export default function CookNaviPage() {
     planItems.forEach((item) => {
       const recipe = recipeById.get(item.recipeId)
       if (!recipe) return
+      // ナビが足した工程はレシピの本文ではないので、材料の突き合わせに掛けない
+      // （2026-08-15 便GO。「{料理名}の火を止める」の料理名に材料の語が入っていると、
+      //   材料を使わない一手に分量が並ぶ。例:「豆腐とわかめのみそ汁」→ 豆腐・わかめ・みそ）
+      if (item.addedByNavi) return
       const target = servingsByRecipeId.get(item.recipeId) ?? recipe.servings
       map.set(
         `${item.recipeId}-${item.stepIndex}`,
@@ -2180,7 +2191,12 @@ export default function CookNaviPage() {
                           onMoveUp={() => moveStep(index, 'up')}
                           onMoveDown={() => moveStep(index, 'down')}
                           ingredients={stepIngredientsByKey.get(`${item.recipeId}-${item.stepIndex}`) ?? []}
-                          ingredientNames={ingredientNamesByRecipeId.get(item.recipeId) ?? []}
+                          /* ナビが足した工程には材料の下線を引かない（2026-08-15 便GO。
+                             分量を出さない工程なので、下線だけが引かれる状態にしない
+                             ＝下線と分量は必ず一致させる・logic/naviIngredients.ts の方針） */
+                          ingredientNames={
+                            item.addedByNavi ? [] : (ingredientNamesByRecipeId.get(item.recipeId) ?? [])
+                          }
                           recipeNotes={recipeNotesByStep.get(recipeNoteStepKey(item)) ?? []}
                           /* 1品ずつ作る順番のときは「この間に、次の手作業を進められます」を出さない
                              （次の手順は同じ品の続きで、待ち終わってからやる作業のため）。
