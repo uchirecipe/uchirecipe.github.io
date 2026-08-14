@@ -25290,15 +25290,30 @@ try {
         }
       })
       await fdPage.waitForTimeout(900)
+      // 2026-08-14 便GH: 測るものを「縦スクロール量(window.scrollY)の一致」から
+      // **「見ていた曜日カードが画面の同じ高さに帰ってくること」**へ変えた。
+      // 旧い測り方は利用者の関心（同じ場所が映るか）とずれていて、両方向に誤判定していた:
+      //  ・落ちる側 … この直前のFD-02が「栄養の概算を詳しく見る」を開いたままなので、
+      //    レシピ詳細へ移ると明細が閉じてページが695px縮む。週の後半の曜日ではカードの位置が
+      //    ページの末尾寄りになり、覚えた縦位置まで下がれない＝**今日が何曜日かで結果が変わる**
+      //    （実測: 月〜木は通り、金2511→2460・土2715→2264で落ちる。app/CLAUDE.mdの禁じ手①）
+      //  ・素通り合格の側 … 月曜は縦位置が一致して「合格」になるが、そのとき見ていたカードは
+      //    画面外へ695px上がっていた＝**同じ場所に帰れていないのに通っていた**（禁じ手④に同じ）
+      // カードの画面上の位置で測れば、上で何が伸び縮みしても、曜日が変わっても、
+      // 「同じ場所が映るか」だけを見ることになる。誤差20px以内は変えない。
       const fdBeforeOpen = await fdPage.evaluate(() => {
         const link = [...document.querySelectorAll('[data-testid="slot-open-recipe"]')].find((a) => {
           const r = a.getBoundingClientRect()
           return r.top > 90 && r.bottom < window.innerHeight - 90
         })
         if (!link) return null
+        const card = link.closest('section[data-date]')
+        if (!card) return null
         const y = Math.round(window.scrollY)
+        const date = card.getAttribute('data-date')
+        const cardTop = Math.round(card.getBoundingClientRect().top)
         link.click()
-        return { y }
+        return { y, date, cardTop }
       })
       await fdPage.waitForTimeout(1500)
       check(
@@ -25308,11 +25323,25 @@ try {
       )
       await fdPage.getByRole('button', { name: '戻る' }).first().click()
       await fdPage.waitForTimeout(2500)
-      const fdBack = await fdGeom()
+      const fdBack = await fdPage.evaluate((date) => {
+        const card = date ? document.querySelector(`section[data-date="${date}"]`) : null
+        return {
+          y: Math.round(window.scrollY),
+          docH: Math.round(document.documentElement.scrollHeight),
+          cardTop: card ? Math.round(card.getBoundingClientRect().top) : null,
+        }
+      }, fdBeforeOpen?.date ?? '')
       check(
-        'FD-03 「戻る」で献立の週タブの同じ縦位置に帰る（誤差20px以内）',
-        fdBeforeOpen != null && Math.abs(fdBack.y - fdBeforeOpen.y) <= 20,
-        `${fdBeforeOpen && fdBeforeOpen.y}→${fdBack.y}`,
+        'FD-03 前提: 戻ると離れる前と同じ週が開いている（そのカードが画面に在る）',
+        fdBeforeOpen != null && fdBack.cardTop != null,
+        `${JSON.stringify(fdBeforeOpen)} → ${JSON.stringify(fdBack)}`,
+      )
+      check(
+        'FD-03 「戻る」で、離れる直前に見ていた献立のカードが画面の同じ位置に帰る（誤差20px以内）',
+        fdBeforeOpen != null &&
+          fdBack.cardTop != null &&
+          Math.abs(fdBack.cardTop - fdBeforeOpen.cardTop) <= 20,
+        `${fdBeforeOpen && fdBeforeOpen.date}のカード ${fdBeforeOpen && fdBeforeOpen.cardTop}px→${fdBack.cardTop}px / scrollY ${fdBeforeOpen && fdBeforeOpen.y}→${fdBack.y} / docH ${fdBack.docH}`,
       )
 
       // ---------- FD-03 「レシピを見る」から同じ画面へ帰る（月タブの日の窓） ----------

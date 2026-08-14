@@ -302,6 +302,8 @@ import {
   MONTH_RETURN_KEY,
   parseViewReturn,
   parseWeekReturn,
+  pickReturnAnchor,
+  scrollTargetForAnchor,
   serializeViewReturn,
   serializeWeekReturn,
 } from '../src/logic/navMemory.ts'
@@ -2921,6 +2923,115 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('DT2-NAV 日付が無ければnull', parseWeekReturn('{"scrollY":10}'), null)
   eq('DT2-NAV スクロール位置が数値でなければnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":"10"}'), null)
   eq('DT2-NAV NaNはnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":null}'), null)
+}
+
+// ---------- navMemory: 見ていた場所の目印(2026-08-14 便GH・再発防止) ----------
+// 直したバグ: 週タブ→レシピ詳細→「戻る」で、離れる前と別の場所に着地する(実測695pxのずれ)。
+// 覚えていたのがページ先頭からの距離(scrollY)だけで、離れている間にページの高さが変わると
+// 同じ距離が別の場所を指すため(「栄養の概算を詳しく見る」で開いた明細は、離れると閉じる)。
+{
+  // 画面(高さ844)に4枚のカードが並び、上の2枚は上端が画面より上にある状態
+  const cards = [
+    { date: '2026-08-10', top: -500 },
+    { date: '2026-08-11', top: -100 },
+    { date: '2026-08-12', top: 300 },
+    { date: '2026-08-13', top: 700 },
+  ]
+  eq('GH-ANCHOR 上端が画面の中から始まるカードのうち、いちばん上を目印にする', pickReturnAnchor(cards), {
+    date: '2026-08-12',
+    top: 300,
+  })
+  // 上端が画面より上のカードを目印にしてはいけない: そのカードの中で縮む部分（栄養の明細）も
+  // 画面より上にあり、明細が閉じてもカードの上端は動かない＝ずれを打ち消せない（実測 -644px）
+  eq(
+    'GH-ANCHOR 上端が画面より上のカードは目印にしない(その中の縮む部分も画面の上なので直らない)',
+    pickReturnAnchor([
+      { date: '2026-08-14', top: -1055 },
+      { date: '2026-08-15', top: 70 },
+    ]).date,
+    '2026-08-15',
+  )
+  eq(
+    'GH-ANCHOR 上に貼り付く帯の下から数える(帯に隠れて上端が見えないカードは目印にしない)',
+    pickReturnAnchor(cards, 320),
+    { date: '2026-08-13', top: 700 },
+  )
+  eq(
+    'GH-ANCHOR 画面いっぱいに1枚が広がっているときは、画面の下にある次のカードを目印にする',
+    pickReturnAnchor([
+      { date: '2026-08-14', top: -300 },
+      { date: '2026-08-15', top: 1200 },
+    ]),
+    { date: '2026-08-15', top: 1200 },
+  )
+  eq(
+    'GH-ANCHOR 最後のカードの中まで送っていれば目印なし(従来どおり縦位置だけで戻す)',
+    pickReturnAnchor([{ date: '2026-08-10', top: -900 }]),
+    null,
+  )
+  eq('GH-ANCHOR カードが1枚も無ければ目印なし', pickReturnAnchor([]), null)
+  eq('GH-ANCHOR 上端は整数に丸める', pickReturnAnchor([{ date: '2026-08-10', top: 12.4 }]).top, 12)
+  // 復元の計算: 目印のカードを離れたときと同じ高さに戻す
+  eq(
+    'GH-ANCHOR 上の中身が695px縮んでいても、目印のカードは同じ高さに戻る',
+    // 離れたとき: 縦位置2511でカードの上端は70px。戻ったとき、明細が閉じて上が695px縮み、
+    // 同じ縦位置2511ではカードの上端が-625pxまで上がっている
+    scrollTargetForAnchor(2511, -625, { date: '2026-08-15', top: 70 }),
+    2511 - 695,
+  )
+  eq(
+    'GH-ANCHOR 高さが変わっていなければ、離れたときと同じ縦位置になる',
+    scrollTargetForAnchor(1493, 70, { date: '2026-08-11', top: 70 }),
+    1493,
+  )
+  eq(
+    'GH-ANCHOR 上が伸びていれば、そのぶん下へ送る',
+    scrollTargetForAnchor(1000, 260, { date: '2026-08-11', top: 60 }),
+    1200,
+  )
+  eq(
+    'GH-ANCHOR 先頭より手前へは戻さない(負の縦位置を作らない)',
+    scrollTargetForAnchor(100, 0, { date: '2026-08-11', top: 500 }),
+    0,
+  )
+  // 覚え書きの形: 目印は任意。付いていない古い覚え書きも、壊れた目印も、週の復元は止めない
+  eq(
+    'GH-ANCHOR 目印つきの覚え書きをそのまま読み戻せる',
+    parseWeekReturn(
+      serializeWeekReturn({
+        weekStart: '2026-08-10',
+        scrollY: 2511,
+        anchor: { date: '2026-08-15', top: 70.4 },
+      }),
+    ),
+    { weekStart: '2026-08-10', scrollY: 2511, anchor: { date: '2026-08-15', top: 70 } },
+  )
+  eq(
+    'GH-ANCHOR 目印が無い覚え書きは以前と同じ形のまま(古い覚え書きも読める)',
+    parseWeekReturn('{"weekStart":"2026-08-10","scrollY":2511}'),
+    { weekStart: '2026-08-10', scrollY: 2511 },
+  )
+  eq(
+    'GH-ANCHOR 目印だけ壊れていたら目印を捨てて週の復元は続ける',
+    parseWeekReturn('{"weekStart":"2026-08-10","scrollY":2511,"anchor":{"date":"きのう","top":70}}'),
+    { weekStart: '2026-08-10', scrollY: 2511 },
+  )
+  eq(
+    'GH-ANCHOR 目印の上端が数値でなければ目印を捨てる',
+    parseWeekReturn('{"weekStart":"2026-08-10","scrollY":2511,"anchor":{"date":"2026-08-15","top":"70"}}'),
+    { weekStart: '2026-08-10', scrollY: 2511 },
+  )
+  eq(
+    'GH-ANCHOR 目印の上端は0未満に丸めない(画面の外を指す値も位置として意味がある)',
+    parseWeekReturn(
+      serializeWeekReturn({
+        weekStart: '2026-08-10',
+        scrollY: 2511,
+        anchor: { date: '2026-08-15', top: -120 },
+      }),
+    ).anchor,
+    { date: '2026-08-15', top: -120 },
+  )
 }
 
 // ---------- navMemory: ホーム/月タブ/日タブの居場所(2026-08-09 便EQ) ----------
