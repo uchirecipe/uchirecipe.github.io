@@ -205,7 +205,7 @@ export class ApplianceSchedule {
    * 終わりの時刻が決まっていない占有。品ごとに1つだけ持つ（＝1品につき鍋1つと数える）。
    * 便GCまでは**その工程の長さだけ**口をふさぐ数え方だったので、「中火にかける（2分）」の
    * 2分が過ぎればコンロが空くことになり、**火にかけっぱなしの鍋の上にもう1つ鍋を置く段取り**が
-   * 出ていた（コンロ1口の家で、理論下限を下回る＝成立しない段取りが41通り）。
+   * 出ていた（コンロ1口の家で、理論下限を下回る＝手も口も足りていない段取りが9通り）。
    */
   private holds = new Map<number, { key: ApplianceKey; start: number }>()
   private kitchen: KitchenEquipment
