@@ -81,7 +81,8 @@ const SHOT_NAMES = [
   'plan-day-buttons', 'select-for-today', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
   'detail-photo', 'nutrition-open', 'share', 'logs',
-  'cookmode-voice', 'cookmode', 'timer', 'cooknavi',
+  'cookmode-voice', 'cookmode', 'timer', 'settings-kitchen', 'cooknavi',
+  'cooknavi-finish', 'cooknavi-reorder', 'cooknavi-reorder-undo',
   'cooknavi-session', 'cooknavi-session-others',
   'backup-export', 'backup-import', 'nutrition-row', 'plan-week-nutrition-row',
 ]
@@ -749,6 +750,14 @@ try {
   await wait(page, 800)
   await page.locator('main a[href*="/recipes/"]:not([href$="/new"])').first().click()
   await wait(page, 1400)
+  // 「食数の設定」「台所の器具」の初回の案内(2026-08-13 便GE)は、レシピ詳細を初めて開いたときに
+  // 1回だけ出る。撮影用の端末は毎回まっさらなので必ずここで出て、以降の操作を全部ふさぐ
+  // (2026-08-15 便GN で撮り直したときに実際に止まった)。閉じると次からは出ない
+  const firstSetupDismiss = page.locator('[data-testid="first-setup-notice-dismiss"]')
+  if (await firstSetupDismiss.count()) {
+    await firstSetupDismiss.click()
+    await wait(page, 600)
+  }
   await page.evaluate(() => window.scrollTo(0, 0))
   await wait(page, 400)
   await cropRect(page, 'detail-photo', { x: 0, y: 44, width: VIEW.width, height: 338 })
@@ -844,6 +853,18 @@ try {
     await wait(page, 400)
   }
 
+  // ======== 設定「台所の器具」(2026-08-15 便GN) ========
+  // 使い方ページ§9の「台所の器具に合わせて段取りを組みます」の図。
+  // 段取りの前提になる設定なので、並行調理ナビの図より前に撮っておく(読む順番と同じ)。
+  // 欄が丸ごと収まるところまで切る(トリミング基準)。既定のまま=コンロ2口・3つとも「持っている」
+  await page.goto(`${BASE}/#/settings?section=kitchen`, { waitUntil: 'networkidle' })
+  await wait(page, 1800)
+  const kitchenSection = page.locator('#kitchen-section')
+  if (await kitchenSection.count()) {
+    // タブの帯が画面の上に貼り付いているので、欄の見出しがその下に来る位置まで送ってから切る
+    await crop(page, 'settings-kitchen', kitchenSection, { top: 110, padTop: 10, padBottom: 10 })
+  }
+
   // ======== 並行調理ナビ ========
   // 今日の献立を「肉じゃが」「ほうれん草のおひたし」の2品だけにしてから開く。
   // 2026-08-09 便EU: 以前は「2品に満たなければ足す」だったが、この時点では上の週タブで
@@ -927,17 +948,84 @@ try {
     })
     if (picked >= 0) waitIndex = picked
   }
-  const waitStep = waitCards.nth(waitIndex).getByText(WAIT_BAND).first()
-  if (await waitStep.count()) {
-    await waitStep.scrollIntoViewIfNeeded()
-    await wait(page, 300)
-    await waitStep.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 120))
-    await wait(page, 400)
-    // 2026-08-09 便EM: 待ち時間の帯に「タイマーを始める」が入って背が高くなり、216pxでは
-    // 次の手順の本文が途中で切れていた(トリミング基準=説明している範囲を途中で切らない)
-    await cropRect(page, 'cooknavi', { x: 0, y: 108, width: VIEW.width, height: 320 })
+  const waitCard = waitCards.nth(waitIndex)
+  // 次の手順の材料の行までを下端にする(2026-08-15 便GN)。
+  // 2026-08-14 便GJ で手順カードに「上へ」「下へ」の行が増え、切り出しの高さを px で
+  // 決め打ちしていたぶん(y=108・320px)では次の手順の本文が途中で切れていた。
+  // 高さを測って切る形にすれば、カードの中身が増えても本文の途中では切れない
+  const nextIngredients = waitCard.locator(
+    'xpath=following-sibling::li[1]//*[@data-testid="navi-step-ingredients"]',
+  )
+  if ((await waitCard.count()) && (await nextIngredients.count())) {
+    await cropRange(page, 'cooknavi', waitCard, nextIngredients, { top: 60, padBottom: 2 })
+  } else if (await waitCard.count()) {
+    await crop(page, 'cooknavi', waitCard, { top: 60, padBottom: 12, extraBottom: 220 })
   } else {
     await cropRect(page, 'cooknavi', { x: 0, y: 60, width: VIEW.width, height: 300 })
+  }
+
+  // ======== できあがりの目安(2026-08-15 便GN) ========
+  // 使い方ページ§9の「できあがりの目安」の図。品ごとの分数と、その開きの一言が入る枠を
+  // 丸ごと切る。**手で並べ替える前**に撮る(並べ替えたあとは分数が灰色になるため、
+  // 自動で組んだ並びのときの見え方をここで写す)
+  const finishPanel = page.locator('[data-testid="navi-finish-times"]')
+  if (await finishPanel.count()) {
+    await crop(page, 'cooknavi-finish', finishPanel, { top: 72, padTop: 4, padBottom: 6 })
+  } else {
+    console.warn('  ⚠ できあがりの目安の枠が見つかりませんでした')
+  }
+
+  // ======== 段取りの並べ替え(2026-08-15 便GN) ========
+  // 使い方ページ§9の「段取りの順番を自分で変える」の2枚。
+  //  cooknavi-reorder      … 手順カードの「上へ」「下へ」と、無理な並びになったときの印
+  //  cooknavi-reorder-undo … 戻す欄(1つ前の並びに戻す/自動の並びに戻す)と印のまとめ
+  //
+  // 印が出る並びを**作ってから**撮る。同じ品の2つめ以降の手順を先頭まで押し上げると
+  // 「レシピに書いた順番より前に出ています」の印が必ず付く(logic/cookReorder.ts)。
+  // 動かした手順が先頭に来るので、印の付いたカードの位置が毎回同じになる。
+  //
+  // カードのDOM id は navi-step-<レシピの番号>-<手順の呼び名>(CookNaviPage.tsx naviStepDomId)。
+  // レシピの番号が一度出たあとに同じ番号がまた出てくる位置＝その品の2つめ以降の手順
+  const reorderFrom = await page.evaluate(() => {
+    const cards = [...document.querySelectorAll('main ol > li')]
+    const seen = new Set()
+    for (let i = 0; i < cards.length; i++) {
+      const id = cards[i].id ?? ''
+      const recipeId = id.split('-')[2]
+      if (!recipeId) continue
+      if (seen.has(recipeId)) return i
+      seen.add(recipeId)
+    }
+    return -1
+  })
+  if (reorderFrom > 0) {
+    for (let at = reorderFrom; at > 0; at--) {
+      const up = page.locator('[data-testid="navi-step-up"]').nth(at)
+      await up.scrollIntoViewIfNeeded()
+      await wait(page, 200)
+      await up.click()
+      await wait(page, 500)
+    }
+    const movedCard = page.locator('main ol > li').first()
+    if (await movedCard.count()) {
+      await crop(page, 'cooknavi-reorder', movedCard, { top: 72, padTop: 8, padBottom: 8 })
+    }
+    const reorderState = page.locator('[data-testid="navi-reorder-state"]')
+    if (await reorderState.count()) {
+      await crop(page, 'cooknavi-reorder-undo', reorderState, { top: 72, padTop: 8, padBottom: 8 })
+    }
+    // 撮り終えたら自動の並びに戻す(このあとの調理中モードのカットに並べ替えを持ち込まない)。
+    // 「自動の並びに戻す」は確認の窓が開くので、押した回数ぶん1つずつ戻す
+    for (let i = 0; i < reorderFrom; i++) {
+      const undoOne = page.locator('[data-testid="navi-reorder-undo"]')
+      if ((await undoOne.count()) === 0) break
+      await undoOne.scrollIntoViewIfNeeded()
+      await wait(page, 200)
+      await undoOne.click()
+      await wait(page, 500)
+    }
+  } else {
+    console.warn('  ⚠ 印の出る並びを作れませんでした（同じ品の2つめの手順が見つからない）')
   }
 
   // ======== 並行調理ナビの調理中モード(2026-08-11 便FK) ========

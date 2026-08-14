@@ -105,7 +105,7 @@
   },
   "cooknavi": {
     "w": 780,
-    "h": 640
+    "h": 926
   },
   "backup-export": {
     "w": 780,
@@ -125,7 +125,7 @@
   },
   "cooknavi-session": {
     "w": 780,
-    "h": 186
+    "h": 148
   },
   "cooknavi-session-others": {
     "w": 780,
@@ -134,5 +134,21 @@
   "select-for-today": {
     "w": 780,
     "h": 990
+  },
+  "settings-kitchen": {
+    "w": 780,
+    "h": 904
+  },
+  "cooknavi-finish": {
+    "w": 780,
+    "h": 424
+  },
+  "cooknavi-reorder": {
+    "w": 780,
+    "h": 736
+  },
+  "cooknavi-reorder-undo": {
+    "w": 780,
+    "h": 448
   }
 }
