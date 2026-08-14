@@ -31985,8 +31985,17 @@ try {
         glBoilNote.includes('実際に沸くまでの時間は、火力と量で変わります'),
         glBoilNote,
       )
+      // 測りたいのは「押す前に目に入る」こと。ボタンからの距離をpxで決め打ちすると、
+      // あいだに別の説明（範囲タイマーの一文・並行の案内）が正当に入った瞬間に落ちる
+      // （CLAUDE.mdの禁じ手④。2026-08-15に実際に落ちた）。同じ待ちのブロックの中にあり、
+      // ボタンと同時に画面へ入ることで測る
+      await glPage
+        .locator('[data-testid="navi-boil-note"]')
+        .first()
+        .scrollIntoViewIfNeeded()
+      await glPage.waitForTimeout(300)
       check(
-        'GL-07 その一文は「タイマーを始める」より下に無い＝押す前に目に入る位置にある',
+        'GL-07 その一文は、タイマーのボタンと同時に画面に入る＝押す前に目に入る',
         await glPage.evaluate(() => {
           const note = document.querySelector('[data-testid="navi-boil-note"]')
           if (!note) return false
@@ -31995,8 +32004,10 @@ try {
             (b.textContent ?? '').includes('タイマーを始める'),
           )
           if (!btn) return false
-          // 同じ待ちのブロックの中にあり、ボタンとの縦の隔たりが1行ぶん以内
-          return note.getBoundingClientRect().top - btn.getBoundingClientRect().bottom < 24
+          const n = note.getBoundingClientRect()
+          const b = btn.getBoundingClientRect()
+          const inView = (r) => r.top >= 0 && r.bottom <= window.innerHeight
+          return card.contains(btn) && inView(n) && inView(b)
         }),
       )
 
