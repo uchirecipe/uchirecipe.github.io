@@ -1558,7 +1558,7 @@ export const ja = {
     reorderIssueMicrowave: 'この位置では、電子レンジが空いていません。',
     reorderIssueGrill: 'この位置では、魚焼きグリルが空いていません。',
     reorderIssueToaster: 'この位置では、トースターが空いていません。',
-    reorderIssueUnattended: '火にかけたまま、次にこの品へ手を戻すまでが空きます。',
+    reorderIssueUnattended: '火にかけたまま、次にこの品へ手を戻すまでが長くなります。',
     // 行き先が無いときも黙らない（「聞こえていないのか、効かないのか」を作らない）。
     // いま大きく出している品の色を言ったとき
     sessionColorCurrent: '{title}の手順は、いま開いています',
