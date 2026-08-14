@@ -21,6 +21,8 @@
  *   2. **覚えた日が今日でない**（昨日の段取りが today の献立の上に復活しない）
  *   3. 版・日付が読めない、JSONが壊れている、選んだ品が1品も無い
  *   4. 段取りを出していない（showTimeline が false）のに位置だけある不整合 → 位置と並べ替えを捨てる
+ *      （並べ替えは段取りに付くものなので、**調理中の位置が無くても段取りがあれば読む**。
+ *        2026-08-14 便GJ で段取りの一覧から手で並べ替えられるようにしたときに直した）
  * さらに読み戻したあとも、選択は今日の献立と突き合わせ（resolveCookNaviSelection）、
  * 位置は組み直した段取りに無ければ捨てる（cookSession.ts の resolveCursor）＝どちらも迂回しない。
  *
@@ -151,8 +153,15 @@ function readCookNaviSession(data: Partial<CookNaviSession> | null): CookNaviSes
   // 段取りを表示していない状態で調理中の手順だけが残ることはない（不整合は捨てる）
   const showTimeline = data.showTimeline === true
   const keepCursor = showTimeline && current != null
-  // 並べ替えも調理中の位置と同じで、段取りを表示していない状態だけが残ることはない
-  const pulls = keepCursor ? parseStepPulls(data.pulls) : []
+  /**
+   * 並べ替えは**段取りに付く**もので、調理中の手順があるかどうかとは関係ない
+   * （2026-08-14 便GJ）。便FI では並べ替えの手立てが調理中モードの中にしか無かったので
+   * 「位置があるときだけ読む」でも辻褄が合っていたが、段取りの一覧で手順を上下に動かせる
+   * ようになった今、その読み方だと**調理中モードを開かずに並べ替えた人の並びだけが
+   * 読み込み直しで消える**（画面を移って戻るたびに自動の並びへ戻ってしまう）。
+   * 段取りを出していない覚え書きに並べ替えだけが残ることはない、という線はそのまま。
+   */
+  const pulls = showTimeline ? parseStepPulls(data.pulls) : []
   return {
     selectedIds,
     showTimeline,

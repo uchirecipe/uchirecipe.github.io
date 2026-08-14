@@ -31288,6 +31288,330 @@ try {
     }
   }
 
+  // ============================================================================
+  // GJ-01〜08: 段取りを手で並べ替える（2026-08-14 便GJ・docs/71 R3/R4）
+  //
+  //   R3「段取りを手で並べ替える手段がない。上下ボタンもドラッグもなし。」
+  //   R4「順番の入れ替えもできません。前後させると番号が合わなくなり、
+  //       調理中モードは元の順で進みます。」
+  //
+  //   GJ-01 段取りの各手順に「上へ」「下へ」があり、押すと順番が変わる（390pxで押せる）
+  //   GJ-02 変えた順番のまま調理中モードが進む（R4の「元の順で進みます」への答え）
+  //   GJ-03 画面を移って戻っても・読み込み直しても、その日のうちは並びが残る
+  //   GJ-04 日付が変わったら並びごと捨てる（推測しない）
+  //   GJ-05 「1つ前の並びに戻す」で1回ずつ戻せる／「自動の並びに戻す」で白紙に戻せる（規約F）
+  //   GJ-06 うちの台所では続けられなくなる並びは、止めずに印を出す
+  //   GJ-07 自動で組んだ並びのままなら、印も並べ替えの欄も出ない（自動の段取りを変えていない）
+  //   GJ-08 何回動かしても手順は1つも消えない
+  // ============================================================================
+  currentCheck = 'GJ-01'
+  {
+    const gjBrowser = await chromium.launch()
+    const gjCtx = await gjBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const gjPage = await gjCtx.newPage()
+    let gjDialog = ''
+    let gjAnswer = 'accept'
+    gjPage.on('dialog', (d) => { gjDialog = d.message(); void (gjAnswer === 'accept' ? d.accept() : d.dismiss()) })
+    gjPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@GJ] ${err.message}`)
+    })
+    gjPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@GJ] ${t}`)
+    })
+    // BudouX が文節の切れ目にゼロ幅スペースを挿すので、照合の前に外す（CLAUDE.md の禁じ手②）
+    const noZw = (t) => (t ?? '').replace(/\u200B/g, '')
+    /** 段取りに出ている手順の本文（ゼロ幅スペース・改行を外して比べる） */
+    const gjOrder = async () =>
+      (await gjPage.locator('[data-testid="navi-step-text"]').allInnerTexts()).map((t) =>
+        noZw(t).replace(/\s+/g, ''),
+      )
+    try {
+      await gjPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await gjPage.waitForTimeout(1800)
+      // コンロ1口の家＋どちらもコンロを使う2品（手で動かすと口が足りなくなる形を作る）
+      await gjPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const a = await P(store('recipes').add(mk('GJ煮物', [
+          { text: '大根を一口大に切る。', minutes: 4 },
+          { text: '鍋に大根とだしを入れて中火で12分煮る。', minutes: 12 },
+          { text: '器に盛る。', minutes: 2 },
+        ])))
+        const b = await P(store('recipes').add(mk('GJ炒めもの', [
+          { text: 'にんじんを細切りにする。', minutes: 3 },
+          { text: 'フライパンで豚肉を炒める。', minutes: 5 },
+          { text: '器に盛る。', minutes: 2 },
+        ])))
+        let addedAt = Date.now()
+        for (const id of [a, b]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({
+          ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now(), kitchenBurners: 1,
+        }))
+        db.close()
+      })
+      await gjPage.goto(`${BASE}/#/cook-navi`)
+      await gjPage.reload({ waitUntil: 'networkidle' })
+      await gjPage.waitForTimeout(1500)
+      await gjPage.getByRole('button', { name: '段取りを作る' }).click()
+      await gjPage.waitForTimeout(1000)
+
+      const gjAuto = await gjOrder()
+      check('GJ 前提: 段取りが組める', gjAuto.length >= 4, gjAuto.join(' | '))
+
+      // --- GJ-07: 自動で組んだ並びのままなら、印も並べ替えの欄も出ない ---
+      currentCheck = 'GJ-07'
+      check(
+        'GJ-07 動かす前は、無理の印を1つも出さない（自動の段取りの見え方を変えていない）',
+        (await gjPage.locator('[data-testid="navi-step-issue"]').count()) === 0,
+      )
+      check(
+        'GJ-07 動かす前は、並べ替えの状態の欄も出さない',
+        (await gjPage.locator('[data-testid="navi-reorder-state"]').count()) === 0,
+      )
+      check(
+        'GJ-07 順番を変えられることは、動かす前から書いてある',
+        noZw(await gjPage.locator('[data-testid="navi-reorder-hint"]').innerText()) ===
+          '各手順の「上へ」「下へ」で順番を変えられます。変えた順番のまま調理中モードが進みます。',
+        noZw(await gjPage.locator('[data-testid="navi-reorder-hint"]').innerText()),
+      )
+
+      // --- GJ-01: 上へ・下へで順番が変わる／390pxで押せる大きさ ---
+      currentCheck = 'GJ-01'
+      const gjBtn = await gjPage.evaluate(() => {
+        const up = document.querySelectorAll('[data-testid="navi-step-up"]')[1]
+        const down = document.querySelectorAll('[data-testid="navi-step-down"]')[1]
+        const box = (el) => {
+          const b = el.getBoundingClientRect()
+          return { w: Math.round(b.width), h: Math.round(b.height), left: Math.round(b.left), right: Math.round(b.right) }
+        }
+        return { up: box(up), down: box(down) }
+      })
+      check(
+        'GJ-01 「上へ」「下へ」は指で押せる大きさ（実測 幅70px以上・高さ44px以上）',
+        gjBtn.up.w >= 70 && gjBtn.up.h >= 44 && gjBtn.down.w >= 70 && gjBtn.down.h >= 44,
+        JSON.stringify(gjBtn),
+      )
+      check(
+        'GJ-01 2つのボタンは離してある（濡れた手の押し間違い対策・実測6px以上）',
+        gjBtn.down.left - gjBtn.up.right >= 6,
+        String(gjBtn.down.left - gjBtn.up.right),
+      )
+      check(
+        'GJ-01 いちばん上の手順は「上へ」を押せない',
+        await gjPage.locator('[data-testid="navi-step-up"]').first().isDisabled(),
+      )
+      check(
+        'GJ-01 いちばん下の手順は「下へ」を押せない',
+        await gjPage.locator('[data-testid="navi-step-down"]').last().isDisabled(),
+      )
+      await gjPage.locator('[data-testid="navi-step-down"]').nth(0).click()
+      await gjPage.waitForTimeout(600)
+      const gjMoved = await gjOrder()
+      check(
+        'GJ-01 「下へ」を押すと、その手順が1つ後ろへ動く',
+        gjMoved[0] === gjAuto[1] && gjMoved[1] === gjAuto[0],
+        `${gjAuto.slice(0, 2).join(' / ')} → ${gjMoved.slice(0, 2).join(' / ')}`,
+      )
+      await gjPage.locator('[data-testid="navi-step-up"]').nth(1).click()
+      await gjPage.waitForTimeout(600)
+      check(
+        'GJ-01 「上へ」で押し返すと元の並びに戻る（押しすぎても戻せる）',
+        (await gjOrder()).join('|') === gjAuto.join('|'),
+        (await gjOrder()).join(' | '),
+      )
+      // 以降のためにもう一度動かしておく
+      await gjPage.locator('[data-testid="navi-step-down"]').nth(0).click()
+      await gjPage.waitForTimeout(600)
+
+      // --- GJ-08: 何回動かしても手順は消えない ---
+      currentCheck = 'GJ-08'
+      for (const i of [2, 3, 4]) {
+        await gjPage.locator('[data-testid="navi-step-up"]').nth(i).click()
+        await gjPage.waitForTimeout(350)
+      }
+      const gjAfterMany = await gjOrder()
+      check(
+        'GJ-08 4回動かしても手順は1つも消えない・増えない',
+        gjAfterMany.length === gjAuto.length &&
+          [...gjAfterMany].sort().join('|') === [...gjAuto].sort().join('|'),
+        `${gjAuto.length}→${gjAfterMany.length}`,
+      )
+
+      // --- GJ-06: 無理になる並びは止めずに印を出す ---
+      currentCheck = 'GJ-06'
+      const gjIssues = (await gjPage.locator('[data-testid="navi-step-issue"]').allInnerTexts()).map(noZw)
+      check(
+        'GJ-06 うちの台所では続けられなくなる並びに、印が出る',
+        gjIssues.length > 0,
+        gjIssues.join(' / '),
+      )
+      check(
+        'GJ-06 印の文は理由を名指しする（レシピの順／コンロ・レンジ・グリル・トースター／火にかけたまま）',
+        gjIssues.every((t) =>
+          t.includes('レシピに書いた順番より前に出ています。') ||
+          t.includes('コンロの口が空いていません。') ||
+          t.includes('電子レンジが空いていません。') ||
+          t.includes('魚焼きグリルが空いていません。') ||
+          t.includes('トースターが空いていません。') ||
+          t.includes('火にかけたまま、次にこの品へ手を戻すまでが長くなります。'),
+        ),
+        gjIssues.join(' / '),
+      )
+      const gjIssueNote = noZw(await gjPage.locator('[data-testid="navi-reorder-issue-note"]').innerText())
+      check(
+        'GJ-06 まとめの行に、そのまま進めることもできると書いてある（止めない）',
+        gjIssueNote.includes('並べ直すことも、そのまま進めることもできます。'),
+        gjIssueNote,
+      )
+      check(
+        'GJ-06 印が出ても、動かす手立ては押せるまま（止めない）',
+        !(await gjPage.locator('[data-testid="navi-step-down"]').nth(0).isDisabled()),
+      )
+      check(
+        'GJ-06 目安の分数が何の数字かを書いてある',
+        noZw(await gjPage.locator('[data-testid="navi-reorder-estimate-note"]').innerText()).includes(
+          '自動で組んだ並びで計算した数字のままです。',
+        ),
+      )
+
+      // --- GJ-02: 変えた順番のまま調理中モードが進む ---
+      currentCheck = 'GJ-02'
+      const gjShown = await gjOrder()
+      await gjPage.locator('[data-testid="cook-session-start"]').click()
+      await gjPage.waitForTimeout(900)
+      const gjSessionTexts = []
+      for (let i = 0; i < 3; i++) {
+        gjSessionTexts.push(noZw(await gjPage.locator('[data-testid="cook-session-step-text"]').innerText()).replace(/\s+/g, ''))
+        if (i < 2) {
+          await gjPage.locator('[data-testid="cook-session-next"]').click()
+          await gjPage.waitForTimeout(500)
+        }
+      }
+      check(
+        'GJ-02 調理中モードは、手で変えた順番のまま進む（元の順に戻らない）',
+        gjSessionTexts.every((t, i) => gjShown[i].includes(t) || t.includes(gjShown[i])),
+        `一覧=${gjShown.slice(0, 3).join(' / ')} 調理中=${gjSessionTexts.join(' / ')}`,
+      )
+      check(
+        'GJ-02 段取りの通し番号も、変えた順番で数え直されている',
+        /^段取り 3\//.test(await gjPage.locator('[data-testid="cook-session-counter"]').innerText()),
+        await gjPage.locator('[data-testid="cook-session-counter"]').innerText(),
+      )
+      await gjPage.locator('[data-testid="cook-session-close"]').click()
+      await gjPage.waitForTimeout(700)
+
+      // --- GJ-03: その日のうちは残る ---
+      currentCheck = 'GJ-03'
+      await gjPage.goto(`${BASE}/#/meal-plan`)
+      await gjPage.waitForTimeout(1000)
+      await gjPage.goto(`${BASE}/#/cook-navi`)
+      await gjPage.waitForTimeout(1400)
+      check(
+        'GJ-03 画面を移って戻っても、手で変えた並びが残る',
+        (await gjOrder()).join('|') === gjShown.join('|'),
+        (await gjOrder()).join(' | '),
+      )
+      await gjPage.reload({ waitUntil: 'networkidle' })
+      await gjPage.waitForTimeout(1600)
+      check(
+        'GJ-03 読み込み直しても、手で変えた並びが残る',
+        (await gjOrder()).join('|') === gjShown.join('|'),
+        (await gjOrder()).join(' | '),
+      )
+
+      // --- GJ-05: 元に戻せる ---
+      currentCheck = 'GJ-05'
+      await gjPage.locator('[data-testid="navi-reorder-undo"]').click()
+      await gjPage.waitForTimeout(600)
+      const gjUndoneOne = await gjOrder()
+      check(
+        'GJ-05 「1つ前の並びに戻す」で、直前の1回だけが取り消される',
+        gjUndoneOne.join('|') !== gjShown.join('|') && gjUndoneOne.join('|') !== gjAuto.join('|'),
+        gjUndoneOne.join(' | '),
+      )
+      gjDialog = ''
+      gjAnswer = 'dismiss'
+      await gjPage.locator('[data-testid="navi-reorder-reset"]').click()
+      await gjPage.waitForTimeout(700)
+      check(
+        'GJ-05 「自動の並びに戻す」の確認は、何が消えて何が残るかを両方書く（規約F）',
+        gjDialog.includes('手で動かした') &&
+          gjDialog.includes('取り消して、自動で組んだ並びに戻します') &&
+          gjDialog.includes('作った記録はそのまま残ります'),
+        gjDialog,
+      )
+      check(
+        'GJ-05 確認でやめると、並びは変わらない',
+        (await gjOrder()).join('|') === gjUndoneOne.join('|'),
+        (await gjOrder()).join(' | '),
+      )
+      gjAnswer = 'accept'
+      await gjPage.locator('[data-testid="navi-reorder-reset"]').click()
+      await gjPage.waitForTimeout(800)
+      check(
+        'GJ-05 「自動の並びに戻す」で、自動で組んだ並びに戻る',
+        (await gjOrder()).join('|') === gjAuto.join('|'),
+        (await gjOrder()).join(' | '),
+      )
+      check(
+        'GJ-05 戻したあとは、印も並べ替えの状態の欄も消える',
+        (await gjPage.locator('[data-testid="navi-reorder-state"]').count()) === 0 &&
+          (await gjPage.locator('[data-testid="navi-step-issue"]').count()) === 0,
+      )
+
+      // --- GJ-04: 日付が変わったら捨てる（推測しない） ---
+      currentCheck = 'GJ-04'
+      await gjPage.locator('[data-testid="navi-step-down"]').nth(0).click()
+      await gjPage.waitForTimeout(600)
+      await gjPage.evaluate(() => {
+        const key = 'uchi-recipe-cook-navi-session'
+        const raw = JSON.parse(localStorage.getItem(key))
+        localStorage.setItem(key, JSON.stringify({ ...raw, date: '2020-01-01' }))
+      })
+      await gjPage.reload({ waitUntil: 'networkidle' })
+      await gjPage.waitForTimeout(1600)
+      check(
+        'GJ-04 日付が変わったら、手で変えた並びごと捨てる（段取りを出さない）',
+        (await gjPage.locator('[data-testid="navi-step-text"]').count()) === 0,
+      )
+      // 文面は「調理の途中だったか」で2通りある（便FT）。どちらでも同じ判定になる形で見る
+      const gjExpired = noZw(await gjPage.locator('[data-testid="navi-restore-expired"]').innerText())
+      check(
+        'GJ-04 捨てたことは黙らない（理由と、何が残るかを1行で出す）',
+        gjExpired.includes('日付が変わったため') &&
+          gjExpired.includes('残していません') &&
+          gjExpired.includes('レシピと作った記録はそのままです。'),
+        gjExpired,
+      )
+      // 組み直すと、自動で組んだ並びから始まる（昨日の並びを当てにいかない）
+      await gjPage.getByRole('button', { name: '段取りを作る' }).click()
+      await gjPage.waitForTimeout(1000)
+      check(
+        'GJ-04 組み直すと、自動で組んだ並びから始まる',
+        (await gjOrder()).join('|') === gjAuto.join('|'),
+        (await gjOrder()).join(' | '),
+      )
+    } finally {
+      await gjBrowser.close()
+    }
+  }
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)
