@@ -20231,15 +20231,23 @@ try {
         rows1.length === 2,
         `行数=${rows1.length} / ${JSON.stringify(rows1)}`,
       )
+      // どの品が先頭に来るかは段取り次第なので、品名で決め打ちしない
+      // （2026-08-14 便GK。混在手順を割るようになって並びが変わり、決め打ちが落ちた。
+      //   CLAUDE.md「要素の置き場所への固定」＝どこに出ていても同じ判定になる形にする）
+      const elLongSteps = [
+        'ボウルにオリーブオイルと酢、塩こしょうを入れてよく混ぜ、マリネ液を作る。',
+        '鶏もも肉は厚みを開いて、フォークで数か所穴を開ける。',
+      ]
       check(
         'EL-01 長い手順は「文頭…文末」に畳んで1行に収める',
-        rows1.some((t) => t.includes('…') && t.includes('マリネ液を作る。')),
+        rows1.some((t) => t.includes('…')) && !rows1.some((t) => elLongSteps.some((s) => t.includes(s))),
         JSON.stringify(rows1),
       )
+      const elOpenTitle = (await elPage.locator('[data-testid="cook-session-recipe"]').innerText()).trim()
       check(
         'EL-01 いま開いている品は下部に出さない',
-        !rows1.some((t) => t.includes('EL煮物')),
-        JSON.stringify(rows1),
+        elOpenTitle !== '' && !rows1.some((t) => t.includes(elOpenTitle)),
+        `開いている品=${elOpenTitle} / ${JSON.stringify(rows1)}`,
       )
 
       // EL-02: 次へ→前へで元の手順に帰る（手順飛ばし・戻り先の誤りが起きない）
@@ -26200,7 +26208,18 @@ try {
         (await fiPage.locator('[data-testid="cook-session"]').count()) === 1,
       )
       const fiPlanBefore = await fiWalkPlan()
-      check('FI-01 前提: 3品9手順の段取りになっている', fiPlanBefore.length === 9, fiPlanBefore.join(','))
+      // 手順の数は決め打ちしない（2026-08-14 便GK。混在手順を割ると1手順が2工程になるので、
+      // 9固定にすると段取りが正しくなった瞬間に落ちる。CLAUDE.md「手順数の決め打ち」）。
+      // 見たいのは「3品ぶんの手順がすべて段取りに載っていること」
+      const fiTitlesAll = ['FI照り焼き', 'FI煮物', 'FIマリネ']
+      const fiCountBefore = Object.fromEntries(
+        fiTitlesAll.map((t) => [t, fiPlanBefore.filter((x) => x === t).length]),
+      )
+      check(
+        'FI-01 前提: 3品ぶんの手順がすべて段取りに載っている（1品も欠けない）',
+        fiPlanBefore.length >= 9 && fiTitlesAll.every((t) => fiCountBefore[t] >= 3),
+        fiPlanBefore.join(','),
+      )
 
       // --- FI-01: 下部の行に、声で言う色の名前が出ている（色の帯だけでは何と言えばよいか決まらない） ---
       const fiWords = await fiPage.locator('[data-testid="cook-session-color-word"]').allInnerTexts()
@@ -26267,12 +26286,14 @@ try {
         !(await fiPage.locator('[data-testid="cook-session-others"]').innerText()).includes('完成'),
         await fiPage.locator('[data-testid="cook-session-others"]').innerText(),
       )
+      // どの行に出るかは段取り次第なので、行の位置で決め打ちしない（2026-08-14 便GK。
+      // CLAUDE.md「要素の置き場所への固定」＝どこに出ていても同じ判定になる形にする）
       check(
         'FI-03 開いていた手順は、すぐ次に残っている（「次へ」で戻れる）',
-        (await fiPage.locator('[data-testid="cook-session-other-row"]').first().innerText()).includes(
-          fiFirstRecipe,
+        (await fiPage.locator('[data-testid="cook-session-other-row"]').allInnerTexts()).some((t) =>
+          t.includes(fiFirstRecipe),
         ),
-        await fiPage.locator('[data-testid="cook-session-other-row"]').first().innerText(),
+        (await fiPage.locator('[data-testid="cook-session-other-row"]').allInnerTexts()).join(' / '),
       )
 
       // --- FI-04: 別の色を言えば移り直せる（可逆）。手順は1つも消えない ---
@@ -26296,11 +26317,9 @@ try {
         `前=${fiPlanBefore.length} 後=${fiPlanAfter.length}`,
       )
       check(
-        'FI-04 品ごとの手順の数も変わらない',
-        ['FI照り焼き', 'FI煮物', 'FIマリネ'].every(
-          (t) => fiPlanAfter.filter((x) => x === t).length === 3,
-        ),
-        fiPlanAfter.join(','),
+        'FI-04 品ごとの手順の数も変わらない（色で移る前と同じ内訳）',
+        fiTitlesAll.every((t) => fiPlanAfter.filter((x) => x === t).length === fiCountBefore[t]),
+        `前=${JSON.stringify(fiCountBefore)} 後=${fiPlanAfter.join(',')}`,
       )
 
       // --- FI-05: 「青ねぎ」等では誤爆しない（発話まるごとの一致だけを見る） ---
@@ -26388,11 +26407,9 @@ try {
         `前=${fiPlanBefore.length} 後=${fiPlanReloaded.length}`,
       )
       check(
-        'FI-08 読み込み直しても品ごとの手順の数は3つずつ',
-        ['FI照り焼き', 'FI煮物', 'FIマリネ'].every(
-          (t) => fiPlanReloaded.filter((x) => x === t).length === 3,
-        ),
-        fiPlanReloaded.join(','),
+        'FI-08 読み込み直しても品ごとの手順の数は変わらない（開く前と同じ内訳）',
+        fiTitlesAll.every((t) => fiPlanReloaded.filter((x) => x === t).length === fiCountBefore[t]),
+        `前=${JSON.stringify(fiCountBefore)} 後=${fiPlanReloaded.join(',')}`,
       )
     } finally {
       await fiBrowser.close()
@@ -29461,9 +29478,18 @@ try {
           })),
         )
         const HINT = 'この間に、次の手作業を進められます'
-        const soup = waitBlocks.find((w) => w.card.includes('2分温める'))
+        /**
+         * 「次が同じ鍋の続き」になる待ちを見る。
+         *
+         * 2026-08-14 便GK まではこの標本の「沸いたら…豆腐とわかめを入れて2分温める。」が
+         * その形だった。いまは**この手順が2つに割れる**（豆腐を切って入れる手作業＋2分の待ち）
+         * ので、割れた待ちの中には別の品の手作業が本当に入る＝「この間に〜」は嘘ではなくなった。
+         * 同じ形は、ナビが差し込む「火にかけたまま、沸くのを待つ」に移っている
+         * （次に来るのは同じ鍋の「沸いたら豆腐とわかめを入れる」）。そこで見る。
+         */
+        const soup = waitBlocks.find((w) => w.card.includes('沸くのを待つ'))
         const nikujaga = waitBlocks.find((w) => w.card.includes('15分煮る'))
-        check('FS-02 前提: 味噌汁の「2分温める」の待ちが段取りに出る', soup !== undefined)
+        check('FS-02 前提: 味噌汁の「沸くのを待つ」の待ちが段取りに出る', soup !== undefined)
         check(
           'FS-02 次が同じ鍋の続きの待ちには「この間に〜」を出さない',
           soup !== undefined && !soup.block.includes(HINT),
@@ -29757,6 +29783,10 @@ try {
         ftKeepNote,
       )
 
+      // 開き直したあとと比べるための、いまの段取りの枚数（2026-08-14 便GK。
+      // 枚数を決め打ちすると、混在手順を割って1手順が2工程になった瞬間に落ちる。
+      // 見たいのは「開き直しても同じ段取りが残っている」ことなので、開く前の値と比べる）
+      const ftCardsBefore = await ftPage.locator('[data-testid="navi-step-text"]').count()
       // 調理中モードで3つ進めておく（＝段取りと「途中の位置」の両方がある状態）
       await ftPage.locator('[data-testid="cook-session-start"]').click()
       await ftPage.waitForTimeout(600)
@@ -29801,7 +29831,11 @@ try {
       currentCheck = 'FT-01'
       const ftPage2 = await ftReopen()
       const ftCards = await ftPage2.locator('[data-testid="navi-step-text"]').count()
-      check('FT-01 アプリを開き直しても段取りが残っている（作り直しにならない）', ftCards === 9, `${ftCards}枚`)
+      check(
+        'FT-01 アプリを開き直しても段取りが残っている（作り直しにならない）',
+        ftCards > 0 && ftCards === ftCardsBefore,
+        `${ftCards}枚 / 開く前=${ftCardsBefore}枚`,
+      )
       currentCheck = 'FT-03'
       check(
         'FT-03 開き直した直後は全画面ではなく段取りの一覧に着地する（大きな手順をいきなり出さない）',
