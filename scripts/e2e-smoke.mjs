@@ -27722,6 +27722,57 @@ try {
           countNote,
         )
 
+        // --- GF-C: 各品が何分後にできあがるかと、その開きが画面に出る ---
+        //   利用者テスト「アプリは合計だけ出して、各品が何分後にできるかは表示しません。
+        //   開きは最大16分。みそ汁ができてから主菜が焼き上がるまで12分放置になります。
+        //   この開きが出ること自体を画面に出してほしい（今は自分で足し算しないと分からない）」
+        {
+          const prevCheck = currentCheck
+          currentCheck = 'GF-C'
+          const finishRows = await p.evaluate(() => {
+            const box = document.querySelector('[data-testid="navi-finish-times"]')
+            if (!box) return null
+            return [...box.querySelectorAll('li')].map((li) => ({
+              title: (li.querySelector('span')?.textContent ?? '').trim(),
+              minutes: Number(/約(\d+)分後/.exec((li.textContent ?? '').replaceAll('​', ''))?.[1] ?? -1),
+            }))
+          })
+          check(
+            'GF-C 組み合わせた品それぞれに「約◯分後」が出る',
+            finishRows != null &&
+              finishRows.length === 3 &&
+              finishRows.every((r) => r.minutes >= 0 && r.title !== ''),
+            JSON.stringify(finishRows),
+          )
+          // 段取りの合計は「いちばん遅い品ができあがる時刻」。画面の上で読み合わせられること
+          const naviBody = noZw(await p.textContent('body'))
+          const totalOnScreen = Number(/全体の目安\s*約(\d+)分/.exec(naviBody)?.[1] ?? -1)
+          check(
+            'GF-C いちばん遅い品の「約◯分後」が、全体の目安と一致する（自分で足し算しなくてよい）',
+            finishRows != null && Math.max(...finishRows.map((r) => r.minutes)) === totalOnScreen,
+            `品ごと=${JSON.stringify(finishRows)} / 全体=${totalOnScreen}`,
+          )
+          // 開きの一文は「どの2品が何分あくか」。書いてある数字が、上の一覧の引き算と合うこと
+          const spreadText = noZw(
+            (await p
+              .locator('[data-testid="navi-finish-spread"]')
+              .innerText()
+              .catch(() => '')) || '',
+          )
+          // 開きが0分のとき（温かい品の完成がそろっているとき）は一文を出さないので、
+          // 出ているときだけ中身を見る＝「出る/出ない」を決め打ちしない
+          if (spreadText !== '') {
+            const named = (finishRows ?? []).filter((r) => spreadText.includes(r.title))
+            const spreadMinutes = Number(/約(\d+)分あきます/.exec(spreadText)?.[1] ?? -1)
+            check(
+              'GF-C 開きの一文が、名前を挙げた2品の差と一致する（画面の中で計算が合う）',
+              named.length === 2 && spreadMinutes === Math.abs(named[0].minutes - named[1].minutes),
+              `${spreadText} / ${JSON.stringify(named)}`,
+            )
+          }
+          currentCheck = prevCheck
+        }
+
         // FN-03: タイマーを2本動かして献立の画面へ。帯の下に隠れる操作要素がゼロであること
         const startButtons = p
           .locator('[data-testid="navi-wait-block"]')

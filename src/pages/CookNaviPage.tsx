@@ -44,6 +44,7 @@ import {
   showsWaitTimerButton,
   type TimelineItem,
 } from '../logic/cookNavi'
+import { finishSpread, isFinishSpreadWide, recipeFinishTimes } from '../logic/cookFinish'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
 import {
   clearCookNaviSession,
@@ -995,6 +996,24 @@ export default function CookNaviPage() {
   const isSequential = timeline?.mode === 'sequential'
 
   /**
+   * 品ごとのできあがりの目安（2026-08-14 便GF・利用者テスト「各品が何分後にできるかは
+   * 表示しません。（中略）この開きが出ること自体を画面に出してほしい」）。
+   * 数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts に集めてある。
+   */
+  const finishTimes = useMemo(
+    () =>
+      timeline
+        ? recipeFinishTimes(timeline.items, timeline.recipes, (id) => recipeById.get(id))
+        : [],
+    [timeline, recipeById],
+  )
+  const finishGap = useMemo(() => finishSpread(finishTimes), [finishTimes])
+  const finishGapWide = isFinishSpreadWide(finishGap.minutes, timeline?.totalMinutes ?? 0)
+  /** 開きの説明に出す品名（段取りが持っている名前を使う＝一覧の並びと同じ呼び方にする） */
+  const finishTitleOf = (recipeId: number) =>
+    timeline?.recipes.find((r) => r.id === recipeId)?.title ?? ''
+
+  /**
    * 画面に出す段取り（2026-08-10 便FI）。組み直した段取りに、色で引き寄せた並べ替えを
    * 当て直したもの。**引き寄せが1つも無ければ組み直したそのまま**（＝今までと同じ）。
    *
@@ -1714,6 +1733,64 @@ export default function CookNaviPage() {
                         {renderJaUnits(ja.cookNavi.restoreKeepNote)}
                       </p>
                     </div>
+
+                    {/* 品ごとのできあがりの目安と、その開き（2026-08-14 便GF・利用者テスト
+                        「アプリは合計だけ出して、各品が何分後にできるかは表示しません。
+                        （中略）この開きが出ること自体を画面に出してほしい」）。
+                        数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts */}
+                    {finishTimes.length > 0 && (
+                      <div
+                        data-testid="navi-finish-times"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                      >
+                        <p className="text-sm font-bold text-ink-muted">
+                          {ja.cookNavi.finishTitle}
+                        </p>
+                        <ul className="mt-[var(--space-sm)] space-y-1">
+                          {finishTimes.map((finish) => {
+                            const recipe = timeline.recipes.find((r) => r.id === finish.recipeId)
+                            if (!recipe) return null
+                            return (
+                              <li
+                                key={finish.recipeId}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <RecipePill title={recipe.title} colorIndex={recipe.colorIndex} />
+                                <span
+                                  data-testid="navi-finish-minutes"
+                                  className="shrink-0 font-bold"
+                                >
+                                  {ja.cookNavi.finishItem.replace('{n}', String(finish.minutes))}
+                                </span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                        {/* 開きは冷たくして出す品を除いて数える（先に仕上げて冷やすのは正しい動き）。
+                            大きいときは色を変えて、続けて何が起きるかを1行足す */}
+                        {finishGap.minutes > 0 && finishGap.first && finishGap.last && (
+                          <p
+                            data-testid="navi-finish-spread"
+                            className={`ja-phrase mt-[var(--space-sm)] text-sm ${
+                              finishGapWide ? 'font-bold text-accent-ink' : 'text-ink-muted'
+                            }`}
+                          >
+                            {renderJaUnits(
+                              ja.cookNavi.finishSpread
+                                .replace('{first}', finishTitleOf(finishGap.first.recipeId))
+                                .replace('{last}', finishTitleOf(finishGap.last.recipeId))
+                                .replace('{n}', String(finishGap.minutes)) +
+                                (finishGapWide
+                                  ? ja.cookNavi.finishSpreadWide.replace(
+                                      '{first}',
+                                      finishTitleOf(finishGap.first.recipeId),
+                                    )
+                                  : ''),
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {/* 並行の余地が無かったときの説明（2026-08-08 便ED・docs/68 打ち手#4）。
                         縮んでいないのに縮んだように見せないため、理由と次の一手を書く */}

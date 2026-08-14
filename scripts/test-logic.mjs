@@ -17371,6 +17371,110 @@ Aみりん 大さじ1
   )
 }
 
+// ---------- GF-C 品ごとのできあがりの目安と、その開きを画面に出す ----------
+// 2026-08-14 便GF・利用者テスト（原文）:
+//   「アプリは合計だけ出して、各品が何分後にできるかは表示しません。開きは最大16分。
+//     みそ汁ができてから主菜が焼き上がるまで12分放置になります。平日の夕食は3品同時に
+//     出したいので、この開きが出ること自体を画面に出してほしい（今は自分で足し算しないと
+//     分からない）」
+// 数え方は docs/72 の N1（完成の揃い）と同じにそろえる＝**その品の最後の工程が終わる時刻**、
+// 開きは**冷たくして出す品を除いた**最大−最小、線は全体の目安の30%。
+{
+  const { recipeFinishTimes, finishSpread, isFinishSpreadWide, FINISH_SPREAD_WIDE_RATIO } =
+    await import('../src/logic/cookFinish.ts')
+  const trio = [
+    {
+      id: 1,
+      title: 'GC鶏のグリル焼き',
+      steps: [{ text: '鶏むね肉をそぎ切りにする' }, { text: '魚焼きグリルで15分焼く' }, { text: 'パセリをふる' }],
+    },
+    {
+      id: 2,
+      title: 'GCみそ汁',
+      dishType: 'soup',
+      steps: [{ text: '鍋に水とだしの素を入れて中火にかける' }, { text: '豆腐を切る' }, { text: 'みそを溶いて火を止める' }],
+    },
+    {
+      id: 3,
+      title: 'GCポテトサラダ',
+      steps: [{ text: 'じゃがいもを切る' }, { text: '電子レンジで6分加熱する' }, { text: '冷蔵庫で冷やしてから和える' }],
+    },
+  ]
+  const plan = buildCookPlan(trio)
+  const finishes = recipeFinishTimes(plan.items, plan.recipes, (id) => trio.find((r) => r.id === id))
+  // 監査（scripts/audit-cook-navi.mjs の finishTimes）と同じ数え方であること。
+  // 実装を写すのではなく、段取りの endMin から**独立に**数え直して突き合わせる
+  const expected = plan.recipes.map((r) => ({
+    recipeId: r.id,
+    minutes: plan.items
+      .filter((it) => it.recipeId === r.id)
+      .reduce((max, it) => Math.max(max, it.endMin), 0),
+  }))
+  eq(
+    'GF-C 品ごとの完成時刻は「その品の最後の工程が終わる時刻」（docs/72 N1と同じ数え方）',
+    finishes.map((f) => ({ recipeId: f.recipeId, minutes: f.minutes })),
+    expected,
+  )
+  eq('GF-C 3品ぶんの目安が出る（1品も欠けない）', finishes.length, 3)
+  eq(
+    'GF-C 冷やしてから出す品は「冷たい品」と読む（開きの計算から外すため）',
+    finishes.map((f) => f.cold),
+    [false, false, true],
+  )
+  const gap = finishSpread(finishes)
+  const warm = finishes.filter((f) => !f.cold).map((f) => f.minutes)
+  eq(
+    'GF-C 開きは冷たい品を除いた最大−最小（冷たい品を先に仕上げるのは正しい動きなので数えない）',
+    gap.minutes,
+    Math.max(...warm) - Math.min(...warm),
+  )
+  eq(
+    'GF-C どの2品の開きなのかも返す（画面では品名で書く）',
+    [gap.first.recipeId !== gap.last.recipeId, gap.first.minutes <= gap.last.minutes],
+    [true, true],
+  )
+}
+{
+  const { recipeFinishTimes, finishSpread, isFinishSpreadWide } = await import(
+    '../src/logic/cookFinish.ts'
+  )
+  // 温かい品が1つしかないときは開きを言わない（比べる相手がいない）
+  const two = [
+    { id: 1, title: 'GC煮物', steps: [{ text: '材料を切る' }, { text: '鍋で20分煮る' }, { text: '盛る' }] },
+    { id: 2, title: 'GC冷やしサラダ', steps: [{ text: '野菜を切る' }, { text: '冷蔵庫で冷やしてから和える' }] },
+  ]
+  const plan = buildCookPlan(two)
+  const finishes = recipeFinishTimes(plan.items, plan.recipes, (id) => two.find((r) => r.id === id))
+  eq('GF-C 温かい品が1品だけなら開きは0（言わない）', finishSpread(finishes).minutes, 0)
+  // 線は docs/72 N1 と同じ＝全体の30%を「超えた」ら大きいとみなす（ちょうど30%は大きくない）
+  eq('GF-C 開きの線は全体の30%（ちょうどは大きくない）', isFinishSpreadWide(30, 100), false)
+  eq('GF-C 30%を超えたら大きい', isFinishSpreadWide(31, 100), true)
+  eq('GF-C 全体が0分なら大きいと言わない', isFinishSpreadWide(5, 0), false)
+  // 利用者の実測（開き16分／12分放置）に相当する形は「大きい」と読む
+  eq('GF-C 利用者の実測（44分中16分の開き）は大きいと読む', isFinishSpreadWide(16, 44), true)
+}
+{
+  // 画面に出す文言（規約H）。数字と品名がそろって初めて読めるので、差し込み口を固定する
+  eq(
+    'GF-C 見出しに「調理を始めてから」が入っている（何分後かの起点が読める）',
+    ja.cookNavi.finishTitle.includes('調理を始めてから'),
+    true,
+  )
+  eq('GF-C 品ごとの行は分数を差し込む', ja.cookNavi.finishItem.includes('{n}'), true)
+  eq(
+    'GF-C 開きの一文は、2品の名前と分数を差し込む',
+    ja.cookNavi.finishSpread.includes('{first}') &&
+      ja.cookNavi.finishSpread.includes('{last}') &&
+      ja.cookNavi.finishSpread.includes('{n}'),
+    true,
+  )
+  eq(
+    'GF-C 開きが大きいときの一文も、先にできる品の名前を差し込む',
+    ja.cookNavi.finishSpreadWide.includes('{first}'),
+    true,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
