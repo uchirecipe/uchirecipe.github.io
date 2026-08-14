@@ -18218,6 +18218,166 @@ Aみりん 大さじ1
     typeof ja.cookNavi.finishSpreadCold === 'string' && ja.cookNavi.finishSpreadCold.includes('{first}'),
     true,
   )
+
+// ---------- 便GL: 手順を進めたときのタイマーの一言 / 読み上げ名 ----------
+{
+  const { timerNoticeOnAdvance } = await import('../src/logic/cookTimerNotice.ts')
+  const { naviStepSpeechText } = await import('../src/logic/naviStepText.ts')
+  /** 段取りの手順1つぶん（判定に要るところだけ） */
+  const it = (recipeId, stepIndex, over = {}) => ({
+    recipeId,
+    stepIndex,
+    order: stepIndex + 1,
+    stepNumber: stepIndex + 1,
+    recipeId2: undefined,
+    kind: 'active',
+    text: '切る。',
+    minutes: 3,
+    waitMinutes: 0,
+    activeMinutes: 3,
+    longRest: false,
+    addedByNavi: false,
+    recipeTitle: `料理${recipeId}`,
+    colorIndex: 0,
+    startMin: 0,
+    endMin: 3,
+    ...over,
+  })
+  const wait = (recipeId, stepIndex, minutes, over = {}) =>
+    it(recipeId, stepIndex, {
+      kind: 'wait',
+      waitMinutes: minutes,
+      activeMinutes: 0,
+      text: `${minutes}分焼く。`,
+      ...over,
+    })
+  const timer = (id, recipeId, stepIndex, over = {}) => ({
+    id,
+    key: `${recipeId}-${stepIndex}-600`,
+    recipeId,
+    done: false,
+    ...over,
+  })
+  const cur = (recipeId, stepIndex) => ({ recipeId, stepIndex })
+
+  // ① タイマーを押さずに次へ進めた（利用者「グリル15分のタイマーを押さずに次へ進めてしまった」）
+  {
+    const items = [wait(1, 0, 15), it(2, 0)]
+    eq(
+      'GL-5① 待ちのタイマーを始めずに次へ進むと、その手順を指して伝える',
+      JSON.stringify(timerNoticeOnAdvance(items, cur(1, 0), cur(2, 0), [])),
+      JSON.stringify({ kind: 'notStarted', recipeId: 1, stepIndex: 0 }),
+    )
+    eq(
+      'GL-5① タイマーを始めてあれば何も言わない（うるさくしない）',
+      timerNoticeOnAdvance(items, cur(1, 0), cur(2, 0), [timer(9, 1, 0)]),
+      null,
+    )
+    eq(
+      'GL-5① 手を動かす手順から進んだときは何も言わない',
+      timerNoticeOnAdvance([it(1, 0), it(2, 0)], cur(1, 0), cur(2, 0), []),
+      null,
+    )
+    eq(
+      'GL-5① 分数を出さない長い待ち（半日〜一晩）はタイマーが無いので言わない',
+      timerNoticeOnAdvance(
+        [wait(1, 0, 0, { longRest: true }), it(2, 0)],
+        cur(1, 0),
+        cur(2, 0),
+        [],
+      ),
+      null,
+    )
+  }
+  // ② その品のタイマーがまだ動いているのに、その品の次の手順へ進んだ
+  //    （利用者「段取り6に進んだ時点で、鶏の下味10分タイマーがまだ09:12残っていました」）
+  {
+    const items = [wait(1, 0, 10), it(1, 1), it(2, 0)]
+    eq(
+      'GL-5② 同じ品のタイマーが動いたままその品の次の手順へ進むと、残り時間を伝える',
+      JSON.stringify(timerNoticeOnAdvance(items, cur(1, 0), cur(1, 1), [timer(7, 1, 0)])),
+      JSON.stringify({ kind: 'stillRunning', timerId: 7 }),
+    )
+    eq(
+      'GL-5② 別の品の手順へ進んだときは言わない（待ちの間に他の品をやるのは段取りどおり）',
+      timerNoticeOnAdvance(items, cur(1, 0), cur(2, 0), [timer(7, 1, 0)]),
+      null,
+    )
+    eq(
+      'GL-5② 一時停止しているタイマーでは言わない（急かさない）',
+      timerNoticeOnAdvance(items, cur(1, 0), cur(1, 1), [
+        timer(7, 1, 0, { pausedRemainingMs: 60000 }),
+      ]),
+      null,
+    )
+    // 利用者が「その間に」と書いた手順は、待ちの中でやるのが正しいので黙る
+    const cued = [wait(1, 0, 10), it(1, 1, { text: 'その間に☆を混ぜ合わせる。' }), it(2, 0)]
+    eq(
+      'GL-5② 「その間に」と書かれた手順へ進んだときは黙る（段取りどおりの並行作業）',
+      timerNoticeOnAdvance(cued, cur(1, 0), cur(1, 1), [timer(7, 1, 0)]),
+      null,
+    )
+    // ナビが足した湯沸かしの次の手順も同じ扱い
+    const boil = [wait(1, 0, 5, { addedByNavi: true }), it(1, 1), it(2, 0)]
+    eq(
+      'GL-5② ナビが足した湯沸かしの次の手順でも黙る',
+      timerNoticeOnAdvance(boil, cur(1, 0), cur(1, 1), [timer(7, 1, 0)]),
+      null,
+    )
+  }
+  // ①が②より先（火が入ったままのほうが先に伝わる）
+  {
+    const items = [wait(1, 0, 15), it(1, 1)]
+    eq(
+      'GL-5 どちらも当てはまるときは「始めていない」を先に伝える',
+      timerNoticeOnAdvance(items, cur(1, 0), cur(1, 1), [timer(7, 1, 5)])?.kind,
+      'notStarted',
+    )
+  }
+  // 読み上げ名（利用者「同じ『手順』で2つの番号を指していて紛らわしい」）
+  {
+    eq(
+      'GL-B 読み上げ名は2つの番号をそれぞれの名前で呼ぶ',
+      naviStepSpeechText(9, '1-2'),
+      '段取り9・手順1の2つめ',
+    )
+    eq('GL-B 分けていない手順はそのままの番号', naviStepSpeechText(9, '3'), '段取り9・手順3')
+    eq('GL-B レシピ内の番号が無い工程は段取りの番号だけ', naviStepSpeechText(9), '段取り9')
+    eq(
+      'GL-B 読み上げ名に「手順」が2つの番号を指す形は残っていない',
+      /手順\d+[（(]/.test(naviStepSpeechText(9, '1-2')),
+      false,
+    )
+    // 画面に出る文字（バッジと並ぶ側）は便EZ のまま変えていない
+    const { naviStepText } = await import('../src/logic/naviStepText.ts')
+    eq('GL-B 画面の文字は今までどおり', naviStepText(9, '1-2'), '⑨（1-2）')
+  }
+  // 画面文言（規約H）
+  {
+    eq(
+      'GL-1 目安の分数の印は、何の数字かと何でないかを両方言い切る',
+      ja.cookNavi.estimateStaleNote.includes('自動で組んだ並びで計算した数字です') &&
+        ja.cookNavi.estimateStaleNote.includes('手で並べ替えたあとの時間ではありません'),
+      true,
+    )
+    eq(
+      'GL-3 戻すボタンは、あと何回戻せるかを差し込む',
+      ja.cookNavi.reorderUndoOne.includes('{n}'),
+      true,
+    )
+    eq(
+      'GL-6 終わりの窓のタイマーの一言は、消す側・消さない側の両方を書く',
+      ja.cookNavi.sessionFinishTimersStopNote.includes('残り時間はなくなります') &&
+        ja.cookNavi.sessionFinishTimersKeepNote.includes('片づけの間も鳴ります'),
+      true,
+    )
+    eq(
+      'GL-A 沸くまでの待ちは、タイマーが何分ではかるかを押す前に書く（沸く時間は言い切らない）',
+      ja.cookNavi.waitBlockBoilNote.includes('タイマーは{n}分ではかります') &&
+        ja.cookNavi.waitBlockBoilNote.includes('火力と量で変わります'),
+      true,
+    )
+  }
 }
 
 // ---------- 結果 ----------

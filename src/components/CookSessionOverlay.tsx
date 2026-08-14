@@ -36,6 +36,7 @@ import {
 import { naviColorWord, naviRecipeColor } from '../logic/naviColors'
 import { seasoningGroupLineStyle } from '../logic/seasoningGroup'
 import {
+  BOIL_WATER_MINUTES,
   endsWithLongRest,
   hasFillableWorkDuringWait,
   recipeStepLabel,
@@ -66,6 +67,7 @@ import {
   type StepPull,
 } from '../logic/cookSession'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
+import { timerNoticeOnAdvance, type CookTimerNotice } from '../logic/cookTimerNotice'
 import { ja } from '../i18n/ja'
 
 /**
@@ -92,6 +94,7 @@ function TimerChip({
   timer,
   now,
   flashing,
+  inRecipeRow,
   onOpen,
   onToggleMute,
   onResume,
@@ -100,6 +103,17 @@ function TimerChip({
   timer: ActiveTimer
   now: number
   flashing: boolean
+  /**
+   * 「他の品の次の手順」の行の中に置くか（2026-08-14 便GL・利用者テスト
+   * 「青＝ごま和え、ピンク＝みそ汁の間に、鶏のタイマー09:36が挟まる。
+   * パッと見『3品目の次の手順』に見えました」）。
+   *
+   * 行の中では、手順の行と**同じ並び**（番号のバッジ2つ＋料理名）になっていたのが原因。
+   * 料理名はすぐ上の行に出ているので繰り返さず、代わりに時計の印を先頭に付ける
+   * ＝手順の行と字面が重ならない。置き場所は変えない（オーナー指示E-11
+   * 「大きく表示中のタイマーは画面上、他のタイマーは『他の品の〜』に直接表示」）
+   */
+  inRecipeRow?: boolean
   onOpen: () => void
   onToggleMute: () => void
   /** 一時停止中のタイマーを動かし直す（2026-08-10 便EZ。声の「ストップ」の戻り道） */
@@ -131,6 +145,11 @@ function TimerChip({
         aria-label={ja.timer.adjustOpenAria.replace('{label}', timer.label)}
         className="flex min-w-0 items-center gap-1"
       >
+        {/* 行の中では時計の印を先頭に置く（2026-08-14 便GL）。手順の行は色の言葉から始まるので、
+            頭の記号が違うだけで「これは手順ではない」と目で分かる */}
+        {inRecipeRow && !timer.done && (
+          <TimerIcon size={14} className="shrink-0" aria-hidden />
+        )}
         <StepBadge number={isCustom ? 'custom' : (timer.naviOrder ?? timer.stepNumber)} size={24} />
         {!isCustom && recipeStepBadge && (
           <StepBadge
@@ -142,7 +161,9 @@ function TimerChip({
         {timer.done && <BellRing size={16} className="shrink-0 animate-pulse" aria-hidden />}
         {/* 止まっていることが数字だけでは分からないので、時間の手前に印を出す（便EZ） */}
         {paused && <Pause size={14} className="shrink-0" aria-hidden />}
-        <span className="max-w-[7rem] truncate text-xs font-bold">{timer.label}</span>
+        {/* 行の中では料理名を繰り返さない（すぐ上の行に出ている。2026-08-14 便GL）。
+            読み上げ名（aria-label）は今までどおり料理名を含むので、耳では区別が付いたまま */}
+        {!inRecipeRow && <span className="max-w-[7rem] truncate text-xs font-bold">{timer.label}</span>}
         <span className="whitespace-nowrap text-base font-bold tabular-nums">
           {timer.done ? timer.doneLabel : formatRemaining(timerRemainingSeconds(timer, now))}
         </span>
@@ -288,6 +309,21 @@ export default function CookSessionOverlay({
    */
   const [peekRecipeId, setPeekRecipeId] = useState<number | null>(null)
   /**
+   * 手順を進めた直後に出す、タイマーについての一言（2026-08-14 便GL）。
+   * **止めない**（確認の窓は出さない）。しばらく置いてから自分で消す＝台所で消す操作を増やさない。
+   * 中身の決め方は logic/cookTimerNotice.ts（純関数・単体テストで固定）。
+   */
+  const [timerNotice, setTimerNotice] = useState<CookTimerNotice | null>(null)
+  const timerNoticeTimeout = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timerNoticeTimeout.current), [])
+  const showTimerNotice = useCallback((next: CookTimerNotice | null) => {
+    setTimerNotice(next)
+    clearTimeout(timerNoticeTimeout.current)
+    if (!next) return
+    // 読む前に消えない長さ（同じ画面の「番号を付け直しています」より少し長く置く）
+    timerNoticeTimeout.current = setTimeout(() => setTimerNotice(null), 12000)
+  }, [])
+  /**
    * 「最初の手順へ」を押す直前にいた手順（2026-08-11 便FO・利用者テスト
    * 「閉じる✕のすぐ隣にあるので、押し間違えたら今いる場所を失う（戻る手段は『次へ』を8回）」）。
    * 押したあとだけ「元の手順に戻す」を出して、1回で元の場所へ帰れるようにする。
@@ -327,9 +363,20 @@ export default function CookSessionOverlay({
     stopSpeech()
     // 別の移動をした時点で「元の手順に戻す」は役目を終える（どこへ戻すのかが曖昧になるため）
     setUndoFirst(null)
+    // 前の移動で出した一言は、次に動いた時点で役目を終える
+    showTimerNotice(null)
     onMove(next)
   }
-  const goNext = () => move(advanceCursor(items, cursor))
+  /**
+   * 「次へ」で進んだときに、タイマーのことだけを一言伝える（2026-08-14 便GL）。
+   * **止めない**（進む手は邪魔しない）。当てはまらないときは何も出さない。
+   */
+  const goNext = () => {
+    const next = advanceCursor(items, cursor)
+    const notice = next ? timerNoticeOnAdvance(items, cursor, next, timers) : null
+    move(next)
+    if (notice) showTimerNotice(notice)
+  }
   const goPrev = () => move(backCursor(items, cursor))
   /**
    * 段取りの最初の手順へ（2026-08-10 便FC・オーナー実機「左上に、①に戻るボタンを設置したい」）。
@@ -669,6 +716,64 @@ export default function CookSessionOverlay({
         </div>
       </div>
 
+      {/* 手順を進めた直後の、タイマーについての一言（2026-08-14 便GL）。
+          「タイマーを押さずに次へ進めても何も言われない」「前のタイマーは動いたまま・警告なし」
+          への答え。**進む手は止めない**ので、確認の窓ではなくこの1行にしてある。
+          ①始めていない待ちには、その場で始める道を1つ添える
+          ②まだ動いているタイマーは残り時間をそのまま出す（時計は動き続ける） */}
+      {timerNotice && (
+        <div
+          data-testid="cook-session-timer-notice"
+          className="mx-[var(--space-md)] mb-1 flex flex-wrap items-center justify-center gap-2 rounded-md border border-warning bg-surface px-2 py-1.5"
+        >
+          {timerNotice.kind === 'notStarted'
+            ? (() => {
+                const target = items.find(
+                  (x) =>
+                    x.recipeId === timerNotice.recipeId && x.stepIndex === timerNotice.stepIndex,
+                )
+                if (!target) return null
+                return (
+                  <>
+                    <span className="ja-phrase min-w-0 flex-1 text-xs font-bold text-warning">
+                      {ja.cookNavi.sessionTimerNotStarted
+                        .replace('{title}', target.recipeTitle)
+                        .replace(
+                          '{wait}',
+                          target.addedByNavi
+                            ? ja.cookNavi.waitBlockBoil
+                            : ja.cookNavi.waitBlockTitle.replace('{n}', String(target.waitMinutes)),
+                        )}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="cook-session-timer-notice-start"
+                      onClick={() => {
+                        onStartTimer(target, target.waitMinutes * 60)
+                        showTimerNotice(null)
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-accent bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                    >
+                      <TimerIcon size={16} aria-hidden />
+                      {ja.cookNavi.sessionTimerStartNow}
+                    </button>
+                  </>
+                )
+              })()
+            : (() => {
+                const target = timers.find((t) => t.id === timerNotice.timerId)
+                if (!target || target.done) return null
+                return (
+                  <span className="ja-phrase min-w-0 flex-1 text-xs font-bold text-warning">
+                    {ja.cookNavi.sessionTimerStillRunning
+                      .replace('{title}', target.label)
+                      .replace('{time}', formatRemaining(timerRemainingSeconds(target, now)))}
+                  </span>
+                )
+              })()}
+        </div>
+      )}
+
       {/* 手順を移した直後の1行（2026-08-12 便FS-8）。段取りの番号が振り直されたことを、
           カウンタのすぐ下に置く（番号を読み比べる場所と同じ場所に理由を置く） */}
       {pullNoticed && (
@@ -988,7 +1093,7 @@ export default function CookSessionOverlay({
                 湯沸かしだけは分数を出さないので、全体の目安に何分で入っているかを添える */}
             {item.addedByNavi && (
               <p data-testid="cook-session-boil-note" className="ja-phrase mt-1 text-xs text-ink-muted">
-                {ja.cookNavi.waitBlockBoilNote}
+                {ja.cookNavi.waitBlockBoilNote.replaceAll('{n}', String(BOIL_WATER_MINUTES))}
               </p>
             )}
             {item.waitEstimated && (
@@ -1173,20 +1278,32 @@ export default function CookSessionOverlay({
                 {otherTimers.length > 0 && (
                   <div
                     data-testid="cook-session-other-timers"
-                    className="flex flex-wrap items-center gap-1 pb-1"
+                    /* 2026-08-14 便GL: 手順の行と地続きに見えていたので、面を変えて1段下げ、
+                       何の並びなのかを見出しで言う。行の色の線の内側に収まるので、
+                       どの品のタイマーかは今までどおり目を動かさずに読める */
+                    className="mb-1 rounded-sm bg-app px-1.5 py-1"
                   >
-                    {otherTimers.map((t) => (
-                      <TimerChip
-                        key={t.id}
-                        timer={t}
-                        now={now}
-                        flashing={flashingId === t.id}
-                        onOpen={() => setAdjustingId(t.id)}
-                        onToggleMute={() => toggleMute(t.id)}
-                        onResume={() => resumeTimer(t.id)}
-                        onDismiss={() => dismissTimer(t.id)}
-                      />
-                    ))}
+                    <p
+                      data-testid="cook-session-other-timers-title"
+                      className="text-[10px] font-bold text-ink-muted"
+                    >
+                      {ja.cookNavi.sessionOtherTimersTitle}
+                    </p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                      {otherTimers.map((t) => (
+                        <TimerChip
+                          key={t.id}
+                          timer={t}
+                          now={now}
+                          flashing={flashingId === t.id}
+                          inRecipeRow
+                          onOpen={() => setAdjustingId(t.id)}
+                          onToggleMute={() => toggleMute(t.id)}
+                          onResume={() => resumeTimer(t.id)}
+                          onDismiss={() => dismissTimer(t.id)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

@@ -5,7 +5,7 @@ import { useTimers, type ActiveTimer } from './TimerProvider'
 import { hasCookNaviTimeline } from '../logic/cookNaviSession'
 import { naviRecipeColor } from '../logic/naviColors'
 import { formatRemaining } from '../logic/time'
-import { naviStepText } from '../logic/naviStepText'
+import { naviStepSpeechText, naviStepText } from '../logic/naviStepText'
 import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
 import StepBadge from './StepBadge'
 import TimerAdjustModal from './TimerAdjustModal'
@@ -123,9 +123,15 @@ export default function TimerBar() {
               : timer.stepNumber > 0
                 ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
                 : null
+          // 読み上げ名だけは2つの番号を呼び分ける（2026-08-14 便GL）。
+          // 画面の文字（stepText）はバッジと並んでいるので今までどおり「手順⑨（1-2）」のまま
+          const speechStepText =
+            timer.naviOrder != null
+              ? naviStepSpeechText(timer.naviOrder, recipeStepBadge(timer))
+              : stepText
           const adjustAriaLabel = ja.timer.adjustOpenAria.replace(
             '{label}',
-            stepText ? `${timer.label}・${stepText}` : timer.label,
+            speechStepText ? `${timer.label}・${speechStepText}` : timer.label,
           )
           return (
             <button

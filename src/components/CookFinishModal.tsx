@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Check, ChevronLeft, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, ChevronLeft, Square, SquareCheck, X } from 'lucide-react'
 import { ja } from '../i18n/ja'
 
 /**
@@ -19,10 +19,17 @@ import { ja } from '../i18n/ja'
  *
  * 本文（何件に記録が付き、何が残るか＝規約F）は「まとめて作った！」ボタンの確認と
  * **同じ文字列**を受け取って出す（記録の中身の説明を2か所に書かない）。
+ *
+ * 2026-08-14 便GL: 動いているタイマーの扱いだけは、ここで**聞く**ようにした
+ *（利用者テスト「『動いているタイマーはそのまま残ります』とは書いてあるけど、片づけ中に
+ * 鳴ります。終了時に『止めますか』が欲しい」）。本文の側からはタイマーの一文が抜けており
+ *（呼び出し側が {timers} を空で組む）、この窓の中の欄が消す／消さないの両方の結果を書く。
+ * 「まとめて作った！」の確認は今までどおり「そのまま残ります」と書いて動きも変えていない。
  */
 export default function CookFinishModal({
   open,
   body,
+  runningTimers,
   onRecord,
   onBack,
   onClose,
@@ -30,12 +37,27 @@ export default function CookFinishModal({
   open: boolean
   /** 記録の中身の説明（呼び出し側が「まとめて作った！」と同じ組み立てで作る） */
   body: string
-  onRecord: () => void
+  /**
+   * まだ動いているタイマー（2026-08-14 便GL・利用者テスト
+   * 「『動いているタイマーはそのまま残ります』とは書いてあるけど、片づけ中に鳴ります。
+   * 終了時に『止めますか』が欲しい」）。1本も無ければこの欄自体を出さない
+   */
+  runningTimers: readonly { id: number; label: string }[]
+  /** 記録をつける（動いているタイマーも消すかどうかを渡す） */
+  onRecord: (stopTimers: boolean) => void
   /** 手順の画面へ帰る（何も起きない＝窓を閉じるだけ） */
   onBack: () => void
-  /** 記録をつけずに全画面を閉じる */
-  onClose: () => void
+  /** 記録をつけずに全画面を閉じる（同じくタイマーの扱いを渡す） */
+  onClose: (stopTimers: boolean) => void
 }) {
+  /**
+   * 動いているタイマーも消すか。**既定は消さない**＝今までの動き（そのまま残る）を変えない。
+   * 窓を開くたびに選び直す（前回の選択を持ち越すと、押し間違いで残り時間を失う）
+   */
+  const [stopTimers, setStopTimers] = useState(false)
+  useEffect(() => {
+    if (open) setStopTimers(false)
+  }, [open])
   /**
    * Escape は「調理を続ける」と同じ扱い（何も起きない側に倒す）。
    * **履歴は積まない**（useOverlayDismiss を使わない）: この窓は全画面の調理中モードの上に
@@ -74,11 +96,54 @@ export default function CookFinishModal({
         >
           {body.trim()}
         </p>
+        {/* 動いているタイマーをどうするか（2026-08-14 便GL）。1本も無ければ出さない。
+            消す側・消さない側の両方の結果を書く（規約F）。押す場所は指で押せる高さにする */}
+        {runningTimers.length > 0 && (
+          <div
+            data-testid="cook-finish-timers"
+            className="mt-[var(--space-md)] rounded-md border border-edge bg-app p-[var(--space-sm)]"
+          >
+            <p className="text-sm font-bold">
+              {ja.cookNavi.sessionFinishTimersTitle.replace('{n}', String(runningTimers.length))}
+            </p>
+            <p
+              data-testid="cook-finish-timers-list"
+              className="ja-phrase mt-0.5 text-xs text-ink-muted"
+            >
+              {runningTimers.map((t) => t.label).join('・')}
+            </p>
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={stopTimers}
+              data-testid="cook-finish-timers-stop"
+              onClick={() => setStopTimers((prev) => !prev)}
+              className="mt-[var(--space-sm)] flex w-full items-center gap-2 rounded-md border border-edge bg-surface px-2 py-3 text-left text-sm font-bold text-accent-ink shadow-sm"
+            >
+              {stopTimers ? (
+                <SquareCheck size={22} className="shrink-0" aria-hidden />
+              ) : (
+                <Square size={22} className="shrink-0 text-ink-muted" aria-hidden />
+              )}
+              <span className="ja-phrase min-w-0 flex-1">
+                {ja.cookNavi.sessionFinishTimersStop}
+              </span>
+            </button>
+            <p
+              data-testid="cook-finish-timers-note"
+              className="ja-phrase mt-1 text-xs text-ink-muted"
+            >
+              {stopTimers
+                ? ja.cookNavi.sessionFinishTimersStopNote
+                : ja.cookNavi.sessionFinishTimersKeepNote}
+            </p>
+          </div>
+        )}
         <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
           <button
             type="button"
             data-testid="cook-finish-record"
-            onClick={onRecord}
+            onClick={() => onRecord(stopTimers)}
             className="flex w-full items-center justify-center gap-1 rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
           >
             <Check size={20} aria-hidden />
@@ -96,7 +161,7 @@ export default function CookFinishModal({
           <button
             type="button"
             data-testid="cook-finish-close"
-            onClick={onClose}
+            onClick={() => onClose(stopTimers)}
             className="flex w-full items-center justify-center gap-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
           >
             <X size={18} aria-hidden />

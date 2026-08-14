@@ -23950,9 +23950,14 @@ try {
       await ezPage.waitForTimeout(800)
       const ezBarRow = ezPage.locator('button[aria-label*="のタイマーを調整"]').first()
       const ezBarAria = await ezBarRow.getAttribute('aria-label')
+      // 2026-08-14 便GL: **読み上げ名だけ**は2つの番号をそれぞれの名前で呼ぶ形に変えた
+      // （利用者テスト「タイマーの読み上げ名『手順⑨（1-2）』が、同じ『手順』で2つの番号を
+      // 指していて紛らわしい」）。画面の文字は便EZ のまま（下の窓の検査がそれを見ている）
       check(
-        'EZ-02 常駐バーの読み上げ名も丸数字＋レシピ内の手順番号で呼ぶ',
-        /手順[①-⑳㉑-㉟㊱-㊿]/.test(ezBarAria) && !/段取りの\d+番目/.test(ezBarAria),
+        'EZ-02 常駐バーの読み上げ名は、段取りの番号とレシピの手順番号を別の名前で呼ぶ',
+        /段取り\d+/.test(ezBarAria) &&
+          ezBarAria.includes('手順') &&
+          !/段取りの\d+番目/.test(ezBarAria),
         String(ezBarAria),
       )
       await ezBarRow.click()
@@ -30299,9 +30304,14 @@ try {
       await fuPage.waitForTimeout(800)
       const fuBarRow = fuPage.locator('button[aria-label*="のタイマーを調整"]').first()
       const fuBarAria = (await fuBarRow.getAttribute('aria-label')) ?? ''
+      // 2026-08-14 便GL: 読み上げ名は「段取り9・手順1の2つめ」の形になった（丸数字は使わない。
+      // 読み上げソフトによって「まる9」「9」と読みが割れるため）。くっついて読めないことは同じ
       check(
-        'FU-04 常駐バーの読み上げ名で、丸数字と手順番号がくっついていない',
-        /手順[①-⑳㉑-㉟㊱-㊿]/.test(fuBarAria) && !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuBarAria),
+        'FU-04 常駐バーの読み上げ名で、2つの番号がくっついていない',
+        /段取り\d+・手順/.test(fuBarAria) &&
+          !/[①-⑳㉑-㉟㊱-㊿]\d/.test(fuBarAria) &&
+          !/手順[①-⑳㉑-㉟㊱-㊿]/.test(fuBarAria) &&
+          !/手順\d+[（(]/.test(fuBarAria),
         fuBarAria,
       )
       await fuBarRow.click()
@@ -30558,9 +30568,16 @@ try {
         fxBoilBlock.includes('沸くまでの待ち時間'),
         fxBoilBlock,
       )
+      // 2026-08-14 便GL: 数え方の一文に「タイマーが何分ではかるか」を足した（利用者テスト
+      // 「押すと5分固定で始まるが、事前に分数がどこにも書いていない」）。数え方の説明は残す
       check(
-        'FX-11 待ちブロックに「全体の目安には約5分として数えています」が添えてある',
-        fxBoilBlock.includes('全体の目安には約5分として数えています'),
+        'FX-11 待ちブロックに、全体の目安への数え方が添えてある',
+        fxBoilBlock.includes('全体の目安に数えているのも同じ5分です'),
+        fxBoilBlock,
+      )
+      check(
+        'FX-11 押す前に、タイマーが何分ではかるかも読める',
+        fxBoilBlock.includes('タイマーは5分ではかります'),
         fxBoilBlock,
       )
       check(
@@ -31596,11 +31613,14 @@ try {
         'GJ-06 印が出ても、動かす手立ては押せるまま（止めない）',
         !(await gjPage.locator('[data-testid="navi-step-down"]').nth(0).isDisabled()),
       )
+      // 2026-08-14 便GL: 目安の分数が何の数字かは、**数字と同じ枠の中**で言うようになった
+      // （便GJ は手順リストの直前に1行で書いていたが、数字は画面のずっと上にあった）
       check(
         'GJ-06 目安の分数が何の数字かを書いてある',
-        noZw(await gjPage.locator('[data-testid="navi-reorder-estimate-note"]').innerText()).includes(
-          '自動で組んだ並びで計算した数字のままです。',
+        noZw(await gjPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()).includes(
+          '自動で組んだ並びで計算した数字です。',
         ),
+        noZw(await gjPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()),
       )
 
       // --- GJ-02: 変えた順番のまま調理中モードが進む ---
@@ -31658,24 +31678,29 @@ try {
         gjUndoneOne.join('|') !== gjShown.join('|') && gjUndoneOne.join('|') !== gjAuto.join('|'),
         gjUndoneOne.join(' | '),
       )
-      gjDialog = ''
-      gjAnswer = 'dismiss'
+      // 2026-08-14 便GL: 確認はブラウザの素の窓ではなく、画面の中の窓（便FXの「完成！」と同じ作法）
       await gjPage.locator('[data-testid="navi-reorder-reset"]').click()
       await gjPage.waitForTimeout(700)
+      const gjResetModal = noZw(
+        await gjPage.locator('[data-testid="navi-reorder-reset-modal"]').innerText(),
+      )
       check(
         'GJ-05 「自動の並びに戻す」の確認は、何が消えて何が残るかを両方書く（規約F）',
-        gjDialog.includes('手で動かした') &&
-          gjDialog.includes('取り消して、自動で組んだ並びに戻します') &&
-          gjDialog.includes('作った記録はそのまま残ります'),
-        gjDialog,
+        gjResetModal.includes('手で動かした') &&
+          gjResetModal.includes('取り消します') &&
+          gjResetModal.includes('作った記録はそのまま残ります'),
+        gjResetModal,
       )
+      await gjPage.locator('[data-testid="navi-reorder-reset-modal-cancel"]').click()
+      await gjPage.waitForTimeout(500)
       check(
         'GJ-05 確認でやめると、並びは変わらない',
         (await gjOrder()).join('|') === gjUndoneOne.join('|'),
         (await gjOrder()).join(' | '),
       )
-      gjAnswer = 'accept'
       await gjPage.locator('[data-testid="navi-reorder-reset"]').click()
+      await gjPage.waitForTimeout(500)
+      await gjPage.locator('[data-testid="navi-reorder-reset-modal-ok"]').click()
       await gjPage.waitForTimeout(800)
       check(
         'GJ-05 「自動の並びに戻す」で、自動で組んだ並びに戻る',
@@ -31722,6 +31747,430 @@ try {
       )
     } finally {
       await gjBrowser.close()
+    }
+  }
+
+  // ============================================================================
+  // GL-01〜03: 並べ替えの見え方（2026-08-14 便GL・実操作テスト3回目）
+  //
+  //   GL-01 並べ替えたあと、目安の分数と**同じ枠の中**に印が出て、分数は灰色になる
+  //         （「数字が載っているカードには何の印もない。上へスクロールしたら私は17分後だと信じます」）
+  //   GL-02 「自動の並びに戻す」の確認は画面の中の窓（ブラウザの素の確認を出さない）
+  //   GL-03 「1つ前の並びに戻す」は連打で戻れる／押す場所が動かない／あと何回戻せるかが出る
+  // ============================================================================
+  currentCheck = 'GL-01'
+  {
+    const glBrowser = await chromium.launch()
+    const glCtx = await glBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const glPage = await glCtx.newPage()
+    /** ブラウザの素の確認・警告が出たら記録する（GL-02 は「出ないこと」を見る） */
+    const glNativeDialogs = []
+    glPage.on('dialog', (d) => { glNativeDialogs.push(d.message()); void d.accept() })
+    glPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@GL] ${err.message}`)
+    })
+    glPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const t = msg.text()
+      if (t.includes('cloudflareinsights') || t.includes('ERR_FAILED')) return
+      errors.push(`[console@GL] ${t}`)
+    })
+    const noZw = (t) => (t ?? '').replace(/​/g, '')
+    const glOrder = async () =>
+      (await glPage.locator('[data-testid="navi-step-text"]').allInnerTexts()).map((t) =>
+        noZw(t).replace(/\s+/g, ''),
+      )
+    try {
+      await glPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await glPage.waitForTimeout(1800)
+      // docs/71 R3 と同じ形（グリル15分・レンジ・鍋）の3品を、利用者の書き方で入れる
+      await glPage.evaluate(async () => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients: [], steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const a = await P(store('recipes').add(mk('GL鶏のみそマヨ焼き', [
+          { text: '鶏むね肉をそぎ切りにする。塩こしょうと酒をふって10分ほどおく。', minutes: 10 },
+          { text: 'みそとマヨネーズを混ぜ合わせる。', minutes: 2 },
+          { text: '魚焼きグリルで15分焼く。', minutes: 15 },
+          { text: '焼けたら乾燥パセリをふる。', minutes: 1 },
+        ])))
+        // 1品だけ「沸騰したお湯で」＝ナビが湯沸かしの待ちを足す形にする（GL-07 で使う）
+        const b = await P(store('recipes').add(mk('GLごま和え', [
+          { text: 'ほうれん草とにんじんを切る。', minutes: 4 },
+          { text: 'たっぷりのお湯でほうれん草を1分ゆでる。', minutes: 1 },
+          { text: 'すりごまと醤油で和える。', minutes: 2 },
+        ])))
+        const c = await P(store('recipes').add(mk('GLみそ汁', [
+          { text: '鍋に水とだしの素を入れて中火にかける。', minutes: 2 },
+          { text: '豆腐とわかめを入れて2分煮る。', minutes: 2 },
+          { text: 'みそを溶き入れる。', minutes: 2 },
+        ])))
+        let addedAt = Date.now()
+        for (const id of [a, b, c]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      })
+      await glPage.goto(`${BASE}/#/cook-navi`)
+      await glPage.reload({ waitUntil: 'networkidle' })
+      await glPage.waitForTimeout(1600)
+      await glPage.getByRole('button', { name: '段取りを作る' }).click()
+      await glPage.waitForTimeout(1200)
+
+      // --- GL-01: 目安の分数につく印 ---
+      currentCheck = 'GL-01'
+      const glAuto = await glOrder()
+      check('GL 前提: 3品の段取りが組める', glAuto.length >= 6, String(glAuto.length))
+      check(
+        'GL-01 自動の並びのままなら、目安の分数に印は付かない',
+        (await glPage.locator('[data-testid="navi-total-estimate-stale"]').count()) === 0 &&
+          (await glPage.locator('[data-testid="navi-finish-estimate-stale"]').count()) === 0,
+      )
+      /** 分数の色（灰色になったか）を実DOMで測る */
+      const glMinutesColor = async (sel) =>
+        glPage.evaluate((s) => {
+          const el = document.querySelector(s)
+          return el ? getComputedStyle(el).color : ''
+        }, sel)
+      const glTotalColorBefore = await glMinutesColor('[data-testid="navi-total-estimate"]')
+      const glFinishColorBefore = await glMinutesColor('[data-testid="navi-finish-minutes"]')
+      // 手で1回動かす
+      await glPage.locator('[data-testid="navi-step-down"]').nth(0).click()
+      await glPage.waitForTimeout(600)
+      check(
+        'GL-01 並べ替えたあとは「全体の目安」と同じ枠の中に印が出る',
+        noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()) ===
+          '自動で組んだ並びで計算した数字です。手で並べ替えたあとの時間ではありません。',
+        noZw(await glPage.locator('[data-testid="navi-total-estimate-stale"]').innerText()),
+      )
+      check(
+        'GL-01 「できあがりの目安」の枠の中にも同じ印が出る（品ごとの分数と同じ場所）',
+        noZw(await glPage.locator('[data-testid="navi-finish-estimate-stale"]').innerText()) ===
+          '自動で組んだ並びで計算した数字です。手で並べ替えたあとの時間ではありません。',
+        noZw(await glPage.locator('[data-testid="navi-finish-estimate-stale"]').innerText()),
+      )
+      const glTotalColorAfter = await glMinutesColor('[data-testid="navi-total-estimate"]')
+      const glFinishColorAfter = await glMinutesColor('[data-testid="navi-finish-minutes"]')
+      check(
+        'GL-01 分数そのものの色も変わる（灰色にして、いまの並びの答えでないと見て分かる）',
+        glTotalColorAfter !== glTotalColorBefore && glFinishColorAfter !== glFinishColorBefore,
+        `全体 ${glTotalColorBefore}→${glTotalColorAfter} / 品ごと ${glFinishColorBefore}→${glFinishColorAfter}`,
+      )
+      check(
+        'GL-01 印は、数字と同じ枠の中にある（手順リストの手前ではなく）',
+        await glPage.evaluate(() => {
+          const card = document.querySelector('[data-testid="navi-finish-times"]')
+          const mark = document.querySelector('[data-testid="navi-finish-estimate-stale"]')
+          return Boolean(card && mark && card.contains(mark))
+        }),
+      )
+
+      // --- GL-03: 連打で戻れる／押す場所が動かない ---
+      currentCheck = 'GL-03'
+      for (let i = 0; i < 4; i++) {
+        await glPage.locator('[data-testid="navi-step-down"]').nth(i + 1).click()
+        await glPage.waitForTimeout(350)
+      }
+      const glMoved = await glOrder()
+      check(
+        'GL-03 あと何回戻せるかが、戻すボタンに出ている',
+        noZw(await glPage.locator('[data-testid="navi-reorder-undo"]').innerText()).includes('あと5回'),
+        noZw(await glPage.locator('[data-testid="navi-reorder-undo"]').innerText()),
+      )
+      // 押す場所を動かさないまま、同じ座標を5回押せるか（連打の再現）
+      const glUndoBox = await glPage.locator('[data-testid="navi-reorder-undo"]').boundingBox()
+      await glPage.locator('[data-testid="navi-reorder-undo"]').scrollIntoViewIfNeeded()
+      await glPage.waitForTimeout(200)
+      const glBoxes = []
+      let glTaps = 0
+      for (let i = 0; i < 5; i++) {
+        const box = await glPage.locator('[data-testid="navi-reorder-undo"]').boundingBox()
+        if (!box) break
+        glBoxes.push(Math.round(box.y))
+        // **同じ座標を叩く**（要素を掴み直さない＝指を動かさない人と同じ押し方）
+        await glPage.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+        glTaps++
+        await glPage.waitForTimeout(400)
+      }
+      check(
+        'GL-03 「1つ前の並びに戻す」は連打で戻れる（5回動かしたら5回とも押せる）',
+        glTaps === 5 && (await glOrder()).join('|') === glAuto.join('|'),
+        `押せた回数=${glTaps} 並び=${(await glOrder()).slice(0, 3).join(' / ')}`,
+      )
+      check(
+        'GL-03 連打の間、ボタンの位置が動かない（実測390pxで縦のずれ4px以内）',
+        Math.max(...glBoxes) - Math.min(...glBoxes) <= 4,
+        glBoxes.join(','),
+      )
+      check(
+        'GL-03 全部戻したら、並べ替えの欄も印も消える',
+        (await glPage.locator('[data-testid="navi-reorder-state"]').count()) === 0 &&
+          (await glPage.locator('[data-testid="navi-total-estimate-stale"]').count()) === 0,
+      )
+      void glMoved
+      void glUndoBox
+
+      // --- GL-02: 「自動の並びに戻す」は画面の中の窓 ---
+      currentCheck = 'GL-02'
+      await glPage.locator('[data-testid="navi-step-down"]').nth(0).click()
+      await glPage.waitForTimeout(500)
+      glNativeDialogs.length = 0
+      await glPage.locator('[data-testid="navi-reorder-reset"]').click()
+      await glPage.waitForTimeout(700)
+      check(
+        'GL-02 「自動の並びに戻す」でブラウザの素の確認が出ない',
+        glNativeDialogs.length === 0,
+        glNativeDialogs.join(' | '),
+      )
+      check(
+        'GL-02 代わりに画面の中の窓が開く（便FXの「完成！」と同じ作法）',
+        (await glPage.locator('[data-testid="navi-reorder-reset-modal"]').count()) === 1,
+      )
+      const glResetText = noZw(
+        await glPage.locator('[data-testid="navi-reorder-reset-modal"]').innerText(),
+      )
+      check(
+        'GL-02 窓の中に、何が消えて何が残るかが件数つきで書いてある（規約F）',
+        glResetText.includes('手で動かした1回ぶんを取り消します') &&
+          glResetText.includes('選んでいる3品') &&
+          glResetText.includes('動いているタイマー・作った記録はそのまま残ります'),
+        glResetText,
+      )
+      check(
+        'GL-02 行き先は2つとも言葉で書いてある（OK／キャンセルではない）',
+        glResetText.includes('自動の並びに戻す') && glResetText.includes('並べ替えたままにする'),
+        glResetText,
+      )
+      await glPage.locator('[data-testid="navi-reorder-reset-modal-cancel"]').click()
+      await glPage.waitForTimeout(400)
+      check(
+        'GL-02 「並べ替えたままにする」を選ぶと、並びはそのまま',
+        (await glPage.locator('[data-testid="navi-reorder-state"]').count()) === 1,
+      )
+      await glPage.locator('[data-testid="navi-reorder-reset"]').click()
+      await glPage.waitForTimeout(400)
+      await glPage.locator('[data-testid="navi-reorder-reset-modal-ok"]').click()
+      await glPage.waitForTimeout(700)
+      check(
+        'GL-02 「自動の並びに戻す」を選ぶと、自動で組んだ並びに戻る',
+        (await glOrder()).join('|') === glAuto.join('|'),
+        (await glOrder()).slice(0, 3).join(' / '),
+      )
+
+      // --- GL-07: 「沸くまでの待ち時間」は、押す前に何分ではかるかが読める ---
+      //   「押すと5分固定で始まるが、事前に分数がどこにも書いていない（押すまで分からない）」
+      //   ※沸くまでの時間そのものは言い切らない（オーナー指示D-3）ので、タイマーの分数を書く
+      currentCheck = 'GL-07'
+      const glBoilNote = noZw(
+        await glPage.locator('[data-testid="navi-boil-note"]').first().innerText(),
+      )
+      check(
+        'GL-07 押す前に、タイマーが何分ではかるかが書いてある',
+        glBoilNote.includes('タイマーは5分ではかります'),
+        glBoilNote,
+      )
+      check(
+        'GL-07 沸くまでの時間そのものは言い切らない（火力と量で変わる）',
+        glBoilNote.includes('実際に沸くまでの時間は、火力と量で変わります'),
+        glBoilNote,
+      )
+      check(
+        'GL-07 その一文は「タイマーを始める」より下に無い＝押す前に目に入る位置にある',
+        await glPage.evaluate(() => {
+          const note = document.querySelector('[data-testid="navi-boil-note"]')
+          if (!note) return false
+          const card = note.closest('li') ?? note.parentElement
+          const btn = [...(card?.querySelectorAll('button') ?? [])].find((b) =>
+            (b.textContent ?? '').includes('タイマーを始める'),
+          )
+          if (!btn) return false
+          // 同じ待ちのブロックの中にあり、ボタンとの縦の隔たりが1行ぶん以内
+          return note.getBoundingClientRect().top - btn.getBoundingClientRect().bottom < 24
+        }),
+      )
+
+      // --- GL-04〜06・08: 調理中モードのタイマーまわり ---
+      currentCheck = 'GL-05'
+      await glPage.locator('[data-testid="cook-session-start"]').click()
+      await glPage.waitForTimeout(1000)
+      /** いまの手順に「タイマーを始める」が出ているか */
+      const glHasTimerButton = async () =>
+        (await glPage
+          .locator('[data-testid="cook-session-wait-block"]')
+          .getByRole('button', { name: 'タイマーを始める' })
+          .count()) > 0
+      // 待ちのタイマーが出る手順まで進む（何手順目かは段取り次第なので決め打ちにしない）
+      let glSteps = 0
+      while (!(await glHasTimerButton()) && glSteps < 20) {
+        if ((await glPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await glPage.locator('[data-testid="cook-session-next"]').click()
+        await glPage.waitForTimeout(400)
+        glSteps++
+      }
+      check('GL 前提: タイマーを出す待ちの手順まで進める', await glHasTimerButton())
+      const glTimerRecipe = await glPage.locator('[data-testid="cook-session-recipe"]').innerText()
+      // **押さずに**次へ
+      await glPage.locator('[data-testid="cook-session-next"]').click()
+      await glPage.waitForTimeout(600)
+      const glNotice = noZw(
+        await glPage.locator('[data-testid="cook-session-timer-notice"]').innerText(),
+      )
+      check(
+        'GL-05 タイマーを押さずに次へ進めると、その場で伝える（止めはしない）',
+        glNotice.includes('タイマーを始めていません') && glNotice.includes(noZw(glTimerRecipe)),
+        glNotice,
+      )
+      check(
+        'GL-05 伝えても進む手は止めない（次の手順が開いている）',
+        (await glPage.locator('[data-testid="cook-session-step-text"]').count()) === 1 &&
+          (await glPage.locator('[data-testid="cook-finish-modal"]').count()) === 0,
+      )
+      check(
+        'GL-05 その場で始める道が1つ添えてある（戻って押し直さなくてよい）',
+        (await glPage.locator('[data-testid="cook-session-timer-notice-start"]').count()) === 1,
+      )
+      await glPage.locator('[data-testid="cook-session-timer-notice-start"]').click()
+      await glPage.waitForTimeout(700)
+      check(
+        'GL-05 「いまから始める」で始まり、一言は役目を終えて消える',
+        (await glPage.locator('[data-testid="cook-session-timer-notice"]').count()) === 0,
+      )
+
+      // --- GL-08: タイマーの読み上げ名（2つの番号を別の名前で呼ぶ） ---
+      currentCheck = 'GL-08'
+      const glAria = await glPage.evaluate(() =>
+        [...document.querySelectorAll('[aria-label]')]
+          .map((el) => el.getAttribute('aria-label') ?? '')
+          .filter((t) => t.includes('のタイマーを調整') && t.includes('段取り')),
+      )
+      check(
+        'GL-08 読み上げ名は、段取りの番号とレシピの手順番号を別の名前で呼ぶ',
+        glAria.length > 0 && glAria.every((t) => /段取り\d+/.test(t) && t.includes('手順')),
+        glAria.join(' | ') || '(段取りを含む読み上げ名が無い)',
+      )
+      check(
+        'GL-08 1つの「手順」に2つの番号がぶら下がる形（手順⑨（1-2））は読み上げ名に残っていない',
+        glAria.every((t) => !/手順[①-⑳㉑-㉟㊱-㊿]/.test(t)),
+        glAria.join(' | '),
+      )
+
+      // --- GL-04: 動いているタイマーが「他の品の次の手順」に混ざって見えない ---
+      currentCheck = 'GL-04'
+      // 始めたタイマーの品が下部の行に回るまで進める（別の品の手順を開いた状態にする）
+      let glHops = 0
+      while (
+        (await glPage.locator('[data-testid="cook-session-other-timers"]').count()) === 0 &&
+        glHops < 8
+      ) {
+        if ((await glPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await glPage.locator('[data-testid="cook-session-next"]').click()
+        await glPage.waitForTimeout(400)
+        glHops++
+      }
+      check(
+        'GL 前提: 他の品の行にタイマーが付いた状態を作れる',
+        (await glPage.locator('[data-testid="cook-session-other-timers"]').count()) > 0,
+      )
+      check(
+        'GL-04 行に付くタイマーには「動いているタイマー」の見出しが付く（手順の行と読み分かれる）',
+        noZw(
+          await glPage.locator('[data-testid="cook-session-other-timers-title"]').first().innerText(),
+        ) === '動いているタイマー',
+      )
+      check(
+        'GL-04 タイマーは、その品の行の中にある（品と品のあいだに挟まらない）',
+        await glPage.evaluate(() => {
+          const box = document.querySelector('[data-testid="cook-session-other-timers"]')
+          const row = box?.parentElement
+          // 行の枠（色の線を引いている箱）の中に、その品の手順の行と一緒に入っている
+          return Boolean(row && row.querySelector('[data-testid="cook-session-other-row"]'))
+        }),
+      )
+      check(
+        'GL-04 手順の行のような並び（料理名の繰り返し）にしない',
+        await glPage.evaluate(() => {
+          const box = document.querySelector('[data-testid="cook-session-other-timers"]')
+          const row = box?.parentElement
+          const title = row?.querySelector('[data-testid="cook-session-other-row"]')
+          const name = (title?.textContent ?? '').replace(/\s+/g, '')
+          const chips = (box?.textContent ?? '').replace(/\s+/g, '')
+          // 行の見出しに出ている料理名が、タイマーの中で繰り返されていない
+          const dish = name.match(/GL[^\d]{1,12}/)?.[0] ?? ''
+          return dish.length > 2 && !chips.replace('動いているタイマー', '').includes(dish)
+        }),
+      )
+
+      // --- GL-06: 終わるときに、動いているタイマーをどうするか聞く ---
+      currentCheck = 'GL-06'
+      let glGuard = 0
+      while (
+        (await glPage.locator('[data-testid="cook-session-finish"]').count()) === 0 &&
+        glGuard < 20
+      ) {
+        await glPage.locator('[data-testid="cook-session-next"]').click()
+        await glPage.waitForTimeout(300)
+        glGuard++
+      }
+      check('GL 前提: 最後の手順まで進める', (await glPage.locator('[data-testid="cook-session-finish"]').count()) === 1)
+      await glPage.locator('[data-testid="cook-session-finish"]').click()
+      await glPage.waitForTimeout(800)
+      check(
+        'GL-06 「完成！」の窓で、動いているタイマーのことを聞く',
+        (await glPage.locator('[data-testid="cook-finish-timers"]').count()) === 1,
+      )
+      const glFinishTimers = noZw(
+        await glPage.locator('[data-testid="cook-finish-timers"]').innerText(),
+      )
+      check(
+        'GL-06 何本あるか・どの料理のものかを書いてある',
+        /動いているタイマー\d+件/.test(glFinishTimers) && glFinishTimers.includes('GL'),
+        glFinishTimers,
+      )
+      check(
+        'GL-06 既定は消さない（押し間違いで残り時間を失わない）',
+        (await glPage.locator('[data-testid="cook-finish-timers-stop"]').getAttribute('aria-checked')) ===
+          'false',
+      )
+      check(
+        'GL-06 消さない側の結果が書いてある（規約F）',
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()).includes(
+          '片づけの間も鳴ります',
+        ),
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()),
+      )
+      await glPage.locator('[data-testid="cook-finish-timers-stop"]').click()
+      await glPage.waitForTimeout(400)
+      check(
+        'GL-06 消す側を選ぶと、消したときの結果に書き替わる（規約F）',
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()).includes(
+          '残り時間はなくなります',
+        ),
+        noZw(await glPage.locator('[data-testid="cook-finish-timers-note"]').innerText()),
+      )
+      // 記録はつけずに終える（作った記録に触らずタイマーの扱いだけを見る）
+      await glPage.locator('[data-testid="cook-finish-close"]').click()
+      await glPage.waitForTimeout(1000)
+      check(
+        'GL-06 選んだとおり、動いていたタイマーは消えている',
+        (await glPage.evaluate(() =>
+          [...document.querySelectorAll('[aria-label]')]
+            .map((el) => el.getAttribute('aria-label') ?? '')
+            .filter((t) => t.includes('のタイマーを調整')).length,
+        )) === 0,
+      )
+    } finally {
+      await glBrowser.close()
     }
   }
 

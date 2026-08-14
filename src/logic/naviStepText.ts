@@ -10,6 +10,7 @@
  * これまで文字の側だけが「段取りの7番目」と別の呼び方をしていたため、画面の丸数字と
  * 読み比べる必要があった。文字の側もバッジと同じ並び（丸数字＋レシピ内の番号）にそろえる。
  */
+import { ja } from '../i18n/ja'
 
 /** 丸数字にできる上限（Unicodeに①〜㊿までしか無い） */
 const CIRCLED_MAX = 50
@@ -42,4 +43,29 @@ export function naviStepText(naviOrder: number, recipeStepLabel?: string): strin
   return recipeStepLabel
     ? `${circledNumber(naviOrder)}（${recipeStepLabel}）`
     : circledNumber(naviOrder)
+}
+
+/**
+ * 同じタイマーの**読み上げ用の呼び方**（2026-08-14 便GL・利用者テスト
+ * 「タイマーの読み上げ名『手順⑨（1-2）』が、同じ『手順』で2つの番号を指していて紛らわしい」）。
+ *
+ * 画面では番号のバッジが2つ並んでいるので「手順⑨（1-2）」で読み比べられるが、
+ * 耳で聞くときはバッジが無く、**1つの「手順」という語に2つの番号がぶら下がって**聞こえる。
+ * 読み上げのときだけ、2つの番号を**それぞれの名前**で呼ぶ:
+ *   段取りの通し番号 → 「段取り9」（画面の大きいバッジ）
+ *   レシピ内の手順番号 → 「手順3」「手順1の2つめ」（画面の小さいバッジ。1手順を2つに分けた工程）
+ *
+ * 画面に出る文字（naviStepText）は変えない（2026-08-10 便EZ のオーナー指示で
+ * バッジと同じ並びにそろえたもので、隣にバッジがあるかぎり読み比べられる）。
+ * 丸数字を使わないのは、読み上げソフトによって「まる9」「9」と読みが割れるため。
+ */
+export function naviStepSpeechText(naviOrder: number, recipeStepLabel?: string): string {
+  const order = ja.timer.stepSpeechOrder.replace('{o}', String(naviOrder))
+  if (!recipeStepLabel) return order
+  // 「3-1」＝レシピの手順3を段取りの上で2つに分けた1つめ。数字の羅列にせず言葉で分ける
+  const split = /^(\d+)-(\d+)$/.exec(recipeStepLabel)
+  const step = split
+    ? ja.timer.stepSpeechSplit.replace('{n}', split[1]).replace('{part}', split[2])
+    : recipeStepLabel
+  return ja.timer.stepSpeechLabel.replace('{o}', order).replace('{r}', step)
 }
