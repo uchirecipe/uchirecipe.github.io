@@ -19,7 +19,9 @@ import { findTimeTokens } from './time'
 export function stepMinutesFromText(text: string): number | undefined {
   const tokens = findTimeTokens(text)
   if (tokens.length === 0) return undefined
-  const maxSeconds = Math.max(...tokens.map((t) => t.seconds))
+  // 幅のある書き方（「12〜15分」）は長いほう＝本文が最後に示している時間を写す
+  // （タイマーを短いほうで鳴らすのは別の話。2026-08-14 便GK・logic/time.ts）
+  const maxSeconds = Math.max(...tokens.map((t) => t.maxSeconds))
   if (maxSeconds < 60) return undefined
   return Math.round(maxSeconds / 60)
 }

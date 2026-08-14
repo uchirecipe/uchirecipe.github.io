@@ -156,6 +156,7 @@ import {
   recipeStepLabel,
   hasParallelCue,
   stepHeatShift,
+  waitTimerSeconds,
   BOIL_WATER_MINUTES,
 } from '../src/logic/cookNavi.ts'
 import {
@@ -12062,9 +12063,11 @@ eq(
   eq('FU-5 半角チルダ・ハイフンの範囲も1つ', [shown('3~4分ゆでる。'), shown('8-10分焼く。')], [['3~4分'], ['8-10分']])
   eq('FU-5 全角数字の範囲も1つ（半角に直して出す）', shown('１２〜１５分焼く。'), ['12〜15分'])
   eq('FU-5 単位が2回書かれる形（12分〜15分）も1つ', shown('12分〜15分煮る。'), ['12分〜15分'])
-  // はかる長さは変えない（範囲の長いほう＝これまでと同じ。段取りの待ち時間の計算に影響させない）
-  eq('FU-5 はかる長さは範囲の長いほうのまま', [secs('12〜15分焼く。'), secs('1〜2分煮る。')], [[900], [120]])
-  eq('FU-5 単位が2回の形でも長いほう', secs('12分〜15分煮る。'), [900])
+  // 2026-08-14 便GK: はかる長さを2つに分けた（タイマー＝短いほう seconds／段取りの見積り＝
+  // 長いほう maxSeconds）。理由は GK-3 のケースと logic/time.ts の解説にある
+  const maxSecs = (text) => findTimeTokens(text).map((t) => t.maxSeconds)
+  eq('FU-5 段取りの見積りに使う長さは範囲の長いほうのまま', [maxSecs('12〜15分焼く。'), maxSecs('1〜2分煮る。')], [[900], [120]])
+  eq('FU-5 単位が2回の形でも見積りは長いほう', maxSecs('12分〜15分煮る。'), [900])
   // 範囲でないものを巻き込まない
   eq('FU-5 範囲でない時間はそのまま', shown('中火で15分煮る。'), ['15分'])
   eq('FU-5 2つの別々の時間は別々のまま', shown('5分炒めてから、10分煮る。'), ['5分', '10分'])
@@ -17898,11 +17901,13 @@ Aみりん 大さじ1
     [false, false, true],
   )
   const gap = finishSpread(finishes)
-  const warm = finishes.filter((f) => !f.cold).map((f) => f.minutes)
+  // 2026-08-14 便GK: 画面に出す開きは**全部の品**で数える（冷たい品を黙って外すと
+  // 「4分は言うのに17分は何も言わない」になる）。段取りを測る N1 の定義は変えていない
+  const all = finishes.map((f) => f.minutes)
   eq(
-    'GF-C 開きは冷たい品を除いた最大−最小（冷たい品を先に仕上げるのは正しい動きなので数えない）',
+    'GF-C 開きは全部の品の最大−最小（先にできる品が冷たい品かどうかは文言で書き分ける）',
     gap.minutes,
-    Math.max(...warm) - Math.min(...warm),
+    Math.max(...all) - Math.min(...all),
   )
   eq(
     'GF-C どの2品の開きなのかも返す（画面では品名で書く）',
@@ -17921,7 +17926,18 @@ Aみりん 大さじ1
   ]
   const plan = buildCookPlan(two)
   const finishes = recipeFinishTimes(plan.items, plan.recipes, (id) => two.find((r) => r.id === id))
-  eq('GF-C 温かい品が1品だけなら開きは0（言わない）', finishSpread(finishes).minutes, 0)
+  // 2026-08-14 便GK: 冷たい品も開きの対象にする（先にできる理由は文言側で書き分ける）
+  eq(
+    'GF-C 冷たい品しか相手がいなくても開きは出す（黙って飛ばさない）',
+    finishSpread(finishes).minutes > 0,
+    true,
+  )
+  eq(
+    'GF-C 先にできる品が冷たい品かどうかを返す',
+    finishSpread(finishes).first.cold,
+    true,
+  )
+  eq('GF-C 品が1つしかなければ開きは0（言わない）', finishSpread([finishes[0]]).minutes, 0)
   // 線は docs/72 N1 と同じ＝全体の30%を「超えた」ら大きいとみなす（ちょうど30%は大きくない）
   eq('GF-C 開きの線は全体の30%（ちょうどは大きくない）', isFinishSpreadWide(30, 100), false)
   eq('GF-C 30%を超えたら大きい', isFinishSpreadWide(31, 100), true)
@@ -17947,6 +17963,259 @@ Aみりん 大さじ1
   eq(
     'GF-C 開きが大きいときの一文も、先にできる品の名前を差し込む',
     ja.cookNavi.finishSpreadWide.includes('{first}'),
+    true,
+  )
+}
+
+// ==========================================================================================
+// 便GK: 段取りの数字が信用できない件（2026-08-14 実操作テスト3回目）
+// 利用者の原文は docs/71 に追記。ここは再発防止のケースだけを置く。
+// ==========================================================================================
+
+// ---------- GK-1: 分数欄が埋まっていても、混在手順を割る ----------
+// 原文:「手順1の本文は『皮を取り、フォークで刺し、そぎ切りにする。塩こしょうと酒をふって10分ほどおく』…
+//        それを手順まるごと『待ち』にして…押した瞬間から10:00がカウントダウンを始める。
+//        でも私はまだ肉に触ってもいない」
+// 真因: 2026-08-08 便ED の打ち手#2（取り込んだ手順の本文に書かれた時間を分数欄へ転記）以降、
+//       URL取り込み・貼り付けで登録したレシピの分数欄は**埋まる**ようになった。
+//       splitMixedStep は「分数欄が埋まっている手順は分けない」で外していたため、
+//       R3の症状を直したはずの便GDが、実際の登録経路では1件も効いていなかった。
+{
+  const t = (text, minutes) => (minutes == null ? { text } : { text, minutes })
+  const chicken = t(
+    '鶏むね肉は皮を取り、フォークで数か所刺してからそぎ切りにする。塩こしょうと酒をふって10分ほどおく。',
+    10,
+  )
+  eq(
+    'GK-1 分数欄が埋まっていても「◯分おく」型の混在は割る（待ちの側に同じ分数が書かれている）',
+    (() => {
+      const s = splitMixedStep(chicken)
+      return s && [s.active.text, s.wait.text, s.wait.minutes, s.active.minutes]
+    })(),
+    [
+      '鶏むね肉は皮を取り、フォークで数か所刺してからそぎ切りにする。',
+      '塩こしょうと酒をふって10分ほどおく。',
+      10,
+      undefined,
+    ],
+  )
+  const soup = t('沸いたら豆腐をさいの目に切って入れ、乾燥わかめも加えて1〜2分煮る。', 2)
+  eq(
+    'GK-1 「◯分煮る」型（豆腐を切る手作業が入っている）も割る',
+    (() => {
+      const s = splitMixedStep(soup)
+      return s && [s.active.text, s.wait.text, s.wait.minutes]
+    })(),
+    // 切る位置はできるだけ後ろ（＝手を動かす部分をできるだけ残す）ので、
+    // 豆腐を切るのもわかめを加えるのも手作業の側に残る
+    ['沸いたら豆腐をさいの目に切って入れ、乾燥わかめも加えて', '1〜2分煮る。', 2],
+  )
+  // 迷ったら割らない側（S1を増やさない）: 分数欄の数字が本文の待ちの側に書かれていない手順は割らない
+  eq(
+    'GK-1 分数欄の数字が本文に書かれていない手順は今までどおり割らない',
+    splitMixedStep(t('水を入れて煮る', 10)),
+    undefined,
+  )
+  eq(
+    'GK-1 手作業の側にだけ時間が書かれている手順は割らない',
+    splitMixedStep(t('玉ねぎを10分炒めてから煮る', 10)),
+    undefined,
+  )
+  {
+    // アプリと同じ登録経路（貼り付け取り込み → 本文の時間を分数欄へ転記）を通しても割れること
+    const raw = '鶏むね肉は皮を取り、フォークで数か所刺してからそぎ切りにする。塩こしょうと酒をふって10分ほどおく。'
+    const step = { text: raw, minutes: stepMinutesFromText(raw) }
+    eq('GK-1 取り込み経路では分数欄が埋まる（前提の確認）', step.minutes, 10)
+    const plan = buildCookTimeline([{ id: 1, title: 'GK主菜', steps: [step] }])
+    eq('GK-1 取り込んだレシピでも手を動かす時間が0分でなくなる', plan.items[0].activeMinutes > 0, true)
+    eq('GK-1 待ちの分数は変わらない', plan.items[1].waitMinutes, 10)
+    eq(
+      'GK-1 タイマーは待ちの工程だけに出る（手作業の前には押せない）',
+      [showsWaitTimerButton(plan.items[0]), showsWaitTimerButton(plan.items[1])],
+      [false, true],
+    )
+    eq('GK-1 待ちは手作業が終わってから始まる', plan.items[1].startMin, plan.items[0].endMin)
+    eq(
+      'GK-1 番号は「1-1」「1-2」',
+      [recipeStepLabel(plan.items[0]), recipeStepLabel(plan.items[1])],
+      ['1-1', '1-2'],
+    )
+  }
+}
+
+// ---------- GK-2: 分数の書かれていない手作業の見積り ----------
+// 原文:「『焼けたら乾燥パセリをふる』に4分。パセリをふるのに4分は取りません。10秒です。
+//        逆に『ホイル敷いて肉を並べてみそマヨを塗ってチーズをのせる』が2分。…見積りが逆になっている」
+{
+  const t = (text) => ({ text })
+  const one = estimateActiveMinutes(t('焼けたら乾燥パセリをふる。')).minutes
+  const many = estimateActiveMinutes(
+    t('アルミホイルを敷いて鶏を並べ、みそマヨを塗ってチーズをのせる。'),
+  ).minutes
+  eq('GK-2 「ふる」の一手は一律4分にしない', one <= 2, true)
+  eq('GK-2 複数動作の組み立ては、一手より長く見る（見積りの逆転を起こさない）', many > one, true)
+  eq('GK-2 「塩をふる」も一手として読む', estimateActiveMinutes(t('塩をふる。')).minutes <= 3, true)
+  eq('GK-2 「器に盛って散らす」は仕上げのまま短い', estimateActiveMinutes(t('器に盛る。')).minutes, 2)
+  // 手順の中でいちばん重い動作で見る（最後に出てきた語だけで決めない）
+  eq(
+    'GK-2 「炒めて器に盛る」は炒めの重さで見る（最後の「盛る」だけで2分にしない）',
+    estimateActiveMinutes(t('ひき肉を炒めて器に盛る。')).minutes >= 5,
+    true,
+  )
+  // やりすぎない側の歯止め（既存の見積りを壊さない）
+  eq('GK-2 切る工程は3分のまま', estimateActiveMinutes(t('玉ねぎをみじん切りにする')).minutes, 3)
+  eq('GK-2 炒める工程は5分のまま', estimateActiveMinutes(t('ひき肉を炒める')).minutes, 5)
+  eq(
+    'GK-2 「鍋に水を入れて火にかける」は準備動作で2分のまま',
+    estimateActiveMinutes(t('鍋に水とだしの素を入れて火にかける。')).minutes,
+    2,
+  )
+}
+
+// ---------- GK-3: 範囲で書かれた時間のタイマーは短いほうで立てる ----------
+// 原文:「本文は『12〜15分焼く』。ボタンのラベルは『12〜15分 タイマー開始』なのに、表示と実際の待ちは約15分。
+//        チーズがのっているものを最初から15分放置に設定するのは危ない。12分で一度見るほうが正しい」
+{
+  const { findTimeTokens } = await import('../src/logic/time.ts')
+  const secs = (text) => findTimeTokens(text).map((x) => x.seconds)
+  const maxSecs = (text) => findTimeTokens(text).map((x) => x.maxSeconds)
+  eq('GK-3 タイマーにする長さは範囲の短いほう', [secs('12〜15分焼く。'), secs('1〜2分煮る。')], [[720], [60]])
+  eq('GK-3 段取りの見積りに使う長さは範囲の長いほうのまま', maxSecs('12〜15分焼く。'), [900])
+  eq('GK-3 単位が2回書かれる形でも短いほうで立てる', secs('12分〜15分煮る。'), [720])
+  eq('GK-3 範囲でない時間は今までどおり', [secs('中火で15分煮る。'), maxSecs('中火で15分煮る。')], [[900], [900]])
+  eq(
+    'GK-3 段取りの待ち分数は上限のまま（先に短く見積もって詰め込まない）',
+    resolveWaitMinutes({ text: '魚焼きグリルで12〜15分焼く。' }),
+    15,
+  )
+  eq(
+    'GK-3 待ちブロックのタイマーも短いほうで始める',
+    waitTimerSeconds({ text: '魚焼きグリルで12〜15分焼く。', waitMinutes: 15, longRest: false }),
+    720,
+  )
+  eq(
+    'GK-3 範囲で書かれていない待ちは、その待ち分数どおりに始める',
+    waitTimerSeconds({ text: '弱火で20分煮る。', waitMinutes: 20, longRest: false }),
+    1200,
+  )
+  eq(
+    'GK-3 分数を本文に持たない待ち（調理法から当てた分数）もその分数で始める',
+    waitTimerSeconds({ text: '魚焼きグリルで焼く。', waitMinutes: 15, longRest: false }),
+    900,
+  )
+  eq('GK-3 取り込みの分数欄には長いほうを写す（本文に書いてある事実の転記）', stepMinutesFromText('12〜15分焼く。'), 15)
+}
+
+// ---------- GK-4: 「1品だけなら約◯分」が手順の合計と合わない ----------
+// 原文:「鶏の手順は 10＋3＋2＋15＋4＝34分。なのに『1品だけなら約31分』。
+//        ごま和えは12分、みそ汁は13分でどちらもぴったり合うのに鶏だけ3分合わない」
+// 真因: 利用者が本文に書いた「その間に」の手順と、ナビが差し込んだ「沸くのを待つ」の直後の手順は、
+//       その品の待ちの**中**に置かれる（2026-08-13 便GB/GD）。品の所要時間には二重に足されないので、
+//       画面の手順の分数を足した数より短くなる。画面がその重なりを何も言っていなかった。
+{
+  const chicken = {
+    id: 1,
+    title: 'GK鶏のみそマヨ焼き',
+    steps: [
+      {
+        text: '鶏むね肉は皮を取り、そぎ切りにする。塩こしょうと酒をふって10分ほどおく。',
+        minutes: 10,
+      },
+      { text: 'その間に☆を全部混ぜ合わせておく。' },
+      { text: '魚焼きグリルで15分焼く。', minutes: 15 },
+      { text: '焼けたら乾燥パセリをふる。' },
+    ],
+  }
+  const side = {
+    id: 2,
+    title: 'GKごま和え',
+    steps: [
+      { text: 'ほうれん草を3〜4cmの長さに切る。' },
+      { text: '電子レンジで3分加熱する。', minutes: 3 },
+      { text: '水気をしぼって和える。' },
+    ],
+  }
+  const plan = buildCookPlan([chicken, side])
+  for (const r of plan.recipes) {
+    eq(`GK-4 品ごとに手順の分数の合計を持つ（${r.title}）`, typeof r.stepSumMinutes === 'number', true)
+    eq(
+      `GK-4 手順の合計は「1品だけなら」の目安を下回らない（${r.title}）`,
+      r.stepSumMinutes >= r.soloMinutes,
+      true,
+    )
+  }
+  const gap = plan.recipes.find((r) => r.id === 1)
+  eq(
+    'GK-4 「その間に」を書いた品は、手順の合計と1品だけの目安が食い違う（重なりぶん）',
+    gap.stepSumMinutes - gap.soloMinutes > 0,
+    true,
+  )
+  const even = plan.recipes.find((r) => r.id === 2)
+  eq('GK-4 重なりの無い品はぴったり合う', even.stepSumMinutes, even.soloMinutes)
+  eq(
+    'GK-4 食い違う理由を画面に置く一文がある（手順の分数を足した数との関係を書く）',
+    typeof ja.cookNavi.legendOverlapNote === 'string' && ja.cookNavi.legendOverlapNote.length > 0,
+    true,
+  )
+}
+
+// ---------- GK-5: 「台所を離れられる待ち時間」が言い過ぎ ----------
+// 原文:「数えたら、手が空くのは（レンジ3分待ち）＋（沸くのを待つ5分）＋（煮る2分）＝10分でした。
+//        でもこのうち7分は鍋の前です。吹きこぼれるので離れられない。『台所を離れられる』は言い過ぎ。
+//        しかも例に出ている『漬ける・冷やす』はこの段取りに1つもない」
+{
+  eq('GK-5 「台所を離れられる」とは言わない', ja.cookNavi.totalAwayNote.includes('台所を離れられる'), false)
+  eq(
+    'GK-5 段取りに出てこないかもしれない調理法を例に出さない',
+    ja.cookNavi.totalAwayNote.includes('漬ける') || ja.cookNavi.totalAwayNote.includes('冷やす'),
+    false,
+  )
+  eq('GK-5 分数の差し込み口は残す', ja.cookNavi.totalAwayNote.includes('{n}'), true)
+  // 火にかけている待ちは数えない（実装側の確認。文言だけ直して中身が違う、を防ぐ）
+  {
+    const plan = buildCookPlan([
+      {
+        id: 1,
+        title: 'GK煮物',
+        steps: [{ text: '材料を切る。' }, { text: '鍋に入れて弱火で20分煮る。', minutes: 20 }, { text: '器に盛る。' }],
+      },
+      {
+        id: 2,
+        title: 'GK漬け物',
+        steps: [{ text: 'きゅうりを切る。' }, { text: '調味料と合わせて30分漬ける。', minutes: 30 }, { text: '器に盛る。' }],
+      },
+    ])
+    eq('GK-5 火にかけている20分は「そばを離れてよい待ち」に数えない', plan.awayMinutes, 30)
+  }
+}
+
+// ---------- GK-6: 完成の開きの警告が出る条件 ----------
+// 原文:「ごま和えを17分後に和えて、鶏ができるのは34分後。17分放置。なのにアプリが警告するのは
+//        『みそ汁ができてから鶏ができるまで約4分あきます』だけ。4分は言うのに17分は何も言わない。
+//        判定基準がわからない」
+{
+  const { finishSpread } = await import('../src/logic/cookFinish.ts')
+  const finishes = [
+    { recipeId: 1, minutes: 34, cold: false }, // 主菜
+    { recipeId: 2, minutes: 30, cold: false }, // みそ汁
+    { recipeId: 3, minutes: 17, cold: true }, // ごま和え（冷たい品と判定される）
+  ]
+  const gap = finishSpread(finishes)
+  eq('GK-6 開きは全部の品で見る（冷たい品を黙って外さない）', gap.minutes, 34 - 17)
+  eq('GK-6 いちばん早い品といちばん遅い品を返す', [gap.first.recipeId, gap.last.recipeId], [3, 1])
+  eq('GK-6 先にできる品が冷たい品かどうかを返す（画面で理由を書き分けるため）', gap.first.cold, true)
+  eq(
+    'GK-6 温かい品どうしだけのときは今までどおり',
+    finishSpread([
+      { recipeId: 1, minutes: 34, cold: false },
+      { recipeId: 2, minutes: 30, cold: false },
+    ]).minutes,
+    4,
+  )
+  eq('GK-6 1品だけなら開きは言わない', finishSpread([{ recipeId: 1, minutes: 20, cold: false }]).minutes, 0)
+  eq(
+    'GK-6 冷たい品が先にできる理由を書く一文がある',
+    typeof ja.cookNavi.finishSpreadCold === 'string' && ja.cookNavi.finishSpreadCold.includes('{first}'),
     true,
   )
 }

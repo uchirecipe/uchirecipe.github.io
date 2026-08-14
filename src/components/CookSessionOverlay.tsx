@@ -40,6 +40,7 @@ import {
   hasFillableWorkDuringWait,
   recipeStepLabel,
   showsWaitTimerButton,
+  waitTimerSeconds,
   type TimelineItem,
   type TimelineRecipe,
 } from '../logic/cookNavi'
@@ -955,7 +956,7 @@ export default function CookSessionOverlay({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => onStartTimer(item, item.waitMinutes * 60)}
+                    onClick={() => onStartTimer(item, waitTimerSeconds(item))}
                     className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface px-3 py-1.5 text-sm font-bold text-accent-ink shadow-sm"
                   >
                     <TimerIcon size={16} aria-hidden />
@@ -966,6 +967,18 @@ export default function CookSessionOverlay({
             {/* 段取りの一覧にだけ出ていた「この間に、次の手作業を進められます」を
                 調理中の画面にも出す（2026-08-11 便FL）。待ちを仕掛けたあと「次へ」で
                 別の品に移ってよいことは、手を動かしている最中こそ要る案内 */}
+            {/* 幅で書かれた待ちは、鳴る長さがブロックの分数と違うので先に書く（2026-08-14 便GK） */}
+            {showWaitTimerButton && waitTimerSeconds(item) < item.waitMinutes * 60 && (
+              <p
+                data-testid="cook-session-wait-timer-range"
+                className="mt-1 text-xs text-ink-muted"
+              >
+                {ja.cookNavi.waitTimerRangeNote.replace(
+                  '{n}',
+                  String(Math.round(waitTimerSeconds(item) / 60)),
+                )}
+              </p>
+            )}
             {showFillHint && (
               <p data-testid="cook-session-fill-hint" className="mt-1 text-xs text-ink-muted">
                 {ja.cookNavi.waitFillHint}

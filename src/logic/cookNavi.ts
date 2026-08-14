@@ -465,7 +465,10 @@ export function resolveStepMinutes(step: Step): number | undefined {
   // （2026-08-11 便FL。「せん切りにする（レンジ600Wで1分半…）」の1分半はやらないかもしれない作業）
   const tokens = findTimeTokens(stepMainText(step.text))
   if (tokens.length === 0) return undefined
-  const maxSeconds = Math.max(...tokens.map((t) => t.seconds))
+  // 幅のある書き方（「12〜15分」）は**長いほう**で見積る（2026-08-14 便GK）。
+  // 短く見積もると、その待ちの中へ差し込む手作業が増えて詰め込みすぎになる。
+  // タイマーを鳴らすのは短いほう（logic/time.ts の TimeToken.seconds）で、役割を分けてある
+  const maxSeconds = Math.max(...tokens.map((t) => t.maxSeconds))
   if (maxSeconds < 60) return undefined
   return Math.round(maxSeconds / 60)
 }
@@ -600,24 +603,43 @@ function mixedSplitPoint(text: string, waitAt: number): number | undefined {
   return best
 }
 
+/**
+ * その分数が、手順の**待ちの側**に書かれた時間か（2026-08-14 便GK）。
+ *
+ * 「…そぎ切りにする。塩こしょうと酒をふって**10分**ほどおく。」の 10 は、後半の待ちの長さであって
+ * 手順ぜんたいの所要時間ではない。分数欄にこの 10 が入っていても、前半の包丁仕事は別に時間が要る。
+ * 逆に「玉ねぎを**10分**炒めてから煮る」の 10 は手を動かす側の時間なので、ここで弾く。
+ */
+function minutesWrittenInWaitPart(head: string, tail: string, minutes: number): boolean {
+  const seconds = minutes * 60
+  const written = (part: string) =>
+    findTimeTokens(stepMainText(part)).some(
+      (token) => token.seconds === seconds || token.maxSeconds === seconds,
+    )
+  return written(tail) && !written(head)
+}
+
 export function splitMixedStep(step: Step): { active: Step; wait: Step } | undefined {
   const text = step.text ?? ''
   if (classifyStep(step) !== 'wait') return undefined
   /**
-   * 分数欄に数字が入っている手順は分けない。理由は2つ（どちらも正直に書いておく）:
+   * 分数欄に数字が入っている手順は、**その数字が待ちの側の本文に書かれているときだけ**分ける
+   * （2026-08-14 便GK・実操作テスト3回目）。
    *
-   * 1. アプリはこの欄を**その手順の時間**として扱っている（手作業なら所要時間、待ちなら待ち分数）。
-   *    位置ルールを当てないのと同じで（`classifyStep` の hasExplicitMinutes）、
-   *    利用者が自分で入れた数字の上に機械の見積りを積まない。
-   * 2. 実測。分数欄の埋まっている同梱109品まで分けると、手を動かす時間が増えたぶん
-   *    平均短縮率が 32.9%→31.8% と合格ライン（32.6%・docs/68）を割った。
-   *    **時間の数え方としては正しくなるが、合格ラインを割る修正は採らない**（docs/72 §4）。
+   * もとは「分数欄が埋まっていたら分けない」だった。当時の根拠は
+   * 「取り込み・貼り付け・手入力で登録したレシピは分数欄が必ず空（docs/68 2-3・A/B/Cとも0.0%）」。
+   * **この前提は 2026-08-08 便ED の打ち手#2 で失効していた**——取り込みは本文に書かれた時間を
+   * 分数欄へ写すようになった（`logic/importStepMinutes.ts`）。つまり便GDが直したはずの症状は、
+   * 実際の登録経路では1件も直っていなかった。利用者の原文:
+   *   「調理中モードで実際にタイマーを押してみました。押した瞬間から10:00がカウントダウンを
+   *     始める。でも私はまだ肉に触ってもいない。言われたとおりに押すと、下味は5分しか入らない」
    *
-   * この線引きで、直したい症状（docs/71 R3）は全部拾える＝取り込み・貼り付け・手入力で
-   * 登録したレシピは**分数欄が必ず空**（docs/68 2-3 で実測。A/B/Cとも0.0%）。
-   * 残る限界: 同梱109品のように分数欄の埋まった手順では、手を動かす部分が0分のまま。
+   * ただし分数欄の数字を無条件で待ちに振り替えると、利用者が「その手順の所要時間」のつもりで
+   * 入れた数字まで待ちに化ける（＝目を離させる誤り・S1）。そこで
+   * **本文の待ちの側にその分数が書かれている**ことを条件にする（`minutesWrittenInWaitPart`）。
+   * 「◯分おく」「◯分煮る」と本文が言っている手順だけが対象になり、迷う手順は分けない側に残る。
    */
-  if (step.minutes != null && step.minutes > 0) return undefined
+  const explicitMinutes = step.minutes != null && step.minutes > 0 ? step.minutes : undefined
   // 位置を測る本文（括弧の中の任意の記述と、待ちでない名詞を同じ長さの伏せ字にする）。
   // 長さが変わらないので、ここで求めた位置をそのまま元の本文に当てられる
   const masked = maskNonWaitNouns(stepMainText(text)).replace(PAREN_CONTENT_PATTERN, (m) =>
@@ -634,6 +656,20 @@ export function splitMixedStep(step: Step): { active: Step; wait: Step } | undef
     const head = text.slice(0, cut).trim()
     const tail = text.slice(cut).trim()
     if (!head || !tail) continue
+    if (explicitMinutes != null) {
+      if (!minutesWrittenInWaitPart(head, tail, explicitMinutes)) continue
+      /**
+       * 前半が**火の状態を変える**手順は分けない（2026-08-14 便GK・迷ったら分けない側）。
+       *
+       * 「鍋で鶏肉と野菜を炒め、水を加えて｜中火で15分煮る。」（前半で火にかける）も
+       * 「いったん火を止めてルーを溶かし、｜弱火でとろみが付くまで5分煮る。」（前半で火を下ろす）も、
+       * コンロの前でひと続きにやる工程で、分けても台所でやることは変わらない。
+       * 一方で分けると**口が空く時刻だけが動き**、コンロ1口の家では
+       * 「カレーの鍋をいったん下ろして別の品を火にかける」段取りや、理論下限を割る段取り
+       * （E5'-b・docs/68）が出る。直したい症状（下ごしらえ→待ち）はこの条件で全部残る。
+       */
+      if (stepHeatShift({ text: head }, DEFAULT_KITCHEN) !== 'keep') continue
+    }
     if (!ACTION_VERB_PATTERN.test(maskNonWaitNouns(stepMainText(head)))) continue
     // 注意書きは両方に付ける。片方に寄せると、火の通り具合のような**安全に関わる一文**が
     // 手作業側・待ち側のどちらかから消える（規約D-④の doneness メモは待ちの側で読みたい）
@@ -756,7 +792,10 @@ const CATEGORY_PATTERNS: { category: StepCategory; patterns: RegExp[] }[] = [
     // （2026-08-09 便ES・オーナー報告D-5「玉ねぎをしんなりするまで炒め、ご飯をほぐしながら
     //   炒め合わせる」の目安が3分。位置ルールで「合わせ」が「炒め」より後ろに来るため、
     //   炒め工程まるごとが「混ぜる（3分）」に化けていた）
-    patterns: [/混ぜ|まぜ|和え|あえ|こね|練る|練り|溶く|溶き|下味|もみ込|もみこ|まぶ|(?<!炒め|煮|焼き|揚げ|いため)合わせ|漬け|漬ける|にぎる|包む|巻く|形を整え|成形/],
+    // 「並べる・塗る・敷く」は組み立ての一手（2026-08-14 便GK・実操作テスト3回目
+    // 「『ホイル敷いて肉を並べてみそマヨを塗ってチーズをのせる』が2分。…見積りが逆になっている」）。
+    // どの種類にも当たらないと、手順の長さだけで一律に見積る枝へ落ちて 4分になっていた
+    patterns: [/混ぜ|まぜ|和え|あえ|こね|練る|練り|溶く|溶き|下味|もみ込|もみこ|まぶ|(?<!炒め|煮|焼き|揚げ|いため)合わせ|漬け|漬ける|にぎる|包む|巻く|形を整え|成形|並べ|敷く|敷い|敷き|塗る|塗り|塗っ/],
   },
   {
     category: 'heat',
@@ -764,25 +803,47 @@ const CATEGORY_PATTERNS: { category: StepCategory; patterns: RegExp[] }[] = [
   },
   {
     category: 'finish',
-    patterns: [/盛る|盛り|器に|添え|散らす|散らし|かけて仕上げ|仕上げ|盛りつけ|盛り付け|上にのせ|いただ/],
+    // 「ふる・のせる」は仕上げの一手（2026-08-14 便GK・実操作テスト3回目
+    // 「『焼けたら乾燥パセリをふる』に4分。パセリをふるのに4分は取りません。10秒です」）。
+    // 「ふる」は単独だと「ふるいにかける」「水気をふき取る」に当たるので、
+    // 「〜をふる／〜を振る」の形に限る
+    patterns: [
+      /盛る|盛り|器に|添え|散らす|散らし|かけて仕上げ|仕上げ|盛りつけ|盛り付け|のせ|乗せ|載せ|いただ/,
+      /を[ふ振][りっ]|を[ふ振]る(?!い)/,
+    ],
   },
 ]
+
+/**
+ * その断片に出てきた作業の種類を全部返す（`main` は本文の中で最後に出てきたもの）。
+ *
+ * 「最後に来る動作がその手順の主役」は**順番の判断**（並べ替え・段階）には正しいが、
+ * **所要時間の見積り**には合わない（2026-08-14 便GK・実操作テスト3回目）。
+ * 「ひき肉を炒めて器に盛る」は最後の語が「盛る」なので仕上げ＝2分と見積られていたが、
+ * 実際にかかるのは炒める時間。見積りは**いちばん重い動作**で取る（`groupBaseMinutes`）。
+ */
+function matchedCategories(text: string): { main?: StepCategory; all: StepCategory[] } {
+  let main: StepCategory | undefined
+  let bestAt = -1
+  const all: StepCategory[] = []
+  for (const { category, patterns } of CATEGORY_PATTERNS) {
+    const at = lastIndexOfPatterns(text, patterns)
+    if (at === -1) continue
+    all.push(category)
+    if (at > bestAt) {
+      bestAt = at
+      main = category
+    }
+  }
+  return { main, all }
+}
 
 /**
  * 手順の作業の種類を、本文の中で最後に出てきた見分け語から決める。
  * どの見分け語にも当たらなければ undefined（＝その断片には動作が書かれていない）。
  */
 function matchedCategory(text: string): StepCategory | undefined {
-  let best: StepCategory | undefined
-  let bestAt = -1
-  for (const { category, patterns } of CATEGORY_PATTERNS) {
-    const at = lastIndexOfPatterns(text, patterns)
-    if (at > bestAt) {
-      bestAt = at
-      best = category
-    }
-  }
-  return best
+  return matchedCategories(text).main
 }
 
 /** 手順の作業の種類を、本文の中で最後に出てきた見分け語から決める（当たらなければ 'other'） */
@@ -880,7 +941,10 @@ const CLAUSE_SPLIT_PATTERN = /[、，,]/
 
 /** 1手順の中の「動作のまとまり」 */
 export interface StepActionGroup {
+  /** そのまとまりの主役（本文の中で最後に出てきた種類）。並べ替え・段階の判断に使う */
   category: StepCategory
+  /** そのまとまりに出てきた種類の全部。見積りはこの中でいちばん重いもので取る（便GK） */
+  categories: StepCategory[]
   text: string
 }
 
@@ -902,7 +966,7 @@ export function stepActionGroups(text: string): StepActionGroup[] {
     for (const raw of sentence.split(CLAUSE_SPLIT_PATTERN)) {
       const fragment = raw.trim()
       if (!fragment) continue
-      const category = matchedCategory(fragment)
+      const { main: category, all } = matchedCategories(fragment)
       const last = groups[groups.length - 1]
       if (category === undefined) {
         // 動作の書かれていない断片（「ボウルに」「お好みで」）は、直前のまとまりの一部として扱う
@@ -911,22 +975,32 @@ export function stepActionGroups(text: string): StepActionGroup[] {
       }
       if (last && groups.length > sentenceStart && last.category === category) {
         last.text += fragment
+        for (const c of all) if (!last.categories.includes(c)) last.categories.push(c)
         continue
       }
-      groups.push({ category, text: fragment })
+      groups.push({ category, categories: all, text: fragment })
     }
     sentenceStart = groups.length
   }
   return groups
 }
 
-/** その動作のまとまり1つぶんの目安（分） */
+/**
+ * その動作のまとまり1つぶんの目安（分）。
+ * まとまりの中に複数の種類が出てくるときは**いちばん重いもの**で取る（2026-08-14 便GK）。
+ * 「炒めて器に盛る」を、最後の語だけを見て仕上げ2分と数えていた（＝見積りが逆になる元）。
+ */
 function groupBaseMinutes(group: StepActionGroup): number {
-  // 「油を熱する」「火にかける」だけの加熱は、手を動かす時間そのものは短い
-  if (group.category === 'heat' && !SUSTAINED_COOK_PATTERN.test(group.text)) {
-    return QUICK_HEAT_MINUTES
+  let best = 0
+  for (const category of group.categories.length > 0 ? group.categories : [group.category]) {
+    // 「油を熱する」「火にかける」だけの加熱は、手を動かす時間そのものは短い
+    const minutes =
+      category === 'heat' && !SUSTAINED_COOK_PATTERN.test(group.text)
+        ? QUICK_HEAT_MINUTES
+        : ACTIVE_MINUTES_BY_CATEGORY[category]
+    if (minutes > best) best = minutes
   }
-  return ACTIVE_MINUTES_BY_CATEGORY[group.category]
+  return best
 }
 
 export interface ActiveMinutesEstimate {
@@ -1556,6 +1630,19 @@ export interface TimelineRecipe {
    * （無限に入れ子になる）ため。値を入れるのは buildCookPlan だけ。
    */
   soloMinutes?: number
+  /**
+   * その品の**手順の分数を単純に足した合計**（分。2026-08-14 便GK・実操作テスト3回目）。
+   *
+   * 原文:「鶏の手順は 10＋3＋2＋15＋4＝34分。なのに『1品だけなら約31分』。
+   *   ごま和えは12分、みそ汁は13分でどちらもぴったり合うのに鶏だけ3分合わない」
+   *
+   * 食い違いの正体は**重なり**。利用者が本文に書いた「その間に」の手順（2026-08-13 便GB）と、
+   * ナビが差し込んだ「沸くのを待つ」の直後の手順（同 便GD）は、その品の待ちの**中**に置かれる。
+   * だから品の所要時間には二重に足されない。数字はどちらも正しいのに、画面が
+   * その重なりを何も言っていなかったため「合わない」としか読めなかった。
+   * この値と `soloMinutes` の差が重なりぶんで、差があるときだけ画面に一文を添える。
+   */
+  stepSumMinutes?: number
 }
 
 /** 1本にまとめたタイムラインの1手順 */
@@ -2554,11 +2641,24 @@ export function buildCookPlan(
   // 品ごとに「1品だけで作ったときの目安」を出し、その合計を「1品ずつ作ると約◯分」にする。
   // 内訳を画面へ渡せるように控えておく（2026-08-11 便FN）
   const soloMinutes = new Map<number, number>()
-  for (const r of valid) soloMinutes.set(r.id!, buildCookTimeline([r], kitchen).totalMinutes)
+  // 手順の分数をそのまま足した合計も控える（画面の数字と読み合わせるため。2026-08-14 便GK）
+  const stepSumMinutes = new Map<number, number>()
+  for (const r of valid) {
+    const solo = buildCookTimeline([r], kitchen)
+    soloMinutes.set(r.id!, solo.totalMinutes)
+    stepSumMinutes.set(
+      r.id!,
+      solo.items.reduce((sum, it) => sum + (it.kind === 'wait' ? it.waitMinutes : it.activeMinutes), 0),
+    )
+  }
   const sequentialMinutes = Array.from(soloMinutes.values()).reduce((sum, m) => sum + m, 0)
   const parallelMinutes = parallel.totalMinutes
   const withSolo = (timeline: CookTimeline): TimelineRecipe[] =>
-    timeline.recipes.map((r) => ({ ...r, soloMinutes: soloMinutes.get(r.id) }))
+    timeline.recipes.map((r) => ({
+      ...r,
+      soloMinutes: soloMinutes.get(r.id),
+      stepSumMinutes: stepSumMinutes.get(r.id),
+    }))
   const gainPercent =
     sequentialMinutes > 0 ? ((sequentialMinutes - parallelMinutes) / sequentialMinutes) * 100 : 0
   if (gainPercent >= MIN_GAIN_PERCENT) {
@@ -2680,6 +2780,29 @@ export function showsWaitTimerButton(
   item: Pick<TimelineItem, 'kind' | 'longRest' | 'waitMinutes'>,
 ): boolean {
   return item.kind === 'wait' && !item.longRest && item.waitMinutes > 0
+}
+
+/**
+ * 待ちのブロックの「タイマーを始める」で数える秒数（2026-08-14 便GK・実操作テスト3回目）。
+ *
+ * 原文: 「本文は『12〜15分焼く』。ボタンのラベルは『12〜15分 タイマー開始』なのに、表示と実際の
+ * 待ちは約15分。チーズがのっているものを最初から15分放置に設定するのは危ない。12分で一度見る
+ * ほうが正しい。焦げるかどうかを見るタイミングを潰しています」
+ *
+ * 幅で書かれた待ち（「12〜15分」）は**短いほうで鳴らす**。段取りの待ち分数（`waitMinutes`）は
+ * 長いほうのままにしてある＝待ちの中へ詰め込みすぎないため。役割を分けることで、
+ * 「見るタイミングを潰さない」と「詰め込みすぎない」の両方を安全側に倒せる。
+ * 幅で書かれていない待ちは、これまでどおりその待ち分数で鳴らす。
+ */
+export function waitTimerSeconds(
+  item: Pick<TimelineItem, 'text' | 'waitMinutes'> & { longRest?: boolean },
+): number {
+  const full = Math.max(0, item.waitMinutes) * 60
+  if (full <= 0) return 0
+  const ranged = findTimeTokens(stepMainText(item.text ?? '')).find(
+    (token) => token.maxSeconds === full && token.seconds < token.maxSeconds,
+  )
+  return ranged ? ranged.seconds : full
 }
 
 /**
