@@ -44,6 +44,7 @@ import {
   showsWaitTimerButton,
   type TimelineItem,
 } from '../logic/cookNavi'
+import { finishSpread, isFinishSpreadWide, recipeFinishTimes } from '../logic/cookFinish'
 import { NAVI_RECIPE_COLORS } from '../logic/naviColors'
 import {
   clearCookNaviSession,
@@ -617,6 +618,23 @@ export default function CookNaviPage() {
   }, [todayList, recipes, todayPlanEntries, recipeById, today])
 
   /**
+   * 今日すでに作った記録が付いている品数（2026-08-14 便GF・利用者テスト
+   * 「まとめて作った！のあと、並行調理ナビが『今日の献立にレシピがありません』になる」）。
+   *
+   * 記録を付けた品は今日の献立から外れる（db/todayList.ts の markRecipesCooked が
+   * 今日の献立から消し、週の予定は「今日作った品」を候補から外す）ので、3品を記録すると
+   * 候補が空になる。そこで従来の案内をそのまま出すと、献立を1品も作っていない人と
+   * 同じ文面になり、画面が事実と違うことを言う。**候補が空の理由を言い分ける**ために数える。
+   *
+   * 数えるのは「今日の日付の記録が付いているレシピ」＝記録を付けた時点で今日の献立から
+   * 消えてしまう品も残らず数えられる（今日の献立の側には手がかりが残らないため）。
+   */
+  const todayCookedCount = useMemo(() => {
+    if (!recipes) return 0
+    return recipes.filter((r) => r.cookedLogs.some((log) => log.date === today)).length
+  }, [recipes, today])
+
+  /**
    * お試しを開始する（2026-08-02 便CP-2）。
    * **段取りを組める献立が無いとき（今日の献立が2品未満）は回数を減らさない**:
    * 画面は本物のナビをそのまま開くが、この状態では「今日の献立にレシピがありません」の案内しか
@@ -976,6 +994,24 @@ export default function CookNaviPage() {
           .replace('{list}', missing.join('・'))
   }, [kitchen])
   const isSequential = timeline?.mode === 'sequential'
+
+  /**
+   * 品ごとのできあがりの目安（2026-08-14 便GF・利用者テスト「各品が何分後にできるかは
+   * 表示しません。（中略）この開きが出ること自体を画面に出してほしい」）。
+   * 数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts に集めてある。
+   */
+  const finishTimes = useMemo(
+    () =>
+      timeline
+        ? recipeFinishTimes(timeline.items, timeline.recipes, (id) => recipeById.get(id))
+        : [],
+    [timeline, recipeById],
+  )
+  const finishGap = useMemo(() => finishSpread(finishTimes), [finishTimes])
+  const finishGapWide = isFinishSpreadWide(finishGap.minutes, timeline?.totalMinutes ?? 0)
+  /** 開きの説明に出す品名（段取りが持っている名前を使う＝一覧の並びと同じ呼び方にする） */
+  const finishTitleOf = (recipeId: number) =>
+    timeline?.recipes.find((r) => r.id === recipeId)?.title ?? ''
 
   /**
    * 画面に出す段取り（2026-08-10 便FI）。組み直した段取りに、色で引き寄せた並べ替えを
@@ -1528,7 +1564,13 @@ export default function CookNaviPage() {
 
             {todayRecipes === undefined ? null : todayRecipes.length === 0 ? (
               <div className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] text-center shadow-sm">
-                <p className="text-sm text-ink-muted">{ja.cookNavi.emptyToday}</p>
+                {/* 「今日の献立が空」と「今日の献立を全部作り終えた」を言い分ける（2026-08-14 便GF）。
+                    まとめて記録した直後は後者なので、「レシピがありません」は事実と違う */}
+                <p data-testid="navi-empty-today" className="ja-phrase text-sm text-ink-muted">
+                  {todayCookedCount > 0
+                    ? ja.cookNavi.emptyTodayCooked.replace('{n}', String(todayCookedCount))
+                    : ja.cookNavi.emptyToday}
+                </p>
                 <Link
                   to="/meal-plan"
                   className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
@@ -1691,6 +1733,64 @@ export default function CookNaviPage() {
                         {renderJaUnits(ja.cookNavi.restoreKeepNote)}
                       </p>
                     </div>
+
+                    {/* 品ごとのできあがりの目安と、その開き（2026-08-14 便GF・利用者テスト
+                        「アプリは合計だけ出して、各品が何分後にできるかは表示しません。
+                        （中略）この開きが出ること自体を画面に出してほしい」）。
+                        数え方は docs/72 の N1（完成の揃い）と同じ＝logic/cookFinish.ts */}
+                    {finishTimes.length > 0 && (
+                      <div
+                        data-testid="navi-finish-times"
+                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm"
+                      >
+                        <p className="text-sm font-bold text-ink-muted">
+                          {ja.cookNavi.finishTitle}
+                        </p>
+                        <ul className="mt-[var(--space-sm)] space-y-1">
+                          {finishTimes.map((finish) => {
+                            const recipe = timeline.recipes.find((r) => r.id === finish.recipeId)
+                            if (!recipe) return null
+                            return (
+                              <li
+                                key={finish.recipeId}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <RecipePill title={recipe.title} colorIndex={recipe.colorIndex} />
+                                <span
+                                  data-testid="navi-finish-minutes"
+                                  className="shrink-0 font-bold"
+                                >
+                                  {ja.cookNavi.finishItem.replace('{n}', String(finish.minutes))}
+                                </span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                        {/* 開きは冷たくして出す品を除いて数える（先に仕上げて冷やすのは正しい動き）。
+                            大きいときは色を変えて、続けて何が起きるかを1行足す */}
+                        {finishGap.minutes > 0 && finishGap.first && finishGap.last && (
+                          <p
+                            data-testid="navi-finish-spread"
+                            className={`ja-phrase mt-[var(--space-sm)] text-sm ${
+                              finishGapWide ? 'font-bold text-accent-ink' : 'text-ink-muted'
+                            }`}
+                          >
+                            {renderJaUnits(
+                              ja.cookNavi.finishSpread
+                                .replace('{first}', finishTitleOf(finishGap.first.recipeId))
+                                .replace('{last}', finishTitleOf(finishGap.last.recipeId))
+                                .replace('{n}', String(finishGap.minutes)) +
+                                (finishGapWide
+                                  ? ja.cookNavi.finishSpreadWide.replace(
+                                      '{first}',
+                                      finishTitleOf(finishGap.first.recipeId),
+                                    )
+                                  : ''),
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     {/* 並行の余地が無かったときの説明（2026-08-08 便ED・docs/68 打ち手#4）。
                         縮んでいないのに縮んだように見せないため、理由と次の一手を書く */}

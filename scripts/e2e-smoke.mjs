@@ -978,6 +978,92 @@ try {
   await page.waitForTimeout(500)
   check('SMK-03 削除が一覧に反映', !(await page.textContent('body')).includes('E2Eスモーク試験用レシピ'))
 
+  // --- GF-B: 貼り付けの☆・◎を見て、合わせ調味料の組を自動で作る ---
+  //   利用者テスト「貼り付け後の材料名は『みそ』『すりごま』になるのに、色分け（合わせ調味料
+  //   グループ）は自動では付かない。一方、手順は『その間に☆を全部混ぜ合わせておく。』のまま。
+  //   結果、『☆ってどれ？』が画面のどこを見ても分からない」
+  //   「9行の材料を1つずつ探して4回タップする手間は『面倒だから登録したくない』層には重い」
+  {
+    currentCheck = 'GF-B'
+    await page.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(500)
+    await page.getByText('テキスト貼り付けで自動入力').click()
+    await page.waitForTimeout(300)
+    await page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+      'GF記号テスト\n\n材料（2人分）\n☆みそ　大さじ2\n☆マヨネーズ　大さじ1\n◎すりごま　大さじ2\n◎しょうゆ　小さじ1\nにんじん　1本\n\n作り方\n1. その間に☆を全部混ぜ合わせておく。\n2. ボウルで◎を混ぜ、にんじんを和える。',
+    )
+    await page.getByRole('button', { name: '自動で振り分ける' }).click()
+    await page.waitForTimeout(500)
+    // 組の色は材料行の丸ボタンに出る。aria-label に組番号が入るので、**どの行にあっても**
+    // 同じ判定になる形で数える（並びを決め打ちしない）
+    const gfGroupLabels = await page.evaluate(() =>
+      [...document.querySelectorAll('button[aria-label^="合わせ調味料グループ"]')].map(
+        (el) => el.getAttribute('aria-label') ?? '',
+      ),
+    )
+    const gfGroups = gfGroupLabels.filter((l) => /^合わせ調味料グループ[0-9]/.test(l))
+    check(
+      'GF-B ☆と◎が、それぞれ別の組として自動で色分けされる',
+      gfGroups.length === 4 && new Set(gfGroups.map((l) => l.slice(0, 12))).size === 2,
+      JSON.stringify(gfGroups),
+    )
+    // 印は材料メモの欄（入力欄）に残る。入力欄の中身は本文には出ないので値を読む
+    const gfMemos = await page.evaluate(() =>
+      [...document.querySelectorAll('input')]
+        .map((el) => el.value)
+        .filter((v) => v.trim() !== ''),
+    )
+    check(
+      'GF-B 印が材料名から外れ、材料のメモに残る（☆がどれかを画面で追える）',
+      gfMemos.includes('☆') && gfMemos.includes('◎'),
+      JSON.stringify(gfMemos),
+    )
+    const gfFormText = ((await page.textContent('body')) ?? '').replaceAll('​', '')
+    check(
+      'GF-B 自動で色分けしたことを画面で知らせる（黙って色を付けない）',
+      gfFormText.includes('2組にまとめ、色分けしました'),
+      (await page.locator('[data-testid="import-seasoning-guide"]').innerText()) ?? '',
+    )
+    // 保存したあとの中身を見る（画面の並びに依存しない形で確かめる）
+    await page.getByRole('button', { name: '保存する' }).click()
+    await page.waitForTimeout(900)
+    const gfSaved = await page.evaluate(async () => {
+      const db = await new Promise((res, rej) => {
+        const r = indexedDB.open('uchi-recipe')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const all = await new Promise((res, rej) => {
+        const q = db.transaction('recipes').objectStore('recipes').getAll()
+        q.onsuccess = () => res(q.result)
+        q.onerror = () => rej(q.error)
+      })
+      const recipe = all.find((r) => r.title === 'GF記号テスト')
+      return recipe
+        ? recipe.ingredients.map((i) => [i.name, i.seasoningGroup ?? null, i.memo ?? ''])
+        : null
+    })
+    check(
+      'GF-B 保存した材料名に記号が混ざらない（栄養・原価の名前照合を壊さない）',
+      gfSaved != null && gfSaved.every(([name]) => !/[☆◎]/.test(name)),
+      JSON.stringify(gfSaved),
+    )
+    check(
+      'GF-B 保存した材料に、印から作った組と印そのものが残っている',
+      gfSaved != null &&
+        gfSaved.filter(([, group]) => group != null).length === 4 &&
+        new Set(gfSaved.map(([, group]) => group).filter((g) => g != null)).size === 2 &&
+        gfSaved.filter(([, , memo]) => memo === '☆' || memo === '◎').length === 4,
+      JSON.stringify(gfSaved),
+    )
+    // 後続の検査に影響しないよう、確認用のレシピはここで片付ける（確認ダイアログは自動承諾）
+    await page.locator('a[href*="/edit"]').first().click()
+    await page.waitForTimeout(500)
+    await page.getByRole('button', { name: 'このレシピを削除' }).click()
+    await page.waitForTimeout(800)
+  }
+
+
   // --- KW-01: 検索キーワード欄(keywords・2026-07-12バッチ)。一覧や詳細には表示されず、
   // 検索語に入力したときだけヒットすることを確認する ---
   currentCheck = 'KW-01'
@@ -27665,6 +27751,57 @@ try {
           countNote,
         )
 
+        // --- GF-C: 各品が何分後にできあがるかと、その開きが画面に出る ---
+        //   利用者テスト「アプリは合計だけ出して、各品が何分後にできるかは表示しません。
+        //   開きは最大16分。みそ汁ができてから主菜が焼き上がるまで12分放置になります。
+        //   この開きが出ること自体を画面に出してほしい（今は自分で足し算しないと分からない）」
+        {
+          const prevCheck = currentCheck
+          currentCheck = 'GF-C'
+          const finishRows = await p.evaluate(() => {
+            const box = document.querySelector('[data-testid="navi-finish-times"]')
+            if (!box) return null
+            return [...box.querySelectorAll('li')].map((li) => ({
+              title: (li.querySelector('span')?.textContent ?? '').trim(),
+              minutes: Number(/約(\d+)分後/.exec((li.textContent ?? '').replaceAll('​', ''))?.[1] ?? -1),
+            }))
+          })
+          check(
+            'GF-C 組み合わせた品それぞれに「約◯分後」が出る',
+            finishRows != null &&
+              finishRows.length === 3 &&
+              finishRows.every((r) => r.minutes >= 0 && r.title !== ''),
+            JSON.stringify(finishRows),
+          )
+          // 段取りの合計は「いちばん遅い品ができあがる時刻」。画面の上で読み合わせられること
+          const naviBody = noZw(await p.textContent('body'))
+          const totalOnScreen = Number(/全体の目安\s*約(\d+)分/.exec(naviBody)?.[1] ?? -1)
+          check(
+            'GF-C いちばん遅い品の「約◯分後」が、全体の目安と一致する（自分で足し算しなくてよい）',
+            finishRows != null && Math.max(...finishRows.map((r) => r.minutes)) === totalOnScreen,
+            `品ごと=${JSON.stringify(finishRows)} / 全体=${totalOnScreen}`,
+          )
+          // 開きの一文は「どの2品が何分あくか」。書いてある数字が、上の一覧の引き算と合うこと
+          const spreadText = noZw(
+            (await p
+              .locator('[data-testid="navi-finish-spread"]')
+              .innerText()
+              .catch(() => '')) || '',
+          )
+          // 開きが0分のとき（温かい品の完成がそろっているとき）は一文を出さないので、
+          // 出ているときだけ中身を見る＝「出る/出ない」を決め打ちしない
+          if (spreadText !== '') {
+            const named = (finishRows ?? []).filter((r) => spreadText.includes(r.title))
+            const spreadMinutes = Number(/約(\d+)分あきます/.exec(spreadText)?.[1] ?? -1)
+            check(
+              'GF-C 開きの一文が、名前を挙げた2品の差と一致する（画面の中で計算が合う）',
+              named.length === 2 && spreadMinutes === Math.abs(named[0].minutes - named[1].minutes),
+              `${spreadText} / ${JSON.stringify(named)}`,
+            )
+          }
+          currentCheck = prevCheck
+        }
+
         // FN-03: タイマーを2本動かして献立の画面へ。帯の下に隠れる操作要素がゼロであること
         const startButtons = p
           .locator('[data-testid="navi-wait-block"]')
@@ -28220,10 +28357,24 @@ try {
           foFinishBody.includes('3件'),
         foFinishBody.slice(0, 240),
       )
+      // GF-A（2026-08-14 便GF・利用者テスト「ダイアログに『レシピと段取りはそのまま残ります』と
+      // 書かれているのに、記録をつけると段取りが消える。リロードしても戻らない。
+      // 説明文がその場で嘘になっているのが一番まずい」）。
+      // 記録で段取りを終える動きはオーナーの整理どおりなので、案内文を動きに合わせた。
+      // ここでは**確認文の中身**を見て、下の GF-A で**そのとおりに消えるか**を見る（両方そろって合格）
       check(
         'FO-09 確認文に、何が残るかも書いてある（規約F）',
-        foFinishBody.includes('レシピと段取りはそのまま残ります'),
+        foFinishBody.includes('残ります') &&
+          foFinishBody.includes('レシピ') &&
+          foFinishBody.includes('作った記録'),
         foFinishBody.slice(0, 240),
+      )
+      check(
+        'GF-A 確認文に「段取りも消える」と書いてある（残ると書いていない）',
+        foFinishBody.includes('段取り') &&
+          foFinishBody.includes('消えます') &&
+          !/段取り[^。]*残ります/.test(foFinishBody),
+        foFinishBody.slice(0, 300),
       )
       // FX-06: まとめて付けた記録も、あとから1件ずつ直せることを添える
       check(
@@ -28308,6 +28459,32 @@ try {
       check(
         'FO-09 記録できたことを画面で知らせる',
         ((await foPage.textContent('body')) ?? '').includes('作った記録をつけました'),
+      )
+      // --- GF-A: 記録をつけたあとの並行調理ナビが、確認文で言ったとおりになっている ---
+      //   利用者テスト「並行調理ナビが『今日の献立にレシピがありません』になり、段取りが消える。
+      //   リロードしても戻らない」。段取りが終わること自体は確認文どおりでよい。
+      //   直したのは①確認文が「段取りは残る」と嘘をついていたこと ②作り終えた状態を
+      //  「レシピがありません」と言っていたこと。**どこに出ていても同じ判定**になるよう本文で見る
+      currentCheck = 'GF-A'
+      await foPage.reload({ waitUntil: 'networkidle' })
+      await foPage.waitForTimeout(1600)
+      const gfaBody = ((await foPage.textContent('body')) ?? '').replaceAll('​', '')
+      check(
+        'GF-A 記録したあとは段取りが残らない（確認文どおり）',
+        (await foPage.locator('[data-testid="cook-session-start"]').count()) === 0 &&
+          (await foPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 0,
+        gfaBody.slice(0, 200),
+      )
+      check(
+        'GF-A 作り終えた状態を「今日の献立にレシピがありません」と言わない',
+        !gfaBody.includes('今日の献立にレシピがありません'),
+        gfaBody.slice(0, 300),
+      )
+      check(
+        'GF-A 作り終えたことと、次にできることを画面に書く',
+        gfaBody.includes('作った記録が付いています') &&
+          gfaBody.includes('「今日の献立に追加」'),
+        gfaBody.slice(0, 300),
       )
 
       // --- FO-10: 中断して献立から戻ったとき、続きの入口が画面の中に入っている ---

@@ -11,6 +11,7 @@
  * - C09: 分量を読み取れなかった材料の件数を数えられるようにする(取り込み結果の内訳表示用)
  */
 import {
+  assignSeasoningGroupsByMark,
   isImportGomiLine,
   isIngredientGroupHeading,
   normalizeImportedIngredient,
@@ -86,7 +87,10 @@ export function buildImportedIngredientRows(
   }
 
   const rows: ImportedIngredientRow[] = []
+  /** 印から組を決めるための控え(行と同じ並び。2026-08-14 便GF) */
+  const marks: (string | undefined)[] = []
   let headingGroup = 0
+  let hasExplicitGroup = false
   for (const ing of ingredients) {
     if (isImportGomiLine(ing.name)) continue
     const parsed = normalizeImportedIngredient(ing.name, ing.amount)
@@ -98,10 +102,35 @@ export function buildImportedIngredientRows(
     const letterGroup = seasoningGroupFromLetter(ing.group)
     const currentHeadingGroup =
       headingGroup >= 1 && headingGroup <= MAX_SEASONING_GROUP ? headingGroup : undefined
-    rows.push(toRow(ing, letterGroup ?? currentHeadingGroup, true))
+    const group = letterGroup ?? currentHeadingGroup
+    if (group != null) hasExplicitGroup = true
+    rows.push(toRow(ing, group, true))
+    marks.push(parsed.mark)
   }
-  if (rows.length > 0 || ingredients.length === 0) return rows
-  return ingredients.map((ing) => toRow(ing, seasoningGroupFromLetter(ing.group), true))
+  if (rows.length === 0 && ingredients.length > 0) {
+    return ingredients.map((ing) => toRow(ing, seasoningGroupFromLetter(ing.group), true))
+  }
+  // 取り込み元がグループを持たないとき(見出しも「A水」の記号も無い)だけ、材料名の先頭に
+  // 付いた印(☆・◎・A等)から組を決める(2026-08-14 便GF・貼り付け取り込みと同じ規則)。
+  // 取り込み元の組と混ぜると番号が衝突するので、**どちらか一方だけ**を使う
+  if (!hasExplicitGroup) {
+    const marked = assignSeasoningGroupsByMark(
+      rows.map((row, i) => ({
+        name: row.name,
+        amount: row.amount,
+        unit: row.unit,
+        ...(row.memo ? { memo: row.memo } : {}),
+        ...(marks[i] ? { mark: marks[i] } : {}),
+      })),
+    )
+    return rows.map((row, i) => ({
+      ...row,
+      name: marked[i].name,
+      memo: marked[i].memo ?? '',
+      group: marked[i].group,
+    }))
+  }
+  return rows
 }
 
 /** 分量も単位も読み取れなかった材料(名前だけの行)の件数。取り込み結果の内訳表示に使う(C09) */

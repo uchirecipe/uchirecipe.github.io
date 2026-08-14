@@ -1182,16 +1182,18 @@ eq(
 キャベツとにんじんも加えて炒めしんなりしたら◎の合わせ調味料を加えて混ぜ合わせたら出来上がり。`
   const r = parseRecipeText(r1)
   eq('R1: タイトル', r.title, '鶏肉とキャベツのピリ辛炒め')
-  eq('R1: 材料11件・名前+分量完全ペア・◎剥落', r.ingredients, [
+  // 2026-08-14 便GF: ◎が付いた4件は**同じ合わせ調味料の組**にする(手順2の「◎の合わせ調味料を
+  // 加えて」と対応が付くようにするため)。印は名前から外したまま、材料メモの先頭に残す
+  eq('R1: 材料11件・名前+分量完全ペア・◎は組になる', r.ingredients, [
     { name: '鶏もも肉', amount: '200', unit: 'g' },
     { name: '塩こしょう', amount: '少々', unit: '' },
     { name: '片栗粉', amount: '適量', unit: '' },
     { name: 'キャベツ（ざく切り）', amount: '2', unit: '枚' },
     { name: 'にんじん（薄切り）', amount: '1/3', unit: '本' },
-    { name: 'しょうゆ', amount: '1', unit: '大さじ' },
-    { name: '酢', amount: '1', unit: '大さじ' },
-    { name: '砂糖', amount: '1', unit: '小さじ' },
-    { name: '豆板醤', amount: '適量', unit: '' },
+    { name: 'しょうゆ', amount: '1', unit: '大さじ', memo: '◎', group: 1 },
+    { name: '酢', amount: '1', unit: '大さじ', memo: '◎', group: 1 },
+    { name: '砂糖', amount: '1', unit: '小さじ', memo: '◎', group: 1 },
+    { name: '豆板醤', amount: '適量', unit: '', memo: '◎', group: 1 },
     { name: 'にんにく・しょうがみじんぎり', amount: '各一かけ分', unit: '' },
     { name: 'ごま油', amount: '適量', unit: '' },
   ])
@@ -1498,15 +1500,18 @@ B.牛乳\t大さじ1
 ドーナツは大き過ぎると火の通りが悪くなるので、小さめに丸めるとよい。`
   const r = parseRecipeText(r6)
   eq('R6: cookMinutes(メタくっつき行から救済)', r.cookMinutes, 50)
-  eq('R6: 材料10件・タブ区切り・A./B.名前保持', r.ingredients, [
+  // 2026-08-14 便GF: 「A.」「B.」は組の印なので名前から外して2組に分ける
+  // (手順2の「ふるいにかけたAと」と対応が付く。名前に「A.」が残っていると
+  //  栄養・原価の名前照合も外れる)。英字は**同じ英字が2件以上**あるときだけ印として扱う
+  eq('R6: 材料10件・タブ区切り・A./B.は2組になる', r.ingredients, [
     { name: 'おから', amount: '50', unit: 'g' },
     { name: 'コーン(缶詰)', amount: '50', unit: 'g' },
-    { name: 'A.米粉', amount: '115', unit: 'g' },
-    { name: 'A.ベーキングパウダー', amount: '1', unit: '小さじ' },
-    { name: 'A.塩', amount: '1/4', unit: '小さじ' },
-    { name: 'B.砂糖', amount: '40', unit: 'g' },
-    { name: 'B.卵', amount: '1', unit: '個' },
-    { name: 'B.牛乳', amount: '1', unit: '大さじ' },
+    { name: '米粉', amount: '115', unit: 'g', memo: 'A', group: 1 },
+    { name: 'ベーキングパウダー', amount: '1', unit: '小さじ', memo: 'A', group: 1 },
+    { name: '塩', amount: '1/4', unit: '小さじ', memo: 'A', group: 1 },
+    { name: '砂糖', amount: '40', unit: 'g', memo: 'B', group: 2 },
+    { name: '卵', amount: '1', unit: '個', memo: 'B', group: 2 },
+    { name: '牛乳', amount: '1', unit: '大さじ', memo: 'B', group: 2 },
     { name: '無塩バター', amount: '20', unit: 'g' },
     { name: '揚げ油', amount: '適宜', unit: '' },
   ])
@@ -17151,6 +17156,322 @@ eq(
     '1.25rem',
     '1.5rem',
   ])
+}
+
+
+// ---------- GF-A 「まとめて作った！」の案内文と、実際に起きることを一致させる ----------
+// 2026-08-14 便GF・利用者テスト（原文）:
+//   「ダイアログに『記録した3件は今日の献立から外れます（レシピと段取りはそのまま残ります）』と
+//     書かれている／『記録をつける』を押す／並行調理ナビが『今日の献立にレシピがありません』に
+//     なり、段取りが消える。リロードしても戻らない」
+//   「実害: 作り終えて記録をつけた直後に『あれ、パセリの前に何やったっけ』と振り返れない。
+//     説明文がその場で嘘になっているのが一番まずい」
+// 記録したら段取りを終える動き自体はオーナーの整理どおり（2026-08-13）なので、直すのは案内文。
+// **動き（消える）と案内文（消えると書いてある）を1つのテストで突き合わせる**＝
+// 片方だけ直しても緑にならない形にする。
+{
+  const store = new Map()
+  const shim = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: (k) => store.delete(k),
+  }
+  const originalLocal = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const originalSession = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  Object.defineProperty(globalThis, 'localStorage', { value: shim, configurable: true, writable: true })
+  Object.defineProperty(globalThis, 'sessionStorage', { value: shim, configurable: true, writable: true })
+  const { saveCookNaviSession, loadCookNaviSession, clearCookNaviSession } = await import(
+    '../src/logic/cookNaviSession.ts'
+  )
+  saveCookNaviSession({
+    selectedIds: [1, 2, 3],
+    showTimeline: true,
+    trialActive: false,
+    current: { recipeId: 1, stepIndex: 0 },
+  })
+  eq('GF-A 前提: 段取りは端末に残っている', loadCookNaviSession()?.showTimeline, true)
+  // 「まとめて作った！」が呼ぶ後始末（CookNaviPage の markAllCooked）
+  clearCookNaviSession()
+  eq('GF-A 記録をつけたあと、段取りは残らない', loadCookNaviSession(), undefined)
+  const confirmText = ja.cookNavi.markAllCookedConfirm
+  eq(
+    'GF-A 案内文に、段取りが消えることが書いてある',
+    confirmText.includes('段取り') && confirmText.includes('消えます'),
+    true,
+  )
+  neq(
+    'GF-A 案内文が「段取りは残る」と言っていない（利用者が読んだ嘘の一文）',
+    /段取り[^。]*残ります/.test(confirmText),
+    true,
+  )
+  eq(
+    'GF-A 案内文に、何が残るかも書いてある（規約F）',
+    confirmText.includes('レシピ・作った記録') && confirmText.includes('残ります'),
+    true,
+  )
+  // 記録した直後の並行調理ナビは「今日の献立が空」ではなく「今日の献立を作り終えた」状態。
+  // 「レシピがありません」と出ると、そこでも画面が事実と違うことを言うことになる
+  eq(
+    'GF-A 作り終えたときの案内は、献立が空のときの文言をそのまま使わない',
+    ja.cookNavi.emptyTodayCooked.includes('今日の献立にレシピがありません'),
+    false,
+  )
+  eq(
+    'GF-A 作り終えたときの案内は、件数と次にできることを書く',
+    ja.cookNavi.emptyTodayCooked.includes('{n}品') &&
+      ja.cookNavi.emptyTodayCooked.includes('「今日の献立に追加」'),
+    true,
+  )
+  if (originalLocal) Object.defineProperty(globalThis, 'localStorage', originalLocal)
+  else delete globalThis.localStorage
+  if (originalSession) Object.defineProperty(globalThis, 'sessionStorage', originalSession)
+  else delete globalThis.sessionStorage
+}
+
+// ---------- GF-B 貼り付けの☆・◎から合わせ調味料の組を自動で作る ----------
+// 2026-08-14 便GF・利用者テスト（原文）:
+//   「貼り付け後の材料名: 『☆みそ』→『みそ』、『◎すりごま』→『すりごま』。色分け
+//    （合わせ調味料グループ）も自動では付かない。一方、手順は『その間に☆を全部混ぜ合わせて
+//     おく。』『ボウルで◎を混ぜ、』のまま。結果、『☆ってどれ？』が画面のどこを見ても分からない」
+//   「再現: 『☆みそ / ☆マヨネーズ / ◎すりごま / ◎しょうゆ / Aみりん』を貼ると、名前は
+//    『みそ / マヨネーズ / すりごま / しょうゆ / Aみりん』。**Aだけ残る**。記号ごとに扱いが
+//     違うのも不統一」
+// 決めた規則: **印の種類ではなく「同じ印が2件以上あるか」**で組にする（☆も◎もA〜Dも同じ扱い）。
+// 全部の材料に付いている印は行頭の飾りなので組にしない。印は名前から外し、材料メモに残す。
+{
+  const pasted = `ごま和え
+材料
+☆みそ 大さじ2
+☆マヨネーズ 大さじ1
+◎すりごま 大さじ2
+◎しょうゆ 小さじ1
+Aみりん 小さじ1
+にんじん 1/3本
+作り方
+その間に☆を全部混ぜ合わせておく。
+ボウルで◎を混ぜ、にんじんを和える。`
+  const parsed = parseRecipeText(pasted)
+  eq(
+    'GF-B ☆の2件と◎の2件が、それぞれ別の組になる',
+    parsed.ingredients.map((r) => [r.name, r.group ?? null]),
+    [
+      ['みそ', 1],
+      ['マヨネーズ', 1],
+      ['すりごま', 2],
+      ['しょうゆ', 2],
+      ['Aみりん', null],
+      ['にんじん', null],
+    ],
+  )
+  eq(
+    'GF-B 印は材料メモに残る（手順文の☆・◎がどれを指すか画面で追える）',
+    parsed.ingredients.map((r) => r.memo ?? ''),
+    ['☆', '☆', '◎', '◎', '', ''],
+  )
+  // 1件しかない印は「まとめて計量する組」にならない。英字は語の一部のことがある
+  //（「B級〜」）ので、組にならないときは名前もそのままにする＝材料名を壊さない
+  eq('GF-B 1件だけの印は組にしない', parsed.ingredients[4], {
+    name: 'Aみりん',
+    amount: '1',
+    unit: '小さじ',
+  })
+}
+{
+  // 同じ英字が2件以上あれば、記号と同じように組になる（R6のA./B.が実例）
+  const parsed = parseRecipeText(`材料
+Aしょうゆ 大さじ1
+Aみりん 大さじ1
+豚こま 200g`)
+  eq(
+    'GF-B 英字も2件以上そろえば組になり、名前から外れる',
+    parsed.ingredients.map((r) => [r.name, r.group ?? null, r.memo ?? '']),
+    [
+      ['しょうゆ', 1, 'A'],
+      ['みりん', 1, 'A'],
+      ['豚こま', null, ''],
+    ],
+  )
+}
+{
+  // 全部の行に同じ記号が付いているのは「組」ではなく行頭の飾り。1組にまとめると
+  // 肉と野菜まで「先にまとめて計量できます」と言うことになる
+  const parsed = parseRecipeText(`材料
+☆豚こま 200g
+☆にんじん 1本
+☆しょうゆ 大さじ1`)
+  eq(
+    'GF-B 全部に付いた記号は飾りとみなして組にしない',
+    parsed.ingredients.map((r) => [r.name, r.group ?? null, r.memo ?? '']),
+    [
+      ['豚こま', null, ''],
+      ['にんじん', null, ''],
+      ['しょうゆ', null, ''],
+    ],
+  )
+}
+{
+  // 色は4組までしか見分けが付かないので、5つ目の印は組にしない（色が一周すると別の組と混ざる）
+  const parsed = parseRecipeText(`材料
+☆しょうゆ 大さじ1
+☆酒 大さじ1
+◎みそ 大さじ1
+◎砂糖 大さじ1
+●塩 少々
+●こしょう 少々
+▲酢 大さじ1
+▲油 大さじ1
+■水 100ml
+■だし 少々`)
+  eq(
+    'GF-B 組は色の数（4組）まで',
+    parsed.ingredients.map((r) => r.group ?? null),
+    [1, 1, 2, 2, 3, 3, 4, 4, null, null],
+  )
+  eq(
+    'GF-B 5組目の印も、書いてあった事実は材料メモに残す',
+    parsed.ingredients.slice(8).map((r) => r.memo ?? ''),
+    ['■', '■'],
+  )
+}
+{
+  // 組が付いたら、手順文の記号との対応が並行調理ナビの画面に出る（この対応が付かないと
+  // 「☆ってどれ？」が画面のどこを見ても分からないまま）。取り込みは印を材料メモへ移すので、
+  // ナビは**名前とメモの両方**を見る
+  const ings = [
+    { name: 'みそ', amount: '2', unit: '大さじ', memo: '☆', seasoningGroup: 1 },
+    { name: 'マヨネーズ', amount: '1', unit: '大さじ', memo: '☆', seasoningGroup: 1 },
+    { name: 'すりごま', amount: '2', unit: '大さじ', memo: '◎', seasoningGroup: 2 },
+    { name: 'しょうゆ', amount: '1', unit: '小さじ', memo: '◎', seasoningGroup: 2 },
+  ]
+  eq(
+    'GF-B 手順「☆を全部混ぜ合わせておく」に☆の組が出る',
+    stepIngredientAmounts('その間に☆を全部混ぜ合わせておく。', ings, 2, 2).map((x) => x.name),
+    ['みそ', 'マヨネーズ'],
+  )
+  eq(
+    'GF-B 手順「◎を混ぜ」には◎の組だけが出る（☆と取り違えない）',
+    stepIngredientAmounts('ボウルで◎を混ぜ、にんじんを和える。', ings, 2, 2).map((x) => x.name),
+    ['すりごま', 'しょうゆ'],
+  )
+  const letters = [
+    { name: 'しょうゆ', amount: '1', unit: '大さじ', memo: 'A', seasoningGroup: 1 },
+    { name: 'みりん', amount: '1', unit: '大さじ', memo: 'A', seasoningGroup: 1 },
+    { name: '砂糖', amount: '1', unit: '大さじ', memo: 'B', seasoningGroup: 2 },
+    { name: '酒', amount: '1', unit: '大さじ', memo: 'B', seasoningGroup: 2 },
+  ]
+  eq(
+    'GF-B 手順「Aを加えて」にAの組が出る',
+    stepIngredientAmounts('Aを加えて煮からめる。', letters, 2, 2).map((x) => x.name),
+    ['しょうゆ', 'みりん'],
+  )
+  eq(
+    'GF-B 「A5ランクの牛肉」のような英数字はAの印と読まない',
+    stepIngredientAmounts('A5ランクの牛肉を焼く。', letters, 2, 2).map((x) => x.name),
+    [],
+  )
+}
+
+// ---------- GF-C 品ごとのできあがりの目安と、その開きを画面に出す ----------
+// 2026-08-14 便GF・利用者テスト（原文）:
+//   「アプリは合計だけ出して、各品が何分後にできるかは表示しません。開きは最大16分。
+//     みそ汁ができてから主菜が焼き上がるまで12分放置になります。平日の夕食は3品同時に
+//     出したいので、この開きが出ること自体を画面に出してほしい（今は自分で足し算しないと
+//     分からない）」
+// 数え方は docs/72 の N1（完成の揃い）と同じにそろえる＝**その品の最後の工程が終わる時刻**、
+// 開きは**冷たくして出す品を除いた**最大−最小、線は全体の目安の30%。
+{
+  const { recipeFinishTimes, finishSpread } = await import('../src/logic/cookFinish.ts')
+  const trio = [
+    {
+      id: 1,
+      title: 'GC鶏のグリル焼き',
+      steps: [{ text: '鶏むね肉をそぎ切りにする' }, { text: '魚焼きグリルで15分焼く' }, { text: 'パセリをふる' }],
+    },
+    {
+      id: 2,
+      title: 'GCみそ汁',
+      dishType: 'soup',
+      steps: [{ text: '鍋に水とだしの素を入れて中火にかける' }, { text: '豆腐を切る' }, { text: 'みそを溶いて火を止める' }],
+    },
+    {
+      id: 3,
+      title: 'GCポテトサラダ',
+      steps: [{ text: 'じゃがいもを切る' }, { text: '電子レンジで6分加熱する' }, { text: '冷蔵庫で冷やしてから和える' }],
+    },
+  ]
+  const plan = buildCookPlan(trio)
+  const finishes = recipeFinishTimes(plan.items, plan.recipes, (id) => trio.find((r) => r.id === id))
+  // 監査（scripts/audit-cook-navi.mjs の finishTimes）と同じ数え方であること。
+  // 実装を写すのではなく、段取りの endMin から**独立に**数え直して突き合わせる
+  const expected = plan.recipes.map((r) => ({
+    recipeId: r.id,
+    minutes: plan.items
+      .filter((it) => it.recipeId === r.id)
+      .reduce((max, it) => Math.max(max, it.endMin), 0),
+  }))
+  eq(
+    'GF-C 品ごとの完成時刻は「その品の最後の工程が終わる時刻」（docs/72 N1と同じ数え方）',
+    finishes.map((f) => ({ recipeId: f.recipeId, minutes: f.minutes })),
+    expected,
+  )
+  eq('GF-C 3品ぶんの目安が出る（1品も欠けない）', finishes.length, 3)
+  eq(
+    'GF-C 冷やしてから出す品は「冷たい品」と読む（開きの計算から外すため）',
+    finishes.map((f) => f.cold),
+    [false, false, true],
+  )
+  const gap = finishSpread(finishes)
+  const warm = finishes.filter((f) => !f.cold).map((f) => f.minutes)
+  eq(
+    'GF-C 開きは冷たい品を除いた最大−最小（冷たい品を先に仕上げるのは正しい動きなので数えない）',
+    gap.minutes,
+    Math.max(...warm) - Math.min(...warm),
+  )
+  eq(
+    'GF-C どの2品の開きなのかも返す（画面では品名で書く）',
+    [gap.first.recipeId !== gap.last.recipeId, gap.first.minutes <= gap.last.minutes],
+    [true, true],
+  )
+}
+{
+  const { recipeFinishTimes, finishSpread, isFinishSpreadWide } = await import(
+    '../src/logic/cookFinish.ts'
+  )
+  // 温かい品が1つしかないときは開きを言わない（比べる相手がいない）
+  const two = [
+    { id: 1, title: 'GC煮物', steps: [{ text: '材料を切る' }, { text: '鍋で20分煮る' }, { text: '盛る' }] },
+    { id: 2, title: 'GC冷やしサラダ', steps: [{ text: '野菜を切る' }, { text: '冷蔵庫で冷やしてから和える' }] },
+  ]
+  const plan = buildCookPlan(two)
+  const finishes = recipeFinishTimes(plan.items, plan.recipes, (id) => two.find((r) => r.id === id))
+  eq('GF-C 温かい品が1品だけなら開きは0（言わない）', finishSpread(finishes).minutes, 0)
+  // 線は docs/72 N1 と同じ＝全体の30%を「超えた」ら大きいとみなす（ちょうど30%は大きくない）
+  eq('GF-C 開きの線は全体の30%（ちょうどは大きくない）', isFinishSpreadWide(30, 100), false)
+  eq('GF-C 30%を超えたら大きい', isFinishSpreadWide(31, 100), true)
+  eq('GF-C 全体が0分なら大きいと言わない', isFinishSpreadWide(5, 0), false)
+  // 利用者の実測（開き16分／12分放置）に相当する形は「大きい」と読む
+  eq('GF-C 利用者の実測（44分中16分の開き）は大きいと読む', isFinishSpreadWide(16, 44), true)
+}
+{
+  // 画面に出す文言（規約H）。数字と品名がそろって初めて読めるので、差し込み口を固定する
+  eq(
+    'GF-C 見出しに「調理を始めてから」が入っている（何分後かの起点が読める）',
+    ja.cookNavi.finishTitle.includes('調理を始めてから'),
+    true,
+  )
+  eq('GF-C 品ごとの行は分数を差し込む', ja.cookNavi.finishItem.includes('{n}'), true)
+  eq(
+    'GF-C 開きの一文は、2品の名前と分数を差し込む',
+    ja.cookNavi.finishSpread.includes('{first}') &&
+      ja.cookNavi.finishSpread.includes('{last}') &&
+      ja.cookNavi.finishSpread.includes('{n}'),
+    true,
+  )
+  eq(
+    'GF-C 開きが大きいときの一文も、先にできる品の名前を差し込む',
+    ja.cookNavi.finishSpreadWide.includes('{first}'),
+    true,
+  )
 }
 
 // ---------- 結果 ----------
