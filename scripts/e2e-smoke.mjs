@@ -27827,6 +27827,16 @@ try {
               named.length === 2 && spreadMinutes === Math.abs(named[0].minutes - named[1].minutes),
               `${spreadText} / ${JSON.stringify(named)}`,
             )
+            // GK-03: 開きは**全部の品**で数える（2026-08-14 便GK・実操作テスト3回目
+            //   「4分は言うのに17分は何も言わない。判定基準がわからない」）。
+            //   一覧のいちばん早い品といちばん遅い品が、そのまま一文に出ていること
+            const rows = finishRows ?? []
+            const widest = Math.max(...rows.map((r) => r.minutes)) - Math.min(...rows.map((r) => r.minutes))
+            check(
+              'GK-03 開きの一文は、一覧のいちばん早い品といちばん遅い品の差になっている（冷たい品を黙って外さない）',
+              rows.length > 0 && spreadMinutes === widest,
+              `${spreadText} / ${JSON.stringify(rows)}`,
+            )
           }
           currentCheck = prevCheck
         }
@@ -30153,6 +30163,75 @@ try {
         !!fuGrill && !/12〜(?!15分)/.test(fuGrill.text.replace('12〜15分', '')),
         JSON.stringify(fuGrill),
       )
+
+      // --- GK-01/GK-02: 幅で書かれた待ちのタイマーと、混在手順の分割（2026-08-14 便GK） ---
+      //   GK-01 原文「本文は『12〜15分焼く』。…表示と実際の待ちは約15分。チーズがのっているものを
+      //         最初から15分放置に設定するのは危ない。12分で一度見るほうが正しい」
+      //   GK-02 原文「手順1の本文は『…そぎ切りにする。塩こしょうと酒をふって10分ほどおく』です。
+      //         前半は完全に手作業で…それを手順まるごと『待ち』にして」
+      {
+        const prevCheck = currentCheck
+        currentCheck = 'GK-01'
+        const fuGrillWait = await fuPage.evaluate((recipeId) => {
+          for (const card of document.querySelectorAll(`[id^="navi-step-${recipeId}-"]`)) {
+            const text = card.querySelector('[data-testid="navi-step-text"]')?.textContent ?? ''
+            if (!text.includes('魚焼きグリル')) continue
+            const box = card.querySelector('[data-testid="navi-wait-block"]')
+            return {
+              title: (box?.textContent ?? '').replaceAll('​', ''),
+              note: (
+                card.querySelector('[data-testid="navi-wait-timer-range"]')?.textContent ?? ''
+              ).replaceAll('​', ''),
+            }
+          }
+          return null
+        }, fuIds[0])
+        check(
+          'GK-01 幅で書かれた待ちは、段取りの見積りは長いほう（約15分の待ち時間）のまま',
+          !!fuGrillWait && fuGrillWait.title.includes('約15分の待ち時間'),
+          JSON.stringify(fuGrillWait),
+        )
+        check(
+          'GK-01 その待ちに「タイマーは短いほうの12分で始めます。」が添えてある',
+          !!fuGrillWait && fuGrillWait.note.includes('タイマーは短いほうの12分で始めます'),
+          JSON.stringify(fuGrillWait),
+        )
+        currentCheck = 'GK-02'
+        // FUみそ汁の「豆腐とわかめを加えて2分煮る。」＝手を動かす部分と待ちが同居する手順。
+        // 分数欄が埋まっていても2つに分かれ、タイマーは待ちの側にだけ出ること
+        const fuSoupSplit = await fuPage.evaluate((recipeId) => {
+          const rows = []
+          for (const card of document.querySelectorAll(`[id^="navi-step-${recipeId}-"]`)) {
+            const text = (card.querySelector('[data-testid="navi-step-text"]')?.textContent ?? '')
+              .replaceAll('​', '')
+              .trim()
+            if (!text.includes('豆腐とわかめ') && !text.includes('2分煮る')) continue
+            rows.push({
+              text,
+              label: (
+                card.querySelector('[data-testid="navi-recipe-step-number"]')?.textContent ?? ''
+              ).trim(),
+              wait: !!card.querySelector('[data-testid="navi-wait-block"]'),
+              timer: [...card.querySelectorAll('button')].some(
+                (b) => (b.textContent ?? '').includes('タイマーを始める'),
+              ),
+            })
+          }
+          return rows
+        }, fuIds[1])
+        check(
+          'GK-02 分数欄が埋まっていても、手を動かす部分と待ちが2つの工程に分かれる',
+          fuSoupSplit.length === 2 && fuSoupSplit.filter((r) => r.wait).length === 1,
+          JSON.stringify(fuSoupSplit),
+        )
+        check(
+          'GK-02 タイマーは待ちの工程だけに出る（手を動かす前には押せない）',
+          fuSoupSplit.length === 2 &&
+            fuSoupSplit.every((r) => r.timer === r.wait),
+          JSON.stringify(fuSoupSplit),
+        )
+        currentCheck = prevCheck
+      }
 
       // --- FU-02(調理中モード): 大きく出す1手順にも組ごと出る ---
       currentCheck = 'FU-02'
