@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
-import { buildBulkDeleteConfirmText } from '../logic/recipeDelete'
+import { buildBulkDeleteConfirm } from '../logic/recipeDelete'
 import SelectedRecipesExport from '../components/SelectedRecipesExport'
 import { useSettings, updateSettings } from '../db/settings'
 import { addRecipesToToday } from '../db/mealPlan'
@@ -73,6 +73,7 @@ import Collapse from '../components/Collapse'
 import RecipeCard from '../components/RecipeCard'
 import ChipInput from '../components/ChipInput'
 import Toast from '../components/Toast'
+import { useConfirm } from '../components/ConfirmProvider'
 import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
@@ -355,6 +356,7 @@ function readSavedListState(): SavedListState | null {
 
 /** レシピ一覧: 検索・フィルタ＋写真カードのグリッド＋右下の「＋」ボタン */
 export default function RecipesPage() {
+  const confirm = useConfirm()
   // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
   // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
   const [searchParams, setSearchParams] = useSearchParams()
@@ -838,7 +840,7 @@ export default function RecipesPage() {
     try {
       const impact = await countRecipesDeleteImpact(selectedIds)
       if (impact.recipes === 0) return
-      if (!window.confirm(buildBulkDeleteConfirmText(impact))) return
+      if (!(await confirm(buildBulkDeleteConfirm(impact)))) return
       const removed = await deleteRecipes(selectedIds)
       setSelectedIds([])
       setMessage(ja.recipes.bulkDeletedToast.replace('{r}', String(removed)))

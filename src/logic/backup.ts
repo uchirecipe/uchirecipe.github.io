@@ -18,6 +18,7 @@ import {
 import { buildSearchWords } from './kana'
 import { backupFileName } from './fileSave'
 import { formatFileSize } from './fileSize'
+import type { ConfirmContent } from './confirmContent'
 import { clearCookNaviSession } from './cookNaviSession'
 import { ja } from '../i18n/ja'
 
@@ -358,7 +359,7 @@ export function countReplaceImpact(
 }
 
 /**
- * 確認文の{navi}に、並行調理ナビの段取りの1行を差し込む（純ロジック・DB非依存。2026-08-15 便GP）。
+ * 「消えるもの」の末尾に、並行調理ナビの段取りを足す（純ロジック・DB非依存。2026-08-15 便GP）。
  * 覚え書きが残っていない（selectedCount=0）ときは何も足さない＝消えないものを「消えます」と
  * 書かない（docs/69「捨てたときは失うものがある場合だけ知らせる」）
  */
@@ -366,44 +367,81 @@ function fillCookNaviNote(text: string, cookNaviSelectedCount: number): string {
   return text.replace(
     '{navi}',
     cookNaviSelectedCount > 0
-      ? `\n${ja.settings.replaceCookNaviNote.replace('{n}', String(cookNaviSelectedCount))}`
+      ? ja.settings.replaceCookNaviNote.replace('{n}', String(cookNaviSelectedCount))
       : '',
   )
 }
 
 /**
- * 「データを上書き」の確認文（純ロジック・DB非依存。2026-07-17設定ゼロベース裁定#6a →
- * 2026-08-15 便GPで消えるものを数え直し、段取りの1行を足せるようにした）。
+ * 「データを上書き」の確認の中身（純ロジック・DB非依存。2026-07-17設定ゼロベース裁定#6a →
+ * 2026-08-15 便GPで消えるものを数え直し、便GWで画面の中の窓の形にした）。
  * ファイル選択を開く前(pickImportFile)・ファイル選択後の最終確認(onImportFile)の両方で
- * 同じ文言を使い整合させる。cookNaviSelectedCount=並行調理ナビで選んでいる品数（0なら段取りの行は出ない）
+ * 同じ中身を使い整合させる。cookNaviSelectedCount=並行調理ナビで選んでいる品数（0なら段取りは出ない）
  */
-export function buildReplaceConfirmText(
+export function buildReplaceConfirm(
   impact: ReplaceImpactCounts,
   cookNaviSelectedCount = 0,
-): string {
-  return fillCookNaviNote(
-    ja.settings.backupImportReplaceConfirm
-      .replace('{r}', String(impact.recipes))
-      .replace('{c}', String(impact.cookedLogs))
-      .replace('{p}', String(impact.prices)),
-    cookNaviSelectedCount,
-  )
+): ConfirmContent {
+  const t = ja.settings
+  return {
+    title: t.backupImportReplaceTitle,
+    bullets: [
+      {
+        label: t.backupImportReplaceGoneLabel,
+        text: fillCookNaviNote(
+          t.backupImportReplaceGone
+            .replace('{r}', String(impact.recipes))
+            .replace('{c}', String(impact.cookedLogs))
+            .replace('{p}', String(impact.prices)),
+          cookNaviSelectedCount,
+        ),
+      },
+      { label: t.backupImportReplaceSwapLabel, text: t.backupImportReplaceSwap },
+      { label: t.backupImportReplaceKeptLabel, text: t.backupImportReplaceKept },
+    ],
+    notes: [t.backupImportReplaceNote],
+    confirmLabel: t.backupImportReplaceOk,
+  }
+}
+
+/** 「今のデータに追加」の確認の中身（非破壊マージ。2026-07-30 便CJ/C1・C12 → 便GWで窓の形に） */
+export function buildMergeConfirm(): ConfirmContent {
+  const t = ja.settings
+  return {
+    title: t.backupImportMergeTitle,
+    bullets: [
+      { label: t.backupImportMergeAddLabel, text: t.backupImportMergeAdd },
+      { label: t.backupImportMergeKeptLabel, text: t.backupImportMergeKept },
+    ],
+    confirmLabel: t.backupImportMergeOk,
+  }
 }
 
 /**
- * 「元に戻す」（上書き前の控えへ戻す）の確認文（純ロジック・DB非依存。2026-08-15 便GP・規約F）。
- * 事故から戻すためのボタンなので、消えるもの・残るものを1行ずつの短さにする
+ * 「元に戻す」（上書き前の控えへ戻す）の確認の中身（純ロジック・DB非依存。2026-08-15 便GP・規約F）。
+ * 事故から戻すためのボタンなので、消えるもの・残るものを1項目ずつの短さにする
  */
-export function buildUndoReplaceConfirmText(
+export function buildUndoReplaceConfirm(
   impact: ReplaceImpactCounts,
   cookNaviSelectedCount = 0,
-): string {
-  return fillCookNaviNote(
-    ja.settings.replaceUndoConfirm
-      .replace('{r}', String(impact.recipes))
-      .replace('{c}', String(impact.cookedLogs)),
-    cookNaviSelectedCount,
-  )
+): ConfirmContent {
+  const t = ja.settings
+  return {
+    title: t.replaceUndoTitle,
+    bullets: [
+      {
+        label: t.replaceUndoGoneLabel,
+        text: fillCookNaviNote(
+          t.replaceUndoGone
+            .replace('{r}', String(impact.recipes))
+            .replace('{c}', String(impact.cookedLogs)),
+          cookNaviSelectedCount,
+        ),
+      },
+      { label: t.replaceUndoKeptLabel, text: t.replaceUndoKept },
+    ],
+    confirmLabel: t.replaceUndoOk,
+  }
 }
 
 /** Pro・追加レシピパックの解錠コード関連フィールドだけを抜き出した型（merge復元専用） */

@@ -16,6 +16,7 @@ import TabBar from './components/TabBar'
 import TimerBar from './components/TimerBar'
 import AppUpdateBanner from './components/AppUpdateBanner'
 import { TimerProvider } from './components/TimerProvider'
+import { ConfirmProvider } from './components/ConfirmProvider'
 import { startAppUpdateWatch } from './logic/appUpdate'
 import { watchBottomBarInset } from './logic/bottomBarInset'
 import { useSettings, recordFirstLaunchIfNeeded, resolveVisibleMealSlotsIfNeeded } from './db/settings'
@@ -86,31 +87,36 @@ function App() {
           影響を受けない。basenameを付けると #/ がどのルートにも一致せず白画面になる */}
       <HashRouter>
         <ThemeSync />
-        {/* 下部に固定される帯（タブナビ・タイマー・お知らせ）に中身が隠れないよう、
-            実測した高さ（--app-bottom-inset）ぶんの余白を空ける。既定値は index.css */}
-        <main className="min-h-dvh pb-[calc(var(--app-bottom-inset)+var(--space-lg))]">
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/recipes" element={<RecipesPage />} />
-            <Route path="/recipes/new" element={<RecipeFormPage />} />
-            <Route path="/recipes/:id" element={<RecipeDetailPage />} />
-            <Route path="/recipes/:id/edit" element={<RecipeFormPage />} />
-            <Route path="/meal-plan" element={<MealPlanPage />} />
-            {/* 献立テンプレの中身を見る・直す(2026-08-02 便DE-9)。献立の「週」タブから開く */}
-            <Route path="/meal-templates" element={<MealTemplatesPage />} />
-            {/* 月間画面のサンプルデモ(2026-08-02 便DC)。月タブ・設定のPro紹介・LP/説明書からここへ来る */}
-            <Route path="/month-demo" element={<MonthDemoPage />} />
-            <Route path="/cook-navi" element={<CookNaviPage />} />
-            <Route path="/shopping" element={<ShoppingPage />} />
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/prices" element={<IngredientPricesPage />} />
-          </Routes>
-        </main>
-        <TimerBar />
-        {/* 新しいバージョンのお知らせ(2026-08-09 便ER)。押したときだけ画面を読み込み直す */}
-        <AppUpdateBanner />
-        <TabBar />
+        {/* 確認の窓（2026-08-15 便GW）。ブラウザの素のダイアログをやめて、どの画面の確認も
+            同じ見た目の窓（components/ConfirmDialog）で出す。いちばん外側に置くので、
+            全画面の調理中モードやタブナビの上にも重なる */}
+        <ConfirmProvider>
+          {/* 下部に固定される帯（タブナビ・タイマー・お知らせ）に中身が隠れないよう、
+              実測した高さ（--app-bottom-inset）ぶんの余白を空ける。既定値は index.css */}
+          <main className="min-h-dvh pb-[calc(var(--app-bottom-inset)+var(--space-lg))]">
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/recipes" element={<RecipesPage />} />
+              <Route path="/recipes/new" element={<RecipeFormPage />} />
+              <Route path="/recipes/:id" element={<RecipeDetailPage />} />
+              <Route path="/recipes/:id/edit" element={<RecipeFormPage />} />
+              <Route path="/meal-plan" element={<MealPlanPage />} />
+              {/* 献立テンプレの中身を見る・直す(2026-08-02 便DE-9)。献立の「週」タブから開く */}
+              <Route path="/meal-templates" element={<MealTemplatesPage />} />
+              {/* 月間画面のサンプルデモ(2026-08-02 便DC)。月タブ・設定のPro紹介・LP/説明書からここへ来る */}
+              <Route path="/month-demo" element={<MonthDemoPage />} />
+              <Route path="/cook-navi" element={<CookNaviPage />} />
+              <Route path="/shopping" element={<ShoppingPage />} />
+              <Route path="/history" element={<HistoryPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/prices" element={<IngredientPricesPage />} />
+            </Routes>
+          </main>
+          <TimerBar />
+          {/* 新しいバージョンのお知らせ(2026-08-09 便ER)。押したときだけ画面を読み込み直す */}
+          <AppUpdateBanner />
+          <TabBar />
+        </ConfirmProvider>
       </HashRouter>
     </TimerProvider>
   )

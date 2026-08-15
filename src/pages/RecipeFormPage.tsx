@@ -55,6 +55,7 @@ import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
+import { useConfirm } from '../components/ConfirmProvider'
 import { RecipeIcon } from '../components/RecipeCard'
 import { starterDefs } from '../db/starters'
 import { useAppBusyWhileMounted } from '../logic/appBusy'
@@ -374,6 +375,7 @@ export default function RecipeFormPage() {
 }
 
 function RecipeFormInner() {
+  const confirm = useConfirm()
   // レシピを書いている間は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
   useAppBusyWhileMounted()
   const params = useParams()
@@ -511,8 +513,9 @@ function RecipeFormInner() {
    * 「写真は触られない」と読めてしまっていた(写真は端末内にしか無く、保存したら復元できない)。
    * photoPlanが'replace'なら、材料・手順が空でも確認を出す(料理名と写真だけのレシピを守るため)。
    */
-  const confirmReplaceExisting = (
-    itemsTemplate: string,
+  const confirmReplaceExisting = async (
+    /** どちらの取り込み経路か（見出しと「置き換わるもの」の言い方だけが違う） */
+    kind: 'paste' | 'url',
     parsedIngredientCount: number,
     parsedStepCount: number,
     /**
@@ -521,7 +524,7 @@ function RecipeFormInner() {
      * テンプレート1本(末尾に残るものを含む形)で従来どおり完結する
      */
     photoPlan?: PhotoReplacePlan,
-  ): boolean => {
+  ): Promise<boolean> => {
     const filledIngredients = ingredients.filter(
       (row) => row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim(),
     ).length
@@ -543,17 +546,43 @@ function RecipeFormInner() {
     if (targets.steps) {
       items.push(ja.paste.replaceItemSteps.replace('{n}', String(filledSteps)))
     }
-    // 「消えるもの」→ 写真の扱い →「残るもの」の順に並べる(規約F)
-    const itemsText =
+    // 「消えるもの」→「置き換わるもの」→「残るもの」の順に並べる(規約F)。
+    // 写真はURL取り込みだけが触るので、その経路のときだけ消えるものへ足す
+    const gone = [
       items.length > 0
-        ? itemsTemplate.replace('{items}', items.join(ja.paste.replaceItemSeparator))
-        : ''
-    // 貼り付け経路は写真に触らないので、従来どおりテンプレート1本で完結する(末尾に残るものを含む)
-    if (photoPlan === undefined) return window.confirm(itemsText)
-    const photoText = targets.photo ? ja.urlImport.confirmPhotoReplace : ''
-    const keptText =
-      photoPlan === 'kept' ? ja.urlImport.confirmReplaceKeptWithPhoto : ja.urlImport.confirmReplaceKept
-    return window.confirm(`${itemsText}${photoText}${keptText}`)
+        ? ja.paste.confirmReplaceGone.replace('{items}', items.join(ja.paste.replaceItemSeparator))
+        : '',
+      targets.photo ? ja.urlImport.confirmPhotoReplace : '',
+    ].filter((text) => text !== '')
+    const isUrl = kind === 'url'
+    return await confirm({
+      title: isUrl ? ja.urlImport.confirmReplaceTitle : ja.paste.confirmReplaceTitle,
+      bullets: [
+        ...(gone.length > 0
+          ? [
+              {
+                label: ja.paste.confirmReplaceGoneLabel,
+                text: gone.join(ja.paste.replaceItemSeparator),
+              },
+            ]
+          : []),
+        {
+          label: ja.paste.confirmReplaceSwapLabel,
+          text: isUrl ? ja.urlImport.confirmReplaceSwap : ja.paste.confirmReplaceSwap,
+        },
+        {
+          label: ja.paste.confirmReplaceKeptLabel,
+          text: !isUrl
+            ? ja.paste.confirmReplaceKept
+            : photoPlan === 'kept'
+              ? ja.urlImport.confirmReplaceKeptWithPhoto
+              : ja.urlImport.confirmReplaceKept,
+        },
+      ],
+      // 写真を守る手立ては、消えるものの並びに混ぜず補足の行で伝える
+      notes: targets.photo ? [ja.urlImport.confirmPhotoNote] : [],
+      confirmLabel: isUrl ? ja.urlImport.confirmReplaceOk : ja.paste.confirmReplaceOk,
+    })
   }
 
   const photoUrl = usePhotoUrl(photo)
@@ -762,16 +791,17 @@ function RecipeFormInner() {
   }, [currentSerialized])
 
   /** 下書きをフォームに反映する(写真は下書きに含まれないため、編集では既存レシピの写真を引き継ぐ) */
-  const restoreDraft = () => {
+  const restoreDraft = async () => {
     const d = pendingDraft
     if (!d) return
     // バナーを無視して書き続けた内容がある場合は、無警告で置き換えない(規約F・C-01)
-    if (
-      baselineRef.current !== null &&
-      currentSerialized !== baselineRef.current &&
-      !window.confirm(ja.form.draftRestoreConfirm)
-    ) {
-      return
+    if (baselineRef.current !== null && currentSerialized !== baselineRef.current) {
+      const ok = await confirm({
+        title: ja.form.draftRestoreConfirmTitle,
+        body: ja.form.draftRestoreConfirm,
+        confirmLabel: ja.form.draftRestoreConfirmOk,
+      })
+      if (!ok) return
     }
     draftRestoredRef.current = true
     setTitle(d.title ?? '')
@@ -879,7 +909,7 @@ function RecipeFormInner() {
     try {
       const result = await importRecipeFromUrl(target)
       // 待っているあいだに画面を離れた・別のURLで取り込み直したなら、ここで静かに終わる。
-      // window.confirmは「いま見ている画面」を止めてしまうので、必ず出す前に確認する(便CK/②-3)
+      // 確認の窓は「いま見ている画面」を止めてしまうので、必ず出す前に確認する(便CK/②-3)
       if (generation !== urlImportGenerationRef.current) return
       // 貼り付け経路と同じゴミ行判定を通し、グループ見出しをグループ色へ引き継ぐ(便BX/C07・C08)。
       // 以降の件数(確認文・結果メッセージ)はすべてこの整形後の件数で数える
@@ -891,12 +921,7 @@ function RecipeFormInner() {
       const photoPlan = photoReplacePlan(hadPhoto, urlImportFetchPhoto && !!result.imageUrl)
       // 入力済みの材料・手順・写真を置き換える前に確認する(規約F・C-04。貼り付け経路と同じ扱い)
       if (
-        !confirmReplaceExisting(
-          ja.urlImport.confirmReplace,
-          importedRows.length,
-          importedSteps.length,
-          photoPlan,
-        )
+        !(await confirmReplaceExisting('url', importedRows.length, importedSteps.length, photoPlan))
       ) {
         // 中止したことを必ず返事する(2026-07-28 便BX/C16・QA S3)。
         // 従来は冒頭で消したメッセージ欄が空のまま戻り、押した結果が一切分からなかった
@@ -1015,7 +1040,7 @@ function RecipeFormInner() {
   }
 
   /** 貼り付けた文章を解析してフォームに流し込む（結果はユーザーが修正できる） */
-  const applyPaste = () => {
+  const applyPaste = async () => {
     if (!pasteText.trim()) {
       showPasteMessage(ja.paste.empty, 'warn')
       return
@@ -1026,7 +1051,7 @@ function RecipeFormInner() {
       return
     }
     // 入力済みの材料・手順を置き換える前に確認する(規約F・C-04)
-    if (!confirmReplaceExisting(ja.paste.confirmReplace, parsed.ingredients.length, parsed.steps.length)) {
+    if (!(await confirmReplaceExisting('paste', parsed.ingredients.length, parsed.steps.length))) {
       return
     }
     if (parsed.title && !title.trim()) setTitle(parsed.title)
@@ -1206,17 +1231,22 @@ function RecipeFormInner() {
    * 規約F: 何が消えて何が残るかを件数つきで両方書いてから消す。
    * すべて選んだときは行が0になるので、1行ずつの削除と同じく空の1行を残す
    */
-  const removeSelectedIngredients = () => {
+  const removeSelectedIngredients = async () => {
     const count = selectedIngredientIndexes.length
     if (count === 0) return
     const remaining = ingredients.length - count
-    const message =
-      remaining > 0
-        ? ja.form.ingredientOrganizeConfirm
-            .replace('{n}', String(count))
-            .replace('{m}', String(remaining))
-        : ja.form.ingredientOrganizeConfirmAll.replace('{n}', String(count))
-    if (!window.confirm(message)) return
+    const ok = await confirm({
+      title: (remaining > 0
+        ? ja.form.ingredientOrganizeConfirmTitle
+        : ja.form.ingredientOrganizeConfirmAllTitle
+      ).replace('{n}', String(count)),
+      body:
+        remaining > 0
+          ? ja.form.ingredientOrganizeConfirm.replace('{m}', String(remaining))
+          : ja.form.ingredientOrganizeConfirmAll,
+      confirmLabel: ja.form.ingredientOrganizeConfirmOk,
+    })
+    if (!ok) return
     const drop = new Set(selectedIngredientIndexes)
     setIngredients((rows) => {
       const kept = rows.filter((_, i) => !drop.has(i))
@@ -1250,24 +1280,32 @@ function RecipeFormInner() {
     )
   }
 
+  /**
+   * 入力中の1行を消すときの確認（2026-08-15 便GW）。材料の行と手順の行で同じ窓を出す。
+   * 規約Fの対象外（入力中の1行で、保存を押すまでDBには何も起きない）と司令部が裁定済みなので、
+   * 見出しとボタンだけの短い窓にする。それでも素のダイアログは出さない＝見た目は他とそろえる
+   */
+  const confirmRemoveRow = () =>
+    confirm({ title: ja.form.confirmRemoveRow, confirmLabel: ja.form.confirmRemoveRowOk })
+
   /** 材料行を削除する（入力内容がある行だけ確認を挟む。空行は従来どおり即削除） */
-  const removeIngredientRow = (index: number) => {
+  const removeIngredientRow = async (index: number) => {
     const row = ingredients[index]
     const hasContent = !!(
       row &&
       (row.name.trim() || row.amount.trim() || row.unit.trim() || row.memo.trim())
     )
-    if (hasContent && !window.confirm(ja.form.confirmRemoveRow)) return
+    if (hasContent && !(await confirmRemoveRow())) return
     setIngredients((rows) =>
       rows.length > 1 ? rows.filter((_, i) => i !== index) : [{ ...emptyIngredient }],
     )
   }
 
   /** 手順行を削除する（入力内容がある行だけ確認を挟む。空行は従来どおり即削除） */
-  const removeStepRow = (index: number) => {
+  const removeStepRow = async (index: number) => {
     const row = steps[index]
     const hasContent = !!(row && (row.text.trim() || row.minutes.trim() || row.memo.trim()))
-    if (hasContent && !window.confirm(ja.form.confirmRemoveRow)) return
+    if (hasContent && !(await confirmRemoveRow())) return
     setSteps((rows) => (rows.length > 1 ? rows.filter((_, i) => i !== index) : [{ ...emptyStep }]))
   }
 
@@ -1440,8 +1478,15 @@ function RecipeFormInner() {
    * 以前はリンクで戻るだけで下書きが残り、次に新規登録を開くたび「復元しますか？」が出ていた
    * （取りやめの意図と食い違う）。書きかけがあるときだけ確認を出し、確認できたら下書きも消す。
    */
-  const handleCancel = () => {
-    if (dirtyRef.current && !window.confirm(ja.form.confirmCancel)) return
+  const handleCancel = async () => {
+    if (dirtyRef.current) {
+      const ok = await confirm({
+        title: ja.form.confirmCancelTitle,
+        body: ja.form.confirmCancel,
+        confirmLabel: ja.form.confirmCancelOk,
+      })
+      if (!ok) return
+    }
     clearDraft()
     dirtyRef.current = false
     navigate(isEdit && editId !== undefined ? `/recipes/${editId}` : '/recipes')
@@ -1452,10 +1497,20 @@ function RecipeFormInner() {
     // 削除で巻き添えになるもの(作った記録・記録写真)の件数を確認文に入れる(規約F・便CI/C01)。
     // cookedLogsはRecipe埋め込み配列なのでloadedRecipeから同期的に数えられる
     const logs = loadedRecipe?.cookedLogs ?? []
-    const confirmText = ja.form.confirmDelete
-      .replace('{n}', String(logs.length))
-      .replace('{p}', String(logs.filter((log) => log.photo).length))
-    if (!window.confirm(confirmText)) return
+    const ok = await confirm({
+      title: ja.form.confirmDeleteTitle,
+      bullets: [
+        {
+          label: ja.form.confirmDeleteGoneLabel,
+          text: ja.form.confirmDeleteGone
+            .replace('{n}', String(logs.length))
+            .replace('{p}', String(logs.filter((log) => log.photo).length)),
+        },
+        { label: ja.form.confirmDeleteKeptLabel, text: ja.form.confirmDeleteKept },
+      ],
+      confirmLabel: ja.form.confirmDeleteOk,
+    })
+    if (!ok) return
     await deleteRecipe(editId)
     clearDraft()
     dirtyRef.current = false
@@ -1477,14 +1532,7 @@ function RecipeFormInner() {
       ? 'starter'
       : 'own'
 
-  const [resetArmed, setResetArmed] = useState(false)
   const [resetMessage, setResetMessage] = useState('')
-  const resetArmTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => {
-    return () => {
-      if (resetArmTimerRef.current) clearTimeout(resetArmTimerRef.current)
-    }
-  }, [])
 
   /** 差し替え先の値をまとめてフォームへ反映し、この状態を新しい基準点にする
    * （baselineRef更新＋下書き削除。更新しないと直後の自動保存useEffectが
@@ -1580,17 +1628,26 @@ function RecipeFormInner() {
     else if (resetVariant === 'starter') resetToStarter()
   }
 
-  /** window.confirmは使わず、既存の確認UIパターンが無いためもう一度押す方式で誤操作を防ぐ
-   * （1回目は確認を促す表示に切り替わるだけで何も変更しない。5秒操作が無ければ元のラベルに戻る） */
-  const handleResetClick = () => {
-    if (!resetArmed) {
-      setResetArmed(true)
-      if (resetArmTimerRef.current) clearTimeout(resetArmTimerRef.current)
-      resetArmTimerRef.current = setTimeout(() => setResetArmed(false), 5000)
-      return
-    }
-    if (resetArmTimerRef.current) clearTimeout(resetArmTimerRef.current)
-    setResetArmed(false)
+  /**
+   * 「デフォルトに戻す」の確認（2026-08-15 便GW）。
+   * 以前はもう一度押す方式（1回目はラベルが「もう一度押すと戻します」に変わるだけ）で、
+   * アプリの中に**3つ目の様式**として残っていた。ラベルだけでは「何が戻って何が変わらないか」を
+   * 書く場所が無く規約Fを満たせないので、他の確認と同じ画面の中の窓にそろえた。
+   * DBには書き込まない操作なので、そのこと（保存を押すまで保存済みは変わらない）も書く。
+   */
+  const handleResetClick = async () => {
+    const ok = await confirm({
+      title:
+        resetVariant === 'own'
+          ? ja.form.resetConfirmTitleOwn
+          : ja.form.resetConfirmTitleStarter,
+      bullets: [
+        { label: ja.form.resetConfirmBackLabel, text: ja.form.resetConfirmBack },
+        { label: ja.form.resetConfirmKeptLabel, text: ja.form.resetConfirmKept },
+      ],
+      confirmLabel: ja.form.resetConfirmOk,
+    })
+    if (!ok) return
     performReset()
   }
 
@@ -1659,7 +1716,7 @@ function RecipeFormInner() {
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"
-              onClick={restoreDraft}
+              onClick={() => void restoreDraft()}
               className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
             >
               {ja.form.draftRestore}
@@ -1798,7 +1855,7 @@ function RecipeFormInner() {
           <div className="mt-[var(--space-sm)] flex gap-2">
             <button
               type="button"
-              onClick={applyPaste}
+              onClick={() => void applyPaste()}
               className="flex-1 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
             >
               {ja.paste.apply}
@@ -2039,7 +2096,7 @@ function RecipeFormInner() {
             {selectedIngredientIndexes.length > 0 && (
               <button
                 type="button"
-                onClick={removeSelectedIngredients}
+                onClick={() => void removeSelectedIngredients()}
                 className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-warning shadow-sm"
               >
                 {ja.form.ingredientOrganizeDeleteSelected.replace(
@@ -2183,7 +2240,7 @@ function RecipeFormInner() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeIngredientRow(index)}
+                      onClick={() => void removeIngredientRow(index)}
                       aria-label={ja.form.removeRow}
                       className={`${iconBtnCls} text-warning`}
                     >
@@ -2280,7 +2337,7 @@ function RecipeFormInner() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => removeStepRow(index)}
+                  onClick={() => void removeStepRow(index)}
                   aria-label={ja.form.removeRow}
                   className={`${iconBtnCls} text-warning`}
                 >
@@ -2803,7 +2860,7 @@ function RecipeFormInner() {
         </button>
         <button
           type="button"
-          onClick={handleCancel}
+          onClick={() => void handleCancel()}
           disabled={urlImportLoading}
           className="flex items-center rounded-md border border-edge bg-surface px-5 py-4 text-ink-muted shadow-sm disabled:opacity-60"
         >
@@ -2818,15 +2875,11 @@ function RecipeFormInner() {
         <div className="mt-[var(--space-md)]">
           <button
             type="button"
-            onClick={handleResetClick}
+            onClick={() => void handleResetClick()}
             className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-60"
           >
             <RotateCcw size={18} aria-hidden />
-            {resetArmed
-              ? ja.form.resetConfirmLabel
-              : resetVariant === 'own'
-                ? ja.form.resetToSavedLabel
-                : ja.form.resetToDefaultLabel}
+            {resetVariant === 'own' ? ja.form.resetToSavedLabel : ja.form.resetToDefaultLabel}
           </button>
           {resetMessage && (
             <p className="mt-1 text-center text-sm font-bold text-accent-ink">{resetMessage}</p>
@@ -2838,7 +2891,7 @@ function RecipeFormInner() {
       {isEdit && (
         <button
           type="button"
-          onClick={remove}
+          onClick={() => void remove()}
           className="mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border border-warning py-3 font-bold text-warning"
         >
           <Trash2 size={18} aria-hidden />

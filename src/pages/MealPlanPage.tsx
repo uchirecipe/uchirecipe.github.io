@@ -60,6 +60,7 @@ import {
 import { buildPlanSheet, type PlanSheet } from '../logic/planSheet'
 import { sharePlanSheetImage } from '../logic/planSheetImage'
 import Toast from '../components/Toast'
+import { useConfirm } from '../components/ConfirmProvider'
 import {
   useTodayList,
   removeFromTodayList,
@@ -1431,6 +1432,7 @@ function groupBySlot(entries: MealPlanEntry[] | undefined): Map<MealSlot, MealPl
  *      ＝サンプルは見て確かめるためのもので、書き込み先が無い
  */
 export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
+  const confirm = useConfirm()
   /** サンプルデモとして開いているか（データの差し替えと、書き込み操作を出さない判定に使う） */
   const isDemo = demo != null
   const navigate = useNavigate()
@@ -2711,8 +2713,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       },
     )
   }, [dayModalDate, dayModalSnapshot, monthEntries, monthDayNoteByDate])
-  /** 規約F: 何を取り消し、何が戻るのかを件数つきで両方書く */
-  const dayModalCancelConfirmText = (diff: DayEditDiff, snapshotCount: number) => {
+  /** 規約F: 何を取り消し、何が戻るのかを件数つきで両方書く（2026-08-15 便GWで窓の形に） */
+  const dayModalCancelConfirmRequest = (diff: DayEditDiff, snapshotCount: number) => {
     const changes = [
       diff.added > 0 ? ja.mealPlan.monthDayCancelAdded.replace('{n}', String(diff.added)) : null,
       diff.changed > 0
@@ -2725,9 +2727,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     ]
       .filter((v): v is string => v != null)
       .join('・')
-    return ja.mealPlan.monthDayCancelConfirm
-      .replace('{changes}', changes)
-      .replace('{n}', String(snapshotCount))
+    return {
+      title: ja.mealPlan.monthDayCancelConfirmTitle,
+      bullets: [
+        { label: ja.mealPlan.monthDayCancelUndoLabel, text: changes },
+        {
+          label: ja.mealPlan.monthDayCancelBackLabel,
+          text: ja.mealPlan.monthDayCancelBack.replace('{n}', String(snapshotCount)),
+        },
+      ],
+      notes: [ja.mealPlan.monthDayCancelNote],
+      confirmLabel: ja.mealPlan.monthDayCancelConfirmOk,
+    }
   }
   /** 「キャンセル」＝窓を開いたときの状態へ戻して閉じる（確認あり） */
   const cancelDayModal = async () => {
@@ -2736,7 +2747,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       setDayModalDate(null)
       return
     }
-    if (!window.confirm(dayModalCancelConfirmText(dayModalDiff, snapshot.entries.length))) return
+    if (!(await confirm(dayModalCancelConfirmRequest(dayModalDiff, snapshot.entries.length))))
+      return
     // 窓を閉じる前に書き戻す（閉じる過程のメモ保存と競合させない。印は保険）
     cancelledNoteDateRef.current = snapshot.date
     await restoreDayMealPlan(snapshot.date, snapshot.entries)
@@ -3115,7 +3127,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 組み直すか」を伝える（規約F）。記録を中止したときは false を返す。
    * 段取りの組み直しそのものは並行調理ナビの画面が受け持つ（下のコメント参照）。
    */
-  const confirmCookedAgainstNavi = (recipe: Recipe): boolean => {
+  const confirmCookedAgainstNavi = async (recipe: Recipe): Promise<boolean> => {
     const session = loadCookNaviSession()
     if (!session?.selectedIds.includes(recipe.id!)) return true
     // 2026-08-12 便FW（オーナー指摘「日・今日の献立から作った！したとき、並行調理ナビの
@@ -3128,14 +3140,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       session.selectedIds,
       session.selectedIds.filter((id) => id !== recipe.id),
     )
-    const confirmText =
-      (remaining.length >= COOK_NAVI_MIN_RECIPES
+    const ok = await confirm({
+      title: ja.mealPlan.todayCookedNaviConfirmTitle.replaceAll('{title}', recipe.title),
+      body: (remaining.length >= COOK_NAVI_MIN_RECIPES
         ? ja.mealPlan.todayCookedNaviConfirm
         : ja.mealPlan.todayCookedNaviConfirmEnd
       )
         .replaceAll('{title}', recipe.title)
-        .replaceAll('{n}', String(remaining.length)) + ja.mealPlan.todayCookedNaviConfirmAsk
-    if (!window.confirm(confirmText)) return false
+        .replaceAll('{n}', String(remaining.length)),
+      confirmLabel: ja.mealPlan.todayCookedNaviConfirmOk,
+    })
+    if (!ok) return false
     // 段取りが続くとき（2品以上残る）は、覚えている選択には手を触れない。
     // 組み直しと「何を外したか」の知らせは、並行調理ナビの画面が1か所で受け持つ
     // （どの入口から記録しても同じように直る形にしておく）。
@@ -3146,9 +3161,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   const markDayRecipeCooked = (recipe: Recipe) => {
     const recipeId = recipe.id!
-    if (!confirmCookedAgainstNavi(recipe)) return
     const undoItem = undoItemOf(recipeId)
     void (async () => {
+      if (!(await confirmCookedAgainstNavi(recipe))) return
       await markTodayListCooked(recipeId, dayCookedServings.get(recipeId))
       // 2026-07-16 UI総点検A-4: 行が消えるだけの無言完了だったのでトーストで明示
       setMessage(ja.mealPlan.todayCookedToast)
@@ -3165,14 +3180,39 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const markAllDayRecipesCooked = async () => {
     const count = dayRecipeIds.length
     if (count === 0) return
-    const confirmText =
-      ja.mealPlan.todayMarkAllCookedConfirm.replaceAll('{n}', String(count)) +
-      // 記録すると今日の献立が空になり、並行調理ナビは段取りを出せなくなる。
-      // 押す前に「段取りも終わる」ことを伝える（2026-08-08 便EG・規約F）
-      (naviInProgress ? ja.mealPlan.todayMarkAllCookedConfirmNavi : '') +
-      (settings?.cookedReflectPantry ? ja.mealPlan.todayMarkAllCookedConfirmPantry : '') +
-      ja.mealPlan.todayMarkAllCookedConfirmAsk
-    if (!window.confirm(confirmText)) return
+    const ok = await confirm({
+      title: ja.mealPlan.todayMarkAllCookedConfirmTitle.replace('{n}', String(count)),
+      bullets: [
+        {
+          label: ja.mealPlan.todayMarkAllCookedGoneLabel,
+          text: ja.mealPlan.todayMarkAllCookedGone.replace('{n}', String(count)),
+        },
+        {
+          label: ja.mealPlan.todayMarkAllCookedKeptLabel,
+          text: ja.mealPlan.todayMarkAllCookedKept.replace('{n}', String(count)),
+        },
+        // 記録すると今日の献立が空になり、並行調理ナビは段取りを出せなくなる。
+        // 押す前に「段取りも終わる」ことを伝える（2026-08-08 便EG・規約F）
+        ...(naviInProgress
+          ? [
+              {
+                label: ja.mealPlan.todayMarkAllCookedConfirmNaviLabel,
+                text: ja.mealPlan.todayMarkAllCookedConfirmNavi,
+              },
+            ]
+          : []),
+        ...(settings?.cookedReflectPantry
+          ? [
+              {
+                label: ja.mealPlan.todayMarkAllCookedConfirmPantryLabel,
+                text: ja.mealPlan.todayMarkAllCookedConfirmPantry,
+              },
+            ]
+          : []),
+      ],
+      confirmLabel: ja.mealPlan.todayMarkAllCookedConfirmOk,
+    })
+    if (!ok) return
     const recorded = dayRecipeIds.map(undoItemOf)
     await markAllTodayListCooked(
       recorded.map((item) => item.recipeId),
@@ -3502,11 +3542,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         return
       }
       if (removeCount > 0) {
-        const confirmText = ja.mealPlan.fillModeReplaceAllConfirm
-          .replace('{s}', String(targetSlotCount))
-          .replace('{n}', String(removeCount))
-          .replace('{lock}', lockNotice)
-        if (!window.confirm(confirmText)) return
+        const ok = await confirm({
+          title: ja.mealPlan.fillModeReplaceAllConfirmTitle,
+          bullets: [
+            {
+              label: ja.mealPlan.fillModeReplaceAllGoneLabel,
+              text: ja.mealPlan.fillModeReplaceAllGone
+                .replace('{s}', String(targetSlotCount))
+                .replace('{n}', String(removeCount)),
+            },
+            {
+              label: ja.mealPlan.fillModeReplaceAllKeptLabel,
+              text: ja.mealPlan.fillModeReplaceAllKept,
+            },
+          ],
+          notes: lockNotice ? [lockNotice] : [],
+          confirmLabel: ja.mealPlan.fillModeReplaceAllConfirmOk,
+        })
+        if (!ok) return
       }
     }
     const added = await executeFill(plan, entries ?? [])
@@ -3638,15 +3691,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       return
     }
     const targetDayCount = new Set(targetSlots.map((s) => s.date)).size
-    const confirmText = (
-      preserved > 0 ? ja.mealPlan.fillMonthConfirm : ja.mealPlan.fillMonthConfirmNoKept
-    )
-      .replace('{d}', String(targetDayCount))
-      .replace('{s}', String(targetSlots.length))
-      .replace('{k}', String(preserved))
-      .replace('{note}', noteSkipped)
-      .replace('{lock}', lockNotice)
-    if (!window.confirm(confirmText)) return
+    const ok = await confirm({
+      title: ja.mealPlan.fillMonthConfirmTitle
+        .replace('{d}', String(targetDayCount))
+        .replace('{s}', String(targetSlots.length)),
+      body: (preserved > 0
+        ? ja.mealPlan.fillMonthConfirm
+        : ja.mealPlan.fillMonthConfirmNoKept
+      ).replace('{k}', String(preserved)),
+      // メモを書いた日・ロック中の食事は「対象から外した」お知らせなので、補足の行に置く
+      notes: [noteSkipped, lockNotice].filter((line) => line !== ''),
+      confirmLabel: ja.mealPlan.fillMonthConfirmOk,
+    })
+    if (!ok) return
     const added = await executeFill(plan, monthEntries ?? [])
     // 正直な完了報告: 実際にDBへ入った品数で出し分ける
     if (added > 0) {
@@ -3702,14 +3759,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       )
       return
     }
-    if (
-      !window.confirm(
-        ja.mealPlan.copyLastWeekConfirm
-          .replace('{n}', String(ops.length))
-          .replace('{lock}', lockNotice),
-      )
-    )
-      return
+    const ok = await confirm({
+      title: ja.mealPlan.copyLastWeekConfirmTitle.replace('{n}', String(ops.length)),
+      body: ja.mealPlan.copyLastWeekConfirm,
+      notes: lockNotice ? [lockNotice] : [],
+      confirmLabel: ja.mealPlan.copyLastWeekConfirmOk,
+    })
+    if (!ok) return
     // auto=false(既定)で追加＝手動配置として保護される
     for (const op of ops) {
       await addMealEntry(op.date, op.slot, op.recipeId, op.role)
@@ -3821,17 +3877,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       return
     }
     // 規約F: 何品がどこに入るかと、何が消えないかを件数つきで両方書く
-    const confirmText = (
-      plan.keptSlotCount > 0
+    const ok = await confirm({
+      title: ja.mealPlan.templateApplyConfirmTitle
+        .replace('{name}', template.name)
+        .replace('{n}', String(plan.ops.length))
+        .replace('{d}', String(plan.fillSlotCount)),
+      body: (plan.keptSlotCount > 0
         ? ja.mealPlan.templateApplyConfirm
         : ja.mealPlan.templateApplyConfirmNoKept
-    )
-      .replace('{name}', template.name)
-      .replace('{n}', String(plan.ops.length))
-      .replace('{d}', String(plan.fillSlotCount))
-      .replace('{k}', String(plan.keptSlotCount))
-      .replace('{lock}', lockNotice)
-    if (!window.confirm(confirmText)) return
+      ).replace('{k}', String(plan.keptSlotCount)),
+      notes: lockNotice ? [lockNotice] : [],
+      confirmLabel: ja.mealPlan.templateApplyConfirmOk,
+    })
+    if (!ok) return
     // auto=false(既定)で追加＝手動配置として保護される（ユーザーが意図して入れた献立のため）
     for (const op of plan.ops) {
       await addMealEntry(op.date, op.slot, op.recipeId, op.role)
@@ -3847,12 +3905,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     )
   }
   const removeTemplate = async (id: number, name: string, itemCount: number) => {
-    if (
-      !window.confirm(
-        ja.mealPlan.templateDeleteConfirm.replace('{name}', name).replace('{n}', String(itemCount)),
-      )
-    )
-      return
+    const ok = await confirm({
+      title: ja.mealPlan.templateDeleteConfirmTitle
+        .replace('{name}', name)
+        .replace('{n}', String(itemCount)),
+      body: ja.mealPlan.templateDeleteConfirm,
+      confirmLabel: ja.mealPlan.templateDeleteConfirmOk,
+    })
+    if (!ok) return
     await deleteMealTemplate(id)
     if (selectedTemplateId === id) setSelectedTemplateId(null)
     setMessage(ja.mealPlan.templateDeleteDone.replace('{name}', name))
@@ -4226,16 +4286,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 残る食事とその件数（朝昼夜を全部選んだときは残るほかの食事が無いので専用の文にする）
     const restSlots = MEAL_SLOTS.filter((s) => !clearSlotTargets.includes(s))
     const restCount = weekEntries.filter((e) => restSlots.includes(e.slot)).length
-    const confirmText = (
-      restSlots.length === 0
-        ? ja.mealPlan.clearWeekSlotConfirmAll.replace('{n}', String(targetCount))
+    const allSlots = restSlots.length === 0
+    const ok = await confirm({
+      title: (allSlots
+        ? ja.mealPlan.clearWeekSlotConfirmAllTitle
+        : ja.mealPlan.clearWeekSlotConfirmTitle
+      )
+        .replace('{slot}', label)
+        .replace('{n}', String(targetCount)),
+      body: allSlots
+        ? ja.mealPlan.clearWeekSlotConfirmAll
         : ja.mealPlan.clearWeekSlotConfirm
-            .replace('{slot}', label)
-            .replace('{n}', String(targetCount))
             .replace('{rest}', restSlots.map((s) => ja.mealPlan.slot[s]).join('・'))
-            .replace('{r}', String(restCount))
-    ).replace('{lock}', lockNotice)
-    if (!window.confirm(confirmText)) return
+            .replace('{r}', String(restCount)),
+      notes: lockNotice ? [lockNotice] : [],
+      confirmLabel: ja.mealPlan.clearWeekSlotConfirmOk,
+    })
+    if (!ok) return
     await removeMealEntries(clearPlan.entryIdsToRemove)
     setMessage(
       withNotice(
