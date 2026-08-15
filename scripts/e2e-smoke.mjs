@@ -15646,7 +15646,7 @@ try {
       )
       await naviPage
         .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: /を開く/ })
+        .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await naviPage.waitForTimeout(700)
       check(
@@ -15669,7 +15669,7 @@ try {
       await naviPage.waitForTimeout(400)
       await naviPage
         .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: /を開く/ })
+        .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await naviPage.waitForTimeout(700)
       check(
@@ -15994,7 +15994,7 @@ try {
       // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
       await nav7Page
         .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: /を開く/ })
+        .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await nav7Page.waitForTimeout(900)
       check(
@@ -16218,7 +16218,7 @@ try {
       // 2026-08-11 便FO: 帯は窓を開くだけになったので、移動は窓の「手順◯を開く」から
       await esPage
         .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: /を開く/ })
+        .getByRole('button', { name: /を(開く|見る)/ })
         .click()
       await esPage.waitForTimeout(1200)
       check(
@@ -23964,8 +23964,10 @@ try {
       await ezPage.waitForTimeout(400)
       const ezBarDialogText = await ezPage.getByRole('dialog', { name: 'タイマーを調整' }).textContent()
       check(
-        'EZ-02 「段取りの◯番目を開く」が「手順⑦3-1を開く」の形になっている',
-        /手順[①-⑳㉑-㉟㊱-㊿][^を]*を開く/.test(ezBarDialogText) &&
+        'EZ-02 「段取りの◯番目を開く」が「手順⑦（3-1）を〜」の形になっている',
+        // 2026-08-15 便GQ: 調理の途中は「見る」（現在地を動かさない）に言い分けたので、
+        // ここで見るのは**番号の呼び方**だけにする（動きの語まで固定しない）
+        /手順[①-⑳㉑-㉟㊱-㊿][^を]*を(開く|見る)/.test(ezBarDialogText) &&
           !/段取りの\d+番目/.test(ezBarDialogText),
         ezBarDialogText.slice(0, 200),
       )
@@ -24779,6 +24781,12 @@ try {
       }
       const fcTimerAt = await fcCounter()
       const fcTimerRecipe = await fcRecipe()
+      // BudouX がゼロ幅スペースを差し込むので、突き合わせる前に必ず外す（CLAUDE.md 禁じ手②）
+      const fcNoZw = (t) => (t ?? '').replace(/\u200B/g, '')
+      // タイマーを始めた手順の本文（あとで「見るだけ」の窓に出ているかを突き合わせる）
+      const fcTimerText = fcNoZw(
+        await fcPage.locator('[data-testid="cook-session-step-text"]').innerText(),
+      ).trim()
       await fcPage.locator('[data-testid="cook-session"] button[aria-label*="タイマー開始"]').first().click()
       await fcPage.waitForTimeout(600)
       check(
@@ -24812,38 +24820,147 @@ try {
       await fcPage.locator('[data-testid="timer-adjust-pause"]').click()
       await fcPage.waitForTimeout(400)
 
-      // --- FC-05: 調理中モードで始めたタイマーからの戻り先＝調理中モードのその手順 ---
+      // --- FC-05 / GQ-01・GQ-02: タイマーの手順は「見るだけ」で開く（現在地を動かさない） ---
+      //   便FC のオーナー実機指示「調理中モードでスタートしたタイマーからの戻り先が、
+      //   調理中モードの手順にしたい」＝**段取りの一覧ではなく全画面に着地する**は生かす。
+      //   2026-08-15 便GQ・オーナー判断A案で変えたのは「現在地を、鳴ったタイマーの手順まで
+      //   動かす」ところだけ。このアプリは「済んだ手順＝現在地より前」で数える（docs/69）ので、
+      //   通り過ぎた手順のタイマーから開くと、そこまでの進み具合がまるごと巻き戻っていた。
+      //
+      //   測るのは**タイマーから手順を見たあとも、どこに居るかが変わっていないこと**。
+      //   表示の文字を決め打ちで照合せず、見る前の見え方一式を控えて突き合わせる。
       currentCheck = 'FC-05'
+      const fcGoStep = fcDialog.locator('[data-testid="timer-adjust-go-step"]')
       check(
-        'FC-05 調理中モードのタイマーの窓から、その手順へ戻る道がある',
-        (await fcDialog.getByRole('button', { name: /^手順.*を開く$/ }).count()) === 1,
+        'FC-05 調理中モードのタイマーの窓から、その手順を開く道がある',
+        (await fcGoStep.count()) === 1,
         await fcDialog.textContent(),
+      )
+      check(
+        'GQ-01 その道は「見る」と名乗る（押しても現在地が動かないことが名前から分かる）',
+        /見る$/.test(fcNoZw(await fcGoStep.innerText()).trim()),
+        await fcGoStep.innerText(),
       )
       await fcPage.keyboard.press('Escape')
       await fcPage.waitForTimeout(300)
-      await fcNext(1)
+
+      // オーナーの再現手順: タイマーを始めた手順から「次へ」で先へ進む。
+      // 何回進むかは段取りの長さ次第なので決め打ちせず、別の品の手順に届いたら止める
+      // （上限は保険。CLAUDE.md「押す回数の決め打ち」を避ける）
+      let fcAdvanced = 0
+      for (let i = 0; i < 8; i++) {
+        if ((await fcPage.locator('[data-testid="cook-session-next"]').count()) === 0) break
+        await fcNext(1)
+        fcAdvanced++
+        if ((await fcRecipe()) !== fcTimerRecipe) break
+      }
+      check(
+        'GQ-01 前提: タイマーを始めた手順より先へ進んでいる',
+        fcAdvanced > 0 && (await fcCounter()) !== fcTimerAt,
+        `タイマーの手順=${fcTimerAt} 進んだ先=${await fcCounter()}（${fcAdvanced}回）`,
+      )
+
+      /**
+       * 「いま、どこに居るか」の見え方一式。段取りの中の位置・大きく出ている品と手順本文・
+       * 他の品の次の手順（＝済んだ手順の裏返しの投影）をまとめて控える。
+       * 巻き戻しが起きるとこのどれかが必ず変わる
+       */
+      const fcWhere = async () => ({
+        counter: fcNoZw(await fcCounter()).trim(),
+        recipe: fcNoZw(await fcRecipe()).trim(),
+        step: fcNoZw(
+          await fcPage.locator('[data-testid="cook-session-step-text"]').innerText(),
+        ).trim(),
+        others: (
+          await fcPage.locator('[data-testid="cook-session-other-row"]').allInnerTexts()
+        ).map((t) => fcNoZw(t).trim()),
+      })
+      const fcBeforePeek = await fcWhere()
+
+      // 全画面の中のタイマーをタップ（画面上部でも「他の品の〜」の行でも、
+      // どこに出ていても同じ操作になる形で掴む＝置き場所に固定しない）
+      await fcPage
+        .locator('[data-testid="cook-session"] button[aria-label*="のタイマーを調整"]')
+        .first()
+        .click()
+      await fcPage.waitForTimeout(400)
+      await fcPage.locator('[data-testid="timer-adjust-go-step"]').click()
+      await fcPage.waitForTimeout(600)
+      const fcPeek = fcPage.locator('[data-testid="cook-session-timer-peek"]')
+      check('GQ-01 タイマーの手順が読める窓が出る', (await fcPeek.count()) === 1)
+      check(
+        'GQ-01 窓に出るのは、そのタイマーを始めた手順の本文',
+        fcNoZw(
+          await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText(),
+        ).trim() === fcTimerText,
+        `窓=${fcNoZw(await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText()).trim()} / タイマーの手順=${fcTimerText}`,
+      )
+      check(
+        'GQ-01 窓を開いても、いる場所は1つも動かない（進み具合が巻き戻らない）',
+        JSON.stringify(await fcWhere()) === JSON.stringify(fcBeforePeek),
+        `見る前=${JSON.stringify(fcBeforePeek)} 見た後=${JSON.stringify(await fcWhere())}`,
+      )
+      check(
+        'GQ-01 閉じたあとに帰る場所を、窓の中で番号で名乗る',
+        fcNoZw(
+          await fcPage.locator('[data-testid="cook-session-timer-peek-close"]').innerText(),
+        ).includes(fcBeforePeek.counter),
+        `${await fcPage.locator('[data-testid="cook-session-timer-peek-close"]').innerText()} / いる場所=${fcBeforePeek.counter}`,
+      )
+      await fcPage.locator('[data-testid="cook-session-timer-peek-close"]').click()
+      await fcPage.waitForTimeout(400)
+      check(
+        'GQ-01 閉じると、見る前と同じ手順にそのまま居る',
+        (await fcPeek.count()) === 0 &&
+          JSON.stringify(await fcWhere()) === JSON.stringify(fcBeforePeek),
+        `見る前=${JSON.stringify(fcBeforePeek)} 閉じた後=${JSON.stringify(await fcWhere())}`,
+      )
+
+      // --- GQ-02: 別の場所（常駐タイマーバー）から開いても同じ ---
+      //   全画面を閉じている間にタイマーを押したときも、着地は全画面の調理中モード（便FC）で、
+      //   現在地はそのまま。ここが以前は setCurrent でカーソルごと引き戻していた
+      currentCheck = 'GQ-02'
+      const fcBeforeBar = await fcWhere()
       await fcPage.locator('[data-testid="cook-session-close"]').click()
       await fcPage.waitForTimeout(700)
       check(
-        'FC-05 前提: 調理中モードを閉じると常駐タイマーバーが見える',
+        'GQ-02 前提: 調理中モードを閉じると常駐タイマーバーが見える',
         (await fcPage.locator('button[aria-label*="のタイマーを調整"]').count()) > 0,
       )
       await fcPage.locator('button[aria-label*="のタイマーを調整"]').first().click()
       await fcPage.waitForTimeout(400)
-      await fcPage
-        .getByRole('dialog', { name: 'タイマーを調整' })
-        .getByRole('button', { name: /^手順.*を開く$/ })
-        .click()
-      await fcPage.waitForTimeout(900)
+      const fcBarGoStep = fcPage.locator('[data-testid="timer-adjust-go-step"]')
+      check(
+        'GQ-02 常駐バーの窓でも「見る」と名乗る（調理の途中だから現在地は動かない）',
+        /見る$/.test(fcNoZw(await fcBarGoStep.innerText()).trim()),
+        await fcBarGoStep.innerText(),
+      )
+      await fcBarGoStep.click()
+      await fcPage.waitForTimeout(1200)
       check(
         'FC-05 タイマーから戻ると、段取りの一覧ではなく調理中モードが開く',
         (await fcPage.locator('[data-testid="cook-session"]').count()) === 1,
       )
       check(
-        'FC-05 戻り先はそのタイマーを始めた手順',
-        (await fcCounter()) === fcTimerAt && (await fcRecipe()) === fcTimerRecipe,
-        `タイマーの手順=${fcTimerAt}/${fcTimerRecipe} 戻り先=${await fcCounter()}/${await fcRecipe()}`,
+        'GQ-02 戻り先は閉じたときと同じ手順（タイマーの手順まで引き戻されない）',
+        JSON.stringify(await fcWhere()) === JSON.stringify(fcBeforeBar),
+        `閉じたとき=${JSON.stringify(fcBeforeBar)} 戻り先=${JSON.stringify(await fcWhere())}`,
       )
+      check(
+        'GQ-02 そのタイマーの手順は、見るだけの窓で読める',
+        (await fcPage.locator('[data-testid="cook-session-timer-peek"]').count()) === 1 &&
+          fcNoZw(
+            await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText(),
+          ).trim() === fcTimerText,
+        fcNoZw(
+          await fcPage
+            .locator('[data-testid="cook-session-timer-peek-text"]')
+            .innerText()
+            .catch(() => 'なし'),
+        ).trim(),
+      )
+      await fcPage.locator('[data-testid="cook-session-timer-peek-close"]').click()
+      await fcPage.waitForTimeout(400)
 
       // 戻ったあとに手順を動かせること（2026-08-10 便FCで実際に踏んだ不具合の再発防止）。
       // 全画面を開くのと同じ処理の中で ?focusStep= を消すと、画面遷移の仕組みだけが古いURLを
@@ -28361,9 +28478,11 @@ try {
       )
       const foAdjust = foPage.getByRole('dialog', { name: 'タイマーを調整' })
       check('FO-08 代わりにタイマーの窓が開く', (await foAdjust.count()) === 1)
-      const foGoToStep = foAdjust.getByRole('button', { name: /手順.*を開く/ })
+      // 2026-08-15 便GQ: 調理の途中かどうかで「開く」「見る」に名前が分かれるので、
+      // ここは**手順への道があること**だけを見る（動きの語で掴まない）
+      const foGoToStep = foAdjust.locator('[data-testid="timer-adjust-go-step"]')
       check(
-        'FO-08 窓の中には手順へ移る道が残っている（名前を読んで押せる）',
+        'FO-08 窓の中には手順への道が残っている（名前を読んで押せる）',
         (await foGoToStep.count()) === 1,
         (await foGoToStep.count()) === 1 ? await foGoToStep.innerText() : 'なし',
       )
@@ -28374,7 +28493,7 @@ try {
       await foGoToStep.click()
       await foPage.waitForTimeout(1200)
       check(
-        'FO-08 窓のボタンからは今までどおりその手順へ移る',
+        'FO-08 窓のボタンからは今までどおり手順のある画面へ進む',
         foPage.url() !== foUrlBefore,
         foPage.url(),
       )
