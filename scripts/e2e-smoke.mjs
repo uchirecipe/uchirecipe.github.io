@@ -513,7 +513,11 @@ const installConfirmAutoPress = () => {
  */
 const collectConfirms = (targetPage, sink) =>
   targetPage.exposeFunction('__e2eConfirmSeen', (text) => {
-    sink.push(text)
+    // 呼ぶ側は「配列に貯める」も「その場で受け取る関数」も使う（旧 page.on('dialog') の置き換えで
+    // 両方の書き方が残っている）。**関数を渡された入れ物で push を呼ぶと、ページ側に
+    // 例外が返って pageerror になる**（2026-08-15に6件発生）ので、両方を受ける
+    if (typeof sink === 'function') sink(text)
+    else sink.push(text)
   })
 
 /** 確認の窓の答え方を切り替える（'accept' 既定 / 'cancel' / 'off'）。ページを開いたあとに呼ぶ */
@@ -535,6 +539,23 @@ const clickReplaceImport = async (targetPage) => {
   await setConfirmAnswer(targetPage, 'off')
   const chooser = targetPage.waitForEvent('filechooser')
   await targetPage.getByRole('button', { name: 'データを上書き' }).click()
+  // 自動押しを止めているぶん、**1回目の確認文が貯め口に入らない**。手で押す前に自分で渡す
+  // （でないと「2回とも件数が入っているか」を測れない。2026-08-15）
+  await targetPage.evaluate(() => {
+    const t = (document.querySelector('[data-testid="confirm"]')?.textContent ?? '').replaceAll(
+      '\u200b',
+      '',
+    )
+    if (t) {
+      window.__confirmDialogs = window.__confirmDialogs || []
+      window.__confirmDialogs.push(t)
+      try {
+        window.__e2eConfirmSeen?.(t)
+      } catch {
+        /* 受け取り口を用意していない検証では何もしない */
+      }
+    }
+  })
   await targetPage.locator('[data-testid="confirm-ok"]').click()
   const fileChooser = await chooser
   // ファイルを選んだあとに出る2回目の確認は、今までどおり仕掛けに任せる
@@ -14760,18 +14781,33 @@ try {
         'FORMRESET-01a 基本レシピの編集画面に「デフォルトに戻す」ボタンが出る',
         await frPage.getByRole('button', { name: 'デフォルトに戻す' }).isVisible(),
       )
+      // 2026-08-15 便GW（A-5・オーナー承認）で「もう一度押す」方式をやめ、他の破壊的操作と
+      // 同じ画面の中の窓にそろえた。**確かめたいのは「1回押しただけでは戻らない」こと**なので、
+      // 方式そのものではなく**その性質**で測る（禁じ手④）
+      await setConfirmAnswer(frPage, 'off')
       await frPage.getByRole('button', { name: 'デフォルトに戻す' }).click()
-      await frPage.waitForTimeout(200)
+      await frPage.waitForTimeout(300)
       check(
-        'FORMRESET-01a 1回目のクリックでは実行されず「もう一度押すと戻します」に変わる',
-        await frPage.getByRole('button', { name: 'もう一度押すと戻します' }).isVisible(),
+        'FORMRESET-01a 1回押しただけでは戻らず、確認を出す',
+        (await frPage.locator('[data-testid="confirm"]').count()) === 1,
       )
       check(
         'FORMRESET-01a 確認待ちの間はまだ変更後のタイトルのまま',
         (await titleInput.inputValue()) === 'テスト改名',
       )
+      check(
+        'FORMRESET-01a 確認には、戻るものと変わらないものが両方書いてある（規約F）',
+        await frPage.evaluate(() => {
+          const t = (document.querySelector('[data-testid="confirm"]')?.textContent ?? '').replaceAll(
+            '\u200b',
+            '',
+          )
+          return t.includes('戻るもの') && t.includes('変わらないもの')
+        }),
+      )
 
-      await frPage.getByRole('button', { name: 'もう一度押すと戻します' }).click()
+      await frPage.locator('[data-testid="confirm-ok"]').click()
+      await setConfirmAnswer(frPage, 'accept')
       await frPage.waitForTimeout(300)
       check(
         'FORMRESET-01a 2回目のクリックでタイトルが原本(肉じゃが)に戻る',
