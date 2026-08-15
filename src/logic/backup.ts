@@ -17,6 +17,7 @@ import {
 } from '../db/types'
 import { buildSearchWords } from './kana'
 import { backupFileName } from './fileSave'
+import { formatFileSize } from './fileSize'
 import { clearCookNaviSession } from './cookNaviSession'
 import { ja } from '../i18n/ja'
 
@@ -216,16 +217,64 @@ export async function exportSelectedRecipes(
   return { json: JSON.stringify(file), count: recipes.length }
 }
 
+/** 確認の窓に出す箇条書き1行（labelは太字の見出し、textはその中身） */
+export interface ExportConfirmBullet {
+  label: string
+  text: string
+}
+
+/** 「選択したレシピの書き出し」の確認の中身（見出し・箇条書き・補足） */
+export interface SelectedRecipesExportConfirm {
+  title: string
+  bullets: ExportConfirmBullet[]
+  /** 箇条書きの下に小さめの文字で出す補足 */
+  notes: string[]
+}
+
 /**
- * 「選択したレシピの書き出し」の確認文（純ロジック・DB非依存。2026-08-09 便EM）。
- * 規約F: 何が含まれ、何が含まれないかを件数つきで両方書く。文言そのものは src/i18n/ja.ts が持ち、
- * ここは件数の差し込みだけを行う（scripts/test-logic.mjs で固定する）。
- * selected=選んだ品数 / remaining=選んでいない品数（ファイルに入らない品数）
+ * 「選択したレシピの書き出し」の確認の中身（純ロジック・DB非依存。2026-08-09 便EM →
+ * 2026-08-15 便GVで素のダイアログから画面の中の窓へ移し、箇条書きの形にした）。
+ *
+ * 規約F: 何が入り、何が入らないかを件数つきで両方書く。文言そのものは src/i18n/ja.ts が持ち、
+ * ここは件数・大きさの差し込みと、保存先の言い分けだけを行う（scripts/test-logic.mjs で固定する）。
+ *
+ * bytes は**実際に作ったJSONのバイト数**を渡すこと（見積りを渡さない）。
+ * canPickLocation は保存先を選べる端末か（logic/fileSave.ts の supportsSaveFilePicker の結果）。
+ * 選べない端末（iPhone・iPad・Firefox等）で「選べます」と書かないための分岐で、
+ * 設定のバックアップ書き出しが完了の知らせを経路ごとに分けているのと同じ作法。
  */
-export function buildSelectedRecipesExportConfirmText(selected: number, remaining: number): string {
-  return ja.recipes.exportSelectedConfirm
-    .replace('{r}', String(selected))
-    .replace('{rest}', String(remaining))
+export function buildSelectedRecipesExportConfirm(params: {
+  selected: number
+  remaining: number
+  bytes: number
+  canPickLocation: boolean
+}): SelectedRecipesExportConfirm {
+  const t = ja.recipes
+  return {
+    title: t.exportSelectedConfirmTitle.replace('{r}', String(params.selected)),
+    bullets: [
+      { label: t.exportSelectedConfirmIncludeLabel, text: t.exportSelectedConfirmIncludeText },
+      {
+        label: t.exportSelectedConfirmExcludeLabel,
+        text: t.exportSelectedConfirmExcludeText.replace('{rest}', String(params.remaining)),
+      },
+      {
+        label: t.exportSelectedConfirmSizeLabel,
+        text: t.exportSelectedConfirmSizeText.replace('{size}', formatFileSize(params.bytes)),
+      },
+      {
+        label: t.exportSelectedConfirmSaveToLabel,
+        text: params.canPickLocation
+          ? t.exportSelectedConfirmSaveToPick
+          : t.exportSelectedConfirmSaveToDownload,
+      },
+    ],
+    notes: [
+      t.exportSelectedConfirmNoteKept,
+      t.exportSelectedConfirmNoteShare,
+      t.exportSelectedConfirmNoteRestore,
+    ],
+  }
 }
 
 /** JSONをファイルとしてダウンロードし、最終バックアップ日時を記録する */
@@ -1119,7 +1168,7 @@ export function buildUpdatedSetRecipe(
     sourceUrl: incoming.sourceUrl,
     keywords: incoming.keywords,
     sourceSetName: setName,
-    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords, incoming.steps),
+    searchWords: buildSearchWords(existing.title, incoming.ingredients, incoming.tags, incoming.keywords, incoming.steps, incoming.dishType),
     updatedAt: now,
   }
 }
@@ -1179,7 +1228,7 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
         isStarter: true,
         sourceSetId: file.setId,
         sourceSetName: file.setName,
-        searchWords: buildSearchWords(rest.title, rest.ingredients, rest.tags, rest.keywords, rest.steps),
+        searchWords: buildSearchWords(rest.title, rest.ingredients, rest.tags, rest.keywords, rest.steps, rest.dishType),
         createdAt: now,
         updatedAt: now,
       }

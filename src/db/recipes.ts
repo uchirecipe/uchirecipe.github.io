@@ -32,7 +32,7 @@ export async function createRecipe(input: RecipeInput): Promise<number> {
     ...cleaned,
     isFavorite: false,
     cookedLogs: [],
-    searchWords: buildSearchWords(cleaned.title, cleaned.ingredients, cleaned.tags, cleaned.keywords, cleaned.steps),
+    searchWords: buildSearchWords(cleaned.title, cleaned.ingredients, cleaned.tags, cleaned.keywords, cleaned.steps, cleaned.dishType),
     createdAt: now,
     updatedAt: now,
   }
@@ -54,7 +54,7 @@ export async function updateRecipe(id: number, input: RecipeInput): Promise<void
   const cleaned = cleanInput(input)
   await db.recipes.update(id, {
     ...cleaned,
-    searchWords: buildSearchWords(cleaned.title, cleaned.ingredients, cleaned.tags, cleaned.keywords, cleaned.steps),
+    searchWords: buildSearchWords(cleaned.title, cleaned.ingredients, cleaned.tags, cleaned.keywords, cleaned.steps, cleaned.dishType),
     updatedAt: Date.now(),
   })
 }
@@ -193,7 +193,7 @@ export async function rebuildSearchWordsIfNeeded(): Promise<void> {
     if (!searchIndexNeedsRebuild(settings)) return
     const all = await db.recipes.toArray()
     for (const recipe of all) {
-      const searchWords = buildSearchWords(recipe.title, recipe.ingredients, recipe.tags, recipe.keywords, recipe.steps)
+      const searchWords = buildSearchWords(recipe.title, recipe.ingredients, recipe.tags, recipe.keywords, recipe.steps, recipe.dishType)
       await db.recipes.update(recipe.id!, { searchWords })
     }
     await db.settings.put({

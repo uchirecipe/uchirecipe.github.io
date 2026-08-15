@@ -24,20 +24,12 @@ import {
   ListChecks,
   CheckCircle2,
   CalendarPlus,
-  Download,
   X,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
 import { buildBulkDeleteConfirmText } from '../logic/recipeDelete'
-import { exportSelectedRecipes, buildSelectedRecipesExportConfirmText } from '../logic/backup'
-import {
-  supportsSaveFilePicker,
-  saveJsonWithPicker,
-  downloadJson,
-  isAbortError,
-  selectedRecipesFileName,
-} from '../logic/fileSave'
+import SelectedRecipesExport from '../components/SelectedRecipesExport'
 import { useSettings, updateSettings } from '../db/settings'
 import { addRecipesToToday } from '../db/mealPlan'
 import { todayString } from '../logic/date'
@@ -715,7 +707,6 @@ export default function RecipesPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const [exporting, setExporting] = useState(false)
   // 献立の「＋ 今日の献立を選ぶ」から来た選択モードか(2026-08-11 便FP)。
   // trueの間は「今日の献立に入れるレシピを選んでいます」と決定ボタンを出し、
   // 書き出し・削除は出さない(入れに来た操作の隣に、消す操作を並べない)
@@ -853,54 +844,6 @@ export default function RecipesPage() {
       setMessage(ja.recipes.bulkDeletedToast.replace('{r}', String(removed)))
     } finally {
       setDeleting(false)
-    }
-  }
-
-  /**
-   * 選んだレシピだけをファイルに書き出す（2026-08-09 便EM。2026-08-02 オーナー決定
-   * 「バックアップの内容分割は見送り・選択レシピの書き出しが代替」）。
-   *
-   * 書式は全体のバックアップと同じで、読み込みも設定の「バックアップを読み込む」を使う
-   * （新しい読み込み口は作らない）。保存経路は古い記録の書き出しと同じ考え方で、
-   * 保存先を選べる端末はピッカー・それ以外は自動ダウンロード。バックアップの
-   * 「前回の場所に上書き」の行き先は塗り替えない（saveJsonWithPicker）。
-   * 「最終バックアップ」の日時も更新しない＝全体のバックアップを取ったことにはしない。
-   * 実行しても端末のレシピは1品も減らないので、選択は解除せずそのまま残す
-   */
-  const exportSelected = async () => {
-    if (selectedIds.length === 0 || exporting) return
-    const remaining = Math.max(0, (recipes?.length ?? selectedIds.length) - selectedIds.length)
-    if (!window.confirm(buildSelectedRecipesExportConfirmText(selectedIds.length, remaining))) return
-    setExporting(true)
-    try {
-      const { json, count } = await exportSelectedRecipes(selectedIds)
-      if (count === 0) {
-        setMessage(ja.recipes.exportSelectedError)
-        return
-      }
-      const name = selectedRecipesFileName()
-      let picked = false
-      if (supportsSaveFilePicker()) {
-        try {
-          await saveJsonWithPicker(json, name)
-          picked = true
-        } catch (err) {
-          if (isAbortError(err)) return // 保存先選択を閉じた: 何も起きなかった扱い
-          downloadJson(json, name) // 権限拒否・ピッカーが使えない環境はダウンロードへ切り替える
-        }
-      } else {
-        downloadJson(json, name)
-      }
-      setMessage(
-        (picked
-          ? ja.recipes.exportSelectedDonePicked
-          : ja.recipes.exportSelectedDoneDownloaded
-        ).replace('{r}', String(count)),
-      )
-    } catch {
-      setMessage(ja.recipes.exportSelectedError)
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -1712,15 +1655,13 @@ export default function RecipesPage() {
                 削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM)。
                 献立に入れに来た選択モードでは、書き出し・削除は出さない(2026-08-11 便FP) */}
             {!selectingForToday && selectedIds.length > 0 && (
-              <button
-                type="button"
-                onClick={() => void exportSelected()}
-                disabled={exporting}
-                className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-2.5 font-bold text-accent-ink shadow-sm disabled:opacity-40"
-              >
-                <Download size={16} aria-hidden />
-                {ja.recipes.exportSelected.replace('{r}', String(selectedIds.length))}
-              </button>
+              /* 書き出しは一式を部品に切り出してある（2026-08-15 便GV）。
+                 保存先を選ぶ画面・確認の窓・ファイルの大きさの計算がその中に入っている */
+              <SelectedRecipesExport
+                selectedIds={selectedIds}
+                totalCount={recipes?.length ?? selectedIds.length}
+                onMessage={setMessage}
+              />
             )}
             {!selectingForToday && selectedIds.length > 0 && (
               <button

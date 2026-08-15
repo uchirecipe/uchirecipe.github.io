@@ -1,6 +1,8 @@
 import { INGREDIENT_READINGS, READINGS_VERSION } from './ingredientReadings'
 import { DISH_WORD_READINGS, TITLE_READINGS } from './titleReadings'
 import { isSeasoningLike } from './mainIngredients'
+import { guessDishType } from './dishTypeGuess'
+import type { DishType } from '../db/types'
 
 /**
  * 検索の「ゆらぎ」対策。
@@ -239,6 +241,34 @@ export function applianceSearchWords(steps: readonly { text: string }[]): string
 }
 
 /**
+ * 料理の種別（主菜・副菜・汁物・その他）を検索語に足すための語
+ * （2026-08-15 便GV・オーナー実機「検索窓に『主菜』『副菜』と打ち込んでも絞り込みできない」）。
+ *
+ * 絞り込みの「料理の種別」チップ（レシピ一覧の条件をしぼる）には前から種別があったが、
+ * 検索語（buildSearchWords）には種別が入っていなかったため、検索窓に打った人だけが0件に落ちていた。
+ *
+ * **ここに書く語は ja.dishType のチップ名と同じにする**。違う言葉を入れると
+ * 「チップでは出るのに、同じ言葉を検索窓に打つと出ない」という食い違いが生まれる。
+ * ja.dishType の文言を変えたらここも直し、SEARCH_INDEX_VERSION を+1すること
+ * （scripts/test-logic.mjs の GV-1 が両者の一致を見張っている）。
+ * 読み（しゅさい・ふくさい・しるもの）は TAG_READINGS が持っているので、
+ * buildSearchWords の中で toTagKey を通したときに自動で一緒に入る。
+ *
+ * 言い換え（「メイン」「おかず」「サイド」「スープ」「デザート」「おやつ」）は**入れない**:
+ *  - 「おかず」は主菜にも副菜にも当たる語で、どちらに足しても片方の期待を外す
+ *  - 「スープ」を汁物に足すと、味噌汁・豚汁・鍋まで「スープ」で並ぶ
+ *  - 「デザート」「おやつ」を『その他』に足すと、パン・飲み物（dishTypeGuessがその他に寄せる）
+ *    まで甘いもの扱いで並ぶ
+ * 料理名に「メインディッシュ」「スープ」等が入っているレシピは、従来どおり料理名で引ける。
+ */
+const DISH_TYPE_SEARCH_WORDS: Record<DishType, string> = {
+  main: '主菜',
+  side: '副菜',
+  soup: '汁物',
+  dessert: 'その他',
+}
+
+/**
  * 料理名・材料名・タグ・検索キーワードから検索用キーワード一覧を作る（保存時に呼ぶ）。
  *
  * 調味料的な材料（大さじ/小さじ/単位なし/「少々」等。isSeasoningLikeと同じ基準）は
@@ -259,6 +289,12 @@ export function applianceSearchWords(steps: readonly { text: string }[]): string
  * 2026-08-12 便FS-6: 手順本文に出てくる**調理器具**（電子レンジ・オーブン・炊飯器など）も
  * 足す（APPLIANCE_SEARCH_WORDS）。手順本文をまるごと検索対象にはしない理由は同定数の説明を参照。
  * 第5引数も省略可能なので、手順を渡さない呼び出し元はこれまでと同じ結果になる。
+ *
+ * 2026-08-15 便GV: 料理の種別（主菜・副菜・汁物・その他）も足す（DISH_TYPE_SEARCH_WORDS）。
+ * 種別が未設定のレシピは、絞り込みの「料理の種別」チップと同じ推定（logic/dishTypeGuess の
+ * guessDishType。search.ts の recipeDishType が使うものと同じ）に倒す＝同じレシピが
+ * 「チップでは副菜に出るのに、検索窓の『副菜』では出ない」とならないようにする。
+ * 第6引数も省略可能で、省略時は推定に倒れる。
  */
 export function buildSearchWords(
   title: string,
@@ -266,15 +302,18 @@ export function buildSearchWords(
   tags: readonly string[],
   keywords?: readonly string[],
   steps?: readonly { text: string }[],
+  dishType?: DishType,
 ): string[] {
   const words = new Set<string>()
   const mainNames = ingredients.filter((ing) => !isSeasoningLike(ing)).map((ing) => ing.name)
+  const effectiveDishType = dishType ?? guessDishType({ title, tags, ingredients })
   for (const raw of [
     title,
     ...mainNames,
     ...tags,
     ...(keywords ?? []),
     ...applianceSearchWords(steps ?? []),
+    DISH_TYPE_SEARCH_WORDS[effectiveDishType],
   ]) {
     const trimmed = raw.trim()
     if (!trimmed) continue
@@ -302,7 +341,7 @@ export function buildSearchWords(
  * db/recipes.ts の rebuildSearchWordsIfNeeded が settings.searchIndexVersion と比較し、
  * 食い違っていれば起動時に全レシピのsearchWordsを再構築する。
  */
-export const SEARCH_INDEX_VERSION = 3 // v3: 手順本文の調理器具も検索語に入れる(2026-08-12 便FS-6)
+export const SEARCH_INDEX_VERSION = 4 // v4: 料理の種別(主菜・副菜・汁物・その他)も検索語に入れる(2026-08-15 便GV)
 
 /**
  * settingsに保存済みのバージョンが古く、全レシピのsearchWordsを再構築すべきかを判定する

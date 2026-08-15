@@ -20778,7 +20778,8 @@ try {
   // --- RECIPEEXPORT-EM: 「選択したレシピの書き出し」(2026-08-09 便EM。2026-08-02 オーナー決定
   // 「バックアップの内容分割は見送り・選択レシピの書き出しが代替」)。
   // 確かめること:
-  //  (a) レシピ一覧の「選択」に書き出しボタンが出て、確認文が規約F(含まれるもの/含まれないもの)を満たす
+  //  (a) レシピ一覧の「選択」に書き出しボタンが出て、確認が規約F(入るもの/入らないもの)を満たす
+  //      (2026-08-15 便GVで、確認は素のダイアログから画面の中の窓へ移った)
   //  (b) 書き出したファイルは選んだ品だけで、設定(=Pro解錠コード)も他テーブルも入っていない
   //  (c) 書き出しても端末のレシピは1品も減らない
   //  (d) そのファイルが既存の読み込み経路(設定「バックアップを読み込む」→「今のデータに追加」)に
@@ -20843,29 +20844,60 @@ try {
       const reExportBtn = rePage.getByRole('button', { name: `選択したレシピ${rePicked}品を書き出す` })
       check('RECIPEEXPORT-EM(a) 選択モードに「選択したレシピ◯品を書き出す」が出る', await reExportBtn.isVisible())
 
+      // 2026-08-15 便GV: 確認はブラウザの素のダイアログから画面の中の窓へ移した
+      // (オーナー実機「文章が長い。箇条書きや太字で読みやすくして」。素のダイアログでは
+      // 太字も箇条書きも作れない)。押す→中身を作る→窓→保存、の順になる
+      await reExportBtn.click()
+      await rePage.waitForTimeout(1000)
+      const reConfirm = rePage.getByTestId('recipes-export-confirm')
+      check('RECIPEEXPORT-EM(a) 確認は画面の中の窓で出る(素のポップアップを出さない)', await reConfirm.isVisible())
+      check(
+        'RECIPEEXPORT-EM(a) 書き出しでブラウザの素のダイアログを出さない',
+        lastDialog === '',
+        lastDialog,
+      )
+      const reConfirmText = (await reConfirm.innerText()) ?? ''
+
+      // (a) 確認の中身(規約F): 入るもの・入らないもの・端末のレシピが減らないこと・戻し方
+      check(
+        'RECIPEEXPORT-EM(a) 確認に「入るもの」と「入らないもの」が両方ある',
+        reConfirmText.includes('入るもの') && reConfirmText.includes('入らないもの'),
+        reConfirmText,
+      )
+      // 「設定」は戻し方の補足(設定の「バックアップを読み込む」)にも出るので、
+      // 入らないものの行の中に書いてあることまで見る
+      check(
+        'RECIPEEXPORT-EM(a) 確認に作った記録の写真・設定が入らないと書いてある',
+        /入らないもの:[^\n]*作った記録の写真/.test(reConfirmText) && /入らないもの:[^\n]*設定/.test(reConfirmText),
+        reConfirmText,
+      )
+      check(
+        'RECIPEEXPORT-EM(a) 確認に端末のレシピが減らないことと戻し方が書いてある',
+        reConfirmText.includes('端末のレシピは減りません') &&
+          reConfirmText.includes('設定の「バックアップを読み込む」の「今のデータに追加」'),
+        reConfirmText,
+      )
+      // 2026-08-15 便GV(オーナー実機「ファイルのサイズも書いてあると親切」)。
+      // 実測値なので数字そのものは決め打ちせず、大きさの行が出ていることだけを見る
+      check(
+        'RECIPEEXPORT-EM(a) 確認にファイルの大きさが出る',
+        /ファイルの大きさ:\s*約\d+(\.\d+)?(B|KB|MB)/.test(reConfirmText),
+        reConfirmText,
+      )
+      // 保存先の言い分け(2026-08-15 便GV)。e2eは自動化環境なので必ず自動ダウンロード側になる
+      // (logic/fileSave.ts の supportsSaveFilePicker が navigator.webdriver を見るため)。
+      // 対応していない環境で「選べます」と書かないことを、この経路で確かめる
+      check(
+        'RECIPEEXPORT-EM(a) 保存先を選べない環境では「選べます」と書かない',
+        reConfirmText.includes('保存先') && !reConfirmText.includes('選べます'),
+        reConfirmText,
+      )
+
       const [reDownload] = await Promise.all([
         rePage.waitForEvent('download'),
-        reExportBtn.click(),
+        rePage.getByTestId('recipes-export-confirm-ok').click(),
       ])
       await rePage.waitForTimeout(600)
-
-      // (a) 確認文(規約F): 含まれるもの・含まれないもの・端末のレシピが残ること・戻し方
-      check(
-        'RECIPEEXPORT-EM(a) 確認文に「含まれるもの」と「含まれないもの」が両方ある',
-        lastDialog.includes('含まれるもの') && lastDialog.includes('含まれないもの'),
-        lastDialog,
-      )
-      check(
-        'RECIPEEXPORT-EM(a) 確認文に「作った記録」の写真・アプリの設定が含まれないと書いてある',
-        lastDialog.includes('「作った記録」の写真') && lastDialog.includes('アプリの設定'),
-        lastDialog,
-      )
-      check(
-        'RECIPEEXPORT-EM(a) 確認文に端末のレシピが残ることと戻し方が書いてある',
-        lastDialog.includes('端末のレシピはそのまま残ります') &&
-          lastDialog.includes('設定の「バックアップを読み込む」から「今のデータに追加」'),
-        lastDialog,
-      )
       check(
         'RECIPEEXPORT-EM(b) ファイル名が全体のバックアップと見分けられる',
         /^uchi-recipe-recipes-\d{4}-\d{2}-\d{2}\.json$/.test(reDownload.suggestedFilename()),
@@ -24360,7 +24392,7 @@ try {
           fa4Terms.indexOf('書き出したご本人の責任') < fa4Terms.indexOf('規約の変更'),
       )
 
-      // 書き出しの確認文(ダイアログ)。押しても書き出さずに閉じる＝ファイルは作らない
+      // 書き出しの確認(画面の中の窓・2026-08-15 便GV)。「やめる」で閉じる＝ファイルは作らない
       let fa4Dialog = ''
       fa4Page.on('dialog', (dialog) => {
         fa4Dialog = dialog.message()
@@ -24379,27 +24411,27 @@ try {
       await fa4Page
         .getByRole('button', { name: `選択したレシピ${fa4Picked}品を書き出す` })
         .click()
-      await fa4Page.waitForTimeout(600)
+      await fa4Page.waitForTimeout(1000)
+      const fa4Confirm = fa4Page.getByTestId('recipes-export-confirm')
+      const fa4Text = (await fa4Confirm.innerText()) ?? ''
       check(
-        'FA-3 書き出しの確認文に人へ渡すときの一言が出る',
-        fa4Dialog.includes(
-          'ほかのサイトや本から登録したレシピもそのまま入るので、人に渡す・公開するときは中身をご確認ください。',
-        ),
-        fa4Dialog,
+        'FA-3 書き出しの確認に人へ渡すときの一言が出る',
+        fa4Text.includes('人に渡す・公開するときは中身をご確認ください'),
+        fa4Text,
       )
       check(
-        'FA-3 一言は1行だけ(重い警告にしない。確認文は5行)',
-        fa4Dialog.split('\n').length === 5,
-        `行数=${fa4Dialog.split('\n').length}`,
+        'FA-3 一言は1文だけ(重い警告にしない)',
+        fa4Text.split('ご確認ください').length - 1 === 1,
+        fa4Text,
       )
-      check(
-        'FA-3 選択レシピの書き出しでは解錠コードの話をしない(このファイルには入らない)',
-        !fa4Dialog.includes('解錠コード'),
-        fa4Dialog,
-      )
+      check('FA-3 選択レシピの書き出しでは解錠コードの話をしない(このファイルには入らない)', !fa4Text.includes('解錠コード'), fa4Text)
+      check('FA-3 書き出しの確認でブラウザの素のダイアログを出さない', fa4Dialog === '', fa4Dialog)
+      await fa4Page.getByTestId('recipes-export-confirm-cancel').click()
+      await fa4Page.waitForTimeout(400)
       check(
         'FA-3 閉じれば何も書き出されない(端末のレシピも減らない)',
-        (await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()) === fa4Picked,
+        (await fa4Page.getByTestId('recipes-export-confirm').count()) === 0 &&
+          (await fa4Page.locator('main a[href^="#/recipes/"]:not([href$="/new"])').count()) === fa4Picked,
       )
       // 全体のバックアップは言うべきことが違う: 解錠コードが入るので渡さないと言い切る
       await fa4Page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
