@@ -24786,6 +24786,13 @@ try {
       const fcTimerRecipe = await fcRecipe()
       // BudouX がゼロ幅スペースを差し込むので、突き合わせる前に必ず外す（CLAUDE.md 禁じ手②）
       const fcNoZw = (t) => (t ?? '').replace(/\u200B/g, '')
+      /**
+       * 本文どうしを突き合わせるときは、**空白と改行も外してから**比べる（CLAUDE.md 禁じ手②）。
+       * 手順カードの本文には時間のボタンが埋まっていて innerText に改行が入るが、
+       * 見るだけの窓はただの文字なので改行が入らない。同じ一文でも文字列としては一致しない
+       * （2026-08-15。手順を割る変更のあとに実際に落ちた）
+       */
+      const fcFlat = (t) => fcNoZw(t).replace(/\s+/g, '')
       // タイマーを始めた手順の本文（あとで「見るだけ」の窓に出ているかを突き合わせる）
       const fcTimerText = fcNoZw(
         await fcPage.locator('[data-testid="cook-session-step-text"]').innerText(),
@@ -24898,9 +24905,8 @@ try {
       check('GQ-01 タイマーの手順が読める窓が出る', (await fcPeek.count()) === 1)
       check(
         'GQ-01 窓に出るのは、そのタイマーを始めた手順の本文',
-        fcNoZw(
-          await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText(),
-        ).trim() === fcTimerText,
+        fcFlat(await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText()) ===
+          fcFlat(fcTimerText),
         `窓=${fcNoZw(await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText()).trim()} / タイマーの手順=${fcTimerText}`,
       )
       check(
@@ -24957,9 +24963,9 @@ try {
       check(
         'GQ-02 そのタイマーの手順は、見るだけの窓で読める',
         (await fcPage.locator('[data-testid="cook-session-timer-peek"]').count()) === 1 &&
-          fcNoZw(
+          fcFlat(
             await fcPage.locator('[data-testid="cook-session-timer-peek-text"]').innerText(),
-          ).trim() === fcTimerText,
+          ) === fcFlat(fcTimerText),
         fcNoZw(
           await fcPage
             .locator('[data-testid="cook-session-timer-peek-text"]')
