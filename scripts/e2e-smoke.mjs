@@ -14860,10 +14860,9 @@ try {
       const ownTitleInput = frPage.getByPlaceholder('例: 肉じゃが')
       await ownTitleInput.fill('FORMRESET改名後')
       await frPage.getByRole('button', { name: '前回保存した内容に戻す' }).click()
-      await frPage.waitForTimeout(300)
-      // 2026-08-15 便GW で「もう一度押す」方式は窓にそろえた（上の FORMRESET-01a と同じ）
-      await frPage.locator('[data-testid="confirm-ok"]').click()
-      await frPage.waitForTimeout(300)
+      // 2026-08-15 便GW で「もう一度押す」方式は窓にそろえた。ここは自動押しに任せる
+      // （01a のように自動押しを止めていないので、自分で押しにいくと押す相手が既に消えている）
+      await frPage.waitForTimeout(600)
       check(
         'FORMRESET-01b 2回目のクリックで前回保存したタイトルに戻る',
         (await ownTitleInput.inputValue()) === 'FORMRESET自作レシピ',
