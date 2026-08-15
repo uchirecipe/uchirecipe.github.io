@@ -10,11 +10,11 @@ import {
   Leaf,
   Snowflake,
 } from 'lucide-react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { IconKey, Recipe, Season } from '../db/types'
 import { toggleFavorite } from '../db/recipes'
 import { hasNgIngredient } from '../logic/ng'
-import { pickIconKey } from '../logic/icon'
+import { resolveIconKey } from '../logic/icon'
 import { ingredientColorToken } from '../logic/ingredientColor'
 import { pickDisplayIngredientChips } from '../logic/mainIngredients'
 import { ja } from '../i18n/ja'
@@ -72,7 +72,9 @@ export function RecipePlaceholder({
   recipe: Pick<Recipe, 'title' | 'tags' | 'ingredients' | 'iconKey'>
   iconSize?: number
 }) {
-  const key = recipe.iconKey ?? pickIconKey(recipe)
+  // アプリが絵を持たない iconKey が入っていたら自動判定に落とす（2026-08-15 便GU）。
+  // そのまま描こうとすると読めない画像をマスクに使うことになり、タイルが空白になる
+  const key = resolveIconKey(recipe)
   return (
     <div
       className="flex h-full w-full items-center justify-center"
@@ -156,7 +158,18 @@ export default function RecipeCard({
 }: Props) {
   const photoUrl = usePhotoUrl(recipe.photo)
   const hasNg = ngIngredients ? hasNgIngredient(recipe, ngIngredients) : false
-  const showPhoto = photoUrl && !recipe.showIconInsteadOfPhoto
+  /**
+   * 写真が表示できなかったとき（2026-08-15 便GU・オーナー実機フィードバック
+   * 「レシピカードにアイコンも何も表示されていないものがある」）。
+   *
+   * 写真つきのカードは <img> だけを出しており、その写真が読めないとカードの絵の枠が
+   * 丸ごと空白になっていた（代わり絵に戻る道が無かった）。読めなかったときは、
+   * 写真の無いレシピと同じ代わり絵（料理カテゴリの線画）に切り替える。
+   * 別のレシピを描き直すときのために、写真が変わったら判定をやり直す
+   */
+  const [photoBroken, setPhotoBroken] = useState(false)
+  useEffect(() => setPhotoBroken(false), [photoUrl])
+  const showPhoto = photoUrl && !recipe.showIconInsteadOfPhoto && !photoBroken
   const topIngredients = pickDisplayIngredientChips(recipe.ingredients)
   const displayMinutes = showQuickTime
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
@@ -170,7 +183,12 @@ export default function RecipeCard({
       >
         <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm">
           {showPhoto ? (
-            <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
+            <img
+              src={photoUrl}
+              alt={recipe.title}
+              onError={() => setPhotoBroken(true)}
+              className="h-full w-full object-cover"
+            />
           ) : (
             <RecipePlaceholder recipe={recipe} iconSize={24} />
           )}
@@ -267,7 +285,12 @@ export default function RecipeCard({
     >
       <div className="relative aspect-square w-full overflow-hidden">
         {showPhoto ? (
-          <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
+          <img
+            src={photoUrl}
+            alt={recipe.title}
+            onError={() => setPhotoBroken(true)}
+            className="h-full w-full object-cover"
+          />
         ) : (
           <RecipePlaceholder recipe={recipe} />
         )}

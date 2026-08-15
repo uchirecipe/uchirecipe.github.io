@@ -317,6 +317,12 @@
 //         SETBACK-01(設定へ飛ばされたあとの帰り道・2026-08-02 便DF: Pro案内から?back=付きで飛び、
 //         設定の目次チップの上に「◯◯に戻る」が出る・節へスクロールした後も見えている・
 //         押すと元のページ(レシピ一覧/レシピ詳細)へ帰る・タブから直接開いた設定には出さない) /
+//         SELECT-UI-01(レシピ一覧の複数選択・2026-08-15 便GU: 選択中でも画面下のタブはタブ自身が受ける
+//         (旧: カードに重ねる選択ボタンのz-10が、z-indexを持たないタブ帯より上に来て当たり判定を横取りしていた)・
+//         タブを移動して戻ると選択は残らない・案内文どおりタップで選べてもう一度タップで外れる・
+//         選んだあとの操作と「選択をやめる」が一覧を下まで送っても画面の中にある・
+//         抜けるボタンの名前を「完了」のままにしない・写真が読めないレシピのカードは代わり絵に戻る。
+//         スマホ幅(390)とPC幅(1280)の両方で確認) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -19255,7 +19261,7 @@ try {
       await bdPage.waitForTimeout(400)
       check(
         'BULKDEL-01 長押しで選択モードに入る',
-        await bdPage.getByRole('button', { name: '完了', exact: true }).isVisible(),
+        await bdPage.getByTestId('selection-exit').isVisible(),
       )
       check('BULKDEL-01 長押しで詳細に遷移しない', !/#\/recipes\/\d+/.test(bdPage.url()), bdPage.url())
       check(
@@ -19263,17 +19269,21 @@ try {
         ((await bdPage.textContent('body')) ?? '').includes('選択したレシピ1品を削除'),
       )
       // いったん選択モードを抜けてから、「選択」ボタン経由の通常の流れを検証する
-      await bdPage.getByRole('button', { name: '完了', exact: true }).click()
+      // (抜けるボタンは2026-08-15 便GUで「完了」から画面下の帯の「選択をやめる」へ移した)
+      await bdPage.getByTestId('selection-exit').click()
       await bdPage.waitForTimeout(300)
       check(
-        'BULKDEL-01 「完了」で選択モードを抜ける',
+        'BULKDEL-01 選択をやめると選択モードを抜ける',
         await bdPage.getByRole('button', { name: '選択', exact: true }).isVisible(),
       )
 
       await bdPage.getByRole('button', { name: '選択', exact: true }).click()
       await bdPage.waitForTimeout(300)
       const bdSelectingText = (await bdPage.textContent('body')) ?? ''
-      check('BULKDEL-01 選択モードの案内が出る', bdSelectingText.includes('タップして選択'))
+      check(
+        'BULKDEL-01 選択モードの案内が出る',
+        (await bdPage.getByTestId('select-hint').count()) === 1,
+      )
       check(
         'BULKDEL-01 全選択・選択解除が選択操作のすぐ上に出る',
         bdSelectingText.includes('全選択') && bdSelectingText.includes('選択解除'),
@@ -19331,7 +19341,7 @@ try {
       check('BULKDEL-01 カード数が2枚減る', bdAfterCount === bdBeforeCount - 2, `前=${bdBeforeCount} 後=${bdAfterCount}`)
       check(
         'BULKDEL-01 削除後も選択モードは維持し選択だけ解除する(在庫の整理モードと同じ)',
-        await bdPage.getByRole('button', { name: '完了', exact: true }).isVisible(),
+        await bdPage.getByTestId('selection-exit').isVisible(),
       )
 
       // 孤児防止(deleteRecipeと同じ範囲)とトゥームストーンの扱いをIndexedDB直読みで確認
@@ -29147,7 +29157,7 @@ try {
         // 入れたあとも選択モードは続く(書き出し・削除と同じ作法。続けて選び直せる)
         check(
           'FP-02 入れたあとも選択モードのまま続けられる(選択だけ解除される)',
-          (await p.getByRole('button', { name: '完了', exact: true }).count()) === 1 &&
+          (await p.getByTestId('selection-exit').count()) === 1 &&
             (await p.getByTestId('add-selected-to-today').count()) === 0,
         )
         // すでに入っている品を選び直しても、黙って二重に増やさない
@@ -32547,6 +32557,274 @@ try {
     }
   }
 
+
+  // --- SELECT-UI-01: レシピ一覧の複数選択まわり(2026-08-15 便GU・オーナー実機フィードバック4件) ---
+  //  ① 複数選択中に画面下のタブを押すと、タブの下のレシピカードが押されて移動できなかった
+  //  ② 案内文に書いてある操作(タップで選ぶ・もう一度タップで外す)が、そのとおりに効くこと
+  //  ③ 選んだあとの操作と、選択をやめる操作が、一覧を下まで送っても画面の中にあること
+  //  ④ 写真が読めないレシピでも、カードの絵の枠が空白にならない(代わり絵に戻る)こと
+  // 置き場所ではなく「押したときにどうなるか」で測る(どこに出ていても同じ判定になる形)。
+  // タップは座標で送る(実機と同じで、その点でいちばん上にある要素が受ける)。
+  currentCheck = 'SELECT-UI-01'
+  {
+    const suBrowser = await chromium.launch()
+    try {
+      for (const [suLabel, suViewport] of [
+        ['スマホ幅', { width: 390, height: 844 }],
+        ['PC幅', { width: 1280, height: 800 }],
+      ]) {
+        const suCtx = await suBrowser.newContext({ viewport: suViewport })
+        const suPage = await suCtx.newPage()
+        suPage.on('console', (msg) => {
+          if (msg.type() !== 'error') return
+          const text = msg.text()
+          if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+          errors.push(`[console@SELECT-UI-01] ${text}`)
+        })
+        suPage.on('pageerror', (err) => errors.push(`[pageerror@SELECT-UI-01] ${err.message}`))
+        suPage.on('dialog', (d) => void d.accept())
+        await suPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await suPage.waitForTimeout(2200) // 初回シード完了待ち
+
+        const suSelectedCount = () =>
+          suPage.locator('[data-testid="select-card"][aria-pressed="true"]').count()
+        /** 画面の中にあり、下に固定した帯にも隠れていないカードの中心座標 */
+        const suFreeCardPoint = () =>
+          suPage.evaluate(() => {
+            const bars = [...document.querySelectorAll('[data-app-bottom-bar]')]
+            const barTop = bars.reduce((min, bar) => {
+              const r = bar.getBoundingClientRect()
+              return r.height > 0 ? Math.min(min, r.top) : min
+            }, window.innerHeight)
+            const cards = [...document.querySelectorAll('[data-testid="select-card"]')]
+            for (const card of cards.reverse()) {
+              const r = card.getBoundingClientRect()
+              if (r.top >= 0 && r.bottom <= barTop) {
+                return { x: r.x + r.width / 2, y: r.y + r.height / 2, label: card.getAttribute('aria-label') }
+              }
+            }
+            return null
+          })
+        /** 名前で指したカードを画面の中央へ送り、その中心座標を返す(下の帯に隠れない位置) */
+        const suCardPointByLabel = async (cardLabel) => {
+          const point = await suPage.evaluate((name) => {
+            const card = [...document.querySelectorAll('[data-testid="select-card"]')].find(
+              (el) => el.getAttribute('aria-label') === name,
+            )
+            if (!card) return null
+            card.scrollIntoView({ block: 'center' })
+            const r = card.getBoundingClientRect()
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+          }, cardLabel)
+          await suPage.waitForTimeout(300)
+          return point
+        }
+        /**
+         * 下部タブの中心と、その点で実際に当たる要素を返す。
+         * overCard は「その点の真下にレシピカードが敷かれているか」(形の重なりだけで判定)。
+         * この検証は overCard が真のタブについてだけ意味を持つので、前提として別に確かめる
+         */
+        const suTabPoints = () =>
+          suPage.evaluate(() => {
+            const nav = document.querySelector('nav[data-app-bottom-bar]')
+            if (!nav) return []
+            const cardRects = [...document.querySelectorAll('a[href^="#/recipes/"]')].map((el) =>
+              el.getBoundingClientRect(),
+            )
+            return [...nav.querySelectorAll('a')].map((a) => {
+              const r = a.getBoundingClientRect()
+              const x = r.x + r.width / 2
+              const y = r.y + r.height / 2
+              const hit = document.elementFromPoint(x, y)
+              return {
+                label: (a.textContent ?? '').trim(),
+                x,
+                y,
+                overCard: cardRects.some(
+                  (c) => c.left <= x && x <= c.right && c.top <= y && y <= c.bottom,
+                ),
+                insideNav: hit ? nav.contains(hit) : false,
+                hitLabel: hit?.getAttribute?.('aria-label') ?? null,
+              }
+            })
+          })
+        /**
+         * 一覧を下の方まで送る。いちばん下まで送りきらないのは、末尾では下余白のぶん
+         * カードがタブ帯まで届かず「タブの下にカードがある」状態を作れないため
+         */
+        const suScrollDeep = async () => {
+          await suPage.evaluate(() =>
+            window.scrollTo(0, Math.round(document.body.scrollHeight * 0.6)),
+          )
+          await suPage.waitForTimeout(400)
+        }
+
+        await suPage.getByRole('button', { name: '選択', exact: true }).click()
+        await suPage.waitForTimeout(300)
+        await suScrollDeep()
+
+        // ① タブ帯の当たり判定。中心がカードに重なるタブでも、受けるのはタブ自身であること
+        const suTabs = await suTabPoints()
+        const suTabsOverCard = suTabs.filter((t) => t.overCard)
+        const suTabDetail = JSON.stringify(
+          suTabs.map(({ label, overCard, insideNav, hitLabel }) => ({ label, overCard, insideNav, hitLabel })),
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) 前提: タブの下にレシピカードが敷かれている位置まで送れている`,
+          suTabsOverCard.length > 0,
+          suTabDetail,
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) 選択中でも、下にカードがあるタブはタブ自身が受ける(カードが横取りしない)`,
+          suTabsOverCard.length > 0 && suTabsOverCard.every((t) => t.insideNav),
+          suTabDetail,
+        )
+
+        // ③ 一覧の下端付近のカードを選んでも、操作は画面の中にある
+        const suPoint = await suFreeCardPoint()
+        check(
+          `SELECT-UI-01(${suLabel}) 前提: 下の方まで送った位置に、帯に隠れていないカードがある`,
+          !!suPoint,
+        )
+        await suPage.mouse.click(suPoint.x, suPoint.y)
+        await suPage.waitForTimeout(400)
+        check(
+          `SELECT-UI-01(${suLabel}) 一覧の下の方にあるカードをタップすると選べる`,
+          (await suSelectedCount()) === 1,
+        )
+        const suInViewport = async (locator) => {
+          const box = await locator.boundingBox()
+          if (!box) return false
+          return box.y >= 0 && box.y + box.height <= suPage.viewportSize().height
+        }
+        const suExit = suPage.getByTestId('selection-exit')
+        const suDelete = suPage.getByRole('button', { name: /^選択したレシピ\d+品を削除$/ })
+        const suExport = suPage.getByRole('button', { name: /^選択したレシピ\d+品を書き出す$/ })
+        const suToToday = suPage.getByTestId('add-selected-to-today')
+        check(
+          `SELECT-UI-01(${suLabel}) 一覧を下の方まで送っても、選択をやめる操作が画面の中にある`,
+          await suInViewport(suExit),
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) 一覧を下の方まで送っても、献立・書き出し・削除が画面の中にある`,
+          (await suInViewport(suToToday)) &&
+            (await suInViewport(suExport)) &&
+            (await suInViewport(suDelete)),
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) 何品選んでいるかが、操作と同じ場所に出る`,
+          /\d+品を選択中/.test((await suPage.getByTestId('selection-bar').innerText()) ?? ''),
+          await suPage.getByTestId('selection-bar').innerText(),
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) 抜けるボタンを「完了」という名前のままにしない`,
+          (await suPage.getByRole('button', { name: '完了', exact: true }).count()) === 0,
+        )
+
+        // ② 案内文どおり: 同じカードをもう一度タップすると外れる
+        const suPoint2 = await suCardPointByLabel(suPoint.label)
+        await suPage.mouse.click(suPoint2.x, suPoint2.y)
+        await suPage.waitForTimeout(300)
+        check(
+          `SELECT-UI-01(${suLabel}) 同じカードをもう一度タップすると選択が外れる(案内文どおり)`,
+          (await suSelectedCount()) === 0 && (await suDelete.count()) === 0,
+        )
+
+        // ① 実際にタブを押す。移動できること・押した先でカードが選ばれないこと
+        const suPoint3 = await suFreeCardPoint()
+        await suPage.mouse.click(suPoint3.x, suPoint3.y)
+        await suPage.waitForTimeout(300)
+        await suScrollDeep()
+        const suSettingsTab = (await suTabPoints()).find((t) => t.label.includes('設定') && t.overCard)
+        await suPage.mouse.click(suSettingsTab.x, suSettingsTab.y)
+        await suPage.waitForTimeout(900)
+        check(
+          `SELECT-UI-01(${suLabel}) 選択中でもタブを押せば、その画面へ移動する`,
+          suPage.url().includes('#/settings'),
+          suPage.url(),
+        )
+
+        // タブを移動したら選択は残さない(戻ってきた一覧はふだんの状態から始まる)
+        await suPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await suPage.waitForTimeout(1400)
+        check(
+          `SELECT-UI-01(${suLabel}) タブを移動して戻ると、選択は残らずふだんの一覧に戻る`,
+          (await suPage.getByRole('button', { name: '選択', exact: true }).count()) === 1 &&
+            (await suPage.getByTestId('selection-bar').count()) === 0 &&
+            (await suSelectedCount()) === 0,
+        )
+
+        // ③ やめる操作は、選んだものを外してふだんの一覧に戻す
+        await suPage.getByRole('button', { name: '選択', exact: true }).click()
+        await suPage.waitForTimeout(300)
+        const suPoint4 = await suFreeCardPoint()
+        await suPage.mouse.click(suPoint4.x, suPoint4.y)
+        await suPage.waitForTimeout(300)
+        check(`SELECT-UI-01(${suLabel}) 前提: 1品選べている`, (await suSelectedCount()) === 1)
+        await suPage.getByTestId('selection-exit').click()
+        await suPage.waitForTimeout(500)
+        check(
+          `SELECT-UI-01(${suLabel}) 選択をやめると、選んだレシピが外れてふだんの一覧に戻る`,
+          (await suPage.getByTestId('selection-bar').count()) === 0 &&
+            (await suSelectedCount()) === 0 &&
+            (await suPage.getByRole('button', { name: '選択', exact: true }).count()) === 1,
+        )
+
+        // ④ 写真が読めないレシピでも、カードの絵の枠が空白にならない。
+        // 対象はidで名指しする(料理名での探し当ては、名前を含む別のレシピを掴みうる)
+        const suBrokenId = await suPage.evaluate(
+          () =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction(['recipes'], 'readwrite')
+                const store = tx.objectStore('recipes')
+                const g = store.getAll()
+                g.onsuccess = () => {
+                  const target = g.result.find((r) => r.title === '肉じゃが')
+                  // 画像として読めないバイト列(壊れた写真・空の写真の代わり)
+                  store.put({
+                    ...target,
+                    photo: new Blob(['x'], { type: 'image/jpeg' }),
+                    updatedAt: Date.now(),
+                  })
+                  tx.oncomplete = () => resolve(target.id)
+                  tx.onerror = () => reject(tx.error)
+                }
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+        )
+        await suPage.reload({ waitUntil: 'networkidle' })
+        await suPage.waitForTimeout(2000)
+        const suDrawn = await suPage.evaluate((id) => {
+          const card = document.querySelector(`a[href="#/recipes/${id}"]`)
+          if (!card) return { found: false }
+          const img = card.querySelector('img')
+          const icon = [...card.querySelectorAll('span[aria-hidden]')].find((el) => {
+            const cs = getComputedStyle(el)
+            const mask = cs.maskImage !== 'none' ? cs.maskImage : cs.webkitMaskImage
+            return (mask ?? '').includes('/icons/')
+          })
+          return {
+            found: true,
+            brokenImage: !!img && (img.naturalWidth === 0 || img.naturalHeight === 0),
+            hasIcon: !!icon,
+          }
+        }, suBrokenId)
+        check(
+          `SELECT-UI-01(${suLabel}) 写真が読めないレシピのカードは、代わり絵に戻って空白にならない`,
+          suDrawn.found && suDrawn.hasIcon && !suDrawn.brokenImage,
+          JSON.stringify(suDrawn),
+        )
+
+        await suCtx.close()
+      }
+    } finally {
+      await suBrowser.close()
+    }
+  }
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

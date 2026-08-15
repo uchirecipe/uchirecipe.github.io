@@ -353,7 +353,7 @@ import {
 import { searchRecipes, topTagsByUsage, tagUsageCounts } from '../src/logic/search.ts'
 import { buildShareText } from '../src/logic/share.ts'
 import { ingredientColorToken } from '../src/logic/ingredientColor.ts'
-import { pickIconKey } from '../src/logic/icon.ts'
+import { pickIconKey, resolveIconKey, iconKeyOrder } from '../src/logic/icon.ts'
 import {
   starterDefs,
   buildUpdatedStarterRecipe,
@@ -9101,6 +9101,40 @@ const iconKeyExpected = {
   // 落ちるものが無いこと(誤爆防止の核=たんぱく源が野菜の調理法語より先に取ること)。
   const defaultCount = iconEntries.filter(({ recipe }) => pickIconKey(recipe) === 'default').length
   eq('カタログ全品でpickIconKeyがdefaultになるものは0件', defaultCount, 0)
+
+  // ---- 2026-08-15 便GU: 「レシピカードにアイコンも何も表示されていないものがある」の再発防止 ----
+  // カードの絵はPNGをCSSマスクで描くので、アプリが絵を持たない種別が入ると
+  // 「読めない画像でマスクする＝一切塗られない＝空白のタイル」になる。
+  // 描く直前に通す resolveIconKey が、必ず絵のある種別だけを返すことを確かめる。
+  // (手で選んだ値はアプリの選択UI以外からも入る: バックアップの読み込み・貼り付け取り込み・
+  //  ファイルの手直し。値そのものを信用して描かないための歯止め)
+  const hamburg = { title: 'ハンバーグ', tags: [], ingredients: [{ name: '合いびき肉' }] }
+  eq(
+    '便GU アイコン: 絵を持たない種別が入っていても、絵のある種別に落とす',
+    iconKeyOrder.includes(resolveIconKey({ ...hamburg, iconKey: 'gratin' })),
+    true,
+  )
+  eq(
+    '便GU アイコン: 空文字が入っていても、絵のある種別に落とす',
+    iconKeyOrder.includes(resolveIconKey({ ...hamburg, iconKey: '' })),
+    true,
+  )
+  eq(
+    '便GU アイコン: 手で選んだ種別は、絵があるかぎりそのまま使う',
+    resolveIconKey({ ...hamburg, iconKey: 'soup' }),
+    'soup',
+  )
+  eq(
+    '便GU アイコン: 指定が無ければ自動判定と同じ結果になる',
+    resolveIconKey(hamburg),
+    pickIconKey(hamburg),
+  )
+  // カタログ全品も、描く直前の関数を通して必ず絵のある種別になる
+  eq(
+    '便GU アイコン: カタログ全品が絵のある種別に解決する',
+    iconEntries.every(({ recipe }) => iconKeyOrder.includes(resolveIconKey(recipe))),
+    true,
+  )
 }
 
 // ---------- guessDishType: 役割の自動判定(2026-07-23 便BH-1・docs/56 §3-2) ----------
