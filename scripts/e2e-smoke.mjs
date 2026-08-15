@@ -212,7 +212,7 @@
 //         (showIconInsteadOfPhotoが実際にDBへ連動)であることを確認) /
 //         FORMRESET-01(レシピ編集画面の「デフォルトに戻す」・2026-07-15 オーナー要望。DBには
 //         書き込まずフォームの入力値だけを差し替える安全設計。(a)基本レシピ「肉じゃが」の編集で
-//         タイトル・材料を書き換え→ボタンは1回目「もう一度押すと戻します」に変化するだけで
+//         タイトル・材料を書き換え→1回押しただけでは戻らず確認の窓が出るだけで
 //         まだ戻らない→2回目でstarterDefsの原本(タイトル・材料とも)に戻ること・保存前の
 //         軽いフィードバック文言が出ること→保存せず一覧へ離脱しても実データ(DB)が
 //         書き換わっていないこと(b)自作レシピを新規登録→編集でタイトルを変更→
@@ -14860,8 +14860,9 @@ try {
       const ownTitleInput = frPage.getByPlaceholder('例: 肉じゃが')
       await ownTitleInput.fill('FORMRESET改名後')
       await frPage.getByRole('button', { name: '前回保存した内容に戻す' }).click()
-      await frPage.waitForTimeout(200)
-      await frPage.getByRole('button', { name: 'もう一度押すと戻します' }).click()
+      await frPage.waitForTimeout(300)
+      // 2026-08-15 便GW で「もう一度押す」方式は窓にそろえた（上の FORMRESET-01a と同じ）
+      await frPage.locator('[data-testid="confirm-ok"]').click()
       await frPage.waitForTimeout(300)
       check(
         'FORMRESET-01b 2回目のクリックで前回保存したタイトルに戻る',
