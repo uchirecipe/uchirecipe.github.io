@@ -1616,10 +1616,35 @@ try {
       await fsPage.getByText('調理中モードで見る').click()
       await fsPage.waitForTimeout(500)
       const focusBody = await fsPage.textContent('body')
+      // 2026-08-15 便GS（オーナー承認「ナビ側に揃えて」）で、声で使える言葉の案内は
+      // **「声で操作」を押している間だけ**出るようになった（押していないときに
+      // 「『次へ』で手順の移動」と書いてあると、その言葉はいま何も起きない＝画面が嘘をつく）。
+      // 測りたいのは「使える言葉が読んで分かること」なので、**押してから**確かめる。
+      // 実機の音声認識は自動では再現できないので、他の節と同じやり方で入れ物だけ差し替える
+      await fsPage.evaluate(() => {
+        class FakeRecognition {
+          constructor() { window.__recognition = this }
+          start() {}
+          stop() {}
+          abort() {}
+        }
+        window.SpeechRecognition = FakeRecognition
+        window.webkitSpeechRecognition = FakeRecognition
+      })
       check(
-        'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている',
-        focusBody.includes('「次へ」「戻って」で手順の移動') &&
-          focusBody.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
+        'FOCUS-COPY-01 押す前は、いま効かない言葉を並べない',
+        !focusBody.includes('「次へ」「戻って」で手順の移動'),
+      )
+      const fsMic = fsPage.getByRole('button', { name: '声で操作' })
+      if (await fsMic.count()) {
+        await fsMic.first().click()
+        await fsPage.waitForTimeout(500)
+      }
+      const focusListeningBody = await fsPage.textContent('body')
+      check(
+        'FOCUS-COPY-01 声のコマンドに「何が起きるか」が添えられている（押している間）',
+        focusListeningBody.includes('「次へ」「戻って」で手順の移動') &&
+          focusListeningBody.includes('「タイマー」「ストップ」「再開」でタイマー操作'),
       )
       const iconLabels = await fsPage.evaluate(() =>
         Array.from(document.querySelector('.fixed.inset-0.z-50').querySelectorAll('button span'))
