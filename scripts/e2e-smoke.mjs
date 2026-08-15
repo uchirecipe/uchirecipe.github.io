@@ -295,6 +295,9 @@
 //         FOCUS-KEEP-01(閉じた手順から再開する・完成！や別レシピ経由では手順1から。C3) /
 //         FOCUS-BACK-01(端末の戻るで調理中モードだけが閉じる。C11) /
 //         FOCUS-OTHER-01(別の料理のタイマーも料理名つきで出る・タップで調整窓が開き停止できる。C4/C8) /
+//         FOCUSTOP-01(2026-08-15 便GX オーナー実機: 調理中モードの上側で長い料理名が1文字も
+//         隠れない・起動していないタイマーのボタンが横一列を独り占めしない・44px角で押せて
+//         読み上げ名がある。タイマーが動いている時も同じ) /
 //         【2026-08-03 便DS オーナー実機フィードバック8件(調理中モード・タイマー・声で操作)】
 //         DS-MIC-01(①マイクを断られた状態を見つけて直し方を出す・自動再開ループを止める) /
 //         DS-VOICE-01(⑤時間の手掛かりが無い手順の「タイマー」に言い方の案内) /
@@ -5616,6 +5619,144 @@ try {
     }
   }
 
+  // --- FOCUSTOP-01: 調理中モードの上側が、長い料理名を隠さない(2026-08-15 便GX・オーナー実機
+  //   「調理中モードでじぶんタイマー(起動していない時のアイコン)は横一列潰さずに、アイコンだけ
+  //    表示にできませんか？ただでさえ狭い画面の上側一列に文字を表示できなくて、文字数が多いと
+  //    隠れてしまいます」)。
+  //
+  //   測るのは「どこにあるか」ではなく次の3つ。置き場所が変わっても同じ判定になる形にする:
+  //     ①長い料理名が1文字も隠れていない(切り詰め・はみ出しで欠けない)
+  //     ②自由な時間のタイマーのボタンが、1列を単独で占有していない
+  //       (上側の他の操作ボタンと同じ高さの帯に収まっている)
+  //     ③そのボタンに押せる大きさ(44px角)と読み上げ名がある(画面に文字を出さない代わり)
+  //   ①〜③は動作中のタイマーがあってもなくても同じように成り立つ(タイマーを1本動かして再測)。
+  //   料理名は同梱レシピの名前の長さに左右されないよう、この検証の中で長い名前を登録して作る ---
+  currentCheck = 'FOCUSTOP-01'
+  {
+    const ftBrowser = await chromium.launch()
+    try {
+      const ftContext = await ftBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const ftPage = await ftContext.newPage()
+      ftPage.on('dialog', (dialog) => dialog.accept())
+      const ftTitle = '鶏むね肉としめじの香味だれかけ蒸し（作り置きにも）'
+      await ftPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await ftPage.waitForTimeout(1000)
+      await ftPage.getByText('テキスト貼り付けで自動入力').click()
+      await ftPage.waitForTimeout(300)
+      await ftPage
+        .locator('textarea[placeholder="ここにレシピの文章を貼り付け"]')
+        .fill(
+          `${ftTitle}\n\n材料（2人分）\n・鶏むね肉　1枚\n・しめじ　1袋\n\n作り方\n1. 鶏むね肉をそぎ切りにする\n2. しめじをほぐして耐熱皿に広げる\n3. 蒸し上げる`,
+        )
+      await ftPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await ftPage.waitForTimeout(400)
+      await ftPage.getByRole('button', { name: '保存する' }).click()
+      await ftPage.waitForTimeout(1200)
+      await ftPage.getByText('調理中モードで見る').click()
+      await ftPage.waitForTimeout(700)
+
+      /**
+       * 上側の実測。料理名は「その文字列だけを持つ最も内側の要素」を探して掴む
+       * (見出しの階層や置き場所が変わっても同じものを掴める)。
+       * ZWSPは文節折返しで差し込まれることがあるので、照合前に外す。
+       */
+      const ftMeasure = async () =>
+        await ftPage.evaluate((title) => {
+          const overlay = document.querySelector('.fixed.inset-0.z-50')
+          if (!overlay) return { overlay: false }
+          const strip = (s) => (s || '').replace(/​/g, '').trim()
+          const titleEl = Array.from(overlay.querySelectorAll('*')).find(
+            (el) => el.children.length === 0 && strip(el.textContent) === title,
+          )
+          const timerBtn = Array.from(overlay.querySelectorAll('button')).find(
+            (b) => b.getAttribute('aria-label') === 'タイマーを開く',
+          )
+          const rect = (el) => {
+            const r = el.getBoundingClientRect()
+            return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }
+          }
+          const titleRect = titleEl ? rect(titleEl) : null
+          const timerRect = timerBtn ? rect(timerBtn) : null
+          // タイマーのボタンと同じ高さの帯に、他の操作ボタンが居るか(＝1列を独り占めしていない)
+          const sharesRow =
+            timerBtn != null &&
+            Array.from(overlay.querySelectorAll('button')).some((b) => {
+              if (b === timerBtn || timerBtn.contains(b) || b.contains(timerBtn)) return false
+              const r = b.getBoundingClientRect()
+              if (r.width === 0 || r.height === 0) return false
+              const top = Math.max(r.top, timerRect.top)
+              const bottom = Math.min(r.bottom, timerRect.bottom)
+              return bottom - top >= 8
+            })
+          return {
+            overlay: true,
+            titleFound: titleEl != null,
+            // 切り詰め(truncate)・枠からのはみ出しで欠けていないか
+            titleClipped:
+              titleEl != null &&
+              (titleEl.scrollWidth > titleEl.clientWidth + 1 ||
+                titleEl.scrollHeight > titleEl.clientHeight + 1),
+            titleInViewport:
+              titleRect != null && titleRect.top >= 0 && titleRect.bottom <= window.innerHeight,
+            titleRect,
+            timerFound: timerBtn != null,
+            timerRect,
+            timerTapOk: timerRect != null && timerRect.w >= 44 && timerRect.h >= 44,
+            timerAriaLabel: timerBtn?.getAttribute('aria-label') ?? '',
+            timerHasVisibleText: strip(timerBtn?.textContent) !== '',
+            sharesRow,
+          }
+        }, ftTitle)
+
+      const ftIdle = await ftMeasure()
+      check(
+        'FOCUSTOP-01 長い料理名が調理中モードで1文字も隠れない(タイマー0本)',
+        ftIdle.titleFound && !ftIdle.titleClipped && ftIdle.titleInViewport,
+        JSON.stringify(ftIdle),
+      )
+      check(
+        'FOCUSTOP-01 起動していないタイマーのボタンが横一列を独り占めしない(他の操作と同じ帯に収まる)',
+        ftIdle.timerFound && ftIdle.sharesRow,
+        JSON.stringify(ftIdle),
+      )
+      check(
+        'FOCUSTOP-01 そのボタンは44px角以上で押せる',
+        ftIdle.timerTapOk,
+        JSON.stringify(ftIdle.timerRect),
+      )
+      check(
+        'FOCUSTOP-01 画面に文字を出さない代わりに読み上げ名がある',
+        ftIdle.timerAriaLabel.length > 0,
+        JSON.stringify({ aria: ftIdle.timerAriaLabel, text: ftIdle.timerHasVisibleText }),
+      )
+
+      // タイマーを1本動かしても、料理名は隠れずボタンも押せるまま(動作中の見え方を壊さない)
+      await ftPage.locator('.fixed.inset-0.z-50').getByRole('button', { name: 'タイマーを開く' }).click()
+      await ftPage.waitForTimeout(400)
+      await ftPage
+        .getByRole('dialog', { name: 'タイマー', exact: true })
+        .getByRole('button', { name: '開始' })
+        .click()
+      await ftPage.waitForTimeout(700)
+      const ftRunning = await ftMeasure()
+      check(
+        'FOCUSTOP-01 タイマーが動いていても長い料理名は隠れない',
+        ftRunning.titleFound && !ftRunning.titleClipped && ftRunning.titleInViewport,
+        JSON.stringify(ftRunning),
+      )
+      check(
+        'FOCUSTOP-01 タイマーが動いていても残り時間のチップが読める',
+        await ftPage
+          .locator('.fixed.inset-0.z-50')
+          .getByRole('button', { name: /のタイマーを調整/ })
+          .first()
+          .isVisible(),
+      )
+    } finally {
+      await ftBrowser.close()
+    }
+  }
+
   // --- 便DS: 2026-08-03 オーナー実機フィードバック8件(調理中モード・タイマー・声で操作)の再発防止。
   //  DS-MIC-01(①マイクを一度断ると押しても無反応に見えた → 断られている状態を見つけて直し方を出す) /
   //  DS-VOICE-01(⑤時間の書かれていない手順で「タイマー」と言うと無反応だった → 言い方の案内) /
@@ -5855,26 +5996,29 @@ try {
             Math.abs(before.y - after.y) < 1,
           JSON.stringify({ before, after }),
         )
-        // 折り返しの列に混ざっていないこと(タイマーのチップより右端に固定されている)
+        // 折り返しの列に混ざっていないこと(チップが増えても押し出されない)。
+        // 2026-08-15 便GX: 旧版は「タイマーの列の中で、チップより右端」という置き場所そのものを
+        // 固定していたため、ボタンを見出しの行へ移した時点で落ちた(アプリは正常)。測るのは
+        // 置き場所ではなく「チップと同じ入れ物に居ない・重ならない」＝FB⑥の意図そのものにする
         const pinned = await p.evaluate(() => {
           const overlay = document.querySelector('.fixed.inset-0.z-50')
-          const row = Array.from(overlay.children).find((el) =>
-            el.className.includes('items-start gap-2'),
-          )
-          const btn = Array.from(row.querySelectorAll('button')).find(
+          const btn = Array.from(overlay.querySelectorAll('button')).find(
             (b) => b.getAttribute('aria-label') === 'タイマーを開く',
           )
-          const pill = row.querySelector('div.inline-flex.rounded-full')
+          const chips = Array.from(overlay.querySelectorAll('div.inline-flex.rounded-full'))
+          const r = btn.getBoundingClientRect()
           return {
-            sameParent: btn?.parentElement === row,
-            rightOfPill:
-              pill != null &&
-              btn.getBoundingClientRect().left >= pill.getBoundingClientRect().right,
+            chips: chips.length,
+            insideChip: chips.some((c) => c.contains(btn)),
+            overlapsChip: chips.some((c) => {
+              const cr = c.getBoundingClientRect()
+              return !(cr.right <= r.left || cr.left >= r.right || cr.bottom <= r.top || cr.top >= r.bottom)
+            }),
           }
         })
         check(
-          'DS-CUSTOMBTN-01 「タイマー」ボタンは折り返しの列の外・タイマーより右に固定されている',
-          pinned.sameParent && pinned.rightOfPill,
+          'DS-CUSTOMBTN-01 「タイマー」ボタンは折り返しの列の外(チップが増えても押し出されない)',
+          pinned.chips > 0 && !pinned.insideChip && !pinned.overlapsChip,
           JSON.stringify(pinned),
         )
         await ctx.close()

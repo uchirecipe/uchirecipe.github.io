@@ -821,8 +821,52 @@ try {
   // 2026-08-10 便FJ: 声で操作の案内に「読み上げ」「一時停止」「再開」が加わって4行になり
   // (2026-08-10 便FC)、134pxでは最後の行が画面のふちに貼り付いていた。
   // タイマーのマーク(y=132〜176)まで入る高さにして、案内文の下に余白を作る
-  await cropRect(page, 'cookmode-voice', { x: 0, y: 0, width: VIEW.width, height: 184 })
-  await cropRect(page, 'cookmode', { x: 0, y: 240, width: VIEW.width, height: 440 })
+  //
+  // 2026-08-15 便GX: 上端・下端の固定の数字をやめ、写したいものの位置を測ってから切る。
+  //  - 手順の絵(cookmode): 起動していないタイマーの行を無くした(便GX)ぶん中身が上がり、
+  //    y=240 固定では手順番号のバッジが上で半分に切れていた
+  //  - 声の絵(cookmode-voice): 声で使える言葉の案内は「声で操作」を押している間だけ出る
+  //    (2026-08-15 便GS)。押していない絵を撮ると、本文が説明している案内が写らないので、
+  //    聞き取りの入れ物だけ差し替えて(撮影では実機の音声認識は動かせない)押した状態で撮る
+  const stepBadgeTop = await page.evaluate(() => {
+    const overlay = document.querySelector('div.fixed.inset-0.z-50')
+    const body = Array.from(overlay.children).find((el) => el.className.includes('flex-1'))
+    const badge = body?.firstElementChild
+    return badge ? Math.max(0, Math.floor(badge.getBoundingClientRect().top) - 12) : 240
+  })
+  await cropRect(page, 'cookmode', { x: 0, y: stepBadgeTop, width: VIEW.width, height: 440 })
+  await page.evaluate(() => {
+    class FakeRecognition {
+      start() {}
+      stop() {}
+      abort() {}
+    }
+    window.SpeechRecognition = FakeRecognition
+    window.webkitSpeechRecognition = FakeRecognition
+  })
+  const micBtn = focusLayer.getByRole('button', { name: '声で操作' })
+  if (await micBtn.count()) {
+    await micBtn.first().click()
+    await wait(page, 800)
+  }
+  const voiceHintBottom = await page.evaluate(() => {
+    const overlay = document.querySelector('div.fixed.inset-0.z-50')
+    const hint = Array.from(overlay.querySelectorAll('p')).find((p) =>
+      p.textContent.includes('で手順の移動'),
+    )
+    return hint ? Math.ceil(hint.getBoundingClientRect().bottom) : 0
+  })
+  await cropRect(page, 'cookmode-voice', {
+    x: 0,
+    y: 0,
+    width: VIEW.width,
+    height: Math.max(voiceHintBottom + 10, 96),
+  })
+  // 案内を出したままにすると後続のカットの中身が下へずれるので、撮り終えたら切る
+  if (await micBtn.count()) {
+    await micBtn.first().click()
+    await wait(page, 500)
+  }
   if (await timerBtn.count()) {
     await timerBtn.first().click()
     await wait(page, 1400)

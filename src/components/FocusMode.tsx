@@ -379,8 +379,15 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         </button>
         <div className="min-w-0 flex-1 px-1 text-center">
           {/* 調理中モードは手順のみで料理名が分からなかった(2026-07-11オーナー実機フィードバック)ため、
-              「手順」表記の上に料理名を表示する。長い料理名はtruncateで省略する */}
-          <p className="truncate text-sm font-bold text-ink" title={recipe.title}>
+              「手順」表記の上に料理名を表示する。
+              2026-08-15 便GX(オーナー実機「ただでさえ狭い画面の上側一列に文字を表示できなくて、
+              文字数が多いと隠れてしまいます」): 1行に収める切り詰め(truncate)をやめ、折り返して
+              全部出す。390px幅では料理名に使える幅が128pxしかなく、24文字の名前は7文字で切れて
+              いた(必要な幅350pxのうち204pxが隠れていた)。並行調理ナビの調理中モード
+              (CookSessionOverlay)は2026-08-11 便FOで同じ理由から折り返しに変えてあり、
+              1品の画面だけが切り詰めのまま残っていた。行数のほうを譲るのは、いま何を作っているかが
+              調理中モードで最初に読む情報のため */}
+          <p data-testid="focus-recipe-title" className="ja-phrase text-sm font-bold leading-snug text-ink">
             {recipe.title}
           </p>
           <span className="font-bold text-ink-muted">
@@ -428,6 +435,23 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           >
             <ALargeSmall size={24} aria-hidden />
             <span className="text-[10px] font-bold leading-none">{ja.focus.textSizeLabel}</span>
+          </button>
+          {/* 自由な時間のタイマーの入口(2026-08-15 便GX・オーナー実機「じぶんタイマー
+              (起動していない時のアイコン)は横一列潰さずに、アイコンだけ表示にできませんか？」)。
+              下のタイマーの行に置いていたときは、タイマーが1本も動いていなくても行だけが残り、
+              390px幅で48pxを何も出さずに使っていた。ここへ移すと、動いていない間はその行ごと無くなる。
+              文字を添えないのは、レシピ詳細・並行調理ナビの見出しにある同じ入口と同じ形にそろえるため
+              (どちらもアイコンのみ・aria-labelは ja.timer.customOpenAria)。読み上げ名はここにも付ける。
+              置き場所をこの行に固定したので、タイマーが増えても減っても動かない
+              (2026-08-03 実機FB⑥「動いているタイマーが増減しても置き場所が動かない」を保つ) */}
+          <button
+            type="button"
+            data-testid="focus-custom-timer"
+            onClick={openCustomTimer}
+            aria-label={ja.timer.customOpenAria}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-accent text-accent-ink"
+          >
+            <TimerIcon size={20} aria-hidden />
           </button>
         </div>
       </div>
@@ -480,10 +504,11 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         </div>
       )}
 
-      {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)＋自由な時間のタイマー起動ボタン(2026-07-12・入口B)。
-          タイマーが無い時も「タイマー」ボタンの置き場所として常に表示する。
-          2026-08-03 実機FB⑥: 「タイマー」ボタンを折り返しの列から出して右端の定位置に固定し、
-          動いているタイマーが増減しても置き場所が動かないようにした(アイコンのみ) */}
+      {/* タイマーバー: 動作中タイマーのバッジ(2026-07-11)。
+          2026-08-15 便GX: 1本も動いていないときは行ごと出さない。以前は自由な時間のタイマーの
+          ボタンの置き場所として常に出しており、中身が無くても48pxを使っていた。ボタンは上の
+          見出しの行へ移したので、置き場所のためだけに行を残す必要がなくなった */}
+      {shownTimers.length > 0 && (
       <div className="flex items-start gap-2 px-[var(--space-md)] pb-1">
         <div className="flex max-h-[30vh] min-w-0 flex-1 flex-wrap items-center justify-center gap-2 overflow-y-auto">
         {shownTimers.map((t) => {
@@ -572,15 +597,8 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           )
         })}
         </div>
-        <button
-          type="button"
-          onClick={openCustomTimer}
-          aria-label={ja.timer.customOpenAria}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-accent text-accent-ink"
-        >
-          <TimerIcon size={20} aria-hidden />
-        </button>
       </div>
+      )}
 
       {/* タイマーの決まりごとの初回案内(2026-07-28 機能④診断C7)。常駐バー(TimerBar)にしか
           描かれておらず、この全画面モードから初めてタイマーを起動すると覆い隠されたまま
