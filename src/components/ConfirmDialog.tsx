@@ -14,11 +14,18 @@ import { useEffect } from 'react'
  *    重なりうるが、全画面は自前で履歴を1つ積んでいて、その戻り先で全画面を閉じる作りになっている。
  *    ここでも積むと、窓を閉じたときの history.back() を全画面側が「戻る操作」と受け取ってしまう
  *  - Escape・窓の外のタップは「やめる」と同じ扱い（何も起きない側に倒す）
+ *
+ * 2026-08-15 便GV: bullets／notes を足した（オーナー実機「文章が長い。箇条書きや太字で
+ * 読みやすくして」）。どちらも任意なので、body だけを渡している既存の呼び出し元は
+ * 見た目も文言も変わらない。長い確認文を「見出し＋箇条書き＋小さめの補足」に分けるための器で、
+ * 規約H の「長文は分割・折りたたみ・表で構成する」をこの窓の中でやるための道具。
  */
 export default function ConfirmDialog({
   open,
   title,
   body,
+  bullets,
+  notes,
   confirmLabel,
   cancelLabel,
   testId,
@@ -27,8 +34,12 @@ export default function ConfirmDialog({
 }: {
   open: boolean
   title: string
-  /** 何が消えて何が残るか（規約F）。改行はそのまま出る */
+  /** 何が消えて何が残るか（規約F）。改行はそのまま出る。bullets を使うときは前置きの1行に使う */
   body: string
+  /** 箇条書き（任意）。label は太字の見出しとして行頭に出る */
+  bullets?: readonly { label: string; text: string }[]
+  /** 補足（任意）。箇条書きの下に小さめの文字で1行ずつ出る */
+  notes?: readonly string[]
   confirmLabel: string
   cancelLabel: string
   /** 窓に付ける data-testid（確認は `-ok`、やめるは `-cancel` が付く） */
@@ -59,9 +70,29 @@ export default function ConfirmDialog({
         className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <p className="ja-phrase text-lg font-bold">{title}</p>
-        <p className="ja-phrase mt-[var(--space-sm)] whitespace-pre-line text-sm text-ink-muted">
-          {body.trim()}
-        </p>
+        {body.trim() !== '' && (
+          <p className="ja-phrase mt-[var(--space-sm)] whitespace-pre-line text-sm text-ink-muted">
+            {body.trim()}
+          </p>
+        )}
+        {bullets && bullets.length > 0 && (
+          <ul className="mt-[var(--space-sm)] list-disc space-y-1 pl-5 text-sm text-ink-muted">
+            {bullets.map((bullet) => (
+              <li key={bullet.label} className="ja-phrase">
+                <span className="font-bold text-ink">{bullet.label}</span>: {bullet.text}
+              </li>
+            ))}
+          </ul>
+        )}
+        {notes && notes.length > 0 && (
+          <div className="mt-[var(--space-sm)] space-y-0.5">
+            {notes.map((note) => (
+              <p key={note} className="ja-phrase text-xs text-ink-muted">
+                {note}
+              </p>
+            ))}
+          </div>
+        )}
         <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
           <button
             type="button"

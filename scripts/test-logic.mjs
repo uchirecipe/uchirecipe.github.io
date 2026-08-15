@@ -235,7 +235,7 @@ import {
   resolveMergeRecipeAction,
   mergeRecipeUserData,
   remapBackupRecipeRefs,
-  buildSelectedRecipesExportConfirmText,
+  buildSelectedRecipesExportConfirm,
   buildReplaceConfirmText,
   buildUndoReplaceConfirmText,
 } from '../src/logic/backup.ts'
@@ -245,6 +245,7 @@ import {
   selectedRecipesFileName,
   isAbortError,
 } from '../src/logic/fileSave.ts'
+import { formatFileSize } from '../src/logic/fileSize.ts'
 import {
   sortResults,
   lastCookedDate,
@@ -16057,24 +16058,35 @@ eq(
 // ---------- 便EM: 選択したレシピの書き出しの確認文(規約F) ----------
 // 何が含まれ、何が含まれないかを両方書く。ファイルを作るだけで端末のレシピは減らないので、
 // そのことも書く(すぐ下に削除ボタンが並ぶため)。戻し方まで書いて行き止まりにしない。
+// 2026-08-15 便GV: 素のダイアログ(window.confirm)から画面の中の窓(ConfirmDialog)へ移し、
+// 見出し+箇条書き+補足の3つに分けた。測る中身は同じなので、確認の名前(EM-6/FA-3)は残す。
 {
-  const text = buildSelectedRecipesExportConfirmText(3, 106)
-  eq('EM-6 確認文に選んだ品数が入る', text.includes('レシピ3品をファイルに書き出します'), true)
-  eq('EM-6 確認文に「含まれるもの」がある', text.includes('含まれるもの'), true)
-  eq('EM-6 確認文に「含まれないもの」がある', text.includes('含まれないもの'), true)
-  eq('EM-6 含まれないものに選んでいない品数が入る', text.includes('選んでいないレシピ106品'), true)
-  eq('EM-6 記録の写真は含まれないと書いてある', text.includes('「作った記録」の写真'), true)
-  eq('EM-6 アプリの設定は含まれないと書いてある', text.includes('アプリの設定'), true)
-  eq('EM-6 端末のレシピが残ることを書いてある', text.includes('端末のレシピはそのまま残ります'), true)
+  const confirm = buildSelectedRecipesExportConfirm({
+    selected: 3,
+    remaining: 106,
+    bytes: 1024 * 128,
+    canPickLocation: true,
+  })
+  const all = [confirm.title, ...confirm.bullets.map((b) => `${b.label}: ${b.text}`), ...confirm.notes].join('\n')
+  const bulletText = (label) => confirm.bullets.find((b) => b.label === label)?.text ?? ''
+  eq('EM-6 確認に選んだ品数が入る', confirm.title.includes('レシピ3品'), true)
+  eq('EM-6 確認に「入るもの」がある', bulletText('入るもの') !== '', true)
+  eq('EM-6 確認に「入らないもの」がある', bulletText('入らないもの') !== '', true)
+  eq('EM-6 入らないものに選んでいない品数が入る', bulletText('入らないもの').includes('選んでいないレシピ106品'), true)
+  eq('EM-6 記録の写真は入らないと書いてある', bulletText('入らないもの').includes('記録の写真'), true)
+  eq('EM-6 アプリの設定は入らないと書いてある', bulletText('入らないもの').includes('設定'), true)
+  eq('EM-6 端末のレシピが残ることを書いてある', all.includes('端末のレシピは減りません'), true)
   eq(
     'EM-6 戻し方を画面名・ボタン名で書いてある(規約H: 指示語で場所を示さない)',
-    text.includes('設定の「バックアップを読み込む」から「今のデータに追加」'),
+    all.includes('設定の「バックアップを読み込む」の「今のデータに追加」'),
     true,
   )
-  eq('EM-6 差し込みの取り残しが無い', /\{[a-z]+\}/.test(text), false)
+  eq('EM-6 差し込みの取り残しが無い', /\{[a-z]+\}/.test(all), false)
   eq(
     'EM-6 選んでいない品が0でも文が壊れない',
-    buildSelectedRecipesExportConfirmText(109, 0).includes('選んでいないレシピ0品'),
+    buildSelectedRecipesExportConfirm({ selected: 109, remaining: 0, bytes: 1024, canPickLocation: true })
+      .bullets.find((b) => b.label === '入らないもの')
+      ?.text.includes('選んでいないレシピ0品'),
     true,
   )
   // 2026-08-10 便FA(オーナー承認・docs/65 A-2): 書き出したファイルを人に渡すときの一言。
@@ -16083,24 +16095,16 @@ eq(
   // 「他の人に渡さないでください」と言い切る）
   eq(
     'FA-3 書き出し時に人へ渡すときの一言がある',
-    text.includes('ほかのサイトや本から登録したレシピもそのまま入るので、人に渡す・公開するときは中身をご確認ください。'),
+    confirm.notes.some((n) => n.includes('人に渡す・公開するときは中身をご確認ください')),
     true,
   )
-  eq(
-    'FA-3 選択レシピの書き出しの確認文で解錠コードの話はしない(このファイルには入らない)',
-    text.includes('解錠コード'),
-    false,
-  )
+  eq('FA-3 選択レシピの書き出しの確認で解錠コードの話はしない(このファイルには入らない)', all.includes('解錠コード'), false)
   eq(
     'FA-3 全体のバックアップは「他の人に渡さないでください」のまま(言うべきことが違う)',
     ja.settings.backupContainsCodeNotice.includes('他の人に渡さないでください'),
     true,
   )
-  eq(
-    'FA-3 注意は1行に収める(重い警告にしない。確認文の行数は5行)',
-    text.split('\n').length,
-    5,
-  )
+  eq('FA-3 注意は1行に収める(重い警告にしない)', confirm.notes.filter((n) => n.includes('ご確認ください')).length, 1)
 }
 
 // ---------- 便EK-1: 週タブの文言に「今週」を使わない ----------
@@ -19135,6 +19139,110 @@ Aみりん 大さじ1
       true,
     )
   }
+}
+
+// ---------- 便GV-1: 検索窓に「主菜」「副菜」と打っても絞り込めない(2026-08-15 オーナー実機) ----------
+// 原因: buildSearchWords が作る検索語は 料理名+主な材料+タグ+検索キーワード+手順の調理器具 で、
+// 料理の種別(Recipe.dishType)が入っていなかった。絞り込みの「料理の種別」チップには
+// 前からあるので、検索窓に打った人だけが0件に落ちていた。
+// 測るのは「絞り込みチップと同じ言葉を検索窓に打てば同じ集合が出るか」。
+{
+  const soboro = { title: '鶏そぼろ丼', ingredients: [{ name: '鶏ひき肉', amount: '200', unit: 'g' }], tags: [] }
+  const mainWords = buildSearchWords(soboro.title, soboro.ingredients, soboro.tags, undefined, undefined, 'main')
+  eq('GV-1 主菜のレシピは「主菜」で引ける', mainWords.includes('主菜'), true)
+  eq('GV-1 主菜のレシピは読み「しゅさい」でも引ける', mainWords.includes('しゅさい'), true)
+
+  const ohitashi = { title: 'ほうれん草のおひたし', ingredients: [{ name: 'ほうれん草', amount: '1', unit: '束' }], tags: [] }
+  const sideWords = buildSearchWords(ohitashi.title, ohitashi.ingredients, ohitashi.tags, undefined, undefined, 'side')
+  eq('GV-1 副菜のレシピは「副菜」で引ける', sideWords.includes('副菜'), true)
+  eq('GV-1 副菜のレシピは読み「ふくさい」でも引ける', sideWords.includes('ふくさい'), true)
+  eq('GV-1 副菜のレシピは「主菜」では引けない(種別の絞り込みと食い違わせない)', sideWords.includes('主菜'), false)
+
+  const misoshiru = { title: '豆腐とわかめの味噌汁', ingredients: [{ name: '豆腐', amount: '1/2', unit: '丁' }], tags: [] }
+  const soupWords = buildSearchWords(misoshiru.title, misoshiru.ingredients, misoshiru.tags, undefined, undefined, 'soup')
+  eq('GV-1 汁物のレシピは「汁物」で引ける', soupWords.includes('汁物'), true)
+  eq('GV-1 汁物のレシピは読み「しるもの」でも引ける', soupWords.includes('しるもの'), true)
+
+  const daigakuimo = { title: '大学芋', ingredients: [{ name: 'さつまいも', amount: '2', unit: '本' }], tags: [] }
+  const dessertWords = buildSearchWords(daigakuimo.title, daigakuimo.ingredients, daigakuimo.tags, undefined, undefined, 'dessert')
+  eq('GV-1 その他のレシピは「その他」で引ける', dessertWords.includes('その他'), true)
+
+  // 種別が未設定のレシピ(主にユーザー自作)も、絞り込みチップと同じ推定(dishTypeGuess)に倒す。
+  // ここがずれると「絞り込みでは副菜に出るのに、検索窓の『副菜』では出ない」が起きる
+  const guessed = buildSearchWords(misoshiru.title, misoshiru.ingredients, misoshiru.tags)
+  eq('GV-1 種別が未設定でも推定した種別で引ける(絞り込みチップと同じ判定)', guessed.includes('汁物'), true)
+
+  // 絞り込みチップの名前(ja.dishType)と検索語がずれると、打っても0件のままになる。
+  // 文言を変えたらここが赤くなる＝索引の作り直し(SEARCH_INDEX_VERSION)を忘れないための歯止め
+  for (const [type, label] of Object.entries(ja.dishType)) {
+    const words = buildSearchWords('テスト料理', [{ name: '鶏もも肉', amount: '1', unit: '枚' }], [], undefined, undefined, type)
+    eq(`GV-1 絞り込みチップ「${label}」と同じ言葉で検索できる`, words.includes(label), true)
+  }
+
+  // 広げすぎない: 「メイン」「おかず」「スープ」等の言い換えは入れない(誤ヒットが増えるため)。
+  // 入れた語を増やすときは、この行も一緒に見直すこと
+  eq('GV-1 種別の言い換え(メイン)は検索語に入れない', mainWords.some((w) => w.includes('めいん')), false)
+  eq('GV-1 種別の言い換え(おかず)は検索語に入れない', mainWords.some((w) => w.includes('おかず')), false)
+  eq('GV-1 種別の言い換え(スープ)は検索語に入れない', soupWords.some((w) => w.includes('すーぷ')), false)
+
+  // 既に登録済みのレシピにも効かせるには索引の作り直しが要る(db/recipes.ts rebuildSearchWordsIfNeeded)。
+  // 版を上げ忘れると、新規登録したレシピでしか「主菜」で引けない
+  eq(
+    'GV-1 種別を足す前(v3)に保存された検索語は起動時に作り直される',
+    searchIndexNeedsRebuild({ ingredientReadingsVersion: READINGS_VERSION, searchIndexVersion: 3 }),
+    true,
+  )
+  eq(
+    'GV-1 いまの版で保存済みなら作り直さない(毎回作り直して起動が重くならない)',
+    searchIndexNeedsRebuild({ ingredientReadingsVersion: READINGS_VERSION, searchIndexVersion: SEARCH_INDEX_VERSION }),
+    false,
+  )
+}
+
+// ---------- 便GV-2: ファイルの大きさの表し方 ----------
+{
+  eq('GV-2 1KB未満はバイトで出す', formatFileSize(512), '512B')
+  eq('GV-2 1KB以上はKBで出す(小数は出さない)', formatFileSize(1024 * 128 + 400), '128KB')
+  eq('GV-2 1MB以上はMBで小数第1位まで出す', formatFileSize(1024 * 1024 * 1.53), '1.5MB')
+  eq('GV-2 ちょうど1MBは1.0MBではなく1MB', formatFileSize(1024 * 1024), '1MB')
+  eq('GV-2 0バイトでも壊れない', formatFileSize(0), '0B')
+}
+
+// ---------- 便GV-3: レシピの書き出しの確認(2026-08-15 オーナー実機「文章が長い。
+// 箇条書きや太字で読みやすくして。ファイルのサイズも書いてあると親切」) ----------
+// 素のダイアログ(window.confirm)では太字も箇条書きも出せないので、画面の中の窓
+// (ConfirmDialog)に置き換える。ここでは窓に流し込む中身(純ロジック)を測る。
+{
+  // 素のダイアログのままだった旧確認文の文字数(改行込み240字。r=3・rest=106のとき)。
+  // 「箇条書きにしただけで行数が増えては逆効果」なので、読む量そのものを減らせたかを測る。
+  // 実測の基準値なので、確認の中身を意図的に増やすとき以外はこの数字を上げないこと
+  const OLD_CONFIRM_LENGTH = 240
+  const picked = buildSelectedRecipesExportConfirm({
+    selected: 3,
+    remaining: 106,
+    bytes: 1024 * 128,
+    canPickLocation: true,
+  })
+  eq('GV-3 ファイルの大きさを実測値で出す', picked.bullets.some((b) => b.text.includes('128KB')), true)
+  eq(
+    'GV-3 保存先を選べる端末では選べると書く',
+    picked.bullets.find((b) => b.label === '保存先')?.text.includes('選べます'),
+    true,
+  )
+  // 保存先を選べない端末(iPhone・iPad・Firefox等)で「選べます」と書かない
+  const downloaded = buildSelectedRecipesExportConfirm({
+    selected: 3,
+    remaining: 106,
+    bytes: 1024 * 128,
+    canPickLocation: false,
+  })
+  const dlSaveTo = downloaded.bullets.find((b) => b.label === '保存先')?.text ?? ''
+  eq('GV-3 保存先を選べない端末で「選べます」と書かない', dlSaveTo.includes('選べます'), false)
+  eq('GV-3 保存先を選べない端末では入る場所を書く', dlSaveTo.includes('ダウンロード'), true)
+
+  const newLength = [picked.title, ...picked.bullets.map((b) => `${b.label}: ${b.text}`), ...picked.notes].join('\n')
+    .length
+  eq('GV-3 素のダイアログのときより読む量が減っている', newLength < OLD_CONFIRM_LENGTH, true)
 }
 
 // ---------- 結果 ----------

@@ -217,7 +217,7 @@ export function buildMonthDemoData(photos: ReadonlyMap<string, Blob> = new Map()
       isFavorite: false,
       cookedLogs: [],
       isStarter: true,
-      searchWords: buildSearchWords(def.title, def.ingredients, def.tags, undefined, def.steps),
+      searchWords: buildSearchWords(def.title, def.ingredients, def.tags, undefined, def.steps, def.dishType),
       createdAt: now,
       updatedAt: now,
     })

@@ -2603,12 +2603,47 @@ export const ja = {
      * ここは渡すこと自体を止めず、中身を確かめてから渡す形にする（重い警告にしない）。
      */
     exportSelected: '選択したレシピ{r}品を書き出す',
-    exportSelectedConfirm:
-      'レシピ{r}品をファイルに書き出します。\n' +
-      '含まれるもの: レシピの内容と写真、そのレシピの「作った記録」（日付・人数分・メモ）\n' +
-      '含まれないもの: 「作った記録」の写真、献立、買い物メモ、食材の在庫と価格、アプリの設定、選んでいないレシピ{rest}品\n' +
-      'ほかのサイトや本から登録したレシピもそのまま入るので、人に渡す・公開するときは中身をご確認ください。\n' +
-      '端末のレシピはそのまま残ります。読み込むときは、設定の「バックアップを読み込む」から「今のデータに追加」を押してこのファイルを選びます。',
+    /**
+     * 2026-08-15 便GV（オーナー実機「文章が長い。レシピの書き出しの内容確認、箇条書きや太字で
+     * 読みやすくして。ファイルのサイズも書いてあると親切」）。
+     *
+     * ブラウザの素のダイアログ（window.confirm）は文字しか出せず、太字も箇条書きも作れない。
+     * そこで画面の中の窓（components/ConfirmDialog）へ移し、見出し・箇条書き・補足の3つに分けた。
+     * 中身の決まりは変えない（規約F: 入るものと入らないものを件数つきで両方書く）。
+     * 箇条書きにしただけで読む量が増えないよう、旧の確認文より文字数を減らしてある
+     * （scripts/test-logic.mjs の GV-3 が旧240字を超えないことを見張っている）。
+     * {r}=選んだ品数 {rest}=選んでいない品数 {size}=書き出したデータの実測の大きさ
+     */
+    exportSelectedConfirmTitle: 'レシピ{r}品を書き出します',
+    exportSelectedConfirmIncludeLabel: '入るもの',
+    exportSelectedConfirmIncludeText: 'レシピの内容と写真、作った記録',
+    exportSelectedConfirmExcludeLabel: '入らないもの',
+    exportSelectedConfirmExcludeText:
+      '作った記録の写真、献立、買い物メモ、食材の在庫と価格、設定、選んでいないレシピ{rest}品',
+    // 実際に作ったデータのバイト数から出す（見積りではない）。桁の作り方は logic/fileSize.ts
+    exportSelectedConfirmSizeLabel: 'ファイルの大きさ',
+    exportSelectedConfirmSizeText: '約{size}',
+    // 保存先を選べる端末（Chrome/Edge等）と、自動ダウンロードの端末（iPhone・iPad・Firefox等）で
+    // 言えることが違うので分ける。選べない端末で「選べます」と書かない
+    exportSelectedConfirmSaveToLabel: '保存先',
+    exportSelectedConfirmSaveToPick: 'このあと保存する場所を選べます',
+    exportSelectedConfirmSaveToDownload:
+      '端末の「ダウンロード」に入ります（iPhone・iPadは「ファイル」アプリの中）',
+    // 補足（小さめの文字で箇条書きの下に出す）。削除ボタンのすぐ上にあるので、
+    // ファイルを作るだけで端末のレシピは減らないことを最初に言う
+    exportSelectedConfirmNoteKept: '端末のレシピは減りません。',
+    // 2026-08-10 便FA（オーナー承認・docs/65 A-2）: ファイルを人に渡すときの一言。
+    // 全体のバックアップにはPro版の解錠コードが入るので、そちらは「他の人に渡さないでください」
+    // （settings.backupContainsCodeNotice）と言い切る。選択レシピの書き出しに解錠コードは
+    // 入らないので、ここは渡すこと自体を止めず、中身を確かめてから渡す形にする（重い警告にしない）
+    exportSelectedConfirmNoteShare:
+      'ほかのサイトや本から登録したレシピも入ります。人に渡す・公開するときは中身をご確認ください。',
+    // 戻し方は行き止まりにしないために書く（規約H: 場所は指示語ではなく画面名・ボタン名で言う）。
+    // 「今のデータに追加」まで書くのは、隣の「データを上書き」を押すと今のデータが消えるため
+    exportSelectedConfirmNoteRestore:
+      '読み込みは設定の「バックアップを読み込む」の「今のデータに追加」から。',
+    exportSelectedConfirmOk: '書き出す',
+    exportSelectedConfirmCancel: 'やめる',
     // 保存先を選べる端末（Chrome/Edge等）と、自動ダウンロードの端末（iPhone・iPad等）で
     // 言えることが違うので分ける（設定のバックアップ書き出しと同じ作法）
     exportSelectedDonePicked: 'レシピ{r}品を選んだ場所に書き出しました',
