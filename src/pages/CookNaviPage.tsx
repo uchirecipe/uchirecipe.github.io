@@ -75,6 +75,7 @@ import ConfirmDialog from '../components/ConfirmDialog'
 import {
   applyStepPulls,
   findCursorIndex,
+  resolveTimerStepLanding,
   resumeCursor,
   type CookCursor,
   type StepPull,
@@ -895,6 +896,12 @@ export default function CookNaviPage() {
    * これが無いと、下の不具合（次へを押しても同じ手順に戻される）が再発しうる。
    */
   const handledFocusRef = useRef<string | null>(null)
+  /**
+   * 常駐タイマーバーから開かれた「見るだけ」の手順（2026-08-15 便GQ）。
+   * 全画面の調理中モードへ渡して、**カーソルには触らずに**その手順を出す。
+   * 画面の中だけの一時的な状態で、覚え書き（cookNaviSession）には書かない（docs/69）。
+   */
+  const [timerPeekStep, setTimerPeekStep] = useState<CookCursor | null>(null)
   /** ?focusStep= を消す（着地できたときだけ。同じ手順に何度でも飛べるようにする） */
   const clearFocusStep = () => {
     setSearchParams(
@@ -916,25 +923,33 @@ export default function CookNaviPage() {
       return
     }
     if (handledFocusRef.current === focus) return
-    // 調理中の手順を覚えている（＝調理の途中）なら、その手順そのものへカーソルを移し、
-    // 全画面の調理中モードを開いて着地する（2026-08-09 便ES・オーナー指示
-    // 「タイマーのバー→調整画面→レシピ名タップ→該当手順へ移動」と同じ着地）。
-    // 2026-08-10 便FC・オーナー実機「調理中モードでスタートしたタイマーからの戻り先が
-    // 調理中モードの手順にしたい」: 閉じている間もカーソルは残るようになったので、
-    // タイマーから帰ってきたときは**段取りの一覧ではなく調理中モードへ**戻す。
-    // 調理を終えている（カーソルが無い）ときは、従来どおり一覧の該当カードへ送る
-    if (current && timeline) {
+    // 調理中の手順を覚えている（＝調理の途中）なら、全画面の調理中モードを開いて着地する
+    // （2026-08-10 便FC・オーナー実機「調理中モードでスタートしたタイマーからの戻り先が
+    // 調理中モードの手順にしたい」。閉じている間もカーソルは残るので、タイマーから帰って
+    // きたときは**段取りの一覧ではなく調理中モードへ**戻す）。
+    //
+    // 2026-08-15 便GQ・オーナー判断A案: **カーソルは動かさない**。
+    // ここは以前 setCurrent でカーソルを鳴ったタイマーの手順へ動かしていたが、
+    // このアプリは「済んだ手順＝現在地より前」で数える（docs/69）ので、
+    // 通り過ぎた手順のタイマーから帰ると**そこまでの進み具合がまるごと巻き戻って**いた。
+    // 着地先（全画面の調理中モード）は変えず、その手順は**見るだけ**の窓で出す。
+    // 調理をしていない（カーソルが無い）ときは、従来どおり一覧の該当カードへ送る
+    //（巻き戻す現在地が無いので、そちらは今までの動きでよい）
+    {
       // 「レシピID-手順の呼び名」。呼び名は「3」「3-1」のように「-」を含むことがあるので、
       // 先頭の「-」だけで切る（2026-08-13 便GD）
       const sep = focus.indexOf('-')
       const focusRecipeId = Number(focus.slice(0, sep))
       const focusStepKey = focus.slice(sep + 1)
-      const target = planItems.find(
-        (item) => item.recipeId === focusRecipeId && naviStepKey(item) === focusStepKey,
-      )
-      if (target) {
+      const target = timeline
+        ? planItems.find(
+            (item) => item.recipeId === focusRecipeId && naviStepKey(item) === focusStepKey,
+          )
+        : undefined
+      const landing = resolveTimerStepLanding(planItems, current, target)
+      if (landing.kind === 'peek') {
         handledFocusRef.current = focus
-        setCurrent({ recipeId: target.recipeId, stepIndex: target.stepIndex })
+        setTimerPeekStep(landing.target)
         setSessionOpen(true)
         /**
          * **URLの後片付けは1拍おいてから**（2026-08-10 便FC。ここを直接呼ぶと動かない）。
@@ -1453,7 +1468,11 @@ export default function CookNaviPage() {
    * **調理中の手順は消さない**ので、失うものが無い＝確認は出さない。
    * 選んだ品・段取り・作った記録にも触らない。
    */
-  const closeSession = () => setSessionOpen(false)
+  const closeSession = () => {
+    setSessionOpen(false)
+    // タイマーから開いた「見るだけ」の窓は、全画面と一緒に閉じる（次に開いたときに残らない）
+    setTimerPeekStep(null)
+  }
   /**
    * 色で手順を引き寄せる（2026-08-10 便FI・docs/69 第3段。オーナー要望
    * 「並行調理ナビ調理中モードの、色で手順入れ替えはいつ実装しますか？」）。
@@ -2288,6 +2307,8 @@ export default function CookNaviPage() {
           onFinish={completeSession}
           onStartTimer={startStepTimer}
           sequential={isSequential}
+          peekStep={timerPeekStep}
+          onPeekStepClose={() => setTimerPeekStep(null)}
         />
       )}
       {/* 「完成！」の窓（2026-08-12 便FX）。記録をつける／調理を続ける／記録をつけずに閉じる

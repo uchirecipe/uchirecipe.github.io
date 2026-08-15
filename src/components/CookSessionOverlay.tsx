@@ -51,6 +51,7 @@ import NaviRecipeNotes from './NaviRecipeNotes'
 import VoiceHint from './VoiceHint'
 import SpeechReadingHint from './SpeechReadingHint'
 import CookTextSizeModal from './CookTextSizeModal'
+import CookStepPeekModal from './CookStepPeekModal'
 import { cookFontSize, resolveCookFontScale } from '../logic/cookFontScale'
 import { useSettings, updateSettings } from '../db/settings'
 import {
@@ -62,6 +63,7 @@ import {
   isCursorAtLast,
   nextStepsByRecipe,
   resolveColorMove,
+  resolveTimerStepLanding,
   startCursor,
   type CookCursor,
   type StepPull,
@@ -241,6 +243,14 @@ type Props = {
    * 別の品を差し込まないので、「この間に、次の手作業を進められます」を出さない
    */
   sequential: boolean
+  /**
+   * 別の画面のタイマーから開かれた手順（2026-08-15 便GQ）。**見るだけ**で出し、
+   * カーソルには触らない（常駐タイマーバー → `?focusStep=` → CookNaviPage が渡す）。
+   * 全画面の中のタイマーから開いたときはこの画面が自分で覚えるので、ここは使わない。
+   */
+  peekStep?: CookCursor | null
+  /** 上の窓を閉じたことを呼び出し側にも伝える（渡した指定を1回で使い切る） */
+  onPeekStepClose?: () => void
 }
 
 /**
@@ -271,6 +281,8 @@ export default function CookSessionOverlay({
   onFinish,
   onStartTimer,
   sequential,
+  peekStep,
+  onPeekStepClose,
 }: Props) {
   // 段取りの実行中は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
   useAppBusyWhileMounted()
@@ -308,6 +320,12 @@ export default function CookSessionOverlay({
    * どちらが起きたのか分からなくなる。移るのは声だけ、見るのは指だけで分ける。
    */
   const [peekRecipeId, setPeekRecipeId] = useState<number | null>(null)
+  /**
+   * タイマーから**見るだけ**で開いている手順（2026-08-15 便GQ）。
+   * 下部の行の全文（peekRecipeId）と同じ性質＝保存しない一時的な表示状態で、
+   * **カーソルは動かさない**。端末にも残さない（docs/69「見るだけを新しい保存物にしない」）
+   */
+  const [timerPeek, setTimerPeek] = useState<CookCursor | null>(null)
   /**
    * 手順を進めた直後に出す、タイマーについての一言（2026-08-14 便GL）。
    * **止めない**（確認の窓は出さない）。しばらく置いてから自分で消す＝台所で消す操作を増やさない。
@@ -603,18 +621,37 @@ export default function CookSessionOverlay({
     items.find(
       (x) => x.recipeId === timer.recipeId && (recipeStepLabel(x) ?? '') === (timer.naviStepLabel ?? ''),
     )
-  /** 調整の窓の「レシピ名タップで該当手順へ」（オーナー指示E-14）。段取りに無い手順には飛ばさない */
-  const goToTimerStep = (timer: ActiveTimer) => {
-    const target = timerStep(timer)
-    if (!target) return
+  /**
+   * 調整の窓から、そのタイマーの手順を**見るだけ**で開く（2026-08-15 便GQ・オーナー判断A案）。
+   *
+   * 便FC〜便GO はここで `move()` を呼んでカーソルを動かしていた。段取り6まで進めたあとに
+   * 手順1のタイマーから開くと現在地が1へ戻り、「済んだ手順＝現在地より前」の導出ごと
+   * 手順2〜6が巻き戻っていた（戻す手立ては「次へ」の押し直しだけ）。
+   * 行き先の決め方は logic/cookSession.ts の resolveTimerStepLanding（そこに理由を書いた）。
+   * 段取りに無い手順には何も起こさない（押しても何も起きない見せかけを作らない）。
+   */
+  const peekTimerStep = (timer: ActiveTimer) => {
+    const landing = resolveTimerStepLanding(items, cursor, timerStep(timer))
+    if (landing.kind !== 'peek') return
     setAdjustingId(null)
-    move({ recipeId: target.recipeId, stepIndex: target.stepIndex })
+    setTimerPeek(landing.target)
   }
   /**
-   * このタイマーの手順へ移動できるか（2026-08-10 便FC）。飛び先が無いタイマーで
-   * レシピ名に下線を引く・「手順◯を開く」を出すと、押しても何も起きない見せかけになる
+   * このタイマーの手順を開けるか（2026-08-10 便FC）。開く先が無いタイマーで
+   * レシピ名に下線を引く・「手順◯を見る」を出すと、押しても何も起きない見せかけになる
    */
   const adjustingTimerStep = adjustingTimer ? timerStep(adjustingTimer) : undefined
+  /**
+   * いま見るだけで開いている手順（この画面のタイマー・別の画面のタイマーのどちらから来ても同じ窓）。
+   * 段取りを組み直して消えていたら何も出さない（推測して近い手順を出さない・docs/69）
+   */
+  const peekCursor = timerPeek ?? peekStep ?? null
+  const peekIndex = peekCursor ? findCursorIndex(items, peekCursor) : -1
+  const peekItem = peekIndex === -1 ? undefined : items[peekIndex]
+  const closeTimerPeek = () => {
+    setTimerPeek(null)
+    onPeekStepClose?.()
+  }
 
   const onTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     touchStartX.current = e.touches[0].clientX
@@ -1366,15 +1403,16 @@ export default function CookSessionOverlay({
         timer={adjustingTimer}
         now={now}
         onLabelClick={
-          adjustingTimer && adjustingTimerStep ? () => goToTimerStep(adjustingTimer) : undefined
+          adjustingTimer && adjustingTimerStep ? () => peekTimerStep(adjustingTimer) : undefined
         }
-        /* 「手順⑦（3-1）を開く」（2026-08-10 便FC・オーナー実機「調理中モードでスタートした
-           タイマーからの戻り先が調理中モードの手順にしたい」）。この画面では別の画面へ飛ばさず、
-           段取りの中でその手順へカーソルを移す＝常駐バーから開いた窓と同じ言い方・同じ着地にする。
+        /* 「手順⑦（3-1）を見る」（2026-08-10 便FC・オーナー実機「調理中モードでスタートした
+           タイマーからの戻り先が調理中モードの手順にしたい」＝この画面から別の画面へ飛ばさない、
+           は生かす）。2026-08-15 便GQ・オーナー判断A案で、**カーソルは動かさず見るだけ**に変えた。
            以前はレシピ名のタップにしか道が無く、押せる場所が見た目から分からなかった */
         onGoToStep={
-          adjustingTimer && adjustingTimerStep ? () => goToTimerStep(adjustingTimer) : undefined
+          adjustingTimer && adjustingTimerStep ? () => peekTimerStep(adjustingTimer) : undefined
         }
+        goToStepIsPeek
         onAdjust={(delta) => {
           if (adjustingId !== null) adjustTimer(adjustingId, delta)
         }}
@@ -1394,6 +1432,21 @@ export default function CookSessionOverlay({
             : undefined
         }
         useNaviOrder
+      />
+      {/* タイマーの手順を見るだけで出す窓（2026-08-15 便GQ）。全画面（z-50）より上に重ねる。
+          読み終えて閉じれば、元の手順にそのまま居る＝進み具合は1つも動かない */}
+      <CookStepPeekModal
+        open={peekItem != null}
+        order={peekItem?.order ?? 0}
+        stepLabel={peekItem ? recipeStepLabel(peekItem) : undefined}
+        recipeTitle={peekItem ? (recipeById.get(peekItem.recipeId)?.title ?? '') : ''}
+        color={naviRecipeColor(peekItem?.colorIndex ?? 0)}
+        text={peekItem?.text ?? ''}
+        memo={peekItem?.memo}
+        notes={peekItem ? (recipeNotes.get(recipeNoteStepKey(peekItem)) ?? []) : []}
+        currentNumber={index + 1}
+        total={total}
+        onClose={closeTimerPeek}
       />
     </div>
   )

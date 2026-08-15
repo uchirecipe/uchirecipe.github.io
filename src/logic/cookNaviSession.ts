@@ -402,6 +402,19 @@ export function hasCookNaviTimeline(): boolean {
 }
 
 /**
+ * 調理の途中か（＝段取りの中に現在地がある。2026-08-15 便GQ）。
+ *
+ * 常駐タイマーバーの窓が、そのタイマーの手順を**見るだけ**で開くのか、
+ * 段取りの一覧の該当カードへ送るのかを、押す前にボタンの名前で言い分けるために使う。
+ * 実際にどちらになるかを決めるのは CookNaviPage 側の
+ * `resolveTimerStepLanding`（logic/cookSession.ts）で、ここはその見込みを名前に映すだけ。
+ */
+export function hasCookNaviCursor(): boolean {
+  const session = loadCookNaviSession()
+  return session?.showTimeline === true && session.current != null
+}
+
+/**
  * レシピ詳細を見に行くときの「ナビのどこを見ていたか」（2026-08-08 便EG・オーナー実機報告
  * 「レシピ詳細リンクから戻ると、ナビの末尾に戻りたい。現在は別の場所に戻る」）。
  *

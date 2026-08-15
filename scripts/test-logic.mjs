@@ -207,6 +207,7 @@ import {
   nextStepsByRecipe,
   resolveColorMove,
   resolveCursor,
+  resolveTimerStepLanding,
   resumeCursor,
   startCursor,
 } from '../src/logic/cookSession.ts'
@@ -16198,6 +16199,80 @@ eq(
   eq('EL-NEXT いま開いている品は下部に出さない', nextStepsByRecipe(plan, at(0), ids).some((x) => x.recipeId === 10), false)
   eq('EL-NEXT 並びはレシピの色の順で固定', nextStepsByRecipe(plan, at(4), ids).map((x) => x.recipeId), [10, 20])
   eq('EL-NEXT カーソルが段取りに無ければ何も出さない', nextStepsByRecipe(plan, { recipeId: 99, stepIndex: 0 }, ids), [])
+
+  // ---------- 便GQ: タイマーの手順は「見るだけ」＝現在地を動かさない（2026-08-15） ----------
+  // オーナー判断A案「タイマーが鳴る手順は、すでに通り過ぎた手順。やりたいのは『その手順を読んで、
+  // その一手をやる』ことであって、進捗を戻すことではない」。
+  // 便FC〜便GO は、タイマーの窓の「手順◯を開く」でカーソルそのものを動かしていた。
+  // このアプリは「済んだ手順＝現在地より前」で数える（docs/69 の不変条件）ので、
+  // 現在地が戻ると**通り過ぎた手順がまるごと「まだやっていない」に巻き戻り**、
+  // 他の品の「次の手順」の表示もつられて巻き戻っていた（戻す手立ては「次へ」の押し直しだけ）。
+  {
+    /**
+     * 利用者が確かめたいこと＝**タイマーから手順を見たあとも、どこに居るかが変わっていない**。
+     * 「どこに居るか」は画面の文字ではなく、この2つの導出で見る:
+     *   ①段取りの中の位置（＝済んだ手順がどこまでか）②各品の次の手順（その裏返しの投影）
+     */
+    const whereAmI = (cursor) => ({
+      index: findCursorIndex(plan, cursor),
+      next: nextStepsByRecipe(plan, cursor, ids).map((x) => [x.recipeId, x.item?.stepIndex]),
+    })
+    // 段取りの先頭でタイマーを始め、そこから何回か「次へ」を押して進んだところ
+    const timerStep = at(0)
+    const cooking = at(4)
+    const before = whereAmI(cooking)
+    const landing = resolveTimerStepLanding(plan, cooking, timerStep)
+    eq('GQ-PEEK 通り過ぎた手順のタイマーは「見るだけ」で開く', landing, {
+      kind: 'peek',
+      target: timerStep,
+    })
+    eq('GQ-PEEK 見たあとも、どこに居るかは1つも変わらない', whereAmI(cooking), before)
+    // 行き先に「新しい現在地」を含めない＝呼び出し側にカーソルを動かす材料を渡さない
+    // （この1行が崩れたら、巻き戻しの不具合を作れる形に戻っている）
+    eq('GQ-PEEK 行き先に新しい現在地は含まれない', Object.keys(landing).sort(), ['kind', 'target'])
+    // 現在地より**後ろ**の手順のタイマー（段取りの一覧から先の手順のタイマーを始めた場合）も、
+    // 同じく見るだけ。前へ飛ばすと、今度は**やっていない手順が「済んだ」に化ける**
+    eq('GQ-PEEK 現在地より後ろの手順のタイマーも「見るだけ」（前へも動かさない）', {
+      landing: resolveTimerStepLanding(plan, at(1), at(4)),
+      where: whereAmI(at(1)),
+    }, {
+      landing: { kind: 'peek', target: at(4) },
+      where: whereAmI(at(1)),
+    })
+    // いま開いている手順のタイマーでも扱いは同じ（押しても何も動かない＝押し損じが無害）
+    eq('GQ-PEEK いま開いている手順のタイマーでも同じ扱い', resolveTimerStepLanding(plan, at(2), at(2)), {
+      kind: 'peek',
+      target: at(2),
+    })
+    // 調理していない（カーソルが無い）ときは今までどおり段取りの一覧の該当カードへ送る。
+    // 巻き戻す現在地が無いので、こちらの動きは変えない
+    eq('GQ-PEEK 調理していないときは段取りの一覧へ送る', resolveTimerStepLanding(plan, undefined, at(0)), {
+      kind: 'list',
+    })
+    // 覚えていた現在地が組み直した段取りから消えていたら、推測せず一覧へ（docs/69「復元」）
+    eq(
+      'GQ-PEEK 現在地が段取りから消えていたら一覧へ（近い手順を当てにいかない）',
+      resolveTimerStepLanding(plan, { recipeId: 10, stepIndex: 9 }, at(0)),
+      { kind: 'list' },
+    )
+    // タイマーの手順のほうが段取りから消えている（レシピを直した等）ときも一覧へ
+    eq(
+      'GQ-PEEK タイマーの手順が段取りに無ければ一覧へ',
+      resolveTimerStepLanding(plan, cooking, { recipeId: 20, stepIndex: 7 }),
+      { kind: 'list' },
+    )
+    eq('GQ-PEEK 手順を指していないタイマーは一覧へ', resolveTimerStepLanding(plan, cooking, undefined), {
+      kind: 'list',
+    })
+    // 段取りのどの位置から、どの手順のタイマーを開いても、現在地は1つも動かない（総当たり）
+    for (let i = 0; i < plan.length; i++) {
+      for (let j = 0; j < plan.length; j++) {
+        const snapshot = whereAmI(at(i))
+        resolveTimerStepLanding(plan, at(i), at(j))
+        eq(`GQ-PEEK 現在地(${i})から手順(${j})を見ても居場所が動かない`, whereAmI(at(i)), snapshot)
+      }
+    }
+  }
 
   // 畳んだ1行の書式（2026-08-09 オーナー決定「文頭…文末」）
   eq('EL-FOLD 上限内はそのまま', collapseStepText('玉ねぎをみじん切りにする。', 20), '玉ねぎをみじん切りにする。')

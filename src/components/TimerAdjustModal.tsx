@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { X, BellRing, Bell, BellOff, CornerUpLeft, Pause, Play } from 'lucide-react'
+import { X, BellRing, Bell, BellOff, CornerUpLeft, Eye, Pause, Play } from 'lucide-react'
 import type { ActiveTimer } from './TimerProvider'
 import { formatRemaining } from '../logic/time'
 import { timerRemainingSeconds } from '../logic/timerOrder'
@@ -21,6 +21,16 @@ type Props = {
    * 未指定なら導線を出さない（戻り先が無い＝別の料理の手順へは飛べない場面）。
    */
   onGoToStep?: () => void
+  /**
+   * `onGoToStep` が**手順を見るだけ**か（2026-08-15 便GQ・オーナー判断A案）。
+   *
+   * 並行調理ナビの調理中（段取りの中に現在地があるとき）は、タイマーの手順を開いても
+   * **現在地を動かさない**（動かすと「済んだ手順＝現在地より前」の導出が巻き戻る。
+   * logic/cookSession.ts の resolveTimerStepLanding に理由を書いた）。
+   * 起きることが変わるので、ボタンの名前と印もそれに合わせて分ける。
+   * 未指定＝今までどおりその手順へ移る場面（1品のレシピ詳細・調理していないとき）。
+   */
+  goToStepIsPeek?: boolean
   /** このタイマーだけ消音する／音を戻す（同④）。未指定なら切り替えを出さない */
   onToggleMute?: () => void
   /**
@@ -56,6 +66,7 @@ export default function TimerAdjustModal({
   onStop,
   onClose,
   onGoToStep,
+  goToStepIsPeek,
   onToggleMute,
   useNaviOrder,
   onLabelClick,
@@ -95,6 +106,12 @@ export default function TimerAdjustModal({
       : timer.stepNumber > 0
         ? ja.timer.stepLabel.replace('{n}', String(timer.stepNumber))
         : null
+
+  /**
+   * 手順への導線の名前（2026-08-15 便GQ）。**起きることが違えば名前も違う**にする。
+   * 見るだけ＝「手順⑦（3-1）を見る」／その手順へ移る＝従来どおり「手順⑦（3-1）を開く」
+   */
+  const stepActionLabel = goToStepIsPeek ? ja.timer.peekStep : ja.timer.goToStep
 
   const remaining = timerRemainingSeconds(timer, now)
   /** 一時停止中（2026-08-10 便EZ）。時計が止まっているので、残り時間はその場に固定される */
@@ -240,20 +257,27 @@ export default function TimerAdjustModal({
             {paused ? ja.timer.resume : ja.timer.pause}
           </button>
         )}
-        {/* このタイマーを始めた手順へ戻る(2026-08-03 オーナー実機フィードバック③) */}
+        {/* このタイマーを始めた手順へ戻る(2026-08-03 オーナー実機フィードバック③)。
+            2026-08-15 便GQ: 調理中は**見るだけ**になるので、そのときは名前と印を分ける
+            （矢印の印は「移る」を表すため、見るだけの場面では目の印にする） */}
         {onGoToStep && (
           <button
             type="button"
+            data-testid="timer-adjust-go-step"
             onClick={onGoToStep}
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 text-lg font-bold text-accent-ink shadow-sm"
           >
-            <CornerUpLeft size={20} aria-hidden />
+            {goToStepIsPeek ? (
+              <Eye size={20} aria-hidden />
+            ) : (
+              <CornerUpLeft size={20} aria-hidden />
+            )}
             {/* 2026-08-10 便EZ（オーナー指示）: 「段取りの7番目を開く」→「手順⑦3-1を開く」。
                 すぐ上のバッジ（段取りの通し番号＋レシピ内の手順番号）と同じ並びで呼ぶ */}
             {naviOrder != null
-              ? ja.timer.goToStep.replace('{n}', naviStepText(naviOrder, recipeStepBadge))
+              ? stepActionLabel.replace('{n}', naviStepText(naviOrder, recipeStepBadge))
               : timer.stepNumber > 0
-                ? ja.timer.goToStep.replace('{n}', String(timer.stepNumber))
+                ? stepActionLabel.replace('{n}', String(timer.stepNumber))
                 : ja.timer.goToRecipe}
           </button>
         )}

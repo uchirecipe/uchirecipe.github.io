@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { X, BellRing, Bell, BellOff, Pause, Play } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTimers, type ActiveTimer } from './TimerProvider'
-import { hasCookNaviTimeline } from '../logic/cookNaviSession'
+import { hasCookNaviCursor, hasCookNaviTimeline } from '../logic/cookNaviSession'
 import { naviRecipeColor } from '../logic/naviColors'
 import { formatRemaining } from '../logic/time'
 import { naviStepSpeechText, naviStepText } from '../logic/naviStepText'
@@ -49,7 +49,33 @@ export default function TimerBar() {
   }
 
   /**
-   * このタイマーを始めた手順へ移動する。
+   * `navi-step-...` の id は CookNaviPage の naviStepDomId が付与する。形式を変えるときは両方を揃える。
+   * 2026-08-13 便GD: 1つの手順を2つに分ける形が増えたので、手順番号ではなく
+   * **そのレシピ内の手順の呼び名**（「3」「3-1」「3-2」）で指す
+   */
+  const naviStepDomId = (timer: ActiveTimer) =>
+    `navi-step-${timer.recipeId}-${timer.naviStepLabel ?? String(timer.stepNumber)}`
+
+  /**
+   * 押すと**その手順を見るだけ**になるか（2026-08-15 便GQ・オーナー判断A案）。
+   *
+   * 並行調理ナビの段取りに現在地があるとき、着地先の CookNaviPage は
+   * **カーソルを動かさず**に全画面の調理中モードでその手順を出す
+   *（理由は logic/cookSession.ts の resolveTimerStepLanding）。起きることが変わるので、
+   * 窓のボタンも「開く」ではなく「見る」と名乗る。
+   * 現在地が無いとき（調理していない）は今までどおり段取りの一覧の該当カードへ送り、
+   * ナビと関係のないタイマーは単品レシピ詳細を開くので、どちらも「開く」のまま。
+   */
+  const opensAsPeek = (timer: ActiveTimer): boolean => {
+    if (!hasCookNaviCursor()) return false
+    if (location.pathname === '/cook-navi' && document.getElementById(naviStepDomId(timer))) {
+      return true
+    }
+    return timer.fromNavi === true && hasCookNaviTimeline()
+  }
+
+  /**
+   * このタイマーを始めた手順を開く。
    * 通常は単品レシピ詳細（?step=）へ飛んで詳細画面側でスクロール＆一時ハイライトする。
    * ただし並行調理ナビ実行中は、常駐バーは元々レシピ詳細向けの設計なので詳細へ離脱させず、
    * ナビ内に同じ手順カードが表示されていればナビ内でスクロール＆ハイライトして文脈に留める
@@ -59,19 +85,17 @@ export default function TimerBar() {
    *
    * 2026-08-11 便FO: **帯そのもののタップからは呼ばない**（利用者テスト「帯を消そうとして
    * 触ったら、並行調理ナビの画面に飛ばされた。消す✕は帯の右端の小さい印だけ。濡れた手だと
-   * 確実に押し間違える」）。画面が変わる操作は、調整の窓の中の「手順◯を開く」を
+   * 確実に押し間違える」）。画面が変わる操作は、調整の窓の中の手順のボタンを
    * **名前を読んで押したときだけ**にする。
+   *
+   * 2026-08-15 便GQ: 調理の途中（段取りに現在地がある）なら、着地先の CookNaviPage が
+   * **カーソルを動かさず**その手順を見るだけの窓で出す（上の opensAsPeek）。
+   * ここが送り出す `?focusStep=` そのものは変えていない。
    */
   const goToStep = (timer: ActiveTimer) => {
     const { recipeId, stepNumber } = timer
-    // `navi-step-...` の id は CookNaviPage の naviStepDomId が付与する。形式を変えるときは両方を揃える。
-    // 2026-08-13 便GD: 1つの手順を2つに分ける形が増えたので、手順番号ではなく
-    // **そのレシピ内の手順の呼び名**（「3」「3-1」「3-2」）で指す
     const stepKey = timer.naviStepLabel ?? String(stepNumber)
-    if (
-      location.pathname === '/cook-navi' &&
-      document.getElementById(`navi-step-${recipeId}-${stepKey}`)
-    ) {
+    if (location.pathname === '/cook-navi' && document.getElementById(naviStepDomId(timer))) {
       navigate(`/cook-navi?focusStep=${recipeId}-${stepKey}`, { replace: true })
       return
     }
@@ -304,6 +328,8 @@ export default function TimerBar() {
               }
             : undefined
         }
+        /* 調理の途中なら、押しても現在地は動かない＝「開く」ではなく「見る」と名乗る（便GQ） */
+        goToStepIsPeek={adjustingTimer ? opensAsPeek(adjustingTimer) : false}
         /* レシピ名のタップでも同じ手順へ移動する（2026-08-09 便ES・オーナー指示E-14） */
         onLabelClick={
           adjustingTimer
