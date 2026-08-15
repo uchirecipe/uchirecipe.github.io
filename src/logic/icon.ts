@@ -226,6 +226,30 @@ export function pickIconKey(input: {
   return fromAll ?? 'default'
 }
 
+/**
+ * カードに実際に描くアイコンの種別を決める（2026-08-15 便GU）。
+ *
+ * 手で選んだ値（recipe.iconKey）を優先するが、`public/icons/` に絵が無い値が入っていたら
+ * 自動判定に落とす。落とさないと、絵の読み込みに失敗してカードに何も描かれない
+ * （CSSマスクで描くので、読めない画像＝一切塗られない＝空白のタイルになる）。
+ * バックアップの読み込み・貼り付け取り込み・手直ししたファイルなど、アプリの選択UIを
+ * 通らずに値が入る経路があるため、描く直前にここで必ず通す。
+ */
+export function resolveIconKey(recipe: {
+  title: string
+  tags: readonly string[]
+  ingredients: readonly Pick<Ingredient, 'name'>[]
+  iconKey?: string
+}): IconKey {
+  if (recipe.iconKey && isIconKey(recipe.iconKey)) return recipe.iconKey
+  return pickIconKey(recipe)
+}
+
+/** アプリが絵を持っている種別かどうか（`public/icons/<key>.png` があるもの） */
+export function isIconKey(value: string): value is IconKey {
+  return (iconKeyOrder as string[]).includes(value)
+}
+
 /** アイコン選択UIで並べる順（自動判定の優先順とだいたい揃える） */
 export const iconKeyOrder: IconKey[] = [
   'rice',

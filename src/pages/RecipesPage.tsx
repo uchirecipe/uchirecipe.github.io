@@ -208,6 +208,58 @@ function usePanelMaxHeight(open: boolean, barRef: RefObject<HTMLDivElement | nul
   return maxHeight
 }
 
+/**
+ * 画面下に固定する帯を、すでに下にいる帯（タブナビ・タイマー・新しい版のお知らせ）の
+ * 上に積むための下端位置を測る（2026-08-15 便GU）。
+ *
+ * 高さが固定値ではないので px を決め打ちできない（タイマーは本数で伸びる）。
+ * logic/bottomBarInset.ts と同じく `[data-app-bottom-bar]` を測るが、自分自身は数えない
+ * （自分を含めると「自分の高さぶん自分が上がる」の繰り返しになる）。
+ */
+function useStackedBottomOffset(active: boolean, selfRef: RefObject<HTMLElement | null>) {
+  const [offset, setOffset] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const others = () =>
+      Array.from(document.querySelectorAll<HTMLElement>('[data-app-bottom-bar]')).filter(
+        (bar) => bar !== selfRef.current && !selfRef.current?.contains(bar),
+      )
+    let observed: HTMLElement[] = []
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => update()) : null
+    function update() {
+      const bars = others()
+      if (
+        resizeObserver &&
+        (bars.length !== observed.length || bars.some((bar, i) => bar !== observed[i]))
+      ) {
+        resizeObserver.disconnect()
+        for (const bar of bars) resizeObserver.observe(bar)
+        observed = bars
+      }
+      const vh = window.innerHeight
+      let next = 0
+      for (const bar of bars) {
+        const r = bar.getBoundingClientRect()
+        if (r.height > 0 && r.top < vh) next = Math.max(next, vh - r.top)
+      }
+      setOffset(Math.round(next))
+    }
+    update()
+    const mutationObserver = new MutationObserver(() => update())
+    mutationObserver.observe(document.body, { childList: true, subtree: true })
+    window.addEventListener('resize', update)
+    window.addEventListener('orientationchange', update)
+    return () => {
+      resizeObserver?.disconnect()
+      mutationObserver.disconnect()
+      window.removeEventListener('resize', update)
+      window.removeEventListener('orientationchange', update)
+    }
+  }, [active, selfRef])
+  return offset
+}
+
 const chipCls = (active: boolean) =>
   `rounded-sm border px-3 py-2 text-sm font-bold ${
     active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
@@ -671,6 +723,15 @@ export default function RecipesPage() {
   // まとめて入れるときの食事の振り分け窓(1品ずつのときと同じ部品・同じ選択肢)
   const [bulkSlotModalOpen, setBulkSlotModalOpen] = useState(false)
   const [addingToToday, setAddingToToday] = useState(false)
+  // 選択モードの操作の帯(2026-08-15 便GU)。すでに下にいる帯の上に積む
+  const selectionBarRef = useRef<HTMLDivElement>(null)
+  const selectionBarOffset = useStackedBottomOffset(selecting, selectionBarRef)
+  // 測り終わるまでの控えはタブナビ1本ぶん(タイマーの帯と同じ値)。--app-bottom-inset は
+  // この帯自身の高さも含むので、控えに使うと「自分の高さぶん自分が上がる」が起きうる
+  const selectionBarBottom =
+    selectionBarOffset > 0
+      ? `${selectionBarOffset}px`
+      : 'calc(72px + env(safe-area-inset-bottom))'
 
   const visibleIds = useMemo(
     () => (results ?? []).map((r) => r.recipe.id).filter((id): id is number => id != null),
@@ -697,11 +758,24 @@ export default function RecipesPage() {
     }
   }, [selecting, recipes])
 
-  const toggleSelecting = () => {
-    setSelecting((v) => !v)
+  const startSelecting = () => {
+    setSelecting(true)
     setSelectedIds([])
     // 見出し横のボタンで入り直した選択モードは、献立からの「今日の献立に入れる用」ではない
     setSelectingForToday(false)
+  }
+  /**
+   * 選択モードを抜ける(2026-08-15 便GU)。選んだレシピは外れ、ふだんの一覧に戻る。
+   * 献立の「＋ 今日の献立を選ぶ」から来ていたときは献立へ帰す
+   * (何も入れずに抜けたとき、来た画面へ戻れないと行き止まりになる。便FPと同じ考え方)
+   */
+  const exitSelecting = () => {
+    setSelecting(false)
+    setSelectedIds([])
+    if (selectingForToday) {
+      setSelectingForToday(false)
+      navigate('/meal-plan')
+    }
   }
   const toggleSelected = (id: number) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]))
@@ -938,21 +1012,20 @@ export default function RecipesPage() {
       className="mx-auto w-full max-w-md px-[var(--space-md)] pt-[var(--space-lg)]"
       onClickCapture={onClickCapture}
     >
-      {/* 見出し行に選択モードの出入り口を置く(食材の在庫の「整理」ボタンと同じ位置づけ)。
-          レシピが1品も無いうちは選ぶものが無いので出さない */}
+      {/* 見出し行に選択モードの入口を置く(食材の在庫の「整理」ボタンと同じ位置づけ)。
+          レシピが1品も無いうちは選ぶものが無いので出さない。
+          選択モードに入っている間は出さない: 抜ける操作は画面下の帯にまとめてあり、
+          同じ操作を見出しにも置くと2か所に増える(2026-08-15 便GU) */}
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">{ja.recipes.title}</h1>
-        {recipes && recipes.length > 0 && (
+        {!selecting && recipes && recipes.length > 0 && (
           <button
             type="button"
-            onClick={toggleSelecting}
-            aria-pressed={selecting}
-            className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
-              selecting ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
-            }`}
+            onClick={startSelecting}
+            className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted"
           >
             <ListChecks size={14} aria-hidden />
-            {selecting ? ja.recipes.selectDone : ja.recipes.selectToggle}
+            {ja.recipes.selectToggle}
           </button>
         )}
       </div>
@@ -1453,12 +1526,15 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 選択モードの操作パネル(2026-08-02 便CT)。食材の在庫の整理モードと同じ並びで、
-          案内文→全選択/選択解除→操作のボタンをカードのすぐ上に置く
-          (下までスクロールしなくても全選択・削除に手が届くように) */}
+      {/* 選択モードの案内と全選択/選択解除(2026-08-02 便CT)。
+          選んだあとの操作(今日の献立に入れる・書き出す・削除)と選択モードを抜ける操作は、
+          2026-08-15 便GUで画面下に固定する帯へ移した(下の selection-bar)。
+          全選択・選択解除は選び始める前に使う操作なので、カードの手前のここに残す */}
       {selecting && results && results.length > 0 && (
         <div className="mt-[var(--space-sm)] flex flex-col gap-2">
-          <p className="text-sm text-ink-muted">{ja.recipes.selectHint}</p>
+          <p data-testid="select-hint" className="text-sm text-ink-muted">
+            {ja.recipes.selectHint}
+          </p>
           {/* 選択モードで何ができるかを、1品も選んでいないうちから出す(利用者テスト①) */}
           {!selectingForToday && (
             <p data-testid="select-actions-hint" className="text-xs text-ink-muted">
@@ -1483,46 +1559,6 @@ export default function RecipesPage() {
               {ja.recipes.clearSelection}
             </button>
           </div>
-          {/* まとめて今日の献立に入れる(2026-08-11 便FP)。献立から来たときは1品も選んで
-              いなくても押せない見た目で出し続け、決定ボタンが無いまま迷子にならないようにする */}
-          {(selectingForToday || selectedIds.length > 0) && (
-            <button
-              type="button"
-              data-testid="add-selected-to-today"
-              onClick={() => setBulkSlotModalOpen(true)}
-              disabled={selectedIds.length === 0 || addingToToday}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm disabled:opacity-40"
-            >
-              <CalendarPlus size={16} aria-hidden />
-              {selectedIds.length === 0
-                ? ja.recipes.addSelectedToTodayEmpty
-                : ja.recipes.addSelectedToToday.replace('{r}', String(selectedIds.length))}
-            </button>
-          )}
-          {/* 書き出しは消す作業の前に置く(取り出してから片づける流れ。押し間違いで
-              削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM)。
-              献立に入れに来た選択モードでは、書き出し・削除は出さない(2026-08-11 便FP) */}
-          {!selectingForToday && selectedIds.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void exportSelected()}
-              disabled={exporting}
-              className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
-            >
-              <Download size={16} aria-hidden />
-              {ja.recipes.exportSelected.replace('{r}', String(selectedIds.length))}
-            </button>
-          )}
-          {!selectingForToday && selectedIds.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void deleteSelected()}
-              disabled={deleting}
-              className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
-            >
-              {ja.recipes.deleteSelected.replace('{r}', String(selectedIds.length))}
-            </button>
-          )}
         </div>
       )}
 
@@ -1545,7 +1581,15 @@ export default function RecipesPage() {
           return (
             <div
               key={recipe.id}
-              className="relative"
+              // isolate: 選択モードでカードに重ねるボタン(下の z-10)の重ね順を、このカードの中だけの
+              // 話に閉じ込める(2026-08-15 便GU・オーナー実機「複数選択している時に他のタブを押しても、
+              // タブの下のレシピカードをクリックしてしまう」)。
+              // 真因: 下部のタブナビは position:fixed だが z-index を持たない(auto)ため、
+              // z-10 を持つこのボタンの方が上に描かれ、当たり判定もそちらが取っていた
+              // (390px幅で実測: タブ5つのうち中心がカードに重なる4つで document.elementFromPoint が
+              // タブではなくカードの選択ボタンを返し、タブを押しても移動せずカードが選ばれた)。
+              // isolate を付けるとこの div が重ね合わせの文脈を作り、中の z-10 は外の帯と競わなくなる
+              className="relative isolate"
               // 長押しで選択モードに入る(2026-08-02 便CT)。iOS Safariの長押しメニュー
               // (リンクのプレビュー・コピー)が割り込むと選択に入れないので、この一覧では出さない
               style={{ WebkitTouchCallout: 'none' }}
@@ -1572,6 +1616,7 @@ export default function RecipesPage() {
               {selecting && recipe.id != null && (
                 <button
                   type="button"
+                  data-testid="select-card"
                   onClick={() => toggleSelected(recipe.id!)}
                   aria-pressed={selected}
                   aria-label={recipe.title}
@@ -1606,6 +1651,89 @@ export default function RecipesPage() {
         >
           <Plus size={30} aria-hidden />
         </Link>
+      )}
+
+      {/* 選択モードの操作の帯(2026-08-15 便GU・オーナー実機フィードバック
+          「複数選択中に完了ボタンがページのいちばん上にしかないため、ページ下のレシピカードを
+          選択してから完了ボタンまでが遠い」)。
+
+          直した点:
+           ・位置: 選んだあとの操作(今日の献立に入れる・書き出す・削除)と、選択をやめる操作を
+             画面下に固定する。一覧のどこまで送っていても同じ場所にあり、指が届く
+           ・名前: 「完了」→「選択をやめる」(押した先で何が終わるのかが読める)
+           ・状態: 何品選んでいるかを帯に常に出し、やめたときに何品外れるのかを読み合わせられる
+          同じ操作を2か所に増やさないため、これらは見出し行・カードの手前からは外してある。
+
+          下端は他の帯(タブナビ・タイマー・新しい版のお知らせ)の上に積む(useStackedBottomOffset)。
+          data-app-bottom-bar を付けてあるので、一覧の下余白(--app-bottom-inset)もこの帯を
+          見込んだ高さに追随し、最後のカードが帯の裏に隠れない */}
+      {selecting && (
+        <div
+          ref={selectionBarRef}
+          data-app-bottom-bar
+          data-testid="selection-bar"
+          className="fixed inset-x-0 z-20 border-t border-edge bg-surface shadow-md"
+          style={{ bottom: selectionBarBottom }}
+        >
+          <div className="mx-auto flex max-h-[45vh] max-w-md flex-col gap-2 overflow-y-auto px-[var(--space-md)] py-[var(--space-sm)]">
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 flex-1 text-sm font-bold text-ink-muted">
+                {selectedIds.length === 0
+                  ? ja.recipes.selectingNone
+                  : ja.recipes.selectingCount.replace('{n}', String(selectedIds.length))}
+              </p>
+              <button
+                type="button"
+                data-testid="selection-exit"
+                onClick={exitSelecting}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+              >
+                <X size={16} aria-hidden />
+                {selectingForToday ? ja.recipes.selectExitToMealPlan : ja.recipes.selectExit}
+              </button>
+            </div>
+            {/* まとめて今日の献立に入れる(2026-08-11 便FP)。献立から来たときは1品も選んで
+                いなくても押せない見た目で出し続け、決定ボタンが無いまま迷子にならないようにする */}
+            {(selectingForToday || selectedIds.length > 0) && (
+              <button
+                type="button"
+                data-testid="add-selected-to-today"
+                onClick={() => setBulkSlotModalOpen(true)}
+                disabled={selectedIds.length === 0 || addingToToday}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-accent py-2.5 font-bold text-on-accent shadow-sm disabled:opacity-40"
+              >
+                <CalendarPlus size={16} aria-hidden />
+                {selectedIds.length === 0
+                  ? ja.recipes.addSelectedToTodayEmpty
+                  : ja.recipes.addSelectedToToday.replace('{r}', String(selectedIds.length))}
+              </button>
+            )}
+            {/* 書き出しは消す作業の前に置く(取り出してから片づける流れ。押し間違いで
+                削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM)。
+                献立に入れに来た選択モードでは、書き出し・削除は出さない(2026-08-11 便FP) */}
+            {!selectingForToday && selectedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void exportSelected()}
+                disabled={exporting}
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-2.5 font-bold text-accent-ink shadow-sm disabled:opacity-40"
+              >
+                <Download size={16} aria-hidden />
+                {ja.recipes.exportSelected.replace('{r}', String(selectedIds.length))}
+              </button>
+            )}
+            {!selectingForToday && selectedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void deleteSelected()}
+                disabled={deleting}
+                className="w-full rounded-md border border-edge bg-surface py-2.5 font-bold text-accent-ink shadow-sm disabled:opacity-40"
+              >
+                {ja.recipes.deleteSelected.replace('{r}', String(selectedIds.length))}
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       {/* まとめて入れるときの食事の振り分け窓。1品ずつのとき(レシピ詳細)と同じ部品・
