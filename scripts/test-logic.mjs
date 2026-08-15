@@ -13662,9 +13662,12 @@ eq(
   eq('便FC③ かなの「よみあげ」も受ける', matchVoiceCommand('よみあげ'), 'repeat')
   eq('便FC③ 言い慣れた「もう一回」も今までどおり受ける', matchVoiceCommand('もう一回'), 'repeat')
   // 「読み上げ」を語に足したので、「読み上げストップ」と続けて言われる形が生まれた。
-  // 止める側を先に判定する（読み上げ直してから止まる、が起きない）
-  eq('便FC③ 「読み上げストップ」は止める側に倒す', matchVoiceCommand('読み上げストップ'), 'stop')
-  eq('便FC③ 「読み上げ止めて」も止める側', matchVoiceCommand('読み上げ止めて'), 'stop')
+  // 止める側を先に判定する（読み上げ直してから止まる、が起きない）。
+  // 2026-08-15 便GS でオーナー指示「読み上げをストップする方法が、音声にない」を受け、
+  // **「読み上げ」と一緒に言われた止める言葉は読み上げの停止**に変えた（'stop' → 'readStop'）。
+  // 「ストップ」単独がタイマーである点（便EZ）は変えていない＝下の便GS②で固定する
+  eq('便FC③→GS② 「読み上げストップ」は読み上げを止める', matchVoiceCommand('読み上げストップ'), 'readStop')
+  eq('便FC③→GS② 「読み上げ止めて」も読み上げを止める', matchVoiceCommand('読み上げ止めて'), 'readStop')
   eq('便FC 「3分タイマー」は従来どおり新規起動のまま', matchVoiceCommand('3分タイマー'), 'timer')
 
   // 「再開」でどれを動かすか。止めるとき(pickVoiceStopTarget)の裏返しにそろえる。
@@ -13709,6 +13712,80 @@ eq(
     resolveVoiceTimerSeconds('タイマー', 0, 0),
     undefined,
   )
+
+  // ---------- 2026-08-15 便GS: オーナー実機（iPhone SE2・Chrome）フィードバック2件 ----------
+  //   ①「『戻って』『戻る』の他に『前へ』『前』も対応したい（ボタンと同じ表記にも対応したい）」
+  //   ②「読み上げをストップする方法が、音声にない。タイマーの停止と混同しそうなので、
+  //     片方優先するならタイマー」
+  //
+  // ①は**部分一致で「前」を足すと「名前」「手前」「この前」で手順が飛ぶ**。色の言葉
+  // （matchVoiceColor）と同じ「短い発話の全体一致」で受ける＝発話まるごとが一致したときだけ。
+  // 台所で理由の分からない手順飛びが起きると、原因を突き止める手段が利用者にない
+  eq('便GS① 漢字1文字の「前」で手順を戻す', matchVoiceCommand('前'), 'prev')
+  eq('便GS① かなの「まえ」も従来どおり戻す', matchVoiceCommand('まえ'), 'prev')
+  eq('便GS① 「前に」も戻す', matchVoiceCommand('前に'), 'prev')
+  eq('便GS① 端末が付ける句点は落としてから比べる', matchVoiceCommand('前。'), 'prev')
+  eq('便GS① 画面のボタンどおりの「前へ」は従来どおり戻す', matchVoiceCommand('前へ'), 'prev')
+  eq('便GS① かなの「まえへ」も戻す', matchVoiceCommand('まえへ'), 'prev')
+  eq('便GS① 「戻る」は従来どおり戻す', matchVoiceCommand('戻る'), 'prev')
+  eq('便GS① 「戻って」も従来どおり戻す', matchVoiceCommand('戻って'), 'prev')
+  // 誤爆の固定（部分一致に戻したらここが赤になる）
+  eq('便GS① 「名前」では戻らない', matchVoiceCommand('名前'), undefined)
+  eq('便GS① かなで返る端末の「なまえ」でも戻らない', matchVoiceCommand('なまえ'), undefined)
+  eq('便GS① 「手前」では戻らない', matchVoiceCommand('手前'), undefined)
+  eq('便GS① かなで返る端末の「てまえ」でも戻らない', matchVoiceCommand('てまえ'), undefined)
+  eq('便GS① 「この前」では戻らない', matchVoiceCommand('この前'), undefined)
+  eq('便GS① かなで返る端末の「このまえ」でも戻らない', matchVoiceCommand('このまえ'), undefined)
+  eq('便GS① 「名前をつけて保存」でも戻らない', matchVoiceCommand('名前をつけて保存'), undefined)
+  eq('便GS① 「手前に引く」でも戻らない', matchVoiceCommand('手前に引く'), undefined)
+  eq('便GS① 「この前の残り」でも戻らない', matchVoiceCommand('この前の残り'), undefined)
+
+  // ①の続き: 並行調理ナビの調理中モードの左上にある「最初の手順へ」も、ボタンの表記
+  // そのままで言えるようにする（オーナー「ボタンと同じ表記にも対応したい」）。
+  // 「最初」を部分一致にすると手順文の「最初に玉ねぎを炒める」で飛ぶので、ここも全体一致
+  eq('便GS① 画面のボタンどおりの「最初の手順へ」で先頭へ戻る', matchVoiceCommand('最初の手順へ'), 'first')
+  eq('便GS① 「最初の手順」でも同じ', matchVoiceCommand('最初の手順'), 'first')
+  eq('便GS① 「最初へ」でも同じ', matchVoiceCommand('最初へ'), 'first')
+  eq('便GS① 「最初」だけでも同じ', matchVoiceCommand('最初'), 'first')
+  eq('便GS① かなで返る端末の「さいしょ」も受ける', matchVoiceCommand('さいしょ'), 'first')
+  eq('便GS① かなの「さいしょのてじゅんへ」も受ける', matchVoiceCommand('さいしょのてじゅんへ'), 'first')
+  eq('便GS① 手順文の「最初に玉ねぎを炒める」では飛ばない', matchVoiceCommand('最初に玉ねぎを炒める'), undefined)
+  eq('便GS① 「最初は弱火で」でも飛ばない', matchVoiceCommand('最初は弱火で'), undefined)
+
+  // ②読み上げを止める声。**「読み上げ」の語と一緒に言われたときだけ**読み上げを止める。
+  // オーナー指示「タイマーの停止と混同しそうなので、片方優先するならタイマー」に従い、
+  // **「ストップ」単独はタイマーのまま**（2026-08-10 便EZ でオーナー指摘を受けて直した挙動）。
+  // ここが今回いちばん壊してはいけない場所
+  eq('便GS② 「ストップ」単独は今までどおりタイマー', matchVoiceCommand('ストップ'), 'stop')
+  eq('便GS② かなの「すとっぷ」単独もタイマー', matchVoiceCommand('すとっぷ'), 'stop')
+  eq('便GS② 「止めて」単独もタイマー', matchVoiceCommand('止めて'), 'stop')
+  eq('便GS② 「とめて」単独もタイマー', matchVoiceCommand('とめて'), 'stop')
+  eq('便GS② 「停止」単独もタイマー', matchVoiceCommand('停止'), 'stop')
+  eq('便GS② 画面の「一時停止」もタイマー', matchVoiceCommand('一時停止'), 'stop')
+  eq('便GS② 「タイマーストップ」もタイマー', matchVoiceCommand('タイマーストップ'), 'stop')
+  eq('便GS② 「タイマー止めて」もタイマー', matchVoiceCommand('タイマー止めて'), 'stop')
+  // 「読み上げ」と一緒に言われたときだけ読み上げが止まる
+  eq('便GS② 「読み上げストップ」は読み上げを止める', matchVoiceCommand('読み上げストップ'), 'readStop')
+  eq('便GS② 「読み上げ止めて」も読み上げを止める', matchVoiceCommand('読み上げ止めて'), 'readStop')
+  eq('便GS② 「読み上げやめて」も読み上げを止める', matchVoiceCommand('読み上げやめて'), 'readStop')
+  eq('便GS② 「読み上げをやめて」も受ける', matchVoiceCommand('読み上げをやめて'), 'readStop')
+  eq('便GS② 「読み上げ停止」も受ける', matchVoiceCommand('読み上げ停止'), 'readStop')
+  eq('便GS② 「読み上げ中止」も受ける', matchVoiceCommand('読み上げ中止'), 'readStop')
+  eq('便GS② かなで返る端末の「よみあげすとっぷ」も受ける', matchVoiceCommand('よみあげすとっぷ'), 'readStop')
+  eq('便GS② かなの「よみあげやめて」も受ける', matchVoiceCommand('よみあげやめて'), 'readStop')
+  // 読み上げ側の従来の言い方は変えていない
+  eq('便GS② 「読み上げ」単独は今までどおり読み上げ直す', matchVoiceCommand('読み上げ'), 'repeat')
+  eq('便GS② かなの「よみあげ」単独も読み上げ直す', matchVoiceCommand('よみあげ'), 'repeat')
+  eq('便GS② 「読み上げて」も読み上げ直す', matchVoiceCommand('読み上げて'), 'repeat')
+  eq('便GS② 「もう一回」も今までどおり読み上げ直す', matchVoiceCommand('もう一回'), 'repeat')
+  eq('便GS② 「もう一度読み上げて」も読み上げ直す', matchVoiceCommand('もう一度読み上げて'), 'repeat')
+  // 判定の順番を変えた（読み上げの組を再開・ストップより前に出した）ので、
+  // 先に決まっていたものが動いていないことを確かめる
+  eq('便GS② 「次へ」は従来どおりいちばん先に決まる', matchVoiceCommand('次へもう一回'), 'next')
+  eq('便GS② 「再開」は従来どおり動かし直す', matchVoiceCommand('再開'), 'resume')
+  eq('便GS② 「タイマー再開」も従来どおり', matchVoiceCommand('タイマー再開'), 'resume')
+  eq('便GS② 「3分タイマー」は従来どおり新規起動', matchVoiceCommand('3分タイマー'), 'timer')
+  eq('便GS② どれでもない言葉は今までどおり無反応', matchVoiceCommand('こんばんは'), undefined)
 }
 
 // ---------- 栄養バランス第1段: 野菜量・日別集計・対象外混在(2026-07-30 便CL・docs/60 第1段) ----------

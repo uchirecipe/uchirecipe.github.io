@@ -276,12 +276,28 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           setIndex(currentIndex - 1)
         }
       },
+      /**
+       * 「最初の手順へ」＝手順1に戻る（2026-08-15 便GS・オーナー実機
+       * 「ボタンと同じ表記にも対応したい」）。並行調理ナビの調理中モードには同じ名前の
+       * ボタンがあり、声の言葉が画面ごとに違うと「片方では効くのに片方では黙る」ことになる
+       */
+      onFirst: () => {
+        if (indexRef.current === 0) return
+        stopSpeech()
+        setIndex(0)
+      },
       onRepeat: () => {
         const currentStep = recipe.steps[indexRef.current]
         if (!currentStep) return
         setSpeechUsed(true)
         speak(currentStep.text)
       },
+      /**
+       * 「読み上げストップ」＝読み上げだけを止める（2026-08-15 便GS・オーナー実機
+       * 「読み上げをストップする方法が、音声にない」）。タイマーには触らない
+       * ＝「ストップ」単独は今までどおりタイマーの一時停止（オーナー「片方優先するならタイマー」）
+       */
+      onStopSpeech: () => stopSpeech(),
       /**
        * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
        * （2026-08-10 便EZ・オーナー実機「『ストップ』は聞き取れていてもタイマーとまらない」）。
@@ -416,11 +432,19 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         </div>
       </div>
 
-      {micSupported && (
+      {/* 声の案内は「声で操作」を聞いている間だけ出す（2026-08-15 便GS）。
+          並行調理ナビの調理中モード（CookSessionOverlay）は 2026-08-11 便FO で既にこの形に
+          なっていて、同じ部品（VoiceHint）を使いながら**出す条件だけ**がずれていた。
+          マイクを切っているときに「『次へ』で手順の移動」と出ていると、その言葉を言っても
+          何も起きない＝画面が実態と違うことを言っている状態になる。
+          声で操作できること自体は、上の「声で操作」ボタン（micSupportedなら常にある）と
+          レシピ詳細の「読み上げ・声での操作・タイマーも使えます」で分かる。
+          手応え（聞き取った言葉・マイクが使えなかったこと）は、切ったあとも読めるように残す */}
+      {micSupported && (listening || voiceMessage) && (
         <p className="px-[var(--space-md)] pb-1 text-center text-xs text-ink-muted">
           {/* 声で使える言葉の案内（2026-08-12 便FX で3つにまとめ、読み上げだけを目立たせた）。
               並行調理ナビの調理中モードと同じ部品を使う＝片方だけ言い方が変わらない */}
-          <VoiceHint />
+          {listening && <VoiceHint />}
           {/* 聞いている最中・聞き取れた言葉・マイクが使えなかったことの手応え(機能④診断C14) */}
           {voiceMessage ? (
             <span className={`ml-1 font-bold ${listening ? 'text-accent-ink' : 'text-warning'}`}>
