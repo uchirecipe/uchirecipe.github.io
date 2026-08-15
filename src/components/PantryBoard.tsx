@@ -26,6 +26,7 @@ import { isImeConfirmKey } from '../logic/imeKey'
 import { ja } from '../i18n/ja'
 import Collapse from './Collapse'
 import Toast from './Toast'
+import { useConfirm } from './ConfirmProvider'
 
 /** 整理モードの「まとめて状態設定」3ボタンの並び順(ある→少ない→ない) */
 const BULK_SET_LEVELS: PantryLevel[] = ['have', 'low', 'none']
@@ -50,6 +51,7 @@ function levelClass(level: PantryLevel): string {
  * グループ表示化で並び順がグループ主体になったため、手動並び替えUIは廃止した(2026-07-24 実機FB #6)。
  */
 export default function PantryBoard() {
+  const confirm = useConfirm()
   const items = usePantryItems()
   // 「作った！」で在庫を減らす設定(2026-08-12 便FW)。レシピ詳細の記録の窓にあるスイッチと
   // 同じ settings.cookedReflectPantry を読み書きする＝どちらで切り替えても連動する
@@ -103,7 +105,12 @@ export default function PantryBoard() {
   // 選択だけ解除する(2026-07-24 補足#16。片づけの途中で中断されないように)
   const deleteSelected = async () => {
     if (selectedIds.length === 0) return
-    if (!window.confirm(ja.pantry.organizeConfirm.replace('{n}', String(selectedIds.length)))) return
+    const ok = await confirm({
+      title: ja.pantry.organizeConfirmTitle.replace('{n}', String(selectedIds.length)),
+      body: ja.pantry.organizeConfirm,
+      confirmLabel: ja.pantry.organizeConfirmOk,
+    })
+    if (!ok) return
     await removePantryItems(selectedIds)
     setSelectedIds([])
   }

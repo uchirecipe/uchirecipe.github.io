@@ -33,7 +33,7 @@ import {
   reloadStarterRecipes,
   starterCount,
   previewStarterReload,
-  buildStarterReloadConfirmText,
+  buildStarterReloadConfirm,
 } from '../db/starters'
 import {
   exportBackup,
@@ -44,8 +44,9 @@ import {
   importRecipeSet,
   RecipeSetFetchError,
   countReplaceImpact,
-  buildReplaceConfirmText,
-  buildUndoReplaceConfirmText,
+  buildReplaceConfirm,
+  buildMergeConfirm,
+  buildUndoReplaceConfirm,
   savePreImportSnapshot,
   restorePreImportSnapshot,
   daysSinceBackup,
@@ -132,6 +133,7 @@ import {
 } from '../logic/cookingSupport'
 import { ja } from '../i18n/ja'
 import Toast from '../components/Toast'
+import { useConfirm } from '../components/ConfirmProvider'
 import ArchiveViewerModal from '../components/ArchiveViewerModal'
 
 /** タイマー音の音量の選択肢(2026-08-08 オーナー実機フィードバック③)。未設定＝'normal'＝従来の音 */
@@ -427,6 +429,7 @@ function UnlockCodeDisplay({ code }: { code: string }) {
 
 /** 設定: NG食材 / 画面を暗くしない / テーマ */
 export default function SettingsPage() {
+  const confirm = useConfirm()
   const settings = useSettings()
   const recipes = useLiveQuery(listRecipes, [])
   // 食材価格マスタ(2026-07-17設定ゼロベース裁定#6a: 置き換え確認文の件数表示に使う)
@@ -741,13 +744,15 @@ export default function SettingsPage() {
    * 置き換え(replace)は、押した瞬間に確認なしでファイル選択ダイアログが開いてしまっていた穴を
    * 塞ぐため、ファイル選択を開く前に一段確認を挟む(2026-07-16 データ消失事故の再発防止・P6所見)。
    * キャンセルなら何もしない(ファイル選択自体を開かない)。ファイル選択後にonImportFileで出る
-   * 確認(backupImportReplaceConfirm)と同じ、件数入りの文言を使って整合させる
+   * 確認(buildReplaceConfirm)と同じ、件数入りの中身を使って整合させる
    * (2026-07-17設定ゼロベース裁定#6a)
    */
-  const pickImportFile = (mode: 'replace' | 'merge') => {
+  const pickImportFile = async (mode: 'replace' | 'merge') => {
     if (importBusy) return // 読み込み中の二重操作を防ぐ(ボタンのdisabledと二重の歯止め・便CJ/C15)
     if (mode === 'replace') {
-      if (!window.confirm(buildReplaceConfirmText(dataCounts, cookNaviSelectedCount()))) return
+      // 窓の「上書きする」を押した**その場**でファイル選択を開く（2026-08-15 便GW）。
+      // 確認の返事はボタンのクリックの中で返るので、「利用者の操作の直後」の扱いが切れない
+      if (!(await confirm(buildReplaceConfirm(dataCounts, cookNaviSelectedCount())))) return
     }
     importModeRef.current = mode
     importFileRef.current?.click()
@@ -756,11 +761,11 @@ export default function SettingsPage() {
   const onImportFile = async (file: File | undefined) => {
     if (!file) return
     const mode = importModeRef.current
-    const confirmText =
+    const request =
       mode === 'replace'
-        ? buildReplaceConfirmText(dataCounts, cookNaviSelectedCount())
-        : ja.settings.backupImportMergeConfirm
-    if (!window.confirm(confirmText)) return
+        ? buildReplaceConfirm(dataCounts, cookNaviSelectedCount())
+        : buildMergeConfirm()
+    if (!(await confirm(request))) return
     // 前回の結果を消してから始める(古い結果が新しい操作の結果に見えないように)。
     // 読み込み中は「追加」「置き換え」を押せなくする(二重操作防止・便CJ/C15)
     setImportResultLines([])
@@ -806,7 +811,7 @@ export default function SettingsPage() {
    * 黙って消えていた(規約F)。事故から戻すためのボタンなので、確認文は短いまま消える・残るを両方書く
    */
   const handleUndoReplace = async () => {
-    if (!window.confirm(buildUndoReplaceConfirmText(dataCounts, cookNaviSelectedCount()))) return
+    if (!(await confirm(buildUndoReplaceConfirm(dataCounts, cookNaviSelectedCount())))) return
     const restored = await restorePreImportSnapshot()
     setReplaceUndoAvailable(false)
     // 置き換えの結果表示は戻したあとは事実と違うので消す（便CJ/C11）
@@ -901,11 +906,26 @@ export default function SettingsPage() {
    */
   const handleArchiveDelete = async () => {
     if (!archiveExported) return
-    const confirmText = ja.settings.archiveDeleteConfirm
-      .replace('{c}', String(archiveExported.logs))
-      .replace('{p}', String(archiveExported.photos))
-      .replace('{date}', formatArchiveDate(archiveExported.cutoff))
-    if (!window.confirm(confirmText)) return
+    const ok = await confirm({
+      title: ja.settings.archiveDeleteConfirmTitle,
+      bullets: [
+        {
+          label: ja.settings.archiveDeleteConfirmGoneLabel,
+          text: ja.settings.archiveDeleteConfirmGone
+            .replace('{c}', String(archiveExported.logs))
+            .replace('{p}', String(archiveExported.photos)),
+        },
+        {
+          label: ja.settings.archiveDeleteConfirmKeptLabel,
+          text: ja.settings.archiveDeleteConfirmKept.replace(
+            '{date}',
+            formatArchiveDate(archiveExported.cutoff),
+          ),
+        },
+      ],
+      confirmLabel: ja.settings.archiveDeleteConfirmOk,
+    })
+    if (!ok) return
     setArchiveBusy(true)
     try {
       const removed = await deleteArchivedCookedLogs(archiveExported.ids)
@@ -991,7 +1011,7 @@ export default function SettingsPage() {
    */
   const reloadStarters = async () => {
     const impact = await previewStarterReload()
-    if (!window.confirm(buildStarterReloadConfirmText(impact))) return
+    if (!(await confirm(buildStarterReloadConfirm(impact)))) return
     await reloadStarterRecipes()
     setMessage(ja.settings.starterReloadDone)
   }
@@ -1078,8 +1098,13 @@ export default function SettingsPage() {
   }
   // 2026-08-04 便DV-3(オーナー指示): 並びを変えていないうちも押せるボタンとして出し、
   // 何が戻って何が変わらないかを確認文で言い切る(規約F)
-  const resetAisleOrder = () => {
-    if (!window.confirm(ja.settings.aisleOrderResetConfirm)) return
+  const resetAisleOrder = async () => {
+    const ok = await confirm({
+      title: ja.settings.aisleOrderResetConfirmTitle,
+      body: ja.settings.aisleOrderResetConfirm,
+      confirmLabel: ja.settings.aisleOrderResetConfirmOk,
+    })
+    if (!ok) return
     void updateSettings({ shoppingAisleOrder: [...SHOPPING_AISLE_ORDER] })
     setMessage(ja.settings.aisleOrderResetDone)
   }
@@ -1089,8 +1114,22 @@ export default function SettingsPage() {
    * 戻す対象は「表示するパーツ」「並び順」「『今日なに作る？』を出すとき」の3つ＝この
    * カードの中で変えられるものだけ。レシピ・献立・記録などのデータには触らない(規約F)
    */
-  const resetHomeWidgets = () => {
-    if (!window.confirm(ja.settings.homeWidgetsResetConfirm)) return
+  const resetHomeWidgets = async () => {
+    const ok = await confirm({
+      title: ja.settings.homeWidgetsResetConfirmTitle,
+      bullets: [
+        {
+          label: ja.settings.homeWidgetsResetConfirmBackLabel,
+          text: ja.settings.homeWidgetsResetConfirmBack,
+        },
+        {
+          label: ja.settings.homeWidgetsResetConfirmKeptLabel,
+          text: ja.settings.homeWidgetsResetConfirmKept,
+        },
+      ],
+      confirmLabel: ja.settings.homeWidgetsResetConfirmOk,
+    })
+    if (!ok) return
     void updateSettings({
       homeWidgets: [...defaultHomeWidgets],
       homeSuggestionAlways: false,
@@ -1313,7 +1352,7 @@ export default function SettingsPage() {
             {/* 初期設定に戻す(2026-08-04 便DV-3・オーナー指示)。売り場順と同じ名前・同じ体裁 */}
             <button
               type="button"
-              onClick={resetHomeWidgets}
+              onClick={() => void resetHomeWidgets()}
               className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
             >
               <RotateCcw size={16} aria-hidden />
@@ -1563,7 +1602,7 @@ export default function SettingsPage() {
             )}
             <button
               type="button"
-              onClick={resetAisleOrder}
+              onClick={() => void resetAisleOrder()}
               className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
             >
               <RotateCcw size={16} aria-hidden />
@@ -2000,7 +2039,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   disabled={importBusy}
-                  onClick={() => pickImportFile('merge')}
+                  onClick={() => void pickImportFile('merge')}
                   className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-edge bg-surface px-2 py-3 text-center text-sm font-bold text-accent-ink shadow-sm disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
@@ -2013,7 +2052,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   disabled={importBusy}
-                  onClick={() => pickImportFile('replace')}
+                  onClick={() => void pickImportFile('replace')}
                   className="flex h-full min-h-14 items-center justify-center gap-1.5 rounded-md border border-warning px-2 py-3 text-center text-sm font-bold text-warning disabled:opacity-60"
                 >
                   <Upload size={18} className="shrink-0" aria-hidden />
@@ -2371,11 +2410,16 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => {
-                if (window.confirm(ja.settings.refreshAppConfirm)) {
-                  void refreshApp().then((result) => {
-                    if (result === 'offline') window.alert(ja.settings.refreshAppOffline)
+                void (async () => {
+                  const ok = await confirm({
+                    title: ja.settings.refreshAppConfirmTitle,
+                    body: ja.settings.refreshAppConfirm,
+                    confirmLabel: ja.settings.refreshAppConfirmOk,
                   })
-                }
+                  if (!ok) return
+                  const result = await refreshApp()
+                  if (result === 'offline') setMessage(ja.settings.refreshAppOffline)
+                })()
               }}
               className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
             >

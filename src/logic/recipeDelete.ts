@@ -1,4 +1,5 @@
 import { ja } from '../i18n/ja'
+import type { ConfirmContent } from './confirmContent'
 
 /**
  * レシピをまとめて削除するときに「何が消えて何が残るか」を数える純ロジック
@@ -77,18 +78,35 @@ export function summarizeRecipeDeleteImpact(
 }
 
 /**
- * まとめて削除の確認文を組み立てる（規約F: 何が消えるか／何が残るかを件数つきで両方書く）。
+ * まとめて削除の確認の中身を組み立てる（規約F: 何が消えるか／何が残るかを件数つきで両方書く）。
  * 基本レシピが含まれるときだけ、入れ直しで戻せること（ただし作った記録は戻らないこと）を
- * 2文目として足す。規約H: 場所は指示語ではなく画面名・ボタン名で言う。
+ * 補足として足す。規約H: 場所は指示語ではなく画面名・ボタン名で言う。
+ *
+ * 2026-08-15 便GW: 素のダイアログ（window.confirm）から画面の中の窓へ移したので、
+ * 1本の長い文ではなく「消えるもの」「残るもの」の2項目として返す。
  */
-export function buildBulkDeleteConfirmText(impact: RecipeDeleteImpact): string {
-  const base = ja.recipes.bulkDeleteConfirm
-    .replace('{r}', String(impact.recipes))
-    .replace('{n}', String(impact.cookedLogs))
-    .replace('{p}', String(impact.photos))
-    .replace('{m}', String(impact.mealPlanEntries))
-    .replace('{t}', String(impact.todayEntries))
-    .replace('{rest}', String(impact.remaining))
-  if (impact.restorableStarters === 0) return base
-  return `${base}\n${ja.recipes.bulkDeleteConfirmStarter.replace('{s}', String(impact.restorableStarters))}`
+export function buildBulkDeleteConfirm(impact: RecipeDeleteImpact): ConfirmContent {
+  const t = ja.recipes
+  return {
+    title: t.bulkDeleteConfirmTitle.replace('{r}', String(impact.recipes)),
+    bullets: [
+      {
+        label: t.bulkDeleteConfirmGoneLabel,
+        text: t.bulkDeleteConfirmGone
+          .replace('{n}', String(impact.cookedLogs))
+          .replace('{p}', String(impact.photos))
+          .replace('{m}', String(impact.mealPlanEntries))
+          .replace('{t}', String(impact.todayEntries)),
+      },
+      {
+        label: t.bulkDeleteConfirmKeptLabel,
+        text: t.bulkDeleteConfirmKept.replace('{rest}', String(impact.remaining)),
+      },
+    ],
+    notes:
+      impact.restorableStarters === 0
+        ? []
+        : [t.bulkDeleteConfirmStarter.replace('{s}', String(impact.restorableStarters))],
+    confirmLabel: t.bulkDeleteConfirmOk,
+  }
 }

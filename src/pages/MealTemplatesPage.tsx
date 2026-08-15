@@ -19,6 +19,7 @@ import { searchRecipes } from '../logic/search'
 import BackHeader from '../components/BackHeader'
 import Toast from '../components/Toast'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
+import { useConfirm } from '../components/ConfirmProvider'
 import type { MealTemplate, Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
 
@@ -33,6 +34,7 @@ import { ja } from '../i18n/ja'
  * 「どう直すか」の判断は純ロジック（logic/mealTemplate.ts）に置き、この画面は書き込むだけ。
  */
 export default function MealTemplatesPage() {
+  const confirm = useConfirm()
   const templates = useMealTemplates()
   const recipes = useLiveQuery(listRecipes, [])
   const settings = useSettings()
@@ -85,14 +87,14 @@ export default function MealTemplatesPage() {
   }
 
   const removeItem = async (template: MealTemplate, index: number, title: string) => {
-    if (
-      !window.confirm(
-        ja.mealTemplates.removeConfirm
-          .replace('{name}', template.name)
-          .replace('{title}', title),
-      )
-    )
-      return
+    const ok = await confirm({
+      title: ja.mealTemplates.removeConfirmTitle
+        .replace('{name}', template.name)
+        .replace('{title}', title),
+      body: ja.mealTemplates.removeConfirm,
+      confirmLabel: ja.mealTemplates.removeConfirmOk,
+    })
+    if (!ok) return
     await updateMealTemplateItems(template.id!, removeTemplateItemAt(template.items, index))
     setMessage(
       ja.mealTemplates.removeDone.replace('{name}', template.name).replace('{title}', title),
@@ -116,14 +118,14 @@ export default function MealTemplatesPage() {
   }
 
   const removeTemplate = async (template: MealTemplate) => {
-    if (
-      !window.confirm(
-        ja.mealPlan.templateDeleteConfirm
-          .replace('{name}', template.name)
-          .replace('{n}', String(template.items.length)),
-      )
-    )
-      return
+    const ok = await confirm({
+      title: ja.mealPlan.templateDeleteConfirmTitle
+        .replace('{name}', template.name)
+        .replace('{n}', String(template.items.length)),
+      body: ja.mealPlan.templateDeleteConfirm,
+      confirmLabel: ja.mealPlan.templateDeleteConfirmOk,
+    })
+    if (!ok) return
     await deleteMealTemplate(template.id!)
     setMessage(ja.mealPlan.templateDeleteDone.replace('{name}', template.name))
   }

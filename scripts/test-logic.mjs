@@ -127,7 +127,7 @@ import {
 } from '../src/logic/pantryGroups.ts'
 import {
   summarizeRecipeDeleteImpact,
-  buildBulkDeleteConfirmText,
+  buildBulkDeleteConfirm,
   isRestorableStarter,
 } from '../src/logic/recipeDelete.ts'
 import { NUTRITION_DATA } from '../src/logic/nutritionData.ts'
@@ -236,8 +236,8 @@ import {
   mergeRecipeUserData,
   remapBackupRecipeRefs,
   buildSelectedRecipesExportConfirm,
-  buildReplaceConfirmText,
-  buildUndoReplaceConfirmText,
+  buildReplaceConfirm,
+  buildUndoReplaceConfirm,
 } from '../src/logic/backup.ts'
 import {
   supportsSaveFilePicker,
@@ -361,7 +361,7 @@ import {
   planStarterReload,
   planStarterReloadFor,
   countStarterReloadImpact,
-  buildStarterReloadConfirmText,
+  buildStarterReloadConfirm,
   planFlattenedStarterTopUp,
 } from '../src/db/starters.ts'
 import { isDashiIngredientName, DASHI_RECIPE_TITLE } from '../src/logic/dashiLink.ts'
@@ -423,6 +423,7 @@ import {
   naviColorWord,
 } from '../src/logic/naviColors.ts'
 import { ja } from '../src/i18n/ja.ts'
+import { confirmContentText } from '../src/logic/confirmContent.ts'
 import { settingsLinkWithBack, resolveBackTarget } from '../src/logic/backLink.ts'
 import { isStandaloneDisplay } from '../src/logic/standalone.ts'
 import { shouldShowHomeScreenNotice } from '../src/logic/homeScreenNotice.ts'
@@ -7217,7 +7218,7 @@ eq(
       starterDefs.length - 1,
     )
 
-    const text = buildStarterReloadConfirmText(impact)
+    const text = confirmContentText(buildStarterReloadConfirm(impact))
     eq(
       'STARTER-RELOAD 確認文は消える品数を件数で言う',
       text.includes(ja.settings.starterReloadConfirmRemoved.replace('{d}', String(impact.removed))),
@@ -7238,7 +7239,7 @@ eq(
     )
     // 0のものを並べない(「写真0枚も消えます」＝消えないものを数える文にしない)
     {
-      const noPhoto = buildStarterReloadConfirmText({ ...impact, removedPhotos: 0 })
+      const noPhoto = confirmContentText(buildStarterReloadConfirm({ ...impact, removedPhotos: 0 }))
       eq('STARTER-RELOAD 写真が付いていない品なら写真の件数は書かない', /写真\d+枚/.test(noPhoto), false)
       eq(
         'STARTER-RELOAD 写真が付いていなくても作った記録の件数は書く',
@@ -7247,11 +7248,9 @@ eq(
         ),
         true,
       )
-      const noUserData = buildStarterReloadConfirmText({
-        ...impact,
-        removedCookedLogs: 0,
-        removedPhotos: 0,
-      })
+      const noUserData = confirmContentText(
+        buildStarterReloadConfirm({ ...impact, removedCookedLogs: 0, removedPhotos: 0 }),
+      )
       eq(
         'STARTER-RELOAD 記録も写真も無ければ、その1行ごと出さない',
         /も消えます/.test(noUserData),
@@ -7264,7 +7263,7 @@ eq(
 
     // 消える品が0件のときに削除の話を書くと、消えないのに不安にさせる。件数で出し分ける
     const noneImpact = countStarterReloadImpact([kept], planStarterReloadFor([kept], [], 9000).plan)
-    const noneText = buildStarterReloadConfirmText(noneImpact)
+    const noneText = confirmContentText(buildStarterReloadConfirm(noneImpact))
     eq('STARTER-RELOAD 料理名を変えていなければ消える品は0件', noneImpact.removed, 0)
     eq('STARTER-RELOAD 消える品が0件のときは削除の話を書かない', /削除|消え/.test(noneText), false)
     eq(
@@ -7282,7 +7281,7 @@ eq(
     )
     eq(
       'STARTER-RELOAD 画面は押す前に予行して件数入りの確認文を出す',
-      /previewStarterReload\(\)[\s\S]{0,200}window\.confirm\(buildStarterReloadConfirmText\(/.test(
+      /previewStarterReload\(\)[\s\S]{0,200}await confirm\(buildStarterReloadConfirm\(/.test(
         settingsSrc,
       ),
       true,
@@ -8111,7 +8110,7 @@ eq(
   const backupSrc = readFileSync(path.join(scriptDir, '../src/logic/backup.ts'), 'utf-8')
   const settingsSrc = readFileSync(path.join(scriptDir, '../src/pages/SettingsPage.tsx'), 'utf-8')
   const impact = countReplaceImpact([{ cookedLogs: [{ date: '2026-08-01' }] }, { cookedLogs: [] }], 4)
-  const replaceText = buildReplaceConfirmText(impact)
+  const replaceText = confirmContentText(buildReplaceConfirm(impact))
 
   // (1) 置き換えで中身が入れ替わるテーブルは、1つ残らず確認文の言葉になっている。
   // テーブルを足したのに確認文を直し忘れたら、ここが「言葉が決まっていない」で落ちる
@@ -8154,7 +8153,7 @@ eq(
   // (docs/69「捨てたときは失うものがある場合だけ知らせる」)
   eq(
     'BK-SWAP 段取りが残っていれば、その品数つきで消えると書く',
-    buildReplaceConfirmText(impact, 3).includes(ja.settings.replaceCookNaviNote.replace('{n}', '3')),
+    confirmContentText(buildReplaceConfirm(impact, 3)).includes(ja.settings.replaceCookNaviNote.replace('{n}', '3')),
     true,
   )
   eq('BK-SWAP 段取りが無いときは段取りの話を書かない', /段取り/.test(replaceText), false)
@@ -8194,14 +8193,16 @@ eq(
   )
 
   // (4) 「元に戻す」の確認文。事故から戻すためのボタンなので短いまま、消える・残るを両方書く
-  const undoText = buildUndoReplaceConfirmText(impact)
+  const undoText = confirmContentText(buildUndoReplaceConfirm(impact))
   eq(
     'BK-UNDO 確認文はいまのレシピ・作った記録の件数を差し込む',
-    undoText,
-    ja.settings.replaceUndoConfirm
-      .replace('{r}', String(impact.recipes))
-      .replace('{c}', String(impact.cookedLogs))
-      .replace('{navi}', ''),
+    undoText.includes(
+      ja.settings.replaceUndoGone
+        .replace('{r}', String(impact.recipes))
+        .replace('{c}', String(impact.cookedLogs))
+        .replace('{navi}', ''),
+    ),
+    true,
   )
   eq('BK-UNDO 確認文は何が消えるかを書く(規約F)', /消え/.test(undoText), true)
   eq('BK-UNDO 確認文は何が残るかを書く(規約F)', /残り/.test(undoText), true)
@@ -8219,7 +8220,7 @@ eq(
   )
   eq(
     'BK-UNDO 画面は確認してから控えで置き換える',
-    /window\.confirm\(buildUndoReplaceConfirmText\([\s\S]*restorePreImportSnapshot\(\)/.test(undoHandler),
+    /await confirm\(buildUndoReplaceConfirm\([\s\S]*restorePreImportSnapshot\(\)/.test(undoHandler),
     true,
   )
 }
@@ -14646,7 +14647,7 @@ eq(
   eq('CT-DEL 今日の献立の件数', impact.todayEntries, 2)
   eq('CT-DEL 残るレシピの品数', impact.remaining, 106)
 
-  const text = buildBulkDeleteConfirmText(impact)
+  const text = confirmContentText(buildBulkDeleteConfirm(impact))
   // 規約F: 何が消えるか・何が残るかを件数つきで両方書く(「よろしいですか？」だけは禁止)
   eq('CT-DEL 確認文に削除する品数が入る', /レシピ3品を削除します/.test(text), true)
   eq('CT-DEL 確認文に作った記録の件数が入る', /作った記録3件/.test(text), true)
@@ -14655,7 +14656,8 @@ eq(
   eq('CT-DEL 確認文に今日の献立の件数が入る', /今日の献立2件/.test(text), true)
   eq('CT-DEL 確認文に元に戻せないことが入る', text.includes('元に戻せません'), true)
   eq('CT-DEL 確認文に残るレシピの品数が入る', /他のレシピ106品/.test(text), true)
-  eq('CT-DEL 確認文に残るものが入る', /買い物メモ・食材の在庫は残ります/.test(text), true)
+  // 2026-08-15 便GW: 「残るもの」は太字の項目名になったので、項目名と中身の両方を見る
+  eq('CT-DEL 確認文に残るものが入る', /残るもの: [^\n]*買い物メモ・食材の在庫/.test(text), true)
   eq('CT-DEL 「よろしいですか？」だけで終わらせない', text.includes('よろしいですか'), false)
   // 基本レシピだけは入れ直しで戻せる(ただし記録は戻らない)ことを区別して書く。
   // 規約H: 場所は指示語ではなく画面名・ボタン名で言う
@@ -14671,12 +14673,12 @@ eq(
   eq('CT-DEL 自作だけなら入れ直しの一文は出さない', ownOnly.restorableStarters, 0)
   eq(
     'CT-DEL 自作だけの確認文に入れ直しの案内を出さない',
-    buildBulkDeleteConfirmText(ownOnly).includes('基本レシピを入れ直す'),
+    confirmContentText(buildBulkDeleteConfirm(ownOnly)).includes('基本レシピを入れ直す'),
     false,
   )
   eq(
     'CT-DEL 記録0件でも件数を明示する(0件と書く)',
-    /作った記録0件（うち写真0枚）/.test(buildBulkDeleteConfirmText(ownOnly)),
+    /作った記録0件（うち写真0枚）/.test(confirmContentText(buildBulkDeleteConfirm(ownOnly))),
     true,
   )
   // 全部消す選択でも「残り0品」と正直に書く(残るものの行自体は消さない)
@@ -14686,7 +14688,7 @@ eq(
     todayEntries: 0,
   })
   eq('CT-DEL 全件削除なら残りは0品', allGone.remaining, 0)
-  eq('CT-DEL 残り0品でも残るものを書く', /他のレシピ0品/.test(buildBulkDeleteConfirmText(allGone)), true)
+  eq('CT-DEL 残り0品でも残るものを書く', /他のレシピ0品/.test(confirmContentText(buildBulkDeleteConfirm(allGone))), true)
   // 記録の配列が無いレシピ(cookedLogs未設定)でも落ちない
   eq(
     'CT-DEL cookedLogs未設定でも数えられる',
@@ -16153,10 +16155,15 @@ eq(
     fillWeekHint: ja.mealPlan.fillWeekHint,
     fillModeFillEmptyHint: ja.mealPlan.fillModeFillEmptyHint,
     fillModeReplaceAllHint: ja.mealPlan.fillModeReplaceAllHint,
-    fillModeReplaceAllConfirm: ja.mealPlan.fillModeReplaceAllConfirm,
+    // 2026-08-15 便GW: 確認文を見出し＋項目に割ったので、週を名乗る側(見出し)も見る
+    fillModeReplaceAllConfirmTitle: ja.mealPlan.fillModeReplaceAllConfirmTitle,
+    fillModeReplaceAllGone: ja.mealPlan.fillModeReplaceAllGone,
+    fillModeReplaceAllKept: ja.mealPlan.fillModeReplaceAllKept,
     fillModeReplaceAllDone: ja.mealPlan.fillModeReplaceAllDone,
     clearWeekSlotTitle: ja.mealPlan.clearWeekSlotTitle,
     clearWeekSlotTitleNone: ja.mealPlan.clearWeekSlotTitleNone,
+    clearWeekSlotConfirmTitle: ja.mealPlan.clearWeekSlotConfirmTitle,
+    clearWeekSlotConfirmAllTitle: ja.mealPlan.clearWeekSlotConfirmAllTitle,
     clearWeekSlotConfirm: ja.mealPlan.clearWeekSlotConfirm,
     clearWeekSlotConfirmAll: ja.mealPlan.clearWeekSlotConfirmAll,
     clearWeekSlotDone: ja.mealPlan.clearWeekSlotDone,
@@ -19277,6 +19284,63 @@ Aみりん 大さじ1
   const newLength = [picked.title, ...picked.bullets.map((b) => `${b.label}: ${b.text}`), ...picked.notes].join('\n')
     .length
   eq('GV-3 素のダイアログのときより読む量が減っている', newLength < OLD_CONFIRM_LENGTH, true)
+}
+
+// ---------- 便GW: 確認の窓をアプリ全体で1つの見た目にそろえる ----------
+// オーナー原文「アプリ全体に、確認などで表示される窓が見づらく、見ていて楽しくなる画面じゃない。
+// 事実を的確に伝えるのも重要。見やすさも重要」／利用者テスト「アプリの中で急に素のポップアップが
+// 出るのは違和感があります」。素のダイアログ(window.confirm)は文字しか出せず、太字も箇条書きも
+// 作れないので、画面の中の窓(components/ConfirmDialog)へ全件移した。
+//
+// ここで測るのは「あとから素のダイアログに戻る事故」を防ぐことの1点。
+// 置き場所や件数ではなく**src全体に1つも無いこと**を見るので、画面が増えても勝手に守られる。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  /**
+   * 素のダイアログを残してよい場所（残すと決めたものは理由つきでここに書く）。
+   * いまは1つも無い。増やすときは「なぜ画面の中の窓にできないか」を必ず添えること
+   */
+  const RAW_DIALOG_ALLOWLIST = new Map()
+  const collectSources = (dir) => {
+    const out = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...collectSources(full))
+      else if (/\.(ts|tsx)$/.test(entry.name)) out.push(full)
+    }
+    return out
+  }
+  const offenders = []
+  for (const full of collectSources(path.join(appRoot, 'src'))) {
+    const rel = path.relative(appRoot, full).split(path.sep).join('/')
+    const lines = readFileSync(full, 'utf-8').split('\n')
+    lines.forEach((line, i) => {
+      // 説明のためにコメントへ書いた「window.confirm」は対象外(行頭が // や * のもの)
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
+      if (!/window\.(confirm|prompt)\s*\(/.test(line)) return
+      if (RAW_DIALOG_ALLOWLIST.has(rel)) return
+      offenders.push(`${rel}:${i + 1}`)
+    })
+  }
+  eq('GW-1 素のダイアログ(window.confirm/prompt)がsrcに1つも残っていない', offenders, [])
+
+  // 規約F「『よろしいですか？』だけは禁止」。窓になった今は、何をするかは見出しが、
+  // 実行するかどうかは動詞のボタンが受け持つので、本文の末尾に置く定型句は要らなくなった。
+  // ja.ts の値を丸ごと見るので、新しい確認文で書き足しても引っかかる
+  const jaTexts = []
+  const walkJa = (node) => {
+    if (typeof node === 'string') jaTexts.push(node)
+    else if (Array.isArray(node)) node.forEach(walkJa)
+    else if (node && typeof node === 'object') Object.values(node).forEach(walkJa)
+  }
+  walkJa(ja)
+  // BudouXのゼロ幅スペースが混じっても外れないよう、照合前に外す(禁じ手②)
+  const stripZeroWidth = (text) => text.replaceAll('​', '')
+  eq(
+    'GW-2 UI文言に「よろしいですか」で終わる確認文が残っていない',
+    jaTexts.filter((text) => stripZeroWidth(text).includes('よろしいですか')),
+    [],
+  )
 }
 
 // ---------- 結果 ----------

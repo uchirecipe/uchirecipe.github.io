@@ -6,6 +6,7 @@ import { resizePhoto, rotatePhoto } from '../logic/image'
 import { usePhotoUrl } from './usePhotoUrl'
 import { LOG_PHOTO_MAX_EDGE, LOG_PHOTO_QUALITY } from './CookedLogModal'
 import { ja } from '../i18n/ja'
+import { useConfirm } from './ConfirmProvider'
 
 /**
  * 「作った記録」1件を直す入力欄（2026-08-10 便FD で共通部品に切り出した）。
@@ -45,6 +46,7 @@ export default function CookedLogEditor({
   /** 記録を1件消した */
   onDeleted: () => void
 }) {
+  const confirm = useConfirm()
   const [date, setDate] = useState(log.date)
   const [note, setNote] = useState(log.note ?? '')
   const [servings, setServings] = useState<number>(log.servings ?? fallbackServings)
@@ -101,11 +103,17 @@ export default function CookedLogEditor({
 
   /** 元に戻せない操作なので、規約Fに沿って「何が消えるか」「何が残るか」を件数つきで確認する */
   const remove = async () => {
-    const message = ja.detail.cookedLogDeleteConfirm
-      .replace('{date}', log.date.replaceAll('-', '/'))
-      .replace('{p}', log.photo ? ja.detail.cookedLogDeleteConfirmPhoto : '')
-      .replace('{n}', String(Math.max(0, totalLogCount - 1)))
-    if (!window.confirm(message)) return
+    const ok = await confirm({
+      title: ja.detail.cookedLogDeleteConfirmTitle.replace(
+        '{date}',
+        log.date.replaceAll('-', '/'),
+      ),
+      body: ja.detail.cookedLogDeleteConfirm
+        .replace('{p}', log.photo ? ja.detail.cookedLogDeleteConfirmPhoto : '')
+        .replace('{n}', String(Math.max(0, totalLogCount - 1))),
+      confirmLabel: ja.detail.cookedLogDeleteConfirmOk,
+    })
+    if (!ok) return
     await deleteCookedLog(recipeId, logIndex)
     onDeleted()
   }

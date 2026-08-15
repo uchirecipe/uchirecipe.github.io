@@ -17,6 +17,14 @@ export const ja = {
     // トーストに添える取り消し操作の共通ラベル(2026-07-29 便CC/C19)
     undo: '元に戻す',
     /**
+     * 確認の窓（components/ConfirmProvider）の共通ボタン（2026-08-15 便GW）。
+     * 「やめる」＝何も起きない側。実行側は operation ごとの動詞を必ず渡すので、
+     * confirmOk は渡し忘れたときの受け皿にしか出ない。「OK」にはしない
+     * （素のダイアログの「OK」は何が起きるか分からないという指摘そのものだったため）
+     */
+    confirmOk: '実行する',
+    confirmCancel: 'やめる',
+    /**
      * ランダム提案が今くじを引いている候補の数(2026-08-02 便DE-5・オーナー指示)。
      * 候補が2品しかないときに振り直しても同じ料理が出続け、壊れているように見えていた。
      * ホームの「今日なに作る?」と献立の日タブ(おまかせで提案)の両方で同じ言い方をするため
@@ -217,8 +225,12 @@ export const ja = {
     organizeDeleteSelected: '選択した食材{n}件を削除',
     // 規約F: 何が消えるか/何が残るかを件数つきで両方書く(2026-07-29 便CC/C17。
     // 旧文は「よろしいですか？」止まりで、全選択直後だと在庫が丸ごと消える操作に見合わなかった)
-    organizeConfirm:
-      '選択した食材{n}件を食材の在庫から削除します（元に戻せません）。レシピ・買い物メモ・「作った」の記録は消えません。',
+    // 2026-08-15 便GW: 素のダイアログから画面の中の窓(ConfirmDialog)へ移した。
+    // 何をするかは見出し・実行するかどうかは動詞のボタンが受け持つので、
+    // 本文は「消えるもの」「残るもの」だけにできた
+    organizeConfirmTitle: '選んだ食材{n}件を在庫から削除します',
+    organizeConfirm: '元に戻せません。レシピ・買い物メモ・作った記録は残ります。',
+    organizeConfirmOk: '削除する',
     // まとめて状態設定(2026-07-17 docs/35 §5 案D): 整理モード中、選択した食材をまとめて
     // 「ある」「少ない」「ない」のいずれかに一括変更する。ボタン文言はpantry.levelを流用
     // 見出し(2026-07-24 実機FB #3: グループ移動の見出しと同様式で、3ボタンの上に添える)
@@ -340,8 +352,10 @@ export const ja = {
     replaceDone: '「{from}」を「{to}」に変えました',
     removeItem: 'この品をテンプレートから外す',
     // 規約F: 何が消えるか・何が残るかを両方書く
-    removeConfirm:
-      'テンプレート「{name}」から「{title}」を外します。他の品と、すでに献立に入れた分は消えません。よろしいですか？',
+    // 2026-08-15 便GW: 画面の中の窓へ。見出しとボタンが問いを受け持つので「よろしいですか？」は外した
+    removeConfirmTitle: 'テンプレート「{name}」から「{title}」を外します',
+    removeConfirm: '他の品と、すでに献立に入れた分は消えません。',
+    removeConfirmOk: '外す',
     removeDone: 'テンプレート「{name}」から「{title}」を外しました',
   },
   mealPlan: {
@@ -380,34 +394,39 @@ export const ja = {
       '「作った！」で在庫を減らす設定がONです。記録すると、使った食材の在庫が1つ下がります',
     // 1品だけの「作った！」が、作りかけの段取りに影響するときの確認(2026-08-09 便EH・規約F)。
     // 何が記録され・段取りがどう変わり・何が残るかを件数つきで書く
+    // 2026-08-15 便GW: 画面の中の窓へ。1文目を見出しに移し、問いはボタンに持たせた
+    todayCookedNaviConfirmTitle: '「{title}」に、今日の日付で作った記録をつけます',
     todayCookedNaviConfirm:
-      '「{title}」に、今日の日付で作った記録をつけます。\n並行調理ナビの段取りからも「{title}」が外れ、残りの{n}品で組み直します。\n\n',
+      '並行調理ナビの段取りからも「{title}」が外れ、残りの{n}品で組み直します。',
     todayCookedNaviConfirmEnd:
-      '「{title}」に、今日の日付で作った記録をつけます。\n組み合わせが{n}品になるため、並行調理ナビの段取りは終わります（レシピと今日の献立の残りはそのまま）。\n\n',
-    todayCookedNaviConfirmAsk: '記録をつけますか？',
+      '組み合わせが{n}品になるため、並行調理ナビの段取りは終わります。レシピと今日の献立の残りはそのままです。',
+    todayCookedNaviConfirmOk: '記録をつける',
     todayRemove: 'この献立から外す',
     todayMarkAllCooked: '全て作った！',
     // 2026-08-03 便DP-1(オーナー指示): 押すと確認なしで全件が記録され、リストが消えていた。
     // 規約F=「何が消えるか」「何が残るか」を件数つきで両方書く
-    todayMarkAllCookedConfirm:
-      '今日の献立に並んでいる{n}品に、作った記録をつけます。\n\n' +
-      '消えるもの: 今日の献立の{n}品（リストが空になります）\n' +
-      '残るもの: 作った記録{n}件（「作った記録」の一覧と月の記録に日付つきで残ります）。' +
-      // 週タブの行は記録をつけても消さない（「作った」の見た目で残す）。
-      // 2026-08-11 便FN・利用者テスト: 日タブが空になる一方で週タブには3品が残るため、
-      // 何が起きたのか分からないという報告が出た。規約Fどおり残るものとして先に書く
-      '今週の献立に入れた分は「作った」の表示で残ります。' +
-      'レシピそのものは消えません\n\n',
+    // 2026-08-15 便GW: 画面の中の窓へ。文の中に埋めていた「消えるもの/残るもの」を、
+    // そのまま太字の項目にした（読む量も減る）
+    todayMarkAllCookedConfirmTitle: '今日の献立に並んでいる{n}品に、作った記録をつけます',
+    todayMarkAllCookedGoneLabel: '消えるもの',
+    todayMarkAllCookedGone: '今日の献立の{n}品（リストが空になります）',
+    todayMarkAllCookedKeptLabel: '残るもの',
+    // 週タブの行は記録をつけても消さない（「作った」の見た目で残す）。
+    // 2026-08-11 便FN・利用者テスト: 日タブが空になる一方で週タブには3品が残るため、
+    // 何が起きたのか分からないという報告が出た。規約Fどおり残るものとして書く
+    todayMarkAllCookedKept:
+      '作った記録{n}件（「作った記録の一覧」と月の記録に日付つき）。今週の献立に入れた分は「作った」の表示で残り、レシピそのものは消えません',
     // 並行調理ナビに作りかけの段取りがあるときだけ、確認文に足す(2026-08-08 便EG・規約F)。
     // 記録すると今日の献立が空になり、ナビは段取りを出せなくなる＝黙って終わらせない
-    todayMarkAllCookedConfirmNavi:
-      '作りかけの並行調理ナビの段取りも終わります（もう一度組み直せます）。\n\n',
+    todayMarkAllCookedConfirmNaviLabel: '並行調理ナビ',
+    todayMarkAllCookedConfirmNavi: '作りかけの段取りも終わります（もう一度組み直せます）',
     // 「作った！」で在庫を1段階下げる設定がONのときだけ、確認文に足す(黙って在庫を動かさない)。
     // 2026-08-12 便FW: 「設定により」だけでは、どの設定なのか・どこで切り替えられるのかが
     // 分からなかったので、設定の名前と下がり方をそのまま書く
+    todayMarkAllCookedConfirmPantryLabel: '食材の在庫',
     todayMarkAllCookedConfirmPantry:
-      '「作った！」で在庫を減らす設定がONのため、使った食材の在庫も「ある→少ない→ない」の順に1つ下がります。\n\n',
-    todayMarkAllCookedConfirmAsk: '記録をつけますか？',
+      '「作った！」で在庫を減らす設定がONのため、使った食材が「ある→少ない→ない」の順に1つ下がります',
+    todayMarkAllCookedConfirmOk: '記録をつける',
     todayMarkAllCookedToast: '{n}件の作った記録をつけました',
     // todayImport(「今週の献立から今日の分を取り込む」)は2026-08-03 便DP-2で削除。
     // 日タブが今日の予定を常に並べるようになり(便DH)、自動取り込み(便U-3)も効くため、
@@ -467,10 +486,12 @@ export const ja = {
     // 従来は「よろしいですか？」の1文だけで、件数も残るものも書いていなかった。
     // 便DJ: 複数選択に対応し、残る食事とその件数も名指しで書く({rest}=残る食事・{r}=その件数)。
     // 朝昼夜を全部選んだときは「残る他の食事」が無いので、専用の文（ConfirmAll）を使う
-    clearWeekSlotConfirm:
-      '表示している週の{slot}の予定{n}品を削除します。他の食事（{rest}）の予定{r}品と、作った記録は残ります。{lock}よろしいですか？',
-    clearWeekSlotConfirmAll:
-      '表示している週の予定{n}品をすべて削除します。作った記録と、他の週の予定は残ります。{lock}よろしいですか？',
+    // 2026-08-15 便GW: 画面の中の窓へ。ロックの一文({lock})は本文に混ぜず、補足の行にした
+    clearWeekSlotConfirmTitle: '表示している週の{slot}の予定{n}品を削除します',
+    clearWeekSlotConfirm: '他の食事（{rest}）の予定{r}品と、作った記録は残ります。',
+    clearWeekSlotConfirmAllTitle: '表示している週の予定{n}品をすべて削除します',
+    clearWeekSlotConfirmAll: '作った記録と、他の週の予定は残ります。',
+    clearWeekSlotConfirmOk: '削除する',
     clearWeekSlotEmpty: '表示している週の{slot}には、削除できる予定がありません',
     clearWeekSlotDone: '表示している週の{slot}の予定を{n}品削除しました',
     // 月タブの日タップモーダル(便U-5 Fable設計。従来の即週ジャンプを廃止しモーダル内の
@@ -489,8 +510,14 @@ export const ja = {
     monthDayModalCancel: 'キャンセル',
     monthDayModalSave: '保存',
     monthDayModalDirtyNote: 'この画面での変更は、すでにこの日の献立に入っています',
-    monthDayCancelConfirm:
-      'この画面で行った変更を取り消しますか？\n\n取り消すもの: {changes}\n戻るもの: この画面を開いたときの献立{n}品と、そのときの日付メモ\n\n作った記録と写真、他の日の献立は変わりません。',
+    // 2026-08-15 便GW: 画面の中の窓へ。すでに「取り消すもの/戻るもの」の形だったので、
+    // そのまま太字の項目にした
+    monthDayCancelConfirmTitle: 'この画面で行った変更を取り消します',
+    monthDayCancelUndoLabel: '取り消すもの',
+    monthDayCancelBackLabel: '戻るもの',
+    monthDayCancelBack: 'この画面を開いたときの献立{n}品と、そのときの日付メモ',
+    monthDayCancelNote: '作った記録と写真、他の日の献立は変わりません。',
+    monthDayCancelConfirmOk: '取り消す',
     monthDayCancelAdded: '追加した{n}品',
     monthDayCancelRemoved: '外した{n}品',
     monthDayCancelChanged: '入れ替えた{n}品',
@@ -818,8 +845,12 @@ export const ja = {
     fillModeReplaceAllHint:
       '「まとめて献立を入力」を押すと、表示している週のこれからの献立をすべて消してから入れ直します（過ぎた日と作った記録は消えません）',
     // 規約F: 消えるもの(件数)と残るものを両方書く
-    fillModeReplaceAllConfirm:
-      '表示している週のこれからの{s}食分に入っている献立{n}品を消してから、新しい献立を入れ直します。過ぎた日の献立と作った記録、表示していない食事は消えません。{lock}よろしいですか？',
+    fillModeReplaceAllConfirmTitle: '表示している週のこれからの献立を入れ替えます',
+    fillModeReplaceAllGoneLabel: '消えるもの',
+    fillModeReplaceAllGone: 'これからの{s}食分に入っている献立{n}品',
+    fillModeReplaceAllKeptLabel: '残るもの',
+    fillModeReplaceAllKept: '過ぎた日の献立と作った記録、表示していない食事',
+    fillModeReplaceAllConfirmOk: '入れ替える',
     fillModeReplaceAllNothing:
       '入れ替えられる献立がありません（今ある献立はそのまま残っています）',
     // 消す操作なので、終わったことと入った品数を必ず言う（黙って終わらせない）
@@ -834,10 +865,11 @@ export const ja = {
     fillMonthHint:
       'この月のまだ決まっていない日に、主菜と副菜をまとめて入れます（メモを書いた日は入れません）',
     // {note}=メモを書いた日を外した件数の一文(fillMonthNoteSkipped。外した日が無ければ空文字)
-    fillMonthConfirm:
-      'この月のまだ決まっていない{d}日分（{s}食分）に、主菜と副菜を自動で入れます。すでに決まっている{k}食分の献立と、作った記録は消えません。{note}{lock}よろしいですか？',
-    fillMonthConfirmNoKept:
-      'この月のまだ決まっていない{d}日分（{s}食分）に、主菜と副菜を自動で入れます。今ある献立と作った記録は消えません。{note}{lock}よろしいですか？',
+    fillMonthConfirmTitle:
+      'この月のまだ決まっていない{d}日分（{s}食分）に、主菜と副菜を自動で入れます',
+    fillMonthConfirm: 'すでに決まっている{k}食分の献立と、作った記録は消えません。',
+    fillMonthConfirmNoKept: '今ある献立と作った記録は消えません。',
+    fillMonthConfirmOk: '入れる',
     // 2026-07-30 便CH/C10: 「外食」「実家に帰る」と書いた日まで献立で埋めていた。
     // メモのある日は対象から外し、外したことを確認文と結果の両方に必ず書く(黙って飛ばさない)
     fillMonthNoteSkipped: 'メモを書いた{n}日には入れません。',
@@ -857,7 +889,9 @@ export const ja = {
       'このまま「まとめて献立を入力」を押すと、先週と同じ献立を写します。提案の条件と入れかたは使いません',
     copyLastWeekToggleHintOff:
       'ONにすると、「まとめて献立を入力」が提案のかわりに先週と同じ献立を写します',
-    copyLastWeekConfirm: '先週の献立を、まだ決まっていないところに{n}品コピーします。今ある献立は上書きされず、そのまま残ります。{lock}よろしいですか？',
+    copyLastWeekConfirmTitle: '先週の献立を、まだ決まっていないところに{n}品コピーします',
+    copyLastWeekConfirm: '今ある献立は上書きされず、そのまま残ります。',
+    copyLastWeekConfirmOk: 'コピーする',
     copyLastWeekDone: '先週の献立を{n}品コピーしました',
     copyLastWeekNoSource: '先週にはコピーできる献立がありません',
     copyLastWeekNoRoom: 'まだ決まっていないところがないため、コピーしませんでした（今ある献立はそのまま残っています）',
@@ -897,10 +931,11 @@ export const ja = {
     templateDowNone: '曜日を1つ以上選んでください',
     templateApplyButton: '入れる',
     // 規約F: 何が入るか(件数)と、何が消えないかを必ず両方書く
-    templateApplyConfirm:
-      'テンプレート「{name}」から{n}品を、まだ決まっていない{d}食分に入れます。すでに決まっている{k}食分と、そのほかの献立・記録は消えません。{lock}よろしいですか？',
-    templateApplyConfirmNoKept:
-      'テンプレート「{name}」から{n}品を、まだ決まっていない{d}食分に入れます。今ある献立・記録は消えません。{lock}よろしいですか？',
+    templateApplyConfirmTitle:
+      'テンプレート「{name}」から{n}品を、まだ決まっていない{d}食分に入れます',
+    templateApplyConfirm: 'すでに決まっている{k}食分と、そのほかの献立・記録は消えません。',
+    templateApplyConfirmNoKept: '今ある献立・記録は消えません。',
+    templateApplyConfirmOk: '入れる',
     templateApplyDone: 'テンプレート「{name}」から{n}品を入れました',
     templateApplyNoRoom:
       'すでに決まっている{n}食分のままです。新しく入れられるところがありませんでした',
@@ -914,8 +949,10 @@ export const ja = {
     // 保存したあと中身を確かめる手段が画面に無く、直すには保存し直すしかなかった
     templateManageLink: 'テンプレートの中身を見る・直す',
     templateDelete: 'このテンプレートを削除',
-    templateDeleteConfirm:
-      'テンプレート「{name}」（{n}品）を削除します。すでに献立に入れた分と、他のテンプレートは消えません。よろしいですか？',
+    // 2026-08-15 便GW: 画面の中の窓へ（献立の週タブとテンプレートの中身の画面で共用）
+    templateDeleteConfirmTitle: 'テンプレート「{name}」（{n}品）を削除します',
+    templateDeleteConfirm: 'すでに献立に入れた分と、他のテンプレートは消えません。',
+    templateDeleteConfirmOk: '削除する',
     templateDeleteDone: 'テンプレート「{name}」を削除しました',
     // 献立表の印刷／画像化(2026-07-29 便CB-2・docs/59 A-4)。週または月の献立を1枚に整形し、
     // ブラウザ印刷と画像保存の両方に出す。冷蔵庫に貼る・家族に見せる用途(同期なしで共有を満たす)。
@@ -1240,8 +1277,13 @@ export const ja = {
     // 自分の手で終わらせる道が要る。押すと組み合わせごと白紙に戻る（＝次に開くと選び直しから）。
     // 確認文は規約F: 何が消えて何が残るかを両方、件数つきで書く
     discardTimeline: '段取りを消す',
-    discardTimelineConfirm:
-      '作った段取りと、選んでいた{n}品の組み合わせを消します。調理中だった手順も消えます。\nレシピ・今日の献立・作った記録・動いているタイマーはそのまま残ります。\n\n段取りを消しますか？',
+    // 2026-08-15 便GW: 画面の中の窓へ。消える・残るを太字の項目にした
+    discardTimelineConfirmTitle: '段取りを消します',
+    discardTimelineGoneLabel: '消えるもの',
+    discardTimelineGone: '作った段取り・選んでいた{n}品の組み合わせ・調理中だった手順',
+    discardTimelineKeptLabel: '残るもの',
+    discardTimelineKept: 'レシピ・今日の献立・作った記録・動いているタイマー',
+    discardTimelineConfirmOk: '段取りを消す',
     discardedTimelineToast: '段取りを消しました',
     // 今日の献立から外れた品(作った記録がついた品・献立から外した品)を組み合わせから落としたとき
     // (2026-08-09 便EH・オーナー実機報告の不具合修正)。黙って中身を変えない
@@ -1466,8 +1508,11 @@ export const ja = {
     // 2026-08-14 便GL: 動いているタイマーの扱いだけ {timers} で差し替えられるようにした。
     // 「まとめて作った！」は今までどおり残すので「・動いているタイマー」が入り、
     // 「完成！」の窓は**その場で消すかどうかを聞く**ので空になる（窓の中で別に書く）
+    // 2026-08-15 便GW: 1行目を見出しへ切り出した（「完成！」の窓は自前の見出しを持つので、
+    // そちらへは今までどおり1行目を含めた本文を渡す＝出る文字は変わらない）
+    markAllCookedConfirmTitle: '{titles}の{n}件に、今日の日付で作った記録をつけます',
     markAllCookedConfirm:
-      '{titles}の{n}件に、今日の日付で作った記録をつけます。\n記録した{n}件は今日の献立から外れます。作った段取りと、選んでいた{n}品の組み合わせも消えます。\nレシピ・作った記録{timers}はそのまま残ります。\n\n',
+      '記録した{n}件は今日の献立から外れます。作った段取りと、選んでいた{n}品の組み合わせも消えます。\nレシピ・作った記録{timers}はそのまま残ります。\n\n',
     markAllCookedConfirmTimersKept: '・動いているタイマー',
     markAllCookedConfirmPantry: '設定により、使った食材の在庫も1段階ずつ下がります。\n\n',
     // 2026-08-12 便FX・オーナー指摘「まとめて作った！ので注意書きが出るなら、後から記録一覧から
@@ -1475,7 +1520,7 @@ export const ja = {
     // 覚え書き・写真を直せる（「作った記録の一覧」→記録をタップ→「この記録を編集する」）。
     // 画面の名前で場所を言う（規約H。「あとで直せます」だけだと、どこで直すのか分からない）
     markAllCookedConfirmEdit: 'つけた記録は、あとから「作った記録の一覧」で1件ずつ編集できます。\n\n',
-    markAllCookedConfirmAsk: '記録をつけますか？',
+    markAllCookedConfirmOk: '記録をつける',
     // 調理中モードの最後の手順「完成！」から出す窓の見出し(2026-08-11 便FO・
     // 利用者テスト「14/14まで進めて押したが『作りました』も出ず、段取りのページに戻っただけ」)。
     // なぜ確認が出たのかを先に書く。続きは markAllCookedConfirm と同じ文（記録の中身は1か所で持つ）
@@ -1723,11 +1768,14 @@ export const ja = {
     discardCandidates: 'キャンセル',
     // 下書きの破棄・作り直しの確認(2026-07-29 便CC/C2。規約F=何が消えて何が残るかを両方書く)。
     // 従来は確認なしで即消え、手で直した分量ごと失われていた
-    discardConfirm:
-      '下書き{n}件と、手で直した分量が消えます。買い物メモに追加済みの項目と、食材の在庫はそのまま残ります。',
+    // 2026-08-15 便GW: 画面の中の窓へ。1文目を見出しに移し、動詞はボタンに持たせた
+    discardConfirmTitle: '下書き{n}件を取り消します',
+    discardConfirm: '手で直した分量も消えます。買い物メモに追加済みの項目と在庫は残ります。',
+    discardConfirmOk: '取り消す',
     discardedToast: '下書きを取り消しました',
-    remakeConfirm:
-      '選び直したレシピで下書き{n}件を作り直します。手で直した分量は元の自動計算に戻ります。買い物メモに追加済みの項目はそのまま残ります。',
+    remakeConfirmTitle: '選び直したレシピで下書き{n}件を作り直します',
+    remakeConfirm: '手で直した分量は自動計算に戻ります。買い物メモに追加済みの項目は残ります。',
+    remakeConfirmOk: '作り直す',
     // 下書きのチェックが0件のとき(2026-07-29 便CC/C13)。押しても「0件を追加しました」と出て
     // 下書きだけが消えていたため、押せない状態にして理由を添える
     addConfirmedNoneHint: 'メモに入れたい食材にチェックを入れてください',
@@ -1971,8 +2019,12 @@ export const ja = {
      * 確認文は規約F: 何が戻るか・何が変わらないかを両方書く
      */
     homeWidgetsReset: '初期設定に戻す',
-    homeWidgetsResetConfirm:
-      'ホーム画面の「表示するパーツ」「並び順」「「今日なに作る？」を出すとき」を最初の状態に戻します。レシピ・献立・作った記録などのデータは変わりません。戻しますか？',
+    homeWidgetsResetConfirmTitle: 'ホーム画面のカスタマイズを最初の状態に戻します',
+    homeWidgetsResetConfirmBackLabel: '戻るもの',
+    homeWidgetsResetConfirmBack: '表示するパーツ・並び順・「今日なに作る？」を出すとき',
+    homeWidgetsResetConfirmKeptLabel: '変わらないもの',
+    homeWidgetsResetConfirmKept: 'レシピ・献立・作った記録などのデータ',
+    homeWidgetsResetConfirmOk: '戻す',
     homeWidgetsResetDone: 'ホーム画面を初期設定に戻しました',
     /**
      * 「今日なに作る？」をいつ出すか（2026-08-03 便DH・オーナー指示）。
@@ -1994,8 +2046,9 @@ export const ja = {
     // 2026-08-04 便DV-3(オーナー指示): ホーム画面のカスタマイズと名前をそろえ、並びを変えていない
     // うちも出す(押せるボタンが無いと「戻せる」と分からない)。確認文は規約F
     aisleOrderReset: '初期設定に戻す',
-    aisleOrderResetConfirm:
-      '買い物メモの売り場順を最初の並びに戻します。買い物メモの中身（買うものの一覧・チェック）は変わりません。戻しますか？',
+    aisleOrderResetConfirmTitle: '買い物メモの売り場順を最初の並びに戻します',
+    aisleOrderResetConfirm: '買い物メモの中身（買うものの一覧・チェック）は変わりません。',
+    aisleOrderResetConfirmOk: '戻す',
     aisleOrderResetDone: '売り場順を初期設定に戻しました',
     /** 既定の並びのままであることの表示（並び替え済みかどうかが一目で分かるように） */
     aisleOrderDefaultNote: 'いまは初期設定の順番です',
@@ -2015,27 +2068,34 @@ export const ja = {
     // 文は1行ずつ組み立てる（buildStarterReloadConfirmText）。当てはまらない行は出さない。
     // {k}=料理名が一致して内容だけ戻る品数 / {d}=削除される品数 /
     // {c}=削除される品に付いた作った記録の件数 / {p}=同じく写真の枚数 / {a}=追加される品数
-    /** 消える品が無いときの1行目 */
-    starterReloadConfirm: '基本レシピ{k}品の材料・手順・メモを、最初の内容に戻します。',
-    /** 消える品があるときの1行目（消えることを先に書く） */
+    // 2026-08-15 便GW: 画面の中の窓へ移し、1行ずつの文を項目の箇条書きにした。
+    // 当てはまらない項目を出さない作りは変えていない（buildStarterReloadConfirm）
+    starterReloadConfirmTitle: '基本レシピを入れ直します',
+    starterReloadConfirmRemovedLabel: '消えるもの',
+    /** 消える品があるときだけ出す項目 */
     starterReloadConfirmRemoved:
-      'アプリの基本レシピと料理名が一致しない{d}品（自分で料理名を変えた品など）を削除します。',
+      'アプリの基本レシピと料理名が一致しない{d}品（自分で料理名を変えた品など）',
     /**
-     * 削除される品にユーザーデータが付いているときだけ足す（両方0なら行ごと出さない）。
+     * 削除される品にユーザーデータが付いているときだけ足す（両方0なら足さない）。
      * {items}には下の2つのうち0でないものだけを「・」でつないで入れる
      * （「写真0枚も消えます」のような、消えないものを数える文にしない）
      */
-    starterReloadConfirmRemovedData: '削除する品に付けた{items}も消えます。',
+    starterReloadConfirmRemovedData: '。この品に付けた{items}も消えます',
     starterReloadConfirmRemovedLogs: '作った記録{c}件',
     starterReloadConfirmRemovedPhotos: '写真{p}枚',
-    /** 消える品があるときに、残る品の扱いを書く行 */
-    starterReloadConfirmKept: '料理名が一致する{k}品は、材料・手順・メモが最初の内容に戻ります。',
-    /** 端末に無い基本レシピが入り直すときだけ足す（自分で消した品・アプリに増えた品の両方が入る） */
-    starterReloadConfirmAdded: '端末に無い基本レシピ{a}品を追加します。',
+    starterReloadConfirmBackLabel: '戻るもの',
+    /** 消える品が無いときの「戻るもの」 */
+    starterReloadConfirm: '基本レシピ{k}品の材料・手順・メモ',
+    /** 消える品があるときの「戻るもの」（料理名が一致した品だけが戻る） */
+    starterReloadConfirmKept: '料理名が一致する{k}品の材料・手順・メモ',
+    /** 端末に無い基本レシピが入り直すときだけ出す項目（自分で消した品・アプリに増えた品の両方） */
+    starterReloadConfirmAddedLabel: '追加するもの',
+    starterReloadConfirmAdded: '端末に無い基本レシピ{a}品',
     /** 何が残るか（規約F）。どちらの場合も出す */
+    starterReloadConfirmStaysLabel: '残るもの',
     starterReloadConfirmStays:
-      'お気に入り・作った記録・写真は残ります。自分で登録したレシピは変わりません。',
-    starterReloadConfirmAsk: '入れ直しますか？',
+      'お気に入り・作った記録・写真。自分で登録したレシピは変わりません',
+    starterReloadConfirmOk: '入れ直す',
     starterReloadDone: '基本レシピを入れ直しました',
     recipeSetTitle: 'レシピセットを読み込む',
     recipeSetDescription:
@@ -2115,27 +2175,45 @@ export const ja = {
     // 残っているのに到達できなくなる)なので、有効範囲をそのまま書く
     // 2026-07-30 便CJ/C2: 設定（NG食材・テーマ・週の食費予算など）もファイルの内容になること、
     // 解錠コードは残ることを追記（規約F: 何が消えるか・何が残るかを両方書く）。
-    // 長くなるので段落で区切る（改行はwindow.confirmでそのまま表示される）
+    // 2026-08-15 便GW: 素のダイアログでは太字も箇条書きも出せず、5段落の壁になっていた。
+    // 画面の中の窓へ移し、見出し＋「消えるもの／置き換わるもの／残るもの」の3項目＋補足に分けた。
+    // 事実（件数・入れ替わるテーブル）は1つも落としていない（scripts/test-logic.mjs BK-SWAP）
     // 2026-08-15 便GP: 消えるものを数え落としていた（レシピ・作った記録・価格の3つしか
     // 書いていなかったが、実際は在庫・買い物メモ・週の献立・今日の献立・日付メモ・
     // 献立テンプレート・献立のロック・削除したレシピの記録もファイルの内容に置き換わる。
     // logic/backup.ts importBackupのreplace分岐）。ファイルに入っていない項目は今のまま残る
     // （tablesToReplace）ので、そこも書き分ける。並行調理ナビの段取りは、覚え書きが残っている
     // ときだけ replaceCookNaviNote を足す（docs/69「捨てたときは失うものがある場合だけ知らせる」）
-    backupImportReplaceConfirm:
-      '今のレシピ{r}件・作った記録{c}件・価格{p}件が消え、読み込むファイルの内容で上書きします。\n在庫・買い物メモ・週の献立・今日の献立・日付メモ・献立テンプレート・献立のロックと、削除したレシピを取り込み直さないための記録も、ファイルの内容に置き換わります（ファイルに入っていない項目は今のまま残ります）。{navi}\n設定（NG食材・テーマ・週の食費予算など）もファイルの内容になります。Pro版の解錠コードは残ります。\n上書きする前のデータはアプリの中に控えを取るので、この設定画面を開いている間は「元に戻す」で戻せます（別の画面へ移ると戻せなくなります）。\n\n上書きしますか？',
+    backupImportReplaceTitle: '読み込むファイルの内容で上書きします',
+    backupImportReplaceGoneLabel: '消えるもの',
+    backupImportReplaceGone: '今のレシピ{r}件・作った記録{c}件・価格{p}件{navi}',
+    backupImportReplaceSwapLabel: '置き換わるもの',
+    backupImportReplaceSwap:
+      '在庫・買い物メモ・週の献立・今日の献立・日付メモ・献立テンプレート・献立のロック・削除したレシピを取り込み直さないための記録・設定（NG食材・テーマ・週の食費予算など）',
+    backupImportReplaceKeptLabel: '残るもの',
+    backupImportReplaceKept:
+      'Pro版の解錠コードは残ります。ファイルに入っていない項目も今のままです',
+    backupImportReplaceNote:
+      '上書き前の控えを取るので、この設定画面を開いている間は「元に戻す」で戻せます（画面を移ると戻せません）。',
+    backupImportReplaceOk: '上書きする',
     /**
      * 上書き・元に戻すで並行調理ナビの段取りも捨てるときに足す1行（2026-08-15 便GP）。
      * データが丸ごと入れ替わると、覚えている品番号が別の料理を指しうる（1度も作っていない品が
      * 完成と出る型の事故）。段取りは残さず捨てるので、覚え書きがあるときはそのことを書く
      */
-    replaceCookNaviNote: '並行調理ナビで選んでいた{n}品の段取りも消えます。',
+    // 2026-08-15 便GW: 「消えるもの」の項目の末尾に足す形にしたので、1文ではなく続きの語にした
+    replaceCookNaviNote: '・並行調理ナビで選んでいた{n}品の段取り',
     // 「追加」の確認文・説明文(2026-07-30 便CJ/C1・C12)。以前は「同じレシピ(同一ID)はスキップ」
     // というレシピ本体の話しか書いておらず、在庫・買い物メモ・献立・価格・日付メモ・献立テンプレートや、
     // 既にあるレシピの「作った記録」・写真・お気に入りが取り込まれない実装だったことも伝えていなかった。
     // 非破壊マージ(今のデータは1件も消さない)になったので、そのとおりに書く
-    backupImportMergeConfirm:
-      '今のデータは消さずに、ファイルの中で今のデータに無いものだけを足します（レシピ・作った記録・お気に入り・写真・在庫・買い物メモ・献立・価格・日付メモ・献立テンプレート）。今あるレシピの内容は書き換えません。よろしいですか？',
+    backupImportMergeTitle: 'ファイルの中で今のデータに無いものだけを足します',
+    backupImportMergeAddLabel: '足すもの',
+    backupImportMergeAdd:
+      'レシピ・作った記録・お気に入り・写真・在庫・買い物メモ・献立・価格・日付メモ・献立テンプレート',
+    backupImportMergeKeptLabel: '変わらないもの',
+    backupImportMergeKept: '今のデータ（1件も消えず、内容も書き換えません）',
+    backupImportMergeOk: '追加する',
     // 旧 backupImportMergeNote（「今のデータに追加」ボタンの下のキャプション）は
     // 2026-08-12 便FW でオーナー指示により削除。同じ内容は押したあとの確認文
     // （backupImportMergeConfirm）で件数つきに言い切っているため、事実は落ちていない
@@ -2150,8 +2228,12 @@ export const ja = {
     // 「元に戻す」の確認文（2026-08-15 便GP・規約F）。確認なしで今のデータを控えで置き換えて
     // いたため、上書きしたあとに直した内容が黙って消えていた。ただし事故から戻すためのボタンで、
     // 確認が重いと本来の役目を邪魔するので、消えるもの・残るものを1行ずつの短さにする
-    replaceUndoConfirm:
-      '今のレシピ{r}件・作った記録{c}件を、上書きする前のデータに戻します。\n上書きしたあとに直した内容は消えます。Pro版の解錠コードは残ります。{navi}\n\n戻しますか？',
+    replaceUndoTitle: '上書きする前のデータに戻します',
+    replaceUndoGoneLabel: '消えるもの',
+    replaceUndoGone: '今のレシピ{r}件・作った記録{c}件と、上書きしたあとに直した内容{navi}',
+    replaceUndoKeptLabel: '残るもの',
+    replaceUndoKept: 'Pro版の解錠コードは残ります',
+    replaceUndoOk: '元に戻す',
     replaceUndoDismiss: '閉じる',
     replaceUndoDone: '元のデータに戻しました',
     replaceUndoError: '元に戻せませんでした（控えが見つかりません）',
@@ -2263,8 +2345,14 @@ export const ja = {
     // 書き出しが済んでから初めて出す削除ボタン（ファイルが手元にあることを確かめてから消す）
     archiveDeleteButton: '書き出した記録を端末から消す',
     archiveDeleteNote: '書き出したファイルが保存できたことを確かめてから押してください',
-    archiveDeleteConfirm:
-      '消えるもの: 作った記録{c}件と写真{p}枚\n残るもの: レシピ本体・{date}以降の記録・書き出したファイル\nよろしいですか？',
+    // 2026-08-15 便GW: 画面の中の窓へ。すでに「消えるもの／残るもの」の形だったので、
+    // そのまま箇条書きの2項目にした（末尾の「よろしいですか？」はボタンが受け持つ）
+    archiveDeleteConfirmTitle: '書き出した記録を端末から消します',
+    archiveDeleteConfirmGoneLabel: '消えるもの',
+    archiveDeleteConfirmGone: '作った記録{c}件・写真{p}枚',
+    archiveDeleteConfirmKeptLabel: '残るもの',
+    archiveDeleteConfirmKept: 'レシピ本体・{date}以降の記録・書き出したファイル',
+    archiveDeleteConfirmOk: '端末から消す',
     archiveDeleteDone: '記録{c}件・写真{p}枚を端末から消しました',
     archiveDeleteNothing: '消す記録はありませんでした',
     // 疑問④「アーカイブはどこに保存されているのか」。アプリの中には残らないことを先に言う
@@ -2341,8 +2429,9 @@ export const ja = {
     // 新しいバージョンにしたいだけなら更新で足りる
     refreshAppVsUpdateNote:
       '新しいバージョンにしたいだけなら、「アプリの更新」の「最新の状態にする」で足ります',
-    refreshAppConfirm:
-      'アプリの表示を修復します。レシピや価格などのデータは消えません。よろしいですか？',
+    refreshAppConfirmTitle: 'アプリの表示を修復します',
+    refreshAppConfirm: 'レシピや価格などのデータは消えません。',
+    refreshAppConfirmOk: '修復する',
     // M-2(2026-07-16): オフライン時に実行すると新しいファイルを取得できず白画面になるための案内
     refreshAppOffline:
       'インターネットに繋がっているときにお試しください（オフラインだとアプリを取り直せません）',
@@ -2602,13 +2691,20 @@ export const ja = {
     // (form.confirmDelete・2026-07-29 便CI/C01)と同じ＝db/recipes.tsのdeleteRecipesが
     // 同じトランザクションで消すもの。{r}=レシピ品数 {n}=作った記録 {p}=写真 {m}=献立の予定
     // {t}=今日の献立 {rest}=削除後に残るレシピ品数
-    bulkDeleteConfirm:
-      'レシピ{r}品を削除します。一緒に、作った記録{n}件（うち写真{p}枚）と、これらのレシピが入っている献立の予定{m}件・今日の献立{t}件も消え、元に戻せません。他のレシピ{rest}品・買い物メモ・食材の在庫は残ります。',
+    // 2026-08-15 便GW: 画面の中の窓へ。1文の長い並記を「消えるもの」「残るもの」の
+    // 2項目に分けた（読む量も減る）。件数はどれも落とさない
+    bulkDeleteConfirmTitle: 'レシピ{r}品を削除します',
+    bulkDeleteConfirmGoneLabel: '消えるもの',
+    bulkDeleteConfirmGone:
+      '作った記録{n}件（うち写真{p}枚）・献立の予定{m}件・今日の献立{t}件（元に戻せません）',
+    bulkDeleteConfirmKeptLabel: '残るもの',
+    bulkDeleteConfirmKept: '他のレシピ{rest}品・買い物メモ・食材の在庫',
+    bulkDeleteConfirmOk: '削除する',
     // 同梱の基本レシピだけは入れ直しで戻せるので、戻せないものと区別して伝える
     // (規約H: 場所は「ここ」ではなく画面名・ボタン名で言う)。配布セット由来のレシピは
     // 削除でトゥームストーンが残り入れ直しでも復活しないため、この{s}には含めない
     bulkDeleteConfirmStarter:
-      'このうち基本レシピ{s}品は、設定画面の「基本レシピを入れ直す」で戻せます（作った記録は戻りません）。',
+      'このうち基本レシピ{s}品は、設定画面の「基本レシピを入れ直す」で戻せます（作った記録は戻りません）',
     bulkDeletedToast: 'レシピ{r}品を削除しました',
     /**
      * 選択したレシピの書き出し（2026-08-09 便EM。2026-08-02 オーナー決定
@@ -2860,9 +2956,17 @@ export const ja = {
     // {items}は「材料3件・手順2件」のように、実際に置き換わるものだけを並べた文字列
     // 2026-07-28 便BX/C02: 人数分・調理時間も貼り付けた内容に置き換わるので、URL取り込み側と
     // 同じく確認文に明記する(規約F「何が消えるか」。片方だけ直すと2経路の説明が食い違う)
-    confirmReplace:
-      '入力済みの{items}は、貼り付けた内容に置き換わって消えます。人数分・調理時間も貼り付けた内容に置き換わります。料理名・ひとこと説明・メモはそのまま残ります。',
-    // confirmReplace/{items}の組み立て用(貼り付け・URL取り込みで共用)
+    // 2026-08-15 便GW: 画面の中の窓へ。1文の並記を「消えるもの/置き換わるもの/残るもの」の
+    // 3項目に分けた（消えるものと置き換わるものの区別が読み取りやすくなる）
+    confirmReplaceTitle: '貼り付けた内容で置き換えます',
+    confirmReplaceGoneLabel: '消えるもの',
+    confirmReplaceGone: '入力済みの{items}',
+    confirmReplaceSwapLabel: '置き換わるもの',
+    confirmReplaceSwap: '人数分・調理時間',
+    confirmReplaceKeptLabel: '残るもの',
+    confirmReplaceKept: '料理名・ひとこと説明・メモ',
+    confirmReplaceOk: '置き換える',
+    // {items}の組み立て用(貼り付け・URL取り込みで共用)
     replaceItemIngredients: '材料{n}件',
     replaceItemSteps: '手順{n}件',
     replaceItemSeparator: '・',
@@ -2930,15 +3034,17 @@ export const ja = {
     // 残るものを列挙しているぶん「写真は触られない」と読めてしまっていた。実際は既存の写真が
     // 無条件に差し替わり、保存すると端末内の元写真は復元できない。写真の1文(confirmPhotoReplace)と
     // 残るものの1文(confirmReplaceKept系)を状況に応じて後ろに足す形に分けた
-    confirmReplace:
-      '入力済みの{items}は、読み込んだ内容に置き換わって消えます。人数分・調理時間・参照元URLも読み込んだ内容に置き換わります。',
-    // 「写真も取り込む」がONで、いまフォームに写真があるとき(=置き換わって消えるとき)だけ足す1文。
-    // 逃げ道(チェックを外せば守れる)も同じ場所で伝える
-    confirmPhotoReplace:
-      'いまの写真は、読み込んだ写真に置き換わって消えます（元の写真には戻せません）。写真を残したいときは「写真も取り込む」のチェックを外してください。',
+    // 2026-08-15 便GW: 貼り付けと同じ3項目の形にそろえた（2つの経路で説明の形が違わないように）
+    confirmReplaceTitle: '読み込んだ内容で置き換えます',
+    confirmReplaceSwap: '人数分・調理時間・参照元URL',
+    // 「写真も取り込む」がONで、いまフォームに写真があるとき(=置き換わって消えるとき)だけ
+    // 「消えるもの」に足す。逃げ道(チェックを外せば守れる)は補足の行で伝える
+    confirmPhotoReplace: 'いまの写真（元の写真には戻せません）',
+    confirmPhotoNote: '写真を残したいときは「写真も取り込む」のチェックを外してください。',
     // 「何が残るか」(規約F)。写真が残る場合はその写真も並べて書く
-    confirmReplaceKept: '料理名・ひとこと説明・メモはそのまま残ります。',
-    confirmReplaceKeptWithPhoto: '写真・料理名・ひとこと説明・メモはそのまま残ります。',
+    confirmReplaceKept: '料理名・ひとこと説明・メモ',
+    confirmReplaceKeptWithPhoto: '写真・料理名・ひとこと説明・メモ',
+    confirmReplaceOk: '読み込む',
     // 取り込み後、実際に値が変わった項目だけを結果メッセージの末尾に足す(便BX/C02)。
     // {items}は「人数分・調理時間」のように、変わったものだけを並べた文字列
     alsoApplied: '{items}も読み込んだ内容に合わせました。',
@@ -3137,10 +3243,12 @@ export const ja = {
     ingredientOrganizeSelectRow: 'この材料を選ぶ',
     ingredientOrganizeDeleteSelected: '選んだ材料{n}行を削除',
     // 規約F: 何が消えるか/何が残るかを件数つきで両方書く
+    ingredientOrganizeConfirmTitle: '選んだ材料{n}行を消します',
     ingredientOrganizeConfirm:
-      '選んだ材料{n}行を消します（元に戻せません）。残りの材料{m}行と、料理名・手順・写真などの入力はそのまま残ります。',
-    ingredientOrganizeConfirmAll:
-      '材料{n}行をすべて消して、空の1行に戻します（元に戻せません）。料理名・手順・写真などの入力はそのまま残ります。',
+      '元に戻せません。残りの材料{m}行と、料理名・手順・写真などの入力は残ります。',
+    ingredientOrganizeConfirmAllTitle: '材料{n}行をすべて消して、空の1行に戻します',
+    ingredientOrganizeConfirmAll: '元に戻せません。料理名・手順・写真などの入力は残ります。',
+    ingredientOrganizeConfirmOk: '削除する',
     // 並べ替えの上下矢印を囲むつまみ(2026-08-02 オーナー実機FB: 矢印だけだと分量の数値調整に見える。
     // 買い物メモで先に採った様式=GripVerticalのつまみ+枠 にそろえる)
     reorderHandle: '並び替え（上下に移動）',
@@ -3217,32 +3325,53 @@ export const ja = {
     draftRestore: '復元する',
     draftDiscard: '破棄する',
     // 入力中に「復元する」を押したときの確認(規約F: 何が消えて何が残るか)
+    draftRestoreConfirmTitle: '書きかけの下書きの内容に置き換えます',
     draftRestoreConfirm:
-      'いま入力中の内容（料理名・材料・手順など）は消えて、書きかけの下書きの内容に置き換わります。保存済みのレシピはそのままです。',
+      'いま入力中の内容（料理名・材料・手順など）は消えます。保存済みのレシピはそのままです。',
+    draftRestoreConfirmOk: '復元する',
     save: '保存する',
     saving: '保存中…',
     cancel: 'キャンセル',
     // キャンセルで抜けるときの確認(規約F)。下書きもここで破棄する(2026-07-28 便BW/C-16)
-    confirmCancel:
-      '書きかけの内容（料理名・材料・手順など）を破棄して戻ります。書きかけの内容は残りません。保存済みのレシピはそのままです。',
+    confirmCancelTitle: '書きかけの内容を破棄して戻ります',
+    confirmCancel: '料理名・材料・手順などは残りません。保存済みのレシピはそのままです。',
+    confirmCancelOk: '破棄して戻る',
     moveUp: '上へ移動',
     moveDown: '下へ移動',
     removeRow: 'この行を削除',
-    confirmRemoveRow: 'この行を削除しますか？',
+    // 入力中の1行を消すだけの軽い操作なので、窓は見出しとボタンだけにする（規約Fの対象外と
+    // 司令部が裁定済み。それでも素のダイアログは出さない＝見た目は他の確認とそろえる）
+    confirmRemoveRow: 'この行を削除します',
+    confirmRemoveRowOk: '削除する',
     deleteRecipe: 'このレシピを削除',
     // 2026-07-29 便CI/C01(規約F): 旧文は「よろしいですか？」だけで、db/recipes.ts:deleteRecipe が
     // 同じトランザクションで消す「作った記録(写真ごと)」「献立の予定」「今日の献立」を1つも
     // 告げていなかった。{n}=作った記録の件数・{p}=そのうち写真つきの枚数
-    confirmDelete:
-      'このレシピを削除します。一緒に、作った記録{n}件（うち写真{p}枚）と、このレシピが入っている献立の予定・今日の献立も消え、元に戻せません。他のレシピ・買い物メモ・食材の在庫は残ります。',
+    confirmDeleteTitle: 'このレシピを削除します',
+    confirmDeleteGoneLabel: '消えるもの',
+    confirmDeleteGone:
+      '作った記録{n}件（うち写真{p}枚）・このレシピが入っている献立の予定・今日の献立（元に戻せません）',
+    confirmDeleteKeptLabel: '残るもの',
+    confirmDeleteKept: '他のレシピ・買い物メモ・食材の在庫',
+    confirmDeleteOk: '削除する',
     // 「デフォルトに戻す」(2026-07-15 オーナー要望)。編集画面限定でDBには書き込まず、
     // フォームの入力値だけを差し替える(保存を押すまで確定しない安全設計)。
     // 自作レシピ=前回保存した内容、基本レシピ/配布セット由来=原本(デフォルト)に戻す
     resetToSavedLabel: '前回保存した内容に戻す',
     resetToDefaultLabel: 'デフォルトに戻す',
-    // window.confirmは使わず、もう一度押す方式で誤操作を防ぐ(押すとこの文言に切り替わり、
-    // もう一度押すと実行される。数秒操作が無ければ元のラベルに自動で戻る)
-    resetConfirmLabel: 'もう一度押すと戻します',
+    /**
+     * 2026-08-15 便GW: 「もう一度押すと戻します」に切り替わる**3つ目の様式**をやめ、
+     * 他の確認と同じ画面の中の窓にそろえた。二度押しはラベルが変わるだけで
+     * 「何が戻って何が変わらないか」を書く場所が無く、規約Fを満たせないため
+     * （素のダイアログを避けるために採った方式だが、窓ができた今は揃えられる）。
+     */
+    resetConfirmTitleOwn: '前回保存した内容に戻します',
+    resetConfirmTitleStarter: 'デフォルトの内容に戻します',
+    resetConfirmBackLabel: '戻るもの',
+    resetConfirmBack: '材料・手順・人数分・調理時間・タグ・メモなどの入力',
+    resetConfirmKeptLabel: '変わらないもの',
+    resetConfirmKept: '料理名と写真。保存を押すまで、保存済みのレシピは変わりません',
+    resetConfirmOk: '戻す',
     resetFeedback: 'まだ保存されていません。保存すると確定します',
     resetStarterNotFound: 'デフォルトの元になるレシピが見つかりませんでした',
   },
@@ -3376,9 +3505,12 @@ export const ja = {
     // 元に戻せない操作なので確認文は規約F(何が消えて何が残るかを件数つきで書く)。
     // {date}=消す記録の日付 / {p}=写真つきなら添える一言 / {n}=このレシピに残る記録の件数
     cookedLogDelete: 'この記録を削除',
+    // 2026-08-15 便GW: 画面の中の窓(ConfirmDialog)へ。1文目は見出しへ移した
+    cookedLogDeleteConfirmTitle: '{date}の作った記録を削除します',
     cookedLogDeleteConfirm:
-      '{date}の作った記録を削除します。この1件{p}が消え、元に戻せません。レシピ本体と、このレシピの他の作った記録{n}件は残ります。',
+      'この1件{p}が消え、元に戻せません。レシピ本体と、このレシピの他の作った記録{n}件は残ります。',
     cookedLogDeleteConfirmPhoto: '（添えた写真1枚ごと）',
+    cookedLogDeleteConfirmOk: '削除する',
     cookedLogDeletedToast: '作った記録を削除しました',
     // レシピ詳細の記録は直近5件までしか出ないので、残りへ行ける導線を見出しの横に置く
     // (2026-07-29 便CI/C03)。飛び先は履歴ページのこのレシピだけの絞り込み表示

@@ -4,6 +4,7 @@ import { buildSearchWords } from '../logic/kana'
 // 「基本レシピを入れ直す」の確認文をここで組み立てる（2026-08-15 便GP）。件数の出し分けが
 // 画面側に散らないよう、文言はja、組み立てはこのファイル（logic/backup.tsと同じ作法）
 import { ja } from '../i18n/ja'
+import type { ConfirmContent } from '../logic/confirmContent'
 // 旧「配布テーマ（第◯弾）」の原稿。2026-07-23のテーマ全廃(オーナー確定)で、これらは
 // もう ?set= 配布用ではなく「同梱の基本レシピ」として初回シードに合流する（下の starterDefs 参照）。
 // 原稿ファイル自体は執筆・レビューの正本として残し、ここから recipes 配列だけを読み込む
@@ -2438,11 +2439,10 @@ export function countStarterReloadImpact(
  * 消える品があるときだけ削除の話を書く（0件のときに書くと、消えないのに不安にさせる）。
  * 削除される品にお気に入り・作った記録・写真が付いていない場合は、その1行も出さない。
  */
-export function buildStarterReloadConfirmText(impact: StarterReloadImpact): string {
+export function buildStarterReloadConfirm(impact: StarterReloadImpact): ConfirmContent {
   const t = ja.settings
-  const lines: string[] = []
+  const bullets: { label: string; text: string }[] = []
   if (impact.removed > 0) {
-    lines.push(t.starterReloadConfirmRemoved.replace('{d}', String(impact.removed)))
     // 0のものは並べない（「写真0枚も消えます」＝消えないものを数える文にしない）
     const removedItems = [
       impact.removedCookedLogs > 0 &&
@@ -2450,16 +2450,34 @@ export function buildStarterReloadConfirmText(impact: StarterReloadImpact): stri
       impact.removedPhotos > 0 &&
         t.starterReloadConfirmRemovedPhotos.replace('{p}', String(impact.removedPhotos)),
     ].filter((item): item is string => !!item)
-    if (removedItems.length > 0) {
-      lines.push(t.starterReloadConfirmRemovedData.replace('{items}', removedItems.join('・')))
-    }
-    lines.push(t.starterReloadConfirmKept.replace('{k}', String(impact.kept)))
-  } else {
-    lines.push(t.starterReloadConfirm.replace('{k}', String(impact.kept)))
+    bullets.push({
+      label: t.starterReloadConfirmRemovedLabel,
+      text:
+        t.starterReloadConfirmRemoved.replace('{d}', String(impact.removed)) +
+        (removedItems.length > 0
+          ? t.starterReloadConfirmRemovedData.replace('{items}', removedItems.join('・'))
+          : ''),
+    })
   }
-  if (impact.added > 0) lines.push(t.starterReloadConfirmAdded.replace('{a}', String(impact.added)))
-  lines.push(t.starterReloadConfirmStays)
-  return `${lines.join('\n')}\n\n${t.starterReloadConfirmAsk}`
+  bullets.push({
+    label: t.starterReloadConfirmBackLabel,
+    text: (impact.removed > 0 ? t.starterReloadConfirmKept : t.starterReloadConfirm).replace(
+      '{k}',
+      String(impact.kept),
+    ),
+  })
+  if (impact.added > 0) {
+    bullets.push({
+      label: t.starterReloadConfirmAddedLabel,
+      text: t.starterReloadConfirmAdded.replace('{a}', String(impact.added)),
+    })
+  }
+  bullets.push({ label: t.starterReloadConfirmStaysLabel, text: t.starterReloadConfirmStays })
+  return {
+    title: t.starterReloadConfirmTitle,
+    bullets,
+    confirmLabel: t.starterReloadConfirmOk,
+  }
 }
 
 /**

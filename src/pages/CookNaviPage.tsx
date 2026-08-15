@@ -72,6 +72,7 @@ import { revealExpanded } from '../logic/revealExpanded'
 import CustomTimerModal from '../components/CustomTimerModal'
 import CookFinishModal from '../components/CookFinishModal'
 import ConfirmDialog from '../components/ConfirmDialog'
+import { useConfirm } from '../components/ConfirmProvider'
 import {
   applyStepPulls,
   findCursorIndex,
@@ -639,6 +640,7 @@ function IngredientsPanel({ recipes }: { recipes: NaviRecipeIngredients[] }) {
 }
 
 export default function CookNaviPage() {
+  const confirm = useConfirm()
   const settings = useSettings()
   const isProUnlocked = !!settings?.proCode
   /**
@@ -1445,22 +1447,28 @@ export default function CookNaviPage() {
    * 「まとめて作った！」ボタンの確認と「完成！」の窓で**同じ文字列**を使う
    * ＝記録の説明を2か所に書かない。
    */
-  const cookedConfirmBody = (keepTimers: boolean) =>
+  const cookedRecipes = () => selectedRecipes.filter((r) => r.id != null)
+  /** 記録の中身の1行目（何件に記録が付くか）。確認の窓では見出しになる（2026-08-15 便GW） */
+  const cookedConfirmTitle = () =>
+    ja.cookNavi.markAllCookedConfirmTitle
+      .replaceAll('{n}', String(cookedRecipes().length))
+      .replace('{titles}', cookedRecipes().map((r) => r.title).join('・'))
+  /** 1行目より後ろ（何が変わり、何が残るか） */
+  const cookedConfirmRest = (keepTimers: boolean) =>
     ja.cookNavi.markAllCookedConfirm
-      .replaceAll('{n}', String(selectedRecipes.filter((r) => r.id != null).length))
-      .replace(
-        '{titles}',
-        selectedRecipes
-          .filter((r) => r.id != null)
-          .map((r) => r.title)
-          .join('・'),
-      )
+      .replaceAll('{n}', String(cookedRecipes().length))
       // 動いているタイマーの扱い（2026-08-14 便GL）。「まとめて作った！」は今までどおり残すので
       // そう書き、「完成！」の窓は窓の中で消すかどうかを聞くのでここには書かない
       .replace('{timers}', keepTimers ? ja.cookNavi.markAllCookedConfirmTimersKept : '') +
     (settings?.cookedReflectPantry ? ja.cookNavi.markAllCookedConfirmPantry : '') +
     // まとめて付けた記録も、あとから1件ずつ直せる（2026-08-12 便FX・オーナー指摘）
     ja.cookNavi.markAllCookedConfirmEdit
+  /**
+   * 「完成！」の窓（CookFinishModal）へ渡す本文。あちらは自前の見出し
+   * （sessionFinishTitle）を持つので、1行目も本文に含めて渡す＝出る文字は今までと同じ
+   */
+  const cookedConfirmBody = (keepTimers: boolean) =>
+    `${cookedConfirmTitle()}。\n${cookedConfirmRest(keepTimers)}`
 
   /**
    * 全画面の調理中モードを閉じる（2026-08-10 便FC・オーナー実機
@@ -1570,11 +1578,14 @@ export default function CookNaviPage() {
     const targets = selectedRecipes.filter((r) => r.id != null)
     if (targets.length === 0) return false
     // 「完成！」の窓（CookFinishModal）から来たときは、同じ中身をもう一度聞かない
-    if (
-      !options?.confirmed &&
-      !window.confirm(cookedConfirmBody(true) + ja.cookNavi.markAllCookedConfirmAsk)
-    )
-      return false
+    if (!options?.confirmed) {
+      const ok = await confirm({
+        title: cookedConfirmTitle(),
+        body: cookedConfirmRest(true),
+        confirmLabel: ja.cookNavi.markAllCookedConfirmOk,
+      })
+      if (!ok) return false
+    }
     // 記録できたのは何件かを受け取る（すでに今日の記録がある品は二重に付けない。2026-08-09 便EH）
     // 何人分作ったかも記録する（2026-08-10 便FF）。段取りの分量に使っている食数
     // （枠の食数＞設定「食数の設定」＞レシピの登録人数分）をそのまま記録に残す
@@ -1603,12 +1614,19 @@ export default function CookNaviPage() {
    * 端末に残していた覚え書きも消す＝次に開いたときは今日の献立から選び直すところから始まる。
    * 作った記録・レシピ・今日の献立・動いているタイマーには触らない。
    */
-  const discardTimeline = () => {
-    const confirmText = ja.cookNavi.discardTimelineConfirm.replace(
-      '{n}',
-      String(selectedRecipes.length),
-    )
-    if (!window.confirm(confirmText)) return
+  const discardTimeline = async () => {
+    const ok = await confirm({
+      title: ja.cookNavi.discardTimelineConfirmTitle,
+      bullets: [
+        {
+          label: ja.cookNavi.discardTimelineGoneLabel,
+          text: ja.cookNavi.discardTimelineGone.replace('{n}', String(selectedRecipes.length)),
+        },
+        { label: ja.cookNavi.discardTimelineKeptLabel, text: ja.cookNavi.discardTimelineKept },
+      ],
+      confirmLabel: ja.cookNavi.discardTimelineConfirmOk,
+    })
+    if (!ok) return
     clearCookNaviSession()
     setSelectedIds([])
     setShowTimeline(false)
@@ -2278,7 +2296,7 @@ export default function CookNaviPage() {
                     <button
                       type="button"
                       data-testid="navi-discard-timeline"
-                      onClick={discardTimeline}
+                      onClick={() => void discardTimeline()}
                       className="mt-[var(--space-sm)] w-full rounded-md border border-edge bg-surface py-3 text-sm font-bold text-ink-muted shadow-sm"
                     >
                       {ja.cookNavi.discardTimeline}

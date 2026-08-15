@@ -44,6 +44,7 @@ import type { SearchResult } from '../logic/search'
 import type { Ingredient, ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
+import { useConfirm } from '../components/ConfirmProvider'
 import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
@@ -132,6 +133,7 @@ const PICKER_SORT_OPTIONS: { value: RecipeSortOption; label: string }[] = [
  * 買い物メモ）の2タブ構成(2026-07-16 UI総点検B-9: 買い物メモが最上部を占有しヘビーユーザーの
  * 壁になっていた所見への対応)。既定タブは「食材の在庫」。タブ状態はページローカルで保存しない */
 export default function ShoppingPage() {
+  const confirm = useConfirm()
   // 保存してある下書きを初回描画時に1度だけ読む(2026-07-29 便CC/C2)。
   // 期限切れはここで破棄される。競合する入力状態が無いので「復元しますか？」は出さず黙って戻す
   const [restoredDraft] = useState(readShoppingDraft)
@@ -309,11 +311,15 @@ export default function ShoppingPage() {
     else clearShoppingDraft()
   }, [candidates, lastPickerCounts, candidateRangeLabel])
 
-  const makeCandidates = () => {
+  const makeCandidates = async () => {
     // 既に下書きがあるときの作り直しは、手で直した分量が自動計算に戻るので先に一言確認する
     // (2026-07-29 便CC/C2。規約F=何が消えて何が残るかを両方書く)
     if (candidates && candidates.length > 0) {
-      const ok = window.confirm(ja.shopping.remakeConfirm.replace('{n}', String(candidates.length)))
+      const ok = await confirm({
+        title: ja.shopping.remakeConfirmTitle.replace('{n}', String(candidates.length)),
+        body: ja.shopping.remakeConfirm,
+        confirmLabel: ja.shopping.remakeConfirmOk,
+      })
       if (!ok) return
     }
     // 食数≥1のレシピだけを対象にし、指定食数で分量をスケールする(scale=食数÷登録人数。2026-07-23 #3)
@@ -353,9 +359,13 @@ export default function ShoppingPage() {
   }
 
   // 下書きの取り消し(2026-07-29 便CC/C2)。従来は確認ゼロで即消えていた
-  const discardCandidates = () => {
+  const discardCandidates = async () => {
     if (!candidates) return
-    const ok = window.confirm(ja.shopping.discardConfirm.replace('{n}', String(candidates.length)))
+    const ok = await confirm({
+      title: ja.shopping.discardConfirmTitle.replace('{n}', String(candidates.length)),
+      body: ja.shopping.discardConfirm,
+      confirmLabel: ja.shopping.discardConfirmOk,
+    })
     if (!ok) return
     setCandidates(null)
     setCandidateRangeLabel(undefined)
@@ -825,7 +835,7 @@ export default function ShoppingPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={discardCandidates}
+                  onClick={() => void discardCandidates()}
                   className="flex-1 rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
                 >
                   {ja.shopping.discardCandidates}
@@ -1104,7 +1114,7 @@ export default function ShoppingPage() {
           <div className="px-[var(--space-md)] pb-[calc(var(--space-md)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]">
             <button
               type="button"
-              onClick={makeCandidates}
+              onClick={() => void makeCandidates()}
               disabled={selectedRecipeCount === 0}
               className="w-full rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md disabled:opacity-40"
             >

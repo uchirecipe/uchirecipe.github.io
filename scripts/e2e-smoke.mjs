@@ -452,6 +452,92 @@ const parseRemainingSeconds = (text) => {
  * launch()を包む形にしてあるので、検証ごとに増える入れ物を数え漏らさない。
  */
 const FIRST_SETUP_NOTICE_SEEN_KEY = 'uchirecipe:firstSetupNoticeSeen'
+
+/**
+ * 画面の中の確認の窓（2026-08-15 便GW・components/ConfirmDialog）を、出たらすぐ押す仕掛け。
+ *
+ * 便GWでアプリ全体の確認をブラウザの素のダイアログ（window.confirm）から画面の中の窓へ移した。
+ * それまでの検証は `page.on('dialog', (d) => d.accept())` で素のダイアログを自動で押していたので、
+ * **同じ役目を窓に対して果たすもの**をここに置く（検証ごとに押す行を書き足さなくて済む）。
+ *
+ * 切り替えは localStorage の 'e2e:confirmAuto' で行う:
+ *   （未設定・'accept'）… 「実行」側を押す（旧 dialog.accept()）
+ *   'cancel'            … 「やめる」側を押す（旧 dialog.dismiss()）
+ *   'off'               … 何もしない（窓を見て自分で押す検証用）
+ * 押した窓の文字は window.__confirmDialogs に貯め、page.exposeFunction('__e2eConfirmSeen') を
+ * 用意している検証にはそちらへも渡す（旧 dialog.message() の置き換え）。
+ *
+ * 目印は既定の `confirm` だけを見る。書き出しの確認（recipes-export-confirm）や
+ * 並行調理ナビの並び戻し（navi-reorder-reset-modal）は自分の目印を持ち、
+ * それぞれの検証が自分で押しているので、ここでは触らない。
+ */
+const installConfirmAutoPress = () => {
+  const pressed = new WeakSet()
+  const pump = () => {
+    const dialog = document.querySelector('[data-testid="confirm"]')
+    if (!dialog || pressed.has(dialog)) return
+    let mode = 'accept'
+    try {
+      mode = localStorage.getItem('e2e:confirmAuto') || 'accept'
+    } catch {
+      mode = 'accept'
+    }
+    if (mode === 'off') return
+    pressed.add(dialog)
+    // BudouXのゼロ幅スペースが混じっても照合が外れないよう、貯める前に外す(禁じ手②)
+    const text = (dialog.textContent ?? '').replaceAll('​', '')
+    window.__confirmDialogs = window.__confirmDialogs || []
+    window.__confirmDialogs.push(text)
+    try {
+      window.__e2eConfirmSeen?.(text)
+    } catch {
+      // 受け取り口を用意していない検証では何もしない
+    }
+    const target = mode === 'cancel' ? 'confirm-cancel' : 'confirm-ok'
+    dialog.querySelector(`[data-testid="${target}"]`)?.click()
+  }
+  const start = () => {
+    new MutationObserver(pump).observe(document.body, { childList: true, subtree: true })
+    pump()
+  }
+  if (document.body) start()
+  else document.addEventListener('DOMContentLoaded', start)
+}
+
+/**
+ * 確認の窓の文言を配列へ貯める受け取り口を用意する（旧 page.on('dialog', d => arr.push(d.message()))）。
+ * ページを開く前に呼ぶこと（addInitScriptの仕掛けが最初に窓を見つけたときには用意できている必要がある）
+ */
+const collectConfirms = (targetPage, sink) =>
+  targetPage.exposeFunction('__e2eConfirmSeen', (text) => {
+    sink.push(text)
+  })
+
+/** 確認の窓の答え方を切り替える（'accept' 既定 / 'cancel' / 'off'）。ページを開いたあとに呼ぶ */
+const setConfirmAnswer = (targetPage, mode) =>
+  targetPage.evaluate((value) => {
+    localStorage.setItem('e2e:confirmAuto', value)
+  }, mode)
+
+/** その入れ物で出た確認の窓の文言（貯め口を用意していない検証でも後から読める） */
+const readConfirms = (targetPage) => targetPage.evaluate(() => window.__confirmDialogs ?? [])
+
+/**
+ * 「データを上書き」→ 確認の窓の「上書きする」→ ファイル選択、をこの順で押す。
+ * ファイル選択の画面は「利用者が押した直後」でないとブラウザが開かせないので、
+ * ここだけは仕掛けの自動押しに任せず**本物のクリック**で窓を押す
+ * （仕掛けのクリックは利用者の操作として扱われず、ファイル選択が開かない）。
+ */
+const clickReplaceImport = async (targetPage) => {
+  await setConfirmAnswer(targetPage, 'off')
+  const chooser = targetPage.waitForEvent('filechooser')
+  await targetPage.getByRole('button', { name: 'データを上書き' }).click()
+  await targetPage.locator('[data-testid="confirm-ok"]').click()
+  const fileChooser = await chooser
+  // ファイルを選んだあとに出る2回目の確認は、今までどおり仕掛けに任せる
+  await setConfirmAnswer(targetPage, 'accept')
+  return fileChooser
+}
 const markNoticesSeenByDefault = (browserType) => {
   const origLaunch = browserType.launch.bind(browserType)
   browserType.launch = async (...launchArgs) => {
@@ -466,6 +552,7 @@ const markNoticesSeenByDefault = (browserType) => {
           // ストレージを使えない設定の入れ物では何もしない(案内が出るだけ)
         }
       }, FIRST_SETUP_NOTICE_SEEN_KEY)
+      await ctx.addInitScript(installConfirmAutoPress)
       return ctx
     }
     return launched
@@ -3210,9 +3297,8 @@ try {
     })
     // 2026-08-03 便DP-1: 「全て作った！」に規約Fの確認文を付けた。確認文の中身も検査する
     let taConfirmText = ''
-    taPage.on('dialog', (dialog) => {
-      taConfirmText = dialog.message()
-      return dialog.accept()
+    await collectConfirms(taPage, (text) => {
+      taConfirmText = text
     })
     try {
       await taPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -4077,10 +4163,8 @@ try {
       errors.push(`[pageerror@WEEKLOCK] ${err.message}`)
     })
     const lkDialogs = []
-    lkPage.on('dialog', (dialog) => {
-      lkDialogs.push(dialog.message())
-      void dialog.accept()
-    })
+    // 2026-08-15 便GW: 確認は画面の中の窓になったので、窓の文言をここへ貯める
+    await collectConfirms(lkPage, lkDialogs)
     try {
       // 週タブを開き、必ず「次の週」へ送る(7日とも未来日にする)。
       // 曜日によって未来日の数が変わると検証の中身が変わってしまうため、日曜でも土曜でも
@@ -4306,7 +4390,7 @@ try {
       // 規約F: 消えるものも件数つきで書く。「変わりません」だけでは片手落ち
       check(
         'WEEKLOCK(LOCK-5) 総入れ替えの確認文に消える品数と食分が入っている(規約F)',
-        lkDialogs.some((m) => /これからの[1-9]\d*食分に入っている献立[1-9]\d*品を消して/.test(m)),
+        lkDialogs.some((m) => /消えるもの: これからの[1-9]\d*食分に入っている献立[1-9]\d*品/.test(m)),
         `dialogs=${JSON.stringify(lkDialogs)}`,
       )
 
@@ -4569,10 +4653,7 @@ try {
       errors.push(`[pageerror@WEEKLOCK-BULK] ${err.message}`)
     })
     const bkDialogs = []
-    bkPage.on('dialog', (dialog) => {
-      bkDialogs.push(dialog.message())
-      void dialog.accept()
-    })
+    await collectConfirms(bkPage, bkDialogs)
     try {
       // 献立(mealPlans)をその日付ぶんだけ、主キーidまで含めて読む。
       // idを混ぜるのは「消して入れ直した」と「触っていない」を取り違えないため(便EJ)
@@ -4823,10 +4904,7 @@ try {
       errors.push(`[pageerror@WEEKLOCK-MONTH] ${err.message}`)
     })
     const bmDialogs = []
-    bmPage.on('dialog', (dialog) => {
-      bmDialogs.push(dialog.message())
-      void dialog.accept()
-    })
+    await collectConfirms(bmPage, bmDialogs)
     try {
       const bmPlanOf = (date) =>
         bmPage.evaluate(
@@ -6319,10 +6397,7 @@ try {
     // 便U-4の削除確認confirmを自動承認する。2026-08-09 便EK: 規約F(何が消えて何が残るか)の
     // 確認文そのものも検証するので、承認する前に文面を控える
     const mpDialogs = []
-    mpPage.on('dialog', (dialog) => {
-      mpDialogs.push(dialog.message())
-      void dialog.accept()
-    })
+    await collectConfirms(mpPage, mpDialogs)
     try {
       await mpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mpPage.waitForTimeout(1800) // 初回シード完了待ち
@@ -7411,9 +7486,8 @@ try {
     try {
       // 総入れ替えの確認文(規約F)は自動で受け入れる。何が出たかは本文の検査で別途見る
       let mp4DialogText = ''
-      mp4Page.on('dialog', (d) => {
-        mp4DialogText = d.message()
-        void d.accept()
+      await collectConfirms(mp4Page, (text) => {
+        mp4DialogText = text
       })
       await mp4Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await mp4Page.waitForTimeout(1800) // 初回シード完了待ち(既定表示は夕食のみ)
@@ -7513,7 +7587,7 @@ try {
       )
       check(
         'MEALPLAN-04(便DT-8) 総入れ替えは消す前に確認文を出し、消える件数と残るものを両方書く(規約F)',
-        mp4DialogText.includes('消して') &&
+        mp4DialogText.includes('消えるもの') &&
           mp4DialogText.includes('作った記録') &&
           /\d+品/.test(mp4DialogText),
         `dialog=${mp4DialogText}`,
@@ -9153,9 +9227,8 @@ try {
     const cwContext = await cwBrowser.newContext()
     const cwPage = await cwContext.newPage()
     let cwDialogMsg = ''
-    cwPage.on('dialog', (dialog) => {
-      cwDialogMsg = dialog.message()
-      return dialog.accept()
+    await collectConfirms(cwPage, (text) => {
+      cwDialogMsg = text
     })
     cwPage.on('console', (msg) => {
       if (msg.type() !== 'error') return
@@ -10312,9 +10385,8 @@ try {
     const duContext = await duBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const duPage = await duContext.newPage()
     let duDialog = ''
-    duPage.on('dialog', (dialog) => {
-      duDialog = dialog.message()
-      return dialog.accept()
+    await collectConfirms(duPage, (text) => {
+      duDialog = text
     })
     duPage.on('console', (msg) => {
       if (msg.type() !== 'error') return
@@ -10649,9 +10721,8 @@ try {
     const tpContext = await tpBrowser.newContext()
     const tpPage = await tpContext.newPage()
     let tpConfirmMsg = ''
-    tpPage.on('dialog', (dialog) => {
-      tpConfirmMsg = dialog.message()
-      return dialog.accept()
+    await collectConfirms(tpPage, (text) => {
+      tpConfirmMsg = text
     })
     tpPage.on('console', (msg) => {
       if (msg.type() !== 'error') return
@@ -11142,9 +11213,8 @@ try {
     const fmContext = await fmBrowser.newContext()
     const fmPage = await fmContext.newPage()
     let fmConfirmMsg = ''
-    fmPage.on('dialog', (dialog) => {
-      fmConfirmMsg = dialog.message()
-      return dialog.accept()
+    await collectConfirms(fmPage, (text) => {
+      fmConfirmMsg = text
     })
     fmPage.on('console', (msg) => {
       if (msg.type() !== 'error') return
@@ -12822,10 +12892,7 @@ try {
       await dstPage.waitForTimeout(500)
       await dstPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
       await dstPage.waitForTimeout(300)
-      const [fileChooser] = await Promise.all([
-        dstPage.waitForEvent('filechooser'),
-        dstPage.getByRole('button', { name: 'データを上書き' }).click(),
-      ])
+      const fileChooser = await clickReplaceImport(dstPage)
       await fileChooser.setFiles({
         name: 'uchi-recipe-backup.json',
         mimeType: 'application/json',
@@ -13064,10 +13131,7 @@ try {
       await compatPage.waitForTimeout(500)
       await compatPage.getByRole('button', { name: 'バックアップ', exact: true }).click()
       await compatPage.waitForTimeout(300)
-      const [compatFileChooser] = await Promise.all([
-        compatPage.waitForEvent('filechooser'),
-        compatPage.getByRole('button', { name: 'データを上書き' }).click(),
-      ])
+      const compatFileChooser = await clickReplaceImport(compatPage)
       await compatFileChooser.setFiles({
         name: 'old-format-backup.json',
         mimeType: 'application/json',
@@ -13155,10 +13219,7 @@ try {
         errors.push(`[pageerror@REPLACEUNDO-01] ${err.message}`)
       })
       const dialogMessages = []
-      ruPage.on('dialog', (dialog) => {
-        dialogMessages.push(dialog.message())
-        void dialog.accept()
-      })
+      await collectConfirms(ruPage, dialogMessages)
 
       const countTable = async (storeName) =>
         ruPage.evaluate(async (name) => {
@@ -13197,10 +13258,7 @@ try {
         exportedAt: new Date().toISOString(),
         recipes: [],
       })
-      const [fileChooser] = await Promise.all([
-        ruPage.waitForEvent('filechooser'),
-        ruPage.getByRole('button', { name: 'データを上書き' }).click(),
-      ])
+      const fileChooser = await clickReplaceImport(ruPage)
       await fileChooser.setFiles({
         name: 'empty-backup.json',
         mimeType: 'application/json',
@@ -13787,37 +13845,38 @@ try {
       await icPage.waitForTimeout(300)
 
       // (a)(b) ボタン押下でconfirmダイアログが実際に出ることを検知し、キャンセル(dismiss)する。
-      // キャンセルした場合はファイル選択(filechooser)には進まないはず
-      let dialogSeen = null
-      icPage.once('dialog', (dialog) => {
-        dialogSeen = { type: dialog.type(), message: dialog.message() }
-        void dialog.dismiss()
-      })
+      // キャンセルした場合はファイル選択(filechooser)には進まないはず。
+      // 2026-08-15 便GW: 確認は画面の中の窓になったので、窓を見て自分で押す
+      // （仕掛けの自動押しはブラウザから「利用者の操作」として扱われず、ファイル選択が開けない）
+      await setConfirmAnswer(icPage, 'off')
       let filechooserFired = false
       icPage.once('filechooser', () => {
         filechooserFired = true
       })
       await icPage.getByRole('button', { name: 'データを上書き' }).click()
       await icPage.waitForTimeout(500)
+      const icConfirm = icPage.locator('[data-testid="confirm"]')
+      const icConfirmText = ((await icConfirm.textContent().catch(() => '')) ?? '').replaceAll('​', '')
       check(
-        'IMPORTCONFIRM-01 置き換えボタン押下でconfirmダイアログが出る',
-        dialogSeen?.type === 'confirm' && dialogSeen.message.includes('内容で上書きします'),
-        `dialogSeen=${JSON.stringify(dialogSeen)}`,
+        'IMPORTCONFIRM-01 置き換えボタン押下で画面の中の確認の窓が出る',
+        (await icConfirm.count()) === 1 && icConfirmText.includes('内容で上書きします'),
+        `confirm=${icConfirmText}`,
       )
+      await icPage.locator('[data-testid="confirm-cancel"]').click()
+      await icPage.waitForTimeout(400)
       check(
-        'IMPORTCONFIRM-01 confirmをキャンセルするとファイル選択(filechooser)には進まない',
+        'IMPORTCONFIRM-01 確認を「やめる」で閉じるとファイル選択(filechooser)には進まない',
         !filechooserFired,
       )
+      check('IMPORTCONFIRM-01 「やめる」で窓が閉じる', (await icConfirm.count()) === 0)
 
-      // (c) 同じボタンをもう一度押し、今度はconfirmを承認(accept)すると実際にファイル選択へ進むこと
-      const [fileChooser] = await Promise.all([
-        icPage.waitForEvent('filechooser'),
-        (async () => {
-          icPage.once('dialog', (dialog) => void dialog.accept())
-          await icPage.getByRole('button', { name: 'データを上書き' }).click()
-        })(),
-      ])
-      check('IMPORTCONFIRM-01 confirmを承認するとファイル選択(filechooser)が開く', !!fileChooser)
+      // (c) 同じボタンをもう一度押し、今度は「上書きする」を押すと実際にファイル選択へ進むこと
+      const icChooser = icPage.waitForEvent('filechooser')
+      await icPage.getByRole('button', { name: 'データを上書き' }).click()
+      await icPage.locator('[data-testid="confirm-ok"]').click()
+      const fileChooser = await icChooser
+      check('IMPORTCONFIRM-01 「上書きする」を押すとファイル選択(filechooser)が開く', !!fileChooser)
+      await setConfirmAnswer(icPage, 'accept')
     } finally {
       await icBrowser.close()
     }
@@ -15291,12 +15350,11 @@ try {
 
         // --- URLIMPORT-09(便BX/C16): 置き換え確認をキャンセルしたら「中止した」と返事する ---
         currentCheck = 'URLIMPORT-09'
-        const dismissDialog = (dialog) => dialog.dismiss()
-        uiPage.on('dialog', dismissDialog)
+        await setConfirmAnswer(uiPage, 'cancel')
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/success-recipe-2')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(600)
-        uiPage.off('dialog', dismissDialog)
+        await setConfirmAnswer(uiPage, 'accept')
         check(
           'URLIMPORT-09 確認ダイアログをキャンセルすると中止した旨が出る(C16)',
           (await uiPage.textContent('body')).includes('取り込みを中止しました。入力していた内容はそのままです'),
@@ -15425,22 +15483,15 @@ try {
           'URLIMPORT-14 前提: 1回目の取り込みで写真が入る',
           await uiPage.locator('img[alt="E2Eモック鍋"]').isVisible(),
         )
-        const ckDialogs = []
-        const ckAccept = (dialog) => {
-          ckDialogs.push(dialog.message())
-          dialog.accept()
-        }
-        uiPage.on('dialog', ckAccept)
+        const ckBefore = (await readConfirms(uiPage)).length
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-second')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(800)
-        uiPage.off('dialog', ckAccept)
+        const ckDialogs = (await readConfirms(uiPage)).slice(ckBefore)
         check(
           'URLIMPORT-14 写真が置き換わって消えることと、元に戻せないことを確認文に書く(規約F)',
           ckDialogs.length === 1 &&
-            ckDialogs[0].includes(
-              'いまの写真は、読み込んだ写真に置き換わって消えます（元の写真には戻せません）',
-            ),
+            ckDialogs[0].includes('いまの写真（元の写真には戻せません）'),
           JSON.stringify(ckDialogs),
         )
         check(
@@ -15449,32 +15500,27 @@ try {
         )
         check(
           'URLIMPORT-14 「何が残るか」も従来どおり書かれている(規約F)',
-          ckDialogs[0]?.includes('料理名・ひとこと説明・メモはそのまま残ります'),
+          ckDialogs[0]?.includes('残るもの: 料理名・ひとこと説明・メモ'),
         )
         check(
           'URLIMPORT-14 置き換わった写真は「取り込みました」ではなく「置き換わりました」と伝える',
           (await uiPage.textContent('body')).includes('写真は読み込んだ料理の写真1枚に置き換わりました'),
         )
         // 「写真も取り込む」をOFFにすれば写真は守られる。そのことも確認文に書く(規約F「何が残るか」)
-        const ckDialogsOff = []
-        const ckAcceptOff = (dialog) => {
-          ckDialogsOff.push(dialog.message())
-          dialog.accept()
-        }
         await uiPage
           .locator('label', { hasText: '写真も取り込む' })
           .locator('input[type="checkbox"]')
           .uncheck()
-        uiPage.on('dialog', ckAcceptOff)
+        const ckOffBefore = (await readConfirms(uiPage)).length
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/photo-marker-third')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(800)
-        uiPage.off('dialog', ckAcceptOff)
+        const ckDialogsOff = (await readConfirms(uiPage)).slice(ckOffBefore)
         check(
           'URLIMPORT-14 チェックOFFなら「写真はそのまま残る」と書く(消える予告は出さない)',
           ckDialogsOff.length === 1 &&
-            ckDialogsOff[0].includes('写真・料理名・ひとこと説明・メモはそのまま残ります') &&
-            !ckDialogsOff[0].includes('置き換わって消えます（元の写真には戻せません）'),
+            ckDialogsOff[0].includes('残るもの: 写真・料理名・ひとこと説明・メモ') &&
+            !ckDialogsOff[0].includes('いまの写真（元の写真には戻せません）'),
           JSON.stringify(ckDialogsOff),
         )
 
@@ -15489,16 +15535,9 @@ try {
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/slow-photo-marker')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(500) // 本体は入るが写真はまだ届いていない
-        const ckSeqDialogs = []
-        const ckSeqAccept = (dialog) => {
-          ckSeqDialogs.push(dialog.message())
-          dialog.accept()
-        }
-        uiPage.on('dialog', ckSeqAccept)
         await uiPage.locator('input[type="url"]').first().fill('https://example.com/second-no-photo')
         await uiPage.getByRole('button', { name: '読み込む' }).click()
         await uiPage.waitForTimeout(2500) // 前のURLの写真が届くだけの時間を置く
-        uiPage.off('dialog', ckSeqAccept)
         const seqBody = await uiPage.textContent('body')
         check(
           'URLIMPORT-15 取り込み直したら、前のURLの写真は届いても捨てる',
@@ -15550,15 +15589,10 @@ try {
           ),
         )
         // 下部ナビ等で画面を離れた場合の「幽霊確認ダイアログ」の根絶
-        const ghostDialogs = []
-        const ghostCatch = (dialog) => {
-          ghostDialogs.push(dialog.message())
-          dialog.accept()
-        }
-        uiPage.on('dialog', ghostCatch)
+        // 画面を離れたあとに開いた側で確認の窓が出ていないこと(遷移で貯め口は空に戻る)
         await uiPage.goto(`${URLIMPORT_PREVIEW_BASE}/#/recipes`, { waitUntil: 'networkidle' })
         await uiPage.waitForTimeout(3000) // 取り込みが解決するだけの時間を置く
-        uiPage.off('dialog', ghostCatch)
+        const ghostDialogs = await readConfirms(uiPage)
         check(
           'URLIMPORT-16 読み込み中に画面を離れても、遷移先に置き換え確認が割り込まない',
           ghostDialogs.length === 0,
@@ -15954,9 +15988,8 @@ try {
     const nav7Context = await nav7Browser.newContext({ viewport: { width: 390, height: 820 } })
     const nav7Page = await nav7Context.newPage()
     let confirmText = ''
-    nav7Page.on('dialog', (dialog) => {
-      confirmText = dialog.message()
-      void dialog.accept()
+    await collectConfirms(nav7Page, (text) => {
+      confirmText = text
     })
     nav7Page.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
@@ -16057,7 +16090,7 @@ try {
         confirmText.includes('2件') &&
           confirmText.includes('E2E保持煮物') &&
           confirmText.includes('今日の献立から外れます') &&
-          confirmText.includes('記録をつけますか？'),
+          confirmText.includes('記録をつける'),
         confirmText.slice(0, 200),
       )
       // 2026-08-12 便FX・オーナー指摘「まとめて作った！ので注意書きが出るなら、後から
@@ -16281,9 +16314,8 @@ try {
     const egContext = await egBrowser.newContext({ viewport: { width: 390, height: 820 } })
     const egPage = await egContext.newPage()
     let egConfirmText = ''
-    egPage.on('dialog', (dialog) => {
-      egConfirmText = dialog.message()
-      void dialog.accept()
+    await collectConfirms(egPage, (text) => {
+      egConfirmText = text
     })
     egPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
@@ -16439,7 +16471,8 @@ try {
       await egPage.waitForTimeout(1000)
       check(
         'EG-01 「全て作った！」の確認文に、段取りも終わることが書いてある(規約F)',
-        egConfirmText.includes('作りかけの並行調理ナビの段取りも終わります'),
+        egConfirmText.includes('並行調理ナビ') &&
+          egConfirmText.includes('作りかけの段取りも終わります'),
         egConfirmText.slice(0, 240),
       )
       check(
@@ -16464,10 +16497,9 @@ try {
     const ehContext = await ehBrowser.newContext({ viewport: { width: 390, height: 820 } })
     const ehPage = await ehContext.newPage()
     let ehConfirmText = ''
-    let ehAccept = true
-    ehPage.on('dialog', (dialog) => {
-      ehConfirmText = dialog.message()
-      void (ehAccept ? dialog.accept() : dialog.dismiss())
+    const ehAccept = true
+    await collectConfirms(ehPage, (text) => {
+      ehConfirmText = text
     })
     ehPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
@@ -17358,13 +17390,12 @@ try {
     })
     // 削除の確認文を読むだけで実際には消さない(dismiss)。同じ端末データを後続の検証で使うため
     const w1Dialogs = []
-    w1Page.on('dialog', async (dialog) => {
-      w1Dialogs.push(dialog.message())
-      await dialog.dismiss()
-    })
+    await collectConfirms(w1Page, w1Dialogs)
     try {
       await w1Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await w1Page.waitForTimeout(1800) // 初回シード完了待ち
+      // 確認の窓は「やめる」で閉じる＝文言だけ読んで、端末のデータは後続の検証のために残す
+      await setConfirmAnswer(w1Page, 'cancel')
 
       // C13: 並び替えパネルに「よく使う順」の意味が書かれている
       await w1Page.locator('button[aria-label="並び替え"]').click()
@@ -17480,12 +17511,7 @@ try {
       errors.push(`[pageerror@LOG-CI2-01] ${err.message}`)
     })
     const l2Dialogs = []
-    let l2AcceptDialogs = true
-    l2Page.on('dialog', async (dialog) => {
-      l2Dialogs.push(dialog.message())
-      if (l2AcceptDialogs) await dialog.accept()
-      else await dialog.dismiss()
-    })
+    await collectConfirms(l2Page, l2Dialogs)
     const openLogModal = async () => {
       await l2Page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('button')).find(
@@ -17650,7 +17676,7 @@ try {
       const deleteLogBtn = l2Page.getByRole('button', { name: 'この記録を削除' })
       check('LOG-CI2-01/C02 記録の編集行に「この記録を削除」が出る', (await deleteLogBtn.count()) === 1)
       // まず確認文だけ読む(キャンセル=消えないこと)
-      l2AcceptDialogs = false
+      await setConfirmAnswer(l2Page, 'cancel')
       await deleteLogBtn.click()
       await l2Page.waitForTimeout(500)
       const delLogMessage = l2Dialogs[l2Dialogs.length - 1] ?? ''
@@ -17669,7 +17695,7 @@ try {
         'LOG-CI2-01/C02 キャンセルすると記録は消えない',
         (await readLogs(recipeId)).length === beforeDelete,
       )
-      l2AcceptDialogs = true
+      await setConfirmAnswer(l2Page, 'accept')
       await deleteLogBtn.click()
       await l2Page.waitForTimeout(800)
       check(
@@ -19198,9 +19224,8 @@ try {
     const bdContext = await bdBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const bdPage = await bdContext.newPage()
     let bdDialogMsg = ''
-    bdPage.on('dialog', (dialog) => {
-      bdDialogMsg = dialog.message()
-      return dialog.accept()
+    await collectConfirms(bdPage, (text) => {
+      bdDialogMsg = text
     })
     bdPage.on('console', (msg) => {
       if (msg.type() !== 'error') return
@@ -19304,6 +19329,33 @@ try {
       )
 
       const bdBeforeCount = await bdPage.locator('a[href^="#/recipes/"]').count()
+
+      // --- GW-01(2026-08-15 便GW): 確認は画面の中の窓で出す ---
+      // オーナー原文「アプリ全体に、確認などで表示される窓が見づらく、見ていて楽しくなる画面じゃない」
+      // ／利用者テスト「アプリの中で急に素のポップアップが出るのは違和感があります」。
+      // ここでは仕掛けの自動押しを止め、**窓を見て自分で押す**形で確かめる
+      await setConfirmAnswer(bdPage, 'off')
+      await bdPage.getByRole('button', { name: '選択したレシピ2品を削除' }).click()
+      await bdPage.waitForTimeout(700)
+      const bdConfirm = bdPage.locator('[data-testid="confirm"]')
+      check('GW-01 確認は画面の中の窓で出る(素のポップアップを出さない)', (await bdConfirm.count()) === 1)
+      check(
+        'GW-01 窓のボタンは何が起きるかが読める動詞になっている(「OK」にしない)',
+        (await bdPage.locator('[data-testid="confirm-ok"]').innerText()) === '削除する' &&
+          (await bdPage.locator('[data-testid="confirm-cancel"]').innerText()) === 'やめる',
+        `${await bdPage.locator('[data-testid="confirm-ok"]').innerText()} / ${await bdPage
+          .locator('[data-testid="confirm-cancel"]')
+          .innerText()}`,
+      )
+      await bdPage.locator('[data-testid="confirm-cancel"]').click()
+      await bdPage.waitForTimeout(500)
+      check(
+        'GW-01 「やめる」を押すと窓が閉じ、1品も消えない',
+        (await bdConfirm.count()) === 0 &&
+          (await bdPage.locator('a[href^="#/recipes/"]').count()) === bdBeforeCount,
+      )
+      await setConfirmAnswer(bdPage, 'accept')
+
       await bdPage.getByRole('button', { name: '選択したレシピ2品を削除' }).click()
       await bdPage.waitForTimeout(1200)
 
@@ -19314,7 +19366,7 @@ try {
       check('BULKDEL-01 確認文に献立の予定の件数が入る', /献立の予定2件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に今日の献立の件数が入る', /今日の献立1件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
-      check('BULKDEL-01 確認文に残るものが件数つきで入る', /他のレシピ\d+品・買い物メモ・食材の在庫は残ります/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に残るものが件数つきで入る', /残るもの: 他のレシピ\d+品・買い物メモ・食材の在庫/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check(
         'BULKDEL-01 基本レシピは入れ直しで戻せることを区別して書く',
         /基本レシピ2品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(bdDialogMsg) &&
@@ -20795,9 +20847,8 @@ try {
         errors.push(`[pageerror@RECIPEEXPORT-EM] ${err.message}`)
       })
       let lastDialog = ''
-      rePage.on('dialog', (dialog) => {
-        lastDialog = dialog.message()
-        void dialog.accept()
+      await collectConfirms(rePage, (text) => {
+        lastDialog = text
       })
 
       await rePage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
@@ -27793,9 +27844,8 @@ try {
         const p = await ctx.newPage()
         watchPage(p, 'FN-01')
         let confirmText = ''
-        p.on('dialog', (d) => {
-          confirmText = d.message()
-          return d.accept()
+        await collectConfirms(p, (text) => {
+          confirmText = text
         })
         const TITLES = ['肉じゃが', 'カレーライス', '豆腐とわかめの味噌汁']
         /** レシピ一覧から1品開いて「今日の献立に追加」→「夕食」を押す（利用者の操作そのまま） */
@@ -27827,7 +27877,7 @@ try {
         await p.waitForTimeout(900)
         check(
           'FN-01 確認文に「週の献立に残る」ことが書いてある(規約F)',
-          confirmText.includes('今週の献立に入れた分は「作った」の表示で残ります'),
+          confirmText.includes('今週の献立に入れた分は「作った」の表示で残り'),
           `confirm=${JSON.stringify(confirmText)}`,
         )
         const afterAll = (await p.textContent('body')) ?? ''
@@ -30691,10 +30741,8 @@ try {
     })
     const fxPage = await fxContext.newPage()
     let fxDialogMessage = ''
-    let fxDialogAnswer = 'accept'
-    fxPage.on('dialog', (d) => {
-      fxDialogMessage = d.message()
-      void (fxDialogAnswer === 'accept' ? d.accept() : d.dismiss())
+    await collectConfirms(fxPage, (text) => {
+      fxDialogMessage = text
     })
     fxPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
@@ -31017,22 +31065,21 @@ try {
         (await fxPage.locator('[data-testid="navi-discard-timeline"]').innerText()) === '段取りを消す',
         await fxPage.locator('[data-testid="navi-discard-timeline"]').innerText(),
       )
-      fxDialogAnswer = 'dismiss'
+      await setConfirmAnswer(fxPage, 'cancel')
       fxDialogMessage = ''
       await fxPage.locator('[data-testid="navi-discard-timeline"]').click()
       await fxPage.waitForTimeout(900)
       check(
         'FX-08 確認文に、消えるものと残るものの両方が書いてある（規約F）',
-        fxDialogMessage.includes('選んでいた3品の組み合わせを消します') &&
-          fxDialogMessage.includes('調理中だった手順も消えます') &&
-          fxDialogMessage.includes('レシピ・今日の献立・作った記録・動いているタイマーはそのまま残ります'),
+        fxDialogMessage.includes('作った段取り・選んでいた3品の組み合わせ・調理中だった手順') &&
+          fxDialogMessage.includes('レシピ・今日の献立・作った記録・動いているタイマー'),
         fxDialogMessage,
       )
       check(
         'FX-08 確認でやめれば、段取りはそのまま残る',
         (await fxPage.locator('[data-testid="navi-mark-all-cooked"]').count()) === 1,
       )
-      fxDialogAnswer = 'accept'
+      await setConfirmAnswer(fxPage, 'accept')
       await fxPage.locator('[data-testid="navi-discard-timeline"]').click()
       await fxPage.waitForTimeout(1200)
       check(
@@ -31397,7 +31444,7 @@ try {
     const fpCtx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const fpPage = await fpCtx.newPage()
     const fpDialogs = []
-    fpPage.on('dialog', (d) => { fpDialogs.push(d.message()); void d.accept() })
+    await collectConfirms(fpPage, fpDialogs)
     fpPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@FW-04] ${err.message}`)
@@ -31526,7 +31573,7 @@ try {
     const fnCtx = await fnBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const fnPage = await fnCtx.newPage()
     const fnDialogs = []
-    fnPage.on('dialog', (d) => { fnDialogs.push(d.message()); void d.accept() })
+    await collectConfirms(fnPage, fnDialogs)
     fnPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
       errors.push(`[pageerror@FW-05] ${err.message}`)
