@@ -12,21 +12,85 @@
  */
 import { NAVI_COLOR_SPEECH } from './naviColors'
 
-export type VoiceCommand = 'next' | 'prev' | 'repeat' | 'stop' | 'resume' | 'timer'
+export type VoiceCommand =
+  | 'next'
+  | 'prev'
+  | 'first'
+  | 'repeat'
+  | 'readStop'
+  | 'stop'
+  | 'resume'
+  | 'timer'
+
+/**
+ * 端末が付ける句読点だけを落とす（`matchVoiceColor` と同じ前処理）。
+ * 「短い発話の全体一致」で受ける言葉は、この形にしてから比べる。
+ */
+function bareWord(transcript: string): string {
+  return transcript.replace(/[\s。、．，.!！?？]/g, '')
+}
+
+/**
+ * **発話まるごとが一致したときだけ**「前へ」と同じ扱いにする言い方
+ * （2026-08-15 便GS・オーナー実機「『戻って』『戻る』の他に『前へ』『前』も対応したい
+ * （ボタンと同じ表記にも対応したい）」）。
+ *
+ * 「前」「まえ」を部分一致で受けると、**「名前」「手前」「この前」で手順が戻ってしまう**。
+ * 台所では、なぜ画面が変わったのか利用者に分からない事故になるので、色の言葉
+ * （`matchVoiceColor`）と同じ作法にそろえて全体一致でだけ受ける。
+ */
+const PREV_EXACT_WORDS = ['前', 'まえ', '前に', 'まえに', 'まえへ']
+
+/**
+ * 同じく全体一致でだけ受ける、並行調理ナビの調理中モードの左上のボタン「最初の手順へ」
+ * （2026-08-15 便GS。オーナーの意図は「ボタンと同じ表記にも対応したい」）。
+ * 「最初」を部分一致にすると、手順文の「最初に玉ねぎを炒める」を読み上げただけで飛ぶ。
+ */
+const FIRST_EXACT_WORDS = [
+  '最初の手順へ',
+  '最初の手順',
+  '最初へ',
+  '最初',
+  'さいしょのてじゅんへ',
+  'さいしょのてじゅん',
+  'さいしょへ',
+  'さいしょ',
+]
+
+/**
+ * 「読み上げ」と一緒に言われたときに、読み上げを止める側へ倒す言葉（2026-08-15 便GS）。
+ * かなで返る端末も受ける。**この語だけでは何も起きない**（＝「ストップ」単独はタイマー）。
+ */
+const SPEECH_STOP_WORDS = /ストップ|すとっぷ|止め|とめ|停止|ていし|やめ|辞め|中止|ちゅうし/
 
 /**
  * 聞き取れた文字列（空白は呼び出し側で除去済み）からコマンドを判定する。
  * どれにも当てはまらなければ undefined（画面側は手応えも出さない＝従来どおり）。
  *
  * 判定の順番（前から順に当てる）:
- *   次へ → 戻って → 再開 → ストップ → 読み上げ → タイマー
+ *   次へ → 戻って/前 → 最初の手順へ → 読み上げ（止める/読み直す）→ 再開 → ストップ
+ *   → もう一回 → タイマー
  * 「タイマー」を最後にするのは、「タイマーストップ」「タイマー再開」を新規起動にしないため。
  * 2026-08-10 便FC: **ストップを読み上げより先**にした。読み上げの語を「読み上げ」に変えた
  * （下記）ことで、「読み上げストップ」と続けて言われる形が生まれるため。
+ * 2026-08-15 便GS（オーナー実機「読み上げをストップする方法が、音声にない。タイマーの停止と
+ * 混同しそうなので、片方優先するならタイマー」）: **読み上げの組をストップより前へ戻した**。
+ * ただし戻し方が便FCとは違い、「読み上げ」の語が入っているときだけ先に決める組にしてある
+ * ＝「読み上げストップ」は読み上げの停止、**「ストップ」単独はタイマーのまま**。
+ * オーナーの「片方優先するならタイマー」がここに効いている。
  */
 export function matchVoiceCommand(transcript: string): VoiceCommand | undefined {
   if (/次|つぎ/.test(transcript)) return 'next'
-  if (/戻|もど|前へ|まえ/.test(transcript)) return 'prev'
+  // 「戻」「もど」「前へ」は部分一致のまま（日常語に紛れない）。
+  // 「前」「まえ」だけは全体一致（PREV_EXACT_WORDS の説明を参照）
+  if (/戻|もど|前へ/.test(transcript)) return 'prev'
+  if (PREV_EXACT_WORDS.includes(bareWord(transcript))) return 'prev'
+  if (FIRST_EXACT_WORDS.includes(bareWord(transcript))) return 'first'
+  // 「読み上げ」の語が入っているときは、止めるのか読み直すのかをここで決めきる（便GS）。
+  // ストップ・再開より前に置くのは、「読み上げストップ」がタイマーを止めないようにするため
+  if (/読み上げ|よみあげ/.test(transcript)) {
+    return SPEECH_STOP_WORDS.test(transcript) ? 'readStop' : 'repeat'
+  }
   // 2026-08-10 便FC（オーナー実機「一時停止の後に音声操作で再開できない」）:
   // 止める声（ストップ）はあるのに、動かし直す声が無かった。
   // **主に受ける言い方は「再開」**＝画面のボタンと同じ語にそろえる（案内文どおりの語が
@@ -43,9 +107,9 @@ export function matchVoiceCommand(transcript: string): VoiceCommand | undefined 
   // 音声認識は同じ発話を「もう一回」「もう1回」「もういっかい」のどれでも返しうるので、
   // 数字は半角・全角・漢数字を、読みはかなも受け付ける。
   // 2026-08-10 便FC（オーナー実機「『もう一度』で読み上げは、1回目からになるので
-  // 『読み上げ』に変更」）: **主に受ける言い方は「読み上げ」**＝画面のボタン名と同じ語。
+  // 『読み上げ』に変更」）: **主に受ける言い方は「読み上げ」**＝画面のボタン名と同じ語
+  // （その「読み上げ」の組は上へ移した。2026-08-15 便GS）。
   // 「もう一回」系は今までどおり受ける（言い慣れた人が黙らされないため）
-  if (/読み上げ|よみあげ/.test(transcript)) return 'repeat'
   if (/もう[1１一]?[回度]|もういっかい|もういちど/.test(transcript)) return 'repeat'
   if (/タイマー/.test(transcript)) return 'timer'
   return undefined
@@ -66,7 +130,7 @@ export function matchVoiceCommand(transcript: string): VoiceCommand | undefined 
  * 端末が付ける句読点だけは落としてから比べる。
  */
 export function matchVoiceColor(transcript: string): number | undefined {
-  const word = transcript.replace(/[\s。、．，.!！?？]/g, '')
+  const word = bareWord(transcript)
   if (!word) return undefined
   const index = NAVI_COLOR_SPEECH.findIndex((forms) => forms.includes(word))
   return index === -1 ? undefined : index

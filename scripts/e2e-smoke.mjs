@@ -32323,6 +32323,205 @@ try {
     }
   }
 
+  // ============================================================================
+  // 便GS（2026-08-15 オーナー実機・iPhone SE2 / Chrome）: 声で操作の3点
+  //   ①「戻る『戻って』『戻る』の他に『前へ』『前』も対応したい（ボタンと同じ表記にも対応したい）」
+  //   ②「読み上げをストップする方法が、音声にない。タイマーの停止と混同しそうなので、
+  //     片方優先するならタイマー」＝**「ストップ」単独はタイマーのまま**にしたうえで、
+  //     「読み上げ」の語と一緒に言われたときだけ読み上げを止める
+  //   ③ 声の案内の出し方を、並行調理ナビの調理中モード（FO-03）にそろえる＝聞いている間だけ。
+  //     マイクを切っているのに「『次へ』で手順の移動」と出ていると、その言葉はいま何も
+  //     起きないので、画面が実態と違うことを言っている状態になる
+  //   ④ 電池の一言は使い方ページ（public/about/manual.html）に置く（オーナー判断
+  //     「調理中モードの中だと画面がごちゃつく→HPに説明がひとことあればいい」）
+  //
+  // 声の実機挙動は自動では再現できないため、FOCUSVOICE-01 と同じく window.SpeechRecognition を
+  // 偽装して onresult に文字列を注入する。
+  // ============================================================================
+  currentCheck = 'GS-03'
+  {
+    const gsBrowser = await chromium.launch()
+    const gsContext = await gsBrowser.newContext({ viewport: { width: 375, height: 667 } })
+    await gsContext.addInitScript(() => {
+      class FakeRecognition {
+        constructor() {
+          this.lang = ''
+          this.continuous = false
+          this.interimResults = false
+        }
+        start() {
+          window.__fakeRecognition = this
+        }
+        stop() {}
+        abort() {}
+      }
+      window.SpeechRecognition = FakeRecognition
+      window.webkitSpeechRecognition = FakeRecognition
+      window.__emitVoice = (text) => {
+        const r = window.__fakeRecognition
+        if (!r || typeof r.onresult !== 'function') return false
+        r.onresult({ results: [[{ transcript: text }]] })
+        return true
+      }
+    })
+    const gsPage = await gsContext.newPage()
+    gsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@便GS] ${err.message}`)
+    })
+    // BudouX がゼロ幅スペースを差し込むので、照合の前に必ず外す（禁じ手②）
+    const noZw = (t) => (t ?? '').replace(/​/g, '')
+    const gsBody = async () => noZw(await gsPage.textContent('body'))
+    /** 声を注入して、画面が反応するのを待つ */
+    const gsEmit = async (text) => {
+      const emitted = await gsPage.evaluate((t) => window.__emitVoice(t), text)
+      await gsPage.waitForTimeout(450)
+      return emitted
+    }
+    /** いま何手順目か（手順数を決め打ちしない＝手順が増減しても同じ判定になる。禁じ手③） */
+    const gsStep = async () => {
+      const m = (await gsBody()).match(/手順\s*(\d+)\/(\d+)/)
+      return m ? { n: Number(m[1]), total: Number(m[2]) } : null
+    }
+    /** この画面で止まっているタイマー（一時停止中だけ「再開」ボタンが出る） */
+    const gsPausedCount = () => gsPage.locator('[data-testid="focus-timer-resume"]').count()
+    try {
+      await gsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await gsPage.waitForTimeout(2000)
+      await gsPage.getByText('肉じゃが', { exact: true }).first().click()
+      await gsPage.waitForTimeout(700)
+      await gsPage.getByText('調理中モードで見る').click()
+      await gsPage.waitForTimeout(600)
+
+      // --- GS-03: 案内を出す条件を、並行調理ナビ（FO-03）とそろえる ---
+      check(
+        'GS-03 前提: 1品の調理中モードに「声で操作」のボタンが常にある（声を使えることの入口）',
+        (await gsPage.locator('button[aria-label="声で操作する"]').count()) === 1,
+      )
+      check(
+        'GS-03 声を切っている間は、言葉の一覧を画面に出さない（ナビと同じ）',
+        !(await gsBody()).includes('声で操作:'),
+        (await gsBody()).slice(0, 160),
+      )
+      await gsPage.locator('button[aria-label="声で操作する"]').click()
+      await gsPage.waitForTimeout(500)
+      check(
+        'GS-03 「声で操作」を押すと言葉の一覧が出る（使う人だけが読む）',
+        (await gsBody()).includes('声で操作:') && (await gsBody()).includes('聞いています'),
+      )
+      check(
+        'GS-03 1品の画面には色の言い方を出さない（色が無い画面なので）',
+        !(await gsBody()).includes('「青」「緑」「ピンク」'),
+      )
+      await gsPage.locator('button[aria-label="声の操作をやめる"]').click()
+      await gsPage.waitForTimeout(500)
+      check(
+        'GS-03 もう一度押して切ると、案内もまた消える',
+        !(await gsBody()).includes('声で操作:'),
+        (await gsBody()).slice(0, 160),
+      )
+      // 以降の検証のため、聞いている状態に戻す
+      await gsPage.locator('button[aria-label="声で操作する"]').click()
+      await gsPage.waitForTimeout(500)
+
+      // --- GS-01: 画面のボタンの表記そのままで手順を動かせる ---
+      currentCheck = 'GS-01'
+      const gsFirstStep = await gsStep()
+      check(
+        'GS 前提: 手順が3つ以上あるレシピで見ている（3手順ぶんの移動を見るため）',
+        Boolean(gsFirstStep) && gsFirstStep.n === 1 && gsFirstStep.total >= 3,
+        JSON.stringify(gsFirstStep),
+      )
+      await gsEmit('次へ')
+      check('GS-01 「次へ」は従来どおり手順を進める', (await gsStep())?.n === 2, JSON.stringify(await gsStep()))
+      await gsEmit('前')
+      check(
+        'GS-01 漢字1文字の「前」で手順が戻る（ボタンの「前へ」と同じ言い方）',
+        (await gsStep())?.n === 1,
+        JSON.stringify(await gsStep()),
+      )
+      await gsEmit('名前')
+      check(
+        'GS-01 「名前」では手順が動かない（部分一致にしていない）',
+        (await gsStep())?.n === 1,
+        JSON.stringify(await gsStep()),
+      )
+      check(
+        'GS-01 「名前」は対応外の言葉として返す（マイクは届いていると分かる）',
+        (await gsBody()).includes('「名前」は声で使える言葉ではありません'),
+      )
+      await gsEmit('次へ')
+      await gsEmit('次へ')
+      check('GS-01 前提: 3手順目まで進める', (await gsStep())?.n === 3, JSON.stringify(await gsStep()))
+      await gsEmit('前に')
+      check('GS-01 「前に」でも戻る', (await gsStep())?.n === 2, JSON.stringify(await gsStep()))
+      await gsEmit('最初の手順へ')
+      check(
+        'GS-01 ナビのボタンと同じ「最初の手順へ」で先頭に戻る',
+        (await gsStep())?.n === 1,
+        JSON.stringify(await gsStep()),
+      )
+
+      // --- GS-02: 読み上げを止める声を足しても、「ストップ」単独はタイマーのまま ---
+      currentCheck = 'GS-02'
+      await gsEmit('3分タイマー')
+      const gsTimerCount = await gsPage.evaluate(
+        () =>
+          [...document.querySelectorAll('[aria-label]')].filter((el) =>
+            (el.getAttribute('aria-label') ?? '').includes('のタイマーを調整'),
+          ).length,
+      )
+      check('GS-02 前提: 声でタイマーを1本動かせた', gsTimerCount > 0, `本数=${gsTimerCount}`)
+      check('GS-02 前提: まだ一時停止していない', (await gsPausedCount()) === 0)
+      await gsEmit('読み上げストップ')
+      check(
+        'GS-02 「読み上げストップ」ではタイマーを止めない（止めるのは読み上げだけ）',
+        (await gsPausedCount()) === 0,
+      )
+      check(
+        'GS-02 「読み上げストップ」は聞き取れている（無反応ではない）',
+        (await gsBody()).includes('「読み上げストップ」を聞き取りました'),
+        (await gsBody()).slice(0, 200),
+      )
+      await gsEmit('ストップ')
+      check(
+        'GS-02 「ストップ」単独は今までどおりタイマーを一時停止する（オーナー「片方優先するならタイマー」）',
+        (await gsPausedCount()) === 1,
+      )
+      check(
+        'GS-02 どのタイマーを止めたかを名前で返す',
+        (await gsBody()).includes('のタイマーを一時停止しました'),
+        (await gsBody()).slice(0, 200),
+      )
+
+      // --- GS-04: 電池の一言と、声で使える言葉の説明は使い方ページに載せる ---
+      currentCheck = 'GS-04'
+      const gsManual = await (await gsPage.request.get(`${BASE}/about/manual.html`)).text()
+      check(
+        'GS-04 使い方ページに、声で操作がONの間は電池の減りが速くなることが書いてある',
+        gsManual.includes('電池の減りが速くなります'),
+      )
+      check(
+        'GS-04 使い方ページの声の言葉に「前へ」「前」が載っている',
+        gsManual.includes('「前へ」「前」'),
+      )
+      check(
+        'GS-04 使い方ページの声の言葉に「最初の手順へ」が載っている',
+        gsManual.includes('<li>「最初の手順へ」'),
+      )
+      check(
+        'GS-04 使い方ページの声の言葉に「読み上げストップ」が載っている',
+        gsManual.includes('<li>「読み上げストップ」'),
+      )
+      check(
+        'GS-04 使い方ページに、声の案内が聞いている間だけ出ることが書いてある',
+        gsManual.includes('を押している間だけ出ます'),
+      )
+    } finally {
+      await gsBrowser.close()
+    }
+  }
+
 
 } catch (err) {
   ng(`実行中断(${currentCheck})`, err.message)

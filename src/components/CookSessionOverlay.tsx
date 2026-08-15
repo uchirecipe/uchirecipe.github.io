@@ -473,11 +473,23 @@ export default function CookSessionOverlay({
     useVoiceCommands({
       onNext: goNext,
       onPrev: goPrev,
+      /**
+       * 「最初の手順へ」＝左上のボタンと同じ働き（2026-08-15 便GS・オーナー実機
+       * 「ボタンと同じ表記にも対応したい」）。押したときと同じで「元の手順に戻す」が出る
+       * ＝声で言い間違えても、段取りの途中へ1タップで帰れる
+       */
+      onFirst: goFirst,
       onRepeat: () => {
         if (!item) return
         setSpeechUsed(true)
         speak(item.text)
       },
+      /**
+       * 「読み上げストップ」＝読み上げだけを止める（2026-08-15 便GS・オーナー実機
+       * 「読み上げをストップする方法が、音声にない」）。タイマーには触らない
+       * ＝「ストップ」単独は今までどおりタイマーの一時停止
+       */
+      onStopSpeech: () => stopSpeech(),
       /**
        * 「ストップ」＝読み上げを止め、動作中のタイマーを1本だけ一時停止する
        * （2026-08-10 便EZ）。どれを止めるかは logic/voiceCommand.ts の
