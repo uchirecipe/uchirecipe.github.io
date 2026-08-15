@@ -1,7 +1,7 @@
 import type { Recipe } from '../db/types'
 import { ja } from '../i18n/ja'
 import { formatAmountUnit, scaleAmount } from './amount'
-import { pickIconKey } from './icon'
+import { resolveIconKey } from './icon'
 
 /**
  * SNSシェア:
@@ -310,7 +310,10 @@ export async function generateShareCard(recipe: Recipe, opts: ShareOptions): Pro
   if (hasIconBand) {
     ctx.fillStyle = tokenColor('--icon-tile', '#ece7df')
     ctx.fillRect(0, 0, width, imageHeight)
-    const iconKey = recipe.iconKey ?? pickIconKey(recipe)
+    // アプリが絵を持たない値が iconKey に入っていると、読めない画像になって
+    // 絵が一切出ない（2026-08-15 便GUがレシピカードで見つけた穴と同じもの）。
+    // 描く直前に必ず検証してから使う
+    const iconKey = resolveIconKey(recipe)
     const iconImage = await loadIconImage(`/icons/${iconKey}.png`)
     if (iconImage) {
       const iconSize = 240
