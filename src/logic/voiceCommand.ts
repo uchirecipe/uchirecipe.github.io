@@ -42,6 +42,28 @@ function bareWord(transcript: string): string {
 const PREV_EXACT_WORDS = ['前', 'まえ', '前に', 'まえに', 'まえへ']
 
 /**
+ * 「次へ」も**発話まるごとの一致**でだけ受ける（2026-08-15 オーナー指示「全体一致に揃えて」）。
+ *
+ * それまで「次」は部分一致だったので、**「次に塩を入れるんだっけ」と独り言を言っただけで
+ * 手順が進んで**いた。台所では手が離せないまま画面が変わるので、戻すのも一手間になる。
+ * 「前」を全体一致にした（PREV_EXACT_WORDS）のと同じ理由・同じ作法にそろえる。
+ *
+ * **ボタンの表記（「次へ」）と、オーナーが実機で確認した言い方（「次」）は必ず含める。**
+ */
+const NEXT_EXACT_WORDS = [
+  '次',
+  'つぎ',
+  '次へ',
+  'つぎへ',
+  '次に',
+  'つぎに',
+  '次の手順',
+  '次の手順へ',
+  'つぎのてじゅん',
+  'つぎのてじゅんへ',
+]
+
+/**
  * 同じく全体一致でだけ受ける、並行調理ナビの調理中モードの左上のボタン「最初の手順へ」
  * （2026-08-15 便GS。オーナーの意図は「ボタンと同じ表記にも対応したい」）。
  * 「最初」を部分一致にすると、手順文の「最初に玉ねぎを炒める」を読み上げただけで飛ぶ。
@@ -80,7 +102,8 @@ const SPEECH_STOP_WORDS = /ストップ|すとっぷ|止め|とめ|停止|てい
  * オーナーの「片方優先するならタイマー」がここに効いている。
  */
 export function matchVoiceCommand(transcript: string): VoiceCommand | undefined {
-  if (/次|つぎ/.test(transcript)) return 'next'
+  // 「次」は全体一致だけ（NEXT_EXACT_WORDS の説明を参照）
+  if (NEXT_EXACT_WORDS.includes(bareWord(transcript))) return 'next'
   // 「戻」「もど」「前へ」は部分一致のまま（日常語に紛れない）。
   // 「前」「まえ」だけは全体一致（PREV_EXACT_WORDS の説明を参照）
   if (/戻|もど|前へ/.test(transcript)) return 'prev'

@@ -13578,7 +13578,10 @@ eq(
   eq('便CK/④-1 「3分タイマー」もタイマー', matchVoiceCommand('3分タイマー'), 'timer')
   eq('便CK/④-1 どれでもない言葉は無反応(手応えも出さない)', matchVoiceCommand('こんばんは'), undefined)
   // 分岐の優先順位は従来のif-elseの順番どおり(先に「次へ」を見る)
-  eq('便CK/④-1 優先順位は従来どおり(「次へ」が先)', matchVoiceCommand('次へもう一回'), 'next')
+  // 2026-08-15 オーナー指示「全体一致に揃えて」で、「次」は発話まるごとの一致だけになった。
+  // その副作用として**「次へ」を含む複合の言い方は通らなくなる**（ここでは読み上げ側に落ちる）。
+  // 独り言（「次に塩を入れるんだっけ」）で手順が進む事故を消すほうを取った、という記録
+  eq('便CK/④-1 「次へ」を含む複合は、もう「次へ」にはならない', matchVoiceCommand('次へもう一回'), 'repeat')
 
   // 2026-08-03 便DS/実機FB⑤: 時間の書かれていない手順で「タイマー」とだけ言うと、
   // 聞き取れていても何秒にすればよいか決められず、画面に何も出ないまま終わっていた。
@@ -13781,7 +13784,11 @@ eq(
   eq('便GS② 「もう一度読み上げて」も読み上げ直す', matchVoiceCommand('もう一度読み上げて'), 'repeat')
   // 判定の順番を変えた（読み上げの組を再開・ストップより前に出した）ので、
   // 先に決まっていたものが動いていないことを確かめる
-  eq('便GS② 「次へ」は従来どおりいちばん先に決まる', matchVoiceCommand('次へもう一回'), 'next')
+  // 「次」を全体一致にした（2026-08-15 オーナー指示）ので、複合の言い方は次へにならない
+  eq('便GS② 「次へ」単独は進む', matchVoiceCommand('次へ'), 'next')
+  eq('便GS② 独り言では進まない（次に塩を…）', matchVoiceCommand('次に塩を入れるんだっけ'), undefined)
+  eq('便GS② 独り言では進まない（次の手順が長い）', matchVoiceCommand('次の手順が長いな'), undefined)
+  eq('便GS② 「次」単独も進む（オーナーが実機で確認した言い方）', matchVoiceCommand('次'), 'next')
   eq('便GS② 「再開」は従来どおり動かし直す', matchVoiceCommand('再開'), 'resume')
   eq('便GS② 「タイマー再開」も従来どおり', matchVoiceCommand('タイマー再開'), 'resume')
   eq('便GS② 「3分タイマー」は従来どおり新規起動', matchVoiceCommand('3分タイマー'), 'timer')
@@ -17094,7 +17101,10 @@ eq(
   eq('FI-ORDER 「青」はコマンドとしては当たらない（色は別で最後に見る）', matchVoiceCommand('青'), undefined)
   eq('FI-ORDER 「みどり」も同じ（「もどって」と取り違えない）', matchVoiceCommand('みどり'), undefined)
   eq('FI-ORDER 「ピンク」も同じ', matchVoiceCommand('ピンク'), undefined)
-  eq('FI-ORDER 「次へ」を含む発話はコマンドが先に決まる', matchVoiceCommand('ピンクの次へ'), 'next')
+  // 2026-08-15 オーナー指示で「次」を全体一致にしたため、複合は当たらない＝何も起きない。
+  // 何も起きないほうが安全という判断（「ピンクの次へ」が「進む」なのか
+  // 「ピンクの手順を開く」なのか、発話からは決められないため）
+  eq('FI-ORDER 「ピンクの次へ」は複合なので当たらない', matchVoiceCommand('ピンクの次へ'), undefined)
   eq('FI-ORDER 「戻って」を含む発話も同じ', matchVoiceCommand('青に戻って'), 'prev')
   eq('FI-ORDER 「3分タイマー」は従来どおりタイマーのまま', matchVoiceCommand('3分タイマー'), 'timer')
 
