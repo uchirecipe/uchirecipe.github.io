@@ -24775,8 +24775,11 @@ try {
       // 「15分煮る」の手順まで送って、本文の時間をタップしてタイマーを始める
       await fcToFirst.click()
       await fcPage.waitForTimeout(400)
-      for (let i = 0; i < 12; i++) {
-        if (/煮る/.test(await fcPage.locator('[data-testid="cook-session"]').innerText())) break
+      // 「煮る」を**いま開いている手順の本文**で探す。画面全体で探すと「他の品の次の手順」の行に
+      // 当たって手前で止まり、そのあと押すタイマーが別の品のものになる（2026-08-15。
+      // 手順を割る変更が入って実際に起きた）
+      for (let i = 0; i < 20; i++) {
+        if (/煮る/.test(await fcPage.locator('[data-testid="cook-session-step-text"]').innerText())) break
         await fcNext(1)
       }
       const fcTimerAt = await fcCounter()
@@ -24787,7 +24790,12 @@ try {
       const fcTimerText = fcNoZw(
         await fcPage.locator('[data-testid="cook-session-step-text"]').innerText(),
       ).trim()
-      await fcPage.locator('[data-testid="cook-session"] button[aria-label*="タイマー開始"]').first().click()
+      // **いま開いている手順の中**のタイマーを押す（画面のどこかにある最初のタイマーだと、
+      // 他の品のものを押してしまい、上で控えた本文と食い違う）
+      await fcPage
+        .locator('[data-testid="cook-session-step-text"] button[aria-label*="タイマー開始"]')
+        .first()
+        .click()
       await fcPage.waitForTimeout(600)
       check(
         'FC-01 前提: 調理中モードでタイマーが動き出す',
@@ -30048,7 +30056,12 @@ try {
       const ftCards2 = await ftPage5.locator('[data-testid="navi-step-text"]').count()
       check(
         'FT-06 段取りは残った2品で組み直す（消えた品の手順が残らない）',
-        ftCards2 === 6 && !(await ftPage5.textContent('body')).includes('FTマリネ'),
+        // 枚数を決め打ちしない（CLAUDE.md 禁じ手③）。1手順を2つに割る変更が入るたびに増えるため。
+        // 測るのは「消えた品が段取りに残っていないこと」と「残った2品の手順で組み直せていること」
+        ftCards2 > 0 &&
+          !(await ftPage5.textContent('body')).includes('FTマリネ') &&
+          (await ftPage5.textContent('body')).includes('FT照り焼き') &&
+          (await ftPage5.textContent('body')).includes('FT煮物'),
         `${ftCards2}枚`,
       )
       // もう1品外すと段取りが成り立たない＝勝手に組んだ段取りを出さない
