@@ -8,6 +8,8 @@
  *       npx tsx scripts/audit-cook-navi.mjs --dump     … 生成された段取りの全文も出す
  *       N7_DUMP=n7.json npx tsx scripts/audit-cook-navi.mjs
  *                                                     … N7（火にかけたままの放置）の超過を1件ずつJSONに
+ *       N4_DUMP=n4.json npx tsx scripts/audit-cook-navi.mjs
+ *                                                     … N4（混在手順）の1件ずつをJSONに（型に分けて数えるため）
  *
  * 測るもの:
  *   1. 待ち工程の検出率（手順のうち何%が「待ち」と判定されたか）
@@ -46,6 +48,9 @@ import {
   stepMainText,
   // 2026-08-13 便GB（並べ方の作り直し）で足した並べ替えの部品
   hasParallelCue,
+  // N4_DUMP（混在手順の書き出し）でだけ使う。原因調べ用で、判定そのものには使わない（2026-08-15 便GR）
+  splitMixedStep,
+  splitWaitFirstStep,
 } from '../src/logic/cookNavi.ts'
 import { findTimeTokens } from '../src/logic/time.ts'
 // 2026-08-13 便GC（器具の占有）。**器具の見分けそのものは下で別に書いた独立版を使う**
@@ -82,6 +87,8 @@ import {
 const DUMP = process.argv.includes('--dump')
 /** N7（火にかけたままの放置）の超過を1件ずつ書き出す先。環境変数で指定したときだけ動く */
 const N7_DUMP = process.env.N7_DUMP ?? null
+/** N4（混在手順）の1件ずつを書き出す先。環境変数で指定したときだけ動く（2026-08-15 便GR） */
+const N4_DUMP = process.env.N4_DUMP ?? null
 
 // ---------------------------------------------------------------- 標本づくり
 
@@ -2089,6 +2096,8 @@ say()
 say('| レシピ群 | 手順数 | 混在手順 | 両方計上 | 待ちだけ計上 | 手作業だけ計上 | **両方計上の割合** | 判定 |')
 say('|---|---|---|---|---|---|---|---|')
 const mixedWorst = []
+/** N4_DUMP を付けたときだけ貯める、混在手順の1件ずつ（2026-08-15 便GR） */
+const n4Dump = []
 function n4Row(label, recipes, judge) {
   let steps = 0
   let mixed = 0
@@ -2111,6 +2120,25 @@ function n4Row(label, recipes, judge) {
       if (!isMixedStep(s)) return
       mixed++
       const acc = byStep.get(i + 1) ?? { wait: 0, active: 0 }
+      // 合計の行は同じ手順をもう一度なぞるだけなので書き出さない（二重に数えない）
+      if (N4_DUMP && !label.startsWith('**')) {
+        const split = splitMixedStep(s)
+        const waitFirst = splitWaitFirstStep(s)
+        n4Dump.push({
+          group: label,
+          title: r.title,
+          no: i + 1,
+          text: s.text,
+          minutes: s.minutes ?? null,
+          kind: classifyStep(s),
+          counted: acc.wait > 0 && acc.active > 0 ? '両方' : acc.wait > 0 ? '待ちだけ' : acc.active > 0 ? '手作業だけ' : 'どちらも0分',
+          wait: acc.wait,
+          active: acc.active,
+          split: split ? [split.active.text, split.wait.text] : null,
+          waitFirstSplit: waitFirst ? [waitFirst.wait.text, waitFirst.active.text] : null,
+          isLongRest: isLongRestStep(s),
+        })
+      }
       if (acc.wait === 0 && acc.active === 0) {
         // 「半日〜一晩漬ける」等、今回の調理では終わらない待ち（longRest）は本体が意図して0分にしている。
         // 手を動かす部分まで0分になっている点は同じ問題だが、別扱いで数える
@@ -2142,6 +2170,12 @@ const n4Wild = []
 for (const g of [...groups.slice(1), ...holdoutGroups]) n4Wild.push(...g.recipes)
 for (const g of [...groups.slice(1), ...holdoutGroups]) n4Row(g.key, g.recipes, true)
 const n4Total = n4Row('**野生＋ホールドアウト 合計**', n4Wild, true)
+// 混在手順の全件書き出し（2026-08-15 便GR）。`N4_DUMP=<書き出し先> npx tsx scripts/audit-cook-navi.mjs`
+if (N4_DUMP) {
+  const fs = await import('node:fs')
+  fs.writeFileSync(N4_DUMP, JSON.stringify(n4Dump, null, 1))
+  say(`  （N4_DUMP: 混在手順 ${n4Dump.length}件を ${N4_DUMP} に書き出しました）`)
+}
 say()
 {
   const worst = dedupe(mixedWorst.slice().sort((a, b) => b.lost - a.lost), (x) => x.title + x.no).slice(0, 3)
