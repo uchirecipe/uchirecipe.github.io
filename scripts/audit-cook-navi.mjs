@@ -53,6 +53,9 @@ import {
   splitWaitFirstStep,
 } from '../src/logic/cookNavi.ts'
 import { findTimeTokens } from '../src/logic/time.ts'
+// 「このファイルが直接実行されたか」を見るためだけに使う（下の RUN_AUDIT）
+import { fileURLToPath } from 'node:url'
+import nodePath from 'node:path'
 // 2026-08-13 便GC（器具の占有）。**器具の見分けそのものは下で別に書いた独立版を使う**
 // （本体の見分けで本体を検査すると答え合わせにならないため）。ここで使うのは台数の型だけ
 import { DEFAULT_KITCHEN, applianceCapacity } from '../src/logic/cookAppliance.ts'
@@ -840,7 +843,263 @@ function planStats(triples, plan) {
   }
 }
 
+/**
+ * 測定用の名詞マスク（`cookNavi.ts` の NON_WAIT_NOUN_PATTERN の写し。同じ長さの伏せ字にする）。
+ * 後半は**器具の見分けのために足した分**（便FZで追加）。「油揚げは短冊切りにする」が
+ * 「揚げ」に当たってコンロ使用に化けていた（実測で見つけて塞いだ）。
+ *
+ * 2026-08-13 便GC: 「蒸し大豆」を足した。**測る側の取りこぼし**で、
+ * 「ボウルにツナ・蒸し大豆…を入れてあえて器に盛る」がコンロ使用と数えられ、
+ * 同梱109品でN5が3件残っていた（本体の見分けは正しく器具なしと読んでいた）。
+ * 線は動かしていない＝測り違いを直しただけ。
+ */
+const MEASURE_NON_WAIT_NOUN =
+  /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|漬物|漬け物|オーブンシート|オーブンペーパー|しょうゆ|つゆ|煮干し|蒸し器|蒸しパン|ゆで卵|ゆでうどん|ゆで麺|お浸し|油揚げ|厚揚げ|薄揚げ|揚げ玉|さつま揚げ|焼きのり|焼き海苔|焼き豆腐|焼きそば麺|めんつゆ|煮汁|煮物|煮もの|蒸し鶏|蒸しタオル|蒸し大豆|蒸し野菜|蒸しえび|蒸しエビ|蒸しどり/g
+/** 「〜ておく」＝先に済ませる言い方であって放置時間ではない（アプリ本体と同じ扱い） */
+const MEASURE_TE_OKU = /[てで](?:お|置)[くきい]/g
+/** 判定に使う本文（括弧の中の任意の記述・待ちでない名詞・「〜ておく」を伏せる） */
+function maskForMeasure(text) {
+  return stepMainText(text ?? '')
+    .replace(MEASURE_NON_WAIT_NOUN, (m) => '＊'.repeat(m.length))
+    .replace(MEASURE_TE_OKU, (m) => '＊'.repeat(m.length))
+}
+
+/** patterns のどれかが最初に現れる位置（無ければ -1） */
+function firstIdx(text, patterns) {
+  let first = -1
+  for (const re of patterns) {
+    const m = new RegExp(re.source).exec(text)
+    if (m && (first === -1 || m.index < first)) first = m.index
+  }
+  return first
+}
+
+/**
+ * 【器具の見分け】この便で新しく作った判定。**測るためだけのもので、アプリには入れない**。
+ * docs/72 §3「数える器具は4つ＝コンロ（口数）・電子レンジ・魚焼きグリル・トースター」に合わせる
+ * （オーブンと炊飯器は数える対象に入っていないので見分けない）。
+ *
+ * コンロは「火の入る言い方」が本文にあれば1口使うとみなす。鍋・フライパンの語が無くても
+ * 「しんなりするまで炒める」はコンロを使っているため。逆に **火の語が無い手順は数えない**
+ * （「鍋に豆腐を入れる」だけでは火が入っているか分からない）＝**少なめに数える側に倒してある**。
+ */
+const APPLIANCE_TOASTER = /トースター/
+const APPLIANCE_MICROWAVE = /レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/
+const APPLIANCE_GRILL = /グリル/
+const APPLIANCE_OVEN = /オーブン/
+const STOVE_HEAT_CUE =
+  /火にかけ|火に掛け|中火|弱火|強火|とろ火|煮|茹で|ゆで|沸か|沸騰|炒め|炒る|揚げ|蒸|焼く|焼き|焼い|熱し|熱する|加熱|温め/
+const APPLIANCE_LABEL = { stove: 'コンロ', microwave: '電子レンジ', grill: '魚焼きグリル', toaster: 'トースター' }
+
+function stepAppliance(text) {
+  const t = maskForMeasure(text)
+  if (APPLIANCE_TOASTER.test(t)) return 'toaster'
+  if (APPLIANCE_MICROWAVE.test(t)) return 'microwave'
+  if (APPLIANCE_GRILL.test(t)) return 'grill'
+  if (APPLIANCE_OVEN.test(t)) return null // docs/72 の数える4器具に入っていない
+  return STOVE_HEAT_CUE.test(t) ? 'stove' : null
+}
+
+/**
+ * その工程が器具を占有している区間（分）。占有していなければ undefined。
+ * docs/72 §3「占有する待ち＝煮る・焼く／占有しない待ち＝漬ける・冷ます・寝かせる」は、
+ * アプリ本体の `waitUrgency`（onTime=ゆでる・レンジ／simmer=煮る・グリル／relaxed=漬ける・冷ます）
+ * とそのまま対応するので、**relaxed の待ちだけ占有しない**とみなす。
+ */
+function applianceUse(item, kitchen = DEFAULT_KITCHEN) {
+  const found = stepAppliance(item.text)
+  if (!found) return undefined
+  // 持っていない器具の工程は、フライパン・鍋でやることになる＝コンロが1口ふさがる（本体と同じ扱い）
+  const key = applianceCapacity(kitchen, found) === 0 ? 'stove' : found
+  if (item.kind === 'wait') {
+    if (item.waitMinutes <= 0) return undefined
+    if (waitUrgency({ text: item.text, minutes: item.minutes }) === 'relaxed') return undefined
+  } else if (item.activeMinutes <= 0) return undefined
+  return { key, start: item.startMin, end: item.endMin }
+}
+
+/**
+ * 2つ以上の器具を**同時に使っている時間**の合計（分）。docs/72 第3段Bの「もっと重ねる」を
+ * 短縮率とは別の角度から見るための数字（口数を増やしたときに、実際に火が重なっているか）。
+ */
+function overlapMinutes(intervals) {
+  const points = [...new Set(intervals.flatMap((iv) => [iv.start, iv.end]))].sort((a, b) => a - b)
+  let total = 0
+  for (let i = 0; i < points.length - 1; i++) {
+    const from = points[i]
+    const to = points[i + 1]
+    const busy = intervals.filter((iv) => iv.start <= from && iv.end >= to && iv.end > iv.start).length
+    if (busy >= 2) total += to - from
+  }
+  return total
+}
+
+/** 区間の最大同時使用数（端が接するだけ＝前の工程が終わった瞬間に次が始まる、は重なりとしない） */
+function maxConcurrent(intervals) {
+  const events = []
+  for (const iv of intervals) {
+    if (iv.end <= iv.start) continue
+    events.push([iv.start, 1], [iv.end, -1])
+  }
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  let cur = 0
+  let max = 0
+  for (const [, delta] of events) {
+    cur += delta
+    if (cur > max) max = cur
+  }
+  return max
+}
+
+/**
+ * 【混在手順の見分け】1つの手順の中に「手を動かす作業」と「待ち」が同居しているか。
+ * 判定は位置で行う（アプリ本体の位置ルールと同じ考え方）＝**手作業の語が待ちの語より前**にあるとき、
+ * その手順は「手を動かしてから放置する」形になっている。
+ *   「そぎ切りにする。10分ほどおく」   → 切り(手作業) の後ろに おく(待ち)   → 混在
+ *   「鍋に水とだしの素を入れて中火にかける」→ 入れ(手作業) の後ろに 火にかけ(待ち) → 混在
+ *   「煮立ったら浮いてきたアクを取る」   → 煮(待ち) の後ろに 取る(手作業)   → 混在ではない（手作業の手順）
+ * 「火にかける」は待ち動詞の辞書に無いが、**沸くまでの待ちが必ず続く**言い方なので待ち側に数える
+ * （docs/72 の対象2に挙がっている実例そのもの）。
+ */
+const MEASURE_ACTION_VERB =
+  /炒め|炒る|揚げ|焼く|焼き|焼い|取る|取り|取っ|加え|入れ|混ぜ|溶き|溶い|溶か|絞る|絞り|絞っ|切る|切り|切っ|そぎ|盛る|盛り|盛っ|かける|かけて|ふる|ふり|ふっ|ふって|返す|返し|のせ|散ら|和え|あえ|つぶ|こね|まぶ|止め|ぬぐ|添え|よそ|包む|巻く|にぎ|ほぐ|むく|むき|洗う|洗い|洗っ|締め|刺し|もみ/
+const IMPLIED_WAIT_CUE = /火にかけ|火に掛け/
+const ALL_WAIT_CUES = [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS, IMPLIED_WAIT_CUE]
+
+/**
+ * 【N4の分母から外す＝そもそも割ってはいけない手順】2026-08-16 便HA・docs/68 の裁定。
+ *
+ * 上の位置ルール（手作業の語が待ちの語より前）は、**鍋から離れられない一手**まで
+ * 「手作業と待ちが同居している」と読む。これは**アプリが正しく動いているのに不合格と数える**
+ * 分母の誤りで、この分母のままでは engine を完璧にしても N4 は 90% に届かない。
+ *
+ * **線（90%）は1ptも動かさない。** ここで外すのは「割ると段取りが壊れる手順」だけで、
+ * **判断に迷ったものは外さず不合格のまま残す**（便GMがN7の誤検出でやったのと同じ作法）。
+ *
+ * 外すかどうかの根拠は、自分の目視だけでなく**標本が持っている答え合わせのデータ**を必ず見た。
+ *   - `truth` … その手順が待ちか手作業かの人間の判定
+ *   - `realWaits` … **手順の切れ方に関係なく、その料理に本当にある放置時間**
+ * `realWaits` に対応する待ちが無い手順は、割ると**料理に存在しない待ちを作る**ことになる。
+ * 逆に `realWaits` に載っている待ちを含む手順は、目視で「離れられない」と思えても**外さない**
+ * （から揚げの「一度取り出して2分休ませ」は答え合わせが待ちと言っているので残した）。
+ *
+ * 下の規則は**1つずつ、外す手順の本文と理由を書いて**並べる。まとめて広く取らない。
+ */
+/** 規則①: 油を熱して香りを立てる工程（沸くものが鍋に無い） */
+const NOT_SPLIT_AROMA_OIL = /(?:油|オイル|バター)/
+/** 規則②: 煮えばな（煮立ち）を見て火を落とす一手 */
+const NOT_SPLIT_SIMMER_EDGE = /(?:煮立|ひと煮|沸騰|沸い)[^。]{0,8}(?:火を止め|火をとめ|火を消|火を弱め)/
+/** 規則②の除外条件: その手順の中で鍋に火をつけている＝沸くまでの待ちが本当にある */
+const NOT_SPLIT_HEAT_START = /火にかけ|火に掛け|沸か|沸騰させ/
+/** 規則③: 「煮詰めた〜」＝すでに煮詰めたものを指す連体修飾（これから煮詰める指示ではない） */
+const NOT_SPLIT_REDUCED_SAUCE = /(?:煮詰め|煮つめ)た(?!ら)/
+/** 規則④: 「ゆで汁」は料理の名前（待ちの語「ゆで」を含むだけの名詞） */
+const NOT_SPLIT_BROTH_NOUN = /ゆで汁|茹で汁/g
+
+/**
+ * 割ってはいけない理由（分母から外す理由）。外さないときは null。
+ * **1件ずつ、実際の本文を引いて理由を書く。**
+ */
+export function notSplittableReason(step) {
+  const text = maskForMeasure(step.text)
+
+  // ① 「鍋にオリーブオイルとにんにくを入れて弱火にかけ、香りが立ったら玉ねぎとにんじんを
+  //     加えてしんなりするまで炒めます。」（A4 基本のミートソースパスタ 手順2）
+  //    「フライパンにサラダ油とにんにくを入れて中火にかけ、香りが立ったら豚肉を炒める。」（同梱 回鍋肉 手順3）
+  //    「火にかけ」を待ちの合図に数えている根拠は「**沸くまでの待ちが必ず続く**言い方だから」。
+  //    ところが鍋の中が油と香味野菜のときは沸くものが無く、**にんにくは1分で焦げる**ので
+  //    鍋の前を離れられない。アプリ本体も炒めが待ちの語より後ろにあるとして付きっきりに倒しており
+  //    （`isHandsOnStep`）、答え合わせも truth='active'・realWaits に該当なし。
+  //    ここを割ると、熱した油から目を離させる段取りになる（＝S1の誤りそのもの）。
+  if (
+    firstIdx(text, [IMPLIED_WAIT_CUE]) >= 0 &&
+    firstIdx(text, ALL_WAIT_CUES) === firstIdx(text, [IMPLIED_WAIT_CUE])
+  ) {
+    const at = firstIdx(text, [IMPLIED_WAIT_CUE])
+    const before = text.slice(0, at)
+    const after = text.slice(at)
+    if (
+      NOT_SPLIT_AROMA_OIL.test(before) &&
+      /香り|炒め|炒る/.test(after) &&
+      !/沸|煮立|湯|だし汁|スープ|水を/.test(text)
+    ) {
+      return '油と香味野菜を熱して香りを立てる工程。鍋の中に沸くものが無く、にんにくが焦げるので離れられない'
+    }
+  }
+
+  // ② 「弱火にしてみそを溶き入れ、煮立つ直前で火を止めます。」（A6 豆腐とわかめのみそ汁 手順4）
+  //    「火を弱めてみそを溶き入れ、長ねぎを加えてひと煮したら火を止めます。」（HA1 豚汁 手順6）
+  //    「火を弱めて味噌を溶き入れ、煮立たせる前に火を止める。」（同梱 豆腐とわかめの味噌汁 手順3）
+  //    **煮えばなを見て火を落とす一手**。煮立つ瞬間を見ていないと成り立たない工程で、
+  //    アプリ本体も「煮立つ直前」を付きっきりの語として明示的に持っている（`HANDS_ON_PATTERNS`）。
+  //    答え合わせは3件とも truth='active'・realWaits に該当なし。
+  //    **その手順の中で鍋に火をつけている場合は外さない**——「小鍋にだし汁を入れて中火にかけ、
+  //    煮立ったら火を止める。」（同梱 梅おろしぶっかけうどん 手順3）は冷たいだし汁からなので
+  //    沸くまでの待ちが本当にあり、**割るべき側**。ここが規則②と分かれ目になる。
+  //    **火を止めたあとにさらに待ちの語が続く場合も外さない**（「煮立ったら火を止め、そのまま10分おく」）。
+  if (NOT_SPLIT_SIMMER_EDGE.test(text) && !NOT_SPLIT_HEAT_START.test(text)) {
+    const m = NOT_SPLIT_SIMMER_EDGE.exec(text)
+    const rest = text.slice(m.index + m[0].length)
+    if (firstIdx(rest, ALL_WAIT_CUES) < 0) {
+      return '煮立つ瞬間を見て火を落とす一手。鍋の前を離れたら成立しない（すでに火の上にある鍋の仕上げ）'
+    }
+  }
+
+  // ③ 「食べやすい厚さに切り、煮汁を煮詰めたたれをかけていただきます。」（B5 おうちで作る煮豚 手順4）
+  //    「煮詰め**た**たれ」＝すでに煮詰めたものを指す連体修飾で、**これから煮詰めろという指示ですらない**。
+  //    仮に指示と読んでも、煮詰めはアプリ本体が付きっきりと決めている語（`HANDS_ON_PATTERNS` の /煮詰め/。
+  //    オーナーの実機報告「照りが出るまで煮からめる が待ちに化けていた」で足された語）。
+  //    答え合わせも truth='active'・realWaits に該当なし。切って・かけて・食べる、で全部手作業。
+  if (NOT_SPLIT_REDUCED_SAUCE.test(text)) {
+    return '「煮詰めたたれ」は完了の連体修飾で待ちの指示ではない。煮詰め自体もアプリが付きっきりと決めた語'
+  }
+
+  // ④ 「鍋から取り出して薄切りにし、器に盛ります。ゆで汁はスープに使えるので取っておくとよいです。」
+  //    （HB3 しっとりゆで鶏 手順3）
+  //    待ちの合図として拾っているのは「**ゆで汁**」の“ゆで”だけ（「取っておく」はすでに伏せている）。
+  //    ゆで汁は**料理の名前**であって待ち時間ではない。本体も「ゆで卵」「ゆでうどん」を同じ理由で
+  //    伏せており（`NON_WAIT_NOUN_PATTERN`）、監査も「煮汁」を伏せている。その並びの取りこぼし。
+  //    しかもこの一文は「スープに使えるので取っておくとよい」という**助言**で、工程ですらない。
+  //    ※ここでだけ伏せる（監査ぜんたいの伏せ字表には足さない）＝ほかの項目の数値を動かさないため。
+  const withoutBroth = text.replace(NOT_SPLIT_BROTH_NOUN, (m) => '＊'.repeat(m.length))
+  if (withoutBroth !== text && firstIdx(withoutBroth, ALL_WAIT_CUES) < 0) {
+    return '待ちの合図が「ゆで汁」という名詞だけ。しかも保存の助言で工程ではない'
+  }
+
+  return null
+}
+
+/** 位置ルールだけで見た混在（分母から外す前の姿。書き出しの分類に使う） */
+export function isMixedByPosition(step) {
+  const text = maskForMeasure(step.text)
+  const waitAt = firstIdx(text, ALL_WAIT_CUES)
+  if (waitAt < 0) return false
+  const actionAt = firstIdx(text, [MEASURE_ACTION_VERB])
+  return actionAt >= 0 && actionAt < waitAt
+}
+
+export function isMixedStep(step) {
+  // 割ってはいけない手順は分母に入れない（理由は notSplittableReason に1件ずつ書いた）
+  return isMixedByPosition(step) && notSplittableReason(step) == null
+}
+
 // ---------------------------------------------------------------- 出力
+
+/**
+ * 診断を実際に走らせるか（2026-08-16 便HA）。
+ *
+ * **`scripts/test-logic.mjs` からこのファイルを読み込めるようにするため**の旗。
+ * N4の分母から外す判定（`notSplittableReason`）は「割ってはいけない手順」を決める規則なので、
+ * 広げすぎると線を緩めたのと同じになる＝**回帰テストで固定しておきたい**。
+ * ところが診断ぜんたいは1回15秒かかるので、読み込んだだけで走ると `npm test` に載せられない。
+ * ES モジュールは途中で return できないので、**出力の節ぜんたいをこの旗で囲う**。
+ * 上の判定・見分けの関数はすべてこの外にあるので、テストからはそのまま読める。
+ */
+const RUN_AUDIT =
+  process.argv[1] != null &&
+  fileURLToPath(import.meta.url) === nodePath.resolve(process.argv[1])
+
+if (RUN_AUDIT) {
 
 const out = []
 const say = (line = '') => out.push(line)
@@ -1356,134 +1615,6 @@ function finishTimes(timeline) {
   return finish
 }
 
-/**
- * 測定用の名詞マスク（`cookNavi.ts` の NON_WAIT_NOUN_PATTERN の写し。同じ長さの伏せ字にする）。
- * 後半は**器具の見分けのために足した分**（便FZで追加）。「油揚げは短冊切りにする」が
- * 「揚げ」に当たってコンロ使用に化けていた（実測で見つけて塞いだ）。
- *
- * 2026-08-13 便GC: 「蒸し大豆」を足した。**測る側の取りこぼし**で、
- * 「ボウルにツナ・蒸し大豆…を入れてあえて器に盛る」がコンロ使用と数えられ、
- * 同梱109品でN5が3件残っていた（本体の見分けは正しく器具なしと読んでいた）。
- * 線は動かしていない＝測り違いを直しただけ。
- */
-const MEASURE_NON_WAIT_NOUN =
-  /漬け汁|漬けだれ|漬けタレ|漬けダレ|漬け床|漬物|漬け物|オーブンシート|オーブンペーパー|しょうゆ|つゆ|煮干し|蒸し器|蒸しパン|ゆで卵|ゆでうどん|ゆで麺|お浸し|油揚げ|厚揚げ|薄揚げ|揚げ玉|さつま揚げ|焼きのり|焼き海苔|焼き豆腐|焼きそば麺|めんつゆ|煮汁|煮物|煮もの|蒸し鶏|蒸しタオル|蒸し大豆|蒸し野菜|蒸しえび|蒸しエビ|蒸しどり/g
-/** 「〜ておく」＝先に済ませる言い方であって放置時間ではない（アプリ本体と同じ扱い） */
-const MEASURE_TE_OKU = /[てで](?:お|置)[くきい]/g
-/** 判定に使う本文（括弧の中の任意の記述・待ちでない名詞・「〜ておく」を伏せる） */
-function maskForMeasure(text) {
-  return stepMainText(text ?? '')
-    .replace(MEASURE_NON_WAIT_NOUN, (m) => '＊'.repeat(m.length))
-    .replace(MEASURE_TE_OKU, (m) => '＊'.repeat(m.length))
-}
-
-/** patterns のどれかが最初に現れる位置（無ければ -1） */
-function firstIdx(text, patterns) {
-  let first = -1
-  for (const re of patterns) {
-    const m = new RegExp(re.source).exec(text)
-    if (m && (first === -1 || m.index < first)) first = m.index
-  }
-  return first
-}
-
-/**
- * 【器具の見分け】この便で新しく作った判定。**測るためだけのもので、アプリには入れない**。
- * docs/72 §3「数える器具は4つ＝コンロ（口数）・電子レンジ・魚焼きグリル・トースター」に合わせる
- * （オーブンと炊飯器は数える対象に入っていないので見分けない）。
- *
- * コンロは「火の入る言い方」が本文にあれば1口使うとみなす。鍋・フライパンの語が無くても
- * 「しんなりするまで炒める」はコンロを使っているため。逆に **火の語が無い手順は数えない**
- * （「鍋に豆腐を入れる」だけでは火が入っているか分からない）＝**少なめに数える側に倒してある**。
- */
-const APPLIANCE_TOASTER = /トースター/
-const APPLIANCE_MICROWAVE = /レンジ|チンす|チンし|[0-9０-９]\s*[WＷ]/
-const APPLIANCE_GRILL = /グリル/
-const APPLIANCE_OVEN = /オーブン/
-const STOVE_HEAT_CUE =
-  /火にかけ|火に掛け|中火|弱火|強火|とろ火|煮|茹で|ゆで|沸か|沸騰|炒め|炒る|揚げ|蒸|焼く|焼き|焼い|熱し|熱する|加熱|温め/
-const APPLIANCE_LABEL = { stove: 'コンロ', microwave: '電子レンジ', grill: '魚焼きグリル', toaster: 'トースター' }
-
-function stepAppliance(text) {
-  const t = maskForMeasure(text)
-  if (APPLIANCE_TOASTER.test(t)) return 'toaster'
-  if (APPLIANCE_MICROWAVE.test(t)) return 'microwave'
-  if (APPLIANCE_GRILL.test(t)) return 'grill'
-  if (APPLIANCE_OVEN.test(t)) return null // docs/72 の数える4器具に入っていない
-  return STOVE_HEAT_CUE.test(t) ? 'stove' : null
-}
-
-/**
- * その工程が器具を占有している区間（分）。占有していなければ undefined。
- * docs/72 §3「占有する待ち＝煮る・焼く／占有しない待ち＝漬ける・冷ます・寝かせる」は、
- * アプリ本体の `waitUrgency`（onTime=ゆでる・レンジ／simmer=煮る・グリル／relaxed=漬ける・冷ます）
- * とそのまま対応するので、**relaxed の待ちだけ占有しない**とみなす。
- */
-function applianceUse(item, kitchen = DEFAULT_KITCHEN) {
-  const found = stepAppliance(item.text)
-  if (!found) return undefined
-  // 持っていない器具の工程は、フライパン・鍋でやることになる＝コンロが1口ふさがる（本体と同じ扱い）
-  const key = applianceCapacity(kitchen, found) === 0 ? 'stove' : found
-  if (item.kind === 'wait') {
-    if (item.waitMinutes <= 0) return undefined
-    if (waitUrgency({ text: item.text, minutes: item.minutes }) === 'relaxed') return undefined
-  } else if (item.activeMinutes <= 0) return undefined
-  return { key, start: item.startMin, end: item.endMin }
-}
-
-/**
- * 2つ以上の器具を**同時に使っている時間**の合計（分）。docs/72 第3段Bの「もっと重ねる」を
- * 短縮率とは別の角度から見るための数字（口数を増やしたときに、実際に火が重なっているか）。
- */
-function overlapMinutes(intervals) {
-  const points = [...new Set(intervals.flatMap((iv) => [iv.start, iv.end]))].sort((a, b) => a - b)
-  let total = 0
-  for (let i = 0; i < points.length - 1; i++) {
-    const from = points[i]
-    const to = points[i + 1]
-    const busy = intervals.filter((iv) => iv.start <= from && iv.end >= to && iv.end > iv.start).length
-    if (busy >= 2) total += to - from
-  }
-  return total
-}
-
-/** 区間の最大同時使用数（端が接するだけ＝前の工程が終わった瞬間に次が始まる、は重なりとしない） */
-function maxConcurrent(intervals) {
-  const events = []
-  for (const iv of intervals) {
-    if (iv.end <= iv.start) continue
-    events.push([iv.start, 1], [iv.end, -1])
-  }
-  events.sort((a, b) => a[0] - b[0] || a[1] - b[1])
-  let cur = 0
-  let max = 0
-  for (const [, delta] of events) {
-    cur += delta
-    if (cur > max) max = cur
-  }
-  return max
-}
-
-/**
- * 【混在手順の見分け】1つの手順の中に「手を動かす作業」と「待ち」が同居しているか。
- * 判定は位置で行う（アプリ本体の位置ルールと同じ考え方）＝**手作業の語が待ちの語より前**にあるとき、
- * その手順は「手を動かしてから放置する」形になっている。
- *   「そぎ切りにする。10分ほどおく」   → 切り(手作業) の後ろに おく(待ち)   → 混在
- *   「鍋に水とだしの素を入れて中火にかける」→ 入れ(手作業) の後ろに 火にかけ(待ち) → 混在
- *   「煮立ったら浮いてきたアクを取る」   → 煮(待ち) の後ろに 取る(手作業)   → 混在ではない（手作業の手順）
- * 「火にかける」は待ち動詞の辞書に無いが、**沸くまでの待ちが必ず続く**言い方なので待ち側に数える
- * （docs/72 の対象2に挙がっている実例そのもの）。
- */
-const MEASURE_ACTION_VERB =
-  /炒め|炒る|揚げ|焼く|焼き|焼い|取る|取り|取っ|加え|入れ|混ぜ|溶き|溶い|溶か|絞る|絞り|絞っ|切る|切り|切っ|そぎ|盛る|盛り|盛っ|かける|かけて|ふる|ふり|ふっ|ふって|返す|返し|のせ|散ら|和え|あえ|つぶ|こね|まぶ|止め|ぬぐ|添え|よそ|包む|巻く|にぎ|ほぐ|むく|むき|洗う|洗い|洗っ|締め|刺し|もみ/
-const IMPLIED_WAIT_CUE = /火にかけ|火に掛け/
-function isMixedStep(step) {
-  const text = maskForMeasure(step.text)
-  const waitAt = firstIdx(text, [...WAIT_VERB_PATTERNS, ...EXTRA_WAIT_VERB_PATTERNS, IMPLIED_WAIT_CUE])
-  if (waitAt < 0) return false
-  const actionAt = firstIdx(text, [MEASURE_ACTION_VERB])
-  return actionAt >= 0 && actionAt < waitAt
-}
 
 /**
  * 【利用者の並行指示】手順本文の「その間に」「〜しながら」（docs/72 §2 N6）。
@@ -2093,8 +2224,8 @@ say()
 // ---------------------------------------------------------------- N4
 say('■ N4. 混在手順の両方計上（手作業と待ちが同居する手順で、両方の時間が計上された割合。線＝90%以上）')
 say()
-say('| レシピ群 | 手順数 | 混在手順 | 両方計上 | 待ちだけ計上 | 手作業だけ計上 | **両方計上の割合** | 判定 |')
-say('|---|---|---|---|---|---|---|---|')
+say('| レシピ群 | 手順数 | 混在手順 | 両方計上 | 待ちだけ計上 | 手作業だけ計上 | **両方計上の割合** | 分母から外した | 判定 |')
+say('|---|---|---|---|---|---|---|---|---|')
 const mixedWorst = []
 /** N4_DUMP を付けたときだけ貯める、混在手順の1件ずつ（2026-08-15 便GR） */
 const n4Dump = []
@@ -2104,6 +2235,9 @@ function n4Row(label, recipes, judge) {
   let both = 0
   let waitOnly = 0
   let activeOnly = 0
+  // 割ってはいけない手順として分母から外した件数（2026-08-16 便HA）。
+  // **毎回この列に出す**＝外した数を隠さないため（線を緩めていないことがここで見える）
+  let excluded = 0
   for (const r of recipes) {
     const timeline = buildCookTimeline([r])
     // 元の手順1つに対応する段取り工程をまとめる（湯沸かしの切り出しで1手順が2工程になることがある）
@@ -2117,7 +2251,16 @@ function n4Row(label, recipes, judge) {
     }
     r.steps.forEach((s, i) => {
       steps++
-      if (!isMixedStep(s)) return
+      if (!isMixedStep(s)) {
+        const reason = isMixedByPosition(s) ? notSplittableReason(s) : null
+        if (reason == null) return
+        excluded++
+        // 分母から外した手順も書き出す（あとから裁定を見直せるように。既定では何も出さない）
+        if (N4_DUMP && !label.startsWith('**')) {
+          n4Dump.push({ group: label, title: r.title, no: i + 1, text: s.text, counted: '分母から外した', reason })
+        }
+        return
+      }
       mixed++
       const acc = byStep.get(i + 1) ?? { wait: 0, active: 0 }
       // 合計の行は同じ手順をもう一度なぞるだけなので書き出さない（二重に数えない）
@@ -2161,9 +2304,9 @@ function n4Row(label, recipes, judge) {
   }
   const rate = pct(both, mixed)
   say(
-    `| ${label} | ${steps} | ${mixed} | ${both} | ${waitOnly} | ${activeOnly} | **${f1(rate)}%** | ${judge ? verdict(rate >= N_LINE.n4) : '（参考）'} |`,
+    `| ${label} | ${steps} | ${mixed} | ${both} | ${waitOnly} | ${activeOnly} | **${f1(rate)}%** | ${excluded}件 | ${judge ? verdict(rate >= N_LINE.n4) : '（参考）'} |`,
   )
-  return { mixed, both }
+  return { mixed, both, excluded }
 }
 n4Row('同梱109品', starterRecipes, false)
 const n4Wild = []
@@ -2824,3 +2967,5 @@ say()
 say()
 
 console.log(out.join('\n'))
+
+}
