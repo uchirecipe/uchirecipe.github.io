@@ -2507,9 +2507,15 @@ try {
       // 本体を position:fixed にする）。この作りでは `window.scrollY` は 0 になるが、**見た目は1pxも動かない**。
       // 測りたいのは「**開いてもページの見た目が動かない**」ことなので、
       // 数字ではなく**画面の中の実際の位置**（見出しがどこに見えているか）で見る（CLAUDE.md 禁じ手④）
+      // **同じ要素を測り続ける**こと（窓を開くとDOMが増えるので、その場で探すと
+      // 別の要素を掴んで「動いた」ように見える。2026-08-16に実際に踏んだ）
+      await wkPage2.evaluate(() => {
+        const h = document.querySelector('main h1, main h2')
+        if (h) h.setAttribute('data-e2e-anchor', '1')
+      })
       const seenTop = () =>
         wkPage2.evaluate(() => {
-          const h = document.querySelector('main h1, main h2, main a[href^="#/recipes/"]')
+          const h = document.querySelector('[data-e2e-anchor="1"]')
           return h ? Math.round(h.getBoundingClientRect().top) : null
         })
       const scrollBeforeOpen = await seenTop()
