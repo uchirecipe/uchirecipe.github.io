@@ -2324,6 +2324,11 @@ export default function CookNaviPage() {
           onExit={closeSession}
           onFinish={completeSession}
           onStartTimer={startStepTimer}
+          /* 調理中の画面からも自由な時間のタイマーを開ける（2026-08-16 便HB）。
+             窓（CustomTimerModal）も前回の秒数もこの画面のものをそのまま使う＝
+             段取りの一覧の右上から開いたときと、同じ窓・同じ既定値・同じ始まり方になる。
+             窓は全画面（z-50）より上（z-70）に重なるので、調理中のまま時間を決められる */
+          onOpenCustomTimer={openCustomTimer}
           sequential={isSequential}
           peekStep={timerPeekStep}
           onPeekStepClose={() => setTimerPeekStep(null)}

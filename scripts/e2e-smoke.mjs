@@ -298,6 +298,10 @@
 //         FOCUSTOP-01(2026-08-15 便GX オーナー実機: 調理中モードの上側で長い料理名が1文字も
 //         隠れない・起動していないタイマーのボタンが横一列を独り占めしない・44px角で押せて
 //         読み上げ名がある。タイマーが動いている時も同じ) /
+//         NAVITIMER-01(2026-08-16 便HB: 並行調理ナビの調理中モードからも自由な時間のタイマーを
+//         始められる=レシピ詳細・段取りの一覧・1品の調理中モードと同じ窓が開き、始めた分の残り時間が
+//         この画面に出て調整もできる。入口を足しても画面は狭くならない=手順の枠が上の帯より広い・
+//         入口が横一列を独り占めしない・長い料理名が1文字も隠れない) /
 //         【2026-08-03 便DS オーナー実機フィードバック8件(調理中モード・タイマー・声で操作)】
 //         DS-MIC-01(①マイクを断られた状態を見つけて直し方を出す・自動再開ループを止める) /
 //         DS-VOICE-01(⑤時間の手掛かりが無い手順の「タイマー」に言い方の案内) /
@@ -5853,6 +5857,193 @@ try {
       )
     } finally {
       await ftBrowser.close()
+    }
+  }
+
+  // --- NAVITIMER-01: 並行調理ナビの調理中モードからも、自由な時間のタイマーを始められる
+  //   (2026-08-16 便HB。レシピ詳細・段取りの一覧・1品の調理中モードには入口があり、
+  //    並行調理ナビの調理中モードだけ無かった＝「ゆで時間だけ計りたい」がこの画面でだけできなかった)。
+  //
+  //   測るのは次の2つ。どちらも「どこに置いてあるか」ではなく、利用者が確かめたいことで測る:
+  //     ①この画面から自由な時間のタイマーを始められる
+  //       (入口を押す→3画面と同じ窓が開く→開始→この画面に残り時間が出て、調整の窓も開ける)
+  //     ②入口を足しても画面が狭くなっていない
+  //       (手順の枠が、その上に積まれた帯の合計より広い/入口が横一列を独り占めしない/
+  //        長い料理名が1文字も隠れない)
+  //   ②は見出しの行に置くと必ず落ちる: 390px幅のこの画面の見出しの行は空きが無く、
+  //   44px角を1つ足すと料理名の枠が96px→48pxになって折り返しが増える
+  //   (実測: 25文字の料理名で手順の枠が417px→24px)。
+  //   料理名の長さは同梱レシピに左右されないよう、この検証の中で長い名前を登録して作る。
+  //   タイマーが動いている状態でも同じ判定になることまで見る(置き場所が動かないこと) ---
+  currentCheck = 'NAVITIMER-01'
+  {
+    const ntBrowser = await chromium.launch()
+    try {
+      const ntContext = await ntBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const ntPage = await ntContext.newPage()
+      ntPage.on('dialog', (dialog) => dialog.accept())
+      const ntLongTitle = '鶏むね肉としめじの香味だれかけ蒸し（作り置きにも）'
+      await ntPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ntPage.waitForTimeout(1800)
+      await ntPage.evaluate(async (long) => {
+        const openDb = () =>
+          new Promise((resolve, reject) => {
+            const r = indexedDB.open('uchi-recipe')
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const db = await openDb()
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        const mk = (title, steps, ingredients = []) => ({
+          title, servings: 2, effortLevel: 'normal', tags: [], ingredients, steps,
+          isFavorite: false, cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+        })
+        const idA = await P(store('recipes').add(mk(long, [
+          { text: '鶏むね肉の厚みを開く。' },
+          { text: 'フライパンで皮目から5分焼く。', minutes: 5 },
+          { text: 'たれをからめて器に盛る。' },
+        ], [{ name: '鶏むね肉', amount: '250', unit: 'g' }])))
+        const idB = await P(store('recipes').add(mk('HB煮物', [
+          { text: '大根は一口大に切る。' },
+          { text: '鍋に入れて中火で15分煮る。', minutes: 15 },
+          { text: '火を止めて器に盛る。' },
+        ], [{ name: '大根', amount: '1/3', unit: '本' }])))
+        let addedAt = Date.now()
+        for (const id of [idA, idB]) await P(store('todayList').add({ recipeId: id, addedAt: addedAt++ }))
+        const cur = (await P(store('settings').get(1))) || { id: 1 }
+        await P(store('settings').put({ ...cur, id: 1, proCode: 'UR-E2E-TEST-ONLY', proActivatedAt: Date.now() }))
+        db.close()
+      }, ntLongTitle)
+
+      await ntPage.goto(`${BASE}/#/cook-navi`)
+      await ntPage.reload({ waitUntil: 'networkidle' })
+      await ntPage.waitForTimeout(1200)
+      await ntPage.getByRole('button', { name: '段取りを作る' }).click()
+      await ntPage.waitForTimeout(700)
+      await ntPage.locator('[data-testid="cook-session-start"]').click()
+      await ntPage.waitForTimeout(700)
+
+      const ntStrip = (s) => (s || '').replace(/​/g, '').trim()
+      // 長い料理名の品の手順が出るまで送る(上限は保険。段取りが伸びても届く)
+      for (let i = 0; i < 40; i++) {
+        const t = ntStrip(await ntPage.locator('[data-testid="cook-session-recipe"]').innerText())
+        if (t === ntLongTitle) break
+        await ntPage.locator('[data-testid="cook-session-next"]').click()
+        await ntPage.waitForTimeout(150)
+      }
+
+      /**
+       * 上下の帯と手順の枠の実測。掴み方は「上から◯番目の帯」ではなく
+       * 「手順の本文が入っている帯」で決める＝並びが変わっても同じものを測る。
+       */
+      const ntMeasure = async () =>
+        await ntPage.evaluate((title) => {
+          const overlay = document.querySelector('[data-testid="cook-session"]')
+          if (!overlay) return { overlay: false }
+          const strip = (s) => (s || '').replace(/​/g, '').trim()
+          const rect = (el) => {
+            const r = el.getBoundingClientRect()
+            return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }
+          }
+          const timerBtn = Array.from(overlay.querySelectorAll('button')).find(
+            (b) => b.getAttribute('aria-label') === 'タイマーを開く',
+          )
+          const stepText = overlay.querySelector('[data-testid="cook-session-step-text"]')
+          const stepBand = Array.from(overlay.children).find((c) => stepText && c.contains(stepText))
+          const titleEl = overlay.querySelector('[data-testid="cook-session-recipe"]')
+          const timerRect = timerBtn ? rect(timerBtn) : null
+          // 入口が横一列を独り占めしていないか(同じ高さの帯に別の押せるものが居るか)
+          const sharesRow =
+            timerBtn != null &&
+            Array.from(overlay.querySelectorAll('button')).some((b) => {
+              if (b === timerBtn || timerBtn.contains(b) || b.contains(timerBtn)) return false
+              const r = b.getBoundingClientRect()
+              if (r.width === 0 || r.height === 0) return false
+              return Math.min(r.bottom, timerRect.bottom) - Math.max(r.top, timerRect.top) >= 8
+            })
+          return {
+            overlay: true,
+            timerFound: timerBtn != null,
+            timerRect,
+            timerTapOk: timerRect != null && timerRect.w >= 44 && timerRect.h >= 44,
+            timerAria: timerBtn?.getAttribute('aria-label') ?? '',
+            sharesRow,
+            titleShown: titleEl ? strip(titleEl.textContent) === title : false,
+            titleClipped: titleEl
+              ? titleEl.scrollWidth > titleEl.clientWidth + 1 ||
+                titleEl.scrollHeight > titleEl.clientHeight + 1
+              : null,
+            stepBandH: stepBand ? rect(stepBand).h : null,
+            // 手順の枠の上に積まれている帯(見出し・案内・動作中タイマー)の合計
+            bandsAbove: stepBand ? rect(stepBand).top : null,
+          }
+        }, ntLongTitle)
+
+      const ntIdle = await ntMeasure()
+      check(
+        'NAVITIMER-01 並行調理ナビの調理中モードに自由な時間のタイマーの入口がある',
+        ntIdle.timerFound,
+        JSON.stringify(ntIdle),
+      )
+      check(
+        'NAVITIMER-01 その入口は44px角以上で押せて読み上げ名がある',
+        ntIdle.timerTapOk && ntIdle.timerAria.length > 0,
+        JSON.stringify({ rect: ntIdle.timerRect, aria: ntIdle.timerAria }),
+      )
+      check(
+        'NAVITIMER-01 入口が横一列を独り占めしない(他の操作と同じ帯に収まる)',
+        ntIdle.sharesRow,
+        JSON.stringify(ntIdle),
+      )
+      check(
+        'NAVITIMER-01 長い料理名でも手順の枠が上の帯より広い(画面が狭くなっていない)',
+        ntIdle.stepBandH != null && ntIdle.bandsAbove != null && ntIdle.stepBandH >= ntIdle.bandsAbove,
+        JSON.stringify({ 手順の枠: ntIdle.stepBandH, 上の帯: ntIdle.bandsAbove }),
+      )
+      check(
+        'NAVITIMER-01 長い料理名が1文字も隠れない',
+        ntIdle.titleShown && ntIdle.titleClipped === false,
+        JSON.stringify(ntIdle),
+      )
+
+      // 押した先は3画面と同じ窓。開始まで通して、この画面に残り時間が出ることを見る
+      await ntPage
+        .locator('[data-testid="cook-session"]')
+        .getByRole('button', { name: 'タイマーを開く' })
+        .click()
+      await ntPage.waitForTimeout(400)
+      const ntDialog = ntPage.getByRole('dialog', { name: 'タイマー', exact: true })
+      check('NAVITIMER-01 押すと自由な時間のタイマーの窓が開く', await ntDialog.isVisible())
+      await ntDialog.getByRole('button', { name: '開始' }).click()
+      await ntPage.waitForTimeout(800)
+      const ntSessionText = await ntPage.locator('[data-testid="cook-session"]').innerText()
+      check(
+        'NAVITIMER-01 始めたタイマーの残り時間がこの画面に出る',
+        /\d+:\d\d/.test(ntSessionText),
+        ntSessionText.slice(0, 120),
+      )
+      check(
+        'NAVITIMER-01 そのタイマーはこの画面から開いて調整できる',
+        (await ntPage
+          .locator('[data-testid="cook-session"] button[aria-label*="のタイマーを調整"]')
+          .count()) > 0,
+      )
+      const ntRunning = await ntMeasure()
+      check(
+        'NAVITIMER-01 タイマーが動いていても手順の枠が上の帯より広い',
+        ntRunning.stepBandH != null &&
+          ntRunning.bandsAbove != null &&
+          ntRunning.stepBandH >= ntRunning.bandsAbove,
+        JSON.stringify({ 手順の枠: ntRunning.stepBandH, 上の帯: ntRunning.bandsAbove }),
+      )
+      check(
+        'NAVITIMER-01 タイマーが動いていても入口の置き場所は動かない(同じ帯のまま)',
+        ntRunning.timerFound && ntRunning.sharesRow && ntRunning.timerTapOk,
+        JSON.stringify(ntRunning),
+      )
+    } finally {
+      await ntBrowser.close()
     }
   }
 

@@ -239,6 +239,14 @@ type Props = {
   /** タイマーを始める（段取りの通し番号・レシピの色つきで常駐バーに出す） */
   onStartTimer: (item: TimelineItem, seconds: number) => void
   /**
+   * 自由な時間のタイマーの窓を開く（2026-08-16 便HB）。段取りの一覧・レシピ詳細・
+   * 1品の調理中モードと**同じ窓**（CustomTimerModal）を開く＝この画面だけの窓を作らない。
+   * 窓と前回の秒数の持ち主は呼び出し側（CookNaviPage）のままで、ここは開く合図だけを送る。
+   * 始まったタイマーはどのレシピにも紐付かないので、画面上部の
+   * 「段取りに入っていない品のタイマー」として時計の印で出る（currentTimers の導出）
+   */
+  onOpenCustomTimer: () => void
+  /**
    * 1品ずつ順に作る段取りか（2026-08-11 便FL）。並行の余地が無いときは待ち時間に
    * 別の品を差し込まないので、「この間に、次の手作業を進められます」を出さない
    */
@@ -280,6 +288,7 @@ export default function CookSessionOverlay({
   onExit,
   onFinish,
   onStartTimer,
+  onOpenCustomTimer,
   sequential,
   peekStep,
   onPeekStepClose,
@@ -1380,6 +1389,31 @@ export default function CookSessionOverlay({
           1品の調理中モード（FocusMode）の最終手順と同じ ja.focus.complete を共用する＝
           片方だけ言い方が変わることが構造的に起きない） */}
       <div className="flex gap-2 px-[var(--space-md)] pb-[calc(var(--space-sm)+env(safe-area-inset-bottom))] pt-[var(--space-sm)]">
+        {/* 自由な時間のタイマーの入口（2026-08-16 便HB）。レシピ詳細・段取りの一覧・1品の調理中モードに
+            あって、並行調理ナビの調理中モードだけに無かった＝「ゆで時間だけ計りたい」がこの画面でだけ
+            できなかった。ボタンの形は3画面と同じ（44px角・時計のアイコンのみ・読み上げ名は
+            ja.timer.customOpenAria）で、開く窓も同じ（CustomTimerModal）。
+
+            置き場所だけが3画面と違う（上の見出しの行ではなく、この操作の帯）。理由は実測:
+            390px幅のこの画面の見出しの行は ✕(40px)＋「最初の手順へ」(90px)＋操作3つ(148px)で
+            埋まっており、料理名に残っているのは96pxしかない。ここへ44pxのボタンを足すと料理名の枠は
+            48pxになり、料理名は1行1〜2文字で折り返す。実測で手順の枠は
+            4文字の名前で578→492px、15文字で484→205px、25文字では417→24px まで潰れた
+            （2026-08-15 便GXが1品の調理中モードで48px空けたばかりで、真逆になる）。
+            この帯なら高さは1pxも増えず（実測78pxのまま）、「前へ」「次へ」が176/174→150/148pxに
+            なるだけで、どちらも押す大きさは十分に残る。
+            左端に置くのは、押し間違えても戻せる「前へ」を隣にするため（右端は「次へ」、
+            最後の手順では「完成！」が来る）。タイマーが増えても減っても動かない場所である点は
+            3画面と同じ（2026-08-03 実機FB⑥） */}
+        <button
+          type="button"
+          data-testid="cook-session-custom-timer"
+          onClick={onOpenCustomTimer}
+          aria-label={ja.timer.customOpenAria}
+          className="flex h-11 w-11 shrink-0 items-center justify-center self-center rounded-full border border-accent text-accent-ink"
+        >
+          <TimerIcon size={20} aria-hidden />
+        </button>
         <button
           type="button"
           onClick={goPrev}
