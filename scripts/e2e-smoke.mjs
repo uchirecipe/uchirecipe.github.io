@@ -5199,7 +5199,7 @@ try {
   await page.getByRole('button', { name: '15分 タイマー開始' }).click()
   await page.waitForTimeout(500)
   // タイマー起動の初回だけ出る説明バナーが、次の正規表現セレクタと混同しないことも併せて確認
-  const adjustOpenBtn = page.getByRole('button', { name: /のタイマーを調整/ })
+  const adjustOpenBtn = page.getByRole('button', { name: /タイマーを調整/ })
   check('TIMER-ADJ-01 常駐バーにタイマー行が現れる(タップで調整窓が開く導線)', await adjustOpenBtn.isVisible())
 
   // 常駐バー行の「+1分」ミニボタン(2026-07-13 UIペルソナQA): 調整窓を開かずに即+60秒できる近道。
@@ -5306,14 +5306,14 @@ try {
   await page.waitForTimeout(400)
   // 「タイマー」への改名(2026-08-02)後は body 全文の includes だと「タイマー開始」等に当たって
   // 常に真になるため、常駐バーの行(=調整を開くボタン)のテキストに限定して確かめる
-  const customBarRow = page.getByRole('button', { name: /のタイマーを調整/ })
+  const customBarRow = page.getByRole('button', { name: /タイマーを調整/ })
   const customBarText = await customBarRow.textContent()
   check(
     'TIMER-CUSTOM-01 タイマーが起動する(常駐バーに「タイマー」表示)',
     customBarText.includes('タイマー'),
     customBarText,
   )
-  await page.getByRole('button', { name: /のタイマーを調整/ }).click()
+  await page.getByRole('button', { name: /タイマーを調整/ }).click()
   await page.waitForTimeout(300)
   const customAdjustDialog = page.getByRole('dialog', { name: 'タイマーを調整' })
   await customAdjustDialog.getByRole('button', { name: '−30秒' }).click()
@@ -5379,7 +5379,7 @@ try {
       await openNikujaga()
       await tkPage.getByRole('button', { name: '15分 タイマー開始' }).click()
       await tkPage.waitForTimeout(500)
-      const barRow = tkPage.getByRole('button', { name: /のタイマーを調整/ })
+      const barRow = tkPage.getByRole('button', { name: /タイマーを調整/ })
       const beforeReload = parseRemainingSeconds(await barRow.first().textContent())
       // (2) 初回の注意書きが、実態に合わせた文言になっている
       check(
@@ -5499,7 +5499,7 @@ try {
         await dlg.getByRole('button', { name: '開始' }).click()
       }
       await tkPage.waitForTimeout(500)
-      await focus.getByRole('button', { name: /のタイマーを調整/ }).first().click()
+      await focus.getByRole('button', { name: /タイマーを調整/ }).first().click()
       await tkPage.waitForTimeout(300)
       const zeroDialog = tkPage.getByRole('dialog', { name: 'タイマーを調整' })
       check('TIMER-ADJ-02 調整の窓が開く', await zeroDialog.isVisible())
@@ -5654,7 +5654,7 @@ try {
         otherPills.some((t) => t.includes('肉じゃが')),
         JSON.stringify(otherPills),
       )
-      await fkFocus.getByRole('button', { name: /のタイマーを調整/ }).first().click()
+      await fkFocus.getByRole('button', { name: /タイマーを調整/ }).first().click()
       await fkPage.waitForTimeout(400)
       const otherDialog = fkPage.getByRole('dialog', { name: 'タイマーを調整' })
       check(
@@ -5666,7 +5666,7 @@ try {
       await fkPage.waitForTimeout(400)
       check(
         'FOCUS-OTHER-01 調理中モードから出ずに別の料理のタイマーを停止できる',
-        (await fkFocus.getByRole('button', { name: /のタイマーを調整/ }).count()) === 0,
+        (await fkFocus.getByRole('button', { name: /タイマーを調整/ }).count()) === 0,
       )
     } finally {
       await fkBrowser.close()
@@ -5851,7 +5851,7 @@ try {
         'FOCUSTOP-01 タイマーが動いていても残り時間のチップが読める',
         await ftPage
           .locator('.fixed.inset-0.z-50')
-          .getByRole('button', { name: /のタイマーを調整/ })
+          .getByRole('button', { name: /タイマーを調整/ })
           .first()
           .isVisible(),
       )
@@ -6026,7 +6026,7 @@ try {
       check(
         'NAVITIMER-01 そのタイマーはこの画面から開いて調整できる',
         (await ntPage
-          .locator('[data-testid="cook-session"] button[aria-label*="のタイマーを調整"]')
+          .locator('[data-testid="cook-session"] button[aria-label*="タイマーを調整"]')
           .count()) > 0,
       )
       const ntRunning = await ntMeasure()
@@ -6199,13 +6199,13 @@ try {
         )
         check(
           'DS-VOICE-01 案内だけでタイマーは起動しない(0秒タイマーを作らない)',
-          (await focus.getByRole('button', { name: /のタイマーを調整/ }).count()) === 0,
+          (await focus.getByRole('button', { name: /タイマーを調整/ }).count()) === 0,
         )
         // 言い方どおりに言えば起動する
         await say('3分タイマー')
         check(
           'DS-VOICE-01 案内どおり「3分タイマー」と言えばタイマーが起動する',
-          (await focus.getByRole('button', { name: /のタイマーを調整/ }).count()) === 1,
+          (await focus.getByRole('button', { name: /タイマーを調整/ }).count()) === 1,
         )
 
         // ② この料理のタイマーにも料理名が出る
@@ -6231,7 +6231,7 @@ try {
           'DS-MUTE-01 押すと「音を戻す」に変わる(消音できている)',
           await focus.getByRole('button', { name: 'このタイマーの音を戻す' }).isVisible(),
         )
-        await focus.getByRole('button', { name: /のタイマーを調整/ }).click()
+        await focus.getByRole('button', { name: /タイマーを調整/ }).click()
         await p.waitForTimeout(400)
         const dsDialog = p.getByRole('dialog', { name: 'タイマーを調整' })
         check(
@@ -6331,7 +6331,7 @@ try {
         // 別の画面へ移ってから常駐バーのタイマーを触る
         await p.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(900)
-        await p.getByRole('button', { name: /のタイマーを調整/ }).first().click()
+        await p.getByRole('button', { name: /タイマーを調整/ }).first().click()
         await p.waitForTimeout(400)
         const barDialog = p.getByRole('dialog', { name: 'タイマーを調整' })
         const goBtn = barDialog.getByRole('button', { name: /手順\d+を開く/ })
@@ -16054,7 +16054,7 @@ try {
       await naviPage.waitForTimeout(400)
 
       // NAVI-02: 動作中タイマーの行タップ→±調整の窓が開く(ナビ内に留まる)
-      await naviPage.locator('[aria-label*="のタイマーを調整"]').first().click()
+      await naviPage.locator('[aria-label*="タイマーを調整"]').first().click()
       await naviPage.waitForTimeout(400)
       check(
         'NAVI-02 動作中タイマーのタップで±調整の窓が開く(ナビ内)',
@@ -24552,7 +24552,7 @@ try {
       // 常駐バー側（調理中モードを閉じると出る）
       await ezPage.locator('[data-testid="cook-session-close"]').click()
       await ezPage.waitForTimeout(800)
-      const ezBarRow = ezPage.locator('button[aria-label*="のタイマーを調整"]').first()
+      const ezBarRow = ezPage.locator('button[aria-label*="タイマーを調整"]').first()
       const ezBarAria = await ezBarRow.getAttribute('aria-label')
       // 2026-08-14 便GL: **読み上げ名だけ**は2つの番号をそれぞれの名前で呼ぶ形に変えた
       // （利用者テスト「タイマーの読み上げ名『手順⑨（1-2）』が、同じ『手順』で2つの番号を
@@ -25499,7 +25499,7 @@ try {
       // 全画面の中のタイマーをタップ（画面上部でも「他の品の〜」の行でも、
       // どこに出ていても同じ操作になる形で掴む＝置き場所に固定しない）
       await fcPage
-        .locator('[data-testid="cook-session"] button[aria-label*="のタイマーを調整"]')
+        .locator('[data-testid="cook-session"] button[aria-label*="タイマーを調整"]')
         .first()
         .click()
       await fcPage.waitForTimeout(400)
@@ -25543,9 +25543,9 @@ try {
       await fcPage.waitForTimeout(700)
       check(
         'GQ-02 前提: 調理中モードを閉じると常駐タイマーバーが見える',
-        (await fcPage.locator('button[aria-label*="のタイマーを調整"]').count()) > 0,
+        (await fcPage.locator('button[aria-label*="タイマーを調整"]').count()) > 0,
       )
-      await fcPage.locator('button[aria-label*="のタイマーを調整"]').first().click()
+      await fcPage.locator('button[aria-label*="タイマーを調整"]').first().click()
       await fcPage.waitForTimeout(400)
       const fcBarGoStep = fcPage.locator('[data-testid="timer-adjust-go-step"]')
       check(
@@ -27080,7 +27080,7 @@ try {
       currentCheck = 'FI-06'
       await fiSay('3分タイマー')
       const fiTimerCount = () =>
-        fiPage.locator('[data-testid="cook-session"] button[aria-label*="のタイマーを調整"]').count()
+        fiPage.locator('[data-testid="cook-session"] button[aria-label*="タイマーを調整"]').count()
       const fiTimersBefore = await fiTimerCount()
       check('FI-06 前提: タイマーを1本動かせた', fiTimersBefore >= 1, `本数=${fiTimersBefore}`)
       for (const word of ['青', '緑', 'ピンク']) await fiSay(word)
@@ -31043,7 +31043,7 @@ try {
       const fuWaitTimer = fuPage.getByRole('button', { name: 'タイマーを始める' }).first()
       await fuWaitTimer.click()
       await fuPage.waitForTimeout(800)
-      const fuBarRow = fuPage.locator('button[aria-label*="のタイマーを調整"]').first()
+      const fuBarRow = fuPage.locator('button[aria-label*="タイマーを調整"]').first()
       const fuBarAria = (await fuBarRow.getAttribute('aria-label')) ?? ''
       // 2026-08-14 便GL: 読み上げ名は「段取り9・手順1の2つめ」の形になった（丸数字は使わない。
       // 読み上げソフトによって「まる9」「9」と読みが割れるため）。くっついて読めないことは同じ
