@@ -224,6 +224,10 @@ import {
 import CookedLogDetailModal, {
   type CookedLogDetailTarget,
 } from '../components/CookedLogDetailModal'
+import {
+  useDetachedLogEntries,
+  type DetachedLogEntry,
+} from '../components/useDetachedLogEntries'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -1408,6 +1412,8 @@ function buildRoleRows(
 
 /** 参照が変わらない空配列（デモで「端末の予定は使わない」を表すために使う） */
 const EMPTY_ENTRIES: MealPlanEntry[] = []
+/** 同上。デモ中は「レシピを削除しても残っている記録」も見せない（2026-08-16 便GZ） */
+const EMPTY_DETACHED_ENTRIES: DetachedLogEntry[] = []
 
 /** 日×枠キーで束ねられたエントリ配列を、日付をキーに持つ配列からMap化する共通ヘルパー */
 function groupBySlot(entries: MealPlanEntry[] | undefined): Map<MealSlot, MealPlanEntry[]> {
@@ -1448,6 +1454,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     [dbRecipes],
   )
   const recipes = isDemo ? demo.recipes : dbRecipes
+  // レシピを削除しても残っている記録（2026-08-16 便GZ）。サンプルデモは端末のデータを見せない
+  // 画面なので、デモ中は空にする（recipes を demo.recipes に差し替えているのと同じ扱い）
+  const dbDetachedEntries = useDetachedLogEntries()
+  const detachedEntries = isDemo ? EMPTY_DETACHED_ENTRIES : dbDetachedEntries
   const [searchParams, setSearchParams] = useSearchParams()
   const dbSettings = useSettings()
   /** デモ中の設定はメモリだけに持つ（カレンダーの表示切替などをその場で試せるようにするため） */
@@ -1660,6 +1670,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return map
   }, [recipes])
   /**
+   * レシピを削除したあとも残っている記録（2026-08-16 便GZ・オーナー承認）。日付ごとに引ける形にする。
+   *
+   * **cookedLogsByDate とは別に持つ**のが要点。cookedLogsByDate は栄養・食費・ごはんの杯数・
+   * 献立の枠との突き合わせ（cookedPlanEntryIdSet）の入力にもなっているが、削除済みレシピの記録には
+   * 材料が無い（レシピ本体を消しているので、何をどれだけ使ったかが端末に残っていない）。
+   * 同じ入れ物に混ぜると「中身が0の料理を1品作った」と数えてしまい、期間の食費・栄養が
+   * 実際より低く出る。混ぜるのは**記録として読む場所**（月の✓マーク・カレンダーの写真・
+   * 日の窓の一覧・週タブの過去日カード・献立表の料理名）だけにする。
+   */
+  const detachedLogsByDate = useMemo(() => {
+    const map = new Map<string, DetachedLogEntry[]>()
+    detachedEntries?.forEach((entry) => {
+      const list = map.get(entry.log.date)
+      if (list) list.push(entry)
+      else map.set(entry.log.date, [entry])
+    })
+    return map
+  }, [detachedEntries])
+  /** その日の記録（レシピが残っているもの＋削除済みのもの）。記録として読む場所だけがこれを使う */
+  const shownLogsOf = useMemo(
+    () =>
+      (date: string): (CookedLogDetailTarget & { detachedRecordId?: number })[] => {
+        const own = cookedLogsByDate.get(date)
+        const detached = detachedLogsByDate.get(date)
+        if (!detached) return own ?? []
+        return [...(own ?? []), ...detached]
+      },
+    [cookedLogsByDate, detachedLogsByDate],
+  )
+  /**
    * 押した記録の中身を出す小窓(2026-08-09 便EQ)。null なら閉じている。
    * 週タブの過去日カード・月タブの日の窓・献立の枠(作った！済み)の3か所から同じ小窓を開く。
    */
@@ -1703,11 +1743,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const monthDaysWithLog = useMemo(() => {
     const prefix = monthAnchor.slice(0, 7)
     const set = new Set<string>()
-    cookedLogsByDate.forEach((_, date) => {
+    const add = (_: unknown, date: string) => {
       if (date.startsWith(prefix)) set.add(date)
-    })
+    }
+    cookedLogsByDate.forEach(add)
+    // 削除済みレシピの記録がある日にも印を出す（2026-08-16 便GZ）。
+    // 出さないと、記録は残っているのにカレンダー上では「作らなかった日」に見える
+    detachedLogsByDate.forEach(add)
     return set
-  }, [cookedLogsByDate, monthAnchor])
+  }, [cookedLogsByDate, detachedLogsByDate, monthAnchor])
   // 月カレンダーの各日の代表写真(2026-07-24 便BS・タスク4 → 2026-08-07 便DUで選び方を作り直した)。
   // 選び方そのものは純関数 logic/monthCover.ts の pickDayCoverPhoto に置いてある
   // (作った記録の写真 ＞ レシピの写真／日ごとの指名／レシピの写真を使わない、の3つを1か所で決める)。
@@ -1719,23 +1763,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const monthDayCoverPhoto = useMemo(() => {
     const prefix = monthAnchor.slice(0, 7)
     const map = new Map<string, Blob>()
-    cookedLogsByDate.forEach((list, date) => {
-      if (!date.startsWith(prefix) || list.length === 0) return
-      const pick = pickDayCoverPhoto(
-        list.map(({ recipe, log }) => ({
-          recipeId: recipe.id ?? -1,
-          logPhoto: log.photo,
-          recipePhoto: recipe.photo,
-        })),
-        {
-          chosenRecipeId: monthDayCoverRecipe?.[date],
-          hideRecipePhoto: monthHideRecipePhoto,
-        },
-      )
+    const dates = new Set([...cookedLogsByDate.keys(), ...detachedLogsByDate.keys()])
+    dates.forEach((date) => {
+      if (!date.startsWith(prefix)) return
+      const own = (cookedLogsByDate.get(date) ?? []).map(({ recipe, log }) => ({
+        recipeId: recipe.id ?? -1,
+        logPhoto: log.photo,
+        recipePhoto: recipe.photo,
+      }))
+      // 削除済みレシピの記録の写真もカレンダーに出す（2026-08-16 便GZ）。レシピ番号を持たないので、
+      // 「この日はどの料理を出すか」の指名（正の番号で覚えている）とぶつからない負の番号を当てる。
+      // レシピ側の写真は無い（レシピを消しているため）ので記録の写真だけが候補になる。
+      // 並びは残っているレシピの記録が先＝写真の選ばれ方はこれまでと変わらない
+      const detached = (detachedLogsByDate.get(date) ?? []).map((entry) => ({
+        recipeId: -(entry.detachedRecordId + 1),
+        logPhoto: entry.log.photo,
+        recipePhoto: undefined,
+      }))
+      if (own.length === 0 && detached.length === 0) return
+      const pick = pickDayCoverPhoto([...own, ...detached], {
+        chosenRecipeId: monthDayCoverRecipe?.[date],
+        hideRecipePhoto: monthHideRecipePhoto,
+      })
       if (pick) map.set(date, pick.photo)
     })
     return map
-  }, [cookedLogsByDate, monthAnchor, monthDayCoverRecipe, monthHideRecipePhoto])
+  }, [cookedLogsByDate, detachedLogsByDate, monthAnchor, monthDayCoverRecipe, monthHideRecipePhoto])
   // 月タブ: 日タップで開くその日の献立モーダル（便U-5。従来の即週ジャンプはモーダル内の
   // ボタンへ移動）。nullなら非表示
   const [dayModalDate, setDayModalDate] = useState<string | null>(null)
@@ -1812,8 +1865,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return (monthEntries ?? []).filter((e) => e.date === dayModalDate)
   }, [monthEntries, dayModalDate])
   const dayModalBySlot = useMemo(() => groupBySlot(dayModalEntries), [dayModalEntries])
-  // 月タブの日モーダルに出す、その日の「作った記録」(便Z-2)
-  const dayModalLogs = dayModalDate ? (cookedLogsByDate.get(dayModalDate) ?? []) : []
+  // 月タブの日モーダルに出す、その日の「作った記録」(便Z-2)。
+  // 削除済みレシピの記録もここに並べる(2026-08-16 便GZ。写真・ひとことメモは小窓から読める)
+  const dayModalLogs = dayModalDate ? shownLogsOf(dayModalDate) : []
   /**
    * 「カレンダーに出す写真」の候補（2026-08-07 便DU・オーナー指示⑥）。
    * その日の記録のうち、実際にカレンダーへ出せる写真を持つものだけを、料理1品につき1つ並べる
@@ -3936,14 +3990,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 日付→その日の「作った記録」の料理名（献立表の過去日の行に使う）
   const cookedTitlesByDate = useMemo(() => {
     const map = new Map<string, string[]>()
-    cookedLogsByDate.forEach((list, date) => {
+    // 削除済みレシピの記録も料理名として載せる(2026-08-16 便GZ)。献立表は「その日に何を作ったか」の
+    // 控えなので、レシピを消したかどうかで載る・載らないが変わると控えとして使えない
+    const dates = new Set([...cookedLogsByDate.keys(), ...detachedLogsByDate.keys()])
+    dates.forEach((date) => {
       map.set(
         date,
-        list.map(({ recipe }) => recipe.title),
+        [
+          ...(cookedLogsByDate.get(date) ?? []).map(({ recipe }) => recipe.title),
+          ...(detachedLogsByDate.get(date) ?? []).map((entry) => entry.recipe.title),
+        ],
       )
     })
     return map
-  }, [cookedLogsByDate])
+  }, [cookedLogsByDate, detachedLogsByDate])
   const sheetTitleOf = useMemo(
     () => (recipeId: number) => recipeById.get(recipeId)?.title,
     [recipeById],
@@ -6876,25 +6936,27 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 達成しなかった予定は上のグリッドごと消えているので、ここが過去日の主役になる。
                 記録が無い過去日は控えめな空案内だけ出す */}
             {isPastDate(date, today) &&
-              ((cookedLogsByDate.get(date)?.length ?? 0) > 0 ? (
+              (shownLogsOf(date).length > 0 ? (
                 <div className="mt-[var(--space-sm)]">
                   <p className="flex items-center gap-1 text-xs font-bold text-ink-muted">
                     <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
                     {ja.mealPlan.pastCookedTitle}
                   </p>
                   <ul className="mt-1 space-y-1">
-                    {(cookedLogsByDate.get(date) ?? []).map(({ recipe, log, logIndex }, i) => (
+                    {shownLogsOf(date).map((entry, i) => (
                       <CookedLogCard
-                        key={`${recipe.id}-${i}`}
-                        recipe={recipe}
-                        log={log}
+                        key={`${entry.recipe.id ?? `d${entry.detachedRecordId}`}-${i}`}
+                        recipe={entry.recipe}
+                        log={entry.log}
                         // 2026-08-07 便DT-2(オーナー指示): 週タブから開いた詳細の「戻る」は
                         // 週タブへ帰し、離れる直前の週とスクロール位置を復元する
                         linkState={WEEK_RETURN_LINK_STATE}
                         onNavigate={rememberWeekReturn}
                         // 2026-08-09 便EQ: カードはレシピ詳細のまま、記録の中身への入口を下に足す
-                        onOpenDetail={() => setLogDetail({ recipe, log, logIndex })}
-                        detailAs="below"
+                        onOpenDetail={() => setLogDetail(entry)}
+                        // 削除済みレシピの記録には行き先が無いので、カードそのものを記録の小窓にする
+                        // (2026-08-16 便GZ。'below' のままだと押せないレシピ詳細へのリンクになる)
+                        detailAs={entry.detachedRecordId != null ? 'card' : 'below'}
                       />
                     ))}
                   </ul>
@@ -7664,16 +7726,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   {ja.mealPlan.pastCookedTitle}
                 </p>
                 <ul className="mt-1 space-y-1">
-                  {dayModalLogs.map(({ recipe, log, logIndex }, i) => (
+                  {dayModalLogs.map((entry, i) => (
                     <CookedLogCard
-                      key={`${recipe.id}-${i}`}
-                      recipe={recipe}
-                      log={log}
+                      key={`${entry.recipe.id ?? `d${entry.detachedRecordId}`}-${i}`}
+                      recipe={entry.recipe}
+                      log={entry.log}
                       readOnly={isDemo}
                       onNavigate={() => setDayModalDate(null)}
                       // 2026-08-09 便EQ(オーナー実機「月献立の作った記録から献立名をタップで
                       // 整理された記録を見たい」): 料理名を押すと記録の中身の小窓が開く
-                      onOpenDetail={() => setLogDetail({ recipe, log, logIndex })}
+                      onOpenDetail={() => setLogDetail(entry)}
                     />
                   ))}
                 </ul>

@@ -6,6 +6,8 @@ import { exclusionRecordFor } from '../logic/backup'
 import { archiveIdsForRecipe } from '../logic/cookedArchive'
 import { summarizeRecipeDeleteImpact, type RecipeDeleteImpact } from '../logic/recipeDelete'
 import { READINGS_VERSION } from '../logic/ingredientReadings'
+import { newRecipeUid } from '../logic/recipeUid'
+import { detachRecipeLogs } from './detachedLogs'
 
 /** 入力の掃除: 名前が空の材料行・本文が空の手順行は保存しない */
 function cleanInput(input: RecipeInput): RecipeInput {
@@ -30,6 +32,9 @@ export async function createRecipe(input: RecipeInput): Promise<number> {
   const now = Date.now()
   const recipe: Recipe = {
     ...cleaned,
+    // レシピを一意に指す印（2026-08-16 便GZ）。削除しても残る「作った記録」を、
+    // 書き出したファイルから入れ直したときに正しい料理へ結び直すために使う（logic/recipeUid.ts）
+    uid: newRecipeUid(),
     isFavorite: false,
     cookedLogs: [],
     searchWords: buildSearchWords(cleaned.title, cleaned.ingredients, cleaned.tags, cleaned.keywords, cleaned.steps, cleaned.dishType),
@@ -65,12 +70,18 @@ export async function updateRecipe(id: number, input: RecipeInput): Promise<void
  * 2026-07-13 Fable設計。確認ダイアログは出さない＝設定のテーマ一覧「すべて戻す」で戻せるため）。
  * 同一トランザクションで週間献立(mealPlans)・今日の献立(todayList)から当該レシピの行も削除し、
  * 削除済みレシピを指す孤児データが残らないようにする（データ堅牢性強化・2026-07-13）。
- * mealPlansはrecipeIdに索引が無いためfilterで該当行を洗い出してから削除する
+ * mealPlansはrecipeIdに索引が無いためfilterで該当行を洗い出してから削除する。
+ *
+ * 2026-08-16 便GZ（オーナー承認）: 「作った！」の記録は消さず、同じトランザクションで
+ * detachedLogs（レシピの無い記録）へ移す。レシピのカードも詳細画面も無くなるのは従来どおりで、
+ * 記録・写真・ひとことメモだけが残り、記録の一覧・カレンダーから読めるようになる。
+ * 移し替えと削除を同じトランザクションにしてあるので、片方だけ成功して記録が消えることはない。
  */
 export async function deleteRecipe(id: number): Promise<void> {
-  await db.transaction('rw', db.recipes, db.setExclusions, db.mealPlans, db.todayList, async () => {
+  await db.transaction('rw', db.recipes, db.setExclusions, db.mealPlans, db.todayList, db.detachedLogs, async () => {
     const recipe = await db.recipes.get(id)
     if (recipe) {
+      await detachRecipeLogs([recipe])
       const record = exclusionRecordFor(recipe)
       if (record) {
         // 同じ (setId, title) の記録が既にあれば増やさない（何度削除しても記録は1件のまま）
@@ -103,10 +114,12 @@ export async function deleteRecipe(id: number): Promise<void> {
  */
 export async function deleteRecipes(ids: readonly number[]): Promise<number> {
   if (ids.length === 0) return 0
-  return db.transaction('rw', db.recipes, db.setExclusions, db.mealPlans, db.todayList, async () => {
+  return db.transaction('rw', db.recipes, db.setExclusions, db.mealPlans, db.todayList, db.detachedLogs, async () => {
     const targets = (await db.recipes.bulkGet([...ids])).filter((r): r is Recipe => !!r)
     const targetIds = targets.map((r) => r.id).filter((id): id is number => id != null)
     if (targetIds.length === 0) return 0
+    // 「作った！」の記録は消さずに残す（2026-08-16 便GZ。1品削除と同じ扱い）
+    await detachRecipeLogs(targets)
     for (const recipe of targets) {
       const record = exclusionRecordFor(recipe)
       if (!record) continue
@@ -165,9 +178,12 @@ export async function countRecipesDeleteImpact(
  * 戻したければテーマ一覧の「除外中◯品・すべて戻す」で解除できる）
  */
 export async function deleteRecipesBySourceSet(setId: string): Promise<number> {
-  return db.transaction('rw', db.recipes, db.mealPlans, db.todayList, async () => {
-    const ids = await db.recipes.where('sourceSetId').equals(setId).primaryKeys()
+  return db.transaction('rw', db.recipes, db.mealPlans, db.todayList, db.detachedLogs, async () => {
+    const targets = await db.recipes.where('sourceSetId').equals(setId).toArray()
+    const ids = targets.map((r) => r.id).filter((id): id is number => id != null)
     if (ids.length === 0) return 0
+    // 「作った！」の記録は消さずに残す（2026-08-16 便GZ。1品削除・まとめて削除と同じ扱い）
+    await detachRecipeLogs(targets)
     await db.recipes.bulkDelete(ids)
     const idSet = new Set(ids)
     const orphanMealPlanIds = await db.mealPlans.filter((e) => idSet.has(e.recipeId)).primaryKeys()

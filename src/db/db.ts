@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import type {
   BackupFileHandleRecord,
   DayNote,
+  DetachedCookedRecord,
   MealPlanEntry,
   MealPlanLock,
   MealTemplate,
@@ -36,6 +37,8 @@ class UchiRecipeDB extends Dexie {
   mealTemplates!: Table<MealTemplate, number>
   /** 献立のロック（自動の一括操作で触らない食事の印。主キーが 日付|食事）。2026-08-08 便DX */
   mealPlanLocks!: Table<MealPlanLock, string>
+  /** レシピを削除しても残る「作った記録」（削除したレシピ1品＝1行）。2026-08-16 便GZ */
+  detachedLogs!: Table<DetachedCookedRecord, number>
 
   constructor() {
     super('uchi-recipe')
@@ -221,6 +224,31 @@ class UchiRecipeDB extends Dexie {
       dayNotes: 'date',
       mealTemplates: '++id, createdAt',
       mealPlanLocks: 'key, date',
+    })
+    // バージョン17: レシピを削除しても残る「作った記録」（detachedLogs）テーブルを追加し、
+    // recipesに uid（レシピを一意に指す印）の索引を足す（2026-08-16 便GZ・オーナー承認）。
+    //
+    // 新規テーブルの追加と索引の追加だけで、既存の行の中身は書き換えない（upgrade関数不要）。
+    // uid を持たない既存レシピは索引に載らないだけで、読み書きは従来どおりできる。
+    // その「索引に載っていない件数」を数えて印を後から振るのが db/recipeUid.ts の
+    // backfillRecipeUids（全件を毎回読み直さずに、まだ印の無い端末だけを見分けるための索引）。
+    // detachedLogs の索引は recipeUid だけ＝入れ直したレシピと結び直すときに引くため
+    // （中身の logs は配列なので索引を張らない。dayNotes/mealTemplates を足したときと同じ作法）
+    this.version(17).stores({
+      recipes: '++id, title, *tags, *searchWords, updatedAt, sourceSetId, uid',
+      settings: 'id',
+      pantryItems: '++id, name',
+      shoppingItems: '++id, order',
+      mealPlans: '++id, date, [date+slot]',
+      todayList: '++id, recipeId, addedAt',
+      prices: '++id, name, updatedAt',
+      setExclusions: '++id, setId, title',
+      fileHandles: 'id',
+      preImportSnapshots: 'id',
+      dayNotes: 'date',
+      mealTemplates: '++id, createdAt',
+      mealPlanLocks: 'key, date',
+      detachedLogs: '++id, recipeUid',
     })
   }
 }

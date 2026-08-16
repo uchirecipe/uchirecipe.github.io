@@ -17655,8 +17655,16 @@ try {
       await w1Page.waitForTimeout(500)
       const delMessage = w1Dialogs[w1Dialogs.length - 1] ?? ''
       check(
-        'WORD-CI1-01/C01 削除の確認文に消える作った記録の件数(写真枚数つき)が入る(規約F)',
-        delMessage.includes('作った記録2件（うち写真0枚）'),
+        'WORD-CI1-01/C01 削除の確認文に作った記録の件数(写真枚数つき)が入る(規約F)',
+        /作った記録2件（うち写真0枚）/.test(delMessage),
+        delMessage,
+      )
+      // 2026-08-16 便GZ: 記録はレシピを消しても残るので「残るもの」側に書く。
+      // 言い回しではなく「記録の件数がどちらの項目に載っているか」で測る
+      check(
+        'WORD-CI1-01/C01 削除の確認文は作った記録を「残るもの」に書く(便GZ)',
+        /残るもの: [^\n]*作った記録2件/.test(delMessage) &&
+          !/消えるもの: [^\n]*作った記録/.test(delMessage),
         delMessage,
       )
       check(
@@ -19549,11 +19557,18 @@ try {
       check('BULKDEL-01 確認文に献立の予定の件数が入る', /献立の予定2件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に今日の献立の件数が入る', /今日の献立1件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
-      check('BULKDEL-01 確認文に残るものが件数つきで入る', /残るもの: 他のレシピ\d+品・買い物メモ・食材の在庫/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に残るものが件数つきで入る', /残るもの: [^\n]*他のレシピ\d+品・買い物メモ・食材の在庫/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      // 2026-08-16 便GZ: 作った記録はレシピを消しても残るので「残るもの」に書く
+      check(
+        'BULKDEL-01(便GZ) 確認文は作った記録を「残るもの」に書く',
+        /残るもの: 作った記録3件（うち写真1枚）/.test(bdDialogMsg) &&
+          !/消えるもの: [^\n]*作った記録/.test(bdDialogMsg),
+        `dialog=${bdDialogMsg}`,
+      )
       check(
         'BULKDEL-01 基本レシピは入れ直しで戻せることを区別して書く',
         /基本レシピ2品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(bdDialogMsg) &&
-          bdDialogMsg.includes('作った記録は戻りません'),
+          bdDialogMsg.includes('作った記録もつながり直します'),
         `dialog=${bdDialogMsg}`,
       )
       check('BULKDEL-01 「よろしいですか？」で終わらせない', !bdDialogMsg.includes('よろしいですか'))
@@ -19620,7 +19635,80 @@ try {
         JSON.stringify(bdState),
       )
 
-      // 実際に設定の「基本レシピを入れ直す」で2品が戻ること(記録は戻らないこと)まで確認する
+      // --- 便GZ(2026-08-16 オーナー承認): レシピを消しても作った記録は残る ---
+      // オーナー原文「レシピカードは削除されてレシピ詳細画面にも行けなくなり、記録を見るときに、
+      // 記録した情報や写真閲覧などはできるがレシピ詳細画面には行けない」
+      const bdDetached = await bdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('detachedLogs', 'readonly')
+              const g = tx.objectStore('detachedLogs').getAll()
+              g.onsuccess = () =>
+                resolve({
+                  logs: g.result.reduce((sum, r) => sum + r.logs.length, 0),
+                  photos: g.result.reduce(
+                    (sum, r) => sum + r.logs.filter((l) => !!l.photo).length,
+                    0,
+                  ),
+                  titles: g.result.map((r) => r.title).sort(),
+                  // 印(uid)を持っていないと入れ直しでつながりが戻らない
+                  withUid: g.result.filter((r) => !!r.recipeUid).length,
+                })
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'BULKDEL-01(便GZ) レシピを消しても作った記録3件が端末に残る',
+        bdDetached.logs === 3,
+        JSON.stringify(bdDetached),
+      )
+      check(
+        'BULKDEL-01(便GZ) 記録に添えた写真も残る',
+        bdDetached.photos === 1,
+        JSON.stringify(bdDetached),
+      )
+      check(
+        'BULKDEL-01(便GZ) 残った記録は料理名と印を持つ(印が無いと入れ直しでつながらない)',
+        bdDetached.withUid === 2 &&
+          bdDetached.titles.includes('肉じゃが') &&
+          bdDetached.titles.includes('カレーライス'),
+        JSON.stringify(bdDetached),
+      )
+      // 「作った記録の一覧」で読めて、レシピ詳細へは行けない
+      await bdPage.goto(`${BASE}/#/history`, { waitUntil: 'networkidle' })
+      await bdPage.waitForTimeout(1000)
+      const bdHistoryText = (await bdPage.textContent('body')) ?? ''
+      check(
+        'BULKDEL-01(便GZ) 消したレシピの記録が「作った記録の一覧」に出る',
+        bdHistoryText.includes('肉じゃが') && bdHistoryText.includes('カレーライス'),
+        bdHistoryText.slice(0, 400),
+      )
+      check(
+        'BULKDEL-01(便GZ) レシピが無いことが一覧で読んで分かる',
+        bdHistoryText.includes('このレシピは削除されています'),
+        bdHistoryText.slice(0, 400),
+      )
+      await bdPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first().click()
+      await bdPage.waitForTimeout(600)
+      const bdLogDialog =
+        (await bdPage.locator('[data-testid="cooked-detail-deleted-recipe"]').count()) === 1
+      check('BULKDEL-01(便GZ) 記録の小窓に、レシピが無いことが書いてある', bdLogDialog)
+      check(
+        'BULKDEL-01(便GZ) 記録の小窓からレシピ詳細へは行けない',
+        (await bdPage.getByRole('link', { name: 'レシピを見る' }).count()) === 0,
+      )
+      check(
+        'BULKDEL-01(便GZ) 残った記録は1件ずつ消せる(減らす手立てがある)',
+        (await bdPage.getByTestId('cooked-detail-delete-detached').count()) === 1,
+      )
+      await bdPage.keyboard.press('Escape')
+      await bdPage.waitForTimeout(300)
+
+      // 実際に設定の「基本レシピを入れ直す」で2品が戻り、記録もつながり直すことまで確認する
       await bdPage.goto(`${BASE}/#/settings?section=recipe`, { waitUntil: 'networkidle' })
       await bdPage.waitForTimeout(900)
       await bdPage.getByRole('button', { name: '基本レシピを入れ直す' }).click()
@@ -19650,7 +19738,31 @@ try {
             req.onerror = () => reject(req.error)
           }),
       )
-      check('BULKDEL-01 戻ってきても作った記録は戻らない(確認文どおり)', bdRestoredLogs === 0, `logs=${bdRestoredLogs}`)
+      // 2026-08-16 便GZ: 同梱の基本レシピの印は料理名から決まるので、入れ直すと同じ印の品が戻り、
+      // 残しておいた記録がその品につながり直す（確認文もそう言っている）
+      check(
+        'BULKDEL-01(便GZ) 入れ直すと作った記録3件がレシピにつながり直す',
+        bdRestoredLogs === 3,
+        `logs=${bdRestoredLogs}`,
+      )
+      const bdDetachedAfter = await bdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction('detachedLogs', 'readonly')
+              const g = tx.objectStore('detachedLogs').getAll()
+              g.onsuccess = () => resolve(g.result.length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'BULKDEL-01(便GZ) つながり直した記録は「レシピの無い記録」から消える(二重に出さない)',
+        bdDetachedAfter === 0,
+        `rows=${bdDetachedAfter}`,
+      )
     } finally {
       await bdBrowser.close()
     }

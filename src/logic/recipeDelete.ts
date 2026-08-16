@@ -79,34 +79,67 @@ export function summarizeRecipeDeleteImpact(
 
 /**
  * まとめて削除の確認の中身を組み立てる（規約F: 何が消えるか／何が残るかを件数つきで両方書く）。
- * 基本レシピが含まれるときだけ、入れ直しで戻せること（ただし作った記録は戻らないこと）を
- * 補足として足す。規約H: 場所は指示語ではなく画面名・ボタン名で言う。
+ * 基本レシピが含まれるときだけ、入れ直しで戻せることを補足として足す。
+ * 規約H: 場所は指示語ではなく画面名・ボタン名で言う。
  *
  * 2026-08-15 便GW: 素のダイアログ（window.confirm）から画面の中の窓へ移したので、
  * 1本の長い文ではなく「消えるもの」「残るもの」の2項目として返す。
+ *
+ * 2026-08-16 便GZ（オーナー承認）: 削除しても「作った記録」は端末に残るようになったので、
+ * 記録の件数を「消えるもの」から「残るもの」へ移した。
+ * 記録が0件のときは残り方の補足を出さない（残るものが無いのに残り方を説明しない）。
  */
 export function buildBulkDeleteConfirm(impact: RecipeDeleteImpact): ConfirmContent {
   const t = ja.recipes
+  const notes: string[] = []
+  if (impact.cookedLogs > 0) notes.push(t.bulkDeleteConfirmLogsNote)
+  if (impact.restorableStarters > 0) {
+    notes.push(t.bulkDeleteConfirmStarter.replace('{s}', String(impact.restorableStarters)))
+  }
   return {
     title: t.bulkDeleteConfirmTitle.replace('{r}', String(impact.recipes)),
     bullets: [
       {
         label: t.bulkDeleteConfirmGoneLabel,
         text: t.bulkDeleteConfirmGone
-          .replace('{n}', String(impact.cookedLogs))
-          .replace('{p}', String(impact.photos))
           .replace('{m}', String(impact.mealPlanEntries))
           .replace('{t}', String(impact.todayEntries)),
       },
       {
         label: t.bulkDeleteConfirmKeptLabel,
-        text: t.bulkDeleteConfirmKept.replace('{rest}', String(impact.remaining)),
+        text: t.bulkDeleteConfirmKept
+          .replace('{n}', String(impact.cookedLogs))
+          .replace('{p}', String(impact.photos))
+          .replace('{rest}', String(impact.remaining)),
       },
     ],
-    notes:
-      impact.restorableStarters === 0
-        ? []
-        : [t.bulkDeleteConfirmStarter.replace('{s}', String(impact.restorableStarters))],
+    notes,
     confirmLabel: t.bulkDeleteConfirmOk,
+  }
+}
+
+/**
+ * 1品削除の確認の中身（RecipeFormPage の「このレシピを削除」）。
+ * まとめて削除（buildBulkDeleteConfirm）と同じ規則で組み立てるため、画面側ではなくここに置く
+ * （置き場所が分かれると、片方だけ直して2つの確認文の言うことが食い違う）。
+ */
+export function buildSingleDeleteConfirm(logs: {
+  cookedLogs: number
+  photos: number
+}): ConfirmContent {
+  const t = ja.form
+  return {
+    title: t.confirmDeleteTitle,
+    bullets: [
+      { label: t.confirmDeleteGoneLabel, text: t.confirmDeleteGone },
+      {
+        label: t.confirmDeleteKeptLabel,
+        text: t.confirmDeleteKept
+          .replace('{n}', String(logs.cookedLogs))
+          .replace('{p}', String(logs.photos)),
+      },
+    ],
+    notes: logs.cookedLogs > 0 ? [t.confirmDeleteLogsNote] : [],
+    confirmLabel: t.confirmDeleteOk,
   }
 }

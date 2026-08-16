@@ -1,6 +1,8 @@
 import { db } from './db'
 import { defaultSettings, type Recipe, type RecipeInput } from './types'
 import { buildSearchWords } from '../logic/kana'
+import { starterRecipeUid } from '../logic/recipeUid'
+import { detachRecipeLogs, reattachDetachedLogs } from './detachedLogs'
 // 「基本レシピを入れ直す」の確認文をここで組み立てる（2026-08-15 便GP）。件数の出し分けが
 // 画面側に散らないよう、文言はja、組み立てはこのファイル（logic/backup.tsと同じ作法）
 import { ja } from '../i18n/ja'
@@ -2178,6 +2180,9 @@ function toRecipe(def: StarterDef): Recipe {
   const now = Date.now()
   return {
     ...def,
+    // 同梱の基本レシピの印は料理名から決まる形（logic/recipeUid.ts）。アプリが配る品なので、
+    // 「基本レシピを入れ直す」で入り直しても同じ印になり、削除で残した記録が戻る（2026-08-16 便GZ）
+    uid: starterRecipeUid(def.title),
     isFavorite: false,
     cookedLogs: [],
     isStarter: true,
@@ -2405,10 +2410,16 @@ export function planStarterReloadFor(
 export interface StarterReloadImpact {
   /** 削除される品数（アプリの基本レシピに同じ料理名が無い＝料理名を変えた品・配布が終わった品） */
   removed: number
-  /** 削除される品に付いている「作った記録」の件数 */
+  /**
+   * 削除される品に付いている「作った記録」の件数。
+   * 2026-08-16 便GZ以降、この記録は品と一緒には消えず「レシピの無い記録」として残る
+   * （＝確認文では「消えるもの」ではなく「残るもの」に数える）
+   */
   removedCookedLogs: number
-  /** 削除される品に付いている写真の枚数（レシピの写真＋作った記録の写真） */
-  removedPhotos: number
+  /** そのうち写真つきの枚数（記録と一緒に残る） */
+  removedCookedPhotos: number
+  /** 削除される品に登録されているレシピの写真の枚数（こちらは品と一緒に消える） */
+  removedRecipePhotos: number
   /** 料理名が一致して残る品数（内容だけが最初の状態に戻る） */
   kept: number
   /** 端末に無いので追加される品数 */
@@ -2424,11 +2435,11 @@ export function countStarterReloadImpact(
   return {
     removed: removedRecipes.length,
     removedCookedLogs: removedRecipes.reduce((sum, r) => sum + (r.cookedLogs?.length ?? 0), 0),
-    removedPhotos: removedRecipes.reduce(
-      (sum, r) =>
-        sum + (r.photo ? 1 : 0) + (r.cookedLogs ?? []).filter((log) => !!log.photo).length,
+    removedCookedPhotos: removedRecipes.reduce(
+      (sum, r) => sum + (r.cookedLogs ?? []).filter((log) => !!log.photo).length,
       0,
     ),
+    removedRecipePhotos: removedRecipes.reduce((sum, r) => sum + (r.photo ? 1 : 0), 0),
     kept: existingStarters.length - removedRecipes.length,
     added: plan.toAdd.length,
   }
@@ -2444,18 +2455,12 @@ export function buildStarterReloadConfirm(impact: StarterReloadImpact): ConfirmC
   const bullets: { label: string; text: string }[] = []
   if (impact.removed > 0) {
     // 0のものは並べない（「写真0枚も消えます」＝消えないものを数える文にしない）
-    const removedItems = [
-      impact.removedCookedLogs > 0 &&
-        t.starterReloadConfirmRemovedLogs.replace('{c}', String(impact.removedCookedLogs)),
-      impact.removedPhotos > 0 &&
-        t.starterReloadConfirmRemovedPhotos.replace('{p}', String(impact.removedPhotos)),
-    ].filter((item): item is string => !!item)
     bullets.push({
       label: t.starterReloadConfirmRemovedLabel,
       text:
         t.starterReloadConfirmRemoved.replace('{d}', String(impact.removed)) +
-        (removedItems.length > 0
-          ? t.starterReloadConfirmRemovedData.replace('{items}', removedItems.join('・'))
+        (impact.removedRecipePhotos > 0
+          ? t.starterReloadConfirmRemovedData.replace('{p}', String(impact.removedRecipePhotos))
           : ''),
     })
   }
@@ -2472,7 +2477,18 @@ export function buildStarterReloadConfirm(impact: StarterReloadImpact): ConfirmC
       text: t.starterReloadConfirmAdded.replace('{a}', String(impact.added)),
     })
   }
-  bullets.push({ label: t.starterReloadConfirmStaysLabel, text: t.starterReloadConfirmStays })
+  bullets.push({
+    label: t.starterReloadConfirmStaysLabel,
+    // 消える品に「作った記録」が付いているときだけ、その記録が残ることとどこで読めるかを足す
+    // （2026-08-16 便GZ。記録が0件のときに書くと、無いものを残ると言うことになる）
+    text:
+      t.starterReloadConfirmStays +
+      (impact.removedCookedLogs > 0
+        ? t.starterReloadConfirmStaysLogs
+            .replace('{c}', String(impact.removedCookedLogs))
+            .replace('{p}', String(impact.removedCookedPhotos))
+        : ''),
+  })
   return {
     title: t.starterReloadConfirmTitle,
     bullets,
@@ -2514,17 +2530,26 @@ export interface StarterReloadResult {
 export async function reloadStarterRecipes(): Promise<StarterReloadResult> {
   let added = 0
   let updated = 0
-  await db.transaction('rw', db.recipes, db.setExclusions, async () => {
+  await db.transaction('rw', db.recipes, db.setExclusions, db.detachedLogs, async () => {
     const allRecipes = await db.recipes.toArray()
     const exclusionTitles = (await db.setExclusions.toArray()).map((e) => e.title)
     // 押す前の予行(previewStarterReload)と同じ選び方を使う＝確認文の件数と実際の増減がずれない
     const { plan } = planStarterReloadFor(allRecipes, exclusionTitles)
-    if (plan.toDeleteIds.length) await db.recipes.bulkDelete(plan.toDeleteIds)
+    if (plan.toDeleteIds.length) {
+      // 消される品（アプリの基本レシピに同じ料理名が無い品）の「作った記録」も残す
+      // （2026-08-16 便GZ。レシピの削除と同じ扱い＝どの経路で消しても記録は失われない）
+      const removedIds = new Set(plan.toDeleteIds)
+      await detachRecipeLogs(allRecipes.filter((r) => r.id != null && removedIds.has(r.id)))
+      await db.recipes.bulkDelete(plan.toDeleteIds)
+    }
     if (plan.toUpdate.length) await db.recipes.bulkPut(plan.toUpdate)
     if (plan.toAdd.length) await db.recipes.bulkAdd(plan.toAdd.map(toRecipe))
     added = plan.toAdd.length
     updated = plan.toUpdate.length
   })
+  // 入れ直しで戻ってきた基本レシピに、削除で残しておいた「作った記録」を結び直す
+  // （2026-08-16 便GZ。印が一致したときだけ＝料理名では結ばない。トランザクションの外で呼ぶ）
+  await reattachDetachedLogs()
   return { added, updated }
 }
 
