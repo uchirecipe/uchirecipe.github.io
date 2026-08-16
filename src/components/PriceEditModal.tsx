@@ -117,7 +117,7 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
         role="dialog"
         aria-label={dialogTitle}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-bold">{isAddMode ? ja.detail.costAddTitle : (entry?.name ?? target.name)}</h3>

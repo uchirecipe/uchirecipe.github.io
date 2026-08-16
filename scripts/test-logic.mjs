@@ -19608,6 +19608,35 @@ Aみりん 大さじ1
       true,
     )
   }
+
+  // SPEAK-08(便HD): 1回目の読み上げは、読み上げたい文だけをその場でブラウザへ渡す。
+  //
+  // オーナー実機 iPhone SE2/Safari「読み上げ1回目からなりましたが、1回目のみ音の出だしが
+  // ワンテンポ遅かったのが気になりました」。出だしの遅れはブラウザ側の読み上げの立ち上がりで、
+  // アプリ側の下ごしらえ(用語辞書の読み替え)は便HDの実測で1回目0.79ms・2回目以降0.06ms＝
+  // 耳で分かる差にならない。
+  //
+  // 「無音の発話を先に1回通して温める」案は**採らなかった**（理由は便HDの報告に記載）。
+  // ここで固定するのは、そのぶん**読み上げの前に何も割り込ませない**こと。
+  // 先に別の発話を積むと、ブラウザに渡る順番が変わり、待ち行列に入ったぶん
+  // かえって1回目が遅くなる（この読み上げの段取りは speaking/pending を見て
+  // 「読み直し」と判断し、取り消し＋間を置く道へ入る）。
+  {
+    const synth = makeSynth()
+    const clock = makeClock()
+    const { engine } = makeEngine(synth, clock)
+    engine.speak('玉ねぎをくし形に切る')
+    eq(
+      'SPEAK-08 1回目にブラウザへ渡るのは、読み上げたい文だけ(温めの発話を先に挟まない)',
+      synth.spoken.map((u) => u.text),
+      ['玉ねぎをくし形に切る'],
+    )
+    eq(
+      'SPEAK-08 1回目は待ちを挟まずその場で渡す(押してから鳴るまでを長くしない)',
+      synth.calls,
+      ['speak'],
+    )
+  }
 }
 
 // ---------- 便GY-2: マナーモードでのタイマー音（2026-08-16 オーナー実機確認） ----------
@@ -20486,6 +20515,114 @@ Aみりん 大さじ1
       true,
     )
   }
+}
+
+// ---------- 便HD: 縦にだけ送る箱が、横にも動かせてしまう（2026-08-16 オーナー実機 iPhone SE2/Safari） ----------
+// オーナー実機「作った！の窓の中の情報量が多すぎて、縦横にスクロールできる状態でした。
+// 写真はわかりやすいように右下を表示したものなので、余白や見出しもちゃんとありました」。
+//
+// 起きていたこと（便HDが実測で突き止めた機序）:
+//  ① `src/index.css` の body に `hanging-punctuation: allow-end` がある。行末の約物（」）。、）を
+//     行の外へぶら下げる指定で、**Safari系だけが実装している**（Chromiumは未実装＝何も起きない）。
+//  ② Safari はぶら下げたぶんを「右へのはみ出し」として記録する。実測で、文字14pxの行に対して13px、
+//     文字18px太字の行に対して17px。**見た目にはみ出しているのは1px程度**で、残りは中身の無い余白。
+//  ③ 窓は `overflow-y-auto` だけを指定していた。CSSの規定で、**片方の軸が visible でなくなると
+//     もう片方の visible は auto に変わる**ため、`overflow-x` が auto になっていた
+//     ＝窓は横にも送れる箱になっていた。
+//  ④ ②のはみ出しが窓の左右の余白（16px＋枠1px）を超えると、窓が実際に横へ動く。
+//     便HDの再現実験では 18px 太字の行で `scrollWidth - clientWidth = 1`、実際に横へ1px動いた。
+//     どの行が余白を超えるかは端末の字形と折り返し位置しだいなので、Chromiumでも、
+//     PCのSafariでも出ないのに実機だけで出る、という形になる。
+//
+// ここで測るのは「縦にだけ送るつもりの箱が、横にも動ける状態になっていないか」の1点。
+// 置き場所や件数ではなく **src全体に1つも無いこと** を見るので、窓が増えても勝手に守られる。
+// 見た目は変わらない（横に動かせないだけで、はみ出しはもともと余白の中に収まっている）。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const collectSources = (dir) => {
+    const out = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...collectSources(full))
+      else if (/\.(ts|tsx)$/.test(entry.name)) out.push(full)
+    }
+    return out
+  }
+  /**
+   * 指定のかたまり（'...' "..." `...`）を取り出す。コメントの中の「'」を
+   * 文字列の始まりと取り違えないよう、コメントと文字列を1文字ずつ見分けて拾う
+   * （説明文に overflow-y-auto と書いただけの行を落とさないため）
+   */
+  const collectStringLiterals = (src) => {
+    const out = []
+    let i = 0
+    let line = 1
+    while (i < src.length) {
+      const c = src[i]
+      if (c === '\n') {
+        line++
+        i++
+      } else if (c === '/' && src[i + 1] === '/') {
+        while (i < src.length && src[i] !== '\n') i++
+      } else if (c === '/' && src[i + 1] === '*') {
+        i += 2
+        while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+          if (src[i] === '\n') line++
+          i++
+        }
+        i += 2
+      } else if (c === "'" || c === '"' || c === '`') {
+        const startLine = line
+        const quote = c
+        let value = ''
+        i++
+        while (i < src.length && src[i] !== quote) {
+          if (src[i] === '\\') {
+            i += 2
+            continue
+          }
+          if (src[i] === '\n') line++
+          value += src[i]
+          i++
+        }
+        i++
+        out.push({ value, line: startLine })
+      } else i++
+    }
+    return out
+  }
+  /**
+   * 横にも送れてよい箱は `overflow-x-auto` などを自分で書けば対象外になる
+   * （判定は「同じ指定のかたまりの中に overflow-x-* があるか」）
+   */
+  const offenders = []
+  for (const full of collectSources(path.join(appRoot, 'src'))) {
+    const rel = path.relative(appRoot, full).split(path.sep).join('/')
+    for (const { value, line } of collectStringLiterals(readFileSync(full, 'utf-8'))) {
+      if (!value.includes('overflow-y-auto')) continue
+      if (/overflow-x-(hidden|auto|scroll|clip)/.test(value)) continue
+      offenders.push(`${rel}:${line}`)
+    }
+  }
+  eq(
+    'HD-1 縦にだけ送る箱(overflow-y-auto)は、横に動けないことも書いてある',
+    offenders,
+    [],
+  )
+
+  // 窓そのもの（利用者が「作った！」で開くもの）が、いま横に動けない指定になっていること。
+  // 上の掃引はsrc全体を見るが、こちらは**オーナーが実機で触った窓**を名指しで押さえる
+  const cookedLogSrc = readFileSync(
+    path.join(appRoot, 'src/components/CookedLogModal.tsx'),
+    'utf-8',
+  )
+  eq(
+    'HD-2 「作った記録をつける」の窓は横に動かせない',
+    /overflow-x-hidden[^"'`]*overflow-y-auto|overflow-y-auto[^"'`]*overflow-x-hidden/.test(
+      cookedLogSrc,
+    ),
+    true,
+  )
 }
 
 // ---------- 結果 ----------

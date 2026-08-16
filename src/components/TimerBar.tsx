@@ -115,7 +115,7 @@ export default function TimerBar() {
       className="fixed inset-x-0 z-10"
       style={{ bottom: 'calc(72px + env(safe-area-inset-bottom))' }}
     >
-      <div className="mx-auto max-h-[38vh] max-w-md space-y-1 overflow-y-auto px-[var(--space-sm)]">
+      <div className="mx-auto max-h-[38vh] max-w-md space-y-1 overflow-x-hidden overflow-y-auto px-[var(--space-sm)]">
         {showFirstTimeNotice && (
           <div className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-xs text-ink-muted shadow-md">
             <span className="min-w-0 flex-1">{ja.timer.notice}</span>

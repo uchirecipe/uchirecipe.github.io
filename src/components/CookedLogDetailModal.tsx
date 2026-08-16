@@ -181,7 +181,7 @@ export default function CookedLogDetailModal({
           role="dialog"
           aria-label={ja.cookedDetail.dialogAria.replace('{title}', recipe.title)}
           onClick={(e) => e.stopPropagation()}
-          className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
         >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">

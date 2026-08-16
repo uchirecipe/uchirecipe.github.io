@@ -157,7 +157,7 @@ const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
  *    ＝開いている間にスクロール位置が変わらない
  */
 const PANEL_CLS =
-  'pointer-events-auto mt-[var(--space-sm)] max-h-[calc(100dvh-14rem)] overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface px-[var(--space-md)] pb-[var(--space-md)] shadow-md'
+  'pointer-events-auto mt-[var(--space-sm)] max-h-[calc(100dvh-14rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface px-[var(--space-md)] pb-[var(--space-md)] shadow-md'
 
 /** パネルと画面の縁（貼り付く検索バー・下のタブナビ）のあいだに残す余白（px） */
 const PANEL_EDGE_GAP = 8
@@ -1620,7 +1620,7 @@ export default function RecipesPage() {
           className="fixed inset-x-0 z-20 border-t border-edge bg-surface shadow-md"
           style={{ bottom: selectionBarBottom }}
         >
-          <div className="mx-auto flex max-h-[45vh] max-w-md flex-col gap-2 overflow-y-auto px-[var(--space-md)] py-[var(--space-sm)]">
+          <div className="mx-auto flex max-h-[45vh] max-w-md flex-col gap-2 overflow-x-hidden overflow-y-auto px-[var(--space-md)] py-[var(--space-sm)]">
             <div className="flex items-center justify-between gap-2">
               <p className="min-w-0 flex-1 text-sm font-bold text-ink-muted">
                 {selectedIds.length === 0

@@ -521,7 +521,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           見出しの行へ移したので、置き場所のためだけに行を残す必要がなくなった */}
       {shownTimers.length > 0 && (
       <div className="flex items-start gap-2 px-[var(--space-md)] pb-1">
-        <div className="flex max-h-[30vh] min-w-0 flex-1 flex-wrap items-center justify-center gap-2 overflow-y-auto">
+        <div className="flex max-h-[30vh] min-w-0 flex-1 flex-wrap items-center justify-center gap-2 overflow-x-hidden overflow-y-auto">
         {shownTimers.map((t) => {
           const isThisRecipe = t.recipeId === recipeId
           // 2026-08-03 実機FB②: どのレシピのタイマーかが分からなかったため、この料理の分も含め
@@ -640,7 +640,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
         // (Chromium系で発生。375x667の同梱レシピ10手順で実測。最大101px欠落)。
         // safe center は「あふれた時だけ flex-start 相当に落ちる」ので、収まる短い手順の
         // 見え方は上のpt<pb裁定を含めて1pxも変わらない
-        className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[calc(var(--space-lg)+var(--space-sm))] pt-[var(--space-sm)] text-center"
+        className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-x-hidden overflow-y-auto px-[var(--space-lg)] pb-[calc(var(--space-lg)+var(--space-sm))] pt-[var(--space-sm)] text-center"
         /* 文字の大きさ（2026-08-12 便FX）は、この枠の中で大きさを指定していない文字に効く
            ＝手順本文（下で明示）・メモ。番号のバッジ・ボタンは各自の大きさを持つので動かない */
         style={{ fontSize: cookFontSize(1, fontScale) }}

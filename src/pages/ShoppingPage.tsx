@@ -1050,7 +1050,7 @@ export default function ShoppingPage() {
               </select>
             </label>
           </div>
-          <div className="mt-[var(--space-sm)] flex-1 overflow-y-auto px-[var(--space-md)]">
+          <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto px-[var(--space-md)]">
             {filteredRecipes.length === 0 ? (
               <p className="mt-[var(--space-md)] text-center text-ink-muted">
                 {visibleRecipes.length === 0 ? ja.shopping.pickerEmpty : ja.shopping.pickerNoMatch}

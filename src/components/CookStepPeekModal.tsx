@@ -120,7 +120,7 @@ export default function CookStepPeekModal({
           {ja.cookNavi.sessionTimerPeekNote}
         </p>
         {/* 本文が長い手順でも窓が画面からはみ出さないよう、読む面だけを送れるようにする */}
-        <div className="mt-1 max-h-[42vh] overflow-y-auto rounded-sm bg-app px-2 py-1.5">
+        <div className="mt-1 max-h-[42vh] overflow-x-hidden overflow-y-auto rounded-sm bg-app px-2 py-1.5">
           <p data-testid="cook-session-timer-peek-text" className="ja-phrase leading-relaxed">
             {text}
           </p>

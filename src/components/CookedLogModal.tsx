@@ -118,11 +118,20 @@ export default function CookedLogModal({
       onClick={onClose}
       role="presentation"
     >
+      {/* overflow-x-hidden は「横には動かせない」ことをはっきり書くためのもの(2026-08-16 便HD・
+          オーナー実機 iPhone SE2/Safari「作った！の窓の中の情報量が多すぎて、縦横にスクロール
+          できる状態でした。写真はわかりやすいように右下を表示したものなので、余白や見出しも
+          ちゃんとありました」)。
+          縦に送る指定(overflow-y-auto)だけを書くと、CSSの規定でもう片方の軸の visible が auto に
+          変わる＝横にも送れる箱になる。そこへ Safari だけが持つ行末約物のぶら下げ
+          (src/index.css の hanging-punctuation: allow-end)のはみ出しが乗ると、中身は何も無いのに
+          横へ動く。見た目は変わらない(はみ出しはもともと余白の中に収まっている)。
+          同じ形の箱は src 全体で揃えてある(scripts/test-logic.mjs の HD-1 が見張る) */}
       <div
         role="dialog"
         aria-label={ja.detail.cookedDialogTitle}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-bold">{ja.detail.cookedDialogTitle}</h3>

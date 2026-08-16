@@ -923,7 +923,7 @@ export default function CookSessionOverlay({
       {finishedTimers.length > 0 && (
         <div
           data-testid="cook-session-finished-timers"
-          className="mx-[var(--space-md)] mb-1 max-h-[26vh] space-y-1 overflow-y-auto"
+          className="mx-[var(--space-md)] mb-1 max-h-[26vh] space-y-1 overflow-x-hidden overflow-y-auto"
         >
           {finishedTimers.map((t) => (
             <div
@@ -976,7 +976,7 @@ export default function CookSessionOverlay({
       {currentTimers.length > 0 && (
         <div
           data-testid="cook-session-current-timers"
-          className="flex max-h-[22vh] flex-wrap items-center justify-center gap-2 overflow-y-auto px-[var(--space-md)] pb-1"
+          className="flex max-h-[22vh] flex-wrap items-center justify-center gap-2 overflow-x-hidden overflow-y-auto px-[var(--space-md)] pb-1"
         >
           {currentTimers.map((t) => (
             <TimerChip
@@ -998,7 +998,7 @@ export default function CookSessionOverlay({
           ＝手順本文（下で明示）・その手順の注意書き・その手順で使う材料。
           番号のバッジ・待ちブロックの但し書き・ボタンは各自の大きさを持つので動かない */}
       <div
-        className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-y-auto px-[var(--space-lg)] pb-[var(--space-md)] pt-[var(--space-sm)] text-center"
+        className="flex flex-1 flex-col items-center justify-center-safe gap-[var(--space-md)] overflow-x-hidden overflow-y-auto px-[var(--space-lg)] pb-[var(--space-md)] pt-[var(--space-sm)] text-center"
         style={{ fontSize: cookFontSize(1, fontScale) }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
@@ -1061,7 +1061,7 @@ export default function CookSessionOverlay({
         <NaviRecipeNotes
           notes={currentRecipeNotes}
           testId="cook-session-recipe-memo"
-          className="max-h-[24vh] w-full overflow-y-auto"
+          className="max-h-[24vh] w-full overflow-x-hidden overflow-y-auto"
         />
 
         {/* この手順で使う材料と分量（3品ぶんの材料が混ざるのを防ぐ。色はその料理の色） */}
@@ -1300,7 +1300,7 @@ export default function CookSessionOverlay({
                   {next && (
                     <div
                       data-testid="cook-session-peek"
-                      className="mb-1 max-h-[28vh] overflow-y-auto rounded-sm bg-app px-2 py-1.5"
+                      className="mb-1 max-h-[28vh] overflow-x-hidden overflow-y-auto rounded-sm bg-app px-2 py-1.5"
                     >
                       <p className="ja-phrase text-sm leading-relaxed">{next.text}</p>
                       {next.memo && (

@@ -54,7 +54,7 @@ export default function ArchiveViewerModal({ open, logs, brokenCount, onClose }:
         >
           {ja.settings.archiveViewBanner}
         </p>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <p className="px-[var(--space-md)] pt-[var(--space-sm)] text-sm text-ink-muted">
             {ja.settings.archiveViewCount.replace('{n}', String(logs.length))}
           </p>

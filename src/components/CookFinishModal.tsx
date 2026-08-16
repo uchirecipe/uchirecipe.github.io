@@ -86,7 +86,7 @@ export default function CookFinishModal({
         aria-label={ja.cookNavi.sessionFinishTitle}
         onClick={(e) => e.stopPropagation()}
         data-testid="cook-finish-modal"
-        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <p className="text-lg font-bold">{ja.cookNavi.sessionFinishTitle}</p>
         {/* 本文は改行をそのまま出す（「まとめて作った！」の確認と同じ文面） */}

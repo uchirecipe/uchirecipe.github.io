@@ -189,7 +189,7 @@ export default function MealTemplatesPage() {
               />
             </div>
           </div>
-          <div className="mt-[var(--space-sm)] flex-1 overflow-y-auto px-[var(--space-md)]">
+          <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto px-[var(--space-md)]">
             {pickerResults.length === 0 ? (
               <p className="mt-[var(--space-md)] text-center text-ink-muted">
                 {visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}

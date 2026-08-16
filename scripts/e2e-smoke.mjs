@@ -2448,6 +2448,102 @@ try {
     }
   }
 
+  // --- MODALX-01: 「作った記録をつける」の窓を、横には動かせない(2026-08-16 便HD)。
+  // オーナー実機 iPhone SE2/Safari「作った！の窓の中の情報量が多すぎて、縦横にスクロールできる
+  // 状態でした。写真はわかりやすいように右下を表示したものなので、余白や見出しもちゃんとありました」。
+  //
+  // なぜ**Safariの描画エンジン(webkit)で**測るか: 原因の一つ(src/index.css の
+  // hanging-punctuation: allow-end による行末約物のぶら下げ)は**Safari系しか実装していない**。
+  // Chromiumでは何も起きないので、Chromiumだけで測っても永久に気づけない。
+  //
+  // 測るのは2つ:
+  //  ① いまの中身が窓より広くなっていないこと(はみ出しそのもの)
+  //  ② **窓より広いものが入っても横には動かないこと**(窓の作りとしての保証)。
+  //     ①だけでは、実機でしか出ない字形の差でまた横に動く状態に戻っても気づけない。
+  //     ②は中身に何を入れても成り立つので、窓の中身が増えても勝手に守られる
+  currentCheck = 'MODALX-01'
+  {
+    const mxBrowser = await webkit.launch()
+    try {
+      // 高さの低い画面(Safariのアドレスバーぶん低い場合)も含めて見る
+      for (const size of [
+        { width: 375, height: 667 },
+        { width: 320, height: 568 },
+      ]) {
+        const mxContext = await mxBrowser.newContext({ viewport: size })
+        const mxPage = await mxContext.newPage()
+        mxPage.on('pageerror', (err) => {
+          if (
+            err.message.includes('cloudflareinsights') ||
+            err.message.includes('Access-Control-Allow-Origin')
+          )
+            return
+          errors.push(`[pageerror@MODALX-01] ${err.message}`)
+        })
+        try {
+          await mxPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await mxPage.waitForTimeout(1800) // 初回シード完了待ち
+          await mxPage.evaluate(() => {
+            const link = document.querySelector('a[href^="#/recipes/"]')
+            if (link instanceof HTMLElement) link.click()
+          })
+          await mxPage.waitForTimeout(600)
+          await mxPage.evaluate(() => {
+            const btn = Array.from(document.querySelectorAll('button')).find(
+              (b) => b.textContent?.trim() === '作った！',
+            )
+            if (btn instanceof HTMLElement) btn.click()
+          })
+          await mxPage.waitForTimeout(400)
+          const widthOver = await mxPage.evaluate(() => {
+            const dialog = document.querySelector('[role="dialog"]')
+            return dialog ? dialog.scrollWidth - dialog.clientWidth : null
+          })
+          check(
+            `MODALX-01 (${size.width}x${size.height}) 窓の中身が窓より広くない`,
+            widthOver !== null && widthOver <= 0,
+            `scrollWidth-clientWidth=${widthOver}`,
+          )
+          // 窓より広いものを一時的に入れてから、**実際に横へ払う操作**をして動かないことを見る。
+          // 実機でだけ出るはみ出し(Safariの行末約物のぶら下げ)は手元では作れないので、
+          // 「はみ出しが起きたらどうなるか」を窓の側で押さえる。
+          // scrollLeft に直接代入する形では測れない(横に動かせない指定でも代入だけは通るため)
+          await mxPage.evaluate(() => {
+            const dialog = document.querySelector('[role="dialog"]')
+            const probe = document.createElement('div')
+            probe.dataset.e2eWideProbe = '1'
+            probe.style.width = '3000px'
+            probe.style.height = '1px'
+            dialog?.appendChild(probe)
+            if (dialog) dialog.scrollLeft = 0
+          })
+          const dialogBox = await mxPage.locator('[role="dialog"]').boundingBox()
+          await mxPage.mouse.move(
+            dialogBox.x + dialogBox.width / 2,
+            dialogBox.y + dialogBox.height / 2,
+          )
+          await mxPage.mouse.wheel(300, 0)
+          await mxPage.waitForTimeout(300)
+          const movedSideways = await mxPage.evaluate(() => {
+            const dialog = document.querySelector('[role="dialog"]')
+            const moved = dialog?.scrollLeft ?? null
+            document.querySelector('[data-e2e-wide-probe]')?.remove()
+            return moved
+          })
+          check(
+            `MODALX-01 (${size.width}x${size.height}) 窓より広いものが入っても、横に払っても動かない`,
+            movedSideways === 0,
+            `横に払ったあとの位置=${movedSideways}`,
+          )
+        } finally {
+          await mxContext.close()
+        }
+      }
+    } finally {
+      await mxBrowser.close()
+    }
+  }
+
   // --- LOG-PHOTO-01: 「作った！」記録への写真添付(2026-07-12・docs/20 §4)。
   // ・写真を選ぶと窓(CookedLogModal)内にプレビューが出て、保存すると記録一覧に64pxサムネイルが出る
   // ・サムネイルをタップすると原寸表示の窓が開く

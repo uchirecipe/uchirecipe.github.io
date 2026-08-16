@@ -67,7 +67,7 @@ export default function ConfirmDialog({
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
         data-testid={testId}
-        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <p className="ja-phrase text-lg font-bold">{title}</p>
         {body.trim() !== '' && (
