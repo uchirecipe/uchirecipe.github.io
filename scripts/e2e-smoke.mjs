@@ -5420,7 +5420,12 @@ try {
       )
       check(
         'TIMER-ORDER-01 後から起動しても残りが少ないタイマーが上に来る(起動順ではない)',
-        orderLabels.length === 2 && orderLabels[0].startsWith('タイマーの'),
+        // 上に来るのが「自分で決めたタイマー」であることを、読み上げ名の言い回しに
+        // 依存せずに見る（2026-08-16に「タイマーのタイマーを調整」→「タイマーを調整」へ）。
+        // 手順のタイマーは料理名や手順が名前に入るので、そこで見分ける
+        orderLabels.length === 2 &&
+          !orderLabels[0].includes('手順') &&
+          orderLabels[1].includes('手順'),
         JSON.stringify(orderLabels),
       )
 
@@ -17854,8 +17859,15 @@ try {
       // 言い回しではなく「記録の件数がどちらの項目に載っているか」で測る
       check(
         'WORD-CI1-01/C01 削除の確認文は作った記録を「残るもの」に書く(便GZ)',
-        /残るもの: [^\n]*作った記録2件/.test(delMessage) &&
-          !/消えるもの: [^\n]*作った記録/.test(delMessage),
+        // 見出しの位置で範囲を切る（窓の文字を取り出すと改行が消えるため。2026-08-16）
+        (() => {
+          const removed = delMessage.slice(
+            delMessage.indexOf('消えるもの'),
+            delMessage.indexOf('残るもの'),
+          )
+          const kept = delMessage.slice(delMessage.indexOf('残るもの'))
+          return kept.includes('作った記録2件') && !removed.includes('作った記録')
+        })(),
         delMessage,
       )
       check(
@@ -19752,8 +19764,16 @@ try {
       // 2026-08-16 便GZ: 作った記録はレシピを消しても残るので「残るもの」に書く
       check(
         'BULKDEL-01(便GZ) 確認文は作った記録を「残るもの」に書く',
-        /残るもの: 作った記録3件（うち写真1枚）/.test(bdDialogMsg) &&
-          !/消えるもの: [^\n]*作った記録/.test(bdDialogMsg),
+        // 窓の文字を取り出すと改行が消えるので、`[^\n]*` では範囲を切れない（文章全体に広がる）。
+        // 「消えるもの」と「残るもの」の見出しの位置で切って、どちらに入っているかを見る
+        (() => {
+          const removed = bdDialogMsg.slice(
+            bdDialogMsg.indexOf('消えるもの'),
+            bdDialogMsg.indexOf('残るもの'),
+          )
+          const kept = bdDialogMsg.slice(bdDialogMsg.indexOf('残るもの'))
+          return kept.includes('作った記録3件（うち写真1枚）') && !removed.includes('作った記録')
+        })(),
         `dialog=${bdDialogMsg}`,
       )
       check(
