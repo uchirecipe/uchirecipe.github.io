@@ -20625,6 +20625,32 @@ Aみりん 大さじ1
   )
 }
 
+// --- 日付の欄が枠からはみ出さない（2026-08-16 オーナー実機・iPhone SE2）。
+//     iOSでは中の値が独立した箱で描かれ、既定の余白と最小幅を持つため width:100% では抑えられない。
+//     手元のブラウザでは再現しないので、**指定が消えていないこと**を見張る ---
+{
+  const heRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const css = readFileSync(path.join(heRoot, 'src/index.css'), 'utf-8')
+  eq(
+    'HE-1 日付の欄の中の値から、既定の余白と最小幅を外している',
+    /::-webkit-date-and-time-value[\s\S]{0,120}margin:\s*0/.test(css) &&
+      /::-webkit-date-and-time-value[\s\S]{0,120}min-width:\s*0/.test(css),
+    true,
+  )
+  eq(
+    'HE-1 iOSのときだけ日付欄の見た目の作り直しを外す（デスクトップの印を消さない）',
+    /@supports \(-webkit-touch-callout: none\)[\s\S]{0,200}input\[type='date'\][\s\S]{0,120}appearance:\s*none/.test(
+      css,
+    ),
+    true,
+  )
+  eq(
+    'HE-1 日付の欄そのものにも縮む指定がある',
+    /input\[type='date'\]\s*\{[\s\S]{0,120}min-width:\s*0/.test(css),
+    true,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

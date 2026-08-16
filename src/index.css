@@ -338,6 +338,40 @@
 }
 
 @layer base {
+  /*
+   * 日付の欄が、枠から右にはみ出して見切れる（2026-08-16 オーナー実機・iPhone SE2 / Safari）。
+   *
+   * 直前に「窓の中で横にスクロールできる」を直した（26か所に overflow-x-hidden）ため、
+   * 横には動かなくなった代わりに**日付欄だけが切れて見える**状態になった＝欄そのものが
+   * 枠より広い、ということ。`w-full min-w-0 max-w-full` は既に付いているのに縮んでいない。
+   *
+   * iOS の日付欄は中の値が独立した箱（::-webkit-date-and-time-value）で描かれ、
+   * これが**既定の余白と最小幅を持つ**ため、外側の width:100% では抑えられない。
+   * ChromiumやデスクトップのWebKitでは同じ描かれ方をしないので、手元では再現しない
+   * （2026-08-16に司令部・便HDとも再現できなかった理由）。
+   *
+   * ①中の値の箱の余白と最小幅を外す（どのブラウザでも無害）
+   * ②iOSのときだけ、日付欄の見た目を作り直す指定を外す（-webkit-touch-callout は iOS だけが持つ）。
+   *   デスクトップのChromeでカレンダーの印が消えないよう、iOSに限定する
+   */
+  input[type='date'] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  input[type='date']::-webkit-date-and-time-value {
+    margin: 0;
+    min-width: 0;
+    text-align: left;
+  }
+
+  @supports (-webkit-touch-callout: none) {
+    input[type='date'] {
+      -webkit-appearance: none;
+      appearance: none;
+    }
+  }
+
   html {
     /* システム標準の日本語フォント（読み込みゼロ・高速） */
     font-family: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
