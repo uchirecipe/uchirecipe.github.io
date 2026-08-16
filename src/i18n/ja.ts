@@ -2360,6 +2360,10 @@ export const ja = {
     archiveTargetCount: '{n}ヶ月より前の記録: {c}件（写真{p}枚）',
     archiveTargetNone: '{n}ヶ月より前の記録はありません',
     archiveKeepNote: '{date}以降の記録は端末に残ります',
+    // 2026-08-16 便HC: レシピを削除しても残った記録（detachedLogs）も書き出しの対象になった。
+    // レシピが無いぶん容量だけが残っている記録で、対象外だと軽量化の目的を果たせないため。
+    // 対象に入っていることが件数からは読み取れないので、含まれるときだけ内訳を出す
+    archiveTargetDetachedNote: 'うち{d}件は、レシピを削除したあとに残っている記録です',
     // 追記型: 前回のファイルを選ぶと中身を引き継いで1つにまとめる（同じ記録は1件にまとめる）
     archiveAppendButton: '前回のアーカイブファイルを選ぶ',
     archiveAppendNote:
@@ -2384,6 +2388,10 @@ export const ja = {
     archiveDeleteConfirmGone: '作った記録{c}件・写真{p}枚',
     archiveDeleteConfirmKeptLabel: '残るもの',
     archiveDeleteConfirmKept: 'レシピ本体・{date}以降の記録・書き出したファイル',
+    // 2026-08-16 便HC: 消すのがレシピを削除したあとに残った記録だけのときは「レシピ本体」を書かない
+    // （その記録の元のレシピは端末に無いので、残ると読める書き方にしない）
+    archiveDeleteConfirmKeptDetachedOnly: '{date}以降の記録・書き出したファイル',
+    archiveDeleteConfirmDetachedNote: 'うち{d}件は、レシピを削除したあとに残っていた記録です',
     archiveDeleteConfirmOk: '端末から消す',
     archiveDeleteDone: '記録{c}件・写真{p}枚を端末から消しました',
     archiveDeleteNothing: '消す記録はありませんでした',

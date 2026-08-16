@@ -3,7 +3,7 @@ import { defaultSettings } from './types'
 import type { CookedLog, Recipe, RecipeInput } from './types'
 import { buildSearchWords, SEARCH_INDEX_VERSION, searchIndexNeedsRebuild } from '../logic/kana'
 import { exclusionRecordFor } from '../logic/backup'
-import { archiveIdsForRecipe } from '../logic/cookedArchive'
+import { archiveIdsForDetached, archiveIdsForRecipe } from '../logic/cookedArchive'
 import { summarizeRecipeDeleteImpact, type RecipeDeleteImpact } from '../logic/recipeDelete'
 import { READINGS_VERSION } from '../logic/ingredientReadings'
 import { newRecipeUid } from '../logic/recipeUid'
@@ -303,6 +303,12 @@ export async function deleteCookedLog(id: number, index: number): Promise<void> 
  * 書き出したあとに追加・編集された記録を巻き込むことはない
  * （IDはレシピ番号＋日付＋メモから作る＝logic/cookedArchive.ts の archiveIdsForRecipe）。
  * レシピ本体・境目以降の記録・お気に入り・写真つきのレシピ画像には触れない。
+ *
+ * 2026-08-16 便HC: 「レシピを削除しても残った記録」（detachedLogs）も書き出しの対象になったので、
+ * 消す先も2か所になった。IDの作り方が場所ごとに違う（レシピ側＝レシピ番号／残った記録側＝印）ため、
+ * 書き出しと同じ関数でIDを作り直して突き合わせる。まとまりの記録が0件になったら行ごと消す
+ * （db/detachedLogs.ts の deleteDetachedLog と同じ作法。空の行を残さない）。
+ * 2か所を1つのトランザクションにまとめてあるので、途中で落ちれば丸ごと巻き戻る。
  */
 export async function deleteArchivedCookedLogs(
   ids: readonly string[],
@@ -311,19 +317,29 @@ export async function deleteArchivedCookedLogs(
   let logs = 0
   let photos = 0
   if (idSet.size === 0) return { logs, photos }
-  await db.transaction('rw', db.recipes, async () => {
+  /** 書き出したIDに当たる記録だけを外した残り（数えながら間引く） */
+  const keepUnexported = (source: readonly CookedLog[], logIds: readonly string[]) =>
+    source.filter((log, i) => {
+      if (!idSet.has(logIds[i])) return true
+      logs++
+      if (log.photo) photos++
+      return false
+    })
+  await db.transaction('rw', db.recipes, db.detachedLogs, async () => {
     const recipes = await db.recipes.toArray()
     for (const recipe of recipes) {
       if (recipe.id == null || recipe.cookedLogs.length === 0) continue
-      const logIds = archiveIdsForRecipe(recipe)
-      const kept = recipe.cookedLogs.filter((log, i) => {
-        if (!idSet.has(logIds[i])) return true
-        logs++
-        if (log.photo) photos++
-        return false
-      })
+      const kept = keepUnexported(recipe.cookedLogs, archiveIdsForRecipe(recipe))
       if (kept.length === recipe.cookedLogs.length) continue
       await db.recipes.update(recipe.id, { cookedLogs: kept })
+    }
+    const records = await db.detachedLogs.toArray()
+    for (const record of records) {
+      if (record.id == null || record.logs.length === 0) continue
+      const kept = keepUnexported(record.logs, archiveIdsForDetached(record))
+      if (kept.length === record.logs.length) continue
+      if (kept.length === 0) await db.detachedLogs.delete(record.id)
+      else await db.detachedLogs.update(record.id, { logs: kept })
     }
   })
   return { logs, photos }

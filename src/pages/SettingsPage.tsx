@@ -78,6 +78,7 @@ import {
   DEFAULT_ARCHIVE_MONTHS,
   archiveCutoffDate,
   archiveFileName,
+  buildArchiveDeleteConfirm,
   buildArchiveFile,
   collectArchiveTargets,
   countArchiveTargets,
@@ -544,6 +545,8 @@ export default function SettingsPage() {
     ids: string[]
     logs: number
     photos: number
+    /** そのうち「レシピを削除しても残った記録」の件数(確認文で言い分ける。2026-08-16 便HC) */
+    detachedLogs: number
     cutoff: string
   } | null>(null)
   // 「アーカイブを見る」で開く一時閲覧の窓(IndexedDBには書かない・閉じたら端末に残らない)
@@ -828,9 +831,15 @@ export default function SettingsPage() {
   }
 
   // ===== 古い記録の書き出し(2026-08-02) =====
-  // 「◯ヶ月より前」の境目と、その対象になる記録。recipesが更新されれば自動で数え直される
+  // 「◯ヶ月より前」の境目と、その対象になる記録。recipesが更新されれば自動で数え直される。
+  // 2026-08-16 便HC: レシピを削除しても残った記録(detachedRecords)も対象に渡す
+  // (レシピが無いぶん容量だけが残っている記録なので、外すと軽量化の目的を果たせない)
   const archiveCutoff = archiveCutoffDate(archiveMonths)
-  const archiveTargets = collectArchiveTargets(recipes ?? [], archiveCutoff)
+  const archiveTargets = collectArchiveTargets(
+    recipes ?? [],
+    archiveCutoff,
+    detachedRecords ?? [],
+  )
   const archiveCounts = countArchiveTargets(archiveTargets)
 
   /** 読み込んだアーカイブファイルのエラーを、理由別の文言にする(バックアップと取り違えた場合を言い分ける) */
@@ -891,6 +900,7 @@ export default function SettingsPage() {
         ids: archiveTargets.map((t) => t.id),
         logs: archiveCounts.logs,
         photos: archiveCounts.photos,
+        detachedLogs: archiveCounts.detachedLogs,
         cutoff: archiveCutoff,
       })
       setArchiveMessage(
@@ -914,25 +924,7 @@ export default function SettingsPage() {
    */
   const handleArchiveDelete = async () => {
     if (!archiveExported) return
-    const ok = await confirm({
-      title: ja.settings.archiveDeleteConfirmTitle,
-      bullets: [
-        {
-          label: ja.settings.archiveDeleteConfirmGoneLabel,
-          text: ja.settings.archiveDeleteConfirmGone
-            .replace('{c}', String(archiveExported.logs))
-            .replace('{p}', String(archiveExported.photos)),
-        },
-        {
-          label: ja.settings.archiveDeleteConfirmKeptLabel,
-          text: ja.settings.archiveDeleteConfirmKept.replace(
-            '{date}',
-            formatArchiveDate(archiveExported.cutoff),
-          ),
-        },
-      ],
-      confirmLabel: ja.settings.archiveDeleteConfirmOk,
-    })
+    const ok = await confirm(buildArchiveDeleteConfirm(archiveExported))
     if (!ok) return
     setArchiveBusy(true)
     try {
@@ -2162,6 +2154,16 @@ export default function SettingsPage() {
                     .replace('{c}', String(archiveCounts.logs))
                     .replace('{p}', String(archiveCounts.photos))}
             </p>
+            {/* レシピを削除しても残った記録も対象に入る(2026-08-16 便HC)。件数だけでは
+                どこの記録か分からないので、含まれるときだけ内訳を出す */}
+            {archiveCounts.detachedLogs > 0 && (
+              <p data-testid="archive-target-detached" className="mt-1 text-xs text-ink-muted">
+                {ja.settings.archiveTargetDetachedNote.replace(
+                  '{d}',
+                  String(archiveCounts.detachedLogs),
+                )}
+              </p>
+            )}
             <p className="mt-1 text-xs text-ink-muted">
               {ja.settings.archiveKeepNote.replace('{date}', formatArchiveDate(archiveCutoff))}
             </p>

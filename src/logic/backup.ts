@@ -688,27 +688,76 @@ export const mergeRowKeys = {
  * 「別の品である新しい基本レシピ」に当たる。以前はこれを内容も見ずにスキップしていたので、
  * 自作レシピが丸ごと取り込まれなかった。IDが埋まっていても料理名で突き合わせ直し、
  * 別料理なら新しいIDで取り込む（ID衝突を理由にレシピを落とさない）
+ *
+ * **印（Recipe.uid）を見る（2026-08-16 便HC・司令部の裁定）**。便GZまでは料理名／IDだけで
+ * 突き合わせていたため、「同名の別レシピが既にある端末」へ書き出したファイルから同じレシピを
+ * 入れ直すと、ファイル側のレシピが既存の同名レシピに合流して印が入らず、
+ * 「レシピを削除しても残った記録」が結び直せなかった。規則は4つ:
+ *  1. 印が一致する品が既にあれば、それを同一とみなす（最優先。料理名もIDも見ない）
+ *  2. 印が一致する品が無く、料理名で当たった既存レシピが印を持っていなければ、従来どおり
+ *     同一とみなし、**ファイル側の印を引き継ぐ**（adoptUid）。これで記録が結び直せる
+ *  3. 両方が印を持っていて印が違うなら同一とみなさない（別のレシピとして追加する）。
+ *     オーナーの「同名でも別物なら結ばない」という意向を、ここでも守る
+ *  4. 「追加」は今のデータを1件も消さない（この関数は消す指示を一切返さない）
+ *
+ * 印の照合表は任意。渡さなければ「今のレシピは印を持っていない」として扱うので、
+ * 合流先の選び方は便GZまでと同じになる（印を持たない古いバックアップファイルからの復元も、
+ * ファイル側に印が無いので規則1〜3のどれも働かず、従来どおりの判定になる）。
  */
 export type MergeRecipeAction =
-  | { kind: 'enrich'; targetId: number }
+  | {
+      kind: 'enrich'
+      targetId: number
+      /** 今のレシピが印を持っていないときに引き継がせる、ファイル側の印（規則2） */
+      adoptUid?: string
+    }
   | { kind: 'add' }
   | { kind: 'addWithNewId' }
 
 export function resolveMergeRecipeAction(
-  incoming: Pick<Recipe, 'id' | 'title'>,
+  incoming: Pick<Recipe, 'id' | 'title' | 'uid'>,
   existingTitleById: ReadonlyMap<number, string>,
   existingIdByTitle: ReadonlyMap<string, number>,
+  existingUidById: ReadonlyMap<number, string> = new Map(),
+  existingIdByUid: ReadonlyMap<string, number> = new Map(),
 ): MergeRecipeAction {
+  const incomingUid = incoming.uid?.trim() || undefined
+  // 規則1: 印が一致する品が既にあれば、それが同じレシピ（番号も料理名も見ない）
+  if (incomingUid) {
+    const sameUidId = existingIdByUid.get(incomingUid)
+    if (sameUidId !== undefined) return { kind: 'enrich', targetId: sameUidId }
+  }
+  /**
+   * 料理名・IDで当たった既存レシピを同一とみなしてよいか。
+   * 規則3（両方が印を持ち、印が違う）なら null＝別のレシピとして扱う。
+   * 規則2（今のレシピが印を持たない）なら、ファイル側の印を引き継がせる。
+   */
+  const enrichIfSameRecipe = (targetId: number): MergeRecipeAction | null => {
+    const existingUid = existingUidById.get(targetId)
+    if (incomingUid && existingUid && existingUid !== incomingUid) return null
+    return {
+      kind: 'enrich',
+      targetId,
+      ...(incomingUid && !existingUid ? { adoptUid: incomingUid } : {}),
+    }
+  }
   // IDが無い古い形式は照合できないので従来どおり新規として追加する
   if (incoming.id == null) return { kind: 'addWithNewId' }
   const existingTitle = existingTitleById.get(incoming.id)
-  // そのIDが空いている: 従来どおり同じIDのまま追加する
+  // そのIDが空いている: 従来どおり同じIDのまま追加する（印もそのまま入るので記録が結び直せる）
   if (existingTitle === undefined) return { kind: 'add' }
   const title = incoming.title.trim()
-  if (existingTitle.trim() === title) return { kind: 'enrich', targetId: incoming.id }
+  if (existingTitle.trim() === title) {
+    const action = enrichIfSameRecipe(incoming.id)
+    // 同じ番号・同じ料理名でも印が違えば別のレシピ。番号は埋まっているので振り直して追加する
+    return action ?? { kind: 'addWithNewId' }
+  }
   // 同じIDが別の料理に使われている（版ズレ）。料理名で突き合わせ直す
   const sameTitleId = existingIdByTitle.get(title)
-  if (sameTitleId !== undefined) return { kind: 'enrich', targetId: sameTitleId }
+  if (sameTitleId !== undefined) {
+    const action = enrichIfSameRecipe(sameTitleId)
+    if (action) return action
+  }
   return { kind: 'addWithNewId' }
 }
 
@@ -1015,31 +1064,52 @@ export async function importBackup(
       db.detachedLogs,
     ],
     async () => {
-      // 照合表（ID→料理名 / 料理名→ID）。ファイルのIDが別の料理に当たっていないか、
-      // 当たっていた場合に同じ料理が別のIDで居ないかを1件ずつ問い合わせずに判定するため
+      // 照合表（ID→料理名 / 料理名→ID / ID→印 / 印→ID）。ファイルのIDが別の料理に
+      // 当たっていないか、当たっていた場合に同じ料理が別のIDで居ないかを1件ずつ問い合わせずに
+      // 判定するため。印の表は2026-08-16 便HC（resolveMergeRecipeAction の規則1・2・3）で追加
       const existingTitleById = new Map<number, string>()
       const existingIdByTitle = new Map<string, number>()
+      const existingUidById = new Map<number, string>()
+      const existingIdByUid = new Map<string, number>()
+      /** 追加したレシピも照合表に載せる（同じファイルの後続の品が二重に入らないように） */
+      const indexExisting = (id: number, title: string, uid: string | undefined) => {
+        existingTitleById.set(id, title)
+        const key = title.trim()
+        if (!existingIdByTitle.has(key)) existingIdByTitle.set(key, id)
+        if (!uid) return
+        existingUidById.set(id, uid)
+        // 同じ印が2品にあるときは先に入った方を採る（logic/recipeUid.ts の indexRecipesByUid と同じ）
+        if (!existingIdByUid.has(uid)) existingIdByUid.set(uid, id)
+      }
       // toArray()ではなくeach()で1件ずつ読む（写真つきのレシピを全件メモリに抱えないため。
       // 台数の多い端末での読み込み中のメモリ増加を避ける）
       await db.recipes.each((existing) => {
         if (existing.id == null) return
-        existingTitleById.set(existing.id, existing.title)
-        const key = existing.title.trim()
-        if (!existingIdByTitle.has(key)) existingIdByTitle.set(key, existing.id)
+        indexExisting(existing.id, existing.title, existing.uid)
       })
       // 版ズレでIDを振り直したレシピ・別IDの同じ料理に合流したレシピの「ファイル側のID→今のID」。
       // 週献立・今日の献立・献立テンプレ・買い物メモの参照を付け替えるのに使う
       const idRemap = new Map<number, number>()
 
       for (const recipe of recipes) {
-        const action = resolveMergeRecipeAction(recipe, existingTitleById, existingIdByTitle)
+        const action = resolveMergeRecipeAction(
+          recipe,
+          existingTitleById,
+          existingIdByTitle,
+          existingUidById,
+          existingIdByUid,
+        )
         if (action.kind === 'enrich') {
           // 同じ料理が既にある: 本体は上書きせず、ファイル側の記録・お気に入り・写真だけ足す
           const target = await db.recipes.get(action.targetId)
           if (target) {
             const merged = mergeRecipeUserData(target, recipe)
+            // 印を持っていない今のレシピには、ファイル側の印を引き継ぐ（規則2）。
+            // これを書かないと、レシピを削除しても残った記録が結び直せないまま残る
+            const adopted = action.adoptUid ? { ...merged.recipe, uid: action.adoptUid } : merged.recipe
+            if (merged.changed || action.adoptUid) await db.recipes.put(adopted)
+            if (action.adoptUid) indexExisting(action.targetId, target.title, action.adoptUid)
             if (merged.changed) {
-              await db.recipes.put(merged.recipe)
               detail.recipesEnriched++
               detail.cookedLogsAdded += merged.cookedLogsAdded
               detail.photosAdded += merged.photosAdded
@@ -1053,20 +1123,16 @@ export async function importBackup(
         }
         if (action.kind === 'add') {
           await db.recipes.add(recipe) // 同じIDのまま追加（次回以降も照合できるように）
-          existingTitleById.set(recipe.id!, recipe.title)
-          const key = recipe.title.trim()
-          if (!existingIdByTitle.has(key)) existingIdByTitle.set(key, recipe.id!)
+          indexExisting(recipe.id!, recipe.title, recipe.uid)
           added++
           detail.recipesAdded++
           continue
         }
-        // そのIDが別の料理に使われている（版ズレ）／IDが無い古い形式: 新しいIDを振って追加する。
-        // ID衝突を理由に取り込まない（＝自作レシピを落とす）ことはしない
+        // そのIDが別の料理に使われている（版ズレ）／同名でも印が違う別のレシピ／IDが無い古い形式:
+        // 新しいIDを振って追加する。ID衝突を理由に取り込まない（＝自作レシピを落とす）ことはしない
         const { id: fileId, ...rest } = recipe
         const newId = (await db.recipes.add(rest as Recipe)) as number
-        existingTitleById.set(newId, recipe.title)
-        const newKey = recipe.title.trim()
-        if (!existingIdByTitle.has(newKey)) existingIdByTitle.set(newKey, newId)
+        indexExisting(newId, recipe.title, recipe.uid)
         if (fileId != null) {
           idRemap.set(fileId, newId)
           detail.recipesRenumbered++

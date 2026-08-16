@@ -381,7 +381,9 @@ import {
   ArchiveFileError,
   archiveCutoffDate,
   archiveFileName,
+  archiveIdsForDetached,
   archiveIdsForRecipe,
+  buildArchiveDeleteConfirm,
   buildArchiveFile,
   collectArchiveTargets,
   countArchiveTargets,
@@ -13257,7 +13259,9 @@ eq(
     '2026-05-05',
   ])
   // 同じ料理・同じ日・メモ無しが2件あっても、連番で別件として残る(潰れない)
-  const archDupIds = archTargets.filter((t) => t.recipeId === 2).map((t) => t.id)
+  const archDupIds = archTargets
+    .filter((t) => t.source === 'recipe' && t.sourceId === 2)
+    .map((t) => t.id)
   eq('ARCH 同じ日の重複記録は連番で別件になる', new Set(archDupIds).size, 2)
   // 端末から消すときも同じIDが作られる(消す対象の取り違え防止)
   eq(
@@ -20036,6 +20040,405 @@ Aみりん 大さじ1
     eq(
       'GZ-配線 削除済みレシピの記録は栄養・食費の入力(cookedLogsByDate)に混ぜない',
       /const cookedLogsByDate = useMemo\(\(\) => \{[\s\S]{0,500}\}, \[recipes\]\)/.test(mealPlanSrc),
+      true,
+    )
+  }
+}
+
+// ---------- 便HC: 便GZの積み残し2件(2026-08-16) ----------
+// ①古い記録の書き出し(アーカイブ)が「レシピを削除しても残った記録」を対象にしていなかった。
+//   この機能の目的は端末容量の軽量化(2026-08-02 オーナー要望)で、**残った記録こそレシピが無いぶん
+//   容量だけが残っている**状態なので、対象外なのは目的に反する。
+// ②「今のデータに追加」のレシピ照合が料理名／IDだけだったため、同名の別レシピがある端末へ
+//   書き出したファイルから同じレシピを入れ直すと、既存の同名レシピに合流して印が入らず、
+//   記録が結び直せなかった。
+{
+  const log = (date, note, photo) => ({
+    date,
+    ...(note ? { note } : {}),
+    ...(photo ? { photo: { size: photo } } : {}),
+  })
+
+  // --- ①書き出しの対象 ---
+  {
+    const cutoff = '2026-07-02'
+    const recipes = [
+      { id: 1, title: '肉じゃが', cookedLogs: [log('2026-07-01'), log('2026-08-01')] },
+    ]
+    const detached = [
+      // レシピを削除しても残った記録(印あり)。写真つきの古い記録が容量を占め続けている
+      {
+        id: 3,
+        recipeUid: 'u-1',
+        title: 'カレー',
+        logs: [log('2026-05-05', undefined, 10), log('2026-08-05')],
+        detachedAt: 1,
+      },
+      // 印を持たない古い記録のまとまりも、容量は同じように残っているので対象に入れる
+      { id: 4, title: '印なし', logs: [log('2026-04-04')], detachedAt: 1 },
+    ]
+    const targets = collectArchiveTargets(recipes, cutoff, detached)
+    eq('HC①-対象 残った記録も書き出しの対象に入る', targets.length, 3)
+    eq(
+      'HC①-対象 境目以降の記録は残った記録でも書き出さない',
+      targets.every((t) => t.log.date < cutoff),
+      true,
+    )
+    const counts = countArchiveTargets(targets)
+    eq('HC①-対象 件数に残った記録も足す', counts.logs, 3)
+    eq('HC①-対象 写真の枚数に残った記録の写真も足す', counts.photos, 1)
+    eq('HC①-対象 品数はレシピ1品＋残った記録2まとまり', counts.recipes, 3)
+    eq('HC①-対象 そのうち残った記録の件数を別に数える', counts.detachedLogs, 2)
+    eq(
+      'HC①-対象 レシピの記録と残った記録でIDがぶつからない',
+      new Set(targets.map((t) => t.id)).size,
+      targets.length,
+    )
+    eq(
+      'HC①-対象 どこにある記録かが分かる(消すときにレシピ側と残った記録側を取り違えない)',
+      targets.map((t) => t.source).sort(),
+      ['detached', 'detached', 'recipe'],
+    )
+    eq(
+      'HC①-対象 残った記録を渡さなくても従来どおり数えられる(古い呼び出しを壊さない)',
+      collectArchiveTargets(recipes, cutoff).length,
+      1,
+    )
+
+    // 消すときのIDは書き出しのときと同じ手順で作る(違うと消す対象を取り違える)
+    eq(
+      'HC①-対象 消すとき用のIDは書き出し時と同じ',
+      archiveIdsForDetached(detached[0]),
+      ['u:u-1\n2026-05-05\n', 'u:u-1\n2026-08-05\n'],
+    )
+    // まとまりの番号は「データを上書き」で振り直されるので、印があるうちは印を鍵にする
+    eq(
+      'HC①-ID まとまりの番号が変わっても印が同じならIDは変わらない',
+      archiveIdsForDetached({ id: 99, recipeUid: 'u-1', logs: [log('2026-05-05')] })[0],
+      archiveIdsForDetached({ id: 3, recipeUid: 'u-1', logs: [log('2026-05-05')] })[0],
+    )
+    eq(
+      'HC①-ID 印の無いまとまりはまとまりの番号を鍵にする',
+      archiveIdsForDetached({ id: 4, logs: [log('2026-04-04')] })[0],
+      'd4\n2026-04-04\n',
+    )
+    // レシピ側のIDはレシピ番号(数字)・手編集の行は'?'＋料理名。どれともぶつからない形にする
+    eq(
+      'HC①-ID レシピ側のIDとぶつからない',
+      new Set([
+        ...archiveIdsForRecipe({ id: 4, title: 'カレー', cookedLogs: [log('2026-04-04')] }),
+        ...archiveIdsForDetached({ id: 4, logs: [log('2026-04-04')] }),
+        ...archiveIdsForDetached({ id: 4, recipeUid: 'u-1', logs: [log('2026-04-04')] }),
+      ]).size,
+      3,
+    )
+  }
+
+  // --- ①書き出したファイルの形（古いアーカイブファイルが読めなくならないこと） ---
+  {
+    // 便GZ以前に書き出したファイル: レシピ番号を鍵にしたIDだけが入っている
+    const oldFileJson = JSON.stringify({
+      app: 'uchi-recipe',
+      kind: ARCHIVE_KIND,
+      version: 1,
+      exportedAt: '2026-08-02T00:00:00.000Z',
+      logs: [
+        { id: '1\n2026-05-01\n', date: '2026-05-01', recipeTitle: '肉じゃが' },
+        {
+          id: '2\n2026-04-01\n',
+          date: '2026-04-01',
+          recipeTitle: 'カレー',
+          photoBase64: 'AAA',
+          photoType: 'image/jpeg',
+        },
+      ],
+    })
+    const oldParsed = parseArchiveFile(oldFileJson)
+    eq('HC①-旧ファイル 便GZ以前のアーカイブファイルがそのまま読める', oldParsed.logs.length, 2)
+    eq('HC①-旧ファイル 読めなかった記録は0件', oldParsed.brokenCount, 0)
+    eq(
+      'HC①-旧ファイル 写真も読める',
+      oldParsed.logs.find((l) => l.recipeTitle === 'カレー').photoBase64,
+      'AAA',
+    )
+    // 残った記録を足して書き出しても、ファイルの形（版・種別マーク・項目）は変えない
+    const appended = mergeArchiveLogs(oldParsed.logs, [
+      { id: 'u:u-1\n2026-03-01\n', date: '2026-03-01', recipeTitle: '削除したレシピ' },
+    ])
+    const newFile = buildArchiveFile(appended, '2026-08-16T00:00:00.000Z')
+    eq('HC①-旧ファイル 版を上げない(古いアプリでも読める形のまま)', newFile.version, 1)
+    eq('HC①-旧ファイル 種別マークは同じ', newFile.kind, ARCHIVE_KIND)
+    eq(
+      'HC①-旧ファイル ファイルの項目は増やさない',
+      Object.keys(newFile).sort(),
+      ['app', 'exportedAt', 'kind', 'logs', 'version'],
+    )
+    eq('HC①-旧ファイル 前のファイルの記録は残る', appended.length, 3)
+    eq(
+      'HC①-旧ファイル 書き足したファイルも読める',
+      parseArchiveFile(JSON.stringify(newFile)).logs.length,
+      3,
+    )
+    eq(
+      'HC①-旧ファイル 同じファイルを2回まとめても増えない',
+      mergeArchiveLogs(appended, appended).length,
+      3,
+    )
+  }
+
+  // --- ①「書き出した記録を端末から消す」の確認文（規約F・実態に合わせる） ---
+  {
+    const bullet = (content, label) =>
+      (content.bullets ?? []).find((b) => b.label === label)?.text ?? ''
+    const goneLabel = '消えるもの'
+    const keptLabel = '残るもの'
+
+    // レシピの中の記録と、残った記録の両方を消す場面
+    const both = buildArchiveDeleteConfirm({
+      logs: 5,
+      photos: 2,
+      detachedLogs: 2,
+      cutoff: '2026-07-16',
+    })
+    eq('HC①-確認文 消える件数と写真の枚数を書く', bullet(both, goneLabel), '作った記録5件・写真2枚')
+    eq(
+      'HC①-確認文 レシピの記録も消すときは「レシピ本体は残る」と書く',
+      bullet(both, keptLabel).includes('レシピ本体'),
+      true,
+    )
+    eq(
+      'HC①-確認文 残るものに境目の日付を入れる',
+      bullet(both, keptLabel).includes('2026年7月16日以降の記録'),
+      true,
+    )
+    eq(
+      'HC①-確認文 残った記録が含まれるときは内訳を出す',
+      (both.notes ?? []).some((n) => n.includes('2件') && n.includes('レシピを削除したあと')),
+      true,
+    )
+
+    // レシピの無い記録だけを消す場面（「レシピ本体は残ります」が誤解を生む場面）
+    const detachedOnly = buildArchiveDeleteConfirm({
+      logs: 3,
+      photos: 1,
+      detachedLogs: 3,
+      cutoff: '2026-07-16',
+    })
+    eq(
+      'HC①-確認文 レシピの無い記録だけを消すときは「レシピ本体」と書かない',
+      bullet(detachedOnly, keptLabel).includes('レシピ本体'),
+      false,
+    )
+    eq(
+      'HC①-確認文 それでも残るものは件数・日付つきで書く(規約F)',
+      bullet(detachedOnly, keptLabel),
+      '2026年7月16日以降の記録・書き出したファイル',
+    )
+    eq(
+      'HC①-確認文 消えるものは件数つきで書く(規約F)',
+      bullet(detachedOnly, goneLabel),
+      '作った記録3件・写真1枚',
+    )
+
+    // 残った記録が1件も無いときは内訳を出さない（無い話をしない）
+    const recipeOnly = buildArchiveDeleteConfirm({
+      logs: 2,
+      photos: 0,
+      detachedLogs: 0,
+      cutoff: '2026-07-16',
+    })
+    eq('HC①-確認文 残った記録が無ければ内訳は出さない', (recipeOnly.notes ?? []).length, 0)
+    eq(
+      'HC①-確認文 レシピの記録だけなら従来どおり「レシピ本体」を書く',
+      bullet(recipeOnly, keptLabel).includes('レシピ本体'),
+      true,
+    )
+    const allText = [both, detachedOnly, recipeOnly].map(confirmContentText).join('\n')
+    eq('HC①-確認文 件数の差し込み跡が残っていない', /\{[a-z]+\}/.test(allText), false)
+    eq('HC①-確認文 「よろしいですか？」だけで終わらせない', allText.includes('よろしいですか'), false)
+    eq('HC①-確認文 実行ボタンは何が起きるか分かる言葉', both.confirmLabel, '端末から消す')
+  }
+
+  // --- ②「今のデータに追加」でのレシピ照合(司令部の裁定4項目) ---
+  {
+    // 端末側: 1=肉じゃが(印u-mine) / 2=わたしの唐揚げ(印u-karaage)
+    const titleById = new Map([
+      [1, '肉じゃが'],
+      [2, 'わたしの唐揚げ'],
+    ])
+    const idByTitle = new Map([
+      ['肉じゃが', 1],
+      ['わたしの唐揚げ', 2],
+    ])
+    const uidById = new Map([
+      [1, 'u-mine'],
+      [2, 'u-karaage'],
+    ])
+    const idByUid = new Map([
+      ['u-mine', 1],
+      ['u-karaage', 2],
+    ])
+
+    // 規則1: 印が一致すれば、番号も料理名も違っても同じレシピとみなす(最優先)
+    eq(
+      'HC②-照合 印が一致すれば料理名が違っても同じレシピ',
+      resolveMergeRecipeAction(
+        { id: 9, title: '肉じゃが（名前を変えた）', uid: 'u-mine' },
+        titleById,
+        idByTitle,
+        uidById,
+        idByUid,
+      ),
+      { kind: 'enrich', targetId: 1 },
+    )
+
+    // 規則3: 両方が印を持ち、印が違うなら同一とみなさない(同名でも別物なら結ばない)
+    eq(
+      'HC②-照合 同名でも印が違えば既存に合流させない',
+      resolveMergeRecipeAction(
+        { id: 1, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+        uidById,
+        idByUid,
+      ),
+      { kind: 'addWithNewId' },
+    )
+    eq(
+      'HC②-照合 番号が空いていれば同名でもそのまま別レシピとして追加',
+      resolveMergeRecipeAction(
+        { id: 5, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+        uidById,
+        idByUid,
+      ),
+      { kind: 'add' },
+    )
+
+    // 規則2: 料理名で当たった既存レシピが印を持っていなければ、従来どおり同一とみなし印を引き継ぐ
+    eq(
+      'HC②-照合 今のレシピに印が無ければファイル側の印を引き継ぐ',
+      resolveMergeRecipeAction(
+        { id: 1, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+        new Map(),
+        new Map(),
+      ),
+      { kind: 'enrich', targetId: 1, adoptUid: 'u-file' },
+    )
+    eq(
+      'HC②-照合 版ズレで番号がずれていても、印の無い同名レシピには印を引き継ぐ',
+      resolveMergeRecipeAction(
+        { id: 2, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+        new Map([[2, 'u-karaage']]),
+        new Map([['u-karaage', 2]]),
+      ),
+      { kind: 'enrich', targetId: 1, adoptUid: 'u-file' },
+    )
+
+    // 印を持たない古いバックアップは従来どおり(照合の仕方を変えない=古いファイルが読めなくならない)
+    eq(
+      'HC②-照合 印の無い古いファイルは従来どおり同名で合流する',
+      resolveMergeRecipeAction({ id: 1, title: '肉じゃが' }, titleById, idByTitle, uidById, idByUid),
+      { kind: 'enrich', targetId: 1 },
+    )
+    eq(
+      'HC②-照合 印の無い古いファイルは版ズレの振り直しも従来どおり',
+      resolveMergeRecipeAction(
+        { id: 2, title: 'まったく新しい料理' },
+        titleById,
+        idByTitle,
+        uidById,
+        idByUid,
+      ),
+      { kind: 'addWithNewId' },
+    )
+    // 印の照合表を渡さない呼び出しでも、合流先の選び方は従来どおり(印が分からない＝印を
+    // 持っていない端末として扱うので、規則2どおり印は引き継ぐ側になる)
+    {
+      const { kind, targetId } = resolveMergeRecipeAction(
+        { id: 1, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+      )
+      eq('HC②-照合 印の照合表を渡さなくても合流先は従来どおり', { kind, targetId }, {
+        kind: 'enrich',
+        targetId: 1,
+      })
+    }
+
+    // 規則4の裏付け: 「別のレシピとして追加する」ので、記録はファイル側のレシピへ戻る。
+    // 既存の同名レシピ(印が違う)には戻らない＝オーナーの懸念「似た名前の違うレシピとつながる」を防ぐ
+    const plan = planDetachedReattach(
+      [{ id: 7, recipeUid: 'u-file', title: '肉じゃが', logs: [log('2026-08-01')], detachedAt: 1 }],
+      [
+        { id: 1, uid: 'u-mine', cookedLogs: [] },
+        { id: 20, uid: 'u-file', cookedLogs: [] },
+      ],
+    )
+    eq('HC②-結び直し 入れ直したレシピ側に記録が戻る', plan.items.length, 1)
+    eq('HC②-結び直し 同名の既存レシピには戻さない', plan.items[0].recipeId, 20)
+  }
+
+  // --- 配線の確認(画面・DB操作がこの仕組みを通っているか。実DBはe2eで見る) ---
+  {
+    const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const recipesSrc = readFileSync(path.join(appRoot, 'src/db/recipes.ts'), 'utf-8')
+    // 書き出した記録を消す先も2か所(レシピの中と、残った記録)。同じトランザクションで消す
+    eq(
+      'HC①-配線 書き出した記録の削除は残った記録も対象にする',
+      /deleteArchivedCookedLogs[\s\S]{0,1400}archiveIdsForDetached\(record\)/.test(recipesSrc),
+      true,
+    )
+    eq(
+      'HC①-配線 削除は2か所を同じトランザクションで行う',
+      /deleteArchivedCookedLogs[\s\S]{0,900}db\.transaction\('rw', db\.recipes, db\.detachedLogs/.test(
+        recipesSrc,
+      ),
+      true,
+    )
+    eq(
+      'HC①-配線 記録が0件になったまとまりは行ごと消す(空の行を残さない)',
+      /archiveIdsForDetached\(record\)[\s\S]{0,400}db\.detachedLogs\.delete\(record\.id\)/.test(
+        recipesSrc,
+      ),
+      true,
+    )
+    const settingsSrc = readFileSync(path.join(appRoot, 'src/pages/SettingsPage.tsx'), 'utf-8')
+    eq(
+      'HC①-配線 書き出しの対象に残った記録を渡している',
+      /collectArchiveTargets\(\s*recipes \?\? \[\],\s*archiveCutoff,\s*detachedRecords \?\? \[\],\s*\)/.test(
+        settingsSrc,
+      ),
+      true,
+    )
+    eq(
+      'HC①-配線 削除の確認文は1か所(logic/cookedArchive.ts)で組み立てる',
+      settingsSrc.includes('confirm(buildArchiveDeleteConfirm(archiveExported))'),
+      true,
+    )
+    const backupSrc = readFileSync(path.join(appRoot, 'src/logic/backup.ts'), 'utf-8')
+    eq(
+      'HC②-配線 「今のデータに追加」の照合に印の表を渡している',
+      /resolveMergeRecipeAction\(\s*recipe,\s*existingTitleById,\s*existingIdByTitle,\s*existingUidById,\s*existingIdByUid,\s*\)/.test(
+        backupSrc,
+      ),
+      true,
+    )
+    eq(
+      'HC②-配線 引き継ぐ印を今のレシピへ書き戻している',
+      /action\.adoptUid \? \{ \.\.\.merged\.recipe, uid: action\.adoptUid \}[\s\S]{0,300}db\.recipes\.put\(adopted\)/.test(
+        backupSrc,
+      ),
+      true,
+    )
+    eq(
+      'HC②-配線 追加したレシピの印も照合表に載せる(同じファイルの中で二重に入らない)',
+      (backupSrc.match(/indexExisting\(/g) ?? []).length >= 4,
       true,
     )
   }

@@ -1,8 +1,16 @@
-import type { CookedLog, Recipe } from '../db/types'
+import type { CookedLog, DetachedCookedRecord, Recipe } from '../db/types'
+import { ja } from '../i18n/ja'
+import type { ConfirmContent } from './confirmContent'
 
 /**
  * 「作った記録」のアーカイブ（古い記録の書き出し）。2026-08-02 オーナー採用。
  * 目的は端末容量の軽量化＝「直近◯ヶ月だけ端末に残し、それより前の記録は写真ごとファイルへ出す」。
+ *
+ * 対象は2か所にある記録の両方（2026-08-16 便HC）:
+ * - レシピの中の記録（recipes.cookedLogs）
+ * - レシピを削除しても残った記録（detachedLogs。2026-08-16 便GZ）。**レシピが無いぶん
+ *   容量だけが残っている**状態なので、ここを対象外にすると軽量化という目的を果たせない。
+ *   便GZの時点では対象外で、減らす手立てが「記録の小窓から1件ずつ消す」しか無かった。
  *
  * バックアップとの関係:
  * - バックアップ（logic/backup.ts）は「今の端末の中身を丸ごと往復させる」ためのもので、
@@ -25,9 +33,12 @@ export const DEFAULT_ARCHIVE_MONTHS = 1
 
 /**
  * アーカイブファイルに入る記録1件。
- * レシピ本体は端末に残る（アーカイブしても消さない）が、アーカイブファイル単体でも
- * 「いつ・何を作ったか」が読めるように料理名を持たせる。写真はBase64で埋め込む
- * （バックアップと同じ流儀。ファイル1つで完結させるため）。
+ * アーカイブファイル単体でも「いつ・何を作ったか」が読めるように料理名を持たせる。
+ * 写真はBase64で埋め込む（バックアップと同じ流儀。ファイル1つで完結させるため）。
+ *
+ * **ファイルの形は便GZ以前と同じ**（2026-08-16 便HC）。レシピを削除しても残った記録も
+ * 同じ形で入れるので、version は 1 のままでよく、**古いアーカイブファイルもそのまま読める**
+ * （記録がレシピの中にあったのか、レシピの無い記録だったのかは、端末側の話でファイルには残さない）。
  */
 export interface ArchivedCookedLog {
   /** 記録1件を表す固定のID。同じ記録を二重に取り込まないための鍵（buildArchiveLogId） */
@@ -52,11 +63,17 @@ export interface CookedLogArchiveFile {
   logs: ArchivedCookedLog[]
 }
 
-/** 端末側の記録1件（書き出し対象）。削除するときにどのレシピの何番目かが要る */
+/**
+ * 端末側の記録1件（書き出し対象）。書き出したあとに端末から消すときに、
+ * 「どこにある何番目の記録か」が要る。
+ */
 export interface ArchiveTarget {
-  recipeId: number
+  /** 'recipe'＝レシピの中の記録／'detached'＝レシピを削除しても残った記録（2026-08-16 便HC） */
+  source: 'recipe' | 'detached'
+  /** source が 'recipe' ならレシピ番号、'detached' なら記録のまとまりの番号 */
+  sourceId: number
   recipeTitle: string
-  /** recipe.cookedLogs の添字 */
+  /** recipe.cookedLogs ／ record.logs の添字 */
   logIndex: number
   log: CookedLog
   id: string
@@ -66,7 +83,10 @@ export interface ArchiveTarget {
 export interface ArchiveTargetCounts {
   logs: number
   photos: number
+  /** 記録が属する品数（レシピ＋レシピの無い記録のまとまり） */
   recipes: number
+  /** そのうち「レシピを削除しても残った記録」の件数（確認文で言い分けるのに使う） */
+  detachedLogs: number
 }
 
 /**
@@ -119,6 +139,20 @@ export function buildArchiveLogId(
   return seq > 0 ? `${base}#${seq + 1}` : base
 }
 
+/** 1つのまとまりの各記録にIDを割り当てる（返り値の並びは渡した記録と同じ） */
+function archiveIdsForLogs(
+  sourceKey: string,
+  logs: readonly Pick<CookedLog, 'date' | 'note'>[],
+): string[] {
+  const seen = new Map<string, number>()
+  return logs.map((log) => {
+    const key = `${log.date}\n${log.note?.trim() ?? ''}`
+    const seq = seen.get(key) ?? 0
+    seen.set(key, seq + 1)
+    return buildArchiveLogId(sourceKey, log.date, log.note, seq)
+  })
+}
+
 /**
  * 1つのレシピの各記録にIDを割り当てる（返り値の並びは recipe.cookedLogs と同じ）。
  * 書き出すときと、書き出したあとに端末から消すときの両方で同じIDを作るために使う
@@ -127,50 +161,122 @@ export function buildArchiveLogId(
 export function archiveIdsForRecipe(
   recipe: Pick<Recipe, 'id' | 'title' | 'cookedLogs'>,
 ): string[] {
-  const recipeKey = String(recipe.id ?? `?${recipe.title.trim()}`)
-  const seen = new Map<string, number>()
-  return recipe.cookedLogs.map((log) => {
-    const key = `${log.date}\n${log.note?.trim() ?? ''}`
-    const seq = seen.get(key) ?? 0
-    seen.set(key, seq + 1)
-    return buildArchiveLogId(recipeKey, log.date, log.note, seq)
-  })
+  return archiveIdsForLogs(String(recipe.id ?? `?${recipe.title.trim()}`), recipe.cookedLogs)
 }
 
 /**
- * 端末の全レシピから「境目の日付より前の記録」を集める（日付の新しい順）。
+ * レシピを削除しても残った記録のまとまりの鍵（2026-08-16 便HC）。
+ *
+ * レシピ側の鍵（レシピ番号の数字）とも、IDを持たない行の鍵（'?'＋料理名）ともぶつからない形にする。
+ * 印（recipeUid）があるときは印を使う: まとまりの番号は端末の中でしか通じず、
+ * バックアップの「データを上書き」で振り直されるため、印の方が同じ記録に同じIDを付け続けられる。
+ */
+export function archiveDetachedKey(
+  record: Pick<DetachedCookedRecord, 'id' | 'recipeUid'>,
+): string {
+  return record.recipeUid ? `u:${record.recipeUid}` : `d${record.id ?? '?'}`
+}
+
+/** 残った記録のまとまり1つぶんのIDを割り当てる（並びは record.logs と同じ） */
+export function archiveIdsForDetached(
+  record: Pick<DetachedCookedRecord, 'id' | 'recipeUid' | 'logs'>,
+): string[] {
+  return archiveIdsForLogs(archiveDetachedKey(record), record.logs)
+}
+
+/**
+ * 端末にある「境目の日付より前の記録」を集める（日付の新しい順）。
+ * 対象はレシピの中の記録と、レシピを削除しても残った記録の両方（2026-08-16 便HC）。
  * レシピ本体・境目以降の記録には触れない（この関数は選ぶだけで、消しはしない）。
+ *
+ * detachedRecords を省いても従来どおり動く（呼び出し側が1か所ずつ移れるように任意にしてある）。
  */
 export function collectArchiveTargets(
   recipes: readonly Recipe[],
   cutoff: string,
+  detachedRecords: readonly DetachedCookedRecord[] = [],
 ): ArchiveTarget[] {
   const targets: ArchiveTarget[] = []
+  const collect = (
+    source: ArchiveTarget['source'],
+    sourceId: number,
+    recipeTitle: string,
+    logs: readonly CookedLog[],
+    ids: readonly string[],
+  ) => {
+    logs.forEach((log, logIndex) => {
+      if (log.date >= cutoff) return
+      targets.push({ source, sourceId, recipeTitle, logIndex, log, id: ids[logIndex] })
+    })
+  }
   for (const recipe of recipes) {
     if (recipe.id == null) continue
-    const ids = archiveIdsForRecipe(recipe)
-    recipe.cookedLogs.forEach((log, logIndex) => {
-      if (log.date >= cutoff) return
-      targets.push({
-        recipeId: recipe.id as number,
-        recipeTitle: recipe.title,
-        logIndex,
-        log,
-        id: ids[logIndex],
-      })
-    })
+    collect('recipe', recipe.id, recipe.title, recipe.cookedLogs, archiveIdsForRecipe(recipe))
+  }
+  for (const record of detachedRecords) {
+    if (record.id == null) continue
+    collect('detached', record.id, record.title, record.logs, archiveIdsForDetached(record))
   }
   return targets.sort(
     (a, b) => b.log.date.localeCompare(a.log.date) || a.recipeTitle.localeCompare(b.recipeTitle),
   )
 }
 
-/** 書き出し対象の件数を数える（記録・写真・レシピ） */
+/** 書き出し対象の件数を数える（記録・写真・品数・そのうち残った記録の件数） */
 export function countArchiveTargets(targets: readonly ArchiveTarget[]): ArchiveTargetCounts {
   return {
     logs: targets.length,
     photos: targets.filter((t) => !!t.log.photo).length,
-    recipes: new Set(targets.map((t) => t.recipeId)).size,
+    // 同じ番号でもレシピ側と残った記録側は別の品なので、どちらの番号かまで含めて数える
+    recipes: new Set(targets.map((t) => `${t.source}:${t.sourceId}`)).size,
+    detachedLogs: targets.filter((t) => t.source === 'detached').length,
+  }
+}
+
+/**
+ * 「書き出した記録を端末から消す」の確認の中身（規約F: 何が消えて何が残るかを件数つきで両方書く）。
+ *
+ * 2026-08-16 便HC: 残った記録（レシピを削除しても残っている記録）も対象になったので、
+ * 「残るもの」に無条件で書いていた「レシピ本体」を、**レシピの中の記録を消すときだけ**にした
+ * （レシピの無い記録だけを消す場面で「レシピ本体は残ります」と言うと、消える記録の元レシピが
+ * 端末に残っているかのように読める）。
+ * 画面ではなくここで組み立てるのは、まとめて削除の確認文（logic/recipeDelete.ts）と同じ理由で、
+ * 文の規則を1か所に集めて scripts/test-logic.mjs から測れるようにするため。
+ */
+export function buildArchiveDeleteConfirm(exported: {
+  /** 消える記録の件数 */
+  logs: number
+  /** そのうち写真つきの枚数 */
+  photos: number
+  /** そのうち「レシピを削除しても残った記録」の件数 */
+  detachedLogs: number
+  /** 「◯ヶ月より前」の境目（YYYY-MM-DD） */
+  cutoff: string
+}): ConfirmContent {
+  const t = ja.settings
+  const keepsRecipeLogs = exported.logs > exported.detachedLogs
+  return {
+    title: t.archiveDeleteConfirmTitle,
+    bullets: [
+      {
+        label: t.archiveDeleteConfirmGoneLabel,
+        text: t.archiveDeleteConfirmGone
+          .replace('{c}', String(exported.logs))
+          .replace('{p}', String(exported.photos)),
+      },
+      {
+        label: t.archiveDeleteConfirmKeptLabel,
+        text: (keepsRecipeLogs
+          ? t.archiveDeleteConfirmKept
+          : t.archiveDeleteConfirmKeptDetachedOnly
+        ).replace('{date}', formatArchiveDate(exported.cutoff)),
+      },
+    ],
+    notes:
+      exported.detachedLogs > 0
+        ? [t.archiveDeleteConfirmDetachedNote.replace('{d}', String(exported.detachedLogs))]
+        : [],
+    confirmLabel: t.archiveDeleteConfirmOk,
   }
 }
 
