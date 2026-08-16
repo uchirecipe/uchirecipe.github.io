@@ -93,6 +93,8 @@ import {
   isOverCookedPhotoLimit,
   bytesToMB,
 } from '../logic/cookedPhotoStorage'
+import { detachedPhotoBytes } from '../logic/detachedLogs'
+import { db } from '../db/db'
 import { isLaunchedFromHomeScreen } from '../logic/standalone'
 import { isImeConfirmKey } from '../logic/imeKey'
 import {
@@ -434,6 +436,9 @@ export default function SettingsPage() {
   const recipes = useLiveQuery(listRecipes, [])
   // 食材価格マスタ(2026-07-17設定ゼロベース裁定#6a: 置き換え確認文の件数表示に使う)
   const prices = usePriceEntries()
+  // レシピを削除しても残っている記録(2026-08-16 便GZ)。データ件数の表示・上書きの確認文の件数・
+  // 写真の容量の目安に足す（数え漏らすと、画面が言う件数より多く消えることになる）
+  const detachedRecords = useLiveQuery(() => db.detachedLogs.toArray(), [])
   const [ngInput, setNgInput] = useState('')
   const [message, setMessage] = useState('')
   const importFileRef = useRef<HTMLInputElement>(null)
@@ -656,13 +661,16 @@ export default function SettingsPage() {
       ? recipes.filter((r) => hasNgIngredient(r, [ngInput.trim()])).length
       : undefined
 
-  // 「作った記録」写真の容量ガード（2026-07-12写真添付・docs/20 §4。自動削除はしない、促すバナーのみ）
-  const cookedPhotoBytes = recipes ? totalCookedLogPhotoBytes(recipes) : 0
+  // 「作った記録」写真の容量ガード（2026-07-12写真添付・docs/20 §4。自動削除はしない、促すバナーのみ）。
+  // レシピを削除しても残っている記録の写真も同じ容量を占めるので合算する(2026-08-16 便GZ)
+  const cookedPhotoBytes =
+    (recipes ? totalCookedLogPhotoBytes(recipes) : 0) + detachedPhotoBytes(detachedRecords ?? [])
   const showCookedPhotoLimitBanner = isOverCookedPhotoLimit(cookedPhotoBytes)
 
   // レシピ件数・作った記録の合計件数・価格マスタ件数(2026-07-17設定ゼロベース裁定#3のデータ件数表示・
-  // #6aの置き換え確認文の件数表示の両方で使う共通値)
-  const dataCounts = countReplaceImpact(recipes ?? [], prices?.length ?? 0)
+  // #6aの置き換え確認文の件数表示の両方で使う共通値)。
+  // 上書きでは「レシピの無い記録」もファイルの内容に置き換わるので、記録の件数に含める(便GZ)
+  const dataCounts = countReplaceImpact(recipes ?? [], prices?.length ?? 0, detachedRecords ?? [])
 
   /**
    * 書き出し完了の知らせ(2026-07-30 便CJ/C6)。経路ごとに言えることが違うので文言を分ける。

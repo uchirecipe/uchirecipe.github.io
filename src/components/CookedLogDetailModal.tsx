@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronRight, Maximize2, Pencil, X } from 'lucide-react'
+import { ChevronRight, Maximize2, Pencil, Trash2, X } from 'lucide-react'
 import type { CookedLog, Recipe } from '../db/types'
 import { db } from '../db/db'
 import { usePhotoUrl } from './usePhotoUrl'
 import { useOverlayDismiss } from './useOverlayDismiss'
+import { useConfirm } from './ConfirmProvider'
 import CookedLogEditor from './CookedLogEditor'
+import { deleteDetachedLog } from '../db/detachedLogs'
 import { ja } from '../i18n/ja'
 
 /** 小窓に出す記録1件。logIndex は recipe.cookedLogs の添字（記録の編集を開くのに使う） */
@@ -14,6 +16,13 @@ export interface CookedLogDetailTarget {
   recipe: Recipe
   log: CookedLog
   logIndex: number
+  /**
+   * レシピを削除したあとも残っている記録なら、そのまとまりの番号（detachedLogs テーブルの id。
+   * 2026-08-16 便GZ）。このとき recipe は「削除された時点の料理名を持つだけの形」
+   * （logic/detachedLogs.ts の detachedRecipeStub）で id を持たないので、
+   * レシピ詳細への行き先も、レシピ側へ書き戻す編集も出さない。
+   */
+  detachedRecordId?: number
 }
 
 /**
@@ -106,7 +115,8 @@ export default function CookedLogDetailModal({
   onNavigate,
   onMessage,
 }: Props) {
-  const { recipe } = target
+  const { recipe, detachedRecordId } = target
+  const confirm = useConfirm()
   const [zoomOpen, setZoomOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   /** 直したあとは並び順が変わりうるので、いま見ている記録の位置は窓側で持ち直す */
@@ -123,8 +133,42 @@ export default function CookedLogDetailModal({
   const logCount = liveRecipe?.cookedLogs.length ?? 1
   const photoUrl = usePhotoUrl(log.photo)
 
-  // 端末に無いレシピ（月間サンプルデモの見本）は移動先が無いので操作を出さない
+  // 端末に無いレシピ（月間サンプルデモの見本・削除済みレシピの記録）は移動先が無いので操作を出さない
   const recipePath = recipe.id != null ? `/recipes/${recipe.id}` : null
+
+  /**
+   * 削除済みレシピの記録を1件だけ消す（2026-08-16 便GZ）。
+   * これが無いと、レシピを消したあとの記録は二度と減らせない（レシピ側の「この記録を削除」と対）。
+   * 確認文は規約F: 何が消えて何が残るかを件数つきで両方書く。
+   */
+  const removeDetachedLog = async () => {
+    if (detachedRecordId == null) return
+    const t = ja.cookedDetail
+    const ok = await confirm({
+      title: t.deletedRecipeLogDeleteTitle.replace('{date}', log.date.replaceAll('-', '/')),
+      bullets: [
+        {
+          label: t.deletedRecipeLogDeleteGoneLabel,
+          text: t.deletedRecipeLogDeleteGone.replace(
+            '{p}',
+            log.photo ? t.deletedRecipeLogDeleteGonePhoto : '',
+          ),
+        },
+        {
+          label: t.deletedRecipeLogDeleteKeptLabel,
+          text: t.deletedRecipeLogDeleteKept.replace(
+            '{n}',
+            String(Math.max(0, recipe.cookedLogs.length - 1)),
+          ),
+        },
+      ],
+      confirmLabel: t.deletedRecipeLogDeleteOk,
+    })
+    if (!ok) return
+    await deleteDetachedLog(detachedRecordId, logIndex)
+    onClose()
+    onMessage?.(ja.detail.cookedLogDeletedToast)
+  }
 
   return (
     <>
@@ -216,6 +260,20 @@ export default function CookedLogDetailModal({
                 </dl>
               )}
 
+              {/* レシピを削除したあとも残っている記録（2026-08-16 便GZ）。
+                  レシピ詳細への行き先が無い理由を書いておく＝行けないことが読んで分かる */}
+              {detachedRecordId != null && (
+                <div
+                  data-testid="cooked-detail-deleted-recipe"
+                  className="mt-[var(--space-md)] rounded-md border border-edge bg-app p-[var(--space-sm)]"
+                >
+                  <p className="text-sm font-bold">{ja.cookedDetail.deletedRecipeLabel}</p>
+                  <p className="mt-0.5 text-sm text-ink-muted">
+                    {ja.cookedDetail.deletedRecipeNote}
+                  </p>
+                </div>
+              )}
+
               <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
                 {/* 直す場所はこの窓の中（2026-08-10 便FD）。カレンダーから開いても
                     レシピ詳細へ移らずに終われる */}
@@ -240,6 +298,19 @@ export default function CookedLogDetailModal({
                     {ja.cookedDetail.openRecipe}
                     <ChevronRight size={18} aria-hidden />
                   </Link>
+                )}
+                {/* 残った記録を減らす唯一の手立て（2026-08-16 便GZ）。
+                    レシピ側の「この記録を削除」と同じ位置づけなので、同じ確認の作法で消す */}
+                {detachedRecordId != null && (
+                  <button
+                    type="button"
+                    data-testid="cooked-detail-delete-detached"
+                    onClick={() => void removeDetachedLog()}
+                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-app py-3 font-bold text-ink-muted shadow-sm"
+                  >
+                    <Trash2 size={18} aria-hidden />
+                    {ja.cookedDetail.deletedRecipeLogDelete}
+                  </button>
                 )}
               </div>
             </>

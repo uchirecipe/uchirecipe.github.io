@@ -7,6 +7,7 @@ import BackHeader from '../components/BackHeader'
 import CookedLogDetailModal, {
   type CookedLogDetailTarget,
 } from '../components/CookedLogDetailModal'
+import { useDetachedLogEntries } from '../components/useDetachedLogEntries'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { ja } from '../i18n/ja'
@@ -25,10 +26,13 @@ const PAGE_SIZE = 30
 function HistoryRow({
   recipe,
   log,
+  deleted,
   onOpen,
 }: {
   recipe: Recipe
   log: CookedLog
+  /** レシピを削除したあとも残っている記録か（2026-08-16 便GZ） */
+  deleted?: boolean
   onOpen: () => void
 }) {
   const logPhotoUrl = usePhotoUrl(log.photo)
@@ -54,6 +58,14 @@ function HistoryRow({
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate font-bold">{recipe.title}</p>
+          {/* レシピが端末に無いことを一覧の時点で分かるようにする（2026-08-16 便GZ）。
+              押して開いた小窓でも同じことを書くが、一覧で見分けが付かないと
+              「押してもレシピへ行けない行」を毎回押すことになる */}
+          {deleted && (
+            <p className="mt-0.5 truncate text-sm text-ink-muted">
+              {ja.cookedDetail.deletedRecipeLabel}
+            </p>
+          )}
           {log.note && <p className="mt-0.5 truncate text-sm text-ink-muted">{log.note}</p>}
         </div>
         <span className="shrink-0 text-right text-sm text-ink-muted">
@@ -95,6 +107,8 @@ function backTargetOf(back: string | null): string | null {
 
 export default function HistoryPage() {
   const recipes = useLiveQuery(listRecipes, [])
+  // レシピを削除しても残っている記録（2026-08-16 便GZ）。同じ一覧に日付順で並べる
+  const detachedEntries = useDetachedLogEntries()
   // レシピ詳細の「すべて見る（他◯件）」からの絞り込み(2026-07-29 便CI/C03)
   const [searchParams] = useSearchParams()
   const backTarget = backTargetOf(searchParams.get('back'))
@@ -107,13 +121,19 @@ export default function HistoryPage() {
   const [logDetail, setLogDetail] = useState<CookedLogDetailTarget | null>(null)
 
   const entries = useMemo(() => {
-    if (!recipes) return undefined
+    if (!recipes || !detachedEntries) return undefined
     const target = hasFilter ? recipes.filter((r) => r.id === filterRecipeId) : recipes
     // logIndex（recipe.cookedLogs の何番目か）も持ち回る＝小窓から記録の編集へ渡すため(便EQ)
-    return target
-      .flatMap((recipe) => recipe.cookedLogs.map((log, logIndex) => ({ recipe, log, logIndex })))
-      .sort((a, b) => b.log.date.localeCompare(a.log.date))
-  }, [recipes, hasFilter, filterRecipeId])
+    const own: CookedLogDetailTarget[] = target.flatMap((recipe) =>
+      recipe.cookedLogs.map((log, logIndex) => ({ recipe, log, logIndex })),
+    )
+    // レシピを削除したあとも残っている記録も同じ一覧に並べる（2026-08-16 便GZ・オーナー承認
+    // 「記録を見るときに、記録した情報や写真閲覧などはできる」）。
+    // レシピを1品に絞って見ているとき（?recipe=<id>）は、そのレシピの記録だけを見に来ているので混ぜない
+    return [...own, ...(hasFilter ? [] : detachedEntries)].sort((a, b) =>
+      b.log.date.localeCompare(a.log.date),
+    )
+  }, [recipes, detachedEntries, hasFilter, filterRecipeId])
 
   // 表示する分だけを月区切りにまとめる（残りは「もっと見る」で足す）
   const groups = useMemo(() => {
@@ -169,12 +189,13 @@ export default function HistoryPage() {
                 {ja.history.monthFormat.replace('{y}', y).replace('{m}', String(Number(m)))}
               </h2>
               <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-                {monthEntries.map(({ recipe, log, logIndex }, index) => (
+                {monthEntries.map((entry, index) => (
                   <HistoryRow
-                    key={`${recipe.id}-${log.date}-${index}`}
-                    recipe={recipe}
-                    log={log}
-                    onOpen={() => setLogDetail({ recipe, log, logIndex })}
+                    key={`${entry.recipe.id ?? `d${entry.detachedRecordId}`}-${entry.log.date}-${index}`}
+                    recipe={entry.recipe}
+                    log={entry.log}
+                    deleted={entry.detachedRecordId != null}
+                    onOpen={() => setLogDetail(entry)}
                   />
                 ))}
               </ul>

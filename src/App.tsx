@@ -24,6 +24,8 @@ import { seedStartersIfNeeded, topUpFlattenedStartersIfNeeded } from './db/start
 import { seedPantryPresetIfNeeded } from './db/pantry'
 import { seedPriceDefaultsIfNeeded } from './db/prices'
 import { rebuildSearchWordsIfNeeded } from './db/recipes'
+import { backfillRecipeUids } from './db/recipeUid'
+import { reattachDetachedLogs } from './db/detachedLogs'
 
 /**
  * 設定のテーマを画面に反映する。
@@ -63,6 +65,12 @@ function App() {
       await seedPantryPresetIfNeeded()
       await seedPriceDefaultsIfNeeded()
       await rebuildSearchWordsIfNeeded()
+      // レシピを一意に指す印（uid）を、まだ持っていないレシピに後から振る（2026-08-16 便GZ）。
+      // 印は「レシピを削除しても残る作った記録」を、入れ直したレシピへ結び直すために使う。
+      // 足すだけで既存の中身は書き換えないので、途中で失敗しても失うものは無く、次の起動でやり直す。
+      // そのあとで、印が一致する記録のつながりを戻す（料理名では結ばない）
+      await backfillRecipeUids()
+      await reattachDetachedLogs()
       // 表示食事帯の既定値を初回だけ決める（新規ユーザーは夕食のみ・既存ユーザーは
       // 朝食/昼食を使っていれば3枠を維持。2026-07-13献立の主菜+副菜構成対応と同時導入）
       await resolveVisibleMealSlotsIfNeeded()

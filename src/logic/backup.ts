@@ -4,6 +4,7 @@ import {
   defaultSettings,
   type CookedLog,
   type DayNote,
+  type DetachedCookedRecord,
   type MealPlanEntry,
   type MealPlanLock,
   type MealTemplate,
@@ -20,6 +21,8 @@ import { backupFileName } from './fileSave'
 import { formatFileSize } from './fileSize'
 import type { ConfirmContent } from './confirmContent'
 import { clearCookNaviSession } from './cookNaviSession'
+import { mergeCookedLogLists } from './detachedLogs'
+import { reattachDetachedLogs } from '../db/detachedLogs'
 import { ja } from '../i18n/ja'
 
 /**
@@ -56,6 +59,16 @@ interface BackupRecipe extends Omit<Recipe, 'photo' | 'cookedLogs'> {
   photoBase64?: string
   photoType?: string
   cookedLogs: BackupCookedLog[]
+}
+
+/**
+ * レシピを削除しても残した「作った記録」のまとまり（2026-08-16 便GZ）。
+ * idは復元先で振り直すため含めない（他のテーブルと同じ流儀）。
+ * recipeUid（レシピを一意に指す印）を必ず持ち回るのが要点で、これがファイルに入っているから
+ * 「同じレシピを入れ直したらつながりが戻る」が成り立つ。
+ */
+interface BackupDetachedRecord extends Omit<DetachedCookedRecord, 'id' | 'logs'> {
+  logs: BackupCookedLog[]
 }
 
 export interface BackupFile {
@@ -104,6 +117,14 @@ export interface BackupFile {
    * 従来どおり復元できる
    */
   mealPlanLocks?: MealPlanLock[]
+  /**
+   * レシピを削除しても残した「作った記録」（2026-08-16 便GZ）。端末内保存なので、
+   * 端末移行でこれだけが失われないようバックアップへ含める（日付メモ＝便CB-1と同じ扱い）。
+   * これも任意項目＝この項目が無い古いバックアップも従来どおり復元できる。
+   * 記録の写真は cookedLogs と同じく includeCookedLogPhotos が true のときだけ入れる
+   * （ファイルが重くなるのを避ける既定を、残した記録でも変えない）
+   */
+  detachedLogs?: BackupDetachedRecord[]
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -124,6 +145,20 @@ function base64ToBlob(base64: string, type: string): Blob {
   return new Blob([bytes], { type })
 }
 
+/** 「作った記録」1件をバックアップの形（写真はBase64）に変換する */
+async function toBackupCookedLogs(
+  logs: readonly CookedLog[],
+  includeCookedLogPhotos: boolean,
+): Promise<BackupCookedLog[]> {
+  return Promise.all(
+    logs.map(async ({ photo: logPhoto, ...logRest }) => ({
+      ...logRest,
+      photoBase64: includeCookedLogPhotos && logPhoto ? await blobToBase64(logPhoto) : undefined,
+      photoType: includeCookedLogPhotos && logPhoto ? logPhoto.type || undefined : undefined,
+    })),
+  )
+}
+
 /** レシピ1品をバックアップの形（写真はBase64）に変換する。全体・選択どちらの書き出しでも使う */
 async function toBackupRecipe(recipe: Recipe, includeCookedLogPhotos: boolean): Promise<BackupRecipe> {
   const { photo, cookedLogs, ...rest } = recipe
@@ -131,14 +166,57 @@ async function toBackupRecipe(recipe: Recipe, includeCookedLogPhotos: boolean): 
     ...rest,
     photoBase64: photo ? await blobToBase64(photo) : undefined,
     photoType: photo?.type || undefined,
-    cookedLogs: await Promise.all(
-      cookedLogs.map(async ({ photo: logPhoto, ...logRest }) => ({
-        ...logRest,
-        photoBase64: includeCookedLogPhotos && logPhoto ? await blobToBase64(logPhoto) : undefined,
-        photoType: includeCookedLogPhotos && logPhoto ? logPhoto.type || undefined : undefined,
-      })),
-    ),
+    cookedLogs: await toBackupCookedLogs(cookedLogs, includeCookedLogPhotos),
   }
+}
+
+/** 「レシピの無い記録」1まとまりをバックアップの形にする（2026-08-16 便GZ） */
+async function toBackupDetached(
+  record: DetachedCookedRecord,
+  includeCookedLogPhotos: boolean,
+): Promise<BackupDetachedRecord> {
+  const { id: _unused, logs, ...rest } = record
+  return { ...rest, logs: await toBackupCookedLogs(logs, includeCookedLogPhotos) }
+}
+
+/** バックアップの形の「レシピの無い記録」を端末に保存する形（写真はBlob）へ戻す */
+function toDetachedRecord(backup: BackupDetachedRecord): Omit<DetachedCookedRecord, 'id'> {
+  return {
+    ...backup,
+    logs: backup.logs.map(({ photoBase64, photoType, ...logRest }) => {
+      const log: CookedLog = { ...logRest }
+      if (photoBase64) log.photo = base64ToBlob(photoBase64, photoType || 'image/jpeg')
+      return log
+    }),
+  }
+}
+
+/**
+ * 手で編集されたファイル・別経路で作られたファイルにも耐えるよう、
+ * 「レシピの無い記録」の行を正規化する（日付の形をしていない記録・料理名の無い行は捨てる）。
+ * 捨てた分は復元件数に出ないだけで、他の行の復元は従来どおり続く。
+ */
+function normalizeBackupDetached(
+  rows: readonly BackupDetachedRecord[] | undefined,
+): Omit<DetachedCookedRecord, 'id'>[] {
+  if (!rows) return []
+  const out: Omit<DetachedCookedRecord, 'id'>[] = []
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    const title = typeof row.title === 'string' ? row.title.trim() : ''
+    if (!title || !Array.isArray(row.logs)) continue
+    const record = toDetachedRecord(row)
+    const logs = record.logs.filter((log) => /^\d{4}-\d{2}-\d{2}$/.test(log?.date ?? ''))
+    if (logs.length === 0) continue
+    out.push({
+      ...record,
+      title,
+      recipeUid: typeof row.recipeUid === 'string' && row.recipeUid ? row.recipeUid : undefined,
+      detachedAt: typeof row.detachedAt === 'number' ? row.detachedAt : Date.now(),
+      logs,
+    })
+  }
+  return out
 }
 
 /**
@@ -164,6 +242,11 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
   const mealTemplates = (await db.mealTemplates.toArray()).map(({ id: _unused, ...rest }) => rest)
   // 献立のロック（便DX）。日付メモと同じく主キーが文字列そのものなので、そのまま入れる
   const mealPlanLocks = await db.mealPlanLocks.toArray()
+  // レシピを削除しても残した「作った記録」（便GZ）。ここを含めないと、レシピを消したあとの
+  // 記録だけが端末移行で失われる。記録の写真の扱いはレシピ側の記録と同じ既定にそろえる
+  const detachedLogs = await Promise.all(
+    (await db.detachedLogs.toArray()).map((r) => toBackupDetached(r, includeCookedLogPhotos)),
+  )
   const backupRecipes: BackupRecipe[] = await Promise.all(
     recipes.map((recipe) => toBackupRecipe(recipe, includeCookedLogPhotos)),
   )
@@ -182,6 +265,7 @@ export async function exportBackup(includeCookedLogPhotos = false): Promise<stri
     dayNotes,
     mealTemplates,
     mealPlanLocks,
+    detachedLogs,
   }
   return JSON.stringify(file)
 }
@@ -317,6 +401,7 @@ export function tablesToReplace(file: BackupFile): {
   dayNotes: boolean
   mealTemplates: boolean
   mealPlanLocks: boolean
+  detachedLogs: boolean
 } {
   return {
     pantryItems: file.pantryItems !== undefined,
@@ -331,6 +416,11 @@ export function tablesToReplace(file: BackupFile): {
     mealTemplates: file.mealTemplates !== undefined,
     // 献立のロック（2026-08-08 便DX）。日付メモと同じ後方互換のルール
     mealPlanLocks: file.mealPlanLocks !== undefined,
+    // レシピを削除しても残した「作った記録」（2026-08-16 便GZ）。日付メモと同じ後方互換のルール。
+    // **この項目を持たない古いバックアップを上書きで読んでも、残した記録は1件も消えない**
+    // （項目が無い＝そのテーブルに触らない）。古いファイルに「記録が入っていないから」という
+    // 理由で今の端末の記録を消すのは、バックアップの目的そのものを壊すため
+    detachedLogs: file.detachedLogs !== undefined,
   }
 }
 
@@ -350,10 +440,18 @@ export interface ReplaceImpactCounts {
 export function countReplaceImpact(
   recipes: Pick<Recipe, 'cookedLogs'>[],
   priceCount: number,
+  /**
+   * レシピを削除しても残っている「作った記録」（2026-08-16 便GZ）。上書きではこれも
+   * ファイルの内容へ置き換わるので、確認文の「消える記録の件数」に必ず足す
+   * （数え漏らすと、画面が言った件数より多く消える＝規約Fが守れない）
+   */
+  detachedRecords: readonly { logs: readonly unknown[] }[] = [],
 ): ReplaceImpactCounts {
   return {
     recipes: recipes.length,
-    cookedLogs: recipes.reduce((sum, r) => sum + r.cookedLogs.length, 0),
+    cookedLogs:
+      recipes.reduce((sum, r) => sum + r.cookedLogs.length, 0) +
+      detachedRecords.reduce((sum, r) => sum + r.logs.length, 0),
     prices: priceCount,
   }
 }
@@ -568,6 +666,15 @@ export const mergeRowKeys = {
   mealTemplates: (row: { name: string }) => row.name.trim(),
   // 献立のロック（便DX）＝日付+食事（主キーそのもの・1食1件）
   mealPlanLocks: (row: { key: string }) => row.key,
+  /**
+   * レシピを削除しても残した「作った記録」のまとまり（2026-08-16 便GZ）。
+   * 印（recipeUid）があればそれが「同じまとまり」の唯一の手掛かり。**料理名では突き合わせない**
+   * （似た名前の違うレシピの記録が1つに混ざるのを防ぐ）。印を持たないまとまりは、
+   * 突き合わせる根拠が無いので料理名＋削除日時で「まったく同じ行」だけを重複と見なす
+   * ＝判断がつかないものは足す側（記録を失わない側）に倒す
+   */
+  detachedLogs: (row: { recipeUid?: string; title: string; detachedAt: number }) =>
+    row.recipeUid ? `u\n${row.recipeUid}` : `t\n${row.title.trim()}\n${row.detachedAt}`,
 }
 
 /**
@@ -810,6 +917,7 @@ export async function importBackup(
         db.dayNotes,
         db.mealTemplates,
         db.mealPlanLocks,
+        db.detachedLogs,
       ],
       async () => {
         await db.recipes.clear()
@@ -855,6 +963,11 @@ export async function importBackup(
           await db.mealPlanLocks.clear()
           if (file.mealPlanLocks!.length > 0) await db.mealPlanLocks.bulkAdd(file.mealPlanLocks!)
         }
+        if (replace.detachedLogs) {
+          await db.detachedLogs.clear()
+          const rows = normalizeBackupDetached(file.detachedLogs)
+          if (rows.length > 0) await db.detachedLogs.bulkAdd(rows as DetachedCookedRecord[])
+        }
       },
     )
     // 端末だけに残る「作りかけの段取り」の覚え書き（localStorage・COOK_NAVI_SESSION_KEY）を捨てる
@@ -865,6 +978,10 @@ export async function importBackup(
     // 段取りはその日限りの覚え書きでバックアップにも入れない設計なので、復元せず捨てるだけにする。
     // 「元に戻す」(restorePreImportSnapshot)も同じ置き換え経路を通るので、そちらでも捨てられる
     clearCookNaviSession()
+    // 入れ直したレシピと、残っている「レシピの無い記録」のつながりを戻す（2026-08-16 便GZ）。
+    // 結ぶのは印（recipeUid）が完全に一致したときだけで、料理名では結ばない。
+    // トランザクションの外で呼ぶ（reattachDetachedLogs が自分でトランザクションを開くため）
+    await reattachDetachedLogs()
     return { added: recipes.length, updated: 0, skipped: 0, excluded: 0 }
   }
 
@@ -895,6 +1012,7 @@ export async function importBackup(
       db.dayNotes,
       db.mealTemplates,
       db.mealPlanLocks,
+      db.detachedLogs,
     ],
     async () => {
       // 照合表（ID→料理名 / 料理名→ID）。ファイルのIDが別の料理に当たっていないか、
@@ -1003,6 +1121,30 @@ export async function importBackup(
         if (rows.length > 0) await db.mealPlanLocks.bulkAdd(rows)
         detail.tableRowsAdded += rows.length
       }
+      // レシピを削除しても残した「作った記録」（2026-08-16 便GZ）。
+      // 他のテーブルと違い、同じまとまり（同じ印）が両方にある場合は行を捨てず、
+      // **中の記録を1件ずつ突き合わせて足りない分だけ足す**（行ごとスキップすると、
+      // ファイルにしか無い記録が復元されない＝バックアップの目的が果たせない）
+      if (file.detachedLogs !== undefined) {
+        const incoming = normalizeBackupDetached(file.detachedLogs)
+        const existing = await db.detachedLogs.toArray()
+        const byKey = new Map(existing.map((row) => [mergeRowKeys.detachedLogs(row), row] as const))
+        for (const row of incoming) {
+          const found = byKey.get(mergeRowKeys.detachedLogs(row))
+          if (found?.id != null) {
+            const merged = mergeCookedLogLists(found.logs, row.logs)
+            if (merged.added > 0 || merged.logs.length !== found.logs.length) {
+              await db.detachedLogs.update(found.id, { logs: merged.logs })
+              detail.cookedLogsAdded += merged.added
+            }
+            continue
+          }
+          const id = (await db.detachedLogs.add(row as DetachedCookedRecord)) as number
+          byKey.set(mergeRowKeys.detachedLogs(row), { ...row, id })
+          detail.cookedLogsAdded += row.logs.length
+          detail.tableRowsAdded += 1
+        }
+      }
       // 再取込除外の記録は (setId, title) で照合し、無いものだけ追加する（今の記録は消さない）
       if (backupExclusions.length > 0) {
         const existingKeys = new Set(
@@ -1030,6 +1172,8 @@ export async function importBackup(
       }
     },
   )
+  // 追加で読み込んだレシピにも、残っている記録のつながりを戻す（2026-08-16 便GZ・印の一致のみ）
+  await reattachDetachedLogs()
   return { added, updated: 0, skipped, excluded: 0, mergeDetail: detail }
 }
 
@@ -1275,6 +1419,8 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
       added++
     }
   })
+  // 配布セットの取り込みでもつながりを戻す（2026-08-16 便GZ・印の一致のみ）
+  await reattachDetachedLogs()
   return { added, updated, skipped, excluded }
 }
 

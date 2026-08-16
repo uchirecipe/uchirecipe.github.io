@@ -48,6 +48,7 @@ import {
 import { normalizeAmountInput, normalizeDigits } from '../logic/amount'
 import { isHttpUrl } from '../logic/url'
 import { MAX_SERVINGS, MIN_SERVINGS, clampServings, isServingsInRange } from '../logic/servings'
+import { buildSingleDeleteConfirm } from '../logic/recipeDelete'
 import { needsReplaceConfirm, photoReplacePlan, replaceConfirmTargets } from '../logic/replaceConfirm'
 import type { PhotoReplacePlan } from '../logic/replaceConfirm'
 import { usePhotoUrl } from '../components/usePhotoUrl'
@@ -1494,22 +1495,17 @@ function RecipeFormInner() {
 
   const remove = async () => {
     if (editId === undefined) return
-    // 削除で巻き添えになるもの(作った記録・記録写真)の件数を確認文に入れる(規約F・便CI/C01)。
-    // cookedLogsはRecipe埋め込み配列なのでloadedRecipeから同期的に数えられる
+    // 削除で何が消えて何が残るかを件数つきで出す(規約F・便CI/C01)。
+    // cookedLogsはRecipe埋め込み配列なのでloadedRecipeから同期的に数えられる。
+    // 2026-08-16 便GZ: 記録は削除後も残るので「残るもの」側に数える。文の組み立ては
+    // まとめて削除と同じ場所(logic/recipeDelete.ts)に置き、2つの確認文が食い違わないようにする
     const logs = loadedRecipe?.cookedLogs ?? []
-    const ok = await confirm({
-      title: ja.form.confirmDeleteTitle,
-      bullets: [
-        {
-          label: ja.form.confirmDeleteGoneLabel,
-          text: ja.form.confirmDeleteGone
-            .replace('{n}', String(logs.length))
-            .replace('{p}', String(logs.filter((log) => log.photo).length)),
-        },
-        { label: ja.form.confirmDeleteKeptLabel, text: ja.form.confirmDeleteKept },
-      ],
-      confirmLabel: ja.form.confirmDeleteOk,
-    })
+    const ok = await confirm(
+      buildSingleDeleteConfirm({
+        cookedLogs: logs.length,
+        photos: logs.filter((log) => log.photo).length,
+      }),
+    )
     if (!ok) return
     await deleteRecipe(editId)
     clearDraft()

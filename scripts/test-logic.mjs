@@ -128,6 +128,7 @@ import {
 import {
   summarizeRecipeDeleteImpact,
   buildBulkDeleteConfirm,
+  buildSingleDeleteConfirm,
   isRestorableStarter,
 } from '../src/logic/recipeDelete.ts'
 import { NUTRITION_DATA } from '../src/logic/nutritionData.ts'
@@ -433,6 +434,21 @@ import {
   FIRST_SETUP_NOTICE_SEEN_KEY,
 } from '../src/logic/firstSetupNotice.ts'
 import { isImeConfirmKey } from '../src/logic/imeKey.ts'
+// 便GZ: レシピを削除しても「作った記録」が残る仕組み（2026-08-16 オーナー承認）
+import {
+  starterRecipeUid,
+  isStarterUid,
+  newRecipeUid,
+  planRecipeUidBackfill,
+} from '../src/logic/recipeUid.ts'
+import {
+  buildDetachedRecord,
+  mergeDetachedRecords,
+  planDetachedReattach,
+  detachedRecipeStub,
+  countDetachedLogs,
+  detachedPhotoBytes,
+} from '../src/logic/detachedLogs.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -7213,7 +7229,10 @@ eq(
     const impact = countStarterReloadImpact(existingStarters, plan)
     eq('STARTER-RELOAD 料理名を変えた基本レシピは消える(上書きではない)', impact.removed, 1)
     eq('STARTER-RELOAD 消える品に付いた作った記録も数える', impact.removedCookedLogs, 2)
-    eq('STARTER-RELOAD 消える品に付いた写真も数える(レシピ写真＋記録の写真)', impact.removedPhotos, 2)
+    // 2026-08-16 便GZ: 作った記録とその写真は品と一緒には消えず残るので、消える写真は
+    // レシピに登録した写真だけになった（記録の写真は「残るもの」側で数える）
+    eq('STARTER-RELOAD 記録の写真は残る側で数える', impact.removedCookedPhotos, 1)
+    eq('STARTER-RELOAD 消えるのはレシピに登録した写真だけ', impact.removedRecipePhotos, 1)
     eq('STARTER-RELOAD 料理名が一致する品は残る側で数える', impact.kept, 1)
     eq('STARTER-RELOAD 自分で登録したレシピは入れ直しの対象にしない', existingStarters.length, 2)
     eq(
@@ -7229,31 +7248,33 @@ eq(
       true,
     )
     eq(
-      'STARTER-RELOAD 確認文は消える記録・写真の件数も言う',
+      'STARTER-RELOAD 確認文は消えるレシピの写真の枚数も言う',
       text.includes(
         ja.settings.starterReloadConfirmRemovedData.replace(
-          '{items}',
-          [
-            ja.settings.starterReloadConfirmRemovedLogs.replace('{c}', String(impact.removedCookedLogs)),
-            ja.settings.starterReloadConfirmRemovedPhotos.replace('{p}', String(impact.removedPhotos)),
-          ].join('・'),
+          '{p}',
+          String(impact.removedRecipePhotos),
         ),
       ),
       true,
     )
     // 0のものを並べない(「写真0枚も消えます」＝消えないものを数える文にしない)
     {
-      const noPhoto = confirmContentText(buildStarterReloadConfirm({ ...impact, removedPhotos: 0 }))
-      eq('STARTER-RELOAD 写真が付いていない品なら写真の件数は書かない', /写真\d+枚/.test(noPhoto), false)
+      const noPhoto = confirmContentText(
+        buildStarterReloadConfirm({ ...impact, removedRecipePhotos: 0 }),
+      )
       eq(
-        'STARTER-RELOAD 写真が付いていなくても作った記録の件数は書く',
-        noPhoto.includes(
-          ja.settings.starterReloadConfirmRemovedLogs.replace('{c}', String(impact.removedCookedLogs)),
-        ),
+        'STARTER-RELOAD レシピの写真が無い品なら写真の件数は書かない',
+        /レシピの写真\d+枚/.test(noPhoto),
+        false,
+      )
+      // 2026-08-16 便GZ: 記録は残るので、記録の話は「残るもの」側に出る
+      eq(
+        'STARTER-RELOAD レシピの写真が無くても、残る記録の件数は書く',
+        /作った記録2件（うち写真1枚）も残り/.test(noPhoto),
         true,
       )
       const noUserData = confirmContentText(
-        buildStarterReloadConfirm({ ...impact, removedCookedLogs: 0, removedPhotos: 0 }),
+        buildStarterReloadConfirm({ ...impact, removedCookedLogs: 0, removedRecipePhotos: 0 }),
       )
       eq(
         'STARTER-RELOAD 記録も写真も無ければ、その1行ごと出さない',
@@ -7627,6 +7648,7 @@ eq(
       dayNotes: false,
       mealTemplates: false,
       mealPlanLocks: false,
+      detachedLogs: false,
     },
   )
   eq(
@@ -7641,6 +7663,7 @@ eq(
       dayNotes: false,
       mealTemplates: false,
       mealPlanLocks: false,
+      detachedLogs: false,
     },
   )
   eq(
@@ -7659,6 +7682,7 @@ eq(
       dayNotes: false,
       mealTemplates: false,
       mealPlanLocks: false,
+      detachedLogs: false,
     },
   )
   eq(
@@ -7673,6 +7697,7 @@ eq(
       dayNotes: [],
       mealTemplates: [],
       mealPlanLocks: [],
+      detachedLogs: [],
     }),
     {
       pantryItems: true,
@@ -7683,6 +7708,7 @@ eq(
       dayNotes: true,
       mealTemplates: true,
       mealPlanLocks: true,
+      detachedLogs: true,
     },
   )
   // 日付メモ(2026-07-29 便CB-1・docs/59 A-2)。新テーブルを足したときの後方互換の要:
@@ -8134,6 +8160,9 @@ eq(
     dayNotes: '日付メモ',
     mealTemplates: '献立テンプレート',
     mealPlanLocks: '献立のロック',
+    // 2026-08-16 便GZ: レシピを削除しても残っている記録。上書きではこれもファイルの内容に
+    // 置き換わるので、「消えるもの」の作った記録の件数（countReplaceImpactが合算する）で伝える
+    detachedLogs: '作った記録',
   }
   eq('BK-SWAP 置き換えの分岐を読めている(空振りしていない)', clearedTables.length > 0, true)
   eq(
@@ -14666,7 +14695,9 @@ eq(
   // 基本レシピだけは入れ直しで戻せる(ただし記録は戻らない)ことを区別して書く。
   // 規約H: 場所は指示語ではなく画面名・ボタン名で言う
   eq('CT-DEL 基本レシピの戻し方を添える', /基本レシピ1品は、設定画面の「基本レシピを入れ直す」で戻せます/.test(text), true)
-  eq('CT-DEL 記録は戻らないことを添える', text.includes('作った記録は戻りません'), true)
+  // 2026-08-16 便GZ: 基本レシピの印は料理名から決まるので、入れ直すと記録もつながり直す
+  // （それまでは「作った記録は戻りません」だった）
+  eq('CT-DEL 記録もつながり直すことを添える', text.includes('作った記録もつながり直します'), true)
 
   // 基本レシピを含まない選択では、入れ直しの一文を出さない(戻せない品に戻せると言わない)
   const ownOnly = summarizeRecipeDeleteImpact([{ isStarter: false, cookedLogs: [] }], {
@@ -19690,6 +19721,321 @@ Aみりん 大さじ1
     eq(
       'HA-4 監査の表に「分母から外した」件数の列がある（外した数を隠さない）',
       auditSource.includes('分母から外した'),
+      true,
+    )
+  }
+}
+
+// ---------- 便GZ: レシピを削除しても「作った記録」が残る(2026-08-16 オーナー承認) ----------
+// オーナーの求めた形:
+//  ①レシピを削除したらカードも詳細画面も無くなる ②記録は残り、内容も写真も見られる
+//  ③記録からレシピ詳細へは行けない ④書き出したファイルから同じレシピを入れ直すとつながりが戻る
+// オーナーの懸念は「似た名前の違うレシピとつながってしまいそう」。ここは**名前で結ばない**ことを固定する。
+{
+  const log = (date, note, photo) => ({
+    date,
+    ...(note ? { note } : {}),
+    ...(photo ? { photo: { size: photo } } : {}),
+  })
+
+  // --- 印(uid)の決め方 ---
+  eq('GZ-UID 基本レシピの印は料理名から決まる', starterRecipeUid('肉じゃが'), 'starter:肉じゃが')
+  eq('GZ-UID 前後の空白は印に含めない', starterRecipeUid(' 肉じゃが '), 'starter:肉じゃが')
+  eq('GZ-UID 基本レシピの印は見分けが付く', isStarterUid(starterRecipeUid('肉じゃが')), true)
+  neq('GZ-UID 乱数の印は毎回違う', newRecipeUid(), newRecipeUid())
+  eq('GZ-UID 乱数の印は基本レシピの印と形が違う', isStarterUid(newRecipeUid()), false)
+
+  // 後から印を振る(移行)。印を持っている品は触らない・基本レシピだけ料理名由来の印になる
+  {
+    let n = 0
+    const makeUid = () => `rnd-${++n}`
+    const plan = planRecipeUidBackfill(
+      [
+        { id: 1, title: '肉じゃが', isStarter: true },
+        { id: 2, title: '肉じゃが', isStarter: false }, // 自分で登録した同名レシピ
+        { id: 3, title: '高たんぱく品A', isStarter: true, sourceSetId: 'kintore' },
+        { id: 4, title: '既に印あり', uid: 'keep-me' },
+      ],
+      new Set(['肉じゃが']),
+      makeUid,
+    )
+    eq('GZ-移行 印の無い品だけに振る', plan.length, 3)
+    eq('GZ-移行 基本レシピは料理名由来の印', plan.find((p) => p.id === 1).uid, 'starter:肉じゃが')
+    // ここがオーナーの懸念そのもの: 同じ料理名でも、自作レシピは基本レシピと別の印になる
+    eq('GZ-移行 同名の自作レシピは乱数の印(基本レシピと同じ印にしない)', plan.find((p) => p.id === 2).uid, 'rnd-1')
+    eq('GZ-移行 配布セット由来は乱数の印', plan.find((p) => p.id === 3).uid, 'rnd-2')
+    eq('GZ-移行 既に印がある品は作り直さない', plan.some((p) => p.id === 4), false)
+    // 印は二度と重ならない(重なると結び直しの相手が一意に決まらない)
+    eq('GZ-移行 振った印に重複が無い', new Set(plan.map((p) => p.uid)).size, plan.length)
+  }
+  {
+    // 既に他の品が同じ料理名由来の印を使っていたら、乱数に落とす(重複を作らない)
+    const plan = planRecipeUidBackfill(
+      [
+        { id: 1, title: 'カレー', uid: 'starter:カレー' },
+        { id: 2, title: 'カレー', isStarter: true },
+      ],
+      new Set(['カレー']),
+      () => 'rnd-x',
+    )
+    eq('GZ-移行 印がぶつかるときは乱数に落とす', plan[0].uid, 'rnd-x')
+  }
+
+  // --- 削除で残すまとまりの作り方 ---
+  {
+    const recipe = {
+      uid: 'u-1',
+      title: '肉じゃが',
+      iconKey: 'meat',
+      servings: 2,
+      cookedLogs: [log('2026-08-01'), log('2026-08-03', 'おいしくできた', 10)],
+    }
+    const record = buildDetachedRecord(recipe, 1000)
+    eq('GZ-削除 印を写して残す', record.recipeUid, 'u-1')
+    eq('GZ-削除 料理名を写して残す(表示用。照合には使わない)', record.title, '肉じゃが')
+    eq('GZ-削除 記録は日付の新しい順に並べる', record.logs.map((l) => l.date), ['2026-08-03', '2026-08-01'])
+    eq('GZ-削除 写真も一緒に残る', record.logs[0].photo.size, 10)
+    eq('GZ-削除 ひとことメモも残る', record.logs[0].note, 'おいしくできた')
+    eq(
+      'GZ-削除 記録が1件も無いレシピはまとまりを作らない',
+      buildDetachedRecord({ uid: 'u-2', title: 'から揚げ', servings: 2, cookedLogs: [] }),
+      null,
+    )
+  }
+
+  // --- 結び直し(オーナーの④と懸念) ---
+  {
+    const records = [
+      { id: 1, recipeUid: 'u-1', title: '肉じゃが', logs: [log('2026-08-01'), log('2026-08-02')], detachedAt: 1 },
+      { id: 2, recipeUid: 'u-2', title: 'カレー', logs: [log('2026-07-01')], detachedAt: 1 },
+      { id: 3, title: '印の無い記録', logs: [log('2026-06-01')], detachedAt: 1 },
+    ]
+    // 「肉じゃが」という同じ料理名の別レシピ(印が違う)を入れ直しても結ばれてはいけない
+    const recipes = [{ id: 10, uid: 'other-uid', cookedLogs: [] }]
+    const noMatch = planDetachedReattach(records, recipes)
+    eq('GZ-結び直し 料理名が同じでも印が違えば結ばない', noMatch.items.length, 0)
+    eq('GZ-結び直し 結ばなかった記録は消えない(件数0)', noMatch.logsReattached, 0)
+
+    // 印が一致するレシピが入り直したときだけ結ぶ
+    const matched = planDetachedReattach(records, [
+      { id: 10, uid: 'u-1', cookedLogs: [] },
+      { id: 11, uid: 'other-uid', cookedLogs: [] },
+    ])
+    eq('GZ-結び直し 印が一致した1品だけ結ぶ', matched.items.length, 1)
+    eq('GZ-結び直し 戻した記録の件数', matched.logsReattached, 2)
+    eq('GZ-結び直し 戻し先のレシピ', matched.items[0].recipeId, 10)
+    eq('GZ-結び直し 消すまとまりの番号', matched.items[0].recordId, 1)
+    eq('GZ-結び直し 印の無い記録は結ばない', matched.items.some((i) => i.recordId === 3), false)
+
+    // 同じ記録がレシピ側にもある場合は二重にしない(写真だけ埋める)
+    const dup = planDetachedReattach(
+      [{ id: 1, recipeUid: 'u-1', title: '肉じゃが', logs: [log('2026-08-01', undefined, 5)], detachedAt: 1 }],
+      [{ id: 10, uid: 'u-1', cookedLogs: [log('2026-08-01')] }],
+    )
+    eq('GZ-結び直し 同じ記録は二重に足さない', dup.logsReattached, 0)
+    eq('GZ-結び直し 記録の件数は増えない', dup.items[0].cookedLogs.length, 1)
+    eq('GZ-結び直し 欠けていた写真だけ埋める', dup.items[0].cookedLogs[0].photo.size, 5)
+  }
+
+  // --- まとまりの畳み込み(同じレシピを入れ直しては消す、を繰り返しても行が増えない) ---
+  {
+    const merged = mergeDetachedRecords([
+      { recipeUid: 'u-1', title: '肉じゃが', logs: [log('2026-08-01')], detachedAt: 1 },
+      { recipeUid: 'u-1', title: '肉じゃが（改）', logs: [log('2026-08-05')], detachedAt: 2 },
+      { title: '印なし', logs: [log('2026-08-03')], detachedAt: 1 },
+    ])
+    eq('GZ-畳み込み 同じ印は1行にまとめる', merged.length, 2)
+    eq('GZ-畳み込み 記録は両方残る', merged[0].logs.length, 2)
+    eq('GZ-畳み込み 料理名は新しく消した方を採る', merged[0].title, '肉じゃが（改）')
+    eq('GZ-畳み込み 印の無い行はまとめない', merged[1].title, '印なし')
+  }
+
+  // --- 画面へ渡す形(オーナーの③: レシピ詳細へ行けない) ---
+  {
+    const stub = detachedRecipeStub({
+      id: 7,
+      recipeUid: 'u-1',
+      title: '肉じゃが',
+      iconKey: 'meat',
+      servings: 3,
+      logs: [log('2026-08-01')],
+      detachedAt: 1,
+    })
+    // レシピ番号を持たない＝小窓・カードがレシピ詳細への行き先を出さない経路に乗る
+    eq('GZ-表示 レシピ番号を持たない(詳細画面へ行けない)', stub.id, undefined)
+    eq('GZ-表示 料理名は出す', stub.title, '肉じゃが')
+    eq('GZ-表示 アイコンは削除前のものを引き継ぐ', stub.iconKey, 'meat')
+    eq('GZ-表示 記録はそのまま読める', stub.cookedLogs.length, 1)
+    // 材料・手順は空にする＝栄養や食費の集計に「中身が0の料理」を混ぜないための歯止め
+    eq('GZ-表示 材料は空(集計に混ぜない)', stub.ingredients.length, 0)
+    eq('GZ-表示 手順は空', stub.steps.length, 0)
+  }
+
+  // --- 件数と容量 ---
+  {
+    const records = [
+      { logs: [log('2026-08-01'), log('2026-08-02', undefined, 100)] },
+      { logs: [log('2026-07-01', undefined, 50)] },
+    ]
+    eq('GZ-件数 残っている記録の件数', countDetachedLogs(records).logs, 3)
+    eq('GZ-件数 そのうち写真つきの枚数', countDetachedLogs(records).photos, 2)
+    eq('GZ-容量 写真の合計バイト数', detachedPhotoBytes(records), 150)
+  }
+
+  // --- 削除の確認文(規約F・オーナー指示「記録は残るに変わるはずなので文言も直す」) ---
+  {
+    const impact = summarizeRecipeDeleteImpact(
+      [
+        { isStarter: true, cookedLogs: [log('2026-08-01', undefined, 1), log('2026-08-02')] },
+        { isStarter: false, cookedLogs: [log('2026-08-01', undefined, 1)] },
+      ],
+      { totalRecipes: 109, mealPlanEntries: 4, todayEntries: 2 },
+    )
+    const text = confirmContentText(buildBulkDeleteConfirm(impact))
+    eq('GZ-確認文 記録は「残るもの」に件数つきで入る', /残るもの: 作った記録3件（うち写真2枚）/.test(text), true)
+    eq('GZ-確認文 「消えるもの」に記録を書かない', /消えるもの: [^\n]*作った記録/.test(text), false)
+    eq('GZ-確認文 消えるものはレシピの中身と献立', /消えるもの: [^\n]*材料・手順/.test(text), true)
+    eq('GZ-確認文 献立の予定・今日の献立の件数は残す', /献立の予定4件・今日の献立2件/.test(text), true)
+    eq('GZ-確認文 記録がどこで読めるか書く', text.includes('作った記録の一覧'), true)
+    eq('GZ-確認文 レシピ詳細へ行けなくなることを書く', text.includes('レシピ詳細へは行けなくなります'), true)
+    eq('GZ-確認文 入れ直せば戻ることを書く', text.includes('読み込み直す'), true)
+    eq('GZ-確認文 基本レシピは記録もつながり直すと書く', text.includes('作った記録もつながり直します'), true)
+    eq('GZ-確認文 「よろしいですか？」だけで終わらせない', text.includes('よろしいですか'), false)
+
+    // 記録が0件なら、残り方の説明は出さない(残らないものを「残ります」と言わない)
+    const noLogs = summarizeRecipeDeleteImpact([{ isStarter: false, cookedLogs: [] }], {
+      totalRecipes: 5,
+      mealPlanEntries: 0,
+      todayEntries: 0,
+    })
+    const noLogsText = confirmContentText(buildBulkDeleteConfirm(noLogs))
+    eq('GZ-確認文 記録0件でも件数は明示する', /作った記録0件（うち写真0枚）/.test(noLogsText), true)
+    eq('GZ-確認文 記録0件なら残り方の説明は出さない', noLogsText.includes('作った記録の一覧'), false)
+
+    // 1品削除も同じ規則(2つの確認文が食い違わない)
+    const single = confirmContentText(buildSingleDeleteConfirm({ cookedLogs: 2, photos: 1 }))
+    eq('GZ-確認文 1品削除でも記録は残るものに入る', /残るもの: 作った記録2件（うち写真1枚）/.test(single), true)
+    eq('GZ-確認文 1品削除でも消えるものに記録を書かない', /消えるもの: [^\n]*作った記録/.test(single), false)
+    eq('GZ-確認文 1品削除でも記録の読み場所を書く', single.includes('作った記録の一覧'), true)
+    eq(
+      'GZ-確認文 1品削除で記録0件なら残り方の説明は出さない',
+      confirmContentText(buildSingleDeleteConfirm({ cookedLogs: 0, photos: 0 })).includes('作った記録の一覧'),
+      false,
+    )
+    eq('GZ-確認文 件数の差し込み跡が残っていない', /\{[a-z]+\}/.test(`${text}${single}`), false)
+  }
+
+  // --- バックアップ(古いファイルとの往復。オーナー指示「古いバックアップから戻せなくなるのは絶対に不可」) ---
+  {
+    const base = { app: 'uchi-recipe', version: 1, exportedAt: '', recipes: [] }
+    eq(
+      'GZ-バックアップ 項目を持たない古いファイルでは残った記録に触らない',
+      tablesToReplace(base).detachedLogs,
+      false,
+    )
+    eq(
+      'GZ-バックアップ 空配列は「空にする意図」として置き換え対象',
+      tablesToReplace({ ...base, detachedLogs: [] }).detachedLogs,
+      true,
+    )
+    eq(
+      'GZ-バックアップ 中身があれば置き換え対象',
+      tablesToReplace({ ...base, detachedLogs: [{ title: 'x', logs: [], detachedAt: 1 }] }).detachedLogs,
+      true,
+    )
+    // 上書きの確認文は、残った記録も消える件数に数える(数え漏らすと言った件数より多く消える)
+    const impact = countReplaceImpact([{ cookedLogs: [log('2026-08-01')] }], 3, [
+      { logs: [log('2026-07-01'), log('2026-07-02')] },
+    ])
+    eq('GZ-バックアップ 上書きで消える記録に残った記録も足す', impact.cookedLogs, 3)
+    eq(
+      'GZ-バックアップ 残った記録を渡さなくても従来どおり数えられる',
+      countReplaceImpact([{ cookedLogs: [log('2026-08-01')] }], 3).cookedLogs,
+      1,
+    )
+    // 「今のデータに追加」で同じまとまりかを見分ける鍵は印。料理名では突き合わせない
+    eq(
+      'GZ-バックアップ 印があれば印だけで見分ける',
+      mergeRowKeys.detachedLogs({ recipeUid: 'u-1', title: '肉じゃが', detachedAt: 1 }),
+      mergeRowKeys.detachedLogs({ recipeUid: 'u-1', title: 'ぜんぜん違う名前', detachedAt: 999 }),
+    )
+    neq(
+      'GZ-バックアップ 料理名が同じでも印が違えば別のまとまり',
+      mergeRowKeys.detachedLogs({ recipeUid: 'u-1', title: '肉じゃが', detachedAt: 1 }),
+      mergeRowKeys.detachedLogs({ recipeUid: 'u-2', title: '肉じゃが', detachedAt: 1 }),
+    )
+  }
+
+  // --- 「基本レシピを入れ直す」の確認文も、記録が残る側に変わる ---
+  {
+    const removed = {
+      removed: 1,
+      removedCookedLogs: 2,
+      removedCookedPhotos: 1,
+      removedRecipePhotos: 1,
+      kept: 3,
+      added: 0,
+    }
+    const text = confirmContentText(buildStarterReloadConfirm(removed))
+    eq('GZ-入れ直し 消えるのはレシピの写真だけ', text.includes('レシピの写真1枚も消えます'), true)
+    eq('GZ-入れ直し 「消えるもの」に作った記録を書かない', /消えるもの: [^\n]*作った記録/.test(text), false)
+    eq('GZ-入れ直し 残るものに記録の件数を書く', text.includes('作った記録2件（うち写真1枚）も残り'), true)
+    eq(
+      'GZ-入れ直し 記録が付いていない品なら記録の話は書かない',
+      /作った記録\d+件（うち写真/.test(
+        confirmContentText(buildStarterReloadConfirm({ ...removed, removedCookedLogs: 0 })),
+      ),
+      false,
+    )
+    eq('GZ-入れ直し 件数の差し込み跡が残っていない', /\{[a-z]+\}/.test(text), false)
+  }
+
+  // --- 配線の確認(画面・DB操作がこの仕組みを通っているか。実DBはe2eで見る) ---
+  {
+    const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const recipesSrc = readFileSync(path.join(appRoot, 'src/db/recipes.ts'), 'utf-8')
+    // 削除の3経路すべてで、消す前に記録を移し替えていること
+    eq(
+      'GZ-配線 1品削除は消す前に記録を残す',
+      /deleteRecipe\(id: number\)[\s\S]{0,600}detachRecipeLogs\(\[recipe\]\)[\s\S]{0,600}db\.recipes\.delete\(id\)/.test(
+        recipesSrc,
+      ),
+      true,
+    )
+    eq(
+      'GZ-配線 まとめて削除も消す前に記録を残す',
+      /deleteRecipes\(ids[\s\S]{0,900}detachRecipeLogs\(targets\)[\s\S]{0,900}bulkDelete\(targetIds\)/.test(
+        recipesSrc,
+      ),
+      true,
+    )
+    eq(
+      'GZ-配線 セット丸ごと削除も消す前に記録を残す',
+      /deleteRecipesBySourceSet[\s\S]{0,900}detachRecipeLogs\(targets\)[\s\S]{0,900}bulkDelete\(ids\)/.test(
+        recipesSrc,
+      ),
+      true,
+    )
+    // 移し替えと削除が同じトランザクションでないと、片方だけ成功して記録が消える
+    eq(
+      'GZ-配線 1品削除は記録の移し替えと同じトランザクション',
+      /deleteRecipe\(id: number\)[\s\S]{0,200}db\.transaction\('rw'[^)]*db\.detachedLogs/.test(recipesSrc),
+      true,
+    )
+    const backupSrc = readFileSync(path.join(appRoot, 'src/logic/backup.ts'), 'utf-8')
+    eq('GZ-配線 バックアップに残った記録を含める', /detachedLogs,\n\s*\}\n\s*return JSON\.stringify\(file\)/.test(backupSrc), true)
+    eq('GZ-配線 取り込みのあとに結び直す', (backupSrc.match(/await reattachDetachedLogs\(\)/g) ?? []).length >= 3, true)
+    const appSrc = readFileSync(path.join(appRoot, 'src/App.tsx'), 'utf-8')
+    eq(
+      'GZ-配線 起動時に印を振ってから結び直す',
+      /backfillRecipeUids\(\)[\s\S]{0,120}reattachDetachedLogs\(\)/.test(appSrc),
+      true,
+    )
+    // 集計へ混ぜない歯止め(材料が無い記録を栄養・食費に0として数えない)
+    const mealPlanSrc = readFileSync(path.join(appRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+    eq(
+      'GZ-配線 削除済みレシピの記録は栄養・食費の入力(cookedLogsByDate)に混ぜない',
+      /const cookedLogsByDate = useMemo\(\(\) => \{[\s\S]{0,500}\}, \[recipes\]\)/.test(mealPlanSrc),
       true,
     )
   }

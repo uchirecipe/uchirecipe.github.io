@@ -40,6 +40,7 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import CookedLogDetailModal, {
   type CookedLogDetailTarget,
 } from '../components/CookedLogDetailModal'
+import { useDetachedLogEntries } from '../components/useDetachedLogEntries'
 import { useScrollRestore } from '../components/useScrollRestore'
 import { settingsLinkWithBack } from '../logic/backLink'
 import {
@@ -174,10 +175,13 @@ function HomeTodayListItem({ recipe }: { recipe: Recipe }) {
 function HistoryCard({
   recipe,
   log,
+  deleted,
   onOpen,
 }: {
   recipe: Recipe
   log: CookedLog
+  /** レシピを削除したあとも残っている記録か（2026-08-16 便GZ） */
+  deleted?: boolean
   onOpen: () => void
 }) {
   const logPhotoUrl = usePhotoUrl(log.photo)
@@ -198,7 +202,15 @@ function HistoryCard({
             <RecipePlaceholder recipe={recipe} iconSize={20} />
           )}
         </div>
-        <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
+        <span className="min-w-0 flex-1 truncate">
+          <span className="block truncate font-bold">{recipe.title}</span>
+          {/* レシピが端末に無いことを一覧の時点で分かるようにする（2026-08-16 便GZ） */}
+          {deleted && (
+            <span className="block truncate text-sm text-ink-muted">
+              {ja.cookedDetail.deletedRecipeLabel}
+            </span>
+          )}
+        </span>
         <span className="shrink-0 text-sm text-ink-muted">{log.date.replaceAll('-', '/')}</span>
       </button>
     </li>
@@ -215,6 +227,8 @@ export default function HomePage() {
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
   const allRecipes = useLiveQuery(listRecipes, [])
+  // レシピを削除しても残っている記録（2026-08-16 便GZ）。「最近作ったもの」に日付順で混ぜる
+  const detachedEntries = useDetachedLogEntries()
   const settings = useSettings()
 
   /**
@@ -440,11 +454,15 @@ export default function HomePage() {
   // logIndex（recipe.cookedLogs の何番目か）も持ち回る＝小窓から記録の編集へ渡すため(便EQ)
   const history = useMemo(() => {
     if (!recipes) return []
-    return recipes
-      .flatMap((recipe) => recipe.cookedLogs.map((log, logIndex) => ({ recipe, log, logIndex })))
+    const own: CookedLogDetailTarget[] = recipes.flatMap((recipe) =>
+      recipe.cookedLogs.map((log, logIndex) => ({ recipe, log, logIndex })),
+    )
+    // レシピを削除したあとも残っている記録も同じ並びに混ぜる（2026-08-16 便GZ）。
+    // 混ぜないと、削除した直後に「最近作ったもの」から料理が1つ消えたように見える
+    return [...own, ...(detachedEntries ?? [])]
       .sort((a, b) => b.log.date.localeCompare(a.log.date))
       .slice(0, 5)
-  }, [recipes])
+  }, [recipes, detachedEntries])
 
   // 押した記録の中身を出す小窓(2026-08-09 便EQ)。null なら閉じている
   const [logDetail, setLogDetail] = useState<CookedLogDetailTarget | null>(null)
@@ -758,12 +776,13 @@ export default function HomePage() {
             </Link>
           </div>
           <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
-            {history.map(({ recipe, log, logIndex }, index) => (
+            {history.map((entry, index) => (
               <HistoryCard
                 key={index}
-                recipe={recipe}
-                log={log}
-                onOpen={() => setLogDetail({ recipe, log, logIndex })}
+                recipe={entry.recipe}
+                log={entry.log}
+                deleted={entry.detachedRecordId != null}
+                onOpen={() => setLogDetail(entry)}
               />
             ))}
           </ul>
