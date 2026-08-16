@@ -23,7 +23,7 @@ import { useTimers } from './TimerProvider'
 import { useSettings, updateSettings } from '../db/settings'
 import { deriveDoneLabel } from '../logic/timerLabel'
 import { findTimeTokens, formatRemaining, isMinutesShownInText } from '../logic/time'
-import { sortTimersForDisplay, stepTimerKey, timerRemainingSeconds } from '../logic/timerOrder'
+import { sortTimersForDisplay, stepTimerKey, timerRemainingSeconds, timerAdjustAria} from '../logic/timerOrder'
 import { collectUniqueTerms } from '../logic/termSplit'
 import { buildIngredientNames } from '../logic/ingredientSpans'
 import {
@@ -556,7 +556,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
                 aria-label={
                   jumpsToStep
                     ? ja.timer.goToStep.replace('{n}', String(t.stepNumber))
-                    : ja.timer.adjustOpenAria.replace('{label}', fullLabel)
+                    : timerAdjustAria(fullLabel, ja.timer.adjustOpenAria, ja.timer.customLabel)
                 }
                 className="flex min-w-0 items-center gap-1.5"
               >

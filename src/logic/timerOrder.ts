@@ -171,3 +171,17 @@ export function parseStoredTimers(raw: string | null | undefined, now: number): 
   }
   return restored
 }
+
+/**
+ * タイマーの調整を開くボタンの読み上げ名（2026-08-16）。
+ *
+ * 自分で時間を決めたタイマーは名前がそのまま「タイマー」なので、
+ * `{label}のタイマーを調整` に当てはめると **「タイマーのタイマーを調整」** になっていた
+ * （4つの画面すべてで同じ言い方になる作りだったので、1か所直せば全部直る）。
+ * 名前が「タイマー」で終わるものは、重ねずにそのまま「〜を調整」と読む。
+ */
+export function timerAdjustAria(label: string, template: string, suffix: string): string {
+  const name = (label ?? '').trim()
+  if (!name || name.endsWith(suffix)) return `${name || suffix}を調整`
+  return template.replace('{label}', name)
+}

@@ -19605,6 +19605,21 @@ Aみりん 大さじ1
   )
 }
 
+// --- タイマーの調整を開く読み上げ名（2026-08-16）。自分で時間を決めたタイマーは名前が
+//     そのまま「タイマー」なので、素直に当てはめると「タイマーのタイマーを調整」になっていた ---
+{
+  const { timerAdjustAria } = await import('../src/logic/timerOrder.ts')
+  const T = '{label}のタイマーを調整'
+  eq('TIMERARIA-1 自分で決めたタイマーは名前を重ねない', timerAdjustAria('タイマー', T, 'タイマー'), 'タイマーを調整')
+  eq('TIMERARIA-2 手順のタイマーは今までどおり名前を読む', timerAdjustAria('肉じゃが', T, 'タイマー'), '肉じゃがのタイマーを調整')
+  eq('TIMERARIA-3 名前が空でも読める形にする', timerAdjustAria('', T, 'タイマー'), 'タイマーを調整')
+  eq(
+    'TIMERARIA-4 手順つきの名前も今までどおり',
+    timerAdjustAria('肉じゃが・手順⑨（1-2）', T, 'タイマー'),
+    '肉じゃが・手順⑨（1-2）のタイマーを調整',
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

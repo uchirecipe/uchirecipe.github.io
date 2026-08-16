@@ -6,7 +6,7 @@ import { hasCookNaviCursor, hasCookNaviTimeline } from '../logic/cookNaviSession
 import { naviRecipeColor } from '../logic/naviColors'
 import { formatRemaining } from '../logic/time'
 import { naviStepSpeechText, naviStepText } from '../logic/naviStepText'
-import { sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
+import { sortTimersForDisplay, timerRemainingSeconds, timerAdjustAria} from '../logic/timerOrder'
 import StepBadge from './StepBadge'
 import TimerAdjustModal from './TimerAdjustModal'
 import { ja } from '../i18n/ja'
@@ -153,9 +153,10 @@ export default function TimerBar() {
             timer.naviOrder != null
               ? naviStepSpeechText(timer.naviOrder, recipeStepBadge(timer))
               : stepText
-          const adjustAriaLabel = ja.timer.adjustOpenAria.replace(
-            '{label}',
+          const adjustAriaLabel = timerAdjustAria(
             speechStepText ? `${timer.label}・${speechStepText}` : timer.label,
+            ja.timer.adjustOpenAria,
+            ja.timer.customLabel,
           )
           return (
             <button

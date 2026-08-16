@@ -26,7 +26,7 @@ import TermPopover, { useTermPopover } from './TermPopover'
 import TimerAdjustModal from './TimerAdjustModal'
 import { useTimers, type ActiveTimer } from './TimerProvider'
 import { useSpeech, useVoiceCommands } from './useVoiceCommands'
-import { findRunningStepTimer, sortTimersForDisplay, timerRemainingSeconds } from '../logic/timerOrder'
+import { findRunningStepTimer, sortTimersForDisplay, timerRemainingSeconds, timerAdjustAria} from '../logic/timerOrder'
 import { formatRemaining, findTimeTokens } from '../logic/time'
 import {
   pickVoiceResumeTarget,
@@ -144,7 +144,7 @@ function TimerChip({
       <button
         type="button"
         onClick={onOpen}
-        aria-label={ja.timer.adjustOpenAria.replace('{label}', timer.label)}
+        aria-label={timerAdjustAria(timer.label, ja.timer.adjustOpenAria, ja.timer.customLabel)}
         className="flex min-w-0 items-center gap-1"
       >
         {/* 行の中では時計の印を先頭に置く（2026-08-14 便GL）。手順の行は色の言葉から始まるので、
@@ -934,7 +934,7 @@ export default function CookSessionOverlay({
               <button
                 type="button"
                 onClick={() => setAdjustingId(t.id)}
-                aria-label={ja.timer.adjustOpenAria.replace('{label}', t.label)}
+                aria-label={timerAdjustAria(t.label, ja.timer.adjustOpenAria, ja.timer.customLabel)}
                 className="flex min-w-0 flex-1 items-center gap-2 text-left"
               >
                 <BellRing size={28} className="shrink-0 animate-pulse text-warning" aria-hidden />
