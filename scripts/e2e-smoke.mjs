@@ -14072,6 +14072,477 @@ try {
     }
   }
 
+  // --- ARCHIVE-02(2026-08-16 便HC): 古い記録の書き出しが「レシピを削除しても残った記録」も
+  // 対象にする。この機能の目的は端末容量の軽量化で、残った記録は**レシピが無いぶん記録と写真だけが
+  // 端末に残っている**状態なので、対象外だと目的を果たせない(便GZの積み残し①)。
+  // ここでしか測れないのは「消す側」= detachedLogs テーブルからも消えること・記録が0件になった
+  // まとまりが行ごと消えること。純ロジック(件数・ID・確認文)は scripts/test-logic.mjs が持つ。
+  // 前提の記録はIndexedDBへ直接書き込む(記録UI自体は別の検証でカバー済み) ---
+  currentCheck = 'ARCHIVE-02'
+  {
+    const a2Browser = await chromium.launch()
+    try {
+      const a2Context = await a2Browser.newContext({ acceptDownloads: true })
+      const a2Page = await a2Context.newPage()
+      a2Page.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@ARCHIVE-02] ${err.message}`)
+      })
+      a2Page.on('dialog', (dialog) => dialog.accept())
+      await a2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await a2Page.waitForTimeout(1800) // 初回シード完了待ち
+
+      // 前提: レシピ側に古い記録1件(写真つき)＋最近の記録1件、
+      //       残った記録は A=古い1件+最近1件(行は残るはず) / B=古い1件だけ(行ごと消えるはず)。
+      // 日付は実行日から数えて作る(固定日付だと日が経つほど境目との関係が変わる)
+      const a2Setup = await a2Page.evaluate(async () => {
+        const ymd = (offsetDays) => {
+          const d = new Date()
+          d.setDate(d.getDate() - offsetDays)
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        }
+        const dates = { old1: ymd(200), old2: ymd(150), recent: ymd(1) }
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = 1
+        canvas.height = 1
+        const photo = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8))
+        const recipeId = await new Promise((resolve, reject) => {
+          const cursorReq = idb.transaction('recipes', 'readonly').objectStore('recipes').openCursor()
+          cursorReq.onsuccess = () => resolve(cursorReq.result ? cursorReq.result.primaryKey : null)
+          cursorReq.onerror = () => reject(cursorReq.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('recipes', 'readwrite')
+          const store = tx.objectStore('recipes')
+          const getReq = store.get(recipeId)
+          getReq.onsuccess = () => {
+            store.put({
+              ...getReq.result,
+              cookedLogs: [
+                { date: dates.recent, note: 'E2E最近の記録' },
+                { date: dates.old1, note: 'E2Eレシピ側の古い記録', photo },
+              ],
+            })
+          }
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(tx.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('detachedLogs', 'readwrite')
+          const store = tx.objectStore('detachedLogs')
+          // 印は端末のレシピと一致しないものにする(起動時の結び直しで消えないように)
+          store.add({
+            recipeUid: 'u-e2e-gone-a',
+            title: 'E2E消したレシピA',
+            logs: [
+              { date: dates.old2, note: 'E2E残った古い記録(写真つき)', photo },
+              { date: dates.recent, note: 'E2E残った最近の記録' },
+            ],
+            detachedAt: Date.now(),
+          })
+          store.add({
+            recipeUid: 'u-e2e-gone-b',
+            title: 'E2E消したレシピB',
+            logs: [{ date: dates.old1, note: 'E2E残った古い記録だけ' }],
+            detachedAt: Date.now(),
+          })
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+        return { recipeId, dates }
+      })
+      check('ARCHIVE-02 前提: 記録を入れるレシピを取得できた', typeof a2Setup.recipeId === 'number')
+
+      // 直接書き込んだのでライブクエリは気づかない。読み込み直して数え直させる
+      await a2Page.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await a2Page.reload({ waitUntil: 'networkidle' })
+      await a2Page.waitForTimeout(1500)
+
+      const a2Count = (await a2Page.locator('[data-testid="archive-target-count"]').textContent()).replace(/​/g, '')
+      check(
+        'ARCHIVE-02 残った記録も件数に入る(レシピ側1件＋残った記録2件＝3件・写真2枚)',
+        a2Count.includes('3件') && a2Count.includes('2枚'),
+        `表示=${a2Count}`,
+      )
+      const a2Note = a2Page.locator('[data-testid="archive-target-detached"]')
+      const a2NoteText =
+        (await a2Note.count()) > 0 ? (await a2Note.textContent()).replace(/​/g, '') : ''
+      check(
+        'ARCHIVE-02 そのうち残った記録が何件かを画面に出す',
+        a2NoteText.includes('2件') && a2NoteText.includes('レシピを削除したあとに残っている記録'),
+        a2NoteText || '(出ていない)',
+      )
+
+      const [a2Download] = await Promise.all([
+        a2Page.waitForEvent('download'),
+        a2Page.getByRole('button', { name: '古い記録をファイルに書き出す' }).click(),
+      ])
+      const a2File = JSON.parse(readFileSync(await a2Download.path(), 'utf-8'))
+      check(
+        'ARCHIVE-02 書き出したファイルの形は変えない(版1・アーカイブの種別マーク)',
+        a2File.version === 1 && a2File.kind === 'cooked-log-archive',
+        `version=${a2File.version} kind=${a2File.kind}`,
+      )
+      check(
+        'ARCHIVE-02 残った記録もファイルに入る(料理名つき)',
+        (a2File.logs ?? []).length === 3 &&
+          a2File.logs.some((l) => l.recipeTitle === 'E2E消したレシピA') &&
+          a2File.logs.some((l) => l.recipeTitle === 'E2E消したレシピB'),
+        JSON.stringify((a2File.logs ?? []).map((l) => l.recipeTitle)),
+      )
+      check(
+        'ARCHIVE-02 残った記録の写真もファイルに入る',
+        a2File.logs.filter((l) => typeof l.photoBase64 === 'string' && l.photoBase64.length > 0).length === 2,
+      )
+      check(
+        'ARCHIVE-02 境目以降の記録は残った記録でも書き出さない',
+        !a2File.logs.some((l) => l.date === a2Setup.dates.recent),
+      )
+
+      // 削除の確認文(規約F)。窓の文字は改行が消えるので、箇条書きは li ごとに読む
+      await setConfirmAnswer(a2Page, 'off')
+      await a2Page.getByRole('button', { name: '書き出した記録を端末から消す' }).click()
+      await a2Page.waitForTimeout(500)
+      const a2Confirm = await a2Page.evaluate(() => {
+        const dialog = document.querySelector('[data-testid="confirm"]')
+        if (!dialog) return null
+        const clean = (el) => (el.textContent ?? '').replace(/​/g, '')
+        return {
+          bullets: Array.from(dialog.querySelectorAll('li')).map(clean),
+          notes: Array.from(dialog.querySelectorAll('p')).map(clean),
+        }
+      })
+      const a2Gone = (a2Confirm?.bullets ?? []).find((t) => t.startsWith('消えるもの')) ?? ''
+      const a2Kept = (a2Confirm?.bullets ?? []).find((t) => t.startsWith('残るもの')) ?? ''
+      check(
+        'ARCHIVE-02 確認文の「消えるもの」に件数と写真の枚数が入る',
+        a2Gone.includes('3件') && a2Gone.includes('2枚'),
+        a2Gone,
+      )
+      check(
+        'ARCHIVE-02 確認文の「残るもの」に境目以降の記録と書き出したファイルが入る',
+        a2Kept.includes('以降の記録') && a2Kept.includes('書き出したファイル'),
+        a2Kept,
+      )
+      check(
+        'ARCHIVE-02 レシピ側の記録も消す回なので「レシピ本体」が残るものに入る',
+        a2Kept.includes('レシピ本体'),
+        a2Kept,
+      )
+      check(
+        'ARCHIVE-02 残った記録が混じるときは内訳を補足に出す',
+        (a2Confirm?.notes ?? []).some(
+          (t) => t.includes('2件') && t.includes('レシピを削除したあとに残っていた記録'),
+        ),
+        JSON.stringify(a2Confirm?.notes ?? []),
+      )
+      await a2Page.locator('[data-testid="confirm-ok"]').click()
+      await setConfirmAnswer(a2Page, 'accept')
+      await a2Page.waitForTimeout(1500)
+
+      const a2After = await a2Page.evaluate(async (recipeId) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const recipe = await new Promise((resolve, reject) => {
+          const r = idb.transaction('recipes', 'readonly').objectStore('recipes').get(recipeId)
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const records = await new Promise((resolve, reject) => {
+          const r = idb.transaction('detachedLogs', 'readonly').objectStore('detachedLogs').getAll()
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        idb.close()
+        return {
+          title: recipe.title,
+          recipeNotes: recipe.cookedLogs.map((l) => l.note ?? l.date),
+          records: records.map((rec) => ({
+            title: rec.title,
+            notes: rec.logs.map((l) => l.note ?? l.date),
+          })),
+        }
+      }, a2Setup.recipeId)
+      check(
+        'ARCHIVE-02 レシピ側は古い記録だけ消え、境目以降の記録とレシピ本体は残る',
+        a2After.recipeNotes.length === 1 &&
+          a2After.recipeNotes[0] === 'E2E最近の記録' &&
+          typeof a2After.title === 'string' &&
+          a2After.title.length > 0,
+        JSON.stringify(a2After.recipeNotes),
+      )
+      const a2RecordA = a2After.records.find((r) => r.title === 'E2E消したレシピA')
+      check(
+        'ARCHIVE-02 残った記録も古い分だけ端末から消える',
+        !!a2RecordA && a2RecordA.notes.length === 1 && a2RecordA.notes[0] === 'E2E残った最近の記録',
+        JSON.stringify(a2After.records),
+      )
+      check(
+        'ARCHIVE-02 記録が0件になったまとまりは行ごと消える(空の行を残さない)',
+        !a2After.records.some((r) => r.title === 'E2E消したレシピB'),
+        JSON.stringify(a2After.records.map((r) => r.title)),
+      )
+      check(
+        'ARCHIVE-02 消したあとは対象0件になる',
+        (await a2Page.textContent('body')).includes('より前の記録はありません'),
+      )
+
+      // 「アーカイブを見る」: 残った記録も読める(端末には書き戻さない)
+      const [a2ViewChooser] = await Promise.all([
+        a2Page.waitForEvent('filechooser'),
+        a2Page.getByRole('button', { name: 'アーカイブを見る' }).click(),
+      ])
+      await a2ViewChooser.setFiles({
+        name: 'uchi-recipe-records.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(JSON.stringify(a2File), 'utf-8'),
+      })
+      await a2Page.waitForTimeout(800)
+      const a2ViewText = (await a2Page.textContent('body')).replace(/​/g, '')
+      check(
+        'ARCHIVE-02 閲覧の窓で残った記録も読める',
+        a2ViewText.includes('E2E消したレシピA') && a2ViewText.includes('E2E消したレシピB'),
+      )
+      check(
+        'ARCHIVE-02 閲覧しても端末には書き戻さない',
+        (await a2Page.evaluate(async () => {
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((resolve, reject) => {
+            req.onsuccess = () => resolve(req.result)
+            req.onerror = () => reject(req.error)
+          })
+          const rows = await new Promise((resolve, reject) => {
+            const r = idb.transaction('detachedLogs', 'readonly').objectStore('detachedLogs').getAll()
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+          idb.close()
+          return rows.reduce((sum, row) => sum + row.logs.length, 0)
+        })) === 1,
+      )
+    } finally {
+      await a2Browser.close()
+    }
+  }
+
+  // --- MERGEUID-01(2026-08-16 便HC): 「今のデータに追加」でのレシピの照合(印=Recipe.uid)。
+  // 便GZの積み残し②。守るのは2つで、**どちらもデータを失いうる経路**なので実DBで見る:
+  //  ・レシピは重複させない(印が食い違っても従来どおり同名・同IDの既存へ合流する)
+  //  ・記録は印が一致するときだけ結ぶ(似た名前の違うレシピへつながらない。オーナーの懸念)
+  // 場面A=既存もファイルも印を持ち、違う / 場面B=既存が印を持たない(印を引き継ぐ) /
+  // 場面C=印を持たない古いバックアップ(従来どおり) ---
+  currentCheck = 'MERGEUID-01'
+  {
+    const muBrowser = await chromium.launch()
+    /** 端末の中身(この検証で入れたレシピと、残っている記録)を読む */
+    const muReadDb = (page) =>
+      page.evaluate(async () => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const all = (name) =>
+          new Promise((resolve, reject) => {
+            const r = idb.transaction(name, 'readonly').objectStore(name).getAll()
+            r.onsuccess = () => resolve(r.result)
+            r.onerror = () => reject(r.error)
+          })
+        const recipes = await all('recipes')
+        const detached = await all('detachedLogs')
+        idb.close()
+        return {
+          recipes: recipes
+            .filter((r) => r.title.startsWith('E2E照合'))
+            .map((r) => ({ id: r.id, uid: r.uid, dates: r.cookedLogs.map((l) => l.date) })),
+          detached: detached.map((d) => ({ uid: d.recipeUid, logs: d.logs.length })),
+        }
+      })
+    /**
+     * 場面を1つ流す。端末に「E2E照合肉じゃが」を1品と、印 u-e2e-file のまとまりで残った記録1件を
+     * 入れてから、同じ料理名のレシピが入ったファイルを「今のデータに追加」で読み込む。
+     * keepUidless=true の場面は、起動時の印付け(backfillRecipeUids)が走ると前提が崩れるので
+     * 読み込み直さずに画面だけ移る。
+     */
+    const muRun = async ({ existingUid, fileUid, keepUidless = false }) => {
+      const ctx = await muBrowser.newContext()
+      const page = await ctx.newPage()
+      page.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@MERGEUID-01] ${err.message}`)
+      })
+      await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await page.waitForTimeout(1800)
+      const existingId = await page.evaluate(async (uid) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        const newId = await new Promise((resolve, reject) => {
+          const tx = idb.transaction('recipes', 'readwrite')
+          const addReq = tx.objectStore('recipes').add({
+            ...(uid ? { uid } : {}),
+            title: 'E2E照合肉じゃが',
+            servings: 2,
+            effortLevel: 'normal',
+            tags: [],
+            ingredients: [{ name: '牛肉', amount: '200', unit: 'g' }],
+            steps: [{ text: '煮る' }],
+            isFavorite: false,
+            cookedLogs: [],
+            searchWords: ['e2e'],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          })
+          tx.oncomplete = () => resolve(addReq.result)
+          tx.onerror = () => reject(tx.error)
+        })
+        await new Promise((resolve, reject) => {
+          const tx = idb.transaction('detachedLogs', 'readwrite')
+          tx.objectStore('detachedLogs').add({
+            recipeUid: 'u-e2e-file',
+            title: 'E2E照合肉じゃが',
+            logs: [{ date: '2020-01-02', note: 'E2E残っていた記録' }],
+            detachedAt: Date.now(),
+          })
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(tx.error)
+        })
+        idb.close()
+        return newId
+      }, existingUid)
+      if (keepUidless) {
+        await page.evaluate(() => {
+          window.location.hash = '#/settings?section=backup'
+        })
+      } else {
+        await page.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+        await page.reload({ waitUntil: 'networkidle' })
+      }
+      await page.waitForTimeout(1500)
+      // ファイル側: 同じ料理名・同じ番号のレシピ1品(印は場面ごとに変える)
+      const backup = JSON.stringify({
+        app: 'uchi-recipe',
+        version: 1,
+        exportedAt: '2026-08-16T00:00:00.000Z',
+        recipes: [
+          {
+            id: existingId,
+            ...(fileUid ? { uid: fileUid } : {}),
+            title: 'E2E照合肉じゃが',
+            servings: 2,
+            effortLevel: 'normal',
+            tags: [],
+            ingredients: [{ name: '豚肉', amount: '200', unit: 'g' }],
+            steps: [{ text: 'ファイル側の手順' }],
+            isFavorite: false,
+            cookedLogs: [{ date: '2020-01-03', note: 'E2Eファイル側の記録' }],
+            searchWords: ['e2e'],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+      })
+      const [chooser] = await Promise.all([
+        page.waitForEvent('filechooser'),
+        page.getByRole('button', { name: '今のデータに追加' }).click(),
+      ])
+      await chooser.setFiles({
+        name: 'uchi-recipe-backup-e2e.json',
+        mimeType: 'application/json',
+        buffer: Buffer.from(backup, 'utf-8'),
+      })
+      // ファイルを選んだあとの確認の窓は、既定の自動押しに任せる
+      await page.waitForTimeout(2500)
+      const after = await muReadDb(page)
+      await ctx.close()
+      return { existingId, after }
+    }
+
+    try {
+      // 場面A: 両方が印を持ち、違う。合流はする(重複を作らない)が、記録は結ばない
+      const muA = await muRun({ existingUid: 'u-e2e-mine', fileUid: 'u-e2e-file' })
+      check(
+        'MERGEUID-01(A) 印が食い違っても同じ料理は1品のまま(重複を作らない)',
+        muA.after.recipes.length === 1,
+        JSON.stringify(muA.after.recipes),
+      )
+      check(
+        'MERGEUID-01(A) 今のレシピの印は書き換えない',
+        muA.after.recipes[0]?.uid === 'u-e2e-mine',
+        JSON.stringify(muA.after.recipes),
+      )
+      check(
+        'MERGEUID-01(A) ファイル側の記録は今のレシピへ足される(取り込みは従来どおり)',
+        (muA.after.recipes[0]?.dates ?? []).includes('2020-01-03'),
+        JSON.stringify(muA.after.recipes),
+      )
+      check(
+        'MERGEUID-01(A) 印が違うレシピには、残っている記録を結ばない(似た名前の違うレシピにつながらない)',
+        !(muA.after.recipes[0]?.dates ?? []).includes('2020-01-02'),
+        JSON.stringify(muA.after.recipes),
+      )
+      check(
+        'MERGEUID-01(A) 結ばなかった記録は消えずに残る',
+        muA.after.detached.length === 1 && muA.after.detached[0].logs === 1,
+        JSON.stringify(muA.after.detached),
+      )
+
+      // 場面B: 今のレシピが印を持たない。従来どおり同一とみなし、ファイル側の印を引き継ぐ
+      const muB = await muRun({ existingUid: undefined, fileUid: 'u-e2e-file', keepUidless: true })
+      check(
+        'MERGEUID-01(B) 印を持たない同名レシピにも重複を作らない',
+        muB.after.recipes.length === 1,
+        JSON.stringify(muB.after.recipes),
+      )
+      check(
+        'MERGEUID-01(B) ファイル側の印を引き継ぐ',
+        muB.after.recipes[0]?.uid === 'u-e2e-file',
+        JSON.stringify(muB.after.recipes),
+      )
+      check(
+        'MERGEUID-01(B) 印が付いたので残っていた記録がそのレシピへ戻る',
+        (muB.after.recipes[0]?.dates ?? []).includes('2020-01-02'),
+        JSON.stringify(muB.after.recipes),
+      )
+      check(
+        'MERGEUID-01(B) 戻ったまとまりの行は消える',
+        muB.after.detached.length === 0,
+        JSON.stringify(muB.after.detached),
+      )
+
+      // 場面C: 印を持たない古いバックアップ(便GZ以前)。判定を変えない
+      const muC = await muRun({ existingUid: 'u-e2e-mine', fileUid: undefined })
+      check(
+        'MERGEUID-01(C) 印の無い古いファイルも従来どおり同名の既存へ合流する',
+        muC.after.recipes.length === 1,
+        JSON.stringify(muC.after.recipes),
+      )
+      check(
+        'MERGEUID-01(C) 古いファイルの記録は今のレシピへ足される',
+        (muC.after.recipes[0]?.dates ?? []).includes('2020-01-03'),
+        JSON.stringify(muC.after.recipes),
+      )
+      check(
+        'MERGEUID-01(C) 古いファイルで今のレシピの印を消さない',
+        muC.after.recipes[0]?.uid === 'u-e2e-mine',
+        JSON.stringify(muC.after.recipes),
+      )
+    } finally {
+      await muBrowser.close()
+    }
+  }
+
   // --- FILESAVE-01(2026-07-17バックアップ改修 修正2+3): 保存先選択+前回の場所に上書き。
   // 実ブラウザのFile System Access APIはネイティブのOS保存ダイアログを伴うため、Playwrightの
   // headless chromiumでは`showSaveFilePicker`自体が存在しない(=既定では非対応ブラウザ扱いになる。

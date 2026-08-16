@@ -694,11 +694,19 @@ export const mergeRowKeys = {
  * 入れ直すと、ファイル側のレシピが既存の同名レシピに合流して印が入らず、
  * 「レシピを削除しても残った記録」が結び直せなかった。規則は4つ:
  *  1. 印が一致する品が既にあれば、それを同一とみなす（最優先。料理名もIDも見ない）
- *  2. 印が一致する品が無く、料理名で当たった既存レシピが印を持っていなければ、従来どおり
+ *  2. 印が一致する品が無く、料理名・IDで当たった既存レシピが印を持っていなければ、従来どおり
  *     同一とみなし、**ファイル側の印を引き継ぐ**（adoptUid）。これで記録が結び直せる
- *  3. 両方が印を持っていて印が違うなら同一とみなさない（別のレシピとして追加する）。
- *     オーナーの「同名でも別物なら結ばない」という意向を、ここでも守る
+ *  3. 両方が印を持っていて印が違うときは、**合流はする（従来どおり）が、印は引き継がない**。
+ *     ＝レシピは重複させず、記録は結ばない（結ばれなかった記録は端末に残ったまま）
  *  4. 「追加」は今のデータを1件も消さない（この関数は消す指示を一切返さない）
+ *
+ * 規則3を「別のレシピとして追加する」にしない理由（2026-08-16 司令部の裁定の訂正）:
+ * **レシピの合流と、記録の結び直しは別の話**だから。便GZの移行で端末にある全レシピへ印が付くので、
+ * 端末Aで書き出したファイルを端末Bへ「追加」すると、元は同じレシピでも印が食い違う
+ * （どちらの端末でも乱数の印が振られているため）。別レシピとして追加すると**同じ料理が2品に増える**
+ * ＝「追加」の見え方が今までと変わってしまう。オーナーの懸念は「**記録が似た名前の違うレシピに
+ * つながること**」なので、そこは印を引き継がない（＝記録を結ばない）ことだけで守れる。
+ * 印が食い違う場面は「同じレシピかどうか判断がつかない」場面なので、記録は残す側に倒す。
  *
  * 印の照合表は任意。渡さなければ「今のレシピは印を持っていない」として扱うので、
  * 合流先の選び方は便GZまでと同じになる（印を持たない古いバックアップファイルからの復元も、
@@ -728,13 +736,12 @@ export function resolveMergeRecipeAction(
     if (sameUidId !== undefined) return { kind: 'enrich', targetId: sameUidId }
   }
   /**
-   * 料理名・IDで当たった既存レシピを同一とみなしてよいか。
-   * 規則3（両方が印を持ち、印が違う）なら null＝別のレシピとして扱う。
-   * 規則2（今のレシピが印を持たない）なら、ファイル側の印を引き継がせる。
+   * 料理名・IDで当たった既存レシピへ合流させる（従来どおり重複は作らない）。
+   * 印を引き継ぐのは、今のレシピが印を持っていないときだけ（規則2）。
+   * 両方が印を持ち、違うときは引き継がない（規則3）＝記録は結ばれず端末に残る。
    */
-  const enrichIfSameRecipe = (targetId: number): MergeRecipeAction | null => {
+  const enrichSameRecipe = (targetId: number): MergeRecipeAction => {
     const existingUid = existingUidById.get(targetId)
-    if (incomingUid && existingUid && existingUid !== incomingUid) return null
     return {
       kind: 'enrich',
       targetId,
@@ -747,17 +754,10 @@ export function resolveMergeRecipeAction(
   // そのIDが空いている: 従来どおり同じIDのまま追加する（印もそのまま入るので記録が結び直せる）
   if (existingTitle === undefined) return { kind: 'add' }
   const title = incoming.title.trim()
-  if (existingTitle.trim() === title) {
-    const action = enrichIfSameRecipe(incoming.id)
-    // 同じ番号・同じ料理名でも印が違えば別のレシピ。番号は埋まっているので振り直して追加する
-    return action ?? { kind: 'addWithNewId' }
-  }
+  if (existingTitle.trim() === title) return enrichSameRecipe(incoming.id)
   // 同じIDが別の料理に使われている（版ズレ）。料理名で突き合わせ直す
   const sameTitleId = existingIdByTitle.get(title)
-  if (sameTitleId !== undefined) {
-    const action = enrichIfSameRecipe(sameTitleId)
-    if (action) return action
-  }
+  if (sameTitleId !== undefined) return enrichSameRecipe(sameTitleId)
   return { kind: 'addWithNewId' }
 }
 

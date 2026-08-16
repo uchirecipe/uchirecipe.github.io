@@ -20292,9 +20292,10 @@ Aみりん 大さじ1
       { kind: 'enrich', targetId: 1 },
     )
 
-    // 規則3: 両方が印を持ち、印が違うなら同一とみなさない(同名でも別物なら結ばない)
+    // 規則3: 両方が印を持ち、印が違うときは「合流はする・印は引き継がない」
+    // (レシピを重複させない＝「追加」の見え方を変えない。記録は結ばず端末に残す)
     eq(
-      'HC②-照合 同名でも印が違えば既存に合流させない',
+      'HC②-照合 同名で印が違っても合流はする(レシピを重複させない)',
       resolveMergeRecipeAction(
         { id: 1, title: '肉じゃが', uid: 'u-file' },
         titleById,
@@ -20302,10 +20303,32 @@ Aみりん 大さじ1
         uidById,
         idByUid,
       ),
-      { kind: 'addWithNewId' },
+      { kind: 'enrich', targetId: 1 },
     )
     eq(
-      'HC②-照合 番号が空いていれば同名でもそのまま別レシピとして追加',
+      'HC②-照合 印が違うときはファイル側の印を引き継がない(記録を結ばない)',
+      resolveMergeRecipeAction(
+        { id: 1, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+        uidById,
+        idByUid,
+      ).adoptUid,
+      undefined,
+    )
+    eq(
+      'HC②-照合 版ズレで番号がずれていても、印が違えば印は引き継がない',
+      resolveMergeRecipeAction(
+        { id: 2, title: '肉じゃが', uid: 'u-file' },
+        titleById,
+        idByTitle,
+        uidById,
+        idByUid,
+      ),
+      { kind: 'enrich', targetId: 1 },
+    )
+    eq(
+      'HC②-照合 番号が空いていれば従来どおり同じ番号のまま追加する',
       resolveMergeRecipeAction(
         { id: 5, title: '肉じゃが', uid: 'u-file' },
         titleById,
@@ -20314,6 +20337,22 @@ Aみりん 大さじ1
         idByUid,
       ),
       { kind: 'add' },
+    )
+    // 規則4: この関数は「消す」指示を返さない(追加は今のデータを1件も消さない)
+    eq(
+      'HC②-照合 返すのは合流・追加だけ(消す指示は返さない)',
+      [
+        { id: 1, title: '肉じゃが', uid: 'u-file' },
+        { id: 5, title: '肉じゃが', uid: 'u-file' },
+        { id: 2, title: 'まったく新しい料理', uid: 'u-new' },
+        { id: undefined, title: '番号なし', uid: 'u-x' },
+      ]
+        .map(
+          (r) =>
+            resolveMergeRecipeAction(r, titleById, idByTitle, uidById, idByUid).kind,
+        )
+        .every((kind) => ['enrich', 'add', 'addWithNewId'].includes(kind)),
+      true,
     )
 
     // 規則2: 料理名で当たった既存レシピが印を持っていなければ、従来どおり同一とみなし印を引き継ぐ
@@ -20329,7 +20368,7 @@ Aみりん 大さじ1
       { kind: 'enrich', targetId: 1, adoptUid: 'u-file' },
     )
     eq(
-      'HC②-照合 版ズレで番号がずれていても、印の無い同名レシピには印を引き継ぐ',
+      'HC②-照合 版ズレで番号がずれていても、印を持たない同名レシピには印を引き継ぐ',
       resolveMergeRecipeAction(
         { id: 2, title: '肉じゃが', uid: 'u-file' },
         titleById,
@@ -20371,17 +20410,22 @@ Aみりん 大さじ1
       })
     }
 
-    // 規則4の裏付け: 「別のレシピとして追加する」ので、記録はファイル側のレシピへ戻る。
-    // 既存の同名レシピ(印が違う)には戻らない＝オーナーの懸念「似た名前の違うレシピとつながる」を防ぐ
-    const plan = planDetachedReattach(
-      [{ id: 7, recipeUid: 'u-file', title: '肉じゃが', logs: [log('2026-08-01')], detachedAt: 1 }],
-      [
-        { id: 1, uid: 'u-mine', cookedLogs: [] },
-        { id: 20, uid: 'u-file', cookedLogs: [] },
-      ],
-    )
-    eq('HC②-結び直し 入れ直したレシピ側に記録が戻る', plan.items.length, 1)
-    eq('HC②-結び直し 同名の既存レシピには戻さない', plan.items[0].recipeId, 20)
+    // 規則3の裏付け: 印が食い違う相手へ合流しても、記録はその相手に結ばれない
+    // (＝オーナーの懸念「似た名前の違うレシピとつながる」を防ぐ)。記録は残ったままになる
+    const record = {
+      id: 7,
+      recipeUid: 'u-file',
+      title: '肉じゃが',
+      logs: [log('2026-08-01')],
+      detachedAt: 1,
+    }
+    const notLinked = planDetachedReattach([record], [{ id: 1, uid: 'u-mine', cookedLogs: [] }])
+    eq('HC②-結び直し 印が違う同名レシピには記録を結ばない', notLinked.items.length, 0)
+    eq('HC②-結び直し 結ばなかった記録は消えない', notLinked.logsReattached, 0)
+    // 規則2で印を引き継いだ場合は、そのレシピに記録が戻る
+    const linked = planDetachedReattach([record], [{ id: 1, uid: 'u-file', cookedLogs: [] }])
+    eq('HC②-結び直し 印を引き継いだレシピには記録が戻る', linked.items.length, 1)
+    eq('HC②-結び直し 戻し先は印が一致したレシピ', linked.items[0].recipeId, 1)
   }
 
   // --- 配線の確認(画面・DB操作がこの仕組みを通っているか。実DBはe2eで見る) ---
