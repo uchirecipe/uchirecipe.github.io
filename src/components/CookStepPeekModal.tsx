@@ -5,6 +5,7 @@ import { MemoText } from './MemoText'
 import NaviRecipeNotes from './NaviRecipeNotes'
 import type { RecipeNote } from '../logic/naviRecipeNotes'
 import { ja } from '../i18n/ja'
+import { useScrollLock } from './useScrollLock'
 
 type Props = {
   /** 開くかどうか（false なら何も描かない） */
@@ -73,6 +74,7 @@ export default function CookStepPeekModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  useScrollLock(open)
   if (!open) return null
 
   return (
@@ -120,7 +122,7 @@ export default function CookStepPeekModal({
           {ja.cookNavi.sessionTimerPeekNote}
         </p>
         {/* 本文が長い手順でも窓が画面からはみ出さないよう、読む面だけを送れるようにする */}
-        <div className="mt-1 max-h-[42vh] overflow-x-hidden overflow-y-auto rounded-sm bg-app px-2 py-1.5">
+        <div className="mt-1 max-h-[42vh] overflow-x-hidden overflow-y-auto overscroll-contain rounded-sm bg-app px-2 py-1.5">
           <p data-testid="cook-session-timer-peek-text" className="ja-phrase leading-relaxed">
             {text}
           </p>

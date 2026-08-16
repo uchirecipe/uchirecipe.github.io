@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useScrollLock } from './useScrollLock'
 
 /**
  * 「取り消しの確認」を画面の中の窓で聞く（2026-08-14 便GL・利用者テスト
@@ -55,6 +56,9 @@ export default function ConfirmDialog({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onCancel])
+  // 開いているあいだ、後ろの画面は動かさない（2026-08-16 便HE）。この窓は全画面の調理中モードの
+  // 上にも重なるが、止め方は重なった数を数える形なので、二重に効いても壊れない
+  useScrollLock(open)
   if (!open) return null
   return (
     <div
@@ -67,7 +71,7 @@ export default function ConfirmDialog({
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
         data-testid={testId}
-        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <p className="ja-phrase text-lg font-bold">{title}</p>
         {body.trim() !== '' && (

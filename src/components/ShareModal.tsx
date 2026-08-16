@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, MessageSquareText, Image as ImageIcon } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import type { ShareOptions } from '../logic/share'
+import { useScrollLock } from './useScrollLock'
 
 /** モーダルで選ぶ項目(実数値はRecipeDetailPage側が詰めるので、ここでは選択フラグのみ扱う) */
 export type ShareSelection = Pick<
@@ -80,6 +81,7 @@ export default function ShareModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  useScrollLock(open)
   if (!open) return null
 
   const selection: ShareSelection = { image, cookMinutes, cost, nutrition, allIngredients }
@@ -117,7 +119,7 @@ export default function ShareModal({
         role="dialog"
         aria-label={ja.share.dialogTitle}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-bold">{ja.share.dialogTitle}</h3>

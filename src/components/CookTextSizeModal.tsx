@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { COOK_FONT_SCALES, cookFontSize } from '../logic/cookFontScale'
 import { ja } from '../i18n/ja'
+import { useScrollLock } from './useScrollLock'
 
 /** 倍率ごとの呼び名（COOK_FONT_SCALES と同じ並び） */
 const LABELS = [
@@ -44,6 +45,7 @@ export default function CookTextSizeModal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
+  useScrollLock(open)
   if (!open) return null
   return (
     <div

@@ -5,6 +5,7 @@ import type { PriceEntry } from '../db/types'
 import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
 import UnitQuantityFields from './UnitQuantityFields'
+import { useScrollLock } from './useScrollLock'
 import { ja } from '../i18n/ja'
 
 /** RecipeDetailPageが持つモーダルの開閉state。entryIdあり=編集モード/なし=登録モード(裁定1) */
@@ -58,6 +59,9 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
   const composedUnit = composeUnit(unit)
   const canReset =
     !isAddMode && entry?.isDefault !== true && entry?.defaultPricePerUnit != null && entry?.defaultUnit != null
+
+  // この窓は開いているあいだだけ描かれる（呼び出し側が target で出し分ける）ので、常に止める
+  useScrollLock(true)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -117,7 +121,7 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
         role="dialog"
         aria-label={dialogTitle}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-bold">{isAddMode ? ja.detail.costAddTitle : (entry?.name ?? target.name)}</h3>

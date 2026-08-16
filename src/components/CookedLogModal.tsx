@@ -4,6 +4,7 @@ import SwapLabel from './SwapLabel'
 import { ja } from '../i18n/ja'
 import { resizePhoto, rotatePhoto } from '../logic/image'
 import { usePhotoUrl } from './usePhotoUrl'
+import { useScrollLock } from './useScrollLock'
 
 // 記録写真は長辺1280px・JPEG品質0.8に圧縮する（docs/20 §4。レシピ写真本体の
 // resizePhoto既定値・長辺1200px/品質0.85とはあえて別値。記録写真は数が増えやすいため）。
@@ -86,6 +87,7 @@ export default function CookedLogModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  useScrollLock(open)
   if (!open) return null
 
   const onPhotoSelected = async (file: File | undefined) => {
@@ -131,7 +133,7 @@ export default function CookedLogModal({
         role="dialog"
         aria-label={ja.detail.cookedDialogTitle}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-bold">{ja.detail.cookedDialogTitle}</h3>

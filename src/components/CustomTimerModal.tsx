@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { X, Minus, Plus } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import { formatMinutesSecondsLabel } from '../logic/time'
+import { useScrollLock } from './useScrollLock'
 
 type Props = {
   open: boolean
@@ -40,6 +41,7 @@ export default function CustomTimerModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  useScrollLock(open)
   if (!open) return null
 
   const adjust = (deltaSeconds: number) => {

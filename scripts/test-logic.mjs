@@ -20651,6 +20651,181 @@ Aみりん 大さじ1
   )
 }
 
+// ---------- 便HE: 窓の中を送るつもりが、後ろの画面が動く（2026-08-16 オーナー実機 iPhone SE2/Safari） ----------
+// オーナー原文「窓の見た目は直りました！しかし、窓内を縦にスクロールするつもりが、
+// 後ろの画面が動いてしまうことがあります。」
+//
+// 便HEがWebKit(Safariと同じ描画エンジン・375x667)で測って分かった、後ろが動く2つの経路:
+//  ① 窓の外側（暗い背景）の上で払うと、そのまま後ろの画面が送られる（400px送ると400px動いた）
+//  ② 窓の中を下端まで送ったあとさらに払うと、送りが後ろの画面へ移る
+//     （scroll chaining。600px送ると後ろが600px動いた）
+// 「ことがあります」＝いつも起きるわけではない、の正体は②で、窓の中の余りが尽きた瞬間から
+// 後ろへ移るため、中身が短い窓・下端まで送っていないときは起きない。
+//
+// ここで見張るのは、直し方が消えていないこと（実機の指の動きは手元では作れないため）:
+//  HE-2 縦に送る箱には、送りが外へ移らない指定（overscroll-contain）がある … ②の対策
+//  HE-3 全面の窓を描くファイルは、後ろの画面を止める共通の仕組みを使っている … ①の対策
+//  HE-4 その共通の仕組みが「重なっても1回だけ」「閉じたら元の位置へ戻す」を守っている
+{
+  const heAppRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const heSources = (dir) => {
+    const out = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...heSources(full))
+      else if (/\.(ts|tsx)$/.test(entry.name)) out.push(full)
+    }
+    return out
+  }
+  /** コメントの中の引用符を文字列の始まりと取り違えないよう、HD-1 と同じ拾い方をする */
+  const heStringLiterals = (src) => {
+    const out = []
+    let i = 0
+    let line = 1
+    while (i < src.length) {
+      const c = src[i]
+      if (c === '\n') {
+        line++
+        i++
+      } else if (c === '/' && src[i + 1] === '/') {
+        while (i < src.length && src[i] !== '\n') i++
+      } else if (c === '/' && src[i + 1] === '*') {
+        i += 2
+        while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+          if (src[i] === '\n') line++
+          i++
+        }
+        i += 2
+      } else if (c === "'" || c === '"' || c === '`') {
+        const startLine = line
+        const quote = c
+        let value = ''
+        i++
+        while (i < src.length && src[i] !== quote) {
+          if (src[i] === '\\') {
+            i += 2
+            continue
+          }
+          if (src[i] === '\n') line++
+          value += src[i]
+          i++
+        }
+        i++
+        out.push({ value, line: startLine })
+      } else i++
+    }
+    return out
+  }
+
+  // --- HE-2: 縦に送る箱は、端まで送っても送りが外へ移らない ---
+  // 置き場所や件数ではなく **src全体に1つも無いこと** を見るので、箱が増えても勝手に守られる
+  // （overflow-x-hidden を足した便HD の掃引と同じやり方）。
+  // わざと外へ移したい箱は overscroll-auto と自分で書けば対象外になる。
+  const heChainable = []
+  for (const full of heSources(path.join(heAppRoot, 'src'))) {
+    const rel = path.relative(heAppRoot, full).split(path.sep).join('/')
+    for (const { value, line } of heStringLiterals(readFileSync(full, 'utf-8'))) {
+      if (!value.includes('overflow-y-auto')) continue
+      if (/overscroll-(y-)?(contain|none|auto)/.test(value)) continue
+      heChainable.push(`${rel}:${line}`)
+    }
+  }
+  eq('HE-2 縦に送る箱は、端まで送っても送りが後ろの画面へ移らない', heChainable, [])
+
+  // --- HE-3: 全面の窓は、後ろの画面を止める共通の仕組みを通っている ---
+  // 数え方は「そのファイルにある全面の窓の数」と「後ろの画面を止める呼び出しの数」の対応。
+  // 窓が増えたら止める呼び出しも増やす必要があるので、20枚以上ある窓のどれかが取り残される
+  // ことがない（窓ごとに同じ処理を書き写す形にはしない＝呼ぶのは共通のフック1つ）。
+  const heOverlayExempt = new Map([
+    [
+      'src/components/TermPopover.tsx',
+      // 語をタップして出す小さな吹き出し。中に送る箱を持たず、画面が送られたら
+      // 語との位置がずれるので**自分から閉じる**作り。止めると閉じられなくなる
+      '用語の吹き出しは送られたら閉じる作りのため',
+    ],
+  ])
+  const heMissingLock = []
+  for (const full of heSources(path.join(heAppRoot, 'src'))) {
+    const rel = path.relative(heAppRoot, full).split(path.sep).join('/')
+    const src = readFileSync(full, 'utf-8')
+    const overlays = (src.match(/fixed inset-0/g) ?? []).length
+    if (overlays === 0) continue
+    if (heOverlayExempt.has(rel)) continue
+    const locks = (src.match(/useScrollLock\(/g) ?? []).length
+    if (locks < overlays) heMissingLock.push(`${rel}(窓${overlays}/止める呼び出し${locks})`)
+  }
+  eq('HE-3 全面の窓はすべて、後ろの画面を止める共通の仕組みを通っている', heMissingLock, [])
+  eq(
+    'HE-3 対象外にしている窓は、理由付きで1か所にまとまっている',
+    [...heOverlayExempt.values()].every((reason) => reason.length > 0),
+    true,
+  )
+
+  // --- HE-4: 共通の仕組みそのもの（重なっても1回だけ／閉じたら元の位置へ戻す） ---
+  // 本物のブラウザは要らない部分なので、body と window の代わりを置いて動かす。
+  // 見るのは「利用者が確かめたいこと」＝止めているあいだ見た目が動かず、閉じたら元の場所に戻ること
+  {
+    const heFakeStyle = () => ({ position: '', top: '', left: '', width: '', overflow: '' })
+    const body = { style: heFakeStyle() }
+    const html = { style: heFakeStyle(), clientWidth: 375 }
+    const scrolled = []
+    const fakeWindow = {
+      scrollY: 0,
+      location: { hash: '#/recipes' },
+      scrollTo: (_x, y) => {
+        fakeWindow.scrollY = y
+        scrolled.push(y)
+      },
+    }
+    const prevWindow = globalThis.window
+    const prevDocument = globalThis.document
+    globalThis.window = fakeWindow
+    globalThis.document = { body, documentElement: html }
+    try {
+      const { acquireScrollLock, releaseScrollLock, scrollLockDepth } = await import(
+        '../src/components/useScrollLock.ts'
+      )
+
+      // 一覧を途中まで送ったところで窓を開く
+      fakeWindow.scrollY = 640
+      acquireScrollLock()
+      eq('HE-4 窓を開いているあいだ、後ろの画面は動かせない', body.style.position, 'fixed')
+      eq(
+        'HE-4 止めた瞬間に見た目がずれない（送っていた位置ぶん上へずらして固定する）',
+        body.style.top,
+        '-640px',
+      )
+      eq('HE-4 止めているあいだの横幅は、止める前の幅のまま', body.style.width, '375px')
+
+      // 窓が重なっても、止め方は1回だけ（全画面の調理中モードの上に確認の窓が重なる形）
+      acquireScrollLock()
+      eq('HE-4 窓が重なった数を数えている', scrollLockDepth(), 2)
+      releaseScrollLock()
+      eq('HE-4 上の窓を閉じただけでは、まだ止まったまま', body.style.position, 'fixed')
+      eq('HE-4 上の窓を閉じただけでは、まだ元の位置へ戻さない', scrolled, [])
+
+      // 最後の1枚を閉じたら、開く前の位置に戻る（ここが壊れると「戻ったら先頭に飛ぶ」になる）
+      releaseScrollLock()
+      eq('HE-4 最後の窓を閉じたら、後ろの画面は元どおり動かせる', body.style.position, '')
+      eq('HE-4 最後の窓を閉じたら、開く前の位置に戻る', scrolled, [640])
+      eq('HE-4 止める前に入れた指定は残さない', [body.style.top, body.style.width], ['', ''])
+      eq('HE-4 数え直しも0に戻っている', scrollLockDepth(), 0)
+
+      // 窓の中から別の画面へ移ったときは、移った先の位置に触らない
+      scrolled.length = 0
+      fakeWindow.scrollY = 300
+      acquireScrollLock()
+      fakeWindow.location.hash = '#/recipes/12'
+      releaseScrollLock()
+      eq('HE-4 窓の中から別の画面へ移ったときは、移った先を勝手に送らない', scrolled, [])
+      eq('HE-4 別の画面へ移っても、固定は必ず外す', body.style.position, '')
+    } finally {
+      globalThis.window = prevWindow
+      globalThis.document = prevDocument
+    }
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

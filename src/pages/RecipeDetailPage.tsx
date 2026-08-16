@@ -73,6 +73,7 @@ import {
 import PriceEditModal, { type PriceEditTarget } from '../components/PriceEditModal'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import { useRevealOnOpen } from '../components/useRevealOnOpen'
+import { useScrollLock } from '../components/useScrollLock'
 import StepBadge from '../components/StepBadge'
 import ComposedStepText from '../components/ComposedStepText'
 import { collectUniqueTerms } from '../logic/termSplit'
@@ -302,6 +303,8 @@ export default function RecipeDetailPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [viewingLogPhoto])
+  // 写真を大きく見ているあいだ、後ろのレシピ詳細は動かさない（2026-08-16 便HE）
+  useScrollLock(viewingLogPhoto != null)
 
   // シェア(2026-07-16 裁定3: インライン2ボタン→選択モーダルに変更)
   const [shareOpen, setShareOpen] = useState(false)

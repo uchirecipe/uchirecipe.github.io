@@ -1727,6 +1727,96 @@ try {
         JSON.stringify(w375Detail),
       )
 
+      // --- SCROLLLOCK-01: 窓を開いているあいだ後ろの画面が動かず、閉じたら元の位置に戻る
+      // (2026-08-16 便HE・オーナー実機「窓内を縦にスクロールするつもりが、後ろの画面が
+      // 動いてしまうことがあります」)。
+      //
+      // 見るのは3つ。どれも「利用者が確かめたいこと」で測る:
+      //  ① 止めた瞬間に見た目がずれない(後ろの画面の要素が、画面のどこに見えているか)
+      //  ② 窓が重なっているとき、上の1枚を閉じても下の窓ぶんの固定は外れない
+      //  ③ 閉じたら、開く前に見ていた位置に戻る(ここが壊れると「戻ったら先頭に飛ぶ」になる)
+      //
+      // ③は「本体を固定する」やり方の代償で、対処しないと必ず先頭へ飛ぶ。
+      // 送る位置は画面の長さから決める(決め打ちの数値にしない)
+      currentCheck = 'SCROLLLOCK-01'
+      const lockTargetY = await fsPage.evaluate(() => {
+        const reachable = document.documentElement.scrollHeight - window.innerHeight
+        const y = Math.round(Math.min(reachable, window.innerHeight) / 2)
+        window.scrollTo(0, y)
+        return y
+      })
+      await fsPage.waitForTimeout(300)
+      const lockBefore = await fsPage.evaluate(() => ({
+        y: window.scrollY,
+        mainTop: Math.round(document.querySelector('main').getBoundingClientRect().top),
+        mainWidth: Math.round(document.querySelector('main').getBoundingClientRect().width),
+      }))
+      check(
+        'SCROLLLOCK-01 前提: 窓を開く前にレシピ詳細を途中まで送れている',
+        lockBefore.y > 0,
+        JSON.stringify({ lockTargetY, ...lockBefore }),
+      )
+      // 入口のボタンは画面の下のほうにあるので、locator の click だと Playwright が
+      // 先にその位置まで画面を送ってしまい、「送っていた位置」が測る前に変わる。
+      // ここで見たいのは窓を開いた瞬間の位置なので、送らずにそのまま押す
+      await fsPage.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+          b.textContent?.includes('調理中モードで見る'),
+        )
+        if (btn instanceof HTMLElement) btn.click()
+      })
+      await fsPage.waitForTimeout(500)
+      const lockDuring = await fsPage.evaluate(() => ({
+        mainTop: Math.round(document.querySelector('main').getBoundingClientRect().top),
+        mainWidth: Math.round(document.querySelector('main').getBoundingClientRect().width),
+        bodyPosition: getComputedStyle(document.body).position,
+      }))
+      check(
+        'SCROLLLOCK-01 後ろの画面を止めても、見た目の位置と幅が動かない',
+        lockDuring.mainTop === lockBefore.mainTop && lockDuring.mainWidth === lockBefore.mainWidth,
+        JSON.stringify({ before: lockBefore, during: lockDuring }),
+      )
+      // 窓の重なり: 全画面の調理中モードの上に「文字の大きさ」の窓を開いて閉じる。
+      // 上の1枚を閉じただけで下の全画面ぶんの固定まで外れると、後ろの画面がまた動き出す
+      await fsPage.getByTestId('cook-text-size-open').click()
+      await fsPage.waitForTimeout(300)
+      const nestedOpen = await fsPage.evaluate(
+        () => getComputedStyle(document.body).position,
+      )
+      await fsPage
+        .getByTestId('cook-text-size-modal')
+        .getByRole('button', { name: '閉じる' })
+        .click()
+      await fsPage.waitForTimeout(300)
+      const nestedClosed = await fsPage.evaluate(() => ({
+        bodyPosition: getComputedStyle(document.body).position,
+        mainTop: Math.round(document.querySelector('main').getBoundingClientRect().top),
+        overlayStillOpen: document.querySelector('.fixed.inset-0.z-50') !== null,
+      }))
+      check(
+        'SCROLLLOCK-01 重ねた窓を閉じても、下の全画面ぶんの止めは外れない',
+        nestedOpen === lockDuring.bodyPosition &&
+          nestedClosed.bodyPosition === lockDuring.bodyPosition &&
+          nestedClosed.mainTop === lockBefore.mainTop &&
+          nestedClosed.overlayStillOpen,
+        JSON.stringify({ nestedOpen, ...nestedClosed }),
+      )
+      await fsFocusClose(fsPage)
+      await fsPage.waitForTimeout(400)
+      const lockAfter = await fsPage.evaluate(() => ({
+        y: window.scrollY,
+        mainTop: Math.round(document.querySelector('main').getBoundingClientRect().top),
+        bodyPosition: getComputedStyle(document.body).position,
+      }))
+      check(
+        'SCROLLLOCK-01 窓を閉じたら、開く前に見ていた位置に戻っている',
+        lockAfter.y === lockBefore.y &&
+          lockAfter.mainTop === lockBefore.mainTop &&
+          lockAfter.bodyPosition !== 'fixed',
+        JSON.stringify({ before: lockBefore, after: lockAfter }),
+      )
+      currentCheck = 'FOCUS-SCROLL-01'
+
       // --- FOCUS-COPY-01: 何ができる機能かが読んで分かること(2026-07-28 機能④診断C13/C15/C16/C17) ---
       currentCheck = 'FOCUS-COPY-01'
       const detailBody = await fsPage.textContent('body')
@@ -2541,6 +2631,151 @@ try {
       }
     } finally {
       await mxBrowser.close()
+    }
+  }
+
+  // --- SCROLLLOCK-02: 窓の中を送るつもりが、後ろの画面が動く
+  // (2026-08-16 便HE・オーナー実機 iPhone SE2/Safari
+  // 「窓内を縦にスクロールするつもりが、後ろの画面が動いてしまうことがあります」)。
+  //
+  // なぜ**Safariの描画エンジン(webkit)で**測るか: 便HEが直す前に測った実測値は
+  // Chromiumではなくwebkitで取ったもので、後ろの画面が動く2つの経路が両方出た(375x667):
+  //  ・A 窓の外側(暗い背景)の上で400px払う → 後ろの画面が400px動いた
+  //  ・B 窓の中を下端まで送ってからさらに600px払う → 後ろの画面が600px動いた(送りが外へ移る)
+  //  ・結果、閉じたときの着地点が 400 → 1400 とまるで違う場所になった
+  // 「ことがあります」＝いつも起きるわけではない、の正体はBで、窓の中の余りが尽きた瞬間から
+  // 後ろへ移るため、中身が短い窓・下端まで送っていないときは起きない。
+  //
+  // 測るのは「後ろの画面が見た目で動いていないか」。窓を開いているあいだ window.scrollY は
+  // 0 に固定されるので、その数値ではなく**後ろの要素が画面のどこに見えているか**で見る。
+  currentCheck = 'SCROLLLOCK-02'
+  {
+    const slBrowser = await webkit.launch()
+    try {
+      const slContext = await slBrowser.newContext({ viewport: { width: 375, height: 667 } })
+      const slPage = await slContext.newPage()
+      slPage.on('pageerror', (err) => {
+        if (
+          err.message.includes('cloudflareinsights') ||
+          err.message.includes('Access-Control-Allow-Origin')
+        )
+          return
+        errors.push(`[pageerror@SCROLLLOCK-02] ${err.message}`)
+      })
+      try {
+        await slPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await slPage.waitForTimeout(1800) // 初回シード完了待ち
+        await slPage.evaluate(() => {
+          const link = document.querySelector('a[href^="#/recipes/"]')
+          if (link instanceof HTMLElement) link.click()
+        })
+        await slPage.waitForTimeout(700)
+        // 送る位置は画面の長さから決める(決め打ちの数値にしない)
+        await slPage.evaluate(() => {
+          const reachable = document.documentElement.scrollHeight - window.innerHeight
+          window.scrollTo(0, Math.round(Math.min(reachable, window.innerHeight) / 2))
+        })
+        await slPage.waitForTimeout(300)
+        const slBefore = await slPage.evaluate(() => ({
+          y: window.scrollY,
+          mainTop: Math.round(document.querySelector('main').getBoundingClientRect().top),
+        }))
+        check(
+          'SCROLLLOCK-02 前提: 窓を開く前にレシピ詳細を途中まで送れている',
+          slBefore.y > 0,
+          JSON.stringify(slBefore),
+        )
+        await slPage.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('button')).find(
+            (b) => b.textContent?.trim() === '作った！',
+          )
+          if (btn instanceof HTMLElement) btn.click()
+        })
+        await slPage.waitForTimeout(500)
+
+        // A: 窓の外側(暗い背景)の上で払う。払う場所は窓の実際の位置から決める
+        // (窓の高さは中身しだいで変わるので、決め打ちの座標にすると窓の中を払ってしまう)
+        const slDialogBox = await slPage.locator('[role="dialog"]').boundingBox()
+        const slBackdropY = Math.max(2, Math.round(slDialogBox.y / 2))
+        check(
+          'SCROLLLOCK-02 前提: 窓の外側(暗い背景)を払える隙間がある',
+          slDialogBox.y >= 4,
+          JSON.stringify({ dialogTop: slDialogBox.y, backdropY: slBackdropY }),
+        )
+        await slPage.mouse.move(
+          Math.round(slDialogBox.x + slDialogBox.width / 2),
+          slBackdropY,
+        )
+        await slPage.mouse.wheel(0, 400)
+        await slPage.waitForTimeout(400)
+        const slAfterBackdrop = await slPage.evaluate(() =>
+          Math.round(document.querySelector('main').getBoundingClientRect().top),
+        )
+        check(
+          'SCROLLLOCK-02 窓の外側を払っても、後ろのレシピ詳細は動かない',
+          slAfterBackdrop === slBefore.mainTop,
+          JSON.stringify({ before: slBefore.mainTop, after: slAfterBackdrop }),
+        )
+
+        // B: 窓の中を下端まで送ってから、さらに払う(送りが後ろへ移らないこと)。
+        // 中身の量に関わらず成り立つよう、まず「窓より高いもの」をその場で入れて
+        // 必ず送れる状態にしてから下端まで送る(中身が増減しても同じ判定になる形)
+        const slBox = slDialogBox
+        await slPage.evaluate(() => {
+          const dialog = document.querySelector('[role="dialog"]')
+          const probe = document.createElement('div')
+          probe.dataset.e2eTallProbe = '1'
+          probe.style.height = '2000px'
+          dialog?.appendChild(probe)
+          if (dialog) dialog.scrollTop = dialog.scrollHeight
+        })
+        await slPage.waitForTimeout(200)
+        const slAtEnd = await slPage.evaluate(() => {
+          const dialog = document.querySelector('[role="dialog"]')
+          return dialog.scrollTop >= dialog.scrollHeight - dialog.clientHeight - 1
+        })
+        check('SCROLLLOCK-02 前提: 窓の中を下端まで送れている', slAtEnd)
+        if (slBox) {
+          await slPage.mouse.move(slBox.x + slBox.width / 2, slBox.y + slBox.height / 2)
+          await slPage.mouse.wheel(0, 600)
+          await slPage.waitForTimeout(400)
+        }
+        const slAfterChain = await slPage.evaluate(() => {
+          const top = Math.round(document.querySelector('main').getBoundingClientRect().top)
+          document.querySelector('[data-e2e-tall-probe]')?.remove()
+          return top
+        })
+        check(
+          'SCROLLLOCK-02 窓の中を端まで送ったあとさらに送っても、後ろへ移らない',
+          slAfterChain === slBefore.mainTop,
+          JSON.stringify({ before: slBefore.mainTop, after: slAfterChain }),
+        )
+
+        // C: 閉じたら、開く前に見ていた位置に戻る
+        await slPage.evaluate(() => {
+          const btn = Array.from(document.querySelectorAll('button')).find(
+            (b) => b.textContent?.trim() === 'やめる',
+          )
+          if (btn instanceof HTMLElement) btn.click()
+        })
+        await slPage.waitForTimeout(600)
+        const slAfterClose = await slPage.evaluate(() => ({
+          y: window.scrollY,
+          mainTop: Math.round(document.querySelector('main').getBoundingClientRect().top),
+          bodyPosition: getComputedStyle(document.body).position,
+        }))
+        check(
+          'SCROLLLOCK-02 窓を閉じたら、開く前に見ていた位置に戻っている',
+          slAfterClose.y === slBefore.y &&
+            slAfterClose.mainTop === slBefore.mainTop &&
+            slAfterClose.bodyPosition !== 'fixed',
+          JSON.stringify({ before: slBefore, after: slAfterClose }),
+        )
+      } finally {
+        await slContext.close()
+      }
+    } finally {
+      await slBrowser.close()
     }
   }
 

@@ -1620,7 +1620,7 @@ export default function RecipesPage() {
           className="fixed inset-x-0 z-20 border-t border-edge bg-surface shadow-md"
           style={{ bottom: selectionBarBottom }}
         >
-          <div className="mx-auto flex max-h-[45vh] max-w-md flex-col gap-2 overflow-x-hidden overflow-y-auto px-[var(--space-md)] py-[var(--space-sm)]">
+          <div className="mx-auto flex max-h-[45vh] max-w-md flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)] py-[var(--space-sm)]">
             <div className="flex items-center justify-between gap-2">
               <p className="min-w-0 flex-1 text-sm font-bold text-ink-muted">
                 {selectedIds.length === 0

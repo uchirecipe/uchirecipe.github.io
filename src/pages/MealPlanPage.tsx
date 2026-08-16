@@ -192,6 +192,7 @@ import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import { RecipePlaceholder } from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
+import { useScrollLock } from '../components/useScrollLock'
 import type {
   CookedLog,
   DayNote,
@@ -4142,7 +4143,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 <span>{ja.mealPlan.planSheetIncludeEmptyDays}</span>
               </label>
               {/* 画面のプレビュー。長い月の表が画面を占領しないよう高さを抑える */}
-              <div className="mt-[var(--space-sm)] max-h-[60vh] overflow-x-hidden overflow-y-auto">
+              <div className="mt-[var(--space-sm)] max-h-[60vh] overflow-x-hidden overflow-y-auto overscroll-contain">
                 <div className="plan-sheet-preview rounded-sm border border-edge bg-app p-[var(--space-md)]">
                   <PlanSheetView sheet={sheet} />
                 </div>
@@ -5449,6 +5450,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   useOverlayDismiss(templateSaveOpen, () => setTemplateSaveOpen(false))
   useOverlayDismiss(templateApplyScope != null, () => setTemplateApplyScope(null))
   useOverlayDismiss(servingsEditor != null, () => setServingsEditor(null))
+  // 窓が開いているあいだ、後ろの献立表は動かさない（2026-08-16 便HE）。
+  // 日の窓の上にピッカーが重なる形（2026-07-29 便CB-1）でも、止め方は重なった数を数えるので、
+  // 上のピッカーを閉じただけで下の日の窓ぶんの固定が外れることはない
+  useScrollLock(dayModalDate != null)
+  useScrollLock(pickerOpen)
+  useScrollLock(templateSaveOpen)
+  useScrollLock(templateApplyScope != null)
+  useScrollLock(servingsEditor != null)
 
   return (
     <div className="mx-auto w-full max-w-md px-[var(--space-md)] pb-[var(--space-lg)] pt-[var(--space-lg)]">
@@ -7219,7 +7228,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </div>
           </div>
           <Collapse open={pickerControlsOpen}>
-            <div className="mt-[var(--space-sm)] max-h-[40vh] overflow-x-hidden overflow-y-auto px-[var(--space-md)]">
+            <div className="mt-[var(--space-sm)] max-h-[40vh] overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)]">
               <div className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
                 <p className="text-sm font-bold text-ink-muted">{ja.search.sortTitle}</p>
                 <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
@@ -7288,7 +7297,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               </div>
             </div>
           </Collapse>
-          <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto px-[var(--space-md)]">
+          <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)]">
             {filteredRecipes.length === 0 ? (
               <p className="mt-[var(--space-md)] text-center text-ink-muted">
                 {visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}
@@ -7515,7 +7524,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             role="dialog"
             aria-label={ja.mealPlan.templateApply}
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[85vh] w-full max-w-sm overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+            className="max-h-[85vh] w-full max-w-sm overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
           >
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-bold">{ja.mealPlan.templateApply}</h3>
@@ -7654,7 +7663,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             role="dialog"
             aria-label={dayModalTitle}
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[85vh] w-full max-w-sm overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+            className="max-h-[85vh] w-full max-w-sm overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
           >
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-bold">{dayModalTitle}</h3>

@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import { MEAL_SLOTS } from '../logic/mealPlan'
 import type { MealSlot } from '../db/types'
+import { useScrollLock } from './useScrollLock'
 
 type Props = {
   open: boolean
@@ -52,6 +53,7 @@ export default function TodaySlotModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  useScrollLock(open)
   if (!open) return null
 
   return (

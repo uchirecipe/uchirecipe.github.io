@@ -45,6 +45,7 @@ import type { Ingredient, ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
+import { useScrollLock } from '../components/useScrollLock'
 import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
 
@@ -457,6 +458,12 @@ export default function ShoppingPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [namePopup])
+
+  // 窓が開いているあいだ、後ろの買い物メモは動かさない（2026-08-16 便HE）。
+  // 閉じたら、メモのどこまで見ていたかはそのまま
+  useScrollLock(completeOpen)
+  useScrollLock(namePopup != null)
+  useScrollLock(pickerOpen)
 
   // 「あとにする」(2026-07-29 便CC/C7): 何も消さずにモーダルを閉じる。
   // 背景タップ・Escでも閉じられるが、それが分かる導線がボタンとして無かった
@@ -1050,7 +1057,7 @@ export default function ShoppingPage() {
               </select>
             </label>
           </div>
-          <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto px-[var(--space-md)]">
+          <div className="mt-[var(--space-sm)] flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)]">
             {filteredRecipes.length === 0 ? (
               <p className="mt-[var(--space-md)] text-center text-ink-muted">
                 {visibleRecipes.length === 0 ? ja.shopping.pickerEmpty : ja.shopping.pickerNoMatch}

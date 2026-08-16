@@ -6,6 +6,7 @@ import type { CookedLog, Recipe } from '../db/types'
 import { db } from '../db/db'
 import { usePhotoUrl } from './usePhotoUrl'
 import { useOverlayDismiss } from './useOverlayDismiss'
+import { useScrollLock } from './useScrollLock'
 import { useConfirm } from './ConfirmProvider'
 import CookedLogEditor from './CookedLogEditor'
 import { deleteDetachedLog } from '../db/detachedLogs'
@@ -33,6 +34,7 @@ export interface CookedLogDetailTarget {
 function CookedPhotoViewer({ photo, onClose }: { photo: Blob; onClose: () => void }) {
   const url = usePhotoUrl(photo)
   useOverlayDismiss(true, onClose)
+  useScrollLock(true)
   if (!url) return null
   return (
     <div
@@ -122,6 +124,7 @@ export default function CookedLogDetailModal({
   /** 直したあとは並び順が変わりうるので、いま見ている記録の位置は窓側で持ち直す */
   const [logIndex, setLogIndex] = useState(target.logIndex)
   useOverlayDismiss(true, onClose)
+  useScrollLock(true)
 
   // 直した内容をその場で出し直すため、記録は端末から読み直す（開いたときの写しを見続けない）。
   // まだ届いていない・レシピが消えた等で読めないときは、開いたときの写しをそのまま使う
@@ -181,7 +184,7 @@ export default function CookedLogDetailModal({
           role="dialog"
           aria-label={ja.cookedDetail.dialogAria.replace('{title}', recipe.title)}
           onClick={(e) => e.stopPropagation()}
-          className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+          className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
         >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">

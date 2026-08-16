@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import { archivePhotoDataUrl, type ArchivedCookedLog } from '../logic/cookedArchive'
 import { useOverlayDismiss } from './useOverlayDismiss'
+import { useScrollLock } from './useScrollLock'
 
 type Props = {
   open: boolean
@@ -22,6 +23,7 @@ type Props = {
  */
 export default function ArchiveViewerModal({ open, logs, brokenCount, onClose }: Props) {
   useOverlayDismiss(open, onClose)
+  useScrollLock(open)
   if (!open) return null
 
   return (
@@ -54,7 +56,7 @@ export default function ArchiveViewerModal({ open, logs, brokenCount, onClose }:
         >
           {ja.settings.archiveViewBanner}
         </p>
-        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
           <p className="px-[var(--space-md)] pt-[var(--space-sm)] text-sm text-ink-muted">
             {ja.settings.archiveViewCount.replace('{n}', String(logs.length))}
           </p>

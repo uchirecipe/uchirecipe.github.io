@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import { useOverlayDismiss } from './useOverlayDismiss'
+import { useScrollLock } from './useScrollLock'
 
 /**
  * 「初回だけ出すお知らせ」の窓（2026-08-13 便GE）。
@@ -32,6 +33,7 @@ export default function NoticeDialog({
   children: ReactNode
 }) {
   useOverlayDismiss(true, onClose)
+  useScrollLock(true)
 
   return (
     <div
@@ -44,7 +46,7 @@ export default function NoticeDialog({
         aria-label={title}
         data-testid={testId}
         onClick={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[90vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <div className="flex items-start justify-between gap-2">
           <h2 className="font-bold">{title}</h2>

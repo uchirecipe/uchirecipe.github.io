@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronLeft, Square, SquareCheck, X } from 'lucide-react'
 import { ja } from '../i18n/ja'
+import { useScrollLock } from './useScrollLock'
 
 /**
  * 段取りの最後の手順で「完成！」を押したときの窓（2026-08-12 便FX・オーナー実機
@@ -74,6 +75,7 @@ export default function CookFinishModal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onBack])
+  useScrollLock(open)
   if (!open) return null
   return (
     <div
@@ -86,7 +88,7 @@ export default function CookFinishModal({
         aria-label={ja.cookNavi.sessionFinishTitle}
         onClick={(e) => e.stopPropagation()}
         data-testid="cook-finish-modal"
-        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
       >
         <p className="text-lg font-bold">{ja.cookNavi.sessionFinishTitle}</p>
         {/* 本文は改行をそのまま出す（「まとめて作った！」の確認と同じ文面） */}

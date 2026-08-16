@@ -5,6 +5,7 @@ import { formatRemaining } from '../logic/time'
 import { timerRemainingSeconds } from '../logic/timerOrder'
 import { naviStepText } from '../logic/naviStepText'
 import StepBadge from './StepBadge'
+import { useScrollLock } from './useScrollLock'
 import { naviRecipeColor } from '../logic/naviColors'
 import { ja } from '../i18n/ja'
 
@@ -80,6 +81,7 @@ export default function TimerAdjustModal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [timer, onClose])
+  useScrollLock(timer !== null)
 
   if (!timer) return null
   /** 画面に出す番号（ナビの通し番号を使う場面ではそちらを優先する） */
