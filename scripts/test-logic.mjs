@@ -19343,6 +19343,268 @@ Aみりん 大さじ1
   )
 }
 
+// ---------- 読み上げの段取り(logic/speechEngine.ts): 2026-08-16 便GY・オーナー実機 ----------
+// iPhone SE2/Safari「読み上げは、2-3回ONOFF繰り返し押さないと音が出ない気がします」。
+// ブラウザの読み上げ（speechSynthesis）は、①取り消しの直後に話し始めると発話が捨てられる
+// ②一時停止（paused）のまま残ると speak しても鳴らない ③声の一覧が後から届く、という癖がある。
+// 実機が手元に無いので、speechSynthesis を差し替えて「呼ぶ順番」を固定する。
+{
+  const { createSpeechEngine } = await import('../src/logic/speechEngine.ts')
+
+  /** 読み上げエンジンの替え玉。呼ばれた順番と、渡された発話を覚える */
+  const makeSynth = (voices = []) => {
+    const synth = {
+      speaking: false,
+      pending: false,
+      paused: false,
+      voices,
+      calls: [],
+      spoken: [],
+      speak(utterance) {
+        synth.calls.push('speak')
+        synth.spoken.push(utterance)
+      },
+      cancel() {
+        synth.calls.push('cancel')
+        synth.speaking = false
+        synth.pending = false
+      },
+      resume() {
+        synth.calls.push('resume')
+        synth.paused = false
+      },
+      getVoices: () => synth.voices,
+    }
+    return synth
+  }
+
+  /** 待ち時間の替え玉。何ミリ秒かは測らず、「待ちに入ったか」「消化したか」だけを見る */
+  const makeClock = () => {
+    let nextId = 0
+    const waits = new Map()
+    return {
+      setTimer(fn) {
+        const id = ++nextId
+        waits.set(id, fn)
+        return id
+      },
+      clearTimer(id) {
+        waits.delete(id)
+      },
+      /** いちばん古い待ちを1つだけ消化する。消化できたら true */
+      runNext() {
+        const entry = waits.entries().next()
+        if (entry.done) return false
+        waits.delete(entry.value[0])
+        entry.value[1]()
+        return true
+      },
+      /** 待ちが無くなるまで消化する（上限は暴走よけの保険。回数そのものは測らない） */
+      runAll() {
+        for (let guard = 0; guard < 50; guard++) {
+          if (!this.runNext()) return
+        }
+      },
+    }
+  }
+
+  const makeEngine = (synth, clock) => {
+    const events = { speaking: [], notStarted: 0 }
+    const engine = createSpeechEngine({
+      synth,
+      createUtterance: (text) => ({
+        text,
+        lang: '',
+        voice: null,
+        onstart: null,
+        onend: null,
+        onerror: null,
+      }),
+      setTimer: (fn) => clock.setTimer(fn),
+      clearTimer: (handle) => clock.clearTimer(handle),
+      onSpeakingChange: (value) => events.speaking.push(value),
+      onNotStarted: () => {
+        events.notStarted++
+      },
+    })
+    return { engine, events }
+  }
+
+  // SPEAK-01: 何も鳴っていないのに毎回 cancel してから speak していた。
+  // iOS/Safari はこの並びで発話を捨てることがある＝押しても鳴らない1回目になる
+  {
+    const synth = makeSynth()
+    const clock = makeClock()
+    const { engine } = makeEngine(synth, clock)
+    engine.speak('玉ねぎを炒める')
+    eq(
+      'SPEAK-01 何も鳴っていないときは取り消しを挟まずに読み上げを始める',
+      synth.calls.filter((c) => c === 'cancel'),
+      [],
+    )
+    eq('SPEAK-01 待たずにその場で発話を渡す(押した操作の流れを切らない)', synth.spoken.length, 1)
+  }
+
+  // SPEAK-02: 読み上げ中に読み直すときは取り消しが要る。ただし取り消しの直後に続けて
+  // 話し始めない（間を置く）。同じ流れの中で cancel→speak と並べるのが捨てられる形
+  {
+    const synth = makeSynth()
+    const clock = makeClock()
+    const { engine } = makeEngine(synth, clock)
+    engine.speak('ひとつ目')
+    synth.speaking = true
+    const spokenBefore = synth.spoken.length
+    engine.speak('ふたつ目')
+    eq(
+      'SPEAK-02 読み上げ中の読み直しは、取り消しの直後に続けて話し始めない',
+      synth.calls[synth.calls.length - 1],
+      'cancel',
+    )
+    eq('SPEAK-02 間を置くまで次の発話は渡らない', synth.spoken.length, spokenBefore)
+    clock.runNext()
+    eq('SPEAK-02 間を置いたあとに読み上げが始まる', synth.spoken.length > spokenBefore, true)
+  }
+
+  // SPEAK-03: 一時停止（paused）のまま残っていると、speak しても鳴らない。
+  // 読み上げの前に必ず動かし直す
+  {
+    const synth = makeSynth()
+    synth.paused = true
+    const clock = makeClock()
+    const { engine } = makeEngine(synth, clock)
+    engine.speak('鍋を火にかける')
+    const resumedAt = synth.calls.indexOf('resume')
+    const spokeAt = synth.calls.indexOf('speak')
+    eq(
+      'SPEAK-03 一時停止のまま残っていたら、読み上げの前に動かし直す',
+      resumedAt !== -1 && resumedAt < spokeAt,
+      true,
+    )
+  }
+
+  // SPEAK-04: 声の一覧は後から届く（iOS/Safari は最初の呼び出しで空のことがある）。
+  // 空でも黙り込まず、届いたら日本語の声を使い、そのあと空を返されても使い続ける
+  {
+    const jaVoice = { lang: 'ja-JP' }
+    const enVoice = { lang: 'en-US' }
+    const synth = makeSynth([])
+    const clock = makeClock()
+    const { engine } = makeEngine(synth, clock)
+    engine.speak('声がまだ届いていない')
+    eq('SPEAK-04 声の一覧が空でも読み上げを遅らせない', synth.spoken.length, 1)
+    synth.voices = [enVoice, jaVoice]
+    engine.speak('声が届いたあと')
+    eq(
+      'SPEAK-04 声が届いたら日本語の声を選ぶ',
+      synth.spoken[synth.spoken.length - 1].voice,
+      jaVoice,
+    )
+    synth.voices = []
+    engine.speak('また空を返された')
+    eq(
+      'SPEAK-04 一度読み込めた声は、一覧が空を返しても使い続ける',
+      synth.spoken[synth.spoken.length - 1].voice,
+      jaVoice,
+    )
+  }
+
+  // SPEAK-05: speak が無視されたときは onerror も来ない＝黙って終わってしまう。
+  // 始まった合図が来ないまま時間が過ぎたら、言い直したうえで手応えを画面に返す
+  {
+    const synth = makeSynth()
+    const clock = makeClock()
+    const { engine, events } = makeEngine(synth, clock)
+    engine.speak('鳴らないことがある手順')
+    const spokenBefore = synth.spoken.length
+    clock.runAll()
+    eq('SPEAK-05 諦める前に言い直す', synth.spoken.length > spokenBefore, true)
+    eq('SPEAK-05 それでも始まらなければ、鳴らなかったことを画面に返す', events.notStarted > 0, true)
+    eq(
+      'SPEAK-05 読み上げ中の表示のまま残さない(次に押すと止めるだけになる)',
+      events.speaking[events.speaking.length - 1],
+      false,
+    )
+  }
+
+  // SPEAK-06: 「読み上げストップ」（2026-08-15 便GS）を壊さない。
+  // 間を置いて待っている発話も取り消す＝止めたのに後から鳴り出さない
+  {
+    const synth = makeSynth()
+    const clock = makeClock()
+    const { engine, events } = makeEngine(synth, clock)
+    engine.speak('ひとつ目')
+    synth.speaking = true
+    engine.speak('ふたつ目')
+    engine.stop()
+    const spokenAtStop = synth.spoken.length
+    clock.runAll()
+    eq('SPEAK-06 読み上げストップは取り消しを呼ぶ', synth.calls.includes('cancel'), true)
+    eq('SPEAK-06 待っていた発話は取り消され、後から鳴り出さない', synth.spoken.length, spokenAtStop)
+    eq(
+      'SPEAK-06 止めたあとは読み上げ中の表示にしない',
+      events.speaking[events.speaking.length - 1],
+      false,
+    )
+  }
+
+  // SPEAK-07: 取り消した発話の終了通知は後から届く。これを新しい発話のものとして扱うと、
+  // 鳴っているのにボタンが「読み上げ」に戻り、次に押すと読み直しになる（押す回数が増える）
+  {
+    const synth = makeSynth()
+    const clock = makeClock()
+    const { engine, events } = makeEngine(synth, clock)
+    engine.speak('ひとつ目')
+    const first = synth.spoken[0]
+    synth.speaking = true
+    engine.speak('ふたつ目')
+    clock.runNext()
+    const second = synth.spoken[synth.spoken.length - 1]
+    second.onstart?.()
+    synth.speaking = true
+    first.onerror?.()
+    first.onend?.()
+    eq(
+      'SPEAK-07 取り消した発話の終了通知で、いまの読み上げ中の表示が消えない',
+      events.speaking[events.speaking.length - 1],
+      true,
+    )
+  }
+}
+
+// ---------- 便GY-2: マナーモードでのタイマー音（2026-08-16 オーナー実機確認） ----------
+// 「タイマー音はマナーモードではなりません。オフラインでもタイマー動作の挙動は同じであることを確認」。
+// iPhoneでは ①タイマー音が鳴らない ②Safariに振動の仕組みが無い が重なるので、
+// マナーモード中は終わりに気づく手段が画面だけになる。
+// 設定の注記は「タイマーの終了は音でお知らせします」と言い切っていて、そのままでは嘘になる。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const mentionsSilentMode = (text) => text.includes('マナーモード') || text.includes('消音')
+  eq(
+    'GY-2 振動非対応の注記が「音でお知らせします」で言い切っていない(マナーモードでは鳴らない)',
+    mentionsSilentMode(ja.settings.timerVibrationUnsupportedNote),
+    true,
+  )
+
+  const manual = readFileSync(path.join(appRoot, 'public/about/manual.html'), 'utf-8')
+  eq(
+    'GY-2 使い方ページに「マナーモードではタイマー音が鳴らない」ことが書かれている',
+    manual.split(/[。\n]/).some((s) => mentionsSilentMode(s) && s.includes('タイマー音')),
+    true,
+  )
+
+  // オフラインの節（見出しのidで掴む＝並び順が変わっても外れない）に、
+  // タイマーの挙動が電波のあるときと変わらないことが書かれているか
+  const offlineStart = manual.indexOf('id="offline"')
+  const offlineSection = manual.slice(offlineStart, manual.indexOf('<h3', offlineStart + 1))
+  eq(
+    'GY-2 オフラインの節に、タイマーの動きが電波のあるときと同じだと書かれている',
+    offlineSection
+      .split('\n')
+      .some((line) => line.includes('タイマー') && (line.includes('同じ') || line.includes('変わ'))),
+    true,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

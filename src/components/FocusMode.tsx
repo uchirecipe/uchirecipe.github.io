@@ -98,7 +98,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
    * 調理中セッション（CookSessionOverlay）と**同じコード**を使う（2026-08-09 便EL・docs/69）。
    * この画面の挙動は切り出し前と同じ（受ける言葉・手応えの出し方・許可まわりの案内は不変）。
    */
-  const { speaking, speak, stopSpeech } = useSpeech()
+  const { speaking, speak, stopSpeech, speechMessage } = useSpeech()
   const touchStartX = useRef<number | null>(null)
   // ±調整の窓（2026-07-12タイマー自由設定）: どのタイマーを調整中か
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
@@ -477,6 +477,17 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           ) : (
             listening && <span className="ml-1 font-bold text-accent-ink">{ja.focus.micListening}</span>
           )}
+        </p>
+      )}
+
+      {/* 押したのに読み上げが始まらなかったとき（2026-08-16 便GY）。
+          発話が無視されるとエラーの通知も来ないので、これが無いと画面は何も変わらない */}
+      {speechMessage && (
+        <p
+          data-testid="speech-not-started"
+          className="ja-phrase px-[var(--space-md)] pb-1 text-center text-xs font-bold text-warning"
+        >
+          {speechMessage}
         </p>
       )}
 

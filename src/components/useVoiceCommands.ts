@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { matchVoiceColor, matchVoiceCommand } from '../logic/voiceCommand'
 import { toSpeechText } from '../logic/toSpeechText'
+import { createSpeechEngine, type SpeechEngine } from '../logic/speechEngine'
 import { ja } from '../i18n/ja'
 
 /**
@@ -58,33 +59,83 @@ export interface SpeechControls {
   speak: (text: string) => void
   /** 読み上げを止める */
   stopSpeech: () => void
+  /** 読み上げが始まらなかったときの一言（何も出ていなければ空文字） */
+  speechMessage: string
 }
 
-/** 手順の読み上げ（Web Speech API）。フックを外れるとき（画面を閉じるとき）に必ず止める */
+/** 「読み上げが始まらなかった」の一言を出しておく時間（ミリ秒） */
+const SPEECH_MESSAGE_MS = 6000
+
+/**
+ * 手順の読み上げ（Web Speech API）。フックを外れるとき（画面を閉じるとき）に必ず止める。
+ *
+ * 呼ぶ順番そのものは logic/speechEngine.ts に置いてある（2026-08-16 便GY・オーナー実機
+ * iPhone SE2/Safari「読み上げは、２−３回ONOFF繰り返し押さないと音が出ない気がします」）。
+ * ブラウザを差し替えて単体テストで固定できるようにするためで、この画面側が持つのは
+ * 「読み上げ中かどうか」と「鳴らなかったときの一言」だけ。
+ */
 export function useSpeech(): SpeechControls {
   const [speaking, setSpeaking] = useState(false)
+  // 言い直しても読み上げが始まらなかったとき（2026-08-16 便GY）。speak そのものが無視された
+  // 場合は onerror も来ないので、何も出さないと「押したのに無反応」で終わってしまう
+  const [speechMessage, setSpeechMessage] = useState('')
+  const messageTimeout = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const engineRef = useRef<SpeechEngine | null>(null)
+
+  const getEngine = useCallback(() => {
+    if (!speechSupported) return null
+    if (!engineRef.current) {
+      engineRef.current = createSpeechEngine({
+        synth: window.speechSynthesis,
+        createUtterance: (text) => new SpeechSynthesisUtterance(text),
+        setTimer: (fn, ms) => setTimeout(fn, ms),
+        clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+        onSpeakingChange: setSpeaking,
+        onNotStarted: () => {
+          setSpeechMessage(ja.focus.readNotStarted)
+          clearTimeout(messageTimeout.current)
+          messageTimeout.current = setTimeout(() => setSpeechMessage(''), SPEECH_MESSAGE_MS)
+        },
+      })
+    }
+    return engineRef.current
+  }, [])
 
   const stopSpeech = useCallback(() => {
-    if (speechSupported) window.speechSynthesis.cancel()
+    engineRef.current?.stop()
     setSpeaking(false)
   }, [])
 
-  const speak = useCallback((text: string) => {
-    if (!speechSupported) return
-    const utterance = new SpeechSynthesisUtterance(toSpeechText(text))
-    utterance.lang = 'ja-JP'
-    const jaVoice = window.speechSynthesis.getVoices().find((v) => v.lang.startsWith('ja'))
-    if (jaVoice) utterance.voice = jaVoice
-    utterance.onend = () => setSpeaking(false)
-    utterance.onerror = () => setSpeaking(false)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(utterance)
-    setSpeaking(true)
-  }, [])
+  const speak = useCallback(
+    (text: string) => {
+      const engine = getEngine()
+      if (!engine) return
+      // 前回の「始まりませんでした」は、次に読み上げたところで引っ込める
+      clearTimeout(messageTimeout.current)
+      setSpeechMessage('')
+      engine.speak(toSpeechText(text))
+    },
+    [getEngine],
+  )
 
+  /**
+   * 声の一覧は後から届く（iOS/Safari では最初の getVoices() が空のことがある）。
+   * 届いたら覚えておいて次の読み上げから日本語の声を使う。
+   * **声を待って読み上げを遅らせることはしない**（待つと1回目が黙る）
+   */
+  useEffect(() => {
+    if (!speechSupported) return
+    const synth = window.speechSynthesis
+    const onVoicesChanged = () => getEngine()?.refreshVoices()
+    onVoicesChanged()
+    synth.addEventListener('voiceschanged', onVoicesChanged)
+    return () => synth.removeEventListener('voiceschanged', onVoicesChanged)
+  }, [getEngine])
+
+  useEffect(() => () => clearTimeout(messageTimeout.current), [])
   useEffect(() => stopSpeech, [stopSpeech])
 
-  return { speaking, speak, stopSpeech }
+  return { speaking, speak, stopSpeech, speechMessage }
 }
 
 export interface VoiceCommandActions {

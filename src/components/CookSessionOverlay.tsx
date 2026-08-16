@@ -288,7 +288,7 @@ export default function CookSessionOverlay({
   useAppBusyWhileMounted()
   const { timers, now, dismissTimer, adjustTimer, toggleMute, flashingId, pauseTimer, resumeTimer } =
     useTimers()
-  const { speaking, speak, stopSpeech } = useSpeech()
+  const { speaking, speak, stopSpeech, speechMessage } = useSpeech()
   const { state: termPopoverState, open: openTerm, close: closeTermPopover } = useTermPopover()
   const [adjustingId, setAdjustingId] = useState<number | null>(null)
   /**
@@ -872,6 +872,16 @@ export default function CookSessionOverlay({
           ) : (
             listening && <span className="ml-1 font-bold text-accent-ink">{ja.focus.micListening}</span>
           )}
+        </p>
+      )}
+
+      {/* 押したのに読み上げが始まらなかったとき（2026-08-16 便GY。1品の調理中モードと同じ） */}
+      {speechMessage && (
+        <p
+          data-testid="speech-not-started"
+          className="ja-phrase px-[var(--space-md)] pb-1 text-center text-xs font-bold text-warning"
+        >
+          {speechMessage}
         </p>
       )}
 
