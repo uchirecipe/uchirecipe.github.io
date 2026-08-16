@@ -2503,7 +2503,16 @@ try {
       await wkPage2.waitForTimeout(600)
       await wkPage2.evaluate(() => window.scrollTo(0, 200))
       await wkPage2.waitForTimeout(300)
-      const scrollBeforeOpen = await wkPage2.evaluate(() => window.scrollY)
+      // 2026-08-16 便HE: 窓が開いている間は後ろの画面を固定する（iOSは overflow:hidden では止まらないので
+      // 本体を position:fixed にする）。この作りでは `window.scrollY` は 0 になるが、**見た目は1pxも動かない**。
+      // 測りたいのは「**開いてもページの見た目が動かない**」ことなので、
+      // 数字ではなく**画面の中の実際の位置**（見出しがどこに見えているか）で見る（CLAUDE.md 禁じ手④）
+      const seenTop = () =>
+        wkPage2.evaluate(() => {
+          const h = document.querySelector('main h1, main h2, main a[href^="#/recipes/"]')
+          return h ? Math.round(h.getBoundingClientRect().top) : null
+        })
+      const scrollBeforeOpen = await seenTop()
       // 「作った！」はページ最下部のボタンなので、Playwrightの.click()に任せると
       // 可視範囲へ自動スクロールしてしまい検証したいスクロール位置そのものを壊す(SCROLL-01と同じ理由)。
       // DOMのclick()を直接呼んでスクロールを発生させない
@@ -2516,11 +2525,11 @@ try {
       await wkPage2.waitForTimeout(400)
       const dialogText = await wkPage2.textContent('body')
       check('LOG-01 「作った！」で窓(モーダル)が開く', dialogText.includes('作った記録をつける'))
-      const scrollAfterOpen = await wkPage2.evaluate(() => window.scrollY)
+      const scrollAfterOpen = await seenTop()
       check(
-        'LOG-01 窓を開いてもページのスクロール位置が変わらない',
-        scrollAfterOpen === scrollBeforeOpen,
-        `開く前=${scrollBeforeOpen} 開いた後=${scrollAfterOpen}`,
+        'LOG-01 窓を開いてもページの見た目が動かない',
+        scrollBeforeOpen != null && Math.abs(scrollAfterOpen - scrollBeforeOpen) <= 1,
+        `開く前=${scrollBeforeOpen} 開いた後=${scrollAfterOpen}（画面の中の位置）`,
       )
       const dateBox = await wkPage2.locator('input[type="date"]').boundingBox()
       check(
