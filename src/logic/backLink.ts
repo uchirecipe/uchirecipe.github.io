@@ -14,9 +14,11 @@ import { ja } from '../i18n/ja'
  */
 
 /**
- * 戻り先として受け付けるアプリ内のページ。判定はパスの先頭一致で行う
- * （ホームだけは「/」ちょうど。前方一致にすると知らないパスまでホーム扱いになり、
- * 「ホームに戻る」と書いてあるのに別の場所へ行くボタンになってしまう）。
+ * 戻り先として受け付けるアプリ内のページ。判定はパスの先頭一致で行う。
+ *
+ * 2026-08-17 便HG: ホーム画面の廃止で「/」の行き先を外した。
+ * 「/」は献立へ送るだけの通過点になり、そこへ戻すボタンを出す場面が無くなったため
+ * （知らないパスは null＝戻るボタンを出さない、という従来の扱いのままにする）。
  */
 const BACK_TARGETS: { match: (pathname: string) => boolean; label: () => string }[] = [
   // 長いパスから先に判定する（/recipes より /recipes/ が先）
@@ -27,7 +29,6 @@ const BACK_TARGETS: { match: (pathname: string) => boolean; label: () => string 
   { match: (p) => p.startsWith('/shopping'), label: () => ja.backLink.shopping },
   { match: (p) => p.startsWith('/history'), label: () => ja.backLink.history },
   { match: (p) => p.startsWith('/prices'), label: () => ja.backLink.prices },
-  { match: (p) => p === '/', label: () => ja.backLink.home },
 ]
 
 export interface BackTarget {

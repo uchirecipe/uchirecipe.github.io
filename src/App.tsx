@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
-import { HashRouter, Routes, Route } from 'react-router-dom'
-import HomePage from './pages/HomePage'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import RecipesPage from './pages/RecipesPage'
 import RecipeFormPage from './pages/RecipeFormPage'
 import RecipeDetailPage from './pages/RecipeDetailPage'
@@ -103,7 +102,11 @@ function App() {
               実測した高さ（--app-bottom-inset）ぶんの余白を空ける。既定値は index.css */}
           <main className="min-h-dvh pb-[calc(var(--app-bottom-inset)+var(--space-lg))]">
             <Routes>
-              <Route path="/" element={<HomePage />} />
+              {/* アプリを開いたときの着地(2026-08-17 便HG・オーナー決定「先にホーム画面なくします」)。
+                  ホーム画面を廃止し、その役目は献立の「日」が引き継いだ。
+                  replace を付けるのは、戻る操作で消えた画面のURLへ引き返させないため
+                  （引き返してもここへ送り返されるだけで、押しても何も起きないように見える） */}
+              <Route path="/" element={<Navigate to="/meal-plan" replace />} />
               <Route path="/recipes" element={<RecipesPage />} />
               <Route path="/recipes/new" element={<RecipeFormPage />} />
               <Route path="/recipes/:id" element={<RecipeDetailPage />} />
@@ -118,6 +121,11 @@ function App() {
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/prices" element={<IngredientPricesPage />} />
+              {/* 知らない行き先はすべて着地点へ送る(2026-08-17 便HG)。
+                  従来は何にも当たらないと真っ白な画面になっていた。ホーム画面を指していた
+                  古いブックマーク・共有リンクを開いた人が、行き止まりではなく
+                  いま最初に出る画面（献立の「日」）に着くようにする */}
+              <Route path="*" element={<Navigate to="/meal-plan" replace />} />
             </Routes>
           </main>
           <TimerBar />

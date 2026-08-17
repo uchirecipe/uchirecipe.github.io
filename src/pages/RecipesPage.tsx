@@ -102,7 +102,7 @@ const effortOptions: { value: EffortFilter; label: string }[] = [
 
 /**
  * 料理の種別の絞り込み（2026-08-10 便FF・オーナー要望「主菜副菜などでも絞り込みしたい」）。
- * 区分と並びはレシピ登録の「料理の種別」・ホームの「今日なに作る？」と同じ4つを使う
+ * 区分と並びはレシピ登録の「料理の種別」・献立の「今日なに作る？」と同じ4つを使う
  * （logic/homeSuggest.ts DISH_TYPE_OPTIONS）。4区分は互いに重ならず、合わせると全レシピを覆う
  */
 const dishTypeOptions: { value: DishTypeFilter; label: string }[] = [
@@ -319,7 +319,7 @@ function CheckList<T extends string>({
  * 対策: スクロール位置だけでなく検索語・絞り込み・並べ替えの全項目をこのキーに保存し、
  * URLにクエリが無い「素の /recipes」で開いたとき（＝詳細から戻ってきた・タブバーで戻ってきた
  * 等、明示的な新規検索ではない場合）はここから初期状態を復元する。検索語・使いたい食材は
- * 従来どおりURLの ?q= / ?ing= が指定されていればそちらを優先する（ホームの検索・食材リンク等、
+ * 従来どおりURLの ?q= / ?ing= が指定されていればそちらを優先する（献立の「日」の検索の入口等、
  * 意図的な新規検索は先頭表示のまま、という既存の使用感を維持するため）。
  */
 const RECIPES_LIST_STATE_KEY = 'uchirecipe:recipesListState'
@@ -357,13 +357,13 @@ function readSavedListState(): SavedListState | null {
 /** レシピ一覧: 検索・フィルタ＋写真カードのグリッド＋右下の「＋」ボタン */
 export default function RecipesPage() {
   const confirm = useConfirm()
-  // ホーム画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
+  // 他の画面から ?q=... / ?ing=... 付きで来たときは、その条件で開く。
   // どちらも無ければ（詳細から戻ってきた等の「素の /recipes」）sessionStorageの保存値から復元する
   const [searchParams, setSearchParams] = useSearchParams()
   // Pro案内・設定への入口から飛んだあと、この画面へ帰れるようにするための現在地(2026-08-02 便DF)
   const location = useLocation()
   const navigate = useNavigate()
-  // ホームの「レシピを探す」ショートカットからの遷移(2026-08-02 オーナー実機FB)。
+  // 「レシピを探す」の入口からの遷移(2026-08-02 オーナー実機FB。2026-08-17 便HGで献立の「日」へ移設)。
   // ?focus=search = 検索欄にフォーカスした状態で開く / ?pantry=1 = 「在庫の食材で絞る」をONで開く。
   // どちらも「明示的な新規検索」なので、?q=・?ing= と同じくsessionStorageの保存状態は復元しない
   // (前回の検索語が残ったまま検索欄にフォーカスすると、何を打てばいいのか分からなくなるため)。
@@ -415,7 +415,7 @@ export default function RecipesPage() {
         else next.delete('q')
         if (ingredients.length > 0) next.set('ing', ingredients.join(' '))
         else next.delete('ing')
-        // ホームからの一度きりの指示(2026-08-02)はURLに残さない。残すと、詳細から戻るたびに
+        // 呼び出し元からの一度きりの指示(2026-08-02)はURLに残さない。残すと、詳細から戻るたびに
         // 検索欄へフォーカスが飛んだり在庫の絞り込みが復活したりする
         next.delete('focus')
         next.delete('pantry')
@@ -427,7 +427,7 @@ export default function RecipesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, ingredients])
 
-  // ホームの「レシピを探す」から来たときだけ検索欄にフォーカスする(2026-08-02)。
+  // 「レシピを探す」から来たときだけ検索欄にフォーカスする(2026-08-02)。
   // 初回マウント時に1回だけ。スマホではここでキーボードが開き、すぐ打ち始められる
   useEffect(() => {
     if (!entry.focusSearch) return
@@ -443,7 +443,7 @@ export default function RecipesPage() {
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
   // 在庫(ある/少ない)の食材を使うレシピだけに絞る(2026-07-24 便BN・司令部追加)。
-  // ホームの「在庫の食材から探す」(?pantry=1)から来たときは最初からONで開く(2026-08-02)
+  // 「在庫の食材から探す」(?pantry=1)から来たときは最初からONで開く(2026-08-02)
   const [pantryOnly, setPantryOnly] = useState(entry.pantry || (saved?.pantryOnly ?? false))
   const [sort, setSort] = useState<RecipeSortOption>(saved?.sort ?? 'updated')
   // 並べ替えの昇順/降順(2026-07-13 UI改善)。並べ替えの種類自体を変えたときは
@@ -1002,7 +1002,7 @@ export default function RecipesPage() {
               </Link>
             )}
           </div>
-          {/* -m-2 + p-3.5: ×の見た目は16pxのまま、タップ領域を44px四方に広げる(ホームのお知らせと同じ) */}
+          {/* -m-2 + p-3.5: ×の見た目は16pxのまま、タップ領域を44px四方に広げる(アプリ内のお知らせと同じ) */}
           <button
             type="button"
             onClick={dismissFreeLimitNotice}

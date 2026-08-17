@@ -233,7 +233,7 @@ export async function toggleFavorite(id: number): Promise<void> {
 /**
  * 「作った！」記録の並び順は常に日付の新しい順（2026-07-29 便CI/C08）。
  * 以前は追加順（先頭に積むだけ）だったため、過去の日付を後から記録すると
- * cookedLogs[0] が最新でなくなり、logic/cooked.ts の cookedWithinDays（＝ホームの
+ * cookedLogs[0] が最新でなくなり、logic/cooked.ts の cookedWithinDays（＝
  * 「今日なに作る？」と献立自動提案の「最近作ってない」条件）が誤判定していた。
  * date は 'YYYY-MM-DD' 固定（db/types.ts）なので文字列比較で日付順になる。
  * JSのsortは安定なので、同じ日付の記録どうしは元の順序（新しく足した方が先頭）を保つ。
