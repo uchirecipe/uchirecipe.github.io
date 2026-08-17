@@ -6,7 +6,7 @@
 //   BASE_URL=http://localhost:4284 npx tsx scripts/shots-manual.mjs
 //
 //   一部だけ撮り直すとき(下の ONLY を参照):
-//   BASE_URL=http://localhost:4284 ONLY=day-suggest,day-search npx tsx scripts/shots-manual.mjs
+//   BASE_URL=http://localhost:4284 ONLY=day-suggest,plan-day-buttons npx tsx scripts/shots-manual.mjs
 //
 // 仕様:
 //  - 390x844(iPhone相当)・ライトテーマ・deviceScaleFactor 2 のブラウザで操作する
@@ -75,8 +75,10 @@ const manifest = {}
  * ONLY= の指定を照合するために持つ(2026-08-09 便EM)。名前を打ち間違えると、
  * 「1枚も撮れないまま全カット走り切って何も変わらない」という分かりにくい失敗になっていた。
  */
+// 2026-08-17 便HH: 'day-search' を落とした。撮っていた「レシピを探す」「在庫の食材から探す」の
+// 2つのボタンを献立の「日」から外したため(行き先はレシピ一覧と、その絞り込みに残っている)
 const SHOT_NAMES = [
-  'recipe-cards', 'day-suggest', 'day-search', 'nav-tabs', 'search',
+  'recipe-cards', 'day-suggest', 'nav-tabs', 'search',
   'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
   'plan-day-buttons', 'select-for-today', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
@@ -88,7 +90,7 @@ const SHOT_NAMES = [
 ]
 
 /**
- * ONLY=day-suggest,day-search のように指定すると、その名前のスクショだけを書き出す(部分撮り直し)。
+ * ONLY=day-suggest,plan-day-buttons のように指定すると、その名前のスクショだけを書き出す(部分撮り直し)。
  * 料理写真(MANUAL_PHOTO_DIR)を持っていない環境で全部を撮り直すと、写真つきのスクショ
  * (recipe-cards / detail-photo / plan-month-photo / search / logs)が写真なしの絵に
  * 置き換わってしまうため、一部の画面だけ追随させたいときは対象を絞る。
@@ -415,19 +417,13 @@ try {
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1800)
 
-  // 「今日なに作る？」と「レシピを探す」は、その日の献立が決まっていない日にだけ出る。
-  // このスクリプトはこのあとで献立を入れるので、必ず入れる前に撮ること
+  // 「今日なに作る？」は、その日の献立が決まっていない日にだけ出る。
+  // このスクリプトはこのあとで献立を入れるので、必ず入れる前に撮ること。
+  // 2026-08-17 便HH: この節に「おまかせで献立を組む」も入ったので、下端まで丸ごと写る
   const suggestCard = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '今日なに作る？' }) })
   await crop(page, 'day-suggest', suggestCard, { top: 60 })
-
-  // 「レシピを探す」の入口(2026-08-02 便CRで旧「使いたい食材から探す」の検索欄から差し替え)。
-  // 在庫を入れてあるので「在庫の食材から探す」も一緒に写る
-  const searchShortcut = page
-    .locator('section')
-    .filter({ has: page.getByRole('button', { name: 'レシピを探す', exact: true }) })
-  await crop(page, 'day-search', searchShortcut, { top: 120 })
 
   // 下の行き先の並び(画面の見取り図)
   await cropRect(page, 'nav-tabs', { x: 0, y: VIEW.height - 72, width: VIEW.width, height: 72 })
@@ -547,15 +543,18 @@ try {
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1500)
 
-  // 「日」タブ: まだ決まっていないときの2つのボタン
+  // 「日」タブ: まだ決まっていないときの「今日の献立」
+  // 2026-08-17 便HH: 「おまかせ」は「今日なに作る？」へ移したので、この節に残るボタンは
+  // 「今日の献立を選ぶ」1つ。節を丸ごと切り出す(見出し・案内2行・ボタン)
   const dayTab = page.getByRole('button', { name: '日', exact: true })
   if (await dayTab.count()) {
     await dayTab.click()
     await wait(page, 700)
-    const pickBtn = page.getByRole('button', { name: '今日の献立を選ぶ' })
-    const autoBtn = page.getByRole('button', { name: 'おまかせで提案' })
-    if ((await pickBtn.count()) && (await autoBtn.count())) {
-      await cropRange(page, 'plan-day-buttons', pickBtn, autoBtn, { top: 100, padBottom: 44 })
+    const todaySection = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: '今日の献立' }) })
+    if (await todaySection.count()) {
+      await crop(page, 'plan-day-buttons', todaySection.first(), { top: 100 })
     }
   }
 

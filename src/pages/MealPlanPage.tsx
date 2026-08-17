@@ -29,6 +29,7 @@ import {
   LayoutTemplate,
   Printer,
   ImageDown,
+  UtensilsCrossed,
 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
@@ -232,7 +233,6 @@ import {
 // ホーム画面の廃止（2026-08-17 便HG）で、ホームにあった部品を献立の「日」へ移した。
 // どれも中身は変えていない（置き場所と、出す/出さないの判定だけが変わっている）
 import TodaySuggestPanel from '../components/TodaySuggestPanel'
-import RecipeSearchShortcut from '../components/RecipeSearchShortcut'
 import RecentCookedList from '../components/RecentCookedList'
 import DayStartNotices from '../components/DayStartNotices'
 import HomeScreenNotice from '../components/HomeScreenNotice'
@@ -2353,6 +2353,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const dayHasPlan = dayRecipeIds.length > 0
 
   /**
+   * 献立が決まっている日に「今日なに作る？」を開いているか（2026-08-17 便HH）。
+   *
+   * 直したこと: 1品でも決まると提案が丸ごと引っ込んでいたため、
+   * 「主菜は決めた、あと1品どうしよう」のときに使えなくなっていた。
+   * 既定は閉じたまま＝決まっている日の見え方は今までどおり軽くしておき、
+   * 「もう1品さがす」を押した人にだけ開く。
+   */
+  const [findMoreOpen, setFindMoreOpen] = useState(false)
+
+  /**
    * 「今日なに作る？」「最近作ったもの」が対象にするレシピ（2026-08-17 便HG）。
    * 設定「基本レシピを表示しない」を反映する＝ホームにあったときと同じ絞り方をそのまま使う。
    * 献立に登録済みの品を引き当てる recipeById 側には効かせない（登録した予定は設定で隠さない）。
@@ -2940,7 +2950,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // ピッカーは週の枠(pickerTarget)への割り当て専用。空状態の「今日の献立を選ぶ」は2026-07-24
   // 便BN・タスク1でレシピ一覧タブへの遷移に変更したため、旧「今日の献立ピッカー」モードは廃止した
   const pickerOpen = pickerTarget != null
-  // 「おまかせで提案」で今日の献立に入れた分のレシピID(2026-07-24 便BN・タスク2)。
+  // 「おまかせで献立を組む」で今日の献立に入れた分のレシピID(2026-07-24 便BN・タスク2)。
   // これがある間だけ「振り直す」ボタンを出し、押されたらこの分を入れ替えて再提案する
   const [lastSuggestedIds, setLastSuggestedIds] = useState<number[]>([])
   const [pickerQuery, setPickerQuery] = useState('')
@@ -3132,7 +3142,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
-   * 「おまかせで提案」がいまくじを引いている候補の数（2026-08-02 便DE-5・オーナー指示）。
+   * 「おまかせで献立を組む」がいまくじを引いている候補の数（2026-08-02 便DE-5・オーナー指示）。
    * 候補が2品しかない条件では、振り直しても同じ料理が出続けて壊れているように見えるため、
    * 数字を画面に出して理由が分かるようにする。数えるのは主菜の候補
    * （ペア提案は主菜を引いてから、その主菜に合わせて副菜を引くので、変わり映えの元は主菜側）。
@@ -3164,7 +3174,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const computeSuggestionIds = (excludeIds: number[]): number[] | undefined => {
     if (!recipes) return undefined
     const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
-    // 「おまかせで提案」も目的モードの引き直しを通す（docs/62 決定②のオーナー指示）
+    // 「おまかせで献立を組む」も目的モードの引き直しを通す（docs/62 決定②のオーナー指示）
     const { main, side } = drawPair({
       quickOnly,
       excludeNg: true,
@@ -3178,7 +3188,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     return ids.length === 0 ? undefined : ids
   }
 
-  // 「おまかせで提案」(タスク1): 主菜+副菜のペアを提案して今日の献立へ入れる
+  // 「おまかせで献立を組む」(タスク1): 主菜+副菜のペアを提案して今日の献立へ入れる
   const suggestTodayList = async () => {
     setMessage('')
     const ids = computeSuggestionIds([])
@@ -3622,7 +3632,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (!recipes) return
     setMessage('')
     // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
-    // 「おまかせで提案」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
+    // 「おまかせで献立を組む」も行のサイコロも同じ案内を出すのに、ここだけ何も起きなかった
     if (visibleRecipes.length === 0) {
       setMessage(ja.mealPlan.noSuggestion)
       return
@@ -5714,7 +5724,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <Plus size={18} aria-hidden />
                   {ja.mealPlan.todayAddMoreButton}
                 </button>
-                {/* 「おまかせで提案」の直後だけ出す振り直し(2026-07-24 便BN・タスク2)。
+                {/* 「おまかせで献立を組む」の直後だけ出す振り直し(2026-07-24 便BN・タスク2)。
                     前回のおまかせ分を入れ替えて別の主菜+副菜を提案し直す */}
                 {lastSuggestedIds.length > 0 && (
                   <button
@@ -5727,10 +5737,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </button>
                 )}
                 {/* いま候補が何品あるか(2026-08-02 便DE-5)。少ない条件では振り直しても
-                    同じ料理が出続けるので、その理由が数字で分かるようにする */}
+                    同じ料理が出続けるので、その理由が数字で分かるようにする
+                    (2026-08-17 便HH: 数え方はそのまま・言い方だけ「主菜の候補◯品」に。
+                     「ランダムで1品出す」の候補数と同じ名前で違う値を出さないため) */}
                 {lastSuggestedIds.length > 0 && (
                   <p className="mt-1 text-center text-xs text-ink-muted">
-                    {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}
+                    {ja.mealPlan.todaySuggestCandidateCount.replace(
+                      '{n}',
+                      String(suggestCandidateCount),
+                    )}
                   </p>
                 )}
                 {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する。
@@ -5767,7 +5782,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               // 追加」で足す動線・オーナー指定))。
               // 2026-08-11 便FP(利用者テスト②「ただのレシピ一覧に飛んで止まった」):
               // 飛び先を ?select=today にして、レシピ一覧を**選択モードで**開く。向こうの画面には
-              // 「今日の献立に入れるレシピを選んでいます」と、選んだ品数入りの決定ボタンが出る
+              // 「今日の献立に入れるレシピを選んでいます」と、選んだ品数入りの決定ボタンが出る。
+              //
+              // 2026-08-17 便HH(オーナー承認済み): ここに置くのは「自分で選ぶ」道の1つだけにした。
+              // 「おまかせで献立を組む」は下の「今日なに作る？」へ移した＝**決めてもらう操作を
+              // 1か所にまとめる**（この節に2つ並んでいると、決め方が画面の2か所に散る）
               <div className="mt-[var(--space-sm)]">
                 <p className="text-sm text-ink-muted">{ja.mealPlan.todayEmpty}</p>
                 <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.todayEmptyGuide}</p>
@@ -5780,20 +5799,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     <Plus size={18} aria-hidden />
                     {ja.mealPlan.todayChooseButton}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void suggestTodayList()}
-                    className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
-                  >
-                    <Dices size={18} aria-hidden />
-                    {ja.mealPlan.todaySuggestButton}
-                  </button>
-                  {/* 週タブの「まとめて献立を立てる」との違いを一言で示す
-                      (2026-07-29 便CD/MP-15。名前が近く区別が付かないという指摘) */}
-                  <p className="-mt-1 text-xs text-ink-muted">
-                    {ja.mealPlan.todaySuggestHint}（
-                    {ja.common.candidateCount.replace('{n}', String(suggestCandidateCount))}）
-                  </p>
                   {/* 2026-08-03 便DP-2(オーナー指示): 「今週の献立から今日の分を取り込む」ボタンは
                       削除した。日タブは今日の予定を②として常に並べるようになり(便DH)、さらに
                       自動取り込み(便U-3)も効くため、このボタンが出る条件
@@ -5808,28 +5813,85 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               (設定そのもの=visibleMealSlots は週タブに残り、自動取り込みの対象もそちらで決まる) */}
 
           {/* ここから下が、2026-08-17 便HG でホーム画面から移してきた部分。
-              オーナー指示の出し分けをそのまま実装している:
-              「「今日なに作る？」と「レシピを探す」「在庫の食材から探す」は、献立がない時のみに出る。
-                献立があれば、これまで通りの献立タブにあった「今日の献立」。
-                「最近作ったもの」は常に表示」
+              「最近作ったもの」はその日の献立があってもなくても常に出す（オーナー指示）。
 
-              並び順（献立が決まっていない日）を「今日なに作る？」→「レシピを探す」の順にした理由:
-              決め方が**まかせる → 自分で探す**の順になる。上の「今日の献立」の空案内が
-              「今日の献立を選ぶ（自分で選ぶ）」「おまかせで提案（まかせる）」を持っているので、
-              その次に来る手がかりは、押すだけで1品出る「今日なに作る？」を先に置く方が、
-              上から順に手数が増えていく並びになる。
-              「最近作ったもの」を最後にしたのは、この画面の主役が今日の献立だから
-              （毎日開くたび最初に目に入るのが過去の記録にならないようにする）。
-              下の「作った記録の一覧」への入口とも隣り合うので、記録の話がひとまとまりになる。 */}
-          {!dayHasPlan && (
-            <div className="mt-[var(--space-md)] space-y-[var(--space-md)]">
+              2026-08-17 便HH（オーナー承認済み）で、押せるボタンの重なりを解いた:
+               ・「レシピを探す」を外した。行き先(レシピ一覧)は下の並びの「レシピ」と
+                 「今日の献立を選ぶ」で着き、検索欄は一覧の上端に貼り付いて常に見えている
+               ・「在庫の食材から探す」を外した。在庫で絞る操作は、この画面の
+                 「今日なに作る？」の「在庫の食材から」と、レシピ一覧の絞り込み
+                 「在庫の食材で絞る」に残っている
+               ・「おまかせで献立を組む」を「今日なに作る？」の中へ移した
+                 ＝**決めてもらう操作を1か所にまとめる**（planAction）
+               ・献立が決まっている日も、提案を丸ごと消さずに「もう1品さがす」で開けるようにした
+                 （「主菜は決めた、あと1品どうしよう」で使えなくなっていたため） */}
+          {!dayHasPlan ? (
+            <div className="mt-[var(--space-md)]">
               <TodaySuggestPanel
                 recipes={ownRecipes}
                 pantryNames={pantryNames}
                 settings={settings}
                 linkState={DAY_LINK_STATE}
+                planAction={
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void suggestTodayList()}
+                      className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
+                    >
+                      {/* 絵はサイコロ(Dices)から献立の絵(UtensilsCrossed)へ(2026-08-17 便HH)。
+                          すぐ上の「ランダムで1品出す」と同じサイコロだと、名前で分けた
+                          「1品／献立」の違いが絵で打ち消される */}
+                      <UtensilsCrossed size={18} aria-hidden />
+                      {ja.mealPlan.todaySuggestButton}
+                    </button>
+                    {/* 週タブの「まとめて献立を入力」との違いを一言で示す
+                        (2026-07-29 便CD/MP-15。名前が近く区別が付かないという指摘)。
+                        候補数は「ランダムで1品出す」とは別の数え方なので、そう分かる言い方にする */}
+                    <p className="mt-1 text-center text-xs text-ink-muted">
+                      {ja.mealPlan.todaySuggestHint}（
+                      {ja.mealPlan.todaySuggestCandidateCount.replace(
+                        '{n}',
+                        String(suggestCandidateCount),
+                      )}
+                      ）
+                    </p>
+                  </>
+                }
               />
-              <RecipeSearchShortcut pantryNames={pantryNames} />
+            </div>
+          ) : (
+            /* 献立が決まっている日の「もう1品さがす」（2026-08-17 便HH）。
+               決まっている日の見え方を重くしないため、塗りも枠も持たない小さいリンクにする
+               （ボタンにすると「今日の献立」の操作と同じ重さで並んでしまう）。
+               押す面は上下の余白で確保する＝見た目は小さいまま、指で押せる大きさは保つ。
+               おまかせ(planAction)はここでは渡さない＝すでに決まっている日に、
+               さらに主菜と副菜を足す入口は作らない */
+            <div className="mt-[var(--space-sm)]">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  data-testid="day-find-more"
+                  onClick={() => setFindMoreOpen((v) => !v)}
+                  aria-expanded={findMoreOpen}
+                  className="flex items-center gap-0.5 px-2 py-3.5 text-sm font-bold text-accent-ink underline"
+                >
+                  {ja.mealPlan.todayFindMore}
+                  {findMoreOpen ? (
+                    <ChevronUp size={16} aria-hidden />
+                  ) : (
+                    <ChevronDown size={16} aria-hidden />
+                  )}
+                </button>
+              </div>
+              <Collapse open={findMoreOpen}>
+                <TodaySuggestPanel
+                  recipes={ownRecipes}
+                  pantryNames={pantryNames}
+                  settings={settings}
+                  linkState={DAY_LINK_STATE}
+                />
+              </Collapse>
             </div>
           )}
 
@@ -6827,7 +6889,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   : ja.mealPlan.copyLastWeekToggleHintOff}
               </p>
             </div>
-            {/* 「おまかせで提案」(日タブ)との違いが名前から分からないという指摘への1行説明
+            {/* 「おまかせで献立を組む」(日タブ)との違いが名前から分からないという指摘への1行説明
                 (2026-07-29 便CD/MP-15) */}
             <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
           </>

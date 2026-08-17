@@ -37,7 +37,7 @@
   },
   "plan-day-buttons": {
     "w": 780,
-    "h": 316
+    "h": 364
   },
   "plan-week-nutrition-open": {
     "w": 780,
@@ -145,10 +145,6 @@
   },
   "day-suggest": {
     "w": 780,
-    "h": 704
-  },
-  "day-search": {
-    "w": 780,
-    "h": 408
+    "h": 942
   }
 }

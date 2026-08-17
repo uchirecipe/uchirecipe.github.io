@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Clock, Dices, Heart, ChevronDown, ChevronUp, Refrigerator } from 'lucide-react'
 import { updateSettings } from '../db/settings'
@@ -21,6 +21,13 @@ import { ja } from '../i18n/ja'
  * 在庫での絞り・振り直しの除外は、ホームにあったときのコードをそのまま持ってきている）。
  * 変わったのは置き場所と、出る条件（その日の献立が無いときだけ出す）の判定を
  * 呼び出し側（pages/MealPlanPage.tsx）が持つようになったことだけ。
+ *
+ * 2026-08-17 便HH（オーナー承認済み）: 「決めてもらう」操作をこの節に集めた。
+ * `planAction` に渡されたボタン（「おまかせで献立を組む」）を、この節のいちばん下に並べる。
+ * **提案のしくみ（条件・種別・季節の優先・在庫での絞り・振り直しの除外）は変えていない。**
+ * 置き場所を下端にしたのは、この節の上半分（「条件をしぼる」「在庫の食材から」→候補カード→
+ * 「ランダムで1品出す」→候補数）が**1品側の絞り込みと結果でひとつながり**になっているため。
+ * その途中に別のしくみで動くボタンを差し込むと、上の絞り込みがそちらにも効くように読める。
  */
 
 type SuggestCondition = 'any' | 'notRecent' | 'favorite' | 'quick'
@@ -105,6 +112,7 @@ export default function TodaySuggestPanel({
   pantryNames,
   settings,
   linkState,
+  planAction,
 }: {
   /** 提案の対象にするレシピ（「基本レシピを表示しない」設定を反映済み。読み込み中は undefined） */
   recipes: Recipe[] | undefined
@@ -113,6 +121,13 @@ export default function TodaySuggestPanel({
   settings: Settings | undefined
   /** 候補カードから詳細へ移るときに持たせる出所（戻るでこの画面へ帰るため） */
   linkState: unknown
+  /**
+   * 「決めてもらう」操作のもう1つ（「おまかせで献立を組む」＋その説明）。
+   * 渡された日だけ、この節のいちばん下に並べる（2026-08-17 便HH）。
+   * その日の献立がまだ決まっていない日にだけ渡す＝すでに決まっている日に、
+   * さらに2品入れるボタンを出さない。
+   */
+  planAction?: ReactNode
 }) {
   const [condition, setCondition] = useState<SuggestCondition>('any')
   // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
@@ -127,7 +142,7 @@ export default function TodaySuggestPanel({
     setDishTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]))
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
-  // 「ランダムで選ぶ」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
+  // 「ランダムで1品出す」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
   // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
   const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
   // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
@@ -158,7 +173,7 @@ export default function TodaySuggestPanel({
       : { list: candidates, fallback: true }
   }, [candidates, pantryOnly, pantryNames])
 
-  // 直前に出た候補を「ランダムで選ぶ」の対象から外す(2026-07-29 便CD/MP-12)。
+  // 直前に出た候補を「ランダムで1品出す」の対象から外す(2026-07-29 便CD/MP-12)。
   // 候補が尽きるなら除外を解く(空振りより重複がマシ)＝献立エンジンの
   // excludeYesterdayPlanRecipes と同じ作法・同じ関数を使う
   const shufflePool = useMemo(
@@ -169,7 +184,7 @@ export default function TodaySuggestPanel({
     shufflePool.length > 0
       ? shufflePool[Math.floor(seed * shufflePool.length) % shufflePool.length]
       : undefined
-  // 「ランダムで選ぶ」: 今出ている候補を直近リストへ積んでから振り直す
+  // 「ランダムで1品出す」: 今出ている候補を直近リストへ積んでから振り直す
   const shuffleSuggestion = () => {
     if (suggestion?.id != null) {
       const shownId = suggestion.id
@@ -311,7 +326,8 @@ export default function TodaySuggestPanel({
           )}
 
           {/* 2026-08-03 便DH(オーナー指示): 「ほかの候補を見る」→「ランダムで選ぶ」に改名し、
-              既存のCTAと同じオレンジ地・白字(bg-accent/text-on-accent)にする */}
+              既存のCTAと同じオレンジ地・白字(bg-accent/text-on-accent)にする
+              (2026-08-17 便HHで名前だけ「ランダムで1品出す」に。地色・字色・大きさはそのまま) */}
           <button
             type="button"
             onClick={shuffleSuggestion}
@@ -325,6 +341,14 @@ export default function TodaySuggestPanel({
           <p className="mt-1 text-center text-xs text-ink-muted">
             {ja.common.candidateCount.replace('{n}', String(finalCandidates.length))}
           </p>
+
+          {/* 「決めてもらう」操作のもう1つ(2026-08-17 便HH)。上の1品側とは別のしくみで動くので、
+              細い区切り線で分けたうえで同じ節の中に置く＝決めてもらう操作を1か所にまとめる */}
+          {planAction && (
+            <div className="mt-[var(--space-md)] border-t border-edge pt-[var(--space-md)]">
+              {planAction}
+            </div>
+          )}
         </>
       )}
     </section>

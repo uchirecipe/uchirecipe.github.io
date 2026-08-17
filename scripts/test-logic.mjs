@@ -16032,7 +16032,9 @@ eq(
   //   画面の1行説明は短く保つ(ボタン名の列挙・内部の引き直しの説明を戻さない)
   eq(
     'EA-DW2 「栄養から組む」の1行説明にボタン名を並べない(規約H・余計な一言の禁止)',
-    !ja.mealPlan.purposeHint.includes('おまかせで提案') &&
+    // 2026-08-17 便HH: ボタン名は「おまかせで提案」→「おまかせで献立を組む」。
+    // 名前で当てると改名のたびに素通り合格になるので、i18nの値そのもので見る
+    !ja.mealPlan.purposeHint.includes(ja.mealPlan.todaySuggestButton) &&
       !ja.mealPlan.purposeHint.includes('引き直') &&
       ja.mealPlan.purposeHint.length <= 60,
     true,

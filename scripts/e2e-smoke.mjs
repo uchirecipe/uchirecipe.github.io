@@ -85,9 +85,14 @@
 //         今日の献立の両方に登録した状態で1品削除しても、両テーブルに削除済みレシピを指す孤児行が
 //         残らないことをIndexedDB直読みで確認。旧「テーマ一括削除」はテーマUI撤去で1品削除経路へ置換) /
 //         DAYSUGGEST-01(旧HOME-DH-01。2026-08-03 便DHの「今日なに作る？」を2026-08-17 便HGで献立の「日」へ移設:
-//         その日の献立が決まっていなければ出る/1品でも決まれば出さない/空に戻すとまた出る/
-//         「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり既定は主菜だけON/
+//         その日の献立が決まっていなければ出る/1品でも決まれば開いたまま出さない/空に戻すとまた出る/
+//         「ランダムで1品出す」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり既定は主菜だけON/
 //         種別を足すと候補は減らない・未選択と全選択の候補数が一致(便DV-1の再発防止)) /
+//         DAYLAYOUT-01(2026-08-17 便HH。旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換え: 献立の「日」の
+//         押せるボタンの重なりを解いた。献立が無い日は「自分で選ぶ」入口が1つだけ・「決めてもらう」2つ
+//         (おまかせで献立を組む/ランダムで1品出す)が「今日なに作る？」に揃う・外した2つ(レシピを探す/
+//         在庫の食材から探す)がどこにも無い・どれも指で押せる大きさ。献立がある日は提案が丸ごと消えず
+//         「もう1品さがす」(塗りも枠も無い小さいリンク)で開けて、開いたら振り直せる) /
 //         MEALPLAN-HOUSE(2026-08-03 便DK: 設定「食数の設定」(旧「ふだん作る人数」)。未設定なら従来どおり登録人数分・
 //         4人分に設定すると献立の行/概算食費/買い物メモの分量/レシピ詳細の人数がすべてその人数分になり、
 //         レシピ詳細には元の登録人数が「登録: 2人分」で併記される。枠ごとに決めた食数はこの設定より優先し、
@@ -332,8 +337,8 @@
 //         スマホ幅(390)とPC幅(1280)の両方で確認) /
 //         NOHOME-01(2026-08-17 便HG・オーナー決定「先にホーム画面なくします」: ホーム画面を廃止し、
 //         その役目を献立の「日」が引き継いだ。「#/」を開くと献立の「日」に着く・知らない行き先でも同じ場所に着く・
-//         下の並びは4つで献立→レシピ→食材→設定・その日の献立が無い日は「今日なに作る？」「レシピを探す」
-//         「在庫の食材から探す」が出て、ある日は「今日の献立」だけになる・「最近作ったもの」はどちらの日でも出る・
+//         下の並びは4つで献立→レシピ→食材→設定・その日の献立が無い日は「今日なに作る？」が出て、
+//         ある日は「今日の献立」だけになる・「最近作ったもの」はどちらの日でも出る・
 //         設定から「ホーム画面のカスタマイズ」が残骸なく消えている(端末のホーム画面への追加案内は別物なので残る)) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
@@ -4243,7 +4248,9 @@ try {
       // 「ボタンだけの行」をやめ、料理名と同じ行の右へ置いた(左半分の空白が実機で目立っていた)。
       // 検査するのは①料理名と同じ行に並んでいる ②当たり判定44px以上
       // ③✕(外す)と12px以上離れている(押し間違い対策) の3点
-      await dtPage.getByRole('button', { name: /おまかせで提案/ }).first().click()
+      // 2026-08-17 便HH: おまかせは「今日なに作る？」の中へ移り、名前も
+      // 「おまかせで提案」→「おまかせで献立を組む」になった(置き場所は問わず名前で掴む)
+      await dtPage.getByRole('button', { name: /おまかせで献立を組む/ }).first().click()
       await dtPage.waitForTimeout(1500)
       const dtCookedBtn = await dtPage.evaluate(() => {
         const btn = [...document.querySelectorAll('button')].find((b) =>
@@ -12285,7 +12292,7 @@ try {
   }
 
   // --- DAYSUGGEST-01(旧HOME-DH-01): 献立の「日」の「今日なに作る？」。
-  // 中身(「条件をしぼる」の折りたたみ・料理の種別4区分・候補数・「ランダムで選ぶ」)と、
+  // 中身(「条件をしぼる」の折りたたみ・料理の種別4区分・候補数・「ランダムで1品出す」)と、
   // 出す/出さないの条件を確認する。2026-08-03 便DHでホームに作ったものを、
   // 2026-08-17 便HG(オーナー決定「先にホーム画面なくします」)で献立の「日」へ移した。
   // 測っている中身は移設前と同じで、見る画面と出す条件だけが変わっている:
@@ -12324,15 +12331,20 @@ try {
           'DAYSUGGEST-01 その日の献立が決まっていなければ「今日なに作る？」が出る',
           body.includes('今日なに作る？'),
         )
+        // 2026-08-17 便HH: 名前は「ランダムで選ぶ」→「ランダムで1品出す」
+        // (規約H。隣に並んだ「おまかせで献立を組む」との違いを名前で言う)
         check(
-          'DAYSUGGEST-01 振り直しは「ランダムで選ぶ」(旧「ほかの候補を見る」は残っていない)',
-          body.includes('ランダムで選ぶ') && !body.includes('ほかの候補を見る'),
+          'DAYSUGGEST-01 振り直しは「ランダムで1品出す」(旧「ほかの候補を見る」「ランダムで選ぶ」は残っていない)',
+          body.includes('ランダムで1品出す') &&
+            !body.includes('ほかの候補を見る') &&
+            !body.includes('ランダムで選ぶ'),
         )
         // オレンジ地・白字(既存CTAと同じトークン)。直接色指定ではなくクラスで確認する
         const shuffleClass =
-          (await dhPage.getByRole('button', { name: 'ランダムで選ぶ' }).getAttribute('class')) ?? ''
+          (await dhPage.getByRole('button', { name: 'ランダムで1品出す' }).getAttribute('class')) ??
+          ''
         check(
-          'DAYSUGGEST-01 「ランダムで選ぶ」はオレンジ地・白字(bg-accent/text-on-accent)',
+          'DAYSUGGEST-01 「ランダムで1品出す」はオレンジ地・白字(bg-accent/text-on-accent)',
           shuffleClass.includes('bg-accent') && shuffleClass.includes('text-on-accent'),
         )
         // 種別4区分は「条件をしぼる」の中。畳んでいる間は出ない
@@ -12391,9 +12403,11 @@ try {
         )
       }
 
-      // (2) 今日の献立に1品でも入ると引っ込む(2026-08-17 便HG・オーナー指示)。
+      // (2) 今日の献立に1品でも入ると、開いたままにはしない(2026-08-17 便HG・オーナー指示)。
       // 週の予定ではなく「レシピ一覧から選択中」の1品でも同じように引っ込むことを見る
-      // ＝献立が決まっている日に提案を重ねない、という決めごとそのものを測る
+      // ＝献立が決まっている日に提案を重ねない、という決めごとそのものを測る。
+      // 2026-08-17 便HH: 決まっている日でも「もう1品さがす」を押せば開く形にしたので、
+      // ここで見るのは「押していないうちは出ていない」こと(開けることは DAYLAYOUT-01 が見る)
       await dhPage.evaluate(
         () =>
           new Promise((resolve, reject) => {
@@ -12418,7 +12432,7 @@ try {
       {
         const body = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
         check(
-          'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は出さない',
+          'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は開いたまま出さない',
           !body.includes('今日なに作る？') && body.includes('ほうれん草のおひたし'),
         )
       }
@@ -20135,68 +20149,219 @@ try {
     }
   }
 
-  // --- DAYSEARCH-01(旧HOMESEARCH-01。2026-08-02 オーナー実機FB・便CR-1): 「使いたい食材から探す」の
-  // 検索欄をレシピ一覧への入口に置き換えた。この画面からは検索欄が消え、
-  // 「レシピを探す」でレシピ一覧へ移動して検索欄にフォーカスが当たること・
-  // 「在庫の食材から探す」で「在庫の食材で絞る」がONの状態で開くことを見る。
-  // 2026-08-17 便HG: 置き場所がホームから献立の「日」へ移ったので、見る画面を差し替えた
-  // (測っている「入口を押すとどうなるか」は同じ。出るのはその日の献立が空のときだけなので、
-  //  この検査は献立を1品も入れないまま進める) ---
-  currentCheck = 'DAYSEARCH-01'
+  // --- DAYLAYOUT-01(2026-08-17 便HH・オーナー承認済み): 献立の「日」の押せるボタンの重なりを解く。
+  // 旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換える。旧検査が測っていた「レシピを探す」
+  // 「在庫の食材から探す」の2つは、行き先が他と重なっていたので画面から外した:
+  //   ・レシピを探す(?focus=search)   … 行き先は「今日の献立を選ぶ」と下の並びの「レシピ」と同じ
+  //                                     レシピ一覧。検索欄は一覧の上端に貼り付いて常に見えている
+  //   ・在庫の食材から探す(?pantry=1) … 同じ絞り込みが「今日なに作る？」の「在庫の食材から」と
+  //                                     レシピ一覧の絞り込み「在庫の食材で絞る」にある
+  // この検査が見るのは、直したこと(=押せるボタンが5つから3つに減っても、決め方は全部残る)の骨格:
+  //   ① 献立が無い日: 「自分で選ぶ」入口が1つだけ／「決めてもらう」2つが同じ節に居る／
+  //      外した2つがどこにも無い／どれも指で押せる大きさ
+  //   ② 献立がある日: 提案が丸ごと消えず「もう1品さがす」で開けて、開いたら使える
+  // 置き場所ではなく「名前で掴めるか」「押すとどうなるか」「同じ節に居るか」で測る(禁じ手④)。
+  // 曜日・月替わりに依らない材料(todayList・在庫)だけを使う(禁じ手①)。
+  // 照合はBudouXのゼロ幅スペースを外してから(禁じ手②) ---
+  currentCheck = 'DAYLAYOUT-01'
   {
-    const hsBrowser = await chromium.launch()
-    const hsContext = await hsBrowser.newContext({ viewport: { width: 390, height: 844 } })
-    const hsPage = await hsContext.newPage()
-    hsPage.on('pageerror', (err) => {
-      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@DAYSEARCH-01] ${err.message}`)
+    const dlBrowser = await chromium.launch()
+    const dlContext = await dlBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dlPage = await dlContext.newPage()
+    dlPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@DAYLAYOUT-01] ${text}`)
     })
+    dlPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@DAYLAYOUT-01] ${err.message}`)
+    })
+    const dlBody = async () => ((await dlPage.textContent('body')) ?? '').replaceAll('​', '')
+    /** 「今日なに作る？」の見出しを持つ節そのもの(何番目の要素かではなく“同じ節に居るか”で測る) */
+    const dlSuggestSection = () =>
+      dlPage.locator('section').filter({ has: dlPage.getByRole('heading', { name: '今日なに作る？' }) })
+    /** 押せる大きさ。44pxは下限の保険(これを下回ると濡れた手では押しにくい) */
+    const dlTapSize = async (locator) => {
+      if ((await locator.count()) !== 1) return { width: 0, height: 0 }
+      return (await locator.boundingBox()) ?? { width: 0, height: 0 }
+    }
     try {
-      await hsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await hsPage.waitForTimeout(2200)
-      const homeText = ((await hsPage.textContent('body')) ?? '').replaceAll('​', '')
-      check(
-        'DAYSEARCH-01 献立の「日」に「レシピを探す」の導線がある',
-        // 2026-08-10 便FJ: ユーザー向け文言から「タブ」を掃引したので「レシピ一覧で、」に更新
-        homeText.includes('レシピを探す') && homeText.includes('レシピ一覧で、料理名・材料・タグ・使いたい食材から探せます'),
+      await dlPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dlPage.waitForTimeout(2200) // 初回シード完了待ち
+
+      // 在庫を1品「ある」にする(在庫があるときにだけ出る入口まで含めて見るため)
+      await dlPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction('pantryItems', 'readwrite')
+              const store = tx.objectStore('pantryItems')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                store.put({ ...g.result[0], level: 'have' })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
       )
-      check(
-        'DAYSEARCH-01 食材の検索欄(旧「この食材で探す」)は無い',
-        !homeText.includes('この食材で探す') && !homeText.includes('使いたい食材から探す'),
+
+      // ---- ① その日の献立が決まっていない日 ----
+      await dlPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dlPage.reload({ waitUntil: 'networkidle' })
+      await dlPage.waitForTimeout(1600)
+      {
+        const body = await dlBody()
+        const choose = dlPage.getByRole('button', { name: '今日の献立を選ぶ' })
+        check(
+          'DAYLAYOUT-01 献立が無い日に「自分で選ぶ」入口はちょうど1つ',
+          (await choose.count()) === 1,
+        )
+        check(
+          'DAYLAYOUT-01 「レシピを探す」はどこにも出ない(レシピ一覧へ行く道が二重にならない)',
+          !body.includes('レシピを探す'),
+        )
+        check(
+          'DAYLAYOUT-01 「在庫の食材から探す」はどこにも出ない(在庫での絞り込みが二重にならない)',
+          !body.includes('在庫の食材から探す'),
+        )
+        const section = dlSuggestSection()
+        check('DAYLAYOUT-01 献立が無い日は「今日なに作る？」が出る', (await section.count()) === 1)
+        const omakase = section.getByRole('button', { name: 'おまかせで献立を組む' })
+        const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
+        check(
+          'DAYLAYOUT-01 「決めてもらう」2つは「今日なに作る？」の中に揃っている',
+          (await omakase.count()) === 1 && (await oneDish.count()) === 1,
+          `おまかせ=${await omakase.count()} 1品=${await oneDish.count()}`,
+        )
+        check(
+          'DAYLAYOUT-01 「決めてもらう」2つは画面に1つずつ(他の節へ散らばっていない)',
+          (await dlPage.getByRole('button', { name: 'おまかせで献立を組む' }).count()) === 1 &&
+            (await dlPage.getByRole('button', { name: 'ランダムで1品出す' }).count()) === 1,
+        )
+        for (const [label, loc] of [
+          ['今日の献立を選ぶ', choose],
+          ['おまかせで献立を組む', omakase],
+          ['ランダムで1品出す', oneDish],
+        ]) {
+          const box = await dlTapSize(loc)
+          check(
+            `DAYLAYOUT-01 「${label}」は指で押せる大きさ(高さ44px以上・幅240px以上)`,
+            box.height >= 44 && box.width >= 240,
+            `w=${Math.round(box.width)} h=${Math.round(box.height)}`,
+          )
+        }
+        check(
+          'DAYLAYOUT-01 献立が無い日にも「作った記録の一覧」がある',
+          body.includes('作った記録の一覧'),
+        )
+      }
+
+      // ---- ② その日の献立が決まっている日 ----
+      // 週の予定ではなく「レシピ一覧から選択中」の1品で作る(日付を一切使わない)
+      await dlPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.find((r) => r.title === '肉じゃが')
+                const tx = idb.transaction('todayList', 'readwrite')
+                tx.objectStore('todayList').add({ recipeId: main.id, addedAt: Date.now() })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
       )
-      await hsPage.getByRole('button', { name: 'レシピを探す' }).click()
-      await hsPage.waitForTimeout(900)
-      check(
-        'DAYSEARCH-01 「レシピを探す」でレシピ一覧へ移動し、検索欄にフォーカスが当たる',
-        (await hsPage.evaluate(() => location.hash)).startsWith('#/recipes') &&
-          (await hsPage.evaluate(() => document.activeElement?.getAttribute('type'))) === 'search',
-      )
-      check(
-        'DAYSEARCH-01 一度きりの指示(?focus=search)はURLに残らない',
-        !(await hsPage.evaluate(() => location.hash)).includes('focus='),
-      )
-      // 在庫を1件「ある」にすると、「在庫の食材から探す」が出る
-      await hsPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
-      await hsPage.waitForTimeout(1200)
-      // 食材タブが既定。プリセットの初期状態は「ない」なので、1回タップすると「ある」になる
-      await hsPage.getByRole('button', { name: '玉ねぎ' }).first().click()
-      await hsPage.waitForTimeout(400)
-      await hsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
-      await hsPage.waitForTimeout(1400)
-      const pantryShortcut = hsPage.getByRole('button', { name: '在庫の食材から探す' })
-      check('DAYSEARCH-01 在庫があるときは「在庫の食材から探す」が出る', (await pantryShortcut.count()) === 1)
-      await pantryShortcut.click()
-      await hsPage.waitForTimeout(900)
-      check(
-        'DAYSEARCH-01 「在庫の食材から探す」は絞り込み(在庫の食材で絞る)ONでレシピ一覧を開く',
-        (await hsPage.getByRole('button', { name: '在庫の食材で絞る' }).getAttribute('aria-pressed')) === 'true',
-      )
-      check(
-        'DAYSEARCH-01 一度きりの指示(?pantry=1)はURLに残らない',
-        !(await hsPage.evaluate(() => location.hash)).includes('pantry='),
-      )
+      await dlPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dlPage.reload({ waitUntil: 'networkidle' })
+      await dlPage.waitForTimeout(1600)
+      {
+        const body = await dlBody()
+        check('DAYLAYOUT-01 献立がある日は今日の献立が出る', body.includes('肉じゃが'))
+        check(
+          'DAYLAYOUT-01 献立がある日は「今日なに作る？」を畳んでおく(見え方を重くしない)',
+          !body.includes('今日なに作る？'),
+        )
+        const more = dlPage.getByRole('button', { name: 'もう1品さがす' })
+        const moreFound = (await more.count()) === 1
+        check('DAYLAYOUT-01 献立がある日は「もう1品さがす」がある', moreFound)
+        // 小さいリンク＝塗りも枠も持たない。ただし押せる大きさ(44px)は保つ
+        const moreStyle = moreFound
+          ? await more.evaluate((el) => {
+              const s = getComputedStyle(el)
+              return {
+                bg: s.backgroundColor,
+                borderTop: s.borderTopWidth,
+                borderBottom: s.borderBottomWidth,
+              }
+            })
+          : { bg: '(無し)', borderTop: '99px', borderBottom: '99px' }
+        const moreBox = await dlTapSize(more)
+        check(
+          'DAYLAYOUT-01 「もう1品さがす」は塗り・枠を持たない(ボタンにしない)',
+          /rgba\(0, 0, 0, 0\)|transparent/.test(moreStyle.bg) &&
+            parseFloat(moreStyle.borderTop) === 0 &&
+            parseFloat(moreStyle.borderBottom) === 0,
+          JSON.stringify(moreStyle),
+        )
+        check(
+          'DAYLAYOUT-01 「もう1品さがす」も指で押せる大きさ(高さ44px以上)',
+          moreBox.height >= 44,
+          `w=${Math.round(moreBox.width)} h=${Math.round(moreBox.height)}`,
+        )
+        if (moreFound) {
+          await more.click()
+          await dlPage.waitForTimeout(700)
+        }
+        const section = dlSuggestSection()
+        check(
+          'DAYLAYOUT-01 「もう1品さがす」を押すと「今日なに作る？」が開く',
+          (await section.count()) === 1,
+        )
+        const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
+        const oneDishFound = (await oneDish.count()) === 1
+        check('DAYLAYOUT-01 開いた提案は「ランダムで1品出す」が使える', oneDishFound)
+        // 振り直しても候補のカードが出ていること(開いた先で提案として機能する)。
+        // 出た料理名そのものは見ない(くじなので毎回変わる)
+        const dlCardTitle = async () => {
+          const card = section.locator('a[href*="#/recipes/"]').first()
+          return (await card.count()) > 0 ? ((await card.textContent()) ?? '') : ''
+        }
+        const before = oneDishFound ? await dlCardTitle() : ''
+        if (oneDishFound) {
+          await oneDish.click()
+          await dlPage.waitForTimeout(600)
+        }
+        const after = oneDishFound ? await dlCardTitle() : ''
+        check(
+          'DAYLAYOUT-01 振り直しても候補のカードが出ている(提案が使える)',
+          before.trim().length > 0 && after.trim().length > 0,
+          `前=${before.trim().slice(0, 20)} 後=${after.trim().slice(0, 20)}`,
+        )
+        check(
+          'DAYLAYOUT-01 献立がある日の提案に「おまかせで献立を組む」は出さない',
+          (await dlPage.getByRole('button', { name: 'おまかせで献立を組む' }).count()) === 0,
+        )
+        check(
+          'DAYLAYOUT-01 献立がある日にも「作った記録の一覧」がある',
+          (await dlBody()).includes('作った記録の一覧'),
+        )
+      }
     } finally {
-      await hsBrowser.close()
+      await dlBrowser.close()
     }
   }
 
@@ -34099,9 +34264,11 @@ try {
       {
         const body = await nhBody()
         check('NOHOME-01 献立が無い日は「今日なに作る？」が出る', body.includes('今日なに作る？'))
-        check('NOHOME-01 献立が無い日は「レシピを探す」が出る', body.includes('レシピを探す'))
+        // 2026-08-17 便HH: 「レシピを探す」「在庫の食材から探す」は行き先が重なっていたので外した。
+        // 移設そのもの(ホームにあった提案が「日」に居ること)はこの上の1件で見る。
+        // 外した2つが戻ってこないことと、決め方が減っていないことは DAYLAYOUT-01 が見る
       }
-      // 在庫を1品「ある」にすると「在庫の食材から探す」が出る(在庫0の日は出さない仕様のまま)
+      // 在庫を1品「ある」にする(「今日なに作る？」の在庫の絞り込みが出る条件)
       await nhPage.evaluate(
         () =>
           new Promise((resolve, reject) => {
@@ -34125,8 +34292,8 @@ try {
       await nhPage.reload({ waitUntil: 'networkidle' })
       await nhPage.waitForTimeout(1400)
       check(
-        'NOHOME-01 在庫があるときは「在庫の食材から探す」が出る',
-        (await nhBody()).includes('在庫の食材から探す'),
+        'NOHOME-01 在庫があるときは「今日なに作る？」に在庫の絞り込みが出る',
+        (await nhBody()).includes('在庫の食材から'),
       )
 
       // (4) 「最近作ったもの」は献立が無い日でも出る
@@ -34199,11 +34366,11 @@ try {
           'NOHOME-01 献立がある日は「今日の献立」の中身が出る',
           body.includes('今日の献立') && body.includes('肉じゃが'),
         )
-        check('NOHOME-01 献立がある日は「今日なに作る？」を出さない', !body.includes('今日なに作る？'))
-        check('NOHOME-01 献立がある日は「レシピを探す」を出さない', !body.includes('レシピを探す'))
+        // 2026-08-17 便HH: 献立がある日は提案を畳んでおく(「もう1品さがす」で開ける)。
+        // 開けることは DAYLAYOUT-01 が見る
         check(
-          'NOHOME-01 献立がある日は「在庫の食材から探す」を出さない',
-          !body.includes('在庫の食材から探す'),
+          'NOHOME-01 献立がある日は「今日なに作る？」を開いたまま出さない',
+          !body.includes('今日なに作る？'),
         )
         check('NOHOME-01 献立がある日も「最近作ったもの」は出る', body.includes('最近作ったもの'))
       }
