@@ -20725,12 +20725,25 @@ Aみりん 大さじ1
       // 語との位置がずれるので**自分から閉じる**作り。止めると閉じられなくなる
       '用語の吹き出しは送られたら閉じる作りのため',
     ],
+    [
+      'src/components/dialogStyle.ts',
+      // 2026-08-17 便HJ: 窓の見た目（クラス名）だけを置く場所で、窓そのものは描かない。
+      // このクラス名を使って窓を描く側（ConfirmDialog／ChoiceDialog）は下の数え方で
+      // ちゃんと1枚ずつ数えられるので、見張りは弱くならない
+      'クラス名だけを置く場所で窓を描かないため（使う側で数える）',
+    ],
   ])
   const heMissingLock = []
   for (const full of heSources(path.join(heAppRoot, 'src'))) {
     const rel = path.relative(heAppRoot, full).split(path.sep).join('/')
     const src = readFileSync(full, 'utf-8')
-    const overlays = (src.match(/fixed inset-0/g) ?? []).length
+    // 2026-08-17 便HJ: 窓の後ろ（暗い背景）のクラス名を components/dialogStyle.ts で
+    // 分け合う形にしたので、そのクラス名を**使っている**ファイルも窓1枚として数える
+    // （読み込みの行は使ったことにならないので数から外す）。見張る中身は変えていない
+    const heBody = src.replace(/import\s[\s\S]*?from\s+'[^']+'/g, '')
+    const overlays =
+      (heBody.match(/fixed inset-0/g) ?? []).length +
+      (heBody.match(/DIALOG_BACKDROP_CLS/g) ?? []).length
     if (overlays === 0) continue
     if (heOverlayExempt.has(rel)) continue
     const locks = (src.match(/useScrollLock\(/g) ?? []).length

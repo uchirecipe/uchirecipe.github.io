@@ -334,7 +334,14 @@
 //         タブを移動して戻ると選択は残らない・案内文どおりタップで選べてもう一度タップで外れる・
 //         選んだあとの操作と「選択をやめる」が一覧を下まで送っても画面の中にある・
 //         抜けるボタンの名前を「完了」のままにしない・写真が読めないレシピのカードは代わり絵に戻る。
-//         スマホ幅(390)とPC幅(1280)の両方で確認) /
+//         スマホ幅(390)とPC幅(1280)の両方で確認。
+//         2026-08-17 便HJで測り直し: 「選択」を押しても同じ場所で「選択をやめる」に変わる・
+//         「選び終わる」から献立に入れる/書き出す/削除/やめるの4つが窓に出て、どれも画面の中にある・
+//         窓を閉じても選んだレシピは外れない・1品も選んでいないうちは選び終われない) /
+//         SELECT-UI-02(2026-08-17 便HJ・オーナー実機「画面が小さいと、レシピ選択中に出る選択肢ボタンで
+//         画面の半分が見えなくなる」: 375x667で、選んでいる最中も下の帯が画面の半分を覆わず、
+//         丸ごと見えるレシピカードの枚数がふだんの一覧から減らない・献立から来た選択モード(?select=today)は
+//         4つの道を出さず、決定ボタンと「入れずに献立に戻る」で完結する) /
 //         NOHOME-01(2026-08-17 便HG・オーナー決定「先にホーム画面なくします」: ホーム画面を廃止し、
 //         その役目を献立の「日」が引き継いだ。「#/」を開くと献立の「日」に着く・知らない行き先でも同じ場所に着く・
 //         下の並びは4つで献立→レシピ→食材→設定・その日の献立が無い日は「今日なに作る？」が出て、
@@ -20624,7 +20631,7 @@ try {
       check('BULKDEL-01 長押しで詳細に遷移しない', !/#\/recipes\/\d+/.test(bdPage.url()), bdPage.url())
       check(
         'BULKDEL-01 長押ししたレシピが1品選ばれている',
-        ((await bdPage.textContent('body')) ?? '').includes('選択したレシピ1品を削除'),
+        ((await bdPage.getByTestId('selection-bar').innerText()) ?? '').includes('1品を選択中'),
       )
       // いったん選択モードを抜けてから、「選択」ボタン経由の通常の流れを検証する
       // (抜けるボタンは2026-08-15 便GUで「完了」から画面下の帯の「選択をやめる」へ移した)
@@ -20646,9 +20653,12 @@ try {
         'BULKDEL-01 全選択・選択解除が選択操作のすぐ上に出る',
         bdSelectingText.includes('全選択') && bdSelectingText.includes('選択解除'),
       )
+      // 2026-08-17 便HJ: 削除は「選び終わる」の窓の中へ移したので、0件では
+      // 窓を開く操作そのものが押せないことで測る(選ぶものが無いまま先へ進めない)
       check(
-        'BULKDEL-01 0件選択では削除ボタンを出さない',
-        !bdSelectingText.includes('選択したレシピ'),
+        'BULKDEL-01 0件選択では、選んだあとの操作へ進めない',
+        !bdSelectingText.includes('選択したレシピ') &&
+          (await bdPage.getByTestId('selection-finish').isDisabled()),
       )
 
       // カード全面が選択ボタンになる(aria-labelは料理名)
@@ -20657,9 +20667,16 @@ try {
       await bdPage.getByRole('button', { name: 'カレーライス', exact: true }).click()
       await bdPage.waitForTimeout(300)
       check(
-        'BULKDEL-01 選んだ品数が削除ボタンに出る',
-        ((await bdPage.textContent('body')) ?? '').includes('選択したレシピ2品を削除'),
+        'BULKDEL-01 選んだ品数が操作と同じ場所に出る',
+        ((await bdPage.getByTestId('selection-bar').innerText()) ?? '').includes('2品を選択中'),
       )
+      /** 選び終わって、窓の中の道を1つ選ぶ(2026-08-17 便HJ) */
+      const bdPickDoor = async (name) => {
+        await bdPage.getByTestId('selection-finish').click()
+        await bdPage.waitForTimeout(400)
+        await bdPage.getByTestId(`selection-actions-${name}`).click()
+        await bdPage.waitForTimeout(300)
+      }
 
       const bdBeforeCount = await bdPage.locator('a[href^="#/recipes/"]').count()
 
@@ -20668,7 +20685,7 @@ try {
       // ／利用者テスト「アプリの中で急に素のポップアップが出るのは違和感があります」。
       // ここでは仕掛けの自動押しを止め、**窓を見て自分で押す**形で確かめる
       await setConfirmAnswer(bdPage, 'off')
-      await bdPage.getByRole('button', { name: '選択したレシピ2品を削除' }).click()
+      await bdPickDoor('delete')
       await bdPage.waitForTimeout(700)
       const bdConfirm = bdPage.locator('[data-testid="confirm"]')
       check('GW-01 確認は画面の中の窓で出る(素のポップアップを出さない)', (await bdConfirm.count()) === 1)
@@ -20689,7 +20706,7 @@ try {
       )
       await setConfirmAnswer(bdPage, 'accept')
 
-      await bdPage.getByRole('button', { name: '選択したレシピ2品を削除' }).click()
+      await bdPickDoor('delete')
       await bdPage.waitForTimeout(1200)
 
       // 規約F: 何が消えるか/何が残るかを件数つきで両方書く
@@ -22337,8 +22354,18 @@ try {
       await rePage.getByRole('button', { name: '全選択', exact: true }).click()
       await rePage.waitForTimeout(400)
 
-      const reExportBtn = rePage.getByRole('button', { name: `選択したレシピ${rePicked}品を書き出す` })
-      check('RECIPEEXPORT-EM(a) 選択モードに「選択したレシピ◯品を書き出す」が出る', await reExportBtn.isVisible())
+      // 2026-08-17 便HJ: 書き出しは「選び終わる」を押した先の窓の中の道の1つになった
+      await rePage.getByTestId('selection-finish').click()
+      await rePage.waitForTimeout(400)
+      const reExportBtn = rePage.getByTestId('selection-actions-export')
+      check(
+        'RECIPEEXPORT-EM(a) 選び終わったあとの窓に「ファイルに書き出す」が出る',
+        (await reExportBtn.isVisible()) &&
+          ((await rePage.getByTestId('selection-actions').innerText()) ?? '').includes(
+            `選んだ${rePicked}品`,
+          ),
+        await rePage.getByTestId('selection-actions').innerText().catch(() => ''),
+      )
 
       // 2026-08-15 便GV: 確認はブラウザの素のダイアログから画面の中の窓へ移した
       // (オーナー実機「文章が長い。箇条書きや太字で読みやすくして」。素のダイアログでは
@@ -22450,7 +22477,9 @@ try {
         await reSelectAll.click()
         await rePage.waitForTimeout(300)
       }
-      await rePage.getByRole('button', { name: `選択したレシピ${rePicked}品を削除` }).click()
+      await rePage.getByTestId('selection-finish').click()
+      await rePage.waitForTimeout(400)
+      await rePage.getByTestId('selection-actions-delete').click()
       await rePage.waitForTimeout(1200)
       check(
         'RECIPEEXPORT-EM(d) 前提: 書き出した品を削除できた',
@@ -25871,7 +25900,8 @@ try {
 
   // --- FA-3: 書き出したレシピの扱い(2026-08-10 オーナー承認・docs/65 A-2) ---
   // ①利用規約に「書き出したファイルの取り扱いは書き出した本人の責任」の1文がある
-  // ②「選択したレシピ◯品を書き出す」の確認文に軽い一言が出る(重い警告にしない・解錠コードの話はしない)
+  // ② 書き出し(選び終わったあとの窓の「ファイルに書き出す」)の確認文に軽い一言が出る
+  //    (重い警告にしない・解錠コードの話はしない)
   currentCheck = 'FA-3'
   {
     const fa4Browser = await chromium.launch()
@@ -25912,9 +25942,9 @@ try {
       await fa4Page.waitForTimeout(400)
       await fa4Page.getByRole('button', { name: '全選択', exact: true }).click()
       await fa4Page.waitForTimeout(400)
-      await fa4Page
-        .getByRole('button', { name: `選択したレシピ${fa4Picked}品を書き出す` })
-        .click()
+      await fa4Page.getByTestId('selection-finish').click()
+      await fa4Page.waitForTimeout(400)
+      await fa4Page.getByTestId('selection-actions-export').click()
       await fa4Page.waitForTimeout(1000)
       const fa4Confirm = fa4Page.getByTestId('recipes-export-confirm')
       const fa4Text = (await fa4Confirm.innerText()) ?? ''
@@ -30659,10 +30689,13 @@ try {
           'FP-01 決定ボタンが最初から見えていて、1品も選ばないうちは押せない',
           (await decide.count()) === 1 && (await decide.isDisabled()),
         )
+        // 2026-08-17 便HJ: 削除・書き出しは「選び終わる」の窓の中へ移ったので、
+        // 献立から来たときはその窓の入口ごと出さないこと(行き先が決まっているため)で測る
         check(
           'FP-01 献立に入れに来た選択モードでは、削除・書き出しのボタンを出さない',
-          (await p.getByRole('button', { name: /選択したレシピ.*を削除/ }).count()) === 0 &&
-            (await p.getByRole('button', { name: /選択したレシピ.*を書き出す/ }).count()) === 0,
+          (await p.getByTestId('selection-finish').count()) === 0 &&
+            (await p.getByTestId('selection-actions-delete').count()) === 0 &&
+            (await p.getByTestId('selection-actions-export').count()) === 0,
         )
 
         // 3品をタップして選ぶ(レシピ詳細は1度も開かない)
@@ -30760,14 +30793,16 @@ try {
 
         await p.getByRole('button', { name: '選択', exact: true }).click()
         await p.waitForTimeout(500)
-        // 報告①: 選ぶ機能があるのに、使い道が書き出しと削除しかないと思わなかった
+        // 報告①: 選ぶ機能があるのに、使い道が書き出しと削除しかないと思わなかった。
+        // 2026-08-17 便HJ: 3つの道は「選び終わる」を押した先の窓に移したので、
+        // 案内文もその流れを言う形に書き直した(1品も選ばないうちから読める点は変えない)
         const hint = p.getByTestId('select-actions-hint')
         check(
           'FP-02 1品も選ばないうちに、選択でできる3つが名前で出ている',
           (await hint.count()) === 1 &&
-            ((await hint.innerText()) ?? '').includes(
-              '選んだレシピは、今日の献立に入れる・書き出す・削除するができます',
-            ),
+            ((await hint.innerText()) ?? '')
+              .replace(/​/g, '')
+              .includes('選び終わると、献立に入れる・書き出す・削除を選べます'),
           await hint.innerText().catch(() => ''),
         )
 
@@ -30775,14 +30810,16 @@ try {
         await p.waitForTimeout(200)
         await p.getByRole('button', { name: 'ほうれん草のおひたし', exact: true }).first().click()
         await p.waitForTimeout(400)
+        await p.getByTestId('selection-finish').click()
+        await p.waitForTimeout(400)
         check(
-          'FP-02 選ぶと3つの操作が実際に並ぶ(献立・書き出し・削除)',
-          (await p.getByTestId('add-selected-to-today').count()) === 1 &&
-            (await p.getByRole('button', { name: '選択したレシピ2品を書き出す' }).count()) === 1 &&
-            (await p.getByRole('button', { name: '選択したレシピ2品を削除' }).count()) === 1,
+          'FP-02 選び終わると3つの操作が実際に並ぶ(献立・書き出し・削除)',
+          (await p.getByTestId('selection-actions-today').count()) === 1 &&
+            (await p.getByTestId('selection-actions-export').count()) === 1 &&
+            (await p.getByTestId('selection-actions-delete').count()) === 1,
         )
 
-        await p.getByTestId('add-selected-to-today').click()
+        await p.getByTestId('selection-actions-today').click()
         await p.waitForTimeout(500)
         // 食事を決めない方でもまとめて入る(今週の予定には入れない)
         await p.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
@@ -30802,16 +30839,21 @@ try {
           JSON.stringify(state2),
         )
 
-        // 入れたあとも選択モードは続く(書き出し・削除と同じ作法。続けて選び直せる)
+        // 入れたあとも選択モードは続く(書き出し・削除と同じ作法。続けて選び直せる)。
+        // 2026-08-17 便HJ: 抜ける操作は入口と同じ場所のボタン(selection-exit)、
+        // 献立に入れる操作は「選び終わる」の窓の中＝どちらも一覧の上には並んでいない
         check(
           'FP-02 入れたあとも選択モードのまま続けられる(選択だけ解除される)',
           (await p.getByTestId('selection-exit').count()) === 1 &&
-            (await p.getByTestId('add-selected-to-today').count()) === 0,
+            (await p.getByTestId('selection-actions-today').count()) === 0 &&
+            (await p.getByTestId('selection-finish').isDisabled()),
         )
         // すでに入っている品を選び直しても、黙って二重に増やさない
         await p.getByRole('button', { name: '肉じゃが', exact: true }).first().click()
         await p.waitForTimeout(300)
-        await p.getByTestId('add-selected-to-today').click()
+        await p.getByTestId('selection-finish').click()
+        await p.waitForTimeout(400)
+        await p.getByTestId('selection-actions-today').click()
         await p.waitForTimeout(400)
         await p.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
         await p.waitForTimeout(1000)
@@ -34415,6 +34457,13 @@ try {
   //  ④ 写真が読めないレシピでも、カードの絵の枠が空白にならない(代わり絵に戻る)こと
   // 置き場所ではなく「押したときにどうなるか」で測る(どこに出ていても同じ判定になる形)。
   // タップは座標で送る(実機と同じで、その点でいちばん上にある要素が受ける)。
+  //
+  // 2026-08-17 便HJ(オーナー実機フィードバック「『選択』ボタン押下したら選択をやめるボタンに
+  // 変化するようにして。場所が変わると戻る時に迷子になる」「選択ボタン押下→レシピ選択→選択終了→
+  // 複数のボタンからレシピをどうするのか選ぶ、という流れはどうか」)で ③ を測り直した:
+  //  ・入る/やめるは同じ場所の1つのボタン(押しても上端・右端が動かない)
+  //  ・選んだあとの操作は帯に並べず、「選び終わる」→窓の4つの道(献立/書き出し/削除/やめる)で選ぶ
+  // 測るのは変わらず「一覧を下まで送っても、次に進む操作とその選択肢に手が届くか」。
   currentCheck = 'SELECT-UI-01'
   {
     const suBrowser = await chromium.launch()
@@ -34509,8 +34558,36 @@ try {
           await suPage.waitForTimeout(400)
         }
 
+        /** 目印の要素があれば押す。無ければ押さずに false（無いこと自体は各checkがNGとして出す） */
+        const suClickIfPresent = async (locator) => {
+          if ((await locator.count()) !== 1) return false
+          await locator.click()
+          await suPage.waitForTimeout(400)
+          return true
+        }
+        /** 名前で指したボタンの外枠（押す前と押した後で場所が動いていないかを測るため） */
+        const suButtonBox = async (name) => {
+          const button = suPage.getByRole('button', { name, exact: true })
+          if ((await button.count()) === 0) return null
+          return await button.first().boundingBox()
+        }
+
+        // 選択モードに入る前後で、入口のボタンが同じ場所にあること(2026-08-17 便HJ)。
+        // 幅は名前の長さで変わるので、動かないことを上端と右端で測る
+        const suToggleBefore = await suButtonBox('選択')
         await suPage.getByRole('button', { name: '選択', exact: true }).click()
         await suPage.waitForTimeout(300)
+        const suToggleAfter = await suButtonBox('選択をやめる')
+        check(
+          `SELECT-UI-01(${suLabel}) 「選択」を押しても、ボタンは同じ場所で「選択をやめる」に変わる`,
+          !!suToggleBefore &&
+            !!suToggleAfter &&
+            Math.abs(suToggleBefore.y - suToggleAfter.y) <= 2 &&
+            Math.abs(
+              suToggleBefore.x + suToggleBefore.width - (suToggleAfter.x + suToggleAfter.width),
+            ) <= 2,
+          JSON.stringify({ before: suToggleBefore, after: suToggleAfter }),
+        )
         await suScrollDeep()
 
         // ① タブ帯の当たり判定。中心がカードに重なるタブでも、受けるのはタブ自身であること
@@ -34542,24 +34619,19 @@ try {
           `SELECT-UI-01(${suLabel}) 一覧の下の方にあるカードをタップすると選べる`,
           (await suSelectedCount()) === 1,
         )
+        // 無い要素は「画面の中に無い」として即NGにする(待ち続けて節ごと中断させない)
         const suInViewport = async (locator) => {
+          if ((await locator.count()) !== 1) return false
           const box = await locator.boundingBox()
           if (!box) return false
           return box.y >= 0 && box.y + box.height <= suPage.viewportSize().height
         }
-        const suExit = suPage.getByTestId('selection-exit')
-        const suDelete = suPage.getByRole('button', { name: /^選択したレシピ\d+品を削除$/ })
-        const suExport = suPage.getByRole('button', { name: /^選択したレシピ\d+品を書き出す$/ })
-        const suToToday = suPage.getByTestId('add-selected-to-today')
+        const suFinish = suPage.getByTestId('selection-finish')
+        const suActions = suPage.getByTestId('selection-actions')
+        const suDoor = (name) => suPage.getByTestId(`selection-actions-${name}`)
         check(
-          `SELECT-UI-01(${suLabel}) 一覧を下の方まで送っても、選択をやめる操作が画面の中にある`,
-          await suInViewport(suExit),
-        )
-        check(
-          `SELECT-UI-01(${suLabel}) 一覧を下の方まで送っても、献立・書き出し・削除が画面の中にある`,
-          (await suInViewport(suToToday)) &&
-            (await suInViewport(suExport)) &&
-            (await suInViewport(suDelete)),
+          `SELECT-UI-01(${suLabel}) 一覧を下の方まで送っても、選び終わる操作が画面の中にある`,
+          (await suFinish.count()) === 1 && (await suInViewport(suFinish)),
         )
         check(
           `SELECT-UI-01(${suLabel}) 何品選んでいるかが、操作と同じ場所に出る`,
@@ -34571,13 +34643,44 @@ try {
           (await suPage.getByRole('button', { name: '完了', exact: true }).count()) === 0,
         )
 
+        // 選び終わったら、選んだレシピをどうするのかを窓の中の4つから選ぶ(2026-08-17 便HJ)。
+        // 帯に4つ並べると小さい画面がふさがるので、窓は「選び終わる」を押したときだけ出す
+        await suClickIfPresent(suFinish)
+        check(
+          `SELECT-UI-01(${suLabel}) 選び終わると、献立に入れる・書き出す・削除・やめるの4つが出る`,
+          (await suActions.count()) === 1 &&
+            (await suDoor('today').count()) === 1 &&
+            (await suDoor('export').count()) === 1 &&
+            (await suDoor('delete').count()) === 1 &&
+            (await suDoor('cancel').count()) === 1,
+          await suActions.innerText().catch(() => '(窓が出ていない)'),
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) その4つはどれも画面の中にある(一覧を下まで送った位置でも)`,
+          (await suInViewport(suDoor('today'))) &&
+            (await suInViewport(suDoor('export'))) &&
+            (await suInViewport(suDoor('delete'))) &&
+            (await suInViewport(suDoor('cancel'))),
+        )
+        // 窓の作法は確認の窓(ConfirmDialog)と同じ＝押し間違えて開いても、閉じれば元の続きに戻れる
+        await suPage.keyboard.press('Escape')
+        await suPage.waitForTimeout(300)
+        check(
+          `SELECT-UI-01(${suLabel}) 窓を閉じても選んだレシピは外れない(選び直せる)`,
+          (await suActions.count()) === 0 && (await suSelectedCount()) === 1,
+        )
+
         // ② 案内文どおり: 同じカードをもう一度タップすると外れる
         const suPoint2 = await suCardPointByLabel(suPoint.label)
         await suPage.mouse.click(suPoint2.x, suPoint2.y)
         await suPage.waitForTimeout(300)
         check(
           `SELECT-UI-01(${suLabel}) 同じカードをもう一度タップすると選択が外れる(案内文どおり)`,
-          (await suSelectedCount()) === 0 && (await suDelete.count()) === 0,
+          (await suSelectedCount()) === 0,
+        )
+        check(
+          `SELECT-UI-01(${suLabel}) 1品も選んでいないうちは、選び終わるを押せない`,
+          (await suFinish.count()) === 1 && (await suFinish.isDisabled()),
         )
 
         // ① 実際にタブを押す。移動できること・押した先でカードが選ばれないこと
@@ -34604,7 +34707,12 @@ try {
             (await suSelectedCount()) === 0,
         )
 
-        // ③ やめる操作は、選んだものを外してふだんの一覧に戻す
+        // ③ やめる操作は、選んだものを外してふだんの一覧に戻す。
+        // 入口と同じ場所のボタンと、選び終わったあとの窓の中と、どちらから抜けても同じ結果になること
+        const suBackToPlainList = async () =>
+          (await suPage.getByTestId('selection-bar').count()) === 0 &&
+          (await suSelectedCount()) === 0 &&
+          (await suPage.getByRole('button', { name: '選択', exact: true }).count()) === 1
         await suPage.getByRole('button', { name: '選択', exact: true }).click()
         await suPage.waitForTimeout(300)
         const suPoint4 = await suFreeCardPoint()
@@ -34615,9 +34723,20 @@ try {
         await suPage.waitForTimeout(500)
         check(
           `SELECT-UI-01(${suLabel}) 選択をやめると、選んだレシピが外れてふだんの一覧に戻る`,
-          (await suPage.getByTestId('selection-bar').count()) === 0 &&
-            (await suSelectedCount()) === 0 &&
-            (await suPage.getByRole('button', { name: '選択', exact: true }).count()) === 1,
+          await suBackToPlainList(),
+        )
+
+        await suPage.getByRole('button', { name: '選択', exact: true }).click()
+        await suPage.waitForTimeout(300)
+        const suPoint5 = await suFreeCardPoint()
+        await suPage.mouse.click(suPoint5.x, suPoint5.y)
+        await suPage.waitForTimeout(300)
+        await suClickIfPresent(suFinish)
+        await suClickIfPresent(suDoor('cancel'))
+        await suPage.waitForTimeout(400)
+        check(
+          `SELECT-UI-01(${suLabel}) 選び終わったあとの窓からやめても、同じようにふだんの一覧に戻る`,
+          (await suActions.count()) === 0 && (await suBackToPlainList()),
         )
 
         // ④ 写真が読めないレシピでも、カードの絵の枠が空白にならない。
@@ -34673,6 +34792,104 @@ try {
       }
     } finally {
       await suBrowser.close()
+    }
+  }
+
+  // --- SELECT-UI-02: 小さい画面(375x667)で、選んでいる最中もレシピのカードが見えること ---
+  // 2026-08-17 便HJ・オーナー実機フィードバック「画面が小さいと、レシピ選択中に出る選択肢ボタンで
+  // 画面の半分が見えなくなる」(送られてきた画面は375x667相当で、カードが2枚しか見えていなかった)。
+  // 置き場所ではなく「見えているか」で測る:
+  //  ・下に固定した帯が画面の半分を覆っていないこと(オーナーの言葉そのままの基準)
+  //  ・帯に隠れず丸ごと見えるカードの枚数が、ふだんの一覧から減らないこと
+  // 枚数を決め打ちしないのは、カードの寸法や1行に並ぶ枚数が変わっても同じ判定になるようにするため。
+  // 併せて、献立の「今日の献立を選ぶ」から来た選択モード(?select=today)は行き先が決まっているので
+  // 4つの道を出さず、これまでどおり決定ボタンと「入れずに献立に戻る」で完結することも見る。
+  currentCheck = 'SELECT-UI-02'
+  {
+    const s2Browser = await chromium.launch()
+    try {
+      const s2Ctx = await s2Browser.newContext({ viewport: { width: 375, height: 667 } })
+      const s2Page = await s2Ctx.newPage()
+      s2Page.on('pageerror', (err) => errors.push(`[pageerror@SELECT-UI-02] ${err.message}`))
+      await s2Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await s2Page.waitForTimeout(2200) // 初回シード完了待ち
+
+      /** 一覧の先頭で、下に固定した帯がどれだけ画面を覆っているか・カードが何枚見えているか */
+      const s2Measure = async () => {
+        await s2Page.evaluate(() => window.scrollTo(0, 0))
+        await s2Page.waitForTimeout(300)
+        return await s2Page.evaluate(() => {
+          const vh = window.innerHeight
+          const bars = [...document.querySelectorAll('[data-app-bottom-bar]')]
+          const barTop = bars.reduce((min, bar) => {
+            const r = bar.getBoundingClientRect()
+            return r.height > 0 && r.top < min ? r.top : min
+          }, vh)
+          const rects = [...document.querySelectorAll('a[href^="#/recipes/"]')]
+            .filter((el) => el.getAttribute('href') !== '#/recipes/new')
+            .map((el) => el.getBoundingClientRect())
+          return {
+            vh,
+            coveredPx: Math.round(vh - barTop),
+            fullyVisibleCards: rects.filter((r) => r.top >= 0 && r.bottom <= barTop).length,
+          }
+        })
+      }
+
+      const s2Plain = await s2Measure()
+      check(
+        'SELECT-UI-02 前提: ふだんの一覧では、帯に隠れず丸ごと見えるカードがある',
+        s2Plain.fullyVisibleCards > 0,
+        JSON.stringify(s2Plain),
+      )
+      await s2Page.getByRole('button', { name: '選択', exact: true }).click()
+      await s2Page.waitForTimeout(400)
+      await s2Page.locator('[data-testid="select-card"]').first().click()
+      await s2Page.waitForTimeout(400)
+      const s2Picking = await s2Measure()
+      check(
+        'SELECT-UI-02 レシピを選んでいる最中も、下に固定した帯が画面の半分を覆わない',
+        s2Picking.coveredPx * 2 < s2Picking.vh,
+        `帯=${s2Picking.coveredPx}px / 画面=${s2Picking.vh}px`,
+      )
+      check(
+        'SELECT-UI-02 レシピを選んでいる最中も、丸ごと見えるカードの枚数がふだんの一覧から減らない',
+        s2Picking.fullyVisibleCards >= s2Plain.fullyVisibleCards,
+        `ふだん=${s2Plain.fullyVisibleCards}枚 / 選択中=${s2Picking.fullyVisibleCards}枚`,
+      )
+
+      // 献立から来た選択モードは行き先が決まっているので、4つの道は出さない(2026-08-11 便FPの動きのまま)。
+      // 献立の画面を経由して開く: 同じ「#/recipes」に居るまま `?select=today` を足しても
+      // 画面は作り直されず、来たときの指示(select=today)を受け取れないため
+      await s2Page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await s2Page.waitForTimeout(900)
+      await s2Page.goto(`${BASE}/#/recipes?select=today`, { waitUntil: 'networkidle' })
+      await s2Page.waitForTimeout(1500)
+      check(
+        'SELECT-UI-02 献立から来たときは、選んでいる最中の案内と決定ボタンがそのまま出る',
+        (await s2Page.getByTestId('select-for-today-banner').count()) === 1 &&
+          (await s2Page.getByTestId('add-selected-to-today').count()) === 1,
+      )
+      check(
+        'SELECT-UI-02 献立から来たときは、どうするかを選ぶ窓の入口を出さない(行き先が決まっているため)',
+        (await s2Page.getByTestId('selection-finish').count()) === 0 &&
+          (await s2Page.getByTestId('selection-actions').count()) === 0,
+      )
+      check(
+        'SELECT-UI-02 献立から来たときは「入れずに献立に戻る」がある',
+        (await s2Page.getByRole('button', { name: '入れずに献立に戻る' }).count()) === 1,
+      )
+      await s2Page.getByRole('button', { name: '入れずに献立に戻る' }).click()
+      await s2Page.waitForTimeout(1000)
+      check(
+        'SELECT-UI-02 「入れずに献立に戻る」を押すと献立の画面へ戻る',
+        s2Page.url().includes('#/meal-plan'),
+        s2Page.url(),
+      )
+
+      await s2Ctx.close()
+    } finally {
+      await s2Browser.close()
     }
   }
 
