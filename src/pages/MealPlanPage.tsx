@@ -229,6 +229,14 @@ import {
   useDetachedLogEntries,
   type DetachedLogEntry,
 } from '../components/useDetachedLogEntries'
+// ホーム画面の廃止（2026-08-17 便HG）で、ホームにあった部品を献立の「日」へ移した。
+// どれも中身は変えていない（置き場所と、出す/出さないの判定だけが変わっている）
+import TodaySuggestPanel from '../components/TodaySuggestPanel'
+import RecipeSearchShortcut from '../components/RecipeSearchShortcut'
+import RecentCookedList from '../components/RecentCookedList'
+import DayStartNotices from '../components/DayStartNotices'
+import HomeScreenNotice from '../components/HomeScreenNotice'
+import { shouldShowHomeScreenNoticeNow } from '../logic/homeScreenNotice'
 import { ja } from '../i18n/ja'
 
 /** 献立タブの3タブ構成（2026-07-16 便U-1: 現行の「今日セクション+週/月切替」をタブへ再構成） */
@@ -236,12 +244,22 @@ type MealPlanViewMode = 'day' | 'week' | 'month'
 
 /**
  * 週タブからレシピ詳細を開くときに持ち回る出所（2026-08-07 便DT-2・オーナー指示）。
- * 詳細画面の「戻る」は、ホーム・今日の献立と同じ例外としてここへ帰る（RecipeDetailPage）。
+ * 詳細画面の「戻る」は、今日の献立と同じ例外としてここへ帰る（RecipeDetailPage）。
  * `restore=1` が付いているときだけ、週タブは覚えた週とスクロール位置を復元する。
  */
 const WEEK_RETURN_LINK_STATE = {
   from: 'mealPlanWeek',
   fromPath: `/meal-plan?focus=week&${WEEK_RETURN_PARAM}=1`,
+} as const
+
+/**
+ * 「日」からレシピ詳細を開くときに持ち回る出所（2026-08-17 便HG）。
+ * 「今日なに作る？」の候補カードが使う。ホームにあったころと同じで、戻ると画面の先頭から
+ * 見せる（`restore=1` を付けない＝覚えた縦位置は使わない）。
+ */
+const DAY_LINK_STATE = {
+  from: 'mealPlan',
+  fromPath: '/meal-plan?focus=today',
 } as const
 
 /**
@@ -433,7 +451,7 @@ function TodayListRow({
  * 週タブの過去日の枠と、月タブの日モーダルの両方で使う。
  * 予定(エントリ)との視覚区別: ✓マーク+淡い表示(薄いカード)。
  * サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバック
- * (ホームの「最近作ったもの」HistoryCardと同じ方針)。
+ * (「最近作ったもの」の HistoryCard と同じ方針)。
  * usePhotoUrlはループ内で直接呼べないため専用コンポーネントに分離
  */
 function CookedLogCard({
@@ -1657,7 +1675,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 過去振り返り(2026-07-17 便Z-2・docs/35 §3): 日付→その日の「作った記録」のインデックス。
   // 全レシピのcookedLogsを1回の走査でMap化する(記録件数が多い場合に日付ごとのfilterを
   // 繰り返さないための仕様指定のuseMemoインデックス)。hideStarters設定に関わらず全レシピを
-  // 対象にする(「実際に作った」履歴のため。HistoryPage・ホームの最近作ったものと同じ方針)
+  // 対象にする(「実際に作った」履歴のため。HistoryPage・「最近作ったもの」と同じ方針)
   // logIndex（recipe.cookedLogs の何番目か）も持たせる＝記録の小窓から編集へ渡すため(便EQ)
   const cookedLogsByDate = useMemo(() => {
     const map = new Map<string, { recipe: Recipe; log: CookedLog; logIndex: number }[]>()
@@ -2325,6 +2343,38 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const naviInProgress = hasCookNaviTimeline()
 
+  /**
+   * その日に作るものが1つでも決まっているか（2026-08-17 便HG・オーナー指示
+   * 「「今日なに作る？」と「レシピを探す」「在庫の食材から探す」は、献立がない時のみに出る。
+   * 献立があれば、これまで通りの献立タブにあった「今日の献立」」）。
+   * 判定は「日」に並んでいる品（①レシピ一覧から選択中 ＋ ②今週の献立の予定）そのもの＝
+   * 画面に1品でも出ていれば「決まっている」。
+   */
+  const dayHasPlan = dayRecipeIds.length > 0
+
+  /**
+   * 「今日なに作る？」「最近作ったもの」が対象にするレシピ（2026-08-17 便HG）。
+   * 設定「基本レシピを表示しない」を反映する＝ホームにあったときと同じ絞り方をそのまま使う。
+   * 献立に登録済みの品を引き当てる recipeById 側には効かせない（登録した予定は設定で隠さない）。
+   */
+  const ownRecipes = useMemo(() => {
+    if (!recipes) return undefined
+    return settings?.hideStarters ? recipes.filter((r) => !r.isStarter) : recipes
+  }, [recipes, settings?.hideStarters])
+
+  /**
+   * ホーム画面への追加を案内する初回のお知らせ(2026-08-10 便EW)。
+   * 2026-08-17 便HG: ホーム画面を廃止し、アプリを開いた直後に着く画面が献立の「日」に
+   * なったので、案内もここで出す（着地の合図をそのまま引き継ぐ）。
+   * 出す条件（指で操作する端末のブラウザ・アイコン起動でない・この端末で未表示）は
+   * logic/homeScreenNotice.ts が持つ。ここでは画面に着いた時点で1度だけ判定する
+   * ＝この画面を開いている間に判定が揺れて出たり消えたりしない。
+   * サンプルデモ（月間の見本）は端末の状態を見せる画面ではないので出さない。
+   */
+  const [showHomeScreenNotice, setShowHomeScreenNotice] = useState(
+    () => !isDemo && shouldShowHomeScreenNoticeNow(),
+  )
+
   // 献立タブを開いたときの初期タブ(2026-07-16 便U-1でタブ構成に再設計): 既定は「日」タブ。
   // ?focus=today が付いている場合(今日の献立からレシピを開いて戻ってきた場合)は、明示的に
   // 「日」タブへ固定し最上部へスクロールする（2026-07-15オーナー実機フィードバック対策を維持）。
@@ -2366,12 +2416,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 2026-08-02 便DE-1/DE-11: 開くタブを指定して戻ってこられるようにした。
     //  today … 今日の献立(日タブ)へ。従来からの動き
     //  week  … 週タブへ。date が付いていればその日のカードまでスクロールする
-    //          (ホームの「今日の献立」の食事ごとの見出しから来る)
     //  month … 月タブへ(「作った記録」の一覧から月タブへ戻るときに使う)
     if (focus === 'today') {
       setViewMode('day')
       // 2026-08-09 便EQ: 作った記録の一覧から帰ってきたときだけ、離れる直前の縦位置へ戻す。
-      // それ以外（ホームなどからの通常の「今日へ」）は従来どおり先頭から見せる
+      // それ以外（他の画面からの通常の「今日へ」）は従来どおり先頭から見せる
       const dayPoint =
         searchParams.get(WEEK_RETURN_PARAM) === '1'
           ? parseViewReturn(readSessionItem(DAY_RETURN_KEY))
@@ -5539,6 +5588,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {viewMode === 'day' && (
         <>
+          {/* アプリを開いた直後に読ませたい案内（バックアップのうながし・アプリ内のお知らせ）。
+              2026-08-17 便HG: ホーム画面の廃止でここが最初に着く画面になったので連れてきた */}
+          <DayStartNotices
+            settings={settings}
+            allRecipes={recipes}
+            currentPath={location.pathname + location.search}
+          />
+
           {/* 作りかけの段取りに戻る（2026-08-08 便EG・オーナー実機報告「タブ移動しても
               並行調理が維持されているが、再開したい時に迷う。今日の献立タブの目立つ位置に
               再開ボタン欲しい」）。段取りが残っているときだけ、今日の献立の上に出す */}
@@ -5749,9 +5806,44 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           {/* 2026-08-03 便DH(オーナー指示): 日タブの「表示する食事」は削除した。
               日タブは今日の予定を朝食・昼食・夕食すべて並べるようになり、絞る意味が無くなったため
               (設定そのもの=visibleMealSlots は週タブに残り、自動取り込みの対象もそちらで決まる) */}
+
+          {/* ここから下が、2026-08-17 便HG でホーム画面から移してきた部分。
+              オーナー指示の出し分けをそのまま実装している:
+              「「今日なに作る？」と「レシピを探す」「在庫の食材から探す」は、献立がない時のみに出る。
+                献立があれば、これまで通りの献立タブにあった「今日の献立」。
+                「最近作ったもの」は常に表示」
+
+              並び順（献立が決まっていない日）を「今日なに作る？」→「レシピを探す」の順にした理由:
+              決め方が**まかせる → 自分で探す**の順になる。上の「今日の献立」の空案内が
+              「今日の献立を選ぶ（自分で選ぶ）」「おまかせで提案（まかせる）」を持っているので、
+              その次に来る手がかりは、押すだけで1品出る「今日なに作る？」を先に置く方が、
+              上から順に手数が増えていく並びになる。
+              「最近作ったもの」を最後にしたのは、この画面の主役が今日の献立だから
+              （毎日開くたび最初に目に入るのが過去の記録にならないようにする）。
+              下の「作った記録の一覧」への入口とも隣り合うので、記録の話がひとまとまりになる。 */}
+          {!dayHasPlan && (
+            <div className="mt-[var(--space-md)] space-y-[var(--space-md)]">
+              <TodaySuggestPanel
+                recipes={ownRecipes}
+                pantryNames={pantryNames}
+                settings={settings}
+                linkState={DAY_LINK_STATE}
+              />
+              <RecipeSearchShortcut pantryNames={pantryNames} />
+            </div>
+          )}
+
+          {/* 「最近作ったもの」は、その日の献立があってもなくても常に出す（オーナー指示） */}
+          <RecentCookedList
+            recipes={ownRecipes}
+            detachedEntries={detachedEntries}
+            onOpen={setLogDetail}
+          />
+
           {/* 作った記録の一覧への入口(2026-08-09 便EQ・オーナー「記録一覧への正規の行き方がわからない」)。
               週・月にはあったが、献立を開くと最初に出るこの日タブには無かった。
-              3タブとホームで同じ文言にそろえ、どこからでも同じ名前で辿れるようにする */}
+              日・週・月で同じ文言にそろえ、どこからでも同じ名前で辿れるようにする。
+              「最近作ったもの」の中には同じ行き先を置かない（近くに同じリンクを2つ並べない） */}
           <Link
             to="/history?back=day"
             onClick={rememberDayReturn}
@@ -7891,6 +7983,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           // 記録をこの窓の中で直したときの一言（2026-08-10 便FD）
           onMessage={setMessage}
         />
+      )}
+
+      {/* ホーム画面への追加の案内(2026-08-10 便EW)。2026-08-17 便HGでホーム画面を廃止し、
+          アプリを開いた直後に着くのが「日」になったので、着地の合図もここへ移した。
+          出す作法（パソコンには出さない・初回のみ・閉じたら再表示しない）は変えていない */}
+      {showHomeScreenNotice && viewMode === 'day' && (
+        <HomeScreenNotice onClose={() => setShowHomeScreenNotice(false)} />
       )}
     </div>
   )

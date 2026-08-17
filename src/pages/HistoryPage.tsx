@@ -17,7 +17,7 @@ const PAGE_SIZE = 30
 
 /**
  * 履歴1行（2026-07-29 便CI/C04）。
- * ホームの「最近作ったもの」（HomePage の HistoryCard）と同じく、記録の写真→レシピ写真→
+ * 献立の「日」の「最近作ったもの」（components/RecentCookedList）と同じく、記録の写真→レシピ写真→
  * アイコンの順にフォールバックしてサムネイルを出す。同じ記録なのに履歴だけ文字だけで、
  * 「名前を忘れた料理を写真から探す」動線が成立していなかった。
  * usePhotoUrl はループ内で直接呼べないため行コンポーネントに分離し、
@@ -86,14 +86,14 @@ function HistoryRow({
 /**
  * 呼び出し元へ戻すための行き先（2026-08-02 便DE-11・オーナー指示）。
  * 献立の週タブ／月タブから開いたときは ?back=week / ?back=month が付いてくる。
- * これが無いときは従来どおり（ブラウザ履歴があれば1つ戻る・無ければホーム）。
+ * これが無いときは従来どおり（ブラウザ履歴があれば1つ戻る・無ければ献立）。
  *
  * 直った問題: 週タブの「過去の記録を見る」→ 記録一覧 → 戻る、で献立タブの「日」に落ちていた。
  * 履歴を1つ戻るだけでは献立タブのタブ状態（日/週/月）までは戻らないため、
  * 開いた場所を持ち回って、そのタブを指定して戻す。
  *
- * 2026-08-09 便EQ（オーナー「戻るのも該当場所のスクロール位置まで」）: 行き先を献立の日タブと
- * ホームにも広げ、帰り道に `restore=1` を付けて、呼び出し元が覚えておいた縦スクロール位置
+ * 2026-08-09 便EQ（オーナー「戻るのも該当場所のスクロール位置まで」）: 行き先を献立の日タブにも
+ * 広げ、帰り道に `restore=1` を付けて、呼び出し元が覚えておいた縦スクロール位置
  * （月・週ならそのとき見ていた月・週も）まで戻せるようにした。覚えは呼び出し元がリンクを
  * 押した時点で sessionStorage に書く。覚えが無いときは復元せず、その画面を普通に開くだけになる。
  */
@@ -101,7 +101,9 @@ function backTargetOf(back: string | null): string | null {
   if (back === 'week') return '/meal-plan?focus=week&restore=1'
   if (back === 'month') return '/meal-plan?focus=month&restore=1'
   if (back === 'day') return '/meal-plan?focus=today&restore=1'
-  if (back === 'home') return '/?restore=1'
+  // 2026-08-17 便HG: ホーム画面を廃止したので、ホーム発を名乗るものは献立の「日」へ送る。
+  // 古いリンク（?back=home）を開いた人も、新しい入口と同じ場所に着くようにするため残す
+  if (back === 'home') return '/meal-plan?focus=today&restore=1'
   return null
 }
 
@@ -153,7 +155,7 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto w-full max-w-md pb-[var(--space-lg)]">
       <BackHeader
-        fallback={backTarget ?? '/'}
+        fallback={backTarget ?? '/meal-plan'}
         alwaysFallback={backTarget != null}
         title={ja.history.title}
       />

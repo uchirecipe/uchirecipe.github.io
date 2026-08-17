@@ -3,14 +3,6 @@
     "w": 780,
     "h": 1092
   },
-  "home-suggest": {
-    "w": 780,
-    "h": 704
-  },
-  "home-search": {
-    "w": 780,
-    "h": 408
-  },
   "nav-tabs": {
     "w": 780,
     "h": 144
@@ -150,5 +142,13 @@
   "cooknavi-reorder-undo": {
     "w": 780,
     "h": 448
+  },
+  "day-suggest": {
+    "w": 780,
+    "h": 704
+  },
+  "day-search": {
+    "w": 780,
+    "h": 408
   }
 }

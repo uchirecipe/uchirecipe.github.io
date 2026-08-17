@@ -44,7 +44,7 @@ export const SHOPPING_AISLE_ORDER: PantryGroupKey[] = [
  * 必ず6グループ揃った並びに整えて返す純ロジック。
  * 店の回り方は家庭ごとに違うので順番だけ入れ替えられるようにしたが、保存値には
  * ①未設定 ②将来グループが増減したときの欠け・余り ③壊れた値、が混ざりうる。
- * 設定のホームカスタマイズ（db/settings.ts の sanitizeHomeWidgets）と同じ考え方で、
+ * 保存済みの並び（db/settings.ts の sanitizeHomeWidgets）と同じ考え方で、
  * 知らないキーは黙って捨て、足りないキーは既定順（SHOPPING_AISLE_ORDER）の並びで末尾に補う。
  * 重複したキーは最初の1つだけ残す（同じグループが2回並ぶと整列が不定になるため）。
  */
@@ -67,7 +67,7 @@ export function normalizeAisleOrder(saved: readonly PantryGroupKey[] | undefined
 /**
  * 売り場順の1グループを上（-1）／下（+1）へ1つ動かした並びを返す純ロジック。
  * 端で押しても並びは変えない（呼び出し側のボタンもdisabledにする）。
- * 設定のホームカスタマイズ（moveHomeWidget）と同じ「上下の入れ替え」方式に揃えている。
+ * 「上下の入れ替え」方式で並びを変える。
  */
 export function moveAisleGroup(
   order: readonly PantryGroupKey[],

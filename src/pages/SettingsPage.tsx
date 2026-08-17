@@ -58,7 +58,6 @@ import { hasNgIngredient } from '../logic/ng'
 import { countFreeLimitRecipes, FREE_LIMIT, FREE_LIMIT_ENABLED } from '../logic/freeLimit'
 import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
 import { clampBurners, DEFAULT_KITCHEN, MIN_BURNERS, MAX_BURNERS } from '../logic/cookAppliance'
-import { restoreHomeWidget } from '../logic/homeWidgets'
 import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
 import { applyAppUpdate, checkForAppUpdate } from '../logic/appUpdate'
@@ -112,12 +111,10 @@ import {
   SHOPPING_AISLE_ORDER,
 } from '../logic/pantryGroups'
 import type {
-  HomeWidgetKey,
   ThemeSetting,
   TimerSoundLength,
   TimerSoundVolume,
 } from '../db/types'
-import { defaultHomeWidgets } from '../db/types'
 import {
   TIMER_SOUND_LENGTHS,
   TIMER_SOUND_VOLUMES,
@@ -157,22 +154,6 @@ const themeOptions: { value: ThemeSetting; label: string }[] = [
   { value: 'brown', label: ja.settings.themeBrown },
   { value: 'green', label: ja.settings.themeGreen },
 ]
-
-const allHomeWidgets: HomeWidgetKey[] = [
-  'mealPlan',
-  'suggestion',
-  'ingredientSearch',
-  'history',
-]
-
-const homeWidgetLabels: Record<HomeWidgetKey, string> = {
-  mealPlan: ja.home.mealPlanTitle,
-  suggestion: ja.home.suggestTitle,
-  // キーは'ingredientSearch'のままだが、中身は2026-08-02にレシピタブへのショートカットへ置き換えた
-  // (保存済みの並び順・表示設定を壊さないためキー名は変えていない)
-  ingredientSearch: ja.home.searchShortcutTitle,
-  history: ja.home.historyTitle,
-}
 
 const sectionCls =
   'mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm'
@@ -226,7 +207,7 @@ const launchedFromHomeScreen = isLaunchedFromHomeScreen()
  * 縦に長い設定を使う頻度の高い順に並べ、各節を見出し+アンカーで区切る。
  * ページ上部には節へ飛ぶ目次チップ(sticky)を置き、タップで該当節へスクロールする。
  * 各節の内訳:
- * パーソナライズ=見た目(テーマカラー/ホーム)/食材と価格(NG食材/価格マスタ/週の食費予算/売り場順)/料理中(画面/タイマー)
+ * パーソナライズ=見た目(テーマカラー)/食材と価格(NG食材/価格マスタ/週の食費予算/売り場順)/料理中(画面/タイマー)
  * レシピ=基本レシピ/レシピセットを読み込む（テーマ一覧は2026-07-23のテーマ全廃で撤去）
  * バックアップ=バックアップ一式
  * Pro=Pro版(有料の機能解錠。収録レシピは全て無料・有料はPro機能のみ)
@@ -251,8 +232,8 @@ const settingsSections: { id: string; label: string }[] = [
 
 // ?section=pro / ?section=backup / ?section=recipe の直リンクが、どの要素まで自動スクロールするか。
 // 1本スクロール化で「該当タブを開く」から「該当節へ自動スクロール」へ読み替えた(unlock.html・
-// NutritionTeaser・ホーム「しばらくバックアップしていません」等の既存導線を維持する)。
-// backupは2026-07-16 ホームリンクの遷移先として追加。値は該当節内のアンカー要素id。
+// NutritionTeaser・献立の「日」の「しばらくバックアップしていません」等の既存導線を維持する)。
+// backupは2026-07-16 そのうながしの遷移先として追加。値は該当節内のアンカー要素id。
 // テーマ全廃(2026-07-23)で ?section=themes は廃止したが、旧リンクで来ても無害に着地させるため
 // 「レシピ」節へ読み替える（recipe/themes のどちらでもレシピ節の先頭へ飛ぶ）
 // budgetは2026-07-29 便CD/MP-11: 献立タブの概算食費「週の食費予算を登録する」の遷移先。
@@ -1070,25 +1051,6 @@ export default function SettingsPage() {
     }
   }
 
-  const homeWidgets = settings.homeWidgets
-  const hiddenHomeWidgets = allHomeWidgets.filter((key) => !homeWidgets.includes(key))
-
-  // 2026-08-03 便DH(オーナー指示): 「表示しない」から戻したパーツは末尾ではなく標準の並びの
-  // 位置へ返す(従来は必ずホームのいちばん下に出ていた)。入れ先の計算は logic/homeWidgets.ts
-  const showHomeWidget = (key: HomeWidgetKey) => {
-    void updateSettings({ homeWidgets: restoreHomeWidget(homeWidgets, key) })
-  }
-  const hideHomeWidget = (key: HomeWidgetKey) => {
-    void updateSettings({ homeWidgets: homeWidgets.filter((w) => w !== key) })
-  }
-  const moveHomeWidget = (index: number, direction: -1 | 1) => {
-    const target = index + direction
-    if (target < 0 || target >= homeWidgets.length) return
-    const next = [...homeWidgets]
-    ;[next[index], next[target]] = [next[target], next[index]]
-    void updateSettings({ homeWidgets: next })
-  }
-
   // 買い物メモの売り場順(2026-08-02 便CT/C15)。保存値は必ず normalizeAisleOrder を通し、
   // 未設定・欠け・未知のキーがあっても6グループ揃った並びとして扱う
   const aisleOrder = normalizeAisleOrder(settings.shoppingAisleOrder)
@@ -1107,34 +1069,6 @@ export default function SettingsPage() {
     if (!ok) return
     void updateSettings({ shoppingAisleOrder: [...SHOPPING_AISLE_ORDER] })
     setMessage(ja.settings.aisleOrderResetDone)
-  }
-
-  /**
-   * ホーム画面のカスタマイズを初期設定に戻す(2026-08-04 便DV-3・オーナー指示)。
-   * 戻す対象は「表示するパーツ」「並び順」「『今日なに作る？』を出すとき」の3つ＝この
-   * カードの中で変えられるものだけ。レシピ・献立・記録などのデータには触らない(規約F)
-   */
-  const resetHomeWidgets = async () => {
-    const ok = await confirm({
-      title: ja.settings.homeWidgetsResetConfirmTitle,
-      bullets: [
-        {
-          label: ja.settings.homeWidgetsResetConfirmBackLabel,
-          text: ja.settings.homeWidgetsResetConfirmBack,
-        },
-        {
-          label: ja.settings.homeWidgetsResetConfirmKeptLabel,
-          text: ja.settings.homeWidgetsResetConfirmKept,
-        },
-      ],
-      confirmLabel: ja.settings.homeWidgetsResetConfirmOk,
-    })
-    if (!ok) return
-    void updateSettings({
-      homeWidgets: [...defaultHomeWidgets],
-      homeSuggestionAlways: false,
-    })
-    setMessage(ja.settings.homeWidgetsResetDone)
   }
 
   // バックアップ状態バナー(2026-07-17設定ゼロベース裁定#1)。30日超(または未実施)で警告色にする
@@ -1264,100 +1198,6 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>
-          </section>
-
-          {/* ホーム画面のカスタマイズ */}
-          <section className={sectionCls}>
-            <h2 className="font-bold">{ja.settings.homeWidgetsTitle}</h2>
-            <p className="mt-1 text-sm text-ink-muted">{ja.settings.homeWidgetsDescription}</p>
-            <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-app">
-              {homeWidgets.map((key, index) => (
-                <li key={key} className="px-[var(--space-sm)] py-2">
-                  <div className="flex items-center gap-1">
-                    <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
-                    <button
-                      type="button"
-                      onClick={() => moveHomeWidget(index, -1)}
-                      disabled={index === 0}
-                      aria-label={ja.settings.homeWidgetMoveUp}
-                      className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                    >
-                      <ChevronUp size={18} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveHomeWidget(index, 1)}
-                      disabled={index === homeWidgets.length - 1}
-                      aria-label={ja.settings.homeWidgetMoveDown}
-                      className="rounded-full p-2 text-ink-muted disabled:opacity-30"
-                    >
-                      <ChevronDown size={18} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => hideHomeWidget(key)}
-                      className="rounded-sm border border-edge px-2 py-1 text-xs font-bold text-ink-muted"
-                    >
-                      {ja.settings.homeWidgetHide}
-                    </button>
-                  </div>
-                  {/* 「今日なに作る？」だけは、いつ出すかも選べる(2026-08-03 便DH・オーナー指示)。
-                      既定は今週の献立に今日の予定がない日だけ・「常に表示」で予定があっても出す */}
-                  {key === 'suggestion' && (
-                    <div className="mt-1">
-                      <p className="text-xs text-ink-muted">
-                        {ja.settings.homeSuggestionWhenTitle}
-                      </p>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {[
-                          { always: false, label: ja.settings.homeSuggestionWhenPlanEmpty },
-                          { always: true, label: ja.settings.homeSuggestionWhenAlways },
-                        ].map((option) => (
-                          <button
-                            key={option.label}
-                            type="button"
-                            onClick={() =>
-                              void updateSettings({ homeSuggestionAlways: option.always })
-                            }
-                            aria-pressed={
-                              (settings.homeSuggestionAlways === true) === option.always
-                            }
-                            className={`rounded-sm border px-2 py-1.5 text-xs font-bold ${
-                              (settings.homeSuggestionAlways === true) === option.always
-                                ? 'border-accent bg-accent text-on-accent'
-                                : 'border-edge bg-surface text-ink-muted'
-                            }`}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </li>
-              ))}
-              {hiddenHomeWidgets.map((key) => (
-                <li key={key} className="flex items-center gap-2 px-[var(--space-sm)] py-2 opacity-60">
-                  <span className="min-w-0 flex-1 font-bold">{homeWidgetLabels[key]}</span>
-                  <button
-                    type="button"
-                    onClick={() => showHomeWidget(key)}
-                    className="rounded-sm border border-accent px-2 py-1 text-xs font-bold text-accent-ink"
-                  >
-                    {ja.settings.homeWidgetShow}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {/* 初期設定に戻す(2026-08-04 便DV-3・オーナー指示)。売り場順と同じ名前・同じ体裁 */}
-            <button
-              type="button"
-              onClick={() => void resetHomeWidgets()}
-              className="mt-[var(--space-sm)] inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-            >
-              <RotateCcw size={16} aria-hidden />
-              {ja.settings.homeWidgetsReset}
-            </button>
           </section>
 
           {/* 食材と価格 */}
@@ -1562,7 +1402,7 @@ export default function SettingsPage() {
 
           {/* 買い物メモの売り場順(2026-08-02 便CT/C15 オーナー承認)。回る順番は店ごとに違うので、
               6グループの並び順だけ入れ替えられるようにする(グループの中身=食材の振り分けは変えない)。
-              操作方法はホーム画面のカスタマイズと同じ上下移動に揃える。
+              操作方法は隣同士の上下の入れ替え。
               id は買い物メモからの直リンク(?section=aisle)の着地点 */}
           <section id="aisle-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.aisleOrderTitle}</h2>

@@ -84,10 +84,10 @@
 //         ORPHAN-01(レシピ削除の孤児防止・2026-07バグ修正・deleteRecipe: 基本レシピを週間献立・
 //         今日の献立の両方に登録した状態で1品削除しても、両テーブルに削除済みレシピを指す孤児行が
 //         残らないことをIndexedDB直読みで確認。旧「テーマ一括削除」はテーマUI撤去で1品削除経路へ置換) /
-//         HOME-DH-01(2026-08-03 便DH: ホームの「今日の献立」を「レシピ一覧から選択中」「今週の献立の予定」の
-//         2群に分けてそれぞれ折りたたむ・既定は選択中だけ開く/「今日なに作る？」は今週の献立に今日の予定が
-//         あれば出さない(設定「常に表示」で上書き可)/「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が
-//         「条件をしぼる」の中にあり既定は主菜だけON/設定でいったん隠したパーツは既定の位置へ復帰) /
+//         DAYSUGGEST-01(旧HOME-DH-01。2026-08-03 便DHの「今日なに作る？」を2026-08-17 便HGで献立の「日」へ移設:
+//         その日の献立が決まっていなければ出る/1品でも決まれば出さない/空に戻すとまた出る/
+//         「ランダムで選ぶ」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり既定は主菜だけON/
+//         種別を足すと候補は減らない・未選択と全選択の候補数が一致(便DV-1の再発防止)) /
 //         MEALPLAN-HOUSE(2026-08-03 便DK: 設定「食数の設定」(旧「ふだん作る人数」)。未設定なら従来どおり登録人数分・
 //         4人分に設定すると献立の行/概算食費/買い物メモの分量/レシピ詳細の人数がすべてその人数分になり、
 //         レシピ詳細には元の登録人数が「登録: 2人分」で併記される。枠ごとに決めた食数はこの設定より優先し、
@@ -330,6 +330,11 @@
 //         選んだあとの操作と「選択をやめる」が一覧を下まで送っても画面の中にある・
 //         抜けるボタンの名前を「完了」のままにしない・写真が読めないレシピのカードは代わり絵に戻る。
 //         スマホ幅(390)とPC幅(1280)の両方で確認) /
+//         NOHOME-01(2026-08-17 便HG・オーナー決定「先にホーム画面なくします」: ホーム画面を廃止し、
+//         その役目を献立の「日」が引き継いだ。「#/」を開くと献立の「日」に着く・知らない行き先でも同じ場所に着く・
+//         下の並びは4つで献立→レシピ→食材→設定・その日の献立が無い日は「今日なに作る？」「レシピを探す」
+//         「在庫の食材から探す」が出て、ある日は「今日の献立」だけになる・「最近作ったもの」はどちらの日でも出る・
+//         設定から「ホーム画面のカスタマイズ」が残骸なく消えている(端末のホーム画面への追加案内は別物なので残る)) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -1000,26 +1005,29 @@ try {
   )
 
   // --- DET-01: 詳細の戻るボタン(2026-08-02オーナー指示・同日追補で確定)。
-  // 確定形: ホーム・今日の献立発の例外(2026-07-12・07-16)は残し、出所state無し・
+  // 確定形: 今日の献立発の例外(2026-07-12・07-16)は残し、出所state無し・
   // 不明時は必ずレシピ一覧へ(一覧へ行く手段が消える不具合の再発防止)。
-  // (a)=ホーム発は例外どおりホームへ帰る/(b)=state無しの直接URLは一覧へ ---
+  // (a)=献立の「日」の「今日なに作る？」の候補カード発は例外どおり献立へ帰る
+  //     (2026-08-17 便HGでホーム画面を廃止し、この候補カードはホームから献立の「日」へ移った。
+  //      測っているのは「出所を持ったカードから開いた詳細は、その出所へ帰る」で変えていない)
+  // (b)=state無しの直接URLは一覧へ ---
   currentCheck = 'DET-01'
-  // (a) ホームの候補カードから詳細→戻る→レシピ一覧(#/recipes)へ
-  await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(800)
+  // (a) 献立の「日」の候補カードから詳細→戻る→献立へ
+  await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1500)
   await page.locator('a[href^="#/recipes/"]').first().click()
   await page.waitForTimeout(500)
   check(
-    'DET-01 ホームの候補カードからレシピ詳細へ遷移',
+    'DET-01 献立の「日」の候補カードからレシピ詳細へ遷移',
     /#\/recipes\/\d+/.test(page.url()),
     `現在URL: ${page.url()}`,
   )
   const det01DetailUrl = page.url()
   await page.getByRole('button', { name: '戻る' }).click()
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(600)
   check(
-    'DET-01(2026-08-02追補) ホームの候補カード発の戻るはホームへ帰る(例外復元)',
-    page.url().endsWith('#/') || /#\/$/.test(page.url()),
+    'DET-01(2026-08-02追補) 候補カード発の戻るは献立へ帰る(例外復元)',
+    (page.url().split('#')[1] ?? '').startsWith('/meal-plan'),
     `現在URL: ${page.url()}`,
   )
 
@@ -2265,7 +2273,7 @@ try {
   // ?section=直リンクの自動スクロール(1本スクロール化後: タブ切り替えではなく該当節へ自動スクロール)。
   // 自動スクロールはSettingsPageの1マウントにつき一度だけ動く(scrolledToSectionRefのワンショット)ため、
   // 各?section=の検証の前に一度/recipesへ抜けてSettingsPageを再マウントさせ、毎回まっさらな状態で
-  // 発火することを独立に確認する。unlock.html・NutritionTeaser・ホーム等の既存導線が使う互換パラメータ
+  // 発火することを独立に確認する。unlock.html・NutritionTeaser等の既存導線が使う互換パラメータ
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)
   // ?section=recipe は「レシピ」節へ自動スクロールする(テーマ全廃で ?section=themes は廃止したが、
@@ -6665,7 +6673,7 @@ try {
         await ctx.close()
       }
 
-      // --- DS-BACK-01(③): 他の画面(ホーム)からタイマーを触ってレシピの該当手順へ戻る ---
+      // --- DS-BACK-01(③): 他の画面(食材)からタイマーを触ってレシピの該当手順へ戻る ---
       currentCheck = 'DS-BACK-01'
       {
         const ctx = await dsBrowser.newContext({ viewport: { width: 390, height: 844 } })
@@ -6680,7 +6688,8 @@ try {
         await p.getByRole('button', { name: '15分 タイマー開始' }).click()
         await p.waitForTimeout(500)
         // 別の画面へ移ってから常駐バーのタイマーを触る
-        await p.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        // (2026-08-17 便HG: ホーム画面を廃止したので「レシピから離れた画面」は食材にした)
+        await p.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(900)
         await p.getByRole('button', { name: /タイマーを調整/ }).first().click()
         await p.waitForTimeout(400)
@@ -12275,10 +12284,18 @@ try {
     }
   }
 
-  // --- HOME-DH-01: ホームの「今日の献立」2群の折りたたみ・「今日なに作る？」の表示条件・
-  // 「ランダムで選ぶ」・種別4区分、設定「ホーム画面のカスタマイズ」の常に表示/既定位置復帰
-  // (2026-08-03 便DH・オーナー指示)。まっさらプロファイルで通しで確認する ---
-  currentCheck = 'HOME-DH-01'
+  // --- DAYSUGGEST-01(旧HOME-DH-01): 献立の「日」の「今日なに作る？」。
+  // 中身(「条件をしぼる」の折りたたみ・料理の種別4区分・候補数・「ランダムで選ぶ」)と、
+  // 出す/出さないの条件を確認する。2026-08-03 便DHでホームに作ったものを、
+  // 2026-08-17 便HG(オーナー決定「先にホーム画面なくします」)で献立の「日」へ移した。
+  // 測っている中身は移設前と同じで、見る画面と出す条件だけが変わっている:
+  //   旧… 今週の献立に今日の予定があるときだけ出さない(設定「常に表示」で上書きできた)
+  //   新… その日の献立が1品でも決まっていたら出さない(オーナー指示。設定は廃止)
+  // ホームの2群の折りたたみ・設定「ホーム画面のカスタマイズ」の検査は、
+  // どちらも画面ごと無くなったので落とした(日の2群そのものは MEALPLAN-ROLE が見ている。
+  // 設定からカスタマイズが消えたことは NOHOME-01 が見ている)。
+  // まっさらプロファイルで通しで確認する ---
+  currentCheck = 'DAYSUGGEST-01'
   {
     const dhBrowser = await chromium.launch()
     const dhContext = await dhBrowser.newContext({ viewport: { width: 390, height: 820 } })
@@ -12287,17 +12304,96 @@ try {
       if (msg.type() !== 'error') return
       const text = msg.text()
       if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
-      errors.push(`[console@HOME-DH-01] ${text}`)
+      errors.push(`[console@DAYSUGGEST-01] ${text}`)
     })
     dhPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@HOME-DH-01] ${err.message}`)
+      errors.push(`[pageerror@DAYSUGGEST-01] ${err.message}`)
     })
     try {
       await dhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await dhPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // (1) 今日の予定は無し・今日の献立に1品だけ入れた状態
+      // (1) その日の献立がまだ空の状態＝「今日なに作る？」が出る
+      await dhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dhPage.reload({ waitUntil: 'networkidle' })
+      await dhPage.waitForTimeout(1500)
+      {
+        const body = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
+        check(
+          'DAYSUGGEST-01 その日の献立が決まっていなければ「今日なに作る？」が出る',
+          body.includes('今日なに作る？'),
+        )
+        check(
+          'DAYSUGGEST-01 振り直しは「ランダムで選ぶ」(旧「ほかの候補を見る」は残っていない)',
+          body.includes('ランダムで選ぶ') && !body.includes('ほかの候補を見る'),
+        )
+        // オレンジ地・白字(既存CTAと同じトークン)。直接色指定ではなくクラスで確認する
+        const shuffleClass =
+          (await dhPage.getByRole('button', { name: 'ランダムで選ぶ' }).getAttribute('class')) ?? ''
+        check(
+          'DAYSUGGEST-01 「ランダムで選ぶ」はオレンジ地・白字(bg-accent/text-on-accent)',
+          shuffleClass.includes('bg-accent') && shuffleClass.includes('text-on-accent'),
+        )
+        // 種別4区分は「条件をしぼる」の中。畳んでいる間は出ない
+        check(
+          'DAYSUGGEST-01 種別チップは「条件をしぼる」を開くまで出ない',
+          (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 0,
+        )
+        await dhPage.getByRole('button', { name: /条件をしぼる/ }).click()
+        await dhPage.waitForTimeout(400)
+        check(
+          'DAYSUGGEST-01 「条件をしぼる」の中にレシピと同じ4区分(主菜・副菜・汁物・その他)が並ぶ',
+          (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 1 &&
+            (await dhPage.getByRole('button', { name: '副菜', exact: true }).count()) === 1 &&
+            (await dhPage.getByRole('button', { name: '汁物', exact: true }).count()) === 1 &&
+            (await dhPage.getByRole('button', { name: 'その他', exact: true }).count()) === 1,
+        )
+        check(
+          'DAYSUGGEST-01 既定は主菜だけON',
+          (await dhPage
+            .getByRole('button', { name: '主菜', exact: true })
+            .getAttribute('aria-pressed')) === 'true' &&
+            (await dhPage
+              .getByRole('button', { name: '副菜', exact: true })
+              .getAttribute('aria-pressed')) === 'false',
+        )
+
+        // 2026-08-04 便DV-1 再発防止(オーナー実機報告「全ボタンを選択すると候補が減る」)。
+        // 種別を足すたびに「候補◯品」が増える(減らない)・全選択と未選択が同じ品数になること
+        const candidateCount = async () => {
+          const text = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
+          const m = text.match(/候補(\d+)品/)
+          return m ? Number(m[1]) : -1
+        }
+        const tapType = async (name) => {
+          await dhPage.getByRole('button', { name, exact: true }).click()
+          await dhPage.waitForTimeout(350)
+        }
+        const cMainOnly = await candidateCount()
+        await tapType('副菜')
+        const cMainSide = await candidateCount()
+        await tapType('汁物')
+        await tapType('その他')
+        const cAll = await candidateCount()
+        check(
+          'DAYSUGGEST-01(便DV) 種別を足すと候補は減らない(主菜のみ→+副菜→全選択)',
+          cMainOnly > 0 && cMainSide >= cMainOnly && cAll >= cMainSide,
+          `主菜のみ=${cMainOnly} +副菜=${cMainSide} 全選択=${cAll}`,
+        )
+        // 全部OFF(=種別で絞らない)にすると、全選択とまったく同じ品数になる
+        for (const name of ['主菜', '副菜', '汁物', 'その他']) await tapType(name)
+        const cNone = await candidateCount()
+        check(
+          'DAYSUGGEST-01(便DV) 未選択(絞らない)と全選択の候補数が一致する',
+          cNone === cAll,
+          `未選択=${cNone} 全選択=${cAll}`,
+        )
+      }
+
+      // (2) 今日の献立に1品でも入ると引っ込む(2026-08-17 便HG・オーナー指示)。
+      // 週の予定ではなく「レシピ一覧から選択中」の1品でも同じように引っ込むことを見る
+      // ＝献立が決まっている日に提案を重ねない、という決めごとそのものを測る
       await dhPage.evaluate(
         () =>
           new Promise((resolve, reject) => {
@@ -12317,177 +12413,35 @@ try {
             req.onerror = () => reject(req.error)
           }),
       )
-      await dhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
       await dhPage.reload({ waitUntil: 'networkidle' })
-      await dhPage.waitForTimeout(1200)
+      await dhPage.waitForTimeout(1500)
       {
-        const body = (await dhPage.textContent('body')) ?? ''
+        const body = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
         check(
-          'HOME-DH-01 予定が無い日は「今日なに作る？」が出る(今日の献立に品があっても消えない)',
-          body.includes('今日なに作る？') && body.includes('レシピ一覧から選択中'),
+          'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は出さない',
+          !body.includes('今日なに作る？') && body.includes('ほうれん草のおひたし'),
         )
-        check(
-          'HOME-DH-01 振り直しは「ランダムで選ぶ」(旧「ほかの候補を見る」は残っていない)',
-          body.includes('ランダムで選ぶ') && !body.includes('ほかの候補を見る'),
-        )
-        // オレンジ地・白字(既存CTAと同じトークン)。直接色指定ではなくクラスで確認する
-        const shuffleClass =
-          (await dhPage.getByRole('button', { name: 'ランダムで選ぶ' }).getAttribute('class')) ?? ''
-        check(
-          'HOME-DH-01 「ランダムで選ぶ」はオレンジ地・白字(bg-accent/text-on-accent)',
-          shuffleClass.includes('bg-accent') && shuffleClass.includes('text-on-accent'),
-        )
-        // 種別4区分は「条件をしぼる」の中。畳んでいる間は出ない
-        check(
-          'HOME-DH-01 種別チップは「条件をしぼる」を開くまで出ない',
-          (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 0,
-        )
-        await dhPage.getByRole('button', { name: /条件をしぼる/ }).click()
-        await dhPage.waitForTimeout(400)
-        check(
-          'HOME-DH-01 「条件をしぼる」の中にレシピと同じ4区分(主菜・副菜・汁物・その他)が並ぶ',
-          (await dhPage.getByRole('button', { name: '主菜', exact: true }).count()) === 1 &&
-            (await dhPage.getByRole('button', { name: '副菜', exact: true }).count()) === 1 &&
-            (await dhPage.getByRole('button', { name: '汁物', exact: true }).count()) === 1 &&
-            (await dhPage.getByRole('button', { name: 'その他', exact: true }).count()) === 1,
-        )
-        check(
-          'HOME-DH-01 既定は主菜だけON',
-          (await dhPage
-            .getByRole('button', { name: '主菜', exact: true })
-            .getAttribute('aria-pressed')) === 'true' &&
-            (await dhPage
-              .getByRole('button', { name: '副菜', exact: true })
-              .getAttribute('aria-pressed')) === 'false',
-        )
-
-        // 2026-08-04 便DV-1 再発防止(オーナー実機報告「全ボタンを選択すると候補が減る」)。
-        // 種別を足すたびに「候補◯品」が増える(減らない)・全選択と未選択が同じ品数になること
-        const candidateCount = async () => {
-          const text = (await dhPage.textContent('body')) ?? ''
-          const m = text.match(/候補(\d+)品/)
-          return m ? Number(m[1]) : -1
-        }
-        const tapType = async (name) => {
-          await dhPage.getByRole('button', { name, exact: true }).click()
-          await dhPage.waitForTimeout(350)
-        }
-        const cMainOnly = await candidateCount()
-        await tapType('副菜')
-        const cMainSide = await candidateCount()
-        await tapType('汁物')
-        await tapType('その他')
-        const cAll = await candidateCount()
-        check(
-          'HOME-DH-01(便DV) 種別を足すと候補は減らない(主菜のみ→+副菜→全選択)',
-          cMainOnly > 0 && cMainSide >= cMainOnly && cAll >= cMainSide,
-          `主菜のみ=${cMainOnly} +副菜=${cMainSide} 全選択=${cAll}`,
-        )
-        // 全部OFF(=種別で絞らない)にすると、全選択とまったく同じ品数になる
-        for (const name of ['主菜', '副菜', '汁物', 'その他']) await tapType(name)
-        const cNone = await candidateCount()
-        check(
-          'HOME-DH-01(便DV) 未選択(絞らない)と全選択の候補数が一致する',
-          cNone === cAll,
-          `未選択=${cNone} 全選択=${cAll}`,
-        )
-        // 既定(主菜だけON)へ戻してから次のケースへ進む
-        await tapType('主菜')
       }
 
-      // (2) 今日の夕食に予定を入れる → 2群が並び、既定は「レシピ一覧から選択中」だけ開く
+      // (3) その1品を今日の献立から外すと、また出る(片道の判定になっていないこと)
       await dhPage.evaluate(
         () =>
           new Promise((resolve, reject) => {
-            const d = new Date()
-            const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
             const req = indexedDB.open('uchi-recipe')
             req.onsuccess = () => {
-              const idb = req.result
-              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
-              g.onsuccess = () => {
-                const main = g.result.find((r) => r.title === '肉じゃが')
-                const tx = idb.transaction('mealPlans', 'readwrite')
-                tx.objectStore('mealPlans').add({
-                  date,
-                  slot: 'dinner',
-                  recipeId: main.id,
-                  role: 'main',
-                })
-                tx.oncomplete = () => resolve(true)
-                tx.onerror = () => reject(tx.error)
-              }
-              g.onerror = () => reject(g.error)
+              const tx = req.result.transaction('todayList', 'readwrite')
+              tx.objectStore('todayList').clear()
+              tx.oncomplete = () => resolve(true)
+              tx.onerror = () => reject(tx.error)
             }
             req.onerror = () => reject(req.error)
           }),
       )
       await dhPage.reload({ waitUntil: 'networkidle' })
-      await dhPage.waitForTimeout(1200)
-      {
-        const body = (await dhPage.textContent('body')) ?? ''
-        check(
-          'HOME-DH-01 2つの見出しがどちらも出る(片方だけの表示ではない)',
-          body.includes('レシピ一覧から選択中') && body.includes('今週の献立の予定'),
-        )
-        check(
-          'HOME-DH-01 既定は「レシピ一覧から選択中」だけ開く(今週の予定は畳まれている)',
-          body.includes('ほうれん草のおひたし') && !body.includes('肉じゃが'),
-        )
-        check(
-          'HOME-DH-01 今日の予定があるときは「今日なに作る？」を出さない',
-          !body.includes('今日なに作る？'),
-        )
-        await dhPage.locator('[data-testid="home-today-planned-toggle"]').click()
-        await dhPage.waitForTimeout(400)
-        check(
-          'HOME-DH-01 「今週の献立の予定」を開くと夕食の予定が出る',
-          ((await dhPage.textContent('body')) ?? '').includes('肉じゃが'),
-        )
-      }
-
-      // (3) 設定「常に表示」を選ぶと、予定があってもホームに「今日なに作る？」が出る
-      await dhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
-      await dhPage.waitForTimeout(800)
-      await dhPage.getByRole('button', { name: '常に表示', exact: true }).click()
-      await dhPage.waitForTimeout(400)
-      await dhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-      await dhPage.waitForTimeout(900)
+      await dhPage.waitForTimeout(1500)
       check(
-        'HOME-DH-01 設定「常に表示」なら今日の予定があっても「今日なに作る？」が出る',
-        ((await dhPage.textContent('body')) ?? '').includes('今日なに作る？'),
-      )
-
-      // (4) 「表示しない」→「表示する」で既定の位置(先頭)に戻る(末尾に付け足さない)
-      const homeWidgetsInDb = () =>
-        dhPage.evaluate(
-          () =>
-            new Promise((resolve, reject) => {
-              const req = indexedDB.open('uchi-recipe')
-              req.onsuccess = () => {
-                const g = req.result.transaction('settings', 'readonly').objectStore('settings').get(1)
-                g.onsuccess = () => resolve(g.result?.homeWidgets ?? null)
-                g.onerror = () => reject(g.error)
-              }
-              req.onerror = () => reject(req.error)
-            }),
-        )
-      await dhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
-      await dhPage.waitForTimeout(800)
-      const widgetRow = dhPage.locator('li').filter({ hasText: '今日の献立' }).first()
-      await widgetRow.getByRole('button', { name: '表示しない' }).click()
-      await dhPage.waitForTimeout(500)
-      check(
-        'HOME-DH-01 「表示しない」で並びから外れる',
-        !((await homeWidgetsInDb()) ?? []).includes('mealPlan'),
-      )
-      await dhPage.getByRole('button', { name: '表示する', exact: true }).first().click()
-      await dhPage.waitForTimeout(500)
-      check(
-        'HOME-DH-01 「表示する」に戻すと最下部ではなく既定の位置(先頭)へ復帰する',
-        JSON.stringify(await homeWidgetsInDb()) ===
-          JSON.stringify(['mealPlan', 'suggestion', 'ingredientSearch', 'history']),
-        `homeWidgets=${JSON.stringify(await homeWidgetsInDb())}`,
+        'DAYSUGGEST-01 今日の献立を空に戻すと「今日なに作る？」がまた出る',
+        ((await dhPage.textContent('body')) ?? '').replaceAll('​', '').includes('今日なに作る？'),
       )
     } finally {
       await dhBrowser.close()
@@ -13068,7 +13022,7 @@ try {
       })
       // 2026-08-04 便DV-10(オーナー指摘): 押し売りに見えないよう題も文面も短くし、
       // 解錠済みには出さない印(hideWhenPro)を付けた。
-      // 2026-08-08 便DZ: 上限を30に変えたお知らせが最新になった(ホームは最新1件だけを出す)
+      // 2026-08-08 便DZ: 上限を30に変えたお知らせが最新になった(アプリは最新1件だけを出す)
       const releaseNews = Array.isArray(news)
         ? news.find((n) => n.id === '2026-08-02-pro-release')
         : undefined
@@ -19130,10 +19084,10 @@ try {
     }
     // 検索条件つきのURLで一覧を開き直す。同じ /recipes のまま goto すると RecipesPage が
     // 作り直されず、?ing= / ?q= が読まれない(初期stateでしか見ていないため)ので、
-    // 一度ホームを経由して確実にマウントし直す
+    // 一度べつの画面を経由して確実にマウントし直す
     const openRecipesWith = async (queryString) => {
       await s3Page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
-      await s3Page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await s3Page.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await s3Page.waitForTimeout(400)
       await s3Page.goto(`${BASE}/#/recipes${queryString}`, { waitUntil: 'networkidle' })
       await s3Page.waitForTimeout(900)
@@ -20181,61 +20135,64 @@ try {
     }
   }
 
-  // --- HOMESEARCH-01(2026-08-02 オーナー実機FB・便CR-1): ホームの「使いたい食材から探す」を
-  // レシピタブへのショートカットに置き換えた。ホームからは検索欄が消え、
-  // 「レシピを探す」でレシピタブへ移動して検索欄にフォーカスが当たること・
-  // 「在庫の食材から探す」で「在庫の食材で絞る」がONの状態で開くことを見る ---
-  currentCheck = 'HOMESEARCH-01'
+  // --- DAYSEARCH-01(旧HOMESEARCH-01。2026-08-02 オーナー実機FB・便CR-1): 「使いたい食材から探す」の
+  // 検索欄をレシピ一覧への入口に置き換えた。この画面からは検索欄が消え、
+  // 「レシピを探す」でレシピ一覧へ移動して検索欄にフォーカスが当たること・
+  // 「在庫の食材から探す」で「在庫の食材で絞る」がONの状態で開くことを見る。
+  // 2026-08-17 便HG: 置き場所がホームから献立の「日」へ移ったので、見る画面を差し替えた
+  // (測っている「入口を押すとどうなるか」は同じ。出るのはその日の献立が空のときだけなので、
+  //  この検査は献立を1品も入れないまま進める) ---
+  currentCheck = 'DAYSEARCH-01'
   {
     const hsBrowser = await chromium.launch()
     const hsContext = await hsBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const hsPage = await hsContext.newPage()
     hsPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@HOMESEARCH-01] ${err.message}`)
+      errors.push(`[pageerror@DAYSEARCH-01] ${err.message}`)
     })
     try {
-      await hsPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await hsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await hsPage.waitForTimeout(2200)
-      const homeText = await hsPage.textContent('body')
+      const homeText = ((await hsPage.textContent('body')) ?? '').replaceAll('​', '')
       check(
-        'HOMESEARCH-01 ホームに「レシピを探す」の導線がある',
+        'DAYSEARCH-01 献立の「日」に「レシピを探す」の導線がある',
         // 2026-08-10 便FJ: ユーザー向け文言から「タブ」を掃引したので「レシピ一覧で、」に更新
         homeText.includes('レシピを探す') && homeText.includes('レシピ一覧で、料理名・材料・タグ・使いたい食材から探せます'),
       )
       check(
-        'HOMESEARCH-01 ホームから食材の検索欄(旧「この食材で探す」)が無くなっている',
+        'DAYSEARCH-01 食材の検索欄(旧「この食材で探す」)は無い',
         !homeText.includes('この食材で探す') && !homeText.includes('使いたい食材から探す'),
       )
       await hsPage.getByRole('button', { name: 'レシピを探す' }).click()
       await hsPage.waitForTimeout(900)
       check(
-        'HOMESEARCH-01 「レシピを探す」でレシピタブへ移動し、検索欄にフォーカスが当たる',
+        'DAYSEARCH-01 「レシピを探す」でレシピ一覧へ移動し、検索欄にフォーカスが当たる',
         (await hsPage.evaluate(() => location.hash)).startsWith('#/recipes') &&
           (await hsPage.evaluate(() => document.activeElement?.getAttribute('type'))) === 'search',
       )
       check(
-        'HOMESEARCH-01 一度きりの指示(?focus=search)はURLに残らない',
+        'DAYSEARCH-01 一度きりの指示(?focus=search)はURLに残らない',
         !(await hsPage.evaluate(() => location.hash)).includes('focus='),
       )
-      // 在庫を1件「ある」にすると、ホームに「在庫の食材から探す」が出る
+      // 在庫を1件「ある」にすると、「在庫の食材から探す」が出る
       await hsPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
       await hsPage.waitForTimeout(1200)
       // 食材タブが既定。プリセットの初期状態は「ない」なので、1回タップすると「ある」になる
       await hsPage.getByRole('button', { name: '玉ねぎ' }).first().click()
       await hsPage.waitForTimeout(400)
-      await hsPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-      await hsPage.waitForTimeout(1200)
+      await hsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await hsPage.waitForTimeout(1400)
       const pantryShortcut = hsPage.getByRole('button', { name: '在庫の食材から探す' })
-      check('HOMESEARCH-01 在庫があるときは「在庫の食材から探す」が出る', (await pantryShortcut.count()) === 1)
+      check('DAYSEARCH-01 在庫があるときは「在庫の食材から探す」が出る', (await pantryShortcut.count()) === 1)
       await pantryShortcut.click()
       await hsPage.waitForTimeout(900)
       check(
-        'HOMESEARCH-01 「在庫の食材から探す」は絞り込み(在庫の食材で絞る)ONでレシピタブを開く',
+        'DAYSEARCH-01 「在庫の食材から探す」は絞り込み(在庫の食材で絞る)ONでレシピ一覧を開く',
         (await hsPage.getByRole('button', { name: '在庫の食材で絞る' }).getAttribute('aria-pressed')) === 'true',
       )
       check(
-        'HOMESEARCH-01 一度きりの指示(?pantry=1)はURLに残らない',
+        'DAYSEARCH-01 一度きりの指示(?pantry=1)はURLに残らない',
         !(await hsPage.evaluate(() => location.hash)).includes('pantry='),
       )
     } finally {
@@ -23059,14 +23016,14 @@ try {
   }
 
   // --- EQ-01: 2026-08-09 便EQ(オーナー実機)「作った記録」を見るための導線と表示。
-  //  ①ホームの「最近作ったもの」の料理名を押すと、記録の中身(日付・何人分・ひとことメモ・写真)の
+  //  ①献立の「日」の「最近作ったもの」の料理名を押すと、記録の中身(日付・何人分・ひとことメモ・写真)の
   //    小窓が開く(レシピ詳細へ飛ばない)。写真は押すと拡大表示になる
   //  ②「作った記録の一覧」の行を押しても同じ小窓が開く
   //  ③献立の作った！済みの枠と、週タブの過去日の記録カードには「作った記録を見る」が出て、
   //    そこからも同じ小窓が開く(枠を押したときの「レシピを選び直す」は残す)
-  //  ④一覧への入口は日・週・月の3タブとホームで同じ「作った記録の一覧」という名前になっている
+  //  ④一覧への入口は日・週・月の3タブで同じ「作った記録の一覧」という名前になっている
   //  ⑤小窓の「この記録を編集する」でレシピ詳細の編集フォームが開いた状態になる
-  //  ⑥ホーム→一覧→戻る で、離れる前とほぼ同じスクロール位置に復元される ---
+  //  ⑥献立の「日」→一覧→戻る で、離れる前とほぼ同じスクロール位置に復元される ---
   currentCheck = 'EQ-01'
   {
     const eqBrowser = await chromium.launch()
@@ -23150,12 +23107,14 @@ try {
         [eqToday, eqYesterday],
       )
 
-      // ---------- ① ホームの「最近作ったもの」 ----------
-      await eqPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      // ---------- ① 献立の「日」の「最近作ったもの」 ----------
+      // (2026-08-17 便HG: ホーム画面の廃止で、この一覧はホームから献立の「日」へ移った。
+      //  測っているのは「行を押すと記録の小窓が開く(レシピ詳細へ飛ばない)」で変えていない)
+      await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await eqPage.reload({ waitUntil: 'networkidle' })
-      await eqPage.waitForTimeout(1500)
+      await eqPage.waitForTimeout(1800)
       const eqHomeOpen = eqPage.getByRole('button', { name: '肉じゃがの作った記録を見る' }).first()
-      check('EQ-01(①) ホームの「最近作ったもの」の行が記録を開くボタンになっている', (await eqHomeOpen.count()) === 1)
+      check('EQ-01(①) 献立の「日」の「最近作ったもの」の行が記録を開くボタンになっている', (await eqHomeOpen.count()) === 1)
       await eqHomeOpen.click()
       await eqPage.waitForTimeout(700)
       check(
@@ -23211,12 +23170,15 @@ try {
       check('EQ-01(①) もう一度Escapeで記録の小窓も閉じる', (await eqDialog.count()) === 0)
 
       // ---------- ④ 入口の名前がそろっている ----------
+      // 2026-08-17 便HG: 「最近作ったもの」が献立の「日」へ移り、その下に前からある
+      // 「作った記録の一覧」と隣り合った。同じ行き先のリンクを2つ並べないと決めたので、
+      // この画面に入口は1つだけであることも合わせて見る
       check(
-        'EQ-01(④) ホームの入口が「作った記録の一覧」という名前になっている',
-        (await eqPage.getByRole('link', { name: '作った記録の一覧' }).count()) >= 1,
+        'EQ-01(④) 献立の「日」の入口が「作った記録の一覧」という名前で1つだけある',
+        (await eqPage.getByRole('link', { name: '作った記録の一覧' }).count()) === 1,
       )
 
-      // ---------- ⑥ ホーム→一覧→戻る のスクロール位置復元 ----------
+      // ---------- ⑥ 献立の「日」→一覧→戻る のスクロール位置復元 ----------
       const eqHomeLink = eqPage.getByRole('link', { name: '作った記録の一覧' }).first()
       await eqHomeLink.scrollIntoViewIfNeeded()
       await eqPage.waitForTimeout(400)
@@ -23261,9 +23223,9 @@ try {
       await eqPage.getByRole('button', { name: 'やめる' }).click()
       await eqPage.waitForTimeout(500)
 
-      // ---------- ⑥ ホームへ戻ったときのスクロール位置 ----------
-      await eqPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-      await eqPage.waitForTimeout(900)
+      // ---------- ⑥ 献立の「日」へ戻ったときのスクロール位置 ----------
+      await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await eqPage.waitForTimeout(1200)
       await eqPage.getByRole('link', { name: '作った記録の一覧' }).first().scrollIntoViewIfNeeded()
       await eqPage.waitForTimeout(400)
       const eqScrollBefore2 = await eqPage.evaluate(() => Math.round(window.scrollY))
@@ -23273,7 +23235,7 @@ try {
       await eqPage.waitForTimeout(1500)
       const eqScrollAfter = await eqPage.evaluate(() => Math.round(window.scrollY))
       check(
-        'EQ-01(⑥) 一覧から戻るとホームは離れる前とほぼ同じスクロール位置になる(誤差40px以内)',
+        'EQ-01(⑥) 一覧から戻ると献立の「日」は離れる前とほぼ同じスクロール位置になる(誤差40px以内)',
         Math.abs(eqScrollAfter - eqScrollBefore2) <= 40,
         `before=${eqScrollBefore2}(初回=${eqScrollBefore}) / after=${eqScrollAfter}`,
       )
@@ -23777,7 +23739,7 @@ try {
         check(`ET-00 献立の${etoName}タブで横スクロールが出ない`, etoW.sw === etoW.cw, JSON.stringify(etoW))
       }
       for (const [etoName, etoUrl] of [
-        ['ホーム', '#/'],
+        ['献立', '#/meal-plan'],
         ['レシピ一覧', '#/recipes'],
         ['買い物', '#/shopping'],
         ['設定', '#/settings'],
@@ -24099,9 +24061,12 @@ try {
     }
   }
 
-  // --- EW-01: ホーム画面への追加を案内する「初回のお知らせ」(2026-08-10 便EW)。
-  // 紹介ページ側の割り込み(data-ask="install")をやめ、アプリのホーム画面に着いた直後に
-  // 1回だけ出す案内に作り直した。見るのは次の7点:
+  // --- EW-01: 端末のホーム画面への追加を案内する「初回のお知らせ」(2026-08-10 便EW)。
+  // 紹介ページ側の割り込み(data-ask="install")をやめ、アプリを開いて最初に着く画面に着いた直後に
+  // 1回だけ出す案内に作り直した。
+  // 2026-08-17 便HG: アプリのホーム画面を廃止し、最初に着くのが献立の「日」になったので、
+  // 着地の合図もそこへ移した(出す作法は変えていない)。見る画面を #/meal-plan に差し替えている。
+  // 見るのは次の7点:
   //  (a) 指で操作する端末(390px・タッチあり)の初回で出る・中身がそろっている
   //  (b) 閉じたら、同じ端末で開き直しても二度と出ない(✕でも「このまま使う」でも)
   //  (c) すでにホーム画面のアイコンから開いているときは出ない(iOS・Android/パソコンの両方の見分け方)
@@ -24132,8 +24097,8 @@ try {
     const ewOpen = async (ctx) => {
       const p = await ctx.newPage()
       p.on('pageerror', (err) => errors.push(`[pageerror@EW-01] ${err.message}`))
-      await p.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-      await p.waitForTimeout(1800)
+      await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await p.waitForTimeout(2000)
       return p
     }
     const ewVisible = (p) => p.locator('[data-testid="home-screen-notice"]').isVisible()
@@ -24217,7 +24182,7 @@ try {
         await page1.locator('[data-testid="home-screen-notice-dismiss"]').click()
         await page1.waitForTimeout(400)
         check('EW-01(b) 「このまま使う」で閉じられる', (await ewVisible(page1)) === false)
-        await page1.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page1.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await page1.waitForTimeout(1500)
         check('EW-01(b) 閉じたあとに開き直しても出ない', (await ewVisible(page1)) === false)
         // 見た記録は端末内(localStorage)だけ＝サーバーにも設定(バックアップ対象)にも入れない
@@ -24240,7 +24205,7 @@ try {
         check('EW-01(b) 別の端末(まっさらな状態)ではまた出る', await ewVisible(page2))
         await page2.locator('[data-testid="home-screen-notice-close"]').click()
         await page2.waitForTimeout(400)
-        await page2.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page2.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await page2.waitForTimeout(1500)
         check('EW-01(b) ✕で閉じたあとも開き直して出ない', (await ewVisible(page2)) === false)
         await ctx.close()
@@ -24338,7 +24303,7 @@ try {
           (await ewVisible(page6)) === false,
           page6.url(),
         )
-        await page6.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page6.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await page6.waitForTimeout(1500)
         check('EW-01(e) 手順ページを見たあとに開き直しても出ない', (await ewVisible(page6)) === false)
         await ctx.close()
@@ -24352,7 +24317,7 @@ try {
         await page9.keyboard.press('Escape')
         await page9.waitForTimeout(500)
         check('EW-01(b) Escapeでも閉じられる', (await ewVisible(page9)) === false)
-        await page9.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+        await page9.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await page9.waitForTimeout(1500)
         check('EW-01(b) Escapeで閉じたあとも開き直して出ない', (await ewVisible(page9)) === false)
         await ctx.close()
@@ -24819,7 +24784,7 @@ try {
         const p9 = await ctx.newPage()
         p9.on('pageerror', (err) => errors.push(`[pageerror@GE-01] ${err.message}`))
         for (const [label, path] of [
-          ['ホーム', '/#/'],
+          ['献立', '/#/meal-plan'],
           ['レシピ一覧', '/#/recipes'],
           ['献立', '/#/meal-plan'],
           ['設定', '/#/settings'],
@@ -27998,7 +27963,6 @@ try {
   //  FF-COOK  : 「作った！」で食数を記録する（枠の食数＞設定「食数の設定」＞レシピの登録人数分）
   //  FF-FILTER: 絞り込みの区分分け・タグの件数併記・料理の種別での絞り込み（既存の絞り込みも全部残る）
   //  FF-PANEL : 並べ替え／絞り込みをスクロール途中で開いても位置が動かない（scrollYの実測）
-  //  FF-HOME  : ホームの「今日の献立」の下から献立の画面へ行ける
   // ============================================================================
 
   // --- FF-COOK: 「作った！」押下時の食数を記録に残す（オーナー「作った！では基本的に、
@@ -28472,85 +28436,12 @@ try {
     }
   }
 
-  // --- FF-HOME: ホームの「今日の献立」の下に、献立の画面への行き先を置く（オーナー
-  // 「今日の献立の下に、献立ページへ移動リンクをつけたい。ボタンだと無駄に目立ってしまう」）。
-  // ボタンではなくリンクであること・「タブ」という語を使っていないこと・押すと献立の画面へ行くこと ---
-  currentCheck = 'FF-HOME'
-  {
-    const fhBrowser = await chromium.launch()
-    const fhContext = await fhBrowser.newContext({ viewport: { width: 390, height: 844 } })
-    const fhPage = await fhContext.newPage()
-    fhPage.on('dialog', (dialog) => dialog.accept())
-    fhPage.on('pageerror', (err) => {
-      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@FF-HOME] ${err.message}`)
-    })
-    try {
-      await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await fhPage.waitForTimeout(2000)
-      // 今日の献立が空のうちはウィジェットごと出ない＝行き先も出ない
-      await fhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-      await fhPage.waitForTimeout(1500)
-      check(
-        'FF-HOME 今日の献立が空のうちは行き先も出ない(ウィジェットごと出ないため)',
-        (await fhPage.locator('[data-testid="home-mealplan-link"]').count()) === 0,
-      )
-      // 1品入れるとウィジェットが出て、その下に行き先が付く
-      await fhPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await fhPage.waitForTimeout(900)
-      await fhPage.getByText('肉じゃが', { exact: true }).first().click()
-      await fhPage.waitForTimeout(800)
-      await fhPage.getByRole('button', { name: '今日の献立に追加' }).first().click()
-      await fhPage.waitForTimeout(500)
-      await fhPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
-      await fhPage.waitForTimeout(700)
-      await fhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
-      await fhPage.waitForTimeout(1800)
-      const fhLink = fhPage.locator('[data-testid="home-mealplan-link"]')
-      check('FF-HOME 「今日の献立」の下に献立の画面への行き先がある', (await fhLink.count()) === 1)
-      const fhInfo = await fhPage.evaluate(() => {
-        const link = document.querySelector('[data-testid="home-mealplan-link"]')
-        const title = Array.from(document.querySelectorAll('h2')).find((h) =>
-          h.textContent?.includes('今日の献立'),
-        )
-        if (!link || !title) return null
-        return {
-          tag: link.tagName,
-          text: link.textContent?.trim() ?? '',
-          underline: getComputedStyle(link).textDecorationLine.includes('underline'),
-          // 目立つ塗りのボタン(bg-accent)ではないこと
-          filled: link.className.includes('bg-accent'),
-          belowTitle:
-            link.getBoundingClientRect().top > title.getBoundingClientRect().bottom,
-        }
-      })
-      check(
-        'FF-HOME 行き先はボタンではなく下線つきの文字リンク(塗りつぶしのボタンにしない)',
-        fhInfo != null && fhInfo.tag === 'A' && fhInfo.underline === true && fhInfo.filled === false,
-        JSON.stringify(fhInfo),
-      )
-      check(
-        'FF-HOME 行き先は「今日の献立」の見出しより下にある',
-        fhInfo != null && fhInfo.belowTitle === true,
-        JSON.stringify(fhInfo),
-      )
-      check(
-        'FF-HOME 文言は「献立を開く」(「タブ」という内部の言い方は使わない)',
-        fhInfo != null && fhInfo.text === '献立を開く' && !fhInfo.text.includes('タブ'),
-        JSON.stringify(fhInfo),
-      )
-      await fhLink.click()
-      await fhPage.waitForTimeout(1500)
-      check(
-        'FF-HOME 押すと献立の画面(日の表示)へ移動する',
-        (await fhPage.evaluate(() => location.hash)).startsWith('#/meal-plan') &&
-          ((await fhPage.textContent('body')) ?? '').includes('今日の献立'),
-        `hash=${await fhPage.evaluate(() => location.hash)}`,
-      )
-    } finally {
-      await fhBrowser.close()
-    }
-  }
+  // --- FF-HOME は 2026-08-17 便HG で廃止した。
+  // 測っていたのは「ホームの『今日の献立』から献立の画面へ行ける」ことだったが、
+  // オーナー決定でホーム画面そのものを無くし、その「今日の献立」は行き先だった
+  // 献立の「日」に合流した＝**同じ画面の中で自分自身へ行くリンク**になるため、
+  // 測る対象が残っていない（機能を落としたのではなく、行き先と出発点が1つになった）。
+  // 「日」に今日の献立が出ること・その画面へ着けることは NOHOME-01 と MEALPLAN-ROLE が見ている ---
 
   // ============================================================================
   // 便FK(2026-08-11): 調理中モード(並行調理ナビの段取り)の説明が使い方ページにあること。
@@ -33959,6 +33850,209 @@ try {
     }
   }
 
+
+  // --- NOHOME-01: ホーム画面の廃止と、その役目の引き継ぎ(2026-08-17 便HG・オーナー決定
+  // 「先にホーム画面なくします。タブの順番は、献立＞レシピ＞食材＞設定」
+  //  「献立（日）の画面に、現在のホーム画面の機能をそのまま入れてください。『今日なに作る？』と
+  //   『レシピを探す』『在庫の食材から探す』は、献立がない時のみに出る。献立があれば、これまで通りの
+  //   献立タブにあった『今日の献立』。『最近作ったもの』は常に表示」)。
+  // 骨格の変更なので、①着地 ②並び ③出し分け ④残骸、の4つを1本の流れで見る。
+  // まっさらプロファイルで通しで確認する ---
+  currentCheck = 'NOHOME-01'
+  {
+    const nhBrowser = await chromium.launch()
+    const nhContext = await nhBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const nhPage = await nhContext.newPage()
+    nhPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@NOHOME-01] ${text}`)
+    })
+    nhPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NOHOME-01] ${err.message}`)
+    })
+    // BudouXのゼロ幅スペースを外してから照合する(禁じ手②)
+    const nhBody = async () => ((await nhPage.textContent('body')) ?? '').replaceAll('​', '')
+    // 「日」が選ばれているかは選択状態(aria-pressed)で見る＝見出しの置き場所には縛られない(禁じ手④)
+    const nhDayPressed = async () => {
+      const loc = nhPage.getByRole('button', { name: '日', exact: true })
+      if ((await loc.count()) !== 1) return false
+      return (await loc.getAttribute('aria-pressed')) === 'true'
+    }
+    try {
+      // (1) 旧ホームを指していたURL(#/)を開く＝アプリを素で開いたときと同じ
+      await nhPage.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(2200) // 初回シード完了待ち
+      check(
+        'NOHOME-01 「#/」で開くと献立の「日」に着く',
+        await nhDayPressed(),
+        `hash=${await nhPage.evaluate(() => location.hash)}`,
+      )
+      check(
+        'NOHOME-01 「#/」に留まらない(献立の画面のURLへ移る)',
+        (await nhPage.evaluate(() => location.hash)).startsWith('#/meal-plan'),
+        `hash=${await nhPage.evaluate(() => location.hash)}`,
+      )
+
+      // (2) 下の並びは4つで、献立→レシピ→食材→設定(順番はオーナー指定なので並びごと見る)
+      const nhTabs = await nhPage.$$eval('[data-app-bottom-bar] a', (els) =>
+        els.map((el) => (el.textContent ?? '').replaceAll('​', '').trim()),
+      )
+      check(
+        'NOHOME-01 下の並びは4つ・献立→レシピ→食材→設定(ホームは無い)',
+        JSON.stringify(nhTabs) === JSON.stringify(['献立', 'レシピ', '食材', '設定']),
+        JSON.stringify(nhTabs),
+      )
+
+      // (3) その日の献立が空の日: 3つが出る。以降は献立の画面を名指しで開いて測る
+      await nhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(1500)
+      {
+        const body = await nhBody()
+        check('NOHOME-01 献立が無い日は「今日なに作る？」が出る', body.includes('今日なに作る？'))
+        check('NOHOME-01 献立が無い日は「レシピを探す」が出る', body.includes('レシピを探す'))
+      }
+      // 在庫を1品「ある」にすると「在庫の食材から探す」が出る(在庫0の日は出さない仕様のまま)
+      await nhPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction('pantryItems', 'readwrite')
+              const store = tx.objectStore('pantryItems')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                store.put({ ...g.result[0], level: 'have' })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      await nhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await nhPage.reload({ waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(1400)
+      check(
+        'NOHOME-01 在庫があるときは「在庫の食材から探す」が出る',
+        (await nhBody()).includes('在庫の食材から探す'),
+      )
+
+      // (4) 「最近作ったもの」は献立が無い日でも出る
+      const nhCooked = await nhPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const tx = idb.transaction('recipes', 'readwrite')
+              const store = tx.objectStore('recipes')
+              const g = store.getAll()
+              g.onsuccess = () => {
+                const target = g.result.find((r) => r.title === 'ほうれん草のおひたし')
+                store.put({ ...target, cookedLogs: [{ date }], updatedAt: Date.now() })
+                tx.oncomplete = () => resolve(target.title)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        // 「今日」はブラウザの中で作らず、ここで組んだ日付をそのまま渡す(曜日・月替わりに依らない)
+        (() => {
+          const d = new Date()
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        })(),
+      )
+      await nhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await nhPage.reload({ waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(1600)
+      {
+        const body = await nhBody()
+        check(
+          'NOHOME-01 献立が無い日でも「最近作ったもの」が出る',
+          body.includes('最近作ったもの') && body.includes(nhCooked),
+        )
+      }
+
+      // (5) 今日の夕食に予定を入れる → 「今日の献立」が出て、探す系の3つは引っ込む
+      await nhPage.evaluate(
+        (date) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const main = g.result.find((r) => r.title === '肉じゃが')
+                const tx = idb.transaction('mealPlans', 'readwrite')
+                tx.objectStore('mealPlans').add({ date, slot: 'dinner', recipeId: main.id, role: 'main' })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        (() => {
+          const d = new Date()
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        })(),
+      )
+      await nhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await nhPage.reload({ waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(1800)
+      {
+        const body = await nhBody()
+        check(
+          'NOHOME-01 献立がある日は「今日の献立」の中身が出る',
+          body.includes('今日の献立') && body.includes('肉じゃが'),
+        )
+        check('NOHOME-01 献立がある日は「今日なに作る？」を出さない', !body.includes('今日なに作る？'))
+        check('NOHOME-01 献立がある日は「レシピを探す」を出さない', !body.includes('レシピを探す'))
+        check(
+          'NOHOME-01 献立がある日は「在庫の食材から探す」を出さない',
+          !body.includes('在庫の食材から探す'),
+        )
+        check('NOHOME-01 献立がある日も「最近作ったもの」は出る', body.includes('最近作ったもの'))
+      }
+
+      // (6) 設定から「ホーム画面のカスタマイズ」が残骸なく消えている。
+      // 端末のホーム画面への追加案内(別物)は残っていること
+      await nhPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(1200)
+      {
+        const body = await nhBody()
+        check(
+          'NOHOME-01 設定に「ホーム画面のカスタマイズ」が無い',
+          !body.includes('ホーム画面のカスタマイズ'),
+        )
+        check(
+          'NOHOME-01 その中にあった説明・初期化・「出すとき」の残骸も無い',
+          !body.includes('表示するパーツを選び') && !body.includes('「今日なに作る？」を出すとき'),
+        )
+        check(
+          'NOHOME-01 端末のホーム画面への追加案内は残る(別物なので消さない)',
+          body.includes('ホーム画面への追加方法'),
+        )
+      }
+
+      // (7) 知らない行き先(ホームを指していた古いブックマーク等)でも同じ場所に着く
+      await nhPage.goto(`${BASE}/#/home`, { waitUntil: 'networkidle' })
+      await nhPage.waitForTimeout(1500)
+      check(
+        'NOHOME-01 知らない行き先を開いても献立の「日」に着く',
+        await nhDayPressed(),
+        `hash=${await nhPage.evaluate(() => location.hash)}`,
+      )
+    } finally {
+      await nhBrowser.close()
+    }
+  }
 
   // --- SELECT-UI-01: レシピ一覧の複数選択まわり(2026-08-15 便GU・オーナー実機フィードバック4件) ---
   //  ① 複数選択中に画面下のタブを押すと、タブの下のレシピカードが押されて移動できなかった

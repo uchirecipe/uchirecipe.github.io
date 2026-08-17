@@ -3,8 +3,9 @@ import { db } from './db'
 import { defaultSettings, defaultHomeWidgets, type HomeWidgetKey, type MealSlot, type Settings } from './types'
 
 /**
- * ホームカスタマイズの既知キー集合。保存済みsettings.homeWidgetsに、旧'pantry'
- * (2026-07-16 便Sでホームから削除)のような現行の型に無いキーが残っていても、
+ * 保存済み settings.homeWidgets の既知キー集合（2026-08-17 便HGでホーム画面を廃止した
+ * あとも、書き出したバックアップを読み込めるように保存項目だけ残している）。旧'pantry'
+ * のような現行の型に無いキーが残っていても、
  * ここで静かに取り除いて安全に無視する（並び順や他のキーはそのまま保つ）
  */
 const KNOWN_HOME_WIDGET_KEYS = new Set<string>(defaultHomeWidgets)

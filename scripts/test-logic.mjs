@@ -80,7 +80,6 @@ import {
   recipeDishType,
   mealRoleForRecipe,
 } from '../src/logic/mealPlan.ts'
-import { restoreHomeWidget } from '../src/logic/homeWidgets.ts'
 import { suggestionCandidates, DISH_TYPE_OPTIONS } from '../src/logic/homeSuggest.ts'
 import {
   shouldShowPermissionHelp,
@@ -316,7 +315,6 @@ import {
   WEEK_RETURN_PARAM,
   LAST_RECIPES_PATH_KEY,
   DAY_RETURN_KEY,
-  HOME_RETURN_KEY,
   MONTH_RETURN_KEY,
   parseViewReturn,
   parseWeekReturn,
@@ -2346,7 +2344,7 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
   eq('detectGenreMix: 主菜が無ければ混在なし', detectGenreMix(undefined, [{ tags: ['中華'] }]), false)
   eq('detectGenreMix: 主菜にジャンルが無ければ混在なし', detectGenreMix({ tags: [] }, [{ tags: ['中華'] }]), false)
 
-  // isMainDish / recipeGenre: 外部公開の主菜判定・ジャンル取得(ホーム「今日なに作る?」等が使う)
+  // isMainDish / recipeGenre: 外部公開の主菜判定・ジャンル取得(「今日なに作る?」等が使う)
   eq('isMainDish: dishType:main は主菜', isMainDish(mkRecipe(1, { dishType: 'main' })), true)
   eq('isMainDish: dishType:side は主菜でない', isMainDish(mkRecipe(1, { dishType: 'side' })), false)
   eq('isMainDish: dishType:dessert は主菜でない', isMainDish(mkRecipe(1, { dishType: 'dessert' })), false)
@@ -2548,7 +2546,7 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
   }
 }
 
-// ---------- preferSeasonWithFallback(ホームの候補が季節で痩せる問題・2026-07-29 便CD/MP-12) ----------
+// ---------- preferSeasonWithFallback(提案の候補が季節で痩せる問題・2026-07-29 便CD/MP-12) ----------
 // 季節ぴったりの品が少ないときは通年・季節指定なしの品も自動で混ぜる。同梱の夏タグは5品しかなく、
 // 従来のpreferSeasonは「1品でもあればその季節の品だけ」に絞るため、何度振り直しても同じ5品しか出なかった。
 {
@@ -3077,12 +3075,12 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
-// ---------- navMemory: ホーム/月タブ/日タブの居場所(2026-08-09 便EQ) ----------
+// ---------- navMemory: 献立の月タブ/日タブの居場所(2026-08-09 便EQ) ----------
 // 「作った記録の一覧」へ行って戻ったとき、離れる直前の場所（月タブなら見ていた月も）へ帰す。
 // 週タブと同じく、壊れた値を読んだときは「復元しない」に倒す＝変な場所へ飛ばさない。
 {
-  eq('EQ-NAV 覚えるキーは固定(別便が別名で書かない)', [HOME_RETURN_KEY, MONTH_RETURN_KEY, DAY_RETURN_KEY], [
-    'home:return',
+  // 2026-08-17 便HG: ホーム画面の廃止で 'home:return' は使う画面が無くなったので外した
+  eq('EQ-NAV 覚えるキーは固定(別便が別名で書かない)', [MONTH_RETURN_KEY, DAY_RETURN_KEY], [
     'mealPlan:monthReturn',
     'mealPlan:dayReturn',
   ])
@@ -3092,7 +3090,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     { anchor: '2026-06-01', scrollY: 820 },
   )
   eq(
-    'EQ-NAV 目印が要らない画面(ホーム・日タブ)は空文字で覚える',
+    'EQ-NAV 目印が要らない画面(献立の日タブ)は空文字で覚える',
     parseViewReturn(serializeViewReturn({ anchor: '', scrollY: 40 })),
     { anchor: '', scrollY: 40 },
   )
@@ -13183,7 +13181,7 @@ eq(
 // ---------- cookedWithinDays: 「最近作った」判定(2026-07-29 便CI/C08) ----------
 // 旧実装は cookedLogs[0] の1件だけを見ており、addCookedLog が日付を見ずに先頭へ積むため、
 // 過去の日付を後から記録すると「今日作ったばかりのレシピ」が最近作っていない扱いになっていた
-// (ホーム「今日なに作る？」の候補と献立の自動提案が誤って拾う)。全件の最大日付で判定する。
+// (「今日なに作る？」の候補と献立の自動提案が誤って拾う)。全件の最大日付で判定する。
 {
   const day = 24 * 60 * 60 * 1000
   const ymd = (offsetDays) => new Date(Date.now() - offsetDays * day).toISOString().slice(0, 10)
@@ -14591,7 +14589,7 @@ eq(
   )
   eq('CT-AISLE 常に6グループ揃う', normalizeAisleOrder(['other']).length, 6)
 
-  // 上下移動(設定のホームカスタマイズと同じ入れ替え方式)
+  // 上下移動(隣同士の入れ替え方式)
   eq('CT-AISLE 下へ移動', moveAisleGroup(SHOPPING_AISLE_ORDER, 0, 1), [
     'meatFish',
     'vegetable',
@@ -14933,7 +14931,9 @@ eq(
     to: '/shopping',
     label: '食材に戻る',
   })
-  eq('DF-BACK ホーム', resolveBackTarget('/'), { to: '/', label: 'ホームに戻る' })
+  // 2026-08-17 便HG: ホーム画面を廃止し、「/」は献立へ送るだけの通過点になった。
+  // 戻り先としては受け付けない＝「ホームに戻る」というボタンが残らないことを固定する
+  eq('DF-BACK 「/」は戻り先として受け付けない(ホーム画面は無い)', resolveBackTarget('/'), null)
   eq('DF-BACK クエリ付きの戻り先はクエリごと戻す', resolveBackTarget('/recipes?q=鶏'), {
     to: '/recipes?q=鶏',
     label: 'レシピ一覧に戻る',
@@ -14948,7 +14948,7 @@ eq(
   })
 }
 
-// ---------- 便DH: ホーム・日タブの内訳／種別／ホーム画面のカスタマイズ(2026-08-03) ----------
+// ---------- 便DH: 献立の「日」の内訳／料理の種別(2026-08-03) ----------
 {
   const mk = (id, over = {}) => ({
     id,
@@ -15085,7 +15085,7 @@ eq(
     recipeDishType(mk(4, { title: '豚の生姜焼き', ingredients: [{ name: '豚こま' }] })),
     'main',
   )
-  // 4区分は重ならない(ホームの種別チップは「どれか1つ」に必ず入る前提で並べている)
+  // 4区分は重ならない(種別チップは「どれか1つ」に必ず入る前提で並べている)
   eq(
     'DH-TYPE 判定結果は必ず4区分のどれか1つ',
     ['main', 'side', 'soup', 'dessert'].includes(recipeDishType(mk(5, { title: '謎の料理' }))),
@@ -15113,36 +15113,15 @@ eq(
     true,
   )
 
-  // restoreHomeWidget: 「表示しない」→「表示する」で標準の位置へ戻る(末尾に足さない)
-  eq(
-    'DH-HOMEW 先頭のパーツは先頭へ戻る',
-    restoreHomeWidget(['suggestion', 'ingredientSearch', 'history'], 'mealPlan'),
-    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
-  )
-  eq(
-    'DH-HOMEW 途中のパーツは標準の並びの位置へ戻る',
-    restoreHomeWidget(['mealPlan', 'ingredientSearch', 'history'], 'suggestion'),
-    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
-  )
-  eq(
-    'DH-HOMEW 標準で最後のパーツは末尾へ戻る',
-    restoreHomeWidget(['mealPlan', 'suggestion', 'ingredientSearch'], 'history'),
-    ['mealPlan', 'suggestion', 'ingredientSearch', 'history'],
-  )
-  // 手で入れ替えた並びは崩さない(既に表示中のパーツの相対順は動かさない)
-  eq(
-    'DH-HOMEW 手で入れ替えた並びの相対順は変えない',
-    restoreHomeWidget(['history', 'ingredientSearch'], 'suggestion'),
-    ['suggestion', 'history', 'ingredientSearch'],
-  )
-  eq(
-    'DH-HOMEW 既に表示中なら何もしない',
-    restoreHomeWidget(['mealPlan', 'suggestion'], 'suggestion'),
-    ['mealPlan', 'suggestion'],
-  )
 }
 
-// ---------- 便DV-1: ホーム「今日なに作る?」の種別しぼり(2026-08-04 オーナー実機報告) ----------
+// ---------- 便HG: 設定「ホーム画面のカスタマイズ」は 2026-08-17 に廃止した ----------
+// ホーム画面そのものを無くしたので、「表示するパーツ」「並び順」「戻す」を持つ意味が無くなった。
+// 並べ替えの入れ先を決めていた logic/homeWidgets.ts とその検査（旧 DH-HOMEW）も一緒に落としている。
+// 保存項目 settings.homeWidgets は、書き出したバックアップを読めるようにするため残してある
+// （db/types.ts の HomeWidgetKey のコメント参照）。設定から残骸なく消えたことは e2e の NOHOME-01 が見る。
+
+// ---------- 便DV-1: 「今日なに作る?」の種別しぼり(2026-08-04 オーナー実機報告) ----------
 // 再発防止: 「主菜〜その他の全ボタンを選択すると候補が減る」。
 // 原因は「種別で絞ってから季節の優先(preferSeasonWithFallback)をかける」順で、季節の優先が
 // 「季節の品が10品以上あればその季節だけに絞る」しきい値を持つため、入れる集合が大きいほど
@@ -16061,7 +16040,7 @@ eq(
 }
 
 // ---------- 便EI-1: ホーム画面から起動しているかの判定(設定の追加案内の出し分け) ----------
-// 設定「うちレシピについて」の「ホーム画面への追加方法」は、すでにアイコンから起動している人には
+// 設定「うちレシピについて」の「ホーム画面への追加方法」は、すでに端末のホーム画面のアイコンから起動している人には
 // 出さない。判定材料はAndroid/PC=display-mode、iOS=navigator.standaloneの2本で、
 // どちらか一方でも真ならアイコン起動(iOSは古い版でdisplay-modeを返さないことがあるため)。
 {
@@ -16974,7 +16953,7 @@ eq(
     false,
   )
 
-  // 窓の作り(ホーム画面追加の案内と同じ NoticeDialog に載せる)と、設定への行き先
+  // 窓の作り(端末のホーム画面追加の案内と同じ NoticeDialog に載せる)と、設定への行き先
   const fsUi = readFileSync(path.join(scriptDir, '../src/components/FirstSetupNotice.tsx'), 'utf-8')
   eq(
     'FIRSTSETUP 警告色・全面の黒地を使っていない',
@@ -17023,7 +17002,7 @@ eq(
       ),
     true,
   )
-  // 出す場所はレシピ詳細だけ(ホーム等へ広げない)。docs/65 A-4の決定
+  // 出す場所はレシピ詳細だけ(他の画面へ広げない)。docs/65 A-4の決定
   const fsDetailSrc = readFileSync(path.join(scriptDir, '../src/pages/RecipeDetailPage.tsx'), 'utf-8')
   eq('FIRSTSETUP レシピ詳細から呼んでいる', fsDetailSrc.includes('<FirstSetupNotice'), true)
   eq(
@@ -17033,7 +17012,8 @@ eq(
     ),
     true,
   )
-  for (const page of ['HomePage.tsx', 'RecipesPage.tsx', 'MealPlanPage.tsx', 'CookNaviPage.tsx']) {
+  // 2026-08-17 便HG: HomePage.tsx はホーム画面の廃止で無くなったので外した
+  for (const page of ['RecipesPage.tsx', 'MealPlanPage.tsx', 'CookNaviPage.tsx']) {
     eq(
       `FIRSTSETUP ${page} には出していない`,
       readFileSync(path.join(scriptDir, `../src/pages/${page}`), 'utf-8').includes(

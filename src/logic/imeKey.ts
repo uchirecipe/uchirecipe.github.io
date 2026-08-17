@@ -7,7 +7,7 @@
  *
  * isComposing が本命で、keyCode 229 は compositionend が keydown より先に来る環境向けの保険。
  *
- * 2026-08-09 便EI: レシピ登録画面(RecipeFormPage)にしか無く、ChipInput（レシピ一覧・ホームの
+ * 2026-08-09 便EI: レシピ登録画面(RecipeFormPage)にしか無く、ChipInput（レシピ一覧の
  * 食材しぼり込み）・在庫ボード（食材の追加／一言メモ）・設定のNG食材が未対応で残っていたため、
  * 判定をこのモジュールへ切り出して全箇所で同じものを使う（単体テストもここに集約する）。
  *

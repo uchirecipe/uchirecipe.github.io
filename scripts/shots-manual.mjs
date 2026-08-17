@@ -6,7 +6,7 @@
 //   BASE_URL=http://localhost:4284 npx tsx scripts/shots-manual.mjs
 //
 //   一部だけ撮り直すとき(下の ONLY を参照):
-//   BASE_URL=http://localhost:4284 ONLY=home-suggest,home-search npx tsx scripts/shots-manual.mjs
+//   BASE_URL=http://localhost:4284 ONLY=day-suggest,day-search npx tsx scripts/shots-manual.mjs
 //
 // 仕様:
 //  - 390x844(iPhone相当)・ライトテーマ・deviceScaleFactor 2 のブラウザで操作する
@@ -76,7 +76,7 @@ const manifest = {}
  * 「1枚も撮れないまま全カット走り切って何も変わらない」という分かりにくい失敗になっていた。
  */
 const SHOT_NAMES = [
-  'recipe-cards', 'home-suggest', 'home-search', 'nav-tabs', 'search',
+  'recipe-cards', 'day-suggest', 'day-search', 'nav-tabs', 'search',
   'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
   'plan-day-buttons', 'select-for-today', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
@@ -88,7 +88,7 @@ const SHOT_NAMES = [
 ]
 
 /**
- * ONLY=home-suggest,home-search のように指定すると、その名前のスクショだけを書き出す(部分撮り直し)。
+ * ONLY=day-suggest,day-search のように指定すると、その名前のスクショだけを書き出す(部分撮り直し)。
  * 料理写真(MANUAL_PHOTO_DIR)を持っていない環境で全部を撮り直すと、写真つきのスクショ
  * (recipe-cards / detail-photo / plan-month-photo / search / logs)が写真なしの絵に
  * 置き換わってしまうため、一部の画面だけ追随させたいときは対象を絞る。
@@ -411,24 +411,25 @@ try {
   await page.reload({ waitUntil: 'networkidle' })
   await wait(page, 1500)
 
-  // ======== ホーム ========
-  await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle' })
+  // ======== 献立の「日」(2026-08-17 便HGでホーム画面を廃止し、ここが最初に出る画面になった) ========
+  await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1800)
 
-  // 「今日なに作る？」(2026-08-03 便DH: 今週の献立に今日の予定があると出ないので、献立を入れる前に撮る)
+  // 「今日なに作る？」と「レシピを探す」は、その日の献立が決まっていない日にだけ出る。
+  // このスクリプトはこのあとで献立を入れるので、必ず入れる前に撮ること
   const suggestCard = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: '今日なに作る？' }) })
-  await crop(page, 'home-suggest', suggestCard, { top: 60 })
+  await crop(page, 'day-suggest', suggestCard, { top: 60 })
 
-  // 「レシピを探す」ショートカット(2026-08-02 便CRで旧「使いたい食材から探す」の検索欄から差し替え)。
+  // 「レシピを探す」の入口(2026-08-02 便CRで旧「使いたい食材から探す」の検索欄から差し替え)。
   // 在庫を入れてあるので「在庫の食材から探す」も一緒に写る
   const searchShortcut = page
     .locator('section')
     .filter({ has: page.getByRole('button', { name: 'レシピを探す', exact: true }) })
-  await crop(page, 'home-search', searchShortcut, { top: 120 })
+  await crop(page, 'day-search', searchShortcut, { top: 120 })
 
-  // 下タブ(画面の見取り図)
+  // 下の行き先の並び(画面の見取り図)
   await cropRect(page, 'nav-tabs', { x: 0, y: VIEW.height - 72, width: VIEW.width, height: 72 })
 
   // ======== レシピ一覧(写真つきカード) ========

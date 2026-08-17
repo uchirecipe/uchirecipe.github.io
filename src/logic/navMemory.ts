@@ -202,7 +202,7 @@ function parseReturnAnchor(value: unknown): ReturnAnchor | null {
  * 一覧へ移る直前の居場所（2026-08-09 便EQ・オーナー指示「戻るのも該当場所のスクロール位置まで」）。
  *
  * `anchor` は画面ごとの目印で、献立の月タブなら「見ていた月の日付」を入れる。
- * ホームや献立の日タブのように目印が要らない画面は空文字を入れる。
+ * 献立の日タブのように目印が要らない画面は空文字を入れる。
  * 週タブだけは以前から専用の WeekReturnPoint を使っており、そのままにしてある
  * （週は「見ていた週の起点」を日付の形で検査する必要があるため）。
  */
@@ -220,8 +220,6 @@ export interface ViewReturnPoint {
   openDate?: string
 }
 
-/** ホームが居場所を覚えるキー */
-export const HOME_RETURN_KEY = 'home:return'
 /** 献立の月タブが居場所を覚えるキー */
 export const MONTH_RETURN_KEY = 'mealPlan:monthReturn'
 /** 献立の日タブが居場所を覚えるキー */

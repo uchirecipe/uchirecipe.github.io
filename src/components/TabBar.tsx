@@ -1,19 +1,26 @@
 import { useEffect } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import { House, BookOpen, CalendarDays, Refrigerator, Settings } from 'lucide-react'
+import { BookOpen, CalendarDays, Refrigerator, Settings } from 'lucide-react'
 import { ja } from '../i18n/ja'
 // 覚えるキーと「覚えを捨てる」操作は logic/navMemory.ts に置いてある
 // （捨てる側＝献立タブからも同じキーを触るため。2026-08-07 便DT-2）
 import { LAST_RECIPES_PATH_KEY } from '../logic/navMemory'
 
-const otherTabs = [
-  { to: '/meal-plan', label: ja.nav.mealPlan, Icon: CalendarDays },
+/**
+ * 「レシピ」の後ろに並べる行き先（2026-08-17 便HG）。
+ * レシピだけは直前に見ていた場所を覚える特別扱いがあるので、この表には入れず個別に書く。
+ */
+const tabsAfterRecipes = [
   { to: '/shopping', label: ja.nav.shopping, Icon: Refrigerator },
   { to: '/settings', label: ja.nav.settings, Icon: Settings },
 ] as const
 
 /**
- * 画面下部に固定するタブナビゲーション（ホーム / レシピ / 献立 / 買い物 / 設定）。
+ * 画面下部に固定する行き先の並び（献立 / レシピ / 食材 / 設定）。
+ *
+ * 2026-08-17 便HG（オーナー決定「先にホーム画面なくします。タブの順番は、献立＞レシピ＞食材＞設定」）:
+ * ホームを廃止して4つにした。ホームが担っていた役目（アプリを開いた直後に着く画面）は
+ * 献立の「日」が引き継ぐので、先頭も献立にする。
  *
  * 「レシピ」タブだけは特別扱い: 一覧・詳細・編集のどこにいたかを覚えておき、
  * 他のタブを経由してから戻ってきたとき、直前に見ていたレシピにそのまま戻れるようにする
@@ -45,16 +52,15 @@ export default function TabBar() {
     >
       <div className="mx-auto flex max-w-md">
         <NavLink
-          to="/"
-          end
+          to="/meal-plan"
           className={({ isActive }) =>
             `flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
               isActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
             }`
           }
         >
-          <House size={24} aria-hidden />
-          {ja.nav.home}
+          <CalendarDays size={24} aria-hidden />
+          {ja.nav.mealPlan}
         </NavLink>
 
         <Link
@@ -67,7 +73,7 @@ export default function TabBar() {
           {ja.nav.recipes}
         </Link>
 
-        {otherTabs.map(({ to, label, Icon }) => (
+        {tabsAfterRecipes.map(({ to, label, Icon }) => (
           <NavLink
             key={to}
             to={to}

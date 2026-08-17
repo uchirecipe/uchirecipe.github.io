@@ -90,11 +90,13 @@ export default function RecipeDetailPage() {
   const id = Number(params.id)
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // 戻る先(2026-08-02 オーナー指示・同日追補): ホーム・今日の献立から開いたときだけ
+  // 戻る先(2026-08-02 オーナー指示・同日追補): 今日の献立から開いたときだけ
   // 元の画面へ帰す例外(2026-07-12・2026-07-16)を残し、それ以外＝出所のstateが無い・
   // 不明なときは必ずレシピ一覧へ。以前は不明時の戻り先が場面によってレシピ一覧に
   // ならないことがあり(一覧へ行く手段が消える)、いったん全て一覧固定にしたが、
-  // 「ホーム発の例外は残す・不明時は一覧」が確定形。
+  // 「今日の献立発の例外は残す・不明時は一覧」が確定形。
+  // 2026-08-17 便HG: ホーム画面の廃止で 'home' を出す画面が無くなったので外した
+  // (ホームが持っていた例外は、行き先の 'mealPlan'＝献立の「日」がそのまま引き継いでいる)。
   // 2026-08-07 便DT-2(オーナー指示): 献立タブの週('mealPlanWeek')を**同じ仕組みの例外**として
   // 足した。週の各日にある「作った記録」からレシピを開くと、戻ったときに週の並びを
   // 探し直すことになっていたため(スクロール位置の復元はMealPlanPage側が持つ)。
@@ -106,7 +108,7 @@ export default function RecipeDetailPage() {
   // (スクロール位置の復元はCookNaviPage側が持つ)
   // 2026-08-09 便EQ: 'mealPlan' を追加。作った記録の小窓からレシピ詳細・記録の編集へ来たとき、
   // 献立の日タブ・月タブへも同じ仕組みで帰せるようにした（週は従来の 'mealPlanWeek' のまま）
-  const BACK_TO_ORIGIN_FROM = ['home', 'todayList', 'mealPlan', 'mealPlanWeek', 'cookNavi']
+  const BACK_TO_ORIGIN_FROM = ['todayList', 'mealPlan', 'mealPlanWeek', 'cookNavi']
   const backFallback =
     backState?.from && BACK_TO_ORIGIN_FROM.includes(backState.from) && backState.fromPath
       ? backState.fromPath

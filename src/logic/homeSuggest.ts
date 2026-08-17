@@ -3,7 +3,7 @@ import { preferSeasonWithFallback } from './season'
 import type { DishType, Recipe, Season } from '../db/types'
 
 /**
- * ホーム「今日なに作る？」で選べる料理の種別（2026-08-03 便DH）。
+ * 「今日なに作る？」で選べる料理の種別（2026-08-03 便DH。2026-08-17 便HGで献立の「日」へ移設）。
  * レシピ登録の「料理の種別」と同じ4区分・同じ並び。recipeDishType は必ずこの4つの
  * どれか1つを返すので、4区分は互いに重ならず、合わせると全レシピを覆う。
  */
