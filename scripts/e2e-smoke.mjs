@@ -340,6 +340,14 @@
 //         下の並びは4つで献立→レシピ→食材→設定・その日の献立が無い日は「今日なに作る？」が出て、
 //         ある日は「今日の献立」だけになる・「最近作ったもの」はどちらの日でも出る・
 //         設定から「ホーム画面のカスタマイズ」が残骸なく消えている(端末のホーム画面への追加案内は別物なので残る)) /
+//         HK-PWA(2026-08-17 便HK・オーナー実機「ホーム画面に追加のURLを献立ホーム変更」:
+//         端末のホーム画面に追加したアイコンから開く行き先(manifestのstart_url)が献立を指す・
+//         すでに追加済みの人の行き先(サイトの入口)も今までどおり献立に着く・
+//         アイコンの見分け(manifestのid)が今までの行き先のままで別アプリ扱いにならない) /
+//         HK-LP(2026-08-17 便HK・オーナー実機「吹き出しは、背景？の白いカード部分ごと細くして、
+//         空白を削りたい」: 紹介ページの「こんなこと、ありませんか」の囲みが吹き出しの塊に合わせて細くなり、
+//         囲みの中の空きが狭い画面と同じ・囲みは左右均等・中身の並びは狭い画面と同じ・
+//         狭い画面(390)では今までどおり幅いっぱい・はみ出しなし) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -27947,6 +27955,192 @@ try {
       check('HF-LP 消した説明文がページのどこにも残っていない', hfWide.removedCaptionLeft === false)
     } finally {
       await hfBrowser.close()
+    }
+  }
+
+  // ============================================================================
+  // 便HK-1（2026-08-17 オーナー実機フィードバック「ホーム画面に追加のURLを献立ホーム変更」）:
+  // 2026-08-17 便HG でアプリのホーム画面を廃止し、献立の「日」が入口になった。
+  // 端末のホーム画面に追加したアイコンから開く行き先(manifestのstart_url)も献立を指す。
+  //   ・start_url はサイトの入口「/」のままだった。「#/」は献立へ送られるので着く先は同じだが、
+  //     オーナーの指示どおり行き先そのものを献立にする
+  //   ・すでにホーム画面へ追加してある人が壊れないことが最優先なので、次の2つも合わせて見る
+  //     ①サイトの入口を開いても、これまでどおり献立に着くこと
+  //      (iPhoneは追加した時点のURLを覚えるので、既存のアイコンは「/」を開き続ける)
+  //     ②アイコンの見分け(manifestのid)が今までと同じ「サイトの入口」のままで、
+  //      別のアプリとして扱われない＝追加し直しにならないこと
+  //      (idを書かないとstart_urlが見分けを兼ねるため、start_urlだけを変えると別アプリになる)
+  // ============================================================================
+  currentCheck = 'HK-PWA'
+  {
+    const hkManifest = await (await fetch(`${BASE}/manifest.webmanifest`)).json()
+    const hkSiteRoot = new URL('/', BASE).href
+    const hkStartUrl = new URL(hkManifest.start_url ?? '/', BASE)
+    check(
+      'HK-PWA ホーム画面のアイコンから開く行き先(start_url)が献立を指している',
+      hkStartUrl.hash.startsWith('#/meal-plan'),
+      `start_url=${hkManifest.start_url}`,
+    )
+    check(
+      'HK-PWA 追加済みのアイコンが別のアプリ扱いにならない(見分けidが今までの行き先と同じ)',
+      typeof hkManifest.id === 'string' && new URL(hkManifest.id, BASE).href === hkSiteRoot,
+      `id=${hkManifest.id} / これまでの見分け=${hkSiteRoot}`,
+    )
+
+    const hkBrowser = await chromium.launch()
+    try {
+      // 実際に開いて着く先を見る。「いまいる場所」は下の並びのどれが選ばれているかで判定する
+      // (画面の中身の作りには縛られない・禁じ手④)
+      const hkLand = async (url) => {
+        const ctx = await hkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+        const page = await ctx.newPage()
+        page.on('pageerror', (err) => {
+          if (
+            err.message.includes('cloudflareinsights') ||
+            err.message.includes('Access-Control-Allow-Origin')
+          )
+            return
+          errors.push(`[pageerror@HK-PWA] ${err.message}`)
+        })
+        await page.goto(url, { waitUntil: 'networkidle' })
+        await page.waitForTimeout(2200) // 初回シード完了待ち
+        const got = {
+          hash: await page.evaluate(() => location.hash),
+          tab: (
+            (await page
+              .textContent('[data-app-bottom-bar] a[aria-current="page"]')
+              .catch(() => '')) ?? ''
+          )
+            .replaceAll('​', '')
+            .trim(),
+        }
+        await ctx.close()
+        return got
+      }
+      const hkFromStart = await hkLand(hkStartUrl.href)
+      check(
+        'HK-PWA その行き先を開くと、献立の画面に着く',
+        hkFromStart.hash.startsWith('#/meal-plan') && hkFromStart.tab === '献立',
+        `hash=${hkFromStart.hash} / 選ばれている行き先=${hkFromStart.tab}`,
+      )
+      const hkFromRoot = await hkLand(hkSiteRoot)
+      check(
+        'HK-PWA すでに追加した人の行き先(サイトの入口)も、これまでどおり献立に着く',
+        hkFromRoot.hash.startsWith('#/meal-plan') && hkFromRoot.tab === '献立',
+        `hash=${hkFromRoot.hash} / 選ばれている行き先=${hkFromRoot.tab}`,
+      )
+    } finally {
+      await hkBrowser.close()
+    }
+  }
+
+  // ============================================================================
+  // 便HK-2（2026-08-17 オーナー実機フィードバック「吹き出しは、背景？の白いカード部分ごと
+  // 細くして、空白を削りたい」）: 便HFで吹き出しの塊を狭い画面と同じ324pxに揃えたが、
+  // それを載せている囲み(白いカード)は横いっぱいのままだったため、大きい画面では
+  // 塊の左右に146px前後の空きが残っていた。囲みごと細くしてその空きを削る。
+  // 測り方(禁じ手④「置き場所への固定」を避ける): 何pxかは測らず、
+  //   ①囲みの中に残る左右の空きが、狭い画面のときと同じか(＝余白が削れているか)
+  //   ②囲みがページの中で左右均等に置かれているか
+  //   ③囲みの中身(見出し・吹き出し・結びの文)の並びが、狭い画面と同じか
+  //   ④狭い画面(390)では今までどおりページの幅いっぱいのままか(狭い画面の見え方を変えない)
+  //   ⑤中身が囲みからはみ出していないか
+  // で見る。
+  // ============================================================================
+  currentCheck = 'HK-LP'
+  {
+    const hkLpBrowser = await chromium.launch()
+    try {
+      const hkLpProbe = async (width) => {
+        const ctx = await hkLpBrowser.newContext({ viewport: { width, height: 900 } })
+        const page = await ctx.newPage()
+        page.on('pageerror', (err) => {
+          if (
+            err.message.includes('cloudflareinsights') ||
+            err.message.includes('Access-Control-Allow-Origin')
+          )
+            return
+          errors.push(`[pageerror@HK-LP] ${err.message}`)
+        })
+        await page.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+        const got = await page.evaluate(() => {
+          // 枠線と内側の余白を除いた「中身を置ける範囲」
+          const innerX = (el) => {
+            const b = el.getBoundingClientRect()
+            const cs = getComputedStyle(el)
+            return {
+              left: b.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft),
+              right: b.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight),
+            }
+          }
+          const r1 = (n) => Math.round(n * 10) / 10
+          const ul = document.querySelector('.pains')
+          const sec = ul.closest('section.sec')
+          const secBox = sec.getBoundingClientRect()
+          const secIn = innerX(sec)
+          const mainIn = innerX(document.querySelector('main'))
+          const boxes = [...ul.querySelectorAll('li')].map((li) => li.getBoundingClientRect())
+          return {
+            // 吹き出しの塊が囲みの中に残している左右の空き
+            innerGap: {
+              left: r1(Math.min(...boxes.map((b) => b.left)) - secIn.left),
+              right: r1(secIn.right - Math.max(...boxes.map((b) => b.right))),
+            },
+            // 囲み自体が、本文を置ける範囲の中で左右に空けている幅
+            outerGap: {
+              left: r1(secBox.left - mainIn.left),
+              right: r1(mainIn.right - secBox.right),
+            },
+            secWidth: r1(secBox.width),
+            mainWidth: r1(mainIn.right - mainIn.left),
+            // 囲みの中身の並び(囲みの左上から見た位置と幅)
+            parts: [...sec.children].map((el) => {
+              const b = el.getBoundingClientRect()
+              return `${el.tagName}:${r1(b.left - secBox.left)},${r1(b.top - secBox.top)},${r1(b.width)}`
+            }),
+            overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          }
+        })
+        await ctx.close()
+        return got
+      }
+      const hkNarrow = await hkLpProbe(390)
+      const hkWide = await hkLpProbe(1280)
+
+      check(
+        'HK-LP(PC) 吹き出しの囲みに、狭い画面より広い空きが残っていない',
+        Math.abs(hkWide.innerGap.left - hkNarrow.innerGap.left) <= 2 &&
+          Math.abs(hkWide.innerGap.right - hkNarrow.innerGap.right) <= 2,
+        `1280=左${hkWide.innerGap.left}/右${hkWide.innerGap.right} , 390=左${hkNarrow.innerGap.left}/右${hkNarrow.innerGap.right}`,
+      )
+      check(
+        'HK-LP(PC) 吹き出しの囲みが左右均等に置かれている',
+        Math.abs(hkWide.outerGap.left - hkWide.outerGap.right) <= 2,
+        `左${hkWide.outerGap.left} / 右${hkWide.outerGap.right}`,
+      )
+      check(
+        'HK-LP 吹き出しの囲みの中身の並びが、大きい画面と狭い画面で同じ',
+        JSON.stringify(hkWide.parts) === JSON.stringify(hkNarrow.parts),
+        `1280=${hkWide.parts.join(' / ')} ／ 390=${hkNarrow.parts.join(' / ')}`,
+      )
+      check(
+        'HK-LP(390) 吹き出しの囲みは、狭い画面では今までどおりページの幅いっぱい',
+        Math.abs(hkNarrow.secWidth - hkNarrow.mainWidth) <= 0.5,
+        `囲み=${hkNarrow.secWidth} / 置ける幅=${hkNarrow.mainWidth}`,
+      )
+      for (const [hkLabel, hk] of [
+        ['390', hkNarrow],
+        ['PC', hkWide],
+      ]) {
+        check(
+          `HK-LP(${hkLabel}) 吹き出しが囲みからはみ出していない`,
+          hk.innerGap.left >= 0 && hk.innerGap.right >= 0,
+          `左${hk.innerGap.left} / 右${hk.innerGap.right}`,
+        )
+        check(`HK-LP(${hkLabel}) 横にはみ出していない`, hk.overflow === false)
+      }
+    } finally {
+      await hkLpBrowser.close()
     }
   }
 
