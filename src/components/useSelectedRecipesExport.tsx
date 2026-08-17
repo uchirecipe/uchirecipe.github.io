@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { Download } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { ja } from '../i18n/ja'
 import {
   exportSelectedRecipes,
@@ -16,12 +15,18 @@ import {
 import ConfirmDialog from './ConfirmDialog'
 
 /**
- * 選んだレシピだけをファイルに書き出す（2026-08-09 便EM → 2026-08-15 便GVで全体を切り出し）。
+ * 選んだレシピだけをファイルに書き出す（2026-08-09 便EM → 2026-08-15 便GVで全体を切り出し →
+ * 2026-08-17 便HJ で「押すボタン」と「確認の窓」を分けた）。
  *
  * 書式は全体のバックアップと同じで、読み込みも設定の「バックアップを読み込む」を使う
  * （新しい読み込み口は作らない）。バックアップの「前回の場所に上書き」の行き先は塗り替えない
  * （saveJsonWithPicker）。「最終バックアップ」の日時も更新しない＝全体のバックアップを
  * 取ったことにはしない。実行しても端末のレシピは1品も減らない。
+ *
+ * 便HJで部品からこの形（フック）にした理由: 書き出しを始めるボタンが、選び終わったあとに出す
+ * 「どうしますか？」の窓の中の1つの道になったため。窓の中のボタンは他の道と同じ見た目で
+ * 並べる必要があり、ボタンの置き場所は呼び出し側が決める。ここが持つのは
+ * 「押されたら中身を作って確認の窓を出す」「確認が通ったら保存する」の2つだけ。
  *
  * 押してから保存までの順番（2026-08-15 便GV。オーナー実機「どこに保存するのか選べるようにして。
  * バックアップファイルと同じように」への対応）:
@@ -36,7 +41,7 @@ import ConfirmDialog from './ConfirmDialog'
  * iPhone・iPad・Firefox 等は従来どおり自動ダウンロード。確認の窓の「保存先」の行も
  * その判定で言い分ける（対応していない端末で「選べます」と書かない）。
  */
-export default function SelectedRecipesExport({
+export function useSelectedRecipesExport({
   selectedIds,
   totalCount,
   onMessage,
@@ -45,7 +50,14 @@ export default function SelectedRecipesExport({
   /** 端末に入っているレシピの総数（「選んでいないレシピ◯品」の計算に使う） */
   totalCount: number
   onMessage: (message: string) => void
-}) {
+}): {
+  /** 書き出しを始める（中身を作ってから確認の窓を出す） */
+  start: () => void
+  /** 中身を作っている最中・保存の最中 */
+  busy: boolean
+  /** 確認の窓。呼び出し側の画面のどこかに置く */
+  dialog: ReactNode
+} {
   const [busy, setBusy] = useState(false)
   // 確認の窓に出す中身と、確認が通ったときに書き込む中身。窓を開く前に作っておく
   const [pending, setPending] = useState<{
@@ -116,17 +128,10 @@ export default function SelectedRecipesExport({
     }
   }
 
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => void prepare()}
-        disabled={busy}
-        className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm disabled:opacity-40"
-      >
-        <Download size={16} aria-hidden />
-        {ja.recipes.exportSelected.replace('{r}', String(selectedIds.length))}
-      </button>
+  return {
+    start: () => void prepare(),
+    busy,
+    dialog: (
       <ConfirmDialog
         open={pending !== undefined}
         title={pending?.confirm.title ?? ''}
@@ -139,6 +144,6 @@ export default function SelectedRecipesExport({
         onConfirm={() => void save()}
         onCancel={() => setPending(undefined)}
       />
-    </>
-  )
+    ),
+  }
 }

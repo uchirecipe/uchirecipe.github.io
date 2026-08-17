@@ -1,5 +1,13 @@
 import { useEffect } from 'react'
 import { useScrollLock } from './useScrollLock'
+import {
+  DIALOG_ACTIONS_CLS,
+  DIALOG_BACKDROP_CLS,
+  DIALOG_CANCEL_BUTTON_CLS,
+  DIALOG_CARD_CLS,
+  DIALOG_PRIMARY_BUTTON_CLS,
+  DIALOG_TITLE_CLS,
+} from './dialogStyle'
 
 /**
  * 「取り消しの確認」を画面の中の窓で聞く（2026-08-14 便GL・利用者テスト
@@ -61,19 +69,15 @@ export default function ConfirmDialog({
   useScrollLock(open)
   if (!open) return null
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-[var(--space-md)]"
-      onClick={onCancel}
-      role="presentation"
-    >
+    <div className={DIALOG_BACKDROP_CLS} onClick={onCancel} role="presentation">
       <div
         role="dialog"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
         data-testid={testId}
-        className="max-h-[85vh] w-full max-w-sm min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-md"
+        className={DIALOG_CARD_CLS}
       >
-        <p className="ja-phrase text-lg font-bold">{title}</p>
+        <p className={DIALOG_TITLE_CLS}>{title}</p>
         {body.trim() !== '' && (
           <p className="ja-phrase mt-[var(--space-sm)] whitespace-pre-line text-sm text-ink-muted">
             {body.trim()}
@@ -97,12 +101,12 @@ export default function ConfirmDialog({
             ))}
           </div>
         )}
-        <div className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
+        <div className={DIALOG_ACTIONS_CLS}>
           <button
             type="button"
             data-testid={`${testId}-ok`}
             onClick={onConfirm}
-            className="w-full rounded-md bg-accent py-4 text-lg font-bold text-on-accent shadow-md"
+            className={DIALOG_PRIMARY_BUTTON_CLS}
           >
             {confirmLabel}
           </button>
@@ -110,7 +114,7 @@ export default function ConfirmDialog({
             type="button"
             data-testid={`${testId}-cancel`}
             onClick={onCancel}
-            className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
+            className={DIALOG_CANCEL_BUTTON_CLS}
           >
             {cancelLabel}
           </button>

@@ -13,6 +13,7 @@ import {
   Search,
   SlidersHorizontal,
   ArrowDownUp,
+  ArrowRight,
   Refrigerator,
   LayoutGrid,
   List,
@@ -24,12 +25,15 @@ import {
   ListChecks,
   CheckCircle2,
   CalendarPlus,
+  Download,
+  Trash2,
   X,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
 import { buildBulkDeleteConfirm } from '../logic/recipeDelete'
-import SelectedRecipesExport from '../components/SelectedRecipesExport'
+import { useSelectedRecipesExport } from '../components/useSelectedRecipesExport'
+import ChoiceDialog from '../components/ChoiceDialog'
 import { useSettings, updateSettings } from '../db/settings'
 import { addRecipesToToday } from '../db/mealPlan'
 import { todayString } from '../logic/date'
@@ -716,6 +720,11 @@ export default function RecipesPage() {
   // trueの間は「今日の献立に入れるレシピを選んでいます」と決定ボタンを出し、
   // 書き出し・削除は出さない(入れに来た操作の隣に、消す操作を並べない)
   const [selectingForToday, setSelectingForToday] = useState(entry.selectForToday)
+  /**
+   * 選び終わったあとに出す「選んだ◯品をどうしますか？」の窓(2026-08-17 便HJ)。
+   * 献立から来た選択モード(selectingForToday)は行き先が決まっているので出さない。
+   */
+  const [actionsOpen, setActionsOpen] = useState(false)
   // まとめて入れるときの食事の振り分け窓(1品ずつのときと同じ部品・同じ選択肢)
   const [bulkSlotModalOpen, setBulkSlotModalOpen] = useState(false)
   const [addingToToday, setAddingToToday] = useState(false)
@@ -751,6 +760,7 @@ export default function RecipesPage() {
       setSelecting(false)
       setSelectedIds([])
       setSelectingForToday(false)
+      setActionsOpen(false)
     }
   }, [selecting, recipes])
 
@@ -763,11 +773,15 @@ export default function RecipesPage() {
   /**
    * 選択モードを抜ける(2026-08-15 便GU)。選んだレシピは外れ、ふだんの一覧に戻る。
    * 献立の「＋ 今日の献立を選ぶ」から来ていたときは献立へ帰す
-   * (何も入れずに抜けたとき、来た画面へ戻れないと行き止まりになる。便FPと同じ考え方)
+   * (何も入れずに抜けたとき、来た画面へ戻れないと行き止まりになる。便FPと同じ考え方)。
+   *
+   * 2026-08-17 便HJ: 入口の「選択」と同じ場所のボタンからも、選び終わったあとの窓の
+   * 「選択をやめる」からも、ここへ来る(どちらから抜けても同じ結果になる)
    */
   const exitSelecting = () => {
     setSelecting(false)
     setSelectedIds([])
+    setActionsOpen(false)
     if (selectingForToday) {
       setSelectingForToday(false)
       navigate('/meal-plan')
@@ -832,6 +846,14 @@ export default function RecipesPage() {
     e.preventDefault()
     e.stopPropagation()
   }
+
+  // 選んだレシピをファイルに書き出す一式(2026-08-15 便GVで切り出し・2026-08-17 便HJでフックに)。
+  // 保存先を選ぶ画面・確認の窓・ファイルの大きさの計算がこの中に入っている
+  const selectedExport = useSelectedRecipesExport({
+    selectedIds,
+    totalCount: recipes?.length ?? selectedIds.length,
+    onMessage: setMessage,
+  })
 
   // 選択したレシピをまとめて削除する。確認文は規約F(何が消えて何が残るかを件数つきで
   // 両方書く)＝1品削除(RecipeFormPageのconfirmDelete・便CI/C01)と同じ範囲を数える。
@@ -962,18 +984,27 @@ export default function RecipesPage() {
     >
       {/* 見出し行に選択モードの入口を置く(食材の在庫の「整理」ボタンと同じ位置づけ)。
           レシピが1品も無いうちは選ぶものが無いので出さない。
-          選択モードに入っている間は出さない: 抜ける操作は画面下の帯にまとめてあり、
-          同じ操作を見出しにも置くと2か所に増える(2026-08-15 便GU) */}
+
+          2026-08-17 便HJ(オーナー実機「『選択』ボタン押下したら選択をやめるボタンに変化する
+          ようにして。場所が変わると戻る時に迷子になる」): 入口と出口を**同じ場所の1つのボタン**にする。
+          押しても上端・右端は動かず、名前と絵だけが変わる(幅は名前の長さで変わる)。
+          2026-08-15 便GUは抜ける操作を画面下の帯へ移していたが、押した指の位置と戻り先が
+          離れてしまうので、抜ける操作をここへ戻した(帯には「選び終わる」だけを置く)。
+
+          献立の「＋ 今日の献立を選ぶ」から来たとき(selectingForToday)は出さない: この画面で
+          「選択」を押していないので戻る場所が無く、抜ける先も一覧ではなく献立になるため
+          (その操作は「入れずに献立に戻る」として下の帯にある) */}
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">{ja.recipes.title}</h1>
-        {!selecting && recipes && recipes.length > 0 && (
+        {recipes && recipes.length > 0 && !selectingForToday && (
           <button
             type="button"
-            onClick={startSelecting}
+            data-testid={selecting ? 'selection-exit' : 'select-toggle'}
+            onClick={selecting ? exitSelecting : startSelecting}
             className="inline-flex shrink-0 items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted"
           >
-            <ListChecks size={14} aria-hidden />
-            {ja.recipes.selectToggle}
+            {selecting ? <X size={14} aria-hidden /> : <ListChecks size={14} aria-hidden />}
+            {selecting ? ja.recipes.selectExit : ja.recipes.selectToggle}
           </button>
         )}
       </div>
@@ -1475,20 +1506,26 @@ export default function RecipesPage() {
       )}
 
       {/* 選択モードの案内と全選択/選択解除(2026-08-02 便CT)。
-          選んだあとの操作(今日の献立に入れる・書き出す・削除)と選択モードを抜ける操作は、
-          2026-08-15 便GUで画面下に固定する帯へ移した(下の selection-bar)。
-          全選択・選択解除は選び始める前に使う操作なので、カードの手前のここに残す */}
+          選んだあとの操作(今日の献立に入れる・書き出す・削除)は2026-08-17 便HJで
+          「選び終わる」の窓へ、選択モードを抜ける操作は見出し行のボタンへ移した。
+          全選択・選択解除は選び始める前に使う操作なので、カードの手前のここに残す
+          (帯に入れると帯が伸びてカードの見える高さを削るため)。
+          案内は2行とも1行ずつに収めてある＝小さい画面でカードに使える高さを削らない */}
       {selecting && results && results.length > 0 && (
         <div className="mt-[var(--space-sm)] flex flex-col gap-2">
-          <p data-testid="select-hint" className="text-sm text-ink-muted">
-            {ja.recipes.selectHint}
-          </p>
-          {/* 選択モードで何ができるかを、1品も選んでいないうちから出す(利用者テスト①) */}
-          {!selectingForToday && (
-            <p data-testid="select-actions-hint" className="text-xs text-ink-muted">
-              {ja.recipes.selectActionsHint}
+          {/* 案内の2行は隙間を空けずに重ねる。1行ぶんの高さがそのままレシピのカードの
+              見える高さを削るため(2026-08-17 便HJ) */}
+          <div>
+            <p data-testid="select-hint" className="text-xs text-ink-muted">
+              {ja.recipes.selectHint}
             </p>
-          )}
+            {/* 選択モードで何ができるかを、1品も選んでいないうちから出す(利用者テスト①) */}
+            {!selectingForToday && (
+              <p data-testid="select-actions-hint" className="mt-0.5 text-xs text-ink-muted">
+                {ja.recipes.selectActionsHint}
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -1601,16 +1638,20 @@ export default function RecipesPage() {
         </Link>
       )}
 
-      {/* 選択モードの操作の帯(2026-08-15 便GU・オーナー実機フィードバック
-          「複数選択中に完了ボタンがページのいちばん上にしかないため、ページ下のレシピカードを
-          選択してから完了ボタンまでが遠い」)。
+      {/* 選択モードの帯(2026-08-15 便GU → 2026-08-17 便HJで中身を1行にした)。
 
-          直した点:
-           ・位置: 選んだあとの操作(今日の献立に入れる・書き出す・削除)と、選択をやめる操作を
-             画面下に固定する。一覧のどこまで送っていても同じ場所にあり、指が届く
-           ・名前: 「完了」→「選択をやめる」(押した先で何が終わるのかが読める)
-           ・状態: 何品選んでいるかを帯に常に出し、やめたときに何品外れるのかを読み合わせられる
-          同じ操作を2か所に増やさないため、これらは見出し行・カードの手前からは外してある。
+          便GUで解いた問題(そのまま維持): 抜ける操作が画面のいちばん上にしか無く、一覧を下まで
+          送ってから選ぶと操作までが遠かった。＝一覧のどこまで送っても同じ場所に操作がある。
+
+          便HJで解いた問題(オーナー実機「画面が小さいと、レシピ選択中に出る選択肢ボタンで
+          画面の半分が見えなくなる」): 選んだ瞬間に「今日の献立に入れる」「書き出す」「削除」の
+          3つが帯に積み上がり、375x667の実機では帯だけで画面の4割強(280px)を占めて、
+          レシピのカードが1枚も丸ごと見えなくなっていた。
+          帯に残すのは【いま何品選んでいるか】と【選び終わる】の1行だけにし、
+          「どうするか」は窓(下の ChoiceDialog)の中で選ぶ。
+
+          献立の「＋ 今日の献立を選ぶ」から来たとき(selectingForToday)は行き先が決まっていて
+          選ぶ道が1つしかないので、窓を挟まず決定ボタンをそのまま出す(2026-08-11 便FPのまま)。
 
           下端は他の帯(タブナビ・タイマー・新しい版のお知らせ)の上に積む(useStackedBottomOffset)。
           data-app-bottom-bar を付けてあるので、一覧の下余白(--app-bottom-inset)もこの帯を
@@ -1623,26 +1664,41 @@ export default function RecipesPage() {
           className="fixed inset-x-0 z-20 border-t border-edge bg-surface shadow-md"
           style={{ bottom: selectionBarBottom }}
         >
-          <div className="mx-auto flex max-h-[45vh] max-w-md flex-col gap-2 overflow-x-hidden overflow-y-auto overscroll-contain px-[var(--space-md)] py-[var(--space-sm)]">
-            <div className="flex items-center justify-between gap-2">
+          <div className="mx-auto flex max-w-md flex-col gap-2 px-[var(--space-md)] py-[var(--space-sm)]">
+            <div className="flex items-center justify-between gap-[var(--space-sm)]">
               <p className="min-w-0 flex-1 text-sm font-bold text-ink-muted">
                 {selectedIds.length === 0
                   ? ja.recipes.selectingNone
                   : ja.recipes.selectingCount.replace('{n}', String(selectedIds.length))}
               </p>
-              <button
-                type="button"
-                data-testid="selection-exit"
-                onClick={exitSelecting}
-                className="inline-flex shrink-0 items-center gap-1 rounded-md border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
-              >
-                <X size={16} aria-hidden />
-                {selectingForToday ? ja.recipes.selectExitToMealPlan : ja.recipes.selectExit}
-              </button>
+              {selectingForToday ? (
+                <button
+                  type="button"
+                  data-testid="selection-exit"
+                  onClick={exitSelecting}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+                >
+                  <X size={16} aria-hidden />
+                  {ja.recipes.selectExitToMealPlan}
+                </button>
+              ) : (
+                /* 選び終わって、選んだレシピをどうするかの窓を開く。1品も選んでいないうちは
+                   決める中身が無いので押せない(抜けるのは見出し行の「選択をやめる」) */
+                <button
+                  type="button"
+                  data-testid="selection-finish"
+                  onClick={() => setActionsOpen(true)}
+                  disabled={selectedIds.length === 0}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent px-4 py-2.5 font-bold text-on-accent shadow-sm disabled:opacity-40"
+                >
+                  {ja.recipes.selectFinish}
+                  <ArrowRight size={18} aria-hidden />
+                </button>
+              )}
             </div>
             {/* まとめて今日の献立に入れる(2026-08-11 便FP)。献立から来たときは1品も選んで
                 いなくても押せない見た目で出し続け、決定ボタンが無いまま迷子にならないようにする */}
-            {(selectingForToday || selectedIds.length > 0) && (
+            {selectingForToday && (
               <button
                 type="button"
                 data-testid="add-selected-to-today"
@@ -1656,31 +1712,65 @@ export default function RecipesPage() {
                   : ja.recipes.addSelectedToToday.replace('{r}', String(selectedIds.length))}
               </button>
             )}
-            {/* 書き出しは消す作業の前に置く(取り出してから片づける流れ。押し間違いで
-                削除に当たらないよう、消えない操作を上に置く。2026-08-09 便EM)。
-                献立に入れに来た選択モードでは、書き出し・削除は出さない(2026-08-11 便FP) */}
-            {!selectingForToday && selectedIds.length > 0 && (
-              /* 書き出しは一式を部品に切り出してある（2026-08-15 便GV）。
-                 保存先を選ぶ画面・確認の窓・ファイルの大きさの計算がその中に入っている */
-              <SelectedRecipesExport
-                selectedIds={selectedIds}
-                totalCount={recipes?.length ?? selectedIds.length}
-                onMessage={setMessage}
-              />
-            )}
-            {!selectingForToday && selectedIds.length > 0 && (
-              <button
-                type="button"
-                onClick={() => void deleteSelected()}
-                disabled={deleting}
-                className="w-full rounded-md border border-edge bg-surface py-2.5 font-bold text-accent-ink shadow-sm disabled:opacity-40"
-              >
-                {ja.recipes.deleteSelected.replace('{r}', String(selectedIds.length))}
-              </button>
-            )}
           </div>
         </div>
       )}
+
+      {/* 選び終わったあとに出す「選んだ◯品をどうしますか？」の窓(2026-08-17 便HJ・オーナー実機
+          「選択ボタン押下→レシピ選択→選択終了→複数のボタンからレシピをどうするのか選ぶ、
+          という流れはどうか」)。
+
+          見た目・閉じ方は確認の窓(ConfirmDialog・2026-08-15 便GWでアプリ全体34か所をそろえたもの)と
+          同じ作法にそろえてある(components/dialogStyle.ts を共有)。新しい見た目は作らない。
+
+          並びは書き出し→削除の順(取り出してから片づける流れ。押し間違いで削除に当たらないよう、
+          消えない操作を上に置く。2026-08-09 便EM)。
+          窓の外・Escapeで閉じたときは選んだレシピをそのまま残す＝押し間違えても選び直せる。
+          下の「選択をやめる」は見出し行のボタンと同じ操作(選んだレシピを外して一覧に戻る)なので、
+          名前も同じにしてある */}
+      <ChoiceDialog
+        open={actionsOpen && !selectingForToday}
+        title={ja.recipes.selectActionsTitle.replace('{n}', String(selectedIds.length))}
+        testId="selection-actions"
+        options={[
+          {
+            label: ja.recipes.selectActionToToday,
+            testId: 'selection-actions-today',
+            icon: <CalendarPlus size={18} aria-hidden />,
+            primary: true,
+            disabled: addingToToday,
+            onSelect: () => {
+              setActionsOpen(false)
+              setBulkSlotModalOpen(true)
+            },
+          },
+          {
+            label: ja.recipes.selectActionExport,
+            testId: 'selection-actions-export',
+            icon: <Download size={18} aria-hidden />,
+            disabled: selectedExport.busy,
+            onSelect: () => {
+              setActionsOpen(false)
+              selectedExport.start()
+            },
+          },
+          {
+            label: ja.recipes.selectActionDelete,
+            testId: 'selection-actions-delete',
+            icon: <Trash2 size={18} aria-hidden />,
+            disabled: deleting,
+            onSelect: () => {
+              setActionsOpen(false)
+              void deleteSelected()
+            },
+          },
+        ]}
+        cancelLabel={ja.recipes.selectExit}
+        cancelTestId="selection-actions-cancel"
+        onCancel={exitSelecting}
+        onClose={() => setActionsOpen(false)}
+      />
+      {selectedExport.dialog}
 
       {/* まとめて入れるときの食事の振り分け窓。1品ずつのとき(レシピ詳細)と同じ部品・
           同じ選択肢を使い、見出しだけ品数の入るものに差し替える(2026-08-11 便FP) */}
