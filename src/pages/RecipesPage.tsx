@@ -1727,7 +1727,15 @@ export default function RecipesPage() {
           消えない操作を上に置く。2026-08-09 便EM)。
           窓の外・Escapeで閉じたときは選んだレシピをそのまま残す＝押し間違えても選び直せる。
           下の「選択をやめる」は見出し行のボタンと同じ操作(選んだレシピを外して一覧に戻る)なので、
-          名前も同じにしてある */}
+          名前も同じにしてある。
+
+          2026-08-18 便HO(オーナー実機フィードバック「選択したレシピをどうするかの窓に、
+          キャンセルで選択の続きに戻れるようにしたい。選択をやめる、で選択したレシピも
+          リセットされてしまう」): 選んだレシピを残したまま閉じる道は便HJの時点でもあったが、
+          窓の外のタップとEscapeにしか無く、押せる場所として見えていなかった。
+          同じ道を「選択を続ける」のボタンとして「選択をやめる」の上に出す
+          (backLabel は onClose を呼ぶので、3つの閉じ方の結果が食い違うことはない)。
+          献立から来た選択モード(selectingForToday)はこの窓を出さないので、そちらは変わらない */}
       <ChoiceDialog
         open={actionsOpen && !selectingForToday}
         title={ja.recipes.selectActionsTitle.replace('{n}', String(selectedIds.length))}
@@ -1765,6 +1773,8 @@ export default function RecipesPage() {
             },
           },
         ]}
+        backLabel={ja.recipes.selectContinue}
+        backTestId="selection-actions-continue"
         cancelLabel={ja.recipes.selectExit}
         cancelTestId="selection-actions-cancel"
         onCancel={exitSelecting}

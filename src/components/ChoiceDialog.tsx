@@ -30,6 +30,13 @@ import {
  * 閉じ方は2通りに分けてある:
  *  - onClose（窓の外のタップ・Escape）＝**まだ何も決めていない**。選んだ状態はそのまま残す
  *  - onCancel（下の「やめる」のボタン）＝名前どおりの操作を行う（呼び出し側が決める）
+ *
+ * 2026-08-18 便HO（オーナー実機フィードバック「選択したレシピをどうするかの窓に、キャンセルで
+ * 選択の続きに戻れるようにしたい。選択をやめる、で選択したレシピもリセットされてしまう」）:
+ * まだ何も決めずに閉じる道（onClose）は、窓の外のタップとEscapeにしか無く、
+ * **押せる場所として見えていなかった**。backLabel を渡すと、その道をボタンとしても出す。
+ * ボタンの中身は onClose そのものなので、窓の外のタップ・Escape・このボタンの3つは
+ * 必ず同じ結果になる（別々に書かない＝あとから片方だけ動きが変わることが起きない）。
  */
 export type ChoiceOption = {
   label: string
@@ -48,6 +55,8 @@ export default function ChoiceDialog({
   title,
   hint,
   options,
+  backLabel,
+  backTestId,
   cancelLabel,
   cancelTestId,
   testId,
@@ -59,6 +68,12 @@ export default function ChoiceDialog({
   /** 見出しの下に置く補足（任意） */
   hint?: string
   options: readonly ChoiceOption[]
+  /**
+   * 「まだ決めない」で閉じる道を、押せるボタンとしても出す（任意）。
+   * 押したときに起きることは窓の外のタップ・Escape と同じ（onClose）
+   */
+  backLabel?: string
+  backTestId?: string
   cancelLabel: string
   cancelTestId: string
   /** 窓に付ける data-testid */
@@ -108,6 +123,19 @@ export default function ChoiceDialog({
               {option.label}
             </button>
           ))}
+          {/* 窓から出る道は2つ。どちらも同じ見た目で並べ、違いは名前だけで読ませる
+              （上＝選んだものを残したまま戻る／下＝選んだものを外す）。
+              残る側を上に置くのは、選択肢の並びと同じ考え方（消えない方を上に） */}
+          {backLabel && (
+            <button
+              type="button"
+              data-testid={backTestId}
+              onClick={onClose}
+              className={DIALOG_CANCEL_BUTTON_CLS}
+            >
+              {backLabel}
+            </button>
+          )}
           <button
             type="button"
             data-testid={cancelTestId}

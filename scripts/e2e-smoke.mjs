@@ -350,6 +350,11 @@
 //         画面の半分が見えなくなる」: 375x667で、選んでいる最中も下の帯が画面の半分を覆わず、
 //         丸ごと見えるレシピカードの枚数がふだんの一覧から減らない・献立から来た選択モード(?select=today)は
 //         4つの道を出さず、決定ボタンと「入れずに献立に戻る」で完結する) /
+//         SELECT-UI-03(2026-08-18 便HO・オーナー実機「選択したレシピをどうするかの窓に、キャンセルで
+//         選択の続きに戻れるようにしたい。選択をやめる、で選択したレシピもリセットされてしまう」:
+//         「選んだ◯品をどうしますか？」の窓に、選んだレシピを残したまま選ぶ作業へ戻るボタンと、
+//         選んだレシピを外してふだんの一覧に戻るボタンが**両方**押せる場所にあり、名前が違う。
+//         名前や並び順で探さず、窓の中のボタンを1つずつ押して起きたことで見分ける) /
 //         NOHOME-01(2026-08-17 便HG・オーナー決定「先にホーム画面なくします」: ホーム画面を廃止し、
 //         その役目を献立の「日」が引き継いだ。「#/」を開くと献立の「日」に着く・知らない行き先でも同じ場所に着く・
 //         下の並びは4つで献立→レシピ→食材→設定・その日の献立が無い日は「今日なに作る？」が出て、
@@ -361,8 +366,10 @@
 //         アイコンの見分け(manifestのid)が今までの行き先のままで別アプリ扱いにならない) /
 //         HK-LP(2026-08-17 便HK・オーナー実機「吹き出しは、背景？の白いカード部分ごと細くして、
 //         空白を削りたい」: 紹介ページの「こんなこと、ありませんか」の囲みが吹き出しの塊に合わせて細くなり、
-//         囲みの中の空きが狭い画面と同じ・囲みは左右均等・中身の並びは狭い画面と同じ・
-//         狭い画面(390)では今までどおり幅いっぱい・はみ出しなし) /
+//         囲みは左右均等・中身は狭い画面と同じ順番と縦の位置・狭い画面(390)では今までどおり幅いっぱい・
+//         はみ出しなし。2026-08-18 便HO・オーナー実機「LPの改行：大画面で「きます」だけは変なので、
+//         １行が納まる幅になおしてください。」で足した: 結びの一文が1行に収まっていて、
+//         囲みはその一文が1行に収まるのに要る幅より広くない(＝余白を増やしていない)) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -28548,6 +28555,30 @@ try {
               left: r1(Math.min(...boxes.map((b) => b.left)) - secIn.left),
               right: r1(secIn.right - Math.max(...boxes.map((b) => b.right))),
             },
+            // 囲みのいちばん下に置いた結びの一文（2026-08-18 便HO）。
+            // 何pxかではなく「何行で描かれたか」と「1行に置くのに要る幅」で測る
+            tail: (() => {
+              const p = [...sec.querySelectorAll(':scope > p')].pop()
+              if (!p) return null
+              const cs = getComputedStyle(p)
+              const range = document.createRange()
+              range.selectNodeContents(p)
+              const rects = [...range.getClientRects()].filter((b) => b.width >= 0.5)
+              const lines = new Set(rects.map((b) => Math.round(b.top))).size
+              // 折り返さずに1行で置いたときに要る幅（囲みがこれより広いぶんは余白になる）
+              const span = document.createElement('span')
+              span.style.cssText = `position:absolute;left:-9999px;top:0;white-space:nowrap;visibility:hidden;font:${cs.font};letter-spacing:${cs.letterSpacing}`
+              span.textContent = p.textContent
+              document.body.appendChild(span)
+              const oneLineWidth = r1(span.getBoundingClientRect().width)
+              span.remove()
+              return {
+                text: (p.textContent ?? '').replace(/​/g, '').trim(),
+                lines,
+                oneLineWidth,
+                innerWidth: r1(secIn.right - secIn.left),
+              }
+            })(),
             // 囲み自体が、本文を置ける範囲の中で左右に空けている幅
             outerGap: {
               left: r1(secBox.left - mainIn.left),
@@ -28555,10 +28586,17 @@ try {
             },
             secWidth: r1(secBox.width),
             mainWidth: r1(mainIn.right - mainIn.left),
-            // 囲みの中身の並び(囲みの左上から見た位置と幅)
+            // 囲みの中身の並び(囲みの左上から見た位置と幅)。報告に出す用
             parts: [...sec.children].map((el) => {
               const b = el.getBoundingClientRect()
               return `${el.tagName}:${r1(b.left - secBox.left)},${r1(b.top - secBox.top)},${r1(b.width)}`
+            }),
+            // 中身の順番と、囲みの上端から見た縦の位置。
+            // 2026-08-18 便HO: 横幅は画面幅で変わってよい(結びの一文が1行に収まるところまで
+            // 囲みを広げるため)ので、比べるのは順番と縦の位置だけにする
+            order: [...sec.children].map((el) => {
+              const b = el.getBoundingClientRect()
+              return `${el.tagName}:${r1(b.top - secBox.top)}`
             }),
             overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
           }
@@ -28569,11 +28607,21 @@ try {
       const hkNarrow = await hkLpProbe(390)
       const hkWide = await hkLpProbe(1280)
 
+      // 2026-08-18 便HO（オーナー実機フィードバック「LPの改行：大画面で『きます』だけは変なので、
+      // １行が納まる幅になおしてください。」）: 便HKで囲みを吹き出しの塊ちょうどまで細くした結果、
+      // 結びの一文が2行に折り返し、2行目に「きます。」だけが残っていた。
+      // 一文が1行に収まるところまで囲みを広げる＝そのぶん空白は戻るので、
+      // 便HKの「狭い画面と同じ空きに収める」は「1行に収まるのに要る幅を超えて広げない」に測り直す。
       check(
-        'HK-LP(PC) 吹き出しの囲みに、狭い画面より広い空きが残っていない',
-        Math.abs(hkWide.innerGap.left - hkNarrow.innerGap.left) <= 2 &&
-          Math.abs(hkWide.innerGap.right - hkNarrow.innerGap.right) <= 2,
-        `1280=左${hkWide.innerGap.left}/右${hkWide.innerGap.right} , 390=左${hkNarrow.innerGap.left}/右${hkNarrow.innerGap.right}`,
+        'HK-LP(PC) 結びの一文が1行に収まっている(2行目に文末だけが残らない)',
+        hkWide.tail != null && hkWide.tail.lines === 1,
+        `行数=${hkWide.tail?.lines} / 文=${hkWide.tail?.text}`,
+      )
+      check(
+        // 20pxは「文字1つぶん(15px)＋端数」の保険。囲みが横いっぱいに戻れば大きく超える
+        'HK-LP(PC) 吹き出しの囲みは、結びの一文が1行に収まるのに要る幅より広くない(余白を増やしていない)',
+        hkWide.tail != null && hkWide.tail.innerWidth - hkWide.tail.oneLineWidth <= 20,
+        `中身を置ける幅=${hkWide.tail?.innerWidth} / 1行に要る幅=${hkWide.tail?.oneLineWidth} / 吹き出しの左右の空き=左${hkWide.innerGap.left}・右${hkWide.innerGap.right}`,
       )
       check(
         'HK-LP(PC) 吹き出しの囲みが左右均等に置かれている',
@@ -28581,8 +28629,8 @@ try {
         `左${hkWide.outerGap.left} / 右${hkWide.outerGap.right}`,
       )
       check(
-        'HK-LP 吹き出しの囲みの中身の並びが、大きい画面と狭い画面で同じ',
-        JSON.stringify(hkWide.parts) === JSON.stringify(hkNarrow.parts),
+        'HK-LP 吹き出しの囲みの中身が、大きい画面と狭い画面で同じ順番・同じ縦の位置に並ぶ',
+        JSON.stringify(hkWide.order) === JSON.stringify(hkNarrow.order),
         `1280=${hkWide.parts.join(' / ')} ／ 390=${hkNarrow.parts.join(' / ')}`,
       )
       check(
@@ -35518,6 +35566,143 @@ try {
       await s2Ctx.close()
     } finally {
       await s2Browser.close()
+    }
+  }
+
+  // --- SELECT-UI-03: 「選んだ◯品をどうしますか？」の窓から、選ぶ作業の続きに戻れる ---
+  // 2026-08-18 便HO・オーナー実機フィードバック(原文)「選択したレシピをどうするかの窓に、
+  // キャンセルで選択の続きに戻れるようにしたい。選択をやめる、で選択したレシピもリセットされてしまう」。
+  //
+  // 2026-08-17 便HJの時点でも、窓の外のタップとEscapeなら選んだレシピを残したまま閉じられたが、
+  // 窓の中に並ぶボタンは「今日の献立に入れる」「ファイルに書き出す」「削除する」「選択をやめる」の
+  // 4つで、続きに戻る道だけが**押せる場所として見えていなかった**。
+  //
+  // 測り方(禁じ手④「置き場所への固定」・②「文字列の完全一致」を避ける):
+  // 名前や並び順で探さず、窓の中のボタンを1つずつ押して**起きたこと**で見分ける。
+  //   ・窓が閉じて、選んだレシピが残り、選択モードのまま  = 選ぶ作業の続きに戻る道
+  //   ・窓が閉じて、選んだレシピが外れ、ふだんの一覧に戻る = 選択をやめる道
+  // 両方が窓の中に押せるボタンとしてあり、名前が違う(同じ名前で違う結果にならない)ことを見る。
+  currentCheck = 'SELECT-UI-03'
+  {
+    const s3Browser = await chromium.launch()
+    try {
+      for (const [s3Label, s3Viewport] of [
+        ['小さい画面', { width: 375, height: 667 }],
+        ['PC幅', { width: 1280, height: 800 }],
+      ]) {
+        const s3Ctx = await s3Browser.newContext({ viewport: s3Viewport })
+        const s3Page = await s3Ctx.newPage()
+        s3Page.on('pageerror', (err) => errors.push(`[pageerror@SELECT-UI-03] ${err.message}`))
+        await s3Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await s3Page.waitForTimeout(2200) // 初回シード完了待ち
+
+        const s3Actions = s3Page.getByTestId('selection-actions')
+        const s3Selected = () =>
+          s3Page.locator('[data-testid="select-card"][aria-pressed="true"]').count()
+        /** ふだんの一覧から始め直す(別の画面を経由して選択モードごと作り直す) */
+        const s3Reset = async () => {
+          await s3Page.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+          await s3Page.waitForTimeout(500)
+          await s3Page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await s3Page.waitForTimeout(1400)
+        }
+        /** 2品選んで「選び終わる」まで進み、どうするかの窓を開く */
+        const s3OpenDialog = async () => {
+          await s3Page.getByRole('button', { name: '選択', exact: true }).click()
+          await s3Page.waitForTimeout(400)
+          const cards = s3Page.locator('[data-testid="select-card"]')
+          await cards.nth(0).click()
+          await cards.nth(1).click()
+          await s3Page.waitForTimeout(300)
+          await s3Page.getByTestId('selection-finish').click()
+          await s3Page.waitForTimeout(500)
+        }
+        /** 窓の中に並ぶボタン(名前・目印・押す面の大きさ) */
+        const s3Doors = async () =>
+          await s3Actions.locator('button').evaluateAll((els) =>
+            els.map((el) => {
+              const b = el.getBoundingClientRect()
+              return {
+                testId: el.dataset.testid ?? '',
+                label: (el.innerText ?? '').replace(/​/g, '').replace(/\s+/g, ' ').trim(),
+                top: b.top,
+                bottom: b.bottom,
+                height: b.height,
+              }
+            }),
+          )
+
+        await s3OpenDialog()
+        const s3All = await s3Doors()
+        check(
+          `SELECT-UI-03(${s3Label}) 前提: 選び終わると、どうするかの窓が開く`,
+          (await s3Actions.count()) === 1 && s3All.length > 0 && (await s3Selected()) === 2,
+          JSON.stringify(s3All.map((d) => d.label)),
+        )
+
+        // 「選んだレシピに対して何かをする」道(献立に入れる・書き出す・削除する)以外を、
+        // 1つずつ押して結果を見る。押す前に窓を開き直すので、順番に左右されない
+        const s3ActionIds = [
+          'selection-actions-today',
+          'selection-actions-export',
+          'selection-actions-delete',
+        ]
+        const s3Exits = s3All.filter((d) => !s3ActionIds.includes(d.testId))
+        const s3Outcomes = []
+        for (const door of s3Exits) {
+          if (s3Outcomes.length > 0) {
+            await s3Reset()
+            await s3OpenDialog()
+          }
+          const button = door.testId
+            ? s3Page.getByTestId(door.testId)
+            : s3Actions.getByRole('button', { name: door.label, exact: true })
+          const box = await button.boundingBox()
+          const vh = s3Page.viewportSize().height
+          await button.click()
+          await s3Page.waitForTimeout(600)
+          s3Outcomes.push({
+            label: door.label,
+            closed: (await s3Actions.count()) === 0,
+            kept: (await s3Selected()) === 2,
+            stillSelecting: (await s3Page.getByTestId('selection-bar').count()) === 1,
+            inViewport: !!box && box.y >= 0 && box.y + box.height <= vh,
+            tapHeight: box ? Math.round(box.height) : 0,
+          })
+        }
+        const s3Detail = JSON.stringify(s3Outcomes)
+        const s3Continue = s3Outcomes.find((o) => o.closed && o.kept && o.stillSelecting)
+        const s3Quit = s3Outcomes.find((o) => o.closed && !o.kept && !o.stillSelecting)
+
+        check(
+          `SELECT-UI-03(${s3Label}) 窓の中に、選んだレシピを残したまま選ぶ作業の続きに戻るボタンがある`,
+          !!s3Continue,
+          s3Detail,
+        )
+        check(
+          `SELECT-UI-03(${s3Label}) 窓の中に、選んだレシピを外してふだんの一覧に戻るボタンもある`,
+          !!s3Quit,
+          s3Detail,
+        )
+        check(
+          `SELECT-UI-03(${s3Label}) その2つは違う名前で並ぶ(同じ名前で違う結果にならない)`,
+          !!s3Continue &&
+            !!s3Quit &&
+            s3Continue.label.length > 0 &&
+            s3Quit.label.length > 0 &&
+            s3Continue.label !== s3Quit.label,
+          `続きに戻る=${s3Continue?.label ?? '(無い)'} / やめる=${s3Quit?.label ?? '(無い)'}`,
+        )
+        check(
+          `SELECT-UI-03(${s3Label}) 続きに戻るボタンが画面の中にあり、押す面が小さくない`,
+          !!s3Continue && s3Continue.inViewport && s3Continue.tapHeight >= 44,
+          s3Continue ? JSON.stringify(s3Continue) : '(続きに戻るボタンが無い)',
+        )
+
+        await s3Ctx.close()
+      }
+    } finally {
+      await s3Browser.close()
     }
   }
 
