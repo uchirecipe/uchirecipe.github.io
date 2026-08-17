@@ -28,6 +28,13 @@ import { ja } from '../i18n/ja'
  * 置き場所を下端にしたのは、この節の上半分（「条件をしぼる」「在庫の食材から」→候補カード→
  * 「ランダムで1品出す」→候補数）が**1品側の絞り込みと結果でひとつながり**になっているため。
  * その途中に別のしくみで動くボタンを差し込むと、上の絞り込みがそちらにも効くように読める。
+ *
+ * 2026-08-17 便HI（オーナー指示）で足したのは次の2つ。**くじの引き方そのものは変えていない**:
+ *  ・`collapsible`… 見出しを押して開け閉めできるようにする。その日の献立が決まっている日は
+ *    畳んだ状態で出す。畳んでも節の名前は「今日なに作る？」のままにする＝同じものを
+ *    日によって違う名前で呼ばない（旧「もう1品さがす」の小さいリンクを置き換えた）
+ *  ・`pinnedRecipeId`… 候補カードからレシピ詳細へ行って戻ってきた1回だけ、
+ *    さっき見に行った料理をそのまま出す（引き直さない）。詳細は logic/navMemory.ts
  */
 
 type SuggestCondition = 'any' | 'notRecent' | 'favorite' | 'quick'
@@ -70,7 +77,16 @@ function matchesCondition(
 }
 
 /** 提案カード（写真サムネイル＋名前で詳細へ） */
-function SuggestionCard({ recipe, linkState }: { recipe: Recipe; linkState: unknown }) {
+function SuggestionCard({
+  recipe,
+  linkState,
+  onOpen,
+}: {
+  recipe: Recipe
+  linkState: unknown
+  /** 詳細へ移る直前に呼ぶ（戻ってきたときに同じ候補を出すため。2026-08-17 便HI） */
+  onOpen: (recipeId: number) => void
+}) {
   const photoUrl = usePhotoUrl(recipe.photo)
   return (
     <Link
@@ -78,6 +94,9 @@ function SuggestionCard({ recipe, linkState }: { recipe: Recipe; linkState: unkn
       // 2026-07-16オーナー決定: 候補カードから詳細を開いて戻ったときは、開いた画面へ戻す
       // (「今日の献立」と同じ扱い。RecipeDetailPageのbackFallback参照)
       state={linkState}
+      onClick={() => {
+        if (recipe.id != null) onOpen(recipe.id)
+      }}
       className="mt-[var(--space-sm)] flex items-center gap-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
     >
       <div className="h-20 w-20 shrink-0 overflow-hidden rounded-sm">
@@ -113,6 +132,9 @@ export default function TodaySuggestPanel({
   settings,
   linkState,
   planAction,
+  collapsible = false,
+  pinnedRecipeId = null,
+  onOpenSuggestion,
 }: {
   /** 提案の対象にするレシピ（「基本レシピを表示しない」設定を反映済み。読み込み中は undefined） */
   recipes: Recipe[] | undefined
@@ -128,7 +150,33 @@ export default function TodaySuggestPanel({
    * さらに2品入れるボタンを出さない。
    */
   planAction?: ReactNode
+  /**
+   * 見出しを押して開け閉めできるようにする（2026-08-17 便HI）。
+   * true にすると**畳んだ状態から始まる**。その日の献立が決まっている日に使う。
+   */
+  collapsible?: boolean
+  /**
+   * 引き直さずに出す候補（2026-08-17 便HI）。レシピ詳細から戻ってきた1回だけ渡す。
+   * 「ランダムで1品出す」を押す・条件を変えると外れて、ふだんどおりくじを引く。
+   */
+  pinnedRecipeId?: number | null
+  /** 候補カードからレシピ詳細を開いたことの知らせ（呼び出し側が覚える。2026-08-17 便HI） */
+  onOpenSuggestion?: (recipeId: number) => void
 }) {
+  /**
+   * 畳める日（その日の献立が決まっている日）に、利用者が見出しを押して開いたか
+   * （2026-08-17 便HI）。畳めない日は中身を常に出すので、この値は見ない。
+   *
+   * 「畳める／畳めない」が変わったときに setOpen で開き方を戻す形は**採らなかった**。
+   * 献立とレシピは liveQuery で後から届くので、着地の一瞬だけ「決まっていない日」に見え、
+   * そのあと「決まっている日」に変わる。その間に open を動かすと、**データが届いただけ**なのに
+   * 折りたたみが「利用者が開いた（閉→開）」と読み、伸びた部分を画面へ入れる位置合わせ
+   * （2026-08-09 便EO）を走らせてページを送ってしまう。開き方を状態から**導く**形にすれば、
+   * 押していないのに開いた扱いになる道がそもそも無い（2026-08-10 便FDと同じ考え方）。
+   */
+  const [open, setOpen] = useState(false)
+  /** 中身を出すか。畳めない日は常に出す */
+  const shown = collapsible ? open : true
   const [condition, setCondition] = useState<SuggestCondition>('any')
   // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
   // MealPlanPage「提案の条件」と同じパターン)
@@ -138,10 +186,25 @@ export default function TodaySuggestPanel({
   // 「1品ランダムに副菜が出てがっかり」を防ぐ。副菜・汁物・その他も足して選べる。
   // 選んだ種別に合う品が0件になる場合は0件回避で全体から選ぶ
   const [dishTypes, setDishTypes] = useState<DishType[]>(DEFAULT_DISH_TYPES)
-  const toggleDishType = (type: DishType) =>
-    setDishTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]))
   const [pantryOnly, setPantryOnly] = useState(false)
   const [seed, setSeed] = useState(() => Math.random())
+  /**
+   * レシピ詳細から戻ってきたときに、そのまま出しておく候補（2026-08-17 便HI）。
+   * 引き直しの条件が1つでも変わったら外す＝「戻ってきた1回だけ」に閉じる。
+   */
+  const [pinnedId, setPinnedId] = useState<number | null>(pinnedRecipeId)
+  const toggleDishType = (type: DishType) => {
+    setPinnedId(null)
+    setDishTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]))
+  }
+  const changeCondition = (value: SuggestCondition) => {
+    setPinnedId(null)
+    setCondition(value)
+  }
+  const togglePantryOnly = () => {
+    setPinnedId(null)
+    setPantryOnly((v) => !v)
+  }
   // 「ランダムで1品出す」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
   // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
   const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
@@ -180,10 +243,17 @@ export default function TodaySuggestPanel({
     () => excludeYesterdayPlanRecipes(finalCandidates, recentSuggestedIds),
     [finalCandidates, recentSuggestedIds],
   )
-  const suggestion =
+  const drawn =
     shufflePool.length > 0
       ? shufflePool[Math.floor(seed * shufflePool.length) % shufflePool.length]
       : undefined
+  /**
+   * 覚えていた候補があればそれを出す（2026-08-17 便HI）。
+   * 見つからないとき（そのレシピを消した・条件から外れた等）は、黙ってふつうのくじに戻す
+   * ＝「戻ったら空だった」を作らない。
+   */
+  const pinned = pinnedId != null ? (recipes ?? []).find((r) => r.id === pinnedId) : undefined
+  const suggestion = pinned ?? drawn
   // 「ランダムで1品出す」: 今出ている候補を直近リストへ積んでから振り直す
   const shuffleSuggestion = () => {
     if (suggestion?.id != null) {
@@ -192,14 +262,12 @@ export default function TodaySuggestPanel({
         [shownId, ...prev.filter((id) => id !== shownId)].slice(0, RECENT_SUGGEST_KEEP),
       )
     }
+    setPinnedId(null)
     setSeed(Math.random())
   }
 
-  return (
-    <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-      <h2 className="text-xl font-bold">{ja.dayStart.suggestTitle}</h2>
-
-      {recipes && recipes.length === 0 ? (
+  const body =
+    recipes && recipes.length === 0 ? (
         <div className="mt-[var(--space-sm)] text-center">
           <p className="text-ink-muted">{ja.dayStart.empty}</p>
           <Link
@@ -233,7 +301,7 @@ export default function TodaySuggestPanel({
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => setCondition(option.value)}
+                    onClick={() => changeCondition(option.value)}
                     className={`rounded-sm border px-3 py-2 text-sm font-bold ${
                       condition === option.value
                         ? 'border-accent bg-accent text-on-accent'
@@ -299,7 +367,7 @@ export default function TodaySuggestPanel({
             {pantryNames.length > 0 && (
               <button
                 type="button"
-                onClick={() => setPantryOnly((v) => !v)}
+                onClick={togglePantryOnly}
                 aria-pressed={pantryOnly}
                 className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
                   pantryOnly
@@ -320,7 +388,11 @@ export default function TodaySuggestPanel({
           )}
 
           {suggestion ? (
-            <SuggestionCard recipe={suggestion} linkState={linkState} />
+            <SuggestionCard
+              recipe={suggestion}
+              linkState={linkState}
+              onOpen={(recipeId) => onOpenSuggestion?.(recipeId)}
+            />
           ) : (
             <p className="mt-[var(--space-sm)] text-ink-muted">{ja.dayStart.noCandidate}</p>
           )}
@@ -350,7 +422,36 @@ export default function TodaySuggestPanel({
             </div>
           )}
         </>
+      )
+
+  return (
+    <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+      {/* 見出し。畳める日は見出しそのものが開け閉めのボタンになる（2026-08-17 便HI）。
+          畳んでいても節の名前は「今日なに作る？」のまま＝同じものを日によって違う名前で呼ばない
+          （旧「もう1品さがす」の小さいリンクを置き換えた） */}
+      {collapsible ? (
+        <h2 className="text-xl font-bold">
+          <button
+            type="button"
+            data-testid="day-suggest-toggle"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={shown}
+            /* 見出しの行がそのまま押す面になる（高さは文字の大きさ＋上下の余白で44px以上） */
+            className="flex w-full items-center justify-between gap-2 py-2 text-left"
+          >
+            {ja.dayStart.suggestTitle}
+            {shown ? (
+              <ChevronUp size={20} className="shrink-0 text-ink-muted" aria-hidden />
+            ) : (
+              <ChevronDown size={20} className="shrink-0 text-ink-muted" aria-hidden />
+            )}
+          </button>
+        </h2>
+      ) : (
+        <h2 className="text-xl font-bold">{ja.dayStart.suggestTitle}</h2>
       )}
+
+      {collapsible ? <Collapse open={shown}>{body}</Collapse> : body}
     </section>
   )
 }

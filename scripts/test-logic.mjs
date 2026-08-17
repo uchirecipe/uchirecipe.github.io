@@ -316,10 +316,14 @@ import {
   LAST_RECIPES_PATH_KEY,
   DAY_RETURN_KEY,
   MONTH_RETURN_KEY,
+  MEAL_PLAN_TAB_TAP_KEY,
+  DAY_SUGGEST_PIN_KEY,
+  parseSuggestionPin,
   parseViewReturn,
   parseWeekReturn,
   pickReturnAnchor,
   scrollTargetForAnchor,
+  serializeSuggestionPin,
   serializeViewReturn,
   serializeWeekReturn,
 } from '../src/logic/navMemory.ts'
@@ -3112,6 +3116,27 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('EQ-NAV 目印が無ければnull', parseViewReturn('{"scrollY":10}'), null)
   eq('EQ-NAV スクロール位置が数値でなければnull', parseViewReturn('{"anchor":"","scrollY":"10"}'), null)
   eq('EQ-NAV NaNはnull', parseViewReturn('{"anchor":"","scrollY":null}'), null)
+}
+
+// ---------- navMemory: 「今日なに作る？」の候補を覚える(2026-08-17 便HI・再発防止) ----------
+// オーナー実機「今日なに作るのレシピ詳細から戻ってきた時だけは、ランダムでレシピが変わらないように」。
+// 候補はくじなので、画面を離れて戻ると引き直されてさっき見に行った料理が消えていた。
+// ここで固定するのは「覚える形」と「読めないときは覚えていない扱いにする」の2点
+// （読めない値でおかしな料理を出すより、ふつうにくじを引くほうが正しい）。
+{
+  eq('HI-PIN 覚えるキーは固定(別便が別名で書かない)', [MEAL_PLAN_TAB_TAP_KEY, DAY_SUGGEST_PIN_KEY], [
+    'mealPlan:tabTap',
+    'mealPlan:daySuggest',
+  ])
+  eq('HI-PIN 覚えた候補をそのまま読み戻せる', parseSuggestionPin(serializeSuggestionPin(42)), 42)
+  eq('HI-PIN 覚えが無ければnull(ふつうにくじを引く)', parseSuggestionPin(null), null)
+  eq('HI-PIN 空文字はnull', parseSuggestionPin(''), null)
+  eq('HI-PIN JSONでなければnull', parseSuggestionPin('{壊れた'), null)
+  eq('HI-PIN 物体でなければnull', parseSuggestionPin('42'), null)
+  eq('HI-PIN IDが数値でなければnull', parseSuggestionPin('{"recipeId":"42"}'), null)
+  eq('HI-PIN IDが整数でなければnull', parseSuggestionPin('{"recipeId":4.2}'), null)
+  eq('HI-PIN IDが0以下ならnull', parseSuggestionPin('{"recipeId":0}'), null)
+  eq('HI-PIN IDが無ければnull', parseSuggestionPin('{}'), null)
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------

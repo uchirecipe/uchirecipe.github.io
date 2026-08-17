@@ -4,7 +4,7 @@ import { BookOpen, CalendarDays, Refrigerator, Settings } from 'lucide-react'
 import { ja } from '../i18n/ja'
 // 覚えるキーと「覚えを捨てる」操作は logic/navMemory.ts に置いてある
 // （捨てる側＝献立タブからも同じキーを触るため。2026-08-07 便DT-2）
-import { LAST_RECIPES_PATH_KEY } from '../logic/navMemory'
+import { LAST_RECIPES_PATH_KEY, MEAL_PLAN_TAB_TAP_KEY, writeSessionItem } from '../logic/navMemory'
 
 /**
  * 「レシピ」の後ろに並べる行き先（2026-08-17 便HG）。
@@ -53,6 +53,11 @@ export default function TabBar() {
       <div className="mx-auto flex max-w-md">
         <NavLink
           to="/meal-plan"
+          /* 押したことを献立の画面へ伝える（2026-08-17 便HI・オーナー実機
+             「週や月の献立を表示中に献立タブをタップしたら、日に戻るようにして」）。
+             日/週/月は献立の画面の中の状態なので、すでに献立にいると行き先が同じで
+             何も起きなかった。合図の置き場所と理由は logic/navMemory.ts */
+          onClick={() => writeSessionItem(MEAL_PLAN_TAB_TAP_KEY, '1')}
           className={({ isActive }) =>
             `flex flex-1 flex-col items-center gap-1 py-[var(--space-sm)] text-xs ${
               isActive ? 'font-bold text-accent-ink' : 'text-ink-muted'
