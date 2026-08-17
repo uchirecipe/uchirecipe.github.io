@@ -27313,16 +27313,34 @@ try {
         await feCtx.close()
       }
 
-      // PC幅では吹き出しをさらに重ねて1つの絵に見せる(隙間は0以下)
+      // PC幅でも吹き出しは上下に重なっている(隙間は0以下)。
+      // 2026-08-17 便HF(オーナー指示「こんなことありませんかの吹き出し、大画面だとバランスが悪い。
+      // 幅が狭い画面の時と同じにして」): 「隣り合う吹き出しが左右に完全にずれている」ことを
+      // 条件にしていたが、これはパソコン幅だけ散らし幅を広げていたころ(便FG)の形。
+      // 狭い画面と同じ並びでは隣どうしは左右にも重なるので、この条件は成り立たない。
+      // 見たいのは括弧に書いてあるとおり「文字が重ならない」ことなので、枠ではなく
+      // 文字が描かれている範囲そのもので測る形に改めた
       const fePcCtx = await feBrowser.newContext({ viewport: { width: 1280, height: 900 } })
       const fePcPage = await fePcCtx.newPage()
       await fePcPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
       const fePc = await fePcPage.evaluate(() => {
-        const boxes = [...document.querySelectorAll('.pains li')].map((li) => li.getBoundingClientRect())
+        const lis = [...document.querySelectorAll('.pains li')]
+        const boxes = lis.map((li) => li.getBoundingClientRect())
+        const texts = lis.map((li) => li.querySelector('b').getBoundingClientRect())
         return {
           gaps: boxes.slice(1).map((b, i) => Math.round(b.top - boxes[i].bottom)),
-          // 隣り合う吹き出しは左右にずれている(縦に重ねても文字が重ならない条件)
-          sideBySide: boxes.slice(1).every((b, i) => b.left > boxes[i].right || b.right < boxes[i].left),
+          // どの2つを取っても、文字の描かれている範囲どうしは重なっていない
+          textOverlaps: texts
+            .flatMap((a, i) =>
+              texts.slice(i + 1).map((b, j) => {
+                const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+                const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+                return ox > 0 && oy > 0
+                  ? `${i + 1}と${i + 2 + j}(横${Math.round(ox)} 縦${Math.round(oy)})`
+                  : ''
+              }),
+            )
+            .filter(Boolean),
           overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
         }
       })
@@ -27331,7 +27349,11 @@ try {
         fePc.gaps.length === 3 && fePc.gaps.every((g) => g <= 0),
         `隙間=${fePc.gaps.join(',')}`,
       )
-      check('FE-LP(PC) 縦に重ねても隣どうしは左右にずれている(文字が重ならない)', fePc.sideBySide)
+      check(
+        'FE-LP(PC) 縦に重ねても文字どうしは重なっていない',
+        fePc.textOverlaps.length === 0,
+        fePc.textOverlaps.join(' , '),
+      )
       check('FE-LP(PC) 横スクロールが出ていない', fePc.overflow === false)
       await fePcCtx.close()
     } finally {
@@ -27593,7 +27615,12 @@ try {
         await fgCtx.close()
       }
 
-      // パソコン幅: さらに深く重ねる。左右が重なる組(1と3・2と4)だけは文字が隠れない浅さに保つ
+      // パソコン幅: 2026-08-17 便HF(オーナー指示「幅が狭い画面の時と同じにして」)で、
+      // 狭い画面と同じ並びに戻した。「パソコンではもっと詰める」(便FG)という要件は
+      // この指示で失効したので、全体の高さ220px以下という上限は外し、
+      // 重なっていること自体と、重ねても文字が隠れないことだけを見る。
+      // 文字が隠れない判定のしきい値も、狭い画面と同じ並びになった以上は別々に持つ理由が
+      // ないので、390pxと同じ「縦の重なり28pxまで」にそろえる
       const fgPcCtx = await fgBrowser.newContext({ viewport: { width: 1280, height: 900 } })
       const fgPcPage = await fgPcCtx.newPage()
       await fgPcPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
@@ -27607,15 +27634,15 @@ try {
               boxes.slice(i + 1).map((b, j) => {
                 const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left)
                 const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
-                return ox > 0 && oy > 16 ? `${i + 1}と${i + 2 + j}(横${Math.round(ox)} 縦${Math.round(oy)})` : ''
+                return ox > 0 && oy > 28 ? `${i + 1}と${i + 2 + j}(横${Math.round(ox)} 縦${Math.round(oy)})` : ''
               }),
             )
             .filter(Boolean),
         }
       })
       check(
-        'FG-LP(PC) 吹き出しが便FEより深く重なっている(全体の高さ220px以下)',
-        fgPc.ulH <= 220 && fgPc.gaps.every((g) => g < 0),
+        'FG-LP(PC) 吹き出しが上下に重なっている',
+        fgPc.gaps.every((g) => g < 0),
         `高さ=${fgPc.ulH} 隙間=${fgPc.gaps.join(',')}`,
       )
       check('FG-LP(PC) 重ねても文字が隠れない', fgPc.bad.length === 0, fgPc.bad.join(' , '))
@@ -27631,6 +27658,166 @@ try {
       fgMore.status() === 200 && fgHtml.includes('>そのほかの使い方をくわしく →</a>'),
       `status=${fgMore.status()}`,
     )
+  }
+
+  // ================================================================================
+  // --- 便HF(2026-08-17 オーナー実機フィードバック): 紹介ページの大きい画面での見え方3件 ---
+  //  ①「登録したレシピを、スマホを触らずに〜買い物メモの作成まで」の2行が、大きい画面で
+  //    中央揃えになっていなかった(左に寄り、右に約200pxの空きができていた)。
+  //    周りの上部ラベル・見出し・ボタン下の注記はどれも中央揃えなのでここだけ揃わない。
+  //    狭い画面では折り返して端まで届くため、左揃えのまま変えない
+  //  ②「こんなこと、ありませんか」の吹き出しを、幅が狭い画面のときと同じ並びにする。
+  //    パソコン幅だけ散らし幅を広げて深く重ねる指定(便FG)と、2番目だけを左上へ
+  //    ずらす指定(便GT)をやめた
+  //  ③ 一覧のカードの図の説明文を削除
+  // 測り方: 置き場所を決め打ちせず、「左右の余白が同じか(揃っているか)」
+  //         「狭い画面と同じ並びか」「文字どうしが重なっていないか」で見る。
+  //         狭い画面の見え方は1pxも変えていないので、同じ物差しを両方の幅に当てて突き合わせる
+  // ================================================================================
+  currentCheck = 'HF-LP'
+  {
+    const hfBrowser = await chromium.launch()
+    try {
+      const hfProbe = async (width) => {
+        const hfCtx = await hfBrowser.newContext({ viewport: { width, height: 900 } })
+        const hfPage = await hfCtx.newPage()
+        hfPage.on('pageerror', (err) => {
+          if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+          errors.push(`[pageerror@HF-LP] ${err.message}`)
+        })
+        await hfPage.goto(`${BASE}/about/`, { waitUntil: 'networkidle' })
+        const got = await hfPage.evaluate(() => {
+          // ゼロ幅スペースが混ざっても照合が外れないように落としてから比べる
+          const Z = (s) => (s ?? '').replace(/​/g, '').trim()
+          // 囲みの「中身を置ける範囲」の左右端(枠線と内側の余白を除いた実際の置き場所)
+          const innerX = (el) => {
+            const b = el.getBoundingClientRect()
+            const cs = getComputedStyle(el)
+            return {
+              left: b.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft),
+              right: b.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight),
+            }
+          }
+          // 文字が実際に描かれている行ごとの矩形(折り返した行も1行ずつ取れる)
+          const lineRects = (el) => {
+            const out = []
+            const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+            let n
+            while ((n = walk.nextNode())) {
+              if (!Z(n.textContent)) continue
+              const range = document.createRange()
+              range.selectNodeContents(n)
+              for (const b of range.getClientRects()) if (b.width >= 0.5) out.push(b)
+            }
+            return out
+          }
+          const overlaps = (rects) => {
+            const out = []
+            for (let i = 0; i < rects.length; i++) {
+              for (let j = i + 1; j < rects.length; j++) {
+                const ox = Math.min(rects[i].right, rects[j].right) - Math.max(rects[i].left, rects[j].left)
+                const oy = Math.min(rects[i].bottom, rects[j].bottom) - Math.max(rects[i].top, rects[j].top)
+                if (ox > 0 && oy > 0) out.push(`${i + 1}と${j + 1}(横${Math.round(ox)} 縦${Math.round(oy)})`)
+              }
+            }
+            return out
+          }
+          const lead = document.querySelector('p.lead')
+          const leadArea = innerX(document.querySelector('main'))
+          const ul = document.querySelector('.pains')
+          const ulBox = ul.getBoundingClientRect()
+          const lis = [...ul.querySelectorAll('li')]
+          const boxes = lis.map((li) => li.getBoundingClientRect())
+          const painsArea = innerX(ul.closest('section.sec'))
+          const cardFig = [...document.querySelectorAll('figure.shot')].find((f) =>
+            (f.querySelector('img')?.getAttribute('src') ?? '').endsWith('recipe-cards-photo.webp'),
+          )
+          return {
+            leadText: Z(lead.textContent),
+            leadLines: lineRects(lead).map((b) => ({
+              leftGap: Math.round(b.left - leadArea.left),
+              rightGap: Math.round(leadArea.right - b.right),
+            })),
+            // 吹き出し4つの並び(一覧の左上から見た位置と大きさ)。
+            // 画面幅が違ってもこれが同じなら「狭い画面と同じ並び」
+            painsLayout: boxes.map(
+              (b) =>
+                `${Math.round(b.left - ulBox.left)},${Math.round(b.top - ulBox.top)},${Math.round(
+                  b.width,
+                )},${Math.round(b.height)}`,
+            ),
+            // 吹き出し4つをまとめて囲む範囲の、囲みの中での左右の空き
+            painsBlockGap: {
+              left: Math.round(Math.min(...boxes.map((b) => b.left)) - painsArea.left),
+              right: Math.round(painsArea.right - Math.max(...boxes.map((b) => b.right))),
+            },
+            painsTextOverlaps: overlaps(lis.map((li) => li.querySelector('b').getBoundingClientRect())),
+            cardFigFound: !!cardFig,
+            cardFigHasCaption: !!cardFig?.querySelector('figcaption'),
+            removedCaptionLeft: Z(document.body.textContent).includes(
+              '写真があってもなくても同じ形で並びます',
+            ),
+            overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          }
+        })
+        await hfCtx.close()
+        return got
+      }
+      const hfNarrow = await hfProbe(390)
+      const hfWide = await hfProbe(1280)
+
+      // --- ① リード文の中央揃え ---
+      // 大きい画面ではこの2文は折り返さずに1文=1行で収まるので、
+      // 行の左右の余白が同じなら中央に揃っている
+      check(
+        'HF-LP(PC) リード文「登録したレシピを〜買い物メモの作成まで」の各行が中央に揃っている',
+        hfWide.leadText.startsWith('登録したレシピを、') &&
+          hfWide.leadText.endsWith('買い物メモの作成まで。') &&
+          hfWide.leadLines.length > 0 &&
+          hfWide.leadLines.every((l) => Math.abs(l.leftGap - l.rightGap) <= 2),
+        `文=${hfWide.leadText.slice(0, 12)}… / 行=${hfWide.leadLines
+          .map((l) => `左${l.leftGap}/右${l.rightGap}`)
+          .join(' , ')}`,
+      )
+      // 狭い画面は折り返して端まで届くため左揃えのまま(オーナーの指摘は大きい画面だけ)
+      check(
+        'HF-LP(390) リード文は左端から始まる(狭い画面の見え方は変えない)',
+        hfNarrow.leadLines.length > 0 && hfNarrow.leadLines.every((l) => l.leftGap <= 1),
+        `行=${hfNarrow.leadLines.map((l) => `左${l.leftGap}`).join(' , ')}`,
+      )
+
+      // --- ② 吹き出しの並び ---
+      check(
+        'HF-LP 吹き出しの並びが大きい画面と狭い画面で同じ',
+        JSON.stringify(hfWide.painsLayout) === JSON.stringify(hfNarrow.painsLayout),
+        `390=${hfNarrow.painsLayout.join(' / ')} ／ 1280=${hfWide.painsLayout.join(' / ')}`,
+      )
+      check(
+        'HF-LP(PC) 吹き出しの塊が囲みの中で片側に寄っていない',
+        Math.abs(hfWide.painsBlockGap.left - hfWide.painsBlockGap.right) <= 8,
+        `左の空き=${hfWide.painsBlockGap.left} 右の空き=${hfWide.painsBlockGap.right}`,
+      )
+      // 重ねた結果、文字どうしが重なっていないか(枠と余白は重なってよい)
+      for (const [hfLabel, hf] of [
+        ['390', hfNarrow],
+        ['PC', hfWide],
+      ]) {
+        check(
+          `HF-LP(${hfLabel}) 吹き出しの文字どうしが重なっていない`,
+          hf.painsTextOverlaps.length === 0,
+          hf.painsTextOverlaps.join(' , '),
+        )
+        check(`HF-LP(${hfLabel}) 横にはみ出していない`, hf.overflow === false)
+      }
+
+      // --- ③ 一覧のカードの図の説明文を削除 ---
+      // 説明文を付けない図は <figcaption> ごと置かない(使い方ページの nav-tabs.webp と同じ扱い)
+      check('HF-LP 一覧のカードの図がある', hfWide.cardFigFound)
+      check('HF-LP 一覧のカードの図に説明文を付けていない', hfWide.cardFigHasCaption === false)
+      check('HF-LP 消した説明文がページのどこにも残っていない', hfWide.removedCaptionLeft === false)
+    } finally {
+      await hfBrowser.close()
+    }
   }
 
   // ============================================================================
