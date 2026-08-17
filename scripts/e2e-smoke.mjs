@@ -4503,15 +4503,22 @@ try {
       const dtLogLink = dtPage.locator('a[href*="#/recipes/"]').filter({ hasText: 'カレーライス' }).first()
       await dtLogLink.scrollIntoViewIfNeeded()
       await dtPage.waitForTimeout(400)
+      // 2026-08-17 便HI: 週タブは**先頭から**出るようになった（以前は今日のカードへ勝手に送っていた）。
+      // この検査が見たいのは「戻ったときに元の位置へ帰るか」なので、**自分で送ってから**測る。
+      // 送れない（ページが短い）ときは戻り先の比較そのものが成り立たないので、その旨を出す
+      await dtPage.evaluate(() => window.scrollBy(0, 240))
+      await dtPage.waitForTimeout(300)
       const dtScrollBefore = await dtPage.evaluate(() => Math.round(window.scrollY))
       const dtWeekBefore =
         (await dtPage.locator('button[aria-label="前の週"] ~ button').first().textContent()) ?? ''
       check(
-        'WEEKUI-DT(便DT-2) 前提: 記録カードを開く前に週タブをスクロールしている',
+        'WEEKUI-DT(便DT-2) 前提: 記録カードを開く前に週タブを送っている',
         dtScrollBefore > 0,
-        `scrollY=${dtScrollBefore}`,
+        `scrollY=${dtScrollBefore}（ページが送れる高さか）`,
       )
-      await dtLogLink.click()
+      // Playwrightのclick()は要素を見える位置へ送るので、上で作った位置が壊れる。
+      // DOMのclickを直接呼んで送らない（同じ理由の対処がSCROLL-01・LOG-01にもある）
+      await dtLogLink.evaluate((el) => el.click())
       await dtPage.waitForTimeout(900)
       check(
         'WEEKUI-DT(便DT-2) 記録カードからレシピ詳細が開く',
@@ -25033,8 +25040,11 @@ try {
       {
         const ewIns = await (await page.request.get(`${BASE}/about/install.html`)).text()
         check(
-          'EW-02 見出しが「手順の最初にうちレシピ（ホーム画面）を開いてください」になっている',
-          ewIns.includes('手順の最初にうちレシピ（ホーム画面）を開いてください') &&
+          'EW-02 見出しが「手順の最初に、うちレシピの◯◯の画面を開いてください」になっている',
+          // 2026-08-17 ホーム画面を廃止し、着地は「献立」になった。言い回しを丸ごと決め打ちせず、
+          // 「手順の最初に開く画面を名指ししている」ことで測る（CLAUDE.md 禁じ手②）
+          /手順の最初に[、]?\s*うちレシピの[^<]{0,12}画面を開いてください/.test(ewIns) &&
+            !ewIns.includes('ホーム画面）を開いてください') &&
             !ewIns.includes('<strong>先にうちレシピを開いてください</strong>'),
         )
         check(
