@@ -56,6 +56,67 @@ export function forgetRecipesTabPath(): void {
   removeSessionItem(LAST_RECIPES_PATH_KEY)
 }
 
+// ---------- ①-2 下の並びの「献立」を押したことの合図 ----------
+
+/**
+ * 下の並びの「献立」を押したことを、献立の画面へ伝える合図（2026-08-17 便HI・オーナー実機
+ * 「週や月の献立を表示中に献立タブをタップしたら、日に戻るようにして」）。
+ *
+ * 献立の画面は日/週/月をこの画面の中の状態として持っているので、すでに献立にいるときに
+ * 「献立」を押しても、行き先（/meal-plan）が同じなので何も起きなかった。押した合図を
+ * ここへ置き、画面の側が「日へ戻してページの先頭を出す」を行う。
+ *
+ * 行き先にクエリ（?focus=today）を足す形は採らなかった。あのクエリは
+ * 「レシピ詳細・記録の一覧から帰ってきた」ことを表す印として使われていて、
+ * 覚えた縦位置の復元（restore=1）とも組みになっている。タブを押しただけの操作に
+ * 同じ印を使うと、2つの意味が1つのクエリに混ざる。
+ */
+export const MEAL_PLAN_TAB_TAP_KEY = 'mealPlan:tabTap'
+
+// ---------- ①-3「今日なに作る？」で見ていた候補 ----------
+
+/**
+ * 「今日なに作る？」の候補カードからレシピ詳細へ移るとき、そのとき出ていた候補を覚える
+ * （2026-08-17 便HI・オーナー実機「今日なに作るのレシピ詳細から戻ってきた時だけは、
+ * ランダムでレシピが変わらないようにして」）。
+ *
+ * 直すバグ: 候補はくじ（毎回引き直す乱数）で決まるため、詳細へ移って戻ってくると
+ * **さっきタップした料理が画面から消えていた**。「これにしようか」と見に行った本人が、
+ * 戻った瞬間にその料理を見失う。
+ *
+ * 覚えるのは**カードから開いた1品のレシピID**だけにしてある。くじの種と絞り込みの状態を
+ * 全部覚えて引き直しを再現する形も考えたが、間にレシピを消す・条件が変わるなど
+ * 「同じ結果にならない」道が増えるほど、肝心の「さっきの料理が出ている」が崩れる。
+ * 出す料理そのものを覚えれば、何が変わっても戻ったときの見え方は同じになる。
+ *
+ * 効くのは**戻ってきた1回だけ**。「ランダムで1品出す」を押す・条件を変えると外れて、
+ * ふだんどおりくじを引く。
+ */
+export const DAY_SUGGEST_PIN_KEY = 'mealPlan:daySuggest'
+
+/** 覚える形（後から項目を足せるようにオブジェクトで持つ。中身はレシピIDだけ） */
+export function serializeSuggestionPin(recipeId: number): string {
+  return JSON.stringify({ recipeId })
+}
+
+/**
+ * 覚えた候補を読み出す。壊れた値・別の形の値・IDとして使えない値は null にして無視する
+ * （読めないときは「覚えていない」＝ふつうにくじを引くのが正しい振る舞い）。
+ */
+export function parseSuggestionPin(raw: string | null | undefined): number | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const { recipeId } = parsed as { recipeId?: unknown }
+  if (typeof recipeId !== 'number' || !Number.isInteger(recipeId) || recipeId <= 0) return null
+  return recipeId
+}
+
 // ---------- ②献立タブ・週の「戻ってきたときの居場所」 ----------
 
 /**

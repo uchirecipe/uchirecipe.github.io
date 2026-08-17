@@ -88,11 +88,19 @@
 //         その日の献立が決まっていなければ出る/1品でも決まれば開いたまま出さない/空に戻すとまた出る/
 //         「ランダムで1品出す」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり既定は主菜だけON/
 //         種別を足すと候補は減らない・未選択と全選択の候補数が一致(便DV-1の再発防止)) /
-//         DAYLAYOUT-01(2026-08-17 便HH。旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換え: 献立の「日」の
-//         押せるボタンの重なりを解いた。献立が無い日は「自分で選ぶ」入口が1つだけ・「決めてもらう」2つ
-//         (おまかせで献立を組む/ランダムで1品出す)が「今日なに作る？」に揃う・外した2つ(レシピを探す/
-//         在庫の食材から探す)がどこにも無い・どれも指で押せる大きさ。献立がある日は提案が丸ごと消えず
-//         「もう1品さがす」(塗りも枠も無い小さいリンク)で開けて、開いたら振り直せる) /
+//         DAYLAYOUT-01(2026-08-17 便HH→便HIで並びを更新。旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換え:
+//         献立の「日」の押せるボタンの重なりを解いた。献立が無い日は「自分で選ぶ」入口が1つだけ・
+//         「決めてもらう」2つ(おまかせで献立を組む/ランダムで1品出す)が「今日なに作る？」に揃う・
+//         外した2つ(レシピを探す/在庫の食材から探す)がどこにも無い・どれも指で押せる大きさ・
+//         「今日の献立」の見出しは空の日には出ず「今日の献立を選ぶ」が「今日なに作る？」の下にある。
+//         献立がある日は同じ節を「今日なに作る？」の名前のまま畳んで出し(別名にしない)、
+//         見出しを押すと開いて振り直せる・「今日の献立を選ぶ」は出さない) /
+//         DAYFLOW-01(2026-08-17 便HI・オーナー実機8件: 日/週/月のどこへ移ってもページのいちばん上から
+//         見せる・下の並びの「献立」で日へ戻る(すでに日なら先頭へ)・「今週の献立の予定」の×が
+//         今日と今週の両方から外す(規約Fの押す前の説明と押したあとの知らせ込み)・「おまかせで献立を組む」は
+//         押しただけでは入らず続けて押すと別の組み合わせが出て、入れるときだけ食事の枠を選ぶ窓が開く・
+//         今日の献立の料理→詳細→戻る のあと「レシピ」タブでレシピ一覧が開く・「今日なに作る？」の
+//         候補→詳細→戻る で同じ料理が出ている) /
 //         MEALPLAN-HOUSE(2026-08-03 便DK: 設定「食数の設定」(旧「ふだん作る人数」)。未設定なら従来どおり登録人数分・
 //         4人分に設定すると献立の行/概算食費/買い物メモの分量/レシピ詳細の人数がすべてその人数分になり、
 //         レシピ詳細には元の登録人数が「登録: 2人分」で併記される。枠ごとに決めた食数はこの設定より優先し、
@@ -3733,9 +3741,12 @@ try {
         `confirm=${JSON.stringify(taConfirmText)}`,
       )
       const afterText = await taPage.textContent('body')
+      // 2026-08-17 便HI(オーナー指示「『今日の献立』がない時には表示しない」): 空になった合図は
+      // 案内文ではなく「今日の献立」の見出しごと消えること。文言ではなく見出しの有無で測る
       check(
         'TODAYALL-01 「全て作った！」の後、今日の献立が空になる(clearが実行される)',
-        afterText.includes('まだ今日つくるものが決まっていません'),
+        // 料理名は「最近作ったもの」にも出るので、本文の有無では測らない(禁じ手②)
+        (await taPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
       )
       // 便DP-1: 記録したあとは件数つきのトーストと「元に戻す」を出す
       check(
@@ -3983,8 +3994,9 @@ try {
       const tsDayText = (await tsPage.textContent('body')) ?? ''
       check(
         'TODAYSYNC-01(便DP-4) 日タブに「レシピ一覧から選択中」として取り残されない',
+        // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さないので、そちらで測る
         !tsDayText.includes('レシピ一覧から選択中') &&
-          tsDayText.includes('まだ今日つくるものが決まっていません'),
+          (await tsPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
       )
 
       // 自分でレシピ一覧から足した品は巻き込まない(印が無いものは消さない)
@@ -4249,9 +4261,15 @@ try {
       // 検査するのは①料理名と同じ行に並んでいる ②当たり判定44px以上
       // ③✕(外す)と12px以上離れている(押し間違い対策) の3点
       // 2026-08-17 便HH: おまかせは「今日なに作る？」の中へ移り、名前も
-      // 「おまかせで提案」→「おまかせで献立を組む」になった(置き場所は問わず名前で掴む)
+      // 「おまかせで提案」→「おまかせで献立を組む」になった(置き場所は問わず名前で掴む)。
+      // 2026-08-17 便HI: 押しただけでは今日の献立に入らなくなったので、
+      // 組んだ献立を「今日の献立に入れる」→食事を選ぶ、まで進めて行を用意する
       await dtPage.getByRole('button', { name: /おまかせで献立を組む/ }).first().click()
-      await dtPage.waitForTimeout(1500)
+      await dtPage.waitForTimeout(800)
+      await dtPage.locator('[data-testid="day-suggest-apply"]').click()
+      await dtPage.waitForTimeout(400)
+      await dtPage.getByRole('button', { name: '食事を決めずに今日の献立に追加' }).click()
+      await dtPage.waitForTimeout(1200)
       const dtCookedBtn = await dtPage.evaluate(() => {
         const btn = [...document.querySelectorAll('button')].find((b) =>
           b.textContent?.includes('作った！'),
@@ -4779,7 +4797,9 @@ try {
       // 規約F: 消えるものも件数つきで書く。「変わりません」だけでは片手落ち
       check(
         'WEEKLOCK(LOCK-5) 総入れ替えの確認文に消える品数と食分が入っている(規約F)',
-        lkDialogs.some((m) => /消えるもの: これからの[1-9]\d*食分に入っている献立[1-9]\d*品/.test(m)),
+        // 2026-08-17 便HI(オーナー実機「『これからの7食分に〜』→『今日以降の献立７食分に〜』
+        // とかのほうがわかりやすい」)で言い方を変えた。数字の入る形はそのまま
+        lkDialogs.some((m) => /消えるもの: 今日以降の献立[1-9]\d*食分に入っている[1-9]\d*品/.test(m)),
         `dialogs=${JSON.stringify(lkDialogs)}`,
       )
 
@@ -5491,8 +5511,10 @@ try {
       check('BACKNAV-01 ?focus=today では「日」タブへ固定される', (await dayTabBtn.getAttribute('aria-pressed')) === 'true')
       check('BACKNAV-01 focus=today パラメータは消費されURLから消える', !bnPage.url().includes('focus=today'))
       check(
-        'BACKNAV-01 戻った先に今日の献立セクションが見える',
-        (await bnPage.textContent('body')).includes('今日の献立'),
+        // 2026-08-17 便HI: 空の日は「今日の献立」の見出しを出さないので、
+        // 「日」に着いたことは、どの日にも必ず出る「今日なに作る？」で測る
+        'BACKNAV-01 戻った先が「日」の画面になっている',
+        ((await bnPage.textContent('body')) ?? '').replaceAll('\u200b', '').includes('今日なに作る？'),
       )
     } finally {
       await bnBrowser.close()
@@ -12406,8 +12428,8 @@ try {
       // (2) 今日の献立に1品でも入ると、開いたままにはしない(2026-08-17 便HG・オーナー指示)。
       // 週の予定ではなく「レシピ一覧から選択中」の1品でも同じように引っ込むことを見る
       // ＝献立が決まっている日に提案を重ねない、という決めごとそのものを測る。
-      // 2026-08-17 便HH: 決まっている日でも「もう1品さがす」を押せば開く形にしたので、
-      // ここで見るのは「押していないうちは出ていない」こと(開けることは DAYLAYOUT-01 が見る)
+      // 2026-08-17 便HI: 決まっている日は**節ごと畳んで**出す(見出しは「今日なに作る？」のまま)。
+      // ここで見るのは「押していないうちは中身が出ていない」こと(開けることは DAYLAYOUT-01 が見る)
       await dhPage.evaluate(
         () =>
           new Promise((resolve, reject) => {
@@ -12433,7 +12455,11 @@ try {
         const body = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
         check(
           'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は開いたまま出さない',
-          !body.includes('今日なに作る？') && body.includes('ほうれん草のおひたし'),
+          (await dhPage.locator('[data-testid="day-suggest-toggle"]').getAttribute(
+            'aria-expanded',
+          )) === 'false' &&
+            !body.includes('ランダムで1品出す') &&
+            body.includes('ほうれん草のおひたし'),
         )
       }
 
@@ -12455,7 +12481,7 @@ try {
       await dhPage.waitForTimeout(1500)
       check(
         'DAYSUGGEST-01 今日の献立を空に戻すと「今日なに作る？」がまた出る',
-        ((await dhPage.textContent('body')) ?? '').replaceAll('​', '').includes('今日なに作る？'),
+        ((await dhPage.textContent('body')) ?? '').replaceAll('​', '').includes('ランダムで1品出す'),
       )
     } finally {
       await dhBrowser.close()
@@ -20159,7 +20185,8 @@ try {
   // この検査が見るのは、直したこと(=押せるボタンが5つから3つに減っても、決め方は全部残る)の骨格:
   //   ① 献立が無い日: 「自分で選ぶ」入口が1つだけ／「決めてもらう」2つが同じ節に居る／
   //      外した2つがどこにも無い／どれも指で押せる大きさ
-  //   ② 献立がある日: 提案が丸ごと消えず「もう1品さがす」で開けて、開いたら使える
+  //   ② 献立がある日: 同じ節を「今日なに作る？」の名前のまま畳んで出し、見出しを押すと開いて使える
+  //      （2026-08-17 便HI。便HHの小さいリンク「もう1品さがす」は、節を日によって別名で呼ばないため廃止）
   // 置き場所ではなく「名前で掴めるか」「押すとどうなるか」「同じ節に居るか」で測る(禁じ手④)。
   // 曜日・月替わりに依らない材料(todayList・在庫)だけを使う(禁じ手①)。
   // 照合はBudouXのゼロ幅スペースを外してから(禁じ手②) ---
@@ -20234,6 +20261,21 @@ try {
         )
         const section = dlSuggestSection()
         check('DAYLAYOUT-01 献立が無い日は「今日なに作る？」が出る', (await section.count()) === 1)
+        // 2026-08-17 便HI(オーナー指示): 「今日の献立」の見出しと枠は空の日には出さない。
+        // 「今日の献立を選ぶ」だけを残し、置き場所は「今日なに作る？」の下
+        check(
+          'DAYLAYOUT-01 献立が無い日は「今日の献立」の見出しを出さない',
+          (await dlPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+        )
+        {
+          const sectionBox = (await section.boundingBox()) ?? { y: 0, height: 0 }
+          const chooseBox = (await choose.boundingBox()) ?? { y: 0 }
+          check(
+            'DAYLAYOUT-01 「今日の献立を選ぶ」は「今日なに作る？」の下にある',
+            chooseBox.y >= sectionBox.y + sectionBox.height,
+            `節=${Math.round(sectionBox.y)}+${Math.round(sectionBox.height)} 選ぶ=${Math.round(chooseBox.y)}`,
+          )
+        }
         const omakase = section.getByRole('button', { name: 'おまかせで献立を組む' })
         const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
         check(
@@ -20293,43 +20335,45 @@ try {
         check('DAYLAYOUT-01 献立がある日は今日の献立が出る', body.includes('肉じゃが'))
         check(
           'DAYLAYOUT-01 献立がある日は「今日なに作る？」を畳んでおく(見え方を重くしない)',
-          !body.includes('今日なに作る？'),
+          // 2026-08-17 便HI: 節の名前は畳んでも出したままにしたので、中身が出ていないことで測る
+          !body.includes('ランダムで1品出す'),
         )
-        const more = dlPage.getByRole('button', { name: 'もう1品さがす' })
-        const moreFound = (await more.count()) === 1
-        check('DAYLAYOUT-01 献立がある日は「もう1品さがす」がある', moreFound)
-        // 小さいリンク＝塗りも枠も持たない。ただし押せる大きさ(44px)は保つ
-        const moreStyle = moreFound
-          ? await more.evaluate((el) => {
-              const s = getComputedStyle(el)
-              return {
-                bg: s.backgroundColor,
-                borderTop: s.borderTopWidth,
-                borderBottom: s.borderBottomWidth,
-              }
-            })
-          : { bg: '(無し)', borderTop: '99px', borderBottom: '99px' }
-        const moreBox = await dlTapSize(more)
+        const section = dlSuggestSection()
+        const toggle = dlPage.locator('[data-testid="day-suggest-toggle"]')
+        const toggleFound = (await toggle.count()) === 1
         check(
-          'DAYLAYOUT-01 「もう1品さがす」は塗り・枠を持たない(ボタンにしない)',
-          /rgba\(0, 0, 0, 0\)|transparent/.test(moreStyle.bg) &&
-            parseFloat(moreStyle.borderTop) === 0 &&
-            parseFloat(moreStyle.borderBottom) === 0,
-          JSON.stringify(moreStyle),
+          'DAYLAYOUT-01 献立がある日も節の名前は「今日なに作る？」のまま(別名にしない)',
+          toggleFound &&
+            ((await toggle.textContent()) ?? '').replaceAll('\u200b', '').includes('今日なに作る？'),
         )
         check(
-          'DAYLAYOUT-01 「もう1品さがす」も指で押せる大きさ(高さ44px以上)',
-          moreBox.height >= 44,
-          `w=${Math.round(moreBox.width)} h=${Math.round(moreBox.height)}`,
+          'DAYLAYOUT-01 献立がある日は「もう1品さがす」という別名を出さない',
+          !body.includes('もう1品さがす'),
         )
-        if (moreFound) {
-          await more.click()
+        check(
+          'DAYLAYOUT-01 献立がある日は畳んで出す',
+          toggleFound && (await toggle.getAttribute('aria-expanded')) === 'false',
+        )
+        const toggleBox = await dlTapSize(toggle)
+        check(
+          'DAYLAYOUT-01 畳んだ見出しも指で押せる大きさ(高さ44px以上)',
+          toggleBox.height >= 44,
+          `w=${Math.round(toggleBox.width)} h=${Math.round(toggleBox.height)}`,
+        )
+        // 献立がある日は「今日の献立」の中の「レシピ一覧から追加」が同じ行き先を持つので、
+        // 「今日の献立を選ぶ」は出さない(同じ操作を2か所に作らない)
+        check(
+          'DAYLAYOUT-01 献立がある日は「今日の献立を選ぶ」を出さない(入口が二重にならない)',
+          (await dlPage.getByRole('button', { name: '今日の献立を選ぶ' }).count()) === 0 &&
+            (await dlPage.locator('[data-testid="today-add-more"]').count()) === 1,
+        )
+        if (toggleFound) {
+          await toggle.click()
           await dlPage.waitForTimeout(700)
         }
-        const section = dlSuggestSection()
         check(
-          'DAYLAYOUT-01 「もう1品さがす」を押すと「今日なに作る？」が開く',
-          (await section.count()) === 1,
+          'DAYLAYOUT-01 見出しを押すと「今日なに作る？」が開く',
+          toggleFound && (await toggle.getAttribute('aria-expanded')) === 'true',
         )
         const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
         const oneDishFound = (await oneDish.count()) === 1
@@ -20362,6 +20406,375 @@ try {
       }
     } finally {
       await dlBrowser.close()
+    }
+  }
+
+  // --- DAYFLOW-01(2026-08-17 便HI・オーナー実機フィードバック8件の再発防止)。
+  // 献立の「日/週/月」を実際に触って、次の6つを確かめる:
+  //   (a) どのタブへ移ってもページのいちばん上から見せる（前は週タブだけ今日のカードへ送っていた）
+  //   (b) 下の並びの「献立」を押すと日へ戻る／すでに日にいるときは先頭へ送る
+  //   (c) 「今週の献立の予定」の×は、今日の献立と今週の献立の両方から外す
+  //   (d) 「おまかせで献立を組む」は押しただけでは入らず、押すたびに別の組み合わせが出る。
+  //       入るのは「今日の献立に入れる」で食事を選んだときだけ（窓は他の画面と同じ部品）
+  //   (e) 今日の献立のレシピ→詳細→戻る のあと「レシピ」タブを押すと**一覧**が開く
+  //   (f) 「今日なに作る？」の候補→詳細→戻る で、さっき開いた料理がそのまま出ている
+  // 禁じ手よけ: 曜日・月替わりの前提を置かない（日付は実行時の「今日」をそのまま使い、
+  // 週のどのカードかは見ない）／文言の完全一致で測らない（ゼロ幅スペースを外して部分一致）／
+  // 押す回数・件数を決め打ちしない（上限は保険と分かる形で、判定は中身の変化で行う）／
+  // 要素の置き場所に固定しない（名前・data-testid で掴む。(a)の位置だけは要件そのものなので測る） ---
+  currentCheck = 'DAYFLOW-01'
+  {
+    const dfBrowser = await chromium.launch()
+    const dfContext = await dfBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dfPage = await dfContext.newPage()
+    dfPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@DAYFLOW-01] ${text}`)
+    })
+    dfPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@DAYFLOW-01] ${err.message}`)
+    })
+    /** 実行時の「今日」。曜日には一切依存しない（その日の予定を仕込むためだけに使う） */
+    const dfToday = (() => {
+      const d = new Date()
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })()
+    const dfBody = async () => ((await dfPage.textContent('body')) ?? '').replaceAll('​', '')
+    const dfTab = (name) => dfPage.getByRole('button', { name, exact: true })
+    /** 画面下の並びの「献立」（タブそのもの。日/週/月の切り替えボタンとは別物） */
+    const dfBottomMealPlan = () => dfPage.locator('[data-app-bottom-bar] a[href="#/meal-plan"]')
+    const dfScrollToBottom = async () => {
+      await dfPage.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+      await dfPage.waitForTimeout(400)
+      return dfPage.evaluate(() => Math.round(window.scrollY))
+    }
+    const dfScrollY = () => dfPage.evaluate(() => Math.round(window.scrollY))
+    /** 端末に残るデータの読み書き（曜日に依らない材料だけを仕込む） */
+    const dfRead = (store) =>
+      dfPage.evaluate(
+        (name) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result.transaction([name], 'readonly').objectStore(name).getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        store,
+      )
+    const dfClearPlans = () =>
+      dfPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction(['todayList', 'mealPlans', 'settings'], 'readwrite')
+              tx.objectStore('todayList').clear()
+              tx.objectStore('mealPlans').clear()
+              // 自動取り込みの「その日1回だけ」の記録も戻す（仕込み直しが効くように）
+              const g = tx.objectStore('settings').get(1)
+              g.onsuccess = () => {
+                if (g.result) tx.objectStore('settings').put({ ...g.result, lastAutoImportDate: '' })
+              }
+              tx.oncomplete = () => resolve(true)
+              tx.onerror = () => reject(tx.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    const dfSeedPlan = (title, date, slot) =>
+      dfPage.evaluate(
+        ({ title: t, date: d, slot: sl }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const recipe = g.result.find((r) => r.title === t)
+                if (!recipe) {
+                  reject(new Error(`レシピが見つからない: ${t}`))
+                  return
+                }
+                const tx = idb.transaction('mealPlans', 'readwrite')
+                tx.objectStore('mealPlans').add({
+                  date: d,
+                  slot: sl,
+                  recipeId: recipe.id,
+                  role: 'main',
+                })
+                tx.oncomplete = () => resolve(true)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { title, date, slot },
+      )
+    try {
+      await dfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(2200) // 初回シード完了待ち
+
+      // ---- (a) どのタブへ移ってもいちばん上から ----
+      await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1500)
+      await dfTab('週').click()
+      await dfPage.waitForTimeout(900)
+      const dfWeekBottom = await dfScrollToBottom()
+      check(
+        'DAYFLOW-01 前提: 週の画面は下まで送れる（位置の検査が成り立つ）',
+        dfWeekBottom > 0,
+        `scrollY=${dfWeekBottom}`,
+      )
+      await dfTab('月').click()
+      await dfPage.waitForTimeout(900)
+      check('DAYFLOW-01(a) 月へ移るとページのいちばん上から見せる', (await dfScrollY()) === 0, `scrollY=${await dfScrollY()}`)
+      await dfTab('週').click()
+      await dfPage.waitForTimeout(900)
+      check('DAYFLOW-01(a) 週へ移るとページのいちばん上から見せる', (await dfScrollY()) === 0, `scrollY=${await dfScrollY()}`)
+      await dfScrollToBottom()
+      await dfTab('日').click()
+      await dfPage.waitForTimeout(900)
+      check('DAYFLOW-01(a) 日へ移るとページのいちばん上から見せる', (await dfScrollY()) === 0, `scrollY=${await dfScrollY()}`)
+
+      // ---- (b) 下の並びの「献立」で日へ戻る／すでに日なら先頭へ ----
+      await dfTab('週').click()
+      await dfPage.waitForTimeout(900)
+      const dfBeforeTap = await dfScrollToBottom()
+      await dfBottomMealPlan().click()
+      await dfPage.waitForTimeout(900)
+      check(
+        'DAYFLOW-01(b) 週を見ているときに下の「献立」を押すと日に戻る',
+        (await dfTab('日').getAttribute('aria-pressed')) === 'true',
+      )
+      check(
+        'DAYFLOW-01(b) そのときページのいちばん上から見せる',
+        (await dfScrollY()) === 0,
+        `押す前=${dfBeforeTap} 押した後=${await dfScrollY()}`,
+      )
+      // すでに日にいるとき（押しても行き先が同じ）は先頭へ送る＝押して何も起きない、を作らない
+      await dfTab('月').click()
+      await dfPage.waitForTimeout(600)
+      await dfTab('日').click()
+      await dfPage.waitForTimeout(600)
+      await dfPage.evaluate(() => window.scrollTo(0, 400))
+      await dfPage.waitForTimeout(300)
+      const dfDayScrolled = await dfScrollY()
+      await dfBottomMealPlan().click()
+      await dfPage.waitForTimeout(800)
+      check(
+        'DAYFLOW-01(b) すでに日にいるときも下の「献立」で先頭へ戻る',
+        dfDayScrolled === 0 || (await dfScrollY()) === 0,
+        `押す前=${dfDayScrolled} 押した後=${await dfScrollY()}`,
+      )
+      // 別のタブから来たときも先頭から（前の画面で送っていた位置を引きずらない）
+      await dfPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1200)
+      const dfRecipesBottom = await dfScrollToBottom()
+      check(
+        'DAYFLOW-01 前提: レシピ一覧は下まで送れる',
+        dfRecipesBottom > 0,
+        `scrollY=${dfRecipesBottom}`,
+      )
+      await dfBottomMealPlan().click()
+      await dfPage.waitForTimeout(1200)
+      check(
+        'DAYFLOW-01(b) 別のタブから献立へ来たときも先頭から見せる',
+        (await dfScrollY()) === 0,
+        `レシピ一覧=${dfRecipesBottom} 献立=${await dfScrollY()}`,
+      )
+
+      // ---- (c) 「今週の献立の予定」の×は、今日と今週の両方から外す ----
+      await dfClearPlans()
+      await dfSeedPlan('肉じゃが', dfToday, 'dinner')
+      await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dfPage.reload({ waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1800)
+      {
+        const planned = dfPage.locator('[data-testid="day-planned"]')
+        check(
+          'DAYFLOW-01(c) 前提: 今日の予定が「今週の献立の予定」に並ぶ',
+          (await planned.count()) === 1 &&
+            ((await planned.textContent()) ?? '').includes('肉じゃが'),
+        )
+        // 規約F: 押す前に「何が外れて何が残るか」が読める
+        check(
+          'DAYFLOW-01(c) ×の前に「今週の献立からも外れる」「作った記録は残る」が読める',
+          (await dfBody()).includes('今週の献立からも外れます'),
+        )
+        const dfRemove = planned.getByRole('button', { name: '今日と今週の献立から外す' })
+        check('DAYFLOW-01(c) 「今週の献立の予定」の行に×がある', (await dfRemove.count()) === 1)
+        await dfRemove.first().click()
+        await dfPage.waitForTimeout(1200)
+        const afterBody = await dfBody()
+        const afterPlans = await dfRead('mealPlans')
+        const afterToday = await dfRead('todayList')
+        check(
+          'DAYFLOW-01(c) ×で今週の献立の予定そのものが消える（週と連動）',
+          afterPlans.filter((e) => e.date === dfToday).length === 0,
+          `plans=${JSON.stringify(afterPlans)}`,
+        )
+        check(
+          // 料理名は外したことを知らせるトーストにも入るので、本文の有無では測らない(禁じ手②)。
+          // 「日」に並ぶ行が消えたこと（＝並びが空になり見出しごと出なくなること）で測る
+          'DAYFLOW-01(c) ×で今日の献立からも消える（行が別の見出しへ移らない）',
+          afterToday.length === 0 &&
+            (await planned.count()) === 0 &&
+            (await dfPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+          `today=${JSON.stringify(afterToday)}`,
+        )
+        check(
+          'DAYFLOW-01(c) 外したあと、何が外れて何が残るかを知らせる（規約F）',
+          afterBody.includes('今日と今週の献立から外しました') &&
+            afterBody.includes('作った記録は残ります'),
+        )
+      }
+
+      // ---- (d) おまかせは押しただけでは入らない／押すたびに別の組み合わせ／入れるときに食事を選ぶ ----
+      await dfClearPlans()
+      await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dfPage.reload({ waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1800)
+      {
+        const omakase = dfPage.getByRole('button', { name: 'おまかせで献立を組む' })
+        const pair = dfPage.locator('[data-testid="day-suggest-pair"]')
+        const pairText = async () =>
+          (await pair.count()) > 0 ? ((await pair.textContent()) ?? '').replaceAll('​', '') : ''
+        await omakase.click()
+        await dfPage.waitForTimeout(700)
+        check('DAYFLOW-01(d) 押すと組んだ献立が画面に出る', (await pair.count()) === 1)
+        check(
+          'DAYFLOW-01(d) 押しただけでは今日の献立に入らない',
+          (await dfRead('todayList')).length === 0 &&
+            (await dfPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
+        )
+        // 押すたびに別の組み合わせが出る。回数は決め打ちせず、変わった時点で止める
+        // （上限は無限ループ避けの保険。候補が尽きるほど条件が狭いときのため）
+        const DF_MAX_PRESSES = 8
+        const first = await pairText()
+        let changed = false
+        for (let i = 0; i < DF_MAX_PRESSES && !changed; i++) {
+          await omakase.click()
+          await dfPage.waitForTimeout(500)
+          changed = (await pairText()) !== first
+        }
+        check(
+          'DAYFLOW-01(d) 続けて押すと別の組み合わせが出る',
+          changed,
+          `最初=${first.slice(0, 40)} 最後=${(await pairText()).slice(0, 40)}`,
+        )
+        // 入れるときは、他の画面とまったく同じ「どの食事に入れますか？」の窓が開く。
+        // 料理名は名前の欄そのものから取る（1行にまとまった文から切り出すと、
+        // 主菜/副菜の見出しと料理名が地続きになって切り分けられない）
+        const dfPairTitles = (
+          await pair.locator('[data-testid="day-suggest-pair-title"]').allTextContents()
+        ).map((t) => t.replaceAll('\u200b', '').trim())
+        await dfPage.locator('[data-testid="day-suggest-apply"]').click()
+        await dfPage.waitForTimeout(500)
+        check(
+          'DAYFLOW-01(d) 入れる前に食事の枠を選ぶ窓が開く（他の画面と同じ部品・朝昼夕の3つ）',
+          (await dfPage.locator('[data-testid="today-slot-button"]').count()) === 3,
+        )
+        await dfPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+        await dfPage.waitForTimeout(1500)
+        const dfAfterApply = await dfBody()
+        const dfPlansAfter = await dfRead('mealPlans')
+        check(
+          'DAYFLOW-01(d) 選んだ食事の今週の献立に入る',
+          dfPlansAfter.filter((e) => e.date === dfToday && e.slot === 'dinner').length > 0,
+          `plans=${JSON.stringify(dfPlansAfter)}`,
+        )
+        check(
+          'DAYFLOW-01(d) 今日の献立にも入り、入った先（夕食）を知らせる',
+          (await dfRead('todayList')).length > 0 && dfAfterApply.includes('今日の夕食に'),
+        )
+        // 組んだ献立に並んでいた料理が、そのまま今日の献立に並ぶ（別の料理にすり替わらない）
+        const dfMissing = dfPairTitles.filter(
+          (title) => title.length > 0 && !dfAfterApply.includes(title),
+        )
+        check(
+          'DAYFLOW-01(d) 組んだ献立の料理がそのまま今日の献立に並ぶ',
+          dfMissing.length === 0,
+          `入っていない=${JSON.stringify(dfMissing)}`,
+        )
+        check(
+          'DAYFLOW-01(d) 入れたあとに「別の提案を見る」（入れたあとの振り直し）は残っていない',
+          !dfAfterApply.includes('別の提案を見る'),
+        )
+      }
+
+      // ---- (e) 今日の献立のレシピ→詳細→戻る のあと「レシピ」タブを押すと一覧が開く ----
+      {
+        const dayRow = dfPage.locator('[data-testid="day-planned"] a[href^="#/recipes/"]').first()
+        await dayRow.click()
+        await dfPage.waitForTimeout(800)
+        check(
+          'DAYFLOW-01(e) 前提: 今日の献立の料理からレシピ詳細へ行ける',
+          /#\/recipes\/\d+/.test(dfPage.url()),
+          `現在URL: ${dfPage.url()}`,
+        )
+        await dfPage.getByRole('button', { name: '戻る' }).click()
+        await dfPage.waitForTimeout(1000)
+        check(
+          'DAYFLOW-01(e) 前提: 戻ると献立へ帰る',
+          (dfPage.url().split('#')[1] ?? '').startsWith('/meal-plan'),
+          `現在URL: ${dfPage.url()}`,
+        )
+        await dfPage.locator('[data-app-bottom-bar] a[href^="#/recipes"]').click()
+        await dfPage.waitForTimeout(1000)
+        check(
+          'DAYFLOW-01(e) そのあと「レシピ」タブを押すとレシピ一覧が開く（詳細に戻らない）',
+          !/#\/recipes\/\d+/.test(dfPage.url()),
+          `現在URL: ${dfPage.url()}`,
+        )
+      }
+
+      // ---- (f) 「今日なに作る？」の候補→詳細→戻る で、同じ料理が出ている ----
+      await dfClearPlans()
+      await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dfPage.reload({ waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1800)
+      {
+        const suggestSection = dfPage
+          .locator('section')
+          .filter({ has: dfPage.getByRole('heading', { name: '今日なに作る？' }) })
+        const cardTitle = async () => {
+          const card = suggestSection.locator('a[href^="#/recipes/"]').first()
+          return (await card.count()) > 0
+            ? ((await card.textContent()) ?? '').replaceAll('​', '').trim()
+            : ''
+        }
+        // 1回だけだと「たまたま同じ料理を引いた」で素通り合格しうるので、往復を繰り返して見る
+        // （毎回同じなら引き直していない。上限は保険ではなく、この回数ぶん確かめる）
+        const DF_RETURN_TRIPS = 3
+        const mismatches = []
+        for (let i = 0; i < DF_RETURN_TRIPS; i++) {
+          const before = await cardTitle()
+          await suggestSection.locator('a[href^="#/recipes/"]').first().click()
+          await dfPage.waitForTimeout(800)
+          await dfPage.getByRole('button', { name: '戻る' }).click()
+          await dfPage.waitForTimeout(1200)
+          const after = await cardTitle()
+          if (before.length === 0 || before !== after) mismatches.push(`${i + 1}回目: ${before} → ${after}`)
+          // 次の往復は「ランダムで1品出す」で引き直してから（覚えが外れることも一緒に見る）
+          await suggestSection.getByRole('button', { name: 'ランダムで1品出す' }).click()
+          await dfPage.waitForTimeout(500)
+        }
+        check(
+          'DAYFLOW-01(f) 候補カードから詳細へ行って戻ると、さっき開いた料理がそのまま出ている',
+          mismatches.length === 0,
+          `食い違い=${JSON.stringify(mismatches)}`,
+        )
+      }
+    } finally {
+      await dfBrowser.close()
     }
   }
 
@@ -23391,10 +23804,16 @@ try {
       // ---------- ⑥ 献立の「日」へ戻ったときのスクロール位置 ----------
       await eqPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await eqPage.waitForTimeout(1200)
-      await eqPage.getByRole('link', { name: '作った記録の一覧' }).first().scrollIntoViewIfNeeded()
+      // 2026-08-17 便HI: 「離れる前の位置」は**押す直前**の値で測る。
+      // scrollIntoViewIfNeeded は画面下に貼り付く帯（タブナビ）を勘定に入れないので、
+      // そのあとのクリックが帯を避けてもう一度送る＝先に測ると測った値と実際に離れた位置が
+      // 食い違う（実測: 測った値2px／実際に離れた位置111px。アプリは覚えたとおりに戻していて正常）。
+      // hover はクリックと同じ位置合わせを行うので、これを済ませてから測る
+      const eqHistoryLink = eqPage.getByRole('link', { name: '作った記録の一覧' }).first()
+      await eqHistoryLink.hover()
       await eqPage.waitForTimeout(400)
       const eqScrollBefore2 = await eqPage.evaluate(() => Math.round(window.scrollY))
-      await eqPage.getByRole('link', { name: '作った記録の一覧' }).first().click()
+      await eqHistoryLink.click()
       await eqPage.waitForTimeout(900)
       await eqPage.getByRole('button', { name: '戻る' }).first().click()
       await eqPage.waitForTimeout(1500)
@@ -26750,7 +27169,14 @@ try {
           }
         }, fdSeed.today)
 
-      // ---------- FD-09 週タブに入ったら今日のカードへ寄る ----------
+      // ---------- FD-09 週タブに入っても勝手に下へ飛ばない ----------
+      // 2026-08-10 便FDで直したのは「タブ切替・週移動のたびにページが最下部近くまで飛ぶ」こと
+      // （開いた状態で現れた折りたたみ7か所が同時に位置合わせを要求していた。実測 0→2636px）。
+      // そのとき送り先を「今日のカード」に決めていたが、2026-08-17 便HI（オーナー実機
+      // 「ページ開いた時に、基本的にページのいちばん上を表示して」）で寄せるのをやめた。
+      // 飛ばない仕組み（Collapse側）は残っているので、ここは**先頭のままでいること**で測る。
+      // 「今日のカードへ送る」道は ?focus=week&date=（ET-02が見ている）と
+      // 「まとめて献立を入力」の直後（便BH-3。入った枠が画面外だと無反応に見えるため）に残っている。
       currentCheck = 'FD-09'
       await fdPage.goto(`${BASE}/#/meal-plan`)
       await fdPage.reload({ waitUntil: 'networkidle' })
@@ -26759,13 +27185,11 @@ try {
       await fdPage.waitForTimeout(2500)
       const fdEnter = await fdGeom()
       check(
-        'FD-09 週タブに入ると今日のカードが上部の固定タブのすぐ下に来る（下へ飛ばない）',
-        fdEnter.todayTop != null &&
-          fdEnter.todayTop >= fdEnter.topBar - 1 &&
-          fdEnter.todayTop <= fdEnter.topBar + 40,
+        'FD-09 週タブに入ってもページの先頭のまま（下へ飛ばない）',
+        fdEnter.y === 0 && fdEnter.docH > 2000,
         JSON.stringify(fdEnter),
       )
-      // いったん下まで送ってから 日タブ→週タブ に入り直しても、行き先は今日のまま
+      // いったん下まで送ってから 日タブ→週タブ に入り直しても、先頭から見せる
       await fdPage.evaluate(() => window.scrollTo(0, 2500))
       await fdPage.waitForTimeout(500)
       await fdPage.getByRole('button', { name: '日', exact: true }).click()
@@ -26774,10 +27198,8 @@ try {
       await fdPage.waitForTimeout(2500)
       const fdReenter = await fdGeom()
       check(
-        'FD-09 週タブに入り直しても、行き先は今日のカード（前に見ていた縦位置に取り残されない）',
-        fdReenter.todayTop != null &&
-          fdReenter.todayTop >= fdReenter.topBar - 1 &&
-          fdReenter.todayTop <= fdReenter.topBar + 40,
+        'FD-09 週タブに入り直しても先頭から（前に見ていた縦位置に取り残されない）',
+        fdReenter.y === 0,
         JSON.stringify(fdReenter),
       )
 
@@ -29449,8 +29871,9 @@ try {
         const afterAll = (await p.textContent('body')) ?? ''
         check(
           'FN-01 前提: 「3件の作った記録をつけました」が出て今日の献立が空になる',
+          // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さないので、そちらで測る
           afterAll.includes('3件の作った記録をつけました') &&
-            afterAll.includes('まだ今日つくるものが決まっていません'),
+            (await p.getByRole('heading', { name: '今日の献立' }).count()) === 0,
         )
 
         // ここが報告のバグ: 空なのに「今日の夕食にすでに入っています」と断られ、何も追加されなかった
@@ -29473,7 +29896,7 @@ try {
         check(
           'FN-01 今日の献立(日)に3品とも戻っている',
           TITLES.every((t) => restoredBody.includes(t)) &&
-            !restoredBody.includes('まだ今日つくるものが決まっていません'),
+            (await p.getByRole('heading', { name: '今日の献立' }).count()) === 1,
         )
         check('FN-01 並行調理ナビの入口も戻る(2品以上あるため)', restoredBody.includes('並行調理ナビ'))
 
@@ -30641,7 +31064,8 @@ try {
         await p.waitForTimeout(900)
         check(
           'FP-01 前提: 今日の献立は空で「今日の献立を選ぶ」が出ている',
-          ((await p.textContent('body')) ?? '').includes('まだ今日つくるものが決まっていません') &&
+          // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さず、ボタンだけを残す
+          (await p.getByRole('heading', { name: '今日の献立' }).count()) === 0 &&
             (await p.getByRole('button', { name: '今日の献立を選ぶ' }).count()) === 1,
         )
         await p.getByRole('button', { name: '今日の献立を選ぶ' }).click()
@@ -30696,7 +31120,7 @@ try {
         check(
           'FP-01 今日の献立に3品とも並んでいる',
           TITLES.every((t) => afterBody.includes(t)) &&
-            !afterBody.includes('まだ今日つくるものが決まっていません'),
+            (await p.getByRole('heading', { name: '今日の献立' }).count()) === 1,
         )
         check('FP-01 2品以上あるので並行調理ナビの入口も出る', afterBody.includes('並行調理ナビ'))
 
@@ -34366,11 +34790,11 @@ try {
           'NOHOME-01 献立がある日は「今日の献立」の中身が出る',
           body.includes('今日の献立') && body.includes('肉じゃが'),
         )
-        // 2026-08-17 便HH: 献立がある日は提案を畳んでおく(「もう1品さがす」で開ける)。
+        // 2026-08-17 便HI: 献立がある日は節ごと畳んでおく(見出しを押すと開く)。
         // 開けることは DAYLAYOUT-01 が見る
         check(
           'NOHOME-01 献立がある日は「今日なに作る？」を開いたまま出さない',
-          !body.includes('今日なに作る？'),
+          !body.includes('ランダムで1品出す'),
         )
         check('NOHOME-01 献立がある日も「最近作ったもの」は出る', body.includes('最近作ったもの'))
       }
