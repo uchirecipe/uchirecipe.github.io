@@ -543,19 +543,15 @@ try {
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1500)
 
-  // 「日」タブ: まだ決まっていないときの「今日の献立」
-  // 2026-08-17 便HH: 「おまかせ」は「今日なに作る？」へ移したので、この節に残るボタンは
-  // 「今日の献立を選ぶ」1つ。節を丸ごと切り出す(見出し・案内2行・ボタン)
+  // 2026-08-18 便HL: 'plan-day-buttons' はここでは撮れなくなった。
+  // 2026-08-17 便HI で、その日の献立が空のときは「今日の献立」の見出しも枠も出なくなり、
+  // このカットが掴んでいた「見出し・空状態の案内2行・ボタン」がまるごと無くなったため。
+  // 撮る対象を「献立が決まっている日の『今日の献立』」に変え、週の献立を入れたあと
+  // (＝今日の分が埋まったあと)へ移した。撮っている場所は「週」の概算食費の図のすぐあと。
   const dayTab = page.getByRole('button', { name: '日', exact: true })
   if (await dayTab.count()) {
     await dayTab.click()
     await wait(page, 700)
-    const todaySection = page
-      .locator('section')
-      .filter({ has: page.getByRole('heading', { name: '今日の献立' }) })
-    if (await todaySection.count()) {
-      await crop(page, 'plan-day-buttons', todaySection.first(), { top: 100 })
-    }
   }
 
   // 「今日の献立を選ぶ」からレシピ一覧が選択モードで開くところ(2026-08-13 便FY)。
@@ -666,7 +662,23 @@ try {
     await wait(page, 500)
   }
 
+  // 「日」タブ: 献立が決まっている日の「今日の献立」(2026-08-18 便HL)。
+  // この節は今日の分が1品でも決まっている日にしか出ないので、週の献立を入れたあとに撮る
+  // (空の日に撮ろうとすると節ごと存在しない)。節を丸ごと切り出す＝見出し・
+  // 「今週の献立の予定」・各行の「作った！」と「×」・「レシピ一覧から追加」・「全て作った！」
+  await page.getByRole('button', { name: '日', exact: true }).click()
+  // 週の予定を今日の献立に取り込んだ知らせが画面の下に出るので、自動で消えるまで待つ
+  await wait(page, 8000)
+  const todaySection = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: '今日の献立' }) })
+  if (await todaySection.count()) {
+    await crop(page, 'plan-day-buttons', todaySection.first(), { top: 64, maxHeight: 640 })
+  }
+
   // 「月」タブ: 未定の日をまとめて提案 → 今月のカレンダー
+  await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+  await wait(page, 1500)
   await page.getByRole('button', { name: '月', exact: true }).click()
   await wait(page, 900)
   const fillMonth = page.getByRole('button', { name: '未定の日をまとめて提案' })

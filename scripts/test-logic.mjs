@@ -20846,6 +20846,89 @@ Aみりん 大さじ1
   }
 }
 
+// ==========================================================================================
+// 便HL: 説明のページに、無くなった操作の名前を残さない（GONEWORD-1〜3）
+//
+// なぜ要るか: 2026-08-17 の作り替え（便HG/HH/HI/HJ）でアプリから消えた操作の名前が、
+// 使い方ページと複数の端末で使う方法にそのまま残っていた。読んだ人は画面で探して見つからず、
+// 「自分の操作が悪い」と受け取ることになる。説明文が正しいかどうかは機械では測れないが、
+// **消した名前が残っていないこと**は測れるので、そこだけを見張る。
+//
+// 見る先はユーザーが読むページの本文だけ（HTMLのコメントは内部の説明なので外す）。
+// アプリ側の文言（ja.ts）は消した名前をコメントで経緯として残しているので対象にしない。
+//
+// 新しい名前が入っているかも一緒に見る（消しただけで書き直し忘れると、その操作の説明が
+// ページから丸ごと落ちる）。期待値は ja.ts の実物から取る＝アプリで名前を変えたら赤になる。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const pages = ['public/about/manual.html', 'public/about/index.html', 'public/about/multi-device.html']
+  const bodyOf = (rel) =>
+    readFileSync(path.join(appRoot, rel), 'utf-8').replace(/<!--[\s\S]*?-->/g, '')
+
+  /** 無くなった名前と、いま同じことをする操作の名前（読む人がどこを見ればよいか分かる形で書く） */
+  const goneNames = [
+    // 2026-08-17 便HI: 献立の「日」から無くなった操作
+    ['別の提案を見る', '「おまかせで献立を組む」を押し直す'],
+    ['もう1品さがす', '畳んだ「今日なに作る？」の見出し'],
+    // 同・その日の献立が空のときの案内文（「今日の献立」の枠ごと出なくなった）
+    ['まだ今日つくるものが決まっていません', '「今日なに作る？」と「今日の献立を選ぶ」'],
+    ['レシピ一覧からまとめて選べます', '同上'],
+    // 2026-08-17 便HH: 献立の「日」から外したボタン（行き先はレシピ一覧と、その絞り込みに残っている）
+    ['「レシピを探す」', '下の並びの「レシピ」'],
+    ['「在庫の食材から探す」', 'レシピ一覧の「在庫の食材で絞る」'],
+    // 同・改名前の名前
+    ['おまかせで提案', 'おまかせで献立を組む'],
+    ['ほかの候補を見る', 'ランダムで1品出す'],
+  ]
+  for (const rel of pages) {
+    const body = bodyOf(rel)
+    for (const [gone, now] of goneNames) {
+      eq(`GONEWORD-1 ${rel} に無くなった名前「${gone}」が残っていない（今は ${now}）`, body.includes(gone), false)
+    }
+  }
+
+  // 2026-08-17 便HJ: 選び終わったあとの3つは、帯のボタン（「選択したレシピ◯品を…」）から
+  // 窓の道（「ファイルに書き出す」「削除する」）へ移した。
+  // 「選択したレシピ◯品を今日の献立に入れる」だけは残っている（献立から来た選択モードのボタン）ので、
+  // 書き出し・削除の2つだけを見張る
+  const goneSelectButtons = [
+    [/選択したレシピ[^」]*を書き出す/, ja.recipes.selectActionExport],
+    [/選択したレシピ[^」]*を削除/, ja.recipes.selectActionDelete],
+  ]
+  for (const rel of pages) {
+    const body = bodyOf(rel)
+    for (const [pattern, now] of goneSelectButtons) {
+      const hit = body.match(pattern)
+      eq(`GONEWORD-2 ${rel} に帯のころのボタン名が残っていない（今は「${now}」）`, hit?.[0] ?? null, null)
+    }
+  }
+
+  // 書き直したあとの名前が入っているか。期待値はアプリの文言そのもの
+  const manual = bodyOf('public/about/manual.html')
+  const multiDevice = bodyOf('public/about/multi-device.html')
+  const selectActionsTitle = ja.recipes.selectActionsTitle.replace('{n}', '◯')
+  eq('GONEWORD-3 使い方ページに「選び終わる」が書いてある', manual.includes(ja.recipes.selectFinish), true)
+  eq(`GONEWORD-3 使い方ページに「${selectActionsTitle}」が書いてある`, manual.includes(selectActionsTitle), true)
+  eq('GONEWORD-3 使い方ページに窓の3つの道が書いてある', [
+    manual.includes(ja.recipes.selectActionToToday),
+    manual.includes(ja.recipes.selectActionExport),
+    manual.includes(ja.recipes.selectActionDelete),
+  ], [true, true, true])
+  eq('GONEWORD-3 使い方ページに「選択をやめる」が書いてある', manual.includes(ja.recipes.selectExit), true)
+  eq('GONEWORD-3 複数の端末で使う方法にも「選び終わる」が書いてある', multiDevice.includes(ja.recipes.selectFinish), true)
+  eq(
+    'GONEWORD-3 使い方ページに「おまかせで組んだ献立」が書いてある',
+    manual.includes(ja.mealPlan.todaySuggestPreviewLabel),
+    true,
+  )
+  eq(
+    'GONEWORD-3 使い方ページに「レシピ一覧から追加」が書いてある',
+    manual.includes(ja.mealPlan.todayAddMoreButton),
+    true,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

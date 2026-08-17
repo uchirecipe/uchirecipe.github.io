@@ -37,7 +37,7 @@
   },
   "plan-day-buttons": {
     "w": 780,
-    "h": 364
+    "h": 1050
   },
   "plan-week-nutrition-open": {
     "w": 780,
@@ -125,7 +125,7 @@
   },
   "select-for-today": {
     "w": 780,
-    "h": 990
+    "h": 870
   },
   "settings-kitchen": {
     "w": 780,
