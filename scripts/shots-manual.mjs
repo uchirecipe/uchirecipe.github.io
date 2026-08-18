@@ -676,12 +676,12 @@ try {
     await crop(page, 'plan-day-buttons', todaySection.first(), { top: 64, maxHeight: 640 })
   }
 
-  // 「月」タブ: 未定の日をまとめて提案 → 今月のカレンダー
+  // 「月」タブ: 献立をまとめて提案 → 今月のカレンダー
   await page.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
   await wait(page, 1500)
   await page.getByRole('button', { name: '月', exact: true }).click()
   await wait(page, 900)
-  const fillMonth = page.getByRole('button', { name: '未定の日をまとめて提案' })
+  const fillMonth = page.getByRole('button', { name: '献立をまとめて提案' })
   if (await fillMonth.count()) {
     await fillMonth.click()
     await wait(page, 2500)

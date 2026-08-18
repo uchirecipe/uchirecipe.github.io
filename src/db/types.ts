@@ -1,3 +1,7 @@
+// 栄養項目の型だけを借りる（型のみのimportなので実行時の読み込みは発生しない＝循環しない）。
+// 月カレンダーのマスに出す栄養の項目は、栄養価の表示と同じ顔ぶれ(NutrientTotals)から選ぶ
+import type { NutrientTotals } from '../logic/nutrition'
+
 /** 手間レベル: 超簡単 / ふつう / 手の込んだ */
 export type EffortLevel = 'easy' | 'normal' | 'fancy'
 
@@ -618,6 +622,14 @@ export interface Settings {
    * 任意項目なのでスキーマ変更・マイグレーション不要。
    */
   monthCellMode?: MonthCellMode
+  /**
+   * 月カレンダーのマスに出す栄養の項目（任意・2026-08-19 便HV・⑥・オーナー指示
+   * 「カレンダーに移す情報が栄養の時、基本はカロリーのまま、他の栄養表示も選択で見られるように」）。
+   * 顔ぶれは栄養価の表示・並び替えと同じ8項目（logic/nutrition.ts の NUTRITION_DISPLAY_KEYS）。
+   * 未設定＝エネルギー（従来どおり）。知らない値が残っていても resolveNutritionDisplayKey が
+   * エネルギーに落とすので、項目を変えても既存データは壊れない（マイグレーション不要）。
+   */
+  monthCellNutrient?: keyof NutrientTotals
   /**
    * 月カレンダーの写真に、レシピに登録されている写真を使わないか
    * （任意・2026-08-07 便DU・オーナー指示「レシピのサムネ写真は表示しないスイッチ」）。

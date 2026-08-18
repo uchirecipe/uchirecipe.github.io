@@ -41,6 +41,7 @@ import type { Ingredient } from '../db/types'
 import {
   sumPersonalNutrition,
   addPersonalNutritionSum,
+  type NutrientTotals,
   type PersonalNutritionSum,
 } from './nutrition'
 import { sumCookedRecipesCost, type PriceIndexEntry } from './priceEstimate'
@@ -194,6 +195,25 @@ export interface RangeIntakeSummary {
   /** cookedHouseholdYen を cookedDayCount で割った1日あたりの金額（円・記録が1日も無ければ0） */
   cookedPerDayYen: number
   /**
+   * 「全員分」の合計（円・2026-08-19 便HV・オーナー書き溜め⑧⑨
+   * 「期間の食費と栄養は、過去と未来に分けない表示のみでいいのでは？
+   * 　過去の数値が知りたい人は過去の期間のみで絞り込みするし、これからの予算が知りたい人も然り」）。
+   * 作った食数ぶん（cookedHouseholdYen）と、これから作る食数ぶん（planHouseholdYen）を足した額。
+   * 画面はこの1つだけを出す＝過去と未来で行が2つに割れない。
+   * 割る前の2つも残してあるのは、折りたたみの中の内訳がそのまま使うため。
+   */
+  householdYen: number
+  /** 「全員分」ののべ食数（cookedMealCount + planMealCount）。householdYen と対の数字 */
+  mealCount: number
+  /**
+   * 「1日あたりの平均」の分母（作った記録か登録した献立がある日数・同じ日に何品でも1日）。
+   * 便HV で分子（householdYen）が実績＋予定になったので、分母も同じ料理から数える
+   * ＝画面の上で「全員分 ÷ この日数 ＝ 1日あたりの平均」を検算できる形を保つ。
+   */
+  dayCount: number
+  /** householdYen を dayCount で割った1日あたりの金額（円・数える日が1日も無ければ0） */
+  perDayYen: number
+  /**
    * 基準行に出す材料（2026-08-08 便EA）。actual.range / plan.range は今日を両方に含むので、
    * 画面の文言はこちら（過去・未来・今日を分けたもの）から組み立てる。
    */
@@ -304,6 +324,9 @@ export function summarizeRangeIntake(input: {
   const planNutrition = sumPersonalNutrition(planDishes.map((d) => d.recipe))
   // 「1日あたりの平均」の分母（便DQ）。同じ日に3品作っても1日として数える
   const cookedDayCount = new Set(actualDishes.map((d) => d.date)).size
+  // 便HV（⑧⑨）: 過去と未来を分けない合計。分母も分子と同じ料理から数える
+  const dayCount = new Set([...actualDishes, ...planDishes].map((d) => d.date)).size
+  const householdYen = actualCost.total + planCost.total
 
   const actual: RangeBasisPart = {
     dishCount: actualCost.dishCount,
@@ -328,14 +351,22 @@ export function summarizeRangeIntake(input: {
     planMealCount: planCost.count,
     cookedDayCount,
     cookedPerDayYen: cookedDayCount > 0 ? Math.round(actualCost.total / cookedDayCount) : 0,
+    householdYen,
+    mealCount: actualCost.count + planCost.count,
+    dayCount,
+    perDayYen: dayCount > 0 ? Math.round(householdYen / dayCount) : 0,
     basis: rangeBasisParts(start, end, today),
   }
 }
 
 /** カレンダーの1日分のセルに出す「1人分」の数字（2026-07-28 便CA・タスク2） */
 export interface DayIntake {
-  /** その日の1人分のエネルギー（kcal・概算） */
-  kcal: number
+  /**
+   * その日の1人分の栄養8項目（概算・2026-08-19 便HV・⑥）。
+   * 従来はエネルギーだけを持っていたが、マスに出す項目を選べるようにしたので8項目とも持つ
+   * （顔ぶれ・名前は logic/nutrition.ts の NUTRITION_DISPLAY_KEYS が1か所で決める）。
+   */
+  nutrition: NutrientTotals
   /** その日の1人分の食費（円・概算） */
   yen: number
   /** その日を数えた基準（過去=実績・今日以降=予定） */
@@ -393,7 +424,7 @@ export function dayIntakeMap(input: {
     const cost = sumCookedRecipesCost(dishes, priceIndex)
     const nutrition = sumPersonalNutrition(dishes.map((d) => d.recipe))
     map.set(date, {
-      kcal: nutrition.total.kcal,
+      nutrition: nutrition.total,
       yen: cost.personalTotal,
       basis,
       dishCount: dishes.length,

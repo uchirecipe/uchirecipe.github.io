@@ -2794,7 +2794,7 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
     )
   }
 
-  // (6) 便CH/C1(2026-07-30): 月の「未定の日をまとめて提案」は keepAuto=true で呼ぶ。
+  // (6) 便CH/C1(2026-07-30): 月の「献立をまとめて提案」は keepAuto=true で呼ぶ。
   // 自動提案で入った献立も保護し、2回目に押しても1品も消さない・入れ替えない
   // （確認文「今ある献立と作った記録は消えません」が事実になる。週タブの再抽選は既定値falseで不変）。
   {
@@ -15755,7 +15755,7 @@ eq(
 // ---------- 献立のロック(2026-08-08 便DX・オーナー指示) ----------
 // 鍵の掛かった食事は「自動でまとめて動かす操作」の対象から外れる。守る経路は5つ:
 // ①まとめて献立を入力(空き枠だけ/レシピを総入れ替えの両方) ②テンプレートを適用
-// ③先週の献立をコピー ④まとめて空にする ⑤月の未定の日をまとめて提案。
+// ③先週の献立をコピー ④まとめて空にする ⑤月の献立をまとめて提案。
 // 手での編集は鍵が掛かっていても自由(=画面側の話)。
 // 保存の粒度は「日付×食事」の1階層で、画面の「日ごと」は3食まとめての掛け外しとして表す
 //
@@ -15967,7 +15967,7 @@ eq(
     )
   }
 
-  // --- ⑤月タブ「未定の日をまとめて提案」(planWeekFill を月の日付範囲＋keepAuto＋skipDatesで呼ぶ) ---
+  // --- ⑤月タブ「献立をまとめて提案」(planWeekFill を月の日付範囲＋keepAuto＋skipDatesで呼ぶ) ---
   // 画面側(fillMonth)は週の一括入力と同じ純ロジックを、対象範囲だけ月に広げて使う。
   // メモを書いた日(skipDates)を外す仕組みと鍵が同時に効くことを、鍵なしとの対で固定する
   {
@@ -16327,7 +16327,7 @@ eq(
     proActivatedFeatures.some((f) => f.label.includes('栄養から組む')),
     true,
   )
-  // ②効き先は週タブだけではない(月タブの「未定の日をまとめて提案」も executeFill→drawPair を通る)。
+  // ②効き先は週タブだけではない(月タブの「献立をまとめて提案」も executeFill→drawPair を通る)。
   //   2026-08-09 便EN(オーナー実機「ユーザーにとって関係ないのでは？…だから何？という感想しか
   //   なかった」): 画面の1行説明でボタン名を3つ並べるのはやめ、設定のPro機能一覧の側で
   //   「週」と「月」の両方を案内する形にした。検査もそちらへ移す
@@ -21253,8 +21253,8 @@ Aみりん 大さじ1
     ['週タブ・まとめて空にする（食事を選んだとき）', ja.mealPlan.clearWeekSlotConfirm],
     ['週タブ・まとめて空にする（全部の食事）', ja.mealPlan.clearWeekSlotConfirmAll],
     ['週タブ・まとめて献立を入力の説明', ja.mealPlan.fillModeReplaceAllHint],
-    ['月タブ・未定の日をまとめて提案', ja.mealPlan.fillMonthConfirm],
-    ['月タブ・未定の日をまとめて提案（残る献立が無いとき）', ja.mealPlan.fillMonthConfirmNoKept],
+    ['月タブ・献立をまとめて提案', ja.mealPlan.fillMonthConfirm],
+    ['月タブ・献立をまとめて提案（残る献立が無いとき）', ja.mealPlan.fillMonthConfirmNoKept],
     ['テンプレートを入れる', ja.mealPlan.templateApplyConfirm],
     ['テンプレートを入れる（残る献立が無いとき）', ja.mealPlan.templateApplyConfirmNoKept],
   ]
@@ -21891,6 +21891,194 @@ Aみりん 大さじ1
     }
     walk(path.join(appRoot, 'src'))
     eq('HS-1 条件で0件になる画面に「条件をクリア」がある', missing, [])
+  }
+}
+
+
+// ==========================================================================================
+// 便HV: 月タブの整理（2026-08-19 オーナー書き溜め⑥⑦⑧⑨⑩⑪）
+//
+// ここで見張るのは、画面の作りそのものではなく **利用者が確かめたいこと**:
+//   ⑥ カレンダーのマスに出す栄養を選べる（＝1日分の8項目が全部取り出せる）／顔ぶれは
+//      栄養価の表示・並び替えと同じ（便HU・⑯で1か所に集めた NUTRITION_DISPLAY_KEYS から引く）
+//   ⑦⑪ ボタンの名前を変えたら、使い方ページ・紹介ページ・設定のPro案内も一緒に変わる
+//      （実在しないボタン名で操作を説明したままにしない）
+//   ⑧⑨ 過去と未来で数値が2つに割れていない（合計が1つにまとまっている）
+//   ⑩ カレンダーの説明が「概算であること」「その日1人分であること」だけを言っている
+//
+// 日付を使う検査は、**その場で決めた today からの相対**で組む（曜日・月替わりの前提を置かない）。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const HV_TODAY = '2026-07-15'
+  const onionHV = { ingredients: [{ name: '玉ねぎ', amount: '1', unit: '個' }], servings: 2 }
+  const chickenHV = { ingredients: [{ name: '鶏もも肉', amount: '200', unit: 'g' }], servings: 2 }
+  const hvIndex = buildPriceIndex([
+    { name: '玉ねぎ', pricePerUnit: 50, unit: '1個' },
+    { name: '鶏もも肉', pricePerUnit: 130, unit: '100g' },
+  ])
+
+  // ---- ⑥ カレンダーのマスに出す栄養を選べる ----
+  // マスに出せるのは「その日に1人が食べる分」なので、1日分の集計が8項目そろっている必要がある。
+  // 顔ぶれ・名前は栄養価の表示と同じ1か所(NUTRITION_DISPLAY_KEYS)から引く＝片方だけ古くならない。
+  {
+    const cells = dayIntakeMap({
+      dates: ['2026-07-10', '2026-07-14', '2026-07-20'],
+      today: HV_TODAY,
+      cooked: [{ date: '2026-07-10', recipe: chickenHV }],
+      planned: [{ date: '2026-07-20', recipe: onionHV }],
+      priceIndex: hvIndex,
+    })
+    const pastCell = cells.get('2026-07-10')
+    eq(
+      'HV-6 カレンダーの1日分が栄養8項目をすべて持つ(どれを選んでもマスに出せる)',
+      Object.keys(pastCell?.nutrition ?? {}).sort(),
+      [...NUTRITION_DISPLAY_KEYS].sort(),
+    )
+    // 値は「その日の料理の1人分を足したもの」＝栄養カードと同じ数え方であること。
+    // 期待値は同じ入力を summarizeRangeIntake に通した値から取る(手打ちの数字を置かない)
+    const sameDay = summarizeRangeIntake({
+      start: '2026-07-10',
+      end: '2026-07-10',
+      today: HV_TODAY,
+      cooked: [{ date: '2026-07-10', recipe: chickenHV }],
+      planned: [],
+      priceIndex: hvIndex,
+    })
+    eq(
+      'HV-6 マスの栄養は、その日の1人分の合計(期間の集計と同じ数え方)',
+      NUTRITION_DISPLAY_KEYS.map((k) => pastCell?.nutrition?.[k] ?? null),
+      NUTRITION_DISPLAY_KEYS.map((k) => sameDay.nutrition.total[k]),
+    )
+    // 既定はエネルギー。保存値が壊れていても必ず表示できる項目に落ちる
+    // (無料/Proの線引き上、エネルギーだけが無料側の項目なので既定を動かさない)
+    const nutritionMod = await import('../src/logic/nutrition.ts')
+    eq(
+      'HV-6 未設定・知らない値のときはエネルギーに落ちる(既定は今までどおり)',
+      [
+        nutritionMod.resolveNutritionDisplayKey?.(undefined),
+        nutritionMod.resolveNutritionDisplayKey?.('とけい'),
+        nutritionMod.resolveNutritionDisplayKey?.('proteinG'),
+      ],
+      ['kcal', 'kcal', 'proteinG'],
+    )
+  }
+
+  // ---- ⑧⑨ 過去と未来で数値が2つに割れていない ----
+  // 「作った記録ぶん」と「これから作る予定ぶん」を別々の行に出すのをやめたので、
+  // 画面に出す合計は1つ。分けたままの2つを足し忘れると、どちらか片方だけの額になる。
+  {
+    const hv = summarizeRangeIntake({
+      start: '2026-07-01',
+      end: '2026-07-31',
+      today: HV_TODAY,
+      cooked: [
+        { date: '2026-07-10', recipe: onionHV, log: { servings: 3 } },
+        { date: '2026-07-10', recipe: chickenHV },
+        { date: '2026-07-12', recipe: onionHV, log: { servings: 2 } },
+      ],
+      planned: [
+        { date: '2026-07-20', recipe: chickenHV, servings: 3 },
+        { date: '2026-07-25', recipe: onionHV, servings: 4 },
+      ],
+      priceIndex: hvIndex,
+    })
+    eq(
+      'HV-8 「全員分」は作った食数ぶんと作る食数ぶんを1つに足した額',
+      hv.householdYen,
+      hv.cookedHouseholdYen + hv.planHouseholdYen,
+    )
+    eq(
+      'HV-8 のべ食数も1つにまとまる',
+      hv.mealCount,
+      hv.cookedMealCount + hv.planMealCount,
+    )
+    eq(
+      'HV-8 1日あたりの平均の分母は「記録か献立のある日数」(同じ日に何品でも1日)',
+      hv.dayCount,
+      4, // 7/10(2品で1日)・7/12・7/20・7/25
+    )
+    eq('HV-8 1日あたりの平均 = 全員分 ÷ その日数', hv.perDayYen, Math.round(hv.householdYen / hv.dayCount))
+    // 片方しか無い期間でも同じ形（行を出す/出さないの判断が実績の有無に引きずられない）
+    const futureOnly = summarizeRangeIntake({
+      start: '2026-07-16',
+      end: '2026-07-31',
+      today: HV_TODAY,
+      cooked: [],
+      planned: [{ date: '2026-07-20', recipe: chickenHV, servings: 3 }],
+      priceIndex: hvIndex,
+    })
+    eq(
+      'HV-8 記録が1件も無い期間でも「全員分」は予定ぶんで出る(0円で伏せない)',
+      { yen: futureOnly.householdYen, meals: futureOnly.mealCount, days: futureOnly.dayCount },
+      { yen: futureOnly.planHouseholdYen, meals: futureOnly.planMealCount, days: 1 },
+    )
+    eq(
+      'HV-8 記録も献立も無い期間は0で割らない',
+      { days: futureOnly.dayCount > 0, perDay: summarizeRangeIntake({
+        start: '2026-07-16',
+        end: '2026-07-17',
+        today: HV_TODAY,
+        cooked: [],
+        planned: [],
+        priceIndex: hvIndex,
+      }).perDayYen },
+      { days: true, perDay: 0 },
+    )
+  }
+
+  // ---- ⑨ 使わなくなった文言を残さない（EK-1と同じ作法） ----
+  eq('HV-9 消した「この月の栄養から組む」の文言が残っていない', 'purposeReviewTitle' in ja.mealPlan, false)
+  eq('HV-9 畳んだ月カードの「予定」の行の文言が残っていない', 'monthFoldedPlanPersonal' in ja.mealPlan, false)
+  eq('HV-8 表の「これから作る予定」の見出しが残っていない', 'intakeCostPlanGroup' in ja.mealPlan, false)
+
+  // ---- ⑩ カレンダーの説明は「概算」と「その日に1人が食べる分」だけ ----
+  for (const [name, legend] of [
+    ['栄養', ja.mealPlan.monthCellNutritionLegend],
+    ['食費', ja.mealPlan.monthCellCostLegend],
+  ]) {
+    eq(
+      `HV-10 ${name}の説明に、カレンダーを見れば分かる数え方の説明が残っていない`,
+      /過ぎた日|今日から先|まだの分/.test(legend),
+      false,
+    )
+    eq(
+      `HV-10 ${name}の説明が「概算」と「その日に1人が食べる分」を言っている`,
+      legend.includes('概算') && legend.includes('その日に1人が食べる分'),
+      true,
+    )
+  }
+
+  // ---- ⑦⑪ 名前を変えたら、利用者が読むページも一緒に変える ----
+  // 期待値はアプリの文言そのもの(ja.ts)から取る＝アプリで名前を変えたらここが赤くなる。
+  {
+    const bodyOf = (rel) =>
+      readFileSync(path.join(appRoot, rel), 'utf-8').replace(/<!--[\s\S]*?-->/g, '')
+    const pages = ['public/about/manual.html', 'public/about/index.html']
+    for (const rel of pages) {
+      const body = bodyOf(rel)
+      eq(
+        `HV-11 ${rel} に無くなったボタン名「未定の日をまとめて提案」が残っていない（今は「${ja.mealPlan.fillMonth}」）`,
+        body.includes('未定の日をまとめて提案'),
+        false,
+      )
+      eq(
+        `HV-7 ${rel} が「期間の食費と栄養」をボタン名として説明していない（今は「${ja.mealPlan.rangeCostToggle}」）`,
+        /「期間の食費と栄養」(のボタン|ボタン|を押)/.test(body),
+        false,
+      )
+    }
+    const manualHV = bodyOf('public/about/manual.html')
+    eq('HV-11 使い方ページに今のボタン名が書いてある', manualHV.includes(ja.mealPlan.fillMonth), true)
+    eq('HV-7 使い方ページに今のボタン名が書いてある', manualHV.includes(ja.mealPlan.rangeCostToggle), true)
+    // 設定のPro案内の道順も、いま画面に出ているボタン名で書く
+    const mealPlanFeatures = ja.settings.proActivatedFeatureGroups.flatMap((g) => g.features)
+    const rangeFeature = mealPlanFeatures.find((f) => f.hint.includes('期間'))
+    eq(
+      'HV-7 設定のPro案内の道順が、今のボタン名で書かれている',
+      rangeFeature?.hint.includes(ja.mealPlan.rangeCostToggle) ?? false,
+      true,
+    )
   }
 }
 

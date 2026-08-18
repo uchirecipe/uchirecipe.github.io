@@ -390,6 +390,8 @@ import net from 'node:net'
 import path from 'node:path'
 // 文言は src/i18n/ja.ts の1か所から読む（規約H。画面の字を書き写して二重管理しない）
 import { ja } from '../src/i18n/ja.ts'
+// 栄養の顔ぶれ・名前は表示側の1か所(便HU・⑯)から読む（画面の字を書き写さない）
+import { NUTRITION_DISPLAY_KEYS, nutritionLabelFor } from '../src/logic/nutrition.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -3183,7 +3185,8 @@ try {
           // 2026-08-10 便FJ: ユーザー向け文言から「タブ」を掃引したので「献立の画面」に更新
           'DISC-01 解錠後の案内に期間の集計(期間の食費と栄養)への行き方が書かれている',
           proSectionText.includes('期間の食費と栄養') &&
-            proSectionText.includes('献立の画面 →「月」→「期間の食費と栄養」'),
+            // 2026-08-19 便HV・⑦: ボタン名が「期間で絞る」に変わったので道順の名前もそろえる
+            proSectionText.includes('献立の画面 →「月」→「期間で絞る」'),
         )
         const discLinks = await nutPage.evaluate(() => {
           const hrefs = Array.from(document.querySelectorAll('#pro-section a')).map((a) =>
@@ -5501,7 +5504,7 @@ try {
   // logic/mealTemplate.ts planTemplateFill)には単体テストがあるが、画面のボタンから同じ結果に
   // なるかは「まとめて献立を入力(レシピを総入れ替え)」(WEEKLOCK LOCK-5)しか見ていなかった。
   // 残る4経路 ①テンプレートを適用 ②先週の献立をコピー ③まとめて空にする
-  // ④月の未定の日をまとめて提案 を、実際の操作で確かめる(④は月タブなので別ブロック)。
+  // ④月の献立をまとめて提案 を、実際の操作で確かめる(④は月タブなので別ブロック)。
   //
   // 便EJが確立した「素通り不可能」の形をそのまま踏襲する:
   //  ①その操作が効くはずの前提(入る中身がある/消える中身がある)を先に断定
@@ -5758,7 +5761,7 @@ try {
     }
   }
 
-  // --- WEEKLOCK-MONTH: 4経路目「月の未定の日をまとめて提案」のロックを画面から確かめる。
+  // --- WEEKLOCK-MONTH: 4経路目「月の献立をまとめて提案」のロックを画面から確かめる。
   // 月タブはPro版の機能なので解錠コードを入れてから使う。まっさらなプロファイルで、
   // 必ず「次の月」(まるごと未来の月＝全日が未定)を対象にする＝実行日の日付に左右されない。
   // 鍵は週タブにしか無いので、その月の連続2日が7日分に入るまで「次の週」を送ってから掛ける ---
@@ -5854,7 +5857,7 @@ try {
         `locked=${bmLocked} free=${bmFree}`,
       )
 
-      // 月タブ→次の月→未定の日をまとめて提案。
+      // 月タブ→次の月→献立をまとめて提案。
       // 月タブの表示月はタブを離れても保たれるので、毎回「今月へ戻る」で起点をそろえてから
       // 1つだけ進める（そろえずに「次の月」を押すと2か月先へ行き、鍵の日と別の月を埋めてしまう）
       const bmOpenNextMonth = async () => {
@@ -5875,7 +5878,7 @@ try {
           (await bmPage.locator(`[data-date="${bmFree}"]`).count()) > 0,
         `locked=${bmLocked} free=${bmFree}`,
       )
-      const bmFillMonth = bmPage.getByRole('button', { name: '未定の日をまとめて提案' })
+      const bmFillMonth = bmPage.getByRole('button', { name: '献立をまとめて提案' })
       bmDialogs.length = 0
       await bmFillMonth.click()
       await bmPage.waitForTimeout(9000) // 1か月ぶん書き込むので長めに待つ
@@ -9557,9 +9560,11 @@ try {
       await plPage.waitForTimeout(300)
       const plMonthTable =
         (await plPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
+      // 2026-08-19 便HV・⑧⑨: 過去と未来で行を分けなくなったので、「全員分」は
+      // 作った食数ぶんと作る食数ぶんを足した1行になった(数え方の書き方もそれに合わせた)
       check(
-        'PASTLOG-01(便CH/C8・便DQ) 月の食費の表に「全員分／作った食数ぶん」が内訳を開かずに出る',
-        /全員分作った食数ぶん約[\d,]+円のべ\d+食/.test(plMonthTable),
+        'PASTLOG-01(便CH/C8・便DQ・便HV) 月の食費の表に「全員分」の金額とのべ食数が内訳を開かずに出る',
+        /全員分[^約]{0,20}約[\d,]+円のべ\d+食/.test(plMonthTable),
         `表=${plMonthTable.slice(0, 200)}`,
       )
       // 以降の「記録あり」マーク経由のタップのため写真モードへ戻す
@@ -9749,7 +9754,8 @@ try {
 
       // 日セルは data-date で掴む(予定プレビュー・数字が入っても壊れない)
       const rcDay = (date) => rcPage.locator(`button[data-date="${date}"]`)
-      const rcModeBtn = rcPage.getByRole('button', { name: '期間の食費と栄養', exact: true })
+      // 2026-08-19 便HV・⑦: ボタン名は「期間で絞る」(結果カードの見出しは「期間の食費と栄養」のまま)
+      const rcModeBtn = rcPage.getByRole('button', { name: '期間で絞る', exact: true })
       // 便DRで期間カードも月タブと同じ体裁(食費の表＋折りたたみ)になったため、
       // 本文全体ではなくカード/表を掴んで読む(同じ画面に月の食費の表があり、文言が重なるため)
       const rcCard = rcPage.locator('[data-testid="range-result-card"]')
@@ -9829,10 +9835,13 @@ try {
         !/1食あたり 約[\d,]+円/.test(rcFutureText),
       )
       check(
-        // 2026-07-30 便CH/C8＋2026-08-03 便DQ/DR: 実績の行は表の「全員分／作った食数ぶん」
-        'MEALPLAN-07(便CA・便DR) 未来だけの期間の表に「作った食数ぶん」の行は出ない(予定の行だけ)',
-        !rcFutureTableText.includes('作った食数ぶん') &&
-          /これから作る予定全員分作る食数ぶん約[\d,]+円のべ\d+食/.test(rcFutureTableText),
+        // 2026-07-30 便CH/C8＋2026-08-03 便DQ/DR → 2026-08-19 便HV・⑧:
+        // 過去と未来で行を分けない。未来だけの期間でも「全員分」は1行だけで、
+        // 下段の「これから作る予定」は出ない(数字は作る食数ぶんそのもの)
+        'MEALPLAN-07(便HV) 未来だけの期間でも「全員分」は1行だけで、予定用の下段は出ない',
+        /全員分[^約]{0,20}約[\d,]+円のべ\d+食/.test(rcFutureTableText) &&
+          !rcFutureTableText.includes('これから作る予定') &&
+          (await rcTable.locator('tbody').count()) === 1,
         `表=${rcFutureTableText.slice(0, 240)}`,
       )
       // 2026-08-03 便DR: 内訳と価格の但し書きは月タブと同じく折りたたみの中(既定は畳む)
@@ -9932,14 +9941,15 @@ try {
         // 2026-07-30 便CH/C8: 「全体」→数え方を言い切る・「◯食分」→「のべ◯食分」
         // 2026-08-03 便DQ: 予定側「作る食数ぶん」と語をそろえて「作った食数ぶん」に統一
         // 2026-08-03 便DR: 表の「全員分／作った食数ぶん」の行になった(数字と数え方は同じ)
-        'MEALPLAN-07(便CA・便DR) オーナー指示で残す「全員分／作った食数ぶん」の行が金額と延べ食数で出る',
-        rcPastTableText.includes(
-          `全員分作った食数ぶん約${rcSingleCost.toLocaleString()}円のべ${rcServings}食`,
-        ),
+        'MEALPLAN-07(便CA・便DR) オーナー指示で残す「全員分」の行が金額と延べ食数で出る',
+        new RegExp(
+          `全員分[^約]{0,20}約${rcSingleCost.toLocaleString()}円のべ${rcServings}食`,
+        ).test(rcPastTableText),
         `表=${rcPastTableText.slice(0, 240)} single=${rcSingleCost} servings=${rcServings}`,
       )
       check(
-        'MEALPLAN-07(便DR) 過去だけの期間の表に「これから作る予定」の下段は出ない',
+        // 2026-08-19 便HV・⑧: 下段そのものを廃止したので、どの期間でも出ない
+        'MEALPLAN-07(便HV) 表に「これから作る予定」の下段は出ない',
         !rcPastTableText.includes('これから作る予定'),
         `表=${rcPastTableText.slice(0, 240)}`,
       )
@@ -10052,10 +10062,12 @@ try {
       // 数字が「その日の1人分のkcal」であることは aria-label 側で確認する
       const rcNutriCell = (await rcDay(`${rcNextPrefix}-03`).textContent()) ?? ''
       const rcNutriAria = (await rcDay(`${rcNextPrefix}-03`).getAttribute('aria-label')) ?? ''
-      const rcNutriKcal = rcNutriAria.match(/([\d,]+)kcal/)?.[1] ?? ''
+      // 2026-08-19 便HV・⑥: 単位は項目ごとに変わるので、読み上げも栄養パネルと同じ
+      // 「498 kcal」の形（数と単位のあいだに空き）で作るようにした。空きの有無は問わずに読む
+      const rcNutriKcal = rcNutriAria.match(/([\d,]+)\s*kcal/)?.[1] ?? ''
       check(
         'MEALPLAN-07(便CA②) 読み上げ(aria-label)は「◯日 ◯kcal 登録した献立」',
-        /^3日 [\d,]+kcal 登録した献立$/.test(rcNutriAria),
+        /^3日 [\d,]+\s?kcal 登録した献立$/.test(rcNutriAria),
         `aria=${rcNutriAria}`,
       )
       check(
@@ -10064,10 +10076,11 @@ try {
         `セル=${rcNutriCell} 期待=3${rcNutriKcal}kcal`,
       )
       check(
-        'MEALPLAN-07(便EA) 栄養モードの凡例は「何の数字か」を先に言う(エネルギー(kcal))',
-        ((await rcPage.textContent('body')) ?? '').includes(
-          '数字はエネルギー（kcal）の概算です',
-        ),
+        // 2026-08-19 便HV・⑩で説明を短くした(数え方の説明は落とした)が、項目名は言い続ける
+        'MEALPLAN-07(便EA・便HV) 栄養モードの凡例が「何の数字か」を言う(エネルギー(kcal))',
+        ((await rcPage.textContent('body')) ?? '')
+          .replaceAll('\u200b', '')
+          .includes('エネルギー（kcal）の概算です'),
       )
       check(
         'MEALPLAN-07(便CA②) 予定も記録も無い日は数字を出さない(日付だけ)',
@@ -10084,8 +10097,10 @@ try {
         `セル=${rcCostCell} 期待=${Math.round(rcPersonalOne).toLocaleString()}円`,
       )
       check(
-        'MEALPLAN-07(便EA) 食費モードの凡例も「何の数字か」を先に言う(食費(円))',
-        ((await rcPage.textContent('body')) ?? '').includes('数字は食費（円）の概算です'),
+        'MEALPLAN-07(便EA・便HV) 食費モードの凡例も「何の数字か」を言う(食費(円))',
+        ((await rcPage.textContent('body')) ?? '')
+          .replaceAll('\u200b', '')
+          .includes('食費（円）の概算です'),
       )
 
       // 選択は設定に記憶され、再読み込みしても食費モードのまま
@@ -10233,14 +10248,17 @@ try {
         `セル=${eaCellText}`,
       )
       check(
-        'RANGE-EA(便EA-1) 凡例が「何の数字か」を先に言う(エネルギー(kcal))',
-        ((await eaPage.textContent('body')) ?? '').includes('数字はエネルギー（kcal）の概算です'),
+        // 2026-08-19 便HV・⑩で説明を短くしたが、「何の数字か」を先に言うことは変えていない
+        'RANGE-EA(便EA-1・便HV) 凡例が「何の数字か」を言う(エネルギー(kcal))',
+        ((await eaPage.textContent('body')) ?? '')
+          .replaceAll('\u200b', '')
+          .includes('エネルギー（kcal）の概算です'),
       )
       await eaPage.getByRole('button', { name: '写真', exact: true }).click()
       await eaPage.waitForTimeout(400)
 
       // ---------- EA-2b: 開始日・終了日の手入力 ----------
-      await eaPage.getByRole('button', { name: '期間の食費と栄養', exact: true }).click()
+      await eaPage.getByRole('button', { name: '期間で絞る', exact: true }).click()
       await eaPage.waitForTimeout(400)
       const eaStartInput = eaPage.locator('[data-testid="range-date-start"]')
       const eaEndInput = eaPage.locator('[data-testid="range-date-end"]')
@@ -11356,8 +11374,9 @@ try {
         `title=${meThisMonthTitle}`,
       )
       check(
-        'MEALPLAN-A3B3(B-3) 期間指定のUI(期間の食費と栄養)も従来どおり残っている',
-        (await mePage.getByRole('button', { name: '期間の食費と栄養', exact: true }).count()) === 1,
+        // 2026-08-19 便HV・⑦でボタン名を「期間で絞る」に変えた(機能は同じ)
+        'MEALPLAN-A3B3(B-3) 期間指定のUI(期間で絞る)も従来どおり残っている',
+        (await mePage.getByRole('button', { name: '期間で絞る', exact: true }).count()) === 1,
       )
 
       // 翌月へ移動(全日が未来日=編集対象)。10日のセルを開く
@@ -11500,19 +11519,20 @@ try {
         'MEALPLAN-A3B3(B-3) 内訳は既定で畳まれている(カレンダーを押し下げない)',
         !meBodyAfter.includes('内訳 作った記録'),
       )
-      // 2026-08-03 便DQ(オーナー指示「予定は合計と一人当たりの合計を下に」): 全部が今日から先の月は
-      // 実績の行が無く、「これから作る予定」の合計(作る食数ぶん)と一人当たりの合計だけが出る
+      // 2026-08-19 便HV・⑨(オーナー指示「過去と未来に分ける必要なし」): 全部が今日から先の月でも、
+      // 行は「1人分」「全員分」「1日あたりの平均」の1組だけ。予定用の下段は作らない
       check(
-        'MEALPLAN-A3B3(便DQ) 未来の月は「これから作る予定」の全員分(作る食数ぶん)と1人分が表に出る',
-        /これから作る予定全員分作る食数ぶん約[\d,]+円のべ\d+食1人分献立を1食ずつ足した合計約[\d,]+円\d+食/.test(
-          meCostTableText,
-        ),
+        // 「割れていない」は表の作りで測る: 予定用の下段は別のtbodyだったので、tbodyが1つなら割れていない
+        'MEALPLAN-A3B3(便HV) 未来の月でも表の行は1組だけで、予定用の下段は出ない',
+        (await meCostTable.locator('tbody').count()) === 1 &&
+          !meCostTableText.includes('これから作る予定') &&
+          (meCostTableText.match(/1人分/g) ?? []).length === 1,
         `表=${meCostTableText.slice(0, 240)}`,
       )
       check(
-        'MEALPLAN-A3B3(便DQ) 作った記録が無い月は「全員分(作った食数ぶん)」「1日あたりの平均」を出さない',
-        !meCostTableText.includes('作った食数ぶん') &&
-          !meCostTableText.includes('1日あたりの平均'),
+        'MEALPLAN-A3B3(便HV) 記録が無い月でも「全員分」と「1日あたりの平均」は作る予定ぶんで出る',
+        /全員分[^約]{0,20}約[\d,]+円のべ\d+食/.test(meCostTableText) &&
+          /1日あたりの平均[^約]{0,20}約[\d,]+円/.test(meCostTableText),
         `表=${meCostTableText.slice(0, 240)}`,
       )
       check(
@@ -11772,10 +11792,17 @@ try {
         (await duPage.locator('[data-testid="month-hide-recipe-photo"]').count()) === 0,
       )
       check(
-        'MEALPLAN-DU(⑨→便EA) 食費モードの説明は「何の数字か」と数え方(今日の扱いも)まで言い切る',
-        ((await duPage.textContent('body')) ?? '').includes(
-          '数字は食費（円）の概算です。その日に1人が食べる分で、過ぎた日は作った記録、今日から先は登録した献立、今日は作った分は記録・まだの分は献立で計算しています',
-        ),
+        // 2026-08-19 便HV・⑩(オーナー指示「説明が長いので、数値が概算であることと1日分の
+        // 数値であることの説明のみで良いのでは？」): 数え方の長い説明は落とし、
+        // 「概算であること」と「その日に1人が食べる分であること」だけを言う
+        'MEALPLAN-DU(⑨→便EA→便HV) 食費モードの説明は「概算」と「その日に1人が食べる分」だけを言う',
+        await (async () => {
+          const legend = ((await duPage.textContent('body')) ?? '').replaceAll('\u200b', '')
+          return (
+            legend.includes('数字は、その日に1人が食べる分の食費（円）の概算です') &&
+            !legend.includes('今日は作った分は記録・まだの分は献立で計算しています')
+          )
+        })(),
       )
       await duPage.getByRole('button', { name: '写真', exact: true }).click()
       await duPage.waitForTimeout(400)
@@ -12410,7 +12437,7 @@ try {
   }
 
   // --- MEALPLAN-A5: 月の空日を一括提案(2026-07-29 便CB-2・docs/59 A-5)。
-  // 翌月(全日が未来日)を開いて「未定の日をまとめて提案」を押し、
+  // 翌月(全日が未来日)を開いて「献立をまとめて提案」を押し、
   //  ・一括なので実行前に規約Fの確認文が出る(何日分・何食分を埋めるか＋何が消えないか)
   //  ・すでに決まっている日は上書きされない(手動配置の保護は週の「まとめて献立」と同じ)
   //  ・結果は実際に入れた品数で報告する(便CD/MP-06の正直な完了報告と同じ作法)
@@ -12496,7 +12523,7 @@ try {
       await fmPage.waitForTimeout(400)
       await fmPage.getByRole('button', { name: '次の月' }).click()
       await fmPage.waitForTimeout(600)
-      await fmPage.getByRole('button', { name: '未定の日をまとめて提案' }).click()
+      await fmPage.getByRole('button', { name: '献立をまとめて提案' }).click()
       // 月まるごとの提案は枠数が多いので、書き込みが終わるまで長めに待つ
       await fmPage.waitForTimeout(6000)
       check(
@@ -12572,7 +12599,7 @@ try {
       const fmBefore = fmMonthPlans
         .map((e) => `${e.date}|${e.slot}|${e.role ?? 'main'}|${e.recipeId}`)
         .sort()
-      await fmPage.getByRole('button', { name: '未定の日をまとめて提案' }).click()
+      await fmPage.getByRole('button', { name: '献立をまとめて提案' }).click()
       await fmPage.waitForTimeout(2500)
       const fmAfterSecond = await fmPage.evaluate(
         (prefix) =>
@@ -20432,32 +20459,26 @@ try {
         `purpose付き=${p2Entries.filter((e) => e.purpose === 'protein').length}/${p2Entries.length}`,
       )
 
-      // 月タブの答え合わせ（事実表示）。
-      // 2026-08-07 便DU: 答え合わせは月の栄養カードの中にあり、そのカードは折りたたみ(既定は畳む)
+      // 月タブの「答え合わせ」(旧「この月の『栄養から組む』」)は、2026-08-19 便HV・⑨の
+      // オーナー指示で削除した。**消したものが戻っていないこと**と、
+      // **消しても「栄養から組む」自体は効いたままであること**(枠に purpose が残るのは上で確認済み)を見る
       await p2Page.getByRole('button', { name: '月', exact: true }).click()
       await p2Page.waitForTimeout(800)
-      await p2Page.getByRole('button', { name: /月の栄養（1人分）/ }).click()
-      await p2Page.waitForTimeout(400)
-      const p2Review = p2Page.locator('[data-testid="purpose-review"]')
-      check('PURPOSE-02 月タブに「目的から組む」の答え合わせが出る', await p2Review.isVisible())
-      const p2ReviewText = (await p2Review.textContent()) ?? ''
+      const p2NutritionCard = p2Page.getByRole('button', { name: /月の栄養（1人分）/ })
+      if (await p2NutritionCard.count()) {
+        await p2NutritionCard.click()
+        await p2Page.waitForTimeout(400)
+      }
+      const p2MonthBody = ((await p2Page.textContent('body')) ?? '').replaceAll('\u200b', '')
       check(
-        'PURPOSE-02 答え合わせは日数を「◯日 / ◯日」で並置する',
-        /「たんぱく質多め」で組んだ日: \d+日 \/ \d+日/.test(p2ReviewText),
-        `text=${p2ReviewText}`,
+        'PURPOSE-02(便HV・⑨) 月タブに「この月の『栄養から組む』」の答え合わせは出さない',
+        (await p2Page.locator('[data-testid="purpose-review"]').count()) === 0 &&
+          !p2MonthBody.includes('で組んだ日'),
+        `本文=${p2MonthBody.slice(0, 200)}`,
       )
       check(
-        'PURPOSE-02 答え合わせは達成/未達を判定しない（断定語を出さない）',
-        !p2ReviewText.includes('クリア') &&
-          !p2ReviewText.includes('達成') &&
-          !p2ReviewText.includes('不足') &&
-          !p2ReviewText.includes('バランスの良い'),
-        `text=${p2ReviewText}`,
-      )
-      check(
-        'PURPOSE-02 答え合わせに「概算」と「良し悪しは判定していない」旨が添えられる',
-        p2ReviewText.includes('概算') && p2ReviewText.includes('判定していません'),
-        `text=${p2ReviewText}`,
+        'PURPOSE-02(便HV・⑨) 答え合わせを消しても「栄養から組む」の入口は月タブに残っている',
+        (await p2Page.getByRole('button', { name: /^提案の条件/ }).count()) > 0,
       )
     } finally {
       await p2Browser.close()
@@ -20759,14 +20780,16 @@ try {
           dmBody.includes('5/1〜5/23は作った記録'),
         `body先頭=${dmBody.slice(0, 160)}`,
       )
-      // 2026-08-03 便DQ: 食費の表(一人分・全員分・1日あたりの平均・これから作る予定)と、
-      // 別カードになった栄養の8項目が、見本の1か月でも数値としてそろって出る。
-      // 1日あたりの平均は「全員分 ÷ 作った記録のある◯日」＝画面の上だけで検算できる形で出す
+      // 2026-08-03 便DQ: 食費の表(一人分・全員分・1日あたりの平均)と、別カードになった栄養の
+      // 8項目が、見本の1か月でも数値としてそろって出る。
+      // 1日あたりの平均は「全員分 ÷ ◯日」＝画面の上だけで検算できる形で出す
+      // (2026-08-19 便HV・⑨で分母が「記録か献立のある日数」になった。分母の数は画面から読む)
       const dmCostTable = (await dmPage.locator('table', { hasText: '献立を1食ずつ足した合計' }).first().textContent()) ?? ''
-      const dmPerDay = /全員分作った食数ぶん約([\d,]+)円のべ\d+食1日あたりの平均全員分÷作った記録のある(\d+)日約([\d,]+)円/.exec(dmCostTable)
+      const dmPerDay = /全員分[^約]{0,20}約([\d,]+)円のべ\d+食1日あたりの平均[^÷]{0,10}÷[^\d]{0,20}(\d+)日約([\d,]+)円/.exec(dmCostTable)
       check(
-        'DEMO-01(便DQ) 食費の表に「全員分」と「1日あたりの平均(全員分÷記録のある◯日)」が出て、割り算が合う',
+        'DEMO-01(便DQ・便HV) 食費の表に「全員分」と「1日あたりの平均(全員分÷◯日)」が出て、割り算が合う',
         !!dmPerDay &&
+          Number(dmPerDay[2]) > 0 &&
           Math.round(Number(dmPerDay[1].replaceAll(',', '')) / Number(dmPerDay[2])) ===
             Number(dmPerDay[3].replaceAll(',', '')),
         `表=${dmCostTable.slice(0, 260)}`,
@@ -20783,7 +20806,7 @@ try {
       )
       check(
         'DEMO-01 デモには献立を書き換える操作を出さない',
-        !dmBody.includes('未定の日をまとめて提案') && !dmBody.includes('テンプレートを適用'),
+        !dmBody.includes('献立をまとめて提案') && !dmBody.includes('テンプレートを適用'),
       )
       // カレンダーに出す情報（写真⇄栄養⇄食費）が実際に切り替わる
       await dmPage.getByRole('button', { name: '食費', exact: true }).click()
@@ -23544,8 +23567,9 @@ try {
       const eeFolded = eePage.locator('[data-testid="month-cost-folded"]')
       const eeFoldedText = (await eeFolded.count()) ? await eeFolded.innerText() : ''
       check(
-        'EE-01(①) 畳んだままでも「1人分」の金額が読める',
-        /1人分[\s\S]*約[\d,]+円/.test(eeFoldedText),
+        // 2026-08-19 便HV・⑨: 畳んだ側は「食費の合計」1つだけ(オーナー指示)
+        'EE-01(①・便HV) 畳んだままでも食費の合計が読める',
+        /全員分[\s\S]*約[\d,]+円/.test(eeFoldedText),
         `畳んだ食費=${eeFoldedText.replace(/\n/g, ' / ')}`,
       )
       check(
@@ -37609,6 +37633,305 @@ try {
       await dnCtx.close()
     } finally {
       await dmBrowser.close()
+    }
+  }
+
+
+  // --- HV-01: 月タブの整理（2026-08-19 便HV・オーナー書き溜め⑥⑧⑨⑪）。
+  //
+  //  ⑥ カレンダーのマスに出す栄養を選べる（既定はエネルギーのまま）。
+  //     測るのは「選んだ栄養がマスの数値に出ること」と「無料のままでは8項目が見えないこと」。
+  //  ⑧⑨ 食費・栄養が過去と未来で2つに割れていないこと（見出しの文字合わせではなく、
+  //     **数値が1つにまとまっているか**で測る＝のべ食数が記録ぶん＋予定ぶんの合計になっているか）。
+  //  ⑪ ボタン名が「献立をまとめて提案」になっていること。
+  //
+  // 日付の置き方: 記録も献立も**今日**に置く。今日は必ず表示中の月に入るので、
+  // 月初でも月末でも同じように動く（曜日・月替わりの前提を作らない）。
+  // 数を読み取れなかったときは必ず不合格にする（読めないまま合格にしない）。 ---
+  currentCheck = 'HV-01'
+  {
+    const hvBrowser = await chromium.launch()
+    try {
+      const hvNow = new Date()
+      const hvToday = `${hvNow.getFullYear()}-${String(hvNow.getMonth() + 1).padStart(2, '0')}-${String(hvNow.getDate()).padStart(2, '0')}`
+      const hvLabels = NUTRITION_DISPLAY_KEYS.map((key) => nutritionLabelFor(key))
+      /** マスの読み上げ(aria-label)から数値と単位を読む。読めなければ null（＝不合格にする） */
+      const readNutrientCell = async (targetPage, date) => {
+        const aria = (
+          (await targetPage.locator(`button[data-date="${date}"]`).getAttribute('aria-label')) ?? ''
+        ).replaceAll('​', '')
+        const m = aria.match(/^\d+日\s+([\d,.]+)\s*(kcal|mg|g)(?=\s|$)/)
+        return m ? { value: Number(m[1].replaceAll(',', '')), unit: m[2], aria } : null
+      }
+
+      // ===== (1) Pro解錠した月タブ: 栄養の項目を選べる =====
+      const hvContext = await hvBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const hvPage = await hvContext.newPage()
+      hvPage.on('pageerror', (err) => errors.push(`[pageerror@HV-01] ${err.message}`))
+      await hvPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await hvPage.waitForTimeout(2200) // 初回シード待ち
+      // 今日に「作った記録1件(3人分)」と「別の料理の献立1枠」を置く。
+      // 別の料理にするのは、今日の同じ料理は記録側で数えて予定から落とす規則があるため。
+      const hvSeed = await hvPage.evaluate(async (today) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => {
+          req.onsuccess = () => res(req.result)
+          req.onerror = () => rej(req.error)
+        })
+        const P = (r) =>
+          new Promise((res, rej) => {
+            r.onsuccess = () => res(r.result)
+            r.onerror = () => rej(r.error)
+          })
+        const settings =
+          (await P(idb.transaction('settings', 'readonly').objectStore('settings').get(1))) || { id: 1 }
+        await P(
+          idb
+            .transaction('settings', 'readwrite')
+            .objectStore('settings')
+            .put({
+              ...settings,
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+              monthCellMode: 'nutrition',
+              monthCellNutrient: undefined,
+            }),
+        )
+        const all = await P(idb.transaction('recipes', 'readonly').objectStore('recipes').getAll())
+        const usable = all.filter((r) => (r.ingredients?.length ?? 0) > 3)
+        const cookedRecipe = usable[0]
+        const plannedRecipe = usable[1]
+        // 献立は空にしてから1枠だけ置く（この月で数字が出る日を今日だけにする）
+        await P(idb.transaction('mealPlans', 'readwrite').objectStore('mealPlans').clear())
+        await P(
+          idb
+            .transaction('mealPlans', 'readwrite')
+            .objectStore('mealPlans')
+            .add({ date: today, slot: 'dinner', recipeId: plannedRecipe.id, role: 'main' }),
+        )
+        const rstore = idb.transaction('recipes', 'readwrite').objectStore('recipes')
+        const target = await P(rstore.get(cookedRecipe.id))
+        target.cookedLogs = [{ date: today, servings: 3 }]
+        await P(rstore.put(target))
+        idb.close()
+        return { cookedServings: 3, plannedServings: plannedRecipe.servings }
+      }, hvToday)
+
+      await hvPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await hvPage.reload({ waitUntil: 'networkidle' })
+      await hvPage.waitForTimeout(2000)
+      await hvPage.getByRole('button', { name: '月', exact: true }).first().click()
+      await hvPage.waitForTimeout(1200)
+
+      const hvSelect = hvPage.locator('[data-testid="month-cell-nutrient"]')
+      // 選択欄が無いときも、この節の残りを最後まで見るために「無かった」を記録して進む
+      // （途中で例外を投げると、⑧⑨⑪の結果がひとつも分からなくなる）
+      const hvHasSelect = (await hvSelect.count()) === 1
+      check('HV-01(⑥) 栄養モードに「カレンダーに出す栄養」の選択欄が出る', hvHasSelect)
+      const hvOptions = hvHasSelect
+        ? (await hvSelect.locator('option').allTextContents()).map((t) => t.replaceAll('​', '').trim())
+        : []
+      check(
+        'HV-01(⑥) 選べる顔ぶれは栄養価の表示と同じ8項目・同じ順・同じ名前',
+        JSON.stringify(hvOptions) === JSON.stringify(hvLabels),
+        `画面=${hvOptions.join('/') || '(選択欄が無い)'} 期待=${hvLabels.join('/')}`,
+      )
+      const hvDefaultNutrient = hvHasSelect ? await hvSelect.inputValue() : null
+      check(
+        'HV-01(⑥) 既定は今までどおりエネルギー',
+        hvDefaultNutrient === 'kcal',
+        `value=${hvDefaultNutrient ?? '(選択欄が無い)'}`,
+      )
+      // 押せる大きさ（料理中に触る画面なので、プルダウンも指で押せる高さを保つ）
+      const hvSelectBox = hvHasSelect ? await hvSelect.boundingBox() : null
+      check(
+        'HV-01(⑥) 栄養の選択欄は指で押せる高さ(44px以上)',
+        !!hvSelectBox && hvSelectBox.height >= 44,
+        JSON.stringify(hvSelectBox),
+      )
+
+      // 既定(エネルギー)の値が、今日のマスと月の栄養カードで一致する
+      const hvKcalCell = await readNutrientCell(hvPage, hvToday)
+      check(
+        'HV-01(⑥) 既定では今日のマスにエネルギー(kcal)の数値が出る',
+        !!hvKcalCell && hvKcalCell.unit === 'kcal' && hvKcalCell.value > 0,
+        `読み上げ=${hvKcalCell?.aria ?? '(読めなかった)'}`,
+      )
+      const hvFoldedNutrition = hvPage.locator('[data-testid="month-nutrition-folded"]')
+      const hvFoldedKcalText = (await hvFoldedNutrition.count())
+        ? ((await hvFoldedNutrition.innerText()) ?? '').replaceAll('​', '')
+        : ''
+      const hvFoldedKcal = Number(
+        (hvFoldedKcalText.match(/([\d,]+)\s*kcal/)?.[1] ?? '').replaceAll(',', ''),
+      )
+      check(
+        'HV-01(⑥) マスのエネルギーは、この月の合計(数字が出る日は今日だけ)と同じ値',
+        Number.isFinite(hvFoldedKcal) && hvFoldedKcal > 0 && hvKcalCell?.value === hvFoldedKcal,
+        `マス=${hvKcalCell?.value ?? '(読めなかった)'} 月の合計=${hvFoldedKcal}`,
+      )
+
+      // 別の栄養を選ぶと、マスの数値と単位がその栄養のものに変わる
+      if (hvHasSelect) {
+        await hvSelect.selectOption('proteinG')
+        await hvPage.waitForTimeout(700)
+      }
+      const hvProteinCell = hvHasSelect ? await readNutrientCell(hvPage, hvToday) : null
+      await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await hvPage.waitForTimeout(500)
+      const hvPanelText = (await hvPage.locator('[data-testid="month-nutrition-panel"]').count())
+        ? ((await hvPage.locator('[data-testid="month-nutrition-panel"]').innerText()) ?? '').replaceAll('​', '')
+        : ''
+      const hvPanelProtein = Number(
+        (hvPanelText.match(
+          new RegExp(`${nutritionLabelFor('proteinG')}\\s*([\\d,.]+)\\s*g`),
+        )?.[1] ?? '').replaceAll(',', ''),
+      )
+      check(
+        'HV-01(⑥) 選んだ栄養(たんぱく質)がマスの数値に出る（単位も項目に合わせて変わる）',
+        !!hvProteinCell &&
+          hvProteinCell.unit === 'g' &&
+          Number.isFinite(hvPanelProtein) &&
+          hvPanelProtein > 0 &&
+          hvProteinCell.value === hvPanelProtein,
+        `マス=${hvProteinCell?.value ?? '(読めなかった)'}${hvProteinCell?.unit ?? ''} 月の合計=${hvPanelProtein}g`,
+      )
+      check(
+        'HV-01(⑥) 選んだ栄養は、たんぱく質とエネルギーで別の数値になる(選び直しが効いている)',
+        !!hvProteinCell && !!hvKcalCell && hvProteinCell.value !== hvKcalCell.value,
+        `たんぱく質=${hvProteinCell?.value} エネルギー=${hvKcalCell?.value}`,
+      )
+      // 説明も選んだ栄養の名前で出る（⑩で短くしても「何の数字か」は言い続ける）
+      check(
+        'HV-01(⑥⑩) 説明が選んだ栄養の名前で出て、数え方の長い説明は付いていない',
+        await (async () => {
+          const body = ((await hvPage.textContent('body')) ?? '').replaceAll('​', '')
+          return (
+            body.includes('その日に1人が食べる分のたんぱく質（g）の概算です') &&
+            !body.includes('今日は作った分は記録・まだの分は献立で計算しています')
+          )
+        })(),
+      )
+
+      // 選んだ項目は設定に残る（毎回選び直させない。カレンダーの表示の切り替えと同じ扱い）
+      await hvPage.reload({ waitUntil: 'networkidle' })
+      await hvPage.waitForTimeout(1800)
+      await hvPage.getByRole('button', { name: '月', exact: true }).first().click()
+      await hvPage.waitForTimeout(1000)
+      check(
+        'HV-01(⑥) 選んだ栄養は再読み込みしても残る',
+        (await hvPage.locator('[data-testid="month-cell-nutrient"]').count()) === 1 &&
+          (await hvPage.locator('[data-testid="month-cell-nutrient"]').inputValue()) === 'proteinG',
+      )
+
+      // ===== (2) ⑧⑨ 食費・栄養が過去と未来で割れていない =====
+      // 読み込み直した直後のカードは畳まれている（開閉は覚えない・便EN）ので、まず畳んだ側を見る
+      const hvFoldedNutritionText = (await hvPage
+        .locator('[data-testid="month-nutrition-folded"]')
+        .count())
+        ? ((await hvPage.locator('[data-testid="month-nutrition-folded"]').innerText()) ?? '').replaceAll('​', '')
+        : ''
+      check(
+        'HV-01(⑨) 畳んだ栄養カードに出るのはエネルギーの合計だけ',
+        (await hvPage.locator('[data-testid="month-nutrition-folded"] > div').count()) === 1 &&
+          hvFoldedNutritionText.includes(nutritionLabelFor('kcal')),
+        `畳んだ栄養=${hvFoldedNutritionText.replace(/\n/g, ' / ') || '(出ていない)'}`,
+      )
+      await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await hvPage.waitForTimeout(400)
+      check(
+        'HV-01(⑨) 栄養カードを開いているあいだ、畳んだ側の数値は出さない(同じ数字を二度出さない)',
+        (await hvPage.locator('[data-testid="month-nutrition-folded"]').count()) === 0,
+      )
+      // 畳み直してから、この先の食費カードの検査へ進む
+      await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
+      await hvPage.waitForTimeout(400)
+      const hvFoldedCost = hvPage.locator('[data-testid="month-cost-folded"]')
+      const hvFoldedCostText = (await hvFoldedCost.count())
+        ? ((await hvFoldedCost.innerText()) ?? '').replaceAll('​', '')
+        : ''
+      const hvFoldedCostYen = Number(
+        (hvFoldedCostText.match(/約([\d,]+)円/)?.[1] ?? '').replaceAll(',', ''),
+      )
+      check(
+        'HV-01(⑨) 畳んだ食費カードに出るのは食費の合計だけ',
+        (await hvFoldedCost.locator('> div').count()) === 1 &&
+          Number.isFinite(hvFoldedCostYen) &&
+          hvFoldedCostYen > 0,
+        `畳んだ食費=${hvFoldedCostText.replace(/\n/g, ' / ')}`,
+      )
+      await hvPage.getByRole('button', { name: /月の食費/ }).click()
+      await hvPage.waitForTimeout(500)
+      const hvCostTableText = (await hvPage.locator('[data-testid="month-cost-table"]').count())
+        ? ((await hvPage.locator('[data-testid="month-cost-table"]').innerText()) ?? '').replaceAll('​', '')
+        : ''
+      check(
+        // 「割れていない」は表の作りで測る: 予定用の下段は別のtbodyだったので、tbodyが1つなら割れていない
+        'HV-01(⑧⑨) 食費の表は過去と未来に分かれていない(行が1組・予定用の下段が無い)',
+        (await hvPage.locator('[data-testid="month-cost-table"] tbody').count()) === 1 &&
+          !hvCostTableText.includes('これから作る予定') &&
+          (hvCostTableText.match(/1人分/g) ?? []).length === 1,
+        `表=${hvCostTableText.replace(/\n/g, ' / ')}`,
+      )
+      // 数値が1つにまとまっているか＝のべ食数が「作った記録ぶん＋これから作るぶん」になっているか。
+      // 片方しか数えていなければ、この数は必ず小さくなる
+      const hvMealsShown = Number(
+        (hvCostTableText.match(/のべ\s*([\d,]+)\s*食/)?.[1] ?? '').replaceAll(',', ''),
+      )
+      check(
+        'HV-01(⑧⑨) 「全員分」ののべ食数が、作った記録ぶんと作る予定ぶんを足した数になっている',
+        Number.isFinite(hvMealsShown) &&
+          hvMealsShown === hvSeed.cookedServings + hvSeed.plannedServings,
+        `画面=${hvMealsShown} 期待=${hvSeed.cookedServings}+${hvSeed.plannedServings}=${hvSeed.cookedServings + hvSeed.plannedServings}`,
+      )
+      const hvTableYen = Number(
+        (hvCostTableText.match(/全員分[\s\S]{0,20}?約([\d,]+)円/)?.[1] ?? '').replaceAll(',', ''),
+      )
+      check(
+        'HV-01(⑨) 畳んだときの金額は、開いたときの表の「全員分」と同じ値',
+        Number.isFinite(hvTableYen) && hvTableYen > 0 && hvTableYen === hvFoldedCostYen,
+        `畳んだ=${hvFoldedCostYen} 表=${hvTableYen}`,
+      )
+
+      // ===== (3) ⑪ ボタン名 =====
+      check(
+        'HV-01(⑪) 月タブのボタン名が「献立をまとめて提案」になっている',
+        (await hvPage.getByRole('button', { name: ja.mealPlan.fillMonth, exact: true }).count()) === 1,
+      )
+      check(
+        'HV-01(⑪) どこに入るかの説明はボタンのそばに残っている',
+        ((await hvPage.textContent('body')) ?? '')
+          .replaceAll('​', '')
+          .includes(ja.mealPlan.fillMonthHint),
+      )
+      await hvContext.close()
+
+      // ===== (4) ⑥の線引き: 無料のままでは栄養8項目が見えない =====
+      const hvFreeContext = await hvBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const hvFreePage = await hvFreeContext.newPage()
+      hvFreePage.on('pageerror', (err) => errors.push(`[pageerror@HV-01free] ${err.message}`))
+      await hvFreePage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await hvFreePage.waitForTimeout(2200)
+      await hvFreePage.getByRole('button', { name: '月', exact: true }).first().click()
+      await hvFreePage.waitForTimeout(1000)
+      const hvFreeBody = ((await hvFreePage.textContent('body')) ?? '').replaceAll('​', '')
+      check(
+        'HV-01(⑥) 準備: 無料のままだと月の画面は鍵の案内になっている',
+        hvFreeBody.includes(ja.mealPlan.monthLockedTitle),
+        `本文=${hvFreeBody.slice(0, 160)}`,
+      )
+      const hvProOnlyNutrients = NUTRITION_DISPLAY_KEYS.filter((key) => key !== 'kcal').map((key) =>
+        nutritionLabelFor(key),
+      )
+      check(
+        'HV-01(⑥) 無料のままでは、カレンダーの栄養の選択欄もPro側の栄養の名前も出ない',
+        (await hvFreePage.locator('[data-testid="month-cell-nutrient"]').count()) === 0 &&
+          hvProOnlyNutrients.every((label) => !hvFreeBody.includes(label)),
+        `出ていた項目=${hvProOnlyNutrients.filter((label) => hvFreeBody.includes(label)).join('/') || 'なし'}`,
+      )
+      await hvFreeContext.close()
+    } finally {
+      await hvBrowser.close()
     }
   }
 

@@ -97,6 +97,26 @@ export const NUTRITION_DISPLAY_KEYS: readonly (keyof NutrientTotals)[] = [
 ]
 
 /**
+ * 栄養表示の既定の項目（2026-08-19 便HV・⑥）。
+ * 無料/Proの線引き（docs/08・線引きB'）で**無料側にあるのはエネルギーだけ**なので、
+ * 「何も選んでいないとき」は必ずここに落ちる。
+ */
+export const DEFAULT_NUTRITION_DISPLAY_KEY: keyof NutrientTotals = 'kcal'
+
+/**
+ * 保存されている栄養項目の指定を、必ず表示できる項目に落とす（2026-08-19 便HV・⑥）。
+ * 端末に古い値・知らない値が残っていても画面が壊れないようにするための入口
+ * （項目を減らしたときに、その項目を選んだままの端末が黙って空になるのを防ぐ）。
+ */
+export function resolveNutritionDisplayKey(
+  saved: string | null | undefined,
+): keyof NutrientTotals {
+  return (NUTRITION_DISPLAY_KEYS as readonly string[]).includes(saved ?? '')
+    ? (saved as keyof NutrientTotals)
+    : DEFAULT_NUTRITION_DISPLAY_KEY
+}
+
+/**
  * 栄養項目の画面に出す名前（2026-08-19 便HU・⑯）。
  * 表示と並び替えで違う名前を出さないよう、名前もここに集約する
  * （並び替えが「糖質」、表示が「炭水化物」と食い違っていた。中身は炭水化物=CHOCDF-）。

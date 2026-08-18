@@ -160,6 +160,10 @@ import {
   roundNutrient,
   isNutritionUnlocked,
   nutritionSourceName,
+  nutritionLabelFor,
+  nutritionUnitFor,
+  resolveNutritionDisplayKey,
+  NUTRITION_DISPLAY_KEYS,
   type NutrientTotals,
 } from '../logic/nutrition'
 import {
@@ -176,13 +180,11 @@ import {
   slotBalances,
   summarizeWeekBalance,
   purposePenalty,
-  reviewPurposeDays,
   riceServingRecipes,
   riceSlotKey,
   riceSlotKeysOf,
   riceServingsByDate,
   type RiceSlotInput,
-  PURPOSE_NUTRIENT_KEY,
   RICE_SERVING_RECIPE,
   type BalanceDish,
   type BalanceRecipeLike,
@@ -324,30 +326,6 @@ const PURPOSE_LABEL: Record<MealPurpose, string> = {
   lowSalt: ja.mealPlan.purposeLowSalt,
 }
 const purposeLabelOf = (purpose: MealPurpose): string => PURPOSE_LABEL[purpose]
-
-/** 目的の軸になっている栄養素の表示名（月タブの答え合わせで数値に添える） */
-const PURPOSE_NUTRIENT_LABEL: Record<MealPurpose, string> = {
-  protein: ja.nutrition.proteinLabel,
-  fiber: ja.nutrition.fiberLabel,
-  iron: ja.nutrition.ironLabel,
-  calcium: ja.nutrition.calciumLabel,
-  lowEnergy: ja.nutrition.kcalLabel,
-  lowFat: ja.nutrition.fatLabel,
-  lowCarb: ja.nutrition.carbLabel,
-  lowSalt: ja.nutrition.saltLabel,
-}
-const purposeNutrientLabelOf = (purpose: MealPurpose): string => PURPOSE_NUTRIENT_LABEL[purpose]
-
-/**
- * 目的の軸の単位（2026-08-07 便DT-9）。軸が8つになり g だけではなくなったので、
- * 数値に添える単位も軸から引く（栄養パネルの formatNutrient と同じ対応にそろえる）。
- */
-const purposeUnitOf = (purpose: MealPurpose): string => {
-  const key = PURPOSE_NUTRIENT_KEY[purpose]
-  if (key === 'kcal') return ja.nutrition.kcalUnit
-  if (key === 'ironMg' || key === 'calciumMg') return ja.nutrition.mgUnit
-  return ja.nutrition.gramUnit
-}
 
 /** レシピ選択ピッカーの絞り込み・並び替え（2026-07-24 便BH-3・タスク6: 一覧画面の機構を流用）。
  * 栄養並び替え（Pro機能）は複雑なのでピッカーには出さず、基本の並び替えだけを提供する */
@@ -927,16 +905,19 @@ type IntakeCostRow = {
  * 食費の表（2026-08-03 便DR）。月タブの常設カードと、期間を選んで見る集計カードで共用する。
  * オーナー指示「ここでユーザーが見たいのは数値です」(便DQ)の体裁＝項目/金額/食数の3列を1か所で守り、
  * どの行を出すかだけを呼び出し側が決める（月＝その月ぜんぶ・期間＝選んだ範囲で行の中身が違うため）。
- * これから作る予定は、実績と混ざらないよう必ず表の下段（別のtbody）に分ける。
+ *
+ * 2026-08-19 便HV（オーナー書き溜め⑧⑨「過去と未来に分けない表示のみでいいのでは？
+ * 過去の数値が知りたい人は過去の期間のみで絞り込みするし、これからの予算が知りたい人も然り。
+ * その方が表示がシンプルでわかりやすいと思う」）: 表の下段に分けていた
+ * 「これから作る予定」をやめ、行は1組だけにした。金額も食数も、作った記録ぶんと
+ * これから作る予定ぶんを足した1つの数字を出す（logic/rangeSummary.ts の householdYen/mealCount）。
  */
 function IntakeCostTable({
   testId,
   rows,
-  planRows,
 }: {
   testId: string
   rows: IntakeCostRow[]
-  planRows: IntakeCostRow[]
 }) {
   const renderRow = (row: IntakeCostRow) => {
     const divided = row.note.split('÷')
@@ -987,27 +968,6 @@ function IntakeCostTable({
         </tr>
       </thead>
       <tbody>{rows.map(renderRow)}</tbody>
-      {planRows.length > 0 && (
-        <tbody>
-          {/* 2026-08-07 便DU(オーナー指示「『これから作る予定』の上に隙間を空ける」＝
-              過ぎた日ぶんの実績と、今日から先の予定の境目を目で分ける)。
-              表の行なので余白そのものを持つ空の行を1本入れる（見出しのpaddingだけだと
-              上の罫線が見出しに近いままで、境目が分かれて見えない） */}
-          <tr aria-hidden>
-            <td colSpan={3} className="h-[var(--space-lg)]" />
-          </tr>
-          <tr>
-            <th
-              scope="rowgroup"
-              colSpan={3}
-              className="pb-1 text-left text-xs font-bold text-ink-muted"
-            >
-              {ja.mealPlan.intakeCostPlanGroup}
-            </th>
-          </tr>
-          {planRows.map(renderRow)}
-        </tbody>
-      )}
     </table>
   )
 }
@@ -1180,6 +1140,7 @@ function MonthDayCell({
   isToday,
   inRange,
   mode,
+  nutrient,
   stat,
   showPlanDot,
   planPreview,
@@ -1196,6 +1157,8 @@ function MonthDayCell({
   inRange: boolean
   /** セルに出す情報(便CA・タスク2)。既定は 'photo' */
   mode: MonthCellMode
+  /** 'nutrition' のときにマスへ出す栄養の項目(2026-08-19 便HV・⑥。既定はエネルギー) */
+  nutrient: keyof NutrientTotals
   /** 'nutrition'/'cost' のときに出す、その日の1人分の数字(無い日はundefined) */
   stat?: DayIntake
   showPlanDot: boolean
@@ -1229,17 +1192,20 @@ function MonthDayCell({
   if (mode !== 'photo') {
     // 7列のセルは375px幅で約46px。「498kcal」を1行に入れると途中で切れるので、
     // 数字の下に単位だけを小さく置く(2026-08-08 便EA・オーナー「なんの栄養価かわからない」)。
-    // 項目名(エネルギー)は幅に入らないので、ボタンのすぐ下の凡例と読み上げ(aria-label)が言う
+    // 項目名(エネルギー/たんぱく質…)は幅に入らないので、ボタンのすぐ下の凡例と
+    // 読み上げ(aria-label)が言う。
+    // 2026-08-19 便HV・⑥: 出す栄養の項目を選べるようにしたので、丸め方も単位も項目から引く
+    // (栄養カードの formatNutrient / 並び替えの単位とまったく同じ1か所から取る)
     const cellText = stat
       ? mode === 'nutrition'
-        ? Math.round(stat.kcal).toLocaleString()
+        ? roundNutrient(nutrient, stat.nutrition[nutrient]).toLocaleString()
         : stat.yen.toLocaleString()
       : null
     const cellUnit =
-      mode === 'nutrition' ? ja.mealPlan.monthCellKcalUnit : ja.mealPlan.monthCellYenUnit
+      mode === 'nutrition' ? nutritionUnitFor(nutrient) : ja.mealPlan.monthCellYenUnit
     const value = stat
       ? mode === 'nutrition'
-        ? ja.mealPlan.monthCellKcal.replace('{n}', Math.round(stat.kcal).toLocaleString())
+        ? formatNutrient(nutrient, stat.nutrition[nutrient])
         : ja.mealPlan.monthCellYen.replace('{n}', stat.yen.toLocaleString())
       : null
     const ariaTemplate = !stat
@@ -1587,7 +1553,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 献立のロック（2026-08-08 便DX・オーナー指示）。
    * 鍵の掛かっている食事（'日付|食事'）は、自動でまとめて動かす操作
    * （まとめて献立を入力・テンプレートを適用・先週の献立をコピー・まとめて空にする・
-   * 月タブの未定の日をまとめて提案）の対象から外れる。手での追加・差し替え・削除は自由。
+   * 月タブの献立をまとめて提案）の対象から外れる。手での追加・差し替え・削除は自由。
    * 期間で切らず全件を読む＝週・月・日の窓のどこから見ても同じ鍵を見るため
    * （1件が数十バイトの小さな表で、掛けた食事のぶんしか行が無い）。
    */
@@ -2185,52 +2151,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const [monthCostCardOpen, setMonthCostCardOpen] = useState(false)
   const [monthNutritionCardOpen, setMonthNutritionCardOpen] = useState(false)
 
-  /**
-   * 月タブの「答え合わせ」（2026-08-02 便CP-2・docs/62 決定②）。
-   * 目的を指定して組んだ日が、この月に何日あったか＝献立エントリに残した purpose から数える。
-   * 同じ日に複数の目的が混ざることは通常ないが、混ざったら最後に入った枠の目的を採る
-   * （日単位の事実表示なので1日1つに決める。どちらでも「その日は目的から組んだ」ことに変わりはない）。
-   */
-  const monthPurposeByDate = useMemo(() => {
-    const map = new Map<string, MealPurpose>()
-    monthEntries?.forEach((e) => {
-      if (e.purpose) map.set(e.date, e.purpose)
-    })
-    return map
-  }, [monthEntries])
-  // 日ごとの合計は週タブと同じ dayBalanceMap（過去日=作った記録・今日以降=登録した献立）で出す
-  const monthBalanceCooked = useMemo<BalanceDish[]>(() => {
-    const list: BalanceDish[] = []
-    const prefix = monthAnchor.slice(0, 7)
-    cookedLogsByDate.forEach((logs, date) => {
-      if (!date.startsWith(prefix)) return
-      logs.forEach(({ recipe }) =>
-        list.push({ date, recipe, matchKey: balanceMatchKey(recipe.id) }),
-      )
-    })
-    return list
-  }, [cookedLogsByDate, monthAnchor])
-  const monthBalancePlanned = useMemo<BalanceDish[]>(() => {
-    const list: BalanceDish[] = []
-    monthEntries?.forEach((e) => {
-      const recipe = recipeById.get(e.recipeId)
-      if (recipe) list.push({ date: e.date, recipe, matchKey: balanceMatchKey(e.recipeId) })
-    })
-    return list
-  }, [monthEntries, recipeById])
-  const monthPurposeReviews = useMemo(() => {
-    if (monthPurposeByDate.size === 0) return []
-    const byDate = dayBalanceMap({
-      dates: monthDatesList,
-      today,
-      cooked: monthBalanceCooked,
-      planned: monthBalancePlanned,
-    })
-    return reviewPurposeDays(byDate.values(), monthPurposeByDate)
-  }, [monthPurposeByDate, monthDatesList, today, monthBalanceCooked, monthBalancePlanned])
-
   // 月カレンダーのセル表示(便CA・タスク2): 既定は写真。栄養/食費モードのときだけ日ごとの1人分を計算する
   const monthCellMode: MonthCellMode = settings?.monthCellMode ?? 'photo'
+  // マスに出す栄養の項目(2026-08-19 便HV・⑥)。未設定・知らない値はエネルギーに落ちる
+  const monthCellNutrient = resolveNutritionDisplayKey(settings?.monthCellNutrient)
   const monthDayStats = useMemo(() => {
     if (monthCellMode === 'photo') return new Map<string, DayIntake>()
     return dayIntakeMap({
@@ -5615,7 +5539,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   /**
    * 自動提案の条件（時短優先・ジャンル）の折りたたみ。
    * 2026-07-30 便CH/C11: 週タブの中にしか無かったが、この3つの条件は月タブの
-   * 「未定の日をまとめて提案」にも100%効いている（executeFillが同じ値を読む）。
+   * 「献立をまとめて提案」にも100%効いている（executeFillが同じ値を読む）。
    * 月から条件が見えず変えられないため、「なぜ月が全部中華になったのか」が画面から分からなかった。
    * 同じ部品を週・月の両方で出す＝どちらから見ても今の条件が分かり、その場で変えられる。
    *
@@ -6302,15 +6226,50 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </button>
                 ))}
               </div>
-              {/* 選んだモードの説明(便DU)。栄養・食費は「その日に1人が食べる分」であることと、
-                  過ぎた日／今日から先で数え方が変わることまで言い切る */}
+              {/* 選んだモードの説明(便DU)。
+                  2026-08-19 便HV・⑩(オーナー原文「カレンダー自体が過去は記録のみ、未来は予定のみ、
+                  当日は両方を表示しています。説明が長いので、数値が概算であることと1日分の
+                  数値であることの説明のみで良いのでは？」): 数え方の説明はカレンダーそのものが
+                  示しているので落とし、概算であることと「その日に1人が食べる分」だけを言う */}
               <p className="mt-1 text-xs text-ink-muted">
                 {monthCellMode === 'nutrition'
                   ? ja.mealPlan.monthCellNutritionLegend
+                      .replace('{name}', nutritionLabelFor(monthCellNutrient))
+                      .replace('{unit}', nutritionUnitFor(monthCellNutrient))
                   : monthCellMode === 'cost'
                     ? ja.mealPlan.monthCellCostLegend
                     : ja.mealPlan.monthCellModePhotoLegend}
               </p>
+              {/* マスに出す栄養の項目(2026-08-19 便HV・⑥・オーナー指示「カレンダーに移す情報が
+                  栄養の時、基本はカロリーのまま、他の栄養表示も選択で見られるようにして」)。
+                  既定は従来どおりエネルギー。顔ぶれ・並び・名前は栄養価の表示と同じ1か所
+                  (NUTRITION_DISPLAY_KEYS)から引く＝便HU・⑯でそろえた並び替えとも同じになる。
+                  無料/Proの線引きは動かしていない: この「栄養」モード自体が栄養の解錠済み
+                  (isNutritionUnlocked)のときしか出ないので、無料のままでは8項目のどれも見えない。
+                  写真モードの「レシピの写真は使わない」と同じ位置・同じ作りで置く */}
+              {monthCellMode === 'nutrition' && (
+                <label className="mt-[var(--space-sm)] block">
+                  <span className="block text-xs font-bold text-ink-muted">
+                    {ja.mealPlan.monthCellNutrientLabel}
+                  </span>
+                  <select
+                    data-testid="month-cell-nutrient"
+                    value={monthCellNutrient}
+                    onChange={(e) =>
+                      saveSettings({
+                        monthCellNutrient: resolveNutritionDisplayKey(e.target.value),
+                      })
+                    }
+                    className="select-control mt-1 w-full"
+                  >
+                    {NUTRITION_DISPLAY_KEYS.map((key) => (
+                      <option key={key} value={key}>
+                        {nutritionLabelFor(key)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {/* 写真の出どころの切り替え(2026-08-07 便DU・オーナー指示)。
                   カレンダーの写真は「作った記録の写真 ＞ レシピに登録した写真」の順で選ぶが、
                   レシピの写真を代用に使いたくない人のために、使わない選択肢を置く。
@@ -6418,6 +6377,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     isToday={date === today}
                     inRange={!!inRange}
                     mode={monthCellMode}
+                    nutrient={monthCellNutrient}
                     stat={monthDayStats.get(date)}
                     showPlanDot={monthDaysWithPlan.has(date) && !isPastDate(date, today)}
                     planPreview={monthDayPreview.get(date)}
@@ -6477,6 +6437,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         {ja.nutrition.estimateBadge}
                       </span>
                     </div>
+                    {/* 2026-08-19 便HV・⑧: 過去と未来で行を分けない。
+                        「全員分」は作った食数ぶんと作る食数ぶんを足した1つの金額 */}
                     <IntakeCostTable
                       testId="range-cost-table"
                       rows={[
@@ -6491,52 +6453,26 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         },
                         {
                           // 1つ上の「1人分」を、選んだ日数で割った値。月の表の同じ行は
-                          // 「全員分÷作った記録のある日数」なので、分母を書いて別物だと分かるようにする
+                          // 「全員分÷記録か献立のある日数」なので、分母を書いて別物だと分かるようにする
                           label: ja.mealPlan.intakeCostRowPerDay,
                           note: ja.mealPlan.rangeCostRowPerDayNote.replace('{d}', String(rangeDays)),
                           yen: rangePersonalPerDay,
                           meals: null,
                         },
-                        ...(rangeSummary.cookedMealCount > 0
+                        ...(rangeSummary.mealCount > 0
                           ? [
                               {
                                 label: ja.mealPlan.intakeCostRowHousehold,
                                 note: ja.mealPlan.intakeCostRowHouseholdNote,
-                                yen: rangeSummary.cookedHouseholdYen,
+                                yen: rangeSummary.householdYen,
                                 meals: ja.mealPlan.intakeCostMealsTotal.replace(
                                   '{n}',
-                                  String(rangeSummary.cookedMealCount),
+                                  String(rangeSummary.mealCount),
                                 ),
                               },
                             ]
                           : []),
                       ]}
-                      /* これから作る予定(今日から先)は実績と混ざらないよう表の下段に分ける
-                         (2026-08-03 便DK・月タブと同じ) */
-                      planRows={
-                        rangeSummary.planMealCount > 0
-                          ? [
-                              {
-                                label: ja.mealPlan.intakeCostRowHousehold,
-                                note: ja.mealPlan.intakeCostRowPlanHouseholdNote,
-                                yen: rangeSummary.planHouseholdYen,
-                                meals: ja.mealPlan.intakeCostMealsTotal.replace(
-                                  '{n}',
-                                  String(rangeSummary.planMealCount),
-                                ),
-                              },
-                              {
-                                label: ja.mealPlan.intakeCostRowPersonal,
-                                note: ja.mealPlan.intakeCostRowPersonalNote,
-                                yen: rangeSummary.plan.personalYen,
-                                meals: ja.mealPlan.intakeCostMeals.replace(
-                                  '{n}',
-                                  String(rangeSummary.plan.dishCount),
-                                ),
-                              },
-                            ]
-                          : []
-                      }
                     />
                     {/* 数字の前提(何をもとにした概算か)は月タブと同じ場所・同じ文言で出す */}
                     <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
@@ -6603,9 +6539,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 open={monthCostCardOpen}
                 onToggle={() => setMonthCostCardOpen((v) => !v)}
               />
-              {/* 畳んでいるときも金額は全部読めるようにする(2026-08-08 オーナー実機フィードバック)。
-                  出す金額は開いたときの表とまったく同じ値で、数え方の但し書き・内訳だけを
-                  開いたときに回す */}
+              {/* 畳んでいるときに出すのは食費の合計1つだけ(2026-08-19 便HV・⑨・オーナー原文
+                  「折りたたんだ時に表示する内容も、食費：全部の合計、栄養：カロリーの合計のみにし、
+                  現在折りたたみでも見えている部分（と内訳と注記出典）が開いた時に出てくるだけで
+                  情報は十分」)。出す金額は開いたときの表の「全員分」とまったく同じ値で、
+                  1人分・1日あたりの平均・数え方の但し書き・内訳は開いたときに回す */}
               {!monthCostCardOpen &&
                 (monthSummaryDishCount === 0 ? (
                   <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthSummaryEmpty}</p>
@@ -6614,37 +6552,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     testId="month-cost-folded"
                     items={[
                       {
-                        label: ja.mealPlan.intakeCostRowPersonal,
-                        yen: monthSummary.personalYen,
+                        label: ja.mealPlan.intakeCostRowHousehold,
+                        value: ja.mealPlan.intakeCostYen.replace(
+                          '{n}',
+                          monthSummary.householdYen.toLocaleString(),
+                        ),
                       },
-                      ...(monthSummary.cookedMealCount > 0
-                        ? [
-                            {
-                              label: ja.mealPlan.intakeCostRowHousehold,
-                              yen: monthSummary.cookedHouseholdYen,
-                            },
-                            {
-                              label: ja.mealPlan.intakeCostRowPerDay,
-                              yen: monthSummary.cookedPerDayYen,
-                            },
-                          ]
-                        : []),
-                      ...(monthSummary.planMealCount > 0
-                        ? [
-                            {
-                              label: ja.mealPlan.monthFoldedPlanHousehold,
-                              yen: monthSummary.planHouseholdYen,
-                            },
-                            {
-                              label: ja.mealPlan.monthFoldedPlanPersonal,
-                              yen: monthSummary.plan.personalYen,
-                            },
-                          ]
-                        : []),
-                    ].map(({ label, yen }) => ({
-                      label,
-                      value: ja.mealPlan.intakeCostYen.replace('{n}', yen.toLocaleString()),
-                    }))}
+                    ]}
                   />
                 ))}
               <Collapse open={monthCostCardOpen}>
@@ -6657,11 +6571,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 <>
                   {/* 行の見出し＝何の数字か、その下の小さい字＝数え方。
                       「1人分」は月ぜんぶ(過ぎた日の記録＋今日から先の献立)を1食ずつ足した合計、
-                      「全員分」は作った記録だけ＝実際に出ていった食費、と対象が違うので必ず書く。
-                      「1日あたりの平均」は1つ上の「全員分」を作った記録がある日数で割った値で、
+                      「全員分」は作った食数・これから作る食数ぶん＝実際に出ていく食費、と
+                      対象が違うので必ず書く。
+                      「1日あたりの平均」は1つ上の「全員分」を、記録か献立のある日数で割った値で、
                       分母を行に書いて画面の上だけで検算できるようにする
                       (暦日数で割らない理由はrangeSummary規則4)。
-                      作った記録が1件も無い月(未来の月など)は実績の行ごと出さない */}
+                      2026-08-19 便HV・⑨: 過去と未来で行を分けない(下段の「これから作る予定」を廃止)。
+                      記録も献立も無い月は、割り算の行だけを出さない(0で割らない) */}
                   <IntakeCostTable
                     testId="month-cost-table"
                     rows={[
@@ -6674,56 +6590,33 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           String(monthSummaryDishCount),
                         ),
                       },
-                      ...(monthSummary.cookedMealCount > 0
+                      ...(monthSummary.mealCount > 0
                         ? [
                             {
                               label: ja.mealPlan.intakeCostRowHousehold,
                               note: ja.mealPlan.intakeCostRowHouseholdNote,
-                              yen: monthSummary.cookedHouseholdYen,
+                              yen: monthSummary.householdYen,
                               meals: ja.mealPlan.intakeCostMealsTotal.replace(
                                 '{n}',
-                                String(monthSummary.cookedMealCount),
+                                String(monthSummary.mealCount),
                               ),
                             },
+                          ]
+                        : []),
+                      ...(monthSummary.dayCount > 0
+                        ? [
                             {
                               label: ja.mealPlan.intakeCostRowPerDay,
                               note: ja.mealPlan.monthCostRowPerDayNote.replace(
                                 '{d}',
-                                String(monthSummary.cookedDayCount),
+                                String(monthSummary.dayCount),
                               ),
-                              yen: monthSummary.cookedPerDayYen,
+                              yen: monthSummary.perDayYen,
                               meals: null,
                             },
                           ]
                         : []),
                     ]}
-                    /* これから作る予定(今日から先)は実績と混ざらないよう表の下段に分ける
-                       (オーナー指示「予定は合計と一人当たりの合計を下に」)。
-                       合計＝実際に作る食数ぶん、一人当たり＝献立を1食ずつ足した合計 */
-                    planRows={
-                      monthSummary.planMealCount > 0
-                        ? [
-                            {
-                              label: ja.mealPlan.intakeCostRowHousehold,
-                              note: ja.mealPlan.intakeCostRowPlanHouseholdNote,
-                              yen: monthSummary.planHouseholdYen,
-                              meals: ja.mealPlan.intakeCostMealsTotal.replace(
-                                '{n}',
-                                String(monthSummary.planMealCount),
-                              ),
-                            },
-                            {
-                              label: ja.mealPlan.intakeCostRowPersonal,
-                              note: ja.mealPlan.intakeCostRowPersonalNote,
-                              yen: monthSummary.plan.personalYen,
-                              meals: ja.mealPlan.intakeCostMeals.replace(
-                                '{n}',
-                                String(monthSummary.plan.dishCount),
-                              ),
-                            },
-                          ]
-                        : []
-                    }
                   />
                   {/* どの日をどちらの基準で数えたかは、期間の集計カードと同じ文言で必ず出す */}
                   <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
@@ -6753,10 +6646,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 月の栄養(2026-08-03 便DQで食費と分離)。8項目の数値はカードを開けば畳まずに出し、
                 長い但し書きと出典だけをさらに折りたたみへ回す(規約H)。
                 Pro解錠時のみ(既存のゲートと同じisNutritionUnlocked判定)。
-                目的モードの「答え合わせ」も栄養の数字なのでこのカードに置く。
-                2026-08-07 便DU(オーナー指示): カレンダーの下へ移し、カード自体を折りたたみにした */}
-            {isNutritionUnlocked(monthUnlocked) &&
-              (monthSummary.nutrition.dishCount > 0 || monthPurposeReviews.length > 0) && (
+                2026-08-07 便DU(オーナー指示): カレンダーの下へ移し、カード自体を折りたたみにした。
+                2026-08-19 便HV・⑨(オーナー原文「『この月の栄養から組む』もいらない」):
+                目的モードの「答え合わせ」をこのカードから外した(下の削除メモ参照) */}
+            {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
                 <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
                   <MonthCardHeader
                     title={ja.mealPlan.monthNutritionTitle.replace(
@@ -6766,72 +6659,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     open={monthNutritionCardOpen}
                     onToggle={() => setMonthNutritionCardOpen((v) => !v)}
                   />
-                  {/* 畳んでいるときも1か月ぶんの栄養（1人分・8項目）を読めるようにする
-                      (2026-08-08 オーナー実機フィードバック)。値は開いたときの栄養パネルと同じ。
-                      計算できた品数・除いた品数の注記と「答え合わせ」は開いたときに回す */}
-                  {!monthNutritionCardOpen && monthSummary.nutrition.dishCount > 0 && (
+                  {/* 畳んでいるときに出すのはエネルギーの合計1つだけ(2026-08-19 便HV・⑨・
+                      オーナー原文「栄養：カロリーの合計のみにし」)。残る7項目・計算できた品数の
+                      注記・出典は、カードを開いたときに出る */}
+                  {!monthNutritionCardOpen && (
                     <MonthFoldedFigures
                       testId="month-nutrition-folded"
-                      items={PERIOD_NUTRIENT_ROWS.map(({ key, label }) => ({
-                        label,
-                        value: formatNutrient(key, monthSummary.nutrition.total[key]),
-                      }))}
+                      items={[
+                        {
+                          label: ja.nutrition.kcalLabel,
+                          value: formatNutrient('kcal', monthSummary.nutrition.total.kcal),
+                        },
+                      ]}
                     />
                   )}
                   <Collapse open={monthNutritionCardOpen}>
                   <>
                   {monthSummary.nutrition.dishCount > 0 && (
-                    <div className="mt-[var(--space-sm)]">
+                    <div className="mt-[var(--space-sm)]" data-testid="month-nutrition-panel">
                       <IntakeNutritionPanel summary={monthSummary} notes="brief" />
                     </div>
                   )}
 
-                  {/* 目的モードの「答え合わせ」(2026-08-02 便CP-2・docs/62 決定②)。
-                      目的を指定して組んだ日がこの月に1日もなければ、この節ごと出さない。
-                      出すのは事実だけ＝日数と、1日あたりの数字の並置。達成/未達の判定はせず、
-                      色分けもしない(docs/60 §1-3 の文言規律。「多い方がよい」とも言わない) */}
-                  {monthPurposeReviews.length > 0 && (
-                    <section
-                      data-testid="purpose-review"
-                      className="mt-[var(--space-sm)] rounded-sm border border-edge bg-app p-[var(--space-sm)]"
-                    >
-                      <h3 className="text-sm font-bold">{ja.mealPlan.purposeReviewTitle}</h3>
-                      {monthPurposeReviews.map((review) => {
-                        const key = PURPOSE_NUTRIENT_KEY[review.purpose]
-                        const nutrient = purposeNutrientLabelOf(review.purpose)
-                        // 2026-08-07 便DT-9: 軸が8つ(g/mg/kcal)になったので単位も軸から引く
-                        const purposeUnit = purposeUnitOf(review.purpose)
-                        return (
-                          <div key={review.purpose} className="mt-1">
-                            <p className="text-sm tabular-nums">
-                              {ja.mealPlan.purposeReviewDays
-                                .replace('{purpose}', purposeLabelOf(review.purpose))
-                                .replace('{n}', String(review.days))
-                                .replace('{total}', String(review.totalDays))}
-                            </p>
-                            {review.averageWith != null && (
-                              <p className="mt-0.5 text-xs text-ink-muted tabular-nums">
-                                {review.averageWithout != null
-                                  ? ja.mealPlan.purposeReviewAverage
-                                      .replace('{nutrient}', nutrient)
-                                      .replace('{a}', String(roundNutrient(key, review.averageWith)))
-                                      .replace(
-                                        '{b}',
-                                        String(roundNutrient(key, review.averageWithout)),
-                                      )
-                                      .replaceAll('{unit}', purposeUnit)
-                                  : ja.mealPlan.purposeReviewAverageOnly
-                                      .replace('{nutrient}', nutrient)
-                                      .replace('{a}', String(roundNutrient(key, review.averageWith)))
-                                      .replaceAll('{unit}', purposeUnit)}
-                              </p>
-                            )}
-                          </div>
-                        )
-                      })}
-                      <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeReviewNote}</p>
-                    </section>
-                  )}
+                  {/* 目的モードの「答え合わせ」(旧「この月の『栄養から組む』」・2026-08-02 便CP-2・
+                      docs/62 決定②)は、2026-08-19 便HV・⑨のオーナー指示で削除した。
+                      失われるのは**この月の振り返りの表示だけ**で、「栄養から組む」の機能そのもの
+                      (提案が選んだ栄養に沿う組み方・献立の枠に purpose を残すこと)は変えていない。
+                      集計そのもの(logic/nutritionBalance.ts の reviewPurposeDays)は他から呼ばれて
+                      いないため、この画面を消せば表示は完全に無くなる(データは残る) */}
                   <IntakeDisclosureButton
                     open={monthNutritionNotesOpen}
                     onToggle={() => setMonthNutritionNotesOpen((v) => !v)}
@@ -6848,7 +6703,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 </section>
               )}
 
-            {/* 自動提案の条件(2026-07-30 便CH/C11)。この条件は月の「未定の日をまとめて提案」にも
+            {/* 自動提案の条件(2026-07-30 便CH/C11)。この条件は月の「献立をまとめて提案」にも
                 そのまま効く(週タブでしか変えられず、月が全部同じジャンルになる理由が
                 画面から分からなかった)。週タブと同じ部品・同じ状態を共有する。
                 サンプルデモには献立を書き換える操作を出さないので、その条件も出さない */}
