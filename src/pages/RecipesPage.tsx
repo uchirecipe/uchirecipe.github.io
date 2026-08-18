@@ -39,6 +39,7 @@ import { addRecipesToToday } from '../db/mealPlan'
 import { todayString } from '../logic/date'
 import TodaySlotModal from '../components/TodaySlotModal'
 import type { MealSlot, RecipeListLayout } from '../db/types'
+import { densityForListLayout } from '../logic/cardDensity'
 import { usePantryItems } from '../db/pantry'
 import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
@@ -1588,7 +1589,9 @@ export default function RecipesPage() {
             >
               <RecipeCard
                 recipe={recipe}
-                layout={recipeListLayout}
+                // 設定に保存している表示形式('grid'|'list')を、共通カードの「密度」に写して渡す
+                // (2026-08-18 便HN)。写し方は logic/cardDensity.ts の1か所だけに置く
+                density={densityForListLayout(recipeListLayout)}
                 ngIngredients={ngIngredients}
                 subLabel={subLabelFor(usedCount, wantedCount)}
                 inTodayList={todayRecipeIds.has(recipe.id!)}

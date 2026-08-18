@@ -17,6 +17,7 @@ import { hasNgIngredient } from '../logic/ng'
 import { resolveIconKey } from '../logic/icon'
 import { ingredientColorToken } from '../logic/ingredientColor'
 import { pickDisplayIngredientChips } from '../logic/mainIngredients'
+import type { CardDensity } from '../logic/cardDensity'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
@@ -99,16 +100,24 @@ type Props = {
    */
   showQuickTime?: boolean
   /**
-   * 一覧の表示形式（2026-07-13 UI改善）。'list' のときは小さい写真＋タイトル＋
-   * 既存のメタ（時間・手間レベル・季節）だけの縦一列の行として表示する。省略時は従来どおりのグリッドカード
+   * カードの密度（2026-08-18 便HN。旧 layout='grid'|'list' を置き換えた）。
+   * 値の意味と「3つまで」の歯止めは src/logic/cardDensity.ts に書いてある。
+   *
+   *  large    … 正方形の写真＋料理名（2行ぶん）＋補助情報。旧 layout='grid' と同じ見た目。
+   *  standard … 中くらいのサムネ＋料理名（2行ぶん）＋補助情報の1行。旧 layout='list' と同じ見た目。
+   *  small    … 小さい絵＋料理名1行。週の枠・月のマスのように、1行ぶんの高さしか無い場所用。
+   *
+   * 旧 layout から名前を変えたのは、切り替えていたのが「並べ方」ではなく
+   * **1枚に載せる情報の多さ**だったため。設定に保存している 'grid'|'list' の値は変えていない
+   * （RecipesPage が densityForListLayout で写して渡す）。
    */
-  layout?: 'grid' | 'list'
+  density?: CardDensity
   /**
    * 栄養価並び替え中（Pro機能。2026-07-16 便T）に表示する、並び替えに使っている栄養価の値
    * （例:「カロリー: 320kcal」「たんぱく質: 18.5g」。ラベル+値の形式で呼び出し側(RecipesPage)が
    * 整形済みの文字列を渡す。2026-07-16オーナー指示でラベル付き表示に変更）。
-   * グリッド表示ではカード左上、一覧（list）表示では右下に出す。算出不能なレシピはRecipesPage側で
-   * undefinedのまま渡す（バッジ自体を出さない）
+   * 「大」ではカード左上、「標準」では行の右下に出す。「小」では出さない（幅に載らない）。
+   * 算出不能なレシピはRecipesPage側で undefinedのまま渡す（バッジ自体を出さない）
    */
   nutrientBadgeText?: string
 }
@@ -146,14 +155,19 @@ function FavoriteToggle({ recipe }: { recipe: Recipe }) {
   )
 }
 
-/** レシピ一覧のカード1枚分（写真＋名前＋時間・手間バッジ）。layout='list'なら縦一列の行表示 */
+/**
+ * レシピカード1枚分。密度（density）で載せる情報の多さを切り替える。
+ *  large    … 写真＋名前＋時間・手間バッジ（レシピ一覧のグリッド）
+ *  standard … サムネ＋名前＋同じバッジの1行（レシピ一覧の一覧表示）
+ *  small    … 小さい絵＋名前1行（週の枠・月のマスのような、狭い場所用）
+ */
 export default function RecipeCard({
   recipe,
   ngIngredients,
   subLabel,
   inTodayList,
   showQuickTime,
-  layout = 'grid',
+  density = 'large',
   nutrientBadgeText,
 }: Props) {
   const photoUrl = usePhotoUrl(recipe.photo)
@@ -175,7 +189,59 @@ export default function RecipeCard({
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
     : recipe.cookMinutes
 
-  if (layout === 'list') {
+  /**
+   * 「小」（2026-08-18 便HN）。週の枠・月のマスのように、**1行ぶんの高さしか無い**場所のための形。
+   *
+   * 絵は正方形で、カードの高さいっぱいに広がる（`aspect-square` ＋ 縦は伸ばす）。
+   * これで、同じ1つの書き方が入れ物に応じて2つの見え方になる:
+   *   ・週の枠のように高さが中身で決まる場所 … 絵は最低の高さ（32px）＝小さいサムネ＋名前1行
+   *   ・月のマスのように正方形の入れ物 ……… 絵がマス全体に広がり、名前は幅ゼロで出ない＝写真だけ
+   * 月のマス（390px幅の画面で実測47.7px角）に「サムネ＋名前」の1行を入れると
+   * 名前に十数pxしか残らないため、**入れ物側が正方形なら絵だけになる**のが正しい形になる。
+   *
+   * 載せるのは絵と名前だけ。時間・手間・季節・食材チップ・お気に入りは出さない
+   * （出すと1行に収まらず、狭い場所ほど読めなくなる）。NG食材の警告だけは安全に関わるので、
+   * 場所を取らない小さな印として角に重ねる。
+   */
+  if (density === 'small') {
+    return (
+      <Link
+        to={`/recipes/${recipe.id}`}
+        className="relative flex h-full min-h-8 w-full min-w-0 items-stretch gap-1 overflow-hidden rounded-sm border border-edge bg-surface"
+      >
+        {/* 絵は「カードの高さと同じ正方形」。h-full と min-h-8 の両方を書くのは、
+            高さの決まった入れ物（月のマス）では h-full が、高さが中身で決まる場所（週の枠）では
+            min-h-8 が、それぞれ正方形の一辺を決めるため。どちらか片方だけだと、
+            高さが決まらない側で幅が0になる（390px幅の実測で確認済み） */}
+        <span className="aspect-square h-full min-h-8 shrink-0 overflow-hidden">
+          {showPhoto ? (
+            <img
+              src={photoUrl}
+              alt={recipe.title}
+              onError={() => setPhotoBroken(true)}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <RecipePlaceholder recipe={recipe} iconSize={16} />
+          )}
+        </span>
+        <span className="min-w-0 flex-1 self-center truncate pr-1 text-sm font-bold leading-tight">
+          {recipe.title}
+        </span>
+        {hasNg && (
+          <span
+            title={ja.card.ngBadge}
+            aria-label={ja.card.ngBadge}
+            className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-app"
+          >
+            <TriangleAlert size={10} aria-hidden />
+          </span>
+        )}
+      </Link>
+    )
+  }
+
+  if (density === 'standard') {
     return (
       <Link
         to={`/recipes/${recipe.id}`}
@@ -263,7 +329,7 @@ export default function RecipeCard({
           )}
           {subLabel && <p className="mt-1 text-xs font-bold text-accent-ink">{subLabel}</p>}
         </div>
-        {/* 栄養価並び替え中の値(2026-07-16 便T-7): 一覧(list)表示は行の右下に重ねる。
+        {/* 栄養価並び替え中の値(2026-07-16 便T-7): 「標準」は行の右下に重ねる。
             便T-7-2でラベル付き表示("たんぱく質: 24g")に変更し長くなったため、max-width+truncateで
             カード幅を超えないようにする */}
         {nutrientBadgeText && (

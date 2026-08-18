@@ -1,0 +1,33 @@
+import type { RecipeListLayout } from '../db/types'
+
+/**
+ * レシピカードの「密度」（2026-08-18 便HN・オーナー指摘の1段目）。
+ *
+ * オーナー原文:
+ *   「場所や機能ごとにレシピカードの形や内容が変わっているのがみづらい。
+ *     パターン２つ（もしくは３つ）に絞って。」
+ *   「表記揺れを直すように、レシピカードなど、同じ情報なら形もできるだけ揃えることを徹底したい」
+ *
+ * 画面ごとに自前で描いていたカードを、共通部品（components/RecipeCard）の**1本の軸**に寄せる。
+ * 軸は「密度」だけで、値は次の3つ:
+ *
+ *   large    … 正方形の写真＋料理名（2行ぶん）＋時間・手間・季節。レシピ一覧のグリッド。
+ *   standard … 中くらいのサムネ＋料理名（2行ぶん）＋同じ補助情報の1行。レシピ一覧の一覧表示。
+ *   small    … 小さい絵＋料理名1行。入れ物が正方形なら絵が全面に広がり、名前は出ない。
+ *              週の枠・月のマスのように、1行ぶんの高さしか無い場所のための形。
+ *
+ * **値は3つまで**。4つ目を足したくなったら、それは「密度」以外の軸を混ぜてしまった合図なので、
+ * 足す前に設計を見直すこと（scripts/test-logic.mjs の HN-2 が数を見張っている）。
+ */
+export const CARD_DENSITIES = ['large', 'standard', 'small'] as const
+
+export type CardDensity = (typeof CARD_DENSITIES)[number]
+
+/**
+ * レシピ一覧の表示形式（設定に 'grid' | 'list' で保存している値）を密度に写す。
+ *
+ * 設定に入っている値の形は変えない＝端末に保存済みの設定をそのまま読める。
+ * 'grid' が large、'list' が standard で、**どちらも従来の見た目のまま**。
+ */
+export const densityForListLayout = (layout: RecipeListLayout): CardDensity =>
+  layout === 'list' ? 'standard' : 'large'

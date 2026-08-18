@@ -383,6 +383,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 import path from 'node:path'
+// 文言は src/i18n/ja.ts の1か所から読む（規約H。画面の字を書き写して二重管理しない）
+import { ja } from '../src/i18n/ja.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -35928,6 +35930,135 @@ try {
       }
     } finally {
       await s3Browser.close()
+    }
+  }
+
+  // --- CARDUNIFY-01: レシピカードの形は「密度」の3つだけ。レシピ一覧の見え方は変えない ---
+  // 2026-08-18 便HN・オーナー指摘(原文)「場所や機能ごとにレシピカードの形や内容が変わっているのが
+  // みづらい。パターン２つ（もしくは３つ）に絞って。」
+  // 「表記揺れを直すように、レシピカードなど、同じ情報なら形もできるだけ揃えることを徹底したい」
+  //
+  // 共通部品(components/RecipeCard)に密度(large/standard/small)を入れた1段目の見張り。
+  // 測るのは寸法の絶対値ではなく**形の決まりごと**にする(端末の文字サイズや写真で数値は動くため):
+  //   ・「大」(グリッド)  … 絵は正方形で、カードの幅いっぱい。料理名の枠は2行ぶんの高さを持つ
+  //   ・「標準」(一覧)    … 絵は正方形のサムネで、カードより小さい。名前は絵の横に来る
+  //   ・どちらも カード全体がレシピ詳細への1枚のリンク
+  //   ・表示形式を往復させても、グリッドの寸法がぴたりと元に戻る(切り替えが見た目を持ち帰らない)
+  currentCheck = 'CARDUNIFY-01'
+  {
+    const cuBrowser = await chromium.launch()
+    try {
+      const cuCtx = await cuBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const cuPage = await cuCtx.newPage()
+      cuPage.on('pageerror', (err) => errors.push(`[pageerror@CARDUNIFY-01] ${err.message}`))
+      await cuPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cuPage.waitForTimeout(2200) // 初回シード完了待ち
+
+      /** 先頭のカード1枚の形を測る。写真の有無で中身が変わらないよう、絵の枠(正方形の箱)を見る */
+      const cuShape = () =>
+        cuPage.evaluate(() => {
+          const card = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).find((a) =>
+            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+          )
+          if (!card) return null
+          const r = card.getBoundingClientRect()
+          // 絵の枠 = カードの中でいちばん大きい正方形の箱(写真でもアイコンの敷物でも同じ)
+          let art = null
+          for (const el of card.querySelectorAll('div, span')) {
+            const b = el.getBoundingClientRect()
+            if (b.width < 8 || Math.abs(b.width - b.height) > 1) continue
+            if (!art || b.width > art.width) art = b
+          }
+          const title = card.querySelector('p')
+          const tb = title?.getBoundingClientRect()
+          const lh = title ? parseFloat(getComputedStyle(title).lineHeight) : 0
+          return {
+            card: { w: Math.round(r.width * 100) / 100, h: Math.round(r.height * 100) / 100 },
+            art: art ? { w: Math.round(art.width * 100) / 100, h: Math.round(art.height * 100) / 100 } : null,
+            title: tb ? { w: Math.round(tb.width * 100) / 100, h: Math.round(tb.height * 100) / 100 } : null,
+            lineHeight: lh,
+            // カードの中に、詳細へ移る別のリンクが二重に入っていないこと
+            innerRecipeLinks: card.querySelectorAll('a[href^="#/recipes/"]').length,
+          }
+        })
+
+      const cuGrid = await cuShape()
+      check('CARDUNIFY-01 「大」カードが1枚のリンクとして出ている', !!cuGrid && cuGrid.innerRecipeLinks === 0, JSON.stringify(cuGrid))
+      check(
+        'CARDUNIFY-01 「大」の絵は正方形で、カードの幅いっぱい',
+        !!cuGrid?.art && Math.abs(cuGrid.art.w - cuGrid.art.h) <= 1 && cuGrid.card.w - cuGrid.art.w <= 4,
+        JSON.stringify(cuGrid),
+      )
+      check(
+        'CARDUNIFY-01 「大」の料理名の枠は2行ぶんの高さを持つ(名前の長さでカードの背が変わらない)',
+        !!cuGrid?.title && cuGrid.lineHeight > 0 && cuGrid.title.h >= cuGrid.lineHeight * 2 - 1,
+        JSON.stringify(cuGrid),
+      )
+
+      await cuPage.locator('button[aria-label="リスト表示に切り替え"]').click()
+      await cuPage.waitForTimeout(600)
+      const cuList = await cuShape()
+      check('CARDUNIFY-01 「標準」カードも1枚のリンクとして出ている', !!cuList && cuList.innerRecipeLinks === 0, JSON.stringify(cuList))
+      check(
+        'CARDUNIFY-01 「標準」の絵は正方形のサムネで、カードの幅より小さい',
+        !!cuList?.art && Math.abs(cuList.art.w - cuList.art.h) <= 1 && cuList.art.w < cuList.card.w / 2,
+        JSON.stringify(cuList),
+      )
+      check(
+        'CARDUNIFY-01 「標準」は「大」より1枚が低い(同じ情報を狭く出す形になっている)',
+        !!cuGrid && !!cuList && cuList.card.h < cuGrid.card.h,
+        `大=${JSON.stringify(cuGrid?.card)} 標準=${JSON.stringify(cuList?.card)}`,
+      )
+
+      await cuPage.locator('button[aria-label="グリッド表示に切り替え"]').click()
+      await cuPage.waitForTimeout(600)
+      const cuBack = await cuShape()
+      check(
+        'CARDUNIFY-01 表示形式を往復しても「大」の寸法が元に戻る',
+        JSON.stringify(cuBack) === JSON.stringify(cuGrid),
+        `往路=${JSON.stringify(cuGrid)} 復路=${JSON.stringify(cuBack)}`,
+      )
+
+      // --- 献立の「日」の1品ごとの「作った！」: 押せる大きさが小さくならない ---
+      // 台所で濡れた手で押す前提(CLAUDE.md「押せる大きさを小さくしない」)。
+      // 便HNで枠だけ→塗りに色をそろえたときに、当たり判定まで小さくしていないことを見張る。
+      const cuHref = await cuPage.evaluate(() => {
+        const a = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).find((x) =>
+          /^#\/recipes\/\d+$/.test(x.getAttribute('href') ?? ''),
+        )
+        return a?.getAttribute('href')
+      })
+      await cuPage.goto(`${BASE}/${cuHref}`, { waitUntil: 'networkidle' })
+      await cuPage.waitForTimeout(900)
+      const cuAdd = cuPage.getByRole('button', { name: ja.detail.todayAdd, exact: true })
+      if (await cuAdd.count()) {
+        await cuAdd.first().click()
+        await cuPage.waitForTimeout(600)
+        const cuSlot = cuPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true })
+        if (await cuSlot.count()) {
+          await cuSlot.first().click()
+          await cuPage.waitForTimeout(900)
+        }
+      }
+      await cuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await cuPage.waitForTimeout(1600)
+      const cuCooked = await cuPage.evaluate((label) => {
+        const b = Array.from(document.querySelectorAll('button')).find(
+          (x) => (x.textContent ?? '').replaceAll('​', '').trim() === label,
+        )
+        if (!b) return null
+        const r = b.getBoundingClientRect()
+        return { w: Math.round(r.width), h: Math.round(r.height) }
+      }, ja.mealPlan.todayMarkCooked)
+      check(
+        'CARDUNIFY-01 献立の「日」の1品ごとの記録ボタンは、押せる高さが44px以上',
+        !!cuCooked && cuCooked.h >= 44,
+        JSON.stringify(cuCooked),
+      )
+
+      await cuCtx.close()
+    } finally {
+      await cuBrowser.close()
     }
   }
 

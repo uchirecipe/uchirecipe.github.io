@@ -114,6 +114,7 @@ import {
   timerSoundSeconds,
 } from '../src/logic/timerSound.ts'
 import { selectPantryDowngrades } from '../src/logic/pantry.ts'
+import { CARD_DENSITIES, densityForListLayout } from '../src/logic/cardDensity.ts'
 import {
   categorizePantryName,
   resolvePantryGroup,
@@ -20990,6 +20991,160 @@ Aみりん 大さじ1
     [/作った記録/.test(ja.form.confirmDeleteKept), /作った記録/.test(ja.recipes.bulkDeleteConfirmKept)],
     [true, true],
   )
+}
+
+// ==========================================================================================
+// HN-1: 同じ役目のボタンは、同じ塗り方にする（2026-08-18 オーナー指摘）
+//
+// オーナー原文:「『作った！』と『全て作った！』など、同じような機能は色を同じにした方が、
+//              パッとみてわかりやすいと思う。ここに限らず。」
+//
+// 測り方の決めごと（色の値は決め打ちしない）:
+//   ・アプリの色はテーマで変わるので、「#cc3f01であること」のような測り方はしない。
+//   ・代わりに、そのボタンが**どの塗り方（トークンの組み合わせ）を選んでいるか**を読み取り、
+//     **同じ役目のボタンどうしで一致しているか**だけを見る。
+//   ・塗り方を変えたくなったときは、その役目の全部を一緒に変えれば緑のまま通る
+//     ＝「今の形」ではなく「そろっているか」を測っている。
+//
+// 拾い方: UI文言（src/i18n/ja.ts のキー）が書かれている場所から**手前にさかのぼって**
+// いちばん近い <button の開きタグを見つけ、その className を読む。
+// ボタンの中身（アイコン・字）が増えても、置き場所が変わっても、同じ判定になる。
+// ==========================================================================================
+{
+  const hnRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const hnFile = (rel) => readFileSync(path.join(hnRoot, rel), 'utf-8')
+
+  /**
+   * 目印（JSXに書かれた文言の式）を持つボタンの className を取り出す。
+   *
+   * 見た目が状態で変わるボタン（`className={`… ${押した? 'A' : 'B'}`}`）は、
+   * **まだ押していないときの見た目**＝ else 側（: のあと。並びのいちばん最後）を読む。
+   * 押したあとの見た目（「追加済み ✓」等）は役目が変わるので、そろえる対象ではない。
+   */
+  const buttonClassFor = (src, marker) => {
+    const at = src.indexOf(marker)
+    if (at < 0) return { error: `目印が見つからない: ${marker}` }
+    const openAt = src.lastIndexOf('<button', at)
+    if (openAt < 0) return { error: `ボタンの開きタグが見つからない: ${marker}` }
+    const head = src.slice(openAt, at)
+    const plain = head.match(/className="([^"]*)"/)
+    if (plain) return { cls: plain[1] }
+    const tpl = head.match(/className=\{`([\s\S]*?)`\}/)
+    if (!tpl) return { error: `className が読めない: ${marker}` }
+    const expr = tpl[1]
+    // 条件の外にそのまま書いてある部分＋条件のいちばん最後のかたまり（＝else側）
+    const base = expr.replace(/\$\{[\s\S]*?\}/g, ' ')
+    const branches = [...expr.matchAll(/'([^']*)'/g)].map((m) => m[1])
+    return { cls: `${base} ${branches.at(-1) ?? ''}`.replace(/\s+/g, ' ').trim() }
+  }
+
+  /**
+   * 塗り方の呼び名。トークンの組み合わせだけで決める（具体的な色は見ない）。
+   *  ・塗り   … 地をアクセントで塗り、字はアクセントの上用（bg-accent + text-on-accent）
+   *  ・枠だけ … 地はカード面のまま、枠と字にアクセント（border-accent + text-accent-ink）
+   *  ・地味枠 … 枠は区切り線の色で、字だけアクセント（border-edge + text-accent-ink）
+   */
+  const toneOf = (cls) => {
+    const filled = /(^|\s)bg-accent(\s|$)/.test(cls) && /(^|\s)text-on-accent(\s|$)/.test(cls)
+    const accentEdge = /(^|\s)border-accent(\s|$)/.test(cls)
+    const plainEdge = /(^|\s)border-edge(\s|$)/.test(cls)
+    const accentInk = /(^|\s)text-accent-ink(\s|$)/.test(cls)
+    if (filled) return '塗り'
+    if (accentEdge && accentInk) return '枠だけ'
+    if (plainEdge && accentInk) return '地味枠'
+    return `判別できない(${cls})`
+  }
+
+  /** 役目ごとのボタン一覧。[どこにあるか, ファイル, JSXに書かれた文言の式] */
+  const HN_ROLES = [
+    [
+      '作った記録をつける',
+      [
+        ['レシピ詳細の「作った！」', 'src/pages/RecipeDetailPage.tsx', '{ja.detail.cooked}'],
+        [
+          '献立・日タブの1品ごとの「作った！」',
+          'src/pages/MealPlanPage.tsx',
+          '{ja.mealPlan.todayMarkCooked}',
+        ],
+        [
+          '献立・日タブの「全て作った！」',
+          'src/pages/MealPlanPage.tsx',
+          '{ja.mealPlan.todayMarkAllCooked}',
+        ],
+        [
+          '並行調理ナビの「まとめて作った！」',
+          'src/pages/CookNaviPage.tsx',
+          '{ja.cookNavi.markAllCooked}',
+        ],
+        [
+          '調理を終えた窓の記録ボタン',
+          'src/components/CookFinishModal.tsx',
+          '{ja.cookNavi.sessionFinishRecord}',
+        ],
+        ['記録の窓の保存ボタン', 'src/components/CookedLogModal.tsx', '{ja.detail.cookedSave}'],
+      ],
+    ],
+    [
+      '今日の献立に入れる',
+      [
+        [
+          'レシピ詳細の「今日の献立に追加」',
+          'src/pages/RecipeDetailPage.tsx',
+          '{isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}',
+        ],
+        [
+          '献立・日タブの「レシピ一覧から追加」',
+          'src/pages/MealPlanPage.tsx',
+          '{ja.mealPlan.todayAddMoreButton}',
+        ],
+        [
+          '「今日なに作る？」の「今日の献立に入れる」',
+          'src/components/TodaySuggestPanel.tsx',
+          '{ja.mealPlan.todaySuggestApply}',
+        ],
+      ],
+    ],
+  ]
+
+  for (const [role, buttons] of HN_ROLES) {
+    const found = buttons.map(([where, rel, marker]) => {
+      const r = buttonClassFor(hnFile(rel), marker)
+      return `${where}=${r.error ?? toneOf(r.cls)}`
+    })
+    const kinds = new Set(found.map((f) => f.slice(f.indexOf('=') + 1)))
+    // そろっていれば空の配列。ずれていたら「どこが何色か」を全部並べて出す
+    eq(`HN-1 「${role}」のボタンは全部そろった塗り方`, kinds.size === 1 ? [] : found, [])
+  }
+
+  // ==========================================================================================
+  // HN-2: レシピカードの形は「密度」の1軸・3つだけ（2026-08-18 便HN）
+  //
+  // オーナー原文:「場所や機能ごとにレシピカードの形や内容が変わっているのがみづらい。
+  //              パターン２つ（もしくは３つ）に絞って。」
+  //
+  // 値が4つ目に増えるのは「密度」以外の軸を混ぜてしまった合図なので、数そのものを見張る。
+  // あわせて、共通部品が3つとも扱っていること・レシピ一覧が設定値をこの写し方で渡していること
+  // （＝一覧の見え方が従来のまま保たれる道すじ）を見る。
+  // ==========================================================================================
+  eq('HN-2 カードの密度は3つまで（4つ目が要るなら設計を見直す）', CARD_DENSITIES.length, 3)
+  eq(
+    'HN-2 レシピ一覧の表示形式は、従来と同じ見え方の密度に写る',
+    ['grid', 'list'].map(densityForListLayout),
+    ['large', 'standard'],
+  )
+  {
+    const card = hnFile('src/components/RecipeCard.tsx')
+    const missing = CARD_DENSITIES.filter((d) => !card.includes(`'${d}'`))
+    eq('HN-2 共通のカードは3つの密度をすべて描き分けている', missing, [])
+    // 「密度」以外の言葉で形を切り替える口を増やしていないこと（旧 layout='grid'|'list' の置き換え）
+    eq('HN-2 共通のカードの形を決める口は「密度」だけ', /\blayout\??:/.test(card), false)
+    const recipes = hnFile('src/pages/RecipesPage.tsx')
+    eq(
+      'HN-2 レシピ一覧は、設定の表示形式を密度に写してからカードへ渡す',
+      /density=\{densityForListLayout\(/.test(recipes),
+      true,
+    )
+  }
 }
 
 // ---------- 結果 ----------

@@ -434,10 +434,17 @@ function TodayListRow({
             料理名の右へ移す。便DT-1で右下へ寄せたが、ボタン1つだけの行の左半分が空いて
             実機で空白が目立っていた。×(外す)との押し間違いは、間の余白を12px取り(gap-2＋ml-1)、
             枠・地色つきのボタンと枠なしの✕という見た目の差で分ける */}
+        {/* 2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
+            色を同じにした方が、パッとみてわかりやすい」）: 作った記録をつけるボタンは
+            アプリ全体で6か所あり、5か所がアクセントの塗り（レシピ詳細の「作った！」・
+            同じ画面の「全て作った！」・並行調理ナビの「まとめて作った！」・調理を終えた窓・
+            記録の窓）なのに、ここだけが枠だけの見た目だった。多数側＝塗りに合わせる。
+            押せる高さ44px（min-h-11）は変えない。枠がなくなったぶんボタンは2px細くなり、
+            そのぶん料理名の枠が広がる。 */}
         <button
           type="button"
           onClick={onCooked}
-          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm border border-accent bg-surface px-2.5 py-2 text-sm font-bold text-accent-ink shadow-sm"
+          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
         >
           <CheckCircle2 size={16} aria-hidden />
           {ja.mealPlan.todayMarkCooked}
