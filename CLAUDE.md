@@ -43,6 +43,7 @@
 
 ## コーディング規約
 - UI文言はすべて `src/i18n/ja.ts` に集約（ハードコード禁止）。
+- **数の言い方**: **料理そのもの＝「品」**（レシピ・献立に入っている料理・収録レシピ）／**記録・行・データの本数＝「件」**（作った記録・材料・手順・タイマー・下書き・食材・価格）。**画面の呼び名は、タブや見出しに実際に出ている名前を正**とする（買い物メモ／月間の献立）。「閉じる」「やめる」は `ja.common` を参照し、同じ文字を再定義しない。見張りは `scripts/test-logic.mjs` の HR-1〜HR-4（ja.ts・`public/about/*.html`・news.json を規則で掃く。**社内文書 docs/ の「30件」等はUI文言ではないので追随不要**）。
 - 色は `src/index.css` のデザイントークン（CSS変数）のみ。直接色指定禁止。文字用アクセントは --accent-ink-page／--accent-ink-surface の2本を持ち、実際に使う --accent-ink はカード面を塗るクラス(bg-surface/bg-app)内で自動で切り替わる(ブラウンのみ面で値が異なる #833a00/#ad4e01)。カラーテーマは 自動/ライト/ダーク/ブラウン/グリーン。
 - **アクセントは「塗り」と「文字」で別トークン**（2026-07-30 配色AA調整）。**文字色には `text-accent-ink`（`--accent-ink`）を使う**（`text-accent`は廃止）。塗り・枠・リング・アイコンは従来どおり `bg-accent` / `border-accent` / `ring-accent` / `var(--accent)`。ライトのみ文字用が濃い（#b8380a）で、他テーマは `--accent-ink: var(--accent)` と同値。`public/about/*.html` は同じ色定義を各ファイルが書き写しているため、色を変えるときは全ファイル(現在10・foods.htmlは生成物なので直す先は scripts/gen-food-price-page.mjs)に同じ値を入れる。
 - アイコンは lucide-react のみ。**例外**: レシピ料理カテゴリのプレースホルダー（`RecipeIcon`）は `public/icons/` のカスタムPNGをCSSマスクで描画しテーマ色（`var(--accent)`）に追従。
