@@ -484,6 +484,42 @@ let currentCheck = ''
 const ok = (label) => results.push({ label, pass: true })
 const ng = (label, detail) => results.push({ label, pass: false, detail })
 const check = (label, cond, detail = '') => (cond ? ok(label) : ng(label, detail))
+/**
+ * 画面に出ている数を「助数詞に依らず」読むための道具（2026-08-18 便HR）。
+ *
+ * 2026-08-08と2026-08-18の2回、**数え方を見直すたびにe2eが赤くなった**。
+ * 落ちたのはアプリではなく、期待文字列に「◯件」と書いてあったテストのほうだった。
+ * ここで確かめたいのは **数が出ているか・その数が合っているか** であって、
+ * 品と件のどちらで書いてあるかではない。**助数詞そのものの正しさは
+ * scripts/test-logic.mjs の HR-1/HR-2 が規則で掃いて受け持つ**ので、役割を分ける。
+ *
+ * なお、数の取り出しに失敗したときに -1 や NaN を返して「小さいから合格」に
+ * 倒れると、赤にならず素通りする（2026-08-18 FS-06 で実際に起きた）。
+ * 読めなかったことが分かるよう、呼び出し側で null / NaN を必ず不合格として扱うこと。
+ */
+const ZW = /\u200B/g
+const COUNTER = '[品件]'
+/** 「全109品」「全109件」のどちらでも総数だけを読む。読めなければ null */
+const readTotalCount = (text) => {
+  const m = (text ?? '').replace(ZW, '').match(new RegExp(`全\\s*(\\d+)\\s*${COUNTER}`))
+  return m ? Number(m[1]) : null
+}
+/** 「12品 / 全109品」「12件 / 全109件」のどちらでも {shown, total} を読む。読めなければ null */
+const readResultCount = (text) => {
+  const m = (text ?? '')
+    .replace(ZW, '')
+    .match(new RegExp(`(\\d+)\\s*${COUNTER}\\s*/\\s*全\\s*(\\d+)\\s*${COUNTER}`))
+  return m ? { shown: Number(m[1]), total: Number(m[2]) } : null
+}
+/** 「献立の予定2品」「献立の予定2件」のどちらでも、その語のうしろの数が n かを見る */
+const hasCountAfter = (text, label, n) =>
+  new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*${n}\\s*${COUNTER}`).test(
+    (text ?? '').replace(ZW, ''),
+  )
+/** 語を伴わない「2品」「2件」のどちらでも、その数が出ているかを見る */
+const hasCount = (text, n) =>
+  new RegExp(`(?:^|[^0-9])${n}\\s*${COUNTER}`).test((text ?? '').replace(ZW, ''))
+
 // タイマーの残り表示("08:24"や"1:05:00")を秒数に変換する(TIMER-ADJ-01/TIMER-CUSTOM-01用)
 const parseRemainingSeconds = (text) => {
   const m = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
@@ -673,10 +709,11 @@ try {
   // --- COUNT-01: 絞り込み無しでも一覧上部に総件数「全◯件」が常に表示される(2026-07-13 UI改善) ---
   currentCheck = 'COUNT-01'
   const allCardCount = await page.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+  const allTotalLabel = readTotalCount(await page.textContent('body'))
   check(
-    'COUNT-01 絞り込み無しで「全◯件」の総件数が表示される',
-    (await page.textContent('body')).includes(`全${allCardCount}件`),
-    `カード数=${allCardCount}`,
+    'COUNT-01 絞り込み無しで一覧の総数が出て、並んでいるカードの数と一致する',
+    allTotalLabel === allCardCount,
+    `見出しの総数=${allTotalLabel} カード数=${allCardCount}`,
   )
 
   // --- QF-01: 絞り込み「時短レシピのみに絞る」でカード件数が変わる(quickStepsを持つレシピだけに
@@ -693,9 +730,11 @@ try {
     quickCardCount > 0 && quickCardCount < allCardCount,
     `全件=${allCardCount} 時短=${quickCardCount}`,
   )
+  const quickCountLabel = readResultCount(await page.textContent('body'))
   check(
-    'COUNT-01 絞り込み中は「結果件数 / 全件数」の形で表示される',
-    (await page.textContent('body')).includes(`${quickCardCount}品 / 全${allCardCount}品`),
+    'COUNT-01 絞り込み中は「結果の数 / 全体の数」の形で、どちらも実際の数と一致する',
+    quickCountLabel?.shown === quickCardCount && quickCountLabel?.total === allCardCount,
+    `見出し=${JSON.stringify(quickCountLabel)} 結果=${quickCardCount} 全体=${allCardCount}`,
   )
   // 絞り込みを解除して以降のチェックに影響しないようにする
   await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
@@ -2021,7 +2060,7 @@ try {
       const afterSetBody = await freePage.textContent('body')
       check(
         'SMK-14 ?set=付きURLは無害に設定へ着地する(取り込みは起きない・エラーも出ない)',
-        !afterSetBody.includes('品追加しました') &&
+        !/\d+[品件]追加しました/.test(afterSetBody) &&
           !afterSetBody.includes('見つかりませんでした') &&
           afterSetBody.includes('NG食材（アレルギー・苦手）'),
       )
@@ -2224,13 +2263,13 @@ try {
     check('ABOUT-01 バージョン表示がある', /バージョン \S+/.test(aboutText))
     check(
       'ABOUT-01 データ件数表示(レシピ◯件・作った記録◯件)がある',
-      /レシピ \d+品（自分で登録 \d+\/\d+品）・作った記録 \d+件/.test(aboutText),
+      /レシピ \d+[品件]（自分で登録 \d+\/\d+[品件]）・作った記録 \d+[品件]/.test(aboutText),
     )
     // 2026-08-08 便DZ: 未解錠のときは、レシピ一覧と同じ「自分で登録 ◯/30品」をここにも出す
     // (オーナー要望「利用者がどう確認できるか」。総件数には基本レシピが入るので別の数として並べる)
     check(
       'ABOUT-01(便DZ) 未解錠のデータ件数に「自分で登録 ◯/30品」が出る',
-      /自分で登録 \d+\/30品/.test(aboutText),
+      /自分で登録 \d+\/30[品件]/.test(aboutText),
       `件数表示=${aboutText.match(/レシピ \d+件[^・]*・作った記録 \d+件/)?.[0]}`,
     )
   }
@@ -8061,7 +8100,7 @@ try {
       await nbPage.waitForTimeout(400)
       check(
         'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯分を含めた金額です」を添える',
-        /ごはん\d+杯分（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
+        /ごはん\d+杯(?:分|ぶん)（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
       )
     } finally {
       await nbBrowser.close()
@@ -8216,7 +8255,8 @@ try {
       await mp2Page.waitForTimeout(400)
       check(
         'MEALPLAN-02 前提: Pro解錠済みで月カレンダーが開く(ゲートでない)',
-        !(await mp2Page.textContent('body')).includes('月間の献立はPro版の機能です'),
+        // 機能の呼び名が変わってもゲートの有無を測れるよう、変わらない側の文で見る
+        !(await mp2Page.textContent('body')).includes('Pro版の機能です'),
       )
 
       const monthCenterBtn = mp2Page.locator('button').filter({ hasText: '/' }).first()
@@ -9741,7 +9781,7 @@ try {
       const rcFutureOpenText = (await rcCard.textContent()) ?? ''
       check(
         'MEALPLAN-07(便CA①) 内訳に「作った記録 約0円（0品）／登録した献立 …（2品）」が出る',
-        /内訳 作った記録 約0円（0件）／登録した献立 約[\d,]+円（2品）/.test(rcFutureOpenText),
+        /内訳 作った記録 約0円（0[品件]）／登録した献立 約[\d,]+円（2[品件]）/.test(rcFutureOpenText),
         `内訳=${rcFutureOpenText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
@@ -9756,7 +9796,7 @@ try {
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「登録した献立2品の栄養価を、1食分ずつ足して算出した数値です」',
-        rcFutureOpenText.includes('登録した献立2品の栄養価を、1食分ずつ足して算出した数値です'),
+        /登録した献立2[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(rcFutureOpenText),
         `注記=${rcFutureOpenText.match(/.{0,10}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
       // 便DR: 栄養の長い但し書きと出典も月タブと同じく折りたたみの中
@@ -9821,7 +9861,7 @@ try {
       )
       check(
         'MEALPLAN-07(便CA②) 同じ期間に登録した献立があっても、過去の予定は0品0円で数えない',
-        /内訳 作った記録 約[\d,]+円（1件）／登録した献立 約0円（0品）/.test(rcPastText),
+        /内訳 作った記録 約[\d,]+円（1[品件]）／登録した献立 約0円（0[品件]）/.test(rcPastText),
         `内訳=${rcPastText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
@@ -9841,7 +9881,7 @@ try {
       )
       check(
         'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1件の栄養価を、1食分ずつ足して算出した数値です」',
-        rcPastText.includes('作った記録1件の栄養価を、1食分ずつ足して算出した数値です'),
+        /作った記録1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(rcPastText),
       )
       // 記録も予定も無い期間は空案内
       await rcDay(`${rcPrevPrefix}-20`).click()
@@ -9882,12 +9922,12 @@ try {
         )
         check(
           'MEALPLAN-07(便CA③) 混在期間の内訳は実績1品と予定1品の両方が出る',
-          /内訳 作った記録 約[\d,]+円（1件）／登録した献立 約[\d,]+円（1品）/.test(rcMixedText),
+          /内訳 作った記録 約[\d,]+円（1[品件]）／登録した献立 約[\d,]+円（1[品件]）/.test(rcMixedText),
           `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
         )
         check(
           'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です」',
-          rcMixedText.includes('作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
+          /作った記録1[品件]と登録した献立1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(rcMixedText),
         )
         const rcMixedPersonal = Number(
           (((await rcTable.textContent()) ?? '').match(
@@ -10154,8 +10194,8 @@ try {
       const eaTodayCardText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-3) 今日の「作った記録」1品と、まだ作っていない献立1品を分けて数える',
-        eaTodayCardText.includes(
-          '作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です',
+        /作った記録1[品件]と登録した献立1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(
+          eaTodayCardText,
         ),
         `カード=${eaTodayCardText.match(/.{0,20}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
@@ -10187,7 +10227,7 @@ try {
       const eaCrossText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-2b) 月をまたぐ期間でも、表示中の月の外の「作った記録」を数える(記録2品)',
-        eaCrossText.includes('作った記録2件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
+        /作った記録2[品件]と登録した献立1[品件]の栄養価を、1食分ずつ足して算出した数値です/.test(eaCrossText),
         `カード=${eaCrossText.match(/.{0,26}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
       check(
@@ -13063,7 +13103,7 @@ try {
       const afterSuccessText = await rsPage.textContent('body')
       check(
         'RECIPESET-01 ファイル読み込み(バックアップ形式)が成功し「◯品追加しました」が上部に出る',
-        /\d+品追加しました/.test(afterSuccessText),
+        /\d+[品件]追加しました/.test(afterSuccessText),
       )
       check(
         'RECIPESET-01(修正4) 直前のエラーメッセージは成功後には残らない',
@@ -13527,7 +13567,7 @@ try {
       check(
         'LAUNCH-02(便DZ) 20件目の登録完了で「あと10品登録できます」の予告が出る',
         (await l2Page.locator('[data-testid="free-limit-notice"]').count()) > 0 &&
-          listText.includes('あと10品登録できます'),
+          /あと10[品件]登録できます/.test(listText),
       )
       check(
         'LAUNCH-02(便DZ) 予告と同時に件数表記も20/30品になる',
@@ -13550,7 +13590,7 @@ try {
       check(
         'LAUNCH-02(便DZ) 21件目では予告を出さない(節目のときだけ)',
         (await l2Page.locator('[data-testid="free-limit-notice"]').count()) === 0 &&
-          !/あと\d+品登録できます/.test(listText),
+          !/あと\d+[品件]登録できます/.test(listText),
       )
 
       // 29件まで積んでから30件目を登録=上限到達の案内(予告ではない)
@@ -14330,7 +14370,7 @@ try {
       check(
         'REPLACEUNDO-01(a) 確認文(事前確認+実行前確認の2回とも)に消えるレシピ件数が具体的に入る(規約F)',
         dialogMessages.length === 2 &&
-          dialogMessages.every((m) => m.includes(`今のレシピ${originalRecipeCount}品`)),
+          dialogMessages.every((m) => hasCountAfter(m, '今のレシピ', originalRecipeCount)),
         `dialogMessages=${JSON.stringify(dialogMessages)}`,
       )
       check(
@@ -17633,8 +17673,8 @@ try {
       await nav7Page.getByRole('button', { name: 'まとめて作った！' }).click()
       await nav7Page.waitForTimeout(900)
       check(
-        'NAVI-09 確認文に件数・料理名・何が変わるかが書かれている(規約F)',
-        confirmText.includes('2件') &&
+        'NAVI-09 確認文に数・料理名・何が変わるかが書かれている(規約F)',
+        hasCount(confirmText, 2) &&
           confirmText.includes('E2E保持煮物') &&
           confirmText.includes('今日の献立から外れます') &&
           confirmText.includes('記録をつける'),
@@ -17648,7 +17688,11 @@ try {
         confirmText.slice(0, 300),
       )
       const afterCooked = await nav7Page.textContent('body')
-      check('NAVI-09 件数つきのトーストが出る', afterCooked.includes('2件の作った記録をつけました'))
+      check(
+        'NAVI-09 数つきのトーストが出る',
+        /2\s*[品件]の作った記録をつけました/.test(afterCooked),
+        afterCooked.slice(0, 120),
+      )
       const cookedCount = await nav7Page.evaluate(async () => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
@@ -17682,7 +17726,9 @@ try {
       check('NAVI-09 「元に戻す」で記録が取り消される', undoneCount === 0, `残った記録=${undoneCount}`)
       check(
         'NAVI-09 取り消した件数がトーストに出る',
-        (await nav7Page.textContent('body')).includes('2件の作った記録を取り消して、今日の献立に戻しました'),
+        /2\s*[品件]の作った記録を取り消して、今日の献立に戻しました/.test(
+          await nav7Page.textContent('body'),
+        ),
       )
 
       // 「戻る」は画面を移るだけ＝段取りは残る(2026-08-09 便ES・オーナー実機報告
@@ -21427,7 +21473,9 @@ try {
       await fiPage.waitForTimeout(300)
       check(
         'FORMING-01(便DF) モードに入ると消し方の説明が出る',
-        (await fiPage.textContent('body')).includes('消したい材料にチェックを付けて、「選んだ材料◯件を削除」を押します'),
+        /消したい材料にチェックを付けて、「選んだ材料◯[品件行]を削除」を押します/.test(
+          await fiPage.textContent('body'),
+        ),
       )
       check(
         'FORMING-01(a) 選択中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
@@ -21440,9 +21488,9 @@ try {
       await fiPage.waitForTimeout(300)
       check(
         'FORMING-01(a) 選んだ件数が削除ボタンに出る',
-        (await fiPage.textContent('body')).includes('選んだ材料2件を削除'),
+        /選んだ材料2[品件行]を削除/.test(await fiPage.textContent('body')),
       )
-      await fiPage.getByRole('button', { name: '選んだ材料2件を削除' }).click()
+      await fiPage.getByRole('button', { name: /選んだ材料2[品件行]を削除/ }).click()
       await fiPage.waitForTimeout(500)
       check(
         'FORMING-01(a) 選んだ2行だけが消え、残りの1行(豚こま)はそのまま残る',
@@ -21691,13 +21739,13 @@ try {
       await bdPage.waitForTimeout(1200)
 
       // 規約F: 何が消えるか/何が残るかを件数つきで両方書く
-      check('BULKDEL-01 確認文に削除する品数が入る', /レシピ2品を削除します/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
-      check('BULKDEL-01 確認文に作った記録の件数が入る', /作った記録3件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に削除するレシピの数が入る', hasCountAfter(bdDialogMsg, 'レシピ', 2), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に作った記録の数が入る', hasCountAfter(bdDialogMsg, '作った記録', 3), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に写真の枚数が入る', /写真1枚/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
-      check('BULKDEL-01 確認文に献立の予定の件数が入る', /献立の予定2件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
-      check('BULKDEL-01 確認文に今日の献立の件数が入る', /今日の献立1件/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に献立の予定の数が入る', hasCountAfter(bdDialogMsg, '献立の予定', 2), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に今日の献立の数が入る', hasCountAfter(bdDialogMsg, '今日の献立', 1), `dialog=${bdDialogMsg}`)
       check('BULKDEL-01 確認文に元に戻せないことが入る', bdDialogMsg.includes('元に戻せません'))
-      check('BULKDEL-01 確認文に残るものが件数つきで入る', /残るもの: [^\n]*他のレシピ\d+品・買い物メモ・食材の在庫/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
+      check('BULKDEL-01 確認文に残るものが数つきで入る', /残るもの: [^\n]*他のレシピ\d+[品件]・買い物メモ・食材の在庫/.test(bdDialogMsg), `dialog=${bdDialogMsg}`)
       // 2026-08-16 便GZ: 作った記録はレシピを消しても残るので「残るもの」に書く
       check(
         'BULKDEL-01(便GZ) 確認文は作った記録を「残るもの」に書く',
@@ -29867,9 +29915,9 @@ try {
       const ffPanelCount = () =>
         ffPage.locator('[data-testid="filter-panel-count"]').first().innerText()
       check(
-        'FF-FILTER パネルの中に件数が出る(隠れた件数の行の代わり)',
-        (await ffPanelCount()) === `全${ffTotal}件`,
-        `件数=${await ffPanelCount()}`,
+        'FF-FILTER パネルの中に数が出る(隠れた件数の行の代わり)',
+        readTotalCount(await ffPanelCount()) === ffTotal,
+        `表示=${await ffPanelCount()} 全体=${ffTotal}`,
       )
 
       // チップの件数は、実際に押したときの結果件数と一致する（数字が飾りになっていない）
@@ -29881,10 +29929,11 @@ try {
         (await ffCards()) === Number(ffTopTag.replace(/[^0-9]/g, '')),
         `チップ=${ffTopTag} 結果=${await ffCards()}`,
       )
+      const ffFilteredLabel = readResultCount(await ffPanelCount())
       check(
-        'FF-FILTER パネルの中の件数も絞り込みに追従する',
-        (await ffPanelCount()) === `${await ffCards()}品 / 全${ffTotal}品`,
-        `件数=${await ffPanelCount()}`,
+        'FF-FILTER パネルの中の数も絞り込みに追従する',
+        ffFilteredLabel?.shown === (await ffCards()) && ffFilteredLabel?.total === ffTotal,
+        `表示=${await ffPanelCount()} 結果=${await ffCards()} 全体=${ffTotal}`,
       )
       await ffPage.locator('[data-testid="recipes-tag-chip"]').first().click()
       await ffPage.waitForTimeout(400)
@@ -31479,10 +31528,10 @@ try {
         foFinishBody.slice(0, 200),
       )
       check(
-        'FO-09 確認文に、記録する品名と件数が入っている（規約F）',
+        'FO-09 確認文に、記録する品名と数が入っている（規約F）',
         foFinishBody.includes('FO照り焼き') &&
           foFinishBody.includes('FO煮物') &&
-          foFinishBody.includes('3件'),
+          hasCount(foFinishBody, 3),
         foFinishBody.slice(0, 240),
       )
       // GF-A（2026-08-14 便GF・利用者テスト「ダイアログに『レシピと段取りはそのまま残ります』と
@@ -32729,20 +32778,25 @@ try {
         )
 
         currentCheck = 'FS-06'
+        // 助数詞ではなく数を読む。読めなかったときは null にして、
+        // 「小さいから合格」に倒れないよう呼び出し側で必ず落とす（2026-08-18 便HR）
         const countOf = async (query) => {
           await p.getByPlaceholder('料理名・材料・タグ').fill(query)
           await p.waitForTimeout(700)
-          const body = noZw(await p.textContent('body'))
-          return Number(body.match(/(\d+)件 \/ 全\d+件/)?.[1] ?? -1)
+          return readResultCount(await p.textContent('body'))?.shown ?? null
         }
         const renji = await countOf('電子レンジ')
         check(
-          'FS-06 「電子レンジ」で0件にならない（手順に書かれた器具で引ける）',
-          renji >= 10,
-          `${renji}件`,
+          'FS-06 「電子レンジ」で0にならない（手順に書かれた器具で引ける）',
+          renji !== null && renji >= 10,
+          `結果=${renji}`,
         )
         const renji2 = await countOf('レンジ')
-        check('FS-06 「レンジ」でも同じ品が引ける', renji2 === renji, `電子レンジ=${renji} / レンジ=${renji2}`)
+        check(
+          'FS-06 「レンジ」でも同じ品が引ける',
+          renji2 !== null && renji2 === renji,
+          `電子レンジ=${renji} / レンジ=${renji2}`,
+        )
         const shownTitles = noZw(await p.textContent('body'))
         check(
           'FS-06 手順にだけ器具が出てくる品も並ぶ',
@@ -32757,8 +32811,8 @@ try {
           const n = await countOf(word)
           check(
             `FS-06 「${word}」では増やさない（手順本文をまるごと検索対象にしない）`,
-            n < limit,
-            `${n}件`,
+            n !== null && n < limit,
+            `結果=${n}`,
           )
         }
         await ctx.close()
