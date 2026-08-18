@@ -18968,12 +18968,33 @@ try {
       const hcByButton = await hcTitles()
       check('HU-CLOSE-01(⑰) 「閉じる」で窓が閉じる', (await hcPanelVisible()) === false)
 
-      // (b) 同じ条件のまま開き直して、窓の外をタップして閉じる
+      // (b) 同じ条件のまま開き直して、窓の外をタップして閉じる。
+      // タップする場所は、窓の外でありながら**その下にレシピのカードがある**点を選ぶ
+      // （窓は画面のほとんどを覆うので、左右に残る余白の帯がそれにあたる）。
+      // 「窓の外で閉じたつもりが、下のレシピが開いてしまう」が起きないことを、
+      // いちばん起こりやすい場所で測るため。点が取れなければ落とす（測れないまま合格にしない）
       await hcOpenFilter()
       check('HU-CLOSE-01(⑰) 前提: 窓が開いている', (await hcPanelVisible()) === true)
-      await hcPage
-        .locator('[data-testid="recipes-panel-scrim"]')
-        .click({ position: { x: 195, y: 800 } })
+      const hcOutsidePoint = await hcPage.evaluate(() => {
+        const panel = document.querySelector('[data-testid="recipes-filter-panel"]')
+        if (!panel) return null
+        const r = panel.getBoundingClientRect()
+        const y = Math.round(r.top + r.height / 2)
+        // 窓の左右に残る余白の帯（窓は画面のほとんどを覆うので、外はこの帯になる）
+        for (const x of [Math.round(r.left / 2), Math.round((r.right + window.innerWidth) / 2)]) {
+          if (x < 2 || x > window.innerWidth - 2) continue
+          const el = document.elementFromPoint(x, y)
+          if (!el || panel.contains(el)) continue
+          return { x, y, tag: el.tagName }
+        }
+        return null
+      })
+      check(
+        'HU-CLOSE-01(⑰) 前提: 窓の外の点を掴めている',
+        hcOutsidePoint != null,
+        `点=${JSON.stringify(hcOutsidePoint)}`,
+      )
+      await hcPage.mouse.click(hcOutsidePoint.x, hcOutsidePoint.y)
       await hcPage.waitForTimeout(500)
       const hcByOutside = await hcTitles()
       check('HU-CLOSE-01(⑰) 窓の外のタップで窓が閉じる', (await hcPanelVisible()) === false)
@@ -18987,6 +19008,24 @@ try {
       check(
         'HU-CLOSE-01(⑰) 窓の外のタップで、その下にあるレシピを開いてしまわない',
         !/#\/recipes\/\d+/.test(hcPage.url()),
+        `URL=${hcPage.url()}`,
+      )
+
+      // 窓の外にある「押せるもの」（下のタブナビ）を押したときも、1回目は窓を閉じるだけで
+      // その操作は起きない＝閉じたつもりが別の画面へ飛ばされない
+      await hcOpenFilter()
+      const hcMealTab = hcPage.getByRole('link', { name: '献立' }).first()
+      const hcTabBox = await hcMealTab.boundingBox()
+      check(
+        'HU-CLOSE-01(⑰) 前提: 下のタブナビの位置を掴めている',
+        hcTabBox != null,
+        `タブの位置=${JSON.stringify(hcTabBox)}`,
+      )
+      await hcPage.mouse.click(hcTabBox.x + hcTabBox.width / 2, hcTabBox.y + hcTabBox.height / 2)
+      await hcPage.waitForTimeout(500)
+      check(
+        'HU-CLOSE-01(⑰) 窓の外のタブを押したときも、1回目は窓が閉じるだけで画面は移動しない',
+        (await hcPanelVisible()) === false && /#\/recipes/.test(hcPage.url()),
         `URL=${hcPage.url()}`,
       )
 
