@@ -8,6 +8,7 @@ import { summarizeRecipeDeleteImpact, type RecipeDeleteImpact } from '../logic/r
 import { READINGS_VERSION } from '../logic/ingredientReadings'
 import { newRecipeUid } from '../logic/recipeUid'
 import { detachRecipeLogs } from './detachedLogs'
+import { tagsWithAdded, tagsWithRemoved } from '../logic/tagRegister'
 
 /** 入力の掃除: 名前が空の材料行・本文が空の手順行は保存しない */
 function cleanInput(input: RecipeInput): RecipeInput {
@@ -61,6 +62,68 @@ export async function updateRecipe(id: number, input: RecipeInput): Promise<void
     ...cleaned,
     searchWords: buildSearchWords(cleaned.title, cleaned.ingredients, cleaned.tags, cleaned.keywords, cleaned.steps, cleaned.dishType),
     updatedAt: Date.now(),
+  })
+}
+
+/**
+ * 検索したキーワードを、いま一致しているレシピにタグとしてまとめて付ける
+ * （2026-08-19 便HU・⑭）。付いた品数を返す。
+ *
+ * updatedAt は動かさない: 一覧の既定の並びが「更新順」なので、タグを付けただけで
+ * その品が一覧の先頭へ移動すると、探していた場所から料理が消えたように見える。
+ * 検索の索引（searchWords）はタグを含むので必ず作り直す＝付けたタグでそのまま検索もできる。
+ */
+export async function addTagToRecipes(ids: readonly number[], tag: string): Promise<number> {
+  const name = tag.trim()
+  if (ids.length === 0 || name === '') return 0
+  return db.transaction('rw', db.recipes, async () => {
+    const targets = (await db.recipes.bulkGet([...ids])).filter(
+      (recipe): recipe is Recipe => !!recipe && !recipe.tags.includes(name),
+    )
+    for (const recipe of targets) {
+      if (recipe.id === undefined) continue
+      const tags = tagsWithAdded(recipe.tags, name)
+      await db.recipes.update(recipe.id, {
+        tags,
+        searchWords: buildSearchWords(
+          recipe.title,
+          recipe.ingredients,
+          tags,
+          recipe.keywords,
+          recipe.steps,
+          recipe.dishType,
+        ),
+      })
+    }
+    return targets.length
+  })
+}
+
+/**
+ * そのタグを、付いているレシピ全部から外す（2026-08-19 便HU・⑭「もちろん削除もできるように」）。
+ * 外した品数を返す。レシピそのもの・他のタグ・作った記録は1件も消さない。
+ */
+export async function removeTagFromRecipes(tag: string): Promise<number> {
+  const name = tag.trim()
+  if (name === '') return 0
+  return db.transaction('rw', db.recipes, async () => {
+    const targets = await db.recipes.filter((recipe) => recipe.tags.includes(name)).toArray()
+    for (const recipe of targets) {
+      if (recipe.id === undefined) continue
+      const tags = tagsWithRemoved(recipe.tags, name)
+      await db.recipes.update(recipe.id, {
+        tags,
+        searchWords: buildSearchWords(
+          recipe.title,
+          recipe.ingredients,
+          tags,
+          recipe.keywords,
+          recipe.steps,
+          recipe.dishType,
+        ),
+      })
+    }
+    return targets.length
   })
 }
 

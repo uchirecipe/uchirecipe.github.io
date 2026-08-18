@@ -46,7 +46,13 @@ import {
   FREE_LIMIT,
   FREE_LIMIT_NOTICE_COUNTS,
 } from '../src/logic/freeLimit.ts'
-import { parseAmountNumber, convertToGrams, computeRecipeNutrition } from '../src/logic/nutrition.ts'
+import {
+  parseAmountNumber,
+  convertToGrams,
+  computeRecipeNutrition,
+  NUTRITION_DISPLAY_KEYS,
+  nutritionLabelFor,
+} from '../src/logic/nutrition.ts'
 import { isNewsSuppressed, isNewsVisibleFor } from '../src/logic/news.ts'
 import {
   suggestCandidates,
@@ -257,6 +263,8 @@ import {
   NUTRIENT_SORT_OPTIONS,
   FREE_NUTRIENT_SORT_OPTIONS,
   PRO_NUTRIENT_SORT_OPTIONS,
+  NUTRIENT_SORT_LABELS,
+  NUTRIENT_SORT_FIELD,
 } from '../src/logic/recipeSort.ts'
 import {
   totalCookedLogPhotoBytes,
@@ -7447,17 +7455,12 @@ eq(
   const rLow = mkRecipe(2, '低カロリー', [{ name: '砂糖', amount: '10', unit: 'g' }], 200)
   const rUnknown = mkRecipe(3, '算出不能', [{ name: '謎のたべもの', amount: '適量', unit: '' }], 300)
   const values = buildNutrientSortValues([rHigh, rLow, rUnknown])
-  eq('栄養並び替え値: 名寄せできないレシピはnull(算出不能・5項目とも)', values.get(3), {
-    kcal: null,
-    proteinG: null,
-    fatG: null,
-    carbG: null,
-    saltG: null,
-  })
-  eq('栄養並び替え値: 計算できるレシピは正の数値', values.get(2).kcal > 0, true)
   eq(
-    '栄養並び替え値: 1食あたり(servingsで割った値)である',
-    Math.abs(values.get(1).kcal - values.get(2).kcal * 10) < 1e-6,
+    // 2026-08-19 便HU・⑯: 顔ぶれが増えても書き写しが古くならないよう、
+    // 「顔ぶれの全項目がnull」という規則で見る
+    '栄養並び替え値: 名寄せできないレシピは顔ぶれの全項目がnull(算出不能)',
+    NUTRITION_DISPLAY_KEYS.length > 0 &&
+      NUTRITION_DISPLAY_KEYS.every((key) => values.get(3)[key] === null),
     true,
   )
   const results = [rUnknown, rHigh, rLow].map((recipe) => ({
@@ -7510,26 +7513,48 @@ eq(
     [7, 6],
   )
 
-  // 並べ替えオプションの分類(便T-4: 5項目まとめてPro機能化)
-  eq('NUTRIENT_SORT_OPTIONS: 5項目(カロリー/たんぱく質/塩分/脂質/糖質)', [...NUTRIENT_SORT_OPTIONS], [
-    'kcal',
-    'protein',
-    'salt',
-    'fat',
-    'carb',
-  ])
   eq('isNutrientSortOption: kcalは栄養並び替え', isNutrientSortOption('kcal'), true)
   eq('isNutrientSortOption: updatedは栄養並び替えでない', isNutrientSortOption('updated'), false)
 
-  // 2026-08-01 線引きB'(オーナー確定): 栄養並び替えのうちカロリー順だけを無料に開放し、
-  // たんぱく質・塩分・脂質・糖質はPro維持。並べ替えの計算自体は無料/Proで同じ
-  eq('FREE_NUTRIENT_SORT_OPTIONS: 無料はカロリー順のみ', [...FREE_NUTRIENT_SORT_OPTIONS], ['kcal'])
-  eq('PRO_NUTRIENT_SORT_OPTIONS: 残り4項目はPro', [...PRO_NUTRIENT_SORT_OPTIONS], [
-    'protein',
-    'salt',
-    'fat',
-    'carb',
-  ])
+  // ---- ⑯ 並び替えの顔ぶれ＝栄養表示の顔ぶれ(2026-08-19 便HU・オーナー
+  // 「ラインナップをいつもの栄養価にして。糖質は炭水化物？鉄も入ってない」) ----
+  // 顔ぶれを書き写して並べると、項目が増えたときに書き写しの方が古くなって当たらなくなる。
+  // ここでは「栄養表示に出している項目の集合」と「並び替えで選べる項目の集合」が
+  // 一致することだけを規則で見る(項目が増えても自動で見張りの対象に入る)。
+  {
+    const sortFields = NUTRIENT_SORT_OPTIONS.map((option) => NUTRIENT_SORT_FIELD[option])
+    // 集合が空のまま「一致した」と合格に倒れないよう、先に数え上げが効いていることを確かめる
+    eq(
+      '⑯ 顔ぶれの照合が空振りしていない(並び替え・表示とも項目がある)',
+      sortFields.length > 0 && NUTRITION_DISPLAY_KEYS.length > 0,
+      true,
+    )
+    eq('⑯ 並び替えの顔ぶれに同じ項目が2回出ていない', sortFields.length, new Set(sortFields).size)
+    eq(
+      '⑯ 並び替えで選べる栄養の顔ぶれが栄養表示の顔ぶれと同じ',
+      [...sortFields].sort(),
+      [...NUTRITION_DISPLAY_KEYS].sort(),
+    )
+    // 名前も表示と同じにする(「糖質」と書いてあるのに中身は炭水化物=CHOCDF-、を二度と作らない)
+    const labelMismatch = NUTRIENT_SORT_OPTIONS.filter(
+      (option) => NUTRIENT_SORT_LABELS[option] !== nutritionLabelFor(NUTRIENT_SORT_FIELD[option]),
+    ).map(
+      (option) =>
+        `${option}: 並び替え「${NUTRIENT_SORT_LABELS[option]}」/ 栄養表示「${nutritionLabelFor(NUTRIENT_SORT_FIELD[option])}」`,
+    )
+    eq('⑯ 並び替えの項目名が栄養表示の項目名と一致する', labelMismatch, [])
+  }
+
+  // 2026-08-01 線引きB'(オーナー確定): 栄養並び替えのうちカロリー(エネルギー)順だけを無料に開放し、
+  // 残りはPro維持。並べ替えの計算自体は無料/Proで同じ。
+  // 2026-08-19 便HU: 顔ぶれが5→8項目に増えたので、Pro側は「顔ぶれからエネルギーを引いた残り」
+  // という規則で見る(顔ぶれが増えても無料側が勝手に増えない、という線引きの見張りになる)
+  eq('FREE_NUTRIENT_SORT_OPTIONS: 無料はエネルギー順のみ', [...FREE_NUTRIENT_SORT_OPTIONS], ['kcal'])
+  eq(
+    "PRO_NUTRIENT_SORT_OPTIONS: 顔ぶれからエネルギーを引いた残り全部がPro(線引きB')",
+    [...PRO_NUTRIENT_SORT_OPTIONS],
+    NUTRIENT_SORT_OPTIONS.filter((option) => option !== 'kcal'),
+  )
   eq('isFreeSortOption: カロリー順は無料で使える', isFreeSortOption('kcal'), true)
   eq('isFreeSortOption: 塩分順はPro', isFreeSortOption('salt'), false)
   eq('isFreeSortOption: たんぱく質順はPro', isFreeSortOption('protein'), false)
@@ -8568,6 +8593,168 @@ eq(
     ),
     [],
   )
+}
+
+// ---------- ⑬ 料理の種別は複数選べる(2026-08-19 便HU・オーナー
+// 「料理の種別については複数選択できても良いと思う」) ----------
+// 1つも選んでいない＝絞らない。選んだ種別の**どれか**に当たるレシピが残る(和集合)。
+{
+  const baseOptions = {
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    tag: 'all',
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  }
+  const mk = (id, title, dishType) => ({
+    id,
+    title,
+    tags: [],
+    searchWords: [],
+    ingredients: [],
+    dishType,
+  })
+  const recipes = [
+    mk(1, '豚の生姜焼き', 'main'),
+    mk(2, 'ほうれん草のおひたし', 'side'),
+    mk(3, 'わかめのみそ汁', 'soup'),
+    mk(4, '水ようかん', 'dessert'),
+  ]
+  const ids = (options) => searchRecipes(recipes, { ...baseOptions, ...options }).map((r) => r.recipe.id)
+  // 掴めていないまま合格に倒れないよう、まず絞らないときに全品出ることを確かめる
+  eq('⑬ 種別を1つも選んでいなければ全品出る', ids({}), [1, 2, 3, 4])
+  eq('⑬ 空の配列も「絞らない」と同じ', ids({ dishTypes: [] }), [1, 2, 3, 4])
+  eq('⑬ 1つ選べばその種別だけ', ids({ dishTypes: ['main'] }), [1])
+  eq('⑬ 2つ選ぶとどちらかに当たる品が出る(和集合)', ids({ dishTypes: ['main', 'soup'] }), [1, 3])
+  eq('⑬ 4区分すべてを選ぶと全品出る(区分は重ならず全部を覆う)', ids({ dishTypes: ['main', 'side', 'soup', 'dessert'] }), [1, 2, 3, 4])
+}
+
+// ---------- ⑮ 「高たんぱく」は絞り込みのタグ候補に出さない(2026-08-19 便HU・オーナー指示) ----------
+// レシピに付いているタグそのものは消さない（データを失う方に倒さない）。
+// 候補に出さないだけなので、タグを指定した絞り込み自体は従来どおり効く。
+{
+  const { filterTagUsageCounts, FILTER_HIDDEN_TAGS } = await import('../src/logic/search.ts')
+  const withTags = (id, tags) => ({ id, title: `品${id}`, tags, searchWords: [], ingredients: [] })
+  const recipes = [
+    withTags(1, ['高たんぱく', '和食']),
+    withTags(2, ['高たんぱく', '和食']),
+    withTags(3, ['高たんぱく']),
+    withTags(4, ['作り置き']),
+  ]
+  eq('⑮ 隠すタグの一覧に「高たんぱく」が入っている', [...FILTER_HIDDEN_TAGS].includes('高たんぱく'), true)
+  // 前提: 生の集計では「高たんぱく」がいちばん多い＝隠さなければ必ず候補の先頭に出る
+  eq(
+    '⑮ 前提: 生の集計では「高たんぱく」が数えられている',
+    tagUsageCounts(recipes, 6).map((u) => u.tag),
+    ['高たんぱく', '和食', '作り置き'],
+  )
+  eq(
+    '⑮ 絞り込みの候補からは「高たんぱく」が消える',
+    filterTagUsageCounts(recipes, 6).map((u) => u.tag),
+    ['和食', '作り置き'],
+  )
+  eq(
+    '⑮ 隠したぶんで候補の枠が減らない(上限まで他のタグが入る)',
+    filterTagUsageCounts(recipes, 1).map((u) => u.tag),
+    ['和食'],
+  )
+  // レシピ側のタグは残っている＝データは失っていない
+  eq(
+    '⑮ レシピの「高たんぱく」タグは残っている(絞り込みの指定は今までどおり効く)',
+    searchRecipes(recipes, {
+      query: '',
+      ingredients: '',
+      time: 'all',
+      effort: 'all',
+      tag: '高たんぱく',
+      favoriteOnly: false,
+      excludeNg: false,
+      quickOnly: false,
+      ngIngredients: [],
+    }).map((r) => r.recipe.id),
+    [1, 2, 3],
+  )
+}
+
+// ---------- ⑭ 検索したキーワードをタグとして登録する(2026-08-19 便HU・オーナー
+// 「キーワード検索して結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して。
+// もちろん削除もできるように」) ----------
+// 測るのは①登録したタグで実際に絞り込めること ②消せること の2つ。
+// 「登録＝いま検索に一致している品にまとめてタグを付ける」なので、
+// 付いた品が絞り込みで戻ってくるところまでを通しで見る。
+{
+  const {
+    tagFromQuery,
+    recipeIdsMissingTag,
+    countRecipesWithTag,
+    tagsWithAdded,
+    tagsWithRemoved,
+    keywordTagsWith,
+    keywordTagsWithout,
+  } = await import('../src/logic/tagRegister.ts')
+  const searchOptions = (tag) => ({
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    tag,
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  })
+  // 検索語からタグ名を作る
+  eq('⑭ 前後の空白は落とす', tagFromQuery('  作り置き  '), '作り置き')
+  eq('⑭ 語の間の空白は1つにまとめる(検索は空白区切りでもタグ名は1つ)', tagFromQuery('鶏　むね'), '鶏 むね')
+  eq('⑭ 空の検索語ではタグを作らない', tagFromQuery('   '), null)
+
+  const mk = (id, title, tags) => ({
+    id,
+    title,
+    tags,
+    searchWords: [title],
+    ingredients: [{ name: title }],
+    cookedLogs: [],
+  })
+  let recipes = [mk(1, 'から揚げ', []), mk(2, 'から揚げ丼', ['和食']), mk(3, '肉じゃが', [])]
+  const tag = tagFromQuery('から揚げ')
+  // いま検索に一致している品＝タグを付ける相手。すでに付いている品は数えない
+  const hits = searchRecipes(recipes, { ...searchOptions('all'), query: 'から揚げ' })
+  eq('⑭ 前提: 検索に一致した品が2品ある(空振りしていない)', hits.map((r) => r.recipe.id), [1, 2])
+  const targets = recipeIdsMissingTag(hits.map((r) => r.recipe), tag)
+  eq('⑭ 押す前に見せる件数＝まだそのタグが付いていない品の数', targets, [1, 2])
+
+  // 登録: 対象の品にタグを足す(DBの書き込みと同じ足し方をここで再現する)
+  recipes = recipes.map((r) => (targets.includes(r.id) ? { ...r, tags: tagsWithAdded(r.tags, tag) } : r))
+  eq('⑭ 登録したタグで実際に絞り込める', searchRecipes(recipes, searchOptions(tag)).map((r) => r.recipe.id), [1, 2])
+  eq('⑭ 一致しなかった品にはタグが付かない', recipes.find((r) => r.id === 3).tags, [])
+  eq('⑭ もともと付いていたタグは消えない', recipes.find((r) => r.id === 2).tags, ['和食', 'から揚げ'])
+  eq('⑭ そのタグが付いている品数を数えられる(絞り込みのチップに出す数)', countRecipesWithTag(recipes, tag), 2)
+  // 2回目の登録では付ける相手がいない＝同じタグを二重に付けない
+  const hitsAgain = searchRecipes(recipes, { ...searchOptions('all'), query: 'から揚げ' })
+  eq('⑭ 前提: 2回目も同じ2品が検索に一致する', hitsAgain.map((r) => r.recipe.id), [1, 2])
+  eq(
+    '⑭ もう一度登録しても付ける相手はいない',
+    recipeIdsMissingTag(hitsAgain.map((r) => r.recipe), tag),
+    [],
+  )
+
+  // 登録したタグの控え(設定に持つ一覧)。消せるようにするために、どれが検索から作ったタグかを覚える
+  let keywordTags = keywordTagsWith([], tag)
+  eq('⑭ 登録したタグを控える', keywordTags, ['から揚げ'])
+  eq('⑭ 同じタグを2回登録しても控えは増えない', keywordTagsWith(keywordTags, tag), ['から揚げ'])
+
+  // 削除: 付けた品からタグを外す＝登録前の状態に戻る(取り返しがつく)
+  recipes = recipes.map((r) => ({ ...r, tags: tagsWithRemoved(r.tags, tag) }))
+  keywordTags = keywordTagsWithout(keywordTags, tag)
+  eq('⑭ 消すと、そのタグでは1品も出なくなる', searchRecipes(recipes, searchOptions(tag)).map((r) => r.recipe.id), [])
+  eq('⑭ 消しても他のタグは残る', recipes.find((r) => r.id === 2).tags, ['和食'])
+  eq('⑭ 消すとレシピそのものは残る', recipes.map((r) => r.id), [1, 2, 3])
+  eq('⑭ 控えからも消える', keywordTags, [])
 }
 
 // ---------- jaWrap: 文節折返し(BudouX・2026-07-11) ----------
@@ -17710,26 +17897,27 @@ eq(
     // dishType 未設定＝推定に倒す(材料の豚肉から主菜)
     ffDish(5, '肉じゃが', undefined, ['豚肉', 'じゃがいも']),
   ]
-  const ffIds = (dishType) =>
-    searchRecipes(ffRecipes, { ...ffBase, dishType }).map((r) => r.recipe.id)
-  eq('FF-DISH すべては絞らない', ffIds('all'), [1, 2, 3, 4, 5])
-  eq('FF-DISH 主菜(未設定は推定で主菜に入る)', ffIds('main'), [1, 5])
-  eq('FF-DISH 副菜', ffIds('side'), [2])
-  eq('FF-DISH 汁物', ffIds('soup'), [3])
-  eq('FF-DISH その他', ffIds('dessert'), [4])
+  // 2026-08-19 便HU・⑬: 1つだけ選ぶ形から複数選べる形（dishTypes）に変えた
+  const ffIds = (dishTypes) =>
+    searchRecipes(ffRecipes, { ...ffBase, dishTypes }).map((r) => r.recipe.id)
+  eq('FF-DISH 何も選んでいなければ絞らない', ffIds([]), [1, 2, 3, 4, 5])
+  eq('FF-DISH 主菜(未設定は推定で主菜に入る)', ffIds(['main']), [1, 5])
+  eq('FF-DISH 副菜', ffIds(['side']), [2])
+  eq('FF-DISH 汁物', ffIds(['soup']), [3])
+  eq('FF-DISH その他', ffIds(['dessert']), [4])
   eq(
     'FF-DISH 4区分を合わせると全件になる(取りこぼしが出ない)',
-    [...ffIds('main'), ...ffIds('side'), ...ffIds('soup'), ...ffIds('dessert')].sort(),
+    ffIds(['main', 'side', 'soup', 'dessert']),
     [1, 2, 3, 4, 5],
   )
   eq(
     'FF-DISH 項目を渡さない呼び出し側は従来どおり絞らない(献立のレシピ選択・テンプレ画面)',
-    searchRecipes(ffRecipes, { ...ffBase, dishType: undefined }).map((r) => r.recipe.id),
+    searchRecipes(ffRecipes, { ...ffBase, dishTypes: undefined }).map((r) => r.recipe.id),
     [1, 2, 3, 4, 5],
   )
   eq(
     'FF-DISH 他の絞り込みと重ねられる',
-    searchRecipes(ffRecipes, { ...ffBase, dishType: 'main', query: '照り焼き' }).map(
+    searchRecipes(ffRecipes, { ...ffBase, dishTypes: ['main'], query: '照り焼き' }).map(
       (r) => r.recipe.id,
     ),
     [1],
@@ -20767,10 +20955,16 @@ Aみりん 大さじ1
     // 分け合う形にしたので、そのクラス名を**使っている**ファイルも窓1枚として数える
     // （読み込みの行は使ったことにならないので数から外す）。見張る中身は変えていない
     const heBody = src.replace(/import\s[\s\S]*?from\s+'[^']+'/g, '')
+    // 2026-08-19 便HU: `data-no-scroll-lock` の印が付いた全面の下敷きは数から引く。
+    // これは「窓」ではなく、開いているパネルの外のタップを受け止めるだけの透明な下敷きで、
+    // 後ろの一覧は今までどおり送れるのが正しい（止めると、パネルを開いたまま一覧を
+    // 送れなくなる＝便FFで作った動きが壊れる）。印が無い全面の窓は今までどおり数えるので、
+    // 同じファイルに本物の窓が増えたときは、この見張りがちゃんと赤くなる
     const overlays =
       (heBody.match(/fixed inset-0/g) ?? []).length +
-      (heBody.match(/DIALOG_BACKDROP_CLS/g) ?? []).length
-    if (overlays === 0) continue
+      (heBody.match(/DIALOG_BACKDROP_CLS/g) ?? []).length -
+      (heBody.match(/data-no-scroll-lock/g) ?? []).length
+    if (overlays <= 0) continue
     if (heOverlayExempt.has(rel)) continue
     const locks = (src.match(/useScrollLock\(/g) ?? []).length
     if (locks < overlays) heMissingLock.push(`${rel}(窓${overlays}/止める呼び出し${locks})`)

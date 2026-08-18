@@ -18,8 +18,12 @@ export type TagFilter = 'all' | string
  * 未設定のレシピは料理名・材料からの推定に倒す。判定は献立の自動提案・
  * 「今日なに作る？」と同じ logic/mealPlan.ts recipeDishType に一本化する
  * ＝同じ料理が画面によって主菜だったり副菜だったりしないようにするため。
+ *
+ * 2026-08-19 便HU（オーナー「料理の種別については複数選択できても良いと思う」）:
+ * 1つだけ選ぶ形（'all' か1区分）から**複数選べる形**（選んだ区分の和集合）に変えた。
+ * 何も選んでいない状態＝絞らない、なので 'all' に当たる値は持たない。
  */
-export type DishTypeFilter = 'all' | DishType
+export type DishTypeFilter = DishType
 
 export interface SearchOptions {
   /** 料理名・材料名・タグのテキスト検索 */
@@ -30,10 +34,11 @@ export interface SearchOptions {
   effort: EffortFilter
   tag: TagFilter
   /**
-   * 料理の種別で絞る（任意・2026-08-10 便FF）。未指定＝絞らない。
+   * 料理の種別で絞る（任意・2026-08-10 便FF → 2026-08-19 便HUで複数選択に）。
+   * 未指定・空配列＝絞らない。複数入れたときは**そのどれかに当たる**レシピが残る（和集合）。
    * 任意項目にしてあるので、この絞り込みを使わない呼び出し側（献立のレシピ選択ピッカー等）は据え置きでよい
    */
-  dishType?: DishTypeFilter
+  dishTypes?: readonly DishTypeFilter[]
   favoriteOnly: boolean
   /** NG食材を含むレシピを結果から隠す */
   excludeNg: boolean
@@ -56,7 +61,7 @@ export const defaultSearchOptions: Omit<SearchOptions, 'ngIngredients'> = {
   time: 'all',
   effort: 'all',
   tag: 'all',
-  dishType: 'all',
+  dishTypes: [],
   favoriteOnly: false,
   excludeNg: false,
   quickOnly: false,
@@ -110,6 +115,27 @@ export function tagUsageCounts(recipes: { tags: string[] }[], limit: number): Ta
     .map(([tag, count]) => ({ tag, count }))
 }
 
+/**
+ * レシピ一覧の絞り込みのタグ候補に出さないタグ（2026-08-19 便HU・⑮ オーナー指示
+ * 「『高たんぱく』のタグは絞り込み欄から削除」）。
+ *
+ * **レシピに付いているタグそのものは消さない**（同梱の基本レシピ15品に付いている。
+ * データを失う方には倒さない）。候補のチップに出さないだけなので、
+ * タグを指定した絞り込み自体（searchRecipes の tag）は今までどおり効く。
+ */
+export const FILTER_HIDDEN_TAGS: readonly string[] = ['高たんぱく']
+
+/**
+ * 絞り込みパネルに出すタグ候補（2026-08-19 便HU・⑮）。
+ * 出さないタグを**先に**取り除いてから上位 limit 件を取る
+ * ＝隠したぶんだけ候補の枠が減る、ということが起きない。
+ */
+export function filterTagUsageCounts(recipes: { tags: string[] }[], limit: number): TagUsage[] {
+  const hidden = new Set(FILTER_HIDDEN_TAGS)
+  const visible = recipes.map((recipe) => ({ tags: recipe.tags.filter((tag) => !hidden.has(tag)) }))
+  return tagUsageCounts(visible, limit)
+}
+
 /** 件数を捨ててタグ名だけを返す版（献立のレシピ選択ピッカーが使う） */
 export function topTagsByUsage(recipes: { tags: string[] }[], limit: number): string[] {
   return tagUsageCounts(recipes, limit).map((t) => t.tag)
@@ -159,10 +185,11 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
     if (!matchesTime(recipe, options.time)) continue
     if (options.effort !== 'all' && recipe.effortLevel !== options.effort) continue
     if (options.tag !== 'all' && !recipe.tags.includes(options.tag)) continue
-    // 料理の種別（2026-08-10 便FF）。未設定のレシピも recipeDishType が必ず4区分のどれかに
-    // 割り当てるので、4つを合わせると一覧の全レシピをちょうど覆う（取りこぼしが出ない）
-    if (options.dishType != null && options.dishType !== 'all') {
-      if (recipeDishType(recipe) !== options.dishType) continue
+    // 料理の種別（2026-08-10 便FF → 2026-08-19 便HUで複数選択）。未設定のレシピも
+    // recipeDishType が必ず4区分のどれかに割り当てるので、4つを合わせると一覧の全レシピを
+    // ちょうど覆う（取りこぼしが出ない）。何も選んでいなければ絞らない
+    if (options.dishTypes != null && options.dishTypes.length > 0) {
+      if (!options.dishTypes.includes(recipeDishType(recipe))) continue
     }
     if (options.favoriteOnly && !recipe.isFavorite) continue
     if (options.excludeNg && hasNgIngredient(recipe, options.ngIngredients)) continue

@@ -10,6 +10,9 @@ import {
   nutritionSourceName,
   type ExcludedReason,
   type NutrientTotals,
+  NUTRITION_DISPLAY_KEYS,
+  nutritionLabelFor,
+  nutritionUnitFor,
 } from '../logic/nutrition'
 import { roundVegetableGrams, vegetableGramsOf } from '../logic/nutritionBalance'
 import type { Recipe } from '../db/types'
@@ -256,27 +259,17 @@ function NutrientTable({
   const scaleForDisplay = (key: keyof NutrientTotals): number =>
     roundNutrient(key, per[key]) * displayServings
 
-  // 食物繊維・鉄・カルシウムは既存のたんぱく質・脂質・炭水化物の並びに続けて置き、
-  // 塩分相当量は従来どおり最後に置く(注意して見る項目なので末尾で目に留まりやすく)
-  const proRows: { key: keyof NutrientTotals; label: string }[] = [
-    { key: 'proteinG', label: ja.nutrition.proteinLabel },
-    { key: 'fatG', label: ja.nutrition.fatLabel },
-    { key: 'carbG', label: ja.nutrition.carbLabel },
-    { key: 'fiberG', label: ja.nutrition.fiberLabel },
-    { key: 'ironMg', label: ja.nutrition.ironLabel },
-    { key: 'calciumMg', label: ja.nutrition.calciumLabel },
-    { key: 'saltG', label: ja.nutrition.saltLabel },
-  ]
-  const rows: { key: keyof NutrientTotals; label: string }[] = [
-    { key: 'kcal', label: ja.nutrition.kcalLabel },
-    ...(unlocked ? proRows : []),
-  ]
+  // 顔ぶれ(食物繊維・鉄・カルシウムを含む8項目)と名前・単位は logic/nutrition.ts に一本化する
+  // (2026-08-19 便HU・⑯)。レシピ一覧の「栄養価で並び替え」も同じ顔ぶれを使うので、
+  // ここに項目を足せば並び替えの選択肢にも同じ名前で出る(食い違ったら test-logic の⑯が赤くなる)。
+  // 無料版で出すのはエネルギーだけ(2026-08-01 線引きB')
+  const rows: { key: keyof NutrientTotals; label: string }[] = NUTRITION_DISPLAY_KEYS.filter(
+    (key) => unlocked || key === 'kcal',
+  ).map((key) => ({ key, label: nutritionLabelFor(key) }))
 
   const fmt = (key: keyof NutrientTotals, value: number): string => {
     const n = roundNutrient(key, value).toLocaleString()
-    if (key === 'kcal') return `${n} ${ja.nutrition.kcalUnit}`
-    if (key === 'ironMg' || key === 'calciumMg') return `${n} ${ja.nutrition.mgUnit}`
-    return `${n} ${ja.nutrition.gramUnit}`
+    return `${n} ${nutritionUnitFor(key)}`
   }
   // 野菜量も「1人分 × 人数」で全量を作る（栄養8項目と同じ規則。表示どうしが噛み合うように）
   const vegetablePerServing = roundVegetableGrams(vegetableGramsOf(nutrition))
@@ -309,7 +302,12 @@ function NutrientTable({
           </span>
           {rows.map(({ key, label }) => (
             <div key={key} className="contents">
-              <span className="text-sm">{label}</span>
+              {/* data-nutrient-label: 栄養価の表示に出ている項目の顔ぶれを、画面から読み取れるようにする
+                  印（2026-08-19 便HU・⑯）。レシピ一覧の「栄養価で並び替え」の顔ぶれが
+                  これと一致していることを scripts/e2e-smoke.mjs が確かめる */}
+              <span className="text-sm" data-nutrient-label={key}>
+                {label}
+              </span>
               <span className="text-right text-base font-bold text-accent-ink tabular-nums">
                 {fmt(key, per[key])}
               </span>

@@ -1,34 +1,60 @@
 import type { Recipe } from '../db/types'
 import { titleKanaKey } from './kana'
 import { makePantryMatcher } from './pantry'
-import { computeRecipeNutrition } from './nutrition'
+import {
+  computeRecipeNutrition,
+  nutritionLabelFor,
+  nutritionUnitFor,
+  type NutrientTotals,
+} from './nutrition'
 import type { SearchResult } from './search'
 
 /**
- * 栄養並び替えの5種類（カロリー・たんぱく質・塩分・脂質・糖質）。
+ * 栄養並び替えの顔ぶれ（2026-08-19 便HU・⑯で栄養価の表示と同じ8項目にそろえた。
+ * 並びも表示と同じ＝エネルギー・たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量）。
+ *
+ * オーナー「ラインナップをいつもの栄養価にして。糖質は炭水化物？鉄も入ってない」の2点は
+ * 実データで確かめた結果どちらもそのとおりだった:
+ *  (a) 旧「糖質」の中身は成分表の CHOCDF-（炭水化物）で、食物繊維を引いた糖質ではない
+ *      → **中身は変えず名前を炭水化物に合わせた**（ja.nutrition.carbLabel）
+ *  (b) 鉄（ironMg）はデータにも栄養8項目の表示にもあるのに、並び替えだけ抜けていた
+ *      → 食物繊維・カルシウムと合わせて足した
+ * 無料/Proの線引き（FREE_NUTRIENT_SORT_OPTIONS）は動かしていない＝無料はエネルギー順だけ。
+ *
+ * 旧: 栄養並び替えの5種類（カロリー・たんぱく質・塩分・脂質・糖質）。
  * 2026-07-16 便T: 従来はカロリーだけ無料でも選べたが、5項目まとめてPro機能化した
  * （オーナー指示による確定・docs/34便T-4）。
  * 2026-08-01 線引きB'（オーナー確定）: このうち**カロリー順だけを無料に開放**し、
  * たんぱく質・塩分・脂質・糖質はProのまま（FREE_NUTRIENT_SORT_OPTIONS参照）。
  * 並べ替えの計算そのものは無料/Proで同じ（ここは選択肢の見せ方＝UIのゲートだけを分ける）。
  */
-export const NUTRIENT_SORT_OPTIONS = ['kcal', 'protein', 'salt', 'fat', 'carb'] as const
+export const NUTRIENT_SORT_OPTIONS = [
+  'kcal',
+  'protein',
+  'fat',
+  'carb',
+  'fiber',
+  'iron',
+  'calcium',
+  'salt',
+] as const
 export type NutrientSortOption = (typeof NUTRIENT_SORT_OPTIONS)[number]
 
 /**
  * 無料でも選べる栄養並び替え（2026-08-01 線引きB'・オーナー確定）。
- * カロリー順だけ。無料版で見える栄養の値がエネルギーだけなので、
+ * エネルギー（カロリー）順だけ。無料版で見える栄養の値がエネルギーだけなので、
  * 「画面に出ている値で並べ替えられる」という対応関係を保つ。
+ * 2026-08-19 便HU・⑯で顔ぶれが8項目に増えたが、無料側はここを動かしていない。
  */
 export const FREE_NUTRIENT_SORT_OPTIONS: readonly NutrientSortOption[] = ['kcal']
 
-/** Pro解錠が要る栄養並び替え（たんぱく質・塩分・脂質・糖質） */
+/** Pro解錠が要る栄養並び替え（顔ぶれからエネルギーを引いた残り全部） */
 export const PRO_NUTRIENT_SORT_OPTIONS: readonly NutrientSortOption[] = NUTRIENT_SORT_OPTIONS.filter(
   (option) => !FREE_NUTRIENT_SORT_OPTIONS.includes(option),
 )
 
 
-/** レシピ一覧の並べ替えオプション（kcal/protein/salt/fat/carb=栄養並び替え。2026-07-13 Fable設計、
+/** レシピ一覧の並べ替えオプション（栄養並び替えは NutrientSortOption の8項目。2026-07-13 Fable設計、
  * 2026-07-16 便Tで塩分・脂質・糖質を追加。旧'theme'（基本レシピ順）は配布テーマ全廃で無意味化した
  * ため2026-07-24 便BN・タスク4で廃止。sessionStorageに旧'theme'が残っていても、sortResultsは
  * 該当なしで更新順のタイブレークに落ちるだけなので後方互換上の問題はない） */
@@ -77,8 +103,9 @@ export type SortDirection = 'asc' | 'desc'
  * 並べ替えの種類ごとの既定方向。「あいうえお順（五十音順）」だけ昇順（あ→ん）が自然で、
  * それ以外（更新順=新しい順・よく使う順=多い順・在庫一致順=多い順）は降順が自然なため、
  * 種類を切り替えたときはこの既定値にリセットする（呼び出し側で使う）。
- * 栄養並び替えの既定は「たんぱく質だけ多い方から（高たんぱく志向）・それ以外（カロリー・塩分・脂質・糖質）は
- * 少ない方から（ヘルシー志向）」（2026-07-13にカロリーで導入した方針を2026-07-16に塩分・脂質・糖質にも適用。
+ * 栄養並び替えの既定は「たんぱく質・食物繊維・鉄・カルシウムは多い方から・エネルギー・脂質・
+ * 炭水化物・塩分相当量は少ない方から（ヘルシー志向）」（2026-07-13にカロリーで導入した方針を
+ * 2026-07-16に塩分・脂質にも適用、2026-08-19 便HUで足した3項目にも同じ考え方で向きを決めた。
  * どれも昇順/降順トグルで反転できる）。
  */
 export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
@@ -90,30 +117,48 @@ export const defaultSortDirection: Record<RecipeSortOption, SortDirection> = {
   recentCooked: 'desc',
   kcal: 'asc',
   protein: 'desc',
-  salt: 'asc',
   fat: 'asc',
   carb: 'asc',
+  // 2026-08-19 便HU・⑯で足した3項目。食物繊維・鉄・カルシウムは「多い方から探す」のが自然
+  // （たんぱく質と同じ向き。少ない方から見たいときは昇順/降順トグルで反転できる）
+  fiber: 'desc',
+  iron: 'desc',
+  calcium: 'desc',
+  salt: 'asc',
 }
 
 /**
  * 栄養並び替え用の1食（1人分）あたりの値。null は算出不能（材料が名寄せできない自作レシピ等）で、
  * 昇順/降順に関わらず常に末尾へ回す（2026-07-16 便T: 塩分・脂質・糖質を追加）
  */
-export interface NutrientSortValue {
-  kcal: number | null
-  proteinG: number | null
-  fatG: number | null
-  carbG: number | null
-  saltG: number | null
+export type NutrientSortValue = {
+  [K in keyof NutrientTotals]: number | null
 }
 
 /** 並べ替えオプション → NutrientSortValue のキーの対応表（sortResultsと一覧カードの値表示で共用） */
 export const NUTRIENT_SORT_FIELD: Record<NutrientSortOption, keyof NutrientSortValue> = {
   kcal: 'kcal',
   protein: 'proteinG',
-  salt: 'saltG',
   fat: 'fatG',
   carb: 'carbG',
+  fiber: 'fiberG',
+  iron: 'ironMg',
+  calcium: 'calciumMg',
+  salt: 'saltG',
+}
+
+/**
+ * 栄養並び替えの項目名（2026-08-19 便HU・⑯でここへ集約）。
+ * 従来は RecipesPage が自前の文言を持っていたため、栄養表示の名前と食い違っても誰も気づかなかった
+ * （並び替え「糖質」／表示「炭水化物」）。名前は栄養表示（nutritionLabelFor）から引く。
+ */
+export const NUTRIENT_SORT_LABELS: Record<NutrientSortOption, string> = Object.fromEntries(
+  NUTRIENT_SORT_OPTIONS.map((option) => [option, nutritionLabelFor(NUTRIENT_SORT_FIELD[option])]),
+) as Record<NutrientSortOption, string>
+
+/** 並び替えの項目に対応する単位（kcal / g / mg）。表示と同じものを使う */
+export function nutrientSortUnit(option: NutrientSortOption): string {
+  return nutritionUnitFor(NUTRIENT_SORT_FIELD[option])
 }
 
 /**
@@ -129,14 +174,28 @@ export function buildNutrientSortValues(recipes: Recipe[]): Map<number, Nutrient
     if (recipe.id === undefined) continue
     const nutrition = computeRecipeNutrition(recipe)
     if (nutrition.items.length === 0) {
-      map.set(recipe.id, { kcal: null, proteinG: null, fatG: null, carbG: null, saltG: null })
-    } else {
       map.set(recipe.id, {
-        kcal: nutrition.perServing.kcal,
-        proteinG: nutrition.perServing.proteinG,
-        fatG: nutrition.perServing.fatG,
-        carbG: nutrition.perServing.carbG,
-        saltG: nutrition.perServing.saltG,
+        kcal: null,
+        proteinG: null,
+        fatG: null,
+        carbG: null,
+        saltG: null,
+        fiberG: null,
+        ironMg: null,
+        calciumMg: null,
+      })
+    } else {
+      // 顔ぶれが増えても書き写しが古くならないよう、1食あたりの値をそのまま写す
+      const per = nutrition.perServing
+      map.set(recipe.id, {
+        kcal: per.kcal,
+        proteinG: per.proteinG,
+        fatG: per.fatG,
+        carbG: per.carbG,
+        saltG: per.saltG,
+        fiberG: per.fiberG,
+        ironMg: per.ironMg,
+        calciumMg: per.calciumMg,
       })
     }
   }
@@ -186,7 +245,7 @@ function compareAscending(
  * 省略時はその並べ替えの既定方向（defaultSortDirection）を使うため、
  * 昇順/降順トグルを触っていないユーザーには従来どおりの並びを保つ。
  * 同点のときは常に更新順（新しい順）を維持する（directionの影響を受けない）。
- * 栄養並び替え（kcal/protein/salt/fat/carb）では nutrientValues（buildNutrientSortValues の結果）を渡すこと。
+ * 栄養並び替え（NUTRIENT_SORT_OPTIONS）では nutrientValues（buildNutrientSortValues の結果）を渡すこと。
  * 値が null（算出不能）のレシピは昇順/降順に関わらず常に末尾に回す
  */
 export function sortResults(

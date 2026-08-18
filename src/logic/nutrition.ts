@@ -9,6 +9,7 @@ import {
 } from './amount'
 import { VOLUME_UNIT_FACTORS } from './unitGrams'
 import { matchAssumedGrams } from './amountAssumption'
+import { ja } from '../i18n/ja'
 
 /**
  * 栄養価の自動概算（M6-1・Pro機能）の純ロジック。
@@ -73,6 +74,59 @@ export interface NutrientTotals {
   ironMg: number
   /** カルシウム(mg) */
   calciumMg: number
+}
+
+/**
+ * 栄養表示に出す項目の顔ぶれと並び（2026-08-19 便HU・⑯）。
+ *
+ * レシピの「栄養価の概算」(NutritionTeaser)・献立の栄養表示・レシピ一覧の栄養価での並び替えは、
+ * **同じ顔ぶれ**でなければならない（オーナー「ラインナップをいつもの栄養価にして」）。
+ * 顔ぶれを1か所に置き、表示側も並び替え側もここを基準にする
+ * ＝項目が増えたときに片方だけ古いままにならない。
+ * 並びは無料で見えるエネルギーを先頭に、注意して見る塩分相当量を末尾に置く従来どおりの順。
+ */
+export const NUTRITION_DISPLAY_KEYS: readonly (keyof NutrientTotals)[] = [
+  'kcal',
+  'proteinG',
+  'fatG',
+  'carbG',
+  'fiberG',
+  'ironMg',
+  'calciumMg',
+  'saltG',
+]
+
+/**
+ * 栄養項目の画面に出す名前（2026-08-19 便HU・⑯）。
+ * 表示と並び替えで違う名前を出さないよう、名前もここに集約する
+ * （並び替えが「糖質」、表示が「炭水化物」と食い違っていた。中身は炭水化物=CHOCDF-）。
+ */
+export function nutritionLabelFor(key: keyof NutrientTotals): string {
+  switch (key) {
+    case 'kcal':
+      return ja.nutrition.kcalLabel
+    case 'proteinG':
+      return ja.nutrition.proteinLabel
+    case 'fatG':
+      return ja.nutrition.fatLabel
+    case 'carbG':
+      return ja.nutrition.carbLabel
+    case 'fiberG':
+      return ja.nutrition.fiberLabel
+    case 'ironMg':
+      return ja.nutrition.ironLabel
+    case 'calciumMg':
+      return ja.nutrition.calciumLabel
+    case 'saltG':
+      return ja.nutrition.saltLabel
+  }
+}
+
+/** 栄養項目の単位（kcal / mg / g）。表示と並び替えで同じ単位を出すために共用する */
+export function nutritionUnitFor(key: keyof NutrientTotals): string {
+  if (key === 'kcal') return ja.nutrition.kcalUnit
+  if (key === 'ironMg' || key === 'calciumMg') return ja.nutrition.mgUnit
+  return ja.nutrition.gramUnit
 }
 
 /** 計算対象外になった理由 */

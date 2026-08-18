@@ -6,6 +6,9 @@ import {
   nutritionSourceName,
   roundNutrient,
   type NutrientTotals,
+  NUTRITION_DISPLAY_KEYS,
+  nutritionLabelFor,
+  nutritionUnitFor,
 } from '../logic/nutrition'
 import {
   DAILY_GUIDES,
@@ -310,12 +313,9 @@ export default function NutritionBalancePanel({
   )
 }
 
-/** 表示用の単位付き整形（NutritionTeaserのUnlockedBodyと同じ規則） */
+/** 表示用の単位付き整形（単位も logic/nutrition.ts に一本化・2026-08-19 便HU・⑯） */
 function formatNutrient(key: keyof NutrientTotals, value: number): string {
-  const n = roundNutrient(key, value).toLocaleString()
-  if (key === 'kcal') return `${n} ${ja.nutrition.kcalUnit}`
-  if (key === 'ironMg' || key === 'calciumMg') return `${n} ${ja.nutrition.mgUnit}`
-  return `${n} ${ja.nutrition.gramUnit}`
+  return `${roundNutrient(key, value).toLocaleString()} ${nutritionUnitFor(key)}`
 }
 
 /**
@@ -333,20 +333,11 @@ function NutrientRows({
   vegetableG: number
   unlocked: boolean
 }) {
-  // 食塩相当量もPro側（2026-08-01 線引きB'）。8項目の末尾に置く並びは従来どおり
-  const proRows: { key: keyof NutrientTotals; label: string }[] = [
-    { key: 'proteinG', label: ja.nutrition.proteinLabel },
-    { key: 'fatG', label: ja.nutrition.fatLabel },
-    { key: 'carbG', label: ja.nutrition.carbLabel },
-    { key: 'fiberG', label: ja.nutrition.fiberLabel },
-    { key: 'ironMg', label: ja.nutrition.ironLabel },
-    { key: 'calciumMg', label: ja.nutrition.calciumLabel },
-    { key: 'saltG', label: ja.nutrition.saltLabel },
-  ]
-  const rows: { key: keyof NutrientTotals; label: string }[] = [
-    { key: 'kcal', label: ja.nutrition.kcalLabel },
-    ...(unlocked ? proRows : []),
-  ]
+  // 食塩相当量もPro側（2026-08-01 線引きB'）。顔ぶれ・名前は logic/nutrition.ts に一本化
+  // （2026-08-19 便HU・⑯。栄養価の表示とレシピ一覧の並び替えで違う顔ぶれを出さない）
+  const rows: { key: keyof NutrientTotals; label: string }[] = NUTRITION_DISPLAY_KEYS.filter(
+    (key) => unlocked || key === 'kcal',
+  ).map((key) => ({ key, label: nutritionLabelFor(key) }))
   return (
     <div
       className="rounded-md border border-edge p-[var(--space-sm)]"

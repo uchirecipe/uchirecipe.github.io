@@ -28,9 +28,17 @@ import {
   Download,
   Trash2,
   X,
+  ChevronDown,
+  Tag,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { listRecipes, deleteRecipes, countRecipesDeleteImpact } from '../db/recipes'
+import {
+  listRecipes,
+  deleteRecipes,
+  countRecipesDeleteImpact,
+  addTagToRecipes,
+  removeTagFromRecipes,
+} from '../db/recipes'
 import { buildBulkDeleteConfirm } from '../logic/recipeDelete'
 import { useSelectedRecipesExport } from '../components/useSelectedRecipesExport'
 import ChoiceDialog from '../components/ChoiceDialog'
@@ -45,12 +53,21 @@ import { useTodayList } from '../db/todayList'
 import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
-  tagUsageCounts,
+  filterTagUsageCounts,
   type DishTypeFilter,
   type EffortFilter,
   type TagFilter,
   type TimeFilter,
 } from '../logic/search'
+import {
+  tagFromQuery,
+  recipeIdsMissingTag,
+  countRecipesWithTag,
+  keywordTagsWith,
+  keywordTagsWithout,
+  buildKeywordTagAddConfirm,
+  buildKeywordTagRemoveConfirm,
+} from '../logic/tagRegister'
 import { DISH_TYPE_OPTIONS } from '../logic/homeSuggest'
 import {
   sortResults,
@@ -61,7 +78,8 @@ import {
   NUTRIENT_SORT_OPTIONS,
   FREE_NUTRIENT_SORT_OPTIONS,
   NUTRIENT_SORT_FIELD,
-  type NutrientSortOption,
+  NUTRIENT_SORT_LABELS,
+  nutrientSortUnit,
   type RecipeSortOption,
   type SortDirection,
 } from '../logic/recipeSort'
@@ -108,15 +126,16 @@ const effortOptions: { value: EffortFilter; label: string }[] = [
 /**
  * 料理の種別の絞り込み（2026-08-10 便FF・オーナー要望「主菜副菜などでも絞り込みしたい」）。
  * 区分と並びはレシピ登録の「料理の種別」・献立の「今日なに作る？」と同じ4つを使う
- * （logic/homeSuggest.ts DISH_TYPE_OPTIONS）。4区分は互いに重ならず、合わせると全レシピを覆う
+ * （logic/homeSuggest.ts DISH_TYPE_OPTIONS）。4区分は互いに重ならず、合わせると全レシピを覆う。
+ *
+ * 2026-08-19 便HU・⑬（オーナー「料理の種別については複数選択できても良いと思う」）:
+ * **複数選べるチップ**にした（調理時間・手間レベルはプルダウンへ）。複数選べるプルダウンは
+ * スマホで押しづらく、選んでいる中身も閉じた状態から読めないため、種別だけはチップのまま残す。
+ * 押す回数は選ぶ1回で変わらない（従来の☑リストと同じ）。
  */
-const dishTypeOptions: { value: DishTypeFilter; label: string }[] = [
-  { value: 'all', label: ja.search.dishTypeAll },
-  ...DISH_TYPE_OPTIONS.map((value) => ({
-    value: value as DishTypeFilter,
-    label: ja.dishType[value],
-  })),
-]
+const dishTypeOptions: { value: DishTypeFilter; label: string }[] = DISH_TYPE_OPTIONS.map(
+  (value) => ({ value, label: ja.dishType[value] }),
+)
 
 /**
  * タグのチップに出す最大件数（「すべて」は別枠）。
@@ -135,20 +154,17 @@ const baseSortOptions: { value: RecipeSortOption; label: string }[] = [
   // 「基本レシピ順」は2026-07-24 便BN・タスク4で廃止(配布テーマ全廃で無意味化)
 ]
 
-/** 栄養並び替え5項目のラベル（2026-07-16 便T-4: カロリー・たんぱく質・塩分・脂質・糖質） */
-const nutrientSortLabels: Record<NutrientSortOption, string> = {
-  kcal: ja.search.sortKcal,
-  protein: ja.search.sortProtein,
-  salt: ja.search.sortSalt,
-  fat: ja.search.sortFat,
-  carb: ja.search.sortCarb,
-}
+/**
+ * 栄養並び替えの項目（2026-08-19 便HU・⑯で栄養価の表示と同じ8項目にそろえた）。
+ * 顔ぶれも名前も logic/recipeSort.ts が栄養表示（logic/nutrition.ts）から引くので、
+ * この画面で項目名を書き写さない＝表示と並び替えで違う名前が出ない
+ */
 const nutrientSortOptions: { value: RecipeSortOption; label: string }[] = NUTRIENT_SORT_OPTIONS.map(
-  (value) => ({ value, label: nutrientSortLabels[value] }),
+  (value) => ({ value, label: NUTRIENT_SORT_LABELS[value] }),
 )
-/** 無料版で選べる栄養並び替え（2026-08-01 線引きB': カロリー順のみ） */
+/** 無料版で選べる栄養並び替え（2026-08-01 線引きB': エネルギー順のみ） */
 const freeNutrientSortOptions: { value: RecipeSortOption; label: string }[] =
-  FREE_NUTRIENT_SORT_OPTIONS.map((value) => ({ value, label: nutrientSortLabels[value] }))
+  FREE_NUTRIENT_SORT_OPTIONS.map((value) => ({ value, label: NUTRIENT_SORT_LABELS[value] }))
 
 /**
  * 並び替え／絞り込みパネルの箱（2026-08-10 便FF）。
@@ -307,6 +323,51 @@ function CheckList<T extends string>({
 }
 
 /**
+ * 1つだけ選ぶ絞り込みのプルダウン（2026-08-19 便HU・⑬ オーナー
+ * 「料理の種別・時間・手間レベルは複数選択できないのでプルダウンにして見た目をシンプルに」）。
+ *
+ * 調理時間・手間レベルは1つしか選べないので、☑付きの縦リスト（CheckList）だと
+ * 選択肢の数だけ縦に伸びる。閉じた1行にすると絞り込みパネル全体が短くなり、
+ * 下にある欄までスクロールせずに届く。
+ *
+ * 高さは .tap-target（44px）と同じ 3rem を下限にして、押せる大きさを小さくしない。
+ * appearance-none + 自前の▼で、端末ごとに違う既定の見た目に引きずられないようにする。
+ */
+function FilterSelect<T extends string>({
+  label,
+  options,
+  value,
+  onSelect,
+}: {
+  label: string
+  options: { value: T; label: string }[]
+  value: T
+  onSelect: (value: T) => void
+}) {
+  return (
+    <div className="relative mt-1">
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onSelect(e.target.value as T)}
+        className="tap-target w-full appearance-none rounded-md border border-edge bg-app py-3 pl-3 pr-10 text-sm font-bold text-ink"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        size={18}
+        aria-hidden
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-muted"
+      />
+    </div>
+  )
+}
+
+/**
  * 一覧の状態（検索・絞り込み・並べ替え・スクロール位置）の保存・復元用キー（sessionStorage）。
  *
  * 【2026-07-12 深夜フィードバックの再調査で原因判明・再設計】
@@ -337,8 +398,11 @@ type SavedListState = {
   time: TimeFilter
   effort: EffortFilter
   tag: TagFilter
-  /** 料理の種別で絞る（2026-08-10 便FF。旧セッションの保存値には無いので任意項目） */
-  dishType?: DishTypeFilter
+  /**
+   * 料理の種別で絞る（2026-08-10 便FF → 2026-08-19 便HU・⑬で複数選択に）。
+   * 旧セッションの保存値には無いので任意項目
+   */
+  dishTypes?: DishTypeFilter[]
   favoriteOnly: boolean
   excludeNg: boolean
   quickOnly: boolean
@@ -408,6 +472,61 @@ export default function RecipesPage() {
     setSortPanelOpen((open) => !open)
     setFilterPanelOpen(false)
   }
+  /**
+   * 開いているパネルを閉じる（2026-08-19 便HU・⑰）。
+   * 窓の外のタップ・パネルの「閉じる」ボタンのどちらもここを通る
+   * ＝どちらで閉じても起きることが1つしかない（絞り込みの条件には一切触らない）。
+   * 端末の「戻る」で閉じる仕組み（components/useOverlayDismiss.ts）を後から付けるときも、
+   * 閉じる処理としてこれを渡せばよい。
+   */
+  const closePanels = () => {
+    setSortPanelOpen(false)
+    setFilterPanelOpen(false)
+  }
+  const panelOpen = sortPanelOpen || filterPanelOpen
+  // パネル本体を包む入れ物。タップが「窓の中か外か」の判定に使う
+  const panelWrapRef = useRef<HTMLDivElement>(null)
+  /**
+   * 窓の外をタップしたら閉じる（2026-08-19 便HU・⑰ オーナー「並び替えと絞り込みの窓は、
+   * 窓の外タップでも閉じるようにして」）。
+   *
+   * 「窓の中か外か」は**指を置いた時点（pointerdown）で決める**。押した中身が押した結果
+   * 消えることがあるため（例:「条件をクリア」は押すと条件が無くなってボタン自体が消える）、
+   * 離した後（click）に調べると「もう画面に無い＝窓の外」と誤って読み、窓が勝手に閉じる。
+   * 実際に便HUの実機確認で「条件をクリアを押すと絞り込みの窓ごと閉じる」が起きた。
+   *
+   * 閉じるのは離したとき（click）だけ: 指を滑らせて一覧をスクロールしただけでは閉じない
+   * （料理中に片手で触る画面なので、スクロールの押し始めが「閉じる」に化けないようにする）。
+   * 並び替え/絞り込みのボタン自身は自前で開閉を持っているので、ここでは触らない
+   * （両方が働くと、押した瞬間に開いてすぐ閉じる）。
+   */
+  const pressedOutsideRef = useRef(false)
+  useEffect(() => {
+    if (!panelOpen) return
+    const isOutside = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false
+      if (panelWrapRef.current?.contains(target)) return false
+      if (target.closest('[data-panel-toggle]')) return false
+      return true
+    }
+    const onPointerDown = (e: PointerEvent) => {
+      pressedOutsideRef.current = isOutside(e.target)
+    }
+    const onClick = () => {
+      const outside = pressedOutsideRef.current
+      // キーボード操作など、指を置いた記録が無いまま来たときは閉じない側に倒す
+      pressedOutsideRef.current = false
+      if (outside) closePanels()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('click', onClick)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('click', onClick)
+      pressedOutsideRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelOpen])
   // 一覧の上に重ねて出すパネルの高さの上限(2026-08-10 便FF)。貼り付く検索バーの下端と
   // 下の固定バーの位置から実測する
   const topBarRef = useRef<HTMLDivElement>(null)
@@ -445,8 +564,13 @@ export default function RecipesPage() {
   const [time, setTime] = useState<TimeFilter>(saved?.time ?? 'all')
   const [effort, setEffort] = useState<EffortFilter>(saved?.effort ?? 'all')
   const [tag, setTag] = useState<TagFilter>(saved?.tag ?? 'all')
-  // 料理の種別(主菜・副菜・汁物・その他)で絞る(2026-08-10 便FF)
-  const [dishType, setDishType] = useState<DishTypeFilter>(saved?.dishType ?? 'all')
+  // 料理の種別(主菜・副菜・汁物・その他)で絞る(2026-08-10 便FF → 2026-08-19 便HU・⑬で複数選択)。
+  // 空＝絞らない。選んだ区分の**どれか**に当たるレシピが残る
+  const [dishTypes, setDishTypes] = useState<DishTypeFilter[]>(saved?.dishTypes ?? [])
+  const toggleDishType = (value: DishTypeFilter) =>
+    setDishTypes((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    )
   const [favoriteOnly, setFavoriteOnly] = useState(saved?.favoriteOnly ?? false)
   const [excludeNg, setExcludeNg] = useState(saved?.excludeNg ?? false)
   const [quickOnly, setQuickOnly] = useState(saved?.quickOnly ?? false)
@@ -523,11 +647,30 @@ export default function RecipesPage() {
    * 自分のタグだけが数え直される。
    * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
    */
+  /**
+   * 検索から登録したタグ（2026-08-19 便HU・⑭）。控えは設定に持ち、件数はいま一覧に出ている
+   * レシピから数える（チップの数字と、押したときに出てくる品数が必ず一致する）。
+   */
+  const keywordTags = useMemo(() => settings?.keywordTags ?? [], [settings?.keywordTags])
+  const keywordTagUsages = useMemo(
+    () =>
+      keywordTags.map((name) => ({
+        tag: name,
+        count: countRecipesWithTag(visibleRecipes ?? [], name),
+      })),
+    [keywordTags, visibleRecipes],
+  )
+
   const tagOptions = useMemo(() => {
-    const usages = tagUsageCounts(visibleRecipes ?? [], TAG_CHIP_LIMIT)
-    if (tag !== 'all' && !usages.some((u) => u.tag === tag)) {
-      const count = (visibleRecipes ?? []).filter((r) => r.tags.includes(tag)).length
-      usages.push({ tag, count })
+    // 検索から登録したタグは専用の欄（削除ボタン付き）に出すので、こちらには重ねて出さない
+    const registered = new Set(keywordTags)
+    const pool = (visibleRecipes ?? []).map((recipe) => ({
+      tags: recipe.tags.filter((name) => !registered.has(name)),
+    }))
+    // 2026-08-19 便HU・⑮: 「高たんぱく」は候補に出さない（logic/search.ts FILTER_HIDDEN_TAGS）
+    const usages = filterTagUsageCounts(pool, TAG_CHIP_LIMIT)
+    if (tag !== 'all' && !registered.has(tag) && !usages.some((u) => u.tag === tag)) {
+      usages.push({ tag, count: countRecipesWithTag(visibleRecipes ?? [], tag) })
     }
     return [
       { value: 'all' as TagFilter, label: ja.search.tagAll },
@@ -536,7 +679,7 @@ export default function RecipesPage() {
         label: ja.search.tagChip.replace('{name}', value).replace('{n}', String(count)),
       })),
     ]
-  }, [visibleRecipes, tag])
+  }, [visibleRecipes, tag, keywordTags])
 
   const results = useMemo(() => {
     if (!visibleRecipes) return undefined
@@ -546,7 +689,7 @@ export default function RecipesPage() {
       time,
       effort,
       tag,
-      dishType,
+      dishTypes,
       favoriteOnly,
       excludeNg,
       quickOnly,
@@ -562,7 +705,7 @@ export default function RecipesPage() {
     time,
     effort,
     tag,
-    dishType,
+    dishTypes,
     favoriteOnly,
     excludeNg,
     quickOnly,
@@ -582,7 +725,7 @@ export default function RecipesPage() {
     time !== 'all' ||
     effort !== 'all' ||
     tag !== 'all' ||
-    dishType !== 'all' ||
+    dishTypes.length > 0 ||
     favoriteOnly ||
     excludeNg ||
     quickOnly ||
@@ -606,7 +749,7 @@ export default function RecipesPage() {
         time,
         effort,
         tag,
-        dishType,
+        dishTypes,
         favoriteOnly,
         excludeNg,
         quickOnly,
@@ -620,7 +763,7 @@ export default function RecipesPage() {
       time,
       effort,
       tag,
-      dishType,
+      dishTypes,
       favoriteOnly,
       excludeNg,
       quickOnly,
@@ -671,7 +814,7 @@ export default function RecipesPage() {
       time,
       effort,
       tag,
-      dishType,
+      dishTypes,
       favoriteOnly,
       excludeNg,
       quickOnly,
@@ -947,7 +1090,7 @@ export default function RecipesPage() {
     setTime('all')
     setEffort('all')
     setTag('all')
-    setDishType('all')
+    setDishTypes([])
     setFavoriteOnly(false)
     setExcludeNg(false)
     setQuickOnly(false)
@@ -960,6 +1103,68 @@ export default function RecipesPage() {
     if (hideStarters) void updateSettings({ hideStarters: false })
   }
 
+  /**
+   * 検索したキーワードをタグとして登録する（2026-08-19 便HU・⑭）。
+   *
+   * 付ける相手は**押した時点でその検索に一致しているレシピ**のうち、まだそのタグが付いていない品。
+   * 何品に付くのかはボタンの文字に出したうえで、確認の窓でもう一度言う（規約F）。
+   */
+  const pendingKeywordTag = tagFromQuery(query)
+  const keywordTagTargets = useMemo(() => {
+    if (!pendingKeywordTag || !results) return []
+    return recipeIdsMissingTag(
+      results.map((r) => r.recipe),
+      pendingKeywordTag,
+    )
+  }, [pendingKeywordTag, results])
+  const [taggingBusy, setTaggingBusy] = useState(false)
+  const registerKeywordTag = async () => {
+    if (!pendingKeywordTag || keywordTagTargets.length === 0 || taggingBusy) return
+    setTaggingBusy(true)
+    try {
+      const untouchedCount = Math.max(0, (recipes?.length ?? 0) - keywordTagTargets.length)
+      const ok = await confirm(
+        buildKeywordTagAddConfirm({
+          tag: pendingKeywordTag,
+          targetCount: keywordTagTargets.length,
+          untouchedCount,
+        }),
+      )
+      if (!ok) return
+      const added = await addTagToRecipes(keywordTagTargets, pendingKeywordTag)
+      await updateSettings({ keywordTags: keywordTagsWith(settings?.keywordTags, pendingKeywordTag) })
+      setMessage(
+        ja.search.keywordTagAddedToast
+          .replace('{n}', String(added))
+          .replace('{name}', pendingKeywordTag),
+      )
+    } finally {
+      setTaggingBusy(false)
+    }
+  }
+  /**
+   * 登録したタグを削除する（2026-08-19 便HU・⑭「もちろん削除もできるように」）。
+   * そのタグが付いている**すべての**レシピから外し、控えからも消す。レシピは1品も消えない。
+   */
+  const removeKeywordTag = async (name: string) => {
+    if (taggingBusy) return
+    setTaggingBusy(true)
+    try {
+      const count = countRecipesWithTag(recipes ?? [], name)
+      const ok = await confirm(buildKeywordTagRemoveConfirm({ tag: name, count }))
+      if (!ok) return
+      const removed = await removeTagFromRecipes(name)
+      await updateSettings({ keywordTags: keywordTagsWithout(settings?.keywordTags, name) })
+      // そのタグで絞り込んでいたら「すべて」に戻す（押して外すチップごと消えるため）
+      if (tag === name) setTag('all')
+      setMessage(
+        ja.search.keywordTagRemovedToast.replace('{n}', String(removed)).replace('{name}', name),
+      )
+    } finally {
+      setTaggingBusy(false)
+    }
+  }
+
   const subLabelFor = (usedCount: number, wantedCount: number) => {
     if (wantedCount === 0) return undefined
     if (usedCount === wantedCount) return ja.search.usedAll
@@ -970,13 +1175,13 @@ export default function RecipesPage() {
 
   /**
    * 栄養価順のとき、カードに表示する「並び替えに使っている栄養価の値」(便T-7)。
-   * カロリー順→「◯kcal」、たんぱく質・塩分・脂質・糖質順→「◯g」。算出不能(null)なレシピは
+   * エネルギー順→「◯kcal」、鉄・カルシウム順→「◯mg」、それ以外→「◯g」。算出不能(null)なレシピは
    * 表示しない(undefinedを返し、RecipeCard側でバッジ自体を出さない)。
-   * 2026-08-01 線引きB': 無料で選べるカロリー順のときは無料でも値を出し、
-   * Pro側の項目(たんぱく質・塩分・脂質・糖質)はPro解錠時だけ出す
+   * 2026-08-01 線引きB': 無料で選べるエネルギー順のときは無料でも値を出し、
+   * Pro側の項目はPro解錠時だけ出す
    * (無料の画面に塩分の数値が出ないようにするための表示ゲート)。
    * 2026-07-16オーナー指示: 「たんぱく質: 24g」のように並び替え項目のラベルを値の前に付ける
-   * (ラベルはnutrientSortLabels=並び替えパネルの項目名と同じものを流用する)
+   * (ラベルはNUTRIENT_SORT_LABELS=並び替えパネルの項目名と同じものを流用する)
    */
   const nutrientBadgeTextFor = (recipeId: number | undefined): string | undefined => {
     if (!nutrientSortActive || !isNutrientSortOption(sort)) return undefined
@@ -986,9 +1191,9 @@ export default function RecipesPage() {
     const raw = nutrientSortValues?.get(recipeId)?.[field]
     if (raw == null) return undefined
     const rounded = roundNutrient(field, raw)
-    const value =
-      field === 'kcal' ? `${rounded}${ja.nutrition.kcalUnit}` : `${rounded}${ja.nutrition.gramUnit}`
-    return `${nutrientSortLabels[sort]}${ja.card.nutrientBadgeSeparator}${value}`
+    // 2026-08-19 便HU・⑯: 鉄・カルシウムはmgなので、単位も栄養表示と同じものを使う
+    const value = `${rounded}${nutrientSortUnit(sort)}`
+    return `${NUTRIENT_SORT_LABELS[sort]}${ja.card.nutrientBadgeSeparator}${value}`
   }
 
   return (
@@ -1062,6 +1267,22 @@ export default function RecipesPage() {
         </div>
       )}
 
+      {/* 窓の外をタップして閉じるための下敷き(2026-08-19 便HU・⑰)。
+          一覧のカードより上・貼り付く検索バー(z-20)より下に敷く＝
+          ①窓の外をタップしたとき、その下にあるレシピを一緒に開いてしまわない
+          ②検索欄・並び替え/絞り込みのボタンは今までどおり押せる
+          色は付けない(開いている窓の外が急に暗くならない)。指を滑らせたときは
+          今までどおり一覧がスクロールし、閉じるのはタップしたときだけ */}
+      {panelOpen && (
+        <div
+          data-testid="recipes-panel-scrim"
+          // 窓ではなくタップを受け止めるだけの下敷きなので、後ろの画面は止めない
+          // （scripts/test-logic.mjs の HE-3 はこの印が付いたものを窓として数えない）
+          data-no-scroll-lock
+          className="fixed inset-0 z-10"
+        />
+      )}
+
       {/* 検索バー＋並び替え/絞り込みボタン(2026-07-16 便T-1: 従来は絞り込みボタン1つに両方の
           パネルが入っていたが、別ボタンに分離した。列表示切替は件数表記の横へ移動(下記参照))。
 
@@ -1098,6 +1319,7 @@ export default function RecipesPage() {
         <button
           type="button"
           onClick={toggleSortPanel}
+          data-panel-toggle
           aria-expanded={sortPanelOpen}
           aria-label={ja.search.sortToggle}
           className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
@@ -1111,6 +1333,7 @@ export default function RecipesPage() {
         <button
           type="button"
           onClick={toggleFilterPanel}
+          data-panel-toggle
           aria-expanded={filterPanelOpen}
           aria-label={ja.search.filterToggle}
           className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-md border bg-surface shadow-sm ${
@@ -1137,7 +1360,10 @@ export default function RecipesPage() {
           revealExpanded は使わない(reveal={false})＝便EO・便ETの位置合わせと干渉しない。
           pointer-events-none/auto: 閉じているときも開いているときも、パネルの外側の余白で
           一覧のタップを奪わないようにする */}
-      <div className="pointer-events-none absolute inset-x-0 top-full px-[var(--space-md)]">
+      <div
+        ref={panelWrapRef}
+        className="pointer-events-none absolute inset-x-0 top-full px-[var(--space-md)]"
+      >
       {/* 並び替えパネル(2026-07-16 便T-1で絞り込みパネルから分離) */}
       <Collapse open={sortPanelOpen} reveal={false}>
         <div
@@ -1220,13 +1446,17 @@ export default function RecipesPage() {
             </Link>
           )}
 
-          {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
+          {/* 2026-08-19 便HU・⑰: 旧「決定」を廃止。選んだ時点で並び替えは既に効いていて、
+              このボタンは閉じるだけだったので、名前を動作に合わせた。
+              窓の外のタップと同じ closePanels を呼ぶ＝どちらで閉じても結果は変わらない。
+              押したことで何かが決まる見た目にしないよう、塗りではなく枠のボタンにする */}
           <button
             type="button"
-            onClick={() => setSortPanelOpen(false)}
-            className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+            data-testid="sort-panel-close"
+            onClick={closePanels}
+            className="tap-target mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
-            {ja.search.apply}
+            {ja.common.close}
           </button>
         </div>
       </Collapse>
@@ -1304,12 +1534,39 @@ export default function RecipesPage() {
               「主菜副菜などでも絞り込みしたい（タグ）」) ---
               主菜/副菜はタグではなくレシピの項目(dishType)なので、タグのチップに混ぜず
               専用の区分にする。区分名と選択肢はレシピ登録の「料理の種別」と同じ4つ。
-              調理時間・手間レベルと同じ☑付きの単一選択リストで出す(同じ「1つだけ選ぶ」操作を
-              画面の中で別々の見た目にしない) */}
+
+              2026-08-19 便HU・⑬(オーナー「料理の種別については複数選択できても良いと思う」):
+              **複数選べるチップ**にした。「主菜と汁物だけ見たい」のように、まとめて見たい組み合わせが
+              あるため。調理時間・手間レベルは1つしか選べないのでプルダウンにしたが、種別は
+              複数選べる以上プルダウンにすると「いま何を選んでいるか」が閉じた状態から読めない。
+              1つ選ぶのに要る操作は1回のままで、☑付きリストのときから増えていない */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.dishTypeTitle}
           </p>
-          <CheckList options={dishTypeOptions} value={dishType} onSelect={setDishType} />
+          <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            {/* 選んだ区分をまとめて外して元に戻すチップ。何も選んでいない＝すべて */}
+            <button
+              type="button"
+              data-testid="recipes-dishtype-chip"
+              onClick={() => setDishTypes([])}
+              aria-pressed={dishTypes.length === 0}
+              className={chipCls(dishTypes.length === 0)}
+            >
+              {ja.search.dishTypeAll}
+            </button>
+            {dishTypeOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                data-testid="recipes-dishtype-chip"
+                onClick={() => toggleDishType(option.value)}
+                aria-pressed={dishTypes.includes(option.value)}
+                className={chipCls(dishTypes.includes(option.value))}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
 
           {/* --- 区分③「タグ」(2026-07-24 便BN・タスク3で絞り込みパネルの上部へ移動 →
               2026-08-03 使用件数の集計に変更 → 2026-08-10 便FFで件数を併記・見出しを改称) ---
@@ -1333,6 +1590,44 @@ export default function RecipesPage() {
                   >
                     {option.label}
                   </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* 検索から登録したタグ(2026-08-19 便HU・⑭)。上のタグの候補とは別の欄にして、
+              1つずつ削除できるようにする。上の候補に混ぜると、削除の印を入れる場所が
+              チップの中しかなく、押せる大きさ(44px)を保てない。
+              同梱の基本レシピに元から付いているタグ(和食など)はこの欄に出ないので、
+              まとめて消せてしまうことがない */}
+          {keywordTagUsages.length > 0 && (
+            <>
+              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                {ja.search.keywordTagTitle}
+              </p>
+              <div className="mt-1 flex flex-col gap-[var(--space-sm)]">
+                {keywordTagUsages.map(({ tag: name, count }) => (
+                  <div key={name} className="flex items-center gap-[var(--space-sm)]">
+                    <button
+                      type="button"
+                      data-testid="recipes-keyword-tag-chip"
+                      onClick={() => setTag(name)}
+                      aria-pressed={tag === name}
+                      className={`min-w-0 flex-1 truncate text-left ${chipCls(tag === name)}`}
+                    >
+                      {ja.search.tagChip.replace('{name}', name).replace('{n}', String(count))}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipes-keyword-tag-remove"
+                      onClick={() => void removeKeywordTag(name)}
+                      disabled={taggingBusy}
+                      aria-label={ja.search.keywordTagRemoveAria.replace('{name}', name)}
+                      className="tap-target shrink-0 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted disabled:opacity-40"
+                    >
+                      {ja.search.keywordTagRemove}
+                    </button>
+                  </div>
                 ))}
               </div>
             </>
@@ -1386,11 +1681,18 @@ export default function RecipesPage() {
             )}
           </div>
 
-          {/* --- 区分⑤「調理時間」(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) --- */}
+          {/* --- 区分⑤「調理時間」(2026-07-16 UI総点検B-7: ☑付き単一選択リスト →
+              2026-08-19 便HU・⑬でプルダウン。1つしか選べない欄なので、閉じた1行にして
+              パネル全体を短くする) --- */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.timeTitle}
           </p>
-          <CheckList options={timeOptions} value={time} onSelect={setTime} />
+          <FilterSelect
+            label={ja.search.timeTitle}
+            options={timeOptions}
+            value={time}
+            onSelect={setTime}
+          />
           {/* 時短版の手順(quickSteps)があるレシピだけに絞る独立トグル。単一選択の並べ替え・時間・
               手間とは別枠のON/OFFなのでチップのまま維持する。有効な間は一覧カードの調理時間表示も
               quickCookMinutesに切り替わる(2026-07-11 オーナー実機フィードバック) */}
@@ -1404,19 +1706,26 @@ export default function RecipesPage() {
             </button>
           </div>
 
-          {/* --- 区分⑥「手間レベル」(2026-07-16 UI総点検B-7: ☑付き単一選択リストに変更) --- */}
+          {/* --- 区分⑥「手間レベル」(2026-07-16 UI総点検B-7: ☑付き単一選択リスト →
+              2026-08-19 便HU・⑬でプルダウン。調理時間と同じ理由) --- */}
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.effortTitle}
           </p>
-          <CheckList options={effortOptions} value={effort} onSelect={setEffort} />
+          <FilterSelect
+            label={ja.search.effortTitle}
+            options={effortOptions}
+            value={effort}
+            onSelect={setEffort}
+          />
 
-          {/* 条件は開いた瞬間から即時反映されるので、このボタンは閉じるだけ */}
+          {/* 2026-08-19 便HU・⑰: 旧「決定」を廃止（並び替えパネルと同じ理由・同じ形） */}
           <button
             type="button"
-            onClick={() => setFilterPanelOpen(false)}
-            className="mt-[var(--space-md)] w-full rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+            data-testid="filter-panel-close"
+            onClick={closePanels}
+            className="tap-target mt-[var(--space-md)] w-full rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
           >
-            {ja.search.apply}
+            {ja.common.close}
           </button>
         </div>
       </Collapse>
@@ -1469,6 +1778,29 @@ export default function RecipesPage() {
               )}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 検索したキーワードをタグとして登録する(2026-08-19 便HU・⑭ オーナー「キーワード検索して
+          結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して」)。
+          出すのは検索語があって、まだそのタグが付いていない品が1品以上あるときだけ。
+          何品に付くのかをボタンの文字に出す(規約F)＝押す前に分かる。
+          レシピを選んでいる最中は出さない(選ぶ操作の隣に、まとめて書き換える操作を並べない) */}
+      {!selecting && pendingKeywordTag && keywordTagTargets.length > 0 && (
+        <div className="mt-[var(--space-sm)]">
+          <button
+            type="button"
+            data-testid="keyword-tag-add"
+            onClick={() => void registerKeywordTag()}
+            disabled={taggingBusy}
+            className="tap-target inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-2.5 text-left text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+          >
+            <Tag size={16} className="shrink-0" aria-hidden />
+            {ja.search.keywordTagAdd
+              .replace('{n}', String(keywordTagTargets.length))
+              .replace('{q}', pendingKeywordTag)}
+          </button>
+          <p className="mt-1 text-xs text-ink-muted">{ja.search.keywordTagAddHint}</p>
         </div>
       )}
 

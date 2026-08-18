@@ -739,7 +739,7 @@ try {
   // 絞り込みを解除して以降のチェックに影響しないようにする
   await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
   await page.waitForTimeout(300)
-  await page.getByRole('button', { name: '決定' }).click()
+  await page.locator('[data-testid="filter-panel-close"]').click()
   await page.waitForTimeout(300)
 
   // --- LAYOUT-01: 一覧の表示形式切替(グリッド/リスト。2026-07-13 UI改善)。settingsに保存され
@@ -846,7 +846,7 @@ try {
   // 既定(更新順・降順)に戻して以降のチェックに影響しないようにする
   await page.getByRole('button', { name: '更新順', exact: true }).click()
   await page.waitForTimeout(200)
-  await page.getByRole('button', { name: '決定' }).click()
+  await page.locator('[data-testid="sort-panel-close"]').click()
   await page.waitForTimeout(300)
 
   // --- SMK-05: 人数変更で帯分数表示(2人分→3人分でじゃがいも3個→4と1/2個) ---
@@ -1520,32 +1520,43 @@ try {
   await page.locator('button[aria-label="並び替え"]').click()
   await page.waitForTimeout(300)
   const nutSortPanelText = await page.textContent('body')
-  // 見出しは2026-07-28 便BY/見せ方(c)で「栄養価で並び替え」→「栄養価で探す」に変更
-  // (操作名だけでなく何のために使うかが伝わる用途の言葉にする)
+  // 見出しは2026-08-19 便HU・⑯(オーナー指示)で「栄養価で探す」→「栄養価で並び替え」に戻した
   check(
-    "NUTSORT-01(B') 無料でも「栄養価で探す」の見出しが出る",
-    nutSortPanelText.includes('栄養価で探す'),
+    "NUTSORT-01(B') 無料でも「栄養価で並び替え」の見出しが出る",
+    nutSortPanelText.includes('栄養価で並び替え'),
   )
   check(
-    "NUTSORT-01(B') 無料のティーザーはPro側4項目の案内になっている",
-    nutSortPanelText.includes('たんぱく質・塩分・脂質・糖質で探す（Pro機能）'),
+    "NUTSORT-01(B'・便HU⑯) 無料のティーザーはPro側7項目の案内になっている",
+    nutSortPanelText.includes('エネルギー以外の7項目で並び替え（Pro機能）'),
   )
   check(
-    'NUTSORT-01(便BY) ティーザーに用途の説明が添えられる(たんぱく質が多い順・塩分が低い順)',
-    nutSortPanelText.includes('たんぱく質が多い順・塩分が低い順などで探せます'),
+    'NUTSORT-01(便HU⑯) ティーザーにPro側の項目名が並ぶ',
+    nutSortPanelText.includes(
+      'たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量で並び替えられます',
+    ),
   )
   check(
-    "NUTSORT-01(B'・便BY見せ方(c)) 無料の用途の言葉はカロリーの話になっている",
-    nutSortPanelText.includes('カロリーが低い順・高い順に並べ替えて、目的からレシピを探せます'),
+    "NUTSORT-01(B'・便BY見せ方(c)) 無料の用途の言葉はエネルギーの話になっている",
+    nutSortPanelText.includes('エネルギーが低い順・高い順に並べ替えて、目的からレシピを探せます'),
   )
   const freeNutrientButtons = await page.evaluate(() => {
-    const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']
+    // 栄養表示の8項目の名前。無料で選べるのがエネルギーだけであることを見る
+    const names = [
+      'エネルギー',
+      'たんぱく質',
+      '脂質',
+      '炭水化物',
+      '食物繊維',
+      '鉄',
+      'カルシウム',
+      '塩分相当量',
+    ]
     const buttons = Array.from(document.querySelectorAll('button'))
     return names.filter((n) => buttons.some((b) => b.textContent?.trim() === n))
   })
   check(
-    "NUTSORT-01(B') 無料で選べる栄養並び替えはカロリー順だけ",
-    freeNutrientButtons.length === 1 && freeNutrientButtons[0] === 'カロリー',
+    "NUTSORT-01(B') 無料で選べる栄養並び替えはエネルギー順だけ",
+    freeNutrientButtons.length === 1 && freeNutrientButtons[0] === 'エネルギー',
     `出た項目=${JSON.stringify(freeNutrientButtons)}`,
   )
   const teaserHref = await page.evaluate(() => {
@@ -1560,24 +1571,24 @@ try {
     teaserHref === '#/settings?section=pro&back=%2Frecipes',
     `href=${teaserHref}`,
   )
-  // 無料でもカロリー順が実際に使えること(選ぶとカードに「カロリー: ◯kcal」が出る)を確かめる。
+  // 無料でもエネルギー順が実際に使えること(選ぶとカードに「エネルギー: ◯kcal」が出る)を確かめる。
   // 「選択肢が出ている」だけでは、値の表示ゲート(nutrientBadgeTextFor)が閉じたままでも通ってしまう
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'カロリー',
+      (b) => b.textContent?.trim() === 'エネルギー',
     )
     button?.click()
   })
   await page.waitForTimeout(600)
   const freeKcalSortText = await page.textContent('body')
   check(
-    "NUTSORT-01(B') 無料でカロリー順を選ぶとカードに「カロリー: ◯kcal」が出る",
-    /カロリー: [\d,]+kcal/.test(freeKcalSortText),
-    'カロリー順のバッジが出ていない',
+    "NUTSORT-01(B') 無料でエネルギー順を選ぶとカードに「エネルギー: ◯kcal」が出る",
+    /エネルギー: [\d,]+kcal/.test(freeKcalSortText),
+    'エネルギー順のバッジが出ていない',
   )
   check(
-    "NUTSORT-01(B') 無料のカードに塩分の値は出ない",
-    !/塩分: /.test(freeKcalSortText),
+    "NUTSORT-01(B') 無料のカードに塩分相当量の値は出ない",
+    !/塩分相当量: /.test(freeKcalSortText),
   )
   // 並び替えを既定(更新順)に戻してから閉じる
   await page.evaluate(() => {
@@ -1587,8 +1598,9 @@ try {
     button?.click()
   })
   await page.waitForTimeout(400)
-  // パネルを閉じ、以降のチェックに影響しないようにする(条件は何も変えていない)
-  await page.getByRole('button', { name: '決定' }).click()
+  // パネルを閉じ、以降のチェックに影響しないようにする(条件は何も変えていない)。
+  // 2026-08-19 便HU・⑰: 旧「決定」は廃止し「閉じる」に置き換わった
+  await page.locator('[data-testid="sort-panel-close"]').click()
   await page.waitForTimeout(300)
   await page.evaluate(() => sessionStorage.removeItem('uchirecipe:recipesListState'))
 
@@ -3084,6 +3096,9 @@ try {
   // (コード検証ロジック自体はscripts/test-logic.mjsで別途確認済み)。他チェックのPro状態に
   // 影響しないよう、専用のbrowser/contextで完結させる(M6-1 2026-07-12) ---
   currentCheck = 'NUT-02'
+  // 栄養価の表示に出ている項目名（2026-08-19 便HU・⑯）。NUT-02で読み取り、NUTSORT-02で
+  // 「並び替えの顔ぶれと同じか」を照合する。読み取れないままだと下限の判定で落ちる
+  let nutritionPanelLabels = []
   {
     const nutBrowser = await chromium.launch()
     const nutContext = await nutBrowser.newContext()
@@ -3123,6 +3138,19 @@ try {
       await nutPage.waitForTimeout(300)
       const unlockedText = await nutPage.textContent('body')
       check('NUT-02 Pro解錠済みでたんぱく質が表示される', unlockedText.includes('たんぱく質'))
+      // 2026-08-19 便HU・⑯: 栄養価の表示に出ている項目名をそのまま読み取り、
+      // このあとのNUTSORT-02で「並び替えの顔ぶれと同じか」を照合するのに使う。
+      // 読み取れなかったときは空配列のまま＝NUTSORT-02側の下限(8項目以上)で必ず落ちる
+      nutritionPanelLabels = await nutPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-nutrient-label]')).map(
+          (el) => el.textContent?.trim() ?? '',
+        ),
+      )
+      check(
+        'NUT-02(便HU⑯) 栄養価の表示の項目名を読み取れている(8項目)',
+        nutritionPanelLabels.length === 8,
+        `読み取れた項目=${JSON.stringify(nutritionPanelLabels)}`,
+      )
       // DISC-01(2026-07-28 便BY): 解錠後に8項目表・期間の集計へ届く入口が設定のPro節にある
       {
         await nutPage.goto(`${BASE}/#/settings?section=pro`, { waitUntil: 'networkidle' })
@@ -3222,8 +3250,8 @@ try {
       await nutPage.waitForTimeout(300)
       const proSortPanelText = await nutPage.textContent('body')
       check(
-        'NUTSORT-02 Pro解錠済みでは「栄養価で探す」の区分見出しが出る',
-        proSortPanelText.includes('栄養価で探す'),
+        'NUTSORT-02 Pro解錠済みでは「栄養価で並び替え」の区分見出しが出る',
+        proSortPanelText.includes('栄養価で並び替え'),
       )
       check(
         'NUTSORT-02 Pro解錠済みではグレーのティーザー行(Pro機能)は出ない',
@@ -3233,25 +3261,29 @@ try {
         'NUTSORT-02(便BY) 解錠後も用途の説明が添えられる',
         proSortPanelText.includes('目的からレシピを探せます'),
       )
-      const proNutrientButtons = await nutPage.evaluate(() => {
-        const names = ['カロリー', 'たんぱく質', '塩分', '脂質', '糖質']
+      // 2026-08-19 便HU・⑯: 顔ぶれを栄養価の表示と同じ8項目にそろえた。
+      // ここでは「レシピを開いたときの栄養価の表示に出ている項目名」を実際に読み取り、
+      // その全部が並び替えの選択肢にも出ていることを見る＝顔ぶれを書き写して並べない
+      // (項目が増えても、書き写しが古くなって当たらなくなることがない)
+      const proNutrientButtons = await nutPage.evaluate((names) => {
         const buttons = Array.from(document.querySelectorAll('button'))
         return names.filter((n) => buttons.some((b) => b.textContent?.trim() === n))
-      })
+      }, nutritionPanelLabels)
       check(
-        'NUTSORT-02 Pro解錠済みでは栄養価5項目すべてが選択肢に出る',
-        proNutrientButtons.length === 5,
-        `出た項目=${JSON.stringify(proNutrientButtons)}`,
+        'NUTSORT-02(便HU⑯) 並び替えの顔ぶれが栄養価の表示の顔ぶれと同じ',
+        nutritionPanelLabels.length >= 8 &&
+          proNutrientButtons.length === nutritionPanelLabels.length,
+        `栄養価の表示=${JSON.stringify(nutritionPanelLabels)} 並び替えに出た項目=${JSON.stringify(proNutrientButtons)}`,
       )
-      // カロリー順: 既定は昇順(低い方から)。算出不能レシピは昇順・降順とも末尾
-      await nutPage.getByRole('button', { name: 'カロリー', exact: true }).click()
+      // エネルギー順: 既定は昇順(低い方から)。算出不能レシピは昇順・降順とも末尾
+      await nutPage.getByRole('button', { name: 'エネルギー', exact: true }).click()
       await nutPage.waitForTimeout(500)
       const kcalAscActive = await nutPage.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button'))
         const target = buttons.find((b) => b.textContent?.trim() === '昇順')
         return target ? target.className.includes('border-accent') : false
       })
-      check('NUTSORT-02 カロリー順の既定は昇順(低い方から)', kcalAscActive)
+      check('NUTSORT-02 エネルギー順の既定は昇順(低い方から)', kcalAscActive)
       const nutCardTitles = () =>
         nutPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
       const kcalAscTitles = await nutCardTitles()
@@ -3269,7 +3301,7 @@ try {
         )
         const badgeOf = (a) =>
           Array.from(a.querySelectorAll('span')).find((s) =>
-            /^カロリー: \d+(\.\d+)?kcal$/.test(s.textContent?.trim() ?? ''),
+            /^エネルギー: \d+(\.\d+)?kcal$/.test(s.textContent?.trim() ?? ''),
           )
         const unknownCard = links.find((a) => a.textContent?.includes('E2E栄養並び替え確認レシピ'))
         return {
@@ -3279,7 +3311,7 @@ try {
         }
       })
       check(
-        'NUTSORT-02 カロリー順の間、カードに「カロリー: ◯kcal」のラベル付きの値が表示される(便T-7-2)',
+        'NUTSORT-02 エネルギー順の間、カードに「エネルギー: ◯kcal」のラベル付きの値が表示される(便T-7-2)',
         kcalBadgeInfo.withBadge > 0,
         `バッジ付き=${kcalBadgeInfo.withBadge}/${kcalBadgeInfo.total}`,
       )
@@ -3298,7 +3330,7 @@ try {
         `末尾=${kcalDescTitles[kcalDescTitles.length - 1]}`,
       )
       check(
-        'NUTSORT-02 昇順と降順で先頭が入れ替わる(実際にカロリー順で並んでいる)',
+        'NUTSORT-02 昇順と降順で先頭が入れ替わる(実際にエネルギー順で並んでいる)',
         kcalAscTitles.length > 1 && kcalAscTitles[0] !== kcalDescTitles[0],
         `昇順先頭=${kcalAscTitles[0]} 降順先頭=${kcalDescTitles[0]}`,
       )
@@ -3334,7 +3366,7 @@ try {
       // 便T-7: 一覧(リスト)表示に切り替えても並び替え中の栄養価の値(行の右下)が出る。
       // 2026-08-10 便FF: 並べ替えパネルは一覧の上に重ねて出るようになり、開いている間は
       // 件数の行(表示形式の切替もここにある)がパネルの下に隠れる。先にパネルを閉じてから押す
-      await nutPage.getByRole('button', { name: '決定' }).click()
+      await nutPage.locator('[data-testid="sort-panel-close"]').click()
       await nutPage.waitForTimeout(400)
       await nutPage.locator('button[aria-label="リスト表示に切り替え"]').click()
       await nutPage.waitForTimeout(400)
@@ -18472,7 +18504,7 @@ try {
         ),
       )
       // パネルを閉じる
-      await pfPage.getByRole('button', { name: '決定' }).click()
+      await pfPage.locator('[data-testid="filter-panel-close"]').click()
       await pfPage.waitForTimeout(200)
 
       // 2) 在庫の「玉ねぎ」を1タップして「ある」にする(none→have)
@@ -18536,9 +18568,9 @@ try {
   // --- LISTPANEL-01: レシピ一覧の並び替え/絞り込みパネルの再構成(2026-08-03 オーナー指示・便DI)。
   //   ③ 並び替えパネルの「並び順」(昇順/降順)がパネルの一番上に来ていること
   //   ⑦ 並べ替えに「最近作った順」があること
-  //   ⑤ 絞り込みパネルの先頭が「どのレシピから探すか」(お気に入り等の頻用条件)で、
+  //   ⑤ 絞り込みパネルの先頭が「レシピを絞り込む」(お気に入り等の頻用条件)で、
   //      「タグ」「調理時間」「手間レベル」より上にあること
-  //      (見出しは2026-08-10 便FFで「表示するレシピ」から改称)
+  //      (見出しは2026-08-10 便FFで「表示するレシピ」→2026-08-19 便HU・⑫で現在の名前に改称)
   //   ④ 「タグ」が直書きの固定2択ではなく、実際の使用頻度で並んでいること
   //      (2026-08-10 便FFで見出しを「よく使うタグ」から改称し、チップに件数を併記)
   //   ⑥ 「自分で登録したレシピのみ」だけがONのときも「条件をクリア」が出て、押すと戻ること ---
@@ -18574,11 +18606,11 @@ try {
         dirTop != null && sortTop != null && dirTop < sortTop,
         `並び順=${dirTop} 並べ替え=${sortTop}`,
       )
-      const nutritionTop = await topOf('栄養価で探す')
+      const nutritionTop = await topOf('栄養価で並び替え')
       check(
         'LISTPANEL-01(③) 「並び順」は栄養価の区分よりも上(末尾に埋もれていない)',
         dirTop != null && nutritionTop != null && dirTop < nutritionTop,
-        `並び順=${dirTop} 栄養価で探す=${nutritionTop}`,
+        `並び順=${dirTop} 栄養価で並び替え=${nutritionTop}`,
       )
       const recentBtn = lpPage.getByRole('button', { name: '最近作った順', exact: true })
       check('LISTPANEL-01(⑦) 並べ替えに「最近作った順」がある', (await recentBtn.count()) === 1)
@@ -18603,23 +18635,24 @@ try {
       // 既定(更新順)に戻してパネルを閉じる
       await lpPage.getByRole('button', { name: '更新順', exact: true }).click()
       await lpPage.waitForTimeout(200)
-      await lpPage.getByRole('button', { name: '決定' }).click()
+      await lpPage.locator('[data-testid="sort-panel-close"]').click()
       await lpPage.waitForTimeout(300)
 
       // ---------- ⑤ 絞り込みパネルの区分見出しと並び ----------
       await lpPage.locator('button[aria-label="絞り込み"]').click()
       await lpPage.waitForTimeout(300)
-      const shownTop = await topOf('どのレシピから探すか')
+      // 見出しは2026-08-19 便HU・⑫(オーナー指示)で「どのレシピから探すか」→「レシピを絞り込む」
+      const shownTop = await topOf('レシピを絞り込む')
       const tagTop = await topOf('タグ')
       const timeTop = await topOf('調理時間')
       const effortTop = await topOf('手間レベル')
       const favTop = await topOf('お気に入り')
       check(
-        'LISTPANEL-01(⑤) 「どのレシピから探すか」の区分見出しがある',
+        'LISTPANEL-01(⑤・便HU⑫) 「レシピを絞り込む」の区分見出しがある',
         shownTop != null,
       )
       check(
-        'LISTPANEL-01(⑤) 「どのレシピから探すか」がタグ・調理時間・手間レベルより上にある',
+        'LISTPANEL-01(⑤) 「レシピを絞り込む」がタグ・調理時間・手間レベルより上にある',
         shownTop != null &&
           tagTop != null &&
           timeTop != null &&
@@ -18627,7 +18660,7 @@ try {
           shownTop < tagTop &&
           tagTop < timeTop &&
           timeTop < effortTop,
-        `どのレシピから探すか=${shownTop} タグ=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
+        `レシピを絞り込む=${shownTop} タグ=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
       )
       check(
         'LISTPANEL-01(⑤) 「お気に入り」が手間レベルより上に来た(旧: パネル末尾で見えなかった)',
@@ -18680,12 +18713,12 @@ try {
       await lpPage.getByRole('button', { name: '自分で登録したレシピのみ', exact: true }).click()
       await lpPage.waitForTimeout(400)
       // 自作レシピ0件だと一覧が0件になり、空状態側にも「条件をクリア」が出る。
-      // 見たいのは絞り込みパネルの中(=「どのレシピから探すか」の見出しより上)に出ているかどうか
+      // 見たいのは絞り込みパネルの中(=「レシピを絞り込む」の見出しより上)に出ているかどうか
       check(
         'LISTPANEL-01(⑥) 「自分で登録したレシピのみ」だけでも絞り込みパネルに「条件をクリア」が出る',
         await lpPage.evaluate(() => {
           const heading = Array.from(document.querySelectorAll('p')).find(
-            (n) => n.textContent?.trim() === 'どのレシピから探すか',
+            (n) => n.textContent?.trim() === 'レシピを絞り込む',
           )
           const clears = Array.from(document.querySelectorAll('button')).filter(
             (b) => b.textContent?.trim() === '条件をクリア',
@@ -18709,6 +18742,245 @@ try {
       )
     } finally {
       await lpBrowser.close()
+    }
+  }
+
+  // --- HU-TAG-01: 検索したキーワードをタグとして登録する（2026-08-19 便HU・⑭ オーナー
+  //     「キーワード検索して結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して。
+  //      もちろん削除もできるように」）。
+  //     測るのは「登録したタグで実際に絞り込めること」と「消せること」の2つ。
+  //     件数はすべて画面から読み取り、読み取れなかったときは必ず落ちる形にする
+  //     （読めなかったのに合格、に倒れないよう 0件・全件をそのまま合格にしない）。
+  //     あわせて ⑮「高たんぱく」がタグの候補から消えていること・レシピ側には残っていることも見る ---
+  currentCheck = 'HU-TAG-01'
+  {
+    const htBrowser = await chromium.launch()
+    const htContext = await htBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const htPage = await htContext.newPage()
+    htPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@HU-TAG-01] ${err.message}`)
+    })
+    try {
+      const htCards = () => htPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+      const htOpenFilter = async () => {
+        await htPage.locator('button[aria-label="絞り込み"]').click()
+        await htPage.waitForTimeout(400)
+      }
+      await htPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await htPage.waitForTimeout(2000)
+      const htTotal = await htCards()
+      check('HU-TAG-01 前提: 一覧にレシピが出ている', htTotal > 0, `全件=${htTotal}`)
+
+      // ---------- ⑮ 「高たんぱく」は絞り込みの候補に出さない（レシピ側のタグは残す） ----------
+      await htOpenFilter()
+      const htTagChips = await htPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="recipes-tag-chip"]')).map(
+          (b) => b.textContent?.trim() ?? '',
+        ),
+      )
+      check(
+        'HU-TAG-01(⑮) 前提: タグの候補を読み取れている',
+        htTagChips.length > 1,
+        `チップ=${JSON.stringify(htTagChips)}`,
+      )
+      check(
+        'HU-TAG-01(⑮) 「高たんぱく」が絞り込みのタグの候補に出ない',
+        !htTagChips.some((t) => t.startsWith('高たんぱく')),
+        `チップ=${JSON.stringify(htTagChips)}`,
+      )
+      await htPage.locator('[data-testid="filter-panel-close"]').click()
+      await htPage.waitForTimeout(300)
+      // レシピ側のタグは消していない＝検索で「高たんぱく」を打てば当たる（データを失っていない）
+      await htPage.locator('input[type="search"]').fill('高たんぱく')
+      await htPage.waitForTimeout(700)
+      const htProteinHits = await htCards()
+      check(
+        'HU-TAG-01(⑮) レシピに付いた「高たんぱく」タグは残っている(検索で当たる)',
+        htProteinHits > 0 && htProteinHits < htTotal,
+        `高たんぱくの検索結果=${htProteinHits} 全件=${htTotal}`,
+      )
+
+      // ---------- ⑭ 登録 → 絞り込みに出る → 実際に絞り込める ----------
+      await htPage.locator('input[type="search"]').fill('豆腐')
+      await htPage.waitForTimeout(800)
+      const htHits = await htCards()
+      check(
+        'HU-TAG-01 前提: 検索の結果が0件でも全件でもない',
+        htHits > 0 && htHits < htTotal,
+        `検索結果=${htHits} 全件=${htTotal}`,
+      )
+      const htAddButton = htPage.locator('[data-testid="keyword-tag-add"]')
+      const htAddLabel = ((await htAddButton.textContent()) ?? '').replace(/\u200b/g, '')
+      // 規約F: 押す前に「何品に付くのか」がボタンに出ている
+      const htShownCount = Number((htAddLabel.match(/(\d+)品/) ?? [])[1])
+      check(
+        'HU-TAG-01(⑭) 登録ボタンに「何品に付くのか」が出ていて、検索の結果と一致する',
+        Number.isFinite(htShownCount) && htShownCount === htHits,
+        `ボタン=${htAddLabel} 検索結果=${htHits}`,
+      )
+      await htAddButton.click()
+      await htPage.waitForTimeout(500)
+      const htConfirmText = ((await htPage.locator('[data-testid="confirm"]').innerText()) ?? '').replace(
+        /\u200b/g,
+        '',
+      )
+      check(
+        'HU-TAG-01(⑭) 確認の窓に「変わるもの」と「変わらないもの」が両方出る(規約F)',
+        htConfirmText.includes('付くもの') && htConfirmText.includes('変わらないもの'),
+        `窓=${htConfirmText}`,
+      )
+      await htPage.locator('[data-testid="confirm-ok"]').click()
+      await htPage.waitForTimeout(900)
+      // 検索語を消しても、タグとして残っていること
+      await htPage.locator('input[type="search"]').fill('')
+      await htPage.waitForTimeout(700)
+      check(
+        'HU-TAG-01(⑭) 検索語を消すと全件に戻る(前提)',
+        (await htCards()) === htTotal,
+        `全件=${htTotal}`,
+      )
+      await htOpenFilter()
+      const htKeywordChip = htPage.locator('[data-testid="recipes-keyword-tag-chip"]').first()
+      check(
+        'HU-TAG-01(⑭) 登録したタグが絞り込みに出る',
+        (await htKeywordChip.count()) === 1,
+        `登録タグのチップ数=${await htPage.locator('[data-testid="recipes-keyword-tag-chip"]').count()}`,
+      )
+      await htKeywordChip.click()
+      await htPage.waitForTimeout(600)
+      const htFiltered = await htCards()
+      check(
+        'HU-TAG-01(⑭) 登録したタグで実際に絞り込める(検索したときと同じ品数)',
+        htFiltered === htHits,
+        `タグで絞った件数=${htFiltered} 検索したときの件数=${htHits}`,
+      )
+
+      // ---------- ⑭ 削除できる ----------
+      await htPage.locator('[data-testid="recipes-keyword-tag-remove"]').first().click()
+      await htPage.waitForTimeout(500)
+      const htRemoveConfirm = ((await htPage.locator('[data-testid="confirm"]').innerText()) ?? '').replace(
+        /\u200b/g,
+        '',
+      )
+      check(
+        'HU-TAG-01(⑭) 削除の確認にも「消えるもの」と「残るもの」が両方出る(規約F)',
+        htRemoveConfirm.includes('消えるもの') && htRemoveConfirm.includes('残るもの'),
+        `窓=${htRemoveConfirm}`,
+      )
+      await htPage.locator('[data-testid="confirm-ok"]').click()
+      await htPage.waitForTimeout(1000)
+      check(
+        'HU-TAG-01(⑭) 削除すると登録したタグの欄から消える',
+        (await htPage.locator('[data-testid="recipes-keyword-tag-chip"]').count()) === 0,
+      )
+      check(
+        'HU-TAG-01(⑭) 削除してもレシピは1品も消えない',
+        (await htCards()) === htTotal,
+        `削除後=${await htCards()} 全件=${htTotal}`,
+      )
+    } finally {
+      await htBrowser.close()
+    }
+  }
+
+  // --- HU-CLOSE-01: 並び替え／絞り込みの窓は、窓の外をタップしても閉じる（2026-08-19 便HU・⑰
+  //     オーナー「窓の外タップでも閉じるようにして。この場合はややこしくなるので『決定』ボタン削除？」）。
+  //     旧「決定」は廃止したので、測るのは**2つの閉じ方で絞り込みの結果が同じ**になること
+  //     （＝閉じ方によって条件が変わったり、押していないレシピが開いたりしない）。
+  //     件数は画面から読み取り、読めないときは必ず落ちる（0件・全件をそのまま合格にしない）---
+  currentCheck = 'HU-CLOSE-01'
+  {
+    const hcBrowser = await chromium.launch()
+    const hcContext = await hcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const hcPage = await hcContext.newPage()
+    hcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@HU-CLOSE-01] ${err.message}`)
+    })
+    try {
+      const hcTitles = () =>
+        hcPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"] p.font-bold').allTextContents()
+      const hcOpenFilter = async () => {
+        await hcPage.locator('button[aria-label="絞り込み"]').click()
+        await hcPage.waitForTimeout(400)
+      }
+      const hcPanelVisible = () =>
+        hcPage.locator('[data-testid="recipes-filter-panel"]').first().isVisible()
+      await hcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await hcPage.waitForTimeout(2000)
+      const hcTotal = (await hcTitles()).length
+      check('HU-CLOSE-01 前提: 一覧にレシピが出ている', hcTotal > 0, `全件=${hcTotal}`)
+
+      // 旧「決定」は無い（名前が動作と食い違うボタンを残さない）
+      await hcOpenFilter()
+      check(
+        'HU-CLOSE-01(⑰) 絞り込みの窓に「決定」ボタンは無い',
+        (await hcPage.getByRole('button', { name: '決定', exact: true }).count()) === 0,
+      )
+      check(
+        'HU-CLOSE-01(⑰) 代わりに窓を閉じるボタンがある(何も押せない窓にしない)',
+        (await hcPage.locator('[data-testid="filter-panel-close"]').count()) === 1,
+      )
+
+      // 条件をかける（0件でも全件でもない状態を作る＝閉じ方の違いが結果に出る余地を残す）
+      await hcPage.getByRole('button', { name: '主菜', exact: true }).click()
+      await hcPage.waitForTimeout(300)
+      await hcPage.locator('select[aria-label="調理時間"]').selectOption({ label: '〜30分' })
+      await hcPage.waitForTimeout(500)
+      const hcFilteredInPanel = (await hcTitles()).length
+      check(
+        'HU-CLOSE-01(⑰) 前提: 条件をかけた結果が0件でも全件でもない',
+        hcFilteredInPanel > 0 && hcFilteredInPanel < hcTotal,
+        `条件つき=${hcFilteredInPanel} 全件=${hcTotal}`,
+      )
+
+      // (a) 「閉じる」ボタンで閉じる
+      await hcPage.locator('[data-testid="filter-panel-close"]').click()
+      await hcPage.waitForTimeout(500)
+      const hcByButton = await hcTitles()
+      check('HU-CLOSE-01(⑰) 「閉じる」で窓が閉じる', (await hcPanelVisible()) === false)
+
+      // (b) 同じ条件のまま開き直して、窓の外をタップして閉じる
+      await hcOpenFilter()
+      check('HU-CLOSE-01(⑰) 前提: 窓が開いている', (await hcPanelVisible()) === true)
+      await hcPage
+        .locator('[data-testid="recipes-panel-scrim"]')
+        .click({ position: { x: 195, y: 800 } })
+      await hcPage.waitForTimeout(500)
+      const hcByOutside = await hcTitles()
+      check('HU-CLOSE-01(⑰) 窓の外のタップで窓が閉じる', (await hcPanelVisible()) === false)
+      check(
+        'HU-CLOSE-01(⑰) 外タップで閉じたときと「閉じる」で閉じたときで、絞り込みの結果が同じ',
+        hcByButton.length === hcFilteredInPanel &&
+          hcByOutside.length === hcFilteredInPanel &&
+          JSON.stringify(hcByButton) === JSON.stringify(hcByOutside),
+        `閉じるボタン=${JSON.stringify(hcByButton)} 外タップ=${JSON.stringify(hcByOutside)}`,
+      )
+      check(
+        'HU-CLOSE-01(⑰) 窓の外のタップで、その下にあるレシピを開いてしまわない',
+        !/#\/recipes\/\d+/.test(hcPage.url()),
+        `URL=${hcPage.url()}`,
+      )
+
+      // 窓の中の操作では閉じない（「条件をクリア」のように押すと消えるものを押しても閉じない）
+      await hcOpenFilter()
+      await hcPage
+        .locator('[data-testid="recipes-filter-panel"]')
+        .getByRole('button', { name: '条件をクリア' })
+        .click()
+      await hcPage.waitForTimeout(500)
+      check(
+        'HU-CLOSE-01(⑰) 窓の中の「条件をクリア」を押しても窓は閉じない',
+        (await hcPanelVisible()) === true,
+      )
+      check(
+        'HU-CLOSE-01(⑰) 「条件をクリア」で全件に戻る',
+        (await hcTitles()).length === hcTotal,
+        `クリア後=${(await hcTitles()).length} 全件=${hcTotal}`,
+      )
+    } finally {
+      await hcBrowser.close()
     }
   }
 
@@ -19013,7 +19285,7 @@ try {
           '「よく使う順」は「作った！」の記録が多い順、「最近作った順」は記録がいちばん新しい順です',
         ),
       )
-      await w1Page.getByRole('button', { name: '決定' }).click()
+      await w1Page.locator('[data-testid="sort-panel-close"]').click()
       await w1Page.waitForTimeout(300)
 
       // C20: お気に入り0件の状態で「お気に入り」絞り込みをONにして0件にする
@@ -19021,7 +19293,7 @@ try {
       await w1Page.waitForTimeout(300)
       await w1Page.getByRole('button', { name: 'お気に入り', exact: true }).click()
       await w1Page.waitForTimeout(300)
-      await w1Page.getByRole('button', { name: '決定' }).click()
+      await w1Page.locator('[data-testid="filter-panel-close"]').click()
       await w1Page.waitForTimeout(400)
       const emptyText = await w1Page.textContent('body')
       check(
@@ -19578,7 +19850,7 @@ try {
       await s3Page.waitForTimeout(300)
       await s3Page.getByRole('button', { name: '五十音順' }).click()
       await s3Page.waitForTimeout(300)
-      await s3Page.getByRole('button', { name: '決定' }).click()
+      await s3Page.locator('[data-testid="sort-panel-close"]').click()
       await s3Page.waitForTimeout(600)
       const kanaTitles = await s3Page.evaluate(() =>
         Array.from(document.querySelectorAll('a[href^="#/recipes/"] p.line-clamp-2')).map((p) =>
@@ -29824,7 +30096,8 @@ try {
 
       // ---------- 区分の見出しと並び ----------
       const ffOrder = {
-        どのレシピから探すか: await ffHeadTop('どのレシピから探すか'),
+        // 2026-08-19 便HU・⑫で「どのレシピから探すか」から改称
+        レシピを絞り込む: await ffHeadTop('レシピを絞り込む'),
         料理の種別: await ffHeadTop('料理の種別'),
         タグ: await ffHeadTop('タグ'),
         食材で絞り込む: await ffHeadTop('食材で絞り込む'),
@@ -29838,7 +30111,7 @@ try {
         JSON.stringify(ffOrder),
       )
       check(
-        'FF-FILTER 区分の並びが「どのレシピから探すか→料理の種別→タグ→食材で絞り込む→調理時間→手間レベル」',
+        'FF-FILTER 区分の並びが「レシピを絞り込む→料理の種別→タグ→食材で絞り込む→調理時間→手間レベル」',
         ffTops.every((v, i) => i === 0 || (v != null && ffTops[i - 1] != null && ffTops[i - 1] < v)),
         JSON.stringify(ffOrder),
       )
@@ -29899,12 +30172,30 @@ try {
       )
 
       // ---------- 料理の種別で絞り込める ----------
+      // 2026-08-19 便HU・⑬: 複数選べるようになったので、1区分ずつ測るときは
+      // 毎回「すべて」に戻してから選ぶ(前に選んだ区分が残っていると足し算になる)
       const ffByType = {}
       for (const label of ['主菜', '副菜', '汁物', 'その他']) {
+        await ffClickIn('料理の種別', 'すべて')
+        await ffPage.waitForTimeout(200)
         check(`FF-FILTER 「料理の種別」に「${label}」がある`, await ffClickIn('料理の種別', label))
         await ffPage.waitForTimeout(400)
         ffByType[label] = await ffCards()
       }
+      // 2026-08-19 便HU・⑬(オーナー「料理の種別については複数選択できても良いと思う」):
+      // 2つ選ぶと、どちらかに当たる品が出る(和集合)。1つだけのときより必ず増える
+      await ffClickIn('料理の種別', 'すべて')
+      await ffPage.waitForTimeout(200)
+      await ffClickIn('料理の種別', '主菜')
+      await ffPage.waitForTimeout(300)
+      await ffClickIn('料理の種別', '汁物')
+      await ffPage.waitForTimeout(400)
+      const ffMainSoup = await ffCards()
+      check(
+        'FF-FILTER(便HU⑬) 料理の種別を2つ選ぶと、どちらかに当たる品が出る(主菜＋汁物)',
+        ffMainSoup === ffByType['主菜'] + ffByType['汁物'] && ffMainSoup < ffTotal,
+        `主菜=${ffByType['主菜']} 汁物=${ffByType['汁物']} 主菜+汁物=${ffMainSoup} 全件=${ffTotal}`,
+      )
       check(
         'FF-FILTER 主菜・副菜で件数がそれぞれ絞られる(0件でも全件でもない)',
         ffByType['主菜'] > 0 &&
