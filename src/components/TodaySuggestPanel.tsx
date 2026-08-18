@@ -280,6 +280,24 @@ export default function TodaySuggestPanel({
     setPinnedId(null)
     setPantryOnly((v) => !v)
   }
+  /**
+   * 絞り込みが1つでも効いているか（2026-08-18 便HS・軸8）。
+   * 効いていないのに「条件をクリア」を出すと、押しても何も変わらないボタンになる
+   * （レシピ一覧の空状態も、条件がかかっているときだけこのボタンを出している）。
+   */
+  const anyConditionActive =
+    condition !== 'any' ||
+    pantryOnly ||
+    dishTypes.length !== DEFAULT_DISH_TYPES.length ||
+    !DEFAULT_DISH_TYPES.every((t) => dishTypes.includes(t))
+  /** 「条件をクリア」: 条件チップ・料理の種別・在庫の絞りを、開いた直後と同じ状態に戻す */
+  const clearConditions = () => {
+    setPinnedId(null)
+    setCondition('any')
+    setDishTypes(DEFAULT_DISH_TYPES)
+    setPantryOnly(false)
+    setSeed(Math.random())
+  }
   // 「ランダムで1品出す」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
   // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
   const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
@@ -378,7 +396,7 @@ export default function TodaySuggestPanel({
             to="/recipes/new"
             className="mt-[var(--space-md)] inline-block rounded-md bg-accent px-6 py-3 font-bold text-on-accent shadow-sm"
           >
-            {ja.dayStart.goRegister}
+            {ja.recipes.addRecipe}
           </Link>
         </div>
       ) : (
@@ -560,7 +578,21 @@ export default function TodaySuggestPanel({
               onOpen={(recipeId) => onOpenSuggestion?.(recipeId)}
             />
           ) : (
-            <p className="mt-[var(--space-sm)] text-ink-muted">{ja.dayStart.noCandidate}</p>
+            /* 条件で0件の型（2026-08-18 便HS・軸8）: 「条件に合う◯◯が見つかりません」＋
+               「条件をクリア」。直す前は文だけで、どの条件が効いているのかも、
+               どこで外せるのかも、この場からは分からなかった */
+            <div className="mt-[var(--space-sm)] text-center text-ink-muted">
+              <p>{ja.dayStart.noCandidate}</p>
+              {anyConditionActive && (
+                <button
+                  type="button"
+                  onClick={clearConditions}
+                  className="tap-target mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                >
+                  {ja.search.clear}
+                </button>
+              )}
+            </div>
           )}
 
           {/* 「決めてもらう」ボタン。置き場所は1つで、名前と絵が切り替えで入れ替わる

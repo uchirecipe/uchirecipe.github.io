@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Search, Trash2, X } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
@@ -142,7 +143,18 @@ export default function MealTemplatesPage() {
         <p className="text-sm text-ink-muted">{ja.mealTemplates.description}</p>
 
         {(templates?.length ?? 0) === 0 ? (
-          <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.mealTemplates.empty}</p>
+          /* 空の型（2026-08-18 便HS・軸8）: 「◯◯がありません」＋ボタン1つ。
+             直す前は空状態の中でいちばん長い操作説明なのに、押せるものが1つも無く、
+             作る場所（献立の「週」）へは自分で戻るしかなかった */
+          <div className="mt-[var(--space-md)]">
+            <p className="text-sm text-ink-muted">{ja.mealTemplates.empty}</p>
+            <Link
+              to="/meal-plan?focus=week"
+              className="tap-target mt-[var(--space-md)] inline-block rounded-md bg-accent px-6 py-3 font-bold text-on-accent shadow-sm"
+            >
+              {ja.mealTemplates.emptyLink}
+            </Link>
+          </div>
         ) : (
           <div className="mt-[var(--space-md)] space-y-[var(--space-md)]">
             {(templates ?? []).map((template) => (

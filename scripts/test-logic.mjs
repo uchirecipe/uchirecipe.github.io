@@ -21511,6 +21511,102 @@ Aみりん 大さじ1
   }
 }
 
+// ==========================================================================================
+// 便HS-1: 空のときの見せ方の型（2026-08-18・軸8）
+//
+// 一覧29か所を調べたところ、空のときの言い回しが5系統に割れ、そのうち2つは
+// **何が無いのかを名乗っていなかった**（「見つかりません」だけ・「まだ登録されていません」だけ）。
+// 利用者から見ると、目の前の枠が「レシピの一覧なのか・食材の一覧なのか」が字から分からない。
+//
+// そこで空の型を1つに決めた:
+//   ・1件も無い    … 「（まだ）◯◯がありません」  ＋（次の一手があれば）ボタン1つ
+//   ・条件で0件    … 「条件に合う◯◯が見つかりません」＋「条件をクリア」
+//   ・「まだ」を付けるのは、利用者がこれからためていくもの（レシピ・作った記録・買い物メモ・
+//     テンプレート・在庫の食材・NG食材）。その日・その枠にたまたま無いだけのもの
+//     （その日の献立・その日の記録・そのレシピの材料）には付けない。
+//
+// ここで見張るのは**個別の文字列ではなく規則**にする（文言は規約Hで書き直され続けるため、
+// 文字列を並べた見張りは書いた直後から古くなる）。
+// なお、掃けた文の数も一緒に確かめる＝正規表現が当たらなくなったときに
+// 「1件も違反が無い」と読めてしまい、**何も測らないまま合格**するのを防ぐ（2026-08-18の反省）。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const blank = (s) => s.replace(/[^\n]/g, ' ')
+  const stripTsComments = (src) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, blank)
+      .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + blank(m.slice(p1.length)))
+  const jaSrc = stripTsComments(readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8'))
+  const lineOf = (text, at) => text.slice(0, at).split('\n').length
+  /** ja.ts の中の「画面に出る文字」を、行番号つきで1つずつ取り出す */
+  const jaStrings = []
+  for (const m of jaSrc.matchAll(/'((?:[^'\\]|\\.)*)'/g))
+    jaStrings.push({ value: m[1], line: lineOf(jaSrc, m.index) })
+
+  // ---- 規則①: 「無い」と言い切る文は、何が無いのかを名乗る ----
+  // 「◯◯が/は/も（まだ）ありません」「◯◯が見つかりません」の形になっているか。
+  // 主語は同じ文の中にあればよい（「調理中だった手順が、組み直した段取りに見つかりませんでした」
+  // のように、主語と述語のあいだに別の語句が挟まる文があるため）。
+  // 「正しくありません」のようなイ形容詞の否定は「無い」と言っているのではないので除く。
+  {
+    const unnamed = []
+    let scanned = 0
+    for (const { value, line } of jaStrings) {
+      for (const m of value.matchAll(/(?:ありません|見つかりません)(?:でした)?/g)) {
+        const head = value.slice(0, m.index)
+        if (/く$/.test(head)) continue // 「正しくありません」＝イ形容詞の否定
+        scanned += 1
+        const sentence = head.slice(head.lastIndexOf('。') + 1)
+        if (!/[^\s、。（）「」][がはも]/.test(sentence))
+          unnamed.push(`src/i18n/ja.ts:${line} 「${value}」＝何が無いのかを名乗っていない`)
+      }
+    }
+    // 掃けた文が明らかに足りないときは、規則が当たらなくなったということ。
+    // 下限は「いま57文あるので、その半分を切ったら掃けていない」という保険の数字で、
+    // 文の数そのものを固定するものではない（減らす方向の変更で赤くしないための下限）
+    eq('HS-1 「無い」と言い切る文を取りこぼさずに掃けている', scanned >= 28, true)
+    eq('HS-1 何が無いのかを名乗らない空の案内が1つも無い', unnamed, [])
+  }
+
+  // ---- 規則②: 空の案内を受け身で書かない ----
+  // 「登録されていません」は主語を落としても文として成立してしまい、実際に
+  // NG食材の空の案内が「まだ登録されていません」だけになっていた。言い方そのものを使わない。
+  {
+    const passive = []
+    for (const { value, line } of jaStrings)
+      if (/登録されていません/.test(value))
+        passive.push(`src/i18n/ja.ts:${line} 「${value}」＝「◯◯がありません」で言う`)
+    eq('HS-1 空の案内を「登録されていません」と受け身で書いていない', passive, [])
+  }
+
+  // ---- 規則③: 条件で0件になる画面には、条件を外す入口がある ----
+  // 「条件に合う◯◯が見つかりません」と出す画面を ja.ts の文言から割り出し、
+  // その文言を使っている画面が「条件をクリア」(ja.search.clear) も出しているかを見る。
+  // 画面の名前を書き並べないので、同じ形の画面が増えても自動で見張りの対象に入る。
+  {
+    const jaKeys = []
+    for (const m of jaSrc.matchAll(/([A-Za-z0-9_]+)\s*:\s*'((?:[^'\\]|\\.)*)'/g))
+      if (/条件に合う.+が見つかりません/.test(m[2])) jaKeys.push(m[1])
+    eq('HS-1 「条件に合う◯◯が見つかりません」の文言を拾えている', jaKeys.length >= 3, true)
+    const missing = []
+    const walk = (dir) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) walk(full)
+        else if (e.name.endsWith('.tsx')) {
+          const src = readFileSync(full, 'utf-8')
+          const used = jaKeys.filter((k) => new RegExp(`ja\\.[A-Za-z0-9_.]*\\.${k}\\b`).test(src))
+          if (used.length > 0 && !/ja\.search\.clear\b/.test(src))
+            missing.push(`${path.relative(appRoot, full)} 「${used.join('・')}」を出すのに条件を外す入口が無い`)
+        }
+      }
+    }
+    walk(path.join(appRoot, 'src'))
+    eq('HS-1 条件で0件になる画面に「条件をクリア」がある', missing, [])
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

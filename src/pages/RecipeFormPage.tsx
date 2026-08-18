@@ -1507,10 +1507,23 @@ function RecipeFormInner() {
       }),
     )
     if (!ok) return
+    const deletedTitle = loadedRecipe?.title ?? ''
     await deleteRecipe(editId)
     clearDraft()
     dirtyRef.current = false
-    navigate('/recipes', { replace: true })
+    // 消したことを一覧に着いてから知らせる（2026-08-18 便HS・軸4）。
+    // それまでは削除の直後に一覧へ移るだけで、押せていたのか消えたのかが画面に出ていなかった
+    // （同じ操作でも、まとめて削除の側はトーストを出していた）。
+    // このページのトーストは移動と同時に消えるので、献立から戻すときと同じやり方で
+    // 行き先へ文言を渡す（RecipesPage が受け取って出す）。
+    // 規約F: 消えたもの（レシピ）と、残るもの（作った記録）を件数つきで言う
+    const toast =
+      logs.length > 0
+        ? ja.form.deletedToastKeptLogs
+            .replace('{title}', deletedTitle)
+            .replace('{n}', String(logs.length))
+        : ja.form.deletedToast.replace('{title}', deletedTitle)
+    navigate('/recipes', { replace: true, state: { toast } })
   }
 
   // ---- 「デフォルトに戻す」(2026-07-15 オーナー要望・編集モードのみ) ----

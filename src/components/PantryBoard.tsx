@@ -111,8 +111,13 @@ export default function PantryBoard() {
       confirmLabel: ja.pantry.organizeConfirmOk,
     })
     if (!ok) return
+    const count = selectedIds.length
     await removePantryItems(selectedIds)
     setSelectedIds([])
+    // 消したことを知らせる（2026-08-18 便HS・軸4）。直す前はチップが黙って消えるだけで、
+    // 同じ画面の一括「状態設定」「グループ移動」だけがトーストを出していた。
+    // 規約F: 何が消えて何が残るかを件数つきで言う
+    setMessage(ja.pantry.organizeDeletedToast.replace('{n}', String(count)))
   }
   // まとめて状態設定(docs/35 §5 案D): 選択中の食材全部を指定の状態に一括更新する。
   // 削除と違って整理モードは維持したまま選択だけ解除する(続けて別の一括操作をしやすくするため)

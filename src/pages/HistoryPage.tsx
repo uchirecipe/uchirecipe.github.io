@@ -181,7 +181,13 @@ export default function HistoryPage() {
           </p>
         )}
         {groups && groups.length === 0 && (
-          <p className="text-center text-ink-muted">{ja.history.empty}</p>
+          /* 空の型（2026-08-18 便HS・軸8）。この一覧から1タップで行ける「次の一手」は無い
+             （「作った！」はレシピ詳細・献立・並行調理ナビの3か所にある）ので、
+             ボタンは置かず、どこを押せば記録が残るかをボタン名で書く */
+          <div className="text-center text-ink-muted">
+            <p>{ja.history.empty}</p>
+            <p className="mt-1 text-sm">{ja.history.emptyHint}</p>
+          </div>
         )}
         {groups?.map(([monthKey, monthEntries]) => {
           const [y, m] = monthKey.split('-')

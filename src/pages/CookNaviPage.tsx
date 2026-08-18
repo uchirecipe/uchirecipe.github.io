@@ -1793,9 +1793,12 @@ export default function CookNaviPage() {
                     ? ja.cookNavi.emptyTodayCooked.replace('{n}', String(todayCookedCount))
                     : ja.cookNavi.emptyToday}
                 </p>
+                {/* 空の型（2026-08-18 便HS・軸8）: 他の空状態の導線はボタン（48px）なのに、
+                    ここだけ下線リンク（20px）で、台所で押すにはいちばん小さかった。
+                    見た目・大きさを他の空状態の導線とそろえる */}
                 <Link
                   to="/meal-plan"
-                  className="mt-[var(--space-sm)] inline-block text-sm font-bold text-accent-ink underline"
+                  className="tap-target mt-[var(--space-md)] inline-block rounded-md bg-accent px-6 py-3 font-bold text-on-accent shadow-sm"
                 >
                   {ja.cookNavi.goToday}
                 </Link>

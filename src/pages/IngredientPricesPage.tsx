@@ -214,7 +214,19 @@ export default function IngredientPricesPage() {
             </div>
 
             {filtered && filtered.length === 0 && (
-              <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.priceMaster.searchEmpty}</p>
+              /* 条件で0件の型（2026-08-18 便HS・軸8）: 「条件に合う◯◯が見つかりません」＋
+                 「条件をクリア」。直す前はレシピ一覧だけにこのボタンがあり、
+                 同じ「絞り込んだ結果0件」でも画面によって外し方が違った */
+              <div className="mt-[var(--space-md)] text-sm text-ink-muted">
+                <p>{ja.priceMaster.searchEmpty}</p>
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="tap-target mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                >
+                  {ja.search.clear}
+                </button>
+              </div>
             )}
 
             {filtered && filtered.length > 0 && (

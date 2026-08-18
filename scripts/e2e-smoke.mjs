@@ -7446,7 +7446,9 @@ try {
   await page.waitForTimeout(300)
   check(
     'INLINE-01 検索で該当なしのメッセージが出る',
-    (await page.textContent('body')).includes('該当する食材が見つかりません'),
+    // 文言は ja.ts の1か所から読む（2026-08-18 便HS で空の言い回しを型にそろえた際、
+    // ここに書き写してあった旧文言だけが取り残されて赤くなった＝禁じ手②）
+    (await page.textContent('body')).includes(ja.priceMaster.searchEmpty),
   )
   await searchInput.fill('')
   await page.waitForTimeout(300)
@@ -8283,7 +8285,7 @@ try {
       )
 
       // 便U-5: 月タブの日タップは窓表示(モーダル)。まず献立の無い日(今日)をタップ→
-      // 「献立はありません」+「この週を開く」が出ること。従来の即週ジャンプが起きない
+      // 「献立がありません」+「この週を開く」が出ること。従来の即週ジャンプが起きない
       // (=タップ直後も月タブのまま)ことも確認する
       const todayCell = mp2Page.locator('div.grid.grid-cols-7 button.border-accent').first()
       await todayCell.click()
@@ -8296,8 +8298,8 @@ try {
       const dayModal = mp2Page.locator('[role="dialog"]')
       check('MEALPLAN-02(便U-5) その日の献立モーダルが開く', await dayModal.isVisible())
       check(
-        'MEALPLAN-02(便U-5) 献立の無い日は「献立はありません」と出る',
-        (await dayModal.textContent()).includes('献立はありません'),
+        'MEALPLAN-02(便U-5) 献立の無い日は献立が無いと出る',
+        (await dayModal.textContent()).includes(ja.mealPlan.monthDayModalEmpty),
       )
       check(
         'MEALPLAN-02(便U-5) モーダルに「この週を開く」ボタンがある',
@@ -8949,8 +8951,8 @@ try {
         (await mp6Page.getByRole('button', { name: 'レシピを選ぶ', exact: true }).count()) === 0,
       )
       check(
-        'MEALPLAN-06(便BS) 記録の無い過去日は「この日の記録はありません」を7日分出す',
-        (await mp6Page.getByText('この日の記録はありません').count()) === 7,
+        'MEALPLAN-06(便BS) 記録の無い過去日は「記録が無い」を7日分出す',
+        (await mp6Page.getByText(ja.mealPlan.pastNoRecord).count()) === 7,
       )
       // (a) 過去日にはサイコロ(行の自動提案)ボタン自体が出ない
       check(
@@ -36432,6 +36434,172 @@ try {
       await cuCtx.close()
     } finally {
       await cuBrowser.close()
+    }
+  }
+
+  // --- DELMSG-01/02: 消したあと、消えたことが画面に出る（2026-08-18 便HS・軸4）---
+  // 直す前に赤くなることを確かめたうえで足した見張り。レシピの1品削除は、削除した瞬間に
+  // 編集画面ごと消えて一覧へ移るので**画面が何も言わず**、在庫のまとめて削除はチップが
+  // 黙って消えるだけだった（同じ画面の一括「状態設定」はトーストを出していた）。
+  //
+  // ここで測るのは「トーストが出たか」ではなく **利用者に伝わっているか**＝
+  // 画面に出ている文字そのものを見る。知らせ方をトーストからページ内の帯に変えても、
+  // 伝わってさえいれば通る（＝実装の形ではなく、確かめたいことを測る）。
+  // 準備（総数の読み取り・ボタン探し）に失敗したときは必ず不合格にする＝
+  // 「見つからなかったから合格」に倒れる書き方をしない（2026-08-18 FS-06 の反省）。
+  currentCheck = 'DELMSG-01'
+  {
+    const dmBrowser = await chromium.launch()
+    try {
+      // ① レシピを1品削除する
+      const dmCtx = await dmBrowser.newContext()
+      const dmPage = await dmCtx.newPage()
+      dmPage.on('pageerror', (err) => errors.push(`[pageerror@DELMSG-01] ${err.message}`))
+      await dmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(2000)
+      const dmTotal = async () => readTotalCount(await dmPage.textContent('body'))
+      const dmBefore = await dmTotal()
+      const dmHref = await dmPage.locator('a[href^="#/recipes/"]').first().getAttribute('href')
+      check(
+        'DELMSG-01 準備: 一覧の総数と、消す対象のレシピを読み取れた',
+        dmBefore !== null && !!dmHref,
+        `総数=${dmBefore} href=${dmHref}`,
+      )
+      if (dmBefore === null || !dmHref) throw new Error('レシピ一覧から削除するレシピを掴めなかった')
+      await dmPage.goto(`${BASE}/${dmHref}`, { waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(1200)
+      const dmTitle = ((await dmPage.locator('h1').first().textContent()) ?? '')
+        .replaceAll('​', '')
+        .trim()
+      check('DELMSG-01 準備: 消す対象の料理名を読み取れた', dmTitle.length > 0, `料理名=${dmTitle}`)
+      if (!dmTitle) throw new Error('消すレシピの料理名を読み取れなかった')
+      await dmPage.goto(`${BASE}/${dmHref}/edit`, { waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(1200)
+      const dmDelete = dmPage.getByRole('button', { name: ja.form.deleteRecipe, exact: true })
+      check('DELMSG-01 準備: 「このレシピを削除」が見つかった', (await dmDelete.count()) > 0)
+      await dmDelete.first().click()
+      // 確認の窓は installConfirmAutoPress が自動で「削除する」を押す（この台本の共通の作法）
+      await dmPage.waitForTimeout(1800)
+      check(
+        'DELMSG-01 準備: 削除の確認の窓が出た',
+        ((await dmPage.evaluate(() => window.__confirmDialogs ?? [])) ?? []).length > 0,
+      )
+      const dmAfter = await dmTotal()
+      check(
+        'DELMSG-01 消したぶん、一覧の総数が1減っている',
+        dmAfter !== null && dmAfter === dmBefore - 1,
+        `前=${dmBefore} 後=${dmAfter}`,
+      )
+      // 消したレシピはもう一覧に無いので、その料理名が画面に出ているなら
+      // それは「消したことを告げる知らせ」以外にありえない
+      const dmBody = ((await dmPage.textContent('body')) ?? '').replaceAll('​', '')
+      const dmStillListed = await dmPage.evaluate(
+        (t) =>
+          Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).some((a) =>
+            (a.textContent ?? '').replaceAll('​', '').includes(t),
+          ),
+        dmTitle,
+      )
+      check(
+        'DELMSG-01 消したあと、消したレシピの名前を含む知らせが画面に出る',
+        dmBody.includes(dmTitle) && !dmStillListed,
+        `料理名=${dmTitle} 一覧に残っている=${dmStillListed}`,
+      )
+      await dmCtx.close()
+
+      // ② 在庫の食材をまとめて削除する
+      currentCheck = 'DELMSG-02'
+      const dpCtx = await dmBrowser.newContext()
+      const dpPage = await dpCtx.newPage()
+      dpPage.on('pageerror', (err) => errors.push(`[pageerror@DELMSG-02] ${err.message}`))
+      await dpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await dpPage.waitForTimeout(2200)
+      await dpPage
+        .getByRole('button', { name: ja.pantry.organizeToggle, exact: true })
+        .first()
+        .click()
+      await dpPage.waitForTimeout(400)
+      // 在庫のチップだけを掴む（画面上部の「食材の在庫／買い物メモ」タブも aria-pressed を持つ）
+      const dpChips = dpPage.locator('button.rounded-full[aria-pressed]')
+      const dpChipCount = await dpChips.count()
+      check('DELMSG-02 準備: 整理モードで在庫の食材が並ぶ', dpChipCount >= 2, `チップ数=${dpChipCount}`)
+      if (dpChipCount < 2) throw new Error('在庫の食材を2件選べなかった')
+      const dpNames = []
+      for (let i = 0; i < 2; i++) {
+        const chip = dpChips.nth(i)
+        dpNames.push(((await chip.textContent()) ?? '').replaceAll('​', '').replace(/\s+/g, ' ').trim())
+        await chip.click()
+        await dpPage.waitForTimeout(200)
+      }
+      /** いま画面に出ている「文字を持つ末端の要素」を全部集める */
+      const dpLeaves = () =>
+        dpPage.evaluate(() =>
+          Array.from(document.querySelectorAll('body *'))
+            .filter((el) => el.children.length === 0 && el.getClientRects().length > 0)
+            .map((el) => (el.textContent ?? '').replaceAll('​', '').replace(/\s+/g, ' ').trim())
+            .filter((t) => t.length > 0),
+        )
+      const dpBefore = new Set(await dpLeaves())
+      const dpDelete = dpPage.getByRole('button', {
+        name: ja.pantry.organizeDeleteSelected.replace('{n}', '2'),
+        exact: true,
+      })
+      check('DELMSG-02 準備: まとめて削除のボタンが見つかった', (await dpDelete.count()) > 0)
+      await dpDelete.first().click()
+      // 確認の窓は installConfirmAutoPress が自動で「削除する」を押す
+      await dpPage.waitForTimeout(1500)
+      check(
+        'DELMSG-02 準備: 削除の確認の窓が出た',
+        ((await dpPage.evaluate(() => window.__confirmDialogs ?? [])) ?? []).length > 0,
+      )
+      const dpAfter = await dpLeaves()
+      check(
+        'DELMSG-02 選んだ食材が在庫から消えている',
+        dpNames.every((n) => !dpAfter.includes(n)),
+        `選んだ=${dpNames.join('・')}`,
+      )
+      // 押す前に画面に無かった文字のうち、消した数を告げているものがあるか。
+      // 数は「自分で選んだ2件」から出す＝件数の決め打ちにしない
+      const dpAdded = dpAfter.filter((t) => !dpBefore.has(t))
+      check(
+        'DELMSG-02 消したあと、消えたことを件数つきで告げる文字が画面に出る',
+        dpAdded.some((t) => hasCount(t, dpNames.length)),
+        `押す前に無かった文字=${dpAdded.join(' / ').slice(0, 200)}`,
+      )
+      await dpCtx.close()
+
+      // ③ 空のときの導線の大きさ（2026-08-18 便HS・軸8）。
+      // 並行調理ナビの空状態だけが下線リンク（20px）で、他の空状態の導線（ボタン）より
+      // 小さかった。台所で押す画面なので、押せる高さが44pxを下回らないことを見張る
+      currentCheck = 'EMPTYNAV-01'
+      const dnCtx = await dmBrowser.newContext()
+      const dnPage = await dnCtx.newPage()
+      dnPage.on('pageerror', (err) => errors.push(`[pageerror@EMPTYNAV-01] ${err.message}`))
+      await dnPage.goto(`${BASE}/#/cook-navi`, { waitUntil: 'networkidle' })
+      await dnPage.waitForTimeout(2200)
+      // 並行調理ナビはProの機能なので、まず無料のお試しで中へ入る（残り回数は文言に入るので前方一致で探す）
+      const dnTrial = dnPage.getByRole('button', {
+        name: new RegExp(`^${ja.cookNavi.trialButton.replace(/（あと\{n\}回）/, '')}`),
+      })
+      check('EMPTYNAV-01 準備: 並行調理ナビのお試しの入口が見つかった', (await dnTrial.count()) > 0)
+      if (await dnTrial.count()) {
+        await dnTrial.first().click()
+        await dnPage.waitForTimeout(1500)
+      }
+      const dnEmpty = dnPage.locator('[data-testid="navi-empty-today"]')
+      check('EMPTYNAV-01 準備: 今日の献立が空のときの案内が出ている', (await dnEmpty.count()) > 0)
+      const dnBox = await dnPage
+        .getByRole('link', { name: ja.cookNavi.goToday, exact: true })
+        .first()
+        .boundingBox()
+      check(
+        'EMPTYNAV-01 空のときの導線は、押せる高さが44px以上',
+        !!dnBox && dnBox.height >= 44,
+        JSON.stringify(dnBox),
+      )
+      await dnCtx.close()
+    } finally {
+      await dmBrowser.close()
     }
   }
 

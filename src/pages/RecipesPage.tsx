@@ -716,6 +716,19 @@ export default function RecipesPage() {
   const [selecting, setSelecting] = useState(entry.selectForToday)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [message, setMessage] = useState('')
+  /**
+   * 他の画面から「結果を伝えたうえでレシピ一覧へ戻す」ときのトースト（2026-08-18 便HS・軸4）。
+   * レシピ編集で1品削除すると、削除元の画面ごと消えてこの一覧へ移るので、
+   * 知らせは移った先で出す（献立へ戻すときの MealPlanPage と同じやり方）。
+   * 一度出したら履歴から消す＝ブラウザの戻る/進むで同じ知らせが再び出ないようにする
+   */
+  useEffect(() => {
+    const handedOver = (location.state as { toast?: string } | null)?.toast
+    if (!handedOver) return
+    setMessage(handedOver)
+    navigate(location.pathname + location.search, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
   const [deleting, setDeleting] = useState(false)
   // 献立の「＋ 今日の献立を探す」から来た選択モードか(2026-08-11 便FP)。
   // trueの間は「今日の献立に入れるレシピを選んでいます」と決定ボタンを出し、
@@ -1465,7 +1478,16 @@ export default function RecipesPage() {
           {recipes && recipes.length === 0 ? (
             <>
               <p className="font-bold">{ja.recipes.empty}</p>
-              <p className="mt-1 text-sm">{ja.recipes.emptyHint}</p>
+              {/* 空の型（2026-08-18 便HS・軸8）: 「◯◯がありません」＋ボタン1つ。
+                  直す前は「右下の「＋」から最初のレシピを登録しましょう」と＋の場所を
+                  文章で説明するだけで、この枠から押せるものが1つも無かった。
+                  行き先は右下の「＋」と同じなので、名前も同じ（ja.recipes.addRecipe）にする */}
+              <Link
+                to="/recipes/new"
+                className="tap-target mt-[var(--space-md)] inline-block rounded-md bg-accent px-6 py-3 font-bold text-on-accent shadow-sm"
+              >
+                {ja.recipes.addRecipe}
+              </Link>
             </>
           ) : (
             <>
