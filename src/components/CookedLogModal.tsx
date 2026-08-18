@@ -318,7 +318,7 @@ export default function CookedLogModal({
             onClick={onClose}
             className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted"
           >
-            {ja.detail.cookedCancel}
+            {ja.common.confirmCancel}
           </button>
         </div>
       </div>

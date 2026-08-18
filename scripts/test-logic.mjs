@@ -9566,7 +9566,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     )
 
     // pricelessIngredientNames(2026-07-29 便CD/MP-11): 概算食費に1円も入っていない材料を数え、
-    // 「価格が分からない材料◯種類を除いた概算です」と正直に添えるために使う
+    // 「価格が分からない材料◯件を除いた概算です」と正直に添えるために使う
     eq(
       'pricelessIngredientNames: 価格が分からない材料だけを返す',
       pricelessIngredientNames([{ recipeId: 1 }, { recipeId: 3 }], recipeById, index),
@@ -9625,7 +9625,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
       )
       // 2026-07-30 便CK/③-1: 水・湯・氷は栄養側(isZeroIngredient)で「計算上ゼロ扱い・対象外件数にも
       // 数えない」と決めているのに、この関数だけ適用漏れで数えていた。同梱109品のうち22品で
-      // 「価格が分からない材料1種類を除いた概算です」＋「食材と価格を編集する」が常時出るが、
+      // 「価格が分からない材料1件を除いた概算です」＋「食材と価格を編集する」が常時出るが、
       // 水の価格は登録できない(PriceEditModalはprice>0必須)ためユーザーには解消できなかった
       eq(
         'pricelessIngredientNamesOfRecipes(便CK/③-1): 水は「価格が分からない材料」に数えない',
@@ -9985,7 +9985,7 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
         { days: 0, perDay: 0, yen: 0, meals: 0 },
       )
     }
-    // 2026-07-30 便CH/C2: 「価格が分からない材料◯種類」の注記は合計と同じ料理から数える。
+    // 2026-07-30 便CH/C2: 「価格が分からない材料◯件」の注記は合計と同じ料理から数える。
     // rangeIntakeRecipes が summarizeRangeIntake と同じ切り分け(過去=記録・今日以降=予定)を返す
     eq(
       'rangeIntakeRecipes(便CH/C2): 合計に入れた料理だけを返す(実績2品+予定1品=3品)',
@@ -13238,7 +13238,7 @@ eq(
 // 事故になるのは①境目がずれて「残すはずの記録」まで書き出して消す
 // ②追記で同じ記録が二重に増える／逆に別件が1件に潰れる ③1件壊れているだけで全部読めなくなる、の3つ。
 {
-  // (1) 期間の境目: 「◯ヶ月より前」はちょうど◯ヶ月前の当日を含まない
+  // (1) 期間の境目: 「◯か月より前」はちょうど◯か月前の当日を含まない
   eq('ARCH 1ヶ月前の境目', archiveCutoffDate(1, new Date(2026, 7, 2)), '2026-07-02')
   eq('ARCH 3ヶ月前の境目', archiveCutoffDate(3, new Date(2026, 7, 2)), '2026-05-02')
   eq('ARCH 6ヶ月前の境目(年をまたぐ)', archiveCutoffDate(6, new Date(2026, 2, 15)), '2025-09-15')
@@ -14713,8 +14713,8 @@ eq(
   eq('CT-DEL 確認文に削除する品数が入る', /レシピ3品を削除します/.test(text), true)
   eq('CT-DEL 確認文に作った記録の件数が入る', /作った記録3件/.test(text), true)
   eq('CT-DEL 確認文に写真の枚数が入る', /写真2枚/.test(text), true)
-  eq('CT-DEL 確認文に献立の予定の件数が入る', /献立の予定4件/.test(text), true)
-  eq('CT-DEL 確認文に今日の献立の件数が入る', /今日の献立2件/.test(text), true)
+  eq('CT-DEL 確認文に献立の予定の品数が入る', /献立の予定4品/.test(text), true)
+  eq('CT-DEL 確認文に今日の献立の品数が入る', /今日の献立2品/.test(text), true)
   eq('CT-DEL 確認文に元に戻せないことが入る', text.includes('元に戻せません'), true)
   eq('CT-DEL 確認文に残るレシピの品数が入る', /他のレシピ106品/.test(text), true)
   // 2026-08-15 便GW: 「残るもの」は太字の項目名になったので、項目名と中身の両方を見る
@@ -19936,7 +19936,7 @@ Aみりん 大さじ1
     eq('GZ-確認文 記録は「残るもの」に件数つきで入る', /残るもの: 作った記録3件（うち写真2枚）/.test(text), true)
     eq('GZ-確認文 「消えるもの」に記録を書かない', /消えるもの: [^\n]*作った記録/.test(text), false)
     eq('GZ-確認文 消えるものはレシピの中身と献立', /消えるもの: [^\n]*材料・手順/.test(text), true)
-    eq('GZ-確認文 献立の予定・今日の献立の件数は残す', /献立の予定4件・今日の献立2件/.test(text), true)
+    eq('GZ-確認文 献立の予定・今日の献立の品数は残す', /献立の予定4品・今日の献立2品/.test(text), true)
     eq('GZ-確認文 記録がどこで読めるか書く', text.includes('作った記録の一覧'), true)
     eq('GZ-確認文 レシピ詳細へ行けなくなることを書く', text.includes('レシピ詳細へは行けなくなります'), true)
     eq('GZ-確認文 入れ直せば戻ることを書く', text.includes('読み込み直す'), true)
@@ -21309,6 +21309,206 @@ Aみりん 大さじ1
   // 数そのものは決め打ちしない（画面が増えれば増える）。「1つも小さいものが無い」ことだけを見る
   eq('HQ-3 ✕とチェックの丸を1つ残らず測れている', measured > 30, true)
   eq('HQ-3 44px未満の✕・チェックの丸が1つも無い', tooSmall, [])
+}
+
+// ---------- 便HR: 数え方（助数詞）と呼び名の見張り（軸5・軸6） ----------
+// 2026-08-18 便HP の洗い出しで、同じものを数えているのに助数詞が違う箇所が16件、
+// 同じ画面・同じ操作を別の名前で呼んでいる箇所が16件見つかった。いちばん重いのは
+//   ・献立から「買い物リストを作る」を押すと、着いた先の画面名が「買い物メモ」
+//   ・1つの文の中で同じ数を「{n}件」と「{n}品」で数える（並行調理ナビの確認文）
+// 個別の文字列を並べても次に文言が増えたときに素通りするので、**規則で捕まえる**。
+//
+// 決めた線引き（司令部裁定・2026-08-18）:
+//   料理そのもの＝「品」…レシピ・献立に入っている料理・収録レシピ
+//   記録や行やデータの本数＝「件」…作った記録・材料・手順・タイマー・下書き・食材・価格
+//
+// 見る先は「利用者の目に触れる文字」だけ。ja.ts はコメントを外した文字列、
+// public/about/*.html はタグを外した本文を見る（foods.html は生成物なので
+// 直す先は scripts/gen-food-price-page.mjs だが、出来上がりの文字を測る）。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+  // 落とした部分は空白に置き換える（改行だけ残す）。行番号が原文とずれると、
+  // 赤が出たときに直す場所を探せなくなるため
+  const blank = (s) => s.replace(/[^\n]/g, ' ')
+  /** ja.ts からコメント（ブロック・行）を落として、画面に出る文字だけにする */
+  const stripTsComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + blank(m.slice(p1.length)))
+  /** HTML から <script>/<style>/コメント/タグを落として本文だけにする */
+  const stripHtml = (src) =>
+    src
+      .replace(/<script[\s\S]*?<\/script>/gi, blank)
+      .replace(/<style[\s\S]*?<\/style>/gi, blank)
+      .replace(/<!--[\s\S]*?-->/g, blank)
+      .replace(/<[^>]+>/g, blank)
+
+  const sources = []
+  {
+    const jaSrc = stripTsComments(readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8'))
+    sources.push({ rel: 'src/i18n/ja.ts', text: jaSrc })
+    const aboutDir = path.join(appRoot, 'public/about')
+    // コラム(public/about/column/)も利用者が読むページなので同じ規則で見る
+    for (const e of readdirSync(aboutDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const files = e.isDirectory()
+        ? readdirSync(path.join(aboutDir, e.name))
+            .filter((f) => f.endsWith('.html'))
+            .sort()
+            .map((f) => `${e.name}/${f}`)
+        : e.name.endsWith('.html')
+          ? [e.name]
+          : []
+      for (const f of files)
+        sources.push({
+          rel: `public/about/${f}`,
+          text: stripHtml(readFileSync(path.join(aboutDir, f), 'utf-8')),
+        })
+    }
+    // お知らせ(アプリの中で読む文章)も同じ規則で見る
+    sources.push({
+      rel: 'public/news.json',
+      text: readFileSync(path.join(appRoot, 'public/news.json'), 'utf-8'),
+    })
+    // 生成元も同じ規則で見る（foods.html だけ直しても次の生成で戻るため）
+    sources.push({
+      rel: 'scripts/gen-food-price-page.mjs',
+      text: stripTsComments(readFileSync(path.join(appRoot, 'scripts/gen-food-price-page.mjs'), 'utf-8')),
+    })
+  }
+
+  const lineOf = (text, at) => text.slice(0, at).split('\n').length
+  /** 前後を切り出して、赤が出たときにどこの話か読めるようにする */
+  const around = (text, at, before = 14, after = 8) =>
+    text.slice(Math.max(0, at - before), at + after).replace(/\s+/g, ' ').trim()
+
+  // ---- 規則①: 数える名詞のうしろに付く助数詞 ----
+  // 数の直前 8文字の中に出てくる**最後の**名詞で、どちらの助数詞かが決まる。
+  // 「この料理の他の作った記録{n}件」のように名詞が2つ出るときは、数に近いほうが勝つ。
+  const NOUN_COUNTER = [
+    // 料理そのもの＝品
+    ['レシピ', '品'],
+    ['献立', '品'],
+    ['料理', '品'],
+    ['主菜', '品'],
+    ['副菜', '品'],
+    // 記録・行・データの本数＝件
+    ['作った記録', '件'],
+    ['記録', '件'],
+    ['材料', '件'],
+    ['手順', '件'],
+    ['タイマー', '件'],
+    ['下書き', '件'],
+    ['食材', '件'],
+    ['価格', '件'],
+  ]
+  const NUM = '(?:\\{[A-Za-z][A-Za-z0-9]*\\}|[0-9０-９]+|◯)'
+  const counterRe = new RegExp(`${NUM}(件|品)`, 'g')
+  const counterViolations = []
+  for (const { rel, text } of sources) {
+    for (const m of text.matchAll(counterRe)) {
+      const counter = m[1]
+      // タグ・改行・字下げを詰めてから直前の8文字を見る（HTMLでは名詞とのあいだに
+      // タグが挟まるため、文字数だけで切ると名詞を取りこぼす）
+      const window = text
+        .slice(Math.max(0, m.index - 80), m.index)
+        .replace(/\s+/g, '')
+        .slice(-8)
+      let noun = null
+      let want = null
+      let bestAt = -1
+      for (const [word, c] of NOUN_COUNTER) {
+        // 「記録した{n}品」の「記録」のように、動詞として使われている語は数える名詞ではない
+        let at = window.lastIndexOf(word)
+        while (at >= 0 && window.slice(at + word.length).startsWith('し'))
+          at = window.lastIndexOf(word, at - 1)
+        if (at > bestAt) {
+          bestAt = at
+          noun = word
+          want = c
+        }
+      }
+      // 「全{n}品」のように直前に名詞が無い数え方は、文だけでは何を数えているか決められない。
+      // ここでは判定せず、書く人が節（レシピ一覧なら品／記録の一覧なら件）で決める
+      if (bestAt < 0) continue
+      if (counter !== want)
+        counterViolations.push(
+          `${rel}:${lineOf(text, m.index)} 「${around(text, m.index)}」＝${noun}なので「${want}」`,
+        )
+    }
+  }
+  eq('HR-1 数える名詞と助数詞（品／件）が食い違う文言が1つも無い', counterViolations, [])
+
+
+  // ---- 規則②: 同じ言葉の書き分け（送り仮名・漢数字・呼び名） ----
+  // 「どちらでもよい」ものを2通り書くと、次に足す人がどちらを見るかで割れる。片方を正にする。
+  const WORD_RULES = [
+    { name: 'か月', bad: /ヶ月|ケ月|カ月/g, good: '「か月」' },
+    { name: '杯分', bad: /杯ぶん/g, good: '「杯分」' },
+    { name: '1品', bad: /一品(?!もの)/g, good: '「1品」（「一品もの」は料理の種類の名前なので対象外）' },
+    { name: '買い物メモ', bad: /買い物リスト/g, good: '「買い物メモ」（タブと見出しに出ている名前）' },
+    {
+      name: '月間の献立',
+      bad: /月間表示|月間ビュー|月間の献立表|月間献立/g,
+      good: '「月間の献立」（月タブの見出しに出ている名前）',
+    },
+    // 無料の登録上限は、紹介ページ・使い方ページ・お知らせが全部「30品」で書いてある。
+    // アプリ側だけ「件」で書くと、同じ数字が2通りに読める
+    { name: '登録上限は品', bad: /30件|件登録できます|件を超えて登録/g, good: '「品」' },
+  ]
+  const wordViolations = []
+  for (const { rel, text } of sources) {
+    for (const rule of WORD_RULES) {
+      for (const m of text.matchAll(rule.bad))
+        wordViolations.push(`${rel}:${lineOf(text, m.index)} 「${around(text, m.index)}」→ ${rule.good}`)
+    }
+  }
+  eq('HR-2 書き分けの揺れ（ヶ月・杯ぶん・一品・買い物リスト・月間◯◯）が1つも無い', wordViolations, [])
+
+  // ---- 規則③: 共通語を各画面で書き写していない ----
+  // 同じ「閉じる」を6か所で別々に定義していたため、片方だけ変えると割れる状態だった。
+  // ja.common に1本だけ持ち、画面側は ja.common.close を参照する。
+  {
+    const jaRaw = readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8')
+    const dup = (word) => (stripTsComments(jaRaw).match(new RegExp(`:\\s*'${word}'`, 'g')) ?? []).length
+    eq('HR-3 「閉じる」の定義は ja.common の1か所だけ', dup('閉じる'), 1)
+    eq('HR-3 「やめる」の定義は ja.common の1か所だけ', dup('やめる'), 1)
+  }
+
+  // ---- 規則④: 案内文が読み上げるボタン名が実在する ----
+  // 「『◯◯』を押します」と書いてあるのに、そのボタンが別の名前になっている案内があった。
+  // ja.ts の中の「…」を押す/押します の引用を全部拾い、ja.ts のどこかに同じ文字列の
+  // 値があるかを見る（{n} のような差し込みは ◯ に均してから比べる）。
+  {
+    const jaRaw = readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8')
+    const jaSrc = stripTsComments(jaRaw)
+    const toKey = (s) => s.replace(/\{[A-Za-z][A-Za-z0-9]*\}/g, '◯')
+    const values = new Set()
+    for (const m of jaSrc.matchAll(/'((?:[^'\\]|\\.)*)'/g)) values.add(toKey(m[1]))
+    // アプリの中の言葉でないボタン名（引用しても ja.ts には無いのが正しいもの）。
+    // 1つずつ理由を書く。増やすときも理由なしで足さないこと
+    const NOT_IN_JA = new Set([
+      // 端末（ブラウザ・OS）側のボタン。うちレシピの文言ではない
+      'ホーム画面に追加',
+      'インストール',
+      // 分数・食事の名前を差し込んで組み立てるボタン。組み立て後の文字列は ja.ts に無い
+      // （タイマーのチップ ja.focus.timerChip「{n}分」／食事の枠 ja.mealPlan の朝食・昼食・夕食）
+      '15分',
+      '夕食に入れる',
+    ])
+    // 案内文が引用しているボタン名（3文字以上。「＋」「×」のような記号1つは対象外）。
+    // ja.ts と、利用者が読むページ（紹介・使い方）の両方を見る＝ボタン名を変えたのに
+    // 使い方ページだけ古い名前のまま、という食い違いをここで捕まえる
+    const missing = []
+    const quoteTargets = [{ rel: 'src/i18n/ja.ts', text: jaSrc }].concat(
+      sources.filter((s) => s.rel.startsWith('public/about/')),
+    )
+    for (const { rel, text } of quoteTargets) {
+      for (const m of text.replace(/\s+/g, ' ').matchAll(/「([^「」]{3,40})」を押/g)) {
+        const name = toKey(m[1])
+        if (!values.has(name) && !NOT_IN_JA.has(name)) missing.push(`${rel} 「${m[1]}」`)
+      }
+    }
+    eq('HR-4 案内文が引用するボタン名が ja.ts に実在する', missing, [])
+  }
 }
 
 // ---------- 結果 ----------

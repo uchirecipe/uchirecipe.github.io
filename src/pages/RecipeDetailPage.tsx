@@ -978,7 +978,7 @@ export default function RecipeDetailPage() {
                     <button
                       type="button"
                       onClick={() => setShowCookHint(false)}
-                      aria-label={ja.focus.firstHintDismiss}
+                      aria-label={ja.common.close}
                       className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
                     >
                       <X size={14} aria-hidden />

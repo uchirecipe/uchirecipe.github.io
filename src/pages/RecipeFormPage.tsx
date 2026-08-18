@@ -1804,7 +1804,7 @@ function RecipeFormInner() {
                   disabled={urlImportLoading}
                   className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted disabled:opacity-60"
                 >
-                  {ja.urlImport.close}
+                  {ja.common.close}
                 </button>
               </div>
             </div>
@@ -1861,7 +1861,7 @@ function RecipeFormInner() {
               onClick={() => setPasteOpen(false)}
               className="rounded-md border border-edge bg-surface px-4 py-3 text-ink-muted"
             >
-              {ja.paste.close}
+              {ja.common.close}
             </button>
           </div>
         </div>

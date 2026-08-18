@@ -9,6 +9,12 @@ export const ja = {
     url: 'uchirecipe.com',
   },
   common: {
+    /**
+     * 画面をまたいで同じ役目に出る言葉は、ここ1か所だけで持つ（2026-08-18 便HR・軸6）。
+     * 同じ「閉じる」を6か所で別々に書いていたため、片方だけ直すと言い方が割れる状態だった。
+     * 画面側は ja.common.close / ja.common.confirmCancel を参照すること
+     * （scripts/test-logic.mjs の HR-3 が、再定義が増えたら赤にする）。
+     */
     back: '戻る',
     close: '閉じる',
     // 説明文の折りたたみトグル共通ラベル(2026-07-16 UI総点検B-5: 在庫ボード・買い物候補の
@@ -273,7 +279,7 @@ export const ja = {
     // 「あと2個」程度を添えられるようにする。整理モードで1件だけ選んだときに編集する
     organizeNoteTitle: '選んだ食材に一言メモを添える',
     organizeNotePlaceholder: '例: あと2個',
-    organizeNoteSave: 'メモを保存',
+    organizeNoteSave: '保存する',
     organizeNoteNote: '20字まで。買い物メモの数量計算や並び替えには使いません',
     // 「作った！」で在庫を減らす設定(2026-08-12 便FW・オーナー指摘「まとめて作った！・レシピ詳細
     // 以外から作った！した時に、食材の在庫から減らすか聞かれない。何度も質問の小窓が出るのも
@@ -548,7 +554,7 @@ export const ja = {
     thisWeekRolling: '今日を先頭に戻る',
     // 2つの表示の違いが名前だけでは分からないという指摘(PDCA2周目・MP-14)への1行説明。
     // 3体が「どちらを選べばいいのか分からない」として切替自体を触っていなかった
-    weekLayoutHint: '「週区切り」は月曜から日曜まで、「今日から7日間」は今日を先頭に7日分を並べます',
+    weekLayoutHint: '「週区切り」は月曜から日曜まで、「今日から7日間」は今日を先頭にした7日間を並べます',
     // 3タブ構成(2026-07-16 便U-1 Fable設計: 現行の「今日セクション+週/月切替」を
     // ページ上部の「日」「週」「月」タブに再構成)
     viewDay: '日',
@@ -562,8 +568,8 @@ export const ja = {
     // 月セルの予定プレビューで、料理名を1つも引けなかった日に出す件数
     // (2026-07-30 便CH/C15でハードコードから移設。主菜が無い日は副菜名を出すようにしたので、
     //  ここに倒れるのはレシピを消した等で名前が引けない日だけになった)
-    monthDayPlanCount: '{n}件',
-    monthProGateTitle: '月間表示はPro版の機能です',
+    monthDayPlanCount: '{n}品',
+    monthProGateTitle: '月間の献立はPro版の機能です',
     monthProGateDescription: '1か月分の献立をカレンダーでまとめて見渡せます。日付をタップすると、その日の献立を確認できます。',
     monthProGateLink: 'Pro版について見る',
     // 日タブの食事帯選択の補足文(便U-2)。visibleMealSlotsは週タブの表示帯フィルタと共通の設定値
@@ -608,13 +614,13 @@ export const ja = {
     // その週はまだ表示されていない＝「表示している週」では意味が通らない。2026-08-09 便EM）
     monthDayModalOpenWeek: 'この週を開く',
     // 2026-08-07 便DU(オーナー指示⑦⑧): 日の窓の下に閉じる導線を置く。
-    // 何も変えていないときは「閉じる」1つ、変えたときは「キャンセル」と「保存」の2つにする
-    // (変えていないのに「保存」を出すと、何が保存されるのか分からないため)。
-    // 中身の追加・差し替え・削除・メモはその場でデータに入る作りなので、「保存」は確定して閉じるだけ。
+    // 何も変えていないときは「閉じる」1つ、変えたときは「キャンセル」と「保存する」の2つにする
+    // (変えていないのに「保存する」を出すと、何が保存されるのか分からないため)。
+    // 「閉じる」は ja.common.close を使う（2026-08-18 便HR・共通語は1か所で持つ）。
+    // 中身の追加・差し替え・削除・メモはその場でデータに入る作りなので、「保存する」は確定して閉じるだけ。
     // 「キャンセル」は開いたときの状態へ戻す操作＝規約Fの確認文を必ず通す
-    monthDayModalClose: '閉じる',
     monthDayModalCancel: 'キャンセル',
-    monthDayModalSave: '保存',
+    monthDayModalSave: '保存する',
     monthDayModalDirtyNote: 'この画面での変更は、すでにこの日の献立に入っています',
     // 2026-08-15 便GW: 画面の中の窓へ。すでに「取り消すもの/戻るもの」の形だったので、
     // そのまま太字の項目にした
@@ -691,8 +697,8 @@ export const ja = {
     // 2026-08-02 オーナー指示: 何をどう足した数字なのかを言い切り、語尾を「数値です」にそろえる
     // （画面ごとに「めやす」「概算です」と揺れていた。公的な基準値だけを「めやす」と呼ぶ規律も維持）
     rangeIntakeNutritionCountBoth:
-      '作った記録{a}品と登録した献立{p}品の栄養価を、1食分ずつ足して算出した数値です',
-    rangeIntakeNutritionCountActual: '作った記録{a}品の栄養価を、1食分ずつ足して算出した数値です',
+      '作った記録{a}件と登録した献立{p}品の栄養価を、1食分ずつ足して算出した数値です',
+    rangeIntakeNutritionCountActual: '作った記録{a}件の栄養価を、1食分ずつ足して算出した数値です',
     rangeIntakeNutritionCountPlan: '登録した献立{p}品の栄養価を、1食分ずつ足して算出した数値です',
     rangeIntakeNutritionExcluded: '栄養を計算できなかった{n}品は合計に入れていません',
     // 2026-07-28 便BY/NUT-01: 一部の材料だけ計算できなかった品数。合計には入れているが、
@@ -700,7 +706,7 @@ export const ja = {
     rangeIntakeNutritionPartial:
       '{n}品は、量が書いてあるのに計算できなかった材料があり、その分だけ小さく出ています',
     // 表の「1人分」を、過ぎた日の記録ぶんと今日から先の献立ぶんに割った内訳(折りたたみの中)
-    rangeIntakeCostBreakdown: '内訳 作った記録 約{a}円（{an}品）／登録した献立 約{p}円（{pn}品）',
+    rangeIntakeCostBreakdown: '内訳 作った記録 約{a}円（{an}件）／登録した献立 約{p}円（{pn}品）',
     rangeIntakeEmpty: 'この期間には、作った記録も登録した献立もありません',
     // 食費の表(2026-08-03 便DQで月タブに導入 → 便DRで期間カードと共用)。
     // オーナー指示「食費と栄養は完全に分けて表示したい。文字が多すぎ。ここでユーザーが見たいのは
@@ -904,7 +910,7 @@ export const ja = {
     addRow: '＋料理を追加',
     // 一品もの(丼・麺・カレー・鍋)の日に副菜が空になる理由(docs/56 §3-8)を画面にも出す
     // (2026-07-29 便CD/MP-18)。「提案が1枠だけ失敗した」ように見えていた
-    oneDishNote: '一品で食事が完結する料理のため、副菜は入れていません（必要なら選べます）',
+    oneDishNote: '1品で食事が完結する料理のため、副菜は入れていません（必要なら選べます）',
     // 2026-08-02 便DE-7(オーナー指示): 「時短レシピ優先」は、時短用の手順を書いた品だけが
     // 対象だと読めてしまう。実際の判定は全レシピの調理時間（cookMinutes<=15）なので、
     // 何を見て優先しているのかを数字でそのまま書く。機能は変えていない
@@ -1129,7 +1135,7 @@ export const ja = {
     servingsHouseholdNote: '設定の「食数の設定」は{n}人分です',
     // 効く先と効かない先を両方書く(何人分作っても1人が食べる量は1人分のまま)
     servingsScopeNote:
-      '買い物リストに出す材料の分量と、これから作る予定の概算食費に反映します。栄養の「1人分」の表示は変わりません',
+      '買い物メモに出す材料の分量と、これから作る予定の概算食費に反映します。栄養の「1人分」の表示は変わりません',
     servingsSave: '決定',
     // 戻り先は「ふだん作る人数」を設定していればその人数、していなければレシピの登録人数分。
     // どちらに戻るかがボタンの字面で分かるよう、人数を入れて出す(便DK)
@@ -1283,20 +1289,20 @@ export const ja = {
     // 何を消せば金額が減るのか辿れなかった。集計を今日以降だけに揃え、その範囲を明記する
     weekCostRange: '{start}〜{end}の予定で計算しています（過ぎた日は含みません）',
     // 2026-07-29 便CD/MP-11: 価格が分からない材料の分は1円も入っていない＝金額の信頼度を明示する
-    weekCostPriceless: '価格が分からない材料{n}種類を除いた概算です',
+    weekCostPriceless: '価格が分からない材料{n}件を除いた概算です',
     budgetCompareOver: '予算より約{n}円オーバーしています',
     budgetCompareUnder: '予算まで約{n}円の余裕があります',
     // 2026-07-29 便CD/MP-11: 「設定画面で登録すると」だけの行き止まりだったため、
     // その場から予算の入力欄へ移動できるボタンを添える
     budgetNotSet: '週の食費予算を登録すると、ここで比較できます',
     budgetSetLink: '週の食費予算を登録する',
-    goToShopping: '表示している週の買い物リストを作る',
-    goToShoppingEmpty: 'レシピを選ぶと、まとめて買い物リストの候補にできます',
+    goToShopping: '表示している週の買い物メモを作る',
+    goToShoppingEmpty: 'レシピを選ぶと、まとめて買い物メモの候補にできます',
     /* 買い物リストの範囲えらび（2026-08-08 便EA・オーナー要望
        「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
        １週間分まとめて買い物とは限らない」）。
        既定は閉じていて、開かなければ従来どおり表示中の週ぜんぶから作る。 */
-    shopRangeToggle: '買い物リストの範囲を選ぶ',
+    shopRangeToggle: '買い物メモの範囲を選ぶ',
     // 畳んだ状態でも今の範囲が分かるように、ボタンの横に出す要約
     shopRangeSummaryAll: '表示している週ぜんぶ',
     // {dates}=「8/8〜8/14」または「8/8・8/10」/ {slots}=「朝食・夕食」
@@ -1304,15 +1310,15 @@ export const ja = {
     shopRangeDateLabel: '日付',
     shopRangeSlotLabel: '食事',
     // 読み上げ用。週タブには「表示する食事」のボタン群も居るので、どちらのボタン群かを名前で分ける
-    shopRangeDateAria: '買い物リストの範囲の日付',
-    shopRangeSlotAria: '買い物リストの範囲の食事',
+    shopRangeDateAria: '買い物メモの範囲の日付',
+    shopRangeSlotAria: '買い物メモの範囲の食事',
     shopRangeNote: '選んだ日付と食事の献立だけで材料を計算します。献立そのものは変わりません',
     shopRangeReset: '表示している週ぜんぶに戻す',
     // 選択を0件にしたとき（作るものが無いので押せない状態にし、理由を書く）
     shopRangeEmptyDates: '日付を1つ以上選んでください',
     shopRangeEmptySlots: '食事を1つ以上選んでください',
     // 範囲を絞ったときのボタン名（「表示している週の」が嘘になるので言い換える）
-    goToShoppingPicked: '選んだ範囲の買い物リストを作る',
+    goToShoppingPicked: '選んだ範囲の買い物メモを作る',
     // 絞った結果、その範囲に献立が1品も無いとき
     goToShoppingPickedEmpty: '選んだ範囲には献立が入っていません',
     // 作った記録の一覧への入口(2026-08-09 便EQ: 旧「過去の記録を見る」)。
@@ -1653,9 +1659,9 @@ export const ja = {
     // 「完成！」の窓は**その場で消すかどうかを聞く**ので空になる（窓の中で別に書く）
     // 2026-08-15 便GW: 1行目を見出しへ切り出した（「完成！」の窓は自前の見出しを持つので、
     // そちらへは今までどおり1行目を含めた本文を渡す＝出る文字は変わらない）
-    markAllCookedConfirmTitle: '{titles}の{n}件に、今日の日付で作った記録をつけます',
+    markAllCookedConfirmTitle: '{titles}の{n}品に、今日の日付で作った記録をつけます',
     markAllCookedConfirm:
-      '記録した{n}件は今日の献立から外れます。作った段取りと、選んでいた{n}品の組み合わせも消えます。\nレシピ・作った記録{timers}はそのまま残ります。\n\n',
+      '記録した{n}品は今日の献立から外れます。作った段取りと、選んでいた{n}品の組み合わせも消えます。\nレシピ・作った記録{timers}はそのまま残ります。\n\n',
     markAllCookedConfirmTimersKept: '・動いているタイマー',
     markAllCookedConfirmPantry: '設定により、使った食材の在庫も1段階ずつ下がります。\n\n',
     // 2026-08-12 便FX・オーナー指摘「まとめて作った！ので注意書きが出るなら、後から記録一覧から
@@ -2002,7 +2008,7 @@ export const ja = {
     memoSourceManual: '自分で追加',
     // 出所のレシピが削除されていた場合。名前が出せないものを一覧に並べても行動に繋がらないので、
     // 件数だけ正直に添える
-    memoSourceMissing: '削除されたレシピ {n}件',
+    memoSourceMissing: '削除されたレシピ {n}品',
     // 行をタップすると小窓が出ることのa11yラベル
     memoSourceOpen: '追加したレシピを見る',
   },
@@ -2127,7 +2133,7 @@ export const ja = {
     timerSoundOffNote: '「タイマー音」をオンにすると、音量と鳴る長さを選べます',
     timerWakeLockTitle: 'タイマー中は画面を暗くしない',
     // 便DV-6: 「（対応ブラウザのみ）」は説明文から外し、非対応のときだけ注記を出す条件表示にした
-    timerWakeLockDescription: 'タイマーが1本でも動いている間、どの画面を見ていても自動消灯を防ぎます',
+    timerWakeLockDescription: 'タイマーが1件でも動いている間、どの画面を見ていても自動消灯を防ぎます',
     // 食数の設定（2026-08-03 便DK。2026-08-04 便DVで「ふだん作る人数」から改名・オーナー指示）。
     // 1〜20人の任意項目で、未設定なら従来どおりレシピに登録されている人数分で扱う。
     // 説明はオーナー指示の「レシピの表示や献立の価格・栄養計算の基準として扱います」を元にしつつ、
@@ -2172,8 +2178,8 @@ export const ja = {
     aisleOrderResetDone: '売り場順を初期設定に戻しました',
     /** 既定の並びのままであることの表示（並び替え済みかどうかが一目で分かるように） */
     aisleOrderDefaultNote: 'いまは初期設定の順番です',
-    ngMatchPreview: '一致するレシピ: {n}件',
-    ngAddedFeedback: '「{ng}」を追加しました（該当レシピ {n}件）',
+    ngMatchPreview: '一致するレシピ: {n}品',
+    ngAddedFeedback: '「{ng}」を追加しました（該当レシピ {n}品）',
     starterTitle: '基本レシピ',
     starterDescription: 'アプリに最初から入っている定番レシピ（{n}品）の扱いを選べます',
     starterHide: '基本レシピを一覧に表示しない',
@@ -2231,11 +2237,11 @@ export const ja = {
     recipeSetUrlHint: '配布元のサーバー設定によっては読み込めない場合があります',
     recipeSetFileLoad: 'ファイルから読み込む',
     recipeSetLoading: '読み込み中…',
-    recipeSetResult: '{a}件追加しました（重複{s}件はスキップ）',
+    recipeSetResult: '{a}品追加しました（重複{s}品はスキップ）',
     /** 更新（内容が変わっていた再取込）が1件以上あるときのみ使う。u=0のときはrecipeSetResultのまま */
-    recipeSetResultWithUpdate: '{a}件追加・{u}件更新しました（重複{s}件はスキップ）',
+    recipeSetResultWithUpdate: '{a}品追加・{u}品更新しました（重複{s}品はスキップ）',
     /** 削除済みのため取り込まなかった品があるとき（1件以上）だけ末尾に付ける。0件なら出さない（2026-07-13） */
-    recipeSetResultExcluded: '（削除済みの除外中{e}件）',
+    recipeSetResultExcluded: '（削除済みの除外中{e}品）',
     recipeSetError: '読み込めませんでした。レシピセットのJSONファイルか確認してください',
     recipeSetNotFound: '指定されたURLにレシピセットが見つかりませんでした。IDの綴りが正しいか確認してください',
     // 2026-07-17バックアップ改修 修正5: バックアップタブを3カード(バックアップを取る/
@@ -2312,7 +2318,7 @@ export const ja = {
     // ときだけ replaceCookNaviNote を足す（docs/69「捨てたときは失うものがある場合だけ知らせる」）
     backupImportReplaceTitle: '読み込むファイルの内容で上書きします',
     backupImportReplaceGoneLabel: '消えるもの',
-    backupImportReplaceGone: '今のレシピ{r}件・作った記録{c}件・価格{p}件{navi}',
+    backupImportReplaceGone: '今のレシピ{r}品・作った記録{c}件・価格{p}件{navi}',
     backupImportReplaceSwapLabel: '置き換わるもの',
     backupImportReplaceSwap:
       '在庫・買い物メモ・週の献立・今日の献立・日付メモ・献立テンプレート・献立のロック・削除したレシピを取り込み直さないための記録・設定（NG食材・テーマ・週の食費予算など）',
@@ -2356,11 +2362,10 @@ export const ja = {
     // 確認が重いと本来の役目を邪魔するので、消えるもの・残るものを1行ずつの短さにする
     replaceUndoTitle: '上書きする前のデータに戻します',
     replaceUndoGoneLabel: '消えるもの',
-    replaceUndoGone: '今のレシピ{r}件・作った記録{c}件と、上書きしたあとに直した内容{navi}',
+    replaceUndoGone: '今のレシピ{r}品・作った記録{c}件と、上書きしたあとに直した内容{navi}',
     replaceUndoKeptLabel: '残るもの',
     replaceUndoKept: 'Pro版の解錠コードは残ります',
     replaceUndoOk: '元に戻す',
-    replaceUndoDismiss: '閉じる',
     replaceUndoDone: '元のデータに戻しました',
     replaceUndoError: '元に戻せませんでした（控えが見つかりません）',
     // 控えを取れなかったとき(端末の空き容量不足など)に出す(2026-07-30 便CJ/C16)。
@@ -2450,9 +2455,9 @@ export const ja = {
       '③ファイルが保存できたのを確かめて「書き出した記録を端末から消す」を押す（②を済ませると出るボタンです）',
     ],
     archivePeriodLabel: '書き出す範囲',
-    archivePeriodOption: '{n}ヶ月より前',
-    archiveTargetCount: '{n}ヶ月より前の記録: {c}件（写真{p}枚）',
-    archiveTargetNone: '{n}ヶ月より前の記録はありません',
+    archivePeriodOption: '{n}か月より前',
+    archiveTargetCount: '{n}か月より前の記録: {c}件（写真{p}枚）',
+    archiveTargetNone: '{n}か月より前の記録はありません',
     archiveKeepNote: '{date}以降の記録は端末に残ります',
     // 2026-08-16 便HC: レシピを削除しても残った記録（detachedLogs）も書き出しの対象になった。
     // レシピが無いぶん容量だけが残っている記録で、対象外だと軽量化の目的を果たせないため。
@@ -2608,7 +2613,7 @@ export const ja = {
     // 2026-08-08 便EA(便DWの申し送り): Pro機能一覧に「栄養から組む」が入っていなかったので足す
     // （現在のPro機能＝登録数の上限なし・栄養価の8項目表示と並び替え・月間の献立・並行調理ナビ・
     // 栄養から組む の5つ。紹介ページと説明書は先に5つとも書いてあった）
-    proDescription: 'レシピの登録数を無制限にしたり、栄養価の8項目表示（たんぱく質・塩分相当量など）・たんぱく質や塩分での並び替え・月間の献立表・並行調理ナビ・栄養から組む（「たんぱく質多め」「塩分ひかえめ」など8つから選んで献立を組む）など、Pro向けの機能が使えるようになります。',
+    proDescription: 'レシピの登録数を無制限にしたり、栄養価の8項目表示（たんぱく質・塩分相当量など）・たんぱく質や塩分での並び替え・月間の献立・並行調理ナビ・栄養から組む（「たんぱく質多め」「塩分ひかえめ」など8つから選んで献立を組む）など、Pro向けの機能が使えるようになります。',
     // 2026-08-03 オーナー指示（便DN）: 「購入と解錠」の枠は購入ボタンと解錠コード入力欄を隣り合わせに
     // 置き、機能説明は最低限に絞る。枠の中に出すのはこの1文だけで、詳しい説明は proFeaturesToggle の
     // 折りたたみと proDetailLink のリンク先に回す
@@ -2662,7 +2667,7 @@ export const ja = {
         to: '/recipes',
         linkLabel: 'レシピ一覧を開く',
         features: [
-          { label: 'レシピの登録数の上限なし', hint: '30件を超えて登録できます' },
+          { label: 'レシピの登録数の上限なし', hint: '30品を超えて登録できます' },
           {
             // 2026-08-01 線引きB': 無料で見えるのはエネルギーと野菜量なので、増える項目に塩分相当量を含める
             label: '栄養価の8項目表示',
@@ -2684,7 +2689,7 @@ export const ja = {
             // 2026-07-30 便CH/C5: 大改修で月の画面にできることが増えたのに案内が改修前のままで、
             // 解錠しても何が使えるようになったのか分からなかった。項目は増やさない
             // （メモ・テンプレート・献立表は週の画面でも無料で使えるのでPro特典として並べない）
-            label: '月間ビュー',
+            label: '月間の献立',
             hint: '献立の画面の「週・月」の切り替えから開きます。月の画面から予定を直接追加・変更でき、その日のメモや、未定の日にまとめて提案、1か月分の献立表の印刷・画像保存も月の画面からできます',
           },
           {
@@ -2707,11 +2712,11 @@ export const ja = {
     aboutTitle: 'うちレシピについて',
     // バージョン+データ件数(2026-07-17設定ゼロベース裁定#3。問い合わせ対応に必須)
     aboutVersion: 'バージョン {v}',
-    aboutDataCount: 'レシピ {r}件・作った記録 {c}件',
+    aboutDataCount: 'レシピ {r}品・作った記録 {c}件',
     // 未解錠のときの内訳(2026-08-08 便DZ)。レシピ一覧の件数表記と同じ数を出す
     // （{r}には基本レシピが入るが、上限に数えるのは自分で登録した{u}品だけ）。
     // {max}=logic/freeLimit.ts の FREE_LIMIT
-    aboutDataCountFree: 'レシピ {r}件（自分で登録 {u}/{max}品）・作った記録 {c}件',
+    aboutDataCountFree: 'レシピ {r}品（自分で登録 {u}/{max}品）・作った記録 {c}件',
     aboutPageLink: 'アプリの紹介ページを見る',
     // ホーム画面への追加の案内(2026-08-09 便EI)。手順そのものは public/about/install.html にあり、
     // アプリ内からは辿れなかったので設定に導線を置く。リンク名は紹介ページ・使い方ページに
@@ -2776,7 +2781,7 @@ export const ja = {
     freeLimitCount: '自分で登録 {n}/{max}品',
     // 登録し終えた件数が節目(20件目・27件目)のときだけ出す予告(2026-08-08 便DZ・オーナー指示)。
     // 常時表示をやめたので「いま何件目か」ではなく残りの件数だけを書く
-    freeLimitNearNotice: '無料版はあと{n}件登録できます（登録済みのレシピはこのまま全部使えます）',
+    freeLimitNearNotice: '無料版はあと{n}品登録できます（登録済みのレシピはこのまま全部使えます）',
     // 上限ちょうど(30件目)で登録し終えたときの案内。規約F: これ以上できないこと(=新規登録)と、
     // 変わらないこと(=登録済みのレシピ)を両方書く。数字は logic/freeLimit.ts の FREE_LIMIT と対応
     freeLimitReachedNotice:
@@ -2873,7 +2878,7 @@ export const ja = {
     bulkDeleteConfirmTitle: 'レシピ{r}品を削除します',
     bulkDeleteConfirmGoneLabel: '消えるもの',
     bulkDeleteConfirmGone:
-      'レシピの材料・手順・レシピの写真と、献立の予定{m}件・今日の献立{t}件（元に戻せません）',
+      'レシピの材料・手順・レシピの写真と、献立の予定{m}品・今日の献立{t}品（元に戻せません）',
     bulkDeleteConfirmKeptLabel: '残るもの',
     bulkDeleteConfirmKept: '作った記録{n}件（うち写真{p}枚）・他のレシピ{rest}品・買い物メモ・食材の在庫',
     /** 記録が1件以上あるときだけ添える補足（form.confirmDeleteLogsNote と同じ内容） */
@@ -2947,7 +2952,6 @@ export const ja = {
     exportSelectedConfirmNoteRestore:
       '読み込みは設定の「バックアップを読み込む」の「今のデータに追加」から。',
     exportSelectedConfirmOk: '書き出す',
-    exportSelectedConfirmCancel: 'やめる',
     // 保存先を選べる端末（Chrome/Edge等）と、自動ダウンロードの端末（iPhone・iPad等）で
     // 言えることが違うので分ける（設定のバックアップ書き出しと同じ作法）
     exportSelectedDonePicked: 'レシピ{r}品を選んだ場所に書き出しました',
@@ -2968,7 +2972,7 @@ export const ja = {
      */
     selectForTodayTitle: '今日の献立に入れるレシピを選んでいます',
     selectForTodayHint:
-      'レシピをタップして選び、「選択したレシピを今日の献立に入れる」を押します',
+      'レシピをタップして選び、「選択したレシピ◯品を今日の献立に入れる」を押します',
     addSelectedToToday: '選択したレシピ{r}品を今日の献立に入れる',
     addSelectedToTodayEmpty: '選択したレシピを今日の献立に入れる',
     /** まとめて入れるときの食事の振り分け窓の見出し（1品ずつのときは「どの食事に入れますか？」） */
@@ -3090,9 +3094,9 @@ export const ja = {
     sortAsc: '昇順',
     sortDesc: '降順',
     // 絞り込み無しでも常に表示する総件数(2026-07-13 UI改善)
-    totalCount: '全{n}件',
+    totalCount: '全{n}品',
     // 絞り込み中は「結果件数 / 総件数」の形でまとめて表示する
-    resultCountWithTotal: '{n}件 / 全{t}件',
+    resultCountWithTotal: '{n}品 / 全{t}品',
     noResult: '条件に合うレシピが見つかりません',
     noResultHint: '右下の「＋」ボタンから自分のレシピを登録できます',
     // 2026-07-29 便CI/C20: 絞り込みで0件になったときに「＋から登録」だけを勧めていたため、
@@ -3123,7 +3127,6 @@ export const ja = {
     description: 'レシピの文章を貼り付けると、材料と手順に自動で振り分けます。結果は必ず確認して直せます',
     placeholder: 'ここにレシピの文章を貼り付け',
     apply: '自動で振り分ける',
-    close: '閉じる',
     empty: '文章を貼り付けてください',
     resultNone: '材料や手順を見つけられませんでした。手入力で登録できます',
     // 2026-08-08 オーナー指示（言い訳めいた注意書きの掃引）: 「うまく〜ませんでした」「お手数ですが」
@@ -3182,7 +3185,6 @@ export const ja = {
       'サイトによっては写真を取り込めないことがあります。取り込んだ写真は自動で縮小し、1枚あたりおよそ150〜300KBの保存容量を使います',
     apply: '読み込む',
     loading: '読み込み中…',
-    close: '閉じる',
     empty: 'URLを入力してください',
     // 2026-07-28 便BX/C04: 入力ミスは待っても直らない。何を直せばよいかを具体例で示す
     // (URLの打ち間違いはユーザー自身が直せるので、ここだけは貼り付けに逃がさない)
@@ -3421,16 +3423,16 @@ export const ja = {
     // 説明の1行はモードに入ったときに出し、消し方(チェック→削除ボタン)を書く
     ingredientOrganizeToggle: '選んで削除',
     ingredientOrganizeDone: '完了',
-    ingredientOrganizeHint: '消したい材料にチェックを付けて、「選んだ材料◯行を削除」を押します',
+    ingredientOrganizeHint: '消したい材料にチェックを付けて、「選んだ材料◯件を削除」を押します',
     ingredientOrganizeSelectAll: '全選択',
     ingredientOrganizeClearSelection: '選択解除',
     ingredientOrganizeSelectRow: 'この材料を選ぶ',
-    ingredientOrganizeDeleteSelected: '選んだ材料{n}行を削除',
+    ingredientOrganizeDeleteSelected: '選んだ材料{n}件を削除',
     // 規約F: 何が消えるか/何が残るかを件数つきで両方書く
-    ingredientOrganizeConfirmTitle: '選んだ材料{n}行を消します',
+    ingredientOrganizeConfirmTitle: '選んだ材料{n}件を削除します',
     ingredientOrganizeConfirm:
-      '元に戻せません。残りの材料{m}行と、料理名・手順・写真などの入力は残ります。',
-    ingredientOrganizeConfirmAllTitle: '材料{n}行をすべて消して、空の1行に戻します',
+      '元に戻せません。残りの材料{m}件と、料理名・手順・写真などの入力は残ります。',
+    ingredientOrganizeConfirmAllTitle: '材料{n}件をすべて削除して、空の1行に戻します',
     ingredientOrganizeConfirmAll: '元に戻せません。料理名・手順・写真などの入力は残ります。',
     ingredientOrganizeConfirmOk: '削除する',
     // 並べ替えの上下矢印を囲むつまみ(2026-08-02 オーナー実機FB: 矢印だけだと分量の数値調整に見える。
@@ -3674,7 +3676,6 @@ export const ja = {
     cookedLogPhotoRotating: '回しています',
     cookedSave: '記録する',
     cookedRecordedToast: '作った記録をつけました',
-    cookedCancel: 'やめる',
     // 「作った！」の在庫反映スイッチ(2026-07-23 オーナー実機FB #11)。既定OFF・選択を記憶。
     // ON時、使った食材の在庫を1段階だけ下げる(ある→少ない→ない)。調味料系は対象外
     cookedReflectPantryLabel: '使った食材の在庫を減らす',
@@ -3693,7 +3694,6 @@ export const ja = {
     cookedLogEditTitle: '記録を編集',
     cookedLogNotePlaceholder: 'ひとことメモ（任意）',
     cookedLogSave: '保存する',
-    cookedLogCancel: 'やめる',
     // 作った記録を1件だけ削除する(2026-07-29 便CI/C02)。従来は削除する手段が無く、
     // 誤タップや重複記録を消すにはレシピごと消すしかなかった。
     // 元に戻せない操作なので確認文は規約F(何が消えて何が残るかを件数つきで書く)。
@@ -3742,9 +3742,7 @@ export const ja = {
     // 初回のレシピ詳細でだけ1回出す控えめなヒント(2026-07-23 便BJ・docs/55 CEO提案1-5)。
     // ボタン名は変えず、初見ユーザーがこのボタンに気づきやすくするためだけの一言
     firstHint: '作りながら見るならこれ',
-    firstHintDismiss: '閉じる',
     stepCounter: '手順 {n}/{t}',
-    close: '閉じる',
     prev: '前へ',
     next: '次へ',
     complete: '完成！',
@@ -3997,7 +3995,7 @@ export const ja = {
     includeRiceLabel: '1食につきごはん1杯（{g}g）を足して計算する',
     includeRiceHint:
       '丼・麺・カレー・鍋のように主食を含む料理が主菜の食事には足しません。栄養と概算食費の両方に反映します。',
-    includeRiceCostNote: 'ごはん{n}杯ぶん（約{yen}円）を含めた金額です',
+    includeRiceCostNote: 'ごはん{n}杯分（約{yen}円）を含めた金額です',
     /**
      * いま出している合計に、ごはんを何杯ぶん足したか（2026-08-10 便FD・オーナー実機
      * 「この日の献立栄養で、合計何杯分のご飯が計算に入るか入れて」）。

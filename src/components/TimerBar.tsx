@@ -122,7 +122,7 @@ export default function TimerBar() {
             <button
               type="button"
               onClick={dismissFirstTimeNotice}
-              aria-label={ja.focus.close}
+              aria-label={ja.common.close}
               className="tap-target shrink-0"
             >
               <X size={16} aria-hidden />

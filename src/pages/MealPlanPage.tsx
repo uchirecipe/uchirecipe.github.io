@@ -5490,7 +5490,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             <button
               type="button"
               onClick={() => setAddMenuFor(null)}
-              aria-label={ja.focus.close}
+              aria-label={ja.common.close}
               className="tap-target rounded-full p-1 text-ink-muted"
             >
               <X size={14} aria-hidden />
@@ -7566,7 +7566,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             <button
               type="button"
               onClick={closePicker}
-              aria-label={ja.focus.close}
+              aria-label={ja.common.close}
               className="tap-target rounded-full p-2 text-ink-muted"
             >
               <X size={22} aria-hidden />
@@ -8242,7 +8242,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   onClick={() => setDayModalDate(null)}
                   className="w-full rounded-md border border-edge bg-surface py-3 font-bold text-ink-muted shadow-sm"
                 >
-                  {ja.mealPlan.monthDayModalClose}
+                  {ja.common.close}
                 </button>
               )}
             </div>

@@ -1011,7 +1011,7 @@ export default function ShoppingPage() {
             <button
               type="button"
               onClick={() => setPickerOpen(false)}
-              aria-label={ja.focus.close}
+              aria-label={ja.common.close}
               className="tap-target rounded-full p-2 text-ink-muted"
             >
               <X size={22} aria-hidden />

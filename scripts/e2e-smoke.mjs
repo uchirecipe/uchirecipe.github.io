@@ -7,7 +7,7 @@
 // 既定で空きポートをその場で取る(2026-08-09 便EM。旧: 4194/4203固定で並行実行と衝突していた)。
 // 固定したいときだけ E2E_PREVIEW_PORT / E2E_URLIMPORT_PREVIEW_PORT を指定する。
 // カバー: SMK-01(起動) / COUNT-01(一覧上部の総件数「全◯件」が絞り込み無しでも常に表示され、
-//         絞り込み中は「◯件 / 全◯件」の形になる。2026-07-13 UI改善) /
+//         絞り込み中は「◯品 / 全◯品」の形になる。2026-07-13 UI改善) /
 //         QF-01(「時短レシピのみに絞る」絞り込みで件数が変わる。チップ文言は2026-07-13と
 //         2026-07-16便T-5で変更) /
 //         PANTRYFILTER-01(一覧の絞り込み「在庫の食材で絞る」チップ・2026-07-24 便BN・司令部追加:
@@ -187,7 +187,7 @@
 //         Pro解錠コードが戻ることを実UI経由で確認。(a)未購入プロファイル+コード入りバックアップを
 //         mergeで解錠される (b)Pro解錠済みプロファイル+コード無し旧形式バックアップをmergeしても
 //         解錠状態が消えない=mergeUnlockCodesの「バックアップに無ければ既存を保持」の実固定) /
-//         ARCHIVE-01(古い記録の書き出し・2026-08-02: 「1ヶ月より前」の記録だけが対象になる・
+//         ARCHIVE-01(古い記録の書き出し・2026-08-02: 「1か月より前」の記録だけが対象になる・
 //         書き出す前は削除ボタンが出ない(2段階)・書き出したファイルに種別マーク(kind)と記録の写真が
 //         入る・書き出しただけでは端末の記録は減らない・削除で古い記録だけが消えレシピ本体と
 //         最近の記録は残る・「アーカイブを見る」は帯付きの閲覧だけで端末に書き戻さない・
@@ -695,7 +695,7 @@ try {
   )
   check(
     'COUNT-01 絞り込み中は「結果件数 / 全件数」の形で表示される',
-    (await page.textContent('body')).includes(`${quickCardCount}件 / 全${allCardCount}件`),
+    (await page.textContent('body')).includes(`${quickCardCount}品 / 全${allCardCount}品`),
   )
   // 絞り込みを解除して以降のチェックに影響しないようにする
   await page.getByRole('button', { name: '時短レシピのみに絞る', exact: true }).click()
@@ -2021,7 +2021,7 @@ try {
       const afterSetBody = await freePage.textContent('body')
       check(
         'SMK-14 ?set=付きURLは無害に設定へ着地する(取り込みは起きない・エラーも出ない)',
-        !afterSetBody.includes('件追加しました') &&
+        !afterSetBody.includes('品追加しました') &&
           !afterSetBody.includes('見つかりませんでした') &&
           afterSetBody.includes('NG食材（アレルギー・苦手）'),
       )
@@ -2224,7 +2224,7 @@ try {
     check('ABOUT-01 バージョン表示がある', /バージョン \S+/.test(aboutText))
     check(
       'ABOUT-01 データ件数表示(レシピ◯件・作った記録◯件)がある',
-      /レシピ \d+件（自分で登録 \d+\/\d+品）・作った記録 \d+件/.test(aboutText),
+      /レシピ \d+品（自分で登録 \d+\/\d+品）・作った記録 \d+件/.test(aboutText),
     )
     // 2026-08-08 便DZ: 未解錠のときは、レシピ一覧と同じ「自分で登録 ◯/30品」をここにも出す
     // (オーナー要望「利用者がどう確認できるか」。総件数には基本レシピが入るので別の数として並べる)
@@ -8015,7 +8015,7 @@ try {
       )
 
       // --- 2026-08-02 便CW-10: 「ごはんを含めて計算する」(無料・既定OFF)。
-      // ONにすると各食にごはん1杯ぶんの栄養と食費が足され、選択は設定に残る。
+      // ONにすると各食にごはん1杯分の栄養と食費が足され、選択は設定に残る。
       // 量(150g)・成分値・金額はマスタ参照なので、ここでは「増えること」と「残ること」を見る
       const riceCheckbox = nbPage.locator('[data-testid="include-rice"]').first()
       check(
@@ -8060,8 +8060,8 @@ try {
       await nbPage.getByRole('button', { name: '表示している週の概算食費' }).click()
       await nbPage.waitForTimeout(400)
       check(
-        'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯ぶんを含めた金額です」を添える',
-        /ごはん\d+杯ぶん（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
+        'NUTRI-DAY-01(便CW-10) 週の概算食費に「ごはん◯杯分を含めた金額です」を添える',
+        /ごはん\d+杯分（約[\d,]+円）を含めた金額です/.test(await nbPage.textContent('body')),
       )
     } finally {
       await nbBrowser.close()
@@ -8216,7 +8216,7 @@ try {
       await mp2Page.waitForTimeout(400)
       check(
         'MEALPLAN-02 前提: Pro解錠済みで月カレンダーが開く(ゲートでない)',
-        !(await mp2Page.textContent('body')).includes('月間表示はPro版の機能です'),
+        !(await mp2Page.textContent('body')).includes('月間の献立はPro版の機能です'),
       )
 
       const monthCenterBtn = mp2Page.locator('button').filter({ hasText: '/' }).first()
@@ -9741,7 +9741,7 @@ try {
       const rcFutureOpenText = (await rcCard.textContent()) ?? ''
       check(
         'MEALPLAN-07(便CA①) 内訳に「作った記録 約0円（0品）／登録した献立 …（2品）」が出る',
-        /内訳 作った記録 約0円（0品）／登録した献立 約[\d,]+円（2品）/.test(rcFutureOpenText),
+        /内訳 作った記録 約0円（0件）／登録した献立 約[\d,]+円（2品）/.test(rcFutureOpenText),
         `内訳=${rcFutureOpenText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
@@ -9815,13 +9815,13 @@ try {
         ),
       )
       check(
-        'MEALPLAN-07(便CA①) 過去期間の1人分合計＝作った記録1品の1人分(何人分作ったかでは増えない)',
+        'MEALPLAN-07(便CA①) 過去期間の1人分合計＝作った記録1件の1人分(何人分作ったかでは増えない)',
         rcPastPersonal === Math.round(rcPersonalOne),
         `表示=${rcPastPersonal} 期待=${Math.round(rcPersonalOne)}`,
       )
       check(
         'MEALPLAN-07(便CA②) 同じ期間に登録した献立があっても、過去の予定は0品0円で数えない',
-        /内訳 作った記録 約[\d,]+円（1品）／登録した献立 約0円（0品）/.test(rcPastText),
+        /内訳 作った記録 約[\d,]+円（1件）／登録した献立 約0円（0品）/.test(rcPastText),
         `内訳=${rcPastText.match(/内訳[^。]{0,60}/)?.[0]}`,
       )
       check(
@@ -9840,8 +9840,8 @@ try {
         `表=${rcPastTableText.slice(0, 240)}`,
       )
       check(
-        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1品の栄養価を、1食分ずつ足して算出した数値です」',
-        rcPastText.includes('作った記録1品の栄養価を、1食分ずつ足して算出した数値です'),
+        'MEALPLAN-07(便CA①) 栄養の注記は「作った記録1件の栄養価を、1食分ずつ足して算出した数値です」',
+        rcPastText.includes('作った記録1件の栄養価を、1食分ずつ足して算出した数値です'),
       )
       // 記録も予定も無い期間は空案内
       await rcDay(`${rcPrevPrefix}-20`).click()
@@ -9882,12 +9882,12 @@ try {
         )
         check(
           'MEALPLAN-07(便CA③) 混在期間の内訳は実績1品と予定1品の両方が出る',
-          /内訳 作った記録 約[\d,]+円（1品）／登録した献立 約[\d,]+円（1品）/.test(rcMixedText),
+          /内訳 作った記録 約[\d,]+円（1件）／登録した献立 約[\d,]+円（1品）/.test(rcMixedText),
           `内訳=${rcMixedText.match(/内訳[^。]{0,60}/)?.[0]}`,
         )
         check(
-          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です」',
-          rcMixedText.includes('作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
+          'MEALPLAN-07(便CA①) 混在期間の栄養注記は「作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です」',
+          rcMixedText.includes('作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
         )
         const rcMixedPersonal = Number(
           (((await rcTable.textContent()) ?? '').match(
@@ -10155,7 +10155,7 @@ try {
       check(
         'RANGE-EA(便EA-3) 今日の「作った記録」1品と、まだ作っていない献立1品を分けて数える',
         eaTodayCardText.includes(
-          '作った記録1品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です',
+          '作った記録1件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です',
         ),
         `カード=${eaTodayCardText.match(/.{0,20}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
@@ -10187,7 +10187,7 @@ try {
       const eaCrossText = (await eaCard.textContent()) ?? ''
       check(
         'RANGE-EA(便EA-2b) 月をまたぐ期間でも、表示中の月の外の「作った記録」を数える(記録2品)',
-        eaCrossText.includes('作った記録2品と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
+        eaCrossText.includes('作った記録2件と登録した献立1品の栄養価を、1食分ずつ足して算出した数値です'),
         `カード=${eaCrossText.match(/.{0,26}1食分ずつ足して算出した数値です/)?.[0]}`,
       )
       check(
@@ -10480,7 +10480,7 @@ try {
   }
 
   // --- MEALPLAN-SERV: 献立の食数(2026-08-03 便DJ・オーナー指示)。週の1品ごとに「何人分作るか」を
-  // 決められ、それが買い物リストの分量に効くこと・「1人分」の栄養表示は動かないことを確認する。
+  // 決められ、それが買い物メモの分量に効くこと・「1人分」の栄養表示は動かないことを確認する。
   // 再発防止の要点: 既定(食数を触っていない)ときの分量が従来と1gも変わらないこと。 ---
   currentCheck = 'MEALPLAN-SERV'
   {
@@ -10528,7 +10528,7 @@ try {
             .filter((v) => v && /[0-9]/.test(v)),
         )
       }
-      await svPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
+      await svPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
       await svPage.waitForTimeout(1200)
       const svAmountsBefore = await svReadAmounts()
       check(
@@ -10571,7 +10571,7 @@ try {
         svSaved.length === 1 && svSaved[0].servings === svBase * 2,
         `saved=${JSON.stringify(svSaved)}`,
       )
-      await svPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
+      await svPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
       await svPage.waitForTimeout(1200)
       const svAmountsAfter = await svReadAmounts()
       // 分量は「小さじ1/2」のような分数表記も出るので、分数のまま数値にして比べる
@@ -10594,7 +10594,7 @@ try {
     }
   }
 
-  // --- SHOPRANGE-EA: 買い物リストの範囲えらび(2026-08-08 便EA・オーナー要望
+  // --- SHOPRANGE-EA: 買い物メモの範囲えらび(2026-08-08 便EA・オーナー要望
   // 「選択した日付や時間帯レシピから買い物リスト作成したい。3日分とか、
   // １週間分まとめて買い物とは限らない」)。
   // 再発防止の要点: ①開かなければ従来どおり(ボタン名・下書きの中身が変わらない)
@@ -10640,11 +10640,11 @@ try {
           ),
       )
       check(
-        'SHOPRANGE-EA(既定) ボタン名は従来どおり「表示している週の買い物リストを作る」',
-        await srPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).isVisible(),
+        'SHOPRANGE-EA(既定) ボタン名は従来どおり「表示している週の買い物メモを作る」',
+        await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).isVisible(),
       )
       const srCountDraft = () => srPage.locator('textarea').count()
-      await srPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
+      await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
       await srPage.waitForTimeout(1500)
       const srAll = await srCountDraft()
       check('SHOPRANGE-EA(既定) 週ぜんぶから下書きができる', srAll > 0, `rows=${srAll}`)
@@ -10681,11 +10681,11 @@ try {
       for (let i = 1; i < srDateCount; i++) await srDateChips.nth(i).click()
       await srPage.waitForTimeout(300)
       check(
-        'SHOPRANGE-EA(絞る) 絞るとボタン名が「選んだ範囲の買い物リストを作る」に変わる',
-        await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).isVisible(),
+        'SHOPRANGE-EA(絞る) 絞るとボタン名が「選んだ範囲の買い物メモを作る」に変わる',
+        await srPage.getByRole('button', { name: '選んだ範囲の買い物メモを作る' }).isVisible(),
       )
       const srKeptDate = await srDateChips.nth(0).getAttribute('data-date')
-      await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).click()
+      await srPage.getByRole('button', { name: '選んだ範囲の買い物メモを作る' }).click()
       await srPage.waitForTimeout(1500)
       const srOneDay = await srCountDraft()
       check(
@@ -10719,7 +10719,7 @@ try {
         ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes('夕食'),
         `summary=${await srPage.getByTestId('shop-range-summary').textContent()}`,
       )
-      await srPage.getByRole('button', { name: '選んだ範囲の買い物リストを作る' }).click()
+      await srPage.getByRole('button', { name: '選んだ範囲の買い物メモを作る' }).click()
       await srPage.waitForTimeout(1500)
       const srDinnerOnly = await srCountDraft()
       check(
@@ -10743,7 +10743,7 @@ try {
         'SHOPRANGE-EA(絞る) 「表示している週ぜんぶに戻す」で既定へ戻る',
         ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
           '表示している週ぜんぶ',
-        ) && (await srPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).isVisible()),
+        ) && (await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).isVisible()),
       )
     } finally {
       await srBrowser.close()
@@ -10820,7 +10820,7 @@ try {
             .filter((v) => v && /[0-9]/.test(v)),
         )
       }
-      await hhPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
+      await hhPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
       await hhPage.waitForTimeout(1200)
       const hhAmountsBefore = await hhReadAmounts()
       check(
@@ -10884,7 +10884,7 @@ try {
         hhCostAfter.note === '4' && hhCostAfter.yen === hhCostBefore.yen * 2,
         `before=${JSON.stringify(hhCostBefore)} after=${JSON.stringify(hhCostAfter)}`,
       )
-      await hhPage.getByRole('button', { name: '表示している週の買い物リストを作る' }).click()
+      await hhPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).click()
       await hhPage.waitForTimeout(1200)
       const hhAmountsAfter = await hhReadAmounts()
       const hhAmountNum = (v) => {
@@ -13062,8 +13062,8 @@ try {
       await rsPage.waitForTimeout(1000)
       const afterSuccessText = await rsPage.textContent('body')
       check(
-        'RECIPESET-01 ファイル読み込み(バックアップ形式)が成功し「◯件追加しました」が上部に出る',
-        /\d+件追加しました/.test(afterSuccessText),
+        'RECIPESET-01 ファイル読み込み(バックアップ形式)が成功し「◯品追加しました」が上部に出る',
+        /\d+品追加しました/.test(afterSuccessText),
       )
       check(
         'RECIPESET-01(修正4) 直前のエラーメッセージは成功後には残らない',
@@ -13510,7 +13510,7 @@ try {
       await l2Page.reload({ waitUntil: 'networkidle' })
       await l2Page.waitForTimeout(1600)
       check(
-        'LAUNCH-02(便DZ) レシピ一覧の件数の横に「自分で登録 ◯/30品」が出る',
+        'LAUNCH-02(便DZ) レシピ一覧の品数の横に「自分で登録 ◯/30品」が出る',
         ((await l2Page.locator('[data-testid="free-limit-count"]').textContent()) ?? '').includes(
           '自分で登録 19/30品',
         ),
@@ -13525,9 +13525,9 @@ try {
       await saveRecipeFromForm('20品目のレシピ')
       let listText = await openRecipeList()
       check(
-        'LAUNCH-02(便DZ) 20件目の登録完了で「あと10件登録できます」の予告が出る',
+        'LAUNCH-02(便DZ) 20件目の登録完了で「あと10品登録できます」の予告が出る',
         (await l2Page.locator('[data-testid="free-limit-notice"]').count()) > 0 &&
-          listText.includes('あと10件登録できます'),
+          listText.includes('あと10品登録できます'),
       )
       check(
         'LAUNCH-02(便DZ) 予告と同時に件数表記も20/30品になる',
@@ -13550,7 +13550,7 @@ try {
       check(
         'LAUNCH-02(便DZ) 21件目では予告を出さない(節目のときだけ)',
         (await l2Page.locator('[data-testid="free-limit-notice"]').count()) === 0 &&
-          !/あと\d+件登録できます/.test(listText),
+          !/あと\d+品登録できます/.test(listText),
       )
 
       // 29件まで積んでから30件目を登録=上限到達の案内(予告ではない)
@@ -14330,7 +14330,7 @@ try {
       check(
         'REPLACEUNDO-01(a) 確認文(事前確認+実行前確認の2回とも)に消えるレシピ件数が具体的に入る(規約F)',
         dialogMessages.length === 2 &&
-          dialogMessages.every((m) => m.includes(`今のレシピ${originalRecipeCount}件`)),
+          dialogMessages.every((m) => m.includes(`今のレシピ${originalRecipeCount}品`)),
         `dialogMessages=${JSON.stringify(dialogMessages)}`,
       )
       check(
@@ -14614,7 +14614,7 @@ try {
       await arPage.waitForTimeout(1500)
       const arCount = await arPage.locator('[data-testid="archive-target-count"]').textContent()
       check(
-        'ARCHIVE-01 既定(1ヶ月より前)で古い記録2件・写真1枚が対象になる',
+        'ARCHIVE-01 既定(1か月より前)で古い記録2件・写真1枚が対象になる',
         arCount.includes('2件') && arCount.includes('1枚'),
         `表示=${arCount}`,
       )
@@ -21427,7 +21427,7 @@ try {
       await fiPage.waitForTimeout(300)
       check(
         'FORMING-01(便DF) モードに入ると消し方の説明が出る',
-        (await fiPage.textContent('body')).includes('消したい材料にチェックを付けて、「選んだ材料◯行を削除」を押します'),
+        (await fiPage.textContent('body')).includes('消したい材料にチェックを付けて、「選んだ材料◯件を削除」を押します'),
       )
       check(
         'FORMING-01(a) 選択中は材料行のハンドルが隠れる(選択中に並びが変わらない)',
@@ -21440,9 +21440,9 @@ try {
       await fiPage.waitForTimeout(300)
       check(
         'FORMING-01(a) 選んだ件数が削除ボタンに出る',
-        (await fiPage.textContent('body')).includes('選んだ材料2行を削除'),
+        (await fiPage.textContent('body')).includes('選んだ材料2件を削除'),
       )
-      await fiPage.getByRole('button', { name: '選んだ材料2行を削除' }).click()
+      await fiPage.getByRole('button', { name: '選んだ材料2件を削除' }).click()
       await fiPage.waitForTimeout(500)
       check(
         'FORMING-01(a) 選んだ2行だけが消え、残りの1行(豚こま)はそのまま残る',
@@ -29883,7 +29883,7 @@ try {
       )
       check(
         'FF-FILTER パネルの中の件数も絞り込みに追従する',
-        (await ffPanelCount()) === `${await ffCards()}件 / 全${ffTotal}件`,
+        (await ffPanelCount()) === `${await ffCards()}品 / 全${ffTotal}品`,
         `件数=${await ffPanelCount()}`,
       )
       await ffPage.locator('[data-testid="recipes-tag-chip"]').first().click()

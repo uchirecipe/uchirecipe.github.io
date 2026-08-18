@@ -242,7 +242,7 @@ export default function CookedLogEditor({
           onClick={onCancel}
           className="rounded-sm border border-edge px-3 py-2 text-sm text-ink-muted"
         >
-          {ja.detail.cookedLogCancel}
+          {ja.common.confirmCancel}
         </button>
       </div>
       {/* 記録そのものの削除(2026-07-29 便CI/C02)。確認文は規約F(何が消えて何が残るかを件数つきで) */}

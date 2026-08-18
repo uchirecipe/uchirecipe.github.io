@@ -139,7 +139,7 @@ export function useSelectedRecipesExport({
         bullets={pending?.confirm.bullets}
         notes={pending?.confirm.notes}
         confirmLabel={ja.recipes.exportSelectedConfirmOk}
-        cancelLabel={ja.recipes.exportSelectedConfirmCancel}
+        cancelLabel={ja.common.confirmCancel}
         testId="recipes-export-confirm"
         onConfirm={() => void save()}
         onCancel={() => setPending(undefined)}

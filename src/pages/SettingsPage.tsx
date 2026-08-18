@@ -2310,7 +2310,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setReplaceUndoAvailable(false)}
-                  aria-label={ja.settings.replaceUndoDismiss}
+                  aria-label={ja.common.close}
                   className="tap-target shrink-0"
                 >
                   <X size={16} className="text-accent-ink" aria-hidden />

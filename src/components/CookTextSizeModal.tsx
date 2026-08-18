@@ -68,7 +68,7 @@ export default function CookTextSizeModal({
           <button
             type="button"
             onClick={onClose}
-            aria-label={ja.focus.close}
+            aria-label={ja.common.close}
             className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
           >
             <X size={20} aria-hidden />

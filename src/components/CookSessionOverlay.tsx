@@ -902,7 +902,7 @@ export default function CookSessionOverlay({
           <button
             type="button"
             onClick={dismissMicDenied}
-            aria-label={ja.focus.close}
+            aria-label={ja.common.close}
             className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
           >
             <X size={16} aria-hidden />
