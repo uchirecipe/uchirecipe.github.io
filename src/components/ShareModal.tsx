@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, MessageSquareText, Image as ImageIcon } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import type { ShareOptions } from '../logic/share'
+import { useOverlayDismiss } from './useOverlayDismiss'
 import { useScrollLock } from './useScrollLock'
 
 /** モーダルで選ぶ項目(実数値はRecipeDetailPage側が詰めるので、ここでは選択フラグのみ扱う) */
@@ -72,14 +73,8 @@ export default function ShareModal({
     setAllIngredients(false)
   }, [open, cookMinutesAvailable])
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  // Escape と端末の「戻る」で、この窓だけを閉じる（2026-08-18 便HQ・軸3）
+  useOverlayDismiss(open, onClose)
 
   useScrollLock(open)
   if (!open) return null
@@ -127,7 +122,7 @@ export default function ShareModal({
             type="button"
             onClick={onClose}
             aria-label={ja.common.close}
-            className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+            className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>

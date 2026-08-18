@@ -1328,6 +1328,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={() => removeNg(ng)}
                       aria-label={ja.settings.ngRemove}
+                      className="tap-target"
                     >
                       <X size={14} aria-hidden />
                     </button>
@@ -2310,7 +2311,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => setReplaceUndoAvailable(false)}
                   aria-label={ja.settings.replaceUndoDismiss}
-                  className="shrink-0"
+                  className="tap-target shrink-0"
                 >
                   <X size={16} className="text-accent-ink" aria-hidden />
                 </button>

@@ -96,7 +96,7 @@ export default function DayStartNotices({
               }
             }}
             aria-label={ja.common.close}
-            className="-m-2 shrink-0 rounded-full p-2 text-ink-muted"
+            className="tap-target -m-2 shrink-0 rounded-full p-2 text-ink-muted"
           >
             <X size={16} aria-hidden />
           </span>
@@ -128,7 +128,7 @@ export default function DayStartNotices({
             type="button"
             onClick={dismissNews}
             aria-label={ja.common.close}
-            className="-m-2 shrink-0 rounded-full p-3.5 text-ink-muted"
+            className="tap-target -m-2 shrink-0 rounded-full p-3.5 text-ink-muted"
           >
             <X size={16} aria-hidden />
           </button>

@@ -502,6 +502,10 @@ export const ja = {
       '組み合わせが{n}品になるため、並行調理ナビの段取りは終わります。レシピと今日の献立の残りはそのままです。',
     todayCookedNaviConfirmOk: '記録をつける',
     todayRemove: 'この献立から外す',
+    // 「レシピ一覧から選択中」の行の×（2026-08-18 便HQ・軸1/軸4）。
+    // 外すのは今日の献立の行だけで、今週の予定には最初から入っていない
+    todayRemovedToast: '「{title}」を今日の献立から外しました',
+    todayRemoveUndoneToast: '「{title}」を今日の献立に戻しました',
     todayMarkAllCooked: '全て作った！',
     // 2026-08-03 便DP-1(オーナー指示): 押すと確認なしで全件が記録され、リストが消えていた。
     // 規約F=「何が消えるか」「何が残るか」を件数つきで両方書く
@@ -884,6 +888,12 @@ export const ja = {
     suggest: '自動提案',
     suggestAria: 'この行にレシピを自動提案する',
     clear: 'この割り当てを外す',
+    // 週/月タブの×で行を外したときの知らせと、その取り消し（2026-08-18 便HQ・軸1/軸4）。
+    // それまでは何も出ないまま行が消えていた（消えたのか押し損ねたのかが分からない）。
+    // どの日のどの食事から外したかまで言う＝週・月は複数の日が同時に見えていて、
+    // 料理名だけでは「どこの枠が消えたのか」が読み取れないため
+    clearRemovedToast: '{m}月{d}日の{slot}から「{title}」を外しました',
+    clearUndoneToast: '{m}月{d}日の{slot}に「{title}」を戻しました',
     // 2026-07-29 便CD/MP-16: 「枠」という語が通じないという指摘(3体)を受けた言い換え。
     // このボタンを押すと主菜/副菜を選ぶ小メニューが出て、その料理の行が1行増える
     removeExtraRow: 'この追加した行をやめる',
@@ -1338,6 +1348,9 @@ export const ja = {
     todayPlannedRemove: '今日と今週の献立から外す',
     todayPlannedRemoveHint: '×を押すと、今週の献立からも外れます',
     todayPlannedRemovedToast: '「{title}」を今日と今週の献立から外しました',
+    // 外した直後だけトーストに添える取り消し（2026-08-18 便HQ・軸1）。
+    // 戻す範囲は、この×が外したものと同じ＝今週の予定の行と、今日の献立の行の両方
+    todayPlannedRemoveUndoneToast: '「{title}」を今日と今週の献立に戻しました',
     planMismatchAddToSlot: '{slot}に入れる',
     // 登録したときの結果。どの食事のどの役割に入ったかを明示する(役割の粒度が伝わるように)
     planMismatchAssigned: '{slot}の{role}に「{title}」を登録しました',

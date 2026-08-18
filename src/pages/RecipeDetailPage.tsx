@@ -73,6 +73,7 @@ import {
 import PriceEditModal, { type PriceEditTarget } from '../components/PriceEditModal'
 import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
 import { useRevealOnOpen } from '../components/useRevealOnOpen'
+import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { useScrollLock } from '../components/useScrollLock'
 import StepBadge from '../components/StepBadge'
 import ComposedStepText from '../components/ComposedStepText'
@@ -297,14 +298,10 @@ export default function RecipeDetailPage() {
   // タップした記録写真を原寸表示するモーダル
   const [viewingLogPhoto, setViewingLogPhoto] = useState<Blob>()
   const viewingLogPhotoUrl = usePhotoUrl(viewingLogPhoto)
-  useEffect(() => {
-    if (!viewingLogPhoto) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewingLogPhoto(undefined)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [viewingLogPhoto])
+  // Escape と端末の「戻る」で、この窓だけを閉じる（2026-08-18 便HQ・軸3）。
+  // 写真を大きく見ているときに「戻る」を押すと、写真が閉じるのではなくレシピ詳細ごと
+  // 前の画面へ戻っていた
+  useOverlayDismiss(viewingLogPhoto != null, () => setViewingLogPhoto(undefined))
   // 写真を大きく見ているあいだ、後ろのレシピ詳細は動かさない（2026-08-16 便HE）
   useScrollLock(viewingLogPhoto != null)
 
@@ -982,7 +979,7 @@ export default function RecipeDetailPage() {
                       type="button"
                       onClick={() => setShowCookHint(false)}
                       aria-label={ja.focus.firstHintDismiss}
-                      className="shrink-0 rounded-full p-1 text-ink-muted"
+                      className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
                     >
                       <X size={14} aria-hidden />
                     </button>
@@ -1383,7 +1380,7 @@ export default function RecipeDetailPage() {
               type="button"
               onClick={() => setViewingLogPhoto(undefined)}
               aria-label={ja.common.close}
-              className="absolute -right-2 -top-2 rounded-full border border-edge bg-surface p-1.5 text-ink-muted shadow-sm"
+              className="tap-target absolute -right-2 -top-2 rounded-full border border-edge bg-surface p-1.5 text-ink-muted shadow-sm"
             >
               <X size={18} aria-hidden />
             </button>

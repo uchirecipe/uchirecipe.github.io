@@ -21147,6 +21147,170 @@ Aみりん 大さじ1
   }
 }
 
+// ==========================================================================================
+// 便HQ-3: 押せる面の共通の器（2026-08-18・軸7）
+//
+// 同じ役目の「閉じる／外す ✕」が 22px〜48px の7段階に散り、同じファイルの中で32pxと44pxが
+// 混ざっていた（44px側にだけ「44px四方に広げる」意図のコメントが付いていた＝片方だけ直した跡）。
+// 原因は **44px確保の共通の器が無く、毎回手書きだった** こと（`min-h-11` / `h-11 w-11` /
+// `p-3` / `-m-2 p-3.5` の4通りが併存）。器（src/index.css の .tap-target）を1つ作って
+// 全部そこへ載せたので、ここでは **クラス名の有無ではなく、1つずつ大きさを出して** 見張る。
+//
+// 測り方: ボタンに書いてあるクラスから、そのボタンが実際に何px四方になるかを出す
+// （アイコンの大きさ＋padding、または h-/w-/min-h-/min-w- の指定。器を着けているものは
+// 器が保証する大きさまで当たり判定が広がる＝その値は index.css から読む）。
+// 対象は「文字のラベルを持たない＝アイコンだけのボタン」の ✕ とチェックの丸。
+// 文字ラベル付きのボタンは高さを変えると見た目が変わるので、ここでは測らない。
+//
+// 実画面での当たり判定は scripts/e2e-smoke.mjs の TAP-44 が受け持つ（中心から21pxの点を
+// 実際に突いて、押しても何も起きない場所が無いかを見る）。ここは e2e が開かない画面まで含めて
+// 1つも取りこぼさないための静的な見張り。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const css = readFileSync(path.join(appRoot, 'src/index.css'), 'utf-8')
+  // 守る大きさ（44px）はここで決め、器が本当にその大きさを配っているかを index.css で確かめる。
+  // 器が壊れたら「押せる面が広がっている」根拠が無くなるので、全部の✕がその場で赤くなる
+  const REQUIRED = 44
+  const tapMin = Number(css.match(/--tap-min:\s*(\d+)px/)?.[1] ?? 0)
+  eq('HQ-3 押せる面の大きさは index.css の1か所で決めてある', tapMin, REQUIRED)
+  eq(
+    'HQ-3 器はその値で当たり判定を広げる（箱を大きくしない＝見た目を変えない）',
+    /\.tap-target::after\s*\{[^}]*width:\s*var\(--tap-min\)[^}]*height:\s*var\(--tap-min\)[^}]*\}/.test(
+      css,
+    ),
+    true,
+  )
+
+  // Tailwind の間隔は 1 = 4px（h-11 = 44px・p-3.5 = 14px）
+  const spacing = (v) => Number(v) * 4
+  const sizeOf = (cls, iconPx) => {
+    const pick = (name) => {
+      const m = cls.match(new RegExp(`(?:^|[\\s\`{])${name}-(\\d+(?:\\.\\d+)?)(?![\\w.-])`))
+      return m ? spacing(m[1]) : undefined
+    }
+    const p = pick('p')
+    const px = pick('px')
+    const py = pick('py')
+    const border = /(?:^|[\s`{])border(?![\w-])/.test(cls) ? 2 : 0
+    const width = Math.max(pick('w') ?? iconPx + 2 * (px ?? p ?? 0) + border, pick('min-w') ?? 0)
+    const height = Math.max(pick('h') ?? iconPx + 2 * (py ?? p ?? 0) + border, pick('min-h') ?? 0)
+    // 器を着けているボタンは、箱が小さくても押せる面は器の大きさまで広がる
+    const held = /(?:^|[\s`{])tap-target(?![\w-])/.test(cls) ? tapMin : 0
+    return { width: Math.max(width, held), height: Math.max(height, held) }
+  }
+
+  /** JSXの開きタグの終わり（属性の中の { } と文字列は数えない） */
+  const openTagEnd = (src, from) => {
+    let depth = 0
+    for (let i = from; i < src.length; i++) {
+      const c = src[i]
+      if (c === '{') depth += 1
+      else if (c === '}') depth -= 1
+      else if (c === '"' || c === "'" || c === '`') {
+        const quote = c
+        i += 1
+        while (i < src.length && src[i] !== quote) {
+          if (src[i] === '\\') i += 1
+          i += 1
+        }
+      } else if (c === '>' && depth === 0) return i + 1
+    }
+    return -1
+  }
+
+  const tsxFiles = []
+  const walk = (dir) => {
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      if (name.isDirectory()) walk(path.join(dir, name.name))
+      else if (name.name.endsWith('.tsx')) tsxFiles.push(path.join(dir, name.name))
+    }
+  }
+  walk(path.join(appRoot, 'src'))
+  tsxFiles.sort()
+
+  // アイコンだけのボタン＝押す場所そのもの。✕（閉じる・外す・消す）とチェックの丸を測る
+  const ICONS = ['X', 'CheckCircle2']
+  const tooSmall = []
+  let measured = 0
+  for (const file of tsxFiles) {
+    const src = readFileSync(file, 'utf-8')
+    const rel = path.relative(appRoot, file)
+    // 同じファイルの中でクラス文字列を定数にまとめている場合（iconBtnCls 等）に備えて先に読む
+    const consts = {}
+    for (const m of src.matchAll(/const (\w+) =\s*\n?\s*'([^']*)'/g)) consts[m[1]] = m[2]
+    for (const icon of ICONS) {
+      const iconRe = new RegExp(`<${icon} size=\\{(\\d+)\\}`, 'g')
+      for (const m of src.matchAll(iconRe)) {
+        const iconPx = Number(m[1])
+        const at = m.index
+        // 押す場所は <button> だけとは限らない。役割だけ button に見せた <span>・<div>・<a> があり、
+        // **いちばん小さかった32pxの✕がまさにその形**だった（DayStartNotices の「閉じる」）。
+        // タグ名で探すと、直したい当のものを測り漏らす。
+        // そこで、アイコンの手前の開きタグを1つずつさかのぼり、
+        // 最初に見つかった「押せる要素」（button/Link、または onClick か role="button" を持つもの）を持ち主とする。
+        // 途中に見た目だけの入れ物（<span className>）が挟まっていても、その奥のボタンまで届く
+        const HOLDERS = ['button', 'Link', 'span', 'div', 'a', 'label']
+        let openIdx = -1
+        let tagName = ''
+        let cursor = at
+        while (cursor > 0) {
+          let best = -1
+          let bestTag = ''
+          for (const t of HOLDERS) {
+            const i = src.lastIndexOf(`<${t}`, cursor - 1)
+            // `<a` が `<article` に当たらないよう、タグ名の直後が空白か > であることを確かめる
+            if (i > best && /[\s>/]/.test(src[i + 1 + t.length] ?? '')) {
+              best = i
+              bestTag = t
+            }
+          }
+          if (best < 0) break
+          const holderEnd = openTagEnd(src, best)
+          const holderAttrs = holderEnd > 0 ? src.slice(best, holderEnd) : ''
+          const clickable =
+            bestTag === 'button' ||
+            bestTag === 'Link' ||
+            /onClick/.test(holderAttrs) ||
+            /role="button"/.test(holderAttrs)
+          if (clickable) {
+            openIdx = best
+            tagName = bestTag
+            break
+          }
+          cursor = best
+        }
+        if (openIdx < 0) continue
+        const bodyStart = openTagEnd(src, openIdx)
+        const bodyEnd = src.indexOf(`</${tagName}>`, at)
+        if (bodyStart < 0 || bodyEnd < 0 || bodyStart > at) continue
+        // 文字のラベルを持つボタンは対象外（高さを変えると見た目が変わるため）
+        const body = src
+          .slice(bodyStart, bodyEnd)
+          .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+          .replace(/<[A-Za-z][^>]*\/>/g, '')
+        if (body.trim() !== '') continue
+        const attrs = src.slice(openIdx, bodyStart)
+        let cls =
+          attrs.match(/className=\{`([\s\S]*?)`\}/)?.[1] ??
+          attrs.match(/className="([^"]*)"/)?.[1] ??
+          attrs.match(/className=\{(\w+)\}/)?.[1] ??
+          ''
+        if (consts[cls]) cls = consts[cls]
+        cls = cls.replace(/\$\{(\w+)\}/g, (_, name) => ` ${consts[name] ?? ''} `)
+        const line = src.slice(0, at).split('\n').length
+        const { width, height } = sizeOf(cls, iconPx)
+        measured += 1
+        if (width < REQUIRED || height < REQUIRED)
+          tooSmall.push(`${rel}:${line} ${width}x${height}`)
+      }
+    }
+  }
+  // 数そのものは決め打ちしない（画面が増えれば増える）。「1つも小さいものが無い」ことだけを見る
+  eq('HQ-3 ✕とチェックの丸を1つ残らず測れている', measured > 30, true)
+  eq('HQ-3 44px未満の✕・チェックの丸が1つも無い', tooSmall, [])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

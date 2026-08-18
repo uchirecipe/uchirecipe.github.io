@@ -370,7 +370,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
           type="button"
           onClick={() => onClose(index)}
           aria-label={ja.focus.close}
-          className="rounded-full p-3 text-ink-muted"
+          className="tap-target rounded-full p-3 text-ink-muted"
         >
           <X size={24} aria-hidden />
         </button>
@@ -505,7 +505,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             type="button"
             onClick={dismissMicDenied}
             aria-label={ja.focus.close}
-            className="shrink-0 rounded-full p-1 text-ink-muted"
+            className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
           >
             <X size={16} aria-hidden />
           </button>
@@ -597,7 +597,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
                 type="button"
                 onClick={() => dismissTimer(t.id)}
                 aria-label={ja.timer.dismiss}
-                className="shrink-0 rounded-full p-1.5"
+                className="tap-target shrink-0 rounded-full p-1.5"
               >
                 <X size={16} aria-hidden />
               </button>
@@ -619,7 +619,7 @@ export default function FocusMode({ recipe, recipeId, initialStep, onClose, onCo
             type="button"
             onClick={dismissFirstTimeNotice}
             aria-label={ja.focus.close}
-            className="shrink-0 rounded-full p-1"
+            className="tap-target shrink-0 rounded-full p-1"
           >
             <X size={16} aria-hidden />
           </button>

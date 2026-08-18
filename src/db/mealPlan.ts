@@ -226,5 +226,18 @@ export async function restoreDayMealPlan(
   })
 }
 
+/**
+ * ✕で外した献立の行を、外す直前の姿のまま入れ直す（2026-08-18 便HQ・軸1）。
+ *
+ * 「元に戻す」が戻すのは、その✕が消したものだけ。渡された行だけを id ごと入れ直すので、
+ * 同じ日の他の行や、外したあとに足した行には一切触らない
+ * （その日を丸ごと入れ替える restoreDayMealPlan とはそこが違う）。
+ * id を持ったまま put するので、戻したあとの行は外す前と同じ id になる。
+ */
+export async function restoreMealEntries(entries: readonly MealPlanEntry[]): Promise<void> {
+  if (entries.length === 0) return
+  await db.mealPlans.bulkPut(entries.map((e) => ({ ...e })))
+}
+
 /** 型の再エクスポート（呼び出し側がdb/typesを個別importしなくてよいように） */
 export type { MealPlanEntry }

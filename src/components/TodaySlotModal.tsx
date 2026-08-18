@@ -1,8 +1,8 @@
-import { useEffect } from 'react'
 import { X } from 'lucide-react'
 import { ja } from '../i18n/ja'
 import { MEAL_SLOTS } from '../logic/mealPlan'
 import type { MealSlot } from '../db/types'
+import { useOverlayDismiss } from './useOverlayDismiss'
 import { useScrollLock } from './useScrollLock'
 
 type Props = {
@@ -44,14 +44,12 @@ export default function TodaySlotModal({
   onClose,
   title,
 }: Props) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  // Escape と端末の「戻る」で、この窓だけを閉じる（2026-08-18 便HQ・軸3）。
+  // 自前のEscapeだけだった頃は、窓を開けたまま端末の「戻る」を押すと窓が素通りして
+  // レシピ詳細ごとレシピ一覧へ飛ばされていた（何をしていたか分からなくなる）。
+  // この窓はレシピ詳細・レシピ一覧・献立の上に出るだけで、全画面の調理中モードの上には
+  // 出ないので、共通の仕組みに寄せられる
+  useOverlayDismiss(open, onClose)
 
   useScrollLock(open)
   if (!open) return null
@@ -74,7 +72,7 @@ export default function TodaySlotModal({
             type="button"
             onClick={onClose}
             aria-label={ja.common.close}
-            className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+            className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>

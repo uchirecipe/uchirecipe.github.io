@@ -331,7 +331,7 @@ function PriceRow({
         type="button"
         onClick={onRemove}
         aria-label={ja.priceMaster.remove}
-        className="shrink-0 rounded-full p-2 text-ink-muted"
+        className="tap-target shrink-0 rounded-full p-2 text-ink-muted"
       >
         <X size={18} aria-hidden />
       </button>

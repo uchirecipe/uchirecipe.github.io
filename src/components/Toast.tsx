@@ -73,7 +73,7 @@ export default function Toast({ message, onClose, actionLabel, onAction }: Props
               type="button"
               onClick={onClose}
               aria-label={ja.common.close}
-              className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-accent-ink"
+              className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-accent-ink"
             >
               <X size={16} aria-hidden />
             </button>

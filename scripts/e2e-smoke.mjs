@@ -3949,6 +3949,316 @@ try {
     }
   }
 
+  // --- PLANUNDO-01: 献立の×で外したものを、そのトーストから1回で戻せる(2026-08-18 便HQ・軸1)。
+  // それまでは「作った！」(記録が増えるだけ・あとから消せる)に「元に戻す」が付いていて、
+  // 本当に献立が消える×の側には無かった＝守りが逆向きに付いていた。
+  // 日タブの「今週の献立の予定」の×(今日と今週の両方から外す)と、週タブの行の×
+  // (それまでトーストすら出ず、消えたのかどうかも分からなかった)の2つを、戻した結果まで確かめる ---
+  currentCheck = 'PLANUNDO-01'
+  {
+    const puBrowser = await chromium.launch()
+    const puContext = await puBrowser.newContext()
+    const puPage = await puContext.newPage()
+    puPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@PLANUNDO-01] ${err.message}`)
+    })
+    const puRead = () =>
+      puPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const tx = req.result.transaction(['mealPlans', 'todayList'], 'readonly')
+              let plans, today
+              const pq = tx.objectStore('mealPlans').getAll()
+              const tq = tx.objectStore('todayList').getAll()
+              pq.onsuccess = () => {
+                plans = pq.result
+                if (today !== undefined) resolve({ plans, today })
+              }
+              tq.onsuccess = () => {
+                today = tq.result
+                if (plans !== undefined) resolve({ plans, today })
+              }
+              pq.onerror = () => reject(pq.error)
+              tq.onerror = () => reject(tq.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      await puPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await puPage.waitForTimeout(1800) // 初回シード完了待ち
+      await puPage.getByText('肉じゃが', { exact: true }).first().click()
+      await puPage.waitForTimeout(500)
+      await puPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await puPage.waitForTimeout(300)
+      await puPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await puPage.waitForTimeout(500)
+      await puPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await puPage.waitForTimeout(1200)
+      const puBefore = await puRead()
+      check(
+        'PLANUNDO-01 前提: 今週の予定と今日の献立の両方に入っている',
+        puBefore.plans.length === 1 && puBefore.today.length === 1,
+        JSON.stringify(puBefore),
+      )
+
+      // (1) 日タブ「今週の献立の予定」の×
+      await puPage
+        .locator('[data-testid="day-planned"] button[aria-label="今日と今週の献立から外す"]')
+        .first()
+        .click()
+      await puPage.waitForTimeout(600)
+      const puRemoved = await puRead()
+      check(
+        'PLANUNDO-01 日タブの×で、今週の予定と今日の献立の両方から外れる',
+        puRemoved.plans.length === 0 && puRemoved.today.length === 0,
+        JSON.stringify(puRemoved),
+      )
+      check(
+        'PLANUNDO-01 外したことをトーストで伝える',
+        ((await puPage.textContent('body')) ?? '').includes('を今日と今週の献立から外しました'),
+      )
+      const puUndo = puPage.getByRole('button', { name: '元に戻す' })
+      check('PLANUNDO-01 そのトーストに「元に戻す」が出る', (await puUndo.count()) > 0)
+      if ((await puUndo.count()) > 0) {
+        await puUndo.first().click()
+        await puPage.waitForTimeout(800)
+        const puUndone = await puRead()
+        check(
+          'PLANUNDO-01 「元に戻す」で今週の予定が同じ日・同じ食事へ戻る',
+          puUndone.plans.length === 1 &&
+            puUndone.plans[0].date === puBefore.plans[0].date &&
+            puUndone.plans[0].slot === puBefore.plans[0].slot &&
+            puUndone.plans[0].recipeId === puBefore.plans[0].recipeId,
+          JSON.stringify(puUndone.plans),
+        )
+        check(
+          'PLANUNDO-01 「元に戻す」で今日の献立にも戻る',
+          puUndone.today.length === 1 &&
+            puUndone.today[0].recipeId === puBefore.today[0].recipeId,
+          JSON.stringify(puUndone.today),
+        )
+        check(
+          'PLANUNDO-01 日タブの「今週の献立の予定」に料理名が戻っている',
+          ((await puPage.locator('[data-testid="day-planned"]').textContent()) ?? '').includes(
+            '肉じゃが',
+          ),
+        )
+      }
+
+      // (2) 週タブの行の×(旧: 無言で消えていた)
+      await puPage.getByRole('button', { name: '週', exact: true }).click()
+      await puPage.waitForTimeout(800)
+      const puWeekClear = puPage.locator('button[aria-label="この割り当てを外す"]').first()
+      check('PLANUNDO-01 前提: 週タブに割り当ての×がある', (await puWeekClear.count()) > 0)
+      if ((await puWeekClear.count()) > 0) {
+        await puWeekClear.click()
+        await puPage.waitForTimeout(600)
+        check('PLANUNDO-01 週タブの×で予定が減る', (await puRead()).plans.length === 0)
+        check(
+          'PLANUNDO-01 週タブの×でも、外したことをトーストで伝える',
+          ((await puPage.textContent('body')) ?? '').includes('から「肉じゃが」を外しました'),
+        )
+        const puWeekUndo = puPage.getByRole('button', { name: '元に戻す' })
+        check('PLANUNDO-01 週タブの×のトーストにも「元に戻す」が出る', (await puWeekUndo.count()) > 0)
+        if ((await puWeekUndo.count()) > 0) {
+          await puWeekUndo.first().click()
+          await puPage.waitForTimeout(800)
+          const puWeekUndone = await puRead()
+          check(
+            'PLANUNDO-01 「元に戻す」で、同じ日・同じ食事・同じ役割の枠へ戻る',
+            puWeekUndone.plans.length === 1 &&
+              puWeekUndone.plans[0].date === puBefore.plans[0].date &&
+              puWeekUndone.plans[0].slot === puBefore.plans[0].slot &&
+              puWeekUndone.plans[0].role === puBefore.plans[0].role &&
+              puWeekUndone.plans[0].recipeId === puBefore.plans[0].recipeId,
+            JSON.stringify(puWeekUndone.plans),
+          )
+          check(
+            'PLANUNDO-01 週タブの画面にも料理名が戻っている',
+            ((await puPage.textContent('body')) ?? '').includes('肉じゃが'),
+          )
+        }
+      }
+    } finally {
+      await puBrowser.close()
+    }
+  }
+
+  // --- BACKCLOSE-01: 窓を開けているあいだの端末の「戻る」は、窓だけを閉じて画面を動かさない
+  // (2026-08-18 便HQ・軸3)。自前のEscapeだけの窓は「戻る」が素通りし、
+  // 「どの食事に入れますか？」で戻るとレシピ詳細ごとレシピ一覧へ飛ばされていた
+  // (何をしていたか分からなくなる)。共通の仕組み(useOverlayDismiss)へ寄せた窓を代表で見る ---
+  currentCheck = 'BACKCLOSE-01'
+  {
+    const bcBrowser = await chromium.launch()
+    const bcContext = await bcBrowser.newContext()
+    const bcPage = await bcContext.newPage()
+    bcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@BACKCLOSE-01] ${err.message}`)
+    })
+    try {
+      await bcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await bcPage.waitForTimeout(1800)
+      await bcPage.getByText('肉じゃが', { exact: true }).first().click()
+      await bcPage.waitForTimeout(700)
+      const bcDetailUrl = bcPage.url()
+
+      // (1) どの食事に入れますか？
+      await bcPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await bcPage.waitForTimeout(400)
+      check(
+        'BACKCLOSE-01 前提: 「どの食事に入れますか？」が開く',
+        ((await bcPage.textContent('body')) ?? '').includes('どの食事に入れますか？'),
+      )
+      await bcPage.goBack()
+      await bcPage.waitForTimeout(700)
+      check(
+        'BACKCLOSE-01 「戻る」で「どの食事に入れますか？」の窓が閉じる',
+        !((await bcPage.textContent('body')) ?? '').includes('どの食事に入れますか？'),
+      )
+      check(
+        'BACKCLOSE-01 「戻る」で画面は動かない(レシピ詳細のまま)',
+        bcPage.url() === bcDetailUrl,
+        `いま=${bcPage.url()} 期待=${bcDetailUrl}`,
+      )
+
+      // (2) 共有の窓(同じ作法に寄せた別の窓でも、結果が同じであることを見る)
+      const bcShare = bcPage.locator('button[aria-label="シェア"]')
+      if ((await bcShare.count()) > 0) {
+        await bcShare.first().click()
+        await bcPage.waitForTimeout(400)
+        const bcShareOpen = ((await bcPage.textContent('body')) ?? '').includes('シェアする内容')
+        if (bcShareOpen) {
+          await bcPage.goBack()
+          await bcPage.waitForTimeout(700)
+          check(
+            'BACKCLOSE-01 「戻る」で共有の窓も、窓だけが閉じて画面は動かない',
+            !((await bcPage.textContent('body')) ?? '').includes('シェアする内容') &&
+              bcPage.url() === bcDetailUrl,
+            `いま=${bcPage.url()}`,
+          )
+        }
+      }
+    } finally {
+      await bcBrowser.close()
+    }
+  }
+
+  // --- TAP-44: ×とチェックの丸は、44px四方のどこを押しても「何も起きない場所」が無い
+  // (2026-08-18 便HQ・軸7)。同じ役目の×が22px〜48pxの7段階に散っていたので、
+  // 共通の器(src/index.css の .tap-target)に全部載せ替えた。
+  // ここは**クラス名ではなく実際の当たり判定**で測る: ボタンの中心から上下左右・斜めに21pxの点を
+  // 突き、elementFromPoint がそのボタン(かその子)を返すかを見る。隣の押せるものに当たった場合は
+  // 2つが隙間なく並んでいる(どちらかには必ず届く)ので死んだ余白ではない＝合格とする。
+  // クラス名の総点検は test-logic の HQ-3 が受け持つ(e2eが開かない画面まで1つずつ測る) ---
+  currentCheck = 'TAP-44'
+  {
+    const tpBrowser = await chromium.launch()
+    const tpContext = await tpBrowser.newContext()
+    const tpPage = await tpContext.newPage()
+    tpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@TAP-44] ${err.message}`)
+    })
+    const tapProbe = () =>
+      tpPage.evaluate(() => {
+        const targets = []
+        const seen = new Set()
+        const push = (el, why) => {
+          if (el && !seen.has(el)) {
+            seen.add(el)
+            targets.push({ el, why })
+          }
+        }
+        // ×(閉じる・外す・消す): 文字ラベルを持たず、中身が×アイコンだけのボタン
+        document.querySelectorAll('svg[class~="lucide-x"]').forEach((svg) => {
+          const btn = svg.closest('button, a[href], [role="button"]')
+          if (!btn || (btn.textContent ?? '').trim() !== '') return
+          push(btn, '×')
+        })
+        // 買い物メモのチェックの丸(いちばん連打する操作)
+        document.querySelectorAll('[data-testid="memo-check"]').forEach((el) => push(el, 'チェックの丸'))
+        const out = []
+        for (const { el, why } of targets) {
+          el.scrollIntoView({ block: 'center', inline: 'center' })
+          const r = el.getBoundingClientRect()
+          if (r.width === 0 || r.height === 0) continue
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          // 画面の外にはみ出していて測れないものは飛ばす(測れたものだけを判定する)
+          if (cx - 22 < 0 || cy - 22 < 0 || cx + 22 > innerWidth || cy + 22 > innerHeight) continue
+          const d = 21
+          const points = [
+            [cx - d, cy], [cx + d, cy], [cx, cy - d], [cx, cy + d],
+            [cx - d, cy - d], [cx + d, cy - d], [cx - d, cy + d], [cx + d, cy + d],
+          ]
+          const dead = points.filter(([x, y]) => {
+            const hit = document.elementFromPoint(x, y)
+            if (hit && (hit === el || el.contains(hit))) return false
+            return !(hit && hit.closest('button, a[href], [role="button"], input, select, textarea, label'))
+          })
+          out.push({
+            why,
+            label: el.getAttribute('aria-label') ?? '',
+            box: `${Math.round(r.width)}x${Math.round(r.height)}`,
+            dead: dead.length,
+          })
+        }
+        return out
+      })
+    const tapCheck = async (where) => {
+      const probed = await tapProbe()
+      const bad = probed.filter((p) => p.dead > 0)
+      check(
+        `TAP-44 ${where}: ×とチェックの丸に44px未満の押せない場所が無い`,
+        probed.length > 0 && bad.length === 0,
+        `測った数=${probed.length} 届かない=${JSON.stringify(bad)}`,
+      )
+    }
+    try {
+      await tpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tpPage.waitForTimeout(1800)
+      // ×とチェックの丸が画面に出るところまで仕込む
+      await tpPage.getByText('肉じゃが', { exact: true }).first().click()
+      await tpPage.waitForTimeout(500)
+      await tpPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tpPage.waitForTimeout(300)
+      await tpPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await tpPage.waitForTimeout(500)
+      await tpPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await tpPage.waitForTimeout(900)
+      await tpPage.getByRole('button', { name: '買い物メモ', exact: true }).first().click()
+      await tpPage.waitForTimeout(500)
+      await tpPage.getByPlaceholder('食材を入力').fill('じゃがいも')
+      await tpPage.getByRole('button', { name: '追加', exact: true }).click()
+      await tpPage.waitForTimeout(600)
+      await tapCheck('買い物メモ')
+
+      await tpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await tpPage.waitForTimeout(1000)
+      await tapCheck('献立(日)')
+      await tpPage.getByRole('button', { name: '週', exact: true }).click()
+      await tpPage.waitForTimeout(800)
+      await tapCheck('献立(週)')
+
+      // 窓の中の×も測る
+      await tpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tpPage.waitForTimeout(1000)
+      await tpPage.getByText('カレーライス', { exact: true }).first().click()
+      await tpPage.waitForTimeout(600)
+      await tpPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await tpPage.waitForTimeout(500)
+      await tapCheck('窓(どの食事に入れますか？)')
+    } finally {
+      await tpBrowser.close()
+    }
+  }
+
   // --- TODAYSYNC-01: 「週の予定を削除したあと、今日の献立に『レシピ一覧から選択中』として残る」
   // バグの再発防止(2026-08-03 便DP-4・オーナー報告)。
   // 原因: 日タブを開くと今日の予定が今日の献立へ自動取り込みされる(便U-3)が、その予定を消したときに

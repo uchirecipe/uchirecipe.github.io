@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { RotateCcw, X } from 'lucide-react'
 import { addPriceEntry, updatePriceEntry, resetPriceEntryToDefault } from '../db/prices'
 import type { PriceEntry } from '../db/types'
 import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
 import UnitQuantityFields from './UnitQuantityFields'
+import { useOverlayDismiss } from './useOverlayDismiss'
 import { useScrollLock } from './useScrollLock'
 import { ja } from '../i18n/ja'
 
@@ -63,16 +64,11 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
   // この窓は開いているあいだだけ描かれる（呼び出し側が target で出し分ける）ので、常に止める
   useScrollLock(true)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onChangeTarget(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const close = () => onChangeTarget(null)
+
+  // Escape と端末の「戻る」で、この窓だけを閉じる（2026-08-18 便HQ・軸3）。
+  // この窓は開いているあいだだけ描かれるので、開いている＝true を渡す
+  useOverlayDismiss(true, close)
 
   const handleSave = async () => {
     const priceNum = Number(price)
@@ -129,7 +125,7 @@ export default function PriceEditModal({ target, entries, onChangeTarget }: Prop
             type="button"
             onClick={close}
             aria-label={ja.common.close}
-            className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+            className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>

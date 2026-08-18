@@ -46,6 +46,7 @@ import {
   removeMealEntries,
   updateMealEntryServings,
   restoreDayMealPlan,
+  restoreMealEntries,
   addRecipesToToday,
 } from '../db/mealPlan'
 import { useDayNoteRange, saveDayNote } from '../db/dayNotes'
@@ -70,6 +71,7 @@ import {
   markAllTodayListCooked,
   importRecipeIdsToTodayList,
   removeStaleFromPlanTodayList,
+  restoreTodayListItems,
 } from '../db/todayList'
 import {
   MEAL_SLOTS,
@@ -205,6 +207,7 @@ import type {
   MonthCellMode,
   Recipe,
   Settings,
+  TodayListItem,
 } from '../db/types'
 import { LESS_MEAL_PURPOSES, MEAL_ROLES, MORE_MEAL_PURPOSES } from '../db/types'
 import {
@@ -457,7 +460,7 @@ function TodayListRow({
             type="button"
             onClick={onRemove}
             aria-label={removeLabel ?? ja.mealPlan.todayRemove}
-            className="ml-1 shrink-0 rounded-full p-3 text-ink-muted"
+            className="tap-target ml-1 shrink-0 rounded-full p-3 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>
@@ -3372,6 +3375,55 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
+   * 献立の×で外したものを1回で戻すための控え（2026-08-18 便HQ・軸1）。
+   *
+   * 「作った！」（undoCooked）・「レシピを選び直した」（undoPick）とまったく同じ作法で、
+   * 出したトーストの文言まで一緒に持つ＝別の操作でトーストが差し替わったら、この取り消しも
+   * 一緒に消える（古いトーストの「元に戻す」が残って、押すと関係ない行が戻る事故を防ぐ）。
+   *
+   * **戻す範囲は、その×が消したものと同じだけ**にしてある。
+   * 日タブの「今週の献立の予定」の×は今週の予定の行と今日の献立の行の両方を消すので
+   * 両方戻し、「レシピ一覧から選択中」の×は今日の献立の行しか消さないのでそれだけ戻す。
+   * 週/月タブの×は献立の枠を1行消すので、その1行を同じ日・同じ食事・同じ役割へ戻す。
+   * ここを「ついでに周りも揃える」ようにすると、押した人が見ていない場所まで動いてしまう。
+   */
+  const [undoRemove, setUndoRemove] = useState<{
+    entries: MealPlanEntry[]
+    todayItems: TodayListItem[]
+    /** 「元に戻す」を添えたトーストの文言（これが今のトーストと違えば、控えはもう無効） */
+    message: string
+    /** 戻したあとに出す文言 */
+    undoneMessage: string
+  } | null>(null)
+  const undoRemoveActive = undoRemove != null && undoRemove.message === message
+  const runUndoRemove = async () => {
+    if (!undoRemove) return
+    await restoreMealEntries(undoRemove.entries)
+    await restoreTodayListItems(undoRemove.todayItems)
+    setUndoRemove(null)
+    setMessage(undoRemove.undoneMessage)
+  }
+
+  /**
+   * 「レシピ一覧から選択中」の行の×（2026-08-18 便HQ・軸1/軸4）。
+   * 外すのは今日の献立の行だけ（今週の予定には最初から入っていない品なので触るものが無い）。
+   * それまでは何も言わずに行が消えるだけだったので、外したことをトーストで伝え、
+   * 同じトーストから1回で戻せるようにする。
+   */
+  const removeTodayPickedRecipe = async (recipe: Recipe) => {
+    const removedTodayItems = (todayList ?? []).filter((item) => item.recipeId === recipe.id)
+    await removeFromTodayList(recipe.id!)
+    const toast = ja.mealPlan.todayRemovedToast.replace('{title}', recipe.title)
+    setMessage(toast)
+    setUndoRemove({
+      entries: [],
+      todayItems: removedTodayItems,
+      message: toast,
+      undoneMessage: ja.mealPlan.todayRemoveUndoneToast.replace('{title}', recipe.title),
+    })
+  }
+
+  /**
    * 「今週の献立の予定」の行の×（2026-08-17 便HI・オーナー実機「『今日の献立』のメニューに
    * ×つけて、週と連動して削除できるようにして」）。
    *
@@ -3382,11 +3434,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const removeTodayPlannedRecipe = async (slot: MealSlot, recipe: Recipe) => {
     if (blockedByLock(today, slot, 'remove')) return
-    for (const entryId of plannedEntryIds.get(`${slot}|${recipe.id}`) ?? []) {
+    const entryIds = plannedEntryIds.get(`${slot}|${recipe.id}`) ?? []
+    // 消す前の姿をそのまま控える（2026-08-18 便HQ）。id・日付・食事・役割・食数まで持つので、
+    // 「元に戻す」で同じ枠へそのまま戻る
+    const removedEntries = (todayEntries ?? []).filter(
+      (e) => e.id != null && entryIds.includes(e.id),
+    )
+    const removedTodayItems = (todayList ?? []).filter((item) => item.recipeId === recipe.id)
+    for (const entryId of entryIds) {
       await removeMealEntry(entryId)
     }
     await removeFromTodayList(recipe.id!)
-    setMessage(ja.mealPlan.todayPlannedRemovedToast.replace('{title}', recipe.title))
+    const toast = ja.mealPlan.todayPlannedRemovedToast.replace('{title}', recipe.title)
+    setMessage(toast)
+    setUndoRemove({
+      entries: removedEntries,
+      todayItems: removedTodayItems,
+      message: toast,
+      undoneMessage: ja.mealPlan.todayPlannedRemoveUndoneToast.replace('{title}', recipe.title),
+    })
   }
 
   /**
@@ -3552,8 +3618,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   ) => {
     if (blockedByLock(date, slot, 'remove')) return
     if (entryId != null) {
+      // 消す前の行を控えてから消す（2026-08-18 便HQ・軸1/軸4）。
+      // それまでは料理の入った行が何も言わずに消えていて、押し損ねたのか消えたのかも、
+      // どこの枠を消したのかも分からなかった
+      const removed = allPlanEntries.find((e) => e.id === entryId)
+      const removedTitle = removed ? recipeById.get(removed.recipeId)?.title : undefined
+      // 今日の枠を外すと、今日の献立に入っていたその品の行も片付く（removeStaleFromPlanTodayList）。
+      // 戻すときに一緒に戻せるよう、今日の枠のときだけ今日の献立の行も控える
+      const removedTodayItems =
+        date === today && removed
+          ? (todayList ?? []).filter((item) => item.recipeId === removed.recipeId)
+          : []
       showDefaultRow(date, slot, role)
       await removeMealEntry(entryId)
+      // 料理の入っていた行を外したときだけ知らせる（空欄行を畳む×は献立を1件も消さない）
+      if (removed && removedTitle) {
+        const fill = (text: string) =>
+          text
+            .replace('{m}', String(Number(date.slice(5, 7))))
+            .replace('{d}', String(Number(date.slice(8, 10))))
+            .replace('{slot}', ja.mealPlan.slot[slot])
+            .replace('{title}', removedTitle)
+        const toast = fill(ja.mealPlan.clearRemovedToast)
+        setMessage(toast)
+        setUndoRemove({
+          entries: [removed],
+          todayItems: removedTodayItems,
+          message: toast,
+          undoneMessage: fill(ja.mealPlan.clearUndoneToast),
+        })
+      }
     } else if (extraLocalId) {
       removeExtraRowState(date, slot, extraLocalId)
     } else {
@@ -5206,7 +5300,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   : ja.mealPlan.removeExtraRow
             }
             disabled={locked}
-            className={`rounded-full p-2 text-ink-muted ${locked ? 'opacity-40' : ''}`}
+            className={`tap-target rounded-full p-2 text-ink-muted ${locked ? 'opacity-40' : ''}`}
           >
             <X size={18} aria-hidden />
           </button>
@@ -5397,7 +5491,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               type="button"
               onClick={() => setAddMenuFor(null)}
               aria-label={ja.focus.close}
-              className="rounded-full p-1 text-ink-muted"
+              className="tap-target rounded-full p-1 text-ink-muted"
             >
               <X size={14} aria-hidden />
             </button>
@@ -5750,21 +5844,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       )}
 
       {/* 「作った」の直後だけ「元に戻す」を添える(2026-08-02 便DE-3。買い物メモ・食材価格と同じ形)。
-          2026-08-10 便FD: レシピを選び直した直後にも同じ「元に戻す」を添える */}
+          2026-08-10 便FD: レシピを選び直した直後にも同じ「元に戻す」を添える。
+          2026-08-18 便HQ: 献立の×（日タブの2種・週/月タブの行）にも同じ形で添えた。
+          消える操作ほど戻せない状態だったのを、いちばん軽い「作った！」と同じ守りに揃える */}
       <Toast
         message={message}
         onClose={() => {
           setMessage('')
           setUndoCooked(null)
           setUndoPick(null)
+          setUndoRemove(null)
         }}
-        actionLabel={undoCookedActive || undoPickActive ? ja.common.undo : undefined}
+        actionLabel={
+          undoCookedActive || undoPickActive || undoRemoveActive ? ja.common.undo : undefined
+        }
         onAction={
           undoCookedActive
             ? () => void runUndoCooked()
             : undoPickActive
               ? () => void runUndoPick()
-              : undefined
+              : undoRemoveActive
+                ? () => void runUndoRemove()
+                : undefined
         }
       />
 
@@ -5841,7 +5942,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         key={recipe.id}
                         recipe={recipe}
                         onCooked={() => markDayRecipeCooked(recipe)}
-                        onRemove={() => void removeFromTodayList(recipe.id!)}
+                        onRemove={() => void removeTodayPickedRecipe(recipe)}
                         footer={
                           <div className="mt-1 flex flex-wrap gap-1">
                             {MEAL_SLOTS.map((slot) => (
@@ -7466,7 +7567,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               type="button"
               onClick={closePicker}
               aria-label={ja.focus.close}
-              className="rounded-full p-2 text-ink-muted"
+              className="tap-target rounded-full p-2 text-ink-muted"
             >
               <X size={22} aria-hidden />
             </button>
@@ -7657,7 +7758,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setServingsEditor(null)}
                 aria-label={ja.common.close}
-                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
               >
                 <X size={20} aria-hidden />
               </button>
@@ -7748,7 +7849,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setTemplateSaveOpen(false)}
                 aria-label={ja.common.close}
-                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
               >
                 <X size={20} aria-hidden />
               </button>
@@ -7808,7 +7909,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setTemplateApplyScope(null)}
                 aria-label={ja.common.close}
-                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
               >
                 <X size={20} aria-hidden />
               </button>
@@ -7947,7 +8048,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 type="button"
                 onClick={() => setDayModalDate(null)}
                 aria-label={ja.common.close}
-                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
               >
                 <X size={20} aria-hidden />
               </button>

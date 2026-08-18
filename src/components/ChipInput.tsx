@@ -51,7 +51,12 @@ export default function ChipInput({ values, onChange, placeholder, addLabel, rem
               style={{ background: 'color-mix(in oklab, var(--accent) 14%, var(--bg))' }}
             >
               {value}
-              <button type="button" onClick={() => remove(value)} aria-label={removeLabel ?? ja.chip.remove}>
+              <button
+                type="button"
+                onClick={() => remove(value)}
+                aria-label={removeLabel ?? ja.chip.remove}
+                className="tap-target"
+              >
                 <X size={14} aria-hidden />
               </button>
             </span>

@@ -45,6 +45,7 @@ import type { Ingredient, ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
+import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { useScrollLock } from '../components/useScrollLock'
 import { settingsLinkWithBack } from '../logic/backLink'
 import { ja } from '../i18n/ja'
@@ -432,14 +433,9 @@ export default function ShoppingPage() {
   // 買い物完了(2026-07-23 #7: 下部インラインパネル→作った!と同じ中央モーダルに変更)
   const [completeOpen, setCompleteOpen] = useState(false)
   const checkedItems = memoItems.filter((i) => i.isChecked)
-  useEffect(() => {
-    if (!completeOpen) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCompleteOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [completeOpen])
+  // Escape と端末の「戻る」で、この窓だけを閉じる（2026-08-18 便HQ・軸3。
+  // 自前のEscapeだけだった頃は、窓を開けたまま「戻る」を押すと買い物メモの画面ごと離脱していた）
+  useOverlayDismiss(completeOpen, () => setCompleteOpen(false))
 
   // 生成した下書きへ自動スクロール(2026-07-24 実機FB #13)。候補がDOMに乗った次の描画で1回だけ実行する
   useEffect(() => {
@@ -449,15 +445,9 @@ export default function ShoppingPage() {
     }
   }, [scrollToCandidates, candidates])
 
-  // 食材名ポップはEscでも閉じる(2026-07-24 実機FB #10。他モーダルと同じ作法)
-  useEffect(() => {
-    if (!namePopup) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setNamePopup(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [namePopup])
+  // 食材名ポップはEscでも閉じる(2026-07-24 実機FB #10。他モーダルと同じ作法)。
+  // 2026-08-18 便HQ・軸3: 端末の「戻る」でも窓だけが閉じるよう共通の仕組みへ寄せた
+  useOverlayDismiss(namePopup != null, () => setNamePopup(null))
 
   // 窓が開いているあいだ、後ろの買い物メモは動かさない（2026-08-16 便HE）。
   // 閉じたら、メモのどこまで見ていたかはそのまま
@@ -494,7 +484,8 @@ export default function ShoppingPage() {
         onClick={() => void toggleShoppingChecked(item.id!)}
         aria-pressed={item.isChecked}
         aria-label={ja.shopping.toggleCheck}
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+        data-testid="memo-check"
+        className={`tap-target flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
           item.isChecked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
         }`}
       >
@@ -527,7 +518,7 @@ export default function ShoppingPage() {
         type="button"
         onClick={() => void removeMemoItem(item)}
         aria-label={ja.shopping.remove}
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
+        className="tap-target flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted"
       >
         <X size={18} aria-hidden />
       </button>
@@ -771,7 +762,7 @@ export default function ShoppingPage() {
                         )
                       }
                       aria-pressed={c.checked}
-                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
+                      className={`tap-target flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${
                         c.checked ? 'border-accent bg-accent text-on-accent' : 'border-edge text-ink-muted'
                       }`}
                     >
@@ -874,7 +865,7 @@ export default function ShoppingPage() {
                 type="button"
                 onClick={() => setCompleteOpen(false)}
                 aria-label={ja.common.close}
-                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
               >
                 <X size={20} aria-hidden />
               </button>
@@ -958,7 +949,7 @@ export default function ShoppingPage() {
                 type="button"
                 onClick={() => setNamePopup(null)}
                 aria-label={ja.common.close}
-                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
               >
                 <X size={20} aria-hidden />
               </button>
@@ -1021,7 +1012,7 @@ export default function ShoppingPage() {
               type="button"
               onClick={() => setPickerOpen(false)}
               aria-label={ja.focus.close}
-              className="rounded-full p-2 text-ink-muted"
+              className="tap-target rounded-full p-2 text-ink-muted"
             >
               <X size={22} aria-hidden />
             </button>

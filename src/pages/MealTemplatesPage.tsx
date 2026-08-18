@@ -171,7 +171,7 @@ export default function MealTemplatesPage() {
               type="button"
               onClick={() => setReplaceTarget(null)}
               aria-label={ja.common.close}
-              className="rounded-full p-2 text-ink-muted"
+              className="tap-target rounded-full p-2 text-ink-muted"
             >
               <X size={22} aria-hidden />
             </button>
@@ -301,7 +301,7 @@ function TemplateCard({
                             type="button"
                             onClick={() => onRemoveItem(index, title)}
                             aria-label={ja.mealTemplates.removeItem}
-                            className="shrink-0 rounded-full p-2 text-ink-muted"
+                            className="tap-target shrink-0 rounded-full p-2 text-ink-muted"
                           >
                             <X size={16} aria-hidden />
                           </button>

@@ -103,7 +103,7 @@ export default function AppUpdateBanner() {
             setDismissed(true)
           }}
           aria-label={ja.settings.appUpdateBannerDismiss}
-          className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+          className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
         >
           <X size={16} aria-hidden />
         </button>

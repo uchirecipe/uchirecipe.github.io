@@ -293,3 +293,23 @@ export async function removeStaleFromPlanTodayList(
   }
   return staleIds.length
 }
+
+/**
+ * ✕で外した「今日の献立」の行を、外す直前の姿のまま入れ直す（2026-08-18 便HQ・軸1）。
+ *
+ * 並び順は addedAt で決まる（listTodayList）ので、控えておいた addedAt をそのまま戻す
+ * ＝戻った品が一覧の末尾へ飛ばず、外す前と同じ場所に戻る。
+ * 週の予定の写しの印（fromPlan）も控えのまま戻す。
+ */
+export async function restoreTodayListItems(
+  items: readonly { id?: number; recipeId: number; addedAt: number; fromPlan?: boolean }[],
+): Promise<void> {
+  if (items.length === 0) return
+  await db.transaction('rw', db.todayList, async () => {
+    for (const item of items) {
+      const existing = await db.todayList.where('recipeId').equals(item.recipeId).first()
+      if (existing) continue
+      await db.todayList.put({ ...item })
+    }
+  })
+}

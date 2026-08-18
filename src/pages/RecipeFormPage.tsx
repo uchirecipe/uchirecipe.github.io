@@ -302,7 +302,7 @@ const labelCls = 'block text-sm font-bold text-ink-muted'
 const sectionHeadingCls =
   'mt-[var(--space-lg)] border-t border-edge pt-[var(--space-md)] text-base font-bold text-ink'
 const iconBtnCls =
-  'flex h-10 w-10 items-center justify-center rounded-sm border border-edge bg-surface text-ink-muted'
+  'tap-target flex h-10 w-10 items-center justify-center rounded-sm border border-edge bg-surface text-ink-muted'
 
 /**
  * URL取り込み・貼り付けが成功したときだけ、結果メッセージの下に出す合わせ調味料の案内
@@ -2161,7 +2161,7 @@ function RecipeFormInner() {
                       onClick={() => toggleIngredientSelected(index)}
                       aria-pressed={rowSelected}
                       aria-label={ja.form.ingredientOrganizeSelectRow}
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${
+                      className={`tap-target flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${
                         rowSelected
                           ? 'border-accent bg-accent text-on-accent'
                           : 'border-edge text-ink-muted'
@@ -2661,7 +2661,7 @@ function RecipeFormInner() {
                   type="button"
                   onClick={() => setTags(tags.filter((t) => t !== tag))}
                   aria-label={ja.form.removeTag}
-                  className="flex h-11 w-11 items-center justify-center"
+                  className="tap-target flex h-11 w-11 items-center justify-center"
                 >
                   <X size={18} aria-hidden />
                 </button>
@@ -2732,7 +2732,7 @@ function RecipeFormInner() {
                   type="button"
                   onClick={() => setKeywords(keywords.filter((k) => k !== keyword))}
                   aria-label={ja.form.removeKeyword}
-                  className="flex h-11 w-11 items-center justify-center"
+                  className="tap-target flex h-11 w-11 items-center justify-center"
                 >
                   <X size={18} aria-hidden />
                 </button>

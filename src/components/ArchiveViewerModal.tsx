@@ -44,7 +44,7 @@ export default function ArchiveViewerModal({ open, logs, brokenCount, onClose }:
             type="button"
             onClick={onClose}
             aria-label={ja.common.close}
-            className="-mr-2 shrink-0 rounded-full p-2 text-ink-muted"
+            className="tap-target -mr-2 shrink-0 rounded-full p-2 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>

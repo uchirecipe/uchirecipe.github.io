@@ -40,7 +40,7 @@ export default function SpeechReadingHint({ used }: { used: boolean }) {
         data-testid="speech-reading-hint-close"
         onClick={dismiss}
         aria-label={ja.focus.close}
-        className="shrink-0 rounded-full p-1 text-ink-muted"
+        className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
       >
         <X size={16} aria-hidden />
       </button>

@@ -198,7 +198,7 @@ function TimerChip({
         type="button"
         onClick={onDismiss}
         aria-label={ja.timer.dismiss}
-        className="shrink-0 rounded-full p-1.5"
+        className="tap-target shrink-0 rounded-full p-1.5"
       >
         <X size={16} aria-hidden />
       </button>
@@ -688,7 +688,7 @@ export default function CookSessionOverlay({
           onClick={onExit}
           aria-label={ja.cookNavi.sessionClose}
           data-testid="cook-session-close"
-          className="rounded-full p-2 text-ink-muted"
+          className="tap-target rounded-full p-2 text-ink-muted"
         >
           <X size={24} aria-hidden />
         </button>
@@ -903,7 +903,7 @@ export default function CookSessionOverlay({
             type="button"
             onClick={dismissMicDenied}
             aria-label={ja.focus.close}
-            className="shrink-0 rounded-full p-1 text-ink-muted"
+            className="tap-target shrink-0 rounded-full p-1 text-ink-muted"
           >
             <X size={16} aria-hidden />
           </button>

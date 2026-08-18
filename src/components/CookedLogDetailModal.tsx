@@ -52,7 +52,7 @@ function CookedPhotoViewer({ photo, onClose }: { photo: Blob; onClose: () => voi
           type="button"
           onClick={onClose}
           aria-label={ja.common.close}
-          className="absolute -right-2 -top-2 rounded-full border border-edge bg-surface p-1.5 text-ink-muted shadow-sm"
+          className="tap-target absolute -right-2 -top-2 rounded-full border border-edge bg-surface p-1.5 text-ink-muted shadow-sm"
         >
           <X size={18} aria-hidden />
         </button>
@@ -206,7 +206,7 @@ export default function CookedLogDetailModal({
               type="button"
               onClick={onClose}
               aria-label={ja.common.close}
-              className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
             >
               <X size={20} aria-hidden />
             </button>

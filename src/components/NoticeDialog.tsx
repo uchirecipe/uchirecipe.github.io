@@ -55,7 +55,7 @@ export default function NoticeDialog({
             onClick={onClose}
             data-testid={`${testId}-close`}
             aria-label={ja.common.close}
-            className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+            className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
           >
             <X size={20} aria-hidden />
           </button>
