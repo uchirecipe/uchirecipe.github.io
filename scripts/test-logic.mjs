@@ -21584,6 +21584,33 @@ Aみりん 大さじ1
   }
   eq('HW-3 一覧の1行は、どの画面でも共通のカードを通っている', hwRowOffenders, [])
 
+  // ---- HW-5: 公開するページに、マージの競合の印が残っていない ----------------------------
+  // 2026-08-19 便HW で、public/about/manual.html に `<<<<<<< HEAD` … `>>>>>>> ブランチ名` が
+  // 1組そのまま残っているのを見つけた（利用者にその記号ごと表示される）。
+  // 人の目では見落とすので、公開するHTML・JSONを機械で掃く。
+  {
+    const publicDir = path.join(hwRoot, 'public')
+    const listPublicText = (dir) => {
+      const out = []
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) out.push(...listPublicText(full))
+        else if (/\.(html|json|txt|webmanifest)$/.test(entry.name)) out.push(full)
+      }
+      return out.sort()
+    }
+    const publicFiles = listPublicText(publicDir)
+    eq('HW-5 公開するページを走査できている（0件なら見張りが壊れている）', publicFiles.length > 0, true)
+    const conflicted = publicFiles.filter((full) =>
+      /^(<{7}|={7}|>{7})( |$)/m.test(readFileSync(full, 'utf-8')),
+    )
+    eq(
+      'HW-5 公開するページにマージの競合の印が残っていない',
+      conflicted.map((full) => path.relative(hwRoot, full).split(path.sep).join('/')),
+      [],
+    )
+  }
+
   // ---- HW-4: カードの形を外からいじる口を増やしていない -----------------------------------
   // 密度を3つに絞っても、呼び出し側が見た目を上書きできる口（className・大きさ・変種）が
   // 開いていれば、そこから4つ目の形がこっそり生える。**口そのものが無い**ことを見張る。
