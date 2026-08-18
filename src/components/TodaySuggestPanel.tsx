@@ -65,6 +65,19 @@ import { ja } from '../i18n/ja'
  *    この絞り込みは1品のくじにしか効かないうえ、「料理の種別」は主菜＋副菜を組む側には
  *    そもそも当てられない（主菜だけに絞ると献立が組めなくなる）ため、
  *    効かない側では出さない＝「効くように見えるのに効かない」を作らない
+ *
+ * 2026-08-19 便HT（オーナー原文「基本を献立表示にして、1品にする時のみスイッチ押すように
+ * した方が良いかも」）: 切り替えの**未設定時の既定を「献立」に**した（設定 dayStartSuggestMode）。
+ *
+ * このとき「はじめて開いた人には『条件をしぼる』が見えない」ことになるが、
+ * **便HMの決め（効かない側には出さない）はそのまま**にしてある。理由は3つ:
+ *  ① 既定を変えても、あの絞り込みが献立を組むエンジンに効くようにはならない。
+ *     献立側に出せば「効くように見えて効かない」を新しく作るだけになる
+ *  ② 絞り込みへの道は消えていない。「1品」は節のいちばん上にあって、押せば
+ *     「条件をしぼる」がその場に出る＝隠したのではなく「1品を選ぶと出る」
+ *  ③ 献立側に効く条件は別にある（週の「提案の条件」＝調理時間・和洋中・栄養から組む。
+ *     pages/MealPlanPage.tsx の renderSuggestConditions）。同じ条件をこの節にも置くと、
+ *     同じものを変える場所が2か所になって食い違う
  */
 
 type SuggestCondition = 'any' | 'notRecent' | 'favorite' | 'quick'
@@ -210,13 +223,19 @@ export default function TodaySuggestPanel({
    * 表示中の食事帯・ジャンル・目的・昨日の献立など、この節の外の材料で引くため。
    */
   planPair: { role: MealRole; recipe: Recipe }[]
-  /** 「おまかせで献立を組む」がいまくじを引いている主菜の候補数 */
-  planCandidateCount: number
   /**
-   * 献立を1組引き直す。`auto` は「献立」に切り替えた直後の1回（利用者が押したのではない）で、
-   * 呼び出し側が出しているお知らせを消さないための目印
+   * 「おまかせで献立を組む」がいまくじを引いている主菜の候補数（2026-08-19 便HTで関数にした）。
+   * この節の絞り込みが献立側にも効くようになったので、**その絞り込みを通したあとの数**を
+   * 出さないと、画面の数字と実際に引いている候補が食い違う。
    */
-  onDrawPlan: (options?: { auto?: boolean }) => void
+  planCandidateCount: (allowedRecipeIds?: number[]) => number
+  /**
+   * 献立を1組引き直す。`auto` は「献立」に切り替えた直後・条件を変えた直後の引き直し
+   * （利用者がボタンを押したのではない）で、呼び出し側が出しているお知らせを消さないための目印。
+   * `allowedRecipeIds` はこの節の絞り込みを通したレシピ（2026-08-19 便HT・オーナー指示
+   * 「献立にも1品と同じように条件を絞る機能つければいいのでは？」）。
+   */
+  onDrawPlan: (options?: { auto?: boolean; allowedRecipeIds?: number[] }) => void
   /**
    * 「今日の献立に入れる」。渡すのは出ているレシピ（1品なら1つ、献立なら主菜＋副菜）。
    * 食事の枠を選ぶ窓を開くところから先は呼び出し側が受け持つ
@@ -244,10 +263,13 @@ export default function TodaySuggestPanel({
    *  ① この切り替えは「今日はどっち」ではなく**その人の作り方の好み**（1品だけ決めたいのか、
    *     主菜＋副菜をまとめたいのか）で、開くたびに選び直させると毎日2回押させることになる
    *  ② 同じ節の「◯分以内」の分数（homeQuickMinutes）をすでに同じやり方で覚えている
-   * 未設定（はじめて使う人・これまでの利用者）は「1品」＝これまでどおりの見え方から始まる。
+   *
+   * 2026-08-19 便HT（オーナー原文「基本を献立表示にして、1品にする時のみスイッチ
+   * 押すようにした方が良いかも」）: **未設定のときは「献立」から始める**。
+   * 一度でも切り替えた人はその選び方のまま（保存済みの 'one' はこれまでどおり1品）。
    * 覚えるのは切り替えだけで、出ている候補そのものは覚えない（開くたびに引き直す）。
    */
-  const mode: SuggestMode = settings?.dayStartSuggestMode === 'plan' ? 'plan' : 'one'
+  const mode: SuggestMode = settings?.dayStartSuggestMode === 'one' ? 'one' : 'plan'
   const changeMode = (next: SuggestMode) => {
     if (next === mode) return
     void updateSettings({ dayStartSuggestMode: next })
@@ -329,6 +351,41 @@ export default function TodaySuggestPanel({
       : { list: candidates, fallback: true }
   }, [candidates, pantryOnly, pantryNames])
 
+  /**
+   * 「献立」を組むときに使えるレシピ（2026-08-19 便HT・オーナー原文
+   * 「献立にも1品と同じように条件を絞る機能つければいいのでは？」）。
+   *
+   * 効かせるもの: 条件チップ（すべて／最近作っていない／お気に入り／◯分以内）と
+   * 「在庫の食材から」。**1品側とまったく同じ判定**（matchesCondition と
+   * logic/pantry.ts の判定器）を通す＝同じ条件が画面の左右で違う意味にならない。
+   *
+   * 効かせないもの: **料理の種別**。主菜だけに絞ると副菜が引けず献立が成立しない
+   * （汁物だけ・その他だけも同じ）。黙って無視すると「押しても効かない条件」になるので、
+   * 献立を出しているあいだは種別の並びを出さず、代わりに理由の1行を出す（下の描画部）。
+   *
+   * 在庫で0件になったときは1品側と同じく絞りを解く＝「在庫で組めなかった」で
+   * 献立そのものが出ない、を作らない（解いたことは pantryFallback の1行で言う）。
+   */
+  const planAllowedIds = useMemo(() => {
+    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
+    let pool = byCondition
+    if (pantryOnly && pantryNames.length > 0) {
+      const matchesPantry = makePantryMatcher(pantryNames)
+      const filtered = byCondition.filter((r) => r.ingredients.some((i) => matchesPantry(i.name)))
+      if (filtered.length > 0) pool = filtered
+    }
+    return pool.map((r) => r.id).filter((id): id is number => id != null)
+  }, [recipes, condition, quickMinutes, pantryOnly, pantryNames])
+
+  /** 献立側で「在庫の食材から」の絞りを解いたか（1品側の pantryFallback と同じ知らせを出す） */
+  const planPantryFallback = useMemo(() => {
+    if (!pantryOnly || pantryNames.length === 0) return false
+    const byCondition = (recipes ?? []).filter((r) => matchesCondition(r, condition, quickMinutes))
+    if (byCondition.length === 0) return false
+    const matchesPantry = makePantryMatcher(pantryNames)
+    return !byCondition.some((r) => r.ingredients.some((i) => matchesPantry(i.name)))
+  }, [recipes, condition, quickMinutes, pantryOnly, pantryNames])
+
   // 直前に出た候補を「ランダムで1品出す」の対象から外す(2026-07-29 便CD/MP-12)。
   // 候補が尽きるなら除外を解く(空振りより重複がマシ)＝献立エンジンの
   // excludeYesterdayPlanRecipes と同じ作法・同じ関数を使う
@@ -367,22 +424,43 @@ export default function TodaySuggestPanel({
    * 押した結果が離れた場所に足されていた。切り替えた時点で結果が出ていれば、
    * **押した結果を探しに行く場面そのものが無くなる**。
    *
-   * 引くのは切り替えたとき（畳んでいる日は開いたとき）の1回だけ。
-   * `planDrawTried` を先に立ててから引くので、
-   * 「今日の献立に入れる」で組んだ献立が空になっても勝手に引き直さない
-   * （入れた直後にお知らせを消して別の献立を出す、をしない）。
+   * 引くのは「その条件でまだ組んでいないとき」の1回だけ。何で引いたか（条件の組み合わせ）を
+   * `planDrawnKey` に覚えてから引くので、「今日の献立に入れる」で組んだ献立が空になっても
+   * 勝手に引き直さない（入れた直後にお知らせを消して別の献立を出す、をしない）。
+   *
+   * 2026-08-19 便HT で2つ足した:
+   *  ・**レシピが届くまでは引かない**。この節が既定で「献立」になったので、アプリを開いた
+   *    直後にここが必ず通る。レシピはliveQueryで後から届くため、届く前に引くと候補0品で
+   *    「この条件で組める献立がありませんでした」とだけ言って引いた印が立ち、
+   *    そのあとレシピが届いても組み直さない画面になっていた
+   *  ・**条件を変えたら組み直す**（オーナー指示で絞り込みが献立側にも効くようになったため）。
+   *    1品側は条件を変えるとその場で候補が入れ替わるので、献立側だけ「押すまで前の組のまま」
+   *    だと、絞ったのに効いていないように見える。覚えるのを真偽値ではなく
+   *    「何で引いたか」にしてあるのは、これを引き直しの合図にするため。
+   *
+   * レシピ詳細から戻ってきて組が復元されているときは引き直さない（②の要）。
+   * これは**いちばん最初の1回だけ**の扱いで、そのあと条件を変えれば組み直す。
    */
-  const [planDrawTried, setPlanDrawTried] = useState(false)
   const planPairCount = planPair.length
+  const recipesReady = recipes != null && recipes.length > 0
+  /** いまの条件で引いたか（null＝まだ一度も引いていない）。中身は条件の組み合わせ */
+  const [planDrawnKey, setPlanDrawnKey] = useState<string | null>(null)
+  const planDrawKey =
+    shown && mode === 'plan' && recipesReady
+      ? `${condition}|${quickMinutes}|${pantryOnly ? 'pantry' : 'all'}`
+      : null
   useEffect(() => {
-    if (!shown || mode !== 'plan') {
-      if (planDrawTried) setPlanDrawTried(false)
+    if (planDrawKey == null) {
+      if (planDrawnKey != null) setPlanDrawnKey(null)
       return
     }
-    if (planDrawTried) return
-    setPlanDrawTried(true)
-    if (planPairCount === 0) onDrawPlan({ auto: true })
-  }, [shown, mode, planDrawTried, planPairCount, onDrawPlan])
+    if (planDrawnKey === planDrawKey) return
+    const first = planDrawnKey == null
+    setPlanDrawnKey(planDrawKey)
+    // 最初の1回だけ、すでに組んであるもの（戻ってきたときの覚え）をそのまま出す
+    if (first && planPairCount > 0) return
+    onDrawPlan({ auto: true, allowedRecipeIds: planAllowedIds })
+  }, [planDrawKey, planDrawnKey, planPairCount, planAllowedIds, onDrawPlan])
 
   /** いま出ているもの（「今日の献立に入れる」に渡す中身） */
   const shownRecipes =
@@ -428,12 +506,15 @@ export default function TodaySuggestPanel({
             ))}
           </div>
 
-          {/* 「条件をしぼる」と「在庫の食材から」は「1品」を選んでいるときだけ出す
-              (2026-08-18 便HM)。この絞り込みは1品のくじにしか効かず、中の「料理の種別」は
-              主菜＋副菜を組む側には当てようがない(主菜だけに絞ると献立が組めない)。
-              効かない側に出しておくと「効くように見えて効かない」だけなので、出さない */}
-          {mode === 'one' && (
-            <>
+          {/* 「条件をしぼる」と「在庫の食材から」は**どちらを選んでいても**出す
+              （2026-08-19 便HT・オーナー原文「献立にも1品と同じように条件を絞る機能つければ
+              いいのでは？」）。便HMは献立側で丸ごと隠していたが、オーナーの答えは
+              「隠すのではなく効くようにしてほしい」だったので、効かせるほうへ倒した。
+              効き方は logic の側で1品とそろえてある（planAllowedIds）。
+              ただし**料理の種別だけは献立に当てはめられない**（主菜だけに絞ると副菜が引けず、
+              献立が成立しない）。黙って無視すると「押しても効かない条件」になるので、
+              献立を出しているあいだは種別の並びを出さず、理由の1行に置き換える */}
+          <>
             {/* 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5)。既定閉。畳んだ状態でも
                 既定値(すべて)から変えていればラベルに現在値を出す(MealPlanPage「提案の条件」と同じパターン) */}
             <div className="mt-[var(--space-sm)]">
@@ -492,32 +573,40 @@ export default function TodaySuggestPanel({
                   </div>
                 )}
                 {/* 料理の種別(2026-08-03 便DH・オーナー指示)。旧「主菜」トグル1つを
-                    レシピ登録と同じ4区分の複数選択にし、置き場所も「条件をしぼる」の中へ移した */}
+                    レシピ登録と同じ4区分の複数選択にし、置き場所も「条件をしぼる」の中へ移した。
+                    2026-08-19 便HT: 献立を出しているあいだは、並びの代わりに効かない理由を出す */}
                 <div className="mt-[var(--space-sm)]">
                   <p className="text-xs text-ink-muted">{ja.dayStart.dishTypeLabel}</p>
-                  <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-                    {DISH_TYPE_OPTIONS.map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        onClick={() => toggleDishType(type)}
-                        aria-pressed={dishTypes.includes(type)}
-                        className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                          dishTypes.includes(type)
-                            ? 'border-accent bg-accent text-on-accent'
-                            : 'border-edge bg-surface text-ink-muted'
-                        }`}
-                      >
-                        {ja.dishType[type]}
-                      </button>
-                    ))}
-                  </div>
+                  {mode === 'plan' ? (
+                    <p data-testid="day-dishtype-plan-note" className="mt-1 text-xs text-ink-muted">
+                      {ja.dayStart.dishTypePlanNote}
+                    </p>
+                  ) : (
+                    <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                      {DISH_TYPE_OPTIONS.map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => toggleDishType(type)}
+                          aria-pressed={dishTypes.includes(type)}
+                          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
+                            dishTypes.includes(type)
+                              ? 'border-accent bg-accent text-on-accent'
+                              : 'border-edge bg-surface text-ink-muted'
+                          }`}
+                        >
+                          {ja.dishType[type]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </Collapse>
             </div>
 
             {/* 「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6)。
-                在庫にある食材を使うレシピに絞る(在庫が1件以上あるときだけ出す) */}
+                在庫にある食材を使うレシピに絞る(在庫が1件以上あるときだけ出す)。
+                2026-08-19 便HT: 献立側にも効く */}
             <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
               {pantryNames.length > 0 && (
                 <button
@@ -536,19 +625,50 @@ export default function TodaySuggestPanel({
               )}
             </div>
 
-            {pantryFallback && (
+            {(mode === 'plan' ? planPantryFallback : pantryFallback) && (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
                 {ja.dayStart.pantryOnlyFallback}
               </p>
             )}
-            </>
-          )}
+          </>
 
-          {/* 出てきたもの。**どちらを選んでいてもボタンの上**に出す(2026-08-18 便HM)。
-              直す前は1品の候補がボタンの上、組んだ献立がボタンの下で、同じ節の中で
-              結果の出る向きが逆だった(オーナー「候補が下に出るのわかりづらい」)。
-              献立の主菜・副菜も1品とまったく同じカードで出し、違いは料理名の上に付く
-              「主菜」「副菜」の小さな字だけにする(オーナー「見た目は1品の画面に寄せたい」) */}
+          {/* 「決めてもらう」ボタン。置き場所は1つで、名前と絵が切り替えで入れ替わる
+              (2026-08-18 便HM・オーナー指示「同じボタンにまとめ」)。
+              地色・字色・大きさは「ランダムで1品出す」のものをそのまま使う
+              (2026-08-03 便DH。オーナー「見た目は1品の画面に寄せたい」)。
+
+              2026-08-19 便HT（オーナー実機「ランダムボタンが下だと品数によってボタン位置が変わり、
+              連続タップで誤タップします。上に持ってくるか、ボタン位置がずれないようにするかして」）:
+              **結果より上へ移した**。ここから上に出るものは切り替え・「条件をしぼる」・
+              「在庫の食材から」だけで、どれも1品と献立で同じ数だけ出る＝
+              **出た品数でも、切り替えでも、連続して押しても、このボタンは1pxも動かない**。
+              「結果の場所の高さを固定する」案は採らなかった: 1品のときも献立2品ぶんの空きを
+              抱えることになり、390×667の画面では「今日の献立に入れる」が画面の外へ落ちる。
+              便HMが「結果が下だと探しに行くことになる」と書いた形に戻るが、あのときの問題は
+              **1品は上・献立は下と向きが逆だったこと**と、あいだに説明が2行挟まっていたことで、
+              いまはどちらの側も押した指のすぐ下に同じカードで出る（説明はカードの下へ回した） */}
+          <button
+            type="button"
+            data-testid="day-suggest-draw"
+            onClick={
+              mode === 'plan'
+                ? () => onDrawPlan({ allowedRecipeIds: planAllowedIds })
+                : shuffleSuggestion
+            }
+            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+          >
+            {mode === 'plan' ? (
+              <UtensilsCrossed size={20} aria-hidden />
+            ) : (
+              <Dices size={20} aria-hidden />
+            )}
+            {mode === 'plan' ? ja.mealPlan.todaySuggestButton : ja.dayStart.shuffle}
+          </button>
+
+          {/* 出てきたもの。**どちらを選んでいてもボタンのすぐ下**に出す(2026-08-19 便HT)。
+              便HMで「どちらも同じカード・同じ向き」にそろえたのはそのまま残し、向きだけを
+              下向きに変えた（上の理由）。献立の主菜・副菜も1品とまったく同じカードで出し、
+              違いは料理名の上に付く「主菜」「副菜」の小さな字だけ */}
           {mode === 'plan' ? (
             planPair.length > 0 ? (
               <div data-testid="day-suggest-pair">
@@ -564,11 +684,22 @@ export default function TodaySuggestPanel({
               </div>
             ) : (
               /* 引いてみて0件だったときだけ言う。切り替えた直後の1フレームでは何も出さない
-                 ＝これから引くのに「ありませんでした」と先に言わない */
-              planDrawTried && (
-                <p className="mt-[var(--space-sm)] text-ink-muted">
-                  {ja.mealPlan.todaySuggestNoPair}
-                </p>
+                 ＝これから引くのに「ありませんでした」と先に言わない。
+                 2026-08-19 便HT: 絞り込みが効くようになったので、1品側と同じく
+                 「条件をクリア」も添える（0件の理由が条件のときに、その場で外せる） */
+              planDrawnKey != null && (
+                <div className="mt-[var(--space-sm)] text-center text-ink-muted">
+                  <p>{ja.mealPlan.todaySuggestNoPair}</p>
+                  {anyConditionActive && (
+                    <button
+                      type="button"
+                      onClick={clearConditions}
+                      className="tap-target mt-[var(--space-sm)] rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
+                    >
+                      {ja.search.clear}
+                    </button>
+                  )}
+                </div>
               )
             )
           ) : suggestion ? (
@@ -595,33 +726,19 @@ export default function TodaySuggestPanel({
             </div>
           )}
 
-          {/* 「決めてもらう」ボタン。置き場所は1つで、名前と絵が切り替えで入れ替わる
-              (2026-08-18 便HM・オーナー指示「同じボタンにまとめ」)。
-              地色・字色・大きさは「ランダムで1品出す」のものをそのまま使う
-              (2026-08-03 便DH。オーナー「見た目は1品の画面に寄せたい」) */}
-          <button
-            type="button"
-            data-testid="day-suggest-draw"
-            onClick={mode === 'plan' ? () => onDrawPlan() : shuffleSuggestion}
-            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-          >
-            {mode === 'plan' ? (
-              <UtensilsCrossed size={20} aria-hidden />
-            ) : (
-              <Dices size={20} aria-hidden />
-            )}
-            {mode === 'plan' ? ja.mealPlan.todaySuggestButton : ja.dayStart.shuffle}
-          </button>
-          {/* ボタンの下の1行。いま候補が何品あるか(2026-08-02 便DE-5・オーナー指示)を出す＝
-              候補が少ない条件では振り直しても同じ料理が続けて出るので、その理由が数字で分かる。
-              数える母集団が1品側と献立側で違う(献立は主菜だけ・「条件をしぼる」は効かない)ので、
-              言い方も分けてある(2026-08-17 便HH)。献立のときは、週タブの「まとめて献立を入力」との
-              違い(今日の分だけ・2品)を先に書いてから候補数を添える(2026-07-29 便CD/MP-15) */}
+          {/* いま候補が何品あるか(2026-08-02 便DE-5・オーナー指示)を出す＝候補が少ない条件では
+              振り直しても同じ料理が続けて出るので、その理由が数字で分かる。
+              数える母集団が1品側と献立側で違う(献立は主菜だけ)ので、言い方も分けてある
+              (2026-08-17 便HH)。献立のときは、週タブの「まとめて献立を入力」との違い
+              (今日の分だけ・2品)を先に書いてから候補数を添える(2026-07-29 便CD/MP-15)。
+              2026-08-19 便HT: 置き場所を結果の下にした（ボタンと結果のあいだに説明を挟まない）。
+              献立の候補数も、この節の絞り込みを通したあとの数で出す＝画面の数字と実際に
+              引いている候補が食い違わない */}
           <p className="mt-1 text-center text-xs text-ink-muted">
             {mode === 'plan'
               ? `${ja.mealPlan.todaySuggestHint}（${ja.mealPlan.todaySuggestCandidateCount.replace(
                   '{n}',
-                  String(planCandidateCount),
+                  String(planCandidateCount(planAllowedIds)),
                 )}）`
               : ja.common.candidateCount.replace('{n}', String(finalCandidates.length))}
           </p>

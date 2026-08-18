@@ -113,6 +113,8 @@ import {
   planAllLockToggle,
   planCopyLastWeek,
   planClearMealSlots,
+  PLAN_QUICK_MINUTES_OPTIONS,
+  DEFAULT_PLAN_QUICK_MINUTES,
 } from '../logic/mealPlan'
 import type {
   FillWeekPlan,
@@ -220,6 +222,7 @@ import {
   type ReturnAnchor,
   forgetRecipesTabPath,
   parseSuggestionPin,
+  parseSuggestionPlanPin,
   parseViewReturn,
   parseWeekReturn,
   pickReturnAnchor,
@@ -2402,18 +2405,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 押して来たときや、ふつうにアプリを開いたときは読まない＝古い覚えで
    * 「押してもいない料理」が出続けることがない。覚えそのものは画面に着いた時点で必ず捨てる
    * （1回きり）。作りは logic/navMemory.ts。
+   *
+   * 2026-08-19 便HT（オーナー原文「提案された献立→レシピ詳細→戻る、の流れで、
+   * 献立『今日なに作る？』の提案が変更されないようにして。」）: **献立の側も同じ覚えに乗せた**。
+   * 新しい仕組みは足していない——読むきっかけ（?focus=today）も、捨てるきっかけ（着いたら1回きり）も
+   * 1品側とまったく同じで、覚える記録に「そのとき出ていた主菜・副菜」の項目が増えただけ
+   * （logic/navMemory.ts の serializeSuggestionPin / parseSuggestionPlanPin）。
    */
-  const [returnedSuggestionId] = useState<number | null>(() =>
-    searchParams.get('focus') === 'today'
-      ? parseSuggestionPin(readSessionItem(DAY_SUGGEST_PIN_KEY))
-      : null,
-  )
+  const [returnedSuggestion] = useState<{ oneId: number | null; planIds: number[] }>(() => {
+    const raw = searchParams.get('focus') === 'today' ? readSessionItem(DAY_SUGGEST_PIN_KEY) : null
+    return { oneId: parseSuggestionPin(raw), planIds: parseSuggestionPlanPin(raw) }
+  })
+  const returnedSuggestionId = returnedSuggestion.oneId
   useEffect(() => {
     removeSessionItem(DAY_SUGGEST_PIN_KEY)
   }, [])
-  const rememberSuggestionForReturn = (recipeId: number) => {
-    writeSessionItem(DAY_SUGGEST_PIN_KEY, serializeSuggestionPin(recipeId))
-  }
 
   /**
    * 「今日なに作る？」「最近作ったもの」が対象にするレシピ（2026-08-17 便HG）。
@@ -2765,8 +2771,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }, [isDemo, todayEntries, todayList, todayPlanAllRecipeIds])
 
   const [quickOnly, setQuickOnly] = useState(false)
+  /**
+   * 「調理時間◯分以内を優先」の分数（2026-08-19 便HT・オーナー原文
+   * 「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい」）。
+   *
+   * ON/OFF（quickOnly）は画面を開いているあいだだけの状態のまま、**分数だけを設定に覚える**
+   * ＝「今日なに作る？」の「◯分以内」（homeQuickMinutes）と同じ作法。
+   * 保存されていない値・選べない値が入っていても15分に倒す（提案が止まらないようにする）。
+   */
+  const quickMinutes = (PLAN_QUICK_MINUTES_OPTIONS as readonly number[]).includes(
+    settings?.planQuickMinutes ?? -1,
+  )
+    ? (settings?.planQuickMinutes as number)
+    : DEFAULT_PLAN_QUICK_MINUTES
   // 自動提案の条件UI(2026-07-13追加): ジャンル優先(指定なしも含め単一選択)
   // 2026-08-09 便EO(オーナー指示): 「高たんぱく優先」の絞り込みは削除した
+  // 2026-08-19 便HT(オーナー指示): チップの並び → プルダウン1つ
   const [genreFilter, setGenreFilter] = useState<MealGenre | undefined>(undefined)
   /**
    * 目的モード（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
@@ -3046,8 +3066,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 「おまかせで献立を組む」でいま組んである献立のレシピID（2026-08-17 便HI）。
    * **まだ今日の献立には入っていない**＝押すたびにここが入れ替わり、見比べられる。
    * 「今日の献立に入れる」で食事を選ぶと入って空になる。
+   *
+   * 2026-08-19 便HT: レシピ詳細から戻ってきたときだけ、離れる直前に出ていた組から始める
+   * （②。1品側の pinnedRecipeId とまったく同じ覚えを読んでいる）。それ以外のときは空
+   * ＝ふつうに組み直す。空でなければ TodaySuggestPanel の自動の1回も走らない
+   * ＝戻った瞬間に別の組み合わせへ差し替わらない。
    */
-  const [suggestPairIds, setSuggestPairIds] = useState<number[]>([])
+  const [suggestPairIds, setSuggestPairIds] = useState<number[]>(returnedSuggestion.planIds)
   /**
    * 「今日の献立に入れる」で開く「どの食事に入れますか？」の窓の中身（2026-08-18 便HM）。
    *
@@ -3234,8 +3259,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 目的が指定されているときだけ、同じ引数で最大 PURPOSE_REDRAW_ATTEMPTS 回引き直して、
    * 目的の軸に最も沿うペアを採る（エンジン本体は無改造。一品ものガード等は chooseBalancedPair 側）。
    */
-  const drawPair = (options: Parameters<typeof suggestPairForSlot>[1]): SuggestPairResult => {
-    const draw = () => suggestPairForSlot(visibleRecipes, options)
+  const drawPair = (
+    options: Parameters<typeof suggestPairForSlot>[1],
+    /** 母集団（2026-08-19 便HT。「今日なに作る？」の絞り込みを通したレシピ。省略で従来どおり全部） */
+    pool: Recipe[] = visibleRecipes,
+  ): SuggestPairResult => {
+    const draw = () => suggestPairForSlot(pool, options)
     const purpose = planPurpose
     if (!purpose) return draw()
     return chooseBalancedPair(
@@ -3250,15 +3279,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
+   * 「今日なに作る？」の絞り込み（条件チップ・在庫の食材から）を献立エンジンにも効かせるための
+   * 道具（2026-08-19 便HT・オーナー原文「献立にも1品と同じように条件を絞る機能つければ
+   * いいのでは？」）。渡されなければ今までどおり全部が母集団。
+   *
+   * 絞り込みの判定そのものは節の側（components/TodaySuggestPanel）が持ち、ここへはその結果の
+   * レシピIDだけが来る＝**1品と献立で同じ判定を2回書かない**。
+   *
+   * 絞った結果が0品でも**絞る前には戻さない**。戻すと、条件に合う品が1つも無いときに
+   * 条件を無視した献立が黙って出て、「絞ったのに効いていない」に見える（いちばん分かりづらい）。
+   * 0品のときは組めないまま返し、節の側が「この条件で組める献立がありませんでした」と
+   * 「条件をクリア」を出す＝1品側が0件のときと同じ見せ方になる。
+   */
+  const restrictToAllowed = (list: Recipe[], allowedRecipeIds?: number[]): Recipe[] => {
+    if (!allowedRecipeIds) return list
+    const allowed = new Set(allowedRecipeIds)
+    return list.filter((r) => r.id != null && allowed.has(r.id))
+  }
+
+  /**
    * 「おまかせで献立を組む」がいまくじを引いている候補の数（2026-08-02 便DE-5・オーナー指示）。
    * 候補が2品しかない条件では、振り直しても同じ料理が出続けて壊れているように見えるため、
    * 数字を画面に出して理由が分かるようにする。数えるのは主菜の候補
    * （ペア提案は主菜を引いてから、その主菜に合わせて副菜を引くので、変わり映えの元は主菜側）。
    */
-  const suggestCandidateCount = useMemo(() => {
+  const suggestCandidateCount = (allowedRecipeIds?: number[]) => {
     const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
-    return suggestCandidates(visibleRecipes, {
+    return suggestCandidates(restrictToAllowed(visibleRecipes, allowedRecipeIds), {
       quickOnly,
+      quickMinutes,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
       usedRecipeIds: [],
@@ -3267,14 +3316,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       yesterdayRecipeIds,
       role: 'main',
     }).length
-  }, [
-    visibleRecipes,
-    quickOnly,
-    settings?.ngIngredients,
-    visibleSlots,
-    genreFilter,
-    yesterdayRecipeIds,
-  ])
+  }
 
   /**
    * いま組んである献立の中身（2026-08-17 便HI）。並べるときに主菜/副菜の別を添えるので、
@@ -3291,22 +3333,42 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     [suggestPairIds, recipeById],
   )
 
+  /**
+   * 「今日なに作る？」の候補カードからレシピ詳細へ移るときに、そのとき出ていたものを覚える
+   * （2026-08-17 便HI＝1品／2026-08-19 便HT＝献立）。
+   *
+   * 開いた1品と、そのとき組んであった主菜・副菜を**同じ記録**に書く。どちらを出していたかで
+   * 書き分けないのは、戻ったときにどちらを出すかは切り替え（dayStartSuggestMode）が決めるので、
+   * 「離れる前に画面に出ていたもの」をそのまま残しておけば、どちらに戻っても見え方が変わらないため。
+   */
+  const rememberSuggestionForReturn = (recipeId: number) => {
+    writeSessionItem(DAY_SUGGEST_PIN_KEY, serializeSuggestionPin(recipeId, suggestPairIds))
+  }
+
   // 主菜+副菜のペアを1組計算する。提案元の枠は「表示中の食事帯に夕食があれば
   // 夕食、無ければ先頭の帯」を使う。excludeIdsに渡したレシピは候補から外す(押し直しで直前の
   // 組み合わせを避けるために使う)。候補が0件のときはundefinedを返す
-  const computeSuggestionIds = (excludeIds: number[]): number[] | undefined => {
+  const computeSuggestionIds = (
+    excludeIds: number[],
+    /** 「今日なに作る？」の絞り込みを通したレシピID（2026-08-19 便HT） */
+    allowedRecipeIds?: number[],
+  ): number[] | undefined => {
     if (!recipes) return undefined
     const slot: MealSlot = visibleSlots.includes('dinner') ? 'dinner' : visibleSlots[0] ?? 'dinner'
     // 「おまかせで献立を組む」も目的モードの引き直しを通す（docs/62 決定②のオーナー指示）
-    const { main, side } = drawPair({
-      quickOnly,
-      excludeNg: true,
-      ngIngredients: settings?.ngIngredients ?? [],
-      usedRecipeIds: excludeIds,
-      slot,
-      genre: genreFilter,
-      yesterdayRecipeIds,
-    })
+    const { main, side } = drawPair(
+      {
+        quickOnly,
+        quickMinutes,
+        excludeNg: true,
+        ngIngredients: settings?.ngIngredients ?? [],
+        usedRecipeIds: excludeIds,
+        slot,
+        genre: genreFilter,
+        yesterdayRecipeIds,
+      },
+      restrictToAllowed(visibleRecipes, allowedRecipeIds),
+    )
     const ids = [main?.id, side?.id].filter((x): x is number => x != null)
     return ids.length === 0 ? undefined : ids
   }
@@ -3324,10 +3386,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 増えた。そのときは出ているお知らせを消さない＝**利用者が押していないのに、
    * 直前の操作の結果が黙って消える**のを作らない。
    */
-  const drawSuggestPair = (options?: { auto?: boolean }) => {
+  const drawSuggestPair = (options?: { auto?: boolean; allowedRecipeIds?: number[] }) => {
     if (!options?.auto) setMessage('')
-    const ids = computeSuggestionIds(suggestPairIds)
+    const ids = computeSuggestionIds(suggestPairIds, options?.allowedRecipeIds)
     if (!ids) {
+      // 2026-08-19 便HT: 組めなかったときは、いま出ている組も下ろす。
+      // 「組める献立がありませんでした」と言いながら前の組が画面に残っていると、
+      // その組がいまの条件で出たものだと読めてしまう
+      setSuggestPairIds([])
       // レシピが1件も無いときと、条件で候補が尽きたときで言い方を分ける（黙って終わらせない）
       setMessage(
         visibleRecipes.length === 0 ? ja.mealPlan.noSuggestion : ja.mealPlan.todaySuggestNoPair,
@@ -3685,6 +3751,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     const usedRecipeIds = scopeEntries.filter((e) => e.id !== entryId).map((e) => e.recipeId)
     const baseOptions = {
       quickOnly,
+      quickMinutes,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
       usedRecipeIds,
@@ -3799,6 +3866,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
     const baseOpts = {
       quickOnly,
+      quickMinutes,
       excludeNg: true,
       ngIngredients: settings?.ngIngredients ?? [],
       genre: genreFilter,
@@ -5512,7 +5580,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 提案条件が既定値から変わっていれば、畳んだトグルのラベルにも現在値を出す
   // (2026-07-16 UI総点検A-3: 「提案の条件: 和食」のように)
   const activeConditionSummaries: (string | undefined)[] = [
-    quickOnly ? ja.mealPlan.quickOnlySummary : undefined,
+    quickOnly ? ja.mealPlan.quickOnlySummary.replace('{n}', String(quickMinutes)) : undefined,
     genreFilter,
     // 目的は「まとめて献立」の結果を最も大きく変える条件なので、畳んだラベルにも必ず出す
     planPurpose ? purposeLabelOf(planPurpose) : undefined,
@@ -5584,7 +5652,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       <Collapse open={suggestConditionsOpen}>
         <>
-        <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+        {/* 調理時間（2026-08-19 便HT・オーナー原文「調理時間15分いないを優先は、
+            時間だけプルダウンで変更できるようにしたい」）。
+            **機能はボタンのまま**で、分数だけをプルダウンで変える。
+            分数のプルダウンは優先がONのあいだだけ出す＝OFFのときに触っても何も変わらない
+            ものを並べない（「今日なに作る？」の「◯分以内」も、選んでいるときだけ
+            分数を出している。同じ絞り込みを画面ごとに違う出し方にしない）。
+            押す回数は増やしていない: ONにするのはこれまでどおりボタン1回で、
+            分数を変えるときだけプルダウンを触る（これまでは変えられなかった） */}
+        <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-[var(--space-sm)]">
           <button
             type="button"
             onClick={() => setQuickOnly((v) => !v)}
@@ -5593,37 +5669,55 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             style={chipStyle(quickOnly)}
           >
             <ChipCheck on={quickOnly} />
-            {ja.mealPlan.quickOnlyToggle}
+            {ja.mealPlan.quickOnlyToggle.replace('{n}', String(quickMinutes))}
           </button>
-          <button
-            type="button"
-            onClick={() => setGenreFilter(undefined)}
-            aria-pressed={genreFilter === undefined}
-            className={chipClass(genreFilter === undefined)}
-            style={chipStyle(genreFilter === undefined)}
-          >
-            <ChipCheck on={genreFilter === undefined} />
-            {ja.mealPlan.genreAny}
-          </button>
-          {MEAL_GENRES.map((genre) => (
-            <button
-              key={genre}
-              type="button"
-              onClick={() => setGenreFilter(genre)}
-              aria-pressed={genreFilter === genre}
-              className={chipClass(genreFilter === genre)}
-              style={chipStyle(genreFilter === genre)}
-            >
-              <ChipCheck on={genreFilter === genre} />
-              {genre}
-            </button>
-          ))}
+          {quickOnly && (
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <span className="shrink-0">{ja.mealPlan.quickMinutesLabel}</span>
+              <select
+                data-testid="plan-quick-minutes"
+                value={quickMinutes}
+                onChange={(e) => saveSettings({ planQuickMinutes: Number(e.target.value) })}
+                className="select-control"
+              >
+                {PLAN_QUICK_MINUTES_OPTIONS.map((m) => (
+                  <option key={m} value={m}>
+                    {ja.mealPlan.quickMinutesOption.replace('{n}', String(m))}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
         {/* 条件の説明は、その条件を選んでいるあいだだけ出す（2026-08-09 便EN・オーナー実機
             「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
             優先されているように読めた）。
             調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること */}
-        {quickOnly && <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.quickOnlyHint}</p>}
+        {quickOnly && (
+          <p className="mt-1 text-xs text-ink-muted">
+            {ja.mealPlan.quickOnlyHint.replace('{n}', String(quickMinutes))}
+          </p>
+        )}
+        {/* 料理のジャンル（2026-08-19 便HT・オーナー原文「和洋中選択も同様にプルダウン」）。
+            チップ4つ（指定なし/和食/洋食/中華）を1つのプルダウンにまとめた。
+            チップは「どれが選ばれているか」を地色で言っていたので、まとめると
+            何の欄なのかが読めなくなる。欄の名前（料理のジャンル）を添えて補う */}
+        <label className="mt-[var(--space-sm)] block">
+          <span className="block text-sm font-bold text-ink-muted">{ja.mealPlan.genreLabel}</span>
+          <select
+            data-testid="plan-genre"
+            value={genreFilter ?? ''}
+            onChange={(e) => setGenreFilter((e.target.value || undefined) as MealGenre | undefined)}
+            className="select-control mt-1 w-full"
+          >
+            <option value="">{ja.mealPlan.genreAny}</option>
+            {MEAL_GENRES.map((genre) => (
+              <option key={genre} value={genre}>
+                {genre}
+              </option>
+            ))}
+          </select>
+        </label>
         </>
       </Collapse>
 
@@ -5642,45 +5736,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {ja.mealPlan.purposeProTag}
               </span>
             </p>
-            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => void changePurpose(undefined)}
-                aria-pressed={planPurpose === undefined}
-                className={chipClass(planPurpose === undefined)}
-                style={chipStyle(planPurpose === undefined)}
-              >
-                <ChipCheck on={planPurpose === undefined} />
-                {ja.mealPlan.purposeNone}
-              </button>
-            </div>
-            {/* 2026-08-07 便DT-9(オーナー指示): 軸が8つになったので「多め」「ひかえめ」の
-                2群に分けて並べる。8個を1列に混ぜると、どちらの向きの指定なのかが読み取れない */}
-            {(
-              [
-                [ja.mealPlan.purposeGroupMore, MORE_MEAL_PURPOSES],
-                [ja.mealPlan.purposeGroupLess, LESS_MEAL_PURPOSES],
-              ] as const
-            ).map(([groupLabel, purposes]) => (
-              <div key={groupLabel} className="mt-[var(--space-sm)]">
-                <p className="text-xs font-bold text-ink-muted">{groupLabel}</p>
-                <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+            {/* 2026-08-19 便HT（オーナー原文「栄養から組むのボタンは、プルダウンにしたい。
+                ボタンがたくさん並ぶとごちゃつき感がある。」）: チップ9個（指定なし＋8つの軸）を
+                プルダウン1つにした。
+                2026-08-07 便DT-9でオーナーが決めた「多め」「ひかえめ」の2群分けは、
+                プルダウンの中の区分（optgroup）としてそのまま残す＝8つを1列に混ぜて
+                「どちらの向きの指定なのか読み取れない」状態に戻さない */}
+            <select
+              data-testid="plan-purpose"
+              aria-label={ja.mealPlan.purposeLabel}
+              value={planPurpose ?? ''}
+              onChange={(e) => void changePurpose((e.target.value || undefined) as MealPurpose | undefined)}
+              className="select-control mt-1 w-full"
+            >
+              <option value="">{ja.mealPlan.purposeNone}</option>
+              {(
+                [
+                  [ja.mealPlan.purposeGroupMore, MORE_MEAL_PURPOSES],
+                  [ja.mealPlan.purposeGroupLess, LESS_MEAL_PURPOSES],
+                ] as const
+              ).map(([groupLabel, purposes]) => (
+                <optgroup key={groupLabel} label={groupLabel}>
                   {purposes.map((purpose) => (
-                    <button
-                      key={purpose}
-                      type="button"
-                      onClick={() => void changePurpose(purpose)}
-                      aria-pressed={planPurpose === purpose}
-                      className={chipClass(planPurpose === purpose)}
-                      style={chipStyle(planPurpose === purpose)}
-                    >
-                      <ChipCheck on={planPurpose === purpose} />
+                    <option key={purpose} value={purpose}>
                       {purposeLabelOf(purpose)}
-                    </button>
+                    </option>
                   ))}
-                </div>
-              </div>
-            ))}
+                </optgroup>
+              ))}
+            </select>
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
           </div>
         </Collapse>
@@ -8272,10 +8356,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
       {/* 「今日なに作る？」で出ているものを、どの食事に入れるか選ぶ窓（2026-08-17 便HI）。
           レシピ詳細の「今日の献立に追加」・レシピ一覧のまとめ追加とまったく同じ部品・
-          同じ選択肢（朝食/昼食/夕食＋食事を決めずに）を使う＝新しい見た目は作らない。
+          同じ選択肢（朝食/昼食/夕食＋どれも決めずに）を使う＝新しい見た目は作らない。
           2026-08-18 便HM: 「1品」を入れるときもこの窓（オーナー指示）。
           見出しを差し替えるのは献立（2品）のときだけで、1品のときは部品の既定の見出し
-          （「どの食事に入れますか？」）＝レシピ詳細から1品入れるときとまったく同じ窓になる */}
+          （ja.detail.todaySlotDialogTitle）＝レシピ詳細から1品入れるときとまったく同じ窓になる */}
       <TodaySlotModal
         open={todaySlotPick != null}
         title={

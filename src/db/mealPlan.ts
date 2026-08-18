@@ -132,7 +132,7 @@ export async function removeMealEntries(entryIds: number[]): Promise<void> {
  * ＝どちらの入口から入れても結果が変わらないようにする:
  *  - 予定の行の役割は、レシピの「料理の種別」から決める（mealRoleForRecipe）
  *  - その食事に同じ品が既にある扱いは todaySlotAddPlan（今日すでに作った品は行を増やさず戻す）
- *  - slot を渡さない＝「食事を決めずに今日の献立に追加」と同じで、今週の予定には入れない
+ *  - slot を渡さない＝「朝食・昼食・夕食を決めずに今日の献立に追加」と同じで、今週の予定には入れない
  *
  * @returns added=入れた品数 / already=すでに入っていて何も増やさなかった品数
  */

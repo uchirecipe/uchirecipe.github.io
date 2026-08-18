@@ -94,9 +94,50 @@ export const MEAL_PLAN_TAB_TAP_KEY = 'mealPlan:tabTap'
  */
 export const DAY_SUGGEST_PIN_KEY = 'mealPlan:daySuggest'
 
-/** 覚える形（後から項目を足せるようにオブジェクトで持つ。中身はレシピIDだけ） */
-export function serializeSuggestionPin(recipeId: number): string {
-  return JSON.stringify({ recipeId })
+/**
+ * 覚える形（後から項目を足せるようにオブジェクトで持つ）。
+ *
+ * `recipeId` … カードから開いた1品（「1品」側で出し直すもの）
+ * `planRecipeIds` … そのとき「献立」側に出ていた主菜・副菜（2026-08-19 便HT・オーナー原文
+ * 「提案された献立→レシピ詳細→戻る、の流れで、献立『今日なに作る？』の提案が
+ * 変更されないようにして。」）。
+ *
+ * 献立側のために新しい覚え場所を作らず、**1品側と同じ記録の中に項目を足した**。
+ * 理由は、覚えるきっかけ（カードからレシピ詳細へ移る）と、読むきっかけ
+ * （?focus=today で帰ってくる）と、捨てるきっかけ（画面に着いたら1回きりで捨てる）が
+ * まったく同じだから。別々のキーに分けると、片方だけ消え残る道ができる。
+ * 組が無いとき（1品側から開いたとき）は項目そのものを書かない＝以前の版と同じ形のまま。
+ */
+export function serializeSuggestionPin(recipeId: number, planRecipeIds: number[] = []): string {
+  return JSON.stringify({
+    recipeId,
+    ...(planRecipeIds.length > 0 ? { planRecipeIds } : {}),
+  })
+}
+
+/**
+ * 覚えた「献立」側の組を読み出す（2026-08-19 便HT）。
+ * 読めないときは**空**にして無視する＝ふつうに組み直すのが正しい振る舞い。
+ *
+ * IDに使えない値が1つでも混じっていたら、通った分だけを返さずに空にする。
+ * 主菜だけ・副菜だけが戻るのは「さっきの献立がそのまま出ている」ではなく、
+ * **黙って別の献立に変わった**ように見えるため。
+ */
+export function parseSuggestionPlanPin(raw: string | null | undefined): number[] {
+  if (!raw) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (typeof parsed !== 'object' || parsed === null) return []
+  const { planRecipeIds } = parsed as { planRecipeIds?: unknown }
+  if (!Array.isArray(planRecipeIds) || planRecipeIds.length === 0) return []
+  const usable = planRecipeIds.every(
+    (id) => typeof id === 'number' && Number.isInteger(id) && id > 0,
+  )
+  return usable ? (planRecipeIds as number[]) : []
 }
 
 /**

@@ -328,6 +328,7 @@ import {
   MEAL_PLAN_TAB_TAP_KEY,
   DAY_SUGGEST_PIN_KEY,
   parseSuggestionPin,
+  parseSuggestionPlanPin,
   parseViewReturn,
   parseWeekReturn,
   pickReturnAnchor,
@@ -3146,6 +3147,98 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('HI-PIN IDが整数でなければnull', parseSuggestionPin('{"recipeId":4.2}'), null)
   eq('HI-PIN IDが0以下ならnull', parseSuggestionPin('{"recipeId":0}'), null)
   eq('HI-PIN IDが無ければnull', parseSuggestionPin('{}'), null)
+}
+
+// ---------- navMemory: 「今日なに作る？」の**献立**側も覚える(2026-08-19 便HT・②の再発防止) ----------
+// オーナー原文「提案された献立→レシピ詳細→戻る、の流れで、献立『今日なに作る？』の提案が
+// 変更されないようにして。」
+// 直すバグ: 1品側だけが「戻ってきた1回だけ引き直さない」を持っていて、献立側は画面を離れると
+// 組んだ主菜・副菜が消え、戻った瞬間に別の組み合わせが出ていた。
+// 新しい仕組みは作らず、1品側とまったく同じ覚え(同じキー・同じ1回きり)の中に項目を足す
+// ＝覚える場所が2つに割れない。読めない値は「覚えていない」＝ふつうに引き直す。
+{
+  eq(
+    'HT-PIN 献立の組も一緒に覚えて読み戻せる',
+    parseSuggestionPlanPin(serializeSuggestionPin(42, [7, 9])),
+    [7, 9],
+  )
+  eq(
+    'HT-PIN 献立の組を足しても1品側の覚えは同じ形のまま読める',
+    parseSuggestionPin(serializeSuggestionPin(42, [7, 9])),
+    42,
+  )
+  eq('HT-PIN 献立の組が無ければ空(ふつうに組み直す)', parseSuggestionPlanPin(serializeSuggestionPin(42)), [])
+  eq('HT-PIN 覚えが無ければ空', parseSuggestionPlanPin(null), [])
+  eq('HT-PIN 空文字は空', parseSuggestionPlanPin(''), [])
+  eq('HT-PIN JSONでなければ空', parseSuggestionPlanPin('{壊れた'), [])
+  eq('HT-PIN 物体でなければ空', parseSuggestionPlanPin('42'), [])
+  eq('HT-PIN 並びでなければ空', parseSuggestionPlanPin('{"recipeId":1,"planRecipeIds":7}'), [])
+  eq(
+    'HT-PIN IDに使えない値が混じっていれば空(中途半端に組を出さない)',
+    parseSuggestionPlanPin('{"recipeId":1,"planRecipeIds":[7,"9"]}'),
+    [],
+  )
+  eq(
+    'HT-PIN IDが整数でなければ空',
+    parseSuggestionPlanPin('{"recipeId":1,"planRecipeIds":[7,9.5]}'),
+    [],
+  )
+  eq(
+    'HT-PIN IDが0以下なら空',
+    parseSuggestionPlanPin('{"recipeId":1,"planRecipeIds":[7,0]}'),
+    [],
+  )
+}
+
+// ---------- 提案の条件「調理時間◯分以内を優先」の分数(2026-08-19 便HT・⑤の再発防止) ----------
+// オーナー原文「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい。」
+// ここで測るのは**選んだ分数が提案の中身に効いているか**であって、画面がプルダウンかどうかではない。
+// 分数を渡さない呼び出し(月タブ・買い物メモなど、この条件を持たない場所)は
+// これまでどおり15分のまま＝既存の呼び出しの結果を変えない。
+{
+  const mkQuick = (id, cookMinutes) => ({
+    id,
+    title: `レシピ${id}`,
+    servings: 2,
+    effortLevel: 'easy',
+    tags: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+    cookMinutes,
+  })
+  const quickOpts = (over = {}) => ({
+    quickOnly: true,
+    excludeNg: false,
+    ngIngredients: [],
+    usedRecipeIds: [],
+    slot: 'dinner',
+    season: 'summer',
+    ...over,
+  })
+  // 10分・15分・20分・30分・40分の5品。境界(ちょうど選んだ分数)は含む
+  const quickPool = [mkQuick(10, 10), mkQuick(15, 15), mkQuick(20, 20), mkQuick(30, 30), mkQuick(40, 40)]
+  const quickIds = (options) =>
+    suggestCandidates(quickPool, options)
+      .map((r) => r.id)
+      .sort((a, b) => a - b)
+  eq('HT-QUICK 分数を渡さなければ従来どおり15分以内', quickIds(quickOpts()), [10, 15])
+  eq('HT-QUICK 10分を選ぶと10分以内だけが候補', quickIds(quickOpts({ quickMinutes: 10 })), [10])
+  eq('HT-QUICK 20分を選ぶと20分の品まで候補に入る', quickIds(quickOpts({ quickMinutes: 20 })), [10, 15, 20])
+  eq(
+    'HT-QUICK 30分を選ぶと30分の品まで候補に入る(40分は入らない)',
+    quickIds(quickOpts({ quickMinutes: 30 })),
+    [10, 15, 20, 30],
+  )
+  eq(
+    'HT-QUICK 優先を切っていれば分数は効かない(全部が候補)',
+    quickIds(quickOpts({ quickOnly: false, quickMinutes: 10 })),
+    [10, 15, 20, 30, 40],
+  )
 }
 
 // ---------- cookedPlanEntryIds(週ビューの「作った見た目」対応付け・2026-07-24 便BH-3・タスク2) ----------

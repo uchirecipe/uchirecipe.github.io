@@ -152,6 +152,23 @@ export function sortMealSlots(slots: MealSlot[]): MealSlot[] {
 export const MEAL_GENRES = ['和食', '洋食', '中華'] as const
 export type MealGenre = (typeof MEAL_GENRES)[number]
 
+/**
+ * 「調理時間◯分以内を優先」で選べる分数（2026-08-19 便HT・オーナー指示
+ * 「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい」）。
+ *
+ * 並びと値は「今日なに作る？」の「◯分以内」（components/TodaySuggestPanel の
+ * QUICK_MINUTES_OPTIONS）とそろえてある＝同じ「調理時間で絞る」を、画面ごとに
+ * 違う分数で選ばせない。
+ */
+export const PLAN_QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
+
+/**
+ * 分数を指定しなかったときの「◯分以内」（2026-08-19 便HT）。
+ * 15分は便DE-7でオーナーが決めた値で、そのまま既定にしている
+ * ＝分数を選べるようにしても、これまで使っていた人の結果は変わらない。
+ */
+export const DEFAULT_PLAN_QUICK_MINUTES = 15
+
 function toDateString(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -268,6 +285,11 @@ export function rangeDayCount(start: string, end: string): number {
 
 export interface SuggestOptions {
   quickOnly: boolean
+  /**
+   * quickOnly のときの上限（分・任意・2026-08-19 便HT）。
+   * 渡さなければ DEFAULT_PLAN_QUICK_MINUTES（15分）＝この項目が無かった頃と同じ結果になる。
+   */
+  quickMinutes?: number
   excludeNg: boolean
   ngIngredients: string[]
   /** この週で既に使っているレシピID（同じ主菜が続かないように避けたい） */
@@ -600,7 +622,12 @@ export function suggestCandidates(recipes: Recipe[], options: SuggestOptions): R
     // ハード除外（同じ枠の主菜と副菜に同じ料理を入れない。便CD/MP-09）
     if (r.id != null && options.excludeRecipeIds?.includes(r.id)) return false
     if (options.excludeNg && hasNgIngredient(r, options.ngIngredients)) return false
-    if (options.quickOnly && !(r.cookMinutes != null && r.cookMinutes > 0 && r.cookMinutes <= 15))
+    // 上限は呼び出し側が選んだ分数（2026-08-19 便HT）。渡されなければ従来どおり15分
+    const quickLimit = options.quickMinutes ?? DEFAULT_PLAN_QUICK_MINUTES
+    if (
+      options.quickOnly &&
+      !(r.cookMinutes != null && r.cookMinutes > 0 && r.cookMinutes <= quickLimit)
+    )
       return false
     return true
   })
