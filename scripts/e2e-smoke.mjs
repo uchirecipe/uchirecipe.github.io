@@ -90,11 +90,17 @@
 //         種別を足すと候補は減らない・未選択と全選択の候補数が一致(便DV-1の再発防止)) /
 //         DAYLAYOUT-01(2026-08-17 便HH→便HIで並びを更新。旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換え:
 //         献立の「日」の押せるボタンの重なりを解いた。献立が無い日は「自分で選ぶ」入口が1つだけ・
-//         「決めてもらう」2つ(おまかせで献立を組む/ランダムで1品出す)が「今日なに作る？」に揃う・
+//         「決めてもらう」ボタンが「今日なに作る？」の中に1つだけ(2026-08-18 便HMで2つを1つにまとめた)・
 //         外した2つ(レシピを探す/在庫の食材から探す)がどこにも無い・どれも指で押せる大きさ・
-//         「今日の献立」の見出しは空の日には出ず「今日の献立を選ぶ」が「今日なに作る？」の下にある。
+//         「今日の献立」の見出しは空の日には出ず「今日の献立を探す」が「今日なに作る？」の下にある。
 //         献立がある日は同じ節を「今日なに作る？」の名前のまま畳んで出し(別名にしない)、
-//         見出しを押すと開いて振り直せる・「今日の献立を選ぶ」は出さない) /
+//         見出しを押すと開いて振り直せる・「今日の献立を探す」は出さない) /
+//         DAYMODE-01(2026-08-18 便HM・オーナー実機「同じボタンにまとめ、『1品』↔️『献立』に切り替えスイッチに」
+//         「候補が下に出るのわかりづらい」: 「今日なに作る？」に1品/献立の切り替えが1組あり指で押せる・
+//         決めてもらうボタンは画面に1つだけ・**どちらを選んでも結果はボタンの上**に出る・
+//         「献立」へ切り替えると押さなくても主菜/副菜が出ている・「今日の献立に入れる」は1品でも使えて
+//         他の画面と同じ食事の枠の窓を通る・効かない「条件をしぼる」は献立側では出さない・
+//         切り替えは覚えている。390×667の画面で「今日の献立に入れる」まで収まることも見る) /
 //         DAYFLOW-01(2026-08-17 便HI・オーナー実機8件: 日/週/月のどこへ移ってもページのいちばん上から
 //         見せる・下の並びの「献立」で日へ戻る(すでに日なら先頭へ)・「今週の献立の予定」の×が
 //         今日と今週の両方から外す(規約Fの押す前の説明と押したあとの知らせ込み)・「おまかせで献立を組む」は
@@ -4285,7 +4291,11 @@ try {
       // 2026-08-17 便HH: おまかせは「今日なに作る？」の中へ移り、名前も
       // 「おまかせで提案」→「おまかせで献立を組む」になった(置き場所は問わず名前で掴む)。
       // 2026-08-17 便HI: 押しただけでは今日の献立に入らなくなったので、
-      // 組んだ献立を「今日の献立に入れる」→食事を選ぶ、まで進めて行を用意する
+      // 組んだ献立を「今日の献立に入れる」→食事を選ぶ、まで進めて行を用意する。
+      // 2026-08-18 便HM: おまかせは「今日なに作る？」の「献立」側になったので、先に切り替える
+      // （切り替えた時点で1組出るが、ここでは行を用意したいだけなので押して引き直しておく）
+      await dtPage.locator('[data-testid="day-mode-plan"]').click()
+      await dtPage.waitForTimeout(1200)
       await dtPage.getByRole('button', { name: /おまかせで献立を組む/ }).first().click()
       await dtPage.waitForTimeout(800)
       await dtPage.locator('[data-testid="day-suggest-apply"]').click()
@@ -7430,7 +7440,7 @@ try {
       check(
         'MEALPLAN-01(便EK・規約F) 確認文が残る食事とその件数を名指しする',
         mpDialogs.some((m) =>
-          m.includes(`他の食事（昼食）の予定${mpBeforeClear.lunch}品と、作った記録は残ります`),
+          m.includes(`他の食事（昼食）の予定${mpBeforeClear.lunch}品は残ります`),
         ),
         `dialogs=${JSON.stringify(mpDialogs)}`,
       )
@@ -12067,7 +12077,7 @@ try {
       check(
         'MEALPLAN-A5(規約F) 実行前に「何日分・何食分を埋めるか」と「何が消えないか」を確認する',
         /まだ決まっていない\d+日分（\d+食分）/.test(fmConfirmMsg) &&
-          fmConfirmMsg.includes('作った記録は消えません'),
+          fmConfirmMsg.includes('献立は消えません'),
         `confirm=${fmConfirmMsg}`,
       )
       const fmData = await fmPage.evaluate(
@@ -20207,7 +20217,7 @@ try {
   // --- DAYLAYOUT-01(2026-08-17 便HH・オーナー承認済み): 献立の「日」の押せるボタンの重なりを解く。
   // 旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換える。旧検査が測っていた「レシピを探す」
   // 「在庫の食材から探す」の2つは、行き先が他と重なっていたので画面から外した:
-  //   ・レシピを探す(?focus=search)   … 行き先は「今日の献立を選ぶ」と下の並びの「レシピ」と同じ
+  //   ・レシピを探す(?focus=search)   … 行き先は「今日の献立を探す」と下の並びの「レシピ」と同じ
   //                                     レシピ一覧。検索欄は一覧の上端に貼り付いて常に見えている
   //   ・在庫の食材から探す(?pantry=1) … 同じ絞り込みが「今日なに作る？」の「在庫の食材から」と
   //                                     レシピ一覧の絞り込み「在庫の食材で絞る」にある
@@ -20275,7 +20285,7 @@ try {
       await dlPage.waitForTimeout(1600)
       {
         const body = await dlBody()
-        const choose = dlPage.getByRole('button', { name: '今日の献立を選ぶ' })
+        const choose = dlPage.getByRole('button', { name: '今日の献立を探す' })
         check(
           'DAYLAYOUT-01 献立が無い日に「自分で選ぶ」入口はちょうど1つ',
           (await choose.count()) === 1,
@@ -20291,7 +20301,7 @@ try {
         const section = dlSuggestSection()
         check('DAYLAYOUT-01 献立が無い日は「今日なに作る？」が出る', (await section.count()) === 1)
         // 2026-08-17 便HI(オーナー指示): 「今日の献立」の見出しと枠は空の日には出さない。
-        // 「今日の献立を選ぶ」だけを残し、置き場所は「今日なに作る？」の下
+        // 「今日の献立を探す」だけを残し、置き場所は「今日なに作る？」の下
         check(
           'DAYLAYOUT-01 献立が無い日は「今日の献立」の見出しを出さない',
           (await dlPage.getByRole('heading', { name: '今日の献立' }).count()) === 0,
@@ -20300,26 +20310,29 @@ try {
           const sectionBox = (await section.boundingBox()) ?? { y: 0, height: 0 }
           const chooseBox = (await choose.boundingBox()) ?? { y: 0 }
           check(
-            'DAYLAYOUT-01 「今日の献立を選ぶ」は「今日なに作る？」の下にある',
+            'DAYLAYOUT-01 「今日の献立を探す」は「今日なに作る？」の下にある',
             chooseBox.y >= sectionBox.y + sectionBox.height,
             `節=${Math.round(sectionBox.y)}+${Math.round(sectionBox.height)} 選ぶ=${Math.round(chooseBox.y)}`,
           )
         }
-        const omakase = section.getByRole('button', { name: 'おまかせで献立を組む' })
+        // 2026-08-18 便HM: 「決めてもらう」ボタンは**1つ**になり、見出しの下の「1品」/「献立」の
+        // 切り替えで名前と中身が入れ替わる。ここでは「散らばっていないこと」だけを見る
+        // （切り替えそのものの中身は DAYMODE-01）
+        const draw = section.locator('[data-testid="day-suggest-draw"]')
         const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
         check(
-          'DAYLAYOUT-01 「決めてもらう」2つは「今日なに作る？」の中に揃っている',
-          (await omakase.count()) === 1 && (await oneDish.count()) === 1,
-          `おまかせ=${await omakase.count()} 1品=${await oneDish.count()}`,
+          'DAYLAYOUT-01 「決めてもらう」ボタンは「今日なに作る？」の中に1つだけ',
+          (await draw.count()) === 1 &&
+            (await dlPage.locator('[data-testid="day-suggest-draw"]').count()) === 1,
+          `節の中=${await draw.count()} 画面全体=${await dlPage.locator('[data-testid="day-suggest-draw"]').count()}`,
         )
         check(
-          'DAYLAYOUT-01 「決めてもらう」2つは画面に1つずつ(他の節へ散らばっていない)',
-          (await dlPage.getByRole('button', { name: 'おまかせで献立を組む' }).count()) === 1 &&
-            (await dlPage.getByRole('button', { name: 'ランダムで1品出す' }).count()) === 1,
+          'DAYLAYOUT-01 切り替えも「今日なに作る？」の中にある(他の節へ散らばっていない)',
+          (await section.locator('[data-testid="day-mode-one"]').count()) === 1 &&
+            (await dlPage.locator('[data-testid="day-mode-plan"]').count()) === 1,
         )
         for (const [label, loc] of [
-          ['今日の献立を選ぶ', choose],
-          ['おまかせで献立を組む', omakase],
+          ['今日の献立を探す', choose],
           ['ランダムで1品出す', oneDish],
         ]) {
           const box = await dlTapSize(loc)
@@ -20390,10 +20403,10 @@ try {
           `w=${Math.round(toggleBox.width)} h=${Math.round(toggleBox.height)}`,
         )
         // 献立がある日は「今日の献立」の中の「レシピ一覧から追加」が同じ行き先を持つので、
-        // 「今日の献立を選ぶ」は出さない(同じ操作を2か所に作らない)
+        // 「今日の献立を探す」は出さない(同じ操作を2か所に作らない)
         check(
-          'DAYLAYOUT-01 献立がある日は「今日の献立を選ぶ」を出さない(入口が二重にならない)',
-          (await dlPage.getByRole('button', { name: '今日の献立を選ぶ' }).count()) === 0 &&
+          'DAYLAYOUT-01 献立がある日は「今日の献立を探す」を出さない(入口が二重にならない)',
+          (await dlPage.getByRole('button', { name: '今日の献立を探す' }).count()) === 0 &&
             (await dlPage.locator('[data-testid="today-add-more"]').count()) === 1,
         )
         if (toggleFound) {
@@ -20424,9 +20437,14 @@ try {
           before.trim().length > 0 && after.trim().length > 0,
           `前=${before.trim().slice(0, 20)} 後=${after.trim().slice(0, 20)}`,
         )
+        // 2026-08-18 便HM: 献立がある日にも「1品」/「献立」の切り替えをそのまま出す。
+        // 便HHで隠していた理由（押すとさらに2品入ってしまう）は便HIで消えており
+        // （いまは「今日の献立に入れる」を押して食事を選ぶまで入らない）、
+        // 片側だけを日によって消すと、覚えている選び方が黙って無視されるため
         check(
-          'DAYLAYOUT-01 献立がある日の提案に「おまかせで献立を組む」は出さない',
-          (await dlPage.getByRole('button', { name: 'おまかせで献立を組む' }).count()) === 0,
+          'DAYLAYOUT-01 献立がある日も「1品」「献立」の切り替えが同じように使える',
+          (await section.locator('[data-testid="day-mode-one"]').count()) === 1 &&
+            (await section.locator('[data-testid="day-mode-plan"]').count()) === 1,
         )
         check(
           'DAYLAYOUT-01 献立がある日にも「作った記録の一覧」がある',
@@ -20435,6 +20453,197 @@ try {
       }
     } finally {
       await dlBrowser.close()
+    }
+  }
+
+  // --- DAYMODE-01(2026-08-18 便HM・オーナー実機フィードバックの再発防止)。
+  // オーナー原文:
+  //   「『ランダムで1品出す』と『おまかせで献立を組む』は同じボタンにまとめ、
+  //     『1品』↔️『献立』に切り替えスイッチにしませんか？見た目は1品の画面に寄せたい。
+  //     今日の献立にれるボタンを1品にも適用えきるし。」
+  //   「『おまかせで献立を組む』の候補が下に出るのわかりづらい。」
+  //
+  // 直す前に測って分かっていた「わかりづらさ」の中身（390×667の画面で実測）:
+  //   ・1品の候補はボタンの**上**、組んだ献立はボタンの**下**＝同じ節の中で結果の向きが逆
+  //   ・ボタンと結果のあいだに説明が2行(44px)挟まる
+  //   ・組んだ献立だけ、写真つきカードではなく文字だけの枠で出る
+  //   ・押した直後、「今日の献立に入れる」が画面の外(y=683 / 画面667)に落ちる
+  //
+  // この検査が見るのは、直したことの骨格:
+  //   ① 切り替えが1組あって、指で押せて、押していない側が分かる
+  //   ② 「決めてもらう」ボタンは画面に1つだけ（名前は切り替えで入れ替わる）
+  //   ③ **どちらを選んでいても結果はボタンの上**（④の再発防止。向きがそろっている）
+  //   ④ 「献立」に切り替えたら、押さなくても結果が出ている
+  //   ⑤ 「今日の献立に入れる」は1品でも使え、食事の枠の窓（他の画面と同じ部品）を通る
+  //   ⑥ 効かない絞り込み（条件をしぼる）は、効かない側では出さない
+  //   ⑦ 切り替えは覚えている（開き直しても同じ側から始まる）
+  // 禁じ手よけ: 曜日・月替わりの前提を置かない（仕込むのは todayList だけ・日付を使わない）／
+  // 文言の完全一致で測らない（ゼロ幅スペースを外して部分一致）／品数を決め打ちしない
+  //（一品ものの主菜だと副菜が付かないのが正しいので、「役割が付いているか」で見る）／
+  // 置き場所に固定しない（名前と data-testid で掴む。③の上下だけは要件そのものなので測る） ---
+  currentCheck = 'DAYMODE-01'
+  {
+    const dmBrowser = await chromium.launch()
+    // 画面の高さは390×667（直す前に「今日の献立に入れる」が画面の外へ落ちていた大きさ）
+    const dmContext = await dmBrowser.newContext({ viewport: { width: 390, height: 667 } })
+    const dmPage = await dmContext.newPage()
+    dmPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@DAYMODE-01] ${text}`)
+    })
+    dmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@DAYMODE-01] ${err.message}`)
+    })
+    const dmBody = async () => ((await dmPage.textContent('body')) ?? '').replaceAll('​', '')
+    const dmSection = () =>
+      dmPage.locator('section').filter({ has: dmPage.getByRole('heading', { name: '今日なに作る？' }) })
+    const dmOne = () => dmPage.locator('[data-testid="day-mode-one"]')
+    const dmPlan = () => dmPage.locator('[data-testid="day-mode-plan"]')
+    const dmDraw = () => dmPage.locator('[data-testid="day-suggest-draw"]')
+    const dmApply = () => dmPage.locator('[data-testid="day-suggest-apply"]')
+    const dmResults = () => dmSection().locator('[data-testid="day-suggest-result"]')
+    /** 無いものを掴もうとして検査ごと止まらないようにする（1つだけ在るときにその箱を返す） */
+    const dmBox = async (locator) => ((await locator.count()) === 1 ? await locator.boundingBox() : null)
+    const dmPressed = async (locator) =>
+      (await locator.count()) === 1 ? await locator.getAttribute('aria-pressed') : null
+    const dmRead = (store) =>
+      dmPage.evaluate(
+        (name) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result.transaction([name], 'readonly').objectStore(name).getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        store,
+      )
+    try {
+      await dmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(2200) // 初回シード完了待ち
+      await dmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dmPage.reload({ waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(1800)
+
+      // ---- ① 切り替えがある ----
+      check(
+        'DAYMODE-01 「今日なに作る？」に「1品」「献立」の切り替えがある',
+        (await dmOne().count()) === 1 && (await dmPlan().count()) === 1,
+      )
+      check(
+        'DAYMODE-01 切り替えは「今日なに作る？」の中にある',
+        (await dmSection().locator('[data-testid="day-mode-one"]').count()) === 1,
+      )
+      {
+        const oneBox = (await dmBox(dmOne())) ?? { width: 0, height: 0 }
+        const planBox = (await dmBox(dmPlan())) ?? { width: 0, height: 0 }
+        check(
+          'DAYMODE-01 切り替えは指で押せる大きさ(高さ44px以上)',
+          oneBox.height >= 44 && planBox.height >= 44,
+          `1品 h=${Math.round(oneBox.height)} 献立 h=${Math.round(planBox.height)}`,
+        )
+      }
+      // ---- ② 決めてもらうボタンは1つ ----
+      check('DAYMODE-01 決めてもらうボタンは画面に1つだけ', (await dmDraw().count()) === 1)
+      check(
+        'DAYMODE-01 はじめは「1品」から始まる(これまでの見え方を変えない)',
+        (await dmPressed(dmOne())) === 'true' && (await dmPressed(dmPlan())) === 'false',
+      )
+      // ---- ③ 1品: 結果はボタンの上 / ⑥ 絞り込みは1品にだけ出す ----
+      {
+        const resultBox = await dmBox(dmResults().first())
+        const drawBox = await dmBox(dmDraw())
+        check(
+          'DAYMODE-01 1品のとき、出てきた候補は決めてもらうボタンより上にある',
+          resultBox != null && drawBox != null && resultBox.y < drawBox.y,
+          `候補y=${resultBox ? Math.round(resultBox.y) : '無し'} ボタンy=${drawBox ? Math.round(drawBox.y) : '無し'}`,
+        )
+        check('DAYMODE-01 1品のときは「条件をしぼる」が使える', (await dmBody()).includes('条件をしぼる'))
+        check(
+          'DAYMODE-01 1品のときに献立側の候補数は出さない(数字が2つ並ばない)',
+          !(await dmBody()).includes('主菜の候補'),
+        )
+      }
+      // ---- ④ 献立へ切り替えると押さなくても出る / ③ 結果はボタンの上 / ⑥ 絞り込みは出さない ----
+      if ((await dmPlan().count()) === 1) {
+        await dmPlan().click()
+        await dmPage.waitForTimeout(1500)
+      }
+      {
+        const resultBox = await dmBox(dmResults().first())
+        const drawBox = await dmBox(dmDraw())
+        check(
+          'DAYMODE-01 「献立」へ切り替えると、押さなくても組んだ献立が出ている',
+          resultBox != null,
+          `候補y=${resultBox ? Math.round(resultBox.y) : '無し'}`,
+        )
+        check(
+          'DAYMODE-01 献立のときも、結果は決めてもらうボタンより上にある',
+          resultBox != null && drawBox != null && resultBox.y < drawBox.y,
+          `候補y=${resultBox ? Math.round(resultBox.y) : '無し'} ボタンy=${drawBox ? Math.round(drawBox.y) : '無し'}`,
+        )
+        const dmRoleTexts = (await dmResults().allTextContents()).map((t) => t.replaceAll('​', ''))
+        check(
+          'DAYMODE-01 献立のときは、出た品に主菜/副菜の別が付いている',
+          dmRoleTexts.length > 0 && dmRoleTexts.every((t) => /主菜|副菜/.test(t)),
+          JSON.stringify(dmRoleTexts.map((t) => t.slice(0, 20))),
+        )
+        check(
+          'DAYMODE-01 献立のときは「条件をしぼる」を出さない(効かない絞り込みを見せない)',
+          !(await dmBody()).includes('条件をしぼる'),
+        )
+        const applyBox = await dmBox(dmApply())
+        check(
+          'DAYMODE-01 献立に切り替えた直後、「今日の献立に入れる」まで画面に収まる',
+          applyBox != null && applyBox.y + applyBox.height <= 667,
+          `下端=${applyBox ? Math.round(applyBox.y + applyBox.height) : '無し'} 画面の高さ=667`,
+        )
+      }
+      // ---- ⑦ 切り替えを覚えている ----
+      await dmPage.reload({ waitUntil: 'networkidle' })
+      await dmPage.waitForTimeout(1800)
+      check(
+        'DAYMODE-01 切り替えは覚えている(開き直しても「献立」のまま)',
+        (await dmPressed(dmPlan())) === 'true',
+      )
+      // ---- ⑤ 1品でも「今日の献立に入れる」が使える ----
+      if ((await dmOne().count()) === 1) {
+        await dmOne().click()
+        await dmPage.waitForTimeout(900)
+      }
+      {
+        check('DAYMODE-01 1品にも「今日の献立に入れる」がある', (await dmApply().count()) === 1)
+        const dmTitles = await dmSection()
+          .locator('[data-testid="day-suggest-result-title"]')
+          .allTextContents()
+        const dmPicked = (dmTitles[0] ?? '').replaceAll('​', '').trim()
+        if ((await dmApply().count()) === 1) {
+          await dmApply().click()
+          await dmPage.waitForTimeout(600)
+        }
+        const dmSlotButtons = dmPage.locator('[data-testid="today-slot-button"]')
+        check(
+          'DAYMODE-01 1品でも食事の枠を選ぶ窓が開く(他の画面と同じ部品・朝昼夕の3つ)',
+          (await dmSlotButtons.count()) === 3,
+        )
+        if ((await dmSlotButtons.count()) === 3) {
+          await dmPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+          await dmPage.waitForTimeout(1500)
+        }
+        check(
+          'DAYMODE-01 1品を選んだ食事に入れられる',
+          (await dmRead('todayList')).length > 0 && (await dmBody()).includes(dmPicked),
+          `入れた品=${dmPicked}`,
+        )
+      }
+    } finally {
+      await dmBrowser.close()
     }
   }
 
@@ -20635,7 +20844,7 @@ try {
         )
         // 規約F: 押す前に「何が外れて何が残るか」が読める
         check(
-          'DAYFLOW-01(c) ×の前に「今週の献立からも外れる」「作った記録は残る」が読める',
+          'DAYFLOW-01(c) ×の前に「今週の献立からも外れる」が読める',
           (await dfBody()).includes('今週の献立からも外れます'),
         )
         const dfRemove = planned.getByRole('button', { name: '今日と今週の献立から外す' })
@@ -20660,9 +20869,16 @@ try {
           `today=${JSON.stringify(afterToday)}`,
         )
         check(
-          'DAYFLOW-01(c) 外したあと、何が外れて何が残るかを知らせる（規約F）',
-          afterBody.includes('今日と今週の献立から外しました') &&
-            afterBody.includes('作った記録は残ります'),
+          'DAYFLOW-01(c) 外したあと、何が外れたかを知らせる（規約F）',
+          afterBody.includes('今日と今週の献立から外しました'),
+        )
+        // 2026-08-18 便HM（オーナー「作った記録もするということ？消すだけですよね。嘘書かないで。」）:
+        // この×は献立の予定しか消さない。触らないものを「残ります」と書くと、
+        // 危なかったものを助けたように読める。押す前の説明にも、外したあとの知らせにも書かない
+        check(
+          'DAYFLOW-01(c) ×まわりで「作った記録」の話をしない（触らないものを書かない）',
+          !afterBody.includes('作った記録は残ります'),
+          `本文に残っている: ${afterBody.includes('作った記録は残ります')}`,
         )
       }
 
@@ -20672,10 +20888,15 @@ try {
       await dfPage.reload({ waitUntil: 'networkidle' })
       await dfPage.waitForTimeout(1800)
       {
+        // 2026-08-18 便HM: おまかせは「今日なに作る？」の「献立」側になった。
+        // 切り替えてから触る（切り替えた時点で1組出る＝押さなくても結果が見えている）
+        await dfPage.locator('[data-testid="day-mode-plan"]').click()
+        await dfPage.waitForTimeout(1200)
         const omakase = dfPage.getByRole('button', { name: 'おまかせで献立を組む' })
         const pair = dfPage.locator('[data-testid="day-suggest-pair"]')
         const pairText = async () =>
           (await pair.count()) > 0 ? ((await pair.textContent()) ?? '').replaceAll('​', '') : ''
+        check('DAYFLOW-01(d) 「献立」へ切り替えた時点で組んだ献立が画面に出ている', (await pair.count()) === 1)
         await omakase.click()
         await dfPage.waitForTimeout(700)
         check('DAYFLOW-01(d) 押すと組んだ献立が画面に出る', (await pair.count()) === 1)
@@ -20703,7 +20924,7 @@ try {
         // 料理名は名前の欄そのものから取る（1行にまとまった文から切り出すと、
         // 主菜/副菜の見出しと料理名が地続きになって切り分けられない）
         const dfPairTitles = (
-          await pair.locator('[data-testid="day-suggest-pair-title"]').allTextContents()
+          await pair.locator('[data-testid="day-suggest-result-title"]').allTextContents()
         ).map((t) => t.replaceAll('\u200b', '').trim())
         await dfPage.locator('[data-testid="day-suggest-apply"]').click()
         await dfPage.waitForTimeout(500)
@@ -20774,6 +20995,10 @@ try {
         const suggestSection = dfPage
           .locator('section')
           .filter({ has: dfPage.getByRole('heading', { name: '今日なに作る？' }) })
+        // 2026-08-18 便HM: (d)で「献立」に切り替えた状態が端末に残っている（覚える作りにした）。
+        // ここで見たいのは1品の候補カードなので、明示的に「1品」へ戻してから測る
+        await dfPage.locator('[data-testid="day-mode-one"]').click()
+        await dfPage.waitForTimeout(800)
         const cardTitle = async () => {
           const card = suggestSection.locator('a[href^="#/recipes/"]').first()
           return (await card.count()) > 0
@@ -31275,7 +31500,7 @@ try {
   }
 
   // --- FP-01〜04: 実際にアプリを操作した利用者テストの報告(2026-08-11 便FP) ---
-  //     FP-01 献立の「＋ 今日の献立を選ぶ」からレシピ一覧が選択モードで開き、3品をまとめて
+  //     FP-01 献立の「＋ 今日の献立を探す」からレシピ一覧が選択モードで開き、3品をまとめて
   //           今日の献立へ入れられる(レシピ詳細を1度も開かずに済む)
   //     FP-02 一覧の「選択」で何ができるかが、1品も選ばないうちから読める
   //           (今日の献立に入れる・書き出す・削除する)
@@ -31333,7 +31558,7 @@ try {
       }, date)
 
     try {
-      // ===== FP-01: 献立の「今日の献立を選ぶ」→ まとめて3品(実操作) =====
+      // ===== FP-01: 献立の「今日の献立を探す」→ まとめて3品(実操作) =====
       {
         const ctx = await fpBrowser.newContext({ viewport: { width: 390, height: 844 } })
         const p = await ctx.newPage()
@@ -31345,12 +31570,12 @@ try {
         await p.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
         await p.waitForTimeout(900)
         check(
-          'FP-01 前提: 今日の献立は空で「今日の献立を選ぶ」が出ている',
+          'FP-01 前提: 今日の献立は空で「今日の献立を探す」が出ている',
           // 2026-08-17 便HI: 空の日は「今日の献立」の見出しごと出さず、ボタンだけを残す
           (await p.getByRole('heading', { name: '今日の献立' }).count()) === 0 &&
-            (await p.getByRole('button', { name: '今日の献立を選ぶ' }).count()) === 1,
+            (await p.getByRole('button', { name: '今日の献立を探す' }).count()) === 1,
         )
-        await p.getByRole('button', { name: '今日の献立を選ぶ' }).click()
+        await p.getByRole('button', { name: '今日の献立を探す' }).click()
         await p.waitForTimeout(1200)
 
         // 報告②: 飛び先が「ただのレシピ一覧」で、選んでいる最中だと分かる表示も決定ボタンも無かった
@@ -35478,7 +35703,7 @@ try {
   //  ・下に固定した帯が画面の半分を覆っていないこと(オーナーの言葉そのままの基準)
   //  ・帯に隠れず丸ごと見えるカードの枚数が、ふだんの一覧から減らないこと
   // 枚数を決め打ちしないのは、カードの寸法や1行に並ぶ枚数が変わっても同じ判定になるようにするため。
-  // 併せて、献立の「今日の献立を選ぶ」から来た選択モード(?select=today)は行き先が決まっているので
+  // 併せて、献立の「今日の献立を探す」から来た選択モード(?select=today)は行き先が決まっているので
   // 4つの道を出さず、これまでどおり決定ボタンと「入れずに献立に戻る」で完結することも見る。
   currentCheck = 'SELECT-UI-02'
   {

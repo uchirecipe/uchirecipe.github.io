@@ -29,7 +29,6 @@ import {
   LayoutTemplate,
   Printer,
   ImageDown,
-  UtensilsCrossed,
 } from 'lucide-react'
 import { listRecipes } from '../db/recipes'
 import { useSettings, updateSettings } from '../db/settings'
@@ -3030,7 +3029,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     entryId?: number
     extraLocalId?: string
   } | null>(null)
-  // ピッカーは週の枠(pickerTarget)への割り当て専用。空状態の「今日の献立を選ぶ」は2026-07-24
+  // ピッカーは週の枠(pickerTarget)への割り当て専用。空状態の「今日の献立を探す」は2026-07-24
   // 便BN・タスク1でレシピ一覧タブへの遷移に変更したため、旧「今日の献立ピッカー」モードは廃止した
   const pickerOpen = pickerTarget != null
   /**
@@ -3039,8 +3038,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 「今日の献立に入れる」で食事を選ぶと入って空になる。
    */
   const [suggestPairIds, setSuggestPairIds] = useState<number[]>([])
-  /** 組んだ献立を入れるときに開く「どの食事に入れますか？」の窓 */
-  const [suggestSlotOpen, setSuggestSlotOpen] = useState(false)
+  /**
+   * 「今日の献立に入れる」で開く「どの食事に入れますか？」の窓の中身（2026-08-18 便HM）。
+   *
+   * 「1品」と「献立」のどちらを出しているときも同じボタン・同じ窓を通す
+   * （オーナー「今日の献立にれるボタンを1品にも適用えきるし」）。
+   * `from` は入れたあとの後片付けと知らせの言い分けにだけ使う
+   * （'plan'＝組んである献立を空にする／料理名ではなく品数で言う）。
+   */
+  const [todaySlotPick, setTodaySlotPick] = useState<{
+    ids: number[]
+    from: 'one' | 'plan'
+    title: string
+  } | null>(null)
   const [pickerQuery, setPickerQuery] = useState('')
   // ピッカーの絞り込み・並び替え(2026-07-24 便BH-3・タスク6・一覧画面の機構を流用)。
   // 開閉は既定閉。パネル外の検索窓(pickerQuery)と合わせてsearchRecipes/sortResultsに渡す
@@ -3299,9 +3309,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * いま出ている組を候補から外してから引き直す＝押すたびに違う組み合わせになる
    * （候補が尽きたら除外は自動で緩む＝logic/mealPlan.ts suggestForSlot。押しても無反応にはならない）。
    * 献立に入るのは「今日の献立に入れる」を押して食事を選んだときだけ。
+   *
+   * 2026-08-18 便HM: 「献立」に切り替えた直後にも1組出すため、押していない呼び出し（auto）が
+   * 増えた。そのときは出ているお知らせを消さない＝**利用者が押していないのに、
+   * 直前の操作の結果が黙って消える**のを作らない。
    */
-  const drawSuggestPair = () => {
-    setMessage('')
+  const drawSuggestPair = (options?: { auto?: boolean }) => {
+    if (!options?.auto) setMessage('')
     const ids = computeSuggestionIds(suggestPairIds)
     if (!ids) {
       // レシピが1件も無いときと、条件で候補が尽きたときで言い方を分ける（黙って終わらせない）
@@ -3314,20 +3328,30 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
-   * 組んだ献立を今日の献立に入れる（2026-08-17 便HI）。
+   * 「今日なに作る？」で出ているものを今日の献立に入れる（2026-08-17 便HI → 2026-08-18 便HM）。
    * 食事（朝食/昼食/夕食）を選べば今週の予定の今日の枠にも入り、決めなければ今日の献立だけに入る
    * ＝レシピ詳細・レシピ一覧の「今日の献立に追加」とまったく同じ判断（db/mealPlan.ts
    * addRecipesToToday）を通す。入口ごとに結果が変わらないようにするため。
+   *
+   * 便HMで「1品」も同じここを通るようになった（オーナー
+   * 「今日の献立にれるボタンを1品にも適用えきるし」）。違うのは、
+   * 入れ終わったあとに組んである献立を空にするかどうかと、すでに入っていたときの言い方だけ
+   * （1品は品数ではなく料理名で言う）。
    */
-  const applySuggestPair = async (slot?: MealSlot) => {
-    setSuggestSlotOpen(false)
-    if (suggestPairIds.length === 0) return
+  const applyTodaySlotPick = async (slot?: MealSlot) => {
+    const pick = todaySlotPick
+    setTodaySlotPick(null)
+    if (!pick || pick.ids.length === 0) return
     // 鍵の掛かった食事には入れない（2026-08-08 便EA。どの入口から来ても同じところで止まる）
     if (slot && blockedByLock(today, slot, 'add')) return
-    const { added, already } = await addRecipesToToday(today, suggestPairIds, slot)
-    setSuggestPairIds([])
+    const { added, already } = await addRecipesToToday(today, pick.ids, slot)
+    if (pick.from === 'plan') setSuggestPairIds([])
     if (added === 0) {
-      setMessage(ja.mealPlan.todaySuggestAllAlready.replace('{m}', String(already)))
+      setMessage(
+        pick.from === 'plan'
+          ? ja.mealPlan.todaySuggestAllAlready.replace('{m}', String(already))
+          : ja.mealPlan.todayAddOneAlready.replace('{title}', pick.title),
+      )
       return
     }
     setMessage(
@@ -5767,7 +5791,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           {/* 今日の献立（週間プランナーとは別の「今日これ作る」リスト）。
               2026-08-17 便HI（オーナー実機「『今日の献立』がない時には表示しない」）:
               空の日は**見出しも枠も出さない**。空状態の案内文と、そこにあった
-              「今日の献立を選ぶ」は下（「今日なに作る？」の下）へ移してある＝
+              「今日の献立を探す」は下（「今日なに作る？」の下）へ移してある＝
               空のときの唯一の入口を失わせない */}
           {dayHasPlan && (
             <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
@@ -5868,7 +5892,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   ))}
                 </div>
               )}
-              {/* もう1品足す入口(2026-08-11 便FP)。「今日の献立を選ぶ」は空のときにしか
+              {/* もう1品足す入口(2026-08-11 便FP)。「今日の献立を探す」は空のときにしか
                   出ないため、1品でも入った時点で、献立の画面からまとめて足す道が消えていた。
                   飛び先は空のときと同じ＝選択モードのレシピ一覧 */}
               <button
@@ -5922,7 +5946,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
               2026-08-17 便HH（オーナー承認済み）で、押せるボタンの重なりを解いた:
                ・「レシピを探す」を外した。行き先(レシピ一覧)は下の並びの「レシピ」と
-                 「今日の献立を選ぶ」で着き、検索欄は一覧の上端に貼り付いて常に見えている
+                 「今日の献立を探す」で着き、検索欄は一覧の上端に貼り付いて常に見えている
                ・「在庫の食材から探す」を外した。在庫で絞る操作は、この画面の
                  「今日なに作る？」の「在庫の食材から」と、レシピ一覧の絞り込み
                  「在庫の食材で絞る」に残っている
@@ -5933,9 +5957,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                ・「今日なに作る？」は**どの日にも常に出す**。献立が決まっている日は
                  **畳んだ状態**（見出しを押すと開く）。便HHの小さいリンク「もう1品さがす」は
                  やめた＝同じ節を日によって違う名前で呼ばない
-               ・「今日の献立を選ぶ」は**「今日なに作る？」の下**（オーナー指定の位置）。
+               ・「今日の献立を探す」は**「今日なに作る？」の下**（オーナー指定の位置）。
                  献立が決まっている日は出さない＝同じ操作を2か所に作らない
-                 （決まっている日は「今日の献立」の中の「レシピ一覧から追加」が同じ行き先） */}
+                 （決まっている日は「今日の献立」の中の「レシピ一覧から追加」が同じ行き先）
+
+              2026-08-18 便HM（オーナー実機）で、この節の中身を1つの流れにまとめた。
+              「ランダムで1品出す」と「おまかせで献立を組む」は**1つのボタン**になり、
+              見出しの下の「1品」／「献立」の切り替えで中身が入れ替わる（components/TodaySuggestPanel）。
+              おまかせを**献立が決まっている日にも出す**ようにしたのは、便HHで隠していた理由
+              （「押すとさらに2品入ってしまう」）が便HIで消えたため——いまは押しても入らず、
+              「今日の献立に入れる」で食事を選んだときだけ入る。決まっている日でも
+              「レシピ一覧から追加」で何品でも足せるので、おまかせだけを隠す理由が無い。
+              切り替えの片側が日によって消えると、覚えている選び方（設定 dayStartSuggestMode）が
+              黙って無視されることにもなる */}
           <div className="mt-[var(--space-md)]">
             <TodaySuggestPanel
               recipes={ownRecipes}
@@ -5945,78 +5979,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               collapsible={dayHasPlan}
               pinnedRecipeId={returnedSuggestionId}
               onOpenSuggestion={rememberSuggestionForReturn}
-              planAction={
-                /* おまかせ（主菜+副菜の組み合わせ）。決まっている日には渡さない＝
-                   すでに決まっている日に、さらに2品入れる入口は作らない */
-                dayHasPlan ? undefined : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={drawSuggestPair}
-                      className="flex w-full items-center justify-center gap-2 rounded-md border border-edge bg-surface py-3 font-bold text-accent-ink shadow-sm"
-                    >
-                      {/* 絵はサイコロ(Dices)から献立の絵(UtensilsCrossed)へ(2026-08-17 便HH)。
-                          すぐ上の「ランダムで1品出す」と同じサイコロだと、名前で分けた
-                          「1品／献立」の違いが絵で打ち消される */}
-                      <UtensilsCrossed size={18} aria-hidden />
-                      {ja.mealPlan.todaySuggestButton}
-                    </button>
-                    {/* 週タブの「まとめて献立を入力」との違いを一言で示す
-                        (2026-07-29 便CD/MP-15。名前が近く区別が付かないという指摘)。
-                        候補数は「ランダムで1品出す」とは別の数え方なので、そう分かる言い方にする */}
-                    <p className="mt-1 text-center text-xs text-ink-muted">
-                      {ja.mealPlan.todaySuggestHint}（
-                      {ja.mealPlan.todaySuggestCandidateCount.replace(
-                        '{n}',
-                        String(suggestCandidateCount),
-                      )}
-                      ）
-                    </p>
-                    {/* 組んだ献立（2026-08-17 便HI・オーナー実機「何回も連続で押下することで
-                        違う組み合わせの献立を表示できるように。最後に今日の献立に反映」）。
-                        押すたびにここが入れ替わり、押した回数ぶん見比べられる。
-                        今日の献立に入るのは「今日の献立に入れる」を押したときだけ */}
-                    {suggestPairRecipes.length > 0 && (
-                      <div
-                        data-testid="day-suggest-pair"
-                        className="mt-[var(--space-sm)] rounded-md border border-edge bg-app p-[var(--space-sm)]"
-                      >
-                        <p className="text-sm font-bold text-ink-muted">
-                          {ja.mealPlan.todaySuggestPreviewLabel}
-                        </p>
-                        <ul className="mt-1">
-                          {suggestPairRecipes.map(({ role, recipe }) => (
-                            <li key={recipe.id} className="mt-1 flex items-baseline gap-2">
-                              <span className="shrink-0 text-xs text-ink-muted">
-                                {ja.mealPlan.role[role]}
-                              </span>
-                              <span
-                                data-testid="day-suggest-pair-title"
-                                className="min-w-0 flex-1 font-bold break-words"
-                              >
-                                {recipe.title}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                        <button
-                          type="button"
-                          data-testid="day-suggest-apply"
-                          onClick={() => setSuggestSlotOpen(true)}
-                          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-                        >
-                          <Plus size={18} aria-hidden />
-                          {ja.mealPlan.todaySuggestApply}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )
+              planPair={suggestPairRecipes}
+              planCandidateCount={suggestCandidateCount}
+              onDrawPlan={drawSuggestPair}
+              onAddToToday={(picked, mode) =>
+                setTodaySlotPick({
+                  ids: picked.map((r) => r.id).filter((id): id is number => id != null),
+                  from: mode === 'plan' ? 'plan' : 'one',
+                  title: picked[0]?.title ?? '',
+                })
               }
             />
           </div>
 
-          {/* 「今日の献立を選ぶ」（レシピ一覧を選択モードで開く）。
+          {/* 「今日の献立を探す」（レシピ一覧を選択モードで開く）。
               2026-08-17 便HI（オーナー指示）で「今日なに作る？」の下へ移した。
               献立が決まっている日は出さない＝同じ行き先のボタンを2つ並べない
               （決まっている日は「今日の献立」の中の「レシピ一覧から追加」がこの行き先を持つ）。
@@ -8186,19 +8162,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         />
       )}
 
-      {/* おまかせで組んだ献立を、どの食事に入れるか選ぶ窓（2026-08-17 便HI）。
+      {/* 「今日なに作る？」で出ているものを、どの食事に入れるか選ぶ窓（2026-08-17 便HI）。
           レシピ詳細の「今日の献立に追加」・レシピ一覧のまとめ追加とまったく同じ部品・
           同じ選択肢（朝食/昼食/夕食＋食事を決めずに）を使う＝新しい見た目は作らない。
-          見出しだけ「いま何を入れようとしているか」に差し替える（レシピ一覧と同じ作法） */}
+          2026-08-18 便HM: 「1品」を入れるときもこの窓（オーナー指示）。
+          見出しを差し替えるのは献立（2品）のときだけで、1品のときは部品の既定の見出し
+          （「どの食事に入れますか？」）＝レシピ詳細から1品入れるときとまったく同じ窓になる */}
       <TodaySlotModal
-        open={suggestSlotOpen}
-        title={ja.mealPlan.todaySuggestSlotTitle.replace(
-          '{n}',
-          String(suggestPairRecipes.length),
-        )}
-        onPickSlot={(slot) => void applySuggestPair(slot)}
-        onPickUndecided={() => void applySuggestPair()}
-        onClose={() => setSuggestSlotOpen(false)}
+        open={todaySlotPick != null}
+        title={
+          todaySlotPick?.from === 'plan'
+            ? ja.mealPlan.todaySuggestSlotTitle.replace('{n}', String(todaySlotPick.ids.length))
+            : undefined
+        }
+        onPickSlot={(slot) => void applyTodaySlotPick(slot)}
+        onPickUndecided={() => void applyTodaySlotPick()}
+        onClose={() => setTodaySlotPick(null)}
       />
 
       {/* ホーム画面への追加の案内(2026-08-10 便EW)。2026-08-17 便HGでホーム画面を廃止し、
