@@ -122,6 +122,28 @@ class AllRequestedDone extends Error {}
 
 const wait = (page, ms) => page.waitForTimeout(ms)
 
+/**
+ * 画面の中の確認の窓（2026-08-15 便GW・components/ConfirmDialog）が出ていたら、実行側を押す。
+ *
+ * 2026-08-19 便HW: 月タブの「献立をまとめて提案」に規約Fの確認の窓が付いた（便HV）のに、
+ * このスクリプトは押していなかった。窓が開くと本文のスクロールが止まる（useScrollLock で
+ * body が position:fixed になる）ため、切り出しの中で呼んでいる window.scrollBy が
+ * 何も動かさなくなり、**カレンダーの途中から・薄暗い覆いごと**撮れていた
+ * （public/about/img/manual/plan-month.webp が旧ボタン名のまま残っていた原因）。
+ *
+ * 押すのは「渡されたボタン名の窓が出ているとき」だけにする（撮影中に出るすべての窓を
+ * 無条件に押すと、消える系の操作まで通してしまう）。
+ */
+async function pressConfirmWindow(page, buttonName) {
+  const dialog = page.locator('[role="dialog"]')
+  if (!(await dialog.count())) return false
+  const button = dialog.getByRole('button', { name: buttonName, exact: true })
+  if (!(await button.count())) return false
+  await button.first().click()
+  await wait(page, 600)
+  return true
+}
+
 /** 料理写真(任意)をdataURLで読み込む */
 function loadPhotos() {
   const names = ['curry', 'hamburg', 'mabo', 'misoshiru', 'hoikoro']
@@ -223,6 +245,16 @@ async function cropRangeInner(page, name, topLoc, bottomLoc, opts = {}) {
     await page.evaluate((dy) => window.scrollBy(0, dy), Math.round(a.y - top))
     await wait(page, 250)
     a = await rectOf(topLoc)
+  }
+  // 2026-08-19 便HW: 動かせなかったときに黙って切らない。
+  // 画面の中の窓が開いていると本文のスクロールが止まる（body が position:fixed）ため、
+  // 上の scrollBy は何も起こさず、**説明したい範囲の途中から**撮れてしまう。
+  // 「撮れたが中身が違う」はいちばん気づきにくい失敗なので、ここで落として名前を出す
+  if (Math.abs(a.y - top) > 24) {
+    throw new Error(
+      `上端を ${top}px の位置まで動かせなかった（実際 ${Math.round(a.y)}px）。` +
+        '画面の中の窓が開いたままでスクロールが止まっている可能性がある',
+    )
   }
   const b = await rectOf(bottomLoc)
   const x = fullWidth ? 0 : Math.max(0, Math.round(Math.min(a.x, b.x) - padX))
@@ -684,6 +716,9 @@ try {
   const fillMonth = page.getByRole('button', { name: '献立をまとめて提案' })
   if (await fillMonth.count()) {
     await fillMonth.click()
+    await wait(page, 900)
+    // 規約Fの確認の窓（「この月のまだ決まっていない◯日分に、主菜と副菜を自動で入れます」）を通す
+    await pressConfirmWindow(page, '入れる')
     await wait(page, 2500)
   }
   await wait(page, 6500) // 結果トーストが自動で消えるのを待つ

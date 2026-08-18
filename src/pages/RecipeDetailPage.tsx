@@ -71,7 +71,7 @@ import {
   shouldShowFirstSetupNotice,
 } from '../logic/firstSetupNotice'
 import PriceEditModal, { type PriceEditTarget } from '../components/PriceEditModal'
-import { RecipePlaceholder, seasonIcons } from '../components/RecipeCard'
+import { RecipeHeroPhoto, seasonIcons } from '../components/RecipeCard'
 import { useRevealOnOpen } from '../components/useRevealOnOpen'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { useScrollLock } from '../components/useScrollLock'
@@ -123,7 +123,6 @@ export default function RecipeDetailPage() {
     async () => (await db.recipes.where('title').equals(DASHI_RECIPE_TITLE).first()) ?? null,
     [],
   )
-  const photoUrl = usePhotoUrl(recipe?.photo)
   const settings = useSettings()
   const { startTimer } = useTimers()
   const todayList = useTodayList()
@@ -554,8 +553,6 @@ export default function RecipeDetailPage() {
     }
   }
 
-  const showPhoto = photoUrl && !recipe.showIconInsteadOfPhoto
-
   // 時短版の手順があるレシピだけ切り替えを表示する
   const hasQuickVariant = (recipe.quickSteps?.length ?? 0) > 0
   const useQuick = quickMode && hasQuickVariant
@@ -624,14 +621,10 @@ export default function RecipeDetailPage() {
         }
       />
 
-      {/* 写真（無い場合・アイコン優先の場合はプレースホルダー） */}
-      {showPhoto ? (
-        <img src={photoUrl} alt={recipe.title} className="aspect-video w-full object-cover" />
-      ) : (
-        <div className="aspect-video w-full">
-          <RecipePlaceholder recipe={recipe} iconSize={56} />
-        </div>
-      )}
+      {/* 写真（無い場合・アイコン優先の場合はプレースホルダー）。
+          出し分けは共通部品（components/RecipeCard の RecipeHeroPhoto）に置いてある
+          ＝アプリ全体で「写真か代わり絵か」の決め方が1か所（2026-08-19 便HW） */}
+      <RecipeHeroPhoto recipe={recipe} />
 
       <div className="px-[var(--space-md)] pt-[var(--space-md)]">
         {/* タイトル（編集・お気に入りは上部のsticky ヘッダーに常時表示） */}

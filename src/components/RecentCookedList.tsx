@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
 import { History } from 'lucide-react'
 import type { CookedLog, Recipe } from '../db/types'
-import { RecipePlaceholder } from './RecipeCard'
-import { usePhotoUrl } from './usePhotoUrl'
+import RecipeCard from './RecipeCard'
 import type { CookedLogDetailTarget } from './CookedLogDetailModal'
 import { ja } from '../i18n/ja'
 
@@ -12,11 +11,15 @@ const RECENT_COUNT = 5
 /**
  * 「最近作ったもの」の1件（2026-07-16 便W-②③）。
  * ③サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバック。
- * usePhotoUrlはループ内で直接呼べないため専用コンポーネントに分離
  *
  * 2026-08-09 便EQ（オーナー実機）: 料理名を押すとレシピ詳細へ移っていたが、見たいのは
  * その日の記録そのものだったため、押すと「作った記録」の小窓が開くようにした
  * （小窓の中からレシピ詳細と記録の編集へ行ける）。
+ *
+ * 2026-08-19 便HW（オーナー原文「同じ情報なら形もできるだけ揃える」）: 自前で組んでいた
+ * 「48pxサムネ＋料理名＋日付」の行をやめ、共通のレシピカードの「標準」に寄せた。
+ * 「作った記録の一覧」（pages/HistoryPage）と**同じ役目・同じ形**になる。
+ * 補助情報の行は、レシピの属性（時間・手間・季節）ではなく**その記録の情報**に差し替える。
  */
 function HistoryCard({
   recipe,
@@ -30,35 +33,24 @@ function HistoryCard({
   deleted?: boolean
   onOpen: () => void
 }) {
-  const logPhotoUrl = usePhotoUrl(log.photo)
-  const recipePhotoUrl = usePhotoUrl(recipe.photo)
-  const photoUrl = logPhotoUrl ?? recipePhotoUrl
   return (
     <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
-        className="flex w-full items-center gap-[var(--space-sm)] px-[var(--space-md)] py-3 text-left"
-      >
-        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm">
-          {photoUrl ? (
-            <img src={photoUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <RecipePlaceholder recipe={recipe} iconSize={20} />
-          )}
-        </div>
-        <span className="min-w-0 flex-1 truncate">
-          <span className="block truncate font-bold">{recipe.title}</span>
-          {/* レシピが端末に無いことを一覧の時点で分かるようにする（2026-08-16 便GZ） */}
-          {deleted && (
-            <span className="block truncate text-sm text-ink-muted">
+      <RecipeCard
+        recipe={recipe}
+        density="standard"
+        onSelect={onOpen}
+        selectAriaLabel={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
+        photoOverride={log.photo}
+        meta={log.date.replaceAll('-', '/')}
+        infoLine={
+          /* レシピが端末に無いことを一覧の時点で分かるようにする（2026-08-16 便GZ） */
+          deleted ? (
+            <p className="mt-1 truncate text-sm text-ink-muted">
               {ja.cookedDetail.deletedRecipeLabel}
-            </span>
-          )}
-        </span>
-        <span className="shrink-0 text-sm text-ink-muted">{log.date.replaceAll('-', '/')}</span>
-      </button>
+            </p>
+          ) : null
+        }
+      />
     </li>
   )
 }
@@ -106,7 +98,7 @@ export default function RecentCookedList({
         <History size={20} className="text-accent-ink" aria-hidden />
         {ja.dayStart.historyTitle}
       </h2>
-      <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
+      <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
         {history.map((entry, index) => (
           <HistoryCard
             key={index}

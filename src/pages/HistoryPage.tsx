@@ -8,8 +8,7 @@ import CookedLogDetailModal, {
   type CookedLogDetailTarget,
 } from '../components/CookedLogDetailModal'
 import { useDetachedLogEntries } from '../components/useDetachedLogEntries'
-import { RecipePlaceholder } from '../components/RecipeCard'
-import { usePhotoUrl } from '../components/usePhotoUrl'
+import RecipeCard from '../components/RecipeCard'
 import { ja } from '../i18n/ja'
 
 /** 1回に描く件数（2026-07-29 便CI/C03）。「もっと見る」で同じ数ずつ増やす */
@@ -17,11 +16,18 @@ const PAGE_SIZE = 30
 
 /**
  * 履歴1行（2026-07-29 便CI/C04）。
- * 献立の「日」の「最近作ったもの」（components/RecentCookedList）と同じく、記録の写真→レシピ写真→
- * アイコンの順にフォールバックしてサムネイルを出す。同じ記録なのに履歴だけ文字だけで、
- * 「名前を忘れた料理を写真から探す」動線が成立していなかった。
- * usePhotoUrl はループ内で直接呼べないため行コンポーネントに分離し、
- * 画像は loading="lazy" にして画面外の分をデコードさせない（記録は件数無制限のため）。
+ * サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバックする。
+ * 同じ記録なのに履歴だけ文字だけで、「名前を忘れた料理を写真から探す」動線が成立していなかった。
+ *
+ * 2026-08-09 便EQ（オーナー実機）: 行を押すとレシピ詳細へ移っていたが、一覧から見たいのは
+ * 記録そのものだったので、押すと記録の中身の小窓が開くようにした
+ * （写真の拡大・ひとことメモ・何人分もここで読める。レシピ詳細へは小窓の中から行ける）。
+ *
+ * 2026-08-19 便HW（オーナー原文「同じ情報なら形もできるだけ揃える」）: 自前で組んでいた行を
+ * 共通のレシピカードの「標準」に寄せた。献立の「日」の「最近作ったもの」
+ * （components/RecentCookedList）と**同じ役目・同じ形**になる。
+ * 補助情報の行は、レシピの属性（時間・手間・季節）ではなく**その記録の情報**
+ * （ひとことメモ・削除済みの断り）に差し替える。作った日と何人分は行の右端に置く。
  */
 function HistoryRow({
   recipe,
@@ -35,49 +41,41 @@ function HistoryRow({
   deleted?: boolean
   onOpen: () => void
 }) {
-  const logPhotoUrl = usePhotoUrl(log.photo)
-  const recipePhotoUrl = usePhotoUrl(recipe.photo)
-  const photoUrl = logPhotoUrl ?? recipePhotoUrl
   return (
     <li>
-      {/* 2026-08-09 便EQ（オーナー実機）: 行を押すとレシピ詳細へ移っていたが、一覧から見たいのは
-          記録そのものだったので、押すと記録の中身の小窓が開くようにした
-          （写真の拡大・ひとことメモ・何人分もここで読める。レシピ詳細へは小窓の中から行ける） */}
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
-        className="flex w-full items-center gap-[var(--space-sm)] px-[var(--space-md)] py-3 text-left"
-      >
-        <div className="h-12 w-12 shrink-0 overflow-hidden rounded-sm">
-          {photoUrl ? (
-            <img src={photoUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
-          ) : (
-            <RecipePlaceholder recipe={recipe} iconSize={20} />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-bold">{recipe.title}</p>
-          {/* レシピが端末に無いことを一覧の時点で分かるようにする（2026-08-16 便GZ）。
-              押して開いた小窓でも同じことを書くが、一覧で見分けが付かないと
-              「押してもレシピへ行けない行」を毎回押すことになる */}
-          {deleted && (
-            <p className="mt-0.5 truncate text-sm text-ink-muted">
-              {ja.cookedDetail.deletedRecipeLabel}
-            </p>
-          )}
-          {log.note && <p className="mt-0.5 truncate text-sm text-ink-muted">{log.note}</p>}
-        </div>
-        <span className="shrink-0 text-right text-sm text-ink-muted">
-          {log.date.replaceAll('-', '/')}
-          {/* 記録した人数(2026-07-29 便CI/C05)。献立の「作った記録の食費」の分母になる値 */}
-          {log.servings != null && (
-            <span className="block">
-              {ja.detail.cookedServingsValue.replace('{n}', String(log.servings))}
-            </span>
-          )}
-        </span>
-      </button>
+      <RecipeCard
+        recipe={recipe}
+        density="standard"
+        onSelect={onOpen}
+        selectAriaLabel={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
+        photoOverride={log.photo}
+        meta={
+          <>
+            {log.date.replaceAll('-', '/')}
+            {/* 記録した人数(2026-07-29 便CI/C05)。献立の「作った記録の食費」の分母になる値 */}
+            {log.servings != null && (
+              <span className="block">
+                {ja.detail.cookedServingsValue.replace('{n}', String(log.servings))}
+              </span>
+            )}
+          </>
+        }
+        infoLine={
+          deleted || log.note ? (
+            <>
+              {/* レシピが端末に無いことを一覧の時点で分かるようにする（2026-08-16 便GZ）。
+                  押して開いた小窓でも同じことを書くが、一覧で見分けが付かないと
+                  「押してもレシピへ行けない行」を毎回押すことになる */}
+              {deleted && (
+                <p className="mt-0.5 truncate text-sm text-ink-muted">
+                  {ja.cookedDetail.deletedRecipeLabel}
+                </p>
+              )}
+              {log.note && <p className="mt-0.5 truncate text-sm text-ink-muted">{log.note}</p>}
+            </>
+          ) : null
+        }
+      />
     </li>
   )
 }
@@ -196,7 +194,7 @@ export default function HistoryPage() {
               <h2 className="font-bold text-ink-muted">
                 {ja.history.monthFormat.replace('{y}', y).replace('{m}', String(Number(m)))}
               </h2>
-              <ul className="mt-[var(--space-sm)] divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
+              <ul className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
                 {monthEntries.map((entry, index) => (
                   <HistoryRow
                     key={`${entry.recipe.id ?? `d${entry.detachedRecordId}`}-${entry.log.date}-${index}`}

@@ -14,9 +14,7 @@ import {
   ShoppingCart,
   Check,
   CheckCircle2,
-  Clock,
   Copy,
-  TriangleAlert,
   Lock,
   LockOpen,
   Route,
@@ -144,7 +142,6 @@ import {
   reconcileSelectedIds,
   COOK_NAVI_MIN_RECIPES,
 } from '../logic/cookNaviSession'
-import { hasNgIngredient } from '../logic/ng'
 // 日本語入力の変換確定Enterの判定(2026-08-09 便EI → 便EKで献立タブの2欄にも適用)。
 // Enterで何かを確定する入力欄は、必ずこの判定で変換確定のEnterを除外する
 import { isImeConfirmKey } from '../logic/imeKey'
@@ -197,7 +194,7 @@ import type { MonthDemoData } from '../logic/monthDemo'
 import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
-import { RecipePlaceholder } from '../components/RecipeCard'
+import RecipeCard from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { useScrollLock } from '../components/useScrollLock'
@@ -353,12 +350,21 @@ const pickerChipCls = (active: boolean) =>
   }`
 
 /**
- * 今日の献立の1行（小サムネ＋名前＋作った！＋×）。
+ * 今日の献立の1品（2026-08-19 便HW・A案＝2段）。
  *
  * 2026-08-03 便DH: 日タブを「レシピ一覧から選択中」と「今週の献立の予定」の縦一列に分けたので、
  * ×（外す）は前者だけに出す（onRemove を渡さない＝週の予定の行には出ない）。週の予定は
  * 週タブで組んだものなので、日タブから消せると「どちらが正か」が分からなくなる。
  * footer には行の下に置く操作（レシピ一覧から選んだ品を今日の予定へ入れるボタン）を渡す。
+ *
+ * 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっているのが
+ * みづらい」／司令部の裁定「日タブの行はA案＝2段」）:
+ * 自前で組んでいた「40pxサムネ＋料理名＋作った！＋×」の**1行**をやめ、
+ *   1段目 … 共通のレシピカードの「標準」（レシピ一覧の一覧表示と同じ形。押すとレシピ詳細へ）
+ *   2段目 … その料理に対する操作（「作った！」「×」と、今日の予定へ入れるボタン）
+ * の2段にした。直った問題: 料理名とボタンが横一列だったため、料理名が
+ * 「チンゲン菜としいたけの…」のように途中で切れていた（2段にすると名前が幅いっぱい使える）。
+ * 押せる大きさ（「作った！」44px・×の tap-target）は変えていない。
  */
 function TodayListRow({
   recipe,
@@ -378,7 +384,6 @@ function TodayListRow({
   removeLabel?: string
   footer?: ReactNode
 }) {
-  const photoUrl = usePhotoUrl(recipe.photo)
   // state.from/fromPathで「今日の献立から開いた」ことを詳細画面へ持ち回る。
   // RecipeDetailPageの戻るボタンが、通常の「常に一覧へ」ではなくここ(献立タブ)へ
   // 戻るために参照する（2026-07-12オーナー指示）。
@@ -389,65 +394,44 @@ function TodayListRow({
   // 「戻ったら必ず日タブ」という保証は維持する）
   const fromState = { from: 'todayList' as const, fromPath: '/meal-plan?focus=today' }
   return (
-    <li className="px-[var(--space-sm)] py-2">
-      <div className="flex items-center gap-2">
-        <Link
-          to={`/recipes/${recipe.id}`}
-          state={fromState}
-          className="h-10 w-10 shrink-0 overflow-hidden rounded-sm"
-        >
-          {photoUrl ? (
-            <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
-          ) : (
-            <RecipePlaceholder recipe={recipe} iconSize={20} />
-          )}
-        </Link>
-        {/* 料理名は2行まで折り返す(便EAでボタンを横に並べたぶん幅が狭くなるため)。
-            行の高さは「作った！」ボタンの44pxで決まるので、2行になっても行は高くならない */}
-        <Link
-          to={`/recipes/${recipe.id}`}
-          state={fromState}
-          className="line-clamp-2 min-w-0 flex-1 font-bold leading-snug break-words"
-        >
-          {recipe.title}
-        </Link>
-        {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
-            枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
-            ボタンと同じ当たり判定を下回らないようにする。
-            2026-08-08 便EA(オーナー指示「作ったボタンをレシピ名横に」): 行の下の専用行をやめ、
-            料理名の右へ移す。便DT-1で右下へ寄せたが、ボタン1つだけの行の左半分が空いて
-            実機で空白が目立っていた。×(外す)との押し間違いは、間の余白を12px取り(gap-2＋ml-1)、
-            枠・地色つきのボタンと枠なしの✕という見た目の差で分ける */}
-        {/* 2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
-            色を同じにした方が、パッとみてわかりやすい」）: 作った記録をつけるボタンは
-            アプリ全体で6か所あり、5か所がアクセントの塗り（レシピ詳細の「作った！」・
-            同じ画面の「全て作った！」・並行調理ナビの「まとめて作った！」・調理を終えた窓・
-            記録の窓）なのに、ここだけが枠だけの見た目だった。多数側＝塗りに合わせる。
-            押せる高さ44px（min-h-11）は変えない。枠がなくなったぶんボタンは2px細くなり、
-            そのぶん料理名の枠が広がる。 */}
-        <button
-          type="button"
-          onClick={onCooked}
-          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
-        >
-          <CheckCircle2 size={16} aria-hidden />
-          {ja.mealPlan.todayMarkCooked}
-        </button>
-        {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
-            破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-            押し間違いを減らす */}
-        {onRemove && (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={removeLabel ?? ja.mealPlan.todayRemove}
-            className="tap-target ml-1 shrink-0 rounded-full p-3 text-ink-muted"
-          >
-            <X size={20} aria-hidden />
-          </button>
-        )}
-      </div>
-      {footer}
+    <li>
+      <RecipeCard
+        recipe={recipe}
+        density="standard"
+        linkState={fromState}
+        actions={
+          <>
+            {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+                枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
+                ボタンと同じ当たり判定を下回らないようにする。
+                2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
+                色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
+                6か所あり、多数側＝アクセントの塗りに合わせている */}
+            <button
+              type="button"
+              onClick={onCooked}
+              className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
+            >
+              <CheckCircle2 size={16} aria-hidden />
+              {ja.mealPlan.todayMarkCooked}
+            </button>
+            {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
+                破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
+                押し間違いを減らす */}
+            {onRemove && (
+              <button
+                type="button"
+                onClick={onRemove}
+                aria-label={removeLabel ?? ja.mealPlan.todayRemove}
+                className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            )}
+            {footer}
+          </>
+        }
+      />
     </li>
   )
 }
@@ -456,9 +440,11 @@ function TodayListRow({
  * 過去振り返り(2026-07-17 便Z-2・docs/35 §3)の「作った記録」1件分の薄いカード。
  * 週タブの過去日の枠と、月タブの日モーダルの両方で使う。
  * 予定(エントリ)との視覚区別: ✓マーク+淡い表示(薄いカード)。
- * サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバック
- * (「最近作ったもの」の HistoryCard と同じ方針)。
- * usePhotoUrlはループ内で直接呼べないため専用コンポーネントに分離
+ * サムネは記録に添付された写真を優先し、無ければレシピ写真→アイコンにフォールバックする。
+ *
+ * 2026-08-19 便HW（オーナー原文「同じ情報なら形もできるだけ揃える」）: 自前で組んでいた
+ * 「32pxサムネ＋料理名＋✓」の行をやめ、共通のレシピカードの「小」に寄せた。
+ * すぐ上に並ぶ**献立の枠と同じ形**になり、淡い表示（muted）で予定と記録を見分ける。
  */
 function CookedLogCard({
   recipe,
@@ -494,40 +480,23 @@ function CookedLogCard({
    */
   detailAs?: 'card' | 'below'
 }) {
-  const logPhotoUrl = usePhotoUrl(log.photo)
-  const recipePhotoUrl = usePhotoUrl(recipe.photo)
-  const photoUrl = logPhotoUrl ?? recipePhotoUrl
-  const inner = (
-    <>
-      <div className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
-        {photoUrl ? (
-          <img src={photoUrl} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <RecipePlaceholder recipe={recipe} iconSize={16} />
-        )}
-      </div>
-      <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
-        {recipe.title}
-      </span>
-      <CheckCircle2 size={16} className="shrink-0 text-accent-ink" aria-hidden />
-    </>
-  )
-  const cls = 'flex items-center gap-2 rounded-sm border border-edge bg-app/60 px-2 py-1.5 opacity-80'
   const openDetailAria = ja.cookedDetail.openAria.replace('{title}', recipe.title)
+  const asButton = !readOnly && onOpenDetail != null && detailAs === 'card'
   return (
     <li>
-      {readOnly ? (
-        <div className={cls}>{inner}</div>
-      ) : onOpenDetail && detailAs === 'card' ? (
+      <RecipeCard
+        recipe={recipe}
+        density="small"
+        muted
+        photoOverride={log.photo}
+        readOnly={readOnly}
         // 2026-08-09 便EQ: 料理名を押すと、その記録の中身（日付・何人分・メモ・写真）が開く
-        <button type="button" onClick={onOpenDetail} aria-label={openDetailAria} className={`w-full text-left ${cls}`}>
-          {inner}
-        </button>
-      ) : (
-        <Link to={`/recipes/${recipe.id}`} state={linkState} onClick={onNavigate} className={cls}>
-          {inner}
-        </Link>
-      )}
+        onSelect={asButton ? onOpenDetail : undefined}
+        selectAriaLabel={asButton ? openDetailAria : undefined}
+        linkState={linkState}
+        onNavigate={onNavigate}
+        titleBadges={<CheckCircle2 size={16} className="text-accent-ink" aria-hidden />}
+      />
       {/* カードの押下にレシピ詳細という別の役割があるところ（週タブの過去日）では、
           記録の中身への入口を1行足す（2026-08-09 便EQ） */}
       {!readOnly && onOpenDetail && detailAs === 'below' && (
@@ -535,7 +504,7 @@ function CookedLogCard({
           type="button"
           onClick={onOpenDetail}
           aria-label={openDetailAria}
-          className="mt-0.5 ml-10 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+          className="mt-0.5 ml-12 inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
         >
           {ja.cookedDetail.openFromPlan}
           <ChevronRight size={14} aria-hidden />
@@ -1356,25 +1325,6 @@ const SLOT_TONE: Record<MealSlot, { bar: string; bg: string; lockedBg: string }>
     bg: 'var(--slot-bg-dinner)',
     lockedBg: 'var(--slot-bg-locked-dinner)',
   },
-}
-
-/**
- * 週・月の予定1行の先頭に出す小さなサムネ（2026-08-02 便CW-4・オーナー実機フィードバック:
- * 週の予定が文字だけで、どの料理か掴みにくい）。写真があれば写真・無ければ料理アイコン。
- * usePhotoUrl（フック）を呼ぶため、行の描画関数から切り出した部品にしている。
- */
-function RowThumb({ recipe }: { recipe: Recipe }) {
-  const photoUrl = usePhotoUrl(recipe.photo)
-  return (
-    // 2026-08-02 便DE-6: 入っている行を厚く見せる（空き行との密度差）ため、少し大きくする
-    <span data-testid="row-thumb" className="h-8 w-8 shrink-0 overflow-hidden rounded-sm">
-      {photoUrl ? (
-        <img src={photoUrl} alt="" className="h-full w-full object-cover" />
-      ) : (
-        <RecipePlaceholder recipe={recipe} iconSize={18} />
-      )}
-    </span>
-  )
 }
 
 /** 献立の1枠内の1行分（主菜/副菜の実データ行、または未割り当てのプレースホルダー行） */
@@ -5220,53 +5170,48 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </button>
           )}
         </div>
-        <button
-          type="button"
-          disabled={locked}
-          onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
-          // 2026-08-02 便DE-6(オーナー指示): 入っている行と空いている行の見分けをさらに強くする。
-          // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
-          // 空き行の「押せる」見た目（破線＋Plusアイコン＋アクセント色。便BH-3タスク5）は維持し、
-          // 食事ごとの地色（SLOT_TONE・便CW-1）にも手を入れない
-          className={`flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border px-2 text-left ${
-            isEmpty
-              ? 'border-dashed border-accent/40 py-1.5 text-xs font-bold text-accent-ink'
-              : isCooked
-                ? // タスク2: 作った見た目(記録カードに合わせて淡い表示＋✓)。
-                  // 2026-08-03 便DP-5(オーナー「予定と記録がわかりづらい」): 面と文字をさらに落とし、
-                  // 「作った」バッジで言い切る。押して選び直せる状態は変えない
-                  // (間違えて記録した枠を直せなくなる方が害が大きい・司令部裁定)
-                  // 破線は空き枠の意味に使っているので、線は実線のまま面と文字だけを落とす
-                  'border-edge bg-app/60 py-2.5 text-base font-normal text-ink-muted opacity-70'
-                : 'border-edge bg-surface py-2.5 text-base font-bold text-ink shadow-sm'
-          }`}
-        >
-          {isEmpty ? (
-            <>
-              <Plus size={16} className="shrink-0" aria-hidden />
-              <span className="min-w-0 flex-1 truncate">{ja.mealPlan.emptyAssign}</span>
-            </>
-          ) : (
-            <>
-              {/* 2026-08-02 便CW-4: 文字だけの行に小さなサムネ(写真か料理アイコン)を足す */}
-              <RowThumb recipe={recipe!} />
-              {isCooked && (
-                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">
-                  <CheckCircle2 size={11} aria-hidden />
-                  {ja.mealPlan.cookedEntryBadge}
-                </span>
-              )}
-              {recipe && hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
-                <TriangleAlert
-                  size={14}
-                  className="shrink-0 text-warning"
-                  aria-label={ja.detail.ngWarning}
-                />
-              )}
-              <span className="min-w-0 flex-1 truncate">{recipe!.title}</span>
-            </>
-          )}
-        </button>
+        {isEmpty ? (
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}
+            // 2026-08-02 便DE-6(オーナー指示): 入っている行と空いている行の見分けをさらに強くする。
+            // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
+            // 空き行の「押せる」見た目（破線＋Plusアイコン＋アクセント色。便BH-3タスク5）は維持し、
+            // 食事ごとの地色（SLOT_TONE・便CW-1）にも手を入れない
+            className="flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border border-dashed border-accent/40 px-2 py-1.5 text-left text-xs font-bold text-accent-ink"
+          >
+            <Plus size={16} className="shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{ja.mealPlan.emptyAssign}</span>
+          </button>
+        ) : (
+          /* 2026-08-19 便HW（オーナー原文「同じ情報なら形もできるだけ揃える」）: 自前で組んでいた
+             「サムネ＋バッジ＋料理名」の行をやめ、共通のレシピカードの「小」に寄せた。
+             押すと従来どおりレシピを選び直す（枠の押下の役割は変えていない・便DP-5の司令部裁定）。
+             作った記録が付いた枠の淡い表示（muted）と「作った」バッジ、NG食材の印、
+             鍵の掛かった食事で押せなくなること（disabled）も、そのままカード側の口で表す */
+          <div className="min-w-0 flex-1">
+            <RecipeCard
+              recipe={recipe!}
+              density="small"
+              muted={isCooked}
+              disabled={locked}
+              onSelect={() => openPicker(date, slot, role, entryId, extraLocalId)}
+              ngIngredients={settings?.ngIngredients ?? []}
+              thumbTestId="row-thumb"
+              titleBadges={
+                isCooked ? (
+                  // 2026-08-03 便DP-5(オーナー「予定と記録がわかりづらい」): 面と文字を落としたうえで
+                  // 「作った」バッジで言い切る
+                  <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-accent px-1.5 py-0.5 text-[10px] font-bold text-accent-ink">
+                    <CheckCircle2 size={11} aria-hidden />
+                    {ja.mealPlan.cookedEntryBadge}
+                  </span>
+                ) : undefined
+              }
+            />
+          </div>
+        )}
         {/* 過去日(今日より前)・作った記録のある枠はサイコロ非表示(2026-07-16 便W-⑤a: ランダム提案の
             対象外。過去/作った献立は振り返る対象であり、上書きも新規埋めもしない) */}
         {!isPastDate(date, today) && !isCooked && !locked && (
@@ -5944,7 +5889,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <p className="text-sm font-bold text-ink-muted">
                     {ja.mealPlan.todayPickedLabel}
                   </p>
-                  <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                  <ul className="mt-1 space-y-[var(--space-sm)]">
                     {pickedRecipes.map((recipe) => (
                       <TodayListRow
                         key={recipe.id}
@@ -5952,7 +5897,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         onCooked={() => markDayRecipeCooked(recipe)}
                         onRemove={() => void removeTodayPickedRecipe(recipe)}
                         footer={
-                          <div className="mt-1 flex flex-wrap gap-1">
+                          <div className="flex w-full flex-wrap gap-1">
                             {MEAL_SLOTS.map((slot) => (
                               <button
                                 key={slot}
@@ -5993,7 +5938,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   {plannedGroups.map(({ slot, recipes: slotRecipes }) => (
                     <div key={slot} className="mt-1">
                       <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slot]}</p>
-                      <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
+                      <ul className="mt-1 space-y-[var(--space-sm)]">
                         {slotRecipes.map((recipe) => (
                           <TodayListRow
                             key={recipe.id}
@@ -7619,52 +7564,37 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 {visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}
               </p>
             ) : (
-              <ul className="divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
+              /* 2026-08-19 便HW（オーナー原文「同じ情報なら形もできるだけ揃える」）:
+                 料理名だけの行をやめ、レシピ一覧の一覧表示と同じ「標準」のカードに寄せた。
+                 調理時間・手間・季節・NG食材の印はカード側が同じ位置で出す（出ていた情報は落ちない）。
+                 「選択中」「1つ前」の印だけはこの画面ならではの情報なので、料理名の前に添える */
+              <ul className="space-y-[var(--space-sm)]">
                 {displayedRecipes.map((recipe) => {
                   const isSelected = recipe.id === currentPickerRecipeId
                   // 2026-08-10 便FD: 選び直す前に入っていた料理を「選択中」の次に並べる
                   const isPrevious = !isSelected && recipe.id === previousPickerRecipeId
                   return (
-                  <li key={recipe.id} className={isSelected ? 'bg-accent/10' : undefined}>
-                    <button
-                      type="button"
-                      data-testid={isPrevious ? 'picker-previous' : undefined}
-                      onClick={() => void pickRecipe(recipe.id!)}
-                      className="flex w-full items-center gap-2 px-[var(--space-md)] py-3 text-left"
-                    >
-                      {hasNgIngredient(recipe, settings?.ngIngredients ?? []) && (
-                        <TriangleAlert
-                          size={16}
-                          className="shrink-0 text-warning"
-                          aria-label={ja.detail.ngWarning}
-                        />
-                      )}
-                      <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
-                      {isSelected && (
-                        <span className="shrink-0 rounded-sm border border-accent px-1.5 py-0.5 text-xs font-bold text-accent-ink">
-                          {ja.mealPlan.pickCurrentBadge}
-                        </span>
-                      )}
-                      {/* 「選択中」と同じ形の印にして、色だけ落とす＝いま入っているものと
-                          1つ前に入っていたものを一目で区別できるようにする（2026-08-10 便FD） */}
-                      {isPrevious && (
-                        <span className="shrink-0 rounded-sm border border-edge px-1.5 py-0.5 text-xs font-bold text-ink-muted">
-                          {ja.mealPlan.pickPreviousBadge}
-                        </span>
-                      )}
-                      <span className="flex shrink-0 items-center gap-2 text-xs text-ink-muted">
-                        {recipe.cookMinutes != null && recipe.cookMinutes > 0 && (
-                          <span className="inline-flex items-center gap-0.5">
-                            <Clock size={12} aria-hidden />
-                            {recipe.cookMinutes}
-                            {ja.recipes.minutesSuffix}
+                  <li key={recipe.id} className={isSelected ? 'rounded-md bg-accent/10' : undefined}>
+                    <RecipeCard
+                      recipe={recipe}
+                      density="standard"
+                      ngIngredients={settings?.ngIngredients ?? []}
+                      onSelect={() => void pickRecipe(recipe.id!)}
+                      testId={isPrevious ? 'picker-previous' : undefined}
+                      titleBadges={
+                        isSelected ? (
+                          <span className="rounded-sm border border-accent px-1.5 py-0.5 text-xs font-bold text-accent-ink">
+                            {ja.mealPlan.pickCurrentBadge}
                           </span>
-                        )}
-                        <span className="rounded-sm border border-edge px-1.5 py-0.5">
-                          {ja.effort[recipe.effortLevel]}
-                        </span>
-                      </span>
-                    </button>
+                        ) : isPrevious ? (
+                          /* 「選択中」と同じ形の印にして、色だけ落とす＝いま入っているものと
+                             1つ前に入っていたものを一目で区別できるようにする（2026-08-10 便FD） */
+                          <span className="rounded-sm border border-edge px-1.5 py-0.5 text-xs font-bold text-ink-muted">
+                            {ja.mealPlan.pickPreviousBadge}
+                          </span>
+                        ) : undefined
+                      }
+                    />
                   </li>
                   )
                 })}
@@ -8010,17 +7940,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       const recipe = recipeById.get(entry.recipeId)
                       if (!recipe) return null
                       return (
-                        <li
-                          key={entry.id}
-                          className="flex items-center gap-2 rounded-sm border border-edge bg-app px-2 py-1.5"
-                        >
-                          <RowThumb recipe={recipe} />
-                          <span className="shrink-0 text-xs text-ink-muted">
-                            {ja.mealPlan.slot[entry.slot]}・{ja.mealPlan.role[entry.role ?? 'main']}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-sm font-bold">
-                            {recipe.title}
-                          </span>
+                        /* 2026-08-19 便HW: 本物の月タブの枠と同じ「小」のカードにそろえる。
+                           サンプルは書き込み先が無いので押せない見本のまま */
+                        <li key={entry.id}>
+                          <RecipeCard
+                            recipe={recipe}
+                            density="small"
+                            readOnly
+                            titleBadges={
+                              <span className="text-xs text-ink-muted">
+                                {ja.mealPlan.slot[entry.slot]}・
+                                {ja.mealPlan.role[entry.role ?? 'main']}
+                              </span>
+                            }
+                          />
                         </li>
                       )
                     })}

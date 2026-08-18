@@ -21435,6 +21435,174 @@ Aみりん 大さじ1
 }
 
 // ==========================================================================================
+// HW-1〜HW-3: 「同じ役目のカードは同じ形をしている」の見張り（2026-08-19 便HW）
+//
+// オーナー原文:
+//   「場所や機能ごとにレシピカードの形や内容が変わっているのがみづらい。
+//     パターン２つ（もしくは３つ）に絞って。」
+//   「表記揺れを直すように、レシピカードなど、同じ情報なら形もできるだけ揃えることを徹底したい」
+//
+// 便HN（1段目）で「密度」＝大／標準／小の3つを共通部品に作り、便HW（2〜3段目）で
+// 画面ごとに自前で組んでいたカードを全部そこへ寄せた。
+//
+// **測り方の決めごと**（カードの種類を書き写して並べない＝画面が増えても当たる形にする）:
+//   HW-1 … 「料理の絵」を自前で描いている画面が1つも無いこと。
+//          カードが増えるときは必ずこの部品を通るので、**新しい画面が自前で組んだら赤**になる。
+//   HW-2 … カードを出しているすべての場所が、3つの密度のどれかに解決できること。
+//   HW-3 … **1つの並びの中で形を混ぜていない**こと（同じ一覧に別々の形が並ぶのが
+//          オーナーの言う「みづらい」の中身）。
+//
+// **読み取りに失敗したら必ず落ちる**ようにしてある（2026-08-18に、数を読めなかった便が
+// -1 を返して4件のテストが「何も測らないまま合格」した失敗の再発防止）。
+// 走査できたファイル数・拾えた呼び出し数が0なら、その場で不合格にする。
+//
+// HW_SRC_ROOT に別のディレクトリを渡すと、そこの src を測る。
+// 「この見張りが、直す前のコードに当てると本当に赤くなるか」を確かめるための口。
+// ==========================================================================================
+{
+  const hwScriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const hwRoot = process.env.HW_SRC_ROOT ?? path.join(hwScriptDir, '..')
+  const hwSrcDir = path.join(hwRoot, 'src')
+
+  /** src配下の .tsx を再帰的に集める（リポジトリ内の相対パスで返す） */
+  const listTsx = (dir) => {
+    const out = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...listTsx(full))
+      else if (entry.name.endsWith('.tsx')) out.push(full)
+    }
+    return out.sort()
+  }
+  const hwFiles = listTsx(hwSrcDir).map((full) => ({
+    rel: path.relative(hwRoot, full).split(path.sep).join('/'),
+    src: readFileSync(full, 'utf-8'),
+  }))
+  // 走査そのものが壊れていたら（0件・ほんの数件しか読めていない）、ここで落とす。
+  // 下の3つは「見つからなければ緑」の形をしているので、走査が空だと全部素通りしてしまう
+  eq('HW-0 走査できた画面ファイルがある（0件なら見張りが壊れている）', hwFiles.length > 0, true)
+
+  // ---- HW-1: 料理の絵（写真か代わり絵か）を描いているのは共通部品だけ --------------------
+  // 自前のカードは例外なく「写真があれば <img>、無ければ代わり絵」を自分で書くところから
+  // 始まる。その1行が共通部品の外に出た瞬間に赤くする＝「その画面だけのカード」が生まれない。
+  const hwPlaceholderUsers = hwFiles
+    .filter(({ src }) => /<RecipePlaceholder\b/.test(src))
+    .map(({ rel }) => rel)
+  eq(
+    'HW-1 料理の絵を描いているのは共通のカード部品だけ（自前のカードが無い）',
+    hwPlaceholderUsers,
+    ['src/components/RecipeCard.tsx'],
+  )
+
+  // ---- HW-2: カードを出す場所は、必ず3つの密度のどれかに解決できる ------------------------
+  /** `<RecipeCard` の開きタグを、波かっこの深さを見ながら切り出す（属性の中の `=>` に釣られない） */
+  const cardOpenTags = (src) => {
+    const tags = []
+    let at = src.indexOf('<RecipeCard')
+    while (at >= 0) {
+      let depth = 0
+      let end = -1
+      for (let i = at; i < src.length; i++) {
+        const ch = src[i]
+        if (ch === '{') depth++
+        else if (ch === '}') depth--
+        else if (ch === '>' && depth === 0) {
+          end = i
+          break
+        }
+      }
+      if (end < 0) return { error: `開きタグの終わりが見つからない（位置 ${at}）` }
+      tags.push({ at, text: src.slice(at, end + 1) })
+      at = src.indexOf('<RecipeCard', end)
+    }
+    return { tags }
+  }
+  /** 開きタグ1つぶんの密度。読めなければ理由を返す（黙って既定に倒さない） */
+  const densityOf = (tag) => {
+    const literal = tag.match(/density="([a-z]+)"/)
+    if (literal) {
+      return CARD_DENSITIES.includes(literal[1])
+        ? { density: literal[1] }
+        : { error: `知らない密度: ${literal[1]}` }
+    }
+    const expr = tag.match(/density=\{([^}]*)\}/)
+    if (expr) {
+      // 設定の表示形式から写す道（レシピ一覧）。写し先は densityForListLayout が受け持つ
+      if (/densityForListLayout\(/.test(expr[1])) return { density: 'listLayout' }
+      return { error: `密度の式が読めない: ${expr[1].trim()}` }
+    }
+    // 省略時は既定の「大」
+    return { density: 'large' }
+  }
+
+  const hwCalls = []
+  const hwTagErrors = []
+  for (const { rel, src } of hwFiles) {
+    const found = cardOpenTags(src)
+    if (found.error) {
+      hwTagErrors.push(`${rel}: ${found.error}`)
+      continue
+    }
+    for (const tag of found.tags) {
+      const d = densityOf(tag.text)
+      hwCalls.push({ rel, at: tag.at, ...d })
+    }
+  }
+  eq('HW-2 カードの呼び出しを切り出せている（切り出せない書き方が無い）', hwTagErrors, [])
+  eq(
+    'HW-2 カードを出している場所を1つ以上拾えている（0件なら見張りが壊れている）',
+    hwCalls.length > 0,
+    true,
+  )
+  eq(
+    'HW-2 すべての場所が3つの密度のどれかに解決できる',
+    hwCalls.filter((c) => c.error).map((c) => `${c.rel}: ${c.error}`),
+    [],
+  )
+
+  // ---- HW-3: 一覧の行は、例外なく共通のカードを通る ---------------------------------------
+  // 「同じ情報なら同じ形」が崩れるときは、いつも**一覧の1行だけを自前で組む小さな部品**から
+  // 始まる（便HWで直したのは、まさにその4つ: 今日の献立の行・作った記録のカード・
+  // 最近作ったものの行・作った記録の一覧の行）。
+  // そこで「レシピを受け取って一覧の行（<li>）を返す部品は、必ず共通のカードを描いている」
+  // を規則にする。次に一覧が増えたときも、自前で組めばその場で赤くなる。
+  const hwRowOffenders = []
+  for (const { rel, src } of hwFiles) {
+    if (rel === 'src/components/RecipeCard.tsx') continue
+    // 「recipe: Recipe を受け取る部品」の宣言を拾う（function 宣言・アロー関数のどちらも）
+    const decls = [...src.matchAll(/(?:function|const)\s+([A-Z][A-Za-z0-9]*)\b/g)]
+    for (let i = 0; i < decls.length; i++) {
+      const from = decls[i].index
+      const to = i + 1 < decls.length ? decls[i + 1].index : src.length
+      const body = src.slice(from, to)
+      // レシピを1品受け取り、一覧の行（<li）を返している部品だけを見る
+      if (!/\brecipe:\s*Recipe\b/.test(body)) continue
+      if (!/<li\b/.test(body)) continue
+      if (/<RecipeCard\b/.test(body)) continue
+      hwRowOffenders.push(`${rel} の ${decls[i][1]}`)
+    }
+  }
+  eq('HW-3 一覧の1行は、どの画面でも共通のカードを通っている', hwRowOffenders, [])
+
+  // ---- HW-4: カードの形を外からいじる口を増やしていない -----------------------------------
+  // 密度を3つに絞っても、呼び出し側が見た目を上書きできる口（className・大きさ・変種）が
+  // 開いていれば、そこから4つ目の形がこっそり生える。**口そのものが無い**ことを見張る。
+  {
+    const cardSrc = hwFiles.find((f) => f.rel === 'src/components/RecipeCard.tsx')
+    eq('HW-4 共通のカード部品を読めている', cardSrc != null, true)
+    const propsAt = cardSrc ? cardSrc.src.indexOf('type Props = {') : -1
+    eq('HW-4 カードの受け口（Props）を読めている', propsAt >= 0, true)
+    const propsBlock = propsAt >= 0 ? cardSrc.src.slice(propsAt, cardSrc.src.indexOf('\n}', propsAt)) : ''
+    const forbidden = ['className', 'style', 'size', 'variant', 'compact', 'layout', 'width', 'height']
+    eq(
+      'HW-4 カードの形を外から変える口を持たない（形は「密度」だけで決める）',
+      forbidden.filter((name) => new RegExp(`(^|\\s)${name}\\??:`, 'm').test(propsBlock)),
+      [],
+    )
+  }
+}
+
+// ==========================================================================================
 // 便HQ-3: 押せる面の共通の器（2026-08-18・軸7）
 //
 // 同じ役目の「閉じる／外す ✕」が 22px〜48px の7段階に散り、同じファイルの中で32pxと44pxが

@@ -18,6 +18,7 @@ import {
 } from '../logic/mealTemplate'
 import { searchRecipes } from '../logic/search'
 import BackHeader from '../components/BackHeader'
+import RecipeCard from '../components/RecipeCard'
 import Toast from '../components/Toast'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { useScrollLock } from '../components/useScrollLock'
@@ -210,16 +211,17 @@ export default function MealTemplatesPage() {
                 {visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}
               </p>
             ) : (
-              <ul className="divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
+              /* 2026-08-19 便HW: 料理名だけの行をやめ、レシピ一覧の一覧表示と同じ
+                 「標準」のカードにそろえた（レシピを探して選ぶ場所は、どこでも同じ形にする） */
+              <ul className="space-y-[var(--space-sm)]">
                 {pickerResults.map((recipe) => (
                   <li key={recipe.id}>
-                    <button
-                      type="button"
-                      onClick={() => void pickReplacement(recipe.id!)}
-                      className="flex w-full items-center gap-2 px-[var(--space-md)] py-3 text-left"
-                    >
-                      <span className="min-w-0 flex-1 truncate font-bold">{recipe.title}</span>
-                    </button>
+                    <RecipeCard
+                      recipe={recipe}
+                      density="standard"
+                      ngIngredients={settings?.ngIngredients ?? []}
+                      onSelect={() => void pickReplacement(recipe.id!)}
+                    />
                   </li>
                 ))}
               </ul>
@@ -294,14 +296,27 @@ function TemplateCard({
                   <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slotGroup.slot]}</p>
                   <ul className="mt-0.5 space-y-1">
                     {slotGroup.items.map(({ index, item }) => {
-                      const title =
-                        recipeById.get(item.recipeId)?.title ?? ja.mealTemplates.missingRecipe
+                      const recipe = recipeById.get(item.recipeId)
+                      const title = recipe?.title ?? ja.mealTemplates.missingRecipe
                       return (
                         <li key={index} className="flex items-center gap-2">
+                          {/* 2026-08-19 便HW: 献立の「週」「月」の枠とまったく同じ形
+                              （役割の列＋「小」のカード＋その行の操作）にそろえた。
+                              雛形の中身も献立の1品なので、同じ情報は同じ形で出す。
+                              レシピが端末から消えている行だけは、カードにする絵も
+                              押す先も無いので、断りの1行として文字で残す */}
                           <span className="w-10 shrink-0 text-xs font-bold text-ink-muted">
                             {ja.mealPlan.role[item.role]}
                           </span>
-                          <span className="min-w-0 flex-1 truncate text-sm font-bold">{title}</span>
+                          {recipe ? (
+                            <span className="min-w-0 flex-1">
+                              <RecipeCard recipe={recipe} density="small" readOnly />
+                            </span>
+                          ) : (
+                            <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">
+                              {title}
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => onReplace(index, title)}

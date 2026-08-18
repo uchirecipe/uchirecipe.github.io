@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Clock,
   Dices,
-  Heart,
   ChevronDown,
   ChevronUp,
   Plus,
@@ -18,8 +16,7 @@ import { excludeYesterdayPlanRecipes } from '../logic/mealPlan'
 import { makePantryMatcher } from '../logic/pantry'
 import type { DishType, MealRole, Recipe, Settings } from '../db/types'
 import Collapse from './Collapse'
-import { RecipePlaceholder } from './RecipeCard'
-import { usePhotoUrl } from './usePhotoUrl'
+import RecipeCard from './RecipeCard'
 import { ja } from '../i18n/ja'
 
 /**
@@ -122,7 +119,14 @@ function matchesCondition(
   return true
 }
 
-/** 提案カード（写真サムネイル＋名前で詳細へ） */
+/**
+ * 提案カード（サムネ＋名前＋時間・手間で詳細へ）。
+ *
+ * 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっているのが
+ * みづらい」、司令部裁定「候補カードは『標準』に寄せる」）: 自前で組んでいた
+ * 「80pxサムネ＋大きな料理名」をやめ、共通のレシピカードの「標準」に寄せた。
+ * レシピ一覧の一覧表示と同じ形になり、季節・主要食材・お気に入りの付け外しも同じ位置に出る。
+ */
 function SuggestionCard({
   recipe,
   linkState,
@@ -139,49 +143,24 @@ function SuggestionCard({
    */
   roleLabel?: string
 }) {
-  const photoUrl = usePhotoUrl(recipe.photo)
   return (
-    <Link
-      to={`/recipes/${recipe.id}`}
-      data-testid="day-suggest-result"
-      // 2026-07-16オーナー決定: 候補カードから詳細を開いて戻ったときは、開いた画面へ戻す
-      // (「今日の献立」と同じ扱い。RecipeDetailPageのbackFallback参照)
-      state={linkState}
-      onClick={() => {
-        if (recipe.id != null) onOpen(recipe.id)
-      }}
-      className="mt-[var(--space-sm)] flex items-center gap-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-sm)] shadow-sm"
-    >
-      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-sm">
-        {photoUrl ? (
-          <img src={photoUrl} alt={recipe.title} className="h-full w-full object-cover" />
-        ) : (
-          <RecipePlaceholder recipe={recipe} iconSize={32} />
-        )}
-      </div>
-      <div className="min-w-0">
-        {roleLabel && <p className="text-xs text-ink-muted">{roleLabel}</p>}
-        <p
-          data-testid="day-suggest-result-title"
-          className="line-clamp-2 text-lg font-bold leading-snug"
-        >
-          {recipe.title}
-        </p>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          {recipe.cookMinutes != null && recipe.cookMinutes > 0 && (
-            <span className="inline-flex items-center gap-0.5">
-              <Clock size={14} aria-hidden />
-              {recipe.cookMinutes}
-              {ja.recipes.minutesSuffix}
-            </span>
-          )}
-          <span>{ja.effort[recipe.effortLevel]}</span>
-          {recipe.isFavorite && (
-            <Heart size={14} className="text-accent-ink" fill="currentColor" aria-hidden />
-          )}
-        </div>
-      </div>
-    </Link>
+    <div className="mt-[var(--space-sm)]">
+      <RecipeCard
+        recipe={recipe}
+        density="standard"
+        testId="day-suggest-result"
+        titleTestId="day-suggest-result-title"
+        // 2026-07-16オーナー決定: 候補カードから詳細を開いて戻ったときは、開いた画面へ戻す
+        // (「今日の献立」と同じ扱い。RecipeDetailPageのbackFallback参照)
+        linkState={linkState}
+        onNavigate={() => {
+          if (recipe.id != null) onOpen(recipe.id)
+        }}
+        titleBadges={
+          roleLabel ? <span className="text-xs text-ink-muted">{roleLabel}</span> : undefined
+        }
+      />
+    </div>
   )
 }
 

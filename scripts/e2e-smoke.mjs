@@ -4706,11 +4706,16 @@ try {
       await dtPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await dtPage.waitForTimeout(1800) // 初回シード完了待ち
 
-      // ---------- DT-1→EA-1: 日タブの「作った！」は料理名の横(同じ行) ----------
-      // 2026-08-08 便EA(オーナー指示「作ったボタンをレシピ名横に」): 便DT-1で作った
-      // 「ボタンだけの行」をやめ、料理名と同じ行の右へ置いた(左半分の空白が実機で目立っていた)。
-      // 検査するのは①料理名と同じ行に並んでいる ②当たり判定44px以上
-      // ③✕(外す)と12px以上離れている(押し間違い対策) の3点
+      // ---------- DT-1→EA-1→HW: 日タブの1品は「2段」(A案) ----------
+      // 2026-08-08 便EA(オーナー指示「作ったボタンをレシピ名横に」)で料理名と同じ行の右へ
+      // 置いていたが、2026-08-19 便HW(オーナー原文「場所や機能ごとにレシピカードの形や内容が
+      // 変わっているのがみづらい」＋オーナー承認のA案)で**2段**にした。
+      //   1段目 … 共通のレシピカードの「標準」(レシピ一覧の一覧表示と同じ形)
+      //   2段目 … その料理への操作(「作った！」「✕」)
+      // 直った問題: 料理名とボタンが横一列だったため、料理名が途中で切れていた。
+      // 検査するのは①操作が料理名の**下の段**にある ②料理名がボタンに幅を奪われていない
+      // ③当たり判定44px以上 ④✕(外す)と12px以上離れている(押し間違い対策) の4点。
+      // ②は「収まるか」ではなく**カードの幅に対する割合**で測る＝引けた料理名の長さに左右されない
       // 2026-08-17 便HH: おまかせは「今日なに作る？」の中へ移り、名前も
       // 「おまかせで提案」→「おまかせで献立を組む」になった(置き場所は問わず名前で掴む)。
       // 2026-08-17 便HI: 押しただけでは今日の献立に入らなくなったので、
@@ -4730,45 +4735,51 @@ try {
           b.textContent?.includes('作った！'),
         )
         const li = btn?.closest('li')
-        if (!btn || !li) return null
-        const title = li.querySelector('a[href*="/recipes/"]:not(:first-child)')
+        if (!btn || !li) return { error: '「作った！」の行が見つからない' }
+        // 1段目＝カード(レシピ詳細へのリンク)。その中の料理名の枠を測る
+        const card = li.querySelector('a[href*="/recipes/"]')
+        const titleEl = [...li.querySelectorAll('p')].find((p) =>
+          p.className.includes('line-clamp-2'),
+        )
+        if (!card || !titleEl) return { error: 'カードか料理名が見つからない' }
         const btnRect = btn.getBoundingClientRect()
-        const titleRect = title?.getBoundingClientRect()
-        // ✕(外す)は同じ行にあるときだけ距離を測る(「今週の献立の予定」の行には出ない)
+        const cardRect = card.getBoundingClientRect()
+        const titleRect = titleEl.getBoundingClientRect()
+        // ✕(外す)は同じ段にあるときだけ距離を測る(「今週の献立の予定」の行には出ない)
         const removeBtn = [...li.querySelectorAll('button')].find(
           (b) => b.getAttribute('aria-label') === 'この献立から外す',
         )
         const removeRect = removeBtn?.getBoundingClientRect()
         return {
           height: Math.round(btnRect.height),
-          // 料理名と同じ行か(縦の中心が近く、ボタンが名前より右にある)
-          sameRow:
-            !!titleRect &&
-            Math.abs(btnRect.top + btnRect.height / 2 - (titleRect.top + titleRect.height / 2)) < 12,
-          rightOfTitle: !!titleRect && btnRect.left >= titleRect.right,
-          // 「作った！」の下に専用行が残っていないこと(親が横並びのflex行)
-          parentCls: btn.parentElement?.className ?? '',
+          // 操作は料理名より下の段にあるか(2段になっているか)
+          belowTitle: btnRect.top >= titleRect.bottom - 2,
+          // 料理名がボタンに幅を奪われていないか。カードの内側の幅に対する割合で測る
+          // (絶対値や「何文字入るか」で測ると、引けた料理名の長さで結果が変わる)
+          titleWidthRatio: Math.round((titleRect.width / cardRect.width) * 100),
           removeGap: removeRect ? Math.round(removeRect.left - btnRect.right) : null,
         }
       })
       check(
-        'WEEKUI-DT(便EA-1) 日タブの「作った！」は料理名の横(同じ行)にある',
-        !!dtCookedBtn && dtCookedBtn.sameRow && dtCookedBtn.rightOfTitle,
+        'WEEKUI-DT(便HW・A案) 日タブの1品は2段（操作は料理名の下の段にある）',
+        !dtCookedBtn.error && dtCookedBtn.belowTitle === true,
+        `btn=${JSON.stringify(dtCookedBtn)}`,
+      )
+      check(
+        'WEEKUI-DT(便HW・A案) 料理名が操作に幅を奪われていない（カード幅の6割以上を使う）',
+        !dtCookedBtn.error &&
+          typeof dtCookedBtn.titleWidthRatio === 'number' &&
+          dtCookedBtn.titleWidthRatio >= 60,
         `btn=${JSON.stringify(dtCookedBtn)}`,
       )
       check(
         'WEEKUI-DT(便EA-1) 「作った！」の当たり判定は44px以上',
-        !!dtCookedBtn && dtCookedBtn.height >= 44,
+        !dtCookedBtn.error && dtCookedBtn.height >= 44,
         `btn=${JSON.stringify(dtCookedBtn)}`,
       )
       check(
         'WEEKUI-DT(便EA-1) 「作った！」と✕(外す)は12px以上離れている',
-        !!dtCookedBtn && dtCookedBtn.removeGap !== null && dtCookedBtn.removeGap >= 12,
-        `btn=${JSON.stringify(dtCookedBtn)}`,
-      )
-      check(
-        'WEEKUI-DT(便EA-1) 「作った！」だけの行(justify-end)は残っていない',
-        !!dtCookedBtn && !dtCookedBtn.parentCls.includes('justify-end'),
+        !dtCookedBtn.error && dtCookedBtn.removeGap !== null && dtCookedBtn.removeGap >= 12,
         `btn=${JSON.stringify(dtCookedBtn)}`,
       )
 
@@ -23202,8 +23213,18 @@ try {
       await dsPage.waitForTimeout(300)
       await dsPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
       await dsPage.waitForTimeout(500)
-      // ピッカーの先頭のレシピを1食で選ぶ(料理名は小窓の照合に使う)
-      const dsTitle = (await dsPage.locator('span.line-clamp-2').first().textContent()) ?? ''
+      // ピッカーの先頭のレシピを1食で選ぶ(料理名は小窓の照合に使う)。
+      // 2026-08-19 便HW: ピッカーの行を共通のレシピカード(「標準」)に寄せたので、
+      // 「span.line-clamp-2」のような**置き場所への固定**をやめ、
+      // 「食数を増やす」ボタンと同じ行(li)にある料理名として掴む(CLAUDE.md 禁じ手④)
+      const dsTitle = await dsPage.evaluate(() => {
+        const plus = [...document.querySelectorAll('button')].find(
+          (b) => b.getAttribute('aria-label') === '食数を増やす',
+        )
+        const li = plus?.closest('li')
+        const title = li?.querySelector('p')
+        return title?.textContent?.replace(/\u200B/g, '').trim() ?? ''
+      })
       await dsPage.getByRole('button', { name: '食数を増やす' }).first().click()
       await dsPage.waitForTimeout(250)
       await dsPage.getByRole('button', { name: '下書きを作る' }).click()

@@ -41,8 +41,9 @@ import {
 } from '../logic/shopping'
 import { sortResults, type RecipeSortOption } from '../logic/recipeSort'
 import type { SearchResult } from '../logic/search'
-import type { Ingredient, ShoppingItem } from '../db/types'
+import type { Ingredient, Recipe, ShoppingItem } from '../db/types'
 import PantryBoard from '../components/PantryBoard'
+import RecipeCard from '../components/RecipeCard'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
@@ -170,6 +171,16 @@ export default function ShoppingPage() {
     const map = new Map<number, { title: string; ingredients: Ingredient[] }>()
     for (const r of recipes ?? []) {
       if (r.id != null) map.set(r.id, { title: r.title, ingredients: r.ingredients })
+    }
+    return map
+  }, [recipes])
+
+  // recipeId → レシピそのもの。出所の小窓の行を共通のレシピカードで描くために使う
+  // （2026-08-19 便HW。上の recipeById は名前と材料だけの軽い写しなのでカードには渡せない）
+  const fullRecipeById = useMemo(() => {
+    const map = new Map<number, Recipe>()
+    for (const r of recipes ?? []) {
+      if (r.id != null) map.set(r.id, r)
     }
     return map
   }, [recipes])
@@ -967,23 +978,38 @@ export default function ShoppingPage() {
             {namePopup.recipes.length > 0 && (
               // レシピ名を押すとそのレシピ詳細へ（既存の遷移作法＝Linkで /recipes/:id）。
               // 右側にそのレシピでの分量を並べる
-              <ul className="mt-1 divide-y divide-edge rounded-md border border-edge bg-app">
-                {namePopup.recipes.map((source, i) => (
-                  <li key={`${source.recipeId}-${i}`}>
-                    <Link
-                      to={`/recipes/${source.recipeId}`}
-                      onClick={() => setNamePopup(null)}
-                      className="flex items-center gap-2 px-[var(--space-sm)] py-3"
-                    >
-                      <span className="min-w-0 flex-1 break-words text-sm font-bold text-accent-ink underline decoration-dotted underline-offset-4">
-                        {source.title}
-                      </span>
-                      {source.amount && (
-                        <span className="shrink-0 text-sm text-ink-muted">{source.amount}</span>
+              /* 2026-08-19 便HW: 料理名だけの行をやめ、献立の枠と同じ「小」のカードにそろえた。
+                 そのレシピでの分量は行の右端に添える（出ていた情報はそのまま） */
+              <ul className="mt-1 space-y-1">
+                {namePopup.recipes.map((source, i) => {
+                  const recipe = fullRecipeById.get(source.recipeId)
+                  return (
+                    <li key={`${source.recipeId}-${i}`}>
+                      {recipe ? (
+                        <RecipeCard
+                          recipe={recipe}
+                          density="small"
+                          onNavigate={() => setNamePopup(null)}
+                          meta={source.amount || undefined}
+                        />
+                      ) : (
+                        // レシピが端末から消えている行（カードにする絵も押す先も無い）
+                        <Link
+                          to={`/recipes/${source.recipeId}`}
+                          onClick={() => setNamePopup(null)}
+                          className="flex items-center gap-2 rounded-sm border border-edge bg-app px-[var(--space-sm)] py-3"
+                        >
+                          <span className="min-w-0 flex-1 break-words text-sm font-bold text-accent-ink underline decoration-dotted underline-offset-4">
+                            {source.title}
+                          </span>
+                          {source.amount && (
+                            <span className="shrink-0 text-sm text-ink-muted">{source.amount}</span>
+                          )}
+                        </Link>
                       )}
-                    </Link>
-                  </li>
-                ))}
+                    </li>
+                  )
+                })}
               </ul>
             )}
             {/* 手で足した分は正直に出す(レシピ由来が0件のときも、レシピ由来に足したときも) */}
@@ -1054,28 +1080,25 @@ export default function ShoppingPage() {
                 {visibleRecipes.length === 0 ? ja.mealPlan.pickEmpty : ja.mealPlan.pickNoMatch}
               </p>
             ) : (
-              <ul className="divide-y divide-edge rounded-md border border-edge bg-surface shadow-sm">
+              <ul className="space-y-[var(--space-sm)]">
                 {filteredRecipes.map((recipe) => {
                   const count = pickerCounts[recipe.id!] ?? 0
                   const selected = count >= 1
                   return (
                     <li
                       key={recipe.id}
-                      className={`flex items-center gap-2 px-[var(--space-md)] py-3 ${
+                      className={`flex items-center gap-2 rounded-md ${
                         selected ? 'bg-accent/5' : ''
                       }`}
                     >
                       {/* 品目名下の「◯人分レシピ」表記は削除(2026-07-24 実機FB #9) */}
-                      {/* 似た名前が「鶏むね肉のレモンペッ…」で切れて区別できないため、
-                          2行まで折り返す(2026-07-29 便CC/C20) */}
+                      {/* 2026-08-19 便HW（オーナー原文「同じ情報なら形もできるだけ揃える」）:
+                          料理名だけの行をやめ、レシピ一覧の一覧表示と同じ「標準」のカードに寄せた。
+                          レシピを探して選ぶ場所（献立のレシピ選び・献立テンプレの差し替え）と同じ形になり、
+                          写真で見分けられるようになる。似た名前を2行まで折り返す作法
+                          (2026-07-29 便CC/C20)は「標準」の料理名がそのまま引き継いでいる */}
                       <div className="min-w-0 flex-1">
-                        <span
-                          className={`block line-clamp-2 break-words font-bold ${
-                            selected ? 'text-accent-ink' : ''
-                          }`}
-                        >
-                          {recipe.title}
-                        </span>
+                        <RecipeCard recipe={recipe} density="standard" readOnly />
                       </div>
                       {/* 食数の+/-ステッパー(2026-07-23 #3)。1食以上で選択扱い・指定食数で候補生成 */}
                       <div className="flex shrink-0 items-center gap-1">
