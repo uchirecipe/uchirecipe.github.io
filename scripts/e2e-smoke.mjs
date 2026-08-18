@@ -69,14 +69,19 @@
 //         STEP0-01(手順0件のレシピ・2026-07バグ修正: 手順欄を空のまま保存(steps:[])しても、
 //         詳細画面に「調理中モードで見る」ボタンが表示されない=空配列で調理中モードを開いて
 //         クラッシュすることがないこと) /
-//         NUTSORT-01(栄養並び替えの無料側・2026-08-01 線引きB'でカロリー順のみ無料開放:
-//         無料では選択肢が「カロリー」だけ出て実際に使え(カードに「カロリー: ◯kcal」)、
-//         残り4項目はグレーの「たんぱく質・塩分・脂質・糖質で探す（Pro機能）」行にまとまり
+//         NUTSORT-01(栄養並び替えの無料側・2026-08-01 線引きB'でエネルギー順のみ無料開放:
+//         無料では選択肢が「エネルギー」だけ出て実際に使え(カードに「エネルギー: ◯kcal」)、
+//         残りはグレーの「エネルギー以外の7項目で並び替え（Pro機能）」行にまとまり
 //         タップ先が既存のPro案内であること) /
-//         NUTSORT-02(栄養並び替え・Pro解錠済み: カロリー/たんぱく質/塩分/脂質/糖質の5項目が出る・
-//         カロリー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
+//         NUTSORT-02(栄養並び替え・Pro解錠済み: 2026-08-19 便HU・⑯で顔ぶれを栄養価の表示と
+//         同じ8項目にそろえた。並び替えの選択肢が栄養価の表示の項目名と一致すること・
+//         エネルギー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
 //         栄養価順の間はカードに並び替え中の値が出る=便T-7。2026-07-16便T-7-2で
-//         「カロリー: ◯kcal」「たんぱく質: ◯g」のラベル付き表記に変更) /
+//         「エネルギー: ◯kcal」「たんぱく質: ◯g」のラベル付き表記に変更) /
+//         HU-TAG-01(2026-08-19 便HU・⑭⑮: 検索したキーワードをタグに登録して絞り込めること・
+//         消せること・「高たんぱく」がタグの候補に出ないがレシピ側には残っていること) /
+//         HU-CLOSE-01(2026-08-19 便HU・⑰: 並び替え/絞り込みの窓が外タップでも閉じ、
+//         「閉じる」で閉じたときと絞り込みの結果が同じであること・旧「決定」が無いこと) /
 //         TOPUP-01(既存ユーザーへの差分投入・テーマ全廃2026-07-23: アップデート前状態を再現し、
 //         起動時に不足分だけ1回投入される・トゥームストーンのある削除済みの品は復活させない・
 //         二重投入しない(107→108)・1回だけ実行される、をIndexedDB直読みで確認。旧TOMB-01のテーマ
@@ -18819,19 +18824,27 @@ try {
         Number.isFinite(htShownCount) && htShownCount === htHits,
         `ボタン=${htAddLabel} 検索結果=${htHits}`,
       )
+      // 確認の窓は入れ物ぜんぶで自動的に「確認」される仕掛け(installConfirmAutoPress)が
+      // 入っているので、押すのではなく貯まった文言を読む
+      await htPage.evaluate(() => {
+        window.__confirmDialogs = []
+      })
       await htAddButton.click()
-      await htPage.waitForTimeout(500)
-      const htConfirmText = ((await htPage.locator('[data-testid="confirm"]').innerText()) ?? '').replace(
-        /\u200b/g,
-        '',
-      )
+      await htPage.waitForTimeout(900)
+      const htConfirmText = (
+        await htPage.evaluate(() => (window.__confirmDialogs ?? []).join('\n'))
+      ).replace(/\u200b/g, '')
       check(
         'HU-TAG-01(⑭) 確認の窓に「変わるもの」と「変わらないもの」が両方出る(規約F)',
         htConfirmText.includes('付くもの') && htConfirmText.includes('変わらないもの'),
         `窓=${htConfirmText}`,
       )
-      await htPage.locator('[data-testid="confirm-ok"]').click()
-      await htPage.waitForTimeout(900)
+      check(
+        'HU-TAG-01(⑭) 確認の窓にも何品に付くのかが件数で出る',
+        new RegExp(`レシピ${htHits}品`).test(htConfirmText),
+        `窓=${htConfirmText} 検索結果=${htHits}`,
+      )
+      await htPage.waitForTimeout(400)
       // 検索語を消しても、タグとして残っていること
       await htPage.locator('input[type="search"]').fill('')
       await htPage.waitForTimeout(700)
@@ -18857,19 +18870,20 @@ try {
       )
 
       // ---------- ⑭ 削除できる ----------
+      await htPage.evaluate(() => {
+        window.__confirmDialogs = []
+      })
       await htPage.locator('[data-testid="recipes-keyword-tag-remove"]').first().click()
-      await htPage.waitForTimeout(500)
-      const htRemoveConfirm = ((await htPage.locator('[data-testid="confirm"]').innerText()) ?? '').replace(
-        /\u200b/g,
-        '',
-      )
+      await htPage.waitForTimeout(1000)
+      const htRemoveConfirm = (
+        await htPage.evaluate(() => (window.__confirmDialogs ?? []).join('\n'))
+      ).replace(/\u200b/g, '')
       check(
         'HU-TAG-01(⑭) 削除の確認にも「消えるもの」と「残るもの」が両方出る(規約F)',
         htRemoveConfirm.includes('消えるもの') && htRemoveConfirm.includes('残るもの'),
         `窓=${htRemoveConfirm}`,
       )
-      await htPage.locator('[data-testid="confirm-ok"]').click()
-      await htPage.waitForTimeout(1000)
+      await htPage.waitForTimeout(400)
       check(
         'HU-TAG-01(⑭) 削除すると登録したタグの欄から消える',
         (await htPage.locator('[data-testid="recipes-keyword-tag-chip"]').count()) === 0,
@@ -21821,7 +21835,8 @@ try {
       await sbPage.waitForTimeout(900)
       await sbPage.locator('button[aria-label="並び替え"]').click()
       await sbPage.waitForTimeout(300)
-      await sbPage.getByText('たんぱく質・塩分・脂質・糖質で探す').click()
+      // 2026-08-19 便HU・⑯でティーザーの文言が変わった（顔ぶれを栄養表示と同じ8項目にそろえた）
+      await sbPage.getByText('エネルギー以外の7項目で並び替え').click()
       await sbPage.waitForTimeout(800)
       check(
         'SETBACK-01 Pro案内のリンクに戻り先(?back=)が載っている',
@@ -25441,7 +25456,7 @@ try {
       const etsPanel = await etsPage.evaluate(() => {
         const bar = document.querySelector('.recipes-searchbar').getBoundingClientRect()
         const head = [...document.querySelectorAll('p')].find(
-          (p) => p.textContent?.trim() === 'どのレシピから探すか',
+          (p) => p.textContent?.trim() === 'レシピを絞り込む',
         )
         const hr = head?.getBoundingClientRect()
         return {
