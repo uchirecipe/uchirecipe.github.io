@@ -499,6 +499,15 @@ export default function RecipesPage() {
    * （料理中に片手で触る画面なので、スクロールの押し始めが「閉じる」に化けないようにする）。
    * 並び替え/絞り込みのボタン自身は自前で開閉を持っているので、ここでは触らない
    * （両方が働くと、押した瞬間に開いてすぐ閉じる）。
+   *
+   * 【画面いっぱいの下敷き（透明な板）を置かない理由・2026-08-19 便HU】
+   * はじめは窓の外のタップを受け止めるために `fixed inset-0` の下敷きを開くときだけ
+   * 置いていた。ところがそのぶんの描き直しでブラウザが数十ミリ秒ふさがり、
+   * **折りたたみが開くときのアニメーション（Collapse）が出なくなった**
+   * （中身を置く描き直しより先に「開き切った高さ」の指示が届き、0→高さの変化が起きない。
+   * オーナー実機指摘で入った動きなので、消してはいけないもの。e2eのEO-01が捕まえた）。
+   * 下敷きを置く代わりに、いちばん外側でタップを掴み取って（capture）その1回を使い切る形にした。
+   * 画面に足すものが無いので、開くときの描き直しは元のまま＝アニメーションが戻る。
    */
   const pressedOutsideRef = useRef(false)
   useEffect(() => {
@@ -512,17 +521,23 @@ export default function RecipesPage() {
     const onPointerDown = (e: PointerEvent) => {
       pressedOutsideRef.current = isOutside(e.target)
     }
-    const onClick = () => {
+    const onClickCapture = (e: MouseEvent) => {
       const outside = pressedOutsideRef.current
       // キーボード操作など、指を置いた記録が無いまま来たときは閉じない側に倒す
       pressedOutsideRef.current = false
-      if (outside) closePanels()
+      if (!outside) return
+      // 窓の外の1回目のタップは「窓を閉じる」だけに使い、その下にあるものには渡さない
+      // （レシピのカードの上で閉じたつもりが、そのレシピが開いてしまうのを防ぐ）。
+      // いちばん外側の掴み取り（capture）なので、画面側のどの操作よりも先に決められる
+      e.preventDefault()
+      e.stopPropagation()
+      closePanels()
     }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('click', onClick)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('click', onClickCapture, true)
     return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('click', onClick)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('click', onClickCapture, true)
       pressedOutsideRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1265,22 +1280,6 @@ export default function RecipesPage() {
             <X size={16} aria-hidden />
           </button>
         </div>
-      )}
-
-      {/* 窓の外をタップして閉じるための下敷き(2026-08-19 便HU・⑰)。
-          一覧のカードより上・貼り付く検索バー(z-20)より下に敷く＝
-          ①窓の外をタップしたとき、その下にあるレシピを一緒に開いてしまわない
-          ②検索欄・並び替え/絞り込みのボタンは今までどおり押せる
-          色は付けない(開いている窓の外が急に暗くならない)。指を滑らせたときは
-          今までどおり一覧がスクロールし、閉じるのはタップしたときだけ */}
-      {panelOpen && (
-        <div
-          data-testid="recipes-panel-scrim"
-          // 窓ではなくタップを受け止めるだけの下敷きなので、後ろの画面は止めない
-          // （scripts/test-logic.mjs の HE-3 はこの印が付いたものを窓として数えない）
-          data-no-scroll-lock
-          className="fixed inset-0 z-10"
-        />
       )}
 
       {/* 検索バー＋並び替え/絞り込みボタン(2026-07-16 便T-1: 従来は絞り込みボタン1つに両方の

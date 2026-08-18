@@ -21047,17 +21047,17 @@ Aみりん 大さじ1
     // 2026-08-17 便HJ: 窓の後ろ（暗い背景）のクラス名を components/dialogStyle.ts で
     // 分け合う形にしたので、そのクラス名を**使っている**ファイルも窓1枚として数える
     // （読み込みの行は使ったことにならないので数から外す）。見張る中身は変えていない
-    const heBody = src.replace(/import\s[\s\S]*?from\s+'[^']+'/g, '')
-    // 2026-08-19 便HU: `data-no-scroll-lock` の印が付いた全面の下敷きは数から引く。
-    // これは「窓」ではなく、開いているパネルの外のタップを受け止めるだけの透明な下敷きで、
-    // 後ろの一覧は今までどおり送れるのが正しい（止めると、パネルを開いたまま一覧を
-    // 送れなくなる＝便FFで作った動きが壊れる）。印が無い全面の窓は今までどおり数えるので、
-    // 同じファイルに本物の窓が増えたときは、この見張りがちゃんと赤くなる
+    // 2026-08-19 便HU: **コメントも数から外す**。「なぜ全面の下敷きを置かないのか」を
+    // 説明した文章の中にクラス名を書いたら、実在しない窓として数えられて赤くなった。
+    // 見張りたいのは実際に描いている窓なので、読み込みの行と同じくコメントも落とす
+    const heBody = src
+      .replace(/import\s[\s\S]*?from\s+'[^']+'/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
     const overlays =
       (heBody.match(/fixed inset-0/g) ?? []).length +
-      (heBody.match(/DIALOG_BACKDROP_CLS/g) ?? []).length -
-      (heBody.match(/data-no-scroll-lock/g) ?? []).length
-    if (overlays <= 0) continue
+      (heBody.match(/DIALOG_BACKDROP_CLS/g) ?? []).length
+    if (overlays === 0) continue
     if (heOverlayExempt.has(rel)) continue
     const locks = (src.match(/useScrollLock\(/g) ?? []).length
     if (locks < overlays) heMissingLock.push(`${rel}(窓${overlays}/止める呼び出し${locks})`)
