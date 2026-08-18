@@ -554,12 +554,12 @@ try {
     await wait(page, 700)
   }
 
-  // 「今日の献立を選ぶ」からレシピ一覧が選択モードで開くところ(2026-08-13 便FY)。
+  // 「今日の献立を探す」からレシピ一覧が選択モードで開くところ(2026-08-13 便FY)。
   // 使い方ページ§4の本文が「レシピ一覧が選択モードで開きます」と書いているのに図が無く、
   // どんな画面に変わるのかが読めなかった。帯(何を選んでいる最中か)・選び方の案内・
   // 件数入りの決定ボタン・選んだカードの印が1枚に入る範囲を切る。
   // 決定ボタンは押さない = 今日の献立の中身を変えずに撮る(あとの「週」「月」の図に影響させない)
-  const pickForToday = page.getByRole('button', { name: '今日の献立を選ぶ' })
+  const pickForToday = page.getByRole('button', { name: '今日の献立を探す' })
   if (await pickForToday.count()) {
     await pickForToday.first().click()
     await wait(page, 1800)
