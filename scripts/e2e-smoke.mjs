@@ -3867,14 +3867,23 @@ try {
 
       await tuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tuPage.waitForTimeout(800)
-      // 2026-08-03 便DP-3: 行の☑アイコンを、枠と文字ラベルの付いたボタン「作った！」にした。
-      // ボタンの見た目(枠+地色)と、何が起きるかの1行説明が出ていることも合わせて確認する
+      // 2026-08-03 便DP-3: 行の☑アイコンを、枠と文字ラベルの付いたボタン「作った！」にした
+      // （オーナー実機「☑アイコンだけでは操作できるものに見えなかった」）。
+      // 2026-08-18 便HN（オーナー指示「同じような機能は色を同じに」）で、記録をつける6か所を
+      // **塗り**にそろえた。**見た目の指定そのものを固定すると、そろえるたびに落ちる**ので、
+      // ここが見たいこと＝**押せるものだと分かる見た目である**ことで測る（CLAUDE.md 禁じ手④）。
+      // 「同じ役目どうしが同じ塗り方か」は test-logic の HN-1 が受け持つ
       const tuCookedBtn = tuPage.getByRole('button', { name: '作った！', exact: true }).first()
       const tuBtnCls = (await tuCookedBtn.getAttribute('class')) ?? ''
+      const tuBtnBox = await tuCookedBtn.boundingBox()
       check(
-        'TODAYUNDO-01(便DP-3) 行の「作った！」が枠・地色つきのボタンになっている',
-        tuBtnCls.includes('border-accent') && tuBtnCls.includes('bg-surface'),
-        `class=${tuBtnCls}`,
+        'TODAYUNDO-01(便DP-3) 行の「作った！」が、押せると分かる見た目のボタンになっている',
+        // 塗り（bg-accent）か枠（border-accent）のどちらかを持ち、文字ラベルがあり、押せる高さがある
+        (tuBtnCls.includes('bg-accent') || tuBtnCls.includes('border-accent')) &&
+          (await tuCookedBtn.innerText()).includes('作った') &&
+          !!tuBtnBox &&
+          tuBtnBox.height >= 44,
+        `class=${tuBtnCls} h=${tuBtnBox?.height}`,
       )
       check(
         'TODAYUNDO-01(便DP-3) 「作った！」が何をするかの1行説明が添えてある',
