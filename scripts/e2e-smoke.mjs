@@ -1321,7 +1321,19 @@ try {
   await page.waitForTimeout(400)
   const kwSearchText = await page.textContent('body')
   check('KW-01 検索キーワードでレシピがヒットする', kwSearchText.includes('E2Eキーワード確認レシピ'))
-  check('KW-01 検索結果表示でもキーワード文字列自体は表示されない', !kwSearchText.includes('ずっきーにのひみつご'))
+  // 見る先を「一覧のカード」に絞る(2026-08-19 司令部)。
+  // それまでは画面全体の文字で見ていたが、便HUが「検索した言葉をタグに登録する」ボタンを足し、
+  // その文字に**利用者が自分で打った検索語**が入るようになったため、
+  // レシピ側の隠しキーワードが漏れていなくても赤くなっていた。
+  // ここが守りたいのは「レシピの情報としてキーワードが出ていないこと」なので、カードの中だけを見る。
+  // カードが0枚だと素通り合格になるので、先に掴めていることを確かめる
+  const kwCards = await page.locator('a[href*="#/recipes/"]').count()
+  check('KW-01 前提: 検索結果のカードを掴めている', kwCards > 0, `カード数=${kwCards}`)
+  const kwCardTexts = (await page.locator('a[href*="#/recipes/"]').allTextContents()).join(' ')
+  check(
+    'KW-01 検索結果のカードにキーワード文字列自体は表示されない',
+    kwCards > 0 && !kwCardTexts.includes('ずっきーにのひみつご'),
+  )
 
   // 検索語をクリアしておく(一覧の検索条件はsessionStorageに保存され、この後の一覧系チェックが
   // 同じpage/contextを使い回すため、絞り込んだままだと後続チェックの「a[href^="#/recipes/"]」の
@@ -21290,14 +21302,45 @@ try {
           dmRoleTexts.length > 0 && dmRoleTexts.every((t) => /主菜|副菜/.test(t)),
           JSON.stringify(dmRoleTexts.map((t) => t.slice(0, 20))),
         )
-        // 便HMの約束（390×667の画面で「今日の献立に入れる」まで画面に収まる）は、
-        // 絞り込みを献立側にも出した便HTのあとも守れていること。
-        // 測るのは**開いた直後の見え方**（「条件をしぼる」は畳んだまま＝利用者が最初に見る形）
-        const applyBox = await dmBox(dmApply())
+        // 「今日の献立に入れる」に**指が届く**こと（2026-08-19 司令部が測り直した）。
+        //
+        // 元はここで「押していない状態のまま、下端が667px以内に収まる」を見ていた。
+        // だが実測すると、収まるかどうかは**その回に引けた料理名の長さ**で決まっていた:
+        //   1品もの(副菜が付かない)= 555px ／ 2品で短い名前= 661px ／ 2品で2行に折り返す名前= 671px
+        // さらに在庫を登録している人には「在庫の食材から」の行が増えるので、もっと下がる。
+        // つまり「画面の高さに収まる」は、たまたま短い名前を引いた回だけ通る約束だった
+        // （禁じ手④＝置き場所の決め打ち）。
+        //
+        // 利用者が困るのは「収まらないこと」ではなく**押せないこと**なので、そちらを測る:
+        // その位置まで送ったうえで、①画面の中に全部見えている ②下に貼り付くタブの帯に
+        // 隠れていない、の2つ。ボタンが動かないことは上の2件が別に見張っている。
+        const applyReach = await dmPage.evaluate(() => {
+          const btn = document.querySelector('[data-testid="day-suggest-apply"]')
+          if (!btn) return null
+          btn.scrollIntoView({ block: 'center' })
+          const r = btn.getBoundingClientRect()
+          // 下に貼り付いている帯（タブ）の上端。無ければ画面の下端
+          const bars = [...document.querySelectorAll('nav, [data-app-bottom-bar]')].filter((el) => {
+            const s = getComputedStyle(el)
+            return s.position === 'fixed' && el.getBoundingClientRect().bottom >= innerHeight - 2
+          })
+          const barTop = bars.length > 0 ? Math.min(...bars.map((el) => el.getBoundingClientRect().top)) : innerHeight
+          return {
+            top: Math.round(r.top),
+            bottom: Math.round(r.bottom),
+            barTop: Math.round(barTop),
+            h: Math.round(r.height),
+          }
+        })
         check(
-          'DAYMODE-01 献立のとき、「今日の献立に入れる」まで画面に収まる',
-          applyBox != null && applyBox.y + applyBox.height <= 667,
-          `下端=${applyBox ? Math.round(applyBox.y + applyBox.height) : '無し'} 画面の高さ=667`,
+          'DAYMODE-01 「今日の献立に入れる」に指が届く（画面の中に全部見えて、下の帯に隠れない）',
+          applyReach != null &&
+            applyReach.h > 0 &&
+            applyReach.top >= 0 &&
+            applyReach.bottom <= applyReach.barTop,
+          applyReach
+            ? `上端=${applyReach.top} 下端=${applyReach.bottom} 帯の上端=${applyReach.barTop}`
+            : '無し',
         )
         // ⑥ 絞り込みは献立側でも使える。当てられない「料理の種別」だけ理由に置き換わる
         check(

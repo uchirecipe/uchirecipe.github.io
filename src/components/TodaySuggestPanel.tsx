@@ -607,8 +607,12 @@ export default function TodaySuggestPanel({
             {/* 「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6)。
                 在庫にある食材を使うレシピに絞る(在庫が1件以上あるときだけ出す)。
                 2026-08-19 便HT: 献立側にも効く */}
-            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-              {pantryNames.length > 0 && (
+            {/* 2026-08-19 司令部: 在庫が0件のときは、この行そのものを出さない。
+                それまでは中身が空でも入れ物だけが残り、上の余白ぶん（8px）を取っていた。
+                実測では「今日の献立に入れる」の下端が390×667の画面で671pxまで下がっており、
+                空の行のぶんだけ押すものが画面の外へ近づいていた */}
+            {pantryNames.length > 0 && (
+              <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
                 <button
                   type="button"
                   onClick={togglePantryOnly}
@@ -622,8 +626,8 @@ export default function TodaySuggestPanel({
                   <Refrigerator size={14} aria-hidden />
                   {ja.dayStart.pantryOnlyToggle}
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
             {(mode === 'plan' ? planPantryFallback : pantryFallback) && (
               <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
