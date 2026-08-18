@@ -1187,7 +1187,18 @@ try {
   await page.waitForTimeout(800)
   await page.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
-  check('SMK-03 削除が一覧に反映', !(await page.textContent('body')).includes('E2Eスモーク試験用レシピ'))
+  // 一覧から消えたことを「一覧のカード」で見る(2026-08-18 便HS後の修正)。
+  // それまでは画面全体の文字にその名前が無いことで見ていたが、便HSが削除の知らせを足し、
+  // その文言に消した料理名が入るようになったため、正しく消えていても赤くなっていた。
+  // 知らせが出ること自体は DELMSG-01 が受け持つので、ここは一覧に残っていないかだけを見る
+  // 一覧のカードが1枚も掴めていないなら「消えたから0件」ではなく「測れていない」ので、
+  // 0件を合格に倒さないよう、先に一覧が読めていることを確かめる
+  const smk3Cards = await page.locator('a[href*="#/recipes/"]').count()
+  check('SMK-03 一覧のカードを掴めている', smk3Cards > 0, `カード数=${smk3Cards}`)
+  check(
+    'SMK-03 削除が一覧に反映',
+    (await page.locator('a[href*="#/recipes/"]', { hasText: 'E2Eスモーク試験用レシピ' }).count()) === 0,
+  )
 
   // --- GF-B: 貼り付けの☆・◎を見て、合わせ調味料の組を自動で作る ---
   //   利用者テスト「貼り付け後の材料名は『みそ』『すりごま』になるのに、色分け（合わせ調味料
