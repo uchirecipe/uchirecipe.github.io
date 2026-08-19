@@ -22794,6 +22794,204 @@ Aみりん 大さじ1
   )
 }
 
+// ==========================================================================================
+// IA-1〜IA-5: 献立の「日」の絞り込みを窓にした回の見張り（2026-08-19 便IA）
+//
+// オーナー原文（実機）:
+//   ①「今日なに作るで、条件を絞るボタンをぽちぽち色々試すたびに、説明文や追加の選択肢が出現して
+//      ボタンや献立のレシピカードの場所が変わるので見づらく感じる」
+//   ②「1品も条件ぽちぽち帰るたびに候補が変わらないようにして」
+//   ③「月や週の献立で、サイコロ押してレシピを変更した後に、元に戻すトースト？出してほしい」
+//   ⑤「④OKフォーマットそのままで情報減らすなどコンパクトにする努力はして」
+//
+// **実際に動かして測るのは e2e**（DAYCOND-01・DAYONE-02・WEEKDICE-03・SUGGESTNG-04・
+// PICKCOMPACT-05）が受け持つ。ここは e2e が開かない場所まで含めて、**決めごとが
+// 書き換わっていないか**を静的に見張る。読み取りに失敗したら必ず落ちる形にしてある。
+// ==========================================================================================
+{
+  const iaRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const iaRead = (rel) => readFileSync(path.join(iaRoot, rel), 'utf-8')
+
+  // ---- IA-1: 「レシピを選ぶ」画面の引き算（⑤） ------------------------------------------
+  // 項目名を並べ立てるのではなく、**場所どうしの大小**と「決め手が残っているか」で測る。
+  {
+    const iaFull = cardPartsFor('recipeList')
+    const iaPicker = cardPartsFor('recipePicker')
+    const iaSuggest = cardPartsFor('todaySuggest')
+    eq(
+      'IA-1 「レシピを選ぶ」画面は、レシピ一覧より載せる情報が少ない（2026-08-19 オーナー指示の引き算）',
+      iaPicker.size < iaFull.size && [...iaPicker].every((key) => iaFull.has(key)),
+      true,
+    )
+    eq(
+      'IA-1 「レシピを選ぶ」画面にも調理時間は残っている（決め手まで消していない）',
+      iaPicker.has('time'),
+      true,
+    )
+    // 「1品を選ぶ」場所は2つある（今日なに作る？の候補・レシピを選ぶ画面）。
+    // 同じ役目なので載せる情報も同じにする＝片方だけ増減させない
+    eq(
+      'IA-1 「1品を選ぶ」2か所（今日なに作る？の候補・レシピを選ぶ画面）は同じだけ載せる',
+      [...iaPicker].sort().join(','),
+      [...iaSuggest].sort().join(','),
+    )
+  }
+
+  // ---- IA-2: 「変えた条件は…」の1行（①②・規約H） ---------------------------------------
+  // 押すボタンの名前で場所を言う（「ここ」「これ」等の指示語で言わない）。
+  // 1品側と献立側で、同じことを違う言い方にしない（型がそろっているかを見る）。
+  {
+    // 文言そのものが無いときは、その場で不合格にする（undefined を空文字に倒して素通りさせない）
+    const iaText = (value) => (typeof value === 'string' ? value : '')
+    const iaNotices = [
+      { label: '1品', text: iaText(ja.dayStart.conditionChanged), button: iaText(ja.dayStart.shuffle) },
+      {
+        label: '献立',
+        text: iaText(ja.mealPlan.todaySuggestConditionChanged),
+        button: iaText(ja.mealPlan.todaySuggestButton),
+      },
+    ]
+    eq(
+      'IA-2 「変えた条件は…」の1行が1品側と献立側の両方にある',
+      iaNotices.filter((n) => n.text.length === 0 || n.button.length === 0).map((n) => n.label),
+      [],
+    )
+    eq(
+      'IA-2 「変えた条件は…」の1行は、押すボタンの名前を書いている（規約H）',
+      iaNotices.filter((n) => !n.text.includes(n.button)).map((n) => n.label),
+      [],
+    )
+    eq(
+      'IA-2 その1行で場所を指示語（ここ・これ・上の・下の）で示していない（規約H）',
+      iaNotices.filter((n) => /ここ|これ|上の|下の/.test(n.text)).map((n) => n.label),
+      [],
+    )
+    // ボタン名を外した残り（言い回し）が1品側と献立側で同じ＝同じことを違う言葉で言わない
+    const iaShape = (n) => n.text.replace(n.button, '')
+    eq(
+      'IA-2 1品側と献立側で、言い回しはそろっている（違うのはボタンの名前だけ）',
+      iaShape(iaNotices[0]),
+      iaShape(iaNotices[1]),
+    )
+  }
+
+  // ---- IA-3: サイコロの知らせと「元に戻す」（③・規約F） -----------------------------------
+  // 週・月は複数の日が同時に見えているので、**いつの・どの食事の枠か**を必ず言う。
+  // 取り消しの文言は、起きたことと対になっている（入れた↔外した／変えた↔戻した）。
+  {
+    const iaSuggestToasts = {
+      suggestReplacedToast: ['{before}', '{after}'],
+      suggestReplaceUndoneToast: ['{title}'],
+      suggestAddedToast: ['{title}'],
+      suggestAddedPairToast: ['{main}', '{side}'],
+      suggestAddUndoneToast: ['{title}'],
+      suggestAddPairUndoneToast: ['{main}', '{side}'],
+    }
+    const iaMissingSlot = Object.keys(iaSuggestToasts).filter((key) => {
+      const text = ja.mealPlan[key]
+      return typeof text !== 'string' || !['{m}', '{d}', '{slot}'].every((ph) => text.includes(ph))
+    })
+    eq(
+      'IA-3 サイコロの知らせは、いつの・どの食事の枠かを必ず書いている（週・月は日が並んでいる）',
+      iaMissingSlot,
+      [],
+    )
+    const iaMissingTitles = Object.entries(iaSuggestToasts).filter(
+      ([key, holes]) => !holes.every((ph) => (typeof ja.mealPlan[key] === 'string' ? ja.mealPlan[key] : '').includes(ph)),
+    )
+    eq(
+      'IA-3 サイコロの知らせは、どの料理のことかを書いている（規約F: 何が戻るのかが分かる）',
+      iaMissingTitles.map(([key]) => key),
+      [],
+    )
+    const iaReplaced = typeof ja.mealPlan.suggestReplacedToast === 'string' ? ja.mealPlan.suggestReplacedToast : ''
+    const iaReplaceUndone =
+      typeof ja.mealPlan.suggestReplaceUndoneToast === 'string' ? ja.mealPlan.suggestReplaceUndoneToast : ''
+    eq(
+      'IA-3 入れ替えの知らせは、前の料理名と後の料理名を両方書いている（元に戻すと何が戻るか）',
+      iaReplaced.includes('{before}') &&
+        iaReplaced.includes('{after}') &&
+        iaReplaceUndone.includes('{title}'),
+      true,
+    )
+  }
+
+  // ---- IA-4: 窓の作りを新しく発明していない（①） -----------------------------------------
+  // 「条件をしぼる」は**すでにある窓の作法**に乗せる約束。共通の3点セット
+  // （端末の「戻る」で閉じる・後ろの画面を止める・見た目）を使っていることを見る。
+  {
+    const iaPanel = iaRead('src/components/TodaySuggestPanel.tsx')
+    eq('IA-4 「今日なに作る？」の節を読めている（0文字なら見張りが壊れている）', iaPanel.length > 0, true)
+    const iaWindowParts = [
+      ['端末の「戻る」・Escapeで閉じる', 'useOverlayDismiss('],
+      ['後ろの画面を止める', 'useScrollLock('],
+      ['窓の見た目（共通）', 'DIALOG_CARD_CLS'],
+      ['窓の後ろ（共通）', 'DIALOG_BACKDROP_CLS'],
+    ]
+    eq(
+      'IA-4 「条件をしぼる」の窓は、すでにある窓の作法に乗っている（新しい窓を作っていない）',
+      iaWindowParts.filter(([, needle]) => !iaPanel.includes(needle)).map(([label]) => label),
+      [],
+    )
+    // 絞り込みのチップ（条件・分数・料理の種別・在庫）は、**窓の中にだけ**置く。
+    // 節の側（折りたたみ）へ戻すと、開いた瞬間に下が押し下がる形に逆戻りする。
+    // JSXは書いた順に画面へ出るので、チップの呼び出しが窓の目印より後ろにあることで見る
+    const iaModalAt = iaPanel.indexOf('data-testid="day-conditions-modal"')
+    const iaChipUses = [...iaPanel.matchAll(/conditionChipCls\(/g)].map((m) => m.index)
+    eq(
+      'IA-4 絞り込みのチップは窓の中だけにある（節の側の折りたたみへ戻していない）',
+      iaModalAt > 0 && iaChipUses.length > 0 && iaChipUses.every((at) => at > iaModalAt),
+      true,
+    )
+  }
+
+  // ---- IA-5: NG食材の警告を渡し漏れていない（④） -----------------------------------------
+  // 献立の画面が出す「これから作る品」のカードは、必ず設定「食べられない食材」を渡す。
+  // 作った記録のカード（photoOverride を渡すもの）と押せない見本（readOnly）は除く
+  // ＝もう作ったもの・書き込み先の無い見本には警告を出す意味が無い。
+  {
+    const iaCardTags = (src) => {
+      const tags = []
+      let at = src.indexOf('<RecipeCard')
+      while (at >= 0) {
+        let depth = 0
+        let end = -1
+        for (let i = at; i < src.length; i++) {
+          const ch = src[i]
+          if (ch === '{') depth++
+          else if (ch === '}') depth--
+          else if (ch === '>' && depth === 0) {
+            end = i
+            break
+          }
+        }
+        if (end < 0) return null
+        tags.push(src.slice(at, end + 1))
+        at = src.indexOf('<RecipeCard', end)
+      }
+      return tags
+    }
+    const iaTargets = ['src/pages/MealPlanPage.tsx', 'src/components/TodaySuggestPanel.tsx']
+    const iaChecked = []
+    const iaMissing = []
+    for (const rel of iaTargets) {
+      const tags = iaCardTags(iaRead(rel))
+      eq(`IA-5 ${rel} のカードの呼び出しを切り出せている`, Array.isArray(tags) && tags.length > 0, true)
+      for (const tag of tags ?? []) {
+        if (/\breadOnly\b/.test(tag) || /\bphotoOverride=/.test(tag)) continue
+        iaChecked.push(rel)
+        if (!/\bngIngredients=/.test(tag)) iaMissing.push(`${rel}: ${tag.slice(0, 60)}…`)
+      }
+    }
+    eq('IA-5 見張る対象のカードが1つ以上ある（0件なら見張りが壊れている）', iaChecked.length > 0, true)
+    eq(
+      'IA-5 献立の画面が出す「これから作る品」のカードは、必ずNG食材を渡している',
+      iaMissing,
+      [],
+    )
+  }
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

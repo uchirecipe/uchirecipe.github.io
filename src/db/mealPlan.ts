@@ -31,7 +31,7 @@ export async function addMealEntry(
    * 月タブの答え合わせ（目的を指定して組んだ日の事実表示）にだけ使う記録。
    */
   purpose?: MealPurpose,
-): Promise<void> {
+): Promise<number> {
   // auto=true は「まとめて献立を立てる」由来の枠だけに付ける。手動追加(既定)は付けない
   // （＝手動配置として保護される。types.ts MealPlanEntry.auto 参照）。falseはあえて保存せず
   // 既存の「未設定=手動」の後方互換とそろえる（レコードを余計な項目で汚さない）。
@@ -39,7 +39,10 @@ export async function addMealEntry(
   const entry: MealPlanEntry = { date, slot, recipeId, role }
   if (auto) entry.auto = true
   if (auto && purpose) entry.purpose = purpose
-  await db.mealPlans.add(entry)
+  // 付いたidを返す（2026-08-19 便IA）。サイコロで入れた行を「元に戻す」で外すには、
+  // どの行が増えたのかを呼び出し側が知っている必要がある。
+  // 使わない呼び出し側はそのまま無視できる（戻り値が void → number に増えただけ）
+  return (await db.mealPlans.add(entry)) as number
 }
 
 /**
