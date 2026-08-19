@@ -2,56 +2,64 @@ import { ja } from '../i18n/ja'
 import type { ConfirmContent } from './confirmContent'
 
 /**
- * 検索したキーワードを、そのままタグとして登録する仕組みの純ロジック
- * （2026-08-19 便HU・⑭ オーナー「キーワード検索して結果出した後、キーワードをタグに登録ボタン
- * 作って絞り込みに反映して。もちろん削除もできるように」）。
+ * よく使う検索を「絞り込みのタグ」として登録しておく仕組みの純ロジック
+ * （2026-08-19 便HZ・②。初出は便HU・⑭）。
  *
- * 【どのレシピにタグが付くのか】
- * 「タグの名前だけを作る」形にすると、絞り込みのチップを押しても1品も出てこない
- * （＝オーナーの「絞り込みに反映して」を満たせない）。そこで
- * **押した時点でその検索に一致しているレシピにまとめて付ける**形にする。
- * 何品に付くのかは押す前にボタンの文字に出し（規約F）、確認の窓でもう一度言う。
+ * 【いま作っているもの＝A案】
+ * オーナーの訂正: 「検索結果にタグづけは、絞り込んだレシピにタグをつけるのではなく、
+ * 絞り込み機能の『タグ』に新しいタグを追加する、という意味でした。レシピ自体はいじりません」
+ * 「よく使うタグを自分で設定する機能です。レシピにつけたい場合は、ユーザーがレシピを
+ * 編集画面でタグかキーワードを入力する必要があります」。
  *
- * 【取り返しがつくこと】
- * 「削除」でそのタグを付けた品からタグを外す＝登録前の状態に戻る。
- * どのタグが検索から作られたものかは settings.keywordTags に控える
- * （同梱の基本レシピに元から付いている「和食」などを、まとめて消せてしまわないため）。
+ * つまり登録するのは**検索の言葉だけ**。押すとその検索が呼び戻される。
+ * **レシピのデータには一切書き込まない**（この一点がこの版の作り直しの目的）。
+ * 控えは settings.savedSearches に持つ。
  *
- * 画面にもDexieにも触らない。書き込みは db/recipes.ts、出す場所は pages/RecipesPage.tsx。
+ * 【以前の版（便HU）との違い】
+ * 便HU版は、押した時点で検索に一致したレシピに実際にタグを書き込んでいた。
+ * その書き込みの経路（db/recipes.ts の addTagToRecipes・tagsWithAdded・recipeIdsMissingTag）は
+ * この版で全部消してある。すでに書き込まれてしまったタグは黙って消さず、
+ * 絞り込みパネルの「以前の版でレシピに書き込まれたタグ」から外せるようにする
+ * （＝データを失う方に勝手に倒さない）。その後始末だけが tagsWithRemoved を使う。
+ *
+ * 画面にもDexieにも触らない。出す場所は pages/RecipesPage.tsx。
  */
-
-/** タグ名として扱える最大の長さ（チップに収まらない長さのタグを作らないための歯止め） */
-export const KEYWORD_TAG_MAX_LENGTH = 20
 
 /**
- * 検索語からタグ名を作る。前後の空白は落とし、語の間の空白（全角も）は半角1つにまとめる。
- * 空になる検索語・長すぎる検索語では作らない（null）。
+ * 登録できる言葉の最大の長さ
+ * （チップに収まらない長さのタグを作らないための歯止め。文字数はチップ1行ぶんの目安）
  */
-export function tagFromQuery(query: string): string | null {
+export const SAVED_SEARCH_MAX_LENGTH = 20
+
+/**
+ * 検索語から、登録する言葉を作る。前後の空白は落とし、語の間の空白（全角も）は半角1つにまとめる。
+ * 空になる検索語・長すぎる検索語では作らない（null）。
+ * 空白のまとめ方を検索と合わせてあるので、登録した言葉をそのまま検索欄に戻せば同じ結果になる。
+ */
+export function savedSearchFromQuery(query: string): string | null {
   const normalized = query.replace(/[\s　]+/g, ' ').trim()
   if (normalized === '') return null
-  if (normalized.length > KEYWORD_TAG_MAX_LENGTH) return null
+  if (normalized.length > SAVED_SEARCH_MAX_LENGTH) return null
   return normalized
 }
 
-/** そのタグがまだ付いていないレシピのid（＝これから実際に変わる品） */
-export function recipeIdsMissingTag(
-  recipes: readonly { id?: number; tags: string[] }[],
-  tag: string,
-): number[] {
-  return recipes
-    .filter((recipe) => recipe.id !== undefined && !recipe.tags.includes(tag))
-    .map((recipe) => recipe.id as number)
+/** 登録した言葉の控えに1つ足す（重複させない・登録した順に並べる） */
+export function savedSearchesWith(current: readonly string[] | undefined, name: string): string[] {
+  const list = current ?? []
+  return list.includes(name) ? [...list] : [...list, name]
 }
 
-/** そのタグが付いているレシピの品数（絞り込みのチップに出す数） */
+/** 登録した言葉の控えから1つ外す */
+export function savedSearchesWithout(
+  current: readonly string[] | undefined,
+  name: string,
+): string[] {
+  return (current ?? []).filter((value) => value !== name)
+}
+
+/** そのタグが付いているレシピの品数（以前の版が書き込んだタグの後始末に使う） */
 export function countRecipesWithTag(recipes: readonly { tags: string[] }[], tag: string): number {
   return recipes.filter((recipe) => recipe.tags.includes(tag)).length
-}
-
-/** タグを1つ足した配列（既にあれば増やさない。並びは末尾に足す） */
-export function tagsWithAdded(tags: readonly string[], tag: string): string[] {
-  return tags.includes(tag) ? [...tags] : [...tags, tag]
 }
 
 /** タグを1つ外した配列（他のタグは順番も含めてそのまま） */
@@ -59,59 +67,45 @@ export function tagsWithRemoved(tags: readonly string[], tag: string): string[] 
   return tags.filter((value) => value !== tag)
 }
 
-/** 検索から登録したタグの控えに1つ足す（重複させない・登録した順に並べる） */
-export function keywordTagsWith(current: readonly string[] | undefined, tag: string): string[] {
-  const list = current ?? []
-  return list.includes(tag) ? [...list] : [...list, tag]
-}
-
-/** 検索から登録したタグの控えから1つ外す */
-export function keywordTagsWithout(current: readonly string[] | undefined, tag: string): string[] {
-  return (current ?? []).filter((value) => value !== tag)
-}
-
 /**
- * 登録の確認（規約F: 何が変わって何が変わらないかを件数つきで両方書く）。
- * @param tag 付けるタグ名
- * @param targetCount これからタグが付く品数
- * @param untouchedCount タグが付かないまま残る品数（端末にある全レシピ − targetCount）
+ * 登録したタグを削除するときの確認（規約F: 何が消えて何が残るかを件数つきで両方書く）。
+ * 消えるのは絞り込みに並ぶタグだけで、レシピは1品も変わらない。
+ * @param name 登録した言葉
+ * @param recipeCount 端末にあるレシピの品数（＝この操作で1品も変わらないことを数で示す）
  */
-export function buildKeywordTagAddConfirm(params: {
-  tag: string
-  targetCount: number
-  untouchedCount: number
+export function buildSavedSearchRemoveConfirm(params: {
+  name: string
+  recipeCount: number
 }): ConfirmContent {
   const t = ja.search
   const fill = (text: string) =>
-    text
-      .replace('{name}', params.tag)
-      .replace('{n}', String(params.targetCount))
-      .replace('{rest}', String(params.untouchedCount))
+    text.replace(/\{name\}/g, params.name).replace(/\{n\}/g, String(params.recipeCount))
   return {
-    title: fill(t.keywordTagConfirmTitle),
+    title: fill(t.savedSearchRemoveConfirmTitle),
     bullets: [
-      { label: t.keywordTagConfirmAddedLabel, text: fill(t.keywordTagConfirmAdded) },
-      { label: t.keywordTagConfirmKeptLabel, text: fill(t.keywordTagConfirmKept) },
+      { label: t.savedSearchRemoveConfirmGoneLabel, text: fill(t.savedSearchRemoveConfirmGone) },
+      { label: t.savedSearchRemoveConfirmKeptLabel, text: fill(t.savedSearchRemoveConfirmKept) },
     ],
-    notes: [t.keywordTagConfirmNote],
-    confirmLabel: t.keywordTagConfirmOk,
+    notes: [fill(t.savedSearchRemoveConfirmNote)],
+    confirmLabel: t.savedSearchRemoveConfirmOk,
   }
 }
 
 /**
- * 削除の確認（規約F）。タグを外すだけでレシピそのものは1品も消えないことを必ず書く。
+ * 以前の版がレシピ本体に書き込んだタグを外すときの確認（規約F）。
+ * タグを外すだけでレシピそのものは1品も消えないことを必ず書く。
  * @param count そのタグが付いている品数
  */
-export function buildKeywordTagRemoveConfirm(params: { tag: string; count: number }): ConfirmContent {
+export function buildLegacyTagRemoveConfirm(params: { tag: string; count: number }): ConfirmContent {
   const t = ja.search
   const fill = (text: string) =>
-    text.replace('{name}', params.tag).replace('{n}', String(params.count))
+    text.replace(/\{name\}/g, params.tag).replace(/\{n\}/g, String(params.count))
   return {
-    title: fill(t.keywordTagRemoveConfirmTitle),
+    title: fill(t.legacyTagRemoveConfirmTitle),
     bullets: [
-      { label: t.keywordTagRemoveConfirmGoneLabel, text: fill(t.keywordTagRemoveConfirmGone) },
-      { label: t.keywordTagRemoveConfirmKeptLabel, text: fill(t.keywordTagRemoveConfirmKept) },
+      { label: t.legacyTagRemoveConfirmGoneLabel, text: fill(t.legacyTagRemoveConfirmGone) },
+      { label: t.legacyTagRemoveConfirmKeptLabel, text: fill(t.legacyTagRemoveConfirmKept) },
     ],
-    confirmLabel: t.keywordTagRemoveConfirmOk,
+    confirmLabel: t.legacyTagRemoveConfirmOk,
   }
 }

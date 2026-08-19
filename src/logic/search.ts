@@ -11,6 +11,16 @@ export type EffortFilter = 'all' | EffortLevel
 /** タグ絞り込み: 'all' またはタグ文字列そのもの（例: '作り置き'） */
 export type TagFilter = 'all' | string
 /**
+ * タグを2つ以上選んだときの選び方（2026-08-19 便HZ・③ オーナー
+ * 「タグ検索は、複数選択できるよにして。AND検索OR検索の切り替え機能も欲しい」）。
+ *
+ * 'any' = 選んだタグの**どれかが付いている**レシピ（和集合。オーナーの言う OR検索）
+ * 'all' = 選んだタグが**すべて付いている**レシピ（積集合。オーナーの言う AND検索）
+ *
+ * 1つしか選んでいないときは、どちらでも結果は同じ（＝これまでの絞り込みと変わらない）。
+ */
+export type TagMatchMode = 'any' | 'all'
+/**
  * 料理の種別（主菜・副菜・汁物・その他）の絞り込み（2026-08-10 便FF・オーナー要望
  * 「主菜副菜などでも絞り込みしたい」）。
  *
@@ -32,7 +42,19 @@ export interface SearchOptions {
   ingredients: string
   time: TimeFilter
   effort: EffortFilter
-  tag: TagFilter
+  /**
+   * タグを1つだけ指定して絞る（献立のレシピ選択ピッカー・献立テンプレートが使う旧来の口）。
+   * 'all' または未指定＝この条件では絞らない。レシピ一覧は下の tags / tagMatch を使う
+   */
+  tag?: TagFilter
+  /**
+   * タグで絞る（2026-08-19 便HZ・③で複数選択に）。空配列・未指定＝絞らない。
+   * 2つ以上入れたときの扱いは tagMatch で決める（既定は 'any' ＝どれかが付いていれば残す）。
+   * 任意項目にしてあるので、この絞り込みを使わない呼び出し側は据え置きでよい
+   */
+  tags?: readonly string[]
+  /** tags を2つ以上指定したときの選び方（既定 'any'） */
+  tagMatch?: TagMatchMode
   /**
    * 料理の種別で絞る（任意・2026-08-10 便FF → 2026-08-19 便HUで複数選択に）。
    * 未指定・空配列＝絞らない。複数入れたときは**そのどれかに当たる**レシピが残る（和集合）。
@@ -61,6 +83,8 @@ export const defaultSearchOptions: Omit<SearchOptions, 'ngIngredients'> = {
   time: 'all',
   effort: 'all',
   tag: 'all',
+  tags: [],
+  tagMatch: 'any',
   dishTypes: [],
   favoriteOnly: false,
   excludeNg: false,
@@ -184,7 +208,18 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
     if (!matchesQuery(recipe, queryTerms)) continue
     if (!matchesTime(recipe, options.time)) continue
     if (options.effort !== 'all' && recipe.effortLevel !== options.effort) continue
-    if (options.tag !== 'all' && !recipe.tags.includes(options.tag)) continue
+    if (options.tag != null && options.tag !== 'all' && !recipe.tags.includes(options.tag)) continue
+    // タグの複数選択（2026-08-19 便HZ・③）。何も選んでいなければ絞らない。
+    // 'all'（すべて付いている）は選んだタグの数だけ条件が増えるので、選ぶほど必ず減る。
+    // 'any'（どれかが付いている）は選ぶほど必ず増える＝同じ選び方をしている
+    // 「料理の種別」（上の dishTypes）と同じ和集合になる
+    if (options.tags != null && options.tags.length > 0) {
+      const matched =
+        options.tagMatch === 'all'
+          ? options.tags.every((name) => recipe.tags.includes(name))
+          : options.tags.some((name) => recipe.tags.includes(name))
+      if (!matched) continue
+    }
     // 料理の種別（2026-08-10 便FF → 2026-08-19 便HUで複数選択）。未設定のレシピも
     // recipeDishType が必ず4区分のどれかに割り当てるので、4つを合わせると一覧の全レシピを
     // ちょうど覆う（取りこぼしが出ない）。何も選んでいなければ絞らない

@@ -8773,37 +8773,45 @@ eq(
   )
 }
 
-// ---------- ⑭ 検索したキーワードをタグとして登録する(2026-08-19 便HU・オーナー
-// 「キーワード検索して結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して。
-// もちろん削除もできるように」) ----------
-// 測るのは①登録したタグで実際に絞り込めること ②消せること の2つ。
-// 「登録＝いま検索に一致している品にまとめてタグを付ける」なので、
-// 付いた品が絞り込みで戻ってくるところまでを通しで見る。
+// ---------- 便HZ・② よく使う検索を「絞り込みのタグ」として登録する ----------
+// オーナーの訂正:「検索結果にタグづけは、絞り込んだレシピにタグをつけるのではなく、
+// 絞り込み機能の『タグ』に新しいタグを追加する、という意味でした。レシピ自体はいじりません」
+// 「よく使うタグを自分で設定する機能です」。
+// 以前の版(便HU・⑭)は、押した時点で検索に一致したレシピに実際にタグを書き込んでいた。
+//
+// 【この節でいちばん測ること】レシピのデータが1件も変わらないこと。
+// 登録→押す→削除まで通しでやってから、レシピの配列を丸ごと比べる。
 {
   const {
-    tagFromQuery,
-    recipeIdsMissingTag,
+    savedSearchFromQuery,
+    savedSearchesWith,
+    savedSearchesWithout,
     countRecipesWithTag,
-    tagsWithAdded,
     tagsWithRemoved,
-    keywordTagsWith,
-    keywordTagsWithout,
+    buildSavedSearchRemoveConfirm,
+    buildLegacyTagRemoveConfirm,
+    SAVED_SEARCH_MAX_LENGTH,
   } = await import('../src/logic/tagRegister.ts')
-  const searchOptions = (tag) => ({
+  const { confirmContentText } = await import('../src/logic/confirmContent.ts')
+  const baseOptions = {
     query: '',
     ingredients: '',
     time: 'all',
     effort: 'all',
-    tag,
     favoriteOnly: false,
     excludeNg: false,
     quickOnly: false,
     ngIngredients: [],
-  })
-  // 検索語からタグ名を作る
-  eq('⑭ 前後の空白は落とす', tagFromQuery('  作り置き  '), '作り置き')
-  eq('⑭ 語の間の空白は1つにまとめる(検索は空白区切りでもタグ名は1つ)', tagFromQuery('鶏　むね'), '鶏 むね')
-  eq('⑭ 空の検索語ではタグを作らない', tagFromQuery('   '), null)
+  }
+  // 登録できる言葉の作り方(空白の詰め方は検索と同じ＝登録した言葉をそのまま検索欄に戻せる)
+  eq('② 前後の空白は落とす', savedSearchFromQuery('  作り置き  '), '作り置き')
+  eq('② 語の間の空白は半角1つにまとめる', savedSearchFromQuery('鶏　むね'), '鶏 むね')
+  eq('② 空の検索語では登録しない', savedSearchFromQuery('   '), null)
+  eq(
+    '② チップに収まらない長さは登録しない',
+    savedSearchFromQuery('あ'.repeat(SAVED_SEARCH_MAX_LENGTH + 1)),
+    null,
+  )
 
   const mk = (id, title, tags) => ({
     id,
@@ -8813,41 +8821,171 @@ eq(
     ingredients: [{ name: title }],
     cookedLogs: [],
   })
-  let recipes = [mk(1, 'から揚げ', []), mk(2, 'から揚げ丼', ['和食']), mk(3, '肉じゃが', [])]
-  const tag = tagFromQuery('から揚げ')
-  // いま検索に一致している品＝タグを付ける相手。すでに付いている品は数えない
-  const hits = searchRecipes(recipes, { ...searchOptions('all'), query: 'から揚げ' })
-  eq('⑭ 前提: 検索に一致した品が2品ある(空振りしていない)', hits.map((r) => r.recipe.id), [1, 2])
-  const targets = recipeIdsMissingTag(hits.map((r) => r.recipe), tag)
-  eq('⑭ 押す前に見せる件数＝まだそのタグが付いていない品の数', targets, [1, 2])
+  const recipes = [mk(1, 'から揚げ', []), mk(2, 'から揚げ丼', ['和食']), mk(3, '肉じゃが', [])]
+  // レシピが1件も変わらないことを測るための控え(通しでやったあとに丸ごと比べる)
+  const recipesBefore = JSON.stringify(recipes)
 
-  // 登録: 対象の品にタグを足す(DBの書き込みと同じ足し方をここで再現する)
-  recipes = recipes.map((r) => (targets.includes(r.id) ? { ...r, tags: tagsWithAdded(r.tags, tag) } : r))
-  eq('⑭ 登録したタグで実際に絞り込める', searchRecipes(recipes, searchOptions(tag)).map((r) => r.recipe.id), [1, 2])
-  eq('⑭ 一致しなかった品にはタグが付かない', recipes.find((r) => r.id === 3).tags, [])
-  eq('⑭ もともと付いていたタグは消えない', recipes.find((r) => r.id === 2).tags, ['和食', 'から揚げ'])
-  eq('⑭ そのタグが付いている品数を数えられる(絞り込みのチップに出す数)', countRecipesWithTag(recipes, tag), 2)
-  // 2回目の登録では付ける相手がいない＝同じタグを二重に付けない
-  const hitsAgain = searchRecipes(recipes, { ...searchOptions('all'), query: 'から揚げ' })
-  eq('⑭ 前提: 2回目も同じ2品が検索に一致する', hitsAgain.map((r) => r.recipe.id), [1, 2])
+  const hits = searchRecipes(recipes, { ...baseOptions, query: 'から揚げ' }).map((r) => r.recipe.id)
+  eq('② 前提: 検索に一致した品が2品ある(空振りしていない)', hits, [1, 2])
+  const name = savedSearchFromQuery('から揚げ')
+
+  // 登録: 増えるのは「登録した言葉の控え」だけ
+  let saved = savedSearchesWith(undefined, name)
+  eq('② 登録すると控えに入る', saved, ['から揚げ'])
+  eq('② 同じ言葉を2回登録しても控えは増えない', savedSearchesWith(saved, name), ['から揚げ'])
+
+  // 押す: その検索が呼び戻される(登録したときと同じ結果に戻る)
   eq(
-    '⑭ もう一度登録しても付ける相手はいない',
-    recipeIdsMissingTag(hitsAgain.map((r) => r.recipe), tag),
-    [],
+    '② 登録したタグを押すと、登録したときと同じ結果が戻る',
+    searchRecipes(recipes, { ...baseOptions, query: name }).map((r) => r.recipe.id),
+    hits,
+  )
+  eq('② 登録してもレシピのタグは1つも増えない', recipes.map((r) => r.tags), [[], ['和食'], []])
+  eq(
+    '② そのタグが付いた品は1品も無い(レシピには書き込んでいない)',
+    countRecipesWithTag(recipes, name),
+    0,
   )
 
-  // 登録したタグの控え(設定に持つ一覧)。消せるようにするために、どれが検索から作ったタグかを覚える
-  let keywordTags = keywordTagsWith([], tag)
-  eq('⑭ 登録したタグを控える', keywordTags, ['から揚げ'])
-  eq('⑭ 同じタグを2回登録しても控えは増えない', keywordTagsWith(keywordTags, tag), ['から揚げ'])
+  // 削除: 控えから消えるだけ
+  saved = savedSearchesWithout(saved, name)
+  eq('② 削除すると控えから消える', saved, [])
+  eq(
+    '② 登録→押す→削除を通してもレシピのデータが1件も変わらない',
+    JSON.stringify(recipes),
+    recipesBefore,
+  )
 
-  // 削除: 付けた品からタグを外す＝登録前の状態に戻る(取り返しがつく)
-  recipes = recipes.map((r) => ({ ...r, tags: tagsWithRemoved(r.tags, tag) }))
-  keywordTags = keywordTagsWithout(keywordTags, tag)
-  eq('⑭ 消すと、そのタグでは1品も出なくなる', searchRecipes(recipes, searchOptions(tag)).map((r) => r.recipe.id), [])
-  eq('⑭ 消しても他のタグは残る', recipes.find((r) => r.id === 2).tags, ['和食'])
-  eq('⑭ 消すとレシピそのものは残る', recipes.map((r) => r.id), [1, 2, 3])
-  eq('⑭ 控えからも消える', keywordTags, [])
+  // 削除の確認(規約F: 何が消えて何が残るかを両方書く。「よろしいですか？」だけにしない)
+  const removeText = confirmContentText(
+    buildSavedSearchRemoveConfirm({ name: 'から揚げ', recipeCount: 3 }),
+  )
+  eq('② 削除の窓に消えるものが出る', removeText.includes('消えるもの'), true)
+  eq('② 削除の窓に残るものが出る', removeText.includes('残るもの'), true)
+  eq('② 削除の窓にレシピが1品も変わらないことが出る', removeText.includes('レシピ3品'), true)
+  eq(
+    '② 削除の窓が「よろしいですか？」だけになっていない',
+    removeText.includes('よろしいですか'),
+    false,
+  )
+
+  // 以前の版がレシピ本体に書き込んだタグの後始末。外す道は残す(データを失う方に倒さない)
+  const legacy = [mk(1, 'から揚げ', ['から揚げ']), mk(2, 'から揚げ丼', ['和食', 'から揚げ'])]
+  eq('② 前提: 以前の版で書き込まれたタグが2品に残っている', countRecipesWithTag(legacy, 'から揚げ'), 2)
+  const cleaned = legacy.map((r) => ({ ...r, tags: tagsWithRemoved(r.tags, 'から揚げ') }))
+  eq('② 外すとそのタグだけが消える', cleaned.map((r) => r.tags), [[], ['和食']])
+  eq('② 外してもレシピそのものは残る', cleaned.map((r) => r.id), [1, 2])
+  const legacyText = confirmContentText(buildLegacyTagRemoveConfirm({ tag: 'から揚げ', count: 2 }))
+  eq('② 後始末の窓に消えるものが出る', legacyText.includes('消えるもの'), true)
+  eq('② 後始末の窓に残るものが出る', legacyText.includes('残るもの'), true)
+  eq('② 後始末の窓に何品から外れるかが出る', legacyText.includes('レシピ2品'), true)
+}
+
+// ---------- 便HZ・② レシピを書き換える経路が本当に無いことを、コードそのものから見る ----------
+// 画面を立ち上げずに measure できる唯一の形。読み取りに失敗したら必ず落ちるようにする
+// (ファイルが読めなかった＝合格、に倒れない)。同じ読み方で「在るもの」も読めることを
+// 前提として確かめ、正規表現が空振りしているだけの合格を作らない。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  // 説明のコメントに書いた名前(「addTagToRecipes は便HZで削除した」等)を数えないよう、
+  // コメントを落としてから読む＝コードとして残っているかどうかだけを見る
+  const stripComments = (src) =>
+    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/gm, '$1')
+  const read = (rel) => {
+    const text = readFileSync(path.join(appRoot, rel), 'utf-8')
+    if (text.length < 200) throw new Error(`${rel} を読み取れていない(長さ=${text.length})`)
+    const code = stripComments(text)
+    if (code.length < 200) throw new Error(`${rel} のコメントを落としたら中身が残らない`)
+    return code
+  }
+  const page = read('src/pages/RecipesPage.tsx')
+  const dbRecipes = read('src/db/recipes.ts')
+  const logic = read('src/logic/tagRegister.ts')
+  // 前提: 同じ読み方で、いま在るものは「在る」と読める(見張りの空振り防止)
+  eq(
+    '② 前提: 見張りが空振りしていない(在る名前は読み取れる)',
+    /savedSearchesWith/.test(logic) &&
+      /savedSearchFromQuery/.test(page) &&
+      /removeTagFromRecipes/.test(dbRecipes),
+    true,
+  )
+  eq(
+    '② レシピにタグを書き込む関数(addTagToRecipes)がDBから無くなった',
+    /addTagToRecipes/.test(dbRecipes),
+    false,
+  )
+  eq('② レシピ一覧からも addTagToRecipes を呼んでいない', /addTagToRecipes/.test(page), false)
+  eq(
+    '② 登録のロジックにタグを足す道具(tagsWithAdded・recipeIdsMissingTag)が残っていない',
+    /tagsWithAdded|recipeIdsMissingTag/.test(logic),
+    false,
+  )
+}
+
+// ---------- 便HZ・③ タグの複数選択と、2つ以上選んだときの選び方の切り替え ----------
+// オーナー「タグ検索は、複数選択できるよにして。AND検索OR検索の切り替え機能も欲しい」。
+// 件数の決め打ちではなく、**2つ選んだときにANDとORで結果が実際に違う**ことと、
+// **AND ⊆ OR** の関係で測る(タグの顔ぶれが増えても意味が変わらない形)。
+{
+  const { defaultSearchOptions } = await import('../src/logic/search.ts')
+  const mk = (id, tags) => ({
+    id,
+    title: `品${id}`,
+    tags,
+    searchWords: [],
+    ingredients: [],
+    cookedLogs: [],
+  })
+  const recipes = [mk(1, ['和食', '作り置き']), mk(2, ['和食']), mk(3, ['作り置き']), mk(4, ['洋食'])]
+  const base = {
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  }
+  const ids = (tags, tagMatch) =>
+    searchRecipes(recipes, { ...base, tags, tagMatch }).map((r) => r.recipe.id)
+
+  eq('③ 1つも選んでいなければ絞らない', ids([], 'any'), [1, 2, 3, 4])
+  eq('③ 空の配列も「絞らない」と同じ', ids([], 'all'), [1, 2, 3, 4])
+  eq('③ 1つだけ選んだとき(どれかが付いている)', ids(['和食'], 'any'), [1, 2])
+  eq('③ 1つだけなら選び方を変えても結果は同じ', ids(['和食'], 'all'), ids(['和食'], 'any'))
+
+  const anyTwo = ids(['和食', '作り置き'], 'any')
+  const allTwo = ids(['和食', '作り置き'], 'all')
+  eq('③ 前提: 2つ選んだときどちらも空振りしていない', anyTwo.length > 0 && allTwo.length > 0, true)
+  neq('③ 2つ選ぶと、選び方で結果が実際に違う', allTwo, anyTwo)
+  eq(
+    '③ 「すべて付いている」の結果は「どれかが付いている」に必ず含まれる',
+    allTwo.every((id) => anyTwo.includes(id)),
+    true,
+  )
+  eq('③ 「すべて付いている」の方が必ず少ない(選ぶほど絞れる)', allTwo.length < anyTwo.length, true)
+  eq('③ どれかが付いている＝和集合', anyTwo, [1, 2, 3])
+  eq('③ すべて付いている＝両方付いている品だけ', allTwo, [1])
+  eq('③ 選び方を渡さないときは「どれかが付いている」として扱う', ids(['和食', '作り置き'], undefined), anyTwo)
+  eq('③ 既定値も「どれかが付いている」', defaultSearchOptions.tagMatch, 'any')
+  // 既定を「すべて付いている」にしない理由: 候補の上位は和食・洋食のように同時には付かない分類で、
+  // 2つ目を押した瞬間に0品になり、壊れて見える
+  eq('③ 同時には付かないタグ2つ: すべて付いている＝0品', ids(['和食', '洋食'], 'all'), [])
+  eq('③ 同時には付かないタグ2つ: どれかが付いている＝品が出る', ids(['和食', '洋食'], 'any'), [1, 2, 4])
+  // 1つだけ選ぶ旧来の指定(献立のレシピ選択ピッカー等)は今までどおり効く
+  eq(
+    '③ 1つだけ選ぶ旧来の指定(tag)は今までどおり効く',
+    searchRecipes(recipes, { ...base, tag: '洋食' }).map((r) => r.recipe.id),
+    [4],
+  )
+  eq(
+    '③ 旧来の指定と複数選択は同時に指定しても両方効く',
+    searchRecipes(recipes, { ...base, tag: '和食', tags: ['作り置き'], tagMatch: 'any' }).map(
+      (r) => r.recipe.id,
+    ),
+    [1],
+  )
 }
 
 // ---------- jaWrap: 文節折返し(BudouX・2026-07-11) ----------
