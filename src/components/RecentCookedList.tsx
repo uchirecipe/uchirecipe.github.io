@@ -38,6 +38,8 @@ function HistoryCard({
       <RecipeCard
         recipe={recipe}
         density="standard"
+        // 出すのはレシピの属性ではなく「その記録の情報」（2026-08-19 便HY・cardParts.ts）
+        place="cookedLog"
         onSelect={onOpen}
         selectAriaLabel={ja.cookedDetail.openAria.replace('{title}', recipe.title)}
         photoOverride={log.photo}

@@ -219,6 +219,7 @@ export default function MealTemplatesPage() {
                     <RecipeCard
                       recipe={recipe}
                       density="standard"
+                      place="recipePicker"
                       ngIngredients={settings?.ngIngredients ?? []}
                       onSelect={() => void pickReplacement(recipe.id!)}
                     />
@@ -310,7 +311,7 @@ function TemplateCard({
                           </span>
                           {recipe ? (
                             <span className="min-w-0 flex-1">
-                              <RecipeCard recipe={recipe} density="small" readOnly />
+                              <RecipeCard recipe={recipe} density="small" place="planSlot" readOnly />
                             </span>
                           ) : (
                             <span className="min-w-0 flex-1 truncate text-sm font-bold text-ink-muted">

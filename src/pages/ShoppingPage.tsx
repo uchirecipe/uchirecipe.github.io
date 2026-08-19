@@ -989,6 +989,7 @@ export default function ShoppingPage() {
                         <RecipeCard
                           recipe={recipe}
                           density="small"
+                          place="planSlot"
                           onNavigate={() => setNamePopup(null)}
                           meta={source.amount || undefined}
                         />
@@ -1098,7 +1099,7 @@ export default function ShoppingPage() {
                           写真で見分けられるようになる。似た名前を2行まで折り返す作法
                           (2026-07-29 便CC/C20)は「標準」の料理名がそのまま引き継いでいる */}
                       <div className="min-w-0 flex-1">
-                        <RecipeCard recipe={recipe} density="standard" readOnly />
+                        <RecipeCard recipe={recipe} density="standard" place="recipePicker" readOnly />
                       </div>
                       {/* 食数の+/-ステッパー(2026-07-23 #3)。1食以上で選択扱い・指定食数で候補生成 */}
                       <div className="flex shrink-0 items-center gap-1">

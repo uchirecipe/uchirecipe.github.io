@@ -398,6 +398,11 @@ function TodayListRow({
       <RecipeCard
         recipe={recipe}
         density="standard"
+        place="todayPlan"
+        // 検査用の目印（2026-08-19 便HY・CARDPARTS-01）。「今日なに作る？」の候補と
+        // 同じレシピのカードを見比べて、場所ごとに載せる情報が違うことを機械で見張る
+        testId="day-plan-card"
+        titleTestId="day-plan-card-title"
         linkState={fromState}
         actions={
           <>
@@ -487,6 +492,7 @@ function CookedLogCard({
       <RecipeCard
         recipe={recipe}
         density="small"
+        place="planSlot"
         muted
         photoOverride={log.photo}
         readOnly={readOnly}
@@ -5194,6 +5200,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             <RecipeCard
               recipe={recipe!}
               density="small"
+              place="planSlot"
               muted={isCooked}
               disabled={locked}
               onSelect={() => openPicker(date, slot, role, entryId, extraLocalId)}
@@ -7582,6 +7589,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     <RecipeCard
                       recipe={recipe}
                       density="standard"
+                      place="recipePicker"
                       ngIngredients={settings?.ngIngredients ?? []}
                       onSelect={() => void pickRecipe(recipe.id!)}
                       testId={isPrevious ? 'picker-previous' : undefined}
@@ -7950,6 +7958,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           <RecipeCard
                             recipe={recipe}
                             density="small"
+                            place="planSlot"
                             readOnly
                             titleBadges={
                               <span className="text-xs text-ink-muted">

@@ -64,17 +64,20 @@ import { ja } from '../i18n/ja'
  *    効かない側では出さない＝「効くように見えるのに効かない」を作らない
  *
  * 2026-08-19 便HT（オーナー原文「基本を献立表示にして、1品にする時のみスイッチ押すように
- * した方が良いかも」）: 切り替えの**未設定時の既定を「献立」に**した（設定 dayStartSuggestMode）。
+ * した方が良いかも」「献立にも1品と同じように条件を絞る機能つければいいのでは？」）:
+ *  ・切り替えの**未設定時の既定を「献立」に**した（設定 dayStartSuggestMode）
+ *  ・便HMが献立側で隠していた「条件をしぼる」「在庫の食材から」を**どちらの側でも出し、
+ *    献立エンジンにも効かせる**ようにした（planAllowedIds）。当てはめられない
+ *    「料理の種別」だけは、並びの代わりに効かない理由の1行に置き換える
  *
- * このとき「はじめて開いた人には『条件をしぼる』が見えない」ことになるが、
- * **便HMの決め（効かない側には出さない）はそのまま**にしてある。理由は3つ:
- *  ① 既定を変えても、あの絞り込みが献立を組むエンジンに効くようにはならない。
- *     献立側に出せば「効くように見えて効かない」を新しく作るだけになる
- *  ② 絞り込みへの道は消えていない。「1品」は節のいちばん上にあって、押せば
- *     「条件をしぼる」がその場に出る＝隠したのではなく「1品を選ぶと出る」
- *  ③ 献立側に効く条件は別にある（週の「提案の条件」＝調理時間・和洋中・栄養から組む。
- *     pages/MealPlanPage.tsx の renderSuggestConditions）。同じ条件をこの節にも置くと、
- *     同じものを変える場所が2か所になって食い違う
+ * 2026-08-19 便HY（オーナー原文「『在庫の食材から』をON/OFFするたびに献立の表示が
+ * 切り替わらないようにして。変わるのは『おまかせで組む』押下後」）:
+ * 献立側は**どの条件を変えても、押すまで組み直さない**。効くのは「おまかせで献立を組む」を
+ * 押したときだけで、条件を変えた直後は「変えた条件は…押すと反映されます」の1行を
+ * ボタンのすぐ下に出す（詳しい理由は下の planDrawnKey まわり）。
+ * 在庫だけを据え置きにしないのは、同じ並びに置いた絞り込みの作法を1つだけ変えないため。
+ * **1品側は据え置きにしない**＝条件を変えるとその場で候補が入れ替わる（1品は「引き直す」
+ * ことそのものが目的の道具で、押す前と押した後を見比べる献立とは性質が違う）。
  */
 
 type SuggestCondition = 'any' | 'notRecent' | 'favorite' | 'quick'
@@ -148,6 +151,10 @@ function SuggestionCard({
       <RecipeCard
         recipe={recipe}
         density="standard"
+        // 2026-08-19 便HY（オーナー原文「『今日なに作る？』だったら『基本レシピ』と
+        // 食材表記はいらないように感じました」）: 形はレシピ一覧と同じ「標準」のまま、
+        // 載せる情報だけをこの場所ぶんに絞る（表は src/logic/cardParts.ts）
+        place="todaySuggest"
         testId="day-suggest-result"
         titleTestId="day-suggest-result-title"
         // 2026-07-16オーナー決定: 候補カードから詳細を開いて戻ったときは、開いた画面へ戻す
@@ -407,27 +414,45 @@ export default function TodaySuggestPanel({
    * `planDrawnKey` に覚えてから引くので、「今日の献立に入れる」で組んだ献立が空になっても
    * 勝手に引き直さない（入れた直後にお知らせを消して別の献立を出す、をしない）。
    *
-   * 2026-08-19 便HT で2つ足した:
-   *  ・**レシピが届くまでは引かない**。この節が既定で「献立」になったので、アプリを開いた
-   *    直後にここが必ず通る。レシピはliveQueryで後から届くため、届く前に引くと候補0品で
-   *    「この条件で組める献立がありませんでした」とだけ言って引いた印が立ち、
-   *    そのあとレシピが届いても組み直さない画面になっていた
-   *  ・**条件を変えたら組み直す**（オーナー指示で絞り込みが献立側にも効くようになったため）。
-   *    1品側は条件を変えるとその場で候補が入れ替わるので、献立側だけ「押すまで前の組のまま」
-   *    だと、絞ったのに効いていないように見える。覚えるのを真偽値ではなく
-   *    「何で引いたか」にしてあるのは、これを引き直しの合図にするため。
+   * 2026-08-19 便HT: **レシピが届くまでは引かない**。この節が既定で「献立」になったので、
+   * アプリを開いた直後にここが必ず通る。レシピはliveQueryで後から届くため、届く前に引くと
+   * 候補0品で「この条件で組める献立がありませんでした」とだけ言って引いた印が立ち、
+   * そのあとレシピが届いても組み直さない画面になっていた。
    *
-   * レシピ詳細から戻ってきて組が復元されているときは引き直さない（②の要）。
-   * これは**いちばん最初の1回だけ**の扱いで、そのあと条件を変えれば組み直す。
+   * 2026-08-19 便HY（オーナー原文「『在庫の食材から』をON/OFFするたびに献立の表示が
+   * 切り替わらないようにして。変わるのは『おまかせで組む』押下後」）:
+   * **条件を変えても組み直さない**。便HTは逆に「条件を変えたら押さなくても組み直す」に
+   * していたが、勝手に組み替わるほうが驚く、というのがオーナーの指摘。
+   *
+   * 据え置きにするのは**在庫だけではなく、この節の絞り込み全部**（条件チップ・分数・
+   * 在庫の食材から）。在庫だけ据え置きにすると、同じ並びに置かれた絞り込みの作法が
+   * 1つだけ違うことになる。**組み直すのは「おまかせで献立を組む」を押したときだけ**。
+   *
+   * そのため引いた印（planDrawnKey）から条件を外し、「この節で献立を出しているか」だけを
+   * 覚える。条件は別に drawnConditionKey として覚えておき、**いま選んでいる条件と
+   * 食い違っているあいだ**はボタンのすぐ下に1行出す（下の planConditionChanged）
+   * ＝画面が変わらない理由と、変えた条件がいつ効くのかを、押すボタンの側で言う。
+   *
+   * 1品側は今までどおり、条件を変えるとその場で候補が入れ替わる（1品は「引き直す」こと
+   * そのものが目的の道具なので、性質が違う）。
+   *
+   * レシピ詳細から戻ってきて組が復元されているときも引き直さない（②の要）。
    */
   const planPairCount = planPair.length
   const recipesReady = recipes != null && recipes.length > 0
-  /** いまの条件で引いたか（null＝まだ一度も引いていない）。中身は条件の組み合わせ */
+  /**
+   * いま選んでいる絞り込み（2026-08-19 便HY）。献立側に効く条件だけを並べる
+   * ＝料理の種別は献立に当てはめられないので入れない（planAllowedIds と同じ材料）。
+   */
+  const conditionKey = `${condition}|${quickMinutes}|${pantryOnly ? 'pantry' : 'all'}`
+  /**
+   * この節で献立を出しているあいだ立つ印（null＝出していない）。
+   * 2026-08-19 便HY で**条件を含めるのをやめた**＝条件を変えても組み直さない。
+   */
   const [planDrawnKey, setPlanDrawnKey] = useState<string | null>(null)
-  const planDrawKey =
-    shown && mode === 'plan' && recipesReady
-      ? `${condition}|${quickMinutes}|${pantryOnly ? 'pantry' : 'all'}`
-      : null
+  /** 最後に組んだときの絞り込み。いまの conditionKey と違えば「変えたけどまだ組んでいない」 */
+  const [drawnConditionKey, setDrawnConditionKey] = useState<string | null>(null)
+  const planDrawKey = shown && mode === 'plan' && recipesReady ? 'plan' : null
   useEffect(() => {
     if (planDrawKey == null) {
       if (planDrawnKey != null) setPlanDrawnKey(null)
@@ -436,10 +461,35 @@ export default function TodaySuggestPanel({
     if (planDrawnKey === planDrawKey) return
     const first = planDrawnKey == null
     setPlanDrawnKey(planDrawKey)
-    // 最初の1回だけ、すでに組んであるもの（戻ってきたときの覚え）をそのまま出す
-    if (first && planPairCount > 0) return
+    // 最初の1回だけ、すでに組んであるもの（戻ってきたときの覚え・「1品」から戻したとき）を
+    // そのまま出す。覚えが無いときだけ、いまの条件で組んだことにする
+    // （ここで毎回上書きすると、「1品」へ寄り道して戻るだけで「条件を変えた」印が消える）
+    if (first && planPairCount > 0) {
+      if (drawnConditionKey == null) setDrawnConditionKey(conditionKey)
+      return
+    }
+    setDrawnConditionKey(conditionKey)
     onDrawPlan({ auto: true, allowedRecipeIds: planAllowedIds })
-  }, [planDrawKey, planDrawnKey, planPairCount, planAllowedIds, onDrawPlan])
+  }, [
+    planDrawKey,
+    planDrawnKey,
+    planPairCount,
+    planAllowedIds,
+    conditionKey,
+    drawnConditionKey,
+    onDrawPlan,
+  ])
+  /** 「おまかせで献立を組む」を押したとき。組んだ時点の条件を覚え直す */
+  const drawPlanNow = () => {
+    setDrawnConditionKey(conditionKey)
+    onDrawPlan({ allowedRecipeIds: planAllowedIds })
+  }
+  /**
+   * 絞り込みを変えたあと、まだ組み直していない（＝出ている献立が前の条件のもの）。
+   * 献立を出しているあいだだけ見る値
+   */
+  const planConditionChanged =
+    mode === 'plan' && planDrawnKey != null && drawnConditionKey != null && drawnConditionKey !== conditionKey
 
   /** いま出ているもの（「今日の献立に入れる」に渡す中身） */
   const shownRecipes =
@@ -633,11 +683,7 @@ export default function TodaySuggestPanel({
           <button
             type="button"
             data-testid="day-suggest-draw"
-            onClick={
-              mode === 'plan'
-                ? () => onDrawPlan({ allowedRecipeIds: planAllowedIds })
-                : shuffleSuggestion
-            }
+            onClick={mode === 'plan' ? drawPlanNow : shuffleSuggestion}
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
           >
             {mode === 'plan' ? (
@@ -647,6 +693,23 @@ export default function TodaySuggestPanel({
             )}
             {mode === 'plan' ? ja.mealPlan.todaySuggestButton : ja.dayStart.shuffle}
           </button>
+
+          {/* 絞り込みを変えたのに画面が変わらない理由（2026-08-19 便HY・オーナー指示で
+              献立側は押すまで組み直さなくなった）。**置き場所はボタンの「下」**にする:
+              上に置くと、条件を触るたびにボタンが下へずれて、便HTがオーナー実機の指摘
+              （「ランダムボタンが下だと品数によってボタン位置が変わり、連続タップで誤タップします」）
+              に応えて固定した位置がまた動く。下に置けばボタンは1pxも動かず、それでいて
+              押すボタンのすぐ隣で読める。
+              数字の側（下の「主菜の候補◯品」）は条件を変えたその場で動くので、
+              「絞り込みを受け付けたか」はこの1行と数字の2つで分かる */}
+          {planConditionChanged && (
+            <p
+              data-testid="day-plan-condition-changed"
+              className="mt-[var(--space-sm)] text-center text-xs text-ink-muted"
+            >
+              {ja.mealPlan.todaySuggestConditionChanged}
+            </p>
+          )}
 
           {/* 出てきたもの。**どちらを選んでいてもボタンのすぐ下**に出す(2026-08-19 便HT)。
               便HMで「どちらも同じカード・同じ向き」にそろえたのはそのまま残し、向きだけを
@@ -669,8 +732,12 @@ export default function TodaySuggestPanel({
               /* 引いてみて0件だったときだけ言う。切り替えた直後の1フレームでは何も出さない
                  ＝これから引くのに「ありませんでした」と先に言わない。
                  2026-08-19 便HT: 絞り込みが効くようになったので、1品側と同じく
-                 「条件をクリア」も添える（0件の理由が条件のときに、その場で外せる） */
-              planDrawnKey != null && (
+                 「条件をクリア」も添える（0件の理由が条件のときに、その場で外せる）。
+                 2026-08-19 便HY: 条件を変えたあと（まだ組み直していない）は出さない——
+                 「この条件で」が指しているのは**前の条件**なので、そのまま置くと
+                 いま選んでいる条件では組めない、と読めてしまう。
+                 代わりに上の1行（変えた条件は押すと反映されます）が出ている */
+              planDrawnKey != null && !planConditionChanged && (
                 <div className="mt-[var(--space-sm)] text-center text-ink-muted">
                   <p>{ja.mealPlan.todaySuggestNoPair}</p>
                   {anyConditionActive && (

@@ -91,7 +91,7 @@
 //         残らないことをIndexedDB直読みで確認。旧「テーマ一括削除」はテーマUI撤去で1品削除経路へ置換) /
 //         DAYSUGGEST-01(旧HOME-DH-01。2026-08-03 便DHの「今日なに作る？」を2026-08-17 便HGで献立の「日」へ移設:
 //         その日の献立が決まっていなければ出る/1品でも決まれば開いたまま出さない/空に戻すとまた出る/
-//         「ランダムで1品出す」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり既定は主菜だけON/
+//         「おまかせで1品出す」の名前とオレンジ地白字/種別4区分が「条件をしぼる」の中にあり既定は主菜だけON/
 //         種別を足すと候補は減らない・未選択と全選択の候補数が一致(便DV-1の再発防止)) /
 //         DAYLAYOUT-01(2026-08-17 便HH→便HIで並びを更新。旧DAYSEARCH-01(旧HOMESEARCH-01)を置き換え:
 //         献立の「日」の押せるボタンの重なりを解いた。献立が無い日は「自分で選ぶ」入口が1つだけ・
@@ -392,6 +392,9 @@ import path from 'node:path'
 import { ja } from '../src/i18n/ja.ts'
 // 栄養の顔ぶれ・名前は表示側の1か所(便HU・⑯)から読む（画面の字を書き写さない）
 import { NUTRITION_DISPLAY_KEYS, nutritionLabelFor } from '../src/logic/nutrition.ts'
+// カードに出る主要食材のチップ（2026-08-19 便HY・CARDPARTS-01）。画面に出る名前は
+// この関数が決めるので、検査側でも同じ関数を通して突き合わせる（書き写さない）
+import { pickDisplayIngredientChips } from '../src/logic/mainIngredients.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -12935,7 +12938,7 @@ try {
   }
 
   // --- DAYSUGGEST-01(旧HOME-DH-01): 献立の「日」の「今日なに作る？」。
-  // 中身(「条件をしぼる」の折りたたみ・料理の種別4区分・候補数・「ランダムで1品出す」)と、
+  // 中身(「条件をしぼる」の折りたたみ・料理の種別4区分・候補数・「おまかせで1品出す」)と、
   // 出す/出さないの条件を確認する。2026-08-03 便DHでホームに作ったものを、
   // 2026-08-17 便HG(オーナー決定「先にホーム画面なくします」)で献立の「日」へ移した。
   // 測っている中身は移設前と同じで、見る画面と出す条件だけが変わっている:
@@ -12987,18 +12990,21 @@ try {
         )
         // 2026-08-17 便HH: 名前は「ランダムで選ぶ」→「ランダムで1品出す」
         // (規約H。隣に並んだ「おまかせで献立を組む」との違いを名前で言う)
+        // 2026-08-19 便HY(オーナー指示): 「ランダムで1品出す」→「おまかせで1品出す」。
+        // 同じ1つのボタンが切り替えで入れ替わるので、頭の言葉を「おまかせ」でそろえた
         check(
-          'DAYSUGGEST-01 振り直しは「ランダムで1品出す」(旧「ほかの候補を見る」「ランダムで選ぶ」は残っていない)',
-          body.includes('ランダムで1品出す') &&
+          'DAYSUGGEST-01 振り直しは「おまかせで1品出す」(旧「ほかの候補を見る」「ランダムで選ぶ」「ランダムで1品出す」は残っていない)',
+          body.includes('おまかせで1品出す') &&
             !body.includes('ほかの候補を見る') &&
-            !body.includes('ランダムで選ぶ'),
+            !body.includes('ランダムで選ぶ') &&
+            !body.includes('ランダムで1品出す'),
         )
         // オレンジ地・白字(既存CTAと同じトークン)。直接色指定ではなくクラスで確認する
         const shuffleClass =
-          (await dhPage.getByRole('button', { name: 'ランダムで1品出す' }).getAttribute('class')) ??
+          (await dhPage.getByRole('button', { name: 'おまかせで1品出す' }).getAttribute('class')) ??
           ''
         check(
-          'DAYSUGGEST-01 「ランダムで1品出す」はオレンジ地・白字(bg-accent/text-on-accent)',
+          'DAYSUGGEST-01 「おまかせで1品出す」はオレンジ地・白字(bg-accent/text-on-accent)',
           shuffleClass.includes('bg-accent') && shuffleClass.includes('text-on-accent'),
         )
         // 種別4区分は「条件をしぼる」の中。畳んでいる間は出ない
@@ -13090,7 +13096,7 @@ try {
           (await dhPage.locator('[data-testid="day-suggest-toggle"]').getAttribute(
             'aria-expanded',
           )) === 'false' &&
-            !body.includes('ランダムで1品出す') &&
+            !body.includes('おまかせで1品出す') &&
             body.includes('ほうれん草のおひたし'),
         )
       }
@@ -13113,7 +13119,7 @@ try {
       await dhPage.waitForTimeout(1500)
       check(
         'DAYSUGGEST-01 今日の献立を空に戻すと「今日なに作る？」がまた出る',
-        ((await dhPage.textContent('body')) ?? '').replaceAll('​', '').includes('ランダムで1品出す'),
+        ((await dhPage.textContent('body')) ?? '').replaceAll('​', '').includes('おまかせで1品出す'),
       )
     } finally {
       await dhBrowser.close()
@@ -21218,7 +21224,7 @@ try {
           await section.locator('[data-testid="day-mode-one"]').click()
           await dlPage.waitForTimeout(800)
         }
-        const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
+        const oneDish = section.getByRole('button', { name: 'おまかせで1品出す' })
         check(
           'DAYLAYOUT-01 「決めてもらう」ボタンは「今日なに作る？」の中に1つだけ',
           (await draw.count()) === 1 &&
@@ -21232,7 +21238,7 @@ try {
         )
         for (const [label, loc] of [
           ['今日の献立を探す', choose],
-          ['ランダムで1品出す', oneDish],
+          ['おまかせで1品出す', oneDish],
         ]) {
           const box = await dlTapSize(loc)
           check(
@@ -21277,7 +21283,7 @@ try {
         check(
           'DAYLAYOUT-01 献立がある日は「今日なに作る？」を畳んでおく(見え方を重くしない)',
           // 2026-08-17 便HI: 節の名前は畳んでも出したままにしたので、中身が出ていないことで測る
-          !body.includes('ランダムで1品出す'),
+          !body.includes('おまかせで1品出す'),
         )
         const section = dlSuggestSection()
         const toggle = dlPage.locator('[data-testid="day-suggest-toggle"]')
@@ -21316,9 +21322,9 @@ try {
           'DAYLAYOUT-01 見出しを押すと「今日なに作る？」が開く',
           toggleFound && (await toggle.getAttribute('aria-expanded')) === 'true',
         )
-        const oneDish = section.getByRole('button', { name: 'ランダムで1品出す' })
+        const oneDish = section.getByRole('button', { name: 'おまかせで1品出す' })
         const oneDishFound = (await oneDish.count()) === 1
-        check('DAYLAYOUT-01 開いた提案は「ランダムで1品出す」が使える', oneDishFound)
+        check('DAYLAYOUT-01 開いた提案は「おまかせで1品出す」が使える', oneDishFound)
         // 振り直しても候補のカードが出ていること(開いた先で提案として機能する)。
         // 出た料理名そのものは見ない(くじなので毎回変わる)
         const dlCardTitle = async () => {
@@ -22021,8 +22027,8 @@ try {
           await dfPage.waitForTimeout(1200)
           const after = await cardTitle()
           if (before.length === 0 || before !== after) mismatches.push(`${i + 1}回目: ${before} → ${after}`)
-          // 次の往復は「ランダムで1品出す」で引き直してから（覚えが外れることも一緒に見る）
-          await suggestSection.getByRole('button', { name: 'ランダムで1品出す' }).click()
+          // 次の往復は「おまかせで1品出す」で引き直してから（覚えが外れることも一緒に見る）
+          await suggestSection.getByRole('button', { name: 'おまかせで1品出す' }).click()
           await dfPage.waitForTimeout(500)
         }
         check(
@@ -22327,17 +22333,24 @@ try {
   }
 
   // --- DAYPLANFILTER-01(2026-08-19 便HT・オーナー原文「献立にも1品と同じように条件を絞る
-  // 機能つければいいのでは？」)。
+  // 機能つければいいのでは？」／2026-08-19 便HY・オーナー原文「『在庫の食材から』を
+  // ON/OFFするたびに献立の表示が切り替わらないようにして。変わるのは『おまかせで組む』押下後」)。
   //
-  // 測るのは「**選んだ条件が、組まれた献立に本当に効いているか**」。画面に条件が出ているか
-  // ではなく、出てくる料理が条件どおりに変わることで見る。
-  //   ① 「◯分以内」を10分にすると、組まれた主菜・副菜の調理時間がすべて10分以内になる
-  //   ② 条件を変えると、押さなくてもその場で組み直す（絞ったのに前の組のまま、にしない）
-  //   ③ 「お気に入り」にすると、組まれた品がすべてお気に入りになる
+  // 測るのは2つ。**選んだ条件が組まれた献立に効いているか**と、**それがいつ効くか**。
+  // 画面に条件が出ているかではなく、出てくる料理で見る。
+  //   ① 条件を変えただけでは、出ている献立が**変わらない**（勝手に組み替わらない）
+  //   ② 変えたことは、押すボタンのそばで分かる（1行が出る）
+  //   ③ 「おまかせで献立を組む」を押すと組み直り、10分以内の品だけになる（＝条件が効いている）
+  //      押したあとは②の1行が消える（変えた条件が反映済みだと分かる）
+  //   ④ 条件に合う品が1つも無いときは、条件を無視した献立を黙って出さない
+  //   ⑤ 「お気に入り」で組み直すと、組まれた品がすべてお気に入りになる
+  // 便HTはここを「条件を変えたら押さなくても組み直す」にしていた。オーナーの指摘で逆向きに
+  // 直したので、この検査も向きごと入れ替えてある（在庫だけでなく**どの条件でも**据え置き）。
   // 仕込みは「調理時間で分かれる自分のレシピ」を作るのではなく、**同梱のレシピの調理時間を
   // そのまま使う**（レシピの中身に手を入れない）。判定は画面の料理名を IndexedDB の
   // レシピと突き合わせて行う＝表示の書式に依らない。
-  // 禁じ手よけ: 曜日・月替わりの前提を置かない／文言の完全一致で測らない／品数を決め打ちしない／
+  // 禁じ手よけ: 曜日・月替わりの前提を置かない／文言の完全一致で測らない／品数・押す回数を
+  // 決め打ちしない／要素の置き場所に固定しない（data-testid と名前で掴む）／
   // **料理名が1つも読めなかったときは合格に倒さず不合格にする** ---
   currentCheck = 'DAYPLANFILTER-01'
   {
@@ -22415,7 +22428,7 @@ try {
           pfAll.some((r) => r.cookMinutes != null && r.cookMinutes > 10),
       )
 
-      // ① 「◯分以内」を10分にして組ませる
+      // ①〜③ 「◯分以内」を10分にする → 押すまで変わらない → 押すと効く
       const pfConditions = pfSection().getByRole('button', { name: /条件をしぼる/ })
       check('DAYPLANFILTER-01 前提: 献立側でも「条件をしぼる」が押せる', (await pfConditions.count()) === 1)
       if ((await pfConditions.count()) === 1) {
@@ -22423,6 +22436,7 @@ try {
         await pfPage.waitForTimeout(500)
       }
       const pfBefore = await pfTitles()
+      check('DAYPLANFILTER-01 前提: 条件を変える前の献立を読めた', pfBefore.length > 0)
       // 無いものを押して30秒待ち、節ごと「実行中断」で止まらないようにする
       // （止まると後ろの節まで走らないので、赤の中身が読めなくなる）
       const pfQuick = pfSection().getByRole('button', { name: /分以内$/ })
@@ -22438,26 +22452,50 @@ try {
         await pfTen.first().click()
         await pfPage.waitForTimeout(1500)
       }
+      const pfChangedNote = () => pfPage.locator('[data-testid="day-plan-condition-changed"]')
       {
+        // ① 条件を変えただけでは、出ている献立は1品も入れ替わらない
+        const titles = await pfTitles()
+        check(
+          'DAYPLANFILTER-01 条件を変えただけでは、出ている献立が組み直らない(2026-08-19 便HY)',
+          pfBefore.length > 0 && JSON.stringify(titles) === JSON.stringify(pfBefore),
+          `前=${JSON.stringify(pfBefore)} 後=${JSON.stringify(titles)}`,
+        )
+        // ② 変えたことは押すボタンのそばで分かる（画面が変わらない理由が読める）
+        check(
+          'DAYPLANFILTER-01 条件を変えると、押すボタンのそばに変えたことが出る',
+          (await pfChangedNote().count()) === 1,
+        )
+        // ボタンより下に出す＝押すものが動かない（便HTの誤タップ対策を壊していない）
+        const noteBox = (await pfChangedNote().count()) === 1 ? await pfChangedNote().boundingBox() : null
+        const drawBox = await pfPage.locator('[data-testid="day-suggest-draw"]').boundingBox()
+        check(
+          'DAYPLANFILTER-01 その1行は決めてもらうボタンより下に出る(ボタンを押し下げない)',
+          noteBox != null && drawBox != null && noteBox.y > drawBox.y,
+          `1行y=${noteBox ? Math.round(noteBox.y) : '無し'} ボタンy=${drawBox ? Math.round(drawBox.y) : '無し'}`,
+        )
+      }
+      // ③ 押すと組み直り、条件が効いた結果になる
+      {
+        await pfPage.locator('[data-testid="day-suggest-draw"]').click()
+        await pfPage.waitForTimeout(1500)
         const titles = await pfTitles()
         const overs = titles.filter((t) => {
           const r = pfByTitle.get(t)
           return !r || r.cookMinutes == null || r.cookMinutes > 10
         })
         check(
-          'DAYPLANFILTER-01 「10分以内」にすると、組まれた献立が10分以内の品だけになる',
+          'DAYPLANFILTER-01 押すと「10分以内」が効いて、組まれた献立が10分以内の品だけになる',
           titles.length > 0 && overs.length === 0,
           `出た品=${JSON.stringify(titles)} はみ出し=${JSON.stringify(overs)}`,
         )
-        // ② 条件を変えた時点で組み直っている（押していないのに中身が入れ替わる）
         check(
-          'DAYPLANFILTER-01 条件を変えると、押さなくてもその場で組み直す',
-          titles.length > 0 && JSON.stringify(titles) !== JSON.stringify(pfBefore),
-          `前=${JSON.stringify(pfBefore)} 後=${JSON.stringify(titles)}`,
+          'DAYPLANFILTER-01 押したあとは「変えた条件は…」の1行が消える',
+          (await pfChangedNote().count()) === 0,
         )
       }
 
-      // ③-0 条件に合う品が1つも無いときは、**黙って条件を無視した献立を出さない**。
+      // ④ 条件に合う品が1つも無いときは、**黙って条件を無視した献立を出さない**。
       // ここがいちばん分かりづらい倒れ方（絞ったのに効いていないように見える）なので、
       // お気に入りを1品も付けていない状態で「お気に入り」を選んで確かめる
       {
@@ -22476,8 +22514,15 @@ try {
         check('DAYPLANFILTER-01 前提: お気に入りが選べる', (await pfFav0.count()) === 1)
         if ((await pfFav0.count()) === 1) {
           await pfFav0.click()
-          await pfPage.waitForTimeout(1600)
+          await pfPage.waitForTimeout(800)
         }
+        // 2026-08-19 便HY: 押すまでは組み直さないので、0件の知らせもここでは出ない
+        check(
+          'DAYPLANFILTER-01 条件を変えただけでは「組める献立がありませんでした」と先に言わない',
+          !((await pfPage.textContent('body')) ?? '').replaceAll('​', '').includes('組める献立がありませんでした'),
+        )
+        await pfPage.locator('[data-testid="day-suggest-draw"]').click()
+        await pfPage.waitForTimeout(1600)
         const pfBody0 = ((await pfPage.textContent('body')) ?? '').replaceAll('​', '')
         check(
           'DAYPLANFILTER-01 条件に合う品が無いときは、条件を無視した献立を黙って出さない',
@@ -22486,7 +22531,7 @@ try {
         )
       }
 
-      // ③ 「お気に入り」にすると、組まれた品がすべてお気に入りになる
+      // ⑤ 「お気に入り」にして押すと、組まれた品がすべてお気に入りになる
       // お気に入りを2品だけ付ける（主菜と副菜が1品ずつ＝献立が組める最小の形）
       await pfPage.evaluate(
         () =>
@@ -22524,19 +22569,217 @@ try {
       check('DAYPLANFILTER-01 前提: 献立側で「お気に入り」が選べる', (await pfFav.count()) === 1)
       if ((await pfFav.count()) === 1) {
         await pfFav.click()
-        await pfPage.waitForTimeout(1600)
+        await pfPage.waitForTimeout(800)
       }
+      // 2026-08-19 便HY: 効かせるのは押したとき。押す前と押したあとで、同じ条件が
+      // 「まだ効いていない」→「効いた」に変わることを1組で見る。
+      // 押す前の判定は**料理名の中身ではなく、変えた印が出ているか**で行う
+      // （たまたま引けた組がお気に入りと一致する回だけ落ちる、をしない）
+      const pfNoteBefore = await pfPage.locator('[data-testid="day-plan-condition-changed"]').count()
+      await pfPage.locator('[data-testid="day-suggest-draw"]').click()
+      await pfPage.waitForTimeout(1600)
       {
         const favTitles = await pfTitles()
         const notFav = favTitles.filter((t) => !(pfByTitle.get(t) ? ['肉じゃが', 'ほうれん草のおひたし'].includes(t) : false))
         check(
-          'DAYPLANFILTER-01 「お気に入り」にすると、お気に入りにした品だけで組まれる',
+          'DAYPLANFILTER-01 「お気に入り」にして押すと、お気に入りにした品だけで組まれる',
           favTitles.length > 0 && notFav.length === 0,
           `出た品=${JSON.stringify(favTitles)} お気に入りでない=${JSON.stringify(notFav)}`,
+        )
+        // 押す前は「まだ反映していない」と言っていて、押したら言わなくなる
+        check(
+          'DAYPLANFILTER-01 「お気に入り」を選んだ時点では、まだ反映していないと言っている',
+          pfNoteBefore === 1,
+          `変えた印=${pfNoteBefore}`,
+        )
+        check(
+          'DAYPLANFILTER-01 押したあとは、その1行が消える',
+          (await pfPage.locator('[data-testid="day-plan-condition-changed"]').count()) === 0,
         )
       }
     } finally {
       await pfBrowser.close()
+    }
+  }
+
+  // --- CARDPARTS-01(2026-08-19 便HY・オーナー原文「レシピカードはフォーマットが揃っていれば、
+  // それぞれの場所で不要な情報はなくしてシンプルにしたいのですが、どうでしょう？
+  // 『今日なに作る？』だったら『基本レシピ』と食材表記はいらないように感じました。」)。
+  //
+  // 測るのは「**同じレシピのカードが、場所によって載せる情報を変えているか**」。
+  // 項目名を場所ごとに書き写して並べるのではなく、**同じ1品を2か所で見比べて**判定する:
+  //   ① 「今日なに作る？」の候補には「基本レシピ」も主要食材のチップも出ない
+  //   ② その同じ品を今日の献立に入れると、そちらのカードには両方とも出る
+  //      （＝カードごと情報を落としたのではなく、場所で切り替えている）
+  //   ③ 骨格は動かしていない: 料理名の大きさが2か所で同じで、オーナーがOKと言った16pxのまま
+  //   ④ 候補カードからも、決め手になる手間（かんたん/ふつう/じっくり）は消えていない
+  // 主要食材のチップに出る名前は画面側と同じ関数（pickDisplayIngredientChips）で出す
+  // ＝表示の書式や選び方が変わっても、書き写した名前が古くなって空振りすることがない。
+  // 禁じ手よけ: 曜日・月替わりの前提を置かない／文言の完全一致で測らない（ゼロ幅スペースを外す）／
+  // 押す回数を決め打ちしない（上限は保険と分かる書き方）／要素の置き場所に固定しない
+  //（data-testid で掴み、入れ子の段数は見ない）。
+  // **測る材料が取れなかったときは合格に倒さず不合格にする**（料理名が読めない・
+  // 料理名に含まれない主要食材が1つも無い品しか引けなかった、はどちらも前提の不合格） ---
+  currentCheck = 'CARDPARTS-01'
+  {
+    const cpBrowser = await chromium.launch()
+    const cpContext = await cpBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const cpPage = await cpContext.newPage()
+    cpPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@CARDPARTS-01] ${text}`)
+    })
+    cpPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@CARDPARTS-01] ${err.message}`)
+    })
+    const cpClean = (t) => (t ?? '').replaceAll('​', '').trim()
+    const cpSection = () =>
+      cpPage.locator('section').filter({ has: cpPage.getByRole('heading', { name: '今日なに作る？' }) })
+    const cpCard = () => cpSection().locator('[data-testid="day-suggest-result"]').first()
+    const cpTitleEl = () => cpSection().locator('[data-testid="day-suggest-result-title"]').first()
+    /** 端末に入っているレシピ（主要食材のチップを検査側でも同じ関数で出すため） */
+    const cpRecipes = () =>
+      cpPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result.transaction(['recipes'], 'readonly').objectStore('recipes').getAll()
+              q.onsuccess = () =>
+                resolve(
+                  q.result.map((r) => ({
+                    title: r.title,
+                    isStarter: !!r.isStarter,
+                    ingredients: (r.ingredients ?? []).map((i) => ({
+                      name: i.name ?? '',
+                      amount: i.amount ?? '',
+                      unit: i.unit ?? '',
+                    })),
+                  })),
+                )
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      await cpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cpPage.waitForTimeout(2400) // 初回シード完了待ち
+      await cpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await cpPage.reload({ waitUntil: 'networkidle' })
+      await cpPage.waitForTimeout(1800)
+      const cpAll = await cpRecipes()
+      const cpByTitle = new Map(cpAll.map((r) => [r.title, r]))
+      check('CARDPARTS-01 前提: 端末のレシピを読めた', cpAll.length > 0)
+
+      // 1品側に寄せる＝候補が1品だけになり、どのレシピを見比べるのかが決まる
+      const cpOne = cpPage.locator('[data-testid="day-mode-one"]')
+      check('CARDPARTS-01 前提: 「1品」への切り替えがある', (await cpOne.count()) === 1)
+      if ((await cpOne.count()) === 1) {
+        await cpOne.click()
+        await cpPage.waitForTimeout(1000)
+      }
+
+      /**
+       * 見比べに使える品が出るまで引き直す（上限は無限ループ避けの保険）。
+       * 使えるのは「基本レシピの印を持ち、かつ**料理名に含まれない**主要食材がある」品
+       * ＝料理名にその食材が入っていると、カードの文字に出ていても
+       * 「チップが出ている」のか「料理名の一部」なのか切り分けられない
+       */
+      const CP_MAX_DRAWS = 12
+      let cpTitle = ''
+      let cpChips = []
+      for (let i = 0; i < CP_MAX_DRAWS; i++) {
+        cpTitle = cpClean(await cpTitleEl().textContent())
+        const recipe = cpByTitle.get(cpTitle)
+        if (recipe && recipe.isStarter) {
+          cpChips = pickDisplayIngredientChips(recipe.ingredients)
+            .map((c) => c.name)
+            .filter((name) => name.length > 0 && !cpTitle.includes(name))
+          if (cpChips.length > 0) break
+        }
+        cpChips = []
+        await cpSection().getByRole('button', { name: ja.dayStart.shuffle }).click()
+        await cpPage.waitForTimeout(600)
+      }
+      check(
+        'CARDPARTS-01 前提: 見比べに使える候補が出た（基本レシピの印と、料理名に無い主要食材を持つ品）',
+        cpTitle.length > 0 && cpChips.length > 0,
+        `料理名=${cpTitle} 主要食材=${JSON.stringify(cpChips)}`,
+      )
+
+      // ① 「今日なに作る？」の候補には、基本レシピの印も主要食材のチップも出ない
+      const cpCardText = cpClean(await cpCard().textContent())
+      check(
+        'CARDPARTS-01 「今日なに作る？」の候補に「基本レシピ」を出さない',
+        cpTitle.length > 0 && !cpCardText.includes(ja.card.starterBadge),
+        `カード=${cpCardText}`,
+      )
+      check(
+        'CARDPARTS-01 「今日なに作る？」の候補に主要食材のチップを出さない',
+        cpChips.length > 0 && cpChips.every((name) => !cpCardText.includes(name)),
+        `カード=${cpCardText} 主要食材=${JSON.stringify(cpChips)}`,
+      )
+      // ④ 決め手になる手間は残っている（カードごと情報を落としたのではない）
+      check(
+        'CARDPARTS-01 候補カードには手間（かんたん/ふつう/じっくり）が残っている',
+        new RegExp(Object.values(ja.effort).join('|')).test(cpCardText),
+        `カード=${cpCardText}`,
+      )
+      const cpSuggestFont = await cpTitleEl().evaluate((el) => getComputedStyle(el).fontSize)
+
+      // ② 同じ品を今日の献立に入れると、そちらのカードには両方とも出る
+      await cpPage.locator('[data-testid="day-suggest-apply"]').click()
+      await cpPage.waitForTimeout(600)
+      const cpSlotButtons = cpPage.locator('[data-testid="today-slot-button"]')
+      check('CARDPARTS-01 前提: 食事の枠を選ぶ窓が開く', (await cpSlotButtons.count()) === 3)
+      if ((await cpSlotButtons.count()) === 3) {
+        await cpPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+        await cpPage.waitForTimeout(1600)
+      }
+      const cpPlanCard = cpPage
+        .locator('[data-testid="day-plan-card"]')
+        .filter({ hasText: cpTitle })
+        .first()
+      check(
+        'CARDPARTS-01 前提: 同じ品が今日の献立のカードとして出ている',
+        (await cpPlanCard.count()) === 1,
+        `料理名=${cpTitle}`,
+      )
+      if ((await cpPlanCard.count()) === 1) {
+        const cpPlanText = cpClean(await cpPlanCard.textContent())
+        check(
+          'CARDPARTS-01 今日の献立のカードには「基本レシピ」が出る（削ったのは候補の側だけ）',
+          cpPlanText.includes(ja.card.starterBadge),
+          `カード=${cpPlanText}`,
+        )
+        check(
+          'CARDPARTS-01 今日の献立のカードには主要食材のチップが出る（削ったのは候補の側だけ）',
+          cpChips.length > 0 && cpChips.every((name) => cpPlanText.includes(name)),
+          `カード=${cpPlanText} 主要食材=${JSON.stringify(cpChips)}`,
+        )
+        // ③ 骨格は動かしていない（料理名の大きさが2か所で同じ・オーナーOKの16pxのまま）
+        const cpPlanFont = await cpPage
+          .locator('[data-testid="day-plan-card-title"]')
+          .first()
+          .evaluate((el) => getComputedStyle(el).fontSize)
+        check(
+          'CARDPARTS-01 料理名の大きさは場所で変わらない（骨格は動かしていない）',
+          cpSuggestFont.length > 0 && cpSuggestFont === cpPlanFont,
+          `候補=${cpSuggestFont} 今日の献立=${cpPlanFont}`,
+        )
+        check(
+          'CARDPARTS-01 料理名の大きさは16pxのまま（2026-08-19 オーナーがOKと言った大きさ）',
+          cpSuggestFont === '16px',
+          `候補=${cpSuggestFont}`,
+        )
+      }
+    } finally {
+      await cpBrowser.close()
     }
   }
 
@@ -36878,7 +37121,7 @@ try {
         // 開けることは DAYLAYOUT-01 が見る
         check(
           'NOHOME-01 献立がある日は「今日なに作る？」を開いたまま出さない',
-          !body.includes('ランダムで1品出す'),
+          !body.includes('おまかせで1品出す'),
         )
         check('NOHOME-01 献立がある日も「最近作ったもの」は出る', body.includes('最近作ったもの'))
       }

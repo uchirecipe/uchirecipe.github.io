@@ -122,6 +122,12 @@ import {
 import { selectPantryDowngrades } from '../src/logic/pantry.ts'
 import { CARD_DENSITIES, densityForListLayout } from '../src/logic/cardDensity.ts'
 import {
+  CARD_PART_KEYS,
+  CARD_PLACE_PARTS,
+  DEFAULT_CARD_PLACE,
+  cardPartsFor,
+} from '../src/logic/cardParts.ts'
+import {
   categorizePantryName,
   resolvePantryGroup,
   groupPantryItems,
@@ -21656,6 +21662,216 @@ Aみりん 大さじ1
           !classBefore(at).includes('pointer-events-none'),
       ).length,
       0,
+    )
+  }
+}
+
+// ==========================================================================================
+// HY-1〜HY-5: 「どの場所で、カードに何を載せるか」は1つの表で決まる（2026-08-19 便HY）
+//
+// オーナー原文:
+//   「レシピカードはフォーマットが揃っていれば、それぞれの場所で不要な情報はなくして
+//     シンプルにしたいのですが、どうでしょう？『今日なに作る？』だったら『基本レシピ』と
+//     食材表記はいらないように感じました。」
+//
+// 便HN/便HWで**形**は3つの密度にそろった。便HYはその先の**引き算**で、決めごとは
+// 「**削るのは自由・足すのは共通部品を通す**」。表は src/logic/cardParts.ts の1か所。
+//
+// **測り方の決めごと**（項目名を画面ごとに書き写して並べない＝場所が増えても当たる形にする）:
+//   HY-1 … カードを出しているすべての場所が、表の「場所」のどれかに解決できること
+//   HY-2 … 共通のカード部品が、表を通してからでないとその項目を描かないこと
+//   HY-3 … 表に、カードが用意していない項目を書けないこと（＝その場で足せない）
+//   HY-4 … 表に書いたのに一度も使われていない項目が無いこと（書いただけで効かない列を作らない）
+//   HY-5 … **どの場所も、レシピを探す一覧より情報を増やしていない**こと。そのうえで
+//          「今日なに作る？」の候補は、レシピを探す一覧より**少ない**こと（今回の引き算そのもの）
+//
+// **読み取りに失敗したら必ず落ちる**形にしてある（拾えた呼び出しが0件・描いている場所が0件なら
+// その場で不合格。「見つからなかった＝合格」に倒れる書き方をしない）。
+//
+// HY_SRC_ROOT に別のディレクトリを渡すと、そこの src を測る
+// （この見張りが直す前のコードで本当に赤くなるかを確かめるための口）。
+// ==========================================================================================
+{
+  const hyScriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const hyRoot = process.env.HY_SRC_ROOT ?? path.join(hyScriptDir, '..')
+  const hySrcDir = path.join(hyRoot, 'src')
+
+  const hyListTsx = (dir) => {
+    const out = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...hyListTsx(full))
+      else if (entry.name.endsWith('.tsx')) out.push(full)
+    }
+    return out.sort()
+  }
+  const hyFiles = hyListTsx(hySrcDir).map((full) => ({
+    rel: path.relative(hyRoot, full).split(path.sep).join('/'),
+    src: readFileSync(full, 'utf-8'),
+  }))
+  eq('HY-0 走査できた画面ファイルがある（0件なら見張りが壊れている）', hyFiles.length > 0, true)
+
+  // ---- HY-1: カードを出す場所は、必ず表の「場所」に解決できる ----------------------------
+  /** `<RecipeCard` の開きタグを、波かっこの深さを見ながら切り出す（属性の中の `>` に釣られない） */
+  const hyCardOpenTags = (src) => {
+    const tags = []
+    let at = src.indexOf('<RecipeCard')
+    while (at >= 0) {
+      let depth = 0
+      let end = -1
+      for (let i = at; i < src.length; i++) {
+        const ch = src[i]
+        if (ch === '{') depth++
+        else if (ch === '}') depth--
+        else if (ch === '>' && depth === 0) {
+          end = i
+          break
+        }
+      }
+      if (end < 0) return { error: `開きタグの終わりが見つからない（位置 ${at}）` }
+      tags.push(src.slice(at, end + 1))
+      at = src.indexOf('<RecipeCard', end)
+    }
+    return { tags }
+  }
+  /** 開きタグ1つぶんの場所。読めなければ理由を返す（黙って既定に倒さない） */
+  const hyPlaceOf = (tag) => {
+    const literal = tag.match(/\bplace="([A-Za-z]+)"/)
+    if (literal) {
+      return Object.hasOwn(CARD_PLACE_PARTS, literal[1])
+        ? { place: literal[1] }
+        : { error: `表に無い場所: ${literal[1]}` }
+    }
+    // 省略は「レシピ一覧と同じ＝いちばん情報の多い側」。式で渡すのは読めないので不合格にする
+    const expr = tag.match(/\bplace=\{([^}]*)\}/)
+    if (expr) return { error: `場所の式が読めない: ${expr[1].trim()}` }
+    return { place: DEFAULT_CARD_PLACE }
+  }
+
+  const hyCalls = []
+  const hyTagErrors = []
+  for (const { rel, src } of hyFiles) {
+    if (rel === 'src/components/RecipeCard.tsx') continue
+    const found = hyCardOpenTags(src)
+    if (found.error) {
+      hyTagErrors.push(`${rel}: ${found.error}`)
+      continue
+    }
+    for (const tag of found.tags) hyCalls.push({ rel, ...hyPlaceOf(tag) })
+  }
+  eq('HY-1 カードの呼び出しを切り出せている（切り出せない書き方が無い）', hyTagErrors, [])
+  eq(
+    'HY-1 カードを出している場所を1つ以上拾えている（0件なら見張りが壊れている）',
+    hyCalls.length > 0,
+    true,
+  )
+  eq(
+    'HY-1 すべての場所が表のどれかに解決できる（表に無い場所でカードを出していない）',
+    hyCalls.filter((c) => c.error).map((c) => `${c.rel}: ${c.error}`),
+    [],
+  )
+
+  // ---- HY-2: カード部品は、表を通してからでないとその項目を描かない ----------------------
+  // 「その項目を実際に画面へ出している一行」を項目ごとに1つ決めて、そこへ辿り着く前に
+  // 必ず表の判定（shows('◯◯')）を通っていることを見る。表を素通りして描き足した瞬間に赤くなる。
+  {
+    const hyCardSrc = hyFiles.find((f) => f.rel === 'src/components/RecipeCard.tsx')?.src ?? ''
+    eq('HY-2 共通のカード部品を読めている', hyCardSrc.length > 0, true)
+    /** 項目ごとの「画面へ出している印」。コメントではなく、描画に使っている式そのものを見る */
+    const hyRenderMarks = {
+      time: 'ja.recipes.minutesSuffix',
+      effort: 'ja.effort[',
+      season: 'ja.season[',
+      starter: 'ja.card.starterBadge',
+      ingredients: 'ingredientColorToken(',
+    }
+    // 表の項目と、印を持っている項目がぴったり一致していること
+    // （どちらかにしか無い＝この見張りが片方を測っていない）
+    eq(
+      'HY-2 カタログの項目すべてに「画面へ出している印」がある（測り漏れが無い）',
+      CARD_PART_KEYS.filter((key) => !(key in hyRenderMarks)),
+      [],
+    )
+    eq(
+      'HY-2 印の側に、カタログに無い項目が紛れていない',
+      Object.keys(hyRenderMarks).filter((key) => !CARD_PART_KEYS.includes(key)),
+      [],
+    )
+    const hyUnguarded = []
+    const hyNotDrawn = []
+    for (const [key, mark] of Object.entries(hyRenderMarks)) {
+      const spots = []
+      let at = hyCardSrc.indexOf(mark)
+      while (at >= 0) {
+        spots.push(at)
+        at = hyCardSrc.indexOf(mark, at + mark.length)
+      }
+      // 描いている場所が1つも無い＝印が古い（見張りが何も測っていない）ので不合格にする
+      if (spots.length === 0) {
+        hyNotDrawn.push(`${key}（印: ${mark}）`)
+        continue
+      }
+      for (const spot of spots) {
+        // 直前800文字のあいだに表の判定があるか。密度ごとに書き方が違っても当たるよう、
+        // 「どの入れ子の何段目か」ではなく**手前にあるか**だけで見る
+        const before = hyCardSrc.slice(Math.max(0, spot - 800), spot)
+        if (!before.includes(`shows('${key}')`)) hyUnguarded.push(`${key} @${spot}`)
+      }
+    }
+    eq('HY-2 印が古くなっていない（どの項目も1か所以上で描かれている）', hyNotDrawn, [])
+    eq(
+      'HY-2 カタログの項目は、表を通してからでないと描かれない（表の外で描き足せない）',
+      hyUnguarded,
+      [],
+    )
+  }
+
+  // ---- HY-3/HY-4: 表そのものの決まりごと -------------------------------------------------
+  const hyPlaces = Object.keys(CARD_PLACE_PARTS)
+  eq('HY-3 表に場所が1つ以上ある（0件なら見張りが壊れている）', hyPlaces.length > 0, true)
+  eq(
+    'HY-3 表に、カードが用意していない項目は書けない（その場で新しい項目を足せない）',
+    hyPlaces.flatMap((place) =>
+      CARD_PLACE_PARTS[place]
+        .filter((key) => !CARD_PART_KEYS.includes(key))
+        .map((key) => `${place}: ${key}`),
+    ),
+    [],
+  )
+  eq(
+    'HY-3 同じ項目を1つの場所に2回書いていない',
+    hyPlaces.filter((place) => new Set(CARD_PLACE_PARTS[place]).size !== CARD_PLACE_PARTS[place].length),
+    [],
+  )
+  eq(
+    'HY-4 表に書いたのに、どの場所でも使われていない項目が無い',
+    CARD_PART_KEYS.filter((key) => !hyPlaces.some((place) => cardPartsFor(place).has(key))),
+    [],
+  )
+  eq(
+    'HY-4 省略したときの場所が表に載っている',
+    Object.hasOwn(CARD_PLACE_PARTS, DEFAULT_CARD_PLACE),
+    true,
+  )
+
+  // ---- HY-5: 引き算の向き（増やす方向へは動かない・候補は実際に減っている） ---------------
+  // 「どの場所で何が出るか」を項目名で書き写すと、項目が増えた瞬間に写し直しが要る。
+  // ここでは**場所どうしの大小**だけで測る＝新しい項目が増えても、場所が増えても当たる。
+  {
+    const hyFull = cardPartsFor(DEFAULT_CARD_PLACE)
+    const hyGrew = hyPlaces.filter((place) =>
+      [...cardPartsFor(place)].some((key) => !hyFull.has(key)),
+    )
+    eq(
+      'HY-5 どの場所も、レシピを探す一覧より情報を増やしていない（削る方向だけ）',
+      hyGrew,
+      [],
+    )
+    const hySuggest = cardPartsFor('todaySuggest')
+    eq(
+      'HY-5 「今日なに作る？」の候補は、レシピを探す一覧より載せる情報が少ない（2026-08-19 オーナー指示）',
+      hySuggest.size < hyFull.size && [...hySuggest].every((key) => hyFull.has(key)),
+      true,
     )
   }
 }

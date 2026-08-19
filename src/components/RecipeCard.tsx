@@ -23,6 +23,7 @@ import { resolveIconKey } from '../logic/icon'
 import { ingredientColorToken } from '../logic/ingredientColor'
 import { pickDisplayIngredientChips } from '../logic/mainIngredients'
 import type { CardDensity } from '../logic/cardDensity'
+import { cardPartsFor, type CardPartKey, type CardPlace } from '../logic/cardParts'
 import { ja } from '../i18n/ja'
 import { usePhotoUrl } from './usePhotoUrl'
 
@@ -143,6 +144,16 @@ type Props = {
    */
   density?: CardDensity
   /**
+   * カードを出す**場所**（2026-08-19 便HY・オーナー原文「レシピカードはフォーマットが
+   * 揃っていれば、それぞれの場所で不要な情報はなくしてシンプルにしたい」）。
+   *
+   * 形（密度）はそのままに、**載せる情報だけ**をこの場所ごとに切り替える。
+   * どこで何を載せるかは src/logic/cardParts.ts の1つの表にまとめてあり、
+   * ここで新しい項目を足すことはできない（**削るのは自由・足すのは共通部品を通す**）。
+   * 省略するとレシピ一覧と同じ＝いちばん情報の多い側になる（黙って減らさない）。
+   */
+  place?: CardPlace
+  /**
    * 栄養価並び替え中（Pro機能。2026-07-16 便T）に表示する、並び替えに使っている栄養価の値
    * （例:「カロリー: 320kcal」「たんぱく質: 18.5g」。ラベル+値の形式で呼び出し側(RecipesPage)が
    * 整形済みの文字列を渡す。2026-07-16オーナー指示でラベル付き表示に変更）。
@@ -160,6 +171,10 @@ type Props = {
   //   ・押したときに何が起きるか（レシピ詳細へ／その場で選ぶ／押せない見本）
   //   ・その画面ならではの短い情報と操作（記録の日付・献立の役割・「作った！」ボタン等）
   // の2つで、どちらもカードの骨格（絵の大きさ・名前の行数・余白）には手を触れない。
+  //
+  // 2026-08-19 便HY（オーナー承認済み）で、これに**引き算の口**（place）が1つ増えた。
+  // レシピの属性（時間・手間・季節・基本レシピ・主要食材）のうち、その場所で出すものを
+  // src/logic/cardParts.ts の表から選ぶ。**削るのは自由・足すのは共通部品を通す**。
   // ------------------------------------------------------------------------
 
   /**
@@ -257,6 +272,7 @@ export default function RecipeCard({
   inTodayList,
   showQuickTime,
   density = 'large',
+  place,
   nutrientBadgeText,
   onSelect,
   selectAriaLabel,
@@ -294,6 +310,12 @@ export default function RecipeCard({
   useEffect(() => setPhotoBroken(false), [photoUrl])
   const showPhoto = photoUrl && !photoBroken
   const topIngredients = pickDisplayIngredientChips(recipe.ingredients)
+  /**
+   * この場所で載せる情報（2026-08-19 便HY）。**カードが用意した中から選ぶだけ**で、
+   * 場所ごとに新しい項目を足すことはできない。表は src/logic/cardParts.ts の1か所。
+   */
+  const parts = cardPartsFor(place)
+  const shows = (key: CardPartKey) => parts.has(key)
   const displayMinutes = showQuickTime
     ? recipe.quickCookMinutes ?? recipe.cookMinutes
     : recipe.cookMinutes
@@ -357,10 +379,10 @@ export default function RecipeCard({
     </span>
   )
 
-  /** 調理時間・手間・季節の1行（「大」「標準」の既定の補助情報） */
+  /** 調理時間・手間・季節の1行（「大」「標準」の既定の補助情報）。1つずつ場所の表を通す */
   const defaultInfoRow = (
     <>
-      {displayMinutes != null && displayMinutes > 0 && (
+      {shows('time') && displayMinutes != null && displayMinutes > 0 && (
         <span className="inline-flex items-center gap-0.5">
           <Clock size={12} aria-hidden />
           {showQuickTime && ja.card.quickTimePrefix}
@@ -368,10 +390,12 @@ export default function RecipeCard({
           {ja.recipes.minutesSuffix}
         </span>
       )}
-      <span className="rounded-sm border border-edge px-1.5 py-0.5">
-        {ja.effort[recipe.effortLevel]}
-      </span>
-      {recipe.season && recipe.season !== 'all' && (
+      {shows('effort') && (
+        <span className="rounded-sm border border-edge px-1.5 py-0.5">
+          {ja.effort[recipe.effortLevel]}
+        </span>
+      )}
+      {shows('season') && recipe.season && recipe.season !== 'all' && (
         <span className="inline-flex items-center gap-0.5 rounded-sm border border-edge px-1.5 py-0.5">
           {(() => {
             const SeasonIcon = seasonIcons[recipe.season]
@@ -499,12 +523,12 @@ export default function RecipeCard({
                       </span>
                     )}
                   </div>
-                  {recipe.isStarter && (
+                  {shows('starter') && recipe.isStarter && (
                     <p className="mt-1 truncate text-[10px] font-bold text-ink-muted">
                       {ja.card.starterBadge}
                     </p>
                   )}
-                  {topIngredients.length > 0 && (
+                  {shows('ingredients') && topIngredients.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {topIngredients.map((ing, index) => (
                         <span
@@ -567,13 +591,13 @@ export default function RecipeCard({
                 公式は配布テーマ由来かどうかに関わらず全て「基本レシピ」で表示する
                 (2026-07-20 便AM: 商品が全部込み買い切りになりテーマ区別が販売上不要になったため。
                 データ側のsourceSetName/sourceSetIdは読み込み・削除・再配信の単位として維持している) */}
-            {recipe.isStarter && (
+            {shows('starter') && recipe.isStarter && (
               <span className="absolute bottom-1.5 left-1.5 line-clamp-2 max-w-[70%] rounded-full bg-surface/90 px-2 py-0.5 text-[10px] font-bold text-ink-muted shadow-sm">
                 {ja.card.starterBadge}
               </span>
             )}
             {/* 主要食材チップ（先頭3つ）を写真の右下に重ねる */}
-            {topIngredients.length > 0 && (
+            {shows('ingredients') && topIngredients.length > 0 && (
               <div className="absolute bottom-1.5 right-1.5 flex max-w-[80%] flex-col items-end gap-1">
                 {topIngredients.map((ing, index) => (
                   <span
