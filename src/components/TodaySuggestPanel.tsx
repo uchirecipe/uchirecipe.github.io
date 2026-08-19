@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Dices,
@@ -6,7 +6,9 @@ import {
   ChevronUp,
   Plus,
   Refrigerator,
+  SlidersHorizontal,
   UtensilsCrossed,
+  X,
 } from 'lucide-react'
 import { updateSettings } from '../db/settings'
 import { cookedWithinDays } from '../logic/cooked'
@@ -17,6 +19,9 @@ import { makePantryMatcher } from '../logic/pantry'
 import type { DishType, MealRole, Recipe, Settings } from '../db/types'
 import Collapse from './Collapse'
 import RecipeCard from './RecipeCard'
+import { DIALOG_BACKDROP_CLS, DIALOG_CARD_CLS, DIALOG_PRIMARY_BUTTON_CLS } from './dialogStyle'
+import { useOverlayDismiss } from './useOverlayDismiss'
+import { useScrollLock } from './useScrollLock'
 import { ja } from '../i18n/ja'
 
 /**
@@ -85,16 +90,34 @@ type SuggestCondition = 'any' | 'notRecent' | 'favorite' | 'quick'
 /** 「1品」を出すか、「献立」（主菜＋副菜）を組むか（2026-08-18 便HM） */
 type SuggestMode = 'one' | 'plan'
 
-const conditions: { value: SuggestCondition; label: string }[] = [
+/**
+ * 「条件をしぼる」の窓に並べる絞り込み（2026-08-19 便IA）。
+ *
+ * 「◯分以内」を**分数のぶんだけ最初から並べる**形にした（下の QUICK_MINUTES_OPTIONS）。
+ * 便BN以来「◯分以内」はチップ1つで、押してはじめて分数の並びが下に現れていたが、
+ * それがオーナー実機の「条件を絞るボタンをぽちぽち色々試すたびに、追加の選択肢が出現して
+ * ボタンや献立のレシピカードの場所が変わる」のいちばんの原因だった
+ * （390px幅の実測で、押すと下のものが112px下がっていた）。
+ * 分数を最初から並べれば、どれを押しても**並びの数も高さも変わらない**。
+ */
+const conditions: { value: Exclude<SuggestCondition, 'quick'>; label: string }[] = [
   { value: 'any', label: ja.dayStart.condAll },
   { value: 'notRecent', label: ja.dayStart.condNotRecent },
   { value: 'favorite', label: ja.dayStart.condFavorite },
-  // condQuickは '{n}分以内' テンプレート。{n}には選択中の分数が入る(2026-07-24 便BN・タスク7)
-  { value: 'quick', label: ja.dayStart.condQuick },
 ]
 
 // 「◯分以内」で選べる分数(2026-07-24 便BN・タスク7)。既定は先頭の10分
 const QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
+
+/**
+ * 「条件をしぼる」の窓に並ぶチップの見た目（2026-08-19 便IA）。
+ * 条件・分数・料理の種別・在庫の4つの並びで同じ見た目にするため、1か所で持つ
+ * （選んでいるものは塗る＝アプリの他の絞り込みチップと同じ言い方）。
+ */
+const conditionChipCls = (active: boolean) =>
+  `rounded-sm border px-3 py-2 text-sm font-bold ${
+    active ? 'border-accent bg-accent text-on-accent' : 'border-edge bg-surface text-ink-muted'
+  }`
 
 /**
  * 選べる料理の種別の既定(2026-08-03 便DH・オーナー指示)。
@@ -132,11 +155,19 @@ function matchesCondition(
  */
 function SuggestionCard({
   recipe,
+  ngIngredients,
   linkState,
   onOpen,
   roleLabel,
 }: {
   recipe: Recipe
+  /**
+   * 設定「食べられない食材」（2026-08-19 便IA）。ここに引っかかる品には警告の印が付く。
+   * **提案してくる場所にこそ要る**ので渡す——レシピ一覧・献立の枠・今日の献立には最初から
+   * 出ていたのに、この節が出す候補と「今日の献立」の1品だけ渡し忘れていて、
+   * 食べられない品を勧めておいて何も言わない画面になっていた。
+   */
+  ngIngredients: string[]
   linkState: unknown
   /** 詳細へ移る直前に呼ぶ（戻ってきたときに同じ候補を出すため。2026-08-17 便HI） */
   onOpen: (recipeId: number) => void
@@ -151,6 +182,7 @@ function SuggestionCard({
       <RecipeCard
         recipe={recipe}
         density="standard"
+        ngIngredients={ngIngredients}
         // 2026-08-19 便HY（オーナー原文「『今日なに作る？』だったら『基本レシピ』と
         // 食材表記はいらないように感じました」）: 形はレシピ一覧と同じ「標準」のまま、
         // 載せる情報だけをこの場所ぶんに絞る（表は src/logic/cardParts.ts）
@@ -261,33 +293,55 @@ export default function TodaySuggestPanel({
     void updateSettings({ dayStartSuggestMode: next })
   }
   const [condition, setCondition] = useState<SuggestCondition>('any')
-  // 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5: 常時全展開がゴチャつきの一因。既定閉。
-  // MealPlanPage「提案の条件」と同じパターン)
+  /**
+   * 「条件をしぼる」の窓が開いているか（2026-08-19 便IA・オーナー実機
+   * 「今日なに作るで、条件を絞るボタンをぽちぽち色々試すたびに、説明文や追加の選択肢が出現して
+   *   ボタンや献立のレシピカードの場所が変わるので見づらく感じる」）。
+   *
+   * 直す前は折りたたみ（Collapse）で、開くと下が押し下がり、さらに中の選択肢を押すと
+   * 分数の並びが現れて下がまたずれていた（390px幅の実測: 開くと決めてもらうボタンが
+   * 299px→451pxへ152px下がり、「◯分以内」を押すとさらに112px下がる）。
+   * **窓にすれば、開いても中で何を押しても後ろの画面は1pxも動かない**。
+   * 窓の作りはアプリ共通のもの（外タップ・✕・端末の「戻る」で閉じる useOverlayDismiss、
+   * 後ろの画面を止める useScrollLock、見た目は dialogStyle）をそのまま使う＝新しく作らない。
+   */
   const [conditionsOpen, setConditionsOpen] = useState(false)
+  const closeConditions = useCallback(() => setConditionsOpen(false), [])
+  // 端末の「戻る」とEscapeで、この窓だけを閉じる／開いているあいだ後ろの画面を止める。
+  // どちらもアプリ共通の仕組みをそのまま使う（新しい窓の作りを発明しない）
+  useOverlayDismiss(conditionsOpen, closeConditions)
+  useScrollLock(conditionsOpen)
   // 種別のしぼり(2026-07-23 便BH-2「主菜」トグル → 2026-08-03 便DHで4区分の複数選択へ)。
   // 既定は主菜だけ=献立の中心になる主菜(肉・魚・卵・豆腐が主役)を提案し、
   // 「1品ランダムに副菜が出てがっかり」を防ぐ。副菜・汁物・その他も足して選べる。
   // 選んだ種別に合う品が0件になる場合は0件回避で全体から選ぶ
   const [dishTypes, setDishTypes] = useState<DishType[]>(DEFAULT_DISH_TYPES)
   const [pantryOnly, setPantryOnly] = useState(false)
-  const [seed, setSeed] = useState(() => Math.random())
   /**
    * レシピ詳細から戻ってきたときに、そのまま出しておく候補（2026-08-17 便HI）。
-   * 引き直しの条件が1つでも変わったら外す＝「戻ってきた1回だけ」に閉じる。
+   * 「おまかせで1品出す」を押したときに外れる＝「戻ってきた1回だけ」に閉じる。
+   * 2026-08-19 便IA: **条件を変えただけでは外さない**（条件を変えても出ているものは変えない）。
    */
   const [pinnedId, setPinnedId] = useState<number | null>(pinnedRecipeId)
-  const toggleDishType = (type: DishType) => {
-    setPinnedId(null)
+  // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
+  const quickMinutes = settings?.homeQuickMinutes ?? 10
+  /**
+   * 絞り込みを変える（2026-08-19 便IA・オーナー実機「1品も条件ぽちぽち帰るたびに候補が
+   * 変わらないようにして」）。**変えるのは条件だけで、出ているものには触らない**
+   * ＝1品も献立も「おまかせで…」を押したときだけ入れ替わる。
+   */
+  const toggleDishType = (type: DishType) =>
     setDishTypes((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]))
+  const changeCondition = (value: SuggestCondition) => setCondition(value)
+  /**
+   * 「◯分以内」の分数を選ぶ。選んだ時点で条件も「◯分以内」にそろえる
+   * ＝分数を最初から並べても「押しても効かないボタン」を作らない（2026-08-19 便IA）。
+   */
+  const changeQuickMinutes = (minutes: number) => {
+    if (condition !== 'quick') setCondition('quick')
+    if (minutes !== quickMinutes) void updateSettings({ homeQuickMinutes: minutes })
   }
-  const changeCondition = (value: SuggestCondition) => {
-    setPinnedId(null)
-    setCondition(value)
-  }
-  const togglePantryOnly = () => {
-    setPinnedId(null)
-    setPantryOnly((v) => !v)
-  }
+  const togglePantryOnly = () => setPantryOnly((v) => !v)
   /**
    * 絞り込みが1つでも効いているか（2026-08-18 便HS・軸8）。
    * 効いていないのに「条件をクリア」を出すと、押しても何も変わらないボタンになる
@@ -300,22 +354,18 @@ export default function TodaySuggestPanel({
     !DEFAULT_DISH_TYPES.every((t) => dishTypes.includes(t))
   /** 「条件をクリア」: 条件チップ・料理の種別・在庫の絞りを、開いた直後と同じ状態に戻す */
   const clearConditions = () => {
-    setPinnedId(null)
     setCondition('any')
     setDishTypes(DEFAULT_DISH_TYPES)
     setPantryOnly(false)
-    setSeed(Math.random())
   }
-  // 「ランダムで1品出す」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
+  // 「おまかせで1品出す」で直近に出した候補(2026-07-29 便CD/MP-12)。押すたびに積んで、
   // その分は次の抽選から外す＝同じ料理が続けて出るのを防ぐ
   const [recentSuggestedIds, setRecentSuggestedIds] = useState<number[]>([])
-  // 「◯分以内」で選んだ分数(2026-07-24 便BN・タスク7)。設定に記憶し、未設定は10分扱い
-  const quickMinutes = settings?.homeQuickMinutes ?? 10
-  // 「◯分以内」チップのラベルは選択中の分数を差し込む。他の条件はそのままのラベルを使う
-  const conditionLabel = (value: SuggestCondition): string => {
-    const base = conditions.find((c) => c.value === value)?.label ?? ''
-    return value === 'quick' ? base.replace('{n}', String(quickMinutes)) : base
-  }
+  /** 「条件をしぼる」のボタンに添える、いま選んでいる条件の名前（「◯分以内」は分数を差し込む） */
+  const currentConditionLabel =
+    condition === 'quick'
+      ? ja.dayStart.condQuick.replace('{n}', String(quickMinutes))
+      : (conditions.find((c) => c.value === condition)?.label ?? '')
 
   // 条件(すべて/最近作っていない/お気に入り/◯分以内)で絞り込んだ上で、選んだ種別ごとに
   // 今の季節を優先した候補を作って合わせる(logic/homeSuggest.ts)。
@@ -372,35 +422,58 @@ export default function TodaySuggestPanel({
     return !byCondition.some((r) => r.ingredients.some((i) => matchesPantry(i.name)))
   }, [recipes, condition, quickMinutes, pantryOnly, pantryNames])
 
-  // 直前に出た候補を「ランダムで1品出す」の対象から外す(2026-07-29 便CD/MP-12)。
-  // 候補が尽きるなら除外を解く(空振りより重複がマシ)＝献立エンジンの
-  // excludeYesterdayPlanRecipes と同じ作法・同じ関数を使う
-  const shufflePool = useMemo(
-    () => excludeYesterdayPlanRecipes(finalCandidates, recentSuggestedIds),
-    [finalCandidates, recentSuggestedIds],
-  )
-  const drawn =
-    shufflePool.length > 0
-      ? shufflePool[Math.floor(seed * shufflePool.length) % shufflePool.length]
-      : undefined
+  /**
+   * 「在庫の食材から」で絞った結果が0品だったので、絞りを解いた（1品側・献立側で同じ知らせ）。
+   * 2026-08-19 便IA: 出す場所を「条件をしぼる」の窓の中（在庫のボタンのすぐ下）へ移した。
+   * 直す前は決めてもらうボタンの**上**に出ていたので、在庫を押すたびにボタンごと下がっていた。
+   */
+  const pantryFallbackShown = mode === 'plan' ? planPantryFallback : pantryFallback
+
+  /**
+   * いま出ている1品（2026-08-19 便IA・オーナー実機「1品も条件ぽちぽち帰るたびに候補が
+   * 変わらないようにして」）。
+   *
+   * 直す前は、条件から毎回その場で引き当てていた（くじの種＋いまの候補一覧）ので、
+   * 条件を1つ触るだけで候補が入れ替わっていた。2026-08-18の裁定では「1品は引き直すことが
+   * 目的なのでそれでよい」としたが、オーナーが実機で見て逆の判断をしたので、
+   * **献立側と同じく「引いた結果を覚えておく」**形にそろえた。
+   * こうすると、条件を変えても出ているものは動かず、押したときだけ入れ替わる。
+   */
+  const [drawnOneId, setDrawnOneId] = useState<number | null>(null)
   /**
    * 覚えていた候補があればそれを出す（2026-08-17 便HI）。
    * 見つからないとき（そのレシピを消した・条件から外れた等）は、黙ってふつうのくじに戻す
    * ＝「戻ったら空だった」を作らない。
    */
   const pinned = pinnedId != null ? (recipes ?? []).find((r) => r.id === pinnedId) : undefined
-  const suggestion = pinned ?? drawn
-  // 「ランダムで1品出す」: 今出ている候補を直近リストへ積んでから振り直す
-  const shuffleSuggestion = () => {
-    if (suggestion?.id != null) {
-      const shownId = suggestion.id
-      setRecentSuggestedIds((prev) =>
-        [shownId, ...prev.filter((id) => id !== shownId)].slice(0, RECENT_SUGGEST_KEEP),
-      )
-    }
-    setPinnedId(null)
-    setSeed(Math.random())
-  }
+  const drawnOne = drawnOneId != null ? (recipes ?? []).find((r) => r.id === drawnOneId) : undefined
+  const suggestion = pinned ?? drawnOne
+  /**
+   * 1品を引く（2026-08-19 便IA）。**押した時点の絞り込み**（finalCandidates）から選ぶ。
+   * 直前に出した数品は次の抽選から外す（2026-07-29 便CD/MP-12。候補が尽きるなら除外を解く
+   * ＝空振りより重複がマシ。献立エンジンの excludeYesterdayPlanRecipes と同じ作法・同じ関数）。
+   *
+   * `auto` は開いた直後・「1品」に切り替えた直後の1回で、そのときは
+   * いま出ているものを「直近に出した」に積まない（まだ誰も見ていないため）。
+   */
+  const drawOne = useCallback(
+    (options?: { auto?: boolean }) => {
+      const shownId = suggestion?.id ?? null
+      const nextRecent =
+        options?.auto || shownId == null
+          ? recentSuggestedIds
+          : [shownId, ...recentSuggestedIds.filter((id) => id !== shownId)].slice(
+              0,
+              RECENT_SUGGEST_KEEP,
+            )
+      if (nextRecent !== recentSuggestedIds) setRecentSuggestedIds(nextRecent)
+      setPinnedId(null)
+      const pool = excludeYesterdayPlanRecipes(finalCandidates, nextRecent)
+      const picked = pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : undefined
+      setDrawnOneId(picked?.id ?? null)
+    },
+    [suggestion, recentSuggestedIds, finalCandidates],
+  )
 
   /**
    * 「献立」に切り替えたら、押さなくても1組出しておく（2026-08-18 便HM）。
@@ -491,6 +564,60 @@ export default function TodaySuggestPanel({
   const planConditionChanged =
     mode === 'plan' && planDrawnKey != null && drawnConditionKey != null && drawnConditionKey !== conditionKey
 
+  /**
+   * 1品側の「押すまで変えない」（2026-08-19 便IA）。**献立側とまったく同じ作りにする**
+   * ＝同じ節に並ぶ2つの側が、条件を変えたときに違う動き方をしないようにするため。
+   * 違うのは、1品側では**料理の種別も効く**ので、覚えておく条件にそれも入るところだけ。
+   */
+  const oneConditionKey = `${condition}|${quickMinutes}|${pantryOnly ? 'pantry' : 'all'}|${[
+    ...dishTypes,
+  ]
+    .sort()
+    .join(',')}`
+  /** この節で1品を出しているあいだ立つ印（null＝出していない） */
+  const [oneDrawnKey, setOneDrawnKey] = useState<string | null>(null)
+  /** 最後に引いたときの絞り込み。いまの oneConditionKey と違えば「変えたけどまだ引いていない」 */
+  const [drawnOneConditionKey, setDrawnOneConditionKey] = useState<string | null>(null)
+  const oneDrawKey = shown && mode === 'one' && recipesReady ? 'one' : null
+  useEffect(() => {
+    if (oneDrawKey == null) {
+      if (oneDrawnKey != null) setOneDrawnKey(null)
+      return
+    }
+    if (oneDrawnKey === oneDrawKey) return
+    const first = oneDrawnKey == null
+    setOneDrawnKey(oneDrawKey)
+    // 最初の1回だけ、すでに出ているもの（レシピ詳細から戻ってきた覚え・「献立」から戻したとき）を
+    // そのまま出す。覚えが無いときだけ、いまの条件で引いたことにする
+    if (first && (pinnedId != null || drawnOneId != null)) {
+      if (drawnOneConditionKey == null) setDrawnOneConditionKey(oneConditionKey)
+      return
+    }
+    setDrawnOneConditionKey(oneConditionKey)
+    drawOne({ auto: true })
+  }, [
+    oneDrawKey,
+    oneDrawnKey,
+    pinnedId,
+    drawnOneId,
+    oneConditionKey,
+    drawnOneConditionKey,
+    drawOne,
+  ])
+  /** 「おまかせで1品出す」を押したとき。引いた時点の条件を覚え直す */
+  const drawOneNow = () => {
+    setDrawnOneConditionKey(oneConditionKey)
+    drawOne()
+  }
+  /** 絞り込みを変えたあと、まだ引き直していない（＝出ている1品が前の条件のもの） */
+  const oneConditionChanged =
+    mode === 'one' &&
+    oneDrawnKey != null &&
+    drawnOneConditionKey != null &&
+    drawnOneConditionKey !== oneConditionKey
+  /** 出ているものが「前の条件のもの」になっているか（1品と献立で同じ扱い） */
+  const conditionChanged = mode === 'plan' ? planConditionChanged : oneConditionChanged
+
   /** いま出ているもの（「今日の献立に入れる」に渡す中身） */
   const shownRecipes =
     mode === 'plan' ? planPair.map((item) => item.recipe) : suggestion ? [suggestion] : []
@@ -535,135 +662,29 @@ export default function TodaySuggestPanel({
             ))}
           </div>
 
-          {/* 「条件をしぼる」と「在庫の食材から」は**どちらを選んでいても**出す
-              （2026-08-19 便HT・オーナー原文「献立にも1品と同じように条件を絞る機能つければ
-              いいのでは？」）。便HMは献立側で丸ごと隠していたが、オーナーの答えは
-              「隠すのではなく効くようにしてほしい」だったので、効かせるほうへ倒した。
-              効き方は logic の側で1品とそろえてある（planAllowedIds）。
-              ただし**料理の種別だけは献立に当てはめられない**（主菜だけに絞ると副菜が引けず、
-              献立が成立しない）。黙って無視すると「押しても効かない条件」になるので、
-              献立を出しているあいだは種別の並びを出さず、理由の1行に置き換える */}
-          <>
-            {/* 条件チップ4つの折りたたみ(2026-07-16 UI総点検B-5)。既定閉。畳んだ状態でも
-                既定値(すべて)から変えていればラベルに現在値を出す(MealPlanPage「提案の条件」と同じパターン) */}
-            <div className="mt-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => setConditionsOpen((v) => !v)}
-                aria-expanded={conditionsOpen}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
-              >
-                {ja.dayStart.conditionsToggle}
-                {/* 現在値は開いていても出したままにする（2026-08-09 便EO・オーナー実機
-                    「押下後にサイズが変わって場所がズレる」）。畳んだときだけ足すと、
-                    押すたびにボタンの幅が変わってシェブロンの位置が動いていた */}
-                {condition !== 'any' ? `: ${conditionLabel(condition)}` : ''}
-                {conditionsOpen ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
-              </button>
-              <Collapse open={conditionsOpen}>
-                <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-                  {conditions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => changeCondition(option.value)}
-                      className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                        condition === option.value
-                          ? 'border-accent bg-accent text-on-accent'
-                          : 'border-edge bg-surface text-ink-muted'
-                      }`}
-                    >
-                      {conditionLabel(option.value)}
-                    </button>
-                  ))}
-                </div>
-                {/* 「◯分以内」を選んでいるときだけ、分数(10/15/20/30)を選ぶ(2026-07-24 便BN・タスク7)。
-                    選んだ分数は設定に記憶する */}
-                {condition === 'quick' && (
-                  <div className="mt-[var(--space-sm)]">
-                    <p className="text-xs text-ink-muted">{ja.dayStart.quickMinutesLabel}</p>
-                    <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-                      {QUICK_MINUTES_OPTIONS.map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => void updateSettings({ homeQuickMinutes: m })}
-                          aria-pressed={m === quickMinutes}
-                          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                            m === quickMinutes
-                              ? 'border-accent bg-accent text-on-accent'
-                              : 'border-edge bg-surface text-ink-muted'
-                          }`}
-                        >
-                          {ja.dayStart.condQuick.replace('{n}', String(m))}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {/* 料理の種別(2026-08-03 便DH・オーナー指示)。旧「主菜」トグル1つを
-                    レシピ登録と同じ4区分の複数選択にし、置き場所も「条件をしぼる」の中へ移した。
-                    2026-08-19 便HT: 献立を出しているあいだは、並びの代わりに効かない理由を出す */}
-                <div className="mt-[var(--space-sm)]">
-                  <p className="text-xs text-ink-muted">{ja.dayStart.dishTypeLabel}</p>
-                  {mode === 'plan' ? (
-                    <p data-testid="day-dishtype-plan-note" className="mt-1 text-xs text-ink-muted">
-                      {ja.dayStart.dishTypePlanNote}
-                    </p>
-                  ) : (
-                    <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
-                      {DISH_TYPE_OPTIONS.map((type) => (
-                        <button
-                          key={type}
-                          type="button"
-                          onClick={() => toggleDishType(type)}
-                          aria-pressed={dishTypes.includes(type)}
-                          className={`rounded-sm border px-3 py-2 text-sm font-bold ${
-                            dishTypes.includes(type)
-                              ? 'border-accent bg-accent text-on-accent'
-                              : 'border-edge bg-surface text-ink-muted'
-                          }`}
-                        >
-                          {ja.dishType[type]}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </Collapse>
-            </div>
-
-            {/* 「在庫の食材から」トグル(2026-07-23 便BH-2・2026-07-24 便BN・タスク6)。
-                在庫にある食材を使うレシピに絞る(在庫が1件以上あるときだけ出す)。
-                2026-08-19 便HT: 献立側にも効く */}
-            {/* 2026-08-19 司令部: 在庫が0件のときは、この行そのものを出さない。
-                それまでは中身が空でも入れ物だけが残り、上の余白ぶん（8px）を取っていた。
-                実測では「今日の献立に入れる」の下端が390×667の画面で671pxまで下がっており、
-                空の行のぶんだけ押すものが画面の外へ近づいていた */}
-            {pantryNames.length > 0 && (
-              <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-                <button
-                  type="button"
-                  onClick={togglePantryOnly}
-                  aria-pressed={pantryOnly}
-                  className={`inline-flex items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
-                    pantryOnly
-                      ? 'border-accent bg-accent text-on-accent'
-                      : 'border-edge bg-surface text-ink-muted'
-                  }`}
-                >
-                  <Refrigerator size={14} aria-hidden />
-                  {ja.dayStart.pantryOnlyToggle}
-                </button>
-              </div>
-            )}
-
-            {(mode === 'plan' ? planPantryFallback : pantryFallback) && (
-              <p className="mt-[var(--space-sm)] text-sm text-ink-muted">
-                {ja.dayStart.pantryOnlyFallback}
-              </p>
-            )}
-          </>
+          {/* 「条件をしぼる」（2026-08-19 便IA）。**押すと窓が開く**だけの1つのボタンにした。
+              直す前はここが折りたたみで、開くと下が押し下がり、中の選択肢を押すたびに
+              分数の並びや説明文が現れてまたずれていた（オーナー実機の指摘そのもの）。
+              いま選んでいる条件は、押さなくても分かるようにボタンの名前に添える
+              （幅は変わるが高さは変わらない＝下のものは動かない）。
+              何か絞り込んでいるあいだは枠と字をアクセント色にする＝窓を開かなくても
+              「絞り込み中かどうか」が分かる（レシピを選ぶ画面の絞り込みボタンと同じ言い方）。
+              「在庫の食材から」もこの窓の中に入れた: 同じ絞り込みなのに片方だけ外に残すと、
+              押したときの動き方（後ろが動く／動かない）が2つに割れるため */}
+          <div className="mt-[var(--space-sm)]">
+            <button
+              type="button"
+              data-testid="day-conditions-open"
+              onClick={() => setConditionsOpen(true)}
+              className={`inline-flex items-center gap-1 rounded-sm border bg-surface px-3 py-2 text-sm font-bold shadow-sm ${
+                anyConditionActive ? 'border-accent text-accent-ink' : 'border-edge text-ink-muted'
+              }`}
+            >
+              <SlidersHorizontal size={16} aria-hidden />
+              {ja.dayStart.conditionsToggle}
+              {condition !== 'any' ? `: ${currentConditionLabel}` : ''}
+            </button>
+          </div>
 
           {/* 「決めてもらう」ボタン。置き場所は1つで、名前と絵が切り替えで入れ替わる
               (2026-08-18 便HM・オーナー指示「同じボタンにまとめ」)。
@@ -672,8 +693,9 @@ export default function TodaySuggestPanel({
 
               2026-08-19 便HT（オーナー実機「ランダムボタンが下だと品数によってボタン位置が変わり、
               連続タップで誤タップします。上に持ってくるか、ボタン位置がずれないようにするかして」）:
-              **結果より上へ移した**。ここから上に出るものは切り替え・「条件をしぼる」・
-              「在庫の食材から」だけで、どれも1品と献立で同じ数だけ出る＝
+              **結果より上へ移した**。ここから上に出るものは切り替えと「条件をしぼる」だけで、
+              どちらも1品と献立で同じ数だけ出る（2026-08-19 便IAで「在庫の食材から」と
+              在庫の1行を窓の中へ移したので、ここから上はさらに変わらなくなった）＝
               **出た品数でも、切り替えでも、連続して押しても、このボタンは1pxも動かない**。
               「結果の場所の高さを固定する」案は採らなかった: 1品のときも献立2品ぶんの空きを
               抱えることになり、390×667の画面では「今日の献立に入れる」が画面の外へ落ちる。
@@ -683,7 +705,7 @@ export default function TodaySuggestPanel({
           <button
             type="button"
             data-testid="day-suggest-draw"
-            onClick={mode === 'plan' ? drawPlanNow : shuffleSuggestion}
+            onClick={mode === 'plan' ? drawPlanNow : drawOneNow}
             className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
           >
             {mode === 'plan' ? (
@@ -694,22 +716,36 @@ export default function TodaySuggestPanel({
             {mode === 'plan' ? ja.mealPlan.todaySuggestButton : ja.dayStart.shuffle}
           </button>
 
-          {/* 絞り込みを変えたのに画面が変わらない理由（2026-08-19 便HY・オーナー指示で
-              献立側は押すまで組み直さなくなった）。**置き場所はボタンの「下」**にする:
-              上に置くと、条件を触るたびにボタンが下へずれて、便HTがオーナー実機の指摘
-              （「ランダムボタンが下だと品数によってボタン位置が変わり、連続タップで誤タップします」）
-              に応えて固定した位置がまた動く。下に置けばボタンは1pxも動かず、それでいて
-              押すボタンのすぐ隣で読める。
-              数字の側（下の「主菜の候補◯品」）は条件を変えたその場で動くので、
-              「絞り込みを受け付けたか」はこの1行と数字の2つで分かる */}
-          {planConditionChanged && (
-            <p
-              data-testid="day-plan-condition-changed"
-              className="mt-[var(--space-sm)] text-center text-xs text-ink-muted"
-            >
-              {ja.mealPlan.todaySuggestConditionChanged}
-            </p>
-          )}
+          {/* 絞り込みを変えたのに画面が変わらない理由（2026-08-19 便HY＝献立／便IA＝1品）。
+              **置き場所はボタンの「下」**にする: 上に置くと、条件を触るたびにボタンが下へずれて、
+              便HTがオーナー実機の指摘（「ランダムボタンが下だと品数によってボタン位置が変わり、
+              連続タップで誤タップします」）に応えて固定した位置がまた動く。
+
+              2026-08-19 便IA: **この1行の場所を先に確保する**（出ていないあいだも同じ高さを取る）。
+              出たり消えたりで場所を取ると、下に並ぶ候補カードが40px動く（390px幅で実測）。
+              オーナー実機の指摘は「説明文が出現してボタンや献立のレシピカードの場所が変わる」
+              なので、カードのほうも動かしてはいけない。
+              空の箱に決め打ちの高さを入れるのではなく**同じ文をそのまま置いて見えなくする**のは、
+              端末の幅や文字の大きさで折り返しが変わっても、確保する高さがいつも実際の高さと
+              一致するため（決め打ちの高さは、折り返した瞬間にずれる）。
+              目印（data-testid）は出ているときだけ付ける＝「出ているか」を機械が数で見分けられる。
+              1品側と献立側で文が違うのは、押すボタンの名前が違うため（規約H: 場所は指示語でなく
+              ボタン名で言う） */}
+          <p
+            {...(conditionChanged
+              ? {
+                  'data-testid':
+                    mode === 'plan' ? 'day-plan-condition-changed' : 'day-one-condition-changed',
+                }
+              : { 'aria-hidden': true })}
+            className={`mt-[var(--space-sm)] text-center text-xs text-ink-muted ${
+              conditionChanged ? '' : 'invisible'
+            }`}
+          >
+            {mode === 'plan'
+              ? ja.mealPlan.todaySuggestConditionChanged
+              : ja.dayStart.conditionChanged}
+          </p>
 
           {/* 出てきたもの。**どちらを選んでいてもボタンのすぐ下**に出す(2026-08-19 便HT)。
               便HMで「どちらも同じカード・同じ向き」にそろえたのはそのまま残し、向きだけを
@@ -722,6 +758,7 @@ export default function TodaySuggestPanel({
                   <SuggestionCard
                     key={recipe.id}
                     recipe={recipe}
+                    ngIngredients={settings?.ngIngredients ?? []}
                     linkState={linkState}
                     onOpen={(recipeId) => onOpenSuggestion?.(recipeId)}
                     roleLabel={ja.mealPlan.role[role]}
@@ -733,11 +770,12 @@ export default function TodaySuggestPanel({
                  ＝これから引くのに「ありませんでした」と先に言わない。
                  2026-08-19 便HT: 絞り込みが効くようになったので、1品側と同じく
                  「条件をクリア」も添える（0件の理由が条件のときに、その場で外せる）。
-                 2026-08-19 便HY: 条件を変えたあと（まだ組み直していない）は出さない——
-                 「この条件で」が指しているのは**前の条件**なので、そのまま置くと
-                 いま選んでいる条件では組めない、と読めてしまう。
-                 代わりに上の1行（変えた条件は押すと反映されます）が出ている */
-              planDrawnKey != null && !planConditionChanged && (
+                 2026-08-19 便IA: 便HYはここを「条件を変えたら消す」にしていたが、消すと
+                 出ているものの場所が動く（オーナー実機「条件を絞るたびにレシピカードの場所が
+                 変わる」）。**出ているものは押すまで丸ごと据え置く**方にそろえた——
+                 「この条件で」が指しているのは最後に押したときの条件で、変えた条件がまだ
+                 効いていないことは、すぐ上の1行が言っている */
+              planDrawnKey != null && (
                 <div className="mt-[var(--space-sm)] text-center text-ink-muted">
                   <p>{ja.mealPlan.todaySuggestNoPair}</p>
                   {anyConditionActive && (
@@ -755,13 +793,17 @@ export default function TodaySuggestPanel({
           ) : suggestion ? (
             <SuggestionCard
               recipe={suggestion}
+              ngIngredients={settings?.ngIngredients ?? []}
               linkState={linkState}
               onOpen={(recipeId) => onOpenSuggestion?.(recipeId)}
             />
           ) : (
             /* 条件で0件の型（2026-08-18 便HS・軸8）: 「条件に合う◯◯が見つかりません」＋
                「条件をクリア」。直す前は文だけで、どの条件が効いているのかも、
-               どこで外せるのかも、この場からは分からなかった */
+               どこで外せるのかも、この場からは分からなかった。
+               2026-08-19 便IA: 引く前（切り替えた直後の1フレーム）は何も出さない
+               ＝これから引くのに「見つかりません」と先に言わない（献立側と同じ作法） */
+            oneDrawnKey != null && (
             <div className="mt-[var(--space-sm)] text-center text-ink-muted">
               <p>{ja.dayStart.noCandidate}</p>
               {anyConditionActive && (
@@ -774,6 +816,7 @@ export default function TodaySuggestPanel({
                 </button>
               )}
             </div>
+            )
           )}
 
           {/* いま候補が何品あるか(2026-08-02 便DE-5・オーナー指示)を出す＝候補が少ない条件では
@@ -840,6 +883,149 @@ export default function TodaySuggestPanel({
       )}
 
       {collapsible ? <Collapse open={shown}>{body}</Collapse> : body}
+
+      {/* 「条件をしぼる」の窓（2026-08-19 便IA）。
+          折りたたみ（Collapse）の**外**に置く: 折りたたみは開閉のあいだ中身を切り取るので、
+          その中に窓を置くと、閉じるときに窓ごと切り取られてしまう。
+          後ろの画面を止める・端末の「戻る」で閉じる・外タップで閉じる・見た目、の4つは
+          アプリ共通のもの（useScrollLock / useOverlayDismiss / dialogStyle）をそのまま使う。
+
+          **窓の中も動かない形にしてある**（オーナー実機「条件を絞るボタンをぽちぽち色々
+          試すたびに、説明文や追加の選択肢が出現して…場所が変わる」）:
+           ・「◯分以内」の分数（10/15/20/30）を最初から並べる＝押しても選択肢が増えない
+           ・「在庫の食材から」で候補が0品になったときの1行は、**出ていないあいだも場所を取る**
+             （見えなくするだけ。文をそのまま置くので、折り返しが変わっても高さが合う）
+           ・「条件をクリア」も同じやり方で場所を先に取る
+          この窓は真ん中に出るので、中身が1行でも増えると**窓ごと上下に動く**＝
+          並びの途中だけでなく、出したり消したりするもの全部が場所を先に取る必要がある */}
+      {conditionsOpen && (
+        <div className={DIALOG_BACKDROP_CLS} onClick={closeConditions} role="presentation">
+          <div
+            role="dialog"
+            aria-label={ja.dayStart.conditionsToggle}
+            data-testid="day-conditions-modal"
+            onClick={(e) => e.stopPropagation()}
+            className={DIALOG_CARD_CLS}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold">{ja.dayStart.conditionsToggle}</h3>
+              <button
+                type="button"
+                onClick={closeConditions}
+                aria-label={ja.common.close}
+                className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            </div>
+
+            {/* どのレシピから選ぶか。「すべて」「最近作ってない」「お気に入り」に続けて、
+                「◯分以内」を分数のぶんだけ並べる（1つだけ選ぶ） */}
+            <p className="mt-[var(--space-md)] text-xs text-ink-muted">
+              {ja.dayStart.conditionLabel}
+            </p>
+            <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+              {conditions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => changeCondition(option.value)}
+                  aria-pressed={condition === option.value}
+                  className={conditionChipCls(condition === option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+              {QUICK_MINUTES_OPTIONS.map((minutes) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  onClick={() => changeQuickMinutes(minutes)}
+                  aria-pressed={condition === 'quick' && minutes === quickMinutes}
+                  className={conditionChipCls(condition === 'quick' && minutes === quickMinutes)}
+                >
+                  {ja.dayStart.condQuick.replace('{n}', String(minutes))}
+                </button>
+              ))}
+            </div>
+
+            {/* 料理の種別(2026-08-03 便DH・オーナー指示)。旧「主菜」トグル1つを
+                レシピ登録と同じ4区分の複数選択にした。
+                2026-08-19 便HT: 献立を出しているあいだは、並びの代わりに効かない理由を出す
+                （切り替えはこの窓の外にあるので、開いているあいだに入れ替わることはない） */}
+            <p className="mt-[var(--space-md)] text-xs text-ink-muted">
+              {ja.dayStart.dishTypeLabel}
+            </p>
+            {mode === 'plan' ? (
+              <p data-testid="day-dishtype-plan-note" className="mt-1 text-xs text-ink-muted">
+                {ja.dayStart.dishTypePlanNote}
+              </p>
+            ) : (
+              <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                {DISH_TYPE_OPTIONS.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => toggleDishType(type)}
+                    aria-pressed={dishTypes.includes(type)}
+                    className={conditionChipCls(dishTypes.includes(type))}
+                  >
+                    {ja.dishType[type]}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* 「在庫の食材から」(2026-07-23 便BH-2・2026-07-24 便BN・タスク6)。
+                在庫にある食材を使うレシピに絞る(在庫が1件以上あるときだけ出す)。
+                絞った結果が0品で解いたときの1行は、出ていないあいだも場所を取る */}
+            {pantryNames.length > 0 && (
+              <>
+                <div className="mt-[var(--space-md)] flex flex-wrap gap-[var(--space-sm)]">
+                  <button
+                    type="button"
+                    onClick={togglePantryOnly}
+                    aria-pressed={pantryOnly}
+                    className={`inline-flex items-center gap-1 ${conditionChipCls(pantryOnly)}`}
+                  >
+                    <Refrigerator size={14} aria-hidden />
+                    {ja.dayStart.pantryOnlyToggle}
+                  </button>
+                </div>
+                <p
+                  aria-hidden={!pantryFallbackShown}
+                  className={`mt-1 text-xs text-ink-muted ${pantryFallbackShown ? '' : 'invisible'}`}
+                >
+                  {ja.dayStart.pantryOnlyFallback}
+                </p>
+              </>
+            )}
+
+            <div className={`mt-[var(--space-md)] space-y-[var(--space-sm)]`}>
+              <button
+                type="button"
+                onClick={clearConditions}
+                aria-hidden={!anyConditionActive}
+                className={`w-full rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm ${
+                  anyConditionActive ? '' : 'invisible'
+                }`}
+              >
+                {ja.search.clear}
+              </button>
+              {/* 窓の中身は縦に長くなるので、下端にも大きな「閉じる」を置く
+                  （下まで送ると右上の✕が画面の外に出るため）。名前は同じ ja.common.close */}
+              <button
+                type="button"
+                data-testid="day-conditions-close"
+                onClick={closeConditions}
+                className={DIALOG_PRIMARY_BUTTON_CLS}
+              >
+                {ja.common.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

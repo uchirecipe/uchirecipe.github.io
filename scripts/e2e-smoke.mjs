@@ -21803,19 +21803,22 @@ try {
           'DAYMODE-01 献立のときも「条件をしぼる」が使える(2026-08-19 便HT・オーナー指示)',
           (await dmBody()).includes('条件をしぼる'),
         )
+        // 2026-08-19 便IA: 「条件をしぼる」は**窓**で開く。開いているあいだ後ろの画面は
+        // 窓に覆われて押せないので、閉じるのは窓の中の「閉じる」から行う
         const dmConditions = dmSection().getByRole('button', { name: /条件をしぼる/ })
         if ((await dmConditions.count()) === 1) {
           await dmConditions.click()
-          await dmPage.waitForTimeout(500)
+          await dmPage.waitForTimeout(600)
         }
         check(
           'DAYMODE-01 献立のときは料理の種別を並べず、当てられない理由を出す',
           (await dmSection().locator('[data-testid="day-dishtype-plan-note"]').count()) === 1 &&
             (await dmSection().getByRole('button', { name: '汁物', exact: true }).count()) === 0,
         )
-        if ((await dmConditions.count()) === 1) {
-          await dmConditions.click()
-          await dmPage.waitForTimeout(500)
+        const dmCloseConditions = dmPage.locator('[data-testid="day-conditions-close"]')
+        if ((await dmCloseConditions.count()) === 1) {
+          await dmCloseConditions.click()
+          await dmPage.waitForTimeout(600)
         }
       }
       // ---- ③ 連続して押してもボタンが動かない(誤タップの再発防止・2026-08-19 便HT) ----
@@ -22429,6 +22432,12 @@ try {
           'DAYDEFAULT-01 1品側では料理の種別まで選べる',
           (await ddSection().getByRole('button', { name: '汁物', exact: true }).count()) === 1,
         )
+        // 2026-08-19 便IA: 窓で開くようになったので、次へ進む前に閉じる
+        const ddCloseConditions = ddPage.locator('[data-testid="day-conditions-close"]')
+        if ((await ddCloseConditions.count()) === 1) {
+          await ddCloseConditions.click()
+          await ddPage.waitForTimeout(600)
+        }
       }
       // ⑤ 自分で選んだ側は、開き直しても上書きされない
       await ddPage.reload({ waitUntil: 'networkidle' })
@@ -22689,11 +22698,18 @@ try {
         await pfPage.waitForTimeout(1200)
       }
       // 分数のチップ（10/15/20/30）から10分を選ぶ
+      // 2026-08-19 便IA: 分数は最初から4つ並んでいるので、押しても選択肢は増えない
       const pfTen = pfSection().getByRole('button', { name: '10分以内', exact: true })
       check('DAYPLANFILTER-01 前提: 分数(10分以内)が選べる', (await pfTen.count()) >= 1)
       if ((await pfTen.count()) >= 1) {
         await pfTen.first().click()
         await pfPage.waitForTimeout(1500)
+      }
+      // 2026-08-19 便IA: 絞り込みは窓で開く。押すボタンは窓の裏なので、閉じてから押す
+      const pfCloseConditions = () => pfPage.locator('[data-testid="day-conditions-close"]')
+      if ((await pfCloseConditions().count()) === 1) {
+        await pfCloseConditions().click()
+        await pfPage.waitForTimeout(700)
       }
       const pfChangedNote = () => pfPage.locator('[data-testid="day-plan-condition-changed"]')
       {
@@ -22759,6 +22775,10 @@ try {
           await pfFav0.click()
           await pfPage.waitForTimeout(800)
         }
+        if ((await pfCloseConditions().count()) === 1) {
+          await pfCloseConditions().click()
+          await pfPage.waitForTimeout(700)
+        }
         // 2026-08-19 便HY: 押すまでは組み直さないので、0件の知らせもここでは出ない
         check(
           'DAYPLANFILTER-01 条件を変えただけでは「組める献立がありませんでした」と先に言わない',
@@ -22813,6 +22833,10 @@ try {
       if ((await pfFav.count()) === 1) {
         await pfFav.click()
         await pfPage.waitForTimeout(800)
+      }
+      if ((await pfCloseConditions().count()) === 1) {
+        await pfCloseConditions().click()
+        await pfPage.waitForTimeout(700)
       }
       // 2026-08-19 便HY: 効かせるのは押したとき。押す前と押したあとで、同じ条件が
       // 「まだ効いていない」→「効いた」に変わることを1組で見る。
@@ -23023,6 +23047,644 @@ try {
       }
     } finally {
       await cpBrowser.close()
+    }
+  }
+
+  // --- DAYCOND-01(2026-08-19 便IA・オーナー実機「今日なに作るで、条件を絞るボタンをぽちぽち
+  // 色々試すたびに、説明文や追加の選択肢が出現してボタンや献立のレシピカードの場所が変わるので
+  // 見づらく感じる」)。
+  //
+  // 「条件をしぼる」は**窓（モーダル）**で開き、窓の中で何を押しても後ろの画面は動かない。
+  // 測るのは見た目ではなく**位置**:
+  //   ① 「条件をしぼる」を押すと窓が開く（折りたたみではない）
+  //   ② 窓を開いた直後・窓の中で条件を次々押したあと、決めてもらうボタン・今日の献立に入れる
+  //      ボタン・出ている候補カードの**ページの中での位置**が1pxも変わらない
+  //   ③ 窓を閉じても、開く前と同じ場所に戻っている（後ろの画面が送られていない）
+  //
+  // 禁じ手よけ:
+  //  ・位置は**ページの中での位置**で測る。画面の中での位置で測ると、窓が後ろの画面を
+  //    止める（body を position:fixed にする）ぶんを「動いた」と誤検出する。
+  //    止めているあいだは body の top に -スクロール量が入るので、それを足し戻してそろえる
+  //  ・掴み方は data-testid だけ（クラス名・入れ子の段数・「何番目」に依らない）
+  //  ・押す回数を決め打ちしない（並んでいる条件を順に押し、押せたものだけ数える）
+  //  ・位置を読めなかったときは合格に倒さず不合格にする ---
+  currentCheck = 'DAYCOND-01'
+  {
+    const dcBrowser = await chromium.launch()
+    const dcContext = await dcBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const dcPage = await dcContext.newPage()
+    dcPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@DAYCOND-01] ${text}`)
+    })
+    dcPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@DAYCOND-01] ${err.message}`)
+    })
+    /** ページの先頭からの位置。窓が後ろの画面を止めているあいだも同じ値になる */
+    const dcDocPos = async (loc) => {
+      if ((await loc.count()) === 0) return null
+      return await loc.first().evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const fixed = getComputedStyle(document.body).position === 'fixed'
+        const top = fixed ? parseFloat(document.body.style.top || '0') : 0
+        const y = r.top + window.scrollY - (Number.isFinite(top) ? top : 0)
+        const x = r.left + window.scrollX
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+        return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }
+      })
+    }
+    try {
+      await dcPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dcPage.waitForTimeout(2400) // 初回シード完了待ち
+      await dcPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dcPage.reload({ waitUntil: 'networkidle' })
+      await dcPage.waitForTimeout(2000)
+      const dcSection = () =>
+        dcPage
+          .locator('section')
+          .filter({ has: dcPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
+      const dcToggle = dcSection().locator('[data-testid="day-suggest-toggle"]')
+      if ((await dcToggle.count()) === 1 && (await dcToggle.getAttribute('aria-expanded')) === 'false') {
+        await dcToggle.click()
+        await dcPage.waitForTimeout(700)
+      }
+      const dcWatch = {
+        決めてもらうボタン: dcPage.locator('[data-testid="day-suggest-draw"]'),
+        今日の献立に入れる: dcPage.locator('[data-testid="day-suggest-apply"]'),
+        候補カード: dcPage.locator('[data-testid="day-suggest-result"]'),
+      }
+      const dcSnap = async () => {
+        const out = {}
+        for (const [label, loc] of Object.entries(dcWatch)) out[label] = await dcDocPos(loc)
+        return out
+      }
+      check('DAYCOND-01 前提: 決めてもらうボタンが出ている', (await dcWatch.決めてもらうボタン.count()) === 1)
+      check('DAYCOND-01 前提: 出てきた候補のカードがある', (await dcWatch.候補カード.count()) >= 1)
+      const dcBefore = await dcSnap()
+      check(
+        'DAYCOND-01 前提: 位置を読めた（読めなければ見張りが壊れている）',
+        Object.values(dcBefore).every((v) => v != null),
+        JSON.stringify(dcBefore),
+      )
+
+      const dcConditions = dcSection().getByRole('button', { name: /条件をしぼる/ })
+      check('DAYCOND-01 前提: 「条件をしぼる」が押せる', (await dcConditions.count()) === 1)
+      if ((await dcConditions.count()) === 1) {
+        await dcConditions.click()
+        await dcPage.waitForTimeout(800)
+      }
+      const dcModal = dcPage.locator('[data-testid="day-conditions-modal"]')
+      check('DAYCOND-01 「条件をしぼる」を押すと窓が開く（折りたたみではない）', (await dcModal.count()) === 1)
+
+      // 窓が開いていれば窓の中を、開いていなければ節の中を押す
+      // （直す前のコードでも同じ操作で測れる＝赤の中身がそのまま「何pxずれたか」になる）
+      const dcScope = (await dcModal.count()) === 1 ? dcModal : dcSection()
+      const dcMoved = []
+      const dcSame = (a, b) =>
+        a != null && b != null && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.x - b.x) < 0.5
+      const dcCompare = async (when) => {
+        const now = await dcSnap()
+        for (const label of Object.keys(dcWatch)) {
+          if (!dcSame(dcBefore[label], now[label])) {
+            dcMoved.push(
+              `${when}: ${label} ${JSON.stringify(dcBefore[label])}→${JSON.stringify(now[label])}`,
+            )
+          }
+        }
+      }
+      await dcCompare('窓を開いた直後')
+      // 窓の**中**も動かないこと（オーナー実機の不満は「説明文や追加の選択肢が出現して
+      // 場所が変わる」なので、窓の中で同じことが起きても同じ不満になる）。
+      // 窓は真ん中に出るので、中身が1行増えると窓ごと上下にずれる＝上端（いちばん上のチップ）と
+      // 下端（「閉じる」）の両方を見る
+      const dcInside = {
+        '窓のいちばん上のチップ': dcScope.getByRole('button', { name: ja.dayStart.condAll, exact: true }),
+        '窓の「閉じる」': dcPage.locator('[data-testid="day-conditions-close"]'),
+      }
+      const dcInsideSnap = async () => {
+        const out = {}
+        for (const [label, loc] of Object.entries(dcInside)) out[label] = await dcDocPos(loc)
+        return out
+      }
+      const dcInsideBefore = await dcInsideSnap()
+      check(
+        'DAYCOND-01 前提: 窓の中の位置を読めた',
+        (await dcModal.count()) !== 1 || Object.values(dcInsideBefore).every((v) => v != null),
+        JSON.stringify(dcInsideBefore),
+      )
+      const dcInsideMoved = []
+      const dcCompareInside = async (when) => {
+        if ((await dcModal.count()) !== 1) return
+        const now = await dcInsideSnap()
+        for (const label of Object.keys(dcInside)) {
+          if (!dcSame(dcInsideBefore[label], now[label])) {
+            dcInsideMoved.push(
+              `${when}: ${label} ${JSON.stringify(dcInsideBefore[label])}→${JSON.stringify(now[label])}`,
+            )
+          }
+        }
+      }
+      const dcPressed = []
+      for (const name of [
+        ja.dayStart.condNotRecent,
+        ja.dayStart.condFavorite,
+        ja.dayStart.condQuick.replace('{n}', '20'),
+        ja.dayStart.condQuick.replace('{n}', '10'),
+        ja.dayStart.pantryOnlyToggle,
+        ja.dayStart.condAll,
+      ]) {
+        const button = dcScope.getByRole('button', { name, exact: true })
+        if ((await button.count()) === 0) continue
+        await button.first().click()
+        await dcPage.waitForTimeout(600)
+        dcPressed.push(name)
+        await dcCompare(`「${name}」を押した後`)
+        await dcCompareInside(`「${name}」を押した後`)
+      }
+      check(
+        'DAYCOND-01 前提: 条件のボタンを2つ以上押せた（押せていなければ測れていない）',
+        dcPressed.length >= 2,
+        `押せた=${JSON.stringify(dcPressed)}`,
+      )
+      check(
+        'DAYCOND-01 窓の中で条件を次々押しても、後ろのボタンと候補カードが1pxも動かない',
+        dcMoved.length === 0,
+        dcMoved.join(' / '),
+      )
+      check(
+        'DAYCOND-01 窓の中の並びも動かない（説明文や選択肢が出たり消えたりして中身がずれない）',
+        dcInsideMoved.length === 0,
+        dcInsideMoved.join(' / '),
+      )
+
+      const dcClose = dcPage.locator('[data-testid="day-conditions-close"]')
+      if ((await dcClose.count()) === 1) {
+        await dcClose.click()
+        await dcPage.waitForTimeout(800)
+        const dcAfter = await dcSnap()
+        const dcDiff = Object.keys(dcWatch)
+          .filter((label) => !dcSame(dcBefore[label], dcAfter[label]))
+          .map((label) => `${label} ${JSON.stringify(dcBefore[label])}→${JSON.stringify(dcAfter[label])}`)
+        check('DAYCOND-01 窓を閉じても、開く前と同じ場所に戻っている', dcDiff.length === 0, dcDiff.join(' / '))
+      }
+
+      // 端末の「戻る」で、この窓だけが閉じる（アプリ共通の窓の作法に乗っていること）。
+      // 乗っていないと、窓を開けたまま戻るを押したときに献立の画面ごと離脱する
+      if ((await dcModal.count()) === 0 && (await dcConditions.count()) === 1) {
+        await dcConditions.first().click()
+        await dcPage.waitForTimeout(700)
+        check('DAYCOND-01 前提: 窓をもう一度開けた', (await dcModal.count()) === 1)
+        await dcPage.goBack()
+        await dcPage.waitForTimeout(900)
+        check(
+          'DAYCOND-01 端末の「戻る」で窓だけが閉じる（献立の画面から離脱しない）',
+          (await dcModal.count()) === 0 && dcPage.url().includes('#/meal-plan'),
+          `窓=${await dcModal.count()} URL=${dcPage.url()}`,
+        )
+      }
+    } finally {
+      await dcBrowser.close()
+    }
+  }
+
+  // --- DAYONE-02(2026-08-19 便IA・オーナー実機「1品も条件ぽちぽち帰るたびに候補が
+  // 変わらないようにして」)。2026-08-18の裁定（1品は引き直すのが目的なので条件を変えたら
+  // すぐ入れ替わってよい）を、オーナーが実機で見て逆に決め直したもの。
+  //
+  // 測るのは両方向:
+  //   ① 条件を変えただけでは、出ている1品が入れ替わらない
+  //   ② 変えたことは、押すボタンのそばの1行で分かる
+  //   ③ 「おまかせで1品出す」を押すと、変えた条件が効いた候補に入れ替わる
+  //   ④ 押したあとは②の1行が消える
+  // 仕込みは**お気に入りをちょうど1品だけ付ける**＝「お気に入り」に絞ったときに出る品が
+  // 1つに決まるので、③を「たまたま別の品を引いた回だけ通る」形にしない。
+  // 禁じ手よけ: 曜日・月替わりの前提を置かない／引き直しの回数を決め打ちしない（上限は保険）／
+  // 料理名が読めなかったときは合格に倒さず不合格にする ---
+  currentCheck = 'DAYONE-02'
+  {
+    const doBrowser = await chromium.launch()
+    const doContext = await doBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const doPage = await doContext.newPage()
+    doPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@DAYONE-02] ${text}`)
+    })
+    doPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@DAYONE-02] ${err.message}`)
+    })
+    const doClean = (t) => (t ?? '').replaceAll('​', '').trim()
+    try {
+      await doPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await doPage.waitForTimeout(2400) // 初回シード完了待ち
+      const doFavTitle = '肉じゃが'
+      const doMarked = await doPage.evaluate(
+        (title) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const tx = idb.transaction('recipes', 'readwrite')
+                const store = tx.objectStore('recipes')
+                let n = 0
+                for (const r of g.result) {
+                  const want = r.title === title
+                  if (!!r.isFavorite !== want) store.put({ ...r, isFavorite: want })
+                  if (want) n++
+                }
+                tx.oncomplete = () => resolve(n)
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        doFavTitle,
+      )
+      check('DAYONE-02 前提: お気に入りをちょうど1品だけ付けられた', doMarked === 1, `付けた数=${doMarked}`)
+      await doPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await doPage.reload({ waitUntil: 'networkidle' })
+      await doPage.waitForTimeout(2000)
+      const doSection = () =>
+        doPage
+          .locator('section')
+          .filter({ has: doPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
+      const doToggle = doSection().locator('[data-testid="day-suggest-toggle"]')
+      if ((await doToggle.count()) === 1 && (await doToggle.getAttribute('aria-expanded')) === 'false') {
+        await doToggle.click()
+        await doPage.waitForTimeout(700)
+      }
+      await doPage.locator('[data-testid="day-mode-one"]').click()
+      await doPage.waitForTimeout(1000)
+      const doTitle = () => doPage.locator('[data-testid="day-suggest-result-title"]').first()
+      // お気に入りに付けた品そのものが出ていたら、別の品になるまで引き直す（上限は保険）
+      const DO_MAX_DRAWS = 12
+      let doShown = doClean(await doTitle().textContent())
+      for (let i = 0; i < DO_MAX_DRAWS && doShown === doFavTitle; i++) {
+        await doPage.locator('[data-testid="day-suggest-draw"]').click()
+        await doPage.waitForTimeout(600)
+        doShown = doClean(await doTitle().textContent())
+      }
+      check(
+        'DAYONE-02 前提: お気に入り以外の候補が出ている（変わったかどうかを見分けられる）',
+        doShown.length > 0 && doShown !== doFavTitle,
+        `候補=${doShown}`,
+      )
+
+      const doConditions = doSection().getByRole('button', { name: /条件をしぼる/ })
+      if ((await doConditions.count()) === 1) {
+        await doConditions.click()
+        await doPage.waitForTimeout(800)
+      }
+      const doModal = doPage.locator('[data-testid="day-conditions-modal"]')
+      const doScope = (await doModal.count()) === 1 ? doModal : doSection()
+      const doFav = doScope.getByRole('button', { name: ja.dayStart.condFavorite, exact: true })
+      check('DAYONE-02 前提: 「お気に入り」で絞れる', (await doFav.count()) >= 1)
+      if ((await doFav.count()) >= 1) {
+        await doFav.first().click()
+        await doPage.waitForTimeout(900)
+      }
+      const doClose = doPage.locator('[data-testid="day-conditions-close"]')
+      if ((await doClose.count()) === 1) {
+        await doClose.click()
+        await doPage.waitForTimeout(800)
+      }
+      check(
+        'DAYONE-02 条件を変えただけでは、1品の候補が入れ替わらない',
+        doClean(await doTitle().textContent()) === doShown,
+        `変える前=${doShown} 変えた後=${doClean(await doTitle().textContent())}`,
+      )
+      const doNote = () => doPage.locator('[data-testid="day-one-condition-changed"]')
+      check(
+        'DAYONE-02 条件を変えると、押すボタンのそばに「まだ反映していない」1行が出る',
+        (await doNote().count()) === 1 && (await doNote().first().isVisible()),
+      )
+      await doPage.locator('[data-testid="day-suggest-draw"]').click()
+      await doPage.waitForTimeout(1000)
+      check(
+        'DAYONE-02 「おまかせで1品出す」を押すと、変えた条件が効いた候補に入れ替わる',
+        doClean(await doTitle().textContent()) === doFavTitle,
+        `出た候補=${doClean(await doTitle().textContent())} 期待=${doFavTitle}`,
+      )
+      check('DAYONE-02 押したあとは、その1行が消える', (await doNote().count()) === 0)
+    } finally {
+      await doBrowser.close()
+    }
+  }
+
+  // --- WEEKDICE-03(2026-08-19 便IA・オーナー実機「月や週の献立で、サイコロ押してレシピを
+  // 変更した後に、元に戻すトースト？出してほしい」)。
+  //
+  // 週・月の行のサイコロを押すと、その枠のレシピが入れ替わる。入れ替えは端末に保存されるので、
+  // 押し直しても前の料理には戻らない＝**何が入っていたかを覚えていないと戻せない**状態だった。
+  // ×の知らせ（便HQ）と同じ形にそろえ、**入れ替える前のレシピに戻る**ところまで測る。
+  //   ① 押すと、何が何に変わったかの知らせが出る
+  //   ② その知らせに「元に戻す」が付いている
+  //   ③ 押すと、入れ替える前のレシピに戻っている
+  // 行の掴み方は data-date / data-slot / data-role（**いつの・どの食事の・どの役割**の行か）。
+  // 週には同じ形の行が何十個も並ぶので、「何番目」や入れ子の段数では掴まない。
+  // 禁じ手よけ: 曜日・月替わりの前提を置かない（使うのは今日の日付だけ）／
+  // サイコロを押す回数を決め打ちしない（同じ品を引くことがあるので上限つきで繰り返す）／
+  // 料理名を読めなかったときは合格に倒さず不合格にする ---
+  currentCheck = 'WEEKDICE-03'
+  {
+    const wdBrowser = await chromium.launch()
+    const wdContext = await wdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const wdPage = await wdContext.newPage()
+    wdPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@WEEKDICE-03] ${text}`)
+    })
+    wdPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@WEEKDICE-03] ${err.message}`)
+    })
+    const wdClean = (t) => (t ?? '').replaceAll('​', '').trim()
+    try {
+      await wdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await wdPage.waitForTimeout(2400) // 初回シード完了待ち
+      await wdPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await wdPage.reload({ waitUntil: 'networkidle' })
+      await wdPage.waitForTimeout(2000)
+      const wdToday = await wdPage.evaluate(() => {
+        const d = new Date()
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      })
+      await wdPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await wdPage.waitForTimeout(1400)
+      const wdRow = wdPage.locator(
+        `[data-testid="plan-row"][data-date="${wdToday}"][data-slot="dinner"][data-role="main"]`,
+      )
+      check(
+        'WEEKDICE-03 前提: 今日の夕食・主菜の行を掴めた（日付と食事と役割で掴む）',
+        (await wdRow.count()) === 1,
+        `見つかった行=${await wdRow.count()}`,
+      )
+      if ((await wdRow.count()) === 1) {
+        // 空いていればまず1品入れる（測りたいのは「入れ替え」なので、中身を作ってから始める）
+        if ((await wdRow.locator('[data-testid="row-recipe"]').count()) === 0) {
+          await wdRow.getByRole('button', { name: ja.mealPlan.emptyAssign }).click()
+          await wdPage.waitForTimeout(1000)
+          await wdPage.locator('[data-testid="recipe-picker"] [data-testid="picker-item"]').first().click()
+          await wdPage.waitForTimeout(1400)
+        }
+        const wdTitle = async () =>
+          wdClean(await wdRow.locator('[data-testid="row-recipe"]').first().textContent())
+        const wdBefore = await wdTitle()
+        check('WEEKDICE-03 前提: 行にレシピが入っている', wdBefore.length > 0, `料理名=${wdBefore}`)
+        const WD_MAX_PRESSES = 10
+        let wdAfter = wdBefore
+        for (let i = 0; i < WD_MAX_PRESSES && wdAfter === wdBefore; i++) {
+          await wdRow.getByRole('button', { name: ja.mealPlan.suggestAria }).click()
+          await wdPage.waitForTimeout(900)
+          wdAfter = await wdTitle()
+        }
+        check(
+          'WEEKDICE-03 前提: サイコロでレシピが入れ替わった',
+          wdBefore.length > 0 && wdAfter.length > 0 && wdAfter !== wdBefore,
+          `前=${wdBefore} 後=${wdAfter}`,
+        )
+        const wdToast = wdPage.locator('[role="status"]')
+        const wdToastText = wdClean(await wdToast.first().textContent().catch(() => ''))
+        check(
+          'WEEKDICE-03 サイコロを押すと、何が何に変わったかの知らせが出る',
+          wdToastText.includes(wdBefore) && wdToastText.includes(wdAfter),
+          `知らせ=${wdToastText}`,
+        )
+        const wdUndo = wdToast.getByRole('button', { name: ja.common.undo })
+        check('WEEKDICE-03 その知らせに「元に戻す」が付いている', (await wdUndo.count()) === 1)
+        if ((await wdUndo.count()) === 1) {
+          await wdUndo.first().click()
+          await wdPage.waitForTimeout(1400)
+          check(
+            'WEEKDICE-03 「元に戻す」で、入れ替える前のレシピに戻っている',
+            (await wdTitle()) === wdBefore,
+            `戻した後=${await wdTitle()} 期待=${wdBefore}`,
+          )
+        }
+      }
+    } finally {
+      await wdBrowser.close()
+    }
+  }
+
+  // --- SUGGESTNG-04(2026-08-19 便IA・司令部裁定): NG食材（設定「食べられない食材」）の警告は、
+  // **提案してくる場所にこそ要る**。レシピ一覧・献立の枠・「レシピを選ぶ」画面には出ていたのに、
+  // 「今日なに作る？」の候補と「今日の献立」の1品にだけ出ていなかった（渡し忘れ）。
+  // 同じ1品を2か所で見て、どちらにも同じ印が出ることを測る。
+  // 仕込みはお気に入り1品＋その品が使っている食材をNGに入れる＝**必ずその品が候補に出る**
+  // ようにして、「たまたまNGの品を引いた回だけ通る」形にしない ---
+  currentCheck = 'SUGGESTNG-04'
+  {
+    const snBrowser = await chromium.launch()
+    const snContext = await snBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const snPage = await snContext.newPage()
+    snPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@SUGGESTNG-04] ${text}`)
+    })
+    snPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@SUGGESTNG-04] ${err.message}`)
+    })
+    const snClean = (t) => (t ?? '').replaceAll('​', '').trim()
+    try {
+      await snPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await snPage.waitForTimeout(2400) // 初回シード完了待ち
+      const snTitle = '肉じゃが'
+      const snNg = 'じゃがいも'
+      const snSetup = await snPage.evaluate(
+        ({ title, ng }) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const target = g.result.find((r) => r.title === title)
+                const hasNg =
+                  !!target && (target.ingredients ?? []).some((i) => (i.name ?? '').includes(ng))
+                const tx = idb.transaction(['recipes', 'settings'], 'readwrite')
+                const store = tx.objectStore('recipes')
+                for (const r of g.result) {
+                  const want = r.title === title
+                  if (!!r.isFavorite !== want) store.put({ ...r, isFavorite: want })
+                }
+                const settingsStore = tx.objectStore('settings')
+                const sg = settingsStore.get(1)
+                sg.onsuccess = () => settingsStore.put({ ...(sg.result ?? { id: 1 }), ngIngredients: [ng] })
+                tx.oncomplete = () => resolve({ hasNg })
+                tx.onerror = () => reject(tx.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        { title: snTitle, ng: snNg },
+      )
+      check(
+        `SUGGESTNG-04 前提: 「${snTitle}」が「${snNg}」を使っている（使っていなければ測れていない）`,
+        snSetup.hasNg === true,
+        JSON.stringify(snSetup),
+      )
+      await snPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await snPage.reload({ waitUntil: 'networkidle' })
+      await snPage.waitForTimeout(2200)
+      const snSection = () =>
+        snPage
+          .locator('section')
+          .filter({ has: snPage.getByRole('heading', { name: ja.dayStart.suggestTitle }) })
+      const snToggle = snSection().locator('[data-testid="day-suggest-toggle"]')
+      if ((await snToggle.count()) === 1 && (await snToggle.getAttribute('aria-expanded')) === 'false') {
+        await snToggle.click()
+        await snPage.waitForTimeout(700)
+      }
+      await snPage.locator('[data-testid="day-mode-one"]').click()
+      await snPage.waitForTimeout(1000)
+      const snConditions = snSection().getByRole('button', { name: /条件をしぼる/ })
+      if ((await snConditions.count()) === 1) {
+        await snConditions.click()
+        await snPage.waitForTimeout(800)
+      }
+      const snModal = snPage.locator('[data-testid="day-conditions-modal"]')
+      const snScope = (await snModal.count()) === 1 ? snModal : snSection()
+      const snFav = snScope.getByRole('button', { name: ja.dayStart.condFavorite, exact: true })
+      if ((await snFav.count()) >= 1) {
+        await snFav.first().click()
+        await snPage.waitForTimeout(800)
+      }
+      const snClose = snPage.locator('[data-testid="day-conditions-close"]')
+      if ((await snClose.count()) === 1) {
+        await snClose.click()
+        await snPage.waitForTimeout(700)
+      }
+      await snPage.locator('[data-testid="day-suggest-draw"]').click()
+      await snPage.waitForTimeout(1100)
+      const snShown = snClean(
+        await snPage.locator('[data-testid="day-suggest-result-title"]').first().textContent(),
+      )
+      check(
+        'SUGGESTNG-04 前提: NG食材を含む品が候補に出ている',
+        snShown === snTitle,
+        `候補=${snShown} 期待=${snTitle}`,
+      )
+      check(
+        'SUGGESTNG-04 「今日なに作る？」の候補にNG食材の警告が出る',
+        (await snPage
+          .locator('[data-testid="day-suggest-result"]')
+          .first()
+          .locator(`[aria-label="${ja.card.ngBadge}"]`)
+          .count()) >= 1,
+      )
+      await snPage.locator('[data-testid="day-suggest-apply"]').click()
+      await snPage.waitForTimeout(900)
+      await snPage.getByRole('button', { name: ja.mealPlan.slot.dinner, exact: true }).first().click()
+      await snPage.waitForTimeout(1800)
+      const snPlanCard = snPage.locator('[data-testid="day-plan-card"]').filter({ hasText: snTitle }).first()
+      check('SUGGESTNG-04 前提: その品が今日の献立に入った', (await snPlanCard.count()) === 1)
+      if ((await snPlanCard.count()) === 1) {
+        check(
+          'SUGGESTNG-04 「今日の献立」の1品にもNG食材の警告が出る',
+          (await snPlanCard.locator(`[aria-label="${ja.card.ngBadge}"]`).count()) >= 1,
+        )
+      }
+    } finally {
+      await snBrowser.close()
+    }
+  }
+
+  // --- PICKCOMPACT-05(2026-08-19 便IA・オーナー原文「④OKフォーマットそのままで情報減らすなど
+  // コンパクトにする努力はして」)。
+  //
+  // 便HWで「レシピを選ぶ」画面が共通のカードにそろった代わりに、1画面に入る品数が減った
+  // （390×844の実測で6品）。**骨格は変えずに、載せる情報だけを引いて高さを詰める**。
+  // 測るのは見た目ではなく**1画面に丸ごう見える品数**＝利用者が1回のスクロールで見比べられる数。
+  // 掴み方は data-testid（並びの何番目かには依らない）。列が読めなかったときは不合格にする ---
+  currentCheck = 'PICKCOMPACT-05'
+  {
+    const pkBrowser = await chromium.launch()
+    const pkContext = await pkBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const pkPage = await pkContext.newPage()
+    pkPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@PICKCOMPACT-05] ${text}`)
+    })
+    pkPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@PICKCOMPACT-05] ${err.message}`)
+    })
+    const pkClean = (t) => (t ?? '').replaceAll('​', '').trim()
+    try {
+      await pkPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await pkPage.waitForTimeout(2400) // 初回シード完了待ち
+      await pkPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await pkPage.reload({ waitUntil: 'networkidle' })
+      await pkPage.waitForTimeout(2000)
+      const pkToday = await pkPage.evaluate(() => {
+        const d = new Date()
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      })
+      await pkPage.getByRole('button', { name: ja.mealPlan.viewWeek, exact: true }).click()
+      await pkPage.waitForTimeout(1400)
+      const pkRow = pkPage.locator(
+        `[data-testid="plan-row"][data-date="${pkToday}"][data-slot="dinner"][data-role="main"]`,
+      )
+      check('PICKCOMPACT-05 前提: 今日の夕食・主菜の行を掴めた', (await pkRow.count()) === 1)
+      if ((await pkRow.count()) === 1) {
+        const pkOpen = pkRow.getByRole('button', { name: ja.mealPlan.emptyAssign })
+        if ((await pkOpen.count()) === 1) await pkOpen.click()
+        else await pkRow.locator('[data-testid="row-recipe"]').first().click()
+        await pkPage.waitForTimeout(1400)
+        const pkPicker = pkPage.locator('[data-testid="recipe-picker"]')
+        check('PICKCOMPACT-05 前提: 「レシピを選ぶ」画面が開いた', (await pkPicker.count()) === 1)
+        const pkTotal = await pkPicker.locator('[data-testid="picker-item"]').count()
+        check('PICKCOMPACT-05 前提: レシピが並んでいる', pkTotal > 10, `並んだ数=${pkTotal}`)
+        const pkFully = await pkPicker.evaluate((root) => {
+          const items = [...root.querySelectorAll('[data-testid="picker-item"]')]
+          if (items.length === 0) return null
+          return items.filter((el) => {
+            const r = el.getBoundingClientRect()
+            return r.top >= -0.5 && r.bottom <= window.innerHeight + 0.5
+          }).length
+        })
+        // 便HWのあと（引き算する前）は6品。7品を下限にする＝引き算が効いていれば必ず超える
+        check(
+          'PICKCOMPACT-05 1画面に7品以上が丸ごと見える（情報を引く前は6品）',
+          pkFully != null && pkFully >= 7,
+          `丸ごと見えた数=${pkFully ?? '読めず'}品`,
+        )
+        const pkText = pkClean(await pkPicker.textContent())
+        check(
+          'PICKCOMPACT-05 「レシピを選ぶ」画面に「基本レシピ」は出さない（選ぶ決め手にならない）',
+          pkText.length > 0 && !pkText.includes(ja.card.starterBadge),
+        )
+        check(
+          'PICKCOMPACT-05 調理時間は残っている（高さの縮まない情報まで消していない）',
+          /\d+分/.test(pkText),
+        )
+      }
+    } finally {
+      await pkBrowser.close()
     }
   }
 
@@ -37285,10 +37947,27 @@ try {
       await nhPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await nhPage.reload({ waitUntil: 'networkidle' })
       await nhPage.waitForTimeout(1400)
+      // 2026-08-19 便IA: 在庫の絞り込みは「条件をしぼる」の窓の中へ移した
+      // （同じ絞り込みなのに片方だけ外に残すと、押したときに後ろが動く/動かないが割れるため）
+      {
+        const nhConditions = nhPage.getByRole('button', { name: /条件をしぼる/ })
+        check('NOHOME-01 前提: 「今日なに作る？」に「条件をしぼる」がある', (await nhConditions.count()) === 1)
+        if ((await nhConditions.count()) === 1) {
+          await nhConditions.click()
+          await nhPage.waitForTimeout(700)
+        }
+      }
       check(
-        'NOHOME-01 在庫があるときは「今日なに作る？」に在庫の絞り込みが出る',
+        'NOHOME-01 在庫があるときは「今日なに作る？」の絞り込みに在庫の絞り込みが出る',
         (await nhBody()).includes('在庫の食材から'),
       )
+      {
+        const nhClose = nhPage.locator('[data-testid="day-conditions-close"]')
+        if ((await nhClose.count()) === 1) {
+          await nhClose.click()
+          await nhPage.waitForTimeout(600)
+        }
+      }
 
       // (4) 「最近作ったもの」は献立が無い日でも出る
       const nhCooked = await nhPage.evaluate(

@@ -368,12 +368,20 @@ const pickerChipCls = (active: boolean) =>
  */
 function TodayListRow({
   recipe,
+  ngIngredients,
   onCooked,
   onRemove,
   removeLabel,
   footer,
 }: {
   recipe: Recipe
+  /**
+   * 設定「食べられない食材」（2026-08-19 便IA）。引っかかる品にはカードが警告の印を出す。
+   * レシピ一覧・献立の枠・「レシピを選ぶ」画面には最初から出ていたのに、ここと
+   * 「今日なに作る？」の候補だけ渡し忘れていて、**今日これを作ると決めた品**について
+   * 何も言わない画面になっていた。
+   */
+  ngIngredients: string[]
   onCooked: () => void
   onRemove?: () => void
   /**
@@ -399,6 +407,7 @@ function TodayListRow({
         recipe={recipe}
         density="standard"
         place="todayPlan"
+        ngIngredients={ngIngredients}
         // 検査用の目印（2026-08-19 便HY・CARDPARTS-01）。「今日なに作る？」の候補と
         // 同じレシピのカードを見比べて、場所ごとに載せる情報が違うことを機械で見張る
         testId="day-plan-card"
@@ -3580,11 +3589,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       // 料理の入っていた行を外したときだけ知らせる（空欄行を畳む×は献立を1件も消さない）
       if (removed && removedTitle) {
         const fill = (text: string) =>
-          text
-            .replace('{m}', String(Number(date.slice(5, 7))))
-            .replace('{d}', String(Number(date.slice(8, 10))))
-            .replace('{slot}', ja.mealPlan.slot[slot])
-            .replace('{title}', removedTitle)
+          fillSlotText(text, date, slot).replace('{title}', removedTitle)
         const toast = fill(ja.mealPlan.clearRemovedToast)
         setMessage(toast)
         setUndoRemove({
@@ -3599,6 +3604,65 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     } else {
       hideDefaultRow(date, slot, role)
     }
+  }
+
+  /**
+   * 週・月の知らせに「いつの・どの食事の枠か」を差し込む（2026-08-18 便HQ ×／2026-08-19 便IA サイコロ）。
+   * 週・月は複数の日が同時に見えていて、料理名だけではどの枠のことか読み取れないため、
+   * この2つの知らせは必ず日付と食事から書き出す。
+   */
+  const fillSlotText = (text: string, date: string, slot: MealSlot) =>
+    text
+      .replace('{m}', String(Number(date.slice(5, 7))))
+      .replace('{d}', String(Number(date.slice(8, 10))))
+      .replace('{slot}', ja.mealPlan.slot[slot])
+
+  /**
+   * 行の「サイコロ」の取り消し（2026-08-19 便IA・オーナー実機「月や週の献立で、サイコロ押して
+   * レシピを変更した後に、元に戻すトースト？出してほしい」）。
+   *
+   * 「作った！」（undoCooked）・「レシピを選び直した」（undoPick）・「×で外した」（undoRemove）と
+   * **まったく同じ作法**で、出したトーストの文言まで一緒に持つ＝別の操作でトーストが差し替わったら
+   * この取り消しも一緒に消える（古いトーストの「元に戻す」で関係ない行が動く事故を防ぐ）。
+   *
+   * サイコロがすることは2通りあるので、戻すことも2通り持つ:
+   *  ・入れ替えた（もともと料理が入っていた枠） → **入れ替える前のレシピに戻す**
+   *  ・入れた（空いていた枠を埋めた。主菜＋副菜が一度に入ることもある） → 入れた行を外し、
+   *    空欄の行を出し直す（外したあとに「＋レシピを選ぶ」が戻らないと、次に入れる入口が消える）
+   */
+  const [undoSuggest, setUndoSuggest] = useState<{
+    /** 入れ替えを戻す（その行を、入れ替える前のレシピへ書き戻す） */
+    replace?: { entryId: number; recipeId: number }
+    /** 入れたものを外す（増えた行のid） */
+    addedEntryIds?: number[]
+    /** 外したあとに空欄の行を出し直す枠 */
+    restoreRows?: { date: string; slot: MealSlot; role: MealRole }[]
+    /** 「元に戻す」を添えたトーストの文言（これが今のトーストと違えば、控えはもう無効） */
+    message: string
+    /** 戻したあとに出す文言 */
+    undoneMessage: string
+  } | null>(null)
+  const undoSuggestActive = undoSuggest != null && undoSuggest.message === message
+  const runUndoSuggest = async () => {
+    if (!undoSuggest) return
+    if (undoSuggest.replace) {
+      await updateMealEntryRecipe(undoSuggest.replace.entryId, undoSuggest.replace.recipeId)
+      // 戻した時点で「1つ前」はもう無い（いま入っているものがそれ）ので控えを捨てる
+      const entryId = undoSuggest.replace.entryId
+      setPreviousRecipeByEntry((prev) => {
+        const next = { ...prev }
+        delete next[entryId]
+        return next
+      })
+    }
+    for (const entryId of undoSuggest.addedEntryIds ?? []) {
+      await removeMealEntry(entryId)
+    }
+    for (const row of undoSuggest.restoreRows ?? []) {
+      showDefaultRow(row.date, row.slot, row.role)
+    }
+    setUndoSuggest(null)
+    setMessage(undoSuggest.undoneMessage)
   }
 
   /**
@@ -3647,9 +3711,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         setMessage(ja.mealPlan.noSuggestion)
         return
       }
-      if (main) await addMealEntry(date, slot, main.id!, 'main')
-      if (side) await addMealEntry(date, slot, side.id!, 'side')
+      // 入れた行のidを控える（2026-08-19 便IA）。空いていた枠を埋めたときの「元に戻す」は
+      // **入れた行を外す**ことなので、どの行が増えたのかを知っている必要がある
+      const addedEntryIds: number[] = []
+      const restoreRows: { date: string; slot: MealSlot; role: MealRole }[] = []
+      if (main) {
+        addedEntryIds.push(await addMealEntry(date, slot, main.id!, 'main'))
+        restoreRows.push({ date, slot, role: 'main' })
+      }
+      if (side) {
+        addedEntryIds.push(await addMealEntry(date, slot, side.id!, 'side'))
+        restoreRows.push({ date, slot, role: 'side' })
+      }
       if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
+      const fill = (text: string) => fillSlotText(text, date, slot)
+      const toast =
+        main && side
+          ? fill(ja.mealPlan.suggestAddedPairToast)
+              .replace('{main}', main.title)
+              .replace('{side}', side.title)
+          : fill(ja.mealPlan.suggestAddedToast).replace('{title}', (main ?? side)!.title)
+      const undoneMessage =
+        main && side
+          ? fill(ja.mealPlan.suggestAddPairUndoneToast)
+              .replace('{main}', main.title)
+              .replace('{side}', side.title)
+          : fill(ja.mealPlan.suggestAddUndoneToast).replace('{title}', (main ?? side)!.title)
+      setMessage(toast)
+      setUndoSuggest({ addedEntryIds, restoreRows, message: toast, undoneMessage })
       return
     }
     // 副菜行のサイコロにも、ペア提案(suggestPairForSlot)・まとめて献立と同じ条件を効かせる
@@ -3684,11 +3773,41 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       setMessage(ja.mealPlan.noSuggestion)
       return
     }
+    const fill = (text: string) => fillSlotText(text, date, slot)
     if (entryId != null) {
+      // 入れ替え（2026-08-19 便IA）。**入れ替える前のレシピ**を控えてから書き換える。
+      // 控えは「レシピを選ぶ」画面の「前回選択」にも使う＝サイコロで入れ替えたあとに
+      // 選び直そうとしたとき、さっきまで入っていた料理が一覧の上のほうに並ぶ
+      // （選び直しで入れ替えたとき＝pickRecipe とまったく同じ扱い）
+      const before = allPlanEntries.find((e) => e.id === entryId)?.recipeId
+      const beforeTitle = before != null ? recipeById.get(before)?.title : undefined
       await updateMealEntryRecipe(entryId, picked.id!)
+      if (before != null && before !== picked.id && beforeTitle) {
+        setPreviousRecipeByEntry((prev) => ({ ...prev, [entryId]: before }))
+        const toast = fill(ja.mealPlan.suggestReplacedToast)
+          .replace('{before}', beforeTitle)
+          .replace('{after}', picked.title)
+        setMessage(toast)
+        setUndoSuggest({
+          replace: { entryId, recipeId: before },
+          message: toast,
+          undoneMessage: fill(ja.mealPlan.suggestReplaceUndoneToast).replace(
+            '{title}',
+            beforeTitle,
+          ),
+        })
+      }
     } else {
-      await addMealEntry(date, slot, picked.id!, role)
+      const addedEntryId = await addMealEntry(date, slot, picked.id!, role)
       if (extraLocalId) removeExtraRowState(date, slot, extraLocalId)
+      const toast = fill(ja.mealPlan.suggestAddedToast).replace('{title}', picked.title)
+      setMessage(toast)
+      setUndoSuggest({
+        addedEntryIds: [addedEntryId],
+        restoreRows: [{ date, slot, role }],
+        message: toast,
+        undoneMessage: fill(ja.mealPlan.suggestAddUndoneToast).replace('{title}', picked.title),
+      })
     }
   }
 
@@ -5139,9 +5258,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 作った！済みの枠に対応する記録(2026-08-09 便EQ)。あれば行の下に記録への入口を出す
     const cookedLogRow = isCooked ? cookedLogForEntry(date, recipe?.id) : undefined
     return (
-      // data-role: 検査用（この行がどの役割の行か）。2026-08-11 便FP で「今日の献立に追加」から
-      // 入れた品が全部主菜の行になっていた不具合を直したので、その再発を機械で見張る
-      <div key={key} data-testid="plan-row" data-role={role}>
+      // data-date / data-slot / data-role: 検査用（この行が「いつの・どの食事の・どの役割」の行か）。
+      // 2026-08-11 便FP で「今日の献立に追加」から入れた品が全部主菜の行になっていた不具合を直したので、
+      // その再発を機械で見張る。2026-08-19 便IA で日付と食事も足した＝週・月には同じ形の行が
+      // 何十個も並ぶので、**並び順ではなく「いつのどの枠か」で掴める**ようにするため
+      // （並びが変わると落ちる掴み方を作らない）
+      <div key={key} data-testid="plan-row" data-date={date} data-slot={slot} data-role={role}>
       <div className="flex items-center gap-2">
         {/* 役割ラベルの列。入っている行では、その下に食数(何人分作るか)のボタンを重ねて置く
             (2026-08-03 便DJ・オーナー指示)。横に足すと料理名の幅を削ってしまうため縦に積む */}
@@ -5810,6 +5932,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       {/* 「作った」の直後だけ「元に戻す」を添える(2026-08-02 便DE-3。買い物メモ・食材価格と同じ形)。
           2026-08-10 便FD: レシピを選び直した直後にも同じ「元に戻す」を添える。
           2026-08-18 便HQ: 献立の×（日タブの2種・週/月タブの行）にも同じ形で添えた。
+          2026-08-19 便IA: 週/月の行のサイコロ（自動提案）にも同じ形で添えた。
           消える操作ほど戻せない状態だったのを、いちばん軽い「作った！」と同じ守りに揃える */}
       <Toast
         message={message}
@@ -5818,9 +5941,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           setUndoCooked(null)
           setUndoPick(null)
           setUndoRemove(null)
+          setUndoSuggest(null)
         }}
         actionLabel={
-          undoCookedActive || undoPickActive || undoRemoveActive ? ja.common.undo : undefined
+          undoCookedActive || undoPickActive || undoRemoveActive || undoSuggestActive
+            ? ja.common.undo
+            : undefined
         }
         onAction={
           undoCookedActive
@@ -5829,7 +5955,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               ? () => void runUndoPick()
               : undoRemoveActive
                 ? () => void runUndoRemove()
-                : undefined
+                : undoSuggestActive
+                  ? () => void runUndoSuggest()
+                  : undefined
         }
       />
 
@@ -5905,6 +6033,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                       <TodayListRow
                         key={recipe.id}
                         recipe={recipe}
+                        ngIngredients={settings?.ngIngredients ?? []}
                         onCooked={() => markDayRecipeCooked(recipe)}
                         onRemove={() => void removeTodayPickedRecipe(recipe)}
                         footer={
@@ -5954,6 +6083,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                           <TodayListRow
                             key={recipe.id}
                             recipe={recipe}
+                            ngIngredients={settings?.ngIngredients ?? []}
                             onCooked={() => markDayRecipeCooked(recipe)}
                             onRemove={() => void removeTodayPlannedRecipe(slot, recipe)}
                             removeLabel={ja.mealPlan.todayPlannedRemove}
@@ -7585,7 +7715,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   // 2026-08-10 便FD: 選び直す前に入っていた料理を「選択中」の次に並べる
                   const isPrevious = !isSelected && recipe.id === previousPickerRecipeId
                   return (
-                  <li key={recipe.id} className={isSelected ? 'rounded-md bg-accent/10' : undefined}>
+                  <li
+                    key={recipe.id}
+                    // 検査用の目印（2026-08-19 便IA）。1画面に何品入るかを測るときに、
+                    // クラス名や入れ子の段数ではなく、この目印で1品ぶんを掴む
+                    data-testid="picker-item"
+                    className={isSelected ? 'rounded-md bg-accent/10' : undefined}
+                  >
                     <RecipeCard
                       recipe={recipe}
                       density="standard"
