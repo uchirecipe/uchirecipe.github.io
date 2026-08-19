@@ -22662,6 +22662,47 @@ Aみりん 大さじ1
   }
 }
 
+// ---------- IC-1: 折りたたみの開閉が「予約の追い越し」で消えないこと（2026-08-19 便IC） ----------
+//
+// 直したバグ: 折りたたみ（src/components/Collapse.tsx・34か所で使う共通部品）は
+// 「中身を置く→高さ0のまま1フレーム待つ→伸ばす」を requestAnimationFrame の二重予約で
+// 表していた。予約は描き直しの順番を保証しないので、機械が混むと
+// 「高さ0の中身」が一度も作られないまま開き切り、**アニメーションが丸ごと消えていた**
+// （設定の「機種変更するときは」は混んでいなくても毎回消えていた）。
+//
+// いまは useLayoutEffect（描き直しの前に必ず走る）の中で、中身を置く → 寸法を読んで
+// 「高さ0」をブラウザに確定させる → 1fr にする、を**同じ処理の中で**順に行う。
+// 予約を挟まないので順番が入れ替わらない。
+//
+// ここは「動きが出るか」ではなく「予約に戻していないか」だけを見る見張り
+// （動きそのものは scripts/e2e-smoke.mjs の EO-01 が実機で測る）。
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const raw = readFileSync(path.join(appRoot, 'src/components/Collapse.tsx'), 'utf-8')
+  if (raw.length < 500) throw new Error(`Collapse.tsx を読み取れていない(長さ=${raw.length})`)
+  // 説明のコメントに書いた言葉を数えないよう、コメントを落としてから読む
+  const code = raw.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/gm, '$1')
+  if (code.length < 300) throw new Error('Collapse.tsx のコメントを落としたら中身が残らない')
+  // 前提の確認（同じ読み方で、いま在るものが「在る」と読めること＝見張りの空振り防止）
+  eq('IC-1 前提: Collapse.tsx の中身を読めている', /export default function Collapse/.test(code), true)
+
+  eq(
+    'IC-1 開くときの順番を requestAnimationFrame の予約で作っていない',
+    /requestAnimationFrame/.test(code),
+    false,
+  )
+  eq(
+    'IC-1 開閉の指示は描き直しの前に片づける（useLayoutEffect を使う）',
+    /useLayoutEffect\s*\(/.test(code),
+    true,
+  )
+  eq(
+    'IC-1 「高さ0」を確定させる寸法の読み取りが残っている（消すとアニメーションが出なくなる）',
+    /getBoundingClientRect\(\)/.test(code),
+    true,
+  )
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
