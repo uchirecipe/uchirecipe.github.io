@@ -36,7 +36,6 @@ import {
   listRecipes,
   deleteRecipes,
   countRecipesDeleteImpact,
-  addTagToRecipes,
   removeTagFromRecipes,
 } from '../db/recipes'
 import { buildBulkDeleteConfirm } from '../logic/recipeDelete'
@@ -57,16 +56,16 @@ import {
   type DishTypeFilter,
   type EffortFilter,
   type TagFilter,
+  type TagMatchMode,
   type TimeFilter,
 } from '../logic/search'
 import {
-  tagFromQuery,
-  recipeIdsMissingTag,
+  savedSearchFromQuery,
+  savedSearchesWith,
+  savedSearchesWithout,
   countRecipesWithTag,
-  keywordTagsWith,
-  keywordTagsWithout,
-  buildKeywordTagAddConfirm,
-  buildKeywordTagRemoveConfirm,
+  buildSavedSearchRemoveConfirm,
+  buildLegacyTagRemoveConfirm,
 } from '../logic/tagRegister'
 import { DISH_TYPE_OPTIONS } from '../logic/homeSuggest'
 import {
@@ -397,7 +396,16 @@ type SavedListState = {
   ingredients: string[]
   time: TimeFilter
   effort: EffortFilter
-  tag: TagFilter
+  /**
+   * タグで絞る（2026-08-19 便HZ・③で複数選択に）。旧セッションの保存値には
+   * 1つだけ選ぶ tag しか無いので、両方を任意項目にして読めるようにしておく
+   * （復元のときに tag → tags へ読み替える）
+   */
+  tags?: string[]
+  /** タグを2つ以上選んだときの選び方（2026-08-19 便HZ・③。旧セッションの保存値には無い） */
+  tagMatch?: TagMatchMode
+  /** 1つだけ選ぶ形だった頃の保存値（2026-08-19 便HZ・③より前） */
+  tag?: TagFilter
   /**
    * 料理の種別で絞る（2026-08-10 便FF → 2026-08-19 便HU・⑬で複数選択に）。
    * 旧セッションの保存値には無いので任意項目
@@ -578,7 +586,25 @@ export default function RecipesPage() {
   }, [])
   const [time, setTime] = useState<TimeFilter>(saved?.time ?? 'all')
   const [effort, setEffort] = useState<EffortFilter>(saved?.effort ?? 'all')
-  const [tag, setTag] = useState<TagFilter>(saved?.tag ?? 'all')
+  /**
+   * タグで絞る（2026-08-19 便HZ・③ オーナー「タグ検索は、複数選択できるよにして。
+   * AND検索OR検索の切り替え機能も欲しい」）。空＝絞らない。
+   * 前の版（1つだけ選ぶ形）の保存値は、選んでいたタグ1つを入れた状態として読み替える
+   * ＝更新をまたいでも、見ていた絞り込みがそのまま戻る
+   */
+  const [tags, setTags] = useState<string[]>(
+    () => saved?.tags ?? (saved?.tag != null && saved.tag !== 'all' ? [saved.tag] : []),
+  )
+  /**
+   * タグを2つ以上選んだときの選び方（2026-08-19 便HZ・③）。既定は「どれかが付いている」。
+   * 理由: ①同じ絞り込みパネルの「料理の種別」も複数選択＝和集合で、選び方がそろう
+   * ②実際に候補の上位に出るタグは和食・洋食・中華のような同時には付かない分類なので、
+   * 「すべて付いている」を既定にすると2つ目を押した瞬間に0品になり、壊れて見える
+   * ③1つだけ選んでいるあいだは、どちらでも結果は今までと同じ
+   */
+  const [tagMatch, setTagMatch] = useState<TagMatchMode>(saved?.tagMatch ?? 'any')
+  const toggleTag = (value: string) =>
+    setTags((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]))
   // 料理の種別(主菜・副菜・汁物・その他)で絞る(2026-08-10 便FF → 2026-08-19 便HU・⑬で複数選択)。
   // 空＝絞らない。選んだ区分の**どれか**に当たるレシピが残る
   const [dishTypes, setDishTypes] = useState<DishTypeFilter[]>(saved?.dishTypes ?? [])
@@ -663,38 +689,52 @@ export default function RecipesPage() {
    * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
    */
   /**
-   * 検索から登録したタグ（2026-08-19 便HU・⑭）。控えは設定に持ち、件数はいま一覧に出ている
-   * レシピから数える（チップの数字と、押したときに出てくる品数が必ず一致する）。
+   * 絞り込みのタグとして登録した検索の言葉（2026-08-19 便HZ・②）。控えは設定に持つ。
+   * **レシピのデータには一切触らない**ので、チップに件数は出さない
+   * （押すとその言葉の検索が戻るだけで、「そのタグが付いた品が◯品ある」という数ではない）。
    */
-  const keywordTags = useMemo(() => settings?.keywordTags ?? [], [settings?.keywordTags])
-  const keywordTagUsages = useMemo(
+  const savedSearches = useMemo(() => settings?.savedSearches ?? [], [settings?.savedSearches])
+  /**
+   * 以前の版（便HU・⑭）が、登録と同時にレシピ本体へ書き込んだタグのうち、まだ残っているもの
+   * （2026-08-19 便HZ・②）。1つも残っていなければ欄ごと出さない。
+   * 数える相手は端末にある全レシピ（外すときも全レシピが相手なので、
+   * 「基本レシピを表示しない」の設定で数が変わってはいけない）
+   */
+  const legacyTags = useMemo(() => settings?.keywordTags ?? [], [settings?.keywordTags])
+  const legacyTagUsages = useMemo(
     () =>
-      keywordTags.map((name) => ({
-        tag: name,
-        count: countRecipesWithTag(visibleRecipes ?? [], name),
-      })),
-    [keywordTags, visibleRecipes],
+      legacyTags
+        .map((name) => ({ tag: name, count: countRecipesWithTag(recipes ?? [], name) }))
+        .filter((usage) => usage.count > 0),
+    [legacyTags, recipes],
   )
+  /**
+   * 以前の版で登録したタグの**名前だけ**を「自分で登録したタグ」へ引き継ぐ（1回だけ・
+   * 2026-08-19 便HZ・②）。引き継がないと、登録した覚えのあるタグが更新した瞬間に
+   * 絞り込みから消えたように見える。レシピには触らない
+   */
+  useEffect(() => {
+    if (!settings) return
+    if (settings.savedSearches !== undefined) return
+    const carried = settings.keywordTags ?? []
+    if (carried.length === 0) return
+    void updateSettings({ savedSearches: [...carried] })
+  }, [settings])
 
   const tagOptions = useMemo(() => {
-    // 検索から登録したタグは専用の欄（削除ボタン付き）に出すので、こちらには重ねて出さない
-    const registered = new Set(keywordTags)
-    const pool = (visibleRecipes ?? []).map((recipe) => ({
-      tags: recipe.tags.filter((name) => !registered.has(name)),
-    }))
     // 2026-08-19 便HU・⑮: 「高たんぱく」は候補に出さない（logic/search.ts FILTER_HIDDEN_TAGS）
-    const usages = filterTagUsageCounts(pool, TAG_CHIP_LIMIT)
-    if (tag !== 'all' && !registered.has(tag) && !usages.some((u) => u.tag === tag)) {
-      usages.push({ tag, count: countRecipesWithTag(visibleRecipes ?? [], tag) })
+    const usages = filterTagUsageCounts(visibleRecipes ?? [], TAG_CHIP_LIMIT)
+    // 選んでいるタグは、件数の変動で上位から外れても必ず残す（外す手段が消えないように）
+    for (const name of tags) {
+      if (!usages.some((u) => u.tag === name)) {
+        usages.push({ tag: name, count: countRecipesWithTag(visibleRecipes ?? [], name) })
+      }
     }
-    return [
-      { value: 'all' as TagFilter, label: ja.search.tagAll },
-      ...usages.map(({ tag: value, count }) => ({
-        value: value as TagFilter,
-        label: ja.search.tagChip.replace('{name}', value).replace('{n}', String(count)),
-      })),
-    ]
-  }, [visibleRecipes, tag, keywordTags])
+    return usages.map(({ tag: value, count }) => ({
+      value,
+      label: ja.search.tagChip.replace('{name}', value).replace('{n}', String(count)),
+    }))
+  }, [visibleRecipes, tags])
 
   const results = useMemo(() => {
     if (!visibleRecipes) return undefined
@@ -703,7 +743,8 @@ export default function RecipesPage() {
       ingredients: ingredients.join(' '),
       time,
       effort,
-      tag,
+      tags,
+      tagMatch,
       dishTypes,
       favoriteOnly,
       excludeNg,
@@ -719,7 +760,8 @@ export default function RecipesPage() {
     ingredients,
     time,
     effort,
-    tag,
+    tags,
+    tagMatch,
     dishTypes,
     favoriteOnly,
     excludeNg,
@@ -739,7 +781,7 @@ export default function RecipesPage() {
     ingredients.length > 0 ||
     time !== 'all' ||
     effort !== 'all' ||
-    tag !== 'all' ||
+    tags.length > 0 ||
     dishTypes.length > 0 ||
     favoriteOnly ||
     excludeNg ||
@@ -763,7 +805,8 @@ export default function RecipesPage() {
         ingredients,
         time,
         effort,
-        tag,
+        tags,
+        tagMatch,
         dishTypes,
         favoriteOnly,
         excludeNg,
@@ -777,7 +820,8 @@ export default function RecipesPage() {
       ingredients,
       time,
       effort,
-      tag,
+      tags,
+      tagMatch,
       dishTypes,
       favoriteOnly,
       excludeNg,
@@ -828,7 +872,8 @@ export default function RecipesPage() {
       ingredients,
       time,
       effort,
-      tag,
+      tags,
+      tagMatch,
       dishTypes,
       favoriteOnly,
       excludeNg,
@@ -1104,7 +1149,9 @@ export default function RecipesPage() {
     setIngredients([])
     setTime('all')
     setEffort('all')
-    setTag('all')
+    setTags([])
+    // 選び方も既定（どれかが付いている）に戻す＝クリアしたあとの絞り込みが毎回同じ形になる
+    setTagMatch('any')
     setDishTypes([])
     setFavoriteOnly(false)
     setExcludeNg(false)
@@ -1119,64 +1166,77 @@ export default function RecipesPage() {
   }
 
   /**
-   * 検索したキーワードをタグとして登録する（2026-08-19 便HU・⑭）。
+   * よく使う検索を、絞り込みのタグとして登録する（2026-08-19 便HZ・②）。
    *
-   * 付ける相手は**押した時点でその検索に一致しているレシピ**のうち、まだそのタグが付いていない品。
-   * 何品に付くのかはボタンの文字に出したうえで、確認の窓でもう一度言う（規約F）。
+   * オーナーの訂正「絞り込んだレシピにタグをつけるのではなく、絞り込み機能の『タグ』に
+   * 新しいタグを追加する、という意味でした。レシピ自体はいじりません」のとおり、
+   * 登録するのは**検索の言葉だけ**。ここから db/recipes.ts を呼ぶ経路は無く、
+   * 書き込む相手は settings.savedSearches だけ＝レシピのデータは1件も変わらない。
+   * 押して増えるだけの操作なので確認の窓は出さない（規約Fは何かが消える操作の作法）。
    */
-  const pendingKeywordTag = tagFromQuery(query)
-  const keywordTagTargets = useMemo(() => {
-    if (!pendingKeywordTag || !results) return []
-    return recipeIdsMissingTag(
-      results.map((r) => r.recipe),
-      pendingKeywordTag,
-    )
-  }, [pendingKeywordTag, results])
-  const [taggingBusy, setTaggingBusy] = useState(false)
-  const registerKeywordTag = async () => {
-    if (!pendingKeywordTag || keywordTagTargets.length === 0 || taggingBusy) return
-    setTaggingBusy(true)
+  const pendingSavedSearch = savedSearchFromQuery(query)
+  const savedSearchRegistered =
+    pendingSavedSearch != null && savedSearches.includes(pendingSavedSearch)
+  const [tagBusy, setTagBusy] = useState(false)
+  const registerSavedSearch = async () => {
+    if (!pendingSavedSearch || savedSearchRegistered || tagBusy) return
+    setTagBusy(true)
     try {
-      const untouchedCount = Math.max(0, (recipes?.length ?? 0) - keywordTagTargets.length)
-      const ok = await confirm(
-        buildKeywordTagAddConfirm({
-          tag: pendingKeywordTag,
-          targetCount: keywordTagTargets.length,
-          untouchedCount,
-        }),
-      )
-      if (!ok) return
-      const added = await addTagToRecipes(keywordTagTargets, pendingKeywordTag)
-      await updateSettings({ keywordTags: keywordTagsWith(settings?.keywordTags, pendingKeywordTag) })
-      setMessage(
-        ja.search.keywordTagAddedToast
-          .replace('{n}', String(added))
-          .replace('{name}', pendingKeywordTag),
-      )
+      await updateSettings({
+        savedSearches: savedSearchesWith(settings?.savedSearches, pendingSavedSearch),
+      })
+      setMessage(ja.search.savedSearchAddedToast.replace('{name}', pendingSavedSearch))
     } finally {
-      setTaggingBusy(false)
+      setTagBusy(false)
     }
   }
   /**
-   * 登録したタグを削除する（2026-08-19 便HU・⑭「もちろん削除もできるように」）。
-   * そのタグが付いている**すべての**レシピから外し、控えからも消す。レシピは1品も消えない。
+   * 登録したタグをタップしたときの動き。その言葉での検索が戻る。
+   * もう一度タップすると検索を外す＝押して戻せる（一覧は全件に戻る）
    */
-  const removeKeywordTag = async (name: string) => {
-    if (taggingBusy) return
-    setTaggingBusy(true)
+  const applySavedSearch = (name: string) => setQuery((prev) => (prev === name ? '' : name))
+  /**
+   * 登録したタグを削除する（オーナー指示「もちろん削除もできるように」）。
+   * 消えるのは絞り込みに並ぶタグだけで、レシピは1品も変わらない（規約Fで両方書く）。
+   */
+  const removeSavedSearch = async (name: string) => {
+    if (tagBusy) return
+    setTagBusy(true)
     try {
-      const count = countRecipesWithTag(recipes ?? [], name)
-      const ok = await confirm(buildKeywordTagRemoveConfirm({ tag: name, count }))
+      const ok = await confirm(
+        buildSavedSearchRemoveConfirm({ name, recipeCount: recipes?.length ?? 0 }),
+      )
+      if (!ok) return
+      await updateSettings({ savedSearches: savedSearchesWithout(settings?.savedSearches, name) })
+      // その言葉で検索している最中なら検索欄も戻す（押して外すチップごと消えるため）
+      if (query === name) setQuery('')
+      setMessage(ja.search.savedSearchRemovedToast.replace('{name}', name))
+    } finally {
+      setTagBusy(false)
+    }
+  }
+  /**
+   * 以前の版（便HU・⑭）がレシピ本体に書き込んだタグを外す（2026-08-19 便HZ・②）。
+   *
+   * この画面でレシピを書き換えるのはここだけで、**利用者が押したときにしか動かない**
+   * （作り直しに合わせて黙って外すと、残しておきたい人のデータを失うため）。
+   * 押す前に、何品から外れて何が残るかを窓に出す（規約F）。
+   */
+  const removeLegacyTag = async (name: string, count: number) => {
+    if (tagBusy) return
+    setTagBusy(true)
+    try {
+      const ok = await confirm(buildLegacyTagRemoveConfirm({ tag: name, count }))
       if (!ok) return
       const removed = await removeTagFromRecipes(name)
-      await updateSettings({ keywordTags: keywordTagsWithout(settings?.keywordTags, name) })
-      // そのタグで絞り込んでいたら「すべて」に戻す（押して外すチップごと消えるため）
-      if (tag === name) setTag('all')
+      await updateSettings({ keywordTags: legacyTags.filter((value) => value !== name) })
+      // そのタグで絞り込んでいたら外す（押して外すチップごと消えるため）
+      setTags((prev) => prev.filter((value) => value !== name))
       setMessage(
-        ja.search.keywordTagRemovedToast.replace('{n}', String(removed)).replace('{name}', name),
+        ja.search.legacyTagRemovedToast.replace('{n}', String(removed)).replace('{name}', name),
       )
     } finally {
-      setTaggingBusy(false)
+      setTagBusy(false)
     }
   }
 
@@ -1419,11 +1479,9 @@ export default function RecipesPage() {
           <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
             {ja.search.sortNutritionTitle}
           </p>
-          {/* 何のために並べ替えるのか(用途)を1行添える(2026-07-28 便BY/見せ方(c))。
-              無料版は使えるのがカロリー順だけなので、用途の言葉もカロリーの話にする */}
-          <p className="text-xs text-ink-muted">
-            {nutritionUnlocked ? ja.search.sortNutritionHint : ja.search.sortNutritionFreeHint}
-          </p>
+          {/* 2026-08-19 便HZ・①(オーナー「並び替え『たんぱく質が多い順〜探せます』削除。
+              タイトルのみで目的がわかるため」): 見出しの下に添えていた用途の1行(旧
+              sortNutritionHint / sortNutritionFreeHint)を、無料・Proの両方とも消した */}
           <CheckList
             options={nutritionUnlocked ? nutrientSortOptions : freeNutrientSortOptions}
             value={sort}
@@ -1568,65 +1626,143 @@ export default function RecipesPage() {
           </div>
 
           {/* --- 区分③「タグ」(2026-07-24 便BN・タスク3で絞り込みパネルの上部へ移動 →
-              2026-08-03 使用件数の集計に変更 → 2026-08-10 便FFで件数を併記・見出しを改称) ---
-              チップに「和食 48」のようにレシピの件数を出し、並びの規則(件数の多い順)が
+              2026-08-03 使用件数の集計に変更 → 2026-08-10 便FFで件数を併記・見出しを改称 →
+              2026-08-19 便HZ・③で複数選択に) ---
+              チップに「和食 48」のようにレシピの品数を出し、並びの規則(品数の多い順)が
               画面から読めるようにする。
+              複数選択の作法は同じパネルの「料理の種別」(便HU・⑬)とそろえる:
+              先頭の「すべて」＝選んだタグをまとめて外す、他のチップ＝押すたびに入り切り。
               タグが1つも付いていないときは「すべて」だけの空の欄になるので、区分ごと出さない */}
-          {tagOptions.length > 1 && (
+          {tagOptions.length > 0 && (
             <>
               <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
                 {ja.search.tagTitle}
               </p>
               <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                <button
+                  type="button"
+                  data-testid="recipes-tag-chip"
+                  onClick={() => setTags([])}
+                  aria-pressed={tags.length === 0}
+                  className={chipCls(tags.length === 0)}
+                >
+                  {ja.search.tagAll}
+                </button>
                 {tagOptions.map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     data-testid="recipes-tag-chip"
-                    onClick={() => setTag(option.value)}
-                    aria-pressed={tag === option.value}
-                    className={chipCls(tag === option.value)}
+                    onClick={() => toggleTag(option.value)}
+                    aria-pressed={tags.includes(option.value)}
+                    className={chipCls(tags.includes(option.value))}
                   >
                     {option.label}
                   </button>
                 ))}
               </div>
+              {/* チップの数字が何を指すのか(2026-08-19 便HZ・③)。複数選べるようになると
+                  「押したら何品になるか」と読み違えられるので、数字の意味を1行で示す。
+                  この数字は選んでいるタグや下の選び方では変わらない */}
+              <p className="mt-1 text-xs text-ink-muted">{ja.search.tagCountHint}</p>
+              {/* タグを2つ以上選んだときの選び方(2026-08-19 便HZ・③ オーナー
+                  「AND検索OR検索の切り替え機能も欲しい」)。「AND」「OR」という語は出さず、
+                  何が残るかをそのまま書く(規約H)。1つだけ選んでいるあいだは結果が同じなので、
+                  切り替えても一覧は動かない */}
+              <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
+                {ja.search.tagMatchTitle}
+              </p>
+              <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+                <button
+                  type="button"
+                  data-testid="recipes-tag-match"
+                  onClick={() => setTagMatch('any')}
+                  aria-pressed={tagMatch === 'any'}
+                  className={chipCls(tagMatch === 'any')}
+                >
+                  {ja.search.tagMatchAny}
+                </button>
+                <button
+                  type="button"
+                  data-testid="recipes-tag-match"
+                  onClick={() => setTagMatch('all')}
+                  aria-pressed={tagMatch === 'all'}
+                  className={chipCls(tagMatch === 'all')}
+                >
+                  {ja.search.tagMatchAll}
+                </button>
+              </div>
             </>
           )}
 
-          {/* 検索から登録したタグ(2026-08-19 便HU・⑭)。上のタグの候補とは別の欄にして、
-              1つずつ削除できるようにする。上の候補に混ぜると、削除の印を入れる場所が
-              チップの中しかなく、押せる大きさ(44px)を保てない。
-              同梱の基本レシピに元から付いているタグ(和食など)はこの欄に出ないので、
-              まとめて消せてしまうことがない */}
-          {keywordTagUsages.length > 0 && (
+          {/* 自分で登録したタグ(2026-08-19 便HZ・②)。上のタグの候補とは別の欄にする:
+              上はレシピに付いているタグで絞る欄、こちらは登録した言葉で検索し直す欄で、
+              押したときに起きることが違う。1つずつ削除できるよう行を分け、削除ボタンは
+              押せる大きさ(tap-target)を保つ */}
+          {savedSearches.length > 0 && (
             <>
               <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                {ja.search.keywordTagTitle}
+                {ja.search.savedSearchTitle}
               </p>
+              <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchHint}</p>
               <div className="mt-1 flex flex-col gap-[var(--space-sm)]">
-                {keywordTagUsages.map(({ tag: name, count }) => (
+                {savedSearches.map((name) => (
                   <div key={name} className="flex items-center gap-[var(--space-sm)]">
                     <button
                       type="button"
-                      data-testid="recipes-keyword-tag-chip"
-                      onClick={() => setTag(name)}
-                      aria-pressed={tag === name}
-                      className={`min-w-0 flex-1 truncate text-left ${chipCls(tag === name)}`}
+                      data-testid="recipes-saved-search-chip"
+                      onClick={() => applySavedSearch(name)}
+                      aria-pressed={query === name}
+                      aria-label={ja.search.savedSearchChipAria.replace('{name}', name)}
+                      className={`inline-flex min-w-0 flex-1 items-center gap-1 text-left ${chipCls(query === name)}`}
                     >
-                      {ja.search.tagChip.replace('{name}', name).replace('{n}', String(count))}
+                      <Search size={16} className="shrink-0" aria-hidden />
+                      <span className="min-w-0 truncate">{name}</span>
                     </button>
                     <button
                       type="button"
-                      data-testid="recipes-keyword-tag-remove"
-                      onClick={() => void removeKeywordTag(name)}
-                      disabled={taggingBusy}
-                      aria-label={ja.search.keywordTagRemoveAria.replace('{name}', name)}
+                      data-testid="recipes-saved-search-remove"
+                      onClick={() => void removeSavedSearch(name)}
+                      disabled={tagBusy}
+                      aria-label={ja.search.savedSearchRemoveAria.replace('{name}', name)}
                       className="tap-target shrink-0 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted disabled:opacity-40"
                     >
-                      {ja.search.keywordTagRemove}
+                      {ja.search.savedSearchRemove}
                     </button>
                   </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* 以前の版(便HU・⑭)がレシピ本体に書き込んだタグの後始末(2026-08-19 便HZ・②)。
+              書き込まれたタグを作り直しに合わせて黙って外すとデータを失うので、
+              残したままにもできる形にして、外したいときだけ外せる道をここに置く。
+              残っていなければ欄ごと出さない＝使ったことのない人には最初から出ない */}
+          {legacyTagUsages.length > 0 && (
+            <>
+              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
+                {ja.search.legacyTagTitle}
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">{ja.search.legacyTagHint}</p>
+              <div className="mt-1 flex flex-col gap-[var(--space-sm)]">
+                {legacyTagUsages.map(({ tag: name, count }) => (
+                  <button
+                    key={name}
+                    type="button"
+                    data-testid="recipes-legacy-tag-remove"
+                    onClick={() => void removeLegacyTag(name, count)}
+                    disabled={tagBusy}
+                    aria-label={ja.search.legacyTagRemoveAria
+                      .replace('{name}', name)
+                      .replace('{n}', String(count))}
+                    className="tap-target flex w-full items-center justify-between gap-[var(--space-sm)] rounded-sm border border-edge bg-surface px-3 py-2 text-left text-sm font-bold text-ink-muted disabled:opacity-40"
+                  >
+                    <span className="min-w-0 truncate">{name}</span>
+                    <span className="shrink-0 text-accent-ink">
+                      {ja.search.legacyTagRemove.replace('{n}', String(count))}
+                    </span>
+                  </button>
                 ))}
               </div>
             </>
@@ -1780,26 +1916,24 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 検索したキーワードをタグとして登録する(2026-08-19 便HU・⑭ オーナー「キーワード検索して
-          結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して」)。
-          出すのは検索語があって、まだそのタグが付いていない品が1品以上あるときだけ。
-          何品に付くのかをボタンの文字に出す(規約F)＝押す前に分かる。
-          レシピを選んでいる最中は出さない(選ぶ操作の隣に、まとめて書き換える操作を並べない) */}
-      {!selecting && pendingKeywordTag && keywordTagTargets.length > 0 && (
+      {/* いまの検索を、絞り込みのタグとして登録する(2026-08-19 便HZ・② オーナー
+          「絞り込み機能の『タグ』に新しいタグを追加する、という意味でした。レシピ自体はいじりません」)。
+          出すのは検索語があって、結果が1品以上あって、まだ登録していないときだけ
+          (1品も出ない検索や、同じ言葉の二重登録をタグに増やさない)。
+          レシピを選んでいる最中は出さない(選ぶ操作の隣に別の操作を並べない) */}
+      {!selecting && pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
         <div className="mt-[var(--space-sm)]">
           <button
             type="button"
-            data-testid="keyword-tag-add"
-            onClick={() => void registerKeywordTag()}
-            disabled={taggingBusy}
+            data-testid="saved-search-add"
+            onClick={() => void registerSavedSearch()}
+            disabled={tagBusy}
             className="tap-target inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-2.5 text-left text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
           >
             <Tag size={16} className="shrink-0" aria-hidden />
-            {ja.search.keywordTagAdd
-              .replace('{n}', String(keywordTagTargets.length))
-              .replace('{q}', pendingKeywordTag)}
+            {ja.search.savedSearchAdd.replace('{q}', pendingSavedSearch)}
           </button>
-          <p className="mt-1 text-xs text-ink-muted">{ja.search.keywordTagAddHint}</p>
+          <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchAddHint}</p>
         </div>
       )}
 

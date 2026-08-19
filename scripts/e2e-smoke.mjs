@@ -78,8 +78,13 @@
 //         エネルギー既定は昇順・たんぱく質既定は降順・算出不能レシピは昇順/降順とも末尾・
 //         栄養価順の間はカードに並び替え中の値が出る=便T-7。2026-07-16便T-7-2で
 //         「エネルギー: ◯kcal」「たんぱく質: ◯g」のラベル付き表記に変更) /
-//         HU-TAG-01(2026-08-19 便HU・⑭⑮: 検索したキーワードをタグに登録して絞り込めること・
-//         消せること・「高たんぱく」がタグの候補に出ないがレシピ側には残っていること) /
+//         HZ-TAG-01(2026-08-19 便HZ・②: よく使う検索を絞り込みのタグとして登録できること・
+//         押すとその検索が戻ること・消せること・**登録から削除まで通してレシピのデータが
+//         1件も変わらないこと**をIndexedDB直読みで確認。⑮「高たんぱく」がタグの候補に
+//         出ないがレシピ側には残っていることも同じ節で見る) /
+//         HZ-TAG-02(2026-08-19 便HZ・③: タグの複数選択と、2つ以上選んだときの選び方の
+//         切り替え。同じ2つのタグでANDとORの結果が実際に違うこと・AND⊆OR・
+//         「どれか＝片方＋もう片方−すべて」の数え合わせ・チップの数字の意味が動かないこと) /
 //         HU-CLOSE-01(2026-08-19 便HU・⑰: 並び替え/絞り込みの窓が外タップでも閉じ、
 //         「閉じる」で閉じたときと絞り込みの結果が同じであること・旧「決定」が無いこと) /
 //         TOPUP-01(既存ユーザーへの差分投入・テーマ全廃2026-07-23: アップデート前状態を再現し、
@@ -1568,9 +1573,11 @@ try {
       'たんぱく質・脂質・炭水化物・食物繊維・鉄・カルシウム・塩分相当量で並び替えられます',
     ),
   )
+  // 2026-08-19 便HZ・①(オーナー「並び替え『たんぱく質が多い順〜探せます』削除。
+  // タイトルのみで目的がわかるため」)。無料・Proの両方とも消したので、無料側でも出ない
   check(
-    "NUTSORT-01(B'・便BY見せ方(c)) 無料の用途の言葉はエネルギーの話になっている",
-    nutSortPanelText.includes('エネルギーが低い順・高い順に並べ替えて、目的からレシピを探せます'),
+    'NUTSORT-01(便HZ①) 並び替えの見出しに添えていた用途の1行が無い',
+    !nutSortPanelText.includes('目的からレシピを探せます'),
   )
   const freeNutrientButtons = await page.evaluate(() => {
     // 栄養表示の8項目の名前。無料で選べるのがエネルギーだけであることを見る
@@ -3291,9 +3298,11 @@ try {
         'NUTSORT-02 Pro解錠済みではグレーのティーザー行(Pro機能)は出ない',
         !proSortPanelText.includes('（Pro機能）'),
       )
+      // 2026-08-19 便HZ・①: 用途の1行は無料・Proの両方とも削除した(片方だけ残すと、
+      // 解錠しているかどうかで説明の有無が変わる)
       check(
-        'NUTSORT-02(便BY) 解錠後も用途の説明が添えられる',
-        proSortPanelText.includes('目的からレシピを探せます'),
+        'NUTSORT-02(便HZ①) 解錠後も用途の1行は出ない',
+        !proSortPanelText.includes('目的からレシピを探せます'),
       )
       // 2026-08-19 便HU・⑯: 顔ぶれを栄養価の表示と同じ8項目にそろえた。
       // ここでは「レシピを開いたときの栄養価の表示に出ている項目名」を実際に読み取り、
@@ -18938,24 +18947,50 @@ try {
     }
   }
 
-  // --- HU-TAG-01: 検索したキーワードをタグとして登録する（2026-08-19 便HU・⑭ オーナー
-  //     「キーワード検索して結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して。
-  //      もちろん削除もできるように」）。
-  //     測るのは「登録したタグで実際に絞り込めること」と「消せること」の2つ。
-  //     件数はすべて画面から読み取り、読み取れなかったときは必ず落ちる形にする
-  //     （読めなかったのに合格、に倒れないよう 0件・全件をそのまま合格にしない）。
+  // --- HZ-TAG-01: よく使う検索を「絞り込みのタグ」として登録する（2026-08-19 便HZ・② オーナー
+  //     「検索結果にタグづけは、絞り込んだレシピにタグをつけるのではなく、絞り込み機能の『タグ』に
+  //      新しいタグを追加する、という意味でした。レシピ自体はいじりません」
+  //      「よく使うタグを自分で設定する機能です」）。
+  //
+  //     【この検査でいちばん測ること】**レシピのデータが1件も変わらないこと**。
+  //     以前の版（便HU・⑭）は、押した時点で検索に一致したレシピにタグを書き込んでいた。
+  //     端末の中身（IndexedDBのrecipes）を登録の前後で丸ごと読み比べる。
+  //     読み取れなかった（0件だった）ときは必ず落ちる形にする。
   //     あわせて ⑮「高たんぱく」がタグの候補から消えていること・レシピ側には残っていることも見る ---
-  currentCheck = 'HU-TAG-01'
+  currentCheck = 'HZ-TAG-01'
   {
     const htBrowser = await chromium.launch()
     const htContext = await htBrowser.newContext({ viewport: { width: 390, height: 844 } })
     const htPage = await htContext.newPage()
     htPage.on('pageerror', (err) => {
       if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
-      errors.push(`[pageerror@HU-TAG-01] ${err.message}`)
+      errors.push(`[pageerror@HZ-TAG-01] ${err.message}`)
     })
+    // 端末に入っているレシピを丸ごと読む（並びに左右されないようidの順にそろえる）。
+    // 1品ずつ文字列にしておくと、変わった品だけを名指しで報告できる
+    const HT_READ_RECIPES = `(async () => {
+      const db = await new Promise((res, rej) => {
+        const r = indexedDB.open('uchi-recipe')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const all = await new Promise((res, rej) => {
+        const q = db.transaction('recipes').objectStore('recipes').getAll()
+        q.onsuccess = () => res(q.result)
+        q.onerror = () => rej(q.error)
+      })
+      return all.slice().sort((a, b) => (a.id ?? 0) - (b.id ?? 0)).map((r) => JSON.stringify(r))
+    })()`
     try {
-      const htCards = () => htPage.locator('div.grid.grid-cols-2 a[href^="#/recipes/"]').count()
+      // カードはグリッド/リストどちらの表示でも同じように数えたいので、置き場所ではなく
+      // 「レシピ1品へのリンク」であることで拾う（#/recipes/新規 は数に入らない）
+      const htIds = () =>
+        htPage.evaluate(() =>
+          Array.from(document.querySelectorAll('a[href]'))
+            .map((a) => a.getAttribute('href') ?? '')
+            .filter((href) => /^#\/recipes\/\d+$/.test(href)),
+        )
+      const htCards = async () => (await htIds()).length
       const htOpenFilter = async () => {
         await htPage.locator('button[aria-label="絞り込み"]').click()
         await htPage.waitForTimeout(400)
@@ -18963,7 +18998,7 @@ try {
       await htPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await htPage.waitForTimeout(2000)
       const htTotal = await htCards()
-      check('HU-TAG-01 前提: 一覧にレシピが出ている', htTotal > 0, `全件=${htTotal}`)
+      check('HZ-TAG-01 前提: 一覧にレシピが出ている', htTotal > 0, `全件=${htTotal}`)
 
       // ---------- ⑮ 「高たんぱく」は絞り込みの候補に出さない（レシピ側のタグは残す） ----------
       await htOpenFilter()
@@ -18973,12 +19008,12 @@ try {
         ),
       )
       check(
-        'HU-TAG-01(⑮) 前提: タグの候補を読み取れている',
+        'HZ-TAG-01(⑮) 前提: タグの候補を読み取れている',
         htTagChips.length > 1,
         `チップ=${JSON.stringify(htTagChips)}`,
       )
       check(
-        'HU-TAG-01(⑮) 「高たんぱく」が絞り込みのタグの候補に出ない',
+        'HZ-TAG-01(⑮) 「高たんぱく」が絞り込みのタグの候補に出ない',
         !htTagChips.some((t) => t.startsWith('高たんぱく')),
         `チップ=${JSON.stringify(htTagChips)}`,
       )
@@ -18989,100 +19024,308 @@ try {
       await htPage.waitForTimeout(700)
       const htProteinHits = await htCards()
       check(
-        'HU-TAG-01(⑮) レシピに付いた「高たんぱく」タグは残っている(検索で当たる)',
+        'HZ-TAG-01(⑮) レシピに付いた「高たんぱく」タグは残っている(検索で当たる)',
         htProteinHits > 0 && htProteinHits < htTotal,
         `高たんぱくの検索結果=${htProteinHits} 全件=${htTotal}`,
       )
 
-      // ---------- ⑭ 登録 → 絞り込みに出る → 実際に絞り込める ----------
+      // ---------- ② 登録の前に、端末に入っているレシピを丸ごと控える ----------
+      await htPage.locator('input[type="search"]').fill('')
+      await htPage.waitForTimeout(600)
+      const htBefore = await htPage.evaluate(HT_READ_RECIPES)
+      check(
+        'HZ-TAG-01(②) 前提: 端末のレシピの中身を読み取れている',
+        Array.isArray(htBefore) && htBefore.length > 0 && htBefore.length === htTotal,
+        `読み取れた品数=${Array.isArray(htBefore) ? htBefore.length : 'null'} 一覧の品数=${htTotal}`,
+      )
+
+      // ---------- ② 登録 → 絞り込みに出る → 押すとその検索が戻る ----------
       await htPage.locator('input[type="search"]').fill('豆腐')
       await htPage.waitForTimeout(800)
-      const htHits = await htCards()
+      const htHitIds = await htIds()
       check(
-        'HU-TAG-01 前提: 検索の結果が0件でも全件でもない',
-        htHits > 0 && htHits < htTotal,
-        `検索結果=${htHits} 全件=${htTotal}`,
+        'HZ-TAG-01 前提: 検索の結果が0件でも全件でもない',
+        htHitIds.length > 0 && htHitIds.length < htTotal,
+        `検索結果=${htHitIds.length} 全件=${htTotal}`,
       )
-      const htAddButton = htPage.locator('[data-testid="keyword-tag-add"]')
-      const htAddLabel = ((await htAddButton.textContent()) ?? '').replace(/\u200b/g, '')
-      // 規約F: 押す前に「何品に付くのか」がボタンに出ている
-      const htShownCount = Number((htAddLabel.match(/(\d+)品/) ?? [])[1])
+      const htAddButton = htPage.locator('[data-testid="saved-search-add"]')
+      const htAddLabel = ((await htAddButton.textContent()) ?? '').replace(/​/g, '')
       check(
-        'HU-TAG-01(⑭) 登録ボタンに「何品に付くのか」が出ていて、検索の結果と一致する',
-        Number.isFinite(htShownCount) && htShownCount === htHits,
-        `ボタン=${htAddLabel} 検索結果=${htHits}`,
+        'HZ-TAG-01(②) 登録ボタンに、登録する言葉と行き先(絞り込みのタグ)が出ている',
+        htAddLabel.includes('豆腐') && htAddLabel.includes('絞り込み') && htAddLabel.includes('タグ'),
+        `ボタン=${htAddLabel}`,
       )
-      // 確認の窓は入れ物ぜんぶで自動的に「確認」される仕掛け(installConfirmAutoPress)が
-      // 入っているので、押すのではなく貯まった文言を読む
-      await htPage.evaluate(() => {
-        window.__confirmDialogs = []
-      })
+      // 何品に付くか、という言い方が残っていない（レシピに書き込む機能ではなくなった）
+      check(
+        'HZ-TAG-01(②) 登録ボタンが「レシピ◯品にタグを付ける」になっていない',
+        !/レシピ\d+品/.test(htAddLabel),
+        `ボタン=${htAddLabel}`,
+      )
       await htAddButton.click()
       await htPage.waitForTimeout(900)
-      const htConfirmText = (
-        await htPage.evaluate(() => (window.__confirmDialogs ?? []).join('\n'))
-      ).replace(/\u200b/g, '')
-      check(
-        'HU-TAG-01(⑭) 確認の窓に「変わるもの」と「変わらないもの」が両方出る(規約F)',
-        htConfirmText.includes('付くもの') && htConfirmText.includes('変わらないもの'),
-        `窓=${htConfirmText}`,
-      )
-      check(
-        'HU-TAG-01(⑭) 確認の窓にも何品に付くのかが件数で出る',
-        new RegExp(`レシピ${htHits}品`).test(htConfirmText),
-        `窓=${htConfirmText} 検索結果=${htHits}`,
-      )
-      await htPage.waitForTimeout(400)
       // 検索語を消しても、タグとして残っていること
       await htPage.locator('input[type="search"]').fill('')
       await htPage.waitForTimeout(700)
       check(
-        'HU-TAG-01(⑭) 検索語を消すと全件に戻る(前提)',
+        'HZ-TAG-01(②) 検索語を消すと全件に戻る(前提)',
         (await htCards()) === htTotal,
         `全件=${htTotal}`,
       )
       await htOpenFilter()
-      const htKeywordChip = htPage.locator('[data-testid="recipes-keyword-tag-chip"]').first()
+      const htSavedChip = htPage.locator('[data-testid="recipes-saved-search-chip"]').first()
       check(
-        'HU-TAG-01(⑭) 登録したタグが絞り込みに出る',
-        (await htKeywordChip.count()) === 1,
-        `登録タグのチップ数=${await htPage.locator('[data-testid="recipes-keyword-tag-chip"]').count()}`,
+        'HZ-TAG-01(②) 登録したタグが絞り込みに出る',
+        (await htPage.locator('[data-testid="recipes-saved-search-chip"]').count()) === 1,
+        `登録したタグの数=${await htPage.locator('[data-testid="recipes-saved-search-chip"]').count()}`,
       )
-      await htKeywordChip.click()
-      await htPage.waitForTimeout(600)
-      const htFiltered = await htCards()
+      await htSavedChip.click()
+      await htPage.waitForTimeout(700)
+      const htRecalledIds = await htIds()
       check(
-        'HU-TAG-01(⑭) 登録したタグで実際に絞り込める(検索したときと同じ品数)',
-        htFiltered === htHits,
-        `タグで絞った件数=${htFiltered} 検索したときの件数=${htHits}`,
+        'HZ-TAG-01(②) 登録したタグを押すと、登録したときと同じ検索が戻る',
+        JSON.stringify(htRecalledIds) === JSON.stringify(htHitIds),
+        `押した後=${JSON.stringify(htRecalledIds)} 登録したとき=${JSON.stringify(htHitIds)}`,
+      )
+      check(
+        'HZ-TAG-01(②) 押すと検索欄にも登録した言葉が戻る',
+        (await htPage.locator('input[type="search"]').inputValue()) === '豆腐',
+        `検索欄=${await htPage.locator('input[type="search"]').inputValue()}`,
       )
 
-      // ---------- ⑭ 削除できる ----------
+      // ---------- ② 削除できる（規約F: 何が消えて何が残るか） ----------
       await htPage.evaluate(() => {
         window.__confirmDialogs = []
       })
-      await htPage.locator('[data-testid="recipes-keyword-tag-remove"]').first().click()
+      await htPage.locator('[data-testid="recipes-saved-search-remove"]').first().click()
       await htPage.waitForTimeout(1000)
       const htRemoveConfirm = (
         await htPage.evaluate(() => (window.__confirmDialogs ?? []).join('\n'))
-      ).replace(/\u200b/g, '')
+      ).replace(/​/g, '')
       check(
-        'HU-TAG-01(⑭) 削除の確認にも「消えるもの」と「残るもの」が両方出る(規約F)',
+        'HZ-TAG-01(②) 削除の確認に「消えるもの」と「残るもの」が両方出る(規約F)',
         htRemoveConfirm.includes('消えるもの') && htRemoveConfirm.includes('残るもの'),
         `窓=${htRemoveConfirm}`,
       )
+      check(
+        'HZ-TAG-01(②) 削除の確認に、レシピが変わらないことが品数つきで出る',
+        new RegExp(`レシピ${htTotal}品`).test(htRemoveConfirm),
+        `窓=${htRemoveConfirm} 全件=${htTotal}`,
+      )
       await htPage.waitForTimeout(400)
       check(
-        'HU-TAG-01(⑭) 削除すると登録したタグの欄から消える',
-        (await htPage.locator('[data-testid="recipes-keyword-tag-chip"]').count()) === 0,
+        'HZ-TAG-01(②) 削除すると登録したタグの欄から消える',
+        (await htPage.locator('[data-testid="recipes-saved-search-chip"]').count()) === 0,
+      )
+
+      // ---------- ② いちばんの肝: ここまでの通しでレシピのデータが1件も変わっていない ----------
+      await htPage.locator('input[type="search"]').fill('')
+      await htPage.waitForTimeout(800)
+      const htAfter = await htPage.evaluate(HT_READ_RECIPES)
+      const htChanged =
+        Array.isArray(htAfter) && Array.isArray(htBefore)
+          ? htAfter.filter((row, i) => row !== htBefore[i])
+          : null
+      check(
+        'HZ-TAG-01(②) 登録→押す→削除を通してもレシピのデータが1件も変わらない',
+        Array.isArray(htAfter) &&
+          htAfter.length > 0 &&
+          htAfter.length === htBefore.length &&
+          htChanged.length === 0,
+        `前=${Array.isArray(htBefore) ? htBefore.length : 'null'}品 後=${
+          Array.isArray(htAfter) ? htAfter.length : 'null'
+        }品 変わった品=${htChanged == null ? '読めない' : htChanged.slice(0, 2).join(' / ')}`,
       )
       check(
-        'HU-TAG-01(⑭) 削除してもレシピは1品も消えない',
+        'HZ-TAG-01(②) レシピは1品も消えていない',
         (await htCards()) === htTotal,
-        `削除後=${await htCards()} 全件=${htTotal}`,
+        `いまの品数=${await htCards()} 全件=${htTotal}`,
       )
     } finally {
       await htBrowser.close()
+    }
+  }
+
+  // --- HZ-TAG-02: タグを複数選べる／2つ以上選んだときの選び方を切り替えられる
+  //     （2026-08-19 便HZ・③ オーナー「タグ検索は、複数選択できるよにして。
+  //      AND検索OR検索の切り替え機能も欲しい」）。
+  //     件数の決め打ちはせず、**同じ2つのタグでANDとORの結果が実際に違う**ことと
+  //     **AND ⊆ OR** を、画面から読み取ったレシピの並びで見る。
+  //     タグの顔ぶれは画面から拾い、重なりのある組をその場で探す
+  //     （重なりの無い組では「すべて付いている」が必ず0品になり、比べる中身が無くなるため）---
+  currentCheck = 'HZ-TAG-02'
+  {
+    const tmBrowser = await chromium.launch()
+    const tmContext = await tmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const tmPage = await tmContext.newPage()
+    tmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@HZ-TAG-02] ${err.message}`)
+    })
+    try {
+      const tmIds = () =>
+        tmPage.evaluate(() =>
+          Array.from(document.querySelectorAll('a[href]'))
+            .map((a) => a.getAttribute('href') ?? '')
+            .filter((href) => /^#\/recipes\/\d+$/.test(href)),
+        )
+      // チップは名前で押す（画面の中の何番目か、には頼らない）。押せなかったら false が返る
+      const tmClickChip = (testid, label) =>
+        tmPage.evaluate(
+          ({ testid, label }) => {
+            const btn = Array.from(document.querySelectorAll(`[data-testid="${testid}"]`)).find(
+              (b) => (b.textContent ?? '').replace(/​/g, '').trim().split(' ')[0] === label,
+            )
+            if (!btn) return false
+            btn.click()
+            return true
+          },
+          { testid, label },
+        )
+      const tmClearTags = () => tmClickChip('recipes-tag-chip', 'すべて')
+      await tmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tmPage.waitForTimeout(2000)
+      const tmTotal = (await tmIds()).length
+      check('HZ-TAG-02 前提: 一覧にレシピが出ている', tmTotal > 0, `全件=${tmTotal}`)
+      await tmPage.locator('button[aria-label="絞り込み"]').click()
+      await tmPage.waitForTimeout(400)
+
+      // タグの名前を画面から拾う（「すべて」は絞り込みを外すチップなので除く）
+      const tmTagNames = await tmPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="recipes-tag-chip"]'))
+          .map((b) => (b.textContent ?? '').replace(/​/g, '').trim().split(' ')[0])
+          .filter((name) => name !== 'すべて' && name !== ''),
+      )
+      check(
+        'HZ-TAG-02 前提: タグの候補が2つ以上ある',
+        tmTagNames.length >= 2,
+        `タグ=${JSON.stringify(tmTagNames)}`,
+      )
+      // 選び方の切り替えが画面にある（言葉はja.tsのとおり。「AND」「OR」はそのまま出さない）
+      const tmMatchLabels = await tmPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="recipes-tag-match"]')).map(
+          (b) => (b.textContent ?? '').replace(/​/g, '').trim(),
+        ),
+      )
+      check(
+        'HZ-TAG-02 タグを2つ以上選んだときの選び方が2つある',
+        tmMatchLabels.length === 2,
+        `選び方=${JSON.stringify(tmMatchLabels)}`,
+      )
+      check(
+        'HZ-TAG-02 選び方の名前に「AND」「OR」をそのまま出していない(規約H)',
+        !tmMatchLabels.some((t) => /AND|OR/i.test(t)),
+        `選び方=${JSON.stringify(tmMatchLabels)}`,
+      )
+      // 既定は「どれかが付いている」＝同じパネルの「料理の種別」と同じ和集合
+      const tmDefaultMatch = await tmPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="recipes-tag-match"]'))
+          .filter((b) => b.getAttribute('aria-pressed') === 'true')
+          .map((b) => (b.textContent ?? '').replace(/​/g, '').trim()),
+      )
+      check(
+        'HZ-TAG-02 既定は「どれかが付いている」の方が選ばれている',
+        tmDefaultMatch.length === 1 && tmDefaultMatch[0] === tmMatchLabels[0],
+        `選ばれている=${JSON.stringify(tmDefaultMatch)} 選び方=${JSON.stringify(tmMatchLabels)}`,
+      )
+
+      // 重なりのある2つを探す（見つからなければ「測れなかった」として落ちる）
+      let tmPair = null
+      let tmA = null
+      let tmB = null
+      let tmAnd = null
+      for (let i = 0; i < tmTagNames.length && tmPair == null; i++) {
+        for (let j = i + 1; j < Math.min(tmTagNames.length, i + 4) && tmPair == null; j++) {
+          await tmClearTags()
+          await tmPage.waitForTimeout(250)
+          if (!(await tmClickChip('recipes-tag-chip', tmTagNames[i]))) continue
+          await tmPage.waitForTimeout(350)
+          const first = await tmIds()
+          if (!(await tmClickChip('recipes-tag-chip', tmTagNames[j]))) continue
+          await tmPage.waitForTimeout(350)
+          if (!(await tmClickChip('recipes-tag-match', tmMatchLabels[1]))) continue
+          await tmPage.waitForTimeout(400)
+          const both = await tmIds()
+          if (both.length > 0) {
+            tmPair = [tmTagNames[i], tmTagNames[j]]
+            tmA = first
+            tmAnd = both
+          }
+        }
+      }
+      check(
+        'HZ-TAG-02 前提: 重なりのある2つのタグを画面から見つけられた',
+        tmPair != null && tmA != null && tmA.length > 0 && tmAnd != null && tmAnd.length > 0,
+        `タグ=${JSON.stringify(tmTagNames)} 見つかった組=${JSON.stringify(tmPair)}`,
+      )
+      if (tmPair != null) {
+        // もう片方だけを選んだときの品数（和集合の数え合わせに使う）
+        await tmClearTags()
+        await tmPage.waitForTimeout(250)
+        await tmClickChip('recipes-tag-chip', tmPair[1])
+        await tmPage.waitForTimeout(400)
+        tmB = await tmIds()
+        // 2つ選んで「どれかが付いている」に戻す
+        await tmClickChip('recipes-tag-chip', tmPair[0])
+        await tmPage.waitForTimeout(350)
+        await tmClickChip('recipes-tag-match', tmMatchLabels[0])
+        await tmPage.waitForTimeout(400)
+        const tmOr = await tmIds()
+        check(
+          'HZ-TAG-02 前提: それぞれ1つだけ選んだときも0件でも全件でもない',
+          tmA.length > 0 && tmA.length < tmTotal && tmB.length > 0 && tmB.length < tmTotal,
+          `${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} 全件=${tmTotal}`,
+        )
+        check(
+          'HZ-TAG-02 2つ選んだときの結果が、2つの選び方で実際に違う',
+          tmAnd.length < tmOr.length,
+          `${JSON.stringify(tmPair)} すべて付いている=${tmAnd.length} どれかが付いている=${tmOr.length}`,
+        )
+        check(
+          'HZ-TAG-02 「すべて付いている」の結果は「どれかが付いている」に必ず含まれる',
+          tmAnd.every((id) => tmOr.includes(id)),
+          `すべて=${JSON.stringify(tmAnd)} どれか=${JSON.stringify(tmOr)}`,
+        )
+        check(
+          'HZ-TAG-02 数え合わせが合う(どれか = 片方 + もう片方 - すべて)',
+          tmOr.length === tmA.length + tmB.length - tmAnd.length,
+          `どれか=${tmOr.length} ${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} すべて=${tmAnd.length}`,
+        )
+        check(
+          'HZ-TAG-02 「どれかが付いている」は1つだけ選んだときより増える(和集合)',
+          tmOr.length > tmA.length && tmOr.length > tmB.length && tmOr.length <= tmTotal,
+          `どれか=${tmOr.length} ${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} 全件=${tmTotal}`,
+        )
+        // チップの数字の意味（そのタグが付いている品数）は、選び方でも他の選択でも変わらない
+        const tmChipCount = await tmPage.evaluate((name) => {
+          const btn = Array.from(document.querySelectorAll('[data-testid="recipes-tag-chip"]')).find(
+            (b) => (b.textContent ?? '').replace(/​/g, '').trim().split(' ')[0] === name,
+          )
+          const text = (btn?.textContent ?? '').replace(/​/g, '').trim()
+          const m = text.match(/(\d+)\s*$/)
+          return m ? Number(m[1]) : null
+        }, tmPair[0])
+        check(
+          'HZ-TAG-02 チップの数字は「そのタグが付いている品数」のまま(2つ選んでも動かない)',
+          tmChipCount != null && tmChipCount === tmA.length,
+          `チップの数字=${tmChipCount} ${tmPair[0]}だけを選んだときの品数=${tmA.length}`,
+        )
+        check(
+          'HZ-TAG-02 数字が何を指すのかが画面に書いてある',
+          (await tmPage.textContent('body')).replace(/​/g, '').includes(
+            '数字は、そのタグが付いているレシピの品数です',
+          ),
+        )
+        // 「すべて」で外せる＝絞り込みを戻す手段がある
+        await tmClearTags()
+        await tmPage.waitForTimeout(500)
+        check(
+          'HZ-TAG-02 「すべて」で選んだタグをまとめて外せる',
+          (await tmIds()).length === tmTotal,
+          `外した後=${(await tmIds()).length} 全件=${tmTotal}`,
+        )
+      }
+    } finally {
+      await tmBrowser.close()
     }
   }
 

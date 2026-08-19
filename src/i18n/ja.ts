@@ -3120,8 +3120,23 @@ export const ja = {
      */
     tagTitle: 'タグ',
     tagAll: 'すべて',
-    /** タグのチップ。{name}=タグ名 / {n}=そのタグが付いているレシピの件数 */
+    /** タグのチップ。{name}=タグ名 / {n}=そのタグが付いているレシピの品数 */
     tagChip: '{name} {n}',
+    /**
+     * タグを複数選べるようにし、選び方を切り替える（2026-08-19 便HZ・③ オーナー
+     * 「タグ検索は、複数選択できるよにして。AND検索OR検索の切り替え機能も欲しい」）。
+     *
+     * 「AND」「OR」という語は出さない（規約H: 読んで機能の性質・使い方が分かるかだけで書く）。
+     * 何が起きるかをそのまま日本語にすると、切り替えの意味を覚え直さずに読める。
+     *
+     * 件数の意味（tagCountHint）: チップの数字は**そのタグが付いている品数**で、
+     * 他にどのタグを選んでいるか・どちらの選び方かでは変わらない。複数選択にすると
+     * 「押したら何品になるか」と読み違えられるので、数字が何を指すのかを1行で示す
+     */
+    tagCountHint: '数字は、そのタグが付いているレシピの品数です',
+    tagMatchTitle: 'タグを2つ以上選んだとき',
+    tagMatchAny: 'どれかが付いている',
+    tagMatchAll: 'すべて付いている',
     // 料理の種別で絞る(2026-08-10 便FF・オーナー要望「主菜副菜などでも絞り込みしたい」)。
     // 区分の名前と並びはレシピ登録の「料理の種別」(ja.dishType)と同じものを使う
     // ＝同じ分類を画面ごとに違う言葉で出さない
@@ -3159,16 +3174,13 @@ export const ja = {
     // 旧「糖質」は中身が炭水化物(成分表のCHOCDF-)で名前と中身が食い違っていた
     // 栄養並び替えの区分見出しと、Pro未解錠時のグレーのティーザー行(2026-07-16 便T-4)。
     // タップでPro案内(/settings?section=pro)へ、既存のProゲート表現(Lock+ミュート色+underlineリンク)を流用。
-    // 2026-07-28 便BY/見せ方(c): 「並び替え」という操作名だけだと、レシピ詳細に無料で出ている数値を
-    // 並べ替えるだけの機能に見える。何のために使うのか(高たんぱくのレシピを探す・塩分の低い順に
-    // 献立を組む)が伝わる用途の言葉を添える。
-    // 2026-08-01 線引きB': 無料でもカロリー順は使えるので、見出しは無料/Pro共通で出し、
-    // 用途の言葉だけを使える範囲に合わせて出し分ける。ティーザーはPro側の4項目の案内にする
     // 2026-08-19 便HU・⑯(オーナー「並び替えの『栄養価で探す』→『栄養価で並び替え』。
     // ラインナップをいつもの栄養価にして」): 見出しは字義どおり。顔ぶれは栄養価の表示と同じ8項目
+    // 2026-08-19 便HZ・①(オーナー「並び替え『たんぱく質が多い順〜探せます』削除。
+    // タイトルのみで目的がわかるため」): 見出しの下に添えていた用途の1行を削除した。
+    // 旧 sortNutritionHint(Pro解錠時)/sortNutritionFreeHint(無料時)は同じ型の説明文なので
+    // 両方消す。片方だけ残すと、解錠しているかどうかで説明の有無が変わる
     sortNutritionTitle: '栄養価で並び替え',
-    sortNutritionHint: 'たんぱく質が多い順・塩分相当量が低い順などに並べ替えて、目的からレシピを探せます',
-    sortNutritionFreeHint: 'エネルギーが低い順・高い順に並べ替えて、目的からレシピを探せます',
     // Pro未解錠のティーザー行。無料で選べるのはエネルギー順だけなので、増える項目の数を先に言い、
     // 名前は下の1行に並べる(見出しに7つ並べると2行に折り返して読み飛ばされる)
     sortNutritionGate: 'エネルギー以外の7項目で並び替え（Pro機能）',
@@ -3201,38 +3213,54 @@ export const ja = {
     // 名前が動作と食い違っていた。窓を閉じる操作そのものは残す(ja.common.close を使う)
 
     /**
-     * 検索したキーワードをタグとして登録する（2026-08-19 便HU・⑭ オーナー
-     * 「キーワード検索して結果出した後、キーワードをタグに登録ボタン作って絞り込みに反映して。
-     * もちろん削除もできるように」）。
+     * よく使う検索を、絞り込みのタグとして登録する（2026-08-19 便HZ・②）。
      *
-     * 付く相手は**押した時点でその検索に一致しているレシピ**。何品に付くのかはボタンの文字に
-     * 出し（規約F）、確認の窓でもう一度言う。{n}=これからタグが付く品数 / {q}=検索語。
+     * 【オーナーの訂正】「検索結果にタグづけは、絞り込んだレシピにタグをつけるのではなく、
+     * 絞り込み機能の『タグ』に新しいタグを追加する、という意味でした。レシピ自体はいじりません」
+     * 「よく使うタグを自分で設定する機能です。レシピにつけたい場合は、ユーザーがレシピを
+     * 編集画面でタグかキーワードを入力する必要があります」。
+     *
+     * 登録するのは**検索の言葉だけ**で、レシピのデータには一切書き込まない。
+     * 登録したタグをタップすると、その言葉での検索が戻る。{q}/{name}=登録した言葉。
      */
-    keywordTagAdd: 'レシピ{n}品にタグ「{q}」を付ける',
-    keywordTagAddHint: '付けたタグは絞り込みの「タグ」に出ます',
-    /** 絞り込みパネルの中で、検索から登録したタグを並べる欄の見出し */
-    keywordTagTitle: '検索から登録したタグ',
-    /** 登録したタグの行のボタン。{name}=タグ名 */
-    keywordTagRemove: '削除',
-    keywordTagRemoveAria: 'タグ「{name}」を削除',
-    // 登録の確認（規約F）。{name}=タグ名 / {n}=タグが付く品数 / {rest}=付かないまま残る品数
-    keywordTagConfirmTitle: 'レシピ{n}品にタグ「{name}」を付けます',
-    keywordTagConfirmAddedLabel: '付くもの',
-    keywordTagConfirmAdded: 'いま検索に一致しているレシピ{n}品に、タグ「{name}」が付きます',
-    keywordTagConfirmKeptLabel: '変わらないもの',
-    keywordTagConfirmKept:
-      '料理名・材料・手順・作った記録はそのままです。検索に一致していないレシピ{rest}品にはタグは付きません',
-    keywordTagConfirmNote: '付けたタグは絞り込みの「タグ」からいつでも削除できます',
-    keywordTagConfirmOk: 'タグを付ける',
-    // 削除の確認（規約F）。{name}=タグ名 / {n}=そのタグが付いている品数
-    keywordTagRemoveConfirmTitle: 'タグ「{name}」をレシピ{n}品から外します',
-    keywordTagRemoveConfirmGoneLabel: '消えるもの',
-    keywordTagRemoveConfirmGone: 'レシピ{n}品に付いたタグ「{name}」と、絞り込みのタグの候補',
-    keywordTagRemoveConfirmKeptLabel: '残るもの',
-    keywordTagRemoveConfirmKept: 'レシピ{n}品そのものと、他のタグ・材料・手順・作った記録',
-    keywordTagRemoveConfirmOk: 'タグを削除',
-    keywordTagAddedToast: 'レシピ{n}品にタグ「{name}」を付けました',
-    keywordTagRemovedToast: 'レシピ{n}品からタグ「{name}」を外しました',
+    savedSearchAdd: '「{q}」を絞り込みのタグに登録',
+    savedSearchAddHint: '登録したタグは絞り込みの「タグ」の下に並びます。レシピには何も書き込みません',
+    /** 絞り込みパネルの中で、登録したタグを並べる欄の見出しと、押すと何が起きるかの1行 */
+    savedSearchTitle: '自分で登録したタグ',
+    savedSearchHint: 'タップすると登録した言葉で検索し、もう一度タップすると検索を外します',
+    savedSearchChipAria: '「{name}」で検索',
+    /** 登録したタグの行の削除ボタン。{name}=登録した言葉 */
+    savedSearchRemove: '削除',
+    savedSearchRemoveAria: '登録したタグ「{name}」を削除',
+    // 削除の確認（規約F: 何が消えて何が残るかを両方書く）。{name}=登録した言葉 / {n}=端末にあるレシピの品数
+    savedSearchRemoveConfirmTitle: '登録したタグ「{name}」を削除します',
+    savedSearchRemoveConfirmGoneLabel: '消えるもの',
+    savedSearchRemoveConfirmGone: '絞り込みに並んでいるタグ「{name}」',
+    savedSearchRemoveConfirmKeptLabel: '残るもの',
+    savedSearchRemoveConfirmKept: 'レシピ{n}品と、そのタグ・材料・手順・作った記録（どれも変わりません）',
+    savedSearchRemoveConfirmNote: '検索欄に「{name}」と打てば、いつでも同じ検索ができます',
+    savedSearchRemoveConfirmOk: 'タグを削除',
+    savedSearchAddedToast: 'タグ「{name}」を絞り込みに登録しました',
+    savedSearchRemovedToast: 'タグ「{name}」を絞り込みから削除しました',
+    /**
+     * 以前の版（2026-08-19 便HU）が、登録と同時にレシピ本体へ書き込んだタグの後始末
+     * （2026-08-19 便HZ・②）。
+     *
+     * 書き込まれたタグを黙って消すとデータを失うので、残したままにもできる形にして、
+     * 外したいときだけ外せる道を置く。書き込まれたタグが1つも残っていなければ欄ごと出さない。
+     * {name}=タグ名 / {n}=そのタグが付いている品数
+     */
+    legacyTagTitle: '以前の版でレシピに書き込まれたタグ',
+    legacyTagHint: '以前の版では、タグを登録するとレシピ本体にもタグが書き込まれました。いまの版では書き込みません',
+    legacyTagRemove: 'レシピ{n}品から外す',
+    legacyTagRemoveAria: 'タグ「{name}」をレシピ{n}品から外す',
+    legacyTagRemoveConfirmTitle: 'タグ「{name}」をレシピ{n}品から外します',
+    legacyTagRemoveConfirmGoneLabel: '消えるもの',
+    legacyTagRemoveConfirmGone: 'レシピ{n}品に付いているタグ「{name}」',
+    legacyTagRemoveConfirmKeptLabel: '残るもの',
+    legacyTagRemoveConfirmKept: 'レシピ{n}品そのものと、他のタグ・材料・手順・作った記録',
+    legacyTagRemoveConfirmOk: 'タグを外す',
+    legacyTagRemovedToast: 'レシピ{n}品からタグ「{name}」を外しました',
     // 一覧の表示切替(グリッド/リスト。2026-07-13 UI改善)。ボタンは現在の表示から
     // 切り替わる先のアイコン・aria-labelを出す(押すと何になるかが分かるように)
     layoutToggleToList: 'リスト表示に切り替え',
