@@ -5085,6 +5085,11 @@ try {
 
       await tpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await tpPage.waitForTimeout(1000)
+      // 2026-08-20 司令部: 日タブの×は「整理」の中へ移った(便IG・オーナー指示A案)。
+      // 押せる大きさは**出ているときに**測るものなので、先に整理へ入る。
+      // 入らずに測ると「測った数=0」で必ず落ちる（0件を合格に倒さない見張りが効いている）
+      await openDayOrganize(tpPage)
+      await tpPage.waitForTimeout(400)
       await tapCheck('献立(日)')
       await tpPage.getByRole('button', { name: '週', exact: true }).click()
       await openAllWeekDays(tpPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
