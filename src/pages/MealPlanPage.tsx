@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   BookmarkPlus,
   LayoutTemplate,
+  ListChecks,
   Printer,
   ImageDown,
 } from 'lucide-react'
@@ -384,10 +385,13 @@ const pickerChipCls = (active: boolean) =>
 /**
  * 今日の献立の1品（2026-08-19 便HW・A案＝2段）。
  *
- * 2026-08-03 便DH: 日タブを「レシピ一覧から選択中」と「今週の献立の予定」の縦一列に分けたので、
- * ×（外す）は前者だけに出す（onRemove を渡さない＝週の予定の行には出ない）。週の予定は
- * 週タブで組んだものなので、日タブから消せると「どちらが正か」が分からなくなる。
+ * 2026-08-03 便DH: 日タブを「レシピ一覧から選択中」と「今週の献立の予定」の縦一列に分けた。
  * footer には行の下に置く操作（レシピ一覧から選んだ品を今日の予定へ入れるボタン）を渡す。
+ *
+ * 2026-08-20 便IG・①（オーナー原文「「作った！」と×が邪魔。作った！をつけるときには
+ * モード切り替えするようにしたら解決できる？全て作った！も含めて。」／司令部の裁定＝A案）:
+ * ×は「今日の献立」の**整理モードのあいだだけ**出す（呼び出し側が onRemove を渡さなければ出ない）。
+ * 「作った！」は毎日押す主役の操作なので、モードの外に出したまま＝毎日1タップ増やさない。
  *
  * 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっているのが
  * みづらい」／司令部の裁定「日タブの行はA案＝2段」）:
@@ -1026,14 +1030,33 @@ function IntakeDisclosureButton({
  * 見出しは畳んでいても出したままにして、そこに何があるのかを畳んだ状態でも読めるようにする。
  * 「概算」バッジも見出しと一緒に常に見せる（数字を開く前に、これが概算だと分かるようにする）。
  */
+/**
+ * 月カード（食費・栄養）の見出し行。
+ *
+ * 2026-08-20 便IG・⑬（オーナー原文「◯月の食費・栄養の折りたたみで表示される数値は、
+ * ◯月の食費（栄養）の横に表示して。縦長にしない。」）:
+ * 畳んでいるときの数値（figure）を**この見出しの中**に置く。直す前は見出しの下に
+ * 別の枠（名前を値の上に置く2段組み）で出していたため、畳んでいるのにカードが縦に伸びていた。
+ *
+ * 「縦長にしない」を守るための作り:
+ *  ・数値は右端（ml-auto）に置き、縮まない（shrink-0）＝桁が増えても折り返さない
+ *  ・見出しの文字だけが縮む（min-w-0 truncate）＝どんな桁数でも1行に収まる
+ *  ・出すのは**数値だけ**で、行の名前（「全員分」「エネルギー」）は開いたときの表・パネルに任せる
+ *    （390px幅では名前まで並べると1行に入らず、折り返して縦長に戻ってしまう）
+ */
 function MonthCardHeader({
   title,
   open,
   onToggle,
+  figure,
+  figureTestId,
 }: {
   title: string
   open: boolean
   onToggle: () => void
+  /** 畳んでいるときだけ見出しの横に出す数値（開いているときは表・パネルが出すので渡さない） */
+  figure?: string
+  figureTestId?: string
 }) {
   return (
     <h2>
@@ -1043,50 +1066,23 @@ function MonthCardHeader({
         aria-expanded={open}
         className="flex min-h-11 w-full items-center gap-2 text-left font-bold"
       >
-        <span>{title}</span>
-        <span className="rounded-full border border-edge px-2 py-0.5 text-xs font-normal text-ink-muted">
+        <span className="min-w-0 truncate">{title}</span>
+        <span className="shrink-0 rounded-full border border-edge px-2 py-0.5 text-xs font-normal text-ink-muted">
           {ja.nutrition.estimateBadge}
         </span>
-        <span className="ml-auto shrink-0 text-ink-muted">
+        {figure && (
+          <span
+            data-testid={figureTestId}
+            className="ml-auto shrink-0 whitespace-nowrap text-sm text-accent-ink tabular-nums"
+          >
+            {figure}
+          </span>
+        )}
+        <span className={`shrink-0 text-ink-muted ${figure ? '' : 'ml-auto'}`}>
           {open ? <ChevronUp size={20} aria-hidden /> : <ChevronDown size={20} aria-hidden />}
         </span>
       </button>
     </h2>
-  )
-}
-
-/**
- * 畳んだ月カード（食費・栄養）に出す数値の並び（2026-08-08 オーナー実機フィードバック
- * 「◯月の食費、栄養の折りたたみ状態で、それぞれ食費全部の数値と1ヶ月分の栄養（一人分）を
- * 表示して」）。
- *
- * カードを開かなくても数値が読めることが目的なので、出すのは「行の名前＋数値」だけにする。
- * 数え方の但し書き・内訳・出典は開いたときのまま（畳んだ側に長文を持ち込むと畳む意味が
- * 無くなる。規約H）。
- *
- * 体裁は開いたときの栄養パネルと同じ2列で、名前を値の上に置く。390px幅では
- * 「1日あたりの平均 約1,234円」を1行に並べると名前が途中で折れるため、横並びにはしない。
- */
-function MonthFoldedFigures({
-  testId,
-  items,
-}: {
-  testId: string
-  items: { label: string; value: string }[]
-}) {
-  if (items.length === 0) return null
-  return (
-    <dl
-      data-testid={testId}
-      className="mt-[var(--space-sm)] grid grid-cols-2 gap-x-3 gap-y-[var(--space-sm)]"
-    >
-      {items.map(({ label, value }) => (
-        <div key={label} className="min-w-0">
-          <dt className="truncate text-xs text-ink-muted">{label}</dt>
-          <dd className="text-sm font-bold text-accent-ink tabular-nums">{value}</dd>
-        </div>
-      ))}
-    </dl>
   )
 }
 
@@ -1808,8 +1804,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 月タブ: 日タップで開くその日の献立モーダル（便U-5。従来の即週ジャンプはモーダル内の
   // ボタンへ移動）。nullなら非表示
   const [dayModalDate, setDayModalDate] = useState<string | null>(null)
+  /**
+   * 月タブの日の窓から「この週を開く」（2026-08-20 便IG・⑩。オーナー原文
+   * 「月から「この週を開く」したときは、記録がある日は開いた状態、選んだ日付まで
+   *   スクロールして表示。」）。
+   *
+   * 曜日カードの既定は便ID・⑦で「過ぎた日は畳む／献立のある未来の日は開く」になっている。
+   * ここはそれとぶつかるので、**月から来たときだけの上書き**として作る＝
+   * 人が押して開け閉めした記憶（dayFoldOverrides）に、その週の「記録がある日」を
+   * 開いた状態として書き込む。既定そのものは触らないので、週タブを普通に開いたときの
+   * 見え方は変わらない（別の週の日付にも当たらない＝キーが日付だから）。
+   *
+   * 開く日の決め方は「その日に作った記録があるか」だけ＝今日が何曜日でも何日でも通る
+   * （曜日・月替わりの前提を置かない）。並べる7日は週タブと同じ計算（weekDates）で出す。
+   */
   const goToWeekOf = (date: string) => {
-    setWeekStart(weekDates(new Date(`${date}T00:00:00`))[0])
+    const weekOfDate = weekDates(new Date(`${date}T00:00:00`))
+    setWeekStart(weekOfDate[0])
+    setDayFoldOverrides((prev) => {
+      const next = { ...prev }
+      for (const d of weekOfDate) {
+        if (shownLogsOf(d).length > 0) next[d] = false
+      }
+      return next
+    })
+    // 選んだ日のカードまで送る（既にある仕組み＝?focus=week&date= と同じ経路に乗せる）
+    setPendingScrollDate(date)
     setViewMode('week')
   }
 
@@ -2335,6 +2355,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 画面に1品でも出ていれば「決まっている」。
    */
   const dayHasPlan = dayRecipeIds.length > 0
+
+  /**
+   * 「今日の献立」の整理モード（2026-08-20 便IG・①。オーナー原文
+   * 「「作った！」と×が邪魔。作った！をつけるときにはモード切り替えするようにしたら
+   *   解決できる？全て作った！も含めて。」／司令部の裁定＝A案）。
+   *
+   * ONのあいだだけ、行に×（献立から外す）を出す。「作った！」「全て作った！」は
+   * モードの外に残す＝毎日押す操作を奥へ入れない（A案の理由）。
+   * 作法は食材の在庫の「整理」（PantryBoard）に合わせてある（ja.mealPlan.todayOrganizeToggle 参照）。
+   *
+   * 画面を離れると既定（OFF）に戻す＝設定には残さない。並んでいる品が1つも無くなったら
+   * 自動で抜ける（在庫の整理モードと同じ。抜けるボタンごと消えて閉じ込められないように）。
+   */
+  const [dayOrganizing, setDayOrganizing] = useState(false)
+  useEffect(() => {
+    if (dayOrganizing && !dayHasPlan) setDayOrganizing(false)
+  }, [dayOrganizing, dayHasPlan])
 
   /**
    * 「今日なに作る？」の候補カードから開いた料理を覚える／覚えを読む（2026-08-17 便HI・
@@ -6272,7 +6309,27 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               空のときの唯一の入口を失わせない */}
           {dayHasPlan && (
             <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
-              <h2 className="text-xl font-bold">{ja.mealPlan.todayTitle}</h2>
+              {/* 見出しの横に「整理」（2026-08-20 便IG・①）。作法は食材の在庫の
+                  「整理」ボタン（components/PantryBoard）にそろえる＝同じ位置（見出しの右）・
+                  同じ名前（整理／完了）・同じ見た目（ONで塗り・OFFで枠）。
+                  押せる高さは44px（min-h-11）を下回らせない */}
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xl font-bold">{ja.mealPlan.todayTitle}</h2>
+                <button
+                  type="button"
+                  data-testid="day-organize"
+                  onClick={() => setDayOrganizing((v) => !v)}
+                  aria-pressed={dayOrganizing}
+                  className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                    dayOrganizing
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  <ListChecks size={14} aria-hidden />
+                  {dayOrganizing ? ja.mealPlan.todayOrganizeDone : ja.mealPlan.todayOrganizeToggle}
+                </button>
+              </div>
 
               {/* 2026-08-03 便DH(オーナー指示): 便DEの左右2列をやめ、縦一列で
                   「レシピ一覧から選択中」→「今週の献立の予定(朝食・昼食・夕食)」の順に並べる */}
@@ -6281,6 +6338,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   リストの上に1回だけ置く(行ごとに繰り返さない) */}
               <p className="mt-1 text-xs text-ink-muted">
                 {ja.mealPlan.todayMarkCookedHint}
+                {/* 整理モードのあいだだけ、×が何をするものかを1行で添える（2026-08-20 便IG・①・規約H）。
+                    「整理」の2文字だけでは何ができるのか読み取れないため */}
+                {dayOrganizing && (
+                  <span data-testid="day-organize-hint" className="block">
+                    {ja.mealPlan.todayOrganizeHint}
+                  </span>
+                )}
                 {/* 段取りを組んでいる間だけ、1品の記録が段取りに与える影響を先に伝える
                     （2026-08-09 便EH・規約F） */}
                 {naviInProgress && (
@@ -6297,9 +6361,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 )}
               </p>
 
-              {/* ①レシピ一覧から選択中。×(外す)が押せるのはこちらだけ。
+              {/* ①レシピ一覧から選択中。この×は今日の献立からだけ外す。
                   今日の予定へ入れたいときは行の下の「◯食に入れる」から
-                  (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜) */}
+                  (入る役割の判定は assignMismatchRecipe＝主菜になる料理は主菜・それ以外は副菜)。
+                  2026-08-20 便IG・①: ×は整理モードのあいだだけ出す(onRemoveを渡さない＝出ない) */}
               {pickedRecipes.length > 0 && (
                 <div data-testid="day-picked" className="mt-[var(--space-sm)]">
                   <p className="text-sm font-bold text-ink-muted">
@@ -6312,7 +6377,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         recipe={recipe}
                         ngIngredients={settings?.ngIngredients ?? []}
                         onCooked={() => markDayRecipeCooked(recipe)}
-                        onRemove={() => void removeTodayPickedRecipe(recipe)}
+                        onRemove={
+                          dayOrganizing ? () => void removeTodayPickedRecipe(recipe) : undefined
+                        }
                         footer={
                           <div className="flex w-full flex-wrap gap-1">
                             {MEAL_SLOTS.map((slot) => (
@@ -6348,10 +6415,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <p className="text-sm font-bold text-ink-muted">
                     {ja.mealPlan.todayPlannedLabel}
                   </p>
-                  {/* 規約F: ×が何を消して何を残すかを、押す前に読める場所に書く */}
-                  <p data-testid="day-planned-remove-hint" className="text-xs text-ink-muted">
-                    {ja.mealPlan.todayPlannedRemoveHint}
-                  </p>
+                  {/* 規約F: ×が何を消して何を残すかを、押す前に読める場所に書く。
+                      2026-08-20 便IG・①: ×が出ているとき＝整理モードのあいだだけ出す
+                      （出ていない操作の説明を先に読ませない） */}
+                  {dayOrganizing && (
+                    <p data-testid="day-planned-remove-hint" className="text-xs text-ink-muted">
+                      {ja.mealPlan.todayPlannedRemoveHint}
+                    </p>
+                  )}
                   {plannedGroups.map(({ slot, recipes: slotRecipes }) => (
                     <div key={slot} className="mt-1">
                       <p className="text-xs text-ink-muted">{ja.mealPlan.slot[slot]}</p>
@@ -6362,7 +6433,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                             recipe={recipe}
                             ngIngredients={settings?.ngIngredients ?? []}
                             onCooked={() => markDayRecipeCooked(recipe)}
-                            onRemove={() => void removeTodayPlannedRecipe(slot, recipe)}
+                            onRemove={
+                              dayOrganizing
+                                ? () => void removeTodayPlannedRecipe(slot, recipe)
+                                : undefined
+                            }
                             removeLabel={ja.mealPlan.todayPlannedRemove}
                           />
                         ))}
@@ -6894,6 +6969,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 2026-08-07 便DU(オーナー指示): カレンダーの下へ移し、カード自体を折りたたみにした
                 (既定は畳む。理由は monthCostCardOpen の宣言部) */}
             <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+              {/* 畳んでいるときに出すのは食費の合計1つだけ(2026-08-19 便HV・⑨・オーナー原文
+                  「折りたたんだ時に表示する内容も、食費：全部の合計、栄養：カロリーの合計のみにし、
+                  現在折りたたみでも見えている部分（と内訳と注記出典）が開いた時に出てくるだけで
+                  情報は十分」)。出す金額は開いたときの表の「全員分」とまったく同じ値で、
+                  1人分・1日あたりの平均・数え方の但し書き・内訳は開いたときに回す。
+                  2026-08-20 便IG・⑬: その数値を見出しの横へ移した(縦に伸ばさない) */}
               <MonthCardHeader
                 title={ja.mealPlan.monthCostTitle.replace(
                   '{m}',
@@ -6901,29 +6982,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 )}
                 open={monthCostCardOpen}
                 onToggle={() => setMonthCostCardOpen((v) => !v)}
+                figure={
+                  !monthCostCardOpen && monthSummaryDishCount > 0
+                    ? ja.mealPlan.intakeCostYen.replace(
+                        '{n}',
+                        monthSummary.householdYen.toLocaleString(),
+                      )
+                    : undefined
+                }
+                figureTestId="month-cost-folded"
               />
-              {/* 畳んでいるときに出すのは食費の合計1つだけ(2026-08-19 便HV・⑨・オーナー原文
-                  「折りたたんだ時に表示する内容も、食費：全部の合計、栄養：カロリーの合計のみにし、
-                  現在折りたたみでも見えている部分（と内訳と注記出典）が開いた時に出てくるだけで
-                  情報は十分」)。出す金額は開いたときの表の「全員分」とまったく同じ値で、
-                  1人分・1日あたりの平均・数え方の但し書き・内訳は開いたときに回す */}
-              {!monthCostCardOpen &&
-                (monthSummaryDishCount === 0 ? (
-                  <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthSummaryEmpty}</p>
-                ) : (
-                  <MonthFoldedFigures
-                    testId="month-cost-folded"
-                    items={[
-                      {
-                        label: ja.mealPlan.intakeCostRowHousehold,
-                        value: ja.mealPlan.intakeCostYen.replace(
-                          '{n}',
-                          monthSummary.householdYen.toLocaleString(),
-                        ),
-                      },
-                    ]}
-                  />
-                ))}
+              {/* 数える対象が1品も無い月は、金額の代わりに理由を1行で置く(畳んだままでも読める) */}
+              {!monthCostCardOpen && monthSummaryDishCount === 0 && (
+                <p className="mt-1 text-sm text-ink-muted">{ja.mealPlan.monthSummaryEmpty}</p>
+              )}
               <Collapse open={monthCostCardOpen}>
                 {monthSummaryDishCount === 0 ? (
                 // 2026-08-08 便EA: 今日の作った記録も合計に入るようになったので、
@@ -7014,6 +7086,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 目的モードの「答え合わせ」をこのカードから外した(下の削除メモ参照) */}
             {isNutritionUnlocked(monthUnlocked) && monthSummary.nutrition.dishCount > 0 && (
                 <section className="mt-[var(--space-md)] rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
+                  {/* 畳んでいるときに出すのはエネルギーの合計1つだけ(2026-08-19 便HV・⑨・
+                      オーナー原文「栄養：カロリーの合計のみにし」)。残る7項目・計算できた品数の
+                      注記・出典は、カードを開いたときに出る。
+                      2026-08-20 便IG・⑬: その数値を見出しの横へ移した(縦に伸ばさない) */}
                   <MonthCardHeader
                     title={ja.mealPlan.monthNutritionTitle.replace(
                       '{m}',
@@ -7021,21 +7097,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     )}
                     open={monthNutritionCardOpen}
                     onToggle={() => setMonthNutritionCardOpen((v) => !v)}
+                    figure={
+                      !monthNutritionCardOpen
+                        ? formatNutrient('kcal', monthSummary.nutrition.total.kcal)
+                        : undefined
+                    }
+                    figureTestId="month-nutrition-folded"
                   />
-                  {/* 畳んでいるときに出すのはエネルギーの合計1つだけ(2026-08-19 便HV・⑨・
-                      オーナー原文「栄養：カロリーの合計のみにし」)。残る7項目・計算できた品数の
-                      注記・出典は、カードを開いたときに出る */}
-                  {!monthNutritionCardOpen && (
-                    <MonthFoldedFigures
-                      testId="month-nutrition-folded"
-                      items={[
-                        {
-                          label: ja.nutrition.kcalLabel,
-                          value: formatNutrient('kcal', monthSummary.nutrition.total.kcal),
-                        },
-                      ]}
-                    />
-                  )}
                   <Collapse open={monthNutritionCardOpen}>
                   <>
                   {monthSummary.nutrition.dishCount > 0 && (

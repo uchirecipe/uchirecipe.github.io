@@ -386,6 +386,18 @@
 //         はみ出しなし。2026-08-18 便HO・オーナー実機「LPの改行：大画面で「きます」だけは変なので、
 //         １行が納まる幅になおしてください。」で足した: 結びの一文が1行に収まっていて、
 //         囲みはその一文が1行に収まるのに要る幅より広くない(＝余白を増やしていない)) /
+//         DAYORG-01(2026-08-20 便IG・①: 「今日の献立」の×を「整理」モードの中へ移した。
+//         整理でないときは×がどこにも出ない・「整理」に入ると2品ぶんの×が出る・
+//         外した後にそのお知らせから元に戻せる(今日と今週の両方へ)・「完了」で引っ込む。
+//         A案の要＝「作った！」「全て作った！」はモードの外に残ることも毎回見る) /
+//         CARDSMALL-01(2026-08-20 便IG・⑫: 「小」のカードに写真があっても絵が膨らまない。
+//         月の日の窓と週タブの過ぎた日の両方で、料理名の幅・絵の大きさ・行の高さを実測する
+//         (直す前は絵が600px角・料理名の幅が4pxだった)) /
+//         WEEKOPEN-01(2026-08-20 便IG・⑩: 月の日の窓の「この週を開く」で着いた週は、
+//         記録がある日が開いた状態で、選んだ日付まで送られている。曜日・月替わりに依らない
+//         (目当ての日のマスが今の月に無ければ前の月へ送ってから掴む)) /
+//         FOLDFIG-01(2026-08-20 便IG・⑬: 畳んだ月の食費・栄養カードの数値が見出しの横に出て、
+//         見出しは1行のまま・見出しの下には何も出ない・開いたときの表と同じ数字であること) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -540,6 +552,20 @@ const openWeekGroup = async (page, title) => {
     await opener.first().click()
     await page.waitForTimeout(350)
   }
+}
+/**
+ * 日タブの「今日の献立」を整理モードにする（2026-08-20 便IG・①）。
+ *
+ * ×（献立から外す）は整理モードの中にしか出さなくなったので、×を触る検査は先にここを通す
+ * （×そのものが「整理でないときは出ない／整理にすると出る」ことは DAYORG-01 が受け持つ）。
+ * **すでに整理モードなら押さない**＝押す回数を決め打ちしない。ボタンが無い画面では素通りする。
+ */
+const openDayOrganize = async (page) => {
+  const toggle = page.locator('[data-testid="day-organize"]')
+  if ((await toggle.count()) === 0) return
+  if ((await toggle.first().getAttribute('aria-pressed')) === 'true') return
+  await toggle.first().click()
+  await page.waitForTimeout(350)
 }
 /**
  * 画面に出ている数を「助数詞に依らず」読むための道具（2026-08-18 便HR）。
@@ -4233,6 +4259,8 @@ try {
       )
 
       // (1) 日タブ「今週の献立の予定」の×
+      // 2026-08-20 便IG・①: ×は「整理」モードの中にしか出ないので、先に整理へ入る
+      await openDayOrganize(puPage)
       await puPage
         .locator('[data-testid="day-planned"] button[aria-label="今日と今週の献立から外す"]')
         .first()
@@ -4313,6 +4341,594 @@ try {
       }
     } finally {
       await puBrowser.close()
+    }
+  }
+
+
+  // --- DAYORG-01: 「今日の献立」の×は「整理」の中だけに出す(2026-08-20 便IG・①)。
+  // オーナー原文「「作った！」と×が邪魔。作った！をつけるときにはモード切り替えするようにしたら
+  // 解決できる？全て作った！も含めて。」→ 司令部の裁定はA案＝**×だけ**をモードの中へ移し、
+  // 毎日押す「作った！」「全て作った！」は出したまま。
+  // 見張るのは ①整理でないときに×が出ていない ②整理にすると出る ③外した後に元に戻せる の3つ。
+  // 掴み方は読み上げの名前(aria-label)と ja.ts の文言だけ＝どの入れ子・どの並びに出ていても
+  // 同じ判定になる(禁じ手④)。数え上げが0件で素通りしないよう、前提(2品が並び「作った！」が
+  // 2つある)を先に測ってから本題に入る(禁じ手「見つからなかった＝合格」対策) ---
+  currentCheck = 'DAYORG-01'
+  {
+    const doBrowser = await chromium.launch()
+    const doContext = await doBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const doPage = await doContext.newPage()
+    doPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@DAYORG-01] ${err.message}`)
+    })
+    const doRead = (table) =>
+      doPage.evaluate(
+        (name) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const store = req.result.transaction(name, 'readonly').objectStore(name)
+              const q = store.getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        table,
+      )
+    const doRemoveButtons = () =>
+      doPage.locator(
+        `button[aria-label="${ja.mealPlan.todayRemove}"], button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`,
+      )
+    try {
+      await doPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await doPage.waitForTimeout(1800) // 初回シード完了待ち
+      // ①今週の献立の予定に入る品(夕食) ②レシピ一覧から選択中に入る品(食事を決めずに追加)
+      await doPage.getByText('肉じゃが', { exact: true }).first().click()
+      await doPage.waitForTimeout(500)
+      await doPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await doPage.waitForTimeout(300)
+      await doPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await doPage.waitForTimeout(600)
+      await doPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await doPage.waitForTimeout(900)
+      await doPage.getByText('ほうれん草のおひたし', { exact: true }).first().click()
+      await doPage.waitForTimeout(500)
+      await doPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await doPage.waitForTimeout(300)
+      await doPage
+        .getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' })
+        .click()
+      await doPage.waitForTimeout(600)
+
+      await doPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await doPage.waitForTimeout(1500)
+      const doCooked = doPage.getByRole('button', { name: ja.mealPlan.todayMarkCooked, exact: true })
+      const doBody0 = ((await doPage.textContent('body')) ?? '').replaceAll('​', '')
+      check(
+        'DAYORG-01 前提: 今日の献立に2品が並び、「作った！」が2つある',
+        doBody0.includes('肉じゃが') &&
+          doBody0.includes('ほうれん草のおひたし') &&
+          (await doCooked.count()) === 2,
+        `作った！=${await doCooked.count()}`,
+      )
+
+      // ---------- ① 整理でないときに×が出ていない ----------
+      check(
+        'DAYORG-01(①) 整理モードでないときは、献立から外す×がどこにも出ていない',
+        (await doRemoveButtons().count()) === 0,
+        `×=${await doRemoveButtons().count()}`,
+      )
+      // A案の要:「作った！」「全て作った！」はモードの外に残す(毎日押す操作を奥へ入れない)
+      check(
+        'DAYORG-01(A案) 「作った！」は整理モードでなくても押せる',
+        (await doCooked.count()) === 2 && (await doCooked.first().isVisible()),
+      )
+      const doAll = doPage.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked, exact: true })
+      check(
+        'DAYORG-01(A案) 「全て作った！」も整理モードでなくても押せる',
+        (await doAll.count()) === 1 && (await doAll.isVisible()),
+        `全て作った！=${await doAll.count()}`,
+      )
+
+      // ---------- ② 整理にすると出る ----------
+      const doToggle = doPage.getByRole('button', {
+        name: ja.mealPlan.todayOrganizeToggle,
+        exact: true,
+      })
+      const doToggleBox = (await doToggle.count()) === 1 ? await doToggle.boundingBox() : null
+      check(
+        'DAYORG-01(①) 「今日の献立」に整理へ入るボタンが1つあり、指で押せる大きさ(44px以上)',
+        (await doToggle.count()) === 1 && !!doToggleBox && doToggleBox.height >= 44,
+        `数=${await doToggle.count()} 高さ=${doToggleBox?.height}`,
+      )
+      if ((await doToggle.count()) === 1) {
+        await doToggle.click()
+        await doPage.waitForTimeout(500)
+      }
+      check(
+        'DAYORG-01(①) 整理モードにすると、2品ぶんの×が出る',
+        (await doRemoveButtons().count()) === 2,
+        `×=${await doRemoveButtons().count()}`,
+      )
+      check(
+        'DAYORG-01(①) 整理モードで何ができるかの1行が読める',
+        ((await doPage.textContent('body')) ?? '')
+          .replaceAll('​', '')
+          .includes(ja.mealPlan.todayOrganizeHint),
+      )
+      check(
+        'DAYORG-01(A案) 整理モードでも「作った！」は消えない(押す道が無くならない)',
+        (await doCooked.count()) === 2,
+        `作った！=${await doCooked.count()}`,
+      )
+
+      // ---------- ③ 外した後に元に戻せる(便HQの「元に戻す」が遠くならない) ----------
+      const doBefore = { today: await doRead('todayList'), plans: await doRead('mealPlans') }
+      check(
+        'DAYORG-01 前提: 今日の献立2件・今週の予定1件が端末に入っている',
+        doBefore.today.length === 2 && doBefore.plans.length === 1,
+        `today=${doBefore.today.length} plans=${doBefore.plans.length}`,
+      )
+      const doPlannedRemove = doPage.locator(
+        `button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`,
+      )
+      if ((await doPlannedRemove.count()) > 0) {
+        await doPlannedRemove.first().click()
+        await doPage.waitForTimeout(900)
+        const doAfter = { today: await doRead('todayList'), plans: await doRead('mealPlans') }
+        check(
+          'DAYORG-01(①) 整理モードの×で、今日と今週の献立の両方から外れる',
+          doAfter.today.length === 1 && doAfter.plans.length === 0,
+          `today=${doAfter.today.length} plans=${doAfter.plans.length}`,
+        )
+        const doUndo = doPage.getByRole('button', { name: ja.common.undo, exact: true })
+        check('DAYORG-01(①) 外した直後のお知らせに「元に戻す」が出る', (await doUndo.count()) === 1)
+        if ((await doUndo.count()) === 1) {
+          await doUndo.click()
+          await doPage.waitForTimeout(1000)
+          const doUndone = { today: await doRead('todayList'), plans: await doRead('mealPlans') }
+          check(
+            'DAYORG-01(①) 「元に戻す」で今日の献立にも今週の予定にも戻る',
+            doUndone.today.length === 2 &&
+              doUndone.plans.length === 1 &&
+              doUndone.plans[0].date === doBefore.plans[0].date &&
+              doUndone.plans[0].slot === doBefore.plans[0].slot &&
+              doUndone.plans[0].recipeId === doBefore.plans[0].recipeId,
+            `today=${doUndone.today.length} plans=${JSON.stringify(doUndone.plans)}`,
+          )
+        }
+      }
+
+      // ---------- 「完了」で元の並びに戻る ----------
+      const doDone = doPage.getByRole('button', { name: ja.mealPlan.todayOrganizeDone, exact: true })
+      check('DAYORG-01(①) 整理モード中は「完了」で抜けられる', (await doDone.count()) === 1)
+      if ((await doDone.count()) === 1) {
+        await doDone.click()
+        await doPage.waitForTimeout(500)
+        check(
+          'DAYORG-01(①) 「完了」で×は引っ込み、「作った！」は残る',
+          (await doRemoveButtons().count()) === 0 && (await doCooked.count()) === 2,
+          `×=${await doRemoveButtons().count()} 作った！=${await doCooked.count()}`,
+        )
+      }
+    } finally {
+      await doBrowser.close()
+    }
+  }
+
+  // --- CARDSMALL-01: 「小」のカードに写真があっても、絵が入れ物いっぱいに膨らまない
+  // (2026-08-20 便IG・⑫。オーナー実機報告「月の日の窓を開くと、作った記録の写真が窓いっぱいに
+  // 縦長で表示され、料理名が出ていない」)。
+  // 原因は入れ物の形ではなく、絵の枠が「高さ100%」で組まれていたこと＝親の高さが中身で決まる
+  // 場所では高さが決まらず、中の<img>が元の大きさ(600px等)のまま並んで、正方形の一辺が
+  // その大きさになっていた。月の日の窓だけの話ではないので、**同じ「小」のカードを使う
+  // 週タブの過ぎた日**でも同じことを測る(片方だけ直して片方が残るのを防ぐ)。
+  // 測るのは見た目のクラス名ではなく**実際の大きさ**(行・絵・料理名の箱)。
+  // 読み取れなかったときは error を返して必ず落ちる(「見つからなかった＝合格」に倒れない) ---
+  currentCheck = 'CARDSMALL-01'
+  {
+    const csBrowser = await chromium.launch()
+    const csContext = await csBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const csPage = await csContext.newPage()
+    csPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@CARDSMALL-01] ${err.message}`)
+    })
+    const pad2 = (n) => String(n).padStart(2, '0')
+    const csDay = (offset) => {
+      const d = new Date()
+      d.setDate(d.getDate() + offset)
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+    }
+    const csToday = csDay(0)
+    const csPast = csDay(-1)
+    /** その行の「行・絵・料理名」の実寸を返す。読めなければ error を返す(必ず落ちる形) */
+    const csMeasure = (rootSel, title) =>
+      csPage.evaluate(
+        ({ rootSel, title }) => {
+          const clean = (s) => (s ?? '').replaceAll('​', '')
+          const root = document.querySelector(rootSel)
+          if (!root) return { error: `土台が見つからない(${rootSel})` }
+          const li = [...root.querySelectorAll('li')].find((el) =>
+            clean(el.innerText).includes(title),
+          )
+          if (!li) return { error: `「${title}」の行が見つからない` }
+          const img = li.querySelector('img')
+          if (!img) return { error: '記録の写真が見つからない' }
+          const titleEl = [...li.querySelectorAll('*')]
+            .filter((el) => el.children.length === 0)
+            .find((el) => clean(el.textContent).trim() === title)
+          if (!titleEl) return { error: '料理名の箱が見つからない' }
+          const r = (el) => {
+            const b = el.getBoundingClientRect()
+            return { w: Math.round(b.width), h: Math.round(b.height) }
+          }
+          return { row: r(li), img: r(img), title: r(titleEl) }
+        },
+        { rootSel, title },
+      )
+    const csCheckCard = (where, m) => {
+      check(
+        `CARDSMALL-01(⑫) ${where}: 窓の中の記録に料理名が出ている(幅が潰れていない)`,
+        !m.error && m.title.w >= 80,
+        `計測=${JSON.stringify(m)}`,
+      )
+      check(
+        `CARDSMALL-01(⑫) ${where}: 絵が行からはみ出していない(縦にも横にも行の中に収まる)`,
+        !m.error && m.img.w <= m.row.w && m.img.h <= m.row.h,
+        `計測=${JSON.stringify(m)}`,
+      )
+      check(
+        `CARDSMALL-01(⑫) ${where}: 行の高さが「小」のまま(1行ぶん・96px以下)`,
+        !m.error && m.row.h <= 96,
+        `計測=${JSON.stringify(m)}`,
+      )
+      check(
+        `CARDSMALL-01(⑫) ${where}: 絵は押せる大きさ(44px)以上の正方形`,
+        !m.error && m.img.h >= 44 && Math.abs(m.img.w - m.img.h) <= 2,
+        `計測=${JSON.stringify(m)}`,
+      )
+    }
+    try {
+      await csPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await csPage.waitForTimeout(1800) // 初回シード完了待ち
+      // Pro解錠(月タブを開くため)＋今日と昨日に「縦長の写真つきの作った記録」を仕込む。
+      // 写真の元の大きさ(600×900)が、そのまま画面の大きさに化けていたのが⑫の中身
+      await csPage.evaluate(
+        async ({ today, past }) => {
+          const photo = await new Promise((resolve) => {
+            const c = document.createElement('canvas')
+            c.width = 600
+            c.height = 900
+            const ctx = c.getContext('2d')
+            ctx.fillStyle = '#c60'
+            ctx.fillRect(0, 0, 600, 900)
+            c.toBlob((b) => resolve(b), 'image/jpeg', 0.8)
+          })
+          const req = indexedDB.open('uchi-recipe')
+          const idb = await new Promise((res, rej) => {
+            req.onsuccess = () => res(req.result)
+            req.onerror = () => rej(req.error)
+          })
+          await new Promise((res, rej) => {
+            const tx = idb.transaction(['settings', 'recipes'], 'readwrite')
+            const s = tx.objectStore('settings')
+            const g = s.get(1)
+            g.onsuccess = () =>
+              s.put({
+                ...(g.result || { id: 1 }),
+                id: 1,
+                proCode: 'UR-E2E-TEST-ONLY',
+                proActivatedAt: Date.now(),
+              })
+            const rs = tx.objectStore('recipes')
+            const all = rs.getAll()
+            all.onsuccess = () => {
+              const r = all.result.find((x) => x.title === '肉じゃが')
+              if (r) {
+                r.cookedLogs = [
+                  { date: today, servings: 2, photo },
+                  { date: past, servings: 2, photo },
+                ]
+                rs.put(r)
+              }
+            }
+            tx.oncomplete = () => res()
+            tx.onerror = () => rej(tx.error)
+          })
+          idb.close()
+        },
+        { today: csToday, past: csPast },
+      )
+      await csPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await csPage.reload({ waitUntil: 'networkidle' })
+      await csPage.waitForTimeout(1500)
+
+      // ---------- (a) 月タブ: 日の窓 ----------
+      await csPage.getByRole('button', { name: '月', exact: true }).click()
+      await csPage.waitForTimeout(900)
+      const csCell = csPage.locator(`button[data-date="${csToday}"]`)
+      check('CARDSMALL-01 前提: 月のカレンダーに今日のマスがある', (await csCell.count()) === 1)
+      await csCell.click()
+      await csPage.waitForTimeout(900)
+      check(
+        'CARDSMALL-01 前提: 日の窓が開き、作った記録が並んでいる',
+        (await csPage.locator('[role="dialog"]').count()) === 1 &&
+          ((await csPage.locator('[role="dialog"]').innerText()) ?? '').includes('肉じゃが'),
+      )
+      csCheckCard('月の日の窓', await csMeasure('[role="dialog"]', '肉じゃが'))
+      await csPage.keyboard.press('Escape')
+      await csPage.waitForTimeout(500)
+
+      // ---------- (b) 週タブ: 過ぎた日のカード(同じ「小」のカードを使う場所) ----------
+      await csPage.getByRole('button', { name: '週', exact: true }).click()
+      await csPage.waitForTimeout(700)
+      // 昨日のカードが出る週まで送る(前へも後ろへも送れる形。曜日・月替わりに依らない)
+      for (let i = 0; i < 3; i++) {
+        if ((await csPage.locator(`section[data-date="${csPast}"]`).count()) > 0) break
+        await csPage.getByRole('button', { name: '前の週', exact: true }).click()
+        await csPage.waitForTimeout(600)
+      }
+      const csPastSection = csPage.locator(`section[data-date="${csPast}"]`)
+      check(
+        'CARDSMALL-01 前提: 週タブに昨日のカードが出ている',
+        (await csPastSection.count()) === 1,
+      )
+      if ((await csPastSection.count()) === 1) {
+        const csFold = csPastSection.locator('[data-testid="week-day-toggle"]')
+        if ((await csFold.getAttribute('aria-expanded')) === 'false') {
+          await csFold.click()
+          await csPage.waitForTimeout(600)
+        }
+        csCheckCard('週タブの過ぎた日', await csMeasure(`section[data-date="${csPast}"]`, '肉じゃが'))
+      }
+    } finally {
+      await csBrowser.close()
+    }
+  }
+
+  // --- WEEKOPEN-01: 月の日の窓から「この週を開く」で着いた週は、記録のある日が開いていて、
+  // 選んだ日付まで送られている(2026-08-20 便IG・⑩。オーナー原文「月から「この週を開く」した
+  // ときは、記録がある日は開いた状態、選んだ日付までスクロールして表示。」)。
+  // 便ID・⑦の既定(過ぎた日は畳む)とぶつかるので、**月から来たときだけの上書き**として作った。
+  // 曜日にも月替わりにも依らない形にする: 目当ての日のマスが今の月に無ければ前の月へ送る ---
+  currentCheck = 'WEEKOPEN-01'
+  {
+    const woBrowser = await chromium.launch()
+    const woContext = await woBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const woPage = await woContext.newPage()
+    woPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@WEEKOPEN-01] ${err.message}`)
+    })
+    const woPad = (n) => String(n).padStart(2, '0')
+    const woDate = (offset) => {
+      const d = new Date()
+      d.setDate(d.getDate() + offset)
+      return `${d.getFullYear()}-${woPad(d.getMonth() + 1)}-${woPad(d.getDate())}`
+    }
+    const woTarget = woDate(-1)
+    try {
+      await woPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await woPage.waitForTimeout(1800)
+      await woPage.evaluate(async (date) => {
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => {
+          req.onsuccess = () => res(req.result)
+          req.onerror = () => rej(req.error)
+        })
+        await new Promise((res, rej) => {
+          const tx = idb.transaction(['settings', 'recipes'], 'readwrite')
+          const s = tx.objectStore('settings')
+          const g = s.get(1)
+          g.onsuccess = () =>
+            s.put({
+              ...(g.result || { id: 1 }),
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+          const rs = tx.objectStore('recipes')
+          const all = rs.getAll()
+          all.onsuccess = () => {
+            const r = all.result.find((x) => x.title === '肉じゃが')
+            if (r) {
+              r.cookedLogs = [{ date, servings: 2 }]
+              rs.put(r)
+            }
+          }
+          tx.oncomplete = () => res()
+          tx.onerror = () => rej(tx.error)
+        })
+        idb.close()
+      }, woTarget)
+      await woPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await woPage.reload({ waitUntil: 'networkidle' })
+      await woPage.waitForTimeout(1500)
+      await woPage.getByRole('button', { name: '月', exact: true }).click()
+      await woPage.waitForTimeout(900)
+      for (let i = 0; i < 2; i++) {
+        if ((await woPage.locator(`button[data-date="${woTarget}"]`).count()) > 0) break
+        await woPage.getByRole('button', { name: '前の月', exact: true }).click()
+        await woPage.waitForTimeout(700)
+      }
+      const woCell = woPage.locator(`button[data-date="${woTarget}"]`)
+      check('WEEKOPEN-01 前提: 記録のある日のマスが月のカレンダーにある', (await woCell.count()) === 1)
+      if ((await woCell.count()) === 1) {
+        await woCell.click()
+        await woPage.waitForTimeout(800)
+        const woOpenWeek = woPage.getByRole('button', {
+          name: ja.mealPlan.monthDayModalOpenWeek,
+          exact: true,
+        })
+        check('WEEKOPEN-01 前提: 日の窓に「この週を開く」がある', (await woOpenWeek.count()) === 1)
+        await woOpenWeek.click()
+        await woPage.waitForTimeout(1600)
+        check(
+          'WEEKOPEN-01 「この週を開く」で週タブに移る',
+          (await woPage
+            .getByRole('button', { name: '週', exact: true })
+            .getAttribute('aria-pressed')) === 'true',
+        )
+        const woSection = woPage.locator(`section[data-date="${woTarget}"]`)
+        check(
+          'WEEKOPEN-01 前提: 選んだ日のカードが週に出ている',
+          (await woSection.count()) === 1,
+        )
+        if ((await woSection.count()) === 1) {
+          check(
+            'WEEKOPEN-01(⑩) 記録がある日は開いた状態で着く(過ぎた日を畳む既定を上書きする)',
+            (await woSection
+              .locator('[data-testid="week-day-toggle"]')
+              .getAttribute('aria-expanded')) === 'true',
+          )
+          check(
+            'WEEKOPEN-01(⑩) 開いた中身に、その日の作った記録が見えている',
+            ((await woSection.innerText()) ?? '').replaceAll('​', '').includes('肉じゃが'),
+          )
+          const woPos = await woPage.evaluate((date) => {
+            const el = document.querySelector(`section[data-date="${date}"]`)
+            const all = [...document.querySelectorAll('section[data-date]')].map(
+              (s) => s.dataset.date,
+            )
+            return {
+              top: el ? Math.round(el.getBoundingClientRect().top) : null,
+              index: all.indexOf(date),
+              scrollY: Math.round(window.scrollY),
+            }
+          }, woTarget)
+          check(
+            'WEEKOPEN-01(⑩) 選んだ日付が画面の上端まで送られている',
+            woPos.top !== null && woPos.top >= -4 && woPos.top <= 120,
+            `位置=${JSON.stringify(woPos)}`,
+          )
+          check(
+            'WEEKOPEN-01(⑩) 先頭の日でなければ、実際に画面が下へ送られている',
+            woPos.index === 0 ? true : woPos.scrollY > 0,
+            `位置=${JSON.stringify(woPos)}`,
+          )
+        }
+      }
+    } finally {
+      await woBrowser.close()
+    }
+  }
+
+  // --- FOLDFIG-01: 畳んだ月の食費・栄養カードの数値は、見出しの横に1行で出る
+  // (2026-08-20 便IG・⑬。オーナー原文「◯月の食費・栄養の折りたたみで表示される数値は、
+  // ◯月の食費（栄養）の横に表示して。縦長にしない。」)。
+  // 「縦長にしない」を、見出しの高さ(1行に収まっている)と、畳んだカードに見出し以外の
+  // 中身が無いことの2つで測る。390px幅(iPhone 12〜15相当)で見る ---
+  currentCheck = 'FOLDFIG-01'
+  {
+    const ffBrowser = await chromium.launch()
+    const ffContext = await ffBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ffPage = await ffContext.newPage()
+    ffPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FOLDFIG-01] ${err.message}`)
+    })
+    /** 畳んだカードの見出しと、カード全体の中身を読む(見出しの外に何か残っていないかを見る) */
+    const ffCard = (testId) =>
+      ffPage.evaluate((id) => {
+        const clean = (s) => (s ?? '').replaceAll('​', '')
+        const marker = document.querySelector(`[data-testid="${id}"]`)
+        if (!marker) return { error: `畳んだときの数値(${id})が見つからない` }
+        const section = marker.closest('section')
+        const h2 = section?.querySelector('h2')
+        if (!section || !h2) return { error: 'カードか見出しが見つからない' }
+        return {
+          inHeader: h2.contains(marker),
+          headerText: clean(h2.innerText).replace(/\n/g, ' '),
+          headerH: Math.round(h2.getBoundingClientRect().height),
+          headerW: Math.round(h2.getBoundingClientRect().width),
+          // 見出しの外に残っている中身(畳んでいるあいだは空であってほしい)
+          restText: clean(section.innerText).replace(clean(h2.innerText), '').trim(),
+          valueText: clean(marker.innerText).replace(/\n/g, ' '),
+        }
+      }, testId)
+    try {
+      await ffPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ffPage.waitForTimeout(1800)
+      // Pro解錠＋今日の作った記録を数品ぶん(食費・栄養の合計が桁数の多い数字になるようにする)
+      await ffPage.evaluate(async () => {
+        const d = new Date()
+        const p = (n) => String(n).padStart(2, '0')
+        const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+        const req = indexedDB.open('uchi-recipe')
+        const idb = await new Promise((res, rej) => {
+          req.onsuccess = () => res(req.result)
+          req.onerror = () => rej(req.error)
+        })
+        await new Promise((res, rej) => {
+          const tx = idb.transaction(['settings', 'recipes'], 'readwrite')
+          const s = tx.objectStore('settings')
+          const g = s.get(1)
+          g.onsuccess = () =>
+            s.put({
+              ...(g.result || { id: 1 }),
+              id: 1,
+              proCode: 'UR-E2E-TEST-ONLY',
+              proActivatedAt: Date.now(),
+            })
+          const rs = tx.objectStore('recipes')
+          const all = rs.getAll()
+          all.onsuccess = () => {
+            all.result.slice(0, 30).forEach((r) => {
+              r.cookedLogs = [{ date, servings: 8 }]
+              rs.put(r)
+            })
+          }
+          tx.oncomplete = () => res()
+          tx.onerror = () => rej(tx.error)
+        })
+        idb.close()
+      })
+      await ffPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await ffPage.reload({ waitUntil: 'networkidle' })
+      await ffPage.waitForTimeout(1800)
+      await ffPage.getByRole('button', { name: '月', exact: true }).click()
+      await ffPage.waitForTimeout(1500)
+
+      for (const [label, testId, unitRe] of [
+        ['食費', 'month-cost-folded', /[\d,]+円/],
+        ['栄養', 'month-nutrition-folded', /[\d,]+\s*kcal/],
+      ]) {
+        const card = await ffCard(testId)
+        check(
+          `FOLDFIG-01(⑬) ${label}: 畳んだときの数値が見出しの中に出ている`,
+          !card.error && card.inHeader === true && unitRe.test(card.valueText),
+          `カード=${JSON.stringify(card)}`,
+        )
+        check(
+          `FOLDFIG-01(⑬) ${label}: 見出しは1行のまま(折り返して縦長になっていない)`,
+          !card.error && card.headerH <= 60,
+          `カード=${JSON.stringify(card)}`,
+        )
+        check(
+          `FOLDFIG-01(⑬) ${label}: 畳んでいるあいだ、見出しの下には何も出さない`,
+          !card.error && card.restText === '',
+          `カード=${JSON.stringify(card)}`,
+        )
+      }
+
+      // 見出しに出す数字は、開いたときの表・パネルと同じ値であること(別々に数え直さない)
+      const ffCostValue = (await ffCard('month-cost-folded')).valueText ?? ''
+      const ffCostYen = ffCostValue.match(/[\d,]+円/)?.[0] ?? ''
+      await ffPage.getByRole('button', { name: /月の食費/ }).click()
+      await ffPage.waitForTimeout(700)
+      const ffTable = (await ffPage.locator('[data-testid="month-cost-table"]').count())
+        ? ((await ffPage.locator('[data-testid="month-cost-table"]').innerText()) ?? '').replaceAll('​', '')
+        : ''
+      check(
+        'FOLDFIG-01(⑬) 見出しの金額は、開いたときの表と同じ数字',
+        !!ffCostYen && ffTable.includes(ffCostYen),
+        `見出し=${ffCostValue} 表=${ffTable.replace(/\n/g, ' / ').slice(0, 200)}`,
+      )
+    } finally {
+      await ffBrowser.close()
     }
   }
 
@@ -4861,6 +5477,9 @@ try {
       await dtPage.waitForTimeout(400)
       await dtPage.getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' }).click()
       await dtPage.waitForTimeout(1200)
+      // 2026-08-20 便IG・①: ×は「整理」モードの中にしか出さなくなった。ここで測りたいのは
+      // 「作った！」と×が押し間違えない距離にあることなので、×が出ている状態＝整理モードで測る
+      await openDayOrganize(dtPage)
       const dtCookedBtn = await dtPage.evaluate(() => {
         const btn = [...document.querySelectorAll('button')].find((b) =>
           b.textContent?.includes('作った！'),
@@ -13004,6 +13623,8 @@ try {
         'MEALPLAN-ROLE(便DH) 「今週の献立の予定」の夕食に肉じゃがが並ぶ',
         (await roPage.locator('[data-testid="day-planned"]').textContent())?.includes('肉じゃが'),
       )
+      // 2026-08-20 便IG・①: ×は「整理」モードの中にしか出ないので、先に整理へ入ってから数える
+      await openDayOrganize(roPage)
       check(
         'MEALPLAN-ROLE(便DH) ×(この献立から外す)が押せるのは「レシピ一覧から選択中」だけ',
         (await roPage
@@ -22531,6 +23152,9 @@ try {
           (await planned.count()) === 1 &&
             ((await planned.textContent()) ?? '').includes('肉じゃが'),
         )
+        // 2026-08-20 便IG・①: ×は「整理」モードの中にしか出ない。押す前の説明も同じモードの中に置く
+        // （出ていない操作の説明を先に読ませないため）ので、整理へ入ってから両方を見る
+        await openDayOrganize(dfPage)
         // 規約F: 押す前に「何が外れて何が残るか」が読める
         check(
           'DAYFLOW-01(c) ×の前に「今週の献立からも外れる」が読める',
@@ -25327,8 +25951,9 @@ try {
       const eeFoldedText = (await eeFolded.count()) ? await eeFolded.innerText() : ''
       check(
         // 2026-08-19 便HV・⑨: 畳んだ側は「食費の合計」1つだけ(オーナー指示)
+        // 2026-08-20 便IG・⑬: その金額は見出しの横に出る(行の名前「全員分」は開いたときの表に任せた)
         'EE-01(①・便HV) 畳んだままでも食費の合計が読める',
-        /全員分[\s\S]*約[\d,]+円/.test(eeFoldedText),
+        /約[\d,]+円/.test(eeFoldedText),
         `畳んだ食費=${eeFoldedText.replace(/\n/g, ' / ')}`,
       )
       check(
@@ -39780,9 +40405,12 @@ try {
         ? ((await hvPage.locator('[data-testid="month-nutrition-folded"]').innerText()) ?? '').replaceAll('​', '')
         : ''
       check(
+        // 2026-08-20 便IG・⑬: 数値は見出しの横に1つだけ出る(項目名「エネルギー」は開いた
+        // ときのパネルに任せた＝390px幅で見出しが折り返して縦長になるのを避けるため)。
+        // ここで見たいのは「畳んだ側にエネルギーの合計が1つだけ読める」ことなので、単位で測る
         'HV-01(⑨) 畳んだ栄養カードに出るのはエネルギーの合計だけ',
-        (await hvPage.locator('[data-testid="month-nutrition-folded"] > div').count()) === 1 &&
-          hvFoldedNutritionText.includes(nutritionLabelFor('kcal')),
+        (await hvPage.locator('[data-testid="month-nutrition-folded"]').count()) === 1 &&
+          /^[\d,]+\s*kcal$/.test(hvFoldedNutritionText.trim()),
         `畳んだ栄養=${hvFoldedNutritionText.replace(/\n/g, ' / ') || '(出ていない)'}`,
       )
       await hvPage.getByRole('button', { name: /月の栄養（1人分）/ }).click()
@@ -39802,8 +40430,10 @@ try {
         (hvFoldedCostText.match(/約([\d,]+)円/)?.[1] ?? '').replaceAll(',', ''),
       )
       check(
+        // 2026-08-20 便IG・⑬: 金額は見出しの横に1つだけ(行の名前「全員分」は開いたときの表に任せた)
         'HV-01(⑨) 畳んだ食費カードに出るのは食費の合計だけ',
-        (await hvFoldedCost.locator('> div').count()) === 1 &&
+        (await hvFoldedCost.count()) === 1 &&
+          /^約[\d,]+円$/.test(hvFoldedCostText.trim()) &&
           Number.isFinite(hvFoldedCostYen) &&
           hvFoldedCostYen > 0,
         `畳んだ食費=${hvFoldedCostText.replace(/\n/g, ' / ')}`,
