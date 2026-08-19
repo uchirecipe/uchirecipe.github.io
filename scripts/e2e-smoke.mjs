@@ -21409,9 +21409,20 @@ try {
     /** 無いものを掴もうとして検査ごと止まらないようにする（1つだけ在るときにその箱を返す） */
     const dmBox = async (locator) => ((await locator.count()) === 1 ? await locator.boundingBox() : null)
     /** 決めてもらうボタンの縦位置。取れなければ null（null は下の判定で必ず不合格になる） */
+    /**
+     * 決めてもらうボタンの縦位置。取れなければ null（null は下の判定で必ず不合格になる）。
+     *
+     * 2026-08-19 司令部: **ページの中での位置**で測る（画面の中での位置に scrollY を足す）。
+     * 直前の検査が「押すものを画面の中へ送る」ためにページを動かすので、画面の中での位置だけで
+     * 見ていると、レイアウトが1pxも変わっていないのに「動いた」と読めてしまう（実際に誤検出した）。
+     * オーナーの指摘（連続タップで指の下からボタンが逃げる）の正体は**並びの変化**なので、
+     * ページの中での位置で測るのが本来の測り方。
+     */
     const dmDrawY = async () => {
       const box = await dmBox(dmDraw())
-      return box ? Math.round(box.y) : null
+      if (!box) return null
+      const scrolled = await dmPage.evaluate(() => Math.round(scrollY))
+      return Math.round(box.y) + scrolled
     }
     const dmPressed = async (locator) =>
       (await locator.count()) === 1 ? await locator.getAttribute('aria-pressed') : null
@@ -21524,6 +21535,10 @@ try {
             h: Math.round(r.height),
           }
         })
+        // 送ったぶんのスクロールは、ここで先頭へ戻す＝次の検査が「画面の中での位置」を
+        // 見ていても、この検査の副作用で狂わないようにする
+        await dmPage.evaluate(() => window.scrollTo(0, 0))
+        await dmPage.waitForTimeout(200)
         check(
           'DAYMODE-01 「今日の献立に入れる」に指が届く（画面の中に全部見えて、下の帯に隠れない）',
           applyReach != null &&
