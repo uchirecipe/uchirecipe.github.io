@@ -179,6 +179,33 @@ const rectOf = (loc) =>
   })
 
 /**
+ * 後ろの画面が窓で止まっていないかを確かめる(2026-08-19 便IE)。
+ *
+ * 便HWが cropRange に入れた「上端まで動かせなかったら落ちる」判定は、**動かした結果**を見ている。
+ * 動かす必要がそもそも無い位置に写したいものがあると、判定を通り抜けたまま
+ * **薄暗い覆いごと**撮れる（画面の中の窓が開くと body が position:fixed になり、
+ * window.scrollBy が何も起こさなくなるため）。ここでは**原因のほう**を直接見る。
+ *
+ * 窓そのものを撮るカット（「シェアする内容」など）は、写したいものが窓の中にあるので
+ * 落とさない。撮ろうとしているものが窓の外にあるときだけ、その場で落として名前を出す。
+ */
+async function assertNotBlockedByWindow(loc) {
+  const blocked = await loc.first().evaluate((el) => {
+    if (document.body.style.position !== 'fixed') return null
+    // 窓（後ろの画面を止めているもの）の中にあるなら、それを撮りに来ている
+    const inWindow = el.closest('[role="dialog"]') ?? el.closest('div.fixed.inset-0')
+    if (inWindow) return null
+    const front = document.querySelector('[role="dialog"]')
+    return front ? (front.textContent ?? '').replace(/\s+/g, ' ').slice(0, 40) : '(名前の取れない窓)'
+  })
+  if (blocked !== null)
+    throw new Error(
+      `画面の中の窓が開いたままで、写したいものが窓の外にある（窓の中身: ${blocked}）。` +
+        'この状態で切り出すと、薄暗い覆いごと・狙った位置とは違うところが撮れる',
+    )
+}
+
+/**
  * 要素の周りだけを切り出して保存する。
  * top: 画面の上から何pxの位置に要素の上端を置くか(既定=なるべく中央寄り)
  */
@@ -204,6 +231,7 @@ async function cropInner(page, name, loc, opts = {}) {
     fullWidth = true,
   } = opts
   const el = loc.first()
+  await assertNotBlockedByWindow(loc)
   await el.scrollIntoViewIfNeeded()
   await wait(page, 250)
   let r = await rectOf(el)
@@ -238,6 +266,7 @@ async function cropRange(page, name, topLoc, bottomLoc, opts = {}) {
 
 async function cropRangeInner(page, name, topLoc, bottomLoc, opts = {}) {
   const { padX = 8, padTop = 8, padBottom = 8, top = 16, fullWidth = true } = opts
+  await assertNotBlockedByWindow(topLoc)
   await topLoc.first().scrollIntoViewIfNeeded()
   await wait(page, 250)
   let a = await rectOf(topLoc)

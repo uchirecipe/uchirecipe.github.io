@@ -22487,21 +22487,75 @@ Aみりん 大さじ1
       // （タイマーのチップ ja.focus.timerChip「{n}分」／食事の枠 ja.mealPlan の朝食・昼食・夕食）
       '15分',
       '夕食に入れる',
+      // 章の中で説明している考え方の呼び名（栄養の「概算」と「めやす」）。画面のボタンではない
+      'めやす',
     ])
     // 案内文が引用しているボタン名（3文字以上。「＋」「×」のような記号1つは対象外）。
     // ja.ts と、利用者が読むページ（紹介・使い方）の両方を見る＝ボタン名を変えたのに
     // 使い方ページだけ古い名前のまま、という食い違いをここで捕まえる
+    //
+    // 2026-08-19 便IE: 拾う言い方を「押す」だけから広げた。使い方ページには
+    // 「『提案の条件』を開くと」「『レシピを総入れ替え』を選ぶと」のように**押す以外の動詞**で
+    // 操作を説明している文が多く、そこに残っていた旧名（提案の条件→現在の条件、
+    // レシピを総入れ替え→総入れ替え、まだ決まっていない枠だけ埋める→空いた枠だけ）を
+    // この見張りが1つも拾えていなかった。操作の動詞を増やせば、同じ取りこぼしは起きない
     const missing = []
     const quoteTargets = [{ rel: 'src/i18n/ja.ts', text: jaSrc }].concat(
       sources.filter((s) => s.rel.startsWith('public/about/')),
     )
+    // 「◯◯」に続く操作の言い方。押す・開く・選ぶ・タップする・入れる（ONにする）まで見る
+    const OPERATION_VERBS = /「([^「」]{3,40})」を(?:押|開(?:く|き|いた|いて)|選(?:ぶ|び|ん)|タップ)/g
     for (const { rel, text } of quoteTargets) {
-      for (const m of text.replace(/\s+/g, ' ').matchAll(/「([^「」]{3,40})」を押/g)) {
+      for (const m of text.replace(/\s+/g, ' ').matchAll(OPERATION_VERBS)) {
         const name = toKey(m[1])
+        // ボタンの名前に読点・句点は入らない。「『鮭にするか、ぶりにするか』を選ぶ」のような
+        // 地の文の引用まで拾うと、この見張りが「直しようのない赤」で埋まる
+        if (/[、。？！]/.test(name)) continue
         if (!values.has(name) && !NOT_IN_JA.has(name)) missing.push(`${rel} 「${m[1]}」`)
       }
     }
     eq('HR-4 案内文が引用するボタン名が ja.ts に実在する', missing, [])
+
+    // ---- 規則④-2: 使い方ページ・紹介ページが**太字で名指ししている画面の言葉** ----------
+    // 2026-08-19 便IE。上の規則④は「◯◯」を押す/開く/選ぶ の形にしか当たらないので、
+    // 「最初は『まだ決まっていない枠だけ埋める』で」のように動詞を伴わない引用は素通りしていた。
+    //
+    // これらのページは**画面に出ている言葉を太字の「」で名指しする**書き方でそろえてあるので、
+    // その形（<strong>「◯◯」</strong>）を丸ごと見張る。ページの書き方そのものを物差しにするので、
+    // 章が増えても当たる（「押す」以外の言い方で説明しても拾える）。
+    //
+    // {n} のような差し込みのある文言は、埋めたあとの文字列がページに載る。差し込みを
+    // 「何か1文字以上」に読み替えて照合するが、**差し込みを除いた地の文が6文字以上ある
+    // ものだけ**をその照合に使う（'{name} {n}' のような、ほぼ差し込みだけの文言を
+    // 物差しにすると何にでも当たってしまい、この見張りが何も測らなくなる）
+    const boldNames = []
+    const boldMissing = []
+    const jaTemplates = []
+    for (const value of values) {
+      if (!value.includes('◯')) continue
+      if (value.replace(/◯/g, '').length < 6) continue
+      jaTemplates.push(
+        new RegExp(`^${value.split('◯').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+')}$`),
+      )
+    }
+    // 太字は印そのものを見るので、タグを外す前の生のHTMLを読む
+    const boldSources = sources
+      .filter((s) => s.rel.startsWith('public/about/'))
+      .map((s) => ({ rel: s.rel, raw: readFileSync(path.join(appRoot, s.rel), 'utf-8') }))
+    for (const { rel, raw } of boldSources) {
+      for (const m of raw.replace(/<!--[\s\S]*?-->/g, ' ').matchAll(
+        /<strong>\s*「([^「」<>]{3,40})」\s*<\/strong>/g,
+      )) {
+        const name = toKey(m[1])
+        boldNames.push(name)
+        if (values.has(name) || NOT_IN_JA.has(name)) continue
+        if (jaTemplates.some((re) => re.test(name))) continue
+        boldMissing.push(`${rel} 「${m[1]}」`)
+      }
+    }
+    // 拾えた数が0なら、ページの書き方が変わって物差しが当たらなくなったということ
+    eq('HR-4 使い方ページが太字で名指ししている画面の言葉を拾えている', boldNames.length > 0, true)
+    eq('HR-4 太字で名指ししている画面の言葉が ja.ts に実在する', boldMissing, [])
   }
 }
 
@@ -22981,12 +23035,65 @@ Aみりん 大さじ1
     )
   }
 
-  // ---- IA-5: NG食材の警告を渡し漏れていない（④） -----------------------------------------
-  // 献立の画面が出す「これから作る品」のカードは、必ず設定「食べられない食材」を渡す。
-  // 作った記録のカード（photoOverride を渡すもの）と押せない見本（readOnly）は除く
-  // ＝もう作ったもの・書き込み先の無い見本には警告を出す意味が無い。
+  // ---- IA-5: NG食材の警告を渡し漏れていない（④・2026-08-19 便IEで対象を全画面へ広げた） ----
+  // 測るのは1つだけ:「**これから作る品を出すカードは、どの画面にあっても
+  // 設定『食べられない食材』を受け取っている**」。
+  //
+  // 便IAの時点では献立の2ファイルだけを名指しで見ていたため、買い物メモの「レシピを選ぶ」の
+  // 渡し漏れが素通りした（同じ渡し漏れが別の画面で起きても当たらない書き方だった）。
+  // ファイル名を書き写して並べるのをやめ、**src/ の .tsx を全部走査して、カードを出す
+  // 「場所」(place) で対象かどうかを決める**形にする。画面が増えても当たる。
+  //
+  // 対象外は2つだけ:
+  //  ・**作った記録** … place="cookedLog"（記録の一覧）と、献立の枠に収まっているのが
+  //    記録のカード（photoOverride で記録の写真を出しているもの）。もう作ったものに
+  //    「食べられない食材が入っています」と出しても直す先が無い
+  //  ・**押せない見本** … 献立の枠(planSlot)の readOnly。サンプルデモの月の日の窓と
+  //    献立テンプレの中身で、指しているレシピが端末に無いこともある見本
+  //  ※「レシピを選ぶ」一覧の readOnly は見本ではない。行の中の＋/−で食数を決める作りなので
+  //    カードごと押せなくしてあるだけで、出しているのはこれから作る品そのもの。だから対象。
+  //
+  // 場所の名前を並べただけだと、表(src/logic/cardParts.ts)に新しい場所が増えたときに
+  // 黙って素通りする。**表のすべての場所を「要る／要らない」に仕分けてあるか**を先に見て、
+  // 仕分けの無い場所が1つでもあればその場で不合格にする。
+  //
+  // IA_SRC_ROOT に別のディレクトリを渡すと、そこの src を測る
+  // （この見張りが直す前のコードで本当に赤くなるかを確かめるための口）。
   {
-    const iaCardTags = (src) => {
+    const iaSrcRoot = process.env.IA_SRC_ROOT ?? iaRoot
+    const iaListTsx = (dir) => {
+      const out = []
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) out.push(...iaListTsx(full))
+        else if (entry.name.endsWith('.tsx')) out.push(full)
+      }
+      return out.sort()
+    }
+    const iaFiles = iaListTsx(path.join(iaSrcRoot, 'src')).map((full) => ({
+      rel: path.relative(iaSrcRoot, full).split(path.sep).join('/'),
+      src: readFileSync(full, 'utf-8'),
+    }))
+    eq('IA-5 走査できた画面ファイルがある（0件なら見張りが壊れている）', iaFiles.length > 0, true)
+
+    // 「これから作る品を出す場所」＝ここに並ぶもの。表の場所はすべてどちらかに入れる
+    const iaNgNeeded = new Set(['recipeList', 'recipePicker', 'todayPlan', 'todaySuggest', 'planSlot'])
+    const iaNgNotNeeded = new Set(['cookedLog'])
+    eq(
+      'IA-5 カードを出す場所すべてが「NG食材が要る／要らない」に仕分けてある（新しい場所が黙って素通りしない）',
+      Object.keys(CARD_PLACE_PARTS).filter(
+        (place) => !iaNgNeeded.has(place) && !iaNgNotNeeded.has(place),
+      ),
+      [],
+    )
+    eq(
+      'IA-5 仕分けに書いた場所は、すべて表に実在する（消えた場所を見張り続けない）',
+      [...iaNgNeeded, ...iaNgNotNeeded].filter((place) => !Object.hasOwn(CARD_PLACE_PARTS, place)),
+      [],
+    )
+
+    /** `<RecipeCard` の開きタグを、波かっこの深さを見ながら切り出す（属性の中の `>` に釣られない） */
+    const iaCardOpenTags = (src) => {
       const tags = []
       let at = src.indexOf('<RecipeCard')
       while (at >= 0) {
@@ -23001,28 +23108,58 @@ Aみりん 大さじ1
             break
           }
         }
-        if (end < 0) return null
+        if (end < 0) return { error: `開きタグの終わりが見つからない（位置 ${at}）` }
         tags.push(src.slice(at, end + 1))
         at = src.indexOf('<RecipeCard', end)
       }
-      return tags
+      return { tags }
     }
-    const iaTargets = ['src/pages/MealPlanPage.tsx', 'src/components/TodaySuggestPanel.tsx']
-    const iaChecked = []
-    const iaMissing = []
-    for (const rel of iaTargets) {
-      const tags = iaCardTags(iaRead(rel))
-      eq(`IA-5 ${rel} のカードの呼び出しを切り出せている`, Array.isArray(tags) && tags.length > 0, true)
-      for (const tag of tags ?? []) {
-        if (/\breadOnly\b/.test(tag) || /\bphotoOverride=/.test(tag)) continue
-        iaChecked.push(rel)
-        if (!/\bngIngredients=/.test(tag)) iaMissing.push(`${rel}: ${tag.slice(0, 60)}…`)
+
+    const iaCalls = []
+    const iaReadErrors = []
+    for (const { rel, src } of iaFiles) {
+      if (rel === 'src/components/RecipeCard.tsx') continue
+      const found = iaCardOpenTags(src)
+      if (found.error) {
+        iaReadErrors.push(`${rel}: ${found.error}`)
+        continue
+      }
+      for (const tag of found.tags) {
+        const literal = tag.match(/\bplace="([A-Za-z]+)"/)
+        // 式で渡されると読めない＝黙って既定に倒さず、その場で不合格にする
+        const expr = tag.match(/\bplace=\{([^}]*)\}/)
+        if (expr) {
+          iaReadErrors.push(`${rel}: 場所の式が読めない: ${expr[1].trim()}`)
+          continue
+        }
+        const place = literal ? literal[1] : DEFAULT_CARD_PLACE
+        if (!Object.hasOwn(CARD_PLACE_PARTS, place)) {
+          iaReadErrors.push(`${rel}: 表に無い場所: ${place}`)
+          continue
+        }
+        iaCalls.push({ rel, place, tag })
       }
     }
-    eq('IA-5 見張る対象のカードが1つ以上ある（0件なら見張りが壊れている）', iaChecked.length > 0, true)
+    eq('IA-5 カードの呼び出しを切り出せている（読めない書き方が無い）', iaReadErrors, [])
+    eq('IA-5 カードの呼び出しを1つ以上拾えている（0件なら見張りが壊れている）', iaCalls.length > 0, true)
+
+    /** 作った記録のカード（記録の一覧・献立の枠に収まった記録） */
+    const iaIsCookedLog = (c) => iaNgNotNeeded.has(c.place) || /\bphotoOverride=/.test(c.tag)
+    /** 押せない見本（献立の枠の readOnly） */
+    const iaIsSample = (c) => c.place === 'planSlot' && /\breadOnly\b/.test(c.tag)
+    const iaMust = iaCalls.filter((c) => !iaIsCookedLog(c) && !iaIsSample(c))
+    const iaWhere = (c) =>
+      `${c.rel} place=${c.place} ${c.tag.replace(/\s+/g, ' ').slice(0, 70)}…`
+
+    eq('IA-5 NG食材を渡すべきカードが1つ以上ある（全部が対象外に倒れていない）', iaMust.length > 0, true)
     eq(
-      'IA-5 献立の画面が出す「これから作る品」のカードは、必ずNG食材を渡している',
-      iaMissing,
+      'IA-5 対象外の判定が空振りしていない（作った記録・押せない見本を1つも拾えていないなら書き方が変わっている）',
+      iaCalls.filter(iaIsCookedLog).length > 0 && iaCalls.filter(iaIsSample).length > 0,
+      true,
+    )
+    eq(
+      'IA-5 これから作る品を出すカードは、どの画面にあっても必ずNG食材を受け取っている',
+      iaMust.filter((c) => !/\bngIngredients=/.test(c.tag)).map(iaWhere),
       [],
     )
   }

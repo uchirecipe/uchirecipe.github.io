@@ -990,6 +990,9 @@ export default function ShoppingPage() {
                           recipe={recipe}
                           density="small"
                           place="planSlot"
+                          // 設定「食べられない食材」の警告（2026-08-19 便IE）。ここに並ぶのは
+                          // これから作る品なので、献立の枠と同じように警告を出す
+                          ngIngredients={settings?.ngIngredients ?? []}
                           onNavigate={() => setNamePopup(null)}
                           meta={source.amount || undefined}
                         />
@@ -1099,7 +1102,15 @@ export default function ShoppingPage() {
                           写真で見分けられるようになる。似た名前を2行まで折り返す作法
                           (2026-07-29 便CC/C20)は「標準」の料理名がそのまま引き継いでいる */}
                       <div className="min-w-0 flex-1">
-                        <RecipeCard recipe={recipe} density="standard" place="recipePicker" readOnly />
+                        {/* 設定「食べられない食材」の警告（2026-08-19 便IE）。献立の枠のレシピ選び・
+                            献立テンプレの差し替えと同じ「1品を選ぶ」場所なので、同じ印を出す */}
+                        <RecipeCard
+                          recipe={recipe}
+                          density="standard"
+                          place="recipePicker"
+                          ngIngredients={settings?.ngIngredients ?? []}
+                          readOnly
+                        />
                       </div>
                       {/* 食数の+/-ステッパー(2026-07-23 #3)。1食以上で選択扱い・指定食数で候補生成 */}
                       <div className="flex shrink-0 items-center gap-1">
