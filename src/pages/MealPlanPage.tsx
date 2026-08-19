@@ -5199,6 +5199,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               onSelect={() => openPicker(date, slot, role, entryId, extraLocalId)}
               ngIngredients={settings?.ngIngredients ?? []}
               thumbTestId="row-thumb"
+              // 検査用の目印(2026-08-19 便HX)。鍵を掛けたときにこのカード=料理名の差し替えが
+              // 押せなくなることを機械で見張る。以前はクラス名(flex-1)で拾っていたが、
+              // それは自前で組んでいた行の内部の書き方で、共通カードに寄せた時点で当たらなくなった
+              testId="row-recipe"
               titleBadges={
                 isCooked ? (
                   // 2026-08-03 便DP-5(オーナー「予定と記録がわかりづらい」): 面と文字を落としたうえで

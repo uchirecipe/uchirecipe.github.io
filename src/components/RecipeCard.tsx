@@ -536,9 +536,13 @@ export default function RecipeCard({
         )}
         {/* 栄養価並び替え中の値(2026-07-16 便T-7): 「標準」は行の右下に重ねる。
             便T-7-2でラベル付き表示("たんぱく質: 24g")に変更し長くなったため、max-width+truncateで
-            カード幅を超えないようにする */}
+            カード幅を超えないようにする。
+            pointer-events-none は必須(2026-08-19 便HX): このバッジは便HWで押せる面の**外**に
+            出たので、指を素通りさせないとバッジの上だけレシピ詳細へ行けない死角になる
+            (390px幅の実機で、リスト表示のバッジを押しても何も起きないことを実測)。
+            「大」の同じ役目の重ね表示は最初からこの扱いなので、そちらに揃える */}
         {nutrientBadgeText && (
-          <span className="absolute bottom-1.5 right-1.5 max-w-[50%] truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
+          <span className="pointer-events-none absolute bottom-1.5 right-1.5 max-w-[50%] truncate rounded-full bg-accent px-2 py-0.5 text-[10px] font-bold text-on-accent shadow-sm">
             {nutrientBadgeText}
           </span>
         )}

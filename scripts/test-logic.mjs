@@ -21627,6 +21627,37 @@ Aみりん 大さじ1
       [],
     )
   }
+
+  // ---- HX-1: カードに「重ねて」出す表示が、指を素通りさせている ---------------------------
+  // 2026-08-19 便HXで実際に出た後戻り: 便HWで骨格を組み替えたとき、栄養価の値バッジが
+  // 押せる面（レシピ詳細へのリンク）の**外側**へ出た。「大」は指を素通りさせていたが
+  // 「標準」は素通りさせておらず、一覧(リスト)表示ではバッジの上だけ押しても何も起きない
+  // 死角になっていた（390px幅の実機で、押してもレシピ詳細へ行かないことを実測）。
+  // 見えているかどうかだけを見ていると、この種の後戻りは一切引っかからない。
+  {
+    const cardSrc = hwFiles.find((f) => f.rel === 'src/components/RecipeCard.tsx')?.src ?? ''
+    eq('HX-1 共通のカード部品を読めている', cardSrc.length > 0, true)
+    // 値バッジを出している場所（「大」「標準」の2か所）を全部拾う。0件なら見張りが壊れている
+    const badgeSpots = [...cardSrc.matchAll(/\{nutrientBadgeText &&/g)].map((m) => m.index)
+    eq('HX-1 値バッジを出している場所を拾えている（0件なら見張りが壊れている）', badgeSpots.length >= 2, true)
+    // 「標準」はバッジ自身が、「大」は外側の重ねの箱が pointer-events-none を持つので、
+    // 直後のclassと直前のclassの**どちらか**にあれば通す（持たせ方を1つに縛らない）。
+    // 見るのは class の中身だけ＝説明のコメントに同じ言葉が書いてあっても通らない
+    const classAfter = (at) => cardSrc.slice(at, at + 600).match(/className="([^"]*)"/)?.[1] ?? ''
+    const classBefore = (at) => {
+      const found = [...cardSrc.slice(Math.max(0, at - 600), at).matchAll(/className="([^"]*)"/g)]
+      return found.length > 0 ? found[found.length - 1][1] : ''
+    }
+    eq(
+      'HX-1 カードに重ねる値バッジは指を素通りさせる（押せる面の外に死角を作らない）',
+      badgeSpots.filter(
+        (at) =>
+          !classAfter(at).includes('pointer-events-none') &&
+          !classBefore(at).includes('pointer-events-none'),
+      ).length,
+      0,
+    )
+  }
 }
 
 // ==========================================================================================

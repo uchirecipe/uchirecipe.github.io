@@ -754,12 +754,23 @@ try {
   currentCheck = 'LAYOUT-01'
   const layoutContainerInfo = () =>
     page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
-        /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
-      )
-      // カードは1枚ずつ相対配置のラッパー(選択モードの覆いを重ねるため。2026-08-02 便CT)に
-      // 包まれているので、グリッド/リストのコンテナはリンクの2つ親になる
-      const container = links[0]?.parentElement?.parentElement
+      const cardLinks = (root) =>
+        Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
+          /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+        )
+      const links = cardLinks()
+      // グリッド/リストのコンテナ＝**カードを2枚以上まとめて抱えている、いちばん内側の要素**。
+      // 以前は「リンクの2つ親」と数えていたが、2026-08-19 便HWで共通カードの外枠(div)が1枚
+      // 増えたぶん親の数が変わり、コンテナではなくカード1枚のラッパーを掴んでいた。
+      // 置き場所(何番目の親か)への固定はCLAUDE.mdの禁じ手④なので、
+      // 「カードを複数抱えた最初の親」を辿って取る＝入れ子が増えても減っても同じ所に当たる。
+      // 見つからないときは null のまま返す(className が空文字になり、判定は必ず不合格になる)
+      let container = null
+      if (links.length > 1) {
+        let el = links[0]
+        while (el.parentElement && cardLinks(el.parentElement).length < 2) el = el.parentElement
+        container = el.parentElement
+      }
       return { className: container?.className ?? '', count: links.length }
     })
   const layoutBefore = await layoutContainerInfo()
@@ -3315,12 +3326,24 @@ try {
       )
       // 便T-7-2(2026-07-16オーナー指示): カロリー順の間、グリッドカードの左上に
       // 「カロリー: ◯kcal」のラベル付きの値が出る。算出不能レシピには出ない
+      // 2026-08-19 便HX: 値のバッジは「カードの外枠に重ねる」作りで、便HWの共通カード化で
+      // レシピ詳細へのリンク(<a>)の**外側**へ移った。リンクの中だけを探すと、実際には
+      // 110枚すべてに出ていても0件と数えてしまう(実機で確認済み)。
+      // カード1枚ぶん＝**そのカードのリンクだけを抱えているいちばん外側の要素**まで
+      // 広げてから探す＝リンクとバッジの前後関係が変わっても当たる(禁じ手④への対処)
       const kcalBadgeInfo = await nutPage.evaluate(() => {
-        const links = Array.from(document.querySelectorAll('div.grid.grid-cols-2 a')).filter((a) =>
-          /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
-        )
+        const cardLinks = (root) =>
+          Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
+            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+          )
+        const cardRootOf = (a) => {
+          let el = a
+          while (el.parentElement && cardLinks(el.parentElement).length === 1) el = el.parentElement
+          return el
+        }
+        const links = cardLinks()
         const badgeOf = (a) =>
-          Array.from(a.querySelectorAll('span')).find((s) =>
+          Array.from(cardRootOf(a).querySelectorAll('span')).find((s) =>
             /^エネルギー: \d+(\.\d+)?kcal$/.test(s.textContent?.trim() ?? ''),
           )
         const unknownCard = links.find((a) => a.textContent?.includes('E2E栄養並び替え確認レシピ'))
@@ -3336,9 +3359,11 @@ try {
         `バッジ付き=${kcalBadgeInfo.withBadge}/${kcalBadgeInfo.total}`,
       )
       check(
+        // 「1枚も出ていない」状態でも合格してしまわないよう、出ているカードがあることを
+        // 同じ条件の中で対にする(2026-08-19 便HX。実際に0/110で素通りしていた)
         'NUTSORT-02 算出不能なレシピのカードには値バッジが出ない',
-        kcalBadgeInfo.unknownHasBadge === false,
-        `unknownHasBadge=${kcalBadgeInfo.unknownHasBadge}`,
+        kcalBadgeInfo.unknownHasBadge === false && kcalBadgeInfo.withBadge > 0,
+        `unknownHasBadge=${kcalBadgeInfo.unknownHasBadge} バッジ付き=${kcalBadgeInfo.withBadge}/${kcalBadgeInfo.total}`,
       )
       await nutPage.getByRole('button', { name: '降順', exact: true }).click()
       await nutPage.waitForTimeout(500)
@@ -3363,13 +3388,21 @@ try {
         return target ? target.className.includes('border-accent') : false
       })
       check('NUTSORT-02 たんぱく質順の既定は降順(多い方から)', proteinDescActive)
+      // kcal側と同じ理由(便HX)でカード1枚ぶんまで広げてから探す
       const countGramBadges = () =>
         nutPage.evaluate(() => {
-          const links = Array.from(document.querySelectorAll('a')).filter((a) =>
-            /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
-          )
-          return links.filter((a) =>
-            Array.from(a.querySelectorAll('span')).some((s) =>
+          const cardLinks = (root) =>
+            Array.from((root ?? document).querySelectorAll('a[href^="#/recipes/"]')).filter((a) =>
+              /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''),
+            )
+          const cardRootOf = (a) => {
+            let el = a
+            while (el.parentElement && cardLinks(el.parentElement).length === 1)
+              el = el.parentElement
+            return el
+          }
+          return cardLinks().filter((a) =>
+            Array.from(cardRootOf(a).querySelectorAll('span')).some((s) =>
               /^たんぱく質: \d+(\.\d+)?g$/.test(s.textContent?.trim() ?? ''),
             ),
           ).length
@@ -3394,8 +3427,46 @@ try {
         'NUTSORT-02 一覧(リスト)表示でも並び替え中の栄養価の値が出る(便T-7)',
         (await countGramBadges()) > 0,
       )
+      // 2026-08-19 便HX(再発防止): 値のバッジはカードに**重ねて**出しているので、
+      // その上を押したときに指が素通りしてレシピ詳細へ行けることまで見る。
+      // 便HWでバッジが押せる面の外へ出たとき、リスト表示のバッジの上だけが
+      // 「押しても何も起きない死角」になっていた(390px幅の実機で実測)。
+      // 「バッジが見えている」だけを見ていると、この種の後戻りは一切引っかからない
+      const tapBadgeOpensRecipe = async () => {
+        const point = await nutPage.evaluate(() => {
+          const badge = Array.from(document.querySelectorAll('span')).find((s) =>
+            /^(エネルギー|たんぱく質): /.test(s.textContent?.trim() ?? ''),
+          )
+          if (!badge) return null
+          const r = badge.getBoundingClientRect()
+          if (r.width <= 0 || r.height <= 0) return null
+          return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+        })
+        if (!point) return { tapped: false, opened: false }
+        await nutPage.mouse.click(point.x, point.y)
+        await nutPage.waitForTimeout(800)
+        const opened = /#\/recipes\/\d+$/.test(nutPage.url())
+        // 一覧へ戻す。goBack()はHashRouterだとURLが動かないことがある(実測)ので、
+        // 一覧のURLを開き直す。検索・絞り込み・並べ替えはsessionStorageから復元されるため、
+        // 開き直しても並び替え中の状態は続く
+        await nutPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await nutPage.waitForTimeout(800)
+        return { tapped: true, opened }
+      }
+      const listBadgeTap = await tapBadgeOpensRecipe()
+      check(
+        'NUTSORT-02(便HX) 一覧(リスト)表示で値のバッジを押してもレシピ詳細へ行ける(重ねた表示が死角にならない)',
+        listBadgeTap.tapped && listBadgeTap.opened,
+        `tap=${JSON.stringify(listBadgeTap)}`,
+      )
       await nutPage.locator('button[aria-label="グリッド表示に切り替え"]').click()
       await nutPage.waitForTimeout(300)
+      const gridBadgeTap = await tapBadgeOpensRecipe()
+      check(
+        'NUTSORT-02(便HX) グリッド表示でも値のバッジを押してレシピ詳細へ行ける',
+        gridBadgeTap.tapped && gridBadgeTap.opened,
+        `tap=${JSON.stringify(gridBadgeTap)}`,
+      )
     } finally {
       await nutBrowser.close()
     }
@@ -5321,7 +5392,12 @@ try {
           if (!block) return null
           const buttons = [...block.querySelectorAll('button')]
           const remove = buttons.find((b) => b.getAttribute('aria-label') === 'この割り当てを外す')
-          const name = buttons.find((b) => b.className.includes('flex-1'))
+          // 料理名(押すとレシピを選び直すカード)。2026-08-19 便HXまではクラス名(flex-1)で
+          // 拾っていたが、それは自前で組んでいた行の内部の書き方＝便HWで共通のレシピカードに
+          // 寄せた時点で当たらなくなり、ロック中も解除後も null(=測れていない)になっていた。
+          // 実機では鍵を掛けると押せなくなっていた(disabled)ので、掴み方だけを直す。
+          // 見つからなければ null のまま＝下の判定(=== true / === false)はどちらも不合格になる
+          const name = block.querySelector('[data-testid="row-recipe"]')
           const servings = buttons.find((b) =>
             (b.getAttribute('aria-label') ?? '').includes('この行の食数を変える'),
           )
@@ -5330,7 +5406,8 @@ try {
           )
           return {
             removeDisabled: remove ? remove.disabled : null,
-            nameDisabled: name ? name.disabled : null,
+            // ボタンでなくなっていたら(押せなくする口が無い形に変わっていたら) null＝不合格に倒す
+            nameDisabled: name instanceof HTMLButtonElement ? name.disabled : null,
             servingsDisabled: servings ? servings.disabled : null,
             diceCount: dice ? 1 : 0,
             note: block.querySelector('[data-testid="slot-lock-note"]')?.textContent ?? '',
@@ -5382,6 +5459,29 @@ try {
           JSON.stringify(await lkPlanOf(lkDate)) === JSON.stringify(lkPlanBeforeManual),
         `before=${JSON.stringify(lkPlanBeforeManual)}`,
       )
+      // 2026-08-19 便HX: 料理名(差し替え)は「押せない印が付いている」だけでなく、
+      // **実際に押しても差し替えの画面が開かない**ことまで見る。
+      // 便HWで掴み方が外れたとき、印だけを見る書き方では null(測れていない)で落ちるまで
+      // 気付けなかった＝押した結果まで見ておくと、印の名前が変わっても意味が残る
+      const lkClickName = () =>
+        lkPage.evaluate((date) => {
+          const section = document.querySelector(`section[data-date="${date}"]`)
+          const name = section
+            ?.querySelector('[data-testid="slot-block"]')
+            ?.querySelector('[data-testid="row-recipe"]')
+          if (!name) return false
+          name.click()
+          return true
+        }, lkDate)
+      const lkNameClickedWhileLocked = await lkClickName()
+      await lkPage.waitForTimeout(700)
+      check(
+        'WEEKLOCK(便EA) ロック中は料理名を押しても差し替えの画面が開かない',
+        lkNameClickedWhileLocked === true &&
+          (await lkPage.locator('[data-testid="recipe-picker"]').count()) === 0,
+        `押せた=${lkNameClickedWhileLocked}`,
+      )
+
       // 鍵を外せば元どおり操作できる
       await lkPage.locator(`[data-testid="day-lock"][data-date="${lkDate}"]`).click()
       await lkPage.waitForTimeout(700)
@@ -5402,6 +5502,25 @@ try {
         !!lkUnlockedCtl && lkUnlockedCtl.diceCount === 1 && lkUnlockedCtl.addRow === true,
         `ctl=${JSON.stringify(lkUnlockedCtl)}`,
       )
+      // 対の確認(2026-08-19 便HX): 鍵を外せば同じ料理名で差し替えの画面がちゃんと開く
+      // ＝「この料理名はもともと押しても何も起きない」ではないことの証明。開いたら閉じて戻す
+      const lkNameClickedAfterUnlock = await lkClickName()
+      await lkPage.waitForTimeout(700)
+      const lkPickerOpened = (await lkPage.locator('[data-testid="recipe-picker"]').count()) === 1
+      check(
+        'WEEKLOCK(便EA) 鍵を外すと同じ料理名で差し替えの画面が開く(対の確認)',
+        lkNameClickedAfterUnlock === true && lkPickerOpened,
+        `押せた=${lkNameClickedAfterUnlock} / 開いた=${lkPickerOpened}`,
+      )
+      if (lkPickerOpened) {
+        await lkPage
+          .locator('[data-testid="recipe-picker"]')
+          .getByRole('button', { name: '閉じる' })
+          .first()
+          .click()
+        await lkPage.waitForTimeout(500)
+      }
+
       // 素通り防止(2026-08-09 便EJ): 同じ×を、鍵を外した状態でもう一度押すと今度は実際に消える。
       // これが無いと「ロック中は消えない」は「×はもともと効かないボタン」でも合格してしまう
       const lkPlanBeforeRealRemove = await lkPlanOf(lkDate)
