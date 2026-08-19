@@ -25753,81 +25753,199 @@ try {
 
 
   // --- EO-01: 折りたたみは高さのアニメーションで開閉し、動きを減らす設定では出さない ---
+  //
+  // 2026-08-19 便IC: **1か所（レシピ一覧の絞り込み）だけを見ていたのをやめ、複数の画面を見る**。
+  // 折りたたみは34か所・11ファイルで同じ部品を使っているので、1か所直すと全部が変わる。
+  // 逆に、見張りが1か所だけだと「その1か所が別の作りに変わった日」に見張りごと消える。
+  //
+  // 測り方の注意（ここを間違えると、壊れていても緑になる）:
+  //  ・高さを取りに行くのに getBoundingClientRect / getComputedStyle を使うと、**その読み取り自体が
+  //    ブラウザにスタイルを計算させる**。折りたたみのアニメーションは「高さ0の状態が一度計算されて
+  //    いること」で成立するので、検査側が読みに行くと、アニメーションが出ない作りでも出てしまう。
+  //    2026-08-19に実際にそうなっていた（本番では動いていない画面があったのに、この節は緑だった）。
+  //    そこで **ResizeObserver**（実際に大きさが変わったときだけ後から知らせが来る・こちらからは
+  //    何も強制しない）で記録する。
+  //  ・「◯ms以内に開く」のような時間での判定はしない（機械の速さで揺れる）。
+  //    **途中の高さを通ったかどうか**という結果だけで判定する。
+  //  ・掴み方は入れ子の段数・クラス名に依存させない。折りたたみの箱には `data-collapse` が付く
+  //    （src/components/Collapse.tsx）ので、それだけで探す。
+  //  ・読み取れなかったときは必ず不合格にする（「見つからなかった＝合格」に倒れない）。
   currentCheck = 'EO-01'
   {
+    /** ページの中に仕込む記録係。開閉のあいだの高さを1フレームずつ受け取る */
+    const COLLAPSE_RECORDER = `() => {
+      const rec = { armed: false, t0: 0, all: [] }
+      window.__collapseRec = rec
+      const ro = new ResizeObserver((list) => {
+        if (!rec.armed) return
+        const t = Math.round(performance.now() - rec.t0)
+        for (const e of list) {
+          const hit = e.target.__collapseHit
+          if (hit && hit.armed) hit.series.push([t, Math.round(e.contentRect.height * 10) / 10])
+        }
+      })
+      const track = (el) => {
+        if (el.__collapseHit) return el.__collapseHit
+        const hit = { armed: false, series: [] }
+        el.__collapseHit = hit
+        rec.all.push(hit)
+        ro.observe(el)
+        return hit
+      }
+      const mo = new MutationObserver((muts) => {
+        for (const m of muts) for (const n of m.addedNodes) {
+          if (!(n instanceof Element)) continue
+          const found = n.matches('[data-collapse]') ? [n] : []
+          for (const el of n.querySelectorAll('[data-collapse]')) found.push(el)
+          for (const el of found) { const hit = track(el); if (rec.armed) hit.armed = true }
+        }
+      })
+      mo.observe(document.body, { childList: true, subtree: true })
+      // これから測る、の合図。いま出ている折りたたみも測る対象にする（閉じる側を見るため）
+      window.__collapseArm = () => {
+        for (const hit of rec.all) { hit.armed = false; hit.series = [] }
+        for (const el of document.querySelectorAll('[data-collapse]')) { const hit = track(el); hit.armed = true; hit.series = [] }
+        rec.t0 = performance.now()
+        rec.armed = true
+      }
+      // 測り終わり。大きさが変わったものだけを返す（閉じてDOMから消えたものも残る）
+      window.__collapseRead = () => {
+        rec.armed = false
+        return rec.all.filter((h) => h.armed && h.series.length > 0).map((h) => h.series)
+      }
+    }`
+    /** 折りたたみの数（閉じているあいだは中身ごとDOMに無いので0になる） */
+    const collapseCount = (p) => p.evaluate(() => document.querySelectorAll('[data-collapse]').length)
+    /**
+     * 押してから、いちばん大きく育った（＝いま開閉した）折りたたみの高さの並びを返す。
+     * 何も動かなかったときは null＝呼び出し側で必ず不合格にする。
+     */
+    const recordToggle = async (p, locator, settleMs = 900) => {
+      await p.evaluate(() => window.__collapseArm())
+      await locator.click()
+      await p.waitForTimeout(settleMs)
+      const seriesList = await p.evaluate(() => window.__collapseRead())
+      if (!seriesList.length) return null
+      const main = seriesList
+        .map((s) => ({ s, max: Math.max(...s.map((x) => x[1])) }))
+        .sort((a, b) => b.max - a.max)[0]
+      const heights = main.s.map((x) => x[1])
+      return {
+        heights,
+        max: main.max,
+        /** 0でも開き切りでもない「途中の高さ」を何回通ったか */
+        midway: heights.filter((h) => h > 0.5 && h < main.max - 0.5).length,
+        text: main.s.map((x) => `${x[0]}ms:${x[1]}`).join(' '),
+      }
+    }
+
     const eoBrowser = await chromium.launch()
     try {
       const eoCtx = await eoBrowser.newContext({ viewport: { width: 390, height: 844 } })
       const eoPage = await eoCtx.newPage()
-      eoPage.on('pageerror', (err) => errors.push(`[pageerror@EO-01] ${err.message}`))
+      eoPage.on('pageerror', (err) => {
+        if (/cloudflareinsights|Access-Control/.test(err.message)) return
+        errors.push(`[pageerror@EO-01] ${err.message}`)
+      })
       await eoPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await eoPage.waitForTimeout(1800)
+      await eoPage.evaluate(`(${COLLAPSE_RECORDER})()`)
 
-      // 折りたたみの中身の高さを測る（Collapseは grid の中に min-h-0 の箱を1つ持つ）
-      const panelHeight = () =>
-        eoPage.evaluate(() => {
-          const g = [...document.querySelectorAll('div.grid')].find((d) =>
-            d.querySelector(':scope > div.min-h-0'),
-          )
-          return g ? Math.round(g.getBoundingClientRect().height) : -1
-        })
-
-      const eoFilter = eoPage.getByRole('button', { name: '絞り込み' })
-      check('EO-01 開く前は折りたたみの中身がDOMに無い', (await panelHeight()) === -1)
-
-      // 高さは20msごとに拾う(1回だけだと、機械の速さで「まだ0」「もう開き切り」に当たって
-      // 偽の赤になる。2026-08-09 司令部: 実際に取りこぼしたのでサンプリングに変更)
-      await eoFilter.click()
-      const samples = []
-      for (let i = 0; i < 20; i++) {
-        samples.push(await panelHeight())
-        await eoPage.waitForTimeout(20)
+      // 見る場所は「別々の画面から3つ以上」。1つの画面の作りが変わっても見張りが消えないようにする。
+      // 文言は ja.ts から取る（画面の字を書き写さない）
+      const eoTargets = [
+        { screen: '設定', hash: '#/settings', label: ja.settings.moveGuideToggle },
+        { screen: 'レシピ登録', hash: '#/recipes/new', label: ja.paste.open },
+        { screen: '食材の在庫', hash: '#/shopping', label: ja.common.usageHint },
+        { screen: 'レシピ一覧', hash: '#/recipes', label: ja.search.filterToggle },
+      ]
+      const eoMeasured = []
+      for (const t of eoTargets) {
+        await eoPage.evaluate((h) => { window.location.hash = h }, t.hash)
+        await eoPage.waitForTimeout(1500)
+        const toggle = eoPage.getByRole('button', { name: t.label, exact: false }).first()
+        if ((await toggle.count()) === 0) continue // その画面に無い作りに変わった＝下の下限で受け止める
+        await toggle.scrollIntoViewIfNeeded()
+        await eoPage.waitForTimeout(200)
+        const opening = await recordToggle(eoPage, toggle)
+        check(
+          `EO-01 ${t.screen}「${t.label}」は開くときに高さが途中の値を通る`,
+          opening !== null && opening.midway > 0 && opening.max > 0,
+          opening === null ? '高さの変化が1回も記録できなかった' : `1フレームごとの高さ: ${opening.text}`,
+        )
+        if (opening !== null && opening.midway > 0) eoMeasured.push(t.screen)
+        // 開けたものは閉じておく（次の画面へ持ち越さない）
+        if (await toggle.count()) { await toggle.click(); await eoPage.waitForTimeout(500) }
       }
-      await eoPage.waitForTimeout(600)
-      const opened = await panelHeight()
-      const midway = Math.max(...samples.filter((h) => h > 0 && h < opened), 0)
       check(
-        'EO-01 開くときは高さが途中の値を通る（一瞬で開かない＝アニメーションしている）',
-        midway > 0 && opened > 0 && midway < opened,
-        `途中=${midway} / 開き切り=${opened}`,
+        'EO-01 複数の画面の折りたたみを測れている（1か所だけの見張りに戻っていない）',
+        eoMeasured.length >= 3,
+        `測れた画面: ${eoMeasured.join('・') || 'なし'}`,
       )
 
-      await eoFilter.click()
-      await eoPage.waitForTimeout(60)
-      const closing = await panelHeight()
+      // 開く前後でDOMに中身が置かれる／消えることと、閉じるときも途中の高さを通ること
+      await eoPage.evaluate((h) => { window.location.hash = h }, '#/settings')
+      await eoPage.waitForTimeout(1500)
+      const eoToggle = eoPage.getByRole('button', { name: ja.settings.moveGuideToggle, exact: false }).first()
+      check('EO-01 開く前は折りたたみの中身がDOMに無い', (await collapseCount(eoPage)) === 0)
+      await eoToggle.scrollIntoViewIfNeeded()
+      await recordToggle(eoPage, eoToggle)
+      check('EO-01 開いている間は中身がDOMにある', (await collapseCount(eoPage)) > 0)
+      const eoClosing = await recordToggle(eoPage, eoToggle)
       check(
         'EO-01 閉じるときも高さが途中の値を通る',
-        closing > 0 && closing < opened,
-        `途中=${closing} / 開き切り=${opened}`,
+        eoClosing !== null && eoClosing.midway > 0,
+        eoClosing === null ? '高さの変化が1回も記録できなかった' : `1フレームごとの高さ: ${eoClosing.text}`,
       )
-      await eoPage.waitForTimeout(600)
-      check('EO-01 閉じ切ると中身はDOMから消える', (await panelHeight()) === -1)
+      check('EO-01 閉じ切ると中身はDOMから消える', (await collapseCount(eoPage)) === 0)
 
-      // 動きを減らす設定では、押した直後にもう開き切っている
+      // 動きを減らす設定では、途中の高さを通らずに開き切る
       const eoRmCtx = await eoBrowser.newContext({
         viewport: { width: 390, height: 844 },
         reducedMotion: 'reduce',
       })
       const eoRmPage = await eoRmCtx.newPage()
-      eoRmPage.on('pageerror', (err) => errors.push(`[pageerror@EO-01rm] ${err.message}`))
-      await eoRmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      eoRmPage.on('pageerror', (err) => {
+        if (/cloudflareinsights|Access-Control/.test(err.message)) return
+        errors.push(`[pageerror@EO-01rm] ${err.message}`)
+      })
+      await eoRmPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
       await eoRmPage.waitForTimeout(1800)
-      const rmHeight = () =>
-        eoRmPage.evaluate(() => {
-          const g = [...document.querySelectorAll('div.grid')].find((d) =>
-            d.querySelector(':scope > div.min-h-0'),
-          )
-          return g ? Math.round(g.getBoundingClientRect().height) : -1
-        })
-      await eoRmPage.getByRole('button', { name: '絞り込み' }).click()
-      await eoRmPage.waitForTimeout(60)
-      const rmFirst = await rmHeight()
-      await eoRmPage.waitForTimeout(600)
-      const rmSettled = await rmHeight()
+      await eoRmPage.evaluate(`(${COLLAPSE_RECORDER})()`)
+      const eoRmToggle = eoRmPage.getByRole('button', { name: ja.settings.moveGuideToggle, exact: false }).first()
+      await eoRmToggle.scrollIntoViewIfNeeded()
+      const eoRm = await recordToggle(eoRmPage, eoRmToggle)
       check(
         'EO-01 動きを減らす設定ではアニメーションを出さず即座に開く',
-        rmFirst > 0 && rmFirst === rmSettled,
-        `直後=${rmFirst} / 落ち着いた後=${rmSettled}`,
+        eoRm !== null && eoRm.max > 0 && eoRm.midway === 0,
+        eoRm === null ? '高さの変化が1回も記録できなかった' : `1フレームごとの高さ: ${eoRm.text}`,
+      )
+
+      // EO-01f（2026-08-19 便IC）: **機械が混んでいても**途中の高さを通ること。
+      // 直す前は「中身を置く」→「1フレーム待つ」→「伸ばす」を requestAnimationFrame の二重予約で
+      // 表しており、予約が描き直しを追い越すとアニメーションが丸ごと消えた。設定の
+      // 「機種変更するときは」は混んでいなくても毎回消えていたが、他の画面は混んだときだけ消える。
+      // CPUを絞って「混んでいる状態」を作り、そこでも途中の高さを通ることを見張る。
+      const eoSlowCtx = await eoBrowser.newContext({ viewport: { width: 390, height: 844 } })
+      const eoSlowPage = await eoSlowCtx.newPage()
+      eoSlowPage.on('pageerror', (err) => {
+        if (/cloudflareinsights|Access-Control/.test(err.message)) return
+        errors.push(`[pageerror@EO-01slow] ${err.message}`)
+      })
+      await eoSlowPage.goto(`${BASE}/#/settings`, { waitUntil: 'networkidle' })
+      await eoSlowPage.waitForTimeout(2000)
+      const eoCdp = await eoSlowCtx.newCDPSession(eoSlowPage)
+      await eoCdp.send('Emulation.setCPUThrottlingRate', { rate: 10 })
+      await eoSlowPage.evaluate(`(${COLLAPSE_RECORDER})()`)
+      const eoSlowToggle = eoSlowPage.getByRole('button', { name: ja.settings.moveGuideToggle, exact: false }).first()
+      await eoSlowToggle.scrollIntoViewIfNeeded()
+      await eoSlowPage.waitForTimeout(400)
+      const eoSlow = await recordToggle(eoSlowPage, eoSlowToggle, 1600)
+      await eoCdp.send('Emulation.setCPUThrottlingRate', { rate: 1 })
+      check(
+        'EO-01 機械が混んでいても開くときに高さが途中の値を通る（予約の追い越しが起きない）',
+        eoSlow !== null && eoSlow.midway > 0 && eoSlow.max > 0,
+        eoSlow === null ? '高さの変化が1回も記録できなかった' : `1フレームごとの高さ: ${eoSlow.text}`,
       )
     } finally {
       await eoBrowser.close()
