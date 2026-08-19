@@ -269,6 +269,30 @@ const DISH_TYPE_SEARCH_WORDS: Record<DishType, string> = {
 }
 
 /**
+ * その料理の種別が、検索でどの言葉として索引に入っているか（2026-08-20 便IH・②）。
+ *
+ * 検索結果に「なぜ当たったか」を出すために、**索引を作るときと同じ表**を読む口を開けたもの。
+ * ここを通さずに種別の言葉を書き写すと、索引と説明が食い違う（同じ表を2か所に持たない）。
+ */
+export function dishTypeSearchWord(dishType: DishType): string {
+  return DISH_TYPE_SEARCH_WORDS[dishType]
+}
+
+/**
+ * その材料名から検索語に足されるカテゴリ語（例:「しめじ」→「きのこ」）を返す（2026-08-20 便IH・②）。
+ *
+ * buildSearchWords が下でやっている当てはめと**同じ規則**をここから読む＝
+ * 「きのこ」で当たったレシピに、その元になった材料名を添えて理由を出せる。
+ * 返す語はひらがな化済み（索引に入る形と同じ）。
+ */
+export function categorySearchWords(ingredientName: string): string[] {
+  const normalizedName = toHiragana(ingredientName)
+  return CATEGORY_RULES.filter((rule) =>
+    rule.words.some((word) => normalizedName.includes(toHiragana(word))),
+  ).map((rule) => toHiragana(rule.category))
+}
+
+/**
  * 料理名・材料名・タグ・検索キーワードから検索用キーワード一覧を作る（保存時に呼ぶ）。
  *
  * 調味料的な材料（大さじ/小さじ/単位なし/「少々」等。isSeasoningLikeと同じ基準）は

@@ -34,13 +34,26 @@
  *  season      … 季節（春・夏・秋・冬。「通年」は元から出さない）
  *  starter     … 「基本レシピ」（同梱レシピの見分け）
  *  ingredients … 主要食材のチップ（先頭3件まで）
+ *  matchReason … 検索で当たった先（「タグ: 魚」「手順: 魚焼きグリル」。2026-08-20 便IH・②）
+ *
+ * matchReason だけは「レシピの属性」ではなく**探し方に対する答え**なので、出す言葉は
+ * 呼び出し側（レシピ一覧）が組み立てて渡す。それでもこの表に載せてあるのは、
+ * **出す場所を1か所で決めるため**——献立の枠のレシピ選びにも検索まどがあり、
+ * 表に無ければ「渡せばどこでも出る」状態になる。渡せるのは表に載っている場所だけ、にしておく。
  *
  * NG食材の警告・「今日の献立」の印・栄養価の値は、この表では切らない。
  * どれも**呼び出し側が渡した材料があるときだけ**出る（ngIngredients / inTodayList /
  * nutrientBadgeText）ので、出す・出さないの判断はすでに呼び出し側が持っている。
  * とくにNG食材の警告は安全に関わるので、場所ごとに削れる列には置かない。
  */
-export const CARD_PART_KEYS = ['time', 'effort', 'season', 'starter', 'ingredients'] as const
+export const CARD_PART_KEYS = [
+  'time',
+  'effort',
+  'season',
+  'starter',
+  'ingredients',
+  'matchReason',
+] as const
 
 export type CardPartKey = (typeof CARD_PART_KEYS)[number]
 
@@ -61,8 +74,11 @@ export const CARD_PLACE_PARTS = {
   /**
    * レシピ一覧は**全部載せる**。ここは「どれにするか決める」場所であると同時に、
    * 自分で登録した品と同梱の品を見分けたり、何が入っているかで探したりする場所でもある。
+   *
+   * 検索で当たった先（matchReason）を出すのはここだけ（2026-08-20 便IH・②）。
+   * 「なぜこの品が出たのか」が分からなくなるのは、**打った言葉で一覧が入れ替わる**この場所だから。
    */
-  recipeList: ['time', 'effort', 'season', 'starter', 'ingredients'],
+  recipeList: ['time', 'effort', 'season', 'starter', 'ingredients', 'matchReason'],
   /**
    * 献立の枠・買い物メモ・献立テンプレの「レシピを選ぶ」画面
    * （2026-08-19 便IA・オーナー原文「④OKフォーマットそのままで情報減らすなどコンパクトにする

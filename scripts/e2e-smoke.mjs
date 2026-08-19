@@ -19585,7 +19585,9 @@ try {
       await lpPage.waitForTimeout(300)
       // 見出しは2026-08-19 便HU・⑫(オーナー指示)で「どのレシピから探すか」→「レシピを絞り込む」
       const shownTop = await topOf('レシピを絞り込む')
-      const tagTop = await topOf('タグ')
+      // 欄の見出しは ja.ts から読む（2026-08-20 便IH・①で「タグ」→「キーワード」に改名。
+      // 画面の字を書き写すと、次の改名でここだけ古くなる）
+      const tagTop = await topOf(ja.search.tagTitle)
       const timeTop = await topOf('調理時間')
       const effortTop = await topOf('手間レベル')
       const favTop = await topOf('お気に入り')
@@ -19594,7 +19596,7 @@ try {
         shownTop != null,
       )
       check(
-        'LISTPANEL-01(⑤) 「レシピを絞り込む」がタグ・調理時間・手間レベルより上にある',
+        `LISTPANEL-01(⑤) 「レシピを絞り込む」が「${ja.search.tagTitle}」・調理時間・手間レベルより上にある`,
         shownTop != null &&
           tagTop != null &&
           timeTop != null &&
@@ -19602,7 +19604,7 @@ try {
           shownTop < tagTop &&
           tagTop < timeTop &&
           timeTop < effortTop,
-        `レシピを絞り込む=${shownTop} タグ=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
+        `レシピを絞り込む=${shownTop} ${ja.search.tagTitle}=${tagTop} 調理時間=${timeTop} 手間レベル=${effortTop}`,
       )
       check(
         'LISTPANEL-01(⑤) 「お気に入り」が手間レベルより上に来た(旧: パネル末尾で見えなかった)',
@@ -19791,8 +19793,10 @@ try {
       const htAddButton = htPage.locator('[data-testid="saved-search-add"]')
       const htAddLabel = ((await htAddButton.textContent()) ?? '').replace(/​/g, '')
       check(
-        'HZ-TAG-01(②) 登録ボタンに、登録する言葉と行き先(絞り込みのタグ)が出ている',
-        htAddLabel.includes('豆腐') && htAddLabel.includes('絞り込み') && htAddLabel.includes('タグ'),
+        `HZ-TAG-01(②) 登録ボタンに、登録する言葉と行き先(絞り込みの「${ja.search.tagTitle}」)が出ている`,
+        htAddLabel.includes('豆腐') &&
+          htAddLabel.includes('絞り込み') &&
+          htAddLabel.includes(ja.search.tagTitle),
         `ボタン=${htAddLabel}`,
       )
       // 何品に付くか、という言い方が残っていない（レシピに書き込む機能ではなくなった）
@@ -19889,6 +19893,159 @@ try {
       )
     } finally {
       await htBrowser.close()
+    }
+  }
+
+  // --- IH-SEARCH-01: 絞り込みの欄の呼び名（①）と、検索で当たった先の1行（②）
+  //     （2026-08-20 便IH）
+  //
+  //     オーナー原文（①）: 「絞り込み『タグ』は、追加可能になった＝タグ以外も登録できる、ので、
+  //       『ワード』『キーワード』のような別の名前がいいのでは？このアプリでの『タグ』は
+  //       レシピカードに表示されるワードなので。」
+  //     オーナー原文（②）: 「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ
+  //       ６件ありましたが、レシピのタグやキーワードに入っているわけではなさそうでした。」
+  //
+  //     【この検査で測ること】
+  //      ①絞り込みのパネルに、古い呼び名（レシピに付いている印＝「タグ」）が1つも残っていない
+  //        ＝欄の見出しは ja.ts の値そのもの（画面の字を書き写さない）
+  //      ②検索していないときは、当たり先の1行がどのカードにも出ない
+  //      ③検索すると、出たカードは1枚残らず「当たり先の1行」か「料理名にその言葉がある」の
+  //        どちらかで説明が付く
+  //      ④出た当たり先が**本当にそのレシピのその欄にある**（タグで当たった品はレシピ詳細に
+  //        そのタグが並び、手順で当たった品は手順の本文にその言葉がある）
+  //
+  //     品数は決め打ちしない（レシピが増減しても当たる）。読み取りに失敗したら必ず落ちる
+  //     （カードが0枚・当たり先の顔ぶれを1つも拾えない・確かめる相手が見つからないときは不合格）---
+  currentCheck = 'IH-SEARCH-01'
+  {
+    const ihBrowser = await chromium.launch()
+    const ihContext = await ihBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ihPage = await ihContext.newPage()
+    ihPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@IH-SEARCH-01] ${err.message}`)
+    })
+    try {
+      const ihClean = (text) => (text ?? '').replace(/\u200b/g, '').replace(/\s+/g, ' ').trim()
+      /**
+       * 画面に出ているカードを「料理名・行き先・当たり先の1行」の組で読む。
+       * 料理名と当たり先は**同じリンクの中にあるかどうか**だけで対応づける
+       * （何番目のカードか・入れ子の何段目か、には頼らない）
+       */
+      const ihCards = () =>
+        ihPage.evaluate(() =>
+          Array.from(document.querySelectorAll('a[href]'))
+            .filter((a) => /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''))
+            .map((a) => ({
+              href: a.getAttribute('href') ?? '',
+              title: (a.querySelector('[data-testid="recipe-card-title"]')?.textContent ?? '')
+                .replace(/\u200b/g, '')
+                .trim(),
+              reason: (a.querySelector('[data-testid="card-match-reason"]')?.textContent ?? '')
+                .replace(/\u200b/g, '')
+                .trim(),
+            })),
+        )
+      await ihPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ihPage.waitForTimeout(2000)
+
+      // ---- ② 検索していないときは1行も出ない ----------------------------------------------
+      const ihIdle = await ihCards()
+      check('IH-SEARCH-01 前提: 一覧にカードが出ている', ihIdle.length > 0, `カード=${ihIdle.length}枚`)
+      check(
+        'IH-SEARCH-01(②) 検索していないときは、当たり先の1行がどのカードにも出ない',
+        ihIdle.every((c) => c.reason === ''),
+        `出ていたカード=${JSON.stringify(ihIdle.filter((c) => c.reason !== '').slice(0, 3))}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 前提: 料理名を読み取れている(読めないまま合格にしない)',
+        ihIdle.every((c) => c.title !== ''),
+        `料理名の読めないカード=${ihIdle.filter((c) => c.title === '').length}枚`,
+      )
+
+      // ---- ①絞り込みのパネルの呼び名 ---------------------------------------------------------
+      await ihPage.locator('button[aria-label="絞り込み"]').click()
+      await ihPage.waitForTimeout(600)
+      const ihPanel = ihClean(await ihPage.textContent('[data-testid="recipes-filter-panel"]'))
+      check('IH-SEARCH-01 前提: 絞り込みのパネルの中身を読めている', ihPanel.length > 0, `字数=${ihPanel.length}`)
+      check(
+        'IH-SEARCH-01(①) 絞り込みの欄の見出しが画面に出ている',
+        ihPanel.includes(ja.search.tagTitle),
+        `見出し=「${ja.search.tagTitle}」 パネル=${ihPanel.slice(0, 120)}`,
+      )
+      check(
+        'IH-SEARCH-01(①) 絞り込みのパネルに、レシピに付いている印の呼び名が1つも残っていない',
+        // 「以前の版でレシピに書き込まれたタグ」の後始末の欄は、書き込まれたタグが
+        // 残っている端末にだけ出る（この検査は初回起動の端末なので出ない）
+        !ihPanel.includes(ja.form.tagsLabel),
+        `パネル=${ihPanel.slice(0, 400)}`,
+      )
+      await ihPage.locator('[data-testid="filter-panel-close"]').click()
+      await ihPage.waitForTimeout(400)
+
+      // ---- ②③ 検索したときの当たり先 ---------------------------------------------------------
+      // 探す言葉はオーナーが実機で打ったもの。料理名以外の当たり先が混ざる言葉であることを
+      // その場で確かめてから測る（当たり先が1種類しか出ない言葉だと、④で比べる相手が作れない）
+      await ihPage.locator('input[type="search"]').fill('魚')
+      await ihPage.waitForTimeout(900)
+      const ihFound = await ihCards()
+      check('IH-SEARCH-01(②) 「魚」で1品以上出る', ihFound.length > 0, `出た品数=${ihFound.length}`)
+      check(
+        'IH-SEARCH-01(②) 「魚」で出た品は、当たり先の1行か料理名で説明が付く',
+        ihFound.every((c) => c.reason !== '' || c.title.includes('魚')),
+        `説明の付かない品=${JSON.stringify(ihFound.filter((c) => c.reason === '' && !c.title.includes('魚')))}`,
+      )
+      // 当たり先の顔ぶれ（「◯◯: ×××」の◯◯）を画面から拾う
+      const ihLabelOf = (reason) => (reason.includes(': ') ? reason.slice(0, reason.indexOf(': ')) : '')
+      const ihWordOf = (reason) => (reason.includes(': ') ? reason.slice(reason.indexOf(': ') + 2) : '')
+      const ihByTag = ihFound.find((c) => ihLabelOf(c.reason) === ja.card.matchReasonTag)
+      const ihByStep = ihFound.find((c) => ihLabelOf(c.reason) === ja.card.matchReasonAppliance)
+      check(
+        'IH-SEARCH-01(②) 「魚」はレシピに付いているタグでも当たっていることが読める',
+        ihByTag != null,
+        `画面の当たり先=${JSON.stringify(ihFound.map((c) => c.reason))}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 「魚」は手順に出てくる調理器具でも当たっていることが読める',
+        ihByStep != null,
+        `画面の当たり先=${JSON.stringify(ihFound.map((c) => c.reason))}`,
+      )
+
+      // ---- ④ 出した当たり先が、そのレシピの本当の中身と合っているか ---------------------------
+      if (ihByTag != null) {
+        await ihPage.goto(`${BASE}/${ihByTag.href}`, { waitUntil: 'networkidle' })
+        await ihPage.waitForTimeout(900)
+        const detail = ihClean(await ihPage.textContent('body'))
+        check(
+          `IH-SEARCH-01(④) 「${ihByTag.reason}」と出た品(${ihByTag.title})は、レシピ詳細にそのタグが並んでいる`,
+          detail.includes(ihWordOf(ihByTag.reason)),
+          `探した言葉=${ihWordOf(ihByTag.reason)} 詳細=${detail.slice(0, 200)}`,
+        )
+      }
+      if (ihByStep != null) {
+        await ihPage.goto(`${BASE}/${ihByStep.href}`, { waitUntil: 'networkidle' })
+        await ihPage.waitForTimeout(900)
+        const detail = ihClean(await ihPage.textContent('body'))
+        check(
+          `IH-SEARCH-01(④) 「${ihByStep.reason}」と出た品(${ihByStep.title})は、手順の本文にその言葉がある`,
+          detail.includes(ihWordOf(ihByStep.reason)),
+          `探した言葉=${ihWordOf(ihByStep.reason)} 詳細=${detail.slice(0, 200)}`,
+        )
+      }
+
+      // ---- 検索をやめたら1行も残らない ---------------------------------------------------------
+      await ihPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ihPage.waitForTimeout(1200)
+      await ihPage.locator('input[type="search"]').fill('')
+      await ihPage.waitForTimeout(800)
+      const ihAfter = await ihCards()
+      check(
+        'IH-SEARCH-01(②) 検索をやめると当たり先の1行が消える',
+        ihAfter.length > 0 && ihAfter.every((c) => c.reason === ''),
+        `残っていたカード=${JSON.stringify(ihAfter.filter((c) => c.reason !== '').slice(0, 3))}`,
+      )
+    } finally {
+      await ihBrowser.close()
     }
   }
 
@@ -20004,9 +20161,9 @@ try {
       )
       check(
         'IB-TAG-01(②) 数字の意味の説明が1本になっている',
-        (await ibPage.textContent('body'))
-          .replace(/​/g, '')
-          .includes('数字は、そのタグに当てはまるレシピの品数です'),
+        // 文言は ja.ts から読む（画面の字を書き写すと、呼び名を変えたときに片方だけ古くなる。
+        // 2026-08-20 便IH・①で「タグ」→「キーワード」に改名した際、ここが実際に取り残された）
+        (await ibPage.textContent('body')).replace(/​/g, '').includes(ja.search.tagCountHint),
       )
 
       // 増えた押しどころ（選び方のスイッチ・登録したタグの削除）が指で押せる大きさであること。
@@ -20355,9 +20512,8 @@ try {
         )
         check(
           'HZ-TAG-02 数字が何を指すのかが画面に書いてある',
-          (await tmPage.textContent('body')).replace(/​/g, '').includes(
-            '数字は、そのタグに当てはまるレシピの品数です',
-          ),
+          // 文言は ja.ts から読む（便IH・①の改名で書き写しが取り残されたため）
+          (await tmPage.textContent('body')).replace(/​/g, '').includes(ja.search.tagCountHint),
         )
         // 「すべて」で外せる＝絞り込みを戻す手段がある
         await tmSetSwitch(false)
@@ -33390,7 +33546,7 @@ try {
         // 2026-08-19 便HU・⑫で「どのレシピから探すか」から改称
         レシピを絞り込む: await ffHeadTop('レシピを絞り込む'),
         料理の種別: await ffHeadTop('料理の種別'),
-        タグ: await ffHeadTop('タグ'),
+        [ja.search.tagTitle]: await ffHeadTop(ja.search.tagTitle),
         食材で絞り込む: await ffHeadTop('食材で絞り込む'),
         調理時間: await ffHeadTop('調理時間'),
         手間レベル: await ffHeadTop('手間レベル'),
@@ -33402,7 +33558,7 @@ try {
         JSON.stringify(ffOrder),
       )
       check(
-        'FF-FILTER 区分の並びが「レシピを絞り込む→料理の種別→タグ→食材で絞り込む→調理時間→手間レベル」',
+        `FF-FILTER 区分の並びが「レシピを絞り込む→料理の種別→${ja.search.tagTitle}→食材で絞り込む→調理時間→手間レベル」`,
         ffTops.every((v, i) => i === 0 || (v != null && ffTops[i - 1] != null && ffTops[i - 1] < v)),
         JSON.stringify(ffOrder),
       )

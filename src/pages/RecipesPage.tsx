@@ -54,6 +54,8 @@ import {
   searchRecipes,
   filterTagUsageCounts,
   countRecipesMatchingKeyword,
+  searchMatchReasonText,
+  splitTerms,
   type DishTypeFilter,
   type EffortFilter,
   type TagFilter,
@@ -1295,6 +1297,15 @@ export default function RecipesPage() {
     }
   }
 
+  /**
+   * 検索でこのレシピが当たった先を1行で出すための言葉（2026-08-20 便IH・②）。
+   *
+   * 見るのは**検索欄に打った言葉だけ**。絞り込みのチップ（キーワード・タグ・料理の種別など）は
+   * 押した本人がその言葉を選んでいるので、当たり先を出す必要が無い。
+   * 打っていなければ splitTerms が空になり、どのカードにも1行が出ない。
+   */
+  const queryTerms = useMemo(() => splitTerms(query), [query])
+
   const subLabelFor = (usedCount: number, wantedCount: number) => {
     if (wantedCount === 0) return undefined
     if (usedCount === wantedCount) return ja.search.usedAll
@@ -2136,6 +2147,10 @@ export default function RecipesPage() {
                 inTodayList={todayRecipeIds.has(recipe.id!)}
                 showQuickTime={quickOnly}
                 nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
+                matchReason={searchMatchReasonText(recipe, queryTerms)}
+                // 検査用の目印（2026-08-20 便IH・②）。当たり先の1行と料理名が同じカードのものだと
+                // 見分けるために付ける（画面のどこに出ているか・入れ子の何段目かに頼らないため）
+                titleTestId="recipe-card-title"
               />
               {/* 選択モード中はカード全面を選択ボタンで覆い、詳細への遷移の代わりに選択の
                   ON/OFFにする(カード自体は<Link>なので、覆って遷移させない方が確実)。

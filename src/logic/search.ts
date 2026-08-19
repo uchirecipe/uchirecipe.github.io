@@ -1,4 +1,13 @@
-import { toHiragana } from './kana'
+import {
+  applianceSearchWords,
+  categorySearchWords,
+  dishTypeSearchWord,
+  titleKanaKey,
+  toHiragana,
+  toTagKey,
+} from './kana'
+import { isSeasoningLike } from './mainIngredients'
+import { ja } from '../i18n/ja'
 import { makePantryMatcher } from './pantry'
 import { hasNgIngredient } from './ng'
 import { splitValues } from './textSplit'
@@ -211,6 +220,160 @@ function matchesQuery(recipe: Recipe, terms: string[]): boolean {
     if (log.note) pool.push(toHiragana(log.note))
   }
   return terms.every((term) => pool.some((word) => word.includes(term)))
+}
+
+/**
+ * 検索の言葉が、そのレシピの**どこに当たったか**（2026-08-20 便IH・②）。
+ *
+ * オーナー原文:
+ *   「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ６件ありましたが、
+ *     レシピのタグやキーワードに入っているわけではなさそうでした。」
+ *
+ * 検索の索引（logic/kana.ts の buildSearchWords）は、料理名・材料名・タグ・検索キーワード・
+ * 手順に出てくる調理器具・料理の種別・材料のカテゴリ語を**ひらがなの語の集まりに均して**持つ。
+ * 均した時点で「どこから来た語か」は消えるので、当たり先はここで**同じ規則をもう一度たどって**出す。
+ * 索引の作り方（kana.ts）とこの関数の見る先がずれると説明が嘘になるため、
+ * 語の作り方（toHiragana / toTagKey / applianceSearchWords / categorySearchWords /
+ * dishTypeSearchWord）は**索引と同じ口**から読む。
+ *
+ * 料理名に当たった語は**理由を出さない**（オーナー「料理名そのもので当たったときは、出す意味が薄い」）。
+ * カードには料理名がそのまま出ているので、読めば分かる。
+ * 料理名にも当たり、材料にも当たった語は、料理名で説明が付くので同じく出さない
+ * （「麻婆豆腐」を「豆腐」で引いたときに「材料: 木綿豆腐」と念を押さない）。
+ */
+export type SearchMatchField =
+  | 'ingredient'
+  | 'tag'
+  | 'keyword'
+  | 'appliance'
+  | 'dishType'
+  | 'cookedNote'
+
+export interface SearchMatchReason {
+  field: SearchMatchField
+  /**
+   * 当たった言葉（レシピに書いてある形のまま）。作った記録のひとことメモだけは持たない
+   * ——メモは文なので、そのまま出すとカードの1行に収まらない
+   */
+  word?: string
+}
+
+/**
+ * 並べる順（先に立つものほどカードの前に出る）。
+ * 「タグ」「材料」は探した人が思い浮かべている当たり先で、
+ * 「手順」「料理の種別」「作った記録のメモ」は思い浮かべていない当たり先。
+ * 思い浮かべている方を先に置くと、思っていた通りのときは読み飛ばせる
+ */
+const MATCH_FIELD_ORDER: readonly SearchMatchField[] = [
+  'tag',
+  'ingredient',
+  'keyword',
+  'appliance',
+  'dishType',
+  'cookedNote',
+]
+
+/** 索引に入る2つの形（ひらがな化・タグの読み）のどちらかに検索語が含まれるか */
+function wordHits(source: string, term: string): boolean {
+  const trimmed = source.trim()
+  if (trimmed === '') return false
+  return toHiragana(trimmed).includes(term) || toTagKey(trimmed).includes(term)
+}
+
+/** その語が料理名（読み仮名を含む）に当たっているか */
+function titleHits(recipe: Recipe, term: string): boolean {
+  return wordHits(recipe.title, term) || titleKanaKey(recipe.title).includes(term)
+}
+
+/**
+ * そのレシピが検索の言葉に当たった理由を、当たり先ごとに返す。
+ * terms は splitTerms を通したあと（＝ひらがな化済み）の語を渡すこと。
+ * 料理名だけで説明が付く語は何も返さない＝**検索していないときと、料理名で当たったときは空**になる。
+ */
+export function searchMatchReasons(recipe: Recipe, terms: readonly string[]): SearchMatchReason[] {
+  if (terms.length === 0) return []
+  const found: SearchMatchReason[] = []
+  const seen = new Set<string>()
+  const add = (field: SearchMatchField, word?: string) => {
+    const key = `${field}\u0000${word ?? ''}`
+    if (seen.has(key)) return
+    seen.add(key)
+    found.push(word === undefined ? { field } : { field, word })
+  }
+  for (const term of terms) {
+    if (term === '') continue
+    // 料理名で説明が付く語は、その語について何も出さない（他の語の理由は出す）
+    if (titleHits(recipe, term)) continue
+    for (const tag of recipe.tags) if (wordHits(tag, term)) add('tag', tag.trim())
+    for (const ing of recipe.ingredients) {
+      // 索引に入っているのは調味料以外の材料名だけ（buildSearchWords と同じ線引き）
+      if (!isSeasoningLike(ing) && wordHits(ing.name, term)) add('ingredient', ing.name.trim())
+      // カテゴリ語（しめじ→きのこ）で当たったときは、その元になった材料名を出す
+      // ＝「きのこ」で探した人が、どの材料でこの品が出たのかを読める
+      else if (categorySearchWords(ing.name).some((word) => word.includes(term)))
+        add('ingredient', ing.name.trim())
+    }
+    for (const keyword of recipe.keywords ?? []) if (wordHits(keyword, term)) add('keyword', keyword.trim())
+    // 器具の一覧は「魚焼きグリル」と「グリル」、「オーブントースター」と「オーブン」のように
+    // 長い名前と短い名前が両方入る（手順に長い方が書いてあれば短い方も当たる）。
+    // 当たったものが他の当たったものの一部でしかないときは出さない＝手順に書いてある形だけが残る
+    const appliances = applianceSearchWords(recipe.steps).filter((word) => wordHits(word, term))
+    for (const appliance of appliances)
+      if (!appliances.some((other) => other !== appliance && other.includes(appliance)))
+        add('appliance', appliance)
+    const dishWord = dishTypeSearchWord(recipeDishType(recipe))
+    if (wordHits(dishWord, term)) add('dishType', dishWord)
+    for (const log of recipe.cookedLogs)
+      if (log.note && toHiragana(log.note).includes(term)) add('cookedNote')
+  }
+  return found.sort(
+    (a, b) => MATCH_FIELD_ORDER.indexOf(a.field) - MATCH_FIELD_ORDER.indexOf(b.field),
+  )
+}
+
+/** 出どころの名前（ja に集約。ここで文字を書かない） */
+const MATCH_FIELD_LABELS: Record<SearchMatchField, string> = {
+  tag: ja.card.matchReasonTag,
+  ingredient: ja.card.matchReasonIngredient,
+  keyword: ja.card.matchReasonKeyword,
+  appliance: ja.card.matchReasonAppliance,
+  dishType: ja.card.matchReasonDishType,
+  cookedNote: ja.card.matchReasonCookedNote,
+}
+
+/**
+ * カードに出す「なぜ当たったか」の1行（2026-08-20 便IH・②）。検索していなければ undefined。
+ *
+ * **間引きの決めごと**（同梱109品と語彙371語で実測してから決めた。うるさくしないため）:
+ *  ① 同じ出どころに何語も当たったときは**先頭の1語だけ**出す。
+ *     「きのこ」で寄せ鍋が出たときの「しいたけ・えのき」は、どちらか1つ読めれば理由が分かる
+ *  ② **同じ言葉が2つ以上の出どころに当たったら、先の1つだけ**出す。
+ *     「汁物」はタグにも料理の種別にも当たるので、そのままだと同じ字が2回並ぶ
+ *  ③ 残った出どころは**全部**出す（実測で2つを超えたものが1つも無かったため、
+ *     「◯件」と数えて隠すより、そのまま読める方が短い）
+ *  ④ 料理名で説明が付く語は searchMatchReasons の時点で落ちている（＝1行そのものが出ない）
+ */
+export function searchMatchReasonText(
+  recipe: Recipe,
+  terms: readonly string[],
+): string | undefined {
+  const usedFields = new Set<SearchMatchField>()
+  const usedWords = new Set<string>()
+  const parts: string[] = []
+  for (const reason of searchMatchReasons(recipe, terms)) {
+    if (usedFields.has(reason.field)) continue
+    if (reason.word !== undefined && usedWords.has(reason.word)) continue
+    usedFields.add(reason.field)
+    if (reason.word !== undefined) usedWords.add(reason.word)
+    parts.push(
+      reason.word === undefined
+        ? MATCH_FIELD_LABELS[reason.field]
+        : ja.card.matchReason
+            .replace('{field}', MATCH_FIELD_LABELS[reason.field])
+            .replace('{word}', reason.word),
+    )
+  }
+  return parts.length === 0 ? undefined : parts.join(ja.card.matchReasonJoin)
 }
 
 function matchesTime(recipe: Recipe, time: TimeFilter): boolean {
