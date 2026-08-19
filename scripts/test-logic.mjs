@@ -2984,6 +2984,42 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   eq('DT2-NAV 日付が無ければnull', parseWeekReturn('{"scrollY":10}'), null)
   eq('DT2-NAV スクロール位置が数値でなければnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":"10"}'), null)
   eq('DT2-NAV NaNはnull', parseWeekReturn('{"weekStart":"2026-08-03","scrollY":null}'), null)
+  // 2026-08-19 便ID・⑦: 人が開け閉めした曜日カードも一緒に覚える。
+  // 覚えずに戻ると、開いていた日がまた畳まれてページの高さが変わり、
+  // 覚えた縦位置に戻しても違う場所へ着く（e2e WEEKUI-DT で実測130pxずれた）
+  eq(
+    'ID-7 開け閉めした曜日カードも覚えて読み戻せる',
+    parseWeekReturn(
+      serializeWeekReturn({
+        weekStart: '2026-08-03',
+        scrollY: 100,
+        dayFold: { '2026-08-03': false, '2026-08-04': true },
+      }),
+    ),
+    { weekStart: '2026-08-03', scrollY: 100, dayFold: { '2026-08-03': false, '2026-08-04': true } },
+  )
+  eq(
+    'ID-7 1つも触っていなければ書かない(以前の版と同じ形のまま)',
+    serializeWeekReturn({ weekStart: '2026-08-03', scrollY: 100, dayFold: {} }),
+    '{"weekStart":"2026-08-03","scrollY":100}',
+  )
+  eq(
+    'ID-7 覚えが古い版で曜日カードの分が無くても、週と縦位置は読み戻せる',
+    parseWeekReturn('{"weekStart":"2026-08-03","scrollY":100}'),
+    { weekStart: '2026-08-03', scrollY: 100 },
+  )
+  eq(
+    'ID-7 壊れた1件だけを捨てて残りを活かす(日付の形でない鍵・真偽でない値)',
+    parseWeekReturn(
+      '{"weekStart":"2026-08-03","scrollY":100,"dayFold":{"2026/08/03":true,"2026-08-04":"はい","2026-08-05":true}}',
+    ).dayFold,
+    { '2026-08-05': true },
+  )
+  eq(
+    'ID-7 曜日カードの分が丸ごと壊れていても、週と縦位置は読み戻せる',
+    parseWeekReturn('{"weekStart":"2026-08-03","scrollY":100,"dayFold":"こわれた"}'),
+    { weekStart: '2026-08-03', scrollY: 100 },
+  )
 }
 
 // ---------- navMemory: 見ていた場所の目印(2026-08-14 便GH・再発防止) ----------
@@ -22988,6 +23024,204 @@ Aみりん 大さじ1
       'IA-5 献立の画面が出す「これから作る品」のカードは、必ずNG食材を渡している',
       iaMissing,
       [],
+    )
+  }
+}
+
+// ---------- 便ID(2026-08-19 オーナーの書き溜め7件) ----------
+// 直したもの: ②入れかたのボタンを短く横1列に ③「提案の条件」→「現在の条件」
+// ⑤「多め/ひかえめ」の見出しと選択肢名の両立 ⑥先週コピーの説明 ⑦曜日カードの既定の折りたたみ。
+// 画面の見え方(窓で開くこと・位置が動かないこと)は e2e の WEEKCOND-01 / WEEKFOLD-01 が受け持ち、
+// ここでは**言葉と実際の動きが食い違っていないか**と、日付に依らない判定だけを見る
+{
+  const mealPlanLogic = await import('../src/logic/mealPlan.ts')
+  const { planCopyLastWeek } = mealPlanLogic
+  // 読み取りに失敗したら必ず落ちる形にする（見張りが「関数が無いので測れませんでした」で
+  // 素通りしないよう、無ければここで1件NGにしてから空の実装で先へ進む）
+  eq(
+    'ID-7 曜日カードの既定を決める関数がある（無ければ以下は測れていない）',
+    typeof mealPlanLogic.planDefaultFoldedDates === 'function',
+    true,
+  )
+  const planDefaultFoldedDates =
+    typeof mealPlanLogic.planDefaultFoldedDates === 'function'
+      ? mealPlanLogic.planDefaultFoldedDates
+      : () => ['(関数が無い)']
+
+  // --- ⑦ 曜日カードの既定(planDefaultFoldedDates) ---
+  // オーナー原文「過去の日付は折りたたみ、献立が空欄の未来の日付も折りたたみ、
+  // 献立ありの未来の日付は開いて表示にしたい」。
+  //
+  // 禁じ手①(曜日・月替わりの前提)よけ: 「今日」は引数で渡す形にして、
+  // **月初・月末・年またぎ・うるう日**の4通りで同じ結論になることを固定する。
+  // 実行日がいつでも通る＝この見張り自体が日付で赤くならない
+  {
+    const cases = [
+      ['月末をまたぐ', '2026-08-31', ['2026-08-29', '2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02']],
+      ['年をまたぐ', '2026-12-31', ['2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']],
+      ['月初', '2026-03-01', ['2026-02-26', '2026-02-27', '2026-03-01', '2026-03-02', '2026-03-03']],
+      ['うるう日', '2028-02-29', ['2028-02-27', '2028-02-28', '2028-02-29', '2028-03-01', '2028-03-02']],
+    ]
+    for (const [name, today, dates] of cases) {
+      const past = dates.filter((d) => d < today)
+      const future = dates.filter((d) => d > today)
+      // 未来の1日目にだけ献立を入れる＝「献立あり/なし」で開閉が分かれることを見る
+      const withPlan = new Set([future[0]])
+      const folded = planDefaultFoldedDates({ dates, today, datesWithPlan: withPlan })
+      eq(`ID-7 ${name}: 過ぎた日はすべて畳む`, past.every((d) => folded.includes(d)), true)
+      eq(`ID-7 ${name}: 献立のある未来の日は開く`, folded.includes(future[0]), false)
+      eq(`ID-7 ${name}: 献立の無い未来の日は畳む`, folded.includes(future[1]), true)
+      eq(`ID-7 ${name}: 今日は献立が無くても開く`, folded.includes(today), false)
+    }
+    // 献立が1品も無い週でも、今日だけは開く(今日が入っていない週は全部畳む)
+    eq(
+      'ID-7 献立が1品も無い未来の週は全部畳む',
+      planDefaultFoldedDates({
+        dates: ['2026-09-07', '2026-09-08'],
+        today: '2026-09-01',
+        datesWithPlan: new Set(),
+      }),
+      ['2026-09-07', '2026-09-08'],
+    )
+    eq(
+      'ID-7 過ぎた日は献立が入っていても畳む(過ぎた日は予定を出さない画面のため)',
+      planDefaultFoldedDates({
+        dates: ['2026-08-30'],
+        today: '2026-09-01',
+        datesWithPlan: new Set(['2026-08-30']),
+      }),
+      ['2026-08-30'],
+    )
+  }
+
+  // --- ⑥ 「先週の献立をコピー」の説明が、実際の動きと食い違っていないこと ---
+  // オーナー案は「そのまま入力します」または「上書きします」。実装(planCopyLastWeek)は
+  // **すでに入っている食事を1つも書き換えない**ので、「上書きします」と書いた瞬間に
+  // 画面の言葉が嘘になる(規約F)。動きと言葉を1か所で結んで固定する
+  {
+    const prevEntries = [
+      { date: '2026-08-03', slot: 'dinner', recipeId: 31, role: 'main' },
+      { date: '2026-08-04', slot: 'dinner', recipeId: 32, role: 'main' },
+    ]
+    const base = {
+      dates: ['2026-08-10', '2026-08-11'],
+      today: '2026-08-10',
+      visibleSlots: ['dinner'],
+      prevEntries,
+    }
+    eq(
+      'ID-6 空いている枠には入る(何も起きないテストで素通りしていないことの担保)',
+      planCopyLastWeek({ ...base, entries: [] }).ops.length,
+      2,
+    )
+    eq(
+      'ID-6 すでに献立が入っている枠には1品も入れない(＝上書きしない)',
+      planCopyLastWeek({
+        ...base,
+        entries: [
+          { date: '2026-08-10', slot: 'dinner' },
+          { date: '2026-08-11', slot: 'dinner' },
+        ],
+      }).ops.length,
+      0,
+    )
+    eq(
+      'ID-6 埋まっている日と空いている日が混ざっていれば、空いている日にだけ入る',
+      planCopyLastWeek({ ...base, entries: [{ date: '2026-08-10', slot: 'dinner' }] }).ops,
+      [{ date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' }],
+    )
+    for (const [name, text] of [
+      ['ONのときの説明', ja.mealPlan.copyLastWeekToggleHintOn],
+      ['OFFのときの説明', ja.mealPlan.copyLastWeekToggleHintOff],
+      ['確認の窓の本文', ja.mealPlan.copyLastWeekConfirm],
+    ]) {
+      eq(`ID-6 ${name}は「上書きします」と言わない(実装は上書きしない)`, /上書きします/.test(text), false)
+    }
+    eq(
+      'ID-6 ONのときの説明は、押すと何が入るかを「入力」で言う',
+      ja.mealPlan.copyLastWeekToggleHintOn.includes('入力します'),
+      true,
+    )
+  }
+
+  // --- ⑤ 「多め/ひかえめ」の見出しと選択肢名の両立 ---
+  // プルダウンの中は区分(多め/ひかえめ)＋項目名だけ、閉じたときの要約は「たんぱく質多め」。
+  // 2つの表示名がずれると、選んだ名前と要約の名前が別物になる。組み立てで結んで固定する
+  {
+    const { MORE_MEAL_PURPOSES, LESS_MEAL_PURPOSES } = await import('../src/db/types.ts')
+    const summaryOf = (purpose) =>
+      ({
+        protein: ja.mealPlan.purposeProtein,
+        fiber: ja.mealPlan.purposeFiber,
+        iron: ja.mealPlan.purposeIron,
+        calcium: ja.mealPlan.purposeCalcium,
+        lowEnergy: ja.mealPlan.purposeLowEnergy,
+        lowFat: ja.mealPlan.purposeLowFat,
+        lowCarb: ja.mealPlan.purposeLowCarb,
+        lowSalt: ja.mealPlan.purposeLowSalt,
+      })[purpose]
+    const groups = [
+      [MORE_MEAL_PURPOSES, ja.mealPlan.purposeGroupMore],
+      [LESS_MEAL_PURPOSES, ja.mealPlan.purposeGroupLess],
+    ]
+    const mismatched = []
+    let counted = 0
+    for (const [purposes, groupLabel] of groups) {
+      for (const purpose of purposes) {
+        counted++
+        const option = ja.mealPlan.purposeOption?.[purpose]
+        if (!option || `${option}${groupLabel}` !== summaryOf(purpose)) {
+          mismatched.push(`${purpose}: 選択肢=${option} 区分=${groupLabel} 要約=${summaryOf(purpose)}`)
+        }
+      }
+    }
+    eq('ID-5 見張る軸が8つそろっている(0件なら見張りが壊れている)', counted, 8)
+    eq('ID-5 選択肢名＋区分名＝要約の名前(たんぱく質＋多め＝たんぱく質多め)', mismatched, [])
+    eq(
+      'ID-5 選択肢名そのものには「多め」「ひかえめ」を付けない(区分と二重に言わない)',
+      Object.values(ja.mealPlan.purposeOption ?? {}).filter((v) => /多め|ひかえめ/.test(v)),
+      [],
+    )
+  }
+
+  // --- ② 入れかたの2つのボタン ---
+  // オーナー原文「横一列にボタンを配置。２列だと情報量自体が多く感じ、直感的に２択だとわからない」。
+  // 画面側は2列のグリッドで必ず横1列に置くが、名前が長いとボタンの中で折り返して背が伸びる。
+  // 「一部の単語のみでも内容がなんとなくわかる」長さに収まっていることを字数で固定する
+  {
+    for (const [name, label] of [
+      ['空き埋め', ja.mealPlan.fillModeFillEmpty],
+      ['総入れ替え', ja.mealPlan.fillModeReplaceAll],
+    ]) {
+      eq(`ID-2 入れかたのボタン「${name}」は6文字以内`, label.length <= 6, true)
+    }
+    neq('ID-2 2つのボタンは違う名前', ja.mealPlan.fillModeFillEmpty, ja.mealPlan.fillModeReplaceAll)
+    // 短くしても、押すと何が起きるかは下の1行が言い切る(規約H。名前だけに背負わせない)
+    eq(
+      'ID-2 空き埋めの説明は「今ある献立はそのまま」を言う',
+      ja.mealPlan.fillModeFillEmptyHint.includes('今ある献立はそのまま'),
+      true,
+    )
+    eq(
+      'ID-2 総入れ替えの説明は「消してから入れ直す」を言う',
+      ja.mealPlan.fillModeReplaceAllHint.includes('消して'),
+      true,
+    )
+  }
+
+  // --- ③ 「提案の条件」→「現在の条件」 ---
+  {
+    eq('ID-3 ボタンの名前は「現在の条件」', ja.mealPlan.suggestConditionsToggle, '現在の条件')
+    eq(
+      'ID-3 条件を選んでいないときに出す言葉がある(コロンの後ろを空にしない)',
+      typeof ja.mealPlan.suggestConditionsNone === 'string' &&
+        ja.mealPlan.suggestConditionsNone.length > 0,
+      true,
+    )
+    neq(
+      'ID-3 窓の見出しはボタンの名前と別に持つ(ボタン=いまの状態・窓=これから使う条件)',
+      ja.mealPlan.suggestConditionsTitle,
+      ja.mealPlan.suggestConditionsToggle,
     )
   }
 }

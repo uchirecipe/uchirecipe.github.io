@@ -194,6 +194,15 @@ export interface WeekReturnPoint {
    * 送っているとき）は入らない。入っていないときは従来どおり scrollY だけで戻す
    */
   anchor?: ReturnAnchor
+  /**
+   * 人が開け閉めした曜日カード（日付→畳んでいるか。2026-08-19 便ID・⑦）。
+   *
+   * 曜日カードの既定が「過ぎた日・献立の無い未来の日は畳む」に変わったので、
+   * 人が開いたぶんを覚えずに戻ると、戻った先でその日がまた畳まれる＝ページの高さが変わり、
+   * 覚えた縦位置に戻しても違う場所に着く（実測で130pxずれた）。
+   * 押した結果も「居場所」の一部として一緒に覚える。触っていなければ空で、書かない。
+   */
+  dayFold?: Record<string, boolean>
 }
 
 /**
@@ -248,6 +257,7 @@ export const WEEK_RETURN_KEY = 'mealPlan:weekReturn'
 export const WEEK_RETURN_PARAM = 'restore'
 
 export function serializeWeekReturn(point: WeekReturnPoint): string {
+  const dayFold = point.dayFold ?? {}
   return JSON.stringify({
     weekStart: point.weekStart,
     scrollY: Math.max(0, Math.round(point.scrollY)),
@@ -255,6 +265,8 @@ export function serializeWeekReturn(point: WeekReturnPoint): string {
     ...(point.anchor
       ? { anchor: { date: point.anchor.date, top: Math.round(point.anchor.top) } }
       : {}),
+    // 曜日カードを1つも触っていなければ書かない（以前の版と同じ形のまま）
+    ...(Object.keys(dayFold).length > 0 ? { dayFold } : {}),
   })
 }
 
@@ -274,19 +286,38 @@ export function parseWeekReturn(raw: string | null | undefined): WeekReturnPoint
     return null
   }
   if (typeof parsed !== 'object' || parsed === null) return null
-  const { weekStart, scrollY, anchor } = parsed as {
+  const { weekStart, scrollY, anchor, dayFold } = parsed as {
     weekStart?: unknown
     scrollY?: unknown
     anchor?: unknown
+    dayFold?: unknown
   }
   if (typeof weekStart !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null
   if (typeof scrollY !== 'number' || !Number.isFinite(scrollY) || scrollY < 0) return null
   const validAnchor = parseReturnAnchor(anchor)
+  const validDayFold = parseDayFold(dayFold)
   return {
     weekStart,
     scrollY: Math.round(scrollY),
     ...(validAnchor ? { anchor: validAnchor } : {}),
+    ...(validDayFold ? { dayFold: validDayFold } : {}),
   }
+}
+
+/**
+ * 覚えていた曜日カードの開け閉めを読み出す（2026-08-19 便ID・⑦）。
+ * 日付の形をしていない鍵・真偽でない値は**その1件だけ捨てる**（残りは活かす）。
+ * 1件も残らなければ null＝「触っていない」と同じ扱いにして、既定の畳み方に任せる。
+ */
+function parseDayFold(raw: unknown): Record<string, boolean> | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const out: Record<string, boolean> = {}
+  for (const [date, folded] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+    if (typeof folded !== 'boolean') continue
+    out[date] = folded
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /** 目印の読み出し（形が違えば「目印なし」として扱う。上端は画面外を指す負の値もありうる） */

@@ -80,6 +80,7 @@ import {
   shiftWeek,
   shiftDate,
   isPastDate,
+  planDefaultFoldedDates,
   monthDates,
   shiftMonth,
   monthLeadingBlanks,
@@ -196,6 +197,12 @@ import SwapLabel from '../components/SwapLabel'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import RecipeCard from '../components/RecipeCard'
 import { usePhotoUrl } from '../components/usePhotoUrl'
+import {
+  DIALOG_ACTIONS_CLS,
+  DIALOG_BACKDROP_CLS,
+  DIALOG_CARD_CLS,
+  DIALOG_PRIMARY_BUTTON_CLS,
+} from '../components/dialogStyle'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
 import { useScrollLock } from '../components/useScrollLock'
 import type {
@@ -323,6 +330,30 @@ const PURPOSE_LABEL: Record<MealPurpose, string> = {
   lowSalt: ja.mealPlan.purposeLowSalt,
 }
 const purposeLabelOf = (purpose: MealPurpose): string => PURPOSE_LABEL[purpose]
+/**
+ * 「栄養から組む」のプルダウンの中に並べる名前（2026-08-19 便ID・⑤）。
+ *
+ * オーナー原文「栄養から組むの選択肢は、多めとひかえめでグループ分けされている→個別に
+ * 『〇〇多め』『〇〇ひかえめ』とついているとくどく感じる。しかし、『提案の条件：〇〇』に
+ * 入れる場合は『〇〇多め』の方が見やすい。両立できない？」。
+ *
+ * **表示名を2つ持てば両立する**。プルダウンの中は「多め」「ひかえめ」の区分（optgroup）の下に
+ * 並ぶので項目名だけでよく（こちら）、条件のボタンに出す要約は区分から離れて1つで読まれるので
+ * 「たんぱく質多め」のまま（上の PURPOSE_LABEL）。内部キーも提案の効き方も変えていない。
+ * 2つがずれると「選んだ名前と要約の名前が別物」になるので、
+ * scripts/test-logic.mjs の ID-5 が「選択肢名＋区分名＝要約の名前」で結んで見張る。
+ */
+const PURPOSE_OPTION_LABEL: Record<MealPurpose, string> = {
+  protein: ja.mealPlan.purposeOption.protein,
+  fiber: ja.mealPlan.purposeOption.fiber,
+  iron: ja.mealPlan.purposeOption.iron,
+  calcium: ja.mealPlan.purposeOption.calcium,
+  lowEnergy: ja.mealPlan.purposeOption.lowEnergy,
+  lowFat: ja.mealPlan.purposeOption.lowFat,
+  lowCarb: ja.mealPlan.purposeOption.lowCarb,
+  lowSalt: ja.mealPlan.purposeOption.lowSalt,
+}
+const purposeOptionLabelOf = (purpose: MealPurpose): string => PURPOSE_OPTION_LABEL[purpose]
 
 /** レシピ選択ピッカーの絞り込み・並び替え（2026-07-24 便BH-3・タスク6: 一覧画面の機構を流用）。
  * 栄養並び替え（Pro機能）は複雑なのでピッカーには出さず、基本の並び替えだけを提供する */
@@ -2422,6 +2453,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           setWeekStart(point.weekStart)
           setPendingScrollY(point.scrollY)
           setPendingScrollAnchor(point.anchor ?? null)
+          // 開け閉めした曜日カードも離れる前の形に戻す（2026-08-19 便ID・⑦）
+          setDayFoldOverrides(point.dayFold ?? {})
           // 「今日を先頭に7日間」表示の初期化(weekModeInitRef)が、あとから設定を読み終えた
           // タイミングで週を今日へ寄せ直してしまうと、復元した週が消える。復元したときは
           // その初期化を済み扱いにする＝覚えていた週をそのまま見せる
@@ -2687,8 +2720,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const changePurpose = (next: MealPurpose | undefined) => {
     saveSettings({ planPurpose: next })
   }
-  // 提案条件6ボタンの折りたたみ(2026-07-16 UI総点検A-3)。既定閉
+  /**
+   * 「現在の条件」の窓が開いているか（2026-08-19 便ID・④。オーナーはA案＝窓を選択）。
+   * 2026-07-16 UI総点検A-3から折りたたみだったものを窓に替えた。既定は閉じている。
+   * 週タブと月タブが同じ状態を共有する（条件そのものを共有しているため）。
+   */
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
+  const closeSuggestConditions = () => setSuggestConditionsOpen(false)
+  /**
+   * 「調理時間◯分以内を優先」の分数を選ぶ（2026-08-19 便ID）。
+   * 分数のプルダウンを常に出す形にしたので、選んだ時点で優先もONにする
+   * ＝押しても何も起きない欄を窓の中に置かない（日タブの「◯分以内」と同じ作法）。
+   */
+  const changeQuickMinutes = (minutes: number) => {
+    if (!quickOnly) setQuickOnly(true)
+    if (minutes !== quickMinutes) saveSettings({ planQuickMinutes: minutes })
+  }
   const [message, setMessage] = useState('')
   /**
    * 他の画面から「結果を伝えたうえで献立へ戻す」ときのトースト（2026-08-11 便FP）。
@@ -4592,13 +4639,41 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   }
 
   /**
-   * 週タブで畳んでいる曜日カードの日付（2026-08-03 便DJ・オーナー指示）。
-   * 畳むと日付の行だけが残る。7日ぶんが常に全部開いていて、ほかの曜日を探すのに
-   * 何画面もスクロールしていたための対応。既定は全部開いた状態（従来と同じ見え方）で、
-   * 週を移動すると畳んだ記憶は持ち越さない（見ている週の話だけにする）。
+   * 週タブの曜日カードの開け閉め（2026-08-03 便DJ・オーナー指示。畳むと日付の行だけが残る）。
+   *
+   * 2026-08-19 便ID・⑦（オーナー原文「デフォルト表示は、過去の日付は折りたたみ（入力があれば
+   * ☑️マーク）、献立が空欄の未来の日付も折りたたみ、献立ありの未来の日付は開いて表示にしたい。」）:
+   * **既定を「全部開く」から日ごとの判断に変えた**。決め方は logic/mealPlan.ts の
+   * planDefaultFoldedDates が持つ（実行日の曜日にも月替わりにも依存しない形）。
+   *
+   * ここが覚えるのは**人が押して開け閉めしたぶんだけ**（日付→畳んでいるか）。
+   * 押していない日は既定に従う＝あとから献立が入れば、その日は押さなくても開く。
+   * 週を移動しても持ち越さない（日付をキーにしているので、別の週の日付には当たらない）。
    */
-  const [collapsedDates, setCollapsedDates] = useState<string[]>([])
-  const allDaysCollapsed = dates.every((d) => collapsedDates.includes(d))
+  const [dayFoldOverrides, setDayFoldOverrides] = useState<Record<string, boolean>>({})
+  /**
+   * 献立が1品以上入っている日（表示している食事のぶんだけ数える）。
+   * 表示していない食事にしか入っていない日を「献立あり」と数えると、開いても何も無い日が開く。
+   */
+  const datesWithPlan = useMemo(() => {
+    const set = new Set<string>()
+    for (const entry of entries ?? []) {
+      if (visibleSlots.includes(entry.slot)) set.add(entry.date)
+    }
+    return set
+  }, [entries, visibleSlots])
+  const defaultFoldedDates = useMemo(
+    () => new Set(planDefaultFoldedDates({ dates, today, datesWithPlan })),
+    [dates, today, datesWithPlan],
+  )
+  const isDayFolded = (date: string) => dayFoldOverrides[date] ?? defaultFoldedDates.has(date)
+  const setAllDaysFolded = (folded: boolean) =>
+    setDayFoldOverrides((prev) => {
+      const next = { ...prev }
+      for (const date of dates) next[date] = folded
+      return next
+    })
+  const allDaysCollapsed = dates.every((d) => isDayFolded(d))
   /** 表示中の7日が全部ロック済みか（「すべてロック」ボタンが「すべて解除」に変わる条件） */
   const allDaysLocked = dates.every((d) => isDayMealLocked(lockedKeys, d))
 
@@ -4625,6 +4700,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         weekStart: dates[0],
         scrollY: window.scrollY,
         anchor: pickReturnAnchor(cards, visibleTop) ?? undefined,
+        // 人が開け閉めした曜日カードも一緒に覚える（2026-08-19 便ID・⑦）。
+        // 覚えずに戻ると、開いていた日がまた畳まれてページの高さが変わり、
+        // 覚えた縦位置に戻しても違う場所へ着く（実測で130pxずれた）
+        dayFold: dayFoldOverrides,
       }),
     )
   }
@@ -5633,53 +5712,106 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       className={`mt-[var(--space-sm)] ${disabled ? 'pointer-events-none opacity-40' : ''}`}
       aria-disabled={disabled || undefined}
     >
+      {/* 2026-08-19 便ID・③④（オーナー原文
+          「『提案の条件：〇〇』→『現在の条件：〇〇』。実際に〇〇に入っているのは現在の条件のはず。」
+          「『提案の条件：〇〇』をタップした時に期待する挙動は、そのままこの枠のプルダウン。
+            実際は下にスペースが伸びるので、ちょっとびっくりする。」→ オーナーはA案＝窓で開くを選択）:
+          ・名前を「現在の条件」にした（ここに出ているのは、いま効いている条件そのもの）
+          ・押すと**窓**が開く。折りたたみをやめたので、押しても下の内容は1pxも動かない
+          ・条件を1つも選んでいないときは「: 指定なし」と書く（コロンの後ろを空にしない＝
+            「読み取れなかった」のか「選んでいない」のかが分かるようにする）
+          何か絞り込んでいるあいだは枠と字をアクセント色にする＝窓を開かなくても
+          「絞り込み中かどうか」が分かる（日タブの「条件をしぼる」と同じ言い方） */}
       <button
         type="button"
+        data-testid="plan-conditions-open"
         disabled={disabled}
-        onClick={() => setSuggestConditionsOpen((v) => !v)}
-        aria-expanded={suggestConditionsOpen}
-        className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted shadow-sm"
+        onClick={() => setSuggestConditionsOpen(true)}
+        className={`inline-flex items-center gap-1 rounded-sm border bg-surface px-3 py-2 text-sm font-bold shadow-sm ${
+          conditionsSummary ? 'border-accent text-accent-ink' : 'border-edge text-ink-muted'
+        }`}
       >
-        {ja.mealPlan.suggestConditionsToggle}
-        {/* 現在値は開いていても出したままにする（2026-08-09 便EO・オーナー実機
-            「ボタンも押下後にサイズが変わって場所がズレる」）。畳んだときだけ足していたため、
-            押すたびにボタンの右端が100px以上動き、シェブロンに置いた指が空振りしていた */}
-        {conditionsSummary ? `: ${conditionsSummary}` : ''}
-        {suggestConditionsOpen ? (
-          <ChevronUp size={16} aria-hidden />
-        ) : (
-          <ChevronDown size={16} aria-hidden />
-        )}
+        <SlidersHorizontal size={16} aria-hidden />
+        {ja.mealPlan.suggestConditionsToggle}:{' '}
+        {conditionsSummary || ja.mealPlan.suggestConditionsNone}
       </button>
 
-      <Collapse open={suggestConditionsOpen}>
-        <>
-        {/* 調理時間（2026-08-19 便HT・オーナー原文「調理時間15分いないを優先は、
-            時間だけプルダウンで変更できるようにしたい」）。
-            **機能はボタンのまま**で、分数だけをプルダウンで変える。
-            分数のプルダウンは優先がONのあいだだけ出す＝OFFのときに触っても何も変わらない
-            ものを並べない（「今日なに作る？」の「◯分以内」も、選んでいるときだけ
-            分数を出している。同じ絞り込みを画面ごとに違う出し方にしない）。
-            押す回数は増やしていない: ONにするのはこれまでどおりボタン1回で、
-            分数を変えるときだけプルダウンを触る（これまでは変えられなかった） */}
-        <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-[var(--space-sm)]">
-          <button
-            type="button"
-            onClick={() => setQuickOnly((v) => !v)}
-            aria-pressed={quickOnly}
-            className={chipClass(quickOnly)}
-            style={chipStyle(quickOnly)}
-          >
-            <ChipCheck on={quickOnly} />
-            {ja.mealPlan.quickOnlyToggle.replace('{n}', String(quickMinutes))}
-          </button>
-          {quickOnly && (
+      {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）の入口。
+          解錠済みの3択は窓の中（下の renderSuggestConditionsModal）。
+          未解錠のときだけ、控えめな鍵付き1行をここに常設して押すとPro案内へ行く
+          （docs/62「売り場を変える」＝設定の奥ではなく無料の献立画面に入口を置く。
+          窓の中に入れると、窓を開けない人には入口が見えない）。
+          押し売りはしない＝1行の控えめな鍵付き行にとどめる（規約H） */}
+      {!isPro && showLockedRow && renderPurposeLockedRow()}
+    </div>
+  )
+
+  /**
+   * 「現在の条件」を押すと開く窓（2026-08-19 便ID・④。オーナーはA案＝窓を選択）。
+   *
+   * 直す前はこの中身が折りたたみで、開くと下の内容が押し下がり、さらに中の「調理時間◯分以内を優先」を
+   * 押すと分数のプルダウンと説明が現れて下がまたずれていた（オーナー原文「実際は下にスペースが
+   * 伸びるので、ちょっとびっくりする」）。窓にすれば、開いても中で何を押しても後ろの画面は動かない。
+   *
+   * **窓の作りは日タブの「条件をしぼる」（2026-08-19 便IA）とまったく同じものを使う**＝
+   * 外タップ・✕・端末の「戻る」で閉じる（useOverlayDismiss）／開いているあいだ後ろの画面を止める
+   * （useScrollLock）／見た目は dialogStyle。新しい窓の作りは発明しない。
+   *
+   * **窓の中も動かない形にしてある**（便IAと同じ手）:
+   *  ・分数のプルダウンを最初から出す（押してはじめて現れる選択肢を作らない）。
+   *    分数を選んだ時点で「調理時間◯分以内を優先」もONにする＝押しても効かない欄を置かない
+   *  ・「調理時間◯分以内を優先」の説明の1行は、出ていないあいだも同じ場所を取る（見えなくするだけ）
+   *  この窓は真ん中に出るので、中身が1行増えると窓ごと上下に動く＝出したり消したりするものは
+   *  すべて場所を先に取る必要がある。
+   *
+   * 週タブと月タブが同じ窓を共有する（条件そのものが共有＝executeFillが同じ値を読むため）。
+   * 描くのは画面に1つだけ（折りたたみの中に置くと、閉じるときに窓ごと切り取られる）。
+   */
+  const renderSuggestConditionsModal = () =>
+    suggestConditionsOpen && (
+      <div className={DIALOG_BACKDROP_CLS} onClick={closeSuggestConditions} role="presentation">
+        <div
+          role="dialog"
+          aria-label={ja.mealPlan.suggestConditionsTitle}
+          data-testid="plan-conditions-modal"
+          onClick={(e) => e.stopPropagation()}
+          className={DIALOG_CARD_CLS}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-bold">{ja.mealPlan.suggestConditionsTitle}</h3>
+            <button
+              type="button"
+              onClick={closeSuggestConditions}
+              aria-label={ja.common.close}
+              className="tap-target -mr-2 -mt-1 shrink-0 rounded-full p-2 text-ink-muted"
+            >
+              <X size={20} aria-hidden />
+            </button>
+          </div>
+
+          {/* 調理時間（2026-08-19 便HT・オーナー原文「調理時間15分いないを優先は、
+              時間だけプルダウンで変更できるようにしたい」）。**機能はボタンのまま**で、
+              分数だけをプルダウンで変える。
+              2026-08-19 便ID: 分数のプルダウンは**いつも出す**（便HTでは優先がONのあいだだけ
+              出していたが、押すたびに窓の中身が伸び縮みしていた）。押しても効かない欄にしないため、
+              分数を選んだらその場で優先もONにする（日タブの「◯分以内」と同じ作法） */}
+          <div className="mt-[var(--space-md)] flex flex-wrap items-center gap-[var(--space-sm)]">
+            <button
+              type="button"
+              onClick={() => setQuickOnly((v) => !v)}
+              aria-pressed={quickOnly}
+              className={chipClass(quickOnly)}
+              style={chipStyle(quickOnly)}
+            >
+              <ChipCheck on={quickOnly} />
+              {ja.mealPlan.quickOnlyToggle.replace('{n}', String(quickMinutes))}
+            </button>
             <label className="flex items-center gap-2 text-sm text-ink-muted">
               <span className="shrink-0">{ja.mealPlan.quickMinutesLabel}</span>
               <select
                 data-testid="plan-quick-minutes"
                 value={quickMinutes}
-                onChange={(e) => saveSettings({ planQuickMinutes: Number(e.target.value) })}
+                onChange={(e) => changeQuickMinutes(Number(e.target.value))}
                 className="select-control"
               >
                 {PLAN_QUICK_MINUTES_OPTIONS.map((m) => (
@@ -5689,92 +5821,102 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 ))}
               </select>
             </label>
-          )}
-        </div>
-        {/* 条件の説明は、その条件を選んでいるあいだだけ出す（2026-08-09 便EN・オーナー実機
-            「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
-            優先されているように読めた）。
-            調理時間: 何を見ているか(全レシピの調理時間)と、自分で登録したレシピも対象になること */}
-        {quickOnly && (
-          <p className="mt-1 text-xs text-ink-muted">
+          </div>
+          {/* 条件の説明は、その条件を選んでいるあいだだけ見せる（2026-08-09 便EN・オーナー実機
+              「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
+              優先されているように読めた）。
+              2026-08-19 便ID: 見えないあいだも**同じ場所を取る**（消すと窓の中身が伸び縮みする）。
+              読み上げにも乗せない（aria-hidden） */}
+          <p
+            data-testid="plan-quick-hint"
+            aria-hidden={!quickOnly}
+            className={`mt-1 text-xs text-ink-muted ${quickOnly ? '' : 'invisible'}`}
+          >
             {ja.mealPlan.quickOnlyHint.replace('{n}', String(quickMinutes))}
           </p>
-        )}
-        {/* 料理のジャンル（2026-08-19 便HT・オーナー原文「和洋中選択も同様にプルダウン」）。
-            チップ4つ（指定なし/和食/洋食/中華）を1つのプルダウンにまとめた。
-            チップは「どれが選ばれているか」を地色で言っていたので、まとめると
-            何の欄なのかが読めなくなる。欄の名前（料理のジャンル）を添えて補う */}
-        <label className="mt-[var(--space-sm)] block">
-          <span className="block text-sm font-bold text-ink-muted">{ja.mealPlan.genreLabel}</span>
-          <select
-            data-testid="plan-genre"
-            value={genreFilter ?? ''}
-            onChange={(e) => setGenreFilter((e.target.value || undefined) as MealGenre | undefined)}
-            className="select-control mt-1 w-full"
-          >
-            <option value="">{ja.mealPlan.genreAny}</option>
-            {MEAL_GENRES.map((genre) => (
-              <option key={genre} value={genre}>
-                {genre}
-              </option>
-            ))}
-          </select>
-        </label>
-        </>
-      </Collapse>
-
-      {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
-          解錠済み: 3択で選ぶ（他の条件と同じく折りたたみの中）。
-          未解錠: 控えめな鍵付き1行を**折りたたみの外に常設**し、押すとPro案内へ行く
-          （docs/62「売り場を変える」＝設定の奥ではなく無料の献立画面に入口を置く。
-          既定で閉じている折りたたみの中に入れると、結局その入口は誰にも見えない）。
-          押し売りはしない＝1行の控えめな鍵付き行にとどめる（規約H） */}
-      {isPro ? (
-        <Collapse open={suggestConditionsOpen}>
-          <div className="mt-[var(--space-md)]" data-testid="purpose-picker">
-            <p className="flex items-center gap-1 text-sm font-bold text-ink-muted">
-              {ja.mealPlan.purposeLabel}
-              <span className="rounded-full border border-accent px-2 py-0.5 text-xs text-accent-ink">
-                {ja.mealPlan.purposeProTag}
-              </span>
-            </p>
-            {/* 2026-08-19 便HT（オーナー原文「栄養から組むのボタンは、プルダウンにしたい。
-                ボタンがたくさん並ぶとごちゃつき感がある。」）: チップ9個（指定なし＋8つの軸）を
-                プルダウン1つにした。
-                2026-08-07 便DT-9でオーナーが決めた「多め」「ひかえめ」の2群分けは、
-                プルダウンの中の区分（optgroup）としてそのまま残す＝8つを1列に混ぜて
-                「どちらの向きの指定なのか読み取れない」状態に戻さない */}
+          {/* 料理のジャンル（2026-08-19 便HT・オーナー原文「和洋中選択も同様にプルダウン」）。
+              チップ4つ（指定なし/和食/洋食/中華）を1つのプルダウンにまとめた。
+              チップは「どれが選ばれているか」を地色で言っていたので、まとめると
+              何の欄なのかが読めなくなる。欄の名前（料理のジャンル）を添えて補う */}
+          <label className="mt-[var(--space-md)] block">
+            <span className="block text-sm font-bold text-ink-muted">{ja.mealPlan.genreLabel}</span>
             <select
-              data-testid="plan-purpose"
-              aria-label={ja.mealPlan.purposeLabel}
-              value={planPurpose ?? ''}
-              onChange={(e) => void changePurpose((e.target.value || undefined) as MealPurpose | undefined)}
+              data-testid="plan-genre"
+              value={genreFilter ?? ''}
+              onChange={(e) => setGenreFilter((e.target.value || undefined) as MealGenre | undefined)}
               className="select-control mt-1 w-full"
             >
-              <option value="">{ja.mealPlan.purposeNone}</option>
-              {(
-                [
-                  [ja.mealPlan.purposeGroupMore, MORE_MEAL_PURPOSES],
-                  [ja.mealPlan.purposeGroupLess, LESS_MEAL_PURPOSES],
-                ] as const
-              ).map(([groupLabel, purposes]) => (
-                <optgroup key={groupLabel} label={groupLabel}>
-                  {purposes.map((purpose) => (
-                    <option key={purpose} value={purpose}>
-                      {purposeLabelOf(purpose)}
-                    </option>
-                  ))}
-                </optgroup>
+              <option value="">{ja.mealPlan.genreAny}</option>
+              {MEAL_GENRES.map((genre) => (
+                <option key={genre} value={genre}>
+                  {genre}
+                </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
+          </label>
+
+          {/* 栄養から組む（Pro機能）。解錠済みのときだけ、この窓の中で選べる */}
+          {isPro && (
+            <div className="mt-[var(--space-md)]" data-testid="purpose-picker">
+              <p className="flex items-center gap-1 text-sm font-bold text-ink-muted">
+                {ja.mealPlan.purposeLabel}
+                <span className="rounded-full border border-accent px-2 py-0.5 text-xs text-accent-ink">
+                  {ja.mealPlan.purposeProTag}
+                </span>
+              </p>
+              {/* 2026-08-19 便HT（オーナー原文「栄養から組むのボタンは、プルダウンにしたい。
+                  ボタンがたくさん並ぶとごちゃつき感がある。」）: チップ9個（指定なし＋8つの軸）を
+                  プルダウン1つにした。
+                  2026-08-07 便DT-9でオーナーが決めた「多め」「ひかえめ」の2群分けは、
+                  プルダウンの中の区分（optgroup）としてそのまま残す。
+                  2026-08-19 便ID・⑤（オーナー原文「個別に『〇〇多め』『〇〇ひかえめ』と
+                  ついているとくどく感じる。しかし、『提案の条件：〇〇』に入れる場合は
+                  『〇〇多め』の方が見やすい。両立できない？」）: **表示名を2つ持って両立させる**。
+                  区分の中に並ぶこの選択肢は項目名だけ（PURPOSE_OPTION_LABEL）、
+                  区分から離れて1つで読まれる条件のボタンの要約は「たんぱく質多め」
+                  （PURPOSE_LABEL）。中身（内部キー・提案の効き方）は何も変えていない */}
+              <select
+                data-testid="plan-purpose"
+                aria-label={ja.mealPlan.purposeLabel}
+                value={planPurpose ?? ''}
+                onChange={(e) => void changePurpose((e.target.value || undefined) as MealPurpose | undefined)}
+                className="select-control mt-1 w-full"
+              >
+                <option value="">{ja.mealPlan.purposeNone}</option>
+                {(
+                  [
+                    [ja.mealPlan.purposeGroupMore, MORE_MEAL_PURPOSES],
+                    [ja.mealPlan.purposeGroupLess, LESS_MEAL_PURPOSES],
+                  ] as const
+                ).map(([groupLabel, purposes]) => (
+                  <optgroup key={groupLabel} label={groupLabel}>
+                    {purposes.map((purpose) => (
+                      <option key={purpose} value={purpose}>
+                        {purposeOptionLabelOf(purpose)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.purposeHint}</p>
+            </div>
+          )}
+
+          {/* 窓の中身は縦に長くなるので、下端にも大きな「閉じる」を置く
+              （下まで送ると右上の✕が画面の外に出るため）。名前は同じ ja.common.close */}
+          <div className={DIALOG_ACTIONS_CLS}>
+            <button
+              type="button"
+              data-testid="plan-conditions-close"
+              onClick={closeSuggestConditions}
+              className={DIALOG_PRIMARY_BUTTON_CLS}
+            >
+              {ja.common.close}
+            </button>
           </div>
-        </Collapse>
-      ) : (
-        showLockedRow && renderPurposeLockedRow()
-      )}
-    </div>
-  )
+        </div>
+      </div>
+    )
 
   /**
    * 週タブの操作グループ（表示のしかた／自動で献立を提案／献立テンプレート）の見出し＝折りたたみボタン
@@ -5856,6 +5998,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 重ね窓はEscapeキーと端末の「戻る」で1枚ずつ閉じる(2026-07-30 便CH/C13)。
   // 日モーダルはEscapeだけ対応済みだったので戻るにも広げ、便CB-1/CB-2で増えた
   // ピッカー・テンプレの窓（どちらも未対応で、戻るとレシピ一覧へ離脱していた）も同じ作法に揃える
+  // 「現在の条件」の窓（2026-08-19 便ID・④）。閉じ方も後ろの画面の止め方も、
+  // 日タブの「条件をしぼる」（便IA）と同じ共通の仕組みに乗せる
+  useOverlayDismiss(suggestConditionsOpen, closeSuggestConditions)
+  useScrollLock(suggestConditionsOpen)
   useOverlayDismiss(dayModalDate != null, () => setDayModalDate(null))
   useOverlayDismiss(pickerOpen, () => closePicker())
   useOverlayDismiss(templateSaveOpen, () => setTemplateSaveOpen(false))
@@ -7069,25 +7215,29 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         {!isPro && renderPurposeLockedRow()}
         <Collapse open={weekGroupOpen.auto}>
           <>
-            {/* 自動提案の条件: 時短優先・ジャンル(指定なし/和食/洋食/中華・単一選択)。
-                既定は折りたたみ(2026-07-16 UI総点検A-3: 常時全展開がP1/P2一致のゴチャつき指摘だったため)。
-                畳んだ状態でも既定値から変わっていればラベルに現在値を出す。
-                2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
-                2026-08-07 便DT-7: 先週コピーがONのあいだは効かないのでグレーアウトする */}
-            {renderSuggestConditions(copyLastWeekMode, false)}
-
             {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
                 空いている枠だけを埋めるのか、これからの献立を総入れ替えするのかを選ぶ。
-                先週コピーがONのあいだは効かないのでグレーアウトする */}
+                先週コピーがONのあいだは効かないのでグレーアウトする。
+
+                2026-08-19 便ID・①（オーナー原文「献立を提案の並び順：入れ方＞提案の条件」）:
+                **入れかたを先、現在の条件を後**にした。
+                2026-08-19 便ID・②（オーナー原文「『まだ決まっていない枠だけ埋める』
+                『レシピを総入れ替え』→『空欄のみ』『総入れ替え』のように、シンプルに。（略）
+                横一列にボタンを配置。２列だと情報量自体が多く感じ、直感的に２択だとわからない」）:
+                名前を短くし、**2列のグリッドで必ず横1列**に並べる（折り返しに任せると、
+                文字を大きくした端末では2段に割れて「2択」に見えなくなる）。
+                下の1行は残す: 短い名前だけでは「押すボタンはどれか」「今ある献立がどうなるか」が
+                言えないため（便ENでオーナーが「押さないといけないことに気づけない」と指摘した箇所）。
+                総入れ替えのときに何が消えて何が残るかは、押したあとの確認の窓が件数つきで言う（規約F） */}
             <div
-              className={`mt-[var(--space-md)] ${copyLastWeekMode ? 'pointer-events-none opacity-40' : ''}`}
+              className={`mt-[var(--space-sm)] ${copyLastWeekMode ? 'pointer-events-none opacity-40' : ''}`}
               aria-disabled={copyLastWeekMode || undefined}
             >
               <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.fillModeTitle}</p>
               <div
                 role="group"
                 aria-label={ja.mealPlan.fillModeTitle}
-                className="mt-1 flex flex-wrap gap-[var(--space-sm)]"
+                className="mt-1 grid grid-cols-2 gap-[var(--space-sm)]"
               >
                 {(
                   [
@@ -7098,10 +7248,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <button
                     key={value}
                     type="button"
+                    data-testid={value === 'fillEmpty' ? 'fill-mode-empty' : 'fill-mode-replace'}
                     disabled={copyLastWeekMode}
                     onClick={() => setFillMode(value)}
                     aria-pressed={fillMode === value}
-                    className={chipClass(fillMode === value)}
+                    /* チップの見た目は他の条件と同じものを使うが、2列に敷くので
+                       inline-flex（中身ぶんの幅）ではなく列いっぱいに広げる */
+                    className={`${chipClass(fillMode === value)} w-full justify-center`}
                     style={chipStyle(fillMode === value)}
                   >
                     <ChipCheck on={fillMode === value} />
@@ -7115,6 +7268,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   : ja.mealPlan.fillModeFillEmptyHint}
               </p>
             </div>
+
+            {/* 現在の条件: 時短優先・ジャンル・栄養から組む。押すと窓が開く(2026-08-19 便ID・④)。
+                2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
+                2026-08-07 便DT-7: 先週コピーがONのあいだは効かないのでグレーアウトする */}
+            {renderSuggestConditions(copyLastWeekMode, false)}
 
             {/* S-3(docs/59): 先週の献立を空き枠だけにコピー。上書きはしない=非破壊
                 (確認文で件数と「残る」を明示)。
@@ -7245,7 +7403,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </button>
         <button
           type="button"
-          onClick={() => setCollapsedDates(allDaysCollapsed ? [] : [...dates])}
+          onClick={() => setAllDaysFolded(!allDaysCollapsed)}
           className="rounded-sm border border-edge bg-surface px-3 py-1.5 text-xs font-bold text-accent-ink shadow-sm"
         >
           <SwapLabel
@@ -7256,7 +7414,25 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </div>
       <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
         {dates.map((date) => {
-          const dayCollapsed = collapsedDates.includes(date)
+          const dayCollapsed = isDayFolded(date)
+          /**
+           * 畳んでいる日に出す印（2026-08-19 便ID・⑦。オーナー原文「献立ありで折りたたみに
+           * した場合はオレンジ色の「・」などで入力があることがわかるようにして」）。
+           * 絵文字は使わない（端末ごとに見た目が変わるため。アプリはアイコンを lucide-react に、
+           * 色をデザイントークンに統一している）。
+           *  ・今日以降 … 献立が入っていれば丸い点（月タブのカレンダーで「献立が入っている日」に
+           *    出している点と同じ形・同じアクセント色＝同じ意味を同じ印で言う）
+           *  ・過ぎた日 … 「作った記録」があればチェックの印（過ぎた日のカードは予定を出さず
+           *    記録を見せる画面なので、開くと何が読めるのかをそのまま印にする。
+           *    この印は過ぎた日のカードの中で「作った記録」の見出しにも使っている）
+           */
+          const dayMark = isPastDate(date, today)
+            ? shownLogsOf(date).length > 0
+              ? 'cooked'
+              : null
+            : datesWithPlan.has(date)
+              ? 'plan'
+              : null
           const dayLocked = isDayMealLocked(lockedKeys, date)
           return (
           <section
@@ -7283,11 +7459,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る) */}
               <button
                 type="button"
-                onClick={() =>
-                  setCollapsedDates((prev) =>
-                    prev.includes(date) ? prev.filter((d) => d !== date) : [...prev, date],
-                  )
-                }
+                data-testid="week-day-toggle"
+                data-date={date}
+                onClick={() => setDayFoldOverrides((prev) => ({ ...prev, [date]: !dayCollapsed }))}
                 aria-expanded={!dayCollapsed}
                 aria-label={(dayCollapsed
                   ? ja.mealPlan.weekDayToggleOpenAria
@@ -7295,10 +7469,36 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 ).replace('{date}', date.replaceAll('-', '/'))}
                 className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
               >
-                <span>
-                  {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
-                  {date === today && (
-                    <span className="ml-2 text-sm text-accent-ink">{ja.mealPlan.todayBadge}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0">
+                    {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
+                    {date === today && (
+                      <span className="ml-2 text-sm text-accent-ink">{ja.mealPlan.todayBadge}</span>
+                    )}
+                  </span>
+                  {/* 畳んでいる日に、中身があることを言う印（便ID・⑦）。
+                      開いている日には出さない（中身がそのまま見えているため） */}
+                  {dayCollapsed && dayMark === 'plan' && (
+                    <span
+                      data-testid="week-day-mark"
+                      data-date={date}
+                      data-mark="plan"
+                      className="inline-flex shrink-0 items-center"
+                    >
+                      <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />
+                      <span className="sr-only">{ja.mealPlan.weekDayPlanMark}</span>
+                    </span>
+                  )}
+                  {dayCollapsed && dayMark === 'cooked' && (
+                    <span
+                      data-testid="week-day-mark"
+                      data-date={date}
+                      data-mark="cooked"
+                      className="inline-flex shrink-0 items-center"
+                    >
+                      <CheckCircle2 size={14} className="text-accent-ink" aria-hidden />
+                      <span className="sr-only">{ja.mealPlan.weekDayCookedMark}</span>
+                    </span>
                   )}
                 </span>
                 {dayCollapsed ? (
@@ -8290,6 +8490,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           onMessage={setMessage}
         />
       )}
+
+      {/* 「現在の条件」の窓（2026-08-19 便ID・④）。週タブ・月タブのどちらから開いても同じ窓。
+          **折りたたみやタブの中ではなくここに1つだけ**置く: 折りたたみは開閉のあいだ中身を
+          切り取るので、その中に窓を置くと閉じるときに窓ごと切り取られる */}
+      {renderSuggestConditionsModal()}
 
       {/* 「今日なに作る？」で出ているものを、どの食事に入れるか選ぶ窓（2026-08-17 便HI）。
           レシピ詳細の「今日の献立に追加」・レシピ一覧のまとめ追加とまったく同じ部品・
