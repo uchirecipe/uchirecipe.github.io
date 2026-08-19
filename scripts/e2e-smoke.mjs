@@ -19086,10 +19086,17 @@ try {
         JSON.stringify(htRecalledIds) === JSON.stringify(htHitIds),
         `押した後=${JSON.stringify(htRecalledIds)} 登録したとき=${JSON.stringify(htHitIds)}`,
       )
+      // 2026-08-19 便IB・②: 登録したタグは、もとからあるタグと同じ「絞り込みのタグ」として効く
+      // （押しても検索欄は動かない＝2つのタグで押したときの効き方が違う、という状態を作らない）
       check(
-        'HZ-TAG-01(②) 押すと検索欄にも登録した言葉が戻る',
-        (await htPage.locator('input[type="search"]').inputValue()) === '豆腐',
+        'HZ-TAG-01(②) 登録したタグを押しても検索欄は変わらない(タグの選択として効く)',
+        (await htPage.locator('input[type="search"]').inputValue()) === '',
         `検索欄=${await htPage.locator('input[type="search"]').inputValue()}`,
+      )
+      check(
+        'HZ-TAG-01(②) 押した登録したタグが「選ばれている」状態になる',
+        (await htSavedChip.getAttribute('aria-pressed')) === 'true',
+        `aria-pressed=${await htSavedChip.getAttribute('aria-pressed')}`,
       )
 
       // ---------- ② 削除できる（規約F: 何が消えて何が残るか） ----------
@@ -19145,13 +19152,277 @@ try {
     }
   }
 
-  // --- HZ-TAG-02: タグを複数選べる／2つ以上選んだときの選び方を切り替えられる
-  //     （2026-08-19 便HZ・③ オーナー「タグ検索は、複数選択できるよにして。
-  //      AND検索OR検索の切り替え機能も欲しい」）。
-  //     件数の決め打ちはせず、**同じ2つのタグでANDとORの結果が実際に違う**ことと
-  //     **AND ⊆ OR** を、画面から読み取ったレシピの並びで見る。
+  // --- IB-TAG-01: 絞り込みの「タグ」は1つの並びで、数字の意味もそろっている（2026-08-19 便IB・②
+  //     オーナー実機フィードバック「絞り込みタグは、実質キーワード検索？説明に『タグが付いている
+  //     レシピの品数』とあるので、表現を揃えたい。やりたいことは『好きなキーワードをよく使うタグとして
+  //     絞り込みに登録したい』」）。
+  //
+  //     直す前は、同じ「タグ」の欄に性質の違う2つが別々に並んでいた
+  //     （もとからあるタグ＝レシピに付いている印・数字あり／自分で登録したタグ＝保存した検索の言葉・数字なし）。
+  //     【この検査で測ること】
+  //      ①チップに出ている数字と、そのチップだけで絞り込んだときに実際に出る品数が一致すること
+  //        （もとからあるタグ・登録したタグの両方で。数字と結果が食い違うと説明文が嘘になる）
+  //      ②登録したタグも、もとからあるタグと同じ選び方（スイッチ）に乗ること
+  //      ③欄が2つに分かれていない（「自分で登録したタグ」という別見出しが無い）
+  //     数字が読み取れなかったときは必ず落ちる（読めないまま合格にしない）---
+  currentCheck = 'IB-TAG-01'
+  {
+    const ibBrowser = await chromium.launch()
+    const ibContext = await ibBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ibPage = await ibContext.newPage()
+    ibPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@IB-TAG-01] ${err.message}`)
+    })
+    try {
+      const ibIds = () =>
+        ibPage.evaluate(() =>
+          Array.from(document.querySelectorAll('a[href]'))
+            .map((a) => a.getAttribute('href') ?? '')
+            .filter((href) => /^#\/recipes\/\d+$/.test(href)),
+        )
+      // チップは名前で押す（画面の中の何番目か・入れ子の段数には頼らない）
+      const ibClickChip = (testid, label) =>
+        ibPage.evaluate(
+          ({ testid, label }) => {
+            const btn = Array.from(document.querySelectorAll(`[data-testid="${testid}"]`)).find(
+              (b) => (b.textContent ?? '').replace(/​/g, '').trim().split(' ')[0] === label,
+            )
+            if (!btn) return false
+            btn.click()
+            return true
+          },
+          { testid, label },
+        )
+      // チップの「名前」と「数字」を読む。数字が付いていなければ null（読めないまま合格にしない）
+      const ibChips = (testid) =>
+        ibPage.evaluate(
+          (testid) =>
+            Array.from(document.querySelectorAll(`[data-testid="${testid}"]`))
+              .map((b) => (b.textContent ?? '').replace(/​/g, '').trim())
+              .filter((text) => text !== '' && text.split(' ')[0] !== 'すべて')
+              .map((text) => {
+                const m = text.match(/(\d+)\s*$/)
+                return { name: text.split(' ')[0], count: m ? Number(m[1]) : null }
+              }),
+          testid,
+        )
+      const ibClearTags = () => ibClickChip('recipes-tag-chip', 'すべて')
+      const ibSwitch = ibPage.locator('[data-testid="recipes-tag-match"]')
+      const ibSwitchOn = async () => (await ibSwitch.first().getAttribute('aria-checked')) === 'true'
+      const ibSetSwitch = async (on) => {
+        if ((await ibSwitch.count()) !== 1) return false
+        if ((await ibSwitchOn()) === on) return true
+        await ibSwitch.first().click()
+        await ibPage.waitForTimeout(400)
+        return (await ibSwitchOn()) === on
+      }
+      const ibOpenFilter = async () => {
+        await ibPage.locator('button[aria-label="絞り込み"]').click()
+        await ibPage.waitForTimeout(500)
+      }
+      await ibPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ibPage.waitForTimeout(2000)
+      const ibTotal = (await ibIds()).length
+      check('IB-TAG-01 前提: 一覧にレシピが出ている', ibTotal > 0, `全件=${ibTotal}`)
+
+      // 好きな言葉を「よく使うタグ」として登録する
+      await ibPage.locator('input[type="search"]').fill('豆腐')
+      await ibPage.waitForTimeout(900)
+      const ibSearchHits = await ibIds()
+      check(
+        'IB-TAG-01 前提: 登録する言葉の検索結果が0品でも全品でもない',
+        ibSearchHits.length > 0 && ibSearchHits.length < ibTotal,
+        `検索結果=${ibSearchHits.length} 全件=${ibTotal}`,
+      )
+      await ibPage.locator('[data-testid="saved-search-add"]').click()
+      await ibPage.waitForTimeout(900)
+      await ibPage.locator('input[type="search"]').fill('')
+      await ibPage.waitForTimeout(700)
+
+      await ibOpenFilter()
+      const ibSavedChips = await ibChips('recipes-saved-search-chip')
+      const ibTagChips = await ibChips('recipes-tag-chip')
+      check(
+        'IB-TAG-01(②) 登録したタグが絞り込みのタグに1つ並んでいる',
+        ibSavedChips.length === 1 && ibSavedChips[0].name === '豆腐',
+        `登録したタグ=${JSON.stringify(ibSavedChips)}`,
+      )
+      check(
+        'IB-TAG-01(②) 前提: もとからあるタグも2つ以上読み取れている',
+        ibTagChips.length >= 2,
+        `タグ=${JSON.stringify(ibTagChips)}`,
+      )
+      check(
+        'IB-TAG-01(②) 登録したタグにも数字が出ている(もとからあるタグと同じ形)',
+        ibSavedChips.length === 1 && ibSavedChips[0].count != null && ibSavedChips[0].count > 0,
+        `登録したタグ=${JSON.stringify(ibSavedChips)}`,
+      )
+      check(
+        'IB-TAG-01(②) 欄が2つに分かれていない(「自分で登録したタグ」の別見出しが無い)',
+        !(await ibPage.textContent('body')).replace(/​/g, '').includes('自分で登録したタグ'),
+      )
+      check(
+        'IB-TAG-01(②) 数字の意味の説明が1本になっている',
+        (await ibPage.textContent('body'))
+          .replace(/​/g, '')
+          .includes('数字は、そのタグに当てはまるレシピの品数です'),
+      )
+
+      // 増えた押しどころ（選び方のスイッチ・登録したタグの削除）が指で押せる大きさであること。
+      // クラス名ではなく**実際の当たり判定**で測る（TAP-44と同じ方法。中心から上下左右21pxの点を
+      // 突いて、何も起きない場所が無いことを見る）。測れなかったら落ちる
+      const ibTapProbe = await ibPage.evaluate(() => {
+        const out = []
+        for (const sel of [
+          '[data-testid="recipes-tag-match"]',
+          '[data-testid="recipes-saved-search-remove"]',
+        ]) {
+          const el = document.querySelector(sel)
+          if (!el) {
+            out.push({ sel, found: false })
+            continue
+          }
+          el.scrollIntoView({ block: 'center', inline: 'center' })
+          const r = el.getBoundingClientRect()
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          const d = 21
+          const dead = [
+            [cx - d, cy],
+            [cx + d, cy],
+            [cx, cy - d],
+            [cx, cy + d],
+          ].filter(([x, y]) => {
+            const hit = document.elementFromPoint(x, y)
+            if (hit && (hit === el || el.contains(hit))) return false
+            return !(hit && hit.closest('button, a[href], [role="button"], input, select, textarea, label'))
+          })
+          out.push({ sel, found: true, box: `${Math.round(r.width)}x${Math.round(r.height)}`, dead: dead.length })
+        }
+        return out
+      })
+      check(
+        'IB-TAG-01 増えた押しどころ(スイッチ・削除)に、44px四方の中で押せない場所が無い',
+        ibTapProbe.length === 2 &&
+          ibTapProbe.every((probe) => probe.found && probe.dead === 0),
+        `実測=${JSON.stringify(ibTapProbe)}`,
+      )
+
+      // ① 画面の数字と、実際に出る品数が一致する（登録したタグ・もとからあるタグの両方）
+      const ibTargets = [
+        ...ibSavedChips.slice(0, 1).map((c) => ({ ...c, testid: 'recipes-saved-search-chip' })),
+        ...ibTagChips.slice(0, 2).map((c) => ({ ...c, testid: 'recipes-tag-chip' })),
+      ]
+      check(
+        'IB-TAG-01(①) 前提: 数字を確かめる相手を3つ拾えている',
+        ibTargets.length === 3 && ibTargets.every((t) => t.count != null),
+        `相手=${JSON.stringify(ibTargets)}`,
+      )
+      await ibSetSwitch(false)
+      for (const target of ibTargets) {
+        await ibClearTags()
+        await ibPage.waitForTimeout(300)
+        const pressed = await ibClickChip(target.testid, target.name)
+        await ibPage.waitForTimeout(600)
+        const shown = (await ibIds()).length
+        check(
+          `IB-TAG-01(①) 「${target.name}」: 画面の数字と実際に出る品数が一致する`,
+          pressed && target.count != null && shown === target.count,
+          `押せた=${pressed} 画面の数字=${target.count} 実際に出た品数=${shown} 全件=${ibTotal}`,
+        )
+        check(
+          `IB-TAG-01(①) 前提: 「${target.name}」で絞ると0品でも全件でもない`,
+          shown > 0 && shown < ibTotal,
+          `実際に出た品数=${shown} 全件=${ibTotal}`,
+        )
+      }
+
+      // ② 登録したタグも、もとからあるタグと同じ選び方（スイッチ）に乗る。
+      //    重なりのある相手を画面から探す（重なりが無いとONが必ず0品になり、比べる中身が無い）
+      let ibPairTag = null
+      let ibOr = null
+      let ibAnd = null
+      for (const tag of ibTagChips) {
+        await ibSetSwitch(false)
+        await ibClearTags()
+        await ibPage.waitForTimeout(250)
+        if (!(await ibClickChip('recipes-saved-search-chip', '豆腐'))) continue
+        await ibPage.waitForTimeout(350)
+        if (!(await ibClickChip('recipes-tag-chip', tag.name))) continue
+        await ibPage.waitForTimeout(400)
+        const union = await ibIds()
+        if (!(await ibSetSwitch(true))) continue
+        await ibPage.waitForTimeout(450)
+        const both = await ibIds()
+        if (both.length > 0 && both.length < union.length) {
+          ibPairTag = tag.name
+          ibOr = union
+          ibAnd = both
+          break
+        }
+      }
+      check(
+        'IB-TAG-01(②) 前提: 登録したタグと重なるタグを画面から見つけられた',
+        ibPairTag != null,
+        `もとからあるタグ=${JSON.stringify(ibTagChips.map((c) => c.name))}`,
+      )
+      if (ibPairTag != null) {
+        check(
+          'IB-TAG-01(②) 登録したタグを混ぜてもスイッチONで結果が絞り込まれる',
+          ibAnd.length < ibOr.length,
+          `ON=${ibAnd.length} OFF=${ibOr.length} 組=豆腐+${ibPairTag}`,
+        )
+        check(
+          'IB-TAG-01(②) 登録したタグを混ぜてもONの結果はOFFの結果に必ず含まれる',
+          ibAnd.every((id) => ibOr.includes(id)),
+          `ON=${JSON.stringify(ibAnd)} OFF=${JSON.stringify(ibOr)}`,
+        )
+      }
+
+      // 後片付け（登録したタグを消して、次の検査に持ち越さない）
+      await ibSetSwitch(false)
+      await ibClearTags()
+      await ibPage.waitForTimeout(300)
+      const ibRemove = ibPage.locator('[data-testid="recipes-saved-search-remove"]')
+      if ((await ibRemove.count()) > 0) {
+        await ibRemove.first().click()
+        await ibPage.waitForTimeout(900)
+      }
+      await ibPage.locator('[data-testid="filter-panel-close"]').click()
+      await ibPage.waitForTimeout(400)
+
+      // 1つの並びにまとめた以上、同じ名前のチップが2つ並ばないこと（押す場所によって
+      // 当たる品が変わる、という状態を作らない）。もとからあるタグと同じ言葉で検索したときは
+      // 登録ボタンを出さない。空振りしていないことを、出るはずの言葉で先に確かめる
+      await ibPage.locator('input[type="search"]').fill('豆腐')
+      await ibPage.waitForTimeout(800)
+      check(
+        'IB-TAG-01(②) 前提: まだ並んでいない言葉では登録ボタンが出る(見張りの空振り防止)',
+        (await ibPage.locator('[data-testid="saved-search-add"]').count()) === 1,
+      )
+      await ibPage.locator('input[type="search"]').fill(ibTagChips[0].name)
+      await ibPage.waitForTimeout(800)
+      check(
+        `IB-TAG-01(②) もとからあるタグと同じ言葉「${ibTagChips[0].name}」では登録ボタンを出さない(同じ名前のチップを2つ作らない)`,
+        (await ibPage.locator('[data-testid="saved-search-add"]').count()) === 0,
+      )
+      await ibPage.locator('input[type="search"]').fill('')
+      await ibPage.waitForTimeout(500)
+    } finally {
+      await ibBrowser.close()
+    }
+  }
+
+  // --- HZ-TAG-02: タグを2つ以上選んだときの選び方（2026-08-19 便HZ・③ → 便IB・①でスイッチ1つに）
+  //     オーナー実機フィードバック「絞り込みタグ複数選択のANDとORの切り替えは、
+  //     『すべてのタグを含む』とON/OFFスイッチの方がわかりやすいかも」。
+  //     2つのチップ（どれかが付いている／すべて付いている）を、ON/OFFスイッチ1つに変えた。
+  //
+  //     件数の決め打ちはせず、**スイッチを入れると結果が絞り込まれ、入れないときの結果に
+  //     必ず含まれる**ことを、画面から読み取ったレシピの並びで見る。
   //     タグの顔ぶれは画面から拾い、重なりのある組をその場で探す
-  //     （重なりの無い組では「すべて付いている」が必ず0品になり、比べる中身が無くなるため）---
+  //     （重なりの無い組ではONが必ず0品になり、比べる中身が無くなるため）---
   currentCheck = 'HZ-TAG-02'
   {
     const tmBrowser = await chromium.launch()
@@ -19182,6 +19453,15 @@ try {
           { testid, label },
         )
       const tmClearTags = () => tmClickChip('recipes-tag-chip', 'すべて')
+      // 選び方のスイッチ。入り切りは aria-checked で読む（見た目の色ではなく状態で見る）
+      const tmSwitch = tmPage.locator('[data-testid="recipes-tag-match"]')
+      const tmSwitchOn = async () => (await tmSwitch.first().getAttribute('aria-checked')) === 'true'
+      const tmSetSwitch = async (on) => {
+        if ((await tmSwitchOn()) === on) return true
+        await tmSwitch.first().click()
+        await tmPage.waitForTimeout(400)
+        return (await tmSwitchOn()) === on
+      }
       await tmPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await tmPage.waitForTimeout(2000)
       const tmTotal = (await tmIds()).length
@@ -19200,32 +19480,36 @@ try {
         tmTagNames.length >= 2,
         `タグ=${JSON.stringify(tmTagNames)}`,
       )
-      // 選び方の切り替えが画面にある（言葉はja.tsのとおり。「AND」「OR」はそのまま出さない）
-      const tmMatchLabels = await tmPage.evaluate(() =>
-        Array.from(document.querySelectorAll('[data-testid="recipes-tag-match"]')).map(
-          (b) => (b.textContent ?? '').replace(/​/g, '').trim(),
-        ),
+      // 選び方は「ON/OFFのスイッチ1つ」（便IB・① オーナー案）。2つのチップには戻っていない
+      const tmSwitchCount = await tmSwitch.count()
+      const tmSwitchRole = tmSwitchCount > 0 ? await tmSwitch.first().getAttribute('role') : null
+      check(
+        'HZ-TAG-02(①) 選び方がON/OFFスイッチ1つになっている',
+        tmSwitchCount === 1 && tmSwitchRole === 'switch',
+        `数=${tmSwitchCount} role=${tmSwitchRole}`,
+      )
+      const tmSwitchLabel =
+        tmSwitchCount > 0 ? ((await tmSwitch.first().getAttribute('aria-label')) ?? '') : ''
+      check(
+        'HZ-TAG-02(①) スイッチの名前を読み取れている',
+        tmSwitchLabel.trim().length > 0,
+        `名前=${JSON.stringify(tmSwitchLabel)}`,
       )
       check(
-        'HZ-TAG-02 タグを2つ以上選んだときの選び方が2つある',
-        tmMatchLabels.length === 2,
-        `選び方=${JSON.stringify(tmMatchLabels)}`,
+        'HZ-TAG-02(①) スイッチの名前に「AND」「OR」をそのまま出していない(規約H)',
+        !/AND|OR/i.test(tmSwitchLabel),
+        `名前=${tmSwitchLabel}`,
       )
       check(
-        'HZ-TAG-02 選び方の名前に「AND」「OR」をそのまま出していない(規約H)',
-        !tmMatchLabels.some((t) => /AND|OR/i.test(t)),
-        `選び方=${JSON.stringify(tmMatchLabels)}`,
-      )
-      // 既定は「どれかが付いている」＝同じパネルの「料理の種別」と同じ和集合
-      const tmDefaultMatch = await tmPage.evaluate(() =>
-        Array.from(document.querySelectorAll('[data-testid="recipes-tag-match"]'))
-          .filter((b) => b.getAttribute('aria-pressed') === 'true')
-          .map((b) => (b.textContent ?? '').replace(/​/g, '').trim()),
+        'HZ-TAG-02(①) スイッチの名前が画面にも文字で出ている(印だけにしない)',
+        tmSwitchLabel.trim().length > 0 &&
+          (await tmPage.textContent('body')).replace(/​/g, '').includes(tmSwitchLabel),
+        `名前=${tmSwitchLabel}`,
       )
       check(
-        'HZ-TAG-02 既定は「どれかが付いている」の方が選ばれている',
-        tmDefaultMatch.length === 1 && tmDefaultMatch[0] === tmMatchLabels[0],
-        `選ばれている=${JSON.stringify(tmDefaultMatch)} 選び方=${JSON.stringify(tmMatchLabels)}`,
+        'HZ-TAG-02(①) 既定はOFF(選んだタグのどれかが当たれば残る)',
+        tmSwitchCount === 1 && (await tmSwitchOn()) === false,
+        `入り切り=${tmSwitchCount === 1 ? await tmSwitch.first().getAttribute('aria-checked') : 'スイッチが無い'}`,
       )
 
       // 重なりのある2つを探す（見つからなければ「測れなかった」として落ちる）
@@ -19233,8 +19517,10 @@ try {
       let tmA = null
       let tmB = null
       let tmAnd = null
+      let tmOr = null
       for (let i = 0; i < tmTagNames.length && tmPair == null; i++) {
         for (let j = i + 1; j < Math.min(tmTagNames.length, i + 4) && tmPair == null; j++) {
+          await tmSetSwitch(false)
           await tmClearTags()
           await tmPage.waitForTimeout(250)
           if (!(await tmClickChip('recipes-tag-chip', tmTagNames[i]))) continue
@@ -19242,12 +19528,14 @@ try {
           const first = await tmIds()
           if (!(await tmClickChip('recipes-tag-chip', tmTagNames[j]))) continue
           await tmPage.waitForTimeout(350)
-          if (!(await tmClickChip('recipes-tag-match', tmMatchLabels[1]))) continue
+          const union = await tmIds()
+          if (!(await tmSetSwitch(true))) continue
           await tmPage.waitForTimeout(400)
           const both = await tmIds()
           if (both.length > 0) {
             tmPair = [tmTagNames[i], tmTagNames[j]]
             tmA = first
+            tmOr = union
             tmAnd = both
           }
         }
@@ -19258,44 +19546,60 @@ try {
         `タグ=${JSON.stringify(tmTagNames)} 見つかった組=${JSON.stringify(tmPair)}`,
       )
       if (tmPair != null) {
+        check(
+          'HZ-TAG-02(①) スイッチを入れると結果が絞り込まれる',
+          tmAnd.length < tmOr.length,
+          `${JSON.stringify(tmPair)} ON=${tmAnd.length} OFF=${tmOr.length}`,
+        )
+        check(
+          'HZ-TAG-02(①) スイッチを入れた結果は、入れないときの結果に必ず含まれる',
+          tmAnd.every((id) => tmOr.includes(id)),
+          `ON=${JSON.stringify(tmAnd)} OFF=${JSON.stringify(tmOr)}`,
+        )
         // もう片方だけを選んだときの品数（和集合の数え合わせに使う）
+        await tmSetSwitch(false)
         await tmClearTags()
         await tmPage.waitForTimeout(250)
         await tmClickChip('recipes-tag-chip', tmPair[1])
         await tmPage.waitForTimeout(400)
         tmB = await tmIds()
-        // 2つ選んで「どれかが付いている」に戻す
-        await tmClickChip('recipes-tag-chip', tmPair[0])
-        await tmPage.waitForTimeout(350)
-        await tmClickChip('recipes-tag-match', tmMatchLabels[0])
-        await tmPage.waitForTimeout(400)
-        const tmOr = await tmIds()
         check(
           'HZ-TAG-02 前提: それぞれ1つだけ選んだときも0件でも全件でもない',
           tmA.length > 0 && tmA.length < tmTotal && tmB.length > 0 && tmB.length < tmTotal,
           `${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} 全件=${tmTotal}`,
         )
+        // 1つしか選んでいないときはスイッチを入れても結果が変わらない
+        // （だからスイッチは出したままでよい＝押しても間違った結果にはならない。便IB・①の判断）
+        const tmOneOff = await tmIds()
+        await tmSetSwitch(true)
+        await tmPage.waitForTimeout(400)
+        const tmOneOn = await tmIds()
         check(
-          'HZ-TAG-02 2つ選んだときの結果が、2つの選び方で実際に違う',
-          tmAnd.length < tmOr.length,
-          `${JSON.stringify(tmPair)} すべて付いている=${tmAnd.length} どれかが付いている=${tmOr.length}`,
+          'HZ-TAG-02(①) タグが1つだけのときはスイッチを入れても結果が変わらない',
+          JSON.stringify(tmOneOn) === JSON.stringify(tmOneOff) && tmOneOff.length > 0,
+          `ON=${tmOneOn.length}品 OFF=${tmOneOff.length}品`,
         )
+        await tmSetSwitch(false)
+        await tmPage.waitForTimeout(300)
         check(
-          'HZ-TAG-02 「すべて付いている」の結果は「どれかが付いている」に必ず含まれる',
-          tmAnd.every((id) => tmOr.includes(id)),
-          `すべて=${JSON.stringify(tmAnd)} どれか=${JSON.stringify(tmOr)}`,
-        )
-        check(
-          'HZ-TAG-02 数え合わせが合う(どれか = 片方 + もう片方 - すべて)',
+          'HZ-TAG-02 数え合わせが合う(OFF = 片方 + もう片方 - ON)',
           tmOr.length === tmA.length + tmB.length - tmAnd.length,
-          `どれか=${tmOr.length} ${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} すべて=${tmAnd.length}`,
+          `OFF=${tmOr.length} ${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} ON=${tmAnd.length}`,
         )
         check(
-          'HZ-TAG-02 「どれかが付いている」は1つだけ選んだときより増える(和集合)',
+          'HZ-TAG-02 OFFのときは1つだけ選んだときより増える(和集合)',
           tmOr.length > tmA.length && tmOr.length > tmB.length && tmOr.length <= tmTotal,
-          `どれか=${tmOr.length} ${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} 全件=${tmTotal}`,
+          `OFF=${tmOr.length} ${tmPair[0]}=${tmA.length} ${tmPair[1]}=${tmB.length} 全件=${tmTotal}`,
         )
-        // チップの数字の意味（そのタグが付いている品数）は、選び方でも他の選択でも変わらない
+        // チップの数字（そのタグだけで絞り込んだときの品数）は、スイッチでも他の選択でも変わらない
+        await tmClearTags()
+        await tmPage.waitForTimeout(250)
+        await tmClickChip('recipes-tag-chip', tmPair[0])
+        await tmPage.waitForTimeout(300)
+        await tmClickChip('recipes-tag-chip', tmPair[1])
+        await tmPage.waitForTimeout(300)
+        await tmSetSwitch(true)
+        await tmPage.waitForTimeout(400)
         const tmChipCount = await tmPage.evaluate((name) => {
           const btn = Array.from(document.querySelectorAll('[data-testid="recipes-tag-chip"]')).find(
             (b) => (b.textContent ?? '').replace(/​/g, '').trim().split(' ')[0] === name,
@@ -19305,17 +19609,18 @@ try {
           return m ? Number(m[1]) : null
         }, tmPair[0])
         check(
-          'HZ-TAG-02 チップの数字は「そのタグが付いている品数」のまま(2つ選んでも動かない)',
+          'HZ-TAG-02 チップの数字は「そのタグだけで絞り込んだときの品数」のまま(2つ選んでもスイッチを入れても動かない)',
           tmChipCount != null && tmChipCount === tmA.length,
           `チップの数字=${tmChipCount} ${tmPair[0]}だけを選んだときの品数=${tmA.length}`,
         )
         check(
           'HZ-TAG-02 数字が何を指すのかが画面に書いてある',
           (await tmPage.textContent('body')).replace(/​/g, '').includes(
-            '数字は、そのタグが付いているレシピの品数です',
+            '数字は、そのタグに当てはまるレシピの品数です',
           ),
         )
         // 「すべて」で外せる＝絞り込みを戻す手段がある
+        await tmSetSwitch(false)
         await tmClearTags()
         await tmPage.waitForTimeout(500)
         check(

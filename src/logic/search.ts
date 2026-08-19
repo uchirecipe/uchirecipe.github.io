@@ -53,7 +53,17 @@ export interface SearchOptions {
    * 任意項目にしてあるので、この絞り込みを使わない呼び出し側は据え置きでよい
    */
   tags?: readonly string[]
-  /** tags を2つ以上指定したときの選び方（既定 'any'） */
+  /**
+   * 自分で登録した言葉のタグで絞る（2026-08-19 便IB・② オーナー実機フィードバック
+   * 「やりたいことは『好きなキーワードをよく使うタグとして絞り込みに登録したい』」）。
+   *
+   * 中身は**検索の言葉**で、レシピには何も書き込まれていない（A案）。それでも利用者から見れば
+   * tags と同じ「絞り込みに使うタグ」なので、**同じ入れ物・同じ選び方（tagMatch）に乗せる**。
+   * 判定はテキスト検索（query と同じ matchesQuery）＝登録した言葉をそのまま検索欄に打ったときと
+   * 同じ品が出る。空配列・未指定＝絞らない
+   */
+  keywords?: readonly string[]
+  /** tags と keywords を合わせて2つ以上指定したときの選び方（既定 'any'） */
   tagMatch?: TagMatchMode
   /**
    * 料理の種別で絞る（任意・2026-08-10 便FF → 2026-08-19 便HUで複数選択に）。
@@ -84,6 +94,7 @@ export const defaultSearchOptions: Omit<SearchOptions, 'ngIngredients'> = {
   effort: 'all',
   tag: 'all',
   tags: [],
+  keywords: [],
   tagMatch: 'any',
   dishTypes: [],
   favoriteOnly: false,
@@ -160,6 +171,25 @@ export function filterTagUsageCounts(recipes: { tags: string[] }[], limit: numbe
   return tagUsageCounts(visible, limit)
 }
 
+/**
+ * 自分で登録したタグ（＝検索の言葉）に、いま何品が当たるかを数える（2026-08-19 便IB・②）。
+ *
+ * もとからあるタグのチップは「そのタグが付いている品数」を出しているのに、登録したタグだけ
+ * 数字が無く、説明文（「タグが付いているレシピの品数です」）も片方にしか効かなかった
+ * （オーナー指摘）。同じ形の数字を出すために、**絞り込みと同じ searchRecipes で数える**
+ * ＝画面に出す数字と、そのタグを押したときに実際に出る品数が食い違わない。
+ *
+ * 数える対象は渡されたレシピ集合そのもの（＝いま一覧に出ているレシピ）で、
+ * もとからあるタグの数え方（tagUsageCounts）とそろえる。
+ */
+export function countRecipesMatchingKeyword(recipes: Recipe[], keyword: string): number {
+  return searchRecipes(recipes, {
+    ...defaultSearchOptions,
+    ngIngredients: [],
+    keywords: [keyword],
+  }).length
+}
+
 /** 件数を捨ててタグ名だけを返す版（献立のレシピ選択ピッカーが使う） */
 export function topTagsByUsage(recipes: { tags: string[] }[], limit: number): string[] {
   return tagUsageCounts(recipes, limit).map((t) => t.tag)
@@ -202,6 +232,16 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
   const wantedTerms = splitTerms(options.ingredients)
   // 在庫との照合器は1回だけ作る(2026-07-29 便CC/C4)
   const matchesPantry = makePantryMatcher(options.pantryOnly ? (options.pantryNames ?? []) : [])
+  // タグの絞り込みの判定器（2026-08-19 便IB・②）。もとからあるタグは「付いているか」、
+  // 登録したタグは「その言葉で検索して当たるか」で、判定の中身は違うが同じ並びに入れる。
+  // 言葉の分解（splitTerms）はレシピごとにやると重いので、ここで1回だけ済ませる
+  const tagChecks: ((recipe: Recipe) => boolean)[] = [
+    ...(options.tags ?? []).map((name) => (recipe: Recipe) => recipe.tags.includes(name)),
+    ...(options.keywords ?? []).map((word) => {
+      const terms = splitTerms(word)
+      return (recipe: Recipe) => matchesQuery(recipe, terms)
+    }),
+  ]
 
   const results: SearchResult[] = []
   for (const recipe of recipes) {
@@ -209,15 +249,18 @@ export function searchRecipes(recipes: Recipe[], options: SearchOptions): Search
     if (!matchesTime(recipe, options.time)) continue
     if (options.effort !== 'all' && recipe.effortLevel !== options.effort) continue
     if (options.tag != null && options.tag !== 'all' && !recipe.tags.includes(options.tag)) continue
-    // タグの複数選択（2026-08-19 便HZ・③）。何も選んでいなければ絞らない。
-    // 'all'（すべて付いている）は選んだタグの数だけ条件が増えるので、選ぶほど必ず減る。
-    // 'any'（どれかが付いている）は選ぶほど必ず増える＝同じ選び方をしている
-    // 「料理の種別」（上の dishTypes）と同じ和集合になる
-    if (options.tags != null && options.tags.length > 0) {
+    // タグの複数選択（2026-08-19 便HZ・③ → 便IB・②で「自分で登録したタグ」も同じ入れ物に）。
+    // 何も選んでいなければ絞らない。
+    // 'all'（すべて当てはまる）は選んだタグの数だけ条件が増えるので、選ぶほど必ず減る。
+    // 'any'（どれかが当てはまる）は選ぶほど必ず増える＝同じ選び方をしている
+    // 「料理の種別」（上の dishTypes）と同じ和集合になる。
+    // もとからあるタグ（レシピに付いている印）と登録したタグ（検索の言葉）は判定の中身が違うが、
+    // **同じ選び方に乗せる**ので、利用者はどちらのタグかを意識せずに選べる
+    if (tagChecks.length > 0) {
       const matched =
         options.tagMatch === 'all'
-          ? options.tags.every((name) => recipe.tags.includes(name))
-          : options.tags.some((name) => recipe.tags.includes(name))
+          ? tagChecks.every((matches) => matches(recipe))
+          : tagChecks.some((matches) => matches(recipe))
       if (!matched) continue
     }
     // 料理の種別（2026-08-10 便FF → 2026-08-19 便HUで複数選択）。未設定のレシピも

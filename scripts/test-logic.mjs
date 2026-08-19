@@ -8994,6 +8994,97 @@ eq(
   )
 }
 
+// ---------- 便IB・② 登録したタグも、もとからあるタグと同じ「タグ」の並びで絞り込む ----------
+// オーナー実機フィードバック「絞り込みタグは、実質キーワード検索？説明に『タグが付いている
+// レシピの品数』とあるので、表現を揃えたい。やりたいことは『好きなキーワードをよく使うタグとして
+// 絞り込みに登録したい』」。
+//
+// 直す前は、同じ「タグ」の欄に性質の違う2つが並んでいた:
+//   ・もとからあるタグ = レシピに付いている印。押すと複数選択に入り、選び方(どれか/すべて)が効く
+//   ・自分で登録したタグ = 保存した検索の言葉。押すと検索欄に入るだけで、選び方は効かない
+// 利用者から見ると同じ「タグ」なのに、押したときの効き方が違っていた。
+//
+// 【この節で測ること】
+//  (1) 登録したタグを押した結果が、その言葉で検索した結果と同じであること
+//  (2) 登録したタグも、もとからあるタグと同じ選び方(どれか/すべて)に乗ること
+//  (3) チップに出す数字が、そのタグだけで絞り込んだときに実際に出る品数と一致すること
+//      (もとからあるタグ・登録したタグの両方で。数字と結果が食い違うと説明文が嘘になる)
+//  (4) 登録したタグを使ってもレシピのデータが1件も変わらないこと(A案の一点)
+// 件数の決め打ちはせず、同じ関数から取った2つの数の一致で見る。
+{
+  const { countRecipesMatchingKeyword } = await import('../src/logic/search.ts')
+  const mk = (id, title, tags) => ({
+    id,
+    title,
+    tags,
+    searchWords: [title],
+    ingredients: [{ name: title }],
+    cookedLogs: [],
+  })
+  const recipes = [
+    mk(1, 'から揚げ', ['和食']), // 言葉にも当たり、タグも付いている
+    mk(2, 'から揚げ丼', []), // 言葉にだけ当たる
+    mk(3, '肉じゃが', ['和食']), // タグだけ付いている
+    mk(4, 'パスタ', ['洋食']), // どちらでもない
+  ]
+  const recipesBefore = JSON.stringify(recipes)
+  const base = {
+    query: '',
+    ingredients: '',
+    time: 'all',
+    effort: 'all',
+    favoriteOnly: false,
+    excludeNg: false,
+    quickOnly: false,
+    ngIngredients: [],
+  }
+  const ids = (options) => searchRecipes(recipes, { ...base, ...options }).map((r) => r.recipe.id)
+
+  // (1) 押したときの結果＝その言葉で検索した結果
+  eq('IB② 登録したタグを押した結果は、その言葉の検索と同じ', ids({ keywords: ['から揚げ'] }), ids({ query: 'から揚げ' }))
+  eq('IB② 前提: その言葉の検索が0品でも全品でもない', ids({ keywords: ['から揚げ'] }), [1, 2])
+  eq('IB② 1つも選んでいなければ絞らない', ids({ keywords: [] }), [1, 2, 3, 4])
+
+  // (2) もとからあるタグと同じ選び方に乗る
+  const anyMixed = ids({ tags: ['和食'], keywords: ['から揚げ'], tagMatch: 'any' })
+  const allMixed = ids({ tags: ['和食'], keywords: ['から揚げ'], tagMatch: 'all' })
+  eq('IB② 前提: 混ぜて選んでもどちらも空振りしていない', anyMixed.length > 0 && allMixed.length > 0, true)
+  eq('IB② どれかが当たる＝もとからあるタグと登録したタグの和集合', anyMixed, [1, 2, 3])
+  eq('IB② すべて当たる＝両方に当たる品だけ', allMixed, [1])
+  eq(
+    'IB② 「すべて」の結果は「どれか」に必ず含まれる(混ぜても関係は同じ)',
+    allMixed.every((id) => anyMixed.includes(id)),
+    true,
+  )
+  eq('IB② 「すべて」の方が必ず少ない(混ぜても選ぶほど絞れる)', allMixed.length < anyMixed.length, true)
+  eq('IB② 登録したタグ同士でも選び方が効く(どれか)', ids({ keywords: ['から揚げ', '肉じゃが'], tagMatch: 'any' }), [1, 2, 3])
+  eq('IB② 登録したタグ同士でも選び方が効く(すべて)', ids({ keywords: ['から揚げ', '肉じゃが'], tagMatch: 'all' }), [])
+
+  // (3) チップの数字＝そのタグだけで絞り込んだときに実際に出る品数
+  eq('IB② 登録したタグの品数を数える道具がある', typeof countRecipesMatchingKeyword, 'function')
+  // 道具がまだ無い版でも、この節の残りが「実行時エラーで止まる」ではなく
+  // 「数字が読めない＝不合格」として出るようにする(読み取り失敗を素通り合格にしない)
+  const countKeyword =
+    typeof countRecipesMatchingKeyword === 'function' ? countRecipesMatchingKeyword : () => null
+  const keywordShown = countKeyword(recipes, 'から揚げ')
+  eq(
+    'IB② 登録したタグ: 画面に出す数字と、押したときに出る品数が一致する',
+    keywordShown,
+    ids({ keywords: ['から揚げ'] }).length,
+  )
+  const tagShown = tagUsageCounts(recipes, 10).find((u) => u.tag === '和食')?.count
+  eq(
+    'IB② もとからあるタグ: 画面に出す数字と、押したときに出る品数が一致する',
+    tagShown,
+    ids({ tags: ['和食'] }).length,
+  )
+  eq('IB② 前提: 数字を読み取れている(0や未取得のまま合格にしない)', keywordShown > 0 && tagShown > 0, true)
+
+  // (4) レシピのデータは1件も変わらない(A案: 登録したタグはレシピに書き込まない)
+  eq('IB② 登録したタグで絞り込んでもレシピのデータが1件も変わらない', JSON.stringify(recipes), recipesBefore)
+  eq('IB② そのタグが付いた品は1品も無い(レシピには書き込んでいない)', tagUsageCounts(recipes, 10).some((u) => u.tag === 'から揚げ'), false)
+}
+
 // ---------- jaWrap: 文節折返し(BudouX・2026-07-11) ----------
 {
   const { wrapJaPhrases, ZWSP } = await import('../src/logic/jaWrap.ts')

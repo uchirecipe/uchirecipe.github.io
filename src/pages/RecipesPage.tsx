@@ -53,6 +53,7 @@ import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
   filterTagUsageCounts,
+  countRecipesMatchingKeyword,
   type DishTypeFilter,
   type EffortFilter,
   type TagFilter,
@@ -402,6 +403,12 @@ type SavedListState = {
    * （復元のときに tag → tags へ読み替える）
    */
   tags?: string[]
+  /**
+   * 自分で登録したタグ（＝検索の言葉）で絞る（2026-08-19 便IB・②）。
+   * もとからあるタグ（上の tags）と同じ並び・同じ選び方に乗るが、判定の中身が違うので別に持つ。
+   * 旧セッションの保存値には無いので任意項目
+   */
+  keywords?: string[]
   /** タグを2つ以上選んだときの選び方（2026-08-19 便HZ・③。旧セッションの保存値には無い） */
   tagMatch?: TagMatchMode
   /** 1つだけ選ぶ形だった頃の保存値（2026-08-19 便HZ・③より前） */
@@ -605,6 +612,16 @@ export default function RecipesPage() {
   const [tagMatch, setTagMatch] = useState<TagMatchMode>(saved?.tagMatch ?? 'any')
   const toggleTag = (value: string) =>
     setTags((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]))
+  /**
+   * 自分で登録したタグ（＝検索の言葉）のうち、いま選んでいるもの（2026-08-19 便IB・②）。
+   * もとからあるタグと同じ並びに出し、同じ選び方（tagMatch）に乗せる。
+   * 押したときに検索欄へ言葉を入れる旧来の作りをやめたので、検索欄とは無関係に選び外しできる
+   */
+  const [keywords, setKeywords] = useState<string[]>(saved?.keywords ?? [])
+  const toggleKeyword = (value: string) =>
+    setKeywords((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
+    )
   // 料理の種別(主菜・副菜・汁物・その他)で絞る(2026-08-10 便FF → 2026-08-19 便HU・⑬で複数選択)。
   // 空＝絞らない。選んだ区分の**どれか**に当たるレシピが残る
   const [dishTypes, setDishTypes] = useState<DishTypeFilter[]>(saved?.dishTypes ?? [])
@@ -679,21 +696,23 @@ export default function RecipesPage() {
   }
 
   /**
-   * タグのチップ(2026-08-03 オーナー指示 → 2026-08-10 便FFで件数を併記)。
-   *
-   * いま一覧に出ているレシピのタグを数え、そのタグが付いているレシピの多い順に出す。
-   * チップに件数を出すのは、並びの規則を画面から読めるようにするため
-   * (オーナー「現状は勝手にこちらできめた『よく使いようなタグ』をとにかく並べただけ」)。
-   * 数える対象は一覧と同じ集合なので、「自分で登録したレシピのみ」をONにすれば
-   * 自分のタグだけが数え直される。
-   * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
-   */
-  /**
    * 絞り込みのタグとして登録した検索の言葉（2026-08-19 便HZ・②）。控えは設定に持つ。
-   * **レシピのデータには一切触らない**ので、チップに件数は出さない
-   * （押すとその言葉の検索が戻るだけで、「そのタグが付いた品が◯品ある」という数ではない）。
+   * **レシピのデータには一切触らない**（A案）。
+   *
+   * 2026-08-19 便IB・②: もとからあるタグと1つの並びにまとめ、チップにも同じ形の数字を出す。
+   * 数字はレシピに付いている印の数ではなく「その言葉で絞り込んだときに当たる品数」で、
+   * 絞り込みと同じ searchRecipes から取る＝画面の数字と押した結果が食い違わない
    */
   const savedSearches = useMemo(() => settings?.savedSearches ?? [], [settings?.savedSearches])
+  /**
+   * 選んでいる登録したタグのうち、いまも登録されているものだけ（2026-08-19 便IB・②）。
+   * 前のセッションの保存値に、その後で削除したタグが残っていても、
+   * 画面にチップが無い絞り込みが効いたままにならないようにする
+   */
+  const activeKeywords = useMemo(
+    () => keywords.filter((name) => savedSearches.includes(name)),
+    [keywords, savedSearches],
+  )
   /**
    * 以前の版（便HU・⑭）が、登録と同時にレシピ本体へ書き込んだタグのうち、まだ残っているもの
    * （2026-08-19 便HZ・②）。1つも残っていなければ欄ごと出さない。
@@ -721,6 +740,32 @@ export default function RecipesPage() {
     void updateSettings({ savedSearches: [...carried] })
   }, [settings])
 
+  /**
+   * 自分で登録したタグのチップ（2026-08-19 便IB・②）。もとからあるタグと同じ「{name} {n}」の形。
+   * 数える対象は一覧と同じ集合（visibleRecipes）で、もとからあるタグの数え方とそろえる
+   * ＝「自分で登録したレシピのみ」をONにすれば、どちらの数字も同じように数え直される
+   */
+  const savedTagOptions = useMemo(
+    () =>
+      savedSearches.map((name) => ({
+        value: name,
+        label: ja.search.tagChip
+          .replace('{name}', name)
+          .replace('{n}', String(countRecipesMatchingKeyword(visibleRecipes ?? [], name))),
+      })),
+    [savedSearches, visibleRecipes],
+  )
+
+  /**
+   * タグのチップ(2026-08-03 オーナー指示 → 2026-08-10 便FFで件数を併記)。
+   *
+   * いま一覧に出ているレシピのタグを数え、そのタグが付いているレシピの多い順に出す。
+   * チップに件数を出すのは、並びの規則を画面から読めるようにするため
+   * (オーナー「現状は勝手にこちらできめた『よく使いようなタグ』をとにかく並べただけ」)。
+   * 数える対象は一覧と同じ集合なので、「自分で登録したレシピのみ」をONにすれば
+   * 自分のタグだけが数え直される。
+   * 選択中のタグは、件数の変動で上位から外れても必ず残す(外す手段が消えないように)
+   */
   const tagOptions = useMemo(() => {
     // 2026-08-19 便HU・⑮: 「高たんぱく」は候補に出さない（logic/search.ts FILTER_HIDDEN_TAGS）
     const usages = filterTagUsageCounts(visibleRecipes ?? [], TAG_CHIP_LIMIT)
@@ -744,6 +789,7 @@ export default function RecipesPage() {
       time,
       effort,
       tags,
+      keywords: activeKeywords,
       tagMatch,
       dishTypes,
       favoriteOnly,
@@ -761,6 +807,7 @@ export default function RecipesPage() {
     time,
     effort,
     tags,
+    activeKeywords,
     tagMatch,
     dishTypes,
     favoriteOnly,
@@ -782,6 +829,7 @@ export default function RecipesPage() {
     time !== 'all' ||
     effort !== 'all' ||
     tags.length > 0 ||
+    activeKeywords.length > 0 ||
     dishTypes.length > 0 ||
     favoriteOnly ||
     excludeNg ||
@@ -806,6 +854,7 @@ export default function RecipesPage() {
         time,
         effort,
         tags,
+        keywords,
         tagMatch,
         dishTypes,
         favoriteOnly,
@@ -821,6 +870,7 @@ export default function RecipesPage() {
       time,
       effort,
       tags,
+      keywords,
       tagMatch,
       dishTypes,
       favoriteOnly,
@@ -873,6 +923,7 @@ export default function RecipesPage() {
       time,
       effort,
       tags,
+      keywords,
       tagMatch,
       dishTypes,
       favoriteOnly,
@@ -1150,7 +1201,9 @@ export default function RecipesPage() {
     setTime('all')
     setEffort('all')
     setTags([])
-    // 選び方も既定（どれかが付いている）に戻す＝クリアしたあとの絞り込みが毎回同じ形になる
+    setKeywords([])
+    // 選び方も既定（選んだタグのどれかが当てはまれば残る）に戻す
+    // ＝クリアしたあとの絞り込みが毎回同じ形になる
     setTagMatch('any')
     setDishTypes([])
     setFavoriteOnly(false)
@@ -1175,8 +1228,15 @@ export default function RecipesPage() {
    * 押して増えるだけの操作なので確認の窓は出さない（規約Fは何かが消える操作の作法）。
    */
   const pendingSavedSearch = savedSearchFromQuery(query)
+  /**
+   * その言葉のタグが、絞り込みの「タグ」にもう並んでいるか（2026-08-19 便IB・②）。
+   * 登録済みだけでなく、**もとからあるタグと同じ名前**のときも登録ボタンを出さない
+   * ＝同じ名前のチップが2つ並び、押す場所によって当たる品が変わる、という状態を作らない
+   */
   const savedSearchRegistered =
-    pendingSavedSearch != null && savedSearches.includes(pendingSavedSearch)
+    pendingSavedSearch != null &&
+    (savedSearches.includes(pendingSavedSearch) ||
+      tagOptions.some((option) => option.value === pendingSavedSearch))
   const [tagBusy, setTagBusy] = useState(false)
   const registerSavedSearch = async () => {
     if (!pendingSavedSearch || savedSearchRegistered || tagBusy) return
@@ -1191,11 +1251,6 @@ export default function RecipesPage() {
     }
   }
   /**
-   * 登録したタグをタップしたときの動き。その言葉での検索が戻る。
-   * もう一度タップすると検索を外す＝押して戻せる（一覧は全件に戻る）
-   */
-  const applySavedSearch = (name: string) => setQuery((prev) => (prev === name ? '' : name))
-  /**
    * 登録したタグを削除する（オーナー指示「もちろん削除もできるように」）。
    * 消えるのは絞り込みに並ぶタグだけで、レシピは1品も変わらない（規約Fで両方書く）。
    */
@@ -1208,8 +1263,8 @@ export default function RecipesPage() {
       )
       if (!ok) return
       await updateSettings({ savedSearches: savedSearchesWithout(settings?.savedSearches, name) })
-      // その言葉で検索している最中なら検索欄も戻す（押して外すチップごと消えるため）
-      if (query === name) setQuery('')
+      // そのタグで絞り込んでいたら外す（押して外すチップごと消えるため）
+      setKeywords((prev) => prev.filter((value) => value !== name))
       setMessage(ja.search.savedSearchRemovedToast.replace('{name}', name))
     } finally {
       setTagBusy(false)
@@ -1627,13 +1682,19 @@ export default function RecipesPage() {
 
           {/* --- 区分③「タグ」(2026-07-24 便BN・タスク3で絞り込みパネルの上部へ移動 →
               2026-08-03 使用件数の集計に変更 → 2026-08-10 便FFで件数を併記・見出しを改称 →
-              2026-08-19 便HZ・③で複数選択に) ---
-              チップに「和食 48」のようにレシピの品数を出し、並びの規則(品数の多い順)が
-              画面から読めるようにする。
-              複数選択の作法は同じパネルの「料理の種別」(便HU・⑬)とそろえる:
-              先頭の「すべて」＝選んだタグをまとめて外す、他のチップ＝押すたびに入り切り。
-              タグが1つも付いていないときは「すべて」だけの空の欄になるので、区分ごと出さない */}
-          {tagOptions.length > 0 && (
+              2026-08-19 便HZ・③で複数選択に → 便IB・②で「自分で登録したタグ」もこの並びへ) ---
+
+              便IB・②(オーナー実機フィードバック「絞り込みタグは、実質キーワード検索？
+              説明に『タグが付いているレシピの品数』とあるので、表現を揃えたい。やりたいことは
+              『好きなキーワードをよく使うタグとして絞り込みに登録したい』):
+              直す前は、同じ「タグ」でも**押したときの効き方が違う2つ**が別々の欄に並んでいた
+              (もとからあるタグ=複数選択に入る／登録したタグ=検索欄に言葉が入るだけ)。
+              利用者から見ればどちらも「絞り込みに使うタグ」なので、1つの並びにまとめ、
+              押したときの効き方(複数選択・下のスイッチ)も数字の出し方もそろえる。
+              並び順は「登録したタグ→もとからあるタグ(品数の多い順)」。登録したタグは数が少なく、
+              消す操作もここにあるので、件数で埋もれない先頭に固定する。
+              チップの数字はどちらも「そのタグだけで絞り込んだときの品数」で意味が同じ */}
+          {(tagOptions.length > 0 || savedTagOptions.length > 0) && (
             <>
               <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
                 {ja.search.tagTitle}
@@ -1642,12 +1703,41 @@ export default function RecipesPage() {
                 <button
                   type="button"
                   data-testid="recipes-tag-chip"
-                  onClick={() => setTags([])}
-                  aria-pressed={tags.length === 0}
-                  className={chipCls(tags.length === 0)}
+                  onClick={() => {
+                    setTags([])
+                    setKeywords([])
+                  }}
+                  aria-pressed={tags.length === 0 && keywords.length === 0}
+                  className={chipCls(tags.length === 0 && keywords.length === 0)}
                 >
                   {ja.search.tagAll}
                 </button>
+                {/* 自分で登録したタグ。チップの形はもとからあるタグと同じにし、
+                    自分で作ったものだけ消せるように削除ボタンを隣に添える
+                    (押せる大きさは tap-target で確保する) */}
+                {savedTagOptions.map((option) => (
+                  <span key={option.value} className="inline-flex items-center">
+                    <button
+                      type="button"
+                      data-testid="recipes-saved-search-chip"
+                      onClick={() => toggleKeyword(option.value)}
+                      aria-pressed={keywords.includes(option.value)}
+                      className={chipCls(keywords.includes(option.value))}
+                    >
+                      {option.label}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="recipes-saved-search-remove"
+                      onClick={() => void removeSavedSearch(option.value)}
+                      disabled={tagBusy}
+                      aria-label={ja.search.savedSearchRemoveAria.replace('{name}', option.value)}
+                      className="tap-target rounded-sm px-1.5 py-2 text-ink-muted disabled:opacity-40"
+                    >
+                      <Trash2 size={16} aria-hidden />
+                    </button>
+                  </span>
+                ))}
                 {tagOptions.map((option) => (
                   <button
                     key={option.value}
@@ -1661,77 +1751,39 @@ export default function RecipesPage() {
                   </button>
                 ))}
               </div>
-              {/* チップの数字が何を指すのか(2026-08-19 便HZ・③)。複数選べるようになると
-                  「押したら何品になるか」と読み違えられるので、数字の意味を1行で示す。
-                  この数字は選んでいるタグや下の選び方では変わらない */}
+              {/* チップの数字が何を指すのか(2026-08-19 便HZ・③ → 便IB・②)。複数選べるので
+                  「押したら何品になるか」と読み違えられるため、数字の意味を1行で示す。
+                  この数字は選んでいるタグや下のスイッチでは変わらない */}
               <p className="mt-1 text-xs text-ink-muted">{ja.search.tagCountHint}</p>
-              {/* タグを2つ以上選んだときの選び方(2026-08-19 便HZ・③ オーナー
-                  「AND検索OR検索の切り替え機能も欲しい」)。「AND」「OR」という語は出さず、
-                  何が残るかをそのまま書く(規約H)。1つだけ選んでいるあいだは結果が同じなので、
-                  切り替えても一覧は動かない */}
-              <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
-                {ja.search.tagMatchTitle}
-              </p>
-              <div className="mt-1 flex flex-wrap gap-[var(--space-sm)]">
+              {/* タグを2つ以上選んだときの選び方(2026-08-19 便HZ・③ → 便IB・① オーナー実機
+                  フィードバック「絞り込みタグ複数選択のANDとORの切り替えは、『すべてのタグを含む』と
+                  ON/OFFスイッチの方がわかりやすいかも」)。2つのチップからスイッチ1つにした。
+                  形はアプリに既にあるON/OFFスイッチ(設定の「画面を暗くしない」等)と同じ作法
+                  ——role="switch"+aria-checked、見出しの右にスイッチ、押せる面は tap-target。
+                  1つしか選んでいないときも出したままにする: 入れても結果は変わらないだけで
+                  間違った結果にはならず、タグを押すたびに欄が出入りして押す位置がずれる方が危ない */}
+              <label className="mt-[var(--space-sm)] flex items-center justify-between gap-3">
+                <span className="min-w-0 text-sm font-bold text-ink-muted">
+                  {ja.search.tagMatchAllSwitch}
+                </span>
                 <button
                   type="button"
+                  role="switch"
                   data-testid="recipes-tag-match"
-                  onClick={() => setTagMatch('any')}
-                  aria-pressed={tagMatch === 'any'}
-                  className={chipCls(tagMatch === 'any')}
+                  aria-checked={tagMatch === 'all'}
+                  aria-label={ja.search.tagMatchAllSwitch}
+                  onClick={() => setTagMatch((prev) => (prev === 'all' ? 'any' : 'all'))}
+                  className={`tap-target relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                    tagMatch === 'all' ? 'bg-accent' : 'bg-edge'
+                  }`}
                 >
-                  {ja.search.tagMatchAny}
+                  <span
+                    className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                      tagMatch === 'all' ? 'left-7' : 'left-1'
+                    }`}
+                  />
                 </button>
-                <button
-                  type="button"
-                  data-testid="recipes-tag-match"
-                  onClick={() => setTagMatch('all')}
-                  aria-pressed={tagMatch === 'all'}
-                  className={chipCls(tagMatch === 'all')}
-                >
-                  {ja.search.tagMatchAll}
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* 自分で登録したタグ(2026-08-19 便HZ・②)。上のタグの候補とは別の欄にする:
-              上はレシピに付いているタグで絞る欄、こちらは登録した言葉で検索し直す欄で、
-              押したときに起きることが違う。1つずつ削除できるよう行を分け、削除ボタンは
-              押せる大きさ(tap-target)を保つ */}
-          {savedSearches.length > 0 && (
-            <>
-              <p className="mt-[var(--space-md)] text-sm font-bold text-ink-muted">
-                {ja.search.savedSearchTitle}
-              </p>
-              <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchHint}</p>
-              <div className="mt-1 flex flex-col gap-[var(--space-sm)]">
-                {savedSearches.map((name) => (
-                  <div key={name} className="flex items-center gap-[var(--space-sm)]">
-                    <button
-                      type="button"
-                      data-testid="recipes-saved-search-chip"
-                      onClick={() => applySavedSearch(name)}
-                      aria-pressed={query === name}
-                      aria-label={ja.search.savedSearchChipAria.replace('{name}', name)}
-                      className={`inline-flex min-w-0 flex-1 items-center gap-1 text-left ${chipCls(query === name)}`}
-                    >
-                      <Search size={16} className="shrink-0" aria-hidden />
-                      <span className="min-w-0 truncate">{name}</span>
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="recipes-saved-search-remove"
-                      onClick={() => void removeSavedSearch(name)}
-                      disabled={tagBusy}
-                      aria-label={ja.search.savedSearchRemoveAria.replace('{name}', name)}
-                      className="tap-target shrink-0 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-ink-muted disabled:opacity-40"
-                    >
-                      {ja.search.savedSearchRemove}
-                    </button>
-                  </div>
-                ))}
-              </div>
+              </label>
             </>
           )}
 
