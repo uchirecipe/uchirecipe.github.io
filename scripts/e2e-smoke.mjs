@@ -528,6 +528,20 @@ const openAllWeekDays = async (page) => {
   }
 }
 /**
+ * 週タブの操作グループ（表示のしかた／献立を提案／献立テンプレート）を開く（2026-08-19 便IF）。
+ *
+ * 「献立を提案」は便IF・⑤⑥で既定が「開く」に戻った（実行ボタンがグループの中へ移ったため）。
+ * **閉じているときだけ押す**＝既定がどちらでも、この呼び出しで「開いた状態」にたどり着ける。
+ * 押す回数を決め打ちしない（禁じ手③）。
+ */
+const openWeekGroup = async (page, title) => {
+  const opener = page.getByRole('button', { name: `${title}を開く` })
+  if ((await opener.count()) > 0) {
+    await opener.first().click()
+    await page.waitForTimeout(350)
+  }
+}
+/**
  * 画面に出ている数を「助数詞に依らず」読むための道具（2026-08-18 便HR）。
  *
  * 2026-08-08と2026-08-18の2回、**数え方を見直すたびにe2eが赤くなった**。
@@ -4911,40 +4925,33 @@ try {
         'WEEKUI-DT(便DT-4) グループ見出しが「献立を提案」になっている(「自動で献立を提案」は残っていない)',
         dtBody.includes('献立を提案') && !dtBody.includes('自動で献立を提案'),
       )
-      const dtFillBtn = dtPage.getByRole('button', { name: 'まとめて献立を入力' })
+      const dtFillBtn = dtPage.locator('[data-testid="week-fill-run"]')
       check('WEEKUI-DT(便DT-5) 実行ボタンは「まとめて献立を入力」', await dtFillBtn.isVisible())
       check(
         'WEEKUI-DT(便DT-5) 実行ボタンは塗りつぶしで目立たせている',
         ((await dtFillBtn.getAttribute('class')) ?? '').includes('bg-accent'),
       )
-      const dtFillInHeader = await dtPage.evaluate(() => {
-        const btn = [...document.querySelectorAll('button')].find(
-          (b) => b.textContent?.trim() === 'まとめて献立を入力',
-        )
-        const toggle = btn?.parentElement?.querySelector('button[aria-expanded]')
-        return { sameRow: !!toggle, toggleLabel: toggle?.textContent ?? '' }
-      })
+      // 2026-08-19 便IF・⑥（オーナー原文「日と週で、同じ献立を提案する機能なのに、条件の
+      // 絞り込みなどのボタンの配置がバラバラで、まるで別機能。フォーマット揃えたい。
+      // 週は、日の、できることが増えたバージョン。」）で、DT-5/DT-6 の「実行ボタンは見出しの横・
+      // 畳んでも押せる」をやめた。日タブの「今日なに作る？」と同じ場所（条件の下・横いっぱい）
+      // へ移し、そのぶん「献立を提案」は既定で開く（＝便DJでオーナーが決めた既定に戻した）。
+      // 実行ボタンが中に入ったので、畳むと日タブの節を畳んだときと同じく操作ごと隠れる。
+      // 日と週の並びがそろっているかは WEEKFMT-01 が規則で測るので、ここでは
+      // 「既定で開いている」「畳めば中身ごと隠れる」の2つだけを見る
+      const dtAutoClose = dtPage.getByRole('button', { name: '献立を提案を閉じる' })
       check(
-        'WEEKUI-DT(便DT-6) 実行ボタンは「献立を提案」の見出しの横にある',
-        dtFillInHeader.sameRow && dtFillInHeader.toggleLabel.includes('献立を提案'),
-        `header=${JSON.stringify(dtFillInHeader)}`,
+        'WEEKUI-DT(便IF-⑥) 「献立を提案」は既定で開いている',
+        (await dtAutoClose.count()) === 1,
       )
-      // 畳んでも押せる位置に残る
-      // 2026-08-09 便EN(オーナー指示): 「献立を提案」も既定で畳んだ状態になったので、
-      // ここで閉じる操作は不要（開いていない状態から始まる）
+      await dtAutoClose.click()
+      await dtPage.waitForTimeout(400)
       check(
-        'WEEKUI-DT(便EN) 「献立を提案」は既定で畳んである',
-        (await dtPage.getByRole('button', { name: '献立を提案を開く' }).count()) === 1,
-      )
-      check(
-        'WEEKUI-DT(便DT-5) グループを畳んでも「まとめて献立を入力」は見えたまま',
-        await dtFillBtn.isVisible(),
-      )
-      check(
-        'WEEKUI-DT(便DT-6) 畳むと現在の条件・入れかたは隠れる(実行ボタンだけ残る)',
+        'WEEKUI-DT(便IF-⑥) 畳むと現在の条件・入れかた・実行ボタンがまとめて隠れる(日タブの節と同じ)',
         // 2026-08-19 便ID・③: 「提案の条件」→「現在の条件」に改名した(名前は ja.ts から読む)
         (await dtPage.getByRole('button', { name: new RegExp(`^${ja.mealPlan.suggestConditionsToggle}`) }).count()) === 0 &&
-          (await dtPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).count()) === 0,
+          (await dtPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).count()) === 0 &&
+          (await dtPage.locator('[data-testid="week-fill-run"]').count()) === 0,
       )
       await dtPage.getByRole('button', { name: '献立を提案を開く' }).click()
       await dtPage.waitForTimeout(300)
@@ -5860,11 +5867,13 @@ try {
         (await bkLockedState(bkLockedC)) === 'true',
       )
       await bkOpenGroup('献立を提案')
-      const bkCopyToggle = bkPage.getByRole('button', { name: '先週の献立をコピー', exact: true })
+      // 2026-08-19 便IF・⑥: 独立したスイッチをやめ、出しかたの2択（おまかせ／先週をコピー）の
+      // 片側になった。掴み方は目印にする＝名前を短くしても、この検査は動かない
+      const bkCopyToggle = bkPage.locator('[data-testid="plan-source-copy"]')
       await bkCopyToggle.click()
       await bkPage.waitForTimeout(400)
       check(
-        'WEEKLOCK-BULK(先週コピー) 前提: 「先週の献立をコピー」のスイッチがONになった',
+        'WEEKLOCK-BULK(先週コピー) 前提: 出しかたが「先週をコピー」になった',
         (await bkCopyToggle.getAttribute('aria-pressed')) === 'true',
       )
       bkDialogs.length = 0
@@ -7901,7 +7910,7 @@ try {
       // Fix5: aria-pressed(見た目は変更しない)
       // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
-      await mpPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await openWeekGroup(mpPage, '献立を提案')
       await mpPage.waitForTimeout(300)
       // 2026-07-16 UI総点検A-3で既定折りたたみ → 2026-08-19 便ID・④で**窓**になった。
       // 条件は窓の中にあるので、開いて触り、触り終えたら閉じてから次の操作へ移る
@@ -8706,7 +8715,7 @@ try {
 
       // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
-      await mp3Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await openWeekGroup(mp3Page, '献立を提案')
       await mp3Page.waitForTimeout(300)
       // 料理のジャンルは「現在の条件」の窓の中(2026-08-19 便ID・④で折りたたみ→窓)。まず開く
       await mp3Page.locator('[data-testid="plan-conditions-open"]').click()
@@ -8964,7 +8973,7 @@ try {
 
       // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
-      await mp4Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await openWeekGroup(mp4Page, '献立を提案')
       await mp4Page.waitForTimeout(300)
       // 便DT-8: 入れかたを「総入れ替え」に倒す(既定は非破壊の「空いた枠だけ」。名前は便ID・②で短くした)
       await mp4Page.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).click()
@@ -10749,29 +10758,34 @@ try {
       await openAllWeekDays(cwPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await cwPage.waitForTimeout(400)
 
-      // 2026-08-09 便EN(オーナー指示): 「献立を提案」グループは既定で畳んである。
-      // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
-      await cwPage.getByRole('button', { name: '献立を提案を開く' }).click()
-      await cwPage.waitForTimeout(300)
-      // 便DT-7: スイッチをONにしてから「まとめて献立を入力」で実行(confirmは自動承認・メッセージを捕捉)
-      const cwCopyToggle = cwPage.getByRole('button', { name: '先週の献立をコピー', exact: true })
+      // 2026-08-19 便IF・⑤⑥: 「献立を提案」グループは既定で開いている（実行ボタンが中へ移ったため）。
+      // 畳まれている端末でも通るよう、閉じていたときだけ開く
+      const cwAutoOpen = cwPage.getByRole('button', { name: '献立を提案を開く' })
+      if ((await cwAutoOpen.count()) === 1) {
+        await cwAutoOpen.click()
+        await cwPage.waitForTimeout(300)
+      }
+      // 便DT-7→便IF・⑥: 出しかたを「先週をコピー」に切り替えてから「まとめて献立を入力」で実行
+      // (confirmは自動承認・メッセージを捕捉)
+      const cwCopyToggle = cwPage.locator('[data-testid="plan-source-copy"]')
       await cwCopyToggle.click()
       await cwPage.waitForTimeout(300)
       check(
-        'MEALPLAN-S3(便DT-7) 「先週の献立をコピー」はスイッチで、押すとONになる',
+        'MEALPLAN-S3(便IF-⑥) 出しかたの2択で「先週をコピー」を選べる',
         (await cwCopyToggle.getAttribute('aria-pressed')) === 'true',
       )
       check(
-        'MEALPLAN-S3(便DT-7) ONのあいだは現在の条件が効かないので押せない状態になる',
+        'MEALPLAN-S3(便DT-7) 選んでいるあいだは現在の条件が効かないので押せない状態になる',
         await cwPage
           .getByRole('button', { name: new RegExp(`^${ja.mealPlan.suggestConditionsToggle}`) })
           .isDisabled(),
       )
       check(
-        'MEALPLAN-S3(便DT-7) ONのあいだは入れかたのスイッチも押せない状態になる',
-        await cwPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).isDisabled(),
+        // 2026-08-19 便IF・⑧: 入れかたはコピーにも効くようになったので、押せる状態のままにする
+        'MEALPLAN-S3(便IF-⑧) 入れかたはコピーを選んでいても押せる(コピーにも効くため)',
+        await cwPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).isEnabled(),
       )
-      await cwPage.getByRole('button', { name: 'まとめて献立を入力' }).click()
+      await cwPage.locator('[data-testid="week-fill-run"]').click()
       await cwPage.waitForTimeout(700)
 
       check(
@@ -10779,8 +10793,13 @@ try {
         /コピーします/.test(cwDialogMsg) && /\d+品/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
         `dialog=${cwDialogMsg}`,
       )
+      // 2026-08-19 便IF・④: 完了の知らせにもコピー元の7日間の日付が入る
       const cwToast = (await cwPage.textContent('body')) ?? ''
-      check('MEALPLAN-S3 コピー完了トーストが出る', /先週の献立を\d+品コピーしました/.test(cwToast))
+      check(
+        'MEALPLAN-S3 コピー完了トーストが出る',
+        /\d{4}\/\d{2}\/\d{2}〜\d{4}\/\d{2}\/\d{2}の献立を\d+品入れました/.test(cwToast),
+        cwToast.slice(0, 400),
+      )
 
       // IndexedDBで結果を検証(day1=コピーされる / day0=手動配置が残る)
       const cwResult = await cwPage.evaluate(
@@ -21049,8 +21068,10 @@ try {
   // ============================================================================
 
   // --- PURPOSE-01: 無料ユーザーの入口（docs/62 決定②「売り場を変える」）。
-  // 週タブの提案条件に「目的から組む（Pro）」の鍵付き行が**折りたたみを開かなくても**常設で出て、
-  // タップすると設定のPro節へ着地すること。未解錠では目的の3択自体は出ないこと。 ---
+  // 2026-08-19 便IF・②（オーナー原文「無料版でpro機能の案内が折りたたみでも表示されていて
+  // 邪魔。しまって。」）: 鍵付き行の置き場所を**条件の窓の中**へ移した。
+  // 見るのは「入口が残っていること」と「タップで設定のPro節へ着地すること」で変わらない。
+  // 変わったのは、窓を開くまでは場所を取らないこと（消してはいない）。 ---
   currentCheck = 'PURPOSE-01'
   {
     const p1Browser = await chromium.launch()
@@ -21066,7 +21087,21 @@ try {
       await p1Page.waitForTimeout(400)
 
       const p1Locked = p1Page.locator('[data-testid="purpose-locked-row"]')
-      check('PURPOSE-01 未解錠の週タブに「目的から組む（Pro）」の鍵付き行が常設される', await p1Locked.isVisible())
+      check(
+        'PURPOSE-01(便IF・②) 週タブを開いただけでは鍵付き行は出ない（しまわれている）',
+        (await p1Locked.count()) === 0,
+      )
+      check(
+        'PURPOSE-01 未解錠では目的の選択肢は出さない',
+        (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
+      )
+      await openWeekGroup(p1Page, '献立を提案')
+      await p1Page.locator('[data-testid="plan-conditions-open"]').click()
+      await p1Page.waitForTimeout(400)
+      check(
+        'PURPOSE-01(便IF・②) 条件の窓を開けば鍵付き行がある（消してはいない）',
+        await p1Locked.isVisible(),
+      )
       const p1LockedText = (await p1Locked.textContent()) ?? ''
       check(
         'PURPOSE-01 鍵付き行に何ができるかが書かれている',
@@ -21074,23 +21109,9 @@ try {
         `text=${p1LockedText}`,
       )
       check(
-        'PURPOSE-01 未解錠では目的の選択肢は出さない',
-        (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
-      )
-      // 折りたたみを開いても、未解錠なら3択は出ない（鍵付き行だけ）
-      // 2026-08-09 便EN: 「献立を提案」グループが既定で畳んであるので先に開く
-      // （鍵付き行はそのグループの外に出したので、上の常設チェックは畳んだままで通る）
-      await p1Page.getByRole('button', { name: '献立を提案を開く' }).click()
-      await p1Page.waitForTimeout(300)
-      await p1Page.locator('[data-testid="plan-conditions-open"]').click()
-      await p1Page.waitForTimeout(400)
-      check(
         'PURPOSE-01 条件の窓を開いても未解錠に3択は出ない',
         (await p1Page.locator('[data-testid="purpose-picker"]').count()) === 0,
       )
-      // 窓を閉じてから鍵付き行を押す(2026-08-19 便ID・④で条件は窓になった)
-      await p1Page.locator('[data-testid="plan-conditions-close"]').click()
-      await p1Page.waitForTimeout(400)
       await p1Locked.click()
       await p1Page.waitForTimeout(600)
       check(
@@ -21149,7 +21170,7 @@ try {
         (await p2Page.locator('[data-testid="purpose-locked-row"]').count()) === 0,
       )
       // 2026-08-09 便EN: 「献立を提案」グループが既定で畳んであるので先に開く
-      await p2Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await openWeekGroup(p2Page, '献立を提案')
       await p2Page.waitForTimeout(300)
       await p2Page.locator('[data-testid="plan-conditions-open"]').click()
       await p2Page.waitForTimeout(400)
@@ -21215,7 +21236,7 @@ try {
       await openAllWeekDays(p2Page) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await p2Page.waitForTimeout(400)
       // 折りたたみの状態は覚えないので、読み込み直したらまた畳んである（2026-08-09 便EN）
-      await p2Page.getByRole('button', { name: '献立を提案を開く' }).click()
+      await openWeekGroup(p2Page, '献立を提案')
       await p2Page.waitForTimeout(300)
       check(
         'PURPOSE-02 選んだ目的は再読み込み後も残る',
@@ -25759,19 +25780,30 @@ try {
       await openAllWeekDays(enPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await enPage.waitForTimeout(600)
 
+      // 2026-08-19 便IF・⑤⑥: 「献立を提案」だけ既定で開く（実行ボタンがこのグループの中へ移り、
+      // 畳んだままだと押すものが画面から消えるため）。見た目を決める「表示のしかた」と
+      // 「献立テンプレート」は便ENのまま畳んだ状態で始まる
       check(
-        'EN-01(項目10) 週タブの3グループは既定で全部畳んである',
+        'EN-01(項目10→便IF・⑥) 見た目を決めるグループは既定で畳み、「献立を提案」だけ開いている',
         (await enPage.getByRole('button', { name: '表示のしかたを開く' }).count()) === 1 &&
-          (await enPage.getByRole('button', { name: '献立を提案を開く' }).count()) === 1 &&
+          (await enPage.getByRole('button', { name: '献立を提案を閉じる' }).count()) === 1 &&
           (await enPage.getByRole('button', { name: '献立テンプレートを開く' }).count()) === 1,
       )
       check(
-        'EN-01(項目10) 畳んだままでも「まとめて献立を入力」は押せる位置にある',
-        await enPage.getByRole('button', { name: 'まとめて献立を入力' }).isVisible(),
+        'EN-01(項目10→便IF・⑥) 「まとめて献立を入力」は押せる位置にある',
+        await enPage.locator('[data-testid="week-fill-run"]').isVisible(),
       )
+
+      await openWeekGroup(enPage, '献立を提案')
+      await enPage.locator('[data-testid="plan-conditions-open"]').click()
+      await enPage.waitForTimeout(500)
+      // 2026-08-19 便IF・②(オーナー原文「無料版でpro機能の案内が折りたたみでも表示されていて
+      // 邪魔。しまって。」): 鍵付きの入口は条件の窓の中へ移した＝消してはいない(docs/62 決定②)
       check(
-        'EN-01(項目10) 畳んだままでも「栄養から組む（Pro）」の入口が消えない(docs/62 決定②)',
-        await enPage.locator('[data-testid="purpose-locked-row"]').isVisible(),
+        'EN-01(項目10→便IF・②) 「栄養から組む（Pro）」の入口は、条件の窓の中に残っている',
+        await enPage
+          .locator('[data-testid="plan-conditions-modal"] [data-testid="purpose-locked-row"]')
+          .isVisible(),
       )
       check(
         'EN-01(項目5) Proの入口の呼称が「栄養から組む」になっている（「目的」を使わない）',
@@ -25779,11 +25811,6 @@ try {
           '栄養から組む',
         ),
       )
-
-      await enPage.getByRole('button', { name: '献立を提案を開く' }).click()
-      await enPage.waitForTimeout(300)
-      await enPage.locator('[data-testid="plan-conditions-open"]').click()
-      await enPage.waitForTimeout(500)
 
       const enQuickHint = '調理時間が15分以内のレシピを優先します'
       const enProteinHint = 'レシピに「高たんぱく」タグが付いた料理を優先します'
@@ -26803,7 +26830,7 @@ try {
       await noResize('週タブ「すべて開く」', eoCollapseAll)
 
       // 現在の条件のチップ＝選ぶとチェック印が付くボタン（2026-08-19 便ID・④で窓の中に移った）
-      await eoPage.getByRole('button', { name: '献立を提案を開く' }).click()
+      await openWeekGroup(eoPage, '献立を提案')
       await eoPage.waitForTimeout(400)
       await eoPage.locator('[data-testid="plan-conditions-open"]').click()
       await eoPage.waitForTimeout(500)
@@ -39907,15 +39934,20 @@ try {
       await wcPage.waitForTimeout(1500)
       await wcPage.getByRole('button', { name: '週', exact: true }).click()
       await wcPage.waitForTimeout(800)
-      // 「献立を提案」グループは既定で畳んである(便EN)。中を見るのでまず開く
-      const wcGroup = wcPage.getByRole('button', {
-        name: ja.mealPlan.weekGroupToggleOpenAria.replace('{group}', ja.mealPlan.weekGroupAutoTitle),
-      })
-      check('WEEKCOND-01 前提: 「献立を提案」のグループを開ける', (await wcGroup.count()) === 1)
-      if ((await wcGroup.count()) === 1) {
-        await wcGroup.click()
-        await wcPage.waitForTimeout(700)
-      }
+      // 「献立を提案」グループは 2026-08-19 便IF・⑤⑥ で既定が「開く」に戻った。
+      // 畳んでいるときだけ開く＝既定がどちらでも、この先は「開いた状態」から測れる
+      await openWeekGroup(wcPage, ja.mealPlan.weekGroupAutoTitle)
+      check(
+        'WEEKCOND-01 前提: 「献立を提案」のグループが開いている',
+        (await wcPage
+          .getByRole('button', {
+            name: ja.mealPlan.weekGroupToggleCloseAria.replace(
+              '{group}',
+              ja.mealPlan.weekGroupAutoTitle,
+            ),
+          })
+          .count()) === 1,
+      )
 
       const wcConditions = wcPage.locator('[data-testid="plan-conditions-open"]')
       const wcFillEmpty = wcPage.locator('[data-testid="fill-mode-empty"]')
@@ -40537,6 +40569,420 @@ try {
       }
     } finally {
       await wfBrowser.close()
+    }
+  }
+
+  // --- WEEKFMT-01(2026-08-19 便IF。オーナー原文「日と週で、同じ献立を提案する機能なのに、
+  // 条件の絞り込みなどのボタンの配置がバラバラで、まるで別機能。フォーマット揃えたい。
+  // 週は、日の、できることが増えたバージョン。」ほか⑧②③④⑪)。
+  //
+  // 測るのは6つ:
+  //  ⑥ 日と週で、同じ役目のものが同じ順に並んでいる（**並びを書き写して並べない**。
+  //     それぞれのタブで役目→画面上の位置を読み、出てきた順番の列どうしを突き合わせる）
+  //  ② 無料版のPro案内が、週タブを開いただけでは出ていない（＝しまわれている）。
+  //     消してはいない＝条件の窓を開けば同じ入口がある
+  //  ③ 条件の窓に「条件をクリア」がある（名前は日タブと同じ ja.search.clear）
+  //  ④ 「先週をコピー」を選ぶと、実際にコピーされる7日間の日付が画面に出る
+  //     （画面に出ている週から計算して照合＝日付を書き写さない）
+  //  ⑧ 「総入れ替え」を選ぶと決まっている枠も入れ替わり、選ばなければ1品も入れ替わらない
+  //  ⑪ 過去だけの週ではロックのボタンを出さない／今日を含む週では出す
+  //
+  // 禁じ手よけ:
+  //  ・掴み方は data-testid と読み上げ名だけ（入れ子の段数・並び順・クラス名に依らない）
+  //  ・位置は「ページの中での位置」で測り、要素の親子関係には触れない
+  //  ・日付・曜日の前提を置かない（週は画面から読む。前後どちらへも送って戻す）
+  //  ・読み取りに失敗したら null のまま「前提」の行で必ず落とす（小さいから合格に倒さない） ---
+  currentCheck = 'WEEKFMT-01'
+  {
+    const wmBrowser = await chromium.launch()
+    const wmContext = await wmBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const wmPage = await wmContext.newPage()
+    wmPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin'))
+        return
+      errors.push(`[pageerror@WEEKFMT-01] ${err.message}`)
+    })
+    try {
+      /** ページの中での位置（スクロールしていても同じ値になる） */
+      const wmPos = async (loc) => {
+        if ((await loc.count()) === 0) return null
+        return await loc.first().evaluate((el) => {
+          const r = el.getBoundingClientRect()
+          return { y: Math.round(r.top + window.scrollY), x: Math.round(r.left + window.scrollX) }
+        })
+      }
+      const wmTab = async (name) => {
+        const tab = wmPage.getByRole('button', { name, exact: true })
+        if ((await tab.getAttribute('aria-pressed')) !== 'true') {
+          await tab.click()
+          await wmPage.waitForTimeout(900)
+        }
+      }
+      const wmToday = () =>
+        wmPage.evaluate(() => {
+          const d = new Date()
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        })
+      /** 画面に出ている7日分の日付（並び順ではなく属性から読む） */
+      const wmDates = () =>
+        wmPage
+          .locator('[data-testid="week-day-toggle"]')
+          .evaluateAll((els) => els.map((el) => el.getAttribute('data-date')))
+
+      // 確認の窓は共通の仕掛けが自動で押す（installConfirmAutoPress）ので、
+      // 文言は受け取り口で拾う（押し終わったあとに画面を見に行っても、もう窓は無い）
+      const wmDialogs = []
+      await collectConfirms(wmPage, wmDialogs)
+      await wmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await wmPage.waitForTimeout(2400) // 初回シード完了待ち
+
+      // ===== ⑥ 同じ役目のものが同じ順に並んでいるか =====
+      // 役目 → その役目を担う目印。**日と週で1対1に対応させる**。
+      // 「週にしか無いもの（入れかた）」は、この突き合わせには入れない
+      // ＝「できることが増えた版」であることと、並びがそろっていることを混ぜて測らない
+      const wmRoles = [
+        ['出しかたの切り替え', 'day-mode-one', 'plan-source-suggest'],
+        ['条件の窓を開くボタン', 'day-conditions-open', 'plan-conditions-open'],
+        ['決めてもらうボタン', 'day-suggest-draw', 'week-fill-run'],
+      ]
+      /** そのタブで、役目を画面の上から順に並べた列を作る（読めない役目があれば null を混ぜる） */
+      const wmOrderOf = async (which) => {
+        const found = []
+        for (const [role, dayId, weekId] of wmRoles) {
+          const id = which === 'day' ? dayId : weekId
+          const pos = await wmPos(wmPage.locator(`[data-testid="${id}"]`))
+          found.push({ role, id, pos })
+        }
+        return found
+      }
+      await wmTab('日')
+      const wmDayFound = await wmOrderOf('day')
+      await wmTab('週')
+      const wmWeekFound = await wmOrderOf('week')
+      check(
+        'WEEKFMT-01 前提: 日タブの3つの役目をすべて掴めた（掴めなければ以下は測れていない）',
+        wmDayFound.every((f) => f.pos != null),
+        JSON.stringify(wmDayFound),
+      )
+      check(
+        'WEEKFMT-01 前提: 週タブの3つの役目をすべて掴めた（掴めなければ以下は測れていない）',
+        wmWeekFound.every((f) => f.pos != null),
+        JSON.stringify(wmWeekFound),
+      )
+      const wmSeq = (found) =>
+        found.every((f) => f.pos != null)
+          ? found
+              .slice()
+              .sort((a, b) => a.pos.y - b.pos.y || a.pos.x - b.pos.x)
+              .map((f) => f.role)
+          : null
+      const wmDaySeq = wmSeq(wmDayFound)
+      const wmWeekSeq = wmSeq(wmWeekFound)
+      check(
+        'WEEKFMT-01(⑥) 日と週で、同じ役目のものが同じ順に並んでいる',
+        wmDaySeq != null && wmWeekSeq != null && JSON.stringify(wmDaySeq) === JSON.stringify(wmWeekSeq),
+        `日=${JSON.stringify(wmDaySeq)} 週=${JSON.stringify(wmWeekSeq)}`,
+      )
+      // 見た目もそろえる: 「決めてもらう」ボタンはどちらのタブでも塗りつぶしで横いっぱい
+      const wmRunLook = async (id) => {
+        const loc = wmPage.locator(`[data-testid="${id}"]`)
+        if ((await loc.count()) === 0) return null
+        return await loc.first().evaluate((el) => {
+          const parent = el.parentElement
+          const w = el.getBoundingClientRect().width
+          const pw = parent ? parent.getBoundingClientRect().width : 0
+          return {
+            filled: el.className.includes('bg-accent'),
+            widthRatio: pw > 0 ? Math.round((w / pw) * 100) : 0,
+          }
+        })
+      }
+      await wmTab('日')
+      const wmDayRun = await wmRunLook('day-suggest-draw')
+      await wmTab('週')
+      const wmWeekRun = await wmRunLook('week-fill-run')
+      check(
+        'WEEKFMT-01 前提: 両方の「決めてもらう」ボタンの見た目を読めた',
+        wmDayRun != null && wmWeekRun != null,
+        `日=${JSON.stringify(wmDayRun)} 週=${JSON.stringify(wmWeekRun)}`,
+      )
+      check(
+        'WEEKFMT-01(⑥) 「決めてもらう」ボタンは、日でも週でも塗りつぶしで横いっぱい',
+        wmDayRun != null &&
+          wmWeekRun != null &&
+          wmDayRun.filled === true &&
+          wmWeekRun.filled === true &&
+          wmDayRun.widthRatio >= 90 &&
+          wmWeekRun.widthRatio >= 90,
+        `日=${JSON.stringify(wmDayRun)} 週=${JSON.stringify(wmWeekRun)}`,
+      )
+
+      // ===== ② 無料版のPro案内はしまわれている（消してはいない） =====
+      const wmLockedRow = wmPage.locator('[data-testid="purpose-locked-row"]')
+      check(
+        'WEEKFMT-01(②) 週タブを開いただけでは、無料版のPro案内は出ていない',
+        (await wmLockedRow.count()) === 0,
+      )
+      const wmCondOpen = wmPage.locator('[data-testid="plan-conditions-open"]')
+      await wmCondOpen.click()
+      await wmPage.waitForTimeout(700)
+      const wmModal = wmPage.locator('[data-testid="plan-conditions-modal"]')
+      check('WEEKFMT-01 前提: 条件の窓が開いた', (await wmModal.count()) === 1)
+      check(
+        'WEEKFMT-01(②) 条件の窓を開けば、Pro案内の入口はある（消してはいない）',
+        (await wmModal.locator('[data-testid="purpose-locked-row"]').count()) === 1,
+      )
+
+      // ===== ③ 条件の窓の「条件をクリア」 =====
+      // 名前は「日タブの窓に出ているものと同じか」で見る（こちらに文字列を書き写さない）。
+      // 条件を1つも選んでいないあいだは場所だけ取って読み上げから外している（日タブと同じ作り）ので、
+      // 役割ではなく目印で掴む
+      const wmClear = wmModal.locator('[data-testid="plan-conditions-clear"]')
+      check(
+        'WEEKFMT-01(③) 条件の窓に「条件をクリア」がある',
+        (await wmClear.count()) === 1,
+      )
+      const wmClearName = (await wmClear.count()) === 1
+        ? ((await wmClear.textContent()) ?? '').replace(/​/g, '').trim()
+        : null
+      check(
+        'WEEKFMT-01(③) 「条件をクリア」の名前は、日タブの窓のものと同じ',
+        wmClearName != null && wmClearName === ja.search.clear,
+        `週=${wmClearName} 日=${ja.search.clear}`,
+      )
+      const wmGenre = wmPage.locator('[data-testid="plan-genre"]')
+      await wmGenre.selectOption('和食')
+      await wmPage.waitForTimeout(400)
+      check(
+        'WEEKFMT-01(③) 前提: 条件を1つ選べた（選べていなければクリアの効きは測れていない）',
+        (await wmGenre.inputValue()) === '和食',
+        await wmGenre.inputValue(),
+      )
+      check(
+        'WEEKFMT-01(③) 条件を選ぶと「条件をクリア」が押せる形で出る',
+        (await wmClear.count()) === 1 && (await wmClear.isVisible()) === true,
+      )
+      await wmClear.click()
+      await wmPage.waitForTimeout(400)
+      check(
+        'WEEKFMT-01(③) 「条件をクリア」を押すと、選んだ条件が外れる',
+        (await wmGenre.inputValue()) === '',
+        await wmGenre.inputValue(),
+      )
+      await wmPage.locator('[data-testid="plan-conditions-close"]').click()
+      await wmPage.waitForTimeout(500)
+      check(
+        'WEEKFMT-01(③) クリアしたあと、条件のボタンは「指定なし」に戻る',
+        ((await wmCondOpen.textContent()) ?? '')
+          .replace(/​/g, '')
+          .includes(ja.mealPlan.suggestConditionsNone),
+        (await wmCondOpen.textContent())?.replace(/​/g, ''),
+      )
+
+      // ===== ④ コピー元の7日間の日付が出る =====
+      const wmSource = wmPage.locator('[data-testid="plan-source-copy"]')
+      await wmSource.click()
+      await wmPage.waitForTimeout(600)
+      const wmShown = await wmDates()
+      check(
+        'WEEKFMT-01 前提: 表示している週の7日分を読めた',
+        wmShown.length === 7 && wmShown.every(Boolean),
+        JSON.stringify(wmShown),
+      )
+      const wmShift = (date, days) => {
+        const d = new Date(`${date}T00:00:00`)
+        d.setDate(d.getDate() + days)
+        return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+      }
+      const wmSrcStart = wmShown.length === 7 ? wmShift(wmShown[0], -7) : null
+      const wmSrcEnd = wmShown.length === 7 ? wmShift(wmShown[6], -7) : null
+      const wmBodyText = ((await wmPage.textContent('body')) ?? '').replace(/​/g, '')
+      check(
+        'WEEKFMT-01(④) 「先週をコピー」を選ぶと、コピー元の7日間の日付が画面に出る',
+        wmSrcStart != null && wmBodyText.includes(wmSrcStart) && wmBodyText.includes(wmSrcEnd),
+        `コピー元=${wmSrcStart}〜${wmSrcEnd}`,
+      )
+
+      // ===== ⑧ 入れかたがコピーにも効く =====
+      const wmToday2 = await wmToday()
+      const wmFuture = wmShown.filter((d) => d >= wmToday2)
+      check(
+        'WEEKFMT-01 前提: 今日以降の日が1日以上ある（今週を見ている）',
+        wmFuture.length > 0,
+        `今日=${wmToday2} 週=${JSON.stringify(wmShown)}`,
+      )
+      /** 献立を直接入れる（レシピは登録順の1品目/2品目＝コピー元と今の週で別のレシピにする） */
+      const wmSeed = (rows) =>
+        wmPage.evaluate(
+          (targets) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const idb = req.result
+                const rtx = idb.transaction('recipes', 'readonly')
+                const g = rtx.objectStore('recipes').getAll()
+                g.onsuccess = () => {
+                  const ids = g.result.map((r) => r.id).filter((v) => v != null)
+                  if (ids.length < 2) {
+                    resolve({ ok: false })
+                    return
+                  }
+                  const wtx = idb.transaction('mealPlans', 'readwrite')
+                  const store = wtx.objectStore('mealPlans')
+                  for (const row of targets) {
+                    store.add({ date: row.date, slot: 'dinner', recipeId: ids[row.which], role: 'main' })
+                  }
+                  wtx.oncomplete = () => resolve({ ok: true, source: ids[0], here: ids[1] })
+                  wtx.onerror = () => reject(wtx.error)
+                }
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          rows,
+        )
+      /** いまの献立（今日以降ぶん）を id つきで読む */
+      const wmPlans = (dates) =>
+        wmPage.evaluate(
+          (targets) =>
+            new Promise((resolve, reject) => {
+              const req = indexedDB.open('uchi-recipe')
+              req.onsuccess = () => {
+                const tx = req.result.transaction('mealPlans', 'readonly')
+                const g = tx.objectStore('mealPlans').getAll()
+                g.onsuccess = () =>
+                  resolve(
+                    g.result
+                      .filter((e) => targets.includes(e.date))
+                      .map((e) => ({ id: e.id, date: e.date, recipeId: e.recipeId }))
+                      .sort((a, b) => a.id - b.id),
+                  )
+                g.onerror = () => reject(g.error)
+              }
+              req.onerror = () => reject(req.error)
+            }),
+          dates,
+        )
+      const wmPrevOf = (date) => {
+        const d = new Date(`${date}T00:00:00`)
+        d.setDate(d.getDate() - 7)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      }
+      const wmSeeded = await wmSeed([
+        ...wmFuture.map((d) => ({ date: wmPrevOf(d), which: 0 })), // コピー元＝1品目
+        ...wmFuture.map((d) => ({ date: d, which: 1 })), // 今の週＝2品目（＝入れ替わったか見分けられる）
+      ])
+      check('WEEKFMT-01 前提: コピー元と今の週に、別のレシピの献立を仕込めた', wmSeeded.ok === true)
+      // 仕込んだあとは読み込み直す（Dexieの自動反映は自分の書き込みしか見ていない）
+      await wmPage.reload({ waitUntil: 'networkidle' })
+      await wmPage.waitForTimeout(1800)
+      await wmTab('週')
+      const wmBefore = await wmPlans(wmFuture)
+      check(
+        'WEEKFMT-01 前提: 今日以降の献立を読めた',
+        wmBefore.length === wmFuture.length &&
+          wmBefore.every((e) => e.recipeId === wmSeeded.here),
+        JSON.stringify(wmBefore),
+      )
+      // (a) 「空いた枠だけ」のまま押しても、決まっている枠は1品も入れ替わらない
+      await wmPage.locator('[data-testid="plan-source-copy"]').click()
+      await wmPage.waitForTimeout(400)
+      check(
+        'WEEKFMT-01(⑧) 前提: 入れかたの既定は「空いた枠だけ」',
+        (await wmPage.locator('[data-testid="fill-mode-empty"]').getAttribute('aria-pressed')) === 'true',
+      )
+      wmDialogs.length = 0
+      await wmPage.locator('[data-testid="week-fill-run"]').click()
+      await wmPage.waitForTimeout(1800)
+      const wmAfterKeep = await wmPlans(wmFuture)
+      check(
+        'WEEKFMT-01(⑧) 上書きを選ばなければ、決まっている枠は入れ替わらない',
+        JSON.stringify(wmAfterKeep) === JSON.stringify(wmBefore),
+        `前=${JSON.stringify(wmBefore)} 後=${JSON.stringify(wmAfterKeep)}`,
+      )
+      check(
+        'WEEKFMT-01(⑧) 上書きを選ばなければ、消す確認の窓も出ない',
+        wmDialogs.length === 0,
+        JSON.stringify(wmDialogs),
+      )
+      // (b) 「総入れ替え」を選ぶと、決まっている枠もコピー元の献立に入れ替わる
+      await wmPage.locator('[data-testid="fill-mode-replace"]').click()
+      await wmPage.waitForTimeout(400)
+      wmDialogs.length = 0
+      await wmPage.locator('[data-testid="week-fill-run"]').click()
+      await wmPage.waitForTimeout(2000)
+      check(
+        'WEEKFMT-01(⑧・規約F) 上書きするときは、押す前に確認の窓が出る',
+        wmDialogs.length === 1,
+        JSON.stringify(wmDialogs),
+      )
+      const wmConfirmText = wmDialogs[0] ?? ''
+      check(
+        'WEEKFMT-01(⑧・規約F) 確認の窓は「消えるもの」と「残るもの」を両方書く',
+        wmConfirmText.includes(ja.mealPlan.fillModeReplaceAllGoneLabel) &&
+          wmConfirmText.includes(ja.mealPlan.fillModeReplaceAllKeptLabel),
+        wmConfirmText,
+      )
+      check(
+        'WEEKFMT-01(⑧・規約F) 確認の窓は、消える品数を数で言う',
+        new RegExp(`${wmBefore.length}\\s*[品件]`).test(wmConfirmText),
+        wmConfirmText,
+      )
+      const wmAfterSwap = await wmPlans(wmFuture)
+      check(
+        'WEEKFMT-01(⑧) 上書きを選ぶと、決まっている枠もコピー元の献立に入れ替わる',
+        wmAfterSwap.length === wmFuture.length &&
+          wmAfterSwap.every((e) => e.recipeId === wmSeeded.source) &&
+          wmAfterSwap.every((e) => !wmBefore.some((b) => b.id === e.id)),
+        `前=${JSON.stringify(wmBefore)} 後=${JSON.stringify(wmAfterSwap)}`,
+      )
+
+      // ===== ⑪ 過去だけの週ではロックのボタンを出さない =====
+      await wmPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await wmPage.reload({ waitUntil: 'networkidle' })
+      await wmPage.waitForTimeout(1800)
+      await wmTab('週')
+      const wmLockCount = async () => ({
+        all: await wmPage.locator('[data-testid="lock-all"]').count(),
+        day: await wmPage.locator('[data-testid="day-lock"]').count(),
+      })
+      const wmNow = await wmLockCount()
+      check(
+        'WEEKFMT-01(⑪) 今日を含む週では、ロックのボタンを出す',
+        wmNow.all === 1 && wmNow.day === 7,
+        JSON.stringify(wmNow),
+      )
+      // 前の週へ2回送る＝今日が何曜日でも7日とも過去になる（曜日の前提を置かない）
+      for (let i = 0; i < 2; i++) {
+        await wmPage.locator('button[aria-label="前の週"]').click()
+        await wmPage.waitForTimeout(700)
+      }
+      const wmPastDates = await wmDates()
+      const wmToday3 = await wmToday()
+      check(
+        'WEEKFMT-01 前提: 送った先は7日とも過去（曜日に左右されない土台）',
+        wmPastDates.length === 7 && wmPastDates.every((d) => d < wmToday3),
+        `今日=${wmToday3} 週=${JSON.stringify(wmPastDates)}`,
+      )
+      const wmPast = await wmLockCount()
+      check(
+        'WEEKFMT-01(⑪) 過去だけの週では、ロックのボタンを出さない',
+        wmPast.all === 0 && wmPast.day === 0,
+        JSON.stringify(wmPast),
+      )
+      // 戻せば また出る（前後どちらへも送れる形にする）
+      for (let i = 0; i < 2; i++) {
+        await wmPage.locator('button[aria-label="次の週"]').click()
+        await wmPage.waitForTimeout(700)
+      }
+      const wmBack = await wmLockCount()
+      check(
+        'WEEKFMT-01(⑪) 今日を含む週へ戻せば、ロックのボタンはまた出る',
+        wmBack.all === 1 && wmBack.day === 7,
+        JSON.stringify(wmBack),
+      )
+    } finally {
+      await wmBrowser.close()
     }
   }
 

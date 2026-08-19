@@ -16749,8 +16749,14 @@ eq(
 {
   const weekScopeTexts = {
     weekCostTitle: ja.mealPlan.weekCostTitle,
-    fillWeekHint: ja.mealPlan.fillWeekHint,
+    // 2026-08-19 便IF・⑥: 旧 fillWeekHint は無くし、出しかた×入れかたの4通りの1行にまとめた
     fillModeFillEmptyHint: ja.mealPlan.fillModeFillEmptyHint,
+    copyFillEmptyHint: ja.mealPlan.copyFillEmptyHint,
+    copyReplaceAllHint: ja.mealPlan.copyReplaceAllHint,
+    copyReplaceAllConfirmTitle: ja.mealPlan.copyReplaceAllConfirmTitle,
+    copyReplaceAllGone: ja.mealPlan.copyReplaceAllGone,
+    copyReplaceAllKept: ja.mealPlan.copyReplaceAllKept,
+    copyReplaceAllDone: ja.mealPlan.copyReplaceAllDone,
     fillModeReplaceAllHint: ja.mealPlan.fillModeReplaceAllHint,
     // 2026-08-15 便GW: 確認文を見出し＋項目に割ったので、週を名乗る側(見出し)も見る
     fillModeReplaceAllConfirmTitle: ja.mealPlan.fillModeReplaceAllConfirmTitle,
@@ -23267,18 +23273,29 @@ Aみりん 大さじ1
       planCopyLastWeek({ ...base, entries: [{ date: '2026-08-10', slot: 'dinner' }] }).ops,
       [{ date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' }],
     )
+    // 2026-08-19 便IF・⑧: コピーにも「入れかた」が効くようになったので、説明は入れかたごとに
+    // 2本に分かれた。「上書きしない」と言えるのは**空いた枠だけ**を選んでいるときの説明と
+    // 確認の窓の本文の2つ（総入れ替えの側は消してから入れるので、別の言い方で言う＝IF-8が見る）
     for (const [name, text] of [
-      ['ONのときの説明', ja.mealPlan.copyLastWeekToggleHintOn],
-      ['OFFのときの説明', ja.mealPlan.copyLastWeekToggleHintOff],
-      ['確認の窓の本文', ja.mealPlan.copyLastWeekConfirm],
+      ['空いた枠だけのときの説明', ja.mealPlan.copyFillEmptyHint],
+      ['空いた枠だけの確認の窓の本文', ja.mealPlan.copyLastWeekConfirm],
     ]) {
-      eq(`ID-6 ${name}は「上書きします」と言わない(実装は上書きしない)`, /上書きします/.test(text), false)
+      eq(
+        `ID-6 ${name}は「上書きします」と言わない(この入れかたは上書きしない)`,
+        typeof text === 'string' && !/上書きします/.test(text),
+        true,
+      )
     }
-    eq(
-      'ID-6 ONのときの説明は、押すと何が入るかを「入力」で言う',
-      ja.mealPlan.copyLastWeekToggleHintOn.includes('入力します'),
-      true,
-    )
+    for (const [name, text] of [
+      ['空いた枠だけのときの説明', ja.mealPlan.copyFillEmptyHint],
+      ['総入れ替えのときの説明', ja.mealPlan.copyReplaceAllHint],
+    ]) {
+      eq(
+        `ID-6 ${name}は、押すと何が入るかを「入力」で言う`,
+        typeof text === 'string' && text.includes('入力します'),
+        true,
+      )
+    }
   }
 
   // --- ⑤ 「多め/ひかえめ」の見出しと選択肢名の両立 ---
@@ -23360,6 +23377,231 @@ Aみりん 大さじ1
       ja.mealPlan.suggestConditionsTitle,
       ja.mealPlan.suggestConditionsToggle,
     )
+  }
+}
+
+// ---------- 便IF(2026-08-19 オーナーの書き溜め。週タブを「日タブのできること増加版」に作り直す) ----------
+// ここで見張るのは**日付に左右されない中身**だけ:
+//   ⑧ 先週コピーに「入れかた」が効く（総入れ替えを選ぶと決まっている枠も入れ替わる／
+//      選ばなければ1品も入れ替わらない）
+//   ④ コピー元の7日間の日付を、文言に差し込む場所があること（「先週」と固定で書かない）
+//   ⑪ 過去だけの週ではロックのボタンを出さない／今日以降が1日でもあれば出す
+// 画面の並び・見た目（⑥②③）は e2e の WEEKFMT-01 が受け持つ。
+//
+// 禁じ手よけ:
+//  ・曜日・月替わりの前提を置かない＝「今日」は引数で渡し、月末・年またぎ・うるう日でも同じ結論を見る
+//  ・読み取りに失敗したら必ず落ちる（関数や文言が無いときは、素通りではなくその場で1件NGにする）
+{
+  const mealPlanLogicIF = await import('../src/logic/mealPlan.ts')
+  const { planCopyLastWeek: copyIF } = mealPlanLogicIF
+
+  // --- ⑧ 先週コピー×入れかた(planCopyLastWeek の replaceAll) ---
+  {
+    const prevEntries = [
+      { date: '2026-08-03', slot: 'dinner', recipeId: 31, role: 'main' },
+      { date: '2026-08-04', slot: 'dinner', recipeId: 32, role: 'main' },
+    ]
+    const base = {
+      dates: ['2026-08-10', '2026-08-11'],
+      today: '2026-08-10',
+      visibleSlots: ['dinner'],
+      prevEntries,
+    }
+    // 両日ともすでに決まっている状態を土台にする（＝「入れ替わったか」を見分けられる形）
+    const filled = [
+      { id: 101, date: '2026-08-10', slot: 'dinner', recipeId: 91 },
+      { id: 102, date: '2026-08-11', slot: 'dinner', recipeId: 92 },
+    ]
+    const keep = copyIF({ ...base, entries: filled })
+    eq('IF-8 選ばなければ入れ替わらない: 1品も入れない', keep.ops.length, 0)
+    eq(
+      'IF-8 選ばなければ入れ替わらない: 1件も消さない',
+      Array.isArray(keep.entryIdsToRemove) ? keep.entryIdsToRemove : '(entryIdsToRemoveが無い)',
+      [],
+    )
+    const swap = copyIF({ ...base, entries: filled, replaceAll: true })
+    eq(
+      'IF-8 上書きを選ぶと、決まっている枠の行を消す',
+      Array.isArray(swap.entryIdsToRemove) ? [...swap.entryIdsToRemove].sort((a, b) => a - b) : '(entryIdsToRemoveが無い)',
+      [101, 102],
+    )
+    eq(
+      'IF-8 上書きを選ぶと、コピー元の献立がその枠に入る',
+      swap.ops,
+      [
+        { date: '2026-08-10', slot: 'dinner', recipeId: 31, role: 'main' },
+        { date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' },
+      ],
+    )
+    eq(
+      'IF-8 入れ替える食事の数を返す(規約Fの件数に使う)',
+      swap.replacedSlotCount,
+      2,
+    )
+    // 空いている枠しか無いときは、どちらの入れかたでも結果が同じ（消すものが無い）
+    const emptyKeep = copyIF({ ...base, entries: [] })
+    const emptySwap = copyIF({ ...base, entries: [], replaceAll: true })
+    eq('IF-8 空いている枠には、どちらの入れかたでも入る(素通り防止)', emptyKeep.ops.length, 2)
+    eq('IF-8 空いている枠だけなら、上書きを選んでも消すものは無い', emptySwap.entryIdsToRemove, [])
+    // 鍵と過去日は「上書き」でも触らない（既存の約束を崩していないこと）
+    const lockedSwap = copyIF({
+      ...base,
+      entries: filled,
+      replaceAll: true,
+      lockedKeys: new Set(['2026-08-10|dinner']),
+    })
+    eq(
+      'IF-8 鍵の掛かった食事は、上書きを選んでも消さない',
+      Array.isArray(lockedSwap.entryIdsToRemove) ? lockedSwap.entryIdsToRemove : '(entryIdsToRemoveが無い)',
+      [102],
+    )
+    eq('IF-8 鍵の掛かった食事は、上書きを選んでも入れない', lockedSwap.ops, [
+      { date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' },
+    ])
+    const pastSwap = copyIF({
+      ...base,
+      today: '2026-08-11',
+      entries: filled,
+      replaceAll: true,
+    })
+    eq(
+      'IF-8 過ぎた日は、上書きを選んでも消さない',
+      Array.isArray(pastSwap.entryIdsToRemove) ? pastSwap.entryIdsToRemove : '(entryIdsToRemoveが無い)',
+      [102],
+    )
+    // コピー元にその食事が無い日は、総入れ替えでは空になる（自動提案の総入れ替えと同じ意味）。
+    // 消える側の挙動なので、言葉（確認の窓の「消えるもの」）と数が食い違わないよう固定しておく
+    const halfSource = copyIF({
+      ...base,
+      entries: filled,
+      replaceAll: true,
+      prevEntries: [prevEntries[0]],
+    })
+    eq(
+      'IF-8 コピー元にその食事が無い日は、上書きを選ぶと空になる（消す行に数える）',
+      Array.isArray(halfSource.entryIdsToRemove)
+        ? [...halfSource.entryIdsToRemove].sort((a, b) => a - b)
+        : '(entryIdsToRemoveが無い)',
+      [101, 102],
+    )
+    eq(
+      'IF-8 コピー元にある日にだけ、コピー元の献立が入る',
+      halfSource.ops,
+      [{ date: '2026-08-10', slot: 'dinner', recipeId: 31, role: 'main' }],
+    )
+  }
+
+  // --- ⑪ 過去だけの週でロックのボタンを出すか(planShowWeekLock) ---
+  // 過去日は予定のグリッドそのものが出ない＝手で足す・変える・消すができない。
+  // 自動でまとめて動かす操作(提案・先週コピー)も過去日を初めから対象外にしている。
+  // よって「過去だけの週」では鍵の掛けようが無い。今日・未来日が1日でも混ざる週では出す。
+  {
+    eq(
+      'IF-11 ロックのボタンを出すかを決める関数がある（無ければ以下は測れていない）',
+      typeof mealPlanLogicIF.planShowWeekLock === 'function',
+      true,
+    )
+    const planShowWeekLock =
+      typeof mealPlanLogicIF.planShowWeekLock === 'function'
+        ? mealPlanLogicIF.planShowWeekLock
+        : () => '(関数が無い)'
+    // 月末・年またぎ・月初・うるう日の4通り。実行日がいつでも同じ結論になる
+    const cases = [
+      ['月末をまたぐ', '2026-08-31'],
+      ['年をまたぐ', '2026-12-31'],
+      ['月初', '2026-03-01'],
+      ['うるう日', '2028-02-29'],
+    ]
+    for (const [name, today] of cases) {
+      const past7 = Array.from({ length: 7 }, (_, i) => shiftDate(today, i - 7))
+      const withToday = Array.from({ length: 7 }, (_, i) => shiftDate(today, i - 3))
+      const future7 = Array.from({ length: 7 }, (_, i) => shiftDate(today, i + 1))
+      eq(`IF-11 ${name}: 過去だけの週では出さない`, planShowWeekLock(past7, today), false)
+      eq(`IF-11 ${name}: 今日を含む週では出す`, planShowWeekLock(withToday, today), true)
+      eq(`IF-11 ${name}: 未来だけの週では出す`, planShowWeekLock(future7, today), true)
+    }
+  }
+
+  // --- ④ コピー元の日付期間を文言に差し込む場所があること ---
+  // オーナー原文「『先週の献立をコピー』に、コピー元の日付期間を書いてほしい」。
+  // 表示している週を送ればコピー元も動くので、**文言に日付を書き込まず差し込み口を持つ**。
+  // 実際に出る日付が画面の週と合っているかは e2e の WEEKFMT-01 が見る
+  {
+    const rangeTexts = {
+      '空いた枠だけのときの説明': ja.mealPlan.copyFillEmptyHint,
+      '総入れ替えのときの説明': ja.mealPlan.copyReplaceAllHint,
+      '空いた枠だけの確認の窓の見出し': ja.mealPlan.copyLastWeekConfirmTitle,
+      '総入れ替えの確認の窓の見出し': ja.mealPlan.copyReplaceAllConfirmTitle,
+      'コピー元が空のときの知らせ': ja.mealPlan.copyLastWeekNoSource,
+    }
+    for (const [name, text] of Object.entries(rangeTexts)) {
+      eq(
+        `IF-4 ${name}にコピー元の期間の差し込み口({start}と{end})がある`,
+        typeof text === 'string' && text.includes('{start}') && text.includes('{end}'),
+        true,
+      )
+      eq(
+        `IF-4 ${name}は「先週」と決め打ちで書かない(表示する週で変わるため)`,
+        typeof text === 'string' && !text.includes('先週'),
+        true,
+      )
+    }
+  }
+
+  // --- ⑧ 説明文が、直した動きと食い違っていないこと ---
+  {
+    eq(
+      'IF-8 空いた枠だけのコピーの説明は「上書きしません」を言う(実装も上書きしない)',
+      typeof ja.mealPlan.copyFillEmptyHint === 'string' &&
+        ja.mealPlan.copyFillEmptyHint.includes('上書きしません'),
+      true,
+    )
+    eq(
+      'IF-8 総入れ替えのコピーの説明は「消してから」を言う(実装は消してから入れる)',
+      typeof ja.mealPlan.copyReplaceAllHint === 'string' &&
+        ja.mealPlan.copyReplaceAllHint.includes('消してから'),
+      true,
+    )
+    for (const [name, text] of [
+      ['空いた枠だけのときの説明', ja.mealPlan.copyFillEmptyHint],
+      ['総入れ替えのときの説明', ja.mealPlan.copyReplaceAllHint],
+    ]) {
+      eq(
+        `IF-8 ${name}から「入れかたは反映しません」が消えている(入れかたが効くようになったため)`,
+        typeof text === 'string' && !text.includes('入れかたは反映しません'),
+        true,
+      )
+    }
+    // 規約F: 消える側の確認は「何が消えて何が残るか」を件数つきで両方言う
+    eq(
+      'IF-8 総入れ替えのコピーの確認に、消える品数の差し込み口がある',
+      typeof ja.mealPlan.copyReplaceAllGone === 'string' &&
+        ja.mealPlan.copyReplaceAllGone.includes('{n}') &&
+        ja.mealPlan.copyReplaceAllGone.includes('{s}'),
+      true,
+    )
+    eq(
+      'IF-8 総入れ替えのコピーの確認に、残るものを言う文がある',
+      typeof ja.mealPlan.copyReplaceAllKept === 'string' &&
+        ja.mealPlan.copyReplaceAllKept.length > 0,
+      true,
+    )
+  }
+
+  // --- ⑥ 出しかたの2択(おまかせ／先週をコピー)の名前 ---
+  // 便ID・②で入れかたの2つを短く横1列にしたのと同じ作法にそろえる（長いと2段に割れて2択に見えない）
+  {
+    for (const [name, label] of [
+      ['おまかせ側', ja.mealPlan.fillSourceSuggest],
+      ['先週のコピー側', ja.mealPlan.fillSourceCopy],
+    ]) {
+      eq(
+        `IF-6 出しかたのボタン(${name})は6文字以内`,
+        typeof label === 'string' && label.length > 0 && label.length <= 6,
+        true,
+      )
+    }
+    neq('IF-6 2つのボタンは違う名前', ja.mealPlan.fillSourceSuggest, ja.mealPlan.fillSourceCopy)
   }
 }
 

@@ -1056,6 +1056,13 @@ export interface CopyLastWeekPlan {
   sourceTotal: number
   /** 鍵が掛かっていて対象から外した食事の数（確認文の件数に使う。2026-08-08 便DX） */
   lockedSlotCount: number
+  /**
+   * 総入れ替え（replaceAll）で消す行のid（2026-08-19 便IF・⑧）。
+   * 「空いた枠だけ」を選んでいるあいだは必ず空＝1件も消さない。
+   */
+  entryIdsToRemove: number[]
+  /** 総入れ替えで中身を入れ替える食事の数（規約Fの確認文の件数に使う） */
+  replacedSlotCount: number
 }
 
 /**
@@ -1064,9 +1071,15 @@ export interface CopyLastWeekPlan {
  *
  * 守ること:
  * - 過去日（今日より前）は対象外。表示していない食事にも入れない（週タブの編集範囲と同じ）。
- * - すでに1品でも入っている食事には入れない＝上書きしない（手動・自動のどちらも残す）。
  * - 鍵の掛かっている食事には入れない（2026-08-08 便DX）。空いていても入れない
- *   ＝「この食事は自分で決めるから自動で入れないで」を守る。
+ *   ＝「この食事は自分で決めるから自動で入れないで」を守る。総入れ替えでも消さない。
+ *
+ * 2026-08-19 便IF・⑧（オーナー原文「『先週の献立をコピー』で、すでに決まっている日も
+ * 上書きできる選択ができない」）: 週タブの「入れかた」がコピーにも効くようにした。
+ * - replaceAll なし（既定＝空いた枠だけ）… すでに1品でも入っている食事には入れない＝上書きしない
+ * - replaceAll あり（総入れ替え）… その食事に今ある行を消してから、コピー元の献立を入れる。
+ *   コピー元が空の食事は空になる（自動提案の総入れ替え＝planWeekFill と同じ意味にそろえる）。
+ *   消す操作なので、呼び出し側は規約Fの確認（何が消えて何が残るか・件数つき）を必ず通す。
  */
 export function planCopyLastWeek(options: {
   /** コピー先の日付（表示中の週の7日） */
@@ -1075,16 +1088,26 @@ export function planCopyLastWeek(options: {
   today: string
   /** 表示中の食事 */
   visibleSlots: MealSlot[]
-  /** コピー先に今ある献立 */
-  entries: Pick<MealPlanEntry, 'date' | 'slot'>[]
+  /** コピー先に今ある献立（総入れ替えでは id を使って消す） */
+  entries: Pick<MealPlanEntry, 'id' | 'date' | 'slot'>[]
   /** コピー元（1週間前の週）の献立 */
   prevEntries: Pick<MealPlanEntry, 'date' | 'slot' | 'recipeId' | 'role'>[]
   /** 鍵の掛かっている食事（'YYYY-MM-DD|slot'） */
   lockedKeys?: ReadonlySet<string>
+  /** すでに決まっている食事も入れ替える（2026-08-19 便IF・⑧。既定は false＝非破壊） */
+  replaceAll?: boolean
 }): CopyLastWeekPlan {
   const { dates, today, visibleSlots, entries, prevEntries } = options
   const lockedKeys = options.lockedKeys ?? EMPTY_LOCK_KEYS
+  const replaceAll = options.replaceAll ?? false
   const filledKeys = new Set(entries.map((e) => `${e.date}|${e.slot}`))
+  const entriesByKey = new Map<string, typeof entries>()
+  for (const e of entries) {
+    const key = `${e.date}|${e.slot}`
+    const list = entriesByKey.get(key)
+    if (list) list.push(e)
+    else entriesByKey.set(key, [e])
+  }
   const prevByKey = new Map<string, typeof prevEntries>()
   for (const e of prevEntries) {
     const key = `${e.date}|${e.slot}`
@@ -1093,8 +1116,10 @@ export function planCopyLastWeek(options: {
     else prevByKey.set(key, [e])
   }
   const ops: CopyLastWeekPlan['ops'] = []
+  const entryIdsToRemove: number[] = []
   let sourceTotal = 0
   let lockedSlotCount = 0
+  let replacedSlotCount = 0
   for (const date of dates) {
     if (isPastDate(date, today)) continue
     const src = shiftDate(date, -7)
@@ -1105,14 +1130,40 @@ export function planCopyLastWeek(options: {
         lockedSlotCount++
         continue
       }
-      // 既にある食事は上書きしない（手動・自動とも残す）。空いている食事にだけ先週の分を入れる
-      if (filledKeys.has(`${date}|${slot}`)) continue
+      if (replaceAll) {
+        // 総入れ替え: いま入っている行を消してから入れ直す（鍵と過去日は上で外してある）
+        const here = entriesByKey.get(`${date}|${slot}`) ?? []
+        const ids = here.map((e) => e.id).filter((id): id is number => id != null)
+        if (ids.length > 0) {
+          entryIdsToRemove.push(...ids)
+          replacedSlotCount++
+        }
+      } else if (filledKeys.has(`${date}|${slot}`)) {
+        // 既にある食事は上書きしない（手動・自動とも残す）。空いている食事にだけ先週の分を入れる
+        continue
+      }
       for (const e of srcEntries) {
         ops.push({ date, slot, recipeId: e.recipeId, role: e.role ?? 'main' })
       }
     }
   }
-  return { ops, sourceTotal, lockedSlotCount }
+  return { ops, sourceTotal, lockedSlotCount, entryIdsToRemove, replacedSlotCount }
+}
+
+/**
+ * 表示している週で、鍵（ロック）のボタンを出すか（2026-08-19 便IF・⑪。オーナー原文
+ * 「過去の日付の１週間表示では、ロック機能使いませんよね？残しておく意味ある？」）。
+ *
+ * 過ぎた日は週タブで予定のグリッドそのものを出しておらず、手で足す・変える・消すができない。
+ * まとめて動かす操作のうち「まとめて献立を入力」（planWeekFill）と「先週の献立をコピー」
+ * （planCopyLastWeek）も、過ぎた日を初めから対象外にしている。
+ * ＝7日とも過ぎている週では、鍵で守るものが画面に1つも無い。
+ *
+ * **機能そのものは消さない**（掛かっている鍵は保存されたまま効き続ける）。
+ * 出すか出さないかだけをここで決める。今日・未来日が1日でも混ざる週（＝今週）では出す。
+ */
+export function planShowWeekLock(dates: string[], today: string): boolean {
+  return dates.some((date) => !isPastDate(date, today))
 }
 
 /** 「まとめて空にする」の計画（planClearMealSlots の戻り値） */

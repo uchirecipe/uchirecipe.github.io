@@ -112,6 +112,7 @@ import {
   planAllLockToggle,
   planCopyLastWeek,
   planClearMealSlots,
+  planShowWeekLock,
   PLAN_QUICK_MINUTES_OPTIONS,
   DEFAULT_PLAN_QUICK_MINUTES,
 } from '../logic/mealPlan'
@@ -1531,6 +1532,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 現在以外のときだけ出す)。従来表示=当週の月曜、今日起点表示=今日、が「現在」の起点
   const currentWeekAnchor = rollingWeek ? today : weekDates(new Date())[0]
   const isAtCurrentWeek = dates[0] === currentWeekAnchor
+  /**
+   * 表示している週で、鍵（ロック）のボタンを出すか（2026-08-19 便IF・⑪。オーナー原文
+   * 「過去の日付の１週間表示では、ロック機能使いませんよね？残しておく意味ある？」）。
+   * 判断は logic/mealPlan.ts の planShowWeekLock（過ぎた日しか無い週では出さない）。
+   */
+  const showWeekLock = planShowWeekLock(dates, today)
 
   // デモでは週タブを出さないので、端末の週の予定は読んでも使わない（見本の月の予定だけで組む）
   const dbEntries = useMealPlanRange(dates[0], dates[6])
@@ -1867,6 +1874,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // ローリング表示・週区切り表示のどちらでも「同じ曜日の1週間前」を指す(shiftDate(-7)が常に週差になるため)
   const prevWeekDates = useMemo(() => dates.map((d) => shiftDate(d, -7)), [dates])
   const prevWeekEntries = useMealPlanRange(prevWeekDates[0], prevWeekDates[6])
+  /**
+   * コピー元の7日間（2026-08-19 便IF・④。オーナー原文「『先週の献立をコピー』に、
+   * コピー元の日付期間を書いてほしい」）。
+   * 表示している週を前後に送るとコピー元も一緒に動くので、**実際に写す7日間を毎回ここで作る**
+   * （文言の側に「先週」と書き込まない）。書き方は週の移動ボタンの日付と同じ YYYY/MM/DD。
+   */
+  const copySourceLabel = useMemo(
+    () => ({
+      start: prevWeekDates[0].replaceAll('-', '/'),
+      end: prevWeekDates[6].replaceAll('-', '/'),
+    }),
+    [prevWeekDates],
+  )
 
   // 月タブの日タップモーダル用（monthEntries由来なので表示帯フィルタに関係なく朝昼夕すべてを見せる）
   const dayModalEntries = useMemo(() => {
@@ -2727,6 +2747,24 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [suggestConditionsOpen, setSuggestConditionsOpen] = useState(false)
   const closeSuggestConditions = () => setSuggestConditionsOpen(false)
+  /**
+   * 条件が1つでも効いているか（2026-08-19 便IF・③）。
+   * 効いていないのに「条件をクリア」を出すと、押しても何も変わらないボタンになる
+   * （日タブの「条件をしぼる」の窓と同じ判断の仕方）。
+   * 分数（planQuickMinutes）は「調理時間◯分以内を優先」がOFFなら効いていないので数えない。
+   */
+  const anyPlanConditionActive = quickOnly || genreFilter != null || planPurpose != null
+  /**
+   * 「条件をクリア」（2026-08-19 便IF・③。オーナー原文「献立を提案の提案の条件に、
+   * リセット機能がない」）。日タブと同じで、**選んだ条件だけ**を開いた直後の状態に戻す。
+   * 分数そのもの（planQuickMinutes）は覚えたままにする＝日タブの「◯分以内」の分数を
+   * クリアで消さないのと同じ作法（次に使うときの好みまでは捨てない）。
+   */
+  const clearSuggestConditions = () => {
+    setQuickOnly(false)
+    setGenreFilter(undefined)
+    if (planPurpose != null) changePurpose(undefined)
+  }
   /**
    * 「調理時間◯分以内を優先」の分数を選ぶ（2026-08-19 便ID）。
    * 分数のプルダウンを常に出す形にしたので、選んだ時点で優先もONにする
@@ -4223,39 +4261,93 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
   /**
    * S-3 先週の献立をコピー(2026-07-25 便BU・docs/59)。
-   * 表示中の週の各日(今日・未来日のみ)へ、その1週間前の同じ曜日の献立を「空いている枠だけ」複製する。
-   * - 既にある枠(手動配置・自動提案由来のどちらも)は上書きしない＝非破壊。空き枠にだけ入れる設計。
+   * 表示中の週の各日(今日・未来日のみ)へ、その1週間前の同じ曜日の献立を複製する。
    * - コピーした枠は手動配置(auto=false)として保存する：ユーザーが意図して「先週を写した」枠なので、
    *   次の「まとめて献立を立てる」で再抽選(上書き)されないよう保護側に倒す(既存のauto/手動保護と整合)。
-   * - 過去日・非表示帯は対象外(週タブの編集グリッドと同じ範囲)。
-   * 確認文は規約F準拠で「入る件数」と「今ある献立は上書きされず残る」を明示する(消える予定は無い)。
+   * - 過去日・非表示帯・鍵の掛かった食事は対象外(週タブの編集グリッドと同じ範囲)。
+   *
+   * 2026-08-19 便IF・⑧（オーナー原文「『先週の献立をコピー』で、すでに決まっている日も
+   * 上書きできる選択ができない」）: 入れかた（空いた枠だけ／総入れ替え）がここにも効く。
+   *  - 空いた枠だけ … 従来どおり非破壊。確認文は「入る件数」と「残る件数」を書く
+   *  - 総入れ替え   … 今日以降の献立を消してから入れ直す。**消す操作なので規約Fの確認を必ず出す**
+   *                   （消えるものを件数つきで／残るものも書く）
+   *
+   * 2026-08-19 便IF・④（オーナー原文「『先週の献立をコピー』に、コピー元の日付期間を
+   * 書いてほしい」）: 説明・確認・結果のすべてに、実際に写す7日間の日付を差し込む。
    */
   const copyLastWeek = async () => {
     setMessage('')
+    const replaceAll = fillMode === 'replaceAll'
     // どこへ何を写すかの判断は純ロジックへ切り出した（2026-08-08 便DX。鍵の掛かった食事を
     // 外す条件も含めてテストで固定するため）
-    const { ops, sourceTotal, lockedSlotCount } = planCopyLastWeek({
-      dates,
-      today,
-      visibleSlots,
-      entries: entries ?? [],
-      prevEntries: prevWeekEntries ?? [],
-      lockedKeys,
-    })
+    const { ops, sourceTotal, lockedSlotCount, entryIdsToRemove, replacedSlotCount } =
+      planCopyLastWeek({
+        dates,
+        today,
+        visibleSlots,
+        entries: entries ?? [],
+        prevEntries: prevWeekEntries ?? [],
+        lockedKeys,
+        replaceAll,
+      })
     const lockNotice = lockNoticeOf(lockedSlotCount)
-    if (ops.length === 0) {
-      // 先週にそもそも献立が無い場合と、空き枠が無い(全部埋まっている)場合を出し分ける
+    const withRange = (text: string) =>
+      text.replace('{start}', copySourceLabel.start).replace('{end}', copySourceLabel.end)
+    // コピー元が空の週から「総入れ替え」を走らせると、表示中の週を黙って空にすることになる。
+    // 写すものが1品も無いときは、どちらの入れかたでも何もしない（消すだけの操作にしない）
+    if (sourceTotal === 0) {
+      setMessage(withNotice(withRange(ja.mealPlan.copyLastWeekNoSource), lockNotice))
+      return
+    }
+    if (ops.length === 0 && entryIdsToRemove.length === 0) {
       setMessage(
         withNotice(
-          sourceTotal === 0 ? ja.mealPlan.copyLastWeekNoSource : ja.mealPlan.copyLastWeekNoRoom,
+          replaceAll ? ja.mealPlan.copyReplaceAllNothing : ja.mealPlan.copyLastWeekNoRoom,
           lockNotice,
         ),
       )
       return
     }
+    if (replaceAll) {
+      // 規約F: 何が消えて何が残るかを件数つきで両方書く
+      const ok = await confirm({
+        title: withRange(ja.mealPlan.copyReplaceAllConfirmTitle).replace('{n}', String(ops.length)),
+        body: '',
+        bullets: [
+          {
+            label: ja.mealPlan.fillModeReplaceAllGoneLabel,
+            text: ja.mealPlan.copyReplaceAllGone
+              .replace('{s}', String(replacedSlotCount))
+              .replace('{n}', String(entryIdsToRemove.length)),
+          },
+          {
+            label: ja.mealPlan.fillModeReplaceAllKeptLabel,
+            text: ja.mealPlan.copyReplaceAllKept,
+          },
+        ],
+        notes: lockNotice ? [lockNotice] : [],
+        confirmLabel: ja.mealPlan.copyLastWeekConfirmOk,
+      })
+      if (!ok) return
+      await removeMealEntries(entryIdsToRemove)
+      for (const op of ops) {
+        await addMealEntry(op.date, op.slot, op.recipeId, op.role)
+      }
+      setMessage(
+        withNotice(
+          withRange(ja.mealPlan.copyReplaceAllDone).replace('{n}', String(ops.length)),
+          lockNotice,
+        ),
+      )
+      return
+    }
+    // 空いた枠だけ（非破壊）。残る品数も数えて書く（規約F: 何が残るかも件数つきで）
+    const keptCount = (entries ?? []).filter(
+      (e) => !isPastDate(e.date, today) && visibleSlots.includes(e.slot),
+    ).length
     const ok = await confirm({
-      title: ja.mealPlan.copyLastWeekConfirmTitle.replace('{n}', String(ops.length)),
-      body: ja.mealPlan.copyLastWeekConfirm,
+      title: withRange(ja.mealPlan.copyLastWeekConfirmTitle).replace('{n}', String(ops.length)),
+      body: ja.mealPlan.copyLastWeekConfirm.replace('{k}', String(keptCount)),
       notes: lockNotice ? [lockNotice] : [],
       confirmLabel: ja.mealPlan.copyLastWeekConfirmOk,
     })
@@ -4264,7 +4356,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     for (const op of ops) {
       await addMealEntry(op.date, op.slot, op.recipeId, op.role)
     }
-    setMessage(withNotice(ja.mealPlan.copyLastWeekDone.replace('{n}', String(ops.length)), lockNotice))
+    setMessage(
+      withNotice(withRange(ja.mealPlan.copyLastWeekDone).replace('{n}', String(ops.length)), lockNotice),
+    )
   }
 
   /**
@@ -4751,12 +4845,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 画面を離れると既定に戻る（設定には残さない）。
    *
    * 2026-08-09 便EN（オーナー実機「『献立を提案』も既定で折りたたみに」）: 3つとも畳んだ状態で
-   * 始める。実行ボタン「まとめて献立を入力」は見出しの横にあり畳んでいても押せる（便DT-5/6）ので、
-   * 畳んでも操作は失われない。7日分のカードが画面のいちばん上に近づく。
+   * 始めていた。実行ボタン「まとめて献立を入力」が見出しの横にあり、畳んでいても押せたため
+   * （便DT-5/6）操作は失われていなかった。
+   *
+   * 2026-08-19 便IF・⑤⑥: 「献立を提案」だけ既定で開く（＝便DJでオーナーが決めた既定に戻す）。
+   * 理由は2つ。
+   *  ・⑥で並びを日タブにそろえ、実行ボタンを条件の下（グループの中）へ移した。
+   *    見出しの横に実行ボタンが無くなったので、畳んだままだと押すものが画面から消える
+   *  ・⑤「献立を提案の項目で一番重要なはずの条件を入れる場所がすぐにわからない」は、
+   *    グループを畳んでいるあいだ「現在の条件」が1つも見えないままでは直らない
+   * 便ENが畳んだ理由（中身が縦に長い）は、便IDで条件が窓に移り、便IFで説明を1行にまとめた
+   * ことで無くなっている。
    */
   const [weekGroupOpen, setWeekGroupOpen] = useState({
     display: false,
-    auto: false,
+    auto: true,
     template: false,
   })
 
@@ -4773,12 +4876,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const [fillMode, setFillMode] = useState<'fillEmpty' | 'replaceAll'>('fillEmpty')
 
   /**
-   * 「先週の献立をコピー」のスイッチ（2026-08-07 便DT-7・オーナー指示）。
-   * 独立したボタンをやめ、ONのまま「まとめて献立を入力」を押すとコピーが走る形にした。
-   * ONのあいだ、提案の条件（時短・ジャンル・目的）と入れかたは意味を持たないので、
+   * 「まとめて献立を入力」が、どこから献立を持ってくるか（2026-08-19 便IF・⑥）。
+   *  - 'suggest' … おまかせ（提案の条件で主菜・副菜を選ぶ）
+   *  - 'copy'    … 先週をコピー（表示している週の1週間前の同じ曜日から写す）
+   *
+   * 2026-08-07 便DT-7 でスイッチ1つ（ONで提案のかわりにコピー）にした中身をそのまま、
+   * 日タブの「1品」／「献立」と同じ2択の切り替えに置き換えたもの
+   * （オーナー原文「週は、日の、できることが増えたバージョン」）。
+   * コピーのあいだ提案の条件（時短・ジャンル・目的）は意味を持たないので、
    * 画面でも無効化して「効きません」を見た目で示す（効かない操作を押せる状態で置かない）。
+   * 入れかた（空いた枠だけ／総入れ替え）は 2026-08-19 便IF・⑧ でコピーにも効くようになった。
    */
-  const [copyLastWeekMode, setCopyLastWeekMode] = useState(false)
+  const [fillSource, setFillSource] = useState<'suggest' | 'copy'>('suggest')
+  const copyLastWeekMode = fillSource === 'copy'
 
   // 週タブ「この週の◯◯をまとめて空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 食事を選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
@@ -5705,9 +5815,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 月タブからの呼び出しは引数なし＝従来どおり常に有効。
    *
    * 2026-08-09 便EN: showLockedRow を足した。週タブは「献立を提案」グループごと畳むので、
-   * 未解錠の鍵付き行だけは呼び出し側（折りたたみの外）で出す＝畳んでも入口が消えないようにする。
+   * 未解錠の鍵付き行だけは呼び出し側（折りたたみの外）で出していた。
+   *
+   * 2026-08-19 便IF・②（オーナー原文「無料版でpro機能の案内が折りたたみでも表示されていて邪魔。
+   * しまって。」）: 鍵付き行は**この窓の中**（下の renderSuggestConditionsModal）へ移した。
+   * 消したのではなく、解錠済みのときに「栄養から組む」が出るのと同じ場所へ入れただけ
+   * ＝入口は残り、週タブ・月タブを開いただけでは案内が場所を取らない。
+   * 週タブ・月タブのどちらから開いても同じ窓なので、showLockedRow の出し分けは不要になった。
    */
-  const renderSuggestConditions = (disabled = false, showLockedRow = true) => (
+  const renderSuggestConditions = (disabled = false) => (
     <div
       className={`mt-[var(--space-sm)] ${disabled ? 'pointer-events-none opacity-40' : ''}`}
       aria-disabled={disabled || undefined}
@@ -5736,13 +5852,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         {conditionsSummary || ja.mealPlan.suggestConditionsNone}
       </button>
 
-      {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）の入口。
-          解錠済みの3択は窓の中（下の renderSuggestConditionsModal）。
-          未解錠のときだけ、控えめな鍵付き1行をここに常設して押すとPro案内へ行く
-          （docs/62「売り場を変える」＝設定の奥ではなく無料の献立画面に入口を置く。
-          窓の中に入れると、窓を開けない人には入口が見えない）。
-          押し売りはしない＝1行の控えめな鍵付き行にとどめる（規約H） */}
-      {!isPro && showLockedRow && renderPurposeLockedRow()}
     </div>
   )
 
@@ -5902,9 +6011,31 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </div>
           )}
 
+          {/* 目的（2026-08-02 便CP-2・docs/62 決定②。Pro機能）の入口。
+              2026-08-19 便IF・②: 未解錠のときの鍵付き1行を、この窓の中へ移した。
+              解錠すると同じ場所が上の「栄養から組む」のプルダウンに変わる
+              ＝解錠の前後で入口の場所が動かない。押し売りはしない＝1行にとどめる（規約H） */}
+          {!isPro && renderPurposeLockedRow()}
+
           {/* 窓の中身は縦に長くなるので、下端にも大きな「閉じる」を置く
               （下まで送ると右上の✕が画面の外に出るため）。名前は同じ ja.common.close */}
           <div className={DIALOG_ACTIONS_CLS}>
+            {/* 「条件をクリア」（2026-08-19 便IF・③。オーナー原文「献立を提案の提案の条件に、
+                リセット機能がない」）。日タブの「条件をしぼる」の窓にあるものと**同じ名前**
+                （ja.search.clear）・同じ置き場所（閉じるの上）にそろえた。
+                条件を1つも選んでいないあいだも場所を先に取る（見えなくするだけ）＝
+                窓の中身が伸び縮みして下の「閉じる」が動くことがない（便IDと同じ手） */}
+            <button
+              type="button"
+              data-testid="plan-conditions-clear"
+              onClick={clearSuggestConditions}
+              aria-hidden={!anyPlanConditionActive}
+              className={`w-full rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm ${
+                anyPlanConditionActive ? '' : 'invisible'
+              }`}
+            >
+              {ja.search.clear}
+            </button>
             <button
               type="button"
               data-testid="plan-conditions-close"
@@ -7189,35 +7320,58 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         </Collapse>
       </section>
 
-      {/* グループ2: 献立を提案(条件＋実行ボタン)。押すと献立が増える操作をここに集める。
-          3グループのうちここだけが既定で開く(便DJ・オーナー指示)。
-          2026-08-07 便DT-5/6(オーナー指示): 実行ボタン「まとめて献立を入力」は見出しの横に置き、
-          畳んでいても押せるようにしたうえで、塗りつぶしのボタンにして目立たせる
-          (このグループで唯一「実行する」ボタンなので、条件のボタン群と見た目を変える) */}
+      {/* グループ2: 献立を提案。押すと献立が増える操作をここに集める。
+          2026-08-03 便DJ(オーナー指示): 3グループを折りたたみにし、既定で開くのはここだけ。
+
+          2026-08-19 便IF・⑥（オーナー原文「日と週で、同じ献立を提案する機能なのに、条件の
+          絞り込みなどのボタンの配置がバラバラで、まるで別機能。フォーマット揃えたい。
+          週は、日の、できることが増えたバージョン。」）: **日タブの「今日なに作る？」の並びを正**にして、
+          この中身をそこへ寄せた。日タブの並びは
+            出しかたの切り替え（1品／献立）→ 条件の窓を開くボタン → 決めてもらうボタン（塗り・横いっぱい）
+          なので、週も同じ順にする。
+            出しかたの切り替え（おまかせ／先週をコピー）→［週だけ］入れかた → 現在の条件 → まとめて献立を入力
+
+          ・「先週の献立をコピー」は、独立した囲みのスイッチ（便DT-7）をやめて出しかたの2択にした。
+            ⑤（オーナー原文「『現在の条件』より『先週の献立を〜』が目立っていて、献立を提案の項目で
+            一番重要なはずの条件を入れる場所がすぐにわからない」）への答えでもある＝
+            先週コピーは切り替えの片側に収まり、条件は押すボタンのすぐ上に来る
+          ・実行ボタンは見出しの横（便DT-5/6）から**条件の下**へ移した。日タブと同じ場所・同じ見た目
+            （塗りつぶし・横いっぱい）にするため。見出しの横に無くなったので、このグループは既定で開く
+          ・入れかたは週にしか無い（＝「できることが増えた版」）。並びは便ID・①のまま入れかたが先 */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
-        {renderWeekGroupHeader(
-          'auto',
-          ja.mealPlan.weekGroupAutoTitle,
-          <button
-            type="button"
-            onClick={() => void fillWeek()}
-            /* 2026-08-09 便EN: このグループで唯一の実行ボタン。条件のチップ(丸い枠・塗らない)と
-               はっきり違う形にするため、角丸の四角のまま塗りつぶしを残し、一回り大きくする */
-            className="ml-auto inline-flex items-center gap-1 rounded-md border border-accent bg-accent px-4 py-3 text-base font-bold text-on-accent shadow-md"
-          >
-            {copyLastWeekMode ? <Copy size={16} aria-hidden /> : <Dices size={16} aria-hidden />}
-            {ja.mealPlan.fillWeek}
-          </button>,
-        )}
-        {/* 未解錠のときだけ出る「栄養から組む（Pro）」の鍵付き1行。折りたたみの外に置く
-            （2026-08-09 便EN。グループを既定で畳んだので、中に置くと入口が画面から消える。
-            docs/62 決定②「売り場を変える」＝無料の献立画面に入口を残す） */}
-        {!isPro && renderPurposeLockedRow()}
+        {renderWeekGroupHeader('auto', ja.mealPlan.weekGroupAutoTitle)}
         <Collapse open={weekGroupOpen.auto}>
           <>
+            {/* 出しかたの2択(2026-08-19 便IF・⑥)。日タブの「1品」／「献立」と同じ形
+                （地色で選択中を言い切る・2列で必ず横1列・下のボタンは1つのまま） */}
+            <div
+              role="group"
+              aria-label={ja.mealPlan.fillSourceGroupLabel}
+              className="mt-[var(--space-sm)] grid grid-cols-2 gap-1 rounded-md border border-edge bg-app p-1"
+            >
+              {(
+                [
+                  ['suggest', ja.mealPlan.fillSourceSuggest],
+                  ['copy', ja.mealPlan.fillSourceCopy],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  data-testid={value === 'suggest' ? 'plan-source-suggest' : 'plan-source-copy'}
+                  onClick={() => setFillSource(value)}
+                  aria-pressed={fillSource === value}
+                  className={`rounded-sm py-3 text-base font-bold ${
+                    fillSource === value ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-muted'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
                 空いている枠だけを埋めるのか、これからの献立を総入れ替えするのかを選ぶ。
-                先週コピーがONのあいだは効かないのでグレーアウトする。
 
                 2026-08-19 便ID・①（オーナー原文「献立を提案の並び順：入れ方＞提案の条件」）:
                 **入れかたを先、現在の条件を後**にした。
@@ -7226,13 +7380,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 横一列にボタンを配置。２列だと情報量自体が多く感じ、直感的に２択だとわからない」）:
                 名前を短くし、**2列のグリッドで必ず横1列**に並べる（折り返しに任せると、
                 文字を大きくした端末では2段に割れて「2択」に見えなくなる）。
-                下の1行は残す: 短い名前だけでは「押すボタンはどれか」「今ある献立がどうなるか」が
-                言えないため（便ENでオーナーが「押さないといけないことに気づけない」と指摘した箇所）。
+
+                2026-08-19 便IF・⑧（オーナー原文「『先週の献立をコピー』で、すでに決まっている日も
+                上書きできる選択ができない」）: 先週のコピーでも効くようになったので、
+                コピーを選んでいるあいだのグレーアウトをやめた。
                 総入れ替えのときに何が消えて何が残るかは、押したあとの確認の窓が件数つきで言う（規約F） */}
-            <div
-              className={`mt-[var(--space-sm)] ${copyLastWeekMode ? 'pointer-events-none opacity-40' : ''}`}
-              aria-disabled={copyLastWeekMode || undefined}
-            >
+            <div className="mt-[var(--space-md)]">
               <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.fillModeTitle}</p>
               <div
                 role="group"
@@ -7249,7 +7402,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                     key={value}
                     type="button"
                     data-testid={value === 'fillEmpty' ? 'fill-mode-empty' : 'fill-mode-replace'}
-                    disabled={copyLastWeekMode}
                     onClick={() => setFillMode(value)}
                     aria-pressed={fillMode === value}
                     /* チップの見た目は他の条件と同じものを使うが、2列に敷くので
@@ -7262,42 +7414,40 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   </button>
                 ))}
               </div>
-              <p className="mt-1 text-xs text-ink-muted">
-                {fillMode === 'replaceAll'
-                  ? ja.mealPlan.fillModeReplaceAllHint
-                  : ja.mealPlan.fillModeFillEmptyHint}
+              {/* 押すと何が起きるかの1行。出しかた×入れかたの4通りを1か所で言い切る
+                  （2026-08-19 便IF・④⑧: コピー側にはコピー元の7日間の日付が入る）。
+                  同じことを2か所で言わない＝旧 fillWeekHint はここに畳んだ */}
+              <p data-testid="fill-hint" className="mt-1 text-xs text-ink-muted">
+                {copyLastWeekMode
+                  ? (fillMode === 'replaceAll'
+                      ? ja.mealPlan.copyReplaceAllHint
+                      : ja.mealPlan.copyFillEmptyHint
+                    )
+                      .replace('{start}', copySourceLabel.start)
+                      .replace('{end}', copySourceLabel.end)
+                  : fillMode === 'replaceAll'
+                    ? ja.mealPlan.fillModeReplaceAllHint
+                    : ja.mealPlan.fillModeFillEmptyHint}
               </p>
             </div>
 
             {/* 現在の条件: 時短優先・ジャンル・栄養から組む。押すと窓が開く(2026-08-19 便ID・④)。
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
-                2026-08-07 便DT-7: 先週コピーがONのあいだは効かないのでグレーアウトする */}
-            {renderSuggestConditions(copyLastWeekMode, false)}
+                2026-08-07 便DT-7: 先週コピーを選んでいるあいだは効かないのでグレーアウトする */}
+            {renderSuggestConditions(copyLastWeekMode)}
 
-            {/* S-3(docs/59): 先週の献立を空き枠だけにコピー。上書きはしない=非破壊
-                (確認文で件数と「残る」を明示)。
-                2026-08-07 便DT-7(オーナー指示): 独立したボタンをやめてスイッチにした。
-                ONのまま「まとめて献立を入力」を押すとコピーが走る */}
-            <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app p-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={() => setCopyLastWeekMode((v) => !v)}
-                aria-pressed={copyLastWeekMode}
-                className={chipClass(copyLastWeekMode)}
-                style={chipStyle(copyLastWeekMode)}
-              >
-                {copyLastWeekMode ? <ChipCheck on /> : <Copy size={14} aria-hidden />}
-                {ja.mealPlan.copyLastWeekToggle}
-              </button>
-              <p className="mt-1 text-xs text-ink-muted">
-                {copyLastWeekMode
-                  ? ja.mealPlan.copyLastWeekToggleHintOn
-                  : ja.mealPlan.copyLastWeekToggleHintOff}
-              </p>
-            </div>
-            {/* 「おまかせで献立を組む」(日タブ)との違いが名前から分からないという指摘への1行説明
-                (2026-07-29 便CD/MP-15) */}
-            <p className="mt-[var(--space-sm)] text-xs text-ink-muted">{ja.mealPlan.fillWeekHint}</p>
+            {/* 実行ボタン。日タブの「おまかせで献立を組む」と同じ場所（条件の下）・同じ見た目
+                （塗りつぶし・横いっぱい）にそろえた（2026-08-19 便IF・⑥）。
+                絵は、いま選んでいる出しかたで入れ替える（便DT-7から変えていない） */}
+            <button
+              type="button"
+              data-testid="week-fill-run"
+              onClick={() => void fillWeek()}
+              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+            >
+              {copyLastWeekMode ? <Copy size={20} aria-hidden /> : <Dices size={20} aria-hidden />}
+              {ja.mealPlan.fillWeek}
+            </button>
           </>
         </Collapse>
       </section>
@@ -7382,7 +7532,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           「すべて畳む」を押すと7日ぶんが一度に日付だけになる */}
       <div className="mt-[var(--space-sm)] flex justify-end gap-[var(--space-sm)]">
         {/* 2026-08-08 便DX(オーナー指示「『すべて畳む』の隣に『すべてロック』ボタンも」)。
-            表示中の7日分をまとめて掛け外しする。7日とも3食に鍵が掛かっていれば「すべて解除」になる */}
+            表示中の7日分をまとめて掛け外しする。7日とも3食に鍵が掛かっていれば「すべて解除」になる。
+            2026-08-19 便IF・⑪: 過去だけの週では出さない（判断は logic/mealPlan.ts の
+            planShowWeekLock。機能そのものは消していない） */}
+        {showWeekLock && (
         <button
           type="button"
           data-testid="lock-all"
@@ -7401,6 +7554,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             labels={[ja.mealPlan.lockAllButton, ja.mealPlan.lockAllReleaseButton]}
           />
         </button>
+        )}
         <button
           type="button"
           onClick={() => setAllDaysFolded(!allDaysCollapsed)}
@@ -7508,7 +7662,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 )}
               </button>
               {/* 日ごとのロック: その日の朝食・昼食・夕食をまとめて掛け外しする。
-                  3食とも掛かっているときだけ閉じた鍵になる(表示していない食事も数える) */}
+                  3食とも掛かっているときだけ閉じた鍵になる(表示していない食事も数える)。
+                  2026-08-19 便IF・⑪: 過去だけの週では出さない（「すべてロック」と同じ判断）。
+                  今週のように過去日と未来日が混ざる週では、過ぎた日のカードにも出したまま
+                  ＝同じ週の中で日によって鍵が消える／現れることをしない */}
+              {showWeekLock && (
               <button
                 type="button"
                 data-testid="day-lock"
@@ -7526,6 +7684,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               >
                 {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
               </button>
+              )}
             </h2>
             {/* 2026-08-10 便FD(オーナー実機「『全て開く』すると、下へスクロールする。
                 今日の日づけすらスルーされる」): 曜日カードは開いても画面を動かさない。
