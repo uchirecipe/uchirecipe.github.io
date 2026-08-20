@@ -20007,6 +20007,29 @@ try {
         'IH-SEARCH-01(②) 検索していないときは一致した場所の入口が出ない',
         (await ihPage.locator('[data-testid="search-match-open"]').count()) === 0,
       )
+      /**
+       * 件数の行（「◯品 / 全◯品」「自分で登録 ◯/30品」）の高さと、数字が欠けていないか。
+       * 入口はこの行に入るので、**出入りしても行の高さが動かない**ことと、
+       * **数字が「…」で欠けない**ことを、検索の前後で同じ物差しで測る（2026-08-20 便IH・②）
+       */
+      const ihCountRow = () =>
+        ihPage.evaluate(() => {
+          const label = document.querySelector('[data-testid="free-limit-count"]')
+          const p = label?.parentElement
+          const row = p?.parentElement
+          if (!p || !row) return null
+          return {
+            h: Math.round(row.getBoundingClientRect().height),
+            clip: Math.max(0, p.scrollWidth - p.clientWidth),
+            text: (p.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          }
+        })
+      const ihRowIdle = await ihCountRow()
+      check(
+        'IH-SEARCH-01(②) 前提: 件数の行を測れている(読めないまま合格にしない)',
+        ihRowIdle != null && ihRowIdle.h > 0 && ihRowIdle.text !== '',
+        `実測=${JSON.stringify(ihRowIdle)}`,
+      )
 
       // ---- ①絞り込みのパネルの呼び名 ---------------------------------------------------------
       await ihPage.locator('button[aria-label="絞り込み"]').click()
@@ -20043,15 +20066,25 @@ try {
         ihEntry === ja.search.matchEntry,
         `入口=${ihEntry} 期待=${ja.search.matchEntry}`,
       )
-      // 訂正3「一列使わず、キーワード登録に並べられるくらい小さく」＋
-      // 「押せる大きさは44pxを割らない」。見た目の箱と**実際の当たり判定**を別々に測る
+      // 訂正3「一列使わず、キーワード登録に並べられるくらい小さく」＋訂正4（置き場所）
+      // 「『一致した場所』は、全◯品自分で登録◯品、の隣の方がいいかも。キーワード登録が
+      //  されているワードの時に、列を増やす必要がなくなるので。」
+      //
+      // 測るのは3つ:
+      //  ・入口が**件数の行の中**にある（行を増やしていない）
+      //  ・入口は行を丸ごと使わない（幅が画面の半分未満）
+      //  ・**押せる大きさは44pxを割らない**（中心から21pxの4点を実際に突く）
+      // どれも「何番目の要素か」ではなく**同じ行にいるか・実際に押せるか**で見るので、
+      // 並びが変わっても当たる
       const ihEntryBox = await ihPage.evaluate(() => {
         const entry = document.querySelector('[data-testid="search-match-open"]')
-        const add = document.querySelector('[data-testid="saved-search-add"]')
+        const countRow = document
+          .querySelector('[data-testid="free-limit-count"]')
+          ?.closest('div')
         if (!entry) return null
         entry.scrollIntoView({ block: 'center' })
         const r = entry.getBoundingClientRect()
-        const a = add?.getBoundingClientRect()
+        const c = countRow?.getBoundingClientRect()
         const cx = r.left + r.width / 2
         const cy = r.top + r.height / 2
         const d = 21
@@ -20069,24 +20102,51 @@ try {
           h: Math.round(r.height),
           pageW: document.documentElement.clientWidth,
           dead: dead.length,
-          sameRow: a ? Math.abs(a.top - r.top) < 20 : null,
-          addFound: !!a,
+          countRowFound: !!countRow,
+          inCountRow: countRow ? countRow.contains(entry) : null,
+          rowH: c ? Math.round(c.height) : null,
         }
       })
+      // 入口が出入りしても件数の行の高さが動かないこと・数字が欠けないこと。
+      // **品数の桁数を変えながら**測る（1桁・2桁・3桁）＝桁が増えた瞬間に折り返して
+      // 行が伸びる、という直りにくい跳ね方をここで捕まえる
+      const ihRowStates = [{ q: '(検索なし)', row: ihRowIdle }]
+      for (const q of ['魚', '和食', 'し']) {
+        await ihSearch(q)
+        ihRowStates.push({ q, row: await ihCountRow() })
+      }
+      await ihSearch('魚')
+      check(
+        'IH-SEARCH-01(②) 前提: 1桁・2桁・3桁の品数をひととおり測れている',
+        ihRowStates.length === 4 &&
+          ihRowStates.every((state) => state.row != null) &&
+          new Set(ihRowStates.map((state) => (state.row.text.match(/^\d+/) ?? [''])[0].length)).size >= 3,
+        `実測=${JSON.stringify(ihRowStates)}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 入口が出ても、品数の桁が増えても、件数の行の高さが変わらない(画面が跳ねない)',
+        new Set(ihRowStates.map((state) => state.row?.h)).size === 1,
+        `実測=${JSON.stringify(ihRowStates.map((state) => `${state.q}=${state.row?.h}px`))}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 入口が並んでも品数の数字が「…」で欠けない',
+        ihRowStates.every((state) => state.row?.clip === 0),
+        `実測=${JSON.stringify(ihRowStates.map((state) => `${state.q}=${state.row?.clip}px「${state.row?.text}」`))}`,
+      )
       check(
         'IH-SEARCH-01(②) 入口の大きさを測れている(読めないまま合格にしない)',
-        ihEntryBox != null && ihEntryBox.w > 0,
+        ihEntryBox != null && ihEntryBox.w > 0 && ihEntryBox.countRowFound,
         `実測=${JSON.stringify(ihEntryBox)}`,
       )
       check(
-        'IH-SEARCH-01(②) 入口は1行を丸ごと使わない(キーワード登録の隣に並ぶ小ささ)',
+        'IH-SEARCH-01(②) 入口は件数の行の中にある(入口のために行を増やしていない)',
+        ihEntryBox?.inCountRow === true,
+        `実測=${JSON.stringify(ihEntryBox)}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 入口は1行を丸ごと使わない',
         ihEntryBox != null && ihEntryBox.w < ihEntryBox.pageW / 2,
         `入口の幅=${ihEntryBox?.w}px 画面の幅=${ihEntryBox?.pageW}px`,
-      )
-      check(
-        'IH-SEARCH-01(②) 入口はキーワード登録のボタンと同じ行に並ぶ',
-        ihEntryBox?.addFound === true && ihEntryBox?.sameRow === true,
-        `実測=${JSON.stringify(ihEntryBox)}`,
       )
       check(
         'IH-SEARCH-01(②) 見た目を小さくしても、押す面は44px四方を割らない',
@@ -20210,6 +20270,53 @@ try {
         `「ん」=${ihWideRows.length}行 「い」=${ihWideRows2.length}行 ほか=${ihMore2}`,
       )
       await ihCloseDialog()
+
+      // ---- 狭い画面でも件数の行が跳ねないか ------------------------------------------------------
+      // 390pxでは余白があって折り返さないので、**いちばん余白の薄い幅**でもう一度だけ測る。
+      // 360pxはAndroidの小さめの端末で実際にある幅で、ここが通れば375px（実機の基準）も通る
+      {
+        const ihNarrow = await ihContext.newPage()
+        try {
+          await ihNarrow.setViewportSize({ width: 360, height: 844 })
+          await ihNarrow.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await ihNarrow.waitForTimeout(1800)
+          const readRow = () =>
+            ihNarrow.evaluate(() => {
+              const label = document.querySelector('[data-testid="free-limit-count"]')
+              const p = label?.parentElement
+              const row = p?.parentElement
+              if (!p || !row) return null
+              return {
+                h: Math.round(row.getBoundingClientRect().height),
+                clip: Math.max(0, p.scrollWidth - p.clientWidth),
+                text: (p.textContent ?? '').replace(/\s+/g, ' ').trim(),
+              }
+            })
+          const states = [{ q: '(検索なし)', row: await readRow() }]
+          for (const q of ['魚', '和食', 'し']) {
+            await ihNarrow.locator('input[type="search"]').fill(q)
+            await ihNarrow.waitForTimeout(900)
+            states.push({ q, row: await readRow() })
+          }
+          check(
+            'IH-SEARCH-01(②) 前提: 狭い画面(360px)でも件数の行を測れている',
+            states.every((state) => state.row != null && state.row.h > 0),
+            `実測=${JSON.stringify(states)}`,
+          )
+          check(
+            'IH-SEARCH-01(②) 狭い画面(360px)でも件数の行の高さが変わらない',
+            new Set(states.map((state) => state.row?.h)).size === 1,
+            `実測=${JSON.stringify(states.map((state) => `${state.q}=${state.row?.h}px`))}`,
+          )
+          check(
+            'IH-SEARCH-01(②) 狭い画面(360px)でも品数の数字が欠けない(縮むのは入口の文字の側)',
+            states.every((state) => state.row?.clip === 0),
+            `実測=${JSON.stringify(states.map((state) => `${state.q}=${state.row?.clip}px「${state.row?.text}」`))}`,
+          )
+        } finally {
+          await ihNarrow.close()
+        }
+      }
 
       // ---- 検索をやめたら入口も消える -----------------------------------------------------------
       await ihSearch('')

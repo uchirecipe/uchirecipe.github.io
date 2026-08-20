@@ -29,7 +29,6 @@ import {
   Trash2,
   X,
   ChevronDown,
-  ChevronRight,
   Tag,
 } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -1981,7 +1980,12 @@ export default function RecipesPage() {
           便T-2からこの行のまま: 全◯件 | 列切替 の並び */}
       {results && totalCount !== undefined && (
         <div className="mt-[var(--space-sm)] flex items-center justify-between gap-2">
-          <p className="min-w-0 flex-1 text-sm text-ink-muted">
+          {/* 1行に収める(2026-08-20 便IH・②)。この行に「一致した場所」の入口が並ぶので、
+              入口が出入りしたり数字の桁が増えたりするたびに2行になって**行の高さが動く**、
+              ということが起きないようにする。
+              狭くなったときに縮むのは**入口の文字**の側で、品数の数字は最後まで欠けさせない
+              （数字は読むための情報、入口の文字はただの名前なので、削るなら名前の側から） */}
+          <p className="shrink-0 whitespace-nowrap text-sm text-ink-muted">
             {filterActive
               ? ja.search.resultCountWithTotal
                   .replace('{n}', String(results.length))
@@ -1999,7 +2003,30 @@ export default function RecipesPage() {
               </span>
             )}
           </p>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
+            {/* 打った言葉がレシピのどこに一致したかを開く入口(2026-08-20 便IH・② オーナー原文
+                「『一致した場所』は、全◯品自分で登録◯品、の隣の方がいいかも。キーワード登録が
+                されているワードの時に、列を増やす必要がなくなるので。」)。
+
+                件数の行は**検索していてもしていなくても必ず出ている行**なので、ここに寄せると
+                入口のためだけに行が増えることが無い(登録ボタンが出ないときも同じ)。
+
+                見た目は小さくしても押す面は小さくしない: .tap-target が当たり判定を44px四方に広げる。
+                入口に数は入れない——同じ行に出ている「◯品 / 全◯品」と読み違えられるため
+                (数は窓の中で読む)。検索していないときは出さない */}
+            {!selecting && matchSummary.rows.length > 0 && (
+              <button
+                type="button"
+                data-testid="search-match-open"
+                onClick={() => setMatchDialogOpen(true)}
+                // 文字を省く指定（truncate）はボタン自身ではなく**中の字**に付ける。
+                // ボタンに付けると overflow:hidden が .tap-target の広げた当たり判定まで
+                // 切り落とし、見た目どおりの25pxしか押せなくなる（実測で上下2点が死んだ）
+                className="tap-target inline-flex min-w-0 items-center rounded-sm border border-edge bg-surface px-1 py-1 text-[10px] text-ink-muted"
+              >
+                <span className="min-w-0 truncate">{ja.search.matchEntry}</span>
+              </button>
+            )}
             {/* 一覧の表示形式(グリッド/リスト)切替。押すたびに逆の表示へ切り替わる(2026-07-13 UI改善。
                 2026-07-16 便T-2でヘッダーからこの常設列へ移動) */}
             <button
@@ -2022,57 +2049,31 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 検索まどの下の2つ(2026-08-20 便IH)。**同じ行に並べる**。
+      {/* いまの検索を、絞り込みのキーワードとして登録する(2026-08-19 便HZ・② オーナー
+          「絞り込み機能の『タグ』に新しいタグを追加する、という意味でした。レシピ自体はいじりません」)。
+          出すのは検索語があって、結果が1品以上あって、まだ登録していないときだけ
+          (1品も出ない検索や、同じ言葉の二重登録をキーワードに増やさない)。
+          レシピを選んでいる最中は出さない(選ぶ操作の隣に別の操作を並べない)。
 
-          ・「{q}」をキーワードに登録 … いまの検索を絞り込みのキーワードとして残す(便HZ・②)
-          ・一致した場所 … 打った言葉がレシピのどこに一致したかを窓で見る(便IH・②)
-
-          オーナー原文(便IH・③): 「一列使わず、キーワード登録に並べられるくらい小さく。
-          気になった人が意識して探せばわかればOKなので」——一致した場所の入口は1行を丸ごと使わず、
-          登録ボタンの隣に置く小さな押しどころにする。
-          **見た目は小さくしても押す面は小さくしない**: .tap-target が当たり判定を44px四方に広げる。
-
-          入口に数は入れない。すぐ上に出ている「◯品 / 全◯品」と読み違えられるため
-          （数は窓の中で読む）。
-          レシピを選んでいる最中はどちらも出さない(選ぶ操作の隣に別の操作を並べない) */}
-      {!selecting &&
-        ((pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0) ||
-          matchSummary.rows.length > 0) && (
-          <div className="mt-[var(--space-sm)]">
-            <div className="flex flex-wrap items-center gap-[var(--space-sm)]">
-              {/* 登録は検索語があって、結果が1品以上あって、まだ登録していないときだけ出す
-                  (1品も出ない検索や、同じ言葉の二重登録をキーワードに増やさない) */}
-              {pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
-                <button
-                  type="button"
-                  data-testid="saved-search-add"
-                  onClick={() => void registerSavedSearch()}
-                  disabled={tagBusy}
-                  className="tap-target inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-2.5 text-left text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
-                >
-                  <Tag size={16} className="shrink-0" aria-hidden />
-                  {ja.search.savedSearchAdd.replace('{q}', pendingSavedSearch)}
-                </button>
-              )}
-              {matchSummary.rows.length > 0 && (
-                <button
-                  type="button"
-                  data-testid="search-match-open"
-                  onClick={() => setMatchDialogOpen(true)}
-                  className="tap-target inline-flex shrink-0 items-center gap-0.5 rounded-sm border border-edge bg-surface px-2 py-1 text-xs text-ink-muted shadow-sm"
-                >
-                  {ja.search.matchEntry}
-                  <ChevronRight size={14} className="shrink-0" aria-hidden />
-                </button>
-              )}
-            </div>
-            {/* 登録ボタンの行き先の説明(便IH・③でボタンから「絞り込みの」を落としたぶん、
-                この1行が行き先を言い切る)。登録ボタンが出ていないときは出さない */}
-            {pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
-              <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchAddHint}</p>
-            )}
-          </div>
-        )}
+          2026-08-20 便IH・②: 一致した場所の入口は上の件数の行へ移した(オーナー指示)。
+          登録ボタンが出ているときに、入口のためだけに行が増えないようにするため */}
+      {!selecting && pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
+        <div className="mt-[var(--space-sm)]">
+          <button
+            type="button"
+            data-testid="saved-search-add"
+            onClick={() => void registerSavedSearch()}
+            disabled={tagBusy}
+            className="tap-target inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-2.5 text-left text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+          >
+            <Tag size={16} className="shrink-0" aria-hidden />
+            {ja.search.savedSearchAdd.replace('{q}', pendingSavedSearch)}
+          </button>
+          {/* 登録ボタンの行き先の説明(便IH・③でボタンから「絞り込みの」を落としたぶん、
+              この1行が行き先を言い切る) */}
+          <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchAddHint}</p>
+        </div>
+      )}
 
       {/* 空の状態 */}
       {results && results.length === 0 && (
