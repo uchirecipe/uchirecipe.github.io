@@ -19896,7 +19896,7 @@ try {
     }
   }
 
-  // --- IH-SEARCH-01: 絞り込みの欄の呼び名（①）と、検索で当たった先の1行（②）
+  // --- IH-SEARCH-01: 絞り込みの欄の呼び名（①）と、打った言葉が「どこに当たったか」（②）
   //     （2026-08-20 便IH）
   //
   //     オーナー原文（①）: 「絞り込み『タグ』は、追加可能になった＝タグ以外も登録できる、ので、
@@ -19904,18 +19904,22 @@ try {
   //       レシピカードに表示されるワードなので。」
   //     オーナー原文（②）: 「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ
   //       ６件ありましたが、レシピのタグやキーワードに入っているわけではなさそうでした。」
+  //       →（訂正1）「各レシピカードに表示ではなく、検索バーの下に…羅列するイメージ」
+  //       →（訂正2）「そんなに長くなるなら、羅列部分は…窓出して表示したらいいのでは？
+  //          それでも上限は必須。」
   //
   //     【この検査で測ること】
   //      ①絞り込みのパネルに、古い呼び名（レシピに付いている印＝「タグ」）が1つも残っていない
   //        ＝欄の見出しは ja.ts の値そのもの（画面の字を書き写さない）
-  //      ②検索していないときは、当たり先の1行がどのカードにも出ない
-  //      ③検索すると、出たカードは1枚残らず「当たり先の1行」か「料理名にその言葉がある」の
-  //        どちらかで説明が付く
-  //      ④出た当たり先が**本当にそのレシピのその欄にある**（タグで当たった品はレシピ詳細に
-  //        そのタグが並び、手順で当たった品は手順の本文にその言葉がある）
+  //      ②検索していないときは入口が出ない／レシピカードには当たり先を1つも出さない
+  //        （訂正1で取り下げた形に戻っている）
+  //      ③入口を押すと窓が開き、当たり先が品数の多い順に並ぶ
+  //      ④**窓の数字と、実際に画面へ出ている品数が合っている**（数字を書き写さず、
+  //        画面から数え直して突き合わせる）
+  //      ⑤上限を超えたときは「ほか◯件」で数を出す（黙って切らない）
   //
   //     品数は決め打ちしない（レシピが増減しても当たる）。読み取りに失敗したら必ず落ちる
-  //     （カードが0枚・当たり先の顔ぶれを1つも拾えない・確かめる相手が見つからないときは不合格）---
+  //     （カードが0枚・窓の行を1つも読めない・数字を読めないときは不合格）---
   currentCheck = 'IH-SEARCH-01'
   {
     const ihBrowser = await chromium.launch()
@@ -19926,41 +19930,62 @@ try {
       errors.push(`[pageerror@IH-SEARCH-01] ${err.message}`)
     })
     try {
-      const ihClean = (text) => (text ?? '').replace(/\u200b/g, '').replace(/\s+/g, ' ').trim()
-      /**
-       * 画面に出ているカードを「料理名・行き先・当たり先の1行」の組で読む。
-       * 料理名と当たり先は**同じリンクの中にあるかどうか**だけで対応づける
-       * （何番目のカードか・入れ子の何段目か、には頼らない）
-       */
-      const ihCards = () =>
+      const ihClean = (text) => (text ?? '').replace(/​/g, '').replace(/\s+/g, ' ').trim()
+      /** 画面に出ているカードの料理名（何番目のカードか・入れ子の段数には頼らない） */
+      const ihTitles = () =>
         ihPage.evaluate(() =>
           Array.from(document.querySelectorAll('a[href]'))
             .filter((a) => /^#\/recipes\/\d+$/.test(a.getAttribute('href') ?? ''))
-            .map((a) => ({
-              href: a.getAttribute('href') ?? '',
-              title: (a.querySelector('[data-testid="recipe-card-title"]')?.textContent ?? '')
-                .replace(/\u200b/g, '')
+            .map((a) =>
+              (a.querySelector('[data-testid="recipe-card-title"]')?.textContent ?? '')
+                .replace(/​/g, '')
                 .trim(),
-              reason: (a.querySelector('[data-testid="card-match-reason"]')?.textContent ?? '')
-                .replace(/\u200b/g, '')
-                .trim(),
-            })),
+            ),
         )
+      /** カードのどこかに当たり先が出ていないか（訂正1で取り下げた形が残っていないか） */
+      const ihCardReasons = () =>
+        ihPage.locator('[data-testid="card-match-reason"]').count()
+      /** 窓の中の行を「出どころ・言葉・品数」に分けて読む。読めなければ count が null */
+      const ihRows = () =>
+        ihPage.evaluate(() =>
+          Array.from(document.querySelectorAll('[data-testid="search-match-word"]')).map((el) => {
+            const text = (el.textContent ?? '').replace(/​/g, '').trim()
+            const m = text.match(/(\d+)品\s*$/)
+            const quoted = text.match(/^(.+?)「(.+)」\s*\d+品\s*$/)
+            return {
+              text,
+              field: quoted ? quoted[1].trim() : text.replace(/\s*\d+品\s*$/, '').trim(),
+              word: quoted ? quoted[2] : null,
+              count: m ? Number(m[1]) : null,
+            }
+          }),
+        )
+      const ihSearch = async (q) => {
+        await ihPage.locator('input[type="search"]').fill(q)
+        await ihPage.waitForTimeout(1000)
+      }
+      const ihOpenDialog = async () => {
+        await ihPage.locator('[data-testid="search-match-open"]').click()
+        await ihPage.waitForTimeout(500)
+      }
+      const ihCloseDialog = async () => {
+        await ihPage.locator('[data-testid="search-match-close"]').click()
+        await ihPage.waitForTimeout(400)
+      }
       await ihPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await ihPage.waitForTimeout(2000)
 
-      // ---- ② 検索していないときは1行も出ない ----------------------------------------------
-      const ihIdle = await ihCards()
+      // ---- ② 検索していないときは入口が出ない ------------------------------------------------
+      const ihIdle = await ihTitles()
       check('IH-SEARCH-01 前提: 一覧にカードが出ている', ihIdle.length > 0, `カード=${ihIdle.length}枚`)
       check(
-        'IH-SEARCH-01(②) 検索していないときは、当たり先の1行がどのカードにも出ない',
-        ihIdle.every((c) => c.reason === ''),
-        `出ていたカード=${JSON.stringify(ihIdle.filter((c) => c.reason !== '').slice(0, 3))}`,
+        'IH-SEARCH-01 前提: 料理名を読み取れている(読めないまま合格にしない)',
+        ihIdle.every((t) => t !== ''),
+        `料理名の読めないカード=${ihIdle.filter((t) => t === '').length}枚`,
       )
       check(
-        'IH-SEARCH-01(②) 前提: 料理名を読み取れている(読めないまま合格にしない)',
-        ihIdle.every((c) => c.title !== ''),
-        `料理名の読めないカード=${ihIdle.filter((c) => c.title === '').length}枚`,
+        'IH-SEARCH-01(②) 検索していないときは当たり先の入口が出ない',
+        (await ihPage.locator('[data-testid="search-match-open"]').count()) === 0,
       )
 
       // ---- ①絞り込みのパネルの呼び名 ---------------------------------------------------------
@@ -19983,66 +20008,150 @@ try {
       await ihPage.locator('[data-testid="filter-panel-close"]').click()
       await ihPage.waitForTimeout(400)
 
-      // ---- ②③ 検索したときの当たり先 ---------------------------------------------------------
-      // 探す言葉はオーナーが実機で打ったもの。料理名以外の当たり先が混ざる言葉であることを
-      // その場で確かめてから測る（当たり先が1種類しか出ない言葉だと、④で比べる相手が作れない）
-      await ihPage.locator('input[type="search"]').fill('魚')
-      await ihPage.waitForTimeout(900)
-      const ihFound = await ihCards()
-      check('IH-SEARCH-01(②) 「魚」で1品以上出る', ihFound.length > 0, `出た品数=${ihFound.length}`)
+      // ---- ②③ 「魚」（オーナーが実機で見た言葉） ----------------------------------------------
+      await ihSearch('魚')
+      const ihFishTitles = await ihTitles()
+      check('IH-SEARCH-01(②) 「魚」で1品以上出る', ihFishTitles.length > 0, `出た品数=${ihFishTitles.length}`)
       check(
-        'IH-SEARCH-01(②) 「魚」で出た品は、当たり先の1行か料理名で説明が付く',
-        ihFound.every((c) => c.reason !== '' || c.title.includes('魚')),
-        `説明の付かない品=${JSON.stringify(ihFound.filter((c) => c.reason === '' && !c.title.includes('魚')))}`,
+        'IH-SEARCH-01(②) レシピカードには当たり先を1つも出さない(訂正1で取り下げた形に戻っている)',
+        (await ihCardReasons()) === 0,
+        `カードに出ていた当たり先=${await ihCardReasons()}件`,
       )
-      // 当たり先の顔ぶれ（「◯◯: ×××」の◯◯）を画面から拾う
-      const ihLabelOf = (reason) => (reason.includes(': ') ? reason.slice(0, reason.indexOf(': ')) : '')
-      const ihWordOf = (reason) => (reason.includes(': ') ? reason.slice(reason.indexOf(': ') + 2) : '')
-      const ihByTag = ihFound.find((c) => ihLabelOf(c.reason) === ja.card.matchReasonTag)
-      const ihByStep = ihFound.find((c) => ihLabelOf(c.reason) === ja.card.matchReasonAppliance)
+      const ihEntry = ihClean(await ihPage.textContent('[data-testid="search-match-open"]'))
+      check('IH-SEARCH-01(②) 検索すると当たり先の入口が1行出る', ihEntry.length > 0, `入口=${ihEntry}`)
+      check(
+        'IH-SEARCH-01(②) 窓を開く前は当たり先の一覧を出さない(入口の1行だけ)',
+        (await ihPage.locator('[data-testid="search-match-word"]').count()) === 0,
+      )
+      await ihOpenDialog()
+      const ihFishRows = await ihRows()
+      check(
+        'IH-SEARCH-01(③) 入口を押すと窓が開き、当たり先が並ぶ',
+        (await ihPage.locator('[data-testid="search-match-dialog"]').count()) === 1 &&
+          ihFishRows.length > 0,
+        `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
+      )
+      check(
+        'IH-SEARCH-01(③) 窓の行の品数を読み取れている(読めないまま合格にしない)',
+        ihFishRows.every((r) => r.count != null && r.count > 0),
+        `行=${JSON.stringify(ihFishRows)}`,
+      )
+      check(
+        'IH-SEARCH-01(③) 窓の並びが品数の多い順(オーナー指定)',
+        ihFishRows.every((r, i) => i === 0 || ihFishRows[i - 1].count >= r.count),
+        `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
+      )
+      check(
+        'IH-SEARCH-01(③) 入口の1行に、いちばん品数の多い当たり先が入っている',
+        ihFishRows.length > 0 && ihEntry.includes(ihFishRows[0].text),
+        `入口=${ihEntry} いちばん多い当たり先=${ihFishRows[0]?.text}`,
+      )
       check(
         'IH-SEARCH-01(②) 「魚」はレシピに付いているタグでも当たっていることが読める',
-        ihByTag != null,
-        `画面の当たり先=${JSON.stringify(ihFound.map((c) => c.reason))}`,
+        ihFishRows.some((r) => r.field === ja.search.matchWordTag),
+        `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
       )
       check(
         'IH-SEARCH-01(②) 「魚」は手順に出てくる調理器具でも当たっていることが読める',
-        ihByStep != null,
-        `画面の当たり先=${JSON.stringify(ihFound.map((c) => c.reason))}`,
+        ihFishRows.some((r) => r.field === ja.search.matchWordAppliance),
+        `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
+      )
+      await ihCloseDialog()
+      check(
+        'IH-SEARCH-01(③) 「閉じる」で窓が閉じる',
+        (await ihPage.locator('[data-testid="search-match-dialog"]').count()) === 0,
       )
 
-      // ---- ④ 出した当たり先が、そのレシピの本当の中身と合っているか ---------------------------
-      if (ihByTag != null) {
-        await ihPage.goto(`${BASE}/${ihByTag.href}`, { waitUntil: 'networkidle' })
-        await ihPage.waitForTimeout(900)
-        const detail = ihClean(await ihPage.textContent('body'))
+      // ---- ④ 窓の数字と、実際に画面へ出ている品数が合っている ---------------------------------
+      // (a) 料理名の行: その言葉が料理名に入っているカードを**画面から数え直して**突き合わせる
+      await ihSearch('豆腐')
+      await ihOpenDialog()
+      const ihTofuRows = await ihRows()
+      const ihTofuTitleRow = ihTofuRows.find((r) => r.field === ja.search.matchWordTitle)
+      await ihCloseDialog()
+      const ihTofuTitles = await ihTitles()
+      check(
+        'IH-SEARCH-01(④) 前提: 「豆腐」の窓に料理名の行がある',
+        ihTofuTitleRow != null && ihTofuTitleRow.count != null,
+        `行=${JSON.stringify(ihTofuRows.map((r) => r.text))}`,
+      )
+      if (ihTofuTitleRow?.count != null) {
+        const named = ihTofuTitles.filter((t) => t.includes('豆腐'))
         check(
-          `IH-SEARCH-01(④) 「${ihByTag.reason}」と出た品(${ihByTag.title})は、レシピ詳細にそのタグが並んでいる`,
-          detail.includes(ihWordOf(ihByTag.reason)),
-          `探した言葉=${ihWordOf(ihByTag.reason)} 詳細=${detail.slice(0, 200)}`,
+          'IH-SEARCH-01(④) 「料理名」の数字と、料理名に言葉が入っているカードの数が一致する',
+          named.length === ihTofuTitleRow.count,
+          `窓の数字=${ihTofuTitleRow.count} 画面で数えた品数=${named.length} 料理名=${JSON.stringify(named)}`,
         )
       }
-      if (ihByStep != null) {
-        await ihPage.goto(`${BASE}/${ihByStep.href}`, { waitUntil: 'networkidle' })
-        await ihPage.waitForTimeout(900)
-        const detail = ihClean(await ihPage.textContent('body'))
+      // (b) 当たり先が1つだけの言葉: その数字は、いま出ている品数そのもの
+      await ihSearch('和食')
+      const ihWashokuTitles = await ihTitles()
+      await ihOpenDialog()
+      const ihWashokuRows = await ihRows()
+      await ihCloseDialog()
+      check(
+        'IH-SEARCH-01(④) 前提: 当たり先が1つだけになる言葉で測れている',
+        ihWashokuRows.length === 1 && ihWashokuRows[0].count != null,
+        `行=${JSON.stringify(ihWashokuRows.map((r) => r.text))}`,
+      )
+      if (ihWashokuRows.length === 1) {
         check(
-          `IH-SEARCH-01(④) 「${ihByStep.reason}」と出た品(${ihByStep.title})は、手順の本文にその言葉がある`,
-          detail.includes(ihWordOf(ihByStep.reason)),
-          `探した言葉=${ihWordOf(ihByStep.reason)} 詳細=${detail.slice(0, 200)}`,
+          'IH-SEARCH-01(④) 当たり先が1つだけなら、その数字は画面に出ている品数と同じ',
+          ihWashokuRows[0].count === ihWashokuTitles.length,
+          `窓の数字=${ihWashokuRows[0].count} 画面のカード=${ihWashokuTitles.length}枚`,
         )
       }
 
-      // ---- 検索をやめたら1行も残らない ---------------------------------------------------------
-      await ihPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
-      await ihPage.waitForTimeout(1200)
-      await ihPage.locator('input[type="search"]').fill('')
-      await ihPage.waitForTimeout(800)
-      const ihAfter = await ihCards()
+      // ---- ⑤ 上限を超えたら「ほか◯件」で数を出す（オーナー「上限は必須」） --------------------
+      // 1文字だけ打つと当たり先がいちばん増える。上限の数は画面から読み取り、書き写さない
+      await ihSearch('ん')
+      const ihWideEntry = ihClean(await ihPage.textContent('[data-testid="search-match-open"]'))
+      await ihOpenDialog()
+      const ihWideRows = await ihRows()
+      const ihMoreText = ihClean(
+        await ihPage.textContent('[data-testid="search-match-more"]').catch(() => ''),
+      )
+      const ihMoreCount = Number((ihMoreText.match(/(\d+)/) ?? [])[1])
       check(
-        'IH-SEARCH-01(②) 検索をやめると当たり先の1行が消える',
-        ihAfter.length > 0 && ihAfter.every((c) => c.reason === ''),
-        `残っていたカード=${JSON.stringify(ihAfter.filter((c) => c.reason !== '').slice(0, 3))}`,
+        'IH-SEARCH-01(⑤) 前提: 当たり先が上限を超える言葉で測れている',
+        ihWideRows.length > 0 && ihMoreText !== '',
+        `行=${ihWideRows.length}件 ほか=${ihMoreText}`,
+      )
+      check(
+        'IH-SEARCH-01(⑤) 上限を超えた分は「ほか◯件」で数が出る(黙って切らない)',
+        Number.isFinite(ihMoreCount) && ihMoreCount > 0,
+        `ほか=${ihMoreText}`,
+      )
+      check(
+        'IH-SEARCH-01(⑤) 入口の「ほか◯件」は、いちばん多い当たり先を除いた数と合っている',
+        ihWideEntry.includes(
+          ja.search.matchWordMore.replace('{n}', String(ihWideRows.length + ihMoreCount - 1)),
+        ),
+        `入口=${ihWideEntry} 並んだ=${ihWideRows.length}件 隠した=${ihMoreCount}件`,
+      )
+      await ihCloseDialog()
+      // 上限は当たった数で変わらない（別の当たりの広い言葉でも、並ぶ行数は同じ）
+      await ihSearch('い')
+      await ihOpenDialog()
+      const ihWideRows2 = await ihRows()
+      const ihMore2 = ihClean(
+        await ihPage.textContent('[data-testid="search-match-more"]').catch(() => ''),
+      )
+      check(
+        'IH-SEARCH-01(⑤) 上限は当たった数で変わらない(別の広い言葉でも並ぶ行数は同じ)',
+        ihWideRows2.length === ihWideRows.length && ihMore2 !== '',
+        `「ん」=${ihWideRows.length}行 「い」=${ihWideRows2.length}行 ほか=${ihMore2}`,
+      )
+      await ihCloseDialog()
+
+      // ---- 検索をやめたら入口も消える -----------------------------------------------------------
+      await ihSearch('')
+      const ihAfter = await ihTitles()
+      check(
+        'IH-SEARCH-01(②) 検索をやめると当たり先の入口が消える',
+        ihAfter.length > 0 &&
+          (await ihPage.locator('[data-testid="search-match-open"]').count()) === 0,
+        `カード=${ihAfter.length}枚`,
       )
     } finally {
       await ihBrowser.close()

@@ -161,15 +161,6 @@ type Props = {
    * 算出不能なレシピはRecipesPage側で undefinedのまま渡す（バッジ自体を出さない）
    */
   nutrientBadgeText?: string
-  /**
-   * 検索でこのレシピが当たった先（2026-08-20 便IH・②。例:「タグ: 魚」「手順: 魚焼きグリル」）。
-   *
-   * 文章の組み立ては呼び出し側（logic/search.ts の searchMatchReasonText）が持ち、ここは出すだけ。
-   * **検索していないときは呼び出し側が undefined を渡す**＝この行は出ない。
-   * どの場所で出すかは src/logic/cardParts.ts の表が決める（いまはレシピ一覧だけ）ので、
-   * 表に無い場所へ渡しても描かれない。
-   */
-  matchReason?: string
 
   // ------------------------------------------------------------------------
   // 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっている
@@ -283,7 +274,6 @@ export default function RecipeCard({
   density = 'large',
   place,
   nutrientBadgeText,
-  matchReason,
   onSelect,
   selectAriaLabel,
   disabled,
@@ -387,18 +377,6 @@ export default function RecipeCard({
         <RecipePlaceholder recipe={recipe} iconSize={iconSize} />
       )}
     </span>
-  )
-
-  /**
-   * 検索で当たった先の1行（2026-08-20 便IH・②）。「大」「標準」の同じ場所（いちばん下）に出す。
-   * 料理名・調理時間より小さい字のミュート色で、検索していないときは行そのものが無い
-   * ＝並べて眺めているときの見え方は今までと1pxも変わらない。
-   * 当たり先が2つあっても1行に収める（はみ出す分は「…」で省く）＝カードの高さを動かさない
-   */
-  const matchReasonLine = shows('matchReason') && matchReason && (
-    <p data-testid="card-match-reason" className="mt-1 truncate text-[10px] text-ink-muted">
-      {matchReason}
-    </p>
   )
 
   /** 調理時間・手間・季節の1行（「大」「標準」の既定の補助情報）。1つずつ場所の表を通す */
@@ -577,7 +555,6 @@ export default function RecipeCard({
                 </>
               )}
               {subLabel && <p className="mt-1 text-xs font-bold text-accent-ink">{subLabel}</p>}
-              {matchReasonLine}
             </div>
           </>,
         )}
@@ -676,7 +653,6 @@ export default function RecipeCard({
               </div>
             )}
             {subLabel && <p className="mt-1 text-xs font-bold text-accent-ink">{subLabel}</p>}
-            {matchReasonLine}
           </div>
         </>,
       )}

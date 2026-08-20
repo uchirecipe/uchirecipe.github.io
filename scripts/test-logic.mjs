@@ -377,7 +377,8 @@ import {
   topTagsByUsage,
   tagUsageCounts,
   searchMatchReasons,
-  searchMatchReasonText,
+  searchMatchSummary,
+  searchMatchRowText,
   splitTerms,
   defaultSearchOptions,
 } from '../src/logic/search.ts'
@@ -22098,8 +22099,6 @@ Aみりん 大さじ1
       season: 'ja.season[',
       starter: 'ja.card.starterBadge',
       ingredients: 'ingredientColorToken(',
-      // 検索で当たった先の1行（2026-08-20 便IH・②）。印は描いている行の目印そのもの
-      matchReason: 'card-match-reason',
     }
     // 表の項目と、印を持っている項目がぴったり一致していること
     // （どちらかにしか無い＝この見張りが片方を測っていない）
@@ -22692,22 +22691,29 @@ Aみりん 大さじ1
 }
 
 // ==========================================================================================
-// 便IH-3: 検索結果の「なぜ当たったか」（2026-08-20・②）
+// 便IH-3: 打った言葉が「どこに当たったか」（2026-08-20・②）
 //
 // オーナー原文:
 //   「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ６件ありましたが、
 //     レシピのタグやキーワードに入っているわけではなさそうでした。」
+//   （見せ方の訂正1）「各レシピカードに表示ではなく、検索バーの下に、当たったワードを
+//     多い順に羅列するイメージでした」
+//   （見せ方の訂正2）「そんなに長くなるなら、羅列部分は、レシピ手順のワード説明と同じように、
+//     窓出して表示したらいいのでは？それでも上限は必須。」
 //
 // 検索の索引（logic/kana.ts の buildSearchWords）はひらがなの語の集まりに均してあり、
-// 「どこから来た語か」は消えている。カードに出す当たり先は logic/search.ts が同じ規則を
+// 「どこから来た語か」は消えている。窓に出す当たり先は logic/search.ts が同じ規則を
 // もう一度たどって出しているので、**索引と当たり先がずれていないこと**をここで測る。
 //
-// 測るのは利用者が確かめたいことの2つ:
-//   ・検索していないときは1つも出ない
-//   ・出た理由が**実際の当たり先と一致する**（レシピに本当にその言葉があるか／
-//     料理名で説明が付く品には出さないか／出たのに説明できない品が無いか）
+// 測るのは利用者が確かめたいこと:
+//   ・検索していないときは入口も窓も出ない
+//   ・**画面に出る数字と、その当たり先で実際に出ている品数が一致する**（数を書き写さない）
+//   ・出た品が1品残らず、どれかの当たり先で説明できる
+//   ・並びは品数の多い順（オーナー指定）
+//   ・**上限を超えたら「ほか◯件」で数を出す**（黙って切らない。オーナー「上限は必須」）
+//   ・レシピカードには当たり先を出さない（訂正1で取り下げた形に戻っている）
 //
-// 読み取りに失敗したら必ず落ちる形にしてある（測れたカードが0件・当たり先の種類を
+// 読み取りに失敗したら必ず落ちる形にしてある（測れた当たり先が0件・当たり先の種類を
 // 1つでも測れていなければその場で不合格）。
 // ==========================================================================================
 {
@@ -22755,163 +22761,210 @@ Aみりん 大さじ1
       }),
     ),
   ]
+  const ihFind = (q) =>
+    searchRecipes(ihRecipes, { ...defaultSearchOptions, ngIngredients: [], query: q }).map(
+      (r) => r.recipe,
+    )
+  const ihSummary = (q, limit = 99) => searchMatchSummary(ihFind(q), splitTerms(q), limit)
 
-  // ---- 検索していないときは1つも出ない ----------------------------------------------------
+  // ---- 検索していないときは入口も窓も出ない ------------------------------------------------
   eq(
-    'IH-3 検索していないときは、どのレシピにも当たり先が出ない',
-    ihRecipes.filter((r) => searchMatchReasonText(r, splitTerms('')) !== undefined).map((r) => r.title),
-    [],
+    'IH-3 検索していないときは当たり先が1つも出ない',
+    searchMatchSummary(ihRecipes, splitTerms(''), 99),
+    { rows: [], hiddenCount: 0, total: 0 },
   )
   eq(
     'IH-3 空白だけを打っても出ない',
-    ihRecipes.filter((r) => searchMatchReasonText(r, splitTerms('  　 ')) !== undefined).map((r) => r.title),
-    [],
+    searchMatchSummary(ihRecipes, splitTerms('  　 '), 99),
+    { rows: [], hiddenCount: 0, total: 0 },
   )
 
-  // ---- 出た理由が実際の当たり先と一致する ------------------------------------------------
+  // ---- 画面に出る数字と、実際に出ている品数が一致する --------------------------------------
   // 語は決め打ちせず、**同梱レシピが実際に持っている言葉**から作る＝レシピが増えても当たる
   const ihVocab = new Set(['きのこ', '主菜', '副菜', '汁物', 'その他', 'おつまみ', 'こども'])
   for (const r of ihRecipes) {
     for (const t of r.tags) ihVocab.add(t)
     for (const i of r.ingredients) ihVocab.add(i.name)
-    for (const st of r.steps) for (const w of APPLIANCE_SEARCH_WORDS) if (st.text.includes(w)) ihVocab.add(w)
+    for (const st of r.steps)
+      for (const w of APPLIANCE_SEARCH_WORDS) if (st.text.includes(w)) ihVocab.add(w)
   }
-  /** その語が料理名（読み仮名を含む）で説明が付くか＝当たり先を出さないのが正しい語 */
+  /** その語が料理名（読み仮名を含む）に当たっているか */
   const ihTitleHit = (recipe, term) =>
     toHiragana(recipe.title).includes(term) ||
     toTagKey(recipe.title).includes(term) ||
     titleKanaKey(recipe.title).includes(term)
-  /** 出した当たり先が、そのレシピに本当にあるか（欄ごとに元の場所を見に行く） */
-  const ihReasonIsReal = (recipe, reason) => {
+  /** その当たり先が、そのレシピに本当にあるか（欄ごとに元の場所を見に行く） */
+  const ihReasonIsReal = (recipe, reason, terms) => {
+    if (reason.field === 'title') return terms.some((t) => ihTitleHit(recipe, t))
     if (reason.field === 'tag') return recipe.tags.some((t) => t.trim() === reason.word)
     if (reason.field === 'ingredient')
       return recipe.ingredients.some((i) => i.name.trim() === reason.word)
     if (reason.field === 'keyword')
       return (recipe.keywords ?? []).some((k) => k.trim() === reason.word)
     if (reason.field === 'appliance') return recipe.steps.some((st) => st.text.includes(reason.word))
-    if (reason.field === 'dishType') return reason.word === dishTypeSearchWord(recipeDishType(recipe))
+    if (reason.field === 'dishType')
+      return reason.word === dishTypeSearchWord(recipeDishType(recipe))
     if (reason.field === 'cookedNote')
       return reason.word === undefined && recipe.cookedLogs.some((log) => !!log.note)
     return false
   }
 
-  let ihCards = 0
+  let ihWords = 0
   const ihFieldsSeen = new Set()
+  const ihCountMismatch = []
   const ihUnexplained = []
   const ihUnreal = []
-  const ihExtraText = []
+  const ihOutOfOrder = []
+  const ihTotalWrong = []
   for (const q of ihVocab) {
     const terms = splitTerms(q)
-    for (const { recipe } of searchRecipes(ihRecipes, {
-      ...defaultSearchOptions,
-      ngIngredients: [],
-      query: q,
-    })) {
-      ihCards++
-      const reasons = searchMatchReasons(recipe, terms)
-      for (const reason of reasons) {
-        ihFieldsSeen.add(reason.field)
-        if (!ihReasonIsReal(recipe, reason))
-          ihUnreal.push(`「${q}」→${recipe.title}: ${reason.field}「${reason.word ?? ''}」`)
-      }
-      // 出たのに、当たり先も料理名も説明にならない品は1つも無いこと
-      if (reasons.length === 0 && !terms.some((t) => ihTitleHit(recipe, t)))
-        ihUnexplained.push(`「${q}」→${recipe.title}`)
-      // カードに出す1行は、当たり先から組み立てたものだけでできていること
-      const text = searchMatchReasonText(recipe, terms)
-      if (text !== undefined) {
-        const words = reasons.filter((r) => r.word !== undefined).map((r) => r.word)
-        for (const chunk of text.split(ja.card.matchReasonJoin)) {
-          const shown = chunk.includes(': ') ? chunk.slice(chunk.indexOf(': ') + 2) : undefined
-          if (shown !== undefined && !words.includes(shown))
-            ihExtraText.push(`「${q}」→${recipe.title}: ${chunk}`)
-        }
-      }
+    const hits = ihFind(q)
+    if (hits.length === 0) continue
+    const summary = ihSummary(q)
+    // ① 並びは品数の多い順（オーナー指定）
+    for (let i = 1; i < summary.rows.length; i++)
+      if (summary.rows[i - 1].count < summary.rows[i].count)
+        ihOutOfOrder.push(`「${q}」 ${summary.rows[i - 1].count} → ${summary.rows[i].count}`)
+    // ② 入口に出す「ほか◯件」の元になる総数が、並べた数と合っている
+    if (summary.total !== summary.rows.length + summary.hiddenCount)
+      ihTotalWrong.push(`「${q}」 総数=${summary.total} 並べた=${summary.rows.length} 隠した=${summary.hiddenCount}`)
+    for (const row of summary.rows) {
+      ihWords++
+      ihFieldsSeen.add(row.field)
+      // ③ 画面の数字は書き写さず、**その当たり先に当たる品を数え直して**突き合わせる
+      const actual = hits.filter((recipe) =>
+        searchMatchReasons(recipe, terms).some(
+          (reason) => reason.field === row.field && reason.word === row.word,
+        ),
+      )
+      if (actual.length !== row.count)
+        ihCountMismatch.push(
+          `「${q}」 ${row.field}「${row.word ?? ''}」 画面=${row.count} 実際=${actual.length}`,
+        )
+      // ④ その当たり先が、数えた品に本当にあるか
+      for (const recipe of actual)
+        if (!ihReasonIsReal(recipe, row, terms))
+          ihUnreal.push(`「${q}」→${recipe.title}: ${row.field}「${row.word ?? ''}」`)
     }
+    // ⑤ 出た品は1品残らず、どれかの当たり先で説明できる
+    for (const recipe of hits)
+      if (searchMatchReasons(recipe, terms).length === 0) ihUnexplained.push(`「${q}」→${recipe.title}`)
   }
-  eq('IH-3 測れたカードが1つ以上ある（0件なら見張りが壊れている）', ihCards > 0, true)
+  eq('IH-3 測れた当たり先が1つ以上ある（0件なら見張りが壊れている）', ihWords > 0, true)
   eq(
     'IH-3 当たり先の種類をすべて一度は測れている（測り漏れが無い）',
-    ['tag', 'ingredient', 'keyword', 'appliance', 'dishType', 'cookedNote'].filter(
+    ['title', 'tag', 'ingredient', 'keyword', 'appliance', 'dishType', 'cookedNote'].filter(
       (f) => !ihFieldsSeen.has(f),
     ),
     [],
   )
-  eq('IH-3 出たのに当たり先も料理名も説明にならない品が1つも無い', ihUnexplained, [])
-  eq('IH-3 出した当たり先は、そのレシピに本当にある', ihUnreal, [])
-  eq('IH-3 カードの1行に、当たり先に無い言葉が混ざっていない', ihExtraText, [])
+  eq('IH-3 画面の数字と、その当たり先で実際に出ている品数が一致する', ihCountMismatch, [])
+  eq('IH-3 出した当たり先は、その品に本当にある', ihUnreal, [])
+  eq('IH-3 出たのに、どの当たり先でも説明できない品が1つも無い', ihUnexplained, [])
+  eq('IH-3 並びが品数の多い順になっている（オーナー指定）', ihOutOfOrder, [])
+  eq('IH-3 並べた数と隠した数を足すと、当たり先の総数になる', ihTotalWrong, [])
 
-  // ---- 料理名で説明が付く語は出さない（オーナー「出す意味が薄い」） ------------------------
+  // ---- 料理名で当たったぶんは1つにまとめて数える（1品ずつ並べて窓を埋めない） ---------------
   {
-    const mabo = ihRecipes.find((r) => r.title === '麻婆豆腐')
-    eq('IH-3 料理名に入っている語で当たった品には出さない', mabo !== undefined, true)
+    const rows = ihSummary('豆腐').rows
+    const titleRows = rows.filter((r) => r.field === 'title')
+    eq('IH-3 料理名の当たり先は1つにまとまっている（品ごとに増えない）', titleRows.length, 1)
     eq(
-      'IH-3 「豆腐」で麻婆豆腐が出ても、当たり先の行は出さない',
-      searchMatchReasonText(mabo, splitTerms('豆腐')),
+      'IH-3 料理名の数字は、料理名にその言葉がある品数と一致する',
+      titleRows[0]?.count,
+      ihFind('豆腐').filter((r) => splitTerms('豆腐').some((t) => ihTitleHit(r, t))).length,
+    )
+    eq(
+      'IH-3 料理名の当たり先には言葉を添えない（品ごとに違う文なので並べない）',
+      titleRows[0]?.word,
       undefined,
     )
-    // 同じ「豆腐」でも、料理名に無い品は材料で説明する
-    const shiraae = ihRecipes.find((r) => r.title === '白和え')
+  }
+
+  // ---- オーナーが実機で見た「魚」（2026-08-20 便IH・②の発端） ------------------------------
+  // 品数は決め打ちしない（レシピが増減しても当たる）。**当たり先の顔ぶれ**だけを見る
+  {
+    const summary = ihSummary('魚')
+    const fields = summary.rows.map((r) => r.field)
+    eq('IH-3 「魚」で当たり先が1つ以上出る（0件なら見張りが壊れている）', summary.rows.length > 0, true)
+    eq('IH-3 「魚」はレシピに付いているタグでも当たる', fields.includes('tag'), true)
+    eq('IH-3 「魚」は手順に出てくる調理器具でも当たる', fields.includes('appliance'), true)
+  }
+
+  // ---- 上限を超えたら「ほか◯件」で数を出す（オーナー「上限は必須」・黙って切らない） --------
+  {
+    // 当たり先がいちばん多く出る語を、画面と同じやり方でその場で探す（語を決め打ちしない）
+    let widest = null
+    for (const q of ihVocab) {
+      const all = ihSummary(q, 999)
+      if (widest == null || all.total > widest.all.total) widest = { q, all }
+    }
+    eq('IH-3 上限を試せる語を見つけられた（0件なら見張りが壊れている）', widest != null && widest.all.total > 2, true)
+    const limit = 2
+    const cut = ihSummary(widest.q, limit)
+    eq('IH-3 上限までしか並べない', cut.rows.length, limit)
+    eq('IH-3 隠した当たり先の件数を必ず返す（黙って切らない）', cut.hiddenCount, widest.all.total - limit)
+    eq('IH-3 並べたぶんと隠したぶんを足すと当たり先の総数になる', cut.rows.length + cut.hiddenCount, cut.total)
+    eq('IH-3 隠したぶんは、いちばん品数の少ない側から落ちる', cut.rows[0].count >= widest.all.rows[widest.all.rows.length - 1].count, true)
+    eq('IH-3 全部入るときは「ほか」を出さない', ihSummary(widest.q, 999).hiddenCount, 0)
+  }
+
+  // ---- 一覧に並べる1つぶんの文字 -------------------------------------------------------------
+  {
+    const fish = ihSummary('魚').rows.find((r) => r.field === 'tag')
+    eq('IH-3 タグで当たった行を組み立てられている', fish !== undefined, true)
     eq(
-      'IH-3 料理名に無い品は、当たった材料の名前で説明する',
-      searchMatchReasonText(shiraae, splitTerms('豆腐')),
-      ja.card.matchReason
-        .replace('{field}', ja.card.matchReasonIngredient)
-        .replace('{word}', '木綿豆腐'),
+      'IH-3 タグで当たった行の文字',
+      searchMatchRowText(fish),
+      ja.search.matchWord
+        .replace('{field}', ja.search.matchWordTag)
+        .replace('{word}', '魚')
+        .replace('{n}', String(fish?.count)),
+    )
+    const titleRow = ihSummary('豆腐').rows.find((r) => r.field === 'title')
+    eq(
+      'IH-3 料理名の行は言葉を添えず「料理名 品数」だけ',
+      searchMatchRowText(titleRow),
+      ja.search.matchWordWithoutWord
+        .replace('{field}', ja.search.matchWordTitle)
+        .replace('{n}', String(titleRow?.count)),
+    )
+    const noteRow = ihSummary('こども').rows.find((r) => r.field === 'cookedNote')
+    eq(
+      'IH-3 作った記録のメモの行は、メモの本文を出さずに出どころだけ言う',
+      searchMatchRowText(noteRow),
+      ja.search.matchWordWithoutWord
+        .replace('{field}', ja.search.matchWordCookedNote)
+        .replace('{n}', String(noteRow?.count)),
+    )
+    const kwRow = ihSummary('おつまみ').rows.find((r) => r.field === 'keyword')
+    eq(
+      'IH-3 レシピの「検索キーワード」欄で当たった行は、その欄の名前で説明する',
+      searchMatchRowText(kwRow),
+      ja.search.matchWord
+        .replace('{field}', ja.search.matchWordKeyword)
+        .replace('{word}', 'おつまみ')
+        .replace('{n}', String(kwRow?.count)),
     )
   }
 
-  // ---- オーナーが実機で見た「魚」6品の当たり先（2026-08-20 便IH・②の発端） ----------------
-  // 品数は決め打ちしない（レシピが増減しても当たる）。**当たり先の顔ぶれ**だけを見る:
-  // タグで当たる品と、手順の調理器具で当たる品が、どちらも実際に出ていること
+  // ---- カードには当たり先を出さない（オーナー訂正1で取り下げた形に戻っている） --------------
+  // 共通のカード部品が「その項目を出す口」を持っていないことを、部品のソースそのもので見る
   {
-    const found = searchRecipes(ihRecipes, {
-      ...defaultSearchOptions,
-      ngIngredients: [],
-      query: '魚',
-    })
-    const terms = splitTerms('魚')
-    const fields = new Set(
-      found.flatMap(({ recipe }) => searchMatchReasons(recipe, terms).map((r) => r.field)),
+    const cardSrc = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src/components/RecipeCard.tsx'),
+      'utf-8',
     )
-    eq('IH-3 「魚」で1品以上出る（0品なら見張りが壊れている）', found.length > 0, true)
-    eq('IH-3 「魚」はレシピに付いているタグでも当たる', fields.has('tag'), true)
-    eq('IH-3 「魚」は手順に出てくる調理器具でも当たる', fields.has('appliance'), true)
+    eq('IH-3 共通のカード部品を読めている（0字なら見張りが壊れている）', cardSrc.length > 0, true)
     eq(
-      'IH-3 「魚」で出た品は、1品残らず当たり先を説明できる',
-      found
-        .filter(({ recipe }) => searchMatchReasonText(recipe, terms) === undefined)
-        .map(({ recipe }) => recipe.title),
+      'IH-3 レシピカードは当たり先を出す口を持っていない（検索まどの下の入口と窓に一本化）',
+      cardSrc.includes('matchReason') || cardSrc.includes('card-match-reason'),
+      false,
+    )
+    eq(
+      'IH-3 カードの項目の表にも当たり先が残っていない',
+      CARD_PART_KEYS.filter((key) => key.toLowerCase().includes('match')),
       [],
-    )
-  }
-
-  // ---- 同じ言葉が2か所に当たっても、同じ字を2回並べない（実測で決めた間引き） --------------
-  {
-    const soup = ihRecipes.find((r) => r.title === '豚汁')
-    eq('IH-3 「汁物」はタグにも料理の種別にも当たる品がある', soup !== undefined, true)
-    eq(
-      'IH-3 同じ言葉が2つの当たり先に出ても、1つにまとめて出す',
-      searchMatchReasonText(soup, splitTerms('汁物')),
-      ja.card.matchReason.replace('{field}', ja.card.matchReasonTag).replace('{word}', '汁物'),
-    )
-  }
-
-  // ---- 「検索キーワード」欄・作った記録のメモで当たったとき ---------------------------------
-  {
-    const kyuri = ihRecipes.find((r) => r.id === 9001)
-    eq(
-      'IH-3 レシピの「検索キーワード」欄で当たったときは、その欄の名前で説明する',
-      searchMatchReasonText(kyuri, splitTerms('おつまみ')),
-      ja.card.matchReason
-        .replace('{field}', ja.card.matchReasonKeyword)
-        .replace('{word}', 'おつまみ'),
-    )
-    const nimono = ihRecipes.find((r) => r.id === 9002)
-    eq(
-      'IH-3 作った記録のひとことメモで当たったときは、メモの本文は出さずに出どころだけ言う',
-      searchMatchReasonText(nimono, splitTerms('こども')),
-      ja.card.matchReasonCookedNote,
     )
   }
 }

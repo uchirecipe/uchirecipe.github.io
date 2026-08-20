@@ -228,6 +228,8 @@ function matchesQuery(recipe: Recipe, terms: string[]): boolean {
  * オーナー原文:
  *   「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ６件ありましたが、
  *     レシピのタグやキーワードに入っているわけではなさそうでした。」
+ *   （見せ方の訂正）「各レシピカードに表示ではなく、検索バーの下に、当たったワードを
+ *     多い順に羅列するイメージでした」
  *
  * 検索の索引（logic/kana.ts の buildSearchWords）は、料理名・材料名・タグ・検索キーワード・
  * 手順に出てくる調理器具・料理の種別・材料のカテゴリ語を**ひらがなの語の集まりに均して**持つ。
@@ -235,15 +237,11 @@ function matchesQuery(recipe: Recipe, terms: string[]): boolean {
  * 索引の作り方（kana.ts）とこの関数の見る先がずれると説明が嘘になるため、
  * 語の作り方（toHiragana / toTagKey / applianceSearchWords / categorySearchWords /
  * dishTypeSearchWord）は**索引と同じ口**から読む。
- *
- * 料理名に当たった語は**理由を出さない**（オーナー「料理名そのもので当たったときは、出す意味が薄い」）。
- * カードには料理名がそのまま出ているので、読めば分かる。
- * 料理名にも当たり、材料にも当たった語は、料理名で説明が付くので同じく出さない
- * （「麻婆豆腐」を「豆腐」で引いたときに「材料: 木綿豆腐」と念を押さない）。
  */
 export type SearchMatchField =
-  | 'ingredient'
+  | 'title'
   | 'tag'
+  | 'ingredient'
   | 'keyword'
   | 'appliance'
   | 'dishType'
@@ -252,19 +250,18 @@ export type SearchMatchField =
 export interface SearchMatchReason {
   field: SearchMatchField
   /**
-   * 当たった言葉（レシピに書いてある形のまま）。作った記録のひとことメモだけは持たない
-   * ——メモは文なので、そのまま出すとカードの1行に収まらない
+   * 当たった言葉（レシピに書いてある形のまま）。**料理名と作った記録のひとことメモは持たない**
+   * ——どちらも品ごとに違う文なので、言葉として並べると1品ずつばらばらに並んで一覧が埋まる
    */
   word?: string
 }
 
 /**
- * 並べる順（先に立つものほどカードの前に出る）。
- * 「タグ」「材料」は探した人が思い浮かべている当たり先で、
- * 「手順」「料理の種別」「作った記録のメモ」は思い浮かべていない当たり先。
- * 思い浮かべている方を先に置くと、思っていた通りのときは読み飛ばせる
+ * 並べる順。品数が同じときだけ効く（並びの第一は品数の多い順＝オーナー指定）。
+ * 料理名を先に置くのは、いちばん当たり前の当たり先だから（読み飛ばせる位置に固定する）。
  */
 const MATCH_FIELD_ORDER: readonly SearchMatchField[] = [
+  'title',
   'tag',
   'ingredient',
   'keyword',
@@ -288,22 +285,27 @@ function titleHits(recipe: Recipe, term: string): boolean {
 /**
  * そのレシピが検索の言葉に当たった理由を、当たり先ごとに返す。
  * terms は splitTerms を通したあと（＝ひらがな化済み）の語を渡すこと。
- * 料理名だけで説明が付く語は何も返さない＝**検索していないときと、料理名で当たったときは空**になる。
+ *
+ * 料理名に当たった語は、**料理名だけを当たり先にする**（他の欄は見ない）。
+ * 「豆腐」で麻婆豆腐が出たときに「料理名」と「材料: 木綿豆腐」の両方で数えると、
+ * 同じ1品が2か所で数えられて、一覧の数字が読みにくくなるため。
  */
 export function searchMatchReasons(recipe: Recipe, terms: readonly string[]): SearchMatchReason[] {
   if (terms.length === 0) return []
   const found: SearchMatchReason[] = []
   const seen = new Set<string>()
   const add = (field: SearchMatchField, word?: string) => {
-    const key = `${field}\u0000${word ?? ''}`
+    const key = `${field} ${word ?? ''}`
     if (seen.has(key)) return
     seen.add(key)
     found.push(word === undefined ? { field } : { field, word })
   }
   for (const term of terms) {
     if (term === '') continue
-    // 料理名で説明が付く語は、その語について何も出さない（他の語の理由は出す）
-    if (titleHits(recipe, term)) continue
+    if (titleHits(recipe, term)) {
+      add('title')
+      continue
+    }
     for (const tag of recipe.tags) if (wordHits(tag, term)) add('tag', tag.trim())
     for (const ing of recipe.ingredients) {
       // 索引に入っているのは調味料以外の材料名だけ（buildSearchWords と同じ線引き）
@@ -313,7 +315,8 @@ export function searchMatchReasons(recipe: Recipe, terms: readonly string[]): Se
       else if (categorySearchWords(ing.name).some((word) => word.includes(term)))
         add('ingredient', ing.name.trim())
     }
-    for (const keyword of recipe.keywords ?? []) if (wordHits(keyword, term)) add('keyword', keyword.trim())
+    for (const keyword of recipe.keywords ?? [])
+      if (wordHits(keyword, term)) add('keyword', keyword.trim())
     // 器具の一覧は「魚焼きグリル」と「グリル」、「オーブントースター」と「オーブン」のように
     // 長い名前と短い名前が両方入る（手順に長い方が書いてあれば短い方も当たる）。
     // 当たったものが他の当たったものの一部でしかないときは出さない＝手順に書いてある形だけが残る
@@ -331,49 +334,92 @@ export function searchMatchReasons(recipe: Recipe, terms: readonly string[]): Se
   )
 }
 
-/** 出どころの名前（ja に集約。ここで文字を書かない） */
-const MATCH_FIELD_LABELS: Record<SearchMatchField, string> = {
-  tag: ja.card.matchReasonTag,
-  ingredient: ja.card.matchReasonIngredient,
-  keyword: ja.card.matchReasonKeyword,
-  appliance: ja.card.matchReasonAppliance,
-  dishType: ja.card.matchReasonDishType,
-  cookedNote: ja.card.matchReasonCookedNote,
+/** 当たり先1つと、そこで当たった品数 */
+export interface SearchMatchSummaryRow {
+  field: SearchMatchField
+  /** 当たった言葉（料理名・作った記録のメモは持たない） */
+  word?: string
+  /** その当たり先で出た品数 */
+  count: number
+}
+
+export interface SearchMatchSummary {
+  /** 品数の多い順に並べた当たり先（上限まで） */
+  rows: SearchMatchSummaryRow[]
+  /** 上限に収まらなかった当たり先の件数（0なら全部出ている） */
+  hiddenCount: number
+  /** 当たり先の総数（上限で切る前）。入口に「ほか◯件」を出すために使う */
+  total: number
 }
 
 /**
- * カードに出す「なぜ当たったか」の1行（2026-08-20 便IH・②）。検索していなければ undefined。
+ * 検索まどの下に出す「当たった言葉の一覧」（2026-08-20 便IH・②。オーナー訂正
+ * 「各レシピカードに表示ではなく、検索バーの下に、当たったワードを多い順に羅列するイメージ」）。
  *
- * **間引きの決めごと**（同梱109品と語彙371語で実測してから決めた。うるさくしないため）:
- *  ① 同じ出どころに何語も当たったときは**先頭の1語だけ**出す。
- *     「きのこ」で寄せ鍋が出たときの「しいたけ・えのき」は、どちらか1つ読めれば理由が分かる
- *  ② **同じ言葉が2つ以上の出どころに当たったら、先の1つだけ**出す。
- *     「汁物」はタグにも料理の種別にも当たるので、そのままだと同じ字が2回並ぶ
- *  ③ 残った出どころは**全部**出す（実測で2つを超えたものが1つも無かったため、
- *     「◯件」と数えて隠すより、そのまま読める方が短い）
- *  ④ 料理名で説明が付く語は searchMatchReasons の時点で落ちている（＝1行そのものが出ない）
+ * 数える相手は**いま一覧に出ている品そのもの**（呼び出し側が searchRecipes の結果を渡す）
+ * ＝画面の数字と、実際に並んでいる品数が食い違わない。
+ *
+ * 並びは**品数の多い順**（オーナー指定）。同じ品数のときは当たり先の順（MATCH_FIELD_ORDER）→
+ * 言葉の五十音順にして、打ち直すたびに並びが入れ替わらないようにする。
+ *
+ * 2語以上打ったとき（「豆腐 レンジ」）は、1品が2つの当たり先に当たることがある
+ * ＝**数字の合計は出ている品数と一致しない**。合計を出さないのはそのため。
+ *
+ * @param limit 並べる当たり先の上限。超えた分は hiddenCount で数を返す（黙って切らない）
  */
-export function searchMatchReasonText(
-  recipe: Recipe,
+export function searchMatchSummary(
+  recipes: readonly Recipe[],
   terms: readonly string[],
-): string | undefined {
-  const usedFields = new Set<SearchMatchField>()
-  const usedWords = new Set<string>()
-  const parts: string[] = []
-  for (const reason of searchMatchReasons(recipe, terms)) {
-    if (usedFields.has(reason.field)) continue
-    if (reason.word !== undefined && usedWords.has(reason.word)) continue
-    usedFields.add(reason.field)
-    if (reason.word !== undefined) usedWords.add(reason.word)
-    parts.push(
-      reason.word === undefined
-        ? MATCH_FIELD_LABELS[reason.field]
-        : ja.card.matchReason
-            .replace('{field}', MATCH_FIELD_LABELS[reason.field])
-            .replace('{word}', reason.word),
-    )
+  limit: number,
+): SearchMatchSummary {
+  if (terms.length === 0) return { rows: [], hiddenCount: 0, total: 0 }
+  const counts = new Map<string, SearchMatchSummaryRow>()
+  for (const recipe of recipes) {
+    for (const reason of searchMatchReasons(recipe, terms)) {
+      const key = `${reason.field} ${reason.word ?? ''}`
+      const row = counts.get(key)
+      if (row) row.count += 1
+      else counts.set(key, { ...reason, count: 1 })
+    }
   }
-  return parts.length === 0 ? undefined : parts.join(ja.card.matchReasonJoin)
+  const sorted = [...counts.values()].sort(
+    (a, b) =>
+      b.count - a.count ||
+      MATCH_FIELD_ORDER.indexOf(a.field) - MATCH_FIELD_ORDER.indexOf(b.field) ||
+      tagCollator.compare(a.word ?? '', b.word ?? ''),
+  )
+  const kept = limit > 0 ? sorted.slice(0, limit) : []
+  return {
+    rows: kept,
+    hiddenCount: sorted.length - kept.length,
+    total: sorted.length,
+  }
+}
+
+/** 出どころの名前（ja に集約。ここで文字を書かない） */
+const MATCH_FIELD_LABELS: Record<SearchMatchField, string> = {
+  title: ja.search.matchWordTitle,
+  tag: ja.search.matchWordTag,
+  ingredient: ja.search.matchWordIngredient,
+  keyword: ja.search.matchWordKeyword,
+  appliance: ja.search.matchWordAppliance,
+  dishType: ja.search.matchWordDishType,
+  cookedNote: ja.search.matchWordCookedNote,
+}
+
+/**
+ * 一覧に並べる1つぶんの文字（例:「タグ: 魚 4品」「料理名 8品」）。
+ * 言葉を持たない当たり先（料理名・作った記録のメモ）は、出どころの名前と品数だけにする。
+ */
+export function searchMatchRowText(row: SearchMatchSummaryRow): string {
+  const label = MATCH_FIELD_LABELS[row.field]
+  const count = String(row.count)
+  return row.word === undefined
+    ? ja.search.matchWordWithoutWord.replace('{field}', label).replace('{n}', count)
+    : ja.search.matchWord
+        .replace('{field}', label)
+        .replace('{word}', row.word)
+        .replace('{n}', count)
 }
 
 function matchesTime(recipe: Recipe, time: TimeFilter): boolean {
