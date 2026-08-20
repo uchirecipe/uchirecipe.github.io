@@ -77,10 +77,14 @@ const manifest = {}
  */
 // 2026-08-17 便HH: 'day-search' を落とした。撮っていた「レシピを探す」「在庫の食材から探す」の
 // 2つのボタンを献立の「日」から外したため(行き先はレシピ一覧と、その絞り込みに残っている)
+// 2026-08-20 便IK: 'plan-week-suggest'（週の「献立を提案」）と 'recipes-filter'
+// （レシピ一覧の絞り込み）を足した。どちらもこの数日で並びが変わったのに図が1枚も無く、
+// 使い方ページが「上から順に」「見出しの横にあり」と**見た目を言葉で書いていた**場所
 const SHOT_NAMES = [
-  'recipe-cards', 'day-suggest', 'nav-tabs', 'search',
+  'recipe-cards', 'day-suggest', 'nav-tabs', 'search', 'recipes-filter',
   'register-tabs', 'ingredient-rows', 'bulk-input', 'register-detail', 'paste', 'url-import',
-  'plan-day-buttons', 'select-for-today', 'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
+  'plan-day-buttons', 'select-for-today', 'plan-week-suggest',
+  'plan-week-nutrition-open', 'plan-week-day', 'cost-week',
   'plan-month', 'plan-month-photo', 'shopping', 'pantry',
   'detail-photo', 'nutrition-open', 'share', 'logs',
   'cookmode-voice', 'cookmode', 'timer', 'settings-kitchen', 'cooknavi',
@@ -304,6 +308,51 @@ async function cropRect(page, name, rect) {
   await save(png, name)
 }
 
+/**
+ * 一覧に重ねて出て**中だけがスクロールする**パネル（レシピ一覧の絞り込み）を切り出す。
+ * 2026-08-20 便IK。
+ *
+ * crop / cropRange は window.scrollBy でページごと動かして位置を合わせるが、この手のパネルは
+ *  ・画面上部に貼り付く帯の中に absolute で置かれている（ページを動かすと帯ごと動く）
+ *  ・中身がパネルの高さに収まらず、パネルの中だけがスクロールする（overflow-y:auto）
+ * ため、ページを動かしても写したい範囲は近づかない。位置は測って cropRect で切る。
+ *
+ * 「エラーにならず、それらしい嘘の画像」を作らないための判定を入れる（2026-08-19 便HW/便IEと同じ考え方）:
+ *  ①パネルが開いていること ②パネルの中が先頭（scrollTop=0）＝**途中から**撮っていないこと
+ *  ③下端に指定したものがパネルの見えている範囲に収まっていること（＝はみ出したところを撮らない）
+ */
+async function cropPanelTop(page, name, panelLoc, bottomLoc, opts = {}) {
+  if (!want(name)) return
+  try {
+    const { padTop = 8, padBottom = 12 } = opts
+    if (!(await panelLoc.count())) throw new Error('パネルが開いていない')
+    const box = await panelLoc.first().evaluate((el) => {
+      const b = el.getBoundingClientRect()
+      return { y: b.y, h: b.height, scrollTop: el.scrollTop, scrollH: el.scrollHeight }
+    })
+    if (box.scrollTop > 1)
+      throw new Error(
+        `パネルの中が先頭ではない（scrollTop=${Math.round(box.scrollTop)}）。` +
+          'この位置で切ると、説明したい範囲の途中から撮れる',
+      )
+    const bottom = await rectOf(bottomLoc)
+    const cutAt = Math.round(bottom.y + bottom.h + padBottom)
+    if (cutAt > box.y + box.h + 1)
+      throw new Error(
+        `下端に指定したものがパネルの外にある（切る位置 ${cutAt}px / パネルの下端 ${Math.round(box.y + box.h)}px）`,
+      )
+    const y = Math.max(0, Math.round(box.y - padTop))
+    const png = await page.screenshot({
+      clip: { x: 0, y, width: VIEW.width, height: Math.min(VIEW.height - y, cutAt - y) },
+    })
+    await save(png, name)
+  } catch (e) {
+    if (e instanceof AllRequestedDone) throw e
+    failures.push(name)
+    console.warn(`  ⚠ ${name} 失敗: ${String(e).split('\n')[0].slice(0, 110)}`)
+  }
+}
+
 /** 撮影結果のまとめ表示と、manual.html の width/height を直すときの控えの書き出し */
 function report() {
   if (failures.length) console.log(`\n⚠ 撮影できなかったもの: ${failures.join(', ')}`)
@@ -505,6 +554,24 @@ try {
   await page.getByPlaceholder('料理名・材料・タグ').fill('')
   await wait(page, 500)
 
+  // 絞り込みパネル(2026-08-20 便IK)。一覧に重ねて開き、中だけがスクロールする。
+  // 全部を1枚には収められない(中身は約1,000px・見えるのは約630px)ので、**上から
+  // 「選んだキーワードをすべて含む」のスイッチまで**を切る＝欄の切れ目でちょうど終わる。
+  // 途中の文字を切らない(2026-08-02 オーナー指示のトリミング基準)。
+  // 続きの「食材で絞り込む」「調理時間」「手間レベル」は使い方ページの本文が並べている
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await wait(page, 400)
+  const filterToggle = page.getByRole('button', { name: '絞り込み', exact: true })
+  if (await filterToggle.count()) {
+    await filterToggle.first().click()
+    await wait(page, 1200)
+    const filterPanel = page.locator('[data-testid="recipes-filter-panel"]')
+    const tagMatchRow = page.locator('[data-testid="recipes-tag-match"]')
+    await cropPanelTop(page, 'recipes-filter', filterPanel, tagMatchRow)
+    await page.getByRole('button', { name: '絞り込み', exact: true }).first().click()
+    await wait(page, 600)
+  }
+
   // ======== 登録画面 ========
   await openNewRecipeForm(page, BASE)
   await page.getByPlaceholder('例: 肉じゃが').fill('鶏むね肉のさっぱり煮')
@@ -648,6 +715,25 @@ try {
   await wait(page, 1500)
   await page.getByRole('button', { name: '週', exact: true }).click()
   await wait(page, 600)
+
+  // 「献立を提案」(2026-08-20 便IK)。**画面を開いたままの状態**で撮る＝
+  // 「表示のしかた」と「献立テンプレート」は畳んだまま・「献立を提案」だけが開いている。
+  // ここを触る前に撮ること(このあと「表示のしかた」を開くので、開いた絵になってしまう)。
+  //
+  // day-suggest と違って、写る中身は引いた品では変わらない(候補の料理は出さない節なので、
+  // 一品ものを引いて副菜が消える、といった揺れが起きない)。変わりうるのは
+  // 出しかた・入れかた・条件の**選び方**だけなので、どれも触らず初期値のまま撮る
+  const weekDisplayGroup = page
+    .locator('main section')
+    .filter({ has: page.getByRole('button', { name: '表示のしかたを開く' }) })
+  const weekTemplateGroup = page
+    .locator('main section')
+    .filter({ has: page.getByRole('button', { name: '献立テンプレートを開く' }) })
+  if ((await weekDisplayGroup.count()) && (await weekTemplateGroup.count())) {
+    // 「日」「週」「月」の帯が画面上部に貼り付くので、上端は帯の高さ(54px)より下に置く
+    await cropRange(page, 'plan-week-suggest', weekDisplayGroup, weekTemplateGroup, { top: 64 })
+  }
+
   // 2026-08-08 便DW: 「今日から7日間」は折りたたみグループ「表示のしかた」の中にあり、
   // 既定では畳まれている(2026-08-03 便DJ)。先に見出しを押して開かないとボタンを掴めない。
   // 実行ボタンの名前は「まとめて献立を立てる」→「まとめて献立を入力」(2026-08-07 便DT-5)

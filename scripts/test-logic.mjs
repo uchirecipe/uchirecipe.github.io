@@ -483,7 +483,7 @@ import {
 } from '../src/logic/detachedLogs.ts'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 // 並行調理ナビの診断が使う「割ってはいけない手順」の判定（2026-08-16 便HA・docs/68 の裁定）。
 // 診断そのものは1回15秒かかるので、直接実行されたときだけ走るようになっている
 // （`audit-cook-navi.mjs` の RUN_AUDIT）。ここでは判定の関数だけを読む
@@ -22733,6 +22733,164 @@ Aみりん 大さじ1
         .map((x) => `${x.rel} 「${x.sentence}」`),
       [],
     )
+  }
+
+  // ---- 規則⑥: 使い方ページの図が、いまの画面とそろっている（2026-08-20 便IK） -------------
+  // オーナー原文（この便の発端）:
+  //   「④画像あった方がいい。
+  //     ・説明で画像がないため「（畳んでいる時も押せます）など見た目を説明したり捕捉する文が
+  //       省けるのは嬉しい」
+  //
+  // 図で言葉を省く以上、**図が古くなると説明そのものが消える**。文章なら「古い名前が
+  // 書いてある」と読めば気づけるが、図は撮り直しを忘れても見た目は何ともないので気づけない。
+  // そこで図まわりの食い違いだけを機械で掃く:
+  //   IK-1 … ページが載せている図・撮る仕組み（shots-manual.mjs の SHOT_NAMES）・撮影の控え
+  //          （manual-shot-sizes.json）の3つが1対1（撮ったのに載せていない／載せているのに
+  //          誰も撮らない図を作らない＝撮り直しの対象から漏れる図をなくす）
+  //   IK-2 … <img> の width/height が撮影の控えと同じ（撮り直して縦横が変わったのに
+  //          ページの数字が古いままだと、その図だけ縦横比が狂って出る）
+  //   IK-3 … どの図にも説明（alt）と題（figcaption）がある。図で言葉を省くほど、
+  //          目で見られない人が頼れるのは alt だけになる
+  //   IK-4 … 図の説明・題が「」で名指ししている**画面の言葉**が ja.ts に実在する
+  //          （規則④を図に広げたもの。ボタン名を変えたのに図の説明だけ古い名前のまま、を捕まえる）
+  //
+  // 読み取りに失敗したら必ず落ちる: 図が0枚・カット名が0件のときはその場で不合格にする
+  // （「見つからなかった＝合格」に倒れない）。
+  {
+    const manualRel = 'public/about/manual.html'
+    const manualRaw = readFileSync(path.join(appRoot, manualRel), 'utf-8')
+    const shotsRaw = readFileSync(path.join(appRoot, 'scripts/shots-manual.mjs'), 'utf-8')
+    const shotSizes = JSON.parse(
+      readFileSync(path.join(appRoot, 'scripts/data/manual-shot-sizes.json'), 'utf-8'),
+    )
+
+    // 撮る仕組みが持っているカット名は、配列そのものから読む（名前を書き写さない）
+    const shotNamesBlock = shotsRaw.match(/const SHOT_NAMES = \[([\s\S]*?)\n\]/)
+    eq('IK-1 撮る仕組みのカット名を読めている', shotNamesBlock !== null, true)
+    const shotNames = shotNamesBlock
+      ? [...shotNamesBlock[1].matchAll(/'([^']+)'/g)].map((m) => m[1])
+      : []
+    eq('IK-1 撮る仕組みのカット名を1つ以上読めている', shotNames.length > 0, true)
+
+    const figures = []
+    for (const m of manualRaw.matchAll(/<figure\b[^>]*>([\s\S]*?)<\/figure>/g)) {
+      const inner = m[1]
+      const img = inner.match(/<img\s+src="\/about\/img\/manual\/([a-z0-9-]+)\.webp"([^>]*)>/)
+      figures.push({
+        name: img?.[1] ?? null,
+        w: Number(img?.[2].match(/\swidth="(\d+)"/)?.[1]),
+        h: Number(img?.[2].match(/\sheight="(\d+)"/)?.[1]),
+        alt: inner.match(/\salt="([^"]*)"/)?.[1] ?? '',
+        caption: (inner.match(/<figcaption>([\s\S]*?)<\/figcaption>/)?.[1] ?? '')
+          .replace(/<[^>]+>/g, '')
+          .trim(),
+      })
+    }
+    eq('IK-1 使い方ページの図を読めている（0枚なら見張りが壊れている）', figures.length > 0, true)
+
+    const used = figures.map((f) => f.name).filter((n) => n !== null)
+    eq(
+      'IK-1 ページのすべての図が /about/img/manual/ の webp',
+      figures.filter((f) => f.name === null).map((f) => f.alt.slice(0, 30) || '(説明の無い図)'),
+      [],
+    )
+    eq('IK-1 ページが載せている図は、撮る仕組みが撮っているものだけ', used.filter((n) => !shotNames.includes(n)), [])
+    eq('IK-1 撮る仕組みが撮る図は、すべてページが載せている', shotNames.filter((n) => !used.includes(n)), [])
+    eq('IK-1 撮影の控えに残っている図は、すべてページが載せている', Object.keys(shotSizes).filter((n) => !used.includes(n)), [])
+    eq(
+      'IK-1 図のファイルが実在する',
+      used.filter((n) => !existsSync(path.join(appRoot, `public/about/img/manual/${n}.webp`))),
+      [],
+    )
+
+    eq(
+      'IK-2 図の width/height が撮影の控えと同じ',
+      figures
+        .filter((f) => f.name && shotSizes[f.name])
+        .filter((f) => shotSizes[f.name].w !== f.w || shotSizes[f.name].h !== f.h)
+        .map((f) => `${f.name} ページ=${f.w}x${f.h} 撮影=${shotSizes[f.name].w}x${shotSizes[f.name].h}`),
+      [],
+    )
+    eq(
+      'IK-2 撮影の控えに無い図をページに載せていない',
+      figures.filter((f) => f.name && !shotSizes[f.name]).map((f) => f.name),
+      [],
+    )
+
+    eq(
+      'IK-3 どの図にも説明（alt）がある',
+      figures.filter((f) => f.alt.trim().length < 6).map((f) => f.name ?? '(名前の取れない図)'),
+      [],
+    )
+    eq(
+      'IK-3 どの図にも題（figcaption）がある',
+      figures.filter((f) => f.caption.length < 2).map((f) => f.name ?? '(名前の取れない図)'),
+      [],
+    )
+
+    // --- IK-4: 図の説明・題が名指ししている画面の言葉 ---
+    // 差し込み（{n}）も画面に出る数字も ◯ に均してから比べる。頭の「＋」は絵の代わりの飾りなので落とす
+    const figNorm = (s) =>
+      s
+        .replace(/\{[A-Za-z][A-Za-z0-9]*\}/g, '◯')
+        .replace(/[0-9０-９]+/g, '◯')
+        .replace(/^[＋+]/, '')
+    const figJaSrc = stripTsComments(readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8'))
+    const figValues = new Set()
+    for (const m of figJaSrc.matchAll(/'((?:[^'\\]|\\.)*)'/g)) figValues.add(figNorm(m[1]))
+    const figTemplates = []
+    for (const value of figValues) {
+      if (!value.includes('◯')) continue
+      // ほぼ差し込みだけの文言（'{name} {n}' など）を物差しにすると何にでも当たってしまう
+      if (value.replace(/◯/g, '').length < 6) continue
+      figTemplates.push(
+        new RegExp(
+          `^${value
+            .split('◯')
+            .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            .join('.+')}$`,
+        ),
+      )
+    }
+    // ja.ts に無くて当たり前のもの。**1つずつ理由を書く。理由なしで足さないこと**
+    const NOT_SCREEN_WORDS = new Set(
+      [
+        // ①デモに写り込むレシピ名・食材名。レシピの中身なので、画面の文言を変えても古くならない
+        'カレーライス',
+        '肉じゃが',
+        '豚汁',
+        'ほうれん草のおひたし',
+        '鶏むね肉',
+        'たまねぎ',
+        '玉ねぎ',
+        // ②レシピに書いた手順の本文と、調理用語の見出し（用語は src/data/cookingTerms.ts が持つ）
+        '鍋にたっぷりの湯を沸かす',
+        '落としぶた',
+        // ③画面がその場で組み立てて出す文字（見出し＋補足／売り場名＋件数）。
+        //   組み上がった形は ja.ts のどこにも無い
+        '栄養価の概算（◯人分で作るときの◯食あたり）',
+        '肉・魚介 ◯件',
+        '調味料 ◯件',
+        // ④並行調理ナビの色の名前は src/logic/naviColors.ts（NAVI_COLOR_WORDS）が持っている。
+        //   声で言う語なので ja.ts の画面文言ではない
+        'ピンク',
+      ].map(figNorm),
+    )
+    const figNames = []
+    const figMissing = []
+    for (const f of figures) {
+      for (const text of [f.alt, f.caption]) {
+        for (const m of text.matchAll(/「([^「」]{2,40})」/g)) {
+          const name = figNorm(m[1])
+          figNames.push(name)
+          if (figValues.has(name) || NOT_SCREEN_WORDS.has(name)) continue
+          if (figTemplates.some((re) => re.test(name))) continue
+          figMissing.push(`${f.name ?? '(名前の取れない図)'} 「${m[1]}」`)
+        }
+      }
+    }
+    eq('IK-4 図が名指ししている画面の言葉を拾えている（0件なら見張りが壊れている）', figNames.length > 0, true)
+    eq('IK-4 図の説明・題が名指ししている画面の言葉が ja.ts に実在する', figMissing, [])
   }
 }
 

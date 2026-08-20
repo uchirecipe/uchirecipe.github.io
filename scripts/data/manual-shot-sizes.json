@@ -146,5 +146,13 @@
   "day-suggest": {
     "w": 780,
     "h": 1148
+  },
+  "recipes-filter": {
+    "w": 780,
+    "h": 1054
+  },
+  "plan-week-suggest": {
+    "w": 780,
+    "h": 976
   }
 }
