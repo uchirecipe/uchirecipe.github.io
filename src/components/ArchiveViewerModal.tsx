@@ -92,6 +92,15 @@ export default function ArchiveViewerModal({ open, logs, brokenCount, onClose }:
                     </div>
                     <span className="shrink-0 text-right text-sm text-ink-muted">
                       {log.date.replaceAll('-', '/')}
+                      {/* 何人分（2026-08-20 便IJ・①）。ファイルには前から入っていたのに、
+                          この窓だけが出しておらず、読める場所がどこにも無かった。
+                          設定の「アーカイブファイルの読みかた」で「入るもの」に何人分を挙げる以上、
+                          読めなければ嘘になる */}
+                      {log.servings != null && (
+                        <span data-testid="archive-view-servings" className="mt-0.5 block">
+                          {ja.detail.cookedServingsValue.replace('{n}', String(log.servings))}
+                        </span>
+                      )}
                     </span>
                   </li>
                 )

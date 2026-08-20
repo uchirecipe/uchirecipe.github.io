@@ -1813,11 +1813,18 @@ export default function SettingsPage() {
               />
               <span>
                 {ja.settings.backupIncludeCookedPhotos}
+                {/* 2026-08-20 便IJ・③: 1つの塊だった注記を「OFFのまま／ONにする／毎回」の
+                    3行に分ける。事実は1つも落としていない（写真1枚あたりの大きさだけ、
+                    使い方ページの容量の表へ寄せた） */}
                 <span
                   data-testid="backup-photos-note"
                   className="mt-0.5 block text-xs text-ink-muted"
                 >
-                  {ja.settings.backupIncludeCookedPhotosNote}
+                  {ja.settings.backupIncludeCookedPhotosNotes.map((note) => (
+                    <span key={note} className="block">
+                      {note}
+                    </span>
+                  ))}
                 </span>
               </span>
             </label>
@@ -1933,25 +1940,110 @@ export default function SettingsPage() {
             )}
           </section>
 
-          {/* ③古い記録の書き出し(2026-08-02 オーナー採用「1ヶ月だけ端末に残して古い記録は外へ」)。
+          {/* ③機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。折りたたみ式で、
+              普段は畳んでおき機種変更のときだけ開く想定。
+              2026-08-20 便IJ・③: 「古い記録の書き出し」の**前**へ移した。オーナー原文
+              「機種変更でアプリ卒業される」＝この節でいちばん失敗が高くつくのが機種変更で、
+              その手順が、機種変更とは関係のない「古い記録の書き出し」の長い説明の下に
+              埋まっていた。書き出す→読み込む→機種変更、と読む順にそろえる */}
+          <section className={sectionCls}>
+            {/* 開閉ボタンのタップ領域を44px級にする(py-[10px]+行の高さ24px。2026-07-30 便CJ/C14。
+                同じ節の他のボタンは全て40px以上あるのにここだけ24pxで、
+                「スマホ縦画面基準・ボタン大きめ」の方針から外れていた。上下の余白は
+                -my-[10px]で打ち消し、カードの見た目は変えない) */}
+            <button
+              type="button"
+              onClick={() => setMoveGuideOpen((v) => !v)}
+              aria-expanded={moveGuideOpen}
+              className="-my-[10px] flex w-full items-center justify-between gap-2 py-[10px] text-left font-bold"
+            >
+              {ja.settings.moveGuideToggle}
+              <ChevronDown
+                size={18}
+                className={`shrink-0 text-ink-muted transition-transform ${moveGuideOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            <Collapse open={moveGuideOpen}>
+              <div className="mt-[var(--space-md)]">
+                {/* 2026-08-20 便IJ・③: 手順1つが2〜3の事実を抱えた長い文になっていたので、
+                    **手順は1行・付け足しは下の小さな字**に分けた。手順も注意も減らしていない
+                    （消すと機種変更でデータを失う経路ができるため） */}
+                <ol className="space-y-[var(--space-sm)] text-sm text-ink-muted">
+                  <li>
+                    {ja.settings.moveGuideStep1}
+                    <span
+                      data-testid="move-guide-step1-note"
+                      className="mt-0.5 block text-xs font-bold text-warning"
+                    >
+                      {ja.settings.moveGuideStep1Note}
+                    </span>
+                  </li>
+                  <li>{ja.settings.moveGuideStep2}</li>
+                  <li>{ja.settings.moveGuideStep3}</li>
+                  <li>
+                    {ja.settings.moveGuideStep4}
+                    <span className="mt-0.5 block text-xs">{ja.settings.moveGuideStep4Note}</span>
+                  </li>
+                </ol>
+                <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+                  {ja.settings.moveGuideTransferNote}
+                </p>
+                {/* 行き先は「複数の端末で使う方法」のページ(2026-08-09 便EV新設・便ETで差し替え)。
+                    使い方ページの節より手順が具体的で、端末別の保存先・受け渡し・2台目・クラウドの
+                    注意までが1ページにまとまっている。
+                    別窓(target="_blank")にしないのは、この画面の /about/ 配下へのリンク
+                    (紹介ページ・ホーム画面への追加・利用規約)と同じ作法に揃えるため
+                    (iOSのホーム画面追加アプリはSafariとストレージが別) */}
+                <a
+                  href="/about/multi-device.html"
+                  data-testid="move-guide-transfer-link"
+                  className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
+                >
+                  {ja.settings.moveGuideTransferLink}
+                </a>
+                <ul data-testid="move-guide-notes" className="mt-[var(--space-sm)] space-y-1">
+                  {ja.settings.moveGuideNotes.map((note) => (
+                    <li
+                      key={note}
+                      className="flex items-start gap-1 text-xs font-bold text-warning"
+                    >
+                      <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+                      {note}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Collapse>
+          </section>
+
+          {/* ④古い記録の書き出し(2026-08-02 オーナー採用「1ヶ月だけ端末に残して古い記録は外へ」)。
               目的は端末容量の軽量化。書き出し→(ファイルを確かめてから)削除の2段階で、
               1つのボタンにまとめない(保存に失敗したまま消えると控えが無くなるため) */}
           <section id="archive-section" className={`${sectionCls} scroll-mt-24`}>
             <h2 className="font-bold">{ja.settings.archiveTitle}</h2>
             <p className="mt-1 text-sm text-ink-muted">{ja.settings.archiveDescription}</p>
 
-            {/* 2026-08-12 便FW: オーナーの4つの疑問のうち①バックアップとの違い・③別のファイルか、を
-                表で答える。文章を続けず表にするのは規約H（長文は分割・表で構成する） */}
+            {/* アーカイブファイルの中身と読みかた（2026-08-20 便IJ・①。オーナー原文
+                「アーカイブが一覧のみになるのは注意書きはありますか？写真の拡大もできないし、
+                情報が削れるなら先に知りたい。」）。
+                **書き出すボタンより上**＝押す前に読める位置に置く。
+                2026-08-12 便FWの疑問①（バックアップとの違い）・疑問③（別のファイルか）も
+                この表の中で答える。文章を続けず表にするのは規約H（長文は分割・表で構成する） */}
             <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app px-3 py-2">
-              <p className="text-sm font-bold">{ja.settings.archiveVsBackupTitle}</p>
-              <dl data-testid="archive-vs-backup" className="mt-1 space-y-1 text-sm">
-                {ja.settings.archiveVsBackupRows.map((row) => (
+              <p className="text-sm font-bold">{ja.settings.archiveFileTitle}</p>
+              <dl data-testid="archive-file-facts" className="mt-1 space-y-1 text-sm">
+                {ja.settings.archiveFileRows.map((row) => (
                   <div key={row.name}>
                     <dt className="font-bold text-accent-ink">{row.name}</dt>
                     <dd className="text-ink-muted">{row.body}</dd>
                   </div>
                 ))}
               </dl>
+              {/* 「情報が削れる」と読まれないための1行（消えるのは端末側の記録だけ） */}
+              <p data-testid="archive-file-keep-note" className="mt-1 text-xs text-ink-muted">
+                {ja.settings.archiveFileKeepNote}
+              </p>
               <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveVsBackupNote}</p>
               {/* ファイル名を付け替えてよいことの注記（2026-08-20 便IH・④）。
                   バックアップの欄と同じ文言（ja.settings.fileNameFreeNote の1か所） */}
@@ -2107,23 +2199,36 @@ export default function SettingsPage() {
               </p>
             )}
 
-            {/* 疑問④「アーカイブはどこに保存されているのか」と、端末が軽くなる条件
-                (2026-08-12 便FW)。書き出しのボタンのすぐ下＝押した直後に読む位置に置く */}
-            <p
-              data-testid="archive-where-saved"
-              className="mt-[var(--space-md)] text-xs text-ink-muted"
-            >
-              {ja.settings.archiveWhereSaved}
-            </p>
-            <p data-testid="archive-space-note" className="mt-1 text-xs text-ink-muted">
-              {ja.settings.archiveSpaceNote}
-            </p>
-
-            {/* 通常のバックアップとの関係(端末から消した記録はバックアップに入らない) */}
-            <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
-              <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
-              {ja.settings.archiveBackupNote}
-            </p>
+            {/* 疑問④「アーカイブはどこに保存されているのか」・端末が軽くなる条件
+                (2026-08-12 便FW)・そのあとのバックアップとの関係。
+                2026-08-20 便IJ・③: 小さな字の文が3つ続くだけだったので、**見出しの語＋短い本文**に
+                そろえた（目につく語だけで何の話か分かる形）。事実は1つも落としていない。
+                書き出しのボタンのすぐ下＝押した直後に読む位置に置くのは変えていない */}
+            <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app px-3 py-2">
+              <p className="text-sm font-bold">{ja.settings.archiveAfterTitle}</p>
+              <dl data-testid="archive-after" className="mt-1 space-y-1 text-xs">
+                <div>
+                  <dt className="font-bold text-accent-ink">
+                    {ja.settings.archiveWhereSavedLabel}
+                  </dt>
+                  <dd data-testid="archive-where-saved" className="text-ink-muted">
+                    {ja.settings.archiveWhereSaved}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-bold text-accent-ink">{ja.settings.archiveSpaceLabel}</dt>
+                  <dd data-testid="archive-space-note" className="text-ink-muted">
+                    {ja.settings.archiveSpaceNote}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-bold text-accent-ink">{ja.settings.archiveBackupLabel}</dt>
+                  <dd data-testid="archive-backup-note" className="text-ink-muted">
+                    {ja.settings.archiveBackupNote}
+                  </dd>
+                </div>
+              </dl>
+            </div>
 
             {/* アーカイブを見る: 読み込み専用の一時閲覧(端末には保存しない) */}
             <input
@@ -2158,59 +2263,7 @@ export default function SettingsPage() {
             </p>
           </section>
 
-          {/* 機種変更・引っ越しガイド(2026-07-17設定ゼロベース裁定#5)。折りたたみ式で、
-              普段は畳んでおき機種変更のときだけ開く想定 */}
-          <section className={sectionCls}>
-            {/* 開閉ボタンのタップ領域を44px級にする(py-[10px]+行の高さ24px。2026-07-30 便CJ/C14。
-                同じ節の他のボタンは全て40px以上あるのにここだけ24pxで、
-                「スマホ縦画面基準・ボタン大きめ」の方針から外れていた。上下の余白は
-                -my-[10px]で打ち消し、カードの見た目は変えない) */}
-            <button
-              type="button"
-              onClick={() => setMoveGuideOpen((v) => !v)}
-              aria-expanded={moveGuideOpen}
-              className="-my-[10px] flex w-full items-center justify-between gap-2 py-[10px] text-left font-bold"
-            >
-              {ja.settings.moveGuideToggle}
-              <ChevronDown
-                size={18}
-                className={`shrink-0 text-ink-muted transition-transform ${moveGuideOpen ? 'rotate-180' : ''}`}
-                aria-hidden
-              />
-            </button>
-            <Collapse open={moveGuideOpen}>
-              <div className="mt-[var(--space-md)]">
-                <ol className="space-y-1 text-sm text-ink-muted">
-                  <li>{ja.settings.moveGuideStep1}</li>
-                  <li>{ja.settings.moveGuideStep2}</li>
-                  <li>{ja.settings.moveGuideStep3}</li>
-                  <li>{ja.settings.moveGuideStep4}</li>
-                </ol>
-                <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
-                  {ja.settings.moveGuideTransferNote}
-                </p>
-                {/* 行き先は「複数の端末で使う方法」のページ(2026-08-09 便EV新設・便ETで差し替え)。
-                    使い方ページの節より手順が具体的で、端末別の保存先・受け渡し・2台目・クラウドの
-                    注意までが1ページにまとまっている。
-                    別窓(target="_blank")にしないのは、この画面の /about/ 配下へのリンク
-                    (紹介ページ・ホーム画面への追加・利用規約)と同じ作法に揃えるため
-                    (iOSのホーム画面追加アプリはSafariとストレージが別) */}
-                <a
-                  href="/about/multi-device.html"
-                  data-testid="move-guide-transfer-link"
-                  className="mt-1 inline-block text-xs font-bold text-accent-ink underline"
-                >
-                  {ja.settings.moveGuideTransferLink}
-                </a>
-                <p className="mt-[var(--space-sm)] flex items-start gap-1 text-xs font-bold text-warning">
-                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
-                  {ja.settings.moveGuideNote}
-                </p>
-              </div>
-            </Collapse>
-          </section>
-
-          {/* ③アプリの更新(2026-08-09 便ER): 新しいバージョンが出ていないか確かめ、あればその場で
+          {/* ⑤アプリの更新(2026-08-09 便ER): 新しいバージョンが出ていないか確かめ、あればその場で
               最新にする。次の「困ったとき」の修復とは別物なので、隣り合わせに置いて、
               それぞれの説明でもう一方のカード名・ボタン名を出す(どちらを押せばよいか迷わせない)。
               画面下の更新のお知らせを閉じたあとの受け皿でもある(?section=update で直接ここへ来られる) */}
@@ -2292,10 +2345,17 @@ export default function SettingsPage() {
             </button>
             {/* 修正4: ブラウザ自体のキャッシュクリア機能を使う場合の注意
                 (「Cookieと他のサイトデータ」を消すとIndexedDBごと消える事故の再発防止) */}
-            <p className="mt-[var(--space-md)] flex items-start gap-1 text-xs font-bold text-warning">
-              <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
-              {ja.settings.refreshAppCacheClearWarning}
-            </p>
+            <ul
+              data-testid="cache-clear-warnings"
+              className="mt-[var(--space-md)] space-y-1"
+            >
+              {ja.settings.refreshAppCacheClearWarnings.map((line) => (
+                <li key={line} className="flex items-start gap-1 text-xs font-bold text-warning">
+                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden />
+                  {line}
+                </li>
+              ))}
+            </ul>
           </section>
 
           {/* 三重の網の(c): 置き換え直後に1回だけ出す「元に戻す」バナー

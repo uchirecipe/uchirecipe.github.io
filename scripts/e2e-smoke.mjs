@@ -15693,7 +15693,9 @@ try {
               ...recipe,
               cookedLogs: [
                 { date: dates.recent, note: 'E2E最近の記録' },
-                { date: dates.old2, note: 'E2E古い記録(写真つき)', photo },
+                // 2026-08-20 便IJ・①: 何人分もアーカイブファイルに入り、閲覧の窓で読めることを測る
+                // （設定の「入るもの」に何人分を挙げている以上、読めなければ嘘になる）
+                { date: dates.old2, note: 'E2E古い記録(写真つき)', photo, servings: 3 },
                 { date: dates.old1, note: 'E2E古い記録' },
               ],
             })
@@ -15723,6 +15725,52 @@ try {
         'ARCHIVE-01 書き出す前は「書き出した記録を端末から消す」が出ない(2段階)',
         (await arPage.getByRole('button', { name: '書き出した記録を端末から消す' }).count()) === 0,
       )
+
+      // --- 2026-08-20 便IJ・①: 読みかたの制限が「書き出す前」に画面に出ていること ---
+      // オーナー原文「アーカイブが一覧のみになるのは注意書きはありますか？写真の拡大もできないし、
+      // 情報が削れるなら先に知りたい。」＝**押したあとに気づく形にしない**。
+      // 掴み方は目印（並びの何番目・入れ子の段数には依らない）。文言は ja から読む。
+      // 読み取れなかったとき（枠が無い・ボタンが無い）は、その場で不合格にする
+      {
+        const arFacts = arPage.locator('[data-testid="archive-file-facts"]')
+        const arExportBtn = arPage.getByRole('button', { name: ja.settings.archiveExportButton })
+        const arFactsBox = (await arFacts.count()) === 1 ? await arFacts.boundingBox() : null
+        const arExportBox = (await arExportBtn.count()) === 1 ? await arExportBtn.boundingBox() : null
+        check(
+          'ARCHIVE-01(便IJ・①) 前提: 読みかたの説明と書き出しのボタンを両方掴めている',
+          !!arFactsBox && !!arExportBox,
+          `説明=${JSON.stringify(arFactsBox)} ボタン=${JSON.stringify(arExportBox)}`,
+        )
+        check(
+          'ARCHIVE-01(便IJ・①) 読みかたの制限が「書き出す」ボタンより上に出ている',
+          !!arFactsBox && !!arExportBox && arFactsBox.y + arFactsBox.height <= arExportBox.y,
+          `説明の下端=${arFactsBox ? Math.round(arFactsBox.y + arFactsBox.height) : null} ボタンの上端=${
+            arExportBox ? Math.round(arExportBox.y) : null
+          }`,
+        )
+        const arFactsText = (
+          (await arFacts.innerText().catch(() => '')) ?? ''
+        ).replace(/\u200B/g, '')
+        const arFactsMissing = ja.settings.archiveFileRows.filter(
+          (row) => !arFactsText.includes(row.name) || !arFactsText.includes(row.body),
+        )
+        check(
+          'ARCHIVE-01(便IJ・①) 何が入るか・どう読むか・戻せるかが、そこに書いてある',
+          ja.settings.archiveFileRows.length >= 3 && arFactsMissing.length === 0,
+          `画面に無い行=${JSON.stringify(arFactsMissing.map((r) => r.name))}`,
+        )
+        check(
+          'ARCHIVE-01(便IJ・①) 消えるのは端末の記録のほうだと書いてある（情報が削れると読ませない）',
+          (
+            (await arPage
+              .locator('[data-testid="archive-file-keep-note"]')
+              .innerText()
+              .catch(() => '')) ?? ''
+          )
+            .replace(/\u200B/g, '')
+            .includes(ja.settings.archiveFileKeepNote),
+        )
+      }
 
       // 書き出し(保存先を選べない環境=自動ダウンロード経路)
       const [arDownload] = await Promise.all([
@@ -15775,6 +15823,15 @@ try {
       check('ARCHIVE-01 書き出したあとに削除ボタンが出る', (await arDeleteBtn.count()) === 1)
       await arDeleteBtn.click()
       await arPage.waitForTimeout(900)
+      // 2026-08-20 便IJ・①: 端末側の記録が無くなる最後の関門にも、読みかたの制限を出す
+      {
+        const arConfirmTexts = await readConfirms(arPage)
+        check(
+          'ARCHIVE-01(便IJ・①) 消す前の確認にも、消したあとの読みかたが出る',
+          arConfirmTexts.some((t) => t.includes(ja.settings.archiveDeleteConfirmViewNote)),
+          `出た確認の窓=${JSON.stringify(arConfirmTexts).slice(0, 200)}`,
+        )
+      }
       const arAfterDelete = await arPage.evaluate(async (recipeId) => {
         const req = indexedDB.open('uchi-recipe')
         const idb = await new Promise((resolve, reject) => {
@@ -15834,6 +15891,13 @@ try {
       check(
         'ARCHIVE-01 閲覧の窓に書き出した記録のメモが出る',
         arViewText.includes('E2E古い記録(写真つき)'),
+      )
+      check(
+        // 2026-08-20 便IJ・①: 設定の「入るもの」に何人分を挙げているので、閲覧の窓でも読めること。
+        // 文言は ja から組み立てる（「3人分」を書き写さない）
+        'ARCHIVE-01(便IJ・①) 閲覧の窓に何人分が出る（説明で「入るもの」に挙げているため）',
+        arViewText.includes(ja.detail.cookedServingsValue.replace('{n}', '3')),
+        `窓=${arViewText.slice(0, 160)}`,
       )
       check(
         'ARCHIVE-01 閲覧しても端末の記録は増えない(読み込み専用)',
@@ -38365,8 +38429,13 @@ try {
         fwBackupText.includes('バックアップファイルにはPro版の解錠コードが含まれます'),
       )
       check(
+        // 2026-08-20 便IJ・③: 文字を書き写していたので ja から読む形にした（注記を
+        // 「OFFのまま／ONにする／毎回」の3行に分けた時点で、書き写しの側が落ちた＝禁じ手②）
         'FW-02 短くしても事実は落としていない: 写真は既定で入らないことが残っている',
-        fwBackupText.includes('OFFのままだと写真は入らず、別の端末では戻せません'),
+        ja.settings.backupIncludeCookedPhotosNotes.every((note) => fwBackupText.includes(note)),
+        `画面に無い行=${JSON.stringify(
+          ja.settings.backupIncludeCookedPhotosNotes.filter((note) => !fwBackupText.includes(note)),
+        )}`,
       )
       const fwBackupParas = await fwParagraphs('#backup-section')
       const fwBackupLong = (fwBackupParas ?? []).filter((t) => t.length > FW_PARAGRAPH_MAX)
@@ -38393,14 +38462,18 @@ try {
         (await fwPage.locator('#archive-section').innerText().catch(() => '')) ?? ''
       ).replace(/\u200B/g, '')
       // 疑問①「バックアップと何が違うのか」・疑問③「別のファイルなのか」
+      // 2026-08-20 便IJ・①: アーカイブファイルの説明を1つの表にまとめ直した
+      // （入るもの／読みかた／アプリに戻す／バックアップとの違い）。文言は ja から読む
       const fwVs = (
-        (await fwPage.locator('[data-testid="archive-vs-backup"]').innerText().catch(() => '')) ?? ''
+        (await fwPage.locator('[data-testid="archive-file-facts"]').innerText().catch(() => '')) ?? ''
       ).replace(/\u200B/g, '')
+      const fwVsMissing = ja.settings.archiveFileRows.filter(
+        (row) => !fwVs.includes(row.name) || !fwVs.includes(row.body),
+      )
       check(
-        'FW-03(疑問①) バックアップとの違いを、入るものと戻せるかで言い分けている',
-        fwVs.includes('バックアップファイル') && fwVs.includes('アーカイブファイル') &&
-          fwVs.includes('アプリに読み込んで元に戻せます') && fwVs.includes('「アーカイブを見る」で中身は読めますが、アプリには戻せません'),
-        fwVs.slice(0, 120),
+        'FW-03(疑問①) アーカイブファイルの説明が、jaの行どおりに表で出ている',
+        ja.settings.archiveFileRows.length >= 3 && fwVsMissing.length === 0,
+        `画面に無い行=${JSON.stringify(fwVsMissing.map((r) => r.name))} 画面=${fwVs.slice(0, 120)}`,
       )
       check(
         // 2026-08-20 司令部: ファイル名を書き写していたため、アーカイブの名前を
@@ -42366,6 +42439,223 @@ try {
       )
     } finally {
       await frBrowser.close()
+    }
+  }
+
+
+  // --- 便IJ・②③(2026-08-20 オーナー承認済み) ---------------------------------------------
+  //
+  // ② NGWORD-01: NG食材の印の隣に短い言葉が出ている
+  //    オーナー原文「レシピから追加のNG食材について、マークだけあっても意味がわからない。
+  //    NG食材あり、など超短く説明欲しい。」
+  //    印は5か所以上のカードに出る。**言葉を出す密度と出さない密度**を実DOMで測る:
+  //      ・大／標準 … 印＋言葉（横幅に余裕がある）
+  //      ・小 …… 印だけ。週の枠は実測169pxしかなく、言葉（実測92px）を足すと料理名が消える
+  //    禁じ手よけ: 掴み方は data-testid（並びの何番目・入れ子の段数に依らない）。
+  //    文言は ja から読む（書き写さない）。**1つも拾えなかったときはその場で不合格**にする。
+  //
+  // ③ BKFACT-01: 知らないと事故になる情報が、アプリ側の画面から消えていない
+  //    オーナー原文「バックアップまわりの説明が、文字ばかりで読みにくい。（略）詳しくは説明ページに
+  //    案内すればOK。」＝**説明ページへ送ってよい情報と、送ってはいけない情報**がある。
+  //    ここでは後者だけを、ja の文言そのものが画面に出ているかで測る。
+  currentCheck = 'NGWORD-01'
+  {
+    const ngBrowser = await chromium.launch()
+    const ngCtx = await ngBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ngPage = await ngCtx.newPage()
+    ngPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@NGWORD-01] ${err.message}`)
+    })
+    const ngClean = (t) => (t ?? '').replaceAll('​', '').trim()
+    /** 目印で掴んだ要素の中身（並びの何番目かには依らない） */
+    const ngTexts = (sel) =>
+      ngPage.evaluate(
+        (s) =>
+          Array.from(document.querySelectorAll(s)).map((el) =>
+            (el.textContent ?? '').replaceAll('​', '').trim(),
+          ),
+        sel,
+      )
+    try {
+      await ngPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ngPage.waitForTimeout(2400) // 初回シード完了待ち
+
+      // 前提①: 週の枠（密度「小」）に品を入れる。UIから入れる（献立の作りに手を入れない）
+      await ngPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await ngPage.waitForTimeout(1800)
+      await ngPage.getByRole('button', { name: '週', exact: true }).first().click()
+      await ngPage.waitForTimeout(1000)
+      const ngFill = ngPage.locator('[data-testid="week-fill-run"]')
+      if ((await ngFill.count()) === 1) {
+        await ngFill.click()
+        await ngPage.waitForTimeout(2400)
+      }
+
+      // 前提②: 端末にあるレシピでいちばん多く使われている材料をNG食材に入れる
+      //（どの品が献立に入っても必ず印が付く状態を作る。品名を決め打ちしない）
+      const ngWordIngredient = await ngPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const g = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+              g.onsuccess = () => {
+                const counts = new Map()
+                for (const r of g.result)
+                  for (const i of r.ingredients ?? [])
+                    if (i?.name) counts.set(i.name, (counts.get(i.name) ?? 0) + 1)
+                const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
+                if (!top) {
+                  resolve(null)
+                  return
+                }
+                const st = idb.transaction('settings', 'readwrite').objectStore('settings')
+                const sg = st.get(1)
+                sg.onsuccess = () => {
+                  const put = st.put({ ...(sg.result ?? { id: 1 }), id: 1, ngIngredients: [top[0]] })
+                  put.onsuccess = () => resolve({ name: top[0], used: top[1] })
+                  put.onerror = () => reject(put.error)
+                }
+                sg.onerror = () => reject(sg.error)
+              }
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'NGWORD-01 前提: NG食材に入れる材料を決められた（決められなければ以降は測れていない）',
+        !!ngWordIngredient && ngWordIngredient.used >= 5,
+        `材料=${JSON.stringify(ngWordIngredient)}`,
+      )
+
+      // ---- 大（レシピ一覧のグリッド）----
+      await ngPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ngPage.reload({ waitUntil: 'networkidle' })
+      await ngPage.waitForTimeout(2400)
+      const ngLarge = await ngTexts('[data-testid="ng-badge"]')
+      check(
+        'NGWORD-01 前提: レシピ一覧（大）にNG食材の印が出ている',
+        ngLarge.length > 0,
+        `印=${ngLarge.length}件`,
+      )
+      check(
+        'NGWORD-01(大) 印の隣に短い言葉が出ている',
+        ngLarge.length > 0 && ngLarge.every((t) => t === ja.card.ngBadgeShort),
+        `言葉=${JSON.stringify([...new Set(ngLarge)].slice(0, 3))} 期待=${ja.card.ngBadgeShort}`,
+      )
+
+      // ---- 標準（レシピ一覧の一覧表示）----
+      const ngToList = ngPage.getByRole('button', { name: ja.search.layoutToggleToList })
+      check('NGWORD-01 前提: 一覧表示に切り替えられる', (await ngToList.count()) >= 1)
+      if ((await ngToList.count()) >= 1) {
+        await ngToList.first().click()
+        await ngPage.waitForTimeout(1600)
+      }
+      const ngStandard = await ngTexts('[data-testid="ng-badge"]')
+      check(
+        'NGWORD-01 前提: レシピ一覧（標準）にNG食材の印が出ている',
+        ngStandard.length > 0,
+        `印=${ngStandard.length}件`,
+      )
+      check(
+        'NGWORD-01(標準) 印の隣に短い言葉が出ている',
+        ngStandard.length > 0 && ngStandard.every((t) => t === ja.card.ngBadgeShort),
+        `言葉=${JSON.stringify([...new Set(ngStandard)].slice(0, 3))} 期待=${ja.card.ngBadgeShort}`,
+      )
+
+      // ---- 小（週の枠）: 印だけ。言葉は出さず、料理名が残っていること ----
+      await ngPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await ngPage.waitForTimeout(2000)
+      await ngPage.getByRole('button', { name: '週', exact: true }).first().click()
+      await ngPage.waitForTimeout(1600)
+      const ngSlotCards = await ngPage.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid="row-recipe"]')).map((el) => {
+          const rect = el.getBoundingClientRect()
+          return {
+            width: Math.round(rect.width),
+            text: (el.textContent ?? '').replaceAll('​', '').trim(),
+            badges: el.querySelectorAll('[data-testid="ng-badge"]').length,
+            words: el.querySelectorAll('[data-testid="ng-badge-word"]').length,
+          }
+        }),
+      )
+      const ngWithBadge = ngSlotCards.filter((c) => c.badges > 0)
+      check(
+        'NGWORD-01 前提: 週の枠（小）にNG食材の印が出ている',
+        ngSlotCards.length > 0 && ngWithBadge.length > 0,
+        `枠=${ngSlotCards.length}件 印つき=${ngWithBadge.length}件`,
+      )
+      check(
+        'NGWORD-01(小) 狭い行では言葉を出さない（印だけ）',
+        ngWithBadge.length > 0 && ngWithBadge.every((c) => c.words === 0),
+        `言葉つき=${ngWithBadge.filter((c) => c.words > 0).length}件`,
+      )
+      check(
+        'NGWORD-01(小) 印を出しても料理名が消えていない',
+        ngWithBadge.length > 0 && ngWithBadge.every((c) => c.text.length > 0),
+        `中身=${JSON.stringify(ngWithBadge.slice(0, 3))}`,
+      )
+      check(
+        // 「小」で言葉を出さない理由そのもの。行が広くなったら、この判断を見直す合図になる
+        'NGWORD-01(小) 判断の前提: 狭い行の幅は実測で200px未満のまま',
+        ngWithBadge.length > 0 && ngWithBadge.every((c) => c.width < 200),
+        `幅=${JSON.stringify(ngWithBadge.map((c) => c.width).slice(0, 5))}`,
+      )
+
+      // ---- ③ 事故になる情報が、アプリ側の画面から消えていない ----
+      currentCheck = 'BKFACT-01'
+      await ngPage.goto(`${BASE}/#/settings?section=backup`, { waitUntil: 'networkidle' })
+      await ngPage.waitForTimeout(1800)
+      // 機種変更の手順は折りたたみの中にあるので開く（畳んだままだと本文が読めない）
+      const bkMoveToggle = ngPage.getByRole('button', { name: ja.settings.moveGuideToggle, exact: false })
+      check('BKFACT-01 前提: 「機種変更するときは」を開ける', (await bkMoveToggle.count()) >= 1)
+      if ((await bkMoveToggle.count()) >= 1) {
+        await bkMoveToggle.first().click()
+        await ngPage.waitForTimeout(800)
+      }
+      const bkText = ngClean(await ngPage.locator('#section-backup').innerText().catch(() => ''))
+      // 説明ページへ送ってはいけない事実（知らないと機種変更でデータを失う）。文言は ja から読む
+      const BK_MUST = [
+        ...ja.settings.backupIncludeCookedPhotosNotes,
+        ja.settings.backupContainsCodeNotice,
+        ja.settings.importReplaceCaption,
+        ja.settings.moveGuideStep1Note,
+        ...ja.settings.moveGuideNotes,
+        ...ja.settings.refreshAppCacheClearWarnings,
+        // 「書き出しただけでは端末の記録は減らない」は手順の並びが言う
+        // （archiveDeleteNote は書き出しを済ませてから出る文なので、常に出ているものだけを見る）
+        ...ja.settings.archiveSteps,
+        ja.settings.archiveBackupNote,
+        ja.settings.fileNameFreeNote,
+      ]
+      check(
+        'BKFACT-01 前提: バックアップの節の本文を読めている',
+        bkText.length > 200 && BK_MUST.length >= 10,
+        `本文=${bkText.length}字 見る事実=${BK_MUST.length}件`,
+      )
+      const bkMissing = BK_MUST.filter((t) => !bkText.includes(ngClean(t)))
+      check(
+        'BKFACT-01 事故になる事実が、アプリの画面から1つも消えていない',
+        bkMissing.length === 0,
+        `画面に無い=${JSON.stringify(bkMissing)}`,
+      )
+      // 詳しい説明の行き先（アプリ側を短くしたぶん、案内先が生きていること）
+      for (const [name, sel, href] of [
+        ['バックアップ', '[data-testid="backup-detail-link"]', '/about/manual.html#backup'],
+        ['古い記録の書き出し', '[data-testid="archive-detail-link"]', '/about/manual.html#archive'],
+      ]) {
+        const link = ngPage.locator(sel)
+        check(
+          `BKFACT-01 ${name}の詳しい説明への案内が生きている`,
+          (await link.count()) === 1 && (await link.getAttribute('href')) === href,
+          `href=${(await link.count()) === 1 ? await link.getAttribute('href') : 'なし'}`,
+        )
+      }
+    } finally {
+      await ngBrowser.close()
     }
   }
 

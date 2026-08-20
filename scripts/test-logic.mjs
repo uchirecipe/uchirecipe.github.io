@@ -20856,7 +20856,27 @@ Aみりん 大さじ1
       detachedLogs: 0,
       cutoff: '2026-07-16',
     })
-    eq('HC①-確認文 残った記録が無ければ内訳は出さない', (recipeOnly.notes ?? []).length, 0)
+    // 2026-08-20 便IJ・①: 補足そのものが1件も無いこと（notes.length===0）で測っていたが、
+    // それは「補足を1つも足せない」という別の約束になってしまう（実際、読みかたの制限の1行を
+    // 足した便IJで落ちた）。測りたいのは**残った記録の内訳を出していないこと**なので、
+    // その1行の形（ja の型に数字を入れたもの）を作って、それが混じっていないかで見る
+    const detachedNoteRe = new RegExp(
+      `^${ja.settings.archiveDeleteConfirmDetachedNote
+        .split('{d}')
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('\\d+')}$`,
+    )
+    eq(
+      'HC①-確認文 残った記録が無ければ内訳は出さない',
+      (recipeOnly.notes ?? []).filter((n) => detachedNoteRe.test(n)),
+      [],
+    )
+    // 見張りが当たっていること（型が合わなくなったら、上の判定は何も測らずに合格してしまう）
+    eq(
+      'HC①-確認文 内訳の見張りが当たっている（残った記録があるときは拾える）',
+      (both.notes ?? []).some((n) => detachedNoteRe.test(n)),
+      true,
+    )
     eq(
       'HC①-確認文 レシピの記録だけなら従来どおり「レシピ本体」を書く',
       bullet(recipeOnly, keptLabel).includes('レシピ本体'),
@@ -24285,6 +24305,314 @@ Aみりん 大さじ1
       typeof ja.mealPlan.quickMinutesNone === 'string' && ja.mealPlan.quickMinutesNone.length > 0,
       true,
     )
+  }
+}
+
+
+// ==========================================================================================
+// 便IJ: 説明まわりの3件（2026-08-20・すべてオーナー承認済み）
+//
+//  ① アーカイブの注意書き（「一覧のみ・写真の拡大なし」を**書き出す前に**知らせる）
+//  ② NG食材の印に短い言葉（印だけでは意味が分からない）
+//  ③ バックアップまわりの説明を読みやすく（アプリ＋説明ページ）
+//
+// 禁じ手よけ:
+//  ・**文言を書き写さない**。画面に出る文字は ja.ts から読み、位置は e2e が実DOMで測る
+//  ・**読み取りに失敗したら必ず落ちる**。拾えた数が0のときは、その場で不合格にする
+//  ・要素の置き場所・入れ子の段数に依存しない（ここは文言と規則だけを見る）
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const len = (t) => (typeof t === 'string' ? t.replace(/​/g, '').length : -1)
+  /** 文言が消えていても見張りが落ちる形で読む（未定義で例外にすると、何が欠けたか出ない） */
+  const lines = (v) => (Array.isArray(v) ? v : [])
+  const str = (v) => (typeof v === 'string' ? v : '')
+
+  // ---- ① アーカイブファイルの読みかた（書き出す前に読む注意書き） --------------------------
+  // オーナー原文:
+  //   「アーカイブが一覧のみになるのは注意書きはありますか？写真の拡大もできないし、
+  //     情報が削れるなら先に知りたい。」
+  // 測るのは利用者が確かめたいこと＝**何が入るか／どう読むか／戻せるか**が画面の文言にあること。
+  // 「どこに出ているか」は e2e（IJ-01）が実DOMのY座標で測る（役割を二重にしない）。
+  {
+    const rows = ja.settings.archiveFileRows
+    eq('IJ-1 アーカイブファイルの説明が表の形で用意されている', Array.isArray(rows) && rows.length >= 3, true)
+    const rowsOk = Array.isArray(rows) ? rows : []
+    eq(
+      'IJ-1 表の各行に見出しの語と本文がある',
+      rowsOk.filter((r) => !r || !r.name || !r.body),
+      [],
+    )
+    const body = rowsOk.map((r) => `${r?.name ?? ''}: ${r?.body ?? ''}`).join('\n')
+    // ファイルに何が入るかを名指しする（「情報が削れる」と読まれないため）。
+    // 何を挙げるべきかは**ファイルの形**（logic/cookedArchive.ts の ArchivedCookedLog）から取る
+    // ＝項目が増えたら、この見張りが「説明に足りていない」と教える
+    const FILE_FIELDS = [
+      { field: 'date', word: '日付' },
+      { field: 'recipeTitle', word: '料理名' },
+      { field: 'note', word: 'メモ' },
+      { field: 'servings', word: '人分' },
+      { field: 'photoBase64', word: '写真' },
+    ]
+    {
+      const sample = buildArchiveFile([
+        {
+          id: 'ij-1',
+          date: '2026-01-02',
+          recipeTitle: 'テスト煮',
+          note: 'ひとこと',
+          servings: 2,
+          photoBase64: 'AAAA',
+          photoType: 'image/jpeg',
+        },
+      ])
+      const inFile = Object.keys(sample.logs[0] ?? {})
+      eq(
+        'IJ-1 見張りが当たっている（アーカイブファイルの項目を読めている）',
+        FILE_FIELDS.filter(({ field }) => !inFile.includes(field)),
+        [],
+      )
+      eq(
+        'IJ-1 ファイルに入る項目が、説明の「入るもの」から抜けていない',
+        FILE_FIELDS.filter(({ word }) => !body.includes(word)).map((f) => f.word),
+        [],
+      )
+    }
+    // 読みかたの制限（一覧だけ・写真は拡大できない）
+    eq(
+      'IJ-1 読む手段が「アーカイブを見る」の一覧だけであることを書いている',
+      str(ja.settings.archiveViewButton).length > 0 && body.includes(str(ja.settings.archiveViewButton)) && body.includes('一覧'),
+      true,
+    )
+    eq('IJ-1 写真を拡大できないことを書いている', body.includes('拡大'), true)
+    eq('IJ-1 アプリには戻せないことを書いている', body.includes('戻せ') || body.includes('戻す'), true)
+    // 「情報が削れる」の誤解を打ち消す1行（消えるのは端末側の記録で、ファイルの中身は減らない）
+    eq(
+      'IJ-1 消えるのは端末の記録のほうだと書いている',
+      typeof ja.settings.archiveFileKeepNote === 'string' &&
+        ja.settings.archiveFileKeepNote.includes('端末') &&
+        ja.settings.archiveFileKeepNote.includes('ファイル'),
+      true,
+    )
+    // 端末から消す最後の関門（規約Fの窓）にも、同じ制限が出ること
+    for (const [name, exported] of [
+      ['レシピの中の記録だけ', { logs: 2, photos: 0, detachedLogs: 0, cutoff: '2026-07-16' }],
+      ['残った記録も混ざる', { logs: 5, photos: 2, detachedLogs: 2, cutoff: '2026-07-16' }],
+    ]) {
+      const notes = buildArchiveDeleteConfirm(exported).notes ?? []
+      eq(
+        `IJ-1 消す前の確認にも読みかたの制限が出る（${name}）`,
+        notes.some((n) => n.includes(str(ja.settings.archiveViewButton)) && n.includes('拡大')),
+        true,
+      )
+    }
+  }
+
+  // ---- ② NG食材の印の隣に出す短い言葉 --------------------------------------------------
+  // オーナー原文:
+  //   「レシピから追加のNG食材について、マークだけあっても意味がわからない。
+  //     NG食材あり、など超短く説明欲しい。」
+  // ここでは文言の性質（短い・読み上げ用と別物・呼び名がそろっている）だけを見る。
+  // どのカードに出す／出さないかは e2e（IJ-02）が実DOMで測る。
+  {
+    const short = str(ja.card.ngBadgeShort)
+    eq('IJ-2 印の隣に出す短い言葉がある', typeof short === 'string' && short.length > 0, true)
+    eq('IJ-2 「超短く」（6文字以内）', len(short) <= 6, true)
+    neq('IJ-2 読み上げ用の説明とは別の文言', short, ja.card.ngBadge)
+    // 呼び名をそろえる: 設定の欄名・絞り込みと同じ言葉で呼ぶ（同じものを別名で呼ばない）。
+    // 「NG食材」という語そのものを書き写さず、**設定の欄名の先頭から**取る
+    const ngWord = str(ja.settings.ngTitle).split('（')[0]
+    eq(
+      'IJ-2 見張りが当たっている（設定の欄名から呼び名を取れている）',
+      ngWord.length >= 2 && str(ja.search.excludeNg).includes(ngWord),
+      true,
+    )
+    eq('IJ-2 設定の欄名と同じ呼び名を使っている', short.includes(ngWord), true)
+    // 画面に出す口が共通のカード部品にあること（画面ごとに書き写していない）
+    const cardSrc = readFileSync(path.join(appRoot, 'src/components/RecipeCard.tsx'), 'utf-8')
+    eq('IJ-2 共通のカード部品が短い言葉を出している', cardSrc.includes('ja.card.ngBadgeShort'), true)
+    const others = ['src/pages', 'src/components']
+      .flatMap((dir) =>
+        readdirSync(path.join(appRoot, dir))
+          .filter((f) => f.endsWith('.tsx') && f !== 'RecipeCard.tsx')
+          .map((f) => `${dir}/${f}`),
+      )
+      .filter((rel) => readFileSync(path.join(appRoot, rel), 'utf-8').includes('ngBadgeShort'))
+    eq('IJ-2 短い言葉を画面側で書き写していない（出すのはカード部品だけ）', others, [])
+  }
+
+  // ---- ③ バックアップまわりの説明 ---------------------------------------------------------
+  // オーナー原文:
+  //   「バックアップまわりの説明が、文字ばかりで読みにくい。機種変更でアプリ卒業される。
+  //     目につく単語だけで大体の内容を理解できるように、シンプルにしてください。
+  //     詳しくは説明ページに案内すればOK。ただ、説明ページも同様に読みづらいので直してほしい。」
+  //
+  // 短くするときにいちばん危ないのは、**知らないと事故になる事実を一緒に消すこと**なので、
+  // (a)並びの形 (b)事故になる事実 (c)説明ページの食い違い の3つを別々に測る。
+  {
+    // (a) 1つの塊だった説明が、短い行に分かれていること
+    const SPLIT = [
+      ['「作った記録」の写真のチェックの注記', ja.settings.backupIncludeCookedPhotosNotes],
+      ['機種変更の注意', ja.settings.moveGuideNotes],
+      ['ブラウザの設定でデータを消すときの注意', ja.settings.refreshAppCacheClearWarnings],
+    ]
+    for (const [name, lines] of SPLIT) {
+      eq(`IJ-3 ${name}が短い行に分かれている`, Array.isArray(lines) && lines.length >= 2, true)
+      eq(
+        `IJ-3 ${name}の1行が長くなっていない（60字以内）`,
+        (Array.isArray(lines) ? lines : []).filter((t) => len(t) > 60),
+        [],
+      )
+    }
+    // 書き出したあとの説明は「見出しの語＋短い本文」の形にする（目につく語だけで話が分かる）
+    const LABELLED = [
+      ['ファイルの場所', ja.settings.archiveWhereSavedLabel, ja.settings.archiveWhereSaved],
+      ['端末が軽くなる条件', ja.settings.archiveSpaceLabel, ja.settings.archiveSpaceNote],
+      ['そのあとのバックアップ', ja.settings.archiveBackupLabel, ja.settings.archiveBackupNote],
+    ]
+    for (const [name, label, text] of LABELLED) {
+      eq(`IJ-3 ${name}に見出しの語がある`, typeof label === 'string' && label.length > 0 && len(label) <= 12, true)
+      eq(`IJ-3 ${name}の本文が長くなっていない（60字以内）`, len(text) > 0 && len(text) <= 60, true)
+    }
+
+    // (b) 知らないと事故になる事実が、**アプリの中から**消えていないこと。
+    // 言い回しは規約Hで変わり続けるので、事実の核になる語だけを見る。
+    // あわせて「その文言が設定の画面から参照されているか」も見る＝ja に残っていても
+    // 画面から外れていたら落ちる（説明ページへ送っただけ、を事故にしない）。
+    const screenSrc = ['src/pages/SettingsPage.tsx', 'src/logic/backup.ts', 'src/logic/cookedArchive.ts']
+      .map((rel) => readFileSync(path.join(appRoot, rel), 'utf-8'))
+      .join('\n')
+    const HAZARDS = [
+      {
+        name: '「作った記録」の写真は既定でバックアップに入らない',
+        key: 'backupIncludeCookedPhotosNotes',
+        text: lines(ja.settings.backupIncludeCookedPhotosNotes).join('\n'),
+        must: [/OFF/, /写真/, /入りません|入らず|入らない/],
+      },
+      {
+        name: 'バックアップファイルには解錠コードが入る（他の人に渡さない）',
+        key: 'backupContainsCodeNotice',
+        text: str(ja.settings.backupContainsCodeNotice),
+        must: [/解錠コード/, /渡さない/],
+      },
+      {
+        name: '「データを上書き」は今のデータを消す',
+        key: 'importReplaceCaption',
+        text: str(ja.settings.importReplaceCaption),
+        must: [/今のデータ/, /消して|消す/],
+      },
+      {
+        name: '「元に戻す」はこの設定画面を離れると使えない',
+        key: 'backupImportReplaceNote',
+        text: str(ja.settings.backupImportReplaceNote),
+        must: [new RegExp(esc(str(ja.settings.replaceUndoButton))), /画面/, /戻せません|使えなく/],
+      },
+      {
+        name: '「前回の場所に上書き」がどのファイルを書き換えるか分かる',
+        key: 'backupOverwriteNoteWithName',
+        text: str(ja.settings.backupOverwriteNoteWithName),
+        must: [/\{name\}/, /上書き/],
+      },
+      {
+        name: '機種変更: 記録の写真はチェックをONにしてから書き出す',
+        key: 'moveGuideStep1Note',
+        text: str(ja.settings.moveGuideStep1Note),
+        must: [/写真/, /ON/],
+      },
+      {
+        name: '機種変更: 新しい端末の中身が上書きで消える／手放すのは確かめてから',
+        key: 'moveGuideNotes',
+        text: lines(ja.settings.moveGuideNotes).join('\n'),
+        must: [/上書き/, /消え/, /初期化|下取り/, /確かめて/],
+      },
+      {
+        name: 'ブラウザの設定でサイトデータを消すと全部消える（戻せるのはバックアップだけ）',
+        key: 'refreshAppCacheClearWarnings',
+        text: lines(ja.settings.refreshAppCacheClearWarnings).join('\n'),
+        must: [/Cookie/, /消え/, /バックアップ/],
+      },
+      {
+        name: '書き出しただけでは端末の記録は減らない（消すのは別のボタン）',
+        key: 'archiveDeleteNote',
+        text: `${lines(ja.settings.archiveSteps).join('\n')}\n${str(ja.settings.archiveDeleteNote)}`,
+        must: [new RegExp(esc(str(ja.settings.archiveDeleteButton))), /確かめて/],
+      },
+      {
+        name: '端末から消した記録は、そのあとのバックアップに入らない',
+        key: 'archiveBackupNote',
+        // 見出しの語と本文で1つの話（見出しに「バックアップ」、本文に「入りません」）
+        text: `${str(ja.settings.archiveBackupLabel)}\n${str(ja.settings.archiveBackupNote)}`,
+        must: [/バックアップ/, /入りません/, /控え/],
+      },
+      {
+        name: 'ファイル名の「.json」を消すと読み込むときに選べない',
+        key: 'fileNameFreeNote',
+        text: str(ja.settings.fileNameFreeNote),
+        must: [/\.json/, /選べ/],
+      },
+    ]
+    eq('IJ-3 見張りが対象を拾えている（事故になる事実の一覧が空でない）', HAZARDS.length >= 10, true)
+    eq(
+      'IJ-3 事故になる事実の文言が、どれも空になっていない',
+      HAZARDS.filter((h) => len(h.text) === 0).map((h) => h.name),
+      [],
+    )
+    eq(
+      'IJ-3 事故になる事実が、アプリの中から1つも消えていない',
+      HAZARDS.flatMap((h) =>
+        h.must.filter((re) => !re.test(h.text)).map((re) => `${h.name} ← ${re}`),
+      ),
+      [],
+    )
+    eq(
+      'IJ-3 事故になる事実の文言が、設定の画面から参照されている（説明ページへ送っただけにしない）',
+      HAZARDS.filter((h) => !screenSrc.includes(h.key)).map((h) => h.name),
+      [],
+    )
+
+    // (c) 説明ページとアプリの食い違い: 書いてあるファイル名の頭が、実際に書き出す名前と合うこと。
+    // 2026-08-20 便IH・④でアーカイブの名前を records → archive に変えたとき、使い方ページだけが
+    // 古い名前のまま残っていた（アプリと説明ページで別の名前を案内していた）。
+    // 個別の文字列を書き写さず、**「uchi-recipe-◯◯-」の形を掃いて実際の名前と突き合わせる**。
+    {
+      const realNames = [
+        backupFileName(new Date(2026, 7, 2)),
+        selectedRecipesFileName(new Date(2026, 7, 2)),
+        archiveFileName(new Date(2026, 7, 2)),
+      ]
+      // 見るのは**利用者の目に触れる文字**だけ。作りのコメント（「records から archive に変えた」
+      // のような経緯のメモ）は画面に出ないので落とす
+      const noComments = (src) =>
+        src
+          .replace(/\/\*[\s\S]*?\*\//g, ' ')
+          .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+          .replace(/<!--[\s\S]*?-->/g, ' ')
+      const targets = [
+        { rel: 'src/i18n/ja.ts', text: noComments(readFileSync(path.join(appRoot, 'src/i18n/ja.ts'), 'utf-8')) },
+      ]
+      const aboutDir = path.join(appRoot, 'public/about')
+      for (const name of readdirSync(aboutDir).filter((f) => f.endsWith('.html')).sort()) {
+        targets.push({
+          rel: `public/about/${name}`,
+          text: noComments(readFileSync(path.join(aboutDir, name), 'utf-8')),
+        })
+      }
+      const found = []
+      const wrong = []
+      for (const { rel, text } of targets) {
+        for (const m of text.matchAll(/uchi-recipe-[a-z]+-/g)) {
+          found.push(`${rel} ${m[0]}`)
+          if (!realNames.some((n) => n.startsWith(m[0]))) wrong.push(`${rel} 「${m[0]}」`)
+        }
+      }
+      eq('IJ-3 見張りが当たっている（ファイル名の頭を1つ以上拾えている）', found.length > 0, true)
+      eq(
+        'IJ-3 説明ページとアプリが同じファイル名を案内している',
+        wrong,
+        [],
+      )
+    }
   }
 }
 

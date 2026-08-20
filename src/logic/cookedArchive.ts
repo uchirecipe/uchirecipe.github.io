@@ -272,10 +272,16 @@ export function buildArchiveDeleteConfirm(exported: {
         ).replace('{date}', formatArchiveDate(exported.cutoff)),
       },
     ],
-    notes:
-      exported.detachedLogs > 0
+    notes: [
+      // 消したあとに残る「読む手段」の制限（2026-08-20 便IJ・①。オーナー原文
+      // 「アーカイブが一覧のみになるのは注意書きはありますか？写真の拡大もできないし、
+      // 情報が削れるなら先に知りたい。」）。押す前の画面にも同じことを書いてあるが、
+      // **端末側の記録が無くなる最後の関門**でもう一度出す
+      t.archiveDeleteConfirmViewNote,
+      ...(exported.detachedLogs > 0
         ? [t.archiveDeleteConfirmDetachedNote.replace('{d}', String(exported.detachedLogs))]
-        : [],
+        : []),
+    ],
     confirmLabel: t.archiveDeleteConfirmOk,
   }
 }

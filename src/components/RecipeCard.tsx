@@ -379,6 +379,42 @@ export default function RecipeCard({
     </span>
   )
 
+  /**
+   * NG食材の印（2026-08-20 便IJ・②）。
+   *
+   * オーナー原文:
+   *   「レシピから追加のNG食材について、マークだけあっても意味がわからない。
+   *     NG食材あり、など超短く説明欲しい。」
+   *
+   * 直す前は三角の印だけで、`ja.card.ngBadge`（NG食材を含む）は読み上げ用の名前にしか
+   * 使っておらず、**画面には1文字も出ていなかった**。印の隣に短い言葉（ngBadgeShort）を出す。
+   *
+   * 出す・出さないは密度で分ける（実測は scripts/e2e-smoke.mjs の NGWORD-01）:
+   *  ・「大」「標準」… 印＋言葉。どちらも1行ぶんの横幅に余裕がある
+   *  ・「小」………… 印だけ。週の枠・月の日の窓は料理名がすでに詰めて出ている行で、
+   *                  言葉を足すと**料理名のほうが削れる**（判断の材料が減る）。
+   *                  読み上げと指を置いたときの吹き出しでは「小」でも同じ説明が出る
+   *
+   * 掴み方を並びに依らせないため、どの密度でも同じ目印（data-testid="ng-badge"）を付ける。
+   * `role="img"` を付けるのは、文字を持たない「小」でも aria-label が確実に名前になるようにするため。
+   */
+  const ngBadge = (opts: { withWord: boolean; iconSize: number; cls: string }) => (
+    <span
+      data-testid="ng-badge"
+      role="img"
+      title={ja.card.ngBadge}
+      aria-label={ja.card.ngBadge}
+      className={opts.cls}
+    >
+      <TriangleAlert size={opts.iconSize} aria-hidden />
+      {opts.withWord && (
+        <span data-testid="ng-badge-word" className="whitespace-nowrap">
+          {ja.card.ngBadgeShort}
+        </span>
+      )}
+    </span>
+  )
+
   /** 調理時間・手間・季節の1行（「大」「標準」の既定の補助情報）。1つずつ場所の表を通す */
   const defaultInfoRow = (
     <>
@@ -459,15 +495,12 @@ export default function RecipeCard({
         {meta && (
           <span className="shrink-0 self-center pr-1 text-xs text-ink-muted">{meta}</span>
         )}
-        {hasNg && (
-          <span
-            title={ja.card.ngBadge}
-            aria-label={ja.card.ngBadge}
-            className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-app"
-          >
-            <TriangleAlert size={10} aria-hidden />
-          </span>
-        )}
+        {hasNg &&
+          ngBadge({
+            withWord: false,
+            iconSize: 10,
+            cls: 'absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-app',
+          })}
       </>,
       testId ? { 'data-testid': testId } : undefined,
     )
@@ -512,15 +545,12 @@ export default function RecipeCard({
                 <>
                   <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-muted">
                     {defaultInfoRow}
-                    {hasNg && (
-                      <span
-                        title={ja.card.ngBadge}
-                        aria-label={ja.card.ngBadge}
-                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-warning text-app"
-                      >
-                        <TriangleAlert size={12} aria-hidden />
-                      </span>
-                    )}
+                    {hasNg &&
+                      ngBadge({
+                        withWord: true,
+                        iconSize: 12,
+                        cls: 'inline-flex h-5 shrink-0 items-center gap-0.5 rounded-full bg-warning px-1.5 font-bold text-app',
+                      })}
                     {inTodayList && (
                       <span
                         title={ja.card.todayBadge}
@@ -666,15 +696,12 @@ export default function RecipeCard({
               {nutrientBadgeText}
             </span>
           )}
-          {hasNg && (
-            <span
-              title={ja.card.ngBadge}
-              aria-label={ja.card.ngBadge}
-              className="flex h-7 w-7 items-center justify-center rounded-full bg-warning text-app shadow-sm"
-            >
-              <TriangleAlert size={16} aria-hidden />
-            </span>
-          )}
+          {hasNg &&
+            ngBadge({
+              withWord: true,
+              iconSize: 14,
+              cls: 'flex h-7 max-w-full items-center gap-1 rounded-full bg-warning px-2 text-[10px] font-bold text-app shadow-sm',
+            })}
         </div>
       )}
       {inTodayList && (
