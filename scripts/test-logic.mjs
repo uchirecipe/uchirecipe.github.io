@@ -236,6 +236,7 @@ import {
 } from '../src/logic/ingredientSpans.ts'
 import { stepMinutesFromText, importedStepMinutes } from '../src/logic/importStepMinutes.ts'
 import {
+  parseBackup,
   resolveDuplicateTitleAction,
   buildUpdatedSetRecipe,
   exclusionRecordFor,
@@ -8483,7 +8484,7 @@ eq(
     'uchi-recipe-backup-2026-01-09.json',
   )
   // 選択したレシピの書き出し(2026-08-09 便EM)。中身の範囲が違うファイルなので、
-  // 全体のバックアップ・古い記録と名前で見分けられること
+  // 全体のバックアップ・アーカイブと名前で見分けられること
   eq(
     'selectedRecipesFileName: バックアップと見分けの付く名前になる',
     selectedRecipesFileName(new Date(2026, 6, 5)),
@@ -13954,7 +13955,9 @@ eq(
     archReason(JSON.stringify({ app: 'other', logs: [] })),
     'invalid',
   )
-  eq('ARCH ファイル名にバックアップと同じ名前を使わない', archiveFileName(new Date(2026, 7, 2)), 'uchi-recipe-records-2026-08-02.json')
+  // 2026-08-20 便IH・④: 名前を uchi-recipe-records- から uchi-recipe-archive- に変えた。
+  // 名前そのものの決まりごとは下の IH-4 でまとめて見る
+  eq('ARCH ファイル名にバックアップと同じ名前を使わない', archiveFileName(new Date(2026, 7, 2)), 'uchi-recipe-archive-2026-08-02.json')
   eq('ARCH 日付の表示', formatArchiveDate('2026-07-02'), '2026年7月2日')
 }
 
@@ -22677,6 +22680,29 @@ Aみりん 大さじ1
       [],
     )
 
+    // --- IH-5: アプリの中でしか通じない造語を、画面の言葉に使わない ---
+    // 2026-08-20 便IH・① オーナー「当たった先の表記：『当たった先』『当たり先』→違う言葉ない？
+    // 一般的にこういうアプリではどう言っているの？」
+    //
+    // 「当たった先」「当たり先」は司令部と便が作った造語で、他のアプリでは使われていない。
+    // 検索の結果がなぜ出たのかを言うときの一般的な語は「一致」。
+    // （「ハイライト」＝文字に色を付けるやり方はいちばん多いが、手順の調理器具・材料の分類のように
+    // **画面に出ていない場所**での一致を指せないので、このアプリでは使えない）
+    //
+    // 表に1行足すだけで次の造語も掃ける形にしてある。理由なしで足さないこと
+    const COINED_WORDS = [
+      {
+        bad: /当たった先|当たり先/g,
+        good: '「一致した場所」（検索の結果がなぜ出たのかを言う一般的な語。2026-08-20 便IH・①）',
+      },
+    ]
+    const coined = []
+    for (const { rel, sentence } of uiSentences)
+      for (const rule of COINED_WORDS)
+        for (const m of sentence.matchAll(rule.bad))
+          coined.push(`${rel} 「${m[0]}」→ ${rule.good}（${sentence}）`)
+    eq('IH-5 アプリの中でしか通じない造語が、画面の言葉に1つも無い', coined, [])
+
     // --- IH-2: 絞り込みの話と同じ文の「タグ」は、レシピに付いている印だと分かる書き方 ---
     const filterSentences = uiSentences.filter((x) => x.sentence.includes('絞り込'))
     eq('IH-2 絞り込みの話をしている文を拾えている（0件なら見張りが壊れている）', filterSentences.length > 0, true)
@@ -22696,24 +22722,24 @@ Aみりん 大さじ1
 // オーナー原文:
 //   「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ６件ありましたが、
 //     レシピのタグやキーワードに入っているわけではなさそうでした。」
-//   （見せ方の訂正1）「各レシピカードに表示ではなく、検索バーの下に、当たったワードを
+//   （見せ方の訂正1）「各レシピカードに表示ではなく、検索バーの下に、一致した言葉を
 //     多い順に羅列するイメージでした」
 //   （見せ方の訂正2）「そんなに長くなるなら、羅列部分は、レシピ手順のワード説明と同じように、
 //     窓出して表示したらいいのでは？それでも上限は必須。」
 //
 // 検索の索引（logic/kana.ts の buildSearchWords）はひらがなの語の集まりに均してあり、
-// 「どこから来た語か」は消えている。窓に出す当たり先は logic/search.ts が同じ規則を
-// もう一度たどって出しているので、**索引と当たり先がずれていないこと**をここで測る。
+// 「どこから来た語か」は消えている。窓に出す一致した場所は logic/search.ts が同じ規則を
+// もう一度たどって出しているので、**索引と一致した場所がずれていないこと**をここで測る。
 //
 // 測るのは利用者が確かめたいこと:
 //   ・検索していないときは入口も窓も出ない
-//   ・**画面に出る数字と、その当たり先で実際に出ている品数が一致する**（数を書き写さない）
-//   ・出た品が1品残らず、どれかの当たり先で説明できる
+//   ・**画面に出る数字と、その一致した場所で実際に出ている品数が一致する**（数を書き写さない）
+//   ・出た品が1品残らず、どれかの一致した場所で説明できる
 //   ・並びは品数の多い順（オーナー指定）
 //   ・**上限を超えたら「ほか◯件」で数を出す**（黙って切らない。オーナー「上限は必須」）
-//   ・レシピカードには当たり先を出さない（訂正1で取り下げた形に戻っている）
+//   ・レシピカードには一致した場所を出さない（訂正1で取り下げた形に戻っている）
 //
-// 読み取りに失敗したら必ず落ちる形にしてある（測れた当たり先が0件・当たり先の種類を
+// 読み取りに失敗したら必ず落ちる形にしてある（測れた一致した場所が0件・一致した場所の種類を
 // 1つでも測れていなければその場で不合格）。
 // ==========================================================================================
 {
@@ -22738,7 +22764,7 @@ Aみりん 大さじ1
   })
 
   // 同梱の基本レシピ（109品）＝オーナーが実機で見ている中身そのものを土台にする。
-  // 同梱品は「検索キーワード」欄も「作った記録」も持たないので、その2つの当たり先を
+  // 同梱品は「検索キーワード」欄も「作った記録」も持たないので、その2つの一致した場所を
   // 測るための品を足す（足さないと、その2つを一度も測らないまま合格になる）
   const ihRecipes = [
     ...starterDefs.map((def, i) => ihWithWords(ihRecipe({ ...def, id: i + 1 }))),
@@ -22769,7 +22795,7 @@ Aみりん 大さじ1
 
   // ---- 検索していないときは入口も窓も出ない ------------------------------------------------
   eq(
-    'IH-3 検索していないときは当たり先が1つも出ない',
+    'IH-3 検索していないときは一致した場所が1つも出ない',
     searchMatchSummary(ihRecipes, splitTerms(''), 99),
     { rows: [], hiddenCount: 0, total: 0 },
   )
@@ -22793,7 +22819,7 @@ Aみりん 大さじ1
     toHiragana(recipe.title).includes(term) ||
     toTagKey(recipe.title).includes(term) ||
     titleKanaKey(recipe.title).includes(term)
-  /** その当たり先が、そのレシピに本当にあるか（欄ごとに元の場所を見に行く） */
+  /** その一致した場所が、そのレシピに本当にあるか（欄ごとに元の場所を見に行く） */
   const ihReasonIsReal = (recipe, reason, terms) => {
     if (reason.field === 'title') return terms.some((t) => ihTitleHit(recipe, t))
     if (reason.field === 'tag') return recipe.tags.some((t) => t.trim() === reason.word)
@@ -22831,7 +22857,7 @@ Aみりん 大さじ1
     for (const row of summary.rows) {
       ihWords++
       ihFieldsSeen.add(row.field)
-      // ③ 画面の数字は書き写さず、**その当たり先に当たる品を数え直して**突き合わせる
+      // ③ 画面の数字は書き写さず、**その一致した場所に当たる品を数え直して**突き合わせる
       const actual = hits.filter((recipe) =>
         searchMatchReasons(recipe, terms).some(
           (reason) => reason.field === row.field && reason.word === row.word,
@@ -22841,59 +22867,59 @@ Aみりん 大さじ1
         ihCountMismatch.push(
           `「${q}」 ${row.field}「${row.word ?? ''}」 画面=${row.count} 実際=${actual.length}`,
         )
-      // ④ その当たり先が、数えた品に本当にあるか
+      // ④ その一致した場所が、数えた品に本当にあるか
       for (const recipe of actual)
         if (!ihReasonIsReal(recipe, row, terms))
           ihUnreal.push(`「${q}」→${recipe.title}: ${row.field}「${row.word ?? ''}」`)
     }
-    // ⑤ 出た品は1品残らず、どれかの当たり先で説明できる
+    // ⑤ 出た品は1品残らず、どれかの一致した場所で説明できる
     for (const recipe of hits)
       if (searchMatchReasons(recipe, terms).length === 0) ihUnexplained.push(`「${q}」→${recipe.title}`)
   }
-  eq('IH-3 測れた当たり先が1つ以上ある（0件なら見張りが壊れている）', ihWords > 0, true)
+  eq('IH-3 測れた一致した場所が1つ以上ある（0件なら見張りが壊れている）', ihWords > 0, true)
   eq(
-    'IH-3 当たり先の種類をすべて一度は測れている（測り漏れが無い）',
+    'IH-3 一致した場所の種類をすべて一度は測れている（測り漏れが無い）',
     ['title', 'tag', 'ingredient', 'keyword', 'appliance', 'dishType', 'cookedNote'].filter(
       (f) => !ihFieldsSeen.has(f),
     ),
     [],
   )
-  eq('IH-3 画面の数字と、その当たり先で実際に出ている品数が一致する', ihCountMismatch, [])
-  eq('IH-3 出した当たり先は、その品に本当にある', ihUnreal, [])
-  eq('IH-3 出たのに、どの当たり先でも説明できない品が1つも無い', ihUnexplained, [])
+  eq('IH-3 画面の数字と、その一致した場所で実際に出ている品数が一致する', ihCountMismatch, [])
+  eq('IH-3 出した一致した場所は、その品に本当にある', ihUnreal, [])
+  eq('IH-3 出たのに、どの一致した場所でも説明できない品が1つも無い', ihUnexplained, [])
   eq('IH-3 並びが品数の多い順になっている（オーナー指定）', ihOutOfOrder, [])
-  eq('IH-3 並べた数と隠した数を足すと、当たり先の総数になる', ihTotalWrong, [])
+  eq('IH-3 並べた数と隠した数を足すと、一致した場所の総数になる', ihTotalWrong, [])
 
   // ---- 料理名で当たったぶんは1つにまとめて数える（1品ずつ並べて窓を埋めない） ---------------
   {
     const rows = ihSummary('豆腐').rows
     const titleRows = rows.filter((r) => r.field === 'title')
-    eq('IH-3 料理名の当たり先は1つにまとまっている（品ごとに増えない）', titleRows.length, 1)
+    eq('IH-3 料理名の一致した場所は1つにまとまっている（品ごとに増えない）', titleRows.length, 1)
     eq(
       'IH-3 料理名の数字は、料理名にその言葉がある品数と一致する',
       titleRows[0]?.count,
       ihFind('豆腐').filter((r) => splitTerms('豆腐').some((t) => ihTitleHit(r, t))).length,
     )
     eq(
-      'IH-3 料理名の当たり先には言葉を添えない（品ごとに違う文なので並べない）',
+      'IH-3 料理名の一致した場所には言葉を添えない（品ごとに違う文なので並べない）',
       titleRows[0]?.word,
       undefined,
     )
   }
 
   // ---- オーナーが実機で見た「魚」（2026-08-20 便IH・②の発端） ------------------------------
-  // 品数は決め打ちしない（レシピが増減しても当たる）。**当たり先の顔ぶれ**だけを見る
+  // 品数は決め打ちしない（レシピが増減しても当たる）。**一致した場所の顔ぶれ**だけを見る
   {
     const summary = ihSummary('魚')
     const fields = summary.rows.map((r) => r.field)
-    eq('IH-3 「魚」で当たり先が1つ以上出る（0件なら見張りが壊れている）', summary.rows.length > 0, true)
+    eq('IH-3 「魚」で一致した場所が1つ以上出る（0件なら見張りが壊れている）', summary.rows.length > 0, true)
     eq('IH-3 「魚」はレシピに付いているタグでも当たる', fields.includes('tag'), true)
     eq('IH-3 「魚」は手順に出てくる調理器具でも当たる', fields.includes('appliance'), true)
   }
 
   // ---- 上限を超えたら「ほか◯件」で数を出す（オーナー「上限は必須」・黙って切らない） --------
   {
-    // 当たり先がいちばん多く出る語を、画面と同じやり方でその場で探す（語を決め打ちしない）
+    // 一致した場所がいちばん多く出る語を、画面と同じやり方でその場で探す（語を決め打ちしない）
     let widest = null
     for (const q of ihVocab) {
       const all = ihSummary(q, 999)
@@ -22903,8 +22929,8 @@ Aみりん 大さじ1
     const limit = 2
     const cut = ihSummary(widest.q, limit)
     eq('IH-3 上限までしか並べない', cut.rows.length, limit)
-    eq('IH-3 隠した当たり先の件数を必ず返す（黙って切らない）', cut.hiddenCount, widest.all.total - limit)
-    eq('IH-3 並べたぶんと隠したぶんを足すと当たり先の総数になる', cut.rows.length + cut.hiddenCount, cut.total)
+    eq('IH-3 隠した一致した場所の件数を必ず返す（黙って切らない）', cut.hiddenCount, widest.all.total - limit)
+    eq('IH-3 並べたぶんと隠したぶんを足すと一致した場所の総数になる', cut.rows.length + cut.hiddenCount, cut.total)
     eq('IH-3 隠したぶんは、いちばん品数の少ない側から落ちる', cut.rows[0].count >= widest.all.rows[widest.all.rows.length - 1].count, true)
     eq('IH-3 全部入るときは「ほか」を出さない', ihSummary(widest.q, 999).hiddenCount, 0)
   }
@@ -22916,8 +22942,8 @@ Aみりん 大さじ1
     eq(
       'IH-3 タグで当たった行の文字',
       searchMatchRowText(fish),
-      ja.search.matchWord
-        .replace('{field}', ja.search.matchWordTag)
+      ja.search.matchRow
+        .replace('{field}', ja.search.matchFieldTag)
         .replace('{word}', '魚')
         .replace('{n}', String(fish?.count)),
     )
@@ -22925,30 +22951,30 @@ Aみりん 大さじ1
     eq(
       'IH-3 料理名の行は言葉を添えず「料理名 品数」だけ',
       searchMatchRowText(titleRow),
-      ja.search.matchWordWithoutWord
-        .replace('{field}', ja.search.matchWordTitle)
+      ja.search.matchRowWithoutWord
+        .replace('{field}', ja.search.matchFieldTitle)
         .replace('{n}', String(titleRow?.count)),
     )
     const noteRow = ihSummary('こども').rows.find((r) => r.field === 'cookedNote')
     eq(
       'IH-3 作った記録のメモの行は、メモの本文を出さずに出どころだけ言う',
       searchMatchRowText(noteRow),
-      ja.search.matchWordWithoutWord
-        .replace('{field}', ja.search.matchWordCookedNote)
+      ja.search.matchRowWithoutWord
+        .replace('{field}', ja.search.matchFieldCookedNote)
         .replace('{n}', String(noteRow?.count)),
     )
     const kwRow = ihSummary('おつまみ').rows.find((r) => r.field === 'keyword')
     eq(
       'IH-3 レシピの「検索キーワード」欄で当たった行は、その欄の名前で説明する',
       searchMatchRowText(kwRow),
-      ja.search.matchWord
-        .replace('{field}', ja.search.matchWordKeyword)
+      ja.search.matchRow
+        .replace('{field}', ja.search.matchFieldKeyword)
         .replace('{word}', 'おつまみ')
         .replace('{n}', String(kwRow?.count)),
     )
   }
 
-  // ---- カードには当たり先を出さない（オーナー訂正1で取り下げた形に戻っている） --------------
+  // ---- カードには一致した場所を出さない（オーナー訂正1で取り下げた形に戻っている） --------------
   // 共通のカード部品が「その項目を出す口」を持っていないことを、部品のソースそのもので見る
   {
     const cardSrc = readFileSync(
@@ -22957,13 +22983,107 @@ Aみりん 大さじ1
     )
     eq('IH-3 共通のカード部品を読めている（0字なら見張りが壊れている）', cardSrc.length > 0, true)
     eq(
-      'IH-3 レシピカードは当たり先を出す口を持っていない（検索まどの下の入口と窓に一本化）',
+      'IH-3 レシピカードは一致した場所を出す口を持っていない（検索まどの下の入口と窓に一本化）',
       cardSrc.includes('matchReason') || cardSrc.includes('card-match-reason'),
       false,
     )
     eq(
-      'IH-3 カードの項目の表にも当たり先が残っていない',
+      'IH-3 カードの項目の表にも一致した場所が残っていない',
       CARD_PART_KEYS.filter((key) => key.toLowerCase().includes('match')),
+      [],
+    )
+  }
+}
+
+// ==========================================================================================
+// 便IH-4: 書き出すファイルの名前（2026-08-20・④ オーナー承認済み）
+//
+// オーナー原文: 「バックアップ名変更については注記いれたほうがいいですね。」
+// 決めごと（司令部裁定）:
+//   ・日本語のファイル名にはしない（PCによっては文字化け・並べ替えの不都合が出る）＝英語のまま
+//   ・アーカイブは `uchi-recipe-records-` → `uchi-recipe-archive-`
+//     （アプリの中では「アーカイブファイル」と呼んでいるのに、名前だけ records で
+//     同じものだと分からなかった）
+//   ・**名前は自由に変えてよいが `.json` は残す**ことを画面に書く
+//
+// 測るのは利用者が確かめたいこと:
+//   ・3つのファイルが名前で見分けられる／どれも `.json` で終わる
+//   ・**名前を変えても、前の名前で書き出したファイルでも読める**
+//     （読み込みが受け取るのは中身の文字列だけで、ファイル名を一切見ていないこと）
+//   ・その注記が画面の文言として実在し、`.json` を名指ししている
+// ==========================================================================================
+{
+  const ihDate = new Date(2026, 7, 2)
+  const ihNames = {
+    バックアップ: backupFileName(ihDate),
+    選んだレシピ: selectedRecipesFileName(ihDate),
+    アーカイブ: archiveFileName(ihDate),
+  }
+  eq('IH-4 アーカイブの名前はアプリの中の呼び名（アーカイブ）に合わせる', ihNames.アーカイブ, 'uchi-recipe-archive-2026-08-02.json')
+  eq(
+    'IH-4 3つのファイルは名前で見分けられる（同じ名前が1つも無い）',
+    new Set(Object.values(ihNames)).size,
+    Object.keys(ihNames).length,
+  )
+  eq(
+    'IH-4 どのファイルも拡張子は .json',
+    Object.entries(ihNames).filter(([, name]) => !name.endsWith('.json')),
+    [],
+  )
+  eq(
+    'IH-4 ファイル名に日本語を使わない（PCで不都合が出ることがある）',
+    Object.entries(ihNames).filter(([, name]) => !/^[\x20-\x7e]+$/.test(name)),
+    [],
+  )
+
+  // ---- 名前を変えても読めること -------------------------------------------------------------
+  // 読み込みが**ファイル名を受け取っていない**ことを、口の形そのもので見る
+  // （引数が1つ＝中身の文字列だけ。名前で分岐する余地が無い）
+  eq('IH-4 アーカイブの読み込みは中身だけを受け取る（ファイル名を見ない）', parseArchiveFile.length, 1)
+  eq('IH-4 バックアップの読み込みは中身だけを受け取る（ファイル名を見ない）', parseBackup.length, 1)
+  // 実際に、いまの名前で書き出したものと、前の名前で書き出したものの**中身**が同じように読めること
+  {
+    const file = buildArchiveFile(
+      [{ id: 'ih-4-1', recipeTitle: 'テスト煮', date: '2026-01-02', servings: 2 }],
+      '2026-01-03T00:00:00.000Z',
+    )
+    const json = JSON.stringify(file)
+    eq(
+      'IH-4 いまの名前で書き出したアーカイブが読める',
+      parseArchiveFile(json).logs.map((log) => log.recipeTitle),
+      ['テスト煮'],
+    )
+    // ファイル名は読み込みの入力に無いので、**名前を変えても同じ中身なら同じ結果になる**。
+    // 名前をいくつ変えても読めた記録が変わらないことを、名前の顔ぶれごと並べて見る
+    eq(
+      'IH-4 名前を付け替えても（前の名前・自分で付けた名前でも）中身が同じなら同じように読める',
+      [
+        'uchi-recipe-archive-2026-01-03.json',
+        'uchi-recipe-records-2026-01-03.json',
+        'わたしの記録.json',
+        'backup',
+      ].map((name) => `${name}: ${parseArchiveFile(json).logs.length}件`),
+      [
+        'uchi-recipe-archive-2026-01-03.json: 1件',
+        'uchi-recipe-records-2026-01-03.json: 1件',
+        'わたしの記録.json: 1件',
+        'backup: 1件',
+      ],
+    )
+  }
+
+  // ---- 注記が画面にあること -----------------------------------------------------------------
+  {
+    const note = ja.settings.fileNameFreeNote
+    eq('IH-4 ファイル名の注記が文言として実在する', typeof note === 'string' && note.length > 0, true)
+    eq('IH-4 注記が「.json」を名指ししている（拡張子だけは残す、と読める）', note.includes('.json'), true)
+    // 画面で言うファイル名の頭と、実際に書き出す名前の頭がそろっていること
+    // （文言に書き写した文字列が古くなるのを防ぐ。名前を変えたらこの見張りが落ちる）
+    const prefixes = ja.settings.archiveVsBackupNote.match(/uchi-recipe-[a-z]+-/g) ?? []
+    eq('IH-4 説明文からファイル名の頭を拾えている（0件なら見張りが壊れている）', prefixes.length > 0, true)
+    eq(
+      'IH-4 説明文が書いているファイル名の頭が、実際に書き出す名前と一致する',
+      prefixes.filter((prefix) => !Object.values(ihNames).some((name) => name.startsWith(prefix))),
       [],
     )
   }

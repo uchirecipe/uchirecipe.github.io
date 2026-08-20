@@ -157,9 +157,9 @@ const dishTypeOptions: { value: DishTypeFilter; label: string }[] = DISH_TYPE_OP
 const TAG_CHIP_LIMIT = 6
 
 /**
- * 検索まどの下に並べる「当たった先」の上限（2026-08-20 便IH・②）。
+ * 検索まどの下に並べる「一致した場所」の上限（2026-08-20 便IH・②）。
  *
- * 同梱109品・語彙376語で実測したところ、当たり先が1種類で済む言葉が242語、3種類までで289語。
+ * 同梱109品・語彙376語で実測したところ、一致した場所が1種類で済む言葉が242語、3種類までで289語。
  * 6を超えたのは「きのこ」（7種）と、1文字だけ打ったとき（「ん」23種・「い」19種）の3語だけだった。
  * 数はキーワードのチップと同じ6にそろえる＝同じ画面に出る「多い順の並び」が、
  * 場所によって違う長さにならない。**入りきらなかった数は必ず「ほか◯件」で出す**（黙って切らない）
@@ -847,17 +847,17 @@ export default function RecipesPage() {
    * 検索まどに打った言葉（2026-08-20 便IH・②）。
    *
    * 見るのは**検索まどに打った言葉だけ**。絞り込みのチップ（キーワード・料理の種別など）は
-   * 押した本人がその言葉を選んでいるので、当たり先を出す必要が無い。
-   * 打っていなければ空になり、当たり先の一覧そのものが出ない。
+   * 押した本人がその言葉を選んでいるので、一致した場所を出す必要が無い。
+   * 打っていなければ空になり、一致した場所の一覧そのものが出ない。
    */
   const queryTerms = useMemo(() => splitTerms(query), [query])
 
-  /** 当たった先の窓を開いているか（2026-08-20 便IH・②） */
+  /** 一致した場所の窓を開いているか（2026-08-20 便IH・②） */
   const [matchDialogOpen, setMatchDialogOpen] = useState(false)
 
   /**
    * 検索まどの下に出す「当たった言葉の一覧」（2026-08-20 便IH・② オーナー訂正
-   * 「各レシピカードに表示ではなく、検索バーの下に、当たったワードを多い順に羅列するイメージ」）。
+   * 「各レシピカードに表示ではなく、検索バーの下に、一致した言葉を多い順に羅列するイメージ」）。
    *
    * 数える相手は**いま一覧に出ている品そのもの**（results）なので、画面の数字と
    * 実際に並んでいる品数が食い違わない。検索まどが空なら空の一覧になり、欄ごと出ない。
@@ -867,10 +867,10 @@ export default function RecipesPage() {
     () => searchMatchSummary(results?.map((r) => r.recipe) ?? [], queryTerms, MATCH_WORD_LIMIT),
     [results, queryTerms],
   )
-  const matchDialogTitle = ja.search.matchSummaryTitle.replace('{q}', query.trim())
+  const matchDialogTitle = ja.search.matchDialogTitle.replace('{q}', query.trim())
   // 窓を開いているあいだ、後ろの一覧は動かさない（他の窓と同じ作法。components/useScrollLock.ts）
   useScrollLock(matchDialogOpen)
-  // 打ち直して当たり先が変わったら窓は閉じる（開いたときと違う中身に黙って入れ替わらない）
+  // 打ち直して一致した場所が変わったら窓は閉じる（開いたときと違う中身に黙って入れ替わらない）
   useEffect(() => {
     if (matchSummary.rows.length === 0) setMatchDialogOpen(false)
   }, [matchSummary])
@@ -2022,68 +2022,57 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 打った言葉が「どこに当たったか」の入口(2026-08-20 便IH・② オーナー原文
-          「そんなに長くなるなら、羅列部分は、レシピ手順のワード説明と同じように、
-          窓出して表示したらいいのでは？それでも上限は必須。」)。
+      {/* 検索まどの下の2つ(2026-08-20 便IH)。**同じ行に並べる**。
 
-          解いている問題(オーナー実機): 「『魚』と入れたところ６件ありましたが、レシピのタグや
-          キーワードに入っているわけではなさそうでした」——検索は料理名・材料・タグ・検索キーワード・
-          手順に出てくる調理器具・料理の種別・材料の分類の7か所から引くので、
-          出てきた品がなぜここにあるのかが読めなかった。
+          ・「{q}」をキーワードに登録 … いまの検索を絞り込みのキーワードとして残す(便HZ・②)
+          ・一致した場所 … 打った言葉がレシピのどこに一致したかを窓で見る(便IH・②)
 
-          検索まどの下に置くのは**1行だけ**にして、全部は窓の中で読む。
-          1行にはいちばん品数の多い当たり先を入れる＝同梱109品・語彙376語の実測で
-          当たり先が1つで済む言葉が242語あり、その大半は**押さなくても答えが分かる**。
-          当たり先の数が1つでも6つでも**同じ入口を出す**(同じ場所が言葉によって違う振る舞いをしない)。
+          オーナー原文(便IH・③): 「一列使わず、キーワード登録に並べられるくらい小さく。
+          気になった人が意識して探せばわかればOKなので」——一致した場所の入口は1行を丸ごと使わず、
+          登録ボタンの隣に置く小さな押しどころにする。
+          **見た目は小さくしても押す面は小さくしない**: .tap-target が当たり判定を44px四方に広げる。
 
-          レシピを選んでいる最中は出さない(選ぶ操作の隣に、窓を開く別の操作を並べない。
-          すぐ下の「絞り込みのキーワードに登録」と同じ扱い) */}
-      {!selecting && matchSummary.rows.length > 0 && (
-        <div className="mt-[var(--space-sm)]">
-          <button
-            type="button"
-            data-testid="search-match-open"
-            onClick={() => setMatchDialogOpen(true)}
-            className="tap-target flex w-full items-center justify-between gap-2 rounded-md border border-edge bg-surface px-3 py-2 text-left text-xs text-ink-muted shadow-sm"
-          >
-            <span className="min-w-0 truncate">
-              {ja.search.matchSummaryEntry.replace(
-                '{top}',
-                searchMatchRowText(matchSummary.rows[0]),
+          入口に数は入れない。すぐ上に出ている「◯品 / 全◯品」と読み違えられるため
+          （数は窓の中で読む）。
+          レシピを選んでいる最中はどちらも出さない(選ぶ操作の隣に別の操作を並べない) */}
+      {!selecting &&
+        ((pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0) ||
+          matchSummary.rows.length > 0) && (
+          <div className="mt-[var(--space-sm)]">
+            <div className="flex flex-wrap items-center gap-[var(--space-sm)]">
+              {/* 登録は検索語があって、結果が1品以上あって、まだ登録していないときだけ出す
+                  (1品も出ない検索や、同じ言葉の二重登録をキーワードに増やさない) */}
+              {pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  data-testid="saved-search-add"
+                  onClick={() => void registerSavedSearch()}
+                  disabled={tagBusy}
+                  className="tap-target inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-2.5 text-left text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
+                >
+                  <Tag size={16} className="shrink-0" aria-hidden />
+                  {ja.search.savedSearchAdd.replace('{q}', pendingSavedSearch)}
+                </button>
               )}
-              {/* 1つ目より後の当たり先の数。黙って伏せると、1行に出ている当たり先が
-                  全部だと読めてしまう */}
-              {matchSummary.total > 1 && (
-                <span className="ml-1">
-                  {ja.search.matchWordMore.replace('{n}', String(matchSummary.total - 1))}
-                </span>
+              {matchSummary.rows.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="search-match-open"
+                  onClick={() => setMatchDialogOpen(true)}
+                  className="tap-target inline-flex shrink-0 items-center gap-0.5 rounded-sm border border-edge bg-surface px-2 py-1 text-xs text-ink-muted shadow-sm"
+                >
+                  {ja.search.matchEntry}
+                  <ChevronRight size={14} className="shrink-0" aria-hidden />
+                </button>
               )}
-            </span>
-            <ChevronRight size={16} className="shrink-0" aria-hidden />
-          </button>
-        </div>
-      )}
-
-      {/* いまの検索を、絞り込みのキーワードとして登録する(2026-08-19 便HZ・② オーナー
-          「絞り込み機能の『タグ』に新しいタグを追加する、という意味でした。レシピ自体はいじりません」)。
-          出すのは検索語があって、結果が1品以上あって、まだ登録していないときだけ
-          (1品も出ない検索や、同じ言葉の二重登録をタグに増やさない)。
-          レシピを選んでいる最中は出さない(選ぶ操作の隣に別の操作を並べない) */}
-      {!selecting && pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
-        <div className="mt-[var(--space-sm)]">
-          <button
-            type="button"
-            data-testid="saved-search-add"
-            onClick={() => void registerSavedSearch()}
-            disabled={tagBusy}
-            className="tap-target inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-2.5 text-left text-sm font-bold text-accent-ink shadow-sm disabled:opacity-40"
-          >
-            <Tag size={16} className="shrink-0" aria-hidden />
-            {ja.search.savedSearchAdd.replace('{q}', pendingSavedSearch)}
-          </button>
-          <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchAddHint}</p>
-        </div>
-      )}
+            </div>
+            {/* 登録ボタンの行き先の説明(便IH・③でボタンから「絞り込みの」を落としたぶん、
+                この1行が行き先を言い切る)。登録ボタンが出ていないときは出さない */}
+            {pendingSavedSearch && !savedSearchRegistered && (results?.length ?? 0) > 0 && (
+              <p className="mt-1 text-xs text-ink-muted">{ja.search.savedSearchAddHint}</p>
+            )}
+          </div>
+        )}
 
       {/* 空の状態 */}
       {results && results.length === 0 && (
@@ -2232,7 +2221,7 @@ export default function RecipesPage() {
                 inTodayList={todayRecipeIds.has(recipe.id!)}
                 showQuickTime={quickOnly}
                 nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
-                // 検査用の目印（2026-08-20 便IH・②）。当たり先の一覧が検索まどの下にだけ出て、
+                // 検査用の目印（2026-08-20 便IH・②）。一致した場所の一覧が検索まどの下にだけ出て、
                 // カードには出ていないことを、画面から料理名を拾って確かめるために付ける
                 titleTestId="recipe-card-title"
               />
@@ -2357,7 +2346,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 当たった先の窓(2026-08-20 便IH・②)。
+      {/* 一致した場所の窓(2026-08-20 便IH・②)。
 
           オーナーの手本は「レシピ手順のワード説明」(components/TermPopover.tsx)だが、
           **同じ作りにはしない**。TermPopoverは①指した語の近くに出す②画面が送られたら自分から閉じる
@@ -2384,7 +2373,7 @@ export default function RecipesPage() {
           >
             <p className={DIALOG_TITLE_CLS}>{matchDialogTitle}</p>
             <p className="ja-phrase mt-[var(--space-sm)] text-sm text-ink-muted">
-              {ja.search.matchSummaryHint}
+              {ja.search.matchDialogHint}
             </p>
             <ul className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
               {matchSummary.rows.map((row) => (
@@ -2399,7 +2388,7 @@ export default function RecipesPage() {
             </ul>
             {matchSummary.hiddenCount > 0 && (
               <p data-testid="search-match-more" className="mt-[var(--space-sm)] text-sm text-ink-muted">
-                {ja.search.matchWordMore.replace('{n}', String(matchSummary.hiddenCount))}
+                {ja.search.matchMore.replace('{n}', String(matchSummary.hiddenCount))}
               </p>
             )}
             <div className={DIALOG_ACTIONS_CLS}>

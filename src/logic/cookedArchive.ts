@@ -324,10 +324,21 @@ export function buildArchiveFile(
   }
 }
 
-/** アーカイブファイルの既定ファイル名（書き出し日基準。バックアップと名前で見分けられるようにする） */
+/**
+ * アーカイブファイルの既定ファイル名（書き出し日基準。バックアップと名前で見分けられるようにする）。
+ *
+ * 2026-08-20 便IH・④（オーナー承認済み）で `uchi-recipe-records-` から `uchi-recipe-archive-` に
+ * 変えた。アプリの中ではこのファイルを「アーカイブファイル」と呼んでいるのに、名前だけ
+ * `records`（記録）で、同じものだと分からなかったため。ファイル名は日本語にしない
+ * （PCによっては文字化け・並べ替えの不都合が出るため）。
+ *
+ * **名前が変わっても、古い名前のファイルはそのまま読める**。読み込みは中身の種別マーク
+ * （kind: cooked-log-archive）だけを見ており、ファイル名は一切見ていない
+ * （parseArchiveFile が受け取るのは中身の文字列だけ）。利用者が自分で付け替えた名前でも同じ。
+ */
 export function archiveFileName(date: Date = new Date()): string {
   const stamp = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-  return `uchi-recipe-records-${stamp}.json`
+  return `uchi-recipe-archive-${stamp}.json`
 }
 
 /**

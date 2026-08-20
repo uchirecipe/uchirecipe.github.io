@@ -15736,13 +15736,24 @@ try {
         arPage.waitForEvent('filechooser'),
         arPage.getByRole('button', { name: 'アーカイブを見る' }).click(),
       ])
+      // 2026-08-20 便IH・④: **自分で付け替えた名前**のファイルを選ぶ。
+      // 読み込みは中身の種別マークだけを見ていて名前は見ていない、を画面で確かめる
+      // （書き出しの名前は uchi-recipe-archive- だが、利用者が変えても読めなければならない）
       await arViewChooser.setFiles({
-        name: 'uchi-recipe-records.json',
+        name: 'わたしの記録.json',
         mimeType: 'application/json',
         buffer: Buffer.from(arJson, 'utf-8'),
       })
       await arPage.waitForTimeout(800)
       const arViewText = await arPage.textContent('body')
+      check(
+        'ARCHIVE-01(便IH・④) ファイル名を自分で付け替えても読める(名前ではなく中身で判断している)',
+        arViewText.includes('記録2件'),
+      )
+      check(
+        'ARCHIVE-01(便IH・④) ファイル名を変えてよいことが画面に書いてある',
+        arViewText.replace(/​/g, '').includes(ja.settings.fileNameFreeNote),
+      )
       check(
         'ARCHIVE-01 閲覧の窓に「端末には保存されません」の帯が出る',
         arViewText.includes('これは閲覧だけです。端末には保存されません'),
@@ -16028,15 +16039,17 @@ try {
         a2Page.waitForEvent('filechooser'),
         a2Page.getByRole('button', { name: 'アーカイブを見る' }).click(),
       ])
+      // 2026-08-20 便IH・④: **前の名前**（uchi-recipe-records-）で書き出したファイルを選ぶ。
+      // 名前を変えたあとも、それまでに書き出したファイルが読めなくなっていないことを確かめる
       await a2ViewChooser.setFiles({
-        name: 'uchi-recipe-records.json',
+        name: 'uchi-recipe-records-2026-01-05.json',
         mimeType: 'application/json',
         buffer: Buffer.from(JSON.stringify(a2File), 'utf-8'),
       })
       await a2Page.waitForTimeout(800)
       const a2ViewText = (await a2Page.textContent('body')).replace(/​/g, '')
       check(
-        'ARCHIVE-02 閲覧の窓で残った記録も読める',
+        'ARCHIVE-02(便IH・④) 前の名前(uchi-recipe-records-)で書き出したファイルも読める',
         a2ViewText.includes('E2E消したレシピA') && a2ViewText.includes('E2E消したレシピB'),
       )
       check(
@@ -19793,11 +19806,18 @@ try {
       const htAddButton = htPage.locator('[data-testid="saved-search-add"]')
       const htAddLabel = ((await htAddButton.textContent()) ?? '').replace(/​/g, '')
       check(
-        `HZ-TAG-01(②) 登録ボタンに、登録する言葉と行き先(絞り込みの「${ja.search.tagTitle}」)が出ている`,
-        htAddLabel.includes('豆腐') &&
-          htAddLabel.includes('絞り込み') &&
-          htAddLabel.includes(ja.search.tagTitle),
+        'HZ-TAG-01(②) 登録ボタンに、登録する言葉が出ている',
+        htAddLabel.includes('豆腐') && htAddLabel.includes(ja.search.tagTitle),
         `ボタン=${htAddLabel}`,
+      )
+      // 2026-08-20 便IH・③（オーナー「『「」を絞り込みの〜登録』→『「」をキーワードに登録』。
+      // 下に説明あるので。」）: 行き先はボタンから落として、真下の1行が言い切る形にした。
+      // **どちらかに必ず行き先が出ている**ことを見る（両方から消えると、押した先が分からなくなる）
+      const htAddHint = ((await htPage.textContent('body')) ?? '').replace(/​/g, '')
+      check(
+        `HZ-TAG-01(②) 登録の行き先(絞り込みの「${ja.search.tagTitle}」)が、ボタンかその下の説明に出ている`,
+        htAddHint.includes(ja.search.savedSearchAddHint),
+        `説明=${ja.search.savedSearchAddHint}`,
       )
       // 何品に付くか、という言い方が残っていない（レシピに書き込む機能ではなくなった）
       check(
@@ -19911,9 +19931,9 @@ try {
   //     【この検査で測ること】
   //      ①絞り込みのパネルに、古い呼び名（レシピに付いている印＝「タグ」）が1つも残っていない
   //        ＝欄の見出しは ja.ts の値そのもの（画面の字を書き写さない）
-  //      ②検索していないときは入口が出ない／レシピカードには当たり先を1つも出さない
+  //      ②検索していないときは入口が出ない／レシピカードには一致した場所を1つも出さない
   //        （訂正1で取り下げた形に戻っている）
-  //      ③入口を押すと窓が開き、当たり先が品数の多い順に並ぶ
+  //      ③入口を押すと窓が開き、一致した場所が品数の多い順に並ぶ
   //      ④**窓の数字と、実際に画面へ出ている品数が合っている**（数字を書き写さず、
   //        画面から数え直して突き合わせる）
   //      ⑤上限を超えたときは「ほか◯件」で数を出す（黙って切らない）
@@ -19942,7 +19962,7 @@ try {
                 .trim(),
             ),
         )
-      /** カードのどこかに当たり先が出ていないか（訂正1で取り下げた形が残っていないか） */
+      /** カードのどこかに一致した場所が出ていないか（訂正1で取り下げた形が残っていないか） */
       const ihCardReasons = () =>
         ihPage.locator('[data-testid="card-match-reason"]').count()
       /** 窓の中の行を「出どころ・言葉・品数」に分けて読む。読めなければ count が null */
@@ -19984,7 +20004,7 @@ try {
         `料理名の読めないカード=${ihIdle.filter((t) => t === '').length}枚`,
       )
       check(
-        'IH-SEARCH-01(②) 検索していないときは当たり先の入口が出ない',
+        'IH-SEARCH-01(②) 検索していないときは一致した場所の入口が出ない',
         (await ihPage.locator('[data-testid="search-match-open"]').count()) === 0,
       )
 
@@ -20013,20 +20033,74 @@ try {
       const ihFishTitles = await ihTitles()
       check('IH-SEARCH-01(②) 「魚」で1品以上出る', ihFishTitles.length > 0, `出た品数=${ihFishTitles.length}`)
       check(
-        'IH-SEARCH-01(②) レシピカードには当たり先を1つも出さない(訂正1で取り下げた形に戻っている)',
+        'IH-SEARCH-01(②) レシピカードには一致した場所を1つも出さない(訂正1で取り下げた形に戻っている)',
         (await ihCardReasons()) === 0,
-        `カードに出ていた当たり先=${await ihCardReasons()}件`,
+        `カードに出ていた一致した場所=${await ihCardReasons()}件`,
       )
       const ihEntry = ihClean(await ihPage.textContent('[data-testid="search-match-open"]'))
-      check('IH-SEARCH-01(②) 検索すると当たり先の入口が1行出る', ihEntry.length > 0, `入口=${ihEntry}`)
       check(
-        'IH-SEARCH-01(②) 窓を開く前は当たり先の一覧を出さない(入口の1行だけ)',
+        'IH-SEARCH-01(②) 検索すると一致した場所の入口が出る',
+        ihEntry === ja.search.matchEntry,
+        `入口=${ihEntry} 期待=${ja.search.matchEntry}`,
+      )
+      // 訂正3「一列使わず、キーワード登録に並べられるくらい小さく」＋
+      // 「押せる大きさは44pxを割らない」。見た目の箱と**実際の当たり判定**を別々に測る
+      const ihEntryBox = await ihPage.evaluate(() => {
+        const entry = document.querySelector('[data-testid="search-match-open"]')
+        const add = document.querySelector('[data-testid="saved-search-add"]')
+        if (!entry) return null
+        entry.scrollIntoView({ block: 'center' })
+        const r = entry.getBoundingClientRect()
+        const a = add?.getBoundingClientRect()
+        const cx = r.left + r.width / 2
+        const cy = r.top + r.height / 2
+        const d = 21
+        const dead = [
+          [cx - d, cy],
+          [cx + d, cy],
+          [cx, cy - d],
+          [cx, cy + d],
+        ].filter(([x, y]) => {
+          const hit = document.elementFromPoint(x, y)
+          return !(hit && (hit === entry || entry.contains(hit)))
+        })
+        return {
+          w: Math.round(r.width),
+          h: Math.round(r.height),
+          pageW: document.documentElement.clientWidth,
+          dead: dead.length,
+          sameRow: a ? Math.abs(a.top - r.top) < 20 : null,
+          addFound: !!a,
+        }
+      })
+      check(
+        'IH-SEARCH-01(②) 入口の大きさを測れている(読めないまま合格にしない)',
+        ihEntryBox != null && ihEntryBox.w > 0,
+        `実測=${JSON.stringify(ihEntryBox)}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 入口は1行を丸ごと使わない(キーワード登録の隣に並ぶ小ささ)',
+        ihEntryBox != null && ihEntryBox.w < ihEntryBox.pageW / 2,
+        `入口の幅=${ihEntryBox?.w}px 画面の幅=${ihEntryBox?.pageW}px`,
+      )
+      check(
+        'IH-SEARCH-01(②) 入口はキーワード登録のボタンと同じ行に並ぶ',
+        ihEntryBox?.addFound === true && ihEntryBox?.sameRow === true,
+        `実測=${JSON.stringify(ihEntryBox)}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 見た目を小さくしても、押す面は44px四方を割らない',
+        ihEntryBox?.dead === 0,
+        `44px四方の中で押せない点=${ihEntryBox?.dead}箇所 見た目=${ihEntryBox?.w}x${ihEntryBox?.h}`,
+      )
+      check(
+        'IH-SEARCH-01(②) 窓を開く前は一致した場所の一覧を出さない(入口の1行だけ)',
         (await ihPage.locator('[data-testid="search-match-word"]').count()) === 0,
       )
       await ihOpenDialog()
       const ihFishRows = await ihRows()
       check(
-        'IH-SEARCH-01(③) 入口を押すと窓が開き、当たり先が並ぶ',
+        'IH-SEARCH-01(③) 入口を押すと窓が開き、一致した場所が並ぶ',
         (await ihPage.locator('[data-testid="search-match-dialog"]').count()) === 1 &&
           ihFishRows.length > 0,
         `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
@@ -20042,18 +20116,13 @@ try {
         `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
       )
       check(
-        'IH-SEARCH-01(③) 入口の1行に、いちばん品数の多い当たり先が入っている',
-        ihFishRows.length > 0 && ihEntry.includes(ihFishRows[0].text),
-        `入口=${ihEntry} いちばん多い当たり先=${ihFishRows[0]?.text}`,
-      )
-      check(
         'IH-SEARCH-01(②) 「魚」はレシピに付いているタグでも当たっていることが読める',
-        ihFishRows.some((r) => r.field === ja.search.matchWordTag),
+        ihFishRows.some((r) => r.field === ja.search.matchFieldTag),
         `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
       )
       check(
         'IH-SEARCH-01(②) 「魚」は手順に出てくる調理器具でも当たっていることが読める',
-        ihFishRows.some((r) => r.field === ja.search.matchWordAppliance),
+        ihFishRows.some((r) => r.field === ja.search.matchFieldAppliance),
         `行=${JSON.stringify(ihFishRows.map((r) => r.text))}`,
       )
       await ihCloseDialog()
@@ -20067,7 +20136,7 @@ try {
       await ihSearch('豆腐')
       await ihOpenDialog()
       const ihTofuRows = await ihRows()
-      const ihTofuTitleRow = ihTofuRows.find((r) => r.field === ja.search.matchWordTitle)
+      const ihTofuTitleRow = ihTofuRows.find((r) => r.field === ja.search.matchFieldTitle)
       await ihCloseDialog()
       const ihTofuTitles = await ihTitles()
       check(
@@ -20083,27 +20152,27 @@ try {
           `窓の数字=${ihTofuTitleRow.count} 画面で数えた品数=${named.length} 料理名=${JSON.stringify(named)}`,
         )
       }
-      // (b) 当たり先が1つだけの言葉: その数字は、いま出ている品数そのもの
+      // (b) 一致した場所が1つだけの言葉: その数字は、いま出ている品数そのもの
       await ihSearch('和食')
       const ihWashokuTitles = await ihTitles()
       await ihOpenDialog()
       const ihWashokuRows = await ihRows()
       await ihCloseDialog()
       check(
-        'IH-SEARCH-01(④) 前提: 当たり先が1つだけになる言葉で測れている',
+        'IH-SEARCH-01(④) 前提: 一致した場所が1つだけになる言葉で測れている',
         ihWashokuRows.length === 1 && ihWashokuRows[0].count != null,
         `行=${JSON.stringify(ihWashokuRows.map((r) => r.text))}`,
       )
       if (ihWashokuRows.length === 1) {
         check(
-          'IH-SEARCH-01(④) 当たり先が1つだけなら、その数字は画面に出ている品数と同じ',
+          'IH-SEARCH-01(④) 一致した場所が1つだけなら、その数字は画面に出ている品数と同じ',
           ihWashokuRows[0].count === ihWashokuTitles.length,
           `窓の数字=${ihWashokuRows[0].count} 画面のカード=${ihWashokuTitles.length}枚`,
         )
       }
 
       // ---- ⑤ 上限を超えたら「ほか◯件」で数を出す（オーナー「上限は必須」） --------------------
-      // 1文字だけ打つと当たり先がいちばん増える。上限の数は画面から読み取り、書き写さない
+      // 1文字だけ打つと一致した場所がいちばん増える。上限の数は画面から読み取り、書き写さない
       await ihSearch('ん')
       const ihWideEntry = ihClean(await ihPage.textContent('[data-testid="search-match-open"]'))
       await ihOpenDialog()
@@ -20113,7 +20182,7 @@ try {
       )
       const ihMoreCount = Number((ihMoreText.match(/(\d+)/) ?? [])[1])
       check(
-        'IH-SEARCH-01(⑤) 前提: 当たり先が上限を超える言葉で測れている',
+        'IH-SEARCH-01(⑤) 前提: 一致した場所が上限を超える言葉で測れている',
         ihWideRows.length > 0 && ihMoreText !== '',
         `行=${ihWideRows.length}件 ほか=${ihMoreText}`,
       )
@@ -20123,11 +20192,9 @@ try {
         `ほか=${ihMoreText}`,
       )
       check(
-        'IH-SEARCH-01(⑤) 入口の「ほか◯件」は、いちばん多い当たり先を除いた数と合っている',
-        ihWideEntry.includes(
-          ja.search.matchWordMore.replace('{n}', String(ihWideRows.length + ihMoreCount - 1)),
-        ),
-        `入口=${ihWideEntry} 並んだ=${ihWideRows.length}件 隠した=${ihMoreCount}件`,
+        'IH-SEARCH-01(⑤) 入口は言葉の当たり方で姿を変えない(いつも同じ1つの押しどころ)',
+        ihWideEntry === ja.search.matchEntry,
+        `入口=${ihWideEntry} 期待=${ja.search.matchEntry}`,
       )
       await ihCloseDialog()
       // 上限は当たった数で変わらない（別の当たりの広い言葉でも、並ぶ行数は同じ）
@@ -20148,7 +20215,7 @@ try {
       await ihSearch('')
       const ihAfter = await ihTitles()
       check(
-        'IH-SEARCH-01(②) 検索をやめると当たり先の入口が消える',
+        'IH-SEARCH-01(②) 検索をやめると一致した場所の入口が消える',
         ihAfter.length > 0 &&
           (await ihPage.locator('[data-testid="search-match-open"]').count()) === 0,
         `カード=${ihAfter.length}枚`,

@@ -228,12 +228,12 @@ function matchesQuery(recipe: Recipe, terms: string[]): boolean {
  * オーナー原文:
  *   「キーワード検索はどこからワードを拾ってきますか？『魚』と入れたところ６件ありましたが、
  *     レシピのタグやキーワードに入っているわけではなさそうでした。」
- *   （見せ方の訂正）「各レシピカードに表示ではなく、検索バーの下に、当たったワードを
+ *   （見せ方の訂正）「各レシピカードに表示ではなく、検索バーの下に、一致した言葉を
  *     多い順に羅列するイメージでした」
  *
  * 検索の索引（logic/kana.ts の buildSearchWords）は、料理名・材料名・タグ・検索キーワード・
  * 手順に出てくる調理器具・料理の種別・材料のカテゴリ語を**ひらがなの語の集まりに均して**持つ。
- * 均した時点で「どこから来た語か」は消えるので、当たり先はここで**同じ規則をもう一度たどって**出す。
+ * 均した時点で「どこから来た語か」は消えるので、一致した場所はここで**同じ規則をもう一度たどって**出す。
  * 索引の作り方（kana.ts）とこの関数の見る先がずれると説明が嘘になるため、
  * 語の作り方（toHiragana / toTagKey / applianceSearchWords / categorySearchWords /
  * dishTypeSearchWord）は**索引と同じ口**から読む。
@@ -258,7 +258,7 @@ export interface SearchMatchReason {
 
 /**
  * 並べる順。品数が同じときだけ効く（並びの第一は品数の多い順＝オーナー指定）。
- * 料理名を先に置くのは、いちばん当たり前の当たり先だから（読み飛ばせる位置に固定する）。
+ * 料理名を先に置くのは、いちばん当たり前の一致だから（読み飛ばせる位置に固定する）。
  */
 const MATCH_FIELD_ORDER: readonly SearchMatchField[] = [
   'title',
@@ -283,10 +283,10 @@ function titleHits(recipe: Recipe, term: string): boolean {
 }
 
 /**
- * そのレシピが検索の言葉に当たった理由を、当たり先ごとに返す。
+ * そのレシピが検索の言葉に一致した理由を、場所ごとに返す。
  * terms は splitTerms を通したあと（＝ひらがな化済み）の語を渡すこと。
  *
- * 料理名に当たった語は、**料理名だけを当たり先にする**（他の欄は見ない）。
+ * 料理名に一致した語は、**一致した場所を料理名だけにする**（他の欄は見ない）。
  * 「豆腐」で麻婆豆腐が出たときに「料理名」と「材料: 木綿豆腐」の両方で数えると、
  * 同じ1品が2か所で数えられて、一覧の数字が読みにくくなるため。
  */
@@ -334,38 +334,38 @@ export function searchMatchReasons(recipe: Recipe, terms: readonly string[]): Se
   )
 }
 
-/** 当たり先1つと、そこで当たった品数 */
+/** 一致した場所1つと、そこで一致した品数 */
 export interface SearchMatchSummaryRow {
   field: SearchMatchField
   /** 当たった言葉（料理名・作った記録のメモは持たない） */
   word?: string
-  /** その当たり先で出た品数 */
+  /** その場所で一致したレシピの品数 */
   count: number
 }
 
 export interface SearchMatchSummary {
-  /** 品数の多い順に並べた当たり先（上限まで） */
+  /** 品数の多い順に並べた、一致した場所（上限まで） */
   rows: SearchMatchSummaryRow[]
-  /** 上限に収まらなかった当たり先の件数（0なら全部出ている） */
+  /** 上限に収まらなかった場所の件数（0なら全部出ている） */
   hiddenCount: number
-  /** 当たり先の総数（上限で切る前）。入口に「ほか◯件」を出すために使う */
+  /** 一致した場所の総数（上限で切る前）。入口の判定に使う */
   total: number
 }
 
 /**
  * 検索まどの下に出す「当たった言葉の一覧」（2026-08-20 便IH・②。オーナー訂正
- * 「各レシピカードに表示ではなく、検索バーの下に、当たったワードを多い順に羅列するイメージ」）。
+ * 「各レシピカードに表示ではなく、検索バーの下に、一致した言葉を多い順に羅列するイメージ」）。
  *
  * 数える相手は**いま一覧に出ている品そのもの**（呼び出し側が searchRecipes の結果を渡す）
  * ＝画面の数字と、実際に並んでいる品数が食い違わない。
  *
- * 並びは**品数の多い順**（オーナー指定）。同じ品数のときは当たり先の順（MATCH_FIELD_ORDER）→
+ * 並びは**品数の多い順**（オーナー指定）。同じ品数のときは場所の順（MATCH_FIELD_ORDER）→
  * 言葉の五十音順にして、打ち直すたびに並びが入れ替わらないようにする。
  *
- * 2語以上打ったとき（「豆腐 レンジ」）は、1品が2つの当たり先に当たることがある
+ * 2語以上打ったとき（「豆腐 レンジ」）は、1品が2つの場所で一致することがある
  * ＝**数字の合計は出ている品数と一致しない**。合計を出さないのはそのため。
  *
- * @param limit 並べる当たり先の上限。超えた分は hiddenCount で数を返す（黙って切らない）
+ * @param limit 並べる場所の上限。超えた分は hiddenCount で数を返す（黙って切らない）
  */
 export function searchMatchSummary(
   recipes: readonly Recipe[],
@@ -396,27 +396,27 @@ export function searchMatchSummary(
   }
 }
 
-/** 出どころの名前（ja に集約。ここで文字を書かない） */
+/** 一致した場所の名前（ja に集約。ここで文字を書かない） */
 const MATCH_FIELD_LABELS: Record<SearchMatchField, string> = {
-  title: ja.search.matchWordTitle,
-  tag: ja.search.matchWordTag,
-  ingredient: ja.search.matchWordIngredient,
-  keyword: ja.search.matchWordKeyword,
-  appliance: ja.search.matchWordAppliance,
-  dishType: ja.search.matchWordDishType,
-  cookedNote: ja.search.matchWordCookedNote,
+  title: ja.search.matchFieldTitle,
+  tag: ja.search.matchFieldTag,
+  ingredient: ja.search.matchFieldIngredient,
+  keyword: ja.search.matchFieldKeyword,
+  appliance: ja.search.matchFieldAppliance,
+  dishType: ja.search.matchFieldDishType,
+  cookedNote: ja.search.matchFieldCookedNote,
 }
 
 /**
  * 一覧に並べる1つぶんの文字（例:「タグ: 魚 4品」「料理名 8品」）。
- * 言葉を持たない当たり先（料理名・作った記録のメモ）は、出どころの名前と品数だけにする。
+ * 言葉を持たない場所（料理名・作った記録のメモ）は、場所の名前と品数だけにする。
  */
 export function searchMatchRowText(row: SearchMatchSummaryRow): string {
   const label = MATCH_FIELD_LABELS[row.field]
   const count = String(row.count)
   return row.word === undefined
-    ? ja.search.matchWordWithoutWord.replace('{field}', label).replace('{n}', count)
-    : ja.search.matchWord
+    ? ja.search.matchRowWithoutWord.replace('{field}', label).replace('{n}', count)
+    : ja.search.matchRow
         .replace('{field}', label)
         .replace('{word}', row.word)
         .replace('{n}', count)

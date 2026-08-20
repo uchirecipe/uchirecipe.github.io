@@ -1786,6 +1786,14 @@ export default function SettingsPage() {
               <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
               {ja.settings.backupContainsCodeNotice}
             </p>
+            {/* ファイル名を自分で付け替えてよいことの注記（2026-08-20 便IH・④ オーナー承認済み）。
+                読み込みはファイルの中身の種別マークだけを見ていて名前は見ていないが、
+                拡張子を変えるとファイルを選ぶ画面に出てこなくなる（accept="…,.json"）ので、
+                そこだけを書く。アーカイブの欄にも同じ文言を出す（ja に1つだけ持つ） */}
+            <p data-testid="file-name-free-note" className="mt-[var(--space-sm)] flex items-start gap-1 text-xs text-ink-muted">
+              <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
+              {ja.settings.fileNameFreeNote}
+            </p>
             <p className="mt-[var(--space-sm)] text-sm font-bold text-ink-muted">
               {settings.lastBackupAt
                 ? ja.settings.backupLastDate.replace('{date}', formatDate(settings.lastBackupAt))
@@ -1945,6 +1953,11 @@ export default function SettingsPage() {
                 ))}
               </dl>
               <p className="mt-1 text-xs text-ink-muted">{ja.settings.archiveVsBackupNote}</p>
+              {/* ファイル名を付け替えてよいことの注記（2026-08-20 便IH・④）。
+                  バックアップの欄と同じ文言（ja.settings.fileNameFreeNote の1か所） */}
+              <p data-testid="file-name-free-note" className="mt-1 text-xs text-ink-muted">
+                {ja.settings.fileNameFreeNote}
+              </p>
             </div>
 
             {/* 疑問②「範囲を選んだあとどこを押すのか」。押す順にボタン名で並べる */}

@@ -39,7 +39,7 @@ export function backupFileName(date: Date = new Date()): string {
 
 /**
  * 「選択したレシピの書き出し」の既定ファイル名（2026-08-09 便EM）。
- * 全体のバックアップ（uchi-recipe-backup-）・古い記録（uchi-recipe-records-）と
+ * 全体のバックアップ（uchi-recipe-backup-）・アーカイブ（uchi-recipe-archive-）と
  * 名前で見分けられるようにする。中身の範囲が違うファイルが同じ名前で並ぶと、
  * 復元のときにどれを選べばよいか分からなくなるため
  */
