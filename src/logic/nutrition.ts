@@ -1,4 +1,4 @@
-import { toIngredientKey } from './kana'
+import { stripIngredientDecoration, toIngredientKey } from './kana'
 import { NUTRITION_DATA, type NutritionFood, type NutritionPer100g } from './nutritionData'
 import type { Ingredient, Recipe } from '../db/types'
 import {
@@ -289,11 +289,11 @@ function getIndex(): MatchIndex {
 }
 
 /**
- * 材料名から成分表の食品を探す。
+ * 材料名から成分表の食品を探す（飾り語を落とす前の、素の名前での照合）。
  * 1) 正規化前の完全一致 → 2) 正規化後の完全一致 → 3) 括弧を除いた完全一致
  * → 4) 最長の部分一致（3文字以上のaliasのみ）の順で照合する。
  */
-export function matchNutritionFood(name: string): NutritionFood | null {
+function matchNutritionFoodExact(name: string): NutritionFood | null {
   const idx = getIndex()
   const rawKey = name.trim()
   const rawHit = idx.raw.get(rawKey)
@@ -314,6 +314,22 @@ export function matchNutritionFood(name: string): NutritionFood | null {
     if (normalized.includes(key)) return food
   }
   return null
+}
+
+/**
+ * 材料名から成分表の食品を探す。
+ *
+ * 素の名前で当たらなかったときだけ、商品名の飾り語（オーガニック・微粒子・国産…）を落として
+ * もう一度探す（2026-08-20 便IL・③）。**当たらなかったときの最後の手当てにしてある**ので、
+ * これまで当たっていた材料の結果は1件も変わらない。
+ * 落としてよい語・落としてはいけない語の線引きは logic/kana.ts の
+ * INGREDIENT_DECORATION_WORDS を参照（「無塩バター」の「無塩」は落とさない）。
+ */
+export function matchNutritionFood(name: string): NutritionFood | null {
+  const hit = matchNutritionFoodExact(name)
+  if (hit) return hit
+  const stripped = stripIngredientDecoration(name)
+  return stripped !== name.trim() ? matchNutritionFoodExact(stripped) : null
 }
 
 // ---------- 換算（分量 × 単位 → グラム） ----------

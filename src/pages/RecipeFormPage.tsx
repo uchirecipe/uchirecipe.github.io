@@ -35,7 +35,16 @@ import { parseRecipeText, normalizeImportedIngredient, autoSplitAmountUnit, look
 import { importRecipeFromUrl, isUrlImportEnabled, UrlImportError, IMPORT_ENDPOINT } from '../logic/urlImport'
 import type { ImportErrorReason } from '../logic/urlImport'
 import { fetchImportedPhoto } from '../logic/urlImportImage'
-import { buildImportedIngredientRows, countAmountlessRows, filterImportedSteps } from '../logic/urlImportRows'
+import {
+  attachImportedStepNotes,
+  buildImportedIngredientRows,
+  countAmountlessRows,
+  filterImportedSteps,
+  isImportedCookwareName,
+  stripImportedMarkup,
+  stripPastedMarkup,
+} from '../logic/urlImportRows'
+import type { ImportedStepRow } from '../logic/urlImportRows'
 import { stepMinutesFromText } from '../logic/importStepMinutes'
 import { pickIconKey, iconKeyOrder } from '../logic/icon'
 import { guessDishType } from '../logic/dishTypeGuess'
@@ -121,13 +130,14 @@ function toIngredientRows(ingredients: Ingredient[]): IngredientRow[] {
  * （2026-08-08 便ED・docs/68 打ち手#2。URL取り込み・貼り付け取り込みの両方で使う）。
  * 写すのは本文に書いてある時間だけで、機械の推測値は入れない。手順の本文は1文字も書き換えない。
  */
-function toImportedStepRows(texts: string[]): StepRow[] {
-  return texts.map((text) => {
+function toImportedStepRows(items: readonly (string | ImportedStepRow)[]): StepRow[] {
+  return items.map((item) => {
+    const { text, memo } = typeof item === 'string' ? { text: item, memo: '' } : item
     const minutes = stepMinutesFromText(text)
     return {
       text,
       minutes: minutes != null ? String(minutes) : '',
-      memo: '',
+      memo,
       minutesAuto: minutes != null,
     }
   })
@@ -453,6 +463,11 @@ function RecipeFormInner() {
   // 「どこを直せばよいか分からない」への最小限の答えで、大掛かりなプレビューUIは作らない。
   // 名前で覚えるので、行を並べ替えても印が付いたままになり、分量を入れれば自然に消える
   const [amountlessImportedNames, setAmountlessImportedNames] = useState<string[]>([])
+  // 取り込みで材料に混じった調理器具の名前(2026-08-20 便IL・④)。
+  // **外さずに印を付けるだけ**にして、消すかどうかはユーザーが決める。
+  // 分量が読み取れなかった行の印(上)と同じで、名前で覚えるので並べ替えても印が残り、
+  // 名前を書き換えれば自然に消える
+  const [cookwareImportedNames, setCookwareImportedNames] = useState<string[]>([])
   /**
    * URL取り込みの世代番号(2026-07-30 便CK/②-2・②-3)。「読み込む」を押すたび、
    * およびこの画面を離れるときに繰り上げる。取り込みの途中で解決した処理は、自分の世代が
@@ -483,6 +498,12 @@ function RecipeFormInner() {
    * （黙って色を付けると、なぜ色が付いたのかが画面から読めない）。
    */
   const [importedSeasoningGroups, setImportedSeasoningGroups] = useState(0)
+
+  /** 取り込み時に調理器具と見た行か(便IL/④の控えめな印の表示条件) */
+  const isImportedCookware = (row: IngredientRow): boolean =>
+    !!row.name.trim() &&
+    cookwareImportedNames.includes(row.name.trim()) &&
+    isImportedCookwareName(row.name)
 
   /** 取り込み時に分量が読み取れず、まだ空のままの行か(便BX/C09の控えめな印の表示条件) */
   const isImportedAmountless = (row: IngredientRow): boolean =>
@@ -915,7 +936,11 @@ function RecipeFormInner() {
       // 貼り付け経路と同じゴミ行判定を通し、グループ見出しをグループ色へ引き継ぐ(便BX/C07・C08)。
       // 以降の件数(確認文・結果メッセージ)はすべてこの整形後の件数で数える
       const importedRows = buildImportedIngredientRows(result.ingredients)
-      const importedSteps = filterImportedSteps(result.steps)
+      // 注記の行(「※…」)は手順として増やさず、直前の手順のメモへ寄せる(便IL/②)。
+      // 以降の件数はすべて寄せたあとの件数で数える(確認の窓と結果の文で食い違わないように)
+      const filteredSteps = filterImportedSteps(result.steps)
+      const importedSteps = attachImportedStepNotes(filteredSteps)
+      const movedNotes = filteredSteps.length - importedSteps.length
       // 写真がどうなるかを先に決める(便CK/②-1)。「写真も取り込む」がONで、いま写真があるなら
       // 置き換わって消える=確認文にそう書く。OFFなら残ることを書く
       const hadPhoto = photo !== undefined
@@ -957,7 +982,13 @@ function RecipeFormInner() {
         filled > 0
           ? `${alsoAppliedNote ? '' : '。'}${ja.form.stepMinutesFilled.replace('{n}', String(filled))}`
           : ''
-      if (result.title && !title.trim()) setTitle(result.title)
+      /** 注記を手順のメモへ寄せた件数の一言（0件のときは何も言わない・便IL/②） */
+      const stepNotesNote = (moved: number, minutesNote: string) =>
+        moved > 0
+          ? `${alsoAppliedNote || minutesNote ? '' : '。'}${ja.form.stepNotesMoved.replace('{n}', String(moved))}`
+          : ''
+      // 料理名にもHTMLの印が混ざりうるので落としてから入れる(便IL/①)
+      if (result.title && !title.trim()) setTitle(stripImportedMarkup(result.title))
       // 取り込んだ人数分も範囲(1〜20)に収める(便CK/①-1)。Worker側のextractServingsに上限が無く、
       // 「24 cookies」等の表記から20超が入りうるが、手入力では作れない値なので保存させない
       if (nextServings !== undefined) setServings(nextServings)
@@ -970,6 +1001,10 @@ function RecipeFormInner() {
       // 分量が読み取れなかった行に印を付ける(便BX/C09)。取り込むたびに入れ替える
       setAmountlessImportedNames(
         importedRows.filter((row) => !row.amount.trim() && !row.unit.trim()).map((row) => row.name),
+      )
+      // 材料に混じった調理器具に印を付ける(便IL/④)。外しはしない
+      setCookwareImportedNames(
+        importedRows.filter((row) => isImportedCookwareName(row.name)).map((row) => row.name),
       )
       // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2）
       const importedStepRows = toImportedStepRows(importedSteps)
@@ -993,11 +1028,14 @@ function RecipeFormInner() {
       }
       // 片側だけ読み込めたときは警告トーンで正直に伝える(便BW/C-02。貼り付け経路と同じ扱い)。
       // どの結果文にも、材料・手順以外で置き換わった項目(便BX/C02)を書き添える
+      const minutesNote = stepMinutesNote(filledMinutes)
+      const notesNote = stepNotesNote(movedNotes, minutesNote)
       if (importedRows.length === 0) {
         showUrlImportMessage(
           ja.urlImport.resultNoIngredients.replace('{s}', String(importedSteps.length)) +
             alsoAppliedNote +
-            stepMinutesNote(filledMinutes),
+            minutesNote +
+            notesNote,
           'warn',
         )
       } else if (importedSteps.length === 0) {
@@ -1020,7 +1058,8 @@ function RecipeFormInner() {
             )
             .replace('{s}', String(importedSteps.length)) +
             alsoAppliedNote +
-            stepMinutesNote(filledMinutes),
+            minutesNote +
+            notesNote,
           'info',
         )
       }
@@ -1046,7 +1085,9 @@ function RecipeFormInner() {
       showPasteMessage(ja.paste.empty, 'warn')
       return
     }
-    const parsed = parseRecipeText(pasteText)
+    // 貼り付けた文章にもHTMLの印が混ざることがある（写真取り込みのBYO-AIで作った文章・
+    // ページから範囲選択して貼った文章）。URL取り込みと同じ手当てを通してから解釈する（便IL/①）
+    const parsed = parseRecipeText(stripPastedMarkup(pasteText))
     if (parsed.ingredients.length === 0 && parsed.steps.length === 0) {
       showPasteMessage(ja.paste.resultNone, 'warn')
       return
@@ -1102,11 +1143,21 @@ function RecipeFormInner() {
     setImportedSeasoningGroups(
       new Set(parsed.ingredients.map((row) => row.group).filter((g) => g != null)).size,
     )
+    // 材料に混じった調理器具に印を付ける（便IL/④。URL取り込みと同じ扱い）
+    setCookwareImportedNames(
+      parsed.ingredients.filter((row) => isImportedCookwareName(row.name)).map((row) => row.name),
+    )
+    // 注記の行（「※…」）は手順として増やさず、直前の手順のメモへ寄せる
+    // （便IL/②。URL取り込みと同じ扱いにする＝同じ文章を貼っても取り込んでも同じ形になる）
+    const pastedSteps = attachImportedStepNotes(parsed.steps)
+    const pastedNotes = parsed.steps.length - pastedSteps.length
     // 手順の本文に書かれている時間を「分」の欄に写す（便ED・docs/68 打ち手#2。URL取り込みと同じ扱い）
-    const pastedStepRows = toImportedStepRows(parsed.steps)
+    const pastedStepRows = toImportedStepRows(pastedSteps)
     const filledMinutes = pastedStepRows.filter((row) => row.minutesAuto).length
     const stepMinutesNote =
       filledMinutes > 0 ? ja.form.stepMinutesFilled.replace('{n}', String(filledMinutes)) : ''
+    const stepNotesNote =
+      pastedNotes > 0 ? ja.form.stepNotesMoved.replace('{n}', String(pastedNotes)) : ''
     if (pastedStepRows.length > 0) {
       setSteps(pastedStepRows)
     }
@@ -1146,13 +1197,13 @@ function RecipeFormInner() {
     // 添える一文はどれも句点で終わる（i18n側で終端まで書いてある）。
     // 件数の一文だけ句点を持たないので、添える文がある場合に1つだけ足す
     // （2026-08-12 便FU-3。文ごとに句点を足していて「入れました。。調理時間も…」になっていた）
-    const pasteNotes = [pasteAlsoAppliedNote, stepMinutesNote, pasteCookMinutesNote]
+    const pasteNotes = [pasteAlsoAppliedNote, stepMinutesNote, stepNotesNote, pasteCookMinutesNote]
       .filter((note) => note !== '')
       .join('')
     showPasteMessage(
       ja.paste.resultSummary
         .replace('{i}', String(parsed.ingredients.length))
-        .replace('{s}', String(parsed.steps.length)) + (pasteNotes ? `。${pasteNotes}` : ''),
+        .replace('{s}', String(pastedSteps.length)) + (pasteNotes ? `。${pasteNotes}` : ''),
       'info',
     )
   }
@@ -2164,6 +2215,11 @@ function RecipeFormInner() {
                   自分で分量を入れると消える(印は「まだ空のまま」を指すため) */}
               {isImportedAmountless(row) && (
                 <p className="mt-1 text-xs text-ink-muted">{ja.form.importedAmountlessHint}</p>
+              )}
+              {/* 取り込みで材料に混じった調理器具の控えめな印(2026-08-20 便IL・④)。
+                  外さずに印だけ付ける＝消すかどうかはユーザーが決める */}
+              {isImportedCookware(row) && (
+                <p className="mt-1 text-xs text-ink-muted">{ja.form.importedCookwareHint}</p>
               )}
               <div className="mt-[var(--space-sm)] flex items-center justify-between gap-[var(--space-sm)]">
                 <div className="flex items-center gap-[var(--space-sm)]">

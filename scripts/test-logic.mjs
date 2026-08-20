@@ -428,6 +428,7 @@ import {
   filterImportedSteps,
   seasoningGroupFromLetter,
   countAmountlessRows,
+  stripPastedMarkup,
 } from '../src/logic/urlImportRows.ts'
 import {
   MIN_SERVINGS,
@@ -24774,6 +24775,292 @@ Aみりん 大さじ1
   }
 }
 
+
+// ==========================================================================================
+// 便IL: URLからの取り込み5件（2026-08-20 オーナー実機報告・プリンのレシピ）
+// ==========================================================================================
+
+// ---------- IL-1 取り込んだ文にHTMLの印が残らない（①） ----------
+// オーナー原文: 「手順で『<br>』が入ったままなのは気になった。」
+// **<br>だけを名指ししない**。取り込み元は「生のタグ」でも「実体参照に置き換えた形」でも
+// 同じ見た目を作るので、どちらの書き方で来てもタグとして落ちることを規則で確かめる
+// （実体参照を先に読み解くと `&lt;br&gt;` が `<br>` に化け、そのまま手順に残っていた）。
+{
+  const TAGISH = /<[^>]{1,60}>/
+  const ENTITYISH = /&(?:[a-zA-Z]{2,10}|#\d{1,5}|#x[0-9a-fA-F]{1,5});/
+  const markupSteps = [
+    '卵を溶く<br>砂糖を加える',
+    '卵を溶く<br />砂糖を加える',
+    '卵を溶く&lt;br&gt;砂糖を加える',
+    '卵を溶く&lt;br /&gt;砂糖を加える',
+    '<b>弱火</b>で20分煮る',
+    '&lt;b&gt;弱火&lt;/b&gt;で20分煮る',
+    '<span class="tips">砂糖</span>を加えて混ぜる',
+    '&lt;p&gt;粗熱を取る&lt;/p&gt;',
+    '&lt;strong&gt;しっかり&lt;/strong&gt;混ぜる',
+    '塩&amp;こしょうをふる',
+    '砂糖&nbsp;を加える',
+  ]
+  const cleanedSteps = filterImportedSteps(markupSteps)
+  eq('IL-1 取り込んだ手順にHTMLのタグが残らない', cleanedSteps.filter((s) => TAGISH.test(s)), [])
+  eq('IL-1 取り込んだ手順にHTMLの実体参照が残らない', cleanedSteps.filter((s) => ENTITYISH.test(s)), [])
+  eq('IL-1 印を落としても手順が1件も消えない', cleanedSteps.length, markupSteps.length)
+  // 改行の印は「消す」だけだと前後の文がくっつく（「卵を溶く砂糖を加える」）。区切りとして扱えているか
+  for (const [label, text] of [
+    ['生の改行タグ', '卵を溶く<br>砂糖を加える'],
+    ['閉じ記号つきの改行タグ', '卵を溶く<br />砂糖を加える'],
+    ['実体参照の改行タグ', '卵を溶く&lt;br&gt;砂糖を加える'],
+    ['段落の区切り', '<p>卵を溶く</p><p>砂糖を加える</p>'],
+    ['箇条書きの区切り', '<li>卵を溶く</li><li>砂糖を加える</li>'],
+  ]) {
+    eq(`IL-1 ${label}の前後がくっつかない`, filterImportedSteps([text])[0].includes('溶く砂糖'), false)
+  }
+  const markupRows = buildImportedIngredientRows([
+    { name: '砂糖&lt;br&gt;', amount: '50g' },
+    { name: '<b>無塩バター</b>', amount: '30g' },
+    { name: '生クリーム&nbsp;', amount: '200ml' },
+    { name: '塩&amp;こしょう', amount: '少々' },
+  ])
+  const rowText = (r) => `${r.name} ${r.amount} ${r.unit} ${r.memo}`
+  eq('IL-1 取り込んだ材料にHTMLのタグが残らない', markupRows.filter((r) => TAGISH.test(rowText(r))), [])
+  eq(
+    'IL-1 取り込んだ材料にHTMLの実体参照が残らない',
+    markupRows.filter((r) => ENTITYISH.test(rowText(r))),
+    [],
+  )
+  eq(
+    'IL-1 材料名は印を落としても中身が残る',
+    markupRows.map((r) => r.name),
+    ['砂糖', '無塩バター', '生クリーム', '塩&こしょう'],
+  )
+  // 貼り付け経路（写真取り込みのBYO-AIを含む）も同じ手当てを通す。
+  // ただし貼り付けは**行の切れ目で材料・手順を見分ける**ので、改行は残すこと
+  {
+    const pasted = stripPastedMarkup('<p>卵 2個</p>\n&lt;b&gt;牛乳&lt;/b&gt; 200ml')
+    eq('IL-1 貼り付けた文章からもHTMLのタグが落ちる', TAGISH.test(pasted), false)
+    eq('IL-1 貼り付けた文章からもHTMLの実体参照が落ちる', ENTITYISH.test(pasted), false)
+    eq('IL-1 貼り付けの改行は残す（行で材料と手順を見分けるため）', pasted.includes('\n'), true)
+  }
+}
+
+// ---------- IL-2 注記の行は前の手順のメモへ寄せる（②） ----------
+// オーナー原文: 「自動だと手順のメモ欄は基本的に未対応？プリンのカラメルの手順の後に、
+//   単独手順で代用可能の工程が挟まっているのが気になった。」
+// 線引きは**行頭の注記記号（※＊）だけ**。実サイト168本の手順1,070件を数えた結果、
+// 「代用」「お好みで」という語での判定は本物の仕上げ手順を巻き込む（外した例を下に固定する）。
+{
+  const { attachImportedStepNotes } = await import('../src/logic/urlImportRows.ts')
+  const rows = attachImportedStepNotes([
+    '鍋にグラニュー糖と水を入れて中火にかける',
+    '※カラメルは市販のカラメルソースで代用できます',
+    '卵と牛乳を混ぜて型に流す',
+  ])
+  eq('IL-2 注記の行は手順として増えない', rows.length, 2)
+  eq('IL-2 注記は直前の手順のメモに入る', rows[0].memo, 'カラメルは市販のカラメルソースで代用できます')
+  eq(
+    'IL-2 手順の本文は1文字も書き換えない',
+    rows.map((r) => r.text),
+    ['鍋にグラニュー糖と水を入れて中火にかける', '卵と牛乳を混ぜて型に流す'],
+  )
+  const texts = (steps) => attachImportedStepNotes(steps).map((r) => r.text)
+  // 「※の板チョコは…」「※印の材料を…」は注記ではなく、合わせ調味料の印を指した本物の手順（楽天レシピ実測）
+  eq('IL-2 印を指す「※の◯◯」は手順のまま', texts(['湯煎する', '※の板チョコを溶かす']).length, 2)
+  eq('IL-2 「※印の◯◯」も手順のまま', texts(['湯煎する', '※印の材料を混ぜる']).length, 2)
+  // 寄せ先が無い先頭の行は手順のまま（注記だからといって消さない）
+  eq('IL-2 先頭の行は寄せ先が無いので手順のまま', texts(['※オーブンは170度に予熱しておく', '生地を混ぜる']).length, 2)
+  // 外した例: 語だけで判断しない（実測では「お好みで」の大半が本物の仕上げ手順だった）
+  eq('IL-2 「お好みで」で始まる行は手順のまま', texts(['器に盛る', 'お好みでパセリをふる']).length, 2)
+  eq('IL-2 「代用」を含むだけの行も手順のまま', texts(['器に盛る', '生クリームは牛乳で代用して泡立てる']).length, 2)
+  eq('IL-2 注記が無ければ手順はそのまま', texts(['湯煎する', '型に流す', '冷やす']).length, 3)
+  // 注記が続いたら1つのメモにまとめる（手順を増やさない）
+  const twoNotes = attachImportedStepNotes(['焼く', '※温度は調節してください', '＊焦げそうならホイルをかぶせる'])
+  eq('IL-2 続いた注記は1つの手順のメモにまとまる', twoNotes.length, 1)
+  eq('IL-2 まとまった注記は行を分けて残す', twoNotes[0].memo.split('\n').length, 2)
+}
+
+// ---------- IL-3 商品名の飾り語を落としてから名寄せする（③） ----------
+// オーナー原文: 「原価や栄養計算で、『オーガニックバニラビーンズペースト』や『微粒子グラニュー糖』
+//   など、商品名の一部を切り取って材料を判断することは不可能ですか？」
+// **落としてよい語（産地・品質の売り文句）と、落としてはいけない語（味・中身が変わる語）**の
+// 両方を測る。落としすぎると「無塩バター」が「バター」になり、栄養の食塩相当量が狂う。
+{
+  const { stripIngredientDecoration } = await import('../src/logic/kana.ts')
+  const { matchNutritionFood } = await import('../src/logic/nutrition.ts')
+  const priceIdx = buildPriceIndex(PRICE_DEFAULTS.map((d) => ({ ...d, isDefault: true })))
+
+  // (1) 落としてよい語: 落とした後の名前で名寄せに当たる
+  const decorated = [
+    ['有機牛乳', '牛乳'],
+    ['国産たまねぎ', 'たまねぎ'],
+    ['こだわりの卵', '卵'],
+    ['微粒子グラニュー糖', 'グラニュー糖'],
+    ['オーガニックバニラビーンズペースト', 'バニラビーンズペースト'],
+    ['新鮮なきゅうり', 'きゅうり'],
+    ['市販のホイップクリーム', 'ホイップクリーム'],
+    ['あればパセリ', 'パセリ'],
+  ]
+  for (const [name, bare] of decorated) {
+    eq(`IL-3 飾り語を落とすと「${bare}」になる`, stripIngredientDecoration(name), bare)
+  }
+  // 名寄せは「飾り語つきでも、飾り語なしと同じ結果になる」ことで測る
+  // （辞書に無い食材はどちらもnullで、悪くなっていないことが分かる）
+  for (const [name, bare] of decorated) {
+    eq(
+      `IL-3 栄養の名寄せが「${name}」でも「${bare}」と同じになる`,
+      matchNutritionFood(name)?.label ?? null,
+      matchNutritionFood(bare)?.label ?? null,
+    )
+    eq(
+      `IL-3 原価の名寄せが「${name}」でも「${bare}」と同じになる`,
+      matchPriceEntry(name, priceIdx)?.normalizedName ?? null,
+      matchPriceEntry(bare, priceIdx)?.normalizedName ?? null,
+    )
+  }
+  // オーナーが挙げた2つが、実際に栄養の食品に当たること
+  eq('IL-3 「微粒子グラニュー糖」が砂糖として計算される', matchNutritionFood('微粒子グラニュー糖')?.label, '砂糖')
+
+  // (2) 落としてはいけない語: 名前が1文字も変わらない
+  const keepAsIs = [
+    '無塩バター',
+    '有塩バター',
+    '減塩しょうゆ',
+    '無調整豆乳',
+    '低脂肪牛乳',
+    '無糖ヨーグルト',
+    '加糖練乳',
+    '生クリーム',
+    '生姜',
+    '生パン粉',
+    '冷凍パイシート',
+    '純ココア',
+    '薄力粉',
+    '強力粉',
+    '全粒粉',
+    '無洗米',
+    '粗びき黒こしょう',
+  ]
+  for (const name of keepAsIs) {
+    eq(`IL-3 「${name}」は飾り語として落とさない`, stripIngredientDecoration(name), name)
+  }
+  // 落としすぎの実害を1つ固定する: 無塩バターがバターに化けたら食塩相当量が変わってしまう
+  neq('IL-3 「無塩バター」を「バター」に丸めない', stripIngredientDecoration('無塩バター'), 'バター')
+  // 飾り語だけの名前は空にしない（残りが無くなるなら落とさない）
+  eq('IL-3 「国産」だけの行は名前を空にしない', stripIngredientDecoration('国産'), '国産')
+
+  // (3) 名寄せを悪くしていないこと（飾り語のない名前の結果は1件も変わらない）
+  const plain = ['牛乳', 'たまねぎ', '卵', 'バター', '砂糖', '鮭', '酒', '豆腐', 'にんじん']
+  for (const name of plain) {
+    eq(`IL-3 「${name}」の名前はそのまま`, stripIngredientDecoration(name), name)
+  }
+}
+
+// ---------- IL-4 材料に混じった調理器具に印を付ける（④） ----------
+// オーナー原文: 「このレシピだと、材料と一緒に調理器具も登録されます。さすがに自動だったら
+//   このくらいはユーザーで消せば良いと思います。」
+// **外さずに印を付ける**（材料側にも「型用バター」「冷凍パイシート」のように器具の語を含む
+// 本物の材料があるため、機械で消すと本物が消える）。
+{
+  const { isImportedCookwareName } = await import('../src/logic/urlImportRows.ts')
+  const cookware = [
+    'プリン型',
+    '18cmパウンド型',
+    'マフィン型',
+    'シフォンケーキ型',
+    'プリンカップ',
+    '耐熱容器',
+    'ボウル',
+    'バット',
+    'オーブンシート',
+    'クッキングシート',
+    'アルミホイル',
+    '竹串',
+    '泡立て器',
+    '茶こし',
+    '保存袋',
+  ]
+  for (const name of cookware) {
+    eq(`IL-4 「${name}」は調理器具として印が付く`, isImportedCookwareName(name), true)
+  }
+  // 材料のほうに出る紛らわしい名前には印を付けない（消してしまうと本物の材料が消える）
+  const notCookware = [
+    '型用バター',
+    '冷凍パイシート',
+    'パイシート',
+    'カップケーキ用の生地',
+    '生クリーム',
+    '牛乳',
+    '砂糖',
+    '型抜きクッキーの生地',
+    'コーヒーカップ1杯分の水',
+  ]
+  for (const name of notCookware) {
+    eq(`IL-4 「${name}」には印を付けない`, isImportedCookwareName(name), false)
+  }
+  eq('IL-4 空の名前には印を付けない', isImportedCookwareName('  '), false)
+}
+
+// ---------- IL-5 「デザート」でも「おやつ」でも同じ品が出る（⑤） ----------
+// オーナー原文: 「検索に引っかかるワードとしては『おやつ』も『デザート』もそれぞれで出てほしい。
+//   内容としてはおなじなので、『デザート』で『おやつ』が表示されるのでも、逆でもいい。
+//   ただ、大学芋がデザートかといえば違う気がするので『おやつ』だよなあ、はあります。種別はそのまま。」
+// タグ名は「おやつ」のまま・種別の表示名も「その他」のまま。**タグの別名**として当てる
+// （種別「その他」に「デザート」を足すと、パン・飲み物まで甘いもの扱いで並ぶため足さない）。
+{
+  const ilRecipe = (over) => ({
+    id: 0,
+    title: '',
+    tags: [],
+    keywords: [],
+    ingredients: [],
+    steps: [],
+    isFavorite: false,
+    cookedLogs: [],
+    searchWords: [],
+    createdAt: 0,
+    updatedAt: 0,
+    ...over,
+  })
+  const ilWithWords = (r) => ({
+    ...r,
+    searchWords: buildSearchWords(r.title, r.ingredients, r.tags, r.keywords, r.steps, r.dishType),
+  })
+  // 同梱の基本レシピ（オーナーが実機で見ている中身そのもの）で測る
+  const ilRecipes = starterDefs.map((def, i) => ilWithWords(ilRecipe({ ...def, id: i + 1 })))
+  const ilFind = (q) =>
+    searchRecipes(ilRecipes, { ...defaultSearchOptions, ngIngredients: [], query: q })
+      .map((r) => r.recipe.title)
+      .sort()
+  const oyatsu = ilFind('おやつ')
+  const dessert = ilFind('デザート')
+  eq('IL-5 「おやつ」で当たる品がある（掴めていないまま合格に倒れない）', oyatsu.length > 0, true)
+  eq('IL-5 「デザート」でも「おやつ」と同じ品が出る', dessert, oyatsu)
+  // 種別「その他」には「鮭フレーク」「だしのとり方」も入っている。甘くない品まで並べない
+  eq('IL-5 「デザート」で種別「その他」の品まで並ばない', dessert.includes('手作り鮭フレーク'), false)
+  eq('IL-5 「デザート」で「だしのとり方」は出ない', dessert.includes('だしのとり方'), false)
+  // 「その他」で絞る従来の道は今までどおり効く（種別の表示名は変えていない）
+  eq('IL-5 種別の言葉「その他」は変えていない', dishTypeSearchWord('dessert'), 'その他')
+  // 一致した場所の言い方: 別名で当たっても、レシピに書いてある言葉（タグ「おやつ」）を出す
+  const ilDessertReasons = ilFind('デザート').length > 0
+    ? searchMatchReasons(
+        ilRecipes.find((r) => r.tags.includes('おやつ')),
+        splitTerms('デザート'),
+      )
+    : []
+  eq('IL-5 別名で当たったときは「タグ」に出る', ilDessertReasons.map((x) => x.field), ['tag'])
+  eq(
+    'IL-5 別名で当たったときはレシピに書いてある言葉を出す',
+    ilDessertReasons.map((x) => x.word),
+    ['おやつ'],
+  )
+  eq(
+    'IL-5 一致した場所の行は ja の文言から作る',
+    searchMatchRowText({ field: 'tag', word: 'おやつ', count: dessert.length }),
+    ja.search.matchRow
+      .replace('{field}', ja.search.matchFieldTag)
+      .replace('{word}', 'おやつ')
+      .replace('{n}', String(dessert.length)),
+  )
+}
 
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)

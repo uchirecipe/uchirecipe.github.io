@@ -2,6 +2,7 @@ import {
   applianceSearchWords,
   categorySearchWords,
   dishTypeSearchWord,
+  tagSynonymWords,
   titleKanaKey,
   toHiragana,
   toTagKey,
@@ -232,11 +233,12 @@ function matchesQuery(recipe: Recipe, terms: string[]): boolean {
  *     多い順に羅列するイメージでした」
  *
  * 検索の索引（logic/kana.ts の buildSearchWords）は、料理名・材料名・タグ・検索キーワード・
- * 手順に出てくる調理器具・料理の種別・材料のカテゴリ語を**ひらがなの語の集まりに均して**持つ。
+ * 手順に出てくる調理器具・料理の種別・材料のカテゴリ語・タグの別名を
+ * **ひらがなの語の集まりに均して**持つ。
  * 均した時点で「どこから来た語か」は消えるので、一致した場所はここで**同じ規則をもう一度たどって**出す。
  * 索引の作り方（kana.ts）とこの関数の見る先がずれると説明が嘘になるため、
  * 語の作り方（toHiragana / toTagKey / applianceSearchWords / categorySearchWords /
- * dishTypeSearchWord）は**索引と同じ口**から読む。
+ * dishTypeSearchWord / tagSynonymWords）は**索引と同じ口**から読む。
  */
 export type SearchMatchField =
   | 'title'
@@ -306,7 +308,12 @@ export function searchMatchReasons(recipe: Recipe, terms: readonly string[]): Se
       add('title')
       continue
     }
-    for (const tag of recipe.tags) if (wordHits(tag, term)) add('tag', tag.trim())
+    for (const tag of recipe.tags) {
+      if (wordHits(tag, term)) add('tag', tag.trim())
+      // タグの別名（おやつ→デザート）で当たったときは、その元になったタグを出す
+      // ＝「デザート」で探した人が、どのタグでこの品が出たのかを読める（材料のカテゴリ語と同じ作法）
+      else if (tagSynonymWords(tag).some((word) => word.includes(term))) add('tag', tag.trim())
+    }
     for (const ing of recipe.ingredients) {
       // 索引に入っているのは調味料以外の材料名だけ（buildSearchWords と同じ線引き）
       if (!isSeasoningLike(ing) && wordHits(ing.name, term)) add('ingredient', ing.name.trim())

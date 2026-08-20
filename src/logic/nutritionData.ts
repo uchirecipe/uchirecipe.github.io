@@ -53,7 +53,7 @@ export const NUTRITION_DATA: NutritionData = {
   "source": "日本食品標準成分表（八訂）増補2023年（文部科学省）",
   "sourcePage": "https://www.mext.go.jp/a_menu/syokuhinseibun/mext_00001.html",
   "sourceFile": "https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx",
-  "generatedAt": "2026-08-10",
+  "generatedAt": "2026-08-20",
   "dbVersion": 6,
   "foods": [
     {
@@ -2926,7 +2926,8 @@ export const NUTRITION_DATA: NutritionData = {
       "mextName": "（砂糖類） 車糖 上白糖",
       "aliases": [
         "砂糖",
-        "上白糖"
+        "上白糖",
+        "グラニュー糖"
       ],
       "per100g": {
         "kcal": 391,

@@ -56,6 +56,43 @@ const CATEGORY_RULES: CategoryRule[] = [
   },
 ]
 
+/**
+ * タグの別名（2026-08-20 便IL・⑤。オーナー原文
+ *   「検索に引っかかるワードとしては『おやつ』も『デザート』もそれぞれで出てほしい。
+ *     内容としてはおなじなので、『デザート』で『おやつ』が表示されるのでも、逆でもいい。
+ *     ただ、大学芋がデザートかといえば違う気がするので『おやつ』だよなあ、はあります。
+ *     種別はそのまま。」）。
+ *
+ * 材料のカテゴリ語（「しめじ」→「きのこ」）と同じ仕組みで、**タグに別名を足す**。
+ * 1つの組に入れた言葉はどれで検索しても同じ品が出る（「おやつ」でも「デザート」でも出る）。
+ *
+ * **料理の種別には足さない**。種別 dessert の画面の名前は「その他」で、鮭フレークや
+ * だしのとり方の受け皿でもある。ここに「デザート」を足すと甘くない品まで並ぶ
+ * （DISH_TYPE_SEARCH_WORDS の説明を参照）。タグ「おやつ」に別名を足せば、
+ * オーナーが「おやつ」と呼びたい6品だけが「デザート」でも出る。
+ *
+ * **タグ名そのものは変えない**（レシピに書いてある言葉は「おやつ」のまま）。
+ * 検索の索引に別名を足すだけなので、絞り込みのチップも一覧の見た目も変わらない。
+ */
+const TAG_SYNONYM_GROUPS: readonly (readonly string[])[] = [['おやつ', 'デザート']]
+
+/**
+ * そのタグから検索語に足される別名（例:「おやつ」→「デザート」）を返す（2026-08-20 便IL・⑤）。
+ *
+ * buildSearchWords が下でやっている当てはめと**同じ表**をここから読む＝
+ * 「デザート」で当たったレシピに、その元になったタグを添えて一致した場所を出せる
+ * （材料のカテゴリ語 categorySearchWords と同じ作法）。返す語はひらがな化済み。
+ */
+export function tagSynonymWords(tag: string): string[] {
+  const normalized = toHiragana(tag)
+  const words = new Set<string>()
+  for (const group of TAG_SYNONYM_GROUPS) {
+    if (!group.some((word) => normalized.includes(toHiragana(word)))) continue
+    for (const word of group) words.add(toHiragana(word))
+  }
+  return [...words]
+}
+
 /** カタカナをひらがなに変換し、全角英数を半角化・小文字化した上で食材名辞書を適用する */
 export function toHiragana(input: string): string {
   const normalized = input
@@ -355,6 +392,8 @@ export function buildSearchWords(
       }
     }
   }
+  // タグの別名(例:「おやつ」→「デザート」)を追加する(2026-08-20 便IL・⑤)
+  for (const tag of tags) for (const word of tagSynonymWords(tag)) words.add(word)
   return [...words]
 }
 
@@ -365,7 +404,7 @@ export function buildSearchWords(
  * db/recipes.ts の rebuildSearchWordsIfNeeded が settings.searchIndexVersion と比較し、
  * 食い違っていれば起動時に全レシピのsearchWordsを再構築する。
  */
-export const SEARCH_INDEX_VERSION = 4 // v4: 料理の種別(主菜・副菜・汁物・その他)も検索語に入れる(2026-08-15 便GV)
+export const SEARCH_INDEX_VERSION = 5 // v5: タグの別名(おやつ⇄デザート)も検索語に入れる(2026-08-20 便IL)
 
 /**
  * settingsに保存済みのバージョンが古く、全レシピのsearchWordsを再構築すべきかを判定する
@@ -381,4 +420,93 @@ export function searchIndexNeedsRebuild(settings: {
     settings.ingredientReadingsVersion !== READINGS_VERSION ||
     settings.searchIndexVersion !== SEARCH_INDEX_VERSION
   )
+}
+/**
+ * 商品名に付く「飾り語」（2026-08-20 便IL・③。オーナー原文
+ * 「原価や栄養計算で、『オーガニックバニラビーンズペースト』や『微粒子グラニュー糖』など、
+ *   商品名の一部を切り取って材料を判断することは不可能ですか？」）。
+ *
+ * ここに並べるのは**産地・品質・売り文句・任意であること**を言う語だけ。
+ * 落としても中身は同じ食材なので、栄養（成分表の食品）にも原価（食材価格マスタ）にも
+ * 同じものとして当てられる。
+ *
+ * **味・中身が変わる語は絶対に入れない**。とくに次の語は落としてはいけない:
+ *  - 無塩・有塩・減塩・食塩不使用 … 食塩相当量が変わる（「無塩バター」を「バター」にしない）
+ *  - 無糖・加糖・微糖 … 糖質が変わる
+ *  - 無調整・調製 … 豆乳は成分そのものが違う
+ *  - 低脂肪・全粒・胚芽・薄力・強力・無洗 … 別の食品として成分表に載っている
+ *  - 生・冷凍・乾燥・干し・純 … 「生クリーム」「生姜」「冷凍パイシート」「純ココア」のように
+ *    語の一部だったり、状態が変わると扱いも変わる
+ *
+ * 並びは長い語から当てる（「有機栽培」を「有機」より先に落とす）。
+ */
+const INGREDIENT_DECORATION_WORDS: readonly string[] = [
+  'オーガニック',
+  '有機栽培',
+  '有機JAS',
+  '有機',
+  '微粒子',
+  '微粒',
+  '国産',
+  '北海道産',
+  '九州産',
+  '地元産',
+  '産地直送',
+  '産直',
+  '朝どり',
+  '朝採り',
+  '朝採れ',
+  'とれたて',
+  '採れたて',
+  '完熟',
+  '新鮮な',
+  '新鮮',
+  '厳選した',
+  '厳選',
+  'こだわりの',
+  'こだわり',
+  '特選',
+  '上質な',
+  '上質',
+  '極上',
+  '最高級',
+  '高級な',
+  '高級',
+  '無添加',
+  '業務用',
+  'お徳用',
+  '徳用',
+  '市販の',
+  '市販',
+  'お好みの',
+  'お好みで',
+  '好みの',
+  'あれば',
+  '自家製',
+  '手作りの',
+  '手作り',
+]
+const decorationWords = [...INGREDIENT_DECORATION_WORDS].sort((a, b) => b.length - a.length)
+
+/**
+ * 材料名の先頭に付いた飾り語を落とす（2026-08-20 便IL・③）。
+ *
+ * 落とすのは**先頭だけ**（「たまねぎ（国産）」のような括弧書きは、栄養・原価の照合が
+ * それぞれ元から括弧を外して見ている）。「有機国産たまねぎ」のように重ねてある場合に備えて
+ * 数回くり返すが、**落とすと何も残らなくなるなら落とさない**
+ * （「国産」だけの行を空の名前にしない）。
+ *
+ * 飾り語が無い名前は1文字も変わらないので、この関数を通しても名寄せの結果は悪くならない。
+ */
+export function stripIngredientDecoration(name: string): string {
+  const trimmed = name.trim()
+  let rest = trimmed
+  for (let i = 0; i < 3; i++) {
+    const hit = decorationWords.find(
+      (word) => rest.startsWith(word) && rest.length > word.length,
+    )
+    if (!hit) break
+    rest = rest.slice(hit.length).trim()
+  }
+  return rest || trimmed
 }

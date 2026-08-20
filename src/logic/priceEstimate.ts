@@ -1,6 +1,6 @@
 import type { Ingredient } from '../db/types'
 import { leadingRangeAmount, normalizeAmountInput, resolveCalcAmount } from './amount'
-import { toHiragana } from './kana'
+import { stripIngredientDecoration, toHiragana } from './kana'
 import { normalizeUnit, parseUnitQuantity } from './unitGrams'
 import { typicalAmountFor } from './amountAssumption'
 // 栄養側の「1枚=◯g」等の目安量(文部科学省 日本食品標準成分表ベース・docs/47監査済み)を
@@ -95,6 +95,20 @@ export function buildPriceIndex(
  * 重複チェックと同じかな正規化キーで比較する）。
  */
 export function matchPriceEntry(name: string, index: PriceIndexEntry[]): PriceIndexEntry | undefined {
+  const hit = matchPriceEntryExact(name, index)
+  if (hit) return hit
+  // 素の名前で当たらなかったときだけ、商品名の飾り語（オーガニック・微粒子・国産…）を落として
+  // もう一度探す（2026-08-20 便IL・③）。原価側の照合は「マスタ名で始まるか」の前方一致なので、
+  // 名前の頭に飾り語が付いているだけで1件も当たらなかった（「国産たまねぎ」→ 価格なし）。
+  // 当たらなかったときの最後の手当てなので、これまで当たっていた材料の結果は変わらない
+  const stripped = stripIngredientDecoration(name)
+  return stripped !== name.trim() ? matchPriceEntryExact(stripped, index) : undefined
+}
+
+function matchPriceEntryExact(
+  name: string,
+  index: PriceIndexEntry[],
+): PriceIndexEntry | undefined {
   const normalized = normalizeIngredientNameForPrice(name)
   if (!normalized) return undefined
   const key = toHiragana(normalized)

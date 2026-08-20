@@ -63,14 +63,37 @@ function stripHtmlTags(text: string): string {
   return text.replace(/<[^>]*>/g, '')
 }
 
+/**
+ * 改行として扱うタグ(<br>と、段落・箇条書き・表の行の閉じタグ)。
+ * ただ落とすだけだと前後の文がくっついて「卵を溶く砂糖を加える」になるため、先に改行へ置き換える
+ * (このあとの collapseWhitespace が半角スペース1つにまとめる)。
+ */
+const LINE_BREAK_TAG = /<\s*br\s*\/?\s*>|<\/\s*(?:p|div|li|tr|h[1-6])\s*>/gi
+
+/** 改行のタグを改行に置き換えてから、残りのタグを落とす */
+function stripMarkup(text: string): string {
+  return stripHtmlTags(text.replace(LINE_BREAK_TAG, '\n'))
+}
+
 /** 改行・タブ・連続空白を単一の半角スペースにまとめる */
 function collapseWhitespace(text: string): string {
   return text.replace(/[\s　]+/g, ' ').trim()
 }
 
-/** タグ除去→実体参照復号→空白正規化までを一括で行う(表示用テキストの共通クリーンアップ) */
+/**
+ * タグ除去→実体参照復号→空白正規化までを一括で行う(表示用テキストの共通クリーンアップ)。
+ *
+ * タグ除去を**2周する**(2026-08-20 便IL・オーナー実機報告「手順で『<br>』が入ったままなのは
+ * 気になった」)。取り込み元には、同じ改行を「生のタグ」で書くサイトと「&lt;br&gt;」のように
+ * 実体参照へ置き換えて書くサイトの両方がある。1周だけだと、実体参照を読み解いた**あと**に
+ * 現れる「<br>」が本文にそのまま残り、手順・材料名に印が見えたままになっていた。
+ * 落とす→読み解く→もう一度落とす、の順にすればどちらの書き方でも同じ結果になる。
+ *
+ * 副作用として「&lt;100度&gt;」のように実体参照で書かれた不等号の組もタグとみなして落ちるが、
+ * レシピ本文にその書き方が出ることはまず無く、印が残るほうの実害が大きいので許容する。
+ */
 function cleanText(text: string): string {
-  return collapseWhitespace(decodeHtmlEntities(stripHtmlTags(text)))
+  return collapseWhitespace(stripMarkup(decodeHtmlEntities(stripMarkup(text))))
 }
 
 // ============================================================================
