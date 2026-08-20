@@ -2412,37 +2412,89 @@ try {
   // 2026-07-30 便CJで手順を改訂: ①に「作った記録」の写真の扱い(C5)、②にファイルの受け渡し(C4)、
   // ④は「解錠コードを入れ直す」誤情報の撤去(C3。実際はファイルから自動で戻る) ---
   currentCheck = 'MOVEGUIDE-01'
+  // 2026-08-20 便IJ: ここは**文言を書き写して**測っていたため、手順を「1行＋下の注記」に
+  // 分けた時点で4件が落ちた（アプリは正常。禁じ手②）。文言は ja.ts から読む形に直し、
+  // 「①の中にあるか」「地の文より弱くなっていないか」は**画面の作り**で測る。
+  // 手順そのものの数（4つ）も決め打ちせず ja の並びから取る
+  const moveGuideSteps = [
+    ja.settings.moveGuideStep1,
+    ja.settings.moveGuideStep2,
+    ja.settings.moveGuideStep3,
+    ja.settings.moveGuideStep4,
+  ]
   check(
     'MOVEGUIDE-01 「機種変更するときは」の折りたたみ見出しが見える',
-    (await page.textContent('body')).includes('機種変更するときは'),
+    (await page.textContent('body')).includes(ja.settings.moveGuideToggle),
   )
   check(
     'MOVEGUIDE-01 既定は畳まれていて手順は見えない',
-    !(await page.textContent('body')).includes('この端末で「ファイルに書き出す」'),
+    !(await page.textContent('body')).replaceAll('​', '').includes(ja.settings.moveGuideStep1),
   )
   await page.getByRole('button', { name: '機種変更するときは', exact: true }).click()
   await page.waitForTimeout(300)
   {
-    const guideText = await page.textContent('body')
+    const guideText = (await page.textContent('body')).replaceAll('​', '')
+    const moveGuideMissing = moveGuideSteps.filter((step) => !guideText.includes(step))
     check(
       'MOVEGUIDE-01 展開すると4ステップが見える',
-      guideText.includes('この端末で「ファイルに書き出す」') &&
-        guideText.includes('「データを上書き」を押してそのファイルを選ぶ') &&
-        guideText.includes('Pro版は①のファイルから一緒に戻ります'),
+      moveGuideSteps.length === 4 &&
+        moveGuideSteps.every((step) => typeof step === 'string' && step.length > 0) &&
+        moveGuideMissing.length === 0,
+      `画面に無い手順=${JSON.stringify(moveGuideMissing)}`,
     )
+    // 便CJ/C5「写真だけ静かに失わせない」。**①の中にあること**と、**地の文より弱くないこと**を
+    // 画面の作りで測る（2026-08-20 便IJ で手順本文から下の注記へ移したので、
+    // 「文字が入っているか」だけでは静かになったかどうかが分からない）
+    const moveGuidePhoto = await page.evaluate((noteText) => {
+      const notes = Array.from(document.querySelectorAll('[data-testid="move-guide-step1-note"]'))
+      const note = notes.find((el) => (el.textContent ?? '').replaceAll('​', '').includes(noteText))
+      if (!note) return { found: false }
+      // 手順の行（li）をたどる。入れ子の段数には依らず「いちばん近い li」を親とする
+      const li = note.closest('li')
+      const ol = li?.closest('ol')
+      const stepIndex = ol && li ? Array.from(ol.children).indexOf(li) : -1
+      const noteStyle = getComputedStyle(note)
+      // 比べる相手は、その手順の地の文（li の直下のテキスト）の見た目
+      const liStyle = li ? getComputedStyle(li) : null
+      return {
+        found: true,
+        stepIndex,
+        bold: Number(noteStyle.fontWeight) > Number(liStyle?.fontWeight ?? 400),
+        colored: noteStyle.color !== liStyle?.color,
+        visible: note.getBoundingClientRect().height > 0,
+      }
+    }, ja.settings.moveGuideStep1Note)
     check(
       'MOVEGUIDE-01 便CJ/C5: ①に「作った記録」の写真を含める操作の案内がある(写真だけ静かに失わせない)',
-      guideText.includes('「作った記録」の写真も新しい端末へ移すなら'),
+      moveGuidePhoto.found === true && moveGuidePhoto.stepIndex === 0 && moveGuidePhoto.visible === true,
+      JSON.stringify(moveGuidePhoto),
+    )
+    check(
+      // 手順本文から注記へ移したぶん、字は小さくなる。**太字か色つきのどちらか**で
+      // 地の文より目立っていること＝静かにしない（どちらでもなければ本当に弱くなっている）
+      'MOVEGUIDE-01 便CJ/C5: その案内が手順の地の文より弱くなっていない(太字か色つき)',
+      moveGuidePhoto.found === true && (moveGuidePhoto.bold === true || moveGuidePhoto.colored === true),
+      JSON.stringify(moveGuidePhoto),
     )
     check(
       'MOVEGUIDE-01 便CJ/C4: ファイルを新しい端末へ移す工程が独立したステップとして書かれている',
-      guideText.includes('書き出したファイルを新しい端末へ移す'),
+      guideText.includes(ja.settings.moveGuideStep2),
     )
     check(
       'MOVEGUIDE-01 便CJ/C3: 「解錠コードを入れ直す」という実装と矛盾した案内が無い',
       !guideText.includes('購入コードを入れ直す') && !guideText.includes('解錠コードを入れ直す（'),
     )
-    check('MOVEGUIDE-01 注意文が見える', guideText.includes('先にレシピを登録していた場合は消える'))
+    check(
+      // 上の「無いこと」だけだと、④ごと消えても合格に倒れる。**戻ることを言っている**側も見る
+      'MOVEGUIDE-01 便CJ/C3: Pro版がファイルから一緒に戻ることは書いてある',
+      guideText.includes(ja.settings.moveGuideStep4Note),
+    )
+    const moveGuideNotesMissing = ja.settings.moveGuideNotes.filter((n) => !guideText.includes(n))
+    check(
+      'MOVEGUIDE-01 注意文が見える',
+      ja.settings.moveGuideNotes.length >= 2 && moveGuideNotesMissing.length === 0,
+      `画面に無い注意=${JSON.stringify(moveGuideNotesMissing)}`,
+    )
   }
   // 畳んで元に戻す(以降のチェックに影響しないように)
   await page.getByRole('button', { name: '機種変更するときは', exact: true }).click()
@@ -2478,10 +2530,19 @@ try {
     (await page.textContent('body')).includes('消えるもの: 画面の一時ファイルだけです') &&
       (await page.textContent('body')).includes('残るもの: レシピ・価格・設定・解錠コードなど'),
   )
-  check(
-    'REFRESH-APP-01 ブラウザのキャッシュクリアに関する注意(「Cookieと他のサイトデータ」)がある(修正4)',
-    (await page.textContent('body')).includes('Cookieと他のサイトデータ」を消すとレシピなどのデータがすべて消えます'),
-  )
+  {
+    // 2026-08-20 便IJ: 153字の1文を3行に分けたので、文言を書き写した判定は落ちた（禁じ手②）。
+    // ja.ts から読む形にし、**3行とも**画面に出ていることを見る（分けた拍子に1行落ちたら赤くなる）
+    const refreshBody = (await page.textContent('body')).replaceAll('​', '')
+    const refreshMissing = ja.settings.refreshAppCacheClearWarnings.filter(
+      (line) => !refreshBody.includes(line),
+    )
+    check(
+      'REFRESH-APP-01 ブラウザのキャッシュクリアに関する注意(「Cookieと他のサイトデータ」)がある(修正4)',
+      ja.settings.refreshAppCacheClearWarnings.length >= 2 && refreshMissing.length === 0,
+      `画面に無い行=${JSON.stringify(refreshMissing)}`,
+    )
+  }
   check(
     'REFRESH-APP-01 上書きボタン(前回の場所に上書き)はFile System Access API非対応のheadless環境では出ない',
     !(await page.textContent('body')).includes('前回の場所に上書き'),
