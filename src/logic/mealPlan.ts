@@ -163,6 +163,16 @@ export type MealGenre = (typeof MEAL_GENRES)[number]
 export const PLAN_QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
 
 /**
+ * 「週をコピー」で選べるコピー元の週（何週間前か・2026-08-20 便II・⑤）。
+ *
+ * オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
+ * 表示している週をコピーにはできない？」への第1段階。
+ * 4週間前まで＝1か月ぶんをさかのぼれる。これより前の週や、週の区切りに合わない任意の7日間を
+ * 中身を見ながら選ぶ形は、画面を1つ作る規模なので別に立てる（司令部と共有済み）。
+ */
+export const COPY_SOURCE_WEEKS_BACK_OPTIONS = [1, 2, 3, 4] as const
+
+/**
  * 分数を指定しなかったときの「◯分以内」（2026-08-19 便HT）。
  * 15分は便DE-7でオーナーが決めた値で、そのまま既定にしている
  * ＝分数を選べるようにしても、これまで使っていた人の結果は変わらない。
@@ -1048,11 +1058,11 @@ export function planWeekFill(
 /** ロック未指定の呼び出し用の空集合（毎回 new Set しないための共有インスタンス） */
 const EMPTY_LOCK_KEYS: ReadonlySet<string> = new Set<string>()
 
-/** 「先週の献立をコピー」の計画（planCopyLastWeek の戻り値） */
+/** 「別の週の献立をコピー」の計画（planCopyLastWeek の戻り値） */
 export interface CopyLastWeekPlan {
   /** 実際に追加する行。空ならコピーするものが無い */
   ops: { date: string; slot: MealSlot; recipeId: number; role: MealRole }[]
-  /** コピー元（1週間前の同じ曜日）にあった品数。0なら「先週に献立が無い」 */
+  /** コピー元（選んだ週の同じ曜日）にあった品数。0なら「その週に献立が無い」 */
   sourceTotal: number
   /** 鍵が掛かっていて対象から外した食事の数（確認文の件数に使う。2026-08-08 便DX） */
   lockedSlotCount: number
@@ -1066,7 +1076,7 @@ export interface CopyLastWeekPlan {
 }
 
 /**
- * S-3「先週の献立をコピー」の計画を立てる純ロジック
+ * S-3「別の週の献立をコピー」の計画を立てる純ロジック
  * （2026-07-25 便BU・docs/59。2026-08-08 便DXでロック対応と同時に画面から切り出した）。
  *
  * 守ること:
@@ -1080,6 +1090,12 @@ export interface CopyLastWeekPlan {
  * - replaceAll あり（総入れ替え）… その食事に今ある行を消してから、コピー元の献立を入れる。
  *   コピー元が空の食事は空になる（自動提案の総入れ替え＝planWeekFill と同じ意味にそろえる）。
  *   消す操作なので、呼び出し側は規約Fの確認（何が消えて何が残るか・件数つき）を必ず通す。
+ *
+ * 2026-08-20 便II・⑤（オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
+ * 表示している週をコピーにはできない？」）: コピー元を**何週間前か**で選べるようにした
+ * （weeksBack。既定は1＝これまでと同じ先週）。コピー先は表示している週のままなので、
+ * 「先々週の献立を今週へ」がこの画面のままできる。呼び出し側は prevEntries に
+ * **選んだ週の7日分**を渡すこと（範囲の取得と weeksBack がずれると、写る中身が食い違う）。
  */
 export function planCopyLastWeek(options: {
   /** コピー先の日付（表示中の週の7日） */
@@ -1090,8 +1106,14 @@ export function planCopyLastWeek(options: {
   visibleSlots: MealSlot[]
   /** コピー先に今ある献立（総入れ替えでは id を使って消す） */
   entries: Pick<MealPlanEntry, 'id' | 'date' | 'slot'>[]
-  /** コピー元（1週間前の週）の献立 */
+  /** コピー元（weeksBack で選んだ週）の献立 */
   prevEntries: Pick<MealPlanEntry, 'date' | 'slot' | 'recipeId' | 'role'>[]
+  /**
+   * コピー元が何週間前か（2026-08-20 便II・⑤。既定は1＝先週）。
+   * 1日ずつではなく必ず7日単位で戻す＝どの表示のしかた（週区切り／今日を先頭に7日間）でも
+   * 「同じ曜日」を指す。
+   */
+  weeksBack?: number
   /** 鍵の掛かっている食事（'YYYY-MM-DD|slot'） */
   lockedKeys?: ReadonlySet<string>
   /** すでに決まっている食事も入れ替える（2026-08-19 便IF・⑧。既定は false＝非破壊） */
@@ -1100,6 +1122,11 @@ export function planCopyLastWeek(options: {
   const { dates, today, visibleSlots, entries, prevEntries } = options
   const lockedKeys = options.lockedKeys ?? EMPTY_LOCK_KEYS
   const replaceAll = options.replaceAll ?? false
+  // 何週間前から写すか。1未満・整数でない値が来ても1週間前に倒す（コピーが止まらないようにする）
+  const weeksBack =
+    Number.isInteger(options.weeksBack) && (options.weeksBack as number) >= 1
+      ? (options.weeksBack as number)
+      : 1
   const filledKeys = new Set(entries.map((e) => `${e.date}|${e.slot}`))
   const entriesByKey = new Map<string, typeof entries>()
   for (const e of entries) {
@@ -1122,7 +1149,7 @@ export function planCopyLastWeek(options: {
   let replacedSlotCount = 0
   for (const date of dates) {
     if (isPastDate(date, today)) continue
-    const src = shiftDate(date, -7)
+    const src = shiftDate(date, -7 * weeksBack)
     for (const slot of visibleSlots) {
       const srcEntries = prevByKey.get(`${src}|${slot}`) ?? []
       sourceTotal += srcEntries.length

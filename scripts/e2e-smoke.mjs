@@ -386,10 +386,13 @@
 //         はみ出しなし。2026-08-18 便HO・オーナー実機「LPの改行：大画面で「きます」だけは変なので、
 //         １行が納まる幅になおしてください。」で足した: 結びの一文が1行に収まっていて、
 //         囲みはその一文が1行に収まるのに要る幅より広くない(＝余白を増やしていない)) /
-//         DAYORG-01(2026-08-20 便IG・①: 「今日の献立」の×を「整理」モードの中へ移した。
-//         整理でないときは×がどこにも出ない・「整理」に入ると2品ぶんの×が出る・
-//         外した後にそのお知らせから元に戻せる(今日と今週の両方へ)・「完了」で引っ込む。
-//         A案の要＝「作った！」「全て作った！」はモードの外に残ることも毎回見る) /
+//         DAYORG-01(2026-08-20 便IG・① → 便II・⑥: 「今日の献立」の×と「作った！」を
+//         「整理」モードの中へ移した。整理でないときは×も「作った！」も「全て作った！」も
+//         どこにも出ない(料理名の行だけ)・「整理」に入ると3つとも出る・外した後にそのお知らせから
+//         元に戻せる(今日と今週の両方へ)・「完了」で3つとも引っ込み料理名の行は残る) /
+//         FOLDRUN-01(2026-08-20 便II・③: 折りたたみを開かなくても決めてもらう操作に手が届く。
+//         日「今日なに作る？」・週「献立を提案」の両方で、畳んだままでも実行ボタンが出ていて
+//         44px以上あり、押すと実際に効く(日=候補が出て節が開く / 週=端末の献立の行が増える)) /
 //         CARDSMALL-01(2026-08-20 便IG・⑫: 「小」のカードに写真があっても絵が膨らまない。
 //         月の日の窓と週タブの過ぎた日の両方で、料理名の幅・絵の大きさ・行の高さを実測する
 //         (直す前は絵が600px角・料理名の幅が4pxだった)) /
@@ -4008,6 +4011,8 @@ try {
         beforeText.includes('肉じゃが') && beforeText.includes('カレーライス'),
       )
 
+      // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
+      await openDayOrganize(taPage)
       await taPage.getByRole('button', { name: '全て作った！' }).click()
       await taPage.waitForTimeout(800)
       // 便DP-1: 押す前の確認文が規約F(何件・何が消える・何が残る)を満たす
@@ -4126,6 +4131,8 @@ try {
       // **塗り**にそろえた。**見た目の指定そのものを固定すると、そろえるたびに落ちる**ので、
       // ここが見たいこと＝**押せるものだと分かる見た目である**ことで測る（CLAUDE.md 禁じ手④）。
       // 「同じ役目どうしが同じ塗り方か」は test-logic の HN-1 が受け持つ
+      // 2026-08-20 便II・⑥: 行の「作った！」も整理モードの中に移った
+      await openDayOrganize(tuPage)
       const tuCookedBtn = tuPage.getByRole('button', { name: '作った！', exact: true }).first()
       const tuBtnCls = (await tuCookedBtn.getAttribute('class')) ?? ''
       const tuBtnBox = await tuCookedBtn.boundingBox()
@@ -4345,14 +4352,21 @@ try {
   }
 
 
-  // --- DAYORG-01: 「今日の献立」の×は「整理」の中だけに出す(2026-08-20 便IG・①)。
-  // オーナー原文「「作った！」と×が邪魔。作った！をつけるときにはモード切り替えするようにしたら
-  // 解決できる？全て作った！も含めて。」→ 司令部の裁定はA案＝**×だけ**をモードの中へ移し、
-  // 毎日押す「作った！」「全て作った！」は出したまま。
-  // 見張るのは ①整理でないときに×が出ていない ②整理にすると出る ③外した後に元に戻せる の3つ。
+  // --- DAYORG-01: 「今日の献立」の「作った！」と×は「整理」の中だけに出す
+  // (2026-08-20 便IG・① → 便II・⑥で「作った！」「全て作った！」も中へ)。
+  // オーナー原文(便IG)「「作った！」と×が邪魔。作った！をつけるときにはモード切り替えするようにしたら
+  // 解決できる？全て作った！も含めて。」→ 便IGはA案＝**×だけ**をモードの中へ移したが、
+  // オーナーが実機を見て裁定をひっくり返した(便II・⑥の原文「整理に作った！も入れたい。
+  // 作った！が気軽にできないよりも、献立を１画面で確認できない方が問題では？」)。
+  // 見張るのは ①整理でないときは「作った！」も「全て作った！」も×も出ていない(料理名の行だけ)
+  // ②整理にすると3つとも出る ③外した後に元に戻せる ④「完了」で3つとも引っ込む。
+  // **対で見るもの**: 「◯食に入れる」は整理モードの外にも出したまま(司令部の裁定)。
+  // 「整理」は減らす・終わらせる操作の集まりで、「これから決める」操作は性質が違う。
+  // 「レシピ一覧から選択中」はレシピを選んだ直後の一時的な状態なので、次にやることを
+  // モードの奥に入れると、選んだ直後に手が止まる(流れの途中に行き止まりを作らない)。
   // 掴み方は読み上げの名前(aria-label)と ja.ts の文言だけ＝どの入れ子・どの並びに出ていても
-  // 同じ判定になる(禁じ手④)。数え上げが0件で素通りしないよう、前提(2品が並び「作った！」が
-  // 2つある)を先に測ってから本題に入る(禁じ手「見つからなかった＝合格」対策) ---
+  // 同じ判定になる(禁じ手④)。数え上げが0件で素通りしないよう、前提(2品の料理名が並んでいる)を
+  // 先に測ってから本題に入る(禁じ手「見つからなかった＝合格」対策) ---
   currentCheck = 'DAYORG-01'
   {
     const doBrowser = await chromium.launch()
@@ -4381,6 +4395,13 @@ try {
       doPage.locator(
         `button[aria-label="${ja.mealPlan.todayRemove}"], button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`,
       )
+    // 「朝食に入れる」「昼食に入れる」「夕食に入れる」。名前は ja.ts から組み立てる
+    // （画面の字を書き写さない。食事の呼び名が変わってもこの検査は動く）
+    const doSlotNames = ['breakfast', 'lunch', 'dinner'].map((slot) =>
+      ja.mealPlan.planMismatchAddToSlot.replace('{slot}', ja.mealPlan.slot[slot]),
+    )
+    const doSlotButtons = () =>
+      doPage.locator(doSlotNames.map((n) => `button:text-is("${n}")`).join(', '))
     try {
       await doPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await doPage.waitForTimeout(1800) // 初回シード完了待ち
@@ -4405,31 +4426,40 @@ try {
       await doPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await doPage.waitForTimeout(1500)
       const doCooked = doPage.getByRole('button', { name: ja.mealPlan.todayMarkCooked, exact: true })
+      const doAll = doPage.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked, exact: true })
       const doBody0 = ((await doPage.textContent('body')) ?? '').replaceAll('​', '')
       check(
-        'DAYORG-01 前提: 今日の献立に2品が並び、「作った！」が2つある',
-        doBody0.includes('肉じゃが') &&
-          doBody0.includes('ほうれん草のおひたし') &&
-          (await doCooked.count()) === 2,
-        `作った！=${await doCooked.count()}`,
+        'DAYORG-01 前提: 今日の献立に2品の料理名が並んでいる',
+        doBody0.includes('肉じゃが') && doBody0.includes('ほうれん草のおひたし'),
+        `本文に肉じゃが=${doBody0.includes('肉じゃが')} ほうれん草のおひたし=${doBody0.includes('ほうれん草のおひたし')}`,
       )
 
-      // ---------- ① 整理でないときに×が出ていない ----------
+      // ---------- ① 整理でないときは、料理名の行だけ(2026-08-20 便II・⑥) ----------
       check(
         'DAYORG-01(①) 整理モードでないときは、献立から外す×がどこにも出ていない',
         (await doRemoveButtons().count()) === 0,
         `×=${await doRemoveButtons().count()}`,
       )
-      // A案の要:「作った！」「全て作った！」はモードの外に残す(毎日押す操作を奥へ入れない)
       check(
-        'DAYORG-01(A案) 「作った！」は整理モードでなくても押せる',
-        (await doCooked.count()) === 2 && (await doCooked.first().isVisible()),
+        'DAYORG-01(⑥) 整理モードでないときは、行の「作った！」がどこにも出ていない',
+        (await doCooked.count()) === 0,
+        `作った！=${await doCooked.count()}`,
       )
-      const doAll = doPage.getByRole('button', { name: ja.mealPlan.todayMarkAllCooked, exact: true })
       check(
-        'DAYORG-01(A案) 「全て作った！」も整理モードでなくても押せる',
-        (await doAll.count()) === 1 && (await doAll.isVisible()),
+        'DAYORG-01(⑥) 整理モードでないときは、「全て作った！」も出ていない',
+        (await doAll.count()) === 0,
         `全て作った！=${await doAll.count()}`,
+      )
+      check(
+        'DAYORG-01(⑥) 整理モードでないときは、「作った！」の説明の1行も出ていない(出ていない操作の説明を先に読ませない)',
+        !doBody0.includes(ja.mealPlan.todayMarkCookedHint),
+      )
+      // 「◯食に入れる」だけは整理モードの外にも出す(司令部の裁定)。
+      // 3つの食事ぶんそろって出ることまで見る＝1つだけ残った状態を合格にしない
+      check(
+        'DAYORG-01(裁定) 整理モードでなくても「◯食に入れる」は出したまま(選んだ直後の行き止まりを作らない)',
+        (await doSlotButtons().count()) === doSlotNames.length,
+        `◯食に入れる=${await doSlotButtons().count()} / 期待=${doSlotNames.length}`,
       )
 
       // ---------- ② 整理にすると出る ----------
@@ -4453,15 +4483,28 @@ try {
         `×=${await doRemoveButtons().count()}`,
       )
       check(
-        'DAYORG-01(①) 整理モードで何ができるかの1行が読める',
-        ((await doPage.textContent('body')) ?? '')
-          .replaceAll('​', '')
-          .includes(ja.mealPlan.todayOrganizeHint),
+        'DAYORG-01(⑥) 整理モードにすると、2品ぶんの「作った！」が出る',
+        (await doCooked.count()) === 2 && (await doCooked.first().isVisible()),
+        `作った！=${await doCooked.count()}`,
       )
       check(
-        'DAYORG-01(A案) 整理モードでも「作った！」は消えない(押す道が無くならない)',
-        (await doCooked.count()) === 2,
-        `作った！=${await doCooked.count()}`,
+        'DAYORG-01(⑥) 整理モードにすると、「全て作った！」も出る',
+        (await doAll.count()) === 1 && (await doAll.isVisible()),
+        `全て作った！=${await doAll.count()}`,
+      )
+      check(
+        'DAYORG-01(裁定) 整理モードにしても「◯食に入れる」は消えない(モードの内と外で同じ場所にある)',
+        (await doSlotButtons().count()) === doSlotNames.length,
+        `◯食に入れる=${await doSlotButtons().count()}`,
+      )
+      const doBody1 = ((await doPage.textContent('body')) ?? '').replaceAll('​', '')
+      check(
+        'DAYORG-01(①) 整理モードで何ができるかの1行が読める',
+        doBody1.includes(ja.mealPlan.todayOrganizeHint),
+      )
+      check(
+        'DAYORG-01(⑥) 整理モードでは「作った！」の説明の1行も読める',
+        doBody1.includes(ja.mealPlan.todayMarkCookedHint),
       )
 
       // ---------- ③ 外した後に元に戻せる(便HQの「元に戻す」が遠くならない) ----------
@@ -4508,9 +4551,20 @@ try {
         await doDone.click()
         await doPage.waitForTimeout(500)
         check(
-          'DAYORG-01(①) 「完了」で×は引っ込み、「作った！」は残る',
-          (await doRemoveButtons().count()) === 0 && (await doCooked.count()) === 2,
-          `×=${await doRemoveButtons().count()} 作った！=${await doCooked.count()}`,
+          'DAYORG-01(⑥) 「完了」で×も「作った！」も「全て作った！」も引っ込む(料理名の行だけに戻る)',
+          (await doRemoveButtons().count()) === 0 &&
+            (await doCooked.count()) === 0 &&
+            (await doAll.count()) === 0,
+          `×=${await doRemoveButtons().count()} 作った！=${await doCooked.count()} 全て作った！=${await doAll.count()}`,
+        )
+        check(
+          'DAYORG-01(⑥) 「完了」で引っ込むのは操作だけで、料理名の行は残る',
+          ((await doPage.textContent('body')) ?? '').replaceAll('​', '').includes('肉じゃが'),
+        )
+        check(
+          'DAYORG-01(裁定) 「完了」で戻しても「◯食に入れる」は残る',
+          (await doSlotButtons().count()) === doSlotNames.length,
+          `◯食に入れる=${await doSlotButtons().count()}`,
         )
       }
     } finally {
@@ -5332,7 +5386,8 @@ try {
       }
       await wuPage.getByRole('button', { name: '日', exact: true }).click()
       await wuPage.waitForTimeout(900)
-      // 肉じゃがの行の「作った！」だけを押す
+      // 肉じゃがの行の「作った！」だけを押す（2026-08-20 便II・⑥で整理モードの中に移った）
+      await openDayOrganize(wuPage)
       await wuPage.evaluate(() => {
         const li = [...document.querySelectorAll('li')].find((el) => el.textContent?.includes('肉じゃが'))
         const b = [...(li?.querySelectorAll('button') ?? [])].find((x) => x.textContent?.includes('作った！'))
@@ -5555,14 +5610,11 @@ try {
         'WEEKUI-DT(便DT-5) 実行ボタンは塗りつぶしで目立たせている',
         ((await dtFillBtn.getAttribute('class')) ?? '').includes('bg-accent'),
       )
-      // 2026-08-19 便IF・⑥（オーナー原文「日と週で、同じ献立を提案する機能なのに、条件の
-      // 絞り込みなどのボタンの配置がバラバラで、まるで別機能。フォーマット揃えたい。
-      // 週は、日の、できることが増えたバージョン。」）で、DT-5/DT-6 の「実行ボタンは見出しの横・
-      // 畳んでも押せる」をやめた。日タブの「今日なに作る？」と同じ場所（条件の下・横いっぱい）
-      // へ移し、そのぶん「献立を提案」は既定で開く（＝便DJでオーナーが決めた既定に戻した）。
-      // 実行ボタンが中に入ったので、畳むと日タブの節を畳んだときと同じく操作ごと隠れる。
-      // 日と週の並びがそろっているかは WEEKFMT-01 が規則で測るので、ここでは
-      // 「既定で開いている」「畳めば中身ごと隠れる」の2つだけを見る
+      // 2026-08-19 便IF・⑥で実行ボタンを日タブと同じ場所（条件の下・横いっぱい）へ移した。
+      // 2026-08-20 便II・③（オーナー原文「折りたたんだ状態で「まとめて献立を入力」ボタンほしい」）で、
+      // その実行ボタンだけを**折りたたみの外**へ出した＝開いているときの並びは便IF・⑥のまま、
+      // 畳んだときも押せる。日タブの「今日なに作る？」も同じ形（FOLDRUN-01が日・週の両方で測る）。
+      // ここでは「既定で開いている」「畳むと条件と入れかたは隠れるが、実行ボタンは残る」を見る
       const dtAutoClose = dtPage.getByRole('button', { name: '献立を提案を閉じる' })
       check(
         'WEEKUI-DT(便IF-⑥) 「献立を提案」は既定で開いている',
@@ -5571,11 +5623,14 @@ try {
       await dtAutoClose.click()
       await dtPage.waitForTimeout(400)
       check(
-        'WEEKUI-DT(便IF-⑥) 畳むと現在の条件・入れかた・実行ボタンがまとめて隠れる(日タブの節と同じ)',
+        'WEEKUI-DT(便II-③) 畳むと現在の条件と入れかたは隠れる',
         // 2026-08-19 便ID・③: 「提案の条件」→「現在の条件」に改名した(名前は ja.ts から読む)
         (await dtPage.getByRole('button', { name: new RegExp(`^${ja.mealPlan.suggestConditionsToggle}`) }).count()) === 0 &&
-          (await dtPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).count()) === 0 &&
-          (await dtPage.locator('[data-testid="week-fill-run"]').count()) === 0,
+          (await dtPage.locator('[data-testid="fill-mode"]').count()) === 0,
+      )
+      check(
+        'WEEKUI-DT(便II-③) 畳んでも「まとめて献立を入力」は残る(折りたたみを開かなくても押せる)',
+        (await dtPage.locator('[data-testid="week-fill-run"]').count()) === 1,
       )
       await dtPage.getByRole('button', { name: '献立を提案を開く' }).click()
       await dtPage.waitForTimeout(300)
@@ -5603,11 +5658,11 @@ try {
       )
 
       // ---------- DT-8: 入れかたスイッチ。既定は非破壊 ----------
+      // 2026-08-20 便II・④: 入れかたは2つのチップからプルダウン1つになった
       check(
         `WEEKUI-DT(便DT-8) 既定の入れかたは「${ja.mealPlan.fillModeFillEmpty}」(非破壊)`,
-        (await dtPage
-          .getByRole('button', { name: ja.mealPlan.fillModeFillEmpty, exact: true })
-          .getAttribute('aria-pressed')) === 'true',
+        (await dtPage.locator('[data-testid="fill-mode"]').inputValue()) === 'fillEmpty',
+        `いまの入れかた=${await dtPage.locator('[data-testid="fill-mode"]').inputValue()}`,
       )
       // 既定のまま2回押しても、1回目に入った献立のidが1件も入れ替わらない(=1品も消していない)
       const dtDinnerIds = () =>
@@ -5988,14 +6043,15 @@ try {
         await lkOpenAuto.first().click()
         await lkPage.waitForTimeout(400)
       }
-      // 「総入れ替え」に切り替えて実行する(確認文は自動承認。名前は2026-08-19 便ID・②で短くした)
-      const lkReplaceBtn = lkPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true })
-      await lkReplaceBtn.click()
+      // 「総入れ替え」に切り替えて実行する(確認文は自動承認)。
+      // 2026-08-20 便II・④: 入れかたはプルダウンになった
+      const lkFillMode = lkPage.locator('[data-testid="fill-mode"]')
+      await lkFillMode.selectOption('replaceAll')
       await lkPage.waitForTimeout(300)
       check(
-        `WEEKLOCK(LOCK-5) 「${ja.mealPlan.fillModeReplaceAll}」を押すと入れかたが総入れ替えに切り替わる`,
-        (await lkReplaceBtn.getAttribute('aria-pressed')) === 'true',
-        `aria-pressed=${await lkReplaceBtn.getAttribute('aria-pressed')}`,
+        `WEEKLOCK(LOCK-5) 入れかたを「${ja.mealPlan.fillModeReplaceAll}」に切り替えられる`,
+        (await lkFillMode.inputValue()) === 'replaceAll',
+        `いまの入れかた=${await lkFillMode.inputValue()}`,
       )
       lkDialogs.length = 0
       await lkFillBtn.click()
@@ -6497,7 +6553,7 @@ try {
       await bkCopyToggle.click()
       await bkPage.waitForTimeout(400)
       check(
-        'WEEKLOCK-BULK(先週コピー) 前提: 出しかたが「先週をコピー」になった',
+        'WEEKLOCK-BULK(週コピー) 前提: 出しかたが「週をコピー」になった',
         (await bkCopyToggle.getAttribute('aria-pressed')) === 'true',
       )
       bkDialogs.length = 0
@@ -8547,12 +8603,14 @@ try {
       await suggestConditionsOpenBtn.click()
       await mpPage.waitForTimeout(400)
       check('MEALPLAN-01(便ID・④) 「現在の条件」を押すと窓が開く', (await suggestConditionsModal.count()) === 1)
-      const quickToggleBtn = mpPage.getByRole('button', { name: '調理時間15分以内を優先' })
-      check('MEALPLAN-01(Fix5) 時短優先トグルは既定でaria-pressed=false', (await quickToggleBtn.getAttribute('aria-pressed')) === 'false')
-      await quickToggleBtn.click()
+      // 2026-08-20 便II・①: 「調理時間◯分以内を優先」のチップ＋分数のプルダウンをやめ、
+      // プルダウン1つ（指定なし／◯分以内）にした
+      const quickSelect = mpPage.locator('[data-testid="plan-quick-minutes"]')
+      check('MEALPLAN-01(便II・①) 調理時間の条件は既定で「指定なし」', (await quickSelect.inputValue()) === '')
+      await quickSelect.selectOption('15')
       await mpPage.waitForTimeout(200)
-      check('MEALPLAN-01(Fix5) 時短優先トグルON後はaria-pressed=true', (await quickToggleBtn.getAttribute('aria-pressed')) === 'true')
-      await quickToggleBtn.click() // 元に戻す
+      check('MEALPLAN-01(便II・①) 分数を選ぶとその条件が効く', (await quickSelect.inputValue()) === '15')
+      await quickSelect.selectOption('') // 元に戻す
       await mpPage.waitForTimeout(200)
       await mpPage.locator('[data-testid="plan-conditions-close"]').click()
       await mpPage.waitForTimeout(400)
@@ -9599,14 +9657,14 @@ try {
       // 中の操作(提案の条件・入れかた・先週コピー)を触る前に開く
       await openWeekGroup(mp4Page, '献立を提案')
       await mp4Page.waitForTimeout(300)
-      // 便DT-8: 入れかたを「総入れ替え」に倒す(既定は非破壊の「空いた枠だけ」。名前は便ID・②で短くした)
-      await mp4Page.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).click()
+      // 便DT-8: 入れかたを「総入れ替え」に倒す(既定は非破壊の「空いた枠だけ」)。
+      // 2026-08-20 便II・④: 入れかたはプルダウンになった
+      await mp4Page.locator('[data-testid="fill-mode"]').selectOption('replaceAll')
       await mp4Page.waitForTimeout(200)
       check(
         `MEALPLAN-04(便DT-8) 入れかたを「${ja.mealPlan.fillModeReplaceAll}」に切り替えられる`,
-        (await mp4Page
-          .getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true })
-          .getAttribute('aria-pressed')) === 'true',
+        (await mp4Page.locator('[data-testid="fill-mode"]').inputValue()) === 'replaceAll',
+        `いまの入れかた=${await mp4Page.locator('[data-testid="fill-mode"]').inputValue()}`,
       )
       const fillWeekBtn = mp4Page.getByRole('button', { name: 'まとめて献立を入力' })
       await fillWeekBtn.click()
@@ -11395,7 +11453,7 @@ try {
       await cwCopyToggle.click()
       await cwPage.waitForTimeout(300)
       check(
-        'MEALPLAN-S3(便IF-⑥) 出しかたの2択で「先週をコピー」を選べる',
+        'MEALPLAN-S3(便IF-⑥) 出しかたの2択で「週をコピー」を選べる',
         (await cwCopyToggle.getAttribute('aria-pressed')) === 'true',
       )
       check(
@@ -11406,8 +11464,14 @@ try {
       )
       check(
         // 2026-08-19 便IF・⑧: 入れかたはコピーにも効くようになったので、押せる状態のままにする
+        // 2026-08-20 便II・④: 入れかたはプルダウンになった
         'MEALPLAN-S3(便IF-⑧) 入れかたはコピーを選んでいても押せる(コピーにも効くため)',
-        await cwPage.getByRole('button', { name: ja.mealPlan.fillModeReplaceAll, exact: true }).isEnabled(),
+        await cwPage.locator('[data-testid="fill-mode"]').isEnabled(),
+      )
+      check(
+        // 2026-08-20 便II・⑤: コピー元の週を選ぶプルダウンは、コピーを選んだときだけ出る
+        'MEALPLAN-S3(便II-⑤) コピーを選ぶと「コピー元の週」のプルダウンが出る',
+        (await cwPage.locator('[data-testid="copy-source-week"]').count()) === 1,
       )
       await cwPage.locator('[data-testid="week-fill-run"]').click()
       await cwPage.waitForTimeout(700)
@@ -13842,11 +13906,19 @@ try {
         const body = ((await dhPage.textContent('body')) ?? '').replaceAll('​', '')
         check(
           'DAYSUGGEST-01 今日の献立が1品でも決まると「今日なに作る？」は開いたまま出さない',
+          // 2026-08-20 便II・③: 決めてもらうボタンだけは畳んでも出す（折りたたみを開かなくても
+          // 機能に手が届くようにした）ので、「中身が出ていない」は**切り替えと候補**で測る
           (await dhPage.locator('[data-testid="day-suggest-toggle"]').getAttribute(
             'aria-expanded',
           )) === 'false' &&
-            !body.includes('おまかせで1品出す') &&
+            (await dhPage.locator('[data-testid="day-mode-one"]').count()) === 0 &&
+            (await dhPage.locator('[data-testid="day-suggest-result"]').count()) === 0 &&
             body.includes('ほうれん草のおひたし'),
+          `切り替え=${await dhPage.locator('[data-testid="day-mode-one"]').count()} 候補=${await dhPage.locator('[data-testid="day-suggest-result"]').count()}`,
+        )
+        check(
+          'DAYSUGGEST-01(便II・③) 畳んでいても、決めてもらうボタンだけは押せる場所に残る',
+          (await dhPage.locator('[data-testid="day-suggest-draw"]').count()) === 1,
         )
       }
 
@@ -19060,6 +19132,8 @@ try {
       await egPage.goto(`${BASE}/#/meal-plan`)
       await egPage.waitForTimeout(1000)
       egConfirmText = ''
+      // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
+      await openDayOrganize(egPage)
       await egPage.getByRole('button', { name: '全て作った！' }).click()
       await egPage.waitForTimeout(1000)
       check(
@@ -23023,8 +23097,16 @@ try {
         check('DAYLAYOUT-01 献立がある日は今日の献立が出る', body.includes('肉じゃが'))
         check(
           'DAYLAYOUT-01 献立がある日は「今日なに作る？」を畳んでおく(見え方を重くしない)',
-          // 2026-08-17 便HI: 節の名前は畳んでも出したままにしたので、中身が出ていないことで測る
-          !body.includes('おまかせで1品出す'),
+          // 2026-08-17 便HI: 節の名前は畳んでも出したままにしたので、中身が出ていないことで測る。
+          // 2026-08-20 便II・③: 決めてもらうボタンだけは畳んでも残すので、中身＝1品/献立の
+          // 切り替えと候補で測る（ボタンが残っていることは下の行で別に見る）
+          (await dlPage.locator('[data-testid="day-mode-one"]').count()) === 0 &&
+            (await dlPage.locator('[data-testid="day-suggest-result"]').count()) === 0,
+          `切り替え=${await dlPage.locator('[data-testid="day-mode-one"]').count()} 候補=${await dlPage.locator('[data-testid="day-suggest-result"]').count()}`,
+        )
+        check(
+          'DAYLAYOUT-01(便II・③) 畳んでいても、決めてもらうボタンだけは押せる場所に残る',
+          (await dlPage.locator('[data-testid="day-suggest-draw"]').count()) === 1,
         )
         const section = dlSuggestSection()
         const toggle = dlPage.locator('[data-testid="day-suggest-toggle"]')
@@ -23960,8 +24042,8 @@ try {
   // 測るのは「**プルダウンで選んだ結果が効いているか**」であって、見た目がプルダウンかどうかでは
   // ない。効き先は「今日なに作る？」の献立側に出る主菜の候補数——週の「提案の条件」は
   // 献立エンジンがそのまま読むので、条件を変えれば候補の数が動く。
-  //   ① 「調理時間◯分以内を優先」はボタンのまま（プルダウンにしていない＝オーナー指示どおり）
-  //   ② 分数のプルダウンはONのあいだだけ出て、選ぶとボタンの名前の数字も変わる
+  //   ① 調理時間はプルダウン1つ（2026-08-20 便II・①でチップ＋分数の2つを1つにまとめた）
+  //   ② 「指定なし」を選べば条件が外れ、分数を選べばその場で効く
   //   ③ 分数を10分→30分に広げると、主菜の候補が**増える**（選んだ分数が提案に効いている）
   //   ④ 料理のジャンルで「和食」を選ぶと、主菜の候補が**減る**（絞り込みが効いている）
   // 禁じ手よけ: 候補の数そのものを決め打ちしない（増えた・減ったの向きだけを見る）／
@@ -24029,47 +24111,42 @@ try {
       await wsPage.waitForTimeout(1800)
 
       await wsOpenConditions()
-      // ① 調理時間は「ボタンのまま」（オーナー指示: 機能はボタン・分数だけプルダウン）
-      const wsQuick = wsPage.getByRole('button', { name: /^調理時間\d+分以内を優先$/ })
-      check('WEEKSELECT-01 「調理時間◯分以内を優先」はボタンのまま', (await wsQuick.count()) === 1)
+      // ① 調理時間はプルダウン1つ（2026-08-20 便II・①。チップ「調理時間◯分以内を優先」は無くした
+      //    ＝実装は優先ではなく除外なので、文言が嘘だった）
       const wsMinutes = wsPage.locator('[data-testid="plan-quick-minutes"]')
-      // 2026-08-19 便ID・④: 分数のプルダウンは**最初から出す**。
-      // 便HTでは優先をONにしたときだけ出していたが、押すたびに窓の中身が伸び縮みしていた
-      // （オーナー原文「下にスペースが伸びるので、ちょっとびっくりする」）。
-      // 押しても効かない欄にしないため、分数を選んだらその場で優先もONになる
+      check('WEEKSELECT-01(便II・①) 調理時間はプルダウン1つ', (await wsMinutes.count()) === 1)
       check(
-        'WEEKSELECT-01(便ID・④) 分数のプルダウンは最初から出ている（押して選択肢が増えない）',
-        (await wsMinutes.count()) === 1,
+        'WEEKSELECT-01(便II・①) 「優先」と名乗るボタンは残っていない（実装は候補から外している）',
+        (await wsPage.getByRole('button', { name: /分以内を優先/ }).count()) === 0,
       )
       check(
-        'WEEKSELECT-01 前提: 優先はまだONにしていない',
-        (await wsQuick.getAttribute('aria-pressed')) === 'false',
+        'WEEKSELECT-01 前提: 調理時間はまだ指定していない',
+        (await wsMinutes.inputValue()) === '',
+        `いまの値=${await wsMinutes.inputValue()}`,
       )
-      if ((await wsMinutes.count()) === 1) {
-        await wsMinutes.selectOption('20')
-        await wsPage.waitForTimeout(600)
-      }
+      // ② 分数を選べばその場で効き、「指定なし」に戻せば外れる
+      await wsMinutes.selectOption('20')
+      await wsPage.waitForTimeout(600)
       check(
-        'WEEKSELECT-01(便ID・④) 分数を選ぶと優先もONになる（押しても効かない欄を置かない）',
-        (await wsPage.getByRole('button', { name: '調理時間20分以内を優先', exact: true }).getAttribute('aria-pressed')) === 'true',
+        'WEEKSELECT-01(便II・①) 分数を選ぶとその場で条件になる',
+        (await wsMinutes.inputValue()) === '20',
+        `いまの値=${await wsMinutes.inputValue()}`,
       )
-      // ② 分数を選ぶとボタンの名前の数字も変わる（いま何分で絞っているかがボタンから読める）
-      if ((await wsMinutes.count()) === 1) {
-        await wsMinutes.selectOption('10')
-        await wsPage.waitForTimeout(700)
-      }
+      await wsMinutes.selectOption('10')
+      await wsPage.waitForTimeout(700)
       check(
-        'WEEKSELECT-01 分数を10分にするとボタンの名前も「調理時間10分以内を優先」になる',
-        (await wsPage.getByRole('button', { name: '調理時間10分以内を優先', exact: true }).count()) === 1,
+        'WEEKSELECT-01(便II・①) 選んだ分数は「現在の条件」のボタンにも出る',
+        (((await wsPage.locator('[data-testid="plan-conditions-open"]').textContent()) ?? '')
+          .replace(/​/g, '')
+          .includes(ja.mealPlan.quickOnlySummary.replace('{n}', '10'))),
+        `条件のボタン=${await wsPage.locator('[data-testid="plan-conditions-open"]').textContent()}`,
       )
       // ③ 10分 → 30分で主菜の候補が増える（選んだ分数が提案に効いている）
       await wsCloseConditions()
       const wsAt10 = await wsMainCandidates()
       await wsOpenConditions()
-      if ((await wsMinutes.count()) === 1) {
-        await wsMinutes.selectOption('30')
-        await wsPage.waitForTimeout(700)
-      }
+      await wsMinutes.selectOption('30')
+      await wsPage.waitForTimeout(700)
       await wsCloseConditions()
       const wsAt30 = await wsMainCandidates()
       check(
@@ -26881,7 +26958,9 @@ try {
         ),
       )
 
-      const enQuickHint = '調理時間が15分以内のレシピを優先します'
+      // 2026-08-20 便II・①: 「優先します」→ 実装どおりの「◯分以内のレシピから選びます」。
+      // 文言そのものは ja.ts から読む（画面の字を書き写さない）
+      const enQuickHint = ja.mealPlan.quickOnlyHint.replace('{n}', '15')
       const enProteinHint = 'レシピに「高たんぱく」タグが付いた料理を優先します'
       const enBody = async () => (await enPage.textContent('body')) ?? ''
       /**
@@ -26896,7 +26975,7 @@ try {
         return await loc.evaluate((el) => getComputedStyle(el).visibility !== 'hidden')
       }
       check(
-        'EN-01(項目3) 「調理時間15分以内を優先」を選んでいないうちは説明を見せない',
+        'EN-01(項目3) 調理時間を指定していないうちは説明を見せない',
         (await enQuickHintVisible()) === false,
         `見えている=${await enQuickHintVisible()}`,
       )
@@ -26908,50 +26987,41 @@ try {
           !(await enBody()).includes(enProteinHint),
       )
 
-      await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
+      // 2026-08-20 便II・①: 調理時間はプルダウン1つになった
+      const enQuick = enPage.locator('[data-testid="plan-quick-minutes"]')
+      await enQuick.selectOption('15')
       await enPage.waitForTimeout(250)
       check(
-        'EN-01(項目3) 選んだときだけ「調理時間15分以内を優先」の説明が出る',
+        'EN-01(項目3) 調理時間を指定したときだけ、その条件の説明が出る',
         (await enQuickHintVisible()) === true && (await enBody()).includes(enQuickHint),
+        `説明=${enQuickHint}`,
       )
-
+      // 便II・①の要: 説明は「優先」ではなく実際の動き（外れる側）を言う
+      check(
+        'EN-01(便II・①) 説明は、調理時間を入れていないレシピが外れることまで言う',
+        (await enBody()).includes('調理時間を入れていないレシピは選ばれません'),
+      )
+      // 項目1（2026-08-09 便EN「選んでいる条件のチップが実行ボタンと見分けが付かない」）は、
+      // 条件がプルダウンになったことで**チップそのものが無くなった**＝塗りの見比べは要らない。
+      // 見るのは「条件の欄が、実行ボタンと同じ塗りのボタンではないこと」に置き換える
       const enLook = await enPage.evaluate(() => {
-        const byText = (t) =>
-          [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === t)
-        const fill = byText('まとめて献立を入力')
-        const chip = byText('調理時間15分以内を優先')
-        if (!fill || !chip) return null
+        const fill = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent?.trim() === 'まとめて献立を入力',
+        )
+        const quick = document.querySelector('[data-testid="plan-quick-minutes"]')
+        if (!fill || !quick) return null
         const cs = (el) => {
           const s = getComputedStyle(el)
-          return { bg: s.backgroundColor, color: s.color, radius: s.borderTopLeftRadius }
+          return { tag: el.tagName, bg: s.backgroundColor, color: s.color }
         }
-        return {
-          fill: cs(fill),
-          chip: cs(chip),
-          // 2026-08-09 便EO: 押しても寸法が変わらないよう、選んでいないときも同じ場所を
-          // 空けている。よって「svgがある」だけでは不十分で、見えているかまで見る
-          chipHasCheck: [...chip.querySelectorAll('svg')].some(
-            (el) => getComputedStyle(el).visibility !== 'hidden',
-          ),
-        }
+        return { fill: cs(fill), quick: cs(quick) }
       })
       check(
-        'EN-01(項目1) 選んでいるチップは実行ボタンと同じ塗りにしない（面の色が違う）',
-        !!enLook && enLook.fill.bg !== enLook.chip.bg,
+        'EN-01(項目1→便II・①) 条件はプルダウンで、実行ボタンと同じ塗りにはならない',
+        !!enLook && enLook.quick.tag === 'SELECT' && enLook.fill.bg !== enLook.quick.bg,
         `look=${JSON.stringify(enLook)}`,
       )
-      check(
-        'EN-01(項目1) 選んでいるチップは実行ボタンと文字色も形も違う',
-        !!enLook &&
-          enLook.fill.color !== enLook.chip.color &&
-          enLook.fill.radius !== enLook.chip.radius,
-        `look=${JSON.stringify(enLook)}`,
-      )
-      check(
-        'EN-01(項目1) 選んでいるチップにはチェック印が付く（色だけに頼らない）',
-        !!enLook && enLook.chipHasCheck,
-      )
-      await enPage.getByRole('button', { name: '調理時間15分以内を優先' }).click()
+      await enQuick.selectOption('')
       await enPage.waitForTimeout(250)
       // 窓を閉じてから、後ろの画面の実行ボタンを押す（2026-08-19 便ID・④）
       await enPage.locator('[data-testid="plan-conditions-close"]').click()
@@ -27898,17 +27968,31 @@ try {
       await noResize('週タブ「すべて折りたたむ」', eoCollapseAll)
       await noResize('週タブ「すべて開く」', eoCollapseAll)
 
-      // 現在の条件のチップ＝選ぶとチェック印が付くボタン（2026-08-19 便ID・④で窓の中に移った）
+      // 現在の条件（2026-08-19 便ID・④で窓の中に移った）。
+      // 2026-08-20 便II・①: 調理時間もチップからプルダウンになった＝押して幅が変わる
+      // 心配のあるチップは、この窓の中に1つも残っていない
       await openWeekGroup(eoPage, '献立を提案')
       await eoPage.waitForTimeout(400)
       await eoPage.locator('[data-testid="plan-conditions-open"]').click()
       await eoPage.waitForTimeout(500)
-      const eoQuick = eoPage.getByRole('button', { name: '調理時間15分以内を優先', exact: true })
-      await noResize('現在の条件のチップ', eoQuick)
-      await noResize('現在の条件のチップ(外す)', eoQuick)
-      // 2026-08-19 便HT: ジャンルはプルダウンになったので、押して幅が変わる心配のある
-      // チップではなくなった（プルダウンは選んでも枠の大きさが変わらない）。
-      // 代わりに「選んでも枠の大きさが変わらない」ことをそのまま確かめる
+      {
+        const eoQuick = eoPage.locator('[data-testid="plan-quick-minutes"]')
+        const before = await eoQuick.boundingBox()
+        await eoQuick.selectOption('15')
+        await eoPage.waitForTimeout(300)
+        const after = await eoQuick.boundingBox()
+        check(
+          'EO-02 調理時間のプルダウンは、選んでも大きさが変わらない',
+          before != null &&
+            after != null &&
+            Math.round(before.width) === Math.round(after.width) &&
+            Math.round(before.height) === Math.round(after.height),
+          `前=${JSON.stringify(before)} 後=${JSON.stringify(after)}`,
+        )
+        await eoQuick.selectOption('')
+        await eoPage.waitForTimeout(300)
+      }
+      // ジャンルも同じ（2026-08-19 便HTでプルダウンになった）
       {
         const eoGenre = eoPage.locator('[data-testid="plan-genre"]')
         const before = await eoGenre.boundingBox()
@@ -33712,6 +33796,8 @@ try {
       // 日の画面で1品ずつ「作った！」を押す
       await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(1800)
+      // 2026-08-20 便II・⑥: 行の「作った！」と説明の1行は整理モードの中に移った
+      await openDayOrganize(fcPage)
       const fcCookedBtns = fcPage.getByRole('button', { name: '作った！', exact: true })
       check(
         'FF-COOK 前提: 日の画面に2品ぶんの「作った！」が並ぶ',
@@ -33754,6 +33840,8 @@ try {
       await fcAddToToday('豚汁', '朝食・昼食・夕食を決めずに今日の献立に追加')
       await fcPage.goto(`${BASE}/#/meal-plan?focus=today`, { waitUntil: 'networkidle' })
       await fcPage.waitForTimeout(1600)
+      // 2026-08-20 便II・⑥: 行の「作った！」は整理モードの中に移った
+      await openDayOrganize(fcPage)
       await fcPage.getByRole('button', { name: '作った！', exact: true }).first().click()
       await fcPage.waitForTimeout(900)
       check(
@@ -34772,6 +34860,8 @@ try {
           TITLES.every((t) => beforeBody.includes(t)),
         )
 
+      // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
+        await openDayOrganize(p)
         await p.getByRole('button', { name: '全て作った！' }).click()
         await p.waitForTimeout(900)
         check(
@@ -36518,6 +36608,8 @@ try {
           plannedBefore.includes('夕食') && plannedBefore.includes('肉じゃが'),
           plannedBefore,
         )
+        // 2026-08-20 便II・⑥: 行の「作った！」は整理モードの中に移った
+        await openDayOrganize(p)
         await p.getByRole('button', { name: '作った！', exact: true }).first().click()
         await p.waitForTimeout(900)
         check(
@@ -38470,6 +38562,8 @@ try {
         (await fpPage.locator('[data-testid="day-pantry-cooked-hint"]').count()) === 1,
       )
       fpDialogs.length = 0
+      // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
+      await openDayOrganize(fpPage)
       await fpPage.getByRole('button', { name: '全て作った！' }).first().click()
       await fpPage.waitForTimeout(1200)
       check(
@@ -38543,6 +38637,8 @@ try {
       await fnPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await fnPage.reload({ waitUntil: 'networkidle' })
       await fnPage.waitForTimeout(1800)
+      // 2026-08-20 便II・⑥: 行の「作った！」と説明の1行は整理モードの中に移った
+      await openDayOrganize(fnPage)
       check(
         'FW-05 段取りを作っていないときは、日の説明に段取りの話を出さない',
         (await fnPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 0,
@@ -38576,6 +38672,8 @@ try {
       await fnPutSession(true)
       await fnPage.reload({ waitUntil: 'networkidle' })
       await fnPage.waitForTimeout(1500)
+      // 2026-08-20 便II・⑥: 行の「作った！」と説明の1行は整理モードの中に移った
+      await openDayOrganize(fnPage)
       check(
         'FW-05 段取りを作ってあるときは、日の説明に段取りの話が出る',
         (await fnPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 1,
@@ -40471,6 +40569,8 @@ try {
       }
       await cuPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await cuPage.waitForTimeout(1600)
+      // 2026-08-20 便II・⑥: 行の「作った！」は整理モードの中に移った
+      await openDayOrganize(cuPage)
       const cuCooked = await cuPage.evaluate((label) => {
         const b = Array.from(document.querySelectorAll('button')).find(
           (x) => (x.textContent ?? '').replaceAll('​', '').trim() === label,
@@ -41028,10 +41128,10 @@ try {
       )
 
       const wcConditions = wcPage.locator('[data-testid="plan-conditions-open"]')
-      const wcFillEmpty = wcPage.locator('[data-testid="fill-mode-empty"]')
-      const wcFillReplace = wcPage.locator('[data-testid="fill-mode-replace"]')
+      // 2026-08-20 便II・④: 入れかたは2つのチップからプルダウン1つになった
+      const wcFillMode = wcPage.locator('[data-testid="fill-mode"]')
       check('WEEKCOND-01 前提: 「現在の条件」のボタンが1つ出ている', (await wcConditions.count()) === 1)
-      check('WEEKCOND-01 前提: 入れかたの2つのボタンが出ている', (await wcFillEmpty.count()) === 1 && (await wcFillReplace.count()) === 1)
+      check('WEEKCOND-01 前提: 入れかたのプルダウンが1つ出ている', (await wcFillMode.count()) === 1)
 
       // ③ 何も選んでいないときの見え方
       check(
@@ -41058,21 +41158,20 @@ try {
         `入れかた=${JSON.stringify(wcFillTitlePos)} 条件=${JSON.stringify(wcCondPos)}`,
       )
 
-      // ② 横一列（同じ高さに並び、横位置が違う＝2段になっていない）
-      const wcEmptyPos = await wcDocPos(wcFillEmpty)
-      const wcReplacePos = await wcDocPos(wcFillReplace)
+      // ② 2択が1行に収まっている（2026-08-20 便II・④でプルダウンになった＝
+      //    2つのボタンが2段に割れる心配そのものが無くなり、選択肢は閉じた1行の中に入る）
+      const wcFillOptions = await wcFillMode.locator('option').evaluateAll((els) =>
+        els.map((el) => el.value),
+      )
       check(
-        'WEEKCOND-01(②) 入れかたの2つのボタンは横一列に並ぶ（同じ高さ・違う横位置）',
-        wcEmptyPos != null &&
-          wcReplacePos != null &&
-          Math.abs(wcEmptyPos.y - wcReplacePos.y) < 0.5 &&
-          wcReplacePos.x > wcEmptyPos.x,
-        `空き=${JSON.stringify(wcEmptyPos)} 総入れ替え=${JSON.stringify(wcReplacePos)}`,
+        'WEEKCOND-01(②) 入れかたはプルダウン1つで、選択肢は「空いた枠だけ」と「総入れ替え」の2つ',
+        JSON.stringify(wcFillOptions) === JSON.stringify(['fillEmpty', 'replaceAll']),
+        `選択肢=${JSON.stringify(wcFillOptions)}`,
       )
 
       // ④ 窓で開く・後ろが動かない
       const wcWatch = {
-        入れかたのボタン: wcFillEmpty,
+        入れかたのプルダウン: wcFillMode,
         まとめて献立を入力: wcPage.getByRole('button', { name: ja.mealPlan.fillWeek }),
         いちばん上の曜日カード: wcPage.locator('[data-testid="week-day-toggle"]'),
       }
@@ -41142,15 +41241,7 @@ try {
 
       // 窓の中の条件を順に触る（触れたものだけ数える＝押す回数を決め打ちしない）
       const wcTouched = []
-      const wcQuickChip = wcScope.getByRole('button', { name: /分以内を優先/ })
-      if ((await wcQuickChip.count()) > 0) {
-        await wcQuickChip.first().click()
-        await wcPage.waitForTimeout(500)
-        wcTouched.push('調理時間の優先')
-        await wcCompare('調理時間の優先を押した後')
-        await wcCompareInside('調理時間の優先を押した後')
-      }
-      const wcMinutes = wcPage.locator('[data-testid="plan-quick-minutes"]')
+      const wcMinutes = wcScope.locator('[data-testid="plan-quick-minutes"]')
       if ((await wcMinutes.count()) > 0) {
         const wcMinuteValues = await wcMinutes.locator('option').evaluateAll((els) =>
           els.map((el) => el.value),
@@ -41158,9 +41249,10 @@ try {
         for (const value of wcMinuteValues) {
           await wcMinutes.selectOption(value)
           await wcPage.waitForTimeout(400)
-          wcTouched.push(`${value}分`)
-          await wcCompare(`分数を${value}にした後`)
-          await wcCompareInside(`分数を${value}にした後`)
+          const label = value === '' ? '調理時間=指定なし' : `調理時間=${value}分`
+          wcTouched.push(label)
+          await wcCompare(`${label}にした後`)
+          await wcCompareInside(`${label}にした後`)
         }
       }
       const wcGenre = wcPage.locator('[data-testid="plan-genre"]')
@@ -41876,10 +41968,49 @@ try {
       const wmSrcEnd = wmShown.length === 7 ? wmShift(wmShown[6], -7) : null
       const wmBodyText = ((await wmPage.textContent('body')) ?? '').replace(/​/g, '')
       check(
-        'WEEKFMT-01(④) 「先週をコピー」を選ぶと、コピー元の7日間の日付が画面に出る',
+        'WEEKFMT-01(④) 「週をコピー」を選ぶと、コピー元の7日間の日付が画面に出る',
         wmSrcStart != null && wmBodyText.includes(wmSrcStart) && wmBodyText.includes(wmSrcEnd),
         `コピー元=${wmSrcStart}〜${wmSrcEnd}`,
       )
+
+      // ===== 便II・⑤ コピー元の週を選べる =====
+      // オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
+      // 表示している週をコピーにはできない？」→ コピー先は表示している週のまま、コピー元を選ぶ。
+      // 見るのは「選んだぶんだけコピー元の日付が動く」こと（週数を決め打ちせず、
+      // 選択肢の中の2つ目を選んで、その週数ぶん戻った日付が出るかで測る）
+      const wmCopyWeek = wmPage.locator('[data-testid="copy-source-week"]')
+      check(
+        'WEEKFMT-01(便II・⑤) コピーを選ぶと「コピー元の週」のプルダウンが出る',
+        (await wmCopyWeek.count()) === 1,
+      )
+      if ((await wmCopyWeek.count()) === 1) {
+        const wmWeekValues = await wmCopyWeek.locator('option').evaluateAll((els) =>
+          els.map((el) => el.value),
+        )
+        check(
+          'WEEKFMT-01(便II・⑤) 前提: コピー元の週を2つ以上から選べる（既定は1週間前）',
+          wmWeekValues.length >= 2 && (await wmCopyWeek.inputValue()) === '1',
+          `選択肢=${JSON.stringify(wmWeekValues)} 既定=${await wmCopyWeek.inputValue()}`,
+        )
+        const wmOther = wmWeekValues.find((v) => v !== '1')
+        if (wmOther) {
+          await wmCopyWeek.selectOption(wmOther)
+          await wmPage.waitForTimeout(600)
+          const wmOtherStart = wmShift(wmShown[0], -7 * Number(wmOther))
+          const wmOtherEnd = wmShift(wmShown[6], -7 * Number(wmOther))
+          const wmBody2 = ((await wmPage.textContent('body')) ?? '').replace(/​/g, '')
+          check(
+            'WEEKFMT-01(便II・⑤) コピー元の週を変えると、説明のコピー元の日付もその週に変わる',
+            wmBody2.includes(wmOtherStart) &&
+              wmBody2.includes(wmOtherEnd) &&
+              !wmBody2.includes(`${wmSrcStart}〜${wmSrcEnd}`),
+            `選んだ=${wmOther}週間前 期待=${wmOtherStart}〜${wmOtherEnd}`,
+          )
+          // 以降の⑧は1週間前を前提にしているので戻しておく
+          await wmCopyWeek.selectOption('1')
+          await wmPage.waitForTimeout(500)
+        }
+      }
 
       // ===== ⑧ 入れかたがコピーにも効く =====
       const wmToday2 = await wmToday()
@@ -41966,8 +42097,10 @@ try {
       await wmPage.locator('[data-testid="plan-source-copy"]').click()
       await wmPage.waitForTimeout(400)
       check(
+        // 2026-08-20 便II・④: 入れかたはプルダウンになった
         'WEEKFMT-01(⑧) 前提: 入れかたの既定は「空いた枠だけ」',
-        (await wmPage.locator('[data-testid="fill-mode-empty"]').getAttribute('aria-pressed')) === 'true',
+        (await wmPage.locator('[data-testid="fill-mode"]').inputValue()) === 'fillEmpty',
+        `いまの入れかた=${await wmPage.locator('[data-testid="fill-mode"]').inputValue()}`,
       )
       wmDialogs.length = 0
       await wmPage.locator('[data-testid="week-fill-run"]').click()
@@ -41984,7 +42117,7 @@ try {
         JSON.stringify(wmDialogs),
       )
       // (b) 「総入れ替え」を選ぶと、決まっている枠もコピー元の献立に入れ替わる
-      await wmPage.locator('[data-testid="fill-mode-replace"]').click()
+      await wmPage.locator('[data-testid="fill-mode"]').selectOption('replaceAll')
       await wmPage.waitForTimeout(400)
       wmDialogs.length = 0
       await wmPage.locator('[data-testid="week-fill-run"]').click()
@@ -42061,6 +42194,143 @@ try {
       )
     } finally {
       await wmBrowser.close()
+    }
+  }
+
+  // --- FOLDRUN-01: 折りたたみを開かなくても、決めてもらう操作に手が届く（2026-08-20 便II・③）。
+  // オーナー原文「折りたたんだ状態で「まとめて献立を入力」ボタンほしい。アプリ全体で、
+  // 折りたたみを一切開かなくても、最低限一通りすべての機能を触れる（使いこなすために開く）
+  // ようにしたい。」
+  // 便DT-5/6で一度この形（畳んでも押せる）になっていたのを、便IFが「日タブにそろえる」ために
+  // 取り下げた。そろえる先を「日も週も畳んだまま押せる」に直したので、**日・週の両方**を見る。
+  // 見張るのは ①畳んだ状態でも実行ボタンが画面に出ている ②指で押せる大きさ（44px以上）
+  // ③押すと実際に効く（週＝端末の献立の行が増える／日＝候補が画面に出る）。
+  // 掴み方は data-testid と端末のデータの変化だけ＝並び・入れ子の段数に依らない（禁じ手④）。
+  // 「畳む前にボタンがあった」「畳めた」を先に測ってから本題に入る
+  // ＝ボタンが見つからないだけで合格に倒れない（禁じ手「見つからなかった＝合格」対策） ---
+  currentCheck = 'FOLDRUN-01'
+  {
+    const frBrowser = await chromium.launch()
+    const frContext = await frBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const frPage = await frContext.newPage()
+    frPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@FOLDRUN-01] ${err.message}`)
+    })
+    /** 端末に入っている献立の行数（週の「まとめて献立を入力」が効いたかを実データで見る） */
+    const frPlanCount = () =>
+      frPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const g = req.result.transaction('mealPlans', 'readonly').objectStore('mealPlans').getAll()
+              g.onsuccess = () => resolve(g.result.length)
+              g.onerror = () => reject(g.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      // 今日の献立を1品決める＝日タブの「今日なに作る？」が畳める日の形になる
+      await frPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await frPage.waitForTimeout(1800) // 初回シード完了待ち
+      await frPage.getByText('肉じゃが', { exact: true }).first().click()
+      await frPage.waitForTimeout(500)
+      await frPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await frPage.waitForTimeout(300)
+      await frPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await frPage.waitForTimeout(600)
+
+      // ---------- 日タブ: 「今日なに作る？」を畳んだまま ----------
+      await frPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await frPage.waitForTimeout(1500)
+      const frDayToggle = frPage.locator('[data-testid="day-suggest-toggle"]')
+      const frDayDraw = frPage.locator('[data-testid="day-suggest-draw"]')
+      check(
+        'FOLDRUN-01 前提: 献立が決まっている日は「今日なに作る？」が畳めて、畳んだ状態から始まる',
+        (await frDayToggle.count()) === 1 &&
+          (await frDayToggle.getAttribute('aria-expanded')) === 'false',
+        `畳みボタン=${await frDayToggle.count()} aria-expanded=${await frDayToggle.getAttribute('aria-expanded')}`,
+      )
+      const frDayBox = (await frDayDraw.count()) === 1 ? await frDayDraw.boundingBox() : null
+      check(
+        'FOLDRUN-01(日) 畳んだままでも「決めてもらう」ボタンが画面に出ている',
+        (await frDayDraw.count()) === 1 && (await frDayDraw.isVisible()),
+        `ボタン=${await frDayDraw.count()}`,
+      )
+      check(
+        'FOLDRUN-01(日) 畳んだままの「決めてもらう」ボタンが指で押せる大きさ(44px以上)',
+        !!frDayBox && frDayBox.height >= 44,
+        `高さ=${frDayBox?.height}`,
+      )
+      if ((await frDayDraw.count()) === 1) {
+        await frDayDraw.click()
+        await frPage.waitForTimeout(1200)
+      }
+      const frPair = frPage.locator('[data-testid="day-suggest-pair"]')
+      const frOne = frPage.locator('[data-testid="day-suggest-result"]')
+      check(
+        'FOLDRUN-01(日) 畳んだまま押しても実際に効く(候補が画面に出る)',
+        (await frPair.count()) + (await frOne.count()) > 0,
+        `献立=${await frPair.count()} 1品=${await frOne.count()}`,
+      )
+      check(
+        'FOLDRUN-01(日) 押した結果は折りたたみの中に出るので、押した時点で節が開く',
+        (await frDayToggle.getAttribute('aria-expanded')) === 'true',
+        `aria-expanded=${await frDayToggle.getAttribute('aria-expanded')}`,
+      )
+
+      // ---------- 週タブ: 「献立を提案」を畳んだまま ----------
+      await frPage.getByRole('button', { name: '週', exact: true }).click()
+      await frPage.waitForTimeout(1000)
+      const frFill = frPage.locator('[data-testid="week-fill-run"]')
+      check(
+        'FOLDRUN-01 前提: 畳む前は「まとめて献立を入力」が出ている',
+        (await frFill.count()) === 1,
+        `ボタン=${await frFill.count()}`,
+      )
+      const frClose = frPage.getByRole('button', { name: '献立を提案を閉じる' })
+      check('FOLDRUN-01 前提: 「献立を提案」を畳める', (await frClose.count()) === 1)
+      if ((await frClose.count()) === 1) {
+        await frClose.click()
+        await frPage.waitForTimeout(600)
+      }
+      check(
+        'FOLDRUN-01 前提: 畳んだ状態になっている',
+        (await frPage.getByRole('button', { name: '献立を提案を開く' }).count()) === 1,
+      )
+      const frFillBox = (await frFill.count()) === 1 ? await frFill.boundingBox() : null
+      check(
+        'FOLDRUN-01(週) 畳んだままでも「まとめて献立を入力」が画面に出ている',
+        (await frFill.count()) === 1 && (await frFill.isVisible()),
+        `ボタン=${await frFill.count()}`,
+      )
+      check(
+        'FOLDRUN-01(週) 畳んだままの「まとめて献立を入力」が指で押せる大きさ(44px以上)',
+        !!frFillBox && frFillBox.height >= 44,
+        `高さ=${frFillBox?.height}`,
+      )
+      const frBefore = await frPlanCount()
+      if ((await frFill.count()) === 1) {
+        await frFill.click()
+        await frPage.waitForTimeout(1600)
+      }
+      const frAfter = await frPlanCount()
+      check(
+        'FOLDRUN-01(週) 畳んだまま押しても実際に効く(端末の献立の行が増える)',
+        Number.isInteger(frBefore) && Number.isInteger(frAfter) && frAfter > frBefore,
+        `押す前=${frBefore} 押した後=${frAfter}`,
+      )
+      check(
+        'FOLDRUN-01(週) 押しても勝手には開かない(結果は下の曜日カードに出るので開く必要が無い)',
+        // 実行ボタンが消えていないことも一緒に見る＝「ボタンが無いから畳んだまま」で合格に倒れない
+        (await frPage.getByRole('button', { name: '献立を提案を開く' }).count()) === 1 &&
+          (await frFill.count()) === 1,
+        `畳んだまま=${await frPage.getByRole('button', { name: '献立を提案を開く' }).count()} ボタン=${await frFill.count()}`,
+      )
+    } finally {
+      await frBrowser.close()
     }
   }
 

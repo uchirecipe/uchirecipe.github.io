@@ -115,6 +115,7 @@ import {
   planClearMealSlots,
   planShowWeekLock,
   PLAN_QUICK_MINUTES_OPTIONS,
+  COPY_SOURCE_WEEKS_BACK_OPTIONS,
   DEFAULT_PLAN_QUICK_MINUTES,
 } from '../logic/mealPlan'
 import type {
@@ -389,9 +390,20 @@ const pickerChipCls = (active: boolean) =>
  * footer には行の下に置く操作（レシピ一覧から選んだ品を今日の予定へ入れるボタン）を渡す。
  *
  * 2026-08-20 便IG・①（オーナー原文「「作った！」と×が邪魔。作った！をつけるときには
- * モード切り替えするようにしたら解決できる？全て作った！も含めて。」／司令部の裁定＝A案）:
+ * モード切り替えするようにしたら解決できる？全て作った！も含めて。」）:
  * ×は「今日の献立」の**整理モードのあいだだけ**出す（呼び出し側が onRemove を渡さなければ出ない）。
- * 「作った！」は毎日押す主役の操作なので、モードの外に出したまま＝毎日1タップ増やさない。
+ *
+ * 2026-08-20 便II・⑥（オーナーが実機を見て便IGの裁定をひっくり返した。原文
+ *   「整理に作った！も入れたい。作った！が気軽にできないよりも、献立を１画面で確認できない方が
+ *     問題では？」）:
+ * **「作った！」も整理モードのあいだだけ**出す（onCooked を渡さなければ出ない）。
+ * 整理モードでないときは「作った！」と×が消え、**料理名の行だけ**になる
+ * ＝今日の献立を1画面で見渡せる。
+ *
+ * ただし footer（「◯食に入れる」）は**モードの外にも出したまま**にする（同便の裁定）。
+ * 「整理」は減らす・終わらせる操作の集まりで、これから決める操作は性質が違う。
+ * 「レシピ一覧から選択中」はレシピを選んだ直後の一時的な状態なので、次にやることを
+ * モードの奥へ入れると、選んだ直後に手が止まる（流れの途中に行き止まりを作らない）。
  *
  * 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっているのが
  * みづらい」／司令部の裁定「日タブの行はA案＝2段」）:
@@ -418,7 +430,8 @@ function TodayListRow({
    * 何も言わない画面になっていた。
    */
   ngIngredients: string[]
-  onCooked: () => void
+  /** 「作った！」（2026-08-20 便II・⑥。整理モードのあいだだけ渡す＝渡さなければ出ない） */
+  onCooked?: () => void
   onRemove?: () => void
   /**
    * ×の読み上げ名（2026-08-17 便HI）。既定は「この献立から外す」＝今日の献立からだけ外す。
@@ -449,37 +462,43 @@ function TodayListRow({
         testId="day-plan-card"
         titleTestId="day-plan-card-title"
         linkState={fromState}
+        /* 2026-08-20 便II・⑥: 操作が1つも無いとき（＝整理モードでないとき）は2段目そのものを
+           作らない＝料理名の行だけになる */
         actions={
-          <>
-            {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
-                枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
-                ボタンと同じ当たり判定を下回らないようにする。
-                2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
-                色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
-                6か所あり、多数側＝アクセントの塗りに合わせている */}
-            <button
-              type="button"
-              onClick={onCooked}
-              className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
-            >
-              <CheckCircle2 size={16} aria-hidden />
-              {ja.mealPlan.todayMarkCooked}
-            </button>
-            {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
-                破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-                押し間違いを減らす */}
-            {onRemove && (
-              <button
-                type="button"
-                onClick={onRemove}
-                aria-label={removeLabel ?? ja.mealPlan.todayRemove}
-                className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
-              >
-                <X size={20} aria-hidden />
-              </button>
-            )}
-            {footer}
-          </>
+          onCooked || onRemove || footer ? (
+            <>
+              {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+                  枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
+                  ボタンと同じ当たり判定を下回らないようにする。
+                  2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
+                  色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
+                  6か所あり、多数側＝アクセントの塗りに合わせている */}
+              {onCooked && (
+                <button
+                  type="button"
+                  onClick={onCooked}
+                  className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
+                >
+                  <CheckCircle2 size={16} aria-hidden />
+                  {ja.mealPlan.todayMarkCooked}
+                </button>
+              )}
+              {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
+                  破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
+                  押し間違いを減らす */}
+              {onRemove && (
+                <button
+                  type="button"
+                  onClick={onRemove}
+                  aria-label={removeLabel ?? ja.mealPlan.todayRemove}
+                  className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
+                >
+                  <X size={20} aria-hidden />
+                </button>
+              )}
+              {footer}
+            </>
+          ) : undefined
         }
       />
     </li>
@@ -1500,6 +1519,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 切り分けが、実時間で開いた日によって変わらないようにするため）
   const today = useMemo(() => demo?.today ?? todayString(), [demo])
   const [weekStart, setWeekStart] = useState(() => weekDates(new Date())[0])
+  /**
+   * 「週をコピー」のコピー元が何週間前か（2026-08-20 便II・⑤。既定は1＝これまでと同じ先週）。
+   *
+   * オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
+   * 表示している週をコピーにはできない？」
+   * コピー**先**は表示している週のまま（週を送れば入る先も動く）で、コピー**元**をここで選ぶ
+   * ＝「先々週の献立を今週へ」がこの画面のままできる。
+   * 覚えるのは画面を開いているあいだだけ（次に開いたら先週に戻る）＝「今回はこの週から」という
+   * その場の指定で、好みとして残るものではないため。
+   */
+  const [copyWeeksBack, setCopyWeeksBack] = useState<number>(1)
   // 週タブの表示起点(2026-07-24 便BH-3・タスク3): 従来の週区切り(月曜始まり)⇄今日を先頭に7日間。
   // 既定は従来(週区切り)・選択は設定に記憶。ローリング表示はweekStartを起点に7日連続で並べる
   const rollingWeek = settings?.weekStartsToday === true
@@ -1892,7 +1922,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // S-3 先週の献立をコピー(2026-07-25 便BU・docs/59): 表示中の週の1週間前(各日を7日戻した同じ曜日)の
   // 献立を引くためのインデックス。datesを丸ごと-7日した範囲をliveQueryで取得し、date|slotキーでまとめる。
   // ローリング表示・週区切り表示のどちらでも「同じ曜日の1週間前」を指す(shiftDate(-7)が常に週差になるため)
-  const prevWeekDates = useMemo(() => dates.map((d) => shiftDate(d, -7)), [dates])
+  const prevWeekDates = useMemo(
+    () => dates.map((d) => shiftDate(d, -7 * copyWeeksBack)),
+    [dates, copyWeeksBack],
+  )
   const prevWeekEntries = useMealPlanRange(prevWeekDates[0], prevWeekDates[6])
   /**
    * コピー元の7日間（2026-08-19 便IF・④。オーナー原文「『先週の献立をコピー』に、
@@ -1906,6 +1939,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       end: prevWeekDates[6].replaceAll('-', '/'),
     }),
     [prevWeekDates],
+  )
+  /**
+   * 「コピー元の週」のプルダウンに並べる選択肢（2026-08-20 便II・⑤）。
+   * 何週間前かだけだと、どの週なのかを数えないと分からないので、**実際に写す7日間の日付**も
+   * 一緒に出す（便IF・④で説明文に日付を入れたのと同じ理由）。日付は月/日だけにする
+   * ＝1〜4週間前の範囲では年が要らず、プルダウンの1行に収まる。
+   */
+  const copySourceWeekOptions = useMemo(
+    () =>
+      COPY_SOURCE_WEEKS_BACK_OPTIONS.map((n) => ({
+        n,
+        start: shiftDate(dates[0], -7 * n).slice(5).replaceAll('-', '/'),
+        end: shiftDate(dates[6], -7 * n).slice(5).replaceAll('-', '/'),
+      })),
+    [dates],
   )
 
   // 月タブの日タップモーダル用（monthEntries由来なので表示帯フィルタに関係なく朝昼夕すべてを見せる）
@@ -2803,11 +2851,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     if (planPurpose != null) changePurpose(undefined)
   }
   /**
-   * 「調理時間◯分以内を優先」の分数を選ぶ（2026-08-19 便ID）。
-   * 分数のプルダウンを常に出す形にしたので、選んだ時点で優先もONにする
-   * ＝押しても何も起きない欄を窓の中に置かない（日タブの「◯分以内」と同じ作法）。
+   * 調理時間の条件を選ぶ（2026-08-20 便II・①）。
+   *
+   * ON/OFFのボタン＋分数のプルダウンの2つで1つの条件を言っていたのをやめ、**プルダウン1つ**にした
+   * （同じ窓の「料理のジャンル」と同じ形）。空文字＝「指定なし」で条件そのものを外す。
+   * 分数を選べばその場で条件が効く＝押しても何も起きない欄を窓の中に置かない
+   * （便IDから引き継いだ作法）。分数の覚え（planQuickMinutes）は「指定なし」に戻しても消さない
+   * ＝次に使うときの好みまでは捨てない（「条件をクリア」と同じ扱い）。
    */
-  const changeQuickMinutes = (minutes: number) => {
+  const changeQuickMinutes = (value: string) => {
+    if (value === '') {
+      setQuickOnly(false)
+      return
+    }
+    const minutes = Number(value)
+    if (!(PLAN_QUICK_MINUTES_OPTIONS as readonly number[]).includes(minutes)) return
     if (!quickOnly) setQuickOnly(true)
     if (minutes !== quickMinutes) saveSettings({ planQuickMinutes: minutes })
   }
@@ -4324,6 +4382,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         visibleSlots,
         entries: entries ?? [],
         prevEntries: prevWeekEntries ?? [],
+        // コピー元の週（2026-08-20 便II・⑤）。prevWeekEntries も同じ週数で引いてある
+        weeksBack: copyWeeksBack,
         lockedKeys,
         replaceAll,
       })
@@ -5923,8 +5983,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           onClick={(e) => e.stopPropagation()}
           className={DIALOG_CARD_CLS}
         >
+          {/* 見出しの行に「条件をクリア」を小さく置く（2026-08-20 便II・②。オーナー原文
+              「「条件をクリア」は上に小さく文字だけでいい（レシピ絞り込みと同じ）下に大きくあると、
+                誤認して決定のつもりで押しそう。」）。
+              形はレシピ一覧の絞り込みパネルの「条件をクリア」と同じ＝**パネルの上端・小さい字・
+              下線のリンク**（pages/RecipesPage.tsx）。下端の大きな枠ボタンだったものを、
+              押し間違えても取り返しのつく上端の小さな文字にする。
+              条件を1つも選んでいないあいだも場所は先に取る（見えなくするだけ）＝
+              窓の中身が伸び縮みして下のプルダウンが動くことがない（便IDと同じ手）。
+              押せる高さは、同じ行にある✕（tap-target・44px）が受け持つ＝行の高さは変わらない */}
           <div className="flex items-center justify-between gap-2">
-            <h3 className="font-bold">{ja.mealPlan.suggestConditionsTitle}</h3>
+            <h3 className="min-w-0 flex-1 font-bold">{ja.mealPlan.suggestConditionsTitle}</h3>
+            <button
+              type="button"
+              data-testid="plan-conditions-clear"
+              onClick={clearSuggestConditions}
+              aria-hidden={!anyPlanConditionActive}
+              className={`shrink-0 py-2 text-sm font-bold text-accent-ink underline ${
+                anyPlanConditionActive ? '' : 'invisible'
+              }`}
+            >
+              {ja.search.clear}
+            </button>
             <button
               type="button"
               onClick={closeSuggestConditions}
@@ -5935,39 +6015,34 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             </button>
           </div>
 
-          {/* 調理時間（2026-08-19 便HT・オーナー原文「調理時間15分いないを優先は、
-              時間だけプルダウンで変更できるようにしたい」）。**機能はボタンのまま**で、
-              分数だけをプルダウンで変える。
-              2026-08-19 便ID: 分数のプルダウンは**いつも出す**（便HTでは優先がONのあいだだけ
-              出していたが、押すたびに窓の中身が伸び縮みしていた）。押しても効かない欄にしないため、
-              分数を選んだらその場で優先もONにする（日タブの「◯分以内」と同じ作法） */}
-          <div className="mt-[var(--space-md)] flex flex-wrap items-center gap-[var(--space-sm)]">
-            <button
-              type="button"
-              onClick={() => setQuickOnly((v) => !v)}
-              aria-pressed={quickOnly}
-              className={chipClass(quickOnly)}
-              style={chipStyle(quickOnly)}
+          {/* 調理時間（2026-08-20 便II・①。オーナー原文「「何分以内を優先する？」→指定した時間より
+              長いレシピも選ばれるということ？表記も長いし、ここだけ疑問系なのが気になる。
+              シンプルに「時間」でいいと思う」）。
+              直したこと:
+               ・**「優先」をやめた**。実装（logic/mealPlan.ts の suggestCandidates）は選んだ分数より
+                 長いレシピを候補から外していて、優先度を上げているのではなかった＝文言が嘘だった
+               ・ON/OFFのボタン＋分数のプルダウンの2つをやめ、**プルダウン1つ**にした
+                 （「料理のジャンル」と同じ形。「指定なし」で条件が外れる）
+               ・欄の名前は疑問形をやめて「調理時間」（オーナーの言う「時間」は、この画面に
+                 朝食・昼食・夕食が同時に出ているため食事の時間帯と読める。規約Hで言い換えた） */}
+          <label className="mt-[var(--space-md)] block">
+            <span className="block text-sm font-bold text-ink-muted">
+              {ja.mealPlan.quickMinutesLabel}
+            </span>
+            <select
+              data-testid="plan-quick-minutes"
+              value={quickOnly ? String(quickMinutes) : ''}
+              onChange={(e) => changeQuickMinutes(e.target.value)}
+              className="select-control mt-1 w-full"
             >
-              <ChipCheck on={quickOnly} />
-              {ja.mealPlan.quickOnlyToggle.replace('{n}', String(quickMinutes))}
-            </button>
-            <label className="flex items-center gap-2 text-sm text-ink-muted">
-              <span className="shrink-0">{ja.mealPlan.quickMinutesLabel}</span>
-              <select
-                data-testid="plan-quick-minutes"
-                value={quickMinutes}
-                onChange={(e) => changeQuickMinutes(Number(e.target.value))}
-                className="select-control"
-              >
-                {PLAN_QUICK_MINUTES_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    {ja.mealPlan.quickMinutesOption.replace('{n}', String(m))}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+              <option value="">{ja.mealPlan.quickMinutesNone}</option>
+              {PLAN_QUICK_MINUTES_OPTIONS.map((m) => (
+                <option key={m} value={m}>
+                  {ja.mealPlan.quickMinutesOption.replace('{n}', String(m))}
+                </option>
+              ))}
+            </select>
+          </label>
           {/* 条件の説明は、その条件を選んでいるあいだだけ見せる（2026-08-09 便EN・オーナー実機
               「『調理時間15分以内を優先』を選んでいないのに説明文が出る」＝選ばなくても
               優先されているように読めた）。
@@ -6056,23 +6131,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
 
           {/* 窓の中身は縦に長くなるので、下端にも大きな「閉じる」を置く
               （下まで送ると右上の✕が画面の外に出るため）。名前は同じ ja.common.close */}
+          {/* 2026-08-20 便II・②: ここにあった「条件をクリア」は見出しの行へ移した
+              （下に大きく置くと「決定」と読み違えて押される）。残るのは「閉じる」だけ */}
           <div className={DIALOG_ACTIONS_CLS}>
-            {/* 「条件をクリア」（2026-08-19 便IF・③。オーナー原文「献立を提案の提案の条件に、
-                リセット機能がない」）。日タブの「条件をしぼる」の窓にあるものと**同じ名前**
-                （ja.search.clear）・同じ置き場所（閉じるの上）にそろえた。
-                条件を1つも選んでいないあいだも場所を先に取る（見えなくするだけ）＝
-                窓の中身が伸び縮みして下の「閉じる」が動くことがない（便IDと同じ手） */}
-            <button
-              type="button"
-              data-testid="plan-conditions-clear"
-              onClick={clearSuggestConditions}
-              aria-hidden={!anyPlanConditionActive}
-              className={`w-full rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm ${
-                anyPlanConditionActive ? '' : 'invisible'
-              }`}
-            >
-              {ja.search.clear}
-            </button>
             <button
               type="button"
               data-testid="plan-conditions-close"
@@ -6334,32 +6395,35 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               {/* 2026-08-03 便DH(オーナー指示): 便DEの左右2列をやめ、縦一列で
                   「レシピ一覧から選択中」→「今週の献立の予定(朝食・昼食・夕食)」の順に並べる */}
 
-              {/* 各行の「作った！」ボタンが何をするものかの1行説明(2026-08-03 便DP-3・規約H)。
-                  リストの上に1回だけ置く(行ごとに繰り返さない) */}
-              <p className="mt-1 text-xs text-ink-muted">
-                {ja.mealPlan.todayMarkCookedHint}
-                {/* 整理モードのあいだだけ、×が何をするものかを1行で添える（2026-08-20 便IG・①・規約H）。
-                    「整理」の2文字だけでは何ができるのか読み取れないため */}
-                {dayOrganizing && (
+              {/* 各行のボタンが何をするものかの1行説明(2026-08-03 便DP-3・規約H)。
+                  リストの上に1回だけ置く(行ごとに繰り返さない)。
+                  2026-08-20 便II・⑥: 「作った！」も×も整理モードの中にしか無くなったので、
+                  この説明も**整理モードのあいだだけ**出す（出ていない操作の説明を先に読ませない）。
+                  在庫・並行調理ナビの1行も「作った！」を押す前に読ませるためのものなので同じ扱い */}
+              {dayOrganizing && (
+                <p className="mt-1 text-xs text-ink-muted">
+                  {ja.mealPlan.todayMarkCookedHint}
+                  {/* ×が何をするものかを1行で添える（2026-08-20 便IG・①・規約H）。
+                      「整理」の2文字だけでは何ができるのか読み取れないため */}
                   <span data-testid="day-organize-hint" className="block">
                     {ja.mealPlan.todayOrganizeHint}
                   </span>
-                )}
-                {/* 段取りを組んでいる間だけ、1品の記録が段取りに与える影響を先に伝える
-                    （2026-08-09 便EH・規約F） */}
-                {naviInProgress && (
-                  <span data-testid="day-navi-cooked-hint" className="block">
-                    {ja.mealPlan.todayMarkCookedNaviHint}
-                  </span>
-                )}
-                {/* 在庫を減らす設定がONのときだけ、押す前に読める場所に書く
-                    （1品ずつの「作った！」で確認の小窓は出さない・2026-08-12 便FW・規約F） */}
-                {settings?.cookedReflectPantry && (
-                  <span data-testid="day-pantry-cooked-hint" className="block">
-                    {ja.mealPlan.todayMarkCookedPantryHint}
-                  </span>
-                )}
-              </p>
+                  {/* 段取りを組んでいる間だけ、1品の記録が段取りに与える影響を先に伝える
+                      （2026-08-09 便EH・規約F） */}
+                  {naviInProgress && (
+                    <span data-testid="day-navi-cooked-hint" className="block">
+                      {ja.mealPlan.todayMarkCookedNaviHint}
+                    </span>
+                  )}
+                  {/* 在庫を減らす設定がONのときだけ、押す前に読める場所に書く
+                      （1品ずつの「作った！」で確認の小窓は出さない・2026-08-12 便FW・規約F） */}
+                  {settings?.cookedReflectPantry && (
+                    <span data-testid="day-pantry-cooked-hint" className="block">
+                      {ja.mealPlan.todayMarkCookedPantryHint}
+                    </span>
+                  )}
+                </p>
+              )}
 
               {/* ①レシピ一覧から選択中。この×は今日の献立からだけ外す。
                   今日の予定へ入れたいときは行の下の「◯食に入れる」から
@@ -6376,10 +6440,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         key={recipe.id}
                         recipe={recipe}
                         ngIngredients={settings?.ngIngredients ?? []}
-                        onCooked={() => markDayRecipeCooked(recipe)}
+                        onCooked={
+                          dayOrganizing ? () => markDayRecipeCooked(recipe) : undefined
+                        }
                         onRemove={
                           dayOrganizing ? () => void removeTodayPickedRecipe(recipe) : undefined
                         }
+                        /* 「◯食に入れる」は整理モードの**外にも出したまま**にする
+                           （2026-08-20 便II・⑥の裁定）。「整理」は減らす・終わらせる操作
+                           （「作った！」「×」）の集まりで、**これから決める操作は性質が違う**。
+                           しかも「レシピ一覧から選択中」はレシピを選んだ直後の一時的な状態で、
+                           **次にやることがこの3つのボタン**なので、モードの奥に入れると
+                           選んだ直後に手が止まる（流れの途中に行き止まりを作らない）。
+                           ⑥のねらい（今日の献立を1画面で見渡せる）は、毎行に付く「作った！」と
+                           「×」を隠すことで足りている＝選択中の行は常にあるものではない */
                         footer={
                           <div className="flex w-full flex-wrap gap-1">
                             {MEAL_SLOTS.map((slot) => (
@@ -6432,7 +6506,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                             key={recipe.id}
                             recipe={recipe}
                             ngIngredients={settings?.ngIngredients ?? []}
-                            onCooked={() => markDayRecipeCooked(recipe)}
+                            onCooked={
+                              dayOrganizing ? () => markDayRecipeCooked(recipe) : undefined
+                            }
                             onRemove={
                               dayOrganizing
                                 ? () => void removeTodayPlannedRecipe(slot, recipe)
@@ -6464,15 +6540,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   今週の献立に入れた分を外せず、押すと画面とデータが食い違う操作だった */}
               {/* 「全て作った！」はいま日タブに並んでいる品すべて(①+②)を記録する。
                   2026-08-03 便DP-1: 押す前に件数つきの確認(規約F)、押したあとは件数つきの
-                  トーストと「元に戻す」を出す */}
-              <button
-                type="button"
-                onClick={() => void markAllDayRecipesCooked()}
-                className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-              >
-                <CheckCircle2 size={18} aria-hidden />
-                {ja.mealPlan.todayMarkAllCooked}
-              </button>
+                  トーストと「元に戻す」を出す。
+                  2026-08-20 便II・⑥（オーナー原文「整理に作った！も入れたい。（略）全て作った！も
+                  含めて。」＝便IGの原文で名指しされていた）: 行の「作った！」と一緒に
+                  **整理モードの中**へ入れる。整理モードでないときは、この節は料理名の行と
+                  「レシピ一覧から追加」だけになる */}
+              {dayOrganizing && (
+                <button
+                  type="button"
+                  onClick={() => void markAllDayRecipesCooked()}
+                  className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+                >
+                  <CheckCircle2 size={18} aria-hidden />
+                  {ja.mealPlan.todayMarkAllCooked}
+                </button>
+              )}
 
               {/* 並行調理ナビは①②の両方を渡す(2026-08-03 便DH)。どの品で段取りを組むかは
                   ナビの画面で選ぶ(最大3品) */}
@@ -7438,50 +7520,62 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               ))}
             </div>
 
+            {/* コピー元の週（2026-08-20 便II・⑤。オーナー原文「先週をコピーは、先週以外を
+                今週に反映したい時に使えない。表示している週をコピーにはできない？」）。
+                コピー先は表示している週のままで、**コピー元をここで選ぶ**＝「先々週の献立を今週へ」が
+                この画面のままできる。「おまかせ」を選んでいるあいだは出さない
+                （押しても効かない欄を置かない＝この節のほかの条件と同じ作法） */}
+            {copyLastWeekMode && (
+              <label className="mt-[var(--space-md)] block">
+                <span className="block text-sm font-bold text-ink-muted">
+                  {ja.mealPlan.copySourceWeekLabel}
+                </span>
+                <select
+                  data-testid="copy-source-week"
+                  value={copyWeeksBack}
+                  onChange={(e) => setCopyWeeksBack(Number(e.target.value))}
+                  className="select-control mt-1 w-full"
+                >
+                  {copySourceWeekOptions.map(({ n, start, end }) => (
+                    <option key={n} value={n}>
+                      {ja.mealPlan.copySourceWeekOption
+                        .replace('{n}', String(n))
+                        .replace('{start}', start)
+                        .replace('{end}', end)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
                 空いている枠だけを埋めるのか、これからの献立を総入れ替えするのかを選ぶ。
 
                 2026-08-19 便ID・①（オーナー原文「献立を提案の並び順：入れ方＞提案の条件」）:
                 **入れかたを先、現在の条件を後**にした。
-                2026-08-19 便ID・②（オーナー原文「『まだ決まっていない枠だけ埋める』
-                『レシピを総入れ替え』→『空欄のみ』『総入れ替え』のように、シンプルに。（略）
-                横一列にボタンを配置。２列だと情報量自体が多く感じ、直感的に２択だとわからない」）:
-                名前を短くし、**2列のグリッドで必ず横1列**に並べる（折り返しに任せると、
-                文字を大きくした端末では2段に割れて「2択」に見えなくなる）。
 
-                2026-08-19 便IF・⑧（オーナー原文「『先週の献立をコピー』で、すでに決まっている日も
-                上書きできる選択ができない」）: 先週のコピーでも効くようになったので、
-                コピーを選んでいるあいだのグレーアウトをやめた。
-                総入れ替えのときに何が消えて何が残るかは、押したあとの確認の窓が件数つきで言う（規約F） */}
+                2026-08-20 便II・④（オーナー原文「『入れかた』２択はプルダウン。見た目をシンプルに。
+                条件より目立ってる上に形が違うため。条件が押せるとわかりづらくなる原因にも
+                なってると思う。」）: 2つのチップを**プルダウン1つ**にした。同じ画面の
+                「コピー元の週」「現在の条件」の中身と同じ形になり、地色のチップが条件より
+                目立つこともなくなる。
+                **総入れ替えは消える操作なので、確認の窓（規約F）はそのまま残す**
+                ＝何が消えて何が残るかは、押したあとの窓が件数つきで言う */}
             <div className="mt-[var(--space-md)]">
-              <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.fillModeTitle}</p>
-              <div
-                role="group"
-                aria-label={ja.mealPlan.fillModeTitle}
-                className="mt-1 grid grid-cols-2 gap-[var(--space-sm)]"
-              >
-                {(
-                  [
-                    ['fillEmpty', ja.mealPlan.fillModeFillEmpty],
-                    ['replaceAll', ja.mealPlan.fillModeReplaceAll],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    data-testid={value === 'fillEmpty' ? 'fill-mode-empty' : 'fill-mode-replace'}
-                    onClick={() => setFillMode(value)}
-                    aria-pressed={fillMode === value}
-                    /* チップの見た目は他の条件と同じものを使うが、2列に敷くので
-                       inline-flex（中身ぶんの幅）ではなく列いっぱいに広げる */
-                    className={`${chipClass(fillMode === value)} w-full justify-center`}
-                    style={chipStyle(fillMode === value)}
-                  >
-                    <ChipCheck on={fillMode === value} />
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <label className="block">
+                <span className="block text-sm font-bold text-ink-muted">
+                  {ja.mealPlan.fillModeTitle}
+                </span>
+                <select
+                  data-testid="fill-mode"
+                  value={fillMode}
+                  onChange={(e) => setFillMode(e.target.value as 'fillEmpty' | 'replaceAll')}
+                  className="select-control mt-1 w-full"
+                >
+                  <option value="fillEmpty">{ja.mealPlan.fillModeFillEmpty}</option>
+                  <option value="replaceAll">{ja.mealPlan.fillModeReplaceAll}</option>
+                </select>
+              </label>
               {/* 押すと何が起きるかの1行。出しかた×入れかたの4通りを1か所で言い切る
                   （2026-08-19 便IF・④⑧: コピー側にはコピー元の7日間の日付が入る）。
                   同じことを2か所で言わない＝旧 fillWeekHint はここに畳んだ */}
@@ -7503,21 +7597,29 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
                 2026-08-07 便DT-7: 先週コピーを選んでいるあいだは効かないのでグレーアウトする */}
             {renderSuggestConditions(copyLastWeekMode)}
-
-            {/* 実行ボタン。日タブの「おまかせで献立を組む」と同じ場所（条件の下）・同じ見た目
-                （塗りつぶし・横いっぱい）にそろえた（2026-08-19 便IF・⑥）。
-                絵は、いま選んでいる出しかたで入れ替える（便DT-7から変えていない） */}
-            <button
-              type="button"
-              data-testid="week-fill-run"
-              onClick={() => void fillWeek()}
-              className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-            >
-              {copyLastWeekMode ? <Copy size={20} aria-hidden /> : <Dices size={20} aria-hidden />}
-              {ja.mealPlan.fillWeek}
-            </button>
           </>
         </Collapse>
+
+        {/* 実行ボタン。**折りたたみの外**に置く（2026-08-20 便II・③。オーナー原文
+            「折りたたんだ状態で「まとめて献立を入力」ボタンほしい。アプリ全体で、折りたたみを
+              一切開かなくても、最低限一通りすべての機能を触れる（使いこなすために開く）ように
+              したい。」）。
+            場所は畳んでいても開いていても**この節のいちばん下**＝開いているときの並び
+            （出しかた→入れかた→現在の条件→実行）は便IF・⑥のまま変わらず、畳むと見出しの
+            すぐ下に来る。日タブの「今日なに作る？」も同じ形にそろえてある
+            （components/TodaySuggestPanel）。
+            便DT-5/6の「見出しの横」に戻さなかった理由: 見出しの横は幅が狭く、塗りつぶしの
+            横いっぱいのボタン（日タブと同じ見た目）が置けない＝そろえ方が また割れる。
+            絵は、いま選んでいる出しかたで入れ替える（便DT-7から変えていない） */}
+        <button
+          type="button"
+          data-testid="week-fill-run"
+          onClick={() => void fillWeek()}
+          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+        >
+          {copyLastWeekMode ? <Copy size={20} aria-hidden /> : <Dices size={20} aria-hidden />}
+          {ja.mealPlan.fillWeek}
+        </button>
       </section>
 
       {/* グループ3: 献立テンプレート(2026-07-29 便CB-2・docs/59 A-1＋B-2)。

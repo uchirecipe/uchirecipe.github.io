@@ -558,6 +558,17 @@ export default function TodaySuggestPanel({
     onDrawPlan({ allowedRecipeIds: planAllowedIds })
   }
   /**
+   * 決めてもらうボタンを押したとき（2026-08-20 便II・③）。
+   * 畳んだままでも押せるようにしたので、**押したら節を開く**＝出てきたものが必ず見える。
+   * （週タブの「まとめて献立を入力」は結果が下の曜日カードに出るので開かない。
+   *   こちらは結果がこの節の中にしか出ないので、開かないと押しても何も見えない）
+   */
+  const drawNow = () => {
+    if (collapsible && !open) setOpen(true)
+    if (mode === 'plan') drawPlanNow()
+    else drawOneNow()
+  }
+  /**
    * 絞り込みを変えたあと、まだ組み直していない（＝出ている献立が前の条件のもの）。
    * 献立を出しているあいだだけ見る値
    */
@@ -622,18 +633,30 @@ export default function TodaySuggestPanel({
   const shownRecipes =
     mode === 'plan' ? planPair.map((item) => item.recipe) : suggestion ? [suggestion] : []
 
-  const body =
-    recipes && recipes.length === 0 ? (
-        <div className="mt-[var(--space-sm)] text-center">
-          <p className="text-ink-muted">{ja.dayStart.empty}</p>
-          <Link
-            to="/recipes/new"
-            className="mt-[var(--space-md)] inline-block rounded-md bg-accent px-6 py-3 font-bold text-on-accent shadow-sm"
-          >
-            {ja.recipes.addRecipe}
-          </Link>
-        </div>
-      ) : (
+  /**
+   * 中身を3つに分ける（2026-08-20 便II・③）。オーナー原文
+   *   「折りたたんだ状態で「まとめて献立を入力」ボタンほしい。アプリ全体で、折りたたみを一切
+   *     開かなくても、最低限一通りすべての機能を触れる（使いこなすために開く）ようにしたい。」
+   *
+   * 決めてもらうボタンだけを折りたたみの**外**に出し、その上（切り替え・条件）と
+   * 下（結果・候補数・「今日の献立に入れる」）を別々の折りたたみに入れる。
+   * こうすると、**開いているときの並びは今までと1つも変わらず**、畳んだときだけ
+   * 見出しのすぐ下に決めてもらうボタンが残る。週タブの「献立を提案」も同じ形にしてある。
+   */
+  /** レシピが1件も無い（＝引くものが無い）とき。決めてもらうボタンも出さない */
+  const noRecipes = recipes != null && recipes.length === 0
+  const emptyBody = (
+    <div className="mt-[var(--space-sm)] text-center">
+      <p className="text-ink-muted">{ja.dayStart.empty}</p>
+      <Link
+        to="/recipes/new"
+        className="mt-[var(--space-md)] inline-block rounded-md bg-accent px-6 py-3 font-bold text-on-accent shadow-sm"
+      >
+        {ja.recipes.addRecipe}
+      </Link>
+    </div>
+  )
+  const bodyTop = (
         <>
           {/* 「1品」／「献立」の切り替え(2026-08-18 便HM・オーナー指示)。見出しのすぐ下に置き、
               いまどちらを出しているかを地色で言い切る(選択中=塗り。条件チップと同じ言い方)。
@@ -686,35 +709,40 @@ export default function TodaySuggestPanel({
             </button>
           </div>
 
-          {/* 「決めてもらう」ボタン。置き場所は1つで、名前と絵が切り替えで入れ替わる
-              (2026-08-18 便HM・オーナー指示「同じボタンにまとめ」)。
-              地色・字色・大きさは「ランダムで1品出す」のものをそのまま使う
-              (2026-08-03 便DH。オーナー「見た目は1品の画面に寄せたい」)。
+        </>
+  )
 
-              2026-08-19 便HT（オーナー実機「ランダムボタンが下だと品数によってボタン位置が変わり、
-              連続タップで誤タップします。上に持ってくるか、ボタン位置がずれないようにするかして」）:
-              **結果より上へ移した**。ここから上に出るものは切り替えと「条件をしぼる」だけで、
-              どちらも1品と献立で同じ数だけ出る（2026-08-19 便IAで「在庫の食材から」と
-              在庫の1行を窓の中へ移したので、ここから上はさらに変わらなくなった）＝
-              **出た品数でも、切り替えでも、連続して押しても、このボタンは1pxも動かない**。
-              「結果の場所の高さを固定する」案は採らなかった: 1品のときも献立2品ぶんの空きを
-              抱えることになり、390×667の画面では「今日の献立に入れる」が画面の外へ落ちる。
-              便HMが「結果が下だと探しに行くことになる」と書いた形に戻るが、あのときの問題は
-              **1品は上・献立は下と向きが逆だったこと**と、あいだに説明が2行挟まっていたことで、
-              いまはどちらの側も押した指のすぐ下に同じカードで出る（説明はカードの下へ回した） */}
-          <button
-            type="button"
-            data-testid="day-suggest-draw"
-            onClick={mode === 'plan' ? drawPlanNow : drawOneNow}
-            className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-          >
-            {mode === 'plan' ? (
-              <UtensilsCrossed size={20} aria-hidden />
-            ) : (
-              <Dices size={20} aria-hidden />
-            )}
-            {mode === 'plan' ? ja.mealPlan.todaySuggestButton : ja.dayStart.shuffle}
-          </button>
+  /**
+   * 「決めてもらう」ボタン。置き場所は1つで、名前と絵が切り替えで入れ替わる
+   * （2026-08-18 便HM・オーナー指示「同じボタンにまとめ」）。
+   * 地色・字色・大きさは「ランダムで1品出す」のものをそのまま使う
+   * （2026-08-03 便DH。オーナー「見た目は1品の画面に寄せたい」）。
+   *
+   * 2026-08-19 便HT（オーナー実機「ランダムボタンが下だと品数によってボタン位置が変わり、
+   * 連続タップで誤タップします。上に持ってくるか、ボタン位置がずれないようにするかして」）:
+   * **結果より上**にある。ここから上に出るものは切り替えと「条件をしぼる」だけで、
+   * どちらも1品と献立で同じ数だけ出る＝**出た品数でも、切り替えでも、連続して押しても、
+   * このボタンは1pxも動かない**。
+   * 「結果の場所の高さを固定する」案は採らなかった: 1品のときも献立2品ぶんの空きを
+   * 抱えることになり、390×667の画面では「今日の献立に入れる」が画面の外へ落ちる。
+   *
+   * 2026-08-20 便II・③: 折りたたみの**外**へ出した。開いているときの並び（切り替え→条件→
+   * このボタン→結果）は1つも変わらず、畳んだときだけ見出しのすぐ下に残る。
+   */
+  const drawButton = (
+    <button
+      type="button"
+      data-testid="day-suggest-draw"
+      onClick={drawNow}
+      className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
+    >
+      {mode === 'plan' ? <UtensilsCrossed size={20} aria-hidden /> : <Dices size={20} aria-hidden />}
+      {mode === 'plan' ? ja.mealPlan.todaySuggestButton : ja.dayStart.shuffle}
+    </button>
+  )
+
+  const bodyBottom = (
+        <>
 
           {/* 絞り込みを変えたのに画面が変わらない理由（2026-08-19 便HY＝献立／便IA＝1品）。
               **置き場所はボタンの「下」**にする: 上に置くと、条件を触るたびにボタンが下へずれて、
@@ -853,7 +881,7 @@ export default function TodaySuggestPanel({
             </button>
           )}
         </>
-      )
+  )
 
   return (
     <section className="rounded-md border border-edge bg-surface p-[var(--space-md)] shadow-sm">
@@ -882,7 +910,26 @@ export default function TodaySuggestPanel({
         <h2 className="text-xl font-bold">{ja.dayStart.suggestTitle}</h2>
       )}
 
-      {collapsible ? <Collapse open={shown}>{body}</Collapse> : body}
+      {/* 2026-08-20 便II・③: 決めてもらうボタンだけを折りたたみの外に出し、その上と下を
+          別々の折りたたみに入れる。開いているときの並びは今までと同じで、畳むと
+          見出し＋決めてもらうボタンだけが残る。
+          下側の折りたたみは開き切ったあとの位置合わせをしない（reveal={false}）＝
+          1回の開閉で画面が2回動かない（上側だけが今までどおり位置を合わせる） */}
+      {noRecipes ? (
+        collapsible ? <Collapse open={shown}>{emptyBody}</Collapse> : emptyBody
+      ) : (
+        <>
+          {collapsible ? <Collapse open={shown}>{bodyTop}</Collapse> : bodyTop}
+          {drawButton}
+          {collapsible ? (
+            <Collapse open={shown} reveal={false}>
+              {bodyBottom}
+            </Collapse>
+          ) : (
+            bodyBottom
+          )}
+        </>
+      )}
 
       {/* 「条件をしぼる」の窓（2026-08-19 便IA）。
           折りたたみ（Collapse）の**外**に置く: 折りたたみは開閉のあいだ中身を切り取るので、
@@ -907,8 +954,27 @@ export default function TodaySuggestPanel({
             onClick={(e) => e.stopPropagation()}
             className={DIALOG_CARD_CLS}
           >
+            {/* 見出しの行に「条件をクリア」を小さく置く（2026-08-20 便II・②。オーナー原文
+                「「条件をクリア」は上に小さく文字だけでいい（レシピ絞り込みと同じ）下に大きくあると、
+                  誤認して決定のつもりで押しそう。」）。
+                形はレシピ一覧の絞り込みパネルの「条件をクリア」と同じ＝**パネルの上端・小さい字・
+                下線のリンク**（pages/RecipesPage.tsx）。週タブの「提案の条件」の窓も同じにしてある
+                ＝同じ操作を画面ごとに違う場所・違う大きさで出さない。
+                条件を1つも選んでいないあいだも場所は先に取る（見えなくするだけ）＝
+                窓の中身が伸び縮みして下の選択肢が動くことがない（便IAと同じ手） */}
             <div className="flex items-center justify-between gap-2">
-              <h3 className="font-bold">{ja.dayStart.conditionsToggle}</h3>
+              <h3 className="min-w-0 flex-1 font-bold">{ja.dayStart.conditionsToggle}</h3>
+              <button
+                type="button"
+                data-testid="day-conditions-clear"
+                onClick={clearConditions}
+                aria-hidden={!anyConditionActive}
+                className={`shrink-0 py-2 text-sm font-bold text-accent-ink underline ${
+                  anyConditionActive ? '' : 'invisible'
+                }`}
+              >
+                {ja.search.clear}
+              </button>
               <button
                 type="button"
                 onClick={closeConditions}
@@ -1001,17 +1067,9 @@ export default function TodaySuggestPanel({
               </>
             )}
 
+            {/* 2026-08-20 便II・②: ここにあった「条件をクリア」は見出しの行へ移した
+                （下に大きく置くと「決定」と読み違えて押される）。残るのは「閉じる」だけ */}
             <div className={`mt-[var(--space-md)] space-y-[var(--space-sm)]`}>
-              <button
-                type="button"
-                onClick={clearConditions}
-                aria-hidden={!anyConditionActive}
-                className={`w-full rounded-md border border-accent bg-surface py-3 font-bold text-accent-ink shadow-sm ${
-                  anyConditionActive ? '' : 'invisible'
-                }`}
-              >
-                {ja.search.clear}
-              </button>
               {/* 窓の中身は縦に長くなるので、下端にも大きな「閉じる」を置く
                   （下まで送ると右上の✕が画面の外に出るため）。名前は同じ ja.common.close */}
               <button

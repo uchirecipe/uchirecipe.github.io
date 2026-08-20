@@ -24129,6 +24129,166 @@ Aみりん 大さじ1
   }
 }
 
+// ============================================================================
+// 2026-08-20 便II: 献立の画面（オーナー承認済みだったのに着手できていなかった分）
+//
+// 禁じ手よけ:
+//  ・曜日・月替わりの前提を置かない＝「今日」もコピー元も引数で渡し、日付を固定して結論を見る
+//  ・読み取りに失敗したら必ず落ちる（関数や文言が無いときは、素通りではなくその場で1件NGにする）
+// ============================================================================
+{
+  const mealPlanLogicII = await import('../src/logic/mealPlan.ts')
+  const { planCopyLastWeek: copyII, suggestCandidates: candidatesII } = mealPlanLogicII
+
+  // --- ⑤ コピー元の週を選べる（planCopyLastWeek の weeksBack） ---
+  // オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
+  // 表示している週をコピーにはできない？」
+  // 第1段階＝コピー先（表示している週）はそのままに、**コピー元の週を選べる**ようにした。
+  // 1週間前だけを見る形だと「2週間前を今週へ」が永久にできないので、そこを固定する。
+  {
+    const prevEntries = [
+      // 1週間前（2026-08-03の週）
+      { date: '2026-08-03', slot: 'dinner', recipeId: 31, role: 'main' },
+      { date: '2026-08-04', slot: 'dinner', recipeId: 32, role: 'main' },
+      // 2週間前（2026-07-27の週）
+      { date: '2026-07-27', slot: 'dinner', recipeId: 21, role: 'main' },
+      { date: '2026-07-28', slot: 'dinner', recipeId: 22, role: 'main' },
+    ]
+    const base = {
+      dates: ['2026-08-10', '2026-08-11'],
+      today: '2026-08-10',
+      visibleSlots: ['dinner'],
+      entries: [],
+      prevEntries,
+    }
+    const oneWeek = copyII(base)
+    eq('II-5 選ばなければ、これまでどおり1週間前を写す（後方互換）', oneWeek.ops, [
+      { date: '2026-08-10', slot: 'dinner', recipeId: 31, role: 'main' },
+      { date: '2026-08-11', slot: 'dinner', recipeId: 32, role: 'main' },
+    ])
+    eq('II-5 1週間前を明示しても、選ばなかったときと同じ結果になる', copyII({ ...base, weeksBack: 1 }).ops, oneWeek.ops)
+    const twoWeeks = copyII({ ...base, weeksBack: 2 })
+    eq('II-5 2週間前を選ぶと、2週間前の献立を写す', twoWeeks.ops, [
+      { date: '2026-08-10', slot: 'dinner', recipeId: 21, role: 'main' },
+      { date: '2026-08-11', slot: 'dinner', recipeId: 22, role: 'main' },
+    ])
+    eq('II-5 コピー元の品数も、選んだ週のぶんだけ数える', twoWeeks.sourceTotal, 2)
+    // 選んだ週に献立が無ければ「写すものが無い」＝黙って別の週から拾わない
+    eq(
+      'II-5 選んだ週に献立が無ければ、1品も写さない（別の週から拾わない）',
+      copyII({ ...base, weeksBack: 3 }).ops,
+      [],
+    )
+    eq('II-5 選んだ週に献立が無ければ、コピー元の品数も0', copyII({ ...base, weeksBack: 3 }).sourceTotal, 0)
+    // 過ぎた日・鍵の約束は、どの週を選んでも変わらない
+    eq(
+      'II-5 コピー元を変えても、過ぎた日には入れない',
+      copyII({ ...base, weeksBack: 2, today: '2026-08-11' }).ops,
+      [{ date: '2026-08-11', slot: 'dinner', recipeId: 22, role: 'main' }],
+    )
+    eq(
+      'II-5 コピー元を変えても、鍵の掛かった食事には入れない',
+      copyII({ ...base, weeksBack: 2, lockedKeys: new Set(['2026-08-10|dinner']) }).ops,
+      [{ date: '2026-08-11', slot: 'dinner', recipeId: 22, role: 'main' }],
+    )
+  }
+
+  // --- ⑤ 文言: 出しかたの名前とコピー元の週の欄 ---
+  {
+    eq(
+      'II-5 出しかたのボタンに「先週」が残っていない（コピー元は選べるようになった）',
+      typeof ja.mealPlan.fillSourceCopy === 'string' && !ja.mealPlan.fillSourceCopy.includes('先週'),
+      true,
+    )
+    eq(
+      'II-5 コピー元の週の欄に名前がある',
+      typeof ja.mealPlan.copySourceWeekLabel === 'string' && ja.mealPlan.copySourceWeekLabel.length > 0,
+      true,
+    )
+    eq(
+      'II-5 コピー元の選択肢に、何週間前かと実際の7日間の日付の差し込み口がある',
+      typeof ja.mealPlan.copySourceWeekOption === 'string' &&
+        ja.mealPlan.copySourceWeekOption.includes('{n}') &&
+        ja.mealPlan.copySourceWeekOption.includes('{start}') &&
+        ja.mealPlan.copySourceWeekOption.includes('{end}'),
+      true,
+    )
+  }
+
+  // --- ① 調理時間の条件は「優先」ではなく「除外」（文言を実装に合わせる） ---
+  // オーナー原文「「何分以内を優先する？」→指定した時間より長いレシピも選ばれるということ？
+  // 表記も長いし、ここだけ疑問系なのが気になる。シンプルに「時間」でいいと思う」
+  // 実装（logic/mealPlan.ts の suggestCandidates）は候補から**外して**いる。
+  // 調理時間が入っていないレシピも一緒に外れるので、そこも文言で言う。
+  {
+    // まず実装の側を固定する（文言だけ直して実装が別物、を作らない）
+    const r = (id, cookMinutes) => ({
+      id,
+      title: `品${id}`,
+      tags: [],
+      ingredients: [],
+      steps: [],
+      cookedLogs: [],
+      cookMinutes,
+    })
+    const pool = [r(1, 10), r(2, 30), r(3, undefined), r(4, 0)]
+    const picked = candidatesII(pool, {
+      quickOnly: true,
+      quickMinutes: 15,
+      excludeNg: false,
+      ngIngredients: [],
+      usedRecipeIds: [],
+      slot: 'dinner',
+      season: 'summer',
+    })
+    eq(
+      'II-1 実装: 調理時間の条件は「優先」ではなく候補から外す（15分より長い品は残らない）',
+      picked.map((x) => x.id).sort((a, b) => a - b),
+      [1],
+    )
+    eq(
+      'II-1 実装: 調理時間を入れていない品も候補から外れる（文言で言うべき事実）',
+      picked.some((x) => x.id === 3 || x.id === 4),
+      false,
+    )
+    for (const [name, text] of [
+      ['欄の名前', ja.mealPlan.quickMinutesLabel],
+      ['選択肢', ja.mealPlan.quickMinutesOption],
+      ['説明の1行', ja.mealPlan.quickOnlyHint],
+    ]) {
+      eq(
+        `II-1 調理時間の条件の${name}に「優先」と書かない（実装は除外なので嘘になる）`,
+        typeof text === 'string' && text.length > 0 && !text.includes('優先'),
+        true,
+      )
+    }
+    eq(
+      'II-1 欄の名前は疑問形にしない（ここだけ問いかけになっていた）',
+      typeof ja.mealPlan.quickMinutesLabel === 'string' &&
+        !ja.mealPlan.quickMinutesLabel.includes('？') &&
+        !ja.mealPlan.quickMinutesLabel.includes('?'),
+      true,
+    )
+    eq(
+      'II-1 欄の名前は短くする（8文字以内）',
+      typeof ja.mealPlan.quickMinutesLabel === 'string' && ja.mealPlan.quickMinutesLabel.length <= 8,
+      true,
+    )
+    eq(
+      'II-1 調理時間を入れていない品が外れることを、説明の1行で言う',
+      typeof ja.mealPlan.quickOnlyHint === 'string' &&
+        ja.mealPlan.quickOnlyHint.includes('調理時間を入れていない'),
+      true,
+    )
+    eq(
+      'II-1 「指定なし」を選べる（条件を外す道が同じ欄の中にある）',
+      typeof ja.mealPlan.quickMinutesNone === 'string' && ja.mealPlan.quickMinutesNone.length > 0,
+      true,
+    )
+  }
+}
+
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
