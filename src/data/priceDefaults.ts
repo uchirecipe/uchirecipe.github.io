@@ -69,7 +69,7 @@ export interface PriceDefaultItem {
  * 旧名「乾燥しいたけ」は logic/ingredientReadings.ts の別名として残すので、その名前で
  * 書いたレシピ・ユーザー入力は引き続き同じ1件に価格解決する。
  */
-export const PRICE_DEFAULTS_VERSION = 8
+export const PRICE_DEFAULTS_VERSION = 9
 
 /** 単位だけを直す移行の1件分（旧単位に一致する既定行だけを新単位へ書き換える） */
 export interface PriceDefaultUnitFix {
@@ -339,6 +339,11 @@ export const PRICE_DEFAULTS: PriceDefaultItem[] = [
   { name: 'こしょう', pricePerUnit: 10, unit: '小さじ1' },
   { name: '七味唐辛子', pricePerUnit: 10, unit: '少々' },
   { name: '砂糖', pricePerUnit: 2, unit: '大さじ1' },
+  // 2026-08-21 オーナー承認: 取り込んだレシピの「微粒子グラニュー糖」等が栄養では砂糖に
+  // 当たるようになったのに、原価だけ当たらなかった（価格マスタに行が無かった）。
+  // 目安価格は砂糖と同じ値にする（実売はやや高いことが多いが、目安なので設定の
+  // 「食材の値段」でいつでも直せる、というのがオーナーの了承した前提）
+  { name: 'グラニュー糖', pricePerUnit: 2, unit: '大さじ1' },
   { name: '甜麺醤', pricePerUnit: 20, unit: '大さじ1' },
   { name: '豆板醤', pricePerUnit: 15, unit: '小さじ1' },
   { name: '粉山椒', pricePerUnit: 15, unit: '少々' },

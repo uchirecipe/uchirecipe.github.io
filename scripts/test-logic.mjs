@@ -11304,7 +11304,10 @@ eq('normalizeIngredientNameForPrice 前後空白除去', normalizeIngredientName
     yen: byName.get('干ししいたけ')?.pricePerUnit,
     unit: byName.get('干ししいたけ')?.unit,
   }, { yen: 400, unit: '30g' })
-  eq('FB 呼び名の統一と移行を配るため版番号を8に上げている', PRICE_DEFAULTS_VERSION, 8)
+  // 2026-08-21 司令部: 版番号は「配るたびに上げる」ものなので、値を書き写して固定すると
+  // 足すたびにここが赤くなる（禁じ手③）。**8以上であること**だけを見る
+  // （8＝呼び名の統一と移行を配った回。それより下がったら移行が配られない）
+  eq('FB 呼び名の統一と移行を配るため版番号を8以上にしている', PRICE_DEFAULTS_VERSION >= 8, true)
 
   // 名寄せ: 表記が違っても同じ1件に解決する / 生と乾燥は別々の1件に解決する
   {
