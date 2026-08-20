@@ -19353,9 +19353,14 @@ try {
         await ehPage.waitForTimeout(300)
       }
 
-      // ① 献立タブから1品だけ「作った！」したときの挙動
+      // ① 献立タブから1品だけ「作った！」したときの挙動。
+      // 2026-08-20 便II・⑥で「作った！」は「今日の献立」の整理モードの中に入った。
+      // ここで見たいのは**押した結果**（押す前の断り書き・段取りの組み直し）なので、
+      // 押せる場所まで進めるためにモードへ入るだけにする
+      // （「整理モードの中にある」こと自体を測るのは DAYORG-01 の役目。二重に持たない）
       await ehPage.goto(`${BASE}/#/meal-plan`)
       await ehPage.waitForTimeout(1000)
+      await openDayOrganize(ehPage)
       check(
         'EH-01 段取り中は「作った！」が段取りに与える影響を先に書いてある(規約F)',
         (await ehPage.locator('[data-testid="day-navi-cooked-hint"]').count()) === 1,
@@ -28554,10 +28559,38 @@ try {
       await eqPage.getByRole('button', { name: '戻る' }).first().click()
       await eqPage.waitForTimeout(1500)
       const eqScrollAfter = await eqPage.evaluate(() => Math.round(window.scrollY))
+      /**
+       * いま送れる限界（ページの下端）。
+       *
+       * 2026-08-20 便II で、この検査が「単独では緑・続けて流すと赤（82px）」になる正体を
+       * 切り分けた。**⑥（「作った！」を整理モードへ移した）とは関係が無い**——この検査の土台では
+       * 今日の献立が1品も無く、「今日の献立」の節そのものが画面に出ていない（整理ボタンも行も0個）。
+       *
+       * 本当の原因は「今日なに作る？」で、**戻るたびに別の献立を組み直す**こと。主菜が
+       * 一品もの（カレー・丼・麺・鍋）だと副菜のカードが付かず、節の高さが実測 156〜170px →
+       * 74px、ページの下端が **82px 上がる**（6回流して 2枚→1枚 になった回だけ再現）。
+       * 「作った記録の一覧」への入口はページのいちばん下にあるので、離れる直前の位置は
+       * **必ずページの下端**になる＝下端が動けば、覚えた位置はもう存在しない。
+       *
+       * アプリはこのとき下端まで戻す（logic上の Math.min(覚えた位置, 送れる限界)）。これは
+       * 利用者にとっても正しい——無い場所へは戻せない。よって**期待値も同じ形で書く**。
+       * 縦位置を決め打ちすると、乱数で変わる高さのぶんだけテストが赤くなる（禁じ手④）。
+       */
+      const eqReachAfter = await eqPage.evaluate(() =>
+        Math.round(document.documentElement.scrollHeight - window.innerHeight),
+      )
+      const eqExpectedScroll = Math.min(eqScrollBefore2, Math.max(0, eqReachAfter))
+      // 素通り防止: 離れる前に実際に送れていて、戻った先にも送れる高さが残っていること。
+      // どちらかが0なら「動かないページで測っていた」＝この検査は何も見ていない
+      check(
+        'EQ-01(⑥) 前提: 離れる前にページを送れていて、戻った先にも送れる高さがある',
+        eqScrollBefore2 > 0 && eqReachAfter > 0,
+        `離れる前=${eqScrollBefore2} / 戻った先の限界=${eqReachAfter}`,
+      )
       check(
         'EQ-01(⑥) 一覧から戻ると献立の「日」は離れる前とほぼ同じスクロール位置になる(誤差40px以内)',
-        Math.abs(eqScrollAfter - eqScrollBefore2) <= 40,
-        `before=${eqScrollBefore2}(初回=${eqScrollBefore}) / after=${eqScrollAfter}`,
+        Math.abs(eqScrollAfter - eqExpectedScroll) <= 40,
+        `before=${eqScrollBefore2}(初回=${eqScrollBefore}) / after=${eqScrollAfter} / 戻った先の限界=${eqReachAfter} / 期待=${eqExpectedScroll}`,
       )
       check(
         'EQ-01(⑥) 復元に使ったクエリ(restore)はURLから消える',
@@ -38557,13 +38590,15 @@ try {
       await fpPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await fpPage.reload({ waitUntil: 'networkidle' })
       await fpPage.waitForTimeout(1800)
+      // 2026-08-20 便II・⑥: 「作った！」「全て作った！」と、その断り書きは整理モードの中に入った。
+      // ここで見たいのは**断り書きの中身**（どの設定でどう減るか）なので、読める場所まで
+      // 進めるためにモードへ入るだけにする（置き場所を測るのは DAYORG-01 の役目）
+      await openDayOrganize(fpPage)
       check(
         'FW-04 設定がONのときは、1品ずつの「作った！」の前にも在庫が減ることが書いてある（小窓は出さない）',
         (await fpPage.locator('[data-testid="day-pantry-cooked-hint"]').count()) === 1,
       )
       fpDialogs.length = 0
-      // 2026-08-20 便II・⑥: 「全て作った！」は整理モードの中に移った
-      await openDayOrganize(fpPage)
       await fpPage.getByRole('button', { name: '全て作った！' }).first().click()
       await fpPage.waitForTimeout(1200)
       check(
