@@ -397,9 +397,13 @@ const pickerChipCls = (active: boolean) =>
  *   「整理に作った！も入れたい。作った！が気軽にできないよりも、献立を１画面で確認できない方が
  *     問題では？」）:
  * **「作った！」も整理モードのあいだだけ**出す（onCooked を渡さなければ出ない）。
- * 整理モードでないときは2段目そのものが無くなり、**料理名の行だけ**になる
- * ＝今日の献立を1画面で見渡せる。行の下に足す操作（footer）も同じ扱いで、
- * 呼び出し側が整理モードのあいだだけ渡す。
+ * 整理モードでないときは「作った！」と×が消え、**料理名の行だけ**になる
+ * ＝今日の献立を1画面で見渡せる。
+ *
+ * ただし footer（「◯食に入れる」）は**モードの外にも出したまま**にする（同便の裁定）。
+ * 「整理」は減らす・終わらせる操作の集まりで、これから決める操作は性質が違う。
+ * 「レシピ一覧から選択中」はレシピを選んだ直後の一時的な状態なので、次にやることを
+ * モードの奥へ入れると、選んだ直後に手が止まる（流れの途中に行き止まりを作らない）。
  *
  * 2026-08-19 便HW（オーナー原文「場所や機能ごとにレシピカードの形や内容が変わっているのが
  * みづらい」／司令部の裁定「日タブの行はA案＝2段」）:
@@ -6442,26 +6446,30 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         onRemove={
                           dayOrganizing ? () => void removeTodayPickedRecipe(recipe) : undefined
                         }
-                        /* 「◯食に入れる」も行に対する操作なので、整理モードのあいだだけ出す
-                           （2026-08-20 便II・⑥「整理モードでないときは、料理名の行だけ」） */
+                        /* 「◯食に入れる」は整理モードの**外にも出したまま**にする
+                           （2026-08-20 便II・⑥の裁定）。「整理」は減らす・終わらせる操作
+                           （「作った！」「×」）の集まりで、**これから決める操作は性質が違う**。
+                           しかも「レシピ一覧から選択中」はレシピを選んだ直後の一時的な状態で、
+                           **次にやることがこの3つのボタン**なので、モードの奥に入れると
+                           選んだ直後に手が止まる（流れの途中に行き止まりを作らない）。
+                           ⑥のねらい（今日の献立を1画面で見渡せる）は、毎行に付く「作った！」と
+                           「×」を隠すことで足りている＝選択中の行は常にあるものではない */
                         footer={
-                          dayOrganizing ? (
-                            <div className="flex w-full flex-wrap gap-1">
-                              {MEAL_SLOTS.map((slot) => (
-                                <button
-                                  key={slot}
-                                  type="button"
-                                  onClick={() => void assignMismatchRecipe(slot, recipe)}
-                                  className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink"
-                                >
-                                  {ja.mealPlan.planMismatchAddToSlot.replace(
-                                    '{slot}',
-                                    ja.mealPlan.slot[slot],
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          ) : undefined
+                          <div className="flex w-full flex-wrap gap-1">
+                            {MEAL_SLOTS.map((slot) => (
+                              <button
+                                key={slot}
+                                type="button"
+                                onClick={() => void assignMismatchRecipe(slot, recipe)}
+                                className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-xs font-bold text-accent-ink"
+                              >
+                                {ja.mealPlan.planMismatchAddToSlot.replace(
+                                  '{slot}',
+                                  ja.mealPlan.slot[slot],
+                                )}
+                              </button>
+                            ))}
+                          </div>
                         }
                       />
                     ))}

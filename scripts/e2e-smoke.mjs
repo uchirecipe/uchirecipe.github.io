@@ -4360,6 +4360,10 @@ try {
   // 作った！が気軽にできないよりも、献立を１画面で確認できない方が問題では？」)。
   // 見張るのは ①整理でないときは「作った！」も「全て作った！」も×も出ていない(料理名の行だけ)
   // ②整理にすると3つとも出る ③外した後に元に戻せる ④「完了」で3つとも引っ込む。
+  // **対で見るもの**: 「◯食に入れる」は整理モードの外にも出したまま(司令部の裁定)。
+  // 「整理」は減らす・終わらせる操作の集まりで、「これから決める」操作は性質が違う。
+  // 「レシピ一覧から選択中」はレシピを選んだ直後の一時的な状態なので、次にやることを
+  // モードの奥に入れると、選んだ直後に手が止まる(流れの途中に行き止まりを作らない)。
   // 掴み方は読み上げの名前(aria-label)と ja.ts の文言だけ＝どの入れ子・どの並びに出ていても
   // 同じ判定になる(禁じ手④)。数え上げが0件で素通りしないよう、前提(2品の料理名が並んでいる)を
   // 先に測ってから本題に入る(禁じ手「見つからなかった＝合格」対策) ---
@@ -4391,6 +4395,13 @@ try {
       doPage.locator(
         `button[aria-label="${ja.mealPlan.todayRemove}"], button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`,
       )
+    // 「朝食に入れる」「昼食に入れる」「夕食に入れる」。名前は ja.ts から組み立てる
+    // （画面の字を書き写さない。食事の呼び名が変わってもこの検査は動く）
+    const doSlotNames = ['breakfast', 'lunch', 'dinner'].map((slot) =>
+      ja.mealPlan.planMismatchAddToSlot.replace('{slot}', ja.mealPlan.slot[slot]),
+    )
+    const doSlotButtons = () =>
+      doPage.locator(doSlotNames.map((n) => `button:text-is("${n}")`).join(', '))
     try {
       await doPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await doPage.waitForTimeout(1800) // 初回シード完了待ち
@@ -4443,6 +4454,13 @@ try {
         'DAYORG-01(⑥) 整理モードでないときは、「作った！」の説明の1行も出ていない(出ていない操作の説明を先に読ませない)',
         !doBody0.includes(ja.mealPlan.todayMarkCookedHint),
       )
+      // 「◯食に入れる」だけは整理モードの外にも出す(司令部の裁定)。
+      // 3つの食事ぶんそろって出ることまで見る＝1つだけ残った状態を合格にしない
+      check(
+        'DAYORG-01(裁定) 整理モードでなくても「◯食に入れる」は出したまま(選んだ直後の行き止まりを作らない)',
+        (await doSlotButtons().count()) === doSlotNames.length,
+        `◯食に入れる=${await doSlotButtons().count()} / 期待=${doSlotNames.length}`,
+      )
 
       // ---------- ② 整理にすると出る ----------
       const doToggle = doPage.getByRole('button', {
@@ -4473,6 +4491,11 @@ try {
         'DAYORG-01(⑥) 整理モードにすると、「全て作った！」も出る',
         (await doAll.count()) === 1 && (await doAll.isVisible()),
         `全て作った！=${await doAll.count()}`,
+      )
+      check(
+        'DAYORG-01(裁定) 整理モードにしても「◯食に入れる」は消えない(モードの内と外で同じ場所にある)',
+        (await doSlotButtons().count()) === doSlotNames.length,
+        `◯食に入れる=${await doSlotButtons().count()}`,
       )
       const doBody1 = ((await doPage.textContent('body')) ?? '').replaceAll('​', '')
       check(
@@ -4537,6 +4560,11 @@ try {
         check(
           'DAYORG-01(⑥) 「完了」で引っ込むのは操作だけで、料理名の行は残る',
           ((await doPage.textContent('body')) ?? '').replaceAll('​', '').includes('肉じゃが'),
+        )
+        check(
+          'DAYORG-01(裁定) 「完了」で戻しても「◯食に入れる」は残る',
+          (await doSlotButtons().count()) === doSlotNames.length,
+          `◯食に入れる=${await doSlotButtons().count()}`,
         )
       }
     } finally {
@@ -6310,8 +6338,6 @@ try {
       const lkDinnerBeforeBlocked = await lkTodayDinner()
       await lkPage.getByRole('button', { name: '日', exact: true }).click()
       await lkPage.waitForTimeout(700)
-      // 2026-08-20 便II・⑥: 行の下の「◯食に入れる」も整理モードの中に移った
-      await openDayOrganize(lkPage)
       await lkPage.getByRole('button', { name: '夕食に入れる' }).first().click()
       await lkPage.waitForTimeout(900)
       check(
@@ -6331,8 +6357,6 @@ try {
       await lkPage.waitForTimeout(700)
       await lkPage.getByRole('button', { name: '日', exact: true }).click()
       await lkPage.waitForTimeout(700)
-      // 2026-08-20 便II・⑥: 行の下の「◯食に入れる」も整理モードの中に移った
-      await openDayOrganize(lkPage)
       await lkPage.getByRole('button', { name: '夕食に入れる' }).first().click()
       await lkPage.waitForTimeout(900)
       check(
