@@ -38278,10 +38278,14 @@ try {
         fwVs.slice(0, 120),
       )
       check(
+        // 2026-08-20 司令部: ファイル名を書き写していたため、アーカイブの名前を
+        // records → archive に変えた便IHのあとも古い名前を探し続けて落ちた（禁じ手②）。
+        // 画面に出るのは ja の1文なので、その1文が出ているかで見る。
+        // 「その1文に書いてある名前が、実際に書き出す名前と一致しているか」は
+        // scripts/test-logic.mjs の IH-4 が別に見張っている（役割を二重にしない）
         'FW-03(疑問③) 2つが別のファイルであることと、名前の見分け方が書いてある',
-        fwArchiveText.includes('2つは別のファイルです') &&
-          fwArchiveText.includes('uchi-recipe-records-') &&
-          fwArchiveText.includes('uchi-recipe-backup-'),
+        fwArchiveText.includes(ja.settings.archiveVsBackupNote.replace(/\u200B/g, '')),
+        `画面=${fwArchiveText.slice(0, 160)}`,
       )
       // 疑問②「範囲を選んだあとどこを押すのか」
       const fwSteps = await fwPage.evaluate(() =>
