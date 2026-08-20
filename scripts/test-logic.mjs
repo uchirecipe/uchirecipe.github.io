@@ -22896,6 +22896,121 @@ Aみりん 大さじ1
     eq('IK-4 図が名指ししている画面の言葉を拾えている（0件なら見張りが壊れている）', figNames.length > 0, true)
     eq('IK-4 図の説明・題が名指ししている画面の言葉が ja.ts に実在する', figMissing, [])
   }
+
+  // ---- 規則⑦: 意味を担う語がひらがなで書かれていない（2026-08-21 便IM・規約H-2） ----------
+  // オーナー原文（この規則の発端）:
+  //   「ひらがな表記が多いのが気になりますが、どう言った基準ですか？ある程度難しい語彙や、
+  //     漢字ばかりの場所ではひらがなの方が良いことも多いですが、「えらびました」「ちがえば」は
+  //     やり過ぎな気がします。丁寧というより、稚拙な印象になる。」
+  //
+  // 規約H-2（オーナー承認済み）は**両向き**の決めごとで、どちらも同じ重み:
+  //   ①意味を担う語は漢字（選ぶ・違う・作る・使う・見る・決める・探す）
+  //   ②補助的な語はひらがな（〜してください／〜のとき／〜すること。「下さい」「時」「事」と書かない）
+  //   ③丁寧にするためのひらがな化はしない
+  //
+  // 直した文言を並べても、**次に書く人が同じことをする**ので掃けない。ここでは
+  // 「かな書きのつづり」そのものを見張る＝次に誰かが「えらびました」と書いたら赤くなる。
+  //
+  // 表に1行足せば掃ける語が増える。**外している語は下に1件ずつ理由を書く**（理由なしで足さない）:
+  //   ・「〜してみる」「〜しておく」「〜していく」など**補助動詞**は、かなが正しいので見張らない
+  //     （「使ってみる」を「使って見る」と書かせない）。「見る」は「〜を見る」の形だけ見る
+  //   ・「消す」は見張らない … 「色分けします」「振り分けする」のように、別の語の一部に
+  //     できてしまう並びで、本物の「けす」と見分けられない
+  //   ・「くわしく」「かんたん」は見張らない … レシピ登録画面のタブ名がこの2つで、使い方ページの
+  //     図（スクリーンショット）にも写っている。名前ごと変えるかは司令部の判断待ち（便IMの報告）
+  //   ・「ひとつまみ」は外す … 分量の言い方（料理の言葉）で、数の「1つ」ではない
+  //   ・「のぞく」は「〜は／を のぞく」の形だけ … 「（サイトを）のぞいてみる」＝覗く は
+  //     常用漢字表に無いので、かなで書くのが正しい
+  //   ・「はかる」「めやす」「おまかせ」「まるごと」「いちばん」「まったく」「ほとんど」「すでに」は
+  //     見張らない … いずれも**このアプリでは、かな書きのほうが多数か唯一**で、
+  //     かな書きが慣用の語（便IMの報告に一覧と数を載せた。倒すなら司令部の裁定が要る）
+  {
+    // ゼロ幅スペース（BudouX）が挟まっても素通りしないよう、照合の前に外す。
+    // 改行は消さないので、赤に出る行番号は原文のまま
+    const kanaSources = sources.map((s) => ({ rel: s.rel, text: s.text.replace(/​/g, '') }))
+    const NOT_AFTER_KANJI = '(?<![一-龥])'
+    const KANA_RULES = [
+      // ①意味を担う語が、かなで書かれていないか
+      { anchor: '選', good: '「選ぶ」', bad: /えら[ぶびべばんぼ]/g },
+      // 「気持ちがうまく」のように**漢字＋ち＋が**で偶然できる並びは数えない
+      { anchor: '違', good: '「違う」', bad: new RegExp(`${NOT_AFTER_KANJI}ちが[ういえわっ]`, 'g') },
+      { anchor: '間違', good: '「間違う」', bad: /まちが[ういえわっ]/g },
+      { anchor: '作', good: '「作る」', bad: /つく[るりれらろっ]/g },
+      // 「見つかった」を数えないため、漢字のうしろは外す
+      { anchor: '使', good: '「使う」', bad: new RegExp(`${NOT_AFTER_KANJI}つか[ういえわっ]`, 'g') },
+      { anchor: '探', good: '「探す」', bad: /さが[すしせそ]/g },
+      { anchor: '決', good: '「決める」', bad: /きめ[るたてよ]|きま[るりっ]/g },
+      { anchor: '戻', good: '「戻す」', bad: /もど[るりすしせら]/g },
+      { anchor: '開', good: '「開く」', bad: /ひら[くきけこ]/g },
+      { anchor: '並', good: '「並ぶ」', bad: /なら[ぶびべん]/g },
+      // 補助動詞の「〜てみる」と分けるため、「〜を見る」「〜が見える」の形だけ見る
+      { anchor: '見', good: '「見る」', bad: /[をが]み[るれ]/g },
+      { anchor: '含', good: '「含む」', bad: /ふく[むめま]/g },
+      { anchor: '除', good: '「除く」', bad: /[はをも]のぞ[きくけ]/g },
+      { anchor: '当てはま', good: '「当てはまる」', bad: /あてはま/g },
+      { anchor: '分か', good: '「分かる」', bad: /わか[るりれら]/g },
+      { anchor: '全部', good: '「全部」', bad: /ぜんぶ/g },
+      { anchor: '普通', good: '「普通」', bad: /ふつう/g },
+      { anchor: '控えめ', good: '「控えめ」', bad: /ひかえめ/g },
+      { anchor: '少し', good: '「少し」', bad: /すこし/g },
+      { anchor: '直ちに', good: '「直ちに」', bad: /ただちに/g },
+      // 「ひとつまみ」は分量の言い方なので外す
+      { anchor: '1つ', good: '「1つ」', bad: /ひとつ(?!まみ)/g },
+      // ②補助的な語が、漢字で書かれていないか（公用文の一般的な作法）
+      { anchor: 'ください', good: '「ください」', bad: /下さい/g },
+      { anchor: 'こと', good: '「こと」', bad: /(?:する|した|ない|ある)事(?![務業実情態項柄件])/g },
+      { anchor: 'とき', good: '「とき」', bad: /(?:する|した|ない|ある)時(?![間刻代計点期差々])/g },
+      { anchor: 'できる', good: '「できる」', bad: /出来[るたなま]/g },
+    ]
+    const kanaViolations = []
+    for (const { rel, text } of kanaSources)
+      for (const rule of KANA_RULES)
+        for (const m of text.matchAll(rule.bad))
+          kanaViolations.push(`${rel}:${lineOf(text, m.index)} 「${around(text, m.index)}」→ ${rule.good}`)
+
+    // 読み取りに失敗したら必ず落ちる: 文字が読めていない／表が現実と噛み合っていないときは、
+    // 「見つからなかった＝合格」に倒れないよう、その場で不合格にする
+    const scanned = kanaSources.reduce((n, s) => n + s.text.length, 0)
+    eq('HR-5 掃く文字を読めている（0なら見張りが壊れている）', scanned > 100000, true)
+    const anchored = KANA_RULES.filter((r) => kanaSources.some((s) => s.text.includes(r.anchor))).length
+    eq(
+      'HR-5 表の「直した先の書き方」が実際に使われている（表が現実と噛み合っている）',
+      anchored >= Math.ceil(KANA_RULES.length / 2),
+      true,
+    )
+    eq('HR-5 意味を担う語のかな書き・補助的な語の漢字書きが1つも無い', kanaViolations, [])
+  }
+
+  // ---- 規則⑧: アプリが短い行に割った注意書きは、説明ページでも1つの塊に戻さない（便IM・②） --
+  // 便IJ・③でアプリ側（ja.settings.refreshAppCacheClearWarnings）を3行に割ったのに、
+  // 使い方ページだけが**153字の1文のまま**残っていた。同じ事故を掃くために、
+  // 「アプリが行に分けて言っていることは、ページでも別々の塊になっている」を測る。
+  //
+  // 文言は ja.ts から取るので書き写さない（言い回しを直しても、この見張りはそのまま当たる）。
+  // 読み取りに失敗したら必ず落ちる: 行が2行未満・ページで1行も見つからないときは不合格。
+  {
+    const manualRaw = readFileSync(path.join(appRoot, 'public/about/manual.html'), 'utf-8')
+    const BLOCKS = /<\/?(?:p|li|h[1-6]|td|th|ul|ol|div|section|figcaption|table|tr|dl|dt|dd|details|summary)\b[^>]*>/gi
+    const blocks = manualRaw
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .split(BLOCKS)
+      .map((t) => t.replace(/<[^>]+>/g, '').replace(/\s+/g, ''))
+      .filter((t) => t !== '')
+    const splitLines = ja.settings.refreshAppCacheClearWarnings.map((t) => t.replace(/\s+/g, ''))
+    eq('HR-6 アプリ側が2行以上に割れている（前提。1行なら測るものが無い）', splitLines.length >= 2, true)
+    // どの塊が、どの行を抱えているか
+    const holders = splitLines.map((line) => blocks.map((b, i) => (b.includes(line) ? i : -1)).filter((i) => i >= 0))
+    eq(
+      'HR-6 アプリ側の行が、説明ページにも1行ずつ載っている',
+      splitLines.filter((_, i) => holders[i].length === 0),
+      [],
+    )
+    // 1つの塊が2行以上を抱えていたら、ページ側では割れていない＝元の1文に戻っている
+    const crowded = []
+    for (const b of new Set(blocks))
+      if (splitLines.filter((line) => b.includes(line)).length >= 2) crowded.push(b.slice(0, 40))
+    eq('HR-6 説明ページでも1つの塊に2行以上を詰め込んでいない', crowded, [])
+  }
 }
 
 // ==========================================================================================
@@ -24038,8 +24153,11 @@ Aみりん 大さじ1
     eq('ID-5 見張る軸が8つそろっている(0件なら見張りが壊れている)', counted, 8)
     eq('ID-5 選択肢名＋区分名＝要約の名前(たんぱく質＋多め＝たんぱく質多め)', mismatched, [])
     eq(
-      'ID-5 選択肢名そのものには「多め」「ひかえめ」を付けない(区分と二重に言わない)',
-      Object.values(ja.mealPlan.purposeOption ?? {}).filter((v) => /多め|ひかえめ/.test(v)),
+      `ID-5 選択肢名そのものには「${ja.mealPlan.purposeGroupMore}」「${ja.mealPlan.purposeGroupLess}」を付けない(区分と二重に言わない)`,
+      // 区分の名前は ja.ts から取る(書き写すと、区分の名前を直したときにこの見張りが何も測らなくなる)
+      Object.values(ja.mealPlan.purposeOption ?? {}).filter((v) =>
+        [ja.mealPlan.purposeGroupMore, ja.mealPlan.purposeGroupLess].some((g) => v.includes(g)),
+      ),
       [],
     )
   }

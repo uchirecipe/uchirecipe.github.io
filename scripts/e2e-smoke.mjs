@@ -11748,10 +11748,11 @@ try {
 
       // ---------- ①既定: 開かなければ従来どおり ----------
       check(
-        'SHOPRANGE-EA(既定) 範囲えらびは閉じていて、要約は「表示している週ぜんぶ」',
+        `SHOPRANGE-EA(既定) 範囲えらびは閉じていて、要約は「${ja.mealPlan.shopRangeSummaryAll}」`,
         (await srPage.getByTestId('shop-range-toggle').getAttribute('aria-expanded')) === 'false' &&
+          // 文言そのものは ja.ts から取る（書き写すと、名前を直したときにテストだけが赤くなる）
           ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
-            '表示している週ぜんぶ',
+            ja.mealPlan.shopRangeSummaryAll,
           ),
       )
       check(
@@ -11763,7 +11764,7 @@ try {
       await srPage.waitForTimeout(1500)
       const srAll = await srCountDraft()
       check('SHOPRANGE-EA(既定) 週ぜんぶから下書きができる', srAll > 0, `rows=${srAll}`)
-      // 絞っていないときは範囲の1行にも「表示している週ぜんぶ」に当たる日付範囲が出る
+      // 絞っていないときは範囲の1行にも「表示している週全部」に当たる日付範囲が出る
       const srAllRange = (await srPage.getByTestId('candidate-range').textContent()) ?? ''
       check(
         'SHOPRANGE-EA(既定) 下書きに「どの範囲から作ったか」が出る',
@@ -11818,7 +11819,7 @@ try {
         `range=${srRangeText} expected=${srExpectedMd}`,
       )
 
-      // ---------- ③食事で絞る + 「表示している週ぜんぶに戻す」 ----------
+      // ---------- ③食事で絞る + 「表示している週全部に戻す」 ----------
       await srPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
       await srPage.waitForTimeout(1200)
       await srPage.getByRole('button', { name: '週', exact: true }).click()
@@ -11858,12 +11859,12 @@ try {
       await srPage.waitForTimeout(300)
       await srPage.getByTestId('shop-range-slot').nth(0).click()
       await srPage.waitForTimeout(200)
-      await srPage.getByRole('button', { name: '表示している週ぜんぶに戻す' }).click()
+      await srPage.getByRole('button', { name: ja.mealPlan.shopRangeReset }).click()
       await srPage.waitForTimeout(300)
       check(
-        'SHOPRANGE-EA(絞る) 「表示している週ぜんぶに戻す」で既定へ戻る',
+        `SHOPRANGE-EA(絞る) 「${ja.mealPlan.shopRangeReset}」で既定へ戻る`,
         ((await srPage.getByTestId('shop-range-summary').textContent()) ?? '').includes(
-          '表示している週ぜんぶ',
+          ja.mealPlan.shopRangeSummaryAll,
         ) && (await srPage.getByRole('button', { name: '表示している週の買い物メモを作る' }).isVisible()),
       )
     } finally {
@@ -22054,13 +22055,13 @@ try {
         ),
       )
       check(
-        'SEARCH-CI3-01/C11 「入れた食材ぜんぶ使える」レシピが先頭に出る',
-        subLabels[0] === '入れた食材ぜんぶ使える',
+        `SEARCH-CI3-01/C11 「${ja.search.usedAll}」レシピが先頭に出る`,
+        subLabels[0] === ja.search.usedAll,
         JSON.stringify(subLabels.slice(0, 6)),
       )
       check(
-        'SEARCH-CI3-01/C11 「ぜんぶ使える」が「一部だけ使える」より後ろに埋もれない',
-        subLabels.indexOf('入れた食材ぜんぶ使える') <
+        `SEARCH-CI3-01/C11 「${ja.search.usedAll}」が「一部だけ使える」より後ろに埋もれない`,
+        subLabels.indexOf(ja.search.usedAll) <
           subLabels.findIndex((l) => l.startsWith('食材 1/')),
         JSON.stringify(subLabels.slice(0, 6)),
       )
@@ -22468,9 +22469,9 @@ try {
         `value=${await p2Select.inputValue()}`,
       )
       check(
-        'PURPOSE-02 プルダウンの中でも「多め」「ひかえめ」の2群に分かれている',
-        (await p2Select.locator('optgroup[label="多め"]').count()) === 1 &&
-          (await p2Select.locator('optgroup[label="ひかえめ"]').count()) === 1,
+        `PURPOSE-02 プルダウンの中でも「${ja.mealPlan.purposeGroupMore}」「${ja.mealPlan.purposeGroupLess}」の2群に分かれている`,
+        (await p2Select.locator(`optgroup[label="${ja.mealPlan.purposeGroupMore}"]`).count()) === 1 &&
+          (await p2Select.locator(`optgroup[label="${ja.mealPlan.purposeGroupLess}"]`).count()) === 1,
       )
       // 断定・効能の語（「バランスの良い」等）を出していないこと（docs/60 §1-3・規約H）
       check(
@@ -24724,7 +24725,7 @@ try {
       )
       // ④ 決め手になる手間は残っている（カードごと情報を落としたのではない）
       check(
-        'CARDPARTS-01 候補カードには手間（かんたん/ふつう/じっくり）が残っている',
+        'CARDPARTS-01 候補カードには手間（超簡単/普通/手の込んだ）が残っている',
         new RegExp(Object.values(ja.effort).join('|')).test(cpCardText),
         `カード=${cpCardText}`,
       )
@@ -26338,8 +26339,10 @@ try {
       )
       // 初期状態は従来の音(ふつう・約1秒)が選ばれている＝既存ユーザーの音を勝手に変えない
       check(
-        'DY-03 初期は従来の音(ふつう・約1秒)が選ばれている',
-        (await dtPage.getByRole('button', { name: 'ふつう', exact: true }).getAttribute('aria-pressed')) ===
+        `DY-03 初期は従来の音(${ja.settings.timerSoundVolumeNormal}・約1秒)が選ばれている`,
+        (await dtPage
+          .getByRole('button', { name: ja.settings.timerSoundVolumeNormal, exact: true })
+          .getAttribute('aria-pressed')) ===
           'true' &&
           (await dtPage.getByRole('button', { name: '約1秒', exact: true }).getAttribute('aria-pressed')) ===
             'true',
@@ -32687,7 +32690,7 @@ try {
                 'h3:2. 文章を貼り付ける',
                 'h3:3. 手入力する',
                 'h3:登録すると、あとは自動',
-                'a:レシピの登録をくわしく →',
+                'a:レシピの登録を詳しく →',
               ]),
             fe.regOutline.join(' / '),
           )
@@ -33108,11 +33111,11 @@ try {
       await fgBrowser.close()
     }
 
-    // --- 「そのほかの使い方をくわしく」の飛び先が実在する ---
+    // --- 「そのほかの使い方を詳しく」の飛び先が実在する ---
     const fgMore = await page.request.get(`${BASE}/about/manual.html`)
     check(
-      'FG-LP 「そのほかの使い方をくわしく」の飛び先(/about/manual.html)が実在する',
-      fgMore.status() === 200 && fgHtml.includes('>そのほかの使い方をくわしく →</a>'),
+      'FG-LP 「そのほかの使い方を詳しく」の飛び先(/about/manual.html)が実在する',
+      fgMore.status() === 200 && fgHtml.includes('>そのほかの使い方を詳しく →</a>'),
       `status=${fgMore.status()}`,
     )
   }
@@ -38188,7 +38191,7 @@ try {
       await fxPage.waitForTimeout(400)
       await fxPage.locator('[data-testid="cook-text-size-modal"] button[aria-label="閉じる"]').click()
       await fxPage.waitForTimeout(400)
-      check('FX-09 「ふつう」に戻せる', (await fxStepFontSize()) === '24px', await fxStepFontSize())
+      check('FX-09 「普通」に戻せる', (await fxStepFontSize()) === '24px', await fxStepFontSize())
 
       // --- FX-05: 読み上げを使ったあと、読み方の直し方を1回だけ案内する ---
       currentCheck = 'FX-05'
@@ -41608,8 +41611,10 @@ try {
         JSON.stringify(wmAllOptions),
       )
       check(
-        'WEEKCOND-02(⑤) 選択肢の名前に「多め」「ひかえめ」を重ねて書かない（区分が言っている）',
-        wmAllOptions.every((o) => !/多め|ひかえめ/.test(o.label)),
+        `WEEKCOND-02(⑤) 選択肢の名前に「${ja.mealPlan.purposeGroupMore}」「${ja.mealPlan.purposeGroupLess}」を重ねて書かない（区分が言っている）`,
+        wmAllOptions.every((o) =>
+          [ja.mealPlan.purposeGroupMore, ja.mealPlan.purposeGroupLess].every((g) => !o.label.includes(g)),
+        ),
         JSON.stringify(wmAllOptions.map((o) => o.label)),
       )
       check(
