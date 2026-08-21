@@ -7391,7 +7391,18 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       {/* グループ1: 表示のしかた(週の区切り・表示する食事・まとめて空にする)。
           「表示する食事」は見出しの横＝畳んでも常に同じ場所に見える(便DT-6)。
           2026-08-03 便DP-7(オーナー指示): 開いたときの並びは 週の区切り → まとめて空にする
-          (表示を決めるものを先に置き、消す操作を最後に離す) */}
+          (表示を決めるものを先に置き、消す操作を最後に離す)。
+
+          2026-08-21 便IN: 「まとめて空にする」を**折りたたみの外**（この節のいちばん下）へ出した。
+          オーナーの原則「アプリ全体で、折りたたみを一切開かなくても、最低限一通りすべての機能を
+          触れる（使いこなすために開く）ようにしたい」に、この節が反していたため
+          （週の献立をまとめて消す道は、この折りたたみの中にしか無かった）。
+          置き場所は「献立を提案」の実行ボタンと同じ作法（便II・③）＝折りたたみの外・節の下端。
+          開いているときの並び（週の区切り → まとめて空にする）は今までと変わらない。
+          見出しの横に足さなかった理由: そこは表示する食事のチップで埋まっており、
+          消す操作を同じ形のチップの列に並べると、押し間違えたときに消える側だと気づけない。
+          週の表示起点の切替だけは折りたたみの中に残した（見え方の好みで、既定のままでも
+          週の中身は全部読める。見張りの一覧 COLLAPSE-1 に理由つきで書いてある） */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader(
           'display',
@@ -7427,47 +7438,60 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
                 3体が切替自体を触っていなかった */}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
-            {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
-                2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した)。
-                従来は週タブのいちばん下に置いていて、そこまで下がらないと気づけなかった。
-                朝食・昼食・夕食は複数選べる。確認文は規約Fのまま
-                (何が消えるか・何が残るかを件数つきで両方書く) */}
-            <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app p-[var(--space-sm)]">
-              <p className="text-xs font-bold text-ink-muted">
-                {clearSlotTargets.length === 0
-                  ? ja.mealPlan.clearWeekSlotTitleNone
-                  : ja.mealPlan.clearWeekSlotTitle.replace('{slot}', clearSlotLabel)}
-              </p>
-              <div className="mt-[var(--space-sm)] flex flex-wrap gap-2">
-                {MEAL_SLOTS.map((slot) => (
-                  <button
-                    key={slot}
-                    type="button"
-                    onClick={() => toggleClearSlotTarget(slot)}
-                    aria-pressed={clearSlotTargets.includes(slot)}
-                    aria-label={ja.mealPlan.clearWeekSlotTargetAria.replace(
-                      '{slot}',
-                      ja.mealPlan.slot[slot],
-                    )}
-                    className={chipClass(clearSlotTargets.includes(slot))}
-                    style={chipStyle(clearSlotTargets.includes(slot))}
-                  >
-                    <ChipCheck on={clearSlotTargets.includes(slot)} />
-                    {ja.mealPlan.slot[slot]}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => void clearWeekSlot()}
-                className="mt-2 inline-flex items-center gap-1 text-sm font-bold text-warning underline"
-              >
-                <Trash2 size={14} aria-hidden />
-                {ja.mealPlan.clearWeekSlotButton}
-              </button>
-            </div>
           </>
         </Collapse>
+
+        {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
+            2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した →
+            2026-08-21 便INで**折りたたみの外**へ出した)。
+            朝食・昼食・夕食は複数選べる。確認文は規約Fのまま
+            (何が消えるか・何が残るかを件数つきで両方書く)。
+            囲みごと外に出すのは、押す前に「どの食事が消えるのか」が同じ場所で読めるようにするため
+            （ボタンだけを外に出すと、畳んだ人には対象の食事が見えないまま消す操作が並ぶ）。
+            **どの食事を空にするかのチップだけは、この節の折りたたみと一緒に開く**＝
+            畳んでいるあいだ、見出しの横の「表示する食事」とまったく同じ形のチップが
+            すぐ下に並んで、どちらがどちらか読めなくなるのを避ける。
+            畳んでいても対象は上の1行が名指しするので、押す前に何が消えるかは分かる
+            （そのうえで確認の窓が件数つきで言う＝規約F） */}
+        <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app p-[var(--space-sm)]">
+          <p className="text-xs font-bold text-ink-muted">
+            {clearSlotTargets.length === 0
+              ? ja.mealPlan.clearWeekSlotTitleNone
+              : ja.mealPlan.clearWeekSlotTitle.replace('{slot}', clearSlotLabel)}
+          </p>
+          <Collapse open={weekGroupOpen.display} reveal={false}>
+            <div className="mt-[var(--space-sm)] flex flex-wrap gap-2">
+              {MEAL_SLOTS.map((slot) => (
+                <button
+                  key={slot}
+                  type="button"
+                  onClick={() => toggleClearSlotTarget(slot)}
+                  aria-pressed={clearSlotTargets.includes(slot)}
+                  aria-label={ja.mealPlan.clearWeekSlotTargetAria.replace(
+                    '{slot}',
+                    ja.mealPlan.slot[slot],
+                  )}
+                  className={chipClass(clearSlotTargets.includes(slot))}
+                  style={chipStyle(clearSlotTargets.includes(slot))}
+                >
+                  <ChipCheck on={clearSlotTargets.includes(slot)} />
+                  {ja.mealPlan.slot[slot]}
+                </button>
+              ))}
+            </div>
+          </Collapse>
+          <button
+            type="button"
+            data-testid="week-clear-slot"
+            onClick={() => void clearWeekSlot()}
+            /* tap-target: 畳んだままでも押す場所になったので、当たり判定を44pxに広げる
+               （見た目の大きさ・色は変えない。消す操作を目立たせない作りのまま） */
+            className="tap-target mt-2 inline-flex items-center gap-1 text-sm font-bold text-warning underline"
+          >
+            <Trash2 size={14} aria-hidden />
+            {ja.mealPlan.clearWeekSlotButton}
+          </button>
+        </div>
       </section>
 
       {/* グループ2: 献立を提案。押すと献立が増える操作をここに集める。
@@ -7623,30 +7647,46 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </section>
 
       {/* グループ3: 献立テンプレート(2026-07-29 便CB-2・docs/59 A-1＋B-2)。
-          保存＝表示中の週を曜日ごと覚える／適用＝空いているところにだけ入れる(非破壊) */}
+          保存＝表示中の週を曜日ごと覚える／適用＝空いているところにだけ入れる(非破壊)。
+
+          2026-08-21 便IN: 「保存」と「適用」の2つを**折りたたみの外**へ出した。
+          この節は畳むと見出ししか残らず、テンプレートを作る道も使う道も消えていた。
+          **2つとも外に出したのは、片方だけでは行き止まりになるため**＝
+          適用だけ残すと、まだ1つも保存していない人には「まだ保存したテンプレートがありません」
+          としか出せず、その案内が指す保存のボタンは折りたたみの中にある。
+          保存だけ残すと、覚えさせた献立を入れる道が無い。
+          折りたたみに残したのは、説明の1行とテンプレートの中身を見る画面への入口
+          （どちらも読む・確かめるもので、使いこなすために開く側）。
+          開いているときの並びは今までと変わらない */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('template', ja.mealPlan.weekGroupTemplateTitle)}
+        <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+          <button
+            type="button"
+            data-testid="week-template-save"
+            onClick={openTemplateSave}
+            /* tap-target: 畳んだままでも押す場所になったので、当たり判定を44pxに広げる */
+            className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <BookmarkPlus size={14} aria-hidden />
+            {ja.mealPlan.templateSave}
+          </button>
+          <button
+            type="button"
+            data-testid="week-template-apply"
+            onClick={() => openTemplateApply('week')}
+            /* tap-target: 畳んだままでも押す場所になったので、当たり判定を44pxに広げる */
+            className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <LayoutTemplate size={14} aria-hidden />
+            {ja.mealPlan.templateApplyWeek}
+          </button>
+        </div>
         <Collapse open={weekGroupOpen.template}>
           <>
-            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-              <button
-                type="button"
-                onClick={openTemplateSave}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <BookmarkPlus size={14} aria-hidden />
-                {ja.mealPlan.templateSave}
-              </button>
-              <button
-                type="button"
-                onClick={() => openTemplateApply('week')}
-                className="inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-              >
-                <LayoutTemplate size={14} aria-hidden />
-                {ja.mealPlan.templateApplyWeek}
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.templateSaveDescription}</p>
+            <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
+              {ja.mealPlan.templateSaveDescription}
+            </p>
             {/* テンプレートの中身を見る・直す画面への入口(2026-08-02 便DE-9・オーナー指示)。
                 保存したあと中身を確かめる手段が無く、直すには保存し直すしかなかった */}
             <Link

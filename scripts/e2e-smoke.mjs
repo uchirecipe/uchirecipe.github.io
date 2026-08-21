@@ -401,6 +401,12 @@
 //         (目当ての日のマスが今の月に無ければ前の月へ送ってから掴む)) /
 //         FOLDFIG-01(2026-08-20 便IG・⑬: 畳んだ月の食費・栄養カードの数値が見出しの横に出て、
 //         見出しは1行のまま・見出しの下には何も出ない・開いたときの表と同じ数字であること) /
+//         COLLAPSED-01(2026-08-21 便IN: 折りたたみを一切開かないまま機能に触れられる。
+//         週タブの「空にする」「テンプレートとして保存」「テンプレートを適用」が畳んだまま押せて
+//         返事が返る(消す操作は確認の窓が出る=規約F)・ごはんの計算が設定にもある・
+//         レシピ詳細の栄養8項目のお試しが畳んだまま押せて、押すと折りたたみも開く。
+//         便II・③で直した2か所(日「今日なに作る？」・週「献立を提案」)は FOLDRUN-01 が見る。
+//         「折りたたみの中にしか無い操作が無いか」の掃引そのものは test-logic の COLLAPSE-1) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -14765,6 +14771,8 @@ try {
 
   // --- NUTTRIAL-01: 栄養8項目のお試し表示(1回だけ・2026-08-08 便DZ・オーナー決定)。
   // 未解錠のまま、好きなレシピ1品で8項目のフル表示を1回だけ見られる。
+  // 2026-08-21 便IN: 押すボタンは栄養の折りたたみの**外**へ移した（畳んだままでも触れるように）。
+  // 畳んだまま押せることは COLLAPSED-01 が見る。ここは今までどおり「1回だけ」の効き方を見る。
   // 使い切ったら入口を出さず「ご利用済みです」に差し替わり、別のレシピではロック表示に戻る
   // ことまで確認する(Proの表示ゲート自体は変えていない=見本は1回だけ)。
   // お試しを消費するので、他のチェックの状態に影響しない専用のbrowser/contextで完結させる ---
@@ -14792,7 +14800,7 @@ try {
       await ntPage.waitForTimeout(2400) // 初回シード(109品)の完了待ち
       let nutText = await openNutrition('肉じゃが')
       check(
-        'NUTTRIAL-01 未解錠のPro案内に「1回だけ表示」の入口が出る',
+        `NUTTRIAL-01 未解錠のときは「${ja.nutrition.trialButton}」の入口が出る`,
         (await ntPage.locator('[data-testid="nutrition-trial-button"]').count()) > 0,
       )
       check(
@@ -14832,6 +14840,193 @@ try {
       )
     } finally {
       await ntBrowser.close()
+    }
+  }
+
+  // --- COLLAPSED-01: 折りたたみを一切開かないまま、機能に触れられること(2026-08-21 便IN)。
+  // オーナーの原則「アプリ全体で、折りたたみを一切開かなくても、最低限一通りすべての機能を
+  // 触れる（使いこなすために開く）ようにしたい」。
+  // 文言は ja.ts から読む(書き写さない)。掴み方は名前とアクセシビリティの状態だけで、
+  // 画面のどこに出ていても同じ判定になる(禁じ手④: 置き場所に固定しない)。
+  // 「折りたたみの中にしか無い操作が無いか」そのものは、ソースを規則で掃く単体側
+  // (scripts/test-logic.mjs の COLLAPSE-1)が受け持つ。ここでは**実物の画面で触れる**ことを見る ---
+  currentCheck = 'COLLAPSED-01'
+  {
+    const cdBrowser = await chromium.launch()
+    try {
+      const cdContext = await cdBrowser.newContext()
+      const cdPage = await cdContext.newPage()
+      cdPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@COLLAPSED-01] ${err.message}`)
+      })
+      await cdPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await cdPage.waitForTimeout(2000) // 初回シード完了待ち
+      await cdPage.getByRole('button', { name: '週', exact: true }).click()
+      await cdPage.waitForTimeout(700)
+
+      // 前提: 「表示のしかた」「献立テンプレート」は畳んだまま(＝畳んだ状態で測っている)
+      const cdFolded = await cdPage.evaluate(() =>
+        [...document.querySelectorAll('button[aria-expanded]')]
+          .filter((b) => /を(開く|閉じる)$/.test(b.getAttribute('aria-label') ?? ''))
+          .map((b) => ({
+            name: b.getAttribute('aria-label') ?? '',
+            open: b.getAttribute('aria-expanded') === 'true',
+          })),
+      )
+      const cdIsFolded = (title) =>
+        cdFolded.some((g) => g.name === `${title}を開く` && !g.open)
+      check(
+        'COLLAPSED-01 前提: 「表示のしかた」「献立テンプレート」は畳んだまま',
+        cdIsFolded(ja.mealPlan.weekGroupDisplayTitle) &&
+          cdIsFolded(ja.mealPlan.weekGroupTemplateTitle),
+        JSON.stringify(cdFolded),
+      )
+
+      // 畳んだままでも、この3つが押せる(見えている＝画面のどこにあってもよい)
+      for (const [what, label] of [
+        ['この週をまとめて空にする', ja.mealPlan.clearWeekSlotButton],
+        ['表示している週をテンプレートとして保存', ja.mealPlan.templateSave],
+        ['テンプレートを適用', ja.mealPlan.templateApplyWeek],
+      ]) {
+        const btn = cdPage.getByRole('button', { name: label, exact: true })
+        check(
+          `COLLAPSED-01 畳んだままでも「${label}」が押せる（${what}）`,
+          (await btn.count()) > 0 && (await btn.first().isVisible()),
+        )
+      }
+
+      // 常設にしたぶん、指で押せる大きさがあること。**実際の当たり判定**で測る
+      // （クラス名では測らない。中心から上下左右21pxの点を突いて、そのボタンに当たるか＝TAP-44と同じ方法）
+      const cdDead = await cdPage.evaluate((ids) => {
+        const out = []
+        for (const id of ids) {
+          const el = document.querySelector(`[data-testid="${id}"]`)
+          if (!el) {
+            out.push({ id, missing: true })
+            continue
+          }
+          el.scrollIntoView({ block: 'center', inline: 'center' })
+          const r = el.getBoundingClientRect()
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          if (cx - 22 < 0 || cy - 22 < 0 || cx + 22 > innerWidth || cy + 22 > innerHeight) continue
+          const d = 21
+          const dead = [
+            [cx - d, cy], [cx + d, cy], [cx, cy - d], [cx, cy + d],
+          ].filter(([x, y]) => {
+            const hit = document.elementFromPoint(x, y)
+            return !(hit && (hit === el || el.contains(hit)))
+          })
+          if (dead.length > 0) out.push({ id, box: `${Math.round(r.width)}x${Math.round(r.height)}`, dead: dead.length })
+        }
+        return out
+      }, ['week-clear-slot', 'week-template-save', 'week-template-apply'])
+      check(
+        'COLLAPSED-01 常設にした3つに、44px未満の押せない場所が無い',
+        cdDead.length === 0,
+        JSON.stringify(cdDead),
+      )
+
+      // 行き止まりでないこと: テンプレートの2つは窓が開く
+      await cdPage.getByRole('button', { name: ja.mealPlan.templateSave, exact: true }).first().click()
+      await cdPage.waitForTimeout(400)
+      // 献立がまだ1品も入っていない週では、窓の代わりに理由の一言が返る（どちらでも行き止まりでない）
+      const cdSaveText = (await cdPage.textContent('body')) ?? ''
+      check(
+        'COLLAPSED-01 畳んだまま押した「保存」が返事をする(窓が開くか、理由の一言が出る)',
+        cdSaveText.includes(ja.mealPlan.templateNameLabel) ||
+          cdSaveText.includes(ja.mealPlan.templateSaveEmpty),
+        cdSaveText.slice(0, 200),
+      )
+      await cdPage.keyboard.press('Escape')
+      await cdPage.waitForTimeout(400)
+      await cdPage
+        .getByRole('button', { name: ja.mealPlan.templateApplyWeek, exact: true })
+        .first()
+        .click()
+      await cdPage.waitForTimeout(400)
+      check(
+        'COLLAPSED-01 畳んだまま押した「テンプレートを適用」で窓が開く',
+        (await cdPage.getByRole('dialog', { name: ja.mealPlan.templateApply }).count()) > 0,
+      )
+      await cdPage.keyboard.press('Escape')
+      await cdPage.waitForTimeout(400)
+
+      // 「空にする」は消える操作。畳んだまま押しても、確認の窓が必ず出る(規約F)。ここでは消さない
+      // （自動押しを止めて、窓が出たことを自分の目で確かめてから「やめる」を押す）
+      await setConfirmAnswer(cdPage, 'off')
+      await cdPage
+        .getByRole('button', { name: ja.mealPlan.clearWeekSlotButton, exact: true })
+        .first()
+        .click()
+      await cdPage.waitForTimeout(500)
+      const cdConfirmText = (await cdPage.textContent('body')) ?? ''
+      check(
+        'COLLAPSED-01 畳んだまま押した「空にする」でも確認の窓が出る(規約F)',
+        cdConfirmText.includes(ja.mealPlan.clearWeekSlotConfirmOk) ||
+          cdConfirmText.includes(ja.mealPlan.clearWeekSlotEmpty.replace('{slot}', ja.mealPlan.slot.dinner)),
+        cdConfirmText.slice(0, 200),
+      )
+      const cdCancel = cdPage.getByRole('button', { name: ja.common.confirmCancel, exact: true })
+      if ((await cdCancel.count()) > 0) {
+        await cdCancel.first().click()
+        await cdPage.waitForTimeout(300)
+      }
+      await setConfirmAnswer(cdPage, 'accept')
+
+      // 設定: ごはんの計算は折りたたみの無い画面にあり、押すと切り替わる
+      await cdPage.goto(`${BASE}/#/settings?section=rice`, { waitUntil: 'networkidle' })
+      await cdPage.waitForTimeout(900)
+      const cdRice = cdPage.locator('[data-testid="settings-include-rice"]')
+      check(
+        'COLLAPSED-01 設定にも「ごはんを足して計算する」の入口がある',
+        (await cdRice.count()) > 0 && (await cdRice.first().isVisible()),
+      )
+      const cdRiceBefore = await cdRice.first().getAttribute('aria-checked')
+      await cdRice.first().click()
+      await cdPage.waitForTimeout(400)
+      check(
+        'COLLAPSED-01 設定のスイッチで切り替わる',
+        (await cdRice.first().getAttribute('aria-checked')) !== cdRiceBefore,
+      )
+      // 端末に残る設定であること(＝献立の栄養パネルのチェックと同じ1つの設定を動かしている)
+      await cdPage.reload({ waitUntil: 'networkidle' })
+      await cdPage.waitForTimeout(900)
+      check(
+        'COLLAPSED-01 設定で切り替えた値が読み込み直しても残る',
+        (await cdPage.locator('[data-testid="settings-include-rice"]').first().getAttribute(
+          'aria-checked',
+        )) !== cdRiceBefore,
+      )
+
+      // レシピ詳細: 栄養の折りたたみを開かないまま、8項目のお試しの入口が押せる
+      await cdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await cdPage.waitForTimeout(1200)
+      await cdPage.getByText('肉じゃが', { exact: true }).first().click()
+      await cdPage.waitForTimeout(800)
+      const cdTrial = cdPage.locator('[data-testid="nutrition-trial-button"]')
+      const cdNutToggle = cdPage.getByRole('button', { name: ja.nutrition.toggleExpand })
+      check(
+        'COLLAPSED-01 前提: 栄養の折りたたみは閉じたまま',
+        (await cdNutToggle.count()) > 0 &&
+          (await cdNutToggle.first().getAttribute('aria-expanded')) === 'false',
+      )
+      check(
+        `COLLAPSED-01 畳んだままでも「${ja.nutrition.trialButton}」が押せる`,
+        (await cdTrial.count()) > 0 && (await cdTrial.first().isVisible()),
+      )
+      await cdTrial.first().click()
+      await cdPage.waitForTimeout(700)
+      const cdTrialText = (await cdPage.textContent('body')) ?? ''
+      check(
+        'COLLAPSED-01 畳んだまま押しても、8項目が出る(折りたたみも一緒に開く)',
+        ['たんぱく質', '脂質', '炭水化物', '食物繊維', '鉄', 'カルシウム', '塩分相当量'].every((k) =>
+          new RegExp(`${k}\\s*[\\d,]`).test(cdTrialText),
+        ),
+      )
+    } finally {
+      await cdBrowser.close()
     }
   }
 

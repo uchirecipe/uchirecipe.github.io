@@ -25183,6 +25183,336 @@ Aみりん 大さじ1
   )
 }
 
+// ---------- 便IN: 折りたたみの中にしか無い操作が無いか（COLLAPSE-1） ----------
+/**
+ * オーナーの原則（2026-08-20）:
+ *   「アプリ全体で、折りたたみを一切開かなくても、最低限一通りすべての機能を触れる
+ *     （使いこなすために開く）ようにしたい。」
+ *
+ * この見張りは**5か所を名前で並べるのではなく、規則で掃く**:
+ *   ① `src/**\/*.tsx` から `<Collapse>…</Collapse>` の中身の範囲を取る（畳むと消える場所）
+ *   ② 「畳むと消える場所でしか使われていない部品」も同じ扱いにする（何段でもたどる）。
+ *      例: レシピ詳細の栄養枠は Collapse の中で `<LockedBody>` を描き、その中で
+ *      `<ProNutrientTeaser>` を描く。中身は別の関数に書いてあるが、画面では二重に隠れている
+ *   ③ その範囲にある**操作の要素**（button / Link / select / input / textarea / label）が
+ *      使っている文言キー（`ja.○○.△△`）を集める
+ *   ④ そのキーが**折りたたみの外に1つも出てこない**なら、「開かないと触れない操作」とみなす
+ *
+ * 文言そのものは書き写さない（キーで測る）＝ja.ts の文を直しても、この見張りは赤くならない。
+ *
+ * 外に出てきても「入口」と数えないもの: 読み上げ名（aria-label）と見出し（h1〜h6）。
+ * ボタンを押して開く窓が、そのボタンと同じ文言を見出し・読み上げ名に使うため
+ * （例「表示している週をテンプレートとして保存」）、数えると入口が有るように見えてしまう。
+ *
+ * 開いてから、でよいものは下の一覧に**理由つきで**書く。ここに足すこと自体が
+ * 「畳んだままでは触れない」と認めた記録になる（黙って通せない形にしてある）。
+ */
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  /** 開いてから、でよい操作（キー → そう決めた理由） */
+  const OPEN_TO_REFINE = {
+    // --- 献立の「週」 ---
+    // 表示起点の切替は「見え方の好み」で、既定（週区切り）のままでも週の中身は全部読める。
+    // 「表示のしかた」の見出しの横は表示する食事のチップで埋まっており、
+    // そこへ同じ形のチップをもう2つ足すと、2組のチップが並んでどちらがどちらか読めなくなる
+    'ja.mealPlan.weekLayoutCalendar': '表示起点の切替は見え方の好み。既定のままでも週の中身は全部読める',
+    'ja.mealPlan.weekLayoutRolling': '表示起点の切替は見え方の好み。既定のままでも週の中身は全部読める',
+    // 「空にする」のボタンと「何が消えるか」の1行は折りたたみの外にある。
+    // 対象の食事を選び直すチップだけを中に置く＝畳んでいるあいだ、見出しの横の
+    // 「表示する食事」とまったく同じ形のチップが2組並んで読めなくなるのを避けるため
+    'ja.mealPlan.clearWeekSlotTargetAria': '「空にする」の対象を選び直すチップ。実行ボタンと対象の1行は折りたたみの外にある',
+    // 「まとめて献立を入力」の実行ボタンは折りたたみの外にある（2026-08-20 便II・③）。
+    // 出しかた・入れかた・コピー元は、その1つのボタンの効き方を細かく決めるもの
+    'ja.mealPlan.fillModeTitle': '「まとめて献立を入力」の効き方を決める欄。実行ボタンは折りたたみの外にある',
+    'ja.mealPlan.fillModeFillEmpty': '同上',
+    'ja.mealPlan.fillModeReplaceAll': '同上',
+    'ja.mealPlan.copySourceWeekLabel': '同上',
+    'ja.mealPlan.copySourceWeekOption': '同上',
+    // 献立表・期間の集計・概算食費は、節の見出しがそのまま機能の名前になっている
+    // （見出しを読めば何ができるか分かり、開くのは実行の直前の一手）
+    'ja.mealPlan.planSheetPrint': '節の見出し「献立表（印刷・画像で保存）」が機能の名前そのもの',
+    'ja.mealPlan.planSheetImage': '同上',
+    'ja.mealPlan.planSheetIncludeEmptyDays': '同上（載せる中身の細かい指定）',
+    'ja.mealPlan.rangeDateStartLabel': '期間の集計の日付欄。節の見出しが機能の名前そのもの',
+    'ja.mealPlan.rangeDateEndLabel': '同上',
+    'ja.mealPlan.weekCostNoteLink': '概算食費の中の案内。食材と価格の画面は設定からも開ける',
+    'ja.mealPlan.budgetSetLink': '概算食費の中の案内。週の食費予算は設定の同じ欄からも入れられる',
+    'ja.mealPlan.shopRangeReset': '買い物メモの範囲を狭めた人にだけ出る戻し方。狭める操作と同じ場所にある',
+    // --- レシピ一覧の絞り込み ---
+    // 「絞り込み」の開閉ボタンは常に見えていて、中身は絞り込みそのもの
+    'ja.search.sortAsc': 'レシピ一覧の絞り込みパネル。開閉ボタンは常に見えており、中身が機能そのもの',
+    'ja.search.sortDesc': '同上',
+    'ja.search.sortNutritionGate': '同上（Pro案内。設定のProからも同じ場所へ行ける）',
+    'ja.search.sortNutritionGateHint': '同上',
+    'ja.search.favoriteOnly': '同上',
+    'ja.search.excludeNg': '同上',
+    'ja.search.myRecipesOnly': '同上',
+    'ja.search.dishTypeAll': '同上',
+    'ja.search.quickOnly': '同上',
+    'ja.search.pantryFilter': '同上',
+    'ja.search.pantryToIngredients': '同上',
+    'ja.search.tagMatchAllSwitch': '同上',
+    'ja.search.savedSearchRemoveAria': '同上（保存した条件の削除）',
+    'ja.search.legacyTagRemove': '同上（古いタグの削除）',
+    'ja.search.legacyTagRemoveAria': '同上',
+    // --- レシピの登録 ---
+    'ja.paste.placeholder': 'レシピ登録の「文章から取り込む」欄。開閉ボタンが取り込みの名前そのもの',
+    'ja.paste.apply': '同上',
+    'ja.urlImport.placeholder': 'レシピ登録の「URLから取り込む」欄。開閉ボタンが取り込みの名前そのもの',
+    'ja.urlImport.apply': '同上',
+    'ja.urlImport.loading': '同上',
+    'ja.urlImport.fetchPhoto': '同上（取り込むときの細かい指定）',
+    'ja.urlImport.fetchPhotoNote': '同上',
+    'ja.form.iconAuto': 'レシピ登録の絵の選び直し。既定は料理名から自動で選ばれており、開かなくても絵は付く',
+    'ja.chip.remove': 'チップ入力欄の✕。欄そのものが見えていれば✕も見えている（欄の部品）',
+    // --- 並行調理ナビ ---
+    'ja.cookNavi.ingredientsServings': '材料の一覧の見出しに出る人数。押すのは開閉だけで、操作ではない',
+    /**
+     * 「この手順を先にする」（他の品の次の手順を開いた中）。**畳んだままでは触れないと認める。**
+     *
+     * 直さない理由（2026-08-11 便FO・オーナー承認済みの設計をそのまま守る）:
+     *   下部の行は「タップ＝全文を見る」だけの意味にしてある。
+     *   components/CookSessionOverlay.tsx の peekRecipeId の説明にあるとおり、
+     *   「同じ行に『見る』と『移る』の2つの意味を持たせると、台所で押し間違えたときに
+     *     どちらが起きたのか分からなくなる」。
+     *   行の横に「先にする」を常設すると、まさにその2つの意味が1行に並ぶ。
+     *   押し間違えると調理中の段取りが別の品へ移って番号が振り直されるので、
+     *   濡れた手で触る画面では取り返しがつきにくい。
+     *   代わりに、**開けば先にできること**を、常に見えている案内の行に書いた
+     *   （ja.cookNavi.sessionOthersHint）＝入口の存在は畳んだままでも分かる。
+     */
+    'ja.cookNavi.sessionPeekMove': '調理中の押し間違いを避けるため、開いた中に残す（案内は常設の行に出す）',
+    // --- 栄養 ---
+    'ja.nutritionBalance.notesToggle': '注記と出典の開閉。読むものであって操作ではない',
+    'ja.nutrition.gateLink': 'Pro版の案内リンク。設定の「Pro」から同じ場所へ行ける',
+  }
+
+  const tsxFiles = []
+  const walkTsx = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name)
+      if (entry.isDirectory()) walkTsx(p)
+      else if (entry.name.endsWith('.tsx')) tsxFiles.push(p)
+    }
+  }
+  walkTsx(path.join(appRoot, 'src'))
+
+  /** 文字列・コメントの終わりの次を返す（違えば -1） */
+  const skipLiteral = (src, i) => {
+    const c = src[i]
+    if (c === '/' && src[i + 1] === '/') {
+      const e = src.indexOf('\n', i)
+      return e === -1 ? src.length : e
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      const e = src.indexOf('*/', i + 2)
+      return e === -1 ? src.length : e + 2
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1
+      while (j < src.length) {
+        if (src[j] === '\\') { j += 2; continue }
+        if (src[j] === c) return j + 1
+        j++
+      }
+      return src.length
+    }
+    return -1
+  }
+  /** 宣言の先頭から、その本体の { } の範囲を返す */
+  const bodySpan = (src, from) => {
+    let i = from
+    let paren = 0
+    let started = false
+    let depth = 0
+    while (i < src.length) {
+      const sk = skipLiteral(src, i)
+      if (sk !== -1) { i = sk; continue }
+      const c = src[i]
+      if (!started) {
+        if (c === '(') paren++
+        else if (c === ')') paren--
+        else if (c === '{' && paren === 0) { started = true; depth = 1 }
+        else if (c === ';' && paren === 0) return null
+      } else if (c === '{') depth++
+      else if (c === '}') { depth--; if (depth === 0) return [from, i + 1] }
+      i++
+    }
+    return null
+  }
+  /** 開始タグの `>` の位置（属性の中の {} と '' は飛ばす） */
+  const endOfOpenTag = (src, from) => {
+    let i = from
+    let depth = 0
+    let quote = null
+    while (i < src.length) {
+      const c = src[i]
+      if (quote) {
+        if (c === quote) quote = null
+        else if (c === '\\') i++
+      } else if (c === '"' || c === "'" || c === '`') quote = c
+      else if (c === '{') depth++
+      else if (c === '}') depth--
+      else if (c === '>' && depth === 0) return i
+      i++
+    }
+    return -1
+  }
+  /** 同じ名前の入れ子を数えて、対応する終了タグの位置を返す */
+  const matchingClose = (src, tag, afterOpen) => {
+    const openRe = new RegExp(`<${tag}\\b`, 'g')
+    const closeRe = new RegExp(`</${tag}\\s*>`, 'g')
+    let depth = 1
+    let i = afterOpen
+    while (i < src.length) {
+      openRe.lastIndex = i
+      closeRe.lastIndex = i
+      const o = openRe.exec(src)
+      const c = closeRe.exec(src)
+      if (!c) return -1
+      if (o && o.index < c.index) {
+        const e = endOfOpenTag(src, o.index)
+        if (e !== -1 && src[e - 1] === '/') { i = e + 1; continue }
+        depth++
+        i = o.index + 1
+        continue
+      }
+      depth--
+      if (depth === 0) return c.index
+      i = c.index + 1
+    }
+    return -1
+  }
+  /** その要素の中身の範囲（自己終了は開始タグだけ） */
+  const elementSpan = (src, start, tag) => {
+    const e = endOfOpenTag(src, start)
+    if (e === -1) return [start, src.length]
+    if (src[e - 1] === '/') return [start, e + 1]
+    const close = matchingClose(src, tag, e + 1)
+    return [start, close === -1 ? e + 1 : close]
+  }
+
+  const JA_KEY = /\bja\.[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+/g
+  const INTERACTIVE = /<(button|Link|select|input|textarea|label)\b/g
+  const JSX_COMPONENT = /<([A-Z][A-Za-z0-9_]*)\b/g
+  const normalizeKey = (key) => key.replace(/\.(replace|replaceAll|toLocaleString)$/, '')
+
+  const parsed = tsxFiles.map((file) => {
+    const src = readFileSync(file, 'utf-8')
+    const collapse = []
+    const re = /<Collapse\b/g
+    let m
+    while ((m = re.exec(src))) {
+      const e = endOfOpenTag(src, m.index)
+      if (e === -1) continue
+      if (src[e - 1] === '/') { re.lastIndex = e + 1; continue }
+      const close = matchingClose(src, 'Collapse', e + 1)
+      if (close === -1) continue
+      collapse.push([e + 1, close])
+      re.lastIndex = e + 1
+    }
+    const comps = new Map()
+    for (const decl of [
+      /^(?:export\s+)?(?:default\s+)?function\s+([A-Z][A-Za-z0-9_]*)/gm,
+      /^(?:export\s+)?const\s+([A-Z][A-Za-z0-9_]*)\s*[:=]/gm,
+    ]) {
+      let d
+      while ((d = decl.exec(src))) {
+        if (comps.has(d[1])) continue
+        const span = bodySpan(src, d.index)
+        if (span) comps.set(d[1], span)
+      }
+    }
+    return { file, src, collapse, comps }
+  })
+
+  // 同じ名前の部品が2つ以上あるファイルは、どちらを指しているか決められないので見ない
+  const defs = new Map()
+  for (const p of parsed) {
+    for (const [name, span] of p.comps) {
+      if (defs.has(name)) defs.set(name, null)
+      else defs.set(name, { file: p.file, span })
+    }
+  }
+
+  // 「畳むと消える範囲」を、部品をたどって広げる（動かなくなるまで繰り返す）
+  const hidden = new Map(parsed.map((p) => [p.file, p.collapse.map((r) => r.slice())]))
+  const inHidden = (file, i) => (hidden.get(file) ?? []).some(([a, b]) => i >= a && i < b)
+  for (let round = 0; round < 8; round++) {
+    let changed = false
+    for (const [name, def] of defs) {
+      if (!def) continue
+      if ((hidden.get(def.file) ?? []).some(([a, b]) => def.span[0] >= a && def.span[1] <= b)) continue
+      let uses = 0
+      let hiddenUses = 0
+      for (const p of parsed) {
+        JSX_COMPONENT.lastIndex = 0
+        let u
+        while ((u = JSX_COMPONENT.exec(p.src))) {
+          if (u[1] !== name) continue
+          uses++
+          if (inHidden(p.file, u.index)) hiddenUses++
+        }
+      }
+      if (uses > 0 && uses === hiddenUses) {
+        hidden.get(def.file).push([def.span[0], def.span[1]])
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+
+  const reachable = new Set()
+  const hiddenOps = new Map()
+  for (const p of parsed) {
+    // 読み上げ名と見出しは「入口」と数えない（押して開く窓が同じ文言を使うため）
+    const notEntry = []
+    for (const re of [/aria-label=\{[^}]*\}/g, /<h[3-6][^>]*>[\s\S]*?<\/h[3-6]>/g]) {
+      let s
+      while ((s = re.exec(p.src))) notEntry.push([s.index, s.index + s[0].length])
+    }
+    JA_KEY.lastIndex = 0
+    let k
+    while ((k = JA_KEY.exec(p.src))) {
+      if (inHidden(p.file, k.index)) continue
+      if (notEntry.some(([a, b]) => k.index >= a && k.index < b)) continue
+      reachable.add(normalizeKey(k[0]))
+    }
+    for (const [a, b] of hidden.get(p.file)) {
+      const body = p.src.slice(a, b)
+      INTERACTIVE.lastIndex = 0
+      let im
+      while ((im = INTERACTIVE.exec(body))) {
+        const [s, t] = elementSpan(body, im.index, im[1])
+        const chunk = body.slice(s, t)
+        JA_KEY.lastIndex = 0
+        let j
+        while ((j = JA_KEY.exec(chunk))) {
+          const key = normalizeKey(j[0])
+          const line = p.src.slice(0, a + s).split('\n').length
+          if (!hiddenOps.has(key)) hiddenOps.set(key, new Set())
+          hiddenOps.get(key).add(`${path.relative(appRoot, p.file)}:${line}`)
+        }
+        INTERACTIVE.lastIndex = im.index + 1
+      }
+    }
+  }
+
+  const unreachable = [...hiddenOps.keys()]
+    .filter((key) => !reachable.has(key) && !(key in OPEN_TO_REFINE))
+    .sort()
+  eq(
+    'COLLAPSE-1 折りたたみを開かないと触れない操作が無い（開いてよいものは理由つきで一覧に書く）',
+    unreachable.map((key) => `${key} (${[...hiddenOps.get(key)].join(' , ')})`),
+    [],
+  )
+  // 一覧のほうが古くなっていないか（直したのに理由が残っていると、次の人が読み違える）
+  const stale = Object.keys(OPEN_TO_REFINE).filter((key) => !hiddenOps.has(key)).sort()
+  eq('COLLAPSE-1 「開いてから」の一覧に、もう当てはまらないものが残っていない', stale, [])
+  // 見張りそのものが動いているか（掴み損ねて素通りの合格に倒れない）
+  eq('COLLAPSE-1 折りたたみの中の操作を掴めている', hiddenOps.size > 20, true)
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

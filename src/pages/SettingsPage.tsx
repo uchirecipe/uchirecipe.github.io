@@ -57,6 +57,8 @@ import { loadCookNaviSession } from '../logic/cookNaviSession'
 import { hasNgIngredient } from '../logic/ng'
 import { countFreeLimitRecipes, FREE_LIMIT, FREE_LIMIT_ENABLED } from '../logic/freeLimit'
 import { clampServings, MIN_SERVINGS, MAX_SERVINGS } from '../logic/servings'
+// 献立の栄養・概算食費に足すごはん1杯のグラム数（成分表から機械的に引く。2026-08-21 便IN）
+import { riceServingGrams } from '../logic/nutritionBalance'
 import { clampBurners, DEFAULT_KITCHEN, MIN_BURNERS, MAX_BURNERS } from '../logic/cookAppliance'
 import { resolveBackTarget } from '../logic/backLink'
 import { refreshApp } from '../logic/appRefresh'
@@ -252,6 +254,10 @@ const sectionDeepLinks: Record<string, string> = {
   // householdは2026-08-03 便DK: 設定「ふだん作る人数」へ名前で飛べる値(?section=household)。
   // 献立の食数・買い物メモの分量・概算食費の既定がどこで決まっているかを案内するときの行き先
   household: 'household-section',
+  // riceは2026-08-21 便IN: 設定「1食につきごはん1杯を足して計算する」へ名前で飛べる値
+  // (?section=rice)。献立の栄養パネルからも同じ設定を切り替えられるが、そちらは
+  // 折りたたみの中にしかなかったので、名前で辿り着ける行き先を用意した
+  rice: 'rice-section',
   // kitchenは2026-08-13 便GC: 設定「台所の器具」へ名前で飛べる値(?section=kitchen)。
   // 並行調理ナビの段取りから、組んだ前提を変えに行ける行き先
   kitchen: 'kitchen-section',
@@ -1385,6 +1391,47 @@ export default function SettingsPage() {
               placeholder={ja.settings.weeklyBudgetPlaceholder}
               className="mt-[var(--space-sm)] w-full rounded-sm border border-edge bg-app px-3 py-3 text-base text-ink placeholder:text-ink-muted/60"
             />
+          </section>
+
+          {/* ごはんを含めて計算する（2026-08-02 便CW-10で献立タブの栄養パネルに入れた設定を、
+              2026-08-21 便INで設定画面にも置いた）。
+              オーナーの原則「アプリ全体で、折りたたみを一切開かなくても、最低限一通りすべての
+              機能を触れる（使いこなすために開く）ようにしたい」に反していた唯一の入口だったため。
+              献立の「週」では、この設定は**日ごとのカードの折りたたみ**の中にある栄養パネルの、
+              さらに折りたたみの中にしかなく、二重に隠れていた。
+              栄養パネル側のチェックはそのまま残してある（数字を見ながら切り替えられる場所）。
+              保存先は同じ settings.includeRice なので、どちらで切り替えても同じ1つの設定が動く。
+              文言は栄養パネルと同じものを使う（同じ設定を2つの言い方で呼ばない）。
+              id は直リンク(?section=rice)の着地点 */}
+          <section id="rice-section" className={`${sectionCls} scroll-mt-24`}>
+            <label className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-bold">
+                  {ja.nutritionBalance.includeRiceLabel.replace('{g}', String(riceServingGrams()))}
+                </h2>
+                <p className="mt-1 text-sm text-ink-muted">{ja.nutritionBalance.includeRiceHint}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                data-testid="settings-include-rice"
+                aria-checked={!!settings.includeRice}
+                aria-label={ja.nutritionBalance.includeRiceLabel.replace(
+                  '{g}',
+                  String(riceServingGrams()),
+                )}
+                onClick={() => void updateSettings({ includeRice: !settings.includeRice })}
+                className={`relative h-8 w-14 shrink-0 rounded-full transition-colors ${
+                  settings.includeRice ? 'bg-accent' : 'bg-edge'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-all ${
+                    settings.includeRice ? 'left-7' : 'left-1'
+                  }`}
+                />
+              </button>
+            </label>
           </section>
 
           {/* 食材と価格（食材価格マスタ。詳細・献立の概算食費のフォールバックに使う）。

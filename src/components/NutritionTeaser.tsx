@@ -108,6 +108,10 @@ export default function NutritionTeaser({
   const startTrial = () => {
     if (!trialAvailable) return
     setTrialActive(true)
+    // 押した人が必ず中身を見られるようにする（2026-08-21 便IN）。
+    // 入口を折りたたみの外へ出したので、畳んだまま押されることがある。
+    // 開かずに使ったことにすると、1回きりのお試しを何も見ないまま使い切ってしまう
+    setExpanded(true)
     void updateSettings({ nutritionTrialUsed: true })
   }
 
@@ -137,6 +141,28 @@ export default function NutritionTeaser({
           <ChevronIcon size={20} className="shrink-0 text-ink-muted" aria-hidden />
         </button>
 
+        {/* 8項目のお試しの入口（2026-08-08 便DZ）。
+            2026-08-21 便IN: **折りたたみの外**へ出した。オーナーの原則
+            「アプリ全体で、折りたたみを一切開かなくても、最低限一通りすべての機能を触れる
+              （使いこなすために開く）ようにしたい」に、この入口だけが反していた
+            （並行調理ナビ・月間献立のお試しは、どちらもロックの案内が畳まれずに出ている）。
+            出るのは**まだ使っていない人だけ**なので、1回使えば二度と出ない
+            ＝毎回の面積は増えない。無料/Proの線引きは1つも動かしていない
+            （見られる中身も回数も便DZのまま。表示のゲート isNutritionUnlocked も触っていない）。
+            押すと折りたたみも開く（startTrial）＝畳んだまま押しても中身が見られる */}
+        {trialAvailable && (
+          <div className="px-[var(--space-md)] pb-[var(--space-md)]">
+            <button
+              type="button"
+              data-testid="nutrition-trial-button"
+              onClick={startTrial}
+              className="inline-flex items-center gap-1 rounded-md border border-accent bg-surface px-4 py-3 text-sm font-bold text-accent-ink shadow-sm"
+            >
+              {ja.nutrition.trialButton}
+            </button>
+          </div>
+        )}
+
         <Collapse open={expanded}>
           <div className="border-t border-edge p-[var(--space-md)] pt-[var(--space-sm)]">
             {unlocked ? (
@@ -150,11 +176,7 @@ export default function NutritionTeaser({
                 nutrition={nutrition}
                 displayServings={displayServings}
                 isPro={isPro}
-                trial={{
-                  available: trialAvailable,
-                  exhausted: trialExhausted,
-                  onStart: startTrial,
-                }}
+                trialExhausted={trialExhausted}
               />
             )}
           </div>
@@ -361,15 +383,18 @@ function SourceNote() {
  */
 export function ProNutrientTeaser({
   isPro,
-  trial,
+  trialExhausted,
 }: {
   isPro: boolean
   /**
-   * 8項目を1回だけ開くお試しの入口（2026-08-08 便DZ）。渡された場所にだけ出す。
+   * 8項目を1回だけ開くお試しを、もう使い切っているか（2026-08-08 便DZ）。渡された場所にだけ出す。
    * レシピ詳細の栄養枠からは渡し、献立タブの栄養バランスパネルからは渡さない
-   * （お試しは「1つのレシピの8項目を見る」体験なので、入口も栄養価の枠に置く）。
+   * （お試しは「1つのレシピの8項目を見る」体験なので、案内も栄養価の枠に置く）。
+   *
+   * 2026-08-21 便IN: **押すボタンはここから折りたたみの外へ移した**（畳んだままでも触れるように）。
+   * ここに残すのは使い切ったあとの一言だけ＝入口が消えた理由が、開いた人には読める。
    */
-  trial?: { available: boolean; exhausted: boolean; onStart: () => void }
+  trialExhausted?: boolean
 }) {
   // Pro案内から設定へ飛んだあと、いま見ている画面へ帰れるようにする(2026-08-02 便DF)。
   // この部品はレシピ詳細・献立の栄養バランスパネルの両方で使うため、戻り先は現在地から作る
@@ -406,19 +431,9 @@ export function ProNutrientTeaser({
         <p className="mt-1 font-bold">{ja.nutrition.lockedTitle}</p>
         <p className="text-sm text-ink-muted">{ja.nutrition.proNutrientHighlight}</p>
         {/* 買う前に中身を確かめられる1回だけのお試し(2026-08-08 便DZ)。
-            使えるうちはボタン、使い切ったら同じ場所に一言だけ置く(入口が消えて理由が
-            分からなくなるのを避ける。並行調理ナビ・月間献立のお試しと同じ作法) */}
-        {trial?.available && (
-          <button
-            type="button"
-            data-testid="nutrition-trial-button"
-            onClick={trial.onStart}
-            className="mt-1 rounded-md border border-accent bg-surface px-4 py-2 text-sm font-bold text-accent-ink shadow-sm"
-          >
-            {ja.nutrition.trialButton}
-          </button>
-        )}
-        {trial?.exhausted && (
+            押すボタンは折りたたみの外にある(2026-08-21 便IN)。
+            使い切ったあとの一言だけをここに置く(入口が消えて理由が分からなくなるのを避ける) */}
+        {trialExhausted && (
           <p className="mt-1 text-xs text-ink-muted">{ja.nutrition.trialUsedNote}</p>
         )}
         {!isPro && (
@@ -441,12 +456,12 @@ function LockedBody({
   nutrition,
   displayServings,
   isPro,
-  trial,
+  trialExhausted,
 }: {
   nutrition: Nutrition
   displayServings: number
   isPro: boolean
-  trial: { available: boolean; exhausted: boolean; onStart: () => void }
+  trialExhausted: boolean
 }) {
   return (
     <div className="space-y-[var(--space-sm)]">
@@ -456,7 +471,7 @@ function LockedBody({
       )}
       {/* Pro版で増える項目のティーザー(2026-07-28 便BY/PRO-01で blur+Lock 様式に統一)。
           詳しい提供時期の話(freeDescription系)より先に、まず「何が増えるか」を見せる */}
-      <ProNutrientTeaser isPro={isPro} trial={trial} />
+      <ProNutrientTeaser isPro={isPro} trialExhausted={trialExhausted} />
       <MaterialGapNote nutrition={nutrition} />
       <AssumedBlock nutrition={nutrition} />
       <ExcludedBlock nutrition={nutrition} />
