@@ -739,7 +739,10 @@ function DayNoteEditor({
         aria-label={ja.mealPlan.dayNoteAria
           .replace('{m}', String(Number(date.slice(5, 7))))
           .replace('{d}', String(Number(date.slice(8, 10))))}
-        className="mt-1 w-full rounded-sm border border-edge bg-app px-2 py-2 text-sm text-ink placeholder:text-ink-muted/60"
+        /* 2026-08-22 便IZ: 実測 高さ38px で、指で押せる大きさ(44px・--tap-min)を下回っていた。
+           文字を打ち込む欄も「押して開くもの」なので、他のボタン・プルダウン
+           （.select-control も min-height: var(--tap-min)）と同じだけの当たり判定を持たせる */
+        className="mt-1 min-h-11 w-full rounded-sm border border-edge bg-app px-2 py-2 text-sm text-ink placeholder:text-ink-muted/60"
       />
     </div>
   )
@@ -5579,41 +5582,20 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       // 何十個も並ぶので、**並び順ではなく「いつのどの枠か」で掴める**ようにするため
       // （並びが変わると落ちる掴み方を作らない）
       <div key={key} data-testid="plan-row" data-date={date} data-slot={slot} data-role={role}>
-      <div className="flex items-center gap-2">
-        {/* 役割ラベルの列。入っている行では、その下に食数(何人分作るか)のボタンを重ねて置く
-            (2026-08-03 便DJ・オーナー指示)。横に足すと料理名の幅を削ってしまうため縦に積む */}
-        <div className="w-10 shrink-0">
-          <span
-            className={`block text-ink-muted ${isEmpty ? 'text-[10px]' : 'text-xs font-bold'}`}
-          >
-            {ja.mealPlan.role[role]}
-          </span>
-          {row.kind === 'entry' && recipe && (
-            <button
-              type="button"
-              onClick={() =>
-                setServingsEditor({
-                  entryId: row.entry.id!,
-                  date,
-                  slot,
-                  title: recipe.title,
-                  recipeServings: recipe.servings > 0 ? recipe.servings : 1,
-                  defaultServings: defaultMealServings(householdServings, recipe.servings),
-                  value: rowServings,
-                  isCustom: row.entry.servings != null,
-                })
-              }
-              disabled={locked}
-              aria-label={ja.mealPlan.servingsEditAria.replace('{n}', String(rowServings))}
-              className={`mt-0.5 block text-[10px] font-bold text-accent-ink underline ${
-                locked ? 'opacity-40' : ''
-              }`}
-            >
-              {ja.mealPlan.servingsChip.replace('{n}', String(rowServings))}
-            </button>
-          )}
-        </div>
-        {isEmpty ? (
+      {/* 2026-08-22 便IZ: 1行を**2段**にした（1段目＝料理カード・2段目＝この1品への操作）。
+          直す前は 役割の列(40px)＋カード＋サイコロ(34px)＋×(34px) が同じ横1行に並んでおり、
+          料理名に残る幅は **390pxで119px＝7文字**（320pxでは49px＝3文字。「肉じゃが」すら切れる）だった。
+          これはオーナーが最初に挙げた困りごと（「「豆腐ときの…」「レンジ蒸し…」「鶏胸肉の…」だと
+          なんなのかわからない」）そのもので、便IVは通常表示（251px＝15文字）だけを直し、
+          **編集モードには直す前の数字がそのまま残っていた**。
+          編集モードは「気になるところのレシピを変更する」ための画面なので、
+          どの料理を差し替えようとしているのかが読めないと用をなさない。
+          カードを行の幅いっぱいにして通常表示と同じ読みやすさに戻し、操作は下の段へ移した
+          （＝料理名の幅を削って操作を置く、をやめた）。
+          あわせて、同じ段に押しにくさが集まっていたのも解いた（実測: サイコロ34px角・
+          食数27×15px・「レシピを見る」高さ16px、サイコロと×の間隔3px＝押し間違える）。
+          この段の押せるものは 44px（--tap-min）以上・間隔12px以上で並べる */}
+      {isEmpty ? (
           <button
             type="button"
             disabled={locked}
@@ -5622,7 +5604,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             // 色（面を塗る／塗らない）・文字サイズ（16px／12px）・密度（高い行／低い行）の3つで差を付ける。
             // 空き行の「押せる」見た目（破線＋Plusアイコン＋アクセント色。便BH-3タスク5）は維持し、
             // 食事ごとの地色（SLOT_TONE・便CW-1）にも手を入れない
-            className="flex min-w-0 flex-1 items-center gap-1 truncate rounded-sm border border-dashed border-accent/40 px-2 py-1.5 text-left text-xs font-bold text-accent-ink"
+            className="flex min-h-11 w-full min-w-0 items-center gap-1 truncate rounded-sm border border-dashed border-accent/40 px-2 py-1.5 text-left text-xs font-bold text-accent-ink"
           >
             <Plus size={16} className="shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate">{ja.mealPlan.emptyAssign}</span>
@@ -5633,7 +5615,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
              押すと従来どおりレシピを選び直す（枠の押下の役割は変えていない・便DP-5の司令部裁定）。
              作った記録が付いた枠の淡い表示（muted）と「作った」バッジ、NG食材の印、
              鍵の掛かった食事で押せなくなること（disabled）も、そのままカード側の口で表す */
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 w-full">
             <RecipeCard
               recipe={recipe!}
               density="small"
@@ -5661,78 +5643,116 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             />
           </div>
         )}
-        {/* 過去日(今日より前)・作った記録のある枠はサイコロ非表示(2026-07-16 便W-⑤a: ランダム提案の
-            対象外。過去/作った献立は振り返る対象であり、上書きも新規埋めもしない) */}
-        {!isPastDate(date, today) && !isCooked && !locked && (
+      {/* 2段目＝この1品への操作（2026-08-22 便IZ）。
+          並びは「何の枠か（役割）→ 何人分 → レシピを見る／記録を見る → （右へ）引き直し・外す」。
+          手を離せない操作（引き直し・外す）を右端にまとめるのは、日タブの整理モードで
+          「作った！」と×を右へ寄せた作法（2026-08-21 便IU・②）と同じ。
+          間隔は 12px（gap-3）で揃える＝押し間違いが起きる近さ（直す前はサイコロと×が3px）を作らない。
+          入り切らない画面（320px）では折り返すので、縦の間隔も同じ12pxにしてある */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <span className="text-xs font-bold text-ink-muted">{ja.mealPlan.role[role]}</span>
+        {row.kind === 'entry' && recipe && (
           <button
             type="button"
-            onClick={() => void suggestRow(date, slot, role, entryId, extraLocalId)}
-            aria-label={ja.mealPlan.suggestAria}
-            className="rounded-full p-2 text-accent-ink"
-          >
-            <Dices size={18} aria-hidden />
-          </button>
-        )}
-        {showRemove && (
-          <button
-            type="button"
-            onClick={() => void clearRow(date, slot, role, entryId, extraLocalId)}
-            aria-label={
-              row.kind === 'entry'
-                ? ja.mealPlan.clear
-                : row.isDefault
-                  ? // 2026-08-02 便CW-2: 既定の空欄行を畳む×。何が起きるかを読み上げでも言い分ける
-                    ja.mealPlan.hideEmptyRow.replace('{role}', ja.mealPlan.role[role])
-                  : ja.mealPlan.removeExtraRow
+            onClick={() =>
+              setServingsEditor({
+                entryId: row.entry.id!,
+                date,
+                slot,
+                title: recipe.title,
+                recipeServings: recipe.servings > 0 ? recipe.servings : 1,
+                defaultServings: defaultMealServings(householdServings, recipe.servings),
+                value: rowServings,
+                isCustom: row.entry.servings != null,
+              })
             }
             disabled={locked}
-            className={`tap-target rounded-full p-2 text-ink-muted ${locked ? 'opacity-40' : ''}`}
+            aria-label={ja.mealPlan.servingsEditAria.replace('{n}', String(rowServings))}
+            /* 直す前は 27×15px（役割ラベルの下に潜り込ませた10pxの字）で、指では狙えなかった */
+            className={`inline-flex min-h-11 items-center rounded-sm px-2 text-xs font-bold text-accent-ink underline ${
+              locked ? 'opacity-40' : ''
+            }`}
           >
-            <X size={18} aria-hidden />
+            {ja.mealPlan.servingsChip.replace('{n}', String(rowServings))}
           </button>
         )}
-      </div>
-      {/* 枠に入っているレシピの詳細へ行く1行（2026-08-10 便EZ・オーナー実機
-          「献立カードで選択中のレシピからレシピ詳細に移る手段がない」）。
-          この枠の押下は「レシピを選び直す」に割り当ててあり(便DP-5の司令部裁定。間違えて
-          記録した枠を直せなくなる方が害が大きい)、週・月のカードにはレシピ詳細への入口が
-          1つも無かった＝材料や手順を見たいときに一覧から探し直すしかなかった。
-          押す場所を奪わずに、記録の入口（下の「作った記録を見る」）と同じ作りで下に添える */}
-      {recipe?.id != null && (
-        <div className="mt-0.5 ml-12 flex flex-wrap items-center gap-x-3">
+        {/* 枠に入っているレシピの詳細へ行く入口（2026-08-10 便EZ・オーナー実機
+            「献立カードで選択中のレシピからレシピ詳細に移る手段がない」）。
+            この枠の押下は「レシピを選び直す」に割り当ててあり(便DP-5の司令部裁定。間違えて
+            記録した枠を直せなくなる方が害が大きい)、週・月のカードにはレシピ詳細への入口が
+            1つも無かった＝材料や手順を見たいときに一覧から探し直すしかなかった。
+            2026-08-22 便IZ で、カードの真下に付いていた高さ16pxの1行から、この操作の段へ移した
+            （カードとの間隔が2pxしかなく、レシピ詳細と差し替えを押し間違える近さだった） */}
+        {recipe?.id != null && (
           <Link
             to={`/recipes/${recipe.id}`}
             state={logDetailLinkState}
             onClick={rememberLogDetailReturn}
             data-testid="slot-open-recipe"
             aria-label={ja.mealPlan.openRecipeAria.replace('{title}', recipe.title)}
-            className="inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+            className="inline-flex min-h-11 items-center gap-0.5 text-xs font-bold text-accent-ink underline"
           >
             {ja.mealPlan.openRecipe}
             <ChevronRight size={14} aria-hidden />
           </Link>
-          {/* 作った！済みで薄くなっている枠から、その記録の中身を開く1行(2026-08-09 便EQ・オーナー実機
-              「作った！して表示が薄くなっているレシピをタップ→記録を見たい」)。
-              開く小窓は他の3か所と同じもの */}
-          {cookedLogRow && (
+        )}
+        {/* 作った！済みで薄くなっている枠から、その記録の中身を開く(2026-08-09 便EQ・オーナー実機
+            「作った！して表示が薄くなっているレシピをタップ→記録を見たい」)。
+            開く小窓は他の3か所と同じもの */}
+        {cookedLogRow && (
+          <button
+            type="button"
+            onClick={() =>
+              setLogDetail({
+                recipe: cookedLogRow.recipe,
+                log: cookedLogRow.log,
+                logIndex: cookedLogRow.logIndex,
+              })
+            }
+            aria-label={ja.cookedDetail.openAria.replace('{title}', cookedLogRow.recipe.title)}
+            className="inline-flex min-h-11 items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+          >
+            {ja.cookedDetail.openFromPlan}
+            <ChevronRight size={14} aria-hidden />
+          </button>
+        )}
+        <span className="ml-auto flex items-center gap-3">
+          {/* 過去日(今日より前)・作った記録のある枠はサイコロ非表示(2026-07-16 便W-⑤a: ランダム提案の
+              対象外。過去/作った献立は振り返る対象であり、上書きも新規埋めもしない) */}
+          {!isPastDate(date, today) && !isCooked && !locked && (
             <button
               type="button"
-              onClick={() =>
-                setLogDetail({
-                  recipe: cookedLogRow.recipe,
-                  log: cookedLogRow.log,
-                  logIndex: cookedLogRow.logIndex,
-                })
-              }
-              aria-label={ja.cookedDetail.openAria.replace('{title}', cookedLogRow.recipe.title)}
-              className="inline-flex items-center gap-0.5 text-xs font-bold text-accent-ink underline"
+              onClick={() => void suggestRow(date, slot, role, entryId, extraLocalId)}
+              aria-label={ja.mealPlan.suggestAria}
+              /* 直す前は p-2 だけの34px角。同じ役目の×には器(.tap-target)が着いていたのに
+                 こちらだけ素通りしていた＝片方だけ直した跡（便HQ-3が測るのはXとチェックの丸だけ） */
+              className="tap-target flex h-11 w-11 items-center justify-center rounded-full text-accent-ink"
             >
-              {ja.cookedDetail.openFromPlan}
-              <ChevronRight size={14} aria-hidden />
+              <Dices size={18} aria-hidden />
             </button>
           )}
-        </div>
-      )}
+          {showRemove && (
+            <button
+              type="button"
+              onClick={() => void clearRow(date, slot, role, entryId, extraLocalId)}
+              aria-label={
+                row.kind === 'entry'
+                  ? ja.mealPlan.clear
+                  : row.isDefault
+                    ? // 2026-08-02 便CW-2: 既定の空欄行を畳む×。何が起きるかを読み上げでも言い分ける
+                      ja.mealPlan.hideEmptyRow.replace('{role}', ja.mealPlan.role[role])
+                    : ja.mealPlan.removeExtraRow
+              }
+              disabled={locked}
+              className={`tap-target flex h-11 w-11 items-center justify-center rounded-full text-ink-muted ${
+                locked ? 'opacity-40' : ''
+              }`}
+            >
+              <X size={18} aria-hidden />
+            </button>
+          )}
+        </span>
+      </div>
       </div>
     )
   }
@@ -5905,7 +5925,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               title={ja.mealPlan.genreMixedHint}
               aria-label={ja.mealPlan.genreMixedAria}
               onClick={() => setMessage(ja.mealPlan.genreMixedHint)}
-              className="rounded-sm border border-edge px-1.5 py-0.5 text-[10px] font-bold text-ink-muted"
+              /* 2026-08-22 便IZ: 実測93×21pxで、隣の料理カードとの間隔が7pxしかなかった
+                 （押し間違えると差し替えの窓が開く）。当たり判定だけ44pxに広げる
+                 ＝見た目（控えめなバッジ・docs/56 §3-10「うるさくしない」）は変えない */
+              className="tap-target rounded-sm border border-edge px-1.5 py-0.5 text-[10px] font-bold text-ink-muted"
             >
               {ja.mealPlan.genreMixedBadge}
             </button>
@@ -5925,14 +5948,19 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             /* 2026-08-09 便EN(オーナー実機「今はどちらも細い線の記号なので、パッと見て
                違いが分かりづらい」): 掛かっているときはアクセント色で塗りつぶした丸にし、
                外れているときは線だけの開いた鍵にする＝塗りの有無で一目で見分けられるようにする */
-            className={`ml-auto shrink-0 rounded-full p-1.5 ${
+            /* 2026-08-22 便IZ: 実測28px角で、指で押せる大きさ(44px・--tap-min)を下回っていた。
+               器(.tap-target)で当たり判定だけ広げる＝丸の見た目・塗りの有無は1pxも変えない */
+            className={`ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
               slotLocked ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-muted'
             }`}
           >
             {slotLocked ? <Lock size={16} aria-hidden /> : <LockOpen size={16} aria-hidden />}
           </button>
         </div>
-        <div className="mt-1 space-y-1">
+        {/* 2026-08-22 便IZ: 1品どうしの間も12pxにする（直す前は4px）。
+            1品が「カードの段＋操作の段」の2段になったので、間が詰まっていると
+            上の品の×と下の品のカードを押し間違える */}
+        <div className="mt-3 space-y-3">
           {roleRows.map(([role, rows]) =>
             rows.map((row, i) =>
               renderRow(
@@ -5956,7 +5984,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           </p>
         ) : isAddMenuOpen ? (
           // 2026-08-02 便DE-4: 足せる区分は主菜・副菜・汁物・その他の4つ(レシピ登録と同じ区分)
-          <div className="mt-1 flex flex-wrap items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             {MEAL_ROLES.map((role) => (
               <button
                 key={role}
@@ -5965,7 +5993,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   addOrRestoreRow(date, slot, role)
                   setAddMenuFor(null)
                 }}
-                className="rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
+                /* 2026-08-22 便IZ: 押せる高さを44px（--tap-min）に。区分は4つ横に並ぶので、
+                   間隔も12pxにして隣の区分を押し間違えないようにする */
+                className="inline-flex min-h-11 items-center rounded-sm border border-edge bg-app px-2 py-1 text-xs font-bold text-accent-ink"
               >
                 {ja.mealPlan.role[role]}
               </button>
@@ -5983,7 +6013,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           <button
             type="button"
             onClick={() => setAddMenuFor(slotKey)}
-            className="mt-1 text-xs font-bold text-accent-ink"
+            /* 2026-08-22 便IZ: 実測72×16pxで、真上の「レシピを見る」との間隔が6pxだった。
+               押せる高さを44px（--tap-min）にして、間隔も取れるようにする */
+            className="mt-3 inline-flex min-h-11 items-center text-xs font-bold text-accent-ink"
           >
             {ja.mealPlan.addRow}
           </button>
@@ -7956,7 +7988,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 2026-08-08 便DX(オーナー指示「献立日付の右」): 日付の行に日ごとのロックを置く。
                 折りたたみボタンの入れ子にはできないので、見出しの行を flex にして
                 「折りたたみボタン＋鍵」を横に並べる(便DT-6のグループ見出しと同じ作法) */}
-            <h2 className="flex items-center gap-1 font-bold">
+            {/* 2026-08-22 便IZ: 見出しの行に「畳む／開く」「編集／完了」「鍵」の3つが 4px 間隔で
+                並んでいた（実測）。畳むと編集は押し直せばよいだけだが、鍵は押すと
+                「まとめて献立を入力」がその日を書き換えなくなる＝結果の違う操作なので、
+                押し間違えが起きない間隔（12px）まで離す。
+                ただし狭い画面（320px＝古いiPhone SE相当）では、3つを1行に並べたまま12px空けると
+                日付が縮められて「2026/08/2」と「2」に割れる（実測）ので、**行を折り返して**
+                日付を1行に保つ（折り返した先も同じ12px空ける） */}
+            <h2 className="flex flex-wrap items-center gap-3 font-bold">
               {/* 曜日は必ず日付から引く(2026-07-29 便CD/MP-02)。並び順(配列インデックス)で
                   引いていたため、「今日から7日間」表示では今日が月曜の日以外は全行の曜日が
                   日付と食い違っていた(水曜に「月 2026/07/29 今日」と出る) */}
@@ -7970,13 +8009,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   ? ja.mealPlan.weekDayToggleOpenAria
                   : ja.mealPlan.weekDayToggleCloseAria
                 ).replace('{date}', date.replaceAll('-', '/'))}
-                className="flex min-w-0 flex-1 items-center justify-between gap-2 py-1 text-left"
+                className="flex min-h-11 min-w-40 flex-1 items-center justify-between gap-2 py-1 text-left"
               >
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span className="min-w-0">
                     {dowLabels[dowIndex(date)]} {date.replaceAll('-', '/')}
                     {date === today && (
-                      <span className="ml-2 text-sm text-accent-ink">{ja.mealPlan.todayBadge}</span>
+                      /* 2026-08-22 便IZ: 320pxで「今」と「日」に割れていたので割らせない */
+                      <span className="ml-2 whitespace-nowrap text-sm text-accent-ink">
+                        {ja.mealPlan.todayBadge}
+                      </span>
                     )}
                   </span>
                   {/* 畳んでいる日に、中身があることを言う印（便ID・⑦）。
@@ -8018,6 +8060,11 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   畳んでいる日には出さない（畳んだ行は日付だけを残す行なので、
                   そこに押しても中身の見えない操作を並べない）。
                   幅は長いほうの字（「完了」）で固定して、押しても1pxも動かさない（便EO） */}
+              {/* 2026-08-22 便IZ: 「編集／完了」と「鍵」を1つの組にする。
+                  狭い画面で折り返すとき、2つ一緒に次の行へ移って右に揃う
+                  （片方だけが次の行の左端に取り残される、をしない） */}
+              {((dayEditable && !dayCollapsed) || showWeekLock) && (
+              <span className="ml-auto flex shrink-0 items-center gap-3">
               {dayEditable && !dayCollapsed && (
                 <button
                   type="button"
@@ -8058,13 +8105,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   ? ja.mealPlan.unlockDayAria
                   : ja.mealPlan.lockDayAria
                 ).replace('{date}', date.replaceAll('-', '/'))}
-                /* 掛かっているときは塗りつぶし（2026-08-09 便EN。時間帯ごとの鍵と同じ作法） */
-                className={`shrink-0 rounded-full p-1.5 ${
+                /* 掛かっているときは塗りつぶし（2026-08-09 便EN。時間帯ごとの鍵と同じ作法）。
+                   2026-08-22 便IZ: 実測30px角で、指で押せる大きさ(44px・--tap-min)を下回っていた。
+                   器(.tap-target)で当たり判定だけ広げる（丸の見た目は変えない） */
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
                   dayLocked ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-muted'
                 }`}
               >
                 {dayLocked ? <Lock size={18} aria-hidden /> : <LockOpen size={18} aria-hidden />}
               </button>
+              )}
+              </span>
               )}
             </h2>
             {/* 2026-08-10 便FD(オーナー実機「『全て開く』すると、下へスクロールする。

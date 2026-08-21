@@ -27047,6 +27047,91 @@ Aみりん 大さじ1
   )
 }
 
+// ==========================================================================================
+// 便IZ-1: 週タブの献立を触る操作は、指で押せる大きさ（44px＝--tap-min）を必ず持つ
+//         （2026-08-22 便IZ・実機の前の機械点検）
+//
+// 便IVで週タブの操作は「編集モード」の中へ集められた。そこが実測でこうなっていた（390×844）:
+//   引き直し（サイコロ）34×34 / 外す（×）34×34の箱＋器で44 / 食数 27×15 /
+//   食事の鍵 28×28 / 日の鍵 30×30 / 「レシピを見る」高さ16 / 「＋料理を追加」高さ16 /
+//   日を畳む／開く 高さ32
+// つまり **同じ役目の×だけに器（.tap-target）が着いていて、隣のサイコロは素通り** という
+// 「片方だけ直した跡」がここにも在った（便HQ-3が測るのは ✕ とチェックの丸だけなので届かない）。
+//
+// ここでは、週タブで献立を触る操作を名前で1つずつ拾い、書いてあるクラスから
+// **44pxを保証するもの（器 .tap-target / min-h-11 / h-11）を持っているか**を見る。
+// 実画面での実寸と間隔は scripts/e2e-smoke.mjs の IZEDIT-01 が受け持つ（390pxと320pxの両方）。
+// ここは e2e が開かない場面まで含めて取りこぼさないための静的な見張り。
+// ==========================================================================================
+{
+  const appRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const src = readFileSync(path.join(appRoot, 'src/pages/MealPlanPage.tsx'), 'utf-8')
+  const css = readFileSync(path.join(appRoot, 'src/index.css'), 'utf-8')
+  // 44pxを配っている大元（器）が生きていることを先に確かめる。
+  // 器が壊れたら「押せる面が広がっている」根拠が無くなるので、下の全部がその場で意味を失う
+  eq(
+    'IZ-1 押せる面の器（.tap-target）が44pxを配っている',
+    /--tap-min:\s*44px/.test(css) &&
+      /\.tap-target::after\s*\{[^}]*width:\s*var\(--tap-min\)[^}]*height:\s*var\(--tap-min\)[^}]*\}/.test(css),
+    true,
+  )
+
+  /**
+   * 目印（data-testid か aria-label の式）から、その要素の開きタグを丸ごと取り出す。
+   * 掴み方を「行番号」や「並び順」にしないのは、並びが変わった瞬間に落ちる見張りを作らないため。
+   */
+  const openTagOf = (marker) => {
+    const at = src.indexOf(marker)
+    if (at < 0) return null
+    const start = src.lastIndexOf('<', at)
+    if (start < 0) return null
+    // 属性の中の { } と文字列は数えずに、開きタグの終わりまで進む
+    let depth = 0
+    for (let i = start; i < src.length; i++) {
+      const c = src[i]
+      if (c === '{') depth += 1
+      else if (c === '}') depth -= 1
+      else if (c === '"' || c === "'" || c === '`') {
+        const quote = c
+        i += 1
+        while (i < src.length && src[i] !== quote) {
+          if (src[i] === '\\') i += 1
+          i += 1
+        }
+      } else if (c === '>' && depth === 0) return src.slice(start, i + 1)
+    }
+    return null
+  }
+  /** 44pxを保証する書き方を持っているか（器 or 実寸の指定） */
+  const holds44 = (tag) =>
+    tag !== null &&
+    /(?:^|[\s`{'"])(?:tap-target|min-h-11|h-11)(?![\w-])/.test(tag)
+
+  // 週タブで献立を触る操作。名前＝画面に出る目印か読み上げ名の式（画面の字は書き写さない）
+  const IZ_TAPS = [
+    ['日を畳む／開く', 'data-testid="week-day-toggle"'],
+    ['編集／完了の切り替え', 'data-testid="week-day-edit"'],
+    ['日の鍵', 'data-testid="day-lock"'],
+    ['食事の鍵', 'data-testid="slot-lock"'],
+    ['レシピを見る', 'data-testid="slot-open-recipe"'],
+    ['引き直し（サイコロ）', 'aria-label={ja.mealPlan.suggestAria}'],
+    ['外す（×）', 'ja.mealPlan.removeExtraRow'],
+    ['食数を変える', 'ja.mealPlan.servingsEditAria'],
+    ['空いている枠にレシピを選ぶ', 'onClick={() => openPicker(date, slot, role, entryId, extraLocalId)}'],
+    ['＋料理を追加', 'ja.mealPlan.addRow'],
+  ]
+  const izMissing = []
+  const izNotFound = []
+  for (const [name, marker] of IZ_TAPS) {
+    const tag = openTagOf(marker)
+    if (tag === null) izNotFound.push(name)
+    else if (!holds44(tag)) izMissing.push(name)
+  }
+  // 目印が見つからないのに「44px未満は0件でした」と緑にしない（掴めていないことを先に赤で言う）
+  eq('IZ-1 週タブの操作を1つも取りこぼさずに掴めた', izNotFound, [])
+  eq('IZ-1 週タブで献立を触る操作は、すべて44pxの押せる面を持つ', izMissing, [])
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

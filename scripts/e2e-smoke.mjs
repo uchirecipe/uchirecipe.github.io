@@ -427,6 +427,15 @@
 //         IUTODAY-07(2026-08-21 便IU・⑦: 献立の「日」を一度も開かず週タブだけで組んでも、
 //         レシピ詳細が「今日の献立に追加済み」になる。外すと今週の献立の予定からも消え、
 //         押す前の説明（規約F）と「元に戻す」が付く) /
+//         IZEDIT-01(2026-08-22 便IZ: 週タブの**編集モード**でも料理名が通常表示と同じ幅で読める。
+//         便IVは通常表示だけを直し、編集モードには直す前の数字(390px=119px=7文字/320px=49px=3文字)が
+//         そのまま残っていた。押せる大きさ44px以上・12px未満の密着なし・横スクロールなしも
+//         390pxと320pxの両方で実測する) /
+//         IZTHEME-02(2026-08-22 便IZ: 週タブの鍵の印と「編集」の切り替えが、5テーマ
+//         (自動はライト/ダーク両方・ライト・ダーク・ブラウン・グリーン)で背景と見分けられ、
+//         絵と文字が読める。実際に塗られる色を読み出して測る) /
+//         IZSTATE-03(2026-08-22 便IZ: 編集モードのまま別の日を押す/週を送って戻る/日タブへ行って戻る/
+//         画面ごと出て戻る/その日を畳んで開き直す、の5つでおかしな状態にならない) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -45769,6 +45778,519 @@ try {
       await iyCloseConditions()
     } finally {
       await iyBrowser.close()
+    }
+  }
+
+
+  // --- IZEDIT-01(2026-08-22 便IZ): 週タブの**編集モード**でも料理名が読める・操作が指で押せる ---
+  //
+  // 便IV は通常表示だけを直し、編集モードには**直す前の数字がそのまま残っていた**。
+  // 実測（この節を足す前）: 料理名の幅は 390pxで119px＝7文字・320pxで49px＝3文字
+  // （「肉じゃが」すら切れる）。オーナーが最初に挙げた困りごと
+  // 「「豆腐ときの…」「レンジ蒸し…」「鶏胸肉の…」だとなんなのかわからない」そのもので、
+  // 編集モードは「気になるところのレシピを変更する」画面なので、どの料理を差し替えようと
+  // しているのかが読めないと用をなさない。
+  // あわせて、同じ横1行に操作が詰まっていた（サイコロ34px角・食数27×15px・
+  // 「レシピを見る」高さ16px・サイコロと×の間隔3px）。
+  //
+  // 測るのは「利用者が確かめたいこと」:
+  //   ①編集モードの料理名が、通常表示と**同じ幅**で読める（片方だけ広い、を作らない）
+  //   ②狭い画面(320px＝古いiPhone SE相当)でも、通常表示・編集モードとも横スクロールが出ない
+  //   ③編集モードの押せるものが**すべて44px以上**で、隣の操作と**12px以上**離れている
+  //     （2026-08-22に「作った！」と×が8pxまで詰まっていた実例の再発防止）
+  //   ④長い料理名（16〜17字）でも行が2行に崩れない
+  // 禁じ手よけ: 文字数・品数・押す回数を決め打ちしない／曜日・月替わりに依らない（今日のカードを使う。
+  // 今日は必ず表示中の週にある）／ゼロ幅スペースを外してから測る／畳み方が落ち着いてから掴む
+  currentCheck = 'IZEDIT-01'
+  {
+    const izBrowser = await chromium.launch()
+    try {
+      for (const izWidth of [390, 320]) {
+        const izContext = await izBrowser.newContext({ viewport: { width: izWidth, height: 844 } })
+        const izPage = await izContext.newPage()
+        izPage.on('pageerror', (err) => {
+          if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+          errors.push(`[pageerror@IZEDIT-01/${izWidth}] ${err.message}`)
+        })
+        try {
+          await izPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await izPage.waitForTimeout(2400) // 初回シード完了待ち
+          await izPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+          await izPage.reload({ waitUntil: 'networkidle' })
+          await izPage.waitForTimeout(1800)
+          await izPage.getByRole('button', { name: '週', exact: true }).click()
+          await izPage.waitForTimeout(1200)
+          // 測る対象（献立の入った日）を作ってから測る
+          await izPage.locator('[data-testid="week-fill-run"]').first().click()
+          await izPage.waitForTimeout(2600)
+          await openAllWeekDays(izPage)
+          await izPage.waitForTimeout(600)
+          const izToday = await izPage.evaluate(() => {
+            const d = new Date()
+            const p = (n) => String(n).padStart(2, '0')
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+          })
+
+          /** 今日のカードの1品カードを実測する（料理名の幅・その幅に何文字入るか・行の高さ） */
+          const izCards = () =>
+            izPage.evaluate((date) => {
+              const section = document.querySelector(`section[data-date="${date}"]`)
+              if (!section) return null
+              const cvs = document.createElement('canvas').getContext('2d')
+              return [...section.querySelectorAll('[data-testid="row-recipe"]')].map((el) => {
+                const title = el.querySelector('[data-testid="row-title"]')
+                const cs = title ? getComputedStyle(title) : null
+                if (cs) cvs.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`
+                const text = (title?.textContent ?? '').replaceAll('​', '')
+                const tw = title ? title.getBoundingClientRect().width : 0
+                let fit = 0
+                if (cs) {
+                  for (let i = 1; i <= Math.max(text.length, 24); i++) {
+                    const probe = i <= text.length ? text.slice(0, i) : text + 'あ'.repeat(i - text.length)
+                    if (cvs.measureText(probe).width <= tw) fit = i
+                    else break
+                  }
+                }
+                const r = el.getBoundingClientRect()
+                return { title: text, titleWidth: Math.round(tw), fit, height: Math.round(r.height) }
+              })
+            }, izToday)
+
+          const izView = await izCards()
+          check(
+            `IZEDIT-01 [${izWidth}px] 前提: 通常表示の1品カードを実測できた`,
+            Array.isArray(izView) && izView.length > 0 && izView.every((c) => c.title.length > 0 && c.titleWidth > 0),
+            JSON.stringify(izView),
+          )
+          const izHscroll = () =>
+            izPage.evaluate(() => ({
+              doc: document.documentElement.scrollWidth,
+              client: document.documentElement.clientWidth,
+            }))
+          const izViewScroll = await izHscroll()
+          check(
+            `IZEDIT-01 [${izWidth}px] 通常表示で横スクロールが出ない`,
+            izViewScroll.doc <= izViewScroll.client,
+            JSON.stringify(izViewScroll),
+          )
+
+          // 編集モードへ
+          const izEditBtn = izPage.locator(`[data-testid="week-day-edit"][data-date="${izToday}"]`)
+          check(`IZEDIT-01 [${izWidth}px] 前提: 今日の編集の切り替えを掴めた`, (await izEditBtn.count()) === 1)
+          if ((await izEditBtn.count()) === 1) {
+            await izEditBtn.click()
+            await izPage.waitForTimeout(900)
+          }
+          const izEdit = await izCards()
+          check(
+            `IZEDIT-01 [${izWidth}px] 前提: 編集モードの1品カードを実測できた`,
+            Array.isArray(izEdit) && izEdit.length > 0 && izEdit.every((c) => c.titleWidth > 0),
+            JSON.stringify(izEdit),
+          )
+          // ①料理名の幅は通常表示と同じ（操作に幅を削られていない）。
+          //   直す前は 通常251px / 編集119px（390px幅）と、モードで倍以上ちがっていた
+          const izViewW = Array.isArray(izView) && izView.length > 0 ? izView[0].titleWidth : -1
+          const izEditW = Array.isArray(izEdit) && izEdit.length > 0 ? izEdit[0].titleWidth : -2
+          check(
+            `IZEDIT-01 [${izWidth}px] 編集モードの料理名が、通常表示と同じ幅で読める`,
+            izViewW > 0 && izEditW === izViewW,
+            `通常=${izViewW}px 編集=${izEditW}px`,
+          )
+          const izEditFit = Array.isArray(izEdit) && izEdit.length > 0 ? Math.min(...izEdit.map((c) => c.fit)) : 0
+          const izViewFit = Array.isArray(izView) && izView.length > 0 ? Math.min(...izView.map((c) => c.fit)) : 0
+          // 上限を決め打ちしない＝「直す前(390px=7文字 / 320px=3文字)より確実に多い」の向きだけ見る。
+          // 狭い画面のほうが少なくなるのは当たり前なので、下限は画面の幅で分ける
+          const izNeed = izWidth >= 390 ? 12 : 9
+          check(
+            `IZEDIT-01 [${izWidth}px] 編集モードで料理名が${izNeed}文字以上読める（直す前は390px=7文字・320px=3文字）`,
+            izEditFit >= izNeed,
+            `編集=${izEditFit}文字 / 通常=${izViewFit}文字`,
+          )
+          // ④長い料理名でも1行のまま（行が2行に割れて他の品と重ならない）
+          const izTallest = Array.isArray(izEdit) && izEdit.length > 0 ? Math.max(...izEdit.map((c) => c.height)) : 0
+          check(
+            `IZEDIT-01 [${izWidth}px] 長い料理名でも1品カードの行が崩れない（高さが揃っている）`,
+            Array.isArray(izEdit) &&
+              izEdit.length > 0 &&
+              izTallest < 60 &&
+              new Set(izEdit.map((c) => c.height)).size === 1,
+            JSON.stringify(izEdit.map((c) => ({ len: c.title.length, h: c.height }))),
+          )
+          const izEditScroll = await izHscroll()
+          check(
+            `IZEDIT-01 [${izWidth}px] 編集モードでも横スクロールが出ない`,
+            izEditScroll.doc <= izEditScroll.client,
+            JSON.stringify(izEditScroll),
+          )
+
+          // ③押せる大きさと間隔。今日のカードの中に出ている押せるものを全部測る
+          const izTaps = await izPage.evaluate(
+            ({ date }) => {
+              const section = document.querySelector(`section[data-date="${date}"]`)
+              if (!section) return null
+              /** 押せる面の実寸。器(.tap-target)を着けたものは ::after が広げるぶんまで含めて測る */
+              const tapBox = (el) => {
+                const r = el.getBoundingClientRect()
+                let l = r.left
+                let t = r.top
+                let w = r.width
+                let h = r.height
+                if (el.classList.contains('tap-target')) {
+                  const cs = getComputedStyle(el, '::after')
+                  const aw = parseFloat(cs.width) || 0
+                  const ah = parseFloat(cs.height) || 0
+                  if (aw > w) { l -= (aw - w) / 2; w = aw }
+                  if (ah > h) { t -= (ah - h) / 2; h = ah }
+                }
+                return { l, t, w, h }
+              }
+              const items = [...section.querySelectorAll('button, a, select, input')]
+                .filter((el) => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0)
+                .map((el) => ({
+                  name: ((el.getAttribute('aria-label') || el.textContent) ?? '')
+                    .replaceAll('​', '')
+                    .trim()
+                    .slice(0, 24) || el.tagName,
+                  ...tapBox(el),
+                }))
+              const small = items
+                .filter((a) => a.w < 44 || a.h < 44)
+                .map((a) => ({ name: a.name, size: `${Math.round(a.w)}x${Math.round(a.h)}` }))
+              const near = []
+              for (let i = 0; i < items.length; i++) {
+                for (let j = i + 1; j < items.length; j++) {
+                  const a = items[i]
+                  const b = items[j]
+                  const gx = Math.max(0, Math.max(a.l, b.l) - Math.min(a.l + a.w, b.l + b.w))
+                  const gy = Math.max(0, Math.max(a.t, b.t) - Math.min(a.t + a.h, b.t + b.h))
+                  if (gx === 0 && gy === 0) continue // 入れ子・重なりは間隔ではない
+                  const g = Math.hypot(gx, gy)
+                  if (g < 12) near.push({ a: a.name, b: b.name, gap: Math.round(g) })
+                }
+              }
+              return { count: items.length, small, near }
+            },
+            { date: izToday },
+          )
+          check(
+            `IZEDIT-01 [${izWidth}px] 前提: 編集モードの押せるものを読めた`,
+            izTaps !== null && izTaps.count > 0,
+            JSON.stringify(izTaps),
+          )
+          check(
+            `IZEDIT-01 [${izWidth}px] 編集モードの操作がすべて指で押せる大きさ(44px以上)`,
+            izTaps !== null && izTaps.small.length === 0,
+            `44px未満=${JSON.stringify(izTaps?.small)}`,
+          )
+          check(
+            `IZEDIT-01 [${izWidth}px] 12px未満に密着した操作の組が無い（押し間違えない）`,
+            izTaps !== null && izTaps.near.length === 0,
+            `近すぎる組=${JSON.stringify(izTaps?.near)}`,
+          )
+        } finally {
+          await izContext.close()
+        }
+      }
+    } finally {
+      await izBrowser.close()
+    }
+  }
+
+  // --- IZTHEME-02(2026-08-22 便IZ): 週タブの新しい部品が、5テーマとも背景と見分けられる ---
+  //
+  // 2026-08-21（便IU・③）に「プルダウンの地色が置かれている面と枠1本しか違わない」＝
+  // オーナーが「気のせい？」と言ったものが気のせいではなかった実例がある（差15.3／16.9）。
+  // 同じ見落としが便IVの新しい部品（鍵の印・編集の切り替え）に無いかを**数値で**見張る。
+  // 測るのは**実際に塗られる色**（color-mix()の計算値はoklab()で返るので、キャンバスに1px塗って
+  // ブラウザが本当に描く値を読み出す）。直接の色の値は書かない＝**見分けが付くか**と
+  // **文字・図形が読めるか**だけを測る（テーマの色を変えたらここも直す、では見張りにならない）。
+  //
+  // 実測（この節を足した時点。390×844）:
+  //   鍵の印と後ろの面の差 … ライト303.0 / ダーク230.3 / ブラウン260.0 / グリーン266.4
+  //   鍵の中のアイコン（図形）のコントラスト … ライト4.52 / ダーク7.36 / ブラウン3.26 / グリーン3.25
+  //   編集の切り替えの文字 … ライト5.10 / ダーク5.34 / ブラウン5.49 / グリーン6.25
+  // ブラウン・グリーンの鍵のアイコンは 3.25 と下限すれすれなので、これ以上薄くしたら赤くなる
+  currentCheck = 'IZTHEME-02'
+  {
+    const izDist = (a, b) => Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2)
+    const izLum = (c) => {
+      const f = (v) => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    const izRatio = (a, b) => (Math.max(izLum(a), izLum(b)) + 0.05) / (Math.min(izLum(a), izLum(b)) + 0.05)
+    const izHex = (c) => `#${[c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+    const izBrowser = await chromium.launch()
+    try {
+      for (const [izTheme, izLabel, izScheme] of [
+        ['auto', '自動（端末=ライト）', 'light'],
+        ['auto', '自動（端末=ダーク）', 'dark'],
+        ['light', 'ライト', 'dark'],
+        ['dark', 'ダーク', 'light'],
+        ['brown', 'ブラウン', 'light'],
+        ['green', 'グリーン', 'dark'],
+      ]) {
+        const izContext = await izBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: izScheme,
+        })
+        const izPage = await izContext.newPage()
+        try {
+          await izPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await izPage.waitForTimeout(2400)
+          await izPage.evaluate(async (theme) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            const P = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) })
+            const cur = await P(idb.transaction('settings').objectStore('settings').get(1))
+            await P(idb.transaction('settings', 'readwrite').objectStore('settings').put({ ...(cur || {}), id: 1, theme }))
+            idb.close()
+          }, izTheme)
+          await izPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+          await izPage.reload({ waitUntil: 'networkidle' })
+          await izPage.waitForTimeout(1800)
+          await izPage.getByRole('button', { name: '週', exact: true }).click()
+          await izPage.waitForTimeout(1200)
+          await izPage.locator('[data-testid="week-fill-run"]').first().click()
+          await izPage.waitForTimeout(2600)
+          await openAllWeekDays(izPage)
+          await izPage.waitForTimeout(600)
+          const izToday = await izPage.evaluate(() => {
+            const d = new Date()
+            const p = (n) => String(n).padStart(2, '0')
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+          })
+          // 鍵の印は「鍵の掛かった食事」にしか出ないので、今日の鍵を掛けてから測る
+          const izDayLock = izPage.locator(`[data-testid="day-lock"][data-date="${izToday}"]`)
+          if ((await izDayLock.count()) === 1) {
+            await izDayLock.click()
+            await izPage.waitForTimeout(1200)
+          }
+          const izSeen = await izPage.evaluate((date) => {
+            const cvs = document.createElement('canvas').getContext('2d')
+            const toRgb = (v) => {
+              cvs.clearRect(0, 0, 1, 1)
+              cvs.fillStyle = v
+              cvs.fillRect(0, 0, 1, 1)
+              const d = cvs.getImageData(0, 0, 1, 1).data
+              return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+            }
+            // 後ろの面＝透けていない親をさかのぼって最初に見つかった地色
+            const behindOf = (el) => {
+              let p = el.parentElement
+              while (p) {
+                const bg = getComputedStyle(p).backgroundColor
+                if (toRgb(bg).a > 0) return toRgb(bg)
+                p = p.parentElement
+              }
+              return toRgb('rgb(255,255,255)')
+            }
+            const section = document.querySelector(`section[data-date="${date}"]`)
+            if (!section) return null
+            const pick = (el) => {
+              if (!el) return null
+              const cs = getComputedStyle(el)
+              return { bg: toRgb(cs.backgroundColor), behind: behindOf(el), color: toRgb(cs.color) }
+            }
+            const lock = section.querySelector('[data-testid="slot-lock-mark"]')
+            const edit = section.querySelector('[data-testid="week-day-edit"]')
+            return {
+              lock: pick(lock),
+              edit: pick(edit),
+              lockAria: lock?.getAttribute('aria-label') ?? null,
+              lockIcon: (() => {
+                const svg = lock?.querySelector('svg')
+                if (!svg) return null
+                const r = svg.getBoundingClientRect()
+                return { w: Math.round(r.width), h: Math.round(r.height) }
+              })(),
+            }
+          }, izToday)
+          check(
+            `IZTHEME-02 [${izLabel}] 前提: 鍵の印と編集の切り替えを掴めた`,
+            izSeen !== null && izSeen.lock !== null && izSeen.edit !== null,
+            JSON.stringify(izSeen),
+          )
+          if (izSeen === null || izSeen.lock === null || izSeen.edit === null) {
+            await izContext.close()
+            continue
+          }
+          check(
+            `IZTHEME-02 [${izLabel}] 鍵の印が後ろの面と見分けられる`,
+            izDist(izSeen.lock.bg, izSeen.lock.behind) >= 20,
+            `印=${izHex(izSeen.lock.bg)} 後ろの面=${izHex(izSeen.lock.behind)} 差=${izDist(izSeen.lock.bg, izSeen.lock.behind).toFixed(1)}`,
+          )
+          check(
+            `IZTHEME-02 [${izLabel}] 鍵の絵が読める（図形の下限 3:1 以上）`,
+            izRatio(izSeen.lock.color, izSeen.lock.bg) >= 3,
+            `${izRatio(izSeen.lock.color, izSeen.lock.bg).toFixed(2)}:1`,
+          )
+          check(
+            `IZTHEME-02 [${izLabel}] 鍵の印に読み上げの名前が付いている`,
+            typeof izSeen.lockAria === 'string' && izSeen.lockAria.length > 0,
+            `名前=${izSeen.lockAria}`,
+          )
+          check(
+            `IZTHEME-02 [${izLabel}] 鍵の絵が小さすぎない（14px以上）`,
+            izSeen.lockIcon !== null && izSeen.lockIcon.w >= 14 && izSeen.lockIcon.h >= 14,
+            JSON.stringify(izSeen.lockIcon),
+          )
+          check(
+            `IZTHEME-02 [${izLabel}] 編集の切り替えの文字が読める（AA 4.5:1以上）`,
+            izRatio(izSeen.edit.color, izSeen.edit.bg) >= 4.5,
+            `${izRatio(izSeen.edit.color, izSeen.edit.bg).toFixed(2)}:1`,
+          )
+        } finally {
+          await izContext.close()
+        }
+      }
+    } finally {
+      await izBrowser.close()
+    }
+  }
+
+  // --- IZSTATE-03(2026-08-22 便IZ): 編集モードのままあちこち動いても、おかしな状態にならない ---
+  //
+  // 見るのは「編集モードに入ったまま」①別の日の編集を押す ②週を送って戻る ③日タブへ行って戻る
+  // ④画面ごと出て戻る ⑤その日を畳んで開き直す、の5つ。
+  // 覚えているのは日付そのもの（logic/mealPlan.ts の planToggleDayEdit）なので、
+  // 送った先の週にその日が無ければ編集モードのカードは出ない＝この節はその実際の姿を確かめる。
+  // 曜日・月替わりに依らない: 使うのは「今日」と「今日より後で表示中の週にある日」だけ。
+  currentCheck = 'IZSTATE-03'
+  {
+    const izBrowser = await chromium.launch()
+    const izContext = await izBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const izPage = await izContext.newPage()
+    izPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@IZSTATE-03] ${err.message}`)
+    })
+    const izEditOn = async (date) => {
+      const l = izPage.locator(`[data-testid="week-day-edit"][data-date="${date}"]`)
+      return (await l.count()) === 1 ? (await l.getAttribute('aria-pressed')) === 'true' : null
+    }
+    const izOpenWeek = async () => {
+      await izPage.getByRole('button', { name: '週', exact: true }).click()
+      await izPage.waitForTimeout(1200)
+      await openAllWeekDays(izPage)
+      await izPage.waitForTimeout(400)
+    }
+    try {
+      await izPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await izPage.waitForTimeout(2400)
+      await izPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await izPage.reload({ waitUntil: 'networkidle' })
+      await izPage.waitForTimeout(1800)
+      await izOpenWeek()
+      await izPage.locator('[data-testid="week-fill-run"]').first().click()
+      await izPage.waitForTimeout(2600)
+      await openAllWeekDays(izPage)
+      await izPage.waitForTimeout(600)
+      const izToday = await izPage.evaluate(() => {
+        const d = new Date()
+        const p = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      })
+      const izLater = await izPage.evaluate((today) => {
+        for (const s of document.querySelectorAll('section[data-date]')) {
+          const d = s.getAttribute('data-date')
+          if (d && d > today) return d
+        }
+        return null
+      }, izToday)
+      check('IZSTATE-03 前提: 今日と、同じ週の先の日を掴めた', izLater !== null, `先の日=${izLater}`)
+      const izPress = async (date) => {
+        await izPage.locator(`[data-testid="week-day-edit"][data-date="${date}"]`).click()
+        await izPage.waitForTimeout(700)
+      }
+      await izPress(izToday)
+      check('IZSTATE-03 前提: 今日が編集モードに入った', (await izEditOn(izToday)) === true)
+
+      // ①別の日の編集を押す → そちらへ移り、前の日は通常表示へ戻る（同時に2日が編集にならない）
+      if (izLater) {
+        await izPress(izLater)
+        check(
+          'IZSTATE-03 別の日の編集を押すと、前の日は通常表示へ戻る（編集は一度に1日だけ）',
+          (await izEditOn(izToday)) === false && (await izEditOn(izLater)) === true,
+          `今日=${await izEditOn(izToday)} 先の日=${await izEditOn(izLater)}`,
+        )
+        await izPress(izLater)
+      }
+
+      // ②編集モードのまま週を送る → 送った先に編集モードの日は無い。戻すと元どおり編集モード
+      await izPress(izToday)
+      const izNext = izPage.locator(`button[aria-label="${ja.mealPlan.nextWeek}"]`).first()
+      const izPrev = izPage.locator(`button[aria-label="${ja.mealPlan.prevWeek}"]`).first()
+      check(
+        'IZSTATE-03 前提: 週を送る／戻すボタンを掴めた',
+        (await izNext.count()) === 1 && (await izPrev.count()) === 1,
+      )
+      await izNext.click()
+      await izPage.waitForTimeout(1600)
+      await openAllWeekDays(izPage)
+      await izPage.waitForTimeout(400)
+      check(
+        'IZSTATE-03 編集モードのまま週を送ると、送った先に編集モードの日が残らない',
+        (await izPage.locator('[data-testid="week-day-edit"][aria-pressed="true"]').count()) === 0 &&
+          (await izPage.locator(`section[data-date="${izToday}"]`).count()) === 0,
+        `編集中=${await izPage.locator('[data-testid="week-day-edit"][aria-pressed="true"]').count()}件`,
+      )
+      await izPrev.click()
+      await izPage.waitForTimeout(1600)
+      await openAllWeekDays(izPage)
+      await izPage.waitForTimeout(400)
+      check(
+        'IZSTATE-03 週を戻すと、編集していた日がそのまま編集モードで出る（作業の続きに戻れる）',
+        (await izEditOn(izToday)) === true,
+        `今日=${await izEditOn(izToday)}`,
+      )
+
+      // ③編集モードのまま日タブへ行って戻る
+      await izPage.getByRole('button', { name: '日', exact: true }).click()
+      await izPage.waitForTimeout(900)
+      await izOpenWeek()
+      check(
+        'IZSTATE-03 日タブへ行って週タブへ戻っても、編集モードの日は同じ（勝手に別の日へ移らない）',
+        (await izEditOn(izToday)) === true,
+        `今日=${await izEditOn(izToday)}`,
+      )
+
+      // ④画面ごと出て戻る → 通常表示から始まる（編集モードで開きっぱなしにしない）
+      await izPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await izPage.waitForTimeout(1200)
+      await izPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await izPage.waitForTimeout(1800)
+      await izOpenWeek()
+      check(
+        'IZSTATE-03 別の画面へ出て戻ると、通常表示から始まる',
+        (await izEditOn(izToday)) === false,
+        `今日=${await izEditOn(izToday)}`,
+      )
+
+      // ⑤編集モードのままその日を畳む → 切り替えは消えるが、開き直せば編集モードのまま
+      //   （畳んだ行に押しても中身の見えない操作を並べない・行き止まりも作らない）
+      await izPress(izToday)
+      const izToggle = izPage.locator(`[data-testid="week-day-toggle"][data-date="${izToday}"]`)
+      await izToggle.click()
+      await izPage.waitForTimeout(700)
+      check(
+        'IZSTATE-03 畳んだ日には編集の切り替えを出さない',
+        (await izPage.locator(`[data-testid="week-day-edit"][data-date="${izToday}"]`).count()) === 0,
+      )
+      await izToggle.click()
+      await izPage.waitForTimeout(700)
+      check(
+        'IZSTATE-03 開き直すと編集モードのまま戻る（行き止まりにならない）',
+        (await izEditOn(izToday)) === true,
+        `今日=${await izEditOn(izToday)}`,
+      )
+    } finally {
+      await izBrowser.close()
     }
   }
 
