@@ -16220,12 +16220,33 @@ eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedM
     isNewsVisibleFor(news({ hideWhenPro: false }), true),
     true,
   )
-  // 配信中の public/news.json 側に印が付いていること（アプリ側だけ直して取りこぼす事故の防止）
+  // 配信中の public/news.json 側に印が付いていること（アプリ側だけ直して取りこぼす事故の防止）。
+  // 2026-08-21 オーナー指示（A案）: **発売前にPro版のお知らせを出さない**ため、
+  // 「Pro版を公開しました」は取り下げた（オーナー原文「まだ正式なユーザーはいません。
+  // このような表現は、宣伝をした後になります」）。id を書き写して1件だけを見る形だと、
+  // 取り下げた瞬間に赤くなる（禁じ手②）ので、**Pro版に触れるお知らせが在れば印が要る**という
+  // 規則で見る。1件も無い今は空振りだが、次に足したときその場で効く
   {
     const items = JSON.parse(readFileSync(new URL('../public/news.json', import.meta.url), 'utf8'))
-    const proNews = items.find((n) => n.id === '2026-08-02-pro-release')
-    eq('DV-NEWS public/news.json のPro版のお知らせに hideWhenPro が付いている', proNews?.hideWhenPro, true)
-    eq('DV-NEWS 解錠済みには表示されない(実データで確認)', isNewsVisibleFor(proNews, true), false)
+    // 「Pro版の売り込み」＝Proの案内へ連れて行くお知らせ。既に買った人に見せない印が要る。
+    // 機能の紹介文の中で「(Pro版の機能)」と触れるだけのもの（並行調理ナビ等）は売り込みではないので対象外
+    const proPitch = items.filter((n) => /section=pro|manual\.html#pro/.test(n.link ?? ''))
+    eq(
+      'DV-NEWS Proの案内へ連れて行くお知らせには hideWhenPro が付いている',
+      proPitch.filter((n) => n.hideWhenPro !== true).map((n) => n.id),
+      [],
+    )
+    eq(
+      'DV-NEWS その手のお知らせは解錠済みには表示されない(実データで確認)',
+      proPitch.filter((n) => isNewsVisibleFor(n, true)).map((n) => n.id),
+      [],
+    )
+    // 発売前は「Pro版そのもの」を題で知らせない（オーナー指示A案）。発売したら消してよい行
+    eq(
+      'DV-NEWS 発売前はPro版そのものを題にしたお知らせを配らない',
+      items.filter((n) => /Pro版/.test(n.title ?? '')).map((n) => n.id),
+      [],
+    )
   }
 }
 
