@@ -50,13 +50,14 @@ import {
   DIALOG_TITLE_CLS,
 } from '../components/dialogStyle'
 import { useSettings, updateSettings } from '../db/settings'
-import { addRecipesToToday } from '../db/mealPlan'
+import { addRecipesToToday, useMealPlanRange } from '../db/mealPlan'
 import { todayString } from '../logic/date'
 import TodaySlotModal from '../components/TodaySlotModal'
 import type { MealSlot, RecipeListLayout } from '../db/types'
 import { densityForListLayout } from '../logic/cardDensity'
 import { usePantryItems } from '../db/pantry'
 import { useTodayList } from '../db/todayList'
+import { isRecipeInToday } from '../logic/mealPlan'
 import { pantryAvailableNames } from '../logic/pantry'
 import {
   searchRecipes,
@@ -665,6 +666,8 @@ export default function RecipesPage() {
   )
 
   const recipes = useLiveQuery(listRecipes, [])
+  /** 「今日の献立に追加済み」の印を出すのに使う今日の日付（描き直しで日付が動かないよう1回だけ決める） */
+  const todayForBadge = useMemo(() => todayString(), [])
   const settings = useSettings()
   const ngIngredients = settings?.ngIngredients
   // 一覧の表示形式(グリッド/リスト。2026-07-13 UI改善)。設定に保存し再訪でも維持する
@@ -672,10 +675,29 @@ export default function RecipesPage() {
   const pantryItems = usePantryItems()
   const pantryNames = useMemo(() => pantryAvailableNames(pantryItems ?? []), [pantryItems])
   const todayList = useTodayList()
-  const todayRecipeIds = useMemo(
-    () => new Set(todayList?.map((item) => item.recipeId) ?? []),
-    [todayList],
-  )
+  /**
+   * カードに「今日の献立に追加済み」の印を出す品（2026-08-21 便IU・⑦）。
+   *
+   * 印の文言（ja.card.todayBadge）はレシピ詳細のボタンとまったく同じなので、
+   * **数え方も同じにする**＝「今日の献立」の表だけでなく、今日の週の予定も見る。
+   * そろえないと、同じ品が一覧では印なし・詳細では「追加済み」になる
+   * （判定は logic/mealPlan.ts の isRecipeInToday 1か所）
+   */
+  const todayPlanEntries = useMealPlanRange(todayForBadge, todayForBadge)
+  const todayRecipeIds = useMemo(() => {
+    const listIds = todayList?.map((item) => item.recipeId) ?? []
+    const planIds = (todayPlanEntries ?? []).map((e) => e.recipeId)
+    const cookedTodayIds = new Set(
+      (recipes ?? [])
+        .filter((r) => r.id != null && r.cookedLogs.some((log) => log.date === todayForBadge))
+        .map((r) => r.id!),
+    )
+    const ids = new Set<number>()
+    for (const id of [...listIds, ...planIds]) {
+      if (isRecipeInToday(id, listIds, planIds, cookedTodayIds.has(id))) ids.add(id)
+    }
+    return ids
+  }, [todayList, todayPlanEntries, recipes, todayForBadge])
 
   const hideStarters = settings?.hideStarters ?? false
 
@@ -2222,6 +2244,9 @@ export default function RecipesPage() {
                 inTodayList={todayRecipeIds.has(recipe.id!)}
                 showQuickTime={quickOnly}
                 nutrientBadgeText={nutrientBadgeTextFor(recipe.id)}
+                // 検査用の目印（2026-08-21 便IU・①）。今日の献立の行から基本レシピ・主要食材を
+                // 外したのが**その場所だけ**であることを、同じ品のカードを見比べて確かめる
+                testId="recipe-list-card"
                 // 検査用の目印（2026-08-20 便IH・②）。一致した場所の一覧が検索まどの下にだけ出て、
                 // カードには出ていないことを、画面から料理名を拾って確かめるために付ける
                 titleTestId="recipe-card-title"

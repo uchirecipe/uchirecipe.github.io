@@ -82,6 +82,7 @@ import {
   mealOccasionCount,
   planRoleAssign,
   todayListPickedIds,
+  isRecipeInToday,
   todaySlotAddPlan,
   showsCookedPlanRowToday,
   staleTodayListFromPlanIds,
@@ -26263,6 +26264,222 @@ Aみりん 大さじ1
     eq(
       `HR-5 お知らせの本文が${NEWS_BODY_LIMIT}字以内`,
       items.filter((n) => n.body.length > NEWS_BODY_LIMIT).map((n) => `${n.id} ${n.body.length}字「${n.body.slice(0, 20)}…」`),
+      [],
+    )
+  }
+}
+
+// ==========================================================================================
+// 便IU（2026-08-21・オーナーの書き溜め7件）
+//
+// ここは「オーナーが言ったことが、直したあとも守られているか」を静的に見張る。
+// 実際に動かして測るのは e2e（IUCARD-01・IUORG-02・IUSELECT-03・IUSCROLL-04・
+// IUUNDO-06・IUTODAY-07）が受け持つ。
+// 文言は必ず ja.ts から読む（この7日で6回、書き写しが赤を出しているため）。
+// ==========================================================================================
+{
+  const iuRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const iuRead = (rel) => readFileSync(path.join(iuRoot, rel), 'utf-8')
+
+  // ---- IU-1: ①今日の献立のカードの中身を減らす -----------------------------------------
+  // オーナー原文「・今日の献立のレシピカードは、基本レシピとか材料表記はなし。」
+  // 「今日なに作る？」の候補で先にやった引き算（便HY）を、今日の献立の行にも同じ手で適用する。
+  // 項目名は CARD_PART_KEYS の並びから取る＝画面の字を書き写していない
+  {
+    const iuToday = cardPartsFor('todayPlan')
+    const iuFull = cardPartsFor('recipeList')
+    eq(
+      'IU-1 今日の献立の1品は、レシピを探す一覧より載せる情報が少ない（2026-08-21 オーナー指示の引き算）',
+      iuToday.size < iuFull.size && [...iuToday].every((key) => iuFull.has(key)),
+      true,
+    )
+    eq('IU-1 今日の献立の1品に「基本レシピ」の印を出さない', iuToday.has('starter'), false)
+    eq('IU-1 今日の献立の1品に主要食材のチップを出さない', iuToday.has('ingredients'), false)
+    // 決め手（何分かかるか）まで消していないこと。引き算しすぎの見張り
+    eq('IU-1 今日の献立の1品にも調理時間は残っている', iuToday.has('time'), true)
+    // 「今日これを作る1品」を出す場所は日タブと「今日なに作る？」の2つ。
+    // 同じ役目なので載せる情報も同じにする＝片方だけ増減させない
+    eq(
+      'IU-1 「今日これを作る1品」の2か所（今日の献立・今日なに作る？の候補）は同じだけ載せる',
+      [...iuToday].sort().join(','),
+      [...cardPartsFor('todaySuggest')].sort().join(','),
+    )
+  }
+
+  // ---- IU-2: ⑤「別の週から入れる」の名前 -----------------------------------------------
+  // オーナー原文「・「別の週から入れる」は名前わかりにくい。「過去の献立をコピーして入力」とか？
+  // 他アプリでどうしているか参考にして。」
+  // 献立アプリ meek は「献立のコピー・入れ替え」＝**「コピー」が日本の献立アプリの通り相場**。
+  // 便IOがUIから「コピー」の語を消したのは行き過ぎだったので戻す。
+  {
+    for (const [name, text] of [
+      ['画面の名前', ja.mealPlan.copyPickTitle],
+      ['実行のボタン', ja.mealPlan.copyPickRun],
+    ]) {
+      eq(
+        `IU-2 ${name}に「コピー」が入っている（2026-08-21 オーナー指示）`,
+        typeof text === 'string' && text.includes('コピー'),
+        true,
+      )
+    }
+    // 説明は押すボタンの名前を主語にする（規約H: 指示語で場所を示さない）。
+    // 名前は ja から組み立てる＝ボタン名を変えた瞬間にここが赤くなる（書き写しではない）
+    for (const [name, text] of [
+      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
+      ['総入れ替えのときの説明', ja.mealPlan.copyWeekReplaceAllHint],
+    ]) {
+      eq(
+        `IU-2 ${name}が、押すボタンの名前をそのまま引いている`,
+        typeof text === 'string' && text.includes(`「${ja.mealPlan.copyPickRun}」`),
+        true,
+      )
+    }
+    // 使い方ページも一緒に直す（画面の名前は ja から読む＝ページ側だけ古いまま残せない）
+    const iuManual = iuRead('public/about/manual.html')
+    for (const [name, text] of [
+      ['画面の名前', ja.mealPlan.copyPickTitle],
+      ['実行のボタン', ja.mealPlan.copyPickRun],
+      ['節の名前', ja.mealPlan.weekGroupTemplateTitle],
+    ]) {
+      eq(`IU-2 使い方ページに${name}が今の言い方で載っている`, iuManual.includes(text), true)
+    }
+    eq(
+      'IU-2 使い方ページに古い名前「別の週から入れる」が残っていない',
+      iuManual.includes('別の週から入れる'),
+      false,
+    )
+  }
+
+  // ---- IU-3: ⑥「まとめて献立を入力」にも「元に戻す」 -------------------------------------
+  // オーナー原文「・「まとめて献立を入力」押したら、元に戻すトースト？も出して」
+  // ✕・サイコロ・削除にはすでに「元に戻す」がある（作法の不揃いを埋める）。
+  // **どこまで戻すか**＝押す直前の姿にまるごと（入れた品を外し、総入れ替えで消した品を戻す）。
+  {
+    eq(
+      'IU-3 「まとめて献立を入力」を戻したときの知らせがある',
+      typeof ja.mealPlan.fillWeekUndoneToast === 'string' &&
+        ja.mealPlan.fillWeekUndoneToast.length > 0,
+      true,
+    )
+    eq(
+      'IU-3 戻したときの知らせが、外した品数を言う（黙って戻さない）',
+      typeof ja.mealPlan.fillWeekUndoneToast === 'string' &&
+        ja.mealPlan.fillWeekUndoneToast.includes('{a}'),
+      true,
+    )
+    // 総入れ替えは「入れた品を外す」と「消した品を戻す」の両方が起きる＝両方を件数で言う（規約F）
+    eq(
+      'IU-3 総入れ替えを戻したときの知らせが、外した品数と戻した品数を両方言う（規約F）',
+      typeof ja.mealPlan.fillModeReplaceAllUndoneToast === 'string' &&
+        ja.mealPlan.fillModeReplaceAllUndoneToast.includes('{a}') &&
+        ja.mealPlan.fillModeReplaceAllUndoneToast.includes('{n}'),
+      true,
+    )
+  }
+
+  // ---- IU-4: ③プルダウンが真っ白に見える ------------------------------------------------
+  // オーナー原文「・「献立を提案」、入れ方のプルダウンの色が真っ白にみえるけど気のせい？」
+  // 気のせいではない: プルダウンの地色がカード面（--surface）と同じ値で、枠1本しか違わなかった。
+  // 実際の見え方は e2e（IUSELECT-03）が5テーマで測る。ここは値そのものを見張る
+  {
+    const iuCss = iuRead('src/index.css')
+    const at = iuCss.indexOf('.select-control {')
+    eq('IU-4 プルダウンの決めごとを読めている（0なら見張りが壊れている）', at >= 0, true)
+    const iuBlock = at >= 0 ? iuCss.slice(at, iuCss.indexOf('}', at)) : ''
+    const iuBg = iuBlock.match(/background-color:\s*([^;]+);/)
+    eq('IU-4 プルダウンの地色を読めている', !!iuBg, true)
+    eq(
+      'IU-4 プルダウンの地色が、カード面（--surface）と同じ値ではない（枠1本しか違わない状態にしない）',
+      iuBg ? iuBg[1].trim() === 'var(--surface)' : true,
+      false,
+    )
+    eq(
+      'IU-4 プルダウンの色はデザイントークンから作る（直接の色指定を書かない）',
+      /#[0-9a-fA-F]{3}|rgb\(|hsl\(/.test(iuBlock),
+      false,
+    )
+  }
+
+  // ---- IU-6: ④開いたときの縦位置を、画面ごとに必ず決めている ----------------------------
+  // オーナー原文（不具合）「・「別の週から入れる」押下後ページの真ん中にスクロールしてしまう。」
+  //
+  // 本当の原因は「先頭へ戻す1行が無かった」こと。1枚のページの中で画面を差し替える作りなので、
+  // **画面が変わってもブラウザの縦位置はそのまま残る**（押した場所がページの下のほうなら、
+  // 着いた先のページの最大値まで詰められて真ん中で止まる）。
+  // 2026-08-17 に献立タブだけを直したので、あとから増えた画面が同じ穴に落ちた。
+  // ここでは**戻る付きの画面（BackHeader を出す画面）が、開いたときの縦位置を自分で決めて
+  // いるか**だけを見る＝先頭へ戻す（useScrollTopOnOpen / window.scrollTo(0, 0)）か、
+  // 覚えていた位置へ戻す（scrollTo({ top: ）か。決めていない画面が1つでもあれば赤。
+  // 画面の名前を並べない＝新しい画面が増えても、そのまま当たる
+  {
+    const iuPagesDir = path.join(iuRoot, 'src/pages')
+    const iuPageFiles = readdirSync(iuPagesDir).filter((f) => f.endsWith('.tsx')).sort()
+    eq('IU-6 画面ファイルを走査できている（0件なら見張りが壊れている）', iuPageFiles.length > 0, true)
+    const iuBackPages = []
+    const iuUndecided = []
+    for (const f of iuPageFiles) {
+      const src = readFileSync(path.join(iuPagesDir, f), 'utf-8')
+      if (!src.includes('<BackHeader')) continue
+      iuBackPages.push(f)
+      const decides =
+        src.includes('useScrollTopOnOpen(') ||
+        src.includes('window.scrollTo(0, 0)') ||
+        src.includes('window.scrollTo({ top: ')
+      if (!decides) iuUndecided.push(f)
+    }
+    eq('IU-6 戻る付きの画面を1つ以上拾えている（0件なら見張りが壊れている）', iuBackPages.length > 0, true)
+    eq(
+      'IU-6 戻る付きの画面はすべて、開いたときの縦位置を自分で決めている（前の画面の位置を持ち越さない）',
+      iuUndecided,
+      [],
+    )
+  }
+
+  // ---- IU-5: ⑦レシピ詳細も「今日の献立に追加済み」に -------------------------------------
+  // オーナー原文「・週で献立組む→今日の献立にレシピが表示される→レシピ詳細も
+  // 「今日の献立に追加済み」にして。はずすと週の献立ごと編集されるようにしたい。」
+  //
+  // 判定の穴: レシピ詳細は「今日の献立」の表だけを見ていた。週の予定がその表へ写るのは
+  // 献立の「日」を開いたときの取り込み1本だけなので、**週で組んだだけでは追加済みにならない**。
+  // 判定は1か所（logic/mealPlan.ts isRecipeInToday）に置き、ここで直に測る
+  {
+    eq(
+      'IU-5 今日の献立の表に入っていれば追加済み',
+      isRecipeInToday(7, [7], []),
+      true,
+    )
+    eq(
+      'IU-5 週で組んだだけ（今日の予定にあるが、今日の献立の表にはまだ写っていない）でも追加済み',
+      isRecipeInToday(7, [], [7]),
+      true,
+    )
+    eq('IU-5 どちらにも無ければ追加済みにしない', isRecipeInToday(7, [1, 2], [3]), false)
+    eq('IU-5 両方にあっても追加済み（二重に数えて崩れない）', isRecipeInToday(7, [7], [7]), true)
+    // 今日すでに作った品は、日タブでも予定の行が消える（showsCookedPlanRowToday）。
+    // そちらに並んでいないものを「追加済み」と言うと、また画面ごとに数え方が食い違う
+    eq(
+      'IU-5 今日すでに作った品は、予定に残っていても追加済みにしない（日タブと同じ数え方）',
+      isRecipeInToday(7, [], [7], true),
+      false,
+    )
+    eq(
+      'IU-5 今日作ったあとに自分で入れ直したら、また追加済み',
+      isRecipeInToday(7, [7], [7], true),
+      true,
+    )
+    // 一覧のカードの印（ja.card.todayBadge）とレシピ詳細のボタン（ja.detail.todayAdded）は
+    // **同じことを言っている**。同じことを言うなら同じ数え方にする＝どちらもこの判定を通す
+    // （そろえないと、同じ品が一覧では印なし・詳細では「追加済み」になる）
+    eq(
+      'IU-5 一覧の印と詳細のボタンは同じ言い方をしている',
+      ja.card.todayBadge,
+      ja.detail.todayAdded,
+    )
+    eq(
+      'IU-5 同じ言い方をする2か所が、どちらも同じ判定（isRecipeInToday）を通している',
+      ['src/pages/RecipesPage.tsx', 'src/pages/RecipeDetailPage.tsx'].filter(
+        (rel) => !iuRead(rel).includes('isRecipeInToday('),
+      ),
       [],
     )
   }

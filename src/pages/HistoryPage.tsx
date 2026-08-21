@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { listRecipes } from '../db/recipes'
 import type { CookedLog, Recipe } from '../db/types'
 import BackHeader from '../components/BackHeader'
+import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import CookedLogDetailModal, {
   type CookedLogDetailTarget,
 } from '../components/CookedLogDetailModal'
@@ -108,6 +109,8 @@ function backTargetOf(back: string | null): string | null {
 }
 
 export default function HistoryPage() {
+  // 開いたらページのいちばん上を見せる（2026-08-21 便IU・④と同じ穴）
+  useScrollTopOnOpen()
   const recipes = useLiveQuery(listRecipes, [])
   // レシピを削除しても残っている記録（2026-08-16 便GZ）。同じ一覧に日付順で並べる
   const detachedEntries = useDetachedLogEntries()

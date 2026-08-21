@@ -64,6 +64,7 @@ import { usePhotoUrl } from '../components/usePhotoUrl'
 import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import BackHeader from '../components/BackHeader'
+import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { RecipeIcon } from '../components/RecipeCard'
@@ -386,6 +387,9 @@ export default function RecipeFormPage() {
 }
 
 function RecipeFormInner() {
+  // 開いたらページのいちばん上を見せる（2026-08-21 便IU・④と同じ穴。下まで読んだレシピ詳細から
+  // 「編集」を押すと、その縦位置のまま入力欄の途中に着いていた）
+  useScrollTopOnOpen()
   const confirm = useConfirm()
   // レシピを書いている間は、アプリの更新のお知らせを出さない(2026-08-09 便ER。logic/appBusy.ts)
   useAppBusyWhileMounted()

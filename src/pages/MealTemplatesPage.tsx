@@ -18,6 +18,7 @@ import {
 } from '../logic/mealTemplate'
 import { searchRecipes } from '../logic/search'
 import BackHeader from '../components/BackHeader'
+import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import RecipeCard from '../components/RecipeCard'
 import Toast from '../components/Toast'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
@@ -37,6 +38,9 @@ import { ja } from '../i18n/ja'
  * 「どう直すか」の判断は純ロジック（logic/mealTemplate.ts）に置き、この画面は書き込むだけ。
  */
 export default function MealTemplatesPage() {
+  // 開いたらページのいちばん上を見せる（2026-08-21 便IU・④。「週」の同じ節から開く画面で、
+  // 「別の週から入れる」とまったく同じ穴が空いていた）
+  useScrollTopOnOpen()
   const confirm = useConfirm()
   const templates = useMealTemplates()
   const recipes = useLiveQuery(listRecipes, [])

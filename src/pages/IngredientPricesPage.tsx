@@ -14,6 +14,7 @@ import { KNOWN_UNITS, decomposeUnit, composeUnit } from '../logic/unitForm'
 import type { UnitFormState } from '../logic/unitForm'
 import UnitQuantityFields from '../components/UnitQuantityFields'
 import BackHeader from '../components/BackHeader'
+import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import Toast from '../components/Toast'
 import { ja } from '../i18n/ja'
 import type { PriceEntry } from '../db/types'
@@ -61,6 +62,8 @@ const blurOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
  * 1つの文字列(composeUnit)なのでDBスキーマ・按分計算(logic/priceEstimate.ts)は変更なし。
  */
 export default function IngredientPricesPage() {
+  // 開いたらページのいちばん上を見せる（2026-08-21 便IU・④と同じ穴）
+  useScrollTopOnOpen()
   const entries = usePriceEntries()
   const [query, setQuery] = useState('')
 

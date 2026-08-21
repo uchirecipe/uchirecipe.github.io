@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ChevronLeft, ChevronRight, Copy, BookmarkPlus, X } from 'lucide-react'
 import BackHeader from '../components/BackHeader'
+import { useScrollTopOnOpen } from '../components/useScrollTopOnOpen'
 import Toast from '../components/Toast'
 import { useConfirm } from '../components/ConfirmProvider'
 import { useOverlayDismiss } from '../components/useOverlayDismiss'
@@ -34,7 +35,7 @@ import { ja } from '../i18n/ja'
 import type { MealSlot, Recipe } from '../db/types'
 
 /**
- * 「別の週から入れる」の画面（2026-08-21 便IO）。
+ * 「過去の献立をコピー」の画面（2026-08-21 便IO。名前は便IU・⑤で「コピー」に戻した）。
  *
  * オーナー原文:
  *   「先週に限らず、ユーザーが選んだ７日間を指定（献立一覧で表示して、今表示している
@@ -60,6 +61,10 @@ import type { MealSlot, Recipe } from '../db/types'
  * 鍵の掛かった食事・過ぎた日・表示していない食事に触れないのは planCopyLastWeek が守る。
  */
 export default function MealPlanCopyWeekPage() {
+  // 開いたらページのいちばん上を見せる（2026-08-21 便IU・④）。
+  // 「週」の画面のいちばん下から来るので、これが無いと前の画面の縦位置が残って
+  // ページの真ん中あたりに着く（原因の詳細は useScrollTopOnOpen のコメント）
+  useScrollTopOnOpen()
   const navigate = useNavigate()
   const confirm = useConfirm()
   const [searchParams] = useSearchParams()

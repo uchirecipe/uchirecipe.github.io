@@ -480,34 +480,44 @@ function TodayListRow({
       actions={
         onCooked || onRemove || footer ? (
           <>
-            {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
-                枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
-                ボタンと同じ当たり判定を下回らないようにする。
-                2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
-                色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
-                6か所あり、多数側＝アクセントの塗りに合わせている */}
-            {onCooked && (
-              <button
-                type="button"
-                onClick={onCooked}
-                className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
-              >
-                <CheckCircle2 size={16} aria-hidden />
-                {ja.mealPlan.todayMarkCooked}
-              </button>
-            )}
-            {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
-                破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-                押し間違いを減らす */}
-            {onRemove && (
-              <button
-                type="button"
-                onClick={onRemove}
-                aria-label={removeLabel ?? ja.mealPlan.todayRemove}
-                className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
-              >
-                <X size={20} aria-hidden />
-              </button>
+            {/* 「作った！」と×は**行の右へ寄せる**（2026-08-21 便IU・②。オーナー原文
+                「・整理画面の「作った！」と×は右に寄せて。」）。
+                2つをひと塊にして ml-auto で右端まで送る＝左に空きができ、料理名の下が
+                すっきりする。押せる大きさ（「作った！」44px・×の tap-target）は変えていない。
+                「◯食に入れる」（footer）は w-full なので、これまでどおり次の行に回る＝
+                右へ寄るのはオーナーが名指しした2つだけ */}
+            {(onCooked || onRemove) && (
+              <div className="ml-auto flex shrink-0 items-center">
+                {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+                    枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
+                    ボタンと同じ当たり判定を下回らないようにする。
+                    2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
+                    色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
+                    6か所あり、多数側＝アクセントの塗りに合わせている */}
+                {onCooked && (
+                  <button
+                    type="button"
+                    onClick={onCooked}
+                    className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
+                  >
+                    <CheckCircle2 size={16} aria-hidden />
+                    {ja.mealPlan.todayMarkCooked}
+                  </button>
+                )}
+                {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
+                    破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
+                    押し間違いを減らす */}
+                {onRemove && (
+                  <button
+                    type="button"
+                    onClick={onRemove}
+                    aria-label={removeLabel ?? ja.mealPlan.todayRemove}
+                    className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
+                  >
+                    <X size={20} aria-hidden />
+                  </button>
+                )}
+              </div>
             )}
             {footer}
           </>
@@ -3856,6 +3866,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     replace?: { entryId: number; recipeId: number }
     /** 入れたものを外す（増えた行のid） */
     addedEntryIds?: number[]
+    /**
+     * 消したものを戻す（2026-08-21 便IU・⑥）。「まとめて献立を入力」の総入れ替えは
+     * **入れる前に今日以降の献立を消す**ので、入れた行を外すだけでは押す前の姿に戻らない。
+     * 消す前の行をそのまま控えておいて、id ごと書き戻す（db/mealPlan.ts restoreMealEntries）
+     */
+    restoreEntries?: MealPlanEntry[]
     /** 外したあとに空欄の行を出し直す枠 */
     restoreRows?: { date: string; slot: MealSlot; role: MealRole }[]
     /** 「元に戻す」を添えたトーストの文言（これが今のトーストと違えば、控えはもう無効） */
@@ -3879,6 +3895,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     for (const entryId of undoSuggest.addedEntryIds ?? []) {
       await removeMealEntry(entryId)
     }
+    // 消したものを先に戻さず、入れたものを外してから戻す＝同じ枠に一瞬2品並ばない
+    await restoreMealEntries(undoSuggest.restoreEntries ?? [])
     for (const row of undoSuggest.restoreRows ?? []) {
       showDefaultRow(row.date, row.slot, row.role)
     }
@@ -4060,7 +4078,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   const executeFill = async (
     plan: FillWeekPlan,
     rangeEntries: MealPlanEntry[],
-  ): Promise<number> => {
+  ): Promise<{ added: number; addedEntryIds: number[] }> => {
     // 埋め直す役割に残っている自動提案由来の行だけを削除(手動配置は plan で除外済み＝残る)
     for (const id of plan.entryIdsToRemove) {
       await removeMealEntry(id)
@@ -4096,6 +4114,9 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     // 実際にDBへ追加した品数(2026-07-29 便CD/MP-06)。結果メッセージはこの実数で出す。
     // plan.slotsToFill.length で判定してはいけない(一品ものスキップ・候補0件で0品追加になる)
     let added = 0
+    // 入れた行のid(2026-08-21 便IU・⑥)。「元に戻す」は**この行だけ**を外す
+    // ＝すでに決まっていた献立・鍵の掛かった食事には触らない
+    const addedEntryIds: number[] = []
 
     // 両役割が空 or 自動だけの枠: 主菜+副菜のペアで埋める(一品ものの主菜なら副菜は付かない=空く)。
     // 目的が指定されていれば drawPair が引き直す(2026-08-02 便CP-2)。入れた枠には目的を記録し、
@@ -4108,13 +4129,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         preferProteinSources: preferProteinSources(),
       })
       if (main) {
-        await addMealEntry(date, slot, main.id!, 'main', true, planPurpose)
+        addedEntryIds.push(await addMealEntry(date, slot, main.id!, 'main', true, planPurpose))
         usedRecipeIds.push(main.id!)
         bumpProtein(main)
         added++
       }
       if (side) {
-        await addMealEntry(date, slot, side.id!, 'side', true, planPurpose)
+        addedEntryIds.push(await addMealEntry(date, slot, side.id!, 'side', true, planPurpose))
         usedRecipeIds.push(side.id!)
         added++
       }
@@ -4148,7 +4169,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           excludeRecipeIds: mainRecipe?.id != null ? [mainRecipe.id] : undefined,
         })
         if (side) {
-          await addMealEntry(date, slot, side.id!, 'side', true)
+          addedEntryIds.push(await addMealEntry(date, slot, side.id!, 'side', true))
           usedRecipeIds.push(side.id!)
           added++
         }
@@ -4161,7 +4182,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           preferProteinSources: preferProteinSources(),
         })
         if (main) {
-          await addMealEntry(date, slot, main.id!, 'main', true)
+          addedEntryIds.push(await addMealEntry(date, slot, main.id!, 'main', true))
           usedRecipeIds.push(main.id!)
           bumpProtein(main)
           added++
@@ -4169,7 +4190,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       }
     }
 
-    return added
+    return { added, addedEntryIds }
   }
 
   /**
@@ -4226,7 +4247,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         if (!ok) return
       }
     }
-    const added = await executeFill(plan, entries ?? [])
+    // 総入れ替えで消える行を、消す前にそのまま控える（2026-08-21 便IU・⑥）。
+    // id・日付・食事・役割・食数まで持つので、「元に戻す」で同じ枠へそのまま戻る
+    const removedEntries = (entries ?? []).filter(
+      (e) => e.id != null && plan.entryIdsToRemove.includes(e.id),
+    )
+    const { added, addedEntryIds } = await executeFill(plan, entries ?? [])
 
     // 結果メッセージ(2026-07-29 便CD/MP-06で正直な出し分けに修正)。
     // 従来は「残す枠が1つでもあれば」だけを見て「空いていた枠に献立を立てました」と言っていたため、
@@ -4244,6 +4270,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             .replace('{n}', String(preserved))
             .replace('{a}', String(added)),
         )
+      } else {
+        // まっさらな週に入れたとき（2026-08-21 便IU・⑥）。ここだけ文が1つも出ず、
+        // 押しても黙って終わっていた＝「元に戻す」を添える先も無かった
+        messages.push(ja.mealPlan.fillWeekDone.replace('{a}', String(added)))
       }
     } else if (preserved > 0) {
       messages.push(ja.mealPlan.fillWeekNoRoom.replace('{n}', String(preserved)))
@@ -4266,7 +4296,31 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           : ja.mealPlan.fillWeekTodayWillImport,
       )
     }
-    if (messages.length > 0) setMessage(messages.join(' '))
+    const toast = messages.join(' ')
+    if (messages.length > 0) setMessage(toast)
+
+    /**
+     * 「元に戻す」を添える（2026-08-21 便IU・⑥。オーナー原文
+     * 「・「まとめて献立を入力」押したら、元に戻すトースト？も出して」）。
+     * ✕・行のサイコロ・削除と**まったく同じ作法**で、出したトーストの文言まで一緒に持つ
+     * ＝別の操作でトーストが差し替わったら、この取り消しも一緒に消える。
+     *
+     * 戻す範囲は**押す直前の姿にまるごと**＝入れた行を外し、総入れ替えで消した行を書き戻す。
+     * 何も動いていないとき（0品しか入らず、消してもいない）は添えない＝戻すものが無い。
+     */
+    if (toast && (addedEntryIds.length > 0 || removedEntries.length > 0)) {
+      setUndoSuggest({
+        addedEntryIds,
+        restoreEntries: removedEntries,
+        message: toast,
+        undoneMessage:
+          removedEntries.length > 0
+            ? ja.mealPlan.fillModeReplaceAllUndoneToast
+                .replace('{a}', String(added))
+                .replace('{n}', String(removedEntries.length))
+            : ja.mealPlan.fillWeekUndoneToast.replace('{a}', String(added)),
+      })
+    }
 
     // まとめて献立の直後、今日の枠へ自動スクロール(2026-07-24 便BH-3・タスク7: 埋まったのが
     // 画面外で無反応に見える問題への対応)。今日が表示中の週に含まれるとき(refがある)だけ動く。
@@ -4368,7 +4422,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       confirmLabel: ja.mealPlan.fillMonthConfirmOk,
     })
     if (!ok) return
-    const added = await executeFill(plan, monthEntries ?? [])
+    const { added } = await executeFill(plan, monthEntries ?? [])
     // 正直な完了報告: 実際にDBへ入った品数で出し分ける
     if (added > 0) {
       setMessage(
@@ -7520,7 +7574,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       </section>
 
       {/* グループ3: 別の週・テンプレートから入れる。
-          ・別の週から入れる … 週を送って中身を見ながら選ぶ画面へ(2026-08-21 便IO)
+          ・過去の献立をコピー … 週を送って中身を見ながら選ぶ画面へ(2026-08-21 便IO)
           ・テンプレートを適用 … 保存した曜日ごとの雛形を、空いているところにだけ入れる(非破壊)
           ・表示している週をテンプレートとして保存 … 入れ先の週を曜日ごと覚える
             (2026-07-29 便CB-2・docs/59 A-1＋B-2)
@@ -7543,8 +7597,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('template', ja.mealPlan.weekGroupTemplateTitle)}
         <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-          {/* 別の週から入れる(2026-08-21 便IO)。入れ先は**いま表示している週のまま**なので、
-              その7日間の初日を渡す＝あちらの画面で週を送っても入れ先は動かない */}
+          {/* 過去の献立をコピー(2026-08-21 便IO・名前は便IU・⑤)。コピー先は**いま表示している
+              週のまま**なので、その7日間の初日を渡す＝あちらの画面で週を送ってもコピー先は動かない */}
           <Link
             to={`/meal-plan/copy-week?to=${dates[0]}`}
             data-testid="week-copy-pick"

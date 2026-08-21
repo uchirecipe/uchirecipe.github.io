@@ -16,7 +16,7 @@ export function useMealPlanRange(startDate: string, endDate: string) {
 /**
  * 献立が入っている一番古い日（2026-08-21 便IO）。
  *
- * 「別の週から入れる」で、どこまで週を送れるかを決めるのに使う
+ * 「過去の献立をコピー」で、どこまで週を送れるかを決めるのに使う
  * （logic/mealPlan.ts の maxCopySourceWeeksBack）。date は索引を張ってあるので、
  * 全件を読まずに先頭の1件だけを取る。
  *

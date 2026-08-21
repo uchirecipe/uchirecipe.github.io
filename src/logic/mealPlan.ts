@@ -163,7 +163,7 @@ export type MealGenre = (typeof MEAL_GENRES)[number]
 export const PLAN_QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
 
 /**
- * 「別の週から入れる」で、どこまでさかのぼれるか（2026-08-21 便IO）。
+ * 「過去の献立をコピー」で、どこまでさかのぼれるか（2026-08-21 便IO）。
  *
  * 2026-08-20 便II・⑤の第1段階は「1〜4週間前」の固定のプルダウンだったが、
  * オーナー原文「先週に限らず、ユーザーが選んだ７日間を指定（献立一覧で表示して、今表示している
@@ -189,7 +189,7 @@ export function maxCopySourceWeeksBack(targetStart: string, earliestPlanDate?: s
   return Math.max(1, Math.ceil(days / 7))
 }
 
-/** 「別の週から入れる」の画面が並べる、その週の1日ぶんの中身 */
+/** 「過去の献立をコピー」の画面が並べる、その週の1日ぶんの中身 */
 export interface CopySourceDay {
   date: string
   /** その日に入っている食事（表示している食事だけ・献立の無い食事は並べない） */
@@ -1339,6 +1339,37 @@ export function todayListPickedIds(
     .filter((item) => !plannedShownRecipeIds.includes(item.recipeId))
     .filter((item) => !(item.fromPlan === true && todayPlanRecipeIds.includes(item.recipeId)))
     .map((item) => item.recipeId)
+}
+
+/**
+ * そのレシピが「今日つくるもの」に入っているか（2026-08-21 便IU・⑦）。
+ *
+ * オーナー原文:
+ *   「週で献立組む→今日の献立にレシピが表示される→レシピ詳細も「今日の献立に追加済み」に
+ *     して。はずすと週の献立ごと編集されるようにしたい。」
+ *
+ * 直している穴: レシピ詳細は「今日の献立」の表（todayList）だけを見ていた。**週で組んだ予定が
+ * その表へ写るのは、献立の「日」を開いたときの自動取り込み1本だけ**（1日1回・表示している
+ * 食事だけ）なので、週タブで組んだあとレシピ詳細を開いても「追加済み」にならなかった。
+ * 日タブは①今日の献立の表 ②今日の予定 の両方を並べているのに、詳細だけ①しか見ていない
+ * ＝**同じ「今日つくるもの」を、画面によって違う数え方をしていた**。
+ *
+ * 判定はこの1か所に置く（画面ごとに書くと、また片方だけ直る）。
+ */
+export function isRecipeInToday(
+  recipeId: number,
+  /** 「今日の献立」の表に入っているレシピID */
+  todayListRecipeIds: readonly number[],
+  /** 今日の週の予定に入っているレシピID */
+  todayPlanRecipeIds: readonly number[],
+  /** その料理を今日すでに作ったか（作った記録が今日の日付である） */
+  cookedToday = false,
+): boolean {
+  const inList = todayListRecipeIds.includes(recipeId)
+  if (inList) return true
+  // 今日すでに作った品は、献立の「日」でも予定の行が消える（showsCookedPlanRowToday）。
+  // そちらに並んでいないものを「追加済み」と言うと、また画面ごとに数え方が食い違う
+  return todayPlanRecipeIds.includes(recipeId) && showsCookedPlanRowToday(cookedToday, inList)
 }
 
 /**

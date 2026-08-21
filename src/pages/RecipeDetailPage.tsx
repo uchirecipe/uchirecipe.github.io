@@ -22,9 +22,21 @@ import { db } from '../db/db'
 import { addCookedLog, toggleFavorite } from '../db/recipes'
 import { lowerPantryLevelsForCooked } from '../db/pantry'
 import { useSettings, updateSettings } from '../db/settings'
-import { useTodayList, addToTodayList, removeFromTodayList } from '../db/todayList'
-import { addMealEntryIfAbsent } from '../db/mealPlan'
-import { mealRoleForRecipe } from '../logic/mealPlan'
+import {
+  useTodayList,
+  addToTodayList,
+  removeFromTodayList,
+  restoreTodayListItems,
+} from '../db/todayList'
+import {
+  addMealEntryIfAbsent,
+  removeMealEntry,
+  restoreMealEntries,
+  useMealPlanRange,
+  type MealPlanEntry,
+} from '../db/mealPlan'
+import { useMealPlanLocks, toLockKeySet } from '../db/mealPlanLocks'
+import { mealRoleForRecipe, isRecipeInToday, isMealEditBlocked } from '../logic/mealPlan'
 import { usePriceEntries } from '../db/prices'
 import { scaleAmount, formatAmountUnit } from '../logic/amount'
 import { ngMatchedIndices } from '../logic/ng'
@@ -125,8 +137,39 @@ export default function RecipeDetailPage() {
   )
   const settings = useSettings()
   const { startTimer } = useTimers()
+  /** 今日の日付（今日の予定を読むのに使う。1回だけ決める＝描き直しで日付が動かない） */
+  const today = useMemo(() => todayString(), [])
   const todayList = useTodayList()
-  const isInTodayList = todayList?.some((item) => item.recipeId === id) ?? false
+  /**
+   * 「今日の献立に追加済み」の判定（2026-08-21 便IU・⑦）。
+   *
+   * オーナー原文:
+   *   「・週で献立組む→今日の献立にレシピが表示される→レシピ詳細も「今日の献立に追加済み」に
+   *     して。はずすと週の献立ごと編集されるようにしたい。」
+   *
+   * 直している穴: ここは「今日の献立」の表（todayList）だけを見ていた。**週で組んだ予定が
+   * その表へ写るのは、献立の「日」を開いたときの自動取り込み1本だけ**なので、
+   * 週タブで組んだあとレシピ詳細を開いても「追加済み」にならなかった。
+   * 献立の「日」は①今日の献立の表 ②今日の予定 の両方を並べているのに、ここだけ①しか
+   * 見ていなかった＝同じ「今日つくるもの」を、画面によって違う数え方をしていた。
+   * 判定は logic/mealPlan.ts の isRecipeInToday 1か所に置く。
+   */
+  const todayPlanEntries = useMealPlanRange(today, today)
+  /** その料理が入っている今日の予定の行（外すときはこの行ごと消す＝日タブの×と同じ範囲） */
+  const todayPlanRows = useMemo(
+    () => (todayPlanEntries ?? []).filter((e) => e.recipeId === id),
+    [todayPlanEntries, id],
+  )
+  /** その料理を今日すでに作ったか（作った品は日タブでも予定の行が消えるので、判定にも渡す） */
+  const cookedToday = (recipe?.cookedLogs ?? []).some((log) => log.date === today)
+  const isInTodayList = isRecipeInToday(
+    id,
+    (todayList ?? []).map((item) => item.recipeId),
+    todayPlanRows.map((e) => e.recipeId),
+    cookedToday,
+  )
+  const mealPlanLocks = useMealPlanLocks()
+  const lockedKeys = useMemo(() => toLockKeySet(mealPlanLocks), [mealPlanLocks])
   // 食材価格マスタ（未入力の材料だけ目安価格で補うフォールバック。docs/20 §3）
   const priceEntries = usePriceEntries()
 
@@ -253,6 +296,71 @@ export default function RecipeDetailPage() {
         : ja.detail.todaySlotAddedToast
       ).replace('{slot}', ja.mealPlan.slot[slot]),
     )
+  }
+
+  /**
+   * 「今日の献立に追加済み」を押して外す（2026-08-21 便IU・⑦）。
+   *
+   * オーナー原文: 「はずすと週の献立ごと編集されるようにしたい。」
+   * 献立の「日」の×（todayPlannedRemove）と**まったく同じ範囲**にそろえる＝
+   * 今日の献立の表からも、今週の献立の予定（今日の枠）からも外す。
+   * 直したのは、押す入口によって結果が違っていたところ（ここは今日の献立からしか
+   * 外さないので、外したはずの品が週の予定に残り、翌日また今日の献立へ戻ってきていた）。
+   *
+   * 鍵の掛かった食事は手でも消せない（2026-08-08 便DX）ので、押しても止まる。
+   * 消える操作なので、押したあとは範囲を書いた知らせと「元に戻す」を必ず出す（規約F）。
+   */
+  const removeFromToday = async () => {
+    if (todayPlanRows.some((e) => isMealEditBlocked(lockedKeys, today, e.slot, 'remove'))) {
+      setMessage(ja.mealPlan.lockedEditBlocked)
+      return
+    }
+    // 消す前の姿をそのまま控える（日タブの×と同じ作法。id・日付・食事・役割・食数まで持つので、
+    // 「元に戻す」で同じ枠へそのまま戻る）
+    const removedEntries = todayPlanRows.filter((e) => e.id != null)
+    const removedTodayItems = (todayList ?? []).filter((item) => item.recipeId === id)
+    for (const entry of removedEntries) {
+      await removeMealEntry(entry.id!)
+    }
+    await removeFromTodayList(id)
+    const title = recipe?.title ?? ''
+    // 外れた範囲をそのまま言う＝週の予定にも入っていたときだけ「今日と今週」になる。
+    // 文言は日タブの×と同じものを使う（同じ操作を画面ごとに違う言葉で呼ばない）
+    const toast = (
+      removedEntries.length > 0
+        ? ja.mealPlan.todayPlannedRemovedToast
+        : ja.mealPlan.todayRemovedToast
+    ).replace('{title}', title)
+    setMessage(toast)
+    setUndoRemove({
+      entries: removedEntries,
+      todayItems: removedTodayItems,
+      message: toast,
+      undoneMessage: (
+        removedEntries.length > 0
+          ? ja.mealPlan.todayPlannedRemoveUndoneToast
+          : ja.mealPlan.todayRemoveUndoneToast
+      ).replace('{title}', title),
+    })
+  }
+
+  /**
+   * 外したものを戻す（2026-08-21 便IU・⑦）。献立の日タブの「元に戻す」と同じ作法で、
+   * 出したトーストの文言まで一緒に持つ＝別の操作でトーストが差し替わったら、この取り消しも消える
+   */
+  const [undoRemove, setUndoRemove] = useState<{
+    entries: MealPlanEntry[]
+    todayItems: { id?: number; recipeId: number; addedAt: number; fromPlan?: boolean }[]
+    message: string
+    undoneMessage: string
+  } | null>(null)
+  const undoRemoveActive = undoRemove != null && undoRemove.message === message
+  const runUndoRemove = async () => {
+    if (!undoRemove) return
+    await restoreMealEntries(undoRemove.entries)
+    await restoreTodayListItems(undoRemove.todayItems)
+    setUndoRemove(null)
+    setMessage(undoRemove.undoneMessage)
   }
 
   /**
@@ -705,9 +813,8 @@ export default function RecipeDetailPage() {
             追加済み時の押下=解除は従来どおり直接) */}
         <button
           type="button"
-          onClick={() =>
-            isInTodayList ? void removeFromTodayList(id) : setSlotModalOpen(true)
-          }
+          data-testid="detail-today-toggle"
+          onClick={() => (isInTodayList ? void removeFromToday() : setSlotModalOpen(true))}
           className={`mt-[var(--space-lg)] flex w-full items-center justify-center gap-2 rounded-md border py-3 font-bold shadow-sm ${
             isInTodayList
               ? 'border-accent bg-accent text-on-accent'
@@ -717,6 +824,14 @@ export default function RecipeDetailPage() {
           <CalendarPlus size={20} aria-hidden />
           {isInTodayList ? `${ja.detail.todayAdded} ✓` : ja.detail.todayAdd}
         </button>
+        {/* 規約F: 押すと何が外れるかを、押す前に読める場所に書く（2026-08-21 便IU・⑦）。
+            今週の献立にも入っているときだけ出す＝今日の献立にしか入っていない品では、
+            押しても今日の献立から外れるだけで驚くことがない */}
+        {isInTodayList && todayPlanRows.length > 0 && (
+          <p data-testid="detail-today-remove-hint" className="mt-1 text-xs text-ink-muted">
+            {ja.detail.todayRemoveHint}
+          </p>
+        )}
 
         {/* 材料（人数分の変更で自動換算） */}
         <section className="mt-[var(--space-lg)]">
@@ -1353,7 +1468,16 @@ export default function RecipeDetailPage() {
           onChangeTarget={setPriceEdit}
         />
       )}
-      <Toast message={message} onClose={() => setMessage('')} />
+      {/* 消える操作の直後だけ「元に戻す」を添える（2026-08-21 便IU・⑦。献立の日タブと同じ形） */}
+      <Toast
+        message={message}
+        onClose={() => {
+          setMessage('')
+          setUndoRemove(null)
+        }}
+        actionLabel={undoRemoveActive ? ja.common.undo : undefined}
+        onAction={undoRemoveActive ? () => void runUndoRemove() : undefined}
+      />
       {/* 記録写真の原寸表示(2026-07-12写真添付・docs/20 §4「タップで原寸モーダル」)。
           他の窓(CookedLogModal等)と同じ様式(角丸カード・枠線・shadow-md・中央寄せ、
           背景の暗幕は無し)に合わせる */}

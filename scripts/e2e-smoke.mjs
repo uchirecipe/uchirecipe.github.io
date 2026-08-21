@@ -414,6 +414,19 @@
 //         レシピ詳細の栄養8項目のお試しが畳んだまま押せて、押すと折りたたみも開く。
 //         便II・③で直した2か所(日「今日なに作る？」・週「献立を提案」)は FOLDRUN-01 が見る。
 //         「折りたたみの中にしか無い操作が無いか」の掃引そのものは test-logic の COLLAPSE-1) /
+//         IUORG-02(2026-08-21 便IU・②: 整理モードの「作った！」と×が行の右に寄っている。
+//         左右の空きを実測して比べ、押せる大きさ44pxを下回っていないことも見る) /
+//         IUSELECT-03(2026-08-21 便IU・③: 「献立を提案」の入れかたのプルダウンが、置かれている面と
+//         見分けられる。5テーマ（自動はライト/ダーク両方・ライト・ダーク・ブラウン・グリーン）で
+//         **実際に塗られる色**を読み出して測る。枠が浮いていること・文字がAAを満たすことも) /
+//         IUSCROLL-04(2026-08-21 便IU・④: 「過去の献立をコピー」を週の下のほうから押しても、
+//         着いた先はページのいちばん上。中身が届いても縦位置が動かない。ページの中での位置で測る) /
+//         IUUNDO-06(2026-08-21 便IU・⑥: 「まとめて献立を入力」の直後に「元に戻す」が出て、
+//         押すと**押す直前の献立にまるごと**戻る。総入れ替えでは消えた献立まで戻ることを、
+//         端末の献立の中身そのもので見比べる) /
+//         IUTODAY-07(2026-08-21 便IU・⑦: 献立の「日」を一度も開かず週タブだけで組んでも、
+//         レシピ詳細が「今日の献立に追加済み」になる。外すと今週の献立の予定からも消え、
+//         押す前の説明（規約F）と「元に戻す」が付く) /
 //         console/pageerrorは全工程で監視(既知のCF計測CORSは除外)
 import { chromium, webkit } from 'playwright'
 import { spawn, execSync } from 'node:child_process'
@@ -10856,10 +10869,17 @@ try {
         (await swPage.textContent('body')).includes('肉じゃが'),
       )
 
-      // (b) 重複ガード: 今日の献立から一旦外し(ボタンを「追加」状態に戻す)、
-      // もう一度窓→夕食を選ぶと、重複させずトーストで案内される。
-      // 2026-08-03 便DH: 週の予定に入った品は日タブの「今週の献立の予定」に並び×が出ない
-      // (外すのは週タブの仕事)ので、todayListから直接1件消して同じ状態を作る
+      // (b) 二重に入れる道が無いこと（2026-08-21 便IU・⑦で作りが変わった）。
+      //
+      // 便IU・⑦の前: レシピ詳細は「今日の献立」の表だけを見ていたので、表から1件消すと
+      // ボタンが「追加」に戻り、そこからもう一度同じ枠を選べた（そのときの重複ガードを
+      // 「今日の夕食にすでに入っています」のトーストで測っていた）。
+      // 便IU・⑦の後: 詳細は**今日の予定も見る**ので、表から消しても予定が残っていれば
+      // 「追加済み」のまま＝**二重に入れる窓がそもそも開かない**。
+      // 重複ガード（logic/mealPlan.ts todaySlotAddPlan の 'duplicate'）はDB側の保険として
+      // 残してあるが、画面からは通らなくなったので、ここではより強い保証のほうを測る。
+      // 状態の作り方は今までどおり（週の予定に入った品は日タブの「今週の献立の予定」に並び
+      // ×が出ないので、todayListから直接1件消して同じ状態を作る）
       await swPage.evaluate(
         (recipeId) =>
           new Promise((resolve, reject) => {
@@ -10884,21 +10904,23 @@ try {
       // 生IDB書き込みはDexieのliveQueryを更新しないので、読み直してから操作する
       await swPage.reload({ waitUntil: 'networkidle' })
       await swPage.waitForTimeout(800)
-      await swPage.getByRole('button', { name: '今日の献立に追加' }).click()
-      await swPage.waitForTimeout(300)
-      await swPage.getByRole('button', { name: '夕食', exact: true }).click()
-      await swPage.waitForTimeout(500)
+      const swToggleLabel = (
+        (await swPage.locator('[data-testid="detail-today-toggle"]').textContent()) ?? ''
+      )
+        .replaceAll('\u200b', '')
+        .trim()
       check(
-        'SLOTWIN-01(重複) 「今日の夕食にすでに入っています」トーストが出る',
-        (await swPage.textContent('body')).includes('今日の夕食にすでに入っています'),
+        'SLOTWIN-01(二重防止) 今日の予定に残っていれば、表から消えていても「追加済み」のまま（2026-08-21 便IU・⑦）',
+        swToggleLabel.includes(ja.detail.todayAdded),
+        `ボタン=${swToggleLabel}`,
       )
       check(
-        'SLOTWIN-01(重複) mealPlansの夕食枠は1件のまま増えない',
+        'SLOTWIN-01(二重防止) 食事を選ぶ窓は開かない（二重に入れる道が無い）',
+        !(await swPage.textContent('body')).includes(ja.detail.todaySlotDialogTitle),
+      )
+      check(
+        'SLOTWIN-01(二重防止) mealPlansの夕食枠は1件のまま増えない',
         (await countTodaySlotEntries(swRecipeId, 'dinner')) === 1,
-      )
-      check(
-        'SLOTWIN-01(重複) 重複時はtodayListにも追加しない(トースト案内のみ)',
-        !(await todayListIds()).includes(swRecipeId),
       )
 
       // (c) 「決めない」: カレーライスで窓→決めない→todayListのみ(週プランには入らない)
@@ -15423,7 +15445,7 @@ try {
         ['この週をまとめて空にする', ja.mealPlan.clearWeekSlotButton, 'button'],
         ['表示している週をテンプレートとして保存', ja.mealPlan.templateSave, 'button'],
         ['テンプレートを適用', ja.mealPlan.templateApplyWeek, 'button'],
-        ['別の週から入れる', ja.mealPlan.copyPickTitle, 'link'],
+        ['過去の献立をコピー', ja.mealPlan.copyPickTitle, 'link'],
       ]) {
         const btn = cdPage.getByRole(role, { name: label, exact: true })
         check(
@@ -25487,13 +25509,21 @@ try {
   // それぞれの場所で不要な情報はなくしてシンプルにしたいのですが、どうでしょう？
   // 『今日なに作る？』だったら『基本レシピ』と食材表記はいらないように感じました。」)。
   //
+  // 2026-08-21 便IU・①でオーナーが同じ引き算を今日の献立にも指示した（原文
+  // 「・今日の献立のレシピカードは、基本レシピとか材料表記はなし。」）ので、見比べる相手を
+  // 「今日の献立の行」から「レシピを探す一覧」へ移した。
+  //
   // 測るのは「**同じレシピのカードが、場所によって載せる情報を変えているか**」。
-  // 項目名を場所ごとに書き写して並べるのではなく、**同じ1品を2か所で見比べて**判定する:
+  // 項目名を場所ごとに書き写して並べるのではなく、**同じ1品を3か所で見比べて**判定する:
   //   ① 「今日なに作る？」の候補には「基本レシピ」も主要食材のチップも出ない
-  //   ② その同じ品を今日の献立に入れると、そちらのカードには両方とも出る
+  //   ② その同じ品を今日の献立に入れても、そちらにも出ない（便IU・①）
+  //   ③ 同じ品を**レシピを探す一覧**で見ると両方とも出る
   //      （＝カードごと情報を落としたのではなく、場所で切り替えている）
-  //   ③ 骨格は動かしていない: 料理名の大きさが2か所で同じで、オーナーがOKと言った16pxのまま
-  //   ④ 候補カードからも、決め手になる手間（かんたん/ふつう/じっくり）は消えていない
+  //   ④ 骨格は動かしていない: 料理名の大きさが2か所で同じで、オーナーがOKと言った16pxのまま
+  //   ⑤ 候補カードからも、決め手になる手間（かんたん/ふつう/じっくり）は消えていない
+  //
+  // 見比べる品は**idで押さえる**（2026-08-21 便IU）。料理名で引くと、同じ名前の品が
+  // 端末に2つあったときに別のレシピの主要食材と突き合わせてしまう
   // 主要食材のチップに出る名前は画面側と同じ関数（pickDisplayIngredientChips）で出す
   // ＝表示の書式や選び方が変わっても、書き写した名前が古くなって空振りすることがない。
   // 禁じ手よけ: 曜日・月替わりの前提を置かない／文言の完全一致で測らない（ゼロ幅スペースを外す）／
@@ -25533,6 +25563,7 @@ try {
               q.onsuccess = () =>
                 resolve(
                   q.result.map((r) => ({
+                    id: r.id,
                     title: r.title,
                     isStarter: !!r.isStarter,
                     ingredients: (r.ingredients ?? []).map((i) => ({
@@ -25622,6 +25653,45 @@ try {
         await cpPage.getByRole('button', { name: '夕食', exact: true }).first().click()
         await cpPage.waitForTimeout(1600)
       }
+      /**
+       * 入れた品を**idで押さえ直す**（2026-08-21 便IU）。
+       * 「今日なに作る？」の候補は後から届くデータで引き直されることがあるので、
+       * 読んだ料理名と実際に入った品がずれうる（禁じ手⑤）。いま入れた品＝
+       * 今日の献立にいちばん後から入った1件を端末から読んで、そこから料理名と主要食材を出す
+       */
+      const cpToday = await cpPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result
+                .transaction(['todayList'], 'readonly')
+                .objectStore('todayList')
+                .getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      const cpAdded = [...cpToday].sort((a, b) => b.addedAt - a.addedAt)[0]
+      const cpTarget = cpAll.find((r) => r.id === cpAdded?.recipeId)
+      check(
+        'CARDPARTS-01 前提: 入れた品をidで押さえられた',
+        !!cpTarget,
+        `id=${cpAdded?.recipeId}`,
+      )
+      if (cpTarget) {
+        cpTitle = cpTarget.title
+        cpChips = pickDisplayIngredientChips(cpTarget.ingredients)
+          .map((c) => c.name)
+          .filter((name) => name.length > 0 && !cpTitle.includes(name))
+      }
+      check(
+        'CARDPARTS-01 前提: 入れた品にも料理名に無い主要食材がある（出ているかを切り分けられる）',
+        cpChips.length > 0,
+        `料理名=${cpTitle} 主要食材=${JSON.stringify(cpChips)}`,
+      )
       const cpPlanCard = cpPage
         .locator('[data-testid="day-plan-card"]')
         .filter({ hasText: cpTitle })
@@ -25633,15 +25703,21 @@ try {
       )
       if ((await cpPlanCard.count()) === 1) {
         const cpPlanText = cpClean(await cpPlanCard.textContent())
+        // ② 2026-08-21 便IU・①: 今日の献立の行にも同じ引き算を当てた
         check(
-          'CARDPARTS-01 今日の献立のカードには「基本レシピ」が出る（削ったのは候補の側だけ）',
-          cpPlanText.includes(ja.card.starterBadge),
+          'CARDPARTS-01 今日の献立のカードにも「基本レシピ」を出さない（2026-08-21 便IU・①）',
+          !cpPlanText.includes(ja.card.starterBadge),
           `カード=${cpPlanText}`,
         )
         check(
-          'CARDPARTS-01 今日の献立のカードには主要食材のチップが出る（削ったのは候補の側だけ）',
-          cpChips.length > 0 && cpChips.every((name) => cpPlanText.includes(name)),
+          'CARDPARTS-01 今日の献立のカードにも主要食材のチップを出さない（2026-08-21 便IU・①）',
+          cpChips.length > 0 && cpChips.every((name) => !cpPlanText.includes(name)),
           `カード=${cpPlanText} 主要食材=${JSON.stringify(cpChips)}`,
+        )
+        check(
+          'CARDPARTS-01 今日の献立のカードには手間（超簡単/普通/手の込んだ）が残っている',
+          new RegExp(Object.values(ja.effort).join('|')).test(cpPlanText),
+          `カード=${cpPlanText}`,
         )
         // ③ 骨格は動かしていない（料理名の大きさが2か所で同じ・オーナーOKの16pxのまま）
         const cpPlanFont = await cpPage
@@ -25658,6 +25734,33 @@ try {
           cpSuggestFont === '16px',
           `候補=${cpSuggestFont}`,
         )
+
+        // ③ 同じ品を「レシピを探す一覧」で見ると両方とも出る
+        //    ＝カードごと情報を落としたのではなく、**場所で切り替えている**
+        await cpPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+        await cpPage.waitForTimeout(1500)
+        const cpListCard = cpPage
+          .locator('[data-testid="recipe-list-card"]')
+          .filter({ hasText: cpTitle })
+          .first()
+        check(
+          'CARDPARTS-01 前提: レシピを探す一覧に同じ品のカードがある',
+          (await cpListCard.count()) >= 1,
+          `料理名=${cpTitle}`,
+        )
+        if ((await cpListCard.count()) >= 1) {
+          const cpListText = cpClean(await cpListCard.textContent())
+          check(
+            'CARDPARTS-01 レシピを探す一覧には「基本レシピ」が出る（引き算したのは今日つくる1品の側だけ）',
+            cpListText.includes(ja.card.starterBadge),
+            `カード=${cpListText}`,
+          )
+          check(
+            'CARDPARTS-01 レシピを探す一覧には主要食材のチップが出る（引き算したのは今日つくる1品の側だけ）',
+            cpChips.length > 0 && cpChips.every((name) => cpListText.includes(name)),
+            `カード=${cpListText} 主要食材=${JSON.stringify(cpChips)}`,
+          )
+        }
       }
     } finally {
       await cpBrowser.close()
@@ -43687,6 +43790,458 @@ try {
       }
     } finally {
       await ngBrowser.close()
+    }
+  }
+
+  // ==========================================================================================
+  // 便IU（2026-08-21・オーナーの書き溜め）。①はCARDPARTS-01に畳んである
+  // ==========================================================================================
+
+  // --- IUORG-02(②。オーナー原文「・整理画面の「作った！」と×は右に寄せて。」)。
+  // 測るのは**行の中での位置**（クラス名では測らない）。左の空きが右の空きより大きければ
+  // 右へ寄っている。あわせて押せる大きさ（44px）を小さくしていないことも見る ---
+  currentCheck = 'IUORG-02'
+  {
+    const ogBrowser = await chromium.launch()
+    const ogContext = await ogBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const ogPage = await ogContext.newPage()
+    ogPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@IUORG-02] ${text}`)
+    })
+    try {
+      await ogPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ogPage.waitForTimeout(2400) // 初回シード完了待ち
+      await ogPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await ogPage.reload({ waitUntil: 'networkidle' })
+      await ogPage.waitForTimeout(1800)
+      const ogOne = ogPage.locator('[data-testid="day-mode-one"]')
+      if ((await ogOne.count()) === 1) {
+        await ogOne.click()
+        await ogPage.waitForTimeout(800)
+      }
+      await ogPage.locator('[data-testid="day-suggest-apply"]').click()
+      await ogPage.waitForTimeout(600)
+      await ogPage.getByRole('button', { name: '夕食', exact: true }).first().click()
+      await ogPage.waitForTimeout(1600)
+      const ogOrganize = ogPage.locator('[data-testid="day-organize"]')
+      check('IUORG-02 前提: 「整理」がある', (await ogOrganize.count()) === 1)
+      await ogOrganize.click()
+      await ogPage.waitForTimeout(600)
+      const ogCard = ogPage.locator('[data-testid="day-plan-card"]').first()
+      check('IUORG-02 前提: 今日の献立の行がある', (await ogCard.count()) === 1)
+      const ogCooked = ogCard.getByRole('button', { name: ja.mealPlan.todayMarkCooked })
+      const ogRemove = ogCard.locator(
+        `button[aria-label="${ja.mealPlan.todayRemove}"], button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`,
+      )
+      check('IUORG-02 前提: 整理モードで「作った！」が出ている', (await ogCooked.count()) === 1)
+      check('IUORG-02 前提: 整理モードで×が出ている', (await ogRemove.count()) === 1)
+      if ((await ogCooked.count()) === 1 && (await ogRemove.count()) === 1) {
+        const ogCardBox = await ogCard.boundingBox()
+        const ogCookedBox = await ogCooked.first().boundingBox()
+        const ogRemoveBox = await ogRemove.first().boundingBox()
+        const ogLeftGap = ogCookedBox.x - ogCardBox.x
+        const ogRightGap = ogCardBox.x + ogCardBox.width - (ogRemoveBox.x + ogRemoveBox.width)
+        check(
+          'IUORG-02 「作った！」と×が行の右に寄っている（左の空きのほうがずっと大きい）',
+          ogLeftGap > ogRightGap * 3,
+          `左の空き=${Math.round(ogLeftGap)}px 右の空き=${Math.round(ogRightGap)}px`,
+        )
+        check(
+          'IUORG-02 右端まで寄っている（右の空きは行の余白ぶんだけ）',
+          ogRightGap <= 12,
+          `右の空き=${Math.round(ogRightGap)}px`,
+        )
+        check(
+          'IUORG-02 押せる大きさを小さくしていない（どちらも44px以上）',
+          Math.min(ogCookedBox.height, ogRemoveBox.height) >= 44 && ogRemoveBox.width >= 44,
+          `作った！=${Math.round(ogCookedBox.width)}x${Math.round(ogCookedBox.height)} ×=${Math.round(ogRemoveBox.width)}x${Math.round(ogRemoveBox.height)}`,
+        )
+      }
+    } finally {
+      await ogBrowser.close()
+    }
+  }
+
+  // --- IUSELECT-03(③。オーナー原文「・「献立を提案」、入れ方のプルダウンの色が真っ白に
+  // みえるけど気のせい？」)。気のせいではなく、プルダウンの地色が置かれている面と同じ値だった。
+  //
+  // 測るのは**実際に塗られる色**（color-mix()は計算値がoklab()で返るので、キャンバスに
+  // 1px塗って読み出す＝ブラウザが本当に描く値）。後ろの面は、透けていない親を上へ探して決める。
+  // テーマは5種すべて。「自動」は端末の設定に従うので明るい側・暗い側の両方を見る。
+  // 直接の色の値は書かない（テーマの色を変えたらここも直す、では見張りにならない）＝
+  // **見分けが付くか**と**文字が読めるか**だけを測る ---
+  currentCheck = 'IUSELECT-03'
+  {
+    const slDist = (a, b) => Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2)
+    const slLum = (c) => {
+      const f = (v) => {
+        const x = v / 255
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+    }
+    const slRatio = (a, b) =>
+      (Math.max(slLum(a), slLum(b)) + 0.05) / (Math.min(slLum(a), slLum(b)) + 0.05)
+    const slHex = (c) =>
+      `#${[c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+    const slBrowser = await chromium.launch()
+    try {
+      for (const [slTheme, slLabel, slScheme] of [
+        ['auto', '自動（端末=ライト）', 'light'],
+        ['auto', '自動（端末=ダーク）', 'dark'],
+        ['light', 'ライト', 'dark'],
+        ['dark', 'ダーク', 'light'],
+        ['brown', 'ブラウン', 'light'],
+        ['green', 'グリーン', 'dark'],
+      ]) {
+        const slContext = await slBrowser.newContext({
+          viewport: { width: 390, height: 844 },
+          colorScheme: slScheme,
+        })
+        const slPage = await slContext.newPage()
+        try {
+          await slPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+          await slPage.waitForTimeout(2400) // 初回シード完了待ち(settingsもこの時点で作られる)
+          await slPage.evaluate(async (theme) => {
+            const req = indexedDB.open('uchi-recipe')
+            const idb = await new Promise((resolve, reject) => {
+              req.onsuccess = () => resolve(req.result)
+              req.onerror = () => reject(req.error)
+            })
+            await new Promise((resolve, reject) => {
+              const tx = idb.transaction('settings', 'readwrite')
+              const store = tx.objectStore('settings')
+              const getReq = store.get(1)
+              getReq.onsuccess = () => {
+                const current = getReq.result || { id: 1 }
+                const putReq = store.put({ ...current, id: 1, theme })
+                putReq.onsuccess = () => resolve(undefined)
+                putReq.onerror = () => reject(putReq.error)
+              }
+              getReq.onerror = () => reject(getReq.error)
+            })
+            idb.close()
+          }, slTheme)
+          await slPage.goto(`${BASE}/#/meal-plan?focus=week`, { waitUntil: 'networkidle' })
+          await slPage.reload({ waitUntil: 'networkidle' })
+          await slPage.waitForTimeout(1800)
+          const slSelect = slPage.locator('[data-testid="fill-mode"]')
+          check(
+            `IUSELECT-03 [${slLabel}] 前提: 入れかたのプルダウンがある`,
+            (await slSelect.count()) === 1,
+          )
+          if ((await slSelect.count()) !== 1) continue
+          const slSeen = await slSelect.evaluate((el) => {
+            const canvas = document.createElement('canvas')
+            canvas.width = 1
+            canvas.height = 1
+            const ctx = canvas.getContext('2d')
+            const toRgb = (value) => {
+              ctx.clearRect(0, 0, 1, 1)
+              ctx.fillStyle = value
+              ctx.fillRect(0, 0, 1, 1)
+              const d = ctx.getImageData(0, 0, 1, 1).data
+              return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }
+            }
+            const cs = getComputedStyle(el)
+            let parent = el.parentElement
+            let behind = 'rgb(255, 255, 255)'
+            while (parent) {
+              const bg = getComputedStyle(parent).backgroundColor
+              if (toRgb(bg).a > 0) {
+                behind = bg
+                break
+              }
+              parent = parent.parentElement
+            }
+            return {
+              bg: toRgb(cs.backgroundColor),
+              behind: toRgb(behind),
+              color: toRgb(cs.color),
+              border: toRgb(cs.borderTopColor),
+            }
+          })
+          check(
+            `IUSELECT-03 [${slLabel}] プルダウンの地色が、後ろの面と見分けられる`,
+            slDist(slSeen.bg, slSeen.behind) >= 20,
+            `地=${slHex(slSeen.bg)} 後ろの面=${slHex(slSeen.behind)} 差=${slDist(slSeen.bg, slSeen.behind).toFixed(1)}`,
+          )
+          check(
+            `IUSELECT-03 [${slLabel}] 枠が後ろの面からはっきり浮いている（押せるものだと分かる）`,
+            slDist(slSeen.border, slSeen.behind) >= 40,
+            `枠=${slHex(slSeen.border)} 後ろの面=${slHex(slSeen.behind)} 差=${slDist(slSeen.border, slSeen.behind).toFixed(1)}`,
+          )
+          check(
+            `IUSELECT-03 [${slLabel}] プルダウンの文字が読める（AA 4.5:1以上）`,
+            slRatio(slSeen.color, slSeen.bg) >= 4.5,
+            `${slRatio(slSeen.color, slSeen.bg).toFixed(2)}:1`,
+          )
+        } finally {
+          await slContext.close()
+        }
+      }
+    } finally {
+      await slBrowser.close()
+    }
+  }
+
+  // --- IUSCROLL-04(④。オーナー原文「・「別の週から入れる」押下後ページの真ん中に
+  // スクロールしてしまう。」)。
+  //
+  // 本当の原因は「先頭へ戻す1行が無かった」こと（1枚のページの中で画面を差し替える作りなので、
+  // 画面が変わってもブラウザの縦位置がそのまま残り、着いた先の最大値まで詰められて真ん中で止まる）。
+  // 測るのは**ページの中での縦位置**（画面の中での位置ではない）。押す場所はページの下のほうに
+  // あるので、実際の使いかたと同じく下まで送ってから押す。
+  // 着いた直後と、中身が届いたあとの両方で測る（後から背が伸びても動かないこと） ---
+  currentCheck = 'IUSCROLL-04'
+  {
+    const scBrowser = await chromium.launch()
+    const scContext = await scBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const scPage = await scContext.newPage()
+    scPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@IUSCROLL-04] ${text}`)
+    })
+    try {
+      await scPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await scPage.waitForTimeout(2400) // 初回シード完了待ち
+      await scPage.goto(`${BASE}/#/meal-plan?focus=week`, { waitUntil: 'networkidle' })
+      await scPage.waitForTimeout(2000)
+      const scLink = scPage.locator('[data-testid="week-copy-pick"]')
+      check('IUSCROLL-04 前提: 過去の献立をコピーの入口がある', (await scLink.count()) === 1)
+      await scPage.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+      await scPage.waitForTimeout(400)
+      const scBefore = await scPage.evaluate(() => window.scrollY)
+      check(
+        'IUSCROLL-04 前提: 押す時点でページは下まで送られている',
+        scBefore > 300,
+        `押す前のscrollY=${scBefore}`,
+      )
+      await scLink.click()
+      await scPage.waitForTimeout(500)
+      const scAt0 = await scPage.evaluate(() => window.scrollY)
+      await scPage.waitForTimeout(1800)
+      const scAt1 = await scPage.evaluate(() => window.scrollY)
+      check(
+        'IUSCROLL-04 前提: 過去の献立をコピーの画面に着いた',
+        (await scPage.locator('[data-testid="copy-pick-target"]').count()) === 1,
+      )
+      check(
+        'IUSCROLL-04 押した直後、ページのいちばん上を見せている（真ん中へ送られない）',
+        scAt0 <= 4,
+        `着いた直後のscrollY=${scAt0}（押す前=${scBefore}）`,
+      )
+      check(
+        'IUSCROLL-04 中身が届いても縦位置が動かない',
+        Math.abs(scAt1 - scAt0) <= 4 && scAt1 <= 4,
+        `直後=${scAt0} 1.8秒後=${scAt1}`,
+      )
+    } finally {
+      await scBrowser.close()
+    }
+  }
+
+  // --- IUUNDO-06(⑥。オーナー原文「・「まとめて献立を入力」押したら、元に戻すトースト？も出して」)。
+  //
+  // **どこまで戻すか＝押す直前の姿にまるごと**。空いた枠だけのときは入れた品を外し、
+  // 総入れ替えのときは**消えた献立まで戻す**（入れた品を外すだけでは押す前と違う状態で終わる）。
+  // 測り方は端末の献立の中身そのもの（日付・食事・レシピ・役割の並び）で、押す回数や品数は
+  // 決め打ちしない ---
+  currentCheck = 'IUUNDO-06'
+  {
+    const udBrowser = await chromium.launch()
+    const udContext = await udBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const udPage = await udContext.newPage()
+    udPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@IUUNDO-06] ${text}`)
+    })
+    const udPlans = () =>
+      udPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result
+                .transaction(['mealPlans'], 'readonly')
+                .objectStore('mealPlans')
+                .getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    /** 献立の中身を並びに依らない1本の文字列にする（件数だけでなく中身まで見比べる） */
+    const udShape = async () =>
+      (await udPlans())
+        .map((e) => `${e.date}|${e.slot}|${e.recipeId}|${e.role ?? ''}`)
+        .sort()
+        .join(',')
+    try {
+      await udPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await udPage.waitForTimeout(2400) // 初回シード完了待ち
+      await udPage.goto(`${BASE}/#/meal-plan?focus=week`, { waitUntil: 'networkidle' })
+      await udPage.waitForTimeout(2000)
+      const udBefore = await udShape()
+      await udPage.locator('[data-testid="week-fill-run"]').click()
+      await udPage.waitForTimeout(2500)
+      const udFilled = await udShape()
+      check('IUUNDO-06 前提: まとめて献立を入力で献立が増えた', udFilled !== udBefore)
+      const udUndo = udPage.getByRole('button', { name: ja.common.undo })
+      check(
+        'IUUNDO-06 「まとめて献立を入力」の直後に「元に戻す」が出る',
+        (await udUndo.count()) === 1,
+      )
+      if ((await udUndo.count()) === 1) {
+        await udUndo.first().click()
+        await udPage.waitForTimeout(2000)
+        check(
+          'IUUNDO-06 「元に戻す」で、押す前の献立に戻る',
+          (await udShape()) === udBefore,
+          `押す前=${udBefore.length}字 戻した後=${(await udShape()).length}字`,
+        )
+      }
+      // 総入れ替え: 入れた品を外すだけでは足りない（消えた献立も戻さないと押す前の姿にならない）
+      await udPage.locator('[data-testid="week-fill-run"]').click()
+      await udPage.waitForTimeout(2500)
+      const udBeforeReplace = await udShape()
+      check('IUUNDO-06 前提: 入れ替える前の献立がある', udBeforeReplace.length > 0)
+      await udPage.selectOption('[data-testid="fill-mode"]', 'replaceAll')
+      await udPage.waitForTimeout(400)
+      await udPage.locator('[data-testid="week-fill-run"]').click()
+      await udPage.waitForTimeout(3000)
+      // 総入れ替えの確認の窓（規約F）は仕掛けが自動で押す。出たことは貯め口から確かめる
+      const udConfirms = await readConfirms(udPage)
+      check(
+        'IUUNDO-06 前提: 総入れ替えでは消える前に確認の窓が出る（規約F）',
+        udConfirms.length > 0,
+        `窓=${JSON.stringify(udConfirms)}`,
+      )
+      const udReplaced = await udShape()
+      check('IUUNDO-06 前提: 総入れ替えで中身が変わった', udReplaced !== udBeforeReplace)
+      const udUndo2 = udPage.getByRole('button', { name: ja.common.undo })
+      check('IUUNDO-06 総入れ替えの直後にも「元に戻す」が出る', (await udUndo2.count()) === 1)
+      if ((await udUndo2.count()) === 1) {
+        await udUndo2.first().click()
+        await udPage.waitForTimeout(2500)
+        check(
+          'IUUNDO-06 総入れ替えを戻すと、消えた献立まで押す前の姿に戻る',
+          (await udShape()) === udBeforeReplace,
+          `押す直前=${udBeforeReplace.split(',').length}件 戻した後=${(await udShape()).split(',').length}件`,
+        )
+      }
+    } finally {
+      await udBrowser.close()
+    }
+  }
+
+  // --- IUTODAY-07(⑦。オーナー原文「・週で献立組む→今日の献立にレシピが表示される→
+  // レシピ詳細も「今日の献立に追加済み」にして。はずすと週の献立ごと編集されるようにしたい。」)。
+  //
+  // 直している穴: レシピ詳細は「今日の献立」の表だけを見ていた。週の予定がその表へ写るのは
+  // **献立の「日」を開いたときの取り込み1本だけ**なので、週タブで組んだだけでは追加済みに
+  // ならなかった。ここでは**「日」を一度も開かずに**週タブだけで組んで測る ---
+  currentCheck = 'IUTODAY-07'
+  {
+    const tdBrowser = await chromium.launch()
+    const tdContext = await tdBrowser.newContext({ viewport: { width: 390, height: 844 } })
+    const tdPage = await tdContext.newPage()
+    tdPage.on('console', (msg) => {
+      if (msg.type() !== 'error') return
+      const text = msg.text()
+      if (text.includes('cloudflareinsights') || text.includes('ERR_FAILED')) return
+      errors.push(`[console@IUTODAY-07] ${text}`)
+    })
+    const tdPlans = () =>
+      tdPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const q = req.result
+                .transaction(['mealPlans'], 'readonly')
+                .objectStore('mealPlans')
+                .getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+    try {
+      await tdPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await tdPage.waitForTimeout(2400) // 初回シード完了待ち
+      // 週タブだけで献立を組む（「日」は一度も開かない＝自動取り込みを走らせない）
+      await tdPage.goto(`${BASE}/#/meal-plan?focus=week`, { waitUntil: 'networkidle' })
+      await tdPage.waitForTimeout(2000)
+      await tdPage.locator('[data-testid="week-fill-run"]').click()
+      await tdPage.waitForTimeout(2500)
+      // 「今日」は端末の日付から取る（曜日・月替わりの前提は置かない）
+      const tdToday = await tdPage.evaluate(() => {
+        const d = new Date()
+        const p = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      })
+      const tdTodayRows = (await tdPlans()).filter((e) => e.date === tdToday)
+      check(
+        'IUTODAY-07 前提: 週で組んだ結果、今日の予定が入っている',
+        tdTodayRows.length > 0,
+        `${tdTodayRows.length}件`,
+      )
+      if (tdTodayRows.length > 0) {
+        const tdRecipeId = tdTodayRows[0].recipeId
+        await tdPage.goto(`${BASE}/#/recipes/${tdRecipeId}`, { waitUntil: 'networkidle' })
+        await tdPage.waitForTimeout(1500)
+        const tdToggle = tdPage.locator('[data-testid="detail-today-toggle"]')
+        const tdLabel = () =>
+          tdToggle.textContent().then((t) => (t ?? '').replaceAll('​', '').trim())
+        check('IUTODAY-07 前提: 今日の献立のボタンがある', (await tdToggle.count()) === 1)
+        check(
+          'IUTODAY-07 週で組んだだけで、レシピ詳細が「今日の献立に追加済み」になる',
+          (await tdLabel()).includes(ja.detail.todayAdded),
+          `ボタン=${await tdLabel()}`,
+        )
+        // 規約F: 押すと今週の献立からも外れることが、押す前に読める場所に書いてある
+        check(
+          'IUTODAY-07 押す前に、今週の献立からも外れることが書いてある（規約F）',
+          (await tdPage.locator('[data-testid="detail-today-remove-hint"]').count()) === 1,
+        )
+        await tdToggle.click()
+        await tdPage.waitForTimeout(1800)
+        check(
+          'IUTODAY-07 外すと、今週の献立の予定からも消える',
+          (await tdPlans()).filter((e) => e.date === tdToday && e.recipeId === tdRecipeId)
+            .length === 0,
+        )
+        check(
+          'IUTODAY-07 外したあとは「今日の献立に追加」に戻る',
+          (await tdLabel()).includes(ja.detail.todayAdd) &&
+            !(await tdLabel()).includes(ja.detail.todayAdded),
+          `ボタン=${await tdLabel()}`,
+        )
+        // 消える操作なので「元に戻す」が出て、押すと週の予定ごと戻る（日タブの×と同じ形）
+        const tdUndo = tdPage.getByRole('button', { name: ja.common.undo })
+        check('IUTODAY-07 外した直後に「元に戻す」が出る', (await tdUndo.count()) === 1)
+        if ((await tdUndo.count()) === 1) {
+          await tdUndo.first().click()
+          await tdPage.waitForTimeout(1800)
+          check(
+            'IUTODAY-07 「元に戻す」で、今週の献立の予定ごと戻る',
+            (await tdPlans()).filter((e) => e.date === tdToday && e.recipeId === tdRecipeId)
+              .length > 0,
+          )
+        }
+      }
+    } finally {
+      await tdBrowser.close()
     }
   }
 
