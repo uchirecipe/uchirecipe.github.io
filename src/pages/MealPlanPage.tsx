@@ -197,6 +197,7 @@ import Collapse from '../components/Collapse'
 import SwapLabel from '../components/SwapLabel'
 import NutritionBalancePanel from '../components/NutritionBalancePanel'
 import RecipeCard from '../components/RecipeCard'
+import { SwipeRevealRow } from '../components/SwipeRevealRow'
 import { usePhotoUrl } from '../components/usePhotoUrl'
 import {
   DIALOG_ACTIONS_CLS,
@@ -419,6 +420,9 @@ function TodayListRow({
   onRemove,
   removeLabel,
   footer,
+  swipeOpen,
+  onSwipeOpenChange,
+  onSwipeRemove,
 }: {
   recipe: Recipe
   /**
@@ -438,6 +442,18 @@ function TodayListRow({
    */
   removeLabel?: string
   footer?: ReactNode
+  /**
+   * 行を左へ払うと右から出る「外す」（2026-08-21 便IQ。オーナー原文
+   * 「横にスワイプして消せるのが楽なんですけどね。」）。
+   *
+   * **整理モードの外でも効かせる**＝モードに入らずに外せることが「楽」の中身。
+   * 出るのはボタンだけで、**押して初めて外れる**（払い切っただけでは何も起きない）。
+   * 開いている行は同時に1つだけなので、開いている行の合図は画面側が持つ。
+   * onSwipeRemove を渡さなければ、その行は払っても何も出ない。
+   */
+  swipeOpen?: boolean
+  onSwipeOpenChange?: (open: boolean) => void
+  onSwipeRemove?: () => void
 }) {
   // state.from/fromPathで「今日の献立から開いた」ことを詳細画面へ持ち回る。
   // RecipeDetailPageの戻るボタンが、通常の「常に一覧へ」ではなくここ(献立タブ)へ
@@ -448,57 +464,74 @@ function TodayListRow({
   // 今週の献立に飛ばされる、の恒久対策。2026-07-16便U-1でタブ構成に再設計後もこの
   // 「戻ったら必ず日タブ」という保証は維持する）
   const fromState = { from: 'todayList' as const, fromPath: '/meal-plan?focus=today' }
+  const card = (
+    <RecipeCard
+      recipe={recipe}
+      density="standard"
+      place="todayPlan"
+      ngIngredients={ngIngredients}
+      // 検査用の目印（2026-08-19 便HY・CARDPARTS-01）。「今日なに作る？」の候補と
+      // 同じレシピのカードを見比べて、場所ごとに載せる情報が違うことを機械で見張る
+      testId="day-plan-card"
+      titleTestId="day-plan-card-title"
+      linkState={fromState}
+      /* 2026-08-20 便II・⑥: 操作が1つも無いとき（＝整理モードでないとき）は2段目そのものを
+         作らない＝料理名の行だけになる */
+      actions={
+        onCooked || onRemove || footer ? (
+          <>
+            {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
+                枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
+                ボタンと同じ当たり判定を下回らないようにする。
+                2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
+                色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
+                6か所あり、多数側＝アクセントの塗りに合わせている */}
+            {onCooked && (
+              <button
+                type="button"
+                onClick={onCooked}
+                className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
+              >
+                <CheckCircle2 size={16} aria-hidden />
+                {ja.mealPlan.todayMarkCooked}
+              </button>
+            )}
+            {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
+                破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
+                押し間違いを減らす */}
+            {onRemove && (
+              <button
+                type="button"
+                onClick={onRemove}
+                aria-label={removeLabel ?? ja.mealPlan.todayRemove}
+                className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
+              >
+                <X size={20} aria-hidden />
+              </button>
+            )}
+            {footer}
+          </>
+        ) : undefined
+      }
+    />
+  )
+  // 払っても何も出さない行（onSwipeRemove を渡していない場所）は、これまでどおりそのまま出す
+  if (!onSwipeRemove) return <li>{card}</li>
   return (
     <li>
-      <RecipeCard
-        recipe={recipe}
-        density="standard"
-        place="todayPlan"
-        ngIngredients={ngIngredients}
-        // 検査用の目印（2026-08-19 便HY・CARDPARTS-01）。「今日なに作る？」の候補と
-        // 同じレシピのカードを見比べて、場所ごとに載せる情報が違うことを機械で見張る
-        testId="day-plan-card"
-        titleTestId="day-plan-card-title"
-        linkState={fromState}
-        /* 2026-08-20 便II・⑥: 操作が1つも無いとき（＝整理モードでないとき）は2段目そのものを
-           作らない＝料理名の行だけになる */
-        actions={
-          onCooked || onRemove || footer ? (
-            <>
-              {/* 2026-08-03 便DP-3(オーナー指示): ☑アイコンだけでは操作できるものに見えなかったので、
-                  枠・地色・文字ラベルの付いたボタンにした。高さは44px(min-h-11)＝従来のp-3のアイコン
-                  ボタンと同じ当たり判定を下回らないようにする。
-                  2026-08-18 便HN（オーナー指摘「『作った！』と『全て作った！』など、同じような機能は
-                  色を同じにした方が、パッとみてわかりやすい」）: 記録をつけるボタンはアプリ全体で
-                  6か所あり、多数側＝アクセントの塗りに合わせている */}
-              {onCooked && (
-                <button
-                  type="button"
-                  onClick={onCooked}
-                  className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm bg-accent px-2.5 py-2 text-sm font-bold text-on-accent shadow-sm"
-                >
-                  <CheckCircle2 size={16} aria-hidden />
-                  {ja.mealPlan.todayMarkCooked}
-                </button>
-              )}
-              {/* 2026-07-29 便CD/MP-21: 「作った」(記録が残る)と「この献立から外す」(確認なしで消える)は
-                  破壊度が違うのに36px・間隔8pxで密着していた。両方44px(p-3)にし、間の余白も広げて
-                  押し間違いを減らす */}
-              {onRemove && (
-                <button
-                  type="button"
-                  onClick={onRemove}
-                  aria-label={removeLabel ?? ja.mealPlan.todayRemove}
-                  className="tap-target ml-2 shrink-0 rounded-full p-3 text-ink-muted"
-                >
-                  <X size={20} aria-hidden />
-                </button>
-              )}
-              {footer}
-            </>
-          ) : undefined
-        }
-      />
+      <SwipeRevealRow
+        testId="day-swipe-row"
+        open={swipeOpen ?? false}
+        onOpenChange={(next) => onSwipeOpenChange?.(next)}
+        actionLabel={ja.mealPlan.todaySwipeRemove}
+        /* 読み上げの名前は×とそろえる＝同じ「外す」でも、外れる範囲が違うことが耳でも分かる
+           （「この献立から外す」／「今日と今週の献立から外す」） */
+        actionAriaLabel={removeLabel ?? ja.mealPlan.todayRemove}
+        actionTestId="day-swipe-remove"
+        onAction={onSwipeRemove}
+      >
+        {card}
+      </SwipeRevealRow>
     </li>
   )
 }
@@ -2370,6 +2403,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   useEffect(() => {
     if (dayOrganizing && !dayHasPlan) setDayOrganizing(false)
   }, [dayOrganizing, dayHasPlan])
+
+  /**
+   * 「今日の献立」の行を左へ払って「外す」を出している行（2026-08-21 便IQ。オーナー原文
+   * 「横にスワイプして消せるのが楽なんですけどね。」）。
+   *
+   * **開くのは同時に1行だけ**にするため、開いている行の合図はここで持つ
+   * （行ごとに持たせると、払った行が2つ3つと開いたままになる）。
+   * 合図は行の出どころ込みの文字列＝「レシピ一覧から選択中」と「今週の献立の予定」に
+   * 同じ料理が並んでも取り違えない。
+   *
+   * 「日」から離れたら閉じる。整理モードに入る/抜けるときも閉じる
+   * （×と「外す」が同時に2つ出ている状態を作らない）。
+   */
+  const [daySwipeOpenKey, setDaySwipeOpenKey] = useState<string | null>(null)
+  useEffect(() => {
+    setDaySwipeOpenKey(null)
+  }, [viewMode, dayOrganizing])
 
   /**
    * 「今日なに作る？」の候補カードから開いた料理を覚える／覚えを読む（2026-08-17 便HI・
@@ -6315,6 +6365,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                         onRemove={
                           dayOrganizing ? () => void removeTodayPickedRecipe(recipe) : undefined
                         }
+                        /* 行を左へ払うと出る「外す」（2026-08-21 便IQ）。整理モードの外でも効く。
+                           押したときの中身は×とまったく同じ＝外れるのは今日の献立の行だけ */
+                        swipeOpen={daySwipeOpenKey === `picked:${recipe.id}`}
+                        onSwipeOpenChange={(next) =>
+                          setDaySwipeOpenKey(next ? `picked:${recipe.id}` : null)
+                        }
+                        onSwipeRemove={() => void removeTodayPickedRecipe(recipe)}
                         /* 「◯食に入れる」は整理モードの**外にも出したまま**にする
                            （2026-08-20 便II・⑥の裁定）。「整理」は減らす・終わらせる操作
                            （「作った！」「×」）の集まりで、**これから決める操作は性質が違う**。
@@ -6384,6 +6441,14 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                                 : undefined
                             }
                             removeLabel={ja.mealPlan.todayPlannedRemove}
+                            /* 行を左へ払うと出る「外す」（2026-08-21 便IQ）。整理モードの外でも効く。
+                               押したときの中身は×とまったく同じ＝今日と今週の両方から外れるので、
+                               読み上げの名前（removeLabel）も押したあとのお知らせも×と同じものを使う */
+                            swipeOpen={daySwipeOpenKey === `planned:${slot}:${recipe.id}`}
+                            onSwipeOpenChange={(next) =>
+                              setDaySwipeOpenKey(next ? `planned:${slot}:${recipe.id}` : null)
+                            }
+                            onSwipeRemove={() => void removeTodayPlannedRecipe(slot, recipe)}
                           />
                         ))}
                       </ul>

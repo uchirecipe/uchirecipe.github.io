@@ -390,6 +390,13 @@
 //         「整理」モードの中へ移した。整理でないときは×も「作った！」も「全て作った！」も
 //         どこにも出ない(料理名の行だけ)・「整理」に入ると3つとも出る・外した後にそのお知らせから
 //         元に戻せる(今日と今週の両方へ)・「完了」で3つとも引っ込み料理名の行は残る) /
+//         DAYSWIPE-01(2026-08-21 便IQ・オーナー原文「横にスワイプして消せるのが楽なんですけどね。」:
+//         「今日の献立」の行を**行の途中から左へ**払うと右から「外す」が出て、**押して初めて**外れる。
+//         整理モードに入らずに使える・払い切っただけでは1件も外れない・**起点が左端30px以内の
+//         払いには反応しない**(ブラウザの「戻る」に譲る)・**縦のスクロールを奪わない**
+//         (touch-actionのpan-y＋本物の指で払ってページが動く)・開くのは1行だけで他を触ると閉じ
+//         そのタップは閉じるだけに使われる・画面を離れて戻ると閉じている・外した後は
+//         「元に戻す」で戻る・払う以外の道(整理モードの×)も残っている) /
 //         FOLDRUN-01(2026-08-20 便II・③: 折りたたみを開かなくても決めてもらう操作に手が届く。
 //         日「今日なに作る？」・週「献立を提案」の両方で、畳んだままでも実行ボタンが出ていて
 //         44px以上あり、押すと実際に効く(日=候補が出て節が開く / 週=端末の献立の行が増える)) /
@@ -4684,6 +4691,483 @@ try {
       }
     } finally {
       await doBrowser.close()
+    }
+  }
+
+  // --- DAYSWIPE-01: 今日の献立の行を**左へ払う**と右から「外す」が出て、**押して初めて**外れる
+  // (2026-08-21 便IQ)。オーナー原文「横にスワイプして消せるのが楽なんですけどね。」
+  //
+  // オーナーが実機で確かめた事実: 献立の行を**左端から右へ**払うと「ChromeでもSafariでも戻ります」
+  // ＝端からの戻るジェスチャーはWebページ側では検知も無効化もできない。そこで**向きと起点を変える**。
+  //   ブラウザが取るのは「左端から右へ」／こちらが使うのは「行の途中から左へ」＝ぶつからない。
+  //
+  // 見張るのは、壊れると黙って困る5つ:
+  //   ①払うとボタンが出る(整理モードに入らずに外せる＝「楽」の中身) ②払い切っただけでは外れない
+  //   ③起点が左端30px以内の払いには反応しない(ブラウザの「戻る」に譲る)
+  //   ④縦の指を奪わない(一覧のスクロールが効く。いちばん壊れやすい)
+  //   ⑤開くのは1行だけ・他を触ると閉じる・画面を離れて戻ると閉じている
+  // あわせて、外したあと「元に戻す」で戻ること、払う以外の道(整理モードの×)が残っていることも見る。
+  //
+  // 指の動きは2通りで作る。**本物のマウス**(pointerdown/move/upが実際に流れる経路)で開くところまでを
+  // measure し、起点や向きを細かく変える検査は**その行の上でPointerEventを組み立てて**測る
+  // （画面の左端30px以内には行そのものが無い＝本物の指では起点を左端にできないため。
+  //   行は左端x=33pxから始まる・2026-08-21 便IPの実測）。
+  // 縦のスクロールだけは本物の指でないと意味がないので、CDPの touch で払う。
+  // 掴み方は data-testid と読み上げの名前(aria-label)だけ＝並び順・入れ子の段数に依らない(禁じ手④) ---
+  currentCheck = 'DAYSWIPE-01'
+  {
+    const dsBrowser = await chromium.launch()
+    const dsContext = await dsBrowser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+    })
+    // 指で触れる入れ物にすると「ホーム画面に追加」の案内が出る条件（指の操作・ホバーなし）に
+    // 当たるので、見た記録を先に入れておく（この節が測るのは払いの動きで、案内は GE-01/HS-01 の担当）
+    await dsContext.addInitScript(() => {
+      try {
+        localStorage.setItem('uchirecipe:homeScreenNoticeSeen', '1')
+      } catch {
+        // ストレージを使えない入れ物では何もしない
+      }
+    })
+    const dsPage = await dsContext.newPage()
+    dsPage.on('pageerror', (err) => {
+      if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+      errors.push(`[pageerror@DAYSWIPE-01] ${err.message}`)
+    })
+    const dsCdp = await dsContext.newCDPSession(dsPage)
+    const dsRead = (table) =>
+      dsPage.evaluate(
+        (name) =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const store = req.result.transaction(name, 'readonly').objectStore(name)
+              const q = store.getAll()
+              q.onsuccess = () => resolve(q.result)
+              q.onerror = () => reject(q.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+        table,
+      )
+    /**
+     * その料理の行の実寸。**掴む前に画面の中へ入れてから**測る（今日の献立は画面の下のほうにあり、
+     * 画面の外の座標に指を置いても何も起きない）。見つからなければ null を返し、
+     * 「見つからなかった＝合格」に倒れないよう呼び出し側で必ず見る。
+     */
+    const dsRowBox = async (title, { scroll = true } = {}) => {
+      const box = await dsPage.evaluate(
+        ({ t, scroll }) => {
+          const clean = (s) => (s ?? '').replaceAll('​', '')
+          const row = [...document.querySelectorAll('[data-testid="day-swipe-row"]')].find((el) =>
+            clean(el.innerText).includes(t),
+          )
+          if (!row) return null
+          if (scroll) row.scrollIntoView({ block: 'center' })
+          const b = row.getBoundingClientRect()
+          return { x: b.x, y: b.y, w: b.width, h: b.height }
+        },
+        { t: title, scroll },
+      )
+      if (box && scroll) await dsPage.waitForTimeout(200)
+      return box
+    }
+    /** 開いている「外す」を閉じる（行の外を触ったのと同じ合図を送る。画面は動かさない） */
+    const dsCloseSwipe = async () => {
+      await dsPage.evaluate(() =>
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+      )
+      await dsPage.waitForTimeout(250)
+    }
+    /** その料理の行に「外す」が出ているか */
+    const dsRowOpen = (title) =>
+      dsPage.evaluate((t) => {
+        const clean = (s) => (s ?? '').replaceAll('​', '')
+        const row = [...document.querySelectorAll('[data-testid="day-swipe-row"]')].find((el) =>
+          clean(el.innerText).includes(t),
+        )
+        if (!row) return 'row-not-found'
+        return !!row.querySelector('[data-testid="day-swipe-remove"]')
+      }, title)
+    /**
+     * その行の上で指の動きを組み立てる。startX を渡すと**起点だけ**を好きな位置にできる
+     * （画面の左端30px以内には行が無いので、本物の指では作れない起点を測るために使う）。
+     */
+    const dsGesture = (title, { startX, dx = -120, dy = 0, steps = 6, release = true } = {}) =>
+      dsPage.evaluate(
+        ({ t, startX, dx, dy, steps, release }) => {
+          const clean = (s) => (s ?? '').replaceAll('​', '')
+          const row = [...document.querySelectorAll('[data-testid="day-swipe-row"]')].find((el) =>
+            clean(el.innerText).includes(t),
+          )
+          if (!row) return 'row-not-found'
+          const target = row.querySelector('[data-testid="day-plan-card"]') ?? row.firstElementChild
+          if (!target) return 'card-not-found'
+          const b = row.getBoundingClientRect()
+          const y = b.y + b.height / 2
+          const x0 = startX ?? b.x + b.width - 24
+          const fire = (type, x, yy) =>
+            target.dispatchEvent(
+              new PointerEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                clientX: x,
+                clientY: yy,
+                pointerId: 1,
+                pointerType: 'touch',
+                isPrimary: true,
+                button: 0,
+                buttons: 1,
+              }),
+            )
+          fire('pointerdown', x0, y)
+          for (let i = 1; i <= steps; i++) {
+            fire('pointermove', x0 + (dx * i) / steps, y + (dy * i) / steps)
+          }
+          if (release) fire('pointerup', x0 + dx, y + dy)
+          return 'ok'
+        },
+        { t: title, startX, dx, dy, steps, release },
+      )
+    /**
+     * 本物のマウスで、その行の途中から左へ払う。
+     * **払う直前に測り直す**（前に測った位置は、別の行を測ったときのスクロールでもうずれている）。
+     */
+    const dsMouseSwipeLeft = async (title) => {
+      const box = await dsRowBox(title)
+      if (!box) return false
+      const y = box.y + box.h / 2
+      const startX = box.x + box.w - 24
+      await dsPage.mouse.move(startX, y)
+      await dsPage.mouse.down()
+      await dsPage.mouse.move(startX - 130, y, { steps: 12 })
+      await dsPage.mouse.up()
+      await dsPage.waitForTimeout(350)
+      return true
+    }
+    /**
+     * 本物の指で払う（CDPのtouch）。縦のスクロールをブラウザに残せているかは、
+     * マウスでは測れない（touch-actionは指の操作にしか効かない）。
+     */
+    const dsTouchDrag = async (x, y, dx, dy, steps = 10) => {
+      await dsCdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+      for (let i = 1; i <= steps; i++) {
+        await dsCdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x: x + (dx * i) / steps, y: y + (dy * i) / steps }],
+        })
+        await dsPage.waitForTimeout(16)
+      }
+      await dsCdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await dsPage.waitForTimeout(450)
+    }
+    const dsTouchPan = (x, y, dy) => dsTouchDrag(x, y, 0, dy)
+    const dsPlannedButton = () =>
+      dsPage.locator(`button[aria-label="${ja.mealPlan.todayPlannedRemove}"]`)
+    const dsPickedButton = () => dsPage.locator(`button[aria-label="${ja.mealPlan.todayRemove}"]`)
+    const dsPlanned = '肉じゃが'
+    const dsPicked = 'ほうれん草のおひたし'
+    try {
+      // ①今週の献立の予定に入る品(夕食) ②レシピ一覧から選択中に入る品(食事を決めずに追加)
+      await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(1800) // 初回シード完了待ち
+      await dsPage.getByText(dsPlanned, { exact: true }).first().click()
+      await dsPage.waitForTimeout(500)
+      await dsPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await dsPage.waitForTimeout(300)
+      await dsPage.getByRole('button', { name: '夕食', exact: true }).click()
+      await dsPage.waitForTimeout(600)
+      await dsPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(900)
+      await dsPage.getByText(dsPicked, { exact: true }).first().click()
+      await dsPage.waitForTimeout(500)
+      await dsPage.getByRole('button', { name: '今日の献立に追加' }).click()
+      await dsPage.waitForTimeout(300)
+      await dsPage
+        .getByRole('button', { name: '朝食・昼食・夕食を決めずに今日の献立に追加' })
+        .click()
+      await dsPage.waitForTimeout(600)
+
+      await dsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dsPage.waitForTimeout(1800)
+      /** 献立の画面のURL。払った行を押してもここから動かないことを後で見る */
+      const dsUrlBefore = dsPage.url()
+
+      // ---------- 前提 ----------
+      const dsBefore = { today: await dsRead('todayList'), plans: await dsRead('mealPlans') }
+      check(
+        'DAYSWIPE-01 前提: 今日の献立2件・今週の予定1件が端末に入っている',
+        dsBefore.today.length === 2 && dsBefore.plans.length === 1,
+        `today=${dsBefore.today.length} plans=${dsBefore.plans.length}`,
+      )
+      const dsPlannedBox0 = await dsRowBox(dsPlanned)
+      const dsPickedBox0 = await dsRowBox(dsPicked)
+      check(
+        'DAYSWIPE-01 前提: 今日の献立の2品とも、払える行として並んでいる',
+        !!dsPlannedBox0 && !!dsPickedBox0,
+        `${dsPlanned}=${JSON.stringify(dsPlannedBox0)} ${dsPicked}=${JSON.stringify(dsPickedBox0)}`,
+      )
+      check(
+        'DAYSWIPE-01 前提: 払う前は「外す」が1つも出ていない（整理モードにも入っていない）',
+        (await dsPlannedButton().count()) === 0 && (await dsPickedButton().count()) === 0,
+        `今週の予定=${await dsPlannedButton().count()} 選択中=${await dsPickedButton().count()}`,
+      )
+
+      // ---------- ① 行の途中から左へ払うと「外す」が出る（本物のマウスで） ----------
+      await dsMouseSwipeLeft(dsPlanned)
+      check(
+        'DAYSWIPE-01(①) 整理モードに入らなくても、行を左へ払うと「外す」が出る',
+        (await dsRowOpen(dsPlanned)) === true,
+        `開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      const dsActionBox = (await dsPlannedButton().count()) === 1
+        ? await dsPlannedButton().boundingBox()
+        : null
+      check(
+        'DAYSWIPE-01(①) 出た「外す」は1つだけで、指で押せる大きさ（44px以上）',
+        (await dsPlannedButton().count()) === 1 &&
+          !!dsActionBox &&
+          dsActionBox.height >= 44 &&
+          dsActionBox.width >= 44,
+        `数=${await dsPlannedButton().count()} 大きさ=${JSON.stringify(dsActionBox)}`,
+      )
+      // 出ていないときに textContent を待つと30秒の中断になるので、必ず数を見てから読む
+      const dsActionText =
+        (await dsPlannedButton().count()) === 1
+          ? ((await dsPlannedButton().first().textContent()) ?? '').replaceAll('​', '').trim()
+          : '(出ていない)'
+      check(
+        'DAYSWIPE-01(①) 出たボタンの字は「外す」',
+        dsActionText === ja.mealPlan.todaySwipeRemove,
+        `字=${dsActionText}`,
+      )
+
+      // ---------- ② 払い切っただけでは外れない ----------
+      const dsAfterSwipe = { today: await dsRead('todayList'), plans: await dsRead('mealPlans') }
+      // 「開いている」ことも一緒に見る＝払えていないだけの状態を合格にしない
+      check(
+        'DAYSWIPE-01(②) 払い切って「外す」が出ても、まだ1件も外れていない（押して初めて外れる）',
+        (await dsRowOpen(dsPlanned)) === true &&
+          dsAfterSwipe.today.length === 2 &&
+          dsAfterSwipe.plans.length === 1,
+        `開いたか=${await dsRowOpen(dsPlanned)} today=${dsAfterSwipe.today.length} plans=${dsAfterSwipe.plans.length}`,
+      )
+
+      // ---------- ⑤ 開くのは1行だけ / 他の行を触ると閉じる ----------
+      await dsMouseSwipeLeft(dsPicked)
+      check(
+        'DAYSWIPE-01(⑤) 別の行を払うと、前に開いていた行は閉じる（開くのは1行だけ）',
+        (await dsRowOpen(dsPicked)) === true && (await dsRowOpen(dsPlanned)) === false,
+        `選択中=${await dsRowOpen(dsPicked)} 今週の予定=${await dsRowOpen(dsPlanned)}`,
+      )
+      check(
+        'DAYSWIPE-01(読み上げ) 「レシピ一覧から選択中」の行の「外す」は、外れる範囲が名前で分かる',
+        (await dsPickedButton().count()) === 1 && (await dsPlannedButton().count()) === 0,
+        `選択中=${await dsPickedButton().count()} 今週の予定=${await dsPlannedButton().count()}`,
+      )
+      // 開いている行の外（別の行のカード）を触ったら閉じる。
+      // このタップは「閉じる」だけに使い、その下のレシピを開かない
+      const dsPlannedBox1 = await dsRowBox(dsPlanned)
+      if (dsPlannedBox1) {
+        await dsPage.mouse.click(dsPlannedBox1.x + dsPlannedBox1.w / 2, dsPlannedBox1.y + dsPlannedBox1.h / 2)
+        await dsPage.waitForTimeout(400)
+      }
+      // 閉じるつもりのタップが、その下のレシピを開いてしまわないことも一緒に見る
+      check(
+        'DAYSWIPE-01(⑤) 他の行を触ると開いていた「外す」は閉じ、そのタップは閉じるだけに使われる',
+        (await dsRowOpen(dsPicked)) === false && dsPage.url() === dsUrlBefore,
+        `選択中=${await dsRowOpen(dsPicked)} URL=${dsPage.url()}`,
+      )
+
+      // ---------- ③ 起点が左端30px以内の払いには反応しない ----------
+      // （ブラウザの「戻る」に譲る。行そのものは左端x=33pxから始まるので、
+      //   本物の指では作れない起点をこの行の上で組み立てて測る）
+      await dsPage.evaluate(() => window.scrollTo(0, 0))
+      await dsPage.waitForTimeout(200)
+      const dsEdge = await dsGesture(dsPlanned, { startX: 10, dx: -130 })
+      await dsPage.waitForTimeout(350)
+      check(
+        'DAYSWIPE-01(③) 起点が左端30px以内の払いには反応しない（ブラウザの「戻る」に譲る）',
+        dsEdge === 'ok' && (await dsRowOpen(dsPlanned)) === false,
+        `組み立て=${dsEdge} 開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      // 同じ払いでも、起点が左端の外なら開く＝「反応しないのは起点のせい」だと言い切れる
+      const dsInside = await dsGesture(dsPlanned, { startX: 200, dx: -130 })
+      await dsPage.waitForTimeout(350)
+      check(
+        'DAYSWIPE-01(③) 起点が左端の外なら、同じ払いで開く（開かない理由が起点であることの裏取り）',
+        dsInside === 'ok' && (await dsRowOpen(dsPlanned)) === true,
+        `組み立て=${dsInside} 開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+
+      // ---------- ④ 縦の指を奪わない ----------
+      check(
+        'DAYSWIPE-01(④) 縦のスクロールはブラウザが受け持つ（行に touch-action の pan-y が敷いてある）',
+        await dsPage.evaluate(() => {
+          const row = document.querySelector('[data-testid="day-swipe-row"]')
+          const slider = row?.lastElementChild
+          return slider ? getComputedStyle(slider).touchAction.includes('pan-y') : false
+        }),
+        true,
+      )
+      // 縦に動かす指では開かない（先に閉じてから測る）
+      await dsCloseSwipe()
+      const dsVertical = await dsGesture(dsPlanned, { startX: 200, dx: -40, dy: 140 })
+      await dsPage.waitForTimeout(350)
+      check(
+        'DAYSWIPE-01(④) 縦のほうが大きい指では「外す」が出ない（一覧をめくる指を奪わない）',
+        dsVertical === 'ok' && (await dsRowOpen(dsPlanned)) === false,
+        `組み立て=${dsVertical} 開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      // 本物の指で、行の上から縦に払ってページが動くこと。
+      // いちばん上まで戻してから測る＝下へ動かせる余地をいちばん大きく取る
+      // （画面の中へ入れ直すと、行が下のほうにあるぶんだけ余地が減る）
+      await dsCloseSwipe()
+      await dsPage.evaluate(() => window.scrollTo(0, 0))
+      await dsPage.waitForTimeout(300)
+      const dsRowForPan = await dsRowBox(dsPlanned, { scroll: false })
+      const dsScrollRoom = await dsPage.evaluate(
+        () => document.documentElement.scrollHeight - window.innerHeight - window.scrollY,
+      )
+      const dsRowOnScreen =
+        !!dsRowForPan && dsRowForPan.y > 0 && dsRowForPan.y + dsRowForPan.h < 844
+      let dsScrollAfter = 0
+      if (dsRowOnScreen) {
+        await dsTouchPan(dsRowForPan.x + dsRowForPan.w / 2, dsRowForPan.y + dsRowForPan.h / 2, -200)
+        dsScrollAfter = await dsPage.evaluate(() => window.scrollY)
+      }
+      check(
+        'DAYSWIPE-01(④) 行の上から縦に払うと、一覧がちゃんとスクロールする',
+        dsRowOnScreen && dsScrollRoom > 100 && dsScrollAfter > 0,
+        `行が画面の中にあるか=${dsRowOnScreen} まだ下がれる量=${dsScrollRoom} 払った後=${dsScrollAfter}`,
+      )
+      check(
+        'DAYSWIPE-01(④) 縦に払っただけでは「外す」は出ない',
+        (await dsRowOpen(dsPlanned)) === false,
+        `開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      // 本物の指で**横に**払っても開く。普段使うのは指なので、ここが緑でないと機能そのものが
+      // 届いていない（マウスだけで見ていると、縦に譲る設定を変えたときに気づけない）
+      await dsCloseSwipe()
+      const dsTouchRow = await dsRowBox(dsPlanned)
+      if (dsTouchRow) {
+        await dsTouchDrag(dsTouchRow.x + dsTouchRow.w - 24, dsTouchRow.y + dsTouchRow.h / 2, -130, 0, 12)
+      }
+      check(
+        'DAYSWIPE-01(①) 本物の指で左へ払っても「外す」が出る（普段使うのは指）',
+        !!dsTouchRow && (await dsRowOpen(dsPlanned)) === true && dsPage.url() === dsUrlBefore,
+        `開いたか=${await dsRowOpen(dsPlanned)} URL=${dsPage.url()}`,
+      )
+
+      // ---------- ⑤ 開いた行を押しても、レシピ詳細へ飛ばない（閉じるだけ） ----------
+      await dsPage.evaluate(() => window.scrollTo(0, 0))
+      await dsPage.waitForTimeout(300)
+      await dsMouseSwipeLeft(dsPlanned)
+      const dsBox3 = await dsRowBox(dsPlanned)
+      if (dsBox3) {
+        await dsPage.mouse.click(dsBox3.x + 60, dsBox3.y + dsBox3.h / 2)
+        await dsPage.waitForTimeout(500)
+      }
+      check(
+        'DAYSWIPE-01(⑤) 開いている行そのものを押しても、レシピ詳細へは行かず閉じるだけ',
+        dsPage.url() === dsUrlBefore && (await dsRowOpen(dsPlanned)) === false,
+        `URL=${dsPage.url()} 開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      // ここが落ちるとレシピ詳細に居るので、献立の画面へ戻す
+      // （1つの赤が、この先の全部を「画面が違う」だけの赤に化けさせないため）
+      if (!dsPage.url().includes('/meal-plan')) {
+        await dsPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+        await dsPage.waitForTimeout(1200)
+      }
+
+      // ---------- ⑤ 画面を離れて戻ったら閉じている ----------
+      await dsMouseSwipeLeft(dsPlanned)
+      check(
+        'DAYSWIPE-01(⑤) 前提: 画面を離れる前は開いている',
+        (await dsRowOpen(dsPlanned)) === true,
+        `開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      await dsPage.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await dsPage.waitForTimeout(300)
+      check(
+        'DAYSWIPE-01(⑤) 画面を離れる合図で閉じる（別のアプリから戻ったとき、最初の1タップを奪わない）',
+        (await dsRowOpen(dsPlanned)) === false,
+        `開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+      await dsMouseSwipeLeft(dsPlanned)
+      const dsTab = async (name) => {
+        const tab = dsPage.getByRole('button', { name, exact: true })
+        if ((await tab.count()) === 0) return false
+        await tab.first().click()
+        await dsPage.waitForTimeout(900)
+        return true
+      }
+      await dsTab(ja.mealPlan.viewWeek)
+      await dsTab(ja.mealPlan.viewDay)
+      check(
+        'DAYSWIPE-01(⑤) 「週」へ移って「日」へ戻ると、払った行は閉じている',
+        (await dsRowOpen(dsPlanned)) === false,
+        `開いたか=${await dsRowOpen(dsPlanned)}`,
+      )
+
+      // ---------- ⑥ 押して初めて外れる → 「元に戻す」で戻る ----------
+      await dsPage.evaluate(() => window.scrollTo(0, 0))
+      await dsPage.waitForTimeout(300)
+      await dsMouseSwipeLeft(dsPlanned)
+      if ((await dsPlannedButton().count()) === 1) {
+        await dsPlannedButton().first().click()
+        await dsPage.waitForTimeout(900)
+      }
+      const dsAfter = { today: await dsRead('todayList'), plans: await dsRead('mealPlans') }
+      check(
+        'DAYSWIPE-01(⑥) 「外す」を押すと、今日と今週の献立の両方から外れる（×と同じ中身）',
+        dsAfter.today.length === 1 && dsAfter.plans.length === 0,
+        `today=${dsAfter.today.length} plans=${dsAfter.plans.length}`,
+      )
+      const dsUndo = dsPage.getByRole('button', { name: ja.common.undo, exact: true })
+      check(
+        'DAYSWIPE-01(⑥) 外した直後のお知らせに「元に戻す」が出る',
+        (await dsUndo.count()) === 1,
+        `元に戻す=${await dsUndo.count()}`,
+      )
+      if ((await dsUndo.count()) === 1) {
+        await dsUndo.click()
+        await dsPage.waitForTimeout(1000)
+        const dsUndone = { today: await dsRead('todayList'), plans: await dsRead('mealPlans') }
+        check(
+          'DAYSWIPE-01(⑥) 「元に戻す」で今日の献立にも今週の予定にも戻る',
+          dsUndone.today.length === 2 &&
+            dsUndone.plans.length === 1 &&
+            dsUndone.plans[0].date === dsBefore.plans[0].date &&
+            dsUndone.plans[0].slot === dsBefore.plans[0].slot &&
+            dsUndone.plans[0].recipeId === dsBefore.plans[0].recipeId,
+          `today=${dsUndone.today.length} plans=${JSON.stringify(dsUndone.plans)}`,
+        )
+      }
+
+      // ---------- 払う操作しか無い形にしない（キーボード・読み上げの道を残す） ----------
+      await dsPage.waitForTimeout(600)
+      const dsOrganize = dsPage.getByRole('button', {
+        name: ja.mealPlan.todayOrganizeToggle,
+        exact: true,
+      })
+      check(
+        'DAYSWIPE-01(道を残す) 払わなくても外せる道（整理モードの入口）が残っている',
+        (await dsOrganize.count()) === 1,
+        `整理=${await dsOrganize.count()}`,
+      )
+      if ((await dsOrganize.count()) === 1) {
+        await dsOrganize.click()
+        await dsPage.waitForTimeout(600)
+        check(
+          'DAYSWIPE-01(道を残す) 整理モードに入れば、払わずに×から外せる',
+          (await dsPlannedButton().count()) === 1 && (await dsPickedButton().count()) === 1,
+          `今週の予定=${await dsPlannedButton().count()} 選択中=${await dsPickedButton().count()}`,
+        )
+      }
+    } finally {
+      await dsBrowser.close()
     }
   }
 

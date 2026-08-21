@@ -25711,6 +25711,106 @@ Aみりん 大さじ1
   eq('COLLAPSE-1 折りたたみの中の操作を掴めている', hiddenOps.size > 20, true)
 }
 
+// ==========================================================================================
+// IQ-1〜IQ-8: 「行を左へ払うと『外す』が出る」の見張り（2026-08-21 便IQ）
+//
+// オーナー原文: 「横にスワイプして消せるのが楽なんですけどね。」
+// オーナーが実機で確かめた事実: 献立の行を**左端から右へ**払うと「ChromeでもSafariでも戻ります」
+// ＝端からの戻るジェスチャーはWebページ側では検知も無効化もできない。
+// そこで**向きと起点を変えて**ぶつからない形にした（行の途中から左へ払う）。
+//
+// ここで見張るのは「作りで守ること」＝**壊れたら黙って消える性質**だけを、
+// 実画面を立てずに読み取れる形で置いてある（動きそのものは e2e の DAYSWIPE-01 が測る）。
+//   IQ-1 … ブラウザの「戻る」に譲る左端の幅が残っていること（30px）
+//   IQ-2 … 起点が左端のときは何も掴まないこと（判定そのものが消えていない）
+//   IQ-3 … 縦の指をブラウザに残すこと（touch-action に pan-y が敷いてある）
+//   IQ-4 … **押して初めて外れる**こと（外す処理を呼ぶのはボタンの押下だけ。指を離す処理からは呼ばない）
+//   IQ-5 … 今日の献立の行がこの器を通っていること
+//   IQ-6 … **付けすぎていない**こと（この器を使うのは今日の献立の行だけ。
+//           買い物メモの品目・食材の在庫には付けない＝同じ払いが別の場所で違う結果になるのを防ぐ）
+//   IQ-7 … 払う以外の道が残っていること（整理モードの×＝キーボード・読み上げの順路）
+//   IQ-8 … ボタンの文言が規約H-2に沿っていること（意味を担う語は漢字・短い）
+//
+// 読み取りに失敗したら必ず落ちる（ファイルが無ければ IQ-0 が赤になり、残りも空振りで赤になる）。
+// ==========================================================================================
+{
+  const iqScriptDir = path.dirname(fileURLToPath(import.meta.url))
+  const iqRoot = process.env.IQ_SRC_ROOT ?? path.join(iqScriptDir, '..')
+  const iqRowPath = path.join(iqRoot, 'src/components/SwipeRevealRow.tsx')
+  const iqPagePath = path.join(iqRoot, 'src/pages/MealPlanPage.tsx')
+  eq('IQ-0 払いの器のファイルが読める（無ければ以下は全部空振りになる）', existsSync(iqRowPath), true)
+  const iqRow = existsSync(iqRowPath) ? readFileSync(iqRowPath, 'utf-8') : ''
+  const iqPage = existsSync(iqPagePath) ? readFileSync(iqPagePath, 'utf-8') : ''
+
+  // ---- IQ-1: ブラウザの「戻る」に譲る左端の幅 ----------------------------------------------
+  // iOSの端からの戻るジェスチャーは左0〜30pxから始まり、献立の行は左端x=33pxから始まる。
+  // ここを0にすると、行の左端で始めた払いが「戻る」と取り合いになる
+  eq(
+    'IQ-1 ブラウザの「戻る」に譲る左端の幅が30pxで残っている',
+    /export const SWIPE_BACK_EDGE_PX = 30\b/.test(iqRow),
+    true,
+  )
+  // ---- IQ-2: 起点が左端なら何も掴まない ----------------------------------------------------
+  eq(
+    'IQ-2 起点が左端のときは払いを掴まない（判定が消えていない）',
+    /clientX <= SWIPE_BACK_EDGE_PX/.test(iqRow),
+    true,
+  )
+  // ---- IQ-3: 縦の指はブラウザに残す --------------------------------------------------------
+  // touch-action から pan-y が落ちると、一覧の縦スクロールがこの行の上だけ効かなくなる
+  eq(
+    'IQ-3 縦のスクロールはブラウザが受け持つ（touch-action に pan-y が敷いてある）',
+    /touchAction: 'pan-y[^']*'/.test(iqRow),
+    true,
+  )
+  // ---- IQ-4: 押して初めて外れる ------------------------------------------------------------
+  // 「払い切ったら外れる」に変わっていないか。外す処理の呼び出しは1か所だけで、
+  // それはボタンの中にある（指を離す処理＝finish からは呼ばない）
+  const iqActionCalls = (iqRow.match(/onAction\(\)/g) ?? []).length
+  const iqButtonStart = iqRow.indexOf('<button')
+  const iqButtonEnd = iqRow.indexOf('</button>')
+  const iqButton = iqButtonStart >= 0 && iqButtonEnd > iqButtonStart ? iqRow.slice(iqButtonStart, iqButtonEnd) : ''
+  eq(
+    'IQ-4 外すのはボタンを押したときだけ（払い切っただけでは外れない）',
+    iqActionCalls === 1 && iqButton.includes('onAction()'),
+    true,
+  )
+  // ---- IQ-5: 今日の献立の行がこの器を通っている --------------------------------------------
+  eq('IQ-5 今日の献立の行が払いの器を通っている', /<SwipeRevealRow\b/.test(iqPage), true)
+  // ---- IQ-6: 付けすぎていない --------------------------------------------------------------
+  // 同じ払いが別の場所で違う結果になるのを防ぐため、いまは今日の献立の行だけに付ける。
+  // 増やすときは、ここの一覧を意図して書き換える（黙って増えない）
+  /** src配下の .tsx を集める（この見張り専用。他の見張りの走査に依らない） */
+  const iqListTsx = (dir) => {
+    const out = []
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) out.push(...iqListTsx(full))
+      else if (entry.name.endsWith('.tsx')) out.push(full)
+    }
+    return out.sort()
+  }
+  const iqAllTsx = iqListTsx(path.join(iqRoot, 'src'))
+  eq('IQ-0 走査できた画面ファイルがある（0件なら見張りが壊れている）', iqAllTsx.length > 0, true)
+  const iqUsers = iqAllTsx
+    .filter((full) => /<SwipeRevealRow\b/.test(readFileSync(full, 'utf-8')))
+    .map((full) => path.relative(iqRoot, full).split(path.sep).join('/'))
+  eq('IQ-6 払いで外せるのは今日の献立の行だけ（買い物メモ・食材の在庫には付けない）', iqUsers, [
+    'src/pages/MealPlanPage.tsx',
+  ])
+  // ---- IQ-7: 払う以外の道が残っている ------------------------------------------------------
+  // 整理モードの×＝キーボードでも読み上げでも届く順路。払う操作しか無い形にしない
+  eq(
+    'IQ-7 払う以外の道（整理モードの×）が残っている',
+    iqPage.includes('ja.mealPlan.todayOrganizeToggle') &&
+      /aria-label=\{removeLabel \?\? ja\.mealPlan\.todayRemove\}/.test(iqPage),
+    true,
+  )
+  // ---- IQ-8: ボタンの文言（規約H-2） -------------------------------------------------------
+  // 88pxの幅に収める短さで、意味を担う語は漢字（「はずす」と開かない）
+  eq('IQ-8 払って出るボタンの文言', ja.mealPlan.todaySwipeRemove, '外す')
+}
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)
