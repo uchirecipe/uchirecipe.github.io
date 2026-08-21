@@ -549,7 +549,7 @@ const openAllWeekDays = async (page) => {
   }
 }
 /**
- * 週タブの操作グループ（表示のしかた／献立を提案／献立テンプレート）を開く（2026-08-19 便IF）。
+ * 週タブの操作グループ（表示のしかた／献立を提案／別の週・テンプレートから入れる）を開く（2026-08-19 便IF）。
  *
  * 「献立を提案」は便IF・⑤⑥で既定が「開く」に戻った（実行ボタンがグループの中へ移ったため）。
  * **閉じているときだけ押す**＝既定がどちらでも、この呼び出しで「開いた状態」にたどり着ける。
@@ -5563,7 +5563,7 @@ try {
   //  DT-4  グループ見出しは「献立を提案」
   //  DT-5  実行ボタンは「まとめて献立を入力」。畳んでいても見える・塗りつぶしで目立つ
   //  DT-6  畳んでも使うボタンは見出しの横に集約
-  //  DT-7  「先週の献立をコピー」はスイッチのみ(ONで他の条件を無効化)…MEALPLAN-S3で検証
+  //  DT-7  別の週から入れる道は 2026-08-21 便IOで専用の画面へ移した…MEALPLAN-S3で検証
   //  DT-8  入れかたスイッチ。既定は非破壊(まだ決まっていない枠だけ埋める)
   //  DT-9  目的の軸は8つ…PURPOSE-02で検証
   //  DT-10 食事(朝食/昼食/夕食)の文字を少し大きく ---
@@ -6441,7 +6441,7 @@ try {
   // 純ロジック(logic/mealPlan.ts planCopyLastWeek/planClearMealSlots・
   // logic/mealTemplate.ts planTemplateFill)には単体テストがあるが、画面のボタンから同じ結果に
   // なるかは「まとめて献立を入力(レシピを総入れ替え)」(WEEKLOCK LOCK-5)しか見ていなかった。
-  // 残る4経路 ①テンプレートを適用 ②先週の献立をコピー ③まとめて空にする
+  // 残る4経路 ①テンプレートを適用 ②別の週から入れる ③まとめて空にする
   // ④月の献立をまとめて提案 を、実際の操作で確かめる(④は月タブなので別ブロック)。
   //
   // 便EJが確立した「素通り不可能」の形をそのまま踏襲する:
@@ -6491,7 +6491,7 @@ try {
         bkPage.evaluate(() =>
           [...document.querySelectorAll('section[data-date]')].map((s) => s.getAttribute('data-date')),
         )
-      // 折りたたみグループ(表示のしかた/献立を提案/献立テンプレート)を開く。
+      // 折りたたみグループ(表示のしかた/献立を提案/別の週・テンプレートから入れる)を開く。
       // 開いているときは「◯◯を開く」ボタンが存在しない＝何もしない
       const bkOpenGroup = async (title) => {
         const btn = bkPage.getByRole('button', { name: `${title}を開く` })
@@ -6528,7 +6528,7 @@ try {
       const bkFill = bkPage.getByRole('button', { name: 'まとめて献立を入力' })
       await bkFill.click()
       await bkPage.waitForTimeout(3500) // 7日ぶん書き込むので長めに待つ
-      await bkOpenGroup('献立テンプレート')
+      await bkOpenGroup(ja.mealPlan.weekGroupTemplateTitle)
       await bkPage.getByRole('button', { name: '表示している週をテンプレートとして保存' }).click()
       await bkPage.waitForTimeout(500)
       await bkPage.getByPlaceholder('平日の定番 など').fill('EK検証用')
@@ -6556,7 +6556,7 @@ try {
         (await bkLockedState(bkLockedB)) === 'true',
       )
       const bkApplyTemplate = async () => {
-        await bkOpenGroup('献立テンプレート')
+        await bkOpenGroup(ja.mealPlan.weekGroupTemplateTitle)
         await bkPage.getByRole('button', { name: 'テンプレートを適用', exact: true }).first().click()
         await bkPage.waitForTimeout(600)
         bkDialogs.length = 0
@@ -6591,69 +6591,63 @@ try {
         `date=${bkLockedB} / plan=${JSON.stringify(await bkPlanOf(bkLockedB))}`,
       )
 
-      // ---------- ② 先週の献立をコピー（非破壊＝空いているところにだけ入る） ----------
-      // コピー元は1週間前＝いまテンプレートで埋めた週
+      // ---------- ② 別の週から入れる（非破壊＝空いているところにだけ入る） ----------
+      // 入れる中身の週は1週間前＝いまテンプレートで埋めた週
       await bkNextWeek()
       const bkWeekC = await bkWeekDates()
       const bkLockedC = bkWeekC[0]
       const bkFreeC = bkWeekC[1]
       check(
-        'WEEKLOCK-BULK(先週コピー) 前提: コピー元(1週間前)の対象2日に献立がある',
+        'WEEKLOCK-BULK(別の週から入れる) 前提: 入れる中身の週(1週間前)の対象2日に献立がある',
         (await bkPlanOf(bkWeekB[0])).length > 0 && (await bkPlanOf(bkWeekB[1])).length > 0,
         `src=${JSON.stringify([bkWeekB[0], bkWeekB[1]])}`,
       )
       check(
-        'WEEKLOCK-BULK(先週コピー) 前提: コピー先の2日は空',
+        'WEEKLOCK-BULK(別の週から入れる) 前提: 入れ先の2日は空',
         (await bkPlanOf(bkLockedC)).length === 0 && (await bkPlanOf(bkFreeC)).length === 0,
         `locked=${bkLockedC} free=${bkFreeC}`,
       )
       await bkDayLock(bkLockedC).click()
       await bkPage.waitForTimeout(700)
       check(
-        'WEEKLOCK-BULK(先週コピー) 前提: コピー先の1日に鍵を掛けた',
+        'WEEKLOCK-BULK(別の週から入れる) 前提: 入れ先の1日に鍵を掛けた',
         (await bkLockedState(bkLockedC)) === 'true',
       )
-      await bkOpenGroup('献立を提案')
-      // 2026-08-19 便IF・⑥: 独立したスイッチをやめ、出しかたの2択（おまかせ／先週をコピー）の
-      // 片側になった。掴み方は目印にする＝名前を短くしても、この検査は動かない
-      const bkCopyToggle = bkPage.locator('[data-testid="plan-source-copy"]')
-      await bkCopyToggle.click()
-      await bkPage.waitForTimeout(400)
+      // 2026-08-21 便IO: 別の週から入れる道は専用の画面へ移った。
+      // 入口 → 1週間前の中身が出ている画面 → 「この週の献立を入れる」で実行し、
+      // 終わると「週」の画面（入れ先の週）へ戻る
+      const bkCopyFromOtherWeek = async () => {
+        bkDialogs.length = 0
+        await bkPage.locator('[data-testid="week-copy-pick"]').click()
+        await bkPage.waitForTimeout(900)
+        await bkPage.locator('[data-testid="copy-pick-run"]').click()
+        await bkPage.waitForTimeout(3000)
+      }
+      await bkCopyFromOtherWeek()
       check(
-        'WEEKLOCK-BULK(週コピー) 前提: 出しかたが「週をコピー」になった',
-        (await bkCopyToggle.getAttribute('aria-pressed')) === 'true',
-      )
-      bkDialogs.length = 0
-      await bkFill.click()
-      await bkPage.waitForTimeout(3000)
-      check(
-        'WEEKLOCK-BULK(先週コピー) 鍵の無い日には先週の献立が写った(素通り防止)',
+        'WEEKLOCK-BULK(別の週から入れる) 鍵の無い日には前の週の献立が写った(素通り防止)',
         (await bkPlanOf(bkFreeC)).length > 0,
         `date=${bkFreeC} / plan=${JSON.stringify(await bkPlanOf(bkFreeC))}`,
       )
       check(
-        'WEEKLOCK-BULK(先週コピー) 鍵の日には先週の献立が写らない',
+        'WEEKLOCK-BULK(別の週から入れる) 鍵の日には前の週の献立が写らない',
         (await bkPlanOf(bkLockedC)).length === 0,
         `date=${bkLockedC} / plan=${JSON.stringify(await bkPlanOf(bkLockedC))}`,
       )
       check(
-        'WEEKLOCK-BULK(先週コピー) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
+        'WEEKLOCK-BULK(別の週から入れる) 確認文に「ロック中の◯食分は変わりません」がある(規約F)',
         bkDialogs.some((m) => /ロック中の\d+食分は変わりません/.test(m)),
         `dialogs=${JSON.stringify(bkDialogs)}`,
       )
       // 対の確認: 鍵を外すと同じ操作で写る
       await bkDayLock(bkLockedC).click()
       await bkPage.waitForTimeout(700)
-      await bkFill.click()
-      await bkPage.waitForTimeout(3000)
+      await bkCopyFromOtherWeek()
       check(
-        'WEEKLOCK-BULK(先週コピー) 鍵を外すと同じ操作で写る(対の確認)',
+        'WEEKLOCK-BULK(別の週から入れる) 鍵を外すと同じ操作で写る(対の確認)',
         (await bkPlanOf(bkLockedC)).length > 0,
         `date=${bkLockedC} / plan=${JSON.stringify(await bkPlanOf(bkLockedC))}`,
       )
-      // 以降の操作に影響させないためスイッチを戻す
-      await bkCopyToggle.click()
-      await bkPage.waitForTimeout(400)
 
       // ---------- ③ まとめて空にする（破壊的＝選んだ食事の予定を消す） ----------
       await bkDayLock(bkLockedC).click()
@@ -11413,11 +11407,11 @@ try {
     }
   }
 
-  // --- MEALPLAN-S3: 先週の献立をコピー(2026-07-25 便BU・docs/59)。週タブ「今日から7日間」表示にし、
+  // --- MEALPLAN-S3: 別の週の献立を入れる(2026-07-25 便BU・docs/59)。週タブ「今日から7日間」表示にし、
   // 1週間前(source)にだけ夕食主菜を仕込み、今日(day0)には別の主菜を手動配置しておく。
-  // 2026-08-07 便DT-7(オーナー指示): 独立したボタンをやめてスイッチにしたので、
-  // 「先週の献立をコピー」をONにしてから「まとめて献立を入力」を押す2段になった。
-  // ONのあいだは提案の条件・入れかたが効かないので、画面でも無効化されていることを併せて見る。
+  // 2026-08-21 便IO(オーナー承認済みの設計): 週タブの出しかたの2択とコピー元のプルダウンをやめ、
+  // 「別の週から入れる」の画面（週を送って中身を見ながら選ぶ）へ移した。
+  // ここでは入口→画面→実行の道すじと、非破壊の約束が変わっていないことを見る。
   // 確認ダイアログ承認で:
   //  ・空いている未来日(day1=今日+1)に先週の主菜(カレーライス)がコピーされること
   //  ・既に手動配置がある今日(day0)は上書きされず元のまま(肉じゃが)残ること(非破壊)
@@ -11507,48 +11501,45 @@ try {
       await openAllWeekDays(cwPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await cwPage.waitForTimeout(400)
 
-      // 2026-08-19 便IF・⑤⑥: 「献立を提案」グループは既定で開いている（実行ボタンが中へ移ったため）。
-      // 畳まれている端末でも通るよう、閉じていたときだけ開く
-      const cwAutoOpen = cwPage.getByRole('button', { name: '献立を提案を開く' })
-      if ((await cwAutoOpen.count()) === 1) {
-        await cwAutoOpen.click()
-        await cwPage.waitForTimeout(300)
-      }
-      // 便DT-7→便IF・⑥: 出しかたを「先週をコピー」に切り替えてから「まとめて献立を入力」で実行
-      // (confirmは自動承認・メッセージを捕捉)
-      const cwCopyToggle = cwPage.locator('[data-testid="plan-source-copy"]')
-      await cwCopyToggle.click()
-      await cwPage.waitForTimeout(300)
+      // 2026-08-21 便IO: 入口は「別の週・テンプレートから入れる」の節にあり、
+      // 折りたたみを開かなくても押せる（便INの原則）
+      const cwEntry = cwPage.locator('[data-testid="week-copy-pick"]')
       check(
-        'MEALPLAN-S3(便IF-⑥) 出しかたの2択で「週をコピー」を選べる',
-        (await cwCopyToggle.getAttribute('aria-pressed')) === 'true',
+        'MEALPLAN-S3(便IO) 「別の週から入れる」の入口が、折りたたみを開かなくても押せる',
+        (await cwEntry.count()) === 1,
+      )
+      const cwWeekShown = await cwPage
+        .locator('[data-testid="week-day-toggle"]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute('data-date')))
+      await cwEntry.click()
+      await cwPage.waitForTimeout(900)
+      const cwTarget = cwPage.locator('[data-testid="copy-pick-target"]')
+      check(
+        'MEALPLAN-S3(便IO) 入れ先は「週」の画面で表示していた7日間のまま(週を送っても動かない先)',
+        cwWeekShown.length === 7 &&
+          (await cwTarget.getAttribute('data-start')) === cwWeekShown[0] &&
+          (await cwTarget.getAttribute('data-end')) === cwWeekShown[6],
+        `入れ先=${await cwTarget.getAttribute('data-start')}〜${await cwTarget.getAttribute('data-end')} 週=${JSON.stringify(cwWeekShown)}`,
       )
       check(
-        'MEALPLAN-S3(便DT-7) 選んでいるあいだは現在の条件が効かないので押せない状態になる',
-        await cwPage
-          .getByRole('button', { name: new RegExp(`^${ja.mealPlan.suggestConditionsToggle}`) })
-          .isDisabled(),
+        // 2026-08-19 便IF・⑧: 入れかたはコピーにも効く。2026-08-21 便IOでこの画面へ移った
+        'MEALPLAN-S3(便IF-⑧) 入れかたはこの画面で選べる(既定は空いた枠だけ)',
+        (await cwPage.locator('[data-testid="copy-pick-fill-mode"]').inputValue()) === 'fillEmpty',
       )
-      check(
-        // 2026-08-19 便IF・⑧: 入れかたはコピーにも効くようになったので、押せる状態のままにする
-        // 2026-08-20 便II・④: 入れかたはプルダウンになった
-        'MEALPLAN-S3(便IF-⑧) 入れかたはコピーを選んでいても押せる(コピーにも効くため)',
-        await cwPage.locator('[data-testid="fill-mode"]').isEnabled(),
-      )
-      check(
-        // 2026-08-20 便II・⑤: コピー元の週を選ぶプルダウンは、コピーを選んだときだけ出る
-        'MEALPLAN-S3(便II-⑤) コピーを選ぶと「コピー元の週」のプルダウンが出る',
-        (await cwPage.locator('[data-testid="copy-source-week"]').count()) === 1,
-      )
-      await cwPage.locator('[data-testid="week-fill-run"]').click()
-      await cwPage.waitForTimeout(700)
+      await cwPage.locator('[data-testid="copy-pick-run"]').click()
+      await cwPage.waitForTimeout(1800)
 
       check(
         'MEALPLAN-S3 確認文が「入る品数」と「残る」を明示する(規約F準拠)',
-        /コピーします/.test(cwDialogMsg) && /\d+品/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
+        /入れます/.test(cwDialogMsg) && /\d+品/.test(cwDialogMsg) && /残ります/.test(cwDialogMsg),
         `dialog=${cwDialogMsg}`,
       )
-      // 2026-08-19 便IF・④: 完了の知らせにもコピー元の7日間の日付が入る
+      check(
+        'MEALPLAN-S3(便IO) 入れ終わると献立の「週」へ戻る(次の一手を探させない)',
+        !cwPage.url().includes('copy-week'),
+        cwPage.url(),
+      )
+      // 2026-08-19 便IF・④: 完了の知らせにも、入れた週の7日間の日付が入る
       const cwToast = (await cwPage.textContent('body')) ?? ''
       check(
         'MEALPLAN-S3 コピー完了トーストが出る',
@@ -13051,7 +13042,7 @@ try {
       await tpPage.getByRole('button', { name: '週', exact: true }).click()
       await openAllWeekDays(tpPage) // 便ID・⑦: 畳む既定になったので、カードの中を触る前に開く
       await tpPage.waitForTimeout(400)
-      await tpPage.getByRole('button', { name: '献立テンプレートを開く' }).click()
+      await tpPage.getByRole('button', { name: `${ja.mealPlan.weekGroupTemplateTitle}を開く` }).click()
       await tpPage.waitForTimeout(200)
       await tpPage.getByRole('button', { name: '表示している週をテンプレートとして保存' }).click()
       await tpPage.waitForTimeout(300)
@@ -14865,7 +14856,7 @@ try {
       await cdPage.getByRole('button', { name: '週', exact: true }).click()
       await cdPage.waitForTimeout(700)
 
-      // 前提: 「表示のしかた」「献立テンプレート」は畳んだまま(＝畳んだ状態で測っている)
+      // 前提: 「表示のしかた」と別の週・テンプレートの節は畳んだまま(＝畳んだ状態で測っている)
       const cdFolded = await cdPage.evaluate(() =>
         [...document.querySelectorAll('button[aria-expanded]')]
           .filter((b) => /を(開く|閉じる)$/.test(b.getAttribute('aria-label') ?? ''))
@@ -14877,19 +14868,21 @@ try {
       const cdIsFolded = (title) =>
         cdFolded.some((g) => g.name === `${title}を開く` && !g.open)
       check(
-        'COLLAPSED-01 前提: 「表示のしかた」「献立テンプレート」は畳んだまま',
+        'COLLAPSED-01 前提: 「表示のしかた」と別の週・テンプレートの節は畳んだまま',
         cdIsFolded(ja.mealPlan.weekGroupDisplayTitle) &&
           cdIsFolded(ja.mealPlan.weekGroupTemplateTitle),
         JSON.stringify(cdFolded),
       )
 
-      // 畳んだままでも、この3つが押せる(見えている＝画面のどこにあってもよい)
-      for (const [what, label] of [
-        ['この週をまとめて空にする', ja.mealPlan.clearWeekSlotButton],
-        ['表示している週をテンプレートとして保存', ja.mealPlan.templateSave],
-        ['テンプレートを適用', ja.mealPlan.templateApplyWeek],
+      // 畳んだままでも、この4つが押せる(見えている＝画面のどこにあってもよい)。
+      // 2026-08-21 便IO: 「別の週から入れる」を足した（別の画面へ行く入口なのでリンク）
+      for (const [what, label, role] of [
+        ['この週をまとめて空にする', ja.mealPlan.clearWeekSlotButton, 'button'],
+        ['表示している週をテンプレートとして保存', ja.mealPlan.templateSave, 'button'],
+        ['テンプレートを適用', ja.mealPlan.templateApplyWeek, 'button'],
+        ['別の週から入れる', ja.mealPlan.copyPickTitle, 'link'],
       ]) {
-        const btn = cdPage.getByRole('button', { name: label, exact: true })
+        const btn = cdPage.getByRole(role, { name: label, exact: true })
         check(
           `COLLAPSED-01 畳んだままでも「${label}」が押せる（${what}）`,
           (await btn.count()) > 0 && (await btn.first().isVisible()),
@@ -14921,9 +14914,9 @@ try {
           if (dead.length > 0) out.push({ id, box: `${Math.round(r.width)}x${Math.round(r.height)}`, dead: dead.length })
         }
         return out
-      }, ['week-clear-slot', 'week-template-save', 'week-template-apply'])
+      }, ['week-clear-slot', 'week-template-save', 'week-template-apply', 'week-copy-pick'])
       check(
-        'COLLAPSED-01 常設にした3つに、44px未満の押せない場所が無い',
+        'COLLAPSED-01 常設にした4つに、44px未満の押せない場所が無い',
         cdDead.length === 0,
         JSON.stringify(cdDead),
       )
@@ -14952,6 +14945,19 @@ try {
       )
       await cdPage.keyboard.press('Escape')
       await cdPage.waitForTimeout(400)
+
+      // 2026-08-21 便IO: 「別の週から入れる」は畳んだまま押すと、その画面が開く（行き止まりでない）
+      await cdPage.getByRole('link', { name: ja.mealPlan.copyPickTitle, exact: true }).first().click()
+      await cdPage.waitForTimeout(900)
+      check(
+        'COLLAPSED-01 畳んだまま押した「別の週から入れる」で、その画面が開く',
+        (await cdPage.locator('[data-testid="copy-pick-run"]').count()) === 1,
+        cdPage.url(),
+      )
+      await cdPage.goBack()
+      await cdPage.waitForTimeout(900)
+      await cdPage.getByRole('button', { name: '週', exact: true }).click()
+      await cdPage.waitForTimeout(600)
 
       // 「空にする」は消える操作。畳んだまま押しても、確認の窓が必ず出る(規約F)。ここでは消さない
       // （自動押しを止めて、窓が出たことを自分の目で確かめてから「やめる」を押す）
@@ -27256,12 +27262,14 @@ try {
 
       // 2026-08-19 便IF・⑤⑥: 「献立を提案」だけ既定で開く（実行ボタンがこのグループの中へ移り、
       // 畳んだままだと押すものが画面から消えるため）。見た目を決める「表示のしかた」と
-      // 「献立テンプレート」は便ENのまま畳んだ状態で始まる
+      // 別の週・テンプレートの節は便ENのまま畳んだ状態で始まる
       check(
         'EN-01(項目10→便IF・⑥) 見た目を決めるグループは既定で畳み、「献立を提案」だけ開いている',
         (await enPage.getByRole('button', { name: '表示のしかたを開く' }).count()) === 1 &&
           (await enPage.getByRole('button', { name: '献立を提案を閉じる' }).count()) === 1 &&
-          (await enPage.getByRole('button', { name: '献立テンプレートを開く' }).count()) === 1,
+          (await enPage
+            .getByRole('button', { name: `${ja.mealPlan.weekGroupTemplateTitle}を開く` })
+            .count()) === 1,
       )
       check(
         'EN-01(項目10→便IF・⑥) 「まとめて献立を入力」は押せる位置にある',
@@ -42121,7 +42129,7 @@ try {
   //  ② 無料版のPro案内が、週タブを開いただけでは出ていない（＝しまわれている）。
   //     消してはいない＝条件の窓を開けば同じ入口がある
   //  ③ 条件の窓に「条件をクリア」がある（名前は日タブと同じ ja.search.clear）
-  //  ④ 「先週をコピー」を選ぶと、実際にコピーされる7日間の日付が画面に出る
+  //  ④⑤ → 2026-08-21 便IOで「別の週から入れる」の画面へ移した（下の便IOの節で見る）
   //     （画面に出ている週から計算して照合＝日付を書き写さない）
   //  ⑧ 「総入れ替え」を選ぶと決まっている枠も入れ替わり、選ばなければ1品も入れ替わらない
   //  ⑪ 過去だけの週ではロックのボタンを出さない／今日を含む週では出す
@@ -42179,8 +42187,11 @@ try {
       // 役目 → その役目を担う目印。**日と週で1対1に対応させる**。
       // 「週にしか無いもの（入れかた）」は、この突き合わせには入れない
       // ＝「できることが増えた版」であることと、並びがそろっていることを混ぜて測らない
+      // 2026-08-21 便IO: 週の「出しかたの切り替え（おまかせ／週をコピー）」は無くなった
+      // （別の週から入れる道は専用の画面へ独立した）。日タブの「1品／献立」と1対1に
+      // 対応する役目が週側に無くなったので、この突き合わせからは外す。
+      // 週にしか無いもの・日にしか無いものを並びの検査に混ぜない、という元の作法のまま
       const wmRoles = [
-        ['出しかたの切り替え', 'day-mode-one', 'plan-source-suggest'],
         ['条件の窓を開くボタン', 'day-conditions-open', 'plan-conditions-open'],
         ['決めてもらうボタン', 'day-suggest-draw', 'week-fill-run'],
       ]
@@ -42199,12 +42210,12 @@ try {
       await wmTab('週')
       const wmWeekFound = await wmOrderOf('week')
       check(
-        'WEEKFMT-01 前提: 日タブの3つの役目をすべて掴めた（掴めなければ以下は測れていない）',
+        'WEEKFMT-01 前提: 日タブの役目をすべて掴めた（掴めなければ以下は測れていない）',
         wmDayFound.every((f) => f.pos != null),
         JSON.stringify(wmDayFound),
       )
       check(
-        'WEEKFMT-01 前提: 週タブの3つの役目をすべて掴めた（掴めなければ以下は測れていない）',
+        'WEEKFMT-01 前提: 週タブの役目をすべて掴めた（掴めなければ以下は測れていない）',
         wmWeekFound.every((f) => f.pos != null),
         JSON.stringify(wmWeekFound),
       )
@@ -42318,70 +42329,27 @@ try {
         (await wmCondOpen.textContent())?.replace(/​/g, ''),
       )
 
-      // ===== ④ コピー元の7日間の日付が出る =====
-      const wmSource = wmPage.locator('[data-testid="plan-source-copy"]')
-      await wmSource.click()
-      await wmPage.waitForTimeout(600)
+      // ===== 便IO: 別の週から入れる（週を送って中身を見ながら選ぶ） =====
+      // オーナー原文「先週に限らず、ユーザーが選んだ７日間を指定（献立一覧で表示して、
+      // 今表示している７日間の献立を今週に反映、と言った感じ？献立の中身も確認できるし。）」
+      // 効く理由: 「先週」だけを選べる形では、何が入っていたか思い出せないまま押すことになる。
+      // なので測るのは次の2つ:
+      //   ① 画面に出る「その週の中身」が、実際にその週に入っているものと一致する
+      //   ② 入れたあと、その中身がそのまま入れ先の週に入っている
+      // 禁じ手よけ: 曜日・月替わりの前提を置かない（表示している7日を属性から読み、
+      // 今日以降の日だけを対象にする）／画面の字を書き写さず、目印と実データで突き合わせる
       const wmShown = await wmDates()
       check(
         'WEEKFMT-01 前提: 表示している週の7日分を読めた',
         wmShown.length === 7 && wmShown.every(Boolean),
         JSON.stringify(wmShown),
       )
-      const wmShift = (date, days) => {
+      const wmShiftKey = (date, days) => {
         const d = new Date(`${date}T00:00:00`)
         d.setDate(d.getDate() + days)
-        return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       }
-      const wmSrcStart = wmShown.length === 7 ? wmShift(wmShown[0], -7) : null
-      const wmSrcEnd = wmShown.length === 7 ? wmShift(wmShown[6], -7) : null
-      const wmBodyText = ((await wmPage.textContent('body')) ?? '').replace(/​/g, '')
-      check(
-        'WEEKFMT-01(④) 「週をコピー」を選ぶと、コピー元の7日間の日付が画面に出る',
-        wmSrcStart != null && wmBodyText.includes(wmSrcStart) && wmBodyText.includes(wmSrcEnd),
-        `コピー元=${wmSrcStart}〜${wmSrcEnd}`,
-      )
-
-      // ===== 便II・⑤ コピー元の週を選べる =====
-      // オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
-      // 表示している週をコピーにはできない？」→ コピー先は表示している週のまま、コピー元を選ぶ。
-      // 見るのは「選んだぶんだけコピー元の日付が動く」こと（週数を決め打ちせず、
-      // 選択肢の中の2つ目を選んで、その週数ぶん戻った日付が出るかで測る）
-      const wmCopyWeek = wmPage.locator('[data-testid="copy-source-week"]')
-      check(
-        'WEEKFMT-01(便II・⑤) コピーを選ぶと「コピー元の週」のプルダウンが出る',
-        (await wmCopyWeek.count()) === 1,
-      )
-      if ((await wmCopyWeek.count()) === 1) {
-        const wmWeekValues = await wmCopyWeek.locator('option').evaluateAll((els) =>
-          els.map((el) => el.value),
-        )
-        check(
-          'WEEKFMT-01(便II・⑤) 前提: コピー元の週を2つ以上から選べる（既定は1週間前）',
-          wmWeekValues.length >= 2 && (await wmCopyWeek.inputValue()) === '1',
-          `選択肢=${JSON.stringify(wmWeekValues)} 既定=${await wmCopyWeek.inputValue()}`,
-        )
-        const wmOther = wmWeekValues.find((v) => v !== '1')
-        if (wmOther) {
-          await wmCopyWeek.selectOption(wmOther)
-          await wmPage.waitForTimeout(600)
-          const wmOtherStart = wmShift(wmShown[0], -7 * Number(wmOther))
-          const wmOtherEnd = wmShift(wmShown[6], -7 * Number(wmOther))
-          const wmBody2 = ((await wmPage.textContent('body')) ?? '').replace(/​/g, '')
-          check(
-            'WEEKFMT-01(便II・⑤) コピー元の週を変えると、説明のコピー元の日付もその週に変わる',
-            wmBody2.includes(wmOtherStart) &&
-              wmBody2.includes(wmOtherEnd) &&
-              !wmBody2.includes(`${wmSrcStart}〜${wmSrcEnd}`),
-            `選んだ=${wmOther}週間前 期待=${wmOtherStart}〜${wmOtherEnd}`,
-          )
-          // 以降の⑧は1週間前を前提にしているので戻しておく
-          await wmCopyWeek.selectOption('1')
-          await wmPage.waitForTimeout(500)
-        }
-      }
-
-      // ===== ⑧ 入れかたがコピーにも効く =====
+      const wmYmd = (date) => date.replaceAll('-', '/')
       const wmToday2 = await wmToday()
       const wmFuture = wmShown.filter((d) => d >= wmToday2)
       check(
@@ -42389,7 +42357,7 @@ try {
         wmFuture.length > 0,
         `今日=${wmToday2} 週=${JSON.stringify(wmShown)}`,
       )
-      /** 献立を直接入れる（レシピは登録順の1品目/2品目＝コピー元と今の週で別のレシピにする） */
+      /** 献立を直接入れる（which=登録順の何品目のレシピか。日ごとに変えて見分けられるようにする） */
       const wmSeed = (rows) =>
         wmPage.evaluate(
           (targets) =>
@@ -42400,17 +42368,25 @@ try {
                 const rtx = idb.transaction('recipes', 'readonly')
                 const g = rtx.objectStore('recipes').getAll()
                 g.onsuccess = () => {
-                  const ids = g.result.map((r) => r.id).filter((v) => v != null)
-                  if (ids.length < 2) {
+                  const known = g.result
+                    .filter((r) => r.id != null)
+                    .map((r) => ({ id: r.id, title: r.title }))
+                  const need = Math.max(...targets.map((t) => t.which)) + 1
+                  if (known.length < need) {
                     resolve({ ok: false })
                     return
                   }
                   const wtx = idb.transaction('mealPlans', 'readwrite')
                   const store = wtx.objectStore('mealPlans')
                   for (const row of targets) {
-                    store.add({ date: row.date, slot: 'dinner', recipeId: ids[row.which], role: 'main' })
+                    store.add({
+                      date: row.date,
+                      slot: 'dinner',
+                      recipeId: known[row.which].id,
+                      role: 'main',
+                    })
                   }
-                  wtx.oncomplete = () => resolve({ ok: true, source: ids[0], here: ids[1] })
+                  wtx.oncomplete = () => resolve({ ok: true, recipes: known.slice(0, need) })
                   wtx.onerror = () => reject(wtx.error)
                 }
                 g.onerror = () => reject(g.error)
@@ -42419,7 +42395,7 @@ try {
             }),
           rows,
         )
-      /** いまの献立（今日以降ぶん）を id つきで読む */
+      /** 指定の日に入っている献立を id つきで読む（並びは id 順＝入れた順） */
       const wmPlans = (dates) =>
         wmPage.evaluate(
           (targets) =>
@@ -42432,8 +42408,8 @@ try {
                   resolve(
                     g.result
                       .filter((e) => targets.includes(e.date))
-                      .map((e) => ({ id: e.id, date: e.date, recipeId: e.recipeId }))
-                      .sort((a, b) => a.id - b.id),
+                      .sort((a, b) => a.id - b.id)
+                      .map((e) => ({ id: e.id, date: e.date, slot: e.slot, recipeId: e.recipeId })),
                   )
                 g.onerror = () => reject(g.error)
               }
@@ -42441,38 +42417,106 @@ try {
             }),
           dates,
         )
-      const wmPrevOf = (date) => {
-        const d = new Date(`${date}T00:00:00`)
-        d.setDate(d.getDate() - 7)
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      }
+      // **2週間前**に入れる中身を仕込む＝「先週」だけでは届かない週を選べることも同時に見る。
+      // 日ごとに別のレシピにして、どの日の中身がどこへ入ったかを1品ずつ突き合わせられるようにする
+      const wmSrcDates = wmShown.map((d) => wmShiftKey(d, -14))
       const wmSeeded = await wmSeed([
-        ...wmFuture.map((d) => ({ date: wmPrevOf(d), which: 0 })), // コピー元＝1品目
-        ...wmFuture.map((d) => ({ date: d, which: 1 })), // 今の週＝2品目（＝入れ替わったか見分けられる）
+        ...wmFuture.map((d, i) => ({ date: wmShiftKey(d, -14), which: i })),
+        // 入れ先の今日以降は、コピー元とは違う1品で埋めておく（入れ替わったかを見分けるため）
+        ...wmFuture.map((d) => ({ date: d, which: 7 })),
       ])
-      check('WEEKFMT-01 前提: コピー元と今の週に、別のレシピの献立を仕込めた', wmSeeded.ok === true)
+      check('WEEKFMT-01 前提: 2週間前と今の週に、別のレシピの献立を仕込めた', wmSeeded.ok === true)
       // 仕込んだあとは読み込み直す（Dexieの自動反映は自分の書き込みしか見ていない）
       await wmPage.reload({ waitUntil: 'networkidle' })
       await wmPage.waitForTimeout(1800)
       await wmTab('週')
       const wmBefore = await wmPlans(wmFuture)
       check(
-        'WEEKFMT-01 前提: 今日以降の献立を読めた',
+        'WEEKFMT-01 前提: 入れ先の今日以降が、コピー元とは違う1品で埋まっている',
         wmBefore.length === wmFuture.length &&
-          wmBefore.every((e) => e.recipeId === wmSeeded.here),
+          wmBefore.every((e) => e.recipeId === wmSeeded.recipes[7].id),
         JSON.stringify(wmBefore),
       )
-      // (a) 「空いた枠だけ」のまま押しても、決まっている枠は1品も入れ替わらない
-      await wmPage.locator('[data-testid="plan-source-copy"]').click()
-      await wmPage.waitForTimeout(400)
+
+      // ---- 入口（折りたたみを開かなくても押せる＝便INの原則） ----
+      const wmEntry = wmPage.locator('[data-testid="week-copy-pick"]')
       check(
-        // 2026-08-20 便II・④: 入れかたはプルダウンになった
+        'WEEKFMT-01(便IO) 「別の週から入れる」の入口が、折りたたみを開かなくても押せる',
+        (await wmEntry.count()) === 1,
+      )
+      await wmEntry.click()
+      await wmPage.waitForTimeout(1000)
+      const wmTargetBox = wmPage.locator('[data-testid="copy-pick-target"]')
+      check(
+        'WEEKFMT-01(便IO) 入れ先は「週」の画面で表示していた7日間のまま（この画面で週を送っても動かない）',
+        (await wmTargetBox.getAttribute('data-start')) === wmShown[0] &&
+          (await wmTargetBox.getAttribute('data-end')) === wmShown[6],
+        `入れ先=${await wmTargetBox.getAttribute('data-start')}〜${await wmTargetBox.getAttribute('data-end')}`,
+      )
+      check(
+        'WEEKFMT-01(便IO) 入れ先の7日間は日付で書いてある（この画面には週が2つあるため）',
+        ((await wmTargetBox.textContent()) ?? '').replace(/​/g, '').includes(wmYmd(wmShown[0])),
+        (await wmTargetBox.textContent()) ?? '',
+      )
+      const wmSrcWeek = wmPage.locator('[data-testid="copy-source-week"]')
+      check(
+        'WEEKFMT-01(便IO) 開いた直後は1週間前を見ている',
+        (await wmSrcWeek.getAttribute('data-start')) === wmShiftKey(wmShown[0], -7),
+        `いま=${await wmSrcWeek.getAttribute('data-start')}`,
+      )
+      // 「先週」に限らず選べること＝さらに前へ送れる（便II・⑤のプルダウンの置き換え）
+      await wmPage.locator('[data-testid="copy-pick-prev"]').click()
+      await wmPage.waitForTimeout(700)
+      check(
+        'WEEKFMT-01(便IO) さらに前へ送ると2週間前になる（「先週」に限らず選べる）',
+        (await wmSrcWeek.getAttribute('data-start')) === wmSrcDates[0],
+        `いま=${await wmSrcWeek.getAttribute('data-start')} 期待=${wmSrcDates[0]}`,
+      )
+      const wmSrcInDb = (await wmPlans(wmSrcDates)).map((e) => ({
+        date: e.date,
+        slot: e.slot,
+        recipeId: e.recipeId,
+      }))
+      check(
+        'WEEKFMT-01 前提: その週に献立が入っている（0件どうしの一致で素通りしない）',
+        wmSrcInDb.length === wmFuture.length && wmSrcInDb.length > 0,
+        JSON.stringify(wmSrcInDb),
+      )
+      const wmItems = await wmPage
+        .locator('[data-testid="copy-source-item"]')
+        .evaluateAll((els) =>
+          els.map((el) => ({
+            date: el.getAttribute('data-date'),
+            slot: el.getAttribute('data-slot'),
+            recipeId: Number(el.getAttribute('data-recipe-id')),
+            text: (el.textContent ?? '').replace(/​/g, ''),
+          })),
+        )
+      check(
+        'WEEKFMT-01(便IO・①) 画面に出ている中身が、その週に実際に入っているものと一致する',
+        JSON.stringify(
+          wmItems.map((i) => ({ date: i.date, slot: i.slot, recipeId: i.recipeId })),
+        ) === JSON.stringify(wmSrcInDb),
+        `画面=${JSON.stringify(wmItems)} / データ=${JSON.stringify(wmSrcInDb)}`,
+      )
+      check(
+        'WEEKFMT-01(便IO・①) 中身は料理名で読める（idだけの一致で素通りしない）',
+        wmItems.length > 0 &&
+          wmItems.every((i) =>
+            i.text.includes(wmSeeded.recipes.find((r) => r.id === i.recipeId)?.title ?? ' '),
+          ),
+        JSON.stringify(wmItems.map((i) => i.text)),
+      )
+
+      // ---- ⑧ 入れかたはこの画面にあり、既定は非破壊 ----
+      const wmFillMode = wmPage.locator('[data-testid="copy-pick-fill-mode"]')
+      check(
         'WEEKFMT-01(⑧) 前提: 入れかたの既定は「空いた枠だけ」',
-        (await wmPage.locator('[data-testid="fill-mode"]').inputValue()) === 'fillEmpty',
-        `いまの入れかた=${await wmPage.locator('[data-testid="fill-mode"]').inputValue()}`,
+        (await wmFillMode.inputValue()) === 'fillEmpty',
+        await wmFillMode.inputValue(),
       )
       wmDialogs.length = 0
-      await wmPage.locator('[data-testid="week-fill-run"]').click()
+      await wmPage.locator('[data-testid="copy-pick-run"]').click()
       await wmPage.waitForTimeout(1800)
       const wmAfterKeep = await wmPlans(wmFuture)
       check(
@@ -42485,12 +42529,12 @@ try {
         wmDialogs.length === 0,
         JSON.stringify(wmDialogs),
       )
-      // (b) 「総入れ替え」を選ぶと、決まっている枠もコピー元の献立に入れ替わる
-      await wmPage.locator('[data-testid="fill-mode"]').selectOption('replaceAll')
+      // ---- ⑧ 総入れ替えは規約Fの確認を通ってから入れ替える ----
+      await wmFillMode.selectOption('replaceAll')
       await wmPage.waitForTimeout(400)
       wmDialogs.length = 0
-      await wmPage.locator('[data-testid="week-fill-run"]').click()
-      await wmPage.waitForTimeout(2000)
+      await wmPage.locator('[data-testid="copy-pick-run"]').click()
+      await wmPage.waitForTimeout(2500)
       check(
         'WEEKFMT-01(⑧・規約F) 上書きするときは、押す前に確認の窓が出る',
         wmDialogs.length === 1,
@@ -42508,13 +42552,30 @@ try {
         new RegExp(`${wmBefore.length}\\s*[品件]`).test(wmConfirmText),
         wmConfirmText,
       )
-      const wmAfterSwap = await wmPlans(wmFuture)
       check(
-        'WEEKFMT-01(⑧) 上書きを選ぶと、決まっている枠もコピー元の献立に入れ替わる',
-        wmAfterSwap.length === wmFuture.length &&
-          wmAfterSwap.every((e) => e.recipeId === wmSeeded.source) &&
+        'WEEKFMT-01(便IO・規約F) 確認の窓は、消える先の週も日付で言う（この画面には週が2つあるため）',
+        wmConfirmText.includes(wmYmd(wmShown[0])) && wmConfirmText.includes(wmYmd(wmShown[6])),
+        wmConfirmText,
+      )
+      // ---- ② 入れたあと、選んだ週の中身がそのまま入れ先に入っている ----
+      const wmAfterSwap = await wmPlans(wmFuture)
+      const wmWant = wmFuture.map((d) => ({
+        date: d,
+        slot: 'dinner',
+        recipeId: wmSrcInDb.find((e) => e.date === wmShiftKey(d, -14))?.recipeId,
+      }))
+      check(
+        'WEEKFMT-01(便IO・②) 入れたあと、選んだ週の中身がそのまま入れ先の週に入っている',
+        JSON.stringify(
+          wmAfterSwap.map((e) => ({ date: e.date, slot: e.slot, recipeId: e.recipeId })),
+        ) === JSON.stringify(wmWant) &&
           wmAfterSwap.every((e) => !wmBefore.some((b) => b.id === e.id)),
-        `前=${JSON.stringify(wmBefore)} 後=${JSON.stringify(wmAfterSwap)}`,
+        `入った=${JSON.stringify(wmAfterSwap)} / 期待=${JSON.stringify(wmWant)}`,
+      )
+      check(
+        'WEEKFMT-01(便IO) 入れ終わると献立の「週」へ戻る（次の一手を探させない）',
+        !wmPage.url().includes('copy-week'),
+        wmPage.url(),
       )
 
       // ===== ⑪ 過去だけの週ではロックのボタンを出さない =====

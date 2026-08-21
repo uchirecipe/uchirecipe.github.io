@@ -52,6 +52,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+// 画面の節の名前は ja.ts の1か所から読む（書き写して二重管理しない＝規約H）
+import { ja } from '../src/i18n/ja.ts'
 import sharp from 'sharp'
 
 const BASE = process.env.BASE_URL ?? ''
@@ -717,7 +719,7 @@ try {
   await wait(page, 600)
 
   // 「献立を提案」(2026-08-20 便IK)。**画面を開いたままの状態**で撮る＝
-  // 「表示のしかた」と「献立テンプレート」は畳んだまま・「献立を提案」だけが開いている。
+  // 「表示のしかた」と「別の週・テンプレートから入れる」は畳んだまま・「献立を提案」だけが開いている。
   // ここを触る前に撮ること(このあと「表示のしかた」を開くので、開いた絵になってしまう)。
   //
   // day-suggest と違って、写る中身は引いた品では変わらない(候補の料理は出さない節なので、
@@ -728,7 +730,9 @@ try {
     .filter({ has: page.getByRole('button', { name: '表示のしかたを開く' }) })
   const weekTemplateGroup = page
     .locator('main section')
-    .filter({ has: page.getByRole('button', { name: '献立テンプレートを開く' }) })
+    .filter({
+      has: page.getByRole('button', { name: `${ja.mealPlan.weekGroupTemplateTitle}を開く` }),
+    })
   if ((await weekDisplayGroup.count()) && (await weekTemplateGroup.count())) {
     // 「日」「週」「月」の帯が画面上部に貼り付くので、上端は帯の高さ(54px)より下に置く
     await cropRange(page, 'plan-week-suggest', weekDisplayGroup, weekTemplateGroup, { top: 64 })

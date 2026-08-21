@@ -111,11 +111,9 @@ import {
   planDayLockToggle,
   planSlotLockToggle,
   planAllLockToggle,
-  planCopyLastWeek,
   planClearMealSlots,
   planShowWeekLock,
   PLAN_QUICK_MINUTES_OPTIONS,
-  COPY_SOURCE_WEEKS_BACK_OPTIONS,
   DEFAULT_PLAN_QUICK_MINUTES,
 } from '../logic/mealPlan'
 import type {
@@ -1519,17 +1517,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 切り分けが、実時間で開いた日によって変わらないようにするため）
   const today = useMemo(() => demo?.today ?? todayString(), [demo])
   const [weekStart, setWeekStart] = useState(() => weekDates(new Date())[0])
-  /**
-   * 「週をコピー」のコピー元が何週間前か（2026-08-20 便II・⑤。既定は1＝これまでと同じ先週）。
-   *
-   * オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
-   * 表示している週をコピーにはできない？」
-   * コピー**先**は表示している週のまま（週を送れば入る先も動く）で、コピー**元**をここで選ぶ
-   * ＝「先々週の献立を今週へ」がこの画面のままできる。
-   * 覚えるのは画面を開いているあいだだけ（次に開いたら先週に戻る）＝「今回はこの週から」という
-   * その場の指定で、好みとして残るものではないため。
-   */
-  const [copyWeeksBack, setCopyWeeksBack] = useState<number>(1)
   // 週タブの表示起点(2026-07-24 便BH-3・タスク3): 従来の週区切り(月曜始まり)⇄今日を先頭に7日間。
   // 既定は従来(週区切り)・選択は設定に記憶。ローリング表示はweekStartを起点に7日連続で並べる
   const rollingWeek = settings?.weekStartsToday === true
@@ -1919,43 +1906,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
     })
     return map
   }, [allPlanEntries])
-  // S-3 先週の献立をコピー(2026-07-25 便BU・docs/59): 表示中の週の1週間前(各日を7日戻した同じ曜日)の
-  // 献立を引くためのインデックス。datesを丸ごと-7日した範囲をliveQueryで取得し、date|slotキーでまとめる。
-  // ローリング表示・週区切り表示のどちらでも「同じ曜日の1週間前」を指す(shiftDate(-7)が常に週差になるため)
-  const prevWeekDates = useMemo(
-    () => dates.map((d) => shiftDate(d, -7 * copyWeeksBack)),
-    [dates, copyWeeksBack],
-  )
-  const prevWeekEntries = useMealPlanRange(prevWeekDates[0], prevWeekDates[6])
-  /**
-   * コピー元の7日間（2026-08-19 便IF・④。オーナー原文「『先週の献立をコピー』に、
-   * コピー元の日付期間を書いてほしい」）。
-   * 表示している週を前後に送るとコピー元も一緒に動くので、**実際に写す7日間を毎回ここで作る**
-   * （文言の側に「先週」と書き込まない）。書き方は週の移動ボタンの日付と同じ YYYY/MM/DD。
-   */
-  const copySourceLabel = useMemo(
-    () => ({
-      start: prevWeekDates[0].replaceAll('-', '/'),
-      end: prevWeekDates[6].replaceAll('-', '/'),
-    }),
-    [prevWeekDates],
-  )
-  /**
-   * 「コピー元の週」のプルダウンに並べる選択肢（2026-08-20 便II・⑤）。
-   * 何週間前かだけだと、どの週なのかを数えないと分からないので、**実際に写す7日間の日付**も
-   * 一緒に出す（便IF・④で説明文に日付を入れたのと同じ理由）。日付は月/日だけにする
-   * ＝1〜4週間前の範囲では年が要らず、プルダウンの1行に収まる。
-   */
-  const copySourceWeekOptions = useMemo(
-    () =>
-      COPY_SOURCE_WEEKS_BACK_OPTIONS.map((n) => ({
-        n,
-        start: shiftDate(dates[0], -7 * n).slice(5).replaceAll('-', '/'),
-        end: shiftDate(dates[6], -7 * n).slice(5).replaceAll('-', '/'),
-      })),
-    [dates],
-  )
-
   // 月タブの日タップモーダル用（monthEntries由来なので表示帯フィルタに関係なく朝昼夕すべてを見せる）
   const dayModalEntries = useMemo(() => {
     if (!dayModalDate) return []
@@ -2545,6 +2495,12 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         setWeekStart(
           settings?.weekStartsToday ? date : weekDates(new Date(`${date}T00:00:00`))[0],
         )
+        // 2026-08-21 便IO: 「今日から7日間」表示の初期化（weekModeInitRef）は、あとから設定を
+        // 読み終えた時点で週を今日へ寄せ直す。ここで済み扱いにしないと、日付を指定して開いた週が
+        // 一瞬で今日の週に戻っていた（月タブの「この週を開く」・買い物メモからの「その日を見る」・
+        // 別の週から入れたあとの戻り先が、すべて今日の週に着地していた）。
+        // 下の WEEK_RETURN_PARAM の枝は同じ手当てを先にしてある
+        weekModeInitRef.current = true
         setPendingScrollDate(date)
       } else if (searchParams.get(WEEK_RETURN_PARAM) === '1') {
         // 2026-08-07 便DT-2(オーナー指示): レシピ詳細の「戻る」で帰ってきたときは、
@@ -4136,12 +4092,8 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 埋め方そのものは executeFill が担う（便CB-2で月タブの一括提案と共通化した）。
    */
   const fillWeek = async () => {
-    // 2026-08-07 便DT-7(オーナー指示): 「先週の献立をコピー」がONのときは、このボタンが
-    // 提案ではなく先週の写しを実行する。提案の条件・入れかたはこの経路では一切読まない
-    if (copyLastWeekMode) {
-      await copyLastWeek()
-      return
-    }
+    // 2026-08-21 便IO: 別の週から入れる道は専用の画面へ移した（pages/MealPlanCopyWeekPage.tsx）。
+    // このボタンが実行するのは、おまかせの提案だけになった
     if (!recipes) return
     setMessage('')
     // レシピが1件も無いときは無反応にしない(2026-07-29 便CD/MP-20)。
@@ -4352,110 +4304,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         ),
       )
     }
-  }
-
-  /**
-   * S-3 先週の献立をコピー(2026-07-25 便BU・docs/59)。
-   * 表示中の週の各日(今日・未来日のみ)へ、その1週間前の同じ曜日の献立を複製する。
-   * - コピーした枠は手動配置(auto=false)として保存する：ユーザーが意図して「先週を写した」枠なので、
-   *   次の「まとめて献立を立てる」で再抽選(上書き)されないよう保護側に倒す(既存のauto/手動保護と整合)。
-   * - 過去日・非表示帯・鍵の掛かった食事は対象外(週タブの編集グリッドと同じ範囲)。
-   *
-   * 2026-08-19 便IF・⑧（オーナー原文「『先週の献立をコピー』で、すでに決まっている日も
-   * 上書きできる選択ができない」）: 入れかた（空いた枠だけ／総入れ替え）がここにも効く。
-   *  - 空いた枠だけ … 従来どおり非破壊。確認文は「入る件数」と「残る件数」を書く
-   *  - 総入れ替え   … 今日以降の献立を消してから入れ直す。**消す操作なので規約Fの確認を必ず出す**
-   *                   （消えるものを件数つきで／残るものも書く）
-   *
-   * 2026-08-19 便IF・④（オーナー原文「『先週の献立をコピー』に、コピー元の日付期間を
-   * 書いてほしい」）: 説明・確認・結果のすべてに、実際に写す7日間の日付を差し込む。
-   */
-  const copyLastWeek = async () => {
-    setMessage('')
-    const replaceAll = fillMode === 'replaceAll'
-    // どこへ何を写すかの判断は純ロジックへ切り出した（2026-08-08 便DX。鍵の掛かった食事を
-    // 外す条件も含めてテストで固定するため）
-    const { ops, sourceTotal, lockedSlotCount, entryIdsToRemove, replacedSlotCount } =
-      planCopyLastWeek({
-        dates,
-        today,
-        visibleSlots,
-        entries: entries ?? [],
-        prevEntries: prevWeekEntries ?? [],
-        // コピー元の週（2026-08-20 便II・⑤）。prevWeekEntries も同じ週数で引いてある
-        weeksBack: copyWeeksBack,
-        lockedKeys,
-        replaceAll,
-      })
-    const lockNotice = lockNoticeOf(lockedSlotCount)
-    const withRange = (text: string) =>
-      text.replace('{start}', copySourceLabel.start).replace('{end}', copySourceLabel.end)
-    // コピー元が空の週から「総入れ替え」を走らせると、表示中の週を黙って空にすることになる。
-    // 写すものが1品も無いときは、どちらの入れかたでも何もしない（消すだけの操作にしない）
-    if (sourceTotal === 0) {
-      setMessage(withNotice(withRange(ja.mealPlan.copyLastWeekNoSource), lockNotice))
-      return
-    }
-    if (ops.length === 0 && entryIdsToRemove.length === 0) {
-      setMessage(
-        withNotice(
-          replaceAll ? ja.mealPlan.copyReplaceAllNothing : ja.mealPlan.copyLastWeekNoRoom,
-          lockNotice,
-        ),
-      )
-      return
-    }
-    if (replaceAll) {
-      // 規約F: 何が消えて何が残るかを件数つきで両方書く
-      const ok = await confirm({
-        title: withRange(ja.mealPlan.copyReplaceAllConfirmTitle).replace('{n}', String(ops.length)),
-        body: '',
-        bullets: [
-          {
-            label: ja.mealPlan.fillModeReplaceAllGoneLabel,
-            text: ja.mealPlan.copyReplaceAllGone
-              .replace('{s}', String(replacedSlotCount))
-              .replace('{n}', String(entryIdsToRemove.length)),
-          },
-          {
-            label: ja.mealPlan.fillModeReplaceAllKeptLabel,
-            text: ja.mealPlan.copyReplaceAllKept,
-          },
-        ],
-        notes: lockNotice ? [lockNotice] : [],
-        confirmLabel: ja.mealPlan.copyLastWeekConfirmOk,
-      })
-      if (!ok) return
-      await removeMealEntries(entryIdsToRemove)
-      for (const op of ops) {
-        await addMealEntry(op.date, op.slot, op.recipeId, op.role)
-      }
-      setMessage(
-        withNotice(
-          withRange(ja.mealPlan.copyReplaceAllDone).replace('{n}', String(ops.length)),
-          lockNotice,
-        ),
-      )
-      return
-    }
-    // 空いた枠だけ（非破壊）。残る品数も数えて書く（規約F: 何が残るかも件数つきで）
-    const keptCount = (entries ?? []).filter(
-      (e) => !isPastDate(e.date, today) && visibleSlots.includes(e.slot),
-    ).length
-    const ok = await confirm({
-      title: withRange(ja.mealPlan.copyLastWeekConfirmTitle).replace('{n}', String(ops.length)),
-      body: ja.mealPlan.copyLastWeekConfirm.replace('{k}', String(keptCount)),
-      notes: lockNotice ? [lockNotice] : [],
-      confirmLabel: ja.mealPlan.copyLastWeekConfirmOk,
-    })
-    if (!ok) return
-    // auto=false(既定)で追加＝手動配置として保護される
-    for (const op of ops) {
-      await addMealEntry(op.date, op.slot, op.recipeId, op.role)
-    }
-    setMessage(
-      withNotice(withRange(ja.mealPlan.copyLastWeekDone).replace('{n}', String(ops.length)), lockNotice),
-    )
   }
 
   /**
@@ -4972,20 +4820,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [fillMode, setFillMode] = useState<'fillEmpty' | 'replaceAll'>('fillEmpty')
 
-  /**
-   * 「まとめて献立を入力」が、どこから献立を持ってくるか（2026-08-19 便IF・⑥）。
-   *  - 'suggest' … おまかせ（提案の条件で主菜・副菜を選ぶ）
-   *  - 'copy'    … 先週をコピー（表示している週の1週間前の同じ曜日から写す）
-   *
-   * 2026-08-07 便DT-7 でスイッチ1つ（ONで提案のかわりにコピー）にした中身をそのまま、
-   * 日タブの「1品」／「献立」と同じ2択の切り替えに置き換えたもの
-   * （オーナー原文「週は、日の、できることが増えたバージョン」）。
-   * コピーのあいだ提案の条件（時短・ジャンル・目的）は意味を持たないので、
-   * 画面でも無効化して「効きません」を見た目で示す（効かない操作を押せる状態で置かない）。
-   * 入れかた（空いた枠だけ／総入れ替え）は 2026-08-19 便IF・⑧ でコピーにも効くようになった。
-   */
-  const [fillSource, setFillSource] = useState<'suggest' | 'copy'>('suggest')
-  const copyLastWeekMode = fillSource === 'copy'
 
   // 週タブ「この週の◯◯をまとめて空にする」(便U-4 Fable設計: 「朝のみ削除したい」への回答)。
   // 食事を選び、確認ダイアログを経てから、表示中の週(dates[0]〜dates[6]。週タブで
@@ -7516,62 +7350,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
         {renderWeekGroupHeader('auto', ja.mealPlan.weekGroupAutoTitle)}
         <Collapse open={weekGroupOpen.auto}>
           <>
-            {/* 出しかたの2択(2026-08-19 便IF・⑥)。日タブの「1品」／「献立」と同じ形
-                （地色で選択中を言い切る・2列で必ず横1列・下のボタンは1つのまま） */}
-            <div
-              role="group"
-              aria-label={ja.mealPlan.fillSourceGroupLabel}
-              className="mt-[var(--space-sm)] grid grid-cols-2 gap-1 rounded-md border border-edge bg-app p-1"
-            >
-              {(
-                [
-                  ['suggest', ja.mealPlan.fillSourceSuggest],
-                  ['copy', ja.mealPlan.fillSourceCopy],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  data-testid={value === 'suggest' ? 'plan-source-suggest' : 'plan-source-copy'}
-                  onClick={() => setFillSource(value)}
-                  aria-pressed={fillSource === value}
-                  className={`rounded-sm py-3 text-base font-bold ${
-                    fillSource === value ? 'bg-accent text-on-accent shadow-sm' : 'text-ink-muted'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* コピー元の週（2026-08-20 便II・⑤。オーナー原文「先週をコピーは、先週以外を
-                今週に反映したい時に使えない。表示している週をコピーにはできない？」）。
-                コピー先は表示している週のままで、**コピー元をここで選ぶ**＝「先々週の献立を今週へ」が
-                この画面のままできる。「おまかせ」を選んでいるあいだは出さない
-                （押しても効かない欄を置かない＝この節のほかの条件と同じ作法） */}
-            {copyLastWeekMode && (
-              <label className="mt-[var(--space-md)] block">
-                <span className="block text-sm font-bold text-ink-muted">
-                  {ja.mealPlan.copySourceWeekLabel}
-                </span>
-                <select
-                  data-testid="copy-source-week"
-                  value={copyWeeksBack}
-                  onChange={(e) => setCopyWeeksBack(Number(e.target.value))}
-                  className="select-control mt-1 w-full"
-                >
-                  {copySourceWeekOptions.map(({ n, start, end }) => (
-                    <option key={n} value={n}>
-                      {ja.mealPlan.copySourceWeekOption
-                        .replace('{n}', String(n))
-                        .replace('{start}', start)
-                        .replace('{end}', end)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
             {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
                 空いている枠だけを埋めるのか、これからの献立を総入れ替えするのかを選ぶ。
 
@@ -7600,27 +7378,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <option value="replaceAll">{ja.mealPlan.fillModeReplaceAll}</option>
                 </select>
               </label>
-              {/* 押すと何が起きるかの1行。出しかた×入れかたの4通りを1か所で言い切る
-                  （2026-08-19 便IF・④⑧: コピー側にはコピー元の7日間の日付が入る）。
-                  同じことを2か所で言わない＝旧 fillWeekHint はここに畳んだ */}
+              {/* 押すと何が起きるかの1行（2026-08-19 便IF・④）。
+                  同じことを2か所で言わない＝旧 fillWeekHint はここに畳んだ。
+                  2026-08-21 便IO: 別の週から入れる道はこの節から出したので、
+                  ここが言うのは「おまかせ×入れかた」の2通りだけになった */}
               <p data-testid="fill-hint" className="mt-1 text-xs text-ink-muted">
-                {copyLastWeekMode
-                  ? (fillMode === 'replaceAll'
-                      ? ja.mealPlan.copyReplaceAllHint
-                      : ja.mealPlan.copyFillEmptyHint
-                    )
-                      .replace('{start}', copySourceLabel.start)
-                      .replace('{end}', copySourceLabel.end)
-                  : fillMode === 'replaceAll'
-                    ? ja.mealPlan.fillModeReplaceAllHint
-                    : ja.mealPlan.fillModeFillEmptyHint}
+                {fillMode === 'replaceAll'
+                  ? ja.mealPlan.fillModeReplaceAllHint
+                  : ja.mealPlan.fillModeFillEmptyHint}
               </p>
             </div>
 
             {/* 現在の条件: 時短優先・ジャンル・栄養から組む。押すと窓が開く(2026-08-19 便ID・④)。
                 2026-07-30 便CH/C11: 同じ部品を月タブにも出す(renderSuggestConditions)。
                 2026-08-07 便DT-7: 先週コピーを選んでいるあいだは効かないのでグレーアウトする */}
-            {renderSuggestConditions(copyLastWeekMode)}
+            {renderSuggestConditions()}
           </>
         </Collapse>
 
@@ -7641,13 +7413,22 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           onClick={() => void fillWeek()}
           className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
         >
-          {copyLastWeekMode ? <Copy size={20} aria-hidden /> : <Dices size={20} aria-hidden />}
+          <Dices size={20} aria-hidden />
           {ja.mealPlan.fillWeek}
         </button>
       </section>
 
-      {/* グループ3: 献立テンプレート(2026-07-29 便CB-2・docs/59 A-1＋B-2)。
-          保存＝表示中の週を曜日ごと覚える／適用＝空いているところにだけ入れる(非破壊)。
+      {/* グループ3: 別の週・テンプレートから入れる。
+          ・別の週から入れる … 週を送って中身を見ながら選ぶ画面へ(2026-08-21 便IO)
+          ・テンプレートを適用 … 保存した曜日ごとの雛形を、空いているところにだけ入れる(非破壊)
+          ・表示している週をテンプレートとして保存 … 入れ先の週を曜日ごと覚える
+            (2026-07-29 便CB-2・docs/59 A-1＋B-2)
+
+          2026-08-21 便IO: オーナー原文「『先週の献立をコピー』は、テンプレート機能の派生として
+          まとめて配置した方が自然？」に沿って、別の週から入れる道をこの節へ移した。
+          「献立を提案」の出しかたの2択(おまかせ／週をコピー)は無くしてある
+          ＝**同じことをする道を2つ置かない**。節の名前も中身に合わせて言い換えた
+          (「献立テンプレート」のままだと、過ぎた週をそのまま入れる道が名前の下に隠れる)。
 
           2026-08-21 便IN: 「保存」と「適用」の2つを**折りたたみの外**へ出した。
           この節は畳むと見出ししか残らず、テンプレートを作る道も使う道も消えていた。
@@ -7661,6 +7442,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('template', ja.mealPlan.weekGroupTemplateTitle)}
         <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+          {/* 別の週から入れる(2026-08-21 便IO)。入れ先は**いま表示している週のまま**なので、
+              その7日間の初日を渡す＝あちらの画面で週を送っても入れ先は動かない */}
+          <Link
+            to={`/meal-plan/copy-week?to=${dates[0]}`}
+            data-testid="week-copy-pick"
+            /* tap-target: 折りたたみの外に常設するので、当たり判定を44pxに広げる */
+            className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+          >
+            <Copy size={14} aria-hidden />
+            {ja.mealPlan.copyPickTitle}
+          </Link>
           <button
             type="button"
             data-testid="week-template-save"

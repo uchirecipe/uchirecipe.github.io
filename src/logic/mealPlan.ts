@@ -163,14 +163,74 @@ export type MealGenre = (typeof MEAL_GENRES)[number]
 export const PLAN_QUICK_MINUTES_OPTIONS = [10, 15, 20, 30] as const
 
 /**
- * 「週をコピー」で選べるコピー元の週（何週間前か・2026-08-20 便II・⑤）。
+ * 「別の週から入れる」で、どこまでさかのぼれるか（2026-08-21 便IO）。
  *
- * オーナー原文「先週をコピーは、先週以外を今週に反映したい時に使えない。
- * 表示している週をコピーにはできない？」への第1段階。
- * 4週間前まで＝1か月ぶんをさかのぼれる。これより前の週や、週の区切りに合わない任意の7日間を
- * 中身を見ながら選ぶ形は、画面を1つ作る規模なので別に立てる（司令部と共有済み）。
+ * 2026-08-20 便II・⑤の第1段階は「1〜4週間前」の固定のプルダウンだったが、
+ * オーナー原文「先週に限らず、ユーザーが選んだ７日間を指定（献立一覧で表示して、今表示している
+ * ７日間の献立を今週に反映、と言った感じ？献立の中身も確認できるし。）」を受けて、
+ * **中身を見ながら週を送って選ぶ画面**（pages/MealPlanCopyWeekPage.tsx）に置き換えた。
+ * さかのぼれる先は数で決め打ちせず、**献立のデータがある一番古い日**で決める:
+ *  ・献立の行は日付で消したりしない（db/mealPlan.ts に期間での掃除は無い）ので、
+ *    アプリを使い始めた週まで届く＝「去年の同じ時期」も選べる
+ *  ・データより前の週へは送れない＝送っても必ず空の週しか出ない道を作らない
+ *
+ * @param targetStart 入れ先の週の初日（YYYY-MM-DD）
+ * @param earliestPlanDate 献立が入っている一番古い日（1件も無ければ undefined）
+ * @returns 何週間前まで見られるか（最低でも1＝1週間前は必ず見られる）
  */
-export const COPY_SOURCE_WEEKS_BACK_OPTIONS = [1, 2, 3, 4] as const
+export function maxCopySourceWeeksBack(targetStart: string, earliestPlanDate?: string): number {
+  if (!earliestPlanDate || earliestPlanDate >= targetStart) return 1
+  // 夏時間のある地域で1時間ずれても日数を取り違えないよう、丸めてから日数にする
+  const days = Math.round(
+    (new Date(`${targetStart}T00:00:00`).getTime() -
+      new Date(`${earliestPlanDate}T00:00:00`).getTime()) /
+      86400000,
+  )
+  return Math.max(1, Math.ceil(days / 7))
+}
+
+/** 「別の週から入れる」の画面が並べる、その週の1日ぶんの中身 */
+export interface CopySourceDay {
+  date: string
+  /** その日に入っている食事（表示している食事だけ・献立の無い食事は並べない） */
+  slots: { slot: MealSlot; recipeIds: number[] }[]
+}
+
+/**
+ * 選んだ週の中身を、画面に並べる形へまとめる（2026-08-21 便IO）。
+ *
+ * 守ること:
+ * - **dates に含まれない日の献立は捨てる**。週を送るたびに範囲で引き直すので、取得範囲の
+ *   重なりで別の週の献立が混ざると「見えているもの」と「入るもの」が食い違う
+ * - **表示していない食事は並べない**。その食事には入らない（planCopyLastWeek が visibleSlots で
+ *   絞る）ので、入らないものを見せない
+ * - 並びは 日付 → 食事（MEAL_SLOTS の順）→ 受け取った行の順。行の順を変えないのは、
+ *   planCopyLastWeek が写す順と1対1にそろえるため＝**見えている中身がそのまま入る**
+ * - 献立の無い日も空のまま残す（7日ぶんの日付が抜けると、どの日が空なのかが読めない）
+ */
+export function copySourceWeekView(
+  entries: Pick<MealPlanEntry, 'date' | 'slot' | 'recipeId'>[],
+  dates: string[],
+  visibleSlots: MealSlot[],
+): CopySourceDay[] {
+  const byKey = new Map<string, number[]>()
+  const target = new Set(dates)
+  for (const e of entries) {
+    if (!target.has(e.date)) continue
+    if (!visibleSlots.includes(e.slot)) continue
+    const key = `${e.date}|${e.slot}`
+    const list = byKey.get(key)
+    if (list) list.push(e.recipeId)
+    else byKey.set(key, [e.recipeId])
+  }
+  const slotOrder = MEAL_SLOTS.filter((slot) => visibleSlots.includes(slot))
+  return dates.map((date) => ({
+    date,
+    slots: slotOrder
+      .map((slot) => ({ slot, recipeIds: byKey.get(`${date}|${slot}`) ?? [] }))
+      .filter((s) => s.recipeIds.length > 0),
+  }))
+}
 
 /**
  * 分数を指定しなかったときの「◯分以内」（2026-08-19 便HT）。

@@ -5,6 +5,7 @@ import RecipeFormPage from './pages/RecipeFormPage'
 import RecipeDetailPage from './pages/RecipeDetailPage'
 import MealPlanPage from './pages/MealPlanPage'
 import MealTemplatesPage from './pages/MealTemplatesPage'
+import MealPlanCopyWeekPage from './pages/MealPlanCopyWeekPage'
 import MonthDemoPage from './pages/MonthDemoPage'
 import CookNaviPage from './pages/CookNaviPage'
 import ShoppingPage from './pages/ShoppingPage'
@@ -112,6 +113,9 @@ function App() {
               <Route path="/recipes/:id" element={<RecipeDetailPage />} />
               <Route path="/recipes/:id/edit" element={<RecipeFormPage />} />
               <Route path="/meal-plan" element={<MealPlanPage />} />
+              {/* 別の週の中身を見ながら選んで入れる(2026-08-21 便IO)。献立の「週」タブから開く。
+                  入れ先は ?to= で受け取って固定する＝この画面で週を送っても入れ先は動かない */}
+              <Route path="/meal-plan/copy-week" element={<MealPlanCopyWeekPage />} />
               {/* 献立テンプレの中身を見る・直す(2026-08-02 便DE-9)。献立の「週」タブから開く */}
               <Route path="/meal-templates" element={<MealTemplatesPage />} />
               {/* 月間画面のサンプルデモ(2026-08-02 便DC)。月タブ・設定のPro紹介・LP/説明書からここへ来る */}

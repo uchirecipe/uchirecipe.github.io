@@ -14,6 +14,21 @@ export function useMealPlanRange(startDate: string, endDate: string) {
 }
 
 /**
+ * 献立が入っている一番古い日（2026-08-21 便IO）。
+ *
+ * 「別の週から入れる」で、どこまで週を送れるかを決めるのに使う
+ * （logic/mealPlan.ts の maxCopySourceWeeksBack）。date は索引を張ってあるので、
+ * 全件を読まずに先頭の1件だけを取る。
+ *
+ * 返し分け: 読み込み中は undefined、**献立が1件も無いときは null**、あれば日付。
+ * 画面は「まだ何も入れていない人」にだけ案内を出すので、この2つを見分けられる必要がある
+ * （読み込み中に「まだありません」と出すと、直後に消える案内を見せることになる）。
+ */
+export function useEarliestMealPlanDate() {
+  return useLiveQuery(async () => (await db.mealPlans.orderBy('date').first())?.date ?? null, [])
+}
+
+/**
  * 指定の日・枠・役割（主菜/副菜）に新しいレシピの割り当てを1件追加する。
  * 同じ日×枠に複数件（主菜+副菜、または同じ役割を複数）を追加できる
  * （2026-07-13 献立の主菜+副菜構成対応。以前は1枠=1件だったが、mealPlansの

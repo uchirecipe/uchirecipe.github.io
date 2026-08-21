@@ -16769,12 +16769,9 @@ eq(
     weekCostTitle: ja.mealPlan.weekCostTitle,
     // 2026-08-19 便IF・⑥: 旧 fillWeekHint は無くし、出しかた×入れかたの4通りの1行にまとめた
     fillModeFillEmptyHint: ja.mealPlan.fillModeFillEmptyHint,
-    copyFillEmptyHint: ja.mealPlan.copyFillEmptyHint,
-    copyReplaceAllHint: ja.mealPlan.copyReplaceAllHint,
-    copyReplaceAllConfirmTitle: ja.mealPlan.copyReplaceAllConfirmTitle,
-    copyReplaceAllGone: ja.mealPlan.copyReplaceAllGone,
-    copyReplaceAllKept: ja.mealPlan.copyReplaceAllKept,
-    copyReplaceAllDone: ja.mealPlan.copyReplaceAllDone,
+    // 2026-08-21 便IO: コピーの文言(copyWeek*)はここから外した。別の画面へ移っており、
+    // その画面には週が2つある（入れ先と、中身を見ている週）ので「表示している週」では
+    // どちらを指すか読めない。あちらは日付で言い切る規律にした＝IO-5 が見る
     fillModeReplaceAllHint: ja.mealPlan.fillModeReplaceAllHint,
     // 2026-08-15 便GW: 確認文を見出し＋項目に割ったので、週を名乗る側(見出し)も見る
     fillModeReplaceAllConfirmTitle: ja.mealPlan.fillModeReplaceAllConfirmTitle,
@@ -24098,8 +24095,8 @@ Aみりん 大さじ1
     // 2本に分かれた。「上書きしない」と言えるのは**空いた枠だけ**を選んでいるときの説明と
     // 確認の窓の本文の2つ（総入れ替えの側は消してから入れるので、別の言い方で言う＝IF-8が見る）
     for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyFillEmptyHint],
-      ['空いた枠だけの確認の窓の本文', ja.mealPlan.copyLastWeekConfirm],
+      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
+      ['空いた枠だけの確認の窓の本文', ja.mealPlan.copyWeekConfirm],
     ]) {
       eq(
         `ID-6 ${name}は「上書きします」と言わない(この入れかたは上書きしない)`,
@@ -24108,8 +24105,8 @@ Aみりん 大さじ1
       )
     }
     for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyFillEmptyHint],
-      ['総入れ替えのときの説明', ja.mealPlan.copyReplaceAllHint],
+      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
+      ['総入れ替えのときの説明', ja.mealPlan.copyWeekReplaceAllHint],
     ]) {
       eq(
         `ID-6 ${name}は、押すと何が入るかを「入力」で言う`,
@@ -24352,11 +24349,11 @@ Aみりん 大さじ1
   // 実際に出る日付が画面の週と合っているかは e2e の WEEKFMT-01 が見る
   {
     const rangeTexts = {
-      '空いた枠だけのときの説明': ja.mealPlan.copyFillEmptyHint,
-      '総入れ替えのときの説明': ja.mealPlan.copyReplaceAllHint,
-      '空いた枠だけの確認の窓の見出し': ja.mealPlan.copyLastWeekConfirmTitle,
-      '総入れ替えの確認の窓の見出し': ja.mealPlan.copyReplaceAllConfirmTitle,
-      'コピー元が空のときの知らせ': ja.mealPlan.copyLastWeekNoSource,
+      '空いた枠だけのときの説明': ja.mealPlan.copyWeekFillEmptyHint,
+      '総入れ替えのときの説明': ja.mealPlan.copyWeekReplaceAllHint,
+      '空いた枠だけの確認の窓の見出し': ja.mealPlan.copyWeekConfirmTitle,
+      '総入れ替えの確認の窓の見出し': ja.mealPlan.copyWeekReplaceAllConfirmTitle,
+      'コピー元が空のときの知らせ': ja.mealPlan.copyWeekNoSource,
     }
     for (const [name, text] of Object.entries(rangeTexts)) {
       eq(
@@ -24365,7 +24362,7 @@ Aみりん 大さじ1
         true,
       )
       eq(
-        `IF-4 ${name}は「先週」と決め打ちで書かない(表示する週で変わるため)`,
+        `IF-4 ${name}は「先週」と決め打ちで書かない(選んだ週で変わるため)`,
         typeof text === 'string' && !text.includes('先週'),
         true,
       )
@@ -24376,19 +24373,19 @@ Aみりん 大さじ1
   {
     eq(
       'IF-8 空いた枠だけのコピーの説明は「上書きしません」を言う(実装も上書きしない)',
-      typeof ja.mealPlan.copyFillEmptyHint === 'string' &&
-        ja.mealPlan.copyFillEmptyHint.includes('上書きしません'),
+      typeof ja.mealPlan.copyWeekFillEmptyHint === 'string' &&
+        ja.mealPlan.copyWeekFillEmptyHint.includes('上書きしません'),
       true,
     )
     eq(
       'IF-8 総入れ替えのコピーの説明は「消してから」を言う(実装は消してから入れる)',
-      typeof ja.mealPlan.copyReplaceAllHint === 'string' &&
-        ja.mealPlan.copyReplaceAllHint.includes('消してから'),
+      typeof ja.mealPlan.copyWeekReplaceAllHint === 'string' &&
+        ja.mealPlan.copyWeekReplaceAllHint.includes('消してから'),
       true,
     )
     for (const [name, text] of [
-      ['空いた枠だけのときの説明', ja.mealPlan.copyFillEmptyHint],
-      ['総入れ替えのときの説明', ja.mealPlan.copyReplaceAllHint],
+      ['空いた枠だけのときの説明', ja.mealPlan.copyWeekFillEmptyHint],
+      ['総入れ替えのときの説明', ja.mealPlan.copyWeekReplaceAllHint],
     ]) {
       eq(
         `IF-8 ${name}から「入れかたは反映しません」が消えている(入れかたが効くようになったため)`,
@@ -24399,34 +24396,22 @@ Aみりん 大さじ1
     // 規約F: 消える側の確認は「何が消えて何が残るか」を件数つきで両方言う
     eq(
       'IF-8 総入れ替えのコピーの確認に、消える品数の差し込み口がある',
-      typeof ja.mealPlan.copyReplaceAllGone === 'string' &&
-        ja.mealPlan.copyReplaceAllGone.includes('{n}') &&
-        ja.mealPlan.copyReplaceAllGone.includes('{s}'),
+      typeof ja.mealPlan.copyWeekReplaceAllGone === 'string' &&
+        ja.mealPlan.copyWeekReplaceAllGone.includes('{n}') &&
+        ja.mealPlan.copyWeekReplaceAllGone.includes('{s}'),
       true,
     )
     eq(
       'IF-8 総入れ替えのコピーの確認に、残るものを言う文がある',
-      typeof ja.mealPlan.copyReplaceAllKept === 'string' &&
-        ja.mealPlan.copyReplaceAllKept.length > 0,
+      typeof ja.mealPlan.copyWeekReplaceAllKept === 'string' &&
+        ja.mealPlan.copyWeekReplaceAllKept.length > 0,
       true,
     )
   }
 
-  // --- ⑥ 出しかたの2択(おまかせ／先週をコピー)の名前 ---
-  // 便ID・②で入れかたの2つを短く横1列にしたのと同じ作法にそろえる（長いと2段に割れて2択に見えない）
-  {
-    for (const [name, label] of [
-      ['おまかせ側', ja.mealPlan.fillSourceSuggest],
-      ['先週のコピー側', ja.mealPlan.fillSourceCopy],
-    ]) {
-      eq(
-        `IF-6 出しかたのボタン(${name})は6文字以内`,
-        typeof label === 'string' && label.length > 0 && label.length <= 6,
-        true,
-      )
-    }
-    neq('IF-6 2つのボタンは違う名前', ja.mealPlan.fillSourceSuggest, ja.mealPlan.fillSourceCopy)
-  }
+  // --- ⑥ 出しかたの2択(おまかせ／週をコピー)は 2026-08-21 便IO で無くした ---
+  // 別の週から入れる道は専用の画面へ独立したので、この節に2択そのものが無い。
+  // 「古い文言が残っていないこと」は IO-4 が見る（消したはずのキーが復活したら赤くなる）
 }
 
 // ============================================================================
@@ -24493,27 +24478,8 @@ Aみりん 大さじ1
     )
   }
 
-  // --- ⑤ 文言: 出しかたの名前とコピー元の週の欄 ---
-  {
-    eq(
-      'II-5 出しかたのボタンに「先週」が残っていない（コピー元は選べるようになった）',
-      typeof ja.mealPlan.fillSourceCopy === 'string' && !ja.mealPlan.fillSourceCopy.includes('先週'),
-      true,
-    )
-    eq(
-      'II-5 コピー元の週の欄に名前がある',
-      typeof ja.mealPlan.copySourceWeekLabel === 'string' && ja.mealPlan.copySourceWeekLabel.length > 0,
-      true,
-    )
-    eq(
-      'II-5 コピー元の選択肢に、何週間前かと実際の7日間の日付の差し込み口がある',
-      typeof ja.mealPlan.copySourceWeekOption === 'string' &&
-        ja.mealPlan.copySourceWeekOption.includes('{n}') &&
-        ja.mealPlan.copySourceWeekOption.includes('{start}') &&
-        ja.mealPlan.copySourceWeekOption.includes('{end}'),
-      true,
-    )
-  }
+  // --- ⑤ 文言: 2026-08-21 便IO で「コピー元の週」のプルダウンごと無くした ---
+  // 中身を見ながら週を送って選ぶ画面に置き換えたので、文言の見張りは IO-4 が引き継ぐ
 
   // --- ① 調理時間の条件は「優先」ではなく「除外」（文言を実装に合わせる） ---
   // オーナー原文「「何分以内を優先する？」→指定した時間より長いレシピも選ばれるということ？
@@ -25183,6 +25149,161 @@ Aみりん 大さじ1
   )
 }
 
+// ============================================================================
+// 2026-08-21 便IO: 「別の週から入れる」（中身を見ながら選ぶ）
+//
+// オーナー原文:
+//   「先週に限らず、ユーザーが選んだ７日間を指定（献立一覧で表示して、今表示している
+//     ７日間の献立を今週に反映、と言った感じ？献立の中身も確認できるし。いい案求む）
+//     →この週の献立をコピー（名前はちゃんと考えて）、この週の献立をテンプレートとして
+//     保存、みたいな？」
+//
+// 効く理由: 「先週」だけを選べる形では、**何が入っていたか思い出せないまま押す**ことになる。
+// 中身を見ながら選べることが本題なので、測るのも次の2つにする:
+//   ① 画面に並べる「その週の中身」が、実際にその週に入っているものと一致する
+//   ② 入れたあと、その中身がそのまま入れ先の週に入っている
+//
+// 禁じ手よけ:
+//  ・「今日」もコピー元も引数で渡す＝走らせた日の曜日・月替わりで結論が変わらない
+//  ・文言は ja.ts から読む（画面の字を書き写さない）
+//  ・関数が無いときは素通りせず、その場でNGにする
+// ============================================================================
+{
+  const io = await import('../src/logic/mealPlan.ts')
+  const viewOf = io.copySourceWeekView
+  const maxBack = io.maxCopySourceWeeksBack
+  eq('IO-0 その週の中身を作る関数がある（copySourceWeekView）', typeof viewOf === 'function', true)
+  eq(
+    'IO-0 さかのぼれる上限を決める関数がある（maxCopySourceWeeksBack）',
+    typeof maxBack === 'function',
+    true,
+  )
+  if (typeof viewOf === 'function' && typeof maxBack === 'function') {
+    const days = (start, n) => Array.from({ length: n }, (_, i) => io.shiftDate(start, i))
+    // 日付は固定して渡す（曜日・月替わりの前提を置かない）。SRCの2週間あとがDST
+    const SRC = days('2026-08-03', 7)
+    const DST = days('2026-08-17', 7)
+    const source = [
+      { date: SRC[0], slot: 'dinner', recipeId: 11, role: 'main' },
+      { date: SRC[0], slot: 'dinner', recipeId: 12, role: 'side' },
+      { date: SRC[0], slot: 'breakfast', recipeId: 13, role: 'main' },
+      { date: SRC[3], slot: 'dinner', recipeId: 14, role: 'main' },
+      // この週の外（1日前）。取得範囲の重なりでまぎれ込みやすいので、必ず捨てることを見る
+      { date: io.shiftDate(SRC[0], -1), slot: 'dinner', recipeId: 99, role: 'main' },
+    ]
+    const visible = ['dinner']
+    const view = viewOf(source, SRC, visible)
+
+    // --- ① 見えている中身が、その週に実際に入っているものと一致する ---
+    eq(
+      'IO-1 中身は、選んだ7日分をそのまま並べる（献立の無い日も抜けない）',
+      view.map((d) => d.date),
+      SRC,
+    )
+    eq(
+      'IO-1 その週の外の日の献立はまぎれ込まない',
+      view.flatMap((d) => d.slots.flatMap((s) => s.recipeIds)).includes(99),
+      false,
+    )
+    eq(
+      'IO-1 表示していない食事は中身にも出さない（入らないものを見せない）',
+      view.flatMap((d) => d.slots.map((s) => s.slot)).filter((s) => s !== 'dinner'),
+      [],
+    )
+    eq(
+      'IO-1 ある日の中身が、その日に入っている献立と一致する',
+      view.find((d) => d.date === SRC[0]).slots,
+      [{ slot: 'dinner', recipeIds: [11, 12] }],
+    )
+    eq('IO-1 献立の無い日は空のまま並ぶ', view.find((d) => d.date === SRC[1]).slots, [])
+
+    // --- ② 入れたあと、見えていた中身がそのまま入れ先に入っている ---
+    const plan = io.planCopyLastWeek({
+      dates: DST,
+      today: DST[0],
+      visibleSlots: visible,
+      entries: [],
+      prevEntries: source,
+      weeksBack: 2,
+    })
+    const shown = view.flatMap((d) =>
+      d.slots.flatMap((s) =>
+        s.recipeIds.map((recipeId) => ({ date: d.date, slot: s.slot, recipeId })),
+      ),
+    )
+    const put = plan.ops.map((op) => ({
+      date: io.shiftDate(op.date, -14),
+      slot: op.slot,
+      recipeId: op.recipeId,
+    }))
+    eq('IO-2 見えていた中身が、1品も欠けずにそのまま入れ先へ入る', put, shown)
+    eq('IO-2 前提: 入れるものが1品以上ある（0品どうしの一致で素通りしない）', shown.length, 3)
+
+    // --- ③ どこまでさかのぼれるかは、献立のある一番古い日で決まる ---
+    eq('IO-3 献立が1件も無ければ、1週間前までにする', maxBack(DST[0], undefined), 1)
+    eq(
+      'IO-3 入れ先より新しい献立しか無くても、1週間前までは見られる',
+      maxBack(DST[0], io.shiftDate(DST[0], 3)),
+      1,
+    )
+    eq('IO-3 1週間前の週の中に献立があれば、1週間前まで', maxBack(DST[0], io.shiftDate(DST[0], -1)), 1)
+    eq('IO-3 ちょうど7日前に献立があれば、1週間前まで', maxBack(DST[0], io.shiftDate(DST[0], -7)), 1)
+    eq('IO-3 8日前に献立があれば、2週間前まで', maxBack(DST[0], io.shiftDate(DST[0], -8)), 2)
+    eq('IO-3 364日前に献立があれば、52週間前まで（去年の同じ時期に届く）', maxBack(DST[0], io.shiftDate(DST[0], -364)), 52)
+  }
+
+  // --- ④ 文言（画面の字は書き写さず、ja.ts に在ることだけを見る） ---
+  eq(
+    'IO-4 「別の週から入れる」の名前がある',
+    typeof ja.mealPlan.copyPickTitle === 'string' && ja.mealPlan.copyPickTitle.length > 0,
+    true,
+  )
+  eq(
+    'IO-4 入れ先の週を日付で言う差し込み口がある',
+    typeof ja.mealPlan.copyPickTarget === 'string' &&
+      ja.mealPlan.copyPickTarget.includes('{start}') &&
+      ja.mealPlan.copyPickTarget.includes('{end}'),
+    true,
+  )
+  eq(
+    'IO-4 実行のボタンに名前がある',
+    typeof ja.mealPlan.copyPickRun === 'string' && ja.mealPlan.copyPickRun.length > 0,
+    true,
+  )
+  eq(
+    'IO-4 献立を1件も入れていない人に、行き止まりにしない1行がある',
+    typeof ja.mealPlan.copyPickNoPlansYet === 'string' &&
+      ja.mealPlan.copyPickNoPlansYet.length > 0,
+    true,
+  )
+  eq(
+    'IO-4 その週をテンプレートとして保存するボタンに名前がある',
+    typeof ja.mealPlan.copyPickSaveTemplate === 'string' &&
+      ja.mealPlan.copyPickSaveTemplate.length > 0,
+    true,
+  )
+  // 規約F: 消す操作の確認文は、消える先の週も日付で言い切る
+  eq(
+    'IO-4 総入れ替えの確認文が、消える先の週を日付で言う（規約F）',
+    typeof ja.mealPlan.copyWeekReplaceAllConfirmTitle === 'string' &&
+      ja.mealPlan.copyWeekReplaceAllConfirmTitle.includes('{toStart}') &&
+      ja.mealPlan.copyWeekReplaceAllConfirmTitle.includes('{toEnd}'),
+    true,
+  )
+  // 同じことをする道が2つあると迷う＝古いプルダウンの文言は残さない
+  eq(
+    'IO-4 古い「コピー元の週」のプルダウンと出しかたの2択の文言が残っていない',
+    [
+      ja.mealPlan.copySourceWeekLabel,
+      ja.mealPlan.copySourceWeekOption,
+      ja.mealPlan.fillSourceCopy,
+      ja.mealPlan.fillSourceSuggest,
+      ja.mealPlan.fillSourceGroupLabel,
+    ].filter((v) => v !== undefined),
+    [],
+  )
+}
+
 // ---------- 便IN: 折りたたみの中にしか無い操作が無いか（COLLAPSE-1） ----------
 /**
  * オーナーの原則（2026-08-20）:
@@ -25226,8 +25347,6 @@ Aみりん 大さじ1
     'ja.mealPlan.fillModeTitle': '「まとめて献立を入力」の効き方を決める欄。実行ボタンは折りたたみの外にある',
     'ja.mealPlan.fillModeFillEmpty': '同上',
     'ja.mealPlan.fillModeReplaceAll': '同上',
-    'ja.mealPlan.copySourceWeekLabel': '同上',
-    'ja.mealPlan.copySourceWeekOption': '同上',
     // 献立表・期間の集計・概算食費は、節の見出しがそのまま機能の名前になっている
     // （見出しを読めば何ができるか分かり、開くのは実行の直前の一手）
     'ja.mealPlan.planSheetPrint': '節の見出し「献立表（印刷・画像で保存）」が機能の名前そのもの',
