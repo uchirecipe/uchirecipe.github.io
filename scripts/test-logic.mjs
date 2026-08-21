@@ -3851,6 +3851,9 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
 }
 
 // ---------- buildShoppingCandidates(「水」がチェック済みで入る・2026-07-09ペルソナ第2波) ----------
+// 2026-08-22 便IX: 水・お湯・湯は「デフォルト未チェックで並べる」から「そもそも出さない」に
+// 変わった(オーナーのテスト用データ31品で、買い物メモに「お湯」が並ぶことが分かったため)。
+// 残りの3件(だし汁・鶏むね肉・しょうゆ)のチェックの向きは従来のまま
 {
   const recipes = [
     {
@@ -3867,9 +3870,9 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   ]
   const candidates = buildShoppingCandidates(recipes, [])
   const byName = new Map(candidates.map((c) => [c.name, c]))
-  eq('買い物候補: 水はデフォルト未チェック側', byName.get('水')?.isSeasoningLike, true)
-  eq('買い物候補: お湯もデフォルト未チェック側', byName.get('お湯')?.isSeasoningLike, true)
-  eq('買い物候補: 湯もデフォルト未チェック側', byName.get('湯')?.isSeasoningLike, true)
+  eq('買い物候補: 水は買い物メモに出さない(便IXで未チェック→非表示)', byName.has('水'), false)
+  eq('買い物候補: お湯も出さない', byName.has('お湯'), false)
+  eq('買い物候補: 湯も出さない', byName.has('湯'), false)
   eq('買い物候補: だし汁は通常どおりチェック側', byName.get('だし汁')?.isSeasoningLike, false)
   eq('買い物候補: 主材料はチェック側のまま', byName.get('鶏むね肉')?.isSeasoningLike, false)
   eq('買い物候補: 調味料は従来どおり未チェック側', byName.get('しょうゆ')?.isSeasoningLike, true)
@@ -3952,7 +3955,9 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   const amountOf = (ingredients, scale) =>
     buildShoppingCandidates([{ id: 1, ingredients, scale }], [])[0]?.amount
   eq('買い物候補(丸め): 250g×0.25→65g(5刻み)', amountOf([{ name: '豚こま切れ肉', amount: '250', unit: 'g' }], 0.25), '65g')
-  eq('買い物候補(丸め): 700ml×0.25→180ml(10刻み)', amountOf([{ name: '水', amount: '700', unit: 'ml' }], 0.25), '180ml')
+  // 2026-08-22 便IX: 「水」は買い物メモに出さなくなったので、丸めの見張りは同じml単位で
+  // 店で買うもの(だし汁)に置き換えた。測っているのは10刻みの丸めで、食材名は関係しない
+  eq('買い物候補(丸め): 700ml×0.25→180ml(10刻み)', amountOf([{ name: 'だし汁', amount: '700', unit: 'ml' }], 0.25), '180ml')
   eq('買い物候補(丸め): 1本×0.25→1/2本(個数系は0.5刻み・0にしない)', amountOf([{ name: 'にんじん', amount: '1', unit: '本' }], 0.25), '1/2本')
   eq('買い物候補(丸め): 1箱×0.25→1/2箱', amountOf([{ name: 'カレールー', amount: '1', unit: '箱' }], 0.25), '1/2箱')
 }
@@ -26480,6 +26485,295 @@ Aみりん 大さじ1
       ['src/pages/RecipesPage.tsx', 'src/pages/RecipeDetailPage.tsx'].filter(
         (rel) => !iuRead(rel).includes('isRecipeInToday('),
       ),
+      [],
+    )
+  }
+}
+
+// ==========================================================================================
+// IX: 買い物メモに材料でないものが並ぶ(2026-08-22 便IX)
+// オーナーが実際のレシピサイト14件から31品を取り込んだテスト用データで発覚した4件。
+// 材料の原文はすべて、そのテスト用データ(うちレシピ_テスト用データ_31品.json)と
+// 元ページ(cotta)の実測をそのまま使っている。
+// ==========================================================================================
+{
+  // ---------- IX-1 ①水・お湯は買い物メモに出さない ----------
+  // クラシル「エビグラタン」実測: ゆでるための「お湯 1000ml」「塩 小さじ2」まで材料に入っており、
+  // 買い物メモの下書きに「お湯」が並んでいた。水道から出るものは店で買わないので下書きに出さない。
+  // レシピの材料一覧は触らない(「ゆでる湯 1000ml」は作るときに要る情報)。
+  {
+    const ebi = [
+      { name: 'マカロニ', amount: '60', unit: 'g' },
+      { name: 'お湯', amount: '1000', unit: 'ml' },
+      { name: '塩', amount: '2', unit: '小さじ' },
+      { name: 'エビ', amount: '5', unit: '尾' },
+      { name: 'ブロッコリー', amount: '1/2', unit: '個' },
+    ]
+    const before = JSON.stringify(ebi)
+    const names = buildShoppingCandidates([{ id: 1, ingredients: ebi }], []).map((c) => c.name)
+    eq('IX-1 エビグラタン: 買い物メモの下書きに「お湯」を出さない', names.includes('お湯'), false)
+    eq('IX-1 エビグラタン: ゆで塩は残す(切らしていれば買うため)', names.includes('塩'), true)
+    eq(
+      'IX-1 エビグラタン: 下書きは水以外の5→4行(消えたのはお湯だけ)',
+      names,
+      ['マカロニ', '塩', 'エビ', 'ブロッコリー'],
+    )
+    eq('IX-1 レシピの材料一覧そのものは書き換えない', JSON.stringify(ebi), before)
+  }
+  {
+    // 落とす語(買いに行かないもの)。「湯」「ぬるま湯」「熱湯」「氷水」「冷水」も同じ扱い
+    const water = [
+      { name: '水', amount: '600', unit: 'ml' },
+      { name: 'お湯', amount: '200', unit: 'ml' },
+      { name: '湯', amount: '400', unit: 'ml' },
+      { name: 'ぬるま湯', amount: '100', unit: 'ml' },
+      { name: '熱湯', amount: '1', unit: 'L' },
+      { name: '氷水', amount: '適量', unit: '' },
+      { name: '冷水', amount: '適量', unit: '' },
+      { name: '水（分量外）', amount: '大さじ', unit: '1' },
+    ]
+    eq(
+      'IX-1 水・湯の言い方はどれも買い物メモに出さない',
+      buildShoppingCandidates([{ id: 1, ingredients: water }], []).map((c) => c.name),
+      [],
+    )
+  }
+  {
+    // **落とさない語**。店で買うものを巻き込んだら最悪なので、名前の完全一致だけで落とす。
+    // 「氷」は買う人がいる(ロックアイス)ので落とさない。調味料も切らしていれば買うので落とさない。
+    const keep = [
+      { name: '炭酸水', amount: '200', unit: 'ml' },
+      { name: 'ミネラルウォーター', amount: '500', unit: 'ml' },
+      { name: '水菜', amount: '1', unit: '束' },
+      { name: '水溶き片栗粉', amount: '2', unit: '大さじ' },
+      { name: 'トマト水煮缶（カット）', amount: '200', unit: 'g' },
+      { name: '湯葉', amount: '50', unit: 'g' },
+      { name: '氷', amount: '5', unit: '個' },
+      { name: 'だし汁', amount: '300', unit: 'ml' },
+      { name: '塩', amount: '少々', unit: '' },
+      { name: '砂糖', amount: '2', unit: '大さじ' },
+    ]
+    eq(
+      'IX-1 名前に水・湯・氷が入っていても、買うものは落とさない',
+      buildShoppingCandidates([{ id: 1, ingredients: keep }], []).map((c) => c.name),
+      keep.map((k) => k.name),
+    )
+  }
+
+  // ---------- IX-2 ②宣伝・見出しを材料として保存しない(cotta実測) ----------
+  // cotta「基本のシュークリームのレシピ」を文章から取り込むと、材料21件のうち5件が
+  // 材料ではなかった: 「おすすめのアイテム」×3(宣伝の見出し)・「cotta 北海道産薄力粉 シュクレ 2.5kg」
+  // (その見出しの下に並ぶ売り物)・「下準備」(節の見出し)。
+  // 下の本文は https://www.cotta.jp/special/article/?p=64082 の材料まわりの実測(手順の文だけ短くした)。
+  const COTTA_CHOUX = [
+    '基本のシュークリームのレシピ(8～10個分)',
+    '',
+    'シュー生地を作る',
+    '',
+    '材料',
+    '',
+    '牛乳…45g',
+    '水…45g',
+    '無塩バター…40g',
+    '塩…2g',
+    '砂糖(グラニュー糖)…2g',
+    '薄力粉…55g',
+    '全卵(M玉)…2～3個',
+    '',
+    'おすすめのアイテム',
+    '',
+    'cotta 北海道産薄力粉 シュクレ 2.5kg',
+    '',
+    '下準備',
+    '',
+    '薄力粉をふるっておく。',
+    '全卵を常温に戻しておく。',
+    '',
+    '作り方',
+    '',
+    '鍋に牛乳・水・無塩バター・塩・グラニュー糖を入れ、手早く混ぜる。',
+    '',
+    'カスタードクリームを作る',
+    '',
+    '材料',
+    '',
+    '牛乳…400g',
+    '卵黄…80g',
+    '砂糖(グラニュー糖)…100g',
+    '薄力粉…40g',
+    'バニラビーンズ…5cm',
+    '無塩バター…20g',
+    '',
+    '生クリーム(乳脂肪分42％)…160g',
+    '',
+    'おすすめのアイテム',
+    '',
+    'メキシコ産バニラビーンズ マヤ・バニラ M(約16cm)',
+    '',
+    '作り方',
+    '',
+    'ボウルに卵黄・グラニュー糖・薄力粉を入れ、泡立て器で混ぜる。',
+    '',
+    '仕上げる',
+    '',
+    '材料',
+    '',
+    'トッピング用粉糖…適量',
+    '',
+    'おすすめのアイテム',
+    '',
+    'cotta トッピング用粉砂糖　250g',
+    '',
+    '作り方',
+    '',
+    'シュー生地にナイフで切り込みを入れる。',
+  ].join('\n')
+  {
+    const parsed = parseRecipeText(COTTA_CHOUX)
+    const names = parsed.ingredients.map((i) => i.name)
+    eq(
+      'IX-2 cotta: 材料は15件(取り込んだ当時は21件。宣伝の見出し3・売り物2・節の見出し1が消える)',
+      parsed.ingredients.length,
+      15,
+    )
+    eq(
+      'IX-2 cotta: 正しい材料は1件も消えない(生地・クリーム・仕上げの3か所ぶんがそのまま残る)',
+      names,
+      [
+        '牛乳', '水', '無塩バター', '塩', '砂糖(グラニュー糖)', '薄力粉', '全卵(M玉)',
+        '牛乳', '卵黄', '砂糖(グラニュー糖)', '薄力粉', 'バニラビーンズ', '無塩バター',
+        '生クリーム(乳脂肪分42％)', 'トッピング用粉糖',
+      ],
+    )
+    eq('IX-2 cotta: 宣伝の見出しを材料にしない', names.includes('おすすめのアイテム'), false)
+    eq(
+      'IX-2 cotta: 見出しの下の売り物を材料にしない(名前に「薄力粉」が入っていても)',
+      names.some((n) => n.startsWith('cotta ')),
+      false,
+    )
+    eq('IX-2 cotta: 「下準備」を材料にしない', names.includes('下準備'), false)
+    eq(
+      'IX-2 cotta: 「下準備」の中身は手順として残る(捨てない)',
+      parsed.steps.slice(0, 2),
+      ['薄力粉をふるっておく。', '全卵を常温に戻しておく。'],
+    )
+    eq(
+      'IX-2 cotta: 手順に紛れていた売り物も残さない',
+      parsed.steps.some((s) => s.includes('マヤ・バニラ')),
+      false,
+    )
+    // 買い物メモまで通したときに、材料でないものが1行も出ないこと(オーナーが見た画面)
+    const built = buildShoppingCandidates(
+      [{ id: 1, ingredients: parsed.ingredients.map((i) => ({ name: i.name, amount: i.amount, unit: i.unit })) }],
+      [],
+    )
+    eq(
+      'IX-2 cotta: 買い物メモの下書きに材料でないものが出ない',
+      built.map((c) => c.name),
+      ['牛乳', '無塩バター', '塩', '砂糖(グラニュー糖)', '薄力粉', '全卵(M玉)', '卵黄', 'バニラビーンズ', '生クリーム(乳脂肪分42％)', 'トッピング用粉糖'],
+    )
+  }
+  {
+    // cotta「基本のマドレーヌ」実測。「使用する道具」の下の「マドレーヌ型」も同じ形
+    const mad = parseRecipeText(
+      ['基本のマドレーヌ', '', '材料', '', '全卵…1個分', '砂糖…50g', '無塩バター…60g', '', '使用する道具', '', 'マドレーヌ型'].join('\n'),
+    )
+    eq(
+      'IX-2 cotta(マドレーヌ): 「使用する道具」と、その下の道具を材料にしない',
+      mad.ingredients.map((i) => i.name),
+      ['全卵', '砂糖', '無塩バター'],
+    )
+  }
+  {
+    // 巻き込み防止: 見出しの直後が見出し行なら、次の行は落とさない(1行だけ・見出しは食べない)
+    const guard = parseRecipeText(
+      ['材料', 'にんじん 1本', 'おすすめのアイテム', '材料', 'じゃがいも 2個'].join('\n'),
+    )
+    eq(
+      'IX-2 落とすのは見出しの直後の1行だけ。次が見出しなら材料を巻き込まない',
+      guard.ingredients.map((i) => i.name),
+      ['にんじん', 'じゃがいも'],
+    )
+    const guard2 = parseRecipeText(['材料', 'にんじん 1本', 'おすすめのアイテム'].join('\n'))
+    eq('IX-2 見出しで文章が終わっても落ちるのは見出しだけ', guard2.ingredients.map((i) => i.name), ['にんじん'])
+  }
+
+  // ---------- IX-3 ③同じ材料が2行に分かれていても買い物メモは1行にまとめる ----------
+  // cotta実測: 材料が「生地・クリーム・仕上げ」の3か所に分かれているので、牛乳・薄力粉・
+  // 砂糖・無塩バターがレシピの中では2行ずつある(作る順に必要なのでレシピ側はそのまま)。
+  {
+    const cotta = [
+      { name: '牛乳', amount: '45', unit: 'g' },
+      { name: '無塩バター', amount: '40', unit: 'g' },
+      { name: '砂糖(グラニュー糖)', amount: '2', unit: 'g' },
+      { name: '薄力粉', amount: '55', unit: 'g' },
+      { name: '牛乳', amount: '400', unit: 'g' },
+      { name: '砂糖(グラニュー糖)', amount: '100', unit: 'g' },
+      { name: '薄力粉', amount: '40', unit: 'g' },
+      { name: '無塩バター', amount: '20', unit: 'g' },
+    ]
+    const built = buildShoppingCandidates([{ id: 1, ingredients: cotta }], [])
+    eq('IX-3 2行ずつの材料が買い物メモでは1行ずつになる', built.length, 4)
+    eq(
+      'IX-3 同じ単位(g)なら足して1行にする',
+      built.map((c) => `${c.name} ${c.amount}`),
+      ['牛乳 450g', '無塩バター 60g', '砂糖(グラニュー糖) 100g', '薄力粉 95g'],
+    )
+  }
+  {
+    // 単位が違うときは足さない(勝手に足すと嘘の数量になる)。キッコーマン「ぶり大根」実測:
+    // 砂糖が「小さじ1」と「大さじ3」の2行
+    const buri = [
+      { name: '砂糖', amount: '1', unit: '小さじ' },
+      { name: '砂糖', amount: '3', unit: '大さじ' },
+    ]
+    const built = buildShoppingCandidates([{ id: 1, ingredients: buri }], [])
+    eq('IX-3 単位が違う2行は1行にまとめるが、数量は足さず並べて出す', built.length, 1)
+    eq('IX-3 ぶり大根の砂糖は「小さじ1・大さじ3」', built[0].amount, '小さじ1・大さじ3')
+  }
+
+  // ---------- IX-4 ④材料が0件のレシピでも壊れない・空行を出さない ----------
+  // 手書きの「冷蔵庫のあまりもの炒め」(材料0件・手順3件)
+  {
+    const built = buildShoppingCandidates([{ id: 1, ingredients: [] }], [])
+    eq('IX-4 材料0件のレシピだけを選ぶと下書きは0行(空行を作らない)', built, [])
+    const mixed = buildShoppingCandidates(
+      [
+        { id: 1, ingredients: [] },
+        { id: 2, ingredients: [{ name: '豚こま切れ肉', amount: '200', unit: 'g' }] },
+      ],
+      [],
+    )
+    eq('IX-4 材料0件のレシピを他の品と一緒に選んでも余計な行が出ない', mixed.length, 1)
+    eq('IX-4 名前が空文字の行は作らない', mixed.every((c) => c.name.trim().length > 0), true)
+    // 名前だけあって分量が空の材料(白ごはん.com等で実際に入る)でも、名前は必ず残る
+    const blankAmount = buildShoppingCandidates(
+      [{ id: 1, ingredients: [{ name: 'サラダ油', amount: '', unit: '' }] }],
+      [],
+    )
+    eq('IX-4 分量が空の材料は名前だけの行として出す(行ごと消さない)', blankAmount.length, 1)
+    eq('IX-4 分量が空でも名前は出る', blankAmount[0].name, 'サラダ油')
+    eq('IX-4 分量が空のときの分量欄は空文字', blankAmount[0].amount, '')
+  }
+  {
+    // 下書きが0行のときの説明。従来はどの理由でも「食材の在庫で『ある』に登録済みのようです」と
+    // 出ていたので、材料を1件も登録していないレシピだけを選ぶと**事実と違う説明**になっていた。
+    // 文言は必ず ja.ts から読む（書き写すと、直したときに片方だけ古くなる）
+    const ixRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const ixPageSrc = readFileSync(path.join(ixRoot, 'src/pages/ShoppingPage.tsx'), 'utf-8')
+    neq(
+      'IX-4 材料0件のときの説明は、在庫にあるときの説明と別の文にする',
+      ja.shopping.candidateEmptyNoIngredients,
+      ja.shopping.candidateEmpty,
+    )
+    eq(
+      'IX-4 材料0件のときの説明は「在庫にある」と言わない',
+      ja.shopping.candidateEmptyNoIngredients.includes('在庫'),
+      false,
+    )
+    eq(
+      'IX-4 買い物メモの画面が2つの説明を出し分けている',
+      ['candidateEmptyNoIngredients', 'candidateEmpty'].filter((k) => !ixPageSrc.includes(`ja.shopping.${k}`)),
       [],
     )
   }

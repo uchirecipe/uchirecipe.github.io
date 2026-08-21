@@ -228,6 +228,18 @@ export default function ShoppingPage() {
   // 買い物候補（下書き。確定するまでDBには保存しない。画面を離れても消えないよう
   // localStorageに保存する＝2026-07-29 便CC/C2）
   const [candidates, setCandidates] = useState<CandidateRow[] | null>(restoredDraft?.candidates ?? null)
+  // 下書きが0行になった理由が「選んだレシピに材料が1件も無い」かどうか（2026-08-22 便IX）。
+  // 手書きの「冷蔵庫のあまりもの炒め」のように料理名と手順だけのレシピを選ぶと0行になるが、
+  // 従来はどの場合も「食材の在庫で『ある』に登録済みのようです」と出ていた＝事実と違う。
+  // 判定は下書きを作ったときの選択（lastPickerCounts）から引く＝下書きに新しい保存項目を足さない
+  const draftHasNoIngredients = useMemo(() => {
+    if (!recipes) return false
+    const picked = Object.entries(lastPickerCounts)
+      .filter(([, count]) => count >= 1)
+      .map(([id]) => recipes.find((r) => r.id === Number(id)))
+      .filter((r): r is (typeof recipes)[number] => r != null)
+    return picked.length > 0 && picked.every((r) => r.ingredients.length === 0)
+  }, [recipes, lastPickerCounts])
   // どの範囲の献立から作った下書きか(2026-08-08 便EA)。献立から来たときだけ入る
   const [candidateRangeLabel, setCandidateRangeLabel] = useState<string | undefined>(
     restoredDraft?.rangeLabel,
@@ -758,7 +770,11 @@ export default function ShoppingPage() {
             )}
 
             {candidates.length === 0 ? (
-              <p className="mt-[var(--space-md)] text-sm text-ink-muted">{ja.shopping.candidateEmpty}</p>
+              <p className="mt-[var(--space-md)] text-sm text-ink-muted">
+                {draftHasNoIngredients
+                  ? ja.shopping.candidateEmptyNoIngredients
+                  : ja.shopping.candidateEmpty}
+              </p>
             ) : (
               <ul className="mt-[var(--space-md)] space-y-[var(--space-sm)]">
                 {candidates.map((c, index) => (
