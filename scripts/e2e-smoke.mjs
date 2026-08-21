@@ -44357,6 +44357,61 @@ try {
         `材料=${JSON.stringify(ngWordIngredient)}`,
       )
 
+      // 前提③: **いま献立に入った品**の材料も1つNG食材に足す（2026-08-22 司令部）。
+      // 直す前は「端末全体でいちばん多く使われている材料」だけを入れて「どの品が献立に
+      // 入っても必ず印が付く」と書いていたが、**それは成り立っていなかった**。最多の材料でも
+      // 全品には入っていないので、引かれた品がたまたま全部それを含まないと「小」の3件が
+      // まとめて落ちる（実測: 同じ版で3回走らせて1回落ちた＝アプリではなくこの手順の揺れ。
+      // 禁じ手③「件数の決め打ち」の親戚で、**引かれる品に結果が依る**形だった）。
+      // 献立に入った品の材料から選べば、印が1つも付かないことが原理的に起きない。
+      const ngPlannedIngredient = await ngPage.evaluate(
+        () =>
+          new Promise((resolve, reject) => {
+            const req = indexedDB.open('uchi-recipe')
+            req.onsuccess = () => {
+              const idb = req.result
+              const mg = idb.transaction('mealPlans', 'readonly').objectStore('mealPlans').getAll()
+              mg.onsuccess = () => {
+                const ids = new Set(mg.result.map((e) => e.recipeId))
+                const rg = idb.transaction('recipes', 'readonly').objectStore('recipes').getAll()
+                rg.onsuccess = () => {
+                  const planned = rg.result.filter((r) => ids.has(r.id))
+                  const counts = new Map()
+                  for (const r of planned)
+                    for (const i of r.ingredients ?? [])
+                      if (i?.name) counts.set(i.name, (counts.get(i.name) ?? 0) + 1)
+                  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]
+                  if (!top) {
+                    resolve(null)
+                    return
+                  }
+                  const st = idb.transaction('settings', 'readwrite').objectStore('settings')
+                  const sg = st.get(1)
+                  sg.onsuccess = () => {
+                    const prev = sg.result?.ngIngredients ?? []
+                    const next = prev.includes(top[0]) ? prev : [...prev, top[0]]
+                    const put = st.put({ ...(sg.result ?? { id: 1 }), id: 1, ngIngredients: next })
+                    put.onsuccess = () => resolve({ name: top[0], usedInPlan: top[1], planned: planned.length })
+                    put.onerror = () => reject(put.error)
+                  }
+                  sg.onerror = () => reject(sg.error)
+                }
+                rg.onerror = () => reject(rg.error)
+              }
+              mg.onerror = () => reject(mg.error)
+            }
+            req.onerror = () => reject(req.error)
+          }),
+      )
+      check(
+        'NGWORD-01 前提: 献立に入った品の材料もNG食材に入れられた（入らなければ「小」は測れていない）',
+        !!ngPlannedIngredient && ngPlannedIngredient.planned > 0 && ngPlannedIngredient.usedInPlan > 0,
+        `献立の材料=${JSON.stringify(ngPlannedIngredient)}`,
+      )
+      // 禁じ手⑥: settings を Dexie を通さず生の IndexedDB へ書いたので、**必ず読み込み直す**
+      await ngPage.reload({ waitUntil: 'networkidle' })
+      await ngPage.waitForTimeout(800)
+
       // ---- 大（レシピ一覧のグリッド）----
       await ngPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
       await ngPage.reload({ waitUntil: 'networkidle' })
