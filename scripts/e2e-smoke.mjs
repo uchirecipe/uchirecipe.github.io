@@ -428,6 +428,8 @@ import { NUTRITION_DISPLAY_KEYS, nutritionLabelFor } from '../src/logic/nutritio
 // カードに出る主要食材のチップ（2026-08-19 便HY・CARDPARTS-01）。画面に出る名前は
 // この関数が決めるので、検査側でも同じ関数を通して突き合わせる（書き写さない）
 import { pickDisplayIngredientChips } from '../src/logic/mainIngredients.ts'
+// 無料の登録上限（2026-08-21 便IR）。お知らせに出る数字は、この1か所から読む（書き写さない）
+import { FREE_LIMIT } from '../src/logic/freeLimit.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const appRoot = path.join(__dirname, '..')
@@ -15113,14 +15115,19 @@ try {
       const releaseNews = Array.isArray(news)
         ? news.find((n) => n.id === '2026-08-02-pro-release')
         : undefined
+      // 2026-08-21 便IR: 題を丸ごと書き写して比べていた（オーナー書き溜め④で題を直した
+      // だけで赤くなった＝禁じ手②）。印(id)と、数字が出ているかだけを見る
       check(
-        'LAUNCH-02(便DZ) お知らせの最新が上限30への変更の告知',
-        Array.isArray(news) && news[0]?.title === '無料で登録できるレシピは30品までになりました',
+        'LAUNCH-02(便DZ) お知らせの最新が無料の上限の案内',
+        Array.isArray(news) &&
+          news[0]?.id === '2026-08-08-free-limit-30' &&
+          new RegExp(`${FREE_LIMIT}品`).test(news[0]?.title ?? ''),
         `latest=${JSON.stringify(news[0]?.title)}`,
       )
       check(
-        'LAUNCH-02(便DZ) 上限変更の告知に、登録済みのレシピが残ることが書いてある(規約F)',
-        (news[0]?.body ?? '').includes('見る・編集する・削除する・バックアップから戻すことができます'),
+        'LAUNCH-02(便DZ) 上限の案内に、登録済みのレシピが残ることが書いてある(規約F)',
+        /登録済みのレシピ[^。]*使えます/.test(news[0]?.body ?? ''),
+        JSON.stringify(news[0]?.body),
       )
       check(
         'LAUNCH-02(便DZ) 上限変更の告知は解錠済みには出さない印が付いている',
@@ -28526,9 +28533,22 @@ try {
       'INSTALLTEXT-EP ホーム画面への追加が「おすすめ」だと言い切っている',
       insEp.includes('ホーム画面に追加してお使いいただくのがおすすめです'),
     )
+    // 2026-08-21 便IR(オーナー書き溜め③「アプリの説明は省く」): 便EPで冒頭に入れた
+    // アプリの説明は、手順の前に読ませる4段落174字の一部だった。冒頭からは外し、
+    // 同じ事実は下の「追加したあとの使い方」が言う。**事実が消えていないこと**と
+    // **冒頭に戻っていないこと**の両方を見る
+    const insHeadEnd = insEp.indexOf('id="iphone"')
+    // 直した経緯は作り手向けのコメントに書いてあるので、コメントを外してから見る
+    const insHead = insEp.slice(insEp.indexOf('<h1'), insHeadEnd).replace(/<!--[\s\S]*?-->/g, ' ')
     check(
-      'INSTALLTEXT-EP アプリとして使えることが書いてある',
-      insEp.includes('Webアプリ') && insEp.includes('他のアプリと同じようにご利用いただけます'),
+      'INSTALLTEXT-EP アプリと同じように使えることは「追加したあとの使い方」に書いてある',
+      insHeadEnd > 0 && insEp.includes('アプリと同じ見た目で使えます'),
+    )
+    check(
+      'INSTALLTEXT-EP 冒頭にアプリの説明を戻していない',
+      insHead.length > 0 &&
+        !insHead.includes('ブラウザで動くWebアプリ') &&
+        !insHead.includes('他のアプリと同じようにご利用いただけます'),
     )
     check(
       'INSTALLTEXT-EP 「追加しなくてもブラウザのまま」は※の注記に下げてある',
@@ -30492,14 +30512,17 @@ try {
         })
         ewNote = info?.note ?? ''
         check('EW-01(a) 重ね窓として名乗っている(role=dialog)', info?.role === 'dialog', String(info?.role))
+        // 2026-08-21 便IR: 見出し・本文を書き写して比べていた（言い回しを直すたびに、
+        // アプリは正常なのにここだけ赤くなる＝禁じ手②）。文言は ja.ts から読む
         check(
           'EW-01(a) 見出しがホーム画面にアイコンを追加できる話になっている',
-          info?.title === 'ホーム画面にアイコンを追加できます',
+          info?.title === ja.homeScreenNotice.title,
           String(info?.title),
         )
         check(
           'EW-01(a) 本文がアプリストアからのダウンロードではないと伝える',
-          info?.body === '次からはアイコンをタップして開けます。アプリストアからのダウンロードはありません。',
+          info?.body === ja.homeScreenNotice.body &&
+            /アプリストアからのダウンロード[^。]{0,6}(必要ありません|ありません|不要)/.test(info?.body ?? ''),
           String(info?.body),
         )
         check(
@@ -30778,14 +30801,26 @@ try {
           'EW-02 その中の説明が、追加したときに開いていたページが開くことを言っている',
           ewIns.includes('アイコンからは、追加したときに開いていたページが開きます'),
         )
+        // 2026-08-21 便IR: このページの一言は、アプリの中の案内(ja.homeScreenNotice.body)と
+        // 同じ言い回しにそろえてある。**ja.ts の文を物差しにして**、ページ側が付いてきているかを見る
+        // （両方に同じ文を書き写すと、片方を直したときにここが赤くなる＝禁じ手②）。
+        // 2026-08-21 オーナー書き溜め③で冒頭を短くしたため、後ろの「うちレシピを開きやすく
+        // するための手順です。」は落とした（見出しの言い直しだった）
+        const ewNoStore =
+          ja.homeScreenNotice.body.split('。').find((t) => t.includes('アプリストア')) ?? ''
+        check(
+          'EW-02 物差しにする一言を ja.ts から取れている',
+          ewNoStore.length > 8,
+          JSON.stringify(ewNoStore),
+        )
         check(
           'EW-02 ページの初めに、アプリストアからのダウンロードではないと書いてある',
-          ewIns.includes('アプリストアからのダウンロードはありません。うちレシピを開きやすくするための手順です。'),
+          ewIns.includes(ewNoStore),
+          JSON.stringify(ewNoStore),
         )
         check(
           'EW-02 その一言は、iPhone・Androidの手順より前(ページの初めの方)にある',
-          ewIns.indexOf('アプリストアからのダウンロードはありません') > 0 &&
-            ewIns.indexOf('アプリストアからのダウンロードはありません') < ewIns.indexOf('id="iphone"'),
+          ewIns.indexOf(ewNoStore) > 0 && ewIns.indexOf(ewNoStore) < ewIns.indexOf('id="iphone"'),
         )
         // Android・パソコンの手順では「インストール」を押してもらうので、
         // 「インストールは不要」とは書かない(2026-08-09 オーナー指摘と同じ線)

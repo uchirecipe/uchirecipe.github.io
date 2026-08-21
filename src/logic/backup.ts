@@ -1490,10 +1490,46 @@ export async function importRecipeSet(file: BackupFile): Promise<ImportResult> {
   return { added, updated, skipped, excluded }
 }
 
-/** 30日以上バックアップしていない（または一度もしていない）か */
-export function backupOverdue(lastBackupAt: number | undefined): boolean {
-  if (lastBackupAt === undefined) return true
-  return Date.now() - lastBackupAt > 30 * 24 * 60 * 60 * 1000
+/** バックアップのうながしを、どの言い方で出すか（出さないなら 'none'） */
+export type BackupNoticeKind =
+  /** 出さない */
+  | 'none'
+  /** 一度も書き出していない人への案内（「しばらく」とは言わない） */
+  | 'first'
+  /** 前回の書き出しから30日以上たった人への案内 */
+  | 'overdue'
+
+/** 前回の書き出しから、このあいだが空いたら「しばらく」と言う */
+const BACKUP_OVERDUE_MS = 30 * 24 * 60 * 60 * 1000
+/**
+ * 一度も書き出していない人に、うながしを出し始めるまでの日数（使い始めから7日）。
+ *
+ * 2026-08-21 便IR（オーナー書き溜め①b・司令部の指摘）: 以前はここが「一度も書き出して
+ * いなければ常に出す」だったため、**アプリを触り始めた初日から**「しばらくバックアップ
+ * していません」と出ていた。「しばらく」が嘘になるうえ、まだ何もためていない人を急かす。
+ * データを守る案内なので出さなくするのではなく、**出す時と言い方**の両方を直した:
+ *   ・出す時 … 使い始めから7日たってから（「しばらく」＝時間の話なので時間で測る。
+ *              30日待つと、その間に端末を替えた人には一度も言えない）
+ *   ・言い方 … ja.dayStart.backupReminderFirst（「しばらく」と言わず、
+ *              まだ端末の中にしか無いという事実を言う）
+ * 使い始めの日時（Settings.firstLaunchAt）は、この項目が無い頃から使っている人には 0 が
+ * 入っているので（db/settings.ts recordFirstLaunchIfNeeded）、既存ユーザーは従来どおり出る。
+ */
+const BACKUP_FIRST_GRACE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * バックアップのうながしを、いつ・どの言い方で出すか（純ロジック・DB非依存）。
+ * nowは検証用の注入フック（省略時はDate.now()）
+ */
+export function backupNoticeKind(
+  lastBackupAt: number | undefined,
+  firstLaunchAt: number | undefined,
+  now: number = Date.now(),
+): BackupNoticeKind {
+  if (lastBackupAt !== undefined) return now - lastBackupAt > BACKUP_OVERDUE_MS ? 'overdue' : 'none'
+  // 使い始めの日時が分からない一瞬（起動直後・記録前）は出さない
+  if (firstLaunchAt === undefined) return 'none'
+  return now - firstLaunchAt >= BACKUP_FIRST_GRACE_MS ? 'first' : 'none'
 }
 
 /**

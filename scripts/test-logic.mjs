@@ -245,6 +245,7 @@ import {
   mergeUnlockCodes,
   countReplaceImpact,
   daysSinceBackup,
+  backupNoticeKind,
   buildReplaceSettings,
   mergeTableRows,
   mergeRowKeys,
@@ -8500,6 +8501,70 @@ eq(
   eq('経過日数: 5日前', daysSinceBackup(now - 5 * 24 * 60 * 60 * 1000, now), 5)
   eq('経過日数: 31日前(要警告)', daysSinceBackup(now - 31 * 24 * 60 * 60 * 1000, now), 31)
   eq('経過日数: 23時間59分前は端数切り捨てで0日前', daysSinceBackup(now - (24 * 60 * 60 * 1000 - 60000), now), 0)
+}
+
+// ---------- backupNoticeKind(2026-08-21 便IR: バックアップのうながしを出す時と言い方) ----------
+// 直した中身: 以前は「一度も書き出していなければ常に出す」だったので、**アプリを触り始めた
+// 初日から**「しばらくバックアップしていません」と出ていた（「しばらく」が嘘になる）。
+// 出さなくするのではなく、出す時（使い始めから7日）と言い方（別の文言）を分けた。
+{
+  const day = 24 * 60 * 60 * 1000
+  const now = Date.parse('2026-08-21T12:00:00+09:00')
+  // --- 一度も書き出していない人 ---
+  eq('うながし: 使い始めた初日には出さない（「しばらく」が嘘になる）', backupNoticeKind(undefined, now, now), 'none')
+  eq('うながし: 使い始めから6日目はまだ出さない', backupNoticeKind(undefined, now - 6 * day, now), 'none')
+  eq('うながし: 使い始めから7日たったら出す', backupNoticeKind(undefined, now - 7 * day, now), 'first')
+  eq('うながし: 使い始めの日時が未記録の一瞬は出さない', backupNoticeKind(undefined, undefined, now), 'none')
+  // firstLaunchAt が無い頃から使っている人には 0 が入る（db/settings.ts）。従来どおり出る
+  eq('うながし: 既存ユーザー(使い始めの記録が0)には出す', backupNoticeKind(undefined, 0, now), 'first')
+  // --- 一度は書き出した人 ---
+  eq('うながし: 書き出し済み29日は出さない', backupNoticeKind(now - 29 * day, 0, now), 'none')
+  eq('うながし: 書き出し済み31日は「しばらく」で出す', backupNoticeKind(now - 31 * day, 0, now), 'overdue')
+  eq(
+    'うながし: 一度でも書き出していれば、使い始めの日時では変わらない',
+    backupNoticeKind(now - 31 * day, now, now),
+    'overdue',
+  )
+
+  // --- 文言（規約H: 押した結果が分かる名前・言っていることが本当か） ---
+  // 押しても書き出しは始まらず、設定のバックアップの節へ移るだけ。行き先の名前をそのまま名乗る
+  eq(
+    'うながし: 行き先の名前が、設定の節の名前(ja.settings.tabBackup)を名乗っている',
+    ja.dayStart.backupReminderLink.includes(ja.settings.tabBackup) &&
+      ja.dayStart.backupReminderLink.includes(ja.settings.title),
+    true,
+  )
+  eq(
+    'うながし: 行き先の名前が「バックアップを開く」（ファイルを開くと読める言い方）に戻っていない',
+    ja.dayStart.backupReminderLink === `${ja.settings.tabBackup}を開く`,
+    false,
+  )
+  eq(
+    'うながし: 一度も書き出していない人には「しばらく」と言わない',
+    /しばらく/.test(ja.dayStart.backupReminderFirst),
+    false,
+  )
+  eq('うながし: 30日以上の人には「しばらく」と言う', /しばらく/.test(ja.dayStart.backupReminder), true)
+  // 2つの言い方は、どちらも同じ締めくくり（設定の「ファイルに書き出す」）に着地する
+  eq(
+    'うながし: どちらの言い方も、設定の「ファイルに書き出す」に着地する',
+    [ja.dayStart.backupReminder, ja.dayStart.backupReminderFirst].filter(
+      (t) => !t.includes(ja.settings.backupExport.replace('す', 'し')),
+    ),
+    [],
+  )
+
+  // 画面側が、2つの言い方を出し分けているか（片方を書いたまま繋ぎ忘れると気づけない）
+  const dayStartSrc = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/components/DayStartNotices.tsx'),
+    'utf-8',
+  )
+  eq(
+    'うながし: 画面が backupNoticeKind の答えで言い方を出し分けている',
+    /backupNoticeKind\(settings\.lastBackupAt, settings\.firstLaunchAt\)/.test(dayStartSrc) &&
+      /backupNotice === 'first'[\s\S]{0,80}backupReminderFirst/.test(dayStartSrc),
+    true,
+  )
 }
 
 // ---------- fileSave(バックアップ修正2+3・2026-07-17: 保存先選択+前回に上書き) ----------
@@ -17412,9 +17477,12 @@ eq(
     ),
     false,
   )
+  // 2026-08-21 便IR: 一文まるごとの照合をやめた（言い回しを直すたびに、アプリは正常なのに
+  // ここだけ赤くなる＝禁じ手②）。見たいのは「アプリストアからのダウンロードではないと
+  // 言っているか」なので、その形だけを見る
   eq(
     'HOMENOTICE 本文はアプリストアからのダウンロードではないと伝える(「インストール不要」とは言わない)',
-    ja.homeScreenNotice.body.includes('アプリストアからのダウンロードはありません') &&
+    /アプリストアからのダウンロード[^。]{0,6}(必要ありません|ありません|不要)/.test(ja.homeScreenNotice.body) &&
       !/インストール[^。]{0,12}(不要|いりません)/.test(ja.homeScreenNotice.body),
     true,
   )
@@ -25809,6 +25877,151 @@ Aみりん 大さじ1
   // ---- IQ-8: ボタンの文言（規約H-2） -------------------------------------------------------
   // 88pxの幅に収める短さで、意味を担う語は漢字（「はずす」と開かない）
   eq('IQ-8 払って出るボタンの文言', ja.mealPlan.todaySwipeRemove, '外す')
+}
+
+// ---------- 便IR: 長文の見張り（規約Hの「長文はやめる」を数字にする） ----------
+// オーナー原文（2026-08-21 書き溜め⑤）:
+//   「アプリもHPも共通して、長文はやめてください。ユーザーは意外なほど読みません。
+//     長文というだけで読み飛ばします。説明ページなど、どうしても長くなる場合は
+//     見た目を工夫してください。」
+//
+// 規約Hには前から「長文は15行以上黒文字が続かないよう分割・折りたたみ・表で構成する」と
+// 書いてあった。書いてあるのに守れていなかったのは、**測っていなかったから**。
+//
+// 決めた数字（便IRが実測して決めた。決め方は下記）:
+//   ・利用者が読むページ（public/about/*.html・コラムを含む）
+//       見出し・図・箇条書き・囲み・表で区切られずに**続けて読ませる本文は160字まで**。
+//       箇条書きの1行・表のます目は、それ1つで1かたまりとして数える。
+//   ・アプリの中のお知らせ（public/news.json）は**題20字・本文80字**まで。
+//
+// なぜ160字か:
+//   ・スマホ幅(390px)・本文14〜15pxで1行およそ20字。160字＝およそ8行。
+//   ・規約Hの「15行」は同じ換算で約300字にあたり、今回オーナーが「いきなり長文を
+//     突きつけられる」と言った install.html の冒頭（4段落・174字）を捕まえられない。
+//     **オーナーが実際に長いと言ったものが赤になる**ことを条件にすると上限は174字未満。
+//   ・実測の分布（この便で全ページを数えた。全2,770かたまり）:
+//       200字超=36件 / 180字超=45件 / 160字超=58件 / 140字超=74件 / 120字超=105件
+//     160字は「オーナーが長いと言った174字が赤になる、いちばんゆるい刻み」。
+//     120字まで締めると105件が一度に赤になり、直しきれずに一覧が形骸化する。
+//
+// 「超えたら赤」だけでは、いま超えている58件で最初から赤くなって回らない。そこで
+// **いま超えているものの一覧**（scripts/data/long-text-known.json）を持ち、
+//   ・一覧に無い長文が現れたら赤（＝新しく増やせない）
+//   ・一覧にあるのに、もう長くない／その文が見つからないときも赤（＝直したら一覧から消す）
+// の両向きで見張る。一覧は減らしていくためのもので、増やすときは理由を報告に書くこと。
+{
+  const irRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+  /** 続けて読ませてよい本文の上限（字） */
+  const LONG_TEXT_LIMIT = 160
+  /** お知らせの題・本文の上限（字） */
+  const NEWS_TITLE_LIMIT = 20
+  const NEWS_BODY_LIMIT = 80
+
+  // 落とした部分は空白に置き換える（改行だけ残す）＝赤に出る行番号を原文と合わせるため
+  const irBlank = (s) => s.replace(/[^\n]/g, ' ')
+  const irPlain = (s) =>
+    s.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, 'x').replace(/[\s​]+/g, '')
+  // かたまりの切れ目になる印（見出し・図・箇条書き・囲み・表）
+  const IR_BREAK =
+    /<\/?(?:h[1-6]|ul|ol|figure|table|div|details|nav|footer|header|section|dl|blockquote|main|aside|li|dd|dt|td|th|figcaption|summary)\b[^>]*>|<hr\b[^>]*>/g
+  // それ1つで1かたまりとして数える器（箇条書きの1行・表のます目・図の題）
+  const IR_UNIT = /<(li|td|dd|figcaption|summary)\b[^>]*>([\s\S]*?)<\/\1>/g
+  // 器の中に入れ子になっている塊は、その中でまた別に数えるのでここでは落とす
+  const IR_NESTED = /<(p|ul|ol|figure|div|table|dl)\b[\s\S]*?<\/\1>/g
+
+  /** 1ページを「続けて読ませる本文のかたまり」に切り分ける */
+  const irChunks = (raw) => {
+    const cleaned = raw
+      .replace(/<script[\s\S]*?<\/script>/gi, irBlank)
+      .replace(/<style[\s\S]*?<\/style>/gi, irBlank)
+      .replace(/<!--[\s\S]*?-->/g, irBlank)
+    const tokens = []
+    for (const m of cleaned.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/g))
+      tokens.push({ kind: 'p', at: m.index, text: m[1] })
+    for (const m of cleaned.matchAll(IR_UNIT))
+      tokens.push({ kind: 'unit', at: m.index, text: m[2].replace(IR_NESTED, ' ') })
+    for (const m of cleaned.matchAll(IR_BREAK)) tokens.push({ kind: 'brk', at: m.index })
+    tokens.sort((a, b) => a.at - b.at)
+    const out = []
+    let run = null
+    const flush = () => {
+      if (run) out.push(run)
+      run = null
+    }
+    for (const t of tokens) {
+      if (t.kind === 'brk') {
+        flush()
+        continue
+      }
+      const txt = irPlain(t.text)
+      if (txt === '') continue
+      const line = cleaned.slice(0, t.at).split('\n').length
+      if (t.kind === 'unit') {
+        flush()
+        out.push({ line, len: txt.length, head: txt.slice(0, 16) })
+        continue
+      }
+      if (!run) run = { line, len: 0, head: txt.slice(0, 16) }
+      run.len += txt.length
+    }
+    flush()
+    return out
+  }
+
+  // 見る先は利用者が読むページ全部（コラムも含む。foods.html は生成物だが出来上がりを測る）
+  const irAboutDir = path.join(irRoot, 'public/about')
+  const irFiles = []
+  for (const e of readdirSync(irAboutDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (e.isDirectory()) {
+      if (e.name === 'img') continue
+      for (const f of readdirSync(path.join(irAboutDir, e.name)).filter((f) => f.endsWith('.html')).sort())
+        irFiles.push(`${e.name}/${f}`)
+    } else if (e.name.endsWith('.html')) irFiles.push(e.name)
+  }
+  eq('HR-5 利用者が読むページを走査できている（0件なら見張りが壊れている）', irFiles.length > 0, true)
+
+  const known = JSON.parse(readFileSync(path.join(irRoot, 'scripts/data/long-text-known.json'), 'utf-8'))
+  // 「_」で始まる項目は読み手向けの説明。一覧そのものではない
+  const knownList = Object.fromEntries(Object.entries(known).filter(([k]) => !k.startsWith('_')))
+  const irTooLong = []
+  const irStale = []
+  let irMeasured = 0
+  for (const f of irFiles) {
+    const rel = `public/about/${f}`
+    const chunks = irChunks(readFileSync(path.join(irAboutDir, f), 'utf-8'))
+    irMeasured += chunks.length
+    const allowed = [...(knownList[rel] ?? [])]
+    for (const c of chunks) {
+      if (c.len <= LONG_TEXT_LIMIT) continue
+      const at = allowed.indexOf(c.head)
+      if (at >= 0) {
+        allowed.splice(at, 1)
+        continue
+      }
+      irTooLong.push(`${rel}:${c.line} ${c.len}字（上限${LONG_TEXT_LIMIT}字）「${c.head}…」`)
+    }
+    for (const head of allowed)
+      irStale.push(`${rel} 「${head}…」は${LONG_TEXT_LIMIT}字を超えていない（直ったので一覧から消してください）`)
+  }
+  eq('HR-5 本文のかたまりを測れている（0件なら見張りが壊れている）', irMeasured > 100, true)
+  eq(`HR-5 ${LONG_TEXT_LIMIT}字を超える本文のかたまりが、一覧に無いところに増えていない`, irTooLong, [])
+  eq('HR-5 一覧に、もう長くないものが残っていない', irStale, [])
+
+  // ---- お知らせ（アプリの中で読む短い文章。ページより短く保つ） ----
+  {
+    const items = JSON.parse(readFileSync(path.join(irRoot, 'public/news.json'), 'utf-8'))
+    eq('HR-5 お知らせを読めている（0件なら見張りが壊れている）', items.length > 0, true)
+    eq(
+      `HR-5 お知らせの題が${NEWS_TITLE_LIMIT}字以内`,
+      items.filter((n) => n.title.length > NEWS_TITLE_LIMIT).map((n) => `${n.id} ${n.title.length}字「${n.title}」`),
+      [],
+    )
+    eq(
+      `HR-5 お知らせの本文が${NEWS_BODY_LIMIT}字以内`,
+      items.filter((n) => n.body.length > NEWS_BODY_LIMIT).map((n) => `${n.id} ${n.body.length}字「${n.body.slice(0, 20)}…」`),
+      [],
+    )
+  }
 }
 
 // ---------- 結果 ----------

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { HardDriveDownload, Megaphone, X } from 'lucide-react'
 import { updateSettings } from '../db/settings'
-import { backupOverdue } from '../logic/backup'
+import { backupNoticeKind } from '../logic/backup'
 import { fetchNews, isNewsSuppressed, isNewsVisibleFor, type NewsItem } from '../logic/news'
 import { settingsLinkWithBack } from '../logic/backLink'
 import type { Recipe, Settings } from '../db/types'
@@ -34,11 +34,15 @@ export default function DayStartNotices({
   allRecipes: Recipe[] | undefined
   currentPath: string
 }) {
-  // 自分のレシピが1件以上あり、30日以上（または一度も）バックアップしていないとき
-  const showBackupReminder =
-    settings !== undefined &&
-    (allRecipes?.some((r) => !r.isStarter) ?? false) &&
-    backupOverdue(settings.lastBackupAt)
+  // 自分のレシピが1品以上あるときだけ見る（守るものが無い人には出さない）。
+  // 出す時と言い方は logic/backup.ts の backupNoticeKind が決める:
+  //   'overdue' … 前回の書き出しから30日以上
+  //   'first'   … 一度も書き出していない人（使い始めから7日たってから・言い方を変える）
+  const backupNotice =
+    settings !== undefined && (allRecipes?.some((r) => !r.isStarter) ?? false)
+      ? backupNoticeKind(settings.lastBackupAt, settings.firstLaunchAt)
+      : 'none'
+  const showBackupReminder = backupNotice !== 'none'
   const [backupReminderDismissed, setBackupReminderDismissed] = useState(
     () => sessionStorage.getItem(BACKUP_REMINDER_DISMISSED_KEY) === '1',
   )
@@ -78,7 +82,9 @@ export default function DayStartNotices({
           className="flex items-center gap-2 rounded-md border border-edge bg-surface px-[var(--space-md)] py-2 text-sm text-ink-muted shadow-sm"
         >
           <HardDriveDownload size={16} className="shrink-0 text-accent-ink" aria-hidden />
-          <span className="min-w-0 flex-1">{ja.dayStart.backupReminder}</span>
+          <span className="min-w-0 flex-1">
+            {backupNotice === 'first' ? ja.dayStart.backupReminderFirst : ja.dayStart.backupReminder}
+          </span>
           <span className="shrink-0 font-bold text-accent-ink">{ja.dayStart.backupReminderLink}</span>
           <span
             role="button"
