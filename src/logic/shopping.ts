@@ -160,18 +160,39 @@ export interface ShoppingCandidate {
    */
   sources: ShoppingItemSource[]
   /**
-   * 全レシピでの使われ方が調味料的（大さじ/小さじ/単位なし/少々等）、
-   * または水道から出るもの（水・お湯・湯）なら true。
+   * 全レシピでの使われ方が調味料的（大さじ/小さじ/単位なし/少々等）なら true。
    * true の候補は買い物候補でデフォルト未チェックになる
    */
   isSeasoningLike: boolean
 }
 
 /**
- * 買うものではないのに分量が数値（600ml等）のせいで主材料扱いされてしまう食材。
- * 調味料と同じくデフォルト未チェックにする（2026-07-09ペルソナ第2波: 「水」がチェック済みで入る）
+ * 買い物メモに出さない食材＝水道から出るもの（2026-08-22 便IX）。
+ *
+ * オーナーが実際のレシピサイトから取り込んだ31品で発覚した。クラシル「エビグラタン」は
+ * マカロニをゆでるための「お湯 1000ml」まで材料に入っており、買い物メモの下書きに
+ * 「お湯」が並んでいた。店で買うものではないので下書きに出さない。
+ * （従来は「デフォルト未チェック」にするだけで、行そのものは並んでいた）
+ *
+ * **レシピの材料一覧からは消さない。** 「ゆでる湯 1000ml」は作るときに要る情報なので、
+ * 落とすのは買い物メモの下書きを組み立てるこの関数の中だけにする。
+ *
+ * 落とす条件は**名前の完全一致だけ**（toPantryKey は括弧書きを外すので「水（分量外）」も同じ）。
+ * 部分一致にすると「炭酸水」「ミネラルウォーター」「水菜」「水溶き片栗粉」「トマト水煮缶」
+ * 「湯葉」まで巻き込む＝店で買うものが黙って消える。それが最悪の結果なので取らない。
+ *
+ * 落とさないもの:
+ * - **塩・砂糖などの調味料**（ゆで塩も含む）… 切らしていれば買うため。
+ * - **氷**… ロックアイスとして買う人がいるため（「氷水」は作るものなので落とす）。
  */
-const TAP_WATER_NAMES = new Set(['水', 'お湯', '湯'].map(toPantryKey))
+const NOT_FOR_SHOPPING_NAMES = new Set(
+  ['水', 'お湯', '湯', 'ぬるま湯', '熱湯', '氷水', '冷水'].map(toPantryKey),
+)
+
+/** その食材名が「買いに行かないもの（水道から出るもの）」か（2026-08-22 便IX） */
+export function isNotForShoppingName(name: string): boolean {
+  return NOT_FOR_SHOPPING_NAMES.has(toPantryKey(name.trim()))
+}
 
 /** 買い物候補づくりの内部で扱う、1材料分の分量パーツ（scale=食数スケール、既定1） */
 interface AmountPart {
@@ -463,6 +484,9 @@ export function buildShoppingCandidates(
     for (const raw of recipe.ingredients) {
       const rawName = raw.name.trim()
       if (!rawName) continue
+      // 水・お湯のように店で買わないものは買い物メモに出さない（2026-08-22 便IX）。
+      // レシピの材料一覧は触らないので、作るときに要る「ゆでる湯」の情報は残る
+      if (isNotForShoppingName(rawName)) continue
       if (haveKeys.has(toPantryKey(rawName))) continue // 在庫「ある」は候補に出さない
       // 炊いたごはんは、店で買える形＝生米のグラムに置き換えてから集計する
       // （2026-08-08 オーナー実機フィードバック。該当しない材料はそのまま返る）
@@ -498,7 +522,7 @@ export function buildShoppingCandidates(
       amount: combineAmounts(entry.parts),
       recipeIds: sources.map((s) => s.recipeId),
       sources,
-      isSeasoningLike: TAP_WATER_NAMES.has(key) || entry.parts.every(isSeasoningLike),
+      isSeasoningLike: entry.parts.every(isSeasoningLike),
     }
   })
 }

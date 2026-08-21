@@ -22116,6 +22116,265 @@ try {
     }
   }
 
+  // --- IX-SHOP-01: 買い物メモに「お湯」が並ぶ(2026-08-22 便IX)。
+  //   オーナーが実際のレシピサイトから取り込んだ31品で発覚した。クラシル「エビグラタン」は
+  //   マカロニをゆでるための「お湯 1000ml」まで材料に入っており、買い物メモの下書きに
+  //   「お湯」の行が並んでいた(店で買うものではない)。
+  //
+  //   測るのは利用者が確かめたいこと3つ。どれも「どこに出ているか」ではなく
+  //   **画面のどこかに出ているか**で判定する(並びが変わっても同じ判定になる形):
+  //     ①下書きに「お湯」が出ない ②同じレシピの他の材料(ゆで塩も含む)は出る
+  //     ③レシピの材料一覧には「お湯 1000ml」が残っている(作るときに要る情報なので消さない)
+  //   料理名は同梱レシピに左右されないよう、この検証の中で登録して作る(「お湯」を含まない名前にする) ---
+  currentCheck = 'IX-SHOP-01'
+  {
+    const ixBrowser = await chromium.launch()
+    try {
+      const ixContext = await ixBrowser.newContext()
+      const ixPage = await ixContext.newPage()
+      ixPage.on('dialog', (dialog) => dialog.accept())
+      ixPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@IX-SHOP-01] ${err.message}`)
+      })
+      const ixTitle = 'IX検証グラタン'
+      await ixPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ixPage.waitForTimeout(1800)
+      const ixId = await ixPage.evaluate(async (title) => {
+        const db = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        const store = (name) => db.transaction(name, 'readwrite').objectStore(name)
+        // クラシル「エビグラタン」の材料の並びそのまま(ゆでる湯と、ゆで塩が先頭に入る形)
+        const id = await P(store('recipes').add({
+          title, servings: 2, effortLevel: 'normal', tags: [], isFavorite: false,
+          cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+          ingredients: [
+            { name: 'マカロニ', amount: '60', unit: 'g' },
+            { name: 'お湯', amount: '1000', unit: 'ml' },
+            { name: '塩', amount: '2', unit: '小さじ' },
+            { name: 'エビ', amount: '5', unit: '尾' },
+          ],
+          steps: [{ text: 'マカロニをゆでる。', minutes: 5 }, { text: 'オーブンで焼く。' }],
+        }))
+        db.close()
+        return id
+      }, ixTitle)
+
+      // ③ 先にレシピの材料一覧を見ておく(買い物メモ側で落としても、レシピからは消えないこと)
+      await ixPage.goto(`${BASE}/#/recipes/${ixId}`)
+      await ixPage.reload({ waitUntil: 'networkidle' })
+      await ixPage.waitForTimeout(900)
+      const ixDetail = (await ixPage.textContent('body')).replace(/​/g, '')
+      check(
+        'IX-SHOP-01 ③レシピの材料一覧には「お湯 1000ml」が残る(作るときに要る情報)',
+        ixDetail.includes('お湯') && ixDetail.includes('1000'),
+        `detailHasOyu=${ixDetail.includes('お湯')} detailHas1000=${ixDetail.includes('1000')}`,
+      )
+
+      await ixPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await ixPage.waitForTimeout(600)
+      await ixPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await ixPage.waitForTimeout(300)
+      await ixPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await ixPage.waitForTimeout(400)
+      // 同梱レシピを巻き込まないよう、この検証で登録した1品だけに絞ってから食数を1にする
+      await ixPage.getByPlaceholder('レシピ名で絞り込み').fill(ixTitle)
+      await ixPage.waitForTimeout(400)
+      await ixPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await ixPage.waitForTimeout(200)
+      await ixPage.getByRole('button', { name: '下書きを作る' }).click()
+      await ixPage.waitForTimeout(600)
+
+      const ixDraft = (await ixPage.textContent('body')).replace(/​/g, '')
+      check(
+        'IX-SHOP-01 ①買い物メモの下書きに「お湯」が出ない',
+        ixDraft.includes('買い物メモ（下書き）') && !ixDraft.includes('お湯'),
+        `draftShown=${ixDraft.includes('買い物メモ（下書き）')} hasOyu=${ixDraft.includes('お湯')}`,
+      )
+      check(
+        'IX-SHOP-01 ②同じレシピの他の材料は出る(ゆで塩も落とさない)',
+        ['マカロニ', 'エビ', '塩'].every((n) => ixDraft.includes(n)),
+        `draftMissing=${JSON.stringify(['マカロニ', 'エビ', '塩'].filter((n) => !ixDraft.includes(n)))}`,
+      )
+
+      // 確定して買い物メモに入れたあとも「お湯」は無い(下書きだけの話にしない)
+      await ixPage.getByRole('button', { name: '買い物メモに追加' }).click()
+      await ixPage.waitForTimeout(600)
+      const ixMemo = (await ixPage.textContent('body')).replace(/​/g, '')
+      check(
+        'IX-SHOP-01 ①確定して買い物メモに入れても「お湯」の行は無い',
+        !ixMemo.includes('お湯') && ixMemo.includes('マカロニ'),
+        `memoHasOyu=${ixMemo.includes('お湯')} memoHasMacaroni=${ixMemo.includes('マカロニ')}`,
+      )
+    } finally {
+      await ixBrowser.close()
+    }
+  }
+
+  // --- IX-SHOP-02: 材料が0件のレシピを買い物メモに入れようとしたとき(2026-08-22 便IX)。
+  //   オーナーのテスト用データにある手書きの「冷蔵庫のあまりもの炒め」(材料0件・手順3件)が、
+  //   買い物メモで壊れないこと・不自然な空行を出さないこと・**理由に合った説明が出ること**を見る。
+  //   実測(便IX)では壊れも空行も無かったが、説明だけが「食材の在庫で『ある』に登録済みのようです」
+  //   ＝材料を1件も登録していないレシピでは事実と違う文になっていた ---
+  currentCheck = 'IX-SHOP-02'
+  {
+    const izBrowser = await chromium.launch()
+    try {
+      const izPage = await (await izBrowser.newContext()).newPage()
+      izPage.on('dialog', (dialog) => dialog.accept())
+      izPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@IX-SHOP-02] ${err.message}`)
+      })
+      const izTitle = 'IX材料ゼロ炒め'
+      await izPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await izPage.waitForTimeout(1800)
+      await izPage.evaluate(async (title) => {
+        const db = await new Promise((resolve, reject) => {
+          const r = indexedDB.open('uchi-recipe')
+          r.onsuccess = () => resolve(r.result)
+          r.onerror = () => reject(r.error)
+        })
+        const P = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+        await P(db.transaction('recipes', 'readwrite').objectStore('recipes').add({
+          title, servings: 2, effortLevel: 'normal', tags: [], isFavorite: false,
+          cookedLogs: [], searchWords: [], isStarter: false, updatedAt: Date.now(),
+          ingredients: [],
+          steps: [
+            { text: '冷蔵庫に残っている野菜と肉を食べやすく切る' },
+            { text: 'フライパンに油を熱し、火の通りにくいものから炒める', minutes: 5 },
+            { text: '塩・こしょうで味を調える' },
+          ],
+        }))
+        db.close()
+      }, izTitle)
+
+      await izPage.goto(`${BASE}/#/shopping`, { waitUntil: 'networkidle' })
+      await izPage.reload({ waitUntil: 'networkidle' })
+      await izPage.waitForTimeout(800)
+      await izPage.getByRole('button', { name: '買い物メモ', exact: true }).click()
+      await izPage.waitForTimeout(300)
+      await izPage.getByRole('button', { name: 'レシピから追加', exact: true }).click()
+      await izPage.waitForTimeout(400)
+      await izPage.getByPlaceholder('レシピ名で絞り込み').fill(izTitle)
+      await izPage.waitForTimeout(400)
+      await izPage.getByRole('button', { name: '食数を増やす' }).first().click()
+      await izPage.waitForTimeout(200)
+      await izPage.getByRole('button', { name: '下書きを作る' }).click()
+      await izPage.waitForTimeout(700)
+
+      const izDraft = izPage.locator('section').filter({ hasText: ja.shopping.candidateTitle }).last()
+      check(
+        'IX-SHOP-02 下書きの枠は出る(押しても何も起きない、にならない)',
+        await izDraft.isVisible(),
+      )
+      // 空行を出していないこと＝行(li)が1つも無いこと。0件なのに枠だけの行を作らない
+      check(
+        'IX-SHOP-02 材料0件でも空の行を作らない',
+        (await izDraft.locator('ul > li').count()) === 0,
+        `行数=${await izDraft.locator('ul > li').count()}`,
+      )
+      // 何も入れられないのに「買い物メモに追加」を押せる状態にしない
+      check(
+        'IX-SHOP-02 入れるものが無いので「買い物メモに追加」は出さない',
+        (await izPage.getByRole('button', { name: ja.shopping.addConfirmed }).count()) === 0,
+      )
+      const izText = (await izDraft.textContent()).replace(/​/g, '')
+      check(
+        'IX-SHOP-02 理由に合った説明が出る(材料が無いことを言う)',
+        izText.includes(ja.shopping.candidateEmptyNoIngredients),
+        `text=${izText.slice(-80)}`,
+      )
+      check(
+        'IX-SHOP-02 事実と違う説明(在庫にある)は出さない',
+        !izText.includes(ja.shopping.candidateEmpty),
+        `text=${izText.slice(-80)}`,
+      )
+    } finally {
+      await izBrowser.close()
+    }
+  }
+
+  // --- IX-PASTE-01: 文章から取り込むと宣伝・見出しが材料に入る(2026-08-22 便IX)。
+  //   cotta「基本のシュークリームのレシピ」を文章から取り込んだ実データで、材料21件のうち
+  //   「おすすめのアイテム」(宣伝の見出し)・「cotta 北海道産薄力粉 シュクレ 2.5kg」(その下に並ぶ売り物)・
+  //   「下準備」(節の見出し)が材料の行として保存され、買い物メモにもそのまま並んでいた。
+  //   下の文章は元ページ https://www.cotta.jp/special/article/?p=64082 の材料まわりの実測。
+  //   判定は**フォームの入力欄に何が入ったか**で見る(貼り付けた原文は画面に残るので、
+  //   画面全体の文字で見ると素通り合格になる) ---
+  currentCheck = 'IX-PASTE-01'
+  {
+    const ipBrowser = await chromium.launch()
+    try {
+      const ipPage = await (await ipBrowser.newContext()).newPage()
+      ipPage.on('dialog', (dialog) => dialog.accept())
+      ipPage.on('pageerror', (err) => {
+        if (err.message.includes('cloudflareinsights') || err.message.includes('Access-Control-Allow-Origin')) return
+        errors.push(`[pageerror@IX-PASTE-01] ${err.message}`)
+      })
+      await ipPage.goto(`${BASE}/#/recipes`, { waitUntil: 'networkidle' })
+      await ipPage.waitForTimeout(1500)
+      await ipPage.goto(`${BASE}/#/recipes/new`, { waitUntil: 'networkidle' })
+      await ipPage.waitForTimeout(500)
+      const ipBox = ipPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
+      if (!(await ipBox.isVisible().catch(() => false))) {
+        await ipPage.getByText('テキスト貼り付けで自動入力').click()
+        await ipPage.waitForTimeout(400)
+      }
+      await ipBox.fill(
+        [
+          'IX貼り付けテスト',
+          '',
+          '材料',
+          '',
+          '牛乳…45g',
+          '薄力粉…55g',
+          '',
+          'おすすめのアイテム',
+          '',
+          'cotta 北海道産薄力粉 シュクレ 2.5kg',
+          '',
+          '下準備',
+          '',
+          '薄力粉をふるっておく。',
+          '',
+          '作り方',
+          '',
+          '鍋に牛乳を入れて温める。',
+        ].join('\n'),
+      )
+      await ipPage.getByRole('button', { name: '自動で振り分ける' }).click()
+      await ipPage.waitForTimeout(500)
+      const ipRead = (await ipPage.textContent('body')).replace(/​/g, '')
+      check(
+        'IX-PASTE-01 読み取り結果は材料2件・手順2件(宣伝2行と節の見出しは材料に数えない)',
+        ipRead.includes('材料2件・手順2件を読み取りました'),
+        ipRead.match(/材料\d+件・手順\d+件を読み取りました/)?.[0] ?? '(読み取り結果の行が無い)',
+      )
+      // 入力欄に何が入ったかで見る(並び順・行の位置には依らない)
+      const ipValues = await ipPage.evaluate(() =>
+        [...document.querySelectorAll('input')].map((el) => el.value).filter(Boolean),
+      )
+      check(
+        'IX-PASTE-01 宣伝の見出し・売り物・節の見出しが材料の行にならない',
+        !ipValues.some((v) => ['おすすめのアイテム', '下準備'].includes(v)) &&
+          !ipValues.some((v) => v.includes('cotta 北海道産薄力粉')),
+        `values=${JSON.stringify(ipValues)}`,
+      )
+      check(
+        'IX-PASTE-01 正しい材料(牛乳・薄力粉)は巻き込まれず両方残る',
+        ipValues.includes('牛乳') && ipValues.includes('薄力粉'),
+        `values=${JSON.stringify(ipValues)}`,
+      )
+    } finally {
+      await ipBrowser.close()
+    }
+  }
+
   // --- COOKED-REFLECT-01: 「作った！」の在庫反映スイッチ(2026-07-23 #11)。既定OFF・選択を記憶。
   // 在庫「玉ねぎ」を「ある」にしておき、玉ねぎを使う肉じゃがで作った!記録時にスイッチONで保存すると、
   // 使った食材の在庫が1段階下がる(ある→少ない)こと、スイッチ状態がsettingsに記憶されることを確認する ---
