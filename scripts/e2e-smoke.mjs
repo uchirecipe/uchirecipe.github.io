@@ -15112,9 +15112,6 @@ try {
       // 2026-08-04 便DV-10(オーナー指摘): 押し売りに見えないよう題も文面も短くし、
       // 解錠済みには出さない印(hideWhenPro)を付けた。
       // 2026-08-08 便DZ: 上限を30に変えたお知らせが最新になった(アプリは最新1件だけを出す)
-      const releaseNews = Array.isArray(news)
-        ? news.find((n) => n.id === '2026-08-02-pro-release')
-        : undefined
       // 2026-08-21 便IR: 題を丸ごと書き写して比べていた（オーナー書き溜め④で題を直した
       // だけで赤くなった＝禁じ手②）。印(id)と、数字が出ているかだけを見る
       check(
@@ -15134,15 +15131,25 @@ try {
         news[0]?.hideWhenPro === true,
         `hideWhenPro=${news[0]?.hideWhenPro}`,
       )
+      // 2026-08-21 オーナー指示（A案）: **発売前にPro版の告知を配らない**ので取り下げた
+      // （原文「まだ正式なユーザーはいません。このような表現は、宣伝をした後になります」）。
+      // 「その1件が在ること」を前提に測っていたので、取り下げた瞬間に赤くなっていた。
+      // いまは**発売前は無いのが正しい**を測り、**発売して戻したときに作法を測る**形にする
       check(
-        'LAUNCH-02 発売の告知も残っていて設定のPro節へ誘導する',
-        releaseNews?.link === '#/settings?section=pro',
-        `link=${releaseNews?.link}`,
+        'LAUNCH-02 発売前はPro版そのものを題にした告知を配らない(2026-08-21 オーナー指示)',
+        !news.some((n) => /Pro版/.test(n.title ?? '')),
+        JSON.stringify(news.map((n) => n.title)),
       )
       check(
-        'LAUNCH-02 発売告知は解錠済みには出さない印が付いている',
-        releaseNews?.hideWhenPro === true,
-        `hideWhenPro=${releaseNews?.hideWhenPro}`,
+        'LAUNCH-02 Proの案内へ連れて行く告知には、解錠済みに出さない印が付いている',
+        news
+          .filter((n) => /section=pro|manual\.html#pro/.test(n.link ?? ''))
+          .every((n) => n.hideWhenPro === true),
+        JSON.stringify(
+          news
+            .filter((n) => /section=pro|manual\.html#pro/.test(n.link ?? ''))
+            .map((n) => [n.id, n.hideWhenPro]),
+        ),
       )
 
       // --- 30件の線引きの実挙動(2026-08-08 便DZ: 上限50→30・予告は節目だけ)。
