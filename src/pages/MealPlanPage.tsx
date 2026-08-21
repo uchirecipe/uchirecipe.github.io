@@ -22,6 +22,7 @@ import {
   Trash2,
   Plus,
   Minus,
+  Pencil,
   SlidersHorizontal,
   BookmarkPlus,
   LayoutTemplate,
@@ -113,6 +114,9 @@ import {
   planAllLockToggle,
   planClearMealSlots,
   planShowWeekLock,
+  planToggleDayEdit,
+  planViewRows,
+  WEEK_GROUP_DEFAULT_OPEN,
   PLAN_QUICK_MINUTES_OPTIONS,
   DEFAULT_PLAN_QUICK_MINUTES,
 } from '../logic/mealPlan'
@@ -4834,6 +4838,17 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [dayFoldOverrides, setDayFoldOverrides] = useState<Record<string, boolean>>({})
   /**
+   * 週タブの「1日ずつの編集モード」（2026-08-22 便IV・オーナー原文
+   * 「1日分にそれぞれ編集モード切り替えボタン作って、ランダムと削除、選んだレシピの追加や
+   *  書き換えができるようにする。１週間分をざっくりと計画した後に、気になるところは個別に
+   *  編集モードでレシピ変更できる、という流れを考えています。」）。
+   *
+   * 覚えるのは**編集している日の日付1つだけ**（切り替えの決め方は logic/mealPlan.ts の
+   * planToggleDayEdit）。他の日は通常表示のまま＝1画面で週を見渡せる状態を崩さない。
+   * 週を送れば別の週の日付には当たらないので、自動で通常表示に戻る。
+   */
+  const [weekEditDate, setWeekEditDate] = useState<string | null>(null)
+  /**
    * 献立が1品以上入っている日（表示している食事のぶんだけ数える）。
    * 表示していない食事にしか入っていない日を「献立あり」と数えると、開いても何も無い日が開く。
    */
@@ -4944,11 +4959,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    *    グループを畳んでいるあいだ「現在の条件」が1つも見えないままでは直らない
    * 便ENが畳んだ理由（中身が縦に長い）は、便IDで条件が窓に移り、便IFで説明を1行にまとめた
    * ことで無くなっている。
+   *
+   * 2026-08-22 便IV（オーナー原文「でふぉるとで設定３種は、折りたたんだ表示にして」）:
+   * **3つとも畳んだ状態から始める**。便IFが「献立を提案」だけ開いていた理由（実行ボタンが
+   * グループの中にある）は、同じ書き溜めの「「まとめて献立てを入力」ボタンは「献立を提案」の
+   * 横にして、１列におさめて。」で解けている＝実行ボタンは見出しの横に出したままなので、
+   * 畳んでいても押すものが画面から消えない。
+   * 既定の値そのものは logic/mealPlan.ts の WEEK_GROUP_DEFAULT_OPEN が持つ（見張れる形にする）。
    */
-  const [weekGroupOpen, setWeekGroupOpen] = useState({
-    display: false,
-    auto: true,
-    template: false,
+  const [weekGroupOpen, setWeekGroupOpen] = useState<Record<keyof typeof WEEK_GROUP_DEFAULT_OPEN, boolean>>({
+    ...WEEK_GROUP_DEFAULT_OPEN,
   })
 
   /**
@@ -5595,6 +5615,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               // 押せなくなることを機械で見張る。以前はクラス名(flex-1)で拾っていたが、
               // それは自前で組んでいた行の内部の書き方で、共通カードに寄せた時点で当たらなくなった
               testId="row-recipe"
+              titleTestId="row-title"
               titleBadges={
                 isCooked ? (
                   // 2026-08-03 便DP-5(オーナー「予定と記録がわかりづらい」): 面と文字を落としたうえで
@@ -5680,6 +5701,103 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           )}
         </div>
       )}
+      </div>
+    )
+  }
+
+  /**
+   * 1日×1つの食事帯の**通常表示**（2026-08-22 便IV）。週タブの曜日カードだけで使う。
+   *
+   * オーナー原文:
+   *   「週のレシピカードが小さすぎてレシピ名で表示できる字数が少なぎる。
+   *     「豆腐ときの…」「レンジ蒸し…」「鶏胸肉の…」だとなんなのかわからない。
+   *     週献立は、通常表示はレシピカード（レシピ名と画像のみ）のみ
+   *     （タップでレシピ詳細画面につながる）。」
+   *
+   * 出すのは**入っている品だけ**（空き枠は出さない）。1品につき絵と料理名だけのカードで、
+   * 押すとレシピ詳細へ移る。役割（主菜/副菜）・人数・「主菜と別ジャンル」の印・引き直し・
+   * 外す・追加・「レシピを見る」は、この表示には出さず**編集モード（renderSlotEditor）へ移した**。
+   * 直す前は同じ1行に 役割の列(40px)＋カード＋サイコロ(34px)＋×(34px) が並び、料理名に
+   * 残る幅は390px幅の実測で119px＝7文字しか読めなかった（オーナーが挙げた「豆腐ときの…」）。
+   *
+   * **例外は鍵の印だけ**（司令部裁定）。鍵の掛かった食事は「まとめて献立を入力」で
+   * 書き換わらないので、掛けたことが通常表示から読めないと、動かない理由が分からなくなる。
+   * 印は場所を取らない小さなものにして、料理名の幅は削らない。
+   *
+   * 空でも鍵が掛かっている食事は枠ごと出す（同じ理由＝自動で埋まらない理由が読めるように）。
+   * それ以外の空の食事は、枠ごと出さない。
+   */
+  const renderSlotView = (date: string, slot: MealSlot) => {
+    const slotKey = `${date}|${slot}`
+    const rows = planViewRows(entriesByDateSlotAll.get(slotKey) ?? [])
+    const slotLocked = isMealSlotLocked(lockedKeys, date, slot)
+    if (rows.length === 0 && !slotLocked) return null
+    return (
+      <div
+        key={slot}
+        data-testid="slot-block"
+        data-slot={slot}
+        data-locked={slotLocked ? 'true' : undefined}
+        // 囲み・地色・左の帯は編集モードとまったく同じ（便CW-1のSLOT_TONE）。
+        // モードを切り替えても、どの食事の枠かの見分け方が変わらないようにする
+        className="rounded-md border border-l-4 p-[var(--space-sm)]"
+        style={{
+          background: slotLocked ? SLOT_TONE[slot].lockedBg : SLOT_TONE[slot].bg,
+          borderColor: slotLocked ? 'var(--accent)' : 'var(--border)',
+          borderLeftColor: SLOT_TONE[slot].bar,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-bold text-ink-muted">{ja.mealPlan.slot[slot]}</p>
+          {slotLocked && (
+            <span
+              data-testid="slot-lock-mark"
+              data-date={date}
+              data-slot={slot}
+              role="img"
+              aria-label={ja.mealPlan.lockedSlotNote}
+              /* 掛かっている鍵は塗りつぶし（便ENの作法をそのまま。押せる鍵は編集モードに在る） */
+              className="ml-auto inline-flex shrink-0 items-center rounded-full bg-accent p-1 text-on-accent shadow-sm"
+            >
+              <Lock size={14} aria-hidden />
+            </span>
+          )}
+        </div>
+        <ul className="mt-1 space-y-1">
+          {rows.map((entry) => {
+            const recipe = recipeById.get(entry.recipeId)
+            if (!recipe) return null
+            const isCooked = entry.id != null && cookedPlanEntryIdSet.has(entry.id)
+            return (
+              <li
+                key={entry.id}
+                // 検査用の目印は編集モードと同じ（この行が「いつの・どの食事の・どの役割」か）。
+                // モードで目印が変わると、同じことを見ている検査が2通りの掴み方を持つことになる
+                data-testid="plan-row"
+                data-date={date}
+                data-slot={slot}
+                data-role={entry.role ?? 'main'}
+              >
+                <RecipeCard
+                  recipe={recipe}
+                  density="small"
+                  place="planSlot"
+                  // 作り終えた品は淡い表示にする（便DP-5の「面と文字を落とす」側だけを残した。
+                  // 「作った」バッジは幅を実測62px使い、料理名が4文字ぶん削れるので通常表示では出さない）
+                  muted={isCooked}
+                  // 押すとレシピ詳細へ（オーナー原文「タップでレシピ詳細画面につながる」）。
+                  // 戻ったときに同じ週・同じ縦位置へ帰すのは「レシピを見る」と同じ仕組み
+                  linkState={logDetailLinkState}
+                  onNavigate={rememberLogDetailReturn}
+                  ngIngredients={settings?.ngIngredients ?? []}
+                  testId="row-recipe"
+                  titleTestId="row-title"
+                  thumbTestId="row-thumb"
+                />
+              </li>
+            )
+          })}
+        </ul>
       </div>
     )
   }
@@ -6136,14 +6254,21 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
   // 畳んだときに見出しの行とボタンの行で2段になり、どのグループのものか読み取りづらかった。
   // 見出しの折りたたみボタンの中には入れない（ボタンの入れ子は押し分けられなくなる）ので、
   // 見出しの行を flex にして「折りたたみボタン＋常設の操作」を横に並べる。
+  //
+  // 2026-08-22 便IV（オーナー原文「「まとめて献立てを入力」ボタンは「献立を提案」の横にして、
+  // １列におさめて。」）: 横に置くものが1つのボタンだけの節は**折り返さない**（wrap=false）。
+  // 「表示のしかた」の食事のチップは3つ並ぶので今までどおり折り返す。
   const renderWeekGroupHeader = (
     key: keyof typeof weekGroupOpen,
     title: string,
     alwaysVisible?: ReactNode,
+    wrap = true,
   ) => {
     const open = weekGroupOpen[key]
     return (
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div
+        className={`flex items-center gap-x-2 gap-y-1 ${wrap ? 'flex-wrap' : 'flex-nowrap'}`}
+      >
         <button
           type="button"
           onClick={() => setWeekGroupOpen((prev) => ({ ...prev, [key]: !prev[key] }))}
@@ -7386,16 +7511,16 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           2026-08-03 便DP-7(オーナー指示): 開いたときの並びは 週の区切り → まとめて空にする
           (表示を決めるものを先に置き、消す操作を最後に離す)。
 
-          2026-08-21 便IN: 「まとめて空にする」を**折りたたみの外**（この節のいちばん下）へ出した。
-          オーナーの原則「アプリ全体で、折りたたみを一切開かなくても、最低限一通りすべての機能を
-          触れる（使いこなすために開く）ようにしたい」に、この節が反していたため
-          （週の献立をまとめて消す道は、この折りたたみの中にしか無かった）。
-          置き場所は「献立を提案」の実行ボタンと同じ作法（便II・③）＝折りたたみの外・節の下端。
+          2026-08-21 便IN: 「まとめて空にする」を折りたたみの外（この節のいちばん下）へ出した。
+          2026-08-22 便IVで**折りたたみの中へ戻した**（オーナー原文「「表示のしかた」の
+          折りたたんだ表示には、空にする項目を入れないで」）。便INは「折りたたみを一切開かなくても
+          最低限一通りすべての機能を触れる」を全部の操作に当てはめたが、オーナーが同じ書き溜めで
+          「折りたたみの状態でも最低限使えるように、というのは、まとめてやテンプレートのような
+          初心者が使わないような機能はしまっておく、という意味合いでした。」と訂正している。
+          週の献立をまとめて消すのは、まさに初心者が毎日使う操作ではないので**しまう側**。
           開いているときの並び（週の区切り → まとめて空にする）は今までと変わらない。
-          見出しの横に足さなかった理由: そこは表示する食事のチップで埋まっており、
-          消す操作を同じ形のチップの列に並べると、押し間違えたときに消える側だと気づけない。
-          週の表示起点の切替だけは折りたたみの中に残した（見え方の好みで、既定のままでも
-          週の中身は全部読める。見張りの一覧 COLLAPSE-1 に理由つきで書いてある） */}
+          対象の食事のチップも囲みごと中に入るので、畳んでいる間に見出しの横の
+          「表示する食事」と同じ形のチップが2組並ぶこともなくなった（便INが避けていた問題）。 */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader(
           'display',
@@ -7431,60 +7556,54 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {/* 2つの表示の違いを一言で示す(2026-07-29 便CD/MP-14)。名前だけでは意味が分からず
                 3体が切替自体を触っていなかった */}
             <p className="mt-1 text-xs text-ink-muted">{ja.mealPlan.weekLayoutHint}</p>
+
+            {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
+                2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した →
+                2026-08-21 便INで折りたたみの外へ出した → 2026-08-22 便IVで中へ戻した)。
+                朝食・昼食・夕食は複数選べる。確認文は規約Fのまま
+                (何が消えるか・何が残るかを件数つきで両方書く)。
+                中へ戻した理由は上の節の頭に書いてある（オーナーの訂正）。
+                対象の食事のチップも囲みも同じ折りたたみの中なので、
+                「どの食事が消えるのか」は押す前に必ず同じ場所で読める */}
+            <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app p-[var(--space-sm)]">
+              <p className="text-xs font-bold text-ink-muted">
+                {clearSlotTargets.length === 0
+                  ? ja.mealPlan.clearWeekSlotTitleNone
+                  : ja.mealPlan.clearWeekSlotTitle.replace('{slot}', clearSlotLabel)}
+              </p>
+              <div className="mt-[var(--space-sm)] flex flex-wrap gap-2">
+                {MEAL_SLOTS.map((slot) => (
+                  <button
+                    key={slot}
+                    type="button"
+                    onClick={() => toggleClearSlotTarget(slot)}
+                    aria-pressed={clearSlotTargets.includes(slot)}
+                    aria-label={ja.mealPlan.clearWeekSlotTargetAria.replace(
+                      '{slot}',
+                      ja.mealPlan.slot[slot],
+                    )}
+                    className={chipClass(clearSlotTargets.includes(slot))}
+                    style={chipStyle(clearSlotTargets.includes(slot))}
+                  >
+                    <ChipCheck on={clearSlotTargets.includes(slot)} />
+                    {ja.mealPlan.slot[slot]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                data-testid="week-clear-slot"
+                onClick={() => void clearWeekSlot()}
+                /* tap-target: 消す操作は指で確実に押せる大きさを保つ
+                   （見た目の大きさ・色は変えない。消す操作を目立たせない作りのまま） */
+                className="tap-target mt-2 inline-flex items-center gap-1 text-sm font-bold text-warning underline"
+              >
+                <Trash2 size={14} aria-hidden />
+                {ja.mealPlan.clearWeekSlotButton}
+              </button>
+            </div>
           </>
         </Collapse>
-
-        {/* 食事を選んでこの週の予定をまとめて空にする(便U-4 → 便CW-3で改名・折りたたみ →
-            2026-08-03 便DJ(オーナー指示)で「表示のしかた」グループの中へ移した →
-            2026-08-21 便INで**折りたたみの外**へ出した)。
-            朝食・昼食・夕食は複数選べる。確認文は規約Fのまま
-            (何が消えるか・何が残るかを件数つきで両方書く)。
-            囲みごと外に出すのは、押す前に「どの食事が消えるのか」が同じ場所で読めるようにするため
-            （ボタンだけを外に出すと、畳んだ人には対象の食事が見えないまま消す操作が並ぶ）。
-            **どの食事を空にするかのチップだけは、この節の折りたたみと一緒に開く**＝
-            畳んでいるあいだ、見出しの横の「表示する食事」とまったく同じ形のチップが
-            すぐ下に並んで、どちらがどちらか読めなくなるのを避ける。
-            畳んでいても対象は上の1行が名指しするので、押す前に何が消えるかは分かる
-            （そのうえで確認の窓が件数つきで言う＝規約F） */}
-        <div className="mt-[var(--space-md)] rounded-sm border border-edge bg-app p-[var(--space-sm)]">
-          <p className="text-xs font-bold text-ink-muted">
-            {clearSlotTargets.length === 0
-              ? ja.mealPlan.clearWeekSlotTitleNone
-              : ja.mealPlan.clearWeekSlotTitle.replace('{slot}', clearSlotLabel)}
-          </p>
-          <Collapse open={weekGroupOpen.display} reveal={false}>
-            <div className="mt-[var(--space-sm)] flex flex-wrap gap-2">
-              {MEAL_SLOTS.map((slot) => (
-                <button
-                  key={slot}
-                  type="button"
-                  onClick={() => toggleClearSlotTarget(slot)}
-                  aria-pressed={clearSlotTargets.includes(slot)}
-                  aria-label={ja.mealPlan.clearWeekSlotTargetAria.replace(
-                    '{slot}',
-                    ja.mealPlan.slot[slot],
-                  )}
-                  className={chipClass(clearSlotTargets.includes(slot))}
-                  style={chipStyle(clearSlotTargets.includes(slot))}
-                >
-                  <ChipCheck on={clearSlotTargets.includes(slot)} />
-                  {ja.mealPlan.slot[slot]}
-                </button>
-              ))}
-            </div>
-          </Collapse>
-          <button
-            type="button"
-            data-testid="week-clear-slot"
-            onClick={() => void clearWeekSlot()}
-            /* tap-target: 畳んだままでも押す場所になったので、当たり判定を44pxに広げる
-               （見た目の大きさ・色は変えない。消す操作を目立たせない作りのまま） */
-            className="tap-target mt-2 inline-flex items-center gap-1 text-sm font-bold text-warning underline"
-          >
-            <Trash2 size={14} aria-hidden />
-            {ja.mealPlan.clearWeekSlotButton}
-          </button>
-        </div>
       </section>
 
       {/* グループ2: 献立を提案。押すと献立が増える操作をここに集める。
@@ -7506,7 +7625,28 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             （塗りつぶし・横いっぱい）にするため。見出しの横に無くなったので、このグループは既定で開く
           ・入れかたは週にしか無い（＝「できることが増えた版」）。並びは便ID・①のまま入れかたが先 */}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
-        {renderWeekGroupHeader('auto', ja.mealPlan.weekGroupAutoTitle)}
+        {/* 実行ボタンは**見出しの横**（2026-08-22 便IV・オーナー原文「「まとめて献立てを入力」
+            ボタンは「献立を提案」の横にして、１列におさめて。」）。
+            便DT-5/6が置いていた場所へ戻す。便IF・⑥が「日タブにそろえる」ために条件の下へ移し、
+            便II・③が折りたたみの外・節の下端へ出していたが、どちらも見出しとボタンで2段になる。
+            見出しの行に横並びで入れると、畳んだときの高さが1行ぶんで済む。
+            塗りつぶし（bg-accent）は変えない＝この節でいちばん押すものだと一目で分かる形は保つ。
+            横いっぱいをやめたので、日タブの「今日なに作る？」とは横幅だけが違う
+            （便IF・⑥がそろえた並び「入れかた→現在の条件→実行」は、開いたときそのまま残る）。 */}
+        {renderWeekGroupHeader(
+          'auto',
+          ja.mealPlan.weekGroupAutoTitle,
+          <button
+            type="button"
+            data-testid="week-fill-run"
+            onClick={() => void fillWeek()}
+            className="ml-auto inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-2 text-sm font-bold text-on-accent shadow-sm"
+          >
+            <Dices size={18} aria-hidden />
+            {ja.mealPlan.fillWeek}
+          </button>,
+          false,
+        )}
         <Collapse open={weekGroupOpen.auto}>
           <>
             {/* 入れかた(2026-08-07 便DT-8・オーナー指示)。「まとめて献立を入力」が
@@ -7554,27 +7694,6 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
             {renderSuggestConditions()}
           </>
         </Collapse>
-
-        {/* 実行ボタン。**折りたたみの外**に置く（2026-08-20 便II・③。オーナー原文
-            「折りたたんだ状態で「まとめて献立を入力」ボタンほしい。アプリ全体で、折りたたみを
-              一切開かなくても、最低限一通りすべての機能を触れる（使いこなすために開く）ように
-              したい。」）。
-            場所は畳んでいても開いていても**この節のいちばん下**＝開いているときの並び
-            （出しかた→入れかた→現在の条件→実行）は便IF・⑥のまま変わらず、畳むと見出しの
-            すぐ下に来る。日タブの「今日なに作る？」も同じ形にそろえてある
-            （components/TodaySuggestPanel）。
-            便DT-5/6の「見出しの横」に戻さなかった理由: 見出しの横は幅が狭く、塗りつぶしの
-            横いっぱいのボタン（日タブと同じ見た目）が置けない＝そろえ方が また割れる。
-            絵は、いま選んでいる出しかたで入れ替える（便DT-7から変えていない） */}
-        <button
-          type="button"
-          data-testid="week-fill-run"
-          onClick={() => void fillWeek()}
-          className="mt-[var(--space-sm)] flex w-full items-center justify-center gap-2 rounded-md bg-accent py-3 font-bold text-on-accent shadow-sm"
-        >
-          <Dices size={20} aria-hidden />
-          {ja.mealPlan.fillWeek}
-        </button>
       </section>
 
       {/* グループ3: 別の週・テンプレートから入れる。
@@ -7589,52 +7708,49 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
           ＝**同じことをする道を2つ置かない**。節の名前も中身に合わせて言い換えた
           (「献立テンプレート」のままだと、過ぎた週をそのまま入れる道が名前の下に隠れる)。
 
-          2026-08-21 便IN: 「保存」と「適用」の2つを**折りたたみの外**へ出した。
-          この節は畳むと見出ししか残らず、テンプレートを作る道も使う道も消えていた。
-          **2つとも外に出したのは、片方だけでは行き止まりになるため**＝
-          適用だけ残すと、まだ1つも保存していない人には「まだ保存したテンプレートがありません」
-          としか出せず、その案内が指す保存のボタンは折りたたみの中にある。
-          保存だけ残すと、覚えさせた献立を入れる道が無い。
-          折りたたみに残したのは、説明の1行とテンプレートの中身を見る画面への入口
-          （どちらも読む・確かめるもので、使いこなすために開く側）。
-          開いているときの並びは今までと変わらない */}
+          2026-08-21 便IN: 「保存」と「適用」の2つを折りたたみの外へ出した。
+          2026-08-22 便IVで**3つとも中へ戻した**（オーナー原文「テンプレートエリアは
+          折りたたみ状態でボタンはなし。」）。同じ書き溜めの
+          「まとめてやテンプレートのような初心者が使わないような機能はしまっておく」が
+          この節そのものを名指ししている＝畳んだときは見出しだけが残る。
+          開いているときの並びは便INの前と同じ（3つのボタン → 説明の1行 → 中身を見る画面への入口）*/}
       <section className="mt-[var(--space-md)] rounded-md border border-edge p-[var(--space-sm)]">
         {renderWeekGroupHeader('template', ja.mealPlan.weekGroupTemplateTitle)}
-        <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
-          {/* 過去の献立をコピー(2026-08-21 便IO・名前は便IU・⑤)。コピー先は**いま表示している
-              週のまま**なので、その7日間の初日を渡す＝あちらの画面で週を送ってもコピー先は動かない */}
-          <Link
-            to={`/meal-plan/copy-week?to=${dates[0]}`}
-            data-testid="week-copy-pick"
-            /* tap-target: 折りたたみの外に常設するので、当たり判定を44pxに広げる */
-            className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-          >
-            <Copy size={14} aria-hidden />
-            {ja.mealPlan.copyPickTitle}
-          </Link>
-          <button
-            type="button"
-            data-testid="week-template-save"
-            onClick={openTemplateSave}
-            /* tap-target: 畳んだままでも押す場所になったので、当たり判定を44pxに広げる */
-            className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-          >
-            <BookmarkPlus size={14} aria-hidden />
-            {ja.mealPlan.templateSave}
-          </button>
-          <button
-            type="button"
-            data-testid="week-template-apply"
-            onClick={() => openTemplateApply('week')}
-            /* tap-target: 畳んだままでも押す場所になったので、当たり判定を44pxに広げる */
-            className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
-          >
-            <LayoutTemplate size={14} aria-hidden />
-            {ja.mealPlan.templateApplyWeek}
-          </button>
-        </div>
         <Collapse open={weekGroupOpen.template}>
           <>
+            <div className="mt-[var(--space-sm)] flex flex-wrap gap-[var(--space-sm)]">
+              {/* 過去の献立をコピー(2026-08-21 便IO・名前は便IU・⑤)。コピー先は**いま表示している
+                  週のまま**なので、その7日間の初日を渡す＝あちらの画面で週を送ってもコピー先は動かない */}
+              <Link
+                to={`/meal-plan/copy-week?to=${dates[0]}`}
+                data-testid="week-copy-pick"
+                /* tap-target: 開いてから押す場所でも、当たり判定は44pxを保つ */
+                className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+              >
+                <Copy size={14} aria-hidden />
+                {ja.mealPlan.copyPickTitle}
+              </Link>
+              <button
+                type="button"
+                data-testid="week-template-save"
+                onClick={openTemplateSave}
+                /* tap-target: 開いてから押す場所でも、当たり判定は44pxを保つ */
+                className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+              >
+                <BookmarkPlus size={14} aria-hidden />
+                {ja.mealPlan.templateSave}
+              </button>
+              <button
+                type="button"
+                data-testid="week-template-apply"
+                onClick={() => openTemplateApply('week')}
+                /* tap-target: 開いてから押す場所でも、当たり判定は44pxを保つ */
+                className="tap-target inline-flex items-center gap-1 rounded-sm border border-edge bg-surface px-3 py-2 text-sm font-bold text-accent-ink shadow-sm"
+              >
+                <LayoutTemplate size={14} aria-hidden />
+                {ja.mealPlan.templateApplyWeek}
+              </button>
+            </div>
             <p className="mt-[var(--space-sm)] text-xs text-ink-muted">
               {ja.mealPlan.templateSaveDescription}
             </p>
@@ -7749,6 +7865,13 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               ? 'plan'
               : null
           const dayLocked = isDayMealLocked(lockedKeys, date)
+          /**
+           * この日を編集モードで出すか（2026-08-22 便IV）。
+           * 過ぎた日は予定そのものを出さない画面なので、編集モードにも入れない
+           * （切り替えボタンも出さない＝押しても何も変わらないボタンを置かない）。
+           */
+          const dayEditable = !isPastDate(date, today)
+          const dayEditing = dayEditable && weekEditDate === date
           return (
           <section
             key={date}
@@ -7822,6 +7945,38 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                   <ChevronUp size={18} className="shrink-0 text-ink-muted" aria-hidden />
                 )}
               </button>
+              {/* 1日ずつの編集モードの切り替え（2026-08-22 便IV・オーナー原文
+                  「1日分にそれぞれ編集モード切り替えボタン作って、ランダムと削除、
+                    選んだレシピの追加や書き換えができるようにする。」）。
+                  見出しの行に置く（司令部裁定）。名前・見た目は日タブの「今日の献立」の
+                  整理モードにそろえる＝押している間は塗りつぶし・名前は「完了」に変わる。
+                  畳んでいる日には出さない（畳んだ行は日付だけを残す行なので、
+                  そこに押しても中身の見えない操作を並べない）。
+                  幅は長いほうの字（「完了」）で固定して、押しても1pxも動かさない（便EO） */}
+              {dayEditable && !dayCollapsed && (
+                <button
+                  type="button"
+                  data-testid="week-day-edit"
+                  data-date={date}
+                  onClick={() => setWeekEditDate((prev) => planToggleDayEdit(prev, date))}
+                  aria-pressed={dayEditing}
+                  aria-label={(dayEditing
+                    ? ja.mealPlan.weekDayEditOffAria
+                    : ja.mealPlan.weekDayEditOnAria
+                  ).replace('{date}', date.replaceAll('-', '/'))}
+                  className={`inline-flex min-h-11 shrink-0 items-center gap-1 rounded-sm border px-3 py-2 text-sm font-bold ${
+                    dayEditing
+                      ? 'border-accent bg-accent text-on-accent'
+                      : 'border-edge bg-surface text-ink-muted'
+                  }`}
+                >
+                  <Pencil size={14} aria-hidden />
+                  <SwapLabel
+                    current={dayEditing ? ja.mealPlan.weekDayEditDone : ja.mealPlan.weekDayEdit}
+                    labels={[ja.mealPlan.weekDayEdit, ja.mealPlan.weekDayEditDone]}
+                  />
+                </button>
+              )}
               {/* 日ごとのロック: その日の朝食・昼食・夕食をまとめて掛け外しする。
                   3食とも掛かっているときだけ閉じた鍵になる(表示していない食事も数える)。
                   2026-08-19 便IF・⑪: 過去だけの週では出さない（「すべてロック」と同じ判断）。
@@ -7855,11 +8010,32 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
                 1日だけ開いたときも見失わない */}
             <Collapse open={!dayCollapsed} reveal={false}>
             <>
-            {/* 今日・未来日は編集可能な予定グリッド。過去日は予定を表示から消し、下の「作った記録」
-                だけを日記のように見せる(便BS・タスク2。mealPlansデータは非破壊で残す) */}
-            {!isPastDate(date, today) && (
+            {/* 今日・未来日の予定。過去日は予定を表示から消し、下の「作った記録」だけを
+                日記のように見せる(便BS・タスク2。mealPlansデータは非破壊で残す)。
+
+                2026-08-22 便IV: 通常表示（renderSlotView＝絵と料理名だけ）と
+                編集モード（renderSlotEditor＝今までの1品ごとの操作すべて）を切り替える。
+                切り替えは見出しの行の「編集」で、一度に1日だけ（他の日は通常表示のまま）。
+                通常表示で献立が1品も無い日は、押す場所の名前を1行で書く
+                （空き枠を出さないので、書かないと行き止まりになる） */}
+            {dayEditable && (
               <div className="mt-[var(--space-sm)] space-y-[var(--space-sm)]">
-                {visibleSlots.map((slot) => renderSlotEditor(date, slot))}
+                {dayEditing ? (
+                  visibleSlots.map((slot) => renderSlotEditor(date, slot))
+                ) : (
+                  <>
+                    {visibleSlots.map((slot) => renderSlotView(date, slot))}
+                    {!visibleSlots.some(
+                      (slot) =>
+                        (entriesByDateSlotAll.get(`${date}|${slot}`)?.length ?? 0) > 0 ||
+                        isMealSlotLocked(lockedKeys, date, slot),
+                    ) && (
+                      <p data-testid="week-day-view-empty" className="text-sm text-ink-muted">
+                        {ja.mealPlan.weekDayViewEmpty}
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             )}
             {/* 過去日の振り返り(2026-07-17 便Z-2・docs/35 §3・便BSで「記録だけ残す」へ強化):
