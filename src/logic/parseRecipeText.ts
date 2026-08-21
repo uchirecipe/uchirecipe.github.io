@@ -164,8 +164,24 @@ export function assignSeasoningGroupsByMark(
 }
 const STEP_NUMBER = /^[（(]?\d{1,2}[）)．.、:：]\s*|^[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]\s*|^(step|STEP|Step)\s*\d+[．.:：)）]?\s*/
 // M4: 「2.を3cm…」「（1）のフライパン…」のように番号直後が格助詞で始まる行は、
-// 前の手順への参照であって新しい番号手順ではない。番号を剥がさず行全体を手順として扱うためのガード
-const STEP_NUMBER_REF_GUARD = /^[（(]?\d{1,2}\s*[）)．.、:：]\s*(?:を|と|の|へ|は|が)/
+// 前の手順への参照であって新しい番号手順ではない。番号を剥がさず行全体を手順として扱うためのガード。
+//
+// 2026-08-21 便IT: **丸数字と「STEP1」の形**も対象に加えた。白ごはん.com実測の
+// 「②で準備した野菜を炒めます。」が「で準備した野菜を炒めます。」になり、文が壊れていた
+// (ガードが「(1)」「1.」の形にしか効いていなかった)。
+// 「に」「で」も加えたが、**直後がひらがな以外のときに限る**。「①にんじんを切る」
+// 「①でんぷんを水で溶く」のように食材名の出だしにもなる2文字で、無条件に参照とみなすと
+// 番号が剥がれず「1 ①にんじんを切る」と番号が二重に並ぶため。
+// 参照の書き方(「①に加える」「②で準備した」)は直後が漢字・カタカナ・英数字になる。
+const STEP_REF_PARTICLE_SOURCE = '(?:を|と|の|へ|は|が|[にで](?![ぁ-ゖ]))'
+const STEP_NUMBER_REF_GUARD = new RegExp(
+  '^(?:' +
+    '[（(]?\\d{1,2}\\s*[）)．.、:：]' +
+    '|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳]' +
+    '|(?:step|STEP|Step)\\s*\\d{1,2}[．.:：)）]?' +
+    ')\\s*' +
+    STEP_REF_PARTICLE_SOURCE,
+)
 const SERVINGS = /(\d+(?:[.．]\d+)?)\s*人\s*(?:分|前)/
 // M2: 「3人分」「(2人分)」「3〜4人分」のように行全体が人数だけの行(材料/手順に混入させず読み飛ばす)
 const SERVINGS_ONLY_LINE =
@@ -547,7 +563,64 @@ type Region = 'pre' | 'ing' | 'steps' | 'memo'
 const ING_HEADER_FOLLOWED_BY_PARTICLE =
   /^[【\[（(◆■□●○☆★♪#＊*\s]*(?:材料|用意するもの|ざいりょう)[をはがもにで]/
 function isIngHeaderLine(line: string): boolean {
-  return ING_HEADER.test(line) && line.length <= 15 && !ING_HEADER_FOLLOWED_BY_PARTICLE.test(line)
+  if (ING_HEADER.test(line) && line.length <= 15 && !ING_HEADER_FOLLOWED_BY_PARTICLE.test(line)) return true
+  return isIngHeaderTail(line)
+}
+function isStepHeaderLine(line: string): boolean {
+  if (STEP_HEADER.test(line) && line.length <= 15) return true
+  return isStepHeaderTail(line)
+}
+
+// 2026-08-21 便IT: **料理名が前に付いた見出し**(「鮭の南蛮漬けの材料 (作りやすい分量)」
+// 「南蛮酢の作り方」)。ING_HEADERは行頭の「材料」だけ、STEP_HEADERは15字までしか見ないため、
+// 白ごはん.com実測ではこれらが見出しと認識されず、**料理名が見出し行そのものになり**、
+// **見出し行が材料の行に混じって**いた。
+// 飾り(【 】など)と末尾のかっこ書き((作りやすい分量)・（仕上げ）)を外した本体が
+// 「〜の材料」「〜の作り方」で終わる**短い行**だけを見出しにする。
+// 句点・感嘆符・疑問符を含む行は文なので対象外(「詳しい南蛮酢の作り方はこちらから。」を弾く)。
+const HEADER_DECORATION_HEAD = /^[【[（(◆■□●○☆★♪#＊*\s　]+/
+const HEADER_DECORATION_TAIL = /[】\])）\s　]+$/
+const HEADER_TRAILING_NOTE = /[（(][^（()）]*[）)][\s　]*$/
+const HEADER_SENTENCE_MARK = /[。！!？?]/
+const HEADER_TAIL_MAX = 30
+const ING_HEADER_TAIL = /の(?:材料|ざいりょう)$/
+// 「〇〇　レシピ・作り方」のように記号でつないだ書き方は**入れない**。M7のタイトル末尾整形
+// (「レシピ・作り方」ごと落として料理名にする)と食い合い、料理名が「〇〇 レシピ」になってしまう
+const STEP_HEADER_TAIL = /の(?:作り方|つくり方|作りかた|手順)$/
+
+/** 見出し行から飾りと末尾のかっこ書きを外した本体を返す */
+function headerCore(line: string): string {
+  return line
+    .trim()
+    .replace(HEADER_DECORATION_HEAD, '')
+    .replace(HEADER_TRAILING_NOTE, '')
+    .replace(HEADER_DECORATION_TAIL, '')
+    .trim()
+}
+
+function isHeaderTailLine(line: string, tail: RegExp): boolean {
+  const core = headerCore(line)
+  return core.length > 0 && core.length <= HEADER_TAIL_MAX && !HEADER_SENTENCE_MARK.test(core) && tail.test(core)
+}
+
+function isIngHeaderTail(line: string): boolean {
+  return isHeaderTailLine(line, ING_HEADER_TAIL)
+}
+
+function isStepHeaderTail(line: string): boolean {
+  return isHeaderTailLine(line, STEP_HEADER_TAIL)
+}
+
+/**
+ * 「◯◯の材料」「◯◯の作り方」形の見出しから料理名を取り出す(2026-08-21 便IT)。
+ * 白ごはん.comのように、ページの先頭がこの形の見出しで始まると、料理名がその行のまま
+ * 「鮭の南蛮漬けの材料 (作りやすい分量)」になっていた。見出し語を外して「鮭の南蛮漬け」にする。
+ */
+function titleFromHeaderTail(line: string): string | undefined {
+  const core = headerCore(line)
+  if (!isHeaderTailLine(line, ING_HEADER_TAIL) && !isHeaderTailLine(line, STEP_HEADER_TAIL)) return undefined
+  const name = core.replace(ING_HEADER_TAIL, '').replace(STEP_HEADER_TAIL, '').trim()
+  return name || undefined
 }
 
 /**
@@ -567,7 +640,7 @@ function isSentenceLikeTitle(line: string): boolean {
 function classifyHeader(line: string): Region | null {
   if (!line) return null
   if (isIngHeaderLine(line)) return 'ing'
-  if (STEP_HEADER.test(line) && line.length <= 15) return 'steps'
+  if (isStepHeaderLine(line)) return 'steps'
   if (MEMO_HEADER.test(line)) return 'memo'
   return null
 }
@@ -924,6 +997,11 @@ const TIME_VALUE_LINE = new RegExp(`^${COOK_TIME_VALUE_SOURCE}$`)
 
 // REWRITE: 捨てず書き換える行
 const ONE_POINT_ADVICE_LINE = /^(?:料理上手のワンポイント|ワンポイント(?:アドバイス)?|アドバイス)$/
+// 便IT: 「数量：シェル型6〜9個分」のような出来上がりの量の行(cotta実測)。
+// 「◯◯の材料」を見出しと読めるようにしたぶん、この行が材料欄の1行目に入るようになったため、
+// 材料として拾わない。人数が書いてあるときだけ値の側を残す(「数量：4人分」→「4人分」)。
+const YIELD_LABEL_LINE = /^数量[\s　]*[／/:：]\s*(.*)$/
+
 // F12: 「調理時間50分カロリー297kcal…」のような調理時間メタくっつき行→「調理時間 50分」に書き換え
 const COOK_TIME_GLUED_META = /^(調理時間|所要時間|目安時間|合計時間|準備時間)(\d{1,3})分\S/
 function rewriteCookTimeGluedMeta(line: string): string | null {
@@ -959,6 +1037,13 @@ function pass1(lines: string[]): string[] {
     const gluedMeta = rewriteCookTimeGluedMeta(line)
     if (gluedMeta) line = gluedMeta
     if (ONE_POINT_ADVICE_LINE.test(normalize(line).trim())) line = 'コツ・ポイント'
+    const yieldLabel = normalize(line).trim().match(YIELD_LABEL_LINE)
+    if (yieldLabel) {
+      const value = yieldLabel[1].trim()
+      if (SERVINGS.test(value)) out.push(value)
+      i++
+      continue
+    }
 
     // 見出し行(材料/作り方/コツ・ポイント等)は常に素通りさせる
     const header = classifyHeader(line)
@@ -1086,11 +1171,16 @@ export function parseRecipeText(text: string): ParsedRecipe {
     }
 
     // 見出し行
-    if (ING_HEADER.test(line)) {
+    // 便IT: 「◯◯の材料」「◯◯の作り方」形(isIngHeaderTail/isStepHeaderTail)を**足すだけ**にして、
+    // 既存のING_HEADER.test / STEP_HEADERの判定はそのまま残す(H-1の既存挙動を変えないため)。
+    // ページの先頭がこの形の見出しだと料理名が入らなくなるので、見出し語を外した名前を料理名にする。
+    if (ING_HEADER.test(line) || isIngHeaderTail(line)) {
+      if (!result.title) result.title = titleFromHeaderTail(line) ?? result.title
       mode = 'ingredients'
       continue
     }
-    if (STEP_HEADER.test(line) && line.length <= 15) {
+    if ((STEP_HEADER.test(line) && line.length <= 15) || isStepHeaderTail(line)) {
+      if (!result.title) result.title = titleFromHeaderTail(line) ?? result.title
       mode = 'steps'
       continue
     }

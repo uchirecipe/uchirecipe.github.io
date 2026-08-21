@@ -346,6 +346,168 @@ await (async () => {
   )
 })()
 
+// ==================== ③(便IT 2026-08-21): Content-Typeが application/octet-stream の画像 ====================
+// E・レシピ実測: 画像が `Content-Type: application/octet-stream` で返るため、
+// 中身はJPEGなのに invalid_content_type で弾いていた(レシピの写真だけが入らない)。
+// 何でも通す形にはせず、**先頭のバイト**で画像だと確かめてから通す。
+
+/** 先頭に印(マジックバイト)を置いた本文を作る */
+function bytesWithHead(head, extra = 32) {
+  const out = new Uint8Array(head.length + extra)
+  out.set(head, 0)
+  return out
+}
+const JPEG_HEAD = [0xff, 0xd8, 0xff, 0xe0]
+const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const GIF_HEAD = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]
+const WEBP_HEAD = [0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]
+
+for (const [label, head, expected] of [
+  ['JPEG', JPEG_HEAD, 'image/jpeg'],
+  ['PNG', PNG_HEAD, 'image/png'],
+  ['GIF', GIF_HEAD, 'image/gif'],
+  ['WebP', WEBP_HEAD, 'image/webp'],
+]) {
+  await (async () => {
+    const bytes = bytesWithHead(head)
+    await withMockFetch(
+      async () =>
+        new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }),
+      async () => {
+        const res = await worker.fetch(
+          req('/image?url=' + encodeURIComponent('https://example.com/photo.bin'), { headers: { Origin: PROD_ORIGIN } }),
+        )
+        ok(`/image IT③: application/octet-stream でも中身が${label}なら通す`, res.status === 200)
+        ok(`/image IT③: ${label}と見分けたContent-Typeを付け直す`, res.headers.get('Content-Type') === expected)
+        const buf = new Uint8Array(await res.arrayBuffer())
+        ok(
+          `/image IT③: ${label}のバイトが1バイトも欠けずに届く`,
+          buf.length === bytes.length && buf.every((b, i) => b === bytes[i]),
+        )
+      },
+    )
+  })()
+}
+
+await (async () => {
+  // 画像でないものを画像として扱わない: HTMLはこれまでどおり400
+  const bytes = new TextEncoder().encode('<!doctype html><html><body>not an image</body></html>')
+  await withMockFetch(
+    async () => new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }),
+    async () => {
+      const res = await worker.fetch(
+        req('/image?url=' + encodeURIComponent('https://example.com/page.bin'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      const body = await res.json()
+      ok('/image IT③: 中身がHTMLなら400/invalid_content_type のまま', res.status === 400 && body.error === 'invalid_content_type')
+    },
+  )
+})()
+
+await (async () => {
+  // SVGは通さない(中にスクリプトを書ける形式なので、印だけでは安全と言えない)
+  const bytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+  await withMockFetch(
+    async () => new Response(bytes, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }),
+    async () => {
+      const res = await worker.fetch(
+        req('/image?url=' + encodeURIComponent('https://example.com/x.bin'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      const body = await res.json()
+      ok('/image IT③: 中身がSVGでも通さない(400)', res.status === 400 && body.error === 'invalid_content_type')
+    },
+  )
+})()
+
+await (async () => {
+  // 中身の判別に足りない短さ(2バイト)は通さない
+  await withMockFetch(
+    async () => new Response(new Uint8Array([0xff, 0xd8]), { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }),
+    async () => {
+      const res = await worker.fetch(
+        req('/image?url=' + encodeURIComponent('https://example.com/tiny.bin'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      const body = await res.json()
+      ok('/image IT③: 見分けが付かない短さは通さない(400)', res.status === 400 && body.error === 'invalid_content_type')
+    },
+  )
+})()
+
+await (async () => {
+  // 3MBの上限は見分けた側でも効く(Content-Length宣言)
+  await withMockFetch(
+    async () =>
+      new Response(bytesWithHead(JPEG_HEAD), {
+        status: 200,
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(5 * 1024 * 1024) },
+      }),
+    async () => {
+      const res = await worker.fetch(
+        req('/image?url=' + encodeURIComponent('https://example.com/huge.bin'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      const body = await res.json()
+      ok('/image IT③: 見分けた画像でも3MB超は413/too_large', res.status === 413 && body.error === 'too_large')
+    },
+  )
+})()
+
+await (async () => {
+  // 上限超のストリーム(Content-Lengthなし)も、見分けた側で打ち切られる
+  await withMockFetch(
+    async () => {
+      const first = bytesWithHead(JPEG_HEAD, 1_000_000)
+      const chunk = new Uint8Array(1_000_000)
+      let sent = 0
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (sent === 0) {
+            sent++
+            controller.enqueue(first)
+            return
+          }
+          if (sent >= 4) {
+            controller.close()
+            return
+          }
+          sent++
+          controller.enqueue(chunk)
+        },
+      })
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'application/octet-stream' } })
+    },
+    async () => {
+      const res = await worker.fetch(
+        req('/image?url=' + encodeURIComponent('https://example.com/stream.bin'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      ok('/image IT③: 見分けた画像のストリームも200で始まる', res.status === 200)
+      let rejected = false
+      try {
+        await res.arrayBuffer()
+      } catch {
+        rejected = true
+      }
+      ok('/image IT③: 3MB超で本文の読み取りが打ち切られる', rejected)
+    },
+  )
+})()
+
+await (async () => {
+  // Content-Typeが image/* のときは、これまでどおりそのまま透過する(中身は見に行かない)
+  const bytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+  await withMockFetch(
+    async () => new Response(bytes, { status: 200, headers: { 'Content-Type': 'image/jpeg' } }),
+    async () => {
+      const res = await worker.fetch(
+        req('/image?url=' + encodeURIComponent('https://example.com/photo.jpg'), { headers: { Origin: PROD_ORIGIN } }),
+      )
+      ok('/image IT③: image/*はこれまでどおり透過(回帰)', res.status === 200 && res.headers.get('Content-Type') === 'image/jpeg')
+      const buf = new Uint8Array(await res.arrayBuffer())
+      ok('/image IT③: image/*のバイトもそのまま(回帰)', buf.length === bytes.length && buf.every((b, i) => b === bytes[i]))
+    },
+  )
+})()
+
+
 // ---------- 結果 ----------
 console.log(`合格: ${passed}件 / 失敗: ${failures.length}件`)
 for (const f of failures) console.log(`  NG ${f}`)

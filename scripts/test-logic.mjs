@@ -430,6 +430,7 @@ import {
   seasoningGroupFromLetter,
   countAmountlessRows,
   stripPastedMarkup,
+  stripImportedMarkup,
 } from '../src/logic/urlImportRows.ts'
 import {
   MIN_SERVINGS,
@@ -13094,6 +13095,228 @@ eq(
   ),
   1,
 )
+
+// ============================================================================
+// 便IT(2026-08-21): テスト用データ作りで見つかった取り込みの不具合。
+// ①cotta(タグの外にRecipeを書くサイト) ②型の大きさを人数と読む ④丸数字の参照
+// ⑤「◯◯の材料」「◯◯の作り方」の見出し ⑥手順に残る「**1**」
+// ============================================================================
+
+// ---- ①(便IT): <script type="application/ld+json"> の外に書かれたRecipeを拾う ----
+// cotta実測: schema.org/Recipeの中身はHTMLソースに丸ごと載っているが、
+// 「var rich_card_json = {…}」というJavaScriptの変数として書かれており、ページを開いてから
+// JavaScriptがld+jsonのタグを作る。タグだけを見ていたWorkerには見つけられなかった。
+{
+  // (1) cottaのレシピページ相当: 素のJavaScriptの中の変数に丸ごと入っている
+  const html =
+    '<!doctype html><html><head></head><body>' +
+    '<script charset="UTF-8" type="text/javascript">\n' +
+    "    const s = document.createElement('script');\n" +
+    "    s.setAttribute('type', 'application/ld+json');\n" +
+    '\tvar rich_card_json ={"@context":"http:\\/\\/schema.org\\/","@type":"Recipe","name":"基本のマドレーヌ",' +
+    '"image":"https:\\/\\/example.com\\/madeleine.jpg","recipeYield":"シェル型6〜9個分",' +
+    '"recipeIngredient":["全卵1個分","砂糖50g","薄力粉50g"],' +
+    '"recipeInstructions":[{"@type":"HowToStep","text":"卵を割りほぐし、砂糖を入れて混ぜる"},' +
+    '{"@type":"HowToStep","text":"型に流して170度で13分焼く"}]};\n' +
+    '    s.textContent = JSON.stringify(rich_card_json);\n' +
+    '    document.head.appendChild(s);\n' +
+    '</script></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/cotta1')
+  eq('IT①: ld+jsonタグの外(JavaScriptの変数)に書かれたRecipeも拾える', r?.title, '基本のマドレーヌ')
+  eq('IT①: 外から拾ったRecipeの材料3件', r?.ingredients, [
+    { name: '全卵', amount: '1個分' },
+    { name: '砂糖', amount: '50g' },
+    { name: '薄力粉', amount: '50g' },
+  ])
+  eq('IT①: 外から拾ったRecipeの手順2件', r?.steps, [
+    '卵を割りほぐし、砂糖を入れて混ぜる',
+    '型に流して170度で13分焼く',
+  ])
+  eq('IT①: 外から拾ったRecipeの写真', r?.imageUrl, 'https://example.com/madeleine.jpg')
+}
+
+{
+  // (2) JSON.stringify({…}) の形で引数に直接書かれている形も同じように拾える
+  const html =
+    '<!doctype html><html><head></head><body><script type="text/javascript">' +
+    'x.textContent = JSON.stringify({"@context":"http:\\/\\/schema.org","@type":"Recipe","name":"かぼちゃの煮物",' +
+    '"recipeIngredient":["かぼちゃ 1/4個"],"recipeInstructions":["ひと口大に切る","落としぶたをして煮る"]});' +
+    '</script></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/cotta2')
+  eq('IT①: JSON.stringify({…})の形でもRecipeを拾える', r?.title, 'かぼちゃの煮物')
+  eq('IT①: JSON.stringify形の手順2件', r?.steps, ['ひと口大に切る', '落としぶたをして煮る'])
+}
+
+{
+  // (3) 入れ子の中にRecipeがあっても、そのRecipeだけを取り出せる
+  const html =
+    '<!doctype html><html><body><script>window.__DATA__ = {"page":{"id":12,' +
+    '"recipe":{"@type":"Recipe","name":"きんぴらごぼう","recipeIngredient":["ごぼう 1本"],' +
+    '"recipeInstructions":["ささがきにする","炒める"]}}};</script></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/nested')
+  eq('IT①: 入れ子の中のRecipeも拾える', r?.title, 'きんぴらごぼう')
+}
+
+{
+  // (4) 拾いすぎない① ld+jsonタグに揃ったRecipeがあるときは、外は見に行かない
+  //     (タグの中が正)。外に別のRecipeが転がっていても混ざらない
+  const html =
+    '<!doctype html><html><head><script type="application/ld+json">' +
+    JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'Recipe',
+      name: '肉じゃが',
+      recipeIngredient: ['じゃがいも 3個'],
+      recipeInstructions: ['煮る'],
+    }) +
+    '</script></head><body><script>var other = {"@type":"Recipe","name":"よその料理",' +
+    '"recipeIngredient":["塩 少々"],"recipeInstructions":["混ぜる"]};</script></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/recipe/both')
+  eq('IT①: タグの中が揃っていれば、そちらを使う(外のRecipeに乗っ取られない)', r?.title, '肉じゃが')
+}
+
+{
+  // (5) 拾いすぎない② <script>の外(本文)に同じ字面があっても拾わない
+  const html =
+    '<!doctype html><html><body><p>このページは {"@type":"Recipe","name":"本文に書いただけ",' +
+    '"recipeIngredient":["塩 少々"],"recipeInstructions":["混ぜる"]} という説明の記事です。</p></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/article')
+  eq('IT①: <script>の外(本文)に転がっている同じ字面は拾わない', r, undefined)
+}
+
+{
+  // (6) 拾いすぎない③ 中身が足りないRecipe(cottaの記事ページ実測: 名前と写真だけ)は
+  //     これまでどおり no_recipe。貼り付け取り込みへ案内する
+  const html =
+    '<!doctype html><html><body><script>y.textContent = JSON.stringify({"@context":"http:\\/\\/schema.org",' +
+    '"@type":"Recipe","name":"基本のシュークリームレシピ","image":"https://example.com/a.jpg",' +
+    '"recipeCategory":"お菓子"});</script></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/column')
+  eq('IT①: 名前だけのRecipe(材料・手順なし)はこれまでどおり取り込まない', r, undefined)
+}
+
+{
+  // (7) 拾いすぎない④ JSONとして読めない書き方(素のJavaScriptのオブジェクト)は諦める(落ちない)
+  const html =
+    '<!doctype html><html><body><script>var z = {"@type":"Recipe", name: 基本の何か, ' +
+    'recipeIngredient: [塩]};</script></body></html>'
+  const r = extractRecipeFromHtml(html, 'https://example.com/broken')
+  eq('IT①: JSONとして読めない書き方は拾わない(例外を投げない)', r, undefined)
+}
+
+// ---- ②(便IT): 型の大きさ(cm)・「1台分」を人数と読まない ----
+// 実測: DELISH KITCHEN「直径17cmのシフォン型1台分」→17人分、macaroni「18cm×18cmの容器1台分」→18人分。
+// 1食あたりの原価が約8円になり、数字が明らかに変だった。docs/43で「26個分」は直っているが
+// cm表記が残っていた
+eq('IT②: 「直径17cmのシフォン型1台分」を人数と読まない', extractServings('直径17cmのシフォン型1台分'), undefined)
+eq('IT②: 「18cm×18cmの容器1台分」を人数と読まない', extractServings('18cm×18cmの容器1台分'), undefined)
+eq('IT②: 「21cmのパウンド型1台分」も読まない', extractServings('21cmのパウンド型1台分'), undefined)
+eq('IT②: 「天板1枚分」も読まない(既存の枚)', extractServings('天板1枚分'), undefined)
+// 範囲の後ろに個数の単位が来る形(cotta「シェル型6〜9個分」実測)。範囲の先頭の数字だけを見ていると
+// 6人分になっていた
+eq('IT②: 「シェル型6〜9個分」を人数と読まない', extractServings('シェル型6〜9個分'), undefined)
+eq('IT②: 「200〜250g」も読まない', extractServings('200〜250g'), undefined)
+// 既存の挙動は変えない(人数として読めるものは読む)
+eq('IT②: 「4人分」はこれまでどおり4', extractServings('4人分'), 4)
+eq('IT②: 単位なしの範囲「2〜3」はこれまでどおり2', extractServings('2〜3'), 2)
+eq('IT②: 「600g / 3」はこれまでどおり3', extractServings('600g / 3'), 3)
+
+// ---- ⑥(便IT): 手順に残る「**1**」(NHK実測) ----
+// みんなのきょうの料理は、前の手順を指す番号を JSON-LD 側で「**1**」と書いている。
+// 番号は残し、印(**)だけを落とす。番号ごと落とすと「の野菜類を加える」になって文が壊れる
+eq(
+  'IT⑥: 手順の「**1**」は印だけ落として番号を残す',
+  normalizeInstructions(['ボウルにひき肉、塩を入れてよく練る。**1**の野菜類を加える。']),
+  ['ボウルにひき肉、塩を入れてよく練る。1の野菜類を加える。'],
+)
+eq(
+  'IT⑥: 行頭の「**2**の…」も番号を残す(手順番号として剥がさない)',
+  normalizeInstructions(['**2**のキャベツの軸をそぎ落とす。', '**4**の巻き終わりを下にして並べる。']),
+  ['2のキャベツの軸をそぎ落とす。', '4の巻き終わりを下にして並べる。'],
+)
+// アプリ側の保険(便IL/①と同じ考え方): アプリはWorkerを差し替えずに更新されうるので、
+// 受け取った側でももう一度落とす。印が無い文は1文字も変わらない
+eq(
+  'IT⑥: アプリ側でも「**1**」の印を落として番号を残す(Workerが出るまでの保険)',
+  filterImportedSteps(['ボウルにひき肉を練る。**1**の野菜類を加える。', '**2**を俵形に整える。']),
+  ['ボウルにひき肉を練る。1の野菜類を加える。', '2を俵形に整える。'],
+)
+eq('IT⑥: 印が無い文はアプリ側でも変わらない', stripImportedMarkup('鍋に水を入れて沸かす'), '鍋に水を入れて沸かす')
+eq('IT⑥: 3桁以上の数字は強調の印とみなさない', stripImportedMarkup('**170**度で焼く'), '**170**度で焼く')
+
+// ---- ④(便IT): 丸数字の参照が剥がれて手順の文が壊れる(貼り付け) ----
+// 白ごはん.com実測「②で準備した野菜を炒めます。」→「で準備した野菜を炒めます。」。
+// M4のガードが「(1)」「1.」の形にしか効いておらず、丸数字と「で」が対象外だった
+{
+  const r = parseRecipeText('鮭の南蛮漬け\n作り方\n①南蛮酢を作る。\n②で準備した野菜を炒めます。\n②の鮭に小麦粉をまぶします。')
+  eq('IT④: 丸数字+「で」始まりは前の手順への参照(番号を剥がさない)', r.steps[1], '②で準備した野菜を炒めます。')
+  eq('IT④: 丸数字+「の」始まりも参照(番号を剥がさない)', r.steps[2], '②の鮭に小麦粉をまぶします。')
+  eq('IT④: ふつうの丸数字手順はこれまでどおり番号を剥がす', r.steps[0], '南蛮酢を作る。')
+}
+{
+  // 誤爆の歯止め: 「に」「で」は食材名の出だしにもなる。直後がひらがななら参照とみなさない
+  const r = parseRecipeText('豚汁\n作り方\n①にんじんを切る\n②でんぷんを水で溶く\n③に加えて混ぜる')
+  eq('IT④: 「①にんじんを切る」は参照ではない(番号を剥がす)', r.steps[0], 'にんじんを切る')
+  eq('IT④: 「②でんぷんを水で溶く」も参照ではない(番号を剥がす)', r.steps[1], 'でんぷんを水で溶く')
+  eq('IT④: 「③に加えて混ぜる」は参照(番号を剥がさない)', r.steps[2], '③に加えて混ぜる')
+}
+
+// ---- ⑤(便IT): 「◯◯の材料」「◯◯の作り方」が見出しと認識されない(貼り付け) ----
+// 白ごはん.com実測: 料理名が「鮭の南蛮漬けの材料 (作りやすい分量)」になり、
+// 「揚げずに作る、鮭の南蛮漬けの作り方」「南蛮酢の作り方」が材料の行に混じっていた
+{
+  const r = parseRecipeText(
+    [
+      '鮭の南蛮漬けの材料 (作りやすい分量)',
+      '【 鮭の南蛮漬けの材料 】',
+      '生鮭 … 3切',
+      '玉ねぎ … 1/2個',
+      '【 南蛮酢の材料 】',
+      '酢 … 150ml',
+      '揚げずに作る、鮭の南蛮漬けの作り方',
+      '南蛮酢の作り方',
+      '上記レシピの分量を鍋に合わせ、一度沸騰させて作ります。',
+      '鮭の南蛮漬けの作り方（まずは野菜を炒めます）',
+      '野菜はそれぞれ食べやすい太さの千切りにしておきます。',
+    ].join('\n'),
+  )
+  eq('IT⑤: 料理名は見出しの「の材料 (…)」を外したもの', r.title, '鮭の南蛮漬け')
+  eq('IT⑤: 見出し行が材料に混ざらない', r.ingredients, [
+    { name: '生鮭', amount: '3', unit: '切' },
+    { name: '玉ねぎ', amount: '1/2', unit: '個' },
+    { name: '酢', amount: '150', unit: 'ml' },
+  ])
+  eq('IT⑤: 見出し行が手順にも混ざらない', r.steps, [
+    '上記レシピの分量を鍋に合わせ、一度沸騰させて作ります。',
+    '野菜はそれぞれ食べやすい太さの千切りにしておきます。',
+  ])
+}
+{
+  // 誤爆の歯止め: 文の途中に「の作り方」が出てくる行は見出しにしない
+  const r = parseRecipeText(
+    '肉じゃが\nじゃがいも 3個\n作り方\n詳しい南蛮酢の作り方はこちらから。\n水を加えて15分煮る',
+  )
+  eq('IT⑤: 「〜の作り方はこちらから。」は見出しにしない(手順として残る)', r.steps, [
+    '詳しい南蛮酢の作り方はこちらから。',
+    '水を加えて15分煮る',
+  ])
+}
+{
+  // ⑤の付け合わせ(便IT): 「このレシピの材料」を見出しと読めるようになったぶん、その直下にある
+  // 「数量：シェル型6〜9個分」(cotta実測)が材料の1行目に入るようになったので、材料として拾わない
+  const r = parseRecipeText('基本のマドレーヌ\nこのレシピの材料\n数量：シェル型6〜9個分\n全卵 1個分\n砂糖 50g')
+  eq('IT⑤: 「数量：…」の行は材料にしない', r.ingredients, [
+    { name: '全卵', amount: '1', unit: '個分' },
+    { name: '砂糖', amount: '50', unit: 'g' },
+  ])
+  eq('IT⑤: 「数量：…」を落としても料理名は残る', r.title, '基本のマドレーヌ')
+}
+{
+  // 人数が書いてあるときは、値の側だけ残して人数として読む
+  const r = parseRecipeText('肉じゃが\nこのレシピの材料\n数量：4人分\nじゃがいも 3個')
+  eq('IT⑤: 「数量：4人分」は人数として読む', r.servings, 4)
+  eq('IT⑤: 「数量：4人分」は材料に混ざらない', r.ingredients, [{ name: 'じゃがいも', amount: '3', unit: '個' }])
+}
 
 // ---------- lineCompose: 読点優先・幅実測の行組みエンジン(2026-07-21 p9/line-compose) ----------
 // composeLines へ「1文字=1幅」の偽測定関数と、実アトム列(TermText+TimeText 相当の分解結果)を

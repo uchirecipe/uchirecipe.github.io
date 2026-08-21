@@ -17,6 +17,51 @@ const FETCH_TIMEOUT_MS = 8000
 // 画像プロキシのサイズ上限(3MB)。Content-Length事前判定とストリーム打ち切りの両方で強制する
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024
 
+/**
+ * Content-Typeが image/* でないときに、**先頭のバイト**で画像かどうかを見分けるための印
+ * (2026-08-21 便IT・E・レシピ実測)。
+ *
+ * E・レシピは写真を `Content-Type: application/octet-stream` で返すため、中身はJPEGなのに
+ * 画像の中継が invalid_content_type で弾いていた(レシピの写真だけが入らなかった)。
+ * **何でも通す形にはしない**: ここに並べた形式の印で始まっていると確かめられたものだけ通し、
+ * Content-Typeも見分けた形式に付け直す。
+ *
+ * SVGは意図的に入れていない(中にスクリプトを書ける形式で、先頭のバイトだけでは安全と言えない)。
+ */
+const IMAGE_SNIFF_BYTES = 16
+const IMAGE_MAGIC: { type: string; match: (b: Uint8Array) => boolean }[] = [
+  { type: 'image/jpeg', match: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  {
+    type: 'image/png',
+    match: (b) =>
+      b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a,
+  },
+  { type: 'image/gif', match: (b) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38 },
+  {
+    type: 'image/webp',
+    match: (b) =>
+      b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50,
+  },
+  {
+    // ISO Base Media形式: 4〜7バイトが "ftyp" で、続く印が avif / avis のときだけ通す
+    type: 'image/avif',
+    match: (b) => {
+      if (!(b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70)) return false
+      const brand = String.fromCharCode(b[8], b[9], b[10], b[11]).toLowerCase()
+      return brand === 'avif' || brand === 'avis'
+    },
+  },
+]
+
+/** 先頭のバイトから画像の種類を見分ける(見分けられなければ undefined) */
+function sniffImageContentType(head: Uint8Array): string | undefined {
+  if (head.length < IMAGE_SNIFF_BYTES) return undefined
+  for (const { type, match } of IMAGE_MAGIC) {
+    if (match(head)) return type
+  }
+  return undefined
+}
+
 // 開発オリジン(Vite dev既定5173・preview既定4173等)は localhost の任意ポートを許可する。
 // 本番オリジンはうちレシピの固定ドメインのみ(CLAUDE.mdの取り決め: オリジン変更禁止)
 const PROD_ORIGIN = 'https://uchirecipe.com'
@@ -127,21 +172,58 @@ async function handleImageProxy(requestUrl: URL, headers: Record<string, string>
   }
   if (!res.ok || !res.body) return jsonResponse({ ok: false, error: 'fetch_failed' }, 502, headers)
 
-  const contentType = res.headers.get('Content-Type') ?? ''
-  if (!contentType.toLowerCase().startsWith('image/')) {
-    return jsonResponse({ ok: false, error: 'invalid_content_type' }, 400, headers)
+  const upstreamType = res.headers.get('Content-Type') ?? ''
+  const declaredImage = upstreamType.toLowerCase().startsWith('image/')
+
+  const upstreamReader = res.body.getReader()
+  // 便IT: Content-Typeが image/* でないときは、先頭のバイトを読んでから通すか決める。
+  // 先に読んだぶんは捨てられないので、あとで組み直すストリームの先頭に必ず戻す。
+  const head: Uint8Array[] = []
+  let received = 0
+  let contentTypeOut: string
+  if (!declaredImage) {
+    let ended = false
+    while (received < IMAGE_SNIFF_BYTES && !ended) {
+      const { done, value } = await upstreamReader.read()
+      if (done || !value) {
+        ended = true
+        break
+      }
+      head.push(value)
+      received += value.byteLength
+    }
+    const peek = new Uint8Array(received)
+    let at = 0
+    for (const chunk of head) {
+      peek.set(chunk, at)
+      at += chunk.byteLength
+    }
+    const sniffed = sniffImageContentType(peek)
+    if (!sniffed) {
+      await upstreamReader.cancel()
+      return jsonResponse({ ok: false, error: 'invalid_content_type' }, 400, headers)
+    }
+    contentTypeOut = sniffed
+  } else {
+    contentTypeOut = upstreamType
   }
 
   const contentLength = res.headers.get('Content-Length')
-  if (contentLength && Number(contentLength) > MAX_IMAGE_BYTES) {
+  // 見分けのために先に読んだぶんだけで上限を超えていたら、その場で止める
+  if ((contentLength && Number(contentLength) > MAX_IMAGE_BYTES) || received > MAX_IMAGE_BYTES) {
+    await upstreamReader.cancel()
     return jsonResponse({ ok: false, error: 'too_large' }, 413, headers)
   }
 
   // Content-Lengthが無い/実態と違う場合に備え、受信しながら実バイト数を数えて上限超で打ち切る
-  let received = 0
-  const upstreamReader = res.body.getReader()
+  // (見分けのために先に読んだぶんも received に数え済み)
   const boundedStream = new ReadableStream<Uint8Array>({
     async pull(controller) {
+      const buffered = head.shift()
+      if (buffered) {
+        controller.enqueue(buffered)
+        return
+      }
       const { done, value } = await upstreamReader.read()
       if (done) {
         controller.close()
@@ -163,8 +245,10 @@ async function handleImageProxy(requestUrl: URL, headers: Record<string, string>
   return new Response(boundedStream, {
     status: 200,
     headers: {
-      'Content-Type': contentType,
+      'Content-Type': contentTypeOut,
       'Cache-Control': 'public, max-age=86400',
+      // 見分けた種類のとおりに扱わせる(ブラウザ側で別の種類として読み直させない)
+      'X-Content-Type-Options': 'nosniff',
       ...headers,
     },
   })

@@ -93,7 +93,21 @@ function collapseWhitespace(text: string): string {
  * レシピ本文にその書き方が出ることはまず無く、印が残るほうの実害が大きいので許容する。
  */
 function cleanText(text: string): string {
-  return collapseWhitespace(stripMarkup(decodeHtmlEntities(stripMarkup(text))))
+  return collapseWhitespace(stripBoldMarkedNumber(stripMarkup(decodeHtmlEntities(stripMarkup(text)))))
+}
+
+/**
+ * 前の手順を指す番号に付いた強調の印(「**1**の野菜類」)。印だけ落として番号は残す
+ * (2026-08-21 便IT・NHK「みんなのきょうの料理」実測)。
+ *
+ * 取り込み元のJSON-LDが前の手順を「**1**」と書いており、そのまま手順文に残っていた。
+ * **番号ごと落とすと「の野菜類を加える」になって文が壊れる**ので、番号は必ず残す。
+ * 対象を1〜2桁の数字を挟んだ形だけに絞ってあるので、本文の「*」や強調の書き方全般には触らない。
+ */
+const BOLD_MARKED_NUMBER = /\*\*([0-9０-９]{1,2})\*\*/g
+
+function stripBoldMarkedNumber(text: string): string {
+  return text.replace(BOLD_MARKED_NUMBER, '$1')
 }
 
 // ============================================================================
@@ -218,6 +232,111 @@ function pickBestCandidate(candidates: Record<string, unknown>[]): Record<string
 }
 
 // ============================================================================
+// タグの外に書かれたRecipeの拾い上げ(2026-08-21 便IT・cotta実測)
+//
+// cotta は schema.org/Recipe の中身をHTMLソースに丸ごと載せているのに、
+// <script type="application/ld+json"> としては書かず、**ページを開いてからJavaScriptで
+// ld+jsonのタグを作って差し込んでいる**(「var rich_card_json = {…}」
+// 「JSON.stringify({…})」の形)。タグだけを見ていたWorkerには見つけられなかった。
+//
+// **どこまで拾うかの線引き**(乱暴に拾うと関係ないJSONを掴んで壊れるため、4つで囲う):
+//  (1) タグの中に**揃ったレシピが見つからなかったときだけ**動く(揃っていればタグの中が正)。
+//      いま取り込めているサイトの結果は1件も変わらない。
+//  (2) 探す場所は **<script> の中だけ**。本文にたまたま同じ字面があっても拾わない。
+//  (3) 「"@type": …Recipe…」という**JSONの書き方の鍵**だけを目印にする。
+//      見つけたら、その鍵を囲んでいる波かっこを文字列を意識しながら数えて切り出し、
+//      JSONとして読めたものだけを採る(読めなければ諦める＝これまでどおり取り込み失敗)。
+//  (4) 探索の量に上限を置く(1つの<script>につき目印5個・さかのぼる文字数8千・
+//      試す波かっこ20個・切り出す長さ20万字)。壊れたページで時間を使い切らないため。
+// ============================================================================
+
+/** <script>…</script> の中身だけを取り出す(本文のただの文字列を拾わないための境界) */
+function extractScriptContents(html: string): string[] {
+  const out: string[] = []
+  const re = /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) out.push(m[1])
+  return out
+}
+
+/** 「"@type":"Recipe"」「"@type":["Recipe","Thing"]」というJSONの鍵。目印にするのはこれだけ */
+const RECIPE_TYPE_KEY =
+  /"@type"\s*:\s*(?:"[^"]*[Rr][Ee][Cc][Ii][Pp][Ee][^"]*"|\[[^\]]*"[^"]*[Rr][Ee][Cc][Ii][Pp][Ee][^"]*"[^\]]*\])/g
+
+const LOOSE_MAX_HITS_PER_SCRIPT = 5
+const LOOSE_BACK_WINDOW = 8000
+const LOOSE_MAX_STARTS = 20
+const LOOSE_MAX_OBJECT_LENGTH = 200000
+
+/**
+ * text[start] の「{」から対応する「}」までを切り出す(文字列リテラルの中の波かっこは数えない)。
+ * 対応が見つからない・長すぎる場合は undefined。
+ */
+function sliceBalancedObject(text: string, start: number): string | undefined {
+  if (text[start] !== '{') return undefined
+  const end = Math.min(text.length, start + LOOSE_MAX_OBJECT_LENGTH)
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < end; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return text.slice(start, i + 1)
+    }
+  }
+  return undefined
+}
+
+/** 目印の位置を含む、いちばん内側のJSONオブジェクトを読み取る(読めなければ undefined) */
+function readObjectAround(text: string, keyIndex: number): unknown {
+  const from = Math.max(0, keyIndex - LOOSE_BACK_WINDOW)
+  let tried = 0
+  for (let i = keyIndex; i >= from; i--) {
+    if (text[i] !== '{') continue
+    if (++tried > LOOSE_MAX_STARTS) return undefined
+    const slice = sliceBalancedObject(text, i)
+    if (!slice) continue
+    // 切り出した塊が目印を含んでいなければ、目印より手前で閉じた別のオブジェクト
+    if (i + slice.length <= keyIndex) continue
+    try {
+      return JSON.parse(slice)
+    } catch {
+      try {
+        return JSON.parse(sanitizeControlCharsInStrings(slice))
+      } catch {
+        continue
+      }
+    }
+  }
+  return undefined
+}
+
+/** <script>の中に素で書かれたRecipe(ld+jsonタグの外)を集める */
+function parseLooseRecipeCandidates(html: string): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = []
+  for (const script of extractScriptContents(html)) {
+    RECIPE_TYPE_KEY.lastIndex = 0
+    let hits = 0
+    let m: RegExpExecArray | null
+    while ((m = RECIPE_TYPE_KEY.exec(script)) !== null) {
+      if (++hits > LOOSE_MAX_HITS_PER_SCRIPT) break
+      const data = readObjectAround(script, m.index)
+      if (data) findRecipeObjects(data, candidates)
+    }
+  }
+  return candidates
+}
+
+// ============================================================================
 // フィールドごとの正規化
 // ============================================================================
 
@@ -269,8 +388,16 @@ function extractTitle(name: unknown): string | undefined {
 // その数字は「人数」ではなく食材の分量・出来上がり数なので、人数フォールバックの対象から除外する
 // (docs/39再監査: クックパッド「鶏もも肉600gで作る分量」→600人分、DELISH KITCHEN「26個分」→26人分
 //  のような誤爆が実際に発生することを実測で確認)。
+// 2026-08-21 便IT: **型の大きさ(cm)と「1台分」**を追加。DELISH KITCHEN「直径17cmのシフォン型1台分」
+// →17人分、macaroni「18cm×18cmの容器1台分」→18人分になり、1食あたりの原価が約8円という
+// 明らかにおかしい数字が出ていた(テスト用データ作成時に実測)。
 const NON_SERVINGS_UNIT_AFTER_NUMBER =
-  /^\s*(?:g|kg|ml|cc|l|個|枚|本|切れ|缶|袋|束|かけ|尾|玉|株|合|片|箱|杯|節)/i
+  /^\s*(?:g|kg|mg|ml|cc|l|cm|mm|㎝|㎜|個|枚|本|切れ|缶|袋|束|かけ|尾|玉|株|合|片|箱|杯|節|台)/i
+
+// 「6〜9個分」のように範囲で書かれていると、範囲の先頭の数字の直後は単位ではなく範囲の記号なので
+// 単位の判定に届かない(cotta「シェル型6〜9個分」→6人分になっていた)。単位を見る前に範囲の
+// 後ろ側(「〜9」)を読み飛ばす。
+const RANGE_TO_NEXT_NUMBER = /^\s*[〜~～ー−–—-]\s*\d+/
 
 /**
  * recipeYield("2 servings" "4人分" "２人分" "4(servings)" "2〜3" "その他"等)から人数(整数)を取り出す。
@@ -286,7 +413,9 @@ export function extractServings(recipeYield: unknown): number | undefined {
   // 「人分/人前」の明示が無い場合だけ、最初に見つかった数字を人数とみなす。
   // ただし直後に重量・容量・個数単位が続く数字(600g・26個分等)は人数ではないので飛ばす。
   for (const m of normalized.matchAll(/\d+/g)) {
-    const after = normalized.slice((m.index ?? 0) + m[0].length)
+    let after = normalized.slice((m.index ?? 0) + m[0].length)
+    const range = after.match(RANGE_TO_NEXT_NUMBER)
+    if (range) after = after.slice(range[0].length)
     if (NON_SERVINGS_UNIT_AFTER_NUMBER.test(after)) continue
     return Number.parseInt(m[0], 10)
   }
@@ -441,7 +570,12 @@ const STEP_MARKER =
 // 番号直後が格助詞で始まる場合は、新しい手順の開始ではなく前の手順への参照
 // (「(1)の生地を」「[3]に加える」等。ミツカン・E・レシピ実測)とみなし、マーカーとして扱わない
 // (parseRecipeText.ts STEP_NUMBER_REF_GUARD/M4と同じ考え方をWorker側にも移植)。
-const STEP_MARKER_FOLLOWED_BY_PARTICLE = /^(?:を|と|の|へ|は|が|に|で)/
+//
+// 2026-08-21 便IT: 「に」「で」だけは**直後がひらがな以外のときに限る**。
+// 「①にんじんを切る」「①でんぷんを水で溶く」のように食材名の出だしにもなる2文字で、
+// 参照とみなすと元サイトの番号が剥がれず「1 ①にんじんを切る」と番号が二重に並んでいた。
+// 参照の書き方(「①に加える」「②で準備した」)は直後が漢字・カタカナ・英数字になる。
+const STEP_MARKER_FOLLOWED_BY_PARTICLE = /^(?:を|と|の|へ|は|が|[にで](?![ぁ-ゖ]))/
 
 /**
  * 「作り方1. ジャガイモは…作り方2. 玉ねぎは…」のような1本の長文字列を番号区切りで手順配列に割る
@@ -590,9 +724,24 @@ export function normalizeInstructions(recipeInstructions: unknown): string[] {
 /**
  * HTML文字列からschema.org/Recipeを抽出し正規化する。見つからない・中核3項目
  * (title・ingredients・steps)のいずれかが空なら undefined を返す(呼び出し側は no_recipe として扱う想定)。
+ *
+ * まず <script type="application/ld+json"> のタグを読む(従来どおり)。
+ * **そこで揃ったレシピが作れなかったときだけ**、タグの外(<script>の中に素で書かれたRecipe)を
+ * 探しに行く(2026-08-21 便IT・cotta対応)。順番をこうしてあるので、いま取り込めているサイトの
+ * 結果は1件も変わらない。
  */
 export function extractRecipeFromHtml(html: string, sourceUrl: string): NormalizedRecipe | undefined {
-  const candidates = parseRecipeCandidates(html)
+  return (
+    buildNormalizedRecipe(parseRecipeCandidates(html), sourceUrl) ??
+    buildNormalizedRecipe(parseLooseRecipeCandidates(html), sourceUrl)
+  )
+}
+
+/** Recipe候補の並びから、うちレシピの取り込み用の形を1件作る(揃っていなければ undefined) */
+function buildNormalizedRecipe(
+  candidates: Record<string, unknown>[],
+  sourceUrl: string,
+): NormalizedRecipe | undefined {
   const best = pickBestCandidate(candidates)
   if (!best) return undefined
 

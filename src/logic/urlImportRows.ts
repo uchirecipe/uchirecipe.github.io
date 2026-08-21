@@ -80,9 +80,21 @@ function stripTags(text: string): string {
 export function stripImportedMarkup(text: string): string {
   if (!text) return ''
   return stripPastedMarkup(text)
+    .replace(BOLD_MARKED_NUMBER, '$1')
     .replace(/[\s　]+/g, ' ')
     .trim()
 }
+
+/**
+ * 前の手順を指す番号に付いた強調の印(「**1**の野菜類」)。印だけ落として番号は残す
+ * (2026-08-21 便IT・NHK「みんなのきょうの料理」実測)。
+ *
+ * **番号ごと落とすと「の野菜類を加える」になって文が壊れる**ので、番号は必ず残す。
+ * 同じ手当てが Worker 側(normalize.ts の cleanText)にも入っているが、
+ * **アプリはWorkerを差し替えずに更新されうる**ので、受け取った側でももう一度通す
+ * (印が無い文は1文字も変わらない)。
+ */
+const BOLD_MARKED_NUMBER = /\*\*([0-9０-９]{1,2})\*\*/g
 
 /**
  * 貼り付けた文章からHTMLの印だけを落とす（改行はそのまま残す版）。
