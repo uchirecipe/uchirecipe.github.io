@@ -77,6 +77,7 @@ import {
   MEAL_SLOTS,
   MEAL_GENRES,
   toggleMealGenre,
+  normalizePlanGenres,
   weekDates,
   dowIndex,
   sortMealSlots,
@@ -2846,18 +2847,23 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    *   混在させたい、ができない。」)。
    *
    * 1つだけ選ぶプルダウンをやめ、**選べるジャンルのぶんだけ並べて選ぶ/外す**形にした。
-   * 既定は3つとも選んだ状態＝「指定なし」(全部から選ぶ＝直す前と同じ振る舞い)。
+   * 既定(未設定)は3つとも選んだ状態＝「指定なし」(全部から選ぶ＝直す前と同じ振る舞い)。
    * 3つとも選んでいるあいだは提案に何も渡さない(planGenresOption)＝
    * ジャンルタグを持たない品まで候補から落とさない。
    * 最後の1つは外せない(toggleMealGenre)＝候補が無くなる状態を作らせない。
+   *
+   * **設定に覚える**(2026-08-22 司令部裁定B案)。「うちは中華を作らない」は年単位で続く
+   * 家庭の好みなので、開くたびに選び直させない(planPurpose と同じ理由)。
+   * 読み出しは normalizePlanGenres を通す＝1つだけ選んでいた頃の保存値も1件として読み、
+   * 知らないジャンル名・壊れた値でも候補を0件にしない。
    */
-  const [genreFilters, setGenreFilters] = useState<MealGenre[]>([...MEAL_GENRES])
+  const genreFilters = normalizePlanGenres(settings?.planGenres)
   /** ジャンルで絞っているか(3つとも選んでいる＝絞っていない) */
   const genreFiltered = genreFilters.length < MEAL_GENRES.length
   /** 提案エンジンへ渡す枠。絞っていなければ渡さない＝「指定なし」と同じ扱いにする */
   const planGenresOption = genreFiltered ? genreFilters : undefined
   const toggleGenreFilter = (genre: MealGenre) =>
-    setGenreFilters((prev) => toggleMealGenre(prev, genre))
+    saveSettings({ planGenres: toggleMealGenre(genreFilters, genre) })
   /**
    * 目的モード（2026-08-02 便CP-2・docs/62 決定②。Pro機能）。
    * 時短・ジャンルと違って設定に保存するのは、この指定が「1か月続ける」ためのものだから
@@ -2890,8 +2896,15 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const clearSuggestConditions = () => {
     setQuickOnly(false)
-    setGenreFilters([...MEAL_GENRES])
-    if (planPurpose != null) changePurpose(undefined)
+    // ジャンルは**保存も消す**（画面だけ戻って保存が残る、を作らない。2026-08-22 便IY）。
+    // 未設定＝3つとも選んだ状態なので、消せばそのまま「指定なし」に戻る。
+    // 栄養から組む(planPurpose)は解錠済みで選んでいるときだけ消す＝未解錠の端末で
+    // Proの保存値を巻き添えにしない（直す前と同じ扱い）。書き込みは1回にまとめる
+    saveSettings(
+      planPurpose != null
+        ? { planGenres: undefined, planPurpose: undefined }
+        : { planGenres: undefined },
+    )
   }
   /**
    * 調理時間の条件を選ぶ（2026-08-20 便II・①）。

@@ -45498,6 +45498,21 @@ try {
           .map((el) => el.getAttribute('data-genre')),
       )
     }
+    /**
+     * 選ばれているジャンルが**落ち着く**（2回続けて同じになる）まで待ってから読む。
+     * 設定はDexieから後で届くので、届く前に掴むと「3つとも選んだ状態」を掴んでしまう
+     * （禁じ手⑤）。読み込み直したあとの検査は必ずこちらを通す
+     */
+    const iySettled = async () => {
+      let prev = JSON.stringify(await iySelected())
+      for (let i = 0; i < 20; i++) {
+        await iyPage.waitForTimeout(200)
+        const now = JSON.stringify(await iySelected())
+        if (now === prev && now !== 'null') return JSON.parse(now)
+        prev = now
+      }
+      return prev === 'null' ? null : JSON.parse(prev)
+    }
     /** ジャンルのチップを押す。無ければ何もしない（無いことは別の検査が受け持つ） */
     const iyTap = async (genre) => {
       if ((await iyChip(genre).count()) === 0) return
@@ -45511,7 +45526,7 @@ try {
         await tab.click()
         await iyPage.waitForTimeout(900)
       }
-      await openWeekGroup(iyPage, '献立を提案')
+      await openWeekGroup(iyPage, ja.mealPlan.weekGroupAutoTitle)
       if ((await iyPage.locator('[data-testid="plan-conditions-modal"]').count()) === 0) {
         await iyPage.locator('[data-testid="plan-conditions-open"]').click()
         await iyPage.waitForTimeout(600)
@@ -45690,12 +45705,68 @@ try {
         JSON.stringify(await iySelected()) === JSON.stringify([...MEAL_GENRES]),
         `選ばれている=${JSON.stringify(await iySelected())}`,
       )
+      // ===== 窓の見出しは、押したボタンと同じ名前（同じものを2つの名前で呼ばない） =====
+      const iyHeading = (
+        (await iyPage
+          .locator('[data-testid="plan-conditions-modal"]')
+          .getByRole('heading')
+          .first()
+          .textContent()) ?? ''
+      ).replaceAll('​', '').trim()
+      check(
+        'IYGENRE-01(便IY) 条件の窓の見出しは、押したボタンと同じ名前',
+        iyHeading === ja.mealPlan.suggestConditionsToggle,
+        `窓の見出し=${iyHeading} ボタン=${ja.mealPlan.suggestConditionsToggle}`,
+      )
       await iyCloseConditions()
       check(
         'IYGENRE-01 クリアしたあと、条件のボタンは「指定なし」に戻る',
         (await iyCondLabel())?.includes(ja.mealPlan.suggestConditionsNone) === true,
         `条件のボタン=${await iyCondLabel()}`,
       )
+
+      // ===== ⑦ 選んだジャンルを覚えている（司令部裁定B案） =====
+      // 「うちは中華を作らない」は年単位で続く家庭の好みなので、開くたびに選び直させない。
+      // まず、直前に押した「条件をクリア」が**保存も消している**ことを読み込み直して確かめる
+      // （画面だけ戻って保存が残る、をしない）。設定は後から届くので落ち着くまで待って掴む
+      await iyPage.reload({ waitUntil: 'networkidle' })
+      await iyPage.waitForTimeout(2400)
+      await iyOpenConditions()
+      check(
+        'IYGENRE-01(便IY) 「条件をクリア」は保存も消す（読み込み直しても3つとも選んだ状態）',
+        JSON.stringify(await iySettled()) === JSON.stringify([...MEAL_GENRES]),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      await iyTap('中華')
+      check(
+        'IYGENRE-01(便IY) 前提: 覚えているかを測る前に、1つ外せた',
+        JSON.stringify(await iySelected()) === JSON.stringify(['和食', '洋食']),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      await iyCloseConditions()
+      await iyPage.reload({ waitUntil: 'networkidle' })
+      await iyPage.waitForTimeout(2400)
+      await iyOpenConditions()
+      check(
+        'IYGENRE-01(便IY) 選んだジャンルは読み込み直しても残る（開くたびに選び直させない）',
+        JSON.stringify(await iySettled()) === JSON.stringify(['和食', '洋食']),
+        `選ばれている=${JSON.stringify(await iySelected())}`,
+      )
+      check(
+        'IYGENRE-01(便IY) 覚えているあいだは「現在の条件」にも出る（黙って絞り込まない）',
+        (await iyCondLabel())?.includes('和食') === true &&
+          (await iyCondLabel())?.includes('中華') === false,
+        `条件のボタン=${await iyCondLabel()}`,
+      )
+      // 覚えた条件を消してから終わる（この節が次に使う入れ物へ持ち越さない）
+      const iyClearAgain = iyPage.locator('[data-testid="plan-conditions-clear"]')
+      // 条件を1つも選んでいないあいだは場所だけ取って見えなくしてある（便II・②）。
+      // 見えないものを押しに行くと30秒待って中断するので、見えているときだけ押す
+      if ((await iyClearAgain.count()) === 1 && (await iyClearAgain.first().isVisible())) {
+        await iyClearAgain.first().click()
+        await iyPage.waitForTimeout(600)
+      }
+      await iyCloseConditions()
     } finally {
       await iyBrowser.close()
     }

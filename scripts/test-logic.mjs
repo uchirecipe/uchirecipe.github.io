@@ -67,6 +67,7 @@ import {
   sortMealSlots,
   sortMealGenres,
   toggleMealGenre,
+  normalizePlanGenres,
   MEAL_GENRES,
   excludeYesterdayPlanRecipes,
   normalizeDateRange,
@@ -2397,6 +2398,25 @@ eq('news: 未記録(起動直後の一瞬)は抑制', isNewsSuppressed(undefined
     toggleMealGenre(['和食'], '和食').join(','), '和食')
   eq('IY-9 足したあとも並びは選べる並びのまま(押した順に散らからない)',
     toggleMealGenre(['中華'], '和食').join(','), '和食,中華')
+  // 保存された設定の読み替え(2026-08-22 便IY・司令部裁定B案)。
+  // レシピ一覧のタグ絞り込み(便HZ・③ pages/RecipesPage.tsx)と同じ作法で、
+  // **1つだけ選んでいた古い値も1件として読む**。壊れた値で候補を消さないことも見る
+  eq('IY-10 保存が無い(これまでの利用者)ときは3つとも選んだ状態＝指定なし',
+    normalizePlanGenres(undefined).join(','), MEAL_GENRES.join(','))
+  eq('IY-10 1つだけ選んで保存されていた値は、その1つを選んだ状態として読む',
+    normalizePlanGenres(['中華']).join(','), '中華')
+  eq('IY-10 1つだけの値が配列でなく素の文字で保存されていても、1件として読む',
+    normalizePlanGenres('洋食').join(','), '洋食')
+  eq('IY-10 知らないジャンル名しか入っていなければ3つとも選んだ状態に倒す(候補を消さない)',
+    normalizePlanGenres(['ロシア料理']).join(','), MEAL_GENRES.join(','))
+  eq('IY-10 空の配列でも候補を消さない',
+    normalizePlanGenres([]).join(','), MEAL_GENRES.join(','))
+  eq('IY-10 数値など読み取れない値でも候補を消さない',
+    normalizePlanGenres(0).join(','), MEAL_GENRES.join(','))
+  eq('IY-10 知っているジャンルと知らない名前が混ざっていたら、知っているほうだけを読む',
+    normalizePlanGenres(['ロシア料理', '和食']).join(','), '和食')
+  eq('IY-10 保存の並びが崩れていても、選べる並びにそろえて読む',
+    normalizePlanGenres(['中華', '和食']).join(','), '和食,中華')
 
   // ---- 便BH-2: 一品もの・副菜純化・たんぱく源分散・ジャンル混在(docs/56) ----
 
@@ -24690,8 +24710,11 @@ Aみりん 大さじ1
         ja.mealPlan.suggestConditionsNone.length > 0,
       true,
     )
-    neq(
-      'ID-3 窓の見出しはボタンの名前と別に持つ(ボタン=いまの状態・窓=これから使う条件)',
+    // 2026-08-22 便IY: 便IDは「ボタン=いまの状態・窓=これから使う条件」と役割で呼び分けたが、
+    // **同じものを指しているのに2つの名前で呼んでいる**ため、押した先で名前が変わって見えた。
+    // 司令部裁定でオーナーが実機で言及した「現在の条件」に寄せる（規約H）
+    eq(
+      'ID-3(便IY) 窓の見出しは、押したボタンと同じ名前（同じものを2つの名前で呼ばない）',
       ja.mealPlan.suggestConditionsTitle,
       ja.mealPlan.suggestConditionsToggle,
     )

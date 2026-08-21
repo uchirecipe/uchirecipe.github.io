@@ -179,6 +179,28 @@ export function toggleMealGenre(selected: MealGenre[], genre: MealGenre): MealGe
 }
 
 /**
+ * 設定に保存された「選んでいる料理のジャンル」を読む（2026-08-22 便IY）。
+ *
+ * 読み替えの作法は、レシピ一覧のタグ絞り込み（2026-08-19 便HZ・③ pages/RecipesPage.tsx）に
+ * そろえてある＝**1つだけ選んでいた頃の保存値も、1件だけ選んだ状態として読む**。
+ * 設定が消えて既定に戻る、という壊し方をしない。
+ *
+ * 何が来ても候補が無くならない形にしてある:
+ *  ・未設定（この項目が無かった頃からの利用者）→ 3つとも選んだ状態＝「指定なし」
+ *  ・配列でない素の文字（'和食'）→ 1件の配列として読む
+ *  ・知らないジャンル名・空・数値など読み取れない値 → 知っているものだけを残し、
+ *    1つも残らなければ3つとも選んだ状態に倒す（0件にして「提案できません」で終わらせない）
+ *  ・並びが崩れていても、選べる並び（MEAL_GENRES）にそろえる
+ */
+export function normalizePlanGenres(value: unknown): MealGenre[] {
+  const list = typeof value === 'string' ? [value] : Array.isArray(value) ? value : []
+  const picked = sortMealGenres(
+    list.filter((g): g is MealGenre => (MEAL_GENRES as readonly unknown[]).includes(g)),
+  )
+  return picked.length > 0 ? picked : [...MEAL_GENRES]
+}
+
+/**
  * 「調理時間◯分以内を優先」で選べる分数（2026-08-19 便HT・オーナー指示
  * 「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい」）。
  *
