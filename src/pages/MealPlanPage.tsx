@@ -3099,6 +3099,37 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    */
   const [suggestPairIds, setSuggestPairIds] = useState<number[]>(returnedSuggestion.planIds)
   /**
+   * いま「今日なに作る？」の「1品」側に出ている料理（2026-08-21 便IP・①）。
+   * 節の中の状態なので TodaySuggestPanel から知らせてもらう（onShownOneChange）。
+   */
+  const [shownSuggestionOneId, setShownSuggestionOneId] = useState<number | null>(
+    returnedSuggestionId,
+  )
+  /**
+   * 「今日なに作る？」にいま出ているものを、離れてもよいように控えておく（2026-08-21 便IP・①）。
+   *
+   * 直すバグ（便IIの実測）: **作った記録の一覧へ行って戻るたびに別の献立を組み直していた。**
+   * 主菜が一品もの（カレー・丼・麺・鍋）だと副菜のカードが付かないので、節の高さが
+   * 156〜170px→74pxに縮み、ページの下端が82px上がる＝画面が跳ねる。
+   * オーナーは同じことをレシピ詳細からの戻りについて指摘済み（便HT）で、そこだけが直っていた。
+   *
+   * 直し方: 出ていくときに1か所ずつ覚えさせるのをやめ、**出ているものをそのまま控え続ける**。
+   * 日タブから出ていく道はレシピ詳細・記録の一覧・記録の中身・記録の編集…と複数あり、
+   * 道が1本増えるたびに覚え忘れが生まれる（今回がその1本目だった）。
+   *
+   * 古い提案が残り続けないのは、**読む側と捨てる側で閉じている**から:
+   *  ・読むのは `?focus=today` が付いているときだけ＝日タブから開いた画面の「戻る」だけ
+   *  ・献立の画面に着いた時点で必ず捨てる（上の removeSessionItem。1回きり）
+   * ＝下の並び（タブバー）で自分から離れた人は、次に開いたときふつうに組み直したものを見る。
+   * 線引きの理由は logic/navMemory.ts の DAY_SUGGEST_PIN_KEY に書いてある。
+   */
+  useEffect(() => {
+    writeSessionItem(
+      DAY_SUGGEST_PIN_KEY,
+      serializeSuggestionPin(shownSuggestionOneId, suggestPairIds),
+    )
+  }, [shownSuggestionOneId, suggestPairIds])
+  /**
    * 「今日の献立に入れる」で開く「どの食事に入れますか？」の窓の中身（2026-08-18 便HM）。
    *
    * 「1品」と「献立」のどちらを出しているときも同じボタン・同じ窓を通す
@@ -3365,6 +3396,10 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
    * 開いた1品と、そのとき組んであった主菜・副菜を**同じ記録**に書く。どちらを出していたかで
    * 書き分けないのは、戻ったときにどちらを出すかは切り替え（dayStartSuggestMode）が決めるので、
    * 「離れる前に画面に出ていたもの」をそのまま残しておけば、どちらに戻っても見え方が変わらないため。
+   *
+   * 2026-08-21 便IP・①: 控えそのものは上の useEffect が出しっぱなしにしているので、ここは
+   * **「献立」側のカードから開いたときに、1品側の覚えを開いた料理に差し替える**ためだけに残す
+   * （主菜を見に行った人が「1品」へ切り替えたら、その主菜が出ている状態にそろえる）。
    */
   const rememberSuggestionForReturn = (recipeId: number) => {
     writeSessionItem(DAY_SUGGEST_PIN_KEY, serializeSuggestionPin(recipeId, suggestPairIds))
@@ -6449,6 +6484,7 @@ export default function MealPlanPage({ demo }: { demo?: MonthDemoData }) {
               collapsible={dayHasPlan}
               pinnedRecipeId={returnedSuggestionId}
               onOpenSuggestion={rememberSuggestionForReturn}
+              onShownOneChange={setShownSuggestionOneId}
               planPair={suggestPairRecipes}
               planCandidateCount={suggestCandidateCount}
               onDrawPlan={drawSuggestPair}

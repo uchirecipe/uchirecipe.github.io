@@ -1305,7 +1305,7 @@ try {
   await page.waitForTimeout(500)
   await page.getByText('テキスト貼り付けで自動入力').click()
   await page.waitForTimeout(300)
-  await page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+  await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
     'E2Eスモーク試験用レシピ\n\n材料（2人分）\n・にんじん　1本\n・しょうゆ　大さじ2\n\n作り方\n1. にんじんを切る\n2. 炒める',
   )
   await page.getByRole('button', { name: '自動で振り分ける' }).click()
@@ -1362,7 +1362,7 @@ try {
     await page.waitForTimeout(500)
     await page.getByText('テキスト貼り付けで自動入力').click()
     await page.waitForTimeout(300)
-    await page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+    await page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
       'GF記号テスト\n\n材料（2人分）\n☆みそ　大さじ2\n☆マヨネーズ　大さじ1\n◎すりごま　大さじ2\n◎しょうゆ　小さじ1\nにんじん　1本\n\n作り方\n1. その間に☆を全部混ぜ合わせておく。\n2. ボウルで◎を混ぜ、にんじんを和える。',
     )
     await page.getByRole('button', { name: '自動で振り分ける' }).click()
@@ -7586,7 +7586,7 @@ try {
       await ftPage.getByText('テキスト貼り付けで自動入力').click()
       await ftPage.waitForTimeout(300)
       await ftPage
-        .locator('textarea[placeholder="ここにレシピの文章を貼り付け"]')
+        .locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
         .fill(
           `${ftTitle}\n\n材料（2人分）\n・鶏むね肉　1枚\n・しめじ　1袋\n\n作り方\n1. 鶏むね肉をそぎ切りにする\n2. しめじをほぐして耐熱皿に広げる\n3. 蒸し上げる`,
         )
@@ -9009,9 +9009,7 @@ try {
       )
       check(
         'NUTRI-DAY-01(便EN) 畳んだままでも「合計に何が入っていないか」の1行は出す',
-        nbDayFoldedText.includes(
-          'ここに出ているのは、献立に登録したレシピだけの合計です（ごはん・飲みもの・おやつ・外食は入っていません）。',
-        ),
+        nbDayFoldedText.includes(ja.nutritionBalance.registeredOnlyNote),
       )
       await nbPage.getByRole('button', { name: '注記と出典' }).first().click()
       await nbPage.waitForTimeout(300)
@@ -9052,9 +9050,8 @@ try {
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-3・便CW-8) 「登録したレシピだけの合計」の但し書きが出る',
-        nbDayOpenText.includes(
-          'ここに出ているのは、献立に登録したレシピだけの合計です（ごはん・飲みもの・おやつ・外食は入っていません）。',
-        ) && nbDayOpenText.includes('3食のうち夕食だけを登録している場合は'),
+        nbDayOpenText.includes(ja.nutritionBalance.registeredOnlyNote) &&
+          nbDayOpenText.includes('3食のうち夕食だけを登録している場合は'),
       )
       check(
         'NUTRI-DAY-01(docs/60 §1-3-4) 除外分で下限側に出ることの但し書きが出る',
@@ -17077,8 +17074,8 @@ try {
         (editText ?? '').includes('価格なし') && (editText ?? '').includes('＋登録'),
       )
       check(
-        'PRICEVIEW-01 「原価を編集」ON: 「ここで変更した価格は「食材と価格」に保存されます」の説明が出る',
-        (editText ?? '').includes('ここで変更した価格は「食材と価格」に保存されます'),
+        `PRICEVIEW-01 「原価を編集」ON: 「${ja.detail.priceEditNote}」の説明が出る`,
+        (editText ?? '').includes(ja.detail.priceEditNote),
       )
 
       // (a) チップ→編集→行・上部メタ・原価を見る側が同時に変化。玉ねぎ(50円/1個)を70円/1個に変更する
@@ -17340,7 +17337,7 @@ try {
       await shPage.waitForTimeout(500)
       await shPage.getByText('テキスト貼り付けで自動入力').click()
       await shPage.waitForTimeout(300)
-      await shPage.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(copiedFull)
+      await shPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(copiedFull)
       await shPage.getByRole('button', { name: '自動で振り分ける' }).click()
       await shPage.waitForTimeout(400)
       const rtFormText = await shPage.textContent('body')
@@ -18958,7 +18955,7 @@ try {
       await nav6Page.waitForTimeout(1500)
       await nav6Page.getByText('テキスト貼り付けで自動入力').click()
       await nav6Page.waitForTimeout(300)
-      await nav6Page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+      await nav6Page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
         'E2E分数自動入力レシピ\n\n材料（2人分）\n・大根　1/4本\n・しょうゆ　大さじ2\n\n作り方\n1. 大根を切る\n2. 鍋に入れて15分煮る\n3. 器に盛る',
       )
       await nav6Page.getByRole('button', { name: '自動で振り分ける' }).click()
@@ -22402,7 +22399,7 @@ try {
     await page.getByText('テキスト貼り付けで自動入力').click()
     await page.waitForTimeout(300)
     await page
-      .locator('textarea[placeholder="ここにレシピの文章を貼り付け"]')
+      .locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
       .fill('大鍋のカレー\n50人分\n材料\nじゃがいも 20個\nにんじん 10本\n作り方\n1. 全部切る\n2. 煮る')
     await page.getByRole('button', { name: '自動で振り分ける' }).click()
     await page.waitForTimeout(500)
@@ -24291,6 +24288,144 @@ try {
           'DAYFLOW-01(g) 献立の料理から詳細へ行って戻ると、さっき組んだ献立がそのまま出ている',
           planMismatches.length === 0,
           `食い違い=${JSON.stringify(planMismatches)}`,
+        )
+      }
+
+      // ---- (h) 「作った記録の一覧」へ行って戻っても、さっき出ていた提案がそのまま残っている ----
+      // 2026-08-21 便IP・①。便IIの実測「『今日なに作る？』が戻るたびに別の献立を組み直す。
+      // 主菜が一品もの（カレー・丼・麺・鍋）だと副菜のカードが付かず、
+      // 節の高さが156〜170px→74px、ページの下端が82px上がる」。
+      // (g)がレシピ詳細からの戻りを測っているのに対し、こちらは**日タブの別の出口**
+      // （「作った記録の一覧」）から帰ってきたときを測る。献立側・1品側の両方を見る。
+      //
+      // 禁じ手よけ:
+      //  ①曜日・月替わりの前提を置かない（日付を使わない。今日の日タブをそのまま見る）
+      //  ②文字列の完全一致で測らない（ゼロ幅スペースを外してから料理名を比べる）
+      //  ③品数・押す回数を決め打ちしない（並んだ名前の**列**で比べる。往復はこの回数ぶん確かめる）
+      //  ④置き場所に固定しない（data-testid とボタン名で掴む）
+      //  ⑤後から届くデータで見た目が変わる場所を、届く前に掴まない
+      //    （献立はレシピがDBから届いてから組まれる。**名前が読めるまで待ってから**掴む）
+      await dfClearPlans()
+      await dfPage.goto(`${BASE}/#/meal-plan`, { waitUntil: 'networkidle' })
+      await dfPage.reload({ waitUntil: 'networkidle' })
+      await dfPage.waitForTimeout(1800)
+      {
+        const suggestSection = dfPage
+          .locator('section')
+          .filter({ has: dfPage.getByRole('heading', { name: '今日なに作る？' }) })
+        const historyLink = () => dfPage.getByRole('link', { name: ja.mealPlan.historyLink })
+        /** 出ているものが読めるまで待つ（届く前に掴まない・禁じ手⑤） */
+        const dhWaitTitles = async (read) => {
+          for (let i = 0; i < 30; i++) {
+            const titles = await read()
+            if (titles.length > 0 && titles.every((t) => t.length > 0)) return titles
+            await dfPage.waitForTimeout(300)
+          }
+          return []
+        }
+        /** 「作った記録の一覧」へ行って「戻る」で帰ってくる */
+        const dhRoundTrip = async () => {
+          await historyLink().scrollIntoViewIfNeeded()
+          await historyLink().click()
+          await dfPage.waitForTimeout(900)
+          const onHistory = (dfPage.url().split('#')[1] ?? '').startsWith('/history')
+          await dfPage.getByRole('button', { name: '戻る' }).click()
+          await dfPage.waitForTimeout(1400)
+          return onHistory
+        }
+
+        // --- 献立側 ---
+        await dfPage.locator('[data-testid="day-mode-plan"]').click()
+        await dfPage.waitForTimeout(1200)
+        const dhPair = dfPage.locator('[data-testid="day-suggest-pair"]')
+        const dhPairTitles = async () =>
+          (await dhPair.locator('[data-testid="day-suggest-result-title"]').allTextContents()).map(
+            (t) => t.replaceAll('​', '').trim(),
+          )
+        check(
+          'DAYFLOW-01(h) 前提: 日タブに「作った記録の一覧」への入口がある',
+          (await historyLink().count()) === 1,
+          `入口の数=${await historyLink().count()}`,
+        )
+        const DH_TRIPS = 3
+        const dhPlanMismatches = []
+        for (let i = 0; i < DH_TRIPS; i++) {
+          const before = await dhWaitTitles(dhPairTitles)
+          if (before.length === 0) {
+            dhPlanMismatches.push(`${i + 1}回目: 組んだ献立が読めなかった`)
+            break
+          }
+          const onHistory = await dhRoundTrip()
+          if (!onHistory) {
+            dhPlanMismatches.push(`${i + 1}回目: 「作った記録の一覧」に着いていない`)
+            break
+          }
+          const after = await dhWaitTitles(dhPairTitles)
+          if (JSON.stringify(before) !== JSON.stringify(after))
+            dhPlanMismatches.push(`${i + 1}回目: ${before.join('・')} → ${after.join('・') || '空'}`)
+          // 次の往復は組み直してから（覚えが「戻ってきた1回だけ」で外れることも一緒に見る）
+          await suggestSection.getByRole('button', { name: 'おまかせで献立を組む' }).click()
+          await dfPage.waitForTimeout(700)
+        }
+        check(
+          'DAYFLOW-01(h) 作った記録の一覧へ行って戻ると、さっき出ていた献立がそのまま残っている',
+          dhPlanMismatches.length === 0,
+          `食い違い=${JSON.stringify(dhPlanMismatches)}`,
+        )
+
+        // --- 1品側（同じ節の片側だけが組み直る、を作らない） ---
+        await dfPage.locator('[data-testid="day-mode-one"]').click()
+        await dfPage.waitForTimeout(900)
+        const dhOneTitle = async () => {
+          const card = suggestSection.locator('a[href^="#/recipes/"]').first()
+          return (await card.count()) > 0
+            ? [((await card.textContent()) ?? '').replaceAll('​', '').trim()]
+            : []
+        }
+        const dhOneMismatches = []
+        for (let i = 0; i < DH_TRIPS; i++) {
+          const before = await dhWaitTitles(dhOneTitle)
+          if (before.length === 0) {
+            dhOneMismatches.push(`${i + 1}回目: 出ている1品が読めなかった`)
+            break
+          }
+          await dhRoundTrip()
+          const after = await dhWaitTitles(dhOneTitle)
+          if (JSON.stringify(before) !== JSON.stringify(after))
+            dhOneMismatches.push(`${i + 1}回目: ${before.join('')} → ${after.join('') || '空'}`)
+          await suggestSection.getByRole('button', { name: 'おまかせで1品出す' }).click()
+          await dfPage.waitForTimeout(500)
+        }
+        check(
+          'DAYFLOW-01(h) 作った記録の一覧へ行って戻ると、さっき出ていた1品もそのまま残っている',
+          dhOneMismatches.length === 0,
+          `食い違い=${JSON.stringify(dhOneMismatches)}`,
+        )
+
+        // --- 下の並びの「献立」で自分から離れたときは、覚えを持ち越さない（線引きの片側） ---
+        // 「アプリの中のどこから戻っても保つ」を、**タブで離れたときまで**広げない。
+        // 広げると、何時間も別のタブを触っていた人が古い提案を見せられる。
+        // 測り方: 別のタブへ移ってから献立へ戻る往復を繰り返し、**1回でも入れ替われば合格**
+        // （くじなので、たまたま同じ料理を引き当てる回もある＝毎回違うことは測れない）
+        await dfPage.locator('[data-testid="day-mode-plan"]').click()
+        await dfPage.waitForTimeout(1200)
+        let dhTabRedrawn = false
+        const dhTabSeen = []
+        for (let i = 0; i < 6 && !dhTabRedrawn; i++) {
+          const before = await dhWaitTitles(dhPairTitles)
+          await dfPage.locator('[data-app-bottom-bar] a[href^="#/recipes"]').click()
+          await dfPage.waitForTimeout(900)
+          await dfBottomMealPlan().click()
+          await dfPage.waitForTimeout(1500)
+          const after = await dhWaitTitles(dhPairTitles)
+          dhTabSeen.push(`${before.join('・') || '空'} → ${after.join('・') || '空'}`)
+          if (before.length > 0 && after.length > 0 && JSON.stringify(before) !== JSON.stringify(after))
+            dhTabRedrawn = true
+        }
+        check(
+          'DAYFLOW-01(h) 下の並びのタブで自分から離れたときは、次に開くと組み直す（古い提案を残さない）',
+          dhTabRedrawn,
+          `往復=${JSON.stringify(dhTabSeen)}`,
         )
       }
     } finally {
@@ -38086,7 +38221,7 @@ try {
       await fuPage.waitForTimeout(700)
       await fuPage.getByText('テキスト貼り付けで自動入力').click()
       await fuPage.waitForTimeout(300)
-      await fuPage.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+      await fuPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
         'FU貼り付け時間つき\n2人分\n調理時間 1時間30分\n\n材料\n・にんじん　1本\n・しょうゆ　大さじ2\n\n作り方\n1. にんじんを切る\n2. 20分煮る',
       )
       await fuPage.getByRole('button', { name: '自動で振り分ける' }).click()
@@ -38111,7 +38246,7 @@ try {
       await fuPage.waitForTimeout(900)
       await fuPage.getByText('テキスト貼り付けで自動入力').click()
       await fuPage.waitForTimeout(300)
-      await fuPage.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]').fill(
+      await fuPage.locator(`textarea[placeholder="${ja.paste.placeholder}"]`).fill(
         'FU貼り付け時間なし\n2人分\n\n材料\n・にんじん　1本\n\n作り方\n1. にんじんを切る\n2. 10分煮る',
       )
       await fuPage.getByRole('button', { name: '自動で振り分ける' }).click()

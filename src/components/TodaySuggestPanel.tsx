@@ -211,6 +211,7 @@ export default function TodaySuggestPanel({
   collapsible = false,
   pinnedRecipeId = null,
   onOpenSuggestion,
+  onShownOneChange,
   planPair,
   planCandidateCount,
   onDrawPlan,
@@ -235,6 +236,11 @@ export default function TodaySuggestPanel({
   pinnedRecipeId?: number | null
   /** 候補カードからレシピ詳細を開いたことの知らせ（呼び出し側が覚える。2026-08-17 便HI） */
   onOpenSuggestion?: (recipeId: number) => void
+  /**
+   * いま「1品」側に出ている料理の知らせ（2026-08-21 便IP・①）。出ていなければ null。
+   * 呼び出し側がこの画面を離れるときの覚えに使う（献立の組と対にして持つ）。
+   */
+  onShownOneChange?: (recipeId: number | null) => void
   /**
    * いま組んである献立（主菜＋副菜。2026-08-18 便HM）。**まだ今日の献立には入っていない**。
    * 組む処理そのものは呼び出し側（pages/MealPlanPage.tsx）が持つ——献立エンジンは
@@ -448,6 +454,21 @@ export default function TodaySuggestPanel({
   const pinned = pinnedId != null ? (recipes ?? []).find((r) => r.id === pinnedId) : undefined
   const drawnOne = drawnOneId != null ? (recipes ?? []).find((r) => r.id === drawnOneId) : undefined
   const suggestion = pinned ?? drawnOne
+  /**
+   * いま「1品」側に出ている料理を、呼び出し側へ知らせる（2026-08-21 便IP・①）。
+   *
+   * 呼び出し側（pages/MealPlanPage.tsx）は、この画面を離れたときに「離れる前に出ていたもの」を
+   * 覚えておく。**献立の組は呼び出し側が持っているのに、1品はこの節の中にしかない**ので、
+   * 知らせないと片側だけが組み直る（＝作った記録の一覧へ行って戻ると、献立は残るのに
+   * 1品だけ別の料理に変わる）。
+   *
+   * 出ているものが変わったときだけ知らせる。渡すのは値を受け取るだけの関数
+   * （useState の更新関数）なので、知らせが次の描画を呼んでこの節が組み直る道は無い。
+   */
+  const shownOneId = suggestion?.id ?? null
+  useEffect(() => {
+    onShownOneChange?.(shownOneId)
+  }, [shownOneId, onShownOneChange])
   /**
    * 1品を引く（2026-08-19 便IA）。**押した時点の絞り込み**（finalCandidates）から選ぶ。
    * 直前に出した数品は次の抽選から外す（2026-07-29 便CD/MP-12。候補が尽きるなら除外を解く

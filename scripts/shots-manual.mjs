@@ -647,7 +647,7 @@ try {
   await page.getByPlaceholder('例: 肉じゃが').fill('なすとピーマンのみそ炒め')
   await page.getByText('テキスト貼り付けで自動入力').click()
   await wait(page, 500)
-  const pasteArea = page.locator('textarea[placeholder="ここにレシピの文章を貼り付け"]')
+  const pasteArea = page.locator(`textarea[placeholder="${ja.paste.placeholder}"]`)
   await pasteArea.fill(
     'なすとピーマンのみそ炒め\n\n材料（2人分）\n・なす 2本\n・ピーマン 3個\n・豚こま切れ肉 150g\n・みそ 大さじ1\n\n作り方\n1. なすとピーマンを乱切りにする\n2. 豚こまを炒め、なす・ピーマンを加えて炒める\n3. みそを加えて全体にからめる',
   )

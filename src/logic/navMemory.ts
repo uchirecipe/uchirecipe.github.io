@@ -91,6 +91,18 @@ export const MEAL_PLAN_TAB_TAP_KEY = 'mealPlan:tabTap'
  *
  * 効くのは**戻ってきた1回だけ**。「ランダムで1品出す」を押す・条件を変えると外れて、
  * ふだんどおりくじを引く。
+ *
+ * ---- どこから戻ったときに保つのか（2026-08-21 便IP・①の線引き） ----
+ * **日タブの中のリンク・ボタンで開いた画面から「戻る」で帰ってきたとき**は保つ。
+ * レシピ詳細だけでなく、**作った記録の一覧・記録の中身・記録の編集**も同じ扱いにする
+ * （便IIの実測: 一覧へ行って戻るたびに別の献立を組み直し、主菜が一品ものだと副菜が
+ * 付かないので節の高さが156〜170px→74px、ページの下端が82px上がっていた）。
+ *
+ * **下の並び（タブバー）を押して自分から離れたときは保たない。** 献立の画面に着くたびに
+ * この覚えを捨てるので、覚えが残るのは「離れて1回帰ってくる」あいだだけになる。
+ * 読むのも `?focus=today` が付いているときだけで、この印は**日タブから開いた画面の
+ * 「戻る」だけ**が付ける（タブを押した合図は上の MEAL_PLAN_TAB_TAP_KEY が別に持つ）。
+ * ＝タブで離れた人が何日も前の提案を見せられることはない。
  */
 export const DAY_SUGGEST_PIN_KEY = 'mealPlan:daySuggest'
 
@@ -107,10 +119,18 @@ export const DAY_SUGGEST_PIN_KEY = 'mealPlan:daySuggest'
  * （?focus=today で帰ってくる）と、捨てるきっかけ（画面に着いたら1回きりで捨てる）が
  * まったく同じだから。別々のキーに分けると、片方だけ消え残る道ができる。
  * 組が無いとき（1品側から開いたとき）は項目そのものを書かない＝以前の版と同じ形のまま。
+ *
+ * 2026-08-21 便IP・①: `recipeId` を**入れないこともできる**ようにした。
+ * レシピ詳細へ移るとき以外（作った記録の一覧へ移るときなど）は「開いた1品」が無く、
+ * それでも「献立」側の組は残したいため。1品側がまだ何も出していないときも同じ形になる。
+ * 入れない項目は書かない＝読み出し側（parseSuggestionPin）は今までどおり null を返す。
  */
-export function serializeSuggestionPin(recipeId: number, planRecipeIds: number[] = []): string {
+export function serializeSuggestionPin(
+  recipeId: number | null,
+  planRecipeIds: number[] = [],
+): string {
   return JSON.stringify({
-    recipeId,
+    ...(recipeId != null ? { recipeId } : {}),
     ...(planRecipeIds.length > 0 ? { planRecipeIds } : {}),
   })
 }

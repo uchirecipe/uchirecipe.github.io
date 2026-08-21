@@ -3245,6 +3245,41 @@ eq('rangeDayCount: 月をまたぐ計算も正しい', rangeDayCount('2026-06-28
   )
 }
 
+// ---------- navMemory: レシピ詳細以外へ離れるときも組を控える(2026-08-21 便IP・①の再発防止) --
+// 便IIの実測「『今日なに作る？』が戻るたびに別の献立を組み直す。主菜が一品もの（カレー・丼・麺・鍋）
+// だと副菜のカードが付かず、節の高さが156〜170px→74px、ページの下端が82px上がる」。
+// オーナーの指摘（便HT）はレシピ詳細からの戻りだけが直っていて、**作った記録の一覧からの戻り**は
+// 組み直したままだった。
+//
+// 直しの要は「覚える形」のほうにある: 記録の一覧へ移るときは**開いた1品が無い**ので、
+// これまでの覚え方（recipeId 必須）では献立の組だけを控えることができなかった。
+// ここで固定するのは次の3つ。
+//   ①1品が無くても献立の組を控えられる（recipeId を入れずに書ける）
+//   ②その控えを読み戻すと、1品側は「覚えていない」＝ふつうにくじを引く（null）
+//   ③どちらも無いときの形（1品も献立も出していない一瞬）でも、読み出しが壊れない
+{
+  eq(
+    'IP-PIN 1品が無くても献立の組を控えられる',
+    parseSuggestionPlanPin(serializeSuggestionPin(null, [7, 9])),
+    [7, 9],
+  )
+  eq(
+    'IP-PIN 1品を控えていなければ1品側は「覚えていない」（ふつうにくじを引く）',
+    parseSuggestionPin(serializeSuggestionPin(null, [7, 9])),
+    null,
+  )
+  eq('IP-PIN どちらも無いときも読み出しが壊れない', parseSuggestionPin(serializeSuggestionPin(null)), null)
+  eq('IP-PIN どちらも無いときの組は空', parseSuggestionPlanPin(serializeSuggestionPin(null)), [])
+  eq(
+    'IP-PIN 1品と組の両方を控えたときは、これまでどおり両方読める',
+    [
+      parseSuggestionPin(serializeSuggestionPin(3, [7, 9])),
+      parseSuggestionPlanPin(serializeSuggestionPin(3, [7, 9])),
+    ],
+    [3, [7, 9]],
+  )
+}
+
 // ---------- 提案の条件「調理時間◯分以内を優先」の分数(2026-08-19 便HT・⑤の再発防止) ----------
 // オーナー原文「調理時間15分いないを優先は、時間だけプルダウンで変更できるようにしたい。」
 // ここで測るのは**選んだ分数が提案の中身に効いているか**であって、画面がプルダウンかどうかではない。
@@ -23007,6 +23042,50 @@ Aみりん 大さじ1
     for (const b of new Set(blocks))
       if (splitLines.filter((line) => b.includes(line)).length >= 2) crowded.push(b.slice(0, 40))
     eq('HR-6 説明ページでも1つの塊に2行以上を詰め込んでいない', crowded, [])
+  }
+
+  // ---- 規則⑨: 場所を指示語で示していない（2026-08-21 便IP・②／規約H） ------------------------
+  // 規約H（2026-08-02 オーナー指示）:
+  //   「説明文・ヘルプでは『ここ』『これ』等の指示語で場所を示さない（画面名・ボタン名で言う）」
+  //
+  // 便IPで見つかった発端は使い方ページの1行「今日の分が決まっている日も決まっていない日も、
+  // いつでもここにあります。」。**同じ型が ja.ts に8か所・使い方ページに2か所**残っていた。
+  // 文言を並べて直しても次に書く人が同じことをするので、**つづりを規則で掃く**。
+  //
+  // 当てる形は「指示語＋場所を指す助詞」だけに絞る（ここ・こちら・そこ ＋ に／で／へ）。
+  //  ・「ここまで」「ここから」は当てない … 文章の流れ（説明のどこまで／どこから）を指す言い方で、
+  //    画面の場所を指していない（例: 使い方ページ「ここまでは無料でお使いいただけます」）
+  //  ・「こちらを」「こちらは」「こちらも」は当てない … 直前に名乗ったもの（機能・登録済みの品）を
+  //    受ける言い方で、場所ではない
+  //  ・「この表」「この手間」のように**名詞に付く連体詞**は当てない … 何を指すか名詞が言っている
+  //  ・「あそこ」は当てない … アプリにも説明ページにも1件も無い（当たらない規則を増やさない）
+  //
+  // 見る先から外すもの（外す理由を1件ずつ書く。理由なしで外さない）:
+  //  ・public/about/column/ … 献立の悩みを書いた**読み物**で、画面の場所を案内する文ではない。
+  //    「ここに、スクショ保存のいちばんの弱点がある」のように、文章の流れで指す言い方が入る
+  {
+    // ゼロ幅スペース（BudouX）が挟まっても素通りしないよう、照合の前に外す
+    const deicticSources = sources
+      .filter((s) => !s.rel.startsWith('public/about/column/'))
+      .map((s) => ({ rel: s.rel, text: s.text.replace(/​/g, '') }))
+    const PLACE_DEICTIC = /(?:ここ|こちら|そこ)[にでへ]/g
+    const deicticViolations = []
+    for (const { rel, text } of deicticSources)
+      for (const m of text.matchAll(PLACE_DEICTIC))
+        deicticViolations.push(
+          `${rel}:${lineOf(text, m.index)} 「${around(text, m.index, 16, 16)}」→ 画面名・ボタン名で言う`,
+        )
+    // 読み取りに失敗したら必ず落ちる: 文字が読めていないときに「見つからなかった＝合格」へ倒さない
+    const deicticScanned = deicticSources.reduce((n, s) => n + s.text.length, 0)
+    eq('HR-7 掃く文字を読めている（0なら見張りが壊れている）', deicticScanned > 100000, true)
+    eq(
+      'HR-7 掃く先に ja.ts と使い方ページが入っている（外し過ぎていない）',
+      ['src/i18n/ja.ts', 'public/about/manual.html'].filter(
+        (rel) => !deicticSources.some((s) => s.rel === rel),
+      ),
+      [],
+    )
+    eq('HR-7 場所を指示語（ここ・こちら・そこ）で示している文が1つも無い', deicticViolations, [])
   }
 }
 
